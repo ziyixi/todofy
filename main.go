@@ -55,21 +55,21 @@ func setupGRPCClients() (*GRPCClients, error) {
 		{
 			name: "llm",
 			addr: config.LLMAddr,
-			newClient: func(conn *grpc.ClientConn) interface{} {
+			newClient: func(conn *grpc.ClientConn) any {
 				return pb.NewLLMSummaryServiceClient(conn)
 			},
 		},
 		{
 			name: "todo",
 			addr: config.TodoAddr,
-			newClient: func(conn *grpc.ClientConn) interface{} {
+			newClient: func(conn *grpc.ClientConn) any {
 				return pb.NewTodoServiceClient(conn)
 			},
 		},
 		{
 			name: "database",
 			addr: config.DatabaseAddr,
-			newClient: func(conn *grpc.ClientConn) interface{} {
+			newClient: func(conn *grpc.ClientConn) any {
 				return pb.NewDataBaseServiceClient(conn)
 			},
 		},
