@@ -39,7 +39,7 @@ RUN CGO_ENABLED=0 GOOS=linux go build -v \
 FROM alpine:latest
 
 LABEL org.opencontainers.image.authors="docker@ziyixi.science"
-LABEL org.opencontainers.image.source="https://github.com/ziyixi/monorepo"
+LABEL org.opencontainers.image.source="https://github.com/ziyixi/todofy"
 LABEL org.opencontainers.image.description="Todofy (llm) is a subpackage of Todofy for task management using large language models."
 LABEL org.opencontainers.image.licenses="MIT"
 

@@ -44,7 +44,7 @@ RUN go build -v \
 FROM debian:bookworm-slim AS runtime
 
 LABEL org.opencontainers.image.authors="docker@ziyixi.science"
-LABEL org.opencontainers.image.source="https://github.com/ziyixi/monorepo"
+LABEL org.opencontainers.image.source="https://github.com/ziyixi/todofy"
 LABEL org.opencontainers.image.description="Todofy (database) is a subpackage of Todofy for task database management."
 LABEL org.opencontainers.image.licenses="MIT"
 

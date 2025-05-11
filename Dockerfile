@@ -41,7 +41,7 @@ RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix netgo \
 FROM alpine:latest
 
 LABEL org.opencontainers.image.authors="docker@ziyixi.science"
-LABEL org.opencontainers.image.source="https://github.com/ziyixi/monorepo"
+LABEL org.opencontainers.image.source="https://github.com/ziyixi/todofy"
 LABEL org.opencontainers.image.description="Todofy is a self-hosted task management tool that helps you organize and prioritize your tasks efficiently."
 LABEL org.opencontainers.image.licenses="MIT"
 
