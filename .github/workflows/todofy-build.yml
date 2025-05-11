@@ -1,0 +1,67 @@
+name: Todofy Build
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    permissions:
+      packages: write # Permission to write to GitHub Packages (GHCR)
+    runs-on: ubuntu-22.04
+    concurrency:
+      group: ${{ github.workflow }}-${{ github.ref }}
+      cancel-in-progress: true # Cancel older runs in the same concurrency group
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1 # Fetch only the latest commit
+
+      - name: Set Git Commit SHA
+        id: vars
+        run: echo "git_commit_sha=$(git rev-parse HEAD)" >> $GITHUB_OUTPUT
+
+      - name: Log in to GitHub Packages (GHCR)
+        uses: docker/login-action@v3 # Updated to v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build Todofy Main App Docker image
+        run: |
+          docker build \
+            --build-arg GIT_COMMIT=${{ steps.vars.outputs.git_commit_sha }} \
+            -t ghcr.io/${{ github.repository_owner }}/todofy:latest \
+            -f Dockerfile .
+
+      - name: Build Todofy LLM Service Docker image
+        run: |
+          docker build \
+            --build-arg GIT_COMMIT=${{ steps.vars.outputs.git_commit_sha }} \
+            -t ghcr.io/${{ github.repository_owner }}/todofy-llm:latest \
+            -f llm/Dockerfile .
+
+      - name: Build Todofy Todo Service Docker image
+        run: |
+          docker build \
+            --build-arg GIT_COMMIT=${{ steps.vars.outputs.git_commit_sha }} \
+            -t ghcr.io/${{ github.repository_owner }}/todofy-todo:latest \
+            -f todo/Dockerfile .
+
+      - name: Build Todofy Database Service Docker image
+        run: |
+          docker build \
+            --build-arg GIT_COMMIT=${{ steps.vars.outputs.git_commit_sha }} \
+            -t ghcr.io/${{ github.repository_owner }}/todofy-database:latest \
+            -f database/Dockerfile .
+
+      - name: Push Docker images to GHCR
+        run: |
+          docker push ghcr.io/${{ github.repository_owner }}/todofy:latest
+          docker push ghcr.io/${{ github.repository_owner }}/todofy-llm:latest
+          docker push ghcr.io/${{ github.repository_owner }}/todofy-todo:latest
+          docker push ghcr.io/${{ github.repository_owner }}/todofy-database:latest

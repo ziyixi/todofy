@@ -21,5 +21,5 @@ var (
 )
 
 const (
-	tokenLimit int32 = 1048576 // 10k tokens
+	tokenLimit int32 = 1048576 // 10k tokens, gemini-2.0-flash
 )
