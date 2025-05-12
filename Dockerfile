@@ -60,16 +60,16 @@ WORKDIR /app
 
 # Copy the built binary from the builder stage
 # The binary now contains the embedded templates.
-COPY --from=builder /todofy /app/todofy
+COPY --from=builder /todofy /todofy
 
 # Copy the entrypoint.sh script
 # Ensure entrypoint.sh is in the root of your build context
-COPY ./entrypoint.sh /app/entrypoint.sh
-RUN chmod +x /app/entrypoint.sh
+COPY ./entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
 
 # Expose the port the application will run on
 EXPOSE 8080
 
 # Define the entrypoint for the container
 # The script will be responsible for starting the todofy application
-ENTRYPOINT ["/app/entrypoint.sh"]
+ENTRYPOINT ["/entrypoint.sh"]
