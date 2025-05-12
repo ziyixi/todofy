@@ -141,8 +141,8 @@ github.com/ugorji/go/codec v1.2.12/go.mod h1:UNopzCgEMSXjBc6AOMqYvWC1ktqTAfzJZUZ
 github.com/yuin/goldmark v1.4.13/go.mod h1:6yULJ656Px+3vBD8DxQVa3kxgyrAnzto9xy5taEt/CY=
 github.com/yuin/goldmark v1.7.1 h1:3bajkSilaCbjdKVsKdZjZCLBNPL9pYzrCakKaf4U49U=
 github.com/yuin/goldmark v1.7.1/go.mod h1:uzxRWxtg69N339t3louHJ7+O03ezfj6PlliRlaOzY1E=
-github.com/ziyixi/protos/go/todofy v0.0.0-20250511002148-17be81f63948 h1:Dg8TCcfIrOxMLtl3+t93gwICe90oL6WHGmtufDXdfPE=
-github.com/ziyixi/protos/go/todofy v0.0.0-20250511002148-17be81f63948/go.mod h1:2inuzsbHXKirr6bJ5CwlV62+ZTq6eJqajkhWrCtoJkU=
+github.com/ziyixi/protos/go/todofy v0.0.0-20250512005418-5ec3b7a9cf20 h1:Ih7lKHpbY0MzXVxPYFs/xgGwjOMzRssUytFPPwV4+28=
+github.com/ziyixi/protos/go/todofy v0.0.0-20250512005418-5ec3b7a9cf20/go.mod h1:2inuzsbHXKirr6bJ5CwlV62+ZTq6eJqajkhWrCtoJkU=
 go.opentelemetry.io/auto/sdk v1.1.0 h1:cH53jehLUN6UFLY71z+NDOiNJqDdPRaXzTel0sJySYA=
 go.opentelemetry.io/auto/sdk v1.1.0/go.mod h1:3wSPjt5PWp2RhlCcmmOial7AvC4DQqZb7a7wCow3W8A=
 go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc v0.60.0 h1:x7wzEgXfnzJcHDwStJT+mxOz4etr2EcexjqhBvmoakw=

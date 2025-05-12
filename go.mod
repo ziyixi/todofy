@@ -11,7 +11,7 @@ require (
 	github.com/mailjet/mailjet-apiv3-go/v4 v4.0.7
 	github.com/sirupsen/logrus v1.9.3
 	github.com/tidwall/gjson v1.18.0
-	github.com/ziyixi/protos/go/todofy v0.0.0-20250511002148-17be81f63948
+	github.com/ziyixi/protos/go/todofy v0.0.0-20250512005418-5ec3b7a9cf20
 	google.golang.org/api v0.232.0
 	google.golang.org/grpc v1.72.0
 	google.golang.org/protobuf v1.36.6
