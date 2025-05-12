@@ -5,6 +5,7 @@ import (
 	"html/template"
 	"io"
 	"net/http"
+	"regexp"
 	"strings"
 
 	_ "embed"
@@ -49,6 +50,9 @@ func HandleUpdateTodo(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error in summarizing email": err.Error()})
 		return
 	}
+	// Remove all # started tags in summary, use regex to match [space]#[arbitrary less than 10 characters]
+	regex := regexp.MustCompile(`\s#[a-zA-Z0-9]{1,10}\s`)
+	summaryResp.Summary = regex.ReplaceAllString(summaryResp.Summary, "<removed tag>")
 	emailContentWithSummary := utils.MailInfo{
 		From:    emailContent.From,
 		To:      emailContent.To,
