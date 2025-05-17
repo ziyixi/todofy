@@ -11,6 +11,8 @@ const (
 	
 	IMPORTANT: Please do not write something like "OK, this is my summary". Just start with the summary.
 	IMPORTANT: Try to follow markdown formatting as much as possible.
+	IMPORTANT: Please use chinese as response language.
+	IMPORTANT: Please try to be concise to 1-2 sentences.
 
 	The email content you are to summarize is as follows:`
 
