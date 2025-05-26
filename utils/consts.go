@@ -13,6 +13,7 @@ const (
 	IMPORTANT: Try to follow markdown formatting as much as possible.
 	IMPORTANT: Please use chinese as response language.
 	IMPORTANT: Please try to be concise to 1-2 sentences.
+	IMPORTANT: Avoid showing # symbol in the summary.
 
 	The email content you are to summarize is as follows:`
 
