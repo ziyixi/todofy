@@ -8,10 +8,11 @@ require (
 	github.com/gin-gonic/gin v1.10.1
 	github.com/go-resty/resty/v2 v2.16.5
 	github.com/google/generative-ai-go v0.20.1
+	github.com/jomei/notionapi v1.13.3
 	github.com/mailjet/mailjet-apiv3-go/v4 v4.0.7
 	github.com/sirupsen/logrus v1.9.3
 	github.com/tidwall/gjson v1.18.0
-	github.com/ziyixi/protos/go/todofy v0.0.0-20250903020845-b95e150fa76c
+	github.com/ziyixi/protos/go/todofy v0.0.0-20250903025226-e5574652a0ef
 	google.golang.org/api v0.248.0
 	google.golang.org/grpc v1.75.0
 	google.golang.org/protobuf v1.36.8

@@ -5,6 +5,7 @@ import (
 	"flag"
 	"fmt"
 	"slices"
+	"time"
 
 	"github.com/badoux/checkmail"
 	"github.com/mailjet/mailjet-apiv3-go/v4"
@@ -13,6 +14,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
+	"github.com/jomei/notionapi"
 	pb "github.com/ziyixi/protos/go/todofy"
 )
 
@@ -25,10 +27,16 @@ func init() {
 }
 
 var (
-	port                 = flag.Int("port", 50052, "The server port of the Todo service")
+	port = flag.Int("port", 50052, "The server port of the Todo service")
+
+	// Mailjet API credentials
 	mailjetAPIKeyPublic  = flag.String("mailjet-api-key-public", "", "The public API key for Mailjet")
 	mailjetAPIKeyPrivate = flag.String("mailjet-api-key-private", "", "The private API key for Mailjet")
 	targetEmail          = flag.String("target-email", "", "The target email address to send the todo to")
+
+	// Notion API credentials
+	notionAPIKey     = flag.String("notion-api-key", "", "The API key for Notion")
+	notionDataBaseID = flag.String("notion-database-id", "", "The database ID for Notion")
 )
 
 type todoServer struct {
@@ -47,6 +55,8 @@ func (s *todoServer) PopulateTodo(ctx context.Context, req *pb.TodoRequest) (*pb
 	switch req.Method {
 	case pb.PopullateTodoMethod_POPULLATE_TODO_METHOD_MAILJET:
 		return s.PopulateTodoByMailjet(ctx, req)
+	case pb.PopullateTodoMethod_POPULLATE_TODO_METHOD_NOTION:
+		return s.PopulateTodoByNotion(ctx, req)
 	default:
 		return nil, status.Errorf(codes.InvalidArgument, "unsupported method: %s", req.Method)
 	}
@@ -111,6 +121,105 @@ func (s *todoServer) PopulateTodoByMailjet(ctx context.Context, req *pb.TodoRequ
 	log.Infof("Mailjet email status: %v", response)
 	return &pb.TodoResponse{
 		Message: fmt.Sprintf("%v", response),
+	}, nil
+}
+
+func validateNotionFlags() error {
+	if len(*notionAPIKey) == 0 {
+		return status.Errorf(codes.InvalidArgument, "missing notion API key")
+	}
+	if len(*notionDataBaseID) == 0 {
+		return status.Errorf(codes.InvalidArgument, "missing notion database ID")
+	}
+	return nil
+}
+
+func (s *todoServer) PopulateTodoByNotion(ctx context.Context, req *pb.TodoRequest) (*pb.TodoResponse, error) {
+	if err := validateNotionFlags(); err != nil {
+		return nil, err
+	}
+	client := notionapi.NewClient(notionapi.Token(*notionAPIKey))
+
+	// Create a new page in the database
+	pageRequest := &notionapi.PageCreateRequest{
+		Parent: notionapi.Parent{
+			Type:       "database_id",
+			DatabaseID: notionapi.DatabaseID(*notionDataBaseID),
+		},
+		Properties: notionapi.Properties{
+			"Name": notionapi.TitleProperty{
+				Title: []notionapi.RichText{
+					{
+						PlainText: req.Subject,
+						Text: &notionapi.Text{
+							Content: req.Subject,
+						},
+					},
+				},
+			},
+			"Added time": notionapi.DateProperty{
+				Date: &notionapi.DateObject{
+					Start: func() *notionapi.Date {
+						d := notionapi.Date(time.Now())
+						return &d
+					}(),
+				},
+			},
+			"From": notionapi.RichTextProperty{
+				RichText: []notionapi.RichText{
+					{
+						PlainText: req.From,
+						Text: &notionapi.Text{
+							Content: req.From,
+						},
+					},
+				},
+			},
+			"Summary": notionapi.RichTextProperty{
+				RichText: []notionapi.RichText{
+					{
+						PlainText: req.Body,
+						Text: &notionapi.Text{
+							Content: req.Body,
+						},
+					},
+				},
+			},
+		},
+	}
+
+	// Add body content as blocks if body is provided
+	if req.Body != "" {
+		pageRequest.Children = []notionapi.Block{
+			&notionapi.ParagraphBlock{
+				BasicBlock: notionapi.BasicBlock{
+					Object: notionapi.ObjectTypeBlock,
+					Type:   notionapi.BlockTypeParagraph,
+				},
+				Paragraph: notionapi.Paragraph{
+					RichText: []notionapi.RichText{
+						{
+							PlainText: req.Body,
+							Text: &notionapi.Text{
+								Content: req.Body,
+							},
+						},
+					},
+				},
+			},
+		}
+	}
+
+	page, err := client.Page.Create(ctx, pageRequest)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create page in database: %w", err)
+	}
+
+	message := fmt.Sprintf("Successfully created page with ID: %s", page.ID)
+
+	return &pb.TodoResponse{
+		Id:      string(page.ID),
+		Message: message,
 	}, nil
 }
 
