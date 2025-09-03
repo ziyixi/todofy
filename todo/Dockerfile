@@ -55,6 +55,8 @@ ENV PORT=50052
 ENV MAILJET_API_KEY_PUBLIC=""
 ENV MAILJET_API_KEY_PRIVATE=""
 ENV TARGET_EMAIL=""
+ENV NOTION_API_KEY=""
+ENV NOTION_DATABASE_ID=""
 
 # Install ca-certificates for HTTPS and tzdata for timezone information
 RUN apk --no-cache add ca-certificates tzdata
