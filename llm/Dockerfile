@@ -44,7 +44,7 @@ LABEL org.opencontainers.image.description="Todofy (llm) is a subpackage of Todo
 LABEL org.opencontainers.image.licenses="MIT"
 
 ENV PORT=50051
-ENV GKEY=""
+ENV GEMINI_API_KEY=""
 
 # Install ca-certificates for HTTPS and tzdata for timezone information
 RUN apk --no-cache add ca-certificates tzdata
