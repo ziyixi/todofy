@@ -20,6 +20,7 @@ import (
 )
 
 var log = logrus.New()
+var GitCommit string // Will be set by Bazel at build time
 
 func init() {
 	log.SetFormatter(&logrus.TextFormatter{
