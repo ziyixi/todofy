@@ -1,6 +1,6 @@
 # Stage 1: Builder
-# Using a specific patch version of Go 1.24 for reproducibility and security
-FROM golang:1.24.3 AS builder
+# Using a specific patch version of Go 1.25 for reproducibility and security
+FROM golang:1.25.1 AS builder
 
 # Set working directory inside the container
 WORKDIR /app
