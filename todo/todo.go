@@ -16,6 +16,7 @@ import (
 
 	"github.com/jomei/notionapi"
 	pb "github.com/ziyixi/protos/go/todofy"
+	"github.com/ziyixi/todofy/internal/todoist"
 )
 
 var log = logrus.New()
@@ -37,6 +38,10 @@ var (
 	// Notion API credentials
 	notionAPIKey     = flag.String("notion-api-key", "", "The API key for Notion")
 	notionDataBaseID = flag.String("notion-database-id", "", "The database ID for Notion")
+
+	// Todoist API credentials
+	todoistAPIKey    = flag.String("todoist-api-key", "", "The API key for Todoist")
+	todoistProjectID = flag.String("todoist-project-id", "", "The project ID for Todoist tasks")
 )
 
 type todoServer struct {
@@ -57,6 +62,8 @@ func (s *todoServer) PopulateTodo(ctx context.Context, req *pb.TodoRequest) (*pb
 		return s.PopulateTodoByMailjet(ctx, req)
 	case pb.PopullateTodoMethod_POPULLATE_TODO_METHOD_NOTION:
 		return s.PopulateTodoByNotion(ctx, req)
+	case pb.PopullateTodoMethod_POPULLATE_TODO_METHOD_TODOIST:
+		return s.PopulateTodoByTodoist(ctx, req)
 	default:
 		return nil, status.Errorf(codes.InvalidArgument, "unsupported method: %s", req.Method)
 	}
@@ -219,6 +226,48 @@ func (s *todoServer) PopulateTodoByNotion(ctx context.Context, req *pb.TodoReque
 
 	return &pb.TodoResponse{
 		Id:      string(page.ID),
+		Message: message,
+	}, nil
+}
+
+func validateTodoistFlags() error {
+	if len(*todoistAPIKey) == 0 {
+		return status.Errorf(codes.InvalidArgument, "missing todoist API key")
+	}
+	return nil
+}
+
+func (s *todoServer) PopulateTodoByTodoist(ctx context.Context, req *pb.TodoRequest) (*pb.TodoResponse, error) {
+	if err := validateTodoistFlags(); err != nil {
+		return nil, err
+	}
+
+	client := todoist.NewClient(*todoistAPIKey)
+
+	// Create the task request
+	taskRequest := &todoist.CreateTaskRequest{
+		Content:     req.Subject,
+		Description: req.Body,
+	}
+
+	// Add project ID if specified
+	if *todoistProjectID != "" {
+		taskRequest.ProjectID = *todoistProjectID
+	}
+
+	// Generate a request ID for idempotency (optional)
+	requestID := fmt.Sprintf("todofy-%d", time.Now().Unix())
+
+	// Create the task
+	task, err := client.CreateTask(ctx, requestID, taskRequest)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create task in Todoist: %w", err)
+	}
+
+	message := fmt.Sprintf("Successfully created task: %s (ID: %s)", task.Content, task.ID)
+
+	return &pb.TodoResponse{
+		Id:      task.ID,
 		Message: message,
 	}, nil
 }

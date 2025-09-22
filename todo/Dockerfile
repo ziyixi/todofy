@@ -1,8 +1,8 @@
 # todo/Dockerfile
 
 # Stage 1: Builder
-# Using golang:1.24.3-alpine for a lightweight builder environment
-FROM golang:1.24.3-alpine AS builder
+# Using golang:1.25.1-alpine3.22 for a lightweight builder environment
+FROM golang:1.25.1-alpine3.22 AS builder
 
 # Install build essentials like git for fetching commit hash if needed, though often not strictly necessary
 # if GIT_COMMIT is passed as a build-arg. Alpine images are minimal.
@@ -57,6 +57,8 @@ ENV MAILJET_API_KEY_PRIVATE=""
 ENV TARGET_EMAIL=""
 ENV NOTION_API_KEY=""
 ENV NOTION_DATABASE_ID=""
+ENV TODOIST_API_KEY=""
+ENV TODOIST_PROJECT_ID=""
 
 # Install ca-certificates for HTTPS and tzdata for timezone information
 RUN apk --no-cache add ca-certificates tzdata

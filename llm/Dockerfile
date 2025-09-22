@@ -1,8 +1,8 @@
 # llm/Dockerfile
 
 # Stage 1: Builder
-# Using a specific patch version of Go 1.24 for consistency and security
-FROM golang:1.24.3-alpine AS builder
+# Using a specific patch version of Go 1.25 for consistency and security
+FROM golang:1.25.1-alpine3.22 AS builder
 
 # Set working directory inside the container
 WORKDIR /app

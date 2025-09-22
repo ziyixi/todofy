@@ -7,3 +7,5 @@
     -target-email=${TARGET_EMAIL} \
     -notion-api-key=${NOTION_API_KEY} \
     -notion-database-id=${NOTION_DATABASE_ID} \
+    -todoist-api-key=${TODOIST_API_KEY} \
+    -todoist-project-id=${TODOIST_PROJECT_ID} \

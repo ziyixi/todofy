@@ -75,8 +75,8 @@ func HandleUpdateTodo(c *gin.Context) {
 
 	// create a todo item
 	todoReq := &pb.TodoRequest{
-		App:     pb.TodoApp_TODO_APP_NOTION,
-		Method:  pb.PopullateTodoMethod_POPULLATE_TODO_METHOD_NOTION,
+		App:     pb.TodoApp_TODO_APP_TODOIST,
+		Method:  pb.PopullateTodoMethod_POPULLATE_TODO_METHOD_TODOIST,
 		Subject: emailContent.Subject,
 		Body:    todoContent,
 		From:    emailContent.From,

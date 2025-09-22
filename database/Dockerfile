@@ -2,7 +2,7 @@
 
 # Stage 1: Builder
 # Using golang image based on Debian Bookworm which includes build tools (gcc)
-FROM golang:1.24.3-bookworm AS builder
+FROM golang:1.25.1-bookworm AS builder
 
 # Install SQLite development libraries required for Cgo linking
 RUN apt-get update && apt-get install -y --no-install-recommends \
