@@ -16,7 +16,7 @@ import (
 
 	"github.com/jomei/notionapi"
 	pb "github.com/ziyixi/protos/go/todofy"
-	"github.com/ziyixi/todofy/internal/todoist"
+	"github.com/ziyixi/todofy/todo/internal/todoist"
 )
 
 var log = logrus.New()
