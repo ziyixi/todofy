@@ -1,6 +1,6 @@
 module github.com/ziyixi/todofy
 
-go 1.25.1
+go 1.24.0
 
 require (
 	github.com/JohannesKaufmann/html-to-markdown v1.6.0
@@ -83,4 +83,5 @@ require (
 	google.golang.org/genproto v0.0.0-20250908214217-97024824d090 // indirect
 	google.golang.org/genproto/googleapis/api v0.0.0-20250908214217-97024824d090 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20250908214217-97024824d090 // indirect
+	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
