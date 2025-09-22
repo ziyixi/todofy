@@ -7,10 +7,9 @@ import (
 	"slices"
 	"time"
 
-	"github.com/google/generative-ai-go/genai"
 	"github.com/sirupsen/logrus"
 	"github.com/ziyixi/todofy/utils"
-	"google.golang.org/api/option"
+	"google.golang.org/genai"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
@@ -95,37 +94,42 @@ func (s *llmServer) summaryByGemini(ctx context.Context, prompt, content string,
 		return "", status.Error(codes.InvalidArgument, "gemini-api-key is empty")
 	}
 
-	client, err := genai.NewClient(ctx, option.WithAPIKey(*geminiAPIKey))
+	client, err := genai.NewClient(ctx, &genai.ClientConfig{
+		APIKey:  *geminiAPIKey,
+		Backend: genai.BackendGeminiAPI,
+	})
 	if err != nil {
 		return "", fmt.Errorf("failed to create Gemini client: %v", err)
 	}
-	defer client.Close()
 
 	llmModelName, ok := llmModelNames[llmModel]
 	if !ok {
 		return "", status.Errorf(codes.InvalidArgument, "unsupported model: %s", llmModel)
 	}
 
-	model := client.GenerativeModel(llmModelName)
-	if model == nil {
-		return "", fmt.Errorf("model %s not found", llmModelName)
-	}
-
 	contentWithPrompt := fmt.Sprintf("%s\n%s", prompt, content)
-	respToken, err := model.CountTokens(ctx, genai.Text(contentWithPrompt))
+
+	// Create content for the new API
+	parts := []*genai.Part{{Text: contentWithPrompt}}
+	contents := []*genai.Content{{Parts: parts}}
+
+	// Count tokens first
+	respToken, err := client.Models.CountTokens(ctx, llmModelName, contents, nil)
 	if err != nil {
 		return "", fmt.Errorf("failed to count tokens: %v", err)
 	}
 
 	for respToken.TotalTokens > maxTokens {
 		contentWithPrompt = contentWithPrompt[:len(contentWithPrompt)/10*9]
-		respToken, err = model.CountTokens(ctx, genai.Text(contentWithPrompt))
+		parts = []*genai.Part{{Text: contentWithPrompt}}
+		contents = []*genai.Content{{Parts: parts}}
+		respToken, err = client.Models.CountTokens(ctx, llmModelName, contents, nil)
 		if err != nil {
 			return "", fmt.Errorf("failed to count tokens: %v", err)
 		}
 	}
 
-	resp, err := model.GenerateContent(ctx, genai.Text(contentWithPrompt))
+	resp, err := client.Models.GenerateContent(ctx, llmModelName, contents, nil)
 	if err != nil {
 		return "", fmt.Errorf("failed to generate content: %v", err)
 	}
@@ -134,7 +138,11 @@ func (s *llmServer) summaryByGemini(ctx context.Context, prompt, content string,
 		return "", fmt.Errorf("no content generated")
 	}
 
-	return fmt.Sprintf("%v", resp.Candidates[0].Content.Parts[0]), nil
+	if len(resp.Candidates[0].Content.Parts) == 0 {
+		return "", fmt.Errorf("no content parts generated")
+	}
+
+	return resp.Candidates[0].Content.Parts[0].Text, nil
 }
 
 func main() {

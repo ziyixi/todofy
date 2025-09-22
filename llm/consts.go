@@ -4,14 +4,16 @@ import pb "github.com/ziyixi/protos/go/todofy"
 
 var (
 	llmModelNames = map[pb.Model]string{
-		pb.Model_MODEL_GEMINI_2_0_FLASH:               "gemini-2.0-flash",
-		pb.Model_MODEL_GEMINI_2_5_PRO_EXP_03_25:       "gemini-2.5-pro-exp-03-25",
-		pb.Model_MODEL_GEMINI_2_5_FLASH_PREVIEW_04_17: "gemini-2.5-flash-preview-04-17",
-		pb.Model_MODEL_GEMINI_2_0_FLASH_LITE:          "gemini-2.0-flash-lite",
+		pb.Model_MODEL_GEMINI_2_0_FLASH:      "gemini-2.0-flash",
+		pb.Model_MODEL_GEMINI_2_5_PRO:        "gemini-2.5-pro",
+		pb.Model_MODEL_GEMINI_2_5_FLASH:      "gemini-2.5-flash",
+		pb.Model_MODEL_GEMINI_2_5_FLASH_LITE: "gemini-2.5-flash-lite",
+		pb.Model_MODEL_GEMINI_2_0_FLASH_LITE: "gemini-2.0-flash-lite",
 	}
 	llmModelPriority = []pb.Model{
-		pb.Model_MODEL_GEMINI_2_5_PRO_EXP_03_25,
-		pb.Model_MODEL_GEMINI_2_5_FLASH_PREVIEW_04_17,
+		pb.Model_MODEL_GEMINI_2_5_PRO,
+		pb.Model_MODEL_GEMINI_2_5_FLASH,
+		pb.Model_MODEL_GEMINI_2_5_FLASH_LITE,
 		pb.Model_MODEL_GEMINI_2_0_FLASH,
 		pb.Model_MODEL_GEMINI_2_0_FLASH_LITE,
 	}
