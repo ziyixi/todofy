@@ -79,30 +79,3 @@ go test -v ./...
 go test ./utils/
 go test ./database/
 ```
-
-### Integration Tests
-
-Run integration tests to verify service communication:
-
-```bash
-# Run integration test script
-./scripts/integration-test.sh
-```
-
-### CI/CD Pipeline
-
-The project uses GitHub Actions for continuous integration:
-
-- **Automated Testing**: All PRs and pushes trigger test runs
-- **Coverage Threshold**: Tests must achieve at least 70% coverage to pass
-- **Multiple Go Versions**: Tests run on Go 1.21, 1.22, and 1.23
-- **Security Scanning**: Gosec security analysis on all code
-- **Linting**: golangci-lint ensures code quality
-- **Docker Builds**: Automatic image building and publishing
-- **Release Automation**: Tagged releases trigger automatic deployment
-
-### Test Structure
-
-- `testutils/`: Common testing utilities and mocks
-- `*_test.go`: Unit tests for each package
-- `scripts/integration-test.sh`: Integration test automation
