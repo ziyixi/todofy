@@ -1,7 +1,10 @@
 name: Todofy Build
 
 on:
-  push:
+  workflow_run:
+    workflows: ["CI/CD Pipeline"]
+    types:
+      - completed
     branches:
       - main
   workflow_dispatch:
@@ -11,6 +14,8 @@ jobs:
     permissions:
       packages: write # Permission to write to GitHub Packages (GHCR)
     runs-on: ubuntu-22.04
+    # Only run if the CI workflow succeeded
+    if: github.event.workflow_run.conclusion == 'success' || github.event_name == 'workflow_dispatch'
     concurrency:
       group: ${{ github.workflow }}-${{ github.ref }}
       cancel-in-progress: true # Cancel older runs in the same concurrency group

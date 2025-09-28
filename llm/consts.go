@@ -1,3 +1,4 @@
+// Package llm provides constants and configuration for language model operations.
 package main
 
 import pb "github.com/ziyixi/protos/go/todofy"

@@ -22,7 +22,8 @@ import (
 var log = logrus.New()
 var GitCommit string // Will be set by Bazel at build time
 
-func init() {
+// initLogger initializes the logger configuration
+func initLogger() {
 	log.SetFormatter(&logrus.TextFormatter{
 		FullTimestamp: true,
 	})
@@ -83,7 +84,7 @@ func validateMailjetFlags() error {
 	return nil
 }
 
-func (s *todoServer) PopulateTodoByMailjet(ctx context.Context, req *pb.TodoRequest) (*pb.TodoResponse, error) {
+func (s *todoServer) PopulateTodoByMailjet(_ context.Context, req *pb.TodoRequest) (*pb.TodoResponse, error) {
 	if err := validateMailjetFlags(); err != nil {
 		return nil, err
 	}
@@ -274,6 +275,7 @@ func (s *todoServer) PopulateTodoByTodoist(ctx context.Context, req *pb.TodoRequ
 }
 
 func main() {
+	initLogger()
 	flag.Parse()
 
 	err := utils.StartGRPCServer[pb.TodoServiceServer](

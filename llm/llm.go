@@ -19,7 +19,8 @@ import (
 var log = logrus.New()
 var GitCommit string // Will be set by Bazel at build time
 
-func init() {
+// initLogger initializes the logger configuration
+func initLogger() {
 	log.SetFormatter(&logrus.TextFormatter{
 		FullTimestamp: true,
 	})
@@ -59,7 +60,8 @@ func (s *llmServer) Summarize(ctx context.Context, req *pb.LLMSummaryRequest) (*
 	return &pb.LLMSummaryResponse{Summary: summary, Model: model}, nil
 }
 
-func (s *llmServer) summaryInternal(ctx context.Context, modelFamily pb.ModelFamily, prompt, text string, models []pb.Model, maxTokens int32) (string, pb.Model, error) {
+func (s *llmServer) summaryInternal(ctx context.Context, modelFamily pb.ModelFamily,
+	prompt, text string, models []pb.Model, maxTokens int32) (string, pb.Model, error) {
 	for _, model := range models {
 		if _, ok := llmModelNames[model]; !ok {
 			return "", pb.Model_MODEL_UNSPECIFIED, status.Errorf(codes.InvalidArgument, "unsupported model: %s", model)
@@ -77,10 +79,12 @@ func (s *llmServer) summaryInternal(ctx context.Context, modelFamily pb.ModelFam
 		}
 	}
 	log.Errorf("Failed to generate summary with all models")
-	return "", pb.Model_MODEL_UNSPECIFIED, status.Errorf(codes.Internal, "failed to generate summary with all models: %v", models)
+	return "", pb.Model_MODEL_UNSPECIFIED, status.Errorf(codes.Internal,
+		"failed to generate summary with all models: %v", models)
 }
 
-func (s *llmServer) tryGenerateSummary(ctx context.Context, modelFamily pb.ModelFamily, prompt, text string, model pb.Model, maxTokens int32) (string, error) {
+func (s *llmServer) tryGenerateSummary(ctx context.Context, modelFamily pb.ModelFamily,
+	prompt, text string, model pb.Model, maxTokens int32) (string, error) {
 	switch modelFamily {
 	case pb.ModelFamily_MODEL_FAMILY_GEMINI:
 		return s.summaryByGemini(ctx, prompt, text, model, maxTokens)
@@ -89,7 +93,8 @@ func (s *llmServer) tryGenerateSummary(ctx context.Context, modelFamily pb.Model
 	}
 }
 
-func (s *llmServer) summaryByGemini(ctx context.Context, prompt, content string, llmModel pb.Model, maxTokens int32) (string, error) {
+func (s *llmServer) summaryByGemini(ctx context.Context, prompt, content string,
+	llmModel pb.Model, maxTokens int32) (string, error) {
 	if *geminiAPIKey == "" {
 		return "", status.Error(codes.InvalidArgument, "gemini-api-key is empty")
 	}
@@ -146,6 +151,7 @@ func (s *llmServer) summaryByGemini(ctx context.Context, prompt, content string,
 }
 
 func main() {
+	initLogger()
 	flag.Parse()
 
 	err := utils.StartGRPCServer[pb.LLMSummaryServiceServer](

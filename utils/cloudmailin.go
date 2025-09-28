@@ -1,3 +1,5 @@
+// Package utils provides utility functions for the todofy application,
+// including email parsing, authentication, and common helper functions.
 package utils
 
 import (
@@ -49,10 +51,10 @@ func ParseCloudmailin(s string) MailInfo {
 		res.Subject = res.Subject[4:]
 	}
 
-	// Outlook might foward the email in the forwarding format
+	// Outlook might forward the email in the forwarding format
 	if strings.Contains(res.To, "cloudmailin") {
 		// parse the correct email address
-		re, _ := regexp.Compile(`_+\\r\\nFrom: .*?([a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+)`)
+		re := regexp.MustCompile(`_+\\r\\nFrom: .*?([a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+)`)
 		matches := re.FindStringSubmatch(s)
 		if len(matches) < 2 {
 			res.To = res.From

@@ -12,7 +12,7 @@ import (
 )
 
 const (
-	TimeDurationToSummary = time.Duration(24 * time.Hour) // 24 hours
+	TimeDurationToSummary = 24 * time.Hour // 24 hours
 )
 
 func HandleSummary(c *gin.Context) {
@@ -38,7 +38,8 @@ func HandleSummary(c *gin.Context) {
 	}
 
 	// Summarize the content
-	summmaries := "As there is no new task in the last 24 hours, there will have no summary. Please check your service as it's highly not possible that there is no new task in the last 24 hours.\n"
+	summmaries := "As there is no new task in the last 24 hours, there will have no summary. " +
+		"Please check your service as it's highly not possible that there is no new task in the last 24 hours.\n"
 	if len(queryResp.Entries) > 0 {
 		summaryReq := &pb.LLMSummaryRequest{
 			ModelFamily: pb.ModelFamily_MODEL_FAMILY_GEMINI,

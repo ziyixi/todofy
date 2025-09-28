@@ -1,3 +1,5 @@
+// Package main provides the todo microservice implementation
+// for the todofy application, handling todo creation and management.
 package main
 
 import pb "github.com/ziyixi/protos/go/todofy"

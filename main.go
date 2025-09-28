@@ -16,7 +16,8 @@ import (
 
 var log = logrus.New()
 
-func init() {
+// initLogger initializes the logger configuration
+func initLogger() {
 	log.SetFormatter(&logrus.TextFormatter{
 		FullTimestamp: true,
 	})
@@ -38,8 +39,10 @@ var (
 	GitCommit string // Will be set by Bazel at build time
 )
 
-func init() {
-	flag.StringVar(&config.AllowedUsers, "allowed-users", "", "Comma-separated list of allowed users in the format 'username:password'")
+// initFlags initializes command line flags
+func initFlags() {
+	flag.StringVar(&config.AllowedUsers, "allowed-users", "",
+		"Comma-separated list of allowed users in the format 'username:password'")
 	flag.StringVar(&config.DataBasePath, "database-path", "", "Path to the SQLite database file")
 	flag.IntVar(&config.Port, "port", 8080, "Port to run the server on")
 	flag.IntVar(&config.HealthCheckTimeout, "health-check-timeout", 10, "Timeout for health check in seconds")
@@ -100,6 +103,8 @@ func setupRouter(allowedUsers gin.Accounts, grpcClients *GRPCClients) *gin.Engin
 }
 
 func main() {
+	initLogger()
+	initFlags()
 	log.Infof("Server Starting time: %s", time.Now().Format(time.RFC3339))
 	flag.Parse()
 
@@ -116,11 +121,13 @@ func main() {
 
 	// Wait for healthy services
 	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(config.HealthCheckTimeout)*time.Second)
-	defer cancel()
 
 	if err := grpcClients.WaitForHealthy(ctx, time.Duration(config.HealthCheckTimeout)*time.Second); err != nil {
-		log.Fatalf("Failed to connect to gRPC services: %v", err)
+		cancel()
+		log.Errorf("Failed to connect to gRPC services: %v", err)
+		return
 	}
+	cancel() // Call cancel after successful health check
 	var servicesNames []string
 	for name := range grpcClients.services {
 		servicesNames = append(servicesNames, name)
@@ -128,15 +135,20 @@ func main() {
 
 	log.Infof("Connected to gRPC services: %v", servicesNames)
 	if config.DataBasePath == "" {
-		log.Fatal("No database path provided. Use --database-path flag to specify it.")
+		log.Error("No database path provided. Use --database-path flag to specify it.")
+		return
 	}
-	grpcClients.SetUpDataBase(config.DataBasePath)
+	if err := grpcClients.SetUpDataBase(config.DataBasePath); err != nil {
+		log.Errorf("Failed to set up database: %v", err)
+		return
+	}
 	log.Infof("Database successfully set up at %s", config.DataBasePath)
 
 	// Parse and validate allowed users
 	allowedUserMap, allowedUsersStrings := utils.ParseAllowedUsers(config.AllowedUsers)
 	if len(allowedUserMap) == 0 {
-		log.Fatal("No valid users found in the allowed users list.")
+		log.Error("No valid users found in the allowed users list.")
+		return
 	}
 	log.Infof("Allowed users (hidden passwords): %s", allowedUsersStrings)
 
@@ -147,6 +159,7 @@ func main() {
 	log.Infof("Gin has started in %s mode on %s", gin.Mode(), listenAddr)
 
 	if err := app.Run(listenAddr); err != nil {
-		log.Fatalf("Failed to start server: %v", err)
+		log.Errorf("Failed to start server: %v", err)
+		return
 	}
 }

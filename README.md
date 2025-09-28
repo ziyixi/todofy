@@ -48,3 +48,61 @@ Docker images for each service are automatically built and pushed to GitHub Cont
 * docker pull ghcr.io/ziyixi/todofy-llm:latest
 * docker pull ghcr.io/ziyixi/todofy-todo:latest
 * docker pull ghcr.io/ziyixi/todofy-database:latest
+
+## 🧪 Testing
+
+This project includes comprehensive unit tests and integration tests with CI/CD automation.
+
+### Test Coverage
+
+Current test coverage is **38.9%** overall:
+- **Database service**: 80.6%
+- **Utils package**: 80.9%  
+- **LLM service**: 61.9%
+- **Todoist client**: 83.3%
+- **TODO service**: 47.4%
+
+### Running Tests
+
+```bash
+# Run all tests
+go test ./...
+
+# Run tests with coverage
+go test -coverprofile=coverage.out ./...
+go tool cover -html=coverage.out -o coverage.html
+
+# Run tests with verbose output
+go test -v ./...
+
+# Run specific package tests
+go test ./utils/
+go test ./database/
+```
+
+### Integration Tests
+
+Run integration tests to verify service communication:
+
+```bash
+# Run integration test script
+./scripts/integration-test.sh
+```
+
+### CI/CD Pipeline
+
+The project uses GitHub Actions for continuous integration:
+
+- **Automated Testing**: All PRs and pushes trigger test runs
+- **Coverage Threshold**: Tests must achieve at least 70% coverage to pass
+- **Multiple Go Versions**: Tests run on Go 1.21, 1.22, and 1.23
+- **Security Scanning**: Gosec security analysis on all code
+- **Linting**: golangci-lint ensures code quality
+- **Docker Builds**: Automatic image building and publishing
+- **Release Automation**: Tagged releases trigger automatic deployment
+
+### Test Structure
+
+- `testutils/`: Common testing utilities and mocks
+- `*_test.go`: Unit tests for each package
+- `scripts/integration-test.sh`: Integration test automation

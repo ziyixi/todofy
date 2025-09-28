@@ -1,3 +1,5 @@
+// Package main provides the entry point for the todofy application server,
+// which handles email-to-todo conversion with gRPC microservices integration.
 package main
 
 import (
@@ -80,13 +82,15 @@ func (c *GRPCClients) Close() {
 
 	for _, service := range c.services {
 		if service.conn != nil {
-			service.conn.Close()
+			if err := service.conn.Close(); err != nil {
+				log.Warningf("Failed to close gRPC connection: %v", err)
+			}
 		}
 	}
 }
 
 // WaitForHealthy waits for all services to become healthy
-func (c *GRPCClients) WaitForHealthy(ctx context.Context, timeout time.Duration) error {
+func (c *GRPCClients) WaitForHealthy(ctx context.Context, _ time.Duration) error {
 	c.mu.RLock()
 	serviceCount := len(c.services)
 	c.mu.RUnlock()

@@ -1,3 +1,5 @@
+// Package database provides gRPC server implementation for database operations.
+// It supports SQLite database creation, data insertion, and querying functionality.
 package main
 
 import (
@@ -19,7 +21,8 @@ import (
 var log = logrus.New()
 var GitCommit string // Will be set by Bazel at build time
 
-func init() {
+// initLogger initializes the logger configuration
+func initLogger() {
 	log.SetFormatter(&logrus.TextFormatter{
 		FullTimestamp: true,
 	})
@@ -44,7 +47,10 @@ type DatabaseEntry struct {
 	Summary     string
 }
 
-func (s *databaseServer) CreateIfNotExist(ctx context.Context, req *pb.CreateIfNotExistRequest) (*pb.CreateIfNotExistResponse, error) {
+func (s *databaseServer) CreateIfNotExist(
+	_ context.Context,
+	req *pb.CreateIfNotExistRequest,
+) (*pb.CreateIfNotExistResponse, error) {
 	switch req.Type {
 	case pb.DatabaseType_DATABASE_TYPE_SQLITE:
 		db, err := gorm.Open(sqlite.Open(req.Path), &gorm.Config{})
@@ -63,7 +69,7 @@ func (s *databaseServer) CreateIfNotExist(ctx context.Context, req *pb.CreateIfN
 }
 
 // Write implements the Write RPC method
-func (s *databaseServer) Write(ctx context.Context, req *pb.WriteRequest) (*pb.WriteResponse, error) {
+func (s *databaseServer) Write(_ context.Context, req *pb.WriteRequest) (*pb.WriteResponse, error) {
 	entry := DatabaseEntry{
 		ModelFamily: int32(req.Schema.ModelFamily),
 		LLMModel:    int32(req.Schema.Model),
@@ -83,7 +89,7 @@ func (s *databaseServer) Write(ctx context.Context, req *pb.WriteRequest) (*pb.W
 }
 
 // QueryRecent implements the QueryRecent RPC method
-func (s *databaseServer) QueryRecent(ctx context.Context, req *pb.QueryRecentRequest) (*pb.QueryRecentResponse, error) {
+func (s *databaseServer) QueryRecent(_ context.Context, req *pb.QueryRecentRequest) (*pb.QueryRecentResponse, error) {
 	if s.db == nil {
 		return nil, status.Errorf(codes.FailedPrecondition, "database not initialized")
 	}
@@ -114,13 +120,15 @@ func (s *databaseServer) QueryRecent(ctx context.Context, req *pb.QueryRecentReq
 			UpdatedAt:   timestamppb.New(entry.UpdatedAt),
 		}
 	}
-	log.Infof("Queried %d entries from the database between %s and %s", len(entries), from.Format(time.RFC3339), now.Format(time.RFC3339))
+	log.Infof("Queried %d entries from the database between %s and %s", len(entries),
+		from.Format(time.RFC3339), now.Format(time.RFC3339))
 	return &pb.QueryRecentResponse{
 		Entries: schemas,
 	}, nil
 }
 
 func main() {
+	initLogger()
 	flag.Parse()
 
 	err := utils.StartGRPCServer[pb.DataBaseServiceServer](

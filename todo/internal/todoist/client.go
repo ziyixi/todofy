@@ -1,3 +1,5 @@
+// Package todoist provides a client for interacting with the Todoist API.
+// It supports creating tasks and managing todo items through HTTP requests.
 package todoist
 
 import (
@@ -6,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"time"
 )
@@ -80,7 +83,11 @@ func (c *Client) CreateTask(ctx context.Context, requestID string, taskDetails *
 	if err != nil {
 		return nil, fmt.Errorf("failed to execute request: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			log.Printf("Failed to close response body: %v", err)
+		}
+	}()
 
 	// Step 5: Handle the response. Check for non-successful status codes.
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {

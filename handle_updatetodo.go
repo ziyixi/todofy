@@ -29,7 +29,8 @@ func HandleUpdateTodo(c *gin.Context) {
 	}
 	jsonString := string(jsonRaw)
 	emailContent := utils.ParseCloudmailin(jsonString)
-	if len(emailContent.From) == 0 || len(emailContent.To) == 0 || (len(emailContent.Subject) == 0 && len(emailContent.Content) == 0) {
+	if len(emailContent.From) == 0 || len(emailContent.To) == 0 ||
+		(len(emailContent.Subject) == 0 && len(emailContent.Content) == 0) {
 		c.JSON(http.StatusBadRequest, gin.H{"error in parsing json body": "from/to/subject/content is empty"})
 		return
 	}
