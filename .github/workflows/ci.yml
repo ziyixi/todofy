@@ -64,9 +64,9 @@ jobs:
         go-version: '1.25.x'
         
     - name: Run golangci-lint
-      uses: golangci/golangci-lint-action@v3
+      uses: golangci/golangci-lint-action@v6
       with:
-        version: latest
+        version: v1.59
         args: --timeout=5m --skip-dirs=testutils/mocks
 
   security:
@@ -83,9 +83,9 @@ jobs:
         go-version: '1.25.x'
         
     - name: Run Gosec Security Scanner
-      uses: securecodewarrior/github-action-gosec@master
-      with:
-        args: '-no-fail -fmt sarif -out results.sarif ./...'
+      run: |
+        go install github.com/securego/gosec/v2/cmd/gosec@latest
+        gosec -no-fail -fmt sarif -out results.sarif ./...
         
     - name: Upload SARIF file
       uses: github/codeql-action/upload-sarif@v2
