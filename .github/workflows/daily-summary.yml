@@ -1,0 +1,179 @@
+name: Daily Summary Cron
+
+on:
+  schedule:
+    # 9:00 AM UTC (1:00 AM PST / 2:00 AM PDT)
+    - cron: "0 9 * * *"
+  
+  # Allow manual triggering for testing
+  workflow_dispatch:
+    inputs:
+      debug:
+        description: 'Enable debug logging'
+        required: false
+        default: false
+        type: boolean
+
+jobs:
+  send_summary:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    
+    steps:
+      - name: Set up environment
+        run: |
+          echo "TIMESTAMP=$(date -u '+%Y-%m-%d %H:%M:%S UTC')" >> $GITHUB_ENV
+          echo "DEBUG_MODE=${{ github.event.inputs.debug || 'false' }}" >> $GITHUB_ENV
+      
+      - name: Validate required secrets
+        run: |
+          if [[ -z "${{ secrets.DAILY_USERNAME }}" || -z "${{ secrets.DAILY_PASSWORD }}" ]]; then
+            echo "❌ Error: Required secrets DAILY_USERNAME and/or DAILY_PASSWORD are not set"
+            exit 1
+          fi
+          echo "✅ Required secrets are configured"
+      
+      - name: Health check endpoint
+        id: health_check
+        run: |
+          echo "🔍 Performing health check on https://daily.ziyixi.science"
+          
+          # Basic connectivity test
+          if ! curl -f -s --connect-timeout 10 --max-time 30 https://daily.ziyixi.science > /dev/null; then
+            echo "❌ Health check failed - service appears to be down"
+            echo "health_status=failed" >> $GITHUB_OUTPUT
+            exit 1
+          fi
+          
+          echo "✅ Health check passed - service is reachable"
+          echo "health_status=passed" >> $GITHUB_OUTPUT
+      
+      - name: Send Daily Summary with Retry Logic
+        id: send_summary
+        run: |
+          echo "📊 Sending daily summary request at $TIMESTAMP"
+          
+          ENDPOINT="https://daily.ziyixi.science/api/summary"
+          MAX_ATTEMPTS=5
+          ATTEMPT=1
+          SUCCESS=false
+          
+          # Function to make the API request
+          make_request() {
+            local attempt=$1
+            echo "🔄 Attempt $attempt/$MAX_ATTEMPTS"
+            
+            # Configure curl with comprehensive options
+            response=$(curl -w "HTTPCODE:%{http_code};TIME:%{time_total};SIZE:%{size_download}" \
+              --silent \
+              --show-error \
+              --fail \
+              --connect-timeout 15 \
+              --max-time 120 \
+              --retry 0 \
+              --user "${{ secrets.DAILY_USERNAME }}:${{ secrets.DAILY_PASSWORD }}" \
+              --header "Accept: application/json" \
+              --header "User-Agent: GitHub-Actions-Daily-Summary/1.0" \
+              "$ENDPOINT" 2>&1)
+            
+            return $?
+          }
+          
+          # Retry loop with exponential backoff
+          while [[ $ATTEMPT -le $MAX_ATTEMPTS && $SUCCESS == false ]]; do
+            if make_request $ATTEMPT; then
+              # Extract metrics from response
+              HTTP_CODE=$(echo "$response" | grep -o "HTTPCODE:[0-9]*" | cut -d: -f2)
+              TIME_TOTAL=$(echo "$response" | grep -o "TIME:[0-9.]*" | cut -d: -f2)
+              SIZE_DOWNLOAD=$(echo "$response" | grep -o "SIZE:[0-9]*" | cut -d: -f2)
+              
+              # Remove metrics from response body
+              BODY=$(echo "$response" | sed 's/HTTPCODE:[0-9]*;TIME:[0-9.]*;SIZE:[0-9]*$//')
+              
+              echo "✅ Summary request successful!"
+              echo "📈 Response Code: $HTTP_CODE"
+              echo "⏱️ Response Time: ${TIME_TOTAL}s"
+              echo "📦 Response Size: ${SIZE_DOWNLOAD} bytes"
+              
+              # Debug output if enabled
+              if [[ "$DEBUG_MODE" == "true" ]]; then
+                echo "🐛 Debug - Response body:"
+                echo "$BODY" | head -c 500
+                if [[ ${#BODY} -gt 500 ]]; then
+                  echo "... (truncated)"
+                fi
+              fi
+              
+              # Set output variables
+              echo "success=true" >> $GITHUB_OUTPUT
+              echo "http_code=$HTTP_CODE" >> $GITHUB_OUTPUT
+              echo "response_time=$TIME_TOTAL" >> $GITHUB_OUTPUT
+              echo "attempts=$ATTEMPT" >> $GITHUB_OUTPUT
+              
+              SUCCESS=true
+            else
+              echo "❌ Attempt $ATTEMPT failed"
+              
+              # Log error details
+              if [[ $ATTEMPT -eq 1 ]]; then
+                echo "🔍 Error details: $response"
+              fi
+              
+              # Calculate backoff time (exponential backoff: 2^attempt seconds, max 60s)
+              if [[ $ATTEMPT -lt $MAX_ATTEMPTS ]]; then
+                BACKOFF=$((2 ** ATTEMPT))
+                if [[ $BACKOFF -gt 60 ]]; then
+                  BACKOFF=60
+                fi
+                
+                echo "⏳ Waiting ${BACKOFF}s before retry..."
+                sleep $BACKOFF
+              fi
+              
+              ATTEMPT=$((ATTEMPT + 1))
+            fi
+          done
+          
+          # Final status check
+          if [[ $SUCCESS == false ]]; then
+            echo "💥 All $MAX_ATTEMPTS attempts failed"
+            echo "success=false" >> $GITHUB_OUTPUT
+            echo "attempts=$MAX_ATTEMPTS" >> $GITHUB_OUTPUT
+            exit 1
+          fi
+      
+      - name: Summary Statistics
+        if: always()
+        run: |
+          echo "📊 Daily Summary Job Statistics"
+          echo "================================"
+          echo "🕐 Timestamp: $TIMESTAMP"
+          echo "🎯 Endpoint: https://daily.ziyixi.science/api/summary"
+          echo "🔄 Attempts: ${{ steps.send_summary.outputs.attempts || 'N/A' }}"
+          echo "✅ Success: ${{ steps.send_summary.outputs.success || 'false' }}"
+          
+          if [[ "${{ steps.send_summary.outputs.success }}" == "true" ]]; then
+            echo "📈 HTTP Code: ${{ steps.send_summary.outputs.http_code }}"
+            echo "⏱️ Response Time: ${{ steps.send_summary.outputs.response_time }}s"
+          fi
+          
+          echo "🐛 Debug Mode: $DEBUG_MODE"
+      
+      - name: Notify on Failure
+        if: failure()
+        run: |
+          echo "🚨 Daily Summary Job Failed"
+          echo "Please check the logs above for details."
+          echo "Common issues:"
+          echo "- Service downtime"
+          echo "- Authentication problems"
+          echo "- Network connectivity issues"
+          echo "- Rate limiting"
+          
+          # You can extend this to send notifications via:
+          # - Slack webhook
+          # - Discord webhook  
+          # - Email via SendGrid/Mailjet
+          # - GitHub Issues API
+          
+          exit 1
