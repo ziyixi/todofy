@@ -36,17 +36,35 @@ jobs:
       - name: Health check endpoint
         id: health_check
         run: |
-          echo "🔍 Performing health check on https://daily.ziyixi.science"
+          echo "🔍 Performing health check on https://daily.ziyixi.science/health"
           
-          # Basic connectivity test
-          if ! curl -f -s --connect-timeout 10 --max-time 30 https://daily.ziyixi.science > /dev/null; then
-            echo "❌ Health check failed - service appears to be down"
+          # Try the dedicated health endpoint first
+          HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" --connect-timeout 10 --max-time 30 https://daily.ziyixi.science/health)
+          
+          if [[ "$HTTP_CODE" == "200" ]]; then
+            echo "✅ Health check passed - server is healthy"
+            echo "health_status=passed" >> $GITHUB_OUTPUT
+          elif [[ "$HTTP_CODE" == "404" ]]; then
+            echo "⚠️ Health endpoint not found - checking root (may indicate older server version)"
+            # Fallback to root check - 404 is expected and means server is responding
+            ROOT_CODE=$(curl -s -o /dev/null -w "%{http_code}" --connect-timeout 10 --max-time 30 https://daily.ziyixi.science)
+            if [[ "$ROOT_CODE" == "404" ]]; then
+              echo "✅ Fallback health check passed - server is responding"
+              echo "health_status=passed" >> $GITHUB_OUTPUT
+            else
+              echo "❌ Health check failed - unexpected response: $ROOT_CODE"
+              echo "health_status=failed" >> $GITHUB_OUTPUT
+              exit 1
+            fi
+          elif [[ "$HTTP_CODE" == "000" ]]; then
+            echo "❌ Health check failed - connection error (server may be down)"
+            echo "health_status=failed" >> $GITHUB_OUTPUT
+            exit 1
+          else
+            echo "❌ Health check failed - unexpected response code: $HTTP_CODE"
             echo "health_status=failed" >> $GITHUB_OUTPUT
             exit 1
           fi
-          
-          echo "✅ Health check passed - service is reachable"
-          echo "health_status=passed" >> $GITHUB_OUTPUT
       
       - name: Send Daily Summary with Retry Logic
         id: send_summary
@@ -63,11 +81,10 @@ jobs:
             local attempt=$1
             echo "🔄 Attempt $attempt/$MAX_ATTEMPTS"
             
-            # Configure curl with comprehensive options
+            # Configure curl with comprehensive options (remove --fail to handle errors manually)
             response=$(curl -w "HTTPCODE:%{http_code};TIME:%{time_total};SIZE:%{size_download}" \
               --silent \
               --show-error \
-              --fail \
               --connect-timeout 15 \
               --max-time 120 \
               --retry 0 \
@@ -76,7 +93,28 @@ jobs:
               --header "User-Agent: GitHub-Actions-Daily-Summary/1.0" \
               "$ENDPOINT" 2>&1)
             
-            return $?
+            # Extract HTTP code for manual error handling
+            local http_code=$(echo "$response" | grep -o "HTTPCODE:[0-9]*" | cut -d: -f2)
+            
+            # Check for success (2xx status codes)
+            if [[ "$http_code" =~ ^2[0-9][0-9]$ ]]; then
+              return 0  # Success
+            elif [[ "$http_code" == "401" ]]; then
+              echo "🔒 Authentication failed - check DAILY_USERNAME and DAILY_PASSWORD secrets"
+              return 1
+            elif [[ "$http_code" == "429" ]]; then
+              echo "⚠️ Rate limited - server is asking us to slow down"
+              return 1
+            elif [[ "$http_code" == "500" ]] || [[ "$http_code" =~ ^5[0-9][0-9]$ ]]; then
+              echo "🛠️ Server error (HTTP $http_code) - this may be temporary"
+              return 1
+            elif [[ -z "$http_code" ]] || [[ "$http_code" == "000" ]]; then
+              echo "🔌 Connection failed - server may be unreachable"
+              return 1
+            else
+              echo "❓ Unexpected HTTP code: $http_code"
+              return 1
+            fi
           }
           
           # Retry loop with exponential backoff
@@ -163,12 +201,35 @@ jobs:
         if: failure()
         run: |
           echo "🚨 Daily Summary Job Failed"
+          echo "================================"
           echo "Please check the logs above for details."
-          echo "Common issues:"
-          echo "- Service downtime"
-          echo "- Authentication problems"
-          echo "- Network connectivity issues"
-          echo "- Rate limiting"
+          echo ""
+          echo "💡 Troubleshooting Steps:"
+          echo "1. 🔒 Check Authentication:"
+          echo "   - Verify DAILY_USERNAME and DAILY_PASSWORD secrets are set correctly"
+          echo "   - Test manually: curl -u 'username:password' https://daily.ziyixi.science/api/summary"
+          echo ""
+          echo "2. 🏥 Check Service Health:"
+          echo "   - Visit: https://daily.ziyixi.science/health"
+          echo "   - Should return: {\"status\":\"healthy\",...}"
+          echo ""
+          echo "3. 🔌 Check Connectivity:"
+          echo "   - Visit: https://daily.ziyixi.science/"
+          echo "   - Should show 404 (means server is running)"
+          echo ""
+          echo "4. 📊 Check Server Logs:"
+          echo "   - Review your server deployment logs"
+          echo "   - Look for gRPC service connection issues"
+          echo "   - Check database connectivity"
+          echo ""
+          echo "5. 🚀 Common Issues:"
+          echo "   - Server restart needed after deployment"
+          echo "   - gRPC services (llm, todo, database) not running"
+          echo "   - SSL certificate issues"
+          echo "   - Rate limiting (max 2 requests per minute)"
+          echo ""
+          echo "🔧 Quick Test Command:"
+          echo "curl -v -u 'your_username:your_password' https://daily.ziyixi.science/api/summary"
           
           # You can extend this to send notifications via:
           # - Slack webhook

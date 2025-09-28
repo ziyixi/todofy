@@ -90,6 +90,15 @@ func setupRouter(allowedUsers gin.Accounts, grpcClients *GRPCClients) *gin.Engin
 	gin.SetMode(gin.ReleaseMode)
 	app := gin.Default()
 
+	// Add public health endpoint (no auth required)
+	app.GET("/health", func(c *gin.Context) {
+		c.JSON(200, gin.H{
+			"status":    "healthy",
+			"timestamp": time.Now().Format(time.RFC3339),
+			"service":   "todofy",
+		})
+	})
+
 	api := app.Group("/api", gin.BasicAuth(allowedUsers))
 	api.Use(grpcMiddleware(grpcClients))
 	api.GET("/summary", HandleSummary)
