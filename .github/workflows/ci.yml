@@ -59,6 +59,7 @@ jobs:
         files: ./coverage.out
         # Optional: set a flag name for the report
         flags: unittests
+        codecov_yml_path: ./.codecov.yml
       # This ensures the step runs even if tests fail, allowing Codecov to report the drop
       if: always()
 
