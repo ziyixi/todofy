@@ -20,7 +20,6 @@ jobs:
     - name: Set up Go
       uses: actions/setup-go@v4
       with:
-        # Use the Go version from the go.mod file for consistency
         go-version-file: 'go.mod'
         
     - name: Cache Go modules
@@ -49,6 +48,19 @@ jobs:
         echo "Test Coverage: ${COVERAGE}"
         echo "## Test Coverage Summary" >> $GITHUB_STEP_SUMMARY
         echo "**Coverage:** ${COVERAGE}" >> $GITHUB_STEP_SUMMARY
+
+    # ⭐️ New step to upload the coverage report
+    - name: Upload coverage to Codecov
+      uses: codecov/codecov-action@v5
+      with:
+        # The token is read from GitHub secrets
+        token: ${{ secrets.CODECOV_TOKEN }}
+        # Specify the coverage file generated in the previous step
+        files: ./coverage.out
+        # Optional: set a flag name for the report
+        flags: unittests
+      # This ensures the step runs even if tests fail, allowing Codecov to report the drop
+      if: always()
 
   lint:
     name: Lint Code
@@ -104,7 +116,6 @@ jobs:
         echo "✅ CI checks passed successfully!"
         
     - name: Notify on failure
-      # This step sets the job's outcome to failure if any dependency failed
       if: contains(needs.*.result, 'failure')
       run: |
         echo "❌ One or more CI checks failed:"
