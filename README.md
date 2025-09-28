@@ -49,34 +49,3 @@ Docker images for each service are automatically built and pushed to GitHub Cont
 * docker pull ghcr.io/ziyixi/todofy-llm:latest
 * docker pull ghcr.io/ziyixi/todofy-todo:latest
 * docker pull ghcr.io/ziyixi/todofy-database:latest
-
-## 🧪 Testing
-
-This project includes comprehensive unit tests and integration tests with CI/CD automation.
-
-### Test Coverage
-
-Current test coverage is **38.9%** overall:
-- **Database service**: 80.6%
-- **Utils package**: 80.9%  
-- **LLM service**: 61.9%
-- **Todoist client**: 83.3%
-- **TODO service**: 47.4%
-
-### Running Tests
-
-```bash
-# Run all tests
-go test ./...
-
-# Run tests with coverage
-go test -coverprofile=coverage.out ./...
-go tool cover -html=coverage.out -o coverage.html
-
-# Run tests with verbose output
-go test -v ./...
-
-# Run specific package tests
-go test ./utils/
-go test ./database/
-```
