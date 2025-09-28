@@ -25,3 +25,9 @@ linters:
     - unparam
     - unused
     - whitespace
+  
+  settings:
+    revive:
+      rules:
+        - name: var-naming
+          disabled: true
