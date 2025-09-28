@@ -20,10 +20,11 @@ jobs:
     - name: Set up Go
       uses: actions/setup-go@v4
       with:
-        go-version: '1.25.x'
+        # Use the Go version from the go.mod file for consistency
+        go-version-file: 'go.mod'
         
     - name: Cache Go modules
-      uses: actions/cache@v3
+      uses: actions/cache@v4
       with:
         path: ~/go/pkg/mod
         key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
@@ -40,12 +41,11 @@ jobs:
       run: go vet ./...
       
     - name: Run tests with coverage
-      run: |
-        go test -v -race -coverprofile=coverage.out -covermode=atomic ./...
+      run: go test -v -race -coverprofile=coverage.out -covermode=atomic ./...
         
     - name: Display coverage summary
       run: |
-        COVERAGE=$(go tool cover -func=coverage.out | tail -1 | awk '{print $3}' | sed 's/%//')
+        COVERAGE=$(go tool cover -func=coverage.out | tail -1 | awk '{print $3}')
         echo "Test Coverage: ${COVERAGE}"
         echo "## Test Coverage Summary" >> $GITHUB_STEP_SUMMARY
         echo "**Coverage:** ${COVERAGE}" >> $GITHUB_STEP_SUMMARY
@@ -61,12 +61,11 @@ jobs:
     - name: Set up Go
       uses: actions/setup-go@v4
       with:
-        go-version: '1.25.x'
+        go-version-file: 'go.mod'
         
     - name: Run golangci-lint
       uses: golangci/golangci-lint-action@v8
       with:
-        version: v2.5.0
         args: --timeout=5m
 
   security:
@@ -80,7 +79,7 @@ jobs:
     - name: Set up Go
       uses: actions/setup-go@v4
       with:
-        go-version: '1.25.x'
+        go-version-file: 'go.mod'
         
     - name: Run Gosec Security Scanner
       run: |
@@ -88,7 +87,7 @@ jobs:
         gosec -no-fail -fmt sarif -out results.sarif ./...
         
     - name: Upload SARIF file
-      uses: github/codeql-action/upload-sarif@v2
+      uses: github/codeql-action/upload-sarif@v3
       with:
         sarif_file: results.sarif
 
@@ -99,18 +98,16 @@ jobs:
     if: always()
     
     steps:
-    - name: Notify success
+    - name: Notify on success
       if: needs.test.result == 'success' && needs.lint.result == 'success' && needs.security.result == 'success'
       run: |
-        echo "✅ All checks passed successfully!"
-        echo "- Tests: ${{ needs.test.result }}"
-        echo "- Lint: ${{ needs.lint.result }}"
-        echo "- Security: ${{ needs.security.result }}"
+        echo "✅ CI checks passed successfully!"
         
-    - name: Notify failure
-      if: needs.test.result == 'failure' || needs.lint.result == 'failure' || needs.security.result == 'failure'
+    - name: Notify on failure
+      # This step sets the job's outcome to failure if any dependency failed
+      if: contains(needs.*.result, 'failure')
       run: |
-        echo "❌ Some checks failed:"
+        echo "❌ One or more CI checks failed:"
         echo "- Tests: ${{ needs.test.result }}"
         echo "- Lint: ${{ needs.lint.result }}"
         echo "- Security: ${{ needs.security.result }}"
