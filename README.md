@@ -1,6 +1,7 @@
 # Todofy - Self-Hosted Task Management Tool
 
 [![Build Status](https://github.com/ziyixi/todofy/actions/workflows/todofy-build.yml/badge.svg)](https://github.com/ziyixi/todofy/actions/workflows/todofy-build.yml)
+[![codecov](https://codecov.io/gh/ziyixi/todofy/graph/badge.svg?token=2Y6YIYUYZP)](https://codecov.io/gh/ziyixi/todofy)
 
 Todofy is a self-hosted task management tool designed to help you organize and prioritize your tasks efficiently. It's built as a collection of services, each handling a specific aspect of the application.
 
