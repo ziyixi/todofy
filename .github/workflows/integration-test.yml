@@ -1,0 +1,146 @@
+name: Docker Integration Tests
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+
+env:
+  # Port where the main todofy service is exposed (must match docker-compose.test.yml)
+  TODOFY_TEST_PORT: 10003
+
+jobs:
+  integration-test:
+    name: Docker Integration Tests
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build and start containers
+        run: |
+          docker compose -f docker-compose.test.yml build
+          docker compose -f docker-compose.test.yml up -d
+
+      - name: Wait for services to be healthy
+        run: |
+          echo "Waiting for all services to be healthy..."
+          
+          # Wait for up to 120 seconds for all services to become healthy
+          timeout=120
+          elapsed=0
+          
+          while [ $elapsed -lt $timeout ]; do
+            # Check if all services are healthy
+            all_healthy=true
+            
+            for service in todofy-llm-test todofy-todo-test todofy-database-test todofy-test; do
+              status=$(docker inspect --format='{{.State.Health.Status}}' $service 2>/dev/null || echo "not_found")
+              if [ "$status" != "healthy" ]; then
+                all_healthy=false
+                echo "  $service: $status"
+              else
+                echo "  $service: healthy ✓"
+              fi
+            done
+            
+            if [ "$all_healthy" = true ]; then
+              echo "All services are healthy!"
+              break
+            fi
+            
+            echo "Waiting for services... ($elapsed/$timeout seconds)"
+            sleep 5
+            elapsed=$((elapsed + 5))
+          done
+          
+          if [ $elapsed -ge $timeout ]; then
+            echo "Timeout waiting for services to become healthy"
+            docker compose -f docker-compose.test.yml logs
+            exit 1
+          fi
+
+      - name: Test main service health endpoint
+        run: |
+          echo "Testing main service health endpoint..."
+          response=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:${{ env.TODOFY_TEST_PORT }}/health)
+          if [ "$response" = "200" ]; then
+            echo "Health endpoint returned 200 OK ✓"
+          else
+            echo "Health endpoint returned $response (expected 200)"
+            exit 1
+          fi
+          
+          # Also verify the response body
+          body=$(curl -s http://localhost:${{ env.TODOFY_TEST_PORT }}/health)
+          echo "Health response: $body"
+          
+          if echo "$body" | grep -q '"status":"healthy"'; then
+            echo "Service reports healthy status ✓"
+          else
+            echo "Service did not report healthy status"
+            exit 1
+          fi
+
+      - name: Test gRPC service connectivity
+        run: |
+          echo "Testing gRPC services connectivity..."
+          
+          # Install grpc_health_probe for direct gRPC health testing
+          wget -qO /tmp/grpc_health_probe https://github.com/grpc-ecosystem/grpc-health-probe/releases/download/v0.4.28/grpc_health_probe-linux-amd64
+          chmod +x /tmp/grpc_health_probe
+          
+          # Test each gRPC service from the host using docker network
+          # The services are exposed via container names on the todofy-test network
+          
+          # Test LLM service via the main container
+          docker exec todofy-test /bin/sh -c "wget -qO /tmp/grpc_health_probe https://github.com/grpc-ecosystem/grpc-health-probe/releases/download/v0.4.28/grpc_health_probe-linux-amd64 && chmod +x /tmp/grpc_health_probe && /tmp/grpc_health_probe -addr=todofy-llm:50051" && \
+            echo "LLM service gRPC health check passed ✓" || \
+            (echo "LLM service gRPC health check failed" && exit 1)
+          
+          # Test Todo service via the main container
+          docker exec todofy-test /bin/sh -c "/tmp/grpc_health_probe -addr=todofy-todo:50052" && \
+            echo "Todo service gRPC health check passed ✓" || \
+            (echo "Todo service gRPC health check failed" && exit 1)
+          
+          # Test Database service via the main container
+          docker exec todofy-test /bin/sh -c "/tmp/grpc_health_probe -addr=todofy-database:50053" && \
+            echo "Database service gRPC health check passed ✓" || \
+            (echo "Database service gRPC health check failed" && exit 1)
+          
+          # Additionally verify via log messages that services connected successfully
+          docker logs todofy-test 2>&1 | grep -q "Connected to gRPC services" && \
+            echo "Main service log confirms gRPC connection ✓" || \
+            echo "Note: Log message not found (service may still be working)"
+          
+          docker logs todofy-test 2>&1 | grep -q "Database successfully set up" && \
+            echo "Database setup confirmed via logs ✓" || \
+            echo "Note: Database setup log not found (service may still be working)"
+
+      - name: Show service logs on success
+        if: success()
+        run: |
+          echo "=== Service Logs (Success) ==="
+          docker compose -f docker-compose.test.yml logs
+
+      - name: Show service logs on failure
+        if: failure()
+        run: |
+          echo "=== Service Logs (Failure) ==="
+          docker compose -f docker-compose.test.yml logs
+          
+          echo "=== Container Status ==="
+          docker ps -a
+
+      - name: Cleanup
+        if: always()
+        run: |
+          docker compose -f docker-compose.test.yml down -v
+          docker system prune -f

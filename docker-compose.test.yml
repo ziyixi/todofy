@@ -1,0 +1,106 @@
+# docker-compose.test.yml - Integration test configuration for todofy services
+# This file is used by GitHub Actions to test that all containers can successfully
+# set up, communicate with each other, and serve services.
+
+networks:
+  todofy-test:
+    driver: bridge
+
+services:
+  # Main todofy application (HTTP API + gRPC client)
+  todofy:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: todofy-test
+    ports:
+      - "10003:8080"
+    environment:
+      PORT: "8080"
+      ALLOWED_USERS: "testuser:testpassword"
+      DATABASE_PATH: "/tmp/test.db"
+      LLMAddr: "todofy-llm:50051"
+      TodoAddr: "todofy-todo:50052"
+      DatabaseAddr: "todofy-database:50053"
+    depends_on:
+      todofy-llm:
+        condition: service_healthy
+      todofy-todo:
+        condition: service_healthy
+      todofy-database:
+        condition: service_healthy
+    networks:
+      - todofy-test
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8080/health"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+  # LLM service (gRPC server for AI summarization)
+  todofy-llm:
+    build:
+      context: .
+      dockerfile: llm/Dockerfile
+    container_name: todofy-llm-test
+    environment:
+      PORT: "50051"
+      # GEMINI_API_KEY intentionally left empty for integration tests
+      # The service should still start and respond to health checks
+      GEMINI_API_KEY: ""
+    networks:
+      - todofy-test
+    healthcheck:
+      test: ["CMD", "/grpc_health_probe", "-addr=:50051"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 5s
+
+  # Todo service (gRPC server for task population via email/notion/todoist)
+  todofy-todo:
+    build:
+      context: .
+      dockerfile: todo/Dockerfile
+    container_name: todofy-todo-test
+    environment:
+      PORT: "50052"
+      # All API keys intentionally left empty for integration tests
+      MAILJET_API_KEY_PUBLIC: ""
+      MAILJET_API_KEY_PRIVATE: ""
+      TARGET_EMAIL: ""
+      NOTION_API_KEY: ""
+      NOTION_DATABASE_ID: ""
+      TODOIST_API_KEY: ""
+      TODOIST_PROJECT_ID: ""
+    networks:
+      - todofy-test
+    healthcheck:
+      test: ["CMD", "/grpc_health_probe", "-addr=:50052"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 5s
+
+  # Database service (gRPC server for SQLite database operations)
+  todofy-database:
+    build:
+      context: .
+      dockerfile: database/Dockerfile
+    container_name: todofy-database-test
+    environment:
+      PORT: "50053"
+    volumes:
+      - todofy-db-test:/root
+    networks:
+      - todofy-test
+    healthcheck:
+      test: ["CMD", "/grpc_health_probe", "-addr=:50053"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 5s
+
+volumes:
+  todofy-db-test:

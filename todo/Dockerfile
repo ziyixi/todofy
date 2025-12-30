@@ -63,6 +63,11 @@ ENV TODOIST_PROJECT_ID=""
 # Install ca-certificates for HTTPS and tzdata for timezone information
 RUN apk --no-cache add ca-certificates tzdata
 
+# Install grpc_health_probe for container health checks
+RUN GRPC_HEALTH_PROBE_VERSION=v0.4.28 && \
+    wget -qO/grpc_health_probe https://github.com/grpc-ecosystem/grpc-health-probe/releases/download/${GRPC_HEALTH_PROBE_VERSION}/grpc_health_probe-linux-amd64 && \
+    chmod +x /grpc_health_probe
+
 # Copy the built binary from the builder stage directly to /todo in the runtime image.
 COPY --from=builder /todo_service_executable /todo
 
