@@ -50,12 +50,18 @@ LABEL org.opencontainers.image.licenses="MIT"
 
 ENV PORT=50053
 
-# Install runtime dependencies: ca-certificates, tzdata, and sqlite3
+# Install runtime dependencies: ca-certificates, tzdata, sqlite3, and wget for grpc_health_probe
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
     sqlite3 \
     tzdata \
+    wget \
     && rm -rf /var/lib/apt/lists/*
+
+# Install grpc_health_probe for container health checks
+RUN GRPC_HEALTH_PROBE_VERSION=v0.4.28 && \
+    wget -qO/grpc_health_probe https://github.com/grpc-ecosystem/grpc-health-probe/releases/download/${GRPC_HEALTH_PROBE_VERSION}/grpc_health_probe-linux-amd64 && \
+    chmod +x /grpc_health_probe
 
 # Copy the built binary from the builder stage directly to /database in the runtime image.
 COPY --from=builder /database_service_executable /database
