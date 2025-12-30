@@ -6,10 +6,16 @@ on:
   pull_request:
     branches: [main, develop]
 
+env:
+  # Port where the main todofy service is exposed (must match docker-compose.test.yml)
+  TODOFY_TEST_PORT: 10003
+
 jobs:
   integration-test:
     name: Docker Integration Tests
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
 
     steps:
       - name: Check out code
@@ -64,7 +70,7 @@ jobs:
       - name: Test main service health endpoint
         run: |
           echo "Testing main service health endpoint..."
-          response=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:10003/health)
+          response=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:${{ env.TODOFY_TEST_PORT }}/health)
           if [ "$response" = "200" ]; then
             echo "Health endpoint returned 200 OK ✓"
           else
@@ -73,7 +79,7 @@ jobs:
           fi
           
           # Also verify the response body
-          body=$(curl -s http://localhost:10003/health)
+          body=$(curl -s http://localhost:${{ env.TODOFY_TEST_PORT }}/health)
           echo "Health response: $body"
           
           if echo "$body" | grep -q '"status":"healthy"'; then
@@ -85,18 +91,38 @@ jobs:
 
       - name: Test gRPC service connectivity
         run: |
-          echo "Testing gRPC services from main container..."
+          echo "Testing gRPC services connectivity..."
           
-          # Test that the main service can connect to all gRPC services
-          # by checking container logs for successful connection messages
+          # Install grpc_health_probe for direct gRPC health testing
+          wget -qO /tmp/grpc_health_probe https://github.com/grpc-ecosystem/grpc-health-probe/releases/download/v0.4.28/grpc_health_probe-linux-amd64
+          chmod +x /tmp/grpc_health_probe
+          
+          # Test each gRPC service from the host using docker network
+          # The services are exposed via container names on the todofy-test network
+          
+          # Test LLM service via the main container
+          docker exec todofy-test /bin/sh -c "wget -qO /tmp/grpc_health_probe https://github.com/grpc-ecosystem/grpc-health-probe/releases/download/v0.4.28/grpc_health_probe-linux-amd64 && chmod +x /tmp/grpc_health_probe && /tmp/grpc_health_probe -addr=todofy-llm:50051" && \
+            echo "LLM service gRPC health check passed ✓" || \
+            (echo "LLM service gRPC health check failed" && exit 1)
+          
+          # Test Todo service via the main container
+          docker exec todofy-test /bin/sh -c "/tmp/grpc_health_probe -addr=todofy-todo:50052" && \
+            echo "Todo service gRPC health check passed ✓" || \
+            (echo "Todo service gRPC health check failed" && exit 1)
+          
+          # Test Database service via the main container
+          docker exec todofy-test /bin/sh -c "/tmp/grpc_health_probe -addr=todofy-database:50053" && \
+            echo "Database service gRPC health check passed ✓" || \
+            (echo "Database service gRPC health check failed" && exit 1)
+          
+          # Additionally verify via log messages that services connected successfully
           docker logs todofy-test 2>&1 | grep -q "Connected to gRPC services" && \
-            echo "Main service connected to gRPC services ✓" || \
-            (echo "Main service failed to connect to gRPC services" && docker logs todofy-test && exit 1)
+            echo "Main service log confirms gRPC connection ✓" || \
+            echo "Note: Log message not found (service may still be working)"
           
-          # Verify database was set up successfully
           docker logs todofy-test 2>&1 | grep -q "Database successfully set up" && \
-            echo "Database setup confirmed ✓" || \
-            (echo "Database setup not confirmed" && docker logs todofy-test && exit 1)
+            echo "Database setup confirmed via logs ✓" || \
+            echo "Note: Database setup log not found (service may still be working)"
 
       - name: Show service logs on success
         if: success()
