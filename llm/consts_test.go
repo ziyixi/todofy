@@ -10,11 +10,10 @@ import (
 func TestLLMConstants(t *testing.T) {
 	t.Run("llmModelNames contains expected models", func(t *testing.T) {
 		expectedModels := []pb.Model{
-			pb.Model_MODEL_GEMINI_2_0_FLASH,
 			pb.Model_MODEL_GEMINI_2_5_PRO,
 			pb.Model_MODEL_GEMINI_2_5_FLASH,
 			pb.Model_MODEL_GEMINI_2_5_FLASH_LITE,
-			pb.Model_MODEL_GEMINI_2_0_FLASH_LITE,
+			pb.Model_MODEL_GEMINI_3_FLASH_PREVIEW,
 		}
 
 		for _, model := range expectedModels {
@@ -23,27 +22,24 @@ func TestLLMConstants(t *testing.T) {
 		}
 
 		// Check specific mappings
-		assert.Equal(t, "gemini-2.0-flash", llmModelNames[pb.Model_MODEL_GEMINI_2_0_FLASH])
 		assert.Equal(t, "gemini-2.5-pro", llmModelNames[pb.Model_MODEL_GEMINI_2_5_PRO])
 		assert.Equal(t, "gemini-2.5-flash", llmModelNames[pb.Model_MODEL_GEMINI_2_5_FLASH])
 		assert.Equal(t, "gemini-2.5-flash-lite", llmModelNames[pb.Model_MODEL_GEMINI_2_5_FLASH_LITE])
-		assert.Equal(t, "gemini-2.0-flash-lite", llmModelNames[pb.Model_MODEL_GEMINI_2_0_FLASH_LITE])
+		assert.Equal(t, "gemini-3-flash-preview", llmModelNames[pb.Model_MODEL_GEMINI_3_FLASH_PREVIEW])
 	})
 
 	t.Run("llmModelPriority has correct order", func(t *testing.T) {
 		expectedPriority := []pb.Model{
-			pb.Model_MODEL_GEMINI_2_5_PRO,
-			pb.Model_MODEL_GEMINI_2_5_FLASH,
 			pb.Model_MODEL_GEMINI_2_5_FLASH_LITE,
-			pb.Model_MODEL_GEMINI_2_0_FLASH,
-			pb.Model_MODEL_GEMINI_2_0_FLASH_LITE,
+			pb.Model_MODEL_GEMINI_2_5_FLASH,
+			pb.Model_MODEL_GEMINI_3_FLASH_PREVIEW,
 		}
 
 		assert.Equal(t, expectedPriority, llmModelPriority)
-		assert.Len(t, llmModelPriority, 5)
+		assert.Len(t, llmModelPriority, 3)
 
-		// First model should be the most preferred (pro model)
-		assert.Equal(t, pb.Model_MODEL_GEMINI_2_5_PRO, llmModelPriority[0])
+		// First model should be the most preferred (flash lite model)
+		assert.Equal(t, pb.Model_MODEL_GEMINI_2_5_FLASH_LITE, llmModelPriority[0])
 	})
 
 	t.Run("supportedModelFamily contains Gemini", func(t *testing.T) {
@@ -74,11 +70,10 @@ func TestLLMModelMappings(t *testing.T) {
 
 	t.Run("model names follow expected pattern", func(t *testing.T) {
 		expectedPatterns := map[pb.Model]string{
-			pb.Model_MODEL_GEMINI_2_0_FLASH:      "gemini-2.0-flash",
-			pb.Model_MODEL_GEMINI_2_5_PRO:        "gemini-2.5-pro",
-			pb.Model_MODEL_GEMINI_2_5_FLASH:      "gemini-2.5-flash",
-			pb.Model_MODEL_GEMINI_2_5_FLASH_LITE: "gemini-2.5-flash-lite",
-			pb.Model_MODEL_GEMINI_2_0_FLASH_LITE: "gemini-2.0-flash-lite",
+			pb.Model_MODEL_GEMINI_2_5_PRO:         "gemini-2.5-pro",
+			pb.Model_MODEL_GEMINI_2_5_FLASH:       "gemini-2.5-flash",
+			pb.Model_MODEL_GEMINI_2_5_FLASH_LITE:  "gemini-2.5-flash-lite",
+			pb.Model_MODEL_GEMINI_3_FLASH_PREVIEW: "gemini-3-flash-preview",
 		}
 
 		for model, expectedName := range expectedPatterns {

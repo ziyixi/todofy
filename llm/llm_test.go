@@ -181,7 +181,7 @@ func TestLLMServer_SummaryByGemini(t *testing.T) {
 func TestModelSelection(t *testing.T) {
 	t.Run("uses priority order for model selection", func(t *testing.T) {
 		// Test that models are tried in priority order
-		expectedFirst := pb.Model_MODEL_GEMINI_2_5_PRO
+		expectedFirst := pb.Model_MODEL_GEMINI_2_5_FLASH_LITE
 		expectedSecond := pb.Model_MODEL_GEMINI_2_5_FLASH
 
 		assert.Equal(t, expectedFirst, llmModelPriority[0])
