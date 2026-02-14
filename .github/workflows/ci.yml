@@ -24,9 +24,13 @@ jobs:
     name: Security
     uses: ./.github/workflows/reusable-security.yml
 
+  integration-test:
+    name: Integration Test
+    uses: ./.github/workflows/reusable-integration-test.yml
+
   build:
     name: Build
-    needs: [test, lint, security]
+    needs: [test, lint, security, integration-test]
     if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
     uses: ./.github/workflows/reusable-build.yml
     permissions:
@@ -35,20 +39,17 @@ jobs:
   notify:
     name: Notify Status
     runs-on: ubuntu-latest
-    needs: [test, lint, security]
+    needs: [test, lint, security, integration-test]
     if: always()
 
     steps:
     - name: Notify on success
-      if: needs.test.result == 'success' && needs.lint.result == 'success' && needs.security.result == 'success'
+      if: needs.integration-test.result == 'success'
       run: |
         echo "✅ CI checks passed successfully!"
 
     - name: Notify on failure
-      if: contains(needs.*.result, 'failure')
+      if: needs.integration-test.result == 'failure'
       run: |
-        echo "❌ One or more CI checks failed:"
-        echo "- Tests: ${{ needs.test.result }}"
-        echo "- Lint: ${{ needs.lint.result }}"
-        echo "- Security: ${{ needs.security.result }}"
+        echo "❌ CI checks failed!"
         exit 1
