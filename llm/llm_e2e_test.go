@@ -15,12 +15,22 @@ import (
 	pb "github.com/ziyixi/protos/go/todofy"
 )
 
+const testAPIKey = "test-api-key"
+
+// countTokensFn is the function signature for CountTokens mock.
+type countTokensFn = func(
+	ctx context.Context, model string, contents []*genai.Content,
+) (*genai.CountTokensResponse, error)
+
+// genContentFn is the function signature for GenerateContent mock.
+type genContentFn = func(
+	ctx context.Context, model string, contents []*genai.Content,
+) (*genai.GenerateContentResponse, error)
+
 // fakeGeminiClient is a mock implementation of geminiClient for testing.
 type fakeGeminiClient struct {
-	// countTokensFunc allows per-test customization of CountTokens behavior.
-	countTokensFunc func(ctx context.Context, model string, contents []*genai.Content) (*genai.CountTokensResponse, error)
-	// generateContentFunc allows per-test customization of GenerateContent behavior.
-	generateContentFunc func(ctx context.Context, model string, contents []*genai.Content) (*genai.GenerateContentResponse, error)
+	countTokens     countTokensFn
+	generateContent genContentFn
 
 	mu                   sync.Mutex
 	countTokensCalls     int
@@ -29,28 +39,32 @@ type fakeGeminiClient struct {
 	lastContents         []*genai.Content
 }
 
-func (f *fakeGeminiClient) CountTokens(ctx context.Context, model string, contents []*genai.Content) (*genai.CountTokensResponse, error) {
+func (f *fakeGeminiClient) CountTokens(
+	ctx context.Context, model string, contents []*genai.Content,
+) (*genai.CountTokensResponse, error) {
 	f.mu.Lock()
 	f.countTokensCalls++
 	f.lastModel = model
 	f.lastContents = contents
 	f.mu.Unlock()
 
-	if f.countTokensFunc != nil {
-		return f.countTokensFunc(ctx, model, contents)
+	if f.countTokens != nil {
+		return f.countTokens(ctx, model, contents)
 	}
 	return &genai.CountTokensResponse{TotalTokens: 100}, nil
 }
 
-func (f *fakeGeminiClient) GenerateContent(ctx context.Context, model string, contents []*genai.Content) (*genai.GenerateContentResponse, error) {
+func (f *fakeGeminiClient) GenerateContent(
+	ctx context.Context, model string, contents []*genai.Content,
+) (*genai.GenerateContentResponse, error) {
 	f.mu.Lock()
 	f.generateContentCalls++
 	f.lastModel = model
 	f.lastContents = contents
 	f.mu.Unlock()
 
-	if f.generateContentFunc != nil {
-		return f.generateContentFunc(ctx, model, contents)
+	if f.generateContent != nil {
+		return f.generateContent(ctx, model, contents)
 	}
 	return &genai.GenerateContentResponse{
 		Candidates: []*genai.Candidate{
@@ -68,30 +82,58 @@ func (f *fakeGeminiClient) GenerateContent(ctx context.Context, model string, co
 	}, nil
 }
 
-func newFakeClientFactory(fake *fakeGeminiClient) func(ctx context.Context, apiKey string) (geminiClient, error) {
-	return func(ctx context.Context, apiKey string) (geminiClient, error) {
+func newFakeClientFactory(
+	fake *fakeGeminiClient,
+) func(ctx context.Context, apiKey string) (geminiClient, error) {
+	return func(
+		ctx context.Context, apiKey string,
+	) (geminiClient, error) {
 		return fake, nil
 	}
 }
 
-func newFailingClientFactory(err error) func(ctx context.Context, apiKey string) (geminiClient, error) {
-	return func(ctx context.Context, apiKey string) (geminiClient, error) {
+func newFailingClientFactory(
+	err error,
+) func(ctx context.Context, apiKey string) (geminiClient, error) {
+	return func(
+		ctx context.Context, apiKey string,
+	) (geminiClient, error) {
 		return nil, err
 	}
 }
 
-// setupTestServer creates an llmServer with a fake Gemini client and token tracker.
-func setupTestServer(fake *fakeGeminiClient, tokenLimit int32) *llmServer {
-	// Ensure API key is set for tests
+// setupTestServer creates an llmServer with a fake client and tracker.
+func setupTestServer(
+	fake *fakeGeminiClient, limit int32,
+) *llmServer {
 	originalKey := *geminiAPIKey
-	*geminiAPIKey = "test-api-key"
+	*geminiAPIKey = testAPIKey
 	_ = originalKey // will be restored in test cleanup
 
-	tracker := NewTokenTracker(24*time.Hour, tokenLimit)
+	tracker := NewTokenTracker(24*time.Hour, limit)
 	return &llmServer{
 		tracker:       tracker,
 		clientFactory: newFakeClientFactory(fake),
 	}
+}
+
+// makeSuccessResp builds a standard success GenerateContentResponse.
+func makeSuccessResp(
+	text string, tokenCount int32,
+) *genai.GenerateContentResponse {
+	resp := &genai.GenerateContentResponse{
+		Candidates: []*genai.Candidate{
+			{Content: &genai.Content{
+				Parts: []*genai.Part{{Text: text}},
+			}},
+		},
+	}
+	if tokenCount > 0 {
+		resp.UsageMetadata = &genai.GenerateContentResponseUsageMetadata{
+			TotalTokenCount: tokenCount,
+		}
+	}
+	return resp
 }
 
 // --- E2E Tests: Full Summarize Flow ---
@@ -129,18 +171,15 @@ func TestE2E_Summarize_ModelFallback(t *testing.T) {
 
 	callCount := 0
 	fake := &fakeGeminiClient{
-		generateContentFunc: func(ctx context.Context, model string, contents []*genai.Content) (*genai.GenerateContentResponse, error) {
+		generateContent: func(
+			ctx context.Context, model string,
+			contents []*genai.Content,
+		) (*genai.GenerateContentResponse, error) {
 			callCount++
-			// First model fails, second succeeds
 			if model == "gemini-2.5-flash-lite" {
 				return nil, fmt.Errorf("model overloaded")
 			}
-			return &genai.GenerateContentResponse{
-				Candidates: []*genai.Candidate{
-					{Content: &genai.Content{Parts: []*genai.Part{{Text: "Fallback summary."}}}},
-				},
-				UsageMetadata: &genai.GenerateContentResponseUsageMetadata{TotalTokenCount: 200},
-			}, nil
+			return makeSuccessResp("Fallback summary.", 200), nil
 		},
 	}
 	server := setupTestServer(fake, 3000000)
@@ -156,7 +195,6 @@ func TestE2E_Summarize_ModelFallback(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, resp)
 	assert.Equal(t, "Fallback summary.", resp.Summary)
-	// Should have fallen back to second model in priority
 	assert.Equal(t, pb.Model_MODEL_GEMINI_2_5_FLASH, resp.Model)
 }
 
@@ -165,7 +203,10 @@ func TestE2E_Summarize_AllModelsFail(t *testing.T) {
 	defer func() { *geminiAPIKey = originalKey }()
 
 	fake := &fakeGeminiClient{
-		generateContentFunc: func(ctx context.Context, model string, contents []*genai.Content) (*genai.GenerateContentResponse, error) {
+		generateContent: func(
+			ctx context.Context, model string,
+			contents []*genai.Content,
+		) (*genai.GenerateContentResponse, error) {
 			return nil, fmt.Errorf("all models fail")
 		},
 	}
@@ -203,7 +244,6 @@ func TestE2E_Summarize_UnsupportedModelFamily(t *testing.T) {
 	assert.Nil(t, resp)
 	assert.Contains(t, err.Error(), "unsupported model family")
 
-	// Should not have called the API at all
 	assert.Equal(t, 0, fake.countTokensCalls)
 	assert.Equal(t, 0, fake.generateContentCalls)
 }
@@ -231,50 +271,90 @@ func TestE2E_Summarize_SpecificModel(t *testing.T) {
 
 // --- E2E Tests: Token Limit Enforcement ---
 
-func TestE2E_Summarize_TokenLimitExceeded(t *testing.T) {
-	originalKey := *geminiAPIKey
-	defer func() { *geminiAPIKey = originalKey }()
-	originalLimit := *dailyTokenLimit
-	defer func() { *dailyTokenLimit = originalLimit }()
-	*dailyTokenLimit = 1000
-
-	fake := &fakeGeminiClient{
-		countTokensFunc: func(ctx context.Context, model string, contents []*genai.Content) (*genai.CountTokensResponse, error) {
-			return &genai.CountTokensResponse{TotalTokens: 500}, nil
+// TestE2E_Summarize_TokenLimitBoundary uses table-driven subtests
+// to cover both exceeded and exact-boundary scenarios (avoids dupl).
+func TestE2E_Summarize_TokenLimitBoundary(t *testing.T) {
+	tests := []struct {
+		name        string
+		limit       int
+		trackerLim  int32
+		tokensPerOp int32
+		text        string
+	}{
+		{
+			name:        "exceeded",
+			limit:       1000,
+			trackerLim:  1000,
+			tokensPerOp: 500,
+			text:        "Test content",
 		},
-		generateContentFunc: func(ctx context.Context, model string, contents []*genai.Content) (*genai.GenerateContentResponse, error) {
-			return &genai.GenerateContentResponse{
-				Candidates: []*genai.Candidate{
-					{Content: &genai.Content{Parts: []*genai.Part{{Text: "Summary"}}}},
+		{
+			name:        "exact_boundary",
+			limit:       500,
+			trackerLim:  500,
+			tokensPerOp: 250,
+			text:        "Test",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			originalKey := *geminiAPIKey
+			defer func() { *geminiAPIKey = originalKey }()
+			originalLimit := *dailyTokenLimit
+			defer func() { *dailyTokenLimit = originalLimit }()
+			*dailyTokenLimit = tc.limit
+
+			tokens := tc.tokensPerOp
+			fake := &fakeGeminiClient{
+				countTokens: func(
+					ctx context.Context, model string,
+					contents []*genai.Content,
+				) (*genai.CountTokensResponse, error) {
+					return &genai.CountTokensResponse{
+						TotalTokens: tokens,
+					}, nil
 				},
-				UsageMetadata: &genai.GenerateContentResponseUsageMetadata{TotalTokenCount: 500},
-			}, nil
-		},
+				generateContent: func(
+					ctx context.Context, model string,
+					contents []*genai.Content,
+				) (*genai.GenerateContentResponse, error) {
+					return makeSuccessResp("Summary", tokens), nil
+				},
+			}
+			server := setupTestServer(fake, tc.trackerLim)
+
+			req := &pb.LLMSummaryRequest{
+				ModelFamily: pb.ModelFamily_MODEL_FAMILY_GEMINI,
+				Model:       pb.Model_MODEL_GEMINI_2_5_FLASH_LITE,
+				Prompt:      "Summarize:",
+				Text:        tc.text,
+			}
+
+			// First call succeeds
+			resp, err := server.Summarize(
+				context.Background(), req,
+			)
+			require.NoError(t, err)
+			require.NotNil(t, resp)
+
+			// Second call succeeds (at limit)
+			resp, err = server.Summarize(
+				context.Background(), req,
+			)
+			require.NoError(t, err)
+			require.NotNil(t, resp)
+
+			// Third call exceeds limit
+			resp, err = server.Summarize(
+				context.Background(), req,
+			)
+			assert.Error(t, err)
+			assert.Nil(t, resp)
+			assert.Contains(t,
+				err.Error(), "failed to generate summary")
+		})
 	}
-	server := setupTestServer(fake, 1000)
-
-	req := &pb.LLMSummaryRequest{
-		ModelFamily: pb.ModelFamily_MODEL_FAMILY_GEMINI,
-		Model:       pb.Model_MODEL_GEMINI_2_5_FLASH_LITE,
-		Prompt:      "Summarize:",
-		Text:        "Test content",
-	}
-
-	// First call succeeds (500 tokens recorded)
-	resp, err := server.Summarize(context.Background(), req)
-	require.NoError(t, err)
-	require.NotNil(t, resp)
-
-	// Second call succeeds (500+500=1000 tokens, at limit)
-	resp, err = server.Summarize(context.Background(), req)
-	require.NoError(t, err)
-	require.NotNil(t, resp)
-
-	// Third call should fail (1000+500=1500 would exceed 1000 limit)
-	resp, err = server.Summarize(context.Background(), req)
-	assert.Error(t, err)
-	assert.Nil(t, resp)
-	assert.Contains(t, err.Error(), "failed to generate summary")
 }
 
 func TestE2E_Summarize_TokenLimitUnlimited(t *testing.T) {
@@ -282,8 +362,13 @@ func TestE2E_Summarize_TokenLimitUnlimited(t *testing.T) {
 	defer func() { *geminiAPIKey = originalKey }()
 
 	fake := &fakeGeminiClient{
-		countTokensFunc: func(ctx context.Context, model string, contents []*genai.Content) (*genai.CountTokensResponse, error) {
-			return &genai.CountTokensResponse{TotalTokens: 999999}, nil
+		countTokens: func(
+			ctx context.Context, model string,
+			contents []*genai.Content,
+		) (*genai.CountTokensResponse, error) {
+			return &genai.CountTokensResponse{
+				TotalTokens: 999999,
+			}, nil
 		},
 	}
 	server := setupTestServer(fake, 0) // unlimited
@@ -295,7 +380,6 @@ func TestE2E_Summarize_TokenLimitUnlimited(t *testing.T) {
 		Text:        "Test content",
 	}
 
-	// Should succeed even with huge token counts when limit is disabled
 	for i := 0; i < 5; i++ {
 		resp, err := server.Summarize(context.Background(), req)
 		require.NoError(t, err)
@@ -308,18 +392,19 @@ func TestE2E_Summarize_TokenUsageTracking(t *testing.T) {
 	defer func() { *geminiAPIKey = originalKey }()
 
 	fake := &fakeGeminiClient{
-		countTokensFunc: func(ctx context.Context, model string, contents []*genai.Content) (*genai.CountTokensResponse, error) {
-			return &genai.CountTokensResponse{TotalTokens: 100}, nil
-		},
-		generateContentFunc: func(ctx context.Context, model string, contents []*genai.Content) (*genai.GenerateContentResponse, error) {
-			return &genai.GenerateContentResponse{
-				Candidates: []*genai.Candidate{
-					{Content: &genai.Content{Parts: []*genai.Part{{Text: "Summary"}}}},
-				},
-				UsageMetadata: &genai.GenerateContentResponseUsageMetadata{
-					TotalTokenCount: 250, // input + output
-				},
+		countTokens: func(
+			ctx context.Context, model string,
+			contents []*genai.Content,
+		) (*genai.CountTokensResponse, error) {
+			return &genai.CountTokensResponse{
+				TotalTokens: 100,
 			}, nil
+		},
+		generateContent: func(
+			ctx context.Context, model string,
+			contents []*genai.Content,
+		) (*genai.GenerateContentResponse, error) {
+			return makeSuccessResp("Summary", 250), nil
 		},
 	}
 	server := setupTestServer(fake, 3000000)
@@ -331,13 +416,12 @@ func TestE2E_Summarize_TokenUsageTracking(t *testing.T) {
 		Text:        "Test content",
 	}
 
-	// Make 3 calls
 	for i := 0; i < 3; i++ {
 		_, err := server.Summarize(context.Background(), req)
 		require.NoError(t, err)
 	}
 
-	// Should have recorded 250 * 3 = 750 total tokens
+	// 250 * 3 = 750 total tokens
 	assert.Equal(t, int32(750), server.tracker.CurrentUsage())
 }
 
@@ -346,16 +430,20 @@ func TestE2E_Summarize_TokenUsageFallsBackToCountTokens(t *testing.T) {
 	defer func() { *geminiAPIKey = originalKey }()
 
 	fake := &fakeGeminiClient{
-		countTokensFunc: func(ctx context.Context, model string, contents []*genai.Content) (*genai.CountTokensResponse, error) {
-			return &genai.CountTokensResponse{TotalTokens: 300}, nil
-		},
-		generateContentFunc: func(ctx context.Context, model string, contents []*genai.Content) (*genai.GenerateContentResponse, error) {
-			// No UsageMetadata - should fall back to CountTokens value
-			return &genai.GenerateContentResponse{
-				Candidates: []*genai.Candidate{
-					{Content: &genai.Content{Parts: []*genai.Part{{Text: "Summary"}}}},
-				},
+		countTokens: func(
+			ctx context.Context, model string,
+			contents []*genai.Content,
+		) (*genai.CountTokensResponse, error) {
+			return &genai.CountTokensResponse{
+				TotalTokens: 300,
 			}, nil
+		},
+		generateContent: func(
+			ctx context.Context, model string,
+			contents []*genai.Content,
+		) (*genai.GenerateContentResponse, error) {
+			// No UsageMetadata — falls back to CountTokens
+			return makeSuccessResp("Summary", 0), nil
 		},
 	}
 	server := setupTestServer(fake, 3000000)
@@ -370,25 +458,32 @@ func TestE2E_Summarize_TokenUsageFallsBackToCountTokens(t *testing.T) {
 	_, err := server.Summarize(context.Background(), req)
 	require.NoError(t, err)
 
-	// Should use CountTokens value (300) since UsageMetadata is nil
 	assert.Equal(t, int32(300), server.tracker.CurrentUsage())
 }
 
 // --- E2E Tests: Token Truncation ---
 
-func TestE2E_Summarize_ContentTruncatedWhenOverTokenLimit(t *testing.T) {
+func TestE2E_Summarize_ContentTruncatedWhenOverTokenLimit(
+	t *testing.T,
+) {
 	originalKey := *geminiAPIKey
 	defer func() { *geminiAPIKey = originalKey }()
 
 	countCalls := 0
 	fake := &fakeGeminiClient{
-		countTokensFunc: func(ctx context.Context, model string, contents []*genai.Content) (*genai.CountTokensResponse, error) {
+		countTokens: func(
+			ctx context.Context, model string,
+			contents []*genai.Content,
+		) (*genai.CountTokensResponse, error) {
 			countCalls++
-			// First call returns over limit, subsequent calls return under
 			if countCalls == 1 {
-				return &genai.CountTokensResponse{TotalTokens: 2000000}, nil
+				return &genai.CountTokensResponse{
+					TotalTokens: 2000000,
+				}, nil
 			}
-			return &genai.CountTokensResponse{TotalTokens: 500}, nil
+			return &genai.CountTokensResponse{
+				TotalTokens: 500,
+			}, nil
 		},
 	}
 	server := setupTestServer(fake, 3000000)
@@ -405,7 +500,6 @@ func TestE2E_Summarize_ContentTruncatedWhenOverTokenLimit(t *testing.T) {
 
 	require.NoError(t, err)
 	require.NotNil(t, resp)
-	// CountTokens should have been called at least twice (initial + after truncation)
 	assert.GreaterOrEqual(t, countCalls, 2)
 }
 
@@ -415,12 +509,19 @@ func TestE2E_Summarize_CustomMaxTokens(t *testing.T) {
 
 	countCalls := 0
 	fake := &fakeGeminiClient{
-		countTokensFunc: func(ctx context.Context, model string, contents []*genai.Content) (*genai.CountTokensResponse, error) {
+		countTokens: func(
+			ctx context.Context, model string,
+			contents []*genai.Content,
+		) (*genai.CountTokensResponse, error) {
 			countCalls++
 			if countCalls == 1 {
-				return &genai.CountTokensResponse{TotalTokens: 600}, nil
+				return &genai.CountTokensResponse{
+					TotalTokens: 600,
+				}, nil
 			}
-			return &genai.CountTokensResponse{TotalTokens: 400}, nil
+			return &genai.CountTokensResponse{
+				TotalTokens: 400,
+			}, nil
 		},
 	}
 	server := setupTestServer(fake, 3000000)
@@ -430,14 +531,13 @@ func TestE2E_Summarize_CustomMaxTokens(t *testing.T) {
 		Model:       pb.Model_MODEL_GEMINI_2_5_FLASH_LITE,
 		Prompt:      "Summarize:",
 		Text:        "Test content",
-		MaxTokens:   500, // Custom low token limit
+		MaxTokens:   500,
 	}
 
 	resp, err := server.Summarize(context.Background(), req)
 
 	require.NoError(t, err)
 	require.NotNil(t, resp)
-	// Content should have been truncated because initial 600 > 500
 	assert.GreaterOrEqual(t, countCalls, 2)
 }
 
@@ -451,16 +551,19 @@ func TestE2E_Summarize_SlidingWindowExpiry(t *testing.T) {
 	*dailyTokenLimit = 1000
 
 	fake := &fakeGeminiClient{
-		countTokensFunc: func(ctx context.Context, model string, contents []*genai.Content) (*genai.CountTokensResponse, error) {
-			return &genai.CountTokensResponse{TotalTokens: 400}, nil
-		},
-		generateContentFunc: func(ctx context.Context, model string, contents []*genai.Content) (*genai.GenerateContentResponse, error) {
-			return &genai.GenerateContentResponse{
-				Candidates: []*genai.Candidate{
-					{Content: &genai.Content{Parts: []*genai.Part{{Text: "Summary"}}}},
-				},
-				UsageMetadata: &genai.GenerateContentResponseUsageMetadata{TotalTokenCount: 400},
+		countTokens: func(
+			ctx context.Context, model string,
+			contents []*genai.Content,
+		) (*genai.CountTokensResponse, error) {
+			return &genai.CountTokensResponse{
+				TotalTokens: 400,
 			}, nil
+		},
+		generateContent: func(
+			ctx context.Context, model string,
+			contents []*genai.Content,
+		) (*genai.GenerateContentResponse, error) {
+			return makeSuccessResp("Summary", 400), nil
 		},
 	}
 
@@ -469,7 +572,7 @@ func TestE2E_Summarize_SlidingWindowExpiry(t *testing.T) {
 		tracker:       tracker,
 		clientFactory: newFakeClientFactory(fake),
 	}
-	*geminiAPIKey = "test-api-key"
+	*geminiAPIKey = testAPIKey
 
 	now := time.Now()
 
@@ -480,8 +583,10 @@ func TestE2E_Summarize_SlidingWindowExpiry(t *testing.T) {
 		Text:        "Test content",
 	}
 
-	// Simulate old usage (25 hours ago) that should expire
-	tracker.timeFunc = func() time.Time { return now.Add(-25 * time.Hour) }
+	// Simulate old usage (25h ago) that should expire
+	tracker.timeFunc = func() time.Time {
+		return now.Add(-25 * time.Hour)
+	}
 	tracker.Record(800)
 
 	// Should succeed because old record is outside window
@@ -496,12 +601,14 @@ func TestE2E_Summarize_SlidingWindowExpiry(t *testing.T) {
 func TestE2E_Summarize_ClientCreationFails(t *testing.T) {
 	originalKey := *geminiAPIKey
 	defer func() { *geminiAPIKey = originalKey }()
-	*geminiAPIKey = "test-api-key"
+	*geminiAPIKey = testAPIKey
 
 	tracker := NewTokenTracker(24*time.Hour, 3000000)
 	server := &llmServer{
-		tracker:       tracker,
-		clientFactory: newFailingClientFactory(fmt.Errorf("connection refused")),
+		tracker: tracker,
+		clientFactory: newFailingClientFactory(
+			fmt.Errorf("connection refused"),
+		),
 	}
 
 	req := &pb.LLMSummaryRequest{
@@ -522,7 +629,10 @@ func TestE2E_Summarize_CountTokensFails(t *testing.T) {
 	defer func() { *geminiAPIKey = originalKey }()
 
 	fake := &fakeGeminiClient{
-		countTokensFunc: func(ctx context.Context, model string, contents []*genai.Content) (*genai.CountTokensResponse, error) {
+		countTokens: func(
+			ctx context.Context, model string,
+			contents []*genai.Content,
+		) (*genai.CountTokensResponse, error) {
 			return nil, fmt.Errorf("quota exceeded")
 		},
 	}
@@ -546,7 +656,10 @@ func TestE2E_Summarize_EmptyResponse(t *testing.T) {
 	defer func() { *geminiAPIKey = originalKey }()
 
 	fake := &fakeGeminiClient{
-		generateContentFunc: func(ctx context.Context, model string, contents []*genai.Content) (*genai.GenerateContentResponse, error) {
+		generateContent: func(
+			ctx context.Context, model string,
+			contents []*genai.Content,
+		) (*genai.GenerateContentResponse, error) {
 			return &genai.GenerateContentResponse{
 				Candidates: []*genai.Candidate{},
 			}, nil
@@ -571,7 +684,10 @@ func TestE2E_Summarize_NoCandidateContent(t *testing.T) {
 	defer func() { *geminiAPIKey = originalKey }()
 
 	fake := &fakeGeminiClient{
-		generateContentFunc: func(ctx context.Context, model string, contents []*genai.Content) (*genai.GenerateContentResponse, error) {
+		generateContent: func(
+			ctx context.Context, model string,
+			contents []*genai.Content,
+		) (*genai.GenerateContentResponse, error) {
 			return &genai.GenerateContentResponse{
 				Candidates: []*genai.Candidate{
 					{Content: nil},
@@ -598,10 +714,15 @@ func TestE2E_Summarize_NoContentParts(t *testing.T) {
 	defer func() { *geminiAPIKey = originalKey }()
 
 	fake := &fakeGeminiClient{
-		generateContentFunc: func(ctx context.Context, model string, contents []*genai.Content) (*genai.GenerateContentResponse, error) {
+		generateContent: func(
+			ctx context.Context, model string,
+			contents []*genai.Content,
+		) (*genai.GenerateContentResponse, error) {
 			return &genai.GenerateContentResponse{
 				Candidates: []*genai.Candidate{
-					{Content: &genai.Content{Parts: []*genai.Part{}}},
+					{Content: &genai.Content{
+						Parts: []*genai.Part{},
+					}},
 				},
 			}, nil
 		},
@@ -646,7 +767,6 @@ func TestE2E_Summarize_NoAPIKey(t *testing.T) {
 	assert.Nil(t, resp)
 	assert.Contains(t, err.Error(), "failed to generate summary")
 
-	// Should not have called the API
 	assert.Equal(t, 0, fake.countTokensCalls)
 	assert.Equal(t, 0, fake.generateContentCalls)
 }
@@ -659,14 +779,14 @@ func TestE2E_Summarize_MultipleSequentialRequests(t *testing.T) {
 
 	callNum := 0
 	fake := &fakeGeminiClient{
-		generateContentFunc: func(ctx context.Context, model string, contents []*genai.Content) (*genai.GenerateContentResponse, error) {
+		generateContent: func(
+			ctx context.Context, model string,
+			contents []*genai.Content,
+		) (*genai.GenerateContentResponse, error) {
 			callNum++
-			return &genai.GenerateContentResponse{
-				Candidates: []*genai.Candidate{
-					{Content: &genai.Content{Parts: []*genai.Part{{Text: fmt.Sprintf("Summary %d", callNum)}}}},
-				},
-				UsageMetadata: &genai.GenerateContentResponseUsageMetadata{TotalTokenCount: 100},
-			}, nil
+			return makeSuccessResp(
+				fmt.Sprintf("Summary %d", callNum), 100,
+			), nil
 		},
 	}
 	server := setupTestServer(fake, 3000000)
@@ -681,59 +801,12 @@ func TestE2E_Summarize_MultipleSequentialRequests(t *testing.T) {
 
 		resp, err := server.Summarize(context.Background(), req)
 		require.NoError(t, err)
-		assert.Equal(t, fmt.Sprintf("Summary %d", i), resp.Summary)
+		assert.Equal(t,
+			fmt.Sprintf("Summary %d", i), resp.Summary)
 	}
 
 	// 5 requests * 100 tokens = 500 total
 	assert.Equal(t, int32(500), server.tracker.CurrentUsage())
-}
-
-// --- E2E Tests: Token Limit Boundary ---
-
-func TestE2E_Summarize_TokenLimitExactBoundary(t *testing.T) {
-	originalKey := *geminiAPIKey
-	defer func() { *geminiAPIKey = originalKey }()
-	originalLimit := *dailyTokenLimit
-	defer func() { *dailyTokenLimit = originalLimit }()
-	*dailyTokenLimit = 500
-
-	fake := &fakeGeminiClient{
-		countTokensFunc: func(ctx context.Context, model string, contents []*genai.Content) (*genai.CountTokensResponse, error) {
-			return &genai.CountTokensResponse{TotalTokens: 250}, nil
-		},
-		generateContentFunc: func(ctx context.Context, model string, contents []*genai.Content) (*genai.GenerateContentResponse, error) {
-			return &genai.GenerateContentResponse{
-				Candidates: []*genai.Candidate{
-					{Content: &genai.Content{Parts: []*genai.Part{{Text: "Summary"}}}},
-				},
-				UsageMetadata: &genai.GenerateContentResponseUsageMetadata{TotalTokenCount: 250},
-			}, nil
-		},
-	}
-	server := setupTestServer(fake, 500)
-
-	req := &pb.LLMSummaryRequest{
-		ModelFamily: pb.ModelFamily_MODEL_FAMILY_GEMINI,
-		Model:       pb.Model_MODEL_GEMINI_2_5_FLASH_LITE,
-		Prompt:      "Summarize:",
-		Text:        "Test",
-	}
-
-	// First call: 250 tokens, within limit
-	resp, err := server.Summarize(context.Background(), req)
-	require.NoError(t, err)
-	require.NotNil(t, resp)
-
-	// Second call: 250 + 250 = 500, exactly at limit, should pass
-	resp, err = server.Summarize(context.Background(), req)
-	require.NoError(t, err)
-	require.NotNil(t, resp)
-
-	// Third call: 500 + 250 = 750, exceeds 500 limit
-	resp, err = server.Summarize(context.Background(), req)
-	assert.Error(t, err)
-	assert.Nil(t, resp)
-	assert.Contains(t, err.Error(), "failed to generate summary")
 }
 
 // --- E2E Tests: Prompt + Text Concatenation ---
@@ -744,11 +817,16 @@ func TestE2E_Summarize_PromptAndTextConcatenated(t *testing.T) {
 
 	var capturedText string
 	fake := &fakeGeminiClient{
-		countTokensFunc: func(ctx context.Context, model string, contents []*genai.Content) (*genai.CountTokensResponse, error) {
+		countTokens: func(
+			ctx context.Context, model string,
+			contents []*genai.Content,
+		) (*genai.CountTokensResponse, error) {
 			if len(contents) > 0 && len(contents[0].Parts) > 0 {
 				capturedText = contents[0].Parts[0].Text
 			}
-			return &genai.CountTokensResponse{TotalTokens: 100}, nil
+			return &genai.CountTokensResponse{
+				TotalTokens: 100,
+			}, nil
 		},
 	}
 	server := setupTestServer(fake, 3000000)
@@ -763,7 +841,8 @@ func TestE2E_Summarize_PromptAndTextConcatenated(t *testing.T) {
 	_, err := server.Summarize(context.Background(), req)
 	require.NoError(t, err)
 
-	assert.Equal(t, "Please summarize:\nThis is the email body.", capturedText)
+	assert.Equal(t,
+		"Please summarize:\nThis is the email body.", capturedText)
 }
 
 // --- E2E Tests: Token Tracking Not Recorded on Failure ---
@@ -773,7 +852,10 @@ func TestE2E_Summarize_TokensNotRecordedOnFailure(t *testing.T) {
 	defer func() { *geminiAPIKey = originalKey }()
 
 	fake := &fakeGeminiClient{
-		generateContentFunc: func(ctx context.Context, model string, contents []*genai.Content) (*genai.GenerateContentResponse, error) {
+		generateContent: func(
+			ctx context.Context, model string,
+			contents []*genai.Content,
+		) (*genai.GenerateContentResponse, error) {
 			return nil, fmt.Errorf("API error")
 		},
 	}

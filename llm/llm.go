@@ -29,7 +29,10 @@ func initLogger() {
 var (
 	port            = flag.Int("port", 50051, "The server port of the LLM service")
 	geminiAPIKey    = flag.String("gemini-api-key", "", "The API key for Gemini")
-	dailyTokenLimit = flag.Int("daily-token-limit", 3000000, "Maximum tokens allowed per 24h sliding window (0 = unlimited)")
+	dailyTokenLimit = flag.Int(
+		"daily-token-limit", 3000000,
+		"Maximum tokens allowed per 24h sliding window (0 = unlimited)",
+	)
 )
 
 type llmServer struct {
@@ -40,8 +43,12 @@ type llmServer struct {
 
 // geminiClient abstracts the Gemini API for testing.
 type geminiClient interface {
-	CountTokens(ctx context.Context, model string, contents []*genai.Content) (*genai.CountTokensResponse, error)
-	GenerateContent(ctx context.Context, model string, contents []*genai.Content) (*genai.GenerateContentResponse, error)
+	CountTokens(
+		ctx context.Context, model string, contents []*genai.Content,
+	) (*genai.CountTokensResponse, error)
+	GenerateContent(
+		ctx context.Context, model string, contents []*genai.Content,
+	) (*genai.GenerateContentResponse, error)
 }
 
 // realGeminiClient wraps the actual genai.Client.
@@ -49,11 +56,15 @@ type realGeminiClient struct {
 	client *genai.Client
 }
 
-func (c *realGeminiClient) CountTokens(ctx context.Context, model string, contents []*genai.Content) (*genai.CountTokensResponse, error) {
+func (c *realGeminiClient) CountTokens(
+	ctx context.Context, model string, contents []*genai.Content,
+) (*genai.CountTokensResponse, error) {
 	return c.client.Models.CountTokens(ctx, model, contents, nil)
 }
 
-func (c *realGeminiClient) GenerateContent(ctx context.Context, model string, contents []*genai.Content) (*genai.GenerateContentResponse, error) {
+func (c *realGeminiClient) GenerateContent(
+	ctx context.Context, model string, contents []*genai.Content,
+) (*genai.GenerateContentResponse, error) {
 	return c.client.Models.GenerateContent(ctx, model, contents, nil)
 }
 

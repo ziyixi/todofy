@@ -1,6 +1,6 @@
 # Todofy Makefile
 
-.PHONY: test test-coverage test-verbose test-integration build clean lint security help
+.PHONY: test test-coverage test-verbose test-integration build clean lint security help install-hooks
 
 # Default target
 help: ## Show this help message
@@ -55,9 +55,13 @@ clean: ## Clean build artifacts
 	go clean -testcache
 
 # Development
-dev-setup: ## Install development dependencies
+install-hooks: ## Install git pre-commit hooks for linting
+	git config core.hooksPath .githooks
+	@echo "Git hooks installed. Pre-commit lint check is now active."
+
+dev-setup: install-hooks ## Install development dependencies and hooks
 	go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
-	go install github.com/securecodewarrior/gosec/v2/cmd/gosec@latest
+	go install github.com/securego/gosec/v2/cmd/gosec@latest
 
 # CI targets (used by GitHub Actions)
 ci-test: test-coverage lint security ## Run all CI checks
