@@ -27,12 +27,14 @@ func initLogger() {
 }
 
 var (
-	port         = flag.Int("port", 50051, "The server port of the LLM service")
-	geminiAPIKey = flag.String("gemini-api-key", "", "The API key for Gemini")
+	port             = flag.Int("port", 50051, "The server port of the LLM service")
+	geminiAPIKey     = flag.String("gemini-api-key", "", "The API key for Gemini")
+	dailyTokenLimit  = flag.Int("daily-token-limit", 3000000, "Maximum tokens allowed per 24h sliding window (0 = unlimited)")
 )
 
 type llmServer struct {
 	pb.LLMSummaryServiceServer
+	tracker *TokenTracker
 }
 
 func (s *llmServer) Summarize(ctx context.Context, req *pb.LLMSummaryRequest) (*pb.LLMSummaryResponse, error) {
@@ -134,6 +136,14 @@ func (s *llmServer) summaryByGemini(ctx context.Context, prompt, content string,
 		}
 	}
 
+	// Check daily token limit before making the API call
+	if s.tracker != nil {
+		if msg := s.tracker.CheckLimit(respToken.TotalTokens); msg != "" {
+			return "", status.Errorf(codes.ResourceExhausted, "%s: current usage %d, request %d, limit %d",
+				msg, s.tracker.CurrentUsage(), respToken.TotalTokens, *dailyTokenLimit)
+		}
+	}
+
 	resp, err := client.Models.GenerateContent(ctx, llmModelName, contents, nil)
 	if err != nil {
 		return "", fmt.Errorf("failed to generate content: %v", err)
@@ -147,6 +157,17 @@ func (s *llmServer) summaryByGemini(ctx context.Context, prompt, content string,
 		return "", fmt.Errorf("no content parts generated")
 	}
 
+	// Record token usage after successful generation
+	if s.tracker != nil {
+		totalTokens := respToken.TotalTokens
+		if resp.UsageMetadata != nil {
+			totalTokens = resp.UsageMetadata.TotalTokenCount
+		}
+		s.tracker.Record(totalTokens)
+		log.Infof("Token usage recorded: %d tokens, daily total: %d/%d",
+			totalTokens, s.tracker.CurrentUsage(), *dailyTokenLimit)
+	}
+
 	return resp.Candidates[0].Content.Parts[0].Text, nil
 }
 
@@ -154,9 +175,12 @@ func main() {
 	initLogger()
 	flag.Parse()
 
+	tracker := NewTokenTracker(24*time.Hour, int32(*dailyTokenLimit))
+	log.Infof("Daily token limit: %d (0 = unlimited)", *dailyTokenLimit)
+
 	err := utils.StartGRPCServer[pb.LLMSummaryServiceServer](
 		*port,
-		&llmServer{},
+		&llmServer{tracker: tracker},
 		pb.RegisterLLMSummaryServiceServer,
 	)
 	if err != nil {
