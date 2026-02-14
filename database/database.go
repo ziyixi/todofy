@@ -45,6 +45,7 @@ type DatabaseEntry struct {
 	MaxTokens   int32
 	Text        string
 	Summary     string
+	HashId      string `gorm:"index"`
 }
 
 func (s *databaseServer) CreateIfNotExist(
@@ -77,6 +78,7 @@ func (s *databaseServer) Write(_ context.Context, req *pb.WriteRequest) (*pb.Wri
 		MaxTokens:   req.Schema.MaxTokens,
 		Text:        req.Schema.Text,
 		Summary:     req.Schema.Summary,
+		HashId:      req.Schema.HashId,
 	}
 	if s.db == nil {
 		return nil, status.Errorf(codes.FailedPrecondition, "database not initialized")
@@ -116,6 +118,7 @@ func (s *databaseServer) QueryRecent(_ context.Context, req *pb.QueryRecentReque
 			MaxTokens:   entry.MaxTokens,
 			Text:        entry.Text,
 			Summary:     entry.Summary,
+			HashId:      entry.HashId,
 			CreatedAt:   timestamppb.New(entry.CreatedAt),
 			UpdatedAt:   timestamppb.New(entry.UpdatedAt),
 		}
@@ -124,6 +127,39 @@ func (s *databaseServer) QueryRecent(_ context.Context, req *pb.QueryRecentReque
 		from.Format(time.RFC3339), now.Format(time.RFC3339))
 	return &pb.QueryRecentResponse{
 		Entries: schemas,
+	}, nil
+}
+
+// CheckExist looks up an entry by hash_id and returns it if found.
+func (s *databaseServer) CheckExist(
+	_ context.Context, req *pb.CheckExistRequest,
+) (*pb.CheckExistResponse, error) {
+	if s.db == nil {
+		return nil, status.Errorf(codes.FailedPrecondition, "database not initialized")
+	}
+	if req.HashId == "" {
+		return nil, status.Errorf(codes.InvalidArgument, "hash_id is required")
+	}
+
+	var entry DatabaseEntry
+	result := s.db.Where("hash_id = ?", req.HashId).First(&entry)
+	if result.Error != nil {
+		// Not found → return empty response (no error)
+		return &pb.CheckExistResponse{}, nil
+	}
+
+	return &pb.CheckExistResponse{
+		Entry: &pb.DataBaseSchema{
+			ModelFamily: pb.ModelFamily(entry.ModelFamily),
+			Model:       pb.Model(entry.LLMModel),
+			Prompt:      entry.Prompt,
+			MaxTokens:   entry.MaxTokens,
+			Text:        entry.Text,
+			Summary:     entry.Summary,
+			HashId:      entry.HashId,
+			CreatedAt:   timestamppb.New(entry.CreatedAt),
+			UpdatedAt:   timestamppb.New(entry.UpdatedAt),
+		},
 	}, nil
 }
 

@@ -72,6 +72,19 @@ func (m *MockDataBaseServiceClient) Write(ctx context.Context, in *pb.WriteReque
 	return args.Get(0).(*pb.WriteResponse), args.Error(1)
 }
 
+// CheckExist checks whether an entry with the given hash_id exists
+func (m *MockDataBaseServiceClient) CheckExist(
+	ctx context.Context,
+	in *pb.CheckExistRequest,
+	opts ...grpc.CallOption,
+) (*pb.CheckExistResponse, error) {
+	args := m.Called(ctx, in, opts)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*pb.CheckExistResponse), args.Error(1)
+}
+
 // QueryRecent retrieves recent database entries using the mock service
 func (m *MockDataBaseServiceClient) QueryRecent(
 	ctx context.Context,

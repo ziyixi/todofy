@@ -294,6 +294,110 @@ func TestDatabaseEntry_Model(t *testing.T) {
 	})
 }
 
+func TestDatabaseServer_CheckExist(t *testing.T) {
+	t.Run("cache hit: entry found by hash_id", func(t *testing.T) {
+		server := setupTestDatabase(t)
+
+		// Insert an entry with a known hash_id
+		entry := DatabaseEntry{
+			ModelFamily: int32(pb.ModelFamily_MODEL_FAMILY_GEMINI),
+			LLMModel:    int32(pb.Model_MODEL_GEMINI_2_5_FLASH),
+			Prompt:      "test prompt",
+			MaxTokens:   1024,
+			Text:        "test text",
+			Summary:     "cached summary",
+			HashId:      "abc123hash",
+		}
+		require.NoError(t, server.db.Create(&entry).Error)
+
+		req := &pb.CheckExistRequest{
+			Type:   pb.DatabaseType_DATABASE_TYPE_SQLITE,
+			HashId: "abc123hash",
+		}
+		resp, err := server.CheckExist(context.Background(), req)
+
+		assert.NoError(t, err)
+		assert.NotNil(t, resp)
+		assert.NotNil(t, resp.Entry)
+		assert.Equal(t, "cached summary", resp.Entry.Summary)
+		assert.Equal(t, "test prompt", resp.Entry.Prompt)
+		assert.Equal(t, "test text", resp.Entry.Text)
+		assert.Equal(t, "abc123hash", resp.Entry.HashId)
+		assert.Equal(t, pb.ModelFamily_MODEL_FAMILY_GEMINI, resp.Entry.ModelFamily)
+		assert.Equal(t, pb.Model_MODEL_GEMINI_2_5_FLASH, resp.Entry.Model)
+	})
+
+	t.Run("cache miss: no entry for hash_id", func(t *testing.T) {
+		server := setupTestDatabase(t)
+
+		req := &pb.CheckExistRequest{
+			Type:   pb.DatabaseType_DATABASE_TYPE_SQLITE,
+			HashId: "nonexistent_hash",
+		}
+		resp, err := server.CheckExist(context.Background(), req)
+
+		assert.NoError(t, err)
+		assert.NotNil(t, resp)
+		assert.Nil(t, resp.Entry) // No entry found
+	})
+
+	t.Run("empty hash_id returns error", func(t *testing.T) {
+		server := setupTestDatabase(t)
+
+		req := &pb.CheckExistRequest{
+			Type:   pb.DatabaseType_DATABASE_TYPE_SQLITE,
+			HashId: "",
+		}
+		resp, err := server.CheckExist(context.Background(), req)
+
+		assert.Error(t, err)
+		assert.Nil(t, resp)
+		assert.Contains(t, err.Error(), "hash_id is required")
+	})
+
+	t.Run("database not initialized", func(t *testing.T) {
+		server := &databaseServer{} // No database
+
+		req := &pb.CheckExistRequest{
+			Type:   pb.DatabaseType_DATABASE_TYPE_SQLITE,
+			HashId: "some_hash",
+		}
+		resp, err := server.CheckExist(context.Background(), req)
+
+		assert.Error(t, err)
+		assert.Nil(t, resp)
+		assert.Contains(t, err.Error(), "database not initialized")
+	})
+
+	t.Run("returns first entry when multiple exist with same hash", func(t *testing.T) {
+		server := setupTestDatabase(t)
+
+		// Insert two entries with the same hash_id
+		for i, summary := range []string{"first", "second"} {
+			entry := DatabaseEntry{
+				ModelFamily: int32(pb.ModelFamily_MODEL_FAMILY_GEMINI),
+				LLMModel:    int32(pb.Model_MODEL_GEMINI_2_5_FLASH),
+				Prompt:      "prompt",
+				Text:        "text",
+				Summary:     summary,
+				HashId:      "dup_hash",
+				Model:       gorm.Model{ID: uint(i + 1)},
+			}
+			require.NoError(t, server.db.Create(&entry).Error)
+		}
+
+		req := &pb.CheckExistRequest{
+			Type:   pb.DatabaseType_DATABASE_TYPE_SQLITE,
+			HashId: "dup_hash",
+		}
+		resp, err := server.CheckExist(context.Background(), req)
+
+		assert.NoError(t, err)
+		assert.NotNil(t, resp.Entry)
+		assert.Equal(t, "first", resp.Entry.Summary)
+	})
+}
+
 func TestDatabaseIntegration(t *testing.T) {
 	t.Run("full workflow: create, write, query", func(t *testing.T) {
 		server := &databaseServer{}
@@ -307,7 +411,7 @@ func TestDatabaseIntegration(t *testing.T) {
 		_, err := server.CreateIfNotExist(context.Background(), createReq)
 		require.NoError(t, err)
 
-		// Step 2: Write data
+		// Step 2: Write data with hash_id
 		writeReq := &pb.WriteRequest{
 			Schema: &pb.DataBaseSchema{
 				ModelFamily: pb.ModelFamily_MODEL_FAMILY_GEMINI,
@@ -316,6 +420,7 @@ func TestDatabaseIntegration(t *testing.T) {
 				MaxTokens:   2048,
 				Text:        "Integration test text",
 				Summary:     "Integration test summary",
+				HashId:      "integration_hash_123",
 			},
 		}
 
@@ -339,8 +444,28 @@ func TestDatabaseIntegration(t *testing.T) {
 		assert.Equal(t, int32(2048), entry.MaxTokens)
 		assert.Equal(t, "Integration test text", entry.Text)
 		assert.Equal(t, "Integration test summary", entry.Summary)
+		assert.Equal(t, "integration_hash_123", entry.HashId)
 		assert.NotNil(t, entry.CreatedAt)
 		assert.NotNil(t, entry.UpdatedAt)
+
+		// Step 4: CheckExist with the same hash_id
+		checkReq := &pb.CheckExistRequest{
+			Type:   pb.DatabaseType_DATABASE_TYPE_SQLITE,
+			HashId: "integration_hash_123",
+		}
+		checkResp, err := server.CheckExist(context.Background(), checkReq)
+		require.NoError(t, err)
+		assert.NotNil(t, checkResp.Entry)
+		assert.Equal(t, "Integration test summary", checkResp.Entry.Summary)
+
+		// Step 5: CheckExist with a different hash_id returns nil entry
+		checkReq2 := &pb.CheckExistRequest{
+			Type:   pb.DatabaseType_DATABASE_TYPE_SQLITE,
+			HashId: "nonexistent_hash",
+		}
+		checkResp2, err := server.CheckExist(context.Background(), checkReq2)
+		require.NoError(t, err)
+		assert.Nil(t, checkResp2.Entry)
 	})
 }
 
