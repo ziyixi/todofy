@@ -38,22 +38,29 @@ const (
 	All the emails previous summarized by gemini API are as follows:`
 
 	DefaultPromptToRecommendTopTasks string = `Below is a list of task summaries I received in the last 24 hours. ` +
-		`Based on these tasks, please pick exactly THREE that are the most important and require my immediate attention. ` +
-		`For each of the three tasks, provide a title and a reason.
+		`Based on these tasks, please pick exactly %d that are the most important and require my immediate attention. ` +
+		`For each task, provide a title and a reason.
 
-Rank them from most important (#1) to least important (#3).
+Rank them from most important (#1) to least important (#%d).
 
 IMPORTANT: You MUST respond with ONLY a valid JSON array, no other text before or after.
 IMPORTANT: Each element must have exactly these fields:
-  "rank" (integer 1-3), "title" (string, one-line), "reason" (string, 1-2 sentences).
-IMPORTANT: Output exactly 3 items. If there are fewer than 3 tasks, re-emphasize the same task and note it.
+  "rank" (integer 1-%d), "title" (string, one-line), "reason" (string, 1-2 sentences).
+IMPORTANT: Output exactly %d items. If there are fewer tasks, re-emphasize the same task and note it.
 IMPORTANT: Please use Chinese as response language for title and reason.
 IMPORTANT: Keep each reason concise.
 
-Example output format:
+Example output format (for 3 items):
 [{"rank":1,"title":"任务标题","reason":"原因说明"},
 {"rank":2,"title":"任务标题","reason":"原因说明"},
 {"rank":3,"title":"任务标题","reason":"原因说明"}]
+
+Example output format (for 5 items):
+[{"rank":1,"title":"任务标题","reason":"原因说明"},
+{"rank":2,"title":"任务标题","reason":"原因说明"},
+{"rank":3,"title":"任务标题","reason":"原因说明"},
+{"rank":4,"title":"任务标题","reason":"原因说明"},
+{"rank":5,"title":"任务标题","reason":"原因说明"}]
 
 The task summaries from the last 24 hours are as follows:`
 )

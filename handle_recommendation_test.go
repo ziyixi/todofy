@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -295,9 +296,13 @@ func TestHandleRecommendation_VerifiesPromptSent(t *testing.T) {
 			},
 		}, nil)
 
+	expectedPrompt := fmt.Sprintf(
+		utils.DefaultPromptToRecommendTopTasks,
+		DefaultTopN, DefaultTopN, DefaultTopN, DefaultTopN,
+	)
 	mockLLM := new(mocks.MockLLMSummaryServiceClient)
 	mockLLM.On("Summarize", mock.Anything, mock.MatchedBy(func(req *pb.LLMSummaryRequest) bool {
-		return req.Prompt == utils.DefaultPromptToRecommendTopTasks &&
+		return req.Prompt == expectedPrompt &&
 			req.ModelFamily == pb.ModelFamily_MODEL_FAMILY_GEMINI &&
 			// The text should contain both summaries
 			assert.Contains(t, req.Text, "summary1") &&
@@ -378,4 +383,97 @@ func TestHandleRecommendation_EmptyStringFromLLM(t *testing.T) {
 	require.Len(t, resp.Tasks, 1)
 	assert.Equal(t, 1, resp.Tasks[0].Rank)
 	assert.Equal(t, "recommendation", resp.Tasks[0].Title)
+}
+
+func TestHandleRecommendation_TopParamCustomValue(t *testing.T) {
+	llmJSON := `[{"rank":1,"title":"T1","reason":"R1"},` +
+		`{"rank":2,"title":"T2","reason":"R2"},` +
+		`{"rank":3,"title":"T3","reason":"R3"},` +
+		`{"rank":4,"title":"T4","reason":"R4"},` +
+		`{"rank":5,"title":"T5","reason":"R5"}]`
+
+	mockDB := new(mocks.MockDataBaseServiceClient)
+	mockDB.On("QueryRecent", mock.Anything, mock.Anything, mock.Anything).
+		Return(&pb.QueryRecentResponse{
+			Entries: []*pb.DataBaseSchema{{Summary: "a"}},
+		}, nil)
+
+	expectedPrompt := fmt.Sprintf(
+		utils.DefaultPromptToRecommendTopTasks, 5, 5, 5, 5,
+	)
+	mockLLM := new(mocks.MockLLMSummaryServiceClient)
+	mockLLM.On("Summarize", mock.Anything,
+		mock.MatchedBy(func(req *pb.LLMSummaryRequest) bool {
+			return req.Prompt == expectedPrompt
+		}), mock.Anything).
+		Return(&pb.LLMSummaryResponse{
+			Summary: llmJSON,
+			Model:   pb.Model_MODEL_GEMINI_2_5_FLASH,
+		}, nil)
+
+	w, router := setupRecommendationTest(mockDB, mockLLM)
+	req, _ := http.NewRequest(
+		http.MethodGet, "/api/recommendation?top=5", nil,
+	)
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	var resp RecommendationResponse
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	require.Len(t, resp.Tasks, 5)
+	assert.Equal(t, 5, resp.Tasks[4].Rank)
+	mockLLM.AssertExpectations(t)
+}
+
+func TestHandleRecommendation_TopParamInvalid(t *testing.T) {
+	tests := []struct {
+		name  string
+		query string
+	}{
+		{"zero", "?top=0"},
+		{"negative", "?top=-1"},
+		{"exceeds max", "?top=11"},
+		{"non-numeric", "?top=abc"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mockDB := new(mocks.MockDataBaseServiceClient)
+			w, router := setupRecommendationTest(mockDB, nil)
+			req, _ := http.NewRequest(
+				http.MethodGet,
+				"/api/recommendation"+tt.query,
+				nil,
+			)
+			router.ServeHTTP(w, req)
+
+			assert.Equal(t, http.StatusBadRequest, w.Code)
+			assert.Contains(t, w.Body.String(), "invalid top")
+		})
+	}
+}
+
+func TestHandleRecommendation_TopParamBoundary(t *testing.T) {
+	// top=1 and top=10 should both be accepted
+	for _, topVal := range []string{"1", "10"} {
+		t.Run("top="+topVal, func(t *testing.T) {
+			mockDB := new(mocks.MockDataBaseServiceClient)
+			mockDB.On("QueryRecent",
+				mock.Anything, mock.Anything, mock.Anything).
+				Return(&pb.QueryRecentResponse{
+					Entries: []*pb.DataBaseSchema{},
+				}, nil)
+
+			w, router := setupRecommendationTest(mockDB, nil)
+			req, _ := http.NewRequest(
+				http.MethodGet,
+				"/api/recommendation?top="+topVal,
+				nil,
+			)
+			router.ServeHTTP(w, req)
+
+			assert.Equal(t, http.StatusOK, w.Code)
+		})
+	}
 }

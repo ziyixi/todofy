@@ -2,7 +2,9 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -14,6 +16,8 @@ import (
 
 const (
 	TimeDurationToRecommendation = 24 * time.Hour
+	DefaultTopN                  = 3
+	MaxTopN                      = 10
 )
 
 // TaskRecommendation represents a single recommended task entry.
@@ -31,10 +35,25 @@ type RecommendationResponse struct {
 }
 
 // HandleRecommendation queries recent tasks from the last 24 hours,
-// asks the LLM to pick the top-3 most important ones, and returns
+// asks the LLM to pick the top-N most important ones, and returns
 // the result as a structured JSON array for consumption by other apps.
+// Optional query parameter: ?top=N (default 3, max 10).
 func HandleRecommendation(c *gin.Context) {
 	clients := c.MustGet(utils.KeyGRPCClients).(ClientProvider)
+
+	// Parse optional "top" query parameter
+	topN := DefaultTopN
+	if topStr := c.Query("top"); topStr != "" {
+		if n, err := strconv.Atoi(topStr); err == nil && n >= 1 && n <= MaxTopN {
+			topN = n
+		} else {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"error": fmt.Sprintf(
+					"invalid top parameter: must be 1-%d", MaxTopN),
+			})
+			return
+		}
+	}
 
 	// Query recent tasks from the database
 	databaseClient := clients.GetClient("database").(pb.DataBaseServiceClient)
@@ -64,9 +83,13 @@ func HandleRecommendation(c *gin.Context) {
 	}
 
 	// Generate recommendation via LLM
+	prompt := fmt.Sprintf(
+		utils.DefaultPromptToRecommendTopTasks,
+		topN, topN, topN, topN,
+	)
 	recReq := &pb.LLMSummaryRequest{
 		ModelFamily: pb.ModelFamily_MODEL_FAMILY_GEMINI,
-		Prompt:      utils.DefaultPromptToRecommendTopTasks,
+		Prompt:      prompt,
 		Text:        content,
 	}
 	llmClient := clients.GetClient("llm").(pb.LLMSummaryServiceClient)
