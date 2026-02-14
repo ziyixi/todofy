@@ -38,7 +38,7 @@ const (
 	All the emails previous summarized by gemini API are as follows:`
 
 	DefaultPromptToRecommendTopTasks string = `Below is a list of task summaries I received in the last 24 hours. ` +
-		`Based on these tasks, please pick exactly %d that are the most important and require my immediate attention. ` +
+		`Based on these tasks, please pick exactly %d that are the most important and require my attention TODAY. ` +
 		`For each task, provide a title and a reason.
 
 Rank them from most important (#1) to least important (#%d).
@@ -49,6 +49,12 @@ IMPORTANT: Each element must have exactly these fields:
 IMPORTANT: Output exactly %d items. If there are fewer tasks, re-emphasize the same task and note it.
 IMPORTANT: Please use Chinese as response language for title and reason.
 IMPORTANT: Keep each reason concise.
+IMPORTANT: Focus on tasks that require ACTION from me today or in the near future.
+  Ignore promotional emails, coupons, marketing offers, expired or time-bound deals,
+  routine notifications (e.g. charging station check-ins, subscription renewals),
+  and anything that does not need a concrete action from me.
+  Prioritize: security alerts, deadlines, financial/tax documents,
+  work-related items, and things with real consequences if ignored.
 
 Example output format (for 3 items):
 [{"rank":1,"title":"任务标题","reason":"原因说明"},
