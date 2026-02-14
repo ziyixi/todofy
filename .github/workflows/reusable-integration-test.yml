@@ -86,18 +86,16 @@ jobs:
       run: |
         echo "Testing gRPC services connectivity..."
 
-        wget -qO /tmp/grpc_health_probe https://github.com/grpc-ecosystem/grpc-health-probe/releases/download/v0.4.28/grpc_health_probe-linux-amd64
-        chmod +x /tmp/grpc_health_probe
-
-        docker exec todofy-test /bin/sh -c "wget -qO /tmp/grpc_health_probe https://github.com/grpc-ecosystem/grpc-health-probe/releases/download/v0.4.28/grpc_health_probe-linux-amd64 && chmod +x /tmp/grpc_health_probe && /tmp/grpc_health_probe -addr=todofy-llm:50051" && \
+        # Use the grpc_health_probe already bundled inside each service container
+        docker exec todofy-llm-test /grpc_health_probe -addr=:50051 && \
           echo "LLM service gRPC health check passed ✓" || \
           (echo "LLM service gRPC health check failed" && exit 1)
 
-        docker exec todofy-test /bin/sh -c "/tmp/grpc_health_probe -addr=todofy-todo:50052" && \
+        docker exec todofy-todo-test /grpc_health_probe -addr=:50052 && \
           echo "Todo service gRPC health check passed ✓" || \
           (echo "Todo service gRPC health check failed" && exit 1)
 
-        docker exec todofy-test /bin/sh -c "/tmp/grpc_health_probe -addr=todofy-database:50053" && \
+        docker exec todofy-database-test /grpc_health_probe -addr=:50053 && \
           echo "Database service gRPC health check passed ✓" || \
           (echo "Database service gRPC health check failed" && exit 1)
 
