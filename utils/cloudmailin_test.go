@@ -177,6 +177,45 @@ func TestParseCloudmailin_InvalidJSON(t *testing.T) {
 	assert.Equal(t, "", result.Content)
 }
 
+func TestParseCloudmailin_ContentTruncation(t *testing.T) {
+	// Generate content larger than maxEmailContentLength
+	largeContent := strings.Repeat("A", maxEmailContentLength+10000)
+	input := `{
+		"headers": {
+			"from": "sender@example.com",
+			"to": "recipient@example.com",
+			"date": "2023-01-01T10:00:00Z",
+			"subject": "Large Email"
+		},
+		"html": "",
+		"plain": "` + largeContent + `"
+	}`
+
+	result := ParseCloudmailin(input)
+
+	assert.Equal(t, maxEmailContentLength, len(result.Content),
+		"Content should be truncated to maxEmailContentLength")
+}
+
+func TestParseCloudmailin_ContentNotTruncatedWhenSmall(t *testing.T) {
+	smallContent := "This is a normal sized email."
+	input := `{
+		"headers": {
+			"from": "sender@example.com",
+			"to": "recipient@example.com",
+			"date": "2023-01-01T10:00:00Z",
+			"subject": "Small Email"
+		},
+		"html": "",
+		"plain": "` + smallContent + `"
+	}`
+
+	result := ParseCloudmailin(input)
+
+	assert.Equal(t, smallContent, result.Content,
+		"Content should not be truncated when within limit")
+}
+
 func TestMailInfo_Struct(t *testing.T) {
 	// Test that MailInfo struct works as expected
 	info := MailInfo{

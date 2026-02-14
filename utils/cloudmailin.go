@@ -11,6 +11,13 @@ import (
 	md "github.com/JohannesKaufmann/html-to-markdown"
 )
 
+const (
+	// maxEmailContentLength is the maximum number of characters allowed in email content.
+	// This prevents excessively large emails (e.g., with embedded images) from consuming
+	// too many LLM tokens. 50,000 chars ≈ ~12,500 tokens, sufficient for any text email.
+	maxEmailContentLength = 50000
+)
+
 // MailInfo is the struct to store the parsed email information
 type MailInfo struct {
 	From    string // headers.from
@@ -36,6 +43,11 @@ func ParseCloudmailin(s string) MailInfo {
 	urlPattern := `\(\s*https[^()]*\)`
 	m := regexp.MustCompile(urlPattern)
 	markdown := m.ReplaceAllString(markdownRaw, "()")
+
+	// Truncate content to limit token consumption for LLM processing
+	if len(markdown) > maxEmailContentLength {
+		markdown = markdown[:maxEmailContentLength]
+	}
 
 	res := MailInfo{
 		From:    gjson.Get(s, "headers.from").String(),
