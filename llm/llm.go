@@ -27,14 +27,45 @@ func initLogger() {
 }
 
 var (
-	port             = flag.Int("port", 50051, "The server port of the LLM service")
-	geminiAPIKey     = flag.String("gemini-api-key", "", "The API key for Gemini")
-	dailyTokenLimit  = flag.Int("daily-token-limit", 3000000, "Maximum tokens allowed per 24h sliding window (0 = unlimited)")
+	port            = flag.Int("port", 50051, "The server port of the LLM service")
+	geminiAPIKey    = flag.String("gemini-api-key", "", "The API key for Gemini")
+	dailyTokenLimit = flag.Int("daily-token-limit", 3000000, "Maximum tokens allowed per 24h sliding window (0 = unlimited)")
 )
 
 type llmServer struct {
 	pb.LLMSummaryServiceServer
-	tracker *TokenTracker
+	tracker       *TokenTracker
+	clientFactory func(ctx context.Context, apiKey string) (geminiClient, error)
+}
+
+// geminiClient abstracts the Gemini API for testing.
+type geminiClient interface {
+	CountTokens(ctx context.Context, model string, contents []*genai.Content) (*genai.CountTokensResponse, error)
+	GenerateContent(ctx context.Context, model string, contents []*genai.Content) (*genai.GenerateContentResponse, error)
+}
+
+// realGeminiClient wraps the actual genai.Client.
+type realGeminiClient struct {
+	client *genai.Client
+}
+
+func (c *realGeminiClient) CountTokens(ctx context.Context, model string, contents []*genai.Content) (*genai.CountTokensResponse, error) {
+	return c.client.Models.CountTokens(ctx, model, contents, nil)
+}
+
+func (c *realGeminiClient) GenerateContent(ctx context.Context, model string, contents []*genai.Content) (*genai.GenerateContentResponse, error) {
+	return c.client.Models.GenerateContent(ctx, model, contents, nil)
+}
+
+func newRealGeminiClient(ctx context.Context, apiKey string) (geminiClient, error) {
+	client, err := genai.NewClient(ctx, &genai.ClientConfig{
+		APIKey:  apiKey,
+		Backend: genai.BackendGeminiAPI,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &realGeminiClient{client: client}, nil
 }
 
 func (s *llmServer) Summarize(ctx context.Context, req *pb.LLMSummaryRequest) (*pb.LLMSummaryResponse, error) {
@@ -101,10 +132,11 @@ func (s *llmServer) summaryByGemini(ctx context.Context, prompt, content string,
 		return "", status.Error(codes.InvalidArgument, "gemini-api-key is empty")
 	}
 
-	client, err := genai.NewClient(ctx, &genai.ClientConfig{
-		APIKey:  *geminiAPIKey,
-		Backend: genai.BackendGeminiAPI,
-	})
+	factory := s.clientFactory
+	if factory == nil {
+		factory = newRealGeminiClient
+	}
+	client, err := factory(ctx, *geminiAPIKey)
 	if err != nil {
 		return "", fmt.Errorf("failed to create Gemini client: %v", err)
 	}
@@ -121,7 +153,7 @@ func (s *llmServer) summaryByGemini(ctx context.Context, prompt, content string,
 	contents := []*genai.Content{{Parts: parts}}
 
 	// Count tokens first
-	respToken, err := client.Models.CountTokens(ctx, llmModelName, contents, nil)
+	respToken, err := client.CountTokens(ctx, llmModelName, contents)
 	if err != nil {
 		return "", fmt.Errorf("failed to count tokens: %v", err)
 	}
@@ -130,7 +162,7 @@ func (s *llmServer) summaryByGemini(ctx context.Context, prompt, content string,
 		contentWithPrompt = contentWithPrompt[:len(contentWithPrompt)/10*9]
 		parts = []*genai.Part{{Text: contentWithPrompt}}
 		contents = []*genai.Content{{Parts: parts}}
-		respToken, err = client.Models.CountTokens(ctx, llmModelName, contents, nil)
+		respToken, err = client.CountTokens(ctx, llmModelName, contents)
 		if err != nil {
 			return "", fmt.Errorf("failed to count tokens: %v", err)
 		}
@@ -144,7 +176,7 @@ func (s *llmServer) summaryByGemini(ctx context.Context, prompt, content string,
 		}
 	}
 
-	resp, err := client.Models.GenerateContent(ctx, llmModelName, contents, nil)
+	resp, err := client.GenerateContent(ctx, llmModelName, contents)
 	if err != nil {
 		return "", fmt.Errorf("failed to generate content: %v", err)
 	}
@@ -180,7 +212,7 @@ func main() {
 
 	err := utils.StartGRPCServer[pb.LLMSummaryServiceServer](
 		*port,
-		&llmServer{tracker: tracker},
+		&llmServer{tracker: tracker, clientFactory: newRealGeminiClient},
 		pb.RegisterLLMSummaryServiceServer,
 	)
 	if err != nil {
