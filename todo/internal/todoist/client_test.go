@@ -251,7 +251,7 @@ func TestNewClient(t *testing.T) {
 
 		assert.NotNil(t, client)
 		assert.Equal(t, "my-token", client.token)
-		assert.Equal(t, "https://api.todoist.com/rest/v2", client.baseURL)
+		assert.Equal(t, "https://api.todoist.com/api/v1", client.baseURL)
 	})
 
 	t.Run("creates client with empty token", func(t *testing.T) {
@@ -259,7 +259,7 @@ func TestNewClient(t *testing.T) {
 
 		assert.NotNil(t, client)
 		assert.Empty(t, client.token)
-		assert.Equal(t, "https://api.todoist.com/rest/v2", client.baseURL)
+		assert.Equal(t, "https://api.todoist.com/api/v1", client.baseURL)
 	})
 }
 

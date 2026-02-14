@@ -16,11 +16,11 @@ import (
 const (
 	// defaultTimeout specifies the default timeout for HTTP requests.
 	defaultTimeout = 10 * time.Second
-	// defaultBaseURL is the base URL for the Todoist REST API v2.
-	defaultBaseURL = "https://api.todoist.com/rest/v2"
+	// defaultBaseURL is the base URL for the Todoist API v1.
+	defaultBaseURL = "https://api.todoist.com/api/v1"
 )
 
-// Client is a client for interacting with the Todoist REST API v2.
+// Client is a client for interacting with the Todoist API v1.
 type Client struct {
 	httpClient *http.Client
 	token      string
