@@ -44,13 +44,16 @@ const (
 Rank them from most important (#1) to least important (#3).
 
 IMPORTANT: You MUST respond with ONLY a valid JSON array, no other text before or after.
-IMPORTANT: Each element must have exactly these fields: "rank" (integer 1-3), "title" (string, one-line), "reason" (string, 1-2 sentences).
+IMPORTANT: Each element must have exactly these fields:
+  "rank" (integer 1-3), "title" (string, one-line), "reason" (string, 1-2 sentences).
 IMPORTANT: Output exactly 3 items. If there are fewer than 3 tasks, re-emphasize the same task and note it.
 IMPORTANT: Please use Chinese as response language for title and reason.
 IMPORTANT: Keep each reason concise.
 
 Example output format:
-[{"rank":1,"title":"任务标题","reason":"原因说明"},{"rank":2,"title":"任务标题","reason":"原因说明"},{"rank":3,"title":"任务标题","reason":"原因说明"}]
+[{"rank":1,"title":"任务标题","reason":"原因说明"},
+{"rank":2,"title":"任务标题","reason":"原因说明"},
+{"rank":3,"title":"任务标题","reason":"原因说明"}]
 
 The task summaries from the last 24 hours are as follows:`
 )

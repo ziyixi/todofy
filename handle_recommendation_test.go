@@ -19,7 +19,10 @@ import (
 )
 
 // helper to set up a gin test context with mock clients injected.
-func setupRecommendationTest(mockDB *mocks.MockDataBaseServiceClient, mockLLM *mocks.MockLLMSummaryServiceClient) (*httptest.ResponseRecorder, *gin.Engine) {
+func setupRecommendationTest(
+	mockDB *mocks.MockDataBaseServiceClient,
+	mockLLM *mocks.MockLLMSummaryServiceClient,
+) (*httptest.ResponseRecorder, *gin.Engine) {
 	gin.SetMode(gin.TestMode)
 
 	clients := mocks.NewMockGRPCClients()
@@ -101,7 +104,9 @@ func TestHandleRecommendation_LLMError(t *testing.T) {
 }
 
 func TestHandleRecommendation_ValidJSON(t *testing.T) {
-	llmJSON := `[{"rank":1,"title":"重要任务A","reason":"需要立即处理"},{"rank":2,"title":"任务B","reason":"截止日期临近"},{"rank":3,"title":"任务C","reason":"团队在等待"}]`
+	llmJSON := `[{"rank":1,"title":"重要任务A","reason":"需要立即处理"},` +
+		`{"rank":2,"title":"任务B","reason":"截止日期临近"},` +
+		`{"rank":3,"title":"任务C","reason":"团队在等待"}]`
 
 	mockDB := new(mocks.MockDataBaseServiceClient)
 	mockDB.On("QueryRecent", mock.Anything, mock.Anything, mock.Anything).
@@ -118,7 +123,7 @@ func TestHandleRecommendation_ValidJSON(t *testing.T) {
 	mockLLM.On("Summarize", mock.Anything, mock.Anything, mock.Anything).
 		Return(&pb.LLMSummaryResponse{
 			Summary: llmJSON,
-			Model:   pb.Model_MODEL_GEMINI_2_0_FLASH_LITE,
+			Model:   pb.Model_MODEL_GEMINI_2_5_FLASH_LITE,
 		}, nil)
 
 	w, router := setupRecommendationTest(mockDB, mockLLM)
@@ -130,7 +135,7 @@ func TestHandleRecommendation_ValidJSON(t *testing.T) {
 	var resp RecommendationResponse
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
 	assert.Equal(t, 4, resp.TaskCount)
-	assert.Equal(t, "MODEL_GEMINI_2_0_FLASH_LITE", resp.Model)
+	assert.Equal(t, "MODEL_GEMINI_2_5_FLASH_LITE", resp.Model)
 	require.Len(t, resp.Tasks, 3)
 
 	// Verify each task has the correct rank, title, and reason
@@ -152,7 +157,11 @@ func TestHandleRecommendation_ValidJSON(t *testing.T) {
 
 func TestHandleRecommendation_JSONWithCodeFences(t *testing.T) {
 	// LLMs sometimes wrap JSON in markdown code fences
-	llmJSON := "```json\n" + `[{"rank":1,"title":"A","reason":"R1"},{"rank":2,"title":"B","reason":"R2"},{"rank":3,"title":"C","reason":"R3"}]` + "\n```"
+	llmJSON := "```json\n" +
+		`[{"rank":1,"title":"A","reason":"R1"},` +
+		`{"rank":2,"title":"B","reason":"R2"},` +
+		`{"rank":3,"title":"C","reason":"R3"}]` +
+		"\n```"
 
 	mockDB := new(mocks.MockDataBaseServiceClient)
 	mockDB.On("QueryRecent", mock.Anything, mock.Anything, mock.Anything).
@@ -164,7 +173,7 @@ func TestHandleRecommendation_JSONWithCodeFences(t *testing.T) {
 	mockLLM.On("Summarize", mock.Anything, mock.Anything, mock.Anything).
 		Return(&pb.LLMSummaryResponse{
 			Summary: llmJSON,
-			Model:   pb.Model_MODEL_GEMINI_2_0_FLASH,
+			Model:   pb.Model_MODEL_GEMINI_2_5_FLASH,
 		}, nil)
 
 	w, router := setupRecommendationTest(mockDB, mockLLM)
@@ -195,7 +204,7 @@ func TestHandleRecommendation_PlainCodeFences(t *testing.T) {
 	mockLLM.On("Summarize", mock.Anything, mock.Anything, mock.Anything).
 		Return(&pb.LLMSummaryResponse{
 			Summary: llmJSON,
-			Model:   pb.Model_MODEL_GEMINI_2_0_FLASH,
+			Model:   pb.Model_MODEL_GEMINI_2_5_FLASH,
 		}, nil)
 
 	w, router := setupRecommendationTest(mockDB, mockLLM)
@@ -225,7 +234,7 @@ func TestHandleRecommendation_FallbackOnInvalidJSON(t *testing.T) {
 	mockLLM.On("Summarize", mock.Anything, mock.Anything, mock.Anything).
 		Return(&pb.LLMSummaryResponse{
 			Summary: plainText,
-			Model:   pb.Model_MODEL_GEMINI_2_0_FLASH,
+			Model:   pb.Model_MODEL_GEMINI_2_5_FLASH,
 		}, nil)
 
 	w, router := setupRecommendationTest(mockDB, mockLLM)
@@ -246,7 +255,9 @@ func TestHandleRecommendation_FallbackOnInvalidJSON(t *testing.T) {
 
 func TestHandleRecommendation_RanksArePreservedFromLLM(t *testing.T) {
 	// Verify ranks come from LLM output, not hardcoded
-	llmJSON := `[{"rank":1,"title":"T1","reason":"R1"},{"rank":2,"title":"T2","reason":"R2"},{"rank":3,"title":"T3","reason":"R3"}]`
+	llmJSON := `[{"rank":1,"title":"T1","reason":"R1"},` +
+		`{"rank":2,"title":"T2","reason":"R2"},` +
+		`{"rank":3,"title":"T3","reason":"R3"}]`
 
 	mockDB := new(mocks.MockDataBaseServiceClient)
 	mockDB.On("QueryRecent", mock.Anything, mock.Anything, mock.Anything).
@@ -258,7 +269,7 @@ func TestHandleRecommendation_RanksArePreservedFromLLM(t *testing.T) {
 	mockLLM.On("Summarize", mock.Anything, mock.Anything, mock.Anything).
 		Return(&pb.LLMSummaryResponse{
 			Summary: llmJSON,
-			Model:   pb.Model_MODEL_GEMINI_2_0_FLASH_LITE,
+			Model:   pb.Model_MODEL_GEMINI_2_5_FLASH_LITE,
 		}, nil)
 
 	w, router := setupRecommendationTest(mockDB, mockLLM)
@@ -294,7 +305,7 @@ func TestHandleRecommendation_VerifiesPromptSent(t *testing.T) {
 	}), mock.Anything).
 		Return(&pb.LLMSummaryResponse{
 			Summary: `[{"rank":1,"title":"T","reason":"R"}]`,
-			Model:   pb.Model_MODEL_GEMINI_2_0_FLASH,
+			Model:   pb.Model_MODEL_GEMINI_2_5_FLASH,
 		}, nil)
 
 	w, router := setupRecommendationTest(mockDB, mockLLM)
@@ -307,7 +318,9 @@ func TestHandleRecommendation_VerifiesPromptSent(t *testing.T) {
 
 func TestHandleRecommendation_TaskCountMatchesDBEntries(t *testing.T) {
 	// task_count should reflect DB entries, not parsed tasks
-	llmJSON := `[{"rank":1,"title":"T1","reason":"R1"},{"rank":2,"title":"T2","reason":"R2"},{"rank":3,"title":"T3","reason":"R3"}]`
+	llmJSON := `[{"rank":1,"title":"T1","reason":"R1"},` +
+		`{"rank":2,"title":"T2","reason":"R2"},` +
+		`{"rank":3,"title":"T3","reason":"R3"}]`
 
 	mockDB := new(mocks.MockDataBaseServiceClient)
 	mockDB.On("QueryRecent", mock.Anything, mock.Anything, mock.Anything).
@@ -325,7 +338,7 @@ func TestHandleRecommendation_TaskCountMatchesDBEntries(t *testing.T) {
 	mockLLM.On("Summarize", mock.Anything, mock.Anything, mock.Anything).
 		Return(&pb.LLMSummaryResponse{
 			Summary: llmJSON,
-			Model:   pb.Model_MODEL_GEMINI_2_0_FLASH,
+			Model:   pb.Model_MODEL_GEMINI_2_5_FLASH,
 		}, nil)
 
 	w, router := setupRecommendationTest(mockDB, mockLLM)
@@ -334,7 +347,8 @@ func TestHandleRecommendation_TaskCountMatchesDBEntries(t *testing.T) {
 
 	var resp RecommendationResponse
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
-	assert.Equal(t, 5, resp.TaskCount, "task_count should be number of DB entries (5), not number of recommendations (3)")
+	assert.Equal(t, 5, resp.TaskCount,
+		"task_count should be number of DB entries (5), not number of recommendations (3)")
 	assert.Len(t, resp.Tasks, 3)
 }
 
@@ -349,7 +363,7 @@ func TestHandleRecommendation_EmptyStringFromLLM(t *testing.T) {
 	mockLLM.On("Summarize", mock.Anything, mock.Anything, mock.Anything).
 		Return(&pb.LLMSummaryResponse{
 			Summary: "",
-			Model:   pb.Model_MODEL_GEMINI_2_0_FLASH,
+			Model:   pb.Model_MODEL_GEMINI_2_5_FLASH,
 		}, nil)
 
 	w, router := setupRecommendationTest(mockDB, mockLLM)
