@@ -102,6 +102,7 @@ func setupRouter(allowedUsers gin.Accounts, grpcClients *GRPCClients) *gin.Engin
 	api := app.Group("/api", gin.BasicAuth(allowedUsers))
 	api.Use(grpcMiddleware(grpcClients))
 	api.GET("/summary", HandleSummary)
+	api.GET("/recommendation", HandleRecommendation)
 
 	v1 := api.Group("/v1")
 	v1.Use(utils.RateLimitMiddleware())

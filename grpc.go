@@ -17,6 +17,12 @@ import (
 	pb "github.com/ziyixi/protos/go/todofy"
 )
 
+// ClientProvider is the interface used by handlers to retrieve gRPC clients.
+// Both *GRPCClients (production) and *MockGRPCClients (test) satisfy it.
+type ClientProvider interface {
+	GetClient(name string) any
+}
+
 // ServiceConfig holds the configuration for a single gRPC service
 type ServiceConfig struct {
 	name      string

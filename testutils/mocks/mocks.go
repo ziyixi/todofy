@@ -113,11 +113,10 @@ func NewMockGRPCClients() *MockGRPCClients {
 
 // GetClient retrieves a mock client by name
 func (m *MockGRPCClients) GetClient(name string) interface{} {
-	args := m.Called(name)
 	if client, ok := m.clients[name]; ok {
 		return client
 	}
-	return args.Get(0)
+	return nil
 }
 
 // SetClient sets a mock client by name for testing

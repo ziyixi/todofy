@@ -16,7 +16,7 @@ const (
 )
 
 func HandleSummary(c *gin.Context) {
-	clients := c.MustGet(utils.KeyGRPCClients).(*GRPCClients)
+	clients := c.MustGet(utils.KeyGRPCClients).(ClientProvider)
 
 	// Query all the data from the database
 	databaseClient := clients.GetClient("database").(pb.DataBaseServiceClient)

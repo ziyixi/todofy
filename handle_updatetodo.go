@@ -22,7 +22,7 @@ import (
 var descriptionTmpl string
 
 func HandleUpdateTodo(c *gin.Context) {
-	clients := c.MustGet(utils.KeyGRPCClients).(*GRPCClients)
+	clients := c.MustGet(utils.KeyGRPCClients).(ClientProvider)
 	// get the post data
 	jsonRaw, err := io.ReadAll(c.Request.Body)
 	if err != nil {
