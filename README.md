@@ -30,13 +30,16 @@ graph TB
     %% API endpoints
     Summary[📊 /api/summary<br/>GET endpoint]
     UpdateTodo[📝 /api/v1/update_todo<br/>POST endpoint]
+    Recommend[🏆 /api/recommendation<br/>GET endpoint<br/>?top=N]
     
     %% Data flow connections
     User -->|HTTPS GET| Summary
+    User -->|HTTPS GET| Recommend
     Email -->|Webhook POST| UpdateTodo
     
     Summary --> Main
     UpdateTodo --> Main
+    Recommend --> Main
     
     Main -->|gRPC Health Check| LLM
     Main -->|gRPC Health Check| Todo  
@@ -67,7 +70,7 @@ graph TB
     
     class User,Email,Gemini,Mailjet,Notion,Todoist external
     class Main,LLM,Todo,DB service
-    class Summary,UpdateTodo endpoint
+    class Summary,UpdateTodo,Recommend endpoint
     class MainContainer,LLMContainer,TodoContainer,DBContainer container
 ```
 
@@ -77,6 +80,7 @@ graph TB
 * **LLM Integration:** Leverages Google Gemini models for email summarization with automatic model fallback (via `todofy-llm` service).
 * **Cost Controls:** Daily token limit with 24-hour sliding window (default: 3M tokens) to prevent runaway API costs, plus email content truncation (50K character hard limit).
 * **Dedup Cache:** SHA-256 hash-based deduplication — identical emails skip the expensive LLM call and reuse the cached summary from the database.
+* **Task Recommendations:** `GET /api/recommendation?top=N` queries recent 24h tasks, asks the LLM to pick the top-N most important ones (default 3, max 10), and returns structured JSON with rank, title, and reason for each.
 * **Email/API Task Population:** Allows tasks to be populated or managed via email or API interactions (via `todofy-todo` service).
 * **Persistent Storage:** Uses SQLite for storing task data with hash-indexed lookups (via `todofy-database` service).
 * **Containerized Services:** All components are containerized using Docker for easy deployment and scaling.
@@ -200,3 +204,12 @@ The LLM service includes e2e tests with a mock Gemini client (no real API calls 
 The database service includes tests for:
 - `CheckExist` RPC — cache hit, cache miss, empty hash validation, uninitialized DB
 - Full integration workflow: create → write (with hash_id) → query → CheckExist verification
+
+The recommendation handler includes tests for:
+- No tasks / database error / LLM error handling
+- Valid JSON parsing with correct ranks, titles, and reasons
+- Markdown code fence stripping (`\`\`\`json ... \`\`\``)
+- Fallback when LLM returns plain text instead of JSON
+- `?top=N` parameter validation (default 3, range 1-10, invalid values)
+- Prompt content verification (correct format string interpolation)
+- `task_count` reflects DB entries, not recommendation count
