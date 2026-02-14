@@ -20,6 +20,12 @@ const (
 	MaxTopN                      = 10
 )
 
+// LLM retry configuration — var so tests can override.
+var (
+	LLMMaxRetries = 3
+	LLMRetrySleep = 5 * time.Second
+)
+
 // TaskRecommendation represents a single recommended task entry.
 type TaskRecommendation struct {
 	Rank   int    `json:"rank"`
@@ -89,11 +95,25 @@ func HandleRecommendation(c *gin.Context) {
 	)
 	recReq := &pb.LLMSummaryRequest{
 		ModelFamily: pb.ModelFamily_MODEL_FAMILY_GEMINI,
+		Model:       utils.RecommendationModel,
 		Prompt:      prompt,
 		Text:        content,
 	}
 	llmClient := clients.GetClient("llm").(pb.LLMSummaryServiceClient)
-	recResp, err := llmClient.Summarize(c, recReq)
+	var recResp *pb.LLMSummaryResponse
+	for attempt := 1; attempt <= LLMMaxRetries; attempt++ {
+		recResp, err = llmClient.Summarize(c, recReq)
+		if err == nil {
+			break
+		}
+		log.Printf(
+			"LLM Summarize attempt %d/%d failed: %v",
+			attempt, LLMMaxRetries, err,
+		)
+		if attempt < LLMMaxRetries {
+			time.Sleep(LLMRetrySleep)
+		}
+	}
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return

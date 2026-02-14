@@ -1,5 +1,12 @@
 package utils
 
+import pb "github.com/ziyixi/protos/go/todofy"
+
+// RecommendationModel is the preferred model for the recommendation
+// endpoint. This should mirror the strongest model available in
+// llm/consts.go llmModelPriority.
+var RecommendationModel = pb.Model_MODEL_GEMINI_3_FLASH_PREVIEW
+
 // Key constants used throughout the application for context storage
 const (
 	// KeyGRPCClients is the context key for storing gRPC clients
@@ -53,8 +60,13 @@ IMPORTANT: Focus on tasks that require ACTION from me today or in the near futur
   Ignore promotional emails, coupons, marketing offers, expired or time-bound deals,
   routine notifications (e.g. charging station check-ins, subscription renewals),
   and anything that does not need a concrete action from me.
+  Think carefully: does this task REALLY need my attention, or is it just noise?
+  For example, a 30-minute EV charging reservation is routine — skip it.
   Prioritize: security alerts, deadlines, financial/tax documents,
   work-related items, and things with real consequences if ignored.
+IMPORTANT: MERGE similar or duplicate tasks into ONE entry.
+  Multiple emails about the same topic (e.g. two security alerts from the same
+  service) should be combined into a single recommendation, not listed separately.
 
 Example output format (for 3 items):
 [{"rank":1,"title":"任务标题","reason":"原因说明"},

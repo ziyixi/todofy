@@ -84,6 +84,10 @@ func TestHandleRecommendation_DatabaseError(t *testing.T) {
 }
 
 func TestHandleRecommendation_LLMError(t *testing.T) {
+	origSleep := LLMRetrySleep
+	LLMRetrySleep = 0
+	t.Cleanup(func() { LLMRetrySleep = origSleep })
+
 	mockDB := new(mocks.MockDataBaseServiceClient)
 	mockDB.On("QueryRecent", mock.Anything, mock.Anything, mock.Anything).
 		Return(&pb.QueryRecentResponse{
@@ -452,6 +456,69 @@ func TestHandleRecommendation_TopParamInvalid(t *testing.T) {
 			assert.Contains(t, w.Body.String(), "invalid top")
 		})
 	}
+}
+
+func TestHandleRecommendation_RetrySucceedsOnSecondAttempt(t *testing.T) {
+	origSleep := LLMRetrySleep
+	LLMRetrySleep = 0
+	t.Cleanup(func() { LLMRetrySleep = origSleep })
+
+	mockDB := new(mocks.MockDataBaseServiceClient)
+	mockDB.On("QueryRecent", mock.Anything, mock.Anything, mock.Anything).
+		Return(&pb.QueryRecentResponse{
+			Entries: []*pb.DataBaseSchema{{Summary: "task retry"}},
+		}, nil)
+
+	llmJSON := `[{"rank":1,"title":"Ok","reason":"recovered"}]`
+	mockLLM := new(mocks.MockLLMSummaryServiceClient)
+	// First call fails, second succeeds
+	mockLLM.On("Summarize", mock.Anything, mock.Anything, mock.Anything).
+		Return(nil, errors.New("rate limited")).Once()
+	mockLLM.On("Summarize", mock.Anything, mock.Anything, mock.Anything).
+		Return(&pb.LLMSummaryResponse{
+			Summary: llmJSON,
+			Model:   pb.Model_MODEL_GEMINI_2_5_FLASH,
+		}, nil).Once()
+
+	w, router := setupRecommendationTest(mockDB, mockLLM)
+	req, _ := http.NewRequest(http.MethodGet, "/api/recommendation", nil)
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	var resp RecommendationResponse
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	assert.Len(t, resp.Tasks, 1)
+	assert.Equal(t, "Ok", resp.Tasks[0].Title)
+	mockLLM.AssertNumberOfCalls(t, "Summarize", 2)
+}
+
+func TestHandleRecommendation_RetryExhausted(t *testing.T) {
+	origSleep := LLMRetrySleep
+	origRetries := LLMMaxRetries
+	LLMRetrySleep = 0
+	LLMMaxRetries = 2
+	t.Cleanup(func() {
+		LLMRetrySleep = origSleep
+		LLMMaxRetries = origRetries
+	})
+
+	mockDB := new(mocks.MockDataBaseServiceClient)
+	mockDB.On("QueryRecent", mock.Anything, mock.Anything, mock.Anything).
+		Return(&pb.QueryRecentResponse{
+			Entries: []*pb.DataBaseSchema{{Summary: "task"}},
+		}, nil)
+
+	mockLLM := new(mocks.MockLLMSummaryServiceClient)
+	mockLLM.On("Summarize", mock.Anything, mock.Anything, mock.Anything).
+		Return(nil, errors.New("always fails"))
+
+	w, router := setupRecommendationTest(mockDB, mockLLM)
+	req, _ := http.NewRequest(http.MethodGet, "/api/recommendation", nil)
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusInternalServerError, w.Code)
+	assert.Contains(t, w.Body.String(), "always fails")
+	mockLLM.AssertNumberOfCalls(t, "Summarize", 2)
 }
 
 func TestHandleRecommendation_TopParamBoundary(t *testing.T) {
