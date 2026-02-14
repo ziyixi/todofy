@@ -17,7 +17,7 @@ graph TB
     Gemini[🤖 Google Gemini<br/>LLM API]
     Mailjet[📬 Mailjet<br/>Email Service]
     Notion[📝 Notion<br/>Database API]
-    Todoist[✅ Todoist<br/>Task Management API]
+    Todoist[✅ Todoist<br/>Task API v1]
     
     %% Main HTTP Server
     Main[🌐 Todofy Main Server<br/>HTTP REST API<br/>Port: 8080<br/>Basic Auth + Rate Limiting]
@@ -42,9 +42,11 @@ graph TB
     Main -->|gRPC Health Check| Todo  
     Main -->|gRPC Health Check| DB
     
-    Main -->|LLMSummaryRequest| LLM
+    %% Dedup cache flow: check DB first, then conditionally call LLM
+    Main -->|CheckExist<br/>hash_id lookup| DB
+    Main -.->|LLMSummaryRequest<br/>only on cache miss| LLM
     Main -->|TodoRequest| Todo
-    Main -->|DatabaseQuery/Insert| DB
+    Main -->|Write<br/>with hash_id| DB
     
     LLM -->|API Calls| Gemini
     Todo -->|Email Send| Mailjet
@@ -74,8 +76,9 @@ graph TB
 * **Task Management:** Core functionality for creating, updating, and managing tasks.
 * **LLM Integration:** Leverages Google Gemini models for email summarization with automatic model fallback (via `todofy-llm` service).
 * **Cost Controls:** Daily token limit with 24-hour sliding window (default: 3M tokens) to prevent runaway API costs, plus email content truncation (50K character hard limit).
+* **Dedup Cache:** SHA-256 hash-based deduplication — identical emails skip the expensive LLM call and reuse the cached summary from the database.
 * **Email/API Task Population:** Allows tasks to be populated or managed via email or API interactions (via `todofy-todo` service).
-* **Persistent Storage:** Uses SQLite for storing task data (via `todofy-database` service).
+* **Persistent Storage:** Uses SQLite for storing task data with hash-indexed lookups (via `todofy-database` service).
 * **Containerized Services:** All components are containerized using Docker for easy deployment and scaling.
 * **Comprehensive Testing:** Unit tests, e2e tests with mock Gemini client injection, and Docker-based integration tests.
 
@@ -100,6 +103,7 @@ Additionally, `gemini-2.5-pro` is available when explicitly requested.
 | Daily token limit | 3,000,000 | 24-hour sliding window; configurable via `--daily-token-limit` flag (0 = unlimited) |
 | Email content limit | 50,000 chars | Hard truncation of email body before LLM processing |
 | Token counting | Per-request | Content is iteratively truncated (to 90%) until under the per-model token limit (1M tokens) |
+| Dedup cache | Always on | SHA-256 hash of `prompt + email content`; duplicate emails return cached summary without LLM call |
 
 ### Configuration Flags
 
@@ -126,13 +130,13 @@ The application is composed of the following services:
     * Image: `ghcr.io/ziyixi/todofy-llm:latest`
 
 3.  **Todo Service (`todofy-todo`)**
-    * Description: Manages task creation via Todoist, Notion, and email (Mailjet).
+    * Description: Manages task creation via Todoist (API v1), Notion, and email (Mailjet).
     * Dockerfile: `todo/Dockerfile`
-    * Default Port: `50052` (configurable via `PORT` env var)
+    * Default Port: `50052` (configurable via `--port` flag)
     * Image: `ghcr.io/ziyixi/todofy-todo:latest`
 
 4.  **Database Service (`todofy-database`)**
-    * Description: Provides database access and management using SQLite.
+    * Description: Provides database access and management using SQLite. Supports `Write`, `QueryRecent`, and `CheckExist` (hash-based dedup lookup) RPCs.
     * Dockerfile: `database/Dockerfile`
     * Default Port: `50053` (configurable via `PORT` env var)
     * Image: `ghcr.io/ziyixi/todofy-database:latest`
@@ -192,3 +196,7 @@ The LLM service includes e2e tests with a mock Gemini client (no real API calls 
 - Token usage tracking (with `UsageMetadata` and `CountTokens` fallback)
 - Content truncation for oversized inputs
 - Error handling (empty responses, client failures, missing API key)
+
+The database service includes tests for:
+- `CheckExist` RPC — cache hit, cache miss, empty hash validation, uninitialized DB
+- Full integration workflow: create → write (with hash_id) → query → CheckExist verification
