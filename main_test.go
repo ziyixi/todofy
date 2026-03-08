@@ -120,7 +120,10 @@ func TestBuildServiceConfigs(t *testing.T) {
 	assert.Equal(t, "database", serviceConfigs[2].name)
 	assert.Equal(t, "database:50053", serviceConfigs[2].addr)
 
-	conn, err := grpc.NewClient("passthrough:///build-service-config-test", grpc.WithTransportCredentials(insecure.NewCredentials()))
+	conn, err := grpc.NewClient(
+		"passthrough:///build-service-config-test",
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+	)
 	require.NoError(t, err)
 	t.Cleanup(func() {
 		_ = conn.Close()
