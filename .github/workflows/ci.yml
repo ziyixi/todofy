@@ -28,10 +28,50 @@ jobs:
     name: Integration Test
     uses: ./.github/workflows/reusable-integration-test.yml
 
+  detect-build-changes:
+    name: Detect Build-Relevant Changes
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+    outputs:
+      should_build: ${{ steps.set-output.outputs.should_build }}
+    steps:
+    - name: Check out code
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 2
+
+    - name: Detect changed files
+      id: changed-files
+      uses: tj-actions/changed-files@v46
+      with:
+        files: |
+          **/*.go
+          go.mod
+          go.sum
+          Dockerfile
+          database/**
+          llm/**
+          todo/**
+          templates/**
+          entrypoint.sh
+          docker-compose*.yml
+          .github/workflows/reusable-build.yml
+
+    - name: Set build output
+      id: set-output
+      run: |
+        if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+          echo "should_build=true" >> "$GITHUB_OUTPUT"
+        elif [[ "${{ steps.changed-files.outputs.any_changed }}" == "true" ]]; then
+          echo "should_build=true" >> "$GITHUB_OUTPUT"
+        else
+          echo "should_build=false" >> "$GITHUB_OUTPUT"
+        fi
+
   build:
     name: Build
-    needs: [test, lint, security, integration-test]
-    if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+    needs: [test, lint, security, integration-test, detect-build-changes]
+    if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && needs.detect-build-changes.outputs.should_build == 'true'
     uses: ./.github/workflows/reusable-build.yml
     permissions:
       packages: write
@@ -39,17 +79,31 @@ jobs:
   notify:
     name: Notify Status
     runs-on: ubuntu-latest
-    needs: [test, lint, security, integration-test]
+    needs: [test, lint, security, integration-test, detect-build-changes, build]
     if: always()
 
     steps:
     - name: Notify on success
-      if: needs.integration-test.result == 'success'
+      if: |
+        needs.test.result == 'success' &&
+        needs.lint.result == 'success' &&
+        needs.security.result == 'success' &&
+        needs.integration-test.result == 'success' &&
+        (needs.detect-build-changes.outputs.should_build != 'true' || needs.build.result == 'success')
       run: |
-        echo "✅ CI checks passed successfully!"
+        if [[ "${{ needs.detect-build-changes.outputs.should_build }}" == "true" ]]; then
+          echo "✅ CI checks and image build passed successfully!"
+        else
+          echo "✅ CI checks passed. Image build skipped (no build-relevant changes)."
+        fi
 
     - name: Notify on failure
-      if: needs.integration-test.result == 'failure'
+      if: |
+        needs.test.result == 'failure' ||
+        needs.lint.result == 'failure' ||
+        needs.security.result == 'failure' ||
+        needs.integration-test.result == 'failure' ||
+        needs.build.result == 'failure'
       run: |
         echo "❌ CI checks failed!"
         exit 1

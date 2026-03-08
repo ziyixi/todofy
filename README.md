@@ -167,7 +167,7 @@ graph LR
 | **Lint** | Runs `golangci-lint` |
 | **Security** | Runs `gosec` with SARIF upload to GitHub Security |
 | **Integration Test** | Builds all 4 Docker images and validates with health checks |
-| **Build** | Pushes Docker images to GHCR (main branch only) |
+| **Build** | Pushes Docker images to GHCR on `main` only when build-relevant files change (or manual dispatch) |
 | **Notify** | Reports pass/fail status |
 
 ## 📦 GitHub Packages (GHCR)
