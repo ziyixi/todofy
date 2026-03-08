@@ -1,9 +1,11 @@
 package main
 
 import (
+	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
 
@@ -125,4 +127,38 @@ func TestConfig_Validation(t *testing.T) {
 		assert.Equal(t, ":50052", config.TodoAddr)
 		assert.Equal(t, ":50053", config.DatabaseAddr)
 	})
+}
+
+func TestSetUpDataBase_Success(t *testing.T) {
+	mockDB := new(mocks.MockDataBaseServiceClient)
+	mockDB.On("CreateIfNotExist", mock.Anything, mock.Anything, mock.Anything).
+		Return(&pb.CreateIfNotExistResponse{}, nil)
+
+	clients := &GRPCClients{
+		services: map[string]*serviceState{
+			"database": {client: mockDB},
+		},
+	}
+
+	err := clients.SetUpDataBase("/tmp/test.db")
+	assert.NoError(t, err)
+	mockDB.AssertExpectations(t)
+}
+
+func TestSetUpDataBase_Error(t *testing.T) {
+	mockDB := new(mocks.MockDataBaseServiceClient)
+	mockDB.On("CreateIfNotExist", mock.Anything, mock.Anything, mock.Anything).
+		Return(nil, fmt.Errorf("connection refused"))
+
+	clients := &GRPCClients{
+		services: map[string]*serviceState{
+			"database": {client: mockDB},
+		},
+	}
+
+	err := clients.SetUpDataBase("/tmp/test.db")
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to set up database")
+	assert.Contains(t, err.Error(), "connection refused")
+	mockDB.AssertExpectations(t)
 }

@@ -46,8 +46,27 @@ var (
 	todoistProjectID = flag.String("todoist-project-id", "", "The project ID for Todoist tasks")
 )
 
+// mailjetSender abstracts the Mailjet send API for testing.
+type mailjetSender interface {
+	SendMailV31(data *mailjet.MessagesV31, options ...mailjet.RequestOptions) (*mailjet.ResultsV31, error)
+}
+
+// notionPageCreator abstracts the Notion page creation API for testing.
+type notionPageCreator interface {
+	Create(ctx context.Context, requestBody *notionapi.PageCreateRequest) (*notionapi.Page, error)
+}
+
+// todoistTaskCreator abstracts the Todoist task creation API for testing.
+type todoistTaskCreator interface {
+	CreateTask(ctx context.Context, requestID string, taskDetails *todoist.CreateTaskRequest) (*todoist.Task, error)
+}
+
 type todoServer struct {
 	pb.TodoServiceServer
+	newMailjetClient  func(publicKey, privateKey string) mailjetSender
+	newNotionClient   func(apiKey string) notionPageCreator
+	newTodoistClient  func(apiKey string) todoistTaskCreator
+	fetchStatus       func(url, username, password string) (interface{}, error)
 }
 
 func (s *todoServer) PopulateTodo(ctx context.Context, req *pb.TodoRequest) (*pb.TodoResponse, error) {
@@ -88,7 +107,14 @@ func (s *todoServer) PopulateTodoByMailjet(_ context.Context, req *pb.TodoReques
 	if err := validateMailjetFlags(); err != nil {
 		return nil, err
 	}
-	mailjetClient := mailjet.NewMailjetClient(*mailjetAPIKeyPublic, *mailjetAPIKeyPrivate)
+
+	factory := s.newMailjetClient
+	if factory == nil {
+		factory = func(pub, priv string) mailjetSender {
+			return mailjet.NewMailjetClient(pub, priv)
+		}
+	}
+	client := factory(*mailjetAPIKeyPublic, *mailjetAPIKeyPrivate)
 
 	toEmail := *targetEmail
 	toEmailName := receiverName
@@ -113,7 +139,7 @@ func (s *todoServer) PopulateTodoByMailjet(_ context.Context, req *pb.TodoReques
 		},
 	}
 	messages := mailjet.MessagesV31{Info: messagesInfo}
-	res, err := mailjetClient.SendMailV31(&messages)
+	res, err := client.SendMailV31(&messages)
 	if err != nil {
 		return nil, fmt.Errorf("mailjet send email error: %w", err)
 	}
@@ -122,8 +148,11 @@ func (s *todoServer) PopulateTodoByMailjet(_ context.Context, req *pb.TodoReques
 	}
 	mailjetHref := res.ResultsV31[0].To[0].MessageHref
 
-	// send request to mailjet API to get email send status
-	response, err := utils.FetchWithBasicAuth(mailjetHref, *mailjetAPIKeyPublic, *mailjetAPIKeyPrivate)
+	fetch := s.fetchStatus
+	if fetch == nil {
+		fetch = utils.FetchWithBasicAuth
+	}
+	response, err := fetch(mailjetHref, *mailjetAPIKeyPublic, *mailjetAPIKeyPrivate)
 	if err != nil {
 		return nil, fmt.Errorf("fetch mailjet email status error: %w", err)
 	}
@@ -147,7 +176,14 @@ func (s *todoServer) PopulateTodoByNotion(ctx context.Context, req *pb.TodoReque
 	if err := validateNotionFlags(); err != nil {
 		return nil, err
 	}
-	client := notionapi.NewClient(notionapi.Token(*notionAPIKey))
+
+	factory := s.newNotionClient
+	if factory == nil {
+		factory = func(apiKey string) notionPageCreator {
+			return notionapi.NewClient(notionapi.Token(apiKey)).Page
+		}
+	}
+	client := factory(*notionAPIKey)
 
 	// Create a new page in the database
 	pageRequest := &notionapi.PageCreateRequest{
@@ -219,7 +255,7 @@ func (s *todoServer) PopulateTodoByNotion(ctx context.Context, req *pb.TodoReque
 		}
 	}
 
-	page, err := client.Page.Create(ctx, pageRequest)
+	page, err := client.Create(ctx, pageRequest)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create page in database: %w", err)
 	}
@@ -244,7 +280,13 @@ func (s *todoServer) PopulateTodoByTodoist(ctx context.Context, req *pb.TodoRequ
 		return nil, err
 	}
 
-	client := todoist.NewClient(*todoistAPIKey)
+	factory := s.newTodoistClient
+	if factory == nil {
+		factory = func(apiKey string) todoistTaskCreator {
+			return todoist.NewClient(apiKey)
+		}
+	}
+	client := factory(*todoistAPIKey)
 
 	// Create the task request
 	taskRequest := &todoist.CreateTaskRequest{

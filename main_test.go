@@ -1,11 +1,15 @@
 package main
 
 import (
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/ziyixi/todofy/utils"
 )
 
 func TestSetupRouter(t *testing.T) {
@@ -74,4 +78,52 @@ func TestGitCommit_Variable(t *testing.T) {
 		// Just verify the variable is accessible
 		assert.True(t, true)
 	})
+}
+
+func TestHealthEndpoint(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	allowedUsers := gin.Accounts{"testuser": "testpass"}
+	grpcClients := &GRPCClients{
+		services: make(map[string]*serviceState),
+	}
+
+	router := setupRouter(allowedUsers, grpcClients)
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("GET", "/health", nil)
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	var body map[string]interface{}
+	err := json.Unmarshal(w.Body.Bytes(), &body)
+	require.NoError(t, err)
+
+	assert.Equal(t, "healthy", body["status"])
+	assert.NotEmpty(t, body["timestamp"])
+	assert.Equal(t, "todofy", body["service"])
+}
+
+func TestGrpcMiddleware(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	grpcClients := &GRPCClients{
+		services: make(map[string]*serviceState),
+	}
+
+	router := gin.New()
+	router.Use(grpcMiddleware(grpcClients))
+	router.GET("/test", func(c *gin.Context) {
+		val, exists := c.Get(utils.KeyGRPCClients)
+		assert.True(t, exists)
+		assert.Equal(t, grpcClients, val)
+		c.Status(http.StatusOK)
+	})
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("GET", "/test", nil)
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
 }
