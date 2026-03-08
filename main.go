@@ -2,8 +2,10 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -37,6 +39,32 @@ type Config struct {
 var (
 	config    Config
 	GitCommit string // Will be set by Bazel at build time
+)
+
+type startupClients interface {
+	Close()
+	WaitForHealthy(context.Context) error
+	SetUpDataBase(path string) error
+	ServiceNames() []string
+}
+
+type appRunner interface {
+	Run(addr ...string) error
+}
+
+var (
+	newGRPCClientsFunc = NewGRPCClients
+	createClients      = func(cfg Config) (startupClients, error) {
+		return setupGRPCClients(cfg)
+	}
+	createRouter = func(allowedUsers gin.Accounts, clients startupClients) (appRunner, error) {
+		grpcClients, ok := clients.(*GRPCClients)
+		if !ok {
+			return nil, fmt.Errorf("unexpected grpc clients type %T", clients)
+		}
+		return setupRouter(allowedUsers, grpcClients), nil
+	}
+	runApplication = run
 )
 
 // initFlags initializes command line flags
@@ -83,8 +111,8 @@ func buildServiceConfigs(cfg Config) []ServiceConfig {
 	}
 }
 
-func setupGRPCClients() (*GRPCClients, error) {
-	clients, err := NewGRPCClients(buildServiceConfigs(config))
+func setupGRPCClients(cfg Config) (*GRPCClients, error) {
+	clients, err := newGRPCClientsFunc(buildServiceConfigs(cfg))
 	if err != nil {
 		return nil, fmt.Errorf("failed to create gRPC clients: %w", err)
 	}
@@ -118,64 +146,74 @@ func setupRouter(allowedUsers gin.Accounts, grpcClients *GRPCClients) *gin.Engin
 	return app
 }
 
+func validateAllowedUsersFormat(users string) error {
+	for _, user := range strings.Split(users, ",") {
+		parts := strings.Split(user, ":")
+		if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
+			return fmt.Errorf("invalid user format: %s. expected 'username:password'", user)
+		}
+	}
+	return nil
+}
+
+func run(cfg Config) error {
+	if cfg.AllowedUsers == "" {
+		return errors.New("no allowed users provided. use --allowed-users flag to specify them")
+	}
+	if err := validateAllowedUsersFormat(cfg.AllowedUsers); err != nil {
+		return err
+	}
+
+	grpcClients, err := createClients(cfg)
+	if err != nil {
+		return fmt.Errorf("failed to create gRPC clients: %w", err)
+	}
+	defer grpcClients.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(cfg.HealthCheckTimeout)*time.Second)
+	defer cancel()
+
+	if err := grpcClients.WaitForHealthy(ctx); err != nil {
+		return fmt.Errorf("failed to connect to gRPC services: %w", err)
+	}
+
+	log.Infof("Connected to gRPC services: %v", grpcClients.ServiceNames())
+	if cfg.DataBasePath == "" {
+		return errors.New("no database path provided. use --database-path flag to specify it")
+	}
+	if err := grpcClients.SetUpDataBase(cfg.DataBasePath); err != nil {
+		return fmt.Errorf("failed to set up database: %w", err)
+	}
+	log.Infof("Database successfully set up at %s", cfg.DataBasePath)
+
+	allowedUserMap, allowedUsersStrings := utils.ParseAllowedUsers(cfg.AllowedUsers)
+	if len(allowedUserMap) == 0 {
+		return errors.New("no valid users found in the allowed users list")
+	}
+	log.Infof("Allowed users (hidden passwords): %s", allowedUsersStrings)
+
+	app, err := createRouter(allowedUserMap, grpcClients)
+	if err != nil {
+		return fmt.Errorf("failed to create router: %w", err)
+	}
+
+	listenAddr := fmt.Sprintf(":%d", cfg.Port)
+	log.Infof("Git commit: %s", GitCommit)
+	log.Infof("Gin has started in %s mode on %s", gin.Mode(), listenAddr)
+
+	if err := app.Run(listenAddr); err != nil {
+		return fmt.Errorf("failed to start server: %w", err)
+	}
+	return nil
+}
+
 func main() {
 	initLogger()
 	initFlags()
 	log.Infof("Server Starting time: %s", time.Now().Format(time.RFC3339))
 	flag.Parse()
 
-	if config.AllowedUsers == "" {
-		log.Fatal("No allowed users provided. Use --allowed-users flag to specify them.")
-	}
-
-	// Setup gRPC clients
-	grpcClients, err := setupGRPCClients()
-	if err != nil {
-		log.Fatalf("Failed to create gRPC clients: %v", err)
-	}
-	defer grpcClients.Close()
-
-	// Wait for healthy services
-	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(config.HealthCheckTimeout)*time.Second)
-
-	if err := grpcClients.WaitForHealthy(ctx); err != nil {
-		cancel()
-		log.Errorf("Failed to connect to gRPC services: %v", err)
-		return
-	}
-	cancel() // Call cancel after successful health check
-	var servicesNames []string
-	for name := range grpcClients.services {
-		servicesNames = append(servicesNames, name)
-	}
-
-	log.Infof("Connected to gRPC services: %v", servicesNames)
-	if config.DataBasePath == "" {
-		log.Error("No database path provided. Use --database-path flag to specify it.")
-		return
-	}
-	if err := grpcClients.SetUpDataBase(config.DataBasePath); err != nil {
-		log.Errorf("Failed to set up database: %v", err)
-		return
-	}
-	log.Infof("Database successfully set up at %s", config.DataBasePath)
-
-	// Parse and validate allowed users
-	allowedUserMap, allowedUsersStrings := utils.ParseAllowedUsers(config.AllowedUsers)
-	if len(allowedUserMap) == 0 {
-		log.Error("No valid users found in the allowed users list.")
-		return
-	}
-	log.Infof("Allowed users (hidden passwords): %s", allowedUsersStrings)
-
-	// Setup and start the server
-	app := setupRouter(allowedUserMap, grpcClients)
-	listenAddr := fmt.Sprintf(":%d", config.Port)
-	log.Infof("Git commit: %s", GitCommit)
-	log.Infof("Gin has started in %s mode on %s", gin.Mode(), listenAddr)
-
-	if err := app.Run(listenAddr); err != nil {
-		log.Errorf("Failed to start server: %v", err)
-		return
+	if err := runApplication(config); err != nil {
+		log.Errorf("Application startup failed: %v", err)
 	}
 }

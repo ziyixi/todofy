@@ -12,9 +12,11 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/ziyixi/todofy/testutils/mocks"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/health"
 	"google.golang.org/grpc/health/grpc_health_v1"
+	"google.golang.org/grpc/status"
 	"google.golang.org/grpc/test/bufconn"
 
 	pb "github.com/ziyixi/protos/go/todofy"
@@ -28,21 +30,45 @@ func TestNewGRPCClients(t *testing.T) {
 		assert.Empty(t, clients.services)
 	})
 
-	t.Run("non-empty config registers service state", func(t *testing.T) {
-		clients, err := NewGRPCClients([]ServiceConfig{
-			{
-				name: "configured-service",
-				addr: "dns:///:bad",
-				newClient: func(_ *grpc.ClientConn) any {
-					return "client"
-				},
-			},
+	t.Run("registers service state when connection succeeds", func(t *testing.T) {
+		grpcNewClient = func(string, ...grpc.DialOption) (*grpc.ClientConn, error) {
+			return &grpc.ClientConn{}, nil
+		}
+		t.Cleanup(func() {
+			grpcNewClient = grpc.NewClient
 		})
+
+		clients, err := NewGRPCClients([]ServiceConfig{{
+			name: "configured-service",
+			addr: "ignored",
+			newClient: func(_ *grpc.ClientConn) any {
+				return "client"
+			},
+		}})
 		require.NoError(t, err)
 		require.NotNil(t, clients)
 		assert.Contains(t, clients.services, "configured-service")
 		assert.Equal(t, "client", clients.GetClient("configured-service"))
-		clients.Close()
+	})
+
+	t.Run("returns wrapped error when connection fails", func(t *testing.T) {
+		grpcNewClient = func(string, ...grpc.DialOption) (*grpc.ClientConn, error) {
+			return nil, status.Error(codes.Unavailable, "dial failed")
+		}
+		t.Cleanup(func() {
+			grpcNewClient = grpc.NewClient
+		})
+
+		clients, err := NewGRPCClients([]ServiceConfig{{
+			name: "llm",
+			addr: "ignored",
+			newClient: func(_ *grpc.ClientConn) any {
+				return "client"
+			},
+		}})
+		require.Error(t, err)
+		assert.Nil(t, clients)
+		assert.Contains(t, err.Error(), "failed to connect to llm server")
 	})
 }
 
@@ -60,6 +86,18 @@ func TestGRPCClients_Close(t *testing.T) {
 	require.NotPanics(t, func() {
 		clients.Close()
 	})
+}
+
+func TestGRPCClients_ServiceNames(t *testing.T) {
+	clients := &GRPCClients{
+		services: map[string]*serviceState{
+			"llm":      {},
+			"todo":     {},
+			"database": {},
+		},
+	}
+	names := clients.ServiceNames()
+	assert.ElementsMatch(t, []string{"llm", "todo", "database"}, names)
 }
 
 func newBufconnConn(t *testing.T, registerHealth bool) (*grpc.ClientConn, func()) {

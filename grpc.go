@@ -41,6 +41,8 @@ type serviceState struct {
 	client any
 }
 
+var grpcNewClient = grpc.NewClient
+
 func grpcMiddleware(clients *GRPCClients) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		c.Set(utils.KeyGRPCClients, clients)
@@ -55,7 +57,7 @@ func NewGRPCClients(configs []ServiceConfig) (*GRPCClients, error) {
 	}
 
 	for _, config := range configs {
-		conn, err := grpc.NewClient(config.addr, grpc.WithTransportCredentials(insecure.NewCredentials()))
+		conn, err := grpcNewClient(config.addr, grpc.WithTransportCredentials(insecure.NewCredentials()))
 		if err != nil {
 			clients.Close() // Clean up any connections already established
 			return nil, fmt.Errorf("failed to connect to %s server: %w", config.name, err)
@@ -93,6 +95,18 @@ func (c *GRPCClients) Close() {
 			}
 		}
 	}
+}
+
+// ServiceNames returns configured service names.
+func (c *GRPCClients) ServiceNames() []string {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	names := make([]string, 0, len(c.services))
+	for name := range c.services {
+		names = append(names, name)
+	}
+	return names
 }
 
 // WaitForHealthy waits for all services to become healthy
