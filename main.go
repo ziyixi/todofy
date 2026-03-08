@@ -41,44 +41,50 @@ var (
 
 // initFlags initializes command line flags
 func initFlags() {
-	flag.StringVar(&config.AllowedUsers, "allowed-users", "",
-		"Comma-separated list of allowed users in the format 'username:password'")
-	flag.StringVar(&config.DataBasePath, "database-path", "", "Path to the SQLite database file")
-	flag.IntVar(&config.Port, "port", 8080, "Port to run the server on")
-	flag.IntVar(&config.HealthCheckTimeout, "health-check-timeout", 10, "Timeout for health check in seconds")
-
-	// GRPC addresses for the services
-	flag.StringVar(&config.LLMAddr, "llm-addr", ":50051", "Address of the LLM server")
-	flag.StringVar(&config.TodoAddr, "todo-addr", ":50052", "Address of the Todo server")
-	flag.StringVar(&config.DatabaseAddr, "database-addr", ":50053", "Address of the Database server")
+	initFlagsWithFlagSet(flag.CommandLine, &config)
 }
 
-func setupGRPCClients() (*GRPCClients, error) {
-	serviceConfigs := []ServiceConfig{
+func initFlagsWithFlagSet(fs *flag.FlagSet, cfg *Config) {
+	fs.StringVar(&cfg.AllowedUsers, "allowed-users", "",
+		"Comma-separated list of allowed users in the format 'username:password'")
+	fs.StringVar(&cfg.DataBasePath, "database-path", "", "Path to the SQLite database file")
+	fs.IntVar(&cfg.Port, "port", 8080, "Port to run the server on")
+	fs.IntVar(&cfg.HealthCheckTimeout, "health-check-timeout", 10, "Timeout for health check in seconds")
+
+	// GRPC addresses for the services
+	fs.StringVar(&cfg.LLMAddr, "llm-addr", ":50051", "Address of the LLM server")
+	fs.StringVar(&cfg.TodoAddr, "todo-addr", ":50052", "Address of the Todo server")
+	fs.StringVar(&cfg.DatabaseAddr, "database-addr", ":50053", "Address of the Database server")
+}
+
+func buildServiceConfigs(cfg Config) []ServiceConfig {
+	return []ServiceConfig{
 		{
 			name: "llm",
-			addr: config.LLMAddr,
+			addr: cfg.LLMAddr,
 			newClient: func(conn *grpc.ClientConn) any {
 				return pb.NewLLMSummaryServiceClient(conn)
 			},
 		},
 		{
 			name: "todo",
-			addr: config.TodoAddr,
+			addr: cfg.TodoAddr,
 			newClient: func(conn *grpc.ClientConn) any {
 				return pb.NewTodoServiceClient(conn)
 			},
 		},
 		{
 			name: "database",
-			addr: config.DatabaseAddr,
+			addr: cfg.DatabaseAddr,
 			newClient: func(conn *grpc.ClientConn) any {
 				return pb.NewDataBaseServiceClient(conn)
 			},
 		},
 	}
+}
 
-	clients, err := NewGRPCClients(serviceConfigs)
+func setupGRPCClients() (*GRPCClients, error) {
+	clients, err := NewGRPCClients(buildServiceConfigs(config))
 	if err != nil {
 		return nil, fmt.Errorf("failed to create gRPC clients: %w", err)
 	}

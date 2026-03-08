@@ -27,7 +27,7 @@ type ClientProvider interface {
 type ServiceConfig struct {
 	name      string
 	addr      string
-	newClient func(*grpc.ClientConn) interface{}
+	newClient func(*grpc.ClientConn) any
 }
 
 // GRPCClients manages multiple gRPC client connections
@@ -38,7 +38,7 @@ type GRPCClients struct {
 
 type serviceState struct {
 	conn   *grpc.ClientConn
-	client interface{}
+	client any
 }
 
 func grpcMiddleware(clients *GRPCClients) gin.HandlerFunc {
@@ -71,7 +71,7 @@ func NewGRPCClients(configs []ServiceConfig) (*GRPCClients, error) {
 }
 
 // GetClient returns the client for the specified service
-func (c *GRPCClients) GetClient(name string) interface{} {
+func (c *GRPCClients) GetClient(name string) any {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 
@@ -143,22 +143,31 @@ func (c *GRPCClients) WaitForHealthy(ctx context.Context) error {
 		close(errChan)
 	}()
 
-	var errors []error
+	var healthErrs []error
 	for err := range errChan {
 		if err != nil {
-			errors = append(errors, err)
+			healthErrs = append(healthErrs, err)
 		}
 	}
 
-	if len(errors) > 0 {
-		return fmt.Errorf("health check failed: %v", errors)
+	if len(healthErrs) > 0 {
+		return fmt.Errorf("health check failed: %v", healthErrs)
 	}
 
 	return nil
 }
 
 func (c *GRPCClients) SetUpDataBase(path string) error {
-	databaseClient := c.GetClient("database").(pb.DataBaseServiceClient)
+	client := c.GetClient("database")
+	if client == nil {
+		return fmt.Errorf("database client is not configured")
+	}
+
+	databaseClient, ok := client.(pb.DataBaseServiceClient)
+	if !ok {
+		return fmt.Errorf("database client has unexpected type %T", client)
+	}
+
 	req := &pb.CreateIfNotExistRequest{
 		Type: pb.DatabaseType_DATABASE_TYPE_SQLITE,
 		Path: path,

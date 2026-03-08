@@ -1,164 +1,194 @@
 package main
 
 import (
+	"context"
 	"fmt"
+	"net"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
+	"github.com/ziyixi/todofy/testutils/mocks"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/health"
+	"google.golang.org/grpc/health/grpc_health_v1"
+	"google.golang.org/grpc/test/bufconn"
 
 	pb "github.com/ziyixi/protos/go/todofy"
-	"github.com/ziyixi/todofy/testutils/mocks"
 )
 
-func TestSetupGRPCClients(t *testing.T) {
-	t.Run("creates clients successfully", func(t *testing.T) {
-		// This test would require actual servers running, so we'll skip it for now
-		// In a real scenario, we'd want to mock the gRPC connections
-		t.Skip("Requires running gRPC servers - needs integration test setup")
-	})
-}
-
 func TestNewGRPCClients(t *testing.T) {
-	t.Run("creates clients with provided configs", func(_ *testing.T) {
-		configs := []ServiceConfig{
+	t.Run("empty config creates empty clients", func(t *testing.T) {
+		clients, err := NewGRPCClients(nil)
+		require.NoError(t, err)
+		require.NotNil(t, clients)
+		assert.Empty(t, clients.services)
+	})
+
+	t.Run("non-empty config registers service state", func(t *testing.T) {
+		clients, err := NewGRPCClients([]ServiceConfig{
 			{
-				name: "test-service",
-				addr: "localhost:50051",
-				newClient: func(conn *grpc.ClientConn) any {
-					return pb.NewLLMSummaryServiceClient(conn)
+				name: "configured-service",
+				addr: "dns:///:bad",
+				newClient: func(_ *grpc.ClientConn) any {
+					return "client"
 				},
 			},
-		}
-
-		// This would fail without actual server, so we'll mock differently
-		// or make this an integration test
-		clients, err := NewGRPCClients(configs)
-
-		// Even if connection fails, the structure should be created
-		if clients != nil {
-			defer clients.Close()
-		}
-
-		// For unit testing, we'd want to extract an interface and mock it
-		// This shows the need for refactoring for better testability
-		_ = err // Don't fail the test - connection expected to fail in unit test
+		})
+		require.NoError(t, err)
+		require.NotNil(t, clients)
+		assert.Contains(t, clients.services, "configured-service")
+		assert.Equal(t, "client", clients.GetClient("configured-service"))
+		clients.Close()
 	})
 }
 
 func TestGRPCClients_GetClient(t *testing.T) {
-	t.Run("returns nil for non-existent service", func(t *testing.T) {
-		clients := &GRPCClients{
-			services: make(map[string]*serviceState),
-		}
+	clients := &GRPCClients{services: map[string]*serviceState{}}
+	assert.Nil(t, clients.GetClient("missing"))
 
-		result := clients.GetClient("non-existent")
-		assert.Nil(t, result)
-	})
-
-	t.Run("returns client for existing service", func(t *testing.T) {
-		mockClient := &mocks.MockLLMSummaryServiceClient{}
-
-		clients := &GRPCClients{
-			services: map[string]*serviceState{
-				"test-service": {
-					client: mockClient,
-				},
-			},
-		}
-
-		result := clients.GetClient("test-service")
-		assert.Equal(t, mockClient, result)
-	})
+	mockClient := &mocks.MockLLMSummaryServiceClient{}
+	clients.services["llm"] = &serviceState{client: mockClient}
+	assert.Equal(t, mockClient, clients.GetClient("llm"))
 }
 
 func TestGRPCClients_Close(t *testing.T) {
-	t.Run("closes all connections without panic", func(t *testing.T) {
-		clients := &GRPCClients{
-			services: make(map[string]*serviceState),
-		}
-
-		// Should not panic even with empty services
-		require.NotPanics(t, func() {
-			clients.Close()
-		})
+	clients := &GRPCClients{services: map[string]*serviceState{}}
+	require.NotPanics(t, func() {
+		clients.Close()
 	})
 }
 
-func TestServiceConfig(t *testing.T) {
-	t.Run("service config structure", func(t *testing.T) {
-		config := ServiceConfig{
-			name: "test",
-			addr: ":50051",
-			newClient: func(_ *grpc.ClientConn) any {
-				return "mock-client"
+func newBufconnConn(t *testing.T, registerHealth bool) (*grpc.ClientConn, func()) {
+	t.Helper()
+
+	listener := bufconn.Listen(1024 * 1024)
+	server := grpc.NewServer()
+	if registerHealth {
+		healthServer := health.NewServer()
+		healthServer.SetServingStatus("", grpc_health_v1.HealthCheckResponse_SERVING)
+		grpc_health_v1.RegisterHealthServer(server, healthServer)
+	}
+
+	go func() {
+		_ = server.Serve(listener)
+	}()
+
+	conn, err := grpc.NewClient(
+		"passthrough:///bufconn",
+		grpc.WithContextDialer(func(context.Context, string) (net.Conn, error) {
+			return listener.Dial()
+		}),
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+	)
+	require.NoError(t, err)
+
+	cleanup := func() {
+		require.NoError(t, conn.Close())
+		server.Stop()
+		require.NoError(t, listener.Close())
+	}
+
+	return conn, cleanup
+}
+
+func TestGRPCClients_WaitForHealthy(t *testing.T) {
+	t.Run("returns nil when all services are serving", func(t *testing.T) {
+		conn, cleanup := newBufconnConn(t, true)
+		defer cleanup()
+
+		clients := &GRPCClients{
+			services: map[string]*serviceState{
+				"healthy": {conn: conn},
 			},
 		}
 
-		assert.Equal(t, "test", config.name)
-		assert.Equal(t, ":50051", config.addr)
-		assert.NotNil(t, config.newClient)
-
-		// Test the newClient function
-		result := config.newClient(nil)
-		assert.Equal(t, "mock-client", result)
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		require.NoError(t, clients.WaitForHealthy(ctx))
 	})
-}
 
-func TestConfig_Validation(t *testing.T) {
-	t.Run("config structure has expected fields", func(t *testing.T) {
-		config := Config{
-			AllowedUsers:       "user:pass",
-			DataBasePath:       "/tmp/test.db",
-			Port:               8080,
-			HealthCheckTimeout: 10,
-			LLMAddr:            ":50051",
-			TodoAddr:           ":50052",
-			DatabaseAddr:       ":50053",
+	t.Run("returns error on timeout", func(t *testing.T) {
+		conn, cleanup := newBufconnConn(t, false)
+		defer cleanup()
+
+		clients := &GRPCClients{
+			services: map[string]*serviceState{
+				"unhealthy": {conn: conn},
+			},
 		}
 
-		assert.Equal(t, "user:pass", config.AllowedUsers)
-		assert.Equal(t, "/tmp/test.db", config.DataBasePath)
-		assert.Equal(t, 8080, config.Port)
-		assert.Equal(t, 10, config.HealthCheckTimeout)
-		assert.Equal(t, ":50051", config.LLMAddr)
-		assert.Equal(t, ":50052", config.TodoAddr)
-		assert.Equal(t, ":50053", config.DatabaseAddr)
+		ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+		defer cancel()
+
+		err := clients.WaitForHealthy(ctx)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "health check failed")
+		assert.Contains(t, err.Error(), "unhealthy")
+	})
+
+	t.Run("returns nil when no services configured", func(t *testing.T) {
+		clients := &GRPCClients{services: map[string]*serviceState{}}
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		require.NoError(t, clients.WaitForHealthy(ctx))
 	})
 }
 
-func TestSetUpDataBase_Success(t *testing.T) {
-	mockDB := new(mocks.MockDataBaseServiceClient)
-	mockDB.On("CreateIfNotExist", mock.Anything, mock.Anything, mock.Anything).
-		Return(&pb.CreateIfNotExistResponse{}, nil)
+func TestSetUpDataBase(t *testing.T) {
+	t.Run("success", func(t *testing.T) {
+		mockDB := new(mocks.MockDataBaseServiceClient)
+		mockDB.On("CreateIfNotExist", mock.Anything, mock.Anything, mock.Anything).
+			Return(&pb.CreateIfNotExistResponse{}, nil)
 
-	clients := &GRPCClients{
-		services: map[string]*serviceState{
-			"database": {client: mockDB},
-		},
-	}
+		clients := &GRPCClients{
+			services: map[string]*serviceState{
+				"database": {client: mockDB},
+			},
+		}
 
-	err := clients.SetUpDataBase("/tmp/test.db")
-	assert.NoError(t, err)
-	mockDB.AssertExpectations(t)
-}
+		err := clients.SetUpDataBase("/tmp/test.db")
+		assert.NoError(t, err)
+		mockDB.AssertExpectations(t)
+	})
 
-func TestSetUpDataBase_Error(t *testing.T) {
-	mockDB := new(mocks.MockDataBaseServiceClient)
-	mockDB.On("CreateIfNotExist", mock.Anything, mock.Anything, mock.Anything).
-		Return(nil, fmt.Errorf("connection refused"))
+	t.Run("rpc error", func(t *testing.T) {
+		mockDB := new(mocks.MockDataBaseServiceClient)
+		mockDB.On("CreateIfNotExist", mock.Anything, mock.Anything, mock.Anything).
+			Return(nil, fmt.Errorf("connection refused"))
 
-	clients := &GRPCClients{
-		services: map[string]*serviceState{
-			"database": {client: mockDB},
-		},
-	}
+		clients := &GRPCClients{
+			services: map[string]*serviceState{
+				"database": {client: mockDB},
+			},
+		}
 
-	err := clients.SetUpDataBase("/tmp/test.db")
-	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "failed to set up database")
-	assert.Contains(t, err.Error(), "connection refused")
-	mockDB.AssertExpectations(t)
+		err := clients.SetUpDataBase("/tmp/test.db")
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "failed to set up database")
+		assert.Contains(t, err.Error(), "connection refused")
+		mockDB.AssertExpectations(t)
+	})
+
+	t.Run("missing database client", func(t *testing.T) {
+		clients := &GRPCClients{services: map[string]*serviceState{}}
+		err := clients.SetUpDataBase("/tmp/test.db")
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "database client is not configured")
+	})
+
+	t.Run("wrong database client type", func(t *testing.T) {
+		clients := &GRPCClients{
+			services: map[string]*serviceState{
+				"database": {client: "not-a-database-client"},
+			},
+		}
+
+		err := clients.SetUpDataBase("/tmp/test.db")
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "database client has unexpected type")
+	})
 }
