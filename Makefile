@@ -1,6 +1,6 @@
 # Todofy Makefile
 
-.PHONY: test test-coverage test-verbose test-integration build clean lint security help install-hooks
+.PHONY: test test-coverage test-verbose test-integration build clean lint lint-check security help install-hooks
 
 # Default target
 help: ## Show this help message
@@ -24,7 +24,12 @@ test-integration: ## Run integration tests
 	./scripts/integration-test.sh
 
 # Code quality targets
-lint: ## Run golangci-lint
+lint: ## Auto-fix lint/format issues, then verify
+	gofmt -w $(shell find . -name '*.go' -not -path './vendor/*')
+	-golangci-lint run --fix
+	$(MAKE) lint-check
+
+lint-check: ## Run golangci-lint without applying fixes
 	golangci-lint run
 
 security: ## Run security analysis with gosec
@@ -64,5 +69,5 @@ dev-setup: install-hooks ## Install development dependencies and hooks
 	go install github.com/securego/gosec/v2/cmd/gosec@latest
 
 # CI targets (used by GitHub Actions)
-ci-test: test-coverage lint security ## Run all CI checks
+ci-test: test-coverage lint-check security ## Run all CI checks
 	@echo "All CI checks completed successfully"

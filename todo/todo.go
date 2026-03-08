@@ -63,10 +63,10 @@ type todoistTaskCreator interface {
 
 type todoServer struct {
 	pb.TodoServiceServer
-	newMailjetClient  func(publicKey, privateKey string) mailjetSender
-	newNotionClient   func(apiKey string) notionPageCreator
-	newTodoistClient  func(apiKey string) todoistTaskCreator
-	fetchStatus       func(url, username, password string) (interface{}, error)
+	newMailjetClient func(publicKey, privateKey string) mailjetSender
+	newNotionClient  func(apiKey string) notionPageCreator
+	newTodoistClient func(apiKey string) todoistTaskCreator
+	fetchStatus      func(url, username, password string) (interface{}, error)
 }
 
 func (s *todoServer) PopulateTodo(ctx context.Context, req *pb.TodoRequest) (*pb.TodoResponse, error) {

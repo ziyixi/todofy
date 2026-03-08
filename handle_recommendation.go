@@ -18,6 +18,7 @@ const (
 	TimeDurationToRecommendation = 24 * time.Hour
 	DefaultTopN                  = 3
 	MaxTopN                      = 10
+	taskSummarySplitter          = "=========================\n"
 )
 
 // LLM retry configuration — var so tests can override.
@@ -82,10 +83,9 @@ func HandleRecommendation(c *gin.Context) {
 	}
 
 	// Build content from task summaries
-	splitter := "=========================\n"
-	content := splitter
+	content := taskSummarySplitter
 	for _, entry := range queryResp.Entries {
-		content += entry.Summary + "\n" + splitter
+		content += entry.Summary + "\n" + taskSummarySplitter
 	}
 
 	// Generate recommendation via LLM

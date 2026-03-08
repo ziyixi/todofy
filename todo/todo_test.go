@@ -16,7 +16,10 @@ import (
 
 type mockMailjetSender struct{ mock.Mock }
 
-func (m *mockMailjetSender) SendMailV31(data *mailjet.MessagesV31, options ...mailjet.RequestOptions) (*mailjet.ResultsV31, error) {
+func (m *mockMailjetSender) SendMailV31(
+	data *mailjet.MessagesV31,
+	options ...mailjet.RequestOptions,
+) (*mailjet.ResultsV31, error) {
 	args := m.Called(data, options)
 	if args.Get(0) == nil {
 		return nil, args.Error(1)
@@ -26,7 +29,10 @@ func (m *mockMailjetSender) SendMailV31(data *mailjet.MessagesV31, options ...ma
 
 type mockNotionPageCreator struct{ mock.Mock }
 
-func (m *mockNotionPageCreator) Create(ctx context.Context, requestBody *notionapi.PageCreateRequest) (*notionapi.Page, error) {
+func (m *mockNotionPageCreator) Create(
+	ctx context.Context,
+	requestBody *notionapi.PageCreateRequest,
+) (*notionapi.Page, error) {
 	args := m.Called(ctx, requestBody)
 	if args.Get(0) == nil {
 		return nil, args.Error(1)
@@ -36,7 +42,11 @@ func (m *mockNotionPageCreator) Create(ctx context.Context, requestBody *notiona
 
 type mockTodoistTaskCreator struct{ mock.Mock }
 
-func (m *mockTodoistTaskCreator) CreateTask(ctx context.Context, requestID string, taskDetails *todoist.CreateTaskRequest) (*todoist.Task, error) {
+func (m *mockTodoistTaskCreator) CreateTask(
+	ctx context.Context,
+	requestID string,
+	taskDetails *todoist.CreateTaskRequest,
+) (*todoist.Task, error) {
 	args := m.Called(ctx, requestID, taskDetails)
 	if args.Get(0) == nil {
 		return nil, args.Error(1)
@@ -45,9 +55,11 @@ func (m *mockTodoistTaskCreator) CreateTask(ctx context.Context, requestID strin
 }
 
 const (
-	testPrivateKey = "private-key"
-	testPublicKey  = "public-key"
-	testEmail      = "test@example.com"
+	testPrivateKey    = "private-key"
+	testPublicKey     = "public-key"
+	testEmail         = "test@example.com"
+	testNotionDBID    = "db-123"
+	testGenericAPIKey = "test-key"
 )
 
 func TestTodoServer_PopulateTodo(t *testing.T) {
@@ -353,7 +365,7 @@ func TestValidateNotionFlags(t *testing.T) {
 		}()
 
 		*notionAPIKey = ""
-		*notionDataBaseID = "db-123"
+		*notionDataBaseID = testNotionDBID
 
 		err := validateNotionFlags()
 		assert.Error(t, err)
@@ -368,7 +380,7 @@ func TestValidateNotionFlags(t *testing.T) {
 			*notionDataBaseID = originalDB
 		}()
 
-		*notionAPIKey = "test-key"
+		*notionAPIKey = testGenericAPIKey
 		*notionDataBaseID = ""
 
 		err := validateNotionFlags()
@@ -384,8 +396,8 @@ func TestValidateNotionFlags(t *testing.T) {
 			*notionDataBaseID = originalDB
 		}()
 
-		*notionAPIKey = "test-key"
-		*notionDataBaseID = "db-123"
+		*notionAPIKey = testGenericAPIKey
+		*notionDataBaseID = testNotionDBID
 
 		err := validateNotionFlags()
 		assert.NoError(t, err)
@@ -408,7 +420,7 @@ func TestValidateTodoistFlags(t *testing.T) {
 		originalKey := *todoistAPIKey
 		defer func() { *todoistAPIKey = originalKey }()
 
-		*todoistAPIKey = "test-key"
+		*todoistAPIKey = testGenericAPIKey
 
 		err := validateTodoistFlags()
 		assert.NoError(t, err)
@@ -430,9 +442,9 @@ func TestPopulateTodoByMailjet_DI(t *testing.T) {
 
 	t.Run("success", func(t *testing.T) {
 		defer saveMailjetFlags()()
-		*mailjetAPIKeyPublic = "test-public"
-		*mailjetAPIKeyPrivate = "test-private"
-		*targetEmail = "test@example.com"
+		*mailjetAPIKeyPublic = testPublicKey
+		*mailjetAPIKeyPrivate = testPrivateKey
+		*targetEmail = testEmail
 
 		mockSender := new(mockMailjetSender)
 		mockSender.On("SendMailV31", mock.Anything, mock.Anything).Return(&mailjet.ResultsV31{
@@ -470,9 +482,9 @@ func TestPopulateTodoByMailjet_DI(t *testing.T) {
 
 	t.Run("send error", func(t *testing.T) {
 		defer saveMailjetFlags()()
-		*mailjetAPIKeyPublic = "test-public"
-		*mailjetAPIKeyPrivate = "test-private"
-		*targetEmail = "test@example.com"
+		*mailjetAPIKeyPublic = testPublicKey
+		*mailjetAPIKeyPrivate = testPrivateKey
+		*targetEmail = testEmail
 
 		mockSender := new(mockMailjetSender)
 		mockSender.On("SendMailV31", mock.Anything, mock.Anything).Return(nil, assert.AnError)
@@ -497,9 +509,9 @@ func TestPopulateTodoByMailjet_DI(t *testing.T) {
 
 	t.Run("empty results", func(t *testing.T) {
 		defer saveMailjetFlags()()
-		*mailjetAPIKeyPublic = "test-public"
-		*mailjetAPIKeyPrivate = "test-private"
-		*targetEmail = "test@example.com"
+		*mailjetAPIKeyPublic = testPublicKey
+		*mailjetAPIKeyPrivate = testPrivateKey
+		*targetEmail = testEmail
 
 		mockSender := new(mockMailjetSender)
 		mockSender.On("SendMailV31", mock.Anything, mock.Anything).Return(&mailjet.ResultsV31{
@@ -575,8 +587,8 @@ func TestPopulateTodoByNotion_DI(t *testing.T) {
 
 	t.Run("success", func(t *testing.T) {
 		defer saveNotionFlags()()
-		*notionAPIKey = "test-key"
-		*notionDataBaseID = "db-123"
+		*notionAPIKey = testGenericAPIKey
+		*notionDataBaseID = testNotionDBID
 
 		mockCreator := new(mockNotionPageCreator)
 		mockCreator.On("Create", mock.Anything, mock.Anything).Return(&notionapi.Page{
@@ -607,8 +619,8 @@ func TestPopulateTodoByNotion_DI(t *testing.T) {
 
 	t.Run("create error", func(t *testing.T) {
 		defer saveNotionFlags()()
-		*notionAPIKey = "test-key"
-		*notionDataBaseID = "db-123"
+		*notionAPIKey = testGenericAPIKey
+		*notionDataBaseID = testNotionDBID
 
 		mockCreator := new(mockNotionPageCreator)
 		mockCreator.On("Create", mock.Anything, mock.Anything).Return(nil, assert.AnError)
@@ -644,7 +656,7 @@ func TestPopulateTodoByTodoist_DI(t *testing.T) {
 
 	t.Run("success", func(t *testing.T) {
 		defer saveTodoistFlags()()
-		*todoistAPIKey = "test-key"
+		*todoistAPIKey = testGenericAPIKey
 		*todoistProjectID = ""
 
 		mockCreator := new(mockTodoistTaskCreator)
@@ -676,7 +688,7 @@ func TestPopulateTodoByTodoist_DI(t *testing.T) {
 
 	t.Run("create error", func(t *testing.T) {
 		defer saveTodoistFlags()()
-		*todoistAPIKey = "test-key"
+		*todoistAPIKey = testGenericAPIKey
 
 		mockCreator := new(mockTodoistTaskCreator)
 		mockCreator.On("CreateTask", mock.Anything, mock.Anything, mock.Anything).Return(nil, assert.AnError)
