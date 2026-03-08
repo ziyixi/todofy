@@ -24,9 +24,21 @@ jobs:
 
     - name: Fix SARIF null relationships
       run: |
-        jq '(.runs[].tool.driver.rules // []) |= map(
-          if .relationships then .relationships |= map(select(. != null)) else . end
-        )' results.sarif > results-fixed.sarif
+        jq '
+          .runs |= map(
+            if (.tool.driver.rules | type) == "array" then
+              .tool.driver.rules |= map(
+                if (.relationships | type) == "array" then
+                  .relationships |= map(select(. != null))
+                else
+                  .
+                end
+              )
+            else
+              .
+            end
+          )
+        ' results.sarif > results-fixed.sarif
         mv results-fixed.sarif results.sarif
 
     - name: Upload SARIF file
