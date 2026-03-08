@@ -25,32 +25,32 @@ func TestConstants(t *testing.T) {
 	})
 
 	t.Run("default prompt constants", func(t *testing.T) {
-		assert.NotEmpty(t, DefaultpromptToSummaryEmail)
-		assert.NotEmpty(t, DefaultpromptToSummaryEmailRange)
+		assert.NotEmpty(t, DefaultPromptToSummaryEmail)
+		assert.NotEmpty(t, DefaultPromptToSummaryEmailRange)
 
 		// Check that prompts contain expected keywords
-		assert.Contains(t, DefaultpromptToSummaryEmail, "summary")
-		assert.Contains(t, DefaultpromptToSummaryEmail, "email")
-		assert.Contains(t, DefaultpromptToSummaryEmail, "chinese")
-		assert.Contains(t, DefaultpromptToSummaryEmail, "concise")
+		assert.Contains(t, DefaultPromptToSummaryEmail, "summary")
+		assert.Contains(t, DefaultPromptToSummaryEmail, "email")
+		assert.Contains(t, DefaultPromptToSummaryEmail, "chinese")
+		assert.Contains(t, DefaultPromptToSummaryEmail, "concise")
 
-		assert.Contains(t, DefaultpromptToSummaryEmailRange, "rank")
-		assert.Contains(t, DefaultpromptToSummaryEmailRange, "importance")
-		assert.Contains(t, DefaultpromptToSummaryEmailRange, "Important")
-		assert.Contains(t, DefaultpromptToSummaryEmailRange, "Urgent")
-		assert.Contains(t, DefaultpromptToSummaryEmailRange, "Normal")
-		assert.Contains(t, DefaultpromptToSummaryEmailRange, "Low Priority")
+		assert.Contains(t, DefaultPromptToSummaryEmailRange, "rank")
+		assert.Contains(t, DefaultPromptToSummaryEmailRange, "importance")
+		assert.Contains(t, DefaultPromptToSummaryEmailRange, "Important")
+		assert.Contains(t, DefaultPromptToSummaryEmailRange, "Urgent")
+		assert.Contains(t, DefaultPromptToSummaryEmailRange, "Normal")
+		assert.Contains(t, DefaultPromptToSummaryEmailRange, "Low Priority")
 	})
 
 	t.Run("prompt format and requirements", func(t *testing.T) {
 		// Check that summary email prompt has required formatting instructions
-		prompt := DefaultpromptToSummaryEmail
+		prompt := DefaultPromptToSummaryEmail
 		assert.Contains(t, prompt, "IMPORTANT:")
 		assert.Contains(t, prompt, "markdown")
 		assert.Contains(t, prompt, "1-2 sentences")
 
 		// Check that range summary prompt has categorization instructions
-		rangePrompt := DefaultpromptToSummaryEmailRange
+		rangePrompt := DefaultPromptToSummaryEmailRange
 		assert.Contains(t, rangePrompt, "IMPORTANT:")
 		assert.Contains(t, rangePrompt, "four categories")
 		assert.Contains(t, rangePrompt, "mac email app")
@@ -65,10 +65,10 @@ func TestConstants(t *testing.T) {
 
 	t.Run("prompt language specifications", func(t *testing.T) {
 		// Check language requirements in prompts
-		assert.Contains(t, DefaultpromptToSummaryEmail, "chinese as response language")
+		assert.Contains(t, DefaultPromptToSummaryEmail, "chinese as response language")
 
 		// Range summary should use plain text (no markdown)
-		assert.Contains(t, DefaultpromptToSummaryEmailRange, "no markdown")
-		assert.Contains(t, DefaultpromptToSummaryEmailRange, "readable for mac email app")
+		assert.Contains(t, DefaultPromptToSummaryEmailRange, "no markdown")
+		assert.Contains(t, DefaultPromptToSummaryEmailRange, "readable for mac email app")
 	})
 }

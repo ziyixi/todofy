@@ -42,7 +42,7 @@ func HandleUpdateTodo(c *gin.Context) {
 	}
 
 	// Compute hash_id from prompt + email content for dedup
-	hashInput := utils.DefaultpromptToSummaryEmail + emailContent.Content
+	hashInput := utils.DefaultPromptToSummaryEmail + emailContent.Content
 	hashID := fmt.Sprintf("%x", sha256.Sum256([]byte(hashInput)))
 
 	// Check if we already have a cached result for this hash
@@ -75,7 +75,7 @@ func HandleUpdateTodo(c *gin.Context) {
 		// Cache miss — call LLM
 		summaryReq = &pb.LLMSummaryRequest{
 			ModelFamily: pb.ModelFamily_MODEL_FAMILY_GEMINI,
-			Prompt:      utils.DefaultpromptToSummaryEmail,
+			Prompt:      utils.DefaultPromptToSummaryEmail,
 			Text:        emailContent.Content,
 		}
 		llmClient := clients.GetClient("llm").(pb.LLMSummaryServiceClient)
@@ -100,11 +100,13 @@ func HandleUpdateTodo(c *gin.Context) {
 	tmpl, err := template.New("todoDescription").Parse(descriptionTmpl)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error in parsing template": err.Error()})
+		return
 	}
 	var buf bytes.Buffer
 	err = tmpl.Execute(&buf, emailContentWithSummary)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error in executing template": err.Error()})
+		return
 	}
 	todoContent := buf.String()
 

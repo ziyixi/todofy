@@ -38,12 +38,12 @@ func HandleSummary(c *gin.Context) {
 	}
 
 	// Summarize the content
-	summmaries := "As there is no new task in the last 24 hours, there will have no summary. " +
+	summaries := "As there is no new task in the last 24 hours, there will have no summary. " +
 		"Please check your service as it's highly not possible that there is no new task in the last 24 hours.\n"
 	if len(queryResp.Entries) > 0 {
 		summaryReq := &pb.LLMSummaryRequest{
 			ModelFamily: pb.ModelFamily_MODEL_FAMILY_GEMINI,
-			Prompt:      utils.DefaultpromptToSummaryEmailRange,
+			Prompt:      utils.DefaultPromptToSummaryEmailRange,
 			Text:        content,
 		}
 		llmClient := clients.GetClient("llm").(pb.LLMSummaryServiceClient)
@@ -52,7 +52,7 @@ func HandleSummary(c *gin.Context) {
 			c.JSON(http.StatusInternalServerError, gin.H{"error in summarizing email": err.Error()})
 			return
 		}
-		summmaries = summaryResp.Summary
+		summaries = summaryResp.Summary
 	}
 
 	// Send an email to the user
@@ -61,7 +61,7 @@ func HandleSummary(c *gin.Context) {
 		App:     pb.TodoApp_TODO_APP_DIDA365,
 		Method:  pb.PopullateTodoMethod_POPULLATE_TODO_METHOD_MAILJET,
 		Subject: utils.SystemAutomaticallyEmailPrefix + fmt.Sprintf("[%s] Summary of last 24 hours", todayDate),
-		Body:    summmaries,
+		Body:    summaries,
 		From:    utils.SystemAutomaticallyEmailSender,
 		To:      utils.SystemAutomaticallyEmailReceiver,
 		ToName:  utils.SystemAutomaticallyEmailReceiverName,

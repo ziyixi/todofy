@@ -96,7 +96,7 @@ func (c *GRPCClients) Close() {
 }
 
 // WaitForHealthy waits for all services to become healthy
-func (c *GRPCClients) WaitForHealthy(ctx context.Context, _ time.Duration) error {
+func (c *GRPCClients) WaitForHealthy(ctx context.Context) error {
 	c.mu.RLock()
 	serviceCount := len(c.services)
 	c.mu.RUnlock()

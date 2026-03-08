@@ -132,7 +132,7 @@ func main() {
 	// Wait for healthy services
 	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(config.HealthCheckTimeout)*time.Second)
 
-	if err := grpcClients.WaitForHealthy(ctx, time.Duration(config.HealthCheckTimeout)*time.Second); err != nil {
+	if err := grpcClients.WaitForHealthy(ctx); err != nil {
 		cancel()
 		log.Errorf("Failed to connect to gRPC services: %v", err)
 		return
