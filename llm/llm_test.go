@@ -8,6 +8,32 @@ import (
 	pb "github.com/ziyixi/protos/go/todofy"
 )
 
+func TestNormalizeDailyTokenLimit(t *testing.T) {
+	t.Run("valid value", func(t *testing.T) {
+		limit, err := normalizeDailyTokenLimit(3000000)
+		assert.NoError(t, err)
+		assert.Equal(t, int32(3000000), limit)
+	})
+
+	t.Run("zero value", func(t *testing.T) {
+		limit, err := normalizeDailyTokenLimit(0)
+		assert.NoError(t, err)
+		assert.Equal(t, int32(0), limit)
+	})
+
+	t.Run("negative value returns error", func(t *testing.T) {
+		_, err := normalizeDailyTokenLimit(-1)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "must be >= 0")
+	})
+
+	t.Run("overflow value returns error", func(t *testing.T) {
+		_, err := normalizeDailyTokenLimit(maxInt32Value + 1)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "must be <=")
+	})
+}
+
 func TestLLMServer_Summarize(t *testing.T) {
 	// Note: These tests focus on validation logic that can be tested
 	// without external dependencies. Full integration tests would require

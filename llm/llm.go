@@ -35,6 +35,8 @@ var (
 	)
 )
 
+const maxInt32Value = int(^uint32(0) >> 1)
+
 type llmServer struct {
 	pb.LLMSummaryServiceServer
 	tracker       *TokenTracker
@@ -214,14 +216,29 @@ func (s *llmServer) summaryByGemini(ctx context.Context, prompt, content string,
 	return resp.Candidates[0].Content.Parts[0].Text, nil
 }
 
+func normalizeDailyTokenLimit(limit int) (int32, error) {
+	if limit < 0 {
+		return 0, fmt.Errorf("daily-token-limit must be >= 0, got %d", limit)
+	}
+	if limit > maxInt32Value {
+		return 0, fmt.Errorf("daily-token-limit must be <= %d, got %d", maxInt32Value, limit)
+	}
+	return int32(limit), nil
+}
+
 func main() {
 	initLogger()
 	flag.Parse()
 
-	tracker := NewTokenTracker(24*time.Hour, int32(*dailyTokenLimit))
+	normalizedDailyTokenLimit, err := normalizeDailyTokenLimit(*dailyTokenLimit)
+	if err != nil {
+		log.Fatalf("invalid daily-token-limit: %v", err)
+	}
+
+	tracker := NewTokenTracker(24*time.Hour, normalizedDailyTokenLimit)
 	log.Infof("Daily token limit: %d (0 = unlimited)", *dailyTokenLimit)
 
-	err := utils.StartGRPCServer[pb.LLMSummaryServiceServer](
+	err = utils.StartGRPCServer[pb.LLMSummaryServiceServer](
 		*port,
 		&llmServer{tracker: tracker, clientFactory: newRealGeminiClient},
 		pb.RegisterLLMSummaryServiceServer,
