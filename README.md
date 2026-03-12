@@ -3,7 +3,7 @@
 [![CI/CD Pipeline](https://github.com/ziyixi/todofy/actions/workflows/ci.yml/badge.svg)](https://github.com/ziyixi/todofy/actions/workflows/ci.yml)
 [![codecov](https://codecov.io/gh/ziyixi/todofy/graph/badge.svg?token=2Y6YIYUYZP)](https://codecov.io/gh/ziyixi/todofy)
 
-Todofy is a self-hosted task management tool designed to help you organize and prioritize your tasks efficiently. It's built as a collection of microservices communicating over gRPC, with email-driven task creation powered by Google Gemini LLM summarization.
+Todofy is a self-hosted task management tool designed to help you organize and prioritize your tasks efficiently. It's built as a collection of microservices communicating over gRPC, with email-driven task creation routed to Todoist and Google Gemini-based summarization.
 
 ## 🏗️ Architecture
 
@@ -15,8 +15,6 @@ graph TB
     
     %% External services
     Gemini[🤖 Google Gemini<br/>LLM API]
-    Mailjet[📬 Mailjet<br/>Email Service]
-    Notion[📝 Notion<br/>Database API]
     Todoist[✅ Todoist<br/>Task API v1]
     
     %% Main HTTP Server
@@ -48,12 +46,10 @@ graph TB
     %% Dedup cache flow: check DB first, then conditionally call LLM
     Main -->|CheckExist<br/>hash_id lookup| DB
     Main -.->|LLMSummaryRequest<br/>only on cache miss| LLM
-    Main -->|TodoRequest| Todo
+    Main -->|TodoRequest<br/>from /api/v1/update_todo| Todo
     Main -->|Write<br/>with hash_id| DB
     
     LLM -->|API Calls| Gemini
-    Todo -->|Email Send| Mailjet
-    Todo -->|Task Creation| Notion
     Todo -->|Task Creation| Todoist
     
     %% Service descriptions
@@ -68,7 +64,7 @@ graph TB
     classDef endpoint fill:#e8f5e8,stroke:#388e3c,stroke-width:2px
     classDef container fill:#fff3e0,stroke:#f57c00,stroke-width:2px,stroke-dasharray: 5 5
     
-    class User,Email,Gemini,Mailjet,Notion,Todoist external
+    class User,Email,Gemini,Todoist external
     class Main,LLM,Todo,DB service
     class Summary,UpdateTodo,Recommend endpoint
     class MainContainer,LLMContainer,TodoContainer,DBContainer container
@@ -80,11 +76,26 @@ graph TB
 * **LLM Integration:** Leverages Google Gemini models for email summarization with automatic model fallback (via `todofy-llm` service).
 * **Cost Controls:** Daily token limit with 24-hour sliding window (default: 3M tokens) to prevent runaway API costs, plus email content truncation (50K character hard limit).
 * **Dedup Cache:** SHA-256 hash-based deduplication — identical emails skip the expensive LLM call and reuse the cached summary from the database.
+* **Summary API:** `GET /api/summary` returns structured JSON: `summary`, `task_count`, and `time_window_hours`.
 * **Task Recommendations:** `GET /api/recommendation?top=N` queries recent 24h tasks, asks the LLM to pick the top-N most important ones (default 3, max 10), and returns structured JSON with rank, title, and reason for each.
-* **Email/API Task Population:** Allows tasks to be populated or managed via email or API interactions (via `todofy-todo` service).
+* **Todoist-Only Task Population:** Incoming tasks are created in Todoist through `todofy-todo`.
 * **Persistent Storage:** Uses SQLite for storing task data with hash-indexed lookups (via `todofy-database` service).
 * **Containerized Services:** All components are containerized using Docker for easy deployment and scaling.
 * **Comprehensive Testing:** Unit tests, e2e tests with mock Gemini client injection, and Docker-based integration tests.
+
+## 📡 API Behavior
+
+### `GET /api/summary`
+
+Returns a 24-hour summary payload with no task delivery side effect:
+
+```json
+{
+  "summary": "string",
+  "task_count": 3,
+  "time_window_hours": 24
+}
+```
 
 ## 🧠 LLM Service Details
 
@@ -134,7 +145,7 @@ The application is composed of the following services:
     * Image: `ghcr.io/ziyixi/todofy-llm:latest`
 
 3.  **Todo Service (`todofy-todo`)**
-    * Description: Manages task creation via Todoist (API v1), Notion, and email (Mailjet).
+    * Description: Manages task creation via Todoist (API v1) only.
     * Dockerfile: `todo/Dockerfile`
     * Default Port: `50052` (configurable via `--port` flag)
     * Image: `ghcr.io/ziyixi/todofy-todo:latest`

@@ -10,11 +10,8 @@ var RecommendationModel = pb.Model_MODEL_GEMINI_3_FLASH_PREVIEW
 // Key constants used throughout the application for context storage
 const (
 	// KeyGRPCClients is the context key for storing gRPC clients
-	KeyGRPCClients                       = "grpcClients"
-	SystemAutomaticallyEmailPrefix       = "[Todofy System]"
-	SystemAutomaticallyEmailSender       = "me@ziyixi.science"
-	SystemAutomaticallyEmailReceiver     = "xiziyi2015@gmail.com"
-	SystemAutomaticallyEmailReceiverName = "Ziyi Xi"
+	KeyGRPCClients                 = "grpcClients"
+	SystemAutomaticallyEmailPrefix = "[Todofy System]"
 
 	DefaultPromptToSummaryEmail string = `Could you please provide a concise and comprehensive summary of the given ` +
 		`email? The summary should capture the main points and key details of the text while conveying the ` +

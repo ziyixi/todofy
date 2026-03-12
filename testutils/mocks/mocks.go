@@ -157,32 +157,6 @@ func (m *MockGeminiClient) GenerateContent(ctx context.Context, model string, co
 	return args.String(0), args.Error(1)
 }
 
-// MockMailjetClient is a mock implementation for Mailjet client
-type MockMailjetClient struct {
-	mock.Mock
-}
-
-// SendEmail sends an email using the mock Mailjet client
-func (m *MockMailjetClient) SendEmail(to, from, subject, body string) (interface{}, error) {
-	args := m.Called(to, from, subject, body)
-	return args.Get(0), args.Error(1)
-}
-
-// MockNotionClient is a mock implementation for Notion client
-type MockNotionClient struct {
-	mock.Mock
-}
-
-// CreatePage creates a page in Notion using the mock client
-func (m *MockNotionClient) CreatePage(
-	ctx context.Context,
-	databaseID string,
-	properties interface{},
-) (interface{}, error) {
-	args := m.Called(ctx, databaseID, properties)
-	return args.Get(0), args.Error(1)
-}
-
 // MockTodoistClient is a mock implementation for Todoist client
 type MockTodoistClient struct {
 	mock.Mock

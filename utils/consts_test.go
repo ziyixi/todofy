@@ -12,16 +12,8 @@ func TestConstants(t *testing.T) {
 		assert.NotEmpty(t, KeyGRPCClients)
 	})
 
-	t.Run("system email constants", func(t *testing.T) {
+	t.Run("system prefix constant", func(t *testing.T) {
 		assert.Equal(t, "[Todofy System]", SystemAutomaticallyEmailPrefix)
-		assert.Equal(t, "me@ziyixi.science", SystemAutomaticallyEmailSender)
-		assert.Equal(t, "xiziyi2015@gmail.com", SystemAutomaticallyEmailReceiver)
-		assert.Equal(t, "Ziyi Xi", SystemAutomaticallyEmailReceiverName)
-
-		// Check that email addresses look valid
-		assert.Contains(t, SystemAutomaticallyEmailSender, "@")
-		assert.Contains(t, SystemAutomaticallyEmailReceiver, "@")
-		assert.NotEmpty(t, SystemAutomaticallyEmailReceiverName)
 	})
 
 	t.Run("default prompt constants", func(t *testing.T) {

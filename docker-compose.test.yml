@@ -58,7 +58,7 @@ services:
       retries: 10
       start_period: 5s
 
-  # Todo service (gRPC server for task population via email/notion/todoist)
+  # Todo service (gRPC server for task population via Todoist)
   todofy-todo:
     build:
       context: .
@@ -66,12 +66,7 @@ services:
     container_name: todofy-todo-test
     environment:
       PORT: "50052"
-      # All API keys intentionally left empty for integration tests
-      MAILJET_API_KEY_PUBLIC: ""
-      MAILJET_API_KEY_PRIVATE: ""
-      TARGET_EMAIL: ""
-      NOTION_API_KEY: ""
-      NOTION_DATABASE_ID: ""
+      # Todoist API keys intentionally left empty for integration tests
       TODOIST_API_KEY: ""
       TODOIST_PROJECT_ID: ""
     networks:

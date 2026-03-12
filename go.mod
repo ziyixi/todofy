@@ -4,11 +4,8 @@ go 1.25.1
 
 require (
 	github.com/JohannesKaufmann/html-to-markdown v1.6.0
-	github.com/badoux/checkmail v1.2.4
 	github.com/gin-gonic/gin v1.11.0
 	github.com/go-resty/resty/v2 v2.17.1
-	github.com/jomei/notionapi v1.13.3
-	github.com/mailjet/mailjet-apiv3-go/v4 v4.0.8
 	github.com/sirupsen/logrus v1.9.4
 	github.com/stretchr/testify v1.11.1
 	github.com/tidwall/gjson v1.18.0

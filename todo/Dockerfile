@@ -48,15 +48,10 @@ FROM alpine:latest
 
 LABEL org.opencontainers.image.authors="docker@ziyixi.science"
 LABEL org.opencontainers.image.source="https://github.com/ziyixi/todofy"
-LABEL org.opencontainers.image.description="Todofy (todo) is a subpackage of Todofy for email/API populating tasks."
+LABEL org.opencontainers.image.description="Todofy (todo) is a Todoist task population service."
 LABEL org.opencontainers.image.licenses="MIT"
 
 ENV PORT=50052
-ENV MAILJET_API_KEY_PUBLIC=""
-ENV MAILJET_API_KEY_PRIVATE=""
-ENV TARGET_EMAIL=""
-ENV NOTION_API_KEY=""
-ENV NOTION_DATABASE_ID=""
 ENV TODOIST_API_KEY=""
 ENV TODOIST_PROJECT_ID=""
 

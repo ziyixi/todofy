@@ -1,7 +1,6 @@
 package main
 
 import (
-	"fmt"
 	"net/http"
 	"time"
 
@@ -55,22 +54,9 @@ func HandleSummary(c *gin.Context) {
 		summaries = summaryResp.Summary
 	}
 
-	// Send an email to the user
-	todayDate := time.Now().Format("2006-01-02")
-	todoReq := &pb.TodoRequest{
-		App:     pb.TodoApp_TODO_APP_DIDA365,
-		Method:  pb.PopullateTodoMethod_POPULLATE_TODO_METHOD_MAILJET,
-		Subject: utils.SystemAutomaticallyEmailPrefix + fmt.Sprintf("[%s] Summary of last 24 hours", todayDate),
-		Body:    summaries,
-		From:    utils.SystemAutomaticallyEmailSender,
-		To:      utils.SystemAutomaticallyEmailReceiver,
-		ToName:  utils.SystemAutomaticallyEmailReceiverName,
-	}
-	todoClient := clients.GetClient("todo").(pb.TodoServiceClient)
-	_, err = todoClient.PopulateTodo(c, todoReq)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error in creating todo": err.Error()})
-		return
-	}
-	c.JSON(http.StatusOK, gin.H{"message": "summary email sent successfully"})
+	c.JSON(http.StatusOK, gin.H{
+		"summary":           summaries,
+		"task_count":        len(queryResp.Entries),
+		"time_window_hours": int(TimeDurationToSummary / time.Hour),
+	})
 }
