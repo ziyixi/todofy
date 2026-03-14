@@ -33,6 +33,8 @@ type Config struct {
 	HealthCheckTimeout int
 	LLMAddr            string
 	TodoAddr           string
+	DependencyAddr     string
+	TodoistAddr        string
 	DatabaseAddr       string
 }
 
@@ -82,6 +84,8 @@ func initFlagsWithFlagSet(fs *flag.FlagSet, cfg *Config) {
 	// GRPC addresses for the services
 	fs.StringVar(&cfg.LLMAddr, "llm-addr", ":50051", "Address of the LLM server")
 	fs.StringVar(&cfg.TodoAddr, "todo-addr", ":50052", "Address of the Todo server")
+	fs.StringVar(&cfg.DependencyAddr, "dependency-addr", "", "Address of the Dependency server (defaults to todo-addr)")
+	fs.StringVar(&cfg.TodoistAddr, "todoist-addr", "", "Address of the Todoist server (defaults to todo-addr)")
 	fs.StringVar(&cfg.DatabaseAddr, "database-addr", ":50053", "Address of the Database server")
 }
 
@@ -106,6 +110,20 @@ func buildServiceConfigs(cfg Config) []ServiceConfig {
 			addr: cfg.DatabaseAddr,
 			newClient: func(conn *grpc.ClientConn) any {
 				return pb.NewDataBaseServiceClient(conn)
+			},
+		},
+		{
+			name: "dependency",
+			addr: cfg.DependencyAddr,
+			newClient: func(conn *grpc.ClientConn) any {
+				return pb.NewDependencyServiceClient(conn)
+			},
+		},
+		{
+			name: "todoist",
+			addr: cfg.TodoistAddr,
+			newClient: func(conn *grpc.ClientConn) any {
+				return pb.NewTodoistServiceClient(conn)
 			},
 		},
 	}
@@ -142,6 +160,12 @@ func setupRouter(allowedUsers gin.Accounts, grpcClients *GRPCClients) *gin.Engin
 	v1.Use(utils.RateLimitMiddleware())
 
 	v1.POST("/update_todo", HandleUpdateTodo)
+	v1.POST("/dependency/reconcile", HandleDependencyReconcile)
+	v1.POST("/dependency/bootstrap_keys", HandleDependencyBootstrapMissingKeys)
+	v1.GET("/dependency/status", HandleDependencyStatus)
+	v1.GET("/dependency/issues", HandleDependencyIssues)
+
+	app.POST("/api/v1/todoist/webhook", grpcMiddleware(grpcClients), HandleTodoistWebhook)
 
 	return app
 }
@@ -162,6 +186,12 @@ func run(cfg Config) error {
 	}
 	if err := validateAllowedUsersFormat(cfg.AllowedUsers); err != nil {
 		return err
+	}
+	if cfg.DependencyAddr == "" {
+		cfg.DependencyAddr = cfg.TodoAddr
+	}
+	if cfg.TodoistAddr == "" {
+		cfg.TodoistAddr = cfg.TodoAddr
 	}
 
 	grpcClients, err := createClients(cfg)

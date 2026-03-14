@@ -82,6 +82,41 @@ jobs:
           exit 1
         fi
 
+    - name: Test HTTP auth and webhook compatibility
+      run: |
+        echo "Testing protected endpoint auth behavior..."
+
+        summary_status=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:${{ env.TODOFY_TEST_PORT }}/api/summary)
+        if [ "$summary_status" != "401" ]; then
+          echo "/api/summary returned $summary_status (expected 401 without auth)"
+          exit 1
+        fi
+
+        update_todo_status=$(curl -s -o /dev/null -w "%{http_code}" -X POST http://localhost:${{ env.TODOFY_TEST_PORT }}/api/v1/update_todo)
+        if [ "$update_todo_status" != "401" ]; then
+          echo "/api/v1/update_todo returned $update_todo_status (expected 401 without auth)"
+          exit 1
+        fi
+
+        dependency_reconcile_status=$(curl -s -o /dev/null -w "%{http_code}" -X POST http://localhost:${{ env.TODOFY_TEST_PORT }}/api/v1/dependency/reconcile)
+        if [ "$dependency_reconcile_status" != "401" ]; then
+          echo "/api/v1/dependency/reconcile returned $dependency_reconcile_status (expected 401 without auth)"
+          exit 1
+        fi
+
+        echo "Testing Todoist webhook endpoint delivery response..."
+        webhook_status=$(curl -s -o /dev/null -w "%{http_code}" \
+          -X POST \
+          -H "Content-Type: application/json" \
+          -d '{"event_data":{"id":"integration-task","content":"Integration task <k:int-task>"}}' \
+          http://localhost:${{ env.TODOFY_TEST_PORT }}/api/v1/todoist/webhook)
+        if [ "$webhook_status" != "200" ]; then
+          echo "/api/v1/todoist/webhook returned $webhook_status (expected 200)"
+          exit 1
+        fi
+
+        echo "Auth and webhook checks passed ✓"
+
     - name: Test gRPC service connectivity
       run: |
         echo "Testing gRPC services connectivity..."

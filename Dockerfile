@@ -50,6 +50,8 @@ ENV ALLOWED_USERS=""
 ENV DATABASE_PATH=""
 ENV LLMAddr=":50051"
 ENV TodoAddr=":50052"
+ENV DependencyAddr=""
+ENV TodoistAddr=""
 ENV DatabaseAddr=":50053"
 
 # Install ca-certificates for HTTPS and tzdata for timezone information

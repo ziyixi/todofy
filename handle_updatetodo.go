@@ -21,6 +21,7 @@ import (
 //go:embed templates/todoDescription.tmpl
 var descriptionTmpl string
 
+// HandleUpdateTodo converts inbound email payloads into summarized Todoist tasks.
 func HandleUpdateTodo(c *gin.Context) {
 	clients := c.MustGet(utils.KeyGRPCClients).(ClientProvider)
 	// get the post data

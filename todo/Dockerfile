@@ -54,6 +54,11 @@ LABEL org.opencontainers.image.licenses="MIT"
 ENV PORT=50052
 ENV TODOIST_API_KEY=""
 ENV TODOIST_PROJECT_ID=""
+ENV TODOIST_WEBHOOK_SECRET=""
+ENV DEPENDENCY_RECONCILE_INTERVAL="30m"
+ENV DEPENDENCY_WEBHOOK_DEBOUNCE="20s"
+ENV DEPENDENCY_GRACE_PERIOD="2m"
+ENV DEPENDENCY_ENABLE_SCHEDULER="true"
 
 # Install ca-certificates for HTTPS and tzdata for timezone information
 RUN apk --no-cache add ca-certificates tzdata

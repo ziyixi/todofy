@@ -14,6 +14,7 @@ const (
 	TimeDurationToSummary = 24 * time.Hour // 24 hours
 )
 
+// HandleSummary returns a 24-hour summary generated from recent persisted task entries.
 func HandleSummary(c *gin.Context) {
 	clients := c.MustGet(utils.KeyGRPCClients).(ClientProvider)
 

@@ -21,6 +21,32 @@ type CreateTaskRequest struct {
 	DeadlineDate string   `json:"deadline_date,omitempty"`
 }
 
+// UpdateTaskRequest represents the partial payload for updating an existing task.
+type UpdateTaskRequest struct {
+	Content string   `json:"content,omitempty"`
+	Labels  []string `json:"labels,omitempty"`
+}
+
+// Label represents a Todoist label.
+type Label struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+}
+
+type createLabelRequest struct {
+	Name string `json:"name"`
+}
+
+// EnsureLabelsResult reports ensure-label outcomes.
+type EnsureLabelsResult struct {
+	// ExistingLabels were already present and required no write.
+	ExistingLabels []string
+	// CreatedLabels were successfully created during ensure.
+	CreatedLabels []string
+	// Failures maps label name to creation error text.
+	Failures map[string]string
+}
+
 // Task represents a Todoist task object as returned by the API v1.
 // This struct includes fields that are relevant after a task is created.
 type Task struct {
@@ -42,6 +68,7 @@ type Task struct {
 	AddedAt        string            `json:"added_at"`
 	UpdatedAt      string            `json:"updated_at"`
 	CompletedAt    string            `json:"completed_at"`
+	IsCompleted    bool              `json:"is_completed"`
 	AddedByUID     string            `json:"added_by_uid"`
 	AssignedByUID  string            `json:"assigned_by_uid"`
 	ResponsibleUID string            `json:"responsible_uid"`

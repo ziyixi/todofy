@@ -21,6 +21,8 @@ services:
       DATABASE_PATH: "/tmp/test.db"
       LLMAddr: "todofy-llm:50051"
       TodoAddr: "todofy-todo:50052"
+      DependencyAddr: "todofy-todo:50052"
+      TodoistAddr: "todofy-todo:50052"
       DatabaseAddr: "todofy-database:50053"
     depends_on:
       todofy-llm:
@@ -69,6 +71,11 @@ services:
       # Todoist API keys intentionally left empty for integration tests
       TODOIST_API_KEY: ""
       TODOIST_PROJECT_ID: ""
+      TODOIST_WEBHOOK_SECRET: ""
+      DEPENDENCY_RECONCILE_INTERVAL: "30m"
+      DEPENDENCY_WEBHOOK_DEBOUNCE: "20s"
+      DEPENDENCY_GRACE_PERIOD: "2m"
+      DEPENDENCY_ENABLE_SCHEDULER: "true"
     networks:
       - todofy-test
     healthcheck:

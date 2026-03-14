@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -252,6 +253,7 @@ func TestNewClient(t *testing.T) {
 		assert.NotNil(t, client)
 		assert.Equal(t, "my-token", client.token)
 		assert.Equal(t, "https://api.todoist.com/api/v1", client.baseURL)
+		assert.LessOrEqual(t, client.httpClient.Timeout, 15*time.Second)
 	})
 
 	t.Run("creates client with empty token", func(t *testing.T) {
@@ -260,6 +262,7 @@ func TestNewClient(t *testing.T) {
 		assert.NotNil(t, client)
 		assert.Empty(t, client.token)
 		assert.Equal(t, "https://api.todoist.com/api/v1", client.baseURL)
+		assert.LessOrEqual(t, client.httpClient.Timeout, 15*time.Second)
 	})
 }
 

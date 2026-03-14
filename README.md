@@ -72,6 +72,9 @@ graph TB
 
 ## ✨ Features
 
+<details>
+<summary><strong>Expand feature list</strong></summary>
+
 * **Task Management:** Core functionality for creating, updating, and managing tasks.
 * **LLM Integration:** Leverages Google Gemini models for email summarization with automatic model fallback (via `todofy-llm` service).
 * **Cost Controls:** Daily token limit with 24-hour sliding window (default: 3M tokens) to prevent runaway API costs, plus email content truncation (50K character hard limit).
@@ -79,11 +82,20 @@ graph TB
 * **Summary API:** `GET /api/summary` returns structured JSON: `summary`, `task_count`, and `time_window_hours`.
 * **Task Recommendations:** `GET /api/recommendation?top=N` queries recent 24h tasks, asks the LLM to pick the top-N most important ones (default 3, max 10), and returns structured JSON with rank, title, and reason for each.
 * **Todoist-Only Task Population:** Incoming tasks are created in Todoist through `todofy-todo`.
+* **Todoist DAG Dependencies:** Supports task-title metadata (`<k:task-key dep:other-key,...>`) and reconcile-driven dependency analysis.
+* **Reserved DAG Labels:** Automatically manages `dag_blocked`, `dag_cycle`, `dag_broken_dep`, and `dag_invalid_meta` with minimal label diffs.
+* **Manual DAG Operations:** Exposes reconcile, bootstrap-key, status, and issue endpoints under `/api/v1/dependency/*`.
+* **Webhook-as-Hint Flow:** Supports Todoist webhook verification and dirty-mark signaling; scheduled/manual reconcile remains the source of truth.
 * **Persistent Storage:** Uses SQLite for storing task data with hash-indexed lookups (via `todofy-database` service).
 * **Containerized Services:** All components are containerized using Docker for easy deployment and scaling.
 * **Comprehensive Testing:** Unit tests, e2e tests with mock Gemini client injection, and Docker-based integration tests.
 
+</details>
+
 ## 📡 API Behavior
+
+<details>
+<summary><strong>Expand API behavior and endpoints</strong></summary>
 
 ### `GET /api/summary`
 
@@ -97,7 +109,25 @@ Returns a 24-hour summary payload with no task delivery side effect:
 }
 ```
 
+### Dependency Control Endpoints (Basic Auth Required)
+
+* `POST /api/v1/dependency/reconcile` (`?dry_run=true` for analyze-only)
+* `POST /api/v1/dependency/bootstrap_keys` (`?dry_run=true` by default)
+* `GET /api/v1/dependency/status?task_key=...` (or `todoist_task_id=...`)
+* `GET /api/v1/dependency/issues?type=...&task_key=...`
+
+### Todoist Webhook Endpoint (No Basic Auth)
+
+* `POST /api/v1/todoist/webhook`
+* Signature verification is delegated to the Todoist gRPC integration layer.
+* Endpoint returns HTTP `200` for delivery compatibility; webhook only marks graph state dirty.
+
+</details>
+
 ## 🧠 LLM Service Details
+
+<details>
+<summary><strong>Expand LLM model and cost-control details</strong></summary>
 
 The LLM service uses Google Gemini for email summarization with several cost-control and reliability features:
 
@@ -128,7 +158,12 @@ Additionally, `gemini-2.5-pro` is available when explicitly requested.
 | `--gemini-api-key` | (required) | Google Gemini API key |
 | `--daily-token-limit` | `3000000` | Max tokens per 24h sliding window (0 = unlimited) |
 
+</details>
+
 ## 🛠️ Services
+
+<details>
+<summary><strong>Expand per-service reference</strong></summary>
 
 The application is composed of the following services:
 
@@ -145,7 +180,7 @@ The application is composed of the following services:
     * Image: `ghcr.io/ziyixi/todofy-llm:latest`
 
 3.  **Todo Service (`todofy-todo`)**
-    * Description: Manages task creation via Todoist (API v1) only.
+    * Description: Manages Todoist integration (create/read/list/update labels/webhook verify) and dependency DAG reconcile services.
     * Dockerfile: `todo/Dockerfile`
     * Default Port: `50052` (configurable via `--port` flag)
     * Image: `ghcr.io/ziyixi/todofy-todo:latest`
@@ -156,7 +191,179 @@ The application is composed of the following services:
     * Default Port: `50053` (configurable via `PORT` env var)
     * Image: `ghcr.io/ziyixi/todofy-database:latest`
 
+</details>
+
+## 🐳 Deployment Setup
+
+Use the collapsible sections below for operational setup details.
+
+<details>
+<summary><strong>Required environment variables</strong></summary>
+
+### `todofy` (main HTTP service)
+
+| Variable | Required | Example |
+|----------|----------|---------|
+| `PORT` | Yes | `8080` |
+| `ALLOWED_USERS` | Yes | `admin:strong-password` |
+| `DATABASE_PATH` | Yes | `/tmp/todofy.db` |
+| `LLMAddr` | Yes | `todofy-llm:50051` |
+| `TodoAddr` | Yes | `todofy-todo:50052` |
+| `DependencyAddr` | Optional | `todofy-todo:50052` (defaults to `TodoAddr`) |
+| `TodoistAddr` | Optional | `todofy-todo:50052` (defaults to `TodoAddr`) |
+| `DatabaseAddr` | Yes | `todofy-database:50053` |
+
+### `todofy-llm`
+
+| Variable | Required | Example |
+|----------|----------|---------|
+| `PORT` | Yes | `50051` |
+| `GEMINI_API_KEY` | Yes (for real summarization) | `AIza...` |
+
+### `todofy-todo`
+
+| Variable | Required | Example |
+|----------|----------|---------|
+| `PORT` | Yes | `50052` |
+| `TODOIST_API_KEY` | Yes (for Todoist writes/reads) | `token` |
+| `TODOIST_PROJECT_ID` | Optional | `1234567890` |
+| `TODOIST_WEBHOOK_SECRET` | Recommended | `webhook-secret` |
+| `DEPENDENCY_RECONCILE_INTERVAL` | Optional | `30m` |
+| `DEPENDENCY_WEBHOOK_DEBOUNCE` | Optional | `20s` |
+| `DEPENDENCY_GRACE_PERIOD` | Optional | `2m` |
+| `DEPENDENCY_ENABLE_SCHEDULER` | Optional | `true` |
+
+### `todofy-database`
+
+| Variable | Required | Example |
+|----------|----------|---------|
+| `PORT` | Yes | `50053` |
+
+</details>
+
+<details>
+<summary><strong>Example env file (`env/todofy.env`)</strong></summary>
+
+```dotenv
+# Main service
+PORT=8080
+ALLOWED_USERS=admin:change-me
+DATABASE_PATH=/tmp/todofy.db
+LLMAddr=todofy-llm:50051
+TodoAddr=todofy-todo:50052
+DependencyAddr=todofy-todo:50052
+TodoistAddr=todofy-todo:50052
+DatabaseAddr=todofy-database:50053
+
+# LLM service
+GEMINI_API_KEY=replace-with-real-key
+
+# Todo service
+TODOIST_API_KEY=replace-with-real-token
+TODOIST_PROJECT_ID=
+TODOIST_WEBHOOK_SECRET=replace-with-real-secret
+DEPENDENCY_RECONCILE_INTERVAL=30m
+DEPENDENCY_WEBHOOK_DEBOUNCE=20s
+DEPENDENCY_GRACE_PERIOD=2m
+DEPENDENCY_ENABLE_SCHEDULER=true
+```
+
+</details>
+
+<details>
+<summary><strong>Docker Compose example (Vultr-style, from your real stack pattern)</strong></summary>
+
+```yaml
+networks:
+  allexport:
+
+services:
+  todofy:
+    image: ghcr.io/ziyixi/todofy:latest
+    container_name: todofy
+    ports:
+      - "10003:8080"
+    restart: always
+    env_file: ./env/todofy.env
+    depends_on:
+      - todofy-llm
+      - todofy-todo
+      - todofy-database
+    networks:
+      - allexport
+
+  todofy-llm:
+    image: ghcr.io/ziyixi/todofy-llm:latest
+    container_name: todofy-llm
+    restart: always
+    env_file: ./env/todofy.env
+    networks:
+      - allexport
+
+  todofy-todo:
+    image: ghcr.io/ziyixi/todofy-todo:latest
+    container_name: todofy-todo
+    restart: always
+    env_file: ./env/todofy.env
+    networks:
+      - allexport
+
+  todofy-database:
+    image: ghcr.io/ziyixi/todofy-database:latest
+    container_name: todofy-database
+    restart: always
+    env_file: ./env/todofy.env
+    volumes:
+      - ./data/todofy:/root
+    networks:
+      - allexport
+```
+
+Bring up/down:
+
+```bash
+docker compose up -d
+docker compose logs -f todofy
+docker compose down
+```
+
+</details>
+
+<details>
+<summary><strong>Equivalent single-container Docker commands</strong></summary>
+
+```bash
+docker network create todofy-net
+
+docker run -d --name todofy-llm \
+  --network todofy-net \
+  --env-file ./env/todofy.env \
+  ghcr.io/ziyixi/todofy-llm:latest
+
+docker run -d --name todofy-todo \
+  --network todofy-net \
+  --env-file ./env/todofy.env \
+  ghcr.io/ziyixi/todofy-todo:latest
+
+docker run -d --name todofy-database \
+  --network todofy-net \
+  --env-file ./env/todofy.env \
+  -v "$PWD/data/todofy:/root" \
+  ghcr.io/ziyixi/todofy-database:latest
+
+docker run -d --name todofy \
+  --network todofy-net \
+  --env-file ./env/todofy.env \
+  -p 10003:8080 \
+  ghcr.io/ziyixi/todofy:latest
+```
+
+</details>
+
 ## 🔄 CI/CD Pipeline
+
+<details>
+<summary><strong>Expand CI/CD workflow details</strong></summary>
 
 The CI/CD pipeline uses GitHub Actions with reusable workflows organized as a dependency graph:
 
@@ -181,7 +388,12 @@ graph LR
 | **Build** | Pushes Docker images to GHCR on `main` only when build-relevant files change (or manual dispatch) |
 | **Notify** | Reports pass/fail status |
 
+</details>
+
 ## 📦 GitHub Packages (GHCR)
+
+<details>
+<summary><strong>Expand published image references</strong></summary>
 
 Docker images for each service are automatically built and pushed to GitHub Container Registry (GHCR) by the CI/CD pipeline. You can pull them using:
 
@@ -190,7 +402,12 @@ Docker images for each service are automatically built and pushed to GitHub Cont
 * `docker pull ghcr.io/ziyixi/todofy-todo:latest`
 * `docker pull ghcr.io/ziyixi/todofy-database:latest`
 
+</details>
+
 ## 🧪 Testing
+
+<details>
+<summary><strong>Expand test commands and coverage scope</strong></summary>
 
 Run all tests:
 
@@ -224,3 +441,5 @@ The recommendation handler includes tests for:
 - `?top=N` parameter validation (default 3, range 1-10, invalid values)
 - Prompt content verification (correct format string interpolation)
 - `task_count` reflects DB entries, not recommendation count
+
+</details>

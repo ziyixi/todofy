@@ -4,11 +4,15 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"net"
 	"time"
 
 	"github.com/sirupsen/logrus"
-	"github.com/ziyixi/todofy/utils"
+	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/health"
+	healthpb "google.golang.org/grpc/health/grpc_health_v1"
+	"google.golang.org/grpc/reflection"
 	"google.golang.org/grpc/status"
 
 	pb "github.com/ziyixi/protos/go/todofy"
@@ -29,8 +33,34 @@ var (
 	port = flag.Int("port", 50052, "The server port of the Todo service")
 
 	// Todoist API credentials
-	todoistAPIKey    = flag.String("todoist-api-key", "", "The API key for Todoist")
-	todoistProjectID = flag.String("todoist-project-id", "", "The project ID for Todoist tasks")
+	todoistAPIKey        = flag.String("todoist-api-key", "", "The API key for Todoist")
+	todoistProjectID     = flag.String("todoist-project-id", "", "The project ID for Todoist tasks")
+	todoistWebhookSecret = flag.String(
+		"todoist-webhook-secret",
+		"",
+		"The Todoist webhook secret used to verify signatures",
+	)
+
+	dependencyReconcileInterval = flag.Duration(
+		"dependency-reconcile-interval",
+		30*time.Minute,
+		"How often to run background dependency reconcile",
+	)
+	dependencyWebhookDebounce = flag.Duration(
+		"dependency-webhook-debounce",
+		20*time.Second,
+		"Debounce duration for webhook-triggered dependency reconcile",
+	)
+	dependencyGracePeriod = flag.Duration(
+		"dependency-grace-period",
+		2*time.Minute,
+		"Skip task label writes for tasks updated more recently than this duration",
+	)
+	dependencyEnableScheduler = flag.Bool(
+		"dependency-enable-scheduler",
+		true,
+		"Whether to enable background dependency reconcile scheduling",
+	)
 )
 
 // todoistTaskCreator abstracts the Todoist task creation API for testing.
@@ -39,10 +69,11 @@ type todoistTaskCreator interface {
 }
 
 type todoServer struct {
-	pb.TodoServiceServer
+	pb.UnimplementedTodoServiceServer
 	newTodoistClient func(apiKey string) todoistTaskCreator
 }
 
+// PopulateTodo validates the todo target and dispatches creation to the Todoist path.
 func (s *todoServer) PopulateTodo(ctx context.Context, req *pb.TodoRequest) (*pb.TodoResponse, error) {
 	if req.App != pb.TodoApp_TODO_APP_TODOIST {
 		return nil, status.Errorf(codes.InvalidArgument, "unsupported app: %s", req.App)
@@ -61,6 +92,7 @@ func validateTodoistFlags() error {
 	return nil
 }
 
+// PopulateTodoByTodoist creates a Todoist task from the incoming todo request payload.
 func (s *todoServer) PopulateTodoByTodoist(ctx context.Context, req *pb.TodoRequest) (*pb.TodoResponse, error) {
 	if err := validateTodoistFlags(); err != nil {
 		return nil, err
@@ -106,12 +138,38 @@ func main() {
 	initLogger()
 	flag.Parse()
 
-	err := utils.StartGRPCServer[pb.TodoServiceServer](
-		*port,
-		&todoServer{},
-		pb.RegisterTodoServiceServer,
-	)
-	if err != nil {
+	if err := runGRPCServer(); err != nil {
 		log.Fatalf("server error: %v", err)
 	}
+}
+
+func runGRPCServer() error {
+	lis, err := net.Listen("tcp", fmt.Sprintf(":%d", *port))
+	if err != nil {
+		return fmt.Errorf("failed to listen: %w", err)
+	}
+
+	server := grpc.NewServer()
+	todoSvc := &todoServer{}
+	todoistSvc := &todoistServer{}
+	dependencySvc := newDependencyServer()
+
+	pb.RegisterTodoServiceServer(server, todoSvc)
+	pb.RegisterTodoistServiceServer(server, todoistSvc)
+	pb.RegisterDependencyServiceServer(server, dependencySvc)
+	reflection.Register(server)
+
+	healthServer := health.NewServer()
+	healthpb.RegisterHealthServer(server, healthServer)
+	healthServer.SetServingStatus("", healthpb.HealthCheckResponse_SERVING)
+
+	backgroundCtx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	dependencySvc.StartBackgroundReconcile(backgroundCtx)
+
+	log.Infof("Todo gRPC server is running on port %d", *port)
+	if err := server.Serve(lis); err != nil {
+		return fmt.Errorf("failed to serve: %w", err)
+	}
+	return nil
 }
