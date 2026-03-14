@@ -59,6 +59,7 @@ ENV DEPENDENCY_RECONCILE_INTERVAL="30m"
 ENV DEPENDENCY_WEBHOOK_DEBOUNCE="20s"
 ENV DEPENDENCY_GRACE_PERIOD="2m"
 ENV DEPENDENCY_ENABLE_SCHEDULER="true"
+ENV DEPENDENCY_BOOTSTRAP_EXCLUDED_PROJECT_IDS=""
 
 # Install ca-certificates for HTTPS and tzdata for timezone information
 RUN apk --no-cache add ca-certificates tzdata

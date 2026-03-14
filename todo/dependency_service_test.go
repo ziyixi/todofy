@@ -9,6 +9,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	pb "github.com/ziyixi/protos/go/todofy"
+	"github.com/ziyixi/todofy/dependency"
 	"github.com/ziyixi/todofy/todo/internal/todoist"
 )
 
@@ -166,4 +168,65 @@ func TestDependencyServer_ReconcileIsIdempotentWithMinimalDiff(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, 0, updatedCountSecondRun)
 	assert.Equal(t, 1, fakeClient.updateCalls)
+}
+
+func TestMetadataBootstrapExcludedProjectSet(t *testing.T) {
+	out := metadataBootstrapExcludedProjectSet("proj-a, proj-b,proj-a")
+	require.Len(t, out, 2)
+	_, hasA := out["proj-a"]
+	_, hasB := out["proj-b"]
+	assert.True(t, hasA)
+	assert.True(t, hasB)
+
+	assert.Nil(t, metadataBootstrapExcludedProjectSet(" , "))
+}
+
+func TestDependencyServer_BootstrapMissingTaskKeys_SkipsExcludedProjects(t *testing.T) {
+	originalKey := *todoistAPIKey
+	originalExcluded := *dependencyBootstrapExcludedProjectIDs
+	t.Cleanup(func() {
+		*todoistAPIKey = originalKey
+		*dependencyBootstrapExcludedProjectIDs = originalExcluded
+	})
+
+	*todoistAPIKey = testGenericAPIKey
+	*dependencyBootstrapExcludedProjectIDs = "proj-inbox, proj-skip-a, proj-skip-b"
+
+	fakeClient := newFakeDependencyTodoistClient([]*todoist.Task{
+		{ID: "inbox-task", Content: "Inbox Task", ProjectID: "proj-inbox"},
+		{ID: "skip-task", Content: "Skip Task", ProjectID: "proj-skip-a"},
+		{ID: "keep-task", Content: "Keep Task", ProjectID: "proj-keep"},
+		{ID: "existing-task", Content: "Existing <k:existing>", ProjectID: "proj-keep"},
+	})
+
+	server := &dependencyServer{
+		newTodoistClient: func(string) todoistOperationalClient {
+			return fakeClient
+		},
+		metadataExcludedProjectIDs: metadataBootstrapExcludedProjectSet(*dependencyBootstrapExcludedProjectIDs),
+	}
+
+	resp, err := server.BootstrapMissingTaskKeys(context.Background(), &pb.BootstrapMissingTaskKeysRequest{})
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+	require.Len(t, resp.GeneratedTaskKeys, 1)
+	assert.Equal(t, int32(1), resp.GetGeneratedCount())
+	assert.Equal(t, "keep-task", resp.GeneratedTaskKeys[0].GetTodoistTaskId())
+
+	inboxMeta := dependency.ParseTaskMetadata(fakeClient.tasksByID["inbox-task"].Content)
+	assert.True(t, inboxMeta.Valid)
+	assert.Empty(t, inboxMeta.TaskKey)
+
+	skipMeta := dependency.ParseTaskMetadata(fakeClient.tasksByID["skip-task"].Content)
+	assert.True(t, skipMeta.Valid)
+	assert.Empty(t, skipMeta.TaskKey)
+
+	keepMeta := dependency.ParseTaskMetadata(fakeClient.tasksByID["keep-task"].Content)
+	assert.True(t, keepMeta.Valid)
+	assert.NotEmpty(t, keepMeta.TaskKey)
+	assert.Equal(t, resp.GeneratedTaskKeys[0].GetTaskKey(), keepMeta.TaskKey)
+
+	existingMeta := dependency.ParseTaskMetadata(fakeClient.tasksByID["existing-task"].Content)
+	assert.True(t, existingMeta.Valid)
+	assert.Equal(t, "existing", existingMeta.TaskKey)
 }

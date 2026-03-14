@@ -8,4 +8,5 @@
     -dependency-reconcile-interval=${DEPENDENCY_RECONCILE_INTERVAL} \
     -dependency-webhook-debounce=${DEPENDENCY_WEBHOOK_DEBOUNCE} \
     -dependency-grace-period=${DEPENDENCY_GRACE_PERIOD} \
-    -dependency-enable-scheduler=${DEPENDENCY_ENABLE_SCHEDULER}
+    -dependency-enable-scheduler=${DEPENDENCY_ENABLE_SCHEDULER} \
+    -dependency-bootstrap-excluded-project-ids=${DEPENDENCY_BOOTSTRAP_EXCLUDED_PROJECT_IDS}

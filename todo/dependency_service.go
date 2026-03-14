@@ -19,6 +19,8 @@ type dependencyServer struct {
 
 	// newTodoistClient is injectable for tests.
 	newTodoistClient todoistOperationalClientFactory
+	// metadataExcludedProjectIDs are skipped during missing-key bootstrap.
+	metadataExcludedProjectIDs map[string]struct{}
 	// gracePeriod suppresses label writes for very recently updated tasks.
 	gracePeriod time.Duration
 	// reconcileInterval controls periodic background reconcile cadence.
@@ -37,12 +39,13 @@ type dependencyServer struct {
 
 func newDependencyServer() *dependencyServer {
 	return &dependencyServer{
-		newTodoistClient:          defaultTodoistOperationalClientFactory,
-		gracePeriod:               *dependencyGracePeriod,
-		reconcileInterval:         *dependencyReconcileInterval,
-		webhookDebounce:           *dependencyWebhookDebounce,
-		enableBackgroundReconcile: *dependencyEnableScheduler,
-		dirtySignal:               make(chan struct{}, 1),
+		newTodoistClient:           defaultTodoistOperationalClientFactory,
+		metadataExcludedProjectIDs: metadataBootstrapExcludedProjectSet(*dependencyBootstrapExcludedProjectIDs),
+		gracePeriod:                *dependencyGracePeriod,
+		reconcileInterval:          *dependencyReconcileInterval,
+		webhookDebounce:            *dependencyWebhookDebounce,
+		enableBackgroundReconcile:  *dependencyEnableScheduler,
+		dirtySignal:                make(chan struct{}, 1),
 	}
 }
 
@@ -122,6 +125,9 @@ func (s *dependencyServer) BootstrapMissingTaskKeys(
 	generated := make([]*pb.GeneratedTaskKey, 0)
 	for _, task := range tasks {
 		if task == nil {
+			continue
+		}
+		if s.isMetadataBootstrapExcludedProject(task.ProjectID) {
 			continue
 		}
 		parsed := metadataByTask[task.ID]
@@ -542,4 +548,35 @@ func dedupeStrings(values []string) []string {
 	}
 	sort.Strings(out)
 	return out
+}
+
+func metadataBootstrapExcludedProjectSet(excludedProjectIDs string) map[string]struct{} {
+	out := make(map[string]struct{})
+
+	for _, raw := range strings.Split(excludedProjectIDs, ",") {
+		projectID := strings.TrimSpace(raw)
+		if projectID == "" {
+			continue
+		}
+		out[projectID] = struct{}{}
+	}
+
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+func (s *dependencyServer) isMetadataBootstrapExcludedProject(projectID string) bool {
+	if len(s.metadataExcludedProjectIDs) == 0 {
+		return false
+	}
+
+	projectID = strings.TrimSpace(projectID)
+	if projectID == "" {
+		return false
+	}
+
+	_, excluded := s.metadataExcludedProjectIDs[projectID]
+	return excluded
 }

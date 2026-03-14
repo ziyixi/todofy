@@ -61,6 +61,11 @@ var (
 		true,
 		"Whether to enable background dependency reconcile scheduling",
 	)
+	dependencyBootstrapExcludedProjectIDs = flag.String(
+		"dependency-bootstrap-excluded-project-ids",
+		"",
+		"Comma-separated Todoist project IDs to skip when bootstrapping missing task keys",
+	)
 )
 
 // todoistTaskCreator abstracts the Todoist task creation API for testing.
