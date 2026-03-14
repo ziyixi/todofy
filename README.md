@@ -197,6 +197,21 @@ The application is composed of the following services:
 
 Use the collapsible sections below for operational setup details.
 
+Reference files in repo:
+- `env/todofy.env.example` for production-style `env_file` compose setups.
+- `env/todofy.test.env` used by `docker-compose.test.yml` in CI and local integration runs.
+
+<details>
+<summary><strong>Env precedence and shared-file rules</strong></summary>
+
+- In Docker Compose, a service's `environment` values override the same keys from `env_file`.
+- Values from `env_file` override image defaults set by Dockerfile `ENV`.
+- If a key is missing from both, the app's internal default/flag value is used.
+
+When one shared `env_file` is reused across all services, set service-specific `PORT` in each service `environment` block (`8080`, `50051`, `50052`, `50053`) to avoid accidental port reuse.
+
+</details>
+
 <details>
 <summary><strong>Required environment variables</strong></summary>
 
@@ -226,7 +241,7 @@ Use the collapsible sections below for operational setup details.
 |----------|----------|---------|
 | `PORT` | Yes | `50052` |
 | `TODOIST_API_KEY` | Yes (for Todoist writes/reads) | `token` |
-| `TODOIST_PROJECT_ID` | Optional | `1234567890` |
+| `TODOIST_DEFAULT_PROJECT_ID` | Optional | `1234567890` |
 | `TODOIST_WEBHOOK_SECRET` | Recommended | `webhook-secret` |
 | `DEPENDENCY_RECONCILE_INTERVAL` | Optional | `30m` |
 | `DEPENDENCY_WEBHOOK_DEBOUNCE` | Optional | `20s` |
@@ -245,9 +260,13 @@ Use the collapsible sections below for operational setup details.
 <details>
 <summary><strong>Example env file (`env/todofy.env`)</strong></summary>
 
+```bash
+cp env/todofy.env.example env/todofy.env
+```
+
 ```dotenv
-# Main service
-PORT=8080
+# Shared values for all services.
+# Keep PORT out of this shared file; set it per service in docker-compose.
 ALLOWED_USERS=admin:change-me
 DATABASE_PATH=/tmp/todofy.db
 LLMAddr=todofy-llm:50051
@@ -261,13 +280,29 @@ GEMINI_API_KEY=replace-with-real-key
 
 # Todo service
 TODOIST_API_KEY=replace-with-real-token
-TODOIST_PROJECT_ID=
+# Optional Todoist project ID used as default target for created tasks.
+TODOIST_DEFAULT_PROJECT_ID=
 TODOIST_WEBHOOK_SECRET=replace-with-real-secret
 DEPENDENCY_RECONCILE_INTERVAL=30m
 DEPENDENCY_WEBHOOK_DEBOUNCE=20s
 DEPENDENCY_GRACE_PERIOD=2m
 DEPENDENCY_ENABLE_SCHEDULER=true
 DEPENDENCY_BOOTSTRAP_EXCLUDED_PROJECT_IDS=
+```
+
+</details>
+
+<details>
+<summary><strong>Integration test compose (`docker-compose.test.yml`)</strong></summary>
+
+`docker-compose.test.yml` reads `env/todofy.test.env` directly. This is the single source used by GitHub Actions integration tests.
+
+Run locally:
+
+```bash
+docker compose -f docker-compose.test.yml build
+docker compose -f docker-compose.test.yml up -d
+docker compose -f docker-compose.test.yml down -v
 ```
 
 </details>
@@ -287,6 +322,8 @@ services:
       - "10003:8080"
     restart: always
     env_file: ./env/todofy.env
+    environment:
+      PORT: "8080"
     depends_on:
       - todofy-llm
       - todofy-todo
@@ -299,6 +336,8 @@ services:
     container_name: todofy-llm
     restart: always
     env_file: ./env/todofy.env
+    environment:
+      PORT: "50051"
     networks:
       - allexport
 
@@ -307,6 +346,8 @@ services:
     container_name: todofy-todo
     restart: always
     env_file: ./env/todofy.env
+    environment:
+      PORT: "50052"
     networks:
       - allexport
 
@@ -315,6 +356,8 @@ services:
     container_name: todofy-database
     restart: always
     env_file: ./env/todofy.env
+    environment:
+      PORT: "50053"
     volumes:
       - ./data/todofy:/root
     networks:

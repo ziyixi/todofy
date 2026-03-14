@@ -110,17 +110,17 @@ func TestValidateTodoistFlags(t *testing.T) {
 func TestPopulateTodoByTodoist_DI(t *testing.T) {
 	saveTodoistFlags := func() func() {
 		origKey := *todoistAPIKey
-		origProject := *todoistProjectID
+		origDefaultProject := *todoistDefaultProjectID
 		return func() {
 			*todoistAPIKey = origKey
-			*todoistProjectID = origProject
+			*todoistDefaultProjectID = origDefaultProject
 		}
 	}
 
 	t.Run("success", func(t *testing.T) {
 		defer saveTodoistFlags()()
 		*todoistAPIKey = testGenericAPIKey
-		*todoistProjectID = ""
+		*todoistDefaultProjectID = ""
 
 		mockCreator := new(mockTodoistTaskCreator)
 		mockCreator.On("CreateTask", mock.Anything, mock.Anything, mock.MatchedBy(func(req *todoist.CreateTaskRequest) bool {
@@ -180,7 +180,7 @@ func TestPopulateTodoByTodoist_DI(t *testing.T) {
 	t.Run("adds project id when configured", func(t *testing.T) {
 		defer saveTodoistFlags()()
 		*todoistAPIKey = testGenericAPIKey
-		*todoistProjectID = "proj-456"
+		*todoistDefaultProjectID = "proj-456"
 
 		mockCreator := new(mockTodoistTaskCreator)
 		mockCreator.On("CreateTask", mock.Anything, mock.Anything,

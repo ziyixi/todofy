@@ -1,6 +1,7 @@
 # docker-compose.test.yml - Integration test configuration for todofy services
 # This file is used by GitHub Actions to test that all containers can successfully
 # set up, communicate with each other, and serve services.
+# Shared test env for CI: env/todofy.test.env
 
 networks:
   todofy-test:
@@ -15,15 +16,10 @@ services:
     container_name: todofy-test
     ports:
       - "10003:8080"
+    env_file:
+      - ./env/todofy.test.env
     environment:
       PORT: "8080"
-      ALLOWED_USERS: "testuser:testpassword"
-      DATABASE_PATH: "/tmp/test.db"
-      LLMAddr: "todofy-llm:50051"
-      TodoAddr: "todofy-todo:50052"
-      DependencyAddr: "todofy-todo:50052"
-      TodoistAddr: "todofy-todo:50052"
-      DatabaseAddr: "todofy-database:50053"
     depends_on:
       todofy-llm:
         condition: service_healthy
@@ -46,11 +42,10 @@ services:
       context: .
       dockerfile: llm/Dockerfile
     container_name: todofy-llm-test
+    env_file:
+      - ./env/todofy.test.env
     environment:
       PORT: "50051"
-      # GEMINI_API_KEY intentionally left empty for integration tests
-      # The service should still start and respond to health checks
-      GEMINI_API_KEY: ""
     networks:
       - todofy-test
     healthcheck:
@@ -66,16 +61,10 @@ services:
       context: .
       dockerfile: todo/Dockerfile
     container_name: todofy-todo-test
+    env_file:
+      - ./env/todofy.test.env
     environment:
       PORT: "50052"
-      # Todoist API keys intentionally left empty for integration tests
-      TODOIST_API_KEY: ""
-      TODOIST_PROJECT_ID: ""
-      TODOIST_WEBHOOK_SECRET: ""
-      DEPENDENCY_RECONCILE_INTERVAL: "30m"
-      DEPENDENCY_WEBHOOK_DEBOUNCE: "20s"
-      DEPENDENCY_GRACE_PERIOD: "2m"
-      DEPENDENCY_ENABLE_SCHEDULER: "true"
     networks:
       - todofy-test
     healthcheck:
@@ -91,6 +80,8 @@ services:
       context: .
       dockerfile: database/Dockerfile
     container_name: todofy-database-test
+    env_file:
+      - ./env/todofy.test.env
     environment:
       PORT: "50053"
     volumes:

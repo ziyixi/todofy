@@ -33,8 +33,12 @@ var (
 	port = flag.Int("port", 50052, "The server port of the Todo service")
 
 	// Todoist API credentials
-	todoistAPIKey        = flag.String("todoist-api-key", "", "The API key for Todoist")
-	todoistProjectID     = flag.String("todoist-project-id", "", "The project ID for Todoist tasks")
+	todoistAPIKey           = flag.String("todoist-api-key", "", "The API key for Todoist")
+	todoistDefaultProjectID = flag.String(
+		"todoist-default-project-id",
+		"",
+		"Default Todoist project ID for created tasks",
+	)
 	todoistWebhookSecret = flag.String(
 		"todoist-webhook-secret",
 		"",
@@ -117,9 +121,9 @@ func (s *todoServer) PopulateTodoByTodoist(ctx context.Context, req *pb.TodoRequ
 		Description: req.Body,
 	}
 
-	// Add project ID if specified.
-	if *todoistProjectID != "" {
-		taskRequest.ProjectID = *todoistProjectID
+	// Add default project ID if specified.
+	if projectID := *todoistDefaultProjectID; projectID != "" {
+		taskRequest.ProjectID = projectID
 	}
 
 	// Generate a request ID for idempotency (optional).
