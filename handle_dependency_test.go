@@ -121,34 +121,74 @@ func TestHandleDependencyStatus_NotFound(t *testing.T) {
 }
 
 func TestHandleTodoistWebhook(t *testing.T) {
-	mockDependency := new(mocks.MockDependencyServiceClient)
-	mockTodoist := new(mocks.MockTodoistServiceClient)
+	t.Run("success", func(t *testing.T) {
+		mockDependency := new(mocks.MockDependencyServiceClient)
+		mockTodoist := new(mocks.MockTodoistServiceClient)
 
-	mockTodoist.On("VerifyWebhook", mock.Anything, mock.Anything, mock.Anything).
-		Return(&pb.VerifyTodoistWebhookResponse{
-			Valid:  true,
-			Reason: "ok",
-		}, nil)
-	mockDependency.On("MarkGraphDirty", mock.Anything,
-		mock.MatchedBy(func(req *pb.MarkDependencyGraphDirtyRequest) bool {
-			return req.GetSource() == "todoist_webhook" &&
-				len(req.GetTodoistTaskIds()) == 1 &&
-				req.GetTodoistTaskIds()[0] == "task-1" &&
-				len(req.GetTaskKeys()) == 1 &&
-				req.GetTaskKeys()[0] == "alpha"
-		}),
-		mock.Anything,
-	).Return(&pb.MarkDependencyGraphDirtyResponse{Accepted: true}, nil)
+		mockTodoist.On("VerifyWebhook", mock.Anything, mock.Anything, mock.Anything).
+			Return(&pb.VerifyTodoistWebhookResponse{
+				Valid:  true,
+				Reason: "ok",
+			}, nil)
+		mockDependency.On("MarkGraphDirty", mock.Anything,
+			mock.MatchedBy(func(req *pb.MarkDependencyGraphDirtyRequest) bool {
+				return req.GetSource() == "todoist_webhook" &&
+					len(req.GetTodoistTaskIds()) == 1 &&
+					req.GetTodoistTaskIds()[0] == "task-1" &&
+					len(req.GetTaskKeys()) == 1 &&
+					req.GetTaskKeys()[0] == "alpha"
+			}),
+			mock.Anything,
+		).Return(&pb.MarkDependencyGraphDirtyResponse{Accepted: true}, nil)
 
-	router := setupDependencyHandlerRouter(mockDependency, mockTodoist)
-	body := `{"event_data":{"id":"task-1","content":"Sample <k:alpha>"}}`
-	req, _ := http.NewRequest(http.MethodPost, "/todoist/webhook", strings.NewReader(body))
-	req.Header.Set("X-Todoist-Hmac-SHA256", "signature")
-	w := httptest.NewRecorder()
-	router.ServeHTTP(w, req)
+		router := setupDependencyHandlerRouter(mockDependency, mockTodoist)
+		body := `{"event_data":{"id":"task-1","content":"Sample <k:alpha>"}}`
+		req, _ := http.NewRequest(http.MethodPost, "/todoist/webhook", strings.NewReader(body))
+		req.Header.Set("X-Todoist-Hmac-SHA256", "signature")
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, req)
 
-	assert.Equal(t, http.StatusOK, w.Code)
-	assert.Contains(t, w.Body.String(), "\"accepted\":true")
-	mockTodoist.AssertExpectations(t)
-	mockDependency.AssertExpectations(t)
+		assert.Equal(t, http.StatusOK, w.Code)
+		assert.Contains(t, w.Body.String(), "\"accepted\":true")
+		mockTodoist.AssertExpectations(t)
+		mockDependency.AssertExpectations(t)
+	})
+
+	t.Run("verification errors surface as 500", func(t *testing.T) {
+		mockTodoist := new(mocks.MockTodoistServiceClient)
+		mockTodoist.On("VerifyWebhook", mock.Anything, mock.Anything, mock.Anything).
+			Return(nil, assert.AnError)
+
+		router := setupDependencyHandlerRouter(new(mocks.MockDependencyServiceClient), mockTodoist)
+		req, _ := http.NewRequest(http.MethodPost, "/todoist/webhook", strings.NewReader(`{"event_data":{"id":"task-1"}}`))
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusInternalServerError, w.Code)
+		assert.Contains(t, w.Body.String(), "verify_failed")
+		mockTodoist.AssertExpectations(t)
+	})
+
+	t.Run("mark graph dirty errors surface as 500", func(t *testing.T) {
+		mockDependency := new(mocks.MockDependencyServiceClient)
+		mockTodoist := new(mocks.MockTodoistServiceClient)
+
+		mockTodoist.On("VerifyWebhook", mock.Anything, mock.Anything, mock.Anything).
+			Return(&pb.VerifyTodoistWebhookResponse{
+				Valid:  true,
+				Reason: "ok",
+			}, nil)
+		mockDependency.On("MarkGraphDirty", mock.Anything, mock.Anything, mock.Anything).
+			Return(nil, assert.AnError)
+
+		router := setupDependencyHandlerRouter(mockDependency, mockTodoist)
+		req, _ := http.NewRequest(http.MethodPost, "/todoist/webhook", strings.NewReader(`{"event_data":{"id":"task-1"}}`))
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusInternalServerError, w.Code)
+		assert.Contains(t, w.Body.String(), "mark_graph_dirty_failed")
+		mockTodoist.AssertExpectations(t)
+		mockDependency.AssertExpectations(t)
+	})
 }

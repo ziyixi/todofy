@@ -5,6 +5,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
@@ -238,6 +239,10 @@ func run(cfg Config) error {
 }
 
 func main() {
+	os.Exit(executeMain())
+}
+
+func executeMain() int {
 	initLogger()
 	initFlags()
 	log.Infof("Server Starting time: %s", time.Now().Format(time.RFC3339))
@@ -245,5 +250,7 @@ func main() {
 
 	if err := runApplication(config); err != nil {
 		log.Errorf("Application startup failed: %v", err)
+		return 1
 	}
+	return 0
 }

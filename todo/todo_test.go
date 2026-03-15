@@ -123,9 +123,15 @@ func TestPopulateTodoByTodoist_DI(t *testing.T) {
 		*todoistDefaultProjectID = ""
 
 		mockCreator := new(mockTodoistTaskCreator)
-		mockCreator.On("CreateTask", mock.Anything, mock.Anything, mock.MatchedBy(func(req *todoist.CreateTaskRequest) bool {
-			return req.Content == "Test Todo" && req.Description == "Test Body" && req.ProjectID == ""
-		})).Return(&todoist.Task{
+		mockCreator.On("CreateTask", mock.Anything,
+			buildTodoistRequestID(&pb.TodoRequest{
+				Subject: "Test Todo",
+				Body:    "Test Body",
+			}),
+			mock.MatchedBy(func(req *todoist.CreateTaskRequest) bool {
+				return req.Content == "Test Todo" && req.Description == "Test Body" && req.ProjectID == ""
+			}),
+		).Return(&todoist.Task{
 			ID:      "task-123",
 			Content: "Test Todo",
 		}, nil)
@@ -209,4 +215,25 @@ func TestPopulateTodoByTodoist_DI(t *testing.T) {
 		assert.Equal(t, "task-456", resp.Id)
 		mockCreator.AssertExpectations(t)
 	})
+}
+
+func TestBuildTodoistRequestID(t *testing.T) {
+	req := &pb.TodoRequest{
+		Subject: "Test Todo",
+		Body:    "Body",
+		From:    "sender@example.com",
+	}
+
+	first := buildTodoistRequestID(req)
+	second := buildTodoistRequestID(req)
+	changed := buildTodoistRequestID(&pb.TodoRequest{
+		Subject: "Test Todo",
+		Body:    "Different body",
+		From:    "sender@example.com",
+	})
+
+	assert.Equal(t, first, second)
+	assert.NotEqual(t, first, changed)
+	assert.Len(t, first, len(todoistRequestIDPrefix)+todoistRequestIDHashSize)
+	assert.Contains(t, first, todoistRequestIDPrefix)
 }

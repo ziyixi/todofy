@@ -4,7 +4,9 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
+	"strings"
 	"time"
 
 	"github.com/sirupsen/logrus"
@@ -83,8 +85,29 @@ func (s *databaseServer) Write(_ context.Context, req *pb.WriteRequest) (*pb.Wri
 	if s.db == nil {
 		return nil, status.Errorf(codes.FailedPrecondition, "database not initialized")
 	}
-	if err := s.db.Create(&entry).Error; err != nil {
-		return nil, status.Errorf(codes.Internal, "failed to create entry: %v", err)
+	hashID := strings.TrimSpace(req.Schema.HashId)
+	if hashID == "" {
+		if err := s.db.Create(&entry).Error; err != nil {
+			return nil, status.Errorf(codes.Internal, "failed to create entry: %v", err)
+		}
+		log.Infof("Entry created for model %s with max tokens %d", req.Schema.Model, req.Schema.MaxTokens)
+		return &pb.WriteResponse{}, nil
+	}
+
+	var existing DatabaseEntry
+	result := s.db.Where("hash_id = ?", hashID).First(&existing)
+	switch {
+	case result.Error == nil:
+		entry.Model = existing.Model
+		if err := s.db.Save(&entry).Error; err != nil {
+			return nil, status.Errorf(codes.Internal, "failed to update entry: %v", err)
+		}
+	case errors.Is(result.Error, gorm.ErrRecordNotFound):
+		if err := s.db.Create(&entry).Error; err != nil {
+			return nil, status.Errorf(codes.Internal, "failed to create entry: %v", err)
+		}
+	default:
+		return nil, status.Errorf(codes.Internal, "failed to look up existing entry: %v", result.Error)
 	}
 	log.Infof("Entry created for model %s with max tokens %d", req.Schema.Model, req.Schema.MaxTokens)
 	return &pb.WriteResponse{}, nil
@@ -143,9 +166,12 @@ func (s *databaseServer) CheckExist(
 
 	var entry DatabaseEntry
 	result := s.db.Where("hash_id = ?", req.HashId).First(&entry)
-	if result.Error != nil {
+	if errors.Is(result.Error, gorm.ErrRecordNotFound) {
 		// Not found → return empty response (no error)
 		return &pb.CheckExistResponse{}, nil
+	}
+	if result.Error != nil {
+		return nil, status.Errorf(codes.Internal, "failed to query entry by hash_id: %v", result.Error)
 	}
 
 	return &pb.CheckExistResponse{

@@ -157,6 +157,36 @@ func TestDatabaseServer_Write(t *testing.T) {
 		assert.NoError(t, err)
 		assert.NotNil(t, resp)
 	})
+
+	t.Run("write upserts existing entry when hash matches", func(t *testing.T) {
+		server := setupTestDatabase(t)
+
+		require.NoError(t, server.db.Create(&DatabaseEntry{
+			Prompt:  "original",
+			Text:    "original text",
+			Summary: "original summary",
+			HashId:  "same-hash",
+		}).Error)
+
+		resp, err := server.Write(context.Background(), &pb.WriteRequest{
+			Schema: &pb.DataBaseSchema{
+				Prompt:  "updated",
+				Text:    "updated text",
+				Summary: "updated summary",
+				HashId:  "same-hash",
+			},
+		})
+
+		assert.NoError(t, err)
+		assert.NotNil(t, resp)
+
+		var entries []DatabaseEntry
+		require.NoError(t, server.db.Order("id").Find(&entries).Error)
+		require.Len(t, entries, 1)
+		assert.Equal(t, "updated", entries[0].Prompt)
+		assert.Equal(t, "updated text", entries[0].Text)
+		assert.Equal(t, "updated summary", entries[0].Summary)
+	})
 }
 
 func TestDatabaseServer_QueryRecent(t *testing.T) {
@@ -367,6 +397,20 @@ func TestDatabaseServer_CheckExist(t *testing.T) {
 		assert.Error(t, err)
 		assert.Nil(t, resp)
 		assert.Contains(t, err.Error(), "database not initialized")
+	})
+
+	t.Run("propagates database query errors", func(t *testing.T) {
+		server := setupTestDatabase(t)
+		require.NoError(t, server.db.Exec("DROP TABLE database_entries").Error)
+
+		resp, err := server.CheckExist(context.Background(), &pb.CheckExistRequest{
+			Type:   pb.DatabaseType_DATABASE_TYPE_SQLITE,
+			HashId: "some_hash",
+		})
+
+		assert.Error(t, err)
+		assert.Nil(t, resp)
+		assert.Contains(t, err.Error(), "failed to query entry by hash_id")
 	})
 
 	t.Run("returns first entry when multiple exist with same hash", func(t *testing.T) {

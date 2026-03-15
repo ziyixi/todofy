@@ -150,7 +150,7 @@ func HandleTodoistWebhook(c *gin.Context) {
 	}
 	verifyResp, verifyErr := todoistClient.VerifyWebhook(c, verifyReq)
 	if verifyErr != nil {
-		c.JSON(http.StatusOK, gin.H{
+		c.JSON(http.StatusInternalServerError, gin.H{
 			"accepted": false,
 			"reason":   "verify_failed",
 			"details":  verifyErr.Error(),
@@ -158,7 +158,7 @@ func HandleTodoistWebhook(c *gin.Context) {
 		return
 	}
 	if !verifyResp.GetValid() {
-		c.JSON(http.StatusOK, gin.H{
+		c.JSON(http.StatusUnauthorized, gin.H{
 			"accepted": false,
 			"reason":   verifyResp.GetReason(),
 			"details":  verifyResp.GetDetails(),
@@ -174,7 +174,7 @@ func HandleTodoistWebhook(c *gin.Context) {
 		TaskKeys:       extractWebhookTaskKeys(body),
 	})
 	if markErr != nil {
-		c.JSON(http.StatusOK, gin.H{
+		c.JSON(http.StatusInternalServerError, gin.H{
 			"accepted": false,
 			"reason":   "mark_graph_dirty_failed",
 			"details":  markErr.Error(),

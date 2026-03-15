@@ -59,9 +59,10 @@ func HandleUpdateTodo(c *gin.Context) {
 
 	var summaryResp *pb.LLMSummaryResponse
 	var summaryReq *pb.LLMSummaryRequest
+	todoContent := ""
 
 	if checkResp != nil && checkResp.Entry != nil {
-		// Cache hit — reuse the stored summary, skip expensive LLM call
+		// Cache hit — reuse the previously rendered todo body, skip expensive LLM call
 		log.Infof("Cache hit for hash_id=%s, skipping LLM call", hashID)
 		summaryResp = &pb.LLMSummaryResponse{
 			Summary: checkResp.Entry.Summary,
@@ -72,6 +73,7 @@ func HandleUpdateTodo(c *gin.Context) {
 			Prompt:      checkResp.Entry.Prompt,
 			Text:        checkResp.Entry.Text,
 		}
+		todoContent = checkResp.Entry.Summary
 	} else {
 		// Cache miss — call LLM
 		summaryReq = &pb.LLMSummaryRequest{
@@ -85,31 +87,32 @@ func HandleUpdateTodo(c *gin.Context) {
 			c.JSON(http.StatusInternalServerError, gin.H{"error in summarizing email": err.Error()})
 			return
 		}
-	}
-	// Remove all # started tags in summary, use regex to match [space]#[arbitrary less than 10 characters]
-	regex := regexp.MustCompile(`\s#[a-zA-Z0-9]{1,10}\s`)
-	summaryResp.Summary = regex.ReplaceAllString(summaryResp.Summary, "<removed tag>")
-	emailContentWithSummary := utils.MailInfo{
-		From:    emailContent.From,
-		To:      emailContent.To,
-		Date:    emailContent.Date,
-		Subject: emailContent.Subject,
-		Content: summaryResp.Summary, // use the summary as the content
-	}
 
-	// prepare task description, load template
-	tmpl, err := template.New("todoDescription").Parse(descriptionTmpl)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error in parsing template": err.Error()})
-		return
+		// Remove all # started tags in summary, use regex to match [space]#[arbitrary less than 10 characters]
+		regex := regexp.MustCompile(`\s#[a-zA-Z0-9]{1,10}\s`)
+		summaryResp.Summary = regex.ReplaceAllString(summaryResp.Summary, "<removed tag>")
+		emailContentWithSummary := utils.MailInfo{
+			From:    emailContent.From,
+			To:      emailContent.To,
+			Date:    emailContent.Date,
+			Subject: emailContent.Subject,
+			Content: summaryResp.Summary, // use the summary as the content
+		}
+
+		// prepare task description, load template
+		tmpl, err := template.New("todoDescription").Parse(descriptionTmpl)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error in parsing template": err.Error()})
+			return
+		}
+		var buf bytes.Buffer
+		err = tmpl.Execute(&buf, emailContentWithSummary)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error in executing template": err.Error()})
+			return
+		}
+		todoContent = buf.String()
 	}
-	var buf bytes.Buffer
-	err = tmpl.Execute(&buf, emailContentWithSummary)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error in executing template": err.Error()})
-		return
-	}
-	todoContent := buf.String()
 
 	// create a todo item
 	todoReq := &pb.TodoRequest{

@@ -371,8 +371,31 @@ func TestMain_ParsesFlagsAndCallsRun(t *testing.T) {
 		return nil
 	}
 
-	main()
+	exitCode := executeMain()
 	assert.True(t, called)
+	assert.Equal(t, 0, exitCode)
+}
+
+func TestExecuteMain_ReturnsNonZeroOnStartupFailure(t *testing.T) {
+	originalRunApplication := runApplication
+	originalCommandLine := flag.CommandLine
+	originalArgs := os.Args
+	originalConfig := config
+	t.Cleanup(func() {
+		runApplication = originalRunApplication
+		flag.CommandLine = originalCommandLine
+		os.Args = originalArgs
+		config = originalConfig
+	})
+
+	flag.CommandLine = flag.NewFlagSet("todofy-main-failure-test", flag.ContinueOnError)
+	os.Args = []string{"todofy"}
+
+	runApplication = func(Config) error {
+		return errors.New("startup failed")
+	}
+
+	assert.Equal(t, 1, executeMain())
 }
 
 func TestSetupRouter(t *testing.T) {
