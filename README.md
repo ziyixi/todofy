@@ -8,66 +8,77 @@ Todofy is a self-hosted task management tool designed to help you organize and p
 ## 🏗️ Architecture
 
 ```mermaid
-graph TB
-    %% External systems and users
-    User[👤 User<br/>HTTP Client]
-    Email[📧 Email System<br/>Cloudmailin Webhook]
-    
-    %% External services
-    Gemini[🤖 Google Gemini<br/>LLM API]
-    Todoist[✅ Todoist<br/>Task API v1]
-    
-    %% Main HTTP Server
-    Main[🌐 Todofy Main Server<br/>HTTP REST API<br/>Port: 8080<br/>Basic Auth + Rate Limiting]
-    
-    %% Microservices
-    LLM[🧠 LLM Service<br/>gRPC Server<br/>Port: 50051]
-    Todo[📋 Todo Service<br/>gRPC Server<br/>Port: 50052]
-    DB[🗄️ Database Service<br/>gRPC Server<br/>Port: 50053<br/>SQLite Backend]
-    
-    %% API endpoints
-    Summary[📊 /api/summary<br/>GET endpoint]
-    UpdateTodo[📝 /api/v1/update_todo<br/>POST endpoint]
-    Recommend[🏆 /api/recommendation<br/>GET endpoint<br/>?top=N]
-    
-    %% Data flow connections
-    User -->|HTTPS GET| Summary
-    User -->|HTTPS GET| Recommend
-    Email -->|Webhook POST| UpdateTodo
-    
+flowchart TB
+    subgraph Clients["Clients + External Events"]
+        direction LR
+        User[👤 User<br/>Browser / API Client]
+        Email[📧 Cloudmailin<br/>Inbound Email]
+        TodoistEvent[🔔 Todoist<br/>Webhook Delivery]
+    end
+
+    subgraph API["Todofy HTTP API :8080"]
+        direction LR
+        Summary[📊 GET /api/summary]
+        Recommend[🏆 GET /api/recommendation]
+        UpdateTodo[📝 POST /api/v1/update_todo]
+        DependencyOps[🔗 /api/v1/dependency/*]
+        Webhook[🪝 POST /api/v1/todoist/webhook]
+    end
+
+    Main[🌐 Main Service<br/>Auth, routing, rate limiting]
+
+    subgraph Services["Internal gRPC Services"]
+        direction LR
+        LLM[🧠 todofy-llm<br/>Gemini summarization]
+        Todo[📋 todofy-todo<br/>Todoist + DAG dependency logic]
+        DB[🗄️ todofy-database<br/>SQLite storage]
+    end
+
+    subgraph Providers["External Providers"]
+        direction LR
+        Gemini[🤖 Gemini API]
+        Todoist[✅ Todoist API]
+    end
+
+    subgraph SUT["Behavior-Level SUT Harness"]
+        direction LR
+        SUTTests[🧪 go test ./sut/...]
+        FakeGemini[🧪 Fake Gemini]
+        FakeTodoist[🧪 Fake Todoist]
+    end
+
+    User --> Summary
+    User --> Recommend
+    User --> DependencyOps
+    Email --> UpdateTodo
+    TodoistEvent --> Webhook
+
     Summary --> Main
-    UpdateTodo --> Main
     Recommend --> Main
-    
-    Main -->|gRPC Health Check| LLM
-    Main -->|gRPC Health Check| Todo  
-    Main -->|gRPC Health Check| DB
-    
-    %% Dedup cache flow: check DB first, then conditionally call LLM
-    Main -->|CheckExist<br/>hash_id lookup| DB
-    Main -.->|LLMSummaryRequest<br/>only on cache miss| LLM
-    Main -->|TodoRequest<br/>from /api/v1/update_todo| Todo
-    Main -->|Write<br/>with hash_id| DB
-    
-    LLM -->|API Calls| Gemini
-    Todo -->|Task Creation| Todoist
-    
-    %% Service descriptions
-    Main -.->|Container| MainContainer[🐳 ghcr.io/ziyixi/todofy:latest]
-    LLM -.->|Container| LLMContainer[🐳 ghcr.io/ziyixi/todofy-llm:latest]
-    Todo -.->|Container| TodoContainer[🐳 ghcr.io/ziyixi/todofy-todo:latest] 
-    DB -.->|Container| DBContainer[🐳 ghcr.io/ziyixi/todofy-database:latest]
-    
-    %% Styling
+    UpdateTodo --> Main
+    DependencyOps --> Main
+    Webhook --> Main
+
+    Main -->|recent queries + writes| DB
+    Main -.->|cache miss only| LLM
+    Main -->|todo + dependency RPCs| Todo
+
+    LLM --> Gemini
+    Todo -->|tasks, labels, verify webhook| Todoist
+
+    SUTTests -->|behavior assertions| Main
+    LLM -.->|SUT base URL override| FakeGemini
+    Todo -.->|SUT base URL override| FakeTodoist
+
     classDef external fill:#e1f5fe,stroke:#0277bd,stroke-width:2px
     classDef service fill:#f3e5f5,stroke:#7b1fa2,stroke-width:2px
     classDef endpoint fill:#e8f5e8,stroke:#388e3c,stroke-width:2px
-    classDef container fill:#fff3e0,stroke:#f57c00,stroke-width:2px,stroke-dasharray: 5 5
-    
-    class User,Email,Gemini,Todoist external
+    classDef test fill:#fff3e0,stroke:#ef6c00,stroke-width:2px,stroke-dasharray: 5 5
+
+    class User,Email,TodoistEvent,Gemini,Todoist external
     class Main,LLM,Todo,DB service
-    class Summary,UpdateTodo,Recommend endpoint
-    class MainContainer,LLMContainer,TodoContainer,DBContainer container
+    class Summary,Recommend,UpdateTodo,DependencyOps,Webhook endpoint
+    class SUTTests,FakeGemini,FakeTodoist test
 ```
 
 ## ✨ Features
@@ -200,6 +211,7 @@ Use the collapsible sections below for operational setup details.
 Reference files in repo:
 - `env/todofy.env.example` for production-style `env_file` compose setups.
 - `env/todofy.test.env` used by `docker-compose.test.yml` in CI and local integration runs.
+- `env/todofy.sut.env` used by `docker-compose.sut.yml` for behavior-level system-under-test coverage.
 
 <details>
 <summary><strong>Env precedence and shared-file rules</strong></summary>
@@ -320,6 +332,52 @@ docker compose -f docker-compose.test.yml build
 docker compose -f docker-compose.test.yml up -d
 docker compose -f docker-compose.test.yml down -v
 ```
+
+</details>
+
+<details>
+<summary><strong>System-Under-Test compose (`docker-compose.sut.yml`)</strong></summary>
+
+`docker-compose.sut.yml` is the behavior-level integration harness.
+It keeps the main app, `todofy-llm`, `todofy-todo`, and `todofy-database` real, while replacing only the true external providers with in-repo fakes:
+
+- fake Gemini at `sut/fakes/gemini`
+- fake Todoist at `sut/fakes/todoist`
+
+The shared env file is `env/todofy.sut.env`.
+By default it:
+
+- points Gemini traffic at the fake Gemini base URL
+- points Todoist traffic at the fake Todoist base URL
+- disables the main app rate limiter for deterministic test runs
+- disables dependency background scheduling so tests can drive reconcile behavior explicitly
+
+Host-exposed ports used by the SUT harness:
+
+- `10013` -> main HTTP API (`todofy-sut`)
+- `10053` -> real database gRPC (`todofy-database-sut`)
+- `18081` -> fake Gemini admin API
+- `18082` -> fake Todoist admin API
+
+Run locally:
+
+```bash
+docker compose -f docker-compose.sut.yml build
+docker compose -f docker-compose.sut.yml up -d
+make test-sut
+docker compose -f docker-compose.sut.yml down -v
+```
+
+`make test-sut` runs `TODOFY_RUN_SUT=1 go test -v ./sut/...`.
+
+The SUT suite covers endpoint behavior such as:
+
+- `POST /api/v1/update_todo` with cache miss, cache hit, and external failure paths
+- `GET /api/summary`
+- `GET /api/recommendation`
+- dependency reconcile, bootstrap, status, and issue endpoints
+- Todoist webhook signature handling
+- excluded-project bootstrap behavior via `DEPENDENCY_BOOTSTRAP_EXCLUDED_PROJECT_IDS`
 
 </details>
 

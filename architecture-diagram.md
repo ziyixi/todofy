@@ -1,67 +1,84 @@
 ```mermaid
-graph TB
-    %% External systems and users
-    User[👤 User<br/>HTTP Client]
-    Email[📧 Email System<br/>Cloudmailin Webhook]
+flowchart TB
+    subgraph Clients["Clients + External Events"]
+        direction LR
+        User[👤 User<br/>Browser / API Client]
+        Email[📧 Cloudmailin<br/>Inbound Email]
+        TodoistEvent[🔔 Todoist<br/>Webhook Delivery]
+    end
 
-    %% External services
-    Gemini[🤖 Google Gemini<br/>LLM API]
-    Todoist[✅ Todoist<br/>Task Management API]
+    subgraph API["Todofy HTTP API :8080"]
+        direction LR
+        Summary[📊 GET /api/summary]
+        Recommend[🏆 GET /api/recommendation]
+        UpdateTodo[📝 POST /api/v1/update_todo]
+        DependencyOps[🔗 /api/v1/dependency/*]
+        Webhook[🪝 POST /api/v1/todoist/webhook]
+    end
 
-    %% Main HTTP Server
-    Main[🌐 Todofy Main Server<br/>HTTP REST API<br/>Port: 8080<br/>Basic Auth + Rate Limiting]
+    Main[🌐 Main Service<br/>Auth, routing, rate limiting]
 
-    %% Microservices
-    LLM[🧠 LLM Service<br/>gRPC Server<br/>Port: 50051]
-    Todo[📋 Todo Service<br/>gRPC Server<br/>Port: 50052]
-    DB[🗄️ Database Service<br/>gRPC Server<br/>Port: 50053<br/>SQLite Backend]
+    subgraph Services["Internal gRPC Services"]
+        direction LR
+        LLM[🧠 todofy-llm<br/>Gemini summarization]
+        Todo[📋 todofy-todo<br/>Todoist + DAG dependency logic]
+        DB[🗄️ todofy-database<br/>SQLite storage]
+    end
 
-    %% API endpoints
-    Summary[📊 /api/summary<br/>GET endpoint]
-    UpdateTodo[📝 /api/v1/update_todo<br/>POST endpoint]
+    subgraph Providers["External Providers"]
+        direction LR
+        Gemini[🤖 Gemini API]
+        Todoist[✅ Todoist API]
+    end
 
-    %% Data flow connections
-    User -->|HTTPS GET| Summary
-    Email -->|Webhook POST| UpdateTodo
+    subgraph SUT["Behavior-Level SUT Harness"]
+        direction LR
+        SUTTests[🧪 go test ./sut/...]
+        FakeGemini[🧪 Fake Gemini]
+        FakeTodoist[🧪 Fake Todoist]
+    end
+
+    User --> Summary
+    User --> Recommend
+    User --> DependencyOps
+    Email --> UpdateTodo
+    TodoistEvent --> Webhook
 
     Summary --> Main
+    Recommend --> Main
     UpdateTodo --> Main
+    DependencyOps --> Main
+    Webhook --> Main
 
-    Main -->|gRPC Health Check| LLM
-    Main -->|gRPC Health Check| Todo
-    Main -->|gRPC Health Check| DB
+    Main -->|recent queries + writes| DB
+    Main -.->|cache miss only| LLM
+    Main -->|todo + dependency RPCs| Todo
 
-    Main -->|LLMSummaryRequest| LLM
-    Main -->|TodoRequest| Todo
-    Main -->|DatabaseQuery/Insert| DB
+    LLM --> Gemini
+    Todo -->|tasks, labels, verify webhook| Todoist
 
-    LLM -->|API Calls| Gemini
-    Todo -->|Task Creation| Todoist
+    SUTTests -->|behavior assertions| Main
+    LLM -.->|SUT base URL override| FakeGemini
+    Todo -.->|SUT base URL override| FakeTodoist
 
-    %% Service descriptions
-    Main -.->|Container| MainContainer[🐳 ghcr.io/ziyixi/todofy:latest]
-    LLM -.->|Container| LLMContainer[🐳 ghcr.io/ziyixi/todofy-llm:latest]
-    Todo -.->|Container| TodoContainer[🐳 ghcr.io/ziyixi/todofy-todo:latest]
-    DB -.->|Container| DBContainer[🐳 ghcr.io/ziyixi/todofy-database:latest]
-
-    %% Styling
     classDef external fill:#e1f5fe,stroke:#0277bd,stroke-width:2px
     classDef service fill:#f3e5f5,stroke:#7b1fa2,stroke-width:2px
     classDef endpoint fill:#e8f5e8,stroke:#388e3c,stroke-width:2px
-    classDef container fill:#fff3e0,stroke:#f57c00,stroke-width:2px,stroke-dasharray: 5 5
+    classDef test fill:#fff3e0,stroke:#ef6c00,stroke-width:2px,stroke-dasharray: 5 5
 
-    class User,Email,Gemini,Todoist external
+    class User,Email,TodoistEvent,Gemini,Todoist external
     class Main,LLM,Todo,DB service
-    class Summary,UpdateTodo endpoint
-    class MainContainer,LLMContainer,TodoContainer,DBContainer container
+    class Summary,Recommend,UpdateTodo,DependencyOps,Webhook endpoint
+    class SUTTests,FakeGemini,FakeTodoist test
 ```
 
 **Architecture Overview:**
 
 - **Main HTTP Server (Port 8080)**: REST API with Basic Authentication and Rate Limiting
 - **LLM Service (Port 50051)**: Handles AI summarization via Google Gemini
-- **Todo Service (Port 50052)**: Manages Todoist task creation
+- **Todo Service (Port 50052)**: Manages Todoist task operations and dependency DAG behavior
 - **Database Service (Port 50053)**: SQLite database operations via gRPC
+- **SUT Harness**: Runs behavior-level tests against real internal services with fake external providers
 
 **Key Features:**
 - 📧 **Email-to-Todo**: Webhook endpoint processes incoming emails and converts them to Todoist tasks
