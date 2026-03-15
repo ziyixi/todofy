@@ -116,7 +116,12 @@ func TestHandleUpdateTodo_SuccessCacheHit(t *testing.T) {
 		}, nil)
 
 	// Todo created
-	mockTodo.On("PopulateTodo", mock.Anything, mock.Anything, mock.Anything).
+	mockTodo.On("PopulateTodo", mock.Anything,
+		mock.MatchedBy(func(req *pb.TodoRequest) bool {
+			return req.Body == "Cached summary from DB"
+		}),
+		mock.Anything,
+	).
 		Return(&pb.TodoResponse{}, nil)
 
 	// DB write succeeds

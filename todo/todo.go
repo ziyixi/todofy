@@ -2,9 +2,12 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"flag"
 	"fmt"
 	"net"
+	"strings"
 	"time"
 
 	"github.com/sirupsen/logrus"
@@ -87,6 +90,11 @@ type todoServer struct {
 	newTodoistClient func(apiKey string) todoistTaskCreator
 }
 
+const (
+	todoistRequestIDPrefix   = "todofy-"
+	todoistRequestIDHashSize = 28
+)
+
 // PopulateTodo validates the todo target and dispatches creation to the Todoist path.
 func (s *todoServer) PopulateTodo(ctx context.Context, req *pb.TodoRequest) (*pb.TodoResponse, error) {
 	if req.App != pb.TodoApp_TODO_APP_TODOIST {
@@ -131,8 +139,8 @@ func (s *todoServer) PopulateTodoByTodoist(ctx context.Context, req *pb.TodoRequ
 		taskRequest.ProjectID = projectID
 	}
 
-	// Generate a request ID for idempotency (optional).
-	requestID := fmt.Sprintf("todofy-%d", time.Now().Unix())
+	// Use a deterministic request ID so retries do not create duplicate Todoist tasks.
+	requestID := buildTodoistRequestID(req)
 
 	// Create the task.
 	task, err := client.CreateTask(ctx, requestID, taskRequest)
@@ -146,6 +154,17 @@ func (s *todoServer) PopulateTodoByTodoist(ctx context.Context, req *pb.TodoRequ
 		Id:      task.ID,
 		Message: message,
 	}, nil
+}
+
+func buildTodoistRequestID(req *pb.TodoRequest) string {
+	hashInput := strings.Join([]string{
+		req.GetSubject(),
+		req.GetBody(),
+		req.GetFrom(),
+	}, "\x00")
+	sum := sha256.Sum256([]byte(hashInput))
+	hash := hex.EncodeToString(sum[:])
+	return todoistRequestIDPrefix + hash[:todoistRequestIDHashSize]
 }
 
 func main() {

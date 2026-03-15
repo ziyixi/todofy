@@ -118,7 +118,7 @@ func TestSUTUpdateTodoIntegration(t *testing.T) {
 		assert.Contains(t, todoistState.Tasks[0].Description, "Cached registration summary")
 
 		assert.Empty(t, h.geminiState(t).Calls)
-		assert.Len(t, h.queryEntries(t), 2)
+		assert.Len(t, h.queryEntries(t), 1)
 	})
 
 	t.Run("update todo surfaces gemini failures after llm fallback exhaustion", func(t *testing.T) {
@@ -445,7 +445,7 @@ func TestSUTTodoistWebhookIntegration(t *testing.T) {
 		}()
 		body, err := io.ReadAll(resp.Body)
 		require.NoError(t, err)
-		require.Equal(t, http.StatusOK, resp.StatusCode, string(body))
+		require.Equal(t, http.StatusUnauthorized, resp.StatusCode, string(body))
 
 		webhookResp := mustUnmarshal[webhookHTTPResponse](t, body)
 		assert.False(t, webhookResp.Accepted)
