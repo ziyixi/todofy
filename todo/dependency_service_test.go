@@ -24,6 +24,7 @@ type fakeDependencyTodoistClient struct {
 	tasksByID            map[string]*todoist.Task
 	order                []string
 	updateCalls          int
+	updateLabelsSignal   chan struct{}
 	updateContentCalls   []updateContentCall
 	listErr              error
 	getTaskErr           error
@@ -95,6 +96,12 @@ func (f *fakeDependencyTodoistClient) UpdateTaskLabels(
 	}
 
 	f.updateCalls++
+	if f.updateLabelsSignal != nil {
+		select {
+		case f.updateLabelsSignal <- struct{}{}:
+		default:
+		}
+	}
 	labelSet := make(map[string]struct{}, len(task.Labels))
 	for _, label := range task.Labels {
 		labelSet[label] = struct{}{}
@@ -341,6 +348,7 @@ func TestDependencyServerStartBackgroundReconcile(t *testing.T) {
 		{ID: "task-a", Content: "Task A <k:a dep:b>", UpdatedAt: time.Now().Add(-time.Hour).Format(time.RFC3339)},
 		{ID: "task-b", Content: "Task B <k:b>", UpdatedAt: time.Now().Add(-time.Hour).Format(time.RFC3339)},
 	})
+	fakeClient.updateLabelsSignal = make(chan struct{}, 1)
 	server := &dependencyServer{
 		newTodoistClient:          func(string) todoistOperationalClient { return fakeClient },
 		gracePeriod:               0,
@@ -350,15 +358,27 @@ func TestDependencyServerStartBackgroundReconcile(t *testing.T) {
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	server.StartBackgroundReconcile(ctx)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		server.backgroundLoop(ctx)
+	}()
 
 	_, err := server.MarkGraphDirty(context.Background(), &pb.MarkDependencyGraphDirtyRequest{})
 	require.NoError(t, err)
 
-	require.Eventually(t, func() bool {
-		return fakeClient.updateCalls == 1
-	}, 2*time.Second, 20*time.Millisecond)
+	select {
+	case <-fakeClient.updateLabelsSignal:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for background reconcile label update")
+	}
+
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for background loop to stop")
+	}
 }
 
 func TestMetadataBootstrapExcludedProjectSet(t *testing.T) {
