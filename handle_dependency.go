@@ -43,7 +43,7 @@ func HandleDependencyReconcile(c *gin.Context) {
 
 	resp, rpcErr := dependencyClient.ReconcileGraph(c, &pb.ReconcileDependencyGraphRequest{})
 	if rpcErr != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": rpcErr.Error()})
+		writeDependencyRPCError(c, rpcErr)
 		return
 	}
 	c.JSON(http.StatusOK, resp)
@@ -66,7 +66,7 @@ func HandleDependencyBootstrapMissingKeys(c *gin.Context) {
 		DryRun: dryRun,
 	})
 	if rpcErr != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": rpcErr.Error()})
+		writeDependencyRPCError(c, rpcErr)
 		return
 	}
 	c.JSON(http.StatusOK, resp)
@@ -95,7 +95,7 @@ func HandleDependencyStatus(c *gin.Context) {
 			c.JSON(http.StatusNotFound, gin.H{"error": rpcErr.Error()})
 			return
 		}
-		c.JSON(http.StatusInternalServerError, gin.H{"error": rpcErr.Error()})
+		writeDependencyRPCError(c, rpcErr)
 		return
 	}
 	c.JSON(http.StatusOK, resp)
@@ -119,7 +119,7 @@ func HandleDependencyIssues(c *gin.Context) {
 		TaskKey: strings.TrimSpace(c.Query("task_key")),
 	})
 	if rpcErr != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": rpcErr.Error()})
+		writeDependencyRPCError(c, rpcErr)
 		return
 	}
 	c.JSON(http.StatusOK, resp)
@@ -217,6 +217,14 @@ func getTodoistClient(c *gin.Context) (pb.TodoistServiceClient, bool) {
 		return nil, false
 	}
 	return todoistClient, true
+}
+
+func writeDependencyRPCError(c *gin.Context, err error) {
+	statusCode := http.StatusInternalServerError
+	if status.Code(err) == codes.DeadlineExceeded {
+		statusCode = http.StatusGatewayTimeout
+	}
+	c.JSON(statusCode, gin.H{"error": err.Error()})
 }
 
 func parseBoolQuery(c *gin.Context, key string, defaultValue bool) (bool, error) {

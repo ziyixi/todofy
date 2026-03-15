@@ -22,8 +22,59 @@ test-coverage: ## Run tests with coverage report
 test-verbose: ## Run tests with verbose output
 	go test -v ./...
 
-test-integration: ## Run integration tests
-	./scripts/integration-test.sh
+test-integration: ## Run docker-compose.test.yml integration checks locally
+	@set -eu; \
+	docker compose -f docker-compose.test.yml build; \
+	docker compose -f docker-compose.test.yml up -d; \
+	trap 'docker compose -f docker-compose.test.yml down -v' EXIT; \
+	timeout=120; \
+	elapsed=0; \
+	echo "Waiting for all services to be healthy..."; \
+	while [ $$elapsed -lt $$timeout ]; do \
+		all_healthy=true; \
+		for service in todofy-llm-test todofy-todo-test todofy-database-test todofy-test; do \
+			status=$$(docker inspect --format='{{.State.Health.Status}}' $$service 2>/dev/null || echo "not_found"); \
+			if [ "$$status" != "healthy" ]; then \
+				all_healthy=false; \
+				echo "  $$service: $$status"; \
+			else \
+				echo "  $$service: healthy"; \
+			fi; \
+		done; \
+		if [ "$$all_healthy" = true ]; then \
+			break; \
+		fi; \
+		sleep 5; \
+		elapsed=$$((elapsed + 5)); \
+	done; \
+	if [ $$elapsed -ge $$timeout ]; then \
+		echo "Timeout waiting for services to become healthy"; \
+		docker compose -f docker-compose.test.yml logs; \
+		exit 1; \
+	fi; \
+	response=$$(curl -s -o /dev/null -w "%{http_code}" http://localhost:10003/health); \
+	test "$$response" = "200"; \
+	body=$$(curl -s http://localhost:10003/health); \
+	printf '%s' "$$body" | grep -q '"status":"healthy"'; \
+	summary_status=$$(curl -s -o /dev/null -w "%{http_code}" http://localhost:10003/api/summary); \
+	test "$$summary_status" = "401"; \
+	update_todo_status=$$(curl -s -o /dev/null -w "%{http_code}" -X POST http://localhost:10003/api/v1/update_todo); \
+	test "$$update_todo_status" = "401"; \
+	dependency_reconcile_status=$$(curl -s -o /dev/null -w "%{http_code}" -X POST http://localhost:10003/api/v1/dependency/reconcile); \
+	test "$$dependency_reconcile_status" = "401"; \
+	webhook_response=$$(curl -s -w '\n%{http_code}' \
+		-X POST \
+		-H "Content-Type: application/json" \
+		-d '{"event_data":{"id":"integration-task","content":"Integration task <k:int-task>"}}' \
+		http://localhost:10003/api/v1/todoist/webhook); \
+	webhook_status=$$(printf '%s\n' "$$webhook_response" | tail -n1); \
+	webhook_body=$$(printf '%s\n' "$$webhook_response" | sed '$$d'); \
+	test "$$webhook_status" = "200"; \
+	printf '%s' "$$webhook_body" | grep -q '"accepted":false'; \
+	docker exec todofy-llm-test /grpc_health_probe -addr=:50051 >/dev/null; \
+	docker exec todofy-todo-test /grpc_health_probe -addr=:50052 >/dev/null; \
+	docker exec todofy-database-test /grpc_health_probe -addr=:50053 >/dev/null; \
+	echo "Integration checks passed"
 
 test-sut: ## Run system-under-test integration tests against a running docker-compose.sut.yml stack
 	TODOFY_RUN_SUT=1 go test -v ./sut/...

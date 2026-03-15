@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"errors"
+	"net"
 	"sort"
 	"strings"
 	"sync"
@@ -29,6 +31,12 @@ type dependencyServer struct {
 	webhookDebounce time.Duration
 	// enableBackgroundReconcile toggles the scheduler loop.
 	enableBackgroundReconcile bool
+	// reconcileTimeout bounds the lifetime of one full reconcile/bootstrap run.
+	reconcileTimeout time.Duration
+	// readTimeout bounds one upstream read/precondition operation.
+	readTimeout time.Duration
+	// writeTimeout bounds one upstream write operation.
+	writeTimeout time.Duration
 
 	// dirtySignal is a single-slot queue to avoid unbounded webhook fan-in.
 	dirtySignal chan struct{}
@@ -45,6 +53,9 @@ func newDependencyServer() *dependencyServer {
 		reconcileInterval:          *dependencyReconcileInterval,
 		webhookDebounce:            *dependencyWebhookDebounce,
 		enableBackgroundReconcile:  *dependencyEnableScheduler,
+		reconcileTimeout:           *dependencyReconcileTimeout,
+		readTimeout:                *dependencyReadTimeout,
+		writeTimeout:               *dependencyWriteTimeout,
 		dirtySignal:                make(chan struct{}, 1),
 	}
 }
@@ -65,16 +76,22 @@ func (s *dependencyServer) ReconcileGraph(
 	ctx context.Context,
 	_ *pb.ReconcileDependencyGraphRequest,
 ) (*pb.ReconcileDependencyGraphResponse, error) {
-	report, updatedCount, err := s.reconcile(ctx)
+	runCtx, cancel := boundedContext(ctx, s.reconcileTimeout)
+	defer cancel()
+
+	report, updatedCount, writeFailures, err := s.reconcile(runCtx)
 	if err != nil {
 		return nil, err
 	}
 
 	return &pb.ReconcileDependencyGraphResponse{
-		TaskCount:        int32(report.TaskCount),
-		UpdatedTaskCount: int32(updatedCount),
-		Issues:           report.Issues,
-		TaskStatuses:     report.TaskStatuses,
+		TaskCount:         int32(report.TaskCount),
+		UpdatedTaskCount:  int32(updatedCount),
+		Issues:            report.Issues,
+		TaskStatuses:      report.TaskStatuses,
+		PartialSuccess:    len(writeFailures) > 0,
+		FailedUpdateCount: int32(len(writeFailures)),
+		WriteFailures:     writeFailures,
 	}, nil
 }
 
@@ -83,7 +100,10 @@ func (s *dependencyServer) AnalyzeGraph(
 	ctx context.Context,
 	_ *pb.AnalyzeDependencyGraphRequest,
 ) (*pb.AnalyzeDependencyGraphResponse, error) {
-	report, err := s.analyze(ctx)
+	readCtx, cancel := boundedContext(ctx, s.readTimeout)
+	defer cancel()
+
+	report, err := s.analyze(readCtx)
 	if err != nil {
 		return nil, err
 	}
@@ -99,14 +119,19 @@ func (s *dependencyServer) BootstrapMissingTaskKeys(
 	ctx context.Context,
 	req *pb.BootstrapMissingTaskKeysRequest,
 ) (*pb.BootstrapMissingTaskKeysResponse, error) {
+	runCtx, cancel := boundedContext(ctx, s.reconcileTimeout)
+	defer cancel()
+
 	client, err := s.getClient()
 	if err != nil {
 		return nil, err
 	}
 
-	tasks, err := client.ListActiveTasks(ctx)
+	listCtx, cancelList := boundedContext(runCtx, s.readTimeout)
+	tasks, err := client.ListActiveTasks(listCtx)
+	cancelList()
 	if err != nil {
-		return nil, status.Errorf(codes.Internal, "failed to list active Todoist tasks: %v", err)
+		return nil, dependencyExternalStatusError("list active Todoist tasks", err)
 	}
 
 	usedKeys := make(map[string]struct{}, len(tasks))
@@ -123,6 +148,7 @@ func (s *dependencyServer) BootstrapMissingTaskKeys(
 	}
 
 	generated := make([]*pb.GeneratedTaskKey, 0)
+	writeFailures := make([]*pb.DependencyWriteFailure, 0)
 	for _, task := range tasks {
 		if task == nil {
 			continue
@@ -142,8 +168,17 @@ func (s *dependencyServer) BootstrapMissingTaskKeys(
 		}
 
 		if !req.GetDryRun() {
-			if _, updateErr := client.UpdateTaskContent(ctx, task.ID, newContent); updateErr != nil {
-				return nil, status.Errorf(codes.Internal, "failed to update task %s with generated key: %v", task.ID, updateErr)
+			writeCtx, cancelWrite := boundedContext(runCtx, s.writeTimeout)
+			_, updateErr := client.UpdateTaskContent(writeCtx, task.ID, newContent)
+			cancelWrite()
+			if updateErr != nil {
+				writeFailures = append(writeFailures, newDependencyWriteFailure(
+					task.ID,
+					newKey,
+					dependencyWriteOperationUpdateContent,
+					dependencyOperationMessage("update Todoist task content", updateErr),
+				))
+				continue
 			}
 		}
 
@@ -156,6 +191,9 @@ func (s *dependencyServer) BootstrapMissingTaskKeys(
 	return &pb.BootstrapMissingTaskKeysResponse{
 		GeneratedCount:    int32(len(generated)),
 		GeneratedTaskKeys: generated,
+		PartialSuccess:    len(writeFailures) > 0,
+		FailedUpdateCount: int32(len(writeFailures)),
+		WriteFailures:     writeFailures,
 	}, nil
 }
 
@@ -170,7 +208,10 @@ func (s *dependencyServer) GetTaskStatus(
 		return nil, status.Error(codes.InvalidArgument, "task_key or todoist_task_id is required")
 	}
 
-	report, err := s.analyze(ctx)
+	readCtx, cancel := boundedContext(ctx, s.readTimeout)
+	defer cancel()
+
+	report, err := s.analyze(readCtx)
 	if err != nil {
 		return nil, err
 	}
@@ -198,7 +239,10 @@ func (s *dependencyServer) ListDependencyIssues(
 	ctx context.Context,
 	req *pb.ListDependencyIssuesRequest,
 ) (*pb.ListDependencyIssuesResponse, error) {
-	report, err := s.analyze(ctx)
+	readCtx, cancel := boundedContext(ctx, s.readTimeout)
+	defer cancel()
+
+	report, err := s.analyze(readCtx)
 	if err != nil {
 		return nil, err
 	}
@@ -290,10 +334,19 @@ func (s *dependencyServer) backgroundLoop(ctx context.Context) {
 }
 
 func (s *dependencyServer) backgroundReconcile() {
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := boundedContext(context.Background(), s.reconcileTimeout)
 	defer cancel()
-	if _, _, err := s.reconcile(ctx); err != nil {
+	_, updatedCount, writeFailures, err := s.reconcile(ctx)
+	if err != nil {
 		log.Warningf("dependency background reconcile failed: %v", err)
+		return
+	}
+	if len(writeFailures) > 0 {
+		log.Warningf(
+			"dependency background reconcile completed with %d successful updates and %d failed writes",
+			updatedCount,
+			len(writeFailures),
+		)
 	}
 }
 
@@ -306,6 +359,11 @@ type dependencyReport struct {
 	TaskStatuses []*pb.TaskDependencyStatus
 }
 
+const (
+	dependencyWriteOperationUpdateLabels  = "update_labels"
+	dependencyWriteOperationUpdateContent = "update_content"
+)
+
 func (s *dependencyServer) analyze(ctx context.Context) (*dependencyReport, error) {
 	client, err := s.getClient()
 	if err != nil {
@@ -314,32 +372,38 @@ func (s *dependencyServer) analyze(ctx context.Context) (*dependencyReport, erro
 
 	tasks, err := client.ListActiveTasks(ctx)
 	if err != nil {
-		return nil, status.Errorf(codes.Internal, "failed to list active Todoist tasks: %v", err)
+		return nil, dependencyExternalStatusError("list active Todoist tasks", err)
 	}
 
 	return buildDependencyReport(tasks), nil
 }
 
-func (s *dependencyServer) reconcile(ctx context.Context) (*dependencyReport, int, error) {
+func (s *dependencyServer) reconcile(
+	ctx context.Context,
+) (*dependencyReport, int, []*pb.DependencyWriteFailure, error) {
 	s.reconcileMu.Lock()
 	defer s.reconcileMu.Unlock()
 
 	client, err := s.getClient()
 	if err != nil {
-		return nil, 0, err
+		return nil, 0, nil, err
 	}
 
-	ensureResult, err := client.EnsureLabels(ctx, dependency.ReservedLabels())
+	ensureCtx, cancelEnsure := boundedContext(ctx, s.readTimeout)
+	ensureResult, err := client.EnsureLabels(ensureCtx, dependency.ReservedLabels())
+	cancelEnsure()
 	if err != nil {
-		return nil, 0, status.Errorf(codes.Internal, "failed to ensure reserved labels: %v", err)
+		return nil, 0, nil, dependencyExternalStatusError("ensure reserved Todoist labels", err)
 	}
 	if len(ensureResult.Failures) > 0 {
 		log.Warningf("ensure reserved labels partial failures: %v", ensureResult.Failures)
 	}
 
-	tasks, err := client.ListActiveTasks(ctx)
+	listCtx, cancelList := boundedContext(ctx, s.readTimeout)
+	tasks, err := client.ListActiveTasks(listCtx)
+	cancelList()
 	if err != nil {
-		return nil, 0, status.Errorf(codes.Internal, "failed to list active Todoist tasks: %v", err)
+		return nil, 0, nil, dependencyExternalStatusError("list active Todoist tasks", err)
 	}
 
 	report := buildDependencyReport(tasks)
@@ -353,6 +417,7 @@ func (s *dependencyServer) reconcile(ctx context.Context) (*dependencyReport, in
 
 	now := time.Now()
 	updatedCount := 0
+	writeFailures := make([]*pb.DependencyWriteFailure, 0)
 	for _, task := range tasks {
 		if task == nil {
 			continue
@@ -370,18 +435,22 @@ func (s *dependencyServer) reconcile(ctx context.Context) (*dependencyReport, in
 		if len(diff.AddLabels) == 0 && len(diff.RemoveLabels) == 0 {
 			continue
 		}
-		if _, updateErr := client.UpdateTaskLabels(ctx, task.ID, diff.AddLabels, diff.RemoveLabels); updateErr != nil {
-			return nil, updatedCount, status.Errorf(
-				codes.Internal,
-				"failed to update labels for task %s: %v",
+		writeCtx, cancelWrite := boundedContext(ctx, s.writeTimeout)
+		_, updateErr := client.UpdateTaskLabels(writeCtx, task.ID, diff.AddLabels, diff.RemoveLabels)
+		cancelWrite()
+		if updateErr != nil {
+			writeFailures = append(writeFailures, newDependencyWriteFailure(
 				task.ID,
-				updateErr,
-			)
+				statusItem.GetTaskKey(),
+				dependencyWriteOperationUpdateLabels,
+				dependencyOperationMessage("update Todoist task labels", updateErr),
+			))
+			continue
 		}
 		updatedCount++
 	}
 
-	return report, updatedCount, nil
+	return report, updatedCount, writeFailures, nil
 }
 
 // buildDependencyReport converts Todoist tasks into analyzer input and proto responses.
@@ -548,6 +617,53 @@ func dedupeStrings(values []string) []string {
 	}
 	sort.Strings(out)
 	return out
+}
+
+func boundedContext(parent context.Context, limit time.Duration) (context.Context, context.CancelFunc) {
+	if limit <= 0 {
+		return context.WithCancel(parent)
+	}
+	return context.WithTimeout(parent, limit)
+}
+
+func isTimeoutLikeError(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		return true
+	}
+
+	var netErr net.Error
+	return errors.As(err, &netErr) && netErr.Timeout()
+}
+
+func dependencyExternalStatusError(action string, err error) error {
+	if isTimeoutLikeError(err) {
+		return status.Errorf(codes.DeadlineExceeded, "%s timed out: %v", action, err)
+	}
+	return status.Errorf(codes.Internal, "failed to %s: %v", action, err)
+}
+
+func dependencyOperationMessage(action string, err error) string {
+	if isTimeoutLikeError(err) {
+		return action + " timed out: " + err.Error()
+	}
+	return "failed to " + action + ": " + err.Error()
+}
+
+func newDependencyWriteFailure(
+	taskID string,
+	taskKey string,
+	operation string,
+	message string,
+) *pb.DependencyWriteFailure {
+	return &pb.DependencyWriteFailure{
+		TodoistTaskId: taskID,
+		TaskKey:       strings.TrimSpace(taskKey),
+		Operation:     operation,
+		ErrorMessage:  message,
+	}
 }
 
 func metadataBootstrapExcludedProjectSet(excludedProjectIDs string) map[string]struct{} {

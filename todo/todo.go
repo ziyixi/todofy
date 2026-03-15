@@ -68,6 +68,21 @@ var (
 		2*time.Minute,
 		"Skip task label writes for tasks updated more recently than this duration",
 	)
+	dependencyReconcileTimeout = flag.Duration(
+		"dependency-reconcile-timeout",
+		2*time.Minute,
+		"Maximum duration for one dependency reconcile or bootstrap run",
+	)
+	dependencyReadTimeout = flag.Duration(
+		"dependency-read-timeout",
+		45*time.Second,
+		"Maximum duration for one dependency upstream read/precondition operation",
+	)
+	dependencyWriteTimeout = flag.Duration(
+		"dependency-write-timeout",
+		20*time.Second,
+		"Maximum duration for one dependency upstream write operation",
+	)
 	dependencyEnableScheduler = flag.Bool(
 		"dependency-enable-scheduler",
 		true,

@@ -65,7 +65,20 @@ func TestHandleDependencyReconcile(t *testing.T) {
 	t.Run("write reconcile", func(t *testing.T) {
 		mockDependency := new(mocks.MockDependencyServiceClient)
 		mockDependency.On("ReconcileGraph", mock.Anything, mock.Anything, mock.Anything).
-			Return(&pb.ReconcileDependencyGraphResponse{TaskCount: 2, UpdatedTaskCount: 1}, nil)
+			Return(&pb.ReconcileDependencyGraphResponse{
+				TaskCount:         2,
+				UpdatedTaskCount:  1,
+				PartialSuccess:    true,
+				FailedUpdateCount: 1,
+				WriteFailures: []*pb.DependencyWriteFailure{
+					{
+						TodoistTaskId: "task-1",
+						TaskKey:       testDependencyTaskKey,
+						Operation:     "update_labels",
+						ErrorMessage:  "failed to update Todoist task labels: boom",
+					},
+				},
+			}, nil)
 
 		router := setupDependencyHandlerRouter(mockDependency, nil)
 		req, _ := http.NewRequest(http.MethodPost, "/dependency/reconcile", nil)
@@ -74,6 +87,23 @@ func TestHandleDependencyReconcile(t *testing.T) {
 
 		assert.Equal(t, http.StatusOK, w.Code)
 		assert.Contains(t, w.Body.String(), "\"updated_task_count\":1")
+		assert.Contains(t, w.Body.String(), "\"partial_success\":true")
+		assert.Contains(t, w.Body.String(), "\"failed_update_count\":1")
+		mockDependency.AssertExpectations(t)
+	})
+
+	t.Run("deadline exceeded maps to gateway timeout", func(t *testing.T) {
+		mockDependency := new(mocks.MockDependencyServiceClient)
+		mockDependency.On("ReconcileGraph", mock.Anything, mock.Anything, mock.Anything).
+			Return(nil, status.Error(codes.DeadlineExceeded, "list active Todoist tasks timed out"))
+
+		router := setupDependencyHandlerRouter(mockDependency, nil)
+		req, _ := http.NewRequest(http.MethodPost, "/dependency/reconcile", nil)
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusGatewayTimeout, w.Code)
+		assert.Contains(t, w.Body.String(), "timed out")
 		mockDependency.AssertExpectations(t)
 	})
 
@@ -123,6 +153,49 @@ func TestHandleDependencyBootstrapMissingKeys(t *testing.T) {
 		router.ServeHTTP(w, req)
 
 		assert.Equal(t, http.StatusOK, w.Code)
+		mockDependency.AssertExpectations(t)
+	})
+
+	t.Run("partial success payload is returned as ok", func(t *testing.T) {
+		mockDependency := new(mocks.MockDependencyServiceClient)
+		mockDependency.On("BootstrapMissingTaskKeys", mock.Anything, mock.Anything, mock.Anything).
+			Return(&pb.BootstrapMissingTaskKeysResponse{
+				GeneratedCount:    1,
+				PartialSuccess:    true,
+				FailedUpdateCount: 1,
+				WriteFailures: []*pb.DependencyWriteFailure{
+					{
+						TodoistTaskId: "task-2",
+						TaskKey:       "task-b",
+						Operation:     "update_content",
+						ErrorMessage:  "failed to update Todoist task content: boom",
+					},
+				},
+			}, nil)
+
+		router := setupDependencyHandlerRouter(mockDependency, nil)
+		req, _ := http.NewRequest(http.MethodPost, "/dependency/bootstrap_keys?dry_run=false", nil)
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusOK, w.Code)
+		assert.Contains(t, w.Body.String(), "\"partial_success\":true")
+		assert.Contains(t, w.Body.String(), "\"failed_update_count\":1")
+		mockDependency.AssertExpectations(t)
+	})
+
+	t.Run("deadline exceeded maps to gateway timeout", func(t *testing.T) {
+		mockDependency := new(mocks.MockDependencyServiceClient)
+		mockDependency.On("BootstrapMissingTaskKeys", mock.Anything, mock.Anything, mock.Anything).
+			Return(nil, status.Error(codes.DeadlineExceeded, "bootstrap timed out"))
+
+		router := setupDependencyHandlerRouter(mockDependency, nil)
+		req, _ := http.NewRequest(http.MethodPost, "/dependency/bootstrap_keys?dry_run=false", nil)
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusGatewayTimeout, w.Code)
+		assert.Contains(t, w.Body.String(), "timed out")
 		mockDependency.AssertExpectations(t)
 	})
 }

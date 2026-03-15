@@ -10,7 +10,7 @@ require (
 	github.com/sirupsen/logrus v1.9.4
 	github.com/stretchr/testify v1.11.1
 	github.com/tidwall/gjson v1.18.0
-	github.com/ziyixi/protos/go/todofy v0.0.0-20260312205358-4224e2438109
+	github.com/ziyixi/protos/go/todofy v0.0.0-20260315081739-c62be248bdb9
 	google.golang.org/genai v1.50.0
 	google.golang.org/grpc v1.79.2
 	google.golang.org/protobuf v1.36.11

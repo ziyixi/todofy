@@ -1,6 +1,7 @@
 package tests
 
 import (
+	"encoding/json"
 	"io"
 	"net/http"
 	"strings"
@@ -9,6 +10,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	pb "github.com/ziyixi/protos/go/todofy"
+	"github.com/ziyixi/todofy/dependency"
 	admincontract "github.com/ziyixi/todofy/sut/contracts/admin"
 	geminicontract "github.com/ziyixi/todofy/sut/contracts/gemini"
 	"github.com/ziyixi/todofy/todo/todoistapi"
@@ -58,6 +60,22 @@ func newEnabledHarness(t *testing.T) *harness {
 	h := newHarness(t)
 	t.Cleanup(h.Close)
 	return h
+}
+
+func reservedTodoistLabels() []todoistapi.Label {
+	return []todoistapi.Label{
+		{ID: "label-blocked", Name: dependency.LabelBlocked},
+		{ID: "label-broken", Name: dependency.LabelBrokenDep},
+		{ID: "label-cycle", Name: dependency.LabelCycle},
+		{ID: "label-invalid", Name: dependency.LabelInvalidMeta},
+	}
+}
+
+func mustMarshalJSON(t *testing.T, value any) string {
+	t.Helper()
+	body, err := json.Marshal(value)
+	require.NoError(t, err)
+	return string(body)
 }
 
 func TestSUTUpdateTodoIntegration(t *testing.T) {
@@ -422,6 +440,180 @@ func TestSUTDependencyIntegration(t *testing.T) {
 		require.NotNil(t, blockedTask)
 		assert.Contains(t, blockedTask.Labels, "dag_blocked")
 		assert.GreaterOrEqual(t, labelCreateCalls, 1)
+	})
+
+	t.Run("dependency reconcile returns partial success and later recovers failed task updates", func(t *testing.T) {
+		h.resetScenario(t)
+		h.seedTodoist(t, admincontract.SeedTodoistStateRequest{
+			Tasks: []todoistapi.Task{
+				{ID: "1", Content: "Task A <k:task-a dep:task-b>"},
+				{ID: "2", Content: "Task B <k:task-b>"},
+				{ID: "3", Content: "Task C <k:task-c dep:missing>"},
+			},
+			Labels: reservedTodoistLabels(),
+			QueuedResponses: repeatedTodoistResponses(
+				3,
+				http.MethodPost,
+				"/api/v1/tasks/1",
+				http.StatusServiceUnavailable,
+				todoistDownBody,
+			),
+		})
+
+		status, body := h.postAPI(t, "/api/v1/dependency/reconcile", []byte(`{}`))
+		require.Equal(t, http.StatusOK, status, string(body))
+
+		resp := mustUnmarshal[pb.ReconcileDependencyGraphResponse](t, body)
+		assert.True(t, resp.GetPartialSuccess())
+		assert.Equal(t, int32(1), resp.GetUpdatedTaskCount())
+		assert.Equal(t, int32(1), resp.GetFailedUpdateCount())
+		require.Len(t, resp.GetWriteFailures(), 1)
+		assert.Equal(t, "1", resp.GetWriteFailures()[0].GetTodoistTaskId())
+		assert.Equal(t, "task-a", resp.GetWriteFailures()[0].GetTaskKey())
+		assert.Equal(t, "update_labels", resp.GetWriteFailures()[0].GetOperation())
+
+		state := h.todoistState(t)
+		labelsByID := make(map[string][]string, len(state.Tasks))
+		for _, task := range state.Tasks {
+			labelsByID[task.ID] = append([]string(nil), task.Labels...)
+		}
+		assert.NotContains(t, labelsByID["1"], dependency.LabelBlocked)
+		assert.Contains(t, labelsByID["3"], dependency.LabelBrokenDep)
+
+		status, body = h.postAPI(t, "/api/v1/dependency/reconcile", []byte(`{}`))
+		require.Equal(t, http.StatusOK, status, string(body))
+
+		resp = mustUnmarshal[pb.ReconcileDependencyGraphResponse](t, body)
+		assert.False(t, resp.GetPartialSuccess())
+		assert.Equal(t, int32(1), resp.GetUpdatedTaskCount())
+		assert.Zero(t, resp.GetFailedUpdateCount())
+
+		state = h.todoistState(t)
+		labelsByID = make(map[string][]string, len(state.Tasks))
+		for _, task := range state.Tasks {
+			labelsByID[task.ID] = append([]string(nil), task.Labels...)
+		}
+		assert.Contains(t, labelsByID["1"], dependency.LabelBlocked)
+	})
+
+	t.Run("dependency bootstrap returns partial success and later recovers failed content updates", func(t *testing.T) {
+		h.resetScenario(t)
+		h.seedTodoist(t, admincontract.SeedTodoistStateRequest{
+			Tasks: []todoistapi.Task{
+				{ID: "1", Content: "First task", ProjectID: "proj-1"},
+				{ID: "2", Content: "Second task", ProjectID: "proj-1"},
+			},
+			QueuedResponses: repeatedTodoistResponses(
+				3,
+				http.MethodPost,
+				"/api/v1/tasks/1",
+				http.StatusServiceUnavailable,
+				todoistDownBody,
+			),
+		})
+
+		status, body := h.postAPI(t, "/api/v1/dependency/bootstrap_keys?dry_run=false", []byte(`{}`))
+		require.Equal(t, http.StatusOK, status, string(body))
+
+		resp := mustUnmarshal[pb.BootstrapMissingTaskKeysResponse](t, body)
+		assert.True(t, resp.GetPartialSuccess())
+		assert.Equal(t, int32(1), resp.GetGeneratedCount())
+		assert.Equal(t, int32(1), resp.GetFailedUpdateCount())
+		require.Len(t, resp.GetWriteFailures(), 1)
+		assert.Equal(t, "1", resp.GetWriteFailures()[0].GetTodoistTaskId())
+		assert.Equal(t, "update_content", resp.GetWriteFailures()[0].GetOperation())
+
+		state := h.todoistState(t)
+		contentsByID := make(map[string]string, len(state.Tasks))
+		for _, task := range state.Tasks {
+			contentsByID[task.ID] = task.Content
+		}
+		assert.NotContains(t, contentsByID["1"], "<k:")
+		assert.Contains(t, contentsByID["2"], "<k:")
+
+		status, body = h.postAPI(t, "/api/v1/dependency/bootstrap_keys?dry_run=false", []byte(`{}`))
+		require.Equal(t, http.StatusOK, status, string(body))
+
+		resp = mustUnmarshal[pb.BootstrapMissingTaskKeysResponse](t, body)
+		assert.False(t, resp.GetPartialSuccess())
+		assert.Equal(t, int32(1), resp.GetGeneratedCount())
+		assert.Zero(t, resp.GetFailedUpdateCount())
+
+		state = h.todoistState(t)
+		contentsByID = make(map[string]string, len(state.Tasks))
+		for _, task := range state.Tasks {
+			contentsByID[task.ID] = task.Content
+		}
+		assert.Contains(t, contentsByID["1"], "<k:")
+	})
+
+	t.Run("dependency reconcile timeout returns gateway timeout and later recovers", func(t *testing.T) {
+		h.resetScenario(t)
+		labels := reservedTodoistLabels()
+		h.seedTodoist(t, admincontract.SeedTodoistStateRequest{
+			Tasks: []todoistapi.Task{
+				{ID: "1", Content: "Task A <k:task-a dep:task-b>"},
+				{ID: "2", Content: "Task B <k:task-b>"},
+			},
+			Labels: labels,
+			QueuedResponses: []admincontract.TodoistQueuedResponse{
+				{
+					Method:     http.MethodGet,
+					Path:       "/api/v1" + todoistapi.LabelsPath,
+					StatusCode: http.StatusOK,
+					DelayMs:    1500,
+					Body:       mustMarshalJSON(t, labels),
+				},
+			},
+		})
+
+		status, body := h.postAPI(t, "/api/v1/dependency/reconcile", []byte(`{}`))
+		require.Equal(t, http.StatusGatewayTimeout, status, string(body))
+		assert.Contains(t, string(body), "timed out")
+
+		status, body = h.postAPI(t, "/api/v1/dependency/reconcile", []byte(`{}`))
+		require.Equal(t, http.StatusOK, status, string(body))
+
+		resp := mustUnmarshal[pb.ReconcileDependencyGraphResponse](t, body)
+		assert.False(t, resp.GetPartialSuccess())
+
+		state := h.todoistState(t)
+		require.Len(t, state.Tasks, 2)
+		assert.Contains(t, state.Tasks[0].Labels, dependency.LabelBlocked)
+	})
+
+	t.Run("dependency bootstrap timeout returns gateway timeout and later recovers", func(t *testing.T) {
+		h.resetScenario(t)
+		delayedTasks := []todoistapi.Task{
+			{ID: "1", Content: "Task A", ProjectID: "proj-1"},
+		}
+		h.seedTodoist(t, admincontract.SeedTodoistStateRequest{
+			Tasks: delayedTasks,
+			QueuedResponses: []admincontract.TodoistQueuedResponse{
+				{
+					Method:     http.MethodGet,
+					Path:       "/api/v1" + todoistapi.TasksPath,
+					StatusCode: http.StatusOK,
+					DelayMs:    1500,
+					Body:       mustMarshalJSON(t, delayedTasks),
+				},
+			},
+		})
+
+		status, body := h.postAPI(t, "/api/v1/dependency/bootstrap_keys?dry_run=false", []byte(`{}`))
+		require.Equal(t, http.StatusGatewayTimeout, status, string(body))
+		assert.Contains(t, string(body), "timed out")
+
+		status, body = h.postAPI(t, "/api/v1/dependency/bootstrap_keys?dry_run=false", []byte(`{}`))
+		require.Equal(t, http.StatusOK, status, string(body))
+
+		resp := mustUnmarshal[pb.BootstrapMissingTaskKeysResponse](t, body)
+		assert.False(t, resp.GetPartialSuccess())
+		assert.Equal(t, int32(1), resp.GetGeneratedCount())
+
+		state := h.todoistState(t)
+		require.Len(t, state.Tasks, 1)
+		assert.Contains(t, state.Tasks[0].Content, "<k:")
 	})
 }
 

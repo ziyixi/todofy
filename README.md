@@ -96,6 +96,8 @@ flowchart TB
 * **Todoist DAG Dependencies:** Supports task-title metadata (`<k:task-key dep:other-key,...>`) and reconcile-driven dependency analysis.
 * **Reserved DAG Labels:** Automatically manages `dag_blocked`, `dag_cycle`, `dag_broken_dep`, and `dag_invalid_meta` with minimal label diffs.
 * **Manual DAG Operations:** Exposes reconcile, bootstrap-key, status, and issue endpoints under `/api/v1/dependency/*`.
+* **Bounded Dependency Sync:** Todoist-backed dependency reads and writes are deadline-bounded so upstream latency does not hang reconcile indefinitely.
+* **Best-Effort Dependency Writes:** Reconcile and bootstrap continue past per-task write failures, return partial-success details, and rely on later runs to converge remaining drift.
 * **Webhook-as-Hint Flow:** Supports Todoist webhook verification and dirty-mark signaling; scheduled/manual reconcile remains the source of truth.
 * **Persistent Storage:** Uses SQLite for storing task data with hash-indexed lookups (via `todofy-database` service).
 * **Containerized Services:** All components are containerized using Docker for easy deployment and scaling.
@@ -126,6 +128,8 @@ Returns a 24-hour summary payload with no task delivery side effect:
 * `POST /api/v1/dependency/bootstrap_keys` (`?dry_run=true` by default)
 * `GET /api/v1/dependency/status?task_key=...` (or `todoist_task_id=...`)
 * `GET /api/v1/dependency/issues?type=...&task_key=...`
+* Reconcile and bootstrap return HTTP `200` with `partial_success`, `failed_update_count`, and `write_failures` when analysis succeeds but one or more Todoist writes fail.
+* Dependency read/precondition timeouts surface as HTTP `504`; later runs recompute state and retry any remaining drift.
 
 ### Todoist Webhook Endpoint (No Basic Auth)
 
@@ -259,6 +263,9 @@ When one shared `env_file` is reused across all services, set service-specific `
 | `DEPENDENCY_RECONCILE_INTERVAL` | Optional | `30m` |
 | `DEPENDENCY_WEBHOOK_DEBOUNCE` | Optional | `20s` |
 | `DEPENDENCY_GRACE_PERIOD` | Optional | `2m` |
+| `DEPENDENCY_RECONCILE_TIMEOUT` | Optional | `2m` |
+| `DEPENDENCY_READ_TIMEOUT` | Optional | `45s` |
+| `DEPENDENCY_WRITE_TIMEOUT` | Optional | `20s` |
 | `DEPENDENCY_ENABLE_SCHEDULER` | Optional | `true` |
 | `DEPENDENCY_BOOTSTRAP_EXCLUDED_PROJECT_IDS` | Optional | `1122334455,99887766` |
 
@@ -315,6 +322,9 @@ TODOIST_WEBHOOK_SECRET=replace-with-real-secret
 DEPENDENCY_RECONCILE_INTERVAL=30m
 DEPENDENCY_WEBHOOK_DEBOUNCE=20s
 DEPENDENCY_GRACE_PERIOD=2m
+DEPENDENCY_RECONCILE_TIMEOUT=2m
+DEPENDENCY_READ_TIMEOUT=45s
+DEPENDENCY_WRITE_TIMEOUT=20s
 DEPENDENCY_ENABLE_SCHEDULER=true
 DEPENDENCY_BOOTSTRAP_EXCLUDED_PROJECT_IDS=
 ```
@@ -329,10 +339,10 @@ DEPENDENCY_BOOTSTRAP_EXCLUDED_PROJECT_IDS=
 Run locally:
 
 ```bash
-docker compose -f docker-compose.test.yml build
-docker compose -f docker-compose.test.yml up -d
-docker compose -f docker-compose.test.yml down -v
+make test-integration
 ```
+
+`make test-integration` mirrors the CI health, auth, webhook, and gRPC connectivity checks against `docker-compose.test.yml` and tears the stack down automatically.
 
 </details>
 
@@ -352,6 +362,7 @@ By default it:
 - points Todoist traffic at the fake Todoist base URL
 - disables the main app rate limiter for deterministic test runs
 - disables dependency background scheduling so tests can drive reconcile behavior explicitly
+- uses short dependency read/write deadlines so timeout handling can be exercised quickly
 
 Host-exposed ports used by the SUT harness:
 
@@ -377,6 +388,7 @@ The SUT suite covers endpoint behavior such as:
 - `GET /api/summary`
 - `GET /api/recommendation`
 - dependency reconcile, bootstrap, status, and issue endpoints
+- dependency partial-success and timeout recovery behavior
 - Todoist webhook signature handling
 - excluded-project bootstrap behavior via `DEPENDENCY_BOOTSTRAP_EXCLUDED_PROJECT_IDS`
 
@@ -544,6 +556,7 @@ go tool cover -func=coverage.out
 
 Reported line coverage excludes `sut/**` and `testutils/**`.
 `sut` still runs in its own CI workflow as behavior-level system coverage.
+Dependency coverage now includes timeout and partial-success paths in the Todo service, while SUT keeps the HTTP-visible recovery contract covered separately.
 
 The LLM service includes e2e tests with a mock Gemini client (no real API calls or costs), covering:
 - Full summarization flow and model fallback

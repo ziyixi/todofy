@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -169,6 +170,9 @@ func (s *server) handleTodoist(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if queued, ok := s.popQueuedResponse(r.Method, r.URL.Path); ok {
+		if !waitForQueuedResponseDelay(r.Context(), queued.DelayMs) {
+			return
+		}
 		writeConfiguredResponse(w, queued.StatusCode, queued.Headers, queued.Body)
 		return
 	}
@@ -465,6 +469,29 @@ func writeConfiguredResponse(w http.ResponseWriter, statusCode int, headers map[
 	}
 	w.WriteHeader(statusCode)
 	_, _ = w.Write([]byte(body))
+}
+
+func waitForQueuedResponseDelay(ctx context.Context, delayMs int) bool {
+	if delayMs <= 0 {
+		return true
+	}
+
+	timer := time.NewTimer(time.Duration(delayMs) * time.Millisecond)
+	defer func() {
+		if !timer.Stop() {
+			select {
+			case <-timer.C:
+			default:
+			}
+		}
+	}()
+
+	select {
+	case <-timer.C:
+		return true
+	case <-ctx.Done():
+		return false
+	}
 }
 
 func writeJSON(w http.ResponseWriter, statusCode int, value any) {

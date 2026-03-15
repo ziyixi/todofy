@@ -145,8 +145,8 @@ github.com/ugorji/go/codec v1.3.1/go.mod h1:pRBVtBSKl77K30Bv8R2P+cLSGaTtex6fsA2W
 github.com/yuin/goldmark v1.4.13/go.mod h1:6yULJ656Px+3vBD8DxQVa3kxgyrAnzto9xy5taEt/CY=
 github.com/yuin/goldmark v1.7.1 h1:3bajkSilaCbjdKVsKdZjZCLBNPL9pYzrCakKaf4U49U=
 github.com/yuin/goldmark v1.7.1/go.mod h1:uzxRWxtg69N339t3louHJ7+O03ezfj6PlliRlaOzY1E=
-github.com/ziyixi/protos/go/todofy v0.0.0-20260312205358-4224e2438109 h1:zVwdreYLftrNAuS296GsqrgkzOwt2ekGCFJvlKo2R/k=
-github.com/ziyixi/protos/go/todofy v0.0.0-20260312205358-4224e2438109/go.mod h1:2inuzsbHXKirr6bJ5CwlV62+ZTq6eJqajkhWrCtoJkU=
+github.com/ziyixi/protos/go/todofy v0.0.0-20260315081739-c62be248bdb9 h1:CxnUI+642KGBJVeNfScQRqCfdFnfW4Crg4pDai0JT0I=
+github.com/ziyixi/protos/go/todofy v0.0.0-20260315081739-c62be248bdb9/go.mod h1:2inuzsbHXKirr6bJ5CwlV62+ZTq6eJqajkhWrCtoJkU=
 go.mongodb.org/mongo-driver/v2 v2.5.0 h1:yXUhImUjjAInNcpTcAlPHiT7bIXhshCTL3jVBkF3xaE=
 go.mongodb.org/mongo-driver/v2 v2.5.0/go.mod h1:yOI9kBsufol30iFsl1slpdq1I0eHPzybRWdyYUs8K/0=
 go.opentelemetry.io/auto/sdk v1.2.1 h1:jXsnJ4Lmnqd11kwkBV2LgLoFMZKizbCi5fNZ/ipaZ64=

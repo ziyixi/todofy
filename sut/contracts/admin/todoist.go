@@ -7,6 +7,7 @@ type TodoistQueuedResponse struct {
 	Method     string            `json:"method"`
 	Path       string            `json:"path"`
 	StatusCode int               `json:"status_code"`
+	DelayMs    int               `json:"delay_ms,omitempty"`
 	Headers    map[string]string `json:"headers,omitempty"`
 	Body       string            `json:"body,omitempty"`
 }
