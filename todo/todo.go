@@ -44,6 +44,11 @@ var (
 		"",
 		"The Todoist webhook secret used to verify signatures",
 	)
+	todoistBaseURL = flag.String(
+		"todoist-base-url",
+		"",
+		"Override base URL for the Todoist API",
+	)
 
 	dependencyReconcileInterval = flag.Duration(
 		"dependency-reconcile-interval",
@@ -110,7 +115,7 @@ func (s *todoServer) PopulateTodoByTodoist(ctx context.Context, req *pb.TodoRequ
 	factory := s.newTodoistClient
 	if factory == nil {
 		factory = func(apiKey string) todoistTaskCreator {
-			return todoist.NewClient(apiKey)
+			return todoist.NewClientWithBaseURL(apiKey, *todoistBaseURL)
 		}
 	}
 	client := factory(*todoistAPIKey)

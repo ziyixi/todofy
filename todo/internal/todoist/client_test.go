@@ -264,6 +264,22 @@ func TestNewClient(t *testing.T) {
 		assert.Equal(t, "https://api.todoist.com/api/v1", client.baseURL)
 		assert.LessOrEqual(t, client.httpClient.Timeout, 15*time.Second)
 	})
+
+	t.Run("creates client with base url override", func(t *testing.T) {
+		client := NewClientWithBaseURL("my-token", "http://fake-todoist.local/api/v1")
+
+		assert.NotNil(t, client)
+		assert.Equal(t, "my-token", client.token)
+		assert.Equal(t, "http://fake-todoist.local/api/v1", client.baseURL)
+		assert.LessOrEqual(t, client.httpClient.Timeout, 15*time.Second)
+	})
+
+	t.Run("normalizes trailing slash in base url override", func(t *testing.T) {
+		client := NewClientWithBaseURL("my-token", "http://fake-todoist.local/api/v1/")
+
+		assert.NotNil(t, client)
+		assert.Equal(t, "http://fake-todoist.local/api/v1", client.baseURL)
+	})
 }
 
 func TestTask_Validation(t *testing.T) {

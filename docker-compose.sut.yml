@@ -1,0 +1,129 @@
+networks:
+  todofy-sut:
+    driver: bridge
+
+services:
+  todofy-fake-gemini-sut:
+    build:
+      context: .
+      dockerfile: sut/fakes/gemini/Dockerfile
+    container_name: todofy-fake-gemini-sut
+    command:
+      - -expected-api-key=sut-gemini-key
+    ports:
+      - "18081:8080"
+    networks:
+      - todofy-sut
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8080/health"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 5s
+
+  todofy-fake-todoist-sut:
+    build:
+      context: .
+      dockerfile: sut/fakes/todoist/Dockerfile
+    container_name: todofy-fake-todoist-sut
+    command:
+      - -expected-token=sut-todoist-token
+    ports:
+      - "18082:8080"
+    networks:
+      - todofy-sut
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8080/health"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 5s
+
+  todofy-llm-sut:
+    build:
+      context: .
+      dockerfile: llm/Dockerfile
+    container_name: todofy-llm-sut
+    env_file:
+      - ./env/todofy.sut.env
+    environment:
+      PORT: "50051"
+    depends_on:
+      todofy-fake-gemini-sut:
+        condition: service_healthy
+    networks:
+      - todofy-sut
+    healthcheck:
+      test: ["CMD", "/grpc_health_probe", "-addr=:50051"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 5s
+
+  todofy-todo-sut:
+    build:
+      context: .
+      dockerfile: todo/Dockerfile
+    container_name: todofy-todo-sut
+    env_file:
+      - ./env/todofy.sut.env
+    environment:
+      PORT: "50052"
+    depends_on:
+      todofy-fake-todoist-sut:
+        condition: service_healthy
+    networks:
+      - todofy-sut
+    healthcheck:
+      test: ["CMD", "/grpc_health_probe", "-addr=:50052"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 5s
+
+  todofy-database-sut:
+    build:
+      context: .
+      dockerfile: database/Dockerfile
+    container_name: todofy-database-sut
+    env_file:
+      - ./env/todofy.sut.env
+    environment:
+      PORT: "50053"
+    ports:
+      - "10053:50053"
+    networks:
+      - todofy-sut
+    healthcheck:
+      test: ["CMD", "/grpc_health_probe", "-addr=:50053"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 5s
+
+  todofy-sut:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: todofy-sut
+    ports:
+      - "10013:8080"
+    env_file:
+      - ./env/todofy.sut.env
+    environment:
+      PORT: "8080"
+    depends_on:
+      todofy-llm-sut:
+        condition: service_healthy
+      todofy-todo-sut:
+        condition: service_healthy
+      todofy-database-sut:
+        condition: service_healthy
+    networks:
+      - todofy-sut
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8080/health"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s

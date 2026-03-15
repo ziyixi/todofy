@@ -249,6 +249,19 @@ When one shared `env_file` is reused across all services, set service-specific `
 | `DEPENDENCY_ENABLE_SCHEDULER` | Optional | `true` |
 | `DEPENDENCY_BOOTSTRAP_EXCLUDED_PROJECT_IDS` | Optional | `1122334455,99887766` |
 
+In the Todoist web app, open the project and read the number in the URL after `/project/`.
+Example: `https://app.todoist.com/app/project/2299753711` means project ID `2299753711`.
+
+If you prefer an API fallback, use:
+
+```bash
+curl -sS \
+  -H "Authorization: Bearer $TODOIST_API_KEY" \
+  https://api.todoist.com/api/v1/projects
+```
+
+Use that project ID for `TODOIST_DEFAULT_PROJECT_ID`, or join multiple project IDs with commas for `DEPENDENCY_BOOTSTRAP_EXCLUDED_PROJECT_IDS`.
+
 ### `todofy-database`
 
 | Variable | Required | Example |
@@ -280,7 +293,10 @@ GEMINI_API_KEY=replace-with-real-key
 
 # Todo service
 TODOIST_API_KEY=replace-with-real-token
-# Optional Todoist project ID used as default target for created tasks.
+# In the Todoist web app, open the project and read the number in the URL after `/project/`.
+# Example: https://app.todoist.com/app/project/2299753711 -> 2299753711
+# You can also use the Projects API as a fallback:
+# curl -sS -H "Authorization: Bearer $TODOIST_API_KEY" https://api.todoist.com/api/v1/projects
 TODOIST_DEFAULT_PROJECT_ID=
 TODOIST_WEBHOOK_SECRET=replace-with-real-secret
 DEPENDENCY_RECONCILE_INTERVAL=30m

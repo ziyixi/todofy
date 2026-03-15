@@ -23,7 +23,7 @@ type todoistOperationalClient interface {
 type todoistOperationalClientFactory func(apiKey string) todoistOperationalClient
 
 func defaultTodoistOperationalClientFactory(apiKey string) todoistOperationalClient {
-	return todoist.NewClient(apiKey)
+	return todoist.NewClientWithBaseURL(apiKey, *todoistBaseURL)
 }
 
 // normalizedTaskFromTodoistTask strips metadata syntax and returns API-facing task fields.

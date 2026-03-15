@@ -27,9 +27,6 @@ import (
 const (
 	// defaultTimeout specifies the default timeout for HTTP requests.
 	defaultTimeout = 14 * time.Second
-	// defaultBaseURL is the base URL for the Todoist API v1.
-	defaultBaseURL    = "https://api.todoist.com/api/v1"
-	todoistLabelsPath = "/labels"
 
 	todoistMaxPostBodyBytes = 1 << 20 // 1 MiB
 	todoistMaxHeaderBytes   = 65 << 10
@@ -70,6 +67,19 @@ func NewClient(token string) *Client {
 	}
 }
 
+// NewClientWithBaseURL creates a Todoist client with an optional base URL override.
+func NewClientWithBaseURL(token string, baseURL string) *Client {
+	client := NewClient(token)
+	if trimmedBaseURL := strings.TrimSpace(baseURL); trimmedBaseURL != "" {
+		normalizedBaseURL := strings.TrimRight(trimmedBaseURL, "/")
+		if normalizedBaseURL == "" {
+			normalizedBaseURL = trimmedBaseURL
+		}
+		client.baseURL = normalizedBaseURL
+	}
+	return client
+}
+
 // ErrorResponse represents an error returned by the Todoist API.
 type ErrorResponse struct {
 	ErrorMessage string `json:"error"`
@@ -106,7 +116,7 @@ func (e *todoistHTTPError) Error() string {
 // CreateTask creates a new task.
 func (c *Client) CreateTask(ctx context.Context, requestID string, taskDetails *CreateTaskRequest) (*Task, error) {
 	var created Task
-	if err := c.doJSON(ctx, http.MethodPost, "/tasks", taskDetails, requestID, &created); err != nil {
+	if err := c.doJSON(ctx, http.MethodPost, todoistTasksPath, taskDetails, requestID, &created); err != nil {
 		return nil, err
 	}
 	return &created, nil
@@ -120,7 +130,7 @@ func (c *Client) GetTask(ctx context.Context, taskID string) (*Task, error) {
 	}
 
 	var task Task
-	if err := c.doJSON(ctx, http.MethodGet, "/tasks/"+taskID, nil, "", &task); err != nil {
+	if err := c.doJSON(ctx, http.MethodGet, todoistTasksPath+"/"+taskID, nil, "", &task); err != nil {
 		return nil, err
 	}
 	return &task, nil
@@ -131,7 +141,7 @@ func (c *Client) ListActiveTasks(ctx context.Context) ([]*Task, error) {
 	allTasks := make([]*Task, 0)
 	cursor := ""
 	for {
-		path := "/tasks"
+		path := todoistTasksPath
 		if cursor != "" {
 			path += "?cursor=" + url.QueryEscape(cursor)
 		}
@@ -170,7 +180,7 @@ func (c *Client) UpdateTask(
 	}
 
 	var task Task
-	if err := c.doJSON(ctx, http.MethodPost, "/tasks/"+taskID, update, requestID, &task); err != nil {
+	if err := c.doJSON(ctx, http.MethodPost, todoistTasksPath+"/"+taskID, update, requestID, &task); err != nil {
 		return nil, err
 	}
 	// Keep compatibility with APIs that return 204/empty body for updates.

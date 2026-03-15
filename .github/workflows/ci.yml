@@ -28,6 +28,10 @@ jobs:
     name: Integration Test
     uses: ./.github/workflows/reusable-integration-test.yml
 
+  sut-test:
+    name: SUT Test
+    uses: ./.github/workflows/reusable-sut-test.yml
+
   detect-build-changes:
     name: Detect Build-Relevant Changes
     runs-on: ubuntu-latest
@@ -70,7 +74,7 @@ jobs:
 
   build:
     name: Build
-    needs: [test, lint, security, integration-test, detect-build-changes]
+    needs: [test, lint, security, integration-test, sut-test, detect-build-changes]
     if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && needs.detect-build-changes.outputs.should_build == 'true'
     uses: ./.github/workflows/reusable-build.yml
     permissions:
@@ -79,7 +83,7 @@ jobs:
   notify:
     name: Notify Status
     runs-on: ubuntu-latest
-    needs: [test, lint, security, integration-test, detect-build-changes, build]
+    needs: [test, lint, security, integration-test, sut-test, detect-build-changes, build]
     if: always()
 
     steps:
@@ -89,6 +93,7 @@ jobs:
         needs.lint.result == 'success' &&
         needs.security.result == 'success' &&
         needs.integration-test.result == 'success' &&
+        needs.sut-test.result == 'success' &&
         (needs.detect-build-changes.outputs.should_build != 'true' || needs.build.result == 'success')
       run: |
         if [[ "${{ needs.detect-build-changes.outputs.should_build }}" == "true" ]]; then
@@ -103,6 +108,7 @@ jobs:
         needs.lint.result == 'failure' ||
         needs.security.result == 'failure' ||
         needs.integration-test.result == 'failure' ||
+        needs.sut-test.result == 'failure' ||
         needs.build.result == 'failure'
       run: |
         echo "❌ CI checks failed!"

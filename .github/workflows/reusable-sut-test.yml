@@ -1,0 +1,90 @@
+name: Reusable SUT Test
+
+on:
+  workflow_call:
+
+jobs:
+  sut-test:
+    name: Docker SUT Tests
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+    - name: Check out code
+      uses: actions/checkout@v4
+
+    - name: Set up Go
+      uses: actions/setup-go@v4
+      with:
+        go-version-file: 'go.mod'
+
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+
+    - name: Build and start SUT containers
+      run: |
+        docker compose -f docker-compose.sut.yml build
+        docker compose -f docker-compose.sut.yml up -d
+
+    - name: Wait for SUT services to be healthy
+      run: |
+        echo "Waiting for SUT services to be healthy..."
+
+        timeout=180
+        elapsed=0
+
+        while [ $elapsed -lt $timeout ]; do
+          all_healthy=true
+
+          for service in \
+            todofy-fake-gemini-sut \
+            todofy-fake-todoist-sut \
+            todofy-llm-sut \
+            todofy-todo-sut \
+            todofy-database-sut \
+            todofy-sut; do
+            status=$(docker inspect --format='{{.State.Health.Status}}' $service 2>/dev/null || echo "not_found")
+            if [ "$status" != "healthy" ]; then
+              all_healthy=false
+              echo "  $service: $status"
+            else
+              echo "  $service: healthy ✓"
+            fi
+          done
+
+          if [ "$all_healthy" = true ]; then
+            echo "All SUT services are healthy!"
+            break
+          fi
+
+          sleep 5
+          elapsed=$((elapsed + 5))
+        done
+
+        if [ "$all_healthy" != true ]; then
+          echo "Timeout waiting for SUT services"
+          docker compose -f docker-compose.sut.yml logs
+          exit 1
+        fi
+
+    - name: Run SUT integration tests
+      env:
+        TODOFY_RUN_SUT: "1"
+      run: go test -v ./sut/...
+
+    - name: Show SUT logs on success
+      if: success()
+      run: docker compose -f docker-compose.sut.yml logs
+
+    - name: Show SUT logs on failure
+      if: failure()
+      run: |
+        docker compose -f docker-compose.sut.yml logs
+        docker ps -a
+
+    - name: Cleanup
+      if: always()
+      run: |
+        docker compose -f docker-compose.sut.yml down -v
+        docker system prune -f

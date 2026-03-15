@@ -5,12 +5,19 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"os"
+	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/go-resty/resty/v2"
+)
+
+const (
+	defaultRateLimitRequestsPerMinute = 2
+	rateLimitRequestsPerMinuteEnv     = "RATE_LIMIT_REQUESTS_PER_MINUTE"
+	rateLimitErrorMessage             = "Too many requests. Please wait for the next minute."
 )
 
 // ParseAllowedUsers parses a comma-separated list of allowed users in the format "username:password"
@@ -57,36 +64,50 @@ func FetchWithBasicAuth(url, username, password string) (interface{}, error) {
 
 // RateLimitMiddleware is a middleware that limits the number of requests per minute
 func RateLimitMiddleware() gin.HandlerFunc {
-	// Declare variables inside the closure
-	var mu sync.Mutex
-	requestsCount := 0
-	resetTime := time.Now().Add(1 * time.Minute)
+	return RateLimitMiddlewareWithLimit(rateLimitRequestsPerMinuteFromEnv())
+}
 
+// RateLimitMiddlewareWithLimit creates a rate limiting middleware with a specific per-minute limit.
+// A limit of 0 disables rate limiting.
+func RateLimitMiddlewareWithLimit(limit int) gin.HandlerFunc {
+	limiter := NewSlidingWindowLimiter(limit, time.Minute)
 	return func(c *gin.Context) {
-		mu.Lock()
-		defer mu.Unlock()
-
-		// Check if the time window has expired
-		if time.Now().After(resetTime) {
-			// Reset the counter and the time window
-			requestsCount = 0
-			resetTime = time.Now().Add(1 * time.Minute)
-		}
-
-		// Check the request count
-		if requestsCount >= 2 {
-			// Block the request if the limit is reached
+		allowed, _ := limiter.Reserve(time.Now())
+		if !allowed {
 			c.JSON(http.StatusServiceUnavailable, gin.H{
-				"error": "Too many requests. Please wait for the next minute.",
+				"error": rateLimitErrorMessage,
 			})
 			c.Abort()
 			return
 		}
-
-		// Allow the request and increment the counter
-		requestsCount++
-
-		// Process the request
 		c.Next()
 	}
+}
+
+func rateLimitRequestsPerMinuteFromEnv() int {
+	raw, ok := os.LookupEnv(rateLimitRequestsPerMinuteEnv)
+	if !ok || strings.TrimSpace(raw) == "" {
+		return defaultRateLimitRequestsPerMinute
+	}
+
+	limit, err := strconv.Atoi(raw)
+	if err != nil {
+		log.Printf(
+			"Invalid %s value %q, using default %d",
+			rateLimitRequestsPerMinuteEnv,
+			raw,
+			defaultRateLimitRequestsPerMinute,
+		)
+		return defaultRateLimitRequestsPerMinute
+	}
+	if limit < 0 {
+		log.Printf(
+			"Invalid %s value %q, using default %d",
+			rateLimitRequestsPerMinuteEnv,
+			raw,
+			defaultRateLimitRequestsPerMinute,
+		)
+		return defaultRateLimitRequestsPerMinute
+	}
+	return limit
 }

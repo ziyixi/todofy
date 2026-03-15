@@ -173,6 +173,43 @@ func TestRateLimitMiddleware(t *testing.T) {
 		_ = json.NewDecoder(w.Body).Decode(&response) // Best effort decode
 		assert.Contains(t, response["error"], "Too many requests")
 	})
+
+	t.Run("can be disabled with zero limit", func(t *testing.T) {
+		router := gin.New()
+		router.Use(RateLimitMiddlewareWithLimit(0))
+		router.GET("/test", func(c *gin.Context) {
+			c.JSON(200, gin.H{"message": "ok"})
+		})
+
+		for i := 0; i < 5; i++ {
+			w := httptest.NewRecorder()
+			req, _ := http.NewRequest("GET", "/test", nil)
+			router.ServeHTTP(w, req)
+			assert.Equal(t, http.StatusOK, w.Code)
+		}
+	})
+}
+
+func TestRateLimitRequestsPerMinuteFromEnv(t *testing.T) {
+	t.Run("uses default when unset", func(t *testing.T) {
+		t.Setenv(rateLimitRequestsPerMinuteEnv, "")
+		assert.Equal(t, defaultRateLimitRequestsPerMinute, rateLimitRequestsPerMinuteFromEnv())
+	})
+
+	t.Run("accepts explicit zero to disable", func(t *testing.T) {
+		t.Setenv(rateLimitRequestsPerMinuteEnv, "0")
+		assert.Equal(t, 0, rateLimitRequestsPerMinuteFromEnv())
+	})
+
+	t.Run("falls back on invalid input", func(t *testing.T) {
+		t.Setenv(rateLimitRequestsPerMinuteEnv, "not-a-number")
+		assert.Equal(t, defaultRateLimitRequestsPerMinute, rateLimitRequestsPerMinuteFromEnv())
+	})
+
+	t.Run("falls back on negative input", func(t *testing.T) {
+		t.Setenv(rateLimitRequestsPerMinuteEnv, "-5")
+		assert.Equal(t, defaultRateLimitRequestsPerMinute, rateLimitRequestsPerMinuteFromEnv())
+	})
 }
 
 func TestRateLimitMiddleware_TimeWindowReset(t *testing.T) {

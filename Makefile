@@ -1,6 +1,6 @@
 # Todofy Makefile
 
-.PHONY: test test-coverage test-verbose test-integration build clean lint lint-check security help install-hooks
+.PHONY: test test-coverage test-verbose test-integration test-sut build clean lint lint-check security help install-hooks
 
 # Default target
 help: ## Show this help message
@@ -22,6 +22,9 @@ test-verbose: ## Run tests with verbose output
 
 test-integration: ## Run integration tests
 	./scripts/integration-test.sh
+
+test-sut: ## Run system-under-test integration tests against a running docker-compose.sut.yml stack
+	TODOFY_RUN_SUT=1 go test -v ./sut/...
 
 # Code quality targets
 lint: ## Auto-fix lint/format issues, then verify

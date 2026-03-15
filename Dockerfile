@@ -53,6 +53,7 @@ ENV TodoAddr=":50052"
 ENV DependencyAddr=""
 ENV TodoistAddr=""
 ENV DatabaseAddr=":50053"
+ENV RATE_LIMIT_REQUESTS_PER_MINUTE=2
 
 # Install ca-certificates for HTTPS and tzdata for timezone information
 RUN apk --no-cache add ca-certificates tzdata
