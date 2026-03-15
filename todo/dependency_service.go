@@ -268,14 +268,72 @@ func (s *dependencyServer) ListDependencyIssues(
 
 // MarkGraphDirty records a dirty signal so background reconcile can refresh graph state.
 func (s *dependencyServer) MarkGraphDirty(
-	_ context.Context,
-	_ *pb.MarkDependencyGraphDirtyRequest,
+	ctx context.Context,
+	req *pb.MarkDependencyGraphDirtyRequest,
 ) (*pb.MarkDependencyGraphDirtyResponse, error) {
+	resp := &pb.MarkDependencyGraphDirtyResponse{Accepted: true}
+	if skip, excludedProjectID := s.shouldSkipWebhookDirtyMark(ctx, req); skip {
+		resp.ExclusionInfo = &pb.MarkDependencyGraphDirtyResponse_ExclusionInfo{
+			InExclusionList:    true,
+			ExclusionProjectId: excludedProjectID,
+		}
+		return resp, nil
+	}
+
 	select {
 	case s.dirtySignal <- struct{}{}:
 	default:
 	}
-	return &pb.MarkDependencyGraphDirtyResponse{Accepted: true}, nil
+	return resp, nil
+}
+
+func (s *dependencyServer) shouldSkipWebhookDirtyMark(
+	ctx context.Context,
+	req *pb.MarkDependencyGraphDirtyRequest,
+) (bool, string) {
+	if req == nil || strings.TrimSpace(req.GetSource()) != "todoist_webhook" {
+		return false, ""
+	}
+	if len(s.metadataExcludedProjectIDs) == 0 {
+		return false, ""
+	}
+
+	client, err := s.getClient()
+	if err != nil {
+		return false, ""
+	}
+
+	var (
+		sawTaskID              bool
+		firstExcludedProjectID string
+	)
+	for _, rawTaskID := range req.GetTodoistTaskIds() {
+		taskID := strings.TrimSpace(rawTaskID)
+		if taskID == "" {
+			continue
+		}
+		sawTaskID = true
+
+		readCtx, cancel := boundedContext(ctx, s.readTimeout)
+		task, getErr := client.GetTask(readCtx, taskID)
+		cancel()
+		if getErr != nil || task == nil {
+			return false, ""
+		}
+
+		projectID := strings.TrimSpace(task.ProjectID)
+		if !s.isMetadataBootstrapExcludedProject(projectID) {
+			return false, ""
+		}
+		if firstExcludedProjectID == "" {
+			firstExcludedProjectID = projectID
+		}
+	}
+
+	if !sawTaskID || firstExcludedProjectID == "" {
+		return false, ""
+	}
+	return true, firstExcludedProjectID
 }
 
 // StartBackgroundReconcile starts the scheduler loop when background reconcile is enabled.

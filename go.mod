@@ -10,7 +10,7 @@ require (
 	github.com/sirupsen/logrus v1.9.4
 	github.com/stretchr/testify v1.11.1
 	github.com/tidwall/gjson v1.18.0
-	github.com/ziyixi/protos/go/todofy v0.0.0-20260315081739-c62be248bdb9
+	github.com/ziyixi/protos/go/todofy v0.0.0-20260315204959-16f9da5d3aec
 	google.golang.org/genai v1.50.0
 	google.golang.org/grpc v1.79.2
 	google.golang.org/protobuf v1.36.11
@@ -22,7 +22,7 @@ require (
 	cloud.google.com/go v0.123.0 // indirect
 	cloud.google.com/go/auth v0.18.2 // indirect
 	cloud.google.com/go/compute/metadata v0.9.0 // indirect
-	github.com/PuerkitoBio/goquery v1.11.0 // indirect
+	github.com/PuerkitoBio/goquery v1.12.0 // indirect
 	github.com/andybalholm/cascadia v1.3.3 // indirect
 	github.com/bytedance/gopkg v0.1.3 // indirect
 	github.com/bytedance/sonic v1.15.0 // indirect
@@ -75,6 +75,7 @@ require (
 	golang.org/x/net v0.52.0 // indirect
 	golang.org/x/sys v0.42.0 // indirect
 	golang.org/x/text v0.35.0 // indirect
+	google.golang.org/api v0.271.0 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20260311181403-84a4fc48630c // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )

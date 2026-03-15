@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -76,6 +77,54 @@ func mustMarshalJSON(t *testing.T, value any) string {
 	body, err := json.Marshal(value)
 	require.NoError(t, err)
 	return string(body)
+}
+
+func postTodoistWebhook(t *testing.T, h *harness, reqBody []byte, signature string) webhookHTTPResponse {
+	t.Helper()
+
+	req, err := http.NewRequest(http.MethodPost, h.baseURL+"/api/v1/todoist/webhook", strings.NewReader(string(reqBody)))
+	require.NoError(t, err)
+	req.SetBasicAuth(h.username, h.password)
+	req.Header.Set("Content-Type", "application/json")
+	if signature != "" {
+		req.Header.Set("X-Todoist-Hmac-SHA256", signature)
+	}
+
+	resp, err := h.httpClient.Do(req)
+	require.NoError(t, err)
+	defer func() {
+		_ = resp.Body.Close()
+	}()
+	body, err := io.ReadAll(resp.Body)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, resp.StatusCode, string(body))
+
+	return mustUnmarshal[webhookHTTPResponse](t, body)
+}
+
+func hasTodoistCall(calls []admincontract.RecordedHTTPRequest, method string, path string) bool {
+	for _, call := range calls {
+		if call.Method == method && call.Path == path {
+			return true
+		}
+	}
+	return false
+}
+
+func waitForTodoistCall(t *testing.T, h *harness, timeout time.Duration, method string, path string) bool {
+	t.Helper()
+
+	deadline := time.Now().Add(timeout)
+	for {
+		state := h.todoistState(t)
+		if hasTodoistCall(state.Calls, method, path) {
+			return true
+		}
+		if time.Now().After(deadline) {
+			return false
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
 }
 
 func TestSUTUpdateTodoIntegration(t *testing.T) {
@@ -624,22 +673,7 @@ func TestSUTTodoistWebhookIntegration(t *testing.T) {
 		h.resetScenario(t)
 
 		reqBody := []byte(`{"event_data":{"id":"task-1","content":"Task A <k:task-a>"}}`)
-		req, err := http.NewRequest(http.MethodPost, h.baseURL+"/api/v1/todoist/webhook", strings.NewReader(string(reqBody)))
-		require.NoError(t, err)
-		req.SetBasicAuth(h.username, h.password)
-		req.Header.Set("Content-Type", "application/json")
-		req.Header.Set("X-Todoist-Hmac-SHA256", "invalid")
-
-		resp, err := h.httpClient.Do(req)
-		require.NoError(t, err)
-		defer func() {
-			_ = resp.Body.Close()
-		}()
-		body, err := io.ReadAll(resp.Body)
-		require.NoError(t, err)
-		require.Equal(t, http.StatusOK, resp.StatusCode, string(body))
-
-		webhookResp := mustUnmarshal[webhookHTTPResponse](t, body)
+		webhookResp := postTodoistWebhook(t, h, reqBody, "invalid")
 		assert.False(t, webhookResp.Accepted)
 		assert.Equal(t, "invalid_signature", webhookResp.Reason)
 	})
@@ -648,23 +682,68 @@ func TestSUTTodoistWebhookIntegration(t *testing.T) {
 		h.resetScenario(t)
 
 		reqBody := []byte(`{"event_data":{"id":"task-1","content":"Task A <k:task-a>"}}`)
-		req, err := http.NewRequest(http.MethodPost, h.baseURL+"/api/v1/todoist/webhook", strings.NewReader(string(reqBody)))
-		require.NoError(t, err)
-		req.SetBasicAuth(h.username, h.password)
-		req.Header.Set("Content-Type", "application/json")
-		req.Header.Set("X-Todoist-Hmac-SHA256", computeWebhookSignature(h.webhookSecret, reqBody))
-
-		resp, err := h.httpClient.Do(req)
-		require.NoError(t, err)
-		defer func() {
-			_ = resp.Body.Close()
-		}()
-		body, err := io.ReadAll(resp.Body)
-		require.NoError(t, err)
-		require.Equal(t, http.StatusOK, resp.StatusCode, string(body))
-
-		webhookResp := mustUnmarshal[webhookHTTPResponse](t, body)
+		webhookResp := postTodoistWebhook(t, h, reqBody, computeWebhookSignature(h.webhookSecret, reqBody))
 		assert.True(t, webhookResp.Accepted)
 		assert.Equal(t, "ok", webhookResp.Reason)
+	})
+
+	t.Run("excluded project webhook does not trigger reconcile list call", func(t *testing.T) {
+		h.resetScenario(t)
+		h.seedTodoist(t, admincontract.SeedTodoistStateRequest{
+			Tasks: []todoistapi.Task{
+				{ID: "task-1", Content: "Task A <k:task-a>", ProjectID: sutExcludedBootstrapProjectA},
+			},
+		})
+
+		reqBody := []byte(`{"event_data":{"id":"task-1","content":"Task A <k:task-a>"}}`)
+		webhookResp := postTodoistWebhook(t, h, reqBody, computeWebhookSignature(h.webhookSecret, reqBody))
+		assert.True(t, webhookResp.Accepted)
+		assert.Equal(t, "ok", webhookResp.Reason)
+
+		require.True(
+			t,
+			waitForTodoistCall(t, h, time.Second, http.MethodGet, "/api/v1"+todoistapi.TasksPath+"/task-1"),
+			"expected webhook exclusion check to resolve task project via GET /tasks/{id}",
+		)
+		assert.False(
+			t,
+			waitForTodoistCall(t, h, time.Second, http.MethodGet, "/api/v1"+todoistapi.TasksPath),
+			"excluded-project webhook should not enqueue reconcile list call",
+		)
+	})
+
+	t.Run("moved task from excluded to included project triggers reconcile", func(t *testing.T) {
+		h.resetScenario(t)
+		reqBody := []byte(`{"event_data":{"id":"task-1","content":"Task A <k:task-a>"}}`)
+
+		h.seedTodoist(t, admincontract.SeedTodoistStateRequest{
+			Tasks: []todoistapi.Task{
+				{ID: "task-1", Content: "Task A <k:task-a>", ProjectID: sutExcludedBootstrapProjectA},
+			},
+		})
+
+		webhookResp := postTodoistWebhook(t, h, reqBody, computeWebhookSignature(h.webhookSecret, reqBody))
+		assert.True(t, webhookResp.Accepted)
+		assert.Equal(t, "ok", webhookResp.Reason)
+		assert.False(
+			t,
+			waitForTodoistCall(t, h, time.Second, http.MethodGet, "/api/v1"+todoistapi.TasksPath),
+			"excluded-project webhook should not trigger reconcile before move",
+		)
+
+		h.seedTodoist(t, admincontract.SeedTodoistStateRequest{
+			Tasks: []todoistapi.Task{
+				{ID: "task-1", Content: "Task A <k:task-a>", ProjectID: "proj-keep"},
+			},
+		})
+
+		webhookResp = postTodoistWebhook(t, h, reqBody, computeWebhookSignature(h.webhookSecret, reqBody))
+		assert.True(t, webhookResp.Accepted)
+		assert.Equal(t, "ok", webhookResp.Reason)
+		assert.True(
+			t,
+			waitForTodoistCall(t, h, 2*time.Second, http.MethodGet, "/api/v1"+todoistapi.TasksPath),
+			"included-project webhook should trigger reconcile list call after move",
+		)
 	})
 }

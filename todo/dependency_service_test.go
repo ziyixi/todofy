@@ -494,15 +494,161 @@ func TestDependencyServerGetTaskStatusErrors(t *testing.T) {
 }
 
 func TestDependencyServerMarkGraphDirty(t *testing.T) {
-	server := &dependencyServer{
-		dirtySignal: make(chan struct{}, 1),
-	}
-	server.dirtySignal <- struct{}{}
+	t.Run("non-webhook source still enqueues dirty", func(t *testing.T) {
+		server := &dependencyServer{
+			dirtySignal: make(chan struct{}, 1),
+		}
+		server.dirtySignal <- struct{}{}
 
-	resp, err := server.MarkGraphDirty(context.Background(), &pb.MarkDependencyGraphDirtyRequest{})
-	require.NoError(t, err)
-	assert.True(t, resp.GetAccepted())
-	assert.Len(t, server.dirtySignal, 1)
+		resp, err := server.MarkGraphDirty(context.Background(), &pb.MarkDependencyGraphDirtyRequest{})
+		require.NoError(t, err)
+		assert.True(t, resp.GetAccepted())
+		assert.Nil(t, resp.GetExclusionInfo())
+		assert.Len(t, server.dirtySignal, 1)
+	})
+
+	t.Run("webhook all excluded skips enqueue and returns exclusion info", func(t *testing.T) {
+		defer saveDependencyFlags()()
+		*todoistAPIKey = testGenericAPIKey
+
+		fakeClient := newFakeDependencyTodoistClient([]*todoist.Task{
+			{ID: "task-a", ProjectID: "proj-excluded-a"},
+			{ID: "task-b", ProjectID: "proj-excluded-b"},
+		})
+		server := &dependencyServer{
+			newTodoistClient: func(string) todoistOperationalClient { return fakeClient },
+			metadataExcludedProjectIDs: map[string]struct{}{
+				"proj-excluded-a": {},
+				"proj-excluded-b": {},
+			},
+			dirtySignal: make(chan struct{}, 1),
+			readTimeout: time.Second,
+		}
+
+		resp, err := server.MarkGraphDirty(context.Background(), &pb.MarkDependencyGraphDirtyRequest{
+			Source:         "todoist_webhook",
+			TodoistTaskIds: []string{"task-a", "task-b"},
+		})
+		require.NoError(t, err)
+		assert.True(t, resp.GetAccepted())
+		require.NotNil(t, resp.GetExclusionInfo())
+		assert.True(t, resp.GetExclusionInfo().GetInExclusionList())
+		assert.Equal(t, "proj-excluded-a", resp.GetExclusionInfo().GetExclusionProjectId())
+		assert.Len(t, server.dirtySignal, 0)
+	})
+
+	t.Run("webhook mixed excluded and included still enqueues dirty", func(t *testing.T) {
+		defer saveDependencyFlags()()
+		*todoistAPIKey = testGenericAPIKey
+
+		fakeClient := newFakeDependencyTodoistClient([]*todoist.Task{
+			{ID: "task-a", ProjectID: "proj-excluded"},
+			{ID: "task-b", ProjectID: "proj-keep"},
+		})
+		server := &dependencyServer{
+			newTodoistClient: func(string) todoistOperationalClient { return fakeClient },
+			metadataExcludedProjectIDs: map[string]struct{}{
+				"proj-excluded": {},
+			},
+			dirtySignal: make(chan struct{}, 1),
+			readTimeout: time.Second,
+		}
+
+		resp, err := server.MarkGraphDirty(context.Background(), &pb.MarkDependencyGraphDirtyRequest{
+			Source:         "todoist_webhook",
+			TodoistTaskIds: []string{"task-a", "task-b"},
+		})
+		require.NoError(t, err)
+		assert.True(t, resp.GetAccepted())
+		assert.Nil(t, resp.GetExclusionInfo())
+		assert.Len(t, server.dirtySignal, 1)
+	})
+
+	t.Run("webhook one non-excluded task enqueues dirty", func(t *testing.T) {
+		defer saveDependencyFlags()()
+		*todoistAPIKey = testGenericAPIKey
+
+		fakeClient := newFakeDependencyTodoistClient([]*todoist.Task{
+			{ID: "task-a", ProjectID: "proj-keep"},
+		})
+		server := &dependencyServer{
+			newTodoistClient: func(string) todoistOperationalClient { return fakeClient },
+			metadataExcludedProjectIDs: map[string]struct{}{
+				"proj-excluded": {},
+			},
+			dirtySignal: make(chan struct{}, 1),
+			readTimeout: time.Second,
+		}
+
+		resp, err := server.MarkGraphDirty(context.Background(), &pb.MarkDependencyGraphDirtyRequest{
+			Source:         "todoist_webhook",
+			TodoistTaskIds: []string{"task-a"},
+		})
+		require.NoError(t, err)
+		assert.True(t, resp.GetAccepted())
+		assert.Nil(t, resp.GetExclusionInfo())
+		assert.Len(t, server.dirtySignal, 1)
+	})
+
+	t.Run("webhook task lookup failure fails open and enqueues dirty", func(t *testing.T) {
+		defer saveDependencyFlags()()
+		*todoistAPIKey = testGenericAPIKey
+
+		fakeClient := newFakeDependencyTodoistClient(nil)
+		fakeClient.getTaskErr = assert.AnError
+		server := &dependencyServer{
+			newTodoistClient: func(string) todoistOperationalClient { return fakeClient },
+			metadataExcludedProjectIDs: map[string]struct{}{
+				"proj-excluded": {},
+			},
+			dirtySignal: make(chan struct{}, 1),
+			readTimeout: time.Second,
+		}
+
+		resp, err := server.MarkGraphDirty(context.Background(), &pb.MarkDependencyGraphDirtyRequest{
+			Source:         "todoist_webhook",
+			TodoistTaskIds: []string{"task-a"},
+		})
+		require.NoError(t, err)
+		assert.True(t, resp.GetAccepted())
+		assert.Nil(t, resp.GetExclusionInfo())
+		assert.Len(t, server.dirtySignal, 1)
+	})
+
+	t.Run("webhook moved task from excluded to included project enqueues after move", func(t *testing.T) {
+		defer saveDependencyFlags()()
+		*todoistAPIKey = testGenericAPIKey
+
+		fakeClient := newFakeDependencyTodoistClient([]*todoist.Task{
+			{ID: "task-a", ProjectID: "proj-excluded"},
+		})
+		server := &dependencyServer{
+			newTodoistClient: func(string) todoistOperationalClient { return fakeClient },
+			metadataExcludedProjectIDs: map[string]struct{}{
+				"proj-excluded": {},
+			},
+			dirtySignal: make(chan struct{}, 2),
+			readTimeout: time.Second,
+		}
+		req := &pb.MarkDependencyGraphDirtyRequest{
+			Source:         "todoist_webhook",
+			TodoistTaskIds: []string{"task-a"},
+		}
+
+		resp, err := server.MarkGraphDirty(context.Background(), req)
+		require.NoError(t, err)
+		require.NotNil(t, resp.GetExclusionInfo())
+		assert.Equal(t, "proj-excluded", resp.GetExclusionInfo().GetExclusionProjectId())
+		assert.Len(t, server.dirtySignal, 0)
+
+		fakeClient.tasksByID["task-a"].ProjectID = "proj-keep"
+
+		resp, err = server.MarkGraphDirty(context.Background(), req)
+		require.NoError(t, err)
+		assert.True(t, resp.GetAccepted())
+		assert.Nil(t, resp.GetExclusionInfo())
+		assert.Len(t, server.dirtySignal, 1)
+	})
 }
 
 func TestDependencyServerStartBackgroundReconcile(t *testing.T) {
