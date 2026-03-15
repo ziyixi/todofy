@@ -158,7 +158,8 @@ func HandleTodoistWebhook(c *gin.Context) {
 		return
 	}
 	if !verifyResp.GetValid() {
-		c.JSON(http.StatusUnauthorized, gin.H{
+		log.Warningf("todoist webhook rejected: reason=%s details=%s", verifyResp.GetReason(), verifyResp.GetDetails())
+		c.JSON(http.StatusOK, gin.H{
 			"accepted": false,
 			"reason":   verifyResp.GetReason(),
 			"details":  verifyResp.GetDetails(),

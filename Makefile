@@ -2,6 +2,8 @@
 
 .PHONY: test test-coverage test-verbose test-integration test-sut build clean lint lint-check security help install-hooks
 
+COVERAGE_PACKAGES = $(shell go list ./... | grep -vE '^github.com/ziyixi/todofy/(sut|testutils)(/|$$)')
+
 # Default target
 help: ## Show this help message
 	@echo "Available targets:"
@@ -12,7 +14,7 @@ test: ## Run all unit tests
 	go test ./...
 
 test-coverage: ## Run tests with coverage report
-	go test -coverprofile=coverage.out ./...
+	go test -coverprofile=coverage.out $(COVERAGE_PACKAGES)
 	go tool cover -func=coverage.out
 	go tool cover -html=coverage.out -o coverage.html
 	@echo "Coverage report generated: coverage.html"

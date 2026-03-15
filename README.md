@@ -131,7 +131,8 @@ Returns a 24-hour summary payload with no task delivery side effect:
 
 * `POST /api/v1/todoist/webhook`
 * Signature verification is delegated to the Todoist gRPC integration layer.
-* Endpoint returns HTTP `200` for delivery compatibility; webhook only marks graph state dirty.
+* Endpoint returns HTTP `200` for delivery compatibility, even when the signature is missing or invalid.
+* Rejected deliveries return JSON with `accepted:false`, `reason`, and `details`; only verified deliveries mark graph state dirty.
 
 </details>
 
@@ -537,9 +538,12 @@ go test ./...
 Run with coverage:
 
 ```bash
-go test -race -coverprofile=coverage.out -covermode=atomic ./...
+go test -race -coverprofile=coverage.out -covermode=atomic $(go list ./... | grep -vE '^github.com/ziyixi/todofy/(sut|testutils)(/|$)')
 go tool cover -func=coverage.out
 ```
+
+Reported line coverage excludes `sut/**` and `testutils/**`.
+`sut` still runs in its own CI workflow as behavior-level system coverage.
 
 The LLM service includes e2e tests with a mock Gemini client (no real API calls or costs), covering:
 - Full summarization flow and model fallback

@@ -37,8 +37,14 @@ jobs:
     - name: Run vet
       run: go vet ./...
 
+    - name: Build coverage package list
+      run: |
+        go list ./... | \
+          grep -vE '^github.com/ziyixi/todofy/(sut|testutils)(/|$)' | \
+          tr '\n' ' ' > coverage-packages.txt
+
     - name: Run tests with coverage
-      run: go test -v -race -coverprofile=coverage.out -covermode=atomic ./...
+      run: go test -v -race -coverprofile=coverage.out -covermode=atomic $(cat coverage-packages.txt)
 
     - name: Display coverage summary
       run: |

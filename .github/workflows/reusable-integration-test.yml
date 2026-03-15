@@ -105,13 +105,19 @@ jobs:
         fi
 
         echo "Testing Todoist webhook endpoint delivery response..."
-        webhook_status=$(curl -s -o /dev/null -w "%{http_code}" \
+        webhook_response=$(curl -s -w '\n%{http_code}' \
           -X POST \
           -H "Content-Type: application/json" \
           -d '{"event_data":{"id":"integration-task","content":"Integration task <k:int-task>"}}' \
           http://localhost:${{ env.TODOFY_TEST_PORT }}/api/v1/todoist/webhook)
+        webhook_status=$(printf '%s\n' "$webhook_response" | tail -n1)
+        webhook_body=$(printf '%s\n' "$webhook_response" | sed '$d')
         if [ "$webhook_status" != "200" ]; then
           echo "/api/v1/todoist/webhook returned $webhook_status (expected 200)"
+          exit 1
+        fi
+        if ! printf '%s' "$webhook_body" | grep -q '"accepted":false'; then
+          echo "/api/v1/todoist/webhook did not report rejected delivery payload: $webhook_body"
           exit 1
         fi
 

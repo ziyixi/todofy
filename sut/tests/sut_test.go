@@ -445,7 +445,7 @@ func TestSUTTodoistWebhookIntegration(t *testing.T) {
 		}()
 		body, err := io.ReadAll(resp.Body)
 		require.NoError(t, err)
-		require.Equal(t, http.StatusUnauthorized, resp.StatusCode, string(body))
+		require.Equal(t, http.StatusOK, resp.StatusCode, string(body))
 
 		webhookResp := mustUnmarshal[webhookHTTPResponse](t, body)
 		assert.False(t, webhookResp.Accepted)
