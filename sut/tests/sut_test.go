@@ -102,22 +102,22 @@ func postTodoistWebhook(t *testing.T, h *harness, reqBody []byte, signature stri
 	return mustUnmarshal[webhookHTTPResponse](t, body)
 }
 
-func hasTodoistCall(calls []admincontract.RecordedHTTPRequest, method string, path string) bool {
+func hasTodoistCall(calls []admincontract.RecordedHTTPRequest, path string) bool {
 	for _, call := range calls {
-		if call.Method == method && call.Path == path {
+		if call.Method == http.MethodGet && call.Path == path {
 			return true
 		}
 	}
 	return false
 }
 
-func waitForTodoistCall(t *testing.T, h *harness, timeout time.Duration, method string, path string) bool {
+func waitForTodoistCall(t *testing.T, h *harness, timeout time.Duration, path string) bool {
 	t.Helper()
 
 	deadline := time.Now().Add(timeout)
 	for {
 		state := h.todoistState(t)
-		if hasTodoistCall(state.Calls, method, path) {
+		if hasTodoistCall(state.Calls, path) {
 			return true
 		}
 		if time.Now().After(deadline) {
@@ -702,12 +702,12 @@ func TestSUTTodoistWebhookIntegration(t *testing.T) {
 
 		require.True(
 			t,
-			waitForTodoistCall(t, h, time.Second, http.MethodGet, "/api/v1"+todoistapi.TasksPath+"/task-1"),
+			waitForTodoistCall(t, h, time.Second, "/api/v1"+todoistapi.TasksPath+"/task-1"),
 			"expected webhook exclusion check to resolve task project via GET /tasks/{id}",
 		)
 		assert.False(
 			t,
-			waitForTodoistCall(t, h, time.Second, http.MethodGet, "/api/v1"+todoistapi.TasksPath),
+			waitForTodoistCall(t, h, time.Second, "/api/v1"+todoistapi.TasksPath),
 			"excluded-project webhook should not enqueue reconcile list call",
 		)
 	})
@@ -727,7 +727,7 @@ func TestSUTTodoistWebhookIntegration(t *testing.T) {
 		assert.Equal(t, "ok", webhookResp.Reason)
 		assert.False(
 			t,
-			waitForTodoistCall(t, h, time.Second, http.MethodGet, "/api/v1"+todoistapi.TasksPath),
+			waitForTodoistCall(t, h, time.Second, "/api/v1"+todoistapi.TasksPath),
 			"excluded-project webhook should not trigger reconcile before move",
 		)
 
@@ -742,7 +742,7 @@ func TestSUTTodoistWebhookIntegration(t *testing.T) {
 		assert.Equal(t, "ok", webhookResp.Reason)
 		assert.True(
 			t,
-			waitForTodoistCall(t, h, 2*time.Second, http.MethodGet, "/api/v1"+todoistapi.TasksPath),
+			waitForTodoistCall(t, h, 2*time.Second, "/api/v1"+todoistapi.TasksPath),
 			"included-project webhook should trigger reconcile list call after move",
 		)
 	})
