@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"sort"
+	"sync"
 	"testing"
 	"time"
 
@@ -21,6 +22,7 @@ type updateContentCall struct {
 }
 
 type fakeDependencyTodoistClient struct {
+	mu                   sync.RWMutex
 	tasksByID            map[string]*todoist.Task
 	order                []string
 	updateCalls          int
@@ -38,6 +40,15 @@ type fakeDependencyTodoistClient struct {
 	updateContentErrs    map[string]error
 	ensureLabelsErr      error
 	ensureLabelsResult   *todoist.EnsureLabelsResult
+}
+
+func cloneTodoistTask(task *todoist.Task) *todoist.Task {
+	if task == nil {
+		return nil
+	}
+	copied := *task
+	copied.Labels = append([]string(nil), task.Labels...)
+	return &copied
 }
 
 func newFakeDependencyTodoistClient(tasks []*todoist.Task) *fakeDependencyTodoistClient {
@@ -58,34 +69,41 @@ func newFakeDependencyTodoistClient(tasks []*todoist.Task) *fakeDependencyTodois
 }
 
 func (f *fakeDependencyTodoistClient) GetTask(_ context.Context, taskID string) (*todoist.Task, error) {
-	if f.getTaskErr != nil {
-		return nil, f.getTaskErr
+	f.mu.RLock()
+	getTaskErr := f.getTaskErr
+	task := cloneTodoistTask(f.tasksByID[taskID])
+	f.mu.RUnlock()
+
+	if getTaskErr != nil {
+		return nil, getTaskErr
 	}
-	task := f.tasksByID[taskID]
 	if task == nil {
 		return nil, assert.AnError
 	}
-	copied := *task
-	copied.Labels = append([]string(nil), task.Labels...)
-	return &copied, nil
+	return task, nil
 }
 
 func (f *fakeDependencyTodoistClient) ListActiveTasks(ctx context.Context) ([]*todoist.Task, error) {
-	if err := waitForFakeTodoistDelay(ctx, f.listDelay); err != nil {
+	f.mu.RLock()
+	listDelay := f.listDelay
+	f.mu.RUnlock()
+
+	if err := waitForFakeTodoistDelay(ctx, listDelay); err != nil {
 		return nil, err
 	}
+
+	f.mu.RLock()
+	defer f.mu.RUnlock()
 	if f.listErr != nil {
 		return nil, f.listErr
 	}
 	out := make([]*todoist.Task, 0, len(f.order))
 	for _, id := range f.order {
-		task := f.tasksByID[id]
+		task := cloneTodoistTask(f.tasksByID[id])
 		if task == nil {
 			continue
 		}
-		copied := *task
-		copied.Labels = append([]string(nil), task.Labels...)
-		out = append(out, &copied)
+		out = append(out, task)
 	}
 	return out, nil
 }
@@ -96,15 +114,30 @@ func (f *fakeDependencyTodoistClient) UpdateTaskLabels(
 	addLabels []string,
 	removeLabels []string,
 ) (*todoist.Task, error) {
-	if err := waitForFakeTodoistDelay(ctx, f.updateLabelDelays[taskID]); err != nil {
+	f.mu.RLock()
+	delay := time.Duration(0)
+	if f.updateLabelDelays != nil {
+		delay = f.updateLabelDelays[taskID]
+	}
+	updateLabelErr := error(nil)
+	if f.updateLabelErrs != nil {
+		updateLabelErr = f.updateLabelErrs[taskID]
+	}
+	updateTaskLabelsErr := f.updateTaskLabelsErr
+	f.mu.RUnlock()
+
+	if err := waitForFakeTodoistDelay(ctx, delay); err != nil {
 		return nil, err
 	}
-	if err := f.updateLabelErrs[taskID]; err != nil {
-		return nil, err
+	if updateLabelErr != nil {
+		return nil, updateLabelErr
 	}
-	if f.updateTaskLabelsErr != nil {
-		return nil, f.updateTaskLabelsErr
+	if updateTaskLabelsErr != nil {
+		return nil, updateTaskLabelsErr
 	}
+
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	task := f.tasksByID[taskID]
 	if task == nil {
 		return nil, assert.AnError
@@ -135,9 +168,7 @@ func (f *fakeDependencyTodoistClient) UpdateTaskLabels(
 	sort.Strings(updated)
 	task.Labels = updated
 
-	copied := *task
-	copied.Labels = append([]string(nil), task.Labels...)
-	return &copied, nil
+	return cloneTodoistTask(task), nil
 }
 
 func (f *fakeDependencyTodoistClient) UpdateTaskContent(
@@ -145,15 +176,30 @@ func (f *fakeDependencyTodoistClient) UpdateTaskContent(
 	taskID string,
 	content string,
 ) (*todoist.Task, error) {
-	if err := waitForFakeTodoistDelay(ctx, f.updateContentDelays[taskID]); err != nil {
+	f.mu.RLock()
+	delay := time.Duration(0)
+	if f.updateContentDelays != nil {
+		delay = f.updateContentDelays[taskID]
+	}
+	updateContentErr := error(nil)
+	if f.updateContentErrs != nil {
+		updateContentErr = f.updateContentErrs[taskID]
+	}
+	updateTaskContentErr := f.updateTaskContentErr
+	f.mu.RUnlock()
+
+	if err := waitForFakeTodoistDelay(ctx, delay); err != nil {
 		return nil, err
 	}
-	if err := f.updateContentErrs[taskID]; err != nil {
-		return nil, err
+	if updateContentErr != nil {
+		return nil, updateContentErr
 	}
-	if f.updateTaskContentErr != nil {
-		return nil, f.updateTaskContentErr
+	if updateTaskContentErr != nil {
+		return nil, updateTaskContentErr
 	}
+
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	task := f.tasksByID[taskID]
 	if task == nil {
 		return nil, assert.AnError
@@ -163,28 +209,67 @@ func (f *fakeDependencyTodoistClient) UpdateTaskContent(
 		content: content,
 	})
 	task.Content = content
-	copied := *task
-	copied.Labels = append([]string(nil), task.Labels...)
-	return &copied, nil
+	return cloneTodoistTask(task), nil
 }
 
 func (f *fakeDependencyTodoistClient) EnsureLabels(
 	ctx context.Context,
 	labels []string,
 ) (*todoist.EnsureLabelsResult, error) {
-	if err := waitForFakeTodoistDelay(ctx, f.ensureLabelsDelay); err != nil {
+	f.mu.RLock()
+	ensureLabelsDelay := f.ensureLabelsDelay
+	f.mu.RUnlock()
+
+	if err := waitForFakeTodoistDelay(ctx, ensureLabelsDelay); err != nil {
 		return nil, err
 	}
+
+	f.mu.RLock()
+	defer f.mu.RUnlock()
 	if f.ensureLabelsErr != nil {
 		return nil, f.ensureLabelsErr
 	}
 	if f.ensureLabelsResult != nil {
-		return f.ensureLabelsResult, nil
+		failures := make(map[string]string, len(f.ensureLabelsResult.Failures))
+		for key, value := range f.ensureLabelsResult.Failures {
+			failures[key] = value
+		}
+		return &todoist.EnsureLabelsResult{
+			ExistingLabels: append([]string(nil), f.ensureLabelsResult.ExistingLabels...),
+			Failures:       failures,
+		}, nil
 	}
 	return &todoist.EnsureLabelsResult{
 		ExistingLabels: append([]string(nil), labels...),
 		Failures:       map[string]string{},
 	}, nil
+}
+
+func (f *fakeDependencyTodoistClient) updateContentCallCount() int {
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+	return len(f.updateContentCalls)
+}
+
+func (f *fakeDependencyTodoistClient) taskContent(taskID string) string {
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+	task := f.tasksByID[taskID]
+	if task == nil {
+		return ""
+	}
+	return task.Content
+}
+
+func (f *fakeDependencyTodoistClient) setTaskContent(taskID string, content string) bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	task := f.tasksByID[taskID]
+	if task == nil {
+		return false
+	}
+	task.Content = content
+	return true
 }
 
 func waitForFakeTodoistDelay(ctx context.Context, delay time.Duration) error {
@@ -561,9 +646,9 @@ func TestDependencyServerBackgroundLoopRunsStartupBootstrap(t *testing.T) {
 	}()
 
 	require.Eventually(t, func() bool {
-		return len(fakeClient.updateContentCalls) == 1
+		return fakeClient.updateContentCallCount() == 1
 	}, 2*time.Second, 20*time.Millisecond)
-	assert.Contains(t, fakeClient.tasksByID["task-a"].Content, "<k:")
+	assert.Contains(t, fakeClient.taskContent("task-a"), "<k:")
 
 	cancel()
 	select {
@@ -597,13 +682,13 @@ func TestDependencyServerBackgroundLoopRunsPeriodicBootstrap(t *testing.T) {
 	}()
 
 	require.Eventually(t, func() bool {
-		return len(fakeClient.updateContentCalls) >= 1
+		return fakeClient.updateContentCallCount() >= 1
 	}, 2*time.Second, 20*time.Millisecond)
 
 	// Force the task back to missing metadata and wait for the periodic tick.
-	fakeClient.tasksByID["task-a"].Content = "Task A"
+	require.True(t, fakeClient.setTaskContent("task-a", "Task A"))
 	require.Eventually(t, func() bool {
-		return len(fakeClient.updateContentCalls) >= 2
+		return fakeClient.updateContentCallCount() >= 2
 	}, 2*time.Second, 20*time.Millisecond)
 
 	cancel()

@@ -82,7 +82,7 @@ jobs:
           exit 1
         fi
 
-    - name: Test HTTP auth and webhook compatibility
+    - name: Test HTTP auth behavior
       run: |
         echo "Testing protected endpoint auth behavior..."
 
@@ -104,24 +104,13 @@ jobs:
           exit 1
         fi
 
-        echo "Testing Todoist webhook endpoint delivery response..."
-        webhook_response=$(curl -s -w '\n%{http_code}' \
-          -X POST \
-          -H "Content-Type: application/json" \
-          -d '{"event_data":{"id":"integration-task","content":"Integration task <k:int-task>"}}' \
-          http://localhost:${{ env.TODOFY_TEST_PORT }}/api/v1/todoist/webhook)
-        webhook_status=$(printf '%s\n' "$webhook_response" | tail -n1)
-        webhook_body=$(printf '%s\n' "$webhook_response" | sed '$d')
-        if [ "$webhook_status" != "200" ]; then
-          echo "/api/v1/todoist/webhook returned $webhook_status (expected 200)"
-          exit 1
-        fi
-        if ! printf '%s' "$webhook_body" | grep -q '"accepted":false'; then
-          echo "/api/v1/todoist/webhook did not report rejected delivery payload: $webhook_body"
+        dependency_clear_status=$(curl -s -o /dev/null -w "%{http_code}" -X POST http://localhost:${{ env.TODOFY_TEST_PORT }}/api/v1/dependency/clear_metadata)
+        if [ "$dependency_clear_status" != "401" ]; then
+          echo "/api/v1/dependency/clear_metadata returned $dependency_clear_status (expected 401 without auth)"
           exit 1
         fi
 
-        echo "Auth and webhook checks passed ✓"
+        echo "Auth checks passed ✓"
 
     - name: Test gRPC service connectivity
       run: |
