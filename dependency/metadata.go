@@ -141,6 +141,16 @@ func BuildContentWithTaskKey(content string, taskKey string) (string, error) {
 	return RenderTaskContent(parsed.DisplayTitle, taskKey, parsed.DependencyKeys)
 }
 
+// StripDependencyMetadata removes trailing dependency metadata while keeping the task title.
+// It only strips metadata blocks recognized by ParseTaskMetadata (k:/dep: forms).
+func StripDependencyMetadata(content string) (string, ParsedMetadata, bool) {
+	parsed := ParseTaskMetadata(content)
+	if !parsed.HasMetadata {
+		return strings.TrimSpace(content), parsed, false
+	}
+	return strings.TrimSpace(parsed.DisplayTitle), parsed, true
+}
+
 // RenderTaskContent builds title content with metadata.
 func RenderTaskContent(displayTitle string, taskKey string, dependencyKeys []string) (string, error) {
 	displayTitle = strings.TrimSpace(displayTitle)
@@ -167,23 +177,8 @@ func RenderTaskContent(displayTitle string, taskKey string, dependencyKeys []str
 // Keys use slug + short hash and are deduplicated against used.
 // The used map is both read and updated by this function.
 func GenerateTaskKey(displayTitle string, used map[string]struct{}) string {
-	base := slug.Make(displayTitle)
-	if base == "" {
-		base = defaultGeneratedTaskKeyBase
-	}
-	base = strings.Trim(base, "-_")
-	if base == "" {
-		base = defaultGeneratedTaskKeyBase
-	}
-
-	// Keep keys concise and still leave room for "-"+6 hex chars.
+	base := compactTaskKeyBase(displayTitle)
 	const hashLen = 6
-	maxBaseLen := 64 - 1 - hashLen
-	base = truncateTaskKey(base, maxBaseLen)
-	base = strings.Trim(base, "-_")
-	if base == "" {
-		base = defaultGeneratedTaskKeyBase
-	}
 
 	for salt := 0; ; salt++ {
 		candidate := fmt.Sprintf("%s-%s", base, shortTaskKeyHash(displayTitle, salt, hashLen))
@@ -192,6 +187,29 @@ func GenerateTaskKey(displayTitle string, used map[string]struct{}) string {
 			return candidate
 		}
 	}
+}
+
+func compactTaskKeyBase(displayTitle string) string {
+	base := slug.Make(displayTitle)
+	base = strings.Trim(base, "-_")
+	if base == "" {
+		base = defaultGeneratedTaskKeyBase
+	}
+
+	// Collapse separators so we can keep a compact, fixed-length base.
+	base = strings.ReplaceAll(base, "-", "")
+	base = strings.ReplaceAll(base, "_", "")
+	base = strings.TrimSpace(base)
+	if base == "" {
+		base = "tsk"
+	}
+
+	const baseLen = 3
+	base = truncateTaskKey(base, baseLen)
+	if len(base) >= baseLen {
+		return base
+	}
+	return base + strings.Repeat("x", baseLen-len(base))
 }
 
 func shortTaskKeyHash(displayTitle string, salt int, hashLen int) string {

@@ -142,6 +142,19 @@ func (m *MockDependencyServiceClient) BootstrapMissingTaskKeys(
 	return args.Get(0).(*pb.BootstrapMissingTaskKeysResponse), args.Error(1)
 }
 
+// ClearDependencyMetadata mocks dependency metadata clear calls.
+func (m *MockDependencyServiceClient) ClearDependencyMetadata(
+	ctx context.Context,
+	in *pb.ClearDependencyMetadataRequest,
+	opts ...grpc.CallOption,
+) (*pb.ClearDependencyMetadataResponse, error) {
+	args := m.Called(ctx, in, opts)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*pb.ClearDependencyMetadataResponse), args.Error(1)
+}
+
 // GetTaskStatus mocks task dependency status lookups.
 func (m *MockDependencyServiceClient) GetTaskStatus(
 	ctx context.Context,
@@ -168,7 +181,7 @@ func (m *MockDependencyServiceClient) ListDependencyIssues(
 	return args.Get(0).(*pb.ListDependencyIssuesResponse), args.Error(1)
 }
 
-// MarkGraphDirty mocks dirty signal calls.
+// MarkGraphDirty mocks compatibility hint calls.
 func (m *MockDependencyServiceClient) MarkGraphDirty(
 	ctx context.Context,
 	in *pb.MarkDependencyGraphDirtyRequest,
@@ -179,76 +192,6 @@ func (m *MockDependencyServiceClient) MarkGraphDirty(
 		return nil, args.Error(1)
 	}
 	return args.Get(0).(*pb.MarkDependencyGraphDirtyResponse), args.Error(1)
-}
-
-// MockTodoistServiceClient is a mock implementation of TodoistServiceClient.
-type MockTodoistServiceClient struct {
-	mock.Mock
-}
-
-// GetTask mocks Todoist task lookup calls.
-func (m *MockTodoistServiceClient) GetTask(
-	ctx context.Context,
-	in *pb.GetTodoistTaskRequest,
-	opts ...grpc.CallOption,
-) (*pb.GetTodoistTaskResponse, error) {
-	args := m.Called(ctx, in, opts)
-	if args.Get(0) == nil {
-		return nil, args.Error(1)
-	}
-	return args.Get(0).(*pb.GetTodoistTaskResponse), args.Error(1)
-}
-
-// ListActiveTasks mocks Todoist active task list calls.
-func (m *MockTodoistServiceClient) ListActiveTasks(
-	ctx context.Context,
-	in *pb.ListActiveTodoistTasksRequest,
-	opts ...grpc.CallOption,
-) (*pb.ListActiveTodoistTasksResponse, error) {
-	args := m.Called(ctx, in, opts)
-	if args.Get(0) == nil {
-		return nil, args.Error(1)
-	}
-	return args.Get(0).(*pb.ListActiveTodoistTasksResponse), args.Error(1)
-}
-
-// UpdateTaskLabels mocks Todoist task label update calls.
-func (m *MockTodoistServiceClient) UpdateTaskLabels(
-	ctx context.Context,
-	in *pb.UpdateTodoistTaskLabelsRequest,
-	opts ...grpc.CallOption,
-) (*pb.UpdateTodoistTaskLabelsResponse, error) {
-	args := m.Called(ctx, in, opts)
-	if args.Get(0) == nil {
-		return nil, args.Error(1)
-	}
-	return args.Get(0).(*pb.UpdateTodoistTaskLabelsResponse), args.Error(1)
-}
-
-// VerifyWebhook mocks Todoist webhook verification calls.
-func (m *MockTodoistServiceClient) VerifyWebhook(
-	ctx context.Context,
-	in *pb.VerifyTodoistWebhookRequest,
-	opts ...grpc.CallOption,
-) (*pb.VerifyTodoistWebhookResponse, error) {
-	args := m.Called(ctx, in, opts)
-	if args.Get(0) == nil {
-		return nil, args.Error(1)
-	}
-	return args.Get(0).(*pb.VerifyTodoistWebhookResponse), args.Error(1)
-}
-
-// EnsureLabels mocks Todoist label ensure calls.
-func (m *MockTodoistServiceClient) EnsureLabels(
-	ctx context.Context,
-	in *pb.EnsureTodoistLabelsRequest,
-	opts ...grpc.CallOption,
-) (*pb.EnsureTodoistLabelsResponse, error) {
-	args := m.Called(ctx, in, opts)
-	if args.Get(0) == nil {
-		return nil, args.Error(1)
-	}
-	return args.Get(0).(*pb.EnsureTodoistLabelsResponse), args.Error(1)
 }
 
 // MockGRPCClients is a mock implementation of GRPCClients

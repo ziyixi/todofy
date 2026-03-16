@@ -42,11 +42,6 @@ var (
 		"",
 		"Default Todoist project ID for created tasks",
 	)
-	todoistWebhookSecret = flag.String(
-		"todoist-webhook-secret",
-		"",
-		"The Todoist webhook secret used to verify signatures",
-	)
 	todoistBaseURL = flag.String(
 		"todoist-base-url",
 		"",
@@ -58,10 +53,10 @@ var (
 		30*time.Minute,
 		"How often to run background dependency reconcile",
 	)
-	dependencyWebhookDebounce = flag.Duration(
-		"dependency-webhook-debounce",
-		20*time.Second,
-		"Debounce duration for webhook-triggered dependency reconcile",
+	dependencyBootstrapInterval = flag.Duration(
+		"dependency-bootstrap-interval",
+		24*time.Hour,
+		"How often to run background dependency key bootstrap",
 	)
 	dependencyGracePeriod = flag.Duration(
 		"dependency-grace-period",

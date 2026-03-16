@@ -16,7 +16,6 @@ type todoistOperationalClient interface {
 	UpdateTaskLabels(ctx context.Context, taskID string, addLabels []string, removeLabels []string) (*todoist.Task, error)
 	UpdateTaskContent(ctx context.Context, taskID string, content string) (*todoist.Task, error)
 	EnsureLabels(ctx context.Context, labels []string) (*todoist.EnsureLabelsResult, error)
-	VerifyWebhook(rawBody []byte, signature string, secret string) bool
 }
 
 // todoistOperationalClientFactory creates a Todoist client from an API key.
@@ -54,17 +53,4 @@ func isTodoistTaskCompleted(task *todoist.Task) bool {
 		return false
 	}
 	return task.Checked || task.IsCompleted || strings.TrimSpace(task.CompletedAt) != ""
-}
-
-// lookupTodoistHeader performs case-insensitive header lookup on proto header pairs.
-func lookupTodoistHeader(headers []*pb.TodoistWebhookHeader, key string) string {
-	for _, header := range headers {
-		if header == nil {
-			continue
-		}
-		if strings.EqualFold(strings.TrimSpace(header.GetKey()), key) {
-			return strings.TrimSpace(header.GetValue())
-		}
-	}
-	return ""
 }

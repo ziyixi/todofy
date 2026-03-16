@@ -4,9 +4,6 @@ package todoist
 import (
 	"bytes"
 	"context"
-	"crypto/hmac"
-	"crypto/sha256"
-	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -305,32 +302,6 @@ func (c *Client) EnsureLabels(ctx context.Context, labels []string) (*EnsureLabe
 	sort.Strings(result.ExistingLabels)
 	sort.Strings(result.CreatedLabels)
 	return result, nil
-}
-
-// VerifyWebhook verifies Todoist webhook signature using HMAC-SHA256.
-func (c *Client) VerifyWebhook(rawBody []byte, signature string, secret string) bool {
-	signature = strings.TrimSpace(signature)
-	secret = strings.TrimSpace(secret)
-	if signature == "" || secret == "" {
-		return false
-	}
-
-	mac := hmac.New(sha256.New, []byte(secret))
-	if _, err := mac.Write(rawBody); err != nil {
-		return false
-	}
-	expectedStd := base64.StdEncoding.EncodeToString(mac.Sum(nil))
-	if hmac.Equal([]byte(expectedStd), []byte(signature)) {
-		return true
-	}
-
-	// Some webhook producers use URL-safe base64 encoding for the same digest.
-	macURL := hmac.New(sha256.New, []byte(secret))
-	if _, err := macURL.Write(rawBody); err != nil {
-		return false
-	}
-	expectedURL := base64.URLEncoding.EncodeToString(macURL.Sum(nil))
-	return hmac.Equal([]byte(expectedURL), []byte(signature))
 }
 
 // doJSON executes an HTTP call and decodes JSON into out when the body is present.

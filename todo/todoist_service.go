@@ -101,55 +101,6 @@ func (s *todoistServer) UpdateTaskLabels(
 	}, nil
 }
 
-// VerifyWebhook validates a Todoist webhook payload signature with the configured secret.
-func (s *todoistServer) VerifyWebhook(
-	_ context.Context,
-	req *pb.VerifyTodoistWebhookRequest,
-) (*pb.VerifyTodoistWebhookResponse, error) {
-	// Webhook verification is local HMAC validation; no API token is required.
-	factory := s.newTodoistClient
-	if factory == nil {
-		factory = defaultTodoistOperationalClientFactory
-	}
-	client := factory("")
-
-	secret := strings.TrimSpace(*todoistWebhookSecret)
-	if secret == "" {
-		return &pb.VerifyTodoistWebhookResponse{
-			Valid:   false,
-			Reason:  "missing_secret",
-			Details: "todoist webhook secret is not configured",
-		}, nil
-	}
-
-	signature := strings.TrimSpace(req.GetSignature())
-	if signature == "" {
-		signature = lookupTodoistHeader(req.GetHeaders(), "X-Todoist-Hmac-SHA256")
-	}
-	if signature == "" {
-		return &pb.VerifyTodoistWebhookResponse{
-			Valid:   false,
-			Reason:  "missing_signature",
-			Details: "X-Todoist-Hmac-SHA256 header or signature field is required",
-		}, nil
-	}
-
-	valid := client.VerifyWebhook(req.GetRawBody(), signature, secret)
-	if !valid {
-		return &pb.VerifyTodoistWebhookResponse{
-			Valid:   false,
-			Reason:  "invalid_signature",
-			Details: "webhook signature validation failed",
-		}, nil
-	}
-
-	return &pb.VerifyTodoistWebhookResponse{
-		Valid:   true,
-		Reason:  "ok",
-		Details: "signature verified",
-	}, nil
-}
-
 // EnsureLabels guarantees the requested Todoist labels exist and reports partial failures.
 func (s *todoistServer) EnsureLabels(
 	ctx context.Context,

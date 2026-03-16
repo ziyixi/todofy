@@ -13,7 +13,6 @@ flowchart TB
         direction LR
         User[👤 User<br/>Browser / API Client]
         Email[📧 Cloudmailin<br/>Inbound Email]
-        TodoistEvent[🔔 Todoist<br/>Webhook Delivery]
     end
 
     subgraph API["Todofy HTTP API :8080"]
@@ -22,7 +21,6 @@ flowchart TB
         Recommend[🏆 GET /api/recommendation]
         UpdateTodo[📝 POST /api/v1/update_todo]
         DependencyOps[🔗 /api/v1/dependency/*]
-        Webhook[🪝 POST /api/v1/todoist/webhook]
     end
 
     Main[🌐 Main Service<br/>Auth, routing, rate limiting]
@@ -51,20 +49,18 @@ flowchart TB
     User --> Recommend
     User --> DependencyOps
     Email --> UpdateTodo
-    TodoistEvent --> Webhook
 
     Summary --> Main
     Recommend --> Main
     UpdateTodo --> Main
     DependencyOps --> Main
-    Webhook --> Main
 
     Main -->|recent queries + writes| DB
     Main -.->|cache miss only| LLM
     Main -->|todo + dependency RPCs| Todo
 
     LLM --> Gemini
-    Todo -->|tasks, labels, verify webhook| Todoist
+    Todo -->|tasks + labels| Todoist
 
     SUTTests -->|behavior assertions| Main
     LLM -.->|SUT base URL override| FakeGemini
@@ -75,9 +71,9 @@ flowchart TB
     classDef endpoint fill:#e8f5e8,stroke:#388e3c,stroke-width:2px
     classDef test fill:#fff3e0,stroke:#ef6c00,stroke-width:2px,stroke-dasharray: 5 5
 
-    class User,Email,TodoistEvent,Gemini,Todoist external
+    class User,Email,Gemini,Todoist external
     class Main,LLM,Todo,DB service
-    class Summary,Recommend,UpdateTodo,DependencyOps,Webhook endpoint
+    class Summary,Recommend,UpdateTodo,DependencyOps endpoint
     class SUTTests,FakeGemini,FakeTodoist test
 ```
 
@@ -95,10 +91,11 @@ flowchart TB
 * **Todoist-Only Task Population:** Incoming tasks are created in Todoist through `todofy-todo`.
 * **Todoist DAG Dependencies:** Supports task-title metadata (`<k:task-key dep:other-key,...>`) and reconcile-driven dependency analysis.
 * **Reserved DAG Labels:** Automatically manages `dag_blocked`, `dag_cycle`, `dag_broken_dep`, and `dag_invalid_meta` with minimal label diffs.
-* **Manual DAG Operations:** Exposes reconcile, bootstrap-key, status, and issue endpoints under `/api/v1/dependency/*`.
+* **Manual DAG Operations:** Exposes reconcile, bootstrap-key, clear-metadata, status, and issue endpoints under `/api/v1/dependency/*`.
 * **Bounded Dependency Sync:** Todoist-backed dependency reads and writes are deadline-bounded so upstream latency does not hang reconcile indefinitely.
 * **Best-Effort Dependency Writes:** Reconcile and bootstrap continue past per-task write failures, return partial-success details, and rely on later runs to converge remaining drift.
-* **Webhook-as-Hint Flow:** Supports Todoist webhook verification and dirty-mark signaling; scheduled/manual reconcile remains the source of truth.
+* **Automatic Key Bootstrap:** Runs one bootstrap pass on startup and periodic bootstrap by interval (default `24h`).
+* **Clear Metadata API:** Supports dry-run and write mode metadata removal while preserving the user-visible task title.
 * **Persistent Storage:** Uses SQLite for storing task data with hash-indexed lookups (via `todofy-database` service).
 * **Containerized Services:** All components are containerized using Docker for easy deployment and scaling.
 * **Comprehensive Testing:** Unit tests, e2e tests with mock Gemini client injection, and Docker-based integration tests.
@@ -126,17 +123,11 @@ Returns a 24-hour summary payload with no task delivery side effect:
 
 * `POST /api/v1/dependency/reconcile` (`?dry_run=true` for analyze-only)
 * `POST /api/v1/dependency/bootstrap_keys` (`?dry_run=true` by default)
+* `POST /api/v1/dependency/clear_metadata` (`?dry_run=true` by default)
 * `GET /api/v1/dependency/status?task_key=...` (or `todoist_task_id=...`)
 * `GET /api/v1/dependency/issues?type=...&task_key=...`
 * Reconcile and bootstrap return HTTP `200` with `partial_success`, `failed_update_count`, and `write_failures` when analysis succeeds but one or more Todoist writes fail.
 * Dependency read/precondition timeouts surface as HTTP `504`; later runs recompute state and retry any remaining drift.
-
-### Todoist Webhook Endpoint (No Basic Auth)
-
-* `POST /api/v1/todoist/webhook`
-* Signature verification is delegated to the Todoist gRPC integration layer.
-* Endpoint returns HTTP `200` for delivery compatibility, even when the signature is missing or invalid.
-* Rejected deliveries return JSON with `accepted:false`, `reason`, and `details`; only verified deliveries mark graph state dirty.
 
 </details>
 
@@ -196,7 +187,7 @@ The application is composed of the following services:
     * Image: `ghcr.io/ziyixi/todofy-llm:latest`
 
 3.  **Todo Service (`todofy-todo`)**
-    * Description: Manages Todoist integration (create/read/list/update labels/webhook verify) and dependency DAG reconcile services.
+    * Description: Manages Todoist integration (create/read/list/update labels) and dependency DAG reconcile services.
     * Dockerfile: `todo/Dockerfile`
     * Default Port: `50052` (configurable via `--port` flag)
     * Image: `ghcr.io/ziyixi/todofy-todo:latest`
@@ -242,7 +233,6 @@ When one shared `env_file` is reused across all services, set service-specific `
 | `LLMAddr` | Yes | `todofy-llm:50051` |
 | `TodoAddr` | Yes | `todofy-todo:50052` |
 | `DependencyAddr` | Optional | `todofy-todo:50052` (defaults to `TodoAddr`) |
-| `TodoistAddr` | Optional | `todofy-todo:50052` (defaults to `TodoAddr`) |
 | `DatabaseAddr` | Yes | `todofy-database:50053` |
 
 ### `todofy-llm`
@@ -259,9 +249,8 @@ When one shared `env_file` is reused across all services, set service-specific `
 | `PORT` | Yes | `50052` |
 | `TODOIST_API_KEY` | Yes (for Todoist writes/reads) | `token` |
 | `TODOIST_DEFAULT_PROJECT_ID` | Optional | `1234567890` |
-| `TODOIST_WEBHOOK_SECRET` | Recommended | `webhook-secret` |
 | `DEPENDENCY_RECONCILE_INTERVAL` | Optional | `30m` |
-| `DEPENDENCY_WEBHOOK_DEBOUNCE` | Optional | `20s` |
+| `DEPENDENCY_BOOTSTRAP_INTERVAL` | Optional | `24h` |
 | `DEPENDENCY_GRACE_PERIOD` | Optional | `2m` |
 | `DEPENDENCY_RECONCILE_TIMEOUT` | Optional | `2m` |
 | `DEPENDENCY_READ_TIMEOUT` | Optional | `45s` |
@@ -305,7 +294,6 @@ DATABASE_PATH=/tmp/todofy.db
 LLMAddr=todofy-llm:50051
 TodoAddr=todofy-todo:50052
 DependencyAddr=todofy-todo:50052
-TodoistAddr=todofy-todo:50052
 DatabaseAddr=todofy-database:50053
 
 # LLM service
@@ -318,9 +306,8 @@ TODOIST_API_KEY=replace-with-real-token
 # You can also use the Projects API as a fallback:
 # curl -sS -H "Authorization: Bearer $TODOIST_API_KEY" https://api.todoist.com/api/v1/projects
 TODOIST_DEFAULT_PROJECT_ID=
-TODOIST_WEBHOOK_SECRET=replace-with-real-secret
 DEPENDENCY_RECONCILE_INTERVAL=30m
-DEPENDENCY_WEBHOOK_DEBOUNCE=20s
+DEPENDENCY_BOOTSTRAP_INTERVAL=24h
 DEPENDENCY_GRACE_PERIOD=2m
 DEPENDENCY_RECONCILE_TIMEOUT=2m
 DEPENDENCY_READ_TIMEOUT=45s
@@ -342,7 +329,7 @@ Run locally:
 make test-integration
 ```
 
-`make test-integration` mirrors the CI health, auth, webhook, and gRPC connectivity checks against `docker-compose.test.yml` and tears the stack down automatically.
+`make test-integration` mirrors the CI health, auth, dependency-route auth, and gRPC connectivity checks against `docker-compose.test.yml` and tears the stack down automatically.
 
 </details>
 
@@ -361,7 +348,7 @@ By default it:
 - points Gemini traffic at the fake Gemini base URL
 - points Todoist traffic at the fake Todoist base URL
 - disables the main app rate limiter for deterministic test runs
-- disables dependency background scheduling so tests can drive reconcile behavior explicitly
+- keeps dependency background scheduling enabled with a short bootstrap interval for periodic coverage
 - uses short dependency read/write deadlines so timeout handling can be exercised quickly
 
 Host-exposed ports used by the SUT harness:
@@ -387,9 +374,9 @@ The SUT suite covers endpoint behavior such as:
 - `POST /api/v1/update_todo` with cache miss, cache hit, and external failure paths
 - `GET /api/summary`
 - `GET /api/recommendation`
-- dependency reconcile, bootstrap, status, and issue endpoints
+- dependency reconcile, bootstrap, clear-metadata, status, and issue endpoints
+- periodic dependency auto-bootstrap behavior
 - dependency partial-success and timeout recovery behavior
-- Todoist webhook signature handling
 - excluded-project bootstrap behavior via `DEPENDENCY_BOOTSTRAP_EXCLUDED_PROJECT_IDS`
 
 </details>

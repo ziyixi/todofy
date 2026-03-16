@@ -62,15 +62,8 @@ test-integration: ## Run docker-compose.test.yml integration checks locally
 	test "$$update_todo_status" = "401"; \
 	dependency_reconcile_status=$$(curl -s -o /dev/null -w "%{http_code}" -X POST http://localhost:10003/api/v1/dependency/reconcile); \
 	test "$$dependency_reconcile_status" = "401"; \
-	webhook_response=$$(curl -s -w '\n%{http_code}' \
-		-X POST \
-		-H "Content-Type: application/json" \
-		-d '{"event_data":{"id":"integration-task","content":"Integration task <k:int-task>"}}' \
-		http://localhost:10003/api/v1/todoist/webhook); \
-	webhook_status=$$(printf '%s\n' "$$webhook_response" | tail -n1); \
-	webhook_body=$$(printf '%s\n' "$$webhook_response" | sed '$$d'); \
-	test "$$webhook_status" = "200"; \
-	printf '%s' "$$webhook_body" | grep -q '"accepted":false'; \
+	dependency_clear_status=$$(curl -s -o /dev/null -w "%{http_code}" -X POST http://localhost:10003/api/v1/dependency/clear_metadata); \
+	test "$$dependency_clear_status" = "401"; \
 	docker exec todofy-llm-test /grpc_health_probe -addr=:50051 >/dev/null; \
 	docker exec todofy-todo-test /grpc_health_probe -addr=:50052 >/dev/null; \
 	docker exec todofy-database-test /grpc_health_probe -addr=:50053 >/dev/null; \

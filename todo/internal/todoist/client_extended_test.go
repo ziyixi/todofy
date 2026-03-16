@@ -2,9 +2,6 @@ package todoist
 
 import (
 	"context"
-	"crypto/hmac"
-	"crypto/sha256"
-	"encoding/base64"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -165,22 +162,6 @@ func TestClient_EnsureLabels(t *testing.T) {
 	assert.Equal(t, []string{"dag_cycle"}, result.CreatedLabels)
 	assert.Contains(t, result.Failures["dag_broken_dep"], "502")
 	assert.Equal(t, 2, listCalls)
-}
-
-func TestClient_VerifyWebhook(t *testing.T) {
-	client := NewClient("token")
-	payload := []byte(`{"event":"item:updated"}`)
-	secret := "webhook-secret"
-
-	mac := hmac.New(sha256.New, []byte(secret))
-	_, err := mac.Write(payload)
-	require.NoError(t, err)
-	signature := base64.StdEncoding.EncodeToString(mac.Sum(nil))
-
-	assert.True(t, client.VerifyWebhook(payload, signature, secret))
-	assert.False(t, client.VerifyWebhook(payload, "bad-signature", secret))
-	assert.False(t, client.VerifyWebhook(payload, signature, ""))
-	assert.False(t, client.VerifyWebhook(payload, "", secret))
 }
 
 func TestClient_RequestCompliance(t *testing.T) {

@@ -187,10 +187,6 @@ func (f *fakeDependencyTodoistClient) EnsureLabels(
 	}, nil
 }
 
-func (f *fakeDependencyTodoistClient) VerifyWebhook(_ []byte, _ string, _ string) bool {
-	return true
-}
-
 func waitForFakeTodoistDelay(ctx context.Context, delay time.Duration) error {
 	if delay <= 0 {
 		return nil
@@ -219,7 +215,7 @@ func saveDependencyFlags() func() {
 	origExcluded := *dependencyBootstrapExcludedProjectIDs
 	origGrace := *dependencyGracePeriod
 	origInterval := *dependencyReconcileInterval
-	origDebounce := *dependencyWebhookDebounce
+	origBootstrapInterval := *dependencyBootstrapInterval
 	origReconcileTimeout := *dependencyReconcileTimeout
 	origReadTimeout := *dependencyReadTimeout
 	origWriteTimeout := *dependencyWriteTimeout
@@ -229,7 +225,7 @@ func saveDependencyFlags() func() {
 		*dependencyBootstrapExcludedProjectIDs = origExcluded
 		*dependencyGracePeriod = origGrace
 		*dependencyReconcileInterval = origInterval
-		*dependencyWebhookDebounce = origDebounce
+		*dependencyBootstrapInterval = origBootstrapInterval
 		*dependencyReconcileTimeout = origReconcileTimeout
 		*dependencyReadTimeout = origReadTimeout
 		*dependencyWriteTimeout = origWriteTimeout
@@ -242,7 +238,7 @@ func TestNewDependencyServer(t *testing.T) {
 	*dependencyBootstrapExcludedProjectIDs = "proj-a, proj-b"
 	*dependencyGracePeriod = 5 * time.Minute
 	*dependencyReconcileInterval = time.Minute
-	*dependencyWebhookDebounce = 3 * time.Second
+	*dependencyBootstrapInterval = 24 * time.Hour
 	*dependencyReconcileTimeout = 2 * time.Minute
 	*dependencyReadTimeout = 45 * time.Second
 	*dependencyWriteTimeout = 20 * time.Second
@@ -252,12 +248,11 @@ func TestNewDependencyServer(t *testing.T) {
 	require.NotNil(t, server)
 	assert.Equal(t, 5*time.Minute, server.gracePeriod)
 	assert.Equal(t, time.Minute, server.reconcileInterval)
-	assert.Equal(t, 3*time.Second, server.webhookDebounce)
+	assert.Equal(t, 24*time.Hour, server.bootstrapInterval)
 	assert.Equal(t, 2*time.Minute, server.reconcileTimeout)
 	assert.Equal(t, 45*time.Second, server.readTimeout)
 	assert.Equal(t, 20*time.Second, server.writeTimeout)
 	assert.False(t, server.enableBackgroundReconcile)
-	assert.NotNil(t, server.dirtySignal)
 	_, hasProjA := server.metadataExcludedProjectIDs["proj-a"]
 	assert.True(t, hasProjA)
 }
@@ -494,161 +489,11 @@ func TestDependencyServerGetTaskStatusErrors(t *testing.T) {
 }
 
 func TestDependencyServerMarkGraphDirty(t *testing.T) {
-	t.Run("non-webhook source still enqueues dirty", func(t *testing.T) {
-		server := &dependencyServer{
-			dirtySignal: make(chan struct{}, 1),
-		}
-		server.dirtySignal <- struct{}{}
-
-		resp, err := server.MarkGraphDirty(context.Background(), &pb.MarkDependencyGraphDirtyRequest{})
-		require.NoError(t, err)
-		assert.True(t, resp.GetAccepted())
-		assert.Nil(t, resp.GetExclusionInfo())
-		assert.Len(t, server.dirtySignal, 1)
-	})
-
-	t.Run("webhook all excluded skips enqueue and returns exclusion info", func(t *testing.T) {
-		defer saveDependencyFlags()()
-		*todoistAPIKey = testGenericAPIKey
-
-		fakeClient := newFakeDependencyTodoistClient([]*todoist.Task{
-			{ID: "task-a", ProjectID: "proj-excluded-a"},
-			{ID: "task-b", ProjectID: "proj-excluded-b"},
-		})
-		server := &dependencyServer{
-			newTodoistClient: func(string) todoistOperationalClient { return fakeClient },
-			metadataExcludedProjectIDs: map[string]struct{}{
-				"proj-excluded-a": {},
-				"proj-excluded-b": {},
-			},
-			dirtySignal: make(chan struct{}, 1),
-			readTimeout: time.Second,
-		}
-
-		resp, err := server.MarkGraphDirty(context.Background(), &pb.MarkDependencyGraphDirtyRequest{
-			Source:         "todoist_webhook",
-			TodoistTaskIds: []string{"task-a", "task-b"},
-		})
-		require.NoError(t, err)
-		assert.True(t, resp.GetAccepted())
-		require.NotNil(t, resp.GetExclusionInfo())
-		assert.True(t, resp.GetExclusionInfo().GetInExclusionList())
-		assert.Equal(t, "proj-excluded-a", resp.GetExclusionInfo().GetExclusionProjectId())
-		assert.Len(t, server.dirtySignal, 0)
-	})
-
-	t.Run("webhook mixed excluded and included still enqueues dirty", func(t *testing.T) {
-		defer saveDependencyFlags()()
-		*todoistAPIKey = testGenericAPIKey
-
-		fakeClient := newFakeDependencyTodoistClient([]*todoist.Task{
-			{ID: "task-a", ProjectID: "proj-excluded"},
-			{ID: "task-b", ProjectID: "proj-keep"},
-		})
-		server := &dependencyServer{
-			newTodoistClient: func(string) todoistOperationalClient { return fakeClient },
-			metadataExcludedProjectIDs: map[string]struct{}{
-				"proj-excluded": {},
-			},
-			dirtySignal: make(chan struct{}, 1),
-			readTimeout: time.Second,
-		}
-
-		resp, err := server.MarkGraphDirty(context.Background(), &pb.MarkDependencyGraphDirtyRequest{
-			Source:         "todoist_webhook",
-			TodoistTaskIds: []string{"task-a", "task-b"},
-		})
-		require.NoError(t, err)
-		assert.True(t, resp.GetAccepted())
-		assert.Nil(t, resp.GetExclusionInfo())
-		assert.Len(t, server.dirtySignal, 1)
-	})
-
-	t.Run("webhook one non-excluded task enqueues dirty", func(t *testing.T) {
-		defer saveDependencyFlags()()
-		*todoistAPIKey = testGenericAPIKey
-
-		fakeClient := newFakeDependencyTodoistClient([]*todoist.Task{
-			{ID: "task-a", ProjectID: "proj-keep"},
-		})
-		server := &dependencyServer{
-			newTodoistClient: func(string) todoistOperationalClient { return fakeClient },
-			metadataExcludedProjectIDs: map[string]struct{}{
-				"proj-excluded": {},
-			},
-			dirtySignal: make(chan struct{}, 1),
-			readTimeout: time.Second,
-		}
-
-		resp, err := server.MarkGraphDirty(context.Background(), &pb.MarkDependencyGraphDirtyRequest{
-			Source:         "todoist_webhook",
-			TodoistTaskIds: []string{"task-a"},
-		})
-		require.NoError(t, err)
-		assert.True(t, resp.GetAccepted())
-		assert.Nil(t, resp.GetExclusionInfo())
-		assert.Len(t, server.dirtySignal, 1)
-	})
-
-	t.Run("webhook task lookup failure fails open and enqueues dirty", func(t *testing.T) {
-		defer saveDependencyFlags()()
-		*todoistAPIKey = testGenericAPIKey
-
-		fakeClient := newFakeDependencyTodoistClient(nil)
-		fakeClient.getTaskErr = assert.AnError
-		server := &dependencyServer{
-			newTodoistClient: func(string) todoistOperationalClient { return fakeClient },
-			metadataExcludedProjectIDs: map[string]struct{}{
-				"proj-excluded": {},
-			},
-			dirtySignal: make(chan struct{}, 1),
-			readTimeout: time.Second,
-		}
-
-		resp, err := server.MarkGraphDirty(context.Background(), &pb.MarkDependencyGraphDirtyRequest{
-			Source:         "todoist_webhook",
-			TodoistTaskIds: []string{"task-a"},
-		})
-		require.NoError(t, err)
-		assert.True(t, resp.GetAccepted())
-		assert.Nil(t, resp.GetExclusionInfo())
-		assert.Len(t, server.dirtySignal, 1)
-	})
-
-	t.Run("webhook moved task from excluded to included project enqueues after move", func(t *testing.T) {
-		defer saveDependencyFlags()()
-		*todoistAPIKey = testGenericAPIKey
-
-		fakeClient := newFakeDependencyTodoistClient([]*todoist.Task{
-			{ID: "task-a", ProjectID: "proj-excluded"},
-		})
-		server := &dependencyServer{
-			newTodoistClient: func(string) todoistOperationalClient { return fakeClient },
-			metadataExcludedProjectIDs: map[string]struct{}{
-				"proj-excluded": {},
-			},
-			dirtySignal: make(chan struct{}, 2),
-			readTimeout: time.Second,
-		}
-		req := &pb.MarkDependencyGraphDirtyRequest{
-			Source:         "todoist_webhook",
-			TodoistTaskIds: []string{"task-a"},
-		}
-
-		resp, err := server.MarkGraphDirty(context.Background(), req)
-		require.NoError(t, err)
-		require.NotNil(t, resp.GetExclusionInfo())
-		assert.Equal(t, "proj-excluded", resp.GetExclusionInfo().GetExclusionProjectId())
-		assert.Len(t, server.dirtySignal, 0)
-
-		fakeClient.tasksByID["task-a"].ProjectID = "proj-keep"
-
-		resp, err = server.MarkGraphDirty(context.Background(), req)
-		require.NoError(t, err)
-		assert.True(t, resp.GetAccepted())
-		assert.Nil(t, resp.GetExclusionInfo())
-		assert.Len(t, server.dirtySignal, 1)
-	})
+	resp, err := (&dependencyServer{}).MarkGraphDirty(context.Background(), &pb.MarkDependencyGraphDirtyRequest{})
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+	assert.False(t, resp.GetAccepted())
+	assert.Nil(t, resp.GetExclusionInfo())
 }
 
 func TestDependencyServerStartBackgroundReconcile(t *testing.T) {
@@ -663,9 +508,12 @@ func TestDependencyServerStartBackgroundReconcile(t *testing.T) {
 	server := &dependencyServer{
 		newTodoistClient:          func(string) todoistOperationalClient { return fakeClient },
 		gracePeriod:               0,
+		reconcileInterval:         25 * time.Millisecond,
+		bootstrapInterval:         0,
+		reconcileTimeout:          time.Second,
+		readTimeout:               time.Second,
+		writeTimeout:              time.Second,
 		enableBackgroundReconcile: true,
-		webhookDebounce:           0,
-		dirtySignal:               make(chan struct{}, 1),
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -675,14 +523,88 @@ func TestDependencyServerStartBackgroundReconcile(t *testing.T) {
 		server.backgroundLoop(ctx)
 	}()
 
-	_, err := server.MarkGraphDirty(context.Background(), &pb.MarkDependencyGraphDirtyRequest{})
-	require.NoError(t, err)
-
 	select {
 	case <-fakeClient.updateLabelsSignal:
 	case <-time.After(2 * time.Second):
 		t.Fatal("timed out waiting for background reconcile label update")
 	}
+
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for background loop to stop")
+	}
+}
+
+func TestDependencyServerBackgroundLoopRunsStartupBootstrap(t *testing.T) {
+	defer saveDependencyFlags()()
+	*todoistAPIKey = testGenericAPIKey
+
+	fakeClient := newFakeDependencyTodoistClient([]*todoist.Task{
+		{ID: "task-a", Content: "Task A"},
+	})
+	server := &dependencyServer{
+		newTodoistClient:  func(string) todoistOperationalClient { return fakeClient },
+		reconcileInterval: 0,
+		bootstrapInterval: 0,
+		reconcileTimeout:  time.Second,
+		readTimeout:       time.Second,
+		writeTimeout:      time.Second,
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		server.backgroundLoop(ctx)
+	}()
+
+	require.Eventually(t, func() bool {
+		return len(fakeClient.updateContentCalls) == 1
+	}, 2*time.Second, 20*time.Millisecond)
+	assert.Contains(t, fakeClient.tasksByID["task-a"].Content, "<k:")
+
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for background loop to stop")
+	}
+}
+
+func TestDependencyServerBackgroundLoopRunsPeriodicBootstrap(t *testing.T) {
+	defer saveDependencyFlags()()
+	*todoistAPIKey = testGenericAPIKey
+
+	fakeClient := newFakeDependencyTodoistClient([]*todoist.Task{
+		{ID: "task-a", Content: "Task A"},
+	})
+	server := &dependencyServer{
+		newTodoistClient:  func(string) todoistOperationalClient { return fakeClient },
+		reconcileInterval: 0,
+		bootstrapInterval: 30 * time.Millisecond,
+		reconcileTimeout:  time.Second,
+		readTimeout:       time.Second,
+		writeTimeout:      time.Second,
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		server.backgroundLoop(ctx)
+	}()
+
+	require.Eventually(t, func() bool {
+		return len(fakeClient.updateContentCalls) >= 1
+	}, 2*time.Second, 20*time.Millisecond)
+
+	// Force the task back to missing metadata and wait for the periodic tick.
+	fakeClient.tasksByID["task-a"].Content = "Task A"
+	require.Eventually(t, func() bool {
+		return len(fakeClient.updateContentCalls) >= 2
+	}, 2*time.Second, 20*time.Millisecond)
 
 	cancel()
 	select {
@@ -814,13 +736,17 @@ func TestDependencyServerBootstrapMissingTaskKeysPartialSuccessAndRecovery(t *te
 	assert.Contains(t, fakeClient.tasksByID["task-a"].Content, "<k:")
 }
 
-func TestDependencyServerBootstrapMissingTaskKeysTimeoutAndRecovery(t *testing.T) {
+func runListTimeoutAndRecovery[T any](
+	t *testing.T,
+	tasks []*todoist.Task,
+	invoke func(*dependencyServer) (T, error),
+	assertRecovered func(*testing.T, T),
+) {
+	t.Helper()
 	defer saveDependencyFlags()()
 	*todoistAPIKey = testGenericAPIKey
 
-	fakeClient := newFakeDependencyTodoistClient([]*todoist.Task{
-		{ID: "task-a", Content: "Task A"},
-	})
+	fakeClient := newFakeDependencyTodoistClient(tasks)
 	fakeClient.listDelay = 50 * time.Millisecond
 
 	server := &dependencyServer{
@@ -830,20 +756,125 @@ func TestDependencyServerBootstrapMissingTaskKeysTimeoutAndRecovery(t *testing.T
 		writeTimeout:     time.Second,
 	}
 
-	resp, err := server.BootstrapMissingTaskKeys(context.Background(), &pb.BootstrapMissingTaskKeysRequest{
-		DryRun: false,
-	})
-	require.Nil(t, resp)
+	_, err := invoke(server)
 	require.Error(t, err)
 	assert.Equal(t, codes.DeadlineExceeded, status.Code(err))
 
 	fakeClient.listDelay = 0
-	resp, err = server.BootstrapMissingTaskKeys(context.Background(), &pb.BootstrapMissingTaskKeysRequest{
+	resp, err := invoke(server)
+	require.NoError(t, err)
+	assertRecovered(t, resp)
+}
+
+func TestDependencyServerBootstrapMissingTaskKeysTimeoutAndRecovery(t *testing.T) {
+	runListTimeoutAndRecovery(
+		t,
+		[]*todoist.Task{
+			{ID: "task-a", Content: "Task A"},
+		},
+		func(server *dependencyServer) (*pb.BootstrapMissingTaskKeysResponse, error) {
+			return server.BootstrapMissingTaskKeys(context.Background(), &pb.BootstrapMissingTaskKeysRequest{
+				DryRun: false,
+			})
+		},
+		func(t *testing.T, resp *pb.BootstrapMissingTaskKeysResponse) {
+			assert.Equal(t, int32(1), resp.GetGeneratedCount())
+			assert.False(t, resp.GetPartialSuccess())
+		},
+	)
+}
+
+func TestDependencyServerClearDependencyMetadata(t *testing.T) {
+	defer saveDependencyFlags()()
+	*todoistAPIKey = testGenericAPIKey
+
+	fakeClient := newFakeDependencyTodoistClient([]*todoist.Task{
+		{ID: "task-a", Content: "Task A <k:a dep:b>"},
+		{ID: "task-b", Content: "Task B <k: dep:broken>"},
+		{ID: "task-c", Content: "Task C <v1>"},
+	})
+	server := &dependencyServer{
+		newTodoistClient: func(string) todoistOperationalClient { return fakeClient },
+	}
+
+	resp, err := server.ClearDependencyMetadata(context.Background(), &pb.ClearDependencyMetadataRequest{
+		DryRun: true,
+	})
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+	assert.Equal(t, int32(3), resp.GetTaskCount())
+	assert.Equal(t, int32(2), resp.GetUpdatedTaskCount())
+	assert.False(t, resp.GetPartialSuccess())
+	assert.Len(t, fakeClient.updateContentCalls, 0)
+	require.Len(t, resp.GetClearedTasks(), 2)
+	assert.Equal(t, "task-a", resp.GetClearedTasks()[0].GetTodoistTaskId())
+	assert.Equal(t, "Task A", resp.GetClearedTasks()[0].GetUpdatedContent())
+	assert.Equal(t, "a", resp.GetClearedTasks()[0].GetTaskKey())
+	assert.Equal(t, "Task B", resp.GetClearedTasks()[1].GetUpdatedContent())
+	assert.Equal(t, "Task A <k:a dep:b>", fakeClient.tasksByID["task-a"].Content)
+	assert.Equal(t, "Task B <k: dep:broken>", fakeClient.tasksByID["task-b"].Content)
+	assert.Equal(t, "Task C <v1>", fakeClient.tasksByID["task-c"].Content)
+}
+
+func TestDependencyServerClearDependencyMetadataPartialSuccessAndRecovery(t *testing.T) {
+	defer saveDependencyFlags()()
+	*todoistAPIKey = testGenericAPIKey
+
+	fakeClient := newFakeDependencyTodoistClient([]*todoist.Task{
+		{ID: "task-a", Content: "Task A <k:a dep:b>"},
+		{ID: "task-b", Content: "Task B <k:b>"},
+	})
+	fakeClient.updateContentErrs = map[string]error{
+		"task-a": assert.AnError,
+	}
+
+	server := &dependencyServer{
+		newTodoistClient: func(string) todoistOperationalClient { return fakeClient },
+		reconcileTimeout: time.Second,
+		readTimeout:      time.Second,
+		writeTimeout:     time.Second,
+	}
+
+	resp, err := server.ClearDependencyMetadata(context.Background(), &pb.ClearDependencyMetadataRequest{
 		DryRun: false,
 	})
 	require.NoError(t, err)
-	assert.Equal(t, int32(1), resp.GetGeneratedCount())
+	assert.True(t, resp.GetPartialSuccess())
+	assert.Equal(t, int32(1), resp.GetUpdatedTaskCount())
+	assert.Equal(t, int32(1), resp.GetFailedUpdateCount())
+	require.Len(t, resp.GetWriteFailures(), 1)
+	assert.Equal(t, "task-a", resp.GetWriteFailures()[0].GetTodoistTaskId())
+	assert.Equal(t, dependencyWriteOperationUpdateContent, resp.GetWriteFailures()[0].GetOperation())
+	assert.Equal(t, "Task A <k:a dep:b>", fakeClient.tasksByID["task-a"].Content)
+	assert.Equal(t, "Task B", fakeClient.tasksByID["task-b"].Content)
+
+	delete(fakeClient.updateContentErrs, "task-a")
+	resp, err = server.ClearDependencyMetadata(context.Background(), &pb.ClearDependencyMetadataRequest{
+		DryRun: false,
+	})
+	require.NoError(t, err)
 	assert.False(t, resp.GetPartialSuccess())
+	assert.Equal(t, int32(1), resp.GetUpdatedTaskCount())
+	assert.Zero(t, resp.GetFailedUpdateCount())
+	assert.Equal(t, "Task A", fakeClient.tasksByID["task-a"].Content)
+}
+
+func TestDependencyServerClearDependencyMetadataTimeoutAndRecovery(t *testing.T) {
+	runListTimeoutAndRecovery(
+		t,
+		[]*todoist.Task{
+			{ID: "task-a", Content: "Task A <k:a>"},
+		},
+		func(server *dependencyServer) (*pb.ClearDependencyMetadataResponse, error) {
+			return server.ClearDependencyMetadata(context.Background(), &pb.ClearDependencyMetadataRequest{
+				DryRun: false,
+			})
+		},
+		func(t *testing.T, resp *pb.ClearDependencyMetadataResponse) {
+			assert.Equal(t, int32(1), resp.GetUpdatedTaskCount())
+			assert.False(t, resp.GetPartialSuccess())
+		},
+	)
 }
 
 func TestBuildDependencyReport(t *testing.T) {

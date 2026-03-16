@@ -27,8 +27,8 @@ type dependencyServer struct {
 	gracePeriod time.Duration
 	// reconcileInterval controls periodic background reconcile cadence.
 	reconcileInterval time.Duration
-	// webhookDebounce coalesces bursts of webhook dirty signals.
-	webhookDebounce time.Duration
+	// bootstrapInterval controls periodic missing-key bootstrap cadence.
+	bootstrapInterval time.Duration
 	// enableBackgroundReconcile toggles the scheduler loop.
 	enableBackgroundReconcile bool
 	// reconcileTimeout bounds the lifetime of one full reconcile/bootstrap run.
@@ -38,10 +38,7 @@ type dependencyServer struct {
 	// writeTimeout bounds one upstream write operation.
 	writeTimeout time.Duration
 
-	// dirtySignal is a single-slot queue to avoid unbounded webhook fan-in.
-	dirtySignal chan struct{}
-
-	// reconcileMu prevents overlapping reconcile runs.
+	// reconcileMu prevents overlapping write-heavy dependency runs.
 	reconcileMu sync.Mutex
 }
 
@@ -51,12 +48,11 @@ func newDependencyServer() *dependencyServer {
 		metadataExcludedProjectIDs: metadataBootstrapExcludedProjectSet(*dependencyBootstrapExcludedProjectIDs),
 		gracePeriod:                *dependencyGracePeriod,
 		reconcileInterval:          *dependencyReconcileInterval,
-		webhookDebounce:            *dependencyWebhookDebounce,
+		bootstrapInterval:          *dependencyBootstrapInterval,
 		enableBackgroundReconcile:  *dependencyEnableScheduler,
 		reconcileTimeout:           *dependencyReconcileTimeout,
 		readTimeout:                *dependencyReadTimeout,
 		writeTimeout:               *dependencyWriteTimeout,
-		dirtySignal:                make(chan struct{}, 1),
 	}
 }
 
@@ -121,6 +117,8 @@ func (s *dependencyServer) BootstrapMissingTaskKeys(
 ) (*pb.BootstrapMissingTaskKeysResponse, error) {
 	runCtx, cancel := boundedContext(ctx, s.reconcileTimeout)
 	defer cancel()
+	s.reconcileMu.Lock()
+	defer s.reconcileMu.Unlock()
 
 	client, err := s.getClient()
 	if err != nil {
@@ -197,6 +195,72 @@ func (s *dependencyServer) BootstrapMissingTaskKeys(
 	}, nil
 }
 
+// ClearDependencyMetadata removes dependency metadata blocks from active Todoist tasks.
+func (s *dependencyServer) ClearDependencyMetadata(
+	ctx context.Context,
+	req *pb.ClearDependencyMetadataRequest,
+) (*pb.ClearDependencyMetadataResponse, error) {
+	runCtx, cancel := boundedContext(ctx, s.reconcileTimeout)
+	defer cancel()
+	s.reconcileMu.Lock()
+	defer s.reconcileMu.Unlock()
+
+	client, err := s.getClient()
+	if err != nil {
+		return nil, err
+	}
+
+	listCtx, cancelList := boundedContext(runCtx, s.readTimeout)
+	tasks, err := client.ListActiveTasks(listCtx)
+	cancelList()
+	if err != nil {
+		return nil, dependencyExternalStatusError("list active Todoist tasks", err)
+	}
+
+	cleared := make([]*pb.ClearedTaskMetadata, 0)
+	writeFailures := make([]*pb.DependencyWriteFailure, 0)
+	for _, task := range tasks {
+		if task == nil {
+			continue
+		}
+
+		updatedContent, parsed, changed := dependency.StripDependencyMetadata(task.Content)
+		if !changed {
+			continue
+		}
+
+		if !req.GetDryRun() {
+			writeCtx, cancelWrite := boundedContext(runCtx, s.writeTimeout)
+			_, updateErr := client.UpdateTaskContent(writeCtx, task.ID, updatedContent)
+			cancelWrite()
+			if updateErr != nil {
+				writeFailures = append(writeFailures, newDependencyWriteFailure(
+					task.ID,
+					parsed.TaskKey,
+					dependencyWriteOperationUpdateContent,
+					dependencyOperationMessage("update Todoist task content", updateErr),
+				))
+				continue
+			}
+		}
+
+		cleared = append(cleared, &pb.ClearedTaskMetadata{
+			TodoistTaskId:  task.ID,
+			TaskKey:        parsed.TaskKey,
+			UpdatedContent: updatedContent,
+		})
+	}
+
+	return &pb.ClearDependencyMetadataResponse{
+		TaskCount:         int32(len(tasks)),
+		UpdatedTaskCount:  int32(len(cleared)),
+		ClearedTasks:      cleared,
+		PartialSuccess:    len(writeFailures) > 0,
+		FailedUpdateCount: int32(len(writeFailures)),
+		WriteFailures:     writeFailures,
+	}, nil
+}
+
 // GetTaskStatus returns dependency status for a specific task key or Todoist task id.
 func (s *dependencyServer) GetTaskStatus(
 	ctx context.Context,
@@ -266,74 +330,12 @@ func (s *dependencyServer) ListDependencyIssues(
 	return &pb.ListDependencyIssuesResponse{Issues: filtered}, nil
 }
 
-// MarkGraphDirty records a dirty signal so background reconcile can refresh graph state.
+// MarkGraphDirty remains for proto compatibility but dirty hints are disabled.
 func (s *dependencyServer) MarkGraphDirty(
-	ctx context.Context,
-	req *pb.MarkDependencyGraphDirtyRequest,
+	_ context.Context,
+	_ *pb.MarkDependencyGraphDirtyRequest,
 ) (*pb.MarkDependencyGraphDirtyResponse, error) {
-	resp := &pb.MarkDependencyGraphDirtyResponse{Accepted: true}
-	if skip, excludedProjectID := s.shouldSkipWebhookDirtyMark(ctx, req); skip {
-		resp.ExclusionInfo = &pb.MarkDependencyGraphDirtyResponse_ExclusionInfo{
-			InExclusionList:    true,
-			ExclusionProjectId: excludedProjectID,
-		}
-		return resp, nil
-	}
-
-	select {
-	case s.dirtySignal <- struct{}{}:
-	default:
-	}
-	return resp, nil
-}
-
-func (s *dependencyServer) shouldSkipWebhookDirtyMark(
-	ctx context.Context,
-	req *pb.MarkDependencyGraphDirtyRequest,
-) (bool, string) {
-	if req == nil || strings.TrimSpace(req.GetSource()) != "todoist_webhook" {
-		return false, ""
-	}
-	if len(s.metadataExcludedProjectIDs) == 0 {
-		return false, ""
-	}
-
-	client, err := s.getClient()
-	if err != nil {
-		return false, ""
-	}
-
-	var (
-		sawTaskID              bool
-		firstExcludedProjectID string
-	)
-	for _, rawTaskID := range req.GetTodoistTaskIds() {
-		taskID := strings.TrimSpace(rawTaskID)
-		if taskID == "" {
-			continue
-		}
-		sawTaskID = true
-
-		readCtx, cancel := boundedContext(ctx, s.readTimeout)
-		task, getErr := client.GetTask(readCtx, taskID)
-		cancel()
-		if getErr != nil || task == nil {
-			return false, ""
-		}
-
-		projectID := strings.TrimSpace(task.ProjectID)
-		if !s.isMetadataBootstrapExcludedProject(projectID) {
-			return false, ""
-		}
-		if firstExcludedProjectID == "" {
-			firstExcludedProjectID = projectID
-		}
-	}
-
-	if !sawTaskID || firstExcludedProjectID == "" {
-		return false, ""
-	}
-	return true, firstExcludedProjectID
+	return &pb.MarkDependencyGraphDirtyResponse{Accepted: false}, nil
 }
 
 // StartBackgroundReconcile starts the scheduler loop when background reconcile is enabled.
@@ -346,47 +348,32 @@ func (s *dependencyServer) StartBackgroundReconcile(ctx context.Context) {
 }
 
 func (s *dependencyServer) backgroundLoop(ctx context.Context) {
-	var ticker *time.Ticker
-	var tickerC <-chan time.Time
+	s.backgroundBootstrap()
+
+	var reconcileTicker *time.Ticker
+	var reconcileTickerC <-chan time.Time
 	if s.reconcileInterval > 0 {
-		ticker = time.NewTicker(s.reconcileInterval)
-		tickerC = ticker.C
-		defer ticker.Stop()
+		reconcileTicker = time.NewTicker(s.reconcileInterval)
+		reconcileTickerC = reconcileTicker.C
+		defer reconcileTicker.Stop()
 	}
 
-	var debounceTimer *time.Timer
-	var debounceC <-chan time.Time
+	var bootstrapTicker *time.Ticker
+	var bootstrapTickerC <-chan time.Time
+	if s.bootstrapInterval > 0 {
+		bootstrapTicker = time.NewTicker(s.bootstrapInterval)
+		bootstrapTickerC = bootstrapTicker.C
+		defer bootstrapTicker.Stop()
+	}
 
 	for {
 		select {
 		case <-ctx.Done():
-			if debounceTimer != nil {
-				debounceTimer.Stop()
-			}
 			return
-		case <-tickerC:
+		case <-reconcileTickerC:
 			s.backgroundReconcile()
-		case <-s.dirtySignal:
-			if s.webhookDebounce <= 0 {
-				// Immediate mode for tests or when debounce is explicitly disabled.
-				s.backgroundReconcile()
-				continue
-			}
-			if debounceTimer == nil {
-				debounceTimer = time.NewTimer(s.webhookDebounce)
-			} else {
-				if !debounceTimer.Stop() {
-					select {
-					case <-debounceTimer.C:
-					default:
-					}
-				}
-				debounceTimer.Reset(s.webhookDebounce)
-			}
-			debounceC = debounceTimer.C
-		case <-debounceC:
-			s.backgroundReconcile()
-			debounceC = nil
+		case <-bootstrapTickerC:
+			s.backgroundBootstrap()
 		}
 	}
 }
@@ -404,6 +391,26 @@ func (s *dependencyServer) backgroundReconcile() {
 			"dependency background reconcile completed with %d successful updates and %d failed writes",
 			updatedCount,
 			len(writeFailures),
+		)
+	}
+}
+
+func (s *dependencyServer) backgroundBootstrap() {
+	ctx, cancel := boundedContext(context.Background(), s.reconcileTimeout)
+	defer cancel()
+
+	resp, err := s.BootstrapMissingTaskKeys(ctx, &pb.BootstrapMissingTaskKeysRequest{
+		DryRun: false,
+	})
+	if err != nil {
+		log.Warningf("dependency background bootstrap failed: %v", err)
+		return
+	}
+	if resp.GetPartialSuccess() {
+		log.Warningf(
+			"dependency background bootstrap completed with %d generated keys and %d failed writes",
+			resp.GetGeneratedCount(),
+			resp.GetFailedUpdateCount(),
 		)
 	}
 }

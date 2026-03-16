@@ -69,7 +69,8 @@ func TestGenerateTaskKey(t *testing.T) {
 		keyOne := GenerateTaskKey("Task title", map[string]struct{}{})
 		keyTwo := GenerateTaskKey("Task title", map[string]struct{}{})
 		assert.Equal(t, keyOne, keyTwo)
-		assert.Regexp(t, regexp.MustCompile(`^task-title-[a-f0-9]{6}$`), keyOne)
+		assert.Regexp(t, regexp.MustCompile(`^[a-z0-9]{3}-[a-f0-9]{6}$`), keyOne)
+		assert.Len(t, keyOne, 10)
 	})
 
 	t.Run("uses different hash when collision occurs", func(t *testing.T) {
@@ -77,24 +78,53 @@ func TestGenerateTaskKey(t *testing.T) {
 		first := GenerateTaskKey("Task title", used)
 		second := GenerateTaskKey("Task title", used)
 		assert.NotEqual(t, first, second)
-		assert.Regexp(t, regexp.MustCompile(`^task-title-[a-f0-9]{6}$`), second)
+		assert.Regexp(t, regexp.MustCompile(`^[a-z0-9]{3}-[a-f0-9]{6}$`), second)
+		assert.Len(t, second, 10)
 	})
 
 	t.Run("uses fallback base when slug is empty", func(t *testing.T) {
 		key := GenerateTaskKey("!!!", map[string]struct{}{})
-		assert.Regexp(t, regexp.MustCompile(`^task-[a-f0-9]{6}$`), key)
+		assert.Regexp(t, regexp.MustCompile(`^[a-z0-9]{3}-[a-f0-9]{6}$`), key)
+		assert.Len(t, key, 10)
 	})
 
 	t.Run("uses gosimple slug transliteration", func(t *testing.T) {
 		key := GenerateTaskKey("Über Café", map[string]struct{}{})
-		assert.True(t, strings.HasPrefix(key, "uber-cafe-"))
+		assert.True(t, strings.HasPrefix(key, "ube-"))
+		assert.Len(t, key, 10)
 
 		cjkKey := GenerateTaskKey("中文任务", map[string]struct{}{})
-		assert.True(t, strings.HasPrefix(cjkKey, "zhong-wen-ren-wu-"))
+		assert.True(t, strings.HasPrefix(cjkKey, "zho-"))
+		assert.Len(t, cjkKey, 10)
 	})
 
-	t.Run("preserves underscore behavior from gosimple slug", func(t *testing.T) {
+	t.Run("normalizes underscore behavior from gosimple slug", func(t *testing.T) {
 		key := GenerateTaskKey("A_B C", map[string]struct{}{})
-		assert.True(t, strings.HasPrefix(key, "a_b-c-"))
+		assert.True(t, strings.HasPrefix(key, "abc-"))
+		assert.Len(t, key, 10)
+	})
+}
+
+func TestStripDependencyMetadata(t *testing.T) {
+	t.Run("strips valid dependency metadata", func(t *testing.T) {
+		stripped, parsed, changed := StripDependencyMetadata("Task title <k:task-key dep:other>")
+		assert.True(t, changed)
+		assert.Equal(t, "Task title", stripped)
+		assert.True(t, parsed.HasMetadata)
+	})
+
+	t.Run("strips malformed dependency metadata", func(t *testing.T) {
+		stripped, parsed, changed := StripDependencyMetadata("Task title <k:Bad-Key>")
+		assert.True(t, changed)
+		assert.Equal(t, "Task title", stripped)
+		assert.True(t, parsed.HasMetadata)
+		assert.False(t, parsed.Valid)
+	})
+
+	t.Run("keeps non-dependency angle bracket suffix", func(t *testing.T) {
+		stripped, parsed, changed := StripDependencyMetadata("Task title <v1>")
+		assert.False(t, changed)
+		assert.Equal(t, "Task title <v1>", stripped)
+		assert.False(t, parsed.HasMetadata)
 	})
 }

@@ -12,15 +12,12 @@ import (
 	"google.golang.org/grpc/status"
 )
 
-const testTodoistWebhookSecret = "secret"
-
 type fakeTodoistOperationalClient struct {
 	getTaskFunc           func(context.Context, string) (*todoist.Task, error)
 	listActiveTasksFunc   func(context.Context) ([]*todoist.Task, error)
 	updateTaskLabelsFunc  func(context.Context, string, []string, []string) (*todoist.Task, error)
 	updateTaskContentFunc func(context.Context, string, string) (*todoist.Task, error)
 	ensureLabelsFunc      func(context.Context, []string) (*todoist.EnsureLabelsResult, error)
-	verifyWebhookFunc     func([]byte, string, string) bool
 }
 
 func (f *fakeTodoistOperationalClient) GetTask(ctx context.Context, taskID string) (*todoist.Task, error) {
@@ -70,19 +67,10 @@ func (f *fakeTodoistOperationalClient) EnsureLabels(
 	return f.ensureLabelsFunc(ctx, labels)
 }
 
-func (f *fakeTodoistOperationalClient) VerifyWebhook(rawBody []byte, signature string, secret string) bool {
-	if f.verifyWebhookFunc == nil {
-		return false
-	}
-	return f.verifyWebhookFunc(rawBody, signature, secret)
-}
-
 func saveTodoistServiceFlags() func() {
 	origKey := *todoistAPIKey
-	origSecret := *todoistWebhookSecret
 	return func() {
 		*todoistAPIKey = origKey
-		*todoistWebhookSecret = origSecret
 	}
 }
 
@@ -236,82 +224,6 @@ func TestTodoistServerUpdateTaskLabels(t *testing.T) {
 		require.NoError(t, err)
 		require.NotNil(t, resp)
 		assert.Equal(t, []string{"dag_blocked"}, resp.GetTask().GetLabels())
-	})
-}
-
-func TestTodoistServerVerifyWebhook(t *testing.T) {
-	t.Run("missing secret", func(t *testing.T) {
-		defer saveTodoistServiceFlags()()
-		*todoistWebhookSecret = ""
-
-		server := &todoistServer{}
-		resp, err := server.VerifyWebhook(context.Background(), &pb.VerifyTodoistWebhookRequest{})
-		require.NoError(t, err)
-		assert.False(t, resp.GetValid())
-		assert.Equal(t, "missing_secret", resp.GetReason())
-	})
-
-	t.Run("missing signature", func(t *testing.T) {
-		defer saveTodoistServiceFlags()()
-		*todoistWebhookSecret = testTodoistWebhookSecret
-
-		server := &todoistServer{}
-		resp, err := server.VerifyWebhook(context.Background(), &pb.VerifyTodoistWebhookRequest{})
-		require.NoError(t, err)
-		assert.False(t, resp.GetValid())
-		assert.Equal(t, "missing_signature", resp.GetReason())
-	})
-
-	t.Run("header fallback is case insensitive", func(t *testing.T) {
-		defer saveTodoistServiceFlags()()
-		*todoistWebhookSecret = testTodoistWebhookSecret
-
-		server := &todoistServer{
-			newTodoistClient: func(string) todoistOperationalClient {
-				return &fakeTodoistOperationalClient{
-					verifyWebhookFunc: func(rawBody []byte, signature string, secret string) bool {
-						assert.Equal(t, []byte("body"), rawBody)
-						assert.Equal(t, "sig", signature)
-						assert.Equal(t, testTodoistWebhookSecret, secret)
-						return true
-					},
-				}
-			},
-		}
-
-		resp, err := server.VerifyWebhook(context.Background(), &pb.VerifyTodoistWebhookRequest{
-			RawBody: []byte("body"),
-			Headers: []*pb.TodoistWebhookHeader{
-				{Key: "x-todoist-hmac-sha256", Value: "sig"},
-			},
-		})
-		require.NoError(t, err)
-		assert.True(t, resp.GetValid())
-		assert.Equal(t, "ok", resp.GetReason())
-	})
-
-	t.Run("invalid signature", func(t *testing.T) {
-		defer saveTodoistServiceFlags()()
-		*todoistWebhookSecret = testTodoistWebhookSecret
-
-		server := &todoistServer{
-			newTodoistClient: func(string) todoistOperationalClient {
-				return &fakeTodoistOperationalClient{
-					verifyWebhookFunc: func([]byte, string, string) bool {
-						return false
-					},
-				}
-			},
-		}
-
-		resp, err := server.VerifyWebhook(context.Background(), &pb.VerifyTodoistWebhookRequest{
-			RawBody:   []byte("body"),
-			Signature: "sig",
-			Headers:   []*pb.TodoistWebhookHeader{{Key: "ignored", Value: "ignored"}},
-		})
-		require.NoError(t, err)
-		assert.False(t, resp.GetValid())
-		assert.Equal(t, "invalid_signature", resp.GetReason())
 	})
 }
 

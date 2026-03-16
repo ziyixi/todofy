@@ -4,7 +4,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strconv"
-	"strings"
 	"testing"
 
 	"github.com/gin-gonic/gin"
@@ -22,15 +21,11 @@ const testDependencyTaskKey = "alpha"
 
 func setupDependencyHandlerRouter(
 	mockDependency *mocks.MockDependencyServiceClient,
-	mockTodoist *mocks.MockTodoistServiceClient,
 ) *gin.Engine {
 	gin.SetMode(gin.TestMode)
 	clients := mocks.NewMockGRPCClients()
 	if mockDependency != nil {
 		clients.SetClient("dependency", mockDependency)
-	}
-	if mockTodoist != nil {
-		clients.SetClient("todoist", mockTodoist)
 	}
 
 	router := gin.New()
@@ -40,9 +35,9 @@ func setupDependencyHandlerRouter(
 	})
 	router.POST("/dependency/reconcile", HandleDependencyReconcile)
 	router.POST("/dependency/bootstrap_keys", HandleDependencyBootstrapMissingKeys)
+	router.POST("/dependency/clear_metadata", HandleDependencyClearMetadata)
 	router.GET("/dependency/status", HandleDependencyStatus)
 	router.GET("/dependency/issues", HandleDependencyIssues)
-	router.POST("/todoist/webhook", HandleTodoistWebhook)
 	return router
 }
 
@@ -52,7 +47,7 @@ func TestHandleDependencyReconcile(t *testing.T) {
 		mockDependency.On("AnalyzeGraph", mock.Anything, mock.Anything, mock.Anything).
 			Return(&pb.AnalyzeDependencyGraphResponse{TaskCount: 3}, nil)
 
-		router := setupDependencyHandlerRouter(mockDependency, nil)
+		router := setupDependencyHandlerRouter(mockDependency)
 		req, _ := http.NewRequest(http.MethodPost, "/dependency/reconcile?dry_run=true", nil)
 		w := httptest.NewRecorder()
 		router.ServeHTTP(w, req)
@@ -80,7 +75,7 @@ func TestHandleDependencyReconcile(t *testing.T) {
 				},
 			}, nil)
 
-		router := setupDependencyHandlerRouter(mockDependency, nil)
+		router := setupDependencyHandlerRouter(mockDependency)
 		req, _ := http.NewRequest(http.MethodPost, "/dependency/reconcile", nil)
 		w := httptest.NewRecorder()
 		router.ServeHTTP(w, req)
@@ -97,7 +92,7 @@ func TestHandleDependencyReconcile(t *testing.T) {
 		mockDependency.On("ReconcileGraph", mock.Anything, mock.Anything, mock.Anything).
 			Return(nil, status.Error(codes.DeadlineExceeded, "list active Todoist tasks timed out"))
 
-		router := setupDependencyHandlerRouter(mockDependency, nil)
+		router := setupDependencyHandlerRouter(mockDependency)
 		req, _ := http.NewRequest(http.MethodPost, "/dependency/reconcile", nil)
 		w := httptest.NewRecorder()
 		router.ServeHTTP(w, req)
@@ -108,7 +103,7 @@ func TestHandleDependencyReconcile(t *testing.T) {
 	})
 
 	t.Run("invalid dry_run returns bad request", func(t *testing.T) {
-		router := setupDependencyHandlerRouter(new(mocks.MockDependencyServiceClient), nil)
+		router := setupDependencyHandlerRouter(new(mocks.MockDependencyServiceClient))
 		req, _ := http.NewRequest(http.MethodPost, "/dependency/reconcile?dry_run=maybe", nil)
 		w := httptest.NewRecorder()
 		router.ServeHTTP(w, req)
@@ -128,7 +123,7 @@ func TestHandleDependencyBootstrapMissingKeys(t *testing.T) {
 			mock.Anything,
 		).Return(&pb.BootstrapMissingTaskKeysResponse{GeneratedCount: 1}, nil)
 
-		router := setupDependencyHandlerRouter(mockDependency, nil)
+		router := setupDependencyHandlerRouter(mockDependency)
 		req, _ := http.NewRequest(http.MethodPost, "/dependency/bootstrap_keys", nil)
 		w := httptest.NewRecorder()
 		router.ServeHTTP(w, req)
@@ -147,7 +142,7 @@ func TestHandleDependencyBootstrapMissingKeys(t *testing.T) {
 			mock.Anything,
 		).Return(&pb.BootstrapMissingTaskKeysResponse{}, nil)
 
-		router := setupDependencyHandlerRouter(mockDependency, nil)
+		router := setupDependencyHandlerRouter(mockDependency)
 		req, _ := http.NewRequest(http.MethodPost, "/dependency/bootstrap_keys?dry_run=false", nil)
 		w := httptest.NewRecorder()
 		router.ServeHTTP(w, req)
@@ -173,7 +168,7 @@ func TestHandleDependencyBootstrapMissingKeys(t *testing.T) {
 				},
 			}, nil)
 
-		router := setupDependencyHandlerRouter(mockDependency, nil)
+		router := setupDependencyHandlerRouter(mockDependency)
 		req, _ := http.NewRequest(http.MethodPost, "/dependency/bootstrap_keys?dry_run=false", nil)
 		w := httptest.NewRecorder()
 		router.ServeHTTP(w, req)
@@ -189,7 +184,7 @@ func TestHandleDependencyBootstrapMissingKeys(t *testing.T) {
 		mockDependency.On("BootstrapMissingTaskKeys", mock.Anything, mock.Anything, mock.Anything).
 			Return(nil, status.Error(codes.DeadlineExceeded, "bootstrap timed out"))
 
-		router := setupDependencyHandlerRouter(mockDependency, nil)
+		router := setupDependencyHandlerRouter(mockDependency)
 		req, _ := http.NewRequest(http.MethodPost, "/dependency/bootstrap_keys?dry_run=false", nil)
 		w := httptest.NewRecorder()
 		router.ServeHTTP(w, req)
@@ -203,7 +198,7 @@ func TestHandleDependencyBootstrapMissingKeys(t *testing.T) {
 func TestHandleDependencyStatus(t *testing.T) {
 	t.Run("validation failure", func(t *testing.T) {
 		mockDependency := new(mocks.MockDependencyServiceClient)
-		router := setupDependencyHandlerRouter(mockDependency, nil)
+		router := setupDependencyHandlerRouter(mockDependency)
 		req, _ := http.NewRequest(http.MethodGet, "/dependency/status", nil)
 		w := httptest.NewRecorder()
 		router.ServeHTTP(w, req)
@@ -223,7 +218,7 @@ func TestHandleDependencyStatus(t *testing.T) {
 			Status: &pb.TaskDependencyStatus{TaskKey: testDependencyTaskKey},
 		}, nil)
 
-		router := setupDependencyHandlerRouter(mockDependency, nil)
+		router := setupDependencyHandlerRouter(mockDependency)
 		req, _ := http.NewRequest(
 			http.MethodGet,
 			"/dependency/status?task_key="+testDependencyTaskKey,
@@ -242,7 +237,7 @@ func TestHandleDependencyStatus(t *testing.T) {
 		mockDependency.On("GetTaskStatus", mock.Anything, mock.Anything, mock.Anything).
 			Return(nil, status.Error(codes.NotFound, "task status not found"))
 
-		router := setupDependencyHandlerRouter(mockDependency, nil)
+		router := setupDependencyHandlerRouter(mockDependency)
 		req, _ := http.NewRequest(http.MethodGet, "/dependency/status?task_key=missing", nil)
 		w := httptest.NewRecorder()
 		router.ServeHTTP(w, req)
@@ -257,7 +252,7 @@ func TestHandleDependencyStatus(t *testing.T) {
 		mockDependency.On("GetTaskStatus", mock.Anything, mock.Anything, mock.Anything).
 			Return(nil, assert.AnError)
 
-		router := setupDependencyHandlerRouter(mockDependency, nil)
+		router := setupDependencyHandlerRouter(mockDependency)
 		req, _ := http.NewRequest(http.MethodGet, "/dependency/status?todoist_task_id=task-1", nil)
 		w := httptest.NewRecorder()
 		router.ServeHTTP(w, req)
@@ -286,7 +281,7 @@ func TestHandleDependencyIssues(t *testing.T) {
 			},
 		}, nil)
 
-		router := setupDependencyHandlerRouter(mockDependency, nil)
+		router := setupDependencyHandlerRouter(mockDependency)
 		req, _ := http.NewRequest(
 			http.MethodGet,
 			"/dependency/issues?type=broken_reference&task_key="+testDependencyTaskKey,
@@ -301,7 +296,7 @@ func TestHandleDependencyIssues(t *testing.T) {
 	})
 
 	t.Run("invalid type returns bad request", func(t *testing.T) {
-		router := setupDependencyHandlerRouter(new(mocks.MockDependencyServiceClient), nil)
+		router := setupDependencyHandlerRouter(new(mocks.MockDependencyServiceClient))
 		req, _ := http.NewRequest(http.MethodGet, "/dependency/issues?type=bogus", nil)
 		w := httptest.NewRecorder()
 		router.ServeHTTP(w, req)
@@ -311,120 +306,56 @@ func TestHandleDependencyIssues(t *testing.T) {
 	})
 }
 
-func TestHandleTodoistWebhook(t *testing.T) {
-	t.Run("success", func(t *testing.T) {
+func TestHandleDependencyClearMetadata(t *testing.T) {
+	t.Run("default dry run is true", func(t *testing.T) {
 		mockDependency := new(mocks.MockDependencyServiceClient)
-		mockTodoist := new(mocks.MockTodoistServiceClient)
-
-		mockTodoist.On("VerifyWebhook", mock.Anything, mock.Anything, mock.Anything).
-			Return(&pb.VerifyTodoistWebhookResponse{
-				Valid:  true,
-				Reason: "ok",
-			}, nil)
-		mockDependency.On("MarkGraphDirty", mock.Anything,
-			mock.MatchedBy(func(req *pb.MarkDependencyGraphDirtyRequest) bool {
-				return req.GetSource() == "todoist_webhook" &&
-					len(req.GetTodoistTaskIds()) == 1 &&
-					req.GetTodoistTaskIds()[0] == "task-1" &&
-					len(req.GetTaskKeys()) == 1 &&
-					req.GetTaskKeys()[0] == testDependencyTaskKey
+		mockDependency.On("ClearDependencyMetadata", mock.Anything,
+			mock.MatchedBy(func(req *pb.ClearDependencyMetadataRequest) bool {
+				return req.GetDryRun()
 			}),
 			mock.Anything,
-		).Return(&pb.MarkDependencyGraphDirtyResponse{Accepted: true}, nil)
+		).Return(&pb.ClearDependencyMetadataResponse{UpdatedTaskCount: 2}, nil)
 
-		router := setupDependencyHandlerRouter(mockDependency, mockTodoist)
-		body := `{"event_data":{"id":"task-1","content":"Sample <k:` + testDependencyTaskKey + `>"}}`
-		req, _ := http.NewRequest(http.MethodPost, "/todoist/webhook", strings.NewReader(body))
-		req.Header.Set("X-Todoist-Hmac-SHA256", "signature")
+		router := setupDependencyHandlerRouter(mockDependency)
+		req, _ := http.NewRequest(http.MethodPost, "/dependency/clear_metadata", nil)
 		w := httptest.NewRecorder()
 		router.ServeHTTP(w, req)
 
 		assert.Equal(t, http.StatusOK, w.Code)
-		assert.Contains(t, w.Body.String(), "\"accepted\":true")
-		mockTodoist.AssertExpectations(t)
+		assert.Contains(t, w.Body.String(), "\"updated_task_count\":2")
 		mockDependency.AssertExpectations(t)
 	})
 
-	t.Run("missing signature returns accepted false without retryable status", func(t *testing.T) {
+	t.Run("explicit false dry run is passed through", func(t *testing.T) {
 		mockDependency := new(mocks.MockDependencyServiceClient)
-		mockTodoist := new(mocks.MockTodoistServiceClient)
-		mockTodoist.On("VerifyWebhook", mock.Anything, mock.Anything, mock.Anything).
-			Return(&pb.VerifyTodoistWebhookResponse{
-				Valid:   false,
-				Reason:  "missing_signature",
-				Details: "signature is required",
-			}, nil)
+		mockDependency.On("ClearDependencyMetadata", mock.Anything,
+			mock.MatchedBy(func(req *pb.ClearDependencyMetadataRequest) bool {
+				return !req.GetDryRun()
+			}),
+			mock.Anything,
+		).Return(&pb.ClearDependencyMetadataResponse{}, nil)
 
-		router := setupDependencyHandlerRouter(mockDependency, mockTodoist)
-		req, _ := http.NewRequest(http.MethodPost, "/todoist/webhook", strings.NewReader(`{"event_data":{"id":"task-1"}}`))
+		router := setupDependencyHandlerRouter(mockDependency)
+		req, _ := http.NewRequest(http.MethodPost, "/dependency/clear_metadata?dry_run=false", nil)
 		w := httptest.NewRecorder()
 		router.ServeHTTP(w, req)
 
 		assert.Equal(t, http.StatusOK, w.Code)
-		assert.Contains(t, w.Body.String(), "\"accepted\":false")
-		assert.Contains(t, w.Body.String(), "missing_signature")
-		mockTodoist.AssertExpectations(t)
-		mockDependency.AssertNotCalled(t, "MarkGraphDirty", mock.Anything, mock.Anything, mock.Anything)
+		mockDependency.AssertExpectations(t)
 	})
 
-	t.Run("invalid signature returns accepted false without marking dirty", func(t *testing.T) {
+	t.Run("deadline exceeded maps to gateway timeout", func(t *testing.T) {
 		mockDependency := new(mocks.MockDependencyServiceClient)
-		mockTodoist := new(mocks.MockTodoistServiceClient)
-		mockTodoist.On("VerifyWebhook", mock.Anything, mock.Anything, mock.Anything).
-			Return(&pb.VerifyTodoistWebhookResponse{
-				Valid:   false,
-				Reason:  "invalid_signature",
-				Details: "signature validation failed",
-			}, nil)
+		mockDependency.On("ClearDependencyMetadata", mock.Anything, mock.Anything, mock.Anything).
+			Return(nil, status.Error(codes.DeadlineExceeded, "clear metadata timed out"))
 
-		router := setupDependencyHandlerRouter(mockDependency, mockTodoist)
-		req, _ := http.NewRequest(http.MethodPost, "/todoist/webhook", strings.NewReader(`{"event_data":{"id":"task-1"}}`))
-		req.Header.Set("X-Todoist-Hmac-SHA256", "invalid")
+		router := setupDependencyHandlerRouter(mockDependency)
+		req, _ := http.NewRequest(http.MethodPost, "/dependency/clear_metadata?dry_run=false", nil)
 		w := httptest.NewRecorder()
 		router.ServeHTTP(w, req)
 
-		assert.Equal(t, http.StatusOK, w.Code)
-		assert.Contains(t, w.Body.String(), "\"accepted\":false")
-		assert.Contains(t, w.Body.String(), "invalid_signature")
-		mockTodoist.AssertExpectations(t)
-		mockDependency.AssertNotCalled(t, "MarkGraphDirty", mock.Anything, mock.Anything, mock.Anything)
-	})
-
-	t.Run("verification errors surface as 500", func(t *testing.T) {
-		mockTodoist := new(mocks.MockTodoistServiceClient)
-		mockTodoist.On("VerifyWebhook", mock.Anything, mock.Anything, mock.Anything).
-			Return(nil, assert.AnError)
-
-		router := setupDependencyHandlerRouter(new(mocks.MockDependencyServiceClient), mockTodoist)
-		req, _ := http.NewRequest(http.MethodPost, "/todoist/webhook", strings.NewReader(`{"event_data":{"id":"task-1"}}`))
-		w := httptest.NewRecorder()
-		router.ServeHTTP(w, req)
-
-		assert.Equal(t, http.StatusInternalServerError, w.Code)
-		assert.Contains(t, w.Body.String(), "verify_failed")
-		mockTodoist.AssertExpectations(t)
-	})
-
-	t.Run("mark graph dirty errors surface as 500", func(t *testing.T) {
-		mockDependency := new(mocks.MockDependencyServiceClient)
-		mockTodoist := new(mocks.MockTodoistServiceClient)
-
-		mockTodoist.On("VerifyWebhook", mock.Anything, mock.Anything, mock.Anything).
-			Return(&pb.VerifyTodoistWebhookResponse{
-				Valid:  true,
-				Reason: "ok",
-			}, nil)
-		mockDependency.On("MarkGraphDirty", mock.Anything, mock.Anything, mock.Anything).
-			Return(nil, assert.AnError)
-
-		router := setupDependencyHandlerRouter(mockDependency, mockTodoist)
-		req, _ := http.NewRequest(http.MethodPost, "/todoist/webhook", strings.NewReader(`{"event_data":{"id":"task-1"}}`))
-		w := httptest.NewRecorder()
-		router.ServeHTTP(w, req)
-
-		assert.Equal(t, http.StatusInternalServerError, w.Code)
-		assert.Contains(t, w.Body.String(), "mark_graph_dirty_failed")
-		mockTodoist.AssertExpectations(t)
+		assert.Equal(t, http.StatusGatewayTimeout, w.Code)
+		assert.Contains(t, w.Body.String(), "timed out")
 		mockDependency.AssertExpectations(t)
 	})
 }
@@ -485,39 +416,4 @@ func TestParseIssueType(t *testing.T) {
 			}
 		})
 	}
-}
-
-func TestWebhookHelperExtraction(t *testing.T) {
-	raw := []byte(`{
-		"event_data": {
-			"id": "task-1",
-			"task_id": "task-2",
-			"item_id": "task-1",
-			"content": "Example <k:alpha dep:beta>",
-			"items": [
-				{"id": "task-3"},
-				{"id": "task-2"},
-				{"id": "task-4"},
-				{"id": ""}
-			]
-		}
-	}`)
-
-	assert.Equal(t, []string{"task-1", "task-2", "task-3", "task-4"}, extractWebhookTaskIDs(raw))
-	assert.Equal(t, []string{"alpha"}, extractWebhookTaskKeys(raw))
-	assert.Nil(t, extractWebhookTaskKeys([]byte(`{"event_data":{"content":"not metadata"}}`)))
-}
-
-func TestFirstNonEmptyHeader(t *testing.T) {
-	gin.SetMode(gin.TestMode)
-	w := httptest.NewRecorder()
-	c, _ := gin.CreateTestContext(w)
-	req, _ := http.NewRequest(http.MethodGet, "/", nil)
-	req.Header.Set("X-Empty", " ")
-	req.Header.Set("X-Second", "value-2")
-	req.Header.Set("X-Third", "value-3")
-	c.Request = req
-
-	assert.Equal(t, "value-2", firstNonEmptyHeader(c, "X-Empty", "X-Second", "X-Third"))
-	assert.Empty(t, firstNonEmptyHeader(c, "X-Missing"))
 }

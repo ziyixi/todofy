@@ -4,7 +4,6 @@ flowchart TB
         direction LR
         User[👤 User<br/>Browser / API Client]
         Email[📧 Cloudmailin<br/>Inbound Email]
-        TodoistEvent[🔔 Todoist<br/>Webhook Delivery]
     end
 
     subgraph API["Todofy HTTP API :8080"]
@@ -13,7 +12,6 @@ flowchart TB
         Recommend[🏆 GET /api/recommendation]
         UpdateTodo[📝 POST /api/v1/update_todo]
         DependencyOps[🔗 /api/v1/dependency/*]
-        Webhook[🪝 POST /api/v1/todoist/webhook]
     end
 
     Main[🌐 Main Service<br/>Auth, routing, rate limiting]
@@ -42,20 +40,18 @@ flowchart TB
     User --> Recommend
     User --> DependencyOps
     Email --> UpdateTodo
-    TodoistEvent --> Webhook
 
     Summary --> Main
     Recommend --> Main
     UpdateTodo --> Main
     DependencyOps --> Main
-    Webhook --> Main
 
     Main -->|recent queries + writes| DB
     Main -.->|cache miss only| LLM
     Main -->|todo + dependency RPCs| Todo
 
     LLM --> Gemini
-    Todo -->|tasks, labels, verify webhook| Todoist
+    Todo -->|tasks + labels| Todoist
 
     SUTTests -->|behavior assertions| Main
     LLM -.->|SUT base URL override| FakeGemini
@@ -66,9 +62,9 @@ flowchart TB
     classDef endpoint fill:#e8f5e8,stroke:#388e3c,stroke-width:2px
     classDef test fill:#fff3e0,stroke:#ef6c00,stroke-width:2px,stroke-dasharray: 5 5
 
-    class User,Email,TodoistEvent,Gemini,Todoist external
+    class User,Email,Gemini,Todoist external
     class Main,LLM,Todo,DB service
-    class Summary,Recommend,UpdateTodo,DependencyOps,Webhook endpoint
+    class Summary,Recommend,UpdateTodo,DependencyOps endpoint
     class SUTTests,FakeGemini,FakeTodoist test
 ```
 
@@ -81,7 +77,9 @@ flowchart TB
 - **SUT Harness**: Runs behavior-level tests against real internal services with fake external providers
 
 **Key Features:**
-- 📧 **Email-to-Todo**: Webhook endpoint processes incoming emails and converts them to Todoist tasks
+- 📧 **Email-to-Todo**: Inbound email payloads are summarized and converted into Todoist tasks
 - 📊 **Summary API**: Returns JSON summaries of recent tasks with task counts
+- 🔁 **Dependency Scheduler**: Startup + periodic bootstrap and reconcile keep DAG metadata and labels converged
+- 🔗 **Dependency APIs**: Reconcile/bootstrap/clear-metadata/status/issues endpoints under `/api/v1/dependency/*`
 - 🐳 **Containerized**: All services available as Docker containers via GitHub Container Registry
 - 🔒 **Security**: Basic authentication, rate limiting, and health checks

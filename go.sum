@@ -151,6 +151,8 @@ github.com/ziyixi/protos/go/todofy v0.0.0-20260315081739-c62be248bdb9 h1:CxnUI+6
 github.com/ziyixi/protos/go/todofy v0.0.0-20260315081739-c62be248bdb9/go.mod h1:2inuzsbHXKirr6bJ5CwlV62+ZTq6eJqajkhWrCtoJkU=
 github.com/ziyixi/protos/go/todofy v0.0.0-20260315204959-16f9da5d3aec h1:rj0t/RATfhoPw6H7lAOZQqoKAojt38Nn4F6dvBjG7mo=
 github.com/ziyixi/protos/go/todofy v0.0.0-20260315204959-16f9da5d3aec/go.mod h1:2inuzsbHXKirr6bJ5CwlV62+ZTq6eJqajkhWrCtoJkU=
+github.com/ziyixi/protos/go/todofy v0.0.0-20260316012047-be5156513ed8 h1:+/EIpJDs+RXVbPjNydofBIR9zyOYAIRclJsZqlusfiU=
+github.com/ziyixi/protos/go/todofy v0.0.0-20260316012047-be5156513ed8/go.mod h1:2inuzsbHXKirr6bJ5CwlV62+ZTq6eJqajkhWrCtoJkU=
 go.mongodb.org/mongo-driver/v2 v2.5.0 h1:yXUhImUjjAInNcpTcAlPHiT7bIXhshCTL3jVBkF3xaE=
 go.mongodb.org/mongo-driver/v2 v2.5.0/go.mod h1:yOI9kBsufol30iFsl1slpdq1I0eHPzybRWdyYUs8K/0=
 go.opentelemetry.io/auto/sdk v1.2.1 h1:jXsnJ4Lmnqd11kwkBV2LgLoFMZKizbCi5fNZ/ipaZ64=

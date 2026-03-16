@@ -3,9 +3,7 @@ package tests
 import (
 	"bytes"
 	"context"
-	"crypto/hmac"
 	"crypto/sha256"
-	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -31,7 +29,6 @@ type harness struct {
 	todoistAdminURL string
 	username        string
 	password        string
-	webhookSecret   string
 	httpClient      *http.Client
 	dbConn          *grpc.ClientConn
 	dbClient        pb.DataBaseServiceClient
@@ -54,7 +51,6 @@ func newHarness(t *testing.T) *harness {
 		todoistAdminURL: envOrDefault("TODOFY_SUT_TODOIST_ADMIN_URL", "http://localhost:18082"),
 		username:        envOrDefault("TODOFY_SUT_ALLOWED_USER", "sutuser"),
 		password:        envOrDefault("TODOFY_SUT_ALLOWED_PASSWORD", "sutpassword"),
-		webhookSecret:   envOrDefault("TODOFY_SUT_WEBHOOK_SECRET", "sut-webhook-secret"),
 		httpClient: &http.Client{
 			Timeout: 20 * time.Second,
 		},
@@ -258,7 +254,7 @@ func hashForSummary(text string) string {
 	return fmt.Sprintf("%x", sha256.Sum256([]byte(utils.DefaultPromptToSummaryEmail+text)))
 }
 
-// cloudmailinPayload mirrors the webhook shape expected by the real HTTP handler.
+// cloudmailinPayload mirrors the inbound email payload shape expected by the real HTTP handler.
 func cloudmailinPayload(subject string, plain string) []byte {
 	payload := map[string]any{
 		"headers": map[string]string{
@@ -275,12 +271,6 @@ func cloudmailinPayload(subject string, plain string) []byte {
 	}
 	body, _ := json.Marshal(payload)
 	return body
-}
-
-func computeWebhookSignature(secret string, body []byte) string {
-	mac := hmac.New(sha256.New, []byte(secret))
-	_, _ = mac.Write(body)
-	return base64.StdEncoding.EncodeToString(mac.Sum(nil))
 }
 
 func mustUnmarshal[T any](t *testing.T, body []byte) T {

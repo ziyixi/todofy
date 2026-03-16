@@ -51,7 +51,6 @@ ENV DATABASE_PATH=""
 ENV LLMAddr=":50051"
 ENV TodoAddr=":50052"
 ENV DependencyAddr=""
-ENV TodoistAddr=""
 ENV DatabaseAddr=":50053"
 ENV RATE_LIMIT_REQUESTS_PER_MINUTE=2
 

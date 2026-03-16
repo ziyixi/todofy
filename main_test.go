@@ -82,7 +82,6 @@ func TestInitFlags_UsesCommandLineFlagSet(t *testing.T) {
 		"-llm-addr", "localhost:60051",
 		"-todo-addr", "localhost:60052",
 		"-dependency-addr", "localhost:60054",
-		"-todoist-addr", "localhost:60055",
 		"-database-addr", "localhost:60053",
 	})
 	require.NoError(t, err)
@@ -94,7 +93,6 @@ func TestInitFlags_UsesCommandLineFlagSet(t *testing.T) {
 	assert.Equal(t, "localhost:60051", config.LLMAddr)
 	assert.Equal(t, "localhost:60052", config.TodoAddr)
 	assert.Equal(t, "localhost:60054", config.DependencyAddr)
-	assert.Equal(t, "localhost:60055", config.TodoistAddr)
 	assert.Equal(t, "localhost:60053", config.DatabaseAddr)
 }
 
@@ -111,7 +109,6 @@ func TestInitFlagsWithFlagSet_Defaults(t *testing.T) {
 	assert.Equal(t, ":50051", cfg.LLMAddr)
 	assert.Equal(t, ":50052", cfg.TodoAddr)
 	assert.Equal(t, "", cfg.DependencyAddr)
-	assert.Equal(t, "", cfg.TodoistAddr)
 	assert.Equal(t, ":50053", cfg.DatabaseAddr)
 }
 
@@ -120,11 +117,10 @@ func TestBuildServiceConfigs(t *testing.T) {
 		LLMAddr:        "llm:50051",
 		TodoAddr:       "todo:50052",
 		DependencyAddr: "dependency:50054",
-		TodoistAddr:    "todoist:50055",
 		DatabaseAddr:   "database:50053",
 	}
 	serviceConfigs := buildServiceConfigs(cfg)
-	require.Len(t, serviceConfigs, 5)
+	require.Len(t, serviceConfigs, 4)
 	assert.Equal(t, "llm", serviceConfigs[0].name)
 	assert.Equal(t, "llm:50051", serviceConfigs[0].addr)
 	assert.Equal(t, "todo", serviceConfigs[1].name)
@@ -133,8 +129,6 @@ func TestBuildServiceConfigs(t *testing.T) {
 	assert.Equal(t, "database:50053", serviceConfigs[2].addr)
 	assert.Equal(t, "dependency", serviceConfigs[3].name)
 	assert.Equal(t, "dependency:50054", serviceConfigs[3].addr)
-	assert.Equal(t, "todoist", serviceConfigs[4].name)
-	assert.Equal(t, "todoist:50055", serviceConfigs[4].addr)
 
 	conn, err := grpc.NewClient(
 		"passthrough:///build-service-config-test",
@@ -153,8 +147,6 @@ func TestBuildServiceConfigs(t *testing.T) {
 	assert.True(t, ok)
 	_, ok = serviceConfigs[3].newClient(conn).(pb.DependencyServiceClient)
 	assert.True(t, ok)
-	_, ok = serviceConfigs[4].newClient(conn).(pb.TodoistServiceClient)
-	assert.True(t, ok)
 }
 
 func TestSetupGRPCClients_UsesBuilderAndFactory(t *testing.T) {
@@ -171,18 +163,16 @@ func TestSetupGRPCClients_UsesBuilderAndFactory(t *testing.T) {
 		LLMAddr:        "llm:1111",
 		TodoAddr:       "todo:2222",
 		DependencyAddr: "dep:4444",
-		TodoistAddr:    "todoist:5555",
 		DatabaseAddr:   "db:3333",
 	}
 	clients, err := setupGRPCClients(cfg)
 	require.NoError(t, err)
 	require.NotNil(t, clients)
-	require.Len(t, captured, 5)
+	require.Len(t, captured, 4)
 	assert.Equal(t, "llm:1111", captured[0].addr)
 	assert.Equal(t, "todo:2222", captured[1].addr)
 	assert.Equal(t, "db:3333", captured[2].addr)
 	assert.Equal(t, "dep:4444", captured[3].addr)
-	assert.Equal(t, "todoist:5555", captured[4].addr)
 
 	t.Run("returns wrapped error when factory fails", func(t *testing.T) {
 		newGRPCClientsFunc = func([]ServiceConfig) (*GRPCClients, error) {
@@ -209,7 +199,7 @@ func TestRun(t *testing.T) {
 		HealthCheckTimeout: 1,
 	}
 
-	t.Run("defaults dependency and todoist addr to todo addr when omitted", func(t *testing.T) {
+	t.Run("defaults dependency addr to todo addr when omitted", func(t *testing.T) {
 		capturedCfg := Config{}
 		fakeClients := &fakeStartupClients{serviceList: []string{"database"}}
 		fakeRunner := &fakeAppRunner{}
@@ -224,12 +214,10 @@ func TestRun(t *testing.T) {
 		cfg := baseCfg
 		cfg.TodoAddr = "todo:2222"
 		cfg.DependencyAddr = ""
-		cfg.TodoistAddr = ""
 
 		err := run(cfg)
 		require.NoError(t, err)
 		assert.Equal(t, "todo:2222", capturedCfg.DependencyAddr)
-		assert.Equal(t, "todo:2222", capturedCfg.TodoistAddr)
 	})
 
 	t.Run("errors when allowed users are missing", func(t *testing.T) {
@@ -426,10 +414,10 @@ func TestSetupRouter(t *testing.T) {
 		assert.Equal(t, http.StatusUnauthorized, w.Code)
 	})
 
-	t.Run("todoist webhook route is public", func(t *testing.T) {
+	t.Run("dependency clear metadata route requires auth", func(t *testing.T) {
 		w := httptest.NewRecorder()
-		req, _ := http.NewRequest(http.MethodPost, "/api/v1/todoist/webhook", nil)
+		req, _ := http.NewRequest(http.MethodPost, "/api/v1/dependency/clear_metadata", nil)
 		router.ServeHTTP(w, req)
-		assert.NotEqual(t, http.StatusUnauthorized, w.Code)
+		assert.Equal(t, http.StatusUnauthorized, w.Code)
 	})
 }
