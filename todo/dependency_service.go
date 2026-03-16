@@ -348,7 +348,7 @@ func (s *dependencyServer) StartBackgroundReconcile(ctx context.Context) {
 }
 
 func (s *dependencyServer) backgroundLoop(ctx context.Context) {
-	s.backgroundBootstrap()
+	s.backgroundBootstrap("startup")
 
 	var reconcileTicker *time.Ticker
 	var reconcileTickerC <-chan time.Time
@@ -371,48 +371,90 @@ func (s *dependencyServer) backgroundLoop(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-reconcileTickerC:
-			s.backgroundReconcile()
+			s.backgroundReconcile("interval")
 		case <-bootstrapTickerC:
-			s.backgroundBootstrap()
+			s.backgroundBootstrap("interval")
 		}
 	}
 }
 
-func (s *dependencyServer) backgroundReconcile() {
+func (s *dependencyServer) backgroundReconcile(trigger string) {
+	startedAt := time.Now()
+	log.Infof("dependency background reconcile started: trigger=%s", trigger)
+
 	ctx, cancel := boundedContext(context.Background(), s.reconcileTimeout)
 	defer cancel()
-	_, updatedCount, writeFailures, err := s.reconcile(ctx)
+	report, updatedCount, writeFailures, err := s.reconcile(ctx)
+	duration := time.Since(startedAt)
 	if err != nil {
-		log.Warningf("dependency background reconcile failed: %v", err)
+		log.Warningf(
+			"dependency background reconcile failed: trigger=%s duration=%s err=%v",
+			trigger,
+			duration,
+			err,
+		)
 		return
 	}
+
 	if len(writeFailures) > 0 {
 		log.Warningf(
-			"dependency background reconcile completed with %d successful updates and %d failed writes",
+			"dependency background reconcile partial success: trigger=%s duration=%s task_count=%d updated=%d failed_writes=%d",
+			trigger,
+			duration,
+			report.TaskCount,
 			updatedCount,
 			len(writeFailures),
 		)
+		return
 	}
+
+	log.Infof(
+		"dependency background reconcile finished: trigger=%s duration=%s task_count=%d updated=%d",
+		trigger,
+		duration,
+		report.TaskCount,
+		updatedCount,
+	)
 }
 
-func (s *dependencyServer) backgroundBootstrap() {
+func (s *dependencyServer) backgroundBootstrap(trigger string) {
+	startedAt := time.Now()
+	log.Infof("dependency background bootstrap started: trigger=%s", trigger)
+
 	ctx, cancel := boundedContext(context.Background(), s.reconcileTimeout)
 	defer cancel()
 
 	resp, err := s.BootstrapMissingTaskKeys(ctx, &pb.BootstrapMissingTaskKeysRequest{
 		DryRun: false,
 	})
+	duration := time.Since(startedAt)
 	if err != nil {
-		log.Warningf("dependency background bootstrap failed: %v", err)
+		log.Warningf(
+			"dependency background bootstrap failed: trigger=%s duration=%s err=%v",
+			trigger,
+			duration,
+			err,
+		)
 		return
 	}
+
 	if resp.GetPartialSuccess() {
 		log.Warningf(
-			"dependency background bootstrap completed with %d generated keys and %d failed writes",
+			"dependency background bootstrap partial success: trigger=%s duration=%s generated=%d failed_writes=%d",
+			trigger,
+			duration,
 			resp.GetGeneratedCount(),
 			resp.GetFailedUpdateCount(),
 		)
+		return
 	}
+
+	log.Infof(
+		"dependency background bootstrap finished: trigger=%s duration=%s generated=%d",
+		trigger,
+		duration,
+		resp.GetGeneratedCount(),
+	)
 }
 
 type dependencyReport struct {
