@@ -5,8 +5,23 @@ on:
 
 jobs:
   sut-test:
-    name: Docker SUT Tests
+    name: Docker SUT Tests (${{ matrix.suite }})
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - suite: api
+            compose_files: docker-compose.sut.yml
+            test_target: test-sut
+            test_count: 3
+          - suite: scheduler
+            compose_files: docker-compose.sut.yml:docker-compose.sut-scheduler.yml
+            test_target: test-sut-scheduler
+            test_count: 1
+    # Each matrix job has a fresh runner, containers, and fake provider state.
+    env:
+      COMPOSE_FILE: ${{ matrix.compose_files }}
     permissions:
       contents: read
 
@@ -24,8 +39,8 @@ jobs:
 
     - name: Build and start SUT containers
       run: |
-        docker compose -f docker-compose.sut.yml build
-        docker compose -f docker-compose.sut.yml up -d
+        docker compose build
+        docker compose up -d
 
     - name: Wait for SUT services to be healthy
       run: |
@@ -64,27 +79,25 @@ jobs:
 
         if [ "$all_healthy" != true ]; then
           echo "Timeout waiting for SUT services"
-          docker compose -f docker-compose.sut.yml logs
+          docker compose logs
           exit 1
         fi
 
     - name: Run SUT integration tests
-      env:
-        TODOFY_RUN_SUT: "1"
-      run: go test -v ./sut/...
+      run: make ${{ matrix.test_target }} SUT_TEST_COUNT=${{ matrix.test_count }}
 
     - name: Show SUT logs on success
       if: success()
-      run: docker compose -f docker-compose.sut.yml logs
+      run: docker compose logs
 
     - name: Show SUT logs on failure
       if: failure()
       run: |
-        docker compose -f docker-compose.sut.yml logs
+        docker compose logs
         docker ps -a
 
     - name: Cleanup
       if: always()
       run: |
-        docker compose -f docker-compose.sut.yml down -v
+        docker compose down -v
         docker system prune -f

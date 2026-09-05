@@ -364,7 +364,7 @@ By default it:
 - points Gemini traffic at the fake Gemini base URL
 - points Todoist traffic at the fake Todoist base URL
 - disables the main app rate limiter for deterministic test runs
-- keeps dependency background scheduling enabled with a short bootstrap interval for periodic coverage
+- disables dependency background scheduling so API scenarios exclusively own the fake provider state
 - uses short dependency read/write deadlines so timeout handling can be exercised quickly
 
 Host-exposed ports used by the SUT harness:
@@ -374,16 +374,32 @@ Host-exposed ports used by the SUT harness:
 - `18081` -> fake Gemini admin API
 - `18082` -> fake Todoist admin API
 
-Run locally:
+Run the API suite locally:
 
 ```bash
 docker compose -f docker-compose.sut.yml build
-docker compose -f docker-compose.sut.yml up -d
+docker compose -f docker-compose.sut.yml up -d --wait --wait-timeout 180
 make test-sut
 docker compose -f docker-compose.sut.yml down -v
 ```
 
-`make test-sut` runs `TODOFY_RUN_SUT=1 go test -v ./sut/...`.
+`make test-sut` selects `TODOFY_SUT_SUITE=api` and runs with `-count=1` to bypass Go's test cache.
+Use `make test-sut SUT_TEST_COUNT=3` to repeat the API scenarios, including exact timeout/retry write-count assertions.
+
+After tearing down the API stack, run periodic scheduler coverage with fresh containers:
+
+```bash
+docker compose -f docker-compose.sut.yml -f docker-compose.sut-scheduler.yml up -d --build --wait --wait-timeout 180
+make test-sut-scheduler
+docker compose -f docker-compose.sut.yml -f docker-compose.sut-scheduler.yml down -v
+```
+
+The scheduler override enables scheduling only for `todofy-todo-sut`, retaining the 15-second bootstrap interval.
+`make test-sut-scheduler` selects `TODOFY_SUT_SUITE=scheduler` and runs only
+`TestSUTDependencySchedulerIntegration`, which verifies two automatic writes without a manual bootstrap request.
+Do not run the suites concurrently against the same stack or enable scheduling for API tests: background writes
+can consume queued fake responses or change task metadata between a timed-out request and its retry.
+GitHub Actions runs the suites on separate fresh runners, repeating API coverage three times and scheduler coverage once.
 
 The SUT suite covers endpoint behavior such as:
 

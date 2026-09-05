@@ -1,0 +1,5 @@
+# Use only for the isolated scheduler SUT suite, on top of docker-compose.sut.yml.
+services:
+  todofy-todo-sut:
+    environment:
+      DEPENDENCY_ENABLE_SCHEDULER: "true"

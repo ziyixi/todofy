@@ -1,8 +1,9 @@
 # Todofy Makefile
 
-.PHONY: test test-coverage test-verbose test-integration test-sut build clean lint lint-check security help install-hooks
+.PHONY: test test-coverage test-verbose test-integration test-sut test-sut-scheduler build clean lint lint-check security help install-hooks
 
 COVERAGE_PACKAGES = $(shell go list ./... | grep -vE '^github.com/ziyixi/todofy/(sut|testutils)(/|$$)')
+SUT_TEST_COUNT ?= 1
 
 # Default target
 help: ## Show this help message
@@ -69,8 +70,11 @@ test-integration: ## Run docker-compose.test.yml integration checks locally
 	docker exec todofy-database-test /grpc_health_probe -addr=:50053 >/dev/null; \
 	echo "Integration checks passed"
 
-test-sut: ## Run system-under-test integration tests against a running docker-compose.sut.yml stack
-	TODOFY_RUN_SUT=1 go test -v ./sut/...
+test-sut: ## Run API SUT tests against a running docker-compose.sut.yml stack (scheduler disabled)
+	TODOFY_RUN_SUT=1 TODOFY_SUT_SUITE=api go test -count=$(SUT_TEST_COUNT) -v ./sut/...
+
+test-sut-scheduler: ## Run scheduler coverage against a fresh stack with docker-compose.sut-scheduler.yml applied
+	TODOFY_RUN_SUT=1 TODOFY_SUT_SUITE=scheduler go test -count=$(SUT_TEST_COUNT) -v ./sut/tests -run '^TestSUTDependencySchedulerIntegration$$'
 
 # Code quality targets
 lint: ## Auto-fix lint/format issues, then verify

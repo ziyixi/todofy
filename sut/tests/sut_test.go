@@ -5,7 +5,6 @@ import (
 	"net/http"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -53,8 +52,18 @@ const (
 
 func newEnabledHarness(t *testing.T) *harness {
 	t.Helper()
+	return newEnabledHarnessForSuite(t, sutSuiteAPI)
+}
+
+func newEnabledHarnessForSuite(t *testing.T, suite string) *harness {
+	t.Helper()
 	if envOrDefault("TODOFY_RUN_SUT", "") != "1" {
 		t.Skip("set TODOFY_RUN_SUT=1 to execute SUT integration tests")
+	}
+	selectedSuite, err := parseSUTSuite(envOrDefault("TODOFY_SUT_SUITE", ""))
+	require.NoError(t, err)
+	if selectedSuite != suite {
+		t.Skipf("set TODOFY_SUT_SUITE=%s to execute this suite", suite)
 	}
 	h := newHarness(t)
 	t.Cleanup(h.Close)
@@ -620,23 +629,6 @@ func TestSUTDependencyIntegration(t *testing.T) {
 		state := h.todoistState(t)
 		require.Len(t, state.Tasks, 1)
 		assert.Contains(t, state.Tasks[0].Content, "<k:")
-	})
-
-	t.Run("dependency scheduler auto-bootstrap adds keys without manual trigger", func(t *testing.T) {
-		h.resetScenario(t)
-		h.seedTodoist(t, admincontract.SeedTodoistStateRequest{
-			Tasks: []todoistapi.Task{
-				{ID: "1", Content: "Auto bootstrap task", ProjectID: sutProjectID},
-			},
-		})
-
-		require.Eventually(t, func() bool {
-			state := h.todoistState(t)
-			if len(state.Tasks) != 1 {
-				return false
-			}
-			return strings.Contains(state.Tasks[0].Content, "<k:")
-		}, 30*time.Second, 250*time.Millisecond)
 	})
 
 	t.Run("dependency clear metadata supports dry run and write mode", func(t *testing.T) {
