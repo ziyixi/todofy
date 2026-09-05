@@ -7,6 +7,12 @@ import (
 	pb "github.com/ziyixi/protos/go/todofy"
 )
 
+const (
+	testDefaultModelName   = "gemini-3.8-flash"
+	testFirstFallbackName  = "gemini-3.7-flash"
+	testSecondFallbackName = "gemini-3.5-flash-lite"
+)
+
 func TestLLMConstants(t *testing.T) {
 	t.Run("llmModelNames contains expected models", func(t *testing.T) {
 		expectedModels := []pb.Model{
@@ -14,6 +20,13 @@ func TestLLMConstants(t *testing.T) {
 			pb.Model_MODEL_GEMINI_2_5_FLASH,
 			pb.Model_MODEL_GEMINI_2_5_FLASH_LITE,
 			pb.Model_MODEL_GEMINI_3_FLASH_PREVIEW,
+			pb.Model_MODEL_GEMINI_3_8_FLASH,
+			pb.Model_MODEL_GEMINI_3_7_FLASH,
+			pb.Model_MODEL_GEMINI_3_6_FLASH,
+			pb.Model_MODEL_GEMINI_3_5_FLASH,
+			pb.Model_MODEL_GEMINI_3_5_FLASH_LITE,
+			pb.Model_MODEL_GEMINI_3_1_FLASH_LITE,
+			pb.Model_MODEL_GEMINI_3_1_PRO_PREVIEW,
 		}
 
 		for _, model := range expectedModels {
@@ -30,16 +43,15 @@ func TestLLMConstants(t *testing.T) {
 
 	t.Run("llmModelPriority has correct order", func(t *testing.T) {
 		expectedPriority := []pb.Model{
-			pb.Model_MODEL_GEMINI_2_5_FLASH_LITE,
-			pb.Model_MODEL_GEMINI_2_5_FLASH,
-			pb.Model_MODEL_GEMINI_3_FLASH_PREVIEW,
+			pb.Model_MODEL_GEMINI_3_8_FLASH,
+			pb.Model_MODEL_GEMINI_3_7_FLASH,
+			pb.Model_MODEL_GEMINI_3_5_FLASH_LITE,
 		}
 
 		assert.Equal(t, expectedPriority, llmModelPriority)
 		assert.Len(t, llmModelPriority, 3)
 
-		// First model should be the most preferred (flash lite model)
-		assert.Equal(t, pb.Model_MODEL_GEMINI_2_5_FLASH_LITE, llmModelPriority[0])
+		assert.Equal(t, pb.Model_MODEL_GEMINI_3_8_FLASH, llmModelPriority[0])
 	})
 
 	t.Run("supportedModelFamily contains Gemini", func(t *testing.T) {
@@ -74,7 +86,16 @@ func TestLLMModelMappings(t *testing.T) {
 			pb.Model_MODEL_GEMINI_2_5_FLASH:       "gemini-2.5-flash",
 			pb.Model_MODEL_GEMINI_2_5_FLASH_LITE:  "gemini-2.5-flash-lite",
 			pb.Model_MODEL_GEMINI_3_FLASH_PREVIEW: "gemini-3-flash-preview",
+			pb.Model_MODEL_GEMINI_3_8_FLASH:       testDefaultModelName,
+			pb.Model_MODEL_GEMINI_3_7_FLASH:       testFirstFallbackName,
+			pb.Model_MODEL_GEMINI_3_6_FLASH:       "gemini-3.6-flash",
+			pb.Model_MODEL_GEMINI_3_5_FLASH:       "gemini-3.5-flash",
+			pb.Model_MODEL_GEMINI_3_5_FLASH_LITE:  testSecondFallbackName,
+			pb.Model_MODEL_GEMINI_3_1_FLASH_LITE:  "gemini-3.1-flash-lite",
+			pb.Model_MODEL_GEMINI_3_1_PRO_PREVIEW: "gemini-3.1-pro-preview",
 		}
+
+		assert.Equal(t, expectedPatterns, llmModelNames)
 
 		for model, expectedName := range expectedPatterns {
 			actualName, exists := llmModelNames[model]
@@ -95,4 +116,25 @@ func TestModelFamilySupport(t *testing.T) {
 			assert.NotEqual(t, pb.ModelFamily_MODEL_FAMILY_UNSPECIFIED, family)
 		}
 	})
+}
+
+func TestLLMModelWireCompatibility(t *testing.T) {
+	// Numeric values are persisted in data and sent over gRPC; never renumber them.
+	expectedValues := map[string]int32{
+		"MODEL_GEMINI_2_5_PRO":         8,
+		"MODEL_GEMINI_2_5_FLASH":       9,
+		"MODEL_GEMINI_2_5_FLASH_LITE":  10,
+		"MODEL_GEMINI_3_FLASH_PREVIEW": 11,
+		"MODEL_GEMINI_3_8_FLASH":       12,
+		"MODEL_GEMINI_3_7_FLASH":       13,
+		"MODEL_GEMINI_3_6_FLASH":       14,
+		"MODEL_GEMINI_3_5_FLASH":       15,
+		"MODEL_GEMINI_3_5_FLASH_LITE":  16,
+		"MODEL_GEMINI_3_1_FLASH_LITE":  17,
+		"MODEL_GEMINI_3_1_PRO_PREVIEW": 18,
+	}
+	for name, value := range expectedValues {
+		assert.Equal(t, value, pb.Model_value[name], name)
+		assert.Equal(t, name, pb.Model(value).String())
+	}
 }

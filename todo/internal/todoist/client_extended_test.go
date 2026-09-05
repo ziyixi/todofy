@@ -15,6 +15,8 @@ import (
 	"github.com/ziyixi/todofy/utils"
 )
 
+const testCycleLabel = "dag_cycle"
+
 func TestClient_ListActiveTasks(t *testing.T) {
 	t.Run("supports legacy array response", func(t *testing.T) {
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -152,14 +154,14 @@ func TestClient_EnsureLabels(t *testing.T) {
 
 	result, err := client.EnsureLabels(context.Background(), []string{
 		"dag_blocked",
-		"dag_cycle",
+		testCycleLabel,
 		"dag_broken_dep",
-		"dag_cycle",
+		testCycleLabel,
 	})
 	require.NoError(t, err)
 	require.NotNil(t, result)
 	assert.Equal(t, []string{"dag_blocked"}, result.ExistingLabels)
-	assert.Equal(t, []string{"dag_cycle"}, result.CreatedLabels)
+	assert.Equal(t, []string{testCycleLabel}, result.CreatedLabels)
 	assert.Contains(t, result.Failures["dag_broken_dep"], "502")
 	assert.Equal(t, 2, listCalls)
 }

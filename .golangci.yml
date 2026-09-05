@@ -5,6 +5,14 @@ run:
   tests: true
 
 linters:
+  exclusions:
+    rules:
+      # Retain legacy wire values in the compatibility map and persisted-data tests.
+      # Other deprecated APIs, and new legacy-model use in production, still fail lint.
+      - linters:
+          - staticcheck
+        path: '(^llm/consts\.go$|_test\.go$)'
+        text: 'SA1019: .*\.Model_MODEL_GEMINI_(2_5_(PRO|FLASH|FLASH_LITE)|3_FLASH_PREVIEW) is deprecated'
   enable:
     - bodyclose
     - dogsled

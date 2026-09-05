@@ -23,7 +23,11 @@ var (
 	expectedToken = flag.String("expected-token", "", "Expected bearer token")
 )
 
-const vendorBasePath = "/api/v1"
+const (
+	methodNotAllowedMessage = "method not allowed"
+	vendorBasePath          = "/api/v1"
+	errorResponseKey        = "error"
+)
 
 type updateTaskPayload struct {
 	Content *string   `json:"content,omitempty"`
@@ -77,7 +81,7 @@ func handleHealth(w http.ResponseWriter, _ *http.Request) {
 
 func (s *server) handleAdminReset(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{errorResponseKey: methodNotAllowedMessage})
 		return
 	}
 
@@ -90,13 +94,13 @@ func (s *server) handleAdminReset(w http.ResponseWriter, r *http.Request) {
 
 func (s *server) handleAdminSeed(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{errorResponseKey: methodNotAllowedMessage})
 		return
 	}
 
 	var req admincontract.SeedTodoistStateRequest
 	if err := decodeJSON(r.Body, &req); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		writeJSON(w, http.StatusBadRequest, map[string]string{errorResponseKey: err.Error()})
 		return
 	}
 
@@ -116,13 +120,13 @@ func (s *server) handleAdminSeed(w http.ResponseWriter, r *http.Request) {
 
 func (s *server) handleAdminQueue(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{errorResponseKey: methodNotAllowedMessage})
 		return
 	}
 
 	var req admincontract.QueueTodoistResponsesRequest
 	if err := decodeJSON(r.Body, &req); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		writeJSON(w, http.StatusBadRequest, map[string]string{errorResponseKey: err.Error()})
 		return
 	}
 
@@ -135,7 +139,7 @@ func (s *server) handleAdminQueue(w http.ResponseWriter, r *http.Request) {
 
 func (s *server) handleAdminState(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{errorResponseKey: methodNotAllowedMessage})
 		return
 	}
 
@@ -153,19 +157,19 @@ func (s *server) handleAdminState(w http.ResponseWriter, r *http.Request) {
 
 func (s *server) handleTodoist(w http.ResponseWriter, r *http.Request) {
 	if !strings.HasPrefix(r.URL.Path, vendorBasePath) {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
+		writeJSON(w, http.StatusNotFound, map[string]string{errorResponseKey: "not found"})
 		return
 	}
 
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "failed to read request body"})
+		writeJSON(w, http.StatusBadRequest, map[string]string{errorResponseKey: "failed to read request body"})
 		return
 	}
 	s.recordCall(r, body)
 
 	if *expectedToken != "" && strings.TrimSpace(r.Header.Get("Authorization")) != "Bearer "+*expectedToken {
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+		writeJSON(w, http.StatusUnauthorized, map[string]string{errorResponseKey: "unauthorized"})
 		return
 	}
 
@@ -190,14 +194,14 @@ func (s *server) handleTodoist(w http.ResponseWriter, r *http.Request) {
 	case r.Method == http.MethodPost && path == todoistapi.LabelsPath:
 		s.handleCreateLabel(w, body)
 	default:
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "unsupported path"})
+		writeJSON(w, http.StatusNotFound, map[string]string{errorResponseKey: "unsupported path"})
 	}
 }
 
 func (s *server) handleCreateTask(w http.ResponseWriter, body []byte) {
 	var req todoistapi.CreateTaskRequest
 	if err := json.Unmarshal(body, &req); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid create task request"})
+		writeJSON(w, http.StatusBadRequest, map[string]string{errorResponseKey: "invalid create task request"})
 		return
 	}
 
@@ -241,7 +245,7 @@ func (s *server) handleTaskByID(w http.ResponseWriter, method string, taskID str
 	task, exists := s.tasks[taskID]
 	s.mu.Unlock()
 	if !exists {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "task not found"})
+		writeJSON(w, http.StatusNotFound, map[string]string{errorResponseKey: "task not found"})
 		return
 	}
 
@@ -251,7 +255,7 @@ func (s *server) handleTaskByID(w http.ResponseWriter, method string, taskID str
 	case http.MethodPost:
 		var req updateTaskPayload
 		if err := json.Unmarshal(body, &req); err != nil {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid update task request"})
+			writeJSON(w, http.StatusBadRequest, map[string]string{errorResponseKey: "invalid update task request"})
 			return
 		}
 
@@ -269,7 +273,7 @@ func (s *server) handleTaskByID(w http.ResponseWriter, method string, taskID str
 
 		writeJSON(w, http.StatusOK, task)
 	default:
-		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{errorResponseKey: methodNotAllowedMessage})
 	}
 }
 
@@ -284,13 +288,13 @@ func (s *server) handleListLabels(w http.ResponseWriter) {
 func (s *server) handleCreateLabel(w http.ResponseWriter, body []byte) {
 	var req todoistapi.CreateLabelRequest
 	if err := json.Unmarshal(body, &req); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid create label request"})
+		writeJSON(w, http.StatusBadRequest, map[string]string{errorResponseKey: "invalid create label request"})
 		return
 	}
 
 	name := strings.TrimSpace(req.Name)
 	if name == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "label name is required"})
+		writeJSON(w, http.StatusBadRequest, map[string]string{errorResponseKey: "label name is required"})
 		return
 	}
 

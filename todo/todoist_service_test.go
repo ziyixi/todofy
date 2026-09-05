@@ -12,6 +12,11 @@ import (
 	"google.golang.org/grpc/status"
 )
 
+const (
+	testOperationalTaskID = "task-1"
+	testBlockedLabel      = "dag_blocked"
+)
+
 type fakeTodoistOperationalClient struct {
 	getTaskFunc           func(context.Context, string) (*todoist.Task, error)
 	listActiveTasksFunc   func(context.Context) ([]*todoist.Task, error)
@@ -104,11 +109,11 @@ func TestTodoistServerGetTask(t *testing.T) {
 				assert.Equal(t, testGenericAPIKey, apiKey)
 				return &fakeTodoistOperationalClient{
 					getTaskFunc: func(_ context.Context, taskID string) (*todoist.Task, error) {
-						assert.Equal(t, "task-1", taskID)
+						assert.Equal(t, testOperationalTaskID, taskID)
 						return &todoist.Task{
-							ID:        "task-1",
+							ID:        testOperationalTaskID,
 							Content:   "Task A <k:alpha dep:beta>",
-							Labels:    []string{"dag_blocked"},
+							Labels:    []string{testBlockedLabel},
 							Checked:   true,
 							UpdatedAt: "2026-03-14T00:00:00Z",
 						}, nil
@@ -117,7 +122,7 @@ func TestTodoistServerGetTask(t *testing.T) {
 			},
 		}
 
-		resp, err := server.GetTask(context.Background(), &pb.GetTodoistTaskRequest{TodoistTaskId: "task-1"})
+		resp, err := server.GetTask(context.Background(), &pb.GetTodoistTaskRequest{TodoistTaskId: testOperationalTaskID})
 		require.NoError(t, err)
 		require.NotNil(t, resp)
 		require.NotNil(t, resp.GetTask())
@@ -141,7 +146,7 @@ func TestTodoistServerGetTask(t *testing.T) {
 			},
 		}
 
-		resp, err := server.GetTask(context.Background(), &pb.GetTodoistTaskRequest{TodoistTaskId: "task-1"})
+		resp, err := server.GetTask(context.Background(), &pb.GetTodoistTaskRequest{TodoistTaskId: testOperationalTaskID})
 		require.Nil(t, resp)
 		require.Error(t, err)
 		assert.Equal(t, codes.Internal, status.Code(err))
@@ -159,7 +164,7 @@ func TestTodoistServerListActiveTasks(t *testing.T) {
 				listActiveTasksFunc: func(context.Context) ([]*todoist.Task, error) {
 					return []*todoist.Task{
 						{
-							ID:      "task-1",
+							ID:      testOperationalTaskID,
 							Content: "Task One <k:one>",
 						},
 						{
@@ -203,13 +208,13 @@ func TestTodoistServerUpdateTaskLabels(t *testing.T) {
 						addLabels []string,
 						removeLabels []string,
 					) (*todoist.Task, error) {
-						assert.Equal(t, "task-1", taskID)
-						assert.Equal(t, []string{"dag_blocked"}, addLabels)
+						assert.Equal(t, testOperationalTaskID, taskID)
+						assert.Equal(t, []string{testBlockedLabel}, addLabels)
 						assert.Equal(t, []string{"old"}, removeLabels)
 						return &todoist.Task{
-							ID:      "task-1",
+							ID:      testOperationalTaskID,
 							Content: "Task A <k:alpha>",
-							Labels:  []string{"dag_blocked"},
+							Labels:  []string{testBlockedLabel},
 						}, nil
 					},
 				}
@@ -217,13 +222,13 @@ func TestTodoistServerUpdateTaskLabels(t *testing.T) {
 		}
 
 		resp, err := server.UpdateTaskLabels(context.Background(), &pb.UpdateTodoistTaskLabelsRequest{
-			TodoistTaskId: "task-1",
-			AddLabels:     []string{"dag_blocked"},
+			TodoistTaskId: testOperationalTaskID,
+			AddLabels:     []string{testBlockedLabel},
 			RemoveLabels:  []string{"old"},
 		})
 		require.NoError(t, err)
 		require.NotNil(t, resp)
-		assert.Equal(t, []string{"dag_blocked"}, resp.GetTask().GetLabels())
+		assert.Equal(t, []string{testBlockedLabel}, resp.GetTask().GetLabels())
 	})
 }
 

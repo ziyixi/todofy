@@ -207,8 +207,8 @@ func TestLLMServer_SummaryByGemini(t *testing.T) {
 func TestModelSelection(t *testing.T) {
 	t.Run("uses priority order for model selection", func(t *testing.T) {
 		// Test that models are tried in priority order
-		expectedFirst := pb.Model_MODEL_GEMINI_2_5_FLASH_LITE
-		expectedSecond := pb.Model_MODEL_GEMINI_2_5_FLASH
+		expectedFirst := pb.Model_MODEL_GEMINI_3_8_FLASH
+		expectedSecond := pb.Model_MODEL_GEMINI_3_7_FLASH
 
 		assert.Equal(t, expectedFirst, llmModelPriority[0])
 		assert.Equal(t, expectedSecond, llmModelPriority[1])
@@ -230,12 +230,10 @@ func TestTokenLimitHandling(t *testing.T) {
 	})
 
 	t.Run("max tokens parameter handling", func(t *testing.T) {
-		server := &llmServer{}
-
-		// Test with custom maxTokens - this will fail at API call but validates parameter handling
 		originalKey := *geminiAPIKey
-		*geminiAPIKey = "dummy-key"
 		defer func() { *geminiAPIKey = originalKey }()
+		fake := &fakeGeminiClient{}
+		server := setupTestServer(fake, 3000000)
 
 		req := &pb.LLMSummaryRequest{
 			ModelFamily: pb.ModelFamily_MODEL_FAMILY_GEMINI,
@@ -244,10 +242,9 @@ func TestTokenLimitHandling(t *testing.T) {
 			MaxTokens:   512,
 		}
 
-		// This will fail at the API call, but validates that maxTokens is processed
 		_, err := server.Summarize(context.Background(), req)
-		assert.Error(t, err) // Expected to fail at API call
-		// Should not fail on parameter validation
-		assert.NotContains(t, err.Error(), "unsupported model family")
+		assert.NoError(t, err)
+		assert.Equal(t, testDefaultModelName, fake.lastModel)
+		assert.Equal(t, 1, fake.generateContentCalls)
 	})
 }

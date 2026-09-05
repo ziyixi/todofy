@@ -15,7 +15,12 @@ import (
 	pb "github.com/ziyixi/protos/go/todofy"
 )
 
-const testAPIKey = "test-api-key"
+const (
+	testAPIKey        = "test-api-key"
+	testShortText     = "Test"
+	testSummaryPrompt = "Summarize:"
+	testSummaryText   = "Test content"
+)
 
 // countTokensFn is the function signature for CountTokens mock.
 type countTokensFn = func(
@@ -165,48 +170,89 @@ func TestE2E_Summarize_Success(t *testing.T) {
 	assert.Equal(t, "gemini-2.5-flash-lite", fake.lastModel)
 }
 
-func TestE2E_Summarize_ModelFallback(t *testing.T) {
+func TestE2E_Summarize_DefaultModel(t *testing.T) {
 	originalKey := *geminiAPIKey
 	defer func() { *geminiAPIKey = originalKey }()
 
-	callCount := 0
-	fake := &fakeGeminiClient{
-		generateContent: func(
-			ctx context.Context, model string,
-			contents []*genai.Content,
-		) (*genai.GenerateContentResponse, error) {
-			callCount++
-			if model == "gemini-2.5-flash-lite" {
-				return nil, fmt.Errorf("model overloaded")
-			}
-			return makeSuccessResp("Fallback summary.", 200), nil
-		},
-	}
+	fake := &fakeGeminiClient{}
 	server := setupTestServer(fake, 3000000)
-
-	req := &pb.LLMSummaryRequest{
+	resp, err := server.Summarize(context.Background(), &pb.LLMSummaryRequest{
 		ModelFamily: pb.ModelFamily_MODEL_FAMILY_GEMINI,
-		Prompt:      "Summarize:",
-		Text:        "Test content",
-	}
-
-	resp, err := server.Summarize(context.Background(), req)
+		Prompt:      testSummaryPrompt,
+		Text:        testSummaryText,
+	})
 
 	require.NoError(t, err)
 	require.NotNil(t, resp)
-	assert.Equal(t, "Fallback summary.", resp.Summary)
-	assert.Equal(t, pb.Model_MODEL_GEMINI_2_5_FLASH, resp.Model)
+	assert.Equal(t, pb.Model_MODEL_GEMINI_3_8_FLASH, resp.Model)
+	assert.Equal(t, testDefaultModelName, fake.lastModel)
+	assert.Equal(t, 1, fake.countTokensCalls)
+	assert.Equal(t, 1, fake.generateContentCalls)
+}
+
+func TestE2E_Summarize_ModelFallback(t *testing.T) {
+	for _, tc := range []struct {
+		name         string
+		fails        int
+		fallback     pb.Model
+		wantedModels []string
+	}{
+		{
+			name: "first fallback", fails: 1,
+			fallback:     pb.Model_MODEL_GEMINI_3_7_FLASH,
+			wantedModels: []string{testDefaultModelName, testFirstFallbackName},
+		},
+		{
+			name: "second fallback", fails: 2,
+			fallback:     pb.Model_MODEL_GEMINI_3_5_FLASH_LITE,
+			wantedModels: []string{testDefaultModelName, testFirstFallbackName, testSecondFallbackName},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			originalKey := *geminiAPIKey
+			t.Cleanup(func() { *geminiAPIKey = originalKey })
+
+			var attemptedModels []string
+			fake := &fakeGeminiClient{
+				generateContent: func(
+					ctx context.Context, model string,
+					contents []*genai.Content,
+				) (*genai.GenerateContentResponse, error) {
+					attemptedModels = append(attemptedModels, model)
+					if len(attemptedModels) <= tc.fails {
+						return nil, fmt.Errorf("model unavailable")
+					}
+					return makeSuccessResp("Fallback summary.", 200), nil
+				},
+			}
+			server := setupTestServer(fake, 3000000)
+			resp, err := server.Summarize(context.Background(), &pb.LLMSummaryRequest{
+				ModelFamily: pb.ModelFamily_MODEL_FAMILY_GEMINI,
+				Prompt:      testSummaryPrompt,
+				Text:        testSummaryText,
+			})
+
+			require.NoError(t, err)
+			require.NotNil(t, resp)
+			assert.Equal(t, "Fallback summary.", resp.Summary)
+			assert.Equal(t, tc.fallback, resp.Model)
+			assert.Equal(t, tc.wantedModels, attemptedModels)
+			assert.Equal(t, tc.fails+1, fake.countTokensCalls)
+		})
+	}
 }
 
 func TestE2E_Summarize_AllModelsFail(t *testing.T) {
 	originalKey := *geminiAPIKey
 	defer func() { *geminiAPIKey = originalKey }()
 
+	var attemptedModels []string
 	fake := &fakeGeminiClient{
 		generateContent: func(
 			ctx context.Context, model string,
 			contents []*genai.Content,
 		) (*genai.GenerateContentResponse, error) {
+			attemptedModels = append(attemptedModels, model)
 			return nil, fmt.Errorf("all models fail")
 		},
 	}
@@ -214,8 +260,8 @@ func TestE2E_Summarize_AllModelsFail(t *testing.T) {
 
 	req := &pb.LLMSummaryRequest{
 		ModelFamily: pb.ModelFamily_MODEL_FAMILY_GEMINI,
-		Prompt:      "Summarize:",
-		Text:        "Test content",
+		Prompt:      testSummaryPrompt,
+		Text:        testSummaryText,
 	}
 
 	resp, err := server.Summarize(context.Background(), req)
@@ -223,6 +269,35 @@ func TestE2E_Summarize_AllModelsFail(t *testing.T) {
 	assert.Error(t, err)
 	assert.Nil(t, resp)
 	assert.Contains(t, err.Error(), "failed to generate summary")
+	assert.Equal(t, []string{testDefaultModelName, testFirstFallbackName, testSecondFallbackName}, attemptedModels)
+	assert.Equal(t, 3, fake.countTokensCalls)
+	assert.Equal(t, 3, fake.generateContentCalls)
+}
+
+func TestE2E_Summarize_ExplicitModelDoesNotFallback(t *testing.T) {
+	originalKey := *geminiAPIKey
+	t.Cleanup(func() { *geminiAPIKey = originalKey })
+	fake := &fakeGeminiClient{
+		generateContent: func(
+			ctx context.Context, model string,
+			contents []*genai.Content,
+		) (*genai.GenerateContentResponse, error) {
+			return nil, fmt.Errorf("requested model unavailable")
+		},
+	}
+	server := setupTestServer(fake, 3000000)
+	resp, err := server.Summarize(context.Background(), &pb.LLMSummaryRequest{
+		ModelFamily: pb.ModelFamily_MODEL_FAMILY_GEMINI,
+		Model:       pb.Model_MODEL_GEMINI_3_8_FLASH,
+		Prompt:      testSummaryPrompt,
+		Text:        testSummaryText,
+	})
+
+	assert.Error(t, err)
+	assert.Nil(t, resp)
+	assert.Equal(t, testDefaultModelName, fake.lastModel)
+	assert.Equal(t, 1, fake.countTokensCalls)
+	assert.Equal(t, 1, fake.generateContentCalls)
 }
 
 func TestE2E_Summarize_UnsupportedModelFamily(t *testing.T) {
@@ -234,8 +309,8 @@ func TestE2E_Summarize_UnsupportedModelFamily(t *testing.T) {
 
 	req := &pb.LLMSummaryRequest{
 		ModelFamily: pb.ModelFamily_MODEL_FAMILY_UNSPECIFIED,
-		Prompt:      "Summarize:",
-		Text:        "Test content",
+		Prompt:      testSummaryPrompt,
+		Text:        testSummaryText,
 	}
 
 	resp, err := server.Summarize(context.Background(), req)
@@ -258,8 +333,8 @@ func TestE2E_Summarize_SpecificModel(t *testing.T) {
 	req := &pb.LLMSummaryRequest{
 		ModelFamily: pb.ModelFamily_MODEL_FAMILY_GEMINI,
 		Model:       pb.Model_MODEL_GEMINI_2_5_FLASH,
-		Prompt:      "Summarize:",
-		Text:        "Test content",
+		Prompt:      testSummaryPrompt,
+		Text:        testSummaryText,
 	}
 
 	resp, err := server.Summarize(context.Background(), req)
@@ -286,14 +361,14 @@ func TestE2E_Summarize_TokenLimitBoundary(t *testing.T) {
 			limit:       1000,
 			trackerLim:  1000,
 			tokensPerOp: 500,
-			text:        "Test content",
+			text:        testSummaryText,
 		},
 		{
 			name:        "exact_boundary",
 			limit:       500,
 			trackerLim:  500,
 			tokensPerOp: 250,
-			text:        "Test",
+			text:        testShortText,
 		},
 	}
 
@@ -327,7 +402,7 @@ func TestE2E_Summarize_TokenLimitBoundary(t *testing.T) {
 			req := &pb.LLMSummaryRequest{
 				ModelFamily: pb.ModelFamily_MODEL_FAMILY_GEMINI,
 				Model:       pb.Model_MODEL_GEMINI_2_5_FLASH_LITE,
-				Prompt:      "Summarize:",
+				Prompt:      testSummaryPrompt,
 				Text:        tc.text,
 			}
 
@@ -376,8 +451,8 @@ func TestE2E_Summarize_TokenLimitUnlimited(t *testing.T) {
 	req := &pb.LLMSummaryRequest{
 		ModelFamily: pb.ModelFamily_MODEL_FAMILY_GEMINI,
 		Model:       pb.Model_MODEL_GEMINI_2_5_FLASH_LITE,
-		Prompt:      "Summarize:",
-		Text:        "Test content",
+		Prompt:      testSummaryPrompt,
+		Text:        testSummaryText,
 	}
 
 	for i := 0; i < 5; i++ {
@@ -412,8 +487,8 @@ func TestE2E_Summarize_TokenUsageTracking(t *testing.T) {
 	req := &pb.LLMSummaryRequest{
 		ModelFamily: pb.ModelFamily_MODEL_FAMILY_GEMINI,
 		Model:       pb.Model_MODEL_GEMINI_2_5_FLASH_LITE,
-		Prompt:      "Summarize:",
-		Text:        "Test content",
+		Prompt:      testSummaryPrompt,
+		Text:        testSummaryText,
 	}
 
 	for i := 0; i < 3; i++ {
@@ -451,8 +526,8 @@ func TestE2E_Summarize_TokenUsageFallsBackToCountTokens(t *testing.T) {
 	req := &pb.LLMSummaryRequest{
 		ModelFamily: pb.ModelFamily_MODEL_FAMILY_GEMINI,
 		Model:       pb.Model_MODEL_GEMINI_2_5_FLASH_LITE,
-		Prompt:      "Summarize:",
-		Text:        "Test content",
+		Prompt:      testSummaryPrompt,
+		Text:        testSummaryText,
 	}
 
 	_, err := server.Summarize(context.Background(), req)
@@ -491,7 +566,7 @@ func TestE2E_Summarize_ContentTruncatedWhenOverTokenLimit(
 	req := &pb.LLMSummaryRequest{
 		ModelFamily: pb.ModelFamily_MODEL_FAMILY_GEMINI,
 		Model:       pb.Model_MODEL_GEMINI_2_5_FLASH_LITE,
-		Prompt:      "Summarize:",
+		Prompt:      testSummaryPrompt,
 		Text:        strings.Repeat("A", 100000),
 		MaxTokens:   1000000,
 	}
@@ -529,8 +604,8 @@ func TestE2E_Summarize_CustomMaxTokens(t *testing.T) {
 	req := &pb.LLMSummaryRequest{
 		ModelFamily: pb.ModelFamily_MODEL_FAMILY_GEMINI,
 		Model:       pb.Model_MODEL_GEMINI_2_5_FLASH_LITE,
-		Prompt:      "Summarize:",
-		Text:        "Test content",
+		Prompt:      testSummaryPrompt,
+		Text:        testSummaryText,
 		MaxTokens:   500,
 	}
 
@@ -579,8 +654,8 @@ func TestE2E_Summarize_SlidingWindowExpiry(t *testing.T) {
 	req := &pb.LLMSummaryRequest{
 		ModelFamily: pb.ModelFamily_MODEL_FAMILY_GEMINI,
 		Model:       pb.Model_MODEL_GEMINI_2_5_FLASH_LITE,
-		Prompt:      "Summarize:",
-		Text:        "Test content",
+		Prompt:      testSummaryPrompt,
+		Text:        testSummaryText,
 	}
 
 	// Simulate old usage (25h ago) that should expire
@@ -614,8 +689,8 @@ func TestE2E_Summarize_ClientCreationFails(t *testing.T) {
 	req := &pb.LLMSummaryRequest{
 		ModelFamily: pb.ModelFamily_MODEL_FAMILY_GEMINI,
 		Model:       pb.Model_MODEL_GEMINI_2_5_FLASH_LITE,
-		Prompt:      "Summarize:",
-		Text:        "Test content",
+		Prompt:      testSummaryPrompt,
+		Text:        testSummaryText,
 	}
 
 	resp, err := server.Summarize(context.Background(), req)
@@ -641,8 +716,8 @@ func TestE2E_Summarize_CountTokensFails(t *testing.T) {
 	req := &pb.LLMSummaryRequest{
 		ModelFamily: pb.ModelFamily_MODEL_FAMILY_GEMINI,
 		Model:       pb.Model_MODEL_GEMINI_2_5_FLASH_LITE,
-		Prompt:      "Summarize:",
-		Text:        "Test",
+		Prompt:      testSummaryPrompt,
+		Text:        testShortText,
 	}
 
 	resp, err := server.Summarize(context.Background(), req)
@@ -670,8 +745,8 @@ func TestE2E_Summarize_EmptyResponse(t *testing.T) {
 	req := &pb.LLMSummaryRequest{
 		ModelFamily: pb.ModelFamily_MODEL_FAMILY_GEMINI,
 		Model:       pb.Model_MODEL_GEMINI_2_5_FLASH_LITE,
-		Prompt:      "Summarize:",
-		Text:        "Test",
+		Prompt:      testSummaryPrompt,
+		Text:        testShortText,
 	}
 
 	resp, err := server.Summarize(context.Background(), req)
@@ -700,8 +775,8 @@ func TestE2E_Summarize_NoCandidateContent(t *testing.T) {
 	req := &pb.LLMSummaryRequest{
 		ModelFamily: pb.ModelFamily_MODEL_FAMILY_GEMINI,
 		Model:       pb.Model_MODEL_GEMINI_2_5_FLASH_LITE,
-		Prompt:      "Summarize:",
-		Text:        "Test",
+		Prompt:      testSummaryPrompt,
+		Text:        testShortText,
 	}
 
 	resp, err := server.Summarize(context.Background(), req)
@@ -732,8 +807,8 @@ func TestE2E_Summarize_NoContentParts(t *testing.T) {
 	req := &pb.LLMSummaryRequest{
 		ModelFamily: pb.ModelFamily_MODEL_FAMILY_GEMINI,
 		Model:       pb.Model_MODEL_GEMINI_2_5_FLASH_LITE,
-		Prompt:      "Summarize:",
-		Text:        "Test",
+		Prompt:      testSummaryPrompt,
+		Text:        testShortText,
 	}
 
 	resp, err := server.Summarize(context.Background(), req)
@@ -758,8 +833,8 @@ func TestE2E_Summarize_NoAPIKey(t *testing.T) {
 	req := &pb.LLMSummaryRequest{
 		ModelFamily: pb.ModelFamily_MODEL_FAMILY_GEMINI,
 		Model:       pb.Model_MODEL_GEMINI_2_5_FLASH_LITE,
-		Prompt:      "Summarize:",
-		Text:        "Test",
+		Prompt:      testSummaryPrompt,
+		Text:        testShortText,
 	}
 
 	resp, err := server.Summarize(context.Background(), req)
@@ -795,7 +870,7 @@ func TestE2E_Summarize_MultipleSequentialRequests(t *testing.T) {
 		req := &pb.LLMSummaryRequest{
 			ModelFamily: pb.ModelFamily_MODEL_FAMILY_GEMINI,
 			Model:       pb.Model_MODEL_GEMINI_2_5_FLASH_LITE,
-			Prompt:      "Summarize:",
+			Prompt:      testSummaryPrompt,
 			Text:        fmt.Sprintf("Email content %d", i),
 		}
 
@@ -864,8 +939,8 @@ func TestE2E_Summarize_TokensNotRecordedOnFailure(t *testing.T) {
 	req := &pb.LLMSummaryRequest{
 		ModelFamily: pb.ModelFamily_MODEL_FAMILY_GEMINI,
 		Model:       pb.Model_MODEL_GEMINI_2_5_FLASH_LITE,
-		Prompt:      "Summarize:",
-		Text:        "Test",
+		Prompt:      testSummaryPrompt,
+		Text:        testShortText,
 	}
 
 	_, err := server.Summarize(context.Background(), req)

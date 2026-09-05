@@ -121,11 +121,11 @@ func TestBuildServiceConfigs(t *testing.T) {
 	}
 	serviceConfigs := buildServiceConfigs(cfg)
 	require.Len(t, serviceConfigs, 4)
-	assert.Equal(t, "llm", serviceConfigs[0].name)
+	assert.Equal(t, testLLMServiceName, serviceConfigs[0].name)
 	assert.Equal(t, "llm:50051", serviceConfigs[0].addr)
-	assert.Equal(t, "todo", serviceConfigs[1].name)
+	assert.Equal(t, testTodoServiceName, serviceConfigs[1].name)
 	assert.Equal(t, "todo:50052", serviceConfigs[1].addr)
-	assert.Equal(t, "database", serviceConfigs[2].name)
+	assert.Equal(t, testDatabaseServiceName, serviceConfigs[2].name)
 	assert.Equal(t, "database:50053", serviceConfigs[2].addr)
 	assert.Equal(t, "dependency", serviceConfigs[3].name)
 	assert.Equal(t, "dependency:50054", serviceConfigs[3].addr)
@@ -201,7 +201,7 @@ func TestRun(t *testing.T) {
 
 	t.Run("defaults dependency addr to todo addr when omitted", func(t *testing.T) {
 		capturedCfg := Config{}
-		fakeClients := &fakeStartupClients{serviceList: []string{"database"}}
+		fakeClients := &fakeStartupClients{serviceList: []string{testDatabaseServiceName}}
 		fakeRunner := &fakeAppRunner{}
 		createClients = func(cfg Config) (startupClients, error) {
 			capturedCfg = cfg
@@ -297,7 +297,9 @@ func TestRun(t *testing.T) {
 	})
 
 	t.Run("propagates server run errors", func(t *testing.T) {
-		fakeClients := &fakeStartupClients{serviceList: []string{"llm", "todo", "database"}}
+		fakeClients := &fakeStartupClients{
+			serviceList: []string{testLLMServiceName, testTodoServiceName, testDatabaseServiceName},
+		}
 		fakeRunner := &fakeAppRunner{runErr: errors.New("bind failed")}
 		createClients = func(Config) (startupClients, error) {
 			return fakeClients, nil
@@ -314,7 +316,7 @@ func TestRun(t *testing.T) {
 	})
 
 	t.Run("returns nil on successful startup", func(t *testing.T) {
-		fakeClients := &fakeStartupClients{serviceList: []string{"database"}}
+		fakeClients := &fakeStartupClients{serviceList: []string{testDatabaseServiceName}}
 		fakeRunner := &fakeAppRunner{}
 		createClients = func(Config) (startupClients, error) {
 			return fakeClients, nil

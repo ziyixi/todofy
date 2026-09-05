@@ -22,6 +22,12 @@ import (
 	pb "github.com/ziyixi/protos/go/todofy"
 )
 
+const (
+	testLLMServiceName      = "llm"
+	testTodoServiceName     = "todo"
+	testDatabaseServiceName = "database"
+)
+
 func TestNewGRPCClients(t *testing.T) {
 	t.Run("empty config creates empty clients", func(t *testing.T) {
 		clients, err := NewGRPCClients(nil)
@@ -60,7 +66,7 @@ func TestNewGRPCClients(t *testing.T) {
 		})
 
 		clients, err := NewGRPCClients([]ServiceConfig{{
-			name: "llm",
+			name: testLLMServiceName,
 			addr: "ignored",
 			newClient: func(_ *grpc.ClientConn) any {
 				return "client"
@@ -77,8 +83,8 @@ func TestGRPCClients_GetClient(t *testing.T) {
 	assert.Nil(t, clients.GetClient("missing"))
 
 	mockClient := &mocks.MockLLMSummaryServiceClient{}
-	clients.services["llm"] = &serviceState{client: mockClient}
-	assert.Equal(t, mockClient, clients.GetClient("llm"))
+	clients.services[testLLMServiceName] = &serviceState{client: mockClient}
+	assert.Equal(t, mockClient, clients.GetClient(testLLMServiceName))
 }
 
 func TestGRPCClients_Close(t *testing.T) {
@@ -91,13 +97,13 @@ func TestGRPCClients_Close(t *testing.T) {
 func TestGRPCClients_ServiceNames(t *testing.T) {
 	clients := &GRPCClients{
 		services: map[string]*serviceState{
-			"llm":      {},
-			"todo":     {},
-			"database": {},
+			testLLMServiceName:      {},
+			testTodoServiceName:     {},
+			testDatabaseServiceName: {},
 		},
 	}
 	names := clients.ServiceNames()
-	assert.ElementsMatch(t, []string{"llm", "todo", "database"}, names)
+	assert.ElementsMatch(t, []string{testLLMServiceName, testTodoServiceName, testDatabaseServiceName}, names)
 }
 
 func newBufconnConn(t *testing.T, registerHealth bool) (*grpc.ClientConn, func()) {
@@ -184,7 +190,7 @@ func TestSetUpDataBase(t *testing.T) {
 
 		clients := &GRPCClients{
 			services: map[string]*serviceState{
-				"database": {client: mockDB},
+				testDatabaseServiceName: {client: mockDB},
 			},
 		}
 
@@ -200,7 +206,7 @@ func TestSetUpDataBase(t *testing.T) {
 
 		clients := &GRPCClients{
 			services: map[string]*serviceState{
-				"database": {client: mockDB},
+				testDatabaseServiceName: {client: mockDB},
 			},
 		}
 
@@ -221,7 +227,7 @@ func TestSetUpDataBase(t *testing.T) {
 	t.Run("wrong database client type", func(t *testing.T) {
 		clients := &GRPCClients{
 			services: map[string]*serviceState{
-				"database": {client: "not-a-database-client"},
+				testDatabaseServiceName: {client: "not-a-database-client"},
 			},
 		}
 

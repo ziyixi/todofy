@@ -19,6 +19,8 @@ import (
 	pb "github.com/ziyixi/protos/go/todofy"
 )
 
+const testRecommendationSummary = "task"
+
 // helper to set up a gin test context with mock clients injected.
 func setupRecommendationTest(
 	mockDB *mocks.MockDataBaseServiceClient,
@@ -125,10 +127,13 @@ func TestHandleRecommendation_ValidJSON(t *testing.T) {
 		}, nil)
 
 	mockLLM := new(mocks.MockLLMSummaryServiceClient)
-	mockLLM.On("Summarize", mock.Anything, mock.Anything, mock.Anything).
+	useServerDefaults := mock.MatchedBy(func(req *pb.LLMSummaryRequest) bool {
+		return req.ModelFamily == pb.ModelFamily_MODEL_FAMILY_GEMINI && req.Model == pb.Model_MODEL_UNSPECIFIED
+	})
+	mockLLM.On("Summarize", mock.Anything, useServerDefaults, mock.Anything).
 		Return(&pb.LLMSummaryResponse{
 			Summary: llmJSON,
-			Model:   pb.Model_MODEL_GEMINI_2_5_FLASH_LITE,
+			Model:   pb.Model_MODEL_GEMINI_3_7_FLASH,
 		}, nil)
 
 	w, router := setupRecommendationTest(mockDB, mockLLM)
@@ -140,7 +145,8 @@ func TestHandleRecommendation_ValidJSON(t *testing.T) {
 	var resp RecommendationResponse
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
 	assert.Equal(t, 4, resp.TaskCount)
-	assert.Equal(t, "MODEL_GEMINI_2_5_FLASH_LITE", resp.Model)
+	// Report the model actually used by the service, including a fallback.
+	assert.Equal(t, "MODEL_GEMINI_3_7_FLASH", resp.Model)
 	require.Len(t, resp.Tasks, 3)
 
 	// Verify each task has the correct rank, title, and reason
@@ -171,7 +177,7 @@ func TestHandleRecommendation_JSONWithCodeFences(t *testing.T) {
 	mockDB := new(mocks.MockDataBaseServiceClient)
 	mockDB.On("QueryRecent", mock.Anything, mock.Anything, mock.Anything).
 		Return(&pb.QueryRecentResponse{
-			Entries: []*pb.DataBaseSchema{{Summary: "task"}},
+			Entries: []*pb.DataBaseSchema{{Summary: testRecommendationSummary}},
 		}, nil)
 
 	mockLLM := new(mocks.MockLLMSummaryServiceClient)
@@ -202,7 +208,7 @@ func TestHandleRecommendation_PlainCodeFences(t *testing.T) {
 	mockDB := new(mocks.MockDataBaseServiceClient)
 	mockDB.On("QueryRecent", mock.Anything, mock.Anything, mock.Anything).
 		Return(&pb.QueryRecentResponse{
-			Entries: []*pb.DataBaseSchema{{Summary: "task"}},
+			Entries: []*pb.DataBaseSchema{{Summary: testRecommendationSummary}},
 		}, nil)
 
 	mockLLM := new(mocks.MockLLMSummaryServiceClient)
@@ -232,7 +238,7 @@ func TestHandleRecommendation_FallbackOnInvalidJSON(t *testing.T) {
 	mockDB := new(mocks.MockDataBaseServiceClient)
 	mockDB.On("QueryRecent", mock.Anything, mock.Anything, mock.Anything).
 		Return(&pb.QueryRecentResponse{
-			Entries: []*pb.DataBaseSchema{{Summary: "task"}},
+			Entries: []*pb.DataBaseSchema{{Summary: testRecommendationSummary}},
 		}, nil)
 
 	mockLLM := new(mocks.MockLLMSummaryServiceClient)
@@ -365,7 +371,7 @@ func TestHandleRecommendation_EmptyStringFromLLM(t *testing.T) {
 	mockDB := new(mocks.MockDataBaseServiceClient)
 	mockDB.On("QueryRecent", mock.Anything, mock.Anything, mock.Anything).
 		Return(&pb.QueryRecentResponse{
-			Entries: []*pb.DataBaseSchema{{Summary: "task"}},
+			Entries: []*pb.DataBaseSchema{{Summary: testRecommendationSummary}},
 		}, nil)
 
 	mockLLM := new(mocks.MockLLMSummaryServiceClient)
@@ -505,7 +511,7 @@ func TestHandleRecommendation_RetryExhausted(t *testing.T) {
 	mockDB := new(mocks.MockDataBaseServiceClient)
 	mockDB.On("QueryRecent", mock.Anything, mock.Anything, mock.Anything).
 		Return(&pb.QueryRecentResponse{
-			Entries: []*pb.DataBaseSchema{{Summary: "task"}},
+			Entries: []*pb.DataBaseSchema{{Summary: testRecommendationSummary}},
 		}, nil)
 
 	mockLLM := new(mocks.MockLLMSummaryServiceClient)

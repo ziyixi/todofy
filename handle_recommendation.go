@@ -55,7 +55,7 @@ func HandleRecommendation(c *gin.Context) {
 			topN = n
 		} else {
 			c.JSON(http.StatusBadRequest, gin.H{
-				"error": fmt.Sprintf(
+				errorResponseKey: fmt.Sprintf(
 					"invalid top parameter: must be 1-%d", MaxTopN),
 			})
 			return
@@ -70,7 +70,7 @@ func HandleRecommendation(c *gin.Context) {
 	}
 	queryResp, err := databaseClient.QueryRecent(c, queryReq)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		c.JSON(http.StatusInternalServerError, gin.H{errorResponseKey: err.Error()})
 		return
 	}
 
@@ -93,9 +93,9 @@ func HandleRecommendation(c *gin.Context) {
 		utils.DefaultPromptToRecommendTopTasks,
 		topN, topN, topN, topN,
 	)
+	// Leave the model unspecified to use the LLM service's default and fallbacks.
 	recReq := &pb.LLMSummaryRequest{
 		ModelFamily: pb.ModelFamily_MODEL_FAMILY_GEMINI,
-		Model:       utils.RecommendationModel,
 		Prompt:      prompt,
 		Text:        content,
 	}
@@ -115,7 +115,7 @@ func HandleRecommendation(c *gin.Context) {
 		}
 	}
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		c.JSON(http.StatusInternalServerError, gin.H{errorResponseKey: err.Error()})
 		return
 	}
 

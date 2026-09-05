@@ -36,11 +36,16 @@ type recommendationHTTPResponse struct {
 }
 
 const (
-	sutExcludedBootstrapProjectA = "proj-excluded-a"
-	sutExcludedBootstrapProjectB = "proj-excluded-b"
-	temporaryUnavailableBody     = `{"error":"temporary unavailable"}`
-	todoistDownBody              = `{"error":"down"}`
-	structuredRecommendationJSON = `[
+	sutTaskAContent                  = "Task A <k:task-a>"
+	sutTaskBDependsOnAContent        = "Task B <k:task-b dep:task-a>"
+	sutTaskCMissingDependencyContent = "Task C <k:task-c dep:missing>"
+	sutProjectID                     = "proj-1"
+	sutTaskADependsOnBContent        = "Task A <k:task-a dep:task-b>"
+	sutExcludedBootstrapProjectA     = "proj-excluded-a"
+	sutExcludedBootstrapProjectB     = "proj-excluded-b"
+	temporaryUnavailableBody         = `{"error":"temporary unavailable"}`
+	todoistDownBody                  = `{"error":"down"}`
+	structuredRecommendationJSON     = `[
   {"rank":1,"title":"任务一","reason":"先处理"},
   {"rank":2,"title":"任务二","reason":"随后处理"}
 ]`
@@ -103,6 +108,7 @@ func TestSUTUpdateTodoIntegration(t *testing.T) {
 		require.Len(t, geminiState.Calls, 2)
 		assert.True(t, strings.HasSuffix(geminiState.Calls[0].Path, geminicontract.CountTokensOperation))
 		assert.True(t, strings.HasSuffix(geminiState.Calls[1].Path, geminicontract.GenerateContentOperation))
+		assert.Contains(t, geminiState.Calls[1].Path, "gemini-3.8-flash")
 
 		entries := h.queryEntries(t)
 		require.Len(t, entries, 1)
@@ -151,7 +157,12 @@ func TestSUTUpdateTodoIntegration(t *testing.T) {
 		require.Equal(t, http.StatusInternalServerError, status, string(body))
 		assert.Contains(t, string(body), "error in summarizing email")
 		assert.Empty(t, h.todoistState(t).Tasks)
-		require.Len(t, h.geminiState(t).Calls, 6)
+		geminiCalls := h.geminiState(t).Calls
+		require.Len(t, geminiCalls, 6)
+		for i, model := range []string{"gemini-3.8-flash", "gemini-3.7-flash", "gemini-3.5-flash-lite"} {
+			assert.Contains(t, geminiCalls[2*i].Path, model)
+			assert.Contains(t, geminiCalls[2*i+1].Path, model)
+		}
 	})
 
 	t.Run("update todo surfaces todoist retry exhaustion", func(t *testing.T) {
@@ -256,6 +267,7 @@ func TestSUTRecommendationIntegration(t *testing.T) {
 
 		resp := mustUnmarshal[recommendationHTTPResponse](t, body)
 		require.Len(t, resp.Tasks, 2)
+		assert.Equal(t, "MODEL_GEMINI_3_8_FLASH", resp.Model)
 		assert.Equal(t, "任务一", resp.Tasks[0].Title)
 		assert.NotEmpty(t, resp.Model)
 	})
@@ -298,9 +310,9 @@ func TestSUTDependencyIntegration(t *testing.T) {
 		h.resetScenario(t)
 		h.seedTodoist(t, admincontract.SeedTodoistStateRequest{
 			Tasks: []todoistapi.Task{
-				{ID: "1", Content: "Task A <k:task-a>"},
-				{ID: "2", Content: "Task B <k:task-b dep:task-a>"},
-				{ID: "3", Content: "Task C <k:task-c dep:missing>"},
+				{ID: "1", Content: sutTaskAContent},
+				{ID: "2", Content: sutTaskBDependsOnAContent},
+				{ID: "3", Content: sutTaskCMissingDependencyContent},
 			},
 		})
 
@@ -322,8 +334,8 @@ func TestSUTDependencyIntegration(t *testing.T) {
 		h.resetScenario(t)
 		h.seedTodoist(t, admincontract.SeedTodoistStateRequest{
 			Tasks: []todoistapi.Task{
-				{ID: "1", Content: "Loose task", ProjectID: "proj-1"},
-				{ID: "2", Content: "Existing task <k:existing>", ProjectID: "proj-1"},
+				{ID: "1", Content: "Loose task", ProjectID: sutProjectID},
+				{ID: "2", Content: "Existing task <k:existing>", ProjectID: sutProjectID},
 			},
 		})
 
@@ -374,9 +386,9 @@ func TestSUTDependencyIntegration(t *testing.T) {
 		h.resetScenario(t)
 		h.seedTodoist(t, admincontract.SeedTodoistStateRequest{
 			Tasks: []todoistapi.Task{
-				{ID: "1", Content: "Task A <k:task-a>"},
-				{ID: "2", Content: "Task B <k:task-b dep:task-a>"},
-				{ID: "3", Content: "Task C <k:task-c dep:missing>"},
+				{ID: "1", Content: sutTaskAContent},
+				{ID: "2", Content: sutTaskBDependsOnAContent},
+				{ID: "3", Content: sutTaskCMissingDependencyContent},
 			},
 		})
 
@@ -398,8 +410,8 @@ func TestSUTDependencyIntegration(t *testing.T) {
 		h.resetScenario(t)
 		h.seedTodoist(t, admincontract.SeedTodoistStateRequest{
 			Tasks: []todoistapi.Task{
-				{ID: "1", Content: "Task A <k:task-a>"},
-				{ID: "2", Content: "Task B <k:task-b dep:task-a>"},
+				{ID: "1", Content: sutTaskAContent},
+				{ID: "2", Content: sutTaskBDependsOnAContent},
 			},
 			QueuedResponses: []admincontract.TodoistQueuedResponse{
 				{
@@ -440,9 +452,9 @@ func TestSUTDependencyIntegration(t *testing.T) {
 		h.resetScenario(t)
 		h.seedTodoist(t, admincontract.SeedTodoistStateRequest{
 			Tasks: []todoistapi.Task{
-				{ID: "1", Content: "Task A <k:task-a dep:task-b>"},
+				{ID: "1", Content: sutTaskADependsOnBContent},
 				{ID: "2", Content: "Task B <k:task-b>"},
-				{ID: "3", Content: "Task C <k:task-c dep:missing>"},
+				{ID: "3", Content: sutTaskCMissingDependencyContent},
 			},
 			Labels: reservedTodoistLabels(),
 			QueuedResponses: repeatedTodoistResponses(
@@ -494,8 +506,8 @@ func TestSUTDependencyIntegration(t *testing.T) {
 		h.resetScenario(t)
 		h.seedTodoist(t, admincontract.SeedTodoistStateRequest{
 			Tasks: []todoistapi.Task{
-				{ID: "1", Content: "First task", ProjectID: "proj-1"},
-				{ID: "2", Content: "Second task", ProjectID: "proj-1"},
+				{ID: "1", Content: "First task", ProjectID: sutProjectID},
+				{ID: "2", Content: "Second task", ProjectID: sutProjectID},
 			},
 			QueuedResponses: repeatedTodoistResponses(
 				3,
@@ -546,7 +558,7 @@ func TestSUTDependencyIntegration(t *testing.T) {
 		labels := reservedTodoistLabels()
 		h.seedTodoist(t, admincontract.SeedTodoistStateRequest{
 			Tasks: []todoistapi.Task{
-				{ID: "1", Content: "Task A <k:task-a dep:task-b>"},
+				{ID: "1", Content: sutTaskADependsOnBContent},
 				{ID: "2", Content: "Task B <k:task-b>"},
 			},
 			Labels: labels,
@@ -579,7 +591,7 @@ func TestSUTDependencyIntegration(t *testing.T) {
 	t.Run("dependency bootstrap timeout returns gateway timeout and later recovers", func(t *testing.T) {
 		h.resetScenario(t)
 		delayedTasks := []todoistapi.Task{
-			{ID: "1", Content: "Task A", ProjectID: "proj-1"},
+			{ID: "1", Content: "Task A", ProjectID: sutProjectID},
 		}
 		h.seedTodoist(t, admincontract.SeedTodoistStateRequest{
 			Tasks: delayedTasks,
@@ -614,7 +626,7 @@ func TestSUTDependencyIntegration(t *testing.T) {
 		h.resetScenario(t)
 		h.seedTodoist(t, admincontract.SeedTodoistStateRequest{
 			Tasks: []todoistapi.Task{
-				{ID: "1", Content: "Auto bootstrap task", ProjectID: "proj-1"},
+				{ID: "1", Content: "Auto bootstrap task", ProjectID: sutProjectID},
 			},
 		})
 
@@ -631,9 +643,9 @@ func TestSUTDependencyIntegration(t *testing.T) {
 		h.resetScenario(t)
 		h.seedTodoist(t, admincontract.SeedTodoistStateRequest{
 			Tasks: []todoistapi.Task{
-				{ID: "1", Content: "Task A <k:task-a dep:task-b>", ProjectID: "proj-1"},
-				{ID: "2", Content: "Task B <k: dep:broken>", ProjectID: "proj-1"},
-				{ID: "3", Content: "Task C <v1>", ProjectID: "proj-1"},
+				{ID: "1", Content: sutTaskADependsOnBContent, ProjectID: sutProjectID},
+				{ID: "2", Content: "Task B <k: dep:broken>", ProjectID: sutProjectID},
+				{ID: "3", Content: "Task C <v1>", ProjectID: sutProjectID},
 			},
 		})
 

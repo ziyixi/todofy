@@ -14,6 +14,11 @@ import (
 	geminicontract "github.com/ziyixi/todofy/sut/contracts/gemini"
 )
 
+const (
+	errorResponseKey        = "error"
+	methodNotAllowedMessage = "method not allowed"
+)
+
 var (
 	port           = flag.Int("port", 8080, "Port for the fake Gemini service")
 	expectedAPIKey = flag.String("expected-api-key", "", "Expected x-goog-api-key header value")
@@ -52,7 +57,7 @@ func handleHealth(w http.ResponseWriter, _ *http.Request) {
 
 func (s *server) handleAdminReset(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{errorResponseKey: methodNotAllowedMessage})
 		return
 	}
 
@@ -67,13 +72,13 @@ func (s *server) handleAdminReset(w http.ResponseWriter, r *http.Request) {
 
 func (s *server) handleAdminSeed(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{errorResponseKey: methodNotAllowedMessage})
 		return
 	}
 
 	var req admincontract.SeedGeminiStateRequest
 	if err := decodeJSON(r.Body, &req); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		writeJSON(w, http.StatusBadRequest, map[string]string{errorResponseKey: err.Error()})
 		return
 	}
 
@@ -94,13 +99,13 @@ func (s *server) handleAdminSeed(w http.ResponseWriter, r *http.Request) {
 
 func (s *server) handleAdminQueue(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{errorResponseKey: methodNotAllowedMessage})
 		return
 	}
 
 	var req admincontract.QueueGeminiResponsesRequest
 	if err := decodeJSON(r.Body, &req); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		writeJSON(w, http.StatusBadRequest, map[string]string{errorResponseKey: err.Error()})
 		return
 	}
 
@@ -114,7 +119,7 @@ func (s *server) handleAdminQueue(w http.ResponseWriter, r *http.Request) {
 
 func (s *server) handleAdminState(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{errorResponseKey: methodNotAllowedMessage})
 		return
 	}
 
@@ -137,23 +142,23 @@ func (s *server) handleAdminState(w http.ResponseWriter, r *http.Request) {
 
 func (s *server) handleGemini(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{errorResponseKey: methodNotAllowedMessage})
 		return
 	}
 	if !strings.HasPrefix(r.URL.Path, geminicontract.ModelPathPrefix) {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
+		writeJSON(w, http.StatusNotFound, map[string]string{errorResponseKey: "not found"})
 		return
 	}
 
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "failed to read request body"})
+		writeJSON(w, http.StatusBadRequest, map[string]string{errorResponseKey: "failed to read request body"})
 		return
 	}
 	s.recordCall(r, body)
 
 	if *expectedAPIKey != "" && strings.TrimSpace(r.Header.Get("x-goog-api-key")) != *expectedAPIKey {
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "invalid api key"})
+		writeJSON(w, http.StatusUnauthorized, map[string]string{errorResponseKey: "invalid api key"})
 		return
 	}
 
@@ -163,14 +168,14 @@ func (s *server) handleGemini(w http.ResponseWriter, r *http.Request) {
 	case strings.HasSuffix(r.URL.Path, geminicontract.GenerateContentOperation):
 		s.handleGenerateContent(w, r.URL.Path, body)
 	default:
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "unsupported operation"})
+		writeJSON(w, http.StatusNotFound, map[string]string{errorResponseKey: "unsupported operation"})
 	}
 }
 
 func (s *server) handleCountTokens(w http.ResponseWriter, body []byte) {
 	var req geminicontract.CountTokensRequest
 	if err := json.Unmarshal(body, &req); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid countTokens request"})
+		writeJSON(w, http.StatusBadRequest, map[string]string{errorResponseKey: "invalid countTokens request"})
 		return
 	}
 
@@ -188,7 +193,7 @@ func (s *server) handleCountTokens(w http.ResponseWriter, body []byte) {
 func (s *server) handleGenerateContent(w http.ResponseWriter, path string, body []byte) {
 	var req geminicontract.GenerateContentRequest
 	if err := json.Unmarshal(body, &req); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid generateContent request"})
+		writeJSON(w, http.StatusBadRequest, map[string]string{errorResponseKey: "invalid generateContent request"})
 		return
 	}
 

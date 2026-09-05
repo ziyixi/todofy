@@ -140,13 +140,29 @@ The LLM service uses Google Gemini for email summarization with several cost-con
 
 ### Supported Models
 
-Models are tried in priority order for automatic fallback:
+Email summaries, range summaries, and task recommendations leave the model unspecified
+and use the LLM service's default fallback order:
 
-1. `gemini-2.5-flash-lite` (fastest, cheapest)
-2. `gemini-2.5-flash` (balanced)
-3. `gemini-3-flash-preview` (latest)
+1. `gemini-3.8-flash` (default)
+2. `gemini-3.7-flash`
+3. `gemini-3.5-flash-lite`
 
-Additionally, `gemini-2.5-pro` is available when explicitly requested.
+Errors or empty responses advance to the next model. If all three fail, the request
+returns an error. The response reports the model that actually generated the summary.
+An explicit `LLMSummaryRequest.model` selects only that model, with no automatic fallback.
+
+Additional explicit choices are `gemini-3.6-flash`, `gemini-3.5-flash`,
+`gemini-3.1-flash-lite`, and `gemini-3.1-pro-preview`.
+For compatibility, `gemini-2.5-pro`, `gemini-2.5-flash`, `gemini-2.5-flash-lite`, and
+`gemini-3-flash-preview` remain accepted, although their proto enum values are marked
+deprecated as project legacy choices. This does not mean Google has shut them down.
+Model availability also depends on the Gemini API key/project; see the
+[Gemini model catalog](https://ai.google.dev/gemini-api/docs/models).
+
+The model enum is provided by the shared `github.com/ziyixi/protos/go/todofy` Go module,
+pinned in `go.mod`; Todofy does not generate its own copy. Update proto sources on the
+shared repository's `protobuf` branch, wait for its workflow to publish generated Go
+code to `main`, then update this module dependency to that published commit.
 
 ### Cost Controls
 
@@ -546,7 +562,8 @@ Reported line coverage excludes `sut/**` and `testutils/**`.
 Dependency coverage now includes timeout and partial-success paths in the Todo service, while SUT keeps the HTTP-visible recovery contract covered separately.
 
 The LLM service includes e2e tests with a mock Gemini client (no real API calls or costs), covering:
-- Full summarization flow and model fallback
+- Gemini 3.8 Flash default selection, ordered 3.7 / 3.5 Flash Lite fallback and exhaustion
+- Explicit model selection without fallback (including legacy model compatibility)
 - Daily token limit enforcement and sliding window expiry
 - Token usage tracking (with `UsageMetadata` and `CountTokens` fallback)
 - Content truncation for oversized inputs
@@ -559,6 +576,7 @@ The database service includes tests for:
 The recommendation handler includes tests for:
 - No tasks / database error / LLM error handling
 - Valid JSON parsing with correct ranks, titles, and reasons
+- Shared server-default model selection and reporting the actual fallback model
 - Markdown code fence stripping (`\`\`\`json ... \`\`\``)
 - Fallback when LLM returns plain text instead of JSON
 - `?top=N` parameter validation (default 3, range 1-10, invalid values)

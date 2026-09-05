@@ -13,6 +13,12 @@ import (
 	"gorm.io/gorm"
 )
 
+const (
+	testSQLiteMemoryPath = ":memory:"
+	testDatabasePrompt   = "Test prompt"
+	testDatabaseSummary  = "Test summary"
+)
+
 func TestDatabaseServer_CreateIfNotExist(t *testing.T) {
 	t.Run("successful SQLite database creation", func(t *testing.T) {
 		server := &databaseServer{}
@@ -20,7 +26,7 @@ func TestDatabaseServer_CreateIfNotExist(t *testing.T) {
 		// Use in-memory SQLite for testing
 		req := &pb.CreateIfNotExistRequest{
 			Type: pb.DatabaseType_DATABASE_TYPE_SQLITE,
-			Path: ":memory:",
+			Path: testSQLiteMemoryPath,
 		}
 
 		resp, err := server.CreateIfNotExist(context.Background(), req)
@@ -62,7 +68,7 @@ func TestDatabaseServer_CreateIfNotExist(t *testing.T) {
 
 		req := &pb.CreateIfNotExistRequest{
 			Type: pb.DatabaseType_DATABASE_TYPE_UNSPECIFIED,
-			Path: ":memory:",
+			Path: testSQLiteMemoryPath,
 		}
 
 		resp, err := server.CreateIfNotExist(context.Background(), req)
@@ -98,10 +104,10 @@ func TestDatabaseServer_Write(t *testing.T) {
 			Schema: &pb.DataBaseSchema{
 				ModelFamily: pb.ModelFamily_MODEL_FAMILY_GEMINI,
 				Model:       pb.Model_MODEL_GEMINI_2_5_PRO,
-				Prompt:      "Test prompt",
+				Prompt:      testDatabasePrompt,
 				MaxTokens:   1024,
 				Text:        "Test text content",
-				Summary:     "Test summary",
+				Summary:     testDatabaseSummary,
 			},
 		}
 
@@ -116,10 +122,10 @@ func TestDatabaseServer_Write(t *testing.T) {
 		assert.NoError(t, err)
 		assert.Equal(t, int32(pb.ModelFamily_MODEL_FAMILY_GEMINI), entry.ModelFamily)
 		assert.Equal(t, int32(pb.Model_MODEL_GEMINI_2_5_PRO), entry.LLMModel)
-		assert.Equal(t, "Test prompt", entry.Prompt)
+		assert.Equal(t, testDatabasePrompt, entry.Prompt)
 		assert.Equal(t, int32(1024), entry.MaxTokens)
 		assert.Equal(t, "Test text content", entry.Text)
-		assert.Equal(t, "Test summary", entry.Summary)
+		assert.Equal(t, testDatabaseSummary, entry.Summary)
 	})
 
 	t.Run("write without database initialization", func(t *testing.T) {
@@ -129,9 +135,9 @@ func TestDatabaseServer_Write(t *testing.T) {
 			Schema: &pb.DataBaseSchema{
 				ModelFamily: pb.ModelFamily_MODEL_FAMILY_GEMINI,
 				Model:       pb.Model_MODEL_GEMINI_2_5_PRO,
-				Prompt:      "Test prompt",
+				Prompt:      testDatabasePrompt,
 				Text:        "Test text content",
-				Summary:     "Test summary",
+				Summary:     testDatabaseSummary,
 			},
 		}
 
@@ -299,18 +305,18 @@ func TestDatabaseEntry_Model(t *testing.T) {
 		entry := DatabaseEntry{
 			ModelFamily: int32(pb.ModelFamily_MODEL_FAMILY_GEMINI),
 			LLMModel:    int32(pb.Model_MODEL_GEMINI_2_5_PRO),
-			Prompt:      "Test prompt",
+			Prompt:      testDatabasePrompt,
 			MaxTokens:   1024,
 			Text:        "Test text",
-			Summary:     "Test summary",
+			Summary:     testDatabaseSummary,
 		}
 
 		assert.Equal(t, int32(pb.ModelFamily_MODEL_FAMILY_GEMINI), entry.ModelFamily)
 		assert.Equal(t, int32(pb.Model_MODEL_GEMINI_2_5_PRO), entry.LLMModel)
-		assert.Equal(t, "Test prompt", entry.Prompt)
+		assert.Equal(t, testDatabasePrompt, entry.Prompt)
 		assert.Equal(t, int32(1024), entry.MaxTokens)
 		assert.Equal(t, "Test text", entry.Text)
-		assert.Equal(t, "Test summary", entry.Summary)
+		assert.Equal(t, testDatabaseSummary, entry.Summary)
 	})
 
 	t.Run("gorm model fields", func(t *testing.T) {
@@ -449,7 +455,7 @@ func TestDatabaseIntegration(t *testing.T) {
 		// Step 1: Initialize database
 		createReq := &pb.CreateIfNotExistRequest{
 			Type: pb.DatabaseType_DATABASE_TYPE_SQLITE,
-			Path: ":memory:",
+			Path: testSQLiteMemoryPath,
 		}
 
 		_, err := server.CreateIfNotExist(context.Background(), createReq)
@@ -515,7 +521,7 @@ func TestDatabaseIntegration(t *testing.T) {
 
 // setupTestDatabase creates a test database server with in-memory SQLite
 func setupTestDatabase(t *testing.T) *databaseServer {
-	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	db, err := gorm.Open(sqlite.Open(testSQLiteMemoryPath), &gorm.Config{})
 	require.NoError(t, err)
 
 	err = db.AutoMigrate(&DatabaseEntry{})

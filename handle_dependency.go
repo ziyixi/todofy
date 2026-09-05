@@ -12,6 +12,8 @@ import (
 	"google.golang.org/grpc/status"
 )
 
+const errorResponseKey = "error"
+
 // HandleDependencyReconcile triggers dependency graph reconcile or analyze-only mode.
 func HandleDependencyReconcile(c *gin.Context) {
 	dependencyClient, ok := getDependencyClient(c)
@@ -21,14 +23,14 @@ func HandleDependencyReconcile(c *gin.Context) {
 
 	dryRun, err := parseBoolQuery(c, "dry_run", false)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{errorResponseKey: err.Error()})
 		return
 	}
 
 	if dryRun {
 		resp, rpcErr := dependencyClient.AnalyzeGraph(c, &pb.AnalyzeDependencyGraphRequest{})
 		if rpcErr != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": rpcErr.Error()})
+			c.JSON(http.StatusInternalServerError, gin.H{errorResponseKey: rpcErr.Error()})
 			return
 		}
 		c.JSON(http.StatusOK, gin.H{
@@ -55,7 +57,7 @@ func HandleDependencyBootstrapMissingKeys(c *gin.Context) {
 
 	dryRun, err := parseBoolQuery(c, "dry_run", true)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{errorResponseKey: err.Error()})
 		return
 	}
 
@@ -78,7 +80,7 @@ func HandleDependencyClearMetadata(c *gin.Context) {
 
 	dryRun, err := parseBoolQuery(c, "dry_run", true)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{errorResponseKey: err.Error()})
 		return
 	}
 
@@ -102,7 +104,7 @@ func HandleDependencyStatus(c *gin.Context) {
 	taskKey := strings.TrimSpace(c.Query("task_key"))
 	taskID := strings.TrimSpace(c.Query("todoist_task_id"))
 	if taskKey == "" && taskID == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "task_key or todoist_task_id is required"})
+		c.JSON(http.StatusBadRequest, gin.H{errorResponseKey: "task_key or todoist_task_id is required"})
 		return
 	}
 
@@ -112,7 +114,7 @@ func HandleDependencyStatus(c *gin.Context) {
 	})
 	if rpcErr != nil {
 		if status.Code(rpcErr) == codes.NotFound {
-			c.JSON(http.StatusNotFound, gin.H{"error": rpcErr.Error()})
+			c.JSON(http.StatusNotFound, gin.H{errorResponseKey: rpcErr.Error()})
 			return
 		}
 		writeDependencyRPCError(c, rpcErr)
@@ -130,7 +132,7 @@ func HandleDependencyIssues(c *gin.Context) {
 
 	issueType, err := parseIssueType(c.Query("type"))
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{errorResponseKey: err.Error()})
 		return
 	}
 
@@ -149,12 +151,12 @@ func getDependencyClient(c *gin.Context) (pb.DependencyServiceClient, bool) {
 	clients := c.MustGet(utils.KeyGRPCClients).(ClientProvider)
 	client := clients.GetClient("dependency")
 	if client == nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "dependency client not configured"})
+		c.JSON(http.StatusInternalServerError, gin.H{errorResponseKey: "dependency client not configured"})
 		return nil, false
 	}
 	dependencyClient, ok := client.(pb.DependencyServiceClient)
 	if !ok {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "dependency client has unexpected type"})
+		c.JSON(http.StatusInternalServerError, gin.H{errorResponseKey: "dependency client has unexpected type"})
 		return nil, false
 	}
 	return dependencyClient, true
@@ -165,7 +167,7 @@ func writeDependencyRPCError(c *gin.Context, err error) {
 	if status.Code(err) == codes.DeadlineExceeded {
 		statusCode = http.StatusGatewayTimeout
 	}
-	c.JSON(statusCode, gin.H{"error": err.Error()})
+	c.JSON(statusCode, gin.H{errorResponseKey: err.Error()})
 }
 
 func parseBoolQuery(c *gin.Context, key string, defaultValue bool) (bool, error) {

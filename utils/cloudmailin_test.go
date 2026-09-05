@@ -8,6 +8,13 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+const (
+	testMailSender    = "sender@example.com"
+	testMailRecipient = "recipient@example.com"
+	testMailDate      = "2023-01-01T10:00:00Z"
+	testMailSubject   = "Test Subject"
+)
+
 func TestParseCloudmailin(t *testing.T) {
 	tests := []struct {
 		name         string
@@ -27,10 +34,10 @@ func TestParseCloudmailin(t *testing.T) {
 				"plain": "Test plain content"
 			}`,
 			expectedInfo: MailInfo{
-				From:    "sender@example.com",
-				To:      "recipient@example.com",
-				Date:    "2023-01-01T10:00:00Z",
-				Subject: "Test Subject",
+				From:    testMailSender,
+				To:      testMailRecipient,
+				Date:    testMailDate,
+				Subject: testMailSubject,
 				Content: "Test HTML content", // Should be converted from HTML
 			},
 		},
@@ -47,10 +54,10 @@ func TestParseCloudmailin(t *testing.T) {
 				"plain": "Test plain content"
 			}`,
 			expectedInfo: MailInfo{
-				From:    "sender@example.com",
-				To:      "recipient@example.com",
-				Date:    "2023-01-01T10:00:00Z",
-				Subject: "Test Subject",
+				From:    testMailSender,
+				To:      testMailRecipient,
+				Date:    testMailDate,
+				Subject: testMailSubject,
 				Content: "Test plain content",
 			},
 		},
@@ -67,10 +74,10 @@ func TestParseCloudmailin(t *testing.T) {
 				"plain": "Check this link (https://example.com/very/long/url) for more info"
 			}`,
 			expectedInfo: MailInfo{
-				From:    "sender@example.com",
-				To:      "recipient@example.com",
-				Date:    "2023-01-01T10:00:00Z",
-				Subject: "Test Subject",
+				From:    testMailSender,
+				To:      testMailRecipient,
+				Date:    testMailDate,
+				Subject: testMailSubject,
 				Content: "Check this link () for more info",
 			},
 		},
@@ -90,9 +97,9 @@ func TestParseCloudmailin(t *testing.T) {
 				"plain": "Forwarded content"
 			}`,
 			expectedInfo: MailInfo{
-				From:    "sender@example.com",
-				To:      "recipient@example.com",
-				Date:    "2023-01-01T10:00:00Z",
+				From:    testMailSender,
+				To:      testMailRecipient,
+				Date:    testMailDate,
 				Subject: "Original Subject", // FW: prefix should be removed
 				Content: "Forwarded content",
 			},
@@ -112,7 +119,7 @@ func TestParseCloudmailin(t *testing.T) {
 			expectedInfo: MailInfo{
 				From:    "original@sender.com",   // Should extract original sender
 				To:      "forwarder@example.com", // Should swap to/from
-				Date:    "2023-01-01T10:00:00Z",
+				Date:    testMailDate,
 				Subject: "Forwarded Subject",
 				Content: "content\r\n_____\r\nFrom: John Smith original@sender.com\r\nForwarded content",
 			},
@@ -132,7 +139,7 @@ func TestParseCloudmailin(t *testing.T) {
 			expectedInfo: MailInfo{
 				From:    "sender unknown", // Fallback when regex doesn't match
 				To:      "forwarder@example.com",
-				Date:    "2023-01-01T10:00:00Z",
+				Date:    testMailDate,
 				Subject: "Forwarded Subject",
 				Content: "No proper forwarding format",
 			},

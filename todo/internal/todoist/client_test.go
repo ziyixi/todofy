@@ -12,6 +12,11 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+const (
+	testTaskContent      = "Test Task"
+	testShortTaskContent = "Test"
+)
+
 func TestClient_CreateTask(t *testing.T) {
 	t.Run("successful task creation", func(t *testing.T) {
 		// Mock server
@@ -26,13 +31,13 @@ func TestClient_CreateTask(t *testing.T) {
 			var taskReq CreateTaskRequest
 			err := json.NewDecoder(r.Body).Decode(&taskReq)
 			require.NoError(t, err)
-			assert.Equal(t, "Test Task", taskReq.Content)
+			assert.Equal(t, testTaskContent, taskReq.Content)
 			assert.Equal(t, "123", taskReq.ProjectID)
 
 			// Return mock response
 			response := Task{
 				ID:        "456",
-				Content:   "Test Task",
+				Content:   testTaskContent,
 				ProjectID: "123",
 			}
 			w.Header().Set("Content-Type", "application/json")
@@ -44,7 +49,7 @@ func TestClient_CreateTask(t *testing.T) {
 		client.baseURL = server.URL
 
 		taskReq := &CreateTaskRequest{
-			Content:   "Test Task",
+			Content:   testTaskContent,
 			ProjectID: "123",
 		}
 
@@ -53,7 +58,7 @@ func TestClient_CreateTask(t *testing.T) {
 		assert.NoError(t, err)
 		assert.NotNil(t, result)
 		assert.Equal(t, "456", result.ID)
-		assert.Equal(t, "Test Task", result.Content)
+		assert.Equal(t, testTaskContent, result.Content)
 		assert.Equal(t, "123", result.ProjectID)
 	})
 
@@ -68,7 +73,7 @@ func TestClient_CreateTask(t *testing.T) {
 		client.baseURL = server.URL
 
 		taskReq := &CreateTaskRequest{
-			Content:   "Test Task",
+			Content:   testTaskContent,
 			ProjectID: "123",
 		}
 
@@ -84,7 +89,7 @@ func TestClient_CreateTask(t *testing.T) {
 		client.baseURL = "http://non-existent-server"
 
 		taskReq := &CreateTaskRequest{
-			Content:   "Test Task",
+			Content:   testTaskContent,
 			ProjectID: "123",
 		}
 
@@ -108,7 +113,7 @@ func TestClient_CreateTask(t *testing.T) {
 		client.baseURL = server.URL
 
 		taskReq := &CreateTaskRequest{
-			Content:   "Test Task",
+			Content:   testTaskContent,
 			ProjectID: "123",
 		}
 
@@ -165,7 +170,7 @@ func TestClient_CreateTask(t *testing.T) {
 			requestID := r.Header.Get("X-Request-Id")
 			assert.Empty(t, requestID)
 
-			response := Task{ID: "123", Content: "Test"}
+			response := Task{ID: "123", Content: testShortTaskContent}
 			_ = json.NewEncoder(w).Encode(response) // Best effort encoding
 		}))
 		defer server.Close()
@@ -173,7 +178,7 @@ func TestClient_CreateTask(t *testing.T) {
 		client := NewClient("test-token")
 		client.baseURL = server.URL
 
-		taskReq := &CreateTaskRequest{Content: "Test", ProjectID: "123"}
+		taskReq := &CreateTaskRequest{Content: testShortTaskContent, ProjectID: "123"}
 		result, err := client.CreateTask(context.Background(), "", taskReq)
 
 		assert.NoError(t, err)
@@ -187,7 +192,7 @@ func TestClient_Authentication(t *testing.T) {
 			auth := r.Header.Get("Authorization")
 			assert.Equal(t, "Bearer my-secret-token", auth)
 
-			response := Task{ID: "123", Content: "Test"}
+			response := Task{ID: "123", Content: testShortTaskContent}
 			_ = json.NewEncoder(w).Encode(response) // Best effort encoding
 		}))
 		defer server.Close()
@@ -195,7 +200,7 @@ func TestClient_Authentication(t *testing.T) {
 		client := NewClient("my-secret-token")
 		client.baseURL = server.URL
 
-		taskReq := &CreateTaskRequest{Content: "Test", ProjectID: "123"}
+		taskReq := &CreateTaskRequest{Content: testShortTaskContent, ProjectID: "123"}
 		_, err := client.CreateTask(context.Background(), "req-123", taskReq)
 
 		assert.NoError(t, err)
@@ -208,7 +213,7 @@ func TestClient_RequestID(t *testing.T) {
 			requestID := r.Header.Get("X-Request-Id")
 			assert.Equal(t, "test-request-123", requestID)
 
-			response := Task{ID: "123", Content: "Test"}
+			response := Task{ID: "123", Content: testShortTaskContent}
 			_ = json.NewEncoder(w).Encode(response) // Best effort encode
 		}))
 		defer server.Close()
@@ -217,7 +222,7 @@ func TestClient_RequestID(t *testing.T) {
 		client.baseURL = server.URL
 
 		taskReq := &CreateTaskRequest{
-			Content:   "Test",
+			Content:   testShortTaskContent,
 			ProjectID: "123",
 		}
 
@@ -231,7 +236,7 @@ func TestClient_RequestID(t *testing.T) {
 			requestID := r.Header.Get("X-Request-Id")
 			assert.Empty(t, requestID)
 
-			response := Task{ID: "123", Content: "Test"}
+			response := Task{ID: "123", Content: testShortTaskContent}
 			_ = json.NewEncoder(w).Encode(response) // Best effort encode
 		}))
 		defer server.Close()
@@ -239,7 +244,7 @@ func TestClient_RequestID(t *testing.T) {
 		client := NewClient("test-token")
 		client.baseURL = server.URL
 
-		taskReq := &CreateTaskRequest{Content: "Test", ProjectID: "123"}
+		taskReq := &CreateTaskRequest{Content: testShortTaskContent, ProjectID: "123"}
 		_, err := client.CreateTask(context.Background(), "", taskReq)
 
 		assert.NoError(t, err)
@@ -324,7 +329,7 @@ func TestTask_Validation(t *testing.T) {
 
 	t.Run("CreateTaskRequest JSON tags", func(t *testing.T) {
 		task := CreateTaskRequest{
-			Content:   "Test",
+			Content:   testShortTaskContent,
 			ProjectID: "456",
 		}
 
@@ -336,14 +341,14 @@ func TestTask_Validation(t *testing.T) {
 		err = json.Unmarshal(data, &jsonData)
 		assert.NoError(t, err)
 
-		assert.Equal(t, "Test", jsonData["content"])
+		assert.Equal(t, testShortTaskContent, jsonData["content"])
 		assert.Equal(t, "456", jsonData["project_id"])
 	})
 
 	t.Run("Task JSON tags", func(t *testing.T) {
 		task := Task{
 			ID:        "123",
-			Content:   "Test",
+			Content:   testShortTaskContent,
 			ProjectID: "456",
 		}
 
@@ -356,7 +361,7 @@ func TestTask_Validation(t *testing.T) {
 		assert.NoError(t, err)
 
 		assert.Equal(t, "123", jsonData["id"])
-		assert.Equal(t, "Test", jsonData["content"])
+		assert.Equal(t, testShortTaskContent, jsonData["content"])
 		assert.Equal(t, "456", jsonData["project_id"])
 	})
 }

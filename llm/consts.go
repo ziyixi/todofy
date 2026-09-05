@@ -9,11 +9,19 @@ var (
 		pb.Model_MODEL_GEMINI_2_5_FLASH:       "gemini-2.5-flash",
 		pb.Model_MODEL_GEMINI_2_5_FLASH_LITE:  "gemini-2.5-flash-lite",
 		pb.Model_MODEL_GEMINI_3_FLASH_PREVIEW: "gemini-3-flash-preview",
+		pb.Model_MODEL_GEMINI_3_8_FLASH:       "gemini-3.8-flash",
+		pb.Model_MODEL_GEMINI_3_7_FLASH:       "gemini-3.7-flash",
+		pb.Model_MODEL_GEMINI_3_6_FLASH:       "gemini-3.6-flash",
+		pb.Model_MODEL_GEMINI_3_5_FLASH:       "gemini-3.5-flash",
+		pb.Model_MODEL_GEMINI_3_5_FLASH_LITE:  "gemini-3.5-flash-lite",
+		pb.Model_MODEL_GEMINI_3_1_FLASH_LITE:  "gemini-3.1-flash-lite",
+		pb.Model_MODEL_GEMINI_3_1_PRO_PREVIEW: "gemini-3.1-pro-preview",
 	}
+	// Unspecified-model requests use this order; explicit models do not fall back.
 	llmModelPriority = []pb.Model{
-		pb.Model_MODEL_GEMINI_2_5_FLASH_LITE,
-		pb.Model_MODEL_GEMINI_2_5_FLASH,
-		pb.Model_MODEL_GEMINI_3_FLASH_PREVIEW,
+		pb.Model_MODEL_GEMINI_3_8_FLASH,
+		pb.Model_MODEL_GEMINI_3_7_FLASH,
+		pb.Model_MODEL_GEMINI_3_5_FLASH_LITE,
 	}
 	supportedModelFamily = []pb.ModelFamily{
 		pb.ModelFamily_MODEL_FAMILY_GEMINI,

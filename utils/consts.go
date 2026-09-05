@@ -1,12 +1,5 @@
 package utils
 
-import pb "github.com/ziyixi/protos/go/todofy"
-
-// RecommendationModel is the preferred model for the recommendation
-// endpoint. This should mirror the strongest model available in
-// llm/consts.go llmModelPriority.
-var RecommendationModel = pb.Model_MODEL_GEMINI_3_FLASH_PREVIEW
-
 // Key constants used throughout the application for context storage
 const (
 	// KeyGRPCClients is the context key for storing gRPC clients

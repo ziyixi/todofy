@@ -16,6 +16,14 @@ import (
 	"google.golang.org/grpc/status"
 )
 
+const (
+	testDependencyTaskAID             = "task-a"
+	testDependencyTaskAWithDependency = "Task A <k:a dep:b>"
+	testDependencyTaskBID             = "task-b"
+	testDependencyTaskBWithKey        = "Task B <k:b>"
+	testDependencyTaskATitle          = "Task A"
+)
+
 type updateContentCall struct {
 	taskID  string
 	content string
@@ -385,14 +393,14 @@ func TestDependencyServerReconcileIsIdempotentWithMinimalDiff(t *testing.T) {
 	oldUpdateTime := time.Now().Add(-10 * time.Minute).Format(time.RFC3339)
 	fakeClient := newFakeDependencyTodoistClient([]*todoist.Task{
 		{
-			ID:        "task-a",
-			Content:   "Task A <k:a dep:b>",
+			ID:        testDependencyTaskAID,
+			Content:   testDependencyTaskAWithDependency,
 			Labels:    nil,
 			UpdatedAt: oldUpdateTime,
 		},
 		{
-			ID:        "task-b",
-			Content:   "Task B <k:b>",
+			ID:        testDependencyTaskBID,
+			Content:   testDependencyTaskBWithKey,
 			Labels:    nil,
 			UpdatedAt: oldUpdateTime,
 		},
@@ -411,7 +419,7 @@ func TestDependencyServerReconcileIsIdempotentWithMinimalDiff(t *testing.T) {
 	assert.Equal(t, 1, updatedCount)
 	assert.Empty(t, writeFailures)
 
-	taskA := fakeClient.tasksByID["task-a"]
+	taskA := fakeClient.tasksByID[testDependencyTaskAID]
 	require.NotNil(t, taskA)
 	assert.Contains(t, taskA.Labels, dependency.LabelBlocked)
 
@@ -427,8 +435,16 @@ func TestDependencyServerReconcileGraph(t *testing.T) {
 	*todoistAPIKey = testGenericAPIKey
 
 	fakeClient := newFakeDependencyTodoistClient([]*todoist.Task{
-		{ID: "task-a", Content: "Task A <k:a dep:b>", UpdatedAt: time.Now().Add(-time.Hour).Format(time.RFC3339)},
-		{ID: "task-b", Content: "Task B <k:b>", UpdatedAt: time.Now().Add(-time.Hour).Format(time.RFC3339)},
+		{
+			ID:        testDependencyTaskAID,
+			Content:   testDependencyTaskAWithDependency,
+			UpdatedAt: time.Now().Add(-time.Hour).Format(time.RFC3339),
+		},
+		{
+			ID:        testDependencyTaskBID,
+			Content:   testDependencyTaskBWithKey,
+			UpdatedAt: time.Now().Add(-time.Hour).Format(time.RFC3339),
+		},
 	})
 	server := &dependencyServer{
 		newTodoistClient: func(string) todoistOperationalClient { return fakeClient },
@@ -449,8 +465,16 @@ func TestDependencyServerReconcileGraphTimeoutAndRecovery(t *testing.T) {
 	*todoistAPIKey = testGenericAPIKey
 
 	fakeClient := newFakeDependencyTodoistClient([]*todoist.Task{
-		{ID: "task-a", Content: "Task A <k:a dep:b>", UpdatedAt: time.Now().Add(-time.Hour).Format(time.RFC3339)},
-		{ID: "task-b", Content: "Task B <k:b>", UpdatedAt: time.Now().Add(-time.Hour).Format(time.RFC3339)},
+		{
+			ID:        testDependencyTaskAID,
+			Content:   testDependencyTaskAWithDependency,
+			UpdatedAt: time.Now().Add(-time.Hour).Format(time.RFC3339),
+		},
+		{
+			ID:        testDependencyTaskBID,
+			Content:   testDependencyTaskBWithKey,
+			UpdatedAt: time.Now().Add(-time.Hour).Format(time.RFC3339),
+		},
 	})
 	fakeClient.ensureLabelsDelay = 50 * time.Millisecond
 
@@ -479,12 +503,20 @@ func TestDependencyServerReconcileGraphPartialSuccessAndRecovery(t *testing.T) {
 	*todoistAPIKey = testGenericAPIKey
 
 	fakeClient := newFakeDependencyTodoistClient([]*todoist.Task{
-		{ID: "task-a", Content: "Task A <k:a dep:b>", UpdatedAt: time.Now().Add(-time.Hour).Format(time.RFC3339)},
-		{ID: "task-b", Content: "Task B <k:b>", UpdatedAt: time.Now().Add(-time.Hour).Format(time.RFC3339)},
+		{
+			ID:        testDependencyTaskAID,
+			Content:   testDependencyTaskAWithDependency,
+			UpdatedAt: time.Now().Add(-time.Hour).Format(time.RFC3339),
+		},
+		{
+			ID:        testDependencyTaskBID,
+			Content:   testDependencyTaskBWithKey,
+			UpdatedAt: time.Now().Add(-time.Hour).Format(time.RFC3339),
+		},
 		{ID: "task-c", Content: "Task C <k:c dep:missing>", UpdatedAt: time.Now().Add(-time.Hour).Format(time.RFC3339)},
 	})
 	fakeClient.updateLabelErrs = map[string]error{
-		"task-a": assert.AnError,
+		testDependencyTaskAID: assert.AnError,
 	}
 
 	server := &dependencyServer{
@@ -501,15 +533,15 @@ func TestDependencyServerReconcileGraphPartialSuccessAndRecovery(t *testing.T) {
 	assert.Equal(t, int32(1), resp.GetUpdatedTaskCount())
 	assert.Equal(t, int32(1), resp.GetFailedUpdateCount())
 	require.Len(t, resp.GetWriteFailures(), 1)
-	assert.Equal(t, "task-a", resp.GetWriteFailures()[0].GetTodoistTaskId())
+	assert.Equal(t, testDependencyTaskAID, resp.GetWriteFailures()[0].GetTodoistTaskId())
 	assert.Equal(t, "a", resp.GetWriteFailures()[0].GetTaskKey())
 	assert.Equal(t, dependencyWriteOperationUpdateLabels, resp.GetWriteFailures()[0].GetOperation())
 	assert.Contains(t, resp.GetWriteFailures()[0].GetErrorMessage(), "failed to update Todoist task labels")
 
-	assert.NotContains(t, fakeClient.tasksByID["task-a"].Labels, dependency.LabelBlocked)
+	assert.NotContains(t, fakeClient.tasksByID[testDependencyTaskAID].Labels, dependency.LabelBlocked)
 	assert.Contains(t, fakeClient.tasksByID["task-c"].Labels, dependency.LabelBrokenDep)
 
-	delete(fakeClient.updateLabelErrs, "task-a")
+	delete(fakeClient.updateLabelErrs, testDependencyTaskAID)
 
 	resp, err = server.ReconcileGraph(context.Background(), &pb.ReconcileDependencyGraphRequest{})
 	require.NoError(t, err)
@@ -517,7 +549,7 @@ func TestDependencyServerReconcileGraphPartialSuccessAndRecovery(t *testing.T) {
 	assert.Equal(t, int32(1), resp.GetUpdatedTaskCount())
 	assert.Zero(t, resp.GetFailedUpdateCount())
 	assert.Empty(t, resp.GetWriteFailures())
-	assert.Contains(t, fakeClient.tasksByID["task-a"].Labels, dependency.LabelBlocked)
+	assert.Contains(t, fakeClient.tasksByID[testDependencyTaskAID].Labels, dependency.LabelBlocked)
 }
 
 func TestDependencyServerAnalyzeAndQueryMethods(t *testing.T) {
@@ -525,8 +557,8 @@ func TestDependencyServerAnalyzeAndQueryMethods(t *testing.T) {
 	*todoistAPIKey = testGenericAPIKey
 
 	fakeClient := newFakeDependencyTodoistClient([]*todoist.Task{
-		{ID: "task-a", Content: "Task A <k:a dep:missing>"},
-		{ID: "task-b", Content: "Task B <k:b>"},
+		{ID: testDependencyTaskAID, Content: "Task A <k:a dep:missing>"},
+		{ID: testDependencyTaskBID, Content: testDependencyTaskBWithKey},
 	})
 	server := &dependencyServer{
 		newTodoistClient: func(string) todoistOperationalClient { return fakeClient },
@@ -541,7 +573,7 @@ func TestDependencyServerAnalyzeAndQueryMethods(t *testing.T) {
 	})
 	require.NoError(t, err)
 	require.NotNil(t, statusResp.GetStatus())
-	assert.Equal(t, "task-a", statusResp.GetStatus().GetTodoistTaskId())
+	assert.Equal(t, testDependencyTaskAID, statusResp.GetStatus().GetTodoistTaskId())
 
 	issuesResp, err := server.ListDependencyIssues(context.Background(), &pb.ListDependencyIssuesRequest{
 		Type:    pb.DependencyIssueType_DEPENDENCY_ISSUE_TYPE_BROKEN_REFERENCE,
@@ -559,7 +591,7 @@ func TestDependencyServerGetTaskStatusErrors(t *testing.T) {
 	server := &dependencyServer{
 		newTodoistClient: func(string) todoistOperationalClient {
 			return newFakeDependencyTodoistClient([]*todoist.Task{
-				{ID: "task-a", Content: "Task A <k:a>"},
+				{ID: testDependencyTaskAID, Content: "Task A <k:a>"},
 			})
 		},
 	}
@@ -586,8 +618,16 @@ func TestDependencyServerStartBackgroundReconcile(t *testing.T) {
 	*todoistAPIKey = testGenericAPIKey
 
 	fakeClient := newFakeDependencyTodoistClient([]*todoist.Task{
-		{ID: "task-a", Content: "Task A <k:a dep:b>", UpdatedAt: time.Now().Add(-time.Hour).Format(time.RFC3339)},
-		{ID: "task-b", Content: "Task B <k:b>", UpdatedAt: time.Now().Add(-time.Hour).Format(time.RFC3339)},
+		{
+			ID:        testDependencyTaskAID,
+			Content:   testDependencyTaskAWithDependency,
+			UpdatedAt: time.Now().Add(-time.Hour).Format(time.RFC3339),
+		},
+		{
+			ID:        testDependencyTaskBID,
+			Content:   testDependencyTaskBWithKey,
+			UpdatedAt: time.Now().Add(-time.Hour).Format(time.RFC3339),
+		},
 	})
 	fakeClient.updateLabelsSignal = make(chan struct{}, 1)
 	server := &dependencyServer{
@@ -627,7 +667,7 @@ func TestDependencyServerBackgroundLoopRunsStartupBootstrap(t *testing.T) {
 	*todoistAPIKey = testGenericAPIKey
 
 	fakeClient := newFakeDependencyTodoistClient([]*todoist.Task{
-		{ID: "task-a", Content: "Task A"},
+		{ID: testDependencyTaskAID, Content: testDependencyTaskATitle},
 	})
 	server := &dependencyServer{
 		newTodoistClient:  func(string) todoistOperationalClient { return fakeClient },
@@ -648,7 +688,7 @@ func TestDependencyServerBackgroundLoopRunsStartupBootstrap(t *testing.T) {
 	require.Eventually(t, func() bool {
 		return fakeClient.updateContentCallCount() == 1
 	}, 2*time.Second, 20*time.Millisecond)
-	assert.Contains(t, fakeClient.taskContent("task-a"), "<k:")
+	assert.Contains(t, fakeClient.taskContent(testDependencyTaskAID), "<k:")
 
 	cancel()
 	select {
@@ -663,7 +703,7 @@ func TestDependencyServerBackgroundLoopRunsPeriodicBootstrap(t *testing.T) {
 	*todoistAPIKey = testGenericAPIKey
 
 	fakeClient := newFakeDependencyTodoistClient([]*todoist.Task{
-		{ID: "task-a", Content: "Task A"},
+		{ID: testDependencyTaskAID, Content: testDependencyTaskATitle},
 	})
 	server := &dependencyServer{
 		newTodoistClient:  func(string) todoistOperationalClient { return fakeClient },
@@ -686,7 +726,7 @@ func TestDependencyServerBackgroundLoopRunsPeriodicBootstrap(t *testing.T) {
 	}, 2*time.Second, 20*time.Millisecond)
 
 	// Force the task back to missing metadata and wait for the periodic tick.
-	require.True(t, fakeClient.setTaskContent("task-a", "Task A"))
+	require.True(t, fakeClient.setTaskContent(testDependencyTaskAID, testDependencyTaskATitle))
 	require.Eventually(t, func() bool {
 		return fakeClient.updateContentCallCount() >= 2
 	}, 2*time.Second, 20*time.Millisecond)
@@ -759,7 +799,7 @@ func TestDependencyServerBootstrapMissingTaskKeysUpdatesContentWhenNotDryRun(t *
 	*todoistAPIKey = testGenericAPIKey
 
 	fakeClient := newFakeDependencyTodoistClient([]*todoist.Task{
-		{ID: "task-a", Content: "Task A"},
+		{ID: testDependencyTaskAID, Content: testDependencyTaskATitle},
 	})
 	server := &dependencyServer{
 		newTodoistClient: func(string) todoistOperationalClient { return fakeClient },
@@ -770,7 +810,7 @@ func TestDependencyServerBootstrapMissingTaskKeysUpdatesContentWhenNotDryRun(t *
 	})
 	require.NoError(t, err)
 	require.Len(t, fakeClient.updateContentCalls, 1)
-	assert.Equal(t, "task-a", fakeClient.updateContentCalls[0].taskID)
+	assert.Equal(t, testDependencyTaskAID, fakeClient.updateContentCalls[0].taskID)
 	assert.Contains(t, fakeClient.updateContentCalls[0].content, "<k:")
 	assert.Equal(t, int32(1), resp.GetGeneratedCount())
 }
@@ -780,11 +820,11 @@ func TestDependencyServerBootstrapMissingTaskKeysPartialSuccessAndRecovery(t *te
 	*todoistAPIKey = testGenericAPIKey
 
 	fakeClient := newFakeDependencyTodoistClient([]*todoist.Task{
-		{ID: "task-a", Content: "Task A"},
-		{ID: "task-b", Content: "Task B"},
+		{ID: testDependencyTaskAID, Content: testDependencyTaskATitle},
+		{ID: testDependencyTaskBID, Content: "Task B"},
 	})
 	fakeClient.updateContentErrs = map[string]error{
-		"task-a": assert.AnError,
+		testDependencyTaskAID: assert.AnError,
 	}
 
 	server := &dependencyServer{
@@ -803,12 +843,12 @@ func TestDependencyServerBootstrapMissingTaskKeysPartialSuccessAndRecovery(t *te
 	assert.Equal(t, int32(1), resp.GetFailedUpdateCount())
 	require.Len(t, resp.GetGeneratedTaskKeys(), 1)
 	require.Len(t, resp.GetWriteFailures(), 1)
-	assert.Equal(t, "task-a", resp.GetWriteFailures()[0].GetTodoistTaskId())
+	assert.Equal(t, testDependencyTaskAID, resp.GetWriteFailures()[0].GetTodoistTaskId())
 	assert.NotEmpty(t, resp.GetWriteFailures()[0].GetTaskKey())
 	assert.Equal(t, dependencyWriteOperationUpdateContent, resp.GetWriteFailures()[0].GetOperation())
 	assert.Contains(t, resp.GetWriteFailures()[0].GetErrorMessage(), "failed to update Todoist task content")
 
-	delete(fakeClient.updateContentErrs, "task-a")
+	delete(fakeClient.updateContentErrs, testDependencyTaskAID)
 
 	resp, err = server.BootstrapMissingTaskKeys(context.Background(), &pb.BootstrapMissingTaskKeysRequest{
 		DryRun: false,
@@ -818,7 +858,7 @@ func TestDependencyServerBootstrapMissingTaskKeysPartialSuccessAndRecovery(t *te
 	assert.Equal(t, int32(1), resp.GetGeneratedCount())
 	assert.Zero(t, resp.GetFailedUpdateCount())
 	assert.Empty(t, resp.GetWriteFailures())
-	assert.Contains(t, fakeClient.tasksByID["task-a"].Content, "<k:")
+	assert.Contains(t, fakeClient.tasksByID[testDependencyTaskAID].Content, "<k:")
 }
 
 func runListTimeoutAndRecovery[T any](
@@ -855,7 +895,7 @@ func TestDependencyServerBootstrapMissingTaskKeysTimeoutAndRecovery(t *testing.T
 	runListTimeoutAndRecovery(
 		t,
 		[]*todoist.Task{
-			{ID: "task-a", Content: "Task A"},
+			{ID: testDependencyTaskAID, Content: testDependencyTaskATitle},
 		},
 		func(server *dependencyServer) (*pb.BootstrapMissingTaskKeysResponse, error) {
 			return server.BootstrapMissingTaskKeys(context.Background(), &pb.BootstrapMissingTaskKeysRequest{
@@ -874,8 +914,8 @@ func TestDependencyServerClearDependencyMetadata(t *testing.T) {
 	*todoistAPIKey = testGenericAPIKey
 
 	fakeClient := newFakeDependencyTodoistClient([]*todoist.Task{
-		{ID: "task-a", Content: "Task A <k:a dep:b>"},
-		{ID: "task-b", Content: "Task B <k: dep:broken>"},
+		{ID: testDependencyTaskAID, Content: testDependencyTaskAWithDependency},
+		{ID: testDependencyTaskBID, Content: "Task B <k: dep:broken>"},
 		{ID: "task-c", Content: "Task C <v1>"},
 	})
 	server := &dependencyServer{
@@ -892,12 +932,12 @@ func TestDependencyServerClearDependencyMetadata(t *testing.T) {
 	assert.False(t, resp.GetPartialSuccess())
 	assert.Len(t, fakeClient.updateContentCalls, 0)
 	require.Len(t, resp.GetClearedTasks(), 2)
-	assert.Equal(t, "task-a", resp.GetClearedTasks()[0].GetTodoistTaskId())
-	assert.Equal(t, "Task A", resp.GetClearedTasks()[0].GetUpdatedContent())
+	assert.Equal(t, testDependencyTaskAID, resp.GetClearedTasks()[0].GetTodoistTaskId())
+	assert.Equal(t, testDependencyTaskATitle, resp.GetClearedTasks()[0].GetUpdatedContent())
 	assert.Equal(t, "a", resp.GetClearedTasks()[0].GetTaskKey())
 	assert.Equal(t, "Task B", resp.GetClearedTasks()[1].GetUpdatedContent())
-	assert.Equal(t, "Task A <k:a dep:b>", fakeClient.tasksByID["task-a"].Content)
-	assert.Equal(t, "Task B <k: dep:broken>", fakeClient.tasksByID["task-b"].Content)
+	assert.Equal(t, testDependencyTaskAWithDependency, fakeClient.tasksByID[testDependencyTaskAID].Content)
+	assert.Equal(t, "Task B <k: dep:broken>", fakeClient.tasksByID[testDependencyTaskBID].Content)
 	assert.Equal(t, "Task C <v1>", fakeClient.tasksByID["task-c"].Content)
 }
 
@@ -906,11 +946,11 @@ func TestDependencyServerClearDependencyMetadataPartialSuccessAndRecovery(t *tes
 	*todoistAPIKey = testGenericAPIKey
 
 	fakeClient := newFakeDependencyTodoistClient([]*todoist.Task{
-		{ID: "task-a", Content: "Task A <k:a dep:b>"},
-		{ID: "task-b", Content: "Task B <k:b>"},
+		{ID: testDependencyTaskAID, Content: testDependencyTaskAWithDependency},
+		{ID: testDependencyTaskBID, Content: testDependencyTaskBWithKey},
 	})
 	fakeClient.updateContentErrs = map[string]error{
-		"task-a": assert.AnError,
+		testDependencyTaskAID: assert.AnError,
 	}
 
 	server := &dependencyServer{
@@ -928,12 +968,12 @@ func TestDependencyServerClearDependencyMetadataPartialSuccessAndRecovery(t *tes
 	assert.Equal(t, int32(1), resp.GetUpdatedTaskCount())
 	assert.Equal(t, int32(1), resp.GetFailedUpdateCount())
 	require.Len(t, resp.GetWriteFailures(), 1)
-	assert.Equal(t, "task-a", resp.GetWriteFailures()[0].GetTodoistTaskId())
+	assert.Equal(t, testDependencyTaskAID, resp.GetWriteFailures()[0].GetTodoistTaskId())
 	assert.Equal(t, dependencyWriteOperationUpdateContent, resp.GetWriteFailures()[0].GetOperation())
-	assert.Equal(t, "Task A <k:a dep:b>", fakeClient.tasksByID["task-a"].Content)
-	assert.Equal(t, "Task B", fakeClient.tasksByID["task-b"].Content)
+	assert.Equal(t, testDependencyTaskAWithDependency, fakeClient.tasksByID[testDependencyTaskAID].Content)
+	assert.Equal(t, "Task B", fakeClient.tasksByID[testDependencyTaskBID].Content)
 
-	delete(fakeClient.updateContentErrs, "task-a")
+	delete(fakeClient.updateContentErrs, testDependencyTaskAID)
 	resp, err = server.ClearDependencyMetadata(context.Background(), &pb.ClearDependencyMetadataRequest{
 		DryRun: false,
 	})
@@ -941,14 +981,14 @@ func TestDependencyServerClearDependencyMetadataPartialSuccessAndRecovery(t *tes
 	assert.False(t, resp.GetPartialSuccess())
 	assert.Equal(t, int32(1), resp.GetUpdatedTaskCount())
 	assert.Zero(t, resp.GetFailedUpdateCount())
-	assert.Equal(t, "Task A", fakeClient.tasksByID["task-a"].Content)
+	assert.Equal(t, testDependencyTaskATitle, fakeClient.tasksByID[testDependencyTaskAID].Content)
 }
 
 func TestDependencyServerClearDependencyMetadataTimeoutAndRecovery(t *testing.T) {
 	runListTimeoutAndRecovery(
 		t,
 		[]*todoist.Task{
-			{ID: "task-a", Content: "Task A <k:a>"},
+			{ID: testDependencyTaskAID, Content: "Task A <k:a>"},
 		},
 		func(server *dependencyServer) (*pb.ClearDependencyMetadataResponse, error) {
 			return server.ClearDependencyMetadata(context.Background(), &pb.ClearDependencyMetadataRequest{
@@ -965,21 +1005,21 @@ func TestDependencyServerClearDependencyMetadataTimeoutAndRecovery(t *testing.T)
 func TestBuildDependencyReport(t *testing.T) {
 	report := buildDependencyReport([]*todoist.Task{
 		{
-			ID:          "task-a",
-			Content:     "Task A <k:a dep:b>",
+			ID:          testDependencyTaskAID,
+			Content:     testDependencyTaskAWithDependency,
 			Labels:      []string{"existing"},
 			CompletedAt: "2026-03-14T00:00:00Z",
 		},
 		{
-			ID:      "task-b",
-			Content: "Task B <k:b>",
+			ID:      testDependencyTaskBID,
+			Content: testDependencyTaskBWithKey,
 		},
 	})
 
 	require.NotNil(t, report)
 	assert.Equal(t, 2, report.TaskCount)
 	require.Len(t, report.TaskStatuses, 2)
-	assert.Equal(t, "Task A", report.TaskStatuses[0].GetTodoistTask().GetContent())
+	assert.Equal(t, testDependencyTaskATitle, report.TaskStatuses[0].GetTodoistTask().GetContent())
 	assert.True(t, report.TaskStatuses[0].GetTodoistTask().GetCompleted())
 }
 

@@ -10,6 +10,11 @@ import (
 	"github.com/ziyixi/todofy/todo/internal/todoist"
 )
 
+const (
+	testTodoSubject = "Test Todo"
+	testTodoBody    = "Test Body"
+)
+
 type mockTodoistTaskCreator struct{ mock.Mock }
 
 func (m *mockTodoistTaskCreator) CreateTask(
@@ -33,8 +38,8 @@ func TestTodoServer_PopulateTodo_StrictTodoistOnly(t *testing.T) {
 		req := &pb.TodoRequest{
 			App:     pb.TodoApp_TODO_APP_DIDA365,
 			Method:  pb.PopullateTodoMethod_POPULLATE_TODO_METHOD_MAILJET,
-			Subject: "Test Todo",
-			Body:    "Test Body",
+			Subject: testTodoSubject,
+			Body:    testTodoBody,
 		}
 
 		resp, err := server.PopulateTodo(context.Background(), req)
@@ -50,8 +55,8 @@ func TestTodoServer_PopulateTodo_StrictTodoistOnly(t *testing.T) {
 		req := &pb.TodoRequest{
 			App:     pb.TodoApp_TODO_APP_TODOIST,
 			Method:  pb.PopullateTodoMethod_POPULLATE_TODO_METHOD_API,
-			Subject: "Test Todo",
-			Body:    "Test Body",
+			Subject: testTodoSubject,
+			Body:    testTodoBody,
 		}
 
 		resp, err := server.PopulateTodo(context.Background(), req)
@@ -71,8 +76,8 @@ func TestTodoServer_PopulateTodo_StrictTodoistOnly(t *testing.T) {
 		req := &pb.TodoRequest{
 			App:     pb.TodoApp_TODO_APP_TODOIST,
 			Method:  pb.PopullateTodoMethod_POPULLATE_TODO_METHOD_TODOIST,
-			Subject: "Test Todo",
-			Body:    "Test Body",
+			Subject: testTodoSubject,
+			Body:    testTodoBody,
 		}
 
 		resp, err := server.PopulateTodo(context.Background(), req)
@@ -125,15 +130,15 @@ func TestPopulateTodoByTodoist_DI(t *testing.T) {
 		mockCreator := new(mockTodoistTaskCreator)
 		mockCreator.On("CreateTask", mock.Anything,
 			buildTodoistRequestID(&pb.TodoRequest{
-				Subject: "Test Todo",
-				Body:    "Test Body",
+				Subject: testTodoSubject,
+				Body:    testTodoBody,
 			}),
 			mock.MatchedBy(func(req *todoist.CreateTaskRequest) bool {
-				return req.Content == "Test Todo" && req.Description == "Test Body" && req.ProjectID == ""
+				return req.Content == testTodoSubject && req.Description == testTodoBody && req.ProjectID == ""
 			}),
 		).Return(&todoist.Task{
 			ID:      "task-123",
-			Content: "Test Todo",
+			Content: testTodoSubject,
 		}, nil)
 
 		server := &todoServer{
@@ -146,8 +151,8 @@ func TestPopulateTodoByTodoist_DI(t *testing.T) {
 		req := &pb.TodoRequest{
 			App:     pb.TodoApp_TODO_APP_TODOIST,
 			Method:  pb.PopullateTodoMethod_POPULLATE_TODO_METHOD_TODOIST,
-			Subject: "Test Todo",
-			Body:    "Test Body",
+			Subject: testTodoSubject,
+			Body:    testTodoBody,
 		}
 
 		resp, err := server.PopulateTodoByTodoist(context.Background(), req)
@@ -172,8 +177,8 @@ func TestPopulateTodoByTodoist_DI(t *testing.T) {
 		}
 
 		req := &pb.TodoRequest{
-			Subject: "Test Todo",
-			Body:    "Test Body",
+			Subject: testTodoSubject,
+			Body:    testTodoBody,
 		}
 
 		resp, err := server.PopulateTodoByTodoist(context.Background(), req)
@@ -219,7 +224,7 @@ func TestPopulateTodoByTodoist_DI(t *testing.T) {
 
 func TestBuildTodoistRequestID(t *testing.T) {
 	req := &pb.TodoRequest{
-		Subject: "Test Todo",
+		Subject: testTodoSubject,
 		Body:    "Body",
 		From:    "sender@example.com",
 	}
@@ -227,7 +232,7 @@ func TestBuildTodoistRequestID(t *testing.T) {
 	first := buildTodoistRequestID(req)
 	second := buildTodoistRequestID(req)
 	changed := buildTodoistRequestID(&pb.TodoRequest{
-		Subject: "Test Todo",
+		Subject: testTodoSubject,
 		Body:    "Different body",
 		From:    "sender@example.com",
 	})

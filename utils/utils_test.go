@@ -11,6 +11,8 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+const testMessageKey = "message"
+
 func TestParseAllowedUsers(t *testing.T) {
 	tests := []struct {
 		name                      string
@@ -65,8 +67,8 @@ func TestFetchWithBasicAuth(t *testing.T) {
 	t.Run("successful request", func(t *testing.T) {
 		// Create a test server
 		expectedData := map[string]interface{}{
-			"message": "success",
-			"data":    []string{"item1", "item2"},
+			testMessageKey: "success",
+			"data":         []string{"item1", "item2"},
 		}
 
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -89,7 +91,7 @@ func TestFetchWithBasicAuth(t *testing.T) {
 		resultMap, ok := result.(map[string]interface{})
 		require.True(t, ok)
 
-		assert.Equal(t, "success", resultMap["message"])
+		assert.Equal(t, "success", resultMap[testMessageKey])
 		assert.Contains(t, resultMap, "data")
 	})
 
@@ -132,7 +134,7 @@ func TestRateLimitMiddleware(t *testing.T) {
 		router := gin.New()
 		router.Use(RateLimitMiddleware())
 		router.GET("/test", func(c *gin.Context) {
-			c.JSON(200, gin.H{"message": "ok"})
+			c.JSON(200, gin.H{testMessageKey: "ok"})
 		})
 
 		// First request should succeed
@@ -152,7 +154,7 @@ func TestRateLimitMiddleware(t *testing.T) {
 		router := gin.New()
 		router.Use(RateLimitMiddleware())
 		router.GET("/test", func(c *gin.Context) {
-			c.JSON(200, gin.H{"message": "ok"})
+			c.JSON(200, gin.H{testMessageKey: "ok"})
 		})
 
 		// Make requests to exceed the limit (limit is 2 per minute)
@@ -178,7 +180,7 @@ func TestRateLimitMiddleware(t *testing.T) {
 		router := gin.New()
 		router.Use(RateLimitMiddlewareWithLimit(0))
 		router.GET("/test", func(c *gin.Context) {
-			c.JSON(200, gin.H{"message": "ok"})
+			c.JSON(200, gin.H{testMessageKey: "ok"})
 		})
 
 		for i := 0; i < 5; i++ {
