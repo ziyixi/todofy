@@ -1,0 +1,28 @@
+# dependencies
+node_modules/
+.pnpm-store/
+*.tsbuildinfo
+
+# Next.js outputs
+.next/
+out/
+
+# generated content and publish state
+.generated/
+public/media/
+.vercel/
+
+# test and diagnostic outputs
+playwright-report/
+test-results/
+coverage/
+design-qa-artifacts/
+
+# local secrets
+.env
+.env.*
+!.env.example
+
+# editor and operating-system files
+.DS_Store
+*.log

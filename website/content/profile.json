@@ -1,0 +1,23 @@
+{
+  "name": "Ziyi Xi",
+  "bioParagraphs": [
+    "I'm a software engineer on Google's Search Quality team, working on query understanding with applied machine learning. I focus on training and serving small language models with millisecond latency at scale, including fine-tuning, model compression, and hardware–model co-design. Previously, I worked on infrastructure reliability and automated recovery at Google, including TPU systems.",
+    "I earned my Ph.D. in Computational Science at Michigan State University, researching AI for science, computational seismology, and high-performance computing. I also hold undergraduate degrees in seismology and computer science from the University of Science and Technology of China."
+  ],
+  "portrait": {
+    "src": "/profile/ziyixi-headshot-2026.png",
+    "alt": "Portrait of Ziyi Xi",
+    "width": 1122,
+    "height": 1402
+  },
+  "links": [
+    {
+      "label": "GitHub",
+      "url": "https://github.com/ziyixi"
+    },
+    {
+      "label": "LinkedIn",
+      "url": "https://www.linkedin.com/in/ziyixi"
+    }
+  ]
+}

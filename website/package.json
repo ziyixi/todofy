@@ -1,0 +1,57 @@
+{
+  "name": "ziyixi-personal-website",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Ziyi Xi's personal academic and engineering website.",
+  "engines": {
+    "node": "24.x"
+  },
+  "packageManager": "pnpm@11.25.0",
+  "scripts": {
+    "content:prepare": "node --import tsx scripts/content/prepare.ts",
+    "content:prepare:empty": "node --import tsx scripts/content/prepare.ts --source=empty --baseline=tests/fixtures/baseline-empty.json",
+    "content:prepare:fixture": "node --import tsx scripts/content/prepare.ts --source=fixture --baseline=tests/fixtures/baseline-empty.json",
+    "content:validate": "node --import tsx scripts/content/validate.ts",
+    "dev": "next dev",
+    "build": "pnpm content:validate && next build",
+    "start": "next start",
+    "lint": "eslint . --max-warnings=0",
+    "typecheck": "next typegen && tsc --noEmit",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "test:unit": "vitest run",
+    "test:e2e": "playwright test",
+    "test:deployment": "DEPLOYMENT_TEST_REQUIRED=1 playwright test tests/e2e/deployment.spec.ts --project=desktop-chromium",
+    "test": "pnpm test:unit",
+    "check": "pnpm format:check && pnpm lint && pnpm typecheck && pnpm test:unit",
+    "release:promote": "bash scripts/release/promote.sh",
+    "release:rollback": "bash scripts/release/rollback.sh"
+  },
+  "dependencies": {
+    "@notionhq/client": "5.26.0",
+    "katex": "0.18.7",
+    "next": "16.3.5",
+    "react": "19.3.0",
+    "react-dom": "19.3.0",
+    "sharp": "0.35.4",
+    "shiki": "4.4.3",
+    "zod": "4.6.5"
+  },
+  "devDependencies": {
+    "@axe-core/playwright": "4.13.0",
+    "@playwright/test": "1.63.0",
+    "@types/katex": "0.16.8",
+    "@types/node": "24.10.1",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "eslint": "9.39.1",
+    "eslint-config-next": "16.3.5",
+    "eslint-config-prettier": "10.1.8",
+    "prettier": "3.9.8",
+    "tsx": "4.23.15",
+    "typescript": "6.0.3",
+    "vercel": "59.23.2",
+    "vitest": "5.0.1"
+  }
+}

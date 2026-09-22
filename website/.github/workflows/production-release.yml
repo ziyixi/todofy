@@ -1,0 +1,410 @@
+name: Production release
+run-name: Production ${{ inputs.operation }} from main
+
+# Intentionally manual-only until the real GitHub repository, Vercel project,
+# deployment protection, and domain recovery path have been verified. Do not add
+# push or schedule triggers as a shortcut; see doc/operations.md.
+on:
+  workflow_dispatch:
+    inputs:
+      operation:
+        description: Release mode; bootstrap and recovery have additional protected-environment gates
+        required: true
+        type: choice
+        default: release
+        options:
+          - release
+          - bootstrap
+          - recovery
+      confirmation:
+        description: Type operation:canonical-host; append :allow-empty when intentionally clearing Notion
+        required: true
+        type: string
+      force_build:
+        description: Rebuild and verify even when the full release identity is unchanged
+        required: true
+        type: boolean
+        default: false
+      allow_empty:
+        description: One-run confirmation that a previously non-empty Notion collection may publish as empty
+        required: true
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  deployments: write
+
+concurrency:
+  group: website-production-release
+  cancel-in-progress: false
+
+env:
+  CI: "true"
+
+jobs:
+  release:
+    name: Verify, stage, and promote one artifact
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    environment: production
+    steps:
+      - name: Check out the latest main inside the release lock
+        # actions/checkout v6.1.0
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          ref: refs/heads/main
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Lock the release commit
+        id: revision
+        shell: bash
+        run: |
+          set -euo pipefail
+          release_sha="$(git rev-parse HEAD)"
+          [[ "$release_sha" =~ ^[0-9a-f]{40}$ ]]
+          printf 'release_sha=%s\n' "$release_sha" >>"$GITHUB_OUTPUT"
+
+      - name: Use Node 24
+        # actions/setup-node v6.5.0
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38
+        with:
+          node-version: 24.x
+          check-latest: false
+          package-manager-cache: false
+
+      - name: Enable the packageManager-pinned pnpm
+        run: |
+          corepack enable
+          pnpm --version
+
+      - name: Install from the committed lockfile
+        run: pnpm install --frozen-lockfile
+
+      - name: Assert trusted production context
+        env:
+          ALLOW_EMPTY: ${{ inputs.allow_empty }}
+          RELEASE_OPERATION: ${{ inputs.operation }}
+          RELEASE_CONFIRMATION: ${{ inputs.confirmation }}
+          SITE_URL: ${{ vars.SITE_URL }}
+          BOOTSTRAP_APPROVAL: ${{ vars.BOOTSTRAP_APPROVAL }}
+          RECOVERY_APPROVAL: ${{ vars.RECOVERY_APPROVAL }}
+          GITHUB_TOKEN: ${{ github.token }}
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+          VERCEL_AUTOMATION_BYPASS_SECRET: ${{ secrets.VERCEL_AUTOMATION_BYPASS_SECRET }}
+        run: bash scripts/release/assert-production-context.sh
+
+      - name: Enforce the GitHub Deployment state gate
+        id: gate
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          bash scripts/release/deployment-record.sh gate \
+            --operation "${{ inputs.operation }}" \
+            --baseline-out .generated/release/baseline.json \
+            --state-out .generated/release/gate-state.json \
+            --bootstrap-baseline tests/fixtures/baseline-empty.json
+
+      - name: Install the pinned browser needed for recovery reconciliation
+        if: inputs.operation == 'recovery'
+        run: pnpm exec playwright install --with-deps chromium
+
+      - name: Coordinate an interrupted release with the actual production deployment
+        id: recovery
+        if: inputs.operation == 'recovery'
+        env:
+          SITE_URL: ${{ vars.SITE_URL }}
+          GITHUB_TOKEN: ${{ github.token }}
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+        run: |
+          bash scripts/release/coordinate-recovery.sh \
+            --gate-state .generated/release/gate-state.json \
+            --baseline-out .generated/release/baseline.json
+
+      - name: Read the coordinated production baseline
+        id: baseline
+        shell: bash
+        run: |
+          set -euo pipefail
+          previous_id="$(jq -r '.baseline.payload.candidateDeploymentId // empty' .generated/release/gate-state.json)"
+          previous_url="$(jq -r '.baseline.payload.candidateDeploymentUrl // empty' .generated/release/gate-state.json)"
+          baseline_record="$(jq -r '.baseline.deploymentId // empty' .generated/release/gate-state.json)"
+          printf 'previous_production_id=%s\n' "$previous_id" >>"$GITHUB_OUTPUT"
+          printf 'previous_production_url=%s\n' "$previous_url" >>"$GITHUB_OUTPUT"
+          printf 'baseline_deployment_id=%s\n' "$baseline_record" >>"$GITHUB_OUTPUT"
+
+      - name: Verify the recorded production baseline
+        if: steps.baseline.outputs.previous_production_id != '' && inputs.operation != 'recovery'
+        env:
+          SITE_URL: ${{ vars.SITE_URL }}
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+        run: |
+          jq '.baseline.payload.identity' .generated/release/gate-state.json \
+            > .generated/release/previous-build-info.json
+          bash scripts/release/verify-deployment.sh \
+            --mode production \
+            --base-url "$SITE_URL" \
+            --expected-build-info .generated/release/previous-build-info.json \
+            --expected-deployment-id "${{ steps.baseline.outputs.previous_production_id }}" \
+            --identity-only
+
+      - name: Prepare an offline snapshot for type generation
+        run: |
+          unset NOTION_TOKEN NOTION_DATA_SOURCE_ID NOTION_API_VERSION
+          pnpm content:prepare:empty
+
+      - name: Run no-secret checks
+        run: pnpm check
+
+      - name: Prepare the configured production snapshot
+        id: content
+        env:
+          RELEASE_SHA: ${{ steps.revision.outputs.release_sha }}
+          SITE_URL: ${{ vars.SITE_URL }}
+          NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
+          NOTION_DATA_SOURCE_ID: ${{ secrets.NOTION_DATA_SOURCE_ID }}
+          NOTION_API_VERSION: ${{ vars.NOTION_API_VERSION }}
+          ALLOW_EMPTY: ${{ inputs.allow_empty }}
+        run: |
+          prepare_args=(--baseline .generated/release/baseline.json)
+          if [[ "$ALLOW_EMPTY" == true ]]; then
+            prepare_args+=(--allow-empty)
+          fi
+          bash scripts/release/prepare-production.sh "${prepare_args[@]}"
+
+      - name: Compute the release identity and deployment decision
+        id: decision
+        env:
+          CODE_SHA: ${{ steps.revision.outputs.release_sha }}
+          FORCE_BUILD: ${{ inputs.force_build }}
+        run: |
+          bash scripts/release/write-build-info.sh \
+            --manifest .generated/content/manifest.json \
+            --output .generated/release/build-info.json \
+            --code-sha "$CODE_SHA"
+          bash scripts/release/decide-release.sh \
+            --operation "${{ inputs.operation }}" \
+            --expected-build-info .generated/release/build-info.json \
+            --gate-state .generated/release/gate-state.json \
+            --force-build "$FORCE_BUILD"
+
+      - name: Install the pinned deployment-test browser
+        if: steps.decision.outputs.deploy_required == 'true' && inputs.operation != 'recovery'
+        run: pnpm exec playwright install --with-deps chromium
+
+      - name: Pull only the configured Vercel production project
+        if: steps.decision.outputs.deploy_required == 'true'
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+        run: |
+          pnpm exec vercel pull --yes --environment=production --token "$VERCEL_TOKEN"
+          if grep -R -q -E '^NOTION_(TOKEN|DATA_SOURCE_ID)=' .vercel --include='*.env*'; then
+            printf 'Notion credentials must not be stored in the Vercel project environment.\n' >&2
+            exit 1
+          fi
+
+      - name: Build the staged production artifact once
+        if: steps.decision.outputs.deploy_required == 'true'
+        env:
+          CODE_SHA: ${{ steps.revision.outputs.release_sha }}
+          SITE_URL: ${{ vars.SITE_URL }}
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+        run: pnpm exec vercel build --prod --token "$VERCEL_TOKEN"
+
+      - name: Upload that same artifact without assigning production domains
+        id: candidate
+        if: steps.decision.outputs.deploy_required == 'true'
+        env:
+          RELEASE_SHA: ${{ steps.revision.outputs.release_sha }}
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+        run: |
+          set -euo pipefail
+          candidate_url="$(pnpm exec vercel deploy \
+            --prebuilt \
+            --prod \
+            --skip-domain \
+            --meta websiteReleaseSha="$RELEASE_SHA" \
+            --token "$VERCEL_TOKEN")"
+          candidate_url="${candidate_url%/}"
+          [[ "$candidate_url" =~ ^https://[A-Za-z0-9.-]+$ ]]
+          printf 'candidate_url=%s\n' "$candidate_url" >>"$GITHUB_OUTPUT"
+
+      - name: Verify the protected candidate
+        id: candidate_verify
+        if: steps.decision.outputs.deploy_required == 'true'
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+          VERCEL_AUTOMATION_BYPASS_SECRET: ${{ secrets.VERCEL_AUTOMATION_BYPASS_SECRET }}
+        run: |
+          bash scripts/release/verify-deployment.sh \
+            --mode candidate \
+            --base-url "${{ steps.candidate.outputs.candidate_url }}" \
+            --expected-build-info .generated/release/build-info.json
+
+      - name: Create the redacted release record payload
+        if: steps.decision.outputs.deploy_required == 'true'
+        env:
+          RELEASE_SHA: ${{ steps.revision.outputs.release_sha }}
+          SITE_URL: ${{ vars.SITE_URL }}
+        run: |
+          bash scripts/release/make-deployment-payload.sh \
+            --build-info .generated/release/build-info.json \
+            --registry .generated/content/registry.json \
+            --manifest .generated/content/manifest.json \
+            --canonical-origin "$SITE_URL" \
+            --candidate-id "${{ steps.candidate_verify.outputs.deployment_id }}" \
+            --candidate-url "${{ steps.candidate.outputs.candidate_url }}" \
+            --previous-production-id "${{ steps.baseline.outputs.previous_production_id }}" \
+            --operation "${{ inputs.operation }}" \
+            --output .generated/release/deployment-payload.json
+
+      - name: Mark the verified candidate in progress
+        id: record
+        if: steps.decision.outputs.deploy_required == 'true'
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          bash scripts/release/deployment-record.sh create \
+            --payload .generated/release/deployment-payload.json \
+            --ref "${{ steps.revision.outputs.release_sha }}"
+
+      - name: Promote only the recorded candidate
+        id: promote
+        if: steps.decision.outputs.deploy_required == 'true'
+        continue-on-error: true
+        env:
+          RELEASE_SHA: ${{ steps.revision.outputs.release_sha }}
+          SITE_URL: ${{ vars.SITE_URL }}
+          GITHUB_TOKEN: ${{ github.token }}
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+          VERCEL_AUTOMATION_BYPASS_SECRET: ${{ secrets.VERCEL_AUTOMATION_BYPASS_SECRET }}
+        run: |
+          bash scripts/release/promote.sh \
+            --candidate-url "${{ steps.candidate.outputs.candidate_url }}" \
+            --candidate-id "${{ steps.candidate_verify.outputs.deployment_id }}" \
+            --expected-build-info .generated/release/build-info.json \
+            --previous-production-id "${{ steps.baseline.outputs.previous_production_id }}" \
+            --gate-state .generated/release/gate-state.json \
+            --github-deployment-id "${{ steps.record.outputs.deployment_id }}"
+
+      - name: Verify the public production domain without bypass credentials
+        id: production_verify
+        if: steps.promote.outcome == 'success'
+        continue-on-error: true
+        env:
+          SITE_URL: ${{ vars.SITE_URL }}
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+        run: |
+          unset VERCEL_AUTOMATION_BYPASS_SECRET
+          bash scripts/release/verify-deployment.sh \
+            --mode production \
+            --base-url "$SITE_URL" \
+            --expected-build-info .generated/release/build-info.json \
+            --expected-deployment-id "${{ steps.candidate_verify.outputs.deployment_id }}"
+
+      - name: Mark the release successful
+        if: steps.promote.outcome == 'success' && steps.production_verify.outcome == 'success'
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          SITE_URL: ${{ vars.SITE_URL }}
+        run: |
+          bash scripts/release/deployment-record.sh status \
+            --deployment-id "${{ steps.record.outputs.deployment_id }}" \
+            --state success \
+            --environment-url "$SITE_URL" \
+            --description "Production identity and routes verified without bypass credentials"
+
+      - name: Restore the exact previous production deployment
+        id: rollback
+        if: >-
+          always() &&
+          steps.record.outputs.deployment_id != '' &&
+          steps.baseline.outputs.previous_production_id != '' &&
+          (steps.promote.outcome != 'success' || steps.production_verify.outcome != 'success')
+        continue-on-error: true
+        env:
+          SITE_URL: ${{ vars.SITE_URL }}
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+        run: |
+          jq '.baseline.payload.identity' .generated/release/gate-state.json \
+            > .generated/release/previous-build-info.json
+          bash scripts/release/rollback.sh \
+            --expected-current-id "${{ steps.candidate_verify.outputs.deployment_id }}" \
+            --restore-id "${{ steps.baseline.outputs.previous_production_id }}" \
+            --restore-url "${{ steps.baseline.outputs.previous_production_url }}" \
+            --restore-build-info .generated/release/previous-build-info.json \
+            --target-record .generated/release/gate-state.json
+
+      - name: Verify the restored public production deployment
+        id: rollback_verify
+        if: always() && steps.rollback.outcome == 'success'
+        continue-on-error: true
+        env:
+          SITE_URL: ${{ vars.SITE_URL }}
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+        run: |
+          unset VERCEL_AUTOMATION_BYPASS_SECRET
+          jq '.baseline.payload.verificationContract' .generated/release/gate-state.json \
+            > .generated/release/previous-verification-contract.json
+          bash scripts/release/verify-deployment.sh \
+            --mode production \
+            --base-url "$SITE_URL" \
+            --expected-build-info .generated/release/previous-build-info.json \
+            --expected-deployment-id "${{ steps.baseline.outputs.previous_production_id }}" \
+            --verification-contract .generated/release/previous-verification-contract.json
+
+      - name: Record a blocked failure
+        if: >-
+          always() &&
+          steps.record.outputs.deployment_id != '' &&
+          (steps.promote.outcome != 'success' || steps.production_verify.outcome != 'success')
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          CANDIDATE_URL: ${{ steps.candidate.outputs.candidate_url }}
+          ROLLBACK_OUTCOME: ${{ steps.rollback.outcome }}
+          ROLLBACK_VERIFY_OUTCOME: ${{ steps.rollback_verify.outcome }}
+        run: |
+          if [[ "$ROLLBACK_OUTCOME" == success && "$ROLLBACK_VERIFY_OUTCOME" == success ]]; then
+            state=failure
+            description='Production verification failed; previous deployment restored and verified'
+          else
+            state=error
+            description='Release failed and automatic restoration was unavailable or unverified'
+          fi
+          bash scripts/release/deployment-record.sh status \
+            --deployment-id "${{ steps.record.outputs.deployment_id }}" \
+            --state "$state" \
+            --environment-url "$CANDIDATE_URL" \
+            --description "$description"
+
+      - name: Fail after preserving the recovery gate
+        if: >-
+          always() &&
+          steps.record.outputs.deployment_id != '' &&
+          (steps.promote.outcome != 'success' || steps.production_verify.outcome != 'success')
+        run: |
+          printf 'Production release failed. The latest GitHub Deployment state now blocks ordinary releases; use the documented recovery flow.\n' >&2
+          exit 1

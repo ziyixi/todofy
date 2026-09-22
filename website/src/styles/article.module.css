@@ -1,0 +1,192 @@
+.articleBody {
+  max-width: 680px;
+  font-family: var(--serif);
+  font-size: 1.05rem;
+  line-height: 1.67;
+  overflow-wrap: anywhere;
+}
+
+.articleBody p {
+  margin: 0 0 1.05em;
+}
+
+.articleBody h2,
+.articleBody h3,
+.articleBody h4 {
+  color: var(--text);
+  font-family: var(--sans);
+  font-weight: 650;
+  line-height: 1.25;
+  scroll-margin-top: 1.25rem;
+}
+
+.articleBody h2 {
+  margin: 1.85em 0 0.62em;
+  font-size: 1.35rem;
+}
+
+.articleBody h3 {
+  margin: 1.55em 0 0.55em;
+  font-size: 1.15rem;
+}
+
+.articleBody h4 {
+  margin: 1.4em 0 0.5em;
+  font-size: 1rem;
+}
+
+.articleBody ul,
+.articleBody ol {
+  margin: 0 0 1.05em;
+  padding-left: 1.5em;
+}
+
+.articleBody li + li {
+  margin-top: 0.28em;
+}
+
+.articleBody li > ul,
+.articleBody li > ol {
+  margin-top: 0.32em;
+  margin-bottom: 0.32em;
+}
+
+.articleBody blockquote {
+  margin: 1.35em 0;
+  padding-left: 1.05em;
+  border-left: 3px solid #aab5bb;
+  color: var(--muted);
+}
+
+.articleBody blockquote > :last-child {
+  margin-bottom: 0;
+}
+
+.articleBody hr {
+  width: 36px;
+  margin: 2em auto;
+  border: 0;
+  border-top: 1px solid #aab5bb;
+}
+
+.articleBody code {
+  padding: 0.08em 0.28em;
+  background: #edf0ef;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 0.88em;
+}
+
+.codeBlock {
+  margin: 1.4em 0;
+}
+
+.codeBlock pre,
+.codeBlock :global(pre) {
+  max-width: 100%;
+  margin: 0;
+  padding: 14px 16px;
+  overflow-x: auto;
+  border: 1px solid #d9dfdc;
+  background: #f5f7f6 !important;
+  font-size: 0.84rem;
+  line-height: 1.55;
+  tab-size: 2;
+}
+
+.codeBlock pre code,
+.codeBlock :global(pre code) {
+  padding: 0;
+  background: transparent;
+}
+
+.articleBody figure {
+  margin: 1.5em 0;
+}
+
+.articleBody figure img {
+  display: block;
+  width: auto;
+  height: auto;
+}
+
+.articleBody figcaption {
+  margin-top: 6px;
+  color: var(--muted);
+  font-family: var(--sans);
+  font-size: 0.8125rem;
+  line-height: 1.45;
+}
+
+.equation,
+.tableScroll {
+  max-width: 100%;
+  margin: 1.35em 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+
+.tableScroll:focus-visible {
+  outline-offset: 2px;
+}
+
+.articleBody table {
+  width: max-content;
+  min-width: 100%;
+  border-collapse: collapse;
+  font-family: var(--sans);
+  font-size: 0.9rem;
+}
+
+.articleBody th,
+.articleBody td {
+  padding: 7px 10px;
+  border: 1px solid #cbd3d0;
+  text-align: left;
+  vertical-align: top;
+}
+
+.articleBody th {
+  background: #f0f3f2;
+  font-weight: 600;
+}
+
+.articleBody details {
+  margin: 1.25em 0;
+}
+
+.articleBody summary {
+  color: var(--link);
+  cursor: pointer;
+  font-family: var(--sans);
+}
+
+.toggleBody {
+  margin-top: 0.75em;
+  padding-left: 1em;
+}
+
+.callout {
+  margin: 1.35em 0;
+  padding: 0.75em 0 0.75em 1em;
+  border-left: 3px solid #8ca3b2;
+  background: #f2f5f4;
+}
+
+.callout > :last-child {
+  margin-bottom: 0;
+}
+
+.bookmark {
+  font-family: var(--sans);
+}
+
+.emptyParagraph {
+  height: 1em;
+}
+
+@media (max-width: 639px) {
+  .articleBody {
+    font-size: 1rem;
+    line-height: 1.65;
+  }
+}

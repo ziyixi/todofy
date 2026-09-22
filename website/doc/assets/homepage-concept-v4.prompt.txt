@@ -1,0 +1,33 @@
+Use case: ui-mockup.
+Asset: one revised personal academic homepage screenshot, revision 4, planning only.
+Three input images, in displayed chronological order:
+Image 1 is Geoffrey Litt's actual homepage: reference ONLY for leading with substantive personal prose. Do not copy its yellow background, sidebar, photo, icons, or project thumbnails.
+Image 2 is Arvind Satyanarayan's actual homepage: reference ONLY for a coherent self-introduction linking identity, research interests and background. Do not copy the portrait, frame, red palette, large greeting, sidebar, or rounded panel.
+Image 3 is our rejected v3 design and is the EDIT TARGET. User finds its publication area much too large (three lines per paper), its biography too small, and the overall visual emphasis awkward.
+
+Create a materially improved, quietly composed academic personal website. Main change: THE PERSON AND BIOGRAPHY ARE THE CENTER OF GRAVITY. Publications and writing are short, equally restrained text indexes below. Do not arbitrarily feature, embolden, enlarge or annotate the first paper. Do not make the work section into a second hero. Website should feel like a carefully edited individual page, not a commercial template.
+
+Target a landscape 1376 x 768 laptop viewport. All content within the first viewport at realistic readable sizing, not a long-page poster. Centered column 720px wide, left edge around x328, right edge around x1048. White #FDFDFC background. Near-black #2B2F2D. Muted low-saturation green #3E5B51 text links and secondary gray #616761. Absolutely no photos, illustrations, background textures, cards, borders, separator rules, badges, decorative icons, timelines, gradients or shadows.
+
+Typesetting: name about 29px in a restrained literary serif, not oversized. Biography about 16px in a lucid humanist sans-serif similar to Source Sans 3, line-height about 24px; publication and blog title links 15–16px regular weight; section headings 16px medium weight, only subtly different from body. Metadata 13px. Don't use bold 700 anywhere except perhaps the modest name. No ALL CAPS and no excessive letterspacing. Header, paragraphs and every list share one clean left edge.
+
+Exact layout and illustrative text:
+Header y44, height34: "Your Name" on left. Small quiet navigation on the right on the same baseline: "Publications   Blog   CV". Name is also home link. No line under header.
+Biography begins y110, TWO coherent paragraphs with ~12px space between them. It should occupy roughly seven to eight total readable lines, around 170–190px in height, significantly more presence than either list:
+Paragraph 1: "I work on scientific computing and inverse problems. My research asks how we can draw reliable conclusions from noisy or incomplete measurements, and how numerical methods can make those questions easier to investigate."
+Paragraph 2: "Alongside the papers, I build research software and small tools for inspecting experiments. I care about methods that others can understand, reproduce, and adapt. This is where I keep my work and write about the ideas and practical details that emerge along the way."
+These are illustrative placeholders, not claims about a real person. No standalone slogan or title above biography. No author details invented from reference people.
+Around y304, compact inline links "Email   Scholar   GitHub", 13px.
+Around y358, understated "Selected publications" heading left, small "All publications" text link right on same baseline.
+Exactly TWO paper rows, each ONE LINE ONLY, row heights 28px:
+at y393: "Learning structure from complex observations" on left, muted "2026" on right.
+at y421: "Open tools for reproducible research" on left, muted "2025" on right.
+No authors. No journal. No explanation. No extra links. Both paper titles normal 15–16px same weight and color as blog links, absolutely no standout first paper. The entire publications section including heading must be only about 90px high.
+Around y478, understated "Recent writing" heading left, small "All writing" text link right on same baseline.
+Exactly THREE blog rows, compact continuous rhythm, normal 15–16px:
+at y514: "On reproducibility and small tools" at left, muted "Sep 2026" at right.
+at y544: "What changes when observations are incomplete?" at left, muted "Aug 2026" at right.
+at y574: "Notes on numerical experiments" at left, muted "Jul 2026" at right.
+Footer y650: unobtrusive 12px "© 2026 Your Name" left, small "RSS" right. No separator line.
+The biography must be visibly the substantial introduction; the two lower sections read as modest indexes with matching typography, not competing emphasis. Gentle variation of paragraph density versus continuous list rhythm provides balance. Natural but precise, compact and readable, not crowded. Keep wide-page side margins but do not add vertical gaps beyond those specified. No decorative hand-made effects.
+Current date 2026-09-20. Render ONE revised screenshot only, keeping the laptop aspect ratio. No multi-option collage, no added labels or rationale on image.
