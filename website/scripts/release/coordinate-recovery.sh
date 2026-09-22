@@ -53,7 +53,7 @@ current_id="$(jq -er '.id' "${temp_dir}/current.json")"
 
 blocking_state="$(jq -er '.blocking.state' "$gate_state")"
 blocking_candidate_id="$(jq -er '.blocking.payload.candidateDeploymentId' "$gate_state")"
-baseline_candidate_id="$(jq -er '.baseline.payload.candidateDeploymentId // empty' "$gate_state")"
+baseline_candidate_id="$(jq -r '.baseline.payload.candidateDeploymentId // empty' "$gate_state")"
 
 verify_recorded_production() {
   local payload_filter="$1"
@@ -70,8 +70,10 @@ verify_recorded_production() {
 }
 
 if [[ "$current_id" == "$blocking_candidate_id" ]]; then
-  [[ "$blocking_state" == "in_progress" ]] ||
-    release_die "production serves the blocked candidate, but only an in_progress record may be reconciled as successful"
+  case "$blocking_state" in
+    in_progress | error | failure) ;;
+    *) release_die "production serves a blocked candidate with unsupported recovery state ${blocking_state}" ;;
+  esac
   if [[ -n "$baseline_candidate_id" ]]; then
     jq -e --arg baseline_id "$baseline_candidate_id" '
       .blocking.payload.previousProductionDeploymentId == $baseline_id
@@ -82,9 +84,10 @@ if [[ "$current_id" == "$blocking_candidate_id" ]]; then
       release_die "blocked candidate unexpectedly names a previous production deployment"
   fi
 
-  # This is the controlled retry for the R4 state: prove immutable deployment
-  # ID, complete identity, and the recorded route contract before retrying the
-  # exact GitHub success transition that previously failed.
+  # A failed production check can leave the candidate live, particularly on
+  # bootstrap when no earlier trusted deployment exists. After the underlying
+  # problem is repaired, prove its immutable ID, complete identity, and recorded
+  # route contract before establishing it as the recovery baseline.
   verify_recorded_production '.blocking.payload' "$blocking_candidate_id"
   blocking_deployment_id="$(jq -er '.blocking.deploymentId' "$gate_state")"
   bash "${script_dir}/deployment-record.sh" status \

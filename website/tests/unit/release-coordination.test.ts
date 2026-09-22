@@ -78,7 +78,7 @@ if [[ "\${1:-}" == exec && "\${2:-}" == vercel && "\${3:-}" == rollback ]]; then
   if [[ "\${FAKE_ROLLBACK_EXIT:-0}" == 0 ]]; then printf '%s\\n' "$FAKE_RESTORE_ID" >"$FAKE_CURRENT_ID"; fi
   exit "\${FAKE_ROLLBACK_EXIT:-0}"
 fi
-if [[ "\${1:-}" == test:deployment ]]; then exit 0; fi
+if [[ "\${1:-}" == test:deployment ]]; then exit "\${FAKE_DEPLOYMENT_TEST_EXIT:-0}"; fi
 printf 'unexpected fake pnpm invocation: %s\\n' "$*" >&2
 exit 91
 `,
@@ -208,6 +208,65 @@ async function rollbackFixture(harness: Awaited<ReturnType<typeof makeHarness>>)
     ),
   ]);
   return { restoreBuildInfo, targetRecord };
+}
+
+async function bootstrapRecoveryFixture(
+  harness: Awaited<ReturnType<typeof makeHarness>>,
+  state: string,
+) {
+  const deployments = path.join(harness.directory, "deployments.json");
+  const blockingStatuses = path.join(harness.directory, "blocking-statuses.json");
+  const gateState = path.join(harness.directory, "gate-state.json");
+  const baselineOut = path.join(harness.directory, "baseline.json");
+  await Promise.all([
+    writeFile(harness.current, "dpl_candidate\n", "utf8"),
+    writeFile(
+      deployments,
+      JSON.stringify([
+        {
+          id: 22,
+          created_at: "2026-09-21T02:00:00Z",
+          payload: deploymentPayload({
+            candidateId: "dpl_candidate",
+            candidateUrl: "https://candidate.example.vercel.app",
+            identity: candidateIdentity,
+            operation: "bootstrap",
+            previousId: null,
+          }),
+        },
+      ]),
+      "utf8",
+    ),
+    writeFile(
+      blockingStatuses,
+      JSON.stringify([{ id: 220, created_at: "2026-09-21T02:01:00Z", state }]),
+      "utf8",
+    ),
+  ]);
+  await execFileAsync(
+    "bash",
+    [
+      "scripts/release/deployment-record.sh",
+      "gate",
+      "--operation",
+      "recovery",
+      "--baseline-out",
+      baselineOut,
+      "--state-out",
+      gateState,
+      "--bootstrap-baseline",
+      "tests/fixtures/baseline-empty.json",
+    ],
+    {
+      cwd: repositoryRoot,
+      env: {
+        ...harness.env,
+        FAKE_GITHUB_BLOCKING_STATUSES: blockingStatuses,
+        FAKE_GITHUB_DEPLOYMENTS: deployments,
+      },
+    },
+  );
+  return { gateState, baselineOut };
 }
 
 afterEach(async () => {
@@ -355,7 +414,7 @@ describe("asynchronous Vercel recovery coordination", () => {
   });
 });
 
-describe("interrupted success-record recovery", () => {
+describe("blocked production recovery", () => {
   it("carries the blocked record payload through the recovery gate for later proof", async () => {
     const harness = await makeHarness();
     const deployments = path.join(harness.directory, "deployments.json");
@@ -503,4 +562,77 @@ describe("interrupted success-record recovery", () => {
     expect(log).toContain("pnpm test:deployment");
     expect(log).toContain("/deployments/22/statuses");
   });
+
+  it.each(["in_progress", "error", "failure"])(
+    "reverifies a %s bootstrap candidate without an earlier successful baseline",
+    async (state) => {
+      const harness = await makeHarness();
+      const { gateState, baselineOut } = await bootstrapRecoveryFixture(harness, state);
+      expect(JSON.parse(await readFile(gateState, "utf8")).baseline).toBeNull();
+
+      await execFileAsync(
+        "bash",
+        [
+          "scripts/release/coordinate-recovery.sh",
+          "--gate-state",
+          gateState,
+          "--baseline-out",
+          baselineOut,
+        ],
+        { cwd: repositoryRoot, env: harness.env },
+      );
+
+      const reconciled = JSON.parse(await readFile(gateState, "utf8"));
+      expect(reconciled.blocking.state).toBe("success");
+      expect(reconciled.baseline.deploymentId).toBe("22");
+      expect(reconciled.baseline.payload.candidateDeploymentId).toBe("dpl_candidate");
+      expect(JSON.parse(await readFile(baselineOut, "utf8"))).toEqual({
+        posts: {},
+        registryVersion: 1,
+      });
+      const log = await readFile(harness.log, "utf8");
+      expect(log.indexOf("pnpm test:deployment")).toBeGreaterThan(-1);
+      expect(log.indexOf("pnpm test:deployment")).toBeLessThan(log.indexOf("--request POST"));
+    },
+  );
+
+  it.each(["identity", "routes", "deployment"])(
+    "keeps an errored bootstrap blocked when %s verification fails",
+    async (failedCheck) => {
+      const harness = await makeHarness();
+      const { gateState, baselineOut } = await bootstrapRecoveryFixture(harness, "error");
+      const originalState = await readFile(gateState, "utf8");
+      const originalBaseline = await readFile(baselineOut, "utf8");
+      if (failedCheck === "identity") {
+        await writeFile(harness.buildInfo, JSON.stringify(baselineIdentity), "utf8");
+      }
+      if (failedCheck === "deployment") {
+        await writeFile(harness.current, "dpl_unrelated\n", "utf8");
+      }
+
+      await expect(
+        execFileAsync(
+          "bash",
+          [
+            "scripts/release/coordinate-recovery.sh",
+            "--gate-state",
+            gateState,
+            "--baseline-out",
+            baselineOut,
+          ],
+          {
+            cwd: repositoryRoot,
+            env: {
+              ...harness.env,
+              FAKE_DEPLOYMENT_TEST_EXIT: failedCheck === "routes" ? "1" : "0",
+            },
+          },
+        ),
+      ).rejects.toMatchObject({ code: 1 });
+
+      expect(await readFile(gateState, "utf8")).toBe(originalState);
+      expect(await readFile(baselineOut, "utf8")).toBe(originalBaseline);
+      expect(await readFile(harness.log, "utf8")).not.toContain("--request POST");
+    },
+  );
 });

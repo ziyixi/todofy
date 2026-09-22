@@ -2,7 +2,7 @@
 
 2026-09-21，按用户最新要求：直接覆盖现有仓库与项目，不保留旧内容，不迁移旧 URL，不备份或演练恢复旧站。旧站恢复衔接不再作为上线前提。
 
-本次只简化说明，未修改代码、线上设置或执行 push。新站仍使用现有构建和部署测试。
+2026-09-21 已完成代码覆盖；下面保留配置步骤供日后查阅。新站使用现有构建和部署测试。
 
 ## 1. Vercel 设置
 
@@ -18,7 +18,7 @@
 | Root Directory                     | 留空                                               |
 | Rolling Releases                   | 保持 Disabled                                      |
 
-域名已经正确：`ziyixi.science` 跳转到 `www.ziyixi.science`，后者连接此项目的 Production。保持现状；注册商转移以后再做。
+域名已经正确：`ziyixi.science` 跳转到 `www.ziyixi.science`，后者连接此项目的 Production。注册商转移以后再做。Cloudflare 代理会额外缓存 `robots.txt`；网站记录建议使用 DNS only（灰云）。若保留代理，首次替换旧站后需清理旧缓存，见下文。
 
 ## 2. 取得两个 Vercel 凭据
 
@@ -69,7 +69,7 @@ Deployment branches and tags 选 **Selected branches and tags**，添加 Branch�
 4. 确认提交不包含 `.env.local` 等密钥文件。
 5. 用 `--force-with-lease` 覆盖远端 `main`，不保留旧站备份。
 
-本次尚未执行。新代码的 `vercel.json` 关闭 Git 自动部署，push 后仍需下一步发布。
+上述代码覆盖已完成。新代码的 `vercel.json` 关闭 Git 自动部署，push 后仍需下一步发布。
 
 ## 5. 第一次上线
 
@@ -86,6 +86,16 @@ Deployment branches and tags 选 **Selected branches and tags**，添加 Branch�
 点击后会自动同步、检查、构建、测试并上线。整次运行变绿后查看正式网站，再删除临时变量 `BOOTSTRAP_APPROVAL`；其余配置保留。
 
 `bootstrap` 是现有流水线对首次发布的称呼，不要求保留旧内容。现有脚本对失败记录的检查仍在；如首发失败，先根据报错修正新站或发布流程，不将恢复旧站作为目标。
+
+## 已上线但验收失败时
+
+本次首次发布已将新站上线，但正式域名的 `robots.txt` 曾命中 Cloudflare 旧站缓存，所以发布记录为 `error`。此时不能重跑 `bootstrap`，也不要删除失败记录。
+
+1. Cloudflare → `ziyixi.science` → **Caching → Configuration → Custom Purge → URL**，填 `https://www.ziyixi.science/robots.txt`，点击 **Purge**。只清理此 URL，不需要清空整个域名的缓存。[官方步骤](https://developers.cloudflare.com/cache/how-to/purge-cache/purge-by-single-file/)
+2. GitHub → **Settings → Environments → Production**，添加临时 Environment variable：`RECOVERY_APPROVAL`，值为 `https://www.ziyixi.science`。
+3. 修复代码已推送后，进入 **Actions → Production release → Run workflow**：Branch=`main`，operation=`recovery`，confirmation=`recovery:www.ziyixi.science`，两个勾选框不选。不要点击旧 bootstrap 运行的 Re-run。
+4. 等待整个工作流成功。恢复会先完整复验已上线的新站，再重新构建、测试和发布。
+5. 成功后删除 `RECOVERY_APPROVAL` 和不再使用的 `BOOTSTRAP_APPROVAL`；以后按下面的 `release` 流程更新。
 
 ## 以后更新
 

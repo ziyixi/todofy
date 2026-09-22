@@ -118,7 +118,7 @@ Environment variables：
 
 - 普通 `release`：最新记录必须是 `success`，且其 deployment ID 与公开生产 `build-info` 都匹配；否则停止。
 - `bootstrap`：必须完全没有本站 Deployment 记录，并使用显式空登记表开始；不能伪造首条 success。
-- `recovery`：最新记录必须不是 `success`。工作流先等待 Vercel pending mutation 结束，再把当前正式 deployment 与阻断记录及较早 success 对照。若当前仍是较早 success，就以它为 baseline；若当前正是状态停在 `in_progress` 的新 candidate，则必须重新验证其 immutable deployment ID、完整 build identity 和记录中的路由合同，并成功重试该记录的 `success` POST 后，才能把它提升为可信 baseline。`failure`/`error` 记录不能走这条协调捷径。随后 recovery 仍重新构建、重新测试，不因身份相同提前退出。
+- `recovery`：最新记录必须不是 `success`。工作流先等待 Vercel pending mutation 结束，再把当前正式 deployment 与阻断记录及较早 success 对照。若当前仍是较早 success，就以它为 baseline；若当前正是状态为 `in_progress`、`error` 或 `failure` 的 candidate，则必须重新验证其 immutable deployment ID、完整 build identity 和记录中的路由合同，并成功写入该记录的 `success` 状态后，才能把它提升为可信 baseline。首次 bootstrap 没有旧 baseline 时也支持此路径，但记录不能声称存在旧 production ID。随后 recovery 仍重新构建、重新测试，不因身份相同提前退出。
 - `in_progress` 长时间未结束、状态缺失、API 读取失败、payload 超限或 schema 不兼容都按阻断处理。
 - 无变化或过时候选不得写一个新的 success 来覆盖故障状态。
 
@@ -160,7 +160,9 @@ Bootstrap 不是普通第一次点击。执行前必须完成并留存：
 - 生产 ID 已被其他维护者改变：停止自动操作，先协调并重新建立可信状态；
 - 首次 bootstrap 跨项目失败：执行旧托管/域名恢复方案，不能假装存在 Vercel rollback ID。
 
-若故障恰好发生在“candidate 已 promote、公开复验已通过、最后 success POST 失败”，不需要先把已经验证的新版本强制切回旧版。设置临时 `RECOVERY_APPROVAL` 后运行 recovery；工作流只会对 `in_progress` 阻断记录尝试受控协调，并在重新证明 deployment ID、身份和完整路由合同后重试原 success 写入。当前 ID 是第三个 deployment、记录已是 failure/error、promotion/rollback 状态无法确认或合同复验失败时，流程保持阻断并要求人工在 Vercel/GitHub 控制台核对，不会伪造 baseline。
+若 candidate 已 promote，但最后 success POST 失败，或 Cloudflare 等外层缓存使正式复验读到旧文件，先处理实际原因，再设置临时 `RECOVERY_APPROVAL` 运行 recovery。当前线上 candidate 与 `in_progress`、`error` 或 `failure` 记录一致时，工作流会重新证明 deployment ID、身份和完整路由合同，再写入原记录的 success；首次 bootstrap 无旧 baseline 也适用。当前 ID 是第三个 deployment、promotion/rollback 状态无法确认或合同复验失败时，流程保持阻断，不会伪造 baseline。
+
+Cloudflare 默认会缓存 `robots.txt`。Vercel promote 不会清除这个外层缓存；若 candidate 验收通过而正式域名仍返回旧站 robots，先在 Cloudflare 对 `https://www.ziyixi.science/robots.txt` 执行单文件清理，再运行 recovery。不要给验收 URL 添加随机参数来掩盖普通读者仍收到旧内容的问题。网站 DNS 记录使用 DNS only 可避免叠加这层缓存；若保留代理，则需要配置相应缓存策略。[默认缓存行为](https://developers.cloudflare.com/cache/concepts/default-cache-behavior/)、[单文件清理](https://developers.cloudflare.com/cache/how-to/purge-cache/purge-by-single-file/)。
 
 自动失败路径调用 `release:rollback` 时会先用固定 `VERCEL_PROJECT_ID` 的认证 API 轮询 `lastAliasRequest`，等待所有异步别名变更结束，再确认 canonical 域名仍指向失败 candidate；若已经稳定回到已知 good target，则只验证、不重复修改；若指向第三个 deployment，则拒绝覆盖。rollback CLI 返回超时不表示取消，脚本会继续读取平台任务状态并重新读取最终 ID；状态或 ID 无法确认时记录为需要人工恢复。恢复后还要在公开域名上核对旧 `build-info` 和完整部署测试。
 
