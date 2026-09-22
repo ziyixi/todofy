@@ -164,6 +164,8 @@ Bootstrap 不是普通第一次点击。执行前必须完成并留存：
 
 Cloudflare 默认会缓存 `robots.txt`。Vercel promote 不会清除这个外层缓存；若 candidate 验收通过而正式域名仍返回旧站 robots，先在 Cloudflare 对 `https://www.ziyixi.science/robots.txt` 执行单文件清理，再运行 recovery。不要给验收 URL 添加随机参数来掩盖普通读者仍收到旧内容的问题。网站 DNS 记录使用 DNS only 可避免叠加这层缓存；若保留代理，则需要配置相应缓存策略。[默认缓存行为](https://developers.cloudflare.com/cache/concepts/default-cache-behavior/)、[单文件清理](https://developers.cloudflare.com/cache/how-to/purge-cache/purge-by-single-file/)。
 
+Vercel 报告 promote 成功后，公开域名的构建标识可能尚未同步。仅在切换后的 identity 验证中，脚本最多读取 12 次，重试间隔为 5 秒；重试时重新核对域名仍属于预期 deployment，并要求响应为合法 JSON 且带 `no-store`。标识完全一致后才继续完整页面验收。持续不一致会失败并触发正常恢复流程；不会添加随机查询参数或只凭 CLI 成功就放行。候选、发布前 baseline 和页面验收的校验要求保持不变。
+
 自动失败路径调用 `release:rollback` 时会先用固定 `VERCEL_PROJECT_ID` 的认证 API 轮询 `lastAliasRequest`，等待所有异步别名变更结束，再确认 canonical 域名仍指向失败 candidate；若已经稳定回到已知 good target，则只验证、不重复修改；若指向第三个 deployment，则拒绝覆盖。rollback CLI 返回超时不表示取消，脚本会继续读取平台任务状态并重新读取最终 ID；状态或 ID 无法确认时记录为需要人工恢复。恢复后还要在公开域名上核对旧 `build-info` 和完整部署测试。
 
 修复原因后，临时设置 `RECOVERY_APPROVAL=SITE_URL`，选择 `operation=recovery`，confirmation 填 `recovery:<canonical-host>`。Recovery 运行全套内容准备、构建、candidate 与生产测试，并写一条新的 success；完成后删除临时变量。

@@ -11,6 +11,7 @@ expected_build_info=""
 expected_deployment_id=""
 verification_contract=""
 identity_only=false
+wait_for_identity=false
 
 while (($#)); do
   case "$1" in
@@ -20,6 +21,7 @@ while (($#)); do
     --expected-deployment-id) expected_deployment_id="${2:-}"; shift 2 ;;
     --verification-contract) verification_contract="${2:-}"; shift 2 ;;
     --identity-only) identity_only=true; shift ;;
+    --wait-for-identity) wait_for_identity=true; shift ;;
     *) release_die "unknown argument: $1" ;;
   esac
 done
@@ -46,6 +48,10 @@ else
 fi
 if [[ -n "$expected_deployment_id" ]]; then
   [[ "$expected_deployment_id" =~ ^dpl_[A-Za-z0-9]+$ ]] || release_die "invalid expected deployment ID"
+fi
+if [[ "$wait_for_identity" == true ]]; then
+  [[ "$mode" == production && -n "$expected_deployment_id" ]] ||
+    release_die "--wait-for-identity requires production mode and an expected deployment ID"
 fi
 if [[ -n "$verification_contract" ]]; then
   require_file "$verification_contract"
@@ -124,16 +130,44 @@ if [[ "$mode" == "candidate" ]]; then
   # deliberately disabled so curl can never forward it to another host.
   curl_args+=(--header "x-vercel-protection-bypass: ${VERCEL_AUTOMATION_BYPASS_SECRET}")
 fi
-curl "${curl_args[@]}" "${base_url}/build-info.json"
-
-grep -Eiq '^cache-control:([^\r\n]*,)?[[:space:]]*no-store([,;[:space:]]|$)' "${temp_dir}/headers.txt" ||
-  release_die "build-info.json did not return an explicit no-store cache policy"
-assert_build_info_file "${temp_dir}/actual-build-info.json"
-
 normalize_build_info "$expected_build_info" >"${temp_dir}/expected.normalized.json"
-normalize_build_info "${temp_dir}/actual-build-info.json" >"${temp_dir}/actual.normalized.json"
-cmp -s "${temp_dir}/expected.normalized.json" "${temp_dir}/actual.normalized.json" ||
-  release_die "deployed build identity does not match the locally verified artifact"
+identity_attempts=1
+[[ "$wait_for_identity" == false ]] || identity_attempts=12
+for ((attempt = 1; attempt <= identity_attempts; attempt++)); do
+  if ((attempt > 1)); then
+    sleep 5
+    # An alias can report success before its public routes converge. Before
+    # every retry, prove that no other deployment has taken over production.
+    vercel_deployment_json "$base_url" >"${temp_dir}/deployment.json"
+    assert_vercel_deployment "${temp_dir}/deployment.json" "$expected_deployment_id" production
+    resolved_deployment_id="$(jq -er '.id' "${temp_dir}/deployment.json")"
+  fi
+  curl "${curl_args[@]}" "${base_url}/build-info.json"
+
+  grep -Eiq '^cache-control:([^\r\n]*,)?[[:space:]]*no-store([,;[:space:]]|$)' "${temp_dir}/headers.txt" ||
+    release_die "build-info.json did not return an explicit no-store cache policy"
+  assert_build_info_file "${temp_dir}/actual-build-info.json"
+  normalize_build_info "${temp_dir}/actual-build-info.json" >"${temp_dir}/actual.normalized.json"
+  if cmp -s "${temp_dir}/expected.normalized.json" "${temp_dir}/actual.normalized.json"; then
+    break
+  fi
+
+  # Log only commit identifiers, never the response body or credential headers.
+  expected_code_sha="$(jq -r '.codeSha | if test("^[0-9a-fA-F]{7,64}$") then . else "<invalid codeSha>" end' "$expected_build_info")"
+  actual_code_sha="$(jq -r '.codeSha | if test("^[0-9a-fA-F]{7,64}$") then . else "<invalid codeSha>" end' "${temp_dir}/actual-build-info.json")"
+  release_note "build identity mismatch on attempt ${attempt}/${identity_attempts}: expected codeSha=${expected_code_sha}, actual codeSha=${actual_code_sha}"
+  response_cache_diagnostics="$(awk -F: '
+    tolower($1) ~ /^(cf-cache-status|x-vercel-cache|x-vercel-id)$/ {
+      value = substr($0, index($0, ":") + 1)
+      gsub(/\r/, "", value)
+      if (length(value) <= 160 && value ~ /^[A-Za-z0-9 ._:;=,-]+$/)
+        printf "%s=%s; ", tolower($1), value
+    }
+  ' "${temp_dir}/headers.txt")"
+  release_note "identity response cache headers: ${response_cache_diagnostics:-not present}"
+  ((attempt < identity_attempts)) ||
+    release_die "deployed build identity does not match the locally verified artifact"
+done
 
 write_github_output deployment_id "$resolved_deployment_id"
 write_github_output deployment_url "$base_url"

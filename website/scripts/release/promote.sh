@@ -118,6 +118,7 @@ bash "${script_dir}/verify-deployment.sh" \
   --base-url "$SITE_URL" \
   --expected-build-info "$expected_build_info" \
   --expected-deployment-id "$candidate_id" \
+  --wait-for-identity \
   --identity-only
 
 write_github_output promoted_deployment_id "$candidate_id"
