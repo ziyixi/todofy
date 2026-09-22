@@ -132,7 +132,12 @@ if [[ "$mode" == "candidate" ]]; then
 fi
 normalize_build_info "$expected_build_info" >"${temp_dir}/expected.normalized.json"
 identity_attempts=1
-[[ "$wait_for_identity" == false ]] || identity_attempts=12
+required_identity_matches=1
+consecutive_identity_matches=0
+if [[ "$wait_for_identity" == true ]]; then
+  identity_attempts=12
+  required_identity_matches=3
+fi
 for ((attempt = 1; attempt <= identity_attempts; attempt++)); do
   if ((attempt > 1)); then
     sleep 5
@@ -149,8 +154,16 @@ for ((attempt = 1; attempt <= identity_attempts; attempt++)); do
   assert_build_info_file "${temp_dir}/actual-build-info.json"
   normalize_build_info "${temp_dir}/actual-build-info.json" >"${temp_dir}/actual.normalized.json"
   if cmp -s "${temp_dir}/expected.normalized.json" "${temp_dir}/actual.normalized.json"; then
-    break
+    ((consecutive_identity_matches += 1))
+    if [[ "$wait_for_identity" == true ]]; then
+      release_note "public identity matched on attempt ${attempt}/${identity_attempts}: ${consecutive_identity_matches}/${required_identity_matches} consecutive matches"
+    fi
+    if ((consecutive_identity_matches >= required_identity_matches)); then
+      break
+    fi
+    continue
   fi
+  consecutive_identity_matches=0
 
   # Log only commit identifiers, never the response body or credential headers.
   expected_code_sha="$(jq -r '.codeSha | if test("^[0-9a-fA-F]{7,64}$") then . else "<invalid codeSha>" end' "$expected_build_info")"
@@ -165,9 +178,13 @@ for ((attempt = 1; attempt <= identity_attempts; attempt++)); do
     }
   ' "${temp_dir}/headers.txt")"
   release_note "identity response cache headers: ${response_cache_diagnostics:-not present}"
-  ((attempt < identity_attempts)) ||
-    release_die "deployed build identity does not match the locally verified artifact"
 done
+if ((consecutive_identity_matches < required_identity_matches)); then
+  if ((consecutive_identity_matches == 0)); then
+    release_die "deployed build identity does not match the locally verified artifact"
+  fi
+  release_die "deployed build identity did not stabilize: ${consecutive_identity_matches}/${required_identity_matches} consecutive matches after ${identity_attempts} attempts"
+fi
 
 write_github_output deployment_id "$resolved_deployment_id"
 write_github_output deployment_url "$base_url"

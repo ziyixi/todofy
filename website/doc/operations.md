@@ -164,7 +164,9 @@ Bootstrap 不是普通第一次点击。执行前必须完成并留存：
 
 Cloudflare 默认会缓存 `robots.txt`。Vercel promote 不会清除这个外层缓存；若 candidate 验收通过而正式域名仍返回旧站 robots，先在 Cloudflare 对 `https://www.ziyixi.science/robots.txt` 执行单文件清理，再运行 recovery。不要给验收 URL 添加随机参数来掩盖普通读者仍收到旧内容的问题。网站 DNS 记录使用 DNS only 可避免叠加这层缓存；若保留代理，则需要配置相应缓存策略。[默认缓存行为](https://developers.cloudflare.com/cache/concepts/default-cache-behavior/)、[单文件清理](https://developers.cloudflare.com/cache/how-to/purge-cache/purge-by-single-file/)。
 
-Vercel 报告 promote 成功后，公开域名的构建标识可能尚未同步。仅在切换后的 identity 验证中，脚本最多读取 12 次，重试间隔为 5 秒；重试时重新核对域名仍属于预期 deployment，并要求响应为合法 JSON 且带 `no-store`。标识完全一致后才继续完整页面验收。持续不一致会失败并触发正常恢复流程；不会添加随机查询参数或只凭 CLI 成功就放行。候选、发布前 baseline 和页面验收的校验要求保持不变。
+Vercel 报告 promote 成功后，公开域名可能短暂交替返回新、旧构建标识。promote 内的切换确认、之后的独立正式验收、rollback 后的正式验收均启用有界等待：最多读取 12 次，间隔 5 秒，连续 3 次标识完全一致才继续。每次重新核对域名仍属于预期 deployment，并要求响应为合法 JSON 且带 `no-store`。持续不一致会失败；不会添加随机查询参数或只凭 CLI 成功就放行。候选、发布前 baseline 和完整页面验收的校验要求保持不变。
+
+Vercel Hobby 对历史 rollback 有限制；多次 promote/rollback 后，GitHub 记录的最后成功版本可能已不在平台允许的前一个生产版本位置。遇到 `To rollback further than the previous production deployment, upgrade to pro`，工作流保留 error，不能声称已恢复。若当前新 candidate 已经健康，使用 recovery 完整复验该候选并建立可信 baseline；不需要为了把状态变绿而升级套餐。
 
 自动失败路径调用 `release:rollback` 时会先用固定 `VERCEL_PROJECT_ID` 的认证 API 轮询 `lastAliasRequest`，等待所有异步别名变更结束，再确认 canonical 域名仍指向失败 candidate；若已经稳定回到已知 good target，则只验证、不重复修改；若指向第三个 deployment，则拒绝覆盖。rollback CLI 返回超时不表示取消，脚本会继续读取平台任务状态并重新读取最终 ID；状态或 ID 无法确认时记录为需要人工恢复。恢复后还要在公开域名上核对旧 `build-info` 和完整部署测试。
 

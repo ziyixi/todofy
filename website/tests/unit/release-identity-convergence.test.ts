@@ -60,6 +60,12 @@ if [[ "$url" == https://www.ziyixi.science/build-info.json ]]; then
   printf 'HTTP/2 200\\r\\ncache-control: %s\\r\\ncf-cache-status: DYNAMIC\\r\\nx-vercel-cache: HIT\\r\\nx-vercel-id: iad1::test-request\\r\\nset-cookie: secret-not-for-logs\\r\\n\\r\\n' "\${FAKE_CACHE_CONTROL:-no-store, max-age=0}" >"$headers"
   if [[ "\${FAKE_INVALID_IDENTITY:-false}" == true ]]; then
     printf 'invalid-json' >"$output"
+  elif [[ -n "\${FAKE_IDENTITY_SEQUENCE:-}" ]]; then
+    if [[ "\${FAKE_IDENTITY_SEQUENCE:count-1:1}" == 1 ]]; then
+      cp "$FAKE_EXPECTED" "$output"
+    else
+      cp "$FAKE_STALE" "$output"
+    fi
   elif (( count >= \${FAKE_IDENTITY_READY_AT:-2} )); then
     cp "$FAKE_EXPECTED" "$output"
   else
@@ -137,13 +143,20 @@ describe("post-promotion public identity convergence", () => {
     const harness = await makeHarness();
     const result = await verify(harness);
     const lines = (await readFile(harness.log, "utf8")).trim().split("\n");
-    expect(lines).toHaveLength(6);
+    expect(lines).toHaveLength(12);
     expect(lines[0]).toContain("https://api.vercel.com/v13/deployments/");
     expect(lines[1]).toBe("https://www.ziyixi.science/build-info.json");
     expect(lines[2]).toBe("sleep 5");
     expect(lines[3]).toBe(lines[0]);
     expect(lines[4]).toBe(lines[1]);
-    expect(lines[5]).toBe("pnpm test:deployment");
+    expect(lines[5]).toBe("sleep 5");
+    expect(lines[6]).toBe(lines[0]);
+    expect(lines[7]).toBe(lines[1]);
+    expect(lines[8]).toBe("sleep 5");
+    expect(lines[9]).toBe(lines[0]);
+    expect(lines[10]).toBe(lines[1]);
+    expect(lines[11]).toBe("pnpm test:deployment");
+    expect(result.stderr).toContain("attempt 4/12: 3/3 consecutive matches");
     expect(result.stderr).toContain(`expected codeSha=${identity.codeSha}`);
     expect(result.stderr).toContain(`actual codeSha=${"d".repeat(40)}`);
     expect(result.stderr).toContain("cf-cache-status= DYNAMIC");
@@ -174,16 +187,21 @@ describe("post-promotion public identity convergence", () => {
     expect(await readFile(harness.log, "utf8")).not.toContain("sleep");
   });
 
-  it("fails immediately if a different deployment takes over while waiting", async () => {
-    const harness = await makeHarness();
-    await expect(verify(harness, { env: { FAKE_FOREIGN_ID_AT: "2" } })).rejects.toMatchObject({
-      code: 1,
-      stderr: expect.stringContaining("Vercel deployment ID does not match the expected ID"),
-    });
-    expect((await readFile(harness.apiCount, "utf8")).trim()).toBe("2");
-    expect((await readFile(harness.publicCount, "utf8")).trim()).toBe("1");
-    expect(await readFile(harness.output, "utf8")).toBe("");
-  });
+  it.each([2, 3])(
+    "fails immediately if a different deployment takes over on attempt %i",
+    async (attempt) => {
+      const harness = await makeHarness();
+      await expect(
+        verify(harness, { env: { FAKE_FOREIGN_ID_AT: String(attempt) } }),
+      ).rejects.toMatchObject({
+        code: 1,
+        stderr: expect.stringContaining("Vercel deployment ID does not match the expected ID"),
+      });
+      expect((await readFile(harness.apiCount, "utf8")).trim()).toBe(String(attempt));
+      expect((await readFile(harness.publicCount, "utf8")).trim()).toBe(String(attempt - 1));
+      expect(await readFile(harness.output, "utf8")).toBe("");
+    },
+  );
 
   it.each([{ FAKE_CACHE_CONTROL: "public, max-age=14400" }, { FAKE_INVALID_IDENTITY: "true" }])(
     "rejects unsafe or invalid responses without retrying: %j",
@@ -200,6 +218,37 @@ describe("post-promotion public identity convergence", () => {
     const harness = await makeHarness();
     await writeFile(harness.stale, JSON.stringify({ ...identity, contentHash: "e".repeat(64) }));
     await verify(harness);
-    expect((await readFile(harness.publicCount, "utf8")).trim()).toBe("2");
+    expect((await readFile(harness.publicCount, "utf8")).trim()).toBe("4");
   });
+
+  it("resets stability when new/old responses alternate before three consecutive matches", async () => {
+    const harness = await makeHarness();
+    const result = await verify(harness, { env: { FAKE_IDENTITY_SEQUENCE: "10111" } });
+    expect((await readFile(harness.apiCount, "utf8")).trim()).toBe("5");
+    expect((await readFile(harness.publicCount, "utf8")).trim()).toBe("5");
+    expect(result.stderr).toContain("attempt 1/12: 1/3 consecutive matches");
+    expect(result.stderr).toContain("build identity mismatch on attempt 2/12");
+    expect(result.stderr).toContain("attempt 3/12: 1/3 consecutive matches");
+    expect(result.stderr).toContain("attempt 5/12: 3/3 consecutive matches");
+    expect((await readFile(harness.log, "utf8")).trim().split("\n").at(-1)).toBe(
+      "pnpm test:deployment",
+    );
+  });
+
+  it.each([11, 12])(
+    "fails closed if the first match arrives on attempt %i without time to prove stability",
+    async (firstMatch) => {
+      const harness = await makeHarness();
+      await expect(
+        verify(harness, { env: { FAKE_IDENTITY_READY_AT: String(firstMatch) } }),
+      ).rejects.toMatchObject({
+        code: 1,
+        stderr: expect.stringContaining("deployed build identity did not stabilize"),
+      });
+      expect((await readFile(harness.apiCount, "utf8")).trim()).toBe("12");
+      expect((await readFile(harness.publicCount, "utf8")).trim()).toBe("12");
+      expect(await readFile(harness.log, "utf8")).not.toContain("pnpm test:deployment");
+      expect(await readFile(harness.output, "utf8")).toBe("");
+    },
+  );
 });

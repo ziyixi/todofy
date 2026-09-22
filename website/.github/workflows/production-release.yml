@@ -319,6 +319,7 @@ jobs:
             --mode production \
             --base-url "$SITE_URL" \
             --expected-build-info .generated/release/build-info.json \
+            --wait-for-identity \
             --expected-deployment-id "${{ steps.candidate_verify.outputs.deployment_id }}"
 
       - name: Mark the release successful
@@ -374,6 +375,7 @@ jobs:
             --base-url "$SITE_URL" \
             --expected-build-info .generated/release/previous-build-info.json \
             --expected-deployment-id "${{ steps.baseline.outputs.previous_production_id }}" \
+            --wait-for-identity \
             --verification-contract .generated/release/previous-verification-contract.json
 
       - name: Record a blocked failure
