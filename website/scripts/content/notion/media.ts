@@ -6,7 +6,7 @@ import path from "node:path";
 
 import { ContentError } from "../../../src/lib/content/errors";
 import type { MediaAsset } from "../types";
-import type { RemoteImage, ResolvedImage } from "./types";
+import type { RemoteFile, RemoteFileKind, RemoteImage, ResolvedFile, ResolvedImage } from "./types";
 
 const MIME_EXTENSIONS: Record<string, string> = {
   "image/avif": "avif",
@@ -16,21 +16,48 @@ const MIME_EXTENSIONS: Record<string, string> = {
   "image/webp": "webp",
 };
 
+const ATTACHMENT_MIME_EXTENSIONS: Record<string, string> = {
+  "application/octet-stream": "bin",
+  "application/pdf": "pdf",
+  "application/zip": "zip",
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document": "docx",
+  "application/vnd.openxmlformats-officedocument.presentationml.presentation": "pptx",
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": "xlsx",
+  "audio/mp4": "m4a",
+  "audio/mpeg": "mp3",
+  "audio/ogg": "ogg",
+  "audio/wav": "wav",
+  "audio/x-wav": "wav",
+  "image/avif": "avif",
+  "image/gif": "gif",
+  "image/jpeg": "jpg",
+  "image/png": "png",
+  "image/webp": "webp",
+  "text/csv": "csv",
+  "text/plain": "txt",
+  "video/mp4": "mp4",
+  "video/ogg": "ogv",
+  "video/webm": "webm",
+};
+
 const DEFAULT_ALLOWED_HOST_SUFFIXES = ["amazonaws.com", "file.notion.so", "notion-static.com"];
 
 export interface MediaResolverOptions {
   publicDirectory: string;
   allowedHostSuffixes?: string[];
   maxImageBytes?: number;
+  maxAttachmentBytes?: number;
+  maxVideoBytes?: number;
   maxTotalBytes?: number;
   timeoutMs?: number;
-  refreshUrl?: (notionBlockId: string) => Promise<string>;
+  refreshUrl?: (notionBlockId: string, kind?: RemoteFileKind) => Promise<string>;
 }
 
 export interface LimitedBodyOptions {
   maxImageBytes: number;
   maxTotalRemainingBytes: number;
   notionBlockId: string;
+  mediaKind?: string;
 }
 
 export interface FetchRetryOptions {
@@ -43,15 +70,32 @@ export interface FetchRetryOptions {
 
 export type MediaResponseFetcher = (url: string) => Promise<Response>;
 
+export function isManagedNotionMediaUrl(
+  rawUrl: string,
+  allowedHostSuffixes: string[] = DEFAULT_ALLOWED_HOST_SUFFIXES,
+): boolean {
+  try {
+    const url = new URL(rawUrl);
+    const hostname = url.hostname.toLowerCase().replace(/\.$/, "");
+    return allowedHostSuffixes.some(
+      (suffix) => hostname === suffix || hostname.endsWith(`.${suffix}`),
+    );
+  } catch {
+    return false;
+  }
+}
+
 export function createMediaResolver(options: MediaResolverOptions) {
   const allowedHostSuffixes = options.allowedHostSuffixes ?? DEFAULT_ALLOWED_HOST_SUFFIXES;
   const maxImageBytes = options.maxImageBytes ?? 20 * 1024 * 1024;
+  const maxAttachmentBytes = options.maxAttachmentBytes ?? 25 * 1024 * 1024;
+  const maxVideoBytes = options.maxVideoBytes ?? 50 * 1024 * 1024;
   const maxTotalBytes = options.maxTotalBytes ?? 200 * 1024 * 1024;
   const timeoutMs = options.timeoutMs ?? 30_000;
   const mediaDirectory = path.join(options.publicDirectory, "media");
   let totalBytes = 0;
 
-  return async function resolveImage(image: RemoteImage): Promise<ResolvedImage> {
+  async function resolveImage(image: RemoteImage): Promise<ResolvedImage> {
     const response = await fetchMediaWithUrlRefresh(image, options.refreshUrl, (url) =>
       safeFetch(url, allowedHostSuffixes, timeoutMs),
     );
@@ -62,16 +106,83 @@ export function createMediaResolver(options: MediaResolverOptions) {
         `Image block ${image.notionBlockId} returned unsupported media type ${mimeType ?? "unknown"}.`,
       );
     }
+    let dimensions: { width: number; height: number } | undefined;
+    const { asset } = await storeResponse(
+      response,
+      image.notionBlockId,
+      maxImageBytes,
+      "Image",
+      MIME_EXTENSIONS[mimeType],
+      async (bytes) => {
+        const sharpModule = await import("sharp");
+        const metadata = await sharpModule.default(bytes, { animated: true }).metadata();
+        if (!metadata.width || !metadata.height) {
+          throw new ContentError(
+            "INVALID_IMAGE",
+            `Image block ${image.notionBlockId} has no readable dimensions.`,
+          );
+        }
+        dimensions = { width: metadata.width, height: metadata.height };
+      },
+    );
+    if (!dimensions) throw new ContentError("INVALID_IMAGE", "Image dimensions are unavailable.");
+    return { asset: { ...asset, ...dimensions } };
+  }
+
+  async function resolveFile(file: RemoteFile): Promise<ResolvedFile> {
+    const refreshUrl = options.refreshUrl;
+    const response = await fetchMediaWithUrlRefresh(
+      file,
+      refreshUrl ? (blockId) => refreshUrl(blockId, file.kind) : undefined,
+      (url) => safeFetch(url, allowedHostSuffixes, timeoutMs),
+    );
+    const mimeType = response.headers.get("content-type")?.split(";", 1)[0]?.trim().toLowerCase();
+    if (!mimeType || !ATTACHMENT_MIME_EXTENSIONS[mimeType]) {
+      throw new ContentError(
+        "UNSUPPORTED_MEDIA_TYPE",
+        `Media block ${file.notionBlockId} returned unsupported media type ${mimeType ?? "unknown"}.`,
+      );
+    }
+    const inferredKind = inferFileKind(mimeType);
+    if (file.kind !== "embed" && !mimeAllowedForKind(file.kind, mimeType)) {
+      throw new ContentError(
+        "UNSUPPORTED_MEDIA_TYPE",
+        `Media block ${file.notionBlockId} returned ${mimeType} for ${file.kind}.`,
+      );
+    }
+    const kind = file.kind === "embed" ? inferredKind : file.kind;
+    const maxBytes = kind === "video" ? maxVideoBytes : maxAttachmentBytes;
+    const { asset } = await storeResponse(
+      response,
+      file.notionBlockId,
+      maxBytes,
+      "Media",
+      ATTACHMENT_MIME_EXTENSIONS[mimeType],
+      (bytes) => {
+        if (mimeType === "application/pdf" && !looksLikePdf(bytes)) {
+          throw new ContentError("INVALID_MEDIA", `PDF block ${file.notionBlockId} is not a PDF.`);
+        }
+      },
+    );
+    return { asset, kind };
+  }
+
+  async function storeResponse(
+    response: Response,
+    notionBlockId: string,
+    maxBytes: number,
+    mediaKind: string,
+    extension: string,
+    validate?: (bytes: Uint8Array) => Promise<void> | void,
+  ): Promise<{ asset: MediaAsset; bytes: Uint8Array }> {
+    const mimeType = response.headers.get("content-type")?.split(";", 1)[0]?.trim().toLowerCase();
+    if (!mimeType) throw new ContentError("UNSUPPORTED_MEDIA_TYPE", "Media type is missing.");
     const contentLength = response.headers.get("content-length");
     const declaredSize = contentLength === null ? undefined : Number(contentLength);
-    if (
-      declaredSize !== undefined &&
-      Number.isFinite(declaredSize) &&
-      declaredSize > maxImageBytes
-    ) {
+    if (declaredSize !== undefined && Number.isFinite(declaredSize) && declaredSize > maxBytes) {
       throw new ContentError(
         "MEDIA_TOO_LARGE",
-        `Image block ${image.notionBlockId} exceeds the ${maxImageBytes}-byte limit.`,
+        `${mediaKind} block ${notionBlockId} exceeds the ${maxBytes}-byte limit.`,
       );
     }
     const remainingTotalBytes = maxTotalBytes - totalBytes;
@@ -85,40 +196,52 @@ export function createMediaResolver(options: MediaResolverOptions) {
         `Downloaded media exceeds the ${maxTotalBytes}-byte total limit.`,
       );
     }
-
     const bytes = await readLimitedResponseBody(response, {
-      maxImageBytes,
+      maxImageBytes: maxBytes,
       maxTotalRemainingBytes: remainingTotalBytes,
-      notionBlockId: image.notionBlockId,
+      notionBlockId,
+      mediaKind,
     });
-    totalBytes += bytes.byteLength;
-
+    await validate?.(bytes);
     const sha256 = createHash("sha256").update(bytes).digest("hex");
-    const extension = MIME_EXTENSIONS[mimeType];
     const filename = `${sha256}.${extension}`;
     const diskPath = path.join(mediaDirectory, filename);
     await mkdir(mediaDirectory, { recursive: true });
     await writeContentAddressedFile(diskPath, bytes, sha256);
-
-    const sharpModule = await import("sharp");
-    const metadata = await sharpModule.default(bytes, { animated: true }).metadata();
-    if (!metadata.width || !metadata.height) {
-      throw new ContentError(
-        "INVALID_IMAGE",
-        `Image block ${image.notionBlockId} has no readable dimensions.`,
-      );
-    }
-
-    const asset: MediaAsset = {
-      path: `/media/${filename}`,
-      sha256,
-      mimeType,
-      sizeBytes: bytes.byteLength,
-      width: metadata.width,
-      height: metadata.height,
+    totalBytes += bytes.byteLength;
+    return {
+      bytes,
+      asset: {
+        path: `/media/${filename}`,
+        sha256,
+        mimeType,
+        sizeBytes: bytes.byteLength,
+      },
     };
-    return { asset };
-  };
+  }
+
+  return Object.assign(resolveImage, {
+    resolveFile,
+    isManagedUrl: (url: string) => isManagedNotionMediaUrl(url, allowedHostSuffixes),
+  });
+}
+
+function inferFileKind(mimeType: string): ResolvedFile["kind"] {
+  if (mimeType === "application/pdf") return "pdf";
+  if (mimeType.startsWith("audio/")) return "audio";
+  if (mimeType.startsWith("video/")) return "video";
+  return "file";
+}
+
+function mimeAllowedForKind(kind: Exclude<RemoteFileKind, "embed">, mimeType: string): boolean {
+  if (kind === "pdf") return mimeType === "application/pdf";
+  if (kind === "audio") return mimeType.startsWith("audio/");
+  if (kind === "video") return mimeType.startsWith("video/");
+  return Boolean(ATTACHMENT_MIME_EXTENSIONS[mimeType]);
+}
+
+function looksLikePdf(bytes: Uint8Array): boolean {
+  return bytes.length >= 5 && String.fromCharCode(...bytes.subarray(0, 5)) === "%PDF-";
 }
 
 /**
@@ -126,25 +249,25 @@ export function createMediaResolver(options: MediaResolverOptions) {
  * is rejected as expired, while preserving every other download failure.
  */
 export async function fetchMediaWithUrlRefresh(
-  image: RemoteImage,
+  media: RemoteImage,
   refreshUrl: MediaResolverOptions["refreshUrl"],
   fetchResponse: MediaResponseFetcher,
 ): Promise<Response> {
   try {
-    return await fetchResponse(image.url);
+    return await fetchResponse(media.url);
   } catch (error) {
     const status =
       error instanceof ContentError && typeof error.details?.status === "number"
         ? error.details.status
         : undefined;
     if (!refreshUrl || (status !== 401 && status !== 403)) throw error;
-    return fetchResponse(await refreshUrl(image.notionBlockId));
+    return fetchResponse(await refreshUrl(media.notionBlockId));
   }
 }
 
 /**
  * Reads a response incrementally so a missing or dishonest Content-Length cannot
- * make the synchronizer buffer an unbounded image. The reader is cancelled as
+ * make the synchronizer buffer unbounded media. The reader is cancelled as
  * soon as either limit is crossed.
  */
 export async function readLimitedResponseBody(
@@ -167,7 +290,7 @@ export async function readLimitedResponseBody(
       if (byteLength > options.maxImageBytes) {
         limitError = new ContentError(
           "MEDIA_TOO_LARGE",
-          `Image block ${options.notionBlockId} exceeds the ${options.maxImageBytes}-byte limit.`,
+          `${options.mediaKind ?? "Image"} block ${options.notionBlockId} exceeds the ${options.maxImageBytes}-byte limit.`,
         );
       } else if (byteLength > options.maxTotalRemainingBytes) {
         limitError = new ContentError(

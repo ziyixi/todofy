@@ -30,6 +30,10 @@ export async function prepareFixtureSource(context: SourceContext): Promise<Prep
         children: [],
       },
       {
+        id: "fixture-toc-marker",
+        type: "tableOfContents",
+      },
+      {
         id: "fixture-boundaries",
         type: "heading",
         level: 2,
@@ -76,6 +80,61 @@ export async function prepareFixtureSource(context: SourceContext): Promise<Prep
         ],
       },
       {
+        id: "fixture-columns",
+        type: "columns",
+        columns: [
+          {
+            id: "fixture-first-column",
+            widthRatio: 0.4,
+            children: [
+              {
+                id: "fixture-checked-task",
+                type: "toDo",
+                checked: true,
+                richText: [{ text: "Verify the snapshot" }],
+                children: [],
+              },
+            ],
+          },
+          {
+            id: "fixture-second-column",
+            widthRatio: 0.6,
+            children: [
+              {
+                id: "fixture-unchecked-task",
+                type: "toDo",
+                checked: false,
+                richText: [{ text: "Publish after review" }],
+                children: [],
+              },
+            ],
+          },
+        ],
+      },
+      {
+        id: "fixture-toggle-heading",
+        type: "heading",
+        level: 2,
+        anchor: "optional-details",
+        richText: [{ text: "Optional details" }],
+        toggleable: true,
+        children: [
+          {
+            id: "fixture-nested-heading",
+            type: "heading",
+            level: 3,
+            anchor: "nested-section",
+            richText: [{ text: "Nested section" }],
+          },
+          {
+            id: "fixture-nested-paragraph",
+            type: "paragraph",
+            richText: [{ text: "This section remains visible on initial navigation." }],
+            children: [],
+          },
+        ],
+      },
+      {
         id: "fixture-toggle",
         type: "toggle",
         richText: [{ text: "Why a manifest?" }],
@@ -107,7 +166,11 @@ export async function prepareFixtureSource(context: SourceContext): Promise<Prep
         ],
       },
     ],
-    toc: [{ id: "explicit-boundaries", text: "Explicit boundaries", level: 2 }],
+    toc: [
+      { id: "explicit-boundaries", text: "Explicit boundaries", level: 2 },
+      { id: "optional-details", text: "Optional details", level: 2 },
+      { id: "nested-section", text: "Nested section", level: 3 },
+    ],
     media: [],
   };
 

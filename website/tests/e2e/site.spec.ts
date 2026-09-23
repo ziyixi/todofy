@@ -34,7 +34,7 @@ test.describe("public site", () => {
     expect(mainWidth).toBeLessThanOrEqual(800);
   });
 
-  test("blog handles both the empty and representative fixture states", async ({ page }) => {
+  test("blog handles empty, fixture, and Notion article states", async ({ page }) => {
     const consoleErrors: string[] = [];
     page.on("console", (message) => {
       if (message.type() === "error") consoleErrors.push(message.text());
@@ -51,23 +51,111 @@ test.describe("public site", () => {
       return;
     }
 
+    const articlePath = await articleLinks.first().getAttribute("href");
     await articleLinks.first().click();
     await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
     await expect(page.locator("article")).toHaveAttribute("lang", /^(en|zh-CN)$/);
-    await expect(page.locator("article pre")).toBeVisible();
-    await expect(page.locator("article table")).toBeVisible();
-    await expect(
-      page.getByText("This article is synthetic and never production content."),
-    ).toBeVisible();
+    expect((await page.locator("article").innerText()).length).toBeGreaterThan(200);
+    if (articlePath === "/blog/reliable-content-pipelines") {
+      await expect(page.locator("article pre").first()).toBeVisible();
+      await expect(page.locator("article table")).toBeVisible();
+      await expect(
+        page.getByText("This article is synthetic and never production content."),
+      ).toBeVisible();
 
-    const bookmark = page.getByRole("link", { name: "Notion developer documentation" });
-    await expect(bookmark).toHaveCount(1);
-    await expect(bookmark).toHaveAttribute("href", "https://developers.notion.com/");
-    await bookmark.focus();
-    await expect(bookmark).toBeFocused();
+      const bookmark = page.getByRole("link", { name: "Notion developer documentation" });
+      await expect(bookmark).toHaveCount(1);
+      await expect(bookmark).toHaveAttribute("href", "https://developers.notion.com/");
+      await bookmark.focus();
+      await expect(bookmark).toBeFocused();
+    }
     await expect(page.locator("article a a")).toHaveCount(0);
     await expect(page.locator('article a[href="https://example.com/caption"]')).toHaveCount(0);
     expect(consoleErrors).toEqual([]);
+  });
+
+  test("Notion-style table of contents, toggled headings, tasks, and columns stay usable", async ({
+    page,
+  }) => {
+    const response = await page.goto("/blog/reliable-content-pipelines");
+    test.skip(response?.status() !== 200, "This test needs the synthetic fixture article.");
+
+    const article = page.locator("article");
+    const toc = article.locator("details", {
+      has: page.locator("summary", { hasText: "On this page" }),
+    });
+    await expect(toc).toHaveCount(1);
+    const nestedHeading = article.getByRole("heading", { name: "Nested section" });
+    const toggleHeading = article.locator("details:has(> summary > h2#optional-details)");
+    await expect(toggleHeading).toHaveAttribute("open", "");
+    await expect(nestedHeading).toBeVisible();
+    await toggleHeading.locator("summary").click();
+    await expect(toggleHeading).not.toHaveAttribute("open", "");
+    await toc.locator("summary").click();
+    await toc.getByRole("link", { name: "Nested section" }).click();
+    await expect(page).toHaveURL(/#nested-section$/);
+    await expect(toggleHeading).toHaveAttribute("open", "");
+    await expect(nestedHeading).toBeInViewport();
+
+    await expect(article.getByRole("checkbox", { name: "Verify the snapshot" })).toBeChecked();
+    await expect(article.getByRole("checkbox", { name: "Publish after review" })).not.toBeChecked();
+    await expect(article.getByRole("checkbox", { name: "Verify the snapshot" })).toBeDisabled();
+
+    const columns = article.locator('[style*="--column-template"]');
+    const gridColumns = await columns.evaluate(
+      (element) => getComputedStyle(element).gridTemplateColumns,
+    );
+    expect(gridColumns.split(" ").length).toBe(page.viewportSize()!.width <= 639 ? 1 : 2);
+  });
+
+  test("article images open at fitted or original size and return keyboard focus", async ({
+    page,
+  }) => {
+    await page.goto("/blog");
+    const articleLink = page.locator('main a[href^="/blog/"]').first();
+    if ((await articleLink.count()) === 0) return;
+    const articlePath = await articleLink.getAttribute("href");
+    if (!articlePath) return;
+
+    await page.goto(articlePath);
+    const trigger = page.locator('article button[aria-label^="Enlarge image"]').first();
+    if ((await trigger.count()) === 0) return;
+
+    await trigger.focus();
+    await trigger.press("Enter");
+    const dialog = page.getByRole("dialog", { name: /Expanded image/ });
+    await expect(dialog).toBeVisible();
+    const accessibility = await new AxeBuilder({ page }).analyze();
+    expect(
+      accessibility.violations.filter(
+        (violation) => violation.impact === "critical" || violation.impact === "serious",
+      ),
+    ).toEqual([]);
+    await expect(dialog.getByRole("button", { name: "Fit" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+
+    const image = dialog.locator("img");
+    await expect
+      .poll(() => image.evaluate((element: HTMLImageElement) => element.naturalWidth))
+      .toBeGreaterThan(0);
+    const fittedWidth = await image.evaluate((element) => element.getBoundingClientRect().width);
+    const naturalWidth = await image.evaluate((element: HTMLImageElement) => element.naturalWidth);
+    expect(fittedWidth).toBeLessThanOrEqual(page.viewportSize()!.width);
+
+    await dialog.getByRole("button", { name: "Original size" }).click();
+    await expect(dialog.getByRole("button", { name: "Original size" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    const originalWidth = await image.evaluate((element) => element.getBoundingClientRect().width);
+    expect(originalWidth).toBe(naturalWidth);
+    if (naturalWidth > fittedWidth) expect(originalWidth).toBeGreaterThan(fittedWidth);
+
+    await page.keyboard.press("Escape");
+    await expect(dialog).not.toBeVisible();
+    await expect(trigger).toBeFocused();
   });
 
   test("publications exposes complete citations and real resources", async ({ page }) => {

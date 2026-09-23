@@ -94,7 +94,7 @@ export async function prepareNotionSource(
     // total limit.
     const resolveImage = createMediaResolver({
       publicDirectory: context.publicDirectory,
-      refreshUrl: (blockId) => refreshNotionImageUrl(client, blockId),
+      refreshUrl: (blockId, kind) => refreshNotionMediaUrl(client, blockId, kind ?? "image"),
       ...(options.allowedMediaHosts ? { allowedHostSuffixes: options.allowedMediaHosts } : {}),
     });
     const prepared = await syncOnce(client, context, {
@@ -146,6 +146,8 @@ async function syncOnce(
       publicPageSlugs,
       warnings,
       resolveImage: options.resolveImage,
+      resolveFile: options.resolveImage.resolveFile,
+      isManagedMediaUrl: options.resolveImage.isManagedUrl,
     });
     for (const asset of converted.media) media.set(asset.path, asset);
     const sourceKey = sourceKeyForNotionPage(page.id);
@@ -215,6 +217,14 @@ export async function refreshNotionImageUrl(
   client: NotionClientLike,
   blockId: string,
 ): Promise<string> {
+  return refreshNotionMediaUrl(client, blockId, "image");
+}
+
+export async function refreshNotionMediaUrl(
+  client: NotionClientLike,
+  blockId: string,
+  expectedType: "image" | "file" | "pdf" | "audio" | "video" | "embed",
+): Promise<string> {
   if (!client.blocks.retrieve) {
     throw new ContentError(
       "NOTION_MEDIA_REFRESH_UNAVAILABLE",
@@ -222,24 +232,39 @@ export async function refreshNotionImageUrl(
     );
   }
   const block = await client.blocks.retrieve({ block_id: blockId });
-  if (!isRecord(block) || block.type !== "image" || !isRecord(block.image)) {
+  if (!isRecord(block) || block.type !== expectedType || !isRecord(block[expectedType])) {
     throw new ContentError(
       "NOTION_MEDIA_REFRESH_FAILED",
-      `Notion block ${blockId} is no longer an image.`,
+      `Notion block ${blockId} is no longer a ${expectedType}.`,
     );
   }
-  const imageType = block.image.type;
-  if (imageType !== "file" && imageType !== "external") {
+  const payload = block[expectedType];
+  if (!isRecord(payload))
     throw new ContentError(
       "NOTION_MEDIA_REFRESH_FAILED",
-      `Notion block ${blockId} returned an unsupported image source.`,
+      `Notion block ${blockId} has no media payload.`,
+    );
+  if (expectedType === "embed") {
+    if (typeof payload.url !== "string" || !payload.url) {
+      throw new ContentError(
+        "NOTION_MEDIA_REFRESH_FAILED",
+        `Notion block ${blockId} did not return a refreshed embed URL.`,
+      );
+    }
+    return payload.url;
+  }
+  const sourceType = payload.type;
+  if (sourceType !== "file" && sourceType !== "external") {
+    throw new ContentError(
+      "NOTION_MEDIA_REFRESH_FAILED",
+      `Notion block ${blockId} returned an unsupported media source.`,
     );
   }
-  const source = block.image[imageType];
+  const source = payload[sourceType];
   if (!isRecord(source) || typeof source.url !== "string" || !source.url) {
     throw new ContentError(
       "NOTION_MEDIA_REFRESH_FAILED",
-      `Notion block ${blockId} did not return a refreshed image URL.`,
+      `Notion block ${blockId} did not return a refreshed media URL.`,
     );
   }
   return source.url;

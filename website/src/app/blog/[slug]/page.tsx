@@ -4,6 +4,7 @@ import { notFound } from "next/navigation";
 import { getContentBundle, getSiteData } from "@/app/_site-data";
 import { ArticleBody } from "@/components/ArticleBody";
 import { ArticleLanguages } from "@/components/ArticleLanguages";
+import { ArticleToc } from "@/components/ArticleToc";
 import { formatPostDate } from "@/components/BlogList";
 import { JsonLd } from "@/components/JsonLd";
 import { PageShell } from "@/components/PageShell";
@@ -99,28 +100,10 @@ export default async function ArticlePage({ params }: ArticlePageProps) {
           <ArticleLanguages translations={translations} currentSlug={post.slug} />
           <p className={styles.articleSummary}>{post.summary}</p>
         </header>
-        {post.toc.length > 0 ? (
-          <details className={styles.toc}>
-            <summary>{post.language === "zh-CN" ? "本文目录" : "On this page"}</summary>
-            <ol>
-              {post.toc.map((entry) => (
-                <li
-                  className={
-                    entry.level === 4
-                      ? styles.tocLevel4
-                      : entry.level === 3
-                        ? styles.tocLevel3
-                        : undefined
-                  }
-                  key={entry.id}
-                >
-                  <a href={`#${entry.id}`}>{entry.text}</a>
-                </li>
-              ))}
-            </ol>
-          </details>
-        ) : null}
-        <ArticleBody blocks={post.blocks} />
+        {post.blocks.some((block) => block.type === "tableOfContents") ? null : (
+          <ArticleToc language={post.language} toc={post.toc} />
+        )}
+        <ArticleBody blocks={post.blocks} language={post.language} toc={post.toc} />
       </article>
     </PageShell>
   );

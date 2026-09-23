@@ -9,7 +9,14 @@ import type { ContentBlock, RichTextSpan, TocEntrySchema } from "../../../src/li
 import { validatePublicHref } from "../../../src/lib/content/url";
 import type { z } from "zod";
 import type { MediaAsset } from "../types";
-import type { NotionBlockNode, RemoteImage, ResolvedImage } from "./types";
+import { isManagedNotionMediaUrl } from "./media";
+import type {
+  NotionBlockNode,
+  RemoteFile,
+  RemoteImage,
+  ResolvedFile,
+  ResolvedImage,
+} from "./types";
 
 type TocEntry = z.infer<typeof TocEntrySchema>;
 
@@ -38,6 +45,8 @@ export interface ConvertContext {
   publicPageSlugs: Map<string, string>;
   warnings: string[];
   resolveImage?: (image: RemoteImage) => Promise<ResolvedImage>;
+  resolveFile?: (file: RemoteFile) => Promise<ResolvedFile>;
+  isManagedMediaUrl?: (url: string) => boolean;
 }
 
 export interface ConvertedBlocks {
@@ -54,6 +63,7 @@ export async function convertNotionBlocks(
   const allocatedHeadingAnchors = new Set(RESERVED_ARTICLE_ANCHOR_IDS);
   const toc: TocEntry[] = [];
   const media = new Map<string, MediaAsset>();
+  let tocMarkerCount = 0;
 
   const blocks = await convertNodes(nodes);
   return { blocks, toc, media: [...media.values()].sort((a, b) => a.path.localeCompare(b.path)) };
@@ -78,8 +88,9 @@ export async function convertNotionBlocks(
         case "heading_1":
         case "heading_2":
         case "heading_3": {
-          if (node.children.length > 0 || payload.is_toggleable === true) {
-            throw unsupportedBlock(type, raw, "toggleable headings are not supported");
+          const toggleable = payload.is_toggleable === true;
+          if (node.children.length > 0 && !toggleable) {
+            throw unsupportedBlock(type, raw, "only toggleable headings may have children");
           }
           const richText = convertRichText(getArray(payload, "rich_text"), context);
           const text = normalizeHeadingText(richText);
@@ -90,10 +101,69 @@ export async function convertNotionBlocks(
             allocatedHeadingAnchors,
           );
           const level = ({ heading_1: 2, heading_2: 3, heading_3: 4 } as const)[type];
-          output.push({ id, type: "heading", level, anchor, richText });
           toc.push({ id: anchor, text, level });
+          output.push({
+            id,
+            type: "heading",
+            level,
+            anchor,
+            richText,
+            ...(toggleable
+              ? { toggleable: true, children: await convertNodes(node.children) }
+              : {}),
+          });
           break;
         }
+        case "to_do":
+          if (typeof payload.checked !== "boolean") {
+            throw unsupportedBlock(type, raw, "checked state is missing");
+          }
+          output.push({
+            id,
+            type: "toDo",
+            checked: payload.checked,
+            richText: convertRichText(getArray(payload, "rich_text"), context),
+            children: await convertNodes(node.children),
+          });
+          break;
+        case "column_list": {
+          if (node.children.length === 0) {
+            throw unsupportedBlock(type, raw, "column list has no columns");
+          }
+          const columns = [];
+          for (const columnNode of node.children) {
+            if (columnNode.block.type !== "column") {
+              throw unsupportedBlock(type, raw, "column list contains a non-column child");
+            }
+            const columnPayload = getRecord(columnNode.block, "column");
+            const widthRatio = columnPayload.width_ratio;
+            if (
+              widthRatio !== undefined &&
+              (typeof widthRatio !== "number" ||
+                !Number.isFinite(widthRatio) ||
+                widthRatio <= 0 ||
+                widthRatio > 1)
+            ) {
+              throw unsupportedBlock("column", columnNode.block, "width ratio is invalid");
+            }
+            columns.push({
+              id: stableBlockId(getString(columnNode.block, "id")),
+              ...(typeof widthRatio === "number" ? { widthRatio } : {}),
+              children: await convertNodes(columnNode.children),
+            });
+          }
+          output.push({ id, type: "columns", columns });
+          break;
+        }
+        case "column":
+          throw unsupportedBlock(type, raw, "columns must be children of a column list");
+        case "table_of_contents":
+          if (input !== nodes || tocMarkerCount > 0 || node.children.length > 0) {
+            throw unsupportedBlock(type, raw, "only one top-level table of contents is supported");
+          }
+          tocMarkerCount += 1;
+          output.push({ id, type: "tableOfContents" });
+          break;
         case "bulleted_list_item":
         case "numbered_list_item":
           output.push({
@@ -181,6 +251,92 @@ export async function convertNotionBlocks(
           });
           break;
         }
+        case "file":
+        case "pdf":
+        case "audio":
+        case "video": {
+          if (node.children.length > 0) throw unsupportedBlock(type, raw, "media has children");
+          const sourceType = getString(payload, "type");
+          if (sourceType !== "file" && sourceType !== "external") {
+            throw unsupportedBlock(type, raw, `media source ${sourceType} is not readable`);
+          }
+          const url = getString(getRecord(payload, sourceType), "url");
+          const caption = convertRichText(optionalArray(payload.caption), context);
+          const name = mediaDisplayName(payload.name, type);
+          if (
+            sourceType === "file" ||
+            isManagedNotionMediaUrl(url) ||
+            context.isManagedMediaUrl?.(url)
+          ) {
+            if (!context.resolveFile) {
+              throw unsupportedBlock(type, raw, "no media resolver is configured");
+            }
+            const resolved = await context.resolveFile({
+              kind: type,
+              url,
+              notionBlockId: getString(raw, "id"),
+            });
+            media.set(resolved.asset.path, resolved.asset);
+            output.push({
+              id,
+              type: "mediaFile",
+              kind: type,
+              name,
+              caption,
+              source: {
+                type: "local",
+                mediaPath: resolved.asset.path,
+                sha256: resolved.asset.sha256,
+              },
+            });
+          } else {
+            output.push({
+              id,
+              type: "mediaFile",
+              kind: type,
+              name,
+              caption,
+              source: { type: "external", href: externalMediaHref(url, context) },
+            });
+          }
+          break;
+        }
+        case "embed": {
+          if (node.children.length > 0) throw unsupportedBlock(type, raw, "embed has children");
+          const url = getString(payload, "url");
+          const caption = convertRichText(optionalArray(payload.caption), context);
+          if (isManagedNotionMediaUrl(url) || context.isManagedMediaUrl?.(url)) {
+            if (!context.resolveFile) {
+              throw unsupportedBlock(type, raw, "no media resolver is configured");
+            }
+            const resolved = await context.resolveFile({
+              kind: "embed",
+              url,
+              notionBlockId: getString(raw, "id"),
+            });
+            media.set(resolved.asset.path, resolved.asset);
+            output.push({
+              id,
+              type: "mediaFile",
+              kind: resolved.kind,
+              name: mediaDisplayName(undefined, resolved.kind),
+              caption,
+              source: {
+                type: "local",
+                mediaPath: resolved.asset.path,
+                sha256: resolved.asset.sha256,
+              },
+            });
+          } else {
+            output.push({
+              id,
+              type: "embed",
+              href: externalMediaHref(url, context),
+              caption,
+            });
+          }
+          break;
+        }
         case "table": {
           const rows = node.children.map((child) => {
             if (child.block.type !== "table_row" || child.children.length > 0) {
@@ -238,6 +394,19 @@ export async function convertNotionBlocks(
             caption: convertRichText(optionalArray(payload.caption), context),
           });
           break;
+        case "link_preview": {
+          const url = getString(payload, "url");
+          if (!/^https?:\/\//i.test(url)) {
+            throw unsupportedBlock(type, raw, "link previews require an HTTP or HTTPS URL");
+          }
+          output.push({
+            id,
+            type: "bookmark",
+            href: rewriteNotionLink(url, context.publicPageSlugs),
+            caption: [],
+          });
+          break;
+        }
         case "table_row":
           throw unsupportedBlock(type, raw, "table rows must be children of a table");
         default:
@@ -246,6 +415,30 @@ export async function convertNotionBlocks(
     }
     return output;
   }
+}
+
+function mediaDisplayName(value: unknown, kind: "file" | "pdf" | "audio" | "video"): string {
+  const name = typeof value === "string" ? value.replace(/[\u0000-\u001f\u007f]/g, " ").trim() : "";
+  if (name) return name.slice(0, 200);
+  return (
+    { file: "File attachment", pdf: "PDF document", audio: "Audio", video: "Video" } as const
+  )[kind];
+}
+
+function externalMediaHref(url: string, context: ConvertContext): string {
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    throw new ContentError("INVALID_MEDIA_URL", "External media must have an absolute URL.");
+  }
+  if (parsed.protocol !== "https:" || parsed.username || parsed.password) {
+    throw new ContentError(
+      "UNSAFE_MEDIA_URL",
+      "External media links must use HTTPS without credentials.",
+    );
+  }
+  return rewriteNotionLink(url, context.publicPageSlugs);
 }
 
 function allocateHeadingAnchor(

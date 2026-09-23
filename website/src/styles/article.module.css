@@ -109,12 +109,148 @@
   height: auto;
 }
 
+.imageTrigger {
+  display: block;
+  max-width: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: zoom-in;
+}
+
+.imageTrigger img {
+  max-width: 100%;
+}
+
+.imageTrigger:focus-visible,
+.imageDialogToolbar button:focus-visible {
+  outline: 2px solid var(--link);
+  outline-offset: 3px;
+}
+
+.imageDialog {
+  width: min(96vw, 1280px);
+  height: min(94dvh, 1024px);
+  max-width: 96vw;
+  max-height: 94dvh;
+  padding: 0;
+  border: 1px solid #cbd3d0;
+  background: #fff;
+  color: var(--text);
+  box-shadow: 0 16px 48px rgb(0 0 0 / 18%);
+}
+
+.imageDialog::backdrop {
+  background: rgb(12 22 28 / 78%);
+}
+
+.imageDialogLayout {
+  display: flex;
+  height: 100%;
+  min-height: 0;
+  flex-direction: column;
+}
+
+.imageDialogToolbar {
+  display: flex;
+  min-height: 48px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 0 14px;
+  border-bottom: 1px solid #d9dfdc;
+  font-family: var(--sans);
+  font-size: 0.8125rem;
+}
+
+.imageSizeControls {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.imageDialogToolbar button {
+  padding: 4px 0;
+  border: 0;
+  border-bottom: 1px solid transparent;
+  background: transparent;
+  color: var(--link);
+  cursor: pointer;
+  font: inherit;
+}
+
+.imageDialogToolbar button[aria-pressed="true"] {
+  border-bottom-color: currentColor;
+  color: var(--text);
+}
+
+.imageDialogViewport {
+  display: flex;
+  min-height: 0;
+  flex: 1;
+  align-items: center;
+  justify-content: center;
+  overflow: auto;
+  padding: 12px;
+}
+
+.imageDialogViewportOriginal {
+  display: block;
+}
+
+.imageDialogViewport .imageDialogImageFit {
+  display: block;
+  width: auto;
+  height: auto;
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+}
+
+.imageDialogViewport .imageDialogImageOriginal {
+  display: block;
+  width: auto;
+  height: auto;
+  max-width: none;
+  max-height: none;
+}
+
 .articleBody figcaption {
   margin-top: 6px;
   color: var(--muted);
   font-family: var(--sans);
   font-size: 0.8125rem;
   line-height: 1.45;
+}
+
+.mediaBlock {
+  max-width: 100%;
+}
+
+.mediaBlock audio,
+.mediaBlock video {
+  display: block;
+  width: 100%;
+  max-width: 100%;
+}
+
+.mediaBlock video {
+  max-height: 72vh;
+  background: #111;
+}
+
+.videoFrame {
+  display: block;
+  width: 100%;
+  border: 1px solid #d9dfdc;
+  aspect-ratio: 16 / 9;
+}
+
+.mediaLink {
+  display: inline-block;
+  margin-top: 0.5rem;
+  font-family: var(--sans);
+  font-size: 0.9rem;
 }
 
 .equation,
@@ -160,6 +296,43 @@
   font-family: var(--sans);
 }
 
+.toggleHeading summary h2,
+.toggleHeading summary h3,
+.toggleHeading summary h4 {
+  display: inline;
+  margin: 0;
+}
+
+.toDo {
+  display: grid;
+  grid-template-columns: 1.1em minmax(0, 1fr);
+  gap: 0.55em;
+  margin: 0.4em 0;
+}
+
+.toDo input {
+  width: 1em;
+  height: 1em;
+  margin: 0.3em 0 0;
+  accent-color: var(--link);
+  opacity: 1;
+}
+
+.columns {
+  display: grid;
+  grid-template-columns: var(--column-template);
+  gap: 1.4em;
+  margin: 1.35em 0;
+}
+
+.column {
+  min-width: 0;
+}
+
+.column > :last-child {
+  margin-bottom: 0;
+}
+
 .toggleBody {
   margin-top: 0.75em;
   padding-left: 1em;
@@ -188,5 +361,10 @@
   .articleBody {
     font-size: 1rem;
     line-height: 1.65;
+  }
+
+  .columns {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0.8em;
   }
 }

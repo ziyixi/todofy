@@ -115,13 +115,22 @@ make preview
 
 ### 1.5 正文支持范围
 
-当前支持普通段落/H1–H3、富文本、嵌套列表、引用、分隔线、代码、KaTeX 公式、图片、简单表格、toggle、简单 callout 和 bookmark。
+正文支持普通段落/H1–H3、富文本、嵌套列表、引用、分隔线、代码、KaTeX 公式、图片、简单表格、toggle、简单 callout、bookmark，以及以下 Notion 块：
+
+- `to_do` 保留勾选状态，以只读方式展示；读者不能在网站上修改 Notion 待办。
+- `column_list`/`column` 保留列顺序和列宽比例；窄屏自动纵向排列。
+- 可折叠标题保留标题层级、锚点和子内容，默认展开，读者可自行收起。
+- `table_of_contents` 可在文章正文顶层指定目录出现的位置；每篇至多一个。有此块时不再重复显示原先页首的自动目录；没有时仍照旧自动显示。
+- `link_preview` 保留为安全的普通链接，不抓取远端缩略图或元数据。
+- `file`、`pdf`、`audio`、`video`、`embed` 按媒体类型展示；Notion 上传的文件在同步时保存为本站资源，外部链接需使用 HTTPS。YouTube/Vimeo 视频可内嵌播放器，其余外部嵌入显示为链接；外部任意 HTML/脚本不会注入文章。
 
 普通外链支持 HTTP、HTTPS 与 mailto；HTTP 链接保留原协议，Notion 自动添加的 HTTP 链接不会使同步失败，无需为此修改正文。bookmark 支持普通 HTTP/HTTPS 外链。图片下载和站点 canonical 仍单独要求 HTTPS。
 
-迁移前先处理 checkbox/to-do、分栏、toggle heading、子页面、嵌套数据库、synced block、复杂 embed、音视频、PDF/file 块、非 page 的 mention：当前这些不在支持范围，遇到会停止同步。
+子页面、嵌套数据库、synced block、非 page 的 mention 等仍不在支持范围；未知块继续使同步停止，避免静默丢失正文。分栏请尽量控制列数，让正文在 680px 的阅读宽度内保持可读。
 
 图片优先直接上传 Notion；支持 JPEG/PNG/WebP/AVIF/GIF，单图上限 20 MiB、一次同步总量上限 200 MiB。填写 caption 以便生成有意义的替代文本。默认接受 Notion 使用的 `amazonaws.com`、`file.notion.so`、`notion-static.com` 来源；第三方图床需单独处理，不能仅在 GitHub 新增一个 env 就假定工作流会读取它。
+
+Notion 上传的附件/PDF/音频单个上限 25 MiB，视频单个上限 50 MiB；它们与图片共用每次同步 200 MiB 的总限额。PDF 在新标签页打开，音视频使用浏览器原生播放器；上传的 HTML/SVG/脚本等不作为可执行嵌入发布。超过限制时先压缩文件或改用安全的外部 HTTPS 链接，不能让同步跳过该块继续发布。
 
 Notion 页面链接、page mention、bookmark 目标必须是本轮公开文章；当前不支持带 Notion block fragment 的章节链接。
 

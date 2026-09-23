@@ -191,6 +191,30 @@ export interface HeadingBlock extends BaseBlock {
   level: 2 | 3 | 4;
   anchor: string;
   richText: RichTextSpan[];
+  toggleable?: boolean;
+  children?: ContentBlock[];
+}
+
+export interface ToDoBlock extends BaseBlock {
+  type: "toDo";
+  checked: boolean;
+  richText: RichTextSpan[];
+  children: ContentBlock[];
+}
+
+export interface Column {
+  id: string;
+  widthRatio?: number;
+  children: ContentBlock[];
+}
+
+export interface ColumnsBlock extends BaseBlock {
+  type: "columns";
+  columns: Column[];
+}
+
+export interface TableOfContentsBlock extends BaseBlock {
+  type: "tableOfContents";
 }
 
 export interface ListItemBlock extends BaseBlock {
@@ -233,6 +257,20 @@ export interface ImageBlock extends BaseBlock {
   caption: RichTextSpan[];
 }
 
+export interface MediaFileBlock extends BaseBlock {
+  type: "mediaFile";
+  kind: "file" | "pdf" | "audio" | "video";
+  name: string;
+  caption: RichTextSpan[];
+  source: { type: "local"; mediaPath: string; sha256: string } | { type: "external"; href: string };
+}
+
+export interface EmbedBlock extends BaseBlock {
+  type: "embed";
+  href: string;
+  caption: RichTextSpan[];
+}
+
 export interface TableBlock extends BaseBlock {
   type: "table";
   hasColumnHeader: boolean;
@@ -262,12 +300,17 @@ export interface BookmarkBlock extends BaseBlock {
 export type ContentBlock =
   | ParagraphBlock
   | HeadingBlock
+  | ToDoBlock
+  | ColumnsBlock
+  | TableOfContentsBlock
   | ListItemBlock
   | QuoteBlock
   | DividerBlock
   | CodeBlock
   | EquationBlock
   | ImageBlock
+  | MediaFileBlock
+  | EmbedBlock
   | TableBlock
   | ToggleBlock
   | CalloutBlock
@@ -292,8 +335,37 @@ export const ContentBlockSchema: z.ZodType<ContentBlock> = z.lazy(() =>
         level: z.union([z.literal(2), z.literal(3), z.literal(4)]),
         anchor: SafeIdSchema,
         richText: z.array(RichTextSpanSchema).min(1),
+        toggleable: z.boolean().optional(),
+        children: children().optional(),
       })
       .strict(),
+    z
+      .object({
+        id: SafeIdSchema,
+        type: z.literal("toDo"),
+        checked: z.boolean(),
+        richText: z.array(RichTextSpanSchema),
+        children: children(),
+      })
+      .strict(),
+    z
+      .object({
+        id: SafeIdSchema,
+        type: z.literal("columns"),
+        columns: z
+          .array(
+            z
+              .object({
+                id: SafeIdSchema,
+                widthRatio: z.number().finite().positive().max(1).optional(),
+                children: children(),
+              })
+              .strict(),
+          )
+          .min(1),
+      })
+      .strict(),
+    z.object({ id: SafeIdSchema, type: z.literal("tableOfContents") }).strict(),
     z
       .object({
         id: SafeIdSchema,
@@ -338,6 +410,38 @@ export const ContentBlockSchema: z.ZodType<ContentBlock> = z.lazy(() =>
         width: z.number().int().positive(),
         height: z.number().int().positive(),
         alt: z.string().max(500),
+        caption: z.array(RichTextSpanSchema),
+      })
+      .strict(),
+    z
+      .object({
+        id: SafeIdSchema,
+        type: z.literal("mediaFile"),
+        kind: z.enum(["file", "pdf", "audio", "video"]),
+        name: z.string().trim().min(1).max(200),
+        caption: z.array(RichTextSpanSchema),
+        source: z.discriminatedUnion("type", [
+          z
+            .object({
+              type: z.literal("local"),
+              mediaPath: z.string().regex(/^\/media\/[a-f0-9]{64}\.[a-z0-9]+$/),
+              sha256: Sha256Schema,
+            })
+            .strict(),
+          z
+            .object({
+              type: z.literal("external"),
+              href: z.string().transform(validatePublicHref),
+            })
+            .strict(),
+        ]),
+      })
+      .strict(),
+    z
+      .object({
+        id: SafeIdSchema,
+        type: z.literal("embed"),
+        href: z.string().transform(validatePublicHref),
         caption: z.array(RichTextSpanSchema),
       })
       .strict(),

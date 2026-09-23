@@ -41,3 +41,14 @@ export interface RemoteImage {
   url: string;
   notionBlockId: string;
 }
+
+export type RemoteFileKind = "file" | "pdf" | "audio" | "video" | "embed";
+
+export interface RemoteFile extends RemoteImage {
+  kind: RemoteFileKind;
+}
+
+export interface ResolvedFile {
+  asset: MediaAsset;
+  kind: Exclude<RemoteFileKind, "embed">;
+}

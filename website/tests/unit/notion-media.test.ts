@@ -1,12 +1,20 @@
 import { describe, expect, it, vi } from "vitest";
+import { mkdtemp, readFile, readdir, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
 
 import { ContentError } from "../../src/lib/content/errors";
 import {
   createMediaResolver,
   fetchMediaWithUrlRefresh,
   fetchWithRetry,
+  isManagedNotionMediaUrl,
   readLimitedResponseBody,
 } from "../../scripts/content/notion/media";
+
+vi.mock("node:dns/promises", () => ({
+  lookup: vi.fn(async () => [{ address: "93.184.216.34", family: 4 }]),
+}));
 
 function chunkedResponse(chunks: number[][], onCancel?: () => void): Response {
   let index = 0;
@@ -28,6 +36,93 @@ function chunkedResponse(chunks: number[][], onCancel?: () => void): Response {
 }
 
 describe("Notion media streaming limits", () => {
+  it("recognizes only exact configured media host suffixes", () => {
+    expect(isManagedNotionMediaUrl("https://file.notion.so/uploaded.pdf")).toBe(true);
+    expect(isManagedNotionMediaUrl("https://evilfile.notion.so.example.com/file")).toBe(false);
+  });
+
+  it("downloads a Notion-hosted PDF with a stable content-addressed path", async () => {
+    const publicDirectory = await mkdtemp(path.join(tmpdir(), "notion-file-test-"));
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response("%PDF-1.4", {
+        headers: { "content-type": "application/pdf" },
+      }),
+    );
+    try {
+      const resolver = createMediaResolver({ publicDirectory });
+      const result = await resolver.resolveFile({
+        kind: "pdf",
+        notionBlockId: "pdf-block",
+        url: "https://file.notion.so/uploaded.pdf",
+      });
+      expect(result.kind).toBe("pdf");
+      expect(result.asset.path).toMatch(/^\/media\/[a-f0-9]{64}\.pdf$/);
+      expect(await readFile(path.join(publicDirectory, result.asset.path.slice(1)), "utf8")).toBe(
+        "%PDF-1.4",
+      );
+    } finally {
+      fetchSpy.mockRestore();
+      await rm(publicDirectory, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects an uploaded HTML embed before writing it to the public directory", async () => {
+    const publicDirectory = await mkdtemp(path.join(tmpdir(), "notion-html-test-"));
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response("<script>alert(1)</script>", {
+        headers: { "content-type": "text/html" },
+      }),
+    );
+    try {
+      const resolver = createMediaResolver({ publicDirectory });
+      await expect(
+        resolver.resolveFile({
+          kind: "embed",
+          notionBlockId: "html-block",
+          url: "https://file.notion.so/uploaded.html",
+        }),
+      ).rejects.toMatchObject({ code: "UNSUPPORTED_MEDIA_TYPE" });
+      expect(await readdir(publicDirectory)).toEqual([]);
+    } finally {
+      fetchSpy.mockRestore();
+      await rm(publicDirectory, { recursive: true, force: true });
+    }
+  });
+
+  it("enforces a separate video byte limit while streaming", async () => {
+    const publicDirectory = await mkdtemp(path.join(tmpdir(), "notion-video-test-"));
+    let cancelled = false;
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(Uint8Array.from([1, 2, 3]));
+        controller.enqueue(Uint8Array.from([4, 5, 6]));
+      },
+      cancel() {
+        cancelled = true;
+      },
+    });
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(body, {
+        headers: { "content-type": "video/mp4" },
+      }),
+    );
+    try {
+      const resolver = createMediaResolver({ publicDirectory, maxVideoBytes: 5 });
+      await expect(
+        resolver.resolveFile({
+          kind: "video",
+          notionBlockId: "large-video",
+          url: "https://file.notion.so/video.mp4",
+        }),
+      ).rejects.toMatchObject({ code: "MEDIA_TOO_LARGE" });
+      expect(cancelled).toBe(true);
+      expect(await readdir(publicDirectory)).toEqual([]);
+    } finally {
+      fetchSpy.mockRestore();
+      await rm(publicDirectory, { recursive: true, force: true });
+    }
+  });
+
   it("rejects HTTP media before fetching despite allowing HTTP hyperlinks", async () => {
     const fetchSpy = vi.spyOn(globalThis, "fetch").mockRejectedValue(new Error("unexpected fetch"));
     try {

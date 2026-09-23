@@ -48,6 +48,12 @@ export function validateContentSnapshotWithOptions(
       headingAnchors: new Set<string>(),
       headings: [] as Array<{ id: string; text: string; level: 2 | 3 | 4 }>,
       media: new Set<string>(),
+      mediaReferences: [] as Array<{
+        path: string;
+        sha256: string;
+        kind: "image" | "file" | "pdf" | "audio" | "video";
+      }>,
+      tocPlacements: 0,
       links: [] as string[],
     };
     inspectBlocks(post.blocks, state);
@@ -80,7 +86,7 @@ export function validateContentSnapshotWithOptions(
     if (declaredMedia.join("\0") !== referencedMedia.join("\0")) {
       throw new ContentError(
         "INVALID_MEDIA_LIST",
-        `Post media list does not match image blocks for ${post.slug}.`,
+        `Post media list does not match media blocks for ${post.slug}.`,
       );
     }
     for (const mediaPath of state.media) {
@@ -88,6 +94,22 @@ export function validateContentSnapshotWithOptions(
         throw new ContentError("MISSING_MEDIA", `Post references missing media: ${mediaPath}`);
       }
       allReferencedMedia.add(mediaPath);
+    }
+    for (const reference of state.mediaReferences) {
+      const asset = mediaByPath.get(reference.path);
+      if (!asset) continue;
+      if (asset.sha256 !== reference.sha256) {
+        throw new ContentError(
+          "MEDIA_HASH_MISMATCH",
+          `Media block in ${post.slug} has a hash that differs from ${reference.path}.`,
+        );
+      }
+      if (!mediaKindAcceptsMimeType(reference.kind, asset.mimeType)) {
+        throw new ContentError(
+          "MEDIA_TYPE_MISMATCH",
+          `Media block in ${post.slug} has an unexpected type for ${reference.path}.`,
+        );
+      }
     }
   }
 
@@ -189,16 +211,21 @@ function decodeFragment(hash: string, href: string): string {
   }
 }
 
-function inspectBlocks(
-  blocks: ContentBlock[],
-  state: {
-    ids: Set<string>;
-    headings: Array<{ id: string; text: string; level: 2 | 3 | 4 }>;
-    headingAnchors: Set<string>;
-    media: Set<string>;
-    links: string[];
-  },
-): void {
+interface BlockInspectionState {
+  ids: Set<string>;
+  headings: Array<{ id: string; text: string; level: 2 | 3 | 4 }>;
+  headingAnchors: Set<string>;
+  media: Set<string>;
+  mediaReferences: Array<{
+    path: string;
+    sha256: string;
+    kind: "image" | "file" | "pdf" | "audio" | "video";
+  }>;
+  tocPlacements: number;
+  links: string[];
+}
+
+function inspectBlocks(blocks: ContentBlock[], state: BlockInspectionState, isRoot = true): void {
   for (const block of blocks) {
     if (state.ids.has(block.id)) {
       throw new ContentError("DUPLICATE_BLOCK_ID", `Duplicate block ID: ${block.id}`);
@@ -210,11 +237,36 @@ function inspectBlocks(
       case "quote":
       case "toggle":
       case "callout":
+      case "toDo":
         inspectRichText(block.richText, state.links);
-        inspectBlocks(block.children, state);
+        inspectBlocks(block.children, state, false);
+        break;
+      case "columns":
+        for (const column of block.columns) {
+          if (state.ids.has(column.id)) {
+            throw new ContentError("DUPLICATE_BLOCK_ID", `Duplicate block ID: ${column.id}`);
+          }
+          state.ids.add(column.id);
+          inspectBlocks(column.children, state, false);
+        }
+        break;
+      case "tableOfContents":
+        state.tocPlacements += 1;
+        if (!isRoot || state.tocPlacements > 1) {
+          throw new ContentError(
+            "INVALID_TOC_PLACEMENT",
+            "A Notion table of contents must appear once at the article root.",
+          );
+        }
         break;
       case "heading":
         inspectRichText(block.richText, state.links);
+        if ((block.toggleable === true) !== (block.children !== undefined)) {
+          throw new ContentError(
+            "INVALID_HEADING_CHILDREN",
+            "Only toggleable headings may contain child blocks.",
+          );
+        }
         if (RESERVED_ARTICLE_ANCHOR_IDS.has(block.anchor)) {
           throw new ContentError(
             "RESERVED_HEADING_ANCHOR",
@@ -237,12 +289,35 @@ function inspectBlocks(
           text: headingText,
           level: block.level,
         });
+        if (block.children) inspectBlocks(block.children, state, false);
         break;
       case "code":
         inspectRichText(block.caption, state.links);
         break;
       case "image":
         state.media.add(block.mediaPath);
+        state.mediaReferences.push({
+          path: block.mediaPath,
+          sha256: block.sha256,
+          kind: "image",
+        });
+        inspectRichText(block.caption, state.links);
+        break;
+      case "mediaFile":
+        if (block.source.type === "local") {
+          state.media.add(block.source.mediaPath);
+          state.mediaReferences.push({
+            path: block.source.mediaPath,
+            sha256: block.source.sha256,
+            kind: block.kind,
+          });
+        } else {
+          inspectExternalMediaHref(block.source.href, state.links);
+        }
+        inspectRichText(block.caption, state.links);
+        break;
+      case "embed":
+        inspectExternalMediaHref(block.href, state.links);
         inspectRichText(block.caption, state.links);
         break;
       case "table":
@@ -261,6 +336,32 @@ function inspectBlocks(
       }
     }
   }
+}
+
+function mediaKindAcceptsMimeType(
+  kind: "image" | "file" | "pdf" | "audio" | "video",
+  mimeType: string,
+): boolean {
+  const imageTypes = new Set(["image/avif", "image/gif", "image/jpeg", "image/png", "image/webp"]);
+  const audioTypes = new Set(["audio/mp4", "audio/mpeg", "audio/ogg", "audio/wav", "audio/x-wav"]);
+  const videoTypes = new Set(["video/mp4", "video/ogg", "video/webm"]);
+  if (kind === "image") return imageTypes.has(mimeType);
+  if (kind === "pdf") return mimeType === "application/pdf";
+  if (kind === "audio") return audioTypes.has(mimeType);
+  if (kind === "video") return videoTypes.has(mimeType);
+  return new Set([
+    "application/octet-stream",
+    "application/pdf",
+    "application/zip",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    "text/plain",
+    "text/csv",
+    ...imageTypes,
+    ...audioTypes,
+    ...videoTypes,
+  ]).has(mimeType);
 }
 
 function inspectRichText(spans: RichTextSpan[], links: string[]): void {
@@ -282,6 +383,24 @@ function inspectHref(href: string, links: string[]): void {
     );
   }
   links.push(href);
+}
+
+function inspectExternalMediaHref(href: string, links: string[]): void {
+  if (!href.startsWith("/blog/")) {
+    let parsed: URL;
+    try {
+      parsed = new URL(href);
+    } catch {
+      throw new ContentError("UNSAFE_MEDIA_URL", "External media must have an absolute HTTPS URL.");
+    }
+    if (parsed.protocol !== "https:" || parsed.username || parsed.password) {
+      throw new ContentError(
+        "UNSAFE_MEDIA_URL",
+        "External media must have an HTTPS URL without credentials.",
+      );
+    }
+  }
+  inspectHref(href, links);
 }
 
 function stripQueryAndHash(href: string): string {
