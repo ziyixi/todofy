@@ -30,7 +30,7 @@ describe("bilingual article presentation", () => {
   const en = post("one-en", "en", "one");
   const zh = post("one-zh", "zh-CN", "one");
 
-  it("counts groups before the homepage limit and keeps both language entries", () => {
+  it("counts groups before the homepage limit and keeps the translated title without extra controls", () => {
     const html = renderToStaticMarkup(
       createElement(BlogList, {
         compact: true,
@@ -42,6 +42,14 @@ describe("bilingual article presentation", () => {
     expect(html).toContain('href="/blog/two-en"');
     expect(html).toContain("同一篇文章");
     expect(html).toContain('hrefLang="zh-CN"');
+    expect(html).not.toContain(">English</a>");
+    expect(html).not.toContain(">中文</a>");
+  });
+
+  it("keeps complete bilingual titles and language links on the blog index", () => {
+    const html = renderToStaticMarkup(createElement(BlogList, { posts: [en, zh] }));
+    expect(html).toContain("A shared article");
+    expect(html).toContain("同一篇文章");
     expect(html).toContain(">English</a>");
     expect(html).toContain(">中文</a>");
   });

@@ -6,6 +6,10 @@
   overflow-wrap: anywhere;
 }
 
+.articleBody:lang(zh-CN) {
+  line-height: 1.8;
+}
+
 .articleBody p {
   margin: 0 0 1.05em;
 }

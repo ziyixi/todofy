@@ -98,7 +98,6 @@ export default async function ArticlePage({ params }: ArticlePageProps) {
             ) : null}
           </p>
           <ArticleLanguages translations={translations} currentSlug={post.slug} />
-          <p className={styles.articleSummary}>{post.summary}</p>
         </header>
         {post.blocks.some((block) => block.type === "tableOfContents") ? null : (
           <ArticleToc language={post.language} toc={post.toc} />

@@ -60,7 +60,7 @@ export function BlogList({
                   </Link>
                 </p>
               ))}
-            <ArticleLanguages translations={translations} />
+            {!compact ? <ArticleLanguages translations={translations} /> : null}
             {!compact ? (
               <p className={styles.postSummary} lang={post.language}>
                 {post.summary}

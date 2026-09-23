@@ -71,8 +71,32 @@ test("a bilingual article occupies one row and switches between complete languag
   await page.goto("/");
   const blog = page.getByRole("region", { name: "Blog", exact: true });
   await expect(blog.locator("ol > li")).toHaveCount(1);
-  await expect(blog.getByRole("link", { name: "中文", exact: true })).toBeVisible();
+  await expect(blog.getByRole("link", { name: "可靠内容流水线笔记", exact: true })).toBeVisible();
+  await expect(blog.getByRole("link", { name: "English", exact: true })).toHaveCount(0);
+  await expect(blog.getByRole("link", { name: "中文", exact: true })).toHaveCount(0);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(
     true,
   );
+});
+
+test("homepage dates sit beside titles on desktop and above them on mobile", async ({ page }) => {
+  test.skip(process.env.CONTENT_MODE === "empty", "The empty snapshot has no blog posts.");
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.goto("/");
+  const blog = page.getByRole("region", { name: "Blog", exact: true });
+  test.skip((await blog.locator("ol > li").count()) === 0, "The snapshot has no blog posts.");
+  const row = blog.locator("ol > li").first();
+  const date = row.locator("time");
+  const title = row.getByRole("heading", { level: 3 });
+  const [desktopDate, desktopTitle] = await Promise.all([date.boundingBox(), title.boundingBox()]);
+  expect(desktopDate).not.toBeNull();
+  expect(desktopTitle).not.toBeNull();
+  expect(desktopDate!.x + desktopDate!.width).toBeLessThan(desktopTitle!.x);
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  const [mobileDate, mobileTitle] = await Promise.all([date.boundingBox(), title.boundingBox()]);
+  expect(mobileDate).not.toBeNull();
+  expect(mobileTitle).not.toBeNull();
+  expect(Math.abs(mobileDate!.x - mobileTitle!.x)).toBeLessThan(2);
+  expect(mobileDate!.y + mobileDate!.height).toBeLessThanOrEqual(mobileTitle!.y);
 });

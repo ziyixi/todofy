@@ -344,6 +344,11 @@
   line-height: 1.13;
 }
 
+.articleTitle:lang(zh-CN) {
+  letter-spacing: 0;
+  line-height: 1.35;
+}
+
 .articleMeta {
   display: flex;
   flex-wrap: wrap;
@@ -351,13 +356,6 @@
   margin: 11px 0 0;
   color: var(--muted);
   font-size: 0.875rem;
-}
-
-.articleSummary {
-  margin: 12px 0 0;
-  color: var(--muted);
-  font-size: 1rem;
-  line-height: 1.55;
 }
 
 .toc {
@@ -443,8 +441,7 @@
   }
 
   .blogListCompact > li {
-    grid-template-columns: 94px minmax(0, 1fr);
-    gap: 12px;
+    display: block;
   }
 
   .postDate {
