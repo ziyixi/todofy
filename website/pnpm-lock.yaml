@@ -17,12 +17,18 @@ importers:
       next:
         specifier: 16.3.5
         version: 16.3.5(@babel/core@7.29.7(supports-color@7.2.0))(@playwright/test@1.63.0)(@types/node@24.10.1)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
+      photoswipe:
+        specifier: 5.4.4
+        version: 5.4.4
       react:
         specifier: 19.3.0
         version: 19.3.0
       react-dom:
         specifier: 19.3.0
         version: 19.3.0(react@19.3.0)
+      react-photoswipe-gallery:
+        specifier: 4.1.2
+        version: 4.1.2(photoswipe@5.4.4)(react@19.3.0)
       sharp:
         specifier: 0.35.4
         version: 0.35.4(@types/node@24.10.1)
@@ -3307,6 +3313,10 @@ packages:
   pend@1.2.0:
     resolution: {integrity: sha512-F3asv42UuXchdzt+xXqfW1OGlVBe+mxa2mqI0pg5yAHZPvFmY3Y6drSf/GQ1A86WgWEN9Kzh/WrgKa6iGcHXLg==}
 
+  photoswipe@5.4.4:
+    resolution: {integrity: sha512-WNFHoKrkZNnvFFhbHL93WDkW3ifwVOXSW3w1UuZZelSmgXpIGiZSNlZJq37rR8YejqME2rHs9EhH9ZvlvFH2NA==}
+    engines: {node: '>= 0.12.0'}
+
   picocolors@1.0.0:
     resolution: {integrity: sha512-1fygroTLlHu66zi26VoTDv8yRgm0Fccecssto+MhsZ0D/DGW2sm8E8AjW7NU5VVTRt5GxbeZ5qBuJr+HyLYkjQ==}
 
@@ -3386,6 +3396,12 @@ packages:
 
   react-is@16.13.1:
     resolution: {integrity: sha512-24e6ynE2H+OKt4kqsOvNd8kBpV65zoxbA4BVsEOB3ARVWQki/DHzaUoC5KuON/BiccDaCCTZBuOcfZs70kR8bQ==}
+
+  react-photoswipe-gallery@4.1.2:
+    resolution: {integrity: sha512-QfohXZVY3pXe0q5/+iH1G6Yx2xr5GsBxALT5S3c9GP1HLCechG4MG3IMXaoujatn/trG5CIlY44fmiuzW1vjjA==}
+    peerDependencies:
+      photoswipe: '>= 5.2.2'
+      react: '>= 16.8.0'
 
   react@19.3.0:
     resolution: {integrity: sha512-E8LUcbtBWt20bbl2YoHfx4ZDBdxVTfOKtCZn9cDSJ4l6/nuoApcpIBcj47t2wZoVX8g2ZHuMHbiShgCR1T5Sog==}
@@ -7249,6 +7265,8 @@ snapshots:
 
   pend@1.2.0: {}
 
+  photoswipe@5.4.4: {}
+
   picocolors@1.0.0: {}
 
   picocolors@1.1.1: {}
@@ -7317,6 +7335,11 @@ snapshots:
       scheduler: 0.28.0
 
   react-is@16.13.1: {}
+
+  react-photoswipe-gallery@4.1.2(photoswipe@5.4.4)(react@19.3.0):
+    dependencies:
+      photoswipe: 5.4.4
+      react: 19.3.0
 
   react@19.3.0: {}
 

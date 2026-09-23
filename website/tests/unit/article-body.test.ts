@@ -130,8 +130,11 @@ describe("article body markup", () => {
     ]);
 
     expect(html).toContain('aria-label="Enlarge image: A diagram"');
+    expect(html).toContain('href="/media/example.png"');
+    expect(html).toContain('style="width:min(100%, 1200px)"');
+    expect(html).toContain('alt="A diagram"');
+    expect(html).toContain('width="1200" height="600"');
     expect(html).toContain("<figcaption><span>Figure 1: the diagram</span></figcaption>");
-    expect(html.match(/<dialog[^>]*>(.*?)<\/dialog>/)?.[1]).toBe("");
   });
 
   it("renders a linked bookmark caption without nested anchors", () => {

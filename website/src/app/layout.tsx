@@ -3,6 +3,7 @@ import localFont from "next/font/local";
 import type { ReactNode } from "react";
 
 import { getSiteData } from "@/app/_site-data";
+import "photoswipe/style.css";
 import "@/styles/globals.css";
 import "katex/dist/katex.min.css";
 

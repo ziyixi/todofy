@@ -108,9 +108,7 @@ test.describe("public site", () => {
     expect(gridColumns.split(" ").length).toBe(page.viewportSize()!.width <= 639 ? 1 : 2);
   });
 
-  test("article images open at fitted or original size and return keyboard focus", async ({
-    page,
-  }) => {
+  test("article images expand naturally and dismiss on backdrop or Escape", async ({ page }) => {
     await page.goto("/blog");
     const articlePaths = await page
       .locator('main a[href^="/blog/"]')
@@ -119,11 +117,12 @@ test.describe("public site", () => {
           .map((link) => link.getAttribute("href"))
           .filter((href): href is string => href !== null),
       );
-    const trigger = page.locator('article button[aria-label^="Enlarge image"]').first();
+    const imageLink = page.locator('article figure a[href^="/media/"]').first();
+    const inlineImage = imageLink.locator("img");
     let foundImage = false;
     for (const articlePath of new Set(articlePaths)) {
       await page.goto(articlePath);
-      if ((await trigger.count()) > 0) {
+      if ((await imageLink.count()) > 0) {
         foundImage = true;
         break;
       }
@@ -133,48 +132,84 @@ test.describe("public site", () => {
       return;
     }
 
-    await expect(trigger).toBeVisible();
-    const triggerBox = await trigger.boundingBox();
-    expect(triggerBox?.width).toBeGreaterThan(0);
-    expect(triggerBox?.height).toBeGreaterThan(0);
+    await inlineImage.scrollIntoViewIfNeeded();
+    await expect(inlineImage).toBeVisible();
+    await expect(imageLink).toHaveAttribute("href", /^\/media\//);
+    const inlineImageBox = await inlineImage.boundingBox();
+    expect(inlineImageBox?.width).toBeGreaterThan(0);
+    expect(inlineImageBox?.height).toBeGreaterThan(0);
     if (test.info().project.name === "mobile-chromium") {
-      await trigger.tap();
+      await inlineImage.tap();
     } else {
-      await trigger.click();
+      await inlineImage.click();
     }
-    const dialog = page.getByRole("dialog", { name: /Expanded image/ });
-    await expect(dialog).toBeVisible();
+    const lightbox = page.locator(".pswp[role='dialog']");
+    await expect(lightbox).toBeVisible();
+    const expandedImage = lightbox.locator(".pswp__img:visible").first();
+    await expect(expandedImage).toBeVisible();
+    await expect
+      .poll(() => expandedImage.evaluate((image: HTMLImageElement) => image.naturalWidth))
+      .toBeGreaterThan(0);
+    await expect
+      .poll(() =>
+        expandedImage.evaluate((image: HTMLImageElement) => new URL(image.currentSrc).pathname),
+      )
+      .toMatch(/^\/media\//);
+    const expandedImageBox = await expandedImage.boundingBox();
+    expect(expandedImageBox?.width).toBeLessThanOrEqual(page.viewportSize()!.width);
+    expect(expandedImageBox?.height).toBeLessThanOrEqual(page.viewportSize()!.height);
+    await expect(lightbox.locator(".pswp__button")).toHaveCount(1);
+    await expect(lightbox.locator(".pswp__button--close")).toBeVisible();
+    await expect(lightbox.getByRole("button", { name: "Fit" })).toHaveCount(0);
+    await expect(lightbox.getByRole("button", { name: "Original size" })).toHaveCount(0);
     const accessibility = await new AxeBuilder({ page }).analyze();
     expect(
       accessibility.violations.filter(
         (violation) => violation.impact === "critical" || violation.impact === "serious",
       ),
     ).toEqual([]);
-    await expect(dialog.getByRole("button", { name: "Fit" })).toHaveAttribute(
-      "aria-pressed",
-      "true",
-    );
+    if (test.info().project.name === "mobile-chromium") {
+      await page.touchscreen.tap(2, page.viewportSize()!.height / 2);
+    } else {
+      await page.mouse.click(2, page.viewportSize()!.height / 2);
+    }
+    await expect(lightbox).not.toBeVisible();
 
-    const image = dialog.locator("img");
+    if (test.info().project.name === "mobile-chromium") {
+      await inlineImage.tap();
+    } else {
+      await inlineImage.click();
+    }
+    await expect(lightbox).toBeVisible();
+    // PhotoSwipe ignores zoom gestures while its opening animation is still running.
+    await page.waitForTimeout(400);
+    const fittedWidth = (await expandedImage.boundingBox())!.width;
+    if (test.info().project.name === "mobile-chromium") {
+      const imageBox = await expandedImage.boundingBox();
+      const centerX = imageBox!.x + imageBox!.width / 2;
+      const centerY = imageBox!.y + imageBox!.height / 2;
+      await page.touchscreen.tap(centerX, centerY);
+      await page.waitForTimeout(100);
+      await page.touchscreen.tap(centerX, centerY);
+    } else {
+      await expandedImage.click();
+    }
     await expect
-      .poll(() => image.evaluate((element: HTMLImageElement) => element.naturalWidth))
-      .toBeGreaterThan(0);
-    const fittedWidth = await image.evaluate((element) => element.getBoundingClientRect().width);
-    const naturalWidth = await image.evaluate((element: HTMLImageElement) => element.naturalWidth);
-    expect(fittedWidth).toBeLessThanOrEqual(page.viewportSize()!.width);
-
-    await dialog.getByRole("button", { name: "Original size" }).click();
-    await expect(dialog.getByRole("button", { name: "Original size" })).toHaveAttribute(
-      "aria-pressed",
-      "true",
-    );
-    const originalWidth = await image.evaluate((element) => element.getBoundingClientRect().width);
-    expect(originalWidth).toBe(naturalWidth);
-    if (naturalWidth > fittedWidth) expect(originalWidth).toBeGreaterThan(fittedWidth);
-
+      .poll(() => expandedImage.evaluate((image) => image.getBoundingClientRect().width))
+      .toBeGreaterThan(fittedWidth * 1.2);
+    await page.waitForTimeout(400);
     await page.keyboard.press("Escape");
-    await expect(dialog).not.toBeVisible();
-    await expect(trigger).toBeFocused();
+    await expect(lightbox).not.toBeVisible();
+
+    const keyboardTrigger = imageLink;
+    await keyboardTrigger.focus();
+    await expect(keyboardTrigger).toBeFocused();
+    await keyboardTrigger.press("Enter");
+    await expect(lightbox).toBeVisible();
+    await page.waitForTimeout(400);
+    await page.keyboard.press("Escape");
+    await expect(lightbox).not.toBeVisible();
+    await expect(keyboardTrigger).toBeFocused();
   });
 
   test("publications exposes complete citations and real resources", async ({ page }) => {
