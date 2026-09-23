@@ -112,17 +112,36 @@ test.describe("public site", () => {
     page,
   }) => {
     await page.goto("/blog");
-    const articleLink = page.locator('main a[href^="/blog/"]').first();
-    if ((await articleLink.count()) === 0) return;
-    const articlePath = await articleLink.getAttribute("href");
-    if (!articlePath) return;
-
-    await page.goto(articlePath);
+    const articlePaths = await page
+      .locator('main a[href^="/blog/"]')
+      .evaluateAll((links) =>
+        links
+          .map((link) => link.getAttribute("href"))
+          .filter((href): href is string => href !== null),
+      );
     const trigger = page.locator('article button[aria-label^="Enlarge image"]').first();
-    if ((await trigger.count()) === 0) return;
+    let foundImage = false;
+    for (const articlePath of new Set(articlePaths)) {
+      await page.goto(articlePath);
+      if ((await trigger.count()) > 0) {
+        foundImage = true;
+        break;
+      }
+    }
+    if (!foundImage) {
+      test.skip(true, "This content mode has no article images.");
+      return;
+    }
 
-    await trigger.focus();
-    await trigger.press("Enter");
+    await expect(trigger).toBeVisible();
+    const triggerBox = await trigger.boundingBox();
+    expect(triggerBox?.width).toBeGreaterThan(0);
+    expect(triggerBox?.height).toBeGreaterThan(0);
+    if (test.info().project.name === "mobile-chromium") {
+      await trigger.tap();
+    } else {
+      await trigger.click();
+    }
     const dialog = page.getByRole("dialog", { name: /Expanded image/ });
     await expect(dialog).toBeVisible();
     const accessibility = await new AxeBuilder({ page }).analyze();

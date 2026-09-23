@@ -118,7 +118,8 @@
   cursor: zoom-in;
 }
 
-.imageTrigger img {
+.articleBody .imageTrigger img {
+  width: 100%;
   max-width: 100%;
 }
 

@@ -42,6 +42,7 @@ export function ExpandableArticleImage({
           setIsOpen(true);
         }}
         ref={triggerRef}
+        style={{ width: `min(100%, ${width}px)` }}
         type="button"
       >
         <Image
