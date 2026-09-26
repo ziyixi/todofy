@@ -75,7 +75,7 @@ UI 分开显示：①逻辑内容；②待物理删除；③桶实际占用；�
 
 ## 备份：复用现有服务器和工具，独立 Mail Hero 快照
 
-不把 Cloudflare 备份任务塞进 Workers Free 的单次执行里，也不直接修改现有 Vultr 备份任务。新增一个隔离的 Mail Hero 收集目录及备份任务，复用当前服务器与 `offen/docker-volume-backup`。
+实际实现使用现有服务器上的独立 Python/GPG 收集任务，不经过 `offen/docker-volume-backup`，也不修改既有 Vultr 备份。备份范围仅为 Mail Hero 自己的数据、状态及恢复材料，不包含操作系统、其他服务或 Docker volumes。systemd 仅负责每天调度；安装其系统级 unit 需要 sudo，不表示执行“系统备份”。具体部署与验收见[备份说明](../deploy/backup/README.md)及[验收记录](verification-native.md)。以下保留原方案的一致性和恢复设计依据。
 
 每份完整快照包含：D1 SQL、其引用的 R2 对象字节和 customMetadata、原始对象 hash/大小清单、schema/代码版本、必要调度与入站预留信息、非秘密资源配置。`CREDENTIAL_KEY` 单独加密托管，恢复需要它；不能只备份 D1 或只同步桶。
 

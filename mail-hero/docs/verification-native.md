@@ -151,3 +151,19 @@ HTTP 接管、容器重建存活与 Mail Hero 解析测试不能代替用户测�
 服务器部署仓库现为`785db9dc91faf7fb6b4cc1ed9cdd8379b4d64aa7`，仅拉取了备份安装器源文件，`mailhero-backup.timer`仍为not-found；没有安装或启用定时任务。安装器会先停止调度并拒绝与运行中的备份并发升级，6项离线部署测试通过。
 
 待办边界：专用Access机器身份的新增权限仍待用户确认；生产实际备份、独立恢复及定时运行尚未完成。恢复私钥与应用密钥的加密副本已在受限本机目录生成，但尚无独立离机托管证据。生产浏览器状态API仍受客户端拦截，DO容量基线初始化状态尚未通过认证overview核实；代码会在首次需要容量的调用中有界初始化，完成前拒绝新写入。Free CPU/内存真实用量、此次升级后的新测试信以及新空Cloudflare资源灾难恢复均不由CI通过推定。通知当前仅UI，外部通知目的地未配置。
+
+## 专用备份身份、真实快照与隔离恢复（2026-09-26 UTC）
+
+以下更新上述待办；备份范围仅是 Mail Hero 应用数据及恢复材料，不是主机系统备份。
+
+- 用户确认后，部署令牌仅新增 `Access: Service Tokens Write`，原有12项权限保持；未改变其他 Worker 的授权。专用 Access service token `mail-hero-backup` 使用 `forever` 有效期，并由精确路径 `mail-hero.ziyixi.science/api/internal/backup/*` 的 Service Auth 策略单独放行。owner app 与两条 owner policy 的前后比较一致。
+- 实际认证矩阵：Access service credential + 独立 backup Bearer 对 backup status 为200；缺 Bearer 为401；缺 Access service credential 为403。该机器身份访问 owner overview 为302，不能用作 owner 登录。服务器只有专用备份凭据、公钥与加密应用密钥，没有 Cloudflare 管理令牌或恢复私钥。
+- 收集/恢复增加所有存活内容引用核验；不能仅对现有文件算 hash 就认为完整。提交 `1e0f48d73dd9aa1dc503a6422461d7a6a6deef87` 的17项真实 GPG 测试通过，[发布运行36268687026](https://github.com/ziyixi/mail-hero/actions/runs/36268687026)成功；生产 Worker 版本为 `43f01ae3-b015-4db5-acf3-3a97dff72759`。
+- 首轮演练发现预制应用密钥密文解密后为空。已从现有密钥显式文件重新加密，在断网容器中解密并逐字节核对后，仅替换服务器上的密文；线上 `CREDENTIAL_KEY` 未改变。随后重新执行完整采集和恢复，不以首轮上传成功充当完整恢复成功。
+- 最终快照 `360280ed-dd88-4e02-b9b4-514f06d71740` 为21,265 bytes加密归档；服务器完整读回 R2 并校验 SHA，签名 finish 成功。独立恢复设备根据服务器回执再次从 R2 下载并核对 SHA，再获取最新删除清单。
+- 在无网络容器的新空目录实际解密恢复：2封邮件、5个对象、1条交付事件，完整对象字节36,974。SQLite integrity/FK、raw/parsed/payload 引用、对象 hash/size、冻结事件身份及 payload bytes、删除清单应用、逻辑容量核对均通过。归档内应用密钥解密后与原密钥一致。恢复副本发送暂停、端点暂停、`activation_allowed=false`，未访问消费者或创建业务任务。
+- 备份后在线状态为 `remote_verified`、`paused=false`、未完成上传0、`receipt_sync_pending=false`；D1 `last_backup_at=2026-09-26T20:23:13.351Z`。Worker 维护和强制暂停均为false，应用 `send_paused=0`，三个必需secret binding保留。生产控制快照显示容量基线已初始化，36,974 bytes、上限5GiB。
+
+服务器每日 timer 尚未安装。用户已同意亲自执行需要 sudo 密码的最后安装命令；该命令只安装 Mail Hero 独立定时任务。准备启用的时间为04:17 UTC加最多10分钟随机延迟，保留7个日快照和4个周快照（重合去重，至多11份）。此时已完成真实手动备份与隔离恢复，不能把它表述成定时运行已验证。
+
+该演练是本地隔离恢复，不是恢复到新空 Cloudflare D1/R2/DO 后重新上线的灾难恢复；不据此承诺 RPO/RTO。恢复私钥仍只在本机受限目录，尚无独立离机托管证据。生产浏览器客户端拦截、Free CPU/内存真实用量和升级后的新测试信仍需分别验证；外部通知目的地未配置。
