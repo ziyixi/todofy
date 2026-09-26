@@ -28,14 +28,17 @@ func initLogger() {
 
 // Config holds all configuration parameters
 type Config struct {
-	AllowedUsers       string
-	DataBasePath       string
-	Port               int
-	HealthCheckTimeout int
-	LLMAddr            string
-	TodoAddr           string
-	DependencyAddr     string
-	DatabaseAddr       string
+	AllowedUsers         string
+	DataBasePath         string
+	MailInboxPath        string
+	MailWebhookTokenFile string
+	MailSourceID         string
+	Port                 int
+	HealthCheckTimeout   int
+	LLMAddr              string
+	TodoAddr             string
+	DependencyAddr       string
+	DatabaseAddr         string
 }
 
 var (
@@ -78,6 +81,24 @@ func initFlagsWithFlagSet(fs *flag.FlagSet, cfg *Config) {
 	fs.StringVar(&cfg.AllowedUsers, "allowed-users", "",
 		"Comma-separated list of allowed users in the format 'username:password'")
 	fs.StringVar(&cfg.DataBasePath, "database-path", "", "Path to the SQLite database file")
+	fs.StringVar(
+		&cfg.MailInboxPath,
+		"mail-inbox-path",
+		os.Getenv("TODOFY_MAIL_INBOX_PATH"),
+		"Absolute path to the durable Mail Hero inbox SQLite file",
+	)
+	fs.StringVar(
+		&cfg.MailWebhookTokenFile,
+		"mail-webhook-token-file",
+		os.Getenv("TODOFY_MAIL_WEBHOOK_TOKEN_FILE"),
+		"Absolute path to the Mail Hero Bearer token file",
+	)
+	fs.StringVar(
+		&cfg.MailSourceID,
+		"mail-source-id",
+		os.Getenv("TODOFY_MAIL_SOURCE_ID"),
+		"Stable logical ID of the authenticated Mail Hero source",
+	)
 	fs.IntVar(&cfg.Port, "port", 8080, "Port to run the server on")
 	fs.IntVar(&cfg.HealthCheckTimeout, "health-check-timeout", 10, "Timeout for health check in seconds")
 
@@ -172,6 +193,9 @@ func validateAllowedUsersFormat(users string) error {
 }
 
 func run(cfg Config) error {
+	if err := validateMailInboxConfig(cfg); err != nil {
+		return err
+	}
 	if cfg.AllowedUsers == "" {
 		return errors.New("no allowed users provided. use --allowed-users flag to specify them")
 	}
@@ -213,6 +237,34 @@ func run(cfg Config) error {
 	app, err := createRouter(allowedUserMap, grpcClients)
 	if err != nil {
 		return fmt.Errorf("failed to create router: %w", err)
+	}
+	if cfg.MailInboxPath != "" {
+		provider, ok := grpcClients.(ClientProvider)
+		if !ok {
+			return fmt.Errorf("mail inbox requires gRPC clients")
+		}
+		inbox, err := openMailInbox(cfg)
+		if err != nil {
+			return fmt.Errorf("failed to open durable mail inbox: %w", err)
+		}
+		defer func() { _ = inbox.Close() }()
+		router, ok := app.(*gin.Engine)
+		if !ok {
+			return fmt.Errorf("mail inbox requires a Gin router")
+		}
+		router.POST("/hooks/mail", inbox.handleWebhook)
+		router.GET("/api/v1/mail_inbox", gin.BasicAuth(allowedUserMap), inbox.handleStatus)
+		router.POST("/api/v1/mail_inbox/:event_id/reconcile", gin.BasicAuth(allowedUserMap), inbox.handleReconcile)
+		workerCtx, stopWorker := context.WithCancel(context.Background())
+		workerDone := make(chan struct{})
+		defer func() {
+			stopWorker()
+			<-workerDone
+		}()
+		go func() {
+			defer close(workerDone)
+			inbox.runWorker(workerCtx, provider)
+		}()
 	}
 
 	listenAddr := fmt.Sprintf(":%d", cfg.Port)

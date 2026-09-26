@@ -20,6 +20,13 @@ services:
       - ./env/todofy.test.env
     environment:
       PORT: "8080"
+      TODOFY_MAIL_INBOX_PATH: /var/lib/todofy-mail/inbox.sqlite
+      TODOFY_MAIL_WEBHOOK_TOKEN_FILE: /run/secrets/mail-webhook-test-token
+      TODOFY_MAIL_SOURCE_ID: mail-hero-ci
+    volumes:
+      - todofy-mail-test:/var/lib/todofy-mail
+      # Public synthetic credential used only by this isolated CI stack.
+      - ./testdata/mail-webhook-test-token:/run/secrets/mail-webhook-test-token:ro
     depends_on:
       todofy-llm:
         condition: service_healthy
@@ -30,7 +37,7 @@ services:
     networks:
       - todofy-test
     healthcheck:
-      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8080/health"]
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://localhost:8080/health"]
       interval: 5s
       timeout: 5s
       retries: 10
@@ -97,3 +104,4 @@ services:
 
 volumes:
   todofy-db-test:
+  todofy-mail-test:

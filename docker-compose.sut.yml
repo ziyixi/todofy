@@ -122,7 +122,7 @@ services:
     networks:
       - todofy-sut
     healthcheck:
-      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8080/health"]
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://localhost:8080/health"]
       interval: 5s
       timeout: 5s
       retries: 10

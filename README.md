@@ -250,6 +250,19 @@ When one shared `env_file` is reused across all services, set service-specific `
 | `TodoAddr` | Yes | `todofy-todo:50052` |
 | `DependencyAddr` | Optional | `todofy-todo:50052` (defaults to `TodoAddr`) |
 | `DatabaseAddr` | Yes | `todofy-database:50053` |
+| `TODOFY_MAIL_INBOX_PATH` | Optional | `/var/lib/todofy-mail/inbox.sqlite` |
+| `TODOFY_MAIL_WEBHOOK_TOKEN_FILE` | Optional | `/run/secrets/todofy-mail-webhook-token` |
+| `TODOFY_MAIL_SOURCE_ID` | Optional | `mail-hero-personal` |
+
+The three `TODOFY_MAIL_*` values enable the independent Mail Hero consumer together; if any is missing, startup fails rather than expose a partially configured webhook. The inbox path and token file must be absolute. The source ID is a stable logical identity, not the token value. Token rotation keeps the same source ID and the same inbox file. If these variables are absent, Todofy's existing CloudMailin endpoint and startup behavior are unchanged.
+
+The main `todofy` container needs its **own persistent local volume** for `/var/lib/todofy-mail`, plus a read-only token file at `/run/secrets/todofy-mail-webhook-token`; its database gRPC container has a separate SQLite file. Add both mounts before setting the variables, and include the entire inbox directory (including SQLite WAL files) in backup. The token file must contain a random single-line token of at least 32 bytes. Do not commit it, put it in a shared env file, or send it in chat. The new route is `POST /hooks/mail`, expects `mail.received.v1` JSON, `Authorization: Bearer <token>`, and an `Idempotency-Key` equal to the event ID. Prefer a verified HTTPS ingress; an explicitly allowlisted internal HTTP target exposes the Bearer token to that private network. It is not a CloudMailin-format endpoint.
+
+Todofy returns 204 only after the event is committed to the inbox. The same source/event ID with identical bytes returns 204 without rerunning work; the same ID with different bytes returns 409. A background worker checkpoints the rendered summary before calling Todoist. A successful task creation is saved before the legacy summary cache is written. If a Todoist call times out, returns an error, or is interrupted, the event becomes `todo_unknown` and **is never retried automatically**: an external task may already exist. The old `/api/v1/update_todo` CloudMailin path remains available, but it has different synchronous semantics and must not be used as Mail Hero's auto-retry target.
+
+The owner's existing BasicAuth credentials can read `GET /api/v1/mail_inbox`, which lists event IDs, processing states, task IDs, safe error codes, and timestamps without email bodies. For `todo_unknown`, inspect Todoist for the `Mail Hero event: <event_id>` footer and then explicitly call `POST /api/v1/mail_inbox/<event_id>/reconcile` with BasicAuth, `X-Todofy-Admin-Action: reconcile-mail-inbox`, and JSON `{"event_id":"<event_id>","resolution":"task_created","task_id":"<actual task id>"}`. If you confirmed that no task exists, use `{"event_id":"<event_id>","resolution":"task_not_created","confirmed_no_task":true}`; this explicitly resumes task creation and can duplicate an undiscovered task. `failed_summary` can be resumed with `resolution: "retry_summary"`. The API accepts each transition once and returns 409 if state has already changed.
+
+After successful processing, the separate inbox clears its mail payload and rendered description while keeping the event ID/hash ledger for future duplicate requests. The existing Todofy summary database and Todoist task retain their own content under their normal policies. Mail Hero's “delivered” state means only that this inbox committed; it cannot prove later task creation. The legacy summary cache uses a non-unique `HashId` index; the new worker uses an event-scoped `mailhero-v1-` namespace so it does not overwrite CloudMailin cache rows. Cache writes happen only after the task checkpoint, and their retries never repeat the Todoist call. The cache is not treated as the webhook idempotency ledger.
 
 ### `todofy-llm`
 
@@ -430,6 +443,10 @@ services:
     env_file: ./env/todofy.env
     environment:
       PORT: "8080"
+    # Add these only when enabling the optional Mail Hero inbox above.
+    # volumes:
+    #   - ./data/todofy-mail:/var/lib/todofy-mail
+    #   - ./secrets/todofy-mail-webhook-token:/run/secrets/todofy-mail-webhook-token:ro
     depends_on:
       - todofy-llm
       - todofy-todo

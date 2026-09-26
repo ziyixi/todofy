@@ -1,6 +1,6 @@
 # Stage 1: Builder
 # Using a specific patch version of Go 1.25 for reproducibility and security
-FROM golang:1.25.1 AS builder
+FROM golang:1.25.1-bookworm AS builder
 
 # Set working directory inside the container
 WORKDIR /app
@@ -24,21 +24,20 @@ ARG GIT_COMMIT=unknown
 RUN if [ "$GIT_COMMIT" = "unknown" ] && [ -d .git ]; then export GIT_COMMIT=$(git rev-parse HEAD); fi
 
 # Build the Go application
-# - CGO_ENABLED=0: Build a statically linked binary without C dependencies
-# - GOOS=linux: Ensure the binary is built for a Linux environment (like Alpine)
-# - -a -installsuffix netgo: Force rebuild of stale packages and use netgo dns resolver
+# - CGO_ENABLED=1: The opt-in durable mail inbox uses the same SQLite C driver
+#   already used by Todofy's database service.
+# - GOOS=linux: Build for the Linux runtime image.
 # - -ldflags: Embed version information (GitCommit) into the binary
 #   Your main package should have a variable like: var GitCommit string
 # - -o /todofy: Output the compiled binary to /todofy in this builder stage
 # - .: Build the package in the current directory (/app)
-RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix netgo \
+RUN CGO_ENABLED=1 GOOS=linux go build \
     -ldflags="-X 'main.GitCommit=${GIT_COMMIT}'" \
     -o /todofy .
 
 # Stage 2: Runtime
-# Using alpine:latest for a minimal runtime image.
-# For production, consider pinning to a specific version, e.g., alpine:3.20 (or current stable)
-FROM alpine:latest
+# Match the glibc used by the builder for the SQLite-linked binary.
+FROM debian:bookworm-slim
 
 LABEL org.opencontainers.image.authors="docker@ziyixi.science"
 LABEL org.opencontainers.image.source="https://github.com/ziyixi/todofy"
@@ -54,8 +53,9 @@ ENV DependencyAddr=""
 ENV DatabaseAddr=":50053"
 ENV RATE_LIMIT_REQUESTS_PER_MINUTE=2
 
-# Install ca-certificates for HTTPS and tzdata for timezone information
-RUN apk --no-cache add ca-certificates tzdata
+# Keep wget for the existing Docker integration and SUT health checks.
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates tzdata wget \
+    && rm -rf /var/lib/apt/lists/*
 
 # Set a working directory for the runtime stage (optional but good practice)
 WORKDIR /app

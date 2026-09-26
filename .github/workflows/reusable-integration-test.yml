@@ -112,6 +112,9 @@ jobs:
 
         echo "Auth checks passed ✓"
 
+    - name: Test durable Mail Hero inbox without external side effects
+      run: python3 scripts/test_mail_inbox_integration.py
+
     - name: Test gRPC service connectivity
       run: |
         echo "Testing gRPC services connectivity..."

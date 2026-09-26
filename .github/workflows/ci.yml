@@ -53,6 +53,7 @@ jobs:
           go.mod
           go.sum
           Dockerfile
+          .dockerignore
           database/**
           llm/**
           todo/**
@@ -78,6 +79,7 @@ jobs:
     if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && needs.detect-build-changes.outputs.should_build == 'true'
     uses: ./.github/workflows/reusable-build.yml
     permissions:
+      contents: read
       packages: write
 
   notify:

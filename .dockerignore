@@ -1,0 +1,11 @@
+.git
+.gocache
+coverage.out
+coverage.html
+env/*.env
+data
+secrets
+*.db
+*.db-*
+*.sqlite
+*.sqlite-*
