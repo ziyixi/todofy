@@ -55,6 +55,7 @@ R2、D1和DO之间没有跨存储事务。每一步必须可恢复、可去重�
 - Workers Free普通handler CPU为10ms；DO invocation含Alarm默认30秒CPU，Alarm wall time上限15分钟。全部仍受128MB isolate内存限制。MIME解析必须在Alarm，不能靠普通Worker的Paid cpu_ms配置规避Free计划。
 - Email Routing原件最多25MiB；MIME要有字节、头部、parts、嵌套及正文预算。这个上限不证明所有25MiB结构已真实测试。解析失败保留原件、给出可理解状态。
 - D1 Free单库500MB、账户5GB；单行/字符串/BLOB 2,000,000 bytes。正文与大型JSON放R2。正文搜索只索引UTF-8前16KiB，API `search_index_truncated`和UI必须说明搜索范围；读取正文仍完整。
+- D1的LIKE/GLOB匹配模式最多50 bytes；带UUID的存储键前缀应使用可走索引的范围查询。本地SQLite/workerd未必执行同样限制，相关回归测试必须显式覆盖生产限制。
 - 初始容量5GiB。新邮件冻结原件安全终态后7天、其余内容30天、账本至少180天的策略；历史NULL策略行不自动采用新期限。容量不是账户R2硬限额，备份和其他项目共享免费量。
 - 每个UTC日默认最多300封及256MiB原件：DO在R2写入前原子预留额度，D1故障时也必须生效。超额暂时失败，不能假定Cloudflare或来源一定重投；不是账户级账单硬上限。
 

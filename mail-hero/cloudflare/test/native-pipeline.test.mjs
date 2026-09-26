@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { emailHandler, MAX_RAW_BYTES } from '../src/native/ingest.ts';
 import { parseMail, safeHTML, ParseError } from '../src/native/parser.ts';
-import { buildPayload, retryAfter } from '../src/native/pipeline.ts';
+import { buildPayload, cleanupPreviousParses, retryAfter } from '../src/native/pipeline.ts';
 
 // A strict test stand-in for workerd's native FixedLengthStream. The integration
 // suite independently runs the actual runtime implementation.
@@ -67,6 +67,34 @@ test('Retry-After supports seconds/date and never schedules a past date',()=>{
 
 import { DatabaseSync } from 'node:sqlite';
 import { MailCoordinator } from '../src/native/coordinator.ts';
+test('parse cleanup stays within D1 LIKE limit and never touches an adjacent message ID',async()=>{
+  const database=new DatabaseSync(':memory:');
+  try {
+    database.exec('CREATE TABLE maintenance(id TEXT PRIMARY KEY,value TEXT NOT NULL)');
+    const id='11111111-1111-4111-8111-111111111111', adjacent='11111111-1111-4111-8111-111111111112';
+    const own=`parse_cleanup:${id}:claim`, neighbor=`parse_cleanup:${adjacent}:claim`;
+    const ownPrefix=`parsed/${id}/claim/`, neighborPrefix=`parsed/${adjacent}/claim/`;
+    database.prepare('INSERT INTO maintenance(id,value) VALUES(?,?)').run(own,ownPrefix);
+    database.prepare('INSERT INTO maintenance(id,value) VALUES(?,?)').run(neighbor,neighborPrefix);
+    const listed=[];
+    const env={DB:{prepare(sql){return {bind(...values){
+      // Cloudflare's production SQLite rejects LIKE/GLOB patterns >50 bytes.
+      // The former `parse_cleanup:<UUID>:%` query fails here before any purge.
+      if(/\b(?:LIKE|GLOB)\s*\?/i.test(sql) && values.some(value=>typeof value==='string' && Buffer.byteLength(value)>50)) throw new Error('SQLITE_ERROR: LIKE or GLOB pattern too complex');
+      return {all:async()=>({results:database.prepare(sql).all(...values)}),run:async()=>database.prepare(sql).run(...values)};
+    }};}},MAIL_STORE:{async list({prefix}){listed.push(prefix);return {objects:[],truncated:false};},async delete(){assert.fail('no synthetic R2 object exists');}}};
+    const formerPattern=`parse_cleanup:${id}:%`;
+    assert.equal(Buffer.byteLength(formerPattern),52);
+    assert.throws(()=>env.DB.prepare('SELECT id,value FROM maintenance WHERE id LIKE ?').bind(formerPattern),/LIKE or GLOB pattern too complex/);
+    await cleanupPreviousParses(env,id);
+    assert.deepEqual(listed,[ownPrefix]);
+    assert.equal(database.prepare('SELECT id FROM maintenance WHERE id=?').get(own),undefined);
+    assert.equal(database.prepare('SELECT value FROM maintenance WHERE id=?').get(neighbor).value,neighborPrefix);
+    const plan=database.prepare('EXPLAIN QUERY PLAN SELECT id,value FROM maintenance WHERE id>=? AND id<? ORDER BY id LIMIT 4')
+      .all(`parse_cleanup:${id}:`,`parse_cleanup:${id};`);
+    assert.ok(plan.some(row=>row.detail.includes('sqlite_autoindex_maintenance_1')),JSON.stringify(plan));
+  } finally {database.close();}
+});
 function coordinatorState() {
   const database=new DatabaseSync(':memory:');let alarm=null;
   const state={storage:{

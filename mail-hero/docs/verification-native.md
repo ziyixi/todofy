@@ -182,3 +182,11 @@ HTTP 接管、容器重建存活与 Mail Hero 解析测试不能代替用户测�
 - 生产备份状态为 `remote_verified`、`paused=false`、无未完成上传或待同步回执；D1 `last_backup_at`等于上述成功时间。Worker维护、强制暂停与应用发送暂停均关闭，必要secret binding保留。当前Worker版本 `9c477d4e-dc59-441e-b0cc-523e63b3982b`。
 
 已验证正式镜像真实备份、隔离恢复、常驻服务健康及重启持久状态；每日04:17 UTC钟点触发尚未到来，不把配置好日程描述为已观察到次日自动运行。仍未演练新空Cloudflare资源的完整上线恢复，私钥的独立离机托管及外部告警目的地保持前述边界。
+
+## 收件停在 pending 的 D1 查询修复（2026-09-26 UTC）
+
+- 经用户授权，线上状态核查确认新收邮件已保存原件，但解析一直为 `pending`，没有生成交付事件。解析前清理查询使用 `parse_cleanup:<UUID>:%`，模式为52 bytes，超过[D1 LIKE/GLOB 的50 bytes限制](https://developers.cloudflare.com/d1/platform/limits/)。生产D1上只使用合成参数的只读表达式复现了 `LIKE or GLOB pattern too complex: SQLITE_ERROR`，无需读取原件即可确认原因。
+- 改用精确UUID前缀的主键范围查询；回归测试显式模拟生产模式长度限制，验证清理不会影响相邻邮件ID且使用主键索引。本地SQLite/workerd并不可靠地执行此生产限制，不能只依赖集成测试发现它。
+- 收件箱与详情区分待解析、解析中、解析失败，解释正文尚未提取及自动交付需等待解析；已经解析且确实无主题的邮件保持原有显示，重解析失败也不会隐藏此前保留的正文。
+- 本地Worker完整测试71项、前端19项、部署配置3项均通过，Worker TypeScript与前端构建通过。真实workerd D1/R2/DO合成链路覆盖Gmail转发格式、中文正文解析及一次自动交付到fake consumer。
+- 上述是修复及本地/合成验证；正式Actions发布和生产积压恢复需另行核验，不能由测试通过推定。

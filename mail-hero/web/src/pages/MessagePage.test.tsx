@@ -46,3 +46,33 @@ it('raw expiry removes download and reparse but preserves the retained body', as
   expect(screen.queryByRole('button',{name:/重新解析/})).toBeNull()
   expect(screen.getByText(/原件已按保留策略过期/)).toBeTruthy()
 })
+
+it.each([
+  ['pending', '（主题待解析）', '发件人待解析', '正文尚未解析'],
+  ['parsing', '（正在解析主题）', '正在解析发件人', '正在提取正文'],
+  ['failed', '（主题解析未完成）', '发件人解析未完成', '正文解析未完成'],
+] as const)('distinguishes %s content from a parsed empty email', async (parse_state, subject, sender, body) => {
+  open({parse_state,subject:'',from:'',text:'',html:'',headers:[],attachments:[]})
+  await screen.findByRole('heading', {level:1,name:subject})
+  expect(screen.getAllByText(sender)).toHaveLength(2)
+  expect(screen.getByRole('heading', {name:body})).toBeTruthy()
+  expect(screen.getByText('自动投递需等待邮件解析成功。')).toBeTruthy()
+  expect(screen.queryByRole('button', {name:/发送到目标/})).toBeNull()
+  expect(screen.queryByText('（无主题）')).toBeNull()
+  expect(screen.queryByText('未知发件人')).toBeNull()
+  expect(screen.queryByText('没有纯文本正文')).toBeNull()
+  expect(screen.queryByText('没有附件。')).toBeNull()
+  fireEvent.click(screen.getByRole('tab', {name:'安全 HTML'}))
+  expect(screen.getByRole('heading', {name:body})).toBeTruthy()
+  expect(screen.queryByText('没有 HTML 正文')).toBeNull()
+  fireEvent.click(screen.getByRole('tab', {name:'邮件头'}))
+  expect(screen.getByRole('heading', {name:'邮件头尚未解析'})).toBeTruthy()
+})
+
+it('preserves the genuine subjectless and empty-body states after parsing succeeds', async () => {
+  open({parse_state:'ready',subject:'',text:'',html:'',attachments:[]})
+  await screen.findByRole('heading', {level:1,name:'（无主题）'})
+  expect(screen.getByRole('heading', {name:'没有纯文本正文'})).toBeTruthy()
+  expect(screen.getByText('没有附件。')).toBeTruthy()
+  expect(screen.queryByText('自动投递需等待邮件解析成功。')).toBeNull()
+})

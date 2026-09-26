@@ -176,6 +176,40 @@ test('native workerd: durable archive, protected API, stable retry identity and 
     assert.equal(tombstone.raw_key, null);
     assert.equal((await db.prepare('SELECT COUNT(*) n FROM messages').first()).n, 1);
     assert.equal(calls.length, 3, 'deletion and redelivery do not replay side effects');
+
+    // A Gmail-style automatic forward uses the already-configured target.
+    // It must leave pending, expose the decoded Chinese body, and deliver once.
+    await db.batch([
+      db.prepare("UPDATE app_settings SET mode='forward',current_endpoint_id=?,next_send_at=NULL WHERE id=1").bind(endpoint.id),
+      db.prepare('UPDATE webhook_endpoints SET next_send_at=NULL WHERE id=?').bind(endpoint.id),
+    ]);
+    const gmailForward = [
+      'Return-Path: <sender@example.org>',
+      'X-Forwarded-To: inbox@mail.example.org',
+      'From: Synthetic Sender <sender@example.org>',
+      'To: original@example.org',
+      'Subject: test',
+      'MIME-Version: 1.0',
+      'Content-Type: text/plain; charset=UTF-8',
+      'Content-Transfer-Encoding: base64',
+      '', Buffer.from('测试邮件', 'utf8').toString('base64'), '',
+    ].join('\r\n');
+    const forwarded = await mf.dispatchFetch('http://localhost/__test/email', { method: 'POST',
+      headers: { 'x-raw-size': String(Buffer.byteLength(gmailForward)) }, body: gmailForward });
+    assert.equal(forwarded.status, 204, await forwarded.text());
+    const forwardedRow = await waitFor(() => db.prepare("SELECT * FROM messages WHERE subject='test'").first(),
+      row => row?.parse_state === 'ready', 'Gmail-style forward is parsed');
+    assert.equal(forwardedRow.receive_mode, 'forward');
+    assert.equal(forwardedRow.from_text, 'Synthetic Sender <sender@example.org>');
+    assert.equal((await api(`/messages/${forwardedRow.id}`)).message.text, '测试邮件');
+    const automatic = await waitFor(() => db.prepare('SELECT * FROM deliveries WHERE message_id=?').bind(forwardedRow.id).first(),
+      row => row?.state === 'delivered', 'forwarded mail auto-delivers');
+    assert.equal(automatic.endpoint_revision_id, endpoint.current_revision_id);
+    assert.equal(calls.length, 4);
+    const posted = JSON.parse(calls[3].body);
+    assert.equal(posted.message.subject, 'test');
+    assert.equal(posted.message.text, '测试邮件');
+    assert.equal(posted.message.from[0].address, 'sender@example.org');
   } finally {
     await mf.dispose();
     await rm(temp, { recursive: true, force: true });

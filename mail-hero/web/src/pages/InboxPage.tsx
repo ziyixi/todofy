@@ -5,12 +5,14 @@ import { ArrowRight, ArrowUpRight, CalendarDays, ChevronLeft, ChevronRight, Filt
 import { api } from '../api/client'
 import { Button, Card, CopyButton, Empty, ErrorState, formatBytes, formatDate, Loading, PageHead, Status } from '../components/UI'
 import type { MessageSummary } from '../api/types'
+import { messageParseNotice, messageSender, messageSubject } from '../components/messageDisplay'
 
 function MessageRow({ message, active, onSelect }: { message: MessageSummary; active: boolean; onSelect: () => void }) {
+  const parseNotice = messageParseNotice(message)
   return <button type="button" className={`message-row ${active ? 'message-row-active' : ''} ${!message.read_at ? 'message-row-unread' : ''}`} onClick={onSelect}>
     <span className="avatar">{(message.from || '?').trim().charAt(0).toUpperCase()}</span>
-    <span className="message-row-main"><span className="message-row-top"><span className="sender">{message.from || '未知发件人'}</span><time>{formatDate(message.received_at)}</time></span><span className="message-subject">{message.subject || '（无主题）'}{message.has_attachment && <Paperclip size={14} aria-label="有附件"/>}</span><span className="message-preview">{message.preview || (message.parse_state === 'failed' ? '解析失败，原件仍可下载' : '点击查看邮件内容')}</span></span>
-    <span className="message-row-state"><Status state={message.delivery_state}/></span>
+    <span className="message-row-main"><span className="message-row-top"><span className="sender">{messageSender(message)}</span><time>{formatDate(message.received_at)}</time></span><span className="message-subject">{messageSubject(message)}{message.has_attachment && <Paperclip size={14} aria-label="有附件"/>}</span><span className="message-preview">{message.preview || parseNotice?.detail || '点击查看邮件内容'}</span></span>
+    <span className="message-row-state">{parseNotice ? <Status state={message.parse_state} kind="parse"/> : <Status state={message.delivery_state}/>}</span>
   </button>
 }
 
@@ -30,6 +32,7 @@ export default function InboxPage() {
   const settings = useQuery({ queryKey: ['settings'], queryFn: api.settings })
   const detail = useQuery({ queryKey: ['message', selected], queryFn: () => api.message(selected!), enabled: !!selected })
   const items = messages.data?.items || []
+  const previewNotice = detail.data?.message ? messageParseNotice(detail.data.message) : null
 
   useEffect(() => { setSearch(q) }, [q])
   function update(key: string, value: string) {
@@ -62,7 +65,7 @@ export default function InboxPage() {
       {messages.isPending ? <Loading label="正在读取邮件…"/> : messages.isError ? <ErrorState error={messages.error} retry={() => messages.refetch()}/> : items.length === 0 ? <Empty title={q || status || parseState || attachment ? '没有符合条件的邮件' : '等待第一封邮件'} detail={q || status || parseState || attachment ? '调整搜索词或筛选条件后再试。' : '复制收信地址，并在 Gmail 或 Exchange 中设置转发。'} action={!q && !status && !parseState && !attachment && settings.data?.receive_address ? <CopyButton value={settings.data.receive_address} label="复制收信地址"/> : <Button variant="secondary" onClick={() => { setSearch(''); setParams({}) }}>清除筛选</Button>} /> : <div className="message-list">{items.map(message => <MessageRow key={message.id} message={message} active={selected === message.id} onSelect={() => select(message.id)}/>)}</div>}
       {(cursorHistory.length > 0 || messages.data?.next_cursor) && <div className="pagination"><Button variant="quiet" disabled={!cursorHistory.length} onClick={previousPage}><ChevronLeft size={16}/> 上一页</Button><span>每页最多 50 封</span><Button variant="quiet" disabled={!messages.data?.next_cursor} onClick={nextPage}>下一页 <ChevronRight size={16}/></Button></div>}
     </Card>
-      <Card className="preview-card">{!selected ? <div className="preview-placeholder"><div className="preview-placeholder-icon"><MailPreviewIcon/></div><h2>选择一封邮件</h2><p>这里会显示正文、附件和投递状态。<br/>邮件详情中还有原件与完整时间线。</p></div> : detail.isPending ? <Loading label="正在读取邮件…"/> : detail.isError ? <ErrorState error={detail.error} retry={() => detail.refetch()}/> : <><div className="preview-top"><Status state={detail.data.message.parse_state} kind="parse"/><Link to={`/messages/${encodeURIComponent(selected)}`} className="text-link">完整详情 <ArrowRight size={15}/></Link></div><h2 className="preview-subject">{detail.data.message.subject || '（无主题）'}</h2><div className="preview-meta"><div><strong>发件人</strong><span>{detail.data.message.from || '未知'}</span></div><div><strong>收到时间</strong><span>{formatDate(detail.data.message.received_at)}</span></div></div><div className="preview-body">{detail.data.message.content_deleted_at ? <p>内容已删除。</p> : detail.data.message.text ? <pre>{detail.data.message.text}</pre> : <p>暂无可显示的纯文本正文。请打开完整详情查看原件或安全 HTML。</p>}</div><div className="preview-bottom"><Status state={detail.data.message.delivery_state}/>{detail.data.message.attachments?.length ? <span><Paperclip size={15}/> {detail.data.message.attachments.length} 个附件</span> : <span>无附件</span>}</div></>}
+      <Card className="preview-card">{!selected ? <div className="preview-placeholder"><div className="preview-placeholder-icon"><MailPreviewIcon/></div><h2>选择一封邮件</h2><p>这里会显示正文、附件和投递状态。<br/>邮件详情中还有原件与完整时间线。</p></div> : detail.isPending ? <Loading label="正在读取邮件…"/> : detail.isError ? <ErrorState error={detail.error} retry={() => detail.refetch()}/> : <><div className="preview-top"><Status state={detail.data.message.parse_state} kind="parse"/><Link to={`/messages/${encodeURIComponent(selected)}`} className="text-link">完整详情 <ArrowRight size={15}/></Link></div><h2 className="preview-subject">{messageSubject(detail.data.message)}</h2><div className="preview-meta"><div><strong>发件人</strong><span>{messageSender(detail.data.message)}</span></div><div><strong>收到时间</strong><span>{formatDate(detail.data.message.received_at)}</span></div></div><div className="preview-body">{detail.data.message.content_deleted_at ? <p>内容已删除。</p> : detail.data.message.text ? <pre>{detail.data.message.text}</pre> : <p>{previewNotice?.detail || "暂无可显示的纯文本正文。请打开完整详情查看原件或安全 HTML。"}</p>}</div><div className="preview-bottom"><Status state={detail.data.message.delivery_state}/>{detail.data.message.attachments?.length ? <span><Paperclip size={15}/> {detail.data.message.attachments.length} 个附件</span> : <span>{previewNotice ? "附件信息尚未解析" : "无附件"}</span>}</div></>}
       </Card>
     </div>
   </>

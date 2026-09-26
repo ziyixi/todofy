@@ -236,10 +236,14 @@ async function registerRaw(env:Env,key:string):Promise<Row|null> {
   }
   return saved;
 }
-async function cleanupPreviousParses(env:Env,messageID:string):Promise<void> {
+export async function cleanupPreviousParses(env:Env,messageID:string):Promise<void> {
   // Publication and this intent commit in one D1 batch. Do not reduce the old
   // allocation while superseded parsed objects might still occupy R2.
-  const intents=await all(env,'SELECT id,value FROM maintenance WHERE id LIKE ? ORDER BY id LIMIT 4',`parse_cleanup:${messageID}:%`);
+  // A UUID in the LIKE pattern exceeds D1's 50-byte LIKE/GLOB limit. The
+  // adjacent ASCII bounds include only keys beginning with this exact UUID
+  // and colon, and use the maintenance primary-key index.
+  const lower=`parse_cleanup:${messageID}:`, upper=`parse_cleanup:${messageID};`;
+  const intents=await all(env,'SELECT id,value FROM maintenance WHERE id>=? AND id<? ORDER BY id LIMIT 4',lower,upper);
   for(const intent of intents) {
     await deletePrefix(env,intent.value);
     await env.DB.prepare('DELETE FROM maintenance WHERE id=?').bind(intent.id).run();
