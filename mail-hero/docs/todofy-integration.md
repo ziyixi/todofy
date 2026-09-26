@@ -1,6 +1,6 @@
 # Mail Hero → Todofy
 
-Mail Hero 向 `https://daily.ziyixi.science/hooks/mail` 发送通用 `mail.received.v1`。Todofy 独立发布，不依赖 Mail Hero 的代码、数据库或 Cloudflare 账户。双方只共享 webhook 合同和专用 Bearer 认证值。
+Mail Hero的Todofy目标为 `https://daily.ziyixi.science/hooks/mail`，使用通用 `mail.received.v1`。Todofy独立发布，不依赖Mail Hero的代码、数据库或Cloudflare账户。双方只共享webhook合同和专用Bearer认证值。
 
 ## 持久接管与业务状态
 
@@ -29,12 +29,24 @@ volumes:
 
 token 文件是单行随机认证值，权限 0600，虽以 `.env` 结尾但不作为 `env_file` 加载。文件属于私有部署材料，不能进入 Git。旧 CloudMailin 接口在迁移期间保留。
 
+## 已部署版本与验收边界（2026-09-26 UTC）
+
+- Todofy提交`5f0e8c6232b24084a0fed99d975f4b2db5272235`的 [CI run 36261628140](https://github.com/ziyixi/todofy/actions/runs/36261628140)成功，服务器使用`ghcr.io/ziyixi/todofy@sha256:632dba1a1b70ab31667d7bfacffbbd50ef1e1b06dc565c0cc47c66733f831675`。
+- 部署仓库提交[`2d529e86fc3a043c04fc76a2410d440bc895c240`](https://github.com/ziyixi/self-host-on-vultr/commit/2d529e86fc3a043c04fc76a2410d440bc895c240)已推送并在服务器fast-forward。只更新主容器，启动时间`18:23:55.711471621Z`；`18:24:17Z`检查healthy，digest及OCI revision匹配。三个gRPC依赖保持9月5日的原启动时间。
+- 合成事件`96fe9dea-1a2b-4a04-a793-61b5a99e77d7`在更新后仍只有一条`ignored`记录，处理尝试次数0、task_id为空，证明inbox持久保存；该事件没有调用LLM或Todoist。
+- Mail Hero清理提交`c0677406a75ee0de83c673a585b6383ab4860bc8`的 [CI/CD run 36262297081](https://github.com/ziyixi/mail-hero/actions/runs/36262297081)成功，Worker版本`e4fe47d3-61b8-4306-8cc7-d7822afd1c91`，D1没有待应用迁移。
+
+Mail Hero已于`2026-09-26T18:26:05.583Z`通过授权的Cloudflare账户管理及D1原子条件更新激活：settings为forward、`send_paused=0`，目标`7886bda0-502a-438c-bc77-1a1aaf915710`已解除暂停；两者version均为2，当前目标revision为`3a866523-4ca1-4c6f-afae-8f8113406fbf`。Worker的`FORCE_SEND_PAUSED`与`MAINTENANCE_MODE`均为false，允许域名为`daily.ziyixi.science`，原`CREDENTIAL_KEY`绑定保留。这是账户管理与数据库状态核对，未声称进行了UI激活验收。
+
+激活前没有delivery事件，历史archive邮件未补发；新邮件会唤醒DO并进入转发处理。完整用户测试信尚未安排或完成，不能把此配置状态当作LLM/Todoist业务成功。各项证据见 [验收记录](verification-native.md)。
+
 ## 原邮箱切换与验收
 
-1. 先向 `inbox-mail-hero@inbox.ziyixi.science` 发送一封无隐私测试信，主题使用独特标记，例如 `Mail Hero Todofy test 20260926`。
-2. 逐层核对：Mail Hero 原件保存与解析 ready → 对应 webhook 204/已交付 → Todofy inbox complete → Todoist 中一个对应任务。相同事件的重投不能多建任务。
-3. 验收通过后，由 owner 在各原邮箱的正规设置里，把 CloudMailin 转发目标替换成 Mail Hero 地址，保留源邮箱副本。不要同时把同一封邮件长期转发给两条业务入口，它们的事件身份不同，无法跨入口自动去重。
-4. Gmail/Exchange 的转发验证邮件可能需要 owner 点链接或验证码；收到普通测试信不等于自动转发配置已完成。
+1. 确认部署就绪，在授权范围内解除强制暂停和目标暂停，选择forward及Todofy目标；同步GitHub中的部署变量，避免下次发布恢复暂停。
+2. 向 `inbox-mail-hero@inbox.ziyixi.science` 发送一封无隐私测试信，主题使用独特标记，例如 `Mail Hero Todofy test 20260926`。
+3. 逐层核对：Mail Hero 原件保存与解析 ready → 对应 webhook 204/已交付 → Todofy inbox complete → Todoist 中一个对应任务。相同事件的重投不能多建任务。
+4. 验收通过后，由 owner 在各原邮箱的正规设置里，把 CloudMailin 转发目标替换成 Mail Hero 地址，保留源邮箱副本。不要同时把同一封邮件长期转发给两条业务入口，它们的事件身份不同，无法跨入口自动去重。
+5. Gmail/Exchange 的转发验证邮件可能需要 owner 点链接或验证码；收到普通测试信不等于自动转发配置已完成。
 
 历史 archive 邮件不会因为开启自动投递而自动补发。无需为了本次验收重发原来的 `Test` 归档邮件。
 

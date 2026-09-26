@@ -80,19 +80,38 @@
 - 独立读取精确 raw 对象，确认 10,744 bytes 且 SHA-256 与 D1 完全一致；只输出比对结果，检查后移除本机临时副本，云端原件保留。
 - 该信没有 HTML 或附件，相应验收不算通过。没有安排 webhook，也未调用 Todofy/Todoist；Gmail/Exchange 自动转发、生产故障重试及完整备份恢复仍待验证。
 
-## Todofy 接入与正式发布准备（2026-09-26 UTC）
+## Todofy 接入与正式发布（2026-09-26 UTC）
 
 - 现有入口为 `https://daily.ziyixi.science/hooks/mail`，使用专用 Bearer 凭据和稳定来源 `mail-hero-personal`。邮件不会走旧 CloudMailin 格式接口。
 - Todofy 已新增独立 SQLite WAL/FULL 持久 inbox，挂载到 `/var/lib/todofy-mail`；204 表示接管完成，业务进度独立查询。
 - 合成系统事件 `96fe9dea-1a2b-4a04-a793-61b5a99e77d7` 的公网 HTTP 验收通过：无认证/错误认证 401、首次及相同重复 204、同 ID 不同 bytes 409。内部恰有一条 ignored 记录、task_id 为空；重建主容器后该记录仍存在。该事件未调用 LLM/Todoist。
 - 原有 Tunnel、LLM、Todoist 和 database 三个依赖容器保持原启动时间；只重建主 Todofy。旧 CloudMailin 入口保留，来源邮箱转发由用户切换。
 - 部署诊断发现 Cloudflare Browser Integrity Check 拒绝 Python 默认客户端标识（1010）。明确 `User-Agent: MailHero/1.0` 后正常。原生投递已加入此标识，并通过真实 workerd 的 503 → 204 重试测试；未关闭 Cloudflare 防护。此项手动发布 Worker 版本为 `b4b99376-9cd9-44d5-affc-8111eff67e1f`。
-- 仓库清理后的本地检查通过：32项Cloudflare原生测试、2项CI配置测试、3项UI测试、双方TypeScript和UI build。Todofy race测试属于独立消费者的验证；镜像digest和完整用户测试信链路分别记录，不由Mail Hero测试结果推定。
+- 仓库清理后的本地检查通过：32项Cloudflare原生测试、2项CI配置测试、3项UI测试、双方TypeScript和UI build。Todofy race测试属于独立消费者的验证；镜像发布和完整用户测试信链路分别记录，不由Mail Hero测试结果推定。
+
+Todofy提交`5f0e8c6232b24084a0fed99d975f4b2db5272235`的 [GitHub Actions run 36261628140](https://github.com/ziyixi/todofy/actions/runs/36261628140) 已成功，发布镜像为：
+
+```text
+ghcr.io/ziyixi/todofy@sha256:632dba1a1b70ab31667d7bfacffbbd50ef1e1b06dc565c0cc47c66733f831675
+```
+
+部署仓库提交[`2d529e86fc3a043c04fc76a2410d440bc895c240`](https://github.com/ziyixi/self-host-on-vultr/commit/2d529e86fc3a043c04fc76a2410d440bc895c240)已推送，服务器通过fast-forward取得配置并仅更新Todofy主容器。主容器启动于`2026-09-26T18:23:55.711471621Z`，`18:24:17Z`检查为healthy；实际镜像digest和OCI revision均匹配上述CI产物。三个gRPC依赖容器仍保持9月5日的原启动时间。
+
+CI镜像更新后，合成事件`96fe9dea-1a2b-4a04-a793-61b5a99e77d7`仍恰好一条记录，状态`ignored`、处理尝试次数0、task_id为空。此检查验证inbox跨镜像更新持久保存，没有调用LLM或创建Todoist任务。此检查时Mail Hero仍为archive、目标暂停；随后激活记录如下。
+
+`2026-09-26T18:26:05.583Z`通过已授权的Cloudflare账户管理和D1原子条件更新完成投递激活，未使用UI操作作为验收证据：
+
+- settings为`forward`、`send_paused=0`、version 2，当前目标`7886bda0-502a-438c-bc77-1a1aaf915710`。
+- 目标`paused=0`、version 2，冻结配置revision为`3a866523-4ca1-4c6f-afae-8f8113406fbf`。
+- Worker为`FORCE_SEND_PAUSED=false`、`MAINTENANCE_MODE=false`，允许目标域名为`daily.ziyixi.science`；`CREDENTIAL_KEY` secret binding保留。
+- 激活前delivery总数为0，没有释放任何积压事件，原archive邮件不变；新邮件入站后会唤醒DO并按forward配置处理。
+
+截至该次激活，尚未安排或完成用户测试信的完整业务验收。
 
 HTTP 接管、容器重建存活与 Mail Hero 解析测试不能代替用户测试信经过 LLM 后成功创建 Todoist 任务的验收。当前没有完整备份恢复成功的证据。
 
 ## GitHub Actions正式发布记录
 
-首次正式发布提交`aaa444f`的 [GitHub Actions run 36261505007](https://github.com/ziyixi/mail-hero/actions/runs/36261505007) 已成功；Worker版本为`aedd3120-af09-424d-be1d-e57be41dbca9`。该记录证明此提交的检查、D1 migration及Worker发布完成，不表示之后的仓库清理已经发布，也不表示用户测试信的Todofy业务链路通过。
+首次正式发布提交`aaa444f`的 [GitHub Actions run 36261505007](https://github.com/ziyixi/mail-hero/actions/runs/36261505007) 已成功；Worker版本为`aedd3120-af09-424d-be1d-e57be41dbca9`。
 
-仓库随后按用户要求清除Mail Hero的Go/PostgreSQL服务、中转Worker及主机部署材料；当前验收命令只执行Cloudflare原生和React测试。清理后的正式CI与生产版本需在实际发布后追加，不能沿用上述提交的发布结果。
+仓库随后按用户要求清除Mail Hero的Go/PostgreSQL服务、中转Worker及主机部署材料；当前验收命令只执行Cloudflare原生和React测试。清理提交`c0677406a75ee0de83c673a585b6383ab4860bc8`的 [GitHub Actions run 36262297081](https://github.com/ziyixi/mail-hero/actions/runs/36262297081)检查及部署均成功，Worker版本为`e4fe47d3-61b8-4306-8cc7-d7822afd1c91`，D1没有待应用迁移。这证明清理后的原生项目已经正式发布；用户测试信到Todofy/Todoist的完整业务链路仍待单独验收。
