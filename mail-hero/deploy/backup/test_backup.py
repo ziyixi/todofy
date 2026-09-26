@@ -51,6 +51,9 @@ class SyntheticSnapshot:
         self.database.commit()
         self.blocks = {}
         self.cancelled = False
+        self.refresh_objects()
+
+    def refresh_objects(self):
         self.objects = [{"key": key, "size": len(value), "etag": backup.digest(value)[:32], "uploaded": NOW,
             "customMetadata": {"synthetic": "yes", "ingest_seq": "1"}, "httpMetadata": {"contentType": "application/octet-stream"}}
             for key, value in sorted(self.content.items())]
@@ -108,6 +111,119 @@ class BackupTests(unittest.TestCase):
     def tearDown(self):
         self.client.database.close()
         self.temp.cleanup()
+
+    def new_stage(self, name):
+        stage = self.root / name
+        stage.mkdir()
+        (stage / "objects").mkdir()
+        return stage
+
+    def archive_without_objects(self, name, missing_keys):
+        # Build a self-consistent, valid-hash archive whose inventory omitted
+        # an object that its D1 rows still reference. This models a lost source
+        # R2 object, not merely a corrupted archive entry.
+        stage = self.root / name
+        shutil.copytree(self.snapshot, stage)
+        index = json.loads((stage / "bundle.json").read_bytes())
+        manifest = json.loads((stage / "manifest.json").read_bytes())
+        for item in index["objects"]:
+            if item["key"] in missing_keys:
+                (stage / item["path"]).unlink()
+        index["objects"] = [item for item in index["objects"] if item["key"] not in missing_keys]
+        manifest["objects"] = [item for item in manifest["objects"] if item["key"] not in missing_keys]
+        index["manifest_sha256"] = backup.digest(backup.canonical(manifest))
+        (stage / "bundle.json").write_bytes(backup.canonical(index))
+        (stage / "manifest.json").write_bytes(backup.canonical(manifest))
+        archive = self.root / (name + ".tar.gz")
+        backup.create_archive(stage, archive)
+        return archive
+
+    def test_collection_and_restore_reject_missing_live_references_with_valid_hashes(self):
+        cases = {"raw": f"raw/{MESSAGE}.eml", "parsed": f"parsed/{MESSAGE}/claim/message.json",
+                 "attachments": f"parsed/{MESSAGE}/claim/attachment-1", "payloads": f"payload/{EVENT}.json"}
+        original_objects = self.client.objects
+        for kind, key in cases.items():
+            with self.subTest(kind=kind):
+                self.client.objects = [item for item in original_objects if item["key"] != key]
+                self.client.cancelled = False
+                with self.assertRaisesRegex(backup.BackupError, f"backup_{kind}_reference_missing"):
+                    backup.collect_snapshot(self.client, self.new_stage("missing-" + kind))
+                self.assertTrue(self.client.cancelled)
+                incomplete = self.archive_without_objects("omitted-" + kind, {key})
+                destination = self.root / ("restore-" + kind)
+                with self.assertRaisesRegex(backup.BackupError, f"backup_{kind}_reference_missing"):
+                    backup.restore_archive(incomplete, destination)
+                self.assertFalse(destination.exists())
+        self.client.objects = original_objects
+
+    def test_explicit_raw_expiry_and_omitted_attachment_are_valid(self):
+        raw_key = f"raw/{MESSAGE}.eml"
+        parsed_key = f"parsed/{MESSAGE}/claim/message.json"
+        attachment_key = f"parsed/{MESSAGE}/claim/attachment-1"
+        self.client.database.execute("UPDATE messages SET raw_expired_at=?,raw_key=NULL", (NOW,))
+        self.client.content.pop(raw_key)
+        self.client.content.pop(attachment_key)
+        self.client.content[parsed_key] = backup.canonical({"text": "Synthetic body", "attachments": [
+            {"filename": "omitted.bin", "storage_status": "omitted", "omitted_reason": "size_limit", "size": 3 * 1024 * 1024}]})
+        self.client.refresh_objects()
+        stage = self.new_stage("intentional-omissions")
+        index = backup.collect_snapshot(self.client, stage)
+        self.assertEqual(index["reference_validation"], {"messages": 1, "raw": 0, "parsed": 1, "attachments": 0, "payloads": 1})
+        archive = self.root / "intentional.tar.gz"
+        backup.create_archive(stage, archive)
+        state = backup.restore_archive(archive, self.root / "intentional-restored")
+        self.assertEqual(state["reference_validation"], index["reference_validation"])
+
+    def test_deleted_and_synthetic_messages_do_not_require_raw_originals(self):
+        self.client.database.execute("UPDATE messages SET origin='synthetic_test',raw_key=NULL")
+        self.client.content.pop(f"raw/{MESSAGE}.eml")
+        self.client.refresh_objects()
+        index = backup.collect_snapshot(self.client, self.new_stage("synthetic-no-raw"))
+        self.assertEqual(index["reference_validation"]["raw"], 0)
+        self.client.database.execute("UPDATE messages SET content_deleted_at=?", (NOW,))
+        self.client.content.clear()
+        self.client.refresh_objects()
+        index = backup.collect_snapshot(self.client, self.new_stage("deleted-no-content"))
+        self.assertEqual(index["reference_validation"], {"messages": 1, "raw": 0, "parsed": 0, "attachments": 0, "payloads": 0})
+
+    def test_event_construction_failure_is_not_a_missing_payload(self):
+        self.client.database.execute("UPDATE deliveries SET state='failed',last_error='invalid_payload',payload_key=NULL,payload_size_bytes=0,payload_sha256=?", (backup.digest(b""),))
+        self.client.content.pop(f"payload/{EVENT}.json")
+        self.client.refresh_objects()
+        index = backup.collect_snapshot(self.client, self.new_stage("construction-failure"))
+        self.assertEqual(index["reference_validation"]["payloads"], 0)
+        self.client.database.execute("UPDATE deliveries SET state='pending',last_error=NULL")
+        with self.assertRaisesRegex(backup.BackupError, "backup_payloads_reference_missing"):
+            backup.collect_snapshot(self.client, self.new_stage("missing-pending-payload"))
+
+    def test_orphan_delivery_and_ready_message_without_parsed_key_fail_closed(self):
+        self.client.database.execute("UPDATE messages SET parsed_key=NULL")
+        with self.assertRaisesRegex(backup.BackupError, "backup_parsed_reference_missing"):
+            backup.collect_snapshot(self.client, self.new_stage("ready-missing-parsed-key"))
+        self.client.database.rollback()
+        self.client.database.execute("PRAGMA foreign_keys=OFF")
+        self.client.database.execute("DELETE FROM messages")
+        with self.assertRaisesRegex(backup.BackupError, "backup_delivery_message_missing"):
+            backup.collect_snapshot(self.client, self.new_stage("orphan-delivery"))
+
+    def test_frozen_payload_must_match_database_hash_and_stored_attachment_requires_key(self):
+        self.client.content[f"payload/{EVENT}.json"] += b" "
+        self.client.refresh_objects()
+        with self.assertRaisesRegex(backup.BackupError, "backup_payload_reference_mismatch"):
+            backup.collect_snapshot(self.client, self.new_stage("changed-frozen-payload"))
+        self.client.content[f"payload/{EVENT}.json"] = self.client.payload
+        self.client.content[f"parsed/{MESSAGE}/claim/message.json"] = backup.canonical({"text": "Body", "attachments": [{"storage_status": "stored"}]})
+        self.client.refresh_objects()
+        with self.assertRaisesRegex(backup.BackupError, "backup_attachments_reference_missing"):
+            backup.collect_snapshot(self.client, self.new_stage("missing-attachment-key"))
+
+    def test_latest_deletion_can_exclude_unneeded_missing_content_on_restore(self):
+        incomplete = self.archive_without_objects("previous-missing-content", set(self.client.content))
+        journal = self.root / "newest-deletions.json"
+        journal.write_bytes(backup.canonical({"version": 1, "fetched_at": "2026-09-27T00:00:00Z", "items": [{"id": MESSAGE, "scope": "content", "deleted_at": NOW}]}))
+        state = backup.restore_archive(incomplete, self.root / "deleted-missing-restored", journal)
+        self.assertEqual(state["objects_restored"], 0)
+        self.assertEqual(state["reference_validation"], {"messages": 1, "raw": 0, "parsed": 0, "attachments": 0, "payloads": 0})
 
     def test_collect_and_isolated_restore_preserve_frozen_bytes_and_pause_delivery(self):
         destination = self.root / "restored"

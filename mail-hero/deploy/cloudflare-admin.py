@@ -55,7 +55,8 @@ def api(token, path, method="GET", body=None):
     payload = None if body is None else json.dumps(body).encode()
     request = urllib.request.Request("https://api.cloudflare.com/client/v4" + path,
         data=payload, method=method,
-        headers={"Authorization": "Bearer " + token, "Accept": "application/json", "Content-Type": "application/json"})
+        headers={"Authorization": "Bearer " + token, "Accept": "application/json", "Content-Type": "application/json",
+                 "User-Agent": "MailHero-Deployment/1.0"})
     try:
         with urllib.request.urlopen(request, timeout=30) as response:
             result = json.load(response)

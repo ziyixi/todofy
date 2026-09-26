@@ -181,6 +181,76 @@ def latest_deletions(client):
     return {"version": 1, "fetched_at": dt.datetime.now(dt.timezone.utc).isoformat(), "items": sorted(items.values(), key=lambda item: (item["id"], item["scope"]))}
 
 
+def exported_rows(stage, table):
+    """Stream a table's checked export pages without retaining message content."""
+    quote_identifier(table)
+    offset = 0
+    while True:
+        page = json.loads((stage / f"database/{table}/{offset}.json").read_bytes())
+        require(page.get("table") == table and page.get("offset") == offset and isinstance(page.get("rows"), list), "database_page_mismatch")
+        yield from page["rows"]
+        if page.get("next_offset") is None:
+            return
+        require(page["next_offset"] == offset + 100, "database_page_cursor_invalid")
+        offset += 100
+
+
+def validate_live_references(read_rows, objects, stage, deletions=()):
+    """Reject a hash-valid inventory that omits content still referenced by D1.
+
+    Deleted content, expired raw bytes, intentionally omitted attachment copies,
+    and explicit event-construction failures do not require nonexistent objects.
+    Only counts and content-free error codes leave this function.
+    """
+    by_key = {item["key"]: item for item in objects}
+    require(len(by_key) == len(objects), "duplicate_snapshot_object")
+    deleted_ids = {item["id"] for item in deletions if item.get("scope") == "content"}
+    expired_raw_ids = {item["id"] for item in deletions if item.get("scope") == "raw"}
+    messages = {}
+    counts = {"messages": 0, "raw": 0, "parsed": 0, "attachments": 0, "payloads": 0}
+
+    def referenced(key, kind):
+        require(isinstance(key, str) and bool(key) and key in by_key, f"backup_{kind}_reference_missing")
+        counts[kind] += 1
+        return by_key[key]
+
+    for message in read_rows("messages"):
+        message_id = message["id"]
+        deleted = bool(message.get("content_deleted_at")) or message_id in deleted_ids
+        messages[message_id] = deleted
+        counts["messages"] += 1
+        if deleted:
+            continue
+        if not message.get("raw_expired_at") and message_id not in expired_raw_ids:
+            # Synthetic endpoint tests intentionally have no RFC822 original.
+            if message.get("origin", "cloudflare") != "synthetic_test" or message.get("raw_key"):
+                referenced(message.get("raw_key"), "raw")
+        parsed_key = message.get("parsed_key")
+        if parsed_key or message.get("parse_state") == "ready":
+            parsed = referenced(parsed_key, "parsed")
+            try:
+                content = json.loads((stage / parsed["path"]).read_bytes())
+            except (ValueError, UnicodeError):
+                raise BackupError("backup_parsed_reference_invalid") from None
+            require(isinstance(content, dict) and isinstance(content.get("attachments"), list), "backup_parsed_reference_invalid")
+            for attachment in content["attachments"]:
+                require(isinstance(attachment, dict), "backup_attachment_reference_invalid")
+                if attachment.get("storage_status") == "omitted":
+                    continue
+                referenced(attachment.get("r2_key"), "attachments")
+    for delivery in read_rows("deliveries"):
+        require(delivery["message_id"] in messages, "backup_delivery_message_missing")
+        if messages[delivery["message_id"]]:
+            continue
+        key = delivery.get("payload_key")
+        if key is None and delivery.get("state") == "failed" and delivery.get("last_error") in ("invalid_payload", "message_needs_review"):
+            require(delivery.get("payload_size_bytes") == 0 and delivery.get("payload_sha256") == digest(b""), "backup_payload_reference_missing")
+            continue
+        item = referenced(key, "payloads")
+        require(item["sha256"] == delivery.get("payload_sha256") and item["size"] == delivery.get("payload_size_bytes"), "backup_payload_reference_mismatch")
+    return counts
+
+
 def collect_snapshot(client, stage, lease_seconds=1800):
     """Returns a verified local snapshot while keeping the lease active."""
     status, _ = client.json("/begin", payload={"lease_seconds": lease_seconds})
@@ -243,9 +313,12 @@ def collect_snapshot(client, stage, lease_seconds=1800):
         for item in manifest["objects"]:
             require(item["key"] in objects and all(objects[item["key"]][k] == v for k, v in item.items()), "manifest_object_mismatch")
         write_private(stage / "manifest.json", canonical(manifest))
-        write_private(stage / "snapshot-deletions.json", canonical(latest_deletions(client)))
+        deletion_journal = latest_deletions(client)
+        write_private(stage / "snapshot-deletions.json", canonical(deletion_journal))
         index = {"version": 1, "backup_id": backup_id, "manifest_sha256": manifest_hash,
                  "objects": list(objects.values()), "created_at": status["created_at"], "credential_key_included": False}
+        index["reference_validation"] = validate_live_references(lambda table: exported_rows(stage, table),
+            index["objects"], stage, deletion_journal["items"])
         write_private(stage / "bundle.json", canonical(index))
         return index
     except BaseException:
@@ -528,6 +601,13 @@ def restore_archive(plain_archive, destination, deletion_journal=None):
             conn.execute("UPDATE messages SET raw_purged_at=COALESCE(raw_purged_at,raw_expired_at) WHERE raw_expired_at IS NOT NULL AND raw_key IS NULL")
             conn.execute("UPDATE app_settings SET logical_bytes=COALESCE((SELECT sum(content_bytes) FROM messages),0)+COALESCE((SELECT sum(payload_size_bytes) FROM deliveries),0) WHERE id=1")
             conn.commit()
+            def restored_rows(table):
+                cursor = conn.execute(f"SELECT * FROM {quote_identifier(table)}")
+                columns = [item[0] for item in cursor.description]
+                for row in cursor:
+                    yield dict(zip(columns, row))
+            reference_validation = validate_live_references(restored_rows,
+                [item for item in index["objects"] if item["key"] not in excluded], extracted)
             write_private(stage / "database.sql", ("\n".join(conn.iterdump()) + "\n").encode())
         finally:
             conn.close()
@@ -550,6 +630,7 @@ def restore_archive(plain_archive, destination, deletion_journal=None):
                  "credential_key_included": False, "deletion_entries_applied": len(deletions),
                  "credential_key_envelope_available": bool(index.get("credential_key_envelope")),
                  "objects_restored": len(objects), "activation_allowed": False}
+        state["reference_validation"] = reference_validation
         write_private(stage / "restore-state.json", canonical(state))
         shutil.rmtree(extracted)
         os.rename(stage, destination)

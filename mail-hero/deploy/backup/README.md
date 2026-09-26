@@ -28,6 +28,8 @@ python3 /opt/mail-hero-backup/current/mailhero_backup.py collect \
 
 The maximum lease is 30 minutes. If export/encryption/upload/read-back cannot complete in that window, the run must fail; it cannot declare success after lease expiry or silently extend the consistency window. On errors it cancels the lease and aborts any incomplete multipart upload where possible. Network response bodies are not printed. The Worker independently expires abandoned leases. There is no automatic upgrade to a paid plan.
 
+Before collection can succeed, every live database reference to a raw message, parsed message, retained attachment or frozen webhook payload must exist in the checked inventory. Payload size and SHA-256 must match the frozen database record. Restore repeats these checks after applying deletion/expiry records. Missing referenced content fails closed; successfully hashing the files that happen to exist is not sufficient.
+
 ## Restore on the recovery device
 
 Fetch the latest independently stored deletion ledger immediately before recovery, using the dedicated machine credentials. Keep its freshness separate from the old snapshot. If the live service is unavailable, retrieve the latest `deletion-journal/` objects from the independent backup bucket through a separately authorized recovery route and build the same version-1 document; do not substitute an old snapshot's journal and call it current.
