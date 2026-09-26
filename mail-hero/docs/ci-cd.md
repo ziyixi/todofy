@@ -6,6 +6,10 @@
 
 这条流水线发布 Cloudflare Worker 和静态资源，使用现有D1、R2和SQLite DO资源。来源邮箱转发、Access策略及根域MX由各自设置管理；流水线不会创建新的Cloudflare收费计划。Todofy的镜像发布和服务器更新在它自己的仓库负责。
 
+独立的 `.github/workflows/backup-image.yml` 发布 `ghcr.io/ziyixi/mail-hero-backup`。它先运行合成备份/恢复及调度测试，再构建 `linux/amd64` 镜像；PR只构建，main发布使用当前工作流的 `GITHUB_TOKEN`，只有发布job获得 `packages: write`。镜像带源码revision标签、`sha-<完整提交>`标签及不可变digest。无需新增长期GitHub token，也不向构建过程提供邮件、备份凭据或Cloudflare管理密钥。首次发布后核对package为public，服务器才可匿名拉取。
+
+服务器的 `self-host-on-vultr` Compose配置固定备份镜像digest，更新时只执行 `docker compose pull mailhero-backup` 和 `docker compose up -d --no-deps mailhero-backup`。容器自己负责每日调度和失败后的有界重试，使用原来的私有备份配置及状态目录，不安装systemd或主机cron。操作与恢复见[备份说明](../deploy/backup/README.md)。
+
 ## 仓库设置
 
 在 GitHub 仓库 Settings → Environments 创建 `production`，将可部署分支限制为 `main`。个人使用可以直接自动部署；若希望每次人工确认，可添加 required reviewer。给 `main` 开启分支保护时，将 `Native checks` 设为 required check。

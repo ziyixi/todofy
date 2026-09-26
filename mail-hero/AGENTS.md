@@ -15,7 +15,7 @@
 ## 0. 范围、授权与隐私
 
 - 产品是个人版 CloudMailin：一个固定地址、每天约50–100封、完整收件UI、持久状态与可靠webhook。不是50–100QPS，不增加多地址CRUD或多租户平台。
-- Mail Hero全托管在Cloudflare，只维护TypeScript Worker和React UI。业务数据库使用D1；SQLite DO负责持久调度。不添加Go、PostgreSQL、Docker或Mail Hero自建服务器入口。
+- Mail Hero应用全托管在Cloudflare，维护TypeScript Worker和React UI。业务数据库使用D1；SQLite DO负责持久调度。不添加Go、PostgreSQL或自建邮件服务入口。用户另行授权的备份收集器使用独立Docker Compose服务，不能与应用运行架构混淆。
 - 使用Workers Free，目标$0/月，低量预算$1–2/月；未经明确授权不升级Workers Paid或开启不需要的收费产品。R2需订阅且超额计费，预算提醒不是硬消费上限，免费量按账户共享。
 - 唯一地址由Worker `RECEIVE_ADDRESS`配置。Todofy是可选、独立的HTTPS webhook消费者；它自己的Go服务、SQLite inbox及Tunnel属于外部系统，不进入Mail Hero仓库。不导入它的包/proto，不访问其数据库，不绑定发布周期。
 - 已授权的账户配置可继续；真实邮件内容、原邮箱自动转发、消费者真实业务副作用和根域现有邮箱不能被无声改动。专用子域设置若要求替换根域现有MX，停止核查，保护主邮箱。
@@ -116,16 +116,17 @@ D1 Time Travel Free7天只恢复D1，不恢复R2、DO或secrets。完整备份�
 - DO预留包含尚未索引的原件和解析放大空间；物理删除成功后释放。首次升级需排空旧版本写入并有界盘点R2。失败不确认接收。
 - 修复、清理、告警用三个独立Alarm调用，每阶段间约1秒，完整周期约10分钟；每次最多两个清理阶段，失败整封删除优先恢复。空闲原件扫描每天一次，每页100个key。
 - 备份使用最长30分钟DO租约，暂停解析、交付、清理与API写入；新邮件继续进入DO/R2并归入下一次快照。它不是MAINTENANCE_MODE。
-- 可选私有BACKUP_STORE保存加密包及最小删除清单。专用机器API `/api/internal/backup/*` 用独立Bearer和Access机器身份，不授权普通管理API。备份收集器使用既有服务器Python/GPG，不是Mail Hero自建应用服务。
+- 可选私有BACKUP_STORE保存加密包及最小删除清单。专用机器API `/api/internal/backup/*` 用独立Bearer和Access机器身份，不授权普通管理API。备份收集器使用既有服务器的独立Compose服务，Python/GPG封装在CI发布的镜像中；非root运行，无Docker socket或主机系统挂载，不安装systemd或主机cron。仅备份Mail Hero数据及恢复材料，不是整机备份。
 - 服务器不持有Cloudflare管理员token、R2 S3 key、应用密钥明文或恢复私钥。上传后完整读回SHA验证，独立HMAC receipt完成后才登记成功；轮转仅计入verified包，7每日+4每周。
 - 恢复需独立归档校验值及最新删除清单。隔离恢复强制暂停并保留event ID/payload；新Cloudflare资源导入、DO重建和未知交付对账需单独验收。
 - API写入遗留租约不得按时间猜测完成。必须在维护模式核对旧调用已排空，再按精确ID清除至少15分钟前的租约。
 
 ## 8. 仓库与发布边界
 
-- 只保留 `cloudflare/` 原生Worker/D1迁移与测试、`web/`、静态构建输出位置 `uiassets/dist/`、通用事件合同和原生部署工具。不要恢复已经移除的Go服务、PostgreSQL schema、SMTP服务器、中转Worker或Compose部署路径。
+- 保留 `cloudflare/` 原生Worker/D1迁移与测试、`web/`、静态构建输出位置 `uiassets/dist/`、通用事件合同和部署/备份工具。不要恢复已经移除的Go服务、PostgreSQL schema、SMTP服务器或中转Worker。`deploy/backup/`中的Dockerfile只封装备份工具，Compose配置属于独立部署仓库。
 - 正式发布从GitHub Actions的同一已验证提交构建UI、应用向后兼容的D1 migration并发布Worker。PR不使用生产密钥。`production` environment只用于授权的main发布；暂停和维护配置需同步GitHub variables，避免下次发布覆盖运维状态。
 - Todofy在自己的仓库通过CI构建GHCR镜像，服务器按digest更新。Mail Hero不构建或部署Todofy镜像。
+- 备份镜像由 `.github/workflows/backup-image.yml` 测试并发布到GHCR，服务器只拉取固定digest，不手工构建。Worker和备份镜像各自发布；备份CI不接触生产凭据或真实邮件。
 - 仓库清理不删除任何生产数据库、桶、邮件、源邮箱转发设置或其他项目资源；不自动导入真实邮件。部署成功、HTTP接管和完整Todofy/Todoist业务验收分别记录。
 
 部署、预算与恢复以 `docs/cloudflare-setup.md` 为准，发布流程见 `docs/ci-cd.md`。

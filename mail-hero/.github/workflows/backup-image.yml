@@ -1,0 +1,132 @@
+name: Backup collector image
+
+on:
+  pull_request:
+    paths:
+      - .github/workflows/backup-image.yml
+      - deploy/backup/**
+      - cloudflare/migrations/**
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/backup-image.yml
+      - deploy/backup/**
+      - cloudflare/migrations/**
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mail-hero-backup-image-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  IMAGE: ghcr.io/ziyixi/mail-hero-backup
+
+jobs:
+  checks:
+    name: Synthetic backup and scheduler tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Require the real encryption implementation
+        run: gpg --version
+      - name: Test collection, recovery and the container scheduler
+        run: python3 -m unittest discover -s deploy/backup -p 'test_*.py' -v
+
+  build-pr:
+    name: Build pull request image without publishing
+    needs: checks
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Build the verified collector
+        run: |
+          set -euo pipefail
+          docker build --pull --platform linux/amd64 \
+            --label "org.opencontainers.image.source=${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}" \
+            --label "org.opencontainers.image.revision=${GITHUB_SHA}" \
+            --tag mail-hero-backup:ci \
+            --file deploy/backup/Dockerfile deploy/backup
+      - name: Check the packaged runtime without network access
+        run: |
+          set -euo pipefail
+          test "$(docker image inspect --format '{{.Architecture}}' mail-hero-backup:ci)" = amd64
+          user=$(docker image inspect --format '{{.Config.User}}' mail-hero-backup:ci)
+          test -n "$user"
+          test "${user%%:*}" != 0
+          test "${user%%:*}" != root
+          docker run --rm --network none --read-only \
+            --cap-drop ALL --security-opt no-new-privileges \
+            --tmpfs /tmp:rw,nosuid,nodev,size=16m mail-hero-backup:ci --help
+
+  publish:
+    name: Publish the verified collector to GHCR
+    needs: checks
+    if: github.repository == 'ziyixi/mail-hero' && github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      image: ${{ steps.publish.outputs.image }}
+      digest: ${{ steps.publish.outputs.digest }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Build the verified collector
+        run: |
+          set -euo pipefail
+          docker build --pull --platform linux/amd64 \
+            --label "org.opencontainers.image.source=${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}" \
+            --label "org.opencontainers.image.revision=${GITHUB_SHA}" \
+            --tag "${IMAGE}:sha-${GITHUB_SHA}" --tag "${IMAGE}:latest" \
+            --file deploy/backup/Dockerfile deploy/backup
+      - name: Check the packaged runtime without network access
+        run: |
+          set -euo pipefail
+          test "$(docker image inspect --format '{{.Architecture}}' "${IMAGE}:sha-${GITHUB_SHA}")" = amd64
+          user=$(docker image inspect --format '{{.Config.User}}' "${IMAGE}:sha-${GITHUB_SHA}")
+          test -n "$user"
+          test "${user%%:*}" != 0
+          test "${user%%:*}" != root
+          docker run --rm --network none --read-only \
+            --cap-drop ALL --security-opt no-new-privileges \
+            --tmpfs /tmp:rw,nosuid,nodev,size=16m "${IMAGE}:sha-${GITHUB_SHA}" --help
+      - name: Log in with this job's temporary GitHub token
+        env:
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: printf '%s' "$GHCR_TOKEN" | docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
+      - name: Publish and record the immutable deployment reference
+        id: publish
+        run: |
+          set -euo pipefail
+          docker push "${IMAGE}:sha-${GITHUB_SHA}"
+          docker push "${IMAGE}:latest"
+          reference=$(docker image inspect --format '{{index .RepoDigests 0}}' "${IMAGE}:sha-${GITHUB_SHA}")
+          digest="${reference##*@}"
+          if [[ "$reference" != "${IMAGE}@sha256:"* || ! "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+            echo 'Published image is missing its immutable digest' >&2
+            exit 1
+          fi
+          echo "image=${reference}" >> "$GITHUB_OUTPUT"
+          echo "digest=${digest}" >> "$GITHUB_OUTPUT"
+          {
+            echo '## Mail Hero backup collector'
+            echo "Commit: \`${GITHUB_SHA}\`"
+            echo "Compose image: \`${reference}\`"
+            echo 'Pin this digest in the server Compose configuration; latest is not a deployment pin.'
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Remove the temporary registry login
+        if: always()
+        run: docker logout ghcr.io

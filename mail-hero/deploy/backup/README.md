@@ -1,36 +1,49 @@
 # Mail Hero backup collector and isolated restore
 
-The collector uses Python 3.9+ standard libraries and the `gpg` command. It is a separate host task; there is no Mail Hero application container or database server on that host. It uses GPG directly to encrypt one verified archive, rather than making the existing offen volume-backup job collect a changing staging directory. Existing Vultr backups and their private environment files are not modified.
+The collector and its daily scheduler run in a single Docker Compose service. GitHub Actions builds the Python/GPG image; the existing server pulls its immutable GHCR digest. The Mail Hero application and database remain on Cloudflare. Existing Vultr backups and their private environment files are not modified.
 
-The backup scope is **Mail Hero application data and recovery state only**. It does not back up the host OS, home directory, Docker volumes, or other services. Installing a system-level systemd timer requires sudo only to register and protect this dedicated scheduled task.
+The backup scope is **Mail Hero application data and recovery state only**. It does not back up the host OS, home directory, Docker volumes, or other services. The container runs as UID/GID 1000 with a read-only root filesystem and no Docker socket. No systemd unit, host cron or additional sudo installation is needed.
 
 `collect` acquires a bounded Worker lease, verifies canonical D1 export pages and exact R2 object sizes/ETags, writes a private local archive, encrypts it to a pinned public key, uploads 16 MiB parts to the separate backup binding, and downloads the encrypted result to verify its full SHA-256. Only then does it sign the independent receipt and call `finish`. `finish` is the durable success point. D1 and R2 content, custom/HTTP metadata, intake/control state, snapshot boundary, and an optional already-encrypted key escrow are included. Post-boundary arrivals belong to the next snapshot.
 
 Each successful run keeps a local encrypted copy and a non-content receipt. After remote success, local and remote rotation keep the latest snapshot on 7 distinct UTC days and 4 distinct ISO weeks (at most 11 snapshots; overlap can reduce this). Failed/unverified local ciphertext is left for inspection and is not counted as a backup. Plaintext staging lives only in a private temporary directory and is removed on normal exit/failure; an abrupt host crash can leave `.snapshot-*` directories, which must be removed only after confirming no collector process is using them. The service's output directory must have mode 0700 and sufficient space for source bytes, a compressed archive, and encrypted output concurrently. No credentials or mail content are logged.
 
-## Credentials and host layout
+## Compose deployment
 
 Only these machine credentials are required: dedicated `BACKUP_TOKEN`, independent 64-hex `BACKUP_RECEIPT_KEY`, and an Access service token pair `CF_ACCESS_CLIENT_ID` / `CF_ACCESS_CLIENT_SECRET` restricted to `/api/internal/backup/*`. The collector does **not** need a Cloudflare admin API token, Wrangler login, D1 administrator key, R2 S3 key, `CREDENTIAL_KEY` plaintext, or the recovery private key. `BACKUP_STORE` is separate from `MAIL_STORE` and existing backup buckets. If Access is not used in an isolated development environment, omit both Access variables together.
 
-Install a reviewed release into `/opt/mail-hero-backup/releases/<git-sha>/mailhero_backup.py`; make `current` a symlink to that exact release. Keep source root-owned and read-only to the service account. Use a dedicated `mailhero-backup` account, `/var/lib/mail-hero-backup` owned by it with mode 0700, and `/etc/mail-hero-backup/credentials.env` root-owned with mode 0600. Python, GPG and trusted CA roots are the only host packages. Install `recovery-public.asc` and the optional `credential-key.gpg` so the service can read them.
+The [self-host-on-vultr Compose service](https://github.com/ziyixi/self-host-on-vultr/tree/main/mailhero-backup) uses these existing directories, outside the other backup's `./data` and `./env` trees:
 
-Generate the recovery key on a separate trusted device, export **only the armored public key** to the server, and pin its full fingerprint in `BACKUP_RECIPIENT`. Keep the private key and an independent encrypted `CREDENTIAL_KEY` backup off the server. The collector creates a temporary public-only keyring and rejects private-key exports. `--credential-key-envelope` accepts an already public-key-encrypted file prepared on the trusted device; it neither decrypts nor generates the application key. The provided service example includes that option; remove the option if independent escrow is managed elsewhere.
+| Host path | Container path | Access |
+| --- | --- | --- |
+| `/home/xiziyi/.config/mail-hero-backup` | `/run/mailhero-backup` | Read-only; mode 0700 directory, 0600 files |
+| `/home/xiziyi/mail-hero-backup` | `/var/lib/mailhero-backup` | Read/write; mode 0700 |
+
+The config directory contains `credentials.env`, `recovery-public.asc`, and `credential-key.gpg`. The runtime reads the environment file as data, never executes it as shell code, and never prints its values. The public image contains only code and dependencies. Configuration and backup archives are mounted at runtime.
+
+Generate the recovery key on a separate trusted device, export **only the armored public key** to the server, and pin its full fingerprint in `BACKUP_RECIPIENT`. Keep the private key and an independent encrypted `CREDENTIAL_KEY` backup off the server. The collector creates a temporary public-only keyring and rejects private-key exports. The container includes the already public-key-encrypted `credential-key.gpg`; it neither decrypts nor generates the application key.
 
 Prepare the encrypted application-key escrow from an explicit input file, then decrypt it on the recovery device and compare it in memory with the original 64-hex key before copying the ciphertext to the server. GPG can successfully encrypt empty input; a successful GPG exit or a nonempty ciphertext does not prove that the key is present. Repeat the comparison against the escrow extracted from the completed backup during the real restore rehearsal. Never print the decrypted key or replace the live application key to make a recovery test pass.
 
-The `.service.example` and `.timer.example` files are templates, not enabled services. The proposed daily time is 04:37 UTC with up to 10 minutes jitter; verify it does not overlap the existing host backup. Before installing/enabling the timer, complete the synthetic encryption/restore tests and one manually supervised real collection plus an isolated recovery rehearsal. Set the Access service policy without replacing existing owner login or unrelated Worker permissions. A successful lease, API deployment, or snapshot upload alone does not establish recovery readiness.
-
-The personal deployment instead uses the reviewed [self-host-on-vultr installer](https://github.com/ziyixi/self-host-on-vultr/tree/main/mailhero-backup), its dedicated `/home/xiziyi/mail-hero-backup*` paths, and its 04:17 UTC timer. Follow that installer's paths and schedule consistently; the `/opt` layout above is a generic alternative. Installation and timer enablement are recorded separately from successful manual backup and restore checks in [the verification record](../../docs/verification-native.md).
-
-Manual invocation, with credentials supplied locally through the service environment:
+After synthetic tests, a supervised real collection and an isolated recovery rehearsal have passed, start only this service from the deployment repository:
 
 ```sh
-python3 /opt/mail-hero-backup/current/mailhero_backup.py collect \
-  --origin "$MAIL_HERO_ORIGIN" --output /var/lib/mail-hero-backup \
-  --public-key-file /etc/mail-hero-backup/recovery-public.asc \
-  --recipient "$BACKUP_RECIPIENT" \
-  --credential-key-envelope /etc/mail-hero-backup/credential-key.gpg
+docker compose pull mailhero-backup
+docker compose up -d --no-deps mailhero-backup
+docker compose ps mailhero-backup
 ```
+
+The scheduler runs daily at **04:17 UTC**, configurable with `BACKUP_AT_UTC=HH:MM`. On restart, it checks the local verified receipt and catches up if the latest scheduled backup was missed. Failures wait one hour before retrying, including across container restarts. A shared file lock prevents overlap with a manual run. Graceful shutdown cancels the active lease and cleans temporary plaintext; an abrupt host failure still requires checking abandoned staging directories.
+
+To request one backup or check the scheduler locally:
+
+```sh
+docker compose run --rm --no-deps mailhero-backup once
+docker compose exec -T mailhero-backup python3 -I /app/container.py health
+docker compose logs --tail=20 mailhero-backup
+```
+
+The healthcheck uses local heartbeat and successful-backup freshness; it does not repeatedly query Cloudflare. A successful upload alone is not recovery proof. Actual collection, restore and deployment facts are recorded separately in [the verification record](../../docs/verification-native.md).
 
 The maximum lease is 30 minutes. If export/encryption/upload/read-back cannot complete in that window, the run must fail; it cannot declare success after lease expiry or silently extend the consistency window. On errors it cancels the lease and aborts any incomplete multipart upload where possible. Network response bodies are not printed. The Worker independently expires abandoned leases. There is no automatic upgrade to a paid plan.
 
