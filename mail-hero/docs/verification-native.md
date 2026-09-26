@@ -134,3 +134,10 @@ HTTP 接管、容器重建存活与 Mail Hero 解析测试不能代替用户测�
 上述不等于生产Free CPU预算、大附件真实邮件、Cloudflare新空资源灾难恢复或定时备份已通过。独立备份机器Access权限仍待具体授权；通知默认仅页面展示。Chrome对状态API返回ERR_BLOCKED_BY_CLIENT，浏览器验收需解除客户端拦截后继续。
 
 首次容量迁移先通过现有已验证提交的[维护发布36266716238](https://github.com/ziyixi/mail-hero/actions/runs/36266716238)暂停旧版本写入；该运行于19:39:11 UTC成功。后续新版本部署、恢复收信及服务器镜像事实另行补录，不能由本地验证推定。
+
+## storage-v1 消费者更新与浏览器验证
+
+- Todofy兼容提交的[GitHub Actions运行36266358399](https://github.com/ziyixi/todofy/actions/runs/36266358399)成功，服务器从GHCR拉取固定digest `sha256:0892e7087bc624cb92d50a4cf92594297f4058403f41c50484dd1858e3998b5b`，OCI revision匹配`b56112ef5d1d3d0ef5500642885eb920301ef7df`。
+- 只重建Todofy主容器，启动于19:49:53.255 UTC，健康接口200；三个gRPC依赖仍保留9月5日的原启动时间。更新后上述两个测试事件仍分别恰好一条，合成事件ignored且无任务，用户测试事件complete且任务记录保留。
+- 本地真实Miniflare D1/R2/SQLite DO的桌面1365×900和手机390×844页面验收通过。设置的预览、确认和保存实际调用API/CSRF；原件过期隐藏原件下载和重解析，正文截断、HTML省略、附件未保存均可见，省略附件没有下载链接。
+- 修复手机附件名称和省略原因的单行裁切，实际截图确认说明完整、已保存附件下载图标可见、无横向溢出；TypeScript/Vite build通过。上述仅使用合成邮件，不代表生产浏览器拦截已经解除。
