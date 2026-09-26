@@ -167,3 +167,18 @@ HTTP 接管、容器重建存活与 Mail Hero 解析测试不能代替用户测�
 服务器每日 timer 尚未安装。用户已同意亲自执行需要 sudo 密码的最后安装命令；该命令只安装 Mail Hero 独立定时任务。准备启用的时间为04:17 UTC加最多10分钟随机延迟，保留7个日快照和4个周快照（重合去重，至多11份）。此时已完成真实手动备份与隔离恢复，不能把它表述成定时运行已验证。
 
 该演练是本地隔离恢复，不是恢复到新空 Cloudflare D1/R2/DO 后重新上线的灾难恢复；不据此承诺 RPO/RTO。恢复私钥仍只在本机受限目录，尚无独立离机托管证据。生产浏览器客户端拦截、Free CPU/内存真实用量和升级后的新测试信仍需分别验证；外部通知目的地未配置。
+
+## Compose 备份正式部署（2026-09-26 UTC）
+
+用户要求沿用现有 Docker Compose，自行完成全部部署。本节替代前节待用户执行 sudo/systemd 安装的计划；预检确认旧 timer 为 `not-found`，没有安装过系统定时任务。
+
+- Mail Hero 提交 `97f8886241b5a85d256099b293ada8703bb779c2` 将收集器、Python/GPG及每日调度封装为非root镜像，删除旧systemd示例。服务器部署仓库提交 `97d05665d40da174281c8da03caecd3b9298e6fc` 增加唯一 `mailhero-backup` Compose服务并删除旧主机安装器。应用继续运行在Cloudflare，备份范围不变。
+- 非root、断网、只读镜像环境中的29项合成测试全部通过，包括真实GPG加密恢复、失败后持久退避、重启补跑、时钟回拨、进程互斥及取消租约/临时明文清理。7项Compose部署合同检查无skip通过；部署仓库CI也成功。
+- [备份镜像发布36271060129](https://github.com/ziyixi/mail-hero/actions/runs/36271060129)、[原生检查与部署36271060119](https://github.com/ziyixi/mail-hero/actions/runs/36271060119)及[部署仓库检查36271267475](https://github.com/ziyixi/self-host-on-vultr/actions/runs/36271267475)均成功。GHCR package为public，匿名读取manifest成功，无需服务器新增GitHub登录凭据。
+- 服务器实际拉取并运行 `ghcr.io/ziyixi/mail-hero-backup@sha256:0206ec216c9e16bdf97b2f47c60915858d3696ce32425c76c9e55a06ce4f7f3a`，运行中的OCI revision与上述Mail Hero提交一致。没有在服务器手工构建镜像，没有sudo操作；容器UID/GID为1000，根文件系统只读、无特权模式，不挂载Docker socket，只挂载独立配置和备份状态目录。
+- 正式镜像首次 `once` 运行于20:58:39.721 UTC完成：快照 `090dfee3-5933-4f6f-8b02-e0d527e648e7`，加密归档21,547 bytes。上传、完整读回SHA和签名finish通过。随后独立恢复设备再次读回并核验SHA、获取最新删除清单，在断网新空目录实际恢复2封邮件、5个对象、1条交付事件；数据库完整性、对象引用/hash、冻结事件及应用密钥解密比对全部通过。恢复副本保持暂停，未触发消费者业务。
+- 20:59 UTC启动每日服务，随后仅重启该容器验证持久状态。21:00 UTC复查为 `running / healthy`，本地health退出0，成功回执未被替换或重复触发，下次调度 `2026-09-27T04:17:00Z`。正常每日04:17 UTC运行，失败约一小时后重试，健康检查只读本地状态。
+- 16个既有运行容器的ID、镜像和启动时间与部署前全部一致；新服务之外的13个Compose service及4个network配置保持原值。没有使用 `--remove-orphans`、全栈down或update脚本。备份状态目录没有遗留 `.snapshot-*` 明文目录；本机演练临时解密副本完成核验后清理，加密归档与回执保留。
+- 生产备份状态为 `remote_verified`、`paused=false`、无未完成上传或待同步回执；D1 `last_backup_at`等于上述成功时间。Worker维护、强制暂停与应用发送暂停均关闭，必要secret binding保留。当前Worker版本 `9c477d4e-dc59-441e-b0cc-523e63b3982b`。
+
+已验证正式镜像真实备份、隔离恢复、常驻服务健康及重启持久状态；每日04:17 UTC钟点触发尚未到来，不把配置好日程描述为已观察到次日自动运行。仍未演练新空Cloudflare资源的完整上线恢复，私钥的独立离机托管及外部告警目的地保持前述边界。
