@@ -33,9 +33,11 @@ type mailAddress struct {
 }
 
 type mailAttachment struct {
-	Filename    string `json:"filename"`
-	ContentType string `json:"content_type"`
-	Size        int64  `json:"size"`
+	Filename      string `json:"filename"`
+	ContentType   string `json:"content_type"`
+	Size          int64  `json:"size"`
+	StorageStatus string `json:"storage_status,omitempty"`
+	OmittedReason string `json:"omitted_reason,omitempty"`
 }
 
 type mailReceivedEvent struct {
@@ -43,14 +45,21 @@ type mailReceivedEvent struct {
 	EventID    string    `json:"event_id"`
 	ReceivedAt time.Time `json:"received_at"`
 	Message    struct {
-		ID           string           `json:"id"`
-		From         []mailAddress    `json:"from"`
-		To           []mailAddress    `json:"to"`
-		Subject      string           `json:"subject"`
-		SentAt       *time.Time       `json:"sent_at"`
-		RFCMessageID *string          `json:"rfc_message_id"`
-		Text         string           `json:"text"`
-		Attachments  []mailAttachment `json:"attachments"`
+		ID                      string           `json:"id"`
+		From                    []mailAddress    `json:"from"`
+		To                      []mailAddress    `json:"to"`
+		Subject                 string           `json:"subject"`
+		SentAt                  *time.Time       `json:"sent_at"`
+		RFCMessageID            *string          `json:"rfc_message_id"`
+		Text                    string           `json:"text"`
+		Attachments             []mailAttachment `json:"attachments"`
+		TextTruncated           bool             `json:"text_truncated,omitempty"`
+		OriginalTextBytes       *int64           `json:"original_text_bytes,omitempty"`
+		HTMLOmitted             bool             `json:"html_omitted,omitempty"`
+		NeedsReview             bool             `json:"needs_review,omitempty"`
+		AttachmentsOmittedCount int              `json:"attachments_omitted_count,omitempty"`
+		ContentPolicyVersion    string           `json:"content_policy_version,omitempty"`
+		Warnings                []string         `json:"warnings,omitempty"`
 	} `json:"message"`
 }
 
@@ -87,12 +96,28 @@ func parseMailReceivedEvent(raw []byte) (mailReceivedEvent, error) {
 		len(event.Message.From) > 50 || len(event.Message.To) > 50 || len(event.Message.Attachments) > 100 {
 		return event, errors.New("unsupported mail.received.v1 event")
 	}
+	return event, validateMailContentPolicy(event)
+}
+
+func validateMailContentPolicy(event mailReceivedEvent) error {
+	// New policy metadata is optional for older frozen events, but a sender
+	// cannot label an incomplete body as complete through inconsistent sizes.
+	original := event.Message.OriginalTextBytes
+	if event.Message.AttachmentsOmittedCount < 0 ||
+		(original != nil && (*original < int64(len(event.Message.Text)) ||
+			(!event.Message.TextTruncated && *original != int64(len(event.Message.Text))))) ||
+		(event.Message.TextTruncated && (original == nil || *original <= int64(len(event.Message.Text)))) {
+		return errors.New("invalid content policy metadata")
+	}
 	for _, attachment := range event.Message.Attachments {
 		if attachment.Size < 0 {
-			return event, errors.New("invalid attachment size")
+			return errors.New("invalid attachment size")
+		}
+		if attachment.StorageStatus != "" && attachment.StorageStatus != "stored" && attachment.StorageStatus != "omitted" {
+			return errors.New("invalid attachment storage status")
 		}
 	}
-	return event, nil
+	return nil
 }
 
 type mailInbox struct {

@@ -108,10 +108,25 @@ func mailEventLabels(event mailReceivedEvent) (from, to, date string) {
 }
 
 func mailSummaryInput(event mailReceivedEvent) string {
+	text := event.Message.Subject
 	if strings.TrimSpace(event.Message.Text) != "" {
-		return event.Message.Text
+		text = event.Message.Text
 	}
-	return event.Message.Subject
+	if event.Message.TextTruncated {
+		return mailContentNotice(event) + "\n\n" + text
+	}
+	return text
+}
+
+func mailContentNotice(event mailReceivedEvent) string {
+	if !event.Message.TextTruncated {
+		return ""
+	}
+	if event.Message.OriginalTextBytes == nil {
+		return "正文不完整：仅收到邮件正文的前部，摘要可能遗漏尾部内容。"
+	}
+	return fmt.Sprintf("正文不完整：原文 %d bytes，仅收到前 %d bytes，摘要可能遗漏尾部内容。",
+		*event.Message.OriginalTextBytes, len(event.Message.Text))
 }
 
 func renderMailTodoBody(event mailReceivedEvent, summary string) (string, error) {
@@ -142,6 +157,15 @@ func (i *mailInbox) summarize(ctx context.Context, row *mailInboxRow, clients Cl
 	if err = json.Unmarshal(row.payload, &event); err != nil {
 		return i.postpone(ctx, row, "pending", "invalid_saved_event")
 	}
+	// Durable acceptance is separate from business success. Do not turn an
+	// unreadable HTML body or opaque MIME content into an invented empty task.
+	if event.Message.NeedsReview || (event.Message.HTMLOmitted && strings.TrimSpace(event.Message.Text) == "") {
+		_, err = i.db.ExecContext(ctx, `UPDATE mail_inbox_events SET state='failed_summary',
+			last_error_code='mail_needs_review',next_attempt_at=0,updated_at=?
+			WHERE source_id=? AND event_id=? AND state='summarizing'`,
+			time.Now().Unix(), row.sourceID, row.eventID)
+		return err
+	}
 	if strings.HasPrefix(event.Message.Subject, utils.SystemAutomaticallyEmailPrefix) {
 		_, err = i.db.ExecContext(
 			ctx,
@@ -168,6 +192,11 @@ func (i *mailInbox) summarize(ctx context.Context, row *mailInboxRow, clients Cl
 		return i.postpone(ctx, row, "pending", "summary_failed")
 	}
 	summary := mailSummaryTag.ReplaceAllString(response.Summary, "<removed tag>")
+	if event.Message.TextTruncated {
+		// Persist the notice independently of the model's output so both the
+		// summary cache and Todoist task disclose the incomplete source.
+		summary = mailContentNotice(event) + "\n\n" + summary
+	}
 	body, err := renderMailTodoBody(event, summary)
 	if err != nil {
 		return i.postpone(ctx, row, "pending", "summary_render_failed")
@@ -414,7 +443,8 @@ func (i *mailInbox) handleReconcile(c *gin.Context) {
 		result, err = i.db.ExecContext(
 			c.Request.Context(),
 			`UPDATE mail_inbox_events SET state='pending',attempt_count=0,
-			next_attempt_at=0,last_error_code='',updated_at=? WHERE source_id=? AND event_id=? AND state='failed_summary'`,
+			next_attempt_at=0,last_error_code='',updated_at=? WHERE source_id=? AND event_id=? AND state='failed_summary'
+			AND last_error_code<>'mail_needs_review'`,
 			now,
 			i.sourceID,
 			eventID,
