@@ -141,3 +141,13 @@ HTTP 接管、容器重建存活与 Mail Hero 解析测试不能代替用户测�
 - 只重建Todofy主容器，启动于19:49:53.255 UTC，健康接口200；三个gRPC依赖仍保留9月5日的原启动时间。更新后上述两个测试事件仍分别恰好一条，合成事件ignored且无任务，用户测试事件complete且任务记录保留。
 - 本地真实Miniflare D1/R2/SQLite DO的桌面1365×900和手机390×844页面验收通过。设置的预览、确认和保存实际调用API/CSRF；原件过期隐藏原件下载和重解析，正文截断、HTML省略、附件未保存均可见，省略附件没有下载链接。
 - 修复手机附件名称和省略原因的单行裁切，实际截图确认说明完整、已保存附件下载图标可见、无横向溢出；TypeScript/Vite build通过。上述仅使用合成邮件，不代表生产浏览器拦截已经解除。
+
+## storage-v1 生产发布结果
+
+提交`bc63a115fc66b5faa1c1903d3f9f858607cde7c2`的[正式发布36267674090](https://github.com/ziyixi/mail-hero/actions/runs/36267674090)于19:56:04 UTC成功。生产已应用`0006_lifecycle_alerts.sql`，配置核对为原件7天、内容30天、账本至少180天、5GiB容量及策略版本1；历史邮件不自动纳入新期限。新增`BACKUP_STORE`指向私有`mail-hero-backups`，公开桶地址关闭，未完成分片默认7天自动终止。
+
+[退出维护发布36267817083](https://github.com/ziyixi/mail-hero/actions/runs/36267817083)于19:58:36 UTC成功，Worker版本`a6882051-aeb9-4a66-a552-960bda60f448`。随后账户API实查`MAINTENANCE_MODE=false`、`FORCE_SEND_PAUSED=false`；三个必要secret binding均保留，workers.dev及预览URL仍禁用。无认证访问owner overview和backup status均由Access返回302，未放开匿名管理入口。实际维护窗口约19:39–19:58 UTC；期间接收暂停，不假设来源必然重投。
+
+服务器部署仓库现为`785db9dc91faf7fb6b4cc1ed9cdd8379b4d64aa7`，仅拉取了备份安装器源文件，`mailhero-backup.timer`仍为not-found；没有安装或启用定时任务。安装器会先停止调度并拒绝与运行中的备份并发升级，6项离线部署测试通过。
+
+待办边界：专用Access机器身份的新增权限仍待用户确认；生产实际备份、独立恢复及定时运行尚未完成。恢复私钥与应用密钥的加密副本已在受限本机目录生成，但尚无独立离机托管证据。生产浏览器状态API仍受客户端拦截，DO容量基线初始化状态尚未通过认证overview核实；代码会在首次需要容量的调用中有界初始化，完成前拒绝新写入。Free CPU/内存真实用量、此次升级后的新测试信以及新空Cloudflare资源灾难恢复均不由CI通过推定。通知当前仅UI，外部通知目的地未配置。

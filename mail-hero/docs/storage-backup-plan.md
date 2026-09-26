@@ -2,7 +2,9 @@
 
 2026-09-26。用户已确认实施。下文保留设计依据；当前实现增加了storage-v1内容策略、分阶段清理、DO容量预留、持久告警和加密备份工具。生产启用与实际验收以docs/verification-native.md本次记录为准；历史邮件不自动纳入新期限。
 
-## 已确认的现状
+## 实施前的现状快照
+
+以下保留规划时的基线；已部署变化与未完成的生产验收以[验收记录](verification-native.md)末尾为准。
 
 - 真实测试信 `Mail Hero Todofy test 20260926` 于 18:31:20.980 UTC 收到，6,957 bytes，解析 ready；18:31:25.195 第一次 webhook 返回 HTTP 204，投递成功。Todofy 18:31:29 进入 complete，返回任务 `6hf2W46X3Gc8hjV7`；通过 Todoist 的精确任务查询确认任务存在且主题匹配。
 - 当前 Mail Hero 内容逻辑上限是 **5 GiB**，不是 Cloudflare 的计费硬上限；当前未启用自动保留清理。
