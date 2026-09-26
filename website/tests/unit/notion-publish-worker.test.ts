@@ -112,7 +112,7 @@ describe("Notion publish Worker", () => {
     const [url, options] = upstream.mock.calls[1]!;
     expect(url).toBe(`${api}/dispatches`);
     expect(options?.method).toBe("POST");
-    expect(options?.redirect).toBe("error");
+    expect(options?.redirect).toBe("manual");
     expect(options?.signal).toBeInstanceOf(AbortSignal);
     expect(JSON.parse(String(options?.body))).toEqual({
       ref: "main",
@@ -190,6 +190,20 @@ describe("Notion publish Worker", () => {
     vi.stubGlobal("fetch", upstream);
     expect((await worker.fetch(request(), env)).status).toBe(502);
     expect(upstream).toHaveBeenCalledTimes(1);
+  });
+
+  it("rejects upstream redirects without forwarding the token to another host", async () => {
+    const upstream = vi
+      .fn<typeof fetch>()
+      .mockResolvedValue(
+        new Response(null, { status: 302, headers: { Location: "https://attacker.example" } }),
+      );
+    vi.stubGlobal("fetch", upstream);
+    const response = await worker.fetch(request(), env);
+    expect(response.status).toBe(502);
+    expect((await response.json()).githubStatus).toBe(302);
+    expect(upstream).toHaveBeenCalledTimes(1);
+    expect(upstream.mock.calls[0]?.[1]?.redirect).toBe("manual");
   });
 
   it("reports a rejected dispatch without echoing GitHub errors or retrying", async () => {

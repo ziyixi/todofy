@@ -19,9 +19,14 @@ function json(body, status = 200, headers = {}) {
   });
 }
 
-function error(code, status, includeWorkflow = false) {
+function error(code, status, includeWorkflow = false, githubStatus) {
   return json(
-    { status: "error", code, ...(includeWorkflow ? { workflowUrl: WORKFLOW_URL } : {}) },
+    {
+      status: "error",
+      code,
+      ...(includeWorkflow ? { workflowUrl: WORKFLOW_URL } : {}),
+      ...(githubStatus ? { githubStatus } : {}),
+    },
     status,
   );
 }
@@ -93,9 +98,11 @@ const worker = {
       // existing GitHub workflow's concurrency group serializes actual releases.
       const existing = await fetch(
         `${WORKFLOW_API}/runs?branch=main&event=workflow_dispatch&per_page=30`,
-        { headers, signal, redirect: "error" },
+        // workerd supports manual/follow, not Node's redirect: "error".
+        // Manual plus the status check prevents forwarding the token on 3xx.
+        { headers, signal, redirect: "manual" },
       );
-      if (!existing.ok) return error("github_unavailable", 502, true);
+      if (!existing.ok) return error("github_unavailable", 502, true, existing.status);
       const listing = await existing.json();
       if (!listing || !Array.isArray(listing.workflow_runs)) {
         return error("github_unavailable", 502, true);
@@ -116,7 +123,7 @@ const worker = {
         method: "POST",
         headers: { ...headers, "Content-Type": "application/json" },
         signal,
-        redirect: "error",
+        redirect: "manual",
         body: JSON.stringify({
           ref: "main",
           inputs: {
@@ -128,7 +135,7 @@ const worker = {
         }),
       });
       if (dispatched.status !== 200 && dispatched.status !== 204) {
-        return error("github_dispatch_failed", 502, true);
+        return error("github_dispatch_failed", 502, true, dispatched.status);
       }
       // A successful dispatch is only acceptance, not deployment completion.
       // Older GitHub API versions return 204; do not turn an accepted request
