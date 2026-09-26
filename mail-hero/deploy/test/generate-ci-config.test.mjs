@@ -32,3 +32,16 @@ test('missing pause state, invalid resource identity and malformed alias fail be
     ['MAIL_HERO_ACCESS_OWNER_ALIASES', 'owner@example.org\ninjected-value'],
   ]) assert.throws(() => generateConfig({ ...environment(), [name]: value }), new RegExp(name))
 })
+
+test('optional backup and alert configuration preserves Free plan and keeps alert credentials out of vars', () => {
+  const input={...environment(),MAIL_HERO_BACKUP_BUCKET_NAME:'mail-hero-backup',MAIL_HERO_ALERT_WEBHOOK_URL:'https://alerts.example.org/hook',MAIL_HERO_ALERT_WEBHOOK_ALLOWED_HOSTS:'alerts.example.org',ALERT_WEBHOOK_TOKEN:'must-not-render'}
+  const config=generateConfig(input)
+  assert.deepEqual(config.r2_buckets[1],{binding:'BACKUP_STORE',bucket_name:'mail-hero-backup'})
+  assert.equal(config.vars.ALERT_WEBHOOK_URL,input.MAIL_HERO_ALERT_WEBHOOK_URL)
+  assert.equal(config.vars.ALERT_WEBHOOK_ALLOWED_HOSTS,'alerts.example.org')
+  assert.equal('ALERT_WEBHOOK_TOKEN' in config.vars,false)
+  assert.equal('limits' in config,false)
+  for(const url of ['http://alerts.example.org/hook','https://other.example.org/hook','https://user:pass@alerts.example.org/hook','https://alerts.example.org:8443/hook','https://alerts.example.org/hook#fragment']) {
+    assert.throws(()=>generateConfig({...input,MAIL_HERO_ALERT_WEBHOOK_URL:url}),/MAIL_HERO_ALERT_WEBHOOK_URL/)
+  }
+})

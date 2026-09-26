@@ -38,7 +38,9 @@ jobs:
           npm ci --prefix cloudflare
           npm ci --prefix web
       - name: Validate deployment configuration
-        run: node --test deploy/test/*.test.mjs
+        run: |
+          node --test deploy/test/*.test.mjs
+          python3 -m unittest discover -s deploy/backup -p 'test_*.py'
       - name: Check and test the Worker, including workerd bindings
         working-directory: cloudflare
         run: |
@@ -85,12 +87,15 @@ jobs:
           MAIL_HERO_D1_DATABASE_ID: ${{ vars.MAIL_HERO_D1_DATABASE_ID }}
           MAIL_HERO_D1_DATABASE_NAME: ${{ vars.MAIL_HERO_D1_DATABASE_NAME || 'mail-hero' }}
           MAIL_HERO_R2_BUCKET_NAME: ${{ vars.MAIL_HERO_R2_BUCKET_NAME || 'mail-hero-store' }}
+          MAIL_HERO_BACKUP_BUCKET_NAME: ${{ vars.MAIL_HERO_BACKUP_BUCKET_NAME }}
           MAIL_HERO_RECEIVE_ADDRESS: ${{ vars.MAIL_HERO_RECEIVE_ADDRESS }}
           MAIL_HERO_ACCESS_ISSUER: ${{ vars.MAIL_HERO_ACCESS_ISSUER }}
           MAIL_HERO_ACCESS_AUDIENCE: ${{ vars.MAIL_HERO_ACCESS_AUDIENCE }}
           MAIL_HERO_ACCESS_OWNER: ${{ vars.MAIL_HERO_ACCESS_OWNER }}
           MAIL_HERO_ACCESS_OWNER_ALIASES: ${{ secrets.MAIL_HERO_ACCESS_OWNER_ALIASES }}
           MAIL_HERO_WEBHOOK_ALLOWED_HOSTS: ${{ vars.MAIL_HERO_WEBHOOK_ALLOWED_HOSTS }}
+          MAIL_HERO_ALERT_WEBHOOK_URL: ${{ vars.MAIL_HERO_ALERT_WEBHOOK_URL }}
+          MAIL_HERO_ALERT_WEBHOOK_ALLOWED_HOSTS: ${{ vars.MAIL_HERO_ALERT_WEBHOOK_ALLOWED_HOSTS }}
           MAIL_HERO_PUBLIC_HOST: ${{ vars.MAIL_HERO_PUBLIC_HOST }}
           MAIL_HERO_FORCE_SEND_PAUSED: ${{ vars.MAIL_HERO_FORCE_SEND_PAUSED }}
           MAIL_HERO_MAINTENANCE_MODE: ${{ vars.MAIL_HERO_MAINTENANCE_MODE }}

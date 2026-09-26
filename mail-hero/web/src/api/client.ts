@@ -75,13 +75,14 @@ export function apiDownload(path: string): string { return `${prefix}${path}` }
 
 export const api = {
   overview: async (): Promise<Overview> => {
-    const raw = await request<{ receive_address?: string; counts?: { messages?: number; pending?: number; failed?: number; delivered?: number }; storage?: { logical_bytes?: number; limit_bytes?: number }; backup?: { last_at?: string | null }; warnings?: string[] }>('/overview')
-    return { receive_address: raw.receive_address, message_count: raw.counts?.messages, pending_count: raw.counts?.pending, failed_count: raw.counts?.failed, delivered_count: raw.counts?.delivered, storage_bytes: raw.storage?.logical_bytes, capacity_bytes: raw.storage?.limit_bytes, last_backup_at: raw.backup?.last_at, warnings: raw.warnings }
+    const raw = await request<{ receive_address?: string; counts?: { messages?: number; pending?: number; failed?: number; delivered?: number }; storage?: { logical_bytes?: number; limit_bytes?: number; pending_physical_delete_bytes?: number; capacity_used_bytes?: number | null; capacity_reserved_bytes?: number | null; bucket_actual_bytes?: number | null; account_r2_bytes?: number | null }; backup?: { last_at?: string | null }; alerts?: Overview['alerts']; warnings?: string[] }>('/overview')
+    return { receive_address: raw.receive_address, message_count: raw.counts?.messages, pending_count: raw.counts?.pending, failed_count: raw.counts?.failed, delivered_count: raw.counts?.delivered, storage_bytes: raw.storage?.logical_bytes, capacity_bytes: raw.storage?.limit_bytes, last_backup_at: raw.backup?.last_at, warnings: raw.warnings,
+      pending_physical_delete_bytes: raw.storage?.pending_physical_delete_bytes, capacity_used_bytes: raw.storage?.capacity_used_bytes, capacity_reserved_bytes: raw.storage?.capacity_reserved_bytes, bucket_actual_bytes: raw.storage?.bucket_actual_bytes, account_r2_bytes: raw.storage?.account_r2_bytes, alerts: raw.alerts }
   },
   setup: () => request<SetupStatus>('/setup/status'),
   settings: () => request<Settings>('/settings'),
-  updateSettings: (body: Partial<Settings> & { version: number; retention_confirmation?: string }) => request<Settings>('/settings', { method: 'PATCH', body }),
-  retentionPreview: (days: number) => request<RetentionPreview>(`/settings/retention-preview${query({ days })}`),
+  updateSettings: (body: Partial<Settings> & { version: number; retention_confirmation?: string; apply_existing?: boolean }) => request<Settings>('/settings', { method: 'PATCH', body }),
+  retentionPreview: (policy: number | { raw_retention_days: number | null; content_retention_days: number | null; ledger_retention_days: number; apply_existing: boolean }) => request<RetentionPreview>(`/settings/retention-preview${query(typeof policy === 'number' ? { days: policy } : { ...policy, raw_retention_days: policy.raw_retention_days ?? 'none', content_retention_days: policy.content_retention_days ?? 'none' })}`),
   messages: (params: Record<string, string | number | boolean | null | undefined>) => request<Page<MessageSummary>>(`/messages${query(params)}`),
   message: (id: string) => request<{ message: MessageDetail; deliveries: Delivery[] }>(`/messages/${encodeURIComponent(id)}`),
   markRead: (id: string, version: number, read: boolean) => request<{ read_at: string | null; version: number }>(`/messages/${encodeURIComponent(id)}`, { method: 'PATCH', body: { read, version } }),

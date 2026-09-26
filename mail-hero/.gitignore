@@ -4,6 +4,9 @@ deploy/local.env
 deploy/secrets/
 deploy/certs/
 deploy/backups/
+deploy/backup/*.env
+__pycache__/
+*.py[cod]
 .wrangler/
 wrangler*.production*
 wrangler*.local.*

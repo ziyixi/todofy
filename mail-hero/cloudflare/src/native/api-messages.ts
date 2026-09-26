@@ -71,10 +71,13 @@ export async function messageRoute(request: Request, env: Env, owner: string, id
       envelope_from: value.envelope_from, envelope_to: value.envelope_recipient, parse_state: value.parse_state,
       parse_error: value.parse_error || value.policy_error, delivery_state: deliveries[0]?.effective_state || 'unarranged',
       received_at: value.received_at, last_received_at: value.last_received_at, arrival_count: value.arrival_count,
-      size_bytes: value.size_bytes, content_deleted_at: value.content_deleted_at, read_at: value.read_at,
+      size_bytes: value.size_bytes, raw_expired_at: value.raw_expired_at, content_deleted_at: value.content_deleted_at, read_at: value.read_at,
       has_attachment: !!value.has_attachment, raw_sha256: value.raw_sha256, action_snapshot: value.receive_mode,
       search_index_truncated: !!value.search_index_truncated,
       needs_review: !!parsed.needs_review, warnings: parsed.warnings || [],
+      text_truncated: !!parsed.text_truncated, original_text_bytes: parsed.original_text_bytes,
+      html_omitted: !!parsed.html_omitted, attachments_omitted_count: parsed.attachments_omitted_count || 0,
+      content_policy_version: parsed.content_policy_version,
     }, deliveries })
   }
   if (method === 'PATCH' && !sub) {
@@ -86,13 +89,15 @@ export async function messageRoute(request: Request, env: Env, owner: string, id
     return json({ read_at: readAt, version: expected + 1 })
   }
   if (method === 'GET' && (sub === 'raw' || sub === 'attachments')) {
-    const message = await required(env, `SELECT raw_key,parsed_key,content_deleted_at FROM messages WHERE id=? AND origin='cloudflare'`, id)
+    const message = await required(env, `SELECT raw_key,parsed_key,raw_expired_at,content_deleted_at FROM messages WHERE id=? AND origin='cloudflare'`, id)
     if (message.content_deleted_at) gone()
+    if (sub === 'raw' && message.raw_expired_at) throw new HttpError(410, 'raw_expired', '原件已按保留策略清理；已提取的正文仍可查看')
     let key = message.raw_key, contentType = 'message/rfc822', filename = 'mail-hero-message.eml'
     if (sub === 'attachments') {
       const parsed = await readParsed(env, message)
       const attachment = parsed.attachments?.find(item => item.part_id === part)
       if (!attachment) missing()
+      if (attachment!.storage_status === 'omitted' || !attachment!.r2_key) throw new HttpError(410, 'attachment_omitted', '该附件未保存独立副本')
       key = attachment!.r2_key; contentType = attachment!.content_type; filename = attachment!.filename || 'attachment'
     }
     if (!key) gone()
@@ -128,7 +133,7 @@ export async function messageRoute(request: Request, env: Env, owner: string, id
     const stamp = now()
     const result = await env.DB.batch([
       env.DB.prepare(`UPDATE messages SET parse_state='pending',parse_error=NULL,claim_token=NULL,lease_until=NULL,version=version+1
-        WHERE id=? AND origin='cloudflare' AND raw_key IS NOT NULL AND content_deleted_at IS NULL AND parse_state IN('ready','failed')
+        WHERE id=? AND origin='cloudflare' AND raw_key IS NOT NULL AND raw_expired_at IS NULL AND content_deleted_at IS NULL AND parse_state IN('ready','failed')
         AND NOT EXISTS(SELECT 1 FROM deliveries WHERE message_id=?) AND EXISTS(SELECT 1 FROM ui_actions WHERE id=? AND result_ref IS NULL)`).bind(id, id, entry.id),
       env.DB.prepare('UPDATE ui_actions SET result_ref=?,http_status=202 WHERE id=? AND changes()>0').bind(id, entry.id),
     ])

@@ -58,7 +58,9 @@ function environment() {
     CREDENTIAL_KEY: '12'.repeat(32), DEV_AUTH_BYPASS: 'true', WEBHOOK_ALLOWED_HOSTS: 'consumer.example.org,second.example.org',
     ACCESS_ISSUER: 'https://test.cloudflareaccess.com', ACCESS_AUDIENCE: 'test-audience', ACCESS_OWNER: 'owner@example.org',
     jobs, COORDINATOR: { idFromName(name) { assert.equal(name, 'inbox-v1'); return name }, get() { return { async fetch(url, init) {
-      jobs.push({ url: String(url), body: init?.body ? JSON.parse(init.body) : null }); return new Response(null, { status: 204 })
+      if (new URL(url).pathname === '/mutation/begin') return Response.json({id: crypto.randomUUID()})
+      if (new URL(url).pathname === '/enqueue') jobs.push({ url: String(url), body: init?.body ? JSON.parse(init.body) : null })
+      return new Response(null, { status: 204 })
     } } } },
   }
 }

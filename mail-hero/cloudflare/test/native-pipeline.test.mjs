@@ -22,7 +22,7 @@ function env(options={}) {
   const objects=new Map(),events=[],promises=[];
   const value={RECEIVE_ADDRESS:'inbox@mail.example.org',
     DB:{prepare(){return {first:async()=>{if(options.dbFail)throw new Error('down');return {mode:'forward',revision_id:'revision',logical_bytes:0,logical_limit_bytes:MAX_RAW_BYTES*2};}};}},
-    COORDINATOR:{idFromName:name=>name,get:()=>({fetch:async(url,request)=>{events.push(['schedule',JSON.parse(request.body)]);return new Response(null,{status:204});}})},
+    COORDINATOR:{idFromName:name=>name,get:()=>({fetch:async(url,request)=>{events.push(['schedule',JSON.parse(request.body)]);return url.endsWith('/reserve-ingest') ? Response.json({ingest_seq:1,mode:options.dbFail?'archive':'forward',revision:options.dbFail?'':'revision',policy_error:options.dbFail?'policy_unavailable':''}) : new Response(null,{status:204});}})},
     MAIL_STORE:{put:async(key,input,metadata)=>{events.push(['put',key]);if(options.putFail)throw new Error('r2 down');const body=typeof input==='string'?new TextEncoder().encode(input):input instanceof ReadableStream?new Uint8Array(await new Response(input).arrayBuffer()):new Uint8Array(input);objects.set(key,{body,...metadata});return {key};}},
   };
   return {value,objects,events,promises,ctx:{waitUntil(p){promises.push(p);}}};
@@ -81,13 +81,14 @@ function coordinatorState() {
 }
 const key1='raw/11111111-1111-4111-8111-111111111111.eml';
 const key2='raw/22222222-2222-4222-8222-222222222222.eml';
+function capacityEnv(extra={}) {return {DB:{prepare(){return {first:async()=>({logical_bytes:0,logical_limit_bytes:5*1024*1024*1024,mode:'archive'})};}},MAIL_STORE:{list:async()=>({objects:[],truncated:false})},...extra};}
 function internal(path,value) {return new Request('https://coordinator'+path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(value)});}
 test('durable ingress reservation is atomic, idempotent across reconstruction, and caps count/bytes',async()=>{
-  const s=coordinatorState(),e={INGEST_DAILY_MESSAGE_LIMIT:'1',INGEST_DAILY_BYTE_LIMIT:'100'};
+  const s=coordinatorState(),e=capacityEnv({INGEST_DAILY_MESSAGE_LIMIT:'1',INGEST_DAILY_BYTE_LIMIT:'100'});
   let coordinator=new MailCoordinator(s.state,e);
-  assert.equal((await coordinator.fetch(internal('/reserve-ingest',{key:key1,size:80}))).status,204);
+  assert.equal((await coordinator.fetch(internal('/reserve-ingest',{key:key1,size:80}))).status,200);
   coordinator=new MailCoordinator(s.state,e);
-  assert.equal((await coordinator.fetch(internal('/reserve-ingest',{key:key1,size:80}))).status,204);
+  assert.equal((await coordinator.fetch(internal('/reserve-ingest',{key:key1,size:80}))).status,200);
   assert.equal((await coordinator.fetch(internal('/reserve-ingest',{key:key1,size:81}))).status,429);
   assert.equal((await coordinator.fetch(internal('/reserve-ingest',{key:key2,size:1}))).status,429);
   assert.equal(s.database.prepare('SELECT count(*) n FROM jobs').get().n,1);
@@ -99,6 +100,7 @@ test('an alarm preserves a newer enqueue while an older job awaits D1',async()=>
   const waiting=new Promise(resolve=>{release=resolve;}),entered=new Promise(resolve=>{started=resolve;});
   const e={DB:{prepare(){return {bind(){return this;},async first(){started();await waiting;return null;}};}},MAIL_STORE:{get:async()=>null}};
   const coordinator=new MailCoordinator(s.state,e);
+  s.database.prepare('UPDATE capacity_control SET initialized=1').run();
   await coordinator.fetch(internal('/enqueue',{type:'parse',key:key1}));
   const running=coordinator.alarm();await entered;
   await coordinator.fetch(internal('/enqueue',{type:'parse',key:key1}));release();await running;
@@ -106,25 +108,27 @@ test('an alarm preserves a newer enqueue while an older job awaits D1',async()=>
   assert.ok(job.due<Date.now()+1000,'new immediate intent must not be postponed by prior result');s.database.close();
 });
 test('three interrupted parse executions stop automatic retry and retain the raw',async()=>{
-  const s=coordinatorState(),updates=[];const messageID=key1.slice(4,-4);
-  const e={DB:{prepare(sql){return {bind(...values){this.values=values;return this;},async first(){return sql.includes('ingest_receipts')?{message_id:messageID}:{id:messageID,parse_state:'parsing',content_deleted_at:null};},async run(){updates.push([sql,this.values]);return {meta:{changes:1}};}};}},MAIL_STORE:{delete(){assert.fail('interrupted parse must keep raw');}}};
+  const s=coordinatorState(),updates=[],capacityCalls=[];const messageID=key1.slice(4,-4);
+  const e={DB:{prepare(sql){return {bind(...values){this.values=values;return this;},async first(){return sql.includes('ingest_receipts')?{message_id:messageID}:{id:messageID,parse_state:'parsing',content_deleted_at:null,raw_key:key1,content_bytes:123};},async run(){updates.push([sql,this.values]);return {meta:{changes:1}};}};}},MAIL_STORE:{delete(){assert.fail('interrupted parse must keep raw');}},COORDINATOR:{idFromName:name=>name,get:()=>({fetch:async(url,request)=>{capacityCalls.push([url,JSON.parse(request.body)]);return new Response(null,{status:204});}})}};
   let coordinator=new MailCoordinator(s.state,e);
+  s.database.prepare('UPDATE capacity_control SET initialized=1').run();
   await coordinator.fetch(internal('/enqueue',{type:'parse',key:key1}));
   s.database.prepare('UPDATE jobs SET run_started=?,crashes=2').run(Date.now()-60000);
   coordinator=new MailCoordinator(s.state,e);await coordinator.alarm();
   const job=s.database.prepare('SELECT * FROM jobs').get();assert.equal(job.failed,1);assert.equal(job.error,'processing_interrupted_limit');
+  assert.deepEqual(capacityCalls,[['https://coordinator/capacity/settle',{key:key1,bytes:123,legacy_bytes:123}]]);
   assert.match(updates[0][0],/parse_state='failed'/);assert.match(updates[0][0],/processing_interrupted_limit/);
   await coordinator.fetch(internal('/enqueue',{type:'parse',key:key1}));
   assert.equal(s.database.prepare('SELECT crashes FROM jobs').get().crashes,0);s.database.close();
 });
 
 test('byte quota also rejects before R2 upload and accepts no partial reservation',async()=>{
-  const s=coordinatorState(),coordinator=new MailCoordinator(s.state,{INGEST_DAILY_MESSAGE_LIMIT:'3',INGEST_DAILY_BYTE_LIMIT:'100'});
-  assert.equal((await coordinator.fetch(internal('/reserve-ingest',{key:key1,size:80}))).status,204);
+  const s=coordinatorState(),coordinator=new MailCoordinator(s.state,capacityEnv({INGEST_DAILY_MESSAGE_LIMIT:'3',INGEST_DAILY_BYTE_LIMIT:'100'}));
+  assert.equal((await coordinator.fetch(internal('/reserve-ingest',{key:key1,size:80}))).status,200);
   assert.equal((await coordinator.fetch(internal('/reserve-ingest',{key:key2,size:21}))).status,429);
   assert.equal(s.database.prepare('SELECT count(*) n FROM ingress_reservations').get().n,1);
   const e=env();e.value.COORDINATOR.get=()=>({fetch:async()=>new Response(null,{status:429})});
-  await assert.rejects(emailHandler(message(),e.value,e.ctx),/daily_ingest_capacity/);assert.equal(e.objects.size,0);
+  await assert.rejects(emailHandler(message(),e.value,e.ctx),/logical_or_daily_capacity/);assert.equal(e.objects.size,0);
   assert.equal(s.database.prepare('SELECT count(*) n FROM jobs').get().n,1);s.database.close();
 });
 test('very large Retry-After values become a finite manual pause instead of overflowing Date',()=>{

@@ -115,3 +115,22 @@ HTTP 接管、容器重建存活与 Mail Hero 解析测试不能代替用户测�
 首次正式发布提交`aaa444f`的 [GitHub Actions run 36261505007](https://github.com/ziyixi/mail-hero/actions/runs/36261505007) 已成功；Worker版本为`aedd3120-af09-424d-be1d-e57be41dbca9`。
 
 仓库随后按用户要求清除Mail Hero的Go/PostgreSQL服务、中转Worker及主机部署材料；当前验收命令只执行Cloudflare原生和React测试。清理提交`c0677406a75ee0de83c673a585b6383ab4860bc8`的 [GitHub Actions run 36262297081](https://github.com/ziyixi/mail-hero/actions/runs/36262297081)检查及部署均成功，Worker版本为`e4fe47d3-61b8-4306-8cc7-d7822afd1c91`，D1没有待应用迁移。这证明清理后的原生项目已经正式发布；用户测试信到Todofy/Todoist的完整业务链路仍待单独验收。
+
+## 完整测试信与凭据延期（2026-09-26）
+
+用户发送的 `Mail Hero Todofy test 20260926` 在18:31:20.980 UTC被接收，原件6,957 bytes，解析ready。事件`b3a7f057-abf4-4b73-86be-447ac040ba96`第一次发送于18:31:25.195返回HTTP204。Todofy中恰有一条对应记录，18:31:29进入complete；精确查询确认Todoist任务`6hf2W46X3Gc8hjV7`存在且主题一致。此项是上述较早“待验证”记录之后的独立完整业务验收。
+
+用户确认后，Mail Hero部署令牌已取消固定到期日，token值与现有权限保留；现有Wrangler登录未更改。其他已核对的R2备份与Tunnel令牌未显示固定到期；GitHub本机OAuth无法据此宣称永不过期。
+
+## storage-v1 本地验证与发布准备
+
+- 原生TypeScript检查通过，完整测试69/69通过，包含真实workerd的D1/R2/SQLite DO绑定、精确25MiB单/多大附件、入站持久处理、生命周期和删除恢复、快照边界、签名成功回执、16MiB加尾块的备份分片上传及读回SHA校验。
+- UI TypeScript、7项测试和生产build通过；3项CI配置测试通过。
+- 备份工具10项测试通过，包括无网络容器内真实GPG公钥加密、解密、独立SQLite SQL重新载入、最新删除日志应用与隔离恢复。Mac本机无GPG时该项会skip，因此另用包含GPG的隔离工具容器实际执行。服务器Python/GPG可用。
+- 自动清理与新投递并发的回归测试通过；终态条件放在同一个tombstone更新内。EXPLAIN验证周期查询使用live/pending部分索引，避免不断扫描永久历史账本。
+- Todofy兼容提交`b56112ef5d1d3d0ef5500642885eb920301ef7df`已推送；隔离暂存索引的mail race测试和全量golangci-lint通过。未包含用户的推荐功能改动。
+- 已创建独立私有`mail-hero-backups`桶及GitHub production的对应binding变量。恢复私钥仅保存在本机；服务器只接收公钥与已加密应用密钥escrow。
+
+上述不等于生产Free CPU预算、大附件真实邮件、Cloudflare新空资源灾难恢复或定时备份已通过。独立备份机器Access权限仍待具体授权；通知默认仅页面展示。Chrome对状态API返回ERR_BLOCKED_BY_CLIENT，浏览器验收需解除客户端拦截后继续。
+
+首次容量迁移先通过现有已验证提交的[维护发布36266716238](https://github.com/ziyixi/mail-hero/actions/runs/36266716238)暂停旧版本写入；该运行于19:39:11 UTC成功。后续新版本部署、恢复收信及服务器镜像事实另行补录，不能由本地验证推定。

@@ -1,0 +1,11 @@
+[Unit]
+Description=Daily Mail Hero snapshot
+
+[Timer]
+OnCalendar=*-*-* 04:37:00 UTC
+RandomizedDelaySec=10m
+Persistent=yes
+Unit=mailhero-backup.service
+
+[Install]
+WantedBy=timers.target

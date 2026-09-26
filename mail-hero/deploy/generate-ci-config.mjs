@@ -23,6 +23,15 @@ export function generateConfig(env) {
   if (aliases.length > 8 || aliases.join(',').length > 2048 || aliases.some(value => !emailPattern.test(value))) fail('MAIL_HERO_ACCESS_OWNER_ALIASES')
   const allowed = (env.MAIL_HERO_WEBHOOK_ALLOWED_HOSTS ?? '').split(',').map(value => value.trim()).filter(Boolean)
   if (!allowed.length || allowed.some(value => !domainPattern.test(value))) fail('MAIL_HERO_WEBHOOK_ALLOWED_HOSTS')
+  const alertAllowed = (env.MAIL_HERO_ALERT_WEBHOOK_ALLOWED_HOSTS ?? '').split(',').map(value => value.trim()).filter(Boolean)
+  if (alertAllowed.some(value => !domainPattern.test(value))) fail('MAIL_HERO_ALERT_WEBHOOK_ALLOWED_HOSTS')
+  const alertURL = env.MAIL_HERO_ALERT_WEBHOOK_URL ?? ''
+  if (alertURL) {
+    let parsed
+    try { parsed = new URL(alertURL) } catch { fail('MAIL_HERO_ALERT_WEBHOOK_URL') }
+    if (alertURL !== alertURL.trim() || parsed.protocol !== 'https:' || parsed.username || parsed.password || parsed.hash ||
+      (parsed.port && parsed.port !== '443') || !(alertAllowed.length ? alertAllowed : allowed).includes(parsed.hostname)) fail('MAIL_HERO_ALERT_WEBHOOK_URL')
+  }
   const databaseID = checked(env, 'MAIL_HERO_D1_DATABASE_ID', /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i)
   return {
     name: 'mail-hero',
@@ -36,6 +45,7 @@ export function generateConfig(env) {
       ACCESS_AUDIENCE: checked(env, 'MAIL_HERO_ACCESS_AUDIENCE', /^[a-f0-9]{64}$/i),
       ACCESS_OWNER: checked(env, 'MAIL_HERO_ACCESS_OWNER', emailPattern),
       ACCESS_OWNER_ALIASES: aliases.join(','), WEBHOOK_ALLOWED_HOSTS: allowed.join(','),
+      ...(alertURL ? { ALERT_WEBHOOK_URL: alertURL, ALERT_WEBHOOK_ALLOWED_HOSTS: (alertAllowed.length ? alertAllowed : allowed).join(',') } : {}),
       FORCE_SEND_PAUSED: flag(env, 'MAIL_HERO_FORCE_SEND_PAUSED'),
       MAINTENANCE_MODE: flag(env, 'MAIL_HERO_MAINTENANCE_MODE'),
       INGEST_DAILY_MESSAGE_LIMIT: integer(env, 'MAIL_HERO_INGEST_DAILY_MESSAGE_LIMIT', '300', 100000),
@@ -43,7 +53,8 @@ export function generateConfig(env) {
     },
     d1_databases: [{ binding: 'DB', database_name: checked(env, 'MAIL_HERO_D1_DATABASE_NAME', /^[a-zA-Z0-9_-]{1,63}$/, 'mail-hero'),
       database_id: databaseID, migrations_dir: 'migrations' }],
-    r2_buckets: [{ binding: 'MAIL_STORE', bucket_name: checked(env, 'MAIL_HERO_R2_BUCKET_NAME', /^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$/, 'mail-hero-store') }],
+    r2_buckets: [{ binding: 'MAIL_STORE', bucket_name: checked(env, 'MAIL_HERO_R2_BUCKET_NAME', /^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$/, 'mail-hero-store') },
+      ...(env.MAIL_HERO_BACKUP_BUCKET_NAME ? [{binding: 'BACKUP_STORE', bucket_name: checked(env, 'MAIL_HERO_BACKUP_BUCKET_NAME', /^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$/)}] : [])],
     durable_objects: { bindings: [{ name: 'COORDINATOR', class_name: 'MailCoordinator' }] },
     migrations: [{ tag: 'v1', new_sqlite_classes: ['MailCoordinator'] }],
     observability: { enabled: false },

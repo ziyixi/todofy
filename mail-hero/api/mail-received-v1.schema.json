@@ -19,12 +19,20 @@
         "sent_at": {"type": ["string", "null"], "format": "date-time"},
         "rfc_message_id": {"type": ["string", "null"]},
         "text": {"type": "string"},
+        "text_truncated": {"type": "boolean"},
+        "original_text_bytes": {"type": "integer", "minimum": 0, "description": "UTF-8 size of normalized plaintext before UI/webhook truncation; not raw MIME size."},
+        "html_omitted": {"type": "boolean"},
+        "needs_review": {"type": "boolean"},
+        "warnings": {"type": "array", "items": {"type": "string"}},
+        "content_policy_version": {"type": "string"},
+        "attachments_omitted_count": {"type": "integer", "minimum": 0, "description": "Attachment records omitted beyond the 100-record metadata cap. Excludes listed records whose byte copies were omitted."},
         "attachments": {"type": "array", "maxItems": 100, "items": {"$ref": "#/$defs/attachment"}}
       },
       "anyOf": [
         {"properties": {"subject": {"pattern": "\\S"}}},
         {"properties": {"text": {"pattern": "\\S"}}}
       ],
+      "allOf": [{"if": {"required": ["text_truncated"], "properties": {"text_truncated": {"const": true}}}, "then": {"required": ["original_text_bytes"]}}],
       "additionalProperties": true
     }
   },
@@ -44,7 +52,9 @@
       "properties": {
         "filename": {"type": "string"},
         "content_type": {"type": "string"},
-        "size": {"type": "integer", "minimum": 0}
+        "size": {"type": "integer", "minimum": 0},
+        "storage_status": {"enum": ["stored", "omitted"], "description": "Copy status at event creation, not a promise of perpetual availability."},
+        "omitted_reason": {"enum": ["size_limit", "message_size_limit", "inline_image", "capacity"]}
       },
       "additionalProperties": true
     }

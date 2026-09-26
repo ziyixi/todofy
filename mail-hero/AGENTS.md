@@ -55,7 +55,7 @@ R2、D1和DO之间没有跨存储事务。每一步必须可恢复、可去重�
 - Workers Free普通handler CPU为10ms；DO invocation含Alarm默认30秒CPU，Alarm wall time上限15分钟。全部仍受128MB isolate内存限制。MIME解析必须在Alarm，不能靠普通Worker的Paid cpu_ms配置规避Free计划。
 - Email Routing原件最多25MiB；MIME要有字节、头部、parts、嵌套及正文预算。这个上限不证明所有25MiB结构已真实测试。解析失败保留原件、给出可理解状态。
 - D1 Free单库500MB、账户5GB；单行/字符串/BLOB 2,000,000 bytes。正文与大型JSON放R2。正文搜索只索引UTF-8前16KiB，API `search_index_truncated`和UI必须说明搜索范围；读取正文仍完整。
-- 初始逻辑容量5GiB，默认archive、无自动过期。容量不能当成账户R2硬限额；孤立对象、备份和其他项目也占空间。R2 Standard免费10GB-month及操作额度共享。
+- 初始容量5GiB。新邮件冻结原件安全终态后7天、其余内容30天、账本至少180天的策略；历史NULL策略行不自动采用新期限。容量不是账户R2硬限额，备份和其他项目共享免费量。
 - 每个UTC日默认最多300封及256MiB原件：DO在R2写入前原子预留额度，D1故障时也必须生效。超额暂时失败，不能假定Cloudflare或来源一定重投；不是账户级账单硬上限。
 
 官方限额依据和预算预警见 `docs/cloudflare-setup.md`。不要把免费额度描述成无限量、零账单保证或可自动升Paid。
@@ -108,7 +108,20 @@ D1 Time Travel Free7天只恢复D1，不恢复R2、DO或secrets。完整备份�
 
 应用5GiB容量、有限扫描、私有下载、精确路由、预算提醒及用量检查用于降低成本。R2 Class A免费量超额后按百万单位向上计费，不能承诺$2绝对封顶。不得无声升级到Paid来解决Free超限。
 
-## 7. 仓库与发布边界
+## 7. storage-v1 与独立备份
+
+本节替代上文旧的无自动过期、完整正文、维护窗口备份及每批一封清理描述。
+
+- 单附件2MiB、每封附件合计5MiB；内嵌图片省略独立副本，保留metadata。UI纯文本1MiB、HTML2MiB；webhook正文256KiB，UTF-8安全截断并显式提示。正常省略仅警告，needs_review阻断自动业务。
+- DO预留包含尚未索引的原件和解析放大空间；物理删除成功后释放。首次升级需排空旧版本写入并有界盘点R2。失败不确认接收。
+- 修复、清理、告警用三个独立Alarm调用，每阶段间约1秒，完整周期约10分钟；每次最多两个清理阶段，失败整封删除优先恢复。空闲原件扫描每天一次，每页100个key。
+- 备份使用最长30分钟DO租约，暂停解析、交付、清理与API写入；新邮件继续进入DO/R2并归入下一次快照。它不是MAINTENANCE_MODE。
+- 可选私有BACKUP_STORE保存加密包及最小删除清单。专用机器API `/api/internal/backup/*` 用独立Bearer和Access机器身份，不授权普通管理API。备份收集器使用既有服务器Python/GPG，不是Mail Hero自建应用服务。
+- 服务器不持有Cloudflare管理员token、R2 S3 key、应用密钥明文或恢复私钥。上传后完整读回SHA验证，独立HMAC receipt完成后才登记成功；轮转仅计入verified包，7每日+4每周。
+- 恢复需独立归档校验值及最新删除清单。隔离恢复强制暂停并保留event ID/payload；新Cloudflare资源导入、DO重建和未知交付对账需单独验收。
+- API写入遗留租约不得按时间猜测完成。必须在维护模式核对旧调用已排空，再按精确ID清除至少15分钟前的租约。
+
+## 8. 仓库与发布边界
 
 - 只保留 `cloudflare/` 原生Worker/D1迁移与测试、`web/`、静态构建输出位置 `uiassets/dist/`、通用事件合同和原生部署工具。不要恢复已经移除的Go服务、PostgreSQL schema、SMTP服务器、中转Worker或Compose部署路径。
 - 正式发布从GitHub Actions的同一已验证提交构建UI、应用向后兼容的D1 migration并发布Worker。PR不使用生产密钥。`production` environment只用于授权的main发布；暂停和维护配置需同步GitHub variables，避免下次发布覆盖运维状态。

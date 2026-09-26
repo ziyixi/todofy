@@ -1,3 +1,4 @@
+import { BACKUP_PREFIX, handleBackupAPI } from './backup';
 import type { Env } from './types';
 import { handleAPI } from './api';
 import { emailHandler } from './ingest';
@@ -11,9 +12,10 @@ export async function fetchHandler(request: Request, env: Env): Promise<Response
     if (path === '/health/live' && ['GET', 'HEAD'].includes(request.method)) {
       return new Response(null, { status: 204, headers: { 'Cache-Control': 'no-store' } });
     }
-    if (env.MAINTENANCE_MODE === 'true' && !['GET', 'HEAD'].includes(request.method)) {
+    if (env.MAINTENANCE_MODE === 'true' && !['GET', 'HEAD'].includes(request.method) && path !== BACKUP_PREFIX + '/reconcile-writer') {
       return privateResponse(json({ error: { code: 'maintenance', message: '维护中，请稍后重试' } }, 503));
     }
+    if (path.startsWith(BACKUP_PREFIX + '/')) return await handleBackupAPI(request, env);
     if (path.startsWith('/api/')) return await handleAPI(request, env);
     await authenticate(request, env);
     if (path === '/health/ready' && ['GET', 'HEAD'].includes(request.method)) {

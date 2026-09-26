@@ -1,3 +1,4 @@
+import { withBackupWrite } from './backup.ts'
 import type { Env } from './types.ts'
 import { HttpError, authenticate, csrfResponse, json, privateResponse, requireCSRF } from './security.ts'
 import { listDeliveries, listMessages, deliveryRoute, messageRoute } from './api-messages.ts'
@@ -45,7 +46,8 @@ export async function handleAPI(request: Request, env: Env): Promise<Response> {
       if (env.MAINTENANCE_MODE === 'true') throw new HttpError(503, 'maintenance', '维护模式暂不接受修改，请稍后重试')
       await requireCSRF(request, env, owner)
     }
-    return privateResponse(await routeAPI(request, env, owner))
+    return privateResponse(await (['GET', 'HEAD'].includes(request.method)
+      ? routeAPI(request, env, owner) : withBackupWrite(env, () => routeAPI(request, env, owner))))
   } catch (error) {
     const known = error instanceof HttpError
     return privateResponse(json({ error: { code: known ? error.code : 'service_unavailable',

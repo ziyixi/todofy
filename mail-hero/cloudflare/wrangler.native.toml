@@ -19,6 +19,9 @@ ACCESS_OWNER = "owner@example.com"
 # Optional: up to 8 comma-separated exact login emails; all resolve to ACCESS_OWNER.
 ACCESS_OWNER_ALIASES = ""
 WEBHOOK_ALLOWED_HOSTS = "todofy.example.com"
+# Optional metadata-only alerts. Store ALERT_WEBHOOK_TOKEN with `wrangler secret`.
+# ALERT_WEBHOOK_URL = "https://alerts.example.com/mailhero"
+# ALERT_WEBHOOK_ALLOWED_HOSTS = "alerts.example.com"
 FORCE_SEND_PAUSED = "true"
 MAINTENANCE_MODE = "false"
 INGEST_DAILY_MESSAGE_LIMIT = "300"

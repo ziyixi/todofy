@@ -2,6 +2,11 @@ import type { Env, Job } from './types.ts';
 import { HttpError, sha256, decryptCredential, validateTarget } from './security.ts';
 import { parseMail, ParseError, type ParsedMail } from './parser.ts';
 import { MAX_RAW_BYTES, RAW_KEY } from './ingest.ts';
+import { webhookContent } from './content-policy.ts';
+import { runLifecycle, safeTerminalSQL } from './lifecycle.ts';
+import { runAlerts } from './alerts.ts';
+import { recordDeletion } from './backup-artifacts.ts';
+import { reserveObjectCapacity, settleObjectCapacity, releaseObjectCapacity, capacitySnapshot, reconcileCapacity, MAX_PARSED_JSON_BYTES, MAX_PARSE_EXTRA_BYTES } from './capacity.ts';
 
 type Row = Record<string, any>;
 const now = () => new Date().toISOString();
@@ -36,13 +41,13 @@ export interface CreateOptions {
   replayOf?: string; retryMode?: 'auto'|'once'; expectedMessageVersion?: number;
 }
 export function buildPayload(eventID: string, messageID: string, receivedAt: string, parsed: ParsedMail, address: string, currentAddress=address): string {
-  if (utf8.encode(parsed.subject).length > 4096 || utf8.encode(parsed.text).length > 256*1024 ||
-      parsed.from.length > 50 || parsed.to.length > 50 || parsed.attachments.length > 100 || (!parsed.subject.trim() && !parsed.text.trim())) error(422,'invalid_payload');
+  const content = webhookContent(parsed);
+  if (utf8.encode(parsed.subject).length > 4096 || parsed.from.length > 50 || parsed.to.length > 50 ||
+      (!parsed.subject.trim() && !content.text.trim())) error(422,'invalid_payload');
   const payload = JSON.stringify({type:'mail.received.v1', event_id:eventID, received_at:receivedAt, message:{
     id:messageID, from:parsed.from.map(a=>({address:a.address,name:a.name ?? ''})),
     to:parsed.to.filter(a=>a.address.toLowerCase() !== address.toLowerCase() && a.address.toLowerCase() !== currentAddress.toLowerCase()).map(a=>({address:a.address,name:a.name ?? ''})),
-    subject:parsed.subject, sent_at:parsed.sent_at, rfc_message_id:parsed.rfc_message_id, text:parsed.text,
-    attachments:parsed.attachments.map(a=>({filename:a.filename,content_type:a.content_type,size:a.size})),
+    subject:parsed.subject, sent_at:parsed.sent_at, rfc_message_id:parsed.rfc_message_id, ...content,
   }});
   if (utf8.encode(payload).length > 1024*1024) error(422,'invalid_payload');
   return payload;
@@ -84,7 +89,10 @@ export async function createDelivery(env: Env, options: CreateOptions): Promise<
     payloadError='invalid_payload';
   }
   const size = utf8.encode(payload).length, hash=await sha256(payload), key=payload ? `payload/${eventID}.json` : null;
-  if (key) await env.MAIL_STORE.put(key,payload,{httpMetadata:{contentType:'application/json'}});
+  if (key) {
+    await reserveObjectCapacity(env,key,size);
+    await env.MAIL_STORE.put(key,payload,{httpMetadata:{contentType:'application/json'}});
+  }
   // Schedule before the D1 record. Missing rows are retried, so an interrupted
   // publish is repairable and a successful publication never lacks an alarm.
   await enqueue(env,{type:'deliver',eventID});
@@ -106,11 +114,11 @@ export async function createDelivery(env: Env, options: CreateOptions): Promise<
       ? await first(env,'SELECT * FROM deliveries WHERE action_request_id=?',options.actionID)
       : await first(env,'SELECT * FROM deliveries WHERE message_id=? AND generation=?',options.messageID,generation);
     if (existing && existing.message_id===options.messageID && existing.endpoint_revision_id===options.revisionID && (existing.replay_of_event_id ?? '')===(options.replayOf ?? '')) {
-      if (key && existing.event_id!==eventID) await env.MAIL_STORE.delete(key);
+      if (key && existing.event_id!==eventID) { await env.MAIL_STORE.delete(key); await releaseObjectCapacity(env,key); }
       return existing.event_id;
     }
     const published=await first(env,'SELECT event_id FROM deliveries WHERE event_id=?',eventID);
-    if(!published && key) await env.MAIL_STORE.delete(key);
+    if(!published && key) { await env.MAIL_STORE.delete(key); await releaseObjectCapacity(env,key); }
     throw err;
   }
   return eventID;
@@ -128,7 +136,7 @@ async function deletePrefix(env:Env,prefix:string):Promise<void> {
     cursor=page.truncated?page.cursor:undefined;
   } while(cursor);
 }
-export async function deleteMessageContent(env:Env,messageID:string,expectedVersion?:number):Promise<void> {
+export async function deleteMessageContent(env:Env,messageID:string,expectedVersion?:number,requireSafeTerminal=false):Promise<void> {
   const message=await first(env,'SELECT * FROM messages WHERE id=?',messageID);
   if(!message) error(404,'message_not_found');
   if(message!.content_deleted_at) { await purgeDeletedContent(env,messageID); return; }
@@ -139,8 +147,10 @@ export async function deleteMessageContent(env:Env,messageID:string,expectedVers
   const result=await env.DB.batch([
     env.DB.prepare(`UPDATE messages SET content_deleted_at=?,version=version+1,claim_token=NULL,lease_until=NULL,
       raw_key=NULL,parsed_key=NULL,subject=NULL,from_text=NULL,search_text=NULL,has_attachment=0,
-      parse_error=NULL,parsed_size_bytes=0,content_bytes=0 WHERE id=? AND version=? AND content_deleted_at IS NULL`).bind(date,messageID,version),
+      parse_error=NULL,parsed_size_bytes=0,pending_delete_bytes=content_bytes+COALESCE((SELECT sum(payload_size_bytes) FROM deliveries WHERE message_id=messages.id),0),
+      content_bytes=0,content_purge_pending=1 WHERE id=? AND version=? AND content_deleted_at IS NULL AND ${requireSafeTerminal?safeTerminalSQL('messages'):'1=1'}`).bind(date,messageID,version),
     env.DB.prepare('INSERT INTO maintenance(id,value) SELECT ?,? WHERE changes()>0').bind(deleteMarker,messageID),
+    env.DB.prepare(`INSERT OR IGNORE INTO maintenance(id,value) SELECT ?,json_object('raw_key',?,'content_bytes',?,'payloads',json(COALESCE((SELECT json_group_array(json_object('key','payload/'||event_id||'.json','bytes',payload_size_bytes)) FROM deliveries WHERE message_id=?),'[]'))) WHERE EXISTS(SELECT 1 FROM maintenance WHERE id=?)`).bind(`delete_accounting:${messageID}`,message!.raw_key || `raw/${messageID}.eml`,message!.content_bytes,messageID,deleteMarker),
     env.DB.prepare(`UPDATE app_settings SET logical_bytes=max(0,logical_bytes-?-COALESCE((SELECT sum(payload_size_bytes) FROM deliveries WHERE message_id=?),0))
       WHERE id=1 AND EXISTS(SELECT 1 FROM maintenance WHERE id=?)`).bind(message!.content_bytes,messageID,deleteMarker),
     env.DB.prepare(`UPDATE deliveries SET payload_key=NULL,payload_size_bytes=0,state=CASE WHEN state='sending' THEN state WHEN state='delivered' THEN state ELSE 'cancelled' END,
@@ -156,11 +166,20 @@ export async function deleteMessageContent(env:Env,messageID:string,expectedVers
   await env.DB.prepare('INSERT OR IGNORE INTO maintenance(id,value) VALUES(?,?)').bind(`purged:${messageID}`,now()).run();
 }
 async function purgeDeletedContent(env:Env,messageID:string):Promise<void> {
+  const tombstone=await first(env,'SELECT content_deleted_at FROM messages WHERE id=?',messageID);
+  if(tombstone?.content_deleted_at) await recordDeletion(env,messageID,'content',tombstone.content_deleted_at);
   const receipts=await all(env,'SELECT external_id FROM ingest_receipts WHERE message_id=?',messageID);
   await deleteKeys(env,[`raw/${messageID}.eml`,...receipts.map(r=>`raw/${r.external_id}.eml`)]);
   await deletePrefix(env,`parsed/${messageID}/`);
   const events=await all(env,'SELECT event_id FROM deliveries WHERE message_id=?',messageID);
   if(events.length) await deleteKeys(env,events.map(e=>`payload/${e.event_id}.json`));
+  const accounting=await first(env,'SELECT value FROM maintenance WHERE id=?',`delete_accounting:${messageID}`);
+  if(accounting) {
+    const ledger=JSON.parse(accounting.value);
+    await releaseObjectCapacity(env,ledger.raw_key,ledger.content_bytes);
+    for(const payload of ledger.payloads) await releaseObjectCapacity(env,payload.key,payload.bytes);
+  }
+  await env.DB.prepare('UPDATE messages SET pending_delete_bytes=0,content_purge_pending=0 WHERE id=? AND content_deleted_at IS NOT NULL').bind(messageID).run();
 }
 
 async function registerRaw(env:Env,key:string):Promise<Row|null> {
@@ -168,7 +187,10 @@ async function registerRaw(env:Env,key:string):Promise<Row|null> {
   const receipt=await first(env,'SELECT message_id FROM ingest_receipts WHERE source=\'cloudflare\' AND external_id=?',id);
   if(receipt) {
     const existing=await first(env,'SELECT * FROM messages WHERE id=?',receipt.message_id);
-    if(existing && (existing.id!==id || existing.content_deleted_at)) await env.MAIL_STORE.delete(key);
+    if(existing && existing.id!==id) {
+      await env.MAIL_STORE.delete(key);
+      if(existing.id!==id) await releaseObjectCapacity(env,key);
+    }
     return existing;
   }
   const object=await env.MAIL_STORE.get(key);
@@ -192,39 +214,71 @@ async function registerRaw(env:Env,key:string):Promise<Row|null> {
   let policyError=metadata.policy_error || null;
   if(revision && !await first(env,'SELECT id FROM endpoint_revisions WHERE id=?',revision)) { revision=null; policyError='policy_revision_missing'; }
   const date=now(), received=new Date(metadata.received_at).toISOString();
+  const policyNumber=(name:string,min:number,max:number):number|null=>{
+    const value=Number(metadata[name]);
+    return metadata[name] && Number.isInteger(value) && value>=min && value<=max ? value : null;
+  };
+  const policyVersion=policyNumber('lifecycle_policy_version',1,1_000_000);
   await env.DB.batch([
-    env.DB.prepare(`INSERT INTO messages(id,ingest_key,origin,received_at,last_received_at,envelope_from,envelope_recipient,raw_key,raw_sha256,size_bytes,receive_mode,endpoint_revision_id,policy_error,content_bytes)
-      VALUES(?,?,'cloudflare',?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(ingest_key) DO NOTHING`).bind(id,ingestKey,received,received,metadata.from ?? '',metadata.to,key,hash,raw.byteLength,revision?'forward':'archive',revision,policyError,raw.byteLength),
+    env.DB.prepare(`INSERT INTO messages(id,ingest_key,origin,received_at,last_received_at,envelope_from,envelope_recipient,raw_key,raw_sha256,size_bytes,receive_mode,endpoint_revision_id,policy_error,content_bytes,
+      retention_policy_version,raw_retention_days,content_retention_days,ledger_retention_days)
+      VALUES(?,?,'cloudflare',?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(ingest_key) DO NOTHING`).bind(id,ingestKey,received,received,metadata.from ?? '',metadata.to,key,hash,raw.byteLength,revision?'forward':'archive',revision,policyError,raw.byteLength,
+        policyVersion,policyVersion?policyNumber('raw_retention_days',1,3650):null,policyVersion?policyNumber('content_retention_days',1,3650):null,policyVersion?policyNumber('ledger_retention_days',90,3650):null),
     env.DB.prepare('UPDATE app_settings SET logical_bytes=logical_bytes+? WHERE id=1 AND changes()>0').bind(raw.byteLength),
     env.DB.prepare(`INSERT INTO ingest_receipts(source,external_id,message_id,ingest_key,received_at,created_at)
       SELECT 'cloudflare',?,id,?,?,? FROM messages WHERE ingest_key=? ON CONFLICT(source,external_id) DO NOTHING`).bind(id,ingestKey,received,date,ingestKey),
     env.DB.prepare(`UPDATE messages SET arrival_count=arrival_count+1,last_received_at=max(last_received_at,?) WHERE ingest_key=? AND id<>? AND changes()>0`).bind(received,ingestKey,id),
   ]);
   const saved=await first(env,'SELECT * FROM messages WHERE ingest_key=?',ingestKey);
-  if(saved && (saved.id!==id || saved.content_deleted_at)) await env.MAIL_STORE.delete(key);
+  if(saved && saved.id!==id) {
+    await env.MAIL_STORE.delete(key);
+    if(saved.id!==id) await releaseObjectCapacity(env,key);
+  }
   return saved;
+}
+async function cleanupPreviousParses(env:Env,messageID:string):Promise<void> {
+  // Publication and this intent commit in one D1 batch. Do not reduce the old
+  // allocation while superseded parsed objects might still occupy R2.
+  const intents=await all(env,'SELECT id,value FROM maintenance WHERE id LIKE ? ORDER BY id LIMIT 4',`parse_cleanup:${messageID}:%`);
+  for(const intent of intents) {
+    await deletePrefix(env,intent.value);
+    await env.DB.prepare('DELETE FROM maintenance WHERE id=?').bind(intent.id).run();
+  }
+  if(intents.length===4) throw new Error('parse_cleanup_pending');
 }
 async function parseJob(env:Env,key:string,attempts=0):Promise<number|null> {
   const message=await registerRaw(env,key);
   if(!message) return Date.now()+Math.min(6*3600_000,30_000*2**Math.min(attempts,10));
   if(message.content_deleted_at) { await purgeDeletedContent(env,message.id); return null; }
+  if(message.raw_expired_at) return null;
+  const capacityKey=message.raw_key || `raw/${message.id}.eml`;
+  await cleanupPreviousParses(env,message.id);
   if(message.parse_state==='ready') {
+    const publishedPrefix=message.parsed_key?.slice(0,message.parsed_key.lastIndexOf('/'));
+    await settleObjectCapacity(env,capacityKey,message.content_bytes,message.content_bytes,publishedPrefix);
     if(message.receive_mode==='forward' && message.endpoint_revision_id && !await first(env,'SELECT event_id FROM deliveries WHERE message_id=?',message.id)) {
       await createDelivery(env,{messageID:message.id,revisionID:message.endpoint_revision_id});
     }
     return null;
   }
-  if(message.parse_state==='failed') return null;
+  if(message.parse_state==='failed') {
+    await settleObjectCapacity(env,capacityKey,message.content_bytes,message.content_bytes);
+    return null;
+  }
   const token=crypto.randomUUID(), date=now();
   const claimed=await env.DB.prepare(`UPDATE messages SET parse_state='parsing',claim_token=?,lease_until=? WHERE id=? AND content_deleted_at IS NULL
     AND (parse_state='pending' OR (parse_state='parsing' AND lease_until<?))`).bind(token,stamp(Date.now()+claimMS),message.id,date).run();
   if(!claimed.meta.changes) return Date.parse(message.lease_until ?? stamp(Date.now()+claimMS));
   const prefix=`parsed/${message.id}/${token}`;
+  await reserveObjectCapacity(env,prefix,MAX_PARSE_EXTRA_BYTES);
   try {
     const raw=await env.MAIL_STORE.get(message.raw_key);
     if(!raw || raw.size!==message.size_bytes) throw new ParseError('raw_content_unavailable');
-    const parsed=await parseMail(await raw.arrayBuffer(),env,prefix);
+    const capacity=await capacitySnapshot(env);
+    const preserveAttachments=Number(capacity.used_bytes)<Number(capacity.limit_bytes)*0.95;
+    const parsed=await parseMail(await raw.arrayBuffer(),env,prefix,{storeAttachmentCopies:preserveAttachments});
     const json=JSON.stringify(parsed.mail), parsedKey=`${prefix}/message.json`, jsonSize=utf8.encode(json).length;
+    if(jsonSize>MAX_PARSED_JSON_BYTES) throw new ParseError('parsed_content_too_large');
     await env.MAIL_STORE.put(parsedKey,json,{httpMetadata:{contentType:'application/json'}});
     const fullSearch=`${parsed.mail.subject}\n${parsed.mail.from.map(a=>`${a.name} ${a.address}`).join(' ')}\n${parsed.mail.text}`.toLocaleLowerCase();
     const searchBytes=utf8.encode(fullSearch), truncated=searchBytes.length>16384;
@@ -232,12 +286,13 @@ async function parseJob(env:Env,key:string,attempts=0):Promise<number|null> {
     const contentBytes=message.size_bytes+jsonSize+parsed.bytes;
     const statements=[
       env.DB.prepare(`UPDATE messages SET parse_state='ready',parsed_key=?,parsed_size_bytes=?,content_bytes=?,parser_version='postal-mime-v1',
-        subject=?,from_text=?,search_text=?,has_attachment=?,search_index_truncated=?,parse_error=NULL,claim_token=NULL,lease_until=NULL,version=version+1
+        subject=?,from_text=?,search_text=?,has_attachment=?,search_index_truncated=?,needs_review=?,parse_error=NULL,claim_token=NULL,lease_until=NULL,version=version+1
         WHERE id=? AND claim_token=? AND content_deleted_at IS NULL
-        AND EXISTS(SELECT 1 FROM app_settings WHERE id=1 AND logical_bytes+?<=logical_limit_bytes)`).bind(parsedKey,jsonSize,contentBytes,parsed.mail.subject,parsed.mail.from.map(a=>a.name?`${a.name} <${a.address}>`:a.address).join(', '),search.slice(0,2000),parsed.mail.attachments.length?1:0,truncated?1:0,message.id,token,contentBytes-message.content_bytes),
+        AND EXISTS(SELECT 1 FROM app_settings WHERE id=1 AND logical_bytes+?<=logical_limit_bytes)`).bind(parsedKey,jsonSize,contentBytes,parsed.mail.subject,parsed.mail.from.map(a=>a.name?`${a.name} <${a.address}>`:a.address).join(', '),search.slice(0,2000),parsed.mail.attachments.length?1:0,truncated?1:0,parsed.mail.needs_review?1:0,message.id,token,contentBytes-message.content_bytes),
       env.DB.prepare('UPDATE app_settings SET logical_bytes=max(0,logical_bytes+?) WHERE id=1 AND changes()>0').bind(contentBytes-message.content_bytes),
       env.DB.prepare('DELETE FROM message_search WHERE message_id=? AND EXISTS(SELECT 1 FROM messages WHERE id=? AND parsed_key=?)').bind(message.id,message.id,parsedKey),
     ];
+    if(message.parsed_key) statements.push(env.DB.prepare(`INSERT OR IGNORE INTO maintenance(id,value) SELECT ?,? WHERE EXISTS(SELECT 1 FROM messages WHERE id=? AND parsed_key=? AND content_deleted_at IS NULL)`).bind(`parse_cleanup:${message.id}:${token}`,message.parsed_key.slice(0,message.parsed_key.lastIndexOf('/')+1),message.id,parsedKey));
     // Overlap preserves substring searches crossing a chunk boundary; each row
     // stays well below D1's 2 MB row cap, including non-ASCII UTF-8 text.
     for(let offset=0,index=0;offset<search.length;offset+=32000,index++) statements.push(env.DB.prepare(`INSERT INTO message_search(message_id,chunk_no,body)
@@ -245,15 +300,18 @@ async function parseJob(env:Env,key:string,attempts=0):Promise<number|null> {
     const result=await env.DB.batch(statements);
     if(!result[0].meta.changes) {
       await env.DB.prepare("UPDATE messages SET parse_state='failed',parse_error='logical_capacity',claim_token=NULL,lease_until=NULL WHERE id=? AND claim_token=? AND content_deleted_at IS NULL").bind(message.id,token).run();
-      await deletePrefix(env,prefix+'/'); return null;
+      await deletePrefix(env,prefix+'/'); await releaseObjectCapacity(env,prefix); return null;
     }
-    if(message.parsed_key) await deletePrefix(env,message.parsed_key.slice(0,message.parsed_key.lastIndexOf('/')+1));
+    await cleanupPreviousParses(env,message.id);
+    await settleObjectCapacity(env,capacityKey,contentBytes,message.content_bytes,prefix);
     if(message.receive_mode==='forward' && message.endpoint_revision_id) await createDelivery(env,{messageID:message.id,revisionID:message.endpoint_revision_id});
     return null;
   } catch(err) {
     if(err instanceof ParseError) {
       await env.DB.prepare(`UPDATE messages SET parse_state='failed',parse_error=?,claim_token=NULL,lease_until=NULL,version=version+1 WHERE id=? AND claim_token=? AND content_deleted_at IS NULL`).bind(err.message,message.id,token).run();
       await deletePrefix(env,prefix+'/');
+      await releaseObjectCapacity(env,prefix);
+      await settleObjectCapacity(env,capacityKey,message.content_bytes,message.content_bytes);
       return null;
     }
     // Storage failures retain the lease and immutable content for later recovery.
@@ -271,6 +329,7 @@ export async function createSyntheticTestDelivery(env:Env,revisionID:string,acti
   const date=now(), key=`parsed/${id}/synthetic/message.json`;
   const parsed:ParsedMail={subject:'Mail Hero webhook test',text:'This is a synthetic Mail Hero connection test.',html:'',from:[{address:'synthetic@example.org',name:'Mail Hero'}],to:[],cc:[],reply_to:[],sent_at:null,rfc_message_id:null,headers:[],attachments:[],needs_review:false,warnings:[]};
   const content=JSON.stringify(parsed), size=utf8.encode(content).length;
+  await reserveObjectCapacity(env,`raw/${id}.eml`,size);
   await env.MAIL_STORE.put(key,content,{httpMetadata:{contentType:'application/json'}});
   await env.DB.batch([
     env.DB.prepare(`INSERT OR IGNORE INTO messages(id,origin,received_at,last_received_at,envelope_from,envelope_recipient,size_bytes,receive_mode,parse_state,parsed_key,parsed_size_bytes,content_bytes,subject,from_text)
@@ -417,13 +476,28 @@ export async function runJob(env:Env,job:Job,attempts=0):Promise<number|null> {
   return job.type==='parse'?parseJob(env,job.key,attempts):deliverJob(env,job.eventID,attempts);
 }
 
-/** Low-frequency repair, never mailbox polling. Only one bounded page of raw
- * keys and D1 work is inspected per maintenance pass. */
-export async function runMaintenance(env:Env):Promise<{jobs:Job[];continueSoon:boolean}> {
+/** Three separate Alarm invocations keep each pass within Free D1's query
+ * budget. The short phase handoff is durable; alerts complete every 10 minutes. */
+export async function runMaintenance(env:Env):Promise<{jobs:Job[];continueSoon:boolean;nextDelayMS?:number}> {
   if(env.MAINTENANCE_MODE==='true') return {jobs:[],continueSoon:false};
-  let continueSoon=false;
+  const phase=(await first(env,"SELECT value FROM maintenance WHERE id='maintenance_phase'"))?.value ?? 'repair';
+  if(phase==='alerts') {
+    await runAlerts(env);
+    await env.DB.prepare("INSERT INTO maintenance(id,value) VALUES('maintenance_phase','repair') ON CONFLICT(id) DO UPDATE SET value=excluded.value").run();
+    return {jobs:[],continueSoon:false,nextDelayMS:600_000};
+  }
+  if(phase==='lifecycle') {
+    // A prior full purge is resumed instead of starting another large batch.
+    const deleted=await all(env,`SELECT id FROM messages WHERE content_purge_pending=1 ORDER BY id LIMIT 1`);
+    if(deleted.length) {
+      await purgeDeletedContent(env,deleted[0].id);
+      await env.DB.prepare('INSERT OR IGNORE INTO maintenance(id,value) VALUES(?,?)').bind(`purged:${deleted[0].id}`,now()).run();
+    } else await runLifecycle(env,{deleteContent:(id,version)=>deleteMessageContent(env,id,version,true),withMutation:operation=>operation()});
+    await env.DB.prepare("UPDATE maintenance SET value='alerts' WHERE id='maintenance_phase'").run();
+    return {jobs:[],continueSoon:true,nextDelayMS:1000};
+  }
   const jobs:Job[]=[];
-  const messages=await all(env,`SELECT raw_key FROM messages WHERE content_deleted_at IS NULL AND raw_key IS NOT NULL
+  const messages=await all(env,`SELECT raw_key FROM messages WHERE origin='cloudflare' AND content_deleted_at IS NULL AND raw_expired_at IS NULL AND raw_key IS NOT NULL
     AND (parse_state='pending' OR (parse_state='parsing' AND lease_until<=?) OR (parse_state='ready' AND receive_mode='forward'
     AND NOT EXISTS(SELECT 1 FROM deliveries WHERE message_id=messages.id))) ORDER BY received_at LIMIT 100`,now());
   for(const message of messages) jobs.push({type:'parse',key:message.raw_key});
@@ -432,36 +506,35 @@ export async function runMaintenance(env:Env):Promise<{jobs:Job[];continueSoon:b
     d.state='sending' OR (d.state IN('pending','retry_wait') AND e.paused=0 AND r.blocked_reason IS NULL AND e.archived_at IS NULL AND s.send_paused=0)
     ORDER BY d.next_attempt_at LIMIT 100`);
   for(const delivery of deliveries) jobs.push({type:'deliver',eventID:delivery.event_id});
-  const cursor=(await first(env,`SELECT value FROM maintenance WHERE id='raw_reconcile_cursor'`))?.value;
-  const raw=await env.MAIL_STORE.list({prefix:'raw/',cursor:cursor || undefined,limit:100});
-  const candidates=raw.objects.map(o=>({id:RAW_KEY.exec(o.key)?.[1],key:o.key})).filter(o=>o.id);
-  if(candidates.length) {
-    const known=await all(env,`SELECT i.external_id,i.message_id,m.content_deleted_at FROM ingest_receipts i JOIN messages m ON m.id=i.message_id WHERE i.external_id IN(${candidates.map(()=>'?').join(',')})`,...candidates.map(o=>o.id));
-    const seen=new Set(known.map(row=>row.external_id)),deletedKeys:string[]=[];
-    const deletedIDs=new Set(known.filter(row=>row.content_deleted_at || row.message_id!==row.external_id).map(row=>row.external_id));
-    for(const object of candidates) {
-      if(!seen.has(object.id)) jobs.push({type:'parse',key:object.key});
-      else if(deletedIDs.has(object.id)) deletedKeys.push(object.key);
+  // Continue recovery pages promptly, but do not rescan an idle bucket every
+  // ten minutes merely because the independent alert clock is due.
+  const checkpoint=await first(env,"SELECT value FROM maintenance WHERE id='raw_reconcile_after'");
+  if(!checkpoint || Number(checkpoint.value)<=Date.now()) {
+    const cursor=(await first(env,"SELECT value FROM maintenance WHERE id='raw_reconcile_cursor'"))?.value;
+    const raw=await env.MAIL_STORE.list({prefix:'raw/',cursor:cursor || undefined,limit:100});
+    const candidates=raw.objects.map(o=>({id:RAW_KEY.exec(o.key)?.[1],key:o.key})).filter(o=>o.id);
+    if(candidates.length) {
+      const known=await all(env,`SELECT i.external_id,i.message_id,m.content_deleted_at,m.raw_expired_at FROM ingest_receipts i JOIN messages m ON m.id=i.message_id WHERE i.external_id IN(${candidates.map(()=>'?').join(',')})`,...candidates.map(o=>o.id));
+      const seen=new Set(known.map(row=>row.external_id));
+      const deletedIDs=new Set(known.filter(row=>row.message_id!==row.external_id).map(row=>row.external_id));
+      const duplicateIDs=new Set(known.filter(row=>row.message_id!==row.external_id).map(row=>row.external_id));
+      for(const object of candidates) {
+        if(!seen.has(object.id)) jobs.push({type:'parse',key:object.key});
+        else if(deletedIDs.has(object.id)) {
+          await env.MAIL_STORE.delete(object.key);
+          if(duplicateIDs.has(object.id)) await releaseObjectCapacity(env,object.key);
+        }
+      }
     }
-    if(deletedKeys.length) await env.MAIL_STORE.delete(deletedKeys);
+    await env.DB.batch([
+      env.DB.prepare("INSERT INTO maintenance(id,value) VALUES('raw_reconcile_cursor',?) ON CONFLICT(id) DO UPDATE SET value=excluded.value").bind(raw.truncated?raw.cursor:''),
+      env.DB.prepare("INSERT INTO maintenance(id,value) VALUES('raw_reconcile_after',?) ON CONFLICT(id) DO UPDATE SET value=excluded.value").bind(String(Date.now()+(raw.truncated?600_000:DAY))),
+    ]);
+    await collectOrphans(env);
   }
-  await env.DB.prepare(`INSERT INTO maintenance(id,value) VALUES('raw_reconcile_cursor',?) ON CONFLICT(id) DO UPDATE SET value=excluded.value`).bind(raw.truncated?raw.cursor:'').run();
-  const retention=await first(env,'SELECT retention_days FROM app_settings WHERE id=1');
-  if(retention?.retention_days) {
-    const expired=await all(env,`SELECT id,version FROM messages WHERE origin='cloudflare' AND content_deleted_at IS NULL AND parse_state='ready' AND received_at<?
-      AND (receive_mode='archive' OR EXISTS(SELECT 1 FROM deliveries WHERE message_id=messages.id AND state='delivered'))
-      AND NOT EXISTS(SELECT 1 FROM deliveries WHERE message_id=messages.id AND state<>'delivered') ORDER BY received_at LIMIT 1`,stamp(Date.now()-retention.retention_days*DAY));
-    continueSoon=expired.length===1;
-    for(const message of expired) { try { await deleteMessageContent(env,message.id,message.version); } catch(err) { if(!(err instanceof HttpError) || err.status!==409) throw err; } }
-  }
-  // Tombstones make repeated purge safe. Cycle pages to finish after crashes.
-  const deleted=await all(env,`SELECT id FROM messages WHERE content_deleted_at IS NOT NULL AND NOT EXISTS(SELECT 1 FROM maintenance WHERE id='purged:'||messages.id) LIMIT 1`);
-  for(const message of deleted) {
-    await purgeDeletedContent(env,message.id);
-    await env.DB.prepare(`INSERT OR IGNORE INTO maintenance(id,value) VALUES(?,?)`).bind(`purged:${message.id}`,now()).run();
-  }
-  await collectOrphans(env);
-  return {jobs,continueSoon:continueSoon || deleted.length===1 || raw.truncated};
+  await reconcileCapacity(env);
+  await env.DB.prepare("INSERT INTO maintenance(id,value) VALUES('maintenance_phase','lifecycle') ON CONFLICT(id) DO UPDATE SET value=excluded.value").run();
+  return {jobs,continueSoon:true,nextDelayMS:1000};
 }
 
 async function collectOrphans(env:Env):Promise<void> {
@@ -473,8 +546,9 @@ async function collectOrphans(env:Env):Promise<void> {
     if(ids.length) {
       const rows=await all(env,prefix==='parsed/'
         ?`SELECT id,parsed_key,claim_token,lease_until,content_deleted_at FROM messages WHERE id IN(${ids.map(()=>'?').join(',')})`
-        :`SELECT event_id id,payload_key FROM deliveries WHERE event_id IN(${ids.map(()=>'?').join(',')})`,...ids);
+        :`SELECT d.event_id id,d.message_id,d.payload_key,m.content_deleted_at FROM deliveries d JOIN messages m ON m.id=d.message_id WHERE d.event_id IN(${ids.map(()=>'?').join(',')})`,...ids);
       const records=new Map(rows.map(row=>[row.id,row]));
+      for(const row of rows) if(row.content_deleted_at) await recordDeletion(env,row.message_id ?? row.id,'content',row.content_deleted_at);
       const remove=candidates.filter(object=>{
         if(prefix==='payload/') return records.get(object.key.slice(8,-5))?.payload_key!==object.key;
         const parts=object.key.split('/'),record=records.get(parts[1]);
@@ -482,7 +556,13 @@ async function collectOrphans(env:Env):Promise<void> {
         if(record.parsed_key?.startsWith(`${parts.slice(0,3).join('/')}/`)) return false;
         return !(record.claim_token===parts[2] && Date.parse(record.lease_until)>Date.now());
       }).map(object=>object.key);
-      if(remove.length) await env.MAIL_STORE.delete(remove);
+      if(remove.length) {
+        await env.MAIL_STORE.delete(remove);
+        if(prefix==='payload/') for(const key of remove) await releaseObjectCapacity(env,key);
+        else for(const claim of new Set(remove.map(key=>key.split('/').slice(0,3).join('/')))) {
+          if(!(await env.MAIL_STORE.list({prefix:claim+'/',limit:1})).objects.length) await releaseObjectCapacity(env,claim);
+        }
+      }
     }
     await env.DB.prepare('INSERT INTO maintenance(id,value) VALUES(?,?) ON CONFLICT(id) DO UPDATE SET value=excluded.value').bind(cursorID,page.truncated?page.cursor:'').run();
   }
@@ -492,5 +572,6 @@ export async function markInterruptedJob(env:Env,job:Job):Promise<void> {
   if(job.type!=='parse') return;
   const message=await registerRaw(env,job.key);
   if(!message) return;
-  await env.DB.prepare("UPDATE messages SET parse_state='failed',parse_error='processing_interrupted_limit',claim_token=NULL,lease_until=NULL,version=version+1 WHERE id=? AND parse_state IN('pending','parsing') AND content_deleted_at IS NULL").bind(message.id).run();
+  const failed=await env.DB.prepare("UPDATE messages SET parse_state='failed',parse_error='processing_interrupted_limit',claim_token=NULL,lease_until=NULL,version=version+1 WHERE id=? AND parse_state IN('pending','parsing') AND content_deleted_at IS NULL").bind(message.id).run();
+  if(failed.meta.changes) await settleObjectCapacity(env,message.raw_key || `raw/${message.id}.eml`,message.content_bytes,message.content_bytes);
 }

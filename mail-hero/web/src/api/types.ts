@@ -25,6 +25,8 @@ export interface Attachment {
   content_type: string
   size_bytes?: number
   size?: number
+  storage_status?: 'stored' | 'omitted'
+  omitted_reason?: 'size_limit' | 'message_size_limit' | 'inline_image' | 'capacity'
 }
 
 export interface MailboxAddress { address: string; name?: string }
@@ -43,6 +45,12 @@ export interface MessageDetail extends MessageSummary {
   parse_error?: string | null
   needs_review?: boolean
   warnings?: string[]
+  text_truncated?: boolean
+  original_text_bytes?: number
+  html_omitted?: boolean
+  attachments_omitted_count?: number
+  content_policy_version?: string
+  raw_expired_at?: string | null
   search_index_truncated?: boolean
   raw_sha256?: string
   action_snapshot?: string
@@ -108,6 +116,10 @@ export interface Settings {
   send_paused: boolean
   effective_send_paused?: boolean
   retention_days?: number | null
+  lifecycle_policy_version?: number
+  raw_retention_days?: number | null
+  content_retention_days?: number | null
+  ledger_retention_days?: number
   capacity_bytes?: number
   logical_bytes?: number
   logical_limit_bytes?: number
@@ -124,6 +136,12 @@ export interface Overview {
   last_backup_at?: string | null
   recent_rejections?: number
   warnings?: string[]
+  pending_physical_delete_bytes?: number
+  capacity_used_bytes?: number | null
+  capacity_reserved_bytes?: number | null
+  bucket_actual_bytes?: number | null
+  account_r2_bytes?: number | null
+  alerts?: { configured: boolean; configuration_error: boolean; active: Array<{ code: string; severity: string; metrics: Record<string, number> }>; pending_notifications: number; failed_notifications: number }
 }
 
 export interface SetupStatus {
@@ -135,7 +153,14 @@ export interface SetupStatus {
 
 export interface RetentionPreview {
   version: number
-  days: number
+  days?: number
+  raw_retention_days?: number | null
+  content_retention_days?: number | null
+  ledger_retention_days?: number
+  apply_existing?: boolean
+  historical_messages?: number
+  safe_terminal_messages?: number
+  historical_content_bytes?: number
   candidates: number | Array<unknown>
   bytes_to_clear: number
   preview_token: string

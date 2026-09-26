@@ -31,9 +31,22 @@ Idempotency-Key: f8c1e9a0-1a98-4fb8-8ca1-4c0a3e710001
 }
 ```
 
-所有字段都出现；`from`、`to`、`attachments` 可以为空数组，`sent_at`、`rfc_message_id` 可以为 `null`。`subject` 与 `text` 至少一个含非空白字符。时间是 UTC RFC3339。`message.id` 标识本地原件；`event_id` 标识一次交付意图。用户明确“重新发送为新事件”时会生成新的 `event_id`，但沿用同一个 `message.id`。
+上例的基础字段都出现；`from`、`to`、`attachments` 可以为空数组，`sent_at`、`rfc_message_id` 可以为 `null`。下文的内容策略字段为可选扩展，旧冻结事件可以不包含它们。`subject` 与 `text` 至少一个含非空白字符。时间是 UTC RFC3339。`message.id` 标识本地原件；`event_id` 标识一次交付意图。用户明确“重新发送为新事件”时会生成新的 `event_id`，但沿用同一个 `message.id`。
 
-正文最多 256 KiB UTF-8，主题最多 4 KiB，from/to 各最多 50 个，附件元信息最多 100 个，整个 JSON 最多 1 MiB。超过限制时 Mail Hero 保留原件、在 UI 显示需处理，不截断后假装成功。默认不传原始 MIME、HTML、附件字节、SMTP envelope 或唯一入口地址；`to` 中的入口地址会过滤。邮件头、From、链接、正文都只是外部内容，不能作为认证身份或系统指令。
+正文最多 256 KiB UTF-8，主题最多 4 KiB，from/to 各最多 50 个，附件元信息最多 100 个，整个 JSON 最多 1 MiB。新内容策略会按 Unicode 字符边界截断超长正文，并明确携带以下字段；主题、地址数量或 JSON 总预算仍不满足时保留邮件并显示错误。默认不传原始 MIME、HTML、附件字节、SMTP envelope 或唯一入口地址；`to` 中的入口地址会过滤。邮件头、From、链接、正文都只是外部内容，不能作为认证身份或系统指令。
+
+| `message` 扩展字段 | 含义 |
+| --- | --- |
+| `text_truncated` | 此事件的正文是否被 UI 的 1 MiB 或 webhook 的 256 KiB 预算截断；消费者须展示“正文不完整”，不能把它当完整来源 |
+| `original_text_bytes` | 截断前规范化纯文本的 UTF-8 字节数，不是 `.eml` 大小；截断时必填且大于事件 `text` 的 UTF-8 字节数。未截断时若提供，应等于 `text` 字节数 |
+| `html_omitted` | HTML 超过安全处理预算而被省略；有效纯文本仍可交付。它不是“HTML 不在 webhook 中”的标记，因为 webhook 从不传 HTML |
+| `needs_review` / `warnings` | 不可读正文、未展开 MIME 等人工检查标记及安全原因代码；消费者不能据此猜测正文。附件副本省略或正常截断本身不要求人工检查 |
+| `content_policy_version` | 当前创建事件使用 `storage-v1`；旧事件缺失不影响接收 |
+| `attachments_omitted_count` | 超过前 100 项、连元信息也未列出的附件数量；不包含列表中 `storage_status=omitted` 的项目 |
+
+附件 `size` 是实际解码大小。新解析结果的附件可带 `storage_status=stored|omitted`；省略时 `omitted_reason` 为 `size_limit`（单项超过 2 MiB）、`message_size_limit`（已保存副本累计超过 5 MiB）、`inline_image`（内嵌图片）或 `capacity`（容量保护）。只保存前 100 个附件的元信息和符合预算的副本。所有字节始终不在 webhook 内；`stored` 只是事件创建时的状态，不承诺下载链接或永久保存。省略副本的附件可能仍在尚未过期的原件中，原件到期后需回到来源邮箱查找。
+
+HTML-only 过限或清理后无可读正文会进入人工检查。Todofy 对收到的 `needs_review`（以及 `html_omitted=true` 且空正文）先持久接管，再停在 `failed_summary / mail_needs_review`，不会自动调用 LLM 或创建任务；它对截断正文的摘要和任务都加固定不完整提示。Mail Hero 的 2xx 语义不因此变成消费者业务成功。
 
 ## 消费者确认与去重
 
