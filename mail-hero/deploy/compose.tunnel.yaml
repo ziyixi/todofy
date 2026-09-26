@@ -1,0 +1,25 @@
+services:
+  tunnel:
+    image: cloudflare/cloudflared:2026.9.1
+    command: ["tunnel", "--no-autoupdate", "run", "--token-file", "/run/secrets/tunnel_token"]
+    restart: unless-stopped
+    user: "${MAIL_HERO_UID:-10001}:${MAIL_HERO_GID:-10001}"
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    secrets:
+      - tunnel_token
+    depends_on:
+      app:
+        condition: service_healthy
+    logging:
+      driver: local
+      options:
+        max-size: 10m
+        max-file: "5"
+
+secrets:
+  tunnel_token:
+    file: ./secrets/tunnel-token

@@ -1,0 +1,20 @@
+# Legacy direct-SMTP option. Cloudflare ingest is the default compose.yaml mode.
+services:
+  app:
+    environment:
+      MAIL_HERO_INGEST_TRANSPORT: smtp
+      MAIL_HERO_MX_HOSTNAME: ${MAIL_HERO_MX_HOSTNAME:?set by deploy/bootstrap.sh}
+      MAIL_HERO_SMTP_LISTEN: 0.0.0.0:2525
+      MAIL_HERO_SMTP_TLS_CERT_FILE: /run/secrets/smtp_cert
+      MAIL_HERO_SMTP_TLS_KEY_FILE: /run/secrets/smtp_key
+    secrets:
+      - smtp_cert
+      - smtp_key
+    ports:
+      - "0.0.0.0:${MAIL_HERO_SMTP_PUBLISH_PORT:-25}:2525"
+
+secrets:
+  smtp_cert:
+    file: ./certs/fullchain.pem
+  smtp_key:
+    file: ./certs/privkey.pem

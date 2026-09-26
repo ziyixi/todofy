@@ -1,0 +1,910 @@
+openapi: 3.1.0
+info:
+  title: Mail Hero API
+  version: 1.0.0
+  description: |
+    Owner-only API for the Mail Hero inbox, deliveries, endpoints and settings,
+    plus a separate machine ingest endpoint when Cloudflare transport is enabled.
+    All /api responses are private and sent with Cache-Control: no-store.
+    In production Cloudflare Access supplies a JWT in Cf-Access-Jwt-Assertion
+    or CF_Authorization. The application verifies its issuer, audience and owner.
+    A local, loopback-only development mode can explicitly bypass Access.
+    Every owner mutation also requires a same-origin Origin header, the
+    mail_hero_csrf cookie and its identical X-CSRF-Token header value obtained
+    from GET /api/v1/csrf. Sending a request without these returns 403.
+    JSON request bodies reject unknown fields and are limited to 1 MiB.
+    POST /api/v1/ingest/email instead accepts raw message/rfc822 bytes and uses
+    its own Bearer token; Access JWTs, cookies and browser CSRF do not authorize it.
+servers:
+  - url: /
+security:
+  - accessAssertion: []
+  - accessCookie: []
+tags:
+  - name: Health
+  - name: Setup
+  - name: Ingest
+  - name: Messages
+  - name: Deliveries
+  - name: Endpoints
+paths:
+  /health/live:
+    get:
+      tags: [Health]
+      summary: Process liveness
+      security: []
+      responses:
+        '204': {description: Process is running}
+  /health/ready:
+    get:
+      tags: [Health]
+      summary: Database readiness
+      description: Does not verify upstream mail reachability or webhook delivery.
+      security: []
+      responses:
+        '204': {description: Database ping succeeded}
+        '503': {description: Database is unavailable}
+  /api/v1/csrf:
+    get:
+      tags: [Setup]
+      summary: Issue a CSRF token and matching HttpOnly cookie
+      responses:
+        '200':
+          description: Token expires after twelve hours.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [token]
+                properties:
+                  token: {type: string}
+  /api/v1/overview:
+    get:
+      tags: [Setup]
+      summary: Inbox, delivery, storage and backup counts
+      responses:
+        '200':
+          description: Current overview
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Overview'}
+  /api/v1/setup/status:
+    get:
+      tags: [Setup]
+      summary: Mode-specific mail intake observations
+      description: |
+        The smtp variant reports MX and STARTTLS configuration, but external
+        SMTP reachability remains not_verified until checked externally. The
+        cloudflare variant reports locally loaded intake configuration and the
+        latest mail committed to this database. It cannot prove that Email
+        Routing, the Worker and R2 are deployed or report their pending backlog.
+      responses:
+        '200':
+          description: Current setup observations
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/SetupStatus'}
+  /api/v1/ingest/email:
+    post:
+      tags: [Ingest]
+      summary: Durably accept one raw email from the Cloudflare Worker
+      description: |
+        Available only when MAIL_HERO_INGEST_TRANSPORT=cloudflare. This is a
+        machine-to-machine endpoint with a dedicated 64-character lowercase
+        hex token in a literal Authorization: Bearer header. It does not use
+        Cloudflare Access owner auth, cookies,
+        Origin or CSRF. The request body must be the complete raw MIME message,
+        at most 25 MiB. X-Mail-Hero-Metadata is unpadded base64url of UTF-8 JSON
+        matching IngestMetadata, for example:
+        {"from":"sender@example.org","to":"hero@example.org",
+        "received_at":"2026-09-23T16:00:00Z","size_bytes":1234}.
+        size_bytes is the expected byte length of the raw request body, not a
+        character count or the HTTP Content-Length alone. The server reads the
+        whole body and checks its exact length before any PostgreSQL commit;
+        a mismatch returns 503 with Retry-After: 30 and never 204. The from value is the actual
+        SMTP envelope sender and may be empty for a null reverse-path; to must
+        equal the single configured receive address. received_at is a nonzero
+        RFC 3339 timestamp and cannot be more than five minutes in the future.
+        The stable ingest ID and metadata must be reused unchanged on retries.
+        A 204 means the raw mail, envelope, routing snapshot and external ID
+        receipt were committed together in PostgreSQL. An identical retry gets
+        the same 204; reusing the ID for different mail or received_at gets 409.
+        A 204 does not mean MIME parsing or downstream webhook delivery finished.
+      security:
+        - ingestBearer: []
+      parameters:
+        - name: X-Mail-Hero-Ingest-Id
+          in: header
+          required: true
+          description: Stable lowercase canonical UUIDv4 generated once per received email.
+          schema: {$ref: '#/components/schemas/IngestID'}
+        - name: X-Mail-Hero-Metadata
+          in: header
+          required: true
+          description: Unpadded base64url-encoded IngestMetadata JSON envelope metadata; at most 2048 characters.
+          schema: {type: string, minLength: 1, maxLength: 2048}
+      requestBody:
+        required: true
+        content:
+          message/rfc822:
+            schema: {type: string, format: binary}
+      responses:
+        '204':
+          description: Raw message durably committed, or an identical retry already committed; no response body.
+          headers:
+            X-Mail-Hero-Ingest-Id:
+              description: Exact echo of the accepted request ingest ID; the Worker checks this before removing its pending R2 object.
+              schema: {$ref: '#/components/schemas/IngestID'}
+        '400': {description: Invalid ingest ID, Content-Type or encoded metadata, including missing or negative size_bytes, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+        '401': {description: Missing or invalid machine Bearer token, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+        '404': {description: Cloudflare ingest transport is disabled, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+        '409': {description: Ingest ID already belongs to different mail or received_at, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+        '413': {description: Declared size_bytes, Content-Length or raw message exceeds 25 MiB, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+        '422': {description: Recipient does not match or envelope/message data is invalid, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+        '503':
+          description: Body read or exact length mismatch, capacity or database failure before a known commit; retry the same ingest ID and bytes. A size mismatch returns error code incomplete_body and Retry-After 30, never 204. Other failures may return Retry-After 30 or 60 seconds.
+          headers:
+            Retry-After: {schema: {type: string}, description: Suggested minimum seconds before retry, when present}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+  /api/v1/settings:
+    get:
+      tags: [Setup]
+      summary: Read current settings
+      responses:
+        '200':
+          description: Settings
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Settings'}
+    patch:
+      tags: [Setup]
+      summary: Update settings with optimistic version check
+      description: |
+        Changes to delivery mode and target affect newly received mail only.
+        To enable retention from null or shorten the current number of days,
+        first GET /api/v1/settings/retention-preview?days=N and submit its
+        preview_token as retention_confirmation with the matching version and
+        retention_days. A longer period or null needs no preview token.
+      parameters: [{$ref: '#/components/parameters/Origin'}, {$ref: '#/components/parameters/CSRF'}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [version]
+              properties:
+                version: {$ref: '#/components/schemas/Version'}
+                mode: {type: string, enum: [archive, forward]}
+                current_endpoint_id: {type: [string, 'null'], format: uuid}
+                send_paused: {type: boolean}
+                retention_days: {type: [integer, 'null'], minimum: 1, maximum: 3650}
+                retention_confirmation: {type: string, writeOnly: true, description: Short-lived token from retention preview; required when enabling or shortening retention}
+      responses:
+        '200':
+          description: Updated settings
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Settings'}
+        '400': {$ref: '#/components/responses/Invalid'}
+        '409': {$ref: '#/components/responses/Conflict'}
+  /api/v1/settings/retention-preview:
+    get:
+      tags: [Setup]
+      summary: Preview the effect of a retention period before confirmation
+      description: |
+        Counts only currently eligible messages. The count and bytes are a
+        snapshot, not a reservation; they can change before the background
+        cleanup runs. The token is bound to the owner, settings version and
+        requested days, and expires after ten minutes.
+      parameters:
+        - name: days
+          in: query
+          required: true
+          schema: {type: integer, minimum: 1, maximum: 3650}
+      responses:
+        '200':
+          description: Eligible content preview and confirmation token
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/RetentionPreview'}
+        '400': {$ref: '#/components/responses/Invalid'}
+  /api/v1/messages:
+    get:
+      tags: [Messages]
+      summary: Search and page through received mail messages
+      parameters:
+        - {$ref: '#/components/parameters/Limit'}
+        - {$ref: '#/components/parameters/Cursor'}
+        - {name: q, in: query, schema: {type: string, maxLength: 200}, description: Subject, sender or normalized body search}
+        - {name: status, in: query, schema: {type: string}, description: Latest delivery state; unarranged for no event}
+        - {name: parse_state, in: query, schema: {type: string, enum: [pending, parsing, ready, failed]}}
+        - {name: has_attachment, in: query, schema: {type: boolean}}
+        - {name: received_after, in: query, schema: {type: string, format: date-time}}
+        - {name: received_before, in: query, schema: {type: string, format: date-time}}
+      responses:
+        '200':
+          description: Page of messages; empty next_cursor means no next page.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MessagePage'}
+        '400': {$ref: '#/components/responses/Invalid'}
+  /api/v1/messages/{id}:
+    parameters: [{$ref: '#/components/parameters/ID'}]
+    get:
+      tags: [Messages]
+      summary: Read parsed message and all delivery summaries
+      responses:
+        '200':
+          description: Message detail
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [message, deliveries]
+                properties:
+                  message: {$ref: '#/components/schemas/MessageDetail'}
+                  deliveries: {type: array, items: {$ref: '#/components/schemas/Delivery'}}
+        '404': {$ref: '#/components/responses/NotFound'}
+    patch:
+      tags: [Messages]
+      summary: Mark a message read or unread
+      parameters: [{$ref: '#/components/parameters/Origin'}, {$ref: '#/components/parameters/CSRF'}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [version, read]
+              properties:
+                version: {$ref: '#/components/schemas/Version'}
+                read: {type: boolean}
+      responses:
+        '200':
+          description: Updated read timestamp and version
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [read_at, version]
+                properties:
+                  read_at: {$ref: '#/components/schemas/NullableTime'}
+                  version: {$ref: '#/components/schemas/Version'}
+        '409': {$ref: '#/components/responses/Conflict'}
+  /api/v1/messages/{id}/raw:
+    get:
+      tags: [Messages]
+      summary: Download original MIME source
+      parameters: [{$ref: '#/components/parameters/ID'}]
+      responses:
+        '200':
+          description: Attachment download
+          content:
+            message/rfc822:
+              schema: {type: string, format: binary}
+        '410': {$ref: '#/components/responses/Gone'}
+  /api/v1/messages/{id}/attachments/{part_id}:
+    get:
+      tags: [Messages]
+      summary: Download a MIME part by its parsed part ID
+      parameters: [{$ref: '#/components/parameters/ID'}, {$ref: '#/components/parameters/PartID'}]
+      responses:
+        '200':
+          description: Attachment with Content-Disposition attachment and nosniff
+          content:
+            application/octet-stream:
+              schema: {type: string, format: binary}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '410': {$ref: '#/components/responses/Gone'}
+  /api/v1/messages/{id}/send:
+    post:
+      tags: [Messages]
+      summary: Create the first delivery event for an archived message
+      parameters: [{$ref: '#/components/parameters/ID'}, {$ref: '#/components/parameters/Origin'}, {$ref: '#/components/parameters/CSRF'}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/SendRequest'}
+      responses:
+        '201': {$ref: '#/components/responses/CreatedEvent'}
+        '409': {$ref: '#/components/responses/Conflict'}
+        '410': {$ref: '#/components/responses/Gone'}
+  /api/v1/messages/{id}/reparse:
+    post:
+      tags: [Messages]
+      summary: Queue a fresh parse of the unchanged raw MIME
+      description: Existing frozen delivery payloads are not modified.
+      parameters: [{$ref: '#/components/parameters/ID'}, {$ref: '#/components/parameters/Origin'}, {$ref: '#/components/parameters/CSRF'}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/ActionRequest'}
+      responses:
+        '202':
+          description: Parse queued
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status]
+                properties:
+                  status: {const: pending}
+        '409': {$ref: '#/components/responses/Conflict'}
+  /api/v1/messages/{id}/content:
+    delete:
+      tags: [Messages]
+      summary: Remove saved content and cancel unsent deliveries
+      parameters: [{$ref: '#/components/parameters/ID'}, {$ref: '#/components/parameters/Origin'}, {$ref: '#/components/parameters/CSRF'}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/DeleteContentRequest'}
+      responses:
+        '200':
+          description: Content removed
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [deleted]
+                properties:
+                  deleted: {const: true}
+        '409': {$ref: '#/components/responses/Conflict'}
+  /api/v1/deliveries:
+    get:
+      tags: [Deliveries]
+      summary: Page through delivery events
+      parameters:
+        - {$ref: '#/components/parameters/Limit'}
+        - {$ref: '#/components/parameters/Cursor'}
+        - {name: status, in: query, schema: {type: string, enum: [pending, sending, retry_wait, delivered, failed, cancelled]}}
+      responses:
+        '200':
+          description: Page of events
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/DeliveryPage'}
+  /api/v1/deliveries/{id}:
+    get:
+      tags: [Deliveries]
+      summary: Read frozen payload and HTTP attempt history
+      parameters: [{$ref: '#/components/parameters/ID'}]
+      responses:
+        '200':
+          description: Event detail; payload is null after content deletion.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [delivery, attempts, payload, payload_sha256]
+                properties:
+                  delivery: {$ref: '#/components/schemas/Delivery'}
+                  attempts: {type: array, items: {$ref: '#/components/schemas/Attempt'}}
+                  payload: {type: [object, 'null'], additionalProperties: true}
+                  payload_sha256: {type: string, description: Base64 encoded PostgreSQL bytea hash}
+        '404': {$ref: '#/components/responses/NotFound'}
+  /api/v1/deliveries/{id}/retry:
+    post:
+      tags: [Deliveries]
+      summary: Schedule one manual retry of the same event and frozen payload
+      parameters: [{$ref: '#/components/parameters/ID'}, {$ref: '#/components/parameters/Origin'}, {$ref: '#/components/parameters/CSRF'}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/ActionRequest'}
+      responses:
+        '202': {$ref: '#/components/responses/AcceptedEvent'}
+        '409': {$ref: '#/components/responses/Conflict'}
+        '410': {$ref: '#/components/responses/Gone'}
+  /api/v1/deliveries/{id}/cancel:
+    post:
+      tags: [Deliveries]
+      summary: Cancel attempts that have not yet been sent
+      parameters: [{$ref: '#/components/parameters/ID'}, {$ref: '#/components/parameters/Origin'}, {$ref: '#/components/parameters/CSRF'}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/ActionRequest'}
+      responses:
+        '200':
+          description: Event cancelled
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [event_id, state]
+                properties:
+                  event_id: {$ref: '#/components/schemas/UUID'}
+                  state: {const: cancelled}
+        '409': {$ref: '#/components/responses/Conflict'}
+  /api/v1/deliveries/{id}/replay:
+    post:
+      tags: [Deliveries]
+      summary: Create a new event from the current message and selected endpoint
+      description: This may cause the consumer to perform the business action again.
+      parameters: [{$ref: '#/components/parameters/ID'}, {$ref: '#/components/parameters/Origin'}, {$ref: '#/components/parameters/CSRF'}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/ReplayRequest'}
+      responses:
+        '201': {$ref: '#/components/responses/CreatedEvent'}
+        '409': {$ref: '#/components/responses/Conflict'}
+  /api/v1/endpoints:
+    get:
+      tags: [Endpoints]
+      summary: List active webhook endpoints
+      responses:
+        '200':
+          description: Endpoints without credential values
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items: {type: array, items: {$ref: '#/components/schemas/Endpoint'}}
+    post:
+      tags: [Endpoints]
+      summary: Create a webhook endpoint
+      parameters: [{$ref: '#/components/parameters/Origin'}, {$ref: '#/components/parameters/CSRF'}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/EndpointCreate'}
+      responses:
+        '201':
+          description: Created endpoint ID
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [id]
+                properties:
+                  id: {$ref: '#/components/schemas/UUID'}
+        '400': {$ref: '#/components/responses/Invalid'}
+  /api/v1/endpoints/{id}:
+    patch:
+      tags: [Endpoints]
+      summary: Change endpoint settings or create a new target revision
+      description: Old queued deliveries keep their original URL and payload.
+      parameters: [{$ref: '#/components/parameters/ID'}, {$ref: '#/components/parameters/Origin'}, {$ref: '#/components/parameters/CSRF'}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/EndpointPatch'}
+      responses:
+        '200':
+          description: Updated endpoint
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [id, version, current_revision_id, pending_old_revision_unchanged]
+                properties:
+                  id: {$ref: '#/components/schemas/UUID'}
+                  version: {$ref: '#/components/schemas/Version'}
+                  current_revision_id: {$ref: '#/components/schemas/UUID'}
+                  pending_old_revision_unchanged: {type: boolean}
+        '409': {$ref: '#/components/responses/Conflict'}
+  /api/v1/endpoints/{id}/rotate-credential:
+    post:
+      tags: [Endpoints]
+      summary: Rotate credential across matching origin and auth-type revisions
+      parameters: [{$ref: '#/components/parameters/ID'}, {$ref: '#/components/parameters/Origin'}, {$ref: '#/components/parameters/CSRF'}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [version, credential]
+              properties:
+                version: {$ref: '#/components/schemas/Version'}
+                credential: {type: string, minLength: 1, writeOnly: true}
+      responses:
+        '200':
+          description: Rotation completed
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [affected_revisions, version]
+                properties:
+                  affected_revisions: {type: integer, minimum: 1}
+                  version: {$ref: '#/components/schemas/Version'}
+        '409': {$ref: '#/components/responses/Conflict'}
+  /api/v1/endpoints/{id}/check:
+    post:
+      tags: [Endpoints]
+      summary: Check URL policy and DNS without a business POST
+      description: Current implementation does not yet probe the TLS handshake.
+      parameters: [{$ref: '#/components/parameters/ID'}, {$ref: '#/components/parameters/Origin'}, {$ref: '#/components/parameters/CSRF'}]
+      responses:
+        '200':
+          description: Diagnostic observation
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/EndpointCheck'}
+  /api/v1/endpoints/{id}/test:
+    post:
+      tags: [Endpoints]
+      summary: Queue a synthetic test event for real HTTP delivery
+      description: The consumer might treat this as real mail; it is excluded from the regular inbox.
+      parameters: [{$ref: '#/components/parameters/ID'}, {$ref: '#/components/parameters/Origin'}, {$ref: '#/components/parameters/CSRF'}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/ActionRequest'}
+      responses:
+        '202':
+          description: Synthetic event queued
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [event_id]
+                properties:
+                  event_id: {$ref: '#/components/schemas/UUID'}
+                  synthetic_test: {type: boolean}
+                  warning: {type: string}
+components:
+  securitySchemes:
+    accessAssertion: {type: apiKey, in: header, name: Cf-Access-Jwt-Assertion}
+    accessCookie: {type: apiKey, in: cookie, name: CF_Authorization}
+    ingestBearer:
+      type: http
+      scheme: bearer
+      bearerFormat: opaque
+      description: Separate 64-character lowercase hex token loaded from MAIL_HERO_INGEST_TOKEN_FILE; not an Access JWT.
+  parameters:
+    ID: {name: id, in: path, required: true, schema: {$ref: '#/components/schemas/UUID'}}
+    PartID: {name: part_id, in: path, required: true, schema: {type: string}, description: Opaque MIME part identifier from message detail}
+    Limit: {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 100, default: 50}}
+    Cursor: {name: cursor, in: query, schema: {type: string}, description: Opaque cursor from the previous page}
+    Origin: {name: Origin, in: header, required: true, schema: {type: string, format: uri}, description: Must match the request host; HTTPS required outside development}
+    CSRF: {name: X-CSRF-Token, in: header, required: true, schema: {type: string}, description: Must equal the mail_hero_csrf cookie}
+  responses:
+    Invalid: {description: Invalid request, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+    Conflict: {description: Stale version or invalid current state, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+    NotFound: {description: Resource not found, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+    Gone: {description: Mail content has been deleted, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+    CreatedEvent:
+      description: Event persisted
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [event_id]
+            properties:
+              event_id: {$ref: '#/components/schemas/UUID'}
+    AcceptedEvent:
+      description: Existing event scheduled
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [event_id, state]
+            properties:
+              event_id: {$ref: '#/components/schemas/UUID'}
+              state: {const: pending}
+  schemas:
+    UUID: {type: string, format: uuid}
+    IngestID:
+      type: string
+      format: uuid
+      pattern: '^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
+    IngestMetadata:
+      type: object
+      description: UTF-8 JSON encoded as unpadded base64url in X-Mail-Hero-Metadata.
+      required: [from, to, received_at, size_bytes]
+      properties:
+        from: {type: string, description: Actual SMTP envelope sender; empty string represents a null reverse-path}
+        to: {type: string, description: Exact configured receive address}
+        received_at: {type: string, format: date-time, description: Time the Cloudflare Worker first accepted this mail}
+        size_bytes: {type: integer, minimum: 0, maximum: 26214400, description: Exact number of raw message/rfc822 body bytes}
+    Version: {type: integer, minimum: 1}
+    NullableTime: {type: [string, 'null'], format: date-time}
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message, request_id]
+          properties:
+            code: {type: string}
+            message: {type: string}
+            request_id: {type: string}
+    ActionRequest:
+      type: object
+      additionalProperties: false
+      required: [action_request_id]
+      properties:
+        action_request_id: {$ref: '#/components/schemas/UUID'}
+    SendRequest:
+      type: object
+      additionalProperties: false
+      required: [endpoint_id, action_request_id]
+      properties:
+        endpoint_id: {$ref: '#/components/schemas/UUID'}
+        action_request_id: {$ref: '#/components/schemas/UUID'}
+    ReplayRequest:
+      type: object
+      additionalProperties: false
+      required: [endpoint_id, message_version, action_request_id]
+      properties:
+        endpoint_id: {$ref: '#/components/schemas/UUID'}
+        message_version: {$ref: '#/components/schemas/Version'}
+        action_request_id: {$ref: '#/components/schemas/UUID'}
+    DeleteContentRequest:
+      type: object
+      additionalProperties: false
+      required: [version, action_request_id]
+      properties:
+        version: {$ref: '#/components/schemas/Version'}
+        action_request_id: {$ref: '#/components/schemas/UUID'}
+    Settings:
+      type: object
+      required: [version, mode, current_endpoint_id, send_paused, effective_send_paused, retention_days, receive_address, logical_bytes, logical_limit_bytes, last_backup_at]
+      properties:
+        version: {$ref: '#/components/schemas/Version'}
+        mode: {type: string, enum: [archive, forward]}
+        current_endpoint_id: {type: [string, 'null'], format: uuid}
+        send_paused: {type: boolean}
+        effective_send_paused: {type: boolean}
+        retention_days: {type: [integer, 'null']}
+        receive_address: {type: string}
+        logical_bytes: {type: integer}
+        logical_limit_bytes: {type: integer}
+        last_backup_at: {$ref: '#/components/schemas/NullableTime'}
+    RetentionPreview:
+      type: object
+      required: [version, days, candidates, bytes_to_clear, preview_token, expires_at]
+      properties:
+        version: {$ref: '#/components/schemas/Version'}
+        days: {type: integer, minimum: 1, maximum: 3650}
+        candidates: {type: integer, minimum: 0}
+        bytes_to_clear: {type: integer, minimum: 0}
+        preview_token: {type: string, description: Submit unchanged as retention_confirmation}
+        expires_at: {type: string, format: date-time}
+    Overview:
+      type: object
+      required: [receive_address, counts, storage, backup, send_paused]
+      properties:
+        receive_address: {type: string}
+        counts:
+          type: object
+          required: [messages, pending, failed, delivered]
+          properties:
+            messages: {type: integer}
+            pending: {type: integer}
+            failed: {type: integer}
+            delivered: {type: integer}
+        storage:
+          type: object
+          required: [logical_bytes, limit_bytes, database_bytes]
+          properties:
+            logical_bytes: {type: integer}
+            limit_bytes: {type: integer}
+            database_bytes: {type: integer}
+        backup:
+          type: object
+          required: [last_at]
+          properties:
+            last_at: {$ref: '#/components/schemas/NullableTime'}
+        send_paused: {type: boolean}
+    SetupStatus:
+      oneOf:
+        - {$ref: '#/components/schemas/SMTPSetupStatus'}
+        - {$ref: '#/components/schemas/CloudflareSetupStatus'}
+      discriminator:
+        propertyName: ingest_transport
+        mapping:
+          smtp: '#/components/schemas/SMTPSetupStatus'
+          cloudflare: '#/components/schemas/CloudflareSetupStatus'
+    SMTPSetupStatus:
+      type: object
+      required: [ingest_transport, receive_address, address_valid, mx_configured, smtp_external, last_received_at, starttls_configured]
+      properties:
+        ingest_transport: {const: smtp}
+        receive_address: {type: string}
+        address_valid: {type: boolean}
+        mx_configured: {type: boolean}
+        smtp_external: {const: not_verified}
+        last_received_at: {$ref: '#/components/schemas/NullableTime', description: Latest locally committed SMTP mail; not proof of public port reachability}
+        starttls_configured: {type: boolean}
+    CloudflareSetupStatus:
+      type: object
+      required: [ingest_transport, receive_address, address_valid, last_received_at, checks]
+      properties:
+        ingest_transport: {const: cloudflare}
+        receive_address: {type: string}
+        address_valid: {type: boolean}
+        last_received_at: {$ref: '#/components/schemas/NullableTime', description: Latest locally committed Cloudflare mail; does not report Worker or R2 backlog}
+        checks:
+          type: array
+          description: Local intake configuration, unverified Cloudflare edge routing/staging, and observed local receipt. Pending edge status is not a live backlog measurement.
+          items: {$ref: '#/components/schemas/SetupCheck'}
+    SetupCheck:
+      type: object
+      required: [id, label, status, detail]
+      properties:
+        id: {type: string}
+        label: {type: string}
+        status: {type: string, enum: [ok, warning, error, pending]}
+        detail: {type: string}
+        action: {type: string}
+    Address:
+      type: object
+      required: [address, name]
+      properties:
+        address: {type: string}
+        name: {type: string}
+    Header:
+      type: object
+      required: [key, value]
+      properties:
+        key: {type: string}
+        value: {type: string}
+    Attachment:
+      type: object
+      required: [part_id, filename, content_type, size]
+      properties:
+        part_id: {type: string}
+        filename: {type: string}
+        content_type: {type: string}
+        size: {type: integer}
+    MessageSummary:
+      type: object
+      required: [id, subject, from, received_at, parse_state, delivery_state, has_attachment, size_bytes, read_at, preview, content_deleted_at]
+      properties:
+        id: {$ref: '#/components/schemas/UUID'}
+        subject: {type: string}
+        from: {type: string}
+        received_at: {type: string, format: date-time}
+        parse_state: {type: string, enum: [pending, parsing, ready, failed]}
+        delivery_state: {type: string}
+        has_attachment: {type: boolean}
+        size_bytes: {type: integer}
+        read_at: {$ref: '#/components/schemas/NullableTime'}
+        preview: {type: string}
+        content_deleted_at: {$ref: '#/components/schemas/NullableTime'}
+    MessagePage:
+      type: object
+      required: [items, next_cursor]
+      properties:
+        items: {type: array, items: {$ref: '#/components/schemas/MessageSummary'}}
+        next_cursor: {type: string}
+    MessageDetail:
+      type: object
+      required: [id, subject, from, to, cc, reply_to, text, html, headers, attachments, warnings, sent_at, rfc_message_id, envelope_from, envelope_to, parse_state, delivery_state, version, received_at, last_received_at, arrival_count, size_bytes, content_deleted_at, read_at]
+      properties:
+        id: {$ref: '#/components/schemas/UUID'}
+        subject: {type: string}
+        from: {type: string}
+        to: {type: [array, 'null'], items: {$ref: '#/components/schemas/Address'}}
+        cc: {type: [array, 'null'], items: {$ref: '#/components/schemas/Address'}}
+        reply_to: {type: [array, 'null'], items: {$ref: '#/components/schemas/Address'}}
+        text: {type: string}
+        html: {type: string, description: Sanitized HTML; still render in a sandboxed iframe}
+        headers: {type: [array, 'null'], items: {$ref: '#/components/schemas/Header'}}
+        attachments: {type: [array, 'null'], items: {$ref: '#/components/schemas/Attachment'}}
+        warnings: {type: [array, 'null'], items: {type: string}}
+        sent_at: {$ref: '#/components/schemas/NullableTime'}
+        rfc_message_id: {type: [string, 'null']}
+        envelope_from: {type: string}
+        envelope_to: {type: string}
+        parse_state: {type: string, enum: [pending, parsing, ready, failed]}
+        delivery_state: {type: string}
+        version: {$ref: '#/components/schemas/Version'}
+        received_at: {type: string, format: date-time}
+        last_received_at: {type: string, format: date-time}
+        arrival_count: {type: integer}
+        size_bytes: {type: integer}
+        content_deleted_at: {$ref: '#/components/schemas/NullableTime'}
+        read_at: {$ref: '#/components/schemas/NullableTime'}
+    Delivery:
+      type: object
+      required: [event_id, message_id, subject, from, endpoint_label, endpoint_url, state, effective_state, attempt_count, created_at, next_attempt_at, delivered_at, last_error, generation, replay_of_event_id, retry_mode, content_deleted]
+      properties:
+        event_id: {$ref: '#/components/schemas/UUID'}
+        message_id: {$ref: '#/components/schemas/UUID'}
+        subject: {type: string}
+        from: {type: string}
+        endpoint_label: {type: string}
+        endpoint_url: {type: string}
+        state: {type: string, enum: [pending, sending, retry_wait, delivered, failed, cancelled]}
+        effective_state: {type: string, description: Can be paused while underlying state remains pending or retry_wait}
+        attempt_count: {type: integer}
+        created_at: {type: string, format: date-time}
+        next_attempt_at: {type: string, format: date-time}
+        delivered_at: {$ref: '#/components/schemas/NullableTime'}
+        last_error: {type: [string, 'null']}
+        generation: {type: integer}
+        replay_of_event_id: {type: [string, 'null'], format: uuid}
+        retry_mode: {type: string, enum: [auto, once]}
+        content_deleted: {type: boolean}
+    DeliveryPage:
+      type: object
+      required: [items, next_cursor]
+      properties:
+        items: {type: array, items: {$ref: '#/components/schemas/Delivery'}}
+        next_cursor: {type: string}
+    Attempt:
+      type: object
+      required: [attempt_no, started_at, finished_at, http_status, outcome, error_code, response_preview, credential_key_id]
+      properties:
+        attempt_no: {type: integer}
+        started_at: {type: string, format: date-time}
+        finished_at: {$ref: '#/components/schemas/NullableTime'}
+        http_status: {type: [integer, 'null']}
+        outcome: {type: [string, 'null']}
+        error_code: {type: [string, 'null']}
+        response_preview: {type: [string, 'null']}
+        credential_key_id: {type: [string, 'null']}
+    Endpoint:
+      type: object
+      required: [id, label, url, auth_type, credential_configured, rate_per_minute, timeout_seconds, paused, paused_reason, blocked_reason, version, current_revision_id]
+      properties:
+        id: {$ref: '#/components/schemas/UUID'}
+        label: {type: string}
+        url: {type: string, format: uri}
+        auth_type: {type: string, enum: [none, bearer, basic]}
+        credential_configured: {type: boolean}
+        rate_per_minute: {type: integer, minimum: 1, maximum: 60}
+        timeout_seconds: {type: integer, minimum: 1, maximum: 120}
+        paused: {type: boolean}
+        paused_reason: {type: [string, 'null']}
+        blocked_reason: {type: [string, 'null']}
+        version: {$ref: '#/components/schemas/Version'}
+        current_revision_id: {$ref: '#/components/schemas/UUID'}
+    EndpointFields:
+      type: object
+      properties:
+        label: {type: string, minLength: 1, maxLength: 120}
+        url: {type: string, format: uri}
+        auth_type: {type: string, enum: [none, bearer, basic]}
+        credential: {type: string, maxLength: 4096, writeOnly: true}
+        rate_per_minute: {type: integer, minimum: 1, maximum: 60}
+        timeout_seconds: {type: integer, minimum: 1, maximum: 120}
+        paused: {type: boolean}
+    EndpointCreate:
+      allOf:
+        - {$ref: '#/components/schemas/EndpointFields'}
+        - type: object
+          required: [label, url, action_request_id]
+          properties:
+            action_request_id: {$ref: '#/components/schemas/UUID'}
+    EndpointPatch:
+      allOf:
+        - {$ref: '#/components/schemas/EndpointFields'}
+        - type: object
+          required: [version]
+          properties:
+            version: {$ref: '#/components/schemas/Version'}
+            action_request_id: {type: string, description: Accepted but not currently used for PATCH deduplication}
+    EndpointCheck:
+      type: object
+      required: [url_valid, dns_status, tls_status]
+      properties:
+        url_valid: {type: boolean}
+        dns_status: {type: string, enum: [blocked, failed, resolved]}
+        resolved_count: {type: integer}
+        tls_status: {const: not_checked}
+        business_contract: {const: not_verified}

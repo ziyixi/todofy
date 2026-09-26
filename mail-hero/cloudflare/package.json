@@ -1,0 +1,25 @@
+{
+  "name": "mail-hero-cloudflare-ingress",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "test": "node --test test/*.test.mjs",
+    "typecheck": "tsc --noEmit",
+    "deploy": "wrangler deploy --config wrangler.native.toml",
+    "dev": "wrangler dev --config wrangler.native.toml --ip 127.0.0.1",
+    "deploy:legacy": "wrangler deploy --config wrangler.toml"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "5.20260926.1",
+    "esbuild": "0.28.1",
+    "miniflare": "5.20260925.0-alpha",
+    "typescript": "5.9.3",
+    "wrangler": "4.141.0"
+  },
+  "dependencies": {
+    "jose": "6.2.12",
+    "parse5": "8.0.1",
+    "postal-mime": "3.0.1"
+  }
+}

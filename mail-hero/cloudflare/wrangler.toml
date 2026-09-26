@@ -1,0 +1,15 @@
+name = "mail-hero-ingress"
+main = "src/index.ts"
+compatibility_date = "2026-09-14"
+workers_dev = true
+
+[vars]
+RECEIVE_ADDRESS = "inbox@example.com"
+INGEST_URL = "https://mail-hero.example.com/api/v1/ingest/email"
+
+[[r2_buckets]]
+binding = "MAIL_BUFFER"
+bucket_name = "mail-hero-buffer"
+
+[triggers]
+crons = ["*/5 * * * *"]

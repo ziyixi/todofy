@@ -1,0 +1,114 @@
+name: Native CI and deploy
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mail-hero-native-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  CI: 'true'
+  WRANGLER_SEND_METRICS: 'false'
+
+jobs:
+  checks:
+    name: Native checks
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: '26'
+          cache: npm
+          cache-dependency-path: |
+            cloudflare/package-lock.json
+            web/package-lock.json
+      - name: Install locked dependencies
+        run: |
+          npm ci --prefix cloudflare
+          npm ci --prefix web
+      - name: Validate deployment configuration
+        run: node --test deploy/test/*.test.mjs
+      - name: Check and test the Worker, including workerd bindings
+        working-directory: cloudflare
+        run: |
+          npm run typecheck
+          npm test
+      - name: Check, test and build the UI
+        working-directory: web
+        run: |
+          npm run typecheck
+          npm test
+          npm run build
+
+  deploy:
+    name: Deploy native Worker
+    needs: checks
+    if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    environment:
+      name: production
+      url: https://${{ vars.MAIL_HERO_PUBLIC_HOST }}
+    concurrency:
+      group: mail-hero-production
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: '26'
+          cache: npm
+          cache-dependency-path: |
+            cloudflare/package-lock.json
+            web/package-lock.json
+      - name: Build the verified revision
+        run: |
+          npm ci --prefix cloudflare
+          npm ci --prefix web
+          npm run build --prefix web
+      - name: Generate native production configuration
+        env:
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+          MAIL_HERO_D1_DATABASE_ID: ${{ vars.MAIL_HERO_D1_DATABASE_ID }}
+          MAIL_HERO_D1_DATABASE_NAME: ${{ vars.MAIL_HERO_D1_DATABASE_NAME || 'mail-hero' }}
+          MAIL_HERO_R2_BUCKET_NAME: ${{ vars.MAIL_HERO_R2_BUCKET_NAME || 'mail-hero-store' }}
+          MAIL_HERO_RECEIVE_ADDRESS: ${{ vars.MAIL_HERO_RECEIVE_ADDRESS }}
+          MAIL_HERO_ACCESS_ISSUER: ${{ vars.MAIL_HERO_ACCESS_ISSUER }}
+          MAIL_HERO_ACCESS_AUDIENCE: ${{ vars.MAIL_HERO_ACCESS_AUDIENCE }}
+          MAIL_HERO_ACCESS_OWNER: ${{ vars.MAIL_HERO_ACCESS_OWNER }}
+          MAIL_HERO_ACCESS_OWNER_ALIASES: ${{ secrets.MAIL_HERO_ACCESS_OWNER_ALIASES }}
+          MAIL_HERO_WEBHOOK_ALLOWED_HOSTS: ${{ vars.MAIL_HERO_WEBHOOK_ALLOWED_HOSTS }}
+          MAIL_HERO_PUBLIC_HOST: ${{ vars.MAIL_HERO_PUBLIC_HOST }}
+          MAIL_HERO_FORCE_SEND_PAUSED: ${{ vars.MAIL_HERO_FORCE_SEND_PAUSED }}
+          MAIL_HERO_MAINTENANCE_MODE: ${{ vars.MAIL_HERO_MAINTENANCE_MODE }}
+          MAIL_HERO_INGEST_DAILY_MESSAGE_LIMIT: ${{ vars.MAIL_HERO_INGEST_DAILY_MESSAGE_LIMIT || '300' }}
+          MAIL_HERO_INGEST_DAILY_BYTE_LIMIT: ${{ vars.MAIL_HERO_INGEST_DAILY_BYTE_LIMIT || '268435456' }}
+        run: node deploy/generate-ci-config.mjs
+      - name: Validate the native deployment bundle before changing D1
+        working-directory: cloudflare
+        run: npx --no-install wrangler deploy --dry-run --config wrangler.native.production.ci.json
+      - name: Apply migrations, then deploy the native Worker
+        working-directory: cloudflare
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          test -n "$CLOUDFLARE_API_TOKEN"
+          npx --no-install wrangler d1 migrations apply DB --remote --config wrangler.native.production.ci.json
+          npx --no-install wrangler deploy --config wrangler.native.production.ci.json
+      - name: Remove generated configuration
+        if: always()
+        run: rm -f cloudflare/wrangler.native.production.ci.json
