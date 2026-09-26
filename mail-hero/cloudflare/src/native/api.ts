@@ -4,12 +4,14 @@ import { HttpError, authenticate, csrfResponse, json, privateResponse, requireCS
 import { listDeliveries, listMessages, deliveryRoute, messageRoute } from './api-messages.ts'
 import { createEndpoint, endpointRoute, listEndpoints } from './api-endpoints.ts'
 import { currentSettings, overview, patchSettings, previewRetention, setupStatus } from './api-settings.ts'
+import { deliveryStats } from './api-delivery-stats.ts'
 import { missing } from './api-common.ts'
 
 export async function routeAPI(request: Request, env: Env, owner: string): Promise<Response> {
   const url = new URL(request.url), path = url.pathname.replace(/\/$/, ''), method = request.method
   if (path === '/api/v1/csrf' && method === 'GET') return csrfResponse(request, env, owner)
   if (path === '/api/v1/overview' && method === 'GET') return overview(env)
+  if (path === '/api/v1/delivery-stats' && method === 'GET') return deliveryStats(request, env)
   if (path === '/api/v1/setup/status' && method === 'GET') return setupStatus(env)
   if (path === '/api/v1/settings') {
     if (method === 'GET') return json(await currentSettings(env))

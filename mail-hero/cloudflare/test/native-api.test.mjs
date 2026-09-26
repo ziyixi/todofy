@@ -97,6 +97,73 @@ async function message(env, options = {}) {
   return id
 }
 
+test('delivery dashboard uses immutable attempt outcomes, UTC windows and distinct-event drill-down', async () => {
+  const env = environment(), api = await session(env), target = await endpoint(api)
+  const real = await message(env), synthetic = await message(env)
+  await env.DB.prepare("UPDATE messages SET origin='synthetic_test' WHERE id=?").bind(synthetic).run()
+  async function delivery(messageID, generation, state = 'delivered') {
+    const id = crypto.randomUUID()
+    await env.DB.prepare(`INSERT INTO deliveries(event_id,message_id,endpoint_revision_id,generation,payload_sha256,state,next_attempt_at,created_at)
+      VALUES(?,?,?,?,'synthetic-hash',?,'2026-09-25T00:00:00.000Z','2026-09-25T00:00:00.000Z')`)
+      .bind(id, messageID, target.current_revision_id, generation, state).run()
+    return id
+  }
+  async function attempt(eventID, no, outcome, finished) {
+    await env.DB.prepare(`INSERT INTO delivery_attempts(id,event_id,attempt_no,started_at,finished_at,outcome)
+      VALUES(?,?,?,?,?,?)`).bind(crypto.randomUUID(), eventID, no, finished, finished, outcome).run()
+  }
+  const retriedThenDelivered = await delivery(real, 1)
+  await attempt(retriedThenDelivered, 1, 'retryable', '2026-09-25T10:00:00.000Z')
+  await attempt(retriedThenDelivered, 2, 'retryable', '2026-09-25T11:00:00.000Z')
+  await attempt(retriedThenDelivered, 3, 'delivered', '2026-09-25T12:00:00.000Z')
+  const rejected = await delivery(real, 2, 'failed')
+  await attempt(rejected, 1, 'rejected', '2026-09-25T13:00:00.000Z')
+  const exhausted = await delivery(real, 3, 'failed')
+  await attempt(exhausted, 1, 'failed', '2026-09-26T00:00:00.000Z')
+  const unknown = await delivery(real, 4, 'retry_wait')
+  await attempt(unknown, 1, 'interrupted', '2026-09-25T14:00:00.000Z')
+  const notSent = await delivery(real, 5, 'retry_wait')
+  await attempt(notSent, 1, 'not_sent', '2026-09-25T15:00:00.000Z')
+  const testEvent = await delivery(synthetic, 1)
+  await attempt(testEvent, 1, 'delivered', '2026-09-25T16:00:00.000Z')
+  const period = 'from=2026-09-25T00%3A00%3A00.000Z&to=2026-09-27T00%3A00%3A00.000Z'
+  const chart = await api(`/delivery-stats?${period}&bucket=day`)
+  assert.equal(chart.status, 200)
+  assert.deepEqual(chart.data.totals, { succeeded: 1, retried: 2, failed: 2, unknown: 1 })
+  assert.deepEqual(chart.data.buckets.map(({ start, succeeded, retried, failed, unknown }) => ({ start, succeeded, retried, failed, unknown })), [
+    { start: '2026-09-25T00:00:00.000Z', succeeded: 1, retried: 2, failed: 1, unknown: 1 },
+    { start: '2026-09-26T00:00:00.000Z', succeeded: 0, retried: 0, failed: 1, unknown: 0 },
+  ])
+  const retryList = await api(`/deliveries?${period}&attempt_outcome=retried`)
+  assert.equal(retryList.status, 200)
+  assert.equal(retryList.data.count_semantics, 'distinct_delivery_events')
+  assert.deepEqual(retryList.data.items.map(item => item.event_id), [retriedThenDelivered])
+  assert.deepEqual((await api(`/deliveries?${period}&attempt_outcome=failed`)).data.items.map(item => item.event_id).sort(), [rejected, exhausted].sort())
+  const beforeFailed = await api('/deliveries?attempt_outcome=failed&from=2026-09-25T00%3A00%3A00.000Z&to=2026-09-26T00%3A00%3A00.000Z')
+  assert.deepEqual(beforeFailed.data.items.map(item => item.event_id), [rejected], 'to is exclusive for drill-down too')
+  assert.equal((await api(`/deliveries?${period}&attempt_outcome=retried&status=retry_wait`)).data.items.length, 0)
+  const plan = await env.DB.prepare(`EXPLAIN QUERY PLAN SELECT DISTINCT a.event_id FROM delivery_attempts a
+    WHERE a.finished_at>=? AND a.finished_at<? AND a.outcome='retryable'`)
+    .bind('2026-09-25T00:00:00.000Z', '2026-09-27T00:00:00.000Z').all()
+  assert.ok(plan.results.some(row => row.detail.includes('delivery_attempts_finished_idx')), JSON.stringify(plan.results))
+  const beforeBoundary = await api(`/delivery-stats?from=2026-09-25T12%3A00%3A00.000Z&to=2026-09-26T00%3A00%3A00.000Z&bucket=hour`)
+  assert.equal(beforeBoundary.data.buckets.length, 12)
+  assert.deepEqual(beforeBoundary.data.totals, { succeeded: 1, retried: 0, failed: 1, unknown: 1 })
+  const empty = await api('/delivery-stats?from=2026-09-24T00%3A00%3A00.000Z&to=2026-09-25T00%3A00%3A00.000Z')
+  assert.deepEqual(empty.data.totals, { succeeded: 0, retried: 0, failed: 0, unknown: 0 })
+  assert.equal(empty.data.buckets.length, 1)
+  for (const invalid of [
+    '/delivery-stats?from=2026-09-25T00:00:00&to=2026-09-26T00:00:00Z',
+    '/delivery-stats?from=2026-09-26T00:00:00Z&to=2026-09-25T00:00:00Z',
+    '/delivery-stats?from=2026-01-01T00:00:00Z&to=2026-09-25T00:00:00Z',
+    '/delivery-stats?from=2026-09-01T00:00:00Z&to=2026-09-25T00:00:00Z&bucket=hour',
+    '/delivery-stats?from=2026-02-30T00:00:00Z&to=2026-03-02T00:00:00Z',
+    `/deliveries?${period}&attempt_outcome=invalid`,
+    `/deliveries?${period}&attempt_outcome=constructor`,
+    '/deliveries?attempt_outcome=failed',
+  ]) assert.equal((await api(invalid)).status, 400, invalid)
+})
+
 test('native API defaults are archive with no retention, maintenance blocks mutations only', async () => {
   const env = environment(), api = await session(env)
   const initial = await api('/settings')

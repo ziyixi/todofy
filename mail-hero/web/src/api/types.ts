@@ -144,6 +144,21 @@ export interface Overview {
   alerts?: { configured: boolean; configuration_error: boolean; active: Array<{ code: string; severity: string; metrics: Record<string, number> }>; pending_notifications: number; failed_notifications: number }
 }
 
+export interface DeliveryStatsCounts {
+  succeeded: number
+  retried: number
+  failed: number
+  unknown: number
+}
+
+export interface DeliveryStats {
+  from: string
+  to: string
+  bucket: 'hour' | 'day'
+  totals: DeliveryStatsCounts
+  buckets: Array<DeliveryStatsCounts & { start: string }>
+}
+
 export interface SetupStatus {
   receive_address?: string
   ingest_transport: 'cloudflare'

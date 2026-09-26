@@ -72,7 +72,7 @@ test('native workerd: durable archive, protected API, stable retry identity and 
       assert.equal(new URL(request.url).hostname, 'consumer.example.org', 'no unexpected outbound fetch');
       calls.push({ body: await request.text(), key: request.headers.get('Idempotency-Key'), authorization: request.headers.get('Authorization'),
         userAgent: request.headers.get('User-Agent'), contentType: request.headers.get('Content-Type') });
-      return new Response(null, { status: calls.length === 1 ? 503 : 204 });
+      return new Response(null, { status: calls.length === 1 || calls.length === 3 ? 503 : 204 });
     },
   }));
   try {
@@ -136,6 +136,12 @@ test('native workerd: durable archive, protected API, stable retry identity and 
     assert.equal(retry.status, 204);
     await waitFor(() => db.prepare('SELECT * FROM deliveries WHERE event_id=?').bind(event.event_id).first(), row => row?.state === 'delivered', 'same event completes');
     assert.equal(calls.length, 2);
+    const statsFrom = new Date(Date.now() - 3600_000).toISOString();
+    const statsTo = new Date(Date.now() + 3600_000).toISOString();
+    const stats = await api(`/delivery-stats?from=${encodeURIComponent(statsFrom)}&to=${encodeURIComponent(statsTo)}&bucket=hour`);
+    assert.deepEqual(stats.totals, { succeeded: 1, retried: 1, failed: 0, unknown: 0 }, 'workerd reads actual completed attempts');
+    assert.deepEqual((await db.prepare('SELECT outcome FROM delivery_attempts WHERE event_id=? ORDER BY attempt_no').bind(event.event_id).all()).results.map(row => row.outcome), ['retryable', 'delivered']);
+    assert.ok(await db.prepare("SELECT name FROM sqlite_master WHERE type='index' AND name='delivery_attempts_finished_idx'").first(), 'range index migrated in workerd D1');
     assert.equal(calls[0].body, calls[1].body);
     assert.equal(calls[0].key, event.event_id);
     assert.equal(calls[1].key, event.event_id);
@@ -143,6 +149,23 @@ test('native workerd: durable archive, protected API, stable retry identity and 
     assert.equal(calls[0].authorization, 'Bearer ' + endpointBody.credential);
     assert.equal(calls[0].userAgent, 'MailHero/1.0');
     assert.equal(calls[0].contentType, 'application/json');
+    // Pause the endpoint while creating a second event so its first attempt
+    // cannot race the test's retry-mode setup. A single manual attempt that
+    // receives 503 is terminal and must be counted as failed, not retried.
+    await db.prepare('UPDATE webhook_endpoints SET paused=1 WHERE id=?').bind(endpoint.id).run();
+    const beforeReplay = (await api(`/messages/${message.id}`)).message;
+    const terminal = await api(`/deliveries/${event.event_id}/replay`, 'POST', { endpoint_id: endpoint.id,
+      message_version: beforeReplay.version, action_request_id: crypto.randomUUID() });
+    await db.batch([
+      db.prepare("UPDATE deliveries SET retry_mode='once',next_attempt_at='2000-01-01T00:00:00.000Z' WHERE event_id=?").bind(terminal.event_id),
+      db.prepare('UPDATE webhook_endpoints SET paused=0,next_send_at=NULL WHERE id=?').bind(endpoint.id),
+      db.prepare('UPDATE app_settings SET next_send_at=NULL'),
+    ]);
+    assert.equal((await mf.dispatchFetch('http://localhost/__test/enqueue', { method: 'POST', body: JSON.stringify({ type: 'deliver', eventID: terminal.event_id }) })).status, 204);
+    await waitFor(() => db.prepare('SELECT state FROM deliveries WHERE event_id=?').bind(terminal.event_id).first(), row => row?.state === 'failed', 'single transient attempt is terminal');
+    assert.equal((await db.prepare('SELECT outcome FROM delivery_attempts WHERE event_id=?').bind(terminal.event_id).first()).outcome, 'failed');
+    const finalStats = await api(`/delivery-stats?from=${encodeURIComponent(statsFrom)}&to=${encodeURIComponent(statsTo)}&bucket=hour`);
+    assert.deepEqual(finalStats.totals, { succeeded: 1, retried: 1, failed: 1, unknown: 0 });
     const fresh = (await api(`/messages/${message.id}`)).message;
     await api(`/messages/${message.id}/content`, 'DELETE', { version: fresh.version, action_request_id: crypto.randomUUID() });
     assert.equal((await mf.dispatchFetch(`http://localhost/api/v1/messages/${message.id}/raw`)).status, 410);
@@ -152,7 +175,7 @@ test('native workerd: durable archive, protected API, stable retry identity and 
     assert.ok(tombstone.content_deleted_at);
     assert.equal(tombstone.raw_key, null);
     assert.equal((await db.prepare('SELECT COUNT(*) n FROM messages').first()).n, 1);
-    assert.equal(calls.length, 2, 'deletion and redelivery do not replay side effects');
+    assert.equal(calls.length, 3, 'deletion and redelivery do not replay side effects');
   } finally {
     await mf.dispose();
     await rm(temp, { recursive: true, force: true });

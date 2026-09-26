@@ -28,6 +28,17 @@ describe('management API integration contract', () => {
     expect(setup.checks?.some(check => check.id === 'tls' || check.id === 'external')).toBe(false)
   })
 
+  it('requests the exact UTC half-open delivery statistics interval', async () => {
+    const payload = { from: '2026-09-01T00:00:00.000Z', to: '2026-09-02T00:00:00.000Z', bucket: 'day', totals: { succeeded: 1, retried: 0, failed: 0, unknown: 0 }, buckets: [] }
+    const fetcher = vi.fn().mockResolvedValueOnce(json(payload))
+    vi.stubGlobal('fetch', fetcher)
+    expect(await api.deliveryStats({ from: payload.from, to: payload.to, bucket: 'day' })).toEqual(payload)
+    const [url] = fetcher.mock.calls[0] as [string]
+    const requestURL = new URL(url, 'https://mail-hero.example.test')
+    expect(requestURL.pathname).toBe('/api/v1/delivery-stats')
+    expect(Object.fromEntries(requestURL.searchParams)).toEqual({ from: payload.from, to: payload.to, bucket: 'day' })
+  })
+
   it('obtains CSRF first and sends the exact action request body', async () => {
     const fetcher = vi.fn().mockResolvedValueOnce(json({ token: 'signed-token' })).mockResolvedValueOnce(json({ id: 'endpoint-1' }))
     vi.stubGlobal('fetch', fetcher)

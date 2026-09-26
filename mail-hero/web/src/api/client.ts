@@ -1,4 +1,4 @@
-import type { Attempt, Delivery, Endpoint, MessageDetail, MessageSummary, Overview, Page, RetentionPreview, Settings, SetupStatus } from './types'
+import type { Attempt, Delivery, DeliveryStats, Endpoint, MessageDetail, MessageSummary, Overview, Page, RetentionPreview, Settings, SetupStatus } from './types'
 
 const prefix = '/api/v1'
 let csrfToken: string | null = null
@@ -90,6 +90,7 @@ export const api = {
   reparse: (id: string, requestId = actionId()) => request<void>(`/messages/${encodeURIComponent(id)}/reparse`, { method: 'POST', body: { action_request_id: requestId } }),
   deleteContent: (id: string, version: number, requestId = actionId()) => request<void>(`/messages/${encodeURIComponent(id)}/content`, { method: 'DELETE', body: { version, action_request_id: requestId } }),
   deliveries: (params: Record<string, string | number | boolean | null | undefined>) => request<Page<Delivery>>(`/deliveries${query(params)}`),
+  deliveryStats: (params: { from: string; to: string; bucket: 'hour' | 'day' }) => request<DeliveryStats>(`/delivery-stats${query(params)}`),
   delivery: async (id: string): Promise<{ delivery: Delivery; attempts: Attempt[] }> => {
     const raw = await request<{ delivery: Delivery; attempts: Attempt[]; payload?: unknown }>(`/deliveries/${encodeURIComponent(id)}`)
     return { delivery: { ...raw.delivery, payload: raw.payload, paused: raw.delivery.effective_state === 'paused' }, attempts: raw.attempts }

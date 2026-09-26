@@ -2,6 +2,7 @@ import type { Env, ParsedMail } from './types'
 import { HttpError, json } from './security.ts'
 import { createDelivery, deleteMessageContent, enqueue } from './pipeline.ts'
 import { action, bad, body, conflict, delivery, deliveryJSON, deliverySelect, finishAction, first, gone, missing, now, page, paged, required, rows, uuid, version, type Row } from './api-common.ts'
+import { deliveryRange } from './api-delivery-stats.ts'
 
 type PreviewMail = Partial<ParsedMail> & { needs_review?: boolean; warnings?: string[] }
 async function readParsed(env: Env, message: Row): Promise<PreviewMail> {
@@ -163,8 +164,30 @@ export async function listDeliveries(request: Request, env: Env): Promise<Respon
   const { limit, time, id } = page(params)
   const status = params.get('status') || ''
   if (status && !['pending', 'sending', 'retry_wait', 'delivered', 'failed', 'cancelled'].includes(status)) bad('status 无效')
-  const items = await rows(env, deliverySelect + ` WHERE (?='' OR d.state=?) AND (? IS NULL OR (d.created_at,d.event_id)<(?,?)) ORDER BY d.created_at DESC,d.event_id DESC LIMIT ?`, status, status, time, time, id, limit + 1)
-  return json(paged(items.map(item => deliveryJSON(env, item)), limit, 'created_at', 'event_id'))
+  const outcome = params.get('attempt_outcome') || ''
+  const outcomeSQL: Record<string, string> = {
+    succeeded: "a.outcome='delivered'", retried: "a.outcome='retryable'",
+    failed: "a.outcome IN('rejected','failed')", unknown: "a.outcome='interrupted'",
+  }
+  if (outcome && !Object.hasOwn(outcomeSQL, outcome)) bad('attempt_outcome 无效')
+  if (!outcome && (params.has('from') || params.has('to'))) bad('按完成时间筛选需要 attempt_outcome')
+  if (outcome && (!params.has('from') || !params.has('to'))) bad('按尝试结果筛选需要 from 和 to')
+  // One event may have several matching attempts. Materializing distinct IDs
+  // keeps the drill-down list distinct, while the chart counts attempts.
+  const range = outcome ? deliveryRange(params) : null
+  const matching = range ? ` JOIN (
+    SELECT DISTINCT a.event_id FROM delivery_attempts a
+    WHERE a.finished_at>=? AND a.finished_at<? AND ${outcomeSQL[outcome]}
+  ) matched ON matched.event_id=d.event_id` : ''
+  const binds: unknown[] = range ? [range.from, range.to] : []
+  const conditions: string[] = []
+  if (range) conditions.push("m.origin='cloudflare'")
+  if (status) { conditions.push('d.state=?'); binds.push(status) }
+  if (time) { conditions.push('(d.created_at,d.event_id)<(?,?)'); binds.push(time, id) }
+  binds.push(limit + 1)
+  const items = await rows(env, deliverySelect + matching + ` ${conditions.length ? `WHERE ${conditions.join(' AND ')}` : ''} ORDER BY d.created_at DESC,d.event_id DESC LIMIT ?`, ...binds)
+  return json({ ...paged(items.map(item => deliveryJSON(env, item)), limit, 'created_at', 'event_id'),
+    ...(range ? { count_semantics: 'distinct_delivery_events' } : {}) })
 }
 
 export async function deliveryRoute(request: Request, env: Env, owner: string, id: string, sub: string): Promise<Response> {

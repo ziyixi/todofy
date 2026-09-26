@@ -6,6 +6,8 @@ Mail Hero 使用 **Workers Free + D1 + 私有 R2 Standard + SQLite Durable Objec
 
 本地生产配置为 gitignored `cloudflare/wrangler.native.production.toml`；`cloudflare/wrangler.native.toml` 是配置模板。[GitHub Actions](ci-cd.md) 从仓库变量和production secrets生成独立的CI配置并正式发布。以下资源创建和初始化步骤供新环境参考，**现有部署不需要重建资源或重新生成密钥**。完整证据和待验收项见 [验收记录](verification-native.md)。
 
+UI 的投递 Dashboard 可按 UTC 时段查看成功、进入重试、终止失败及结果未确认的 webhook 尝试，并进入对应投递记录。统计单位、时间边界和历史数据的限制见 [投递 Dashboard 统计口径](delivery-dashboard.md)。
+
 ## 1. 免费计划的运行边界
 
 保持 **Workers Free**，不需要 $5/月的 Workers Paid、Queues 或 Workflows。R2 需要单独开通订阅；它有免费额度，超出按量计费，没有本项目能够保证的每月 $2 硬账单上限。[R2 开通](https://developers.cloudflare.com/r2/get-started/)、[用量计费与提醒](https://developers.cloudflare.com/billing/understand/usage-based-billing/)

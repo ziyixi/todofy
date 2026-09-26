@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { Link, useNavigate, useParams } from 'react-router'
+import { Link, useLocation, useNavigate, useParams } from 'react-router'
 import { AlertCircle, ArrowLeft, ArrowRight, Ban, Clock3, RefreshCw, Repeat2, Send } from 'lucide-react'
 import { actionId, api } from '../api/client'
 import { Button, Card, CopyButton, ErrorState, formatDate, InfoRow, Loading, Modal, PageHead, SectionTitle, Status } from '../components/UI'
@@ -8,6 +8,7 @@ import { Button, Card, CopyButton, ErrorState, formatDate, InfoRow, Loading, Mod
 export default function DeliveryPage() {
   const { id = '' } = useParams()
   const navigate = useNavigate()
+  const location = useLocation()
   const queryClient = useQueryClient()
   const result = useQuery({ queryKey: ['delivery', id], queryFn: () => api.delivery(id), enabled: !!id })
   const endpoints = useQuery({ queryKey: ['endpoints'], queryFn: api.endpoints })
@@ -32,7 +33,7 @@ export default function DeliveryPage() {
   const canRetry = ['failed', 'retry_wait'].includes(delivery.state)
   const canReplay = !!message.data?.message && !message.data.message.content_deleted_at && message.data.message.parse_state === 'ready'
 
-  return <><div className="back-line"><Link to="/deliveries"><ArrowLeft size={16}/> 返回投递记录</Link><span>事件 / {id.slice(0, 8)}</span></div>
+  return <><div className="back-line"><Link to={`/deliveries${location.search}`}><ArrowLeft size={16}/> 返回投递记录</Link><span>事件 / {id.slice(0, 8)}</span></div>
     <PageHead eyebrow="WEBHOOK · 事件详情" title="投递详情" description="同一事件重试始终使用相同的请求内容与事件 ID。" action={<div className="head-actions">{canRetry && <Button onClick={() => open('retry')}><RefreshCw size={16}/> 重试原事件</Button>}{mutable && <Button variant="secondary" onClick={() => open('cancel')}><Ban size={16}/> 取消交付</Button>}</div>}/>
     {notice && <div className="success-banner" role="status">{notice}</div>}{actionError && <div className="inline-error" role="alert">{actionError}</div>}
     <div className="detail-grid"><div className="detail-main">

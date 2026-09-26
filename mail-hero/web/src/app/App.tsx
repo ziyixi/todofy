@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Link, NavLink, Navigate, Route, Routes, useLocation } from 'react-router'
-import { Activity, ArrowUpRight, Boxes, ChevronDown, CircleHelp, ClipboardList, Inbox, Mail, Menu, Settings2, Webhook, X } from 'lucide-react'
+import { Activity, ArrowUpRight, BarChart3, Boxes, ChevronDown, CircleHelp, ClipboardList, Inbox, Mail, Menu, Settings2, Webhook, X } from 'lucide-react'
 import { api } from '../api/client'
 import { CopyButton, formatBytes } from '../components/UI'
 import InboxPage from '../pages/InboxPage'
@@ -11,8 +11,10 @@ import DeliveryPage from '../pages/DeliveryPage'
 import EndpointsPage from '../pages/EndpointsPage'
 import SettingsPage from '../pages/SettingsPage'
 import SetupPage from '../pages/SetupPage'
+import DashboardPage from '../pages/DashboardPage'
 
 const navItems = [
+  { to: '/dashboard', label: '投递概览', icon: BarChart3 },
   { to: '/inbox', label: '收件箱', icon: Inbox },
   { to: '/deliveries', label: '投递记录', icon: ClipboardList },
   { to: '/endpoints', label: 'Webhook 目标', icon: Webhook },
@@ -47,7 +49,8 @@ function Shell({ children }: { children: React.ReactNode }) {
 
 export default function App() {
   return <Shell><Routes>
-    <Route path="/" element={<Navigate to="/inbox" replace />} />
+    <Route path="/" element={<Navigate to="/dashboard" replace />} />
+    <Route path="/dashboard" element={<DashboardPage />} />
     <Route path="/inbox" element={<InboxPage />} />
     <Route path="/messages/:id" element={<MessagePage />} />
     <Route path="/deliveries" element={<DeliveriesPage />} />

@@ -459,7 +459,9 @@ async function deliverJob(env:Env,eventID:string,attempts=0):Promise<number|null
   if(blocked) state='retry_wait';
   const finished=now();
   const statements=[
-    env.DB.prepare(`UPDATE delivery_attempts SET finished_at=?,http_status=?,duration_ms=?,outcome=?,error_code=? WHERE id=? AND finished_at IS NULL`).bind(finished,status,Date.now()-start,success?'delivered':transient?'retryable':'rejected',success?null:code,attemptID),
+    // Keep the attempt's terminal result immutable. A transient HTTP result
+    // that exhausts its retry window is a failure, not a scheduled retry.
+    env.DB.prepare(`UPDATE delivery_attempts SET finished_at=?,http_status=?,duration_ms=?,outcome=?,error_code=? WHERE id=? AND finished_at IS NULL`).bind(finished,status,Date.now()-start,success?'delivered':state==='failed'?'failed':transient?'retryable':'rejected',success?null:code,attemptID),
     env.DB.prepare(`UPDATE deliveries SET state=CASE WHEN payload_key IS NULL AND ?<>'delivered' THEN 'cancelled' ELSE ? END,delivered_at=?,last_error=?,next_attempt_at=?,claim_token=NULL,lease_until=NULL WHERE event_id=? AND claim_token=?`).bind(state,state,success?finished:null,success?null:code,stamp(next),eventID,token),
   ];
   if(blocked) statements.push(env.DB.prepare('UPDATE endpoint_revisions SET blocked_reason=? WHERE id=?').bind(code,row.endpoint_revision_id));
