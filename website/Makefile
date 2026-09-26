@@ -21,7 +21,7 @@ ifneq ($(LOCAL_NODE_BIN),)
 export PATH := $(LOCAL_NODE_BIN):$(PATH)
 endif
 
-.PHONY: help install sync preview dev check check-runtime
+.PHONY: help install sync preview dev check deploy-relay check-runtime
 
 help:
 	@printf '%s\n' \
@@ -30,6 +30,7 @@ help:
 	  'make preview  Sync Notion, then start the local website' \
 	  'make dev      Start the website using the existing snapshot (no sync)' \
 	  'make check    Run formatting, lint, type checks, and unit tests' \
+	  'make deploy-relay  Deploy the Notion publish button relay and its secrets' \
 	  'Preview URL: http://localhost:3000 (override with PORT=3001)'
 
 check-runtime:
@@ -72,3 +73,6 @@ dev: check-runtime
 
 check: check-runtime
 	$(PNPM) check
+
+deploy-relay: check-runtime
+	"$(NODE)" --env-file=.env.local integrations/notion-publish/deploy.mjs

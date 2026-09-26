@@ -1,0 +1,9 @@
+{
+  "name": "ziyixi-notion-publish",
+  "account_id": "f57937bd1d93bf59e737b6d8445fb7a3",
+  "main": "worker.js",
+  "compatibility_date": "2026-09-25",
+  "workers_dev": true,
+  "preview_urls": false,
+  "observability": { "enabled": false },
+}

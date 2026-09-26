@@ -99,6 +99,8 @@ Deployment branches and tags 选 **Selected branches and tags**，添加 Branch�
 
 ## 以后更新
 
+日常只改 Notion 文章时，直接点击 Blog 表格里的 **发布网站** 按钮即可，不需要 push。详见 [Notion 一键发布说明](./notion-publish-button.md)。下面的手动运行方式仍可备用。
+
 修改 Notion 后，运行同一个工作流，使用：
 
 - Branch：`main`
