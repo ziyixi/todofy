@@ -9,6 +9,7 @@ export const RESERVED_SLUGS = new Set([
   "build-info",
   "cv",
   "feed",
+  "publication-state",
   "publications",
   "robots",
   "sitemap",

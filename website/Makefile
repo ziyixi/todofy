@@ -21,7 +21,7 @@ ifneq ($(LOCAL_NODE_BIN),)
 export PATH := $(LOCAL_NODE_BIN):$(PATH)
 endif
 
-.PHONY: help install sync preview dev check deploy-relay check-runtime
+.PHONY: help install sync preview dev check deploy-relay notion-status check-runtime
 
 help:
 	@printf '%s\n' \
@@ -31,6 +31,7 @@ help:
 	  'make dev      Start the website using the existing snapshot (no sync)' \
 	  'make check    Run formatting, lint, type checks, and unit tests' \
 	  'make deploy-relay  Deploy the Notion publish button relay and its secrets' \
+	  'make notion-status  Refresh Notion feedback from the live website (no deployment)' \
 	  'Preview URL: http://localhost:3000 (override with PORT=3001)'
 
 check-runtime:
@@ -76,3 +77,6 @@ check: check-runtime
 
 deploy-relay: check-runtime
 	"$(NODE)" --env-file=.env.local integrations/notion-publish/deploy.mjs
+
+notion-status: check-runtime
+	"$(NODE)" --env-file=.env.local --import tsx scripts/notion/sync-status.ts

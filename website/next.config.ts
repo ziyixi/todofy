@@ -76,6 +76,10 @@ const nextConfig: NextConfig = {
         source: "/build-info.json",
         headers: [{ key: "Cache-Control", value: "no-store, max-age=0" }],
       },
+      {
+        source: "/publication-state.json",
+        headers: [{ key: "Cache-Control", value: "no-store, max-age=0" }],
+      },
     ];
   },
 };

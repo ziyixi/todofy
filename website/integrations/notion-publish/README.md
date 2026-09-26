@@ -1,7 +1,7 @@
 # Notion publish button relay
 
-The standalone Cloudflare Worker accepts one authenticated Notion button action
-and dispatches the existing production release workflow. It has no dependencies
+The standalone Cloudflare Worker accepts authenticated Notion button actions
+and dispatches either production release or publication-status refresh. It has no dependencies
 and can be pasted into Cloudflare's Worker code editor as an ES module. Keep its
 deployment separate from the Vercel website.
 
@@ -16,6 +16,8 @@ Configure these as **Worker secrets**, never plaintext source or ordinary vars:
 
 Set the Notion button action to **Send webhook**, using the Worker's HTTPS URL
 plus `/publish`. The URL does not contain a secret. Add the custom header above.
+For the separate **刷新状态** button, use `/refresh-status` with the same header.
+It dispatches only `notion-status.yml` on `main`, with no inputs or deployment.
 The request body can be left as Notion's default: the relay never reads it.
 Only people permitted to edit that private button should have access to it.
 
@@ -48,8 +50,12 @@ it does not maintain durable deduplication state. A click during a running sync
 does not queue a guaranteed later sync of additional edits: finish editing first,
 and click again after the active run completes when necessary.
 
-Notion receives acceptance immediately; this relay does not write a final status
-back to Notion. Notion can pause an action after a failed webhook, so inspect its
+Notion receives acceptance immediately; GitHub writes final per-article feedback
+after a successful comparison against the live publication manifest. Both workflows
+use the same concurrency group with `queue: max`; refresh cannot replace a pending
+release and feedback writes cannot overlap release snapshot reads. A post-release
+feedback failure produces a warning without rolling back a verified website.
+Notion can pause an action after a failed webhook, so inspect its
 action settings if subsequent clicks stop working.
 
 ## Local checks and deployment

@@ -229,6 +229,7 @@ function buildRoutes(
     { path: "/feed.xml", expectedStatus: 200, kind: "feed" },
     { path: "/sitemap.xml", expectedStatus: 200, kind: "page" },
     { path: "/robots.txt", expectedStatus: 200, kind: "page" },
+    { path: "/publication-state.json", expectedStatus: 200, kind: "page" },
     ...snapshot.posts.map((post) => ({
       path: `/blog/${post.slug}`,
       expectedStatus: 200 as const,

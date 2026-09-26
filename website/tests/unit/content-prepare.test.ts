@@ -40,6 +40,11 @@ describe("prepared content bundle", () => {
       completedAt: new Date("2026-01-01T00:00:00Z"),
     });
     expect(manifest.postCount).toBe(0);
+    expect(manifest.routes).toContainEqual({
+      path: "/publication-state.json",
+      expectedStatus: 200,
+      kind: "page",
+    });
     await expect(readContentBundle(paths.outputDirectory)).resolves.toMatchObject({
       snapshot: { sourceMode: "empty", posts: [] },
       manifest: { complete: true },

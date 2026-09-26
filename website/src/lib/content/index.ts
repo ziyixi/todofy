@@ -1,6 +1,7 @@
 export * from "./date";
 export * from "./errors";
 export * from "./hash";
+export * from "./publication-state";
 export * from "./reader";
 export * from "./registry";
 export * from "./schema";

@@ -37,6 +37,7 @@ permissions:
 
 concurrency:
   group: website-production-release
+  queue: max
   cancel-in-progress: false
 
 env:
@@ -333,6 +334,30 @@ jobs:
             --state success \
             --environment-url "$SITE_URL" \
             --description "Production identity and routes verified without bypass credentials"
+
+      - name: Refresh Notion feedback after the verified release
+        id: notion_feedback
+        if: success() && (steps.production_verify.outcome == 'success' || steps.decision.outputs.deploy_required == 'false')
+        # A feedback outage must not roll back a verified production website.
+        continue-on-error: true
+        env:
+          SITE_URL: ${{ vars.SITE_URL }}
+          NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
+          NOTION_DATA_SOURCE_ID: ${{ secrets.NOTION_DATA_SOURCE_ID }}
+          NOTION_API_VERSION: ${{ vars.NOTION_API_VERSION }}
+          DEPLOY_REQUIRED: ${{ steps.decision.outputs.deploy_required }}
+        run: |
+          confirmed_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          node --import tsx scripts/notion/sync-status.ts --confirmed-at="$confirmed_at"
+          if [[ "$DEPLOY_REQUIRED" == true ]]; then
+            node --import tsx scripts/notion/update-site-summary.ts --confirmed-at="$confirmed_at"
+          fi
+
+      - name: Report feedback failure without invalidating the website release
+        if: always() && steps.notion_feedback.outcome == 'failure'
+        run: |
+          echo '::warning::Website release succeeded, but Notion feedback is stale. Fix the failed feedback step and use Refresh Notion publication status; do not roll back the website.'
+          printf '### Notion feedback needs attention\n\nThe website release succeeded. Notion status or the site summary could not be updated; inspect the feedback step and rerun the status workflow after fixing the cause.\n' >> "$GITHUB_STEP_SUMMARY"
 
       - name: Restore the exact previous production deployment
         id: rollback

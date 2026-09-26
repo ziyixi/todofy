@@ -8,6 +8,7 @@ const FIXED_PUBLIC_ROUTES = new Set([
   "/sitemap.xml",
   "/robots.txt",
   "/build-info.json",
+  "/publication-state.json",
   "/cv.pdf",
 ]);
 

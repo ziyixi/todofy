@@ -127,6 +127,7 @@ export function validateContentSnapshotWithOptions(
     "/sitemap.xml",
     "/robots.txt",
     "/build-info.json",
+    "/publication-state.json",
     ...currentPaths,
     ...snapshot.media.map((asset) => asset.path),
     ...(options.allowCvPath ? ["/cv.pdf"] : []),

@@ -54,6 +54,7 @@ describe("literal redirect sources", () => {
     "/sitemap.xml",
     "/robots.txt",
     "/build-info.json",
+    "/publication-state.json",
     "/cv.pdf",
     "/_next/static/chunk.js",
     "/media/file.png",

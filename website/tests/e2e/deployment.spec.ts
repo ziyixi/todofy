@@ -5,6 +5,7 @@ import path from "node:path";
 import { expect, test, type APIRequestContext, type Page } from "@playwright/test";
 
 import { siteConfig } from "@content/site.config";
+import { PublicationStateSchema } from "@/lib/content/publication-state";
 
 import {
   assertEquivalentCanonical,
@@ -101,6 +102,17 @@ test.describe("deployed artifact", () => {
           expect(body).toContain(`<loc>${contract.canonicalOrigin}/</loc>`);
         } else if (route.path === "/robots.txt") {
           expect(body).toContain(`Sitemap: ${contract.canonicalOrigin}/sitemap.xml`);
+        } else if (route.path === "/publication-state.json") {
+          expect(responseMediaType).toBe("application/json");
+          expect(response.headers()["cache-control"]).toContain("no-store");
+          const state = PublicationStateSchema.parse(JSON.parse(body) as unknown);
+          expect(state.identity).toEqual(expected);
+          expect(state.posts.map((post) => `/blog/${post.slug}`).sort()).toEqual(
+            contract.routes
+              .filter((entry) => entry.kind === "post")
+              .map((entry) => entry.path)
+              .sort(),
+          );
         }
       }
 

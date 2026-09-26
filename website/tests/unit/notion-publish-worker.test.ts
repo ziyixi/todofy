@@ -29,6 +29,43 @@ function mockGitHub(runs: unknown[] = [], dispatch = Response.json({ workflow_ru
 afterEach(() => vi.unstubAllGlobals());
 
 describe("Notion publish Worker", () => {
+  it("refreshes status through its fixed workflow without accepting publish overrides", async () => {
+    const upstream = mockGitHub();
+    const response = await worker.fetch(
+      request(
+        {
+          body: JSON.stringify({
+            workflow: "production-release.yml",
+            inputs: { operation: "recovery" },
+          }),
+        },
+        "/refresh-status?workflow=production-release.yml",
+      ),
+      env,
+    );
+    expect(response.status).toBe(202);
+    expect((await response.json()).workflowUrl).toContain("/notion-status.yml");
+    expect(upstream.mock.calls[0]?.[0]).toContain("/notion-status.yml/runs?");
+    expect(upstream.mock.calls[1]?.[0]).toContain("/notion-status.yml/dispatches");
+    expect(JSON.parse(String(upstream.mock.calls[1]?.[1]?.body))).toEqual({
+      ref: "main",
+      inputs: {},
+    });
+  });
+
+  it("authenticates and deduplicates refresh requests independently", async () => {
+    const upstream = mockGitHub([{ id: 321, head_branch: "main", status: "in_progress" }]);
+    expect((await worker.fetch(request({ headers: {} }, "/refresh-status"), env)).status).toBe(401);
+    expect(upstream).not.toHaveBeenCalled();
+    const response = await worker.fetch(request({}, "/refresh-status"), env);
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      status: "already-running",
+      workflowUrl: "https://github.com/ziyixi/ziyixi.science/actions/workflows/notion-status.yml",
+    });
+    expect(upstream).toHaveBeenCalledTimes(1);
+  });
+
   it("exposes only a liveness response without checking secrets or contacting GitHub", async () => {
     const upstream = mockGitHub();
     const response = await worker.fetch(request({ method: "GET" }, "/health"), {});
