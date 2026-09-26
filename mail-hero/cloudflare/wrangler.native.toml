@@ -1,4 +1,4 @@
-# Fully hosted Mail Hero. This is separate from the legacy ingress Worker.
+# Fully hosted Mail Hero: Workers, D1, R2 and SQLite Durable Objects.
 name = "mail-hero"
 main = "src/native/index.ts"
 compatibility_date = "2026-09-07"

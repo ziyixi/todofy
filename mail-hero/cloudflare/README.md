@@ -1,6 +1,6 @@
 # Mail Hero on Cloudflare
 
-The default application is `src/native/index.ts`, configured by **`wrangler.native.toml`**. It runs on Workers Free with D1, a private R2 Standard bucket, one SQLite-backed Durable Object coordinator, Static Assets, and Access. There are no Queues, Workflows, PostgreSQL, Go server, or inbound Tunnel in this deployment. A consumer such as Todofy may still use its own Tunnel.
+The application is `src/native/index.ts`, configured by **`wrangler.native.toml`**. It runs entirely on Workers Free with D1, a private R2 Standard bucket, one SQLite-backed Durable Object coordinator, Static Assets, and Access. A separate consumer such as Todofy may use its own server and Tunnel; its deployment is independent of this Worker.
 
 ## Runtime boundary
 
@@ -35,11 +35,11 @@ The Cloudflare Email Routing limit is 25 MiB. This is an accepted raw-size ceili
 | `ACCESS_SERVICE_ORIGIN` | optional variable | Exact HTTPS consumer origin whose Access application uses a service token. |
 | `ACCESS_CLIENT_ID`, `ACCESS_CLIENT_SECRET` | optional paired secrets | That consumer's Access service token, separate from webhook authentication. |
 
-Do not add `[limits] cpu_ms = 30000` to the ordinary Free Worker to imitate Paid capacity. Heavy work belongs in the DO alarm. The native configuration uses a SQLite migration (`new_sqlite_classes`), not a legacy key-value Durable Object namespace.
+Do not add `[limits] cpu_ms = 30000` to the ordinary Free Worker to imitate Paid capacity. Heavy work belongs in the DO alarm. The coordinator uses a SQLite migration (`new_sqlite_classes`).
 
 ## Local checks
 
-From the repository root, build the UI with `npm --prefix web ci` and `npm --prefix web run build`. Then:
+Use Node.js 26. From the repository root, build the UI with `npm --prefix web ci` and `npm --prefix web run build`. Then:
 
 ```sh
 cd cloudflare
@@ -52,7 +52,7 @@ npx wrangler dev --config wrangler.native.toml --ip 127.0.0.1
 
 Use a local `.dev.vars` containing a disposable `CREDENTIAL_KEY` and, if needed, `DEV_AUTH_BYPASS=true`; keep it untracked. Wrangler local D1, R2 and DO data are synthetic test state. Local success does not prove account-level Free quotas, Email Routing failure behavior, or real SMTP arrival.
 
-For deployment and the budget/backup checklist, follow [the setup guide](../docs/cloudflare-setup.md). Every native Wrangler command should specify `--config wrangler.native.toml`. Deployment needs an authorized account session; never put credentials in source or chat.
+For deployment and the budget/backup procedure, follow [the setup guide](../docs/cloudflare-setup.md). Formal releases use [GitHub Actions](../docs/ci-cd.md). Every Wrangler command should explicitly select its local or production configuration. Deployment needs an authorized account session; never put credentials in source or chat.
 
 ## Persistence and recovery
 
@@ -65,7 +65,3 @@ Daily intake protection reserves a message and its raw bytes atomically in the c
 Repeated parse crashes stop automatically after three interrupted runs, leaving the original for inspection and an explicit reparse. Maintenance runs in a separate alarm invocation to respect the Free D1 limit of 50 queries per invocation. Each batch handles at most one safely expired message and one pending content purge. Raw-object repair scans at most 100 keys per page. A remaining retention/purge backlog or another raw page schedules continuation about ten minutes later; after a completed scan with no work, maintenance returns to a daily wake. No content expires until the owner enables retention.
 
 D1 Time Travel covers only D1. It does not restore R2 objects, Worker secrets or DO state. An independent backup must account for all of those relationships, and restored outbound events must stay paused until duplicates are reconciled. See the setup guide's maintenance-window procedure.
-
-## Legacy ingress Worker
-
-`src/index.ts` and `wrangler.toml` retain the former Email Routing → R2 buffer → HTTPS/Tunnel → Go/PostgreSQL flow. Its `MAIL_BUFFER`, `INGEST_URL`, `INGEST_TOKEN`, `STATUS_TOKEN`, `CF_ACCESS_CLIENT_ID` and `CF_ACCESS_CLIENT_SECRET` belong only to that mode. They are not native configuration. Do not deploy both Workers for the same production receive rule or enable two paths that trigger the same consumer.

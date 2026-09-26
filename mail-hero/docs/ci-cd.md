@@ -4,7 +4,7 @@
 
 只有 `main` 上的 push 或手工运行，且 `Native checks` 成功，才进入 GitHub `production` environment。部署从同一提交重新构建 UI，生成专用原生配置，先做 Wrangler dry-run，再依次应用 D1 migrations、发布 Worker。并发部署排队，不中断正在应用的 migration。PR 不接触生产密钥。
 
-这条流水线发布 Cloudflare 原生 Worker 和静态资源；不构建旧 Go 服务镜像，不重启服务器，不修改来源邮箱转发、Access 策略或根域 MX，也不创建新的 Cloudflare 收费计划。Todofy 的镜像发布和服务器更新在它自己的仓库负责。
+这条流水线发布 Cloudflare Worker 和静态资源，使用现有D1、R2和SQLite DO资源。来源邮箱转发、Access策略及根域MX由各自设置管理；流水线不会创建新的Cloudflare收费计划。Todofy的镜像发布和服务器更新在它自己的仓库负责。
 
 ## 仓库设置
 

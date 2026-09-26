@@ -76,7 +76,7 @@ export async function verifyToken<T extends Record<string, unknown> = Record<str
   } catch { return null; }
 }
 
-/** Workers fetch has no Go-style DNS pinning. Destinations must be explicitly
+/** Workers fetch does not pin destination DNS. Destinations must be explicitly
  * provisioned public HTTPS hostnames; never use arbitrary mail/user URL values. */
 export function validateTarget(env: Env, value: string): URL {
   let url: URL;

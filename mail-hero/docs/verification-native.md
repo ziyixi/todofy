@@ -1,10 +1,10 @@
 # 原生实现验收记录
 
-2026-09-25（America/Los_Angeles，后续追加 UTC 验收时间）。此记录区分本地实现、账户部署与生产验收。单封真实纯文本入站已通过；自动转发、生产故障及灾难恢复仍有独立待验收项。
+2026-09-26（以下生产验收时间使用UTC）。此记录区分本地实现、账户部署与生产验收。单封真实纯文本入站已通过；用户测试信到Todofy/Todoist的完整链路、自动转发、生产故障及灾难恢复仍有独立待验收项。
 
 ## 已完成
 
-- 默认实现为 Workers Free、D1、私有 R2、SQLite Durable Object Alarm 和 React Static Assets；没有 Queues、付费 CPU 配置或自建服务器依赖。
+- 实现为 Workers Free、D1、私有 R2、SQLite Durable Object Alarm 和 React Static Assets；没有 Queues、付费 CPU 配置或自建服务器依赖。仓库只保留这条原生实现和相关工具、合同及文档。
 - 收件原件持久保存、MIME/中文/附件解析、正文与安全 HTML、收件及交付 UI、通用 webhook、稳定事件重试、限流、删除去重账本及容量保护。
 - Access JWT、owner、Origin/CSRF 校验；公网目标 HTTPS 精确域名白名单、禁止重定向，凭据加密且绑定目标版本。
 - 初始 archive、暂停消费者交付、不自动过期。入站默认每日 300 封/256 MiB、逻辑容量 5 GiB。
@@ -15,7 +15,8 @@
 | 检查 | 结果和范围 |
 | --- | --- |
 | `npm --prefix cloudflare run typecheck` | 通过 |
-| `npm --prefix cloudflare test` | 36/36；其中原生 API 14、核心 11、25 MiB workerd 1、完整 workerd 链路 1、旧入口回归 9 |
+| `npm --prefix cloudflare test` | 仓库清理后32/32原生测试通过，包含API、核心边界、25 MiB workerd及完整workerd链路 |
+| `node --test deploy/test/*.test.mjs` | 2/2 CI配置生成测试通过 |
 | `npm --prefix web run build` / `npm --prefix web test` | 构建通过；3/3 前端测试 |
 | 原生部署打包 | Wrangler 4.141.0 `deploy --config wrangler.native.toml --dry-run` 通过；541.77 KiB；生产发布另见下表 |
 | 完整 workerd 链路 | 实际 D1/R2/SQLite DO；合成邮件保存解析、受保护 API、附件、fake consumer 503 后同事件/同正文重试至 204、删除后重复入站不复活 |
@@ -68,7 +69,7 @@
 
 2026-09-26 UTC：既有 GitHub IdP Test 成功识别本人身份；新增的 Mail Hero GitHub 策略以精确邮箱 Include 与 GitHub login_method Require 同时匹配，不接受所有 GitHub 用户。应用增加可选 `ACCESS_OWNER_ALIASES`，成功认证始终返回原 canonical owner。
 
-`native-api.test.mjs` 16 项测试及 TypeScript 检查通过，覆盖两个 alias 与主邮箱映射为同一身份、未列出邮箱、大小写差异、错误签名/issuer/audience、过期 JWT 和缺少主 owner 的拒绝。此前全套 36 项本地测试记录不代表本轮重新执行了完整套件。本轮按认证改动范围运行上述测试，并实际验证 GitHub → Access → Mail Hero 页面与受保护配置查询；邮件验收另见下节。
+`native-api.test.mjs` 16项认证与API测试通过，覆盖两个alias与主邮箱映射为同一身份、未列出邮箱、大小写差异、错误签名/issuer/audience、过期JWT和缺少主owner的拒绝。这些检查已纳入当前32项原生测试套件。实际GitHub → Access → Mail Hero页面与受保护配置查询另行验证；邮件验收见下节。
 
 ## 单封真实测试信验收
 
@@ -86,6 +87,12 @@
 - 合成系统事件 `96fe9dea-1a2b-4a04-a793-61b5a99e77d7` 的公网 HTTP 验收通过：无认证/错误认证 401、首次及相同重复 204、同 ID 不同 bytes 409。内部恰有一条 ignored 记录、task_id 为空；重建主容器后该记录仍存在。该事件未调用 LLM/Todoist。
 - 原有 Tunnel、LLM、Todoist 和 database 三个依赖容器保持原启动时间；只重建主 Todofy。旧 CloudMailin 入口保留，来源邮箱转发由用户切换。
 - 部署诊断发现 Cloudflare Browser Integrity Check 拒绝 Python 默认客户端标识（1010）。明确 `User-Agent: MailHero/1.0` 后正常。原生投递已加入此标识，并通过真实 workerd 的 503 → 204 重试测试；未关闭 Cloudflare 防护。此项手动发布 Worker 版本为 `b4b99376-9cd9-44d5-affc-8111eff67e1f`。
-- 当前本地检查通过：41 项 Cloudflare 测试（含旧入口兼容测试）、2 项 CI 配置测试、3 项 UI 测试、双方 TypeScript 和 UI build。Todofy race 测试已通过；正式 GitHub CI、镜像 digest 和完整用户测试信链路另行记录。
+- 仓库清理后的本地检查通过：32项Cloudflare原生测试、2项CI配置测试、3项UI测试、双方TypeScript和UI build。Todofy race测试属于独立消费者的验证；镜像digest和完整用户测试信链路分别记录，不由Mail Hero测试结果推定。
 
 HTTP 接管、容器重建存活与 Mail Hero 解析测试不能代替用户测试信经过 LLM 后成功创建 Todoist 任务的验收。当前没有完整备份恢复成功的证据。
+
+## GitHub Actions正式发布记录
+
+首次正式发布提交`aaa444f`的 [GitHub Actions run 36261505007](https://github.com/ziyixi/mail-hero/actions/runs/36261505007) 已成功；Worker版本为`aedd3120-af09-424d-be1d-e57be41dbca9`。该记录证明此提交的检查、D1 migration及Worker发布完成，不表示之后的仓库清理已经发布，也不表示用户测试信的Todofy业务链路通过。
+
+仓库随后按用户要求清除Mail Hero的Go/PostgreSQL服务、中转Worker及主机部署材料；当前验收命令只执行Cloudflare原生和React测试。清理后的正式CI与生产版本需在实际发布后追加，不能沿用上述提交的发布结果。

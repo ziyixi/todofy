@@ -1,10 +1,10 @@
 # Cloudflare 原生部署、预算与恢复
 
-默认方案是 **Workers Free + D1 + 私有 R2 Standard + SQLite Durable Object Alarm + Static Assets + Access**。Mail Hero 的应用、数据库和网页都由 Cloudflare 托管，不需要 Go/PostgreSQL 或 Mail Hero Tunnel。Todofy 仍是独立 webhook 消费者，可以保留自己的 Tunnel。
+Mail Hero 使用 **Workers Free + D1 + 私有 R2 Standard + SQLite Durable Object Alarm + Static Assets + Access**。应用、数据库和网页都由 Cloudflare 托管。Todofy 是独立 webhook 消费者，可以保留自己的服务器和 Tunnel。
 
-当前已部署：唯一地址 **`inbox-mail-hero@inbox.ziyixi.science`**，UI **[mail-hero.ziyixi.science](https://mail-hero.ziyixi.science)**，唯一 owner **`xiziyi2015@gmail.com`**，数据库 `mail-hero`，私有桶 `mail-hero-store`。GitHub 登录和一封真实纯文本邮件的入站、持久保存、解析及 UI 展示已验收；来源自动转发、HTML/附件、大邮件、OTP 备用登录及生产收信额度仍需分别验证。当前保持 archive、强制暂停交付，没有消费者。
+当前已部署：唯一地址 **`inbox-mail-hero@inbox.ziyixi.science`**，UI **[mail-hero.ziyixi.science](https://mail-hero.ziyixi.science)**，唯一 owner **`xiziyi2015@gmail.com`**，数据库 `mail-hero`，私有桶 `mail-hero-store`。GitHub 登录和一封真实纯文本邮件的入站、持久保存、解析及 UI 展示已验收；来源自动转发、HTML/附件、大邮件、OTP 备用登录及生产收信额度仍需分别验证。Todofy消费者已具备持久接管接口，完整邮件到任务链路仍待用户测试信验收，见 [消费者接入说明](todofy-integration.md)。
 
-生产配置为 gitignored `cloudflare/wrangler.native.production.toml`；`cloudflare/wrangler.native.toml` 是原生配置模板，旧 `wrangler.toml` 是上一代中转 Worker。以下资源创建和初始化步骤供新环境参考，**现有部署不需要重建资源或重新生成密钥**。完整证据和待验收项见 [验收记录](verification-native.md)。
+本地生产配置为 gitignored `cloudflare/wrangler.native.production.toml`；`cloudflare/wrangler.native.toml` 是配置模板。[GitHub Actions](ci-cd.md) 从仓库变量和production secrets生成独立的CI配置并正式发布。以下资源创建和初始化步骤供新环境参考，**现有部署不需要重建资源或重新生成密钥**。完整证据和待验收项见 [验收记录](verification-native.md)。
 
 ## 1. 免费计划的运行边界
 
@@ -38,9 +38,9 @@
 
 ## 3. 创建资源与配置
 
-需要Node.js 24。通过正规 `wrangler login` 或权限受限的API token认证。已有独立任务token时沿用该本机流程，不覆盖其他项目的登录；不要把token、邮件或密钥发到聊天。
+需要Node.js 26。通过正规 `wrangler login` 或权限受限的API token认证。已有独立任务token时沿用该本机流程，不覆盖其他项目的登录；不要把token、邮件或密钥发到聊天。
 
-本次独立 token 已在本机保存并核实有效，且已追加仅目标 zone 的 `Zone Settings Write`，不需要再次保存。新环境首次保存时，在仓库根目录运行 `python3 deploy/cloudflare-admin.py save-token`，提示后从 Cloudflare 的一次性成功页复制 token 并粘贴到本机终端（不回显）。助手只新建 owner-only 文件，不覆盖已有文件，不改 Wrangler 全局登录。随后运行 `python3 deploy/cloudflare-admin.py inspect` 核对权限；下文 Wrangler 命令可改用 `python3 deploy/cloudflare-admin.py wrangler <命令与参数>`（仍从仓库根目录运行，配置路径也相对于仓库根目录），凭据只通过进程环境传递。
+本次独立 token 已在本机保存并核实有效，且已追加仅目标 zone 的 `Zone Settings Write`，不需要再次保存。新环境首次保存时，在仓库根目录运行 `python3 deploy/cloudflare-admin.py save-token`，提示后从 Cloudflare 的一次性成功页复制 token 并粘贴到本机终端（不回显）。助手只新建 owner-only 文件，不覆盖已有文件，不改 Wrangler 全局登录。随后运行 `python3 deploy/cloudflare-admin.py inspect` 核对权限；下文 Wrangler 命令可改用 `python3 deploy/cloudflare-admin.py wrangler <命令与参数>`。包装命令从仓库根目录调用，但实际工作目录为 `cloudflare/`，所以配置参数使用 `--config wrangler.native.production.toml`；凭据只通过进程环境传递。
 
 仅新环境初始化，从仓库根目录：
 
@@ -92,7 +92,7 @@ custom_domain = true
 
 应用独立校验JWT的签名、issuer、audience、过期和owner；浏览器写操作校验Origin/CSRF。附件只能通过鉴权后路由访问，不要为下载而公开R2。[Custom Domains](https://developers.cloudflare.com/workers/configuration/routing/custom-domains/)、[Access JWT](https://developers.cloudflare.com/cloudflare-one/access-controls/applications/http-apps/authorization-cookie/validating-json/)
 
-当前 Custom Domain 已绑定，`workers_dev=false`、`preview_urls=false`。日后代码更新应明确使用生产配置；在完成构建与验证后，从仓库根目录运行：
+当前 Custom Domain 已绑定，`workers_dev=false`、`preview_urls=false`。日常代码更新通过 [GitHub Actions](ci-cd.md) 发布。需要人工维护部署时，在完成构建与验证后，从仓库根目录明确使用生产配置：
 
 ```sh
 python3 deploy/cloudflare-admin.py wrangler deploy --config wrangler.native.production.toml
@@ -127,7 +127,7 @@ Cloudflare未明确承诺 `email()` 在R2写入前失败时的完整持久重投
 
 收件验收通过后，在 Gmail 的“设置 → 转发和 POP/IMAP → 添加转发地址”填写 **`inbox-mail-hero@inbox.ziyixi.science`**，用 Mail Hero 阅读验证邮件，再回 Gmail 完成确认；选择保留 Gmail 副本，按需使用过滤器只转发需要处理的邮件。Exchange/Outlook 同样填写这个地址，保留原邮箱副本；组织账户可能需要管理员允许外部转发。分别用来源邮箱测试实际到达，不轮询任何来源邮箱。
 
-目前没有配置消费者，收件正常后也继续保持 archive 和强制暂停；只有完成下一节的消费者验收才开启 forward。历史 archive 邮件不会自动释放。
+新环境先保持 archive 和强制暂停，完成下一节的消费者接管验收后再配置 forward并解除暂停，以接收用户主动发送的业务测试信。当前Todofy进度见验收记录；来源邮箱的自动转发由用户在完整链路测试通过后开启。历史archive邮件不会自动释放。
 
 ## 7. 独立消费者
 
@@ -159,7 +159,7 @@ npx wrangler d1 export mail-hero --remote --config wrangler.native.production.to
 6. 完整快照加密复制到另一设备/账户，建议7份daily+4份weekly，定期验证解密。相同账户的另一个R2桶不解决账号不可用，副本也计入账户存储。
 7. 退出维护先恢复archive收件，确认调度恢复；消费者保持暂停直到未知交付完成核对，再恢复来源转发并检查窗口遗漏。
 
-脚本退出 0 不等于恢复成功；旧 `deploy/backup.sh` 和 `restore-empty.sh` 只适用于 PostgreSQL，不能用于当前 D1/R2 原生部署。
+导出或复制命令退出0不等于恢复成功；需要在隔离资源执行下一节的完整恢复验收。
 
 ## 9. 隔离恢复演练
 
@@ -171,7 +171,3 @@ npx wrangler d1 export mail-hero --remote --config wrangler.native.production.to
 4. DO调度状态不在D1导出中。通过应用恢复逻辑重新登记pending、retry_wait及未索引raw，对不确定sending先核查。不能假定新DO自动拥有旧Alarm任务。
 5. 对照消费者已接管event_id，保留身份和冻结bytes，不重建事件“修复”未知结果。旧备份可能含后来已经交付的任务。
 6. 在隔离资源通过合成读取、失败恢复、fake consumer后再安排真实路由切换。未实际演练，不能声称达到RPO/RTO或一键恢复。
-
-## 10. 旧模式
-
-`docs/setup.md`、`docs/operations.md`里的Compose、PostgreSQL、ingest token、双Tunnel hostname和本地204，只适用于旧 `cloudflare/wrangler.toml` 中转模式。原生部署不执行这些步骤，也不会收到本地204后删除R2内容。

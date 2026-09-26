@@ -128,7 +128,7 @@ export interface Overview {
 
 export interface SetupStatus {
   receive_address?: string
-  ingest_transport: 'cloudflare' | 'smtp'
+  ingest_transport: 'cloudflare'
   checks?: Array<{ id: string; label: string; status: 'ok' | 'warning' | 'error' | 'pending'; detail?: string; action?: string }>
   last_received_at?: string | null
 }

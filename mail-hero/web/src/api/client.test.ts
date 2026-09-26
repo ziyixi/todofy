@@ -6,19 +6,15 @@ const json = (value: unknown) => new Response(JSON.stringify(value), { status: 2
 afterEach(() => vi.unstubAllGlobals())
 
 describe('management API integration contract', () => {
-  it('maps the server overview and setup shapes used by the workspace', async () => {
+  it('maps the native overview shape used by the workspace', async () => {
     const fetcher = vi.fn()
       .mockResolvedValueOnce(json({ receive_address: 'hero@example.test', counts: { messages: 9, pending: 2, failed: 1, delivered: 5 }, storage: { logical_bytes: 1234, limit_bytes: 9999 }, backup: { last_at: null } }))
-      .mockResolvedValueOnce(json({ receive_address: 'hero@example.test', address_valid: true, mx_configured: false, smtp_external: 'not_verified', starttls_configured: true, last_received_at: null }))
     vi.stubGlobal('fetch', fetcher)
     const overview = await api.overview()
-    const setup = await api.setup()
     expect(overview).toMatchObject({ message_count: 9, pending_count: 2, storage_bytes: 1234, capacity_bytes: 9999 })
-    expect(setup.checks?.find(check => check.id === 'mx')?.status).toBe('warning')
-    expect(setup.checks?.find(check => check.id === 'external')?.status).toBe('pending')
   })
 
-  it('uses Cloudflare ingest checks without inventing SMTP readiness', async () => {
+  it('uses native Cloudflare ingest checks as returned by the API', async () => {
     const fetcher = vi.fn().mockResolvedValueOnce(json({
       receive_address: 'hero@example.test',
       ingest_transport: 'cloudflare',

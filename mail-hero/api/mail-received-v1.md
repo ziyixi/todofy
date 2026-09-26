@@ -11,7 +11,7 @@ Authorization: Bearer <target-token>
 Idempotency-Key: f8c1e9a0-1a98-4fb8-8ca1-4c0a3e710001
 ```
 
-目标可选择 Bearer、Basic，或在部署明确允许的专用网络中选择无认证。公网目标必须使用 HTTPS 并校验证书。仅 `MAIL_HERO_ALLOWED_INTERNAL_TARGETS` 精确列出的 `host:port` 允许 HTTP；若该目标配置 Bearer/Basic，凭据会在这段受控内部网络上以明文传输，不能把此例外用于不可信网络。请求不跟随 redirect。`Idempotency-Key` 与 JSON 的 `event_id` 必须相同。
+目标必须使用 Bearer 或 Basic 认证，并且是 `WEBHOOK_ALLOWED_HOSTS` 精确列出的公网 HTTPS hostname。请求校验证书、不跟随 redirect，不支持内部 HTTP 或无认证目标。使用私有服务器的消费者可通过自己的 HTTPS 入口或 Tunnel 暴露接口。`Idempotency-Key` 与 JSON 的 `event_id` 必须相同。
 
 ```json
 {
