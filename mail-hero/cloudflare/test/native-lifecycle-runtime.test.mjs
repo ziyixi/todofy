@@ -6,6 +6,7 @@ import { join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { build } from 'esbuild'
 import { Miniflare, convertV4MiniflareOptions } from 'miniflare'
+import { migrationStatements } from './migrations.mjs'
 const root = resolve(fileURLToPath(new URL('..', import.meta.url)))
 
 test('workerd lifecycle: migrated D1, R2 expiry journal and durable capacity settlement', { timeout: 60000 }, async () => {
@@ -37,7 +38,7 @@ test('workerd lifecycle: migrated D1, R2 expiry journal and durable capacity set
     const db = await mf.getD1Database('DB'), store = await mf.getR2Bucket('MAIL_STORE'), backup = await mf.getR2Bucket('BACKUP_STORE')
     for (const name of (await readdir(join(root,'migrations'))).filter(name=>name.endsWith('.sql')).sort()) {
       const sql = await readFile(join(root,'migrations',name),'utf8')
-      await db.batch(sql.replace(/--[^\n]*/g,'').split(';').map(s=>s.trim()).filter(Boolean).map(s=>db.prepare(s)))
+      await db.batch(migrationStatements(sql).map(s=>db.prepare(s)))
     }
     const id = crypto.randomUUID(), raw = `raw/${id}.eml`, parsed = `parsed/${id}/message.json`, date = new Date().toISOString()
     await store.put(raw,'raw fixture'); await store.put(parsed,'{"text":"synthetic"}')

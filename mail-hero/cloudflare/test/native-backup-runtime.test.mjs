@@ -8,6 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { build } from 'esbuild';
 import { Miniflare, convertV4MiniflareOptions } from 'miniflare';
 import { canonicalJSON } from '../src/native/backup.ts';
+import { migrationStatements } from './migrations.mjs';
 const root=resolve(fileURLToPath(new URL('..',import.meta.url)));
 const fixture='From: sender@example.org\r\nTo: inbox@mail.example.org\r\nSubject: Synthetic backup fixture\r\n\r\nBackup contract test only.\r\n';
 const token='synthetic-backup-machine-token-32-characters',receiptKey='b'.repeat(64);
@@ -37,7 +38,7 @@ test('workerd snapshot cut preserves intake and verifies complete authenticated 
   try {
     await mf.ready;const db=await mf.getD1Database('DB'),bucket=await mf.getR2Bucket('MAIL_STORE');
     for(const name of (await readdir(join(root,'migrations'))).filter(name=>name.endsWith('.sql')).sort()) {
-      const sql=await readFile(join(root,'migrations',name),'utf8');await db.batch(sql.replace(/--[^\n]*/g,'').split(';').map(s=>s.trim()).filter(Boolean).map(s=>db.prepare(s)));
+      const sql=await readFile(join(root,'migrations',name),'utf8');await db.batch(migrationStatements(sql).map(s=>db.prepare(s)));
     }
     async function call(path,input,authenticated=true){return mf.dispatchFetch('http://localhost'+path,{method:input===undefined?'GET':'POST',headers:{'Content-Type':'application/json',...(authenticated?{Authorization:'Bearer '+token}:{})},body:input===undefined?undefined:JSON.stringify(input)});}
     async function json(path,input){const response=await call(path,input);const value=await response.json();assert.ok(response.ok,`${response.status} ${JSON.stringify(value)}`);return value;}

@@ -14,6 +14,11 @@ const stamp = (time: number) => new Date(time).toISOString();
 const utf8 = new TextEncoder();
 const DAY = 86400000;
 const claimMS = 5 * 60_000;
+// 404/405/3xx are often a transient deploy or routing gap; auth failures are not.
+export const ROUTE_BLOCK_GRACE_MS = 30 * 60_000;
+export const ROUTE_BLOCK_COOLDOWN_MS = 6 * 3600_000;
+/** Sendable: never blocked, or an automatic recheck is due. Binds one timestamp. */
+const unblockedSQL = (r: string) => `(${r}.blocked_reason IS NULL OR (${r}.blocked_until IS NOT NULL AND ${r}.blocked_until<=?))`;
 const error = (status: number, code: string): never => { throw new HttpError(status, code, code); };
 async function first(env: Env, query: string, ...args: any[]): Promise<Row | null> {
   return env.DB.prepare(query).bind(...args).first<Row>();
@@ -356,7 +361,7 @@ export function retryAfter(value:string|null,time=Date.now()):number|null {
 }
 async function deliverJob(env:Env,eventID:string,attempts=0):Promise<number|null> {
   const row=await first(env,`SELECT d.*,m.content_deleted_at,r.url,r.auth_type,r.credential_ciphertext,r.credential_key_id,r.timeout_ms,
-    r.blocked_reason,e.id endpoint_id,e.paused,e.archived_at,e.rate_per_minute,e.next_send_at endpoint_next,
+    r.blocked_reason,r.blocked_until,e.id endpoint_id,e.paused,e.archived_at,e.rate_per_minute,e.next_send_at endpoint_next,
     s.send_paused,s.next_send_at global_next FROM deliveries d JOIN messages m ON m.id=d.message_id
     JOIN endpoint_revisions r ON r.id=d.endpoint_revision_id JOIN webhook_endpoints e ON e.id=r.endpoint_id
     JOIN app_settings s ON s.id=1 WHERE d.event_id=?`,eventID);
@@ -377,7 +382,9 @@ async function deliverJob(env:Env,eventID:string,attempts=0):Promise<number|null
     await env.DB.prepare(`UPDATE deliveries SET state='cancelled',last_error='content_deleted' WHERE event_id=? AND state IN('pending','retry_wait')`).bind(eventID).run();
     return null;
   }
-  if(env.FORCE_SEND_PAUSED==='true' || env.FORCE_SEND_PAUSED==='1' || row.send_paused || row.paused || row.archived_at || row.blocked_reason) return null;
+  if(env.FORCE_SEND_PAUSED==='true' || env.FORCE_SEND_PAUSED==='1' || row.send_paused || row.paused || row.archived_at) return null;
+  // A cooldown block re-runs this job when its automatic recheck is due.
+  if(row.blocked_reason && (!row.blocked_until || Date.parse(row.blocked_until)>Date.now())) return row.blocked_until?Date.parse(row.blocked_until):null;
   const age=Date.now()-Date.parse(row.created_at);
   if((row.retry_mode==='auto' && (age>=7*DAY || row.attempt_count>=48)) || age>=30*DAY) {
     await env.DB.prepare(`UPDATE deliveries SET state='failed',last_error='retry_window_expired' WHERE event_id=? AND state IN('pending','retry_wait')`).bind(eventID).run();
@@ -406,8 +413,8 @@ async function deliverJob(env:Env,eventID:string,attempts=0):Promise<number|null
     }
   } catch {
     await env.DB.batch([
-      env.DB.prepare(`UPDATE endpoint_revisions SET blocked_reason='credential_or_target_invalid' WHERE id=?`).bind(row.endpoint_revision_id),
-      env.DB.prepare(`UPDATE deliveries SET last_error='credential_or_target_invalid' WHERE event_id=?`).bind(eventID),
+      env.DB.prepare(`UPDATE endpoint_revisions SET blocked_reason='credential_or_target_invalid',blocked_until=NULL WHERE id=?`).bind(row.endpoint_revision_id),
+      env.DB.prepare(`UPDATE deliveries SET last_error='credential_or_target_invalid',blocking_since=NULL WHERE event_id=?`).bind(eventID),
     ]);
     return null;
   }
@@ -423,8 +430,8 @@ async function deliverJob(env:Env,eventID:string,attempts=0):Promise<number|null
     env.DB.prepare(`UPDATE deliveries SET state='sending',claim_token=?,lease_until=?,attempt_count=attempt_count+1 WHERE event_id=?
       AND state IN('pending','retry_wait') AND next_attempt_at<=? AND payload_key IS NOT NULL
       AND EXISTS(SELECT 1 FROM messages WHERE id=deliveries.message_id AND content_deleted_at IS NULL)
-      AND EXISTS(SELECT 1 FROM endpoint_revisions r JOIN webhook_endpoints e ON e.id=r.endpoint_id WHERE r.id=deliveries.endpoint_revision_id AND r.blocked_reason IS NULL AND e.paused=0 AND e.archived_at IS NULL AND (e.next_send_at IS NULL OR e.next_send_at<=?))
-      AND EXISTS(SELECT 1 FROM app_settings WHERE id=1 AND send_paused=0 AND (next_send_at IS NULL OR next_send_at<=?))`).bind(token,stamp(Date.now()+claimMS),eventID,date,date,date),
+      AND EXISTS(SELECT 1 FROM endpoint_revisions r JOIN webhook_endpoints e ON e.id=r.endpoint_id WHERE r.id=deliveries.endpoint_revision_id AND ${unblockedSQL('r')} AND e.paused=0 AND e.archived_at IS NULL AND (e.next_send_at IS NULL OR e.next_send_at<=?))
+      AND EXISTS(SELECT 1 FROM app_settings WHERE id=1 AND send_paused=0 AND (next_send_at IS NULL OR next_send_at<=?))`).bind(token,stamp(Date.now()+claimMS),eventID,date,date,date,date),
     env.DB.prepare(`UPDATE webhook_endpoints SET next_send_at=? WHERE id=? AND EXISTS(SELECT 1 FROM deliveries WHERE event_id=? AND claim_token=?)`).bind(stamp(Date.now()+Math.ceil(60_000/row.rate_per_minute)),row.endpoint_id,eventID,token),
     env.DB.prepare(`UPDATE app_settings SET next_send_at=? WHERE id=1 AND EXISTS(SELECT 1 FROM deliveries WHERE event_id=? AND claim_token=?)`).bind(stamp(Date.now()+6000),eventID,token),
     env.DB.prepare(`INSERT INTO delivery_attempts(id,event_id,attempt_no,started_at,credential_key_id) SELECT ?,event_id,attempt_count,?,? FROM deliveries WHERE event_id=? AND claim_token=?`).bind(attemptID,date,row.credential_key_id,eventID,token),
@@ -434,7 +441,7 @@ async function deliverJob(env:Env,eventID:string,attempts=0):Promise<number|null
   // must stop an unstarted HTTP request. A later in-flight delete is not recall.
   const allowed=await first(env,`SELECT d.event_id FROM deliveries d JOIN messages m ON m.id=d.message_id JOIN endpoint_revisions r ON r.id=d.endpoint_revision_id
     JOIN webhook_endpoints e ON e.id=r.endpoint_id JOIN app_settings s ON s.id=1 WHERE d.event_id=? AND d.claim_token=? AND d.state='sending'
-    AND m.content_deleted_at IS NULL AND s.send_paused=0 AND e.paused=0 AND e.archived_at IS NULL AND r.blocked_reason IS NULL`,eventID,token);
+    AND m.content_deleted_at IS NULL AND s.send_paused=0 AND e.paused=0 AND e.archived_at IS NULL AND ${unblockedSQL('r')}`,eventID,token,now());
   if(!allowed || env.MAINTENANCE_MODE==='true') {
     await env.DB.batch([
       env.DB.prepare(`UPDATE delivery_attempts SET finished_at=?,outcome='not_sent',error_code='state_changed' WHERE id=?`).bind(now(),attemptID),
@@ -455,26 +462,38 @@ async function deliverJob(env:Env,eventID:string,attempts=0):Promise<number|null
   finally { clearTimeout(timer); }
   const success=status!==null && status>=200 && status<300;
   const transient=status===null || status===408 || status===429 || status>=500;
-  const blocked=status!==null && ([401,403,404,405].includes(status) || (status>=300 && status<400));
-  const attempt=Number(row.attempt_count)+1;
+  const route=status!==null && (status===404 || status===405 || (status>=300 && status<400));
+  const auth=status===401 || status===403;
+  const attempt=Number(row.attempt_count)+1, finished=now(), time=Date.parse(finished);
   const backoff=Math.min(6*3600_000,30_000*Math.pow(2,Math.min(attempt-1,16)))*(0.8+Math.random()*0.4);
-  const next=Math.max(Date.now()+Math.round(backoff),responseAfter ?? 0);
-  let state=success?'delivered':transient && row.retry_mode==='auto' && attempt<48 && next<Date.parse(row.created_at)+7*DAY?'retry_wait':'failed';
-  if(blocked) state='retry_wait';
-  const finished=now();
+  let next=Math.max(Date.now()+Math.round(backoff),responseAfter ?? 0);
+  // Route-class rejections retry normally within the grace period of one
+  // episode, then block the revision until an automatic recheck. A manual
+  // single attempt blocks at once and ends: only automatic events wait out the
+  // cooldown, so it is never resent unasked. Auth rejections block until the owner acts.
+  const since=route?row.blocking_since ?? finished:null;
+  const grace=route && row.retry_mode==='auto' && time-Date.parse(since!)<ROUTE_BLOCK_GRACE_MS;
+  const blockedUntil=route && !grace?time+ROUTE_BLOCK_COOLDOWN_MS:null;
+  const blocked=auth || blockedUntil!==null;
+  let state=success?'delivered':(transient || grace) && row.retry_mode==='auto' && attempt<48 && next<Date.parse(row.created_at)+7*DAY?'retry_wait':'failed';
+  if(auth || (blockedUntil!==null && row.retry_mode==='auto')) state='retry_wait';
+  if(blockedUntil!==null) next=blockedUntil;
   const statements=[
     // Keep the attempt's terminal result immutable. A transient HTTP result
     // that exhausts its retry window is a failure, not a scheduled retry.
-    env.DB.prepare(`UPDATE delivery_attempts SET finished_at=?,http_status=?,duration_ms=?,outcome=?,error_code=? WHERE id=? AND finished_at IS NULL`).bind(finished,status,Date.now()-start,success?'delivered':state==='failed'?'failed':transient?'retryable':'rejected',success?null:code,attemptID),
-    env.DB.prepare(`UPDATE deliveries SET state=CASE WHEN payload_key IS NULL AND ?<>'delivered' THEN 'cancelled' ELSE ? END,delivered_at=?,last_error=?,next_attempt_at=?,claim_token=NULL,lease_until=NULL WHERE event_id=? AND claim_token=?`).bind(state,state,success?finished:null,success?null:code,stamp(next),eventID,token),
+    env.DB.prepare(`UPDATE delivery_attempts SET finished_at=?,http_status=?,duration_ms=?,outcome=?,error_code=? WHERE id=? AND finished_at IS NULL`).bind(finished,status,Date.now()-start,success?'delivered':blocked?'rejected':state==='failed'?'failed':transient || grace?'retryable':'rejected',success?null:code,attemptID),
+    env.DB.prepare(`UPDATE deliveries SET state=CASE WHEN payload_key IS NULL AND ?<>'delivered' THEN 'cancelled' ELSE ? END,delivered_at=?,last_error=?,next_attempt_at=?,blocking_since=?,claim_token=NULL,lease_until=NULL WHERE event_id=? AND claim_token=?`).bind(state,state,success?finished:null,success?null:code,stamp(next),since,eventID,token),
   ];
-  if(blocked) statements.push(env.DB.prepare('UPDATE endpoint_revisions SET blocked_reason=? WHERE id=?').bind(code,row.endpoint_revision_id));
+  if(blocked) statements.push(env.DB.prepare('UPDATE endpoint_revisions SET blocked_reason=?,blocked_until=? WHERE id=?').bind(code,blockedUntil===null?null:stamp(blockedUntil),row.endpoint_revision_id));
+  // Success ends only an automatic-recheck block; auth blocks need the owner.
+  if(success) statements.push(env.DB.prepare('UPDATE endpoint_revisions SET blocked_reason=NULL,blocked_until=NULL WHERE id=? AND blocked_until IS NOT NULL').bind(row.endpoint_revision_id));
   if(!success && responseAfter!==null) {
     if(responseAfter>Date.now()+DAY) statements.push(env.DB.prepare(`UPDATE webhook_endpoints SET paused=1,paused_reason='retry_after_over_24h',version=version+1,updated_at=? WHERE id=?`).bind(finished,row.endpoint_id));
     else statements.push(env.DB.prepare('UPDATE webhook_endpoints SET next_send_at=max(COALESCE(next_send_at,?),?) WHERE id=?').bind(finished,stamp(responseAfter),row.endpoint_id));
   }
   await env.DB.batch(statements);
-  return state==='retry_wait' && !blocked && !(responseAfter!==null && responseAfter>Date.now()+DAY)?next:null;
+  if(state!=='retry_wait' || auth || (responseAfter!==null && responseAfter>Date.now()+DAY)) return null;
+  return next;
 }
 
 export async function runJob(env:Env,job:Job,attempts=0):Promise<number|null> {
@@ -502,15 +521,31 @@ export async function runMaintenance(env:Env):Promise<{jobs:Job[];continueSoon:b
     await env.DB.prepare("UPDATE maintenance SET value='alerts' WHERE id='maintenance_phase'").run();
     return {jobs:[],continueSoon:true,nextDelayMS:1000};
   }
-  const jobs:Job[]=[];
-  const messages=await all(env,`SELECT raw_key FROM messages WHERE origin='cloudflare' AND content_deleted_at IS NULL AND raw_expired_at IS NULL AND raw_key IS NOT NULL
-    AND (parse_state='pending' OR (parse_state='parsing' AND lease_until<=?) OR (parse_state='ready' AND receive_mode='forward'
-    AND NOT EXISTS(SELECT 1 FROM deliveries WHERE message_id=messages.id))) ORDER BY received_at LIMIT 100`,now());
-  for(const message of messages) jobs.push({type:'parse',key:message.raw_key});
-  const deliveries=await all(env,`SELECT d.event_id FROM deliveries d JOIN endpoint_revisions r ON r.id=d.endpoint_revision_id
-    JOIN webhook_endpoints e ON e.id=r.endpoint_id JOIN app_settings s ON s.id=1 WHERE
-    d.state='sending' OR (d.state IN('pending','retry_wait') AND e.paused=0 AND r.blocked_reason IS NULL AND e.archived_at IS NULL AND s.send_paused=0)
-    ORDER BY d.next_attempt_at LIMIT 100`);
+  const jobs:Job[]=[],date=now();
+  // Separate index ranges: an OR here would scan every stored message.
+  const live="origin='cloudflare' AND content_deleted_at IS NULL AND raw_expired_at IS NULL AND raw_key IS NOT NULL";
+  const messages=[
+    ...await all(env,`SELECT raw_key FROM messages INDEXED BY messages_live_lifecycle_idx WHERE parse_state='pending' AND ${live} ORDER BY received_at LIMIT 100`),
+    ...await all(env,`SELECT raw_key FROM messages INDEXED BY messages_live_lifecycle_idx WHERE parse_state='parsing' AND lease_until<=? AND ${live} ORDER BY received_at LIMIT 100`,date),
+    ...await all(env,`SELECT m.raw_key FROM messages m INDEXED BY messages_unsettled_idx WHERE m.origin='cloudflare' AND m.content_deleted_at IS NULL AND m.retention_started_at IS NULL
+      AND m.raw_expired_at IS NULL AND m.raw_key IS NOT NULL AND m.parse_state='ready' AND m.receive_mode='forward'
+      AND NOT EXISTS(SELECT 1 FROM deliveries WHERE message_id=m.id) ORDER BY m.received_at LIMIT 100`),
+  ];
+  for(const key of new Set(messages.map(message=>message.raw_key as string))) jobs.push({type:'parse',key});
+  // Route-class blocks written without a cooldown (before 0008, by the older
+  // Worker during the deploy gap or after a rollback) get their recheck now.
+  await env.DB.prepare(`UPDATE endpoint_revisions SET blocked_until=? WHERE id IN(SELECT id FROM endpoint_revisions INDEXED BY endpoint_revisions_uncooled_idx
+    WHERE blocked_reason IS NOT NULL AND blocked_until IS NULL AND (blocked_reason IN('http_404','http_405') OR blocked_reason GLOB 'http_3[0-9][0-9]'))`).bind(date).run();
+  // Events held by a pause or a block past their window fail as deliverJob
+  // would on its next run, so the in-flight set stays bounded in time.
+  await env.DB.prepare(`UPDATE deliveries SET state='failed',last_error='retry_window_expired' WHERE event_id IN(SELECT event_id FROM deliveries
+    INDEXED BY deliveries_waiting_created_idx WHERE state IN('pending','retry_wait') AND created_at<=? AND (retry_mode='auto' OR created_at<=?) ORDER BY created_at LIMIT 20)`).bind(stamp(Date.now()-7*DAY),stamp(Date.now()-30*DAY)).run();
+  // Only due events: a job that is not yet due is already scheduled, and
+  // pulling it forward would spend an alarm just to reschedule it.
+  const deliveries=await all(env,`SELECT d.event_id FROM deliveries d INDEXED BY deliveries_due_idx JOIN endpoint_revisions r ON r.id=d.endpoint_revision_id
+    JOIN webhook_endpoints e ON e.id=r.endpoint_id JOIN app_settings s ON s.id=1 WHERE d.state IN('pending','retry_wait','sending')
+    AND (d.state='sending' OR (d.next_attempt_at<=? AND e.paused=0 AND e.archived_at IS NULL AND s.send_paused=0 AND ${unblockedSQL('r')}))
+    ORDER BY d.next_attempt_at LIMIT 100`,date,date);
   for(const delivery of deliveries) jobs.push({type:'deliver',eventID:delivery.event_id});
   // Continue recovery pages promptly, but do not rescan an idle bucket every
   // ten minutes merely because the independent alert clock is due.

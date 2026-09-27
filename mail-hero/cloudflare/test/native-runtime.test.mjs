@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { setTimeout as delay } from 'node:timers/promises';
 import { build } from 'esbuild';
 import { Miniflare, convertV4MiniflareOptions } from 'miniflare';
+import { migrationStatements } from './migrations.mjs';
 
 const root = resolve(fileURLToPath(new URL('..', import.meta.url)));
 const fixture = [
@@ -80,8 +81,7 @@ test('native workerd: durable archive, protected API, stable retry identity and 
     const db = await mf.getD1Database('DB');
     for (const name of (await readdir(join(root, 'migrations'))).filter(name => name.endsWith('.sql')).sort()) {
       const sql = await readFile(join(root, 'migrations', name), 'utf8');
-      // All migration statements here are ordinary DDL/DML; no triggers.
-      await db.batch(sql.replace(/--[^\n]*/g, '').split(';').map(s => s.trim()).filter(Boolean).map(s => db.prepare(s)));
+      await db.batch(migrationStatements(sql).map(s => db.prepare(s)));
     }
     const publicRequest = await mf.dispatchFetch('https://public.example.org/api/v1/messages');
     assert.equal(publicRequest.status, 503, 'DEV bypass fails closed outside localhost');

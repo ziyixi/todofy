@@ -31,12 +31,17 @@ export class MailCoordinator {
     state.storage.sql.exec('CREATE TABLE IF NOT EXISTS ingress_reservations(id TEXT PRIMARY KEY,day TEXT NOT NULL,size INTEGER NOT NULL)');
     state.storage.sql.exec('CREATE INDEX IF NOT EXISTS ingress_day ON ingress_reservations(day)');
     state.storage.sql.exec('CREATE INDEX IF NOT EXISTS jobs_due ON jobs(failed,due)');
+    // Picking the next job reads one row instead of sorting every due job by id.
+    state.storage.sql.exec('CREATE INDEX IF NOT EXISTS jobs_due_id ON jobs(failed,due,id)');
     state.storage.sql.exec('CREATE TABLE IF NOT EXISTS control(id INTEGER PRIMARY KEY,value INTEGER NOT NULL)');
     state.storage.sql.exec('INSERT OR IGNORE INTO control(id,value) VALUES(1,?)',Date.now()+DAY);
     state.storage.sql.exec('CREATE TABLE IF NOT EXISTS intake_control(id INTEGER PRIMARY KEY,value INTEGER NOT NULL)');
     state.storage.sql.exec('INSERT OR IGNORE INTO intake_control VALUES(1,0)');
     state.storage.sql.exec(`CREATE TABLE IF NOT EXISTS ingest_uploads(key TEXT PRIMARY KEY,seq INTEGER UNIQUE NOT NULL,
       status TEXT NOT NULL,policy TEXT NOT NULL,created INTEGER NOT NULL,settled INTEGER)`);
+    // Backup status (read by every repair pass) counts only unsettled uploads,
+    // not the whole intake history kept after a completed snapshot.
+    state.storage.sql.exec('CREATE INDEX IF NOT EXISTS ingest_uploads_status ON ingest_uploads(status,seq)');
     this.capacity=new CapacityLedger(state.storage,env);
     this.backup=new BackupState(state.storage,env,()=>this.running);
   }

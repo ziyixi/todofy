@@ -48,7 +48,7 @@ export class CapacityLedger {
     this.storage = storage; this.env = env;
     storage.sql.exec(`CREATE TABLE IF NOT EXISTS capacity_control
       (id INTEGER PRIMARY KEY,baseline INTEGER NOT NULL,limit_bytes INTEGER NOT NULL,initialized INTEGER NOT NULL)`);
-    storage.sql.exec('INSERT OR IGNORE INTO capacity_control VALUES(1,0,?,0)', DEFAULT_CAPACITY_BYTES);
+    storage.sql.exec('INSERT OR IGNORE INTO capacity_control(id,baseline,limit_bytes,initialized) VALUES(1,0,?,0)', DEFAULT_CAPACITY_BYTES);
     storage.sql.exec(`CREATE TABLE IF NOT EXISTS capacity_allocations
       (key TEXT PRIMARY KEY,bytes INTEGER NOT NULL,released INTEGER NOT NULL DEFAULT 0,created INTEGER NOT NULL DEFAULT 0,checked INTEGER NOT NULL DEFAULT 0)`);
     const columns = new Set(storage.sql.exec<{ name: string }>('PRAGMA table_info(capacity_allocations)').toArray().map(row => row.name));
@@ -56,6 +56,14 @@ export class CapacityLedger {
     if (!columns.has('checked')) storage.sql.exec('ALTER TABLE capacity_allocations ADD COLUMN checked INTEGER NOT NULL DEFAULT 0');
     storage.sql.exec('CREATE INDEX IF NOT EXISTS capacity_active_bytes ON capacity_allocations(released,bytes)');
     storage.sql.exec('CREATE INDEX IF NOT EXISTS capacity_reconcile ON capacity_allocations(released,checked,created)');
+    // Raw keys are never reconciled and never marked checked; keep them out of the scan.
+    storage.sql.exec(`CREATE INDEX IF NOT EXISTS capacity_reconcile_nonraw ON capacity_allocations(checked,created,key)
+      WHERE released=0 AND substr(key,1,4)<>'raw/'`);
+    // Running total of active allocations, so every snapshot reads two rows. It has
+    // its own table: the previous release inserts capacity_control positionally,
+    // so adding columns there would break its constructor after a code rollback.
+    storage.sql.exec('CREATE TABLE IF NOT EXISTS capacity_totals(id INTEGER PRIMARY KEY CHECK(id=1),allocated INTEGER NOT NULL,checked INTEGER NOT NULL)');
+    if (!storage.sql.exec('SELECT 1 FROM capacity_totals WHERE id=1').toArray().length) this.recount();
     storage.sql.exec(`CREATE TABLE IF NOT EXISTS capacity_bootstrap
       (id INTEGER PRIMARY KEY,cursor TEXT,bytes INTEGER NOT NULL,logical_bytes INTEGER NOT NULL,limit_bytes INTEGER NOT NULL)`);
   }
@@ -86,12 +94,24 @@ export class CapacityLedger {
     });
     if (page.truncated) throw new Error('capacity_bootstrap_in_progress');
   }
+  /** One full O(active) sum; the running total is adjusted synchronously by every writer. */
+  private recount(): void {
+    this.storage.sql.exec(`INSERT INTO capacity_totals(id,allocated,checked) SELECT 1,COALESCE(sum(bytes),0),? FROM capacity_allocations WHERE released=0
+      ON CONFLICT(id) DO UPDATE SET allocated=excluded.allocated,checked=excluded.checked`, Date.now());
+  }
+  private adjust(bytes: number): void {
+    if (bytes) this.storage.sql.exec('UPDATE capacity_totals SET allocated=max(0,allocated+?) WHERE id=1', bytes);
+  }
   async reconcileAbandoned(): Promise<{ checked: number; released: number }> {
+    // Daily self-heal of the running total, also after a rollback whose older
+    // writers did not adjust it.
+    const checked = this.storage.sql.exec<{ checked: number }>('SELECT checked FROM capacity_totals WHERE id=1').one().checked;
+    if (!checked || Date.now() - checked > 86_400_000) this.recount();
     // A stale parse cannot still run concurrently with maintenance: only this
     // coordinator's serial Alarm starts MIME parsing. Never reclaim the current
     // D1 claim, even if its timestamp has expired, and never delete R2 here.
-    const rows = this.storage.sql.exec<Allocation>(`SELECT * FROM capacity_allocations
-      WHERE released=0 AND (key LIKE 'parsed/%' OR key LIKE 'payload/%') AND created<? ORDER BY checked,created,key LIMIT 4`, Date.now() - 3600_000).toArray();
+    const rows = this.storage.sql.exec<Allocation>(`SELECT * FROM capacity_allocations INDEXED BY capacity_reconcile_nonraw
+      WHERE released=0 AND substr(key,1,4)<>'raw/' AND (key LIKE 'parsed/%' OR key LIKE 'payload/%') AND created<? ORDER BY checked,created,key LIMIT 4`, Date.now() - 3600_000).toArray();
     let released = 0;
     for (const row of rows) {
       this.storage.sql.exec('UPDATE capacity_allocations SET checked=? WHERE key=?', Date.now(), row.key);
@@ -112,8 +132,9 @@ export class CapacityLedger {
     return { checked: rows.length, released };
   }
   snapshot(): { used_bytes: number; baseline_bytes: number; reserved_bytes: number; limit_bytes: number; initialized: boolean } {
-    const row = this.storage.sql.exec<{ baseline: number; limit_bytes: number; initialized: number }>('SELECT * FROM capacity_control WHERE id=1').one();
-    const allocated = this.storage.sql.exec<{ bytes: number }>('SELECT COALESCE(sum(bytes),0) bytes FROM capacity_allocations WHERE released=0').one().bytes;
+    const row = this.storage.sql.exec<{ baseline: number; limit_bytes: number; initialized: number; allocated: number }>(
+      'SELECT c.baseline,c.limit_bytes,c.initialized,t.allocated FROM capacity_control c JOIN capacity_totals t ON t.id=1 WHERE c.id=1').one();
+    const allocated = row.allocated;
     return { used_bytes: row.baseline + allocated, baseline_bytes: row.baseline, reserved_bytes: allocated,
       limit_bytes: row.limit_bytes, initialized: !!row.initialized };
   }
@@ -123,6 +144,7 @@ export class CapacityLedger {
     const usage = this.snapshot();
     if (!usage.initialized || usage.used_bytes + bytes > usage.limit_bytes) return false;
     this.storage.sql.exec('INSERT INTO capacity_allocations(key,bytes,created) VALUES(?,?,?)', key, bytes, Date.now());
+    this.adjust(bytes);
     return true;
   }
   settle(key: string, bytes: number, legacyBytes = 0, releaseKey?: string): boolean {
@@ -136,14 +158,17 @@ export class CapacityLedger {
     if (usage.used_bytes - (previous?.bytes ?? legacyBytes) - (transferred?.bytes ?? 0) + bytes > usage.limit_bytes) return false;
     if (!previous) this.storage.sql.exec('UPDATE capacity_control SET baseline=max(0,baseline-?) WHERE id=1', legacyBytes);
     this.storage.sql.exec('INSERT INTO capacity_allocations(key,bytes,created) VALUES(?,?,?) ON CONFLICT(key) DO UPDATE SET bytes=excluded.bytes', key, bytes, Date.now());
+    this.adjust(bytes - (previous?.bytes ?? 0));
     if (transferred) this.release(transferred.key, 0);
     return true;
   }
   release(key: string, legacyBytes: number): void {
     const previous = this.storage.sql.exec<Allocation>('SELECT * FROM capacity_allocations WHERE key=?', key).toArray()[0];
     if (previous?.released) return;
-    if (previous) this.storage.sql.exec('UPDATE capacity_allocations SET bytes=0,released=1 WHERE key=?', key);
-    else {
+    if (previous) {
+      this.storage.sql.exec('UPDATE capacity_allocations SET bytes=0,released=1 WHERE key=?', key);
+      this.adjust(-previous.bytes);
+    } else {
       this.storage.sql.exec('UPDATE capacity_control SET baseline=max(0,baseline-?) WHERE id=1', legacyBytes);
       this.storage.sql.exec('INSERT INTO capacity_allocations(key,bytes,released,created) VALUES(?,0,1,?)', key, Date.now());
     }

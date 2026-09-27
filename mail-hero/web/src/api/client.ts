@@ -102,6 +102,7 @@ export const api = {
   createEndpoint: (body: Record<string, unknown>) => request<Endpoint>('/endpoints', { method: 'POST', body: { action_request_id: actionId(), ...body } }),
   updateEndpoint: (id: string, body: Record<string, unknown>) => request<Endpoint>(`/endpoints/${encodeURIComponent(id)}`, { method: 'PATCH', body }),
   rotateCredential: (id: string, body: { credential: string; version: number }) => request<{ affected_revisions: number; version: number }>(`/endpoints/${encodeURIComponent(id)}/rotate-credential`, { method: 'POST', body }),
+  unblockEndpoint: (id: string, body: { version: number }) => request<{ affected_revisions: number; version: number }>(`/endpoints/${encodeURIComponent(id)}/unblock`, { method: 'POST', body }),
   checkEndpoint: (id: string) => request<{ url_valid: boolean; dns_status: string; tls_status: string; business_contract?: string }>(`/endpoints/${encodeURIComponent(id)}/check`, { method: 'POST', body: {} }),
   testEndpoint: (id: string, requestId = actionId()) => request<{ event_id: string; synthetic_test: true; warning?: string }>(`/endpoints/${encodeURIComponent(id)}/test`, { method: 'POST', body: { action_request_id: requestId } }),
 }

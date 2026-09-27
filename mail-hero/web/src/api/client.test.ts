@@ -49,4 +49,15 @@ describe('management API integration contract', () => {
     expect(options.headers).toMatchObject({ 'X-CSRF-Token': 'signed-token' })
     expect(JSON.parse(options.body as string)).toMatchObject({ action_request_id: 'fixed-action-id', credential: 'secret' })
   })
+
+  it('unblocks an endpoint through the CSRF mutation path with only its version', async () => {
+    const fetcher = vi.fn((url: string) => Promise.resolve(url === '/api/v1/csrf' ? json({ token: 'signed-token' }) : json({ affected_revisions: 3, version: 8 })))
+    vi.stubGlobal('fetch', fetcher)
+    expect(await api.unblockEndpoint('endpoint 1', { version: 7 })).toEqual({ affected_revisions: 3, version: 8 })
+    const [url, options] = fetcher.mock.calls.find(([called]) => called !== '/api/v1/csrf') as unknown as [string, RequestInit]
+    expect(url).toBe('/api/v1/endpoints/endpoint%201/unblock')
+    expect(options).toMatchObject({ method: 'POST', credentials: 'same-origin', cache: 'no-store', redirect: 'error' })
+    expect(options.headers).toMatchObject({ 'X-CSRF-Token': 'signed-token', 'Content-Type': 'application/json' })
+    expect(JSON.parse(options.body as string)).toEqual({ version: 7 })
+  })
 })

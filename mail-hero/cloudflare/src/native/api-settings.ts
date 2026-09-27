@@ -2,7 +2,7 @@ import type { Env } from './types.ts'
 import { json, signToken, verifyToken } from './security.ts'
 import { wake } from './pipeline.ts'
 import { lifecycleStorage, safeTerminalSQL } from './lifecycle.ts'
-import { alertOverview } from './alerts.ts'
+import { alertOverview, parseStatus } from './alerts.ts'
 import { bad, body, boolean, conflict, missing, now, paused, required, uuid, version, type Row } from './api-common.ts'
 
 export async function currentSettings(env: Env): Promise<Row> {
@@ -97,7 +97,7 @@ export async function patchSettings(request: Request, env: Env, owner: string): 
     WHERE id=1 AND version=? AND (? IS NULL OR EXISTS(SELECT 1 FROM webhook_endpoints WHERE id=? AND archived_at IS NULL AND current_revision_id IS NOT NULL))`)
     .bind(mode, endpointID, +sendPaused, retention, policyVersion, policy.raw_retention_days, policy.content_retention_days, policy.ledger_retention_days, now(), expected, endpointID, endpointID)
   const statements = [update]
-  if (applyExisting) statements.push(env.DB.prepare(`UPDATE messages SET retention_policy_version=?,raw_retention_days=?,content_retention_days=?,ledger_retention_days=?,retention_started_at=NULL,version=version+1
+  if (applyExisting) statements.push(env.DB.prepare(`UPDATE messages SET retention_policy_version=?,raw_retention_days=?,content_retention_days=?,ledger_retention_days=?,retention_started_at=NULL,lifecycle_due_at=NULL,version=version+1
     WHERE origin='cloudflare' AND retention_policy_version IS NULL AND content_deleted_at IS NULL AND changes()>0`)
     .bind(policyVersion, policy.raw_retention_days, policy.content_retention_days, policy.ledger_retention_days))
   const results = await env.DB.batch(statements)
@@ -110,12 +110,10 @@ export async function overview(env: Env): Promise<Response> {
   const settings = await currentSettings(env)
   const scheduler = await schedulerStatus(env)
   const storage = await lifecycleStorage(env), alerts = await alertOverview(env)
-  const counts = await required(env, `SELECT
-    (SELECT count(*) FROM messages WHERE origin='cloudflare') messages,
-    (SELECT count(*) FROM deliveries WHERE state IN('pending','retry_wait','sending')) pending,
-    (SELECT count(*) FROM deliveries WHERE state='failed') failed,
-    (SELECT count(*) FROM deliveries WHERE state='delivered') delivered,
-    (SELECT count(*) FROM messages WHERE parse_state='failed' AND content_deleted_at IS NULL) parse_failed`)
+  // Trigger-maintained counters keep this O(1) however much history is stored.
+  const counts = await required(env, `SELECT messages,deliveries_pending+deliveries_retry_wait+deliveries_sending pending,
+    deliveries_failed failed,deliveries_delivered delivered FROM app_counters WHERE id=1`)
+  counts.parse_failed = (await parseStatus(env)).failed
   const warnings: string[] = []
   if (Math.max(settings.logical_bytes, scheduler.capacity?.used_bytes ?? 0) >= settings.logical_limit_bytes * 0.7) warnings.push('邮件内容与预留空间接近配置容量，请检查 R2/D1 用量和保留设置。')
   if (settings.database_bytes !== null && settings.database_bytes >= 350000000) warnings.push('D1 数据库接近 Free 单库 500 MB 上限，请检查搜索索引、历史记录及数据库用量。')

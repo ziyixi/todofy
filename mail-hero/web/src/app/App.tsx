@@ -1,8 +1,10 @@
 import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Link, NavLink, Navigate, Route, Routes, useLocation } from 'react-router'
-import { Activity, ArrowUpRight, BarChart3, Boxes, ChevronDown, CircleHelp, ClipboardList, Inbox, Mail, Menu, Settings2, Webhook, X } from 'lucide-react'
+import { Activity, ArrowUpRight, BarChart3, Boxes, ChevronDown, CircleAlert, CircleHelp, ClipboardList, Inbox, Mail, Menu, Settings2, Webhook, X } from 'lucide-react'
 import { api } from '../api/client'
+import type { ActiveAlert } from '../api/types'
+import { alertLabel, attentionAlerts, isEndpointAlert } from '../components/alerts'
 import { CopyButton, formatBytes } from '../components/UI'
 import InboxPage from '../pages/InboxPage'
 import MessagePage from '../pages/MessagePage'
@@ -20,6 +22,13 @@ const navItems = [
   { to: '/endpoints', label: 'Webhook 目标', icon: Webhook },
   { to: '/settings', label: '设置', icon: Settings2 },
 ]
+
+// Rides on the shared five-minute overview poll; it adds no D1 reads of its own.
+function AlertStrip({ active }: { active?: ActiveAlert[] }) {
+  const alerts = attentionAlerts(active)
+  if (!alerts.length) return null
+  return <div className={`alert-strip ${alerts.some(alert => alert.severity === 'critical') ? 'critical' : ''}`} role="status"><CircleAlert size={16}/><span>{alerts.map(alert => alertLabel(alert.code)).join(' · ')}</span>{alerts.some(alert => isEndpointAlert(alert.code)) && <Link to="/endpoints">处理目标</Link>}<Link to="/settings">查看提醒</Link></div>
+}
 
 function Shell({ children }: { children: React.ReactNode }) {
   const [menuOpen, setMenuOpen] = useState(false)
@@ -41,7 +50,7 @@ function Shell({ children }: { children: React.ReactNode }) {
       <header className="topbar"><div className="topbar-left"><button className="menu-button" aria-label="打开菜单" onClick={() => setMenuOpen(true)}><Menu size={21}/></button><div className="breadcrumb"><span>Mail Hero</span><span className="slash">/</span><strong>{navItems.find(item => location.pathname.startsWith(item.to))?.label || (location.pathname.startsWith('/setup') ? '接入指引' : '邮件')}</strong></div></div>
         <div className="topbar-right">{isPaused && <Link to="/settings" className="topbar-pause"><span className="pause-dot"/>投递已暂停</Link>}{receiveAddress ? <div className="address-pill"><span className="address-dot"/><code>{receiveAddress}</code><CopyButton value={receiveAddress} label="复制地址"/></div> : <Link to="/setup" className="address-loading">检查收信地址 <ChevronDown size={15}/></Link>}</div>
       </header>
-      <main className="main-content">{(overview.data?.warnings?.length || 0) > 0 && <div className="warning-banner"><Activity size={17} /><span>{overview.data?.warnings?.join(' · ')}</span><Link to="/settings">查看状态</Link></div>}{children}</main>
+      <main className="main-content"><AlertStrip active={overview.data?.alerts?.active}/>{(overview.data?.warnings?.length || 0) > 0 && <div className="warning-banner"><Activity size={17} /><span>{overview.data?.warnings?.join(' · ')}</span><Link to="/settings">查看状态</Link></div>}{children}</main>
       <footer className="page-footer"><span>你的邮件保存在私有邮件存储中</span><span>{overview.data?.storage_bytes != null ? `已用 ${formatBytes(overview.data.storage_bytes)}` : 'Mail Hero'}<span className="footer-divider">·</span><Link to="/setup">接入帮助</Link></span></footer>
     </div>
   </div>

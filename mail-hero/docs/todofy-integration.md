@@ -8,7 +8,27 @@ Todofy 主容器挂载独立 inbox 目录，使用 SQLite WAL 和 FULL synchrono
 
 后台先持久保存摘要，再请求现有 Todoist 服务，最后写入原摘要缓存。Todoist 调用结果不确定时进入 `todo_unknown`，需要人工对账，不会自动重复创建任务。成功后保留去重账本，清除 inbox 的正文副本。详细恢复接口见 Todofy README 的 Mail Hero 部分。
 
-Mail Hero 的“已交付”只代表 Todofy 已接管。完整成功还要核实 Todofy 状态 `complete` 和实际任务 ID。
+Mail Hero 的“已交付”只代表 Todofy 已持久接管（消费者已接受该事件）。完整成功还要核实 Todofy 状态 `complete` 和实际任务 ID。接管之后的摘要或 Todoist 失败不会回写 Mail Hero，也不会出现在 Mail Hero 的提醒里；它们由下面 Todofy 自己的 attention 视图和每日提醒暴露。
+
+## 卡住事件的发现与处理（Todofy 侧）
+
+以下接口都在 Todofy 上，使用 owner 既有的 BasicAuth，响应只含事件 ID、状态、任务 ID、安全错误码、时间和计数，不含主题、地址或正文。
+
+- `GET /api/v1/mail_inbox` 默认（或 `view=recent`）仍返回最新 100 条。`view=attention` 返回全部需要关注的事件，按创建时间排序，最多 500 条：状态为 `failed_summary`、`todo_unknown`，或创建超过 6 小时仍停在 `pending`、`summarizing`、`summarized`、`todo_sending`、`todo_created`。其他 `view` 值返回 400。两种视图都带按状态的 `counts`、`attention_count` 和最近一次每日提醒的状态 `latest_reminder`（没有则为 `null`）。
+- LLM 暂时失败（`summary_failed`、`llm_client_unavailable`）继续自动重试，退避上限约 4 小时；失败达到 13 次且事件已超过 7 天才转为 `failed_summary`。`invalid_saved_event`、`summary_render_failed` 等确定性错误保持原来的 13 次规则。
+- 处理方式仍是 `POST /api/v1/mail_inbox/<event_id>/reconcile`，带 header `X-Todofy-Admin-Action: reconcile-mail-inbox`，resolution 为 `task_created`、`task_not_created`、`retry_summary` 或新增的 `dismiss`。`dismiss` 必须带 `"confirmed_dismiss": true`，否则 400；只允许从 `failed_summary` 或 `todo_unknown` 执行，其他状态返回 409。成功返回 204，事件变为 `ignored`（错误码 `dismissed_by_owner`），清除 payload、摘要和任务正文，保留去重账本，相同事件重投仍只确认不重做。对 `todo_unknown` 执行 `dismiss` 不会检查 Todoist；应先确认任务是否已存在。
+
+```json
+{"event_id":"<event_id>","resolution":"dismiss","confirmed_dismiss":true}
+```
+
+### 每日 Todoist 提醒
+
+owner 已选择不接外部告警渠道，改为由 Todofy 在有 attention 事件时，每个 UTC 日最多创建一条 Todoist 提醒任务。inbox 启用时默认开启，`TODOFY_MAIL_ATTENTION_REMINDER=false` 关闭。后台空闲时最多每 10 分钟检查一次，`attention_count` 为 0 时不做任何事。
+
+- 标题为 `[Todofy System] Mail Hero：N 封邮件需要处理`；正文最多列 20 条 `事件 ID · 状态 · 错误码 · 收到时间（UTC）`，超出部分只给数量，再附上面的查询与处理步骤。不含邮件主题、地址或正文。
+- 每日状态记录在 inbox 库的 `mail_inbox_reminders` 表，调用 Todoist 前先认领当天并冻结标题和正文。只有确定未创建任务的失败（todo 客户端不可用，或 todo 服务返回 `Unavailable`、`InvalidArgument`、`FailedPrecondition`）会在 1 小时后用同一请求重试，当天最多 5 次。超时、其他错误、没有任务 ID 的响应，以及创建过程中进程中断（重启后）都记为 `unknown`，当天不再重发：宁可当天漏一次提醒，也不重复创建任务。
+- 这条提醒本身是真实的 Todoist 任务。它只提示 Todofy 侧的积压，不改变任何事件状态，也不能代替逐条对账。
 
 ## 两个发布流程
 

@@ -13,6 +13,7 @@ interface Lease {
 const activeStates = new Set(['draining', 'settling', 'ready']);
 const TABLE_NAME = /^[a-zA-Z_][a-zA-Z0-9_]*$/;
 const PAGE_SIZE = 100;
+const ROWID = '__mailhero_rowid';
 const EXPORT_MAX_ROWS = 50_000;
 const EXPORT_MAX_BYTES = 16 * 1024 * 1024;
 const responseError = (status: number, code: string) => Response.json({ error: { code } }, { status });
@@ -46,6 +47,9 @@ export class BackupState {
       (backup_id TEXT NOT NULL,cursor TEXT NOT NULL,value TEXT NOT NULL,PRIMARY KEY(backup_id,cursor))`);
     storage.sql.exec(`CREATE TABLE IF NOT EXISTS backup_blocks
       (backup_id TEXT NOT NULL,name TEXT NOT NULL,value TEXT NOT NULL,PRIMARY KEY(backup_id,name))`);
+    // Keyset position after each full database page, keyed by its block name.
+    storage.sql.exec(`CREATE TABLE IF NOT EXISTS backup_table_cursors
+      (backup_id TEXT NOT NULL,name TEXT NOT NULL,last_rowid INTEGER NOT NULL,PRIMARY KEY(backup_id,name))`);
   }
   private read(): Lease | null {
     const value = this.storage.sql.exec<{ value: string }>('SELECT value FROM backup_control WHERE id=1').toArray()[0]?.value;
@@ -183,6 +187,7 @@ export class BackupState {
       // Previous inventories are backup-only metadata. Keep the last receipt in
       // the external verified backup instead of growing the live DO forever.
       this.storage.sql.exec('DELETE FROM backup_objects'); this.storage.sql.exec('DELETE FROM backup_blocks'); this.storage.sql.exec('DELETE FROM backup_object_pages');
+      this.storage.sql.exec('DELETE FROM backup_table_cursors');
       await this.progress();
       const { policy: _policy, ...publicStatus } = this.status(); return Response.json(publicStatus);
     }
@@ -201,15 +206,18 @@ export class BackupState {
     if (path === '/backup/control' && request.method === 'GET') {
       // Completed ingestion history is already represented in D1 and immutable
       // R2 metadata. Keep only the upload state still needed by scheduler jobs.
-      const uploadPredicate = "u.seq<=? AND (u.status='uploading' OR EXISTS(SELECT 1 FROM jobs j WHERE j.id='parse:'||u.key))";
+      // Keys come from the unsettled-status index and the job list, never from
+      // a walk over all intake history.
+      const uploadPredicate = `u.key IN(SELECT key FROM ingest_uploads INDEXED BY ingest_uploads_status WHERE status='uploading' AND seq<=?
+        UNION SELECT substr(id,7) FROM jobs WHERE substr(id,1,6)='parse:') AND u.seq<=?`;
       const totals = this.storage.sql.exec<{ n: number; bytes: number }>(`SELECT sum(n) n,sum(bytes) bytes FROM (
         SELECT count(*) n,COALESCE(sum(1024+6*length(CAST(policy AS BLOB))),0) bytes FROM ingest_uploads u WHERE ${uploadPredicate}
         UNION ALL SELECT count(*),COALESCE(sum(1024+6*length(CAST(payload AS BLOB))),0) FROM jobs
         UNION ALL SELECT count(*),count(*)*1024 FROM capacity_allocations WHERE released=0
         UNION ALL SELECT count(*),count(*)*512 FROM ingress_reservations
-        UNION ALL SELECT count(*),count(*)*128 FROM control)`, lease.cut_seq!).one();
+        UNION ALL SELECT count(*),count(*)*128 FROM control)`, lease.cut_seq!, lease.cut_seq!).one();
       if (totals.n > EXPORT_MAX_ROWS || totals.bytes > EXPORT_MAX_BYTES) return responseError(413, 'backup_control_export_limit');
-      const uploads = this.storage.sql.exec<Row>(`SELECT * FROM ingest_uploads u WHERE ${uploadPredicate} ORDER BY seq`, lease.cut_seq!).toArray();
+      const uploads = this.storage.sql.exec<Row>(`SELECT * FROM ingest_uploads u WHERE ${uploadPredicate} ORDER BY seq`, lease.cut_seq!, lease.cut_seq!).toArray();
       const postCut = new Set(this.storage.sql.exec<{ key: string }>('SELECT key FROM ingest_uploads WHERE seq>?', lease.cut_seq!).toArray().map(row => row.key));
       const jobs = this.storage.sql.exec<Row>('SELECT * FROM jobs ORDER BY id').toArray().filter(row => !postCut.has(JSON.parse(row.payload).key));
       const allocations = this.storage.sql.exec<Row>('SELECT * FROM capacity_allocations WHERE released=0 ORDER BY key').toArray().filter(row => !postCut.has(row.key));
@@ -230,8 +238,19 @@ export class BackupState {
     if (path === '/backup/database' && request.method === 'GET') {
       const table = url.searchParams.get('table') ?? '', offset = Number(url.searchParams.get('offset') ?? 0);
       if (!lease.tables?.includes(table) || !TABLE_NAME.test(table) || !Number.isSafeInteger(offset) || offset < 0 || offset % PAGE_SIZE) return responseError(400, 'invalid_export_page');
-      if (offset && !this.blockValue(lease, `database/${table}/${offset - PAGE_SIZE}.json`)) return responseError(409, 'export_pages_out_of_order');
-      const rows = (await this.env.DB.prepare(`SELECT * FROM "${table}" ORDER BY rowid LIMIT ? OFFSET ?`).bind(PAGE_SIZE, offset).all<Row>()).results;
+      const name = `database/${table}/${offset}.json`, previous = `database/${table}/${offset - PAGE_SIZE}.json`;
+      if (offset && !this.blockValue(lease, previous)) return responseError(409, 'export_pages_out_of_order');
+      // Keyset pages read ~100 rows each. A page exported by an older Worker in
+      // this lease has no cursor, so continue it with the equivalent OFFSET.
+      const cursor = offset ? this.storage.sql.exec<{ last_rowid: number }>('SELECT last_rowid FROM backup_table_cursors WHERE backup_id=? AND name=?', lease.id, previous).toArray()[0] : null;
+      const select = `SELECT rowid AS "${ROWID}",* FROM "${table}"`;
+      const rows = (await (!offset ? this.env.DB.prepare(`${select} ORDER BY rowid LIMIT ?`).bind(PAGE_SIZE)
+        : cursor ? this.env.DB.prepare(`${select} WHERE rowid>? ORDER BY rowid LIMIT ?`).bind(cursor.last_rowid, PAGE_SIZE)
+          : this.env.DB.prepare(`${select} ORDER BY rowid LIMIT ? OFFSET ?`).bind(PAGE_SIZE, offset)).all<Row>()).results;
+      const last = rows.at(-1)?.[ROWID];
+      for (const row of rows) delete row[ROWID];
+      if (rows.length === PAGE_SIZE) this.storage.sql.exec(`INSERT INTO backup_table_cursors VALUES(?,?,?)
+        ON CONFLICT(backup_id,name) DO UPDATE SET last_rowid=excluded.last_rowid`, lease.id, name, last);
       return this.exportBlock(lease, `database/${table}/${offset}.json`, { table, offset, rows, next_offset: rows.length === PAGE_SIZE ? offset + PAGE_SIZE : null },
         { table, offset, rows: rows.length, complete: rows.length < PAGE_SIZE });
     }

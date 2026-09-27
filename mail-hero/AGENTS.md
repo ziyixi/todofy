@@ -73,7 +73,7 @@ MIME原文、HTML、附件均不可信。HTML经清理后在禁脚本/禁网sand
 
 通用消费者合同仍为 `mail.received.v1`，见 `api/mail-received-v1.md`。冻结event_id、确切JSON bytes和目标revision；普通retry复用全部身份。2xx表示消费者先持久接管，不代表后续任务完成。消费者至少保留90天去重；同ID不同payload冲突。
 
-网络错误、408/429/5xx按持久退避，尊重Retry-After；401/403/404/405、重定向和策略错误阻断revision。自动最多48次或7天，普通手动retry保留30天窗口；“新事件重发”明确可能再次触发业务。目标默认约2次/分钟，全局最多10次/分钟，HTTP有超时。
+网络错误、408/429/5xx按持久退避，尊重Retry-After；404/405/重定向先按30分钟宽限重试，仍失败则阻断revision并6小时后自动复查，成功即解除；401/403和策略错误阻断revision，直到轮换凭据或owner明确解除阻断。自动最多48次或7天，普通手动retry保留30天窗口；“新事件重发”明确可能再次触发业务。目标默认约2次/分钟，全局最多10次/分钟，HTTP有超时。
 
 Worker出站只允许部署配置的精确公网HTTPS hostname；至少Bearer或Basic认证。UI与API保持同一目标策略，不提供内部HTTP或无认证目标。目标“检查”只检查静态URL策略，不声称验证DNS/TLS/消费者；`dns_status=not_checked`显示“未检查”。合成测试事件会真的POST目标，操作文案必须准确。
 

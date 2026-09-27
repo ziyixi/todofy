@@ -8,6 +8,7 @@ const key1='raw/11111111-1111-4111-8111-111111111111.eml';
 const key2='raw/22222222-2222-4222-8222-222222222222.eml';
 function fixture(options={}) {
   const db=new DatabaseSync(':memory:');let alarm=null,dbDown=false,policyReads=0;
+  options.before?.(db);
   const objects=new Map(),settings={logical_bytes:0,logical_limit_bytes:5*1024**3,mode:'forward',revision_id:'frozen-revision',lifecycle_policy_version:3,raw_retention_days:7,content_retention_days:30,ledger_retention_days:180,...options.settings};
   const storage={sql:{exec(sql,...values){const query=db.prepare(sql),rows=query.columns().length?query.all(...values):(query.run(...values),[]);return {toArray:()=>rows,one:()=>{assert.equal(rows.length,1);return rows[0];}};}},
     transactionSync(callback){db.exec('BEGIN');try{const value=callback();db.exec('COMMIT');return value;}catch(e){db.exec('ROLLBACK');throw e;}},
@@ -186,3 +187,59 @@ test('processing deletion before upload settlement cannot leave a phantom pre-cu
     assert.equal((await (await request(f,'/backup/begin',{})).json()).state,'ready');
   } finally {f.close();}
 });
+
+test('running allocation total is computed once for an existing ledger and stays exact through every writer',async()=>{
+  const prefix='parsed/11111111-1111-4111-8111-111111111111/33333333-3333-4333-8333-333333333333';
+  const payload='payload/22222222-2222-4222-8222-222222222222.json';
+  const f=fixture({settings:{logical_bytes:1000},before(db){
+    // A ledger written by the previous Worker: no running total columns yet.
+    db.exec(`CREATE TABLE capacity_control(id INTEGER PRIMARY KEY,baseline INTEGER NOT NULL,limit_bytes INTEGER NOT NULL,initialized INTEGER NOT NULL);
+      INSERT INTO capacity_control VALUES(1,1000,${5*1024**3},1);
+      CREATE TABLE capacity_allocations(key TEXT PRIMARY KEY,bytes INTEGER NOT NULL,released INTEGER NOT NULL DEFAULT 0,created INTEGER NOT NULL DEFAULT 0,checked INTEGER NOT NULL DEFAULT 0);
+      INSERT INTO capacity_allocations(key,bytes,released) VALUES('${key2}',400,0),('raw/old.eml',0,1);`);
+  }});
+  try {
+    const total=()=>f.db.prepare('SELECT allocated FROM capacity_totals').get().allocated;
+    // The previous release inserts this row positionally; a code rollback must still construct.
+    assert.deepEqual(f.db.prepare('PRAGMA table_info(capacity_control)').all().map(row=>row.name),['id','baseline','limit_bytes','initialized']);
+    f.db.prepare('INSERT OR IGNORE INTO capacity_control VALUES(1,0,?,0)').run(5*1024**3);
+    const recount=()=>f.db.prepare('SELECT COALESCE(sum(bytes),0) n FROM capacity_allocations WHERE released=0').get().n;
+    assert.equal(total(),400);
+    const steps=[['/capacity/reserve',{key:key1,bytes:300}],['/capacity/reserve',{key:prefix,bytes:2000}],['/capacity/settle',{key:key1,bytes:2100,legacy_bytes:300,release_key:prefix}],
+      ['/capacity/settle',{key:'raw/legacy.eml',bytes:50,legacy_bytes:80}],['/capacity/reserve',{key:payload,bytes:70}],['/capacity/release',{key:key2}],['/capacity/release',{key:key2}],['/capacity/release',{key:'raw/unknown.eml',legacy_bytes:10}]];
+    for(const [path,input] of steps) {
+      assert.equal((await request(f,path,input)).status,204,path);
+      assert.equal(total(),recount(),`${path} ${JSON.stringify(input)}`);
+    }
+    const status=await (await request(f,'/capacity/status')).json();
+    assert.equal(status.reserved_bytes,recount());assert.equal(status.used_bytes,status.baseline_bytes+recount());
+    // Drift is healed by the daily recount in the repair phase.
+    f.db.prepare('UPDATE capacity_totals SET allocated=1,checked=?').run(Date.now()-2*86400000);
+    await request(f,'/capacity/reconcile',{});
+    assert.equal(total(),recount());
+    const plan=f.db.prepare(`EXPLAIN QUERY PLAN SELECT * FROM capacity_allocations INDEXED BY capacity_reconcile_nonraw WHERE released=0 AND substr(key,1,4)<>'raw/'
+      AND (key LIKE 'parsed/%' OR key LIKE 'payload/%') AND created<? ORDER BY checked,created,key LIMIT 4`).all(Date.now()).map(row=>row.detail);
+    assert.ok(plan.some(detail=>detail.includes('capacity_reconcile_nonraw')) && !plan.some(detail=>detail.includes('TEMP B-TREE')),JSON.stringify(plan));
+  } finally {f.close();}
+});
+test('control export keeps only unsettled or job-held uploads, identical to the former predicate, and the next job is an index read',async()=>{
+  const f=fixture();
+  try {
+    await request(f,'/capacity/status');
+    // Settled intake history, one saved upload a parse job still holds, and one unrelated delivery job.
+    f.db.exec(`WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i+1 FROM n WHERE i<300)
+      INSERT INTO ingest_uploads(key,seq,status,policy,created,settled) SELECT 'raw/history-'||i||'.eml',i,CASE i%3 WHEN 0 THEN 'saved' WHEN 1 THEN 'failed' ELSE 'deleted' END,'{}',0,0 FROM n;
+      UPDATE intake_control SET value=300;`);
+    const job=f.db.prepare('INSERT INTO jobs(id,payload,due,created) VALUES(?,?,?,0)');
+    job.run('parse:raw/history-150.eml',JSON.stringify({type:'parse',key:'raw/history-150.eml'}),Date.now()+86400000);
+    job.run('deliver:11111111-1111-4111-8111-111111111111',JSON.stringify({type:'deliver',eventID:'11111111-1111-4111-8111-111111111111'}),Date.now()+86400000);
+    const begun=await (await request(f,'/backup/begin',{})).json();assert.equal(begun.state,'ready');
+    const control=await (await request(f,'/backup/control?backup_id='+begun.backup_id)).json();
+    const former=f.db.prepare(`SELECT * FROM ingest_uploads u WHERE u.seq<=? AND (u.status='uploading' OR EXISTS(SELECT 1 FROM jobs j WHERE j.id='parse:'||u.key)) ORDER BY seq`).all(control.cut_seq);
+    assert.equal(control.cut_seq,300);assert.deepEqual(control.uploads,former.map(row=>({...row})));assert.deepEqual(control.uploads.map(row=>row.key),['raw/history-150.eml']);
+    assert.deepEqual(control.capacity.map(row=>Object.keys(row).sort()),[['baseline','id','initialized','limit_bytes']],'control export format unchanged');
+    const plan=f.db.prepare('EXPLAIN QUERY PLAN SELECT * FROM jobs WHERE failed=0 AND due<=? ORDER BY due,id LIMIT 1').all(Date.now()).map(row=>row.detail);
+    assert.ok(plan.some(detail=>detail.includes('jobs_due_id')) && !plan.some(detail=>detail.includes('TEMP B-TREE')),JSON.stringify(plan));
+  } finally {f.close();}
+});
+

@@ -102,6 +102,7 @@ export interface Endpoint {
   paused?: boolean
   paused_reason?: string | null
   blocked_reason?: string | null
+  blocked_until?: string | null
   version: number
   current_revision_id?: string
   archived_at?: string | null
@@ -141,8 +142,10 @@ export interface Overview {
   capacity_reserved_bytes?: number | null
   bucket_actual_bytes?: number | null
   account_r2_bytes?: number | null
-  alerts?: { configured: boolean; configuration_error: boolean; active: Array<{ code: string; severity: string; metrics: Record<string, number> }>; pending_notifications: number; failed_notifications: number }
+  alerts?: { configured: boolean; configuration_error: boolean; active: ActiveAlert[]; pending_notifications: number; failed_notifications: number }
 }
+
+export interface ActiveAlert { code: string; severity: string; metrics: Record<string, number>; first_seen_at?: string; last_seen_at?: string }
 
 export interface DeliveryStatsCounts {
   succeeded: number
