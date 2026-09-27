@@ -28,17 +28,18 @@ func initLogger() {
 
 // Config holds all configuration parameters
 type Config struct {
-	AllowedUsers         string
-	DataBasePath         string
-	MailInboxPath        string
-	MailWebhookTokenFile string
-	MailSourceID         string
-	Port                 int
-	HealthCheckTimeout   int
-	LLMAddr              string
-	TodoAddr             string
-	DependencyAddr       string
-	DatabaseAddr         string
+	AllowedUsers          string
+	DataBasePath          string
+	MailInboxPath         string
+	MailWebhookTokenFile  string
+	MailSourceID          string
+	MailAttentionReminder string
+	Port                  int
+	HealthCheckTimeout    int
+	LLMAddr               string
+	TodoAddr              string
+	DependencyAddr        string
+	DatabaseAddr          string
 }
 
 var (
@@ -98,6 +99,12 @@ func initFlagsWithFlagSet(fs *flag.FlagSet, cfg *Config) {
 		"mail-source-id",
 		os.Getenv("TODOFY_MAIL_SOURCE_ID"),
 		"Stable logical ID of the authenticated Mail Hero source",
+	)
+	fs.StringVar(
+		&cfg.MailAttentionReminder,
+		"mail-attention-reminder",
+		os.Getenv("TODOFY_MAIL_ATTENTION_REMINDER"),
+		"Create at most one Todoist reminder per UTC day for stuck Mail Hero events (true or false; default true)",
 	)
 	fs.IntVar(&cfg.Port, "port", 8080, "Port to run the server on")
 	fs.IntVar(&cfg.HealthCheckTimeout, "health-check-timeout", 10, "Timeout for health check in seconds")

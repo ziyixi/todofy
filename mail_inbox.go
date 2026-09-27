@@ -15,6 +15,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -125,6 +126,29 @@ type mailInbox struct {
 	lock      *os.File
 	sourceID  string
 	tokenFile string
+	remind    bool
+	// now is nil in production; tests inject a clock for day and retry windows.
+	now             func() time.Time
+	remindCheckedAt time.Time
+}
+
+func (i *mailInbox) clock() time.Time {
+	if i.now != nil {
+		return i.now()
+	}
+	return time.Now()
+}
+
+func mailReminderEnabled(value string) (bool, error) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return true, nil
+	}
+	enabled, err := strconv.ParseBool(value)
+	if err != nil {
+		return false, errors.New("TODOFY_MAIL_ATTENTION_REMINDER must be true or false")
+	}
+	return enabled, nil
 }
 
 func validateMailInboxConfig(cfg Config) error {
@@ -142,7 +166,8 @@ func validateMailInboxConfig(cfg Config) error {
 		strings.ContainsAny(cfg.MailSourceID, "\r\n\x00") || len(cfg.MailSourceID) > 128 {
 		return errors.New("mail inbox requires an absolute path, an absolute token file, and a stable source ID")
 	}
-	return nil
+	_, err := mailReminderEnabled(cfg.MailAttentionReminder)
+	return err
 }
 
 func readMailWebhookToken(path string) ([]byte, error) {
@@ -189,7 +214,9 @@ func openMailInbox(cfg Config) (*mailInbox, error) {
 	}
 	db.SetMaxOpenConns(1)
 	db.SetMaxIdleConns(1)
-	inbox := &mailInbox{db: db, lock: lock, sourceID: cfg.MailSourceID, tokenFile: cfg.MailWebhookTokenFile}
+	remind, _ := mailReminderEnabled(cfg.MailAttentionReminder)
+	inbox := &mailInbox{db: db, lock: lock, sourceID: cfg.MailSourceID, tokenFile: cfg.MailWebhookTokenFile,
+		remind: remind}
 	if err = inbox.initialize(context.Background()); err != nil {
 		_ = inbox.Close()
 		return nil, err
@@ -228,7 +255,23 @@ func (i *mailInbox) initialize(ctx context.Context) error {
 		updated_at INTEGER NOT NULL,
 		PRIMARY KEY(source_id,event_id)
 	);
-	CREATE INDEX IF NOT EXISTS mail_inbox_due ON mail_inbox_events(state,next_attempt_at,created_at);`)
+	CREATE INDEX IF NOT EXISTS mail_inbox_due ON mail_inbox_events(state,next_attempt_at,created_at);
+	CREATE INDEX IF NOT EXISTS mail_inbox_state ON mail_inbox_events(source_id,state);
+	CREATE INDEX IF NOT EXISTS mail_inbox_active ON mail_inbox_events(source_id,created_at,event_id)
+		WHERE `+mailActiveSQL+`;
+	CREATE TABLE IF NOT EXISTS mail_inbox_reminders (
+		day TEXT PRIMARY KEY,
+		state TEXT NOT NULL CHECK(state IN ('sending','created','unknown','failed')),
+		task_id TEXT NOT NULL DEFAULT '',
+		subject TEXT NOT NULL DEFAULT '',
+		body TEXT NOT NULL DEFAULT '',
+		attention_count INTEGER NOT NULL,
+		attempts INTEGER NOT NULL DEFAULT 0,
+		next_attempt_at INTEGER NOT NULL DEFAULT 0,
+		last_error_code TEXT NOT NULL DEFAULT '',
+		created_at INTEGER NOT NULL,
+		updated_at INTEGER NOT NULL
+	);`)
 	if err != nil {
 		return err
 	}
@@ -259,6 +302,12 @@ func (i *mailInbox) initialize(ctx context.Context) error {
 		time.Now().Unix(),
 		i.sourceID,
 	)
+	if err != nil {
+		return err
+	}
+	// A reminder task may already exist; a missed reminder beats a duplicate.
+	_, err = i.db.ExecContext(ctx, `UPDATE mail_inbox_reminders SET state='unknown',
+		last_error_code='interrupted_reminder_call',updated_at=? WHERE state='sending'`, time.Now().Unix())
 	return err
 }
 
