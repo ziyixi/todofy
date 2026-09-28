@@ -197,3 +197,17 @@ HTTP 接管、容器重建存活与 Mail Hero 解析测试不能代替用户测�
 - 未改生产邮件行、未手动重建事件，也未要求重发。原有Alarm在22:54–22:55 UTC自动恢复三封积压邮件：均为 `ready`，各生成一个已交付事件、一次尝试、HTTP204，无解析或交付错误。
 - owner浏览器真实详情确认用户指定测试邮件的主题、原发件人和中文正文完整显示，交付时间线显示一次成功。仅核验该事件的Todofy状态API：恰好一条记录，`state=complete`，无错误码。未输出原件、凭据或其他邮件正文。
 - 此结果覆盖本次真实Gmail自动转发到Mail Hero、后台解析、Todofy持久接收及业务状态完成；不推定其他来源、未测试MIME结构或未来容量情况均已验收。
+
+## 维护读取量、阻断自动复查与 Todofy 卡住提醒（2026-09-27 UTC）
+
+用户授权修复分析中的三项高风险问题，并要求推送 GitHub、完成 Cloudflare 与服务器部署。用户选择暂不接外部告警渠道，Todofy 侧每日最多一条 Todoist 提醒。
+
+- 问题与依据：部署前生产 D1 约 46 封在库邮件时每日读取约 16 万行，DO 约 28 万行；`d1 insights` 显示约85%来自每10分钟维护周期（lifecycle候选511行/次、告警快照274行/次、repair 126行/次、retention UPDATE 62行/次），均随在库或历史邮件线性增长，备份 D1 导出的 OFFSET 分页随表大小平方增长。按每天50–100封推算，数周到数月内会超过 Workers Free 每日500万行读取。
+- Mail Hero 提交 `87ae06eaece2a00534ec39e925b92a9e3f569fb4`：D1 迁移 `0008_bounded_maintenance` 增加预计算 `lifecycle_due_at`、未结清/到期/缺失到期/待删字节部分索引、`blocked_until`、`blocking_since`，以及由触发器维护的 `app_counters`；维护、告警、overview 只读取到期、未结清或在途行；DO 容量改为 `capacity_totals` 运行总量并每日重算；备份 D1 导出改为 rowid keyset，请求/响应协议不变，现有收集器无需更新。删除内容仍按原锚点与 safe-terminal 在变更租约内复核。
+- 404/405/3xx 改为30分钟宽限后阻断目标版本并6小时自动复查，成功即解除；401/403和策略错误仍需 owner 轮换凭据或新增的“解除阻断”（`POST /api/v1/endpoints/:id/unblock`）。`pending_stale` 不再被失败/取消的投递永久点亮；新增仅 UI 显示的 `endpoint_blocked`、`endpoint_paused`、`delivery_failed`、`policy_error` 提醒及全局提醒条。
+- 本地验证：Worker 93项（含 workerd 行读取回归：300与3,000在库邮件时每个维护周期约170–200行 D1，overview 23行，DO 约13行；旧代码为3,696与36,096行）、前端39项、部署配置3项、备份 Python 29项（1项需 GPG 在本机跳过）全部通过；Worker 与前端类型检查、构建通过；wrangler 4.141.0 本地应用含触发器的 0008 成功。独立审查覆盖数据安全语义、实测读取量、迁移与部署间隙、回滚兼容、备份导出兼容。
+- 正式发布：[原生检查与部署36358925115](https://github.com/ziyixi/mail-hero/actions/runs/36358925115)与[备份镜像36358925146](https://github.com/ziyixi/mail-hero/actions/runs/36358925146)成功。Cloudflare 于23:32:09 UTC部署 Worker 版本 `487e78a9-9d44-4c34-b054-e1926e958735`；远程 D1 迁移列表为 “No migrations to apply”，生产 schema 已含7个新索引、`app_counters`及6个触发器；计数表为109封邮件、108次已交付、0待交付、0失败。Access 登录跳转与未认证 XHR 401 行为不变。服务器备份收集器镜像未变（备份协议未变）。
+- Todofy 提交 `6c46ed4f4508950f73456b199d4f6ac175ef533f`（仅网关）：`view=attention`、按状态计数、`dismiss`、LLM暂时失败7天重试窗口、每 UTC 日最多一条不含邮件内容的 Todoist 提醒。[Todofy CI 36358999614](https://github.com/ziyixi/todofy/actions/runs/36358999614) 9个任务全部成功（含 lint、SUT、集成与镜像发布）。另一任务的未提交文件未纳入提交。
+- 服务器：部署仓库提交 `bcad459`（[检查36359699599](https://github.com/ziyixi/self-host-on-vultr/actions/runs/36359699599)成功）仅更新网关 digest 为 `ghcr.io/ziyixi/todofy@sha256:78e300ae68026bb8fde3d8a12d8c4038996e57183bbc1a197b1b8a9ed06b91f8` 并更正注释。23:44:39 UTC 以 `docker compose up -d --no-deps todofy` 只重建网关；运行镜像 OCI revision 为 `6c46ed4`，本地及 `https://daily.ziyixi.science/health` 返回200，未认证的 `/hooks/mail` 与 `view=attention` 返回401；其余16个容器 ID 不变，三个 gRPC 后端未改动。
+- 生产读取量（Cloudflare GraphQL 15分钟聚合，只读）：部署前每15分钟 DO 约1,400–2,900行（小时峰值2.6万行），部署后第一个完整15分钟桶（23:45）DO 为82行。D1 `insights` 中新维护查询每次只读1–5行（旧查询为62–588行/次）；同桶 D1 总读取主要来自 owner 当时浏览 UI（dashboard统计、列表）。部署前已计时的107封邮件由代码自愈写入 `lifecycle_due_at`，缺失数为0，最早到期 `2026-10-03T23:04:36Z`（原件7天规则）；维护阶段正常轮转，未结清邮件2封。以上核查只读取计数、schema 和维护元数据，未读取邮件内容。
+- 尚未验证：生产中的解除阻断、宽限/复查及新提醒条未在浏览器中实际演练（生产目标当前未被阻断）；keyset 备份导出将在下一次04:17 UTC定时备份首次运行；Todofy 每日提醒是否触发取决于是否存在 attention 事件，本次未用 BasicAuth 查询；数周后稳态读取量需按实际邮件量复查。
