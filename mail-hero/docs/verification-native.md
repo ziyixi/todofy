@@ -211,3 +211,13 @@ HTTP 接管、容器重建存活与 Mail Hero 解析测试不能代替用户测�
 - 服务器：部署仓库提交 `bcad459`（[检查36359699599](https://github.com/ziyixi/self-host-on-vultr/actions/runs/36359699599)成功）仅更新网关 digest 为 `ghcr.io/ziyixi/todofy@sha256:78e300ae68026bb8fde3d8a12d8c4038996e57183bbc1a197b1b8a9ed06b91f8` 并更正注释。23:44:39 UTC 以 `docker compose up -d --no-deps todofy` 只重建网关；运行镜像 OCI revision 为 `6c46ed4`，本地及 `https://daily.ziyixi.science/health` 返回200，未认证的 `/hooks/mail` 与 `view=attention` 返回401；其余16个容器 ID 不变，三个 gRPC 后端未改动。
 - 生产读取量（Cloudflare GraphQL 15分钟聚合，只读）：部署前每15分钟 DO 约1,400–2,900行（小时峰值2.6万行），部署后第一个完整15分钟桶（23:45）DO 为82行。D1 `insights` 中新维护查询每次只读1–5行（旧查询为62–588行/次）；同桶 D1 总读取主要来自 owner 当时浏览 UI（dashboard统计、列表）。部署前已计时的107封邮件由代码自愈写入 `lifecycle_due_at`，缺失数为0，最早到期 `2026-10-03T23:04:36Z`（原件7天规则）；维护阶段正常轮转，未结清邮件2封。以上核查只读取计数、schema 和维护元数据，未读取邮件内容。
 - 尚未验证：生产中的解除阻断、宽限/复查及新提醒条未在浏览器中实际演练（生产目标当前未被阻断）；keyset 备份导出将在下一次04:17 UTC定时备份首次运行；Todofy 每日提醒是否触发取决于是否存在 attention 事件，本次未用 BasicAuth 查询；数周后稳态读取量需按实际邮件量复查。
+
+## 已处理异常清理期限与路由阻断复查上限（2026-09-28 UTC）
+
+- 用户在上一轮上线后追加两项要求：投递失败后已由 owner 处理（重发成功或 owner 取消）的邮件按“略长、可设置”的期限清理；404/405/3xx 自动复查设最大次数（8 次，约 2 天）。
+- Mail Hero 提交 `e3320725`：迁移 `0009_resolved_retention_rechecks` 增加 `app_settings.resolved_retention_days`（默认60天；迁移时取 max(60, 正文期限)，正文不清理时为 NULL）、`messages.resolved_at` 与 `endpoint_revisions.blocked_rechecks`。已处理异常只在无进行中交付、最后一个已送达交付之后的交付都已送达或由 owner 取消（从未送达时全部由 owner 取消）、且有策略快照时成立；期限自最后一次处理起算，并取全局期限、当前正文期限及邮件自身正文期限中最长者；删除标记在同一语句内重新核对规则与到期时间。未处理的失败、进行中交付、NULL 策略历史及已开始普通计时的邮件不改用此期限。开启或缩短需要预览确认。路由类阻断每次进入6小时冷却计1次，最多8次；之后保持阻断直到 owner 解除，成功、解除或轮换凭据清零。
+- 默认值说明：此期限随迁移对现有设置生效，这是用户在会话中明确要求的；不过只有新 Worker 的清理扫描才会记录 `resolved_at`，因此最早也要在部署约60天后才会发生按此规则的删除，owner 可在此之前于设置页修改或关闭。
+- 本地验证：Worker 113项（含 workerd 真实 D1/R2 的已处理清理、并发重发不误删、关闭/延长期限的竞态、8次复查后永久阻断等）、前端58项、部署配置3项、备份29项（1项因无 GPG 跳过）全部通过；类型检查、构建与本地 wrangler 迁移通过。独立审查发现并修复了 NULL 策略历史误删、无尝试的后续处理不更新锚点、已处理期限短于邮件自身正文期限、迁移默认值低于正文期限阻塞设置保存等问题。
+- 正式发布：[原生检查与部署36365274830](https://github.com/ziyixi/mail-hero/actions/runs/36365274830)与[备份镜像36365274921](https://github.com/ziyixi/mail-hero/actions/runs/36365274921)成功；Cloudflare 于01:16:47 UTC部署 Worker 版本 `f8a8acec-8859-4a6d-9507-b0013978e7f8`，远程迁移列表为 “No migrations to apply”，生产设置为正文30天、已处理异常60天，新增列存在；计数与 Access 行为不变。服务器无需变更。
+- Todofy attention 核查（owner 自行在本机终端以 BasicAuth 查询，凭据未经助手处理）：`attention_count=0`，`complete` 108、`ignored` 1，其余状态为0，`latest_reminder=null`，与 Mail Hero 已交付108一致。
+- 部署后约12分钟复查：新的保留扫描（含已处理异常判定）在生产已运行，`insights` 显示每次平均读取7行；维护阶段正常轮转，当前无被标记为已处理异常的邮件（`resolved_at` 为0，与全部邮件均已送达一致）。以上只读取计数、schema 与维护元数据。
