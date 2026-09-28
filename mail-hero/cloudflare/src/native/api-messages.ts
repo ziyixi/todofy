@@ -231,6 +231,10 @@ export async function deliveryRoute(request: Request, env: Env, owner: string, i
         : `UPDATE deliveries SET state='cancelled',last_error='cancelled_by_owner' WHERE ? IS NOT NULL AND event_id=? AND state IN('pending','retry_wait','failed') AND EXISTS(SELECT 1 FROM ui_actions WHERE id=? AND result_ref IS NULL)`)
         .bind(now(), id, entry.id),
       env.DB.prepare('UPDATE ui_actions SET result_ref=?,http_status=? WHERE id=? AND changes()>0').bind(id, sub === 'retry' ? 202 : 200, entry.id),
+      // A retry or cancel is a handling that may end without an attempt time of
+      // its own: the resolved-exception clock restarts when the lifecycle next
+      // sees the message resolved.
+      env.DB.prepare('UPDATE messages SET resolved_at=NULL WHERE id=(SELECT message_id FROM deliveries WHERE event_id=?) AND resolved_at IS NOT NULL AND changes()>0').bind(id),
     ])
     if (!result[0].meta.changes) {
       const completed = await required(env, 'SELECT result_ref FROM ui_actions WHERE id=?', entry.id)

@@ -39,6 +39,16 @@ describe('management API integration contract', () => {
     expect(Object.fromEntries(requestURL.searchParams)).toEqual({ from: payload.from, to: payload.to, bucket: 'day' })
   })
 
+  it('sends every staged retention period to the preview, spelling a disabled period as none', async () => {
+    const fetcher = vi.fn(() => Promise.resolve(json({ version: 3, resolved_retention_days: null, resolved_messages: 4, candidates: 0, bytes_to_clear: 0, preview_token: 'signed', expires_at: '2026-09-28T00:10:00Z' })))
+    vi.stubGlobal('fetch', fetcher)
+    expect((await api.retentionPreview({ raw_retention_days: 7, content_retention_days: 30, ledger_retention_days: 180, resolved_retention_days: null, apply_existing: false })).resolved_messages).toBe(4)
+    await api.retentionPreview({ raw_retention_days: null, content_retention_days: 30, ledger_retention_days: 180, resolved_retention_days: 60, apply_existing: true })
+    const params = (call: number) => Object.fromEntries(new URL((fetcher.mock.calls[call] as unknown as [string])[0], 'https://mail-hero.example.test').searchParams)
+    expect(params(0)).toEqual({ raw_retention_days: '7', content_retention_days: '30', ledger_retention_days: '180', resolved_retention_days: 'none', apply_existing: 'false' })
+    expect(params(1)).toEqual({ raw_retention_days: 'none', content_retention_days: '30', ledger_retention_days: '180', resolved_retention_days: '60', apply_existing: 'true' })
+  })
+
   it('obtains CSRF first and sends the exact action request body', async () => {
     const fetcher = vi.fn().mockResolvedValueOnce(json({ token: 'signed-token' })).mockResolvedValueOnce(json({ id: 'endpoint-1' }))
     vi.stubGlobal('fetch', fetcher)

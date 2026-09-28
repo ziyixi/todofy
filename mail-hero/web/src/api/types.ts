@@ -103,6 +103,9 @@ export interface Endpoint {
   paused_reason?: string | null
   blocked_reason?: string | null
   blocked_until?: string | null
+  /** Automatic route-block rechecks armed on the current revision, including one still
+   * scheduled; the block turns permanent when the 8th fails. */
+  blocked_rechecks?: number
   version: number
   current_revision_id?: string
   archived_at?: string | null
@@ -121,6 +124,8 @@ export interface Settings {
   raw_retention_days?: number | null
   content_retention_days?: number | null
   ledger_retention_days?: number
+  /** Global, not frozen per message: owner-resolved delivery exceptions are cleaned this long after their last handling. */
+  resolved_retention_days?: number | null
   capacity_bytes?: number
   logical_bytes?: number
   logical_limit_bytes?: number
@@ -175,8 +180,10 @@ export interface RetentionPreview {
   raw_retention_days?: number | null
   content_retention_days?: number | null
   ledger_retention_days?: number
+  resolved_retention_days?: number | null
   apply_existing?: boolean
   historical_messages?: number
+  resolved_messages?: number
   safe_terminal_messages?: number
   historical_content_bytes?: number
   candidates: number | Array<unknown>

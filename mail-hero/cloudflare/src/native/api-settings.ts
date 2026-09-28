@@ -1,12 +1,12 @@
 import type { Env } from './types.ts'
 import { json, signToken, verifyToken } from './security.ts'
 import { wake } from './pipeline.ts'
-import { lifecycleStorage, safeTerminalSQL } from './lifecycle.ts'
+import { lifecycleStorage, resolvedFloorSQL, resolvedTerminalSQL, safeTerminalSQL } from './lifecycle.ts'
 import { alertOverview, parseStatus } from './alerts.ts'
 import { bad, body, boolean, conflict, missing, now, paused, required, uuid, version, type Row } from './api-common.ts'
 
 export async function currentSettings(env: Env): Promise<Row> {
-  const result = await env.DB.prepare(`SELECT version,mode,current_endpoint_id,send_paused,retention_days,lifecycle_policy_version,raw_retention_days,content_retention_days,ledger_retention_days,logical_bytes,logical_limit_bytes,last_backup_at FROM app_settings WHERE id=1`).all<Row>()
+  const result = await env.DB.prepare(`SELECT version,mode,current_endpoint_id,send_paused,retention_days,lifecycle_policy_version,raw_retention_days,content_retention_days,ledger_retention_days,resolved_retention_days,logical_bytes,logical_limit_bytes,last_backup_at FROM app_settings WHERE id=1`).all<Row>()
   const value = result.results[0] || missing()
   const databaseBytes = Number.isFinite(result.meta.size_after) ? result.meta.size_after : null
   return { ...value, send_paused: !!value.send_paused, effective_send_paused: !!value.send_paused || paused(env) || env.MAINTENANCE_MODE === 'true', receive_address: env.RECEIVE_ADDRESS, maintenance_mode: env.MAINTENANCE_MODE === 'true', database_bytes: databaseBytes }
@@ -37,8 +37,19 @@ function policyInput(input: Row, old: Row): Row {
   const ledger = 'ledger_retention_days' in input ? retentionDays(input.ledger_retention_days) : old.ledger_retention_days
   if (ledger < 90) bad('去重记录至少保留 90 天')
   if (raw !== null && content !== null && raw > content) bad('原件保留期不能长于正文保留期')
-  return { raw_retention_days: raw, content_retention_days: content, ledger_retention_days: ledger }
+  // Global, not snapshotted per message: it applies to every resolved exception.
+  // A content period kept forever (NULL) allows only a resolved period kept
+  // forever. Checked when either staged field is being set, so a stored
+  // combination (e.g. from the retired retention_days field) never blocks other
+  // changes; the lifecycle enforces the longer period regardless.
+  const resolved = 'resolved_retention_days' in input ? policyDays(input.resolved_retention_days) : old.resolved_retention_days
+  const touched = ['resolved_retention_days', 'content_retention_days'].some(key => key in input)
+  if (touched && resolved !== null && (content === null || resolved < content)) bad('已处理异常邮件的保留期不能短于正文保留期')
+  return { raw_retention_days: raw, content_retention_days: content, ledger_retention_days: ledger, resolved_retention_days: resolved }
 }
+/** Live resolved exceptions that the resolved period governs. */
+const resolvedLive = `FROM messages m INDEXED BY messages_unsettled_idx WHERE m.origin='cloudflare' AND m.content_deleted_at IS NULL
+  AND m.retention_started_at IS NULL AND ${resolvedTerminalSQL()} AND NOT (${safeTerminalSQL()})`
 
 export async function previewRetention(request: Request, env: Env, owner: string): Promise<Response> {
   const parameters = new URL(request.url).searchParams
@@ -54,7 +65,7 @@ export async function previewRetention(request: Request, env: Env, owner: string
       preview_token: await signToken(env, { kind: 'retention', owner, version: settings.version, days, exp: expiration }) })
   }
   const input: Row = {}
-  for (const key of ['raw_retention_days', 'content_retention_days', 'ledger_retention_days']) {
+  for (const key of ['raw_retention_days', 'content_retention_days', 'ledger_retention_days', 'resolved_retention_days']) {
     if (parameters.has(key)) input[key] = parameters.get(key) === 'none' ? null : Number(parameters.get(key))
   }
   const policy = policyInput(input, settings), applyExisting = parameters.get('apply_existing') === 'true'
@@ -62,6 +73,7 @@ export async function previewRetention(request: Request, env: Env, owner: string
     COALESCE(sum(CASE WHEN ${safeTerminalSQL()} THEN 1 ELSE 0 END),0) safe_terminal_messages,
     COALESCE(sum(m.content_bytes),0) historical_content_bytes
     FROM messages m WHERE m.origin='cloudflare' AND m.retention_policy_version IS NULL AND m.content_deleted_at IS NULL`)
+  counts.resolved_messages = (await required(env, `SELECT count(*) n ${resolvedLive}`)).n
   return json({ version: settings.version, ...policy, apply_existing: applyExisting, ...counts,
     candidates: applyExisting ? counts.historical_messages : 0, bytes_to_clear: 0,
     clock_starts: 'after_confirmation_and_safe_terminal', expires_at: new Date(expiration * 1000).toISOString(),
@@ -81,9 +93,11 @@ export async function patchSettings(request: Request, env: Env, owner: string): 
   const retention = 'retention_days' in input
     ? input.retention_days === null ? null : retentionDays(input.retention_days) : old.retention_days
   const policy = policyInput(input, old), applyExisting = 'apply_existing' in input ? boolean(input.apply_existing, 'apply_existing') : false
-  const changed = Object.keys(policy).some(key => policy[key] !== old[key])
-  const shortened = ['raw_retention_days', 'content_retention_days'].some(key => policy[key] !== null && (old[key] === null || policy[key] < old[key]))
-  const staged = ['raw_retention_days', 'content_retention_days', 'ledger_retention_days'].some(key => key in input)
+  // Only the fields each new message snapshots bump the policy version.
+  const changed = ['raw_retention_days', 'content_retention_days', 'ledger_retention_days'].some(key => policy[key] !== old[key])
+  const resolvedChanged = policy.resolved_retention_days !== old.resolved_retention_days
+  const shortened = ['raw_retention_days', 'content_retention_days', 'resolved_retention_days'].some(key => policy[key] !== null && (old[key] === null || policy[key] < old[key]))
+  const staged = ['raw_retention_days', 'content_retention_days', 'ledger_retention_days', 'resolved_retention_days'].some(key => key in input)
   if (applyExisting || (staged && shortened)) {
     const token = typeof input.retention_confirmation === 'string' ? await verifyToken(env, input.retention_confirmation) : null
     if (token?.kind !== 'lifecycle' || token.owner !== owner || token.version !== expected || token.apply_existing !== applyExisting || Object.keys(policy).some(key => token[key] !== policy[key])) bad('启用、缩短或应用历史保留策略前需要预览并确认')
@@ -92,14 +106,23 @@ export async function patchSettings(request: Request, env: Env, owner: string): 
     const token = typeof input.retention_confirmation === 'string' ? await verifyToken(env, input.retention_confirmation) : null
     if (token?.kind !== 'retention' || token.owner !== owner || token.version !== expected || token.days !== retention) bad('缩短保留期前需要预览并确认')
   }
-  const policyVersion = old.lifecycle_policy_version + (changed || applyExisting ? 1 : 0)
-  const update = env.DB.prepare(`UPDATE app_settings SET mode=?,current_endpoint_id=?,send_paused=?,retention_days=?,lifecycle_policy_version=?,raw_retention_days=?,content_retention_days=?,ledger_retention_days=?,version=version+1,updated_at=?
+  const policyVersion = old.lifecycle_policy_version + (changed || applyExisting ? 1 : 0), stamp = now()
+  const update = env.DB.prepare(`UPDATE app_settings SET mode=?,current_endpoint_id=?,send_paused=?,retention_days=?,lifecycle_policy_version=?,raw_retention_days=?,content_retention_days=?,ledger_retention_days=?,resolved_retention_days=?,version=version+1,updated_at=?
     WHERE id=1 AND version=? AND (? IS NULL OR EXISTS(SELECT 1 FROM webhook_endpoints WHERE id=? AND archived_at IS NULL AND current_revision_id IS NOT NULL))`)
-    .bind(mode, endpointID, +sendPaused, retention, policyVersion, policy.raw_retention_days, policy.content_retention_days, policy.ledger_retention_days, now(), expected, endpointID, endpointID)
+    .bind(mode, endpointID, +sendPaused, retention, policyVersion, policy.raw_retention_days, policy.content_retention_days, policy.ledger_retention_days, policy.resolved_retention_days, stamp, expected, endpointID, endpointID)
   const statements = [update]
-  if (applyExisting) statements.push(env.DB.prepare(`UPDATE messages SET retention_policy_version=?,raw_retention_days=?,content_retention_days=?,ledger_retention_days=?,retention_started_at=NULL,lifecycle_due_at=NULL,version=version+1
+  // Adopted history starts every clock after this confirmation, the resolved one included.
+  if (applyExisting) statements.push(env.DB.prepare(`UPDATE messages SET retention_policy_version=?,raw_retention_days=?,content_retention_days=?,ledger_retention_days=?,retention_started_at=NULL,
+    resolved_at=NULL,lifecycle_due_at=NULL,version=version+1
     WHERE origin='cloudflare' AND retention_policy_version IS NULL AND content_deleted_at IS NULL AND changes()>0`)
     .bind(policyVersion, policy.raw_retention_days, policy.content_retention_days, policy.ledger_retention_days))
+  // Re-arm resolved exceptions in the same transaction, only if this very update
+  // committed: each gets the lower bound of its due time under the committed
+  // period (read in this statement), so the next passes re-evaluate only those
+  // that may be due now, and none while disabled.
+  if (resolvedChanged) statements.push(env.DB.prepare(`UPDATE messages AS m SET lifecycle_due_at=max(?,${resolvedFloorSQL('m')}) WHERE m.id IN(SELECT id FROM messages INDEXED BY messages_unsettled_idx
+    WHERE origin='cloudflare' AND content_deleted_at IS NULL AND retention_started_at IS NULL AND resolved_at IS NOT NULL)
+    AND EXISTS(SELECT 1 FROM app_settings WHERE id=1 AND version=? AND updated_at=?)`).bind(stamp, expected + 1, stamp))
   const results = await env.DB.batch(statements)
   if (!results[0].meta.changes) conflict()
   await wake(env)

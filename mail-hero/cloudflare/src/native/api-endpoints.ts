@@ -110,9 +110,10 @@ async function rotateCredential(request: Request, env: Env, id: string): Promise
     try { validateTarget(env, revision.url); targetAllowed = 1 } catch (error) { if (!(error instanceof HttpError)) throw error }
     const cleared = `?=1 AND blocked_reason IN('http_401','http_403','credential_invalid','credential_or_target_invalid','target_policy_invalid')`
     statements.push(env.DB.prepare(`UPDATE endpoint_revisions SET credential_ciphertext=?,credential_key_version=1,credential_key_id=?,
-      blocked_reason=CASE WHEN ${cleared} THEN NULL ELSE blocked_reason END,blocked_until=CASE WHEN ${cleared} THEN NULL ELSE blocked_until END
+      blocked_reason=CASE WHEN ${cleared} THEN NULL ELSE blocked_reason END,blocked_until=CASE WHEN ${cleared} THEN NULL ELSE blocked_until END,
+      blocked_rechecks=CASE WHEN ${cleared} THEN 0 ELSE blocked_rechecks END
       WHERE id=? AND EXISTS(SELECT 1 FROM maintenance WHERE id=? AND value=?)`)
-      .bind(await encryptCredential(env, revision.id, revision.url, credential), keyID, targetAllowed, targetAllowed, revision.id, marker, keyID))
+      .bind(await encryptCredential(env, revision.id, revision.url, credential), keyID, targetAllowed, targetAllowed, targetAllowed, revision.id, marker, keyID))
   }
   statements.push(env.DB.prepare('DELETE FROM maintenance WHERE id=?').bind(marker))
   const results = await env.DB.batch(statements)
@@ -122,8 +123,9 @@ async function rotateCredential(request: Request, env: Env, id: string): Promise
 }
 
 /** Owner override for any block reason. A still-broken target re-blocks on its
- * next attempt; events held by a block retry now instead of at their cooldown
- * time, while other waiting events keep their persistent backoff. */
+ * next attempt with a fresh set of automatic rechecks; events held by a block
+ * retry now instead of at their cooldown time, while other waiting events keep
+ * their persistent backoff. */
 async function unblockEndpoint(request: Request, env: Env, owner: string, id: string): Promise<Response> {
   const input = await body(request), expected = version(input.version)
   const entry = input.action_request_id === undefined ? null : await action(env, owner, input.action_request_id, 'unblock_endpoint', id, expected)
@@ -140,7 +142,7 @@ async function unblockEndpoint(request: Request, env: Env, owner: string, id: st
     env.DB.prepare(`UPDATE deliveries SET blocking_since=NULL,next_attempt_at=CASE WHEN next_attempt_at>?
       AND endpoint_revision_id IN(SELECT id FROM endpoint_revisions WHERE endpoint_id=? AND blocked_reason IS NOT NULL) THEN ? ELSE next_attempt_at END
       WHERE state IN('pending','retry_wait') AND endpoint_revision_id IN(SELECT id FROM endpoint_revisions WHERE endpoint_id=?) AND ${claimed}`).bind(stamp, id, stamp, id, marker),
-    env.DB.prepare(`UPDATE endpoint_revisions SET blocked_reason=NULL,blocked_until=NULL WHERE endpoint_id=? AND blocked_reason IS NOT NULL AND ${claimed}`).bind(id, marker),
+    env.DB.prepare(`UPDATE endpoint_revisions SET blocked_reason=NULL,blocked_until=NULL,blocked_rechecks=0 WHERE endpoint_id=? AND blocked_reason IS NOT NULL AND ${claimed}`).bind(id, marker),
   ]
   // changes() still refers to the revision update, so a lost response replays its count.
   if (entry) statements.push(env.DB.prepare(`UPDATE ui_actions SET result_ref=CAST(changes() AS TEXT),http_status=200 WHERE id=? AND result_ref IS NULL AND ${claimed}`).bind(entry.id, marker))

@@ -32,9 +32,45 @@ export function safeTerminalSQL(alias = 'm'): string {
 export function terminalAnchorSQL(alias = 'm'): string {
   return `max(${alias}.retention_started_at,COALESCE((SELECT max(d.delivered_at) FROM deliveries d WHERE d.message_id=${alias}.id),${alias}.retention_started_at))`
 }
+/** An exception the owner resolved: nothing in flight, and every event that was
+ * neither delivered nor cancelled by the owner precedes (by generation) a
+ * delivered one, i.e. a replay or a later send resolved it. With nothing
+ * delivered, every event was cancelled by the owner. A failure after the last
+ * delivered event is unresolved. Only mail with a policy snapshot qualifies:
+ * NULL-policy history (pre-lifecycle, or a policy read failure) adopts no
+ * period until the owner applies the policy to it. */
+export function resolvedTerminalSQL(alias = 'm'): string {
+  if (!/^[a-z_]+$/i.test(alias)) throw new Error('invalid_sql_alias')
+  const m = alias, events = `SELECT 1 FROM deliveries d WHERE d.message_id=${m}.id`
+  return `${m}.origin='cloudflare' AND ${m}.content_deleted_at IS NULL AND ${m}.parse_state='ready' AND ${m}.claim_token IS NULL AND ${m}.lease_until IS NULL
+    AND ${m}.retention_policy_version IS NOT NULL AND EXISTS(${events})
+    AND NOT EXISTS(${events} AND (d.state IN('pending','retry_wait','sending') OR d.claim_token IS NOT NULL OR d.lease_until IS NOT NULL))
+    AND NOT EXISTS(${events} AND d.state<>'delivered' AND (d.state<>'cancelled' OR COALESCE(d.last_error,'')<>'cancelled_by_owner')
+      AND d.generation>COALESCE((SELECT max(x.generation) FROM deliveries x WHERE x.message_id=${m}.id AND x.state='delivered'),0))`
+}
+/** The last handling: when the lifecycle saw the message resolved, or a later
+ * delivery attempt. NULL until resolved_at is set, so nothing is ever due then. */
+export function resolvedAnchorSQL(alias = 'm'): string {
+  if (!/^[a-z_]+$/i.test(alias)) throw new Error('invalid_sql_alias')
+  return `max(${alias}.resolved_at,COALESCE((SELECT max(t.finished_at) FROM deliveries d JOIN delivery_attempts t ON t.event_id=d.event_id WHERE d.message_id=${alias}.id),${alias}.resolved_at))`
+}
+/** The period governing a resolved exception, read live from the settings in
+ * the same statement: the global setting, never shorter than the current or
+ * the message's own content period. NULL (never due) when disabled or when
+ * either content period keeps content forever. */
+export function resolvedDaysSQL(alias = 'm'): string {
+  if (!/^[a-z_]+$/i.test(alias)) throw new Error('invalid_sql_alias')
+  return `(SELECT CASE WHEN s.resolved_retention_days IS NULL OR s.content_retention_days IS NULL OR ${alias}.content_retention_days IS NULL THEN NULL
+    ELSE max(s.resolved_retention_days,s.content_retention_days,${alias}.content_retention_days) END FROM app_settings s WHERE s.id=1)`
+}
 /** Same text format as toISOString(), so due times compare as strings. */
 export const NEVER_DUE = '9999-12-31T23:59:59.999Z'
 const iso = (julian: string) => `strftime('%Y-%m-%dT%H:%M:%fZ',${julian})`
+/** Precise due time of a resolved exception; NULL while it is never due. */
+export const resolvedDueSQL = (alias = 'm') => iso(`julianday(${resolvedAnchorSQL(alias)})+${resolvedDaysSQL(alias)}`)
+/** A lower bound of that due time without the attempt lookup: the anchor is
+ * never earlier than resolved_at. `resolvedAt` defaults to the stored value. */
+export const resolvedFloorSQL = (alias = 'm', resolvedAt = `${alias}.resolved_at`) => iso(`julianday(${resolvedAt})+${resolvedDaysSQL(alias)}`)
 function stageDueSQL(alias: string, anchor: string, stage: 'raw' | 'content'): string {
   const m = alias
   if (!/^[a-z_]+$/i.test(m)) throw new Error('invalid_sql_alias')
@@ -56,7 +92,9 @@ export async function refreshLifecycleDue(env: Env, messageID: string, expectedD
     .bind(messageID, ...(expectedDue === undefined ? [] : [expectedDue])).run()
 }
 export interface LifecycleHooks {
-  deleteContent: (messageID: string, version: number) => Promise<void>
+  /** Without `resolved` the tombstone requires a safe terminal; with it, an
+   * unclocked resolved exception due, by the live period, at or before `dueBy`. */
+  deleteContent: (messageID: string, version: number, resolved?: { dueBy: string }) => Promise<void>
   /** Must exclude backup acquisition until the entire callback has finished. */
   withMutation: <T>(operation: () => Promise<T>) => Promise<T>
 }
@@ -121,13 +159,36 @@ export async function runLifecycle(env: Env, hooks: LifecycleHooks): Promise<{ c
     const timestamp = new Date().toISOString(), time = Date.parse(timestamp)
     // The index supplies the order, so the precise per-row state below is
     // evaluated for the single selected row only.
-    const candidate = await env.DB.prepare(`SELECT m.id,m.version,m.retention_started_at,m.lifecycle_due_at,(${safeTerminalSQL()}) safe,
-      ${contentDueSQL('m', terminalAnchorSQL('m'))} content_due_at,${rawDueSQL('m', terminalAnchorSQL('m'))} raw_due_at
+    const candidate = await env.DB.prepare(`SELECT m.id,m.version,m.retention_started_at,m.lifecycle_due_at,m.resolved_at,(${safeTerminalSQL()}) safe,
+      ${contentDueSQL('m', terminalAnchorSQL('m'))} content_due_at,${rawDueSQL('m', terminalAnchorSQL('m'))} raw_due_at,
+      CASE WHEN m.retention_started_at IS NULL AND m.resolved_at IS NOT NULL THEN (${resolvedTerminalSQL()}) END resolved,
+      CASE WHEN m.retention_started_at IS NULL AND m.resolved_at IS NOT NULL THEN ${resolvedDueSQL('m')} END resolved_due
       FROM messages m INDEXED BY messages_lifecycle_due_idx WHERE m.origin='cloudflare' AND m.content_deleted_at IS NULL
       AND m.lifecycle_due_at IS NOT NULL AND m.lifecycle_due_at<=? ORDER BY m.lifecycle_due_at,m.id LIMIT 1`).bind(timestamp).first<Row>()
     if (!candidate) break
     const old = candidate.lifecycle_due_at
-    if (!candidate.retention_started_at) { await postpone(candidate.id, old, null); continue }
+    if (!candidate.retention_started_at) {
+      // Owner-resolved exceptions: all content goes once their period has
+      // passed since the last handling. Anything else unclocked is not due.
+      if (!candidate.resolved_at) { await postpone(candidate.id, old, null); continue }
+      // It left the resolved state (a replay or retry, a later failure): its
+      // clock restarts only when the sweep sees it resolved again.
+      if (!candidate.resolved) { await env.DB.prepare('UPDATE messages SET resolved_at=NULL,lifecycle_due_at=NULL WHERE id=? AND lifecycle_due_at=?').bind(candidate.id, old).run(); continue }
+      if (candidate.resolved_due === null) { await postpone(candidate.id, old, null); continue } // Disabled, or content kept forever.
+      if (candidate.resolved_due > timestamp) { await postpone(candidate.id, old, candidate.resolved_due); continue }
+      let deleted = false
+      await hooks.withMutation(async () => {
+        // A replay or a settings change may have happened since selection. The
+        // tombstone CAS re-reads the period and enforces the same predicate
+        // and due time atomically against a later one.
+        const resolved = await env.DB.prepare(`SELECT m.id FROM messages m WHERE m.id=? AND m.version=? AND m.retention_started_at IS NULL
+          AND ${resolvedTerminalSQL()} AND ${resolvedDueSQL('m')}<=?`).bind(candidate.id, candidate.version, timestamp).first()
+        if (resolved) { await hooks.deleteContent(candidate.id, candidate.version, { dueBy: timestamp }); deleted = true }
+      }).catch(error => { if (!(error instanceof HttpError) || error.status !== 409) throw error })
+      if (deleted) processed++
+      else await postpone(candidate.id, old, new Date(time + HOUR).toISOString())
+      continue
+    }
     if (!candidate.safe) { await postpone(candidate.id, old, new Date(time + DAY).toISOString()); continue }
     if (candidate.content_due_at && candidate.content_due_at <= timestamp) {
       let deleted = false
@@ -152,18 +213,34 @@ export async function runLifecycle(env: Env, hooks: LifecycleHooks): Promise<{ c
       // Start clocks through a resumable cursor over unsettled mail only.
       const saved = (await env.DB.prepare("SELECT value FROM maintenance WHERE id='retention_sweep_cursor'").first<Row>())?.value ?? ''
       const split = saved.indexOf('|')
-      const page = (await env.DB.prepare(`SELECT m.id,m.received_at,m.retention_policy_version,(${safeTerminalSQL()}) safe FROM messages m INDEXED BY messages_unsettled_idx
+      const page = (await env.DB.prepare(`SELECT m.id,m.received_at,m.retention_policy_version,m.resolved_at,m.lifecycle_due_at,(${safeTerminalSQL()}) safe,
+        (${resolvedTerminalSQL()}) resolved,${resolvedDaysSQL()} resolved_days FROM messages m INDEXED BY messages_unsettled_idx
         WHERE m.origin='cloudflare' AND m.content_deleted_at IS NULL AND m.retention_started_at IS NULL${saved ? ' AND (m.received_at,m.id)>(?,?)' : ''}
         ORDER BY m.received_at,m.id LIMIT ${SWEEP_PAGE}`).bind(...(saved ? [saved.slice(0, split), saved.slice(split + 1)] : [])).all<Row>()).results
       const ready = page.filter(row => row.safe && row.retention_policy_version !== null).map(row => row.id)
+      // Newly resolved, or resolved while its period applies but with no due
+      // time (cleared by a rolled-back Worker or a raced settings change).
+      const resolved = page.filter(row => !row.safe && row.resolved && (row.resolved_at === null || (row.lifecycle_due_at === null && row.resolved_days !== null))).map(row => row.id)
+      // Left the resolved state since it was recorded: the clock restarts.
+      const reopened = page.filter(row => !row.safe && !row.resolved && row.resolved_at !== null).map(row => row.id)
       more = page.length === SWEEP_PAGE
       const cursor = more ? `${page.at(-1)!.received_at}|${page.at(-1)!.id}` : ''
       const statements: D1PreparedStatement[] = []
+      const stamp = new Date().toISOString()
       // Numbered parameters: ?1 is the clock start and also the anchor floor.
       if (ready.length) statements.push(env.DB.prepare(`UPDATE messages AS m SET retention_started_at=?1,
         lifecycle_due_at=${lifecycleDueSQL('m', 'max(?1,COALESCE((SELECT max(d.delivered_at) FROM deliveries d WHERE d.message_id=m.id),?1))')}
         WHERE m.id IN(${ready.map((_, i) => `?${i + 2}`).join(',')}) AND m.retention_started_at IS NULL AND m.retention_policy_version IS NOT NULL AND ${safeTerminalSQL('m')}`)
-        .bind(new Date().toISOString(), ...ready))
+        .bind(stamp, ...ready))
+      // A resolved exception records when the sweep first saw it resolved. Its
+      // anchor is never earlier, so resolved_at plus the live period is a lower
+      // bound of its due time; none is set while the period is disabled.
+      if (resolved.length) statements.push(env.DB.prepare(`UPDATE messages AS m SET resolved_at=COALESCE(m.resolved_at,?1),
+        lifecycle_due_at=COALESCE(${resolvedFloorSQL('m', 'COALESCE(m.resolved_at,?1)')},m.lifecycle_due_at)
+        WHERE m.id IN(${resolved.map((_, i) => `?${i + 2}`).join(',')}) AND m.retention_started_at IS NULL AND (m.resolved_at IS NULL OR m.lifecycle_due_at IS NULL)
+        AND ${resolvedTerminalSQL('m')}`).bind(stamp, ...resolved))
+      if (reopened.length) statements.push(env.DB.prepare(`UPDATE messages AS m SET resolved_at=NULL,lifecycle_due_at=NULL
+        WHERE m.id IN(${reopened.map(() => '?').join(',')}) AND m.retention_started_at IS NULL AND m.resolved_at IS NOT NULL AND NOT (${resolvedTerminalSQL('m')})`).bind(...reopened))
       if (cursor !== saved) statements.push(env.DB.prepare("INSERT INTO maintenance(id,value) VALUES('retention_sweep_cursor',?) ON CONFLICT(id) DO UPDATE SET value=excluded.value").bind(cursor))
       if (statements.length) await env.DB.batch(statements)
     })

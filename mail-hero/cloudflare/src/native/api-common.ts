@@ -110,12 +110,14 @@ export async function delivery(env: Env, id: string): Promise<Row> {
 }
 
 export const endpointSelect = `SELECT e.id,e.label,r.url,r.auth_type,(r.credential_ciphertext IS NOT NULL) credential_configured,
-e.rate_per_minute,r.timeout_ms/1000 timeout_seconds,e.paused,e.paused_reason,r.blocked_reason,r.blocked_until,e.version,
+e.rate_per_minute,r.timeout_ms/1000 timeout_seconds,e.paused,e.paused_reason,r.blocked_reason,r.blocked_until,r.blocked_rechecks,e.version,
 e.current_revision_id,e.archived_at,r.revision,r.credential_ciphertext FROM webhook_endpoints e
 JOIN endpoint_revisions r ON r.id=e.current_revision_id`
 export function endpointJSON(row: Row): Row {
   const { credential_ciphertext, revision, ...value } = row
   value.credential_configured = !!value.credential_configured
   value.paused = !!value.paused
+  // Rechecks belong to the current block episode; an unblocked revision has used none.
+  value.blocked_rechecks = value.blocked_reason ? Number(value.blocked_rechecks) || 0 : 0
   return value
 }

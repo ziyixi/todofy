@@ -14,6 +14,19 @@ function blockedReasonText(code: string): string {
   if (code === 'credential_or_target_invalid') return '凭据或目标地址无效'
   return code
 }
+// Mirrors the Worker: route-class blocks get at most 8 six-hour rechecks, then stay until the owner unblocks.
+const ROUTE_BLOCK_MAX_RECHECKS = 8
+function isRouteBlock(code: string): boolean { return code === 'http_404' || code === 'http_405' || /^http_3\d\d$/.test(code) }
+function recheckText(endpoint: Endpoint): string {
+  const armed = endpoint.blocked_rechecks
+  if (typeof armed !== 'number' || !endpoint.blocked_reason || !isRouteBlock(endpoint.blocked_reason)) return ''
+  if (!endpoint.blocked_until) return armed >= ROUTE_BLOCK_MAX_RECHECKS ? `自动复查已用完（${ROUTE_BLOCK_MAX_RECHECKS} 次，约 2 天），请核查目标后手动解除阻断。` : ''
+  // The Worker counts a recheck when it arms the cooldown, so the scheduled one
+  // is included; zero means a cooldown set without counting (an older block).
+  const next = Math.min(armed, ROUTE_BLOCK_MAX_RECHECKS)
+  if (next < 1) return `自动复查已用 0/${ROUTE_BLOCK_MAX_RECHECKS} 次；这次复查不计入上限。`
+  return `自动复查已用 ${next - 1}/${ROUTE_BLOCK_MAX_RECHECKS} 次，${next >= ROUTE_BLOCK_MAX_RECHECKS ? '下一次是最后一次；仍返回同类错误时将保持阻断，直到你手动解除。' : `下一次是第 ${next} 次。`}`
+}
 // The Worker writes retry_after_over_24h; retry_after_too_long is an older spelling.
 function pausedReasonText(reason: string): string {
   return reason === 'retry_after_over_24h' || reason === 'retry_after_too_long' ? '接收方要求等待超过 24 小时；请核查后手动恢复。' : reason
@@ -70,7 +83,7 @@ export default function EndpointsPage() {
     await perform(() => api.unblockEndpoint(endpoint.id, { version: endpoint.version }), value => {
       setUnblocked({ id: endpoint.id, at })
       const affected = (value as { affected_revisions: number }).affected_revisions
-      return affected > 0 ? `已解除此目标 ${affected} 个版本的阻断。等待中的事件现在会重试；创建超过 7 天的事件已过自动重试窗口，需在投递记录中手动重试。目标仍有问题时会再次阻断。顶部提醒会在下次后台检查（约 10 分钟内）后更新。`
+      return affected > 0 ? `已解除此目标 ${affected} 个版本的阻断，自动复查次数已重新计数。等待中的事件现在会重试；创建超过 7 天的事件已过自动重试窗口，需在投递记录中手动重试。目标仍有问题时会再次阻断。顶部提醒会在下次后台检查（约 10 分钟内）后更新。`
         : '此目标没有被阻断的版本。提醒中的阻断可能属于其他或已归档的目标，也可能已在上次后台检查后解除；请在投递记录中查看。'
     })
   }
@@ -90,7 +103,7 @@ export default function EndpointsPage() {
       {selected && <div className="endpoint-detail"><Card><div className="endpoint-detail-head"><div className="endpoint-emblem"><Webhook size={23}/></div><div><span className="eyebrow">WEBHOOK ENDPOINT</span><h2>{selected.label}</h2><p>{selected.url}</p></div><span className={`endpoint-state ${selected.paused || cooled ? 'paused' : selected.blocked_reason ? 'blocked' : 'running'}`}>{selected.paused ? '已暂停' : cooled ? '待复查' : selected.blocked_reason ? '已阻断' : '可用'}</span></div>
         <div className="endpoint-facts"><div><span>认证方式</span><strong><LockKeyhole size={15}/>{selected.auth_type === 'none' ? '无认证' : selected.auth_type === 'basic' ? 'Basic' : 'Bearer'}</strong></div><div><span>凭据</span><strong>{selected.credential_configured ? '已设置 · 不回显' : '未设置'}</strong></div><div><span>交付频率</span><strong>{selected.rate_per_minute || 2} 次 / 分钟</strong></div><div><span>请求超时</span><strong>{selected.timeout_seconds || 20} 秒</strong></div></div>
         {selected.paused_reason && <div className="inline-error">此目标已暂停：{pausedReasonText(selected.paused_reason)}</div>}
-        {selected.blocked_reason && <div className={`${cooled ? 'warning-banner' : 'inline-error'} endpoint-notice`}><span>{cooled ? `当前目标版本曾被阻断：${blockedReasonText(selected.blocked_reason)}。冷却已结束，下一次投递时会自动复查。` : `当前目标版本已阻断：${blockedReasonText(selected.blocked_reason)}。${selected.blocked_until ? `将于 ${formatDate(selected.blocked_until)} 自动重试。` : '自动投递已停止。'}`}</span><Button variant="secondary" loading={busy} onClick={() => unblock(selected)}><LockOpen size={16}/> 解除阻断</Button></div>}
+        {selected.blocked_reason && <div className={`${cooled ? 'warning-banner' : 'inline-error'} endpoint-notice`}><span>{cooled ? `当前目标版本曾被阻断：${blockedReasonText(selected.blocked_reason)}。冷却已结束，下一次投递时会自动复查。` : `当前目标版本已阻断：${blockedReasonText(selected.blocked_reason)}。${selected.blocked_until ? `将于 ${formatDate(selected.blocked_until)} 自动重试。` : '自动投递已停止。'}`}{recheckText(selected)}</span><Button variant="secondary" loading={busy} onClick={() => unblock(selected)}><LockOpen size={16}/> 解除阻断</Button></div>}
         {olderRevisionBlocked && <div className="inline-error endpoint-notice"><span>有等待中的投递停在已阻断的目标版本上，而此目标的当前版本未阻断；无法从这里确定它们属于此目标的旧版本、其他目标还是已归档目标。解除阻断只清除此目标所有版本的阻断，结果会显示实际解除的版本数。</span><Button variant="secondary" loading={busy} onClick={() => unblock(selected)}><LockOpen size={16}/> 解除阻断</Button></div>}
         <div className="endpoint-action-bar"><Button onClick={() => open('edit', selected)}>编辑目标</Button><Button variant="secondary" onClick={() => open('rotate', selected)}><KeyRound size={16}/> 轮换凭据</Button><Button variant="secondary" loading={busy} onClick={() => setPaused(selected, !selected.paused)}>{selected.paused ? <><CheckCircle2 size={16}/> 恢复</> : <><CirclePause size={16}/> 暂停</>}</Button></div>
       </Card><Card><SectionTitle title="诊断与测试" detail="连接检查不会请求业务接口；测试事件会真正发往目标。"/><div className="diagnostic-actions"><button onClick={() => open('check', selected)}><Activity size={18}/><span><strong>检查连接</strong><small>检查 URL 与允许的目标域名</small></span><ArrowRight size={16}/></button><button onClick={() => open('test', selected)}><Send size={18}/><span><strong>发送测试事件</strong><small>合成邮件，会真实调用消费者</small></span><ArrowRight size={16}/></button></div></Card><Card><SectionTitle title="配置范围"/><div className="fact-callout"><ShieldCheck size={19}/><p>更改目标 URL 会创建新版本。已有交付继续使用它们保存时的目标；凭据轮换可明确选择影响范围。</p></div><Link to="/deliveries" className="text-link">查看投递记录 <ArrowRight size={15}/></Link></Card></div>}

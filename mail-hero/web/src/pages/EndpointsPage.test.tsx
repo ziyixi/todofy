@@ -30,9 +30,12 @@ function open(endpoint: Partial<Endpoint>, active: ActiveAlert[] = []) {
 
 it('explains a route block with its automatic recheck and unblocks every revision with the endpoint version', async () => {
   const until = hours(6)
-  open({ blocked_reason: 'http_404', blocked_until: until })
-  await screen.findByText(/目标返回 404（路径不存在）/)
+  open({ blocked_reason: 'http_404', blocked_until: until, blocked_rechecks: 3 })
+  const line = await screen.findByText(/目标返回 404（路径不存在）/)
   expect(screen.getByText(`将于 ${formatDate(until)} 自动重试`, { exact: false })).toBeTruthy()
+  // Three armed rechecks: two performed, the third is the scheduled one.
+  expect(line.textContent).toContain('自动复查已用 2/8 次，下一次是第 3 次。')
+  expect(line.textContent).not.toContain('最后一次')
   expect(screen.getByText('已阻断')).toBeTruthy()
   vi.mocked(api.unblockEndpoint).mockResolvedValue({ affected_revisions: 2, version: 5 })
   fireEvent.click(screen.getByRole('button', { name: '解除阻断' }))
@@ -43,6 +46,55 @@ it('explains a route block with its automatic recheck and unblocks every revisio
   expect(notice.textContent).toContain('超过 7 天')
   expect(notice.textContent).toContain('手动重试')
   expect(notice.textContent).toContain('约 10 分钟')
+  expect(notice.textContent).toContain('自动复查次数已重新计数')
+})
+
+it('does not count the first scheduled recheck as used', async () => {
+  open({ blocked_reason: 'http_404', blocked_until: hours(6), blocked_rechecks: 1 })
+  const line = await screen.findByText(/当前目标版本已阻断/)
+  expect(line.textContent).toContain('自动复查已用 0/8 次，下一次是第 1 次。')
+})
+
+it('names the eighth recheck as the last automatic one', async () => {
+  open({ blocked_reason: 'http_302', blocked_until: hours(6), blocked_rechecks: 8 })
+  const line = await screen.findByText(/当前目标版本已阻断/)
+  expect(line.textContent).toContain('自动复查已用 7/8 次，下一次是最后一次；仍返回同类错误时将保持阻断，直到你手动解除。')
+  expect(line.textContent).not.toContain('8/8')
+  expect(line.textContent).not.toContain('已用完')
+})
+
+it('counts the recheck on a cooled block too', async () => {
+  open({ blocked_reason: 'http_405', blocked_until: hours(-1), blocked_rechecks: 2 })
+  const line = await screen.findByText(/冷却已结束/)
+  expect(line.textContent).toContain('自动复查已用 1/8 次，下一次是第 2 次。')
+})
+
+it('says an uncounted cooldown from an older block does not use up a recheck', async () => {
+  open({ blocked_reason: 'http_404', blocked_until: hours(-1), blocked_rechecks: 0 })
+  const line = await screen.findByText(/冷却已结束/)
+  expect(line.textContent).toContain('自动复查已用 0/8 次；这次复查不计入上限。')
+  expect(line.textContent).not.toContain('下一次是第')
+})
+
+it.each(['http_404', 'http_405', 'http_308'])('says automatic rechecks are exhausted for a permanent %s block after 8 rechecks', async code => {
+  open({ blocked_reason: code, blocked_until: null, blocked_rechecks: 8 })
+  const line = await screen.findByText(/当前目标版本已阻断/)
+  expect(line.textContent).toContain('自动投递已停止')
+  expect(line.textContent).toContain('自动复查已用完（8 次，约 2 天），请核查目标后手动解除阻断')
+  expect(line.textContent).not.toContain('自动复查已用 ')
+  expect(line.textContent).not.toContain('自动重试')
+  expect(screen.getByText('已阻断')).toBeTruthy()
+  expect(screen.getByRole('button', { name: '解除阻断' })).toBeTruthy()
+})
+
+it.each([
+  ['a route block awaiting its first recheck', { blocked_reason: 'http_404', blocked_until: null, blocked_rechecks: 0 }],
+  ['an auth block', { blocked_reason: 'http_401', blocked_until: null, blocked_rechecks: 8 }],
+  ['a Worker without the counter', { blocked_reason: 'http_404', blocked_until: hours(6) }],
+])('shows no recheck count for %s', async (_name, endpoint) => {
+  open(endpoint)
+  const line = await screen.findByText(/当前目标版本已阻断/)
+  expect(line.textContent).not.toContain('自动复查已用')
 })
 
 it('says the cooldown has ended instead of blocked once blocked_until has passed', async () => {

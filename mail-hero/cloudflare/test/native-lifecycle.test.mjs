@@ -2,7 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { DatabaseSync } from 'node:sqlite'
 import { readFileSync, readdirSync } from 'node:fs'
-import { NEVER_DUE, captureLifecyclePolicy, expireRawContent, lifecycleStorage, runLifecycle, safeTerminalSQL, terminalAnchorSQL } from '../src/native/lifecycle.ts'
+import { NEVER_DUE, captureLifecyclePolicy, expireRawContent, lifecycleStorage, resolvedFloorSQL, resolvedTerminalSQL, runLifecycle, safeTerminalSQL, terminalAnchorSQL } from '../src/native/lifecycle.ts'
 import { alertConfiguration, alertSignals, alertSnapshot, deliverAlert, evaluateAlerts } from '../src/native/alerts.ts'
 import { currentSettings, patchSettings, previewRetention } from '../src/native/api-settings.ts'
 import { deleteMessageContent, runMaintenance } from '../src/native/pipeline.ts'
@@ -80,7 +80,12 @@ test('periodic maintenance queries are index ranges over due, unsettled or in-fl
   uses(await plan(`SELECT id FROM alert_notifications INDEXED BY alert_notifications_created_idx WHERE created_at<? AND state IN('sent','failed','disabled') ORDER BY created_at LIMIT 20`,'2026-01-01'),'alert_notifications_created_idx')
   // Repair: legacy route blocks and events held past their window are found by partial indexes.
   uses(await plan(`SELECT id FROM endpoint_revisions INDEXED BY endpoint_revisions_uncooled_idx
-    WHERE blocked_reason IS NOT NULL AND blocked_until IS NULL AND (blocked_reason IN('http_404','http_405') OR blocked_reason GLOB 'http_3[0-9][0-9]')`),'endpoint_revisions_uncooled_idx',false)
+    WHERE blocked_reason IS NOT NULL AND blocked_until IS NULL AND (blocked_reason IN('http_404','http_405') OR blocked_reason GLOB 'http_3[0-9][0-9]') AND blocked_rechecks<8`),'endpoint_revisions_uncooled_idx',false)
+  // Resolved exceptions: the settings re-arm and the preview count read unsettled mail only.
+  uses(await plan(`UPDATE messages AS m SET lifecycle_due_at=max(?,${resolvedFloorSQL('m')}) WHERE m.id IN(SELECT id FROM messages INDEXED BY messages_unsettled_idx
+    WHERE origin='cloudflare' AND content_deleted_at IS NULL AND retention_started_at IS NULL AND resolved_at IS NOT NULL)
+    AND EXISTS(SELECT 1 FROM app_settings WHERE id=1 AND version=? AND updated_at=?)`,'2026-01-01',2,'2026-01-01'),'messages_unsettled_idx',false)
+  uses(await plan(`SELECT count(*) FROM messages m INDEXED BY messages_unsettled_idx WHERE ${unsettled} AND ${resolvedTerminalSQL()}`),'messages_unsettled_idx',false)
   uses(await plan(`UPDATE deliveries SET state='failed' WHERE event_id IN(SELECT event_id FROM deliveries INDEXED BY deliveries_waiting_created_idx
     WHERE state IN('pending','retry_wait') AND created_at<=? AND (retry_mode='auto' OR created_at<=?) ORDER BY created_at LIMIT 20)`,'2026-01-01','2026-01-01'),'deliveries_waiting_created_idx')
   const full=await plan('SELECT id FROM messages WHERE content_purge_pending=1 LIMIT 1')
@@ -308,10 +313,14 @@ test('endpoint alert signals need the owner unless every waiting block rechecks 
 
 test('confirming history clears any due time together with the clock', async () => {
   const env = environment(), historical = await insert(env, { lifecycle_due_at: '2026-01-01T00:00:00.000Z' })
+  // Even a stale resolution on history restarts: every clock starts after the confirmation.
+  const resolved = await insert(env, { policy_error: 'policy_unavailable', resolved_at: '2026-01-01T00:00:00.000Z', lifecycle_due_at: '2026-03-01T00:00:00.000Z' })
   const preview = await (await previewRetention(new Request('https://mail.example.org/?apply_existing=true'), env, 'owner')).json()
   await patchSettings(request({ version: 1, apply_existing: true, retention_confirmation: preview.preview_token }), env, 'owner')
   const row = await read(env, historical)
   assert.equal(row.retention_policy_version, 2); assert.equal(row.lifecycle_due_at, null)
+  const adopted = await read(env, resolved)
+  assert.equal(adopted.retention_policy_version, 2); assert.deepEqual([adopted.resolved_at, adopted.lifecycle_due_at], [null, null])
 })
 
 test('the lifecycle phase stays within the Free D1 per-invocation query budget in its worst case', async t => {
@@ -333,4 +342,90 @@ test('the lifecycle phase stays within the Free D1 per-invocation query budget i
   t.diagnostic(`worst-case lifecycle phase: ${statements} D1 statements`)
   assert.ok(statements <= 44, `lifecycle phase used ${statements} D1 statements`)
   assert.equal((await env.DB.prepare('SELECT count(*) n FROM messages WHERE content_deleted_at IS NOT NULL').first()).n, 2)
+})
+
+test('only owner-resolved exceptions qualify for the resolved period', async () => {
+  const env = environment(), revision = await endpoint(env)
+  const cases = {
+    replayDelivered: [true, {}, ['failed', { last_error: 'retry_window_expired' }], ['delivered']],
+    ownerCancelled: [true, {}, ['cancelled', { last_error: 'cancelled_by_owner' }]],
+    cancelledThenDelivered: [true, {}, ['cancelled', { last_error: 'cancelled_by_owner' }], ['failed', { last_error: 'http_404' }], ['delivered']],
+    laterReplayCancelled: [true, {}, ['failed'], ['delivered'], ['cancelled', { last_error: 'cancelled_by_owner' }]],
+    policyErrorSent: [true, { policy_error: 'policy_revision_missing' }, ['delivered']],
+    needsReviewSent: [true, { needs_review: 1 }, ['failed', { last_error: 'message_needs_review' }], ['delivered']],
+    // A failure after the last delivered event is the owner's latest outcome: unresolved.
+    deliveredThenFailed: [false, {}, ['delivered'], ['failed', { last_error: 'http_500' }]],
+    laterReplayExpired: [false, {}, ['failed'], ['delivered'], ['failed', { last_error: 'retry_window_expired' }]],
+    laterReplaySystemCancelled: [false, {}, ['failed'], ['delivered'], ['cancelled', { last_error: 'content_deleted' }]],
+    // NULL-policy history adopts nothing, a policy error included.
+    policyErrorHistory: [false, { retention_policy_version: null, policy_error: 'policy_unavailable' }, ['delivered']],
+    windowExpired: [false, {}, ['failed', { last_error: 'retry_window_expired' }]],
+    needsReview: [false, { needs_review: 1 }, ['failed', { last_error: 'message_needs_review' }]],
+    systemCancelled: [false, {}, ['cancelled', { last_error: null }]],
+    cancelledAndFailed: [false, {}, ['cancelled', { last_error: 'cancelled_by_owner' }], ['failed', { last_error: 'http_500' }]],
+    replayPending: [false, {}, ['failed'], ['delivered'], ['pending']],
+    replayRetrying: [false, {}, ['failed'], ['delivered'], ['retry_wait']],
+    replaySending: [false, {}, ['failed'], ['delivered'], ['sending']],
+    claimedEvent: [false, {}, ['failed'], ['delivered', { claim_token: 'claim' }]],
+    reparsing: [false, { claim_token: 'claim', lease_until: '2999-01-01' }, ['failed'], ['delivered']],
+    parseFailed: [false, { parse_state: 'failed' }, ['failed'], ['delivered']],
+    noEvents: [false, {}],
+    history: [false, { retention_policy_version: null }, ['failed'], ['delivered']],
+    deleted: [false, { content_deleted_at: '2026-09-01' }, ['failed'], ['delivered']],
+  }
+  const ids = {}
+  for (const [name, [, fields, ...events]] of Object.entries(cases)) {
+    ids[name] = await insert(env, { ...policy, receive_mode: 'forward', endpoint_revision_id: revision, ...fields })
+    for (const [index, [state, extra]] of events.entries()) await delivery(env, ids[name], revision, state, { generation: index + 1, ...extra })
+  }
+  const found = new Set((await env.DB.prepare(`SELECT m.id FROM messages m WHERE ${resolvedTerminalSQL()}`).all()).results.map(row => row.id))
+  for (const [name, [expected]] of Object.entries(cases)) assert.equal(found.has(ids[name]), expected, name)
+})
+
+test('resolved deletions stay within the Free D1 per-invocation query budget in their worst case', async t => {
+  const env = environment(), time = Date.now(), revision = await endpoint(env)
+  env.MAIL_STORE.list = async () => ({ objects: [], truncated: false })
+  for (let i = 0; i < 25; i++) await insert(env, { ...policy, needs_review: 1 })
+  for (let i = 0; i < 2; i++) await insert(env, { ...policy, retention_started_at: iso(time - 50 * DAY), lifecycle_due_at: iso(time - 30 * DAY - i), needs_review: 1 })
+  for (let i = 0; i < 3; i++) {
+    const id = await insert(env, { ...policy, receive_mode: 'forward', endpoint_revision_id: revision, resolved_at: iso(time - 70 * DAY), lifecycle_due_at: iso(time - 10 * DAY + i) })
+    await delivery(env, id, revision, 'failed', { last_error: 'retry_window_expired' }); await delivery(env, id, revision, 'delivered', { generation: 2 })
+  }
+  await env.DB.prepare("INSERT INTO maintenance(id,value) VALUES('maintenance_phase','lifecycle')").run()
+  let statements = 0
+  const prepare = env.DB.prepare.bind(env.DB), batch = env.DB.batch.bind(env.DB)
+  env.DB.prepare = sql => { const make = inner => ({ bind: (...values) => make(inner.bind(...values)), inner,
+    async all() { statements++; return inner.all() }, async run() { statements++; return inner.run() }, async first() { statements++; return inner.first() } }); return make(prepare(sql)) }
+  env.DB.batch = async list => { statements += list.length; return batch(list.map(item => item.inner)) }
+  await runMaintenance(env)
+  t.diagnostic(`worst-case resolved lifecycle phase: ${statements} D1 statements`)
+  assert.ok(statements <= 44, `lifecycle phase used ${statements} D1 statements`)
+  assert.equal((await env.DB.prepare('SELECT count(*) n FROM messages WHERE content_deleted_at IS NOT NULL').first()).n, 2)
+})
+
+test('a settings update that loses its version race re-arms nothing; the winner re-arms from its committed period', async () => {
+  const env = environment(), revision = await endpoint(env), time = Date.now(), resolvedAt = iso(time - 10 * DAY)
+  const id = await insert(env, { ...policy, receive_mode: 'forward', endpoint_revision_id: revision, resolved_at: resolvedAt, lifecycle_due_at: iso(time + 50 * DAY) })
+  await delivery(env, id, revision, 'failed', { last_error: 'retry_window_expired' }); await delivery(env, id, revision, 'delivered', { generation: 2 })
+  // Both read version 1; the winner commits a longer period before the loser's batch runs.
+  const batch = env.DB.batch.bind(env.DB)
+  env.DB.batch = async list => { env.DB.batch = batch; await patchSettings(request({ version: 1, resolved_retention_days: 90 }), env, 'owner'); return batch(list) }
+  await assert.rejects(patchSettings(request({ version: 1, resolved_retention_days: null }), env, 'owner'), error => error.status === 409)
+  assert.equal((await currentSettings(env)).resolved_retention_days, 90)
+  assert.equal((await read(env, id)).lifecycle_due_at, iso(Date.parse(resolvedAt) + 90 * DAY), 'the lower bound under the committed period, not cleared')
+})
+
+test('migration 0009 never leaves the resolved period shorter than the existing content period', () => {
+  const directory = new URL('../migrations/', import.meta.url), files = readdirSync(directory).filter(name => name.endsWith('.sql')).sort()
+  const upgrade = content => {
+    const sqlite = new DatabaseSync(':memory:')
+    for (const file of files) {
+      if (file.startsWith('0009')) sqlite.prepare('UPDATE app_settings SET content_retention_days=? WHERE id=1').run(content)
+      sqlite.exec(readFileSync(new URL(file, directory), 'utf8'))
+    }
+    return { ...sqlite.prepare('SELECT content_retention_days,resolved_retention_days FROM app_settings WHERE id=1').get() }
+  }
+  assert.deepEqual(upgrade(30), { content_retention_days: 30, resolved_retention_days: 60 })
+  assert.deepEqual(upgrade(90), { content_retention_days: 90, resolved_retention_days: 90 })
+  assert.deepEqual(upgrade(null), { content_retention_days: null, resolved_retention_days: null }, 'content kept forever: resolved exceptions too')
 })

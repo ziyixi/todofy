@@ -4,8 +4,8 @@ import { DatabaseSync } from 'node:sqlite'
 import { readFileSync, readdirSync } from 'node:fs'
 import { generateKeyPair, SignJWT } from 'jose'
 import { handleAPI } from '../src/native/api.ts'
-import { ROUTE_BLOCK_COOLDOWN_MS, ROUTE_BLOCK_GRACE_MS, runJob, runMaintenance } from '../src/native/pipeline.ts'
-import { alertSnapshot } from '../src/native/alerts.ts'
+import { ROUTE_BLOCK_COOLDOWN_MS, ROUTE_BLOCK_GRACE_MS, ROUTE_BLOCK_MAX_RECHECKS, runJob, runMaintenance } from '../src/native/pipeline.ts'
+import { alertSignals, alertSnapshot } from '../src/native/alerts.ts'
 import { authenticate, decryptCredential, encryptCredential, HttpError } from '../src/native/security.ts'
 
 // Real SQLite executes the production migration and SQL. This fixture emulates
@@ -658,4 +658,142 @@ test('repair rechecks route blocks written without a cooldown, expires events he
   const delivered = await attempt(t, env, legacy.eventID, 204)
   assert.equal(delivered.calls, 1); assert.equal(delivered.delivery.state, 'delivered')
   assert.deepEqual({ ...await revision(legacy.target.id) }, { blocked_reason: null, blocked_until: null })
+})
+
+// Bounded automatic rechecks: eight cooldowns (about two days), then the owner decides.
+const expireCooldown = (env, revision) => env.DB.prepare("UPDATE endpoint_revisions SET blocked_until='2000-01-01T00:00:00.000Z' WHERE id=?").bind(revision).run()
+const pastGrace = (env, eventID) => env.DB.prepare('UPDATE deliveries SET blocking_since=? WHERE event_id=?').bind(new Date(Date.now() - ROUTE_BLOCK_GRACE_MS - 60_000).toISOString(), eventID).run()
+
+test('route blocks recheck automatically eight times, about two days, then stay blocked until the owner acts', async t => {
+  assert.equal(ROUTE_BLOCK_MAX_RECHECKS, 8)
+  const env = environment(), api = await session(env), { target, eventID } = await queued(env, api)
+  await env.DB.prepare("UPDATE app_settings SET mode='forward',current_endpoint_id=?").bind(target.id).run()
+  await pastGrace(env, eventID)
+  let result = await attempt(t, env, eventID, 404)
+  assert.equal(result.revision.blocked_rechecks, 1); assert.equal(result.next, Date.parse(result.revision.blocked_until))
+  assert.equal((await api(`/endpoints/${target.id}`)).data.blocked_rechecks, 1)
+  let cooldowns = 1
+  // Every recheck at the end of a cooldown arms the next until eight were armed.
+  for (let recheck = 1; recheck < ROUTE_BLOCK_MAX_RECHECKS; recheck++) {
+    await expireCooldown(env, result.revision.id)
+    result = await attempt(t, env, eventID, 404)
+    assert.equal(result.calls, 1); assert.equal(result.outcome, 'rejected'); assert.equal(result.delivery.state, 'retry_wait')
+    assert.equal(result.revision.blocked_rechecks, recheck + 1); assert.ok(Date.parse(result.revision.blocked_until) > Date.now() + ROUTE_BLOCK_COOLDOWN_MS - 60_000)
+    assert.equal(result.next, Date.parse(result.revision.blocked_until)); cooldowns++
+  }
+  assert.equal(cooldowns * ROUTE_BLOCK_COOLDOWN_MS, 48 * 3600_000)
+  // The eighth recheck is the last: the block becomes permanent, like an auth rejection.
+  await expireCooldown(env, result.revision.id)
+  result = await attempt(t, env, eventID, 404)
+  assert.equal(result.calls, 1); assert.equal(result.outcome, 'rejected'); assert.equal(result.next, null)
+  assert.deepEqual({ reason: result.revision.blocked_reason, until: result.revision.blocked_until, rechecks: result.revision.blocked_rechecks }, { reason: 'http_404', until: null, rechecks: 8 })
+  assert.equal(result.delivery.state, 'retry_wait'); assert.equal(result.delivery.last_error, 'http_404')
+  const halted = await attempt(t, env, eventID, 204)
+  assert.equal(halted.calls, 0); assert.equal(halted.next, null); assert.equal(halted.delivery.state, 'retry_wait')
+  const listed = (await api(`/endpoints/${target.id}`)).data
+  assert.equal(listed.blocked_rechecks, 8); assert.equal(listed.blocked_until, null); assert.equal(listed.blocked_reason, 'http_404')
+  // Alerts treat it as permanent: no automatic recheck remains.
+  const snapshot = await alertSnapshot(env)
+  assert.equal(snapshot.current_blocked, 1); assert.equal(snapshot.current_auto_recheck, 0); assert.equal(snapshot.blocked_permanent_waiting, 1)
+  assert.equal(alertSignals(snapshot).find(signal => signal.code === 'endpoint_blocked').metrics.auto_recheck, 0)
+  // The repair phase never re-arms it.
+  await repair(env)
+  assert.equal((await revisionRow(env, eventID)).blocked_until, null)
+})
+
+test('a delivered recheck clears the block and resets its recheck count', async t => {
+  const env = environment(), api = await session(env), { target, eventID } = await queued(env, api)
+  await pastGrace(env, eventID)
+  let result = await attempt(t, env, eventID, 404)
+  for (let i = 0; i < 2; i++) { await expireCooldown(env, result.revision.id); result = await attempt(t, env, eventID, 308) }
+  assert.equal(result.revision.blocked_rechecks, 3)
+  await expireCooldown(env, result.revision.id)
+  const delivered = await attempt(t, env, eventID, 204)
+  assert.equal(delivered.delivery.state, 'delivered')
+  assert.deepEqual({ reason: delivered.revision.blocked_reason, until: delivered.revision.blocked_until, rechecks: delivered.revision.blocked_rechecks }, { reason: null, until: null, rechecks: 0 })
+  assert.equal((await api(`/endpoints/${target.id}`)).data.blocked_rechecks, 0)
+  // Success never lifts a permanent block or its count: those need the owner.
+  await env.DB.prepare("UPDATE endpoint_revisions SET blocked_reason='http_401',blocked_rechecks=2 WHERE id=?").bind(delivered.revision.id).run()
+  const later = await api(`/messages/${await message(env)}/send`, 'POST', { endpoint_id: target.id, action_request_id: crypto.randomUUID() })
+  const gated = await attempt(t, env, later.data.event_id, 204)
+  assert.equal(gated.calls, 0); assert.equal(gated.revision.blocked_reason, 'http_401'); assert.equal(gated.revision.blocked_rechecks, 2)
+})
+
+test('owner unblock and credential rotation reset the recheck count of the blocks they clear', async t => {
+  const env = environment(), api = await session(env), { target, eventID } = await queued(env, api)
+  const revision = target.current_revision_id
+  await env.DB.prepare("UPDATE endpoint_revisions SET blocked_reason='http_404',blocked_until=NULL,blocked_rechecks=8 WHERE id=?").bind(revision).run()
+  const result = await api(`/endpoints/${target.id}/unblock`, 'POST', { version: target.version })
+  assert.deepEqual(result.data, { affected_revisions: 1, version: target.version + 1 })
+  assert.deepEqual({ ...await env.DB.prepare('SELECT blocked_reason,blocked_until,blocked_rechecks FROM endpoint_revisions WHERE id=?').bind(revision).first() },
+    { blocked_reason: null, blocked_until: null, blocked_rechecks: 0 })
+  // A still-missing route gets its grace again, then a fresh set of rechecks.
+  const retried = await attempt(t, env, eventID, 404)
+  assert.equal(retried.revision.blocked_reason, null); assert.equal(retried.outcome, 'retryable')
+  await pastGrace(env, eventID)
+  assert.equal((await attempt(t, env, eventID, 404)).revision.blocked_rechecks, 1)
+  // Rotation clears auth-class blocks only, and with them their count; a URL change starts at zero.
+  const changed = (await api(`/endpoints/${target.id}`, 'PATCH', { version: target.version + 1, url: 'https://consumer.example.org/hooks/v2' })).data
+  assert.equal(changed.blocked_rechecks, 0)
+  await env.DB.batch([
+    env.DB.prepare("UPDATE endpoint_revisions SET blocked_reason='http_404',blocked_until=NULL,blocked_rechecks=8 WHERE id=?").bind(revision),
+    env.DB.prepare("UPDATE endpoint_revisions SET blocked_reason='http_401',blocked_until=NULL,blocked_rechecks=3 WHERE id=?").bind(changed.current_revision_id),
+  ])
+  assert.equal((await api(`/endpoints/${target.id}/rotate-credential`, 'POST', { version: changed.version, credential: 'rotated-secret' })).status, 200)
+  const rows = Object.fromEntries((await env.DB.prepare('SELECT id,blocked_reason,blocked_rechecks FROM endpoint_revisions WHERE endpoint_id=?').bind(target.id).all()).results.map(row => [row.id, [row.blocked_reason, row.blocked_rechecks]]))
+  assert.deepEqual(rows, { [revision]: ['http_404', 8], [changed.current_revision_id]: [null, 0] })
+})
+
+test('the repair phase converts legacy route blocks only while automatic rechecks remain', async () => {
+  const env = environment(), api = await session(env), ago = new Date(Date.now() - 60_000).toISOString()
+  const legacy = await queued(env, api), exhausted = await queued(env, api)
+  await env.DB.batch([
+    env.DB.prepare("UPDATE endpoint_revisions SET blocked_reason='http_404',blocked_until=NULL,blocked_rechecks=3 WHERE endpoint_id=?").bind(legacy.target.id),
+    env.DB.prepare("UPDATE endpoint_revisions SET blocked_reason='http_302',blocked_until=NULL,blocked_rechecks=8 WHERE endpoint_id=?").bind(exhausted.target.id),
+    env.DB.prepare("UPDATE deliveries SET state='retry_wait',next_attempt_at=? WHERE event_id IN(?,?)").bind(ago, legacy.eventID, exhausted.eventID),
+  ])
+  assert.deepEqual(await repair(env), [legacy.eventID], 'the exhausted block holds its event')
+  const revision = id => env.DB.prepare('SELECT blocked_reason,blocked_until,blocked_rechecks FROM endpoint_revisions WHERE endpoint_id=?').bind(id).first()
+  const converted = await revision(legacy.target.id)
+  assert.equal(converted.blocked_reason, 'http_404'); assert.ok(Date.parse(converted.blocked_until) <= Date.now()); assert.equal(converted.blocked_rechecks, 3)
+  assert.deepEqual({ ...await revision(exhausted.target.id) }, { blocked_reason: 'http_302', blocked_until: null, blocked_rechecks: 8 })
+  await repair(env)
+  assert.equal((await revision(exhausted.target.id)).blocked_until, null, 'never re-armed')
+})
+
+test('a manual single attempt counts its route block and, with no rechecks left, waits for the owner', async t => {
+  const env = environment(), api = await session(env), { eventID } = await queued(env, api)
+  const retry = async () => {
+    await env.DB.prepare("UPDATE deliveries SET state='failed',last_error='retry_window_expired' WHERE event_id=?").bind(eventID).run()
+    assert.equal((await api(`/deliveries/${eventID}/retry`, 'POST', { action_request_id: crypto.randomUUID() })).status, 202)
+  }
+  const revision = (await revisionRow(env, eventID)).id
+  // An episode in progress: six rechecks used, the next one due.
+  await env.DB.prepare("UPDATE endpoint_revisions SET blocked_reason='http_405',blocked_until='2000-01-01T00:00:00.000Z',blocked_rechecks=6 WHERE id=?").bind(revision).run()
+  await retry()
+  let result = await attempt(t, env, eventID, 405)
+  assert.equal(result.revision.blocked_rechecks, 7); assert.ok(result.revision.blocked_until); assert.equal(result.delivery.state, 'failed'); assert.equal(result.next, null)
+  await expireCooldown(env, revision); await retry()
+  result = await attempt(t, env, eventID, 405)
+  assert.equal(result.revision.blocked_rechecks, 8); assert.ok(result.revision.blocked_until); assert.equal(result.delivery.state, 'failed')
+  // No automatic recheck is left: the block is permanent and the event waits for the owner.
+  await expireCooldown(env, revision); await retry()
+  result = await attempt(t, env, eventID, 405)
+  assert.equal(result.calls, 1); assert.equal(result.outcome, 'rejected'); assert.equal(result.next, null)
+  assert.equal(result.revision.blocked_until, null); assert.equal(result.revision.blocked_rechecks, 8); assert.equal(result.revision.blocked_reason, 'http_405')
+  assert.equal(result.delivery.state, 'retry_wait'); assert.equal(result.delivery.retry_mode, 'once')
+  assert.equal((await attempt(t, env, eventID, 204)).calls, 0)
+})
+
+test('a count left by an older Worker on an unblocked revision never shortens the next block episode', async t => {
+  const env = environment(), api = await session(env), { target, eventID } = await queued(env, api)
+  const revision = (await revisionRow(env, eventID)).id
+  // An older Worker's unblock or delivered recheck cleared the block, not its count.
+  await env.DB.prepare('UPDATE endpoint_revisions SET blocked_reason=NULL,blocked_until=NULL,blocked_rechecks=8 WHERE id=?').bind(revision).run()
+  assert.equal((await api(`/endpoints/${target.id}`)).data.blocked_rechecks, 0, 'an unblocked revision has used no rechecks')
+  await pastGrace(env, eventID)
+  const result = await attempt(t, env, eventID, 404)
+  assert.equal(result.revision.blocked_rechecks, 1, 'a fresh episode'); assert.ok(result.revision.blocked_until)
+  assert.equal(result.next, Date.parse(result.revision.blocked_until)); assert.equal(result.delivery.state, 'retry_wait')
+  assert.equal((await api(`/endpoints/${target.id}`)).data.blocked_rechecks, 1)
 })

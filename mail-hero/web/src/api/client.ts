@@ -82,7 +82,7 @@ export const api = {
   setup: () => request<SetupStatus>('/setup/status'),
   settings: () => request<Settings>('/settings'),
   updateSettings: (body: Partial<Settings> & { version: number; retention_confirmation?: string; apply_existing?: boolean }) => request<Settings>('/settings', { method: 'PATCH', body }),
-  retentionPreview: (policy: number | { raw_retention_days: number | null; content_retention_days: number | null; ledger_retention_days: number; apply_existing: boolean }) => request<RetentionPreview>(`/settings/retention-preview${query(typeof policy === 'number' ? { days: policy } : { ...policy, raw_retention_days: policy.raw_retention_days ?? 'none', content_retention_days: policy.content_retention_days ?? 'none' })}`),
+  retentionPreview: (policy: number | { raw_retention_days: number | null; content_retention_days: number | null; ledger_retention_days: number; resolved_retention_days: number | null; apply_existing: boolean }) => request<RetentionPreview>(`/settings/retention-preview${query(typeof policy === 'number' ? { days: policy } : { ...policy, raw_retention_days: policy.raw_retention_days ?? 'none', content_retention_days: policy.content_retention_days ?? 'none', resolved_retention_days: policy.resolved_retention_days ?? 'none' })}`),
   messages: (params: Record<string, string | number | boolean | null | undefined>) => request<Page<MessageSummary>>(`/messages${query(params)}`),
   message: (id: string) => request<{ message: MessageDetail; deliveries: Delivery[] }>(`/messages/${encodeURIComponent(id)}`),
   markRead: (id: string, version: number, read: boolean) => request<{ read_at: string | null; version: number }>(`/messages/${encodeURIComponent(id)}`, { method: 'PATCH', body: { read, version } }),

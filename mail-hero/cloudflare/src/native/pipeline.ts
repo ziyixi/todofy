@@ -3,7 +3,7 @@ import { HttpError, sha256, decryptCredential, validateTarget } from './security
 import { parseMail, ParseError, type ParsedMail } from './parser.ts';
 import { MAX_RAW_BYTES, RAW_KEY } from './ingest.ts';
 import { webhookContent } from './content-policy.ts';
-import { runLifecycle, safeTerminalSQL } from './lifecycle.ts';
+import { resolvedDueSQL, resolvedTerminalSQL, runLifecycle, safeTerminalSQL } from './lifecycle.ts';
 import { runAlerts } from './alerts.ts';
 import { recordDeletion } from './backup-artifacts.ts';
 import { reserveObjectCapacity, settleObjectCapacity, releaseObjectCapacity, capacitySnapshot, reconcileCapacity, MAX_PARSED_JSON_BYTES, MAX_PARSE_EXTRA_BYTES } from './capacity.ts';
@@ -17,6 +17,8 @@ const claimMS = 5 * 60_000;
 // 404/405/3xx are often a transient deploy or routing gap; auth failures are not.
 export const ROUTE_BLOCK_GRACE_MS = 30 * 60_000;
 export const ROUTE_BLOCK_COOLDOWN_MS = 6 * 3600_000;
+// Eight cooldowns: about two days of automatic rechecks, then the owner decides.
+export const ROUTE_BLOCK_MAX_RECHECKS = 8;
 /** Sendable: never blocked, or an automatic recheck is due. Binds one timestamp. */
 const unblockedSQL = (r: string) => `(${r}.blocked_reason IS NULL OR (${r}.blocked_until IS NOT NULL AND ${r}.blocked_until<=?))`;
 const error = (status: number, code: string): never => { throw new HttpError(status, code, code); };
@@ -141,19 +143,22 @@ async function deletePrefix(env:Env,prefix:string):Promise<void> {
     cursor=page.truncated?page.cursor:undefined;
   } while(cursor);
 }
-export async function deleteMessageContent(env:Env,messageID:string,expectedVersion?:number,requireSafeTerminal=false):Promise<void> {
+/** `guard` true requires a safe terminal. {dueBy} requires an owner-resolved
+ * exception, not clocked, due by the live resolved period at or before that time. */
+export async function deleteMessageContent(env:Env,messageID:string,expectedVersion?:number,guard:boolean|{dueBy:string}=false):Promise<void> {
   const message=await first(env,'SELECT * FROM messages WHERE id=?',messageID);
   if(!message) error(404,'message_not_found');
   if(message!.content_deleted_at) { await purgeDeletedContent(env,messageID); return; }
   const version=expectedVersion ?? message!.version;
   const date=now(), deleteMarker=`delete:${crypto.randomUUID()}`;
+  const predicate=guard===true?safeTerminalSQL('messages'):guard?`messages.retention_started_at IS NULL AND ${resolvedTerminalSQL('messages')} AND ${resolvedDueSQL('messages')}<=?`:'1=1';
   // The tombstone wins first. Late parse and queued delivery publications have
   // state predicates and cannot restore content after this transaction.
   const result=await env.DB.batch([
     env.DB.prepare(`UPDATE messages SET content_deleted_at=?,version=version+1,claim_token=NULL,lease_until=NULL,
       raw_key=NULL,parsed_key=NULL,subject=NULL,from_text=NULL,search_text=NULL,has_attachment=0,
       parse_error=NULL,parsed_size_bytes=0,pending_delete_bytes=content_bytes+COALESCE((SELECT sum(payload_size_bytes) FROM deliveries WHERE message_id=messages.id),0),
-      content_bytes=0,content_purge_pending=1 WHERE id=? AND version=? AND content_deleted_at IS NULL AND ${requireSafeTerminal?safeTerminalSQL('messages'):'1=1'}`).bind(date,messageID,version),
+      content_bytes=0,content_purge_pending=1 WHERE id=? AND version=? AND content_deleted_at IS NULL AND ${predicate}`).bind(date,messageID,version,...(typeof guard==='object'?[guard.dueBy]:[])),
     env.DB.prepare('INSERT INTO maintenance(id,value) SELECT ?,? WHERE changes()>0').bind(deleteMarker,messageID),
     env.DB.prepare(`INSERT OR IGNORE INTO maintenance(id,value) SELECT ?,json_object('raw_key',?,'content_bytes',?,'payloads',json(COALESCE((SELECT json_group_array(json_object('key','payload/'||event_id||'.json','bytes',payload_size_bytes)) FROM deliveries WHERE message_id=?),'[]'))) WHERE EXISTS(SELECT 1 FROM maintenance WHERE id=?)`).bind(`delete_accounting:${messageID}`,message!.raw_key || `raw/${messageID}.eml`,message!.content_bytes,messageID,deleteMarker),
     env.DB.prepare(`UPDATE app_settings SET logical_bytes=max(0,logical_bytes-?-COALESCE((SELECT sum(payload_size_bytes) FROM deliveries WHERE message_id=?),0))
@@ -361,7 +366,7 @@ export function retryAfter(value:string|null,time=Date.now()):number|null {
 }
 async function deliverJob(env:Env,eventID:string,attempts=0):Promise<number|null> {
   const row=await first(env,`SELECT d.*,m.content_deleted_at,r.url,r.auth_type,r.credential_ciphertext,r.credential_key_id,r.timeout_ms,
-    r.blocked_reason,r.blocked_until,e.id endpoint_id,e.paused,e.archived_at,e.rate_per_minute,e.next_send_at endpoint_next,
+    r.blocked_reason,r.blocked_until,r.blocked_rechecks,e.id endpoint_id,e.paused,e.archived_at,e.rate_per_minute,e.next_send_at endpoint_next,
     s.send_paused,s.next_send_at global_next FROM deliveries d JOIN messages m ON m.id=d.message_id
     JOIN endpoint_revisions r ON r.id=d.endpoint_revision_id JOIN webhook_endpoints e ON e.id=r.endpoint_id
     JOIN app_settings s ON s.id=1 WHERE d.event_id=?`,eventID);
@@ -470,13 +475,18 @@ async function deliverJob(env:Env,eventID:string,attempts=0):Promise<number|null
   // Route-class rejections retry normally within the grace period of one
   // episode, then block the revision until an automatic recheck. A manual
   // single attempt blocks at once and ends: only automatic events wait out the
-  // cooldown, so it is never resent unasked. Auth rejections block until the owner acts.
+  // cooldown, so it is never resent unasked. After the last automatic recheck
+  // the block is permanent and, like an auth rejection, waits for the owner.
   const since=route?row.blocking_since ?? finished:null;
   const grace=route && row.retry_mode==='auto' && time-Date.parse(since!)<ROUTE_BLOCK_GRACE_MS;
-  const blockedUntil=route && !grace?time+ROUTE_BLOCK_COOLDOWN_MS:null;
-  const blocked=auth || blockedUntil!==null;
+  // A revision that is not blocked starts a new episode, whatever count an
+  // older Worker (which never resets it) left behind.
+  const exhausted=route && !grace && row.blocked_reason!==null && Number(row.blocked_rechecks)>=ROUTE_BLOCK_MAX_RECHECKS;
+  const blockedUntil=route && !grace && !exhausted?time+ROUTE_BLOCK_COOLDOWN_MS:null;
+  const permanent=auth || exhausted;
+  const blocked=permanent || blockedUntil!==null;
   let state=success?'delivered':(transient || grace) && row.retry_mode==='auto' && attempt<48 && next<Date.parse(row.created_at)+7*DAY?'retry_wait':'failed';
-  if(auth || (blockedUntil!==null && row.retry_mode==='auto')) state='retry_wait';
+  if(permanent || (blockedUntil!==null && row.retry_mode==='auto')) state='retry_wait';
   if(blockedUntil!==null) next=blockedUntil;
   const statements=[
     // Keep the attempt's terminal result immutable. A transient HTTP result
@@ -484,15 +494,17 @@ async function deliverJob(env:Env,eventID:string,attempts=0):Promise<number|null
     env.DB.prepare(`UPDATE delivery_attempts SET finished_at=?,http_status=?,duration_ms=?,outcome=?,error_code=? WHERE id=? AND finished_at IS NULL`).bind(finished,status,Date.now()-start,success?'delivered':blocked?'rejected':state==='failed'?'failed':transient || grace?'retryable':'rejected',success?null:code,attemptID),
     env.DB.prepare(`UPDATE deliveries SET state=CASE WHEN payload_key IS NULL AND ?<>'delivered' THEN 'cancelled' ELSE ? END,delivered_at=?,last_error=?,next_attempt_at=?,blocking_since=?,claim_token=NULL,lease_until=NULL WHERE event_id=? AND claim_token=?`).bind(state,state,success?finished:null,success?null:code,stamp(next),since,eventID,token),
   ];
-  if(blocked) statements.push(env.DB.prepare('UPDATE endpoint_revisions SET blocked_reason=?,blocked_until=? WHERE id=?').bind(code,blockedUntil===null?null:stamp(blockedUntil),row.endpoint_revision_id));
-  // Success ends only an automatic-recheck block; auth blocks need the owner.
-  if(success) statements.push(env.DB.prepare('UPDATE endpoint_revisions SET blocked_reason=NULL,blocked_until=NULL WHERE id=? AND blocked_until IS NOT NULL').bind(row.endpoint_revision_id));
+  if(blocked) statements.push(env.DB.prepare(`UPDATE endpoint_revisions SET blocked_reason=?1,blocked_until=?2,
+    blocked_rechecks=CASE WHEN blocked_reason IS NULL THEN ?3 ELSE blocked_rechecks+?3 END WHERE id=?4`).bind(code,blockedUntil===null?null:stamp(blockedUntil),blockedUntil===null?0:1,row.endpoint_revision_id));
+  // Success ends only an automatic-recheck block and its recheck count;
+  // permanent blocks (auth, or rechecks used up) need the owner.
+  if(success) statements.push(env.DB.prepare('UPDATE endpoint_revisions SET blocked_reason=NULL,blocked_until=NULL,blocked_rechecks=0 WHERE id=? AND (blocked_until IS NOT NULL OR (blocked_reason IS NULL AND blocked_rechecks<>0))').bind(row.endpoint_revision_id));
   if(!success && responseAfter!==null) {
     if(responseAfter>Date.now()+DAY) statements.push(env.DB.prepare(`UPDATE webhook_endpoints SET paused=1,paused_reason='retry_after_over_24h',version=version+1,updated_at=? WHERE id=?`).bind(finished,row.endpoint_id));
     else statements.push(env.DB.prepare('UPDATE webhook_endpoints SET next_send_at=max(COALESCE(next_send_at,?),?) WHERE id=?').bind(finished,stamp(responseAfter),row.endpoint_id));
   }
   await env.DB.batch(statements);
-  if(state!=='retry_wait' || auth || (responseAfter!==null && responseAfter>Date.now()+DAY)) return null;
+  if(state!=='retry_wait' || permanent || (responseAfter!==null && responseAfter>Date.now()+DAY)) return null;
   return next;
 }
 
@@ -517,7 +529,7 @@ export async function runMaintenance(env:Env):Promise<{jobs:Job[];continueSoon:b
     if(deleted.length) {
       await purgeDeletedContent(env,deleted[0].id);
       await env.DB.prepare('INSERT OR IGNORE INTO maintenance(id,value) VALUES(?,?)').bind(`purged:${deleted[0].id}`,now()).run();
-    } else await runLifecycle(env,{deleteContent:(id,version)=>deleteMessageContent(env,id,version,true),withMutation:operation=>operation()});
+    } else await runLifecycle(env,{deleteContent:(id,version,resolved)=>deleteMessageContent(env,id,version,resolved ?? true),withMutation:operation=>operation()});
     await env.DB.prepare("UPDATE maintenance SET value='alerts' WHERE id='maintenance_phase'").run();
     return {jobs:[],continueSoon:true,nextDelayMS:1000};
   }
@@ -534,8 +546,9 @@ export async function runMaintenance(env:Env):Promise<{jobs:Job[];continueSoon:b
   for(const key of new Set(messages.map(message=>message.raw_key as string))) jobs.push({type:'parse',key});
   // Route-class blocks written without a cooldown (before 0008, by the older
   // Worker during the deploy gap or after a rollback) get their recheck now.
+  // Blocks whose automatic rechecks are used up stay permanent.
   await env.DB.prepare(`UPDATE endpoint_revisions SET blocked_until=? WHERE id IN(SELECT id FROM endpoint_revisions INDEXED BY endpoint_revisions_uncooled_idx
-    WHERE blocked_reason IS NOT NULL AND blocked_until IS NULL AND (blocked_reason IN('http_404','http_405') OR blocked_reason GLOB 'http_3[0-9][0-9]'))`).bind(date).run();
+    WHERE blocked_reason IS NOT NULL AND blocked_until IS NULL AND (blocked_reason IN('http_404','http_405') OR blocked_reason GLOB 'http_3[0-9][0-9]') AND blocked_rechecks<${ROUTE_BLOCK_MAX_RECHECKS})`).bind(date).run();
   // Events held by a pause or a block past their window fail as deliverJob
   // would on its next run, so the in-flight set stays bounded in time.
   await env.DB.prepare(`UPDATE deliveries SET state='failed',last_error='retry_window_expired' WHERE event_id IN(SELECT event_id FROM deliveries
