@@ -221,3 +221,10 @@ HTTP 接管、容器重建存活与 Mail Hero 解析测试不能代替用户测�
 - 正式发布：[原生检查与部署36365274830](https://github.com/ziyixi/mail-hero/actions/runs/36365274830)与[备份镜像36365274921](https://github.com/ziyixi/mail-hero/actions/runs/36365274921)成功；Cloudflare 于01:16:47 UTC部署 Worker 版本 `f8a8acec-8859-4a6d-9507-b0013978e7f8`，远程迁移列表为 “No migrations to apply”，生产设置为正文30天、已处理异常60天，新增列存在；计数与 Access 行为不变。服务器无需变更。
 - Todofy attention 核查（owner 自行在本机终端以 BasicAuth 查询，凭据未经助手处理）：`attention_count=0`，`complete` 108、`ignored` 1，其余状态为0，`latest_reminder=null`，与 Mail Hero 已交付108一致。
 - 部署后约12分钟复查：新的保留扫描（含已处理异常判定）在生产已运行，`insights` 显示每次平均读取7行；维护阶段正常轮转，当前无被标记为已处理异常的邮件（`resolved_at` 为0，与全部邮件均已送达一致）。以上只读取计数、schema 与维护元数据。
+
+## 投递概览改用浏览器时区（2026-09-28 UTC）
+
+- 用户要求 dashboard 时区与浏览器一致（当前为 PDT）。提交 `9d29025`：前端发送浏览器 IANA 时区 `tz`，Worker 在一次 D1 查询内按该时区的本地日/小时分桶（区间内 UTC 偏移分段作为绑定参数），正确处理 23/25 小时日、重复的回拨小时及 :30/:45 偏移；桶携带 `end`，下钻按实际长度。无 `tz` 的旧请求保持与原 UTC 输出逐字节一致；浏览器时区不可用时回退 UTC。
+- 本地验证：Worker 120项、前端64项（另在 `TZ=America/Los_Angeles` 与 `TZ=Asia/Kolkata` 下各跑一次）、部署配置3项通过；审查脚本覆盖418个时区无问题。
+- 正式发布：[原生检查与部署36369687379](https://github.com/ziyixi/mail-hero/actions/runs/36369687379)成功，Cloudflare 于02:25:58 UTC部署 Worker 版本 `db94db68-574b-4fed-9622-142be277f694`；未认证访问仍由 Access 拦截。尚未由 owner 在浏览器中实际查看新概览。
+
