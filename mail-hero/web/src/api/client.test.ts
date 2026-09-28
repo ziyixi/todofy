@@ -28,15 +28,16 @@ describe('management API integration contract', () => {
     expect(setup.checks?.some(check => check.id === 'tls' || check.id === 'external')).toBe(false)
   })
 
-  it('requests the exact UTC half-open delivery statistics interval', async () => {
-    const payload = { from: '2026-09-01T00:00:00.000Z', to: '2026-09-02T00:00:00.000Z', bucket: 'day', totals: { succeeded: 1, retried: 0, failed: 0, unknown: 0 }, buckets: [] }
+  it('requests the exact half-open delivery statistics interval in the browser time zone', async () => {
+    const payload = { from: '2026-09-01T07:00:00.000Z', to: '2026-09-02T07:00:00.000Z', bucket: 'day', time_zone: 'America/Los_Angeles', totals: { succeeded: 1, retried: 0, failed: 0, unknown: 0 },
+      buckets: [{ start: '2026-09-01T07:00:00.000Z', end: '2026-09-02T07:00:00.000Z', succeeded: 1, retried: 0, failed: 0, unknown: 0 }] }
     const fetcher = vi.fn().mockResolvedValueOnce(json(payload))
     vi.stubGlobal('fetch', fetcher)
-    expect(await api.deliveryStats({ from: payload.from, to: payload.to, bucket: 'day' })).toEqual(payload)
+    expect(await api.deliveryStats({ from: payload.from, to: payload.to, bucket: 'day', tz: 'America/Los_Angeles' })).toEqual(payload)
     const [url] = fetcher.mock.calls[0] as [string]
     const requestURL = new URL(url, 'https://mail-hero.example.test')
     expect(requestURL.pathname).toBe('/api/v1/delivery-stats')
-    expect(Object.fromEntries(requestURL.searchParams)).toEqual({ from: payload.from, to: payload.to, bucket: 'day' })
+    expect(Object.fromEntries(requestURL.searchParams)).toEqual({ from: payload.from, to: payload.to, bucket: 'day', tz: 'America/Los_Angeles' })
   })
 
   it('sends every staged retention period to the preview, spelling a disabled period as none', async () => {

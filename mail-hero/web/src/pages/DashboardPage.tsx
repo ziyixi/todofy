@@ -4,16 +4,16 @@ import { Link } from 'react-router'
 import { ArrowRight, CheckCircle2, Clock3, RefreshCw, RotateCcw, TriangleAlert } from 'lucide-react'
 import { api } from '../api/client'
 import type { DeliveryStats, DeliveryStatsCounts } from '../api/types'
-import { Button, Card, Empty, ErrorState, Loading, PageHead } from '../components/UI'
+import { Button, Card, Empty, ErrorState, formatInstant, Loading, PageHead, zoneAbbreviation } from '../components/UI'
 
 type Period = '24h' | '7d' | '30d' | 'custom'
 type Outcome = 'succeeded' | 'retried' | 'failed' | 'unknown'
-type Window = { from: string; to: string; bucket: 'hour' | 'day' }
+type Window = { from: string; to: string; bucket: 'hour' | 'day'; tz: string }
 const DAY = 86_400_000
 const periodOptions: Array<{ value: Period; label: string }> = [
   { value: '24h', label: '最近 24 小时' },
-  { value: '7d', label: '最近 7 个 UTC 日' },
-  { value: '30d', label: '最近 30 个 UTC 日' },
+  { value: '7d', label: '最近 7 天' },
+  { value: '30d', label: '最近 30 天' },
   { value: 'custom', label: '自选日期' },
 ]
 const outcomes: Array<{ key: Outcome; label: string; detail: string; icon: typeof CheckCircle2 }> = [
@@ -22,38 +22,68 @@ const outcomes: Array<{ key: Outcome; label: string; detail: string; icon: typeo
   { key: 'failed', label: '失败', detail: '本次请求终止，不会自动重试', icon: TriangleAlert },
 ]
 
-function utcDate(ms: number): string { return new Date(ms).toISOString().slice(0, 10) }
-function utcDayStart(ms: number): number { return Date.parse(`${utcDate(ms)}T00:00:00.000Z`) }
-function dateInputMs(value: string): number | null {
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return null
-  const ms = Date.parse(`${value}T00:00:00.000Z`)
-  return Number.isFinite(ms) && utcDate(ms) === value ? ms : null
+// Windows, labels and the API buckets all follow one zone: the browser's, read
+// again for every window, or UTC when the Worker cannot use it. Date's local
+// methods follow the browser zone, so a UTC fallback uses the UTC methods; the
+// local Date constructor resolves a midnight that DST skips to its first valid
+// instant, like the API does.
+function browserZone(): string | null {
+  // The Worker's checks: an offset such as "+03:00" or "Etc/Unknown" is refused.
+  try {
+    const zone = Intl.DateTimeFormat().resolvedOptions().timeZone
+    if (!zone || zone.length > 64 || !/^[A-Za-z0-9_+\-/]+$/.test(zone) || zone === 'Etc/Unknown') return null
+    new Intl.DateTimeFormat('en-US', { timeZone: zone })
+    return zone
+  } catch { return null }
 }
-function customWindow(fromDate: string, toDate: string): { value: Window | null; error: string | null } {
-  const from = dateInputMs(fromDate), last = dateInputMs(toDate)
+const zoneRefusal = (error: unknown) => (error as { code?: unknown } | null)?.code === 'invalid_time_zone'
+function dateOf(ms: number, tz: string): [number, number, number] {
+  const date = new Date(ms)
+  return tz === 'UTC' ? [date.getUTCFullYear(), date.getUTCMonth() + 1, date.getUTCDate()] : [date.getFullYear(), date.getMonth() + 1, date.getDate()]
+}
+function localDate(ms: number, tz: string): string {
+  const [year, month, day] = dateOf(ms, tz)
+  return `${String(year).padStart(4, '0')}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`
+}
+function localMidnight(year: number, month: number, day: number, tz: string): number {
+  return tz === 'UTC' ? Date.UTC(year, month - 1, day) : new Date(year, month - 1, day).getTime()
+}
+function daysAgo(now: number, days: number, tz: string): number {
+  const [year, month, day] = dateOf(now, tz)
+  return localMidnight(year, month, day - days, tz)
+}
+function dateParts(value: string, tz: string): [number, number, number] | null {
+  const parts = value.match(/^(\d{4})-(\d{2})-(\d{2})$/)
+  if (!parts) return null
+  const [year, month, day] = [Number(parts[1]), Number(parts[2]), Number(parts[3])]
+  return localDate(localMidnight(year, month, day, tz), tz) === value ? [year, month, day] : null
+}
+function customWindow(fromDate: string, toDate: string, tz: string): { value: Window | null; error: string | null } {
+  const from = dateParts(fromDate, tz), last = dateParts(toDate, tz)
   if (from === null || last === null) return { value: null, error: '请选择有效的开始和结束日期。' }
-  if (last < from) return { value: null, error: '结束日期不能早于开始日期。' }
-  if (last - from >= 90 * DAY) return { value: null, error: '一次最多查看 90 个 UTC 日。' }
-  return { value: { from: new Date(from).toISOString(), to: new Date(last + DAY).toISOString(), bucket: 'day' }, error: null }
+  // Count calendar days, so 23- and 25-hour DST days do not shift the limit.
+  const days = (Date.UTC(last[0], last[1] - 1, last[2]) - Date.UTC(from[0], from[1] - 1, from[2])) / DAY + 1
+  if (days < 1) return { value: null, error: '结束日期不能早于开始日期。' }
+  if (days > 90) return { value: null, error: '一次最多查看 90 天。' }
+  return { value: { from: new Date(localMidnight(...from, tz)).toISOString(), to: new Date(localMidnight(last[0], last[1], last[2] + 1, tz)).toISOString(), bucket: 'day', tz }, error: null }
 }
-function presetWindow(period: Exclude<Period, 'custom'>, now: number): Window {
-  if (period === '24h') return { from: new Date(now - DAY).toISOString(), to: new Date(now).toISOString(), bucket: 'hour' }
+function presetWindow(period: Exclude<Period, 'custom'>, now: number, tz: string): Window {
+  if (period === '24h') return { from: new Date(now - DAY).toISOString(), to: new Date(now).toISOString(), bucket: 'hour', tz }
   const days = period === '7d' ? 7 : 30
-  return { from: new Date(utcDayStart(now) - (days - 1) * DAY).toISOString(), to: new Date(now).toISOString(), bucket: 'day' }
+  return { from: new Date(daysAgo(now, days - 1, tz)).toISOString(), to: new Date(now).toISOString(), bucket: 'day', tz }
 }
-function utcInstant(value: string): string {
-  return new Intl.DateTimeFormat('zh-CN', { timeZone: 'UTC', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(new Date(value))
-}
-function bucketLabel(value: string, bucket: Window['bucket'], full = false): string {
-  const options: Intl.DateTimeFormatOptions = { timeZone: 'UTC', month: 'numeric', day: 'numeric' }
+// Labels use the zone the API bucketed in, never whatever zone is current now.
+function bucketLabel(value: string, bucket: Window['bucket'], timeZone: string, full = false): string {
+  const options: Intl.DateTimeFormatOptions = { timeZone, month: 'numeric', day: 'numeric' }
   if (full) options.year = 'numeric'
   if (bucket === 'hour') { options.hour = '2-digit'; options.hourCycle = 'h23' }
-  return new Intl.DateTimeFormat('zh-CN', options).format(new Date(value))
+  const date = new Date(value), label = new Intl.DateTimeFormat('zh-CN', options).format(date)
+  // The abbreviation tells the two buckets of a repeated fall-back hour apart.
+  return full && bucket === 'hour' ? `${label} ${zoneAbbreviation(date, timeZone)}` : label
 }
+// A DST day lasts 23 or 25 hours, so the API's end is used rather than start + 24 h.
 function bucketEnd(stats: DeliveryStats, index: number): string {
-  const start = Date.parse(stats.buckets[index].start)
-  const next = start + (stats.bucket === 'hour' ? 3_600_000 : DAY)
-  return new Date(Math.min(next, Date.parse(stats.to))).toISOString()
+  return stats.buckets[index].end ?? stats.buckets[index + 1]?.start ?? stats.to
 }
 function drilldown(outcome: Outcome, from: string, to: string): string {
   return `/deliveries?${new URLSearchParams({ attempt_outcome: outcome, from, to }).toString()}`
@@ -65,11 +95,20 @@ function countAll(counts: DeliveryStatsCounts): number {
 export default function DashboardPage() {
   const [period, setPeriod] = useState<Period>('7d')
   const [asOf, setAsOf] = useState(() => Date.now())
-  const [draftFrom, setDraftFrom] = useState(() => utcDate(Date.now() - 6 * DAY))
-  const [draftTo, setDraftTo] = useState(() => utcDate(Date.now()))
-  const [chosenCustom, setChosenCustom] = useState(() => customWindow(utcDate(Date.now() - 6 * DAY), utcDate(Date.now())).value!)
-  const validation = customWindow(draftFrom, draftTo)
-  const activeWindow = useMemo(() => period === 'custom' ? chosenCustom : presetWindow(period, asOf), [period, chosenCustom, asOf])
+  // Set once the Worker refuses the browser zone; the dashboard then uses UTC.
+  const [zoneRefused, setZoneRefused] = useState(false)
+  const [initialDates] = useState(() => { const now = Date.now(), tz = browserZone() ?? 'UTC'; return { from: localDate(daysAgo(now, 6, tz), tz), to: localDate(now, tz) } })
+  const [draftFrom, setDraftFrom] = useState(initialDates.from)
+  const [draftTo, setDraftTo] = useState(initialDates.to)
+  const [chosenCustom, setChosenCustom] = useState(initialDates)
+  // The zone is read again whenever a window is computed, so from/to, tz and
+  // the query key agree even after the OS zone changes under an open tab.
+  const { range: activeWindow, browser } = useMemo(() => {
+    const browser = zoneRefused ? null : browserZone(), tz = browser ?? 'UTC'
+    const range = period === 'custom' ? customWindow(chosenCustom.from, chosenCustom.to, tz).value ?? customWindow(chosenCustom.from, chosenCustom.to, 'UTC').value! : presetWindow(period, asOf, tz)
+    return { range, browser }
+  }, [period, chosenCustom, asOf, zoneRefused])
+  const validation = customWindow(draftFrom, draftTo, activeWindow.tz)
   useEffect(() => {
     if (period === 'custom') return
     const advance = () => { if (!document.hidden) setAsOf(Date.now()) }
@@ -79,10 +118,16 @@ export default function DashboardPage() {
   }, [period])
   const overview = useQuery({ queryKey: ['overview'], queryFn: api.overview, staleTime: 300_000, refetchInterval: 300_000, refetchIntervalInBackground: false })
   const stats = useQuery({
-    queryKey: ['delivery-stats', activeWindow.from, activeWindow.to, activeWindow.bucket],
-    queryFn: () => api.deliveryStats(activeWindow),
+    queryKey: ['delivery-stats', activeWindow.from, activeWindow.to, activeWindow.bucket, activeWindow.tz],
+    queryFn: () => api.deliveryStats({ from: activeWindow.from, to: activeWindow.to, bucket: activeWindow.bucket, tz: activeWindow.tz }),
     staleTime: 300_000,
   })
+  // A zone the Worker's Intl lacks: recompute the window in UTC instead of failing.
+  const zoneError = stats.isError && zoneRefusal(stats.error) && activeWindow.tz !== 'UTC'
+  useEffect(() => { if (zoneError) setZoneRefused(true) }, [zoneError])
+  // A response without time_zone came from the UTC-only API.
+  const shownZone = stats.data ? stats.data.time_zone ?? 'UTC' : activeWindow.tz, local = shownZone === browser
+  const zoneWords = local ? '浏览器时区' : ' UTC '
   const total = stats.data ? countAll(stats.data.totals) : 0
   const maxBucket = Math.max(1, ...(stats.data?.buckets.map(countAll) || []))
 
@@ -92,7 +137,7 @@ export default function DashboardPage() {
   }
   function applyCustom(event: FormEvent) {
     event.preventDefault()
-    if (validation.value) setChosenCustom(validation.value)
+    if (validation.value) setChosenCustom({ from: draftFrom, to: draftTo })
   }
   function refresh() {
     if (period === 'custom') void stats.refetch()
@@ -103,26 +148,26 @@ export default function DashboardPage() {
     <PageHead eyebrow="DASHBOARD · WEBHOOK" title="投递概览" description="按投递尝试完成时间查看成功、重试和失败趋势。" action={<Button variant="secondary" onClick={refresh} disabled={stats.isFetching}><RefreshCw size={16}/> 刷新</Button>} />
     <div className="dashboard-toolbar" aria-label="统计时段">
       <div className="dashboard-periods">{periodOptions.map(option => <button type="button" key={option.value} className={`dashboard-period ${period === option.value ? 'active' : ''}`} aria-pressed={period === option.value} onClick={() => choosePeriod(option.value)}>{option.label}</button>)}</div>
-      <span className="dashboard-timezone">所有时段按 UTC 统计</span>
+      <span className="dashboard-timezone">{local ? `时间按浏览器时区 ${shownZone}（${zoneAbbreviation(new Date(asOf), shownZone)}）` : '浏览器时区无法用于统计，时间按 UTC 显示'}</span>
     </div>
     {period === 'custom' && <form className="dashboard-date-form" onSubmit={applyCustom}>
       <label>开始日期 <input type="date" value={draftFrom} onChange={event => setDraftFrom(event.target.value)} /></label>
       <label>结束日期（含） <input type="date" value={draftTo} onChange={event => setDraftTo(event.target.value)} /></label>
-      <Button variant="secondary" type="submit" disabled={!validation.value || (validation.value.from === chosenCustom.from && validation.value.to === chosenCustom.to)}>应用日期</Button>
+      <Button variant="secondary" type="submit" disabled={!validation.value || (draftFrom === chosenCustom.from && draftTo === chosenCustom.to)}>应用日期</Button>
       {validation.error && <span className="dashboard-date-error" role="alert">{validation.error}</span>}
     </form>}
-    <div className="dashboard-range"><Clock3 size={15}/><span>当前区间：{utcInstant(activeWindow.from)} 至 {utcInstant(activeWindow.to)} UTC（不含结束时刻）</span></div>
-    {stats.isPending ? <Card><Loading label="正在读取投递统计…"/></Card> : stats.isError ? <Card><ErrorState error={stats.error} retry={() => void stats.refetch()}/></Card> : <>
+    <div className="dashboard-range"><Clock3 size={15}/><span>当前区间：{formatInstant(activeWindow.from, shownZone)} 至 {formatInstant(activeWindow.to, shownZone)}（不含结束时刻）</span></div>
+    {stats.isPending || zoneError ? <Card><Loading label="正在读取投递统计…"/></Card> : stats.isError ? <Card><ErrorState error={stats.error} retry={() => void stats.refetch()}/></Card> : <>
       <div className="dashboard-metrics">{outcomes.map(({ key, label, detail, icon: Icon }) => <Link to={drilldown(key, stats.data.from, stats.data.to)} className={`dashboard-metric dashboard-metric-${key}`} key={key} aria-label={`查看此区间${label}的投递事件`}><span className="dashboard-metric-top"><span>{label}的尝试</span><Icon size={19}/></span><strong>{stats.data.totals[key].toLocaleString('zh-CN')}</strong><small>{detail}</small><span className="dashboard-metric-action">查看相关事件 <ArrowRight size={14}/></span></Link>)}</div>
       {stats.data.totals.unknown > 0 && <div className="dashboard-unknown" role="status"><TriangleAlert size={17}/><span>另有 <strong>{stats.data.totals.unknown}</strong> 次尝试结果不明（可能在请求中断时发生），需要逐条核对。</span><Link to={drilldown('unknown', stats.data.from, stats.data.to)}>查看事件 <ArrowRight size={14}/></Link></div>}
       {overview.data?.failed_count != null && <div className="dashboard-current-status"><span>当前已停止的事件：<strong>{overview.data.failed_count}</strong> 条。这里按事件当前状态计数，也包括未发出 HTTP 请求就停止的事件。</span><Link to="/deliveries?status=failed">查看当前失败事件 <ArrowRight size={14}/></Link></div>}
       {total === 0 ? <Card><Empty title="这段时间没有投递尝试" detail="新邮件进入转发流程后，这里会显示 webhook 尝试。仅归档的邮件不会计入。" action={<Link className="button button-secondary" to="/deliveries">查看投递记录</Link>}/></Card> : <Card className="dashboard-chart-card">
-        <div className="dashboard-chart-heading"><div><h2>投递趋势</h2><p>每一段显示该 UTC 小时或日期内完成的尝试；一次事件可能发生多次尝试。</p></div><Link className="text-link" to="/deliveries">全部记录 <ArrowRight size={15}/></Link></div>
+        <div className="dashboard-chart-heading"><div><h2>投递趋势</h2><p>每一段显示按{zoneWords}划分的小时或日期内完成的尝试；一次事件可能发生多次尝试。</p></div><Link className="text-link" to="/deliveries">全部记录 <ArrowRight size={15}/></Link></div>
         <div className="dashboard-legend" aria-hidden="true"><span className="succeeded">成功</span><span className="retried">进入重试</span><span className="failed">失败</span>{stats.data.totals.unknown > 0 && <span className="unknown">结果不明</span>}</div>
         <div className="dashboard-chart-scroll"><div className="dashboard-chart" role="img" aria-label={`此区间共 ${total} 次投递尝试：成功 ${stats.data.totals.succeeded} 次，进入重试 ${stats.data.totals.retried} 次，失败 ${stats.data.totals.failed} 次，结果不明 ${stats.data.totals.unknown} 次。每个时段的精确值见下方明细表。`}>
-          {stats.data.buckets.map((item, index) => <div className="dashboard-chart-column" key={item.start}><div className="dashboard-bar-stack">{(['succeeded', 'retried', 'failed', 'unknown'] as Outcome[]).map(key => item[key] > 0 && <span key={key} className={`dashboard-bar-${key}`} style={{ height: `${item[key] / maxBucket * 100}%` }}/>)}</div><span className="dashboard-chart-label">{index % Math.max(1, Math.ceil(stats.data.buckets.length / 8)) === 0 || index === stats.data.buckets.length - 1 ? bucketLabel(item.start, stats.data.bucket) : '\u00a0'}</span></div>)}
+          {stats.data.buckets.map((item, index) => <div className="dashboard-chart-column" key={item.start}><div className="dashboard-bar-stack">{(['succeeded', 'retried', 'failed', 'unknown'] as Outcome[]).map(key => item[key] > 0 && <span key={key} className={`dashboard-bar-${key}`} style={{ height: `${item[key] / maxBucket * 100}%` }}/>)}</div><span className="dashboard-chart-label">{index % Math.max(1, Math.ceil(stats.data.buckets.length / 8)) === 0 || index === stats.data.buckets.length - 1 ? bucketLabel(item.start, stats.data.bucket, shownZone) : '\u00a0'}</span></div>)}
         </div></div>
-        <details className="dashboard-details"><summary>查看每个时段的准确数量</summary><div className="table-wrap"><table className="data-table dashboard-table"><caption>按 UTC 时段统计的投递尝试；数字可打开对应投递事件</caption><thead><tr><th scope="col">时段（UTC）</th><th scope="col">成功</th><th scope="col">进入重试</th><th scope="col">失败</th><th scope="col">结果不明</th></tr></thead><tbody>{stats.data.buckets.map((item, index) => <tr key={item.start}><th scope="row">{bucketLabel(item.start, stats.data.bucket, true)}</th>{(['succeeded', 'retried', 'failed', 'unknown'] as Outcome[]).map(key => <td key={key}>{item[key] ? <Link to={drilldown(key, new Date(Math.max(Date.parse(item.start), Date.parse(stats.data.from))).toISOString(), bucketEnd(stats.data, index))} aria-label={`${bucketLabel(item.start, stats.data.bucket, true)} ${key === 'succeeded' ? '成功' : key === 'retried' ? '进入重试' : key === 'failed' ? '失败' : '结果不明'} ${item[key]} 次，查看相关事件`}>{item[key]}</Link> : '0'}</td>)}</tr>)}</tbody></table></div></details>
+        <details className="dashboard-details"><summary>查看每个时段的准确数量</summary><div className="table-wrap"><table className="data-table dashboard-table"><caption>按{zoneWords}时段统计的投递尝试；数字可打开对应投递事件</caption><thead><tr><th scope="col">时段（{shownZone}）</th><th scope="col">成功</th><th scope="col">进入重试</th><th scope="col">失败</th><th scope="col">结果不明</th></tr></thead><tbody>{stats.data.buckets.map((item, index) => <tr key={item.start}><th scope="row">{bucketLabel(item.start, stats.data.bucket, shownZone, true)}</th>{(['succeeded', 'retried', 'failed', 'unknown'] as Outcome[]).map(key => <td key={key}>{item[key] ? <Link to={drilldown(key, new Date(Math.max(Date.parse(item.start), Date.parse(stats.data.from))).toISOString(), bucketEnd(stats.data, index))} aria-label={`${bucketLabel(item.start, stats.data.bucket, shownZone, true)} ${key === 'succeeded' ? '成功' : key === 'retried' ? '进入重试' : key === 'failed' ? '失败' : '结果不明'} ${item[key]} 次，查看相关事件`}>{item[key]}</Link> : '0'}</td>)}</tr>)}</tbody></table></div></details>
       </Card>}
       <p className="dashboard-scope">只统计真实邮件的 webhook 请求；连接测试和未发出的任务不计入。成功指目标服务返回 2xx 并接管请求，不表示下游业务已经完成。图表按尝试计数，点击数字打开相关事件；同一事件重试多次时，事件列表条数可能小于这里的次数。旧版记录中，部分显示为“进入重试”的尝试可能当时已耗尽重试额度；历史结果无法可靠补算。</p>
     </>}

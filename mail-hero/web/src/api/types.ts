@@ -163,8 +163,11 @@ export interface DeliveryStats {
   from: string
   to: string
   bucket: 'hour' | 'day'
+  // Present when the request sent tz; buckets are then local days or hours.
+  time_zone?: string
   totals: DeliveryStatsCounts
-  buckets: Array<DeliveryStatsCounts & { start: string }>
+  // end is the next bucket's start (or to); a local DST day is 23 or 25 hours.
+  buckets: Array<DeliveryStatsCounts & { start: string; end?: string }>
 }
 
 export interface SetupStatus {

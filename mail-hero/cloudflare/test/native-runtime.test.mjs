@@ -210,6 +210,15 @@ test('native workerd: durable archive, protected API, stable retry identity and 
     assert.equal(posted.message.subject, 'test');
     assert.equal(posted.message.text, '测试邮件');
     assert.equal(posted.message.from[0].address, 'sender@example.org');
+    // workerd's Intl and real D1 evaluate the local-time CASE with numbered parameters.
+    await db.prepare(`INSERT INTO delivery_attempts(id,event_id,attempt_no,started_at,finished_at,outcome)
+      VALUES(?,?,90,'2026-11-01T08:30:00.000Z','2026-11-01T08:30:00.000Z','retryable'),(?,?,91,'2026-11-01T09:30:00.000Z','2026-11-01T09:30:00.000Z','delivered')`)
+      .bind(crypto.randomUUID(), automatic.event_id, crypto.randomUUID(), automatic.event_id).run();
+    const local = await api('/delivery-stats?from=2026-11-01T06%3A00%3A00.000Z&to=2026-11-01T12%3A00%3A00.000Z&bucket=hour&tz=America%2FLos_Angeles');
+    assert.equal(local.time_zone, 'America/Los_Angeles');
+    assert.deepEqual(local.buckets.map(item => [item.start.slice(11, 13), item.retried, item.succeeded]),
+      [['06', 0, 0], ['07', 0, 0], ['08', 1, 0], ['09', 0, 1], ['10', 0, 0], ['11', 0, 0]], 'the repeated 01:00 stays two buckets');
+    assert.equal((await mf.dispatchFetch('http://localhost/api/v1/delivery-stats?from=2026-11-01T06%3A00%3A00.000Z&to=2026-11-01T12%3A00%3A00.000Z&tz=Not%2FAZone')).status, 400);
   } finally {
     await mf.dispose();
     await rm(temp, { recursive: true, force: true });

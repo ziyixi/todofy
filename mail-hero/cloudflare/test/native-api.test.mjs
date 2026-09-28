@@ -4,6 +4,7 @@ import { DatabaseSync } from 'node:sqlite'
 import { readFileSync, readdirSync } from 'node:fs'
 import { generateKeyPair, SignJWT } from 'jose'
 import { handleAPI } from '../src/native/api.ts'
+import { MAX_ZONE_SEGMENTS, zoneSegments } from '../src/native/api-delivery-stats.ts'
 import { ROUTE_BLOCK_COOLDOWN_MS, ROUTE_BLOCK_GRACE_MS, ROUTE_BLOCK_MAX_RECHECKS, runJob, runMaintenance } from '../src/native/pipeline.ts'
 import { alertSignals, alertSnapshot } from '../src/native/alerts.ts'
 import { authenticate, decryptCredential, encryptCredential, HttpError } from '../src/native/security.ts'
@@ -100,7 +101,7 @@ async function message(env, options = {}) {
   return id
 }
 
-test('delivery dashboard uses immutable attempt outcomes, UTC windows and distinct-event drill-down', async () => {
+test('delivery dashboard uses immutable attempt outcomes, default UTC windows and distinct-event drill-down', async () => {
   const env = environment(), api = await session(env), target = await endpoint(api)
   const real = await message(env), synthetic = await message(env)
   await env.DB.prepare("UPDATE messages SET origin='synthetic_test' WHERE id=?").bind(synthetic).run()
@@ -165,6 +166,241 @@ test('delivery dashboard uses immutable attempt outcomes, UTC windows and distin
     `/deliveries?${period}&attempt_outcome=constructor`,
     '/deliveries?attempt_outcome=failed',
   ]) assert.equal((await api(invalid)).status, 400, invalid)
+})
+
+// One real-mail event per attempt, so each finished_at is counted exactly once.
+async function attemptsAt(env, api, list) {
+  const target = await endpoint(api), messageID = await message(env)
+  for (const [index, [finished, outcome = 'delivered']] of list.entries()) {
+    const eventID = crypto.randomUUID()
+    await env.DB.prepare(`INSERT INTO deliveries(event_id,message_id,endpoint_revision_id,generation,payload_sha256,state,next_attempt_at,created_at)
+      VALUES(?,?,?,?,'synthetic-hash','delivered',?,?)`).bind(eventID, messageID, target.current_revision_id, index + 1, finished, finished).run()
+    await env.DB.prepare('INSERT INTO delivery_attempts(id,event_id,attempt_no,started_at,finished_at,outcome) VALUES(?,?,1,?,?,?)')
+      .bind(crypto.randomUUID(), eventID, finished, finished, outcome).run()
+  }
+  return messageID
+}
+async function statsText(env, query) {
+  const response = await handleAPI(new Request(`http://127.0.0.1:8787/api/v1/delivery-stats?${query}`), env)
+  return { status: response.status, text: await response.text() }
+}
+const statsQuery = (from, to, extra = {}) => new URLSearchParams({ from, to, ...extra }).toString()
+const counted = ({ start, end, succeeded, retried, failed, unknown }) => ({ start, end, succeeded, retried, failed, unknown })
+// Frozen copy of the UTC-only implementation that predates tz support.
+async function legacyStatsText(env, from, to, bucket) {
+  const step = bucket === 'hour' ? 3_600_000 : 86_400_000, prefixLength = bucket === 'hour' ? 13 : 10
+  const grouped = (await env.DB.prepare(`SELECT substr(a.finished_at,1,${prefixLength}) bucket,
+    sum(a.outcome='delivered') succeeded, sum(a.outcome='retryable') retried,
+    sum(a.outcome IN('rejected','failed')) failed, sum(a.outcome='interrupted') unknown
+    FROM delivery_attempts a JOIN deliveries d ON d.event_id=a.event_id JOIN messages m ON m.id=d.message_id
+    WHERE a.finished_at>=? AND a.finished_at<? AND m.origin='cloudflare'
+      AND a.outcome IN('delivered','retryable','rejected','failed','interrupted')
+    GROUP BY bucket ORDER BY bucket`).bind(from, to).all()).results
+  const byBucket = new Map(grouped.map(row => [row.bucket, { succeeded: Number(row.succeeded), retried: Number(row.retried), failed: Number(row.failed), unknown: Number(row.unknown) }]))
+  const totals = { succeeded: 0, retried: 0, failed: 0, unknown: 0 }, buckets = []
+  for (let start = Math.floor(Date.parse(from) / step) * step; start < Date.parse(to); start += step) {
+    const iso = new Date(start).toISOString(), counts = byBucket.get(iso.slice(0, prefixLength)) ?? { succeeded: 0, retried: 0, failed: 0, unknown: 0 }
+    buckets.push({ start: iso, ...counts })
+    for (const field of ['succeeded', 'retried', 'failed', 'unknown']) totals[field] += counts[field]
+  }
+  return JSON.stringify({ from, to, bucket, totals, buckets })
+}
+
+test('delivery stats without tz stay byte-identical to the former UTC response; tz=UTC only adds end and time_zone', async () => {
+  const env = environment(), api = await session(env)
+  await attemptsAt(env, api, [
+    ['2026-10-30T13:45:10.499Z', 'retryable'], ['2026-10-30T23:59:59.999Z'], ['2026-10-31T00:00:00.000Z', 'rejected'],
+    ['2026-10-31T22:30:00.000Z', 'interrupted'], ['2026-11-01T08:30:00.000Z'], ['2026-11-01T09:30:00.000Z', 'failed'],
+    ['2026-11-01T10:59:59.999Z', 'retryable'], ['2026-11-02T04:59:59.999Z'], ['2026-11-02T05:00:00.000Z'], ['2026-11-01T12:00:00.000Z', 'not_sent'],
+  ])
+  const synthetic = await message(env)
+  await env.DB.prepare("UPDATE messages SET origin='synthetic_test' WHERE id=?").bind(synthetic).run()
+  const cases = [
+    ['2026-10-30T00:00:00.000Z', '2026-11-03T00:00:00.000Z', 'day'],
+    ['2026-10-30T13:45:10.500Z', '2026-11-02T05:00:00.000Z', 'day'],
+    ['2026-11-01T00:00:00.000Z', '2026-11-02T00:00:00.000Z', 'hour'],
+    ['2026-10-31T22:30:00.000Z', '2026-11-01T11:15:00.000Z', 'hour'],
+    ['2026-09-01T00:00:00.000Z', '2026-09-02T00:00:00.000Z', 'day'],
+  ]
+  for (const [from, to, bucket] of cases) {
+    const current = await statsText(env, statsQuery(from, to, { bucket }))
+    assert.equal(current.status, 200)
+    assert.equal(current.text, await legacyStatsText(env, from, to, bucket), `${from} ${bucket}`)
+    const utc = JSON.parse((await statsText(env, statsQuery(from, to, { bucket, tz: 'UTC' }))).text), legacy = JSON.parse(current.text)
+    assert.equal(utc.time_zone, 'UTC')
+    assert.deepEqual(utc.totals, legacy.totals)
+    assert.deepEqual(utc.buckets.map(({ end, ...rest }) => rest), legacy.buckets)
+    assert.deepEqual(utc.buckets.map(item => item.end), [...legacy.buckets.slice(1).map(item => item.start), to])
+  }
+  assert.equal((await statsText(env, statsQuery(cases[0][0], cases[0][1]))).text, await legacyStatsText(env, cases[0][0], cases[0][1], 'day'), 'bucket defaults to day')
+  // Without tz the former limits stay exact: no DST slack.
+  for (const [from, to, bucket, status] of [
+    ['2026-09-01T00:00:00.000Z', '2026-11-30T00:00:00.000Z', 'day', 200], ['2026-09-01T00:00:00.000Z', '2026-11-30T00:00:00.001Z', 'day', 400],
+    ['2026-01-05T00:00:00.000Z', '2026-01-12T00:00:00.000Z', 'hour', 200], ['2026-01-05T00:00:00.000Z', '2026-01-12T00:00:00.001Z', 'hour', 400],
+  ]) assert.equal((await statsText(env, statsQuery(from, to, { bucket }))).status, status, `${from} ${to} ${bucket}`)
+})
+
+test('America/Los_Angeles day buckets follow the 25-hour and 23-hour local days', async () => {
+  const env = environment(), api = await session(env)
+  await attemptsAt(env, api, [
+    ['2026-11-01T06:59:59.999Z'], ['2026-11-01T07:00:00.000Z'], ['2026-11-01T08:30:00.000Z'], ['2026-11-01T09:30:00.000Z', 'failed'],
+    ['2026-11-02T07:30:00.000Z', 'retryable'], ['2026-11-02T08:00:00.000Z'],
+    ['2026-03-08T07:59:59.999Z'], ['2026-03-08T08:00:00.000Z'], ['2026-03-08T10:00:00.000Z', 'interrupted'],
+    ['2026-03-09T06:59:59.999Z'], ['2026-03-09T07:00:00.000Z'],
+  ])
+  const zone = { bucket: 'day', tz: 'America/Los_Angeles' }
+  const fall = JSON.parse((await statsText(env, statsQuery('2026-10-31T07:00:00.000Z', '2026-11-03T08:00:00.000Z', zone))).text)
+  assert.equal(fall.time_zone, 'America/Los_Angeles')
+  assert.deepEqual(fall.totals, { succeeded: 4, retried: 1, failed: 1, unknown: 0 })
+  assert.deepEqual(fall.buckets.map(counted), [
+    { start: '2026-10-31T07:00:00.000Z', end: '2026-11-01T07:00:00.000Z', succeeded: 1, retried: 0, failed: 0, unknown: 0 },
+    { start: '2026-11-01T07:00:00.000Z', end: '2026-11-02T08:00:00.000Z', succeeded: 2, retried: 1, failed: 1, unknown: 0 },
+    { start: '2026-11-02T08:00:00.000Z', end: '2026-11-03T08:00:00.000Z', succeeded: 1, retried: 0, failed: 0, unknown: 0 },
+  ])
+  const spring = JSON.parse((await statsText(env, statsQuery('2026-03-07T08:00:00.000Z', '2026-03-10T07:00:00.000Z', zone))).text)
+  assert.deepEqual(spring.buckets.map(counted), [
+    { start: '2026-03-07T08:00:00.000Z', end: '2026-03-08T08:00:00.000Z', succeeded: 1, retried: 0, failed: 0, unknown: 0 },
+    { start: '2026-03-08T08:00:00.000Z', end: '2026-03-09T07:00:00.000Z', succeeded: 2, retried: 0, failed: 0, unknown: 1 },
+    { start: '2026-03-09T07:00:00.000Z', end: '2026-03-10T07:00:00.000Z', succeeded: 1, retried: 0, failed: 0, unknown: 0 },
+  ])
+  // A range starting mid-day still begins at that local midnight; the last bucket ends at `to`.
+  const partial = JSON.parse((await statsText(env, statsQuery('2026-11-01T12:00:00.000Z', '2026-11-02T12:00:00.000Z', zone))).text)
+  assert.deepEqual(partial.buckets.map(item => [item.start, item.end, item.succeeded + item.retried + item.failed]), [
+    ['2026-11-01T07:00:00.000Z', '2026-11-02T08:00:00.000Z', 1], ['2026-11-02T08:00:00.000Z', '2026-11-02T12:00:00.000Z', 1],
+  ])
+})
+
+test('hour buckets keep the repeated fall-back hour as two local 01:00 buckets and skip the spring-forward hour', async () => {
+  const env = environment(), api = await session(env)
+  await attemptsAt(env, api, [['2026-11-01T08:30:00.000Z'], ['2026-11-01T08:59:59.999Z'], ['2026-11-01T09:00:00.000Z', 'retryable'], ['2026-11-01T09:30:00.000Z'], ['2026-03-08T10:00:00.000Z']])
+  const localHour = new Intl.DateTimeFormat('en-US', { timeZone: 'America/Los_Angeles', hour: '2-digit', hourCycle: 'h23' })
+  const fall = JSON.parse((await statsText(env, statsQuery('2026-11-01T06:00:00.000Z', '2026-11-01T12:00:00.000Z', { bucket: 'hour', tz: 'America/Los_Angeles' }))).text)
+  assert.deepEqual(fall.buckets.map(item => item.start), ['06', '07', '08', '09', '10', '11'].map(hour => `2026-11-01T${hour}:00:00.000Z`))
+  assert.deepEqual(fall.buckets.map(item => localHour.format(new Date(item.start))), ['23', '00', '01', '01', '02', '03'])
+  assert.deepEqual(fall.buckets.map(item => item.succeeded + item.retried), [0, 0, 2, 2, 0, 0])
+  assert.equal(fall.buckets.at(-1).end, '2026-11-01T12:00:00.000Z')
+  const spring = JSON.parse((await statsText(env, statsQuery('2026-03-08T08:00:00.000Z', '2026-03-08T12:00:00.000Z', { bucket: 'hour', tz: 'America/Los_Angeles' }))).text)
+  assert.deepEqual(spring.buckets.map(item => localHour.format(new Date(item.start))), ['00', '01', '03', '04'])
+  assert.deepEqual(spring.buckets.map(item => item.succeeded), [0, 0, 1, 0])
+})
+
+test('half- and quarter-hour zones align hour buckets at :30 and :15 UTC; a 30-minute DST change realigns local hours', async () => {
+  const env = environment(), api = await session(env)
+  await attemptsAt(env, api, [['2026-09-25T00:14:59.999Z'], ['2026-09-25T00:15:00.000Z'], ['2026-09-25T00:29:59.999Z'], ['2026-09-25T00:30:00.000Z']])
+  const hours = tz => statsText(env, statsQuery('2026-09-25T00:00:00.000Z', '2026-09-25T03:00:00.000Z', { bucket: 'hour', tz })).then(result => JSON.parse(result.text))
+  const kolkata = await hours('Asia/Kolkata')
+  assert.deepEqual(kolkata.buckets.map(item => [item.start, item.end, item.succeeded]), [
+    ['2026-09-24T23:30:00.000Z', '2026-09-25T00:30:00.000Z', 3], ['2026-09-25T00:30:00.000Z', '2026-09-25T01:30:00.000Z', 1],
+    ['2026-09-25T01:30:00.000Z', '2026-09-25T02:30:00.000Z', 0], ['2026-09-25T02:30:00.000Z', '2026-09-25T03:00:00.000Z', 0],
+  ])
+  const kathmandu = await hours('Asia/Kathmandu')
+  assert.deepEqual(kathmandu.buckets.map(item => [item.start, item.end, item.succeeded]), [
+    ['2026-09-24T23:15:00.000Z', '2026-09-25T00:15:00.000Z', 1], ['2026-09-25T00:15:00.000Z', '2026-09-25T01:15:00.000Z', 3],
+    ['2026-09-25T01:15:00.000Z', '2026-09-25T02:15:00.000Z', 0], ['2026-09-25T02:15:00.000Z', '2026-09-25T03:00:00.000Z', 0],
+  ])
+  const day = JSON.parse((await statsText(env, statsQuery('2026-09-24T18:30:00.000Z', '2026-09-25T18:30:00.000Z', { tz: 'Asia/Kolkata' }))).text)
+  assert.deepEqual(day.buckets.map(counted), [{ start: '2026-09-24T18:30:00.000Z', end: '2026-09-25T18:30:00.000Z', succeeded: 4, retried: 0, failed: 0, unknown: 0 }])
+  // Lord Howe falls back 30 minutes (02:00 +11 -> 01:30 +10:30): the half hour
+  // after the change is its own bucket and later buckets realign to local :00.
+  await attemptsAt(env, api, [['2026-04-04T14:59:59.999Z'], ['2026-04-04T15:00:00.000Z'], ['2026-04-04T15:29:59.999Z'], ['2026-04-04T15:30:00.000Z']])
+  const lordHowe = JSON.parse((await statsText(env, statsQuery('2026-04-04T13:00:00.000Z', '2026-04-04T17:00:00.000Z', { bucket: 'hour', tz: 'Australia/Lord_Howe' }))).text)
+  assert.deepEqual(lordHowe.buckets.map(item => [item.start.slice(11, 16), item.end.slice(11, 16), item.succeeded]), [
+    ['13:00', '14:00', 0], ['14:00', '15:00', 1], ['15:00', '15:30', 2], ['15:30', '16:30', 1], ['16:30', '17:00', 0],
+  ])
+})
+
+test('an invalid time zone is refused before any query', async () => {
+  const env = environment()
+  let prepared = 0
+  const prepare = env.DB.prepare.bind(env.DB)
+  env.DB.prepare = sql => { prepared++; return prepare(sql) }
+  for (const tz of ['', 'Mars/Olympus_Mons', 'Not/AZone', 'America/Los Angeles', 'America/Los_Angeles;DROP', '../../etc/localtime', 'A'.repeat(65), 'America/Los_Angeles\u0000', '+03:00', 'Etc/Unknown']) {
+    const result = await statsText(env, statsQuery('2026-09-25T00:00:00.000Z', '2026-09-26T00:00:00.000Z', { tz }))
+    assert.equal(result.status, 400, JSON.stringify(tz))
+    assert.deepEqual([JSON.parse(result.text).error.code, JSON.parse(result.text).error.message], ['invalid_time_zone', '时区无效'])
+  }
+  assert.equal(prepared, 0)
+})
+
+test('90 local days across the 2-hour Antarctica/Troll change are accepted, and drill down', async () => {
+  const env = environment(), api = await session(env)
+  await attemptsAt(env, api, [['2026-08-14T21:59:59.999Z'], ['2026-08-14T22:00:00.000Z'], ['2026-10-25T23:59:59.999Z'], ['2026-11-12T23:59:59.999Z'], ['2026-11-13T00:00:00.000Z']])
+  // 2026-08-15 00:00 +02 to 2026-11-13 00:00 +00: 90 local days, 90 days and 2 hours of real time.
+  const [from, to] = ['2026-08-14T22:00:00.000Z', '2026-11-13T00:00:00.000Z']
+  const result = await statsText(env, statsQuery(from, to, { tz: 'Antarctica/Troll' }))
+  assert.equal(result.status, 200, result.text)
+  const stats = JSON.parse(result.text)
+  assert.equal(stats.buckets.length, 90)
+  assert.deepEqual([stats.buckets[0].start, stats.buckets.at(-1).end, stats.totals.succeeded], [from, to, 3])
+  const change = stats.buckets.find(item => item.start === '2026-10-24T22:00:00.000Z')
+  assert.deepEqual([change.end, change.succeeded], ['2026-10-26T00:00:00.000Z', 1])
+  const drill = await api(`/deliveries?${new URLSearchParams({ attempt_outcome: 'succeeded', from, to })}`)
+  assert.deepEqual([drill.status, drill.data.items.length], [200, 3])
+  const over = new Date(Date.parse(to) + 1).toISOString()
+  assert.equal((await statsText(env, statsQuery(from, over, { tz: 'Antarctica/Troll' }))).status, 400)
+  assert.equal((await api(`/deliveries?${new URLSearchParams({ attempt_outcome: 'succeeded', from, to: over })}`)).status, 400)
+})
+
+test('local-time stats keep bound params, Intl calls and the range index bounded', async () => {
+  const env = environment(), api = await session(env)
+  const seeded = []
+  for (let day = 0; day < 90; day += 3) seeded.push([new Date(Date.parse('2026-09-01T12:00:00.000Z') + day * 86_400_000).toISOString(), day % 2 ? 'retryable' : 'delivered'])
+  await attemptsAt(env, api, seeded)
+  const captured = []
+  const prepare = env.DB.prepare.bind(env.DB)
+  env.DB.prepare = sql => {
+    const statement = prepare(sql), bind = statement.bind.bind(statement)
+    statement.bind = (...args) => { if (sql.includes('strftime(')) captured.push({ sql, args }); return bind(...args) }
+    return statement
+  }
+  // 90 local days across the fall-back are 90 days and one hour of real time.
+  const ninety = statsQuery('2026-09-01T07:00:00.000Z', '2026-11-30T08:00:00.000Z', { tz: 'America/Los_Angeles' })
+  const original = Intl.DateTimeFormat.prototype.formatToParts
+  let intlCalls = 0
+  Intl.DateTimeFormat.prototype.formatToParts = function (...args) { intlCalls++; return original.apply(this, args) }
+  let result, fewerRowsCalls
+  const elapsed = []
+  try {
+    result = await statsText(env, ninety)
+    fewerRowsCalls = intlCalls
+    await attemptsAt(env, api, Array.from({ length: 200 }, (_, index) => [new Date(Date.parse('2026-10-01T00:00:00.000Z') + index * 997_000).toISOString()]))
+    intlCalls = 0
+    await statsText(env, ninety)
+    assert.equal(intlCalls, fewerRowsCalls, 'Intl work does not grow with rows')
+    // Wall time per warm request, including node:sqlite, against the 10 ms Free CPU budget.
+    for (let run = 0; run < 30; run++) {
+      const started = performance.now()
+      assert.equal((await statsText(env, ninety)).status, 200)
+      elapsed.push(performance.now() - started)
+    }
+  } finally { Intl.DateTimeFormat.prototype.formatToParts = original }
+  assert.equal(result.status, 200, result.text)
+  const stats = JSON.parse(result.text)
+  assert.equal(stats.buckets.length, 90)
+  const fallBack = stats.buckets.find(item => item.start === '2026-11-01T07:00:00.000Z')
+  assert.equal(Date.parse(fallBack.end) - Date.parse(fallBack.start), 25 * 3_600_000)
+  assert.deepEqual(stats.totals, { succeeded: 15, retried: 15, failed: 0, unknown: 0 })
+  assert.ok(fewerRowsCalls < 500, `Intl calls ${fewerRowsCalls}`)
+  const median = elapsed.toSorted((a, b) => a - b)[15], sum = elapsed.reduce((a, b) => a + b, 0)
+  assert.ok(median < 10 && sum < 300, `ninety-day requests: median ${median.toFixed(2)} ms, 30 runs ${sum.toFixed(1)} ms`)
+  assert.ok(captured.length >= 32 && captured.every(item => item.args.length < 100), JSON.stringify(captured.map(item => item.args.length)))
+  assert.deepEqual(captured[0].args, ['2026-09-01T07:00:00.000Z', '2026-11-30T08:00:00.000Z', '2026-11-01T09:00:00.000Z', '-420 minutes', '-480 minutes'])
+  const plan = env.DB.sqlite.prepare(`EXPLAIN QUERY PLAN ${captured[0].sql}`).all(...captured[0].args)
+  assert.ok(plan.some(row => row.detail.includes('delivery_attempts_finished_idx')), JSON.stringify(plan))
+  // Seven local days of hour buckets that include the fall-back also use the slack.
+  const worst = statsQuery('2026-10-28T07:00:00.000Z', '2026-11-04T08:00:00.000Z', { bucket: 'hour', tz: 'America/Los_Angeles' })
+  assert.equal(JSON.parse((await statsText(env, worst)).text).buckets.length, 7 * 24 + 1)
+  for (const [from, to, bucket] of [['2026-09-01T07:00:00.000Z', '2026-11-30T09:00:00.001Z', 'day'], ['2026-10-28T07:00:00.000Z', '2026-11-04T09:00:00.001Z', 'hour']]) {
+    assert.equal((await statsText(env, statsQuery(from, to, { bucket, tz: 'America/Los_Angeles' }))).status, 400, `${from} ${to}`)
+  }
+  const flipping = { formatToParts: ms => [{ type: 'timeZoneName', value: Math.floor(ms / 86_400_000) % 2 ? 'GMT+01:00' : 'GMT' }] }
+  assert.throws(() => zoneSegments(flipping, Date.parse('2026-09-01T00:00:00.000Z'), Date.parse('2026-09-30T00:00:00.000Z')), error => error instanceof HttpError && error.status === 400)
+  const real = zoneSegments(new Intl.DateTimeFormat('en-US', { timeZone: 'America/Los_Angeles', timeZoneName: 'longOffset' }), Date.parse('2026-03-01T00:00:00.000Z'), Date.parse('2026-11-30T00:00:00.000Z'))
+  assert.deepEqual(real.starts.slice(1).map(ms => new Date(ms).toISOString()), ['2026-03-08T10:00:00.000Z', '2026-11-01T09:00:00.000Z'])
+  assert.deepEqual(real.offsets, [-28800, -25200, -28800])
+  assert.ok(real.starts.length <= MAX_ZONE_SEGMENTS)
+  const fixed = value => zoneSegments({ formatToParts: () => [{ type: 'timeZoneName', value }] }, 0, 86_400_000).offsets
+  assert.deepEqual(['GMT', 'GMT+00:00', 'GMT+05:45', 'GMT-07:52:58', 'GMT−07:00'].map(fixed), [[0], [0], [20700], [-28378], [-25200]])
 })
 
 test('native API defaults are archive with no retention, maintenance blocks mutations only', async () => {

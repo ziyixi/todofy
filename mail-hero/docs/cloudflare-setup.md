@@ -6,7 +6,7 @@ Mail Hero 使用 **Workers Free + D1 + 私有 R2 Standard + SQLite Durable Objec
 
 本地生产配置为 gitignored `cloudflare/wrangler.native.production.toml`；`cloudflare/wrangler.native.toml` 是配置模板。[GitHub Actions](ci-cd.md) 从仓库变量和production secrets生成独立的CI配置并正式发布。以下资源创建和初始化步骤供新环境参考，**现有部署不需要重建资源或重新生成密钥**。完整证据和待验收项见 [验收记录](verification-native.md)。
 
-UI 的投递 Dashboard 可按 UTC 时段查看成功、进入重试、终止失败及结果未确认的 webhook 尝试，并进入对应投递记录。统计单位、时间边界和历史数据的限制见 [投递 Dashboard 统计口径](delivery-dashboard.md)。
+UI 的投递 Dashboard 可按浏览器时区的本地小时或日期查看成功、进入重试、终止失败及结果未确认的 webhook 尝试，并进入对应投递记录。统计单位、时间边界和历史数据的限制见 [投递 Dashboard 统计口径](delivery-dashboard.md)。
 
 ## 1. 免费计划的运行边界
 

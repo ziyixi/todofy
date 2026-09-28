@@ -1,16 +1,22 @@
 import type { Env } from './types.ts'
 import { bad, rows } from './api-common.ts'
-import { json } from './security.ts'
+import { HttpError, json } from './security.ts'
 
-const DAY = 86_400_000
+const MINUTE = 60_000
 const HOUR = 3_600_000
+const DAY = 86_400_000
+const SAMPLE = 6 * HOUR
+// The largest clock change in tzdata (Antarctica/Troll, +00 <-> +02): N local
+// days across a fall-back last up to N days plus this much real time.
+export const DST_SLACK = 2 * HOUR
+export const MAX_ZONE_SEGMENTS = 8
 
 export type DeliveryBucket = 'hour' | 'day'
 export type DeliveryRange = { from: string; to: string; fromMS: number; toMS: number }
 
 function instant(value: string | null): { iso: string; ms: number } {
   // Require an explicit timezone. Date.parse alone also accepts ambiguous local
-  // timestamps, which would make owner-selected UTC ranges vary by location.
+  // timestamps, which would make owner-selected ranges vary by location.
   const parts = value?.match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d{1,3})?(?:Z|[+-]\d{2}:\d{2})$/)
   if (!parts) return bad('时间范围必须为带时区的 ISO 时间')
   const [, yearText, monthText, dayText, hourText, minuteText, secondText] = parts
@@ -23,10 +29,76 @@ function instant(value: string | null): { iso: string; ms: number } {
   return { iso: new Date(ms).toISOString(), ms }
 }
 
-export function deliveryRange(params: URLSearchParams, maxDays = 90): DeliveryRange {
+// maxDays counts local calendar days; the slack admits a range whose local
+// days include a DST fall-back. UTC-only stats callers pass 0, the former limit.
+export function deliveryRange(params: URLSearchParams, maxDays = 90, slack = DST_SLACK): DeliveryRange {
   const from = instant(params.get('from')), to = instant(params.get('to'))
-  if (to.ms <= from.ms || to.ms - from.ms > maxDays * DAY) bad(`时间范围必须大于 0 且不超过 ${maxDays} 天`)
+  if (to.ms <= from.ms || to.ms - from.ms > maxDays * DAY + slack) bad(`时间范围必须大于 0 且不超过 ${maxDays} 天`)
   return { from: from.iso, to: to.iso, fromMS: from.ms, toMS: to.ms }
+}
+
+// A zone over a bounded range is a few constant-offset segments. segment i
+// covers [starts[i], starts[i+1]); offsets are seconds east of UTC. SQL and the
+// bucket list both derive local time from these, never from per-row Intl calls.
+export type ZoneSegments = { starts: number[]; offsets: number[] }
+type OffsetFormat = Pick<Intl.DateTimeFormat, 'formatToParts'>
+
+// A distinct code lets the dashboard fall back to UTC instead of failing.
+const badZone = (message = '时区无效'): never => { throw new HttpError(400, 'invalid_time_zone', message) }
+function zoneFormat(tz: string): Intl.DateTimeFormat {
+  if (tz.length > 64 || !/^[A-Za-z0-9_+\-/]+$/.test(tz)) badZone()
+  try { return new Intl.DateTimeFormat('en-US', { timeZone: tz, timeZoneName: 'longOffset' }) } catch { return badZone() }
+}
+
+function offsetAt(format: OffsetFormat, ms: number): number {
+  const name = format.formatToParts(ms).find(part => part.type === 'timeZoneName')?.value ?? ''
+  const parts = name.match(/^(?:GMT|UTC)(?:([+\-\u2212])(\d{1,2})(?::(\d{2}))?(?::(\d{2}))?)?$/)
+  if (!parts) return badZone()
+  const seconds = Number(parts[2] ?? 0) * 3600 + Number(parts[3] ?? 0) * 60 + Number(parts[4] ?? 0)
+  return parts[1] && parts[1] !== '+' ? -seconds : seconds
+}
+
+// Sample every 6 h and binary-search each change to the minute: O(range/6 h +
+// changes x 9) Intl calls. A zone with more changes than the cap is refused.
+export function zoneSegments(format: OffsetFormat, fromMS: number, toMS: number): ZoneSegments {
+  const first = Math.floor(fromMS / MINUTE) * MINUTE, last = Math.ceil(toMS / MINUTE) * MINUTE
+  const starts = [-Infinity], offsets = [offsetAt(format, first)]
+  let known = first, sample = first
+  while (sample < last) {
+    sample = Math.min(sample + SAMPLE, last)
+    const sampled = offsetAt(format, sample)
+    while (sampled !== offsets.at(-1)) {
+      let low = known, high = sample, highOffset = sampled
+      while (high - low > MINUTE) {
+        const middle = low + Math.floor((high - low) / MINUTE / 2) * MINUTE, offset = offsetAt(format, middle)
+        if (offset === offsets.at(-1)) low = middle
+        else { high = middle; highOffset = offset }
+      }
+      if (starts.length >= MAX_ZONE_SEGMENTS) badZone('所选时段内时区偏移变化过多')
+      starts.push(high); offsets.push(highOffset); known = high
+    }
+    known = sample
+  }
+  return { starts, offsets }
+}
+
+function segmentAt(zone: ZoneSegments, ms: number): number {
+  let index = 0
+  while (index + 1 < zone.starts.length && zone.starts[index + 1] <= ms) index++
+  return index
+}
+// SQLite date modifier for an offset; LMT-era offsets can carry seconds.
+function shift(offset: number): string {
+  const sign = offset < 0 ? '-' : '+', size = Math.abs(offset)
+  return size % 60 === 0 ? `${sign}${size / 60} minutes` : `${sign}${size} seconds`
+}
+// First instant whose local wall clock is at or after `wall`: the local
+// midnight itself, or the first valid instant when DST skips it.
+function localStart(zone: ZoneSegments, wall: number): number {
+  for (let index = 0; ; index++) {
+    const at = Math.max(zone.starts[index], wall - zone.offsets[index] * 1000)
+    if (index + 1 === zone.starts.length || at < zone.starts[index + 1]) return at
+  }
 }
 
 type Counts = { succeeded: number; retried: number; failed: number; unknown: number }
@@ -36,30 +108,59 @@ export async function deliveryStats(request: Request, env: Env): Promise<Respons
   const params = new URL(request.url).searchParams
   const bucket = params.get('bucket') ?? 'day'
   if (bucket !== 'hour' && bucket !== 'day') bad('bucket 只能为 hour 或 day')
-  const range = deliveryRange(params, bucket === 'hour' ? 7 : 90)
-  const step = bucket === 'hour' ? HOUR : DAY
-  const prefixLength = bucket === 'hour' ? 13 : 10
-  const grouped = await rows(env, `SELECT substr(a.finished_at,1,${prefixLength}) bucket,
+  // An old cached UI sends no tz and receives exactly the former UTC response.
+  const legacy = !params.has('tz'), tz = params.get('tz') ?? 'UTC'
+  const format = zoneFormat(tz)
+  const range = deliveryRange(params, bucket === 'hour' ? 7 : 90, legacy ? 0 : DST_SLACK)
+  const zone = zoneSegments(format, range.fromMS - 2 * DAY, range.toMS)
+  const firstSegment = segmentAt(zone, range.fromMS), lastSegment = segmentAt(zone, range.toMS - 1)
+  const binds: string[] = [range.from, range.to]
+  let cases = ''
+  for (let index = firstSegment; index < lastSegment; index++) {
+    binds.push(new Date(zone.starts[index + 1]).toISOString(), shift(zone.offsets[index]))
+    cases += ` WHEN a.finished_at<?${binds.length - 1} THEN ?${binds.length}`
+  }
+  binds.push(shift(zone.offsets[lastSegment]))
+  const modifier = cases ? `CASE${cases} ELSE ?${binds.length} END` : `?${binds.length}`
+  // An hour key carries its offset, so a repeated fall-back hour stays two buckets.
+  const key = bucket === 'hour' ? `strftime('%Y-%m-%dT%H',a.finished_at,${modifier})||'|'||${modifier}` : `strftime('%Y-%m-%d',a.finished_at,${modifier})`
+  const grouped = await rows(env, `SELECT ${key} bucket,
     sum(a.outcome='delivered') succeeded,
     sum(a.outcome='retryable') retried,
     sum(a.outcome IN('rejected','failed')) failed,
     sum(a.outcome='interrupted') unknown
     FROM delivery_attempts a JOIN deliveries d ON d.event_id=a.event_id
     JOIN messages m ON m.id=d.message_id
-    WHERE a.finished_at>=? AND a.finished_at<? AND m.origin='cloudflare'
+    WHERE a.finished_at>=?1 AND a.finished_at<?2 AND m.origin='cloudflare'
       AND a.outcome IN('delivered','retryable','rejected','failed','interrupted')
-    GROUP BY bucket ORDER BY bucket`, range.from, range.to)
-  const byBucket = new Map<string, Counts>()
-  for (const row of grouped) byBucket.set(row.bucket, {
-    succeeded: Number(row.succeeded), retried: Number(row.retried),
-    failed: Number(row.failed), unknown: Number(row.unknown),
-  })
-  const totals = zero(), buckets: Array<{ start: string } & Counts> = []
-  for (let start = Math.floor(range.fromMS / step) * step; start < range.toMS; start += step) {
-    const iso = new Date(start).toISOString()
-    const key = iso.slice(0, prefixLength), counts = byBucket.get(key) ?? zero()
-    buckets.push({ start: iso, ...counts })
+    GROUP BY bucket ORDER BY bucket`, ...binds)
+  const totals = zero(), byBucket = new Map<string, Counts>()
+  for (const row of grouped) {
+    const counts = { succeeded: Number(row.succeeded), retried: Number(row.retried), failed: Number(row.failed), unknown: Number(row.unknown) }
+    byBucket.set(row.bucket, counts)
     for (const field of ['succeeded', 'retried', 'failed', 'unknown'] as const) totals[field] += counts[field]
   }
-  return json({ from: range.from, to: range.to, bucket, totals, buckets })
+  const starts: Array<{ at: number; key: string }> = []
+  const wall = (ms: number) => ms + zone.offsets[segmentAt(zone, ms)] * 1000
+  if (bucket === 'day') {
+    for (let day = Math.floor(wall(range.fromMS) / DAY), last = Math.floor(wall(range.toMS - 1) / DAY); day <= last; day++) {
+      starts.push({ at: localStart(zone, day * DAY), key: new Date(day * DAY).toISOString().slice(0, 10) })
+    }
+  } else {
+    // Local hour boundaries inside each segment, plus the segment start itself.
+    for (let index = firstSegment; index <= lastSegment; index++) {
+      const offset = zone.offsets[index] * 1000, end = Math.min(zone.starts[index + 1] ?? Infinity, range.toMS)
+      let at = index === firstSegment ? Math.max(zone.starts[index], Math.floor((range.fromMS + offset) / HOUR) * HOUR - offset) : zone.starts[index]
+      for (; at < end; at = Math.floor((at + offset) / HOUR) * HOUR + HOUR - offset) {
+        starts.push({ at, key: `${new Date(at + offset).toISOString().slice(0, 13)}|${shift(zone.offsets[index])}` })
+      }
+    }
+  }
+  const buckets = starts.map(({ at, key }, index) => {
+    const counts = byBucket.get(key) ?? zero(), start = new Date(at).toISOString()
+    byBucket.delete(key)
+    return legacy ? { start, ...counts } : { start, end: new Date(starts[index + 1]?.at ?? range.toMS).toISOString(), ...counts }
+  })
+  return json(legacy ? { from: range.from, to: range.to, bucket, totals, buckets }
+    : { from: range.from, to: range.to, bucket, time_zone: tz, totals, buckets })
 }

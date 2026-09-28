@@ -82,6 +82,18 @@ export function formatDate(value?: string | null): string {
   if (date.getUTCFullYear() < 1970) return '—'
   return new Intl.DateTimeFormat('zh-CN', { dateStyle: 'medium', timeStyle: 'short' }).format(date)
 }
+// A zone's short name at `date` (the browser zone unless timeZone is given):
+// PDT/PST for US zones, GMT+8 style elsewhere.
+export function zoneAbbreviation(date: Date, timeZone?: string): string {
+  return new Intl.DateTimeFormat('en-US', { timeZone, timeZoneName: 'short' }).formatToParts(date).find(part => part.type === 'timeZoneName')?.value ?? ''
+}
+// An exact instant in the browser's zone (or timeZone), with the abbreviation that applied then.
+export function formatInstant(value: string, timeZone?: string): string {
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return value
+  const zone = zoneAbbreviation(date, timeZone)
+  return `${new Intl.DateTimeFormat('zh-CN', { timeZone, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(date)}${zone ? ` ${zone}` : ''}`
+}
 export function formatBytes(value?: number | null): string {
   if (value === undefined || value === null) return '—'
   if (value < 1024) return `${value} B`
