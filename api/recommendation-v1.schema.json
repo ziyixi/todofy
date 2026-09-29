@@ -1,0 +1,72 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://todofy.local/schema/recommendation-v1.schema.json",
+  "$comment": "Self-contained on purpose (no $defs or $ref): openapi-typescript hoists those into the owner API's component namespace.",
+  "title": "Todofy GET /api/recommendation response",
+  "description": "The ranked tasks the newsletter reads (it asks for ?top=10). tasks, model and task_count are the Go service's fields (handle_recommendation.go @ 6c46ed4); model is now a model name rather than a proto enum name, and unparsable model output is reported as status model_output_invalid with no tasks instead of being passed through as a fake task. Fields may be added, never removed or retyped, so consumers must ignore unknown fields. The limits are the newsletter's acceptance rules (newsletter src/newsletter/todofy.py _decode_recommendation), so any response that validates is one the newsletter accepts. Ranks are unique, which JSON Schema cannot express.",
+  "type": "object",
+  "required": ["tasks", "model", "task_count", "status", "top_n", "computed_at", "window_start", "window_end"],
+  "additionalProperties": false,
+  "properties": {
+    "tasks": {
+      "description": "Exactly what the Worker accepted from Gemini (JSON output constrained by the responseSchema from core/report_schema.py), ordered by rank. At most top_n items with ranks 1..top_n; fewer, even none, is valid and never padded.",
+      "type": "array",
+      "maxItems": 10,
+      "items": {
+        "type": "object",
+        "required": ["rank", "title", "reason"],
+        "additionalProperties": false,
+        "properties": {
+          "rank": {"type": "integer", "minimum": 1, "maximum": 10},
+          "title": {
+            "description": "Not blank; no control characters other than tab, line feed and carriage return.",
+            "type": "string",
+            "maxLength": 200,
+            "pattern": "^[^\\u0000-\\u0008\\u000b\\u000c\\u000e-\\u001f\\u007f]*$",
+            "allOf": [{"pattern": "\\S"}]
+          },
+          "reason": {
+            "description": "Same rules as title.",
+            "type": "string",
+            "maxLength": 4000,
+            "pattern": "^[^\\u0000-\\u0008\\u000b\\u000c\\u000e-\\u001f\\u007f]*$",
+            "allOf": [{"pattern": "\\S"}]
+          }
+        }
+      }
+    },
+    "model": {"description": "Gemini model name; empty when no model was called.", "type": "string"},
+    "task_count": {"description": "Summaries in the window.", "type": "integer", "minimum": 0, "maximum": 1000000},
+    "status": {
+      "description": "stale: no report from the last 26 hours and the on-demand run did not finish within its budget, so an older stored report is served.",
+      "enum": ["ok", "empty_window", "model_output_invalid", "stale"]
+    },
+    "top_n": {"type": "integer", "minimum": 1, "maximum": 10},
+    "computed_at": {
+      "description": "UTC RFC 3339 with whole seconds, like every timestamp here.",
+      "type": "string",
+      "format": "date-time",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$"
+    },
+    "window_start": {"type": "string", "format": "date-time", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$"},
+    "window_end": {"type": "string", "format": "date-time", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$"}
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"task_count": {"const": 0}}},
+      "then": {"properties": {"tasks": {"maxItems": 0}}}
+    },
+    {
+      "if": {"properties": {"status": {"const": "ok"}}},
+      "then": {"properties": {"task_count": {"minimum": 1}}}
+    },
+    {
+      "if": {"properties": {"status": {"const": "empty_window"}}},
+      "then": {"properties": {"task_count": {"const": 0}}}
+    },
+    {
+      "if": {"properties": {"status": {"const": "model_output_invalid"}}},
+      "then": {"properties": {"tasks": {"maxItems": 0}}}
+    }
+  ]
+}

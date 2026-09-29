@@ -1,0 +1,10 @@
+**FROM: fa-jian-ren@example.org**
+**DATE: 2026-09-24T01:02:03Z**
+**RECEIVED: **
+**SUBJECT: 季度报告已准备好 🙂**
+
+========================
+这是一封合成测试邮件的摘要。
+请在周五前回复。
+
+Mail Hero event: f8c1e9a0-1a98-4fb8-8ca1-4c0a3e710011

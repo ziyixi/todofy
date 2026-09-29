@@ -1,0 +1,34 @@
+Todofy 的 Mail Hero 收件箱有 25 个事件需要处理（UTC 2026-09-27）：
+
+- f8c1e9a0-1a98-4fb8-8ca1-4c0a3e710400 · failed_summary · summary_failed · 收到 2026-09-27T11:10:00Z
+- f8c1e9a0-1a98-4fb8-8ca1-4c0a3e710401 · failed_summary · mail_needs_review · 收到 2026-09-27T11:11:00Z
+- f8c1e9a0-1a98-4fb8-8ca1-4c0a3e710402 · failed_summary · processing_interrupted_limit · 收到 2026-09-27T11:12:00Z
+- f8c1e9a0-1a98-4fb8-8ca1-4c0a3e710403 · failed_summary · - · 收到 2026-09-27T11:13:00Z
+- f8c1e9a0-1a98-4fb8-8ca1-4c0a3e710404 · failed_summary · summary_failed · 收到 2026-09-27T11:14:00Z
+- f8c1e9a0-1a98-4fb8-8ca1-4c0a3e710405 · failed_summary · mail_needs_review · 收到 2026-09-27T11:15:00Z
+- f8c1e9a0-1a98-4fb8-8ca1-4c0a3e710406 · failed_summary · processing_interrupted_limit · 收到 2026-09-27T11:16:00Z
+- f8c1e9a0-1a98-4fb8-8ca1-4c0a3e710407 · failed_summary · - · 收到 2026-09-27T11:17:00Z
+- f8c1e9a0-1a98-4fb8-8ca1-4c0a3e710408 · failed_summary · summary_failed · 收到 2026-09-27T11:18:00Z
+- f8c1e9a0-1a98-4fb8-8ca1-4c0a3e710409 · failed_summary · mail_needs_review · 收到 2026-09-27T11:19:00Z
+- f8c1e9a0-1a98-4fb8-8ca1-4c0a3e710410 · failed_summary · processing_interrupted_limit · 收到 2026-09-27T11:20:00Z
+- f8c1e9a0-1a98-4fb8-8ca1-4c0a3e710411 · failed_summary · - · 收到 2026-09-27T11:21:00Z
+- f8c1e9a0-1a98-4fb8-8ca1-4c0a3e710412 · failed_summary · summary_failed · 收到 2026-09-27T11:22:00Z
+- f8c1e9a0-1a98-4fb8-8ca1-4c0a3e710413 · failed_summary · mail_needs_review · 收到 2026-09-27T11:23:00Z
+- f8c1e9a0-1a98-4fb8-8ca1-4c0a3e710414 · failed_summary · processing_interrupted_limit · 收到 2026-09-27T11:24:00Z
+- f8c1e9a0-1a98-4fb8-8ca1-4c0a3e710415 · failed_summary · - · 收到 2026-09-27T11:25:00Z
+- f8c1e9a0-1a98-4fb8-8ca1-4c0a3e710416 · failed_summary · summary_failed · 收到 2026-09-27T11:26:00Z
+- f8c1e9a0-1a98-4fb8-8ca1-4c0a3e710417 · failed_summary · mail_needs_review · 收到 2026-09-27T11:27:00Z
+- f8c1e9a0-1a98-4fb8-8ca1-4c0a3e710418 · failed_summary · processing_interrupted_limit · 收到 2026-09-27T11:28:00Z
+- f8c1e9a0-1a98-4fb8-8ca1-4c0a3e710419 · failed_summary · - · 收到 2026-09-27T11:29:00Z
+- … 另有 5 条
+
+处理方法：
+1. 用 Todofy 的 BasicAuth 调用 `GET /api/v1/mail_inbox?view=attention` 查看全部待处理事件。
+2. 逐条调用 `POST /api/v1/mail_inbox/<event_id>/reconcile`，请求头 `X-Todofy-Admin-Action: reconcile-mail-inbox`，JSON 含 `event_id` 和 `resolution`：
+   - `task_created`：Todoist 已有含 `Mail Hero event: <event_id>` 的任务，同时提供 `task_id`；
+   - `task_not_created`：已确认没有任务，需 `confirmed_no_task: true`，会重新创建任务；
+   - `retry_summary`：重新摘要 `failed_summary` 事件；
+   - `dismiss`：放弃 `failed_summary` 或 `todo_unknown` 事件，需 `confirmed_dismiss: true`。
+3. 超过 6 小时仍在处理中的事件多半仍在自动重试，可先查看错误码。
+
+此提醒每个 UTC 日最多创建一次。

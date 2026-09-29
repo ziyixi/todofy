@@ -1,0 +1,10 @@
+**FROM: sender@example.org**
+**DATE: 2026-09-23T15:30:15Z**
+**RECEIVED: owner@example.org**
+**SUBJECT: Quarterly report ready**
+
+========================
+Synthetic summary line one.
+Second line with numbers 12345.
+
+Mail Hero event: f8c1e9a0-1a98-4fb8-8ca1-4c0a3e710001

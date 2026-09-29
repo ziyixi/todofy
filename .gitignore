@@ -1,3 +1,15 @@
 coverage.out
 coverage.html
 .gocache/
+
+# Cloudflare Worker toolchain
+node_modules/
+.venv/
+.venv-workers/
+python_modules/
+.wrangler/
+.dev.vars*
+uiassets/dist/
+wrangler.production.ci.json
+__pycache__/
+.pytest_cache/

@@ -1,0 +1,11 @@
+**FROM: **
+**DATE: 2026-09-25T10:20:30Z**
+**RECEIVED: owner@example.org**
+**SUBJECT:    **
+
+========================
+正文不完整：原文 300000 bytes，仅收到前 10 bytes，摘要可能遗漏尾部内容。
+
+只收到正文前部的合成摘要。
+
+Mail Hero event: f8c1e9a0-1a98-4fb8-8ca1-4c0a3e710021

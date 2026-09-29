@@ -1,0 +1,915 @@
+openapi: 3.1.0
+info:
+  title: Todofy API
+  version: 1.0.0
+  summary: Owner UI API and machine endpoints of the Todofy Worker.
+  description: |
+    One Worker routes by `Host`; any other host gets 404 `not_found`.
+
+    - Owner host (`TODOFY_PUBLIC_HOST`): the React UI and `/api/v1/*`. Cloudflare Access
+      covers the whole hostname, and the Worker re-verifies the Access JWT on every request,
+      static assets included (RS256, issuer, audience, expiry, and an email equal to
+      `ACCESS_OWNER` or one of `ACCESS_OWNER_ALIASES`). Every POST also needs an `Origin`
+      equal to the owner origin and the signed double-submit CSRF token from `/api/v1/csrf`.
+      With `MAINTENANCE_MODE=true` every POST returns 503 `maintenance`.
+    - Machine hosts (each name in `TODOFY_HOOKS_HOSTS`): exactly `POST /hooks/mail`,
+      `GET /api/summary`, `GET /api/recommendation` and `GET /health`, outside Access.
+
+    Timestamps are UTC RFC 3339 with whole seconds. Every error body is `Error`. Lists are
+    keyset-paginated: send `next_cursor` back as `cursor` until it is null. The ledger
+    enums equal `worker/todofy/core/vocab.py`; values in the schemas marked `x-legacy`
+    only appear on rows imported from the retired Go service.
+jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
+servers:
+  - url: https://{publicHost}
+    description: Owner host (TODOFY_PUBLIC_HOST).
+    variables:
+      publicHost:
+        default: todofy.ziyixi.science
+security:
+  - accessJwt: []
+  - accessCookie: []
+tags:
+  - name: owner
+    description: Owner UI API on the owner host.
+  - name: machine
+    description: Mail Hero webhook, newsletter reports and health on the machine hosts.
+
+paths:
+  /api/v1/csrf:
+    get:
+      operationId: getCsrfToken
+      tags: [owner]
+      summary: Issue a CSRF token and set the matching todofy_csrf cookie.
+      responses:
+        '200':
+          description: The token to send as `X-CSRF-Token`; valid for 12 hours.
+          headers:
+            Set-Cookie:
+              description: '`todofy_csrf=<token>; Path=/; HttpOnly; SameSite=Strict; Secure; Max-Age=43200`'
+              schema: {type: string}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Csrf'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '503': {$ref: '#/components/responses/Unavailable'}
+
+  /api/v1/overview:
+    get:
+      operationId: getOverview
+      tags: [owner]
+      summary: Counters, flags and budgets for the shell and status banner.
+      description: Only active rows are counted, so the cost does not grow with the ledger. The UI refreshes it every five minutes.
+      responses:
+        '200':
+          description: Current overview.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Overview'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '503': {$ref: '#/components/responses/Unavailable'}
+
+  /api/v1/events:
+    get:
+      operationId: listEvents
+      tags: [owner]
+      summary: List ledger events, newest first (recent) or oldest first (attention).
+      parameters:
+        - name: view
+          in: query
+          schema:
+            type: string
+            enum: [recent, attention]
+            default: recent
+        - name: state
+          in: query
+          description: Only with view=recent; combining it with view=attention is 400 `invalid_request`.
+          schema: {$ref: '#/components/schemas/EventState'}
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: One page of events. Never includes mail content.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/EventPage'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '503': {$ref: '#/components/responses/Unavailable'}
+
+  /api/v1/events/{event_id}:
+    get:
+      operationId: getEvent
+      tags: [owner]
+      summary: One event with its content preview, allowed actions and timeline.
+      parameters:
+        - $ref: '#/components/parameters/EventId'
+      responses:
+        '200':
+          description: The event.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/EventDetail'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '503': {$ref: '#/components/responses/Unavailable'}
+
+  /api/v1/events/{event_id}/reconcile:
+    post:
+      operationId: reconcileEvent
+      tags: [owner]
+      summary: Apply an owner reconcile action.
+      description: |
+        The action must be in the event's `allowed_actions` and `version` must equal the
+        stored version. A replay with the same `action_request_id` and the same request
+        returns the stored outcome; the same id with a different request is 409
+        `action_request_conflict`. The response shows the committed transition; any
+        follow-up work (lookup, summary, task creation) runs later in the Worker.
+      security:
+        - accessJwt: []
+          csrfToken: []
+          csrfCookie: []
+        - accessCookie: []
+          csrfToken: []
+          csrfCookie: []
+      parameters:
+        - $ref: '#/components/parameters/EventId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/ReconcileRequest'}
+      responses:
+        '200':
+          description: The event after the transition.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/EventDetail'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/CsrfFailed'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {$ref: '#/components/responses/Conflict'}
+        '503': {$ref: '#/components/responses/Unavailable'}
+
+  /api/v1/reminders:
+    get:
+      operationId: listReminders
+      tags: [owner]
+      summary: Daily reminder rows, newest UTC day first.
+      parameters:
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: One page of reminders.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ReminderPage'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '503': {$ref: '#/components/responses/Unavailable'}
+
+  /api/v1/reports/latest:
+    get:
+      operationId: getLatestReports
+      tags: [owner]
+      summary: The stored reports exactly as the newsletter endpoints return them.
+      responses:
+        '200':
+          description: Latest reports.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ReportsLatest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '503': {$ref: '#/components/responses/Unavailable'}
+
+  /api/v1/reports/recompute:
+    post:
+      operationId: recomputeReport
+      tags: [owner]
+      summary: Recompute one report now (calls Gemini unless the window is empty).
+      description: Shares the hourly report-computation cap with the newsletter endpoints; over it the answer is 429 `rate_limited`.
+      security:
+        - accessJwt: []
+          csrfToken: []
+          csrfCookie: []
+        - accessCookie: []
+          csrfToken: []
+          csrfCookie: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/RecomputeRequest'}
+      responses:
+        '200':
+          description: The stored report.
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: './summary-v1.schema.json'
+                  - $ref: './recommendation-v1.schema.json'
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/CsrfFailed'}
+        '409': {$ref: '#/components/responses/Conflict'}
+        '429': {$ref: '#/components/responses/TooManyRequests'}
+        '503': {$ref: '#/components/responses/Unavailable'}
+
+  /api/v1/legacy_text/{event_id}:
+    get:
+      operationId: getLegacyText
+      tags: [owner]
+      summary: Full mail text imported from the retired Go cache.
+      parameters:
+        - name: event_id
+          in: path
+          required: true
+          description: A ledger event ID, or `legacy:<hash>` for an imported summary with no ledger event.
+          schema:
+            anyOf:
+              - $ref: '#/components/schemas/EventId'
+              - {type: string, pattern: '^legacy:[0-9A-Za-z-]{1,128}$'}
+      responses:
+        '200':
+          description: The text.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/LegacyText'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '503': {$ref: '#/components/responses/Unavailable'}
+
+  /api/v1/setup:
+    get:
+      operationId: getSetup
+      tags: [owner]
+      summary: Integration facts for the setup page; never secret values.
+      responses:
+        '200':
+          description: Setup facts.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Setup'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '503': {$ref: '#/components/responses/Unavailable'}
+
+  /hooks/mail:
+    servers: &machine-hosts
+      - url: https://{hooksHost}
+        description: Any host listed in TODOFY_HOOKS_HOSTS.
+        variables:
+          hooksHost:
+            default: todofy-hooks.ziyixi.science
+            enum: [todofy-hooks.ziyixi.science, daily.ziyixi.science]
+    post:
+      operationId: receiveMail
+      tags: [machine]
+      summary: Accept one Mail Hero mail.received.v1 event.
+      description: |
+        204 is sent only after the event is committed to D1. Replaying the same bytes is
+        204 again without new work, even for ledger rows imported from the Go service;
+        the same `event_id` with different bytes is 409.
+      security:
+        - mailWebhook: []
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          description: Exactly one header, byte-equal to the body's `event_id`; otherwise 400.
+          schema: {type: string, format: uuid}
+      requestBody:
+        required: true
+        description: At most 1 MiB, sent with `Content-Length`.
+        content:
+          application/json:
+            schema: {$ref: './mail-received-v1.schema.json'}
+      responses:
+        '204': {description: Stored, or already stored with identical bytes.}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '409': {$ref: '#/components/responses/Conflict'}
+        '411': {$ref: '#/components/responses/LengthRequired'}
+        '413': {$ref: '#/components/responses/PayloadTooLarge'}
+        '415': {$ref: '#/components/responses/UnsupportedMediaType'}
+        '503': {$ref: '#/components/responses/Unavailable'}
+
+  /api/summary:
+    servers: *machine-hosts
+    get:
+      operationId: getDailySummary
+      tags: [machine]
+      summary: The daily summary for the newsletter.
+      security:
+        - reportBasic: []
+      responses:
+        '200':
+          description: The latest summary (precomputed daily; on demand when older than 26 hours).
+          content:
+            application/json:
+              schema: {$ref: './summary-v1.schema.json'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '429': {$ref: '#/components/responses/TooManyRequests'}
+        '503': {$ref: '#/components/responses/Unavailable'}
+
+  /api/recommendation:
+    servers: *machine-hosts
+    get:
+      operationId: getRecommendation
+      tags: [machine]
+      summary: The ranked tasks for the newsletter.
+      security:
+        - reportBasic: []
+      parameters:
+        - name: top
+          in: query
+          description: Absent or empty means 3. Like the Go service, a sign and leading zeros are accepted.
+          schema: {type: integer, minimum: 1, maximum: 10, default: 3}
+      responses:
+        '200':
+          description: The latest recommendation for `top` (precomputed daily; on demand when older than 26 hours).
+          content:
+            application/json:
+              schema: {$ref: './recommendation-v1.schema.json'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '429': {$ref: '#/components/responses/TooManyRequests'}
+        '503': {$ref: '#/components/responses/Unavailable'}
+
+  /health:
+    servers: *machine-hosts
+    get:
+      operationId: getHealth
+      tags: [machine]
+      summary: The deployed build, for the post-deploy check.
+      security: []
+      responses:
+        '200':
+          description: The Worker is serving.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Health'}
+
+components:
+  securitySchemes:
+    accessJwt:
+      type: apiKey
+      in: header
+      name: Cf-Access-Jwt-Assertion
+      description: Cloudflare Access JWT, re-verified by the Worker.
+    accessCookie:
+      type: apiKey
+      in: cookie
+      name: CF_Authorization
+      description: The same Access JWT as a cookie, used by the browser.
+    csrfToken:
+      type: apiKey
+      in: header
+      name: X-CSRF-Token
+      description: Token from GET /api/v1/csrf; must equal the todofy_csrf cookie and be signed for the owner.
+    csrfCookie:
+      type: apiKey
+      in: cookie
+      name: todofy_csrf
+    mailWebhook:
+      type: http
+      scheme: bearer
+      description: Its SHA-256 must equal MAIL_WEBHOOK_TOKEN_SHA256 or, during rotation, MAIL_WEBHOOK_TOKEN_SHA256_PREVIOUS.
+    reportBasic:
+      type: http
+      scheme: basic
+      description: The SHA-256 of `user:password` must be one of REPORT_BASIC_AUTH_SHA256. After 20 failures in a UTC hour the rest of that hour is 429.
+
+  parameters:
+    EventId:
+      name: event_id
+      in: path
+      required: true
+      schema: {$ref: '#/components/schemas/EventId'}
+    Cursor:
+      name: cursor
+      in: query
+      description: Opaque `next_cursor` from the previous page.
+      schema: {type: string, maxLength: 256}
+    Limit:
+      name: limit
+      in: query
+      schema: {type: integer, minimum: 1, maximum: 100, default: 50}
+
+  headers:
+    RetryAfter:
+      description: Seconds to wait before retrying.
+      schema: {type: integer, minimum: 0}
+
+  responses:
+    BadRequest:
+      description: '`invalid_request` (query or body) or `invalid_payload` (webhook contract or Idempotency-Key).'
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/Error'}
+    Unauthorized:
+      description: '`unauthorized`: missing or invalid Access JWT, Bearer token or Basic credentials.'
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/Error'}
+    CsrfFailed:
+      description: '`csrf_failed`: wrong Origin, or missing or invalid CSRF token. Fetch a new token and retry.'
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/Error'}
+    NotFound:
+      description: '`not_found`.'
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/Error'}
+    Conflict:
+      description: '`event_conflict`, `version_conflict`, `action_not_allowed` or `action_request_conflict`.'
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/Error'}
+    LengthRequired:
+      description: '`length_required`.'
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/Error'}
+    PayloadTooLarge:
+      description: '`payload_too_large`: over 1 MiB.'
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/Error'}
+    UnsupportedMediaType:
+      description: '`unsupported_media_type`: not application/json.'
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/Error'}
+    TooManyRequests:
+      description: '`rate_limited`.'
+      headers:
+        Retry-After: {$ref: '#/components/headers/RetryAfter'}
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/Error'}
+    Unavailable:
+      description: '`maintenance`, `not_configured`, `access_not_configured` or `unavailable` (D1, the coordinator or a needed report is unavailable).'
+      headers:
+        Retry-After: {$ref: '#/components/headers/RetryAfter'}
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/Error'}
+
+  schemas:
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message, request_id]
+          properties:
+            code: {$ref: '#/components/schemas/ApiErrorCode'}
+            message:
+              type: string
+              description: Short Chinese text for the UI; never mail content or upstream response bodies.
+            request_id:
+              type: string
+              description: Quote it when reporting a problem; it appears in the Worker logs.
+      examples:
+        - error: {code: version_conflict, message: 事件已被更新，请刷新后重试, request_id: 8c3f0e6d2a1b4c5d}
+
+    ApiErrorCode:
+      type: string
+      enum:
+        - invalid_request
+        - invalid_payload
+        - unauthorized
+        - csrf_failed
+        - not_found
+        - event_conflict
+        - version_conflict
+        - action_not_allowed
+        - action_request_conflict
+        - length_required
+        - payload_too_large
+        - unsupported_media_type
+        - rate_limited
+        - internal_error
+        - maintenance
+        - not_configured
+        - access_not_configured
+        - unavailable
+
+    Timestamp:
+      type: string
+      format: date-time
+      pattern: '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$'
+
+    EventId:
+      description: Mail Hero event ID.
+      type: string
+      format: uuid
+      pattern: '^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}$'
+
+    EventState:
+      type: string
+      enum: [pending, summarizing, summarized, todo_sending, todo_unknown, todo_created, complete, ignored, failed_summary]
+
+    EventErrorCode:
+      anyOf:
+        - $ref: '#/components/schemas/CurrentEventErrorCode'
+        - $ref: '#/components/schemas/LegacyEventErrorCode'
+    CurrentEventErrorCode:
+      type: string
+      enum:
+        - mail_needs_review
+        - summary_failed
+        - llm_quota
+        - llm_budget_exhausted
+        - llm_request_rejected
+        - processing_interrupted_limit
+        - todoist_rejected
+        - todoist_auth_blocked
+        - todoist_rate_limited
+        - todoist_unavailable
+        - todo_result_unknown
+        - interrupted_todo_call
+        - lookup_not_found
+        - lookup_failed
+        - lookup_ambiguous
+        - dismissed_by_owner
+    LegacyEventErrorCode:
+      x-legacy: true
+      type: string
+      enum:
+        - invalid_saved_event
+        - llm_client_unavailable
+        - summary_render_failed
+        - todo_client_unavailable
+        - database_client_unavailable
+        - cache_write_failed
+        - checkpoint_failed
+
+    ReminderState:
+      type: string
+      enum: [sending, created, unknown, failed]
+
+    ReminderErrorCode:
+      anyOf:
+        - $ref: '#/components/schemas/CurrentReminderErrorCode'
+        - $ref: '#/components/schemas/LegacyReminderErrorCode'
+    CurrentReminderErrorCode:
+      type: string
+      enum: [reminder_create_failed, reminder_result_unknown, interrupted_reminder_call]
+    LegacyReminderErrorCode:
+      x-legacy: true
+      type: string
+      enum: [empty_task_id, todo_client_unavailable]
+
+    ReconcileAction:
+      description: |
+        - task_created: the owner found the Todoist task (`task_id` required); the event completes with it.
+        - task_not_created: the owner found no task. A footer lookup runs first, then the frozen request is sent again, which can duplicate a task.
+        - retry_summary: summarize again; not offered for mail_needs_review.
+        - dismiss: give up without checking Todoist; the event becomes ignored.
+      type: string
+      enum: [task_created, task_not_created, retry_summary, dismiss]
+
+    TransitionActor:
+      type: string
+      enum: [worker, owner]
+
+    EventSummary:
+      type: object
+      required: [event_id, state, error_code, attempt_count, task_id, received_at, updated_at, next_attempt_at, attention, imported]
+      properties:
+        event_id: {$ref: '#/components/schemas/EventId'}
+        state: {$ref: '#/components/schemas/EventState'}
+        error_code:
+          anyOf:
+            - $ref: '#/components/schemas/EventErrorCode'
+            - type: 'null'
+        attempt_count: {type: integer, minimum: 0}
+        task_id:
+          type: [string, 'null']
+          description: Todoist task ID once known; link it as https://app.todoist.com/app/task/<id>.
+        received_at: {$ref: '#/components/schemas/Timestamp'}
+        updated_at: {$ref: '#/components/schemas/Timestamp'}
+        next_attempt_at:
+          description: When the Worker acts on the event next; null when nothing is scheduled.
+          anyOf:
+            - $ref: '#/components/schemas/Timestamp'
+            - type: 'null'
+        attention:
+          type: boolean
+          description: failed_summary or todo_unknown, or not terminal and received at least 6 hours ago.
+        imported:
+          type: boolean
+          description: Imported from the Go service's ledger.
+
+    EventDetail:
+      allOf:
+        - $ref: '#/components/schemas/EventSummary'
+        - type: object
+          required: [version, crashes, subject, from, summary, summary_model, todo_body, todoist_request_id, allowed_actions, transitions, has_legacy_text]
+          properties:
+            version:
+              type: integer
+              minimum: 1
+              description: Send it back with a reconcile action.
+            crashes:
+              type: integer
+              minimum: 0
+              description: Summary runs interrupted mid-call; three stop automatic retries.
+            subject:
+              type: [string, 'null']
+              description: From the stored event, or from the report cache once complete; null for imported rows without either.
+            from:
+              type: [string, 'null']
+              description: First From address while the event body is still stored.
+            summary: {type: [string, 'null']}
+            summary_model: {type: [string, 'null']}
+            todo_body:
+              type: [string, 'null']
+              description: The frozen Todoist description, footer included; plain text.
+            todoist_request_id: {type: [string, 'null']}
+            allowed_actions:
+              type: array
+              uniqueItems: true
+              items: {$ref: '#/components/schemas/ReconcileAction'}
+            transitions:
+              type: array
+              maxItems: 100
+              description: Oldest first; the first 100 transitions.
+              items: {$ref: '#/components/schemas/Transition'}
+            has_legacy_text:
+              type: boolean
+              description: GET /api/v1/legacy_text/{event_id} has the imported full text.
+      examples:
+        - event_id: f8c1e9a0-1a98-4fb8-8ca1-4c0a3e710001
+          state: todo_unknown
+          error_code: lookup_not_found
+          attempt_count: 0
+          task_id: null
+          received_at: '2026-09-28T08:00:00Z'
+          updated_at: '2026-09-28T08:02:10Z'
+          next_attempt_at: null
+          attention: true
+          imported: false
+          version: 5
+          crashes: 0
+          subject: Quarterly tax reminder
+          from: billing@example.com
+          summary: 季度预缴税截止日期为 10 月 15 日。
+          summary_model: gemini-3.8-flash
+          todo_body: "**FROM: billing@example.com**\n...\n\nMail Hero event: f8c1e9a0-1a98-4fb8-8ca1-4c0a3e710001"
+          todoist_request_id: todofy-0123456789abcdef0123456789ab
+          allowed_actions: [task_created, task_not_created, dismiss]
+          transitions:
+            - {at: '2026-09-28T08:00:00Z', from_state: null, to_state: pending, error_code: null, actor: worker}
+            - {at: '2026-09-28T08:00:20Z', from_state: summarized, to_state: todo_unknown, error_code: todo_result_unknown, actor: worker}
+          has_legacy_text: false
+
+    Transition:
+      type: object
+      required: [at, from_state, to_state, error_code, actor]
+      properties:
+        at: {$ref: '#/components/schemas/Timestamp'}
+        from_state:
+          description: Null for the event's arrival.
+          anyOf:
+            - $ref: '#/components/schemas/EventState'
+            - type: 'null'
+        to_state: {$ref: '#/components/schemas/EventState'}
+        error_code:
+          anyOf:
+            - $ref: '#/components/schemas/EventErrorCode'
+            - type: 'null'
+        actor: {$ref: '#/components/schemas/TransitionActor'}
+
+    EventPage:
+      type: object
+      required: [items, next_cursor]
+      properties:
+        items:
+          type: array
+          items: {$ref: '#/components/schemas/EventSummary'}
+        next_cursor: {type: [string, 'null']}
+
+    ReconcileRequest:
+      type: object
+      required: [action, version, action_request_id]
+      additionalProperties: false
+      properties:
+        action: {$ref: '#/components/schemas/ReconcileAction'}
+        version: {type: integer, minimum: 1}
+        action_request_id:
+          type: string
+          format: uuid
+          description: A fresh random UUID per user action; reuse it only to retry the same request.
+        task_id:
+          type: string
+          pattern: '^[0-9A-Za-z_-]{1,64}$'
+      if:
+        properties: {action: {const: task_created}}
+      then:
+        required: [task_id]
+      else:
+        not: {required: [task_id]}
+      examples:
+        - {action: task_created, version: 5, action_request_id: 3b0d7a52-8f0e-4a8e-9a55-2f0f6c1d9e11, task_id: 6X7rM8997g3RQmvh}
+        - {action: dismiss, version: 5, action_request_id: 0e8f7a55-1c2d-4e5f-8a9b-0c1d2e3f4a5b}
+
+    Reminder:
+      type: object
+      required: [day, state, task_id, attention_count, attempts, error_code, next_attempt_at, created_at, updated_at, imported]
+      properties:
+        day: {type: string, format: date, description: UTC day.}
+        state: {$ref: '#/components/schemas/ReminderState'}
+        task_id: {type: [string, 'null']}
+        attention_count: {type: integer, minimum: 0}
+        attempts: {type: integer, minimum: 0}
+        error_code:
+          anyOf:
+            - $ref: '#/components/schemas/ReminderErrorCode'
+            - type: 'null'
+        next_attempt_at:
+          anyOf:
+            - $ref: '#/components/schemas/Timestamp'
+            - type: 'null'
+        created_at: {$ref: '#/components/schemas/Timestamp'}
+        updated_at: {$ref: '#/components/schemas/Timestamp'}
+        imported: {type: boolean}
+
+    ReminderPage:
+      type: object
+      required: [items, next_cursor]
+      properties:
+        items:
+          type: array
+          items: {$ref: '#/components/schemas/Reminder'}
+        next_cursor: {type: [string, 'null']}
+
+    Overview:
+      type: object
+      required: [build, now, flags, counts, attention_count, received_24h, latest_reminder, next_alarm_at, oldest_due_at, gemini, todoist]
+      properties:
+        build: {type: string}
+        now: {$ref: '#/components/schemas/Timestamp'}
+        flags:
+          type: object
+          required: [maintenance_mode, processing_paused, force_pause_todoist, reminder_enabled]
+          properties:
+            maintenance_mode: {type: boolean}
+            processing_paused: {type: boolean}
+            force_pause_todoist: {type: boolean}
+            reminder_enabled: {type: boolean}
+        counts:
+          type: object
+          description: Events per active (non-terminal) state.
+          required: [pending, summarizing, summarized, todo_sending, todo_unknown, todo_created, failed_summary]
+          additionalProperties: false
+          properties:
+            pending: {type: integer, minimum: 0}
+            summarizing: {type: integer, minimum: 0}
+            summarized: {type: integer, minimum: 0}
+            todo_sending: {type: integer, minimum: 0}
+            todo_unknown: {type: integer, minimum: 0}
+            todo_created: {type: integer, minimum: 0}
+            failed_summary: {type: integer, minimum: 0}
+        attention_count: {type: integer, minimum: 0}
+        received_24h: {type: integer, minimum: 0}
+        latest_reminder:
+          anyOf:
+            - $ref: '#/components/schemas/Reminder'
+            - type: 'null'
+        next_alarm_at:
+          anyOf:
+            - $ref: '#/components/schemas/Timestamp'
+            - type: 'null'
+        oldest_due_at:
+          description: next_attempt_at of the longest-waiting due event; null when nothing is due.
+          anyOf:
+            - $ref: '#/components/schemas/Timestamp'
+            - type: 'null'
+        gemini:
+          type: object
+          required: [day, token_budget, reserved_tokens, used_tokens, calls, models]
+          properties:
+            day: {type: string, format: date}
+            token_budget: {type: integer, minimum: 0}
+            reserved_tokens: {type: integer, minimum: 0}
+            used_tokens: {type: integer, minimum: 0}
+            calls: {type: integer, minimum: 0}
+            models:
+              type: array
+              description: Fallback order.
+              items: {type: string}
+        todoist:
+          type: object
+          required: [blocked_until, window_seconds, window_calls, window_limit]
+          properties:
+            blocked_until:
+              description: Task creation is paused until then after a 401/403.
+              anyOf:
+                - $ref: '#/components/schemas/Timestamp'
+                - type: 'null'
+            window_seconds: {type: integer, minimum: 1}
+            window_calls: {type: integer, minimum: 0}
+            window_limit: {type: integer, minimum: 1}
+      examples:
+        - build: 0123456789abcdef0123456789abcdef01234567
+          now: '2026-09-28T12:00:00Z'
+          flags: {maintenance_mode: false, processing_paused: false, force_pause_todoist: false, reminder_enabled: true}
+          counts: {pending: 1, summarizing: 0, summarized: 0, todo_sending: 0, todo_unknown: 1, todo_created: 0, failed_summary: 0}
+          attention_count: 1
+          received_24h: 42
+          latest_reminder: null
+          next_alarm_at: '2026-09-28T12:00:01Z'
+          oldest_due_at: '2026-09-28T11:59:00Z'
+          gemini: {day: '2026-09-28', token_budget: 3000000, reserved_tokens: 4096, used_tokens: 181233, calls: 41, models: [gemini-3.8-flash, gemini-3.7-flash, gemini-3.5-flash-lite]}
+          todoist: {blocked_until: null, window_seconds: 900, window_calls: 3, window_limit: 1000}
+
+    ReportsLatest:
+      type: object
+      required: [summary, recommendations]
+      properties:
+        summary:
+          anyOf:
+            - $ref: './summary-v1.schema.json'
+            - type: 'null'
+        recommendations:
+          type: array
+          maxItems: 10
+          description: The latest stored recommendation for each top_n, ordered by top_n.
+          items: {$ref: './recommendation-v1.schema.json'}
+
+    RecomputeRequest:
+      type: object
+      required: [kind, action_request_id]
+      additionalProperties: false
+      properties:
+        kind:
+          type: string
+          enum: [summary, recommendation]
+        top:
+          type: integer
+          minimum: 1
+          maximum: 10
+          description: Recommendation only; defaults to REPORT_DEFAULT_TOP.
+        action_request_id: {type: string, format: uuid}
+      if:
+        properties: {kind: {const: summary}}
+      then:
+        not: {required: [top]}
+
+    LegacyText:
+      type: object
+      required: [event_id, created_at, expires_at, text]
+      properties:
+        event_id: {type: string}
+        created_at: {$ref: '#/components/schemas/Timestamp'}
+        expires_at:
+          description: Null keeps the text forever.
+          anyOf:
+            - $ref: '#/components/schemas/Timestamp'
+            - type: 'null'
+        text: {type: string}
+
+    Setup:
+      type: object
+      required: [build, public_host, hooks_hosts, webhook_path, mail_source_id, access_owner, configured]
+      properties:
+        build: {type: string}
+        public_host: {type: string}
+        hooks_hosts:
+          type: array
+          items: {type: string}
+        webhook_path: {const: /hooks/mail}
+        mail_source_id: {type: string}
+        access_owner: {type: string, format: email}
+        configured:
+          type: object
+          description: Whether each secret or setting is present; values are never returned.
+          required: [mail_webhook_token, report_basic_auth, gemini_api_key, todoist_api_key, todoist_project]
+          properties:
+            mail_webhook_token: {type: boolean}
+            report_basic_auth: {type: boolean}
+            gemini_api_key: {type: boolean}
+            todoist_api_key: {type: boolean}
+            todoist_project: {type: boolean}
+
+    Csrf:
+      type: object
+      required: [token]
+      properties:
+        token: {type: string}
+
+    Health:
+      type: object
+      required: [build]
+      additionalProperties: false
+      properties:
+        build:
+          type: string
+          description: BUILD_SHA, the deployed commit.

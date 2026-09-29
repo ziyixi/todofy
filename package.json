@@ -1,0 +1,8 @@
+{
+  "name": "todofy",
+  "private": true,
+  "description": "Toolchain only: the Worker is Python; wrangler is driven by pywrangler.",
+  "devDependencies": {
+    "wrangler": "4.142.0"
+  }
+}

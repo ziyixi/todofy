@@ -1,0 +1,52 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://todofy.local/schema/summary-v1.schema.json",
+  "$comment": "Self-contained on purpose (no $defs or $ref): openapi-typescript hoists those into the owner API's component namespace.",
+  "title": "Todofy GET /api/summary response",
+  "description": "The daily summary the newsletter reads. summary, task_count and time_window_hours are the Go service's fields (handle_summary.go @ 6c46ed4) and keep their meaning; the rest were added by the Worker. Fields may be added, never removed or retyped, so consumers must ignore unknown fields. The limits are the newsletter's acceptance rules (newsletter src/newsletter/todofy.py _decode), so any response that validates is one the newsletter accepts.",
+  "type": "object",
+  "required": ["summary", "task_count", "time_window_hours", "status", "model", "computed_at", "window_start", "window_end"],
+  "additionalProperties": false,
+  "properties": {
+    "summary": {
+      "description": "Plain text from the daily-summary prompt, or the legacy English sentence when the window is empty. No control characters other than tab, line feed and carriage return.",
+      "type": "string",
+      "maxLength": 12000,
+      "pattern": "^[^\\u0000-\\u0008\\u000b\\u000c\\u000e-\\u001f\\u007f]*$"
+    },
+    "task_count": {"description": "Summaries in the window.", "type": "integer", "minimum": 0, "maximum": 1000000},
+    "time_window_hours": {"const": 24},
+    "status": {
+      "description": "stale: no report from the last 26 hours and the on-demand run did not finish within its budget, so an older stored report is served.",
+      "enum": ["ok", "empty_window", "stale"]
+    },
+    "model": {"description": "Gemini model name; empty when no model was called.", "type": "string"},
+    "computed_at": {
+      "description": "UTC RFC 3339 with whole seconds, like every timestamp here.",
+      "type": "string",
+      "format": "date-time",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$"
+    },
+    "window_start": {"type": "string", "format": "date-time", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$"},
+    "window_end": {"type": "string", "format": "date-time", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$"}
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"task_count": {"minimum": 1}}},
+      "then": {"properties": {"summary": {"pattern": "\\S"}}}
+    },
+    {
+      "if": {"properties": {"status": {"const": "ok"}}},
+      "then": {"properties": {"task_count": {"minimum": 1}}}
+    },
+    {
+      "if": {"properties": {"status": {"const": "empty_window"}}},
+      "then": {
+        "properties": {
+          "task_count": {"const": 0},
+          "summary": {"const": "As there is no new task in the last 24 hours, there will have no summary. Please check your service as it's highly not possible that there is no new task in the last 24 hours.\n"}
+        }
+      }
+    }
+  ]
+}
