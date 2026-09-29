@@ -9,7 +9,7 @@ from collections.abc import Iterator
 import pytest
 from cryptography.hazmat.primitives.asymmetric import rsa
 
-from tests.runtime.harness import OWNER, AccessIssuer, Worker, start_worker
+from tests.runtime.harness import GATEWAY_AUTH_CONFIG, OWNER, AccessIssuer, Worker, start_gateway
 from tests.runtime.owner_support import (
     CSRF_KEY,
     ORIGIN,
@@ -39,8 +39,7 @@ RECONCILE = f"/api/v1/events/{EVENT_ID}/reconcile"
 
 @pytest.fixture(scope="module")
 def jwt_worker(tmp_path_factory: pytest.TempPathFactory, access: AccessIssuer) -> Iterator[Worker]:
-    yield from start_worker(
-        "wrangler.test-auth.toml",
+    yield from start_gateway(
         tmp_path_factory.mktemp("owner-jwt-worker"),
         {
             "ACCESS_ISSUER": access.url,
@@ -48,6 +47,7 @@ def jwt_worker(tmp_path_factory: pytest.TempPathFactory, access: AccessIssuer) -
             "ACCESS_OWNER_ALIASES": f" {ALIAS.upper()} , second@example.net",
             "CSRF_SIGNING_KEY": CSRF_KEY,
         },
+        GATEWAY_AUTH_CONFIG,
     )
 
 

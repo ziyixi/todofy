@@ -2,22 +2,18 @@
 
 Both are precomputed once a day at REPORT_PRECOMPUTE_UTC. The newsletter gets a
 stored row only when it was computed since the latest precompute time and is
-usable (``ok`` or ``empty_window``); otherwise it asks the coordinator for one
-within 40 s, sharing its hourly computation cap, and answers 503 when that
+usable (``ok`` or ``empty_window``); otherwise the coordinator computes one
+within 40 s, under its hourly computation cap, and answers 503 when that
 fails. The newsletter reads only the HTTP status, so an old or unusable report
 is never sent as a 200. Responses validate against api/summary-v1 and
 api/recommendation-v1.
 """
 
-import base64
-import binascii
-import hashlib
-import hmac
 import json
 import math
 from datetime import UTC, datetime
 from typing import Any
-from urllib.parse import parse_qs, urlsplit
+from urllib.parse import parse_qs
 
 from workers import Response
 
@@ -37,8 +33,7 @@ from todofy.core.report_schema import (
 )
 from todofy.core.sql import reports as sql
 from todofy.runtime import gemini
-from todofy.runtime.config import coordinator as coordinator_stub
-from todofy.runtime.config import csv, report_default_top, var
+from todofy.runtime.config import flag, report_default_top, var
 from todofy.runtime.http import error, json_response, with_headers
 from todofy.runtime.interop import now_ms
 
@@ -72,6 +67,14 @@ class ReportError(Exception):
 def failure_hour(timestamp: int) -> str:
     """The ``auth_failures`` key: the UTC hour as ``YYYY-MM-DDTHH``."""
     return datetime.fromtimestamp(timestamp, UTC).strftime("%Y-%m-%dT%H")
+
+
+def report_error(status: int, code: ApiError, now: int) -> Response:
+    """A report that could not be computed; a 429 says when the hourly cap resets."""
+    response = error(status, code)
+    if status == 429:
+        return with_headers(response, {"retry-after": str(HOUR - now % HOUR)})
+    return response
 
 
 async def compute(env: Any, coordinator: Any, kind: str, top_n: int, now: int, budget_ms: int) -> dict:
@@ -178,42 +181,44 @@ def last_precompute(env: Any, now: int) -> int:
     return due if now >= due else due - DAY
 
 
-async def serve(request: Any, env: Any, kind: str) -> Response:
-    """GET /api/summary and /api/recommendation on the machine hosts (Basic auth)."""
-    digests = csv(env, "REPORT_BASIC_AUTH_SHA256")
-    if not digests:
-        return error(503, ApiError.NOT_CONFIGURED)
-    now = now_ms() // 1000
-    db = env.DB
-    # A correct credential always gets through: a lockout that also blocked it would let
-    # anyone deny the newsletter its report with 20 bad requests an hour. The counter
-    # only throttles failures, and stops writing once locked (at most 20 D1 writes an hour).
-    if not _basic_ok(request.headers.get("authorization") or "", digests):
-        hour = failure_hour(now)
-        failures = await db.prepare(sql.AUTH_FAILURES_HOUR.sql).bind(hour).first()
-        if failures is not None and failures["count"] >= LOCKOUT_FAILURES:
-            return with_headers(error(429, ApiError.RATE_LIMITED), {"retry-after": str(HOUR - now % HOUR)})
-        await db.prepare(sql.COUNT_AUTH_FAILURE.sql).bind(hour).run()
-        return with_headers(error(401, ApiError.UNAUTHORIZED), {"www-authenticate": 'Basic realm="todofy"'})
-
+async def serve(env: Any, coordinator: Any, kind: str, query: str) -> Response:
+    """GET /api/summary and /api/recommendation after the gateway accepted the Basic credential."""
     top_n = 0
     if kind == RECOMMENDATION:
         try:
-            top_n = parse_top_n(parse_qs(urlsplit(request.url).query, keep_blank_values=True).get("top", [None])[0])
+            top_n = parse_top_n(parse_qs(query, keep_blank_values=True).get("top", [None])[0])
         except ValueError:
             return error(400, ApiError.INVALID_REQUEST)
 
-    row = await db.prepare(sql.LATEST_REPORT.sql).bind(kind, top_n).first()
+    now = now_ms() // 1000
+    row = await env.DB.prepare(sql.LATEST_REPORT.sql).bind(kind, top_n).first()
     if row is not None and row.computed_at >= last_precompute(env, now) and row.status in SERVABLE:
         return json_response(json.loads(row.payload_json))
-    fresh = await _on_demand(env, kind, top_n)
-    if fresh.status != 200:
-        return fresh
-    payload = await fresh.json()
-    if payload.get("status") not in SERVABLE:
+    if flag(env, "MAINTENANCE_MODE"):
+        return error(503, ApiError.MAINTENANCE)
+    status, result = await coordinator.compute_report(kind, top_n, now)
+    if status != 200:
+        return report_error(status, result, now)
+    if result["status"] not in SERVABLE:
         # model_output_invalid: an empty list would read as "nothing important today".
         return error(503, ApiError.UNAVAILABLE)
-    return json_response(payload)
+    return json_response(result)
+
+
+async def count_auth_failure(db: Any, now: int) -> Response:
+    """A newsletter request whose Basic credential the gateway rejected.
+
+    A correct credential never comes here, so no number of failures can block it
+    (a lockout that did would let anyone deny the newsletter its report). The
+    counter only throttles failures and stops writing once locked, so it costs at
+    most LOCKOUT_FAILURES D1 writes an hour.
+    """
+    hour = failure_hour(now)
+    failures = await db.prepare(sql.AUTH_FAILURES_HOUR.sql).bind(hour).first()
+    if failures is not None and failures["count"] >= LOCKOUT_FAILURES:
+        return report_error(429, ApiError.RATE_LIMITED, now)
+    await db.prepare(sql.COUNT_AUTH_FAILURE.sql).bind(hour).run()
+    return with_headers(error(401, ApiError.UNAUTHORIZED), {"www-authenticate": 'Basic realm="todofy"'})
 
 
 async def latest(db: Any) -> dict:
@@ -278,33 +283,6 @@ def _recommendation(
     tasks: list[dict], count: int, status: ReportStatus, model: str, top_n: int, stamps: dict[str, str]
 ) -> dict:
     return {"tasks": tasks, "model": model, "task_count": count, "status": status, "top_n": top_n, **stamps}
-
-
-async def _on_demand(env: Any, kind: str, top_n: int) -> Response:
-    """The coordinator's answer: 200 with the new report, or an error envelope."""
-    try:
-        return await coordinator_stub(env).fetch(
-            "https://coordinator/report",
-            method="POST",
-            headers={"content-type": "application/json"},
-            body=json.dumps({"kind": kind, "top_n": top_n, "budget_ms": REPORT_ON_DEMAND_BUDGET * 1000}),
-        )
-    except Exception:  # a coordinator failure is an honest 503 for the newsletter
-        return error(503, ApiError.UNAVAILABLE)
-
-
-def _basic_ok(header: str, digests: list[str]) -> bool:
-    scheme, _, encoded = header.partition(" ")
-    if scheme.lower() != "basic":
-        return False
-    try:
-        credentials = base64.b64decode(encoded.strip(), validate=True)
-    except (binascii.Error, ValueError):
-        return False
-    presented = hashlib.sha256(credentials).hexdigest()
-    # Compare against every digest so timing does not reveal which one matched.
-    matches = [hmac.compare_digest(presented, digest) for digest in digests]
-    return any(matches)
 
 
 def _precompute_offset(value: str) -> int | None:

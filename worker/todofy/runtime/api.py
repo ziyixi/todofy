@@ -1,8 +1,9 @@
-"""Owner API routes under /api/v1 (api/owner-api-v1.openapi.yaml).
+"""Owner API routes under /api/v1 (api/owner-api-v1.openapi.yaml), served inside the coordinator.
 
-Plain D1 page reads run here, in the Worker. Anything that parses a stored mail
-or changes the ledger goes to the coordinator, the single writer, which
-answers in the final API shape; its responses are passed through unchanged.
+The gateway has already checked Access, CSRF and MAINTENANCE_MODE and passes the
+canonical owner; it answers /api/v1/csrf itself and composes /api/v1/setup from
+its own facts and :func:`setup`. Everything else runs here, in the Durable
+Object (30 s of CPU), which is also the single writer of the ledger.
 """
 
 import base64
@@ -17,7 +18,7 @@ from urllib.parse import parse_qs, unquote, urlsplit
 from workers import Response
 
 from todofy.core.api_errors import ApiError
-from todofy.core.backoff import DAY, REPORT_ON_DEMAND_BUDGET
+from todofy.core.backoff import DAY
 from todofy.core.contract import UUID
 from todofy.core.render import rfc3339
 from todofy.core.report_schema import MAX_TOP_N
@@ -29,10 +30,10 @@ from todofy.core.vocab import (
     EventState,
     Reconcile,
 )
-from todofy.runtime import csrf, reminder, reports
-from todofy.runtime.config import coordinator, csv, flag, report_default_top, source_id, var
+from todofy.runtime import reminder, reports
+from todofy.runtime.config import flag, report_default_top, source_id, var
 from todofy.runtime.http import error, json_response
-from todofy.runtime.interop import now_ms
+from todofy.runtime.interop import now_ms, read_capped
 
 DEFAULT_LIMIT = 50
 MAX_LIMIT = 100
@@ -136,8 +137,10 @@ async def _json_body(request: Any) -> dict[str, Any]:
     length = request.headers.get("content-length")
     if length and (not length.isdigit() or int(length) > MAX_BODY_BYTES):
         raise InvalidRequest
-    raw = await request.bytes()
-    if len(raw) > MAX_BODY_BYTES:
+    # A chunked body has no Content-Length: stop reading past the cap instead of buffering it all in
+    # the object, which also runs ingest and the alarm loop.
+    raw = await read_capped(request.js_object.body, MAX_BODY_BYTES)
+    if raw is None:
         raise InvalidRequest
     try:
         body = json.loads(raw)
@@ -169,7 +172,7 @@ def _path_id(match: re.Match[str], *, legacy: bool = False) -> str | None:
     return None
 
 
-async def overview(env: Any) -> Response:
+async def overview(env: Any, coordinator: Any) -> Response:
     now = now_ms() // 1000
     db, source = env.DB, source_id(env)
     counts, attention, received, due = await db.batch(
@@ -180,11 +183,8 @@ async def overview(env: Any) -> Response:
             db.prepare(views.OLDEST_DUE.sql).bind(now),
         ]
     )
-    # next_alarm_at and the Gemini/Todoist budgets live in the coordinator, already in API shape.
-    reply = await coordinator(env).fetch("https://coordinator/state")
-    if reply.status != 200:
-        return error(503, ApiError.UNAVAILABLE)
-    budgets = await reply.json()
+    # next_alarm_at and the Gemini/Todoist budgets live in the coordinator's storage, in API shape.
+    budgets = await coordinator.budgets()
     latest_reminders, _ = await reminder.page(db, None, 1)
     per_state = {row["state"]: row["n"] for row in counts.results}
     oldest_due = due.results[0]["at"]
@@ -240,35 +240,26 @@ async def events(env: Any, query: dict[str, str]) -> Response:
     return json_response({"items": [event_summary(row, now) for row in rows[:limit]], "next_cursor": next_cursor})
 
 
-async def reconcile(request: Any, env: Any, owner: str, event_id: str) -> Response:
+async def reconcile(request: Any, coordinator: Any, owner: str, event_id: str) -> Response:
     body = await _json_body(request)
     if not RECONCILE_REQUIRED <= body.keys() <= RECONCILE_FIELDS:
         raise InvalidRequest
-    if body["action"] not in set(Reconcile):
+    action = body["action"]
+    if action not in set(Reconcile):
         raise InvalidRequest
-    command = {
-        "owner": owner,
-        "event_id": event_id,
-        "action": body["action"],
-        "version": _integer(body["version"], 1, MAX_INTEGER),
-        "action_request_id": _action_request_id(body),
-    }
-    if body["action"] == Reconcile.TASK_CREATED:
+    version = _integer(body["version"], 1, MAX_INTEGER)
+    action_request_id = _action_request_id(body)
+    task_id = None
+    if action == Reconcile.TASK_CREATED:
         task_id = body.get("task_id")
         if not isinstance(task_id, str) or not TASK_ID.fullmatch(task_id):
             raise InvalidRequest
-        command["task_id"] = task_id
     elif "task_id" in body:
         raise InvalidRequest
-    return await coordinator(env).fetch(
-        "https://coordinator/reconcile",
-        method="POST",
-        headers={"content-type": "application/json"},
-        body=json.dumps(command),
-    )
+    return await coordinator.reconcile(owner, event_id, action, version, action_request_id, task_id)
 
 
-async def recompute(request: Any, env: Any, owner: str) -> Response:
+async def recompute(request: Any, env: Any, coordinator: Any, owner: str) -> Response:
     body = await _json_body(request)
     if not RECOMPUTE_REQUIRED <= body.keys() <= RECOMPUTE_FIELDS:
         raise InvalidRequest
@@ -278,19 +269,7 @@ async def recompute(request: Any, env: Any, owner: str) -> Response:
     top_n = 0
     if kind == "recommendation":
         top_n = _integer(body["top"], 1, MAX_TOP_N) if "top" in body else report_default_top(env)
-    command = {
-        "kind": kind,
-        "top_n": top_n,
-        "owner": owner,
-        "action_request_id": _action_request_id(body),
-        "budget_ms": REPORT_ON_DEMAND_BUDGET * 1000,
-    }
-    return await coordinator(env).fetch(
-        "https://coordinator/report",
-        method="POST",
-        headers={"content-type": "application/json"},
-        body=json.dumps(command),
-    )
+    return await coordinator.recompute(owner, _action_request_id(body), kind, top_n)
 
 
 async def reminders(env: Any, query: dict[str, str]) -> Response:
@@ -305,7 +284,7 @@ async def reminders(env: Any, query: dict[str, str]) -> Response:
 
 
 async def legacy_text(env: Any, key: str) -> Response:
-    """GET /api/v1/legacy_text/{key}; runs in the coordinator (see _route)."""
+    """GET /api/v1/legacy_text/{key}: imported texts reach 1.9 MB, fine for the object's 30 s of CPU."""
     row = await env.DB.prepare(views.LEGACY_TEXT.sql).bind(key).first()
     expires_at = None if row is None else row["expires_at"]
     if row is None or (expires_at is not None and expires_at <= now_ms() // 1000):
@@ -321,18 +300,11 @@ async def legacy_text(env: Any, key: str) -> Response:
 
 
 def setup(env: Any) -> Response:
-    """Integration facts for the setup page: whether each secret is set, never its value."""
+    """The core's facts for the setup page (the gateway adds its own): whether each secret is set, never its value."""
     return json_response(
         {
-            "build": var(env, "BUILD_SHA", "unknown"),
-            "public_host": var(env, "TODOFY_PUBLIC_HOST").lower(),
-            "hooks_hosts": csv(env, "TODOFY_HOOKS_HOSTS"),
-            "webhook_path": "/hooks/mail",
             "mail_source_id": source_id(env),
-            "access_owner": var(env, "ACCESS_OWNER").lower(),
             "configured": {
-                "mail_webhook_token": bool(var(env, "MAIL_WEBHOOK_TOKEN_SHA256")),
-                "report_basic_auth": bool(var(env, "REPORT_BASIC_AUTH_SHA256")),
                 "gemini_api_key": bool(var(env, "GEMINI_API_KEY")),
                 "todoist_api_key": bool(var(env, "TODOIST_API_KEY")),
                 "todoist_project": bool(var(env, "TODOIST_DEFAULT_PROJECT_ID")),
@@ -341,13 +313,11 @@ def setup(env: Any) -> Response:
     )
 
 
-async def _route(request: Any, env: Any, owner: str, path: str) -> Response:
+async def _route(request: Any, env: Any, coordinator: Any, owner: str, path: str) -> Response:
     method = request.method
     match method, path:
-        case "GET", "/api/v1/csrf":
-            return await csrf.issue(request, env, owner)
         case "GET", "/api/v1/overview":
-            return await overview(env)
+            return await overview(env, coordinator)
         case "GET", "/api/v1/events":
             return await events(env, _query(request))
         case "GET", "/api/v1/reminders":
@@ -355,32 +325,28 @@ async def _route(request: Any, env: Any, owner: str, path: str) -> Response:
         case "GET", "/api/v1/reports/latest":
             return json_response(await reports.latest(env.DB))
         case "POST", "/api/v1/reports/recompute":
-            return await recompute(request, env, owner)
-        case "GET", "/api/v1/setup":
-            return setup(env)
+            return await recompute(request, env, coordinator, owner)
     if method == "GET" and (match := EVENT_PATH.fullmatch(path)):
         event_id = _path_id(match)
         if event_id is None:
             return error(404, ApiError.NOT_FOUND)
-        return await coordinator(env).fetch(f"https://coordinator/event/{event_id}")
+        return await coordinator.event(event_id)
     if method == "POST" and (match := RECONCILE_PATH.fullmatch(path)):
         event_id = _path_id(match)
         if event_id is None:
             return error(404, ApiError.NOT_FOUND)
-        return await reconcile(request, env, owner, event_id)
+        return await reconcile(request, coordinator, owner, event_id)
     if method == "GET" and (match := LEGACY_TEXT_PATH.fullmatch(path)):
         key = _path_id(match, legacy=True)
         if key is None:
             return error(404, ApiError.NOT_FOUND)
-        # Imported texts reach 1.9 MB; reading and encoding one can pass the Worker's 10 ms of CPU,
-        # so the coordinator (30 s) builds the response and the Worker only passes it through.
-        return await coordinator(env).fetch(f"https://coordinator/legacy_text/{key}")
+        return await legacy_text(env, key)
     return error(404, ApiError.NOT_FOUND)
 
 
-async def handle(request: Any, env: Any, owner: str, path: str) -> Response:
-    """Every /api/v1/* path; the caller has already checked Access, CSRF and maintenance."""
+async def handle(request: Any, env: Any, coordinator: Any, owner: str, path: str) -> Response:
+    """Every /api/v1/* path the gateway forwards (it answers csrf and setup itself: 404 here)."""
     try:
-        return await _route(request, env, owner, path)
+        return await _route(request, env, coordinator, owner, path)
     except InvalidRequest:
         return error(400, ApiError.INVALID_REQUEST)

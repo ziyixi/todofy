@@ -6,25 +6,29 @@ summary, and creates exactly one Todoist task per event. It also serves a daily 
 recommendations to the owner's newsletter, sends at most one attention reminder task a day, and has a
 small owner UI for anything that needs a human.
 
-It runs entirely on Cloudflare's Workers Free plan: one Python Worker, one SQLite-backed Durable Object
-(`TodofyCoordinator`, instance `inbox-v1`) as the single ledger writer and scheduler, and one D1
-database. The UI is React/TypeScript, built into static assets the Worker serves.
+It runs entirely on Cloudflare's Workers Free plan: a thin TypeScript gateway Worker (`todofy`: hosts,
+credentials, static assets, cron), a Python Worker (`todofy-core`) hosting one SQLite-backed Durable
+Object (`TodofyCoordinator`, instance `inbox-v1`) as the single ledger writer and scheduler, and one D1
+database. All D1, Gemini and Todoist work runs in the Durable Object, which gets 30 s of CPU per call;
+a plain Worker request gets 10 ms on the Free plan, too little for Python. The UI is React/TypeScript,
+built into static assets the gateway serves.
 [architecture-diagram.md](architecture-diagram.md) has the diagrams.
 
 ```
-Mail Hero --Bearer--> hooks host /hooks/mail --> Durable Object --> D1
-                                                     |--> Gemini (summary, reports)
-                                                     '--> Todoist (task, footer lookup, reminder)
-newsletter --Basic--> hooks host /api/summary, /api/recommendation
-owner --Cloudflare Access--> UI host (React + /api/v1/*)
+                      Worker todofy (TypeScript gateway)       Worker todofy-core (Python)
+Mail Hero --Bearer--> hooks host POST /hooks/mail      --+
+newsletter --Basic--> hooks host GET /api/summary, ... --+--> Durable Object inbox-v1 --> D1
+owner --Access------> UI host: JWT, CSRF, assets,       |     |--> Gemini (summary, reports)
+                      /api/v1/* with the owner  --------+     '--> Todoist (task, lookup, reminder)
+cron */10 ----------> scheduled() -------------------------> /wake
 ```
 
 ## Hosts
 
 | Host | Serves | Auth |
 |---|---|---|
-| `TODOFY_PUBLIC_HOST` (`todofy.ziyixi.science`) | owner UI and `/api/v1/*` | Cloudflare Access app on the whole host, and the Worker verifies the Access JWT itself (issuer, audience, expiry, owner or alias); writes also need CSRF and an `action_request_id` |
-| each of `TODOFY_HOOKS_HOSTS` (`todofy-hooks.ziyixi.science`; `daily.ziyixi.science` is added at cutover so Mail Hero's and the newsletter's existing URLs keep working) | exactly `POST /hooks/mail`, `GET /api/summary`, `GET /api/recommendation`, `GET /health` | webhook: Bearer (SHA-256 digest compared in constant time); newsletter: Basic; `/health` returns only the build SHA |
+| `TODOFY_PUBLIC_HOST` (`todofy.ziyixi.science`) | owner UI and `/api/v1/*` | Cloudflare Access app on the whole host, and the gateway verifies the Access JWT itself (RS256 signature, issuer, audience, expiry, not-before, subject, owner or alias); writes also need CSRF and an `action_request_id` |
+| each of `TODOFY_HOOKS_HOSTS` (`todofy-hooks.ziyixi.science`; `daily.ziyixi.science` is added at cutover so Mail Hero's and the newsletter's existing URLs keep working) | exactly `POST /hooks/mail`, `GET /api/summary`, `GET /api/recommendation`, `GET /health` | webhook: Bearer (SHA-256 digest compared in constant time); newsletter: Basic; `/health` returns the build SHA with `service`/`status` (the gateway answers it without the Durable Object) |
 
 Any other host or path is a 404. `workers.dev` and preview URLs are off.
 
@@ -81,32 +85,36 @@ npm ci --no-audit --no-fund
 uv sync --locked
 uv run ruff check worker tests tools deploy && uv run ruff format --check worker tests tools deploy
 uv run pytest tests/unit tests/fakes tools deploy        # host tests
+(cd gateway && npm ci --no-audit --no-fund && npm run lint && npm run typecheck && npm test)
 (cd web && npm ci --no-audit --no-fund && npm run check:api && npm run typecheck && npm test && npm run build)
-uv run pytest tests/runtime                               # real workerd, D1, DO, alarms, cron (~10 min)
+uv run pytest tests/runtime                               # real workerd, gateway + core, D1, DO, alarms, cron (~9 min)
 ```
 
-`uv run pywrangler dev` runs the Worker locally (`todofy.localhost` / `todofy-hooks.localhost`).
+`uv run pywrangler dev -c gateway/wrangler.toml -c wrangler.toml` runs both Workers locally
+(`todofy.localhost` / `todofy-hooks.localhost`).
 [docs/dev-notes.md](docs/dev-notes.md) covers the layout, the Python Workers idioms and the module
 contracts.
 
 ## Deploy
 
 Every push runs the `Todofy checks` job; a push to `main` (or a manual run on `main`) then deploys:
-generate the production config from GitHub variables, dry-run, apply D1 migrations, deploy, and wait for
-`/health` to report the commit. There are no pull requests; `main` is fast-forwarded. One-time setup
+generate both production configs from GitHub variables, dry-run, apply D1 migrations, deploy
+`todofy-core` and then the gateway, wait for `/health` to report the commit, then check that a wrong
+newsletter credential gets 401/429 from the Durable Object (proving gateway → object → D1). There are no pull requests; `main` is fast-forwarded. One-time setup
 (D1, Access, GitHub environment, Worker secrets) is in [docs/cloudflare-setup.md](docs/cloudflare-setup.md).
 
 ## Repository
 
 ```
 worker/todofy/core/     pure Python rules (vocabulary, contract, prompts, classification, SQL)
-worker/todofy/runtime/  Worker entry, Durable Object, D1 ledger, Gemini/Todoist clients, owner API
+worker/todofy/runtime/  todofy-core: Durable Object, D1 ledger, Gemini/Todoist clients, owner API
+gateway/                the gateway Worker todofy (TypeScript): routing, Access, CSRF, webhook, assets
 migrations/             D1 schema
 api/                    owner OpenAPI contract, newsletter report schemas, Mail Hero event schema
 web/                    owner UI (React + Vite), built into uiassets/dist
 tests/                  unit, fakes and runtime (workerd) tests
 tools/                  legacy SQLite snapshot/export/verify and the webhook smoke test
-deploy/                 production config generator
+deploy/                 production config generator (both Workers)
 docs/                   setup, CI/CD, verification, dev notes, migration plan
 ```
 

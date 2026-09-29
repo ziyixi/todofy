@@ -12,7 +12,7 @@ from tests.fakes.gemini_fake import API_KEY as GEMINI_KEY
 from tests.fakes.gemini_fake import GeminiFake
 from tests.fakes.todoist_fake import PROJECT_ID, TodoistFake
 from tests.fakes.todoist_fake import TOKEN as TODOIST_TOKEN
-from tests.runtime.harness import Worker, start_worker
+from tests.runtime.harness import Worker, start_gateway
 from tests.runtime.owner_support import assert_contract
 from tests.runtime.reports_support import NEWSLETTER, digest
 from todofy.core.reminder_text import reminder_title
@@ -48,7 +48,7 @@ def stack(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Stack]:
         "REMINDER_ENABLED": "true",
     }
     try:
-        for worker in start_worker("wrangler.test.toml", tmp_path_factory.mktemp("reports-alarm"), variables):
+        for worker in start_gateway(tmp_path_factory.mktemp("reports-alarm"), variables):
             # Seeded before the first wake, so the first alarm's ticks see them.
             worker.d1(
                 "INSERT INTO summaries (event_id, created_at, subject, summary, model) VALUES"

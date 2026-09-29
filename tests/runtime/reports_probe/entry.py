@@ -4,9 +4,9 @@
 `worker/todofy`, so these modules run in real workerd with real D1 but without
 the coordinator's alarm loop. POST routes take JSON arguments (``vars``
 overrides Worker vars for that call, ``now`` is the Unix time the module sees);
-the newsletter routes are the real ``reports.serve`` and read overrides from
-the ``x-probe-vars`` header. ``ProbeCoordinator`` answers ``/report`` with the
-real ``reports.compute`` and an unlimited budget.
+the newsletter routes are the real ``reports.serve`` (what the object runs after
+the gateway accepted the Basic credential) with an unlimited ``Budget`` as the
+coordinator, and read overrides from the ``x-probe-vars`` header.
 """
 
 import json
@@ -14,12 +14,11 @@ from dataclasses import replace
 from typing import Any
 from urllib.parse import urlsplit
 
-from workers import DurableObject, Response, WorkerEntrypoint
+from workers import Response, WorkerEntrypoint
 
+from todofy.core.backoff import REPORT_ON_DEMAND_BUDGET
 from todofy.core.vocab import EventState
 from todofy.runtime import ledger, reminder, reports, retention
-from todofy.runtime.http import error, json_response
-from todofy.runtime.interop import now_ms
 
 
 class Overlay:
@@ -34,10 +33,14 @@ class Overlay:
 
 
 class Budget:
-    """Stands in for the coordinator's hourly report cap, Gemini token budget and
-    precompute failure counts (``failures`` maps "kind/top_n/day" to a count)."""
+    """Stands in for the coordinator: its hourly report cap, Gemini token budget,
+    precompute failure counts (``failures`` maps "kind/top_n/day" to a count) and
+    on-demand report computation."""
 
-    def __init__(self, slots: bool = True, tokens: bool = True, failures: dict[str, int] | None = None) -> None:
+    def __init__(
+        self, env: Any, slots: bool = True, tokens: bool = True, failures: dict[str, int] | None = None
+    ) -> None:
+        self.env = env
         self.slots = slots
         self.tokens = tokens
         self.failures = dict(failures or {})
@@ -60,17 +63,12 @@ class Budget:
     def settle_tokens(self, reserved: int, used: int, now: int) -> None:
         self.calls.append(["settle", reserved, used, now])
 
-
-class ProbeCoordinator(DurableObject):
-    async def fetch(self, request: Any) -> Response:
-        args = json.loads(await request.text())
+    async def compute_report(self, kind: str, top_n: int, now: int) -> tuple[int, Any]:
+        """The coordinator's on-demand computation, as reports.serve calls it."""
         try:
-            report = await reports.compute(
-                self.env, Budget(), args["kind"], args["top_n"], now_ms() // 1000, args["budget_ms"]
-            )
+            return 200, await reports.compute(self.env, self, kind, top_n, now, REPORT_ON_DEMAND_BUDGET * 1000)
         except reports.ReportError as exc:
-            return error(exc.status, exc.code)
-        return json_response(report)
+            return exc.status, exc.code
 
 
 class Default(WorkerEntrypoint):
@@ -80,10 +78,10 @@ class Default(WorkerEntrypoint):
             return Response("ok")
         if request.method == "GET" and path in ("/api/summary", "/api/recommendation"):
             env = Overlay(self.env, json.loads(request.headers.get("x-probe-vars") or "{}"))
-            return await reports.serve(request, env, path.removeprefix("/api/"))
+            return await reports.serve(env, Budget(env), path.removeprefix("/api/"), urlsplit(request.url).query)
         args = json.loads(await request.text())
         env = Overlay(self.env, args.get("vars", {}))
-        budget = Budget(args.get("slots", True), args.get("tokens", True), args.get("failures"))
+        budget = Budget(env, args.get("slots", True), args.get("tokens", True), args.get("failures"))
         data: dict[str, Any] = {}
         match path:
             case "/d1":

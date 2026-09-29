@@ -1,18 +1,30 @@
-"""GET /api/summary and /api/recommendation (reports.serve) in real workerd: Basic auth
-with the hourly lockout of failures, rows from since the latest precompute served as
-stored, on-demand computation through the coordinator, and 503 (never an old or
-unusable report) when that fails. Every 200 must validate against the newsletter schemas."""
+"""GET /api/summary and /api/recommendation in real workerd: Basic auth with the hourly
+lockout of failures (gateway and core together), and reports.serve through the probe:
+rows from since the latest precompute served as stored, on-demand computation through
+the coordinator, and 503 (never an old or unusable report) when that fails. Every 200
+must validate against the newsletter schemas."""
 
 import json
 import time
+from collections.abc import Iterator
 from typing import Any
 
 import httpx
 import pytest
 
-from tests.fakes.gemini_fake import error_reply, text_reply
+from tests.fakes.gemini_fake import GeminiFake, error_reply, text_reply
+from tests.fakes.todoist_fake import TodoistFake
+from tests.runtime.conftest import pipeline_vars
+from tests.runtime.harness import Worker, start_gateway
 from tests.runtime.owner_support import assert_contract
-from tests.runtime.reports_support import NEWSLETTER, ROTATED, Probe, clean_fixture, probe_fixture  # noqa: F401
+from tests.runtime.reports_support import (  # noqa: F401
+    NEWSLETTER,
+    ROTATED,
+    Probe,
+    clean_fixture,
+    digest,
+    probe_fixture,
+)
 from todofy.core import gemini_wire, prompts
 from todofy.core.report_schema import EMPTY_WINDOW_SUMMARY
 
@@ -20,9 +32,31 @@ HOUR = 3600
 TASKS = [{"rank": 1, "title": "续签护照", "reason": "下周到期，需要今天预约"}]
 
 
-def get(probe: Probe, path: str, auth: tuple[str, str] | None = NEWSLETTER, **vars: str) -> httpx.Response:
+def get(probe: Probe, path: str, **vars: str) -> httpx.Response:
     headers = {"x-probe-vars": json.dumps(vars)} if vars else {}
-    return probe.worker.hooks.get(path, auth=auth, headers=headers)
+    return probe.worker.hooks.get(path, headers=headers)
+
+
+def auth_failures(worker: Worker) -> int | None:
+    return worker.d1("SELECT sum(count) AS n FROM auth_failures")[0]["n"]
+
+
+def start_newsletter(
+    tmp_path_factory: pytest.TempPathFactory, gemini: GeminiFake, todoist: TodoistFake, digests: str | None
+) -> Iterator[Worker]:
+    """A fresh gateway and core: the failure count and the gateway's lock last an hour."""
+    variables = pipeline_vars(gemini, todoist)
+    del variables["REPORT_BASIC_AUTH_SHA256"]
+    if digests is not None:
+        variables["REPORT_BASIC_AUTH_SHA256"] = digests
+    yield from start_gateway(tmp_path_factory.mktemp("newsletter"), variables)
+
+
+@pytest.fixture(name="newsletter")
+def newsletter_fixture(
+    tmp_path_factory: pytest.TempPathFactory, gemini: GeminiFake, todoist: TodoistFake
+) -> Iterator[Worker]:
+    yield from start_newsletter(tmp_path_factory, gemini, todoist, f"{digest(*NEWSLETTER)},{digest(*ROTATED)}")
 
 
 def seed_summaries(probe: Probe, *texts: str, age: int = HOUR) -> None:
@@ -67,39 +101,41 @@ def stored_summary(text: str = "旧的日报") -> dict[str, Any]:
     }
 
 
-def test_missing_or_wrong_credentials_are_401_and_counted(probe):
+def test_missing_or_wrong_credentials_are_401_and_counted(newsletter: Worker, gemini: GeminiFake):
     for auth in (None, ("newsletter", "wrong")):
-        response = get(probe, "/api/summary", auth=auth)
+        response = newsletter.hooks.get("/api/summary", auth=auth)
         assert response.status_code == 401
         assert response.headers["www-authenticate"].startswith("Basic")
         assert_contract(response, "/api/summary")
-    assert probe.sql("SELECT sum(count) AS n FROM auth_failures")[0]["n"] == 2
-    assert probe.gemini.calls() == []
+    assert auth_failures(newsletter) == 2
+    assert gemini.calls() == []
 
 
-def test_twenty_failures_lock_out_failures_but_never_the_right_password(probe):
+def test_twenty_failures_lock_out_failures_but_never_the_right_password(newsletter: Worker):
     for _ in range(20):
-        assert get(probe, "/api/summary", auth=("newsletter", "guess")).status_code == 401
-    for auth in (("newsletter", "guess"), None):
-        response = get(probe, "/api/summary", auth=auth)
+        assert newsletter.hooks.get("/api/summary", auth=("newsletter", "guess")).status_code == 401
+    for auth in (("newsletter", "guess"), None, ("newsletter", "guess")):
+        response = newsletter.hooks.get("/api/summary", auth=auth)
         assert response.status_code == 429
         assert 0 < int(response.headers["retry-after"]) <= HOUR
         assert_contract(response, "/api/summary")
     # Locked failures write nothing more to D1.
-    assert probe.sql("SELECT sum(count) AS n FROM auth_failures")[0]["n"] == 20
+    assert auth_failures(newsletter) == 20
     for auth in (NEWSLETTER, ROTATED):
-        assert get(probe, "/api/summary", auth=auth).status_code == 200
+        assert newsletter.hooks.get("/api/summary", auth=auth).status_code == 200
 
 
-def test_both_rotation_digests_are_accepted(probe):
+def test_both_rotation_digests_are_accepted(newsletter: Worker):
     for auth in (NEWSLETTER, ROTATED):
-        assert get(probe, "/api/summary", auth=auth).status_code == 200
+        assert newsletter.hooks.get("/api/summary", auth=auth).status_code == 200
+    assert auth_failures(newsletter) is None
 
 
-def test_missing_digest_is_503_not_configured(probe):
-    response = get(probe, "/api/summary", REPORT_BASIC_AUTH_SHA256="")
-    assert response.status_code == 503
-    assert response.json()["error"]["code"] == "not_configured"
+def test_missing_digest_is_503_not_configured(tmp_path_factory, gemini, todoist):
+    for worker in start_newsletter(tmp_path_factory, gemini, todoist, None):
+        response = worker.hooks.get("/api/summary", auth=NEWSLETTER)
+        assert response.status_code == 503
+        assert response.json()["error"]["code"] == "not_configured"
 
 
 def test_empty_window_needs_no_model_and_keeps_the_go_sentence(probe):

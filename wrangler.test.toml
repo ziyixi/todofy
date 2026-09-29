@@ -1,6 +1,6 @@
-# Runtime-test config for pytest (tests/runtime). The harness overrides upstream
-# base URLs and the webhook digest with --var; never deploy this file.
-name = "todofy-test"
+# Runtime-test config of todofy-core for pytest (tests/runtime), started together with either of
+# the gateway's test configs; the harness adds per-test core vars. Never deploy this file.
+name = "todofy-core"
 main = "worker/todofy/runtime/entry.py"
 base_dir = "worker"
 compatibility_date = "2026-09-08"
@@ -8,35 +8,20 @@ compatibility_flags = ["python_workers"]
 workers_dev = false
 preview_urls = false
 
-[assets]
-directory = "uiassets/dist"
-binding = "ASSETS"
-run_worker_first = true
-not_found_handling = "single-page-application"
-
 [[d1_databases]]
 binding = "DB"
 database_name = "todofy"
 database_id = "00000000-0000-4000-8000-000000000000"
 migrations_dir = "migrations"
 
-[[durable_objects.bindings]]
-name = "COORDINATOR"
-class_name = "TodofyCoordinator"
-
 [[migrations]]
 tag = "v1"
 new_sqlite_classes = ["TodofyCoordinator"]
 
-[triggers]
-crons = ["*/10 * * * *"]
-
 [vars]
+# The daily reminder links to the owner UI on this host.
 TODOFY_PUBLIC_HOST = "todofy.localhost"
-TODOFY_HOOKS_HOSTS = "todofy-hooks.localhost"
 BUILD_SHA = "test"
-ACCESS_OWNER = "owner@example.com"
-DEV_AUTH_BYPASS = "true"
 GEMINI_API_BASE = "http://127.0.0.1:9"
 TODOIST_API_BASE = "http://127.0.0.1:9"
 # Short timings so retries, lookups and the watchdog happen within a test.

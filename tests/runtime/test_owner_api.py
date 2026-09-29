@@ -10,7 +10,7 @@ from urllib.parse import quote
 
 import pytest
 
-from tests.runtime.harness import Worker, start_worker
+from tests.runtime.harness import Worker, start_gateway
 from tests.runtime.owner_support import (
     CSRF_KEY,
     assert_contract,
@@ -76,8 +76,7 @@ REMINDERS = [
 
 @pytest.fixture(scope="module")
 def api_worker(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Worker]:
-    for worker in start_worker(
-        "wrangler.test.toml",
+    for worker in start_gateway(
         tmp_path_factory.mktemp("owner-api-worker"),
         {"CSRF_SIGNING_KEY": CSRF_KEY, "PROCESSING_PAUSED": "true", "REMINDER_ENABLED": "true"},
     ):

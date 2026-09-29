@@ -8,7 +8,7 @@ from collections.abc import Iterator
 
 import pytest
 
-from tests.runtime.harness import Worker, start_worker
+from tests.runtime.harness import Worker, start_gateway
 from tests.runtime.owner_support import (
     CSRF_KEY,
     assert_contract,
@@ -24,8 +24,7 @@ RECONCILE = "/api/v1/events/f8c1e9a0-1a98-4fb8-8ca1-4c0a3e710001/reconcile"
 
 @pytest.fixture(scope="module")
 def maintenance_worker(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Worker]:
-    yield from start_worker(
-        "wrangler.test.toml",
+    yield from start_gateway(
         tmp_path_factory.mktemp("owner-maintenance-worker"),
         {"CSRF_SIGNING_KEY": CSRF_KEY, "MAINTENANCE_MODE": "true"},
     )
@@ -33,7 +32,7 @@ def maintenance_worker(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Wor
 
 @pytest.fixture(scope="module")
 def unconfigured_worker(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Worker]:
-    yield from start_worker("wrangler.test.toml", tmp_path_factory.mktemp("owner-no-csrf-key-worker"), {})
+    yield from start_gateway(tmp_path_factory.mktemp("owner-no-csrf-key-worker"), {})
 
 
 def test_maintenance_blocks_writes_after_the_csrf_check(maintenance_worker: Worker) -> None:

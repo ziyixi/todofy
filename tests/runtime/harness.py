@@ -1,17 +1,24 @@
 """Runtime-test harness: real workerd (D1, Durable Object, alarms, cron, assets)
-started with `pywrangler dev` against loopback fakes."""
+started with `pywrangler dev` against loopback fakes.
+
+A test server is one process running both Workers (docs/gateway-contract.md §7): the
+TypeScript gateway (primary: port, cron, assets, `--var`) and todofy-core, whose vars
+go into a generated config because `--var` reaches only the primary.
+"""
 
 import base64
 import functools
 import hashlib
 import json
 import os
+import re
 import shlex
 import signal
 import socket
 import subprocess
 import sys
 import time
+import tomllib
 import uuid
 from collections.abc import Callable, Collection, Iterator
 from datetime import UTC, datetime
@@ -29,6 +36,15 @@ ROOT = Path(__file__).resolve().parents[2]
 WRANGLER = ROOT / "node_modules" / ".bin" / "wrangler"
 PYODIDE_CACHE = ROOT / ".wrangler" / "pyodide-cache"
 STARTUP_TIMEOUT_S = 120
+GATEWAY_CONFIG = "gateway/wrangler.test.toml"
+GATEWAY_AUTH_CONFIG = "gateway/wrangler.test-auth.toml"
+CORE_CONFIG = ROOT / "wrangler.test.toml"
+# Vars only the gateway reads; SHARED_VARS go to both Workers, everything else to the core.
+GATEWAY_VARS = re.compile(
+    r"TODOFY_HOOKS_HOSTS|ACCESS_\w+|CSRF_SIGNING_KEY|MAIL_WEBHOOK_TOKEN_SHA256\w*|REPORT_BASIC_AUTH_SHA256"
+    r"|DEV_\w+|JWKS_REFRESH_COOLDOWN_MS"
+)
+SHARED_VARS = {"MAINTENANCE_MODE", "BUILD_SHA", "TODOFY_PUBLIC_HOST"}
 PUBLIC_HOST = "todofy.localhost"
 HOOKS_HOST = "todofy-hooks.localhost"
 ORIGIN = f"http://{PUBLIC_HOST}"
@@ -57,11 +73,13 @@ def _b64url(data: bytes) -> str:
 
 
 def _ensure_assets() -> None:
-    """wrangler needs the assets directory; CI builds web/ first, otherwise use a placeholder."""
-    index = ROOT / "uiassets" / "dist" / "index.html"
-    if not index.exists():
-        index.parent.mkdir(parents=True, exist_ok=True)
-        index.write_text("<!doctype html><title>Todofy test placeholder</title>\n")
+    """wrangler needs the assets directory; CI builds web/ first, otherwise use a placeholder
+    with one hashed-style asset (the cache-header scenarios need a file under /assets/)."""
+    dist = ROOT / "uiassets" / "dist"
+    if not (dist / "index.html").exists():
+        (dist / "assets").mkdir(parents=True, exist_ok=True)
+        (dist / "assets" / "placeholder-0000test.js").write_text("export {};\n")
+        (dist / "index.html").write_text("<!doctype html><title>Todofy test placeholder</title>\n")
 
 
 @functools.cache
@@ -117,12 +135,15 @@ def wait_until[T](probe: Callable[[], T | None], timeout_s: float, what: str) ->
 class Worker:
     """One `pywrangler dev` process on its own port and persist directory.
 
-    ``stop(kill=True)`` then ``start()`` models an evicted isolate: workerd dies
-    mid-call, D1 and the Durable Object's storage survive on disk.
+    ``configs`` are passed in order (the first is the primary, which owns the port, the cron
+    trigger, the assets and every ``--var``); ``d1_config`` names the config whose D1
+    binding the Worker writes. ``stop(kill=True)`` then ``start()`` models an evicted
+    isolate: workerd dies mid-call, D1 and the Durable Object's storage survive on disk.
     """
 
-    def __init__(self, config: str, persist_to: Path, variables: dict[str, str]) -> None:
-        self.config = config
+    def __init__(self, configs: list[str], d1_config: str, persist_to: Path, variables: dict[str, str]) -> None:
+        self.configs = configs
+        self.d1_config = d1_config
         self.persist_to = persist_to
         self.variables = variables
         self.base_url = ""
@@ -135,13 +156,10 @@ class Worker:
 
     def start(self) -> None:
         port = _free_port()
-        command = [
-            sys.executable,
-            "-m",
-            "pywrangler",
-            "dev",
-            "--config",
-            self.config,
+        command = [sys.executable, "-m", "pywrangler", "dev"]
+        for config in self.configs:
+            command += ["--config", config]
+        command += [
             "--ip",
             "127.0.0.1",
             "--port",
@@ -161,7 +179,14 @@ class Worker:
                 stderr=subprocess.STDOUT,
                 start_new_session=True,
                 env=os.environ
-                | {"CI": "true", "WRANGLER_SEND_METRICS": "false", "MINIFLARE_WORKERD_PATH": str(_cached_workerd())},
+                | {
+                    "CI": "true",
+                    "WRANGLER_SEND_METRICS": "false",
+                    "MINIFLARE_WORKERD_PATH": str(_cached_workerd()),
+                    # A private dev registry: the gateway's todofy-core binding must never reach
+                    # another test server's core (or a missing core must stay missing).
+                    "WRANGLER_REGISTRY_PATH": str(self.persist_to / "registry"),
+                },
             )
         self.base_url = f"http://127.0.0.1:{port}"
         self.hooks, self.owner = self.client(HOOKS_HOST), self.client(PUBLIC_HOST)
@@ -169,7 +194,7 @@ class Worker:
         while True:
             if self._process.poll() is not None or time.monotonic() > deadline:
                 self.stop(kill=True)
-                pytest.fail(f"{self.config} did not start:\n{log_path.read_text()[-4000:]}")
+                pytest.fail(f"{self.configs} did not start:\n{log_path.read_text()[-4000:]}")
             try:
                 if self.hooks.get("/health").status_code == 200:
                     return
@@ -217,7 +242,7 @@ class Worker:
     def d1(self, sql: str) -> list[dict[str, Any]]:
         # A second process reads the SQLite file workerd is writing (the alarm may be mid-step), and
         # wrangler sets no busy timeout, so a read can hit a transient lock; retry only that case.
-        args = ("d1", "execute", "DB", "--local", "--persist-to", str(self.persist_to), "--config", self.config)
+        args = ("d1", "execute", "DB", "--local", "--persist-to", str(self.persist_to), "--config", self.d1_config)
         for attempt in range(5):
             try:
                 result = _wrangler(*args, "--json", "--command", sql)
@@ -318,16 +343,46 @@ class Worker:
         return self.hooks.get(path, params=params, auth=auth or (REPORT_USER, REPORT_PASSWORD))
 
 
-def start_worker(config: str, state: Path, variables: dict[str, str]) -> Iterator[Worker]:
+def _run(worker: Worker) -> Iterator[Worker]:
     _ensure_assets()
     if any((ROOT / "migrations").glob("*.sql")):
-        _wrangler("d1", "migrations", "apply", "DB", "--local", "--persist-to", str(state), "--config", config)
-    worker = Worker(config, state, variables)
+        state = str(worker.persist_to)
+        _wrangler("d1", "migrations", "apply", "DB", "--local", "--persist-to", state, "--config", worker.d1_config)
     try:
         worker.start()
         yield worker
     finally:
         worker.stop()
+
+
+def start_worker(config: str, state: Path, variables: dict[str, str]) -> Iterator[Worker]:
+    """A single Worker (the test-only probes); every var goes to it."""
+    yield from _run(Worker([config], config, state, variables))
+
+
+def start_gateway(
+    state: Path, variables: dict[str, str], config: str = GATEWAY_CONFIG, core: bool = True
+) -> Iterator[Worker]:
+    """The gateway (``config``, the primary) with todofy-core in one process; ``core=False``
+    starts the gateway alone, so every Durable Object call fails.
+
+    Gateway vars stay ``--var``; core vars are written with the core test config into a
+    ``wrangler.test-run-<uuid>.json`` at the repo root (a Python config must sit next to
+    ``python_modules/``), removed when the Worker stops for good.
+    """
+    shared = {name: value for name, value in variables.items() if name in SHARED_VARS}
+    gateway = {name: value for name, value in variables.items() if GATEWAY_VARS.fullmatch(name)} | shared
+    if not core:
+        yield from _run(Worker([config], str(CORE_CONFIG), state, gateway))
+        return
+    core_config = tomllib.loads(CORE_CONFIG.read_text())
+    core_config["vars"] |= {name: value for name, value in variables.items() if name not in gateway} | shared
+    generated = ROOT / f"wrangler.test-run-{uuid.uuid4().hex}.json"
+    generated.write_text(json.dumps(core_config))
+    try:
+        yield from _run(Worker([config, generated.name], generated.name, state, gateway))
+    finally:
+        generated.unlink(missing_ok=True)
 
 
 def utc_now() -> str:

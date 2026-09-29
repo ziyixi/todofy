@@ -6,7 +6,7 @@ import uuid
 import pytest
 
 from tests.runtime.conftest import Launch
-from tests.runtime.harness import OWNER, AccessIssuer, Worker, error_code, mail_event
+from tests.runtime.harness import GATEWAY_AUTH_CONFIG, OWNER, AccessIssuer, Worker, error_code, mail_event
 from tests.runtime.owner_support import assert_contract
 from todofy.core.vocab import EVENT_ERROR_CODES, REMINDER_ERROR_CODES
 
@@ -75,7 +75,7 @@ def test_an_alias_login_acts_as_the_owner(auth_worker: Worker, access: AccessIss
 
 @pytest.mark.reaches("access_not_configured")
 def test_a_misconfigured_access_issuer_fails_closed(launch: Launch, access: AccessIssuer) -> None:
-    worker = launch("wrangler.test-auth.toml", ACCESS_ISSUER="https://evil.example")
+    worker = launch(GATEWAY_AUTH_CONFIG, ACCESS_ISSUER="https://evil.example")
     headers = {"cf-access-jwt-assertion": access.token()}
 
     for path in ("/api/v1/overview", "/attention"):

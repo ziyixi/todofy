@@ -14,7 +14,7 @@ from todofy.core.contract import parse_mail_event
 from todofy.core.render import FOOTER_PREFIX, clean_summary, render_todo_body
 from todofy.core.request_id import todoist_request_id
 
-# LOOKUP_DELAY_MS is 500 in wrangler.test.toml; this leaves time for a lookup and a stray resend.
+# LOOKUP_DELAY_MS is 500 in the core's wrangler.test.toml; this leaves time for a lookup and a stray resend.
 SETTLE_S = 3
 
 

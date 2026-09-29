@@ -31,6 +31,7 @@ jobs:
           cache: npm
           cache-dependency-path: |
             package-lock.json
+            gateway/package-lock.json
             web/package-lock.json
       - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
         with:
@@ -46,6 +47,14 @@ jobs:
           uv run ruff format --check worker tests tools deploy
       - name: Host tests (core, fakes, migration tools, config generator)
         run: uv run pytest tests/unit tests/fakes tools deploy
+      # The gateway Worker "todofy" (TypeScript); the root wrangler bundles it for the tests and the deploy.
+      - name: Check and test the gateway
+        working-directory: gateway
+        run: |
+          npm ci --no-audit --no-fund
+          npm run lint
+          npm run typecheck
+          npm test
       # Builds uiassets/dist, which the runtime tests and the dry-run serve.
       - name: Check, test and build the UI
         working-directory: web
@@ -57,11 +66,12 @@ jobs:
           npm run build
           # The UI is Todofy's own code; nothing may be copied from Mail Hero.
           if grep -rnE 'mail_hero|mail-hero' src; then exit 1; fi
-      - name: Runtime tests (workerd with real D1, Durable Object, alarms, cron and assets)
+      # Each server runs the gateway and todofy-core in one process (docs/gateway-contract.md §7).
+      - name: Runtime tests (workerd with the gateway, real D1, Durable Object, alarms, cron and assets)
         run: uv run pytest tests/runtime
-      # The generated production config must be one wrangler accepts before any deploy
-      # relies on it. Placeholder values only; no token is needed for --dry-run.
-      - name: Dry-run a placeholder production config
+      # The generated production configs must be ones wrangler accepts before any deploy
+      # relies on them. Placeholder values only; no token is needed for --dry-run.
+      - name: Dry-run placeholder production configs
         env:
           CLOUDFLARE_ACCOUNT_ID: '00000000000000000000000000000000'
           TODOFY_D1_DATABASE_ID: 00000000-0000-4000-8000-000000000000
@@ -78,12 +88,14 @@ jobs:
         run: |
           uv run python deploy/generate_ci_config.py
           uv run pywrangler deploy --dry-run --config wrangler.production.ci.json \
-            --secrets-file wrangler.production.secrets.json --outdir "$RUNNER_TEMP/todofy-bundle"
-          # The workers SDK is vendored next to the config; a bundle without it cannot start.
-          test -d "$RUNNER_TEMP/todofy-bundle/python_modules/workers"
-      - name: Remove the placeholder config
+            --outdir "$RUNNER_TEMP/todofy-core-bundle"
+          # The workers SDK is vendored next to the core config; a bundle without it cannot start.
+          test -d "$RUNNER_TEMP/todofy-core-bundle/python_modules/workers"
+          npx --no-install wrangler deploy --dry-run --config gateway/wrangler.production.ci.json \
+            --secrets-file gateway/wrangler.production.secrets.json --outdir "$RUNNER_TEMP/todofy-gateway-bundle"
+      - name: Remove the placeholder configs
         if: always()
-        run: rm -f wrangler.production.ci.json wrangler.production.secrets.json
+        run: rm -f wrangler.production.ci.json gateway/wrangler.production.ci.json gateway/wrangler.production.secrets.json
 
   deploy:
     name: Todofy deploy
@@ -107,6 +119,7 @@ jobs:
           cache: npm
           cache-dependency-path: |
             package-lock.json
+            gateway/package-lock.json
             web/package-lock.json
       - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
         with:
@@ -116,10 +129,11 @@ jobs:
         run: |
           npm ci --no-audit --no-fund
           uv sync --locked
+          npm ci --prefix gateway --no-audit --no-fund
           npm ci --prefix web --no-audit --no-fund
           npm run build --prefix web
       # The owner's email addresses are environment secrets (masked in this public log) and reach the
-      # Worker as secrets through --secrets-file; wrangler would print them if they were plain vars.
+      # gateway as secrets through --secrets-file; wrangler would print them if they were plain vars.
       - name: Generate the production configuration
         env:
           CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
@@ -144,20 +158,34 @@ jobs:
           TODOFY_PROCESSING_PAUSED: ${{ vars.TODOFY_PROCESSING_PAUSED }}
           TODOFY_FORCE_PAUSE_TODOIST: ${{ vars.TODOFY_FORCE_PAUSE_TODOIST }}
         run: uv run python deploy/generate_ci_config.py
-      - name: Validate the bundle before changing D1
-        run: uv run pywrangler deploy --dry-run --config wrangler.production.ci.json --secrets-file wrangler.production.secrets.json
-      - name: Apply D1 migrations, then deploy the Worker
+      - name: Validate both bundles before changing D1
+        run: |
+          uv run pywrangler deploy --dry-run --config wrangler.production.ci.json
+          npx --no-install wrangler deploy --dry-run --config gateway/wrangler.production.ci.json \
+            --secrets-file gateway/wrangler.production.secrets.json
+      # todofy-core first: the Durable Object class and every route a new gateway calls must exist before
+      # the gateway that binds and calls them goes live.
+      - name: Apply D1 migrations, then deploy todofy-core
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
         run: |
           test -n "$CLOUDFLARE_API_TOKEN"
           npx --no-install wrangler d1 migrations apply DB --remote --config wrangler.production.ci.json
-          uv run pywrangler deploy --config wrangler.production.ci.json --secrets-file wrangler.production.secrets.json
-      # A first deploy waits for the Custom Domain certificate and DNS, hence 10 tries x 15 s.
+          uv run pywrangler deploy --config wrangler.production.ci.json
+      - name: Deploy the gateway todofy
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          test -n "$CLOUDFLARE_API_TOKEN"
+          npx --no-install wrangler deploy --config gateway/wrangler.production.ci.json \
+            --secrets-file gateway/wrangler.production.secrets.json
+      # A first deploy waits for the Custom Domain certificate and DNS, hence 10 tries x 15 s. /health is
+      # answered by the gateway alone, so this proves the gateway build; the next step proves the core.
       - name: Wait until the hooks host serves this commit
         run: |
-          host=$(jq -r '.vars.TODOFY_HOOKS_HOSTS | split(",")[0]' wrangler.production.ci.json)
+          host=$(jq -r '.vars.TODOFY_HOOKS_HOSTS | split(",")[0]' gateway/wrangler.production.ci.json)
           for attempt in $(seq 1 10); do
             if build=$(curl -fsS --max-time 10 "https://$host/health" | jq -er .build) && [ "$build" = "$GITHUB_SHA" ]; then
               echo "The hooks host serves $GITHUB_SHA (attempt $attempt)."
@@ -167,6 +195,23 @@ jobs:
           done
           echo "The hooks host never reported build $GITHUB_SHA." >&2
           exit 1
+      # /health never reaches todofy-core. A wrong newsletter credential does: the gateway forwards it to
+      # the object's POST /newsletter/auth-failure, which reads and writes D1 and answers 401 (or 429 once
+      # this hour's 20 failures are spent). A broken core, binding or D1 gives 503. The correct credential
+      # never reads the counter, so this probe cannot lock the newsletter out.
+      - name: Check that the gateway reaches todofy-core
+        run: |
+          host=$(jq -r '.vars.TODOFY_HOOKS_HOSTS | split(",")[0]' gateway/wrangler.production.ci.json)
+          for attempt in $(seq 1 5); do
+            code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 20 -u ci-probe:wrong "https://$host/api/summary")
+            if [ "$code" = 401 ] || [ "$code" = 429 ]; then
+              echo "todofy-core answered $code (attempt $attempt)."
+              exit 0
+            fi
+            sleep 10
+          done
+          echo "The gateway did not reach todofy-core (last status $code)." >&2
+          exit 1
       - name: Remove the generated configuration
         if: always()
-        run: rm -f wrangler.production.ci.json wrangler.production.secrets.json
+        run: rm -f wrangler.production.ci.json gateway/wrangler.production.ci.json gateway/wrangler.production.secrets.json

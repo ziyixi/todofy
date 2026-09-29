@@ -51,7 +51,7 @@ def test_a_rotated_signing_key_is_fetched_once_for_its_new_kid(auth_worker: Work
     assert _status(auth_worker, access.token()) == 200  # the old key set is cached
     before = len(access.server.received("GET", "/cdn-cgi/access/certs"))
     new_key = access.rotate("rotated-key")
-    time.sleep(2.2)  # wrangler.test-auth.toml JWKS_REFRESH_COOLDOWN_MS
+    time.sleep(2.2)  # gateway/wrangler.test-auth.toml JWKS_REFRESH_COOLDOWN_MS
     assert _status(auth_worker, access.token(key=new_key, kid="rotated-key")) == 200
     assert _status(auth_worker, access.token()) == 200  # the previous key keeps working
     assert len(access.server.received("GET", "/cdn-cgi/access/certs")) == before + 1

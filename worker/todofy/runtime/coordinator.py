@@ -1,14 +1,18 @@
 """TodofyCoordinator (`inbox-v1`): the single writer of the ledger and its serial executor.
 
-Internal routes on https://coordinator (only the Worker's own stub reaches them):
+It runs in the `todofy-core` Worker and is reached only through the gateway's
+COORDINATOR binding (docs/gateway-contract.md §3). Internal routes on
+https://coordinator, each after the gateway's own checks:
 
-    POST /ingest      webhook bytes -> 204 | 400 | 409 | 413 | 503
-    POST /wake        run the alarm loop now -> 204
-    POST /reconcile   owner action -> EventDetail | error
-    POST /report      compute one report now -> report | error
-    GET  /event/<id>  EventDetail (parses the stored mail, so it runs here)
-    GET  /legacy_text/<key>  LegacyText (up to 1.9 MB of imported text, too much for 10 ms)
-    GET  /state       budgets and the next alarm, for the Overview
+    POST /ingest                   webhook bytes -> 204 | 400 | 409 | 413 | 503
+    POST /wake                     run the alarm loop now -> 204
+    GET  /newsletter/<kind>        stored or on-demand report (Basic auth passed)
+    POST /newsletter/auth-failure  count a failed Basic credential -> 401 | 429
+    GET  /setup                    the core's facts for the setup page
+    *    /api/v1/...               the owner API (api.py), for x-todofy-owner
+
+Everything that reads D1, parses mail or calls Gemini/Todoist runs here: a
+Durable Object invocation has 30 s of CPU, a Worker request 10 ms on Workers Free.
 
 Each alarm runs at most one ledger step (summary, task creation, lookup or
 completion), then any due reminder, report and retention ticks (v2 plan §5.3).
@@ -19,10 +23,11 @@ time then defaults to "due now" and the ledger stays in D1.
 import hashlib
 import json
 import math
+import re
 from dataclasses import asdict
 from datetime import UTC, datetime
 from typing import Any
-from urllib.parse import unquote, urlsplit
+from urllib.parse import urlsplit
 
 from pyodide.ffi import JsException
 from workers import DurableObject, Response
@@ -36,6 +41,7 @@ from todofy.core.backoff import (
     HOUR,
     LOOKUP_MAX_PAGES,
     MINUTE,
+    REPORT_ON_DEMAND_BUDGET,
     TODOIST_AUTH_BLOCK,
     TODOIST_MAX_ATTEMPTS,
     TODOIST_STEP_BUDGET,
@@ -53,7 +59,7 @@ from todofy.core.todoist_request import RequestTooLarge, build_task_request
 from todofy.core.vocab import Code, EventState, Reconcile, allowed_actions
 from todofy.runtime import api, gemini, ledger, reminder, reports, retention, todoist
 from todofy.runtime.config import flag, gemini_models, integer, source_id, var
-from todofy.runtime.http import empty, error, json_response, with_headers
+from todofy.runtime.http import REQUEST_ID, empty, error, json_response
 from todofy.runtime.interop import now_ms, now_s, read_capped, sha256_hex
 from todofy.runtime.ledger import WORKER, CompletedSummary, EventRow, OwnerAction
 
@@ -92,7 +98,13 @@ DO_SCHEMA = (
     # by the next alarm after an eviction (counted as spent, like reports._generate).
     "CREATE TABLE IF NOT EXISTS llm_inflight (event_id TEXT PRIMARY KEY, day TEXT NOT NULL, reserved INTEGER NOT NULL)",
 )
-WRITE_ROUTES = frozenset({"/ingest", "/reconcile", "/report"})
+# Headers only the gateway's request builder sets (it drops any a client sent).
+INTERNAL = "x-todofy-internal"
+REQUEST_ID_HEADER = "x-todofy-request-id"
+OWNER_HEADER = "x-todofy-owner"
+GATEWAY_REQUEST_ID = re.compile(r"[0-9a-f]{16}")
+MAX_OWNER_CHARS = 254
+NEWSLETTER_KINDS = {"/newsletter/summary": reports.SUMMARY, "/newsletter/recommendation": reports.RECOMMENDATION}
 TICK_COLUMNS = ("next_reminder_check", "next_report", "next_maintenance")
 SET_CONTROL = {
     column: f"UPDATE control SET {column} = ? WHERE id = 1" for column in (*TICK_COLUMNS, "todoist_blocked_until")
@@ -112,12 +124,10 @@ def _request_hash(fields: dict[str, Any]) -> str:
     return hashlib.sha256(json.dumps(fields, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
 
 
-def _report_error(status: int, code: str, now: int) -> Response:
-    response = error(status, ApiError(code))
-    if status == 429:
-        # The hourly computation cap resets at the next UTC hour.
-        return with_headers(response, {"retry-after": str(HOUR - now % HOUR)})
-    return response
+def _owner(request: Any) -> str | None:
+    """The canonical owner the gateway put in x-todofy-owner after Access; None if unusable."""
+    owner = request.headers.get(OWNER_HEADER) or ""
+    return owner if "@" in owner and len(owner) <= MAX_OWNER_CHARS else None
 
 
 def _after(seconds: float) -> int:
@@ -142,31 +152,43 @@ class TodofyCoordinator(DurableObject):
     # ---- routes -------------------------------------------------------------------------
 
     async def fetch(self, request: Any) -> Response:
-        path = urlsplit(request.url).path
-        if request.method == "POST" and path in WRITE_ROUTES and flag(self.env, "MAINTENANCE_MODE"):
-            # The Worker refuses these first; this keeps the single writer consistent on its own.
-            return error(503, ApiError.MAINTENANCE)
+        # Only the gateway's binding reaches the object; a request it did not build fails closed.
+        if request.headers.get(INTERNAL) != "1":
+            return error(404, ApiError.NOT_FOUND)
+        request_id = request.headers.get(REQUEST_ID_HEADER) or ""
+        token = REQUEST_ID.set(request_id if GATEWAY_REQUEST_ID.fullmatch(request_id) else None)
         try:
-            match request.method, path:
-                case "POST", "/ingest":
-                    return await self.ingest(request)
-                case "POST", "/wake":
-                    await self.wake()
-                    return empty()
-                case "POST", "/reconcile":
-                    return await self.reconcile(await request.json())
-                case "POST", "/report":
-                    return await self.report(await request.json())
-                case "GET", "/state":
-                    return await self.state()
-            if request.method == "GET" and path.startswith("/event/"):
-                return await self.event(path.removeprefix("/event/"))
-            if request.method == "GET" and path.startswith("/legacy_text/"):
-                # The key was validated by the Worker (api._path_id).
-                return await api.legacy_text(self.env, unquote(path.removeprefix("/legacy_text/")))
+            return await self._route(request)
         except JsException:
             # D1 or storage failed; the platform logs carry the details.
             return error(503, ApiError.UNAVAILABLE)
+        finally:
+            REQUEST_ID.reset(token)
+
+    async def _route(self, request: Any) -> Response:
+        method, url = request.method, urlsplit(request.url)
+        path, env = url.path, self.env
+        # The gateway refuses writes in maintenance first; this keeps the single writer consistent on its own.
+        maintenance = method == "POST" and flag(env, "MAINTENANCE_MODE")
+        if path.startswith("/api/v1/"):
+            owner = _owner(request)
+            if owner is None:
+                return error(401, ApiError.UNAUTHORIZED)
+            if maintenance:
+                return error(503, ApiError.MAINTENANCE)
+            return await api.handle(request, env, self, owner, path)
+        match method, path:
+            case "POST", "/ingest":
+                return error(503, ApiError.MAINTENANCE) if maintenance else await self.ingest(request)
+            case "POST", "/wake":
+                await self.wake()
+                return empty()
+            case "GET", "/setup":
+                return api.setup(env)
+            case "POST", "/newsletter/auth-failure":
+                return await reports.count_auth_failure(env.DB, now_s())
+            case "GET", _ if path in NEWSLETTER_KINDS:
+                return await reports.serve(env, self, NEWSLETTER_KINDS[path], url.query)
         return error(404, ApiError.NOT_FOUND)
 
     async def ingest(self, request: Any) -> Response:
@@ -202,22 +224,10 @@ class TodofyCoordinator(DurableObject):
         if current is None or current > now:
             await self.ctx.storage.setAlarm(now)
 
-    async def reconcile(self, command: dict[str, Any]) -> Response:
-        owner, event_id = command.get("owner"), command.get("event_id")
-        action, version = command.get("action"), command.get("version")
-        action_request_id, task_id = command.get("action_request_id"), command.get("task_id")
-        if (
-            not isinstance(owner, str)
-            or not owner
-            or not isinstance(event_id, str)
-            or not UUID.fullmatch(event_id)
-            or action not in set(Reconcile)
-            or type(version) is not int
-            or not isinstance(action_request_id, str)
-            or not UUID.fullmatch(action_request_id)
-            or (action == Reconcile.TASK_CREATED) != isinstance(task_id, str)
-        ):
-            return error(400, ApiError.INVALID_REQUEST)
+    async def reconcile(
+        self, owner: str, event_id: str, action: str, version: int, action_request_id: str, task_id: str | None
+    ) -> Response:
+        """An owner action on one event (api.reconcile validated the request)."""
         db, now = self.env.DB, now_s()
         request_hash = _request_hash({"event_id": event_id, "action": action, "version": version, "task_id": task_id})
         claim = await ledger.find_action(db, owner, action_request_id, request_hash)
@@ -252,38 +262,25 @@ class TodofyCoordinator(DurableObject):
         await self.wake()
         return await self.event(event_id)
 
-    async def report(self, command: dict[str, Any]) -> Response:
-        kind, top_n, budget_ms = command.get("kind"), command.get("top_n"), command.get("budget_ms")
-        owner, action_request_id = command.get("owner"), command.get("action_request_id")
-        if (
-            kind not in (reports.SUMMARY, reports.RECOMMENDATION)
-            or type(top_n) is not int
-            or not 0 <= top_n <= 10
-            or type(budget_ms) is not int
-            or budget_ms <= 0
-            or (owner is None) != (action_request_id is None)
-            or not isinstance(owner or "", str)
-            or not isinstance(action_request_id or "", str)
-        ):
-            return error(400, ApiError.INVALID_REQUEST)
+    async def recompute(self, owner: str, action_request_id: str, kind: str, top_n: int) -> Response:
+        """The owner's report recompute, replayed by action_request_id (api.recompute validated it)."""
         db, now = self.env.DB, now_s()
-        if owner is not None:
-            claim = await ledger.claim_action(
-                db, owner, action_request_id, "recompute", _request_hash({"kind": kind, "top_n": top_n}), now
-            )
-            if claim.claim == ledger.Claim.CONFLICT:
-                return error(409, ApiError.ACTION_REQUEST_CONFLICT)
-            if claim.claim == ledger.Claim.REPLAY:
-                return self._replayed_report(claim)
-        status, result = await self._compute_report(kind, top_n, now, budget_ms)
-        if owner is not None:
-            stored = json.dumps(result, ensure_ascii=False) if status == 200 else result
-            await ledger.finish_action(db, owner, action_request_id, stored, status)
-        return json_response(result) if status == 200 else _report_error(status, result, now)
+        claim = await ledger.claim_action(
+            db, owner, action_request_id, "recompute", _request_hash({"kind": kind, "top_n": top_n}), now
+        )
+        if claim.claim == ledger.Claim.CONFLICT:
+            return error(409, ApiError.ACTION_REQUEST_CONFLICT)
+        if claim.claim == ledger.Claim.REPLAY:
+            return self._replayed_report(claim)
+        status, result = await self.compute_report(kind, top_n, now)
+        stored = json.dumps(result, ensure_ascii=False) if status == 200 else result
+        await ledger.finish_action(db, owner, action_request_id, stored, status)
+        return json_response(result) if status == 200 else reports.report_error(status, result, now)
 
-    async def _compute_report(self, kind: str, top_n: int, now: int, budget_ms: int) -> tuple[int, Any]:
+    async def compute_report(self, kind: str, top_n: int, now: int) -> tuple[int, Any]:
+        """(200, report) or (status, ApiError) for one on-demand report (newsletter or owner)."""
         try:
-            return 200, await reports.compute(self.env, self, kind, top_n, now, budget_ms)
+            return 200, await reports.compute(self.env, self, kind, top_n, now, REPORT_ON_DEMAND_BUDGET * 1000)
         except reports.ReportError as exc:
             return exc.status, exc.code
         except Exception as exc:
@@ -297,7 +294,7 @@ class TodofyCoordinator(DurableObject):
             return error(503, ApiError.UNAVAILABLE)
         if claim.http_status == 200:
             return json_response(json.loads(claim.result_ref or "null"))
-        return _report_error(claim.http_status, claim.result_ref or ApiError.UNAVAILABLE, now_s())
+        return reports.report_error(claim.http_status, ApiError(claim.result_ref or ApiError.UNAVAILABLE), now_s())
 
     async def event(self, event_id: str) -> Response:
         if not UUID.fullmatch(event_id):
@@ -340,30 +337,29 @@ class TodofyCoordinator(DurableObject):
         }
         return json_response(detail)
 
-    async def state(self) -> Response:
+    async def budgets(self) -> dict[str, Any]:
+        """The next alarm and the Gemini/Todoist budgets, in the Overview's API shape."""
         now = now_s()
         usage = self._usage(now)
         blocked_until = self._control()["todoist_blocked_until"]
         alarm = await self.ctx.storage.getAlarm()
-        return json_response(
-            {
-                "next_alarm_at": None if alarm is None else api.timestamp(int(alarm) // 1000),
-                "gemini": {
-                    "day": _day(now),
-                    "token_budget": self._token_budget(),
-                    "reserved_tokens": usage["reserved_tokens"],
-                    "used_tokens": usage["used_tokens"],
-                    "calls": usage["calls"],
-                    "models": gemini_models(self.env),
-                },
-                "todoist": {
-                    "blocked_until": api.timestamp(blocked_until) if blocked_until > now else None,
-                    "window_seconds": TODOIST_WINDOW,
-                    "window_calls": self._todoist_window_calls(now),
-                    "window_limit": TODOIST_WINDOW_LIMIT,
-                },
-            }
-        )
+        return {
+            "next_alarm_at": None if alarm is None else api.timestamp(int(alarm) // 1000),
+            "gemini": {
+                "day": _day(now),
+                "token_budget": self._token_budget(),
+                "reserved_tokens": usage["reserved_tokens"],
+                "used_tokens": usage["used_tokens"],
+                "calls": usage["calls"],
+                "models": gemini_models(self.env),
+            },
+            "todoist": {
+                "blocked_until": api.timestamp(blocked_until) if blocked_until > now else None,
+                "window_seconds": TODOIST_WINDOW,
+                "window_calls": self._todoist_window_calls(now),
+                "window_limit": TODOIST_WINDOW_LIMIT,
+            },
+        }
 
     # ---- budgets (also used by reports.py) ------------------------------------------------
 

@@ -23,7 +23,7 @@ def test_timeout_really_closes_a_hanging_upstream_connection(worker: Worker, fre
 
     worker.wait_event(event_id, {"complete"})
     hung, answered = fresh_gemini.calls_mentioning(event_id)
-    # wrangler.test.toml sets GEMINI_TIMEOUT_MS = 1500; a timeout moves on to the next model.
+    # The core's wrangler.test.toml sets GEMINI_TIMEOUT_MS = 1500; a timeout moves on to the next model.
     assert (hung.model, answered.model) == ("model-a", "model-b")
     assert 1.5 <= answered.at - hung.at < 10
     assert fresh_gemini.wait_for(lambda: fresh_gemini.disconnects, timeout_s=5) == [model_path("model-a")]

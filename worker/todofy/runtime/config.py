@@ -2,7 +2,6 @@
 
 from typing import Any
 
-COORDINATOR_NAME = "inbox-v1"
 DEFAULT_SOURCE_ID = "mail-hero-personal"
 DEFAULT_GEMINI_MODELS = ("gemini-3.8-flash", "gemini-3.7-flash", "gemini-3.5-flash-lite")
 
@@ -24,15 +23,6 @@ def integer(env: Any, name: str, default: int) -> int:
     """A non-negative integer var; anything unparsable falls back to the default."""
     value = var(env, name)
     return int(value) if value.isdigit() else default
-
-
-def local_dev(env: Any) -> bool:
-    """Dev-only switches are ignored unless the public host is a *.localhost name."""
-    return var(env, "TODOFY_PUBLIC_HOST").lower().endswith(".localhost")
-
-
-def coordinator(env: Any) -> Any:
-    return env.COORDINATOR.getByName(COORDINATOR_NAME)
 
 
 def source_id(env: Any) -> str:

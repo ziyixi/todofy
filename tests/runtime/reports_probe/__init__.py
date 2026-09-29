@@ -6,8 +6,8 @@ from pathlib import Path
 
 from tests.runtime.harness import ROOT, Worker, start_worker
 
-# Same runtime as the shipped Worker; D1 with the real migrations and a probe
-# coordinator that answers /report like the real one. No assets or cron.
+# Same runtime as the shipped core; D1 with the real migrations. No assets, cron or
+# Durable Object: the probe passes its own budget to the modules as the coordinator.
 CONFIG = """\
 name = "todofy-reports-probe"
 main = "entry.py"
@@ -21,14 +21,6 @@ binding = "DB"
 database_name = "todofy"
 database_id = "00000000-0000-4000-8000-000000000000"
 migrations_dir = "{migrations}"
-
-[[durable_objects.bindings]]
-name = "COORDINATOR"
-class_name = "ProbeCoordinator"
-
-[[migrations]]
-tag = "v1"
-new_sqlite_classes = ["ProbeCoordinator"]
 """
 
 
