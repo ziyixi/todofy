@@ -1,8 +1,9 @@
 # `packages/edge-auth`: specification
 
-Status: design, written before any code. Both implementations were read at `bf7a769`
-(`origin/docs-mail-hero-integration`) line by line, and the consumption mechanism was tried in a
-throwaway copy (§6). Nothing here is implemented or deployed yet.
+Status: the package itself is implemented in `src/` with its vitest suite in `test/` (§5.5, §8). The
+app adapters, CI and doc edits (§5.4, §6.2 steps 2–4, §7) are not done yet, and nothing is deployed.
+Both implementations were read at `bf7a769` (`origin/docs-mail-hero-integration`) line by line, and the
+consumption mechanism was tried in a throwaway copy (§6).
 
 What the owner asked for: one auth package, maintained once, compiled into every Worker in this
 repository (the Todofy gateway and Mail Hero now, a dashboard later). It is a TypeScript source
@@ -450,6 +451,32 @@ export async function authenticate(request: Request, env: Env): Promise<string> 
 and error mapping. It needs no package change unless it has a genuinely new rule, and a new rule
 becomes a new parameter reviewed against this table.
 
+### 5.5 Implementation notes (decided while writing `src/`)
+
+These are not app-visible for real Access tokens or for tokens either app issued:
+
+- Extra exports: `ACCESS_TOKEN_HEADER`, `ACCESS_TOKEN_COOKIE`, `CSRF_DEFAULT_TTL_SECONDS`,
+  `SIGNED_TOKEN_MAX_CHARS`, `CsrfResult`, `PrivateHeaderOptions`, `base64UrlEncode`, `base64UrlDecode`.
+- Policy numbers are validated and fail closed as `not_configured`: `nbfLeewaySeconds` an integer in
+  0–300, `jwks.ttlMs` and `jwks.refreshCooldownMs` integers in 0–86,400,000; `emailMatch` and
+  `tokenSource` must be one of their literal values. A dev-bypass `principal` that is not a string gives
+  `not_configured`.
+- Certs fetch: `GET`, `accept: application/json`, `redirect: 'manual'`, 5 s timeout. A body over
+  1,000,000 characters is `keys_unavailable`. Only the first 16 members of `keys` are considered (Access
+  publishes two or three), which bounds the import work under the Free plan's CPU limit.
+  Concurrent verifications that need a refetch for the same issuer share one request. A verifier caches
+  at most 8 issuers (oldest dropped).
+- The duplicate-kid rule (#12) counts every object member with that string `kid`, before the other JWK
+  filters, so a kid listed twice is dropped even if one of the entries would be filtered out.
+- `readCookie` ignores a pair without `=` (a cookie with an empty name), so it never matches a named
+  cookie. Mail Hero's former reader also skipped it; Todofy's read it as that name with an empty value.
+  Only a hand-built `Cookie` header can tell the difference.
+- `verifyCsrf` and `issueCsrf` throw `TypeError` for an invalid cookie name (not an RFC 6265 token);
+  `issueCsrf` also for a TTL outside 1 s–30 days or a nonce that is not a string. These are programming
+  errors in an adapter, never request-dependent.
+- The bare padding strings `=` and `==` decode to no bytes, as with Todofy's former decoder; no JSON
+  segment can use this.
+
 ## 6. How the apps consume the package
 
 ### 6.1 Options considered
@@ -475,13 +502,16 @@ becomes a new parameter reviewed against this table.
      "exports": { ".": "./src/index.ts" },
      "scripts": {
        "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.dom.json",
-       "test": "node --test test/*.test.ts"
+       "test": "vitest run"
      },
-     "devDependencies": { "@cloudflare/workers-types": "<pinned>", "typescript": "5.9.3" }
+     "devDependencies": { "@cloudflare/workers-types": "5.20260929.1", "typescript": "5.9.3", "vitest": "4.1.11" }
    }
    ```
 
-   Also a `package-lock.json` for the package's own CI job. `tsconfig.json` uses Todofy's flag set
+   Also a `package-lock.json` for the package's own CI job. The dev dependencies are pinned to the
+   Todofy gateway's exact versions. A consumer's `npm install ../../packages/edge-auth` records them
+   in its lockfile's `../../packages/edge-auth` entry as metadata only; npm does not install them
+   (checked: no `packages/edge-auth/node_modules` appears). `tsconfig.json` uses Todofy's flag set
    (`strict`, `noUncheckedIndexedAccess`, `exactOptionalPropertyTypes`, `noUnused*`,
    `verbatimModuleSyntax`, `isolatedModules`, `allowImportingTsExtensions`, lib `ES2024`, types
    `@cloudflare/workers-types`) plus `erasableSyntaxOnly: true`, which Node's type stripping needs.
@@ -604,7 +634,8 @@ used it in `requireCSRF` and Todofy in `csrf.ts` `signingKey`.
 
 ## 8. Tests
 
-- **Package** (`node --test`, no dependencies; tokens signed with WebCrypto):
+- **Package** (vitest, as the owner asked; tokens signed with Web Crypto, independent of the package's
+  decoder):
   - every row of §2.2 under both app policies;
   - the claim edges `exp = now` / `now+1`, `iat = now+59` / `now+60`, and `nbf` at `now + leeway`
     and `+1`;

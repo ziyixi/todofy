@@ -1,0 +1,9 @@
+{
+  // Mail Hero's lib set (ES2022 + DOM): the DOM's BufferSource rejects Uint8Array<ArrayBufferLike>.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2022", "DOM"]
+  },
+  "include": ["src"]
+}

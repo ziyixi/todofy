@@ -1,0 +1,22 @@
+{
+  "name": "@ziyixi/edge-auth",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "description": "Cloudflare Access JWT, signed double-submit CSRF and private headers, compiled into every Worker in this repository.",
+  "engines": {
+    "node": ">=26"
+  },
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.dom.json",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "5.20260929.1",
+    "typescript": "5.9.3",
+    "vitest": "4.1.11"
+  }
+}
