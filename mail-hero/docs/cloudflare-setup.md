@@ -118,7 +118,7 @@ pattern = "mail-hero.ziyixi.science"
 custom_domain = true
 ```
 
-应用独立校验JWT的签名、issuer、audience、过期和owner；浏览器写操作校验Origin/CSRF。附件只能通过鉴权后路由访问，不要为下载而公开R2。[Custom Domains](https://developers.cloudflare.com/workers/configuration/routing/custom-domains/)、[Access JWT](https://developers.cloudflare.com/cloudflare-one/access-controls/applications/http-apps/authorization-cookie/validating-json/)
+应用独立校验JWT的签名（仅RS256）、issuer、audience、过期和owner；浏览器写操作校验Origin/CSRF。两者由共享包 `packages/edge-auth` 实现，配置项不变。附件只能通过鉴权后路由访问，不要为下载而公开R2。[Custom Domains](https://developers.cloudflare.com/workers/configuration/routing/custom-domains/)、[Access JWT](https://developers.cloudflare.com/cloudflare-one/access-controls/applications/http-apps/authorization-cookie/validating-json/)
 
 当前 Custom Domain 已绑定，`workers_dev=false`、`preview_urls=false`。日常代码更新通过 [GitHub Actions](ci-cd.md) 发布。需要人工维护部署时，在完成构建与验证后，从单仓库的 `mail-hero/` 目录明确使用生产配置：
 

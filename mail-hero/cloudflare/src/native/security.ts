@@ -1,4 +1,5 @@
-import { createRemoteJWKSet, jwtVerify, type JWTVerifyGetKey } from 'jose';
+import { createAccessVerifier, deriveHmacKeyHkdf, issueCsrf, verifyCsrf, withPrivateHeaders,
+  type AccessPolicy, type AccessVerifier, type CsrfPolicy } from '@ziyixi/edge-auth';
 import type { Env } from './types.ts';
 
 const encoder = new TextEncoder();
@@ -41,10 +42,9 @@ export async function decryptCredential(env: Env, revisionID: string, url: strin
   return new TextDecoder().decode(plaintext);
 }
 async function signingKey(env: Env): Promise<CryptoKey> {
-  // Domain separation: confirmation/CSRF tokens use a derived HMAC key.
-  const key = await crypto.subtle.importKey('raw', master(env), 'HKDF', false, ['deriveKey']);
-  return crypto.subtle.deriveKey({ name: 'HKDF', hash: 'SHA-256', salt: encoder.encode('mail-hero'), info: encoder.encode('tokens-v1') },
-    key, { name: 'HMAC', hash: 'SHA-256', length: 256 }, false, ['sign', 'verify']);
+  // Domain separation: confirmation/CSRF tokens use a derived HMAC key. The
+  // salt and info are fixed: CSRF cookies and preview tokens already issued stay valid.
+  return deriveHmacKeyHkdf(master(env), 'mail-hero', 'tokens-v1');
 }
 export async function actionHash(env: Env, value: unknown): Promise<string> {
   // Request deduplication can include a low-entropy password. A plain digest
@@ -91,63 +91,46 @@ export function validateTarget(env: Env, value: string): URL {
   return url;
 }
 
-const remoteKeys = new Map<string, JWTVerifyGetKey>();
-function localRequest(request: Request, env: Env): boolean {
-  const url = new URL(request.url);
-  return env.DEV_AUTH_BYPASS === 'true' && url.protocol === 'http:' &&
-    ['localhost', '127.0.0.1', '[::1]'].includes(url.hostname) && !request.headers.has('CF-Ray');
+// Access JWT and CSRF are the shared packages/edge-auth, with Mail Hero's own
+// parameters (packages/edge-auth/SPEC.md §4, §5.4). Statuses, codes and messages stay here.
+const access = createAccessVerifier(); // module scope: one JWKS cache per isolate
+function accessPolicy(env: Env): AccessPolicy {
+  return {
+    issuer: env.ACCESS_ISSUER, audience: env.ACCESS_AUDIENCE, owner: env.ACCESS_OWNER, aliases: env.ACCESS_OWNER_ALIASES,
+    // Alternate login emails are the same owner, not separate users: exact match, one
+    // canonical principal for CSRF tokens and durable action-idempotency records.
+    emailMatch: 'exact', nbfLeewaySeconds: 0,
+    tokenSource: { emptyHeader: 'missing', cookie: 'first' },
+    jwks: { ttlMs: 600_000, refreshCooldownMs: 30_000 },
+    devBypass: { enabled: env.DEV_AUTH_BYPASS === 'true', hosts: 'loopback-http', principal: 'local-development', whenNotLocal: 'refuse' },
+  };
 }
-function cookie(request: Request, name: string): string | null {
-  const pairs = request.headers.get('Cookie')?.split(';') ?? [];
-  const value = pairs.map(p => p.trim()).find(p => p.startsWith(`${name}=`));
-  return value ? value.slice(name.length + 1) : null;
+export async function authenticate(request: Request, env: Env, verifier: AccessVerifier = access): Promise<string> {
+  const result = await verifier.verify(request, accessPolicy(env));
+  if (result.ok) return result.owner;
+  switch (result.failure) {
+    case 'dev_bypass_refused': throw new HttpError(503, 'invalid_auth_configuration', '开发认证模式仅限本机');
+    case 'not_configured': throw new HttpError(503, 'access_not_configured', '请先配置 Cloudflare Access');
+    case 'missing_token': throw new HttpError(401, 'unauthorized', '需要通过 Cloudflare Access 登录');
+    default: throw new HttpError(401, 'unauthorized', 'Access 登录无效或无权限'); // invalid_token, keys_unavailable
+  }
 }
-export async function authenticate(request: Request, env: Env, keyResolver?: JWTVerifyGetKey): Promise<string> {
-  if (localRequest(request, env)) return 'local-development';
-  if (env.DEV_AUTH_BYPASS === 'true') throw new HttpError(503, 'invalid_auth_configuration', '开发认证模式仅限本机');
-  const issuer = env.ACCESS_ISSUER?.replace(/\/$/, '');
-  const owner = env.ACCESS_OWNER?.trim();
-  const aliasConfig = env.ACCESS_OWNER_ALIASES ?? '';
-  const aliases = aliasConfig.split(',').map(value => value.trim()).filter(Boolean);
-  if (!/^https:\/\/[a-z0-9-]+\.cloudflareaccess\.com$/.test(issuer ?? '') || !env.ACCESS_AUDIENCE || !owner || aliasConfig.length > 2048 || aliases.length > 8) {
-    throw new HttpError(503, 'access_not_configured', '请先配置 Cloudflare Access');
-  }
-  const token = request.headers.get('Cf-Access-Jwt-Assertion') ?? cookie(request, 'CF_Authorization');
-  if (!token || token.length > 16000) throw new HttpError(401, 'unauthorized', '需要通过 Cloudflare Access 登录');
-  let keys = keyResolver ?? remoteKeys.get(issuer);
-  if (!keys) {
-    keys = createRemoteJWKSet(new URL(`${issuer}/cdn-cgi/access/certs`), { timeoutDuration: 5000 });
-    remoteKeys.set(issuer, keys);
-  }
-  try {
-    const { payload } = await jwtVerify(token, keys, { issuer, audience: env.ACCESS_AUDIENCE, algorithms: ['RS256'], requiredClaims: ['exp','iat','sub','email'] });
-    // Alternate login emails are the same owner, not separate users. Preserve
-    // one principal for CSRF tokens and durable action-idempotency records.
-    if (payload.email !== owner && !aliases.some(alias => payload.email === alias)) throw new Error('wrong_owner');
-    return owner;
-  } catch { throw new HttpError(401, 'unauthorized', 'Access 登录无效或无权限'); }
+function csrfPolicy(request: Request, env: Env): CsrfPolicy {
+  // The key is lazy: a missing CREDENTIAL_KEY fails issue (503) and verify (403) as before.
+  return { cookieName: 'mail_hero_csrf', key: () => signingKey(env), nonce: () => crypto.randomUUID(),
+    ttlSeconds: 43200, allowedOrigins: [new URL(request.url).origin] };
 }
 export async function csrfResponse(request: Request, env: Env, owner: string): Promise<Response> {
-  const token = await signToken(env, { kind: 'csrf', owner, nonce: crypto.randomUUID(), exp: Math.floor(Date.now()/1000) + 43200 });
+  const { token, setCookie } = await issueCsrf(request, owner, csrfPolicy(request, env));
   const response = json({ token });
-  response.headers.set('Set-Cookie', `mail_hero_csrf=${token}; Path=/; HttpOnly; SameSite=Strict; Max-Age=43200${new URL(request.url).protocol === 'https:' ? '; Secure' : ''}`);
+  response.headers.set('Set-Cookie', setCookie);
   return response;
 }
 export async function requireCSRF(request: Request, env: Env, owner: string): Promise<void> {
-  const provided = request.headers.get('X-CSRF-Token');
-  if (request.headers.get('Origin') !== new URL(request.url).origin || !provided || provided !== cookie(request, 'mail_hero_csrf')) {
-    throw new HttpError(403, 'csrf_failed', '请刷新页面后再试');
-  }
-  const token = await verifyToken(env, provided);
-  if (token?.kind !== 'csrf' || token.owner !== owner) throw new HttpError(403, 'csrf_failed', '请刷新页面后再试');
+  if (!(await verifyCsrf(request, owner, csrfPolicy(request, env))).ok) throw new HttpError(403, 'csrf_failed', '请刷新页面后再试');
 }
 
+const MAIL_HERO_CSP = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'; frame-src 'self' about:; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'";
 export function privateResponse(response: Response): Response {
-  const result = new Response(response.body, response);
-  result.headers.set('Cache-Control', 'no-store');
-  result.headers.set('X-Content-Type-Options', 'nosniff');
-  result.headers.set('Referrer-Policy', 'no-referrer');
-  result.headers.set('X-Frame-Options', 'DENY');
-  result.headers.set('Content-Security-Policy', "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'; frame-src 'self' about:; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'");
-  return result;
+  return withPrivateHeaders(response, { csp: MAIL_HERO_CSP });
 }

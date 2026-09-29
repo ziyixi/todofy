@@ -2,12 +2,13 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { DatabaseSync } from 'node:sqlite'
 import { readFileSync, readdirSync } from 'node:fs'
-import { generateKeyPair, SignJWT } from 'jose'
+import { exportJWK, generateKeyPair, SignJWT } from 'jose'
+import { createAccessVerifier } from '@ziyixi/edge-auth'
 import { handleAPI } from '../src/native/api.ts'
 import { MAX_ZONE_SEGMENTS, zoneSegments } from '../src/native/api-delivery-stats.ts'
 import { ROUTE_BLOCK_COOLDOWN_MS, ROUTE_BLOCK_GRACE_MS, ROUTE_BLOCK_MAX_RECHECKS, runJob, runMaintenance } from '../src/native/pipeline.ts'
 import { alertSignals, alertSnapshot } from '../src/native/alerts.ts'
-import { authenticate, decryptCredential, encryptCredential, HttpError } from '../src/native/security.ts'
+import { authenticate, csrfResponse, decryptCredential, encryptCredential, HttpError, privateResponse, requireCSRF } from '../src/native/security.ts'
 
 // Real SQLite executes the production migration and SQL. This fixture emulates
 // only D1's small binding surface; workerd/remote quotas need separate tests.
@@ -417,30 +418,114 @@ test('native API defaults are archive with no retention, maintenance blocks muta
   assert.ok(overview.data.warnings.some(item => item.includes('维护模式')))
 })
 
+// Test tokens are signed with jose (an independent implementation) and verified by
+// packages/edge-auth through an injected certs fetch, as Access publishes them.
+const ACCESS_KID = 'synthetic-kid'
+async function accessKeys(options = {}) {
+  const keys = await generateKeyPair('RS256', { extractable: true })
+  const jwk = { ...(await exportJWK(keys.publicKey)), kid: ACCESS_KID, alg: 'RS256', use: 'sig' }
+  const certs = []
+  const fetch = options.fetch ?? (async (url, init) => { certs.push({ url, init }); return Response.json({ keys: [jwk] }) })
+  return { privateKey: keys.privateKey, jwk, certs, verifier: createAccessVerifier({ fetch }) }
+}
+function accessToken(env, privateKey, claims = {}, header = { alg: 'RS256', kid: ACCESS_KID }) {
+  let jwt = new SignJWT({ email: env.ACCESS_OWNER, ...claims }).setProtectedHeader(header).setIssuer(env.ACCESS_ISSUER)
+    .setAudience(env.ACCESS_AUDIENCE).setExpirationTime('10m')
+  if (!('iat' in claims)) jwt = jwt.setIssuedAt()
+  if (!('sub' in claims)) jwt = jwt.setSubject('synthetic-user')
+  return jwt.sign(privateKey)
+}
+const unauthorized = message => error => error instanceof HttpError && error.status === 401 && error.code === 'unauthorized' && error.message === message
+
 test('Access validates signature, audience and owner; fake header and remote dev bypass fail closed', async () => {
   const env = environment(); delete env.DEV_AUTH_BYPASS
-  const keys = await generateKeyPair('RS256')
-  const sign = (overrides = {}) => new SignJWT({ email: env.ACCESS_OWNER, ...overrides }).setProtectedHeader({ alg: 'RS256' }).setIssuer(env.ACCESS_ISSUER).setAudience(env.ACCESS_AUDIENCE).setSubject('synthetic-user').setIssuedAt().setExpirationTime('10m').sign(keys.privateKey)
-  const request = async overrides => new Request('https://mail.example.org/api/v1/settings', { headers: { 'Cf-Access-Jwt-Assertion': await sign(overrides) } })
-  assert.equal(await authenticate(await request(), env, async () => keys.publicKey), env.ACCESS_OWNER)
-  await assert.rejects(authenticate(await request(), { ...env, ACCESS_AUDIENCE: 'different-audience' }, async () => keys.publicKey), error => error instanceof HttpError && error.status === 401)
-  await assert.rejects(authenticate(await request({ email: 'other@example.org' }), env, async () => keys.publicKey), error => error instanceof HttpError && error.status === 401)
-  await assert.rejects(authenticate(new Request('https://mail.example.org', { headers: { 'Cf-Access-Jwt-Assertion': 'present-but-not-a-token' } }), env, async () => keys.publicKey), /Access/)
+  const keys = await accessKeys()
+  const request = async claims => new Request('https://mail.example.org/api/v1/settings', { headers: { 'Cf-Access-Jwt-Assertion': await accessToken(env, keys.privateKey, claims) } })
+  assert.equal(await authenticate(await request(), env, keys.verifier), env.ACCESS_OWNER)
+  // The certs come from the pinned issuer as a string URL, with redirects refused.
+  assert.equal(keys.certs[0].url, 'https://test.cloudflareaccess.com/cdn-cgi/access/certs')
+  assert.equal(keys.certs[0].init.redirect, 'manual')
+  await assert.rejects(authenticate(await request(), { ...env, ACCESS_AUDIENCE: 'different-audience' }, keys.verifier), error => error instanceof HttpError && error.status === 401)
+  await assert.rejects(authenticate(await request({ email: 'other@example.org' }), env, keys.verifier), error => error instanceof HttpError && error.status === 401)
+  await assert.rejects(authenticate(new Request('https://mail.example.org', { headers: { 'Cf-Access-Jwt-Assertion': 'present-but-not-a-token' } }), env, keys.verifier), /Access/)
   env.DEV_AUTH_BYPASS = 'true'
   assert.equal((await handleAPI(new Request('https://mail.example.org/api/v1/settings'), env)).status, 503)
+})
+
+test('Access keeps every jose check and the stricter shared ones: RS256 only, kid, iat, nbf, sub, key size', async () => {
+  const env = environment(); delete env.DEV_AUTH_BYPASS
+  const keys = await accessKeys(), now = Math.floor(Date.now() / 1000)
+  const check = token => authenticate(new Request('https://mail.example.org/api/v1/settings', { headers: { 'Cf-Access-Jwt-Assertion': token } }), env, keys.verifier)
+  const invalid = unauthorized('Access 登录无效或无权限')
+  assert.equal(await check(await accessToken(env, keys.privateKey, { nbf: now })), 'owner@example.org')
+  const b64 = value => Buffer.from(typeof value === 'string' ? value : JSON.stringify(value)).toString('base64url')
+  const claims = { iss: env.ACCESS_ISSUER, aud: env.ACCESS_AUDIENCE, sub: 'synthetic-user', email: env.ACCESS_OWNER, iat: now, exp: now + 600 }
+  // Algorithm confusion: an HMAC token keyed with the public JWK, and alg "none".
+  const hmacSecret = new TextEncoder().encode(JSON.stringify(keys.jwk))
+  const small = await crypto.subtle.generateKey({ name: 'RSASSA-PKCS1-v1_5', modulusLength: 1024, publicExponent: new Uint8Array([1, 0, 1]), hash: 'SHA-256' }, true, ['sign', 'verify'])
+  const smallKid = 'small-kid', smallJwk = { ...(await crypto.subtle.exportKey('jwk', small.publicKey)), kid: smallKid, alg: 'RS256', use: 'sig' }
+  const smallVerifier = createAccessVerifier({ fetch: async () => Response.json({ keys: [smallJwk] }) })
+  const raw = async (header, privateKey) => {
+    const head = b64(header) + '.' + b64(claims)
+    return head + '.' + Buffer.from(await crypto.subtle.sign('RSASSA-PKCS1-v1_5', privateKey, new TextEncoder().encode(head))).toString('base64url')
+  }
+  assert.equal(await check(await raw({ alg: 'RS256', kid: ACCESS_KID }, keys.privateKey)), 'owner@example.org')
+  const smallToken = await raw({ alg: 'RS256', kid: smallKid }, small.privateKey)
+  for (const token of [
+    await new SignJWT(claims).setProtectedHeader({ alg: 'HS256', kid: ACCESS_KID }).sign(hmacSecret),
+    `${b64({ alg: 'none', kid: ACCESS_KID })}.${b64(claims)}.`,
+    await accessToken(env, keys.privateKey, {}, { alg: 'RS256' }),                         // no kid
+    await accessToken(env, keys.privateKey, {}, { alg: 'RS256', kid: 'unknown-kid' }),
+    await raw({ alg: 'RS256', kid: ACCESS_KID, crit: ['exp'], exp: 1 }, keys.privateKey),   // jose also refused unknown crit
+    await accessToken(env, keys.privateKey, { iat: now + 3600 }),                           // jose accepted a future iat
+    await accessToken(env, keys.privateKey, { nbf: now + 5 }),                              // 0 s nbf leeway, as before
+    await accessToken(env, keys.privateKey, { sub: '' }),                                   // jose accepted an empty sub
+    await accessToken(env, keys.privateKey, { sub: undefined }),
+    await new SignJWT({ email: env.ACCESS_OWNER }).setProtectedHeader({ alg: 'RS256', kid: ACCESS_KID }).setIssuer(env.ACCESS_ISSUER)
+      .setAudience(env.ACCESS_AUDIENCE).setSubject('synthetic-user').setExpirationTime('10m').sign(keys.privateKey),  // no iat
+  ]) await assert.rejects(check(token), invalid)
+  await assert.rejects(authenticate(new Request('https://mail.example.org/', { headers: { 'Cf-Access-Jwt-Assertion': smallToken } }), env, smallVerifier), invalid)
+})
+
+test('Access token source, certs failures and dev bypass keep their former statuses and messages', async () => {
+  const env = environment(); delete env.DEV_AUTH_BYPASS
+  const keys = await accessKeys(), token = await accessToken(env, keys.privateKey)
+  const at = (headers, url = 'https://mail.example.org/api/v1/settings') => authenticate(new Request(url, { headers }), env, keys.verifier)
+  const missing = unauthorized('需要通过 Cloudflare Access 登录')
+  await assert.rejects(at({}), missing)
+  await assert.rejects(at({ 'Cf-Access-Jwt-Assertion': '', Cookie: `CF_Authorization=${token}` }), missing)  // an empty header is missing
+  await assert.rejects(at({ 'Cf-Access-Jwt-Assertion': 'x'.repeat(16001) }), missing)
+  assert.equal(await at({ Cookie: `other=1; CF_Authorization=${token}; CF_Authorization=stale` }), 'owner@example.org')  // first cookie
+  await assert.rejects(at({ Cookie: `CF_Authorization=stale; CF_Authorization=${token}` }), unauthorized('Access 登录无效或无权限'))
+  for (const fetch of [async () => new Response('down', { status: 500 }), async () => { throw new Error('offline') },
+    async () => new Response(null, { status: 302, headers: { Location: 'https://elsewhere.example.org/certs' } }), async () => new Response('not json')]) {
+    const failing = createAccessVerifier({ fetch })
+    await assert.rejects(authenticate(new Request('https://mail.example.org/', { headers: { 'Cf-Access-Jwt-Assertion': token } }), env, failing), unauthorized('Access 登录无效或无权限'))
+  }
+  const local = { ...env, DEV_AUTH_BYPASS: 'true' }
+  for (const url of ['http://127.0.0.1:8787/api/v1/settings', 'http://localhost/', 'http://[::1]:8787/'])
+    assert.equal(await authenticate(new Request(url), local, keys.verifier), 'local-development')
+  for (const [url, headers] of [['https://localhost/', {}], ['http://mail.example.org/', {}], ['http://127.0.0.1:8787/', { 'CF-Ray': 'abc' }], ['http://app.localhost/', {}]]) {
+    await assert.rejects(authenticate(new Request(url, { headers }), local, keys.verifier),
+      error => error instanceof HttpError && error.status === 503 && error.code === 'invalid_auth_configuration' && error.message === '开发认证模式仅限本机')
+  }
+  for (const bad of [{ ACCESS_ISSUER: 'https://evil.example.org' }, { ACCESS_AUDIENCE: '' }, { ACCESS_OWNER_ALIASES: 'a'.repeat(2049) }]) {
+    await assert.rejects(authenticate(new Request('https://mail.example.org/', { headers: { 'Cf-Access-Jwt-Assertion': token } }), { ...env, ...bad }, keys.verifier),
+      error => error instanceof HttpError && error.status === 503 && error.code === 'access_not_configured' && error.message === '请先配置 Cloudflare Access')
+  }
 })
 
 test('Access aliases preserve one canonical owner and still require every JWT check', async () => {
   const env = environment(); delete env.DEV_AUTH_BYPASS
   env.ACCESS_OWNER = '  owner@example.org  '
   env.ACCESS_OWNER_ALIASES = ' github-owner@example.org, , second-login@example.org '
-  const keys = await generateKeyPair('RS256'), unrelatedKeys = await generateKeyPair('RS256')
+  const keys = await accessKeys(), unrelatedKeys = await generateKeyPair('RS256')
   const sign = (email, overrides = {}, privateKey = keys.privateKey) => new SignJWT({ email })
-    .setProtectedHeader({ alg: 'RS256' }).setIssuer(overrides.issuer ?? env.ACCESS_ISSUER)
+    .setProtectedHeader({ alg: 'RS256', kid: ACCESS_KID }).setIssuer(overrides.issuer ?? env.ACCESS_ISSUER)
     .setAudience(overrides.audience ?? env.ACCESS_AUDIENCE).setSubject('synthetic-user')
     .setIssuedAt().setExpirationTime(overrides.expires ?? '10m').sign(privateKey)
   const request = token => new Request('https://mail.example.org/api/v1/settings', { headers: { 'Cf-Access-Jwt-Assertion': token } })
-  const authenticateToken = token => authenticate(request(token), env, async () => keys.publicKey)
+  const authenticateToken = token => authenticate(request(token), env, keys.verifier)
   for (const email of ['owner@example.org', 'github-owner@example.org', 'second-login@example.org']) {
     assert.equal(await authenticateToken(await sign(email)), 'owner@example.org')
   }
@@ -459,16 +544,79 @@ test('Access aliases preserve one canonical owner and still require every JWT ch
 test('Access aliases cannot replace a missing canonical owner or exceed the personal alias limit', async () => {
   const env = environment(); delete env.DEV_AUTH_BYPASS
   env.ACCESS_OWNER_ALIASES = 'github-owner@example.org'
-  const keys = await generateKeyPair('RS256')
-  const token = await new SignJWT({ email: 'github-owner@example.org' }).setProtectedHeader({ alg: 'RS256' })
-    .setIssuer(env.ACCESS_ISSUER).setAudience(env.ACCESS_AUDIENCE).setSubject('synthetic-user')
-    .setIssuedAt().setExpirationTime('10m').sign(keys.privateKey)
+  const keys = await accessKeys()
+  const token = await accessToken(env, keys.privateKey, { email: 'github-owner@example.org' })
   const request = new Request('https://mail.example.org/api/v1/settings', { headers: { 'Cf-Access-Jwt-Assertion': token } })
   for (const owner of [undefined, '', '   ']) {
-    await assert.rejects(authenticate(request, { ...env, ACCESS_OWNER: owner }, async () => keys.publicKey), error => error instanceof HttpError && error.status === 503)
+    await assert.rejects(authenticate(request, { ...env, ACCESS_OWNER: owner }, keys.verifier), error => error instanceof HttpError && error.status === 503)
   }
   const aliases = Array.from({ length: 9 }, (_, i) => `login-${i}@example.org`).join(',')
-  await assert.rejects(authenticate(request, { ...env, ACCESS_OWNER_ALIASES: aliases }, async () => keys.publicKey), error => error instanceof HttpError && error.status === 503)
+  await assert.rejects(authenticate(request, { ...env, ACCESS_OWNER_ALIASES: aliases }, keys.verifier), error => error instanceof HttpError && error.status === 503)
+})
+
+// Minted by the pre-package security.ts (CREDENTIAL_KEY "12"×32, fixed nonce, exp 2100-01-01):
+// a CSRF cookie already in a browser must keep working across the deploy.
+const GOLDEN_CSRF = 'eyJraW5kIjoiY3NyZiIsIm93bmVyIjoib3duZXJAZXhhbXBsZS5vcmciLCJub25jZSI6IjAwMDAwMDAwLTAwMDAtNDAwMC04MDAwLTAwMDAwMDAwMDAwMCIsImV4cCI6NDEwMjQ0NDgwMH0.PsGfEZ9TSpWDV8E-z6nAAyrq-o4zpAHqNtPXxFlC1ac'
+
+test('an existing mail_hero_csrf token and a real Access login pass handleAPI through the default verifier', async t => {
+  const env = environment(); delete env.DEV_AUTH_BYPASS
+  env.ACCESS_ISSUER = 'https://golden.cloudflareaccess.com'  // own issuer: the module verifier caches per issuer
+  const keys = await accessKeys(), certs = []
+  t.mock.method(globalThis, 'fetch', async (url, init) => { certs.push({ url, init }); return Response.json({ keys: [keys.jwk] }) })
+  const jwt = await accessToken(env, keys.privateKey)
+  const write = (csrf, origin = 'https://mail.example.org') => handleAPI(new Request('https://mail.example.org/api/v1/settings', {
+    method: 'PATCH', body: JSON.stringify({ version: 1, send_paused: true }),
+    headers: { 'Cf-Access-Jwt-Assertion': jwt, Origin: origin, Cookie: `mail_hero_csrf=${csrf}`, 'X-CSRF-Token': csrf, 'Content-Type': 'application/json' } }), env)
+  const accepted = await write(GOLDEN_CSRF)
+  assert.equal(accepted.status, 200, await accepted.clone().text())
+  assert.deepEqual(certs.map(call => [call.url, call.init.redirect]), [['https://golden.cloudflareaccess.com/cdn-cgi/access/certs', 'manual']])
+  // A browser serialises Origin in lowercase; the shared check compares case-insensitively (SPEC §4 #27).
+  assert.equal((await write(GOLDEN_CSRF, 'https://attacker.example')).status, 403)
+  const tampered = GOLDEN_CSRF.slice(0, -1) + (GOLDEN_CSRF.endsWith('c') ? 'd' : 'c')
+  const rejected = await write(tampered)
+  assert.equal(rejected.status, 403)
+  assert.deepEqual({ ...(await rejected.json()).error, request_id: undefined }, { code: 'csrf_failed', message: '请刷新页面后再试', request_id: undefined })
+  // A token minted for the local-development principal is not the Access owner's.
+  const local = await csrfResponse(new Request('http://127.0.0.1:8787/api/v1/csrf'), env, 'local-development')
+  assert.equal((await write((await local.json()).token)).status, 403)
+})
+
+test('CSRF issue keeps the cookie, token claims and key failures of the former code', async () => {
+  const env = environment()
+  const issued = await csrfResponse(new Request('https://mail.example.org/api/v1/csrf'), env, 'owner@example.org')
+  const { token } = await issued.json()
+  assert.equal(issued.headers.get('Set-Cookie'), `mail_hero_csrf=${token}; Path=/; HttpOnly; SameSite=Strict; Max-Age=43200; Secure`)
+  assert.equal(issued.headers.get('Cache-Control'), 'no-store')
+  assert.equal(issued.headers.get('X-Content-Type-Options'), 'nosniff')
+  const claims = JSON.parse(Buffer.from(token.split('.')[0], 'base64url').toString())
+  assert.deepEqual(Object.keys(claims), ['kind', 'owner', 'nonce', 'exp'])
+  assert.equal(claims.kind, 'csrf'); assert.equal(claims.owner, 'owner@example.org')
+  assert.match(claims.nonce, /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/)
+  assert.ok(Math.abs(claims.exp - (Math.floor(Date.now() / 1000) + 43200)) <= 1)
+  const plain = await csrfResponse(new Request('http://127.0.0.1:8787/api/v1/csrf'), env, 'owner@example.org')
+  assert.equal(plain.headers.get('Set-Cookie').endsWith('Max-Age=43200'), true)
+  const request = value => new Request('https://mail.example.org/api/v1/settings', { method: 'PATCH',
+    headers: { Origin: 'https://mail.example.org', Cookie: `mail_hero_csrf=${value}; mail_hero_csrf=other`, 'X-CSRF-Token': value } })
+  await requireCSRF(request(token), env, 'owner@example.org')
+  await requireCSRF(request(GOLDEN_CSRF), env, 'owner@example.org')
+  // A missing CREDENTIAL_KEY: issuing fails as an internal error (503 service_unavailable), verifying as csrf_failed.
+  const noKey = { ...env, CREDENTIAL_KEY: '' }
+  await assert.rejects(csrfResponse(new Request('https://mail.example.org/api/v1/csrf'), noKey, 'owner@example.org'), error => !(error instanceof HttpError))
+  const csrfFailed = error => error instanceof HttpError && error.status === 403 && error.code === 'csrf_failed'
+  await assert.rejects(requireCSRF(request(GOLDEN_CSRF), noKey, 'owner@example.org'), csrfFailed)
+  const unavailable = await handleAPI(new Request('http://127.0.0.1:8787/api/v1/csrf'), noKey)
+  assert.equal(unavailable.status, 503)
+  assert.equal((await unavailable.json()).error.code, 'service_unavailable')
+})
+
+test('private responses carry the exact Mail Hero headers, including the sandboxed-HTML frame-src', async () => {
+  const response = privateResponse(new Response('x', { status: 201, headers: { 'Cache-Control': 'public, max-age=60', 'X-Other': 'kept' } }))
+  assert.equal(response.status, 201)
+  assert.equal(await response.text(), 'x')
+  assert.deepEqual(Object.fromEntries(response.headers), {
+    'cache-control': 'no-store', 'content-security-policy': "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'; frame-src 'self' about:; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'",
+    'content-type': 'text/plain;charset=UTF-8', 'referrer-policy': 'no-referrer', 'x-content-type-options': 'nosniff', 'x-frame-options': 'DENY', 'x-other': 'kept',
+  })
 })
 
 test('mutations require matching signed owner CSRF cookie and same-origin request', async () => {

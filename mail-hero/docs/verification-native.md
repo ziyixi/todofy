@@ -228,3 +228,9 @@ HTTP 接管、容器重建存活与 Mail Hero 解析测试不能代替用户测�
 - 本地验证：Worker 120项、前端64项（另在 `TZ=America/Los_Angeles` 与 `TZ=Asia/Kolkata` 下各跑一次）、部署配置3项通过；审查脚本覆盖418个时区无问题。
 - 正式发布：[原生检查与部署36369687379](https://github.com/ziyixi/mail-hero/actions/runs/36369687379)成功，Cloudflare 于02:25:58 UTC部署 Worker 版本 `db94db68-574b-4fed-9622-142be277f694`；未认证访问仍由 Access 拦截。尚未由 owner 在浏览器中实际查看新概览。
 
+
+## 共享鉴权包 `packages/edge-auth`（2026-09-29，仅本地）
+
+- 改动：`security.ts` 的 Access JWT、CSRF 签发/校验与私有响应头改用单仓库共享包 `packages/edge-auth`（`file:` 依赖编译进 Worker，仅 Web Crypto）；`jose` 移出运行时依赖，只留作测试签发合成 JWT。错误状态、错误码与文案、`mail_hero_csrf` cookie、token 格式和 HKDF 密钥不变；预览 token、`actionHash`、Webhook 凭据加密及备份机器 API 的 Bearer 校验仍是本应用代码。按 `packages/edge-auth/SPEC.md` §4，校验在 jose 基础上收紧：必须有 kid、iat 不得超前60秒、sub 为非空字符串、数值声明必须有限、CSRF 只接受规范签名与整数 exp；Origin 比较改为不区分大小写（浏览器总是发送小写，SPEC §4 #27 待 owner 确认）。
+- 本地验证：Worker 143项（新增5项：旧代码签发的 golden CSRF token 经 `handleAPI` 与默认验证器通过；RS256 以外算法、alg none、HMAC 混淆、缺 kid、未知 kid、crit、未来 iat、nbf+5秒、空/缺 sub、缺 iat、1024位 RSA 均为401；certs 500/异常/302/非 JSON 均为401“Access 登录无效或无权限”；token 来源、开发绕过和配置失败的状态与文案；CSRF cookie 属性、声明顺序与 UUID nonce、缺 `CREDENTIAL_KEY` 时签发503/校验403；私有响应头逐字节）、前端64项、部署配置3项、备份29项（1项跳过）通过；类型检查、UI 构建通过；占位生产配置的 Wrangler dry-run 打包含 `packages/edge-auth/src`，不含 jose。
+- 未完成：尚未部署；真实 Access 登录（主邮箱与 alias）和一次真实写操作需在发布后由 owner 在浏览器确认，出现401即回滚该提交。

@@ -1,12 +1,12 @@
 # GitHub Actions 原生部署
 
-Mail Hero 位于单仓库的 `mail-hero/` 目录，与 `todofy/` 共用根目录的 `.github/workflows/ci.yml`（"CI and deploy"，说明见根 [README](../../README.md)）。任何分支的 push 若相对累计基准改动了 `mail-hero/`、`contracts/` 或 `.github/`，`Mail Hero checks` job 就在 `mail-hero/` 下安装 lockfile 中的依赖、检查 TypeScript、执行 Worker 和 React 测试、构建 UI，并用占位值生成配置做 Wrangler dry-run；`Contracts` job 检查 `contracts/mail-received-v1` 的 golden payload 仍由当前 `buildPayload` 逐字节生成，并由 Todofy 解析。Worker 测试包含真正的 workerd D1/R2/SQLite Durable Object 绑定与合成大附件。Node 使用 26，Actions 固定到已核实的提交 SHA。
+Mail Hero 位于单仓库的 `mail-hero/` 目录，与 `todofy/` 共用根目录的 `.github/workflows/ci.yml`（"CI and deploy"，说明见根 [README](../../README.md)）。任何分支的 push 若相对累计基准改动了 `mail-hero/`、`packages/edge-auth/`（编译进本Worker的共享鉴权包）、`contracts/` 或 `.github/`，`Mail Hero checks` job 就在 `mail-hero/` 下安装 lockfile 中的依赖、检查 TypeScript、执行 Worker 和 React 测试、构建 UI，并用占位值生成配置做 Wrangler dry-run；`Contracts` job 检查 `contracts/mail-received-v1` 的 golden payload 仍由当前 `buildPayload` 逐字节生成，并由 Todofy 解析。Worker 测试包含真正的 workerd D1/R2/SQLite Durable Object 绑定与合成大附件。Node 使用 26，Actions 固定到已核实的提交 SHA。
 
 累计基准不是上一个提交：`main` 上是该 workflow 最近一次成功的 `main` push run 的提交，因此失败或排队时被取消的 run 中的改动会由下一次 run 重新检查并发布；其他分支上是与 `origin/main` 的 merge base，分支 head 的 `CI gate` 覆盖整个分支。找不到可用基准（首次运行、API 错误、基准不是祖先）时全部运行。
 
-只有 `main` 上相对该基准改动了 `mail-hero/` 的 push，或在 `main` 上手工运行并选择 `both`/`mail-hero`，且 `Mail Hero checks` 与 `CI gate` 成功，`Mail Hero deploy` 才进入 GitHub `production` environment。只改 `contracts/` 或 `.github/` 会重新检查但不发布。部署从同一提交重新构建 UI，生成专用原生配置，先做 Wrangler dry-run，再依次应用 D1 migrations、发布 Worker。并发部署排队，不中断正在应用的 migration。非 `main` 分支不接触生产密钥。
+只有 `main` 上相对该基准改动了 `mail-hero/` 或 `packages/edge-auth/` 的 push，或在 `main` 上手工运行并选择 `both`/`mail-hero`，且 `Mail Hero checks` 与 `CI gate` 成功，`Mail Hero deploy` 才进入 GitHub `production` environment。只改 `contracts/` 或 `.github/` 会重新检查但不发布。部署从同一提交重新构建 UI，生成专用原生配置，先做 Wrangler dry-run，再依次应用 D1 migrations、发布 Worker。并发部署排队，不中断正在应用的 migration。非 `main` 分支不接触生产密钥。
 
-这条流水线发布 Cloudflare Worker 和静态资源，使用现有D1、R2和SQLite DO资源。来源邮箱转发、Access策略及根域MX由各自设置管理；流水线不会创建新的Cloudflare收费计划。Todofy 在同一仓库的 `todofy/` 中，由独立的 `Todofy checks`/`Todofy deploy` job 发布；两者只共享 `contracts/`，互不导入代码，发布互不依赖。
+这条流水线发布 Cloudflare Worker 和静态资源，使用现有D1、R2和SQLite DO资源。来源邮箱转发、Access策略及根域MX由各自设置管理；流水线不会创建新的Cloudflare收费计划。Todofy 在同一仓库的 `todofy/` 中，由独立的 `Todofy checks`/`Todofy deploy` job 发布；两者只共享 `contracts/` 与 `packages/`（目前是 `packages/edge-auth`，由各自Worker编译进去），互不导入代码；共享包改动会同时检查并发布两者，其余发布互不依赖。
 
 独立的根目录 `.github/workflows/mail-hero-backup-image.yml`（仅在 `mail-hero/deploy/backup/**`、`mail-hero/cloudflare/migrations/**` 或该文件变更时运行）发布新的 package `ghcr.io/ziyixi/mail-hero-backup-collector`。旧 package `ghcr.io/ziyixi/mail-hero-backup` 仍关联到原 `ziyixi/mail-hero` 仓库，不再更新；服务器继续使用 Compose 中已固定的旧 digest，直到下一次升级收集器时改为新 package 的 digest。它先运行合成备份/恢复及调度测试，再构建 `linux/amd64` 镜像；非 `main` 分支只构建，main发布使用当前工作流的 `GITHUB_TOKEN`，只有发布job获得 `packages: write`。镜像带源码revision标签、`sha-<完整提交>`标签及不可变digest。无需新增长期GitHub token，也不向构建过程提供邮件、备份凭据或Cloudflare管理密钥。新 package 首次发布后核对其为 public，服务器才可匿名拉取。
 

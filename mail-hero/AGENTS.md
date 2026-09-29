@@ -85,7 +85,7 @@ React页面保持收件箱、邮件详情、交付/尝试、目标、设置和�
 
 详情必须以纯文本显示 `parse_error`、`needs_review` 与 `warnings`，不能把尚未展开的嵌套/TNEF附件猜成完整正文。聚合overview前台每五分钟刷新并共享缓存，提供人工刷新；不要用高频全表聚合耗尽D1每日读限额。
 
-UI与API验证Access JWT的签名、issuer、audience、过期和唯一owner。不同登录提供商可通过 `ACCESS_OWNER_ALIASES` 明确列出同一人的已核实邮箱，均映射到 `ACCESS_OWNER`，不增加其他管理员；Cloudflare 策略也必须按精确邮箱和相应提供商限制。浏览器mutation还需Origin+CSRF。邮件下载no-store、nosniff；R2保持私有。任何替代域名/预览路径不得绕过鉴权。
+UI与API验证Access JWT的签名、issuer、audience、过期和唯一owner。JWT、CSRF和私有响应头由单仓库共享的 `packages/edge-auth` 实现（编译进本Worker，不是独立Worker，无运行时依赖），`cloudflare/src/native/security.ts` 只传入Mail Hero的参数（精确邮箱匹配、nbf 0秒、首个 `CF_Authorization` cookie、仅loopback http的开发绕过、本应用CSP）并保留自己的状态码、错误码和文案；只接受RS256且必须有kid，JWKS拒绝重定向并要求≥2048位RSA。CSRF cookie `mail_hero_csrf`、token格式及由 `CREDENTIAL_KEY` HKDF（salt `mail-hero`、info `tokens-v1`）派生的密钥保持不变，已签发的token继续有效。改变这些参数即改变Mail Hero行为，需先按 `packages/edge-auth/SPEC.md` §4 核对；不要在本应用内重新实现或复制鉴权。不同登录提供商可通过 `ACCESS_OWNER_ALIASES` 明确列出同一人的已核实邮箱，均映射到 `ACCESS_OWNER`，不增加其他管理员；Cloudflare 策略也必须按精确邮箱和相应提供商限制。浏览器mutation还需Origin+CSRF。邮件下载no-store、nosniff；R2保持私有。任何替代域名/预览路径不得绕过鉴权。
 
 管理API保持现有前端所需合同，以 `cloudflare/src/native/api.ts`、共享类型及测试为准；通用事件以 `../contracts/mail-received-v1/` 的说明和JSON Schema为准。
 
@@ -127,6 +127,7 @@ D1 Time Travel Free7天只恢复D1，不恢复R2、DO或secrets。完整备份�
 - 保留 `cloudflare/` 原生Worker/D1迁移与测试、`web/`、静态构建输出位置 `uiassets/dist/`、通用事件合同和部署/备份工具。不要恢复已经移除的Go服务、PostgreSQL schema、SMTP服务器或中转Worker。`deploy/backup/`中的Dockerfile只封装备份工具，Compose配置属于独立部署仓库。
 - 正式发布从GitHub Actions的同一已验证提交构建UI、应用向后兼容的D1 migration并发布Worker。PR不使用生产密钥。`production` environment只用于授权的main发布；暂停和维护配置需同步GitHub variables，避免下次发布覆盖运维状态。
 - Todofy在同一仓库的 `todofy/`，由根工作流的 `Todofy checks`/`Todofy deploy` 独立检查和发布。Mail Hero不构建、不部署Todofy，也不因Todofy改动而发布。
+- 应用之间互不导入；共享代码只在根目录 `contracts/` 与 `packages/`。`cloudflare/package.json` 以 `file:../../packages/edge-auth` 依赖共享鉴权包并由打包器编译进Worker；`packages/edge-auth/` 改动会重新检查并发布Mail Hero（及其他使用它的应用）。`jose` 仅作为测试签发合成JWT的devDependency。
 - 备份镜像由根目录 `.github/workflows/mail-hero-backup-image.yml` 测试并发布到GHCR新package `ghcr.io/ziyixi/mail-hero-backup-collector`（旧package `mail-hero-backup` 关联原仓库；服务器在下一次升级前继续使用已固定的旧digest），服务器只拉取固定digest，不手工构建。Worker和备份镜像各自发布；备份CI不接触生产凭据或真实邮件。
 - 仓库清理不删除任何生产数据库、桶、邮件、源邮箱转发设置或其他项目资源；不自动导入真实邮件。部署成功、HTTP接管和完整Todofy/Todoist业务验收分别记录。
 
