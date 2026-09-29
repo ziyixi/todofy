@@ -1,4 +1,4 @@
-# One workflow for both apps. "changes" decides what a push touched (.github/scripts/ci_changes.py),
+# One workflow for both apps. "changes" decides what changed since a cumulative base (.github/scripts/ci_changes.py),
 # each app's checks run from its own directory, "Contracts" runs both sides of mail.received.v1, and
 # "CI gate" is the single status check to require. Deploys run only on main, only for the app that
 # changed (or was dispatched), after the gate passes. See README.md "CI".
@@ -31,6 +31,10 @@ jobs:
     name: Changes
     runs-on: ubuntu-24.04
     timeout-minutes: 5
+    permissions:
+      contents: read
+      # Read this workflow's own past runs: the last successful main run is the change-detection base.
+      actions: read
     outputs:
       todofy_check: ${{ steps.decide.outputs.todofy_check }}
       mail_hero_check: ${{ steps.decide.outputs.mail_hero_check }}
@@ -41,17 +45,32 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-          # The full history, so github.event.before can be diffed (and a force push detected).
+          # The full history of every branch: the base (last successful main run, or the merge base
+          # with origin/main) must be in the clone.
           fetch-depth: 0
       - name: Test the change detection
         run: python3 -m unittest discover -s .github/scripts
+      # Only for a push to main. A run that failed or was cancelled (also while pending in the
+      # concurrency group) is not "success", so its changes stay in this run's diff. Any error here
+      # leaves the base empty, and an empty base runs everything.
+      - name: Find the last successful push run on main
+        id: last
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          sha=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml/runs?branch=main&event=push&status=success&per_page=1" \
+            --jq '.workflow_runs[0].head_sha // empty') || sha=''
+          echo "Last successful main run: ${sha:-none}"
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
       - name: Decide which apps to check and deploy
         id: decide
         env:
           EVENT_NAME: ${{ github.event_name }}
-          BEFORE: ${{ github.event.before }}
+          REF: ${{ github.ref }}
           AFTER: ${{ github.sha }}
           DISPATCH_APP: ${{ inputs.app }}
+          LAST_SUCCESS: ${{ steps.last.outputs.sha }}
         run: python3 .github/scripts/ci_changes.py
 
   todofy-checks:
@@ -265,7 +284,18 @@ jobs:
   todofy-deploy:
     name: Todofy deploy
     needs: [changes, todofy-checks, gate]
-    if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && needs.changes.outputs.todofy_deploy == 'true'
+    # Keep the status function and the results explicit. "gate" needs Mail Hero checks, which is skipped
+    # when only Todofy changed; a bare condition gets an implicit success() that looks at the whole needs
+    # chain, sees that skipped job and skips this deploy too (actions/runner#491, #2205).
+    # .github/scripts/test_ci_changes.py checks this shape.
+    if: >-
+      ${{ !cancelled()
+      && needs.changes.result == 'success'
+      && needs.todofy-checks.result == 'success'
+      && needs.gate.result == 'success'
+      && github.ref == 'refs/heads/main'
+      && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+      && needs.changes.outputs.todofy_deploy == 'true' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     environment:
@@ -388,7 +418,15 @@ jobs:
   mail-hero-deploy:
     name: Mail Hero deploy
     needs: [changes, mail-hero-checks, gate]
-    if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && needs.changes.outputs.mail_hero_deploy == 'true'
+    # Explicit status function and results, as for Todofy deploy (implicit success() and skipped ancestors).
+    if: >-
+      ${{ !cancelled()
+      && needs.changes.result == 'success'
+      && needs.mail-hero-checks.result == 'success'
+      && needs.gate.result == 'success'
+      && github.ref == 'refs/heads/main'
+      && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+      && needs.changes.outputs.mail_hero_deploy == 'true' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     environment:

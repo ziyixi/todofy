@@ -21,7 +21,7 @@ a manual run. Actions are pinned by commit SHA.
 
 | Job | Runs when | Does |
 | --- | --- | --- |
-| `Changes` | always | Tests and runs [`.github/scripts/ci_changes.py`](.github/scripts/ci_changes.py): `git diff --name-only` between `github.event.before` and the pushed commit. A new branch, force push or unknown `before` runs everything. A manual run's `app` input (`both`, `todofy`, `mail-hero`) selects the apps |
+| `Changes` | always | Tests and runs [`.github/scripts/ci_changes.py`](.github/scripts/ci_changes.py): `git diff --name-only` from a cumulative base to the pushed commit. On `main` the base is the commit of the last successful push run of this workflow on `main` (read with the job's `actions: read` token), so changes from a failed or cancelled run, including one cancelled while pending, are checked and deployed by the next run. On other branches the base is `git merge-base origin/main HEAD`, so the head commit's gate covers the whole branch. No usable base (first run, API error, base not an ancestor) runs everything. A manual run's `app` input (`both`, `todofy`, `mail-hero`) selects the apps |
 | `Todofy checks` | `todofy/`, `contracts/` or `.github/` changed | Everything Todofy's CI ran, from `todofy/`: ruff, host tests, gateway lint/typecheck/tests, UI API check/typecheck/tests/build and the no-Mail-Hero guard, workerd runtime tests, placeholder config dry-run of both Workers |
 | `Mail Hero checks` | `mail-hero/`, `contracts/` or `.github/` changed | Everything Mail Hero's CI ran, from `mail-hero/`: config and backup tool tests, Worker typecheck and tests (workerd bindings, contract fixtures), UI typecheck/tests/build, plus a placeholder config dry-run |
 | `Contracts` | any app, `contracts/` or `.github/` changed | Mail Hero rebuilds every golden fixture byte for byte; Todofy validates and parses every fixture |
@@ -31,6 +31,16 @@ a manual run. Actions are pinned by commit SHA.
 
 A change to only `contracts/` or `.github/` re-checks both apps but deploys neither; dispatch on `main` to
 redeploy an app. Root-only files (`README.md`, `AGENTS.md`) run only `Changes` and `CI gate`.
+
+The deploy jobs' `if:` must stay explicit: `!cancelled()` plus `needs.<job>.result == 'success'` for every
+job they need. `CI gate` needs both apps' check jobs and one of them is skipped whenever only the other app
+changed; a condition without a status function gets an implicit `success()` that also sees that skipped
+ancestor and would skip the deploy ([actions/runner#2205](https://github.com/actions/runner/issues/2205)).
+`test_ci_changes.py` (run by `Changes`) fails if a job after the gate loses this shape.
+
+The first push run of this workflow on `main` has no earlier successful run of it and therefore checks and
+deploys both apps. (The Go-era `ci.yml` of the old Todofy repository shares the file name; its last green
+`main` commit is either an ancestor, whose diff covers both apps, or not, which also runs everything.)
 
 [`.github/workflows/mail-hero-backup-image.yml`](.github/workflows/mail-hero-backup-image.yml) builds Mail
 Hero's backup collector when `mail-hero/deploy/backup/**` or `mail-hero/cloudflare/migrations/**` change: other
