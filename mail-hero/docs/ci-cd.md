@@ -1,8 +1,10 @@
 # GitHub Actions 原生部署
 
-Mail Hero 位于单仓库的 `mail-hero/` 目录，与 `todofy/` 共用根目录的 `.github/workflows/ci.yml`（"CI and deploy"，说明见根 [README](../../README.md)）。任何分支的 push 若改动 `mail-hero/`、`contracts/` 或 `.github/`，`Mail Hero checks` job 就在 `mail-hero/` 下安装 lockfile 中的依赖、检查 TypeScript、执行 Worker 和 React 测试、构建 UI，并用占位值生成配置做 Wrangler dry-run；`Contracts` job 检查 `contracts/mail-received-v1` 的 golden payload 仍由当前 `buildPayload` 逐字节生成，并由 Todofy 解析。Worker 测试包含真正的 workerd D1/R2/SQLite Durable Object 绑定与合成大附件。Node 使用 26，Actions 固定到已核实的提交 SHA。
+Mail Hero 位于单仓库的 `mail-hero/` 目录，与 `todofy/` 共用根目录的 `.github/workflows/ci.yml`（"CI and deploy"，说明见根 [README](../../README.md)）。任何分支的 push 若相对累计基准改动了 `mail-hero/`、`contracts/` 或 `.github/`，`Mail Hero checks` job 就在 `mail-hero/` 下安装 lockfile 中的依赖、检查 TypeScript、执行 Worker 和 React 测试、构建 UI，并用占位值生成配置做 Wrangler dry-run；`Contracts` job 检查 `contracts/mail-received-v1` 的 golden payload 仍由当前 `buildPayload` 逐字节生成，并由 Todofy 解析。Worker 测试包含真正的 workerd D1/R2/SQLite Durable Object 绑定与合成大附件。Node 使用 26，Actions 固定到已核实的提交 SHA。
 
-只有 `main` 上改动了 `mail-hero/` 的 push，或在 `main` 上手工运行并选择 `both`/`mail-hero`，且 `CI gate` 成功，`Mail Hero deploy` 才进入 GitHub `production` environment。只改 `contracts/` 或 `.github/` 会重新检查但不发布。部署从同一提交重新构建 UI，生成专用原生配置，先做 Wrangler dry-run，再依次应用 D1 migrations、发布 Worker。并发部署排队，不中断正在应用的 migration。非 `main` 分支不接触生产密钥。
+累计基准不是上一个提交：`main` 上是该 workflow 最近一次成功的 `main` push run 的提交，因此失败或排队时被取消的 run 中的改动会由下一次 run 重新检查并发布；其他分支上是与 `origin/main` 的 merge base，分支 head 的 `CI gate` 覆盖整个分支。找不到可用基准（首次运行、API 错误、基准不是祖先）时全部运行。
+
+只有 `main` 上相对该基准改动了 `mail-hero/` 的 push，或在 `main` 上手工运行并选择 `both`/`mail-hero`，且 `Mail Hero checks` 与 `CI gate` 成功，`Mail Hero deploy` 才进入 GitHub `production` environment。只改 `contracts/` 或 `.github/` 会重新检查但不发布。部署从同一提交重新构建 UI，生成专用原生配置，先做 Wrangler dry-run，再依次应用 D1 migrations、发布 Worker。并发部署排队，不中断正在应用的 migration。非 `main` 分支不接触生产密钥。
 
 这条流水线发布 Cloudflare Worker 和静态资源，使用现有D1、R2和SQLite DO资源。来源邮箱转发、Access策略及根域MX由各自设置管理；流水线不会创建新的Cloudflare收费计划。Todofy 在同一仓库的 `todofy/` 中，由独立的 `Todofy checks`/`Todofy deploy` job 发布；两者只共享 `contracts/`，互不导入代码，发布互不依赖。
 
@@ -32,6 +34,9 @@ Mail Hero 位于单仓库的 `mail-hero/` 目录，与 `todofy/` 共用根目录
 | `MAIL_HERO_MAINTENANCE_MODE` | 明确设为 `true` 或 `false`，正常运行是 `false` |
 | `MAIL_HERO_INGEST_DAILY_MESSAGE_LIMIT` | 可省略，默认 `300` |
 | `MAIL_HERO_INGEST_DAILY_BYTE_LIMIT` | 可省略，默认 `268435456` |
+| `MAIL_HERO_BACKUP_BUCKET_NAME` | 已启用备份时必须照旧设置（现有私有备份桶名）；省略则发布的 Worker 没有 `BACKUP_STORE` binding，备份 API 不可用 |
+| `MAIL_HERO_ALERT_WEBHOOK_URL` | 可选，见 [cloudflare-setup.md](cloudflare-setup.md) 的告警说明；已使用时必须照旧设置 |
+| `MAIL_HERO_ALERT_WEBHOOK_ALLOWED_HOSTS` | 可选，省略时沿用 `MAIL_HERO_WEBHOOK_ALLOWED_HOSTS` |
 
 在 `production` environment 添加 secrets：
 

@@ -13,11 +13,15 @@ secrets, and GitHub masks them.
 
 | Event | `Todofy checks` | `Todofy deploy` |
 |---|---|---|
-| push to any branch touching `todofy/`, `contracts/` or `.github/` | runs | only on `main`, and only when `todofy/` changed |
-| push touching none of those | skipped | no |
+| push to any branch where `todofy/`, `contracts/` or `.github/` changed since the base | runs | only on `main`, and only when `todofy/` changed since the base |
+| push where none of those changed since the base | skipped | no |
 | `workflow_dispatch` with app `both` or `todofy` | runs | only when dispatched on `main` |
 
-A push whose previous commit is unknown (a new branch or a force push) runs everything.
+The base is cumulative, not the previous commit. On `main` it is the commit of the last successful push
+run of the workflow on `main`, so a Todofy change whose run failed or was cancelled (even while pending
+behind another run) is checked and deployed by the next run, whatever that run touched. On a branch it is
+the merge base with `origin/main`, so the branch head's `CI gate` covers every change on the branch. No
+usable base (the first run, an API error, a base that is not an ancestor) runs everything.
 
 There are no pull requests. Work happens on a branch (every push runs the checks); `main` is updated by a
 fast-forward push of a branch whose head passed:
