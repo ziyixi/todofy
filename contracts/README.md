@@ -11,7 +11,7 @@ The webhook Mail Hero POSTs to its consumer. Mail Hero owns it.
 | `mail-received-v1.md` | Semantics: identity, retries, delivery status, content limits (Chinese) |
 | `mail-received-v1.schema.json` | The single JSON Schema. Todofy's OpenAPI (`todofy/api/owner-api-v1.openapi.yaml`) and tests reference it by relative path; there is no copy |
 | `fixtures/*.json` | Golden webhook bodies, exact bytes, written by Mail Hero's real `parseMail` + `buildPayload` from synthetic mail (`mail-hero/cloudflare/test/contract-fixtures.mjs`) |
-| `fixtures/legacy/*.json` | Frozen bodies from older builders. Retries resend frozen bytes, so consumers keep accepting them; nothing regenerates them |
+| `fixtures/legacy/*.json` | Frozen bodies from older builders. Retries resend frozen bytes, so consumers keep accepting them; nothing regenerates them. Each file's SHA-256 is pinned in both apps' contract tests, so any byte change fails CI; adding a legacy file means adding its hash on both sides |
 
 Checks, all run by the `Contracts` CI job (and by each app's own tests):
 

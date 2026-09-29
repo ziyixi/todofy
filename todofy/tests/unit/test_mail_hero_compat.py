@@ -8,6 +8,7 @@ produces these exact bytes, so an incompatible builder change reaches this test 
 retries resend frozen bytes, so Todofy keeps accepting it.
 """
 
+import hashlib
 import json
 from datetime import UTC, datetime
 
@@ -57,9 +58,15 @@ def test_every_fixture_matches_the_published_schema(name):
     assert errors == []
 
 
-def test_only_legacy_fixtures_are_frozen():
-    legacy = {path.stem for path in (mail_contract.CONTRACT / "fixtures" / "legacy").glob("*.json")}
-    assert legacy == {"pre_storage_v1"}
+# Frozen bytes: retries resend them, so they are never edited. Mail Hero's contract-fixtures.test.mjs
+# pins the same hashes; either side alone fails CI when a legacy file changes.
+LEGACY_SHA256 = {"pre_storage_v1.json": "9618c81d70e7275c8f324f76cb8989b58e14dd6d1f211fbe61f9dbe9d1b8b48f"}
+
+
+def test_only_legacy_fixtures_are_frozen_byte_for_byte():
+    legacy = mail_contract.CONTRACT / "fixtures" / "legacy"
+    digests = {path.name: hashlib.sha256(path.read_bytes()).hexdigest() for path in legacy.glob("*.json")}
+    assert digests == LEGACY_SHA256
 
 
 @pytest.mark.parametrize("name", NAMES)
