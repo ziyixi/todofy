@@ -1,16 +1,20 @@
 # Mail Hero and Todofy
 
-Two independent Cloudflare apps in one repository, and the one contract between them.
+Two independent Cloudflare apps in one repository, the one contract between them, and the shared code
+compiled into both.
 
 | Directory | What it is | Start here |
 | --- | --- | --- |
 | [`mail-hero/`](mail-hero/) | Personal inbox on Workers Free + D1 + R2 + a SQLite Durable Object: receives mail through Email Routing and POSTs a `mail.received.v1` webhook | [`mail-hero/README.md`](mail-hero/README.md), [`mail-hero/AGENTS.md`](mail-hero/AGENTS.md) |
 | [`todofy/`](todofy/) | The webhook consumer: TypeScript gateway + Python core Workers that turn mail into Todoist tasks, summaries and reminders | [`todofy/README.md`](todofy/README.md), [`todofy/docs/dev-notes.md`](todofy/docs/dev-notes.md) |
 | [`contracts/`](contracts/) | `mail.received.v1`: schema, semantics and golden payloads built by Mail Hero's real builder | [`contracts/README.md`](contracts/README.md) |
+| [`packages/edge-auth/`](packages/edge-auth/) | Shared auth code compiled into every Worker (Todofy gateway, Mail Hero): Cloudflare Access JWT verification, signed double-submit CSRF, private response headers. TypeScript, Web Crypto only, no runtime dependencies; not a Worker of its own | [`packages/edge-auth/README.md`](packages/edge-auth/README.md), [`SPEC.md`](packages/edge-auth/SPEC.md) |
 
-Rules ([`AGENTS.md`](AGENTS.md)): the apps never import each other; only `contracts/` is shared; each app
-deploys on its own. Work inside an app's directory: `cd mail-hero` or `cd todofy`, then follow that app's
-README. Both apps were separate repositories until 2026-09-29; their histories are kept
+Rules ([`AGENTS.md`](AGENTS.md)): the apps never import each other; shared code lives only in `contracts/`
+and `packages/`; each app deploys on its own. An app uses a package through a
+`"file:../../packages/<name>"` dependency and its bundler compiles it in, so a change to a package checks
+and deploys every app that uses it. Work inside an app's directory: `cd mail-hero` or `cd todofy`, then
+follow that app's README. Both apps were separate repositories until 2026-09-29; their histories are kept
 (`git log --follow todofy/<file>`, `git log -- mail-hero/<file>`; Mail Hero's old commit IDs are mapped in
 [`mail-hero/docs/history-map.md`](mail-hero/docs/history-map.md)).
 
@@ -22,15 +26,21 @@ a manual run. Actions are pinned by commit SHA.
 | Job | Runs when | Does |
 | --- | --- | --- |
 | `Changes` | always | Tests and runs [`.github/scripts/ci_changes.py`](.github/scripts/ci_changes.py): `git diff --name-only` from a cumulative base to the pushed commit. On `main` the base is the commit of the last successful push run of this workflow on `main` (read with the job's `actions: read` token), so changes from a failed or cancelled run, including one cancelled while pending, are checked and deployed by the next run. On other branches the base is `git merge-base origin/main HEAD`, so the head commit's gate covers the whole branch. No usable base (first run, API error, base not an ancestor) runs everything. A manual run's `app` input (`both`, `todofy`, `mail-hero`) selects the apps |
-| `Todofy checks` | `todofy/`, `contracts/` or `.github/` changed | Everything Todofy's CI ran, from `todofy/`: ruff, host tests, gateway lint/typecheck/tests, UI API check/typecheck/tests/build and the no-Mail-Hero guard, workerd runtime tests, placeholder config dry-run of both Workers |
-| `Mail Hero checks` | `mail-hero/`, `contracts/` or `.github/` changed | Everything Mail Hero's CI ran, from `mail-hero/`: config and backup tool tests, Worker typecheck and tests (workerd bindings, contract fixtures), UI typecheck/tests/build, plus a placeholder config dry-run |
-| `Contracts` | any app, `contracts/` or `.github/` changed | Mail Hero rebuilds every golden fixture byte for byte; Todofy validates and parses every fixture |
+| `Shared packages` | `packages/<name>/` or `.github/` changed, or a manual run | For every `packages/*/`, from its own directory: `npm ci`, `npm run typecheck`, `npm test` |
+| `Todofy checks` | `todofy/`, `packages/edge-auth/`, `contracts/` or `.github/` changed | Everything Todofy's CI ran, from `todofy/`: ruff, host tests, gateway lint/typecheck/tests, UI API check/typecheck/tests/build and the no-Mail-Hero guard, workerd runtime tests, placeholder config dry-run of both Workers |
+| `Mail Hero checks` | `mail-hero/`, `packages/edge-auth/`, `contracts/` or `.github/` changed | Everything Mail Hero's CI ran, from `mail-hero/`: config and backup tool tests, Worker typecheck and tests (workerd bindings, contract fixtures), UI typecheck/tests/build, plus a placeholder config dry-run |
+| `Contracts` | any app, a package an app uses, `contracts/` or `.github/` changed | Mail Hero rebuilds every golden fixture byte for byte; Todofy validates and parses every fixture |
 | `CI gate` | always | Fails if any job above failed or was cancelled; skipped as unchanged is fine. **The one check to require on `main`** |
-| `Todofy deploy` | `main` only, `todofy/` changed (or dispatched), after `CI gate` | Generate configs, dry-run, D1 migrations, deploy `todofy-core` then the gateway, `/health` and core probes. `production` environment, group `todofy-production` |
-| `Mail Hero deploy` | `main` only, `mail-hero/` changed (or dispatched), after `CI gate` | `generate-ci-config.mjs`, dry-run, D1 migrations, deploy. `production` environment, group `mail-hero-production` |
+| `Todofy deploy` | `main` only, `todofy/` or `packages/edge-auth/` changed (or dispatched), after `CI gate` | Generate configs, dry-run, D1 migrations, deploy `todofy-core` then the gateway, `/health` and core probes. `production` environment, group `todofy-production` |
+| `Mail Hero deploy` | `main` only, `mail-hero/` or `packages/edge-auth/` changed (or dispatched), after `CI gate` | `generate-ci-config.mjs`, dry-run, D1 migrations, deploy. `production` environment, group `mail-hero-production` |
 
 A change to only `contracts/` or `.github/` re-checks both apps but deploys neither; dispatch on `main` to
-redeploy an app. Root-only files (`README.md`, `AGENTS.md`) run only `Changes` and `CI gate`.
+redeploy an app. A change to `packages/edge-auth/` (any file in it) runs `Shared packages` and checks
+**and deploys** both apps, because both Workers compile it in. `ci_changes.py` maps each package to the
+apps that use it (`PACKAGE_USERS`); `test_ci_changes.py` fails unless that map matches every
+`"file:../../packages/<name>"` dependency and lists every `packages/*/` directory, and a package missing
+from it counts as used by both apps. Root-only files (`README.md`, `AGENTS.md`, `packages/README.md`) run
+only `Changes` and `CI gate`.
 
 The deploy jobs' `if:` must stay explicit: `!cancelled()` plus `needs.<job>.result == 'success'` for every
 job they need. `CI gate` needs both apps' check jobs and one of them is skipped whenever only the other app

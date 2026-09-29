@@ -1,6 +1,6 @@
 # GitHub Actions 原生部署
 
-Mail Hero 位于单仓库的 `mail-hero/` 目录，与 `todofy/` 共用根目录的 `.github/workflows/ci.yml`（"CI and deploy"，说明见根 [README](../../README.md)）。任何分支的 push 若相对累计基准改动了 `mail-hero/`、`packages/edge-auth/`（编译进本Worker的共享鉴权包）、`contracts/` 或 `.github/`，`Mail Hero checks` job 就在 `mail-hero/` 下安装 lockfile 中的依赖、检查 TypeScript、执行 Worker 和 React 测试、构建 UI，并用占位值生成配置做 Wrangler dry-run；`Contracts` job 检查 `contracts/mail-received-v1` 的 golden payload 仍由当前 `buildPayload` 逐字节生成，并由 Todofy 解析。Worker 测试包含真正的 workerd D1/R2/SQLite Durable Object 绑定与合成大附件。Node 使用 26，Actions 固定到已核实的提交 SHA。
+Mail Hero 位于单仓库的 `mail-hero/` 目录，与 `todofy/` 共用根目录的 `.github/workflows/ci.yml`（"CI and deploy"，说明见根 [README](../../README.md)）。任何分支的 push 若相对累计基准改动了 `mail-hero/`、`packages/edge-auth/`（编译进本Worker的共享鉴权包）、`contracts/` 或 `.github/`，`Mail Hero checks` job 就在 `mail-hero/` 下安装 lockfile 中的依赖、检查 TypeScript、执行 Worker 和 React 测试、构建 UI，并用占位值生成配置做 Wrangler dry-run；`packages/edge-auth/` 改动时 `Shared packages` job 还会在包自己的目录运行它的 typecheck 与 vitest；`Contracts` job 检查 `contracts/mail-received-v1` 的 golden payload 仍由当前 `buildPayload` 逐字节生成，并由 Todofy 解析。Worker 测试包含真正的 workerd D1/R2/SQLite Durable Object 绑定与合成大附件。Node 使用 26，Actions 固定到已核实的提交 SHA。
 
 累计基准不是上一个提交：`main` 上是该 workflow 最近一次成功的 `main` push run 的提交，因此失败或排队时被取消的 run 中的改动会由下一次 run 重新检查并发布；其他分支上是与 `origin/main` 的 merge base，分支 head 的 `CI gate` 覆盖整个分支。找不到可用基准（首次运行、API 错误、基准不是祖先）时全部运行。
 
@@ -14,7 +14,7 @@ Mail Hero 位于单仓库的 `mail-hero/` 目录，与 `todofy/` 共用根目录
 
 ## 仓库设置
 
-在 GitHub 仓库 Settings → Environments 创建 `production`，将可部署分支限制为 `main`。个人使用可以直接自动部署；若希望每次人工确认，可添加 required reviewer。给 `main` 开启分支保护时，将 `CI gate` 设为 required check（它汇总两个应用及合同检查，未改动而跳过的 job 视为通过）。
+在 GitHub 仓库 Settings → Environments 创建 `production`，将可部署分支限制为 `main`。个人使用可以直接自动部署；若希望每次人工确认，可添加 required reviewer。给 `main` 开启分支保护时，将 `CI gate` 设为 required check（它汇总共享包、两个应用及合同检查，未改动而跳过的 job 视为通过）。
 
 在 Settings → Secrets and variables → Actions 配置以下 repository variables；也可放入 `production` environment variables。值必须与现有资源一致，不要新建重复资源。
 

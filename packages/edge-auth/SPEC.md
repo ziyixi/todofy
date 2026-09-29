@@ -1,7 +1,8 @@
 # `packages/edge-auth`: specification
 
-Status: the package itself is implemented in `src/` with its vitest suite in `test/` (§5.5, §8). The
-app adapters, CI and doc edits (§5.4, §6.2 steps 2–4, §7) are not done yet, and nothing is deployed.
+Status: the package is implemented in `src/` with its vitest suite in `test/` (§5.5, §8); both app
+adapters (§5.4), the CI changes and the doc edits (§7) are implemented on branch `edge-auth`. Nothing is
+deployed, and the tightenings have not been tried with a real Access token (§9).
 Both implementations were read at `bf7a769` (`origin/docs-mail-hero-integration`) line by line, and the
 consumption mechanism was tried in a throwaway copy (§6).
 
@@ -45,7 +46,7 @@ Sources read:
   be affected. Configuration normalisation is unified because both deploy-config generators already
   reject any value on which the two apps would differ.
 - **CI.** `ci_changes.py` maps `packages/edge-auth/` to both apps. A change there checks **and
-  deploys** Todofy and Mail Hero and runs a new `Edge auth package` job, and `CI gate` requires that
+  deploys** Todofy and Mail Hero and runs the `Shared packages` job, and `CI gate` requires that
   job (§7).
 
 ## 2. Current behaviour: Access JWT
@@ -564,6 +565,14 @@ used it in `requireCSRF` and Todofy in `csrf.ts` `signingKey`.
 | Node 26 probe | `modulusLength` present; `crypto.subtle.timingSafeEqual` **absent** |
 
 ## 7. Repository and CI changes (for the implementation commit)
+
+As implemented, §7 differs from the plan below in names only: the output is `packages` (not
+`edge_auth_check`), the map is `PACKAGE_USERS`, and the job is `shared-packages` ("Shared packages"),
+which runs `npm ci`, `npm run typecheck` and `npm test` in every `packages/*/` directory, so a later
+package needs no new job. `packages` is set by a change inside any package or under `.github/`, and by a
+manual run; a `contracts/` change does not run it. The consistency test also accepts a package with no
+users yet (an empty `PACKAGE_USERS` entry), and `test_ci_changes.py` checks that `CI gate` needs and
+reports every job before it.
 
 **`ci_changes.py`**
 

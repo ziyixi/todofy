@@ -4,7 +4,9 @@
 Outputs (GITHUB_OUTPUT, "true"/"false"):
   todofy_check, mail_hero_check  run that app's full checks
   contracts                      run both sides' mail.received.v1 contract tests
-  todofy_deploy, mail_hero_deploy  the app itself changed (deploy jobs also require refs/heads/main)
+  packages                       run every shared package's own checks (packages/*)
+  todofy_deploy, mail_hero_deploy  the app, or a shared package it compiles in, changed
+                                 (deploy jobs also require refs/heads/main)
 
 push: the files changed between a cumulative base and github.sha, never only this push's own diff,
 so a change whose run was cancelled or failed is checked (and deployed) again by the next run.
@@ -15,8 +17,13 @@ so a change whose run was cancelled or failed is checked (and deployed) again by
                  change on the branch, not only the latest push.
   No usable base (no successful main run yet, API failure, base not an ancestor, no origin/main)
   runs everything. An app's own directory checks and deploys it; contracts/ and .github/ re-check
-  both apps but deploy neither.
-workflow_dispatch: the "app" input (both, todofy or mail-hero) checks and deploys that app.
+  both apps but deploy neither. A shared package packages/<name>/ is compiled into the apps listed in
+  PACKAGE_USERS, so any change inside it runs the package checks and checks AND deploys each of
+  those apps. A package missing from PACKAGE_USERS counts as used by both apps (fail safe; the
+  tests run by the Changes job also fail until PACKAGE_USERS matches the file: dependencies). A file
+  directly under packages/ (a README) is root documentation: gate only.
+workflow_dispatch: the "app" input (both, todofy or mail-hero) checks and deploys that app, and the
+shared packages are checked too.
 """
 
 import os
@@ -24,8 +31,10 @@ import subprocess
 import sys
 from collections.abc import Callable, Iterable
 
-KEYS = ("todofy_check", "mail_hero_check", "contracts", "todofy_deploy", "mail_hero_deploy")
+KEYS = ("todofy_check", "mail_hero_check", "contracts", "packages", "todofy_deploy", "mail_hero_deploy")
 DISPATCH = {"both": ("todofy", "mail-hero"), "todofy": ("todofy",), "mail-hero": ("mail-hero",)}
+# packages/<name>/ -> the apps whose Workers compile it in (a "file:../../packages/<name>" dependency).
+PACKAGE_USERS = {"edge-auth": ("todofy", "mail-hero")}
 
 
 def everything() -> dict[str, bool]:
@@ -34,13 +43,19 @@ def everything() -> dict[str, bool]:
 
 def classify(paths: Iterable[str]) -> dict[str, bool]:
     paths = [path for path in paths if path]
-    todofy = any(path.startswith("todofy/") for path in paths)
-    mail_hero = any(path.startswith("mail-hero/") for path in paths)
-    shared = any(path.startswith(("contracts/", ".github/")) for path in paths)
+    apps = {app for app in ("todofy", "mail-hero") if any(path.startswith(f"{app}/") for path in paths)}
+    # packages/<name>/<file>: at least three components; packages/README.md is documentation.
+    package_names = {path.split("/")[1] for path in paths if path.startswith("packages/") and path.count("/") >= 2}
+    for name in package_names:
+        apps.update(PACKAGE_USERS.get(name, ("todofy", "mail-hero")))
+    ci = any(path.startswith(".github/") for path in paths)
+    shared = ci or any(path.startswith("contracts/") for path in paths)
+    todofy, mail_hero = "todofy" in apps, "mail-hero" in apps
     return {
         "todofy_check": todofy or shared,
         "mail_hero_check": mail_hero or shared,
         "contracts": todofy or mail_hero or shared,
+        "packages": bool(package_names) or ci,
         "todofy_deploy": todofy,
         "mail_hero_deploy": mail_hero,
     }
@@ -55,6 +70,7 @@ def dispatched(app: str) -> dict[str, bool]:
         "todofy_check": todofy,
         "mail_hero_check": mail_hero,
         "contracts": True,
+        "packages": True,
         "todofy_deploy": todofy,
         "mail_hero_deploy": mail_hero,
     }

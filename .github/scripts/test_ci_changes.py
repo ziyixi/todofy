@@ -1,5 +1,6 @@
 """Unit tests for ci_changes.py: python3 -m unittest discover -s .github/scripts"""
 
+import json
 import os
 import re
 import subprocess
@@ -11,16 +12,25 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent))
 import ci_changes  # noqa: E402
 
+REPO = Path(__file__).resolve().parents[2]
+
 SHA = "a" * 40
 BASE = "b" * 40
 MAIN = "refs/heads/main"
 BRANCH = "refs/heads/feature"
-WORKFLOW = Path(__file__).resolve().parents[1] / "workflows" / "ci.yml"
+WORKFLOW = REPO / ".github" / "workflows" / "ci.yml"
 T, F = True, False
 
 
-def expect(todofy_check, mail_hero_check, contracts, todofy_deploy, mail_hero_deploy):
-    return dict(zip(ci_changes.KEYS, (todofy_check, mail_hero_check, contracts, todofy_deploy, mail_hero_deploy)))
+def expect(todofy_check, mail_hero_check, contracts, todofy_deploy, mail_hero_deploy, packages=False):
+    return {
+        "todofy_check": todofy_check,
+        "mail_hero_check": mail_hero_check,
+        "contracts": contracts,
+        "packages": packages,
+        "todofy_deploy": todofy_deploy,
+        "mail_hero_deploy": mail_hero_deploy,
+    }
 
 
 def push(paths, ref=MAIN, last_success=BASE, ancestor=True, merge_base=BASE):
@@ -42,15 +52,37 @@ class Classify(unittest.TestCase):
         self.assertEqual(push(paths), expect(T, T, T, F, F))
 
     def test_ci_changes_recheck_everything_but_deploy_nothing(self):
-        self.assertEqual(push([".github/workflows/ci.yml"]), expect(T, T, T, F, F))
-        self.assertEqual(push([".github/scripts/ci_changes.py"]), expect(T, T, T, F, F))
+        self.assertEqual(push([".github/workflows/ci.yml"]), expect(T, T, T, F, F, packages=T))
+        self.assertEqual(push([".github/scripts/ci_changes.py"]), expect(T, T, T, F, F, packages=T))
+
+    def test_a_shared_package_checks_and_deploys_every_app_that_compiles_it_in(self):
+        for path in (
+            "packages/edge-auth/src/access.ts",
+            "packages/edge-auth/package-lock.json",
+            "packages/edge-auth/SPEC.md",
+        ):
+            with self.subTest(path=path):
+                self.assertEqual(push([path]), expect(T, T, T, T, T, packages=T))
+
+    def test_a_package_change_with_one_app_still_deploys_both_users(self):
+        paths = ["packages/edge-auth/src/csrf.ts", "todofy/gateway/src/csrf.ts"]
+        self.assertEqual(push(paths), expect(T, T, T, T, T, packages=T))
+
+    def test_an_unregistered_package_counts_as_used_by_both_apps(self):
+        self.assertEqual(push(["packages/dashboard-kit/src/index.ts"]), expect(T, T, T, T, T, packages=T))
+
+    def test_a_file_directly_under_packages_is_root_documentation(self):
+        self.assertEqual(push(["packages/README.md"]), expect(F, F, F, F, F))
 
     def test_root_documents_run_only_the_gate(self):
         self.assertEqual(push(["README.md", "AGENTS.md", ".gitignore"]), expect(F, F, F, F, F))
         self.assertEqual(push([]), expect(F, F, F, F, F))
 
     def test_prefixes_are_directories_not_name_prefixes(self):
-        self.assertEqual(push(["todofy-notes.md", "mail-hero.md", "contracts.md"]), expect(F, F, F, F, F))
+        self.assertEqual(
+            push(["todofy-notes.md", "mail-hero.md", "contracts.md", "packages.md", "packages-old/x.ts"]),
+            expect(F, F, F, F, F),
+        )
 
     def test_backup_tool_counts_as_mail_hero(self):
         self.assertEqual(push(["mail-hero/deploy/backup/Dockerfile"]), expect(F, T, T, F, T))
@@ -108,10 +140,10 @@ class Dispatch(unittest.TestCase):
         )[0]
 
     def test_inputs_force_one_or_both_apps(self):
-        self.assertEqual(self.dispatch("both"), expect(T, T, T, T, T))
-        self.assertEqual(self.dispatch(""), expect(T, T, T, T, T))
-        self.assertEqual(self.dispatch("todofy"), expect(T, F, T, T, F))
-        self.assertEqual(self.dispatch("mail-hero"), expect(F, T, T, F, T))
+        self.assertEqual(self.dispatch("both"), expect(T, T, T, T, T, packages=T))
+        self.assertEqual(self.dispatch(""), expect(T, T, T, T, T, packages=T))
+        self.assertEqual(self.dispatch("todofy"), expect(T, F, T, T, F, packages=T))
+        self.assertEqual(self.dispatch("mail-hero"), expect(F, T, T, F, T, packages=T))
 
     def test_unknown_input_fails(self):
         with self.assertRaises(ValueError):
@@ -171,7 +203,13 @@ class RealGit(unittest.TestCase):
         self.commit("todofy/worker/a.py")
         p3 = self.commit("mail-hero/docs/b.md")
         outputs = self.main_run(p3, p0)
-        self.assertEqual(outputs, dict.fromkeys(ci_changes.KEYS, "true"))
+        self.assertEqual(outputs, {**dict.fromkeys(ci_changes.KEYS, "true"), "packages": "false"})
+
+    def test_a_failed_package_run_on_main_deploys_both_apps_next_time(self):
+        green = self.commit("README.md")
+        self.commit("packages/edge-auth/src/access.ts")
+        after = self.commit("README.md.orig")
+        self.assertEqual(set(self.main_run(after, green).values()), {"true"})
 
     def test_a_failed_run_on_main_is_repeated(self):
         # Push A changed todofy/ and its run failed (a Mail Hero flake); push B fixes only mail-hero/.
@@ -220,6 +258,42 @@ class RealGit(unittest.TestCase):
         self.assertEqual(set(self.main_run(unrelated, "").values()), {"true"})
 
 
+class PackageUsers(unittest.TestCase):
+    """PACKAGE_USERS must match the repository: every packages/<name>/ directory is registered, and each
+    lists exactly the apps with a "file:" dependency on it (a missing app would never be redeployed)."""
+
+    def file_dependents(self):
+        found = {}
+        for manifest in REPO.glob("*/**/package.json"):
+            relative = manifest.relative_to(REPO)
+            if "node_modules" in relative.parts or relative.parts[0] == "packages":
+                continue
+            data = json.loads(manifest.read_text())
+            for section in ("dependencies", "devDependencies", "optionalDependencies", "peerDependencies"):
+                for spec in data.get(section, {}).values():
+                    if not spec.startswith("file:"):
+                        continue
+                    target = (manifest.parent / spec.removeprefix("file:")).resolve().relative_to(REPO)
+                    if target.parts[0] == "packages":
+                        found.setdefault(target.parts[1], set()).add(relative.parts[0])
+        return found
+
+    def test_every_package_directory_is_registered(self):
+        directories = {path.name for path in (REPO / "packages").iterdir() if (path / "package.json").is_file()}
+        self.assertEqual(directories, set(ci_changes.PACKAGE_USERS))
+
+    def test_users_match_the_file_dependencies(self):
+        found = self.file_dependents()
+        self.assertLessEqual(set(found), set(ci_changes.PACKAGE_USERS))
+        for name, users in ci_changes.PACKAGE_USERS.items():
+            with self.subTest(package=name):
+                self.assertEqual(found.get(name, set()), set(users))
+
+    def test_users_are_apps_this_script_deploys(self):
+        for users in ci_changes.PACKAGE_USERS.values():
+            self.assertLessEqual(set(users), {"todofy", "mail-hero"})
+
+
 class DeployConditions(unittest.TestCase):
     """Every job that needs "CI gate" must spell out its status checks.
 
@@ -229,7 +303,7 @@ class DeployConditions(unittest.TestCase):
     """
 
     def jobs(self):
-        text = WORKFLOW.read_text()
+        text = WORKFLOW.read_text().split("\njobs:\n", 1)[1]
         starts = [
             (match.start(), match.group(1)) for match in re.finditer(r"^  ([a-z][a-z0-9-]*):\n", text, re.MULTILINE)
         ]
@@ -272,6 +346,26 @@ class DeployConditions(unittest.TestCase):
 
     def test_the_gate_always_runs(self):
         self.assertEqual(self.condition(self.jobs()["gate"]), "always()")
+
+    def test_the_gate_needs_and_checks_every_job_before_it(self):
+        blocks = self.jobs()
+        before_gate = {name for name, block in blocks.items() if name != "gate" and "gate" not in self.needs(block)}
+        gate = blocks["gate"]
+        self.assertEqual(set(self.needs(gate)), before_gate)
+        for need in before_gate:
+            with self.subTest(job=need):
+                self.assertIn(f"${{{{ needs.{need}.result }}}}", gate)
+
+    def test_changes_exports_every_output_and_each_is_used(self):
+        blocks = self.jobs()
+        for key in ci_changes.KEYS:
+            with self.subTest(output=key):
+                self.assertIn(f"{key}: ${{{{ steps.decide.outputs.{key} }}}}", blocks["changes"])
+                users = [name for name, block in blocks.items() if f"needs.changes.outputs.{key} == 'true'" in block]
+                self.assertTrue(users, key)
+
+    def test_shared_packages_run_only_when_flagged(self):
+        self.assertEqual(self.condition(self.jobs()["shared-packages"]), "needs.changes.outputs.packages == 'true'")
 
 
 if __name__ == "__main__":

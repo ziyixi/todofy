@@ -29,6 +29,10 @@ npm run typecheck   # against Todofy's lib set (ES2024) and Mail Hero's (ES2022 
 npm test            # vitest
 ```
 
+CI runs the same three commands in the `Shared packages` job. Any change in this directory also checks
+**and deploys** both apps that compile it in (`PACKAGE_USERS` in `.github/scripts/ci_changes.py`); a new
+app that depends on this package must be added there, and `test_ci_changes.py` fails until it is.
+
 Source rules (both apps' toolchains compile it): relative imports end in `.ts`; erasable TypeScript
 only (no `enum`, `namespace` or parameter properties); no DOM-only type names; no `Buffer` and no
 `crypto.subtle.timingSafeEqual`; state only in objects the app creates.

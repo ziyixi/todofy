@@ -1,7 +1,8 @@
 # One workflow for both apps. "changes" decides what changed since a cumulative base (.github/scripts/ci_changes.py),
-# each app's checks run from its own directory, "Contracts" runs both sides of mail.received.v1, and
-# "CI gate" is the single status check to require. Deploys run only on main, only for the app that
-# changed (or was dispatched), after the gate passes. See README.md "CI".
+# each app's checks run from its own directory, "Shared packages" checks packages/* (compiled into the apps),
+# "Contracts" runs both sides of mail.received.v1, and "CI gate" is the single status check to require.
+# Deploys run only on main, only for the app that changed (itself or a shared package it compiles in, or
+# was dispatched), after the gate passes. See README.md "CI".
 name: CI and deploy
 
 on:
@@ -39,6 +40,7 @@ jobs:
       todofy_check: ${{ steps.decide.outputs.todofy_check }}
       mail_hero_check: ${{ steps.decide.outputs.mail_hero_check }}
       contracts: ${{ steps.decide.outputs.contracts }}
+      packages: ${{ steps.decide.outputs.packages }}
       todofy_deploy: ${{ steps.decide.outputs.todofy_deploy }}
       mail_hero_deploy: ${{ steps.decide.outputs.mail_hero_deploy }}
     steps:
@@ -79,6 +81,35 @@ jobs:
           DISPATCH_APP: ${{ inputs.app }}
           LAST_SUCCESS: ${{ steps.last.outputs.sha }}
         run: python3 .github/scripts/ci_changes.py
+
+  # Each shared package's own typecheck and tests, from its own directory with its own lockfile. The apps'
+  # checks compile the same source through their file: dependency, so they run too (ci_changes.py).
+  shared-packages:
+    name: Shared packages
+    needs: changes
+    if: needs.changes.outputs.packages == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: '26'
+          cache: npm
+          cache-dependency-path: packages/*/package-lock.json
+      - name: Typecheck and test every package
+        run: |
+          found=0
+          for manifest in packages/*/package.json; do
+            dir=${manifest%/package.json}
+            echo "::group::$dir"
+            (cd "$dir" && npm ci --no-audit --no-fund && npm run typecheck && npm test)
+            echo "::endgroup::"
+            found=1
+          done
+          test "$found" = 1
 
   todofy-checks:
     name: Todofy checks
@@ -264,7 +295,7 @@ jobs:
 
   gate:
     name: CI gate
-    needs: [changes, todofy-checks, mail-hero-checks, contracts]
+    needs: [changes, shared-packages, todofy-checks, mail-hero-checks, contracts]
     if: always()
     runs-on: ubuntu-24.04
     timeout-minutes: 5
@@ -272,12 +303,13 @@ jobs:
       - name: Require every needed job to pass or be skipped as unchanged
         env:
           CHANGES: ${{ needs.changes.result }}
+          PACKAGES: ${{ needs.shared-packages.result }}
           TODOFY: ${{ needs.todofy-checks.result }}
           MAIL_HERO: ${{ needs.mail-hero-checks.result }}
           CONTRACTS: ${{ needs.contracts.result }}
         run: |
           failed=0
-          for pair in "Changes=$CHANGES" "Todofy checks=$TODOFY" "Mail Hero checks=$MAIL_HERO" "Contracts=$CONTRACTS"; do
+          for pair in "Changes=$CHANGES" "Shared packages=$PACKAGES" "Todofy checks=$TODOFY" "Mail Hero checks=$MAIL_HERO" "Contracts=$CONTRACTS"; do
             echo "$pair"
             case "${pair#*=}" in
               success|skipped) ;;

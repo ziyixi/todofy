@@ -84,7 +84,7 @@ Mail Hero 的“已交付”只表示 Todofy 已把事件提交到 D1。之后�
 
 ## 发布
 
-两个应用都由根目录 `.github/workflows/ci.yml` 发布：`Mail Hero deploy` 只在 `mail-hero/` 改动时运行，`Todofy deploy` 只在 `todofy/` 改动时运行，都等待 `CI gate`（`main` 的 required check）；只改 `contracts/` 时两边重新检查但都不发布。详见根 [README](../../README.md) 与 [CI/CD](ci-cd.md)。
+两个应用都由根目录 `.github/workflows/ci.yml` 发布：`Mail Hero deploy` 只在 `mail-hero/` 改动时运行，`Todofy deploy` 只在 `todofy/` 改动时运行，两者共同编译进的鉴权包 `packages/edge-auth/` 改动时两者都发布，都等待 `CI gate`（`main` 的 required check）；只改 `contracts/` 时两边重新检查但都不发布。详见根 [README](../../README.md) 与 [CI/CD](ci-cd.md)。
 
 ## 切换记录（2026-09-29 UTC）
 

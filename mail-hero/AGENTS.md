@@ -17,7 +17,7 @@
 - 产品是个人版 CloudMailin：一个固定地址、每天约50–100封、完整收件UI、持久状态与可靠webhook。不是50–100QPS，不增加多地址CRUD或多租户平台。
 - Mail Hero应用全托管在Cloudflare，维护TypeScript Worker和React UI。业务数据库使用D1；SQLite DO负责持久调度。不添加Go、PostgreSQL或自建邮件服务入口。用户另行授权的备份收集器使用独立Docker Compose服务，不能与应用运行架构混淆。
 - 使用Workers Free，目标$0/月，低量预算$1–2/月；未经明确授权不升级Workers Paid或开启不需要的收费产品。R2需订阅且超额计费，预算提醒不是硬消费上限，免费量按账户共享。
-- 唯一地址由Worker `RECEIVE_ADDRESS`配置。Todofy是可选、独立的HTTPS webhook消费者。它现在位于同一单仓库的 `todofy/`（自己的Cloudflare Worker、D1与部署），但仍是独立消费者：Mail Hero不导入它的代码/包，不访问其数据库，不共享发布周期；两者之间只共享根目录 `contracts/` 中的 `mail.received.v1` 合同。
+- 唯一地址由Worker `RECEIVE_ADDRESS`配置。Todofy是可选、独立的HTTPS webhook消费者。它现在位于同一单仓库的 `todofy/`（自己的Cloudflare Worker、D1与部署），但仍是独立消费者：Mail Hero不导入它的代码/包，不访问其数据库，不共享发布周期；两者之间只共享根目录 `contracts/` 中的 `mail.received.v1` 合同，以及编译进各自Worker的 `packages/` 共享代码（目前是鉴权包 `packages/edge-auth`，见§4、§8）。只有共享包改动会同时检查并发布两者。
 - 已授权的账户配置可继续；真实邮件内容、原邮箱自动转发、消费者真实业务副作用和根域现有邮箱不能被无声改动。专用子域设置若要求替换根域现有MX，停止核查，保护主邮箱。
 - 不读取、打印、提交真实邮件、私有env、token、凭据、生产数据库或备份内容；验证用合成fixture。账户配置权限不等于读取个人邮件的授权。
 - 不索取密钥到聊天。已确认需要用户登录或保存token时明确最小步骤，不换渠道绕过。不要覆盖其他任务变更；未获授权不commit/push。
