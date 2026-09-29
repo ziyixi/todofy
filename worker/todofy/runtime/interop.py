@@ -26,8 +26,36 @@ def now_ms() -> int:
     return int(js.Date.now())
 
 
+def now_s() -> int:
+    """Unix seconds, the unit of every D1 time column."""
+    return now_ms() // 1000
+
+
 def utc_now() -> datetime:
     return datetime.fromtimestamp(now_ms() / 1000, UTC)
+
+
+async def read_capped(stream: Any, limit: int) -> bytes | None:
+    """Read a JS ReadableStream (or None) fully; None once it exceeds ``limit`` bytes.
+
+    A chunked upload has no Content-Length, so the cap is enforced while reading
+    and the rest of an oversized body is never buffered.
+    """
+    if stream is None:
+        return b""
+    reader = stream.getReader()
+    chunks: list[bytes] = []
+    size = 0
+    while True:
+        chunk = await reader.read()
+        if chunk.done:
+            return b"".join(chunks)
+        data = chunk.value.to_bytes()
+        size += len(data)
+        if size > limit:
+            await reader.cancel()
+            return None
+        chunks.append(data)
 
 
 @dataclass(frozen=True)

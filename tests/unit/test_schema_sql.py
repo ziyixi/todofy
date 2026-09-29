@@ -103,6 +103,7 @@ def test_tables_and_indexes_are_exactly_the_planned_ones(db):
         "daily_reports_day",
         "owner_actions_created",
         "legacy_mail_text_expires",
+        "legacy_mail_text_created",
     }
 
 
@@ -234,10 +235,19 @@ def test_attention_page_uses_the_vocabulary_rule(db):
     assert db.execute(count_sql, (SOURCE, cutoff)).fetchone() == (2,)
 
 
+INSERT_VALUES = re.compile(r"INSERT INTO (\w+) \([^)]*\) VALUES ")
+
+
 @pytest.mark.parametrize("name", QUERIES)
 def test_query_uses_its_index(db, name):
     sql, index, sort_allowed = QUERIES[name]
     plan = [row[3] for row in db.execute(f"EXPLAIN QUERY PLAN {sql}", (None,) * sql.count("?"))]
+    if (insert := INSERT_VALUES.match(sql)) is not None:
+        # A plain INSERT ... VALUES has no plan; it must name a unique key of its table.
+        assert not plan, plan
+        unique = {row[1] for row in db.execute(f"PRAGMA index_list({insert.group(1)})") if row[2]}
+        assert index in unique, unique
+        return
     partial = {row[0] for row in db.execute("SELECT name FROM sqlite_master WHERE sql LIKE '%INDEX%WHERE%'")}
     assert any(re.search(rf"\bINDEX {index}\b", step) for step in plan), plan
     for step in plan:

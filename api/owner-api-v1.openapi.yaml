@@ -282,7 +282,9 @@ paths:
           schema: {type: string, format: uuid}
       requestBody:
         required: true
-        description: At most 1 MiB, sent with `Content-Length`.
+        description: |
+          At most 1 MiB. A declared `Content-Length` over 1 MiB is 413 before the body is read;
+          without `Content-Length` the body is read up to 1 MiB and anything longer is 413.
         content:
           application/json:
             schema: {$ref: './mail-received-v1.schema.json'}
@@ -291,7 +293,6 @@ paths:
         '400': {$ref: '#/components/responses/BadRequest'}
         '401': {$ref: '#/components/responses/Unauthorized'}
         '409': {$ref: '#/components/responses/Conflict'}
-        '411': {$ref: '#/components/responses/LengthRequired'}
         '413': {$ref: '#/components/responses/PayloadTooLarge'}
         '415': {$ref: '#/components/responses/UnsupportedMediaType'}
         '503': {$ref: '#/components/responses/Unavailable'}
@@ -429,11 +430,6 @@ components:
       content:
         application/json:
           schema: {$ref: '#/components/schemas/Error'}
-    LengthRequired:
-      description: '`length_required`.'
-      content:
-        application/json:
-          schema: {$ref: '#/components/schemas/Error'}
     PayloadTooLarge:
       description: '`payload_too_large`: over 1 MiB.'
       content:
@@ -490,7 +486,6 @@ components:
         - version_conflict
         - action_not_allowed
         - action_request_conflict
-        - length_required
         - payload_too_large
         - unsupported_media_type
         - rate_limited

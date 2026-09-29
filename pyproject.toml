@@ -33,5 +33,5 @@ ignore = ["RUF001", "RUF002", "RUF003"]
 
 [tool.pytest.ini_options]
 pythonpath = ["worker", "."]
-testpaths = ["tests"]
+testpaths = ["tests", "tools", "deploy"]
 addopts = "-ra --import-mode=importlib"

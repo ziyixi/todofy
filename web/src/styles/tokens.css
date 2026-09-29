@@ -1,0 +1,39 @@
+/* The fixed token set. Components use only these; tints are derived with color-mix. */
+:root {
+  color-scheme: light;
+  --bg: #f5f6f3;
+  --surface: #ffffff;
+  --fg: #1b2220;
+  --muted: #5e6a65;
+  --border: #dde2de;
+  --accent: #2b6b5a;
+  --danger: #b4382f;
+  --warn: #9a5b00;
+  --ok: #2c7a4b;
+
+  --text-s: 0.8125rem;
+  --text-m: 0.9375rem;
+  --text-l: 1.25rem;
+
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 16px;
+  --space-4: 24px;
+
+  --radius: 10px;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    color-scheme: dark;
+    --bg: #111513;
+    --surface: #191e1c;
+    --fg: #e4eae7;
+    --muted: #97a39e;
+    --border: #2b3330;
+    --accent: #6cc2a6;
+    --danger: #f07b71;
+    --warn: #e2a84c;
+    --ok: #6fcf97;
+  }
+}

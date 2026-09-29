@@ -3,7 +3,8 @@
 Rules follow the Go consumer (mail_inbox.go:67-122 @ 6c46ed4) and the published
 schema (api/mail-received-v1.schema.json). Where they differ the schema wins:
 typed optional fields must have their JSON type (Go silently accepted null),
-``received_at`` must be UTC with ``Z`` and attachment enums are checked. Unknown
+``received_at`` must be UTC with ``Z`` and attachment enums are checked. A
+``sent_at`` year Python cannot hold reads as unknown rather than failing. Unknown
 fields are ignored so Mail Hero can add optional ones.
 """
 
@@ -33,6 +34,9 @@ UUID = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}
 _RFC3339 = re.compile(
     r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\.[0-9]{1,9})?(?:Z|[+-][0-9]{2}:[0-9]{2})"
 )
+# Mail Hero sends toISOString() of the sender's Date header; for a year outside
+# 1..9999 Python cannot represent it, so the send time is unknown.
+_JS_OUT_OF_RANGE = re.compile(r"(?:[+-][0-9]{6}|0000)-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\.[0-9]{1,9})?Z")
 _ZERO_TIME = datetime(1, 1, 1, tzinfo=UTC)
 
 
@@ -115,7 +119,6 @@ def parse_mail_event(raw: bytes) -> MailEvent:
     if utf8_len(subject) > MAX_SUBJECT_BYTES or utf8_len(text) > MAX_TEXT_BYTES:
         raise ContractError("too_long")
 
-    sent_at = message["sent_at"]
     rfc_message_id = message["rfc_message_id"]
     event = MailEvent(
         event_id=_uuid(top["event_id"]),
@@ -124,7 +127,7 @@ def parse_mail_event(raw: bytes) -> MailEvent:
         from_addresses=_addresses(message["from"]),
         to_addresses=_addresses(message["to"]),
         subject=subject,
-        sent_at=None if sent_at is None else _timestamp(sent_at),
+        sent_at=_sent_at(message["sent_at"]),
         rfc_message_id=None if rfc_message_id is None else _string(rfc_message_id),
         text=text,
         attachments=_attachments(message["attachments"]),
@@ -181,6 +184,12 @@ def _timestamp(value: Any) -> datetime:
         return datetime.fromisoformat(value)
     except ValueError:
         raise ContractError("timestamp") from None
+
+
+def _sent_at(value: Any) -> datetime | None:
+    if value is None or (isinstance(value, str) and _JS_OUT_OF_RANGE.fullmatch(value)):
+        return None
+    return _timestamp(value)
 
 
 def _boolean(value: Any) -> bool:

@@ -1,6 +1,6 @@
 import re
 
-from tests.runtime.harness import AUTH, Worker
+from tests.runtime.harness import AUTH, PYODIDE_CACHE, Worker
 
 NAVIGATE = {"accept": "text/html", "sec-fetch-mode": "navigate"}
 
@@ -10,9 +10,14 @@ def test_health_reports_the_build_on_the_hooks_host(worker: Worker) -> None:
     assert (response.status_code, response.json()) == (200, {"build": "test"})
 
 
+def test_workerd_reuses_a_cached_pyodide_bundle(worker: Worker) -> None:
+    """Dev servers must not download Pyodide on every start (see harness._cached_workerd)."""
+    assert list(PYODIDE_CACHE.glob("pyodide_*.capnp.bin"))
+
+
 def test_unknown_hosts_get_404(worker: Worker) -> None:
     with worker.client("other.example") as client:
-        for path in ("/health", "/", "/api/v1/spike/coordinator"):
+        for path in ("/health", "/", "/api/v1/overview"):
             assert client.get(path).status_code == 404
 
 
@@ -41,4 +46,4 @@ def test_errors_use_the_openapi_envelope(worker: Worker) -> None:
 
 
 def test_owner_api_is_not_reachable_through_the_hooks_host(worker: Worker) -> None:
-    assert worker.hooks.get("/api/v1/spike/coordinator").status_code == 404
+    assert worker.hooks.get("/api/v1/overview").status_code == 404

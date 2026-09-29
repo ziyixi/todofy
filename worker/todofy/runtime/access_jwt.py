@@ -8,7 +8,7 @@ from typing import Any
 import js
 
 from todofy.core.api_errors import ApiError
-from todofy.runtime.config import flag, local_dev, var
+from todofy.runtime.config import csv, flag, local_dev, var
 from todofy.runtime.interop import fetch_with_timeout, now_ms, to_js
 
 ACCESS_ISSUER = re.compile(r"^https://[a-z0-9-]+\.cloudflareaccess\.com$")
@@ -17,6 +17,8 @@ MAX_TOKEN_CHARS = 16_000
 JWKS_TTL_MS = 3_600_000
 JWKS_TIMEOUT_MS = 5_000
 CLOCK_SKEW_S = 60
+MAX_ALIASES = 8
+MAX_ALIASES_CHARS = 2048
 RS256 = {"name": "RSASSA-PKCS1-v1_5", "hash": "SHA-256"}
 
 # Per-isolate cache: issuer -> (expires_at_ms, {kid: CryptoKey}).
@@ -45,6 +47,14 @@ def _issuer(env: Any) -> str:
     if local_dev(env) and flag(env, "DEV_ACCESS_LOOPBACK_ISSUER") and LOOPBACK_ISSUER.fullmatch(issuer):
         return issuer
     raise AccessError(503, ApiError.ACCESS_NOT_CONFIGURED)
+
+
+def _owner_emails(env: Any, owner: str) -> frozenset[str]:
+    """ACCESS_OWNER plus its verified aliases: other logins of the same person, not other users."""
+    aliases = csv(env, "ACCESS_OWNER_ALIASES")
+    if len(var(env, "ACCESS_OWNER_ALIASES")) > MAX_ALIASES_CHARS or len(aliases) > MAX_ALIASES:
+        raise AccessError(503, ApiError.ACCESS_NOT_CONFIGURED)
+    return frozenset([owner, *aliases])
 
 
 def _token(request: Any) -> str:
@@ -77,7 +87,7 @@ async def _signing_keys(issuer: str) -> dict[str, Any]:
 
 
 async def authenticate(request: Any, env: Any) -> str:
-    """Return the owner email for a valid Access login, otherwise raise AccessError."""
+    """Return ACCESS_OWNER for a valid Access login (an alias maps to it), otherwise raise AccessError."""
     owner = var(env, "ACCESS_OWNER").lower()
     if local_dev(env) and flag(env, "DEV_AUTH_BYPASS"):
         return owner
@@ -85,6 +95,7 @@ async def authenticate(request: Any, env: Any) -> str:
     audience = var(env, "ACCESS_AUDIENCE")
     if not audience or not owner:
         raise AccessError(503, ApiError.ACCESS_NOT_CONFIGURED)
+    emails = _owner_emails(env, owner)
 
     try:
         header_b64, payload_b64, signature_b64 = _token(request).split(".")
@@ -112,7 +123,7 @@ async def authenticate(request: Any, env: Any) -> str:
         and isinstance(claims.get("iat"), int | float)
         and claims["iat"] < now_s + CLOCK_SKEW_S
         and isinstance(claims.get("email"), str)
-        and claims["email"].lower() == owner
+        and claims["email"].lower() in emails
     )
     if not valid:
         raise _unauthorized()

@@ -19,7 +19,8 @@ jobs:
   checks:
     name: Todofy checks
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    # The runtime suite starts about 25 local workerd servers (~9 min on a laptop).
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -28,7 +29,9 @@ jobs:
         with:
           node-version-file: .nvmrc
           cache: npm
-          cache-dependency-path: package-lock.json
+          cache-dependency-path: |
+            package-lock.json
+            web/package-lock.json
       - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
         with:
           version: '0.12.10'
@@ -39,21 +42,128 @@ jobs:
           uv sync --locked
       - name: Lint and format
         run: |
-          uv run ruff check worker tests
-          uv run ruff format --check worker tests
-      - name: Unit tests
-        run: uv run pytest tests/unit tests/fakes
+          uv run ruff check worker tests tools deploy
+          uv run ruff format --check worker tests tools deploy
+      - name: Host tests (core, fakes, migration tools, config generator)
+        run: uv run pytest tests/unit tests/fakes tools deploy
+      # Builds uiassets/dist, which the runtime tests and the dry-run serve.
       - name: Check, test and build the UI
-        if: hashFiles('web/package.json') != ''
         working-directory: web
         run: |
           npm ci --no-audit --no-fund
+          npm run check:api
           npm run typecheck
           npm test
           npm run build
+          # The UI is Todofy's own code; nothing may be copied from Mail Hero.
+          if grep -rnE 'mail_hero|mail-hero' src; then exit 1; fi
       - name: Runtime tests (workerd with real D1, Durable Object, alarms, cron and assets)
         run: uv run pytest tests/runtime
+      # The generated production config must be one wrangler accepts before any deploy
+      # relies on it. Placeholder values only; no token is needed for --dry-run.
+      - name: Dry-run a placeholder production config
+        env:
+          CLOUDFLARE_ACCOUNT_ID: '00000000000000000000000000000000'
+          TODOFY_D1_DATABASE_ID: 00000000-0000-4000-8000-000000000000
+          TODOFY_PUBLIC_HOST: todofy.example.com
+          TODOFY_HOOKS_HOSTS: todofy-hooks.example.com
+          TODOFY_ACCESS_ISSUER: https://example.cloudflareaccess.com
+          TODOFY_ACCESS_AUDIENCE: '0000000000000000000000000000000000000000000000000000000000000000'
+          TODOFY_ACCESS_OWNER: owner@example.com
+          TODOFY_TODOIST_DEFAULT_PROJECT_ID: placeholder
+          TODOFY_REMINDER_ENABLED: 'false'
+          TODOFY_MAINTENANCE_MODE: 'false'
+          TODOFY_PROCESSING_PAUSED: 'false'
+          TODOFY_FORCE_PAUSE_TODOIST: 'false'
+        run: |
+          uv run python deploy/generate_ci_config.py
+          uv run pywrangler deploy --dry-run --config wrangler.production.ci.json --outdir "$RUNNER_TEMP/todofy-bundle"
+          # The workers SDK is vendored next to the config; a bundle without it cannot start.
+          test -d "$RUNNER_TEMP/todofy-bundle/python_modules/workers"
+      - name: Remove the placeholder config
+        if: always()
+        run: rm -f wrangler.production.ci.json
 
-  # deploy: added in S9. It needs `checks`, runs only for main push or
-  # workflow_dispatch in the `production` environment, generates the Wrangler
-  # config from GitHub variables, applies D1 migrations and deploys.
+  deploy:
+    name: Todofy deploy
+    needs: checks
+    if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    environment:
+      name: production
+      url: https://${{ vars.TODOFY_PUBLIC_HOST }}
+    concurrency:
+      group: todofy-production
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            web/package-lock.json
+      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          version: '0.12.10'
+          enable-cache: true
+      - name: Build the verified revision
+        run: |
+          npm ci --no-audit --no-fund
+          uv sync --locked
+          npm ci --prefix web --no-audit --no-fund
+          npm run build --prefix web
+      - name: Generate the production configuration
+        env:
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+          TODOFY_D1_DATABASE_ID: ${{ vars.TODOFY_D1_DATABASE_ID }}
+          TODOFY_D1_DATABASE_NAME: ${{ vars.TODOFY_D1_DATABASE_NAME }}
+          TODOFY_PUBLIC_HOST: ${{ vars.TODOFY_PUBLIC_HOST }}
+          TODOFY_HOOKS_HOSTS: ${{ vars.TODOFY_HOOKS_HOSTS }}
+          TODOFY_MAIL_SOURCE_ID: ${{ vars.TODOFY_MAIL_SOURCE_ID }}
+          TODOFY_ACCESS_ISSUER: ${{ vars.TODOFY_ACCESS_ISSUER }}
+          TODOFY_ACCESS_AUDIENCE: ${{ vars.TODOFY_ACCESS_AUDIENCE }}
+          TODOFY_ACCESS_OWNER: ${{ vars.TODOFY_ACCESS_OWNER }}
+          TODOFY_ACCESS_OWNER_ALIASES: ${{ vars.TODOFY_ACCESS_OWNER_ALIASES }}
+          TODOFY_GEMINI_MODELS: ${{ vars.TODOFY_GEMINI_MODELS }}
+          TODOFY_GEMINI_DAILY_TOKEN_BUDGET: ${{ vars.TODOFY_GEMINI_DAILY_TOKEN_BUDGET }}
+          TODOFY_TODOIST_DEFAULT_PROJECT_ID: ${{ vars.TODOFY_TODOIST_DEFAULT_PROJECT_ID }}
+          TODOFY_LOOKUP_DELAY_MS: ${{ vars.TODOFY_LOOKUP_DELAY_MS }}
+          TODOFY_REPORT_DEFAULT_TOP: ${{ vars.TODOFY_REPORT_DEFAULT_TOP }}
+          TODOFY_REPORT_PRECOMPUTE_UTC: ${{ vars.TODOFY_REPORT_PRECOMPUTE_UTC }}
+          TODOFY_LEGACY_TEXT_RETENTION_DAYS: ${{ vars.TODOFY_LEGACY_TEXT_RETENTION_DAYS }}
+          TODOFY_REMINDER_ENABLED: ${{ vars.TODOFY_REMINDER_ENABLED }}
+          TODOFY_MAINTENANCE_MODE: ${{ vars.TODOFY_MAINTENANCE_MODE }}
+          TODOFY_PROCESSING_PAUSED: ${{ vars.TODOFY_PROCESSING_PAUSED }}
+          TODOFY_FORCE_PAUSE_TODOIST: ${{ vars.TODOFY_FORCE_PAUSE_TODOIST }}
+        run: uv run python deploy/generate_ci_config.py
+      - name: Validate the bundle before changing D1
+        run: uv run pywrangler deploy --dry-run --config wrangler.production.ci.json
+      - name: Apply D1 migrations, then deploy the Worker
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          test -n "$CLOUDFLARE_API_TOKEN"
+          npx --no-install wrangler d1 migrations apply DB --remote --config wrangler.production.ci.json
+          uv run pywrangler deploy --config wrangler.production.ci.json
+      # A first deploy waits for the Custom Domain certificate and DNS, hence 10 tries x 15 s.
+      - name: Wait until the hooks host serves this commit
+        run: |
+          host=$(jq -r '.vars.TODOFY_HOOKS_HOSTS | split(",")[0]' wrangler.production.ci.json)
+          for attempt in $(seq 1 10); do
+            if build=$(curl -fsS --max-time 10 "https://$host/health" | jq -er .build) && [ "$build" = "$GITHUB_SHA" ]; then
+              echo "The hooks host serves $GITHUB_SHA (attempt $attempt)."
+              exit 0
+            fi
+            sleep 15
+          done
+          echo "The hooks host never reported build $GITHUB_SHA." >&2
+          exit 1
+      - name: Remove the generated configuration
+        if: always()
+        run: rm -f wrangler.production.ci.json

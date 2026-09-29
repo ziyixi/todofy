@@ -1,35 +1,45 @@
-"""Owner UI and API on TODOFY_PUBLIC_HOST, always behind Cloudflare Access."""
+"""Owner UI and API on TODOFY_PUBLIC_HOST, always behind Cloudflare Access.
+
+The gate, in order: Access JWT on every request (static assets included), then
+for API writes the CSRF check and MAINTENANCE_MODE, then the route. Every
+response leaves with PRIVATE_HEADERS.
+"""
 
 from typing import Any
 
+from pyodide.ffi import JsException
 from workers import Response
 
 from todofy.core.api_errors import ApiError
+from todofy.runtime import api, csrf
 from todofy.runtime.access_jwt import AccessError, authenticate
-from todofy.runtime.config import coordinator
-from todofy.runtime.http import PRIVATE_HEADERS, error, json_response, with_headers
+from todofy.runtime.config import flag
+from todofy.runtime.http import PRIVATE_HEADERS, error, with_headers
 
-SPIKE_EVENT_PREFIX = "/api/v1/spike/events/"
+READ_METHODS = frozenset({"GET", "HEAD"})
+MAINTENANCE_RETRY_AFTER_S = "300"
 
 
-async def _api(request: Any, env: Any, path: str) -> Response:
-    if request.method == "GET" and path.startswith(SPIKE_EVENT_PREFIX):
-        event_id = path.removeprefix(SPIKE_EVENT_PREFIX)
-        row = await env.DB.prepare("SELECT * FROM spike_events WHERE event_id = ?").bind(event_id).first()
-        return json_response(dict(row)) if row else error(404, ApiError.NOT_FOUND)
-    if request.method == "GET" and path == "/api/v1/spike/coordinator":
-        return await coordinator(env).fetch("https://coordinator/state")
-    return error(404, ApiError.NOT_FOUND)
+async def _api(request: Any, env: Any, owner: str, path: str) -> Response:
+    if request.method not in READ_METHODS:
+        await csrf.verify(request, env, owner)
+        if flag(env, "MAINTENANCE_MODE"):
+            return with_headers(error(503, ApiError.MAINTENANCE), {"retry-after": MAINTENANCE_RETRY_AFTER_S})
+    try:
+        return await api.handle(request, env, owner, path)
+    except JsException:
+        # D1, the coordinator or a binding failed; the details stay in the platform logs.
+        return error(503, ApiError.UNAVAILABLE)
 
 
 async def handle(request: Any, env: Any, path: str) -> Response:
     try:
-        await authenticate(request, env)
+        owner = await authenticate(request, env)
+        if path.startswith("/api/"):
+            response = await _api(request, env, owner, path)
+        else:
+            # Unknown paths fall back to index.html (not_found_handling = SPA).
+            response = await env.ASSETS.fetch(request)
     except AccessError as exc:
-        return with_headers(error(exc.status, exc.code), PRIVATE_HEADERS)
-    if path.startswith("/api/"):
-        response = await _api(request, env, path)
-    else:
-        # Unknown paths fall back to index.html (not_found_handling = SPA).
-        response = await env.ASSETS.fetch(request)
+        response = error(exc.status, exc.code)
     return with_headers(response, PRIVATE_HEADERS)

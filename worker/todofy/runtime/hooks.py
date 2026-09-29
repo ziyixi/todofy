@@ -4,12 +4,17 @@ import hashlib
 import hmac
 from typing import Any
 
+from pyodide.ffi import JsException
 from workers import Response
 
 from todofy.core.api_errors import ApiError
 from todofy.core.contract import MAX_EVENT_BYTES
-from todofy.runtime.config import coordinator, var
-from todofy.runtime.http import error, json_response
+from todofy.runtime import reports
+from todofy.runtime.config import coordinator, flag, var
+from todofy.runtime.http import error, json_response, with_headers
+
+# Mail Hero backs off on 503 and honours Retry-After; one cron interval.
+MAINTENANCE_RETRY_AFTER_S = "600"
 
 
 def _bearer_ok(request: Any, digests: list[str]) -> bool:
@@ -32,27 +37,44 @@ async def mail(request: Any, env: Any) -> Response:
         return error(503, ApiError.NOT_CONFIGURED)
     if not _bearer_ok(request, digests):
         return error(401, ApiError.UNAUTHORIZED)
+    if flag(env, "MAINTENANCE_MODE"):
+        return with_headers(error(503, ApiError.MAINTENANCE), {"retry-after": MAINTENANCE_RETRY_AFTER_S})
     if (request.headers.get("content-type") or "").split(";")[0].strip().lower() != "application/json":
         return error(415, ApiError.UNSUPPORTED_MEDIA_TYPE)
+    # A declared length is checked here; a chunked body is capped while the
+    # coordinator reads it.
     length = request.headers.get("content-length") or ""
-    if not length.isdigit():
-        return error(411, ApiError.LENGTH_REQUIRED)
-    if int(length) > MAX_EVENT_BYTES:
+    if length.isdigit() and int(length) > MAX_EVENT_BYTES:
         return error(413, ApiError.PAYLOAD_TOO_LARGE)
+    headers = {"content-type": "application/json"}
+    if (key := request.headers.get("idempotency-key")) is not None:
+        headers["idempotency-key"] = key
     # Parsing, hashing and D1 writes run in the Durable Object: the Worker
     # handler has 10 ms of CPU on Workers Free, the object has 30 s.
-    return await coordinator(env).fetch(
-        "https://coordinator/ingest",
-        method="POST",
-        headers={"content-type": "application/json"},
-        body=request.body,
-    )
+    try:
+        return await coordinator(env).fetch(
+            "https://coordinator/ingest", method="POST", headers=headers, body=request.body
+        )
+    except JsException:
+        return error(503, ApiError.UNAVAILABLE)
 
 
 async def handle(request: Any, env: Any, path: str) -> Response:
     match request.method, path:
         case "POST", "/hooks/mail":
             return await mail(request, env)
+        case "GET", "/api/summary":
+            return await _report(request, env, reports.SUMMARY)
+        case "GET", "/api/recommendation":
+            return await _report(request, env, reports.RECOMMENDATION)
         case "GET", "/health":
             return json_response({"build": var(env, "BUILD_SHA", "unknown")})
     return error(404, ApiError.NOT_FOUND)
+
+
+async def _report(request: Any, env: Any, kind: str) -> Response:
+    try:
+        return await reports.serve(request, env, kind)
+    except JsException:
+        # D1 failed; the newsletter treats 503 as "try again later".
+        return error(503, ApiError.UNAVAILABLE)

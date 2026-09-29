@@ -157,6 +157,19 @@ def test_compatible_variants_are_accepted(payload, path, value):
     parse_mail_event(mutate(payload, path, value))
 
 
+@pytest.mark.parametrize(
+    "value", ["+010000-01-01T00:00:00.000Z", "-000001-12-31T23:59:59.999Z", "0000-01-01T00:00:00.000Z"]
+)
+def test_javascript_years_python_cannot_hold_read_as_unknown_send_time(payload, value):
+    assert parse_mail_event(mutate(payload, ("message", "sent_at"), value)).sent_at is None
+
+
+@pytest.mark.parametrize("value", ["+010000-01-01T00:00:00.000+01:00", "+10000-01-01T00:00:00Z", 2026])
+def test_other_unrepresentable_send_times_are_still_rejected(payload, value):
+    with pytest.raises(ContractError):
+        parse_mail_event(mutate(payload, ("message", "sent_at"), value))
+
+
 def test_subject_and_text_limits_count_utf8_bytes(payload):
     ok_subject = "字" * 1365  # 4095 bytes
     parse_mail_event(with_message(payload, subject=ok_subject + "a"))

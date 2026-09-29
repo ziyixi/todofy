@@ -1,7 +1,9 @@
 """Shared fixtures for host-CPython unit tests of ``todofy.core``.
 
-tests/unit/golden holds bytes captured once from the Go service at 6c46ed4 by a
-throwaway ``go test -overlay`` program that is not kept in the repository.
+tests/unit/golden holds bytes captured once from the Go service at 6c46ed4 (the
+recommendation prompts from the owner-approved 2026-09-05 utils/consts.go) by a
+throwaway Go program that is not kept in the repository; gemini_user_turn_*.txt
+pin Todofy's own Gemini framing.
 """
 
 import json

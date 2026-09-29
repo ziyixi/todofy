@@ -36,13 +36,6 @@ def content_notice(event: MailEvent) -> str:
     )
 
 
-def summary_input(event: MailEvent) -> str:
-    """Text the model summarises: the body, or the subject for a body-less mail."""
-    text = event.text if event.text.strip() else event.subject
-    notice = content_notice(event)
-    return f"{notice}\n\n{text}" if notice else text
-
-
 def clean_summary(model_output: str, event: MailEvent) -> str:
     """Strip tag-like tokens Todoist would turn into labels; restate any truncation."""
     summary = _TAG.sub(" ", model_output)

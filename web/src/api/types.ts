@@ -1,0 +1,27 @@
+import type { components } from './schema'
+
+type Schemas = components['schemas']
+
+export type ApiErrorCode = Schemas['ApiErrorCode']
+export type EventState = Schemas['EventState']
+export type EventErrorCode = Schemas['EventErrorCode']
+export type ReminderState = Schemas['ReminderState']
+export type ReminderErrorCode = Schemas['ReminderErrorCode']
+export type ReconcileAction = Schemas['ReconcileAction']
+export type EventSummary = Schemas['EventSummary']
+export type EventDetail = Schemas['EventDetail']
+export type Transition = Schemas['Transition']
+export type EventPage = Schemas['EventPage']
+export type ReconcileRequest = Schemas['ReconcileRequest']
+export type Reminder = Schemas['Reminder']
+export type ReminderPage = Schemas['ReminderPage']
+export type Overview = Schemas['Overview']
+export type ReportsLatest = Schemas['ReportsLatest']
+export type SummaryReport = Schemas['summary-v1.schema']
+export type RecommendationReport = Schemas['recommendation-v1.schema']
+export type RecomputeRequest = Schemas['RecomputeRequest']
+export type LegacyText = Schemas['LegacyText']
+export type Setup = Schemas['Setup']
+export type ErrorBody = Schemas['Error']
+
+export type EventView = 'recent' | 'attention'

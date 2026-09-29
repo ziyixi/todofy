@@ -1,33 +1,29 @@
-import time
+"""The alarm's outbound deadline is real: a hanging upstream is abandoned and its socket closed."""
 
-from tests.fakes.server import FakeServer, Reply
-from tests.runtime.harness import AUTH, Worker, event_body, spike_event
-
-GENERATE = "/v1beta/models/spike:generateContent"
-
-
-def test_alarm_calls_the_upstream_with_the_api_key(worker: Worker, fresh_gemini: FakeServer) -> None:
-    fresh_gemini.default("POST", GENERATE, Reply(200, {"candidates": []}))
-    event_id, body = event_body()
-
-    assert worker.hooks.post("/hooks/mail", content=body, headers=AUTH).status_code == 204
-
-    row = spike_event(worker.owner, event_id, until_not="pending")
-    assert (row["state"], row["upstream_status"]) == ("called", 200)
-    [call] = [r for r in fresh_gemini.received("POST", GENERATE) if r.json()["event_id"] == event_id]
-    assert call.headers["x-goog-api-key"] == "fake-gemini-key"
+from tests.fakes.gemini_fake import API_KEY, GeminiFake, model_path
+from tests.fakes.server import Reply
+from tests.runtime.harness import Worker, mail_event
 
 
-def test_timeout_really_closes_a_hanging_upstream_connection(worker: Worker, fresh_gemini: FakeServer) -> None:
-    fresh_gemini.queue("POST", GENERATE, Reply(hang=True))
-    event_id, body = event_body()
-    started = time.monotonic()
+def test_alarm_calls_gemini_with_the_api_key(worker: Worker, fresh_gemini: GeminiFake) -> None:
+    event_id, body = mail_event()
 
-    assert worker.hooks.post("/hooks/mail", content=body, headers=AUTH).status_code == 204
+    assert worker.post_event(body).status_code == 204
 
-    row = spike_event(worker.owner, event_id, until_not="pending")
-    elapsed = time.monotonic() - started
-    assert (row["state"], row["upstream_status"]) == ("timeout", None)
-    # wrangler.test.toml sets GEMINI_TIMEOUT_MS = 1500.
-    assert 1.5 <= elapsed < 10
-    assert fresh_gemini.wait_for(lambda: fresh_gemini.disconnects, timeout_s=5) == [GENERATE]
+    worker.wait_event(event_id, {"complete"})
+    [call] = fresh_gemini.calls_mentioning(event_id)
+    assert (call.model, call.api_key) == ("model-a", API_KEY)
+
+
+def test_timeout_really_closes_a_hanging_upstream_connection(worker: Worker, fresh_gemini: GeminiFake) -> None:
+    fresh_gemini.queue_generate(Reply(hang=True), model="model-a")
+    event_id, body = mail_event()
+
+    assert worker.post_event(body).status_code == 204
+
+    worker.wait_event(event_id, {"complete"})
+    hung, answered = fresh_gemini.calls_mentioning(event_id)
+    # wrangler.test.toml sets GEMINI_TIMEOUT_MS = 1500; a timeout moves on to the next model.
+    assert (hung.model, answered.model) == ("model-a", "model-b")
+    assert 1.5 <= answered.at - hung.at < 10
+    assert fresh_gemini.wait_for(lambda: fresh_gemini.disconnects, timeout_s=5) == [model_path("model-a")]

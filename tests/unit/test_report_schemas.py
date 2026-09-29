@@ -219,7 +219,7 @@ def test_recommendation_rejects(response):
 
 def test_prompt_examples_are_valid_model_output():
     examples = re.findall(r"^\[.*?\]$", RECOMMEND_TOP_TASKS, re.MULTILINE | re.DOTALL)
-    assert [len(json.loads(example)) for example in examples] == [3, 5]
+    assert [len(json.loads(example)) for example in examples] == [0, 1]
     for example in examples:
         assert errors(MODEL_OUTPUT, json.loads(example)) == []
 

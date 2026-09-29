@@ -8,10 +8,10 @@ from todofy.core.render import (
     FOOTER_PREFIX,
     NO_SUBJECT,
     clean_summary,
+    content_notice,
     has_footer,
     render_todo_body,
     rfc3339,
-    summary_input,
     task_title,
 )
 
@@ -28,12 +28,6 @@ def test_todo_body_is_byte_identical_to_go(golden, case):
     event = parse_mail_event(golden.bytes(f"event_{case}.json"))
     summary = clean_summary(golden.text(f"model_summary_{case}.txt"), event)
     assert render_todo_body(event, summary).encode() == golden.bytes(f"todo_body_{case}.txt")
-
-
-@pytest.mark.parametrize("case", CASES)
-def test_summary_input_is_byte_identical_to_go(golden, case):
-    event = parse_mail_event(golden.bytes(f"event_{case}.json"))
-    assert summary_input(event).encode() == golden.bytes(f"summary_input_{case}.txt")
 
 
 def test_body_only_message_gets_nonempty_title_and_footer(payload):
@@ -84,15 +78,10 @@ def test_truncation_notice_reaches_summary_and_task(payload):
     payload["message"] |= {"text": "中文🙂", "text_truncated": True, "original_text_bytes": 300_000}
     event = event_from(payload)
     notice = "正文不完整：原文 300000 bytes，仅收到前 10 bytes，摘要可能遗漏尾部内容。"
-    assert summary_input(event) == f"{notice}\n\n中文🙂"
+    assert content_notice(event) == notice
     summary = clean_summary("Synthetic summary", event)
     assert summary == f"{notice}\n\nSynthetic summary"
     assert notice in render_todo_body(event, summary)
-
-
-def test_body_falls_back_to_subject_for_model_input(payload):
-    payload["message"]["text"] = " \n"
-    assert summary_input(event_from(payload)) == payload["message"]["subject"]
 
 
 def test_date_prefers_sent_at_and_is_utc_whole_seconds():

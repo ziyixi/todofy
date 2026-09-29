@@ -1,7 +1,9 @@
 """Single source of the ledger vocabulary: states, error codes and owner actions.
 
-Codes marked ``legacy`` were written only by the retired Go service; the Worker
-never produces them, but imported ledger rows still carry them.
+Codes marked ``legacy`` were written by the retired Go service and imported
+ledger rows still carry them. The Worker produces none of them for its own
+events; it writes ``invalid_saved_event`` only for an imported row that is still
+due but has no stored payload the contract accepts.
 """
 
 from dataclasses import dataclass

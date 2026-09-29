@@ -13,14 +13,16 @@ Prerequisites: Node 26 (`.nvmrc`), uv 0.12.10, Python 3.14 (`.python-version`; u
 npm ci --no-audit --no-fund          # wrangler 4.142.0 only; npm 11 warns about workerd/esbuild
                                      # postinstall scripts, which is harmless
 uv sync --locked                     # dev tools; the Worker itself has no third-party packages
-uv run ruff check worker tests && uv run ruff format --check worker tests
-uv run pytest tests/unit tests/fakes # host CPython, ~3 s
-uv run pytest tests/runtime          # real workerd via `pywrangler dev`, ~25 s
-uv run pytest                        # everything
+uv run ruff check worker tests tools deploy && uv run ruff format --check worker tests tools deploy
+uv run pytest tests/unit tests/fakes tools deploy   # host CPython (tools includes a local-D1 round trip)
+(cd web && npm ci --no-audit --no-fund && npm run check:api && npm run typecheck && npm test && npm run build)
+uv run pytest tests/runtime          # real workerd via `pywrangler dev`, ~8 min (about 25 dev servers)
+uv run pytest                        # everything (testpaths: tests, tools, deploy)
 ```
 
-These are exactly the steps of the `Todofy checks` job in `.github/workflows/native.yml` (it also builds
-`web/` once `web/package.json` exists, before the runtime tests).
+These are exactly the steps of the `Todofy checks` job in `.github/workflows/native.yml`, which then
+generates a placeholder production config and dry-runs it. `npm run build` writes `uiassets/dist`; without
+it the runtime harness serves a placeholder `index.html`.
 
 Other useful commands (all local, no credentials):
 
@@ -46,12 +48,16 @@ api/                           owner-api-v1.openapi.yaml (source of truth for th
                                schemas, mail-received-v1 schema copied from Mail Hero
 worker/todofy/core/            pure stdlib Python, host-testable, no `js`/`workers` imports
   vocab.py api_errors.py contract.py render.py prompts.py reminder_text.py request_id.py
-  backoff.py classify.py todoist_request.py report_schema.py
+  backoff.py classify.py todoist_request.py report_schema.py gemini_wire.py
   sql/                         every D1 statement, one module per owning runtime module
 worker/todofy/runtime/         runs only inside workerd (imports `js`, `workers`, `pyodide`)
 tests/unit/                    host tests for core/, the migration and the API contract (golden/ = Go captures)
 tests/fakes/                   in-process loopback HTTP fake (+ its own tests)
 tests/runtime/                 black-box tests against `pywrangler dev` with real D1/DO/alarms/cron/assets
+tests/fixtures/mail_hero/      exact webhook bytes Mail Hero emits (compat fixtures, synthetic mail)
+web/                           owner UI (React + Vite); builds into uiassets/dist; types generated from the OpenAPI
+tools/                         legacy SQLite → D1 migration scripts and the webhook smoke test (stdlib, Python 3.9+)
+deploy/                        production wrangler config generator used by the deploy job
 ```
 
 Conventions: English identifiers and comments, Chinese user-facing strings, type hints everywhere,
@@ -128,10 +134,15 @@ Outbound calls (`runtime/interop.py`)
 Local runtime quirks (not production behaviour)
 - Local cron: `GET /cdn-cgi/local/scheduled?cron=...` (`Worker.trigger_cron`). `/__scheduled` and
   `--test-scheduled` no longer work in wrangler 4.142; the plan docs still mention them.
-- If the Worker answers a POST before reading its body (401/411/413/415, or 405 from assets), wrangler's
+- If the Worker answers a POST before reading its body (401/413/415, or 405 from assets), wrangler's
   local proxy may fail the next POST on that dev server with a 500. Send such requests without a body, use
   `Worker.headers_only_status`, or use the per-test `throwaway_worker` fixture.
 - The first request after startup takes ~2 s (Pyodide cold start); the harness waits on `/health`.
+- workerd downloads the ~14 MB Pyodide bundle from `pyodide-capnp-bin.edgeworker.net` on every start
+  unless it gets `--pyodide-bundle-disk-cache-dir`, which wrangler never passes. A slow download once
+  stalled a dev server for 77 s and once killed it (`read(): Operation timed out`), so the runtime harness
+  launches workerd through `.wrangler/workerd-with-pyodide-cache` (via `MINIFLARE_WORKERD_PATH`), which
+  caches it in `.wrangler/pyodide-cache`. Plain `pywrangler dev` still downloads it each time.
 
 ## 4. Contracts every module must keep
 
@@ -157,16 +168,19 @@ Local runtime quirks (not production behaviour)
   `meta.changes == 1`) plus its `event_transitions` insert in the same `batch()`. Moving to `complete` or
   `ignored` also sets `payload = NULL` (CHECK-enforced) and, for `complete`, inserts the `summaries` row.
 - Statements that write (INSERT/UPDATE/DELETE) are also `Query` constants; name the index of the key they
-  hit (`sqlite_autoindex_<table>_1` for primary keys).
+  hit (`sqlite_autoindex_<table>_1` for primary keys). A plain `INSERT ... VALUES` has no query plan, so
+  the test only checks that its index is a unique index of the inserted table.
 
 ### 4.3 HTTP
-- Webhook (`hooks.py`): Bearer vs `MAIL_WEBHOOK_TOKEN_SHA256` / `_PREVIOUS` (constant time), then 415,
-  411, 413 on headers alone, then forward to the DO with `content-type` and `idempotency-key`. The DO
+- Webhook (`hooks.py`): Bearer vs `MAIL_WEBHOOK_TOKEN_SHA256` / `_PREVIOUS` (constant time), then
+  `MAINTENANCE_MODE`, 415, and 413 for a declared `Content-Length` over 1 MiB; a request without
+  `Content-Length` is accepted and the DO stops reading at 1 MiB (413). The Worker forwards the body stream
+  to the DO with `content-type` and `idempotency-key`. The DO
   requires one Idempotency-Key equal to `event_id` (a value containing "," means repeated → 400), runs
   `contract.parse_mail_event`, answers 204 (stored or same bytes), 409 (different bytes), 400, or 503.
   `MAINTENANCE_MODE` → 503 `maintenance` with `Retry-After`.
 - Newsletter (`reports.serve`, routed from `hooks.py`): Basic, `sha256("user:password")` compared in constant time with
-  every digest in `REPORT_BASIC_AUTH_SHA256`; failures counted per UTC hour in `auth_failures`, 429
+  every digest in the comma-separated `REPORT_BASIC_AUTH_SHA256` (list two while rotating); failures counted per UTC hour in `auth_failures`, 429
   after 20. Responses must validate against `api/summary-v1` / `recommendation-v1`.
 - Owner API: Access on every request; POSTs also need CSRF (§5 `csrf.py`) and `action_request_id`
   idempotency via `owner_actions`. Anything that parses a mail payload or mutates the ledger runs inside
@@ -185,8 +199,7 @@ the named seams. Signatures are the contract between owners — change one only 
 | **T – runtime tests** | `tests/fakes/{gemini_fake,todoist_fake}.py`, `tests/runtime/test_*.py` scenarios (v2 §6.2 + impl-order §1.5), `wrangler.test*.toml` vars |
 
 `entry.py`, `http.py`, `core/*` and the migration stay with the lead; a new `ApiError` or a schema change
-goes through the lead. The spike code (`spike_events`, `/api/v1/spike/*`, `harness.spike_event`) is
-deleted by P and T when the real ledger lands.
+goes through the lead. The signatures below are as built (S5/S6 done); the spike code is gone.
 
 ### entry.py (lead; exists)
 ```python
@@ -205,12 +218,12 @@ def gemini_models(env) -> list[str]                 # GEMINI_MODELS csv, first i
 Vars (plain, with defaults): `MAIL_SOURCE_ID`, `GEMINI_API_BASE`, `GEMINI_MODELS`,
 `GEMINI_TIMEOUT_MS` (60000), `GEMINI_DAILY_TOKEN_BUDGET` (3000000), `TODOIST_API_BASE`,
 `TODOIST_DEFAULT_PROJECT_ID`, `LOOKUP_DELAY_MS` (120000), `BACKOFF_BASE_MS` (60000),
-`WATCHDOG_MS` (120000), `REPORT_DEFAULT_TOP` (5), `REPORT_PRECOMPUTE_UTC` ("13:30"), `REMINDER_ENABLED`,
+`WATCHDOG_MS` (120000), `TODOIST_ATTEMPT_TIMEOUT_MS` (14000), `REPORT_DEFAULT_TOP` (10), `REPORT_PRECOMPUTE_UTC` ("13:30"), `REMINDER_ENABLED`,
 `LEGACY_TEXT_RETENTION_DAYS`, `MAINTENANCE_MODE`, `PROCESSING_PAUSED`, `FORCE_PAUSE_TODOIST`,
 `ACCESS_ISSUER`, `ACCESS_AUDIENCE`, `ACCESS_OWNER`, `ACCESS_OWNER_ALIASES`, `BUILD_SHA`,
 `TODOFY_PUBLIC_HOST`, `TODOFY_HOOKS_HOSTS`. Secrets: `MAIL_WEBHOOK_TOKEN_SHA256`,
 `MAIL_WEBHOOK_TOKEN_SHA256_PREVIOUS`, `REPORT_BASIC_AUTH_SHA256`, `GEMINI_API_KEY`, `TODOIST_API_KEY`,
-`CSRF_SIGNING_KEY` (proposed, see csrf.py). Test configs shorten `*_MS` values; production never sets them.
+`CSRF_SIGNING_KEY` (64 hex). Test configs shorten `*_MS` values; production never sets them.
 
 ### coordinator.py (P) — the only writer of the ledger
 Internal routes on `https://coordinator` (never reachable from outside the Worker):
@@ -247,16 +260,19 @@ class Stored(StrEnum): NEW, DUPLICATE, CONFLICT
 
 async def ingest(db, source_id, event_id, payload: str, payload_hash: str, now: int) -> Stored
 async def get(db, source_id, event_id) -> EventRow | None
-async def next_due(db, now: int) -> EventRow | None             # pending/summarized/todo_created
+async def next_due(db, now: int, *, todoist: bool = True) -> EventRow | None  # pending/summarized/todo_created
 async def next_lookup(db, now: int) -> EventRow | None          # todo_unknown with a scheduled lookup
-async def next_wake_at(db) -> int | None
-async def recover_interrupted(db, now: int) -> None             # summarizing→pending(+crash), todo_sending→todo_unknown
-async def transition(db, row: EventRow, to: EventState, *, actor: str, now: int,
-                     code: str = "", **columns) -> bool         # CAS + transition row (+ summaries on complete)
-async def claim_action(db, owner, action_request_id, kind, event_id, request_hash, now) -> ActionClaim
+async def next_wake_at(db, *, todoist: bool = True) -> int | None  # todoist=False leaves out summarized rows and lookups
+async def recover_interrupted(db, now: int, *, lookup_at: int) -> None  # summarizing→pending(+crash), todo_sending→todo_unknown
+async def transition(db, row: EventRow, to: EventState, *, actor: str, now: int, code: str = "",
+                     completed: CompletedSummary | None = None, action: OwnerAction | None = None,
+                     **columns) -> EventRow | None   # CAS + transition row (+ summaries row, + owner action); None if lost
+async def find_action(db, owner, action_request_id, request_hash) -> ActionClaim      # read only (reconcile)
+async def claim_action(db, owner, action_request_id, kind, request_hash, now) -> ActionClaim  # insert, then read (recompute)
 async def finish_action(db, owner, action_request_id, result_ref: str, http_status: int) -> None
 ```
-`ActionClaim` is `new`, `replay(result_ref, http_status)` or `conflict` (same id, different hash → 409).
+`ActionClaim.claim` is `new`, `replay` (with `result_ref`, `http_status`) or `conflict` (same id, different
+hash → 409).
 
 ### gemini.py (P; used by R)
 ```python
@@ -267,13 +283,15 @@ class GeminiResult:
     model: str                      # model that answered (or the last one tried)
     tokens: int                     # usageMetadata.totalTokenCount summed over attempts
 
-async def generate(env, *, system: str, user: str, deadline_ms: int,
-                   response_schema: dict | None = None) -> GeminiResult
+async def generate(env, *, system: str, user: str, deadline_ms: int,   # deadline_ms: absolute epoch ms
+                   response_schema: dict | None = None, preface: str = "") -> GeminiResult
 ```
 Tries `gemini_models(env)` in order while `verdict.next_model`, each attempt capped by
 `GEMINI_TIMEOUT_MS` and the remaining `deadline_ms`. No retries across alarms here; the caller applies
-`backoff`. Summary step: `system=prompts.SUMMARY_EMAIL`, `user=render.summary_input(event)` inside an
-explicit delimiter block (decide the exact framing once, in this module, and golden-test it).
+`backoff`. `user` is always framed by `core.gemini_wire` between `<<<BEGIN_CONTENT>>>` and
+`<<<END_CONTENT>>>` (markers inside the content are neutralised; golden-tested); trusted `preface` text,
+such as the truncation notice, goes before the fence. Summary step: `system=prompts.SUMMARY_EMAIL`,
+`user=gemini_wire.summary_content(event)`, `preface=render.content_notice(event)`.
 
 ### todoist.py (P; used by R)
 ```python
@@ -283,7 +301,7 @@ class CreateResult:
     task_id: str
 
 async def create_task(env, request: TaskRequest, *, budget_ms: int) -> CreateResult
-    # up to TODOIST_MAX_ATTEMPTS while verdict.retry_inline, TODOIST_ATTEMPT_TIMEOUT each,
+    # up to TODOIST_MAX_ATTEMPTS while verdict.retry_inline, TODOIST_ATTEMPT_TIMEOUT(_MS) each,
     # backoff.inline_delay between, same frozen bytes and X-Request-Id every time
 async def find_footer_tasks(env, event_id: str) -> list[str] | None
     # GET /api/v1/tasks?project_id=&cursor=, ≤ LOOKUP_MAX_PAGES pages, None on any failure
@@ -306,7 +324,8 @@ async def serve(request, env, kind: str) -> Response  # /api/summary, /api/recom
 async def latest(db) -> dict                          # ReportsLatest for api.py
 ```
 P wires the two newsletter routes in `hooks.py` to `reports.serve`; R never edits `hooks.py`.
-Precompute `top_n` in {`REPORT_DEFAULT_TOP`, 10} (the newsletter asks for `top=10`). Stored text must pass
+Precompute only `top_n = REPORT_DEFAULT_TOP` (default 10, what the newsletter asks for); other `top` values
+are computed on demand under the hourly cap (429 with `Retry-After` until the next UTC hour). Stored text must pass
 `report_schema.newsletter_text_ok`; on-demand work goes through coordinator `/report` with a 40 s budget,
 otherwise the older row is served as `stale`.
 
@@ -314,7 +333,7 @@ otherwise the older row is served as `stale`.
 ```python
 async def tick(db, env, now: int) -> bool             # one bounded sweep; True if more work remains
 ```
-Uses only `core.sql.retention` batches (≤ 5 deletes per call); never deletes `mail_events`.
+Uses only `core.sql.retention` batches (≤ 6 deletes per call); never deletes `mail_events`.
 
 ### access_jwt.py (O; exists)
 ```python
@@ -329,8 +348,8 @@ async def verify(request, env, owner: str) -> None    # raises AccessError(403, 
 ```
 Same semantics as Mail Hero `security.ts:130-142`: `Origin` must equal `https://<TODOFY_PUBLIC_HOST>`
 (`http://` only when `local_dev`), `X-CSRF-Token` must equal the cookie, and the token is an HMAC-signed
-`{owner, nonce, exp}` (12 h). Proposed key: secret `CSRF_SIGNING_KEY` (64 hex); missing → 503
-`not_configured`. The lead must confirm the new secret (open issue).
+`{owner, nonce, exp}` (12 h), keyed by the secret `CSRF_SIGNING_KEY` (64 hex); missing or malformed → 503
+`not_configured` on `GET /api/v1/csrf` and every write (reads keep working).
 
 ### api.py (O) and owner.py (O)
 `owner.py` keeps the gate: authenticate → (POST) `csrf.verify` → `MAINTENANCE_MODE` blocks POSTs with 503

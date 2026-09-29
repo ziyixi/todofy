@@ -1,4 +1,7 @@
-"""The three Gemini prompts, byte-for-byte from the Go service (utils/consts.go @ 6c46ed4).
+"""The three Gemini prompts, byte-for-byte from the Go service.
+
+The summary prompts are utils/consts.go @ 6c46ed4; the recommendation prompt is the
+owner-approved uncommitted 2026-09-05 revision of that file.
 
 The leading tabs come from indented Go raw strings and are kept on purpose:
 tests/unit/golden holds the exact bytes the old service sent.
@@ -38,44 +41,50 @@ SUMMARY_RANGE = (
     "\tAll the emails previous summarized by gemini API are as follows:"
 )
 
-# Go filled four %d verbs; str.format is unusable because the JSON examples
-# contain braces, so the placeholder is replaced literally.
+# Go filled four %d verbs; str.format is unusable because the JSON example
+# contains braces, so the placeholder is replaced literally.
 RECOMMEND_TOP_TASKS = (
     "Below is a list of task summaries I received in the last 24 hours. "
-    "Based on these tasks, please pick exactly {top_n} that are the most important and require my attention TODAY. "
+    "Based on these tasks, please pick up to {top_n} distinct tasks that genuinely require my attention today "
+    "or in the near future. "
     "For each task, provide a title and a reason.\n"
     "\n"
-    "Rank them from most important (#1) to least important (#{top_n}).\n"
+    "Rank only the selected tasks consecutively from #1, never exceeding #{top_n}.\n"
     "\n"
     "IMPORTANT: You MUST respond with ONLY a valid JSON array, no other text before or after.\n"
     "IMPORTANT: Each element must have exactly these fields:\n"
     '  "rank" (integer 1-{top_n}), "title" (string, one-line), "reason" (string, 1-2 sentences).\n'
-    "IMPORTANT: Output exactly {top_n} items. If there are fewer tasks, re-emphasize the same task and note it.\n"
+    "IMPORTANT: Output at most {top_n} items. Fewer items are correct; return [] when none qualify.\n"
+    "  Never fill unused slots, invent an action, or repeat a task to reach the limit.\n"
     "IMPORTANT: Please use Chinese as response language for title and reason.\n"
-    "IMPORTANT: Keep each reason concise.\n"
-    "IMPORTANT: Focus on tasks that require ACTION from me today or in the near future.\n"
+    "IMPORTANT: Rank by the specific unresolved action, concrete risk if ignored, and time remaining.\n"
+    "  Each concise reason should identify what I need to do and the supported risk or deadline.\n"
+    "  Do not invent deadlines or imply that already resolved actions remain open.\n"
+    "IMPORTANT: Focus on tasks that require ACTION from me, not merely important-sounding topics.\n"
     "  Ignore promotional emails, coupons, marketing offers, expired or time-bound deals,\n"
     "  routine notifications (e.g. charging station check-ins, subscription renewals),\n"
     "  and anything that does not need a concrete action from me.\n"
     "  Think carefully: does this task REALLY need my attention, or is it just noise?\n"
     "  For example, a 30-minute EV charging reservation is routine — skip it.\n"
-    "  Prioritize: security alerts, deadlines, financial/tax documents,\n"
-    "  work-related items, and things with real consequences if ignored.\n"
+    "IMPORTANT: A statement being available is not evidence that a payment action is required.\n"
+    "  Ordinary bills with confirmed autopay and no unresolved issue must not consume a priority slot.\n"
+    "  Autopay must be explicitly supported for that account or bill; never infer that all cards use autopay.\n"
+    '  If autopay status is not given, treat it as unknown and explicitly say "自动扣款状态未知"\n'
+    "  when relevant to a selected payment task. Unknown autopay alone is not a reason to create a task.\n"
+    "IMPORTANT: Never suppress unresolved exceptions just because autopay is confirmed or the topic is routine:\n"
+    "  overdue obligations, failed or returned payments, partial payments leaving an amount due,\n"
+    "  insufficient funds, suspicious activity or security alerts, changed obligations requiring action,\n"
+    "  and actual deadlines requiring a specific unresolved action must remain eligible for priority.\n"
+    "  Apply this protection to financial/tax and work-related tasks as well as other consequential tasks.\n"
     "IMPORTANT: MERGE similar or duplicate tasks into ONE entry.\n"
-    "  Multiple emails about the same topic (e.g. two security alerts from the same\n"
-    "  service) should be combined into a single recommendation, not listed separately.\n"
+    "  Multiple emails about the same unresolved issue should be combined into a single recommendation,\n"
+    "  while distinct risks or actions must not be collapsed merely because they concern the same service.\n"
     "\n"
-    "Example output format (for 3 items):\n"
-    '[{"rank":1,"title":"任务标题","reason":"原因说明"},\n'
-    '{"rank":2,"title":"任务标题","reason":"原因说明"},\n'
-    '{"rank":3,"title":"任务标题","reason":"原因说明"}]\n'
+    "Example output when no task requires action:\n"
+    "[]\n"
     "\n"
-    "Example output format (for 5 items):\n"
-    '[{"rank":1,"title":"任务标题","reason":"原因说明"},\n'
-    '{"rank":2,"title":"任务标题","reason":"原因说明"},\n'
-    '{"rank":3,"title":"任务标题","reason":"原因说明"},\n'
-    '{"rank":4,"title":"任务标题","reason":"原因说明"},\n'
-    '{"rank":5,"title":"任务标题","reason":"原因说明"}]\n'
+    "Example output when only one task qualifies, even if the limit is higher:\n"
+    '[{"rank":1,"title":"处理扣款失败","reason":"自动扣款已失败，需在邮件明确的截止时间前处理尚未支付的款项。"}]\n'
     "\n"
     "The task summaries from the last 24 hours are as follows:"
 )

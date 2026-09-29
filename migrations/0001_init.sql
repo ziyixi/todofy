@@ -133,3 +133,5 @@ CREATE TABLE legacy_mail_text (
   expires_at INTEGER
 );
 CREATE INDEX legacy_mail_text_expires ON legacy_mail_text (expires_at) WHERE expires_at IS NOT NULL;
+-- LEGACY_TEXT_RETENTION_DAYS > 0 also deletes texts older than that many days.
+CREATE INDEX legacy_mail_text_created ON legacy_mail_text (created_at);

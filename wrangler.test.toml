@@ -38,5 +38,15 @@ BUILD_SHA = "test"
 ACCESS_OWNER = "owner@example.com"
 DEV_AUTH_BYPASS = "true"
 GEMINI_API_BASE = "http://127.0.0.1:9"
-GEMINI_TIMEOUT_MS = "1500"
 TODOIST_API_BASE = "http://127.0.0.1:9"
+# Short timings so retries, lookups and the watchdog happen within a test.
+GEMINI_TIMEOUT_MS = "1500"
+TODOIST_ATTEMPT_TIMEOUT_MS = "1500"
+BACKOFF_BASE_MS = "200"
+LOOKUP_DELAY_MS = "500"
+WATCHDOG_MS = "2000"
+GEMINI_MODELS = "model-a,model-b"
+# Scenario modules that test reminders turn them on; elsewhere they would add Todoist calls.
+REMINDER_ENABLED = "false"
+# No daily report precompute, whatever the time of day the suite runs (scenarios opt in with "00:00").
+REPORT_PRECOMPUTE_UTC = "off"
