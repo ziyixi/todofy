@@ -35,10 +35,10 @@ public). Sections below the checklist hold the evidence.
 
 | Check | Status |
 |---|---|
-| D1 created, Access app, GitHub `production` environment | passed: D1 `todofy` took the import, the UI answered through Access, the releases below deployed from `main` |
+| D1 created, Access app, GitHub `production` environment | passed: D1 `todofy` took the import, the UI answered through Access, the releases below that went live were deployed from `main` |
 | First deploy from `main`: `/health` reports the commit on the hooks host; UI host 401 without Access | deployed (`2a5ef96`); the `/health` commit and the 401 without Access were not recorded: pending |
 | Worker secrets set; webhook smoke test (`tools/smoke_webhook.py`: 401/415/413/400/204/204/409) | passed with the real token |
-| Owner login through Access (primary email and GitHub-login alias) and a UI reconcile | partly: the UI checks below passed through Access; which logins were used, the alias login and a reconcile were not recorded: pending |
+| Owner login through Access (primary email and GitHub-login alias) and a UI reconcile | partly: the UI checks below passed through Access, including one reconcile action (`dismiss`); which login was used and the alias login were not recorded: pending |
 | Mail Hero test event → `complete` with a Todoist task | passed: `complete` over the real Worker-to-Worker path |
 | Cutover: snapshot, export, import, `verify_d1.py` PASS | passed |
 | Newsletter: `/api/summary` and `/api/recommendation?top=10` return 200 | passed: 200 to the newsletter's own httpx client; its first scheduled run through RPC is pending |
@@ -86,7 +86,7 @@ was rotated to a new 48-character random value; the old credential gets 401.
 | `981a47f` | Go-shaped `/health` fields | live; ended the newsletter crash loop |
 | `e3ca6de` | gateway split: TypeScript `todofy` + Python `todofy-core` | deploy blocked by flaky runtime tests; `2dec605` made them deterministic (its deploy then met the 10061 refusal below, [gateway-contract.md](gateway-contract.md) §6.6) |
 | `a8e8f4f` | core class renamed `TodofyCore` | refused: Cloudflare error 10061 on `deleted_classes` while a live version still bound the class |
-| `bc7b89e` | gateway with no migration and an empty retired `TodofyCoordinator` | live: the gateway replaced the Python version |
+| `bc7b89e` | gateway that sends no migration (only the published `v1`) and exports an empty retired `TodofyCoordinator` | live: the gateway replaced the Python version |
 | `90519d5` | RPC between gateway and core; weekly D1 → R2 backup; Analytics Engine metrics; migration `0002_daily_metrics` | live; first backup in `todofy-backups`: 18 MB, 7 tables, manifest verified; dataset `todofy_metrics` (the owner enabled Analytics Engine) |
 | `4a6dffd` | gateway-only release deleting the retired class (`v2` `deleted_classes`) | accepted |
 | `9ae9d8d` | RPC transition shim removed from the core | released; no separate check recorded |
@@ -119,5 +119,5 @@ First-day samples, not the one-week usage check.
   writes nothing; the first rows are for 2026-09-30, written shortly after 2026-10-01 00:05 UTC.
 - The one-week usage check (Workers, DO, D1 reads/writes, R2, against the shared Free allowance).
 - The checklist items still open: `/health` reporting the deployed commit and the UI host's 401 without
-  Access; the alias login and a UI reconcile.
+  Access; the alias login.
 - Deleting the snapshot on the host after 2026-10-29.
