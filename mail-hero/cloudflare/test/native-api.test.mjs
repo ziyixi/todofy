@@ -6,7 +6,7 @@ import { exportJWK, generateKeyPair, SignJWT } from 'jose'
 import { createAccessVerifier } from '@ziyixi/edge-auth'
 import { handleAPI } from '../src/native/api.ts'
 import { MAX_ZONE_SEGMENTS, zoneSegments } from '../src/native/api-delivery-stats.ts'
-import { ROUTE_BLOCK_COOLDOWN_MS, ROUTE_BLOCK_GRACE_MS, ROUTE_BLOCK_MAX_RECHECKS, runJob, runMaintenance } from '../src/native/pipeline.ts'
+import { ROUTE_BLOCK_COOLDOWN_MS, ROUTE_BLOCK_GRACE_MS, ROUTE_BLOCK_MAX_RECHECKS, buildPayload, runJob, runMaintenance, syntheticTestMail } from '../src/native/pipeline.ts'
 import { alertSignals, alertSnapshot } from '../src/native/alerts.ts'
 import { authenticate, csrfResponse, decryptCredential, encryptCredential, HttpError, privateResponse, requireCSRF } from '../src/native/security.ts'
 
@@ -752,6 +752,13 @@ test('endpoint diagnostics report only verified policy and synthetic tests are i
   assert.equal((await api('/messages')).data.items.length, 0)
   assert.equal((await api('/deliveries')).data.items.length, 1)
   assert.ok(env.jobs.length > 0)
+  // The owner's connection test is unchanged by ops-v1: a single attempt, no canary marker, the golden bytes.
+  const row = await env.DB.prepare('SELECT m.id,m.received_at,m.canary_run_id,d.retry_mode FROM deliveries d JOIN messages m ON m.id=d.message_id WHERE d.event_id=?').bind(first.data.event_id).first()
+  assert.equal(row.canary_run_id, null); assert.equal(row.retry_mode, 'once')
+  const frozen = await (await env.MAIL_STORE.get(`payload/${first.data.event_id}.json`)).text()
+  assert.equal(frozen, buildPayload(first.data.event_id, row.id, row.received_at, syntheticTestMail(), env.RECEIVE_ADDRESS, env.RECEIVE_ADDRESS))
+  assert.equal('canary' in JSON.parse(frozen), false)
+  assert.equal((await api(`/deliveries/${first.data.event_id}`)).data.delivery.canary, false)
 })
 
 test('a lost action acknowledgement still resolves the original event after endpoint changes', async () => {

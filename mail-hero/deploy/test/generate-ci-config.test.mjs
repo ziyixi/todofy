@@ -20,6 +20,8 @@ test('CI configuration targets only the native service and preserves the SQLite 
   assert.equal(config.d1_databases[0].database_name, 'mail-hero')
   assert.equal(config.r2_buckets[0].bucket_name, 'mail-hero-store')
   assert.equal(config.vars.INGEST_DAILY_MESSAGE_LIMIT, '300')
+  assert.equal(config.vars.PUBLIC_HOST, 'mail.example.org', 'ops-v1 ui_url uses the routed host')
+  assert.deepEqual(config.routes, [{ pattern: 'mail.example.org', custom_domain: true }])
   assert.equal('CREDENTIAL_KEY' in config.vars, false)
   assert.equal('DEV_AUTH_BYPASS' in config.vars, false)
   assert.equal('limits' in config, false)
@@ -32,6 +34,7 @@ test('missing pause state, invalid resource identity and malformed alias fail be
     ['MAIL_HERO_ACCESS_OWNER_ALIASES', 'owner@example.org\ninjected-value'],
     ['MAIL_HERO_ACCESS_OWNER', '\u212aate@example.org'], ['MAIL_HERO_ACCESS_OWNER', 'own\u00e9r@example.org'],
     ['MAIL_HERO_ACCESS_OWNER_ALIASES', 'alias@example.org,\u212aim@example.net'],
+    ['MAIL_HERO_PUBLIC_HOST', 'https://mail.example.org/'], ['MAIL_HERO_PUBLIC_HOST', undefined],
   ]) assert.throws(() => generateConfig({ ...environment(), [name]: value }), new RegExp(name))
 })
 

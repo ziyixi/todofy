@@ -89,6 +89,8 @@ export interface Delivery {
   subject?: string
   from?: string
   content_deleted?: boolean
+  /** A synthetic ops-v1 canary event (Mail Hero's dashboard health check), not mail. */
+  canary?: boolean
 }
 
 export interface Endpoint {

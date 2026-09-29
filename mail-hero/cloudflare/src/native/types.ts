@@ -24,6 +24,8 @@ export interface Env {
   ACCESS_SERVICE_ORIGIN?: string;
   ACCESS_CLIENT_ID?: string;
   ACCESS_CLIENT_SECRET?: string;
+  /** The owner UI's host name (the custom domain); ops-v1 status() links it as ui_url. */
+  PUBLIC_HOST?: string;
 }
 
 export type Job = { type: 'parse'; key: string } | { type: 'deliver'; eventID: string };

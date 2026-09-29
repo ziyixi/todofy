@@ -5,6 +5,7 @@ import { emailHandler } from './ingest';
 import { authenticate, HttpError, json, privateResponse } from './security';
 
 export { MailCoordinator } from './coordinator';
+export { Ops } from './ops';
 
 export async function fetchHandler(request: Request, env: Env): Promise<Response> {
   const path = new URL(request.url).pathname;

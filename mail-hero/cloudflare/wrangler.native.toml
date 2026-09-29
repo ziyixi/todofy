@@ -26,6 +26,8 @@ FORCE_SEND_PAUSED = "true"
 MAINTENANCE_MODE = "false"
 INGEST_DAILY_MESSAGE_LIMIT = "300"
 INGEST_DAILY_BYTE_LIMIT = "268435456"
+# The owner UI's custom domain; contracts/ops-v1 status() returns https://<PUBLIC_HOST>/ as ui_url.
+PUBLIC_HOST = "mail.example.com"
 
 [[d1_databases]]
 binding = "DB"

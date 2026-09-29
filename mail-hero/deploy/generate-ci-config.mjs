@@ -34,6 +34,7 @@ export function generateConfig(env) {
     if (alertURL !== alertURL.trim() || parsed.protocol !== 'https:' || parsed.username || parsed.password || parsed.hash ||
       (parsed.port && parsed.port !== '443') || !(alertAllowed.length ? alertAllowed : allowed).includes(parsed.hostname)) fail('MAIL_HERO_ALERT_WEBHOOK_URL')
   }
+  const publicHost = checked(env, 'MAIL_HERO_PUBLIC_HOST', domainPattern)
   const databaseID = checked(env, 'MAIL_HERO_D1_DATABASE_ID', /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i)
   return {
     name: 'mail-hero',
@@ -52,6 +53,8 @@ export function generateConfig(env) {
       MAINTENANCE_MODE: flag(env, 'MAIL_HERO_MAINTENANCE_MODE'),
       INGEST_DAILY_MESSAGE_LIMIT: integer(env, 'MAIL_HERO_INGEST_DAILY_MESSAGE_LIMIT', '300', 100000),
       INGEST_DAILY_BYTE_LIMIT: integer(env, 'MAIL_HERO_INGEST_DAILY_BYTE_LIMIT', '268435456', 10737418240),
+      // contracts/ops-v1 status() links the owner UI; the same host as the custom-domain route.
+      PUBLIC_HOST: publicHost,
     },
     d1_databases: [{ binding: 'DB', database_name: checked(env, 'MAIL_HERO_D1_DATABASE_NAME', /^[a-zA-Z0-9_-]{1,63}$/, 'mail-hero'),
       database_id: databaseID, migrations_dir: 'migrations' }],
@@ -60,7 +63,7 @@ export function generateConfig(env) {
     durable_objects: { bindings: [{ name: 'COORDINATOR', class_name: 'MailCoordinator' }] },
     migrations: [{ tag: 'v1', new_sqlite_classes: ['MailCoordinator'] }],
     observability: { enabled: false },
-    routes: [{ pattern: checked(env, 'MAIL_HERO_PUBLIC_HOST', domainPattern), custom_domain: true }],
+    routes: [{ pattern: publicHost, custom_domain: true }],
   }
 }
 

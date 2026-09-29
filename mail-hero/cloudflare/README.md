@@ -31,6 +31,7 @@ The Cloudflare Email Routing limit is 25 MiB. This is an accepted raw-size ceili
 | `MAINTENANCE_MODE` | variable | Stop intake, management writes and background processing for a coordinated backup or restore. |
 | `INGEST_DAILY_MESSAGE_LIMIT` | variable | Default `300` accepted intake reservations per UTC day. |
 | `INGEST_DAILY_BYTE_LIMIT` | variable | Default `268435456` (256 MiB) raw bytes reserved per UTC day. |
+| `PUBLIC_HOST` | variable | The owner UI's custom domain (CI copies `MAIL_HERO_PUBLIC_HOST`); ops-v1 `status()` returns `https://<PUBLIC_HOST>/` as `ui_url`. |
 | `DEV_AUTH_BYPASS` | local-only variable | Optional local development bypass; rejected on public requests. Never deploy it. |
 | `ACCESS_SERVICE_ORIGIN` | optional variable | Exact HTTPS consumer origin whose Access application uses a service token. |
 | `ACCESS_CLIENT_ID`, `ACCESS_CLIENT_SECRET` | optional paired secrets | That consumer's Access service token, separate from webhook authentication. |
@@ -53,6 +54,17 @@ npx wrangler dev --config wrangler.native.toml --ip 127.0.0.1
 Use a local `.dev.vars` containing a disposable `CREDENTIAL_KEY` and, if needed, `DEV_AUTH_BYPASS=true`; keep it untracked. Wrangler local D1, R2 and DO data are synthetic test state. Local success does not prove account-level Free quotas, Email Routing failure behavior, or real SMTP arrival.
 
 For deployment and the budget/backup procedure, follow [the setup guide](../docs/cloudflare-setup.md). Formal releases use [GitHub Actions](../docs/ci-cd.md). Every Wrangler command should explicitly select its local or production configuration. Deployment needs an authorized account session; never put credentials in source or chat.
+
+## Ops entrypoint (contracts/ops-v1)
+
+Next to the default `fetch`/`email` handlers (unchanged), `index.ts` exports the named `WorkerEntrypoint` `Ops` (`src/native/ops.ts`) for a future dashboard Worker in the same account: `[[services]] binding = "MAIL_HERO", service = "mail-hero", entrypoint = "Ops"`. There is no HTTP route to it. Methods and bounds are in [`contracts/ops-v1/README.md`](../../contracts/ops-v1/README.md); outputs carry only codes, numbers, booleans, timestamps, event IDs and the UI URL.
+
+- `status()`: one coordinator request (DO SQLite only) and at most six D1 reads, the same partial-index ranges as the ten-minute alert phase (`alertSnapshot`) plus the active `alerts` rows; no writes.
+- `setGuard()`: a `shed` guard lives in the coordinator's SQLite (`ops_guard`, not D1, not in backups) and expires by itself at `until` (at most 36 h ahead). It defers only `raw_reconcile`, `lifecycle_retention`, `canary_cleanup` and `alert_history_purge`, and each of them still runs once its last run (`ops_job_runs`) is 48 h old. Intake, parsing, delivery and retries, repair, purge resumption, capacity reconciliation, alerts, backups and the canary always run.
+- `startCanary({run_id})`: the owner connection-test path with fixed canary text, the top-level `canary` marker of `mail.received.v1` and normal automatic retries, to the current default endpoint; idempotent per `run_id` (action ID `canary:<run_id>`). Pauses, a blocked or missing target, maintenance, a backup snapshot or capacity return `paused`/`unavailable` and create nothing. Canary messages are `synthetic_test` rows with `canary_run_id` (migration `0010`): outside the inbox, search, lifecycle and alerts; the deliveries list labels them 金丝雀. Their content is deleted 7 days later (alerts phase, one message per pass). Like owner connection tests, their deliveries are included in the overview's delivery counters.
+- `canaryDelivery(event_id)`: one D1 statement; `unknown` for anything that is not a canary event.
+
+`src/native/ops-core.ts` holds the logic (importable by Node tests), `src/native/ops-guard.ts` the guard rules and coordinator storage. Tests: `test/native-ops.test.mjs`, and `test/native-ops-runtime.test.mjs`, where a second Worker calls the real entrypoint through a service binding in workerd.
 
 ## Persistence and recovery
 

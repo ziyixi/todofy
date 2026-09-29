@@ -59,7 +59,7 @@ export async function parseStatus(env: Env): Promise<{ oldest_at: string | null;
  * exactly as the scheduler sees it, and is rechecked on its next attempt. */
 export async function alertSnapshot(env: Env, time = Date.now()): Promise<Row> {
   const timestamp = new Date(time).toISOString()
-  const settings = await env.DB.prepare(`SELECT s.logical_bytes,s.logical_limit_bytes,s.last_backup_at,s.created_at,s.mode,s.current_endpoint_id,
+  const settings = await env.DB.prepare(`SELECT s.logical_bytes,s.logical_limit_bytes,s.last_backup_at,s.created_at,s.mode,s.current_endpoint_id,s.send_paused,
     e.paused endpoint_paused,e.archived_at endpoint_archived_at,r.blocked_reason,r.blocked_until
     FROM app_settings s LEFT JOIN webhook_endpoints e ON e.id=s.current_endpoint_id LEFT JOIN endpoint_revisions r ON r.id=e.current_revision_id WHERE s.id=1`).first<Row>()
   if (!settings) throw new Error('alert_settings_unavailable')
@@ -89,7 +89,9 @@ export async function alertSnapshot(env: Env, time = Date.now()): Promise<Row> {
     current_blocked: currentBlocked ? 1 : 0, current_auto_recheck: currentBlocked && settings.blocked_until ? 1 : 0,
     current_paused: forward && settings.endpoint_paused ? 1 : 0,
     blocked_waiting: Number(waiting?.blocked_waiting) || 0, blocked_permanent_waiting: Number(waiting?.blocked_permanent_waiting) || 0,
-    paused_waiting: Number(waiting?.paused_waiting) || 0 }
+    paused_waiting: Number(waiting?.paused_waiting) || 0,
+    // Read by ops-v1 status() only (modes); alertSignals ignores them.
+    send_paused: settings.send_paused ? 1 : 0, forwarding: forward ? 1 : 0 }
 }
 
 /** At most one active reminder and one resolution per code per UTC day.
@@ -112,10 +114,12 @@ export async function evaluateAlerts(env: AlertEnv, time = Date.now()): Promise<
     if (!signal.active && !old?.active) continue
     const transition = signal.active ? 'active' : 'resolved'
     const notify = !old || !!old.active !== signal.active || old.last_event_day !== day
-    statements.push(env.DB.prepare(`INSERT INTO alerts(code,active,severity,metrics_json,first_seen_at,last_seen_at,resolved_at,last_event_day)
-      VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(code) DO UPDATE SET active=excluded.active,severity=excluded.severity,
-      metrics_json=excluded.metrics_json,last_seen_at=excluded.last_seen_at,resolved_at=excluded.resolved_at,last_event_day=excluded.last_event_day`)
-      .bind(signal.code, +signal.active, signal.severity, JSON.stringify(signal.metrics), timestamp, timestamp, signal.active ? null : timestamp, notify ? day : old.last_event_day))
+    // active_since (0010): start of the current activation, kept while it stays active (ops-v1 `since`).
+    statements.push(env.DB.prepare(`INSERT INTO alerts(code,active,severity,metrics_json,first_seen_at,last_seen_at,resolved_at,last_event_day,active_since)
+      VALUES(?,?,?,?,?,?,?,?,?) ON CONFLICT(code) DO UPDATE SET active=excluded.active,severity=excluded.severity,
+      metrics_json=excluded.metrics_json,last_seen_at=excluded.last_seen_at,resolved_at=excluded.resolved_at,last_event_day=excluded.last_event_day,
+      active_since=CASE WHEN excluded.active=1 THEN COALESCE(CASE WHEN alerts.active=1 THEN alerts.active_since END,excluded.active_since) END`)
+      .bind(signal.code, +signal.active, signal.severity, JSON.stringify(signal.metrics), timestamp, timestamp, signal.active ? null : timestamp, notify ? day : old.last_event_day, signal.active ? timestamp : null))
     if (notify) {
       const id = crypto.randomUUID()
       const payload = JSON.stringify({ type: 'mailhero.alert.v1', id, code: signal.code, state: transition,
@@ -181,12 +185,13 @@ export async function alertOverview(env: AlertEnv): Promise<Row> {
     pending_notifications: delivery?.pending ?? 0, failed_notifications: delivery?.failed ?? 0 }
 }
 
-/** Run as its own bounded maintenance phase, under the coordinator backup guard. */
-export async function runAlerts(env: AlertEnv): Promise<{ continueSoon: boolean }> {
+/** Run as its own bounded maintenance phase, under the coordinator backup guard.
+ * `purgeHistory: false` (an ops-v1 shed guard) skips only the 180-day history delete. */
+export async function runAlerts(env: AlertEnv, options: { purgeHistory?: boolean } = {}): Promise<{ continueSoon: boolean }> {
   if (env.MAINTENANCE_MODE === 'true') return { continueSoon: false }
   await evaluateAlerts(env)
   await deliverAlert(env)
-  await env.DB.prepare(`DELETE FROM alert_notifications WHERE id IN (SELECT id FROM alert_notifications INDEXED BY alert_notifications_created_idx
+  if (options.purgeHistory !== false) await env.DB.prepare(`DELETE FROM alert_notifications WHERE id IN (SELECT id FROM alert_notifications INDEXED BY alert_notifications_created_idx
     WHERE created_at<? AND state IN('sent','failed','disabled') ORDER BY created_at LIMIT 20)`)
     .bind(new Date(Date.now() - 180 * DAY).toISOString()).run()
   const pending = await env.DB.prepare(`SELECT 1 FROM alert_notifications WHERE state IN('pending','sending') LIMIT 1`).first()

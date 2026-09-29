@@ -94,12 +94,14 @@ export async function finishAction(env: Env, entry: Row, result: string, status:
 export const deliverySelect = `SELECT d.event_id,d.message_id,e.id endpoint_id,COALESCE(m.subject,'') subject,
 COALESCE(m.from_text,'') "from",e.label endpoint_label,r.url endpoint_url,d.state,d.attempt_count,d.created_at,
 d.next_attempt_at,d.delivered_at,d.last_error,d.generation,d.replay_of_event_id,d.retry_mode,
-(m.content_deleted_at IS NOT NULL) content_deleted,e.paused endpoint_paused,s.send_paused global_paused,r.blocked_reason,r.blocked_until
+(m.content_deleted_at IS NOT NULL) content_deleted,(m.canary_run_id IS NOT NULL) canary,e.paused endpoint_paused,s.send_paused global_paused,r.blocked_reason,r.blocked_until
 FROM deliveries d JOIN messages m ON m.id=d.message_id JOIN endpoint_revisions r ON r.id=d.endpoint_revision_id
 JOIN webhook_endpoints e ON e.id=r.endpoint_id JOIN app_settings s ON s.id=1`
 export function deliveryJSON(env: Env, row: Row): Row {
   const { endpoint_paused, global_paused, blocked_reason, blocked_until, ...value } = row
   value.content_deleted = !!value.content_deleted
+  // A contracts/ops-v1 canary (synthetic); the UI labels it.
+  value.canary = !!value.canary
   // An expired cooldown is not a pause: the scheduler sends on the next attempt.
   const blocked = blocked_reason && (!blocked_until || Date.parse(blocked_until) > Date.now())
   value.effective_state = ['pending', 'retry_wait'].includes(value.state) && (endpoint_paused || global_paused || blocked || paused(env)) ? 'paused' : value.state

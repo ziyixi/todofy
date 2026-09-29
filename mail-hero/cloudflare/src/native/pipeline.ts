@@ -6,6 +6,7 @@ import { webhookContent } from './content-policy.ts';
 import { resolvedDueSQL, resolvedTerminalSQL, runLifecycle, safeTerminalSQL } from './lifecycle.ts';
 import { runAlerts } from './alerts.ts';
 import { recordDeletion } from './backup-artifacts.ts';
+import type { OpsDeferral } from './ops-guard.ts';
 import { reserveObjectCapacity, settleObjectCapacity, releaseObjectCapacity, capacitySnapshot, reconcileCapacity, MAX_PARSED_JSON_BYTES, MAX_PARSE_EXTRA_BYTES } from './capacity.ts';
 
 type Row = Record<string, any>;
@@ -94,7 +95,9 @@ export async function createDelivery(env: Env, options: CreateOptions): Promise<
   const eventID = options.eventID ?? crypto.randomUUID();
   let payload = '', payloadError: string | null = null;
   try { if(!options.actionID && parsed.needs_review) payloadError='message_needs_review';
-    else payload=buildPayload(eventID,options.messageID,message!.received_at,parsed,message!.envelope_recipient || env.RECEIVE_ADDRESS,env.RECEIVE_ADDRESS); }
+    // A canary message's every event is a canary, including an owner's resend as a new event.
+    else payload=buildPayload(eventID,options.messageID,message!.received_at,parsed,message!.envelope_recipient || env.RECEIVE_ADDRESS,env.RECEIVE_ADDRESS,
+      message!.canary_run_id ? {run_id:message!.canary_run_id} : undefined); }
   catch (err) {
     if (options.actionID || !(err instanceof HttpError) || err.code!=='invalid_payload') throw err;
     payloadError='invalid_payload';
@@ -348,6 +351,17 @@ export function syntheticCanaryMail():ParsedMail {
   return {subject:'Mail Hero canary',text:'This is a synthetic Mail Hero end-to-end canary. It asks for nothing: consumers must not create tasks, messages or reports for it.',html:'',from:[{address:'synthetic@example.org',name:'Mail Hero'}],to:[],cc:[],reply_to:[],sent_at:null,rfc_message_id:null,headers:[],attachments:[],needs_review:false,warnings:[]};
 }
 export async function createSyntheticTestDelivery(env:Env,revisionID:string,actionID:string):Promise<string> {
+  return createSyntheticDelivery(env,revisionID,actionID,syntheticTestMail(),'once');
+}
+/** The action ID of a canary run; owner action IDs are UUIDs, so they never collide. */
+export const canaryActionID=(runID:string)=>`canary:${runID}`;
+/** contracts/ops-v1 startCanary: the connection-test path with the canary text and marker, and the
+ * normal automatic retries (the owner's connection test stays a single attempt). */
+export async function createSyntheticCanaryDelivery(env:Env,revisionID:string,runID:string):Promise<string> {
+  if(!CANARY_RUN_ID.test(runID)) error(422,'invalid_payload');
+  return createSyntheticDelivery(env,revisionID,canaryActionID(runID),syntheticCanaryMail(),'auto',runID);
+}
+async function createSyntheticDelivery(env:Env,revisionID:string,actionID:string,parsed:ParsedMail,retryMode:'auto'|'once',canaryRunID?:string):Promise<string> {
   const old=await first(env,'SELECT event_id FROM deliveries WHERE action_request_id=?',actionID);
   if(old) return old.event_id;
   // Deterministic identity lets a retry resume after raw/D1 publication but
@@ -355,16 +369,32 @@ export async function createSyntheticTestDelivery(env:Env,revisionID:string,acti
   const hash=await sha256(`synthetic:${actionID}`);
   const id=`${hash.slice(0,8)}-${hash.slice(8,12)}-4${hash.slice(13,16)}-8${hash.slice(17,20)}-${hash.slice(20,32)}`;
   const date=now(), key=`parsed/${id}/synthetic/message.json`;
-  const parsed=syntheticTestMail();
   const content=JSON.stringify(parsed), size=utf8.encode(content).length;
   await reserveObjectCapacity(env,`raw/${id}.eml`,size);
   await env.MAIL_STORE.put(key,content,{httpMetadata:{contentType:'application/json'}});
-  await env.DB.batch([
-    env.DB.prepare(`INSERT OR IGNORE INTO messages(id,origin,received_at,last_received_at,envelope_from,envelope_recipient,size_bytes,receive_mode,parse_state,parsed_key,parsed_size_bytes,content_bytes,subject,from_text)
-      SELECT ?,'synthetic_test',?,?,'synthetic@example.org','',0,'archive','ready',?,?,?,?,'Mail Hero' WHERE EXISTS(SELECT 1 FROM app_settings WHERE id=1 AND logical_bytes+?<=logical_limit_bytes)`).bind(id,date,date,key,size,size,parsed.subject,size),
+  // The connection test's statement stays exactly as before; only a canary names the 0010 column.
+  const canary=canaryRunID===undefined?{column:'',value:''}:{column:',canary_run_id',value:',?'};
+  const inserted=await env.DB.batch([
+    env.DB.prepare(`INSERT OR IGNORE INTO messages(id,origin,received_at,last_received_at,envelope_from,envelope_recipient,size_bytes,receive_mode,parse_state,parsed_key,parsed_size_bytes,content_bytes,subject,from_text${canary.column})
+      SELECT ?,'synthetic_test',?,?,'synthetic@example.org','',0,'archive','ready',?,?,?,?,'Mail Hero'${canary.value} WHERE EXISTS(SELECT 1 FROM app_settings WHERE id=1 AND logical_bytes+?<=logical_limit_bytes)`)
+      .bind(id,date,date,key,size,size,parsed.subject,...(canaryRunID===undefined?[]:[canaryRunID]),size),
     env.DB.prepare('UPDATE app_settings SET logical_bytes=logical_bytes+? WHERE id=1 AND changes()>0').bind(size),
   ]);
-  return createDelivery(env,{messageID:id,revisionID,actionID,retryMode:'once'});
+  // Refused by logical capacity (not an earlier identical call): leave no object behind. The DO
+  // reservation stays under this deterministic key, so a retry of the same action reuses it.
+  if(!inserted[0].meta.changes && !await first(env,'SELECT id FROM messages WHERE id=?',id)) await env.MAIL_STORE.delete(key);
+  return createDelivery(env,{messageID:id,revisionID,actionID,retryMode});
+}
+/** Deferrable (ops-v1 `canary_cleanup`): one live canary message older than 7 days per pass, with no
+ * delivery still in flight, loses its content through the owner-delete path (capacity, deletion
+ * manifest, tombstone). Owner connection tests keep their content as before. */
+export const CANARY_CONTENT_DAYS = 7;
+export async function cleanupCanaryContent(env:Env,time=Date.now()):Promise<boolean> {
+  const row=await first(env,`SELECT m.id,m.version FROM messages m INDEXED BY messages_canary_idx WHERE m.canary_run_id IS NOT NULL AND m.content_deleted_at IS NULL
+    AND m.received_at<? AND NOT EXISTS(SELECT 1 FROM deliveries d WHERE d.message_id=m.id AND d.state IN('pending','retry_wait','sending')) ORDER BY m.received_at LIMIT 1`,stamp(time-CANARY_CONTENT_DAYS*DAY));
+  if(!row) return false;
+  await deleteMessageContent(env,row.id,row.version);
+  return true;
 }
 
 export function retryAfter(value:string|null,time=Date.now()):number|null {
@@ -529,11 +559,18 @@ export async function runJob(env:Env,job:Job,attempts=0):Promise<number|null> {
 
 /** Three separate Alarm invocations keep each pass within Free D1's query
  * budget. The short phase handoff is durable; alerts complete every 10 minutes. */
-export async function runMaintenance(env:Env):Promise<{jobs:Job[];continueSoon:boolean;nextDelayMS?:number}> {
+export async function runMaintenance(env:Env,deferral?:OpsDeferral):Promise<{jobs:Job[];continueSoon:boolean;nextDelayMS?:number}> {
   if(env.MAINTENANCE_MODE==='true') return {jobs:[],continueSoon:false};
   const phase=(await first(env,"SELECT value FROM maintenance WHERE id='maintenance_phase'"))?.value ?? 'repair';
   if(phase==='alerts') {
-    await runAlerts(env);
+    // A shed guard (contracts/ops-v1) defers only cleanup; alert evaluation and delivery always run.
+    const purgeHistory=!deferral?.defers('alert_history_purge');
+    await runAlerts(env,{purgeHistory});
+    if(purgeHistory) deferral?.ran('alert_history_purge');
+    if(!deferral?.defers('canary_cleanup')) {
+      // A failure is retried next cycle; it must not hold the phase cycle (repair) on this phase.
+      try { await cleanupCanaryContent(env); deferral?.ran('canary_cleanup'); } catch { /* next cycle */ }
+    }
     await env.DB.prepare("INSERT INTO maintenance(id,value) VALUES('maintenance_phase','repair') ON CONFLICT(id) DO UPDATE SET value=excluded.value").run();
     return {jobs:[],continueSoon:false,nextDelayMS:600_000};
   }
@@ -543,7 +580,10 @@ export async function runMaintenance(env:Env):Promise<{jobs:Job[];continueSoon:b
     if(deleted.length) {
       await purgeDeletedContent(env,deleted[0].id);
       await env.DB.prepare('INSERT OR IGNORE INTO maintenance(id,value) VALUES(?,?)').bind(`purged:${deleted[0].id}`,now()).run();
-    } else await runLifecycle(env,{deleteContent:(id,version,resolved)=>deleteMessageContent(env,id,version,resolved ?? true),withMutation:operation=>operation()});
+    } else if(!deferral?.defers('lifecycle_retention')) {
+      await runLifecycle(env,{deleteContent:(id,version,resolved)=>deleteMessageContent(env,id,version,resolved ?? true),withMutation:operation=>operation()});
+      deferral?.ran('lifecycle_retention');
+    }
     await env.DB.prepare("UPDATE maintenance SET value='alerts' WHERE id='maintenance_phase'").run();
     return {jobs:[],continueSoon:true,nextDelayMS:1000};
   }
@@ -576,7 +616,8 @@ export async function runMaintenance(env:Env):Promise<{jobs:Job[];continueSoon:b
   for(const delivery of deliveries) jobs.push({type:'deliver',eventID:delivery.event_id});
   // Continue recovery pages promptly, but do not rescan an idle bucket every
   // ten minutes merely because the independent alert clock is due.
-  const checkpoint=await first(env,"SELECT value FROM maintenance WHERE id='raw_reconcile_after'");
+  // A shed guard defers this safety net (jobs are registered before the R2 write) within its bound.
+  const checkpoint=deferral?.defers('raw_reconcile')?{value:String(Number.POSITIVE_INFINITY)}:await first(env,"SELECT value FROM maintenance WHERE id='raw_reconcile_after'");
   if(!checkpoint || Number(checkpoint.value)<=Date.now()) {
     const cursor=(await first(env,"SELECT value FROM maintenance WHERE id='raw_reconcile_cursor'"))?.value;
     const raw=await env.MAIL_STORE.list({prefix:'raw/',cursor:cursor || undefined,limit:100});
@@ -599,6 +640,7 @@ export async function runMaintenance(env:Env):Promise<{jobs:Job[];continueSoon:b
       env.DB.prepare("INSERT INTO maintenance(id,value) VALUES('raw_reconcile_after',?) ON CONFLICT(id) DO UPDATE SET value=excluded.value").bind(String(Date.now()+(raw.truncated?600_000:DAY))),
     ]);
     await collectOrphans(env);
+    deferral?.ran('raw_reconcile');
   }
   await reconcileCapacity(env);
   await env.DB.prepare("INSERT INTO maintenance(id,value) VALUES('maintenance_phase','lifecycle') ON CONFLICT(id) DO UPDATE SET value=excluded.value").run();

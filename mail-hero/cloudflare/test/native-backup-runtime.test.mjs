@@ -57,6 +57,8 @@ test('workerd snapshot cut preserves intake and verifies complete authenticated 
     async function block(path,name){const response=await call(base+path);const bytes=await response.text();assert.equal(response.status,200,bytes);assert.equal(response.headers.get('X-Content-SHA256'),hash(bytes));blocks.set(name,bytes);return JSON.parse(bytes);}
     const control=await block('/control'+q,'control.json');assert.deepEqual(control.uploads.map(r=>r.key),[key]);assert.equal(control.policy.mode,'archive');
     const schema=await block('/database-schema'+q,'database-schema.json');
+    // Additive columns (0010, contracts/ops-v1) travel with the generic schema export.
+    for(const column of ['canary_run_id','active_since','messages_canary_idx']) assert.match(JSON.stringify(schema),new RegExp(column));
     for(const table of schema.tables){let offset=0;do{const page=await block('/database'+q+'&table='+encodeURIComponent(table)+'&offset='+offset,`database/${table}/${offset}.json`);offset=page.next_offset;}while(offset!==null);}
     assert.equal((await call(base+'/manifest'+q)).status,409,'all database pages are not enough without object inventory');
     const objects=await json(base+'/objects'+q);assert.equal(objects.complete,true);assert.deepEqual(objects.objects.map(o=>o.key),[key]);

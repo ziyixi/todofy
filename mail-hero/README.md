@@ -51,4 +51,6 @@ npm --prefix cloudflare test
 
 以下命令都在 `mail-hero/` 目录运行。
 
+运维面：Worker 另外导出命名入口 `Ops`（[ops-v1](../contracts/ops-v1/README.md)），供同一账户内的仪表盘 Worker 通过 service binding 读取健康状态、设置降载 guard、发起并查询端到端金丝雀；没有新增公开路由，默认 `fetch`/`email` 行为不变。细节见 [cloudflare/README.md](cloudflare/README.md#ops-entrypoint-contractsops-v1) 与[设置说明 §2.3](docs/cloudflare-setup.md#23-运维入口ops-v1)。
+
 消费者合同仍是 [mail.received.v1](../contracts/mail-received-v1/mail-received-v1.md)；开发协作和验收边界见 [AGENTS.md](AGENTS.md)。

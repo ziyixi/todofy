@@ -2,6 +2,7 @@ import type { Env, Job } from './types.ts';
 import { runJob, runMaintenance, markInterruptedJob } from './pipeline.ts';
 import { CapacityLedger, MAX_PARSE_EXTRA_BYTES } from './capacity.ts';
 import { BackupState, readIntakePolicy } from './backup-state.ts';
+import { OpsGuardStore } from './ops-guard.ts';
 
 const DAY=86400000;
 const WAIT=30_000;
@@ -21,6 +22,7 @@ export class MailCoordinator {
   private running=false;
   private readonly capacity:CapacityLedger;
   private readonly backup:BackupState;
+  private readonly ops:OpsGuardStore;
   constructor(state:DurableObjectState,env:Env) {
     this.state=state; this.env=env;
     state.storage.sql.exec(`CREATE TABLE IF NOT EXISTS jobs(id TEXT PRIMARY KEY,payload TEXT NOT NULL,due INTEGER NOT NULL,attempts INTEGER NOT NULL DEFAULT 0,created INTEGER NOT NULL,error TEXT,failed INTEGER NOT NULL DEFAULT 0,version INTEGER NOT NULL DEFAULT 1,run_started INTEGER,crashes INTEGER NOT NULL DEFAULT 0)`);
@@ -44,6 +46,7 @@ export class MailCoordinator {
     state.storage.sql.exec('CREATE INDEX IF NOT EXISTS ingest_uploads_status ON ingest_uploads(status,seq)');
     this.capacity=new CapacityLedger(state.storage,env);
     this.backup=new BackupState(state.storage,env,()=>this.running);
+    this.ops=new OpsGuardStore(state.storage.sql);
   }
   private insert(job:Job,time=Date.now()):void {
     this.state.storage.sql.exec(`INSERT INTO jobs(id,payload,due,created) VALUES(?,?,?,?)
@@ -151,6 +154,15 @@ export class MailCoordinator {
       await this.schedule();
       return new Response(null,{status:204});
     }
+    // contracts/ops-v1: reached only through the Ops entrypoint (ops-core.ts), never from a public route.
+    if(path==='/ops/guard' && request.method==='POST') {
+      if(Number(request.headers.get('Content-Length') || 0)>1024) return new Response(null,{status:413});
+      let input:unknown;
+      try { input=await request.json(); } catch { return new Response(null,{status:400}); }
+      try { return Response.json(this.ops.set(input,Date.now())); }
+      catch(error) { return new Response(null,{status:error instanceof Error && error.message==='invalid_input'?400:503}); }
+    }
+    if(path==='/ops/status' && request.method==='GET') return Response.json(this.opsStatus());
     if(path==='/status' && request.method==='GET') {
       if (!this.capacity.snapshot().initialized) {
         try { await this.capacity.initialize(); } catch { await this.state.storage.setAlarm(Date.now()+5000); }
@@ -160,6 +172,17 @@ export class MailCoordinator {
       return Response.json({pending:stats.pending ?? 0,failed:stats.failed ?? 0,oldest:stats.oldest,next_alarm:await this.state.storage.getAlarm(),backup,capacity:this.capacity.snapshot()});
     }
     return new Response(null,{status:404});
+  }
+  /** DO-only reads, each bounded: two index counts capped at 10,000 rows, O(1) capacity totals and
+   * today's intake reservations (at most INGEST_DAILY_MESSAGE_LIMIT rows). No D1 and no R2. */
+  private opsStatus() {
+    const now=Date.now(), day=new Date(now).toISOString().slice(0,10);
+    const count=(failed:number)=>this.state.storage.sql.exec<{n:number}>('SELECT count(*) n FROM (SELECT 1 FROM jobs WHERE failed=? LIMIT 10000)',failed).one().n;
+    const ingest=this.state.storage.sql.exec<{messages:number;bytes:number}>('SELECT count(*) messages,COALESCE(sum(size),0) bytes FROM ingress_reservations WHERE day=?',day).one();
+    const capacity=this.capacity.snapshot();
+    return {jobs_pending:count(0),jobs_failed:count(1),backup_active:this.backup.paused(),
+      capacity:capacity.initialized?{used_bytes:capacity.used_bytes,limit_bytes:capacity.limit_bytes}:null,
+      ingest_today:{messages:ingest.messages,bytes:ingest.bytes},guard:this.ops.read(now)};
   }
   async alarm():Promise<void> {
     if(this.running) { await this.state.storage.setAlarm(Date.now()+WAIT); return; }
@@ -175,7 +198,7 @@ export class MailCoordinator {
       const maintenance=this.state.storage.sql.exec<{value:number}>('SELECT value FROM control WHERE id=1').one().value;
       if(maintenance<=Date.now()) {
         try {
-          const maintenanceResult=await runMaintenance(this.env);
+          const maintenanceResult=await runMaintenance(this.env,this.ops.deferral(Date.now()));
           for(const job of maintenanceResult.jobs) this.insert(job);
           this.state.storage.sql.exec('DELETE FROM ingress_reservations WHERE day<?',new Date(Date.now()-30*DAY).toISOString().slice(0,10));
           this.state.storage.sql.exec('UPDATE control SET value=? WHERE id=1',Date.now()+(maintenanceResult.nextDelayMS ?? (maintenanceResult.continueSoon?10*60_000:DAY)));

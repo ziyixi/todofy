@@ -25,3 +25,13 @@ it('warns before cancelling that an owner-resolved exception is later cleaned by
   expect(note.textContent).toContain('已开始普通保留计时的邮件（此前已达到安全终态）不适用此规则')
   expect(api.cancelDelivery).not.toHaveBeenCalled()
 })
+
+it('marks a canary delivery as a synthetic ops event', async () => {
+  vi.mocked(api.delivery).mockResolvedValue({ delivery: { event_id: 'event-2', message_id: 'message-2', state: 'delivered', attempt_count: 1, created_at: '2026-09-29T00:00:00Z', canary: true }, attempts: [] })
+  vi.mocked(api.endpoints).mockResolvedValue({ items: [] })
+  vi.mocked(api.message).mockRejectedValue(new Error('not found'))
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } })
+  render(<QueryClientProvider client={client}><MemoryRouter initialEntries={['/deliveries/event-2']}><Routes><Route path="/deliveries/:id" element={<DeliveryPage/>}/></Routes></MemoryRouter></QueryClientProvider>)
+  expect((await screen.findByText('金丝雀')).className).toBe('canary-tag')
+  expect(screen.getByText(/运维合成事件/)).toBeTruthy()
+})

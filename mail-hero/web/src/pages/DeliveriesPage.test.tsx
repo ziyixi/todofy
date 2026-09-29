@@ -30,3 +30,17 @@ it('keeps the selected attempt result and exact interval while paging, labelled 
     attempt_outcome: 'retried', from: '2026-11-01T07:00:00.000Z', to: '2026-11-02T08:00:00.000Z', cursor: 'next-cursor',
   })))
 })
+
+it('labels an ops canary event so it is never mistaken for mail', async () => {
+  vi.mocked(api.deliveries).mockResolvedValue({ items: [
+    { event_id: 'canary-1', message_id: 'message-1', state: 'delivered', attempt_count: 1, created_at: '2026-09-29T00:00:00Z', canary: true },
+    { event_id: 'realmail', message_id: 'message-2', state: 'delivered', attempt_count: 1, created_at: '2026-09-29T00:00:00Z', canary: false },
+  ], next_cursor: null })
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } })
+  const { container } = render(<QueryClientProvider client={client}><MemoryRouter initialEntries={['/deliveries']}><DeliveriesPage /></MemoryRouter></QueryClientProvider>)
+  await screen.findByText('canary-1…')
+  const tags = container.querySelectorAll('.canary-tag')
+  expect(tags.length).toBe(1)
+  expect(tags[0].textContent).toBe('金丝雀')
+  expect(tags[0].closest('tr')?.textContent).toContain('canary-1')
+})
