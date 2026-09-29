@@ -193,8 +193,6 @@ Rolling back a later release (after the split) is a revert on `main` that CI dep
 together; never `wrangler rollback` one Worker ([ci-cd.md](ci-cd.md)). Two exceptions and caveats, both
 in [gateway-contract.md](gateway-contract.md):
 
-- The RPC release: if its gateway step fails twice the same way, roll `todofy-core` alone back to its
-  previous version (§6.4); that recreates the previous matching pair.
 - Once the class-delete release is live (`todofy` at migration tag `v2`), a revert of an older release
   keeps the gateway tomls' `[[migrations]]` at `v1` + `v2` and does not bring back `retired.ts` (§6.6).
 

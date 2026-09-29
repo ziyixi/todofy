@@ -103,10 +103,7 @@ Host routing, credentials and assets live in the gateway (`gateway/src`, gateway
 - `request.url` carries the Host header under `wrangler dev`, so tests pick the vhost with
   `host: todofy.localhost` / `host: todofy-hooks.localhost`.
 - The gateway calls the object's RPC methods on `env.COORDINATOR.getByName("inbox-v1")` with arguments it
-  picks itself (the owner API gets the canonical owner); the object's `fetch` answers 404, except that for
-  the one release that moves to RPC it answers the previous gateway's calls (`x-todofy-internal: 1`)
-  503 `unavailable` with `Retry-After: 60` (gateway-contract.md §6.4; delete it in a later release, not
-  in the gateway-only class-delete release, which changes nothing else).
+  picks itself (the owner API gets the canonical owner); the object's `fetch` answers 404 to everything.
   Bodies are passed as streams, unread. Every method answers with an `http.Result` dict, which the gateway
   turns into the HTTP response (gateway-contract.md §3).
 
@@ -284,8 +281,7 @@ gateway-contract.md §1. Test configs shorten `*_MS` values (including the gatew
 `JWKS_REFRESH_COOLDOWN_MS`); production never sets them.
 
 ### coordinator.py (P) — the only writer of the ledger
-RPC methods, called only by the gateway's binding (gateway-contract.md §3; `fetch` answers 404, or 503
-to the previous gateway during the RPC release, §6.4). Each
+RPC methods, called only by the gateway's binding (gateway-contract.md §3; `fetch` answers 404). Each
 returns `Result.wire()` except `wake` and `setup`:
 ```
 ingest(idempotency_key, body)             webhook stream → 204|400|409|413|503
@@ -552,7 +548,6 @@ content; keep it that way (the repository and its logs are public).
 | What the bucket holds | `npx wrangler r2 bucket info todofy-backups` (object count and size; wrangler 4.142.0 has no `r2 object list`, the dashboard's R2 browser lists keys) |
 | One backup's tables, row counts and part hashes | `npx wrangler r2 object get todofy-backups/<key>manifest.json --file manifest.json --remote` (names, counts and SHA-256 only) |
 | Backup job progress or errors | Workers Logs of `todofy-core`, filter on the `backup` field: `planned`, `done` (rows, bytes), `deleted`, `error` (exception type, step), `failed` (`storage_error`, `lease_expired`), `retention_error` |
-| Does a previous gateway still call the core (RPC release only) | Workers Logs of `todofy-core`: `{"request_id", "status": 503, "code": "unavailable"}` lines come only from the transition shim in `fetch`; the gateway logs its own errors under `todofy` |
 | Legacy text size (drives backup size and time) | `SELECT count(*) AS n, sum(length(CAST(text AS BLOB))) AS bytes FROM legacy_mail_text` via `npx wrangler d1 execute <database> --remote --command "..."` (reads each legacy row once) |
 | Account-wide D1 rows read/written today (shared with Mail Hero) | Cloudflare dashboard → D1 → metrics, or Workers & Pages → usage; a backup reads each row of every table once |
 | Daily metrics as stored (counts only, no content) | `SELECT day, key, value FROM daily_metrics WHERE day >= '<YYYY-MM-DD>' ORDER BY day, key` via `npx wrangler d1 execute <database> --remote --command "..."` (the primary-key index; a dozen rows a day) |

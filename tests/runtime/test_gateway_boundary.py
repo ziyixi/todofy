@@ -118,14 +118,9 @@ FORMER_ROUTES = [
 
 
 @pytest.mark.parametrize(("method", "path"), FORMER_ROUTES)
-@pytest.mark.parametrize(
-    ("marker", "status", "code", "retry_after"), [("1", 503, "unavailable", "60"), ("0", 404, "not_found", None)]
-)
-def test_the_object_has_no_http_routes(
-    core: Worker, method: str, path: str, marker: str, status: int, code: str, retry_after: str | None
-) -> None:
-    # The previous gateway's calls (x-todofy-internal: 1) get a retryable 503 during the RPC
-    # transition, so Mail Hero backs off instead of blocking the endpoint on a 404.
+@pytest.mark.parametrize("marker", ["1", "0"])
+def test_the_object_has_no_http_routes(core: Worker, method: str, path: str, marker: str) -> None:
+    # Even a request carrying the former internal marker is refused; the gateway uses RPC only.
     event_id, body = mail_event()
     headers = {
         "x-todofy-internal": marker,
@@ -135,16 +130,16 @@ def test_the_object_has_no_http_routes(
         "idempotency-key": event_id,
     }
     response = core.hooks.request(method, f"/fetch{path}", headers=headers, content=body if method == "POST" else None)
-    assert (response.status_code, error_code(response)) == (status, code)
-    assert response.headers.get("retry-after") == retry_after
+    assert (response.status_code, error_code(response)) == (404, "not_found")
+    assert response.headers.get("retry-after") is None
     assert _envelope_id(response) != CLIENT_REQUEST_ID
 
 
 def test_fetch_changes_nothing_and_rpc_answers_results(core: Worker) -> None:
     event_id, body = mail_event()
     headers = {"x-todofy-internal": "1", "content-type": "application/json", "idempotency-key": event_id}
-    assert core.hooks.post("/fetch/ingest", headers=headers, content=body).status_code == 503
-    assert core.hooks.post("/fetch/newsletter/auth-failure", headers=headers).status_code == 503
+    assert core.hooks.post("/fetch/ingest", headers=headers, content=body).status_code == 404
+    assert core.hooks.post("/fetch/newsletter/auth-failure", headers=headers).status_code == 404
     assert core.d1("SELECT count(*) AS n FROM mail_events")[0]["n"] == 0
     assert core.d1("SELECT count(*) AS n FROM auth_failures")[0]["n"] == 0
 

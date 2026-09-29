@@ -156,8 +156,7 @@ other four headers apply unchanged.
 
 The gateway calls methods of `TodofyCore` over JS RPC on `env.COORDINATOR.getByName("inbox-v1")`
 (`gateway/src/coordinator.ts`, `worker/todofy/runtime/coordinator.py`). The object has no HTTP routes:
-its `fetch`, like the `Default` entrypoint's, answers 404 `not_found` to every request, except the
-transition answer of §6.4 (503 to a request marked `x-todofy-internal: 1`, this release only). Arguments are
+its `fetch`, like the `Default` entrypoint's, answers 404 `not_found` to every request. Arguments are
 chosen by the gateway, so client headers (`x-todofy-*`, `cookie`, `authorization`,
 `cf-access-jwt-assertion`, `origin`, `x-csrf-token`) never reach the DO. Nothing generates the TS
 interface `Coordinator` from the Python class; the two are kept in step by hand, and the runtime
@@ -398,15 +397,14 @@ trailing argument with a Python default is safe; renaming or removing one needs 
 
 The one release that switches from the old internal fetch routes (`x-todofy-internal`, `/ingest`,
 `/newsletter/*`, `/api/v1/*` on `https://coordinator`) to RPC breaks that rule once, on purpose, and
-fails retryably: the new core's `fetch` answers every request marked `x-todofy-internal: 1` with 503
+failed retryably (history; the shim was removed in the release after the class delete): the new core's `fetch` answered every request marked `x-todofy-internal: 1` with 503
 `unavailable` and `retry-after: 60` (any other fetch stays 404) and reads or writes nothing. The previous
 gateway passes that through until the gateway step finishes, or for as long as a failed gateway step is
 not rerun. Mail Hero treats it like any 5xx (backoff that honours `Retry-After`, no revision block; a 404
 would block the revision after 30 minutes); a newsletter read or owner API call gets 503 (the newsletter
 fails for that run); the old gateway turns the core's `/setup` 503 into its own 503; the old cron's
-`/wake` is ignored, and the object's own alarm keeps running. Delete the shim (`PREVIOUS_GATEWAY_*` and
-the marker branch in `coordinator.py`, and its cases in `tests/runtime/test_gateway_boundary.py`) in a
-later release; not in the class-delete release (§6.6), which changes nothing else.
+`/wake` is ignored, and the object's own alarm keeps running. The shim is gone now: `fetch` answers 404 to
+everything, and a gateway older than the RPC release can no longer be paired with this core.
 
 This release (RPC, backup and metrics) changes no Durable Object migration on either Worker: the core
 stays at `v1`/`v2`, the gateway at `v1` with the empty `TodofyCoordinator` still exported. The gateway

@@ -62,7 +62,7 @@ from todofy.core.todoist_request import RequestTooLarge, build_task_request
 from todofy.core.vocab import Code, EventState, Reconcile, allowed_actions
 from todofy.runtime import api, backup, gemini, ledger, metrics, reminder, reports, retention, todoist
 from todofy.runtime.config import flag, gemini_models, integer, source_id, var
-from todofy.runtime.http import NO_CONTENT, Result, error_response, failed, not_found, ok
+from todofy.runtime.http import NO_CONTENT, Result, failed, not_found, ok
 from todofy.runtime.interop import now_ms, now_s, read_capped, sha256_hex
 from todofy.runtime.ledger import WORKER, CompletedSummary, EventRow, OwnerAction
 
@@ -101,9 +101,6 @@ DO_SCHEMA = (
     # by the next alarm after an eviction (counted as spent, like reports._generate).
     "CREATE TABLE IF NOT EXISTS llm_inflight (event_id TEXT PRIMARY KEY, day TEXT NOT NULL, reserved INTEGER NOT NULL)",
 )
-# The header the previous, fetch-based gateway put on every call to the object; see fetch().
-PREVIOUS_GATEWAY_MARKER = "x-todofy-internal"
-PREVIOUS_GATEWAY_RETRY_S = 60
 MAX_OWNER_CHARS = 254
 NEWSLETTER_KINDS = frozenset({reports.SUMMARY, reports.RECOMMENDATION})
 TICK_COLUMNS = ("next_reminder_check", "next_report", "next_maintenance")
@@ -147,14 +144,7 @@ class TodofyCore(DurableObject):
     # ---- RPC methods (the gateway's COORDINATOR binding) -------------------------------------
 
     async def fetch(self, request: Any) -> Response:
-        # Transition shim of the release that moves to RPC; delete it (and PREVIOUS_GATEWAY_*) in a
-        # later release (not the gateway-only class-delete one). CI deploys this core before the new
-        # gateway, so until that step finishes, for as long as a failed gateway step is not rerun, or
-        # after the gateway alone is rolled back, the previous gateway still sends its fetch routes and
-        # passes the answer through. A 503 with Retry-After keeps Mail Hero on its retry backoff; a 404
-        # would block the endpoint revision after 30 minutes. Nothing is read or written.
-        if request.headers.get(PREVIOUS_GATEWAY_MARKER) == "1":
-            return error_response(503, ApiError.UNAVAILABLE, {"retry-after": str(PREVIOUS_GATEWAY_RETRY_S)})
+        # The object has no HTTP surface: the gateway calls the RPC methods below.
         return not_found()
 
     @staticmethod
