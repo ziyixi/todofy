@@ -46,6 +46,10 @@ def test_three_interrupted_summaries_stop_automatic_retries(worker: Worker, fres
     assert event["allowed_actions"] == ["retry_summary", "dismiss"]
     time.sleep(3)
     assert len(fresh_gemini.calls_mentioning(event_id)) == SUMMARY_CRASH_LIMIT
+    # Each interrupted call's reservation is settled as spent, not left reserved all day.
+    usage = worker.overview()["gemini"]
+    assert (usage["reserved_tokens"], usage["calls"]) == (0, SUMMARY_CRASH_LIMIT)
+    assert usage["used_tokens"] > 0
 
 
 @pytest.mark.reaches("interrupted_todo_call")

@@ -20,7 +20,8 @@ export interface Label {
 export interface CodeLabel {
   /** A few words for lists and cards. */
   title: string
-  /** What happened and what the Worker does next; mirrors worker/todofy/core/vocab.py. */
+  /** What happened and what the Worker does next. The only copy of this text: keep it in step
+   *  with the Worker's behaviour (worker/todofy/core/vocab.py holds the codes, not the text). */
   detail: string
 }
 
@@ -60,7 +61,10 @@ export const EVENT_ERRORS: Record<EventErrorCode, CodeLabel> = {
     title: '摘要多次中断',
     detail: '摘要连续 3 次在运行中被中断，已停止自动重试',
   },
-  todoist_rejected: { title: 'Todoist 拒绝创建', detail: 'Todoist 拒绝创建任务（400/404 等），会按退避自动重试' },
+  todoist_rejected: {
+    title: 'Todoist 拒绝创建',
+    detail: 'Todoist 拒绝创建任务（400/404 等），会按退避自动重试；若一直被拒绝，可以放弃此事件',
+  },
   todoist_auth_blocked: {
     title: 'Todoist 认证失败',
     detail: 'Todoist 认证失败（401/403），建任务阶段暂停 6 小时；请检查 TODOIST_API_KEY',

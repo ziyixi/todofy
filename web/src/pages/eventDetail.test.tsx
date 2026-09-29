@@ -138,6 +138,24 @@ describe('reconcile dialogs', () => {
     expect(posts(calls)).toHaveLength(0)
   })
 
+  it('moves focus to the outcome when the action button disappears', async () => {
+    const user = userEvent.setup()
+    mockApi({
+      [DETAIL]: eventDetail(),
+      [RECONCILE]: eventDetail({ state: 'ignored', error_code: 'dismissed_by_owner', allowed_actions: [], version: 6 }),
+    })
+    renderApp(`/events/${EVENT_ID}`)
+    const trigger = await screen.findByRole('button', { name: '放弃' })
+    trigger.focus()
+    await user.keyboard('{Enter}')
+    const dialog = screen.getByRole('dialog', { name: '放弃此事件' })
+    await user.click(within(dialog).getByRole('button', { name: '放弃事件' }))
+    const notice = await screen.findByRole('status')
+    await waitFor(() => expect(notice).toHaveFocus())
+    expect(trigger.isConnected).toBe(false)
+    expect(document.activeElement).not.toBe(document.body)
+  })
+
   it('offers a refresh after a version conflict', async () => {
     const user = userEvent.setup()
     const { calls } = mockApi({ [DETAIL]: eventDetail({ state: 'failed_summary', error_code: 'summary_failed', allowed_actions: ['retry_summary', 'dismiss'] }), [RECONCILE]: apiError(409, 'version_conflict', 'req-409') })

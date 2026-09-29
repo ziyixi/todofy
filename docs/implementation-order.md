@@ -2,6 +2,33 @@
 
 > 依据：todofy `6c46ed4`（main，工作区含另一任务的未提交修改）、mail-hero `5d2b625`、self-host-on-vultr `bcad459`、protos `protobuf`/`main` 分支的只读阅读；方案 v2 `docs/cloudflare-migration-plan.md` 与 UI/门户研究 `docs/ui-and-portal-research.md`。owner 2026-09-28 的最新决定优先于两份文档。本文只是计划：未改任何仓库、主机或 Cloudflare 资源，未读 env、token、数据库或真实邮件。`file:line` 无仓库前缀时指 todofy；平台事实沿用两份文档已标注的来源；"推断"表示未经实测。
 
+> **As-built notes (2026-09-29).** The rewrite is built on `cf-rewrite`; where this plan and the tree
+> differ, the tree and `docs/dev-notes.md` win. Setup and CI details: `docs/cloudflare-setup.md`,
+> `docs/ci-cd.md`; what actually ran: `docs/verification.md`.
+>
+> - Hooks hosts are a list, `TODOFY_HOOKS_HOSTS` (not `TODOFY_HOOKS_HOST`): `todofy-hooks.ziyixi.science`
+>   first; at cutover `daily.ziyixi.science` moves onto the Worker as a second hooks host, so Mail Hero's
+>   existing target and the newsletter keep their URLs (C11's env change then becomes optional).
+> - `TODOFY_ACCESS_OWNER` and `TODOFY_ACCESS_OWNER_ALIASES` are GitHub **environment secrets**, not
+>   variables (the repo and its logs are public; wrangler prints plain vars). The deploy passes them to the
+>   Worker with `--secrets-file`. The alias to list is the owner's GitHub-login email.
+> - Worker secret names: `MAIL_WEBHOOK_TOKEN_SHA256`, `MAIL_WEBHOOK_TOKEN_SHA256_PREVIOUS`,
+>   `REPORT_BASIC_AUTH_SHA256` (comma-separated digests while rotating; no `_PREVIOUS`), `GEMINI_API_KEY`,
+>   `TODOIST_API_KEY`, and `CSRF_SIGNING_KEY` (64 hex, new). The newsletter password must be random
+>   (≥128 bits): the hourly lockout only throttles failures and never blocks a correct credential.
+> - `TODOFY_REPORT_DEFAULT_TOP=10` (the newsletter asks for `?top=10`); `TODOFY_LEGACY_TEXT_RETENTION_DAYS`
+>   defaults to `0` (keep).
+> - A report is served to the newsletter only when computed since the latest precompute time and usable;
+>   otherwise it is computed on demand, and a failure is 503, never a `stale` 200.
+> - `/hooks/mail` accepts a body without `Content-Length` (no 411); the coordinator stops reading at 1 MiB.
+> - Local cron is `GET /cdn-cgi/local/scheduled?cron=...`; `/__scheduled` and `--test-scheduled` no longer
+>   work in wrangler 4.142.
+> - CloudMailin-era cache rows are exported by default (`--skip-cloudmailin` opts out and leaves a manifest
+>   warning, which fails the C6 gate). C5 uses `tools/legacy_migration/snapshot.py` (stdlib, reads through
+>   the WAL); the mini-PC needs no `sqlite3` CLI.
+> - `PROCESSING_PAUSED` also stops the daily reminder; report precompute continues.
+> - S11 is done: the Go tree, its tooling and workflows are deleted (100 paths, §1.7).
+
 ## 总览（阅读顺序就是执行顺序）
 
 1. **阶段 1 仓库内重写**（分支 `cf-rewrite`，S1–S11）：spike 定语言 → 骨架与 CI → schema、合同与旧行为逐字固定 → Worker、测试、UI、迁移工具 → 生成器与 deploy job → 文档 → 删 Go。
@@ -180,7 +207,7 @@ S11 的门禁：这张表每一行都有一个绿测试，并附 run 链接。
 
 新 Worker 在空库上线后，cron 照常运行；空窗口的日报为 `empty_window`，不调 Gemini（v2 :396）。旧栈继续服务：主镜像按 digest 固定（self-host `docker-compose.yml:222`），这次 push 同时删掉了 `ci.yml`，不会再产生新镜像。提醒在本阶段关闭：B7 的合成事件一进入 `failed_summary` 就算 attention，而 cron 每 10 分钟检查一次，下一次检查可能就在几秒之后；一旦当天的提醒被它占用，当天真实的积压就不会再有提醒（v2 :394）。
 
-GitHub variables（B3）：`CLOUDFLARE_ACCOUNT_ID`、`TODOFY_D1_DATABASE_ID`、`TODOFY_D1_DATABASE_NAME`（可省，回退 `todofy`）、`TODOFY_PUBLIC_HOST=todofy.ziyixi.science`、`TODOFY_HOOKS_HOST=todofy-hooks.ziyixi.science`、`TODOFY_MAIL_SOURCE_ID=mail-hero-personal`（须等于 self-host `docker-compose.yml:231`）、`TODOFY_ACCESS_ISSUER=https://ziyixi.cloudflareaccess.com`（以 Zero Trust 的 team 域名为准）、`TODOFY_ACCESS_AUDIENCE`、`TODOFY_ACCESS_OWNER`、`TODOFY_GEMINI_MODELS=gemini-3.8-flash,gemini-3.7-flash,gemini-3.5-flash-lite`（`llm/consts.go:21-25`）、`TODOFY_GEMINI_DAILY_TOKEN_BUDGET=3000000`、`TODOFY_TODOIST_DEFAULT_PROJECT_ID`、`TODOFY_REPORT_DEFAULT_TOP=5`、`TODOFY_REPORT_PRECOMPUTE_UTC=13:30`、`TODOFY_REMINDER_ENABLED=false`（C9 改 true）、`TODOFY_LOOKUP_DELAY_MS=120000`、`TODOFY_LEGACY_TEXT_RETENTION_DAYS=0`（0 = 永久）、`TODOFY_MAINTENANCE_MODE=false`、`TODOFY_PROCESSING_PAUSED=false`、`TODOFY_FORCE_PAUSE_TODOIST=false`。`BUILD_SHA` 不是变量，由生成器写入。
+GitHub variables（B3）：`CLOUDFLARE_ACCOUNT_ID`、`TODOFY_D1_DATABASE_ID`、`TODOFY_D1_DATABASE_NAME`（可省，回退 `todofy`）、`TODOFY_PUBLIC_HOST=todofy.ziyixi.science`、`TODOFY_HOOKS_HOSTS=todofy-hooks.ziyixi.science`（切换时加 `daily.ziyixi.science`）、`TODOFY_MAIL_SOURCE_ID=mail-hero-personal`（须等于 self-host `docker-compose.yml:231`）、`TODOFY_ACCESS_ISSUER=https://ziyixi.cloudflareaccess.com`（以 Zero Trust 的 team 域名为准）、`TODOFY_ACCESS_AUDIENCE`、`TODOFY_GEMINI_MODELS=gemini-3.8-flash,gemini-3.7-flash,gemini-3.5-flash-lite`（`llm/consts.go:21-25`）、`TODOFY_GEMINI_DAILY_TOKEN_BUDGET=3000000`、`TODOFY_TODOIST_DEFAULT_PROJECT_ID`、`TODOFY_REPORT_DEFAULT_TOP=10`（as-built；等于 newsletter 的 `?top=10`）、`TODOFY_REPORT_PRECOMPUTE_UTC=13:30`、`TODOFY_REMINDER_ENABLED=false`（C9 改 true）、`TODOFY_LOOKUP_DELAY_MS=120000`、`TODOFY_LEGACY_TEXT_RETENTION_DAYS=0`（0 = 永久）、`TODOFY_MAINTENANCE_MODE=false`、`TODOFY_PROCESSING_PAUSED=false`、`TODOFY_FORCE_PAUSE_TODOIST=false`。`BUILD_SHA` 不是变量，由生成器写入。
 
 B9 是一次真实的业务调用：它会让 Gemini 生成摘要、在 Todoist 建一条任务。之所以放在阶段 2，是因为只有它能在切换之前证明 Mail Hero → Todofy → Gemini → Todoist 整条链在生产上可用。做完立刻暂停 T_new；而在切换日之前当前目标仍是 T_old，所以 T_new 也不会收到任何真实事件。
 
@@ -188,10 +215,10 @@ B9 是一次真实的业务调用：它会让 Gemini 生成摘要、在 Todoist 
 |---|---|---|---|
 | B1 | 本机 | `npx wrangler d1 create todofy` → 记下 `database_id` | 输出含 UUID |
 | B2 | Zero Trust → Access → Applications | Self-hosted 应用，domain 精确 `todofy.ziyixi.science`（无路径）；两条 Allow 策略照抄 Mail Hero（精确邮箱 + 对应 IdP，无 Bypass，mail-hero `docs/cloudflare-setup.md:109-111`）；App Launcher 可见；记下 AUD。不为 `todofy-hooks.ziyixi.science` 建任何应用。若 dashboard 因 DNS 记录尚不存在而拒绝（推断可能），B3 先填随机 64 hex 占位 AUD，B6 再建应用并替换 | AUD 为 64 hex |
-| B3 | GitHub todofy | Environment `production`（可部署分支仅 `main`）；main 分支保护（§1.1）；environment secrets：`CF_API_TOKEN`（Workers Scripts 编辑、D1 编辑、zone `ziyixi.science` 的 Workers Routes/Custom Domains 与 DNS 编辑、账户设置读；无 Billing；参照 mail-hero `docs/ci-cd.md:40`）、`TODOFY_ACCESS_OWNER_ALIASES`（可空）；variables 如上 | 变量名与生成器一致 |
+| B3 | GitHub todofy | Environment `production`（可部署分支仅 `main`）；main 分支保护（§1.1）；environment secrets：`CF_API_TOKEN`（Workers Scripts 编辑、D1 编辑、zone `ziyixi.science` 的 Workers Routes/Custom Domains 与 DNS 编辑、账户设置读；无 Billing；参照 mail-hero `docs/ci-cd.md:40`）、`TODOFY_ACCESS_OWNER`、`TODOFY_ACCESS_OWNER_ALIASES`（可空；as-built 为 secrets）；variables 如上 | 变量名与生成器一致 |
 | B4 | 本机 | 生成 webhook Bearer（`openssl rand -hex 32`）与 newsletter Basic 用户名/口令，`printf '%s' "$VALUE" \| shasum -a 256` 得摘要；建议为新 Worker 新签发 Gemini key 与 Todoist token（旧的在 R5 吊销，理由见 §5）；明文只进密码管理器 | 摘要备好 |
 | B5 | 本机 → Actions | 首次落 main：`git fetch origin && git checkout main && git merge --ff-only origin/cf-rewrite && git push origin main`（一次 push 只为 head SHA 跑一次 run）→ `checks` → `deploy`（0001 迁移、发布、两条 Custom Domain 及 DNS、`/health` 断言）；`curl -sv` 两个主机名核对 TLS | deploy 绿；hooks `/health` 200、build 等于该 SHA、无 302（排除通配 Access 盖住 hooks 主机）；无 token `POST /hooks/mail` → 503 `not_configured`；UI 主机无 JWT → 401 |
-| B6 | 本机 | `npx wrangler secret put MAIL_WEBHOOK_TOKEN_SHA256 --name todofy`，同法 `GEMINI_API_KEY`、`TODOIST_API_KEY`、`REPORT_BASIC_AUTH_SHA256`（`_PREVIOUS` 可选）；占位 AUD 情形：此时建 Access 应用，改 `TODOFY_ACCESS_AUDIENCE` 后 dispatch | 无 token `POST /hooks/mail` → 401；浏览器经 Access 登录后 UI 可用（真实 AUD 生效的证据） |
+| B6 | 本机 | `npx wrangler secret put MAIL_WEBHOOK_TOKEN_SHA256 --name todofy`，同法 `GEMINI_API_KEY`、`TODOIST_API_KEY`、`REPORT_BASIC_AUTH_SHA256`、`CSRF_SIGNING_KEY`（as-built；`MAIL_WEBHOOK_TOKEN_SHA256_PREVIOUS` 可选；newsletter 口令须随机 ≥128 bit）；占位 AUD 情形：此时建 Access 应用，改 `TODOFY_ACCESS_AUDIENCE` 后 dispatch | 无 token `POST /hooks/mail` → 401；浏览器经 Access 登录后 UI 可用（真实 AUD 生效的证据） |
 | B7 | 本机 | `MAIL_WEBHOOK_TOKEN=… python3 tools/smoke_webhook.py https://todofy-hooks.ziyixi.science/hooks/mail` → 401/415/413/400/204/204/409（合成事件 `needs_review=true`，不调 LLM/Todoist）；UI `/attention` 出现该行 → UI `dismiss`（在生产上走一遍 Access + CSRF + `action_request_id`） | 七码全对；该行变为 `ignored`；`mail_reminders` 无行 |
 | B8 | GitHub mail-hero | variable `MAIL_HERO_WEBHOOK_ALLOWED_HOSTS=daily.ziyixi.science,todofy-hooks.ziyixi.science` → Actions "Native CI and deploy" → Run workflow（main）；生成器只读变量（`deploy/generate-ci-config.mjs:24-25`），无代码改动 | run 绿 |
 | B9 | Mail Hero UI | 新建目标 T_new：`https://todofy-hooks.ziyixi.science/hooks/mail`，Bearer = B4，超时 20 s（默认，`api-endpoints.ts:33`），**不设为当前** → "测试"（真 POST，走完整 LLM + Todoist；测试投递同样受全局与目标暂停约束，`pipeline.ts:336-354,390`，此刻两者都必须关闭）→ 通过后把 T_new 设为 `paused=true` | 测试事件 `delivered`；Todofy UI 中该事件 `complete` 且有 `task_id`；Todoist 任务带 `Mail Hero event:` 页脚、无 HTML 实体、无标签（owner 核对后删除）；T_new 显示暂停 |
@@ -209,8 +236,8 @@ C1 与 C2 的先后是本阶段的关键。Mail Hero 在收信时读出当前目
 | C2 | Mail Hero 投递 | 排空旧目标 T_old：消息列表按 `status` 过滤（`api-messages.ts:29-32`，按每封最新一次投递）查 `pending`/`retry_wait`/`sending`，属于 T_old 的等它投完，`retry_wait` 可点"重试"；属于 T_old 的 `failed` 逐条决定：需要建任务的"重新发送为新事件"到 T_new（新 event_id，`api-messages.ts:207-220`，在 T_new 上排队），其余"取消"。然后把 T_old 设为 `paused=true` | T_old 无 pending/retry_wait/sending/未处理的 failed；T_old 已暂停 |
 | C3 | 本机 | `curl -u … https://daily.ziyixi.science/api/v1/mail_inbox?view=attention` → `attention_count=0`，且 `pending/summarizing/summarized/todo_sending=0`；有剩余先在旧侧对账 | 全为 0（2026-09-28 只读结果：complete 108 / ignored 1 / 其余 0） |
 | C4 | mini-PC | `docker compose stop todofy todofy-llm todofy-todo todofy-database`（先不 `rm`） | `docker ps` 无这四个 |
-| C5 | mini-PC | `mkdir -p /root/mig && sqlite3 ./data/todofy-mail/inbox.sqlite ".backup '/root/mig/inbox-backup.sqlite'" && sqlite3 ./data/todofy/todofy.db ".backup '/root/mig/todofy-backup.db'"`（`.backup` 合并 WAL） | 两个文件存在 |
-| C6 | mini-PC | `python3 legacy_to_d1.py --check-schema …` 通过后导出：`--inbox /root/mig/inbox-backup.sqlite --legacy /root/mig/todofy-backup.db --out /root/mig/out --source-id mail-hero-personal`（全文默认导入）；`scp` `out/` 到本机 | schema 核对 PASS；`manifest.json` 的 `state_counts` 等于 C3，`warnings` 为空或只有"超长分块" |
+| C5 | mini-PC | as-built：`sudo python3 tools/legacy_migration/snapshot.py --inbox ./data/todofy-mail/inbox.sqlite --legacy ./data/todofy/todofy.db --out /root/mig/snap`（SQLite backup API，经 WAL 读全，副本转为 rollback journal，0600；不需要 `sqlite3` CLI；绝不只 `cp` 主文件） | 两个副本存在；打印的 `state_counts` 等于 C3 |
+| C6 | mini-PC | `python3 legacy_to_d1.py --check-schema …` 通过后导出：`--inbox /root/mig/snap/inbox.sqlite --legacy /root/mig/snap/todofy.db --out /root/mig/out --source-id mail-hero-personal`（全文与 CloudMailin 时代行默认导入）；`scp` `out/` 到本机 | schema 核对 PASS；`manifest.json` 的 `state_counts` 等于 C3，`options.include_cloudmailin=true`，`warnings` 为空或只有"超长分块"；记下 `stats.cloudmailin_entries` |
 | C7 | 本机 | `npx wrangler d1 time-travel info todofy --json` → 保存书签 | 书签已存 |
 | C8 | 本机 | 依次 `npx wrangler d1 execute todofy --remote --file=out/01-ledger.sql`、`02-reminders.sql`、`03-summaries.sql`、`04-legacy-text.sql`（最大，需数分钟；`ON CONFLICT DO NOTHING` 可安全重跑）；再 `python3 verify_d1.py --manifest out/manifest.json --remote --db todofy`；删本机 `out/` | 四次无错；三表 PASS；`imported=1` 的状态计数等于 C3 |
 | C9 | GitHub todofy | `TODOFY_REMINDER_ENABLED=true` → dispatch | run 绿；`/health` build 不变 |

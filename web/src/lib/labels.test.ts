@@ -43,6 +43,16 @@ describe('every contract enum value has exactly one Chinese label', () => {
     for (const label of Object.values(table)) expect(JSON.stringify(label)).toMatch(/[一-鿿]/)
   })
 
+  it.each([
+    ['event', EVENT_ERRORS, enumOf('LegacyEventErrorCode')],
+    ['reminder', REMINDER_ERRORS, enumOf('LegacyReminderErrorCode')],
+  ])('%s codes only the Go service wrote are marked legacy, and only those', (_name, table, legacy) => {
+    for (const [code, { title, detail }] of Object.entries(table)) {
+      const isLegacy = legacy.includes(code)
+      expect([title.startsWith('（旧版）'), detail.startsWith('（旧版）')], code).toEqual([isLegacy, isLegacy])
+    }
+  })
+
   it('ApiErrorCode plus the two client-side codes', () => {
     expect(sorted(Object.keys(API_ERROR_HINTS))).toEqual(sorted([...enumOf('ApiErrorCode'), 'network_error', 'bad_response']))
   })

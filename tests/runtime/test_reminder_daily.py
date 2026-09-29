@@ -60,7 +60,9 @@ def tick(probe: Probe, now: int, **vars: str) -> int:
     return probe.call("/reminder/tick", now=now, vars=vars)["next"]
 
 
-@pytest.mark.parametrize("switch", [{"REMINDER_ENABLED": "false"}, {"FORCE_PAUSE_TODOIST": "true"}])
+@pytest.mark.parametrize(
+    "switch", [{"REMINDER_ENABLED": "false"}, {"FORCE_PAUSE_TODOIST": "true"}, {"PROCESSING_PAUSED": "true"}]
+)
 def test_disabled_or_paused_sends_nothing(probe, attention, switch):
     assert tick(probe, NOW, **switch) == NOW + 600
     assert probe.todoist.creates() == []
@@ -129,6 +131,18 @@ def test_unknown_is_never_resent_that_day(probe, attention, reply):
     assert tick(probe, TOMORROW + 60) == TOMORROW + DAY
     assert reminder(probe, "2026-09-29")["state"] == "created"
     assert len(probe.todoist.creates()) == 2
+
+
+def test_a_timeout_then_a_503_is_unknown_and_not_resent_that_day(probe, attention):
+    probe.todoist.queue("POST", TASKS_PATH, Reply(hang=True))
+    for _ in range(2):
+        probe.todoist.queue("POST", TASKS_PATH, Reply(503, {"error": "busy"}))
+    assert tick(probe, NOW, TODOIST_ATTEMPT_TIMEOUT_MS="1000") == TOMORROW
+    row = reminder(probe)
+    assert (row["state"], row["last_error_code"], row["next_attempt_at"]) == ("unknown", "reminder_result_unknown", 0)
+    sent = len(probe.todoist.creates())
+    assert tick(probe, NOW + 3600) == TOMORROW
+    assert len(probe.todoist.creates()) == sent
 
 
 def test_a_day_left_sending_is_recorded_as_interrupted(probe, attention):

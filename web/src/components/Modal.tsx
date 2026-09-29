@@ -54,7 +54,9 @@ export function Modal({ title, onClose, children, footer, busy = false }: ModalP
     return () => {
       document.removeEventListener('keydown', onKey)
       document.body.style.overflow = overflow
-      opener?.focus()
+      // The opener can be gone (an action button the new state no longer offers).
+      if (opener?.isConnected) opener.focus()
+      else document.getElementById('main')?.focus()
     }
   }, [])
 

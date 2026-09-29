@@ -182,6 +182,19 @@ def test_legacy_text_is_served_until_it_expires(api_worker: Worker) -> None:
     assert offered == {DONE: True, TIED[0]: False, PENDING: False}
 
 
+def test_a_legacy_text_near_the_d1_row_limit_is_served(api_worker: Worker) -> None:
+    # 632,000 three-byte characters (~1.9 MB), built in SQL so the command stays short.
+    key = "legacy:large-text"
+    api_worker.d1(
+        "INSERT INTO legacy_mail_text (event_id, created_at, text, expires_at)"
+        f" VALUES ('{key}', {NOW - DAY}, replace(hex(zeroblob(316000)), '0', '邮'), NULL)"
+    )
+    response = api_worker.owner.get(f"/api/v1/legacy_text/{key}")
+    body = assert_contract(response, "/api/v1/legacy_text/{event_id}")
+    assert len(body["text"]) == 632_000 and set(body["text"]) == {"邮"}
+    assert_private(response)
+
+
 def test_setup_reports_presence_never_values(api_worker: Worker) -> None:
     response = api_worker.owner.get("/api/v1/setup")
     body = assert_contract(response, "/api/v1/setup")

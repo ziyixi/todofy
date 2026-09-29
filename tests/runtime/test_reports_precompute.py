@@ -73,8 +73,49 @@ def test_a_row_from_before_today_s_run_is_recomputed(probe):
 def test_a_failed_run_is_retried_in_ten_minutes_and_stores_nothing(probe):
     seed_summaries(probe, 1)
     probe.gemini.queue_generate(error_reply(500))
-    assert probe.call("/reports/tick", now=NOW)["next"] == NOW + 600
+    result = probe.call("/reports/tick", now=NOW)
+    assert result["next"] == NOW + 600
+    assert result["budget"][-1] == ["failure", "summary", 0, "2026-09-28"]
     assert reports(probe) == []
+
+
+def test_after_a_failed_summary_the_recommendation_goes_first(probe):
+    seed_summaries(probe, 1)
+    probe.gemini.queue_generate(text_reply(json.dumps(TASKS, ensure_ascii=False)))
+    result = probe.call("/reports/tick", now=NOW + 600, failures={"summary/0/2026-09-28": 1})
+    assert result["next"] == NOW + 601
+    assert [(row["kind"], row["status"]) for row in reports(probe)] == [("recommendation", "ok")]
+
+
+def test_precompute_gives_up_for_the_day_after_three_failures(probe):
+    seed_summaries(probe, 1)
+    failures = {"summary/0/2026-09-28": 3, "recommendation/10/2026-09-28": 3}
+    assert probe.call("/reports/tick", now=NOW, failures=failures)["next"] == DUE + DAY
+    assert probe.gemini.calls() == [] and reports(probe) == []
+
+
+def test_an_unusable_recommendation_is_not_a_finished_day(probe):
+    seed_summaries(probe, 1)
+    probe.gemini.queue_generate(text_reply("not json at all"))
+    first = probe.call("/reports/tick", now=NOW, failures={"summary/0/2026-09-28": 3})
+    assert first["next"] == NOW + 600
+    assert first["budget"][-1] == ["failure", "recommendation", 10, "2026-09-28"]
+    assert [row["status"] for row in reports(probe)] == ["model_output_invalid"]
+    # Ten minutes later it is tried again rather than kept for the rest of the day.
+    probe.gemini.queue_generate(text_reply(json.dumps(TASKS, ensure_ascii=False)))
+    probe.call("/reports/tick", now=NOW + 600, failures={"summary/0/2026-09-28": 3})
+    assert [row["status"] for row in reports(probe)] == ["ok"]
+
+
+def test_a_summary_over_the_newsletter_limit_is_cut_and_stored(probe):
+    seed_summaries(probe, 3)
+    long_text = "\n".join(f"{index}. 一封邮件的一句话摘要，写得稍长一些。" for index in range(1, 1200))
+    probe.gemini.queue_generate(text_reply(long_text))
+    assert probe.call("/reports/tick", now=NOW)["next"] == NOW + 1
+    [row] = probe.sql("SELECT status, payload_json FROM daily_reports")
+    summary = json.loads(row["payload_json"])["summary"]
+    assert row["status"] == "ok" and len(summary) <= 12_000 and summary.endswith("已截断以适应 newsletter。）")
+    assert len(probe.gemini.calls()) == 1
 
 
 def test_off_disables_the_precompute(probe):

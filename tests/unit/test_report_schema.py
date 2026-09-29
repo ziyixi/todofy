@@ -5,9 +5,13 @@ import pytest
 from todofy.core.report_schema import (
     DEFAULT_TOP_N,
     EMPTY_WINDOW_SUMMARY,
+    MAX_SUMMARY_CHARS,
     MAX_TITLE_CHARS,
+    SUMMARY_TRUNCATED_NOTICE,
     WINDOW_HOURS,
     Recommendation,
+    fit_summary,
+    newsletter_text_ok,
     parse_recommendations,
     parse_top_n,
     recommendation_response_schema,
@@ -78,3 +82,25 @@ def test_response_schema_caps_items():
     schema = recommendation_response_schema(4)
     assert schema["maxItems"] == 4
     assert schema["items"]["required"] == ["rank", "title", "reason"]
+
+
+def test_a_long_summary_is_cut_at_a_line_break_with_a_notice():
+    lines = [f"{index}. 一封邮件的一句话摘要，写得稍长一些以便超过上限。" for index in range(1, 600)]
+    text = "\n".join(lines)
+    assert len(text) > MAX_SUMMARY_CHARS
+    fitted = fit_summary(text)
+    assert fitted is not None and newsletter_text_ok(fitted, MAX_SUMMARY_CHARS)
+    body = fitted.removesuffix(SUMMARY_TRUNCATED_NOTICE)
+    assert fitted.endswith(SUMMARY_TRUNCATED_NOTICE) and body.split("\n") == lines[: len(body.split("\n"))]
+
+
+def test_fit_summary_keeps_short_text_and_drops_control_characters():
+    assert fit_summary("今日重点\t报税\n") == "今日重点\t报税\n"
+    assert fit_summary("a\x00b\x1f") == "ab"
+    assert fit_summary(" \x07\n") is None
+
+
+def test_a_single_overlong_line_is_cut_hard():
+    fitted = fit_summary("x" * 12_001)
+    assert fitted is not None and newsletter_text_ok(fitted, MAX_SUMMARY_CHARS)
+    assert fitted.startswith("x" * 100) and fitted.endswith(SUMMARY_TRUNCATED_NOTICE)

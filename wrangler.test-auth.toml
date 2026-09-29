@@ -48,6 +48,7 @@ TODOIST_ATTEMPT_TIMEOUT_MS = "1500"
 BACKOFF_BASE_MS = "200"
 LOOKUP_DELAY_MS = "500"
 WATCHDOG_MS = "2000"
+JWKS_REFRESH_COOLDOWN_MS = "2000"
 GEMINI_MODELS = "model-a,model-b"
 # Scenario modules that test reminders turn them on; elsewhere they would add Todoist calls.
 REMINDER_ENABLED = "false"

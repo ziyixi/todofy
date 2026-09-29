@@ -1,5 +1,3 @@
-import re
-
 import pytest
 
 from todofy.core.vocab import (
@@ -13,7 +11,6 @@ from todofy.core.vocab import (
     current_codes,
 )
 
-CJK = re.compile(r"[一-鿿]")
 V2_EVENT_CODES = {
     "llm_quota",
     "llm_budget_exhausted",
@@ -35,13 +32,9 @@ def test_states_match_the_go_ledger_check_constraints():
     assert [s.value for s in ReminderState] == ["sending", "created", "unknown", "failed"]
 
 
-def test_every_code_has_a_chinese_description_in_some_table():
-    tables = [EVENT_ERROR_CODES, REMINDER_ERROR_CODES]
+def test_every_code_is_in_some_table():
+    # The Chinese text lives in web/src/lib/labels.ts (labels.test.ts checks it against the OpenAPI enums).
     assert set(Code) == set(EVENT_ERROR_CODES) | set(REMINDER_ERROR_CODES)
-    for table in tables:
-        for code, info in table.items():
-            assert CJK.search(info.description), code
-            assert info.legacy == info.description.startswith("（旧版）"), code
 
 
 def test_legacy_codes_are_exactly_those_only_the_go_service_wrote():
@@ -69,6 +62,8 @@ def test_legacy_codes_are_exactly_those_only_the_go_service_wrote():
         ("failed_summary", "mail_needs_review", ["dismiss"]),
         ("pending", "llm_quota", []),
         ("summarized", "todoist_auth_blocked", []),
+        ("summarized", "todoist_rejected", ["dismiss"]),
+        ("summarized", "todoist_unavailable", []),
         ("todo_created", "", []),
         ("complete", "", []),
         ("ignored", "dismissed_by_owner", []),

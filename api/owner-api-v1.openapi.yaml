@@ -227,7 +227,7 @@ paths:
         - name: event_id
           in: path
           required: true
-          description: A ledger event ID, or `legacy:<hash>` for an imported summary with no ledger event.
+          description: A ledger event ID, or `legacy:<hash>` / `legacy:row-<id>` for an imported cache row with no ledger event (CloudMailin era, or an unlinked Mail Hero row). Those rows are an archive; no endpoint lists them, so their IDs come from D1 (`wrangler d1 execute`).
           schema:
             anyOf:
               - $ref: '#/components/schemas/EventId'
@@ -307,7 +307,7 @@ paths:
         - reportBasic: []
       responses:
         '200':
-          description: The latest summary (precomputed daily; on demand when older than 26 hours).
+          description: The summary computed since the latest precompute time (REPORT_PRECOMPUTE_UTC), or computed on demand; any other case is 503, never an older report.
           content:
             application/json:
               schema: {$ref: './summary-v1.schema.json'}
@@ -330,7 +330,7 @@ paths:
           schema: {type: integer, minimum: 1, maximum: 10, default: 3}
       responses:
         '200':
-          description: The latest recommendation for `top` (precomputed daily; on demand when older than 26 hours).
+          description: The recommendation for `top` computed since the latest precompute time, or computed on demand; any other case (including unusable model output) is 503, never an older or empty-by-failure report.
           content:
             application/json:
               schema: {$ref: './recommendation-v1.schema.json'}
@@ -566,7 +566,7 @@ components:
         - task_created: the owner found the Todoist task (`task_id` required); the event completes with it.
         - task_not_created: the owner found no task. A footer lookup runs first, then the frozen request is sent again, which can duplicate a task.
         - retry_summary: summarize again; not offered for mail_needs_review.
-        - dismiss: give up without checking Todoist; the event becomes ignored.
+        - dismiss: give up without checking Todoist; the event becomes ignored. Offered for failed_summary, todo_unknown, and summarized rows whose last Todoist request was refused (todoist_rejected).
       type: string
       enum: [task_created, task_not_created, retry_summary, dismiss]
 

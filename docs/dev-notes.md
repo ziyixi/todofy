@@ -1,9 +1,10 @@
 # Todofy developer notes
 
-How to work on the Cloudflare rewrite: local commands, repo layout, the Python Workers idioms this code
-relies on, and who owns which module in the next build phase. Plans and decisions live in
-`cloudflare-migration-plan.md` (v2, §0.1 overrides) and `implementation-order.md`; where they disagree
-with this file on a name or interface, this file reflects what is in the tree.
+How to work on Todofy: local commands, repo layout, the Python Workers idioms this code relies on, and
+the contracts between modules. Plans and decisions live in `cloudflare-migration-plan.md` (v2, §0.1
+overrides) and `implementation-order.md`; where they disagree with this file on a name or interface,
+this file reflects what is in the tree. The retired Go service is gone from the tree (S11); it stays in
+the git history at `6c46ed4`.
 
 ## 1. Run everything locally
 
@@ -56,14 +57,15 @@ tests/fakes/                   in-process loopback HTTP fake (+ its own tests)
 tests/runtime/                 black-box tests against `pywrangler dev` with real D1/DO/alarms/cron/assets
 tests/fixtures/mail_hero/      exact webhook bytes Mail Hero emits (compat fixtures, synthetic mail)
 web/                           owner UI (React + Vite); builds into uiassets/dist; types generated from the OpenAPI
-tools/                         legacy SQLite → D1 migration scripts and the webhook smoke test (stdlib, Python 3.9+)
+tools/                         legacy SQLite snapshot → D1 export/verify scripts and the webhook smoke test
+                               (stdlib, Python 3.9+)
 deploy/                        production wrangler config generator used by the deploy job
 ```
 
 Conventions: English identifiers and comments, Chinese user-facing strings, type hints everywhere,
 comments explain why. `core/` modules import each other relatively (`from .vocab import Code`);
-runtime modules import absolutely (`from todofy.core.vocab import Code`). The Go tree is the legacy
-reference until S11 deletes it; do not edit it.
+runtime modules import absolutely (`from todofy.core.vocab import Code`). Comments that cite
+`*.go` files refer to the Go service at `6c46ed4` (git history).
 
 ## 3. Python Workers idioms used here
 
@@ -133,7 +135,7 @@ Outbound calls (`runtime/interop.py`)
 
 Local runtime quirks (not production behaviour)
 - Local cron: `GET /cdn-cgi/local/scheduled?cron=...` (`Worker.trigger_cron`). `/__scheduled` and
-  `--test-scheduled` no longer work in wrangler 4.142; the plan docs still mention them.
+  `--test-scheduled` no longer work in wrangler 4.142 (the plan docs carry an as-built note).
 - If the Worker answers a POST before reading its body (401/413/415, or 405 from assets), wrangler's
   local proxy may fail the next POST on that dev server with a 500. Send such requests without a body, use
   `Worker.headers_only_status`, or use the per-test `throwaway_worker` fixture.
@@ -148,6 +150,8 @@ Local runtime quirks (not production behaviour)
 
 ### 4.1 Vocabulary, units, identities
 - States, error codes and owner actions: `core.vocab` only (== migration CHECKs == OpenAPI enums, tested).
+  The owner-facing Chinese text for each code lives only in `web/src/lib/labels.ts`; change it together
+  with the behaviour it describes.
   Transition actors are the literals `worker` / `owner`.
 - Units: core timing constants and `backoff.*` are seconds; D1 columns are Unix seconds (store
   `math.ceil`ed deadlines); DO alarms are epoch ms. Pass `now: int` (Unix seconds) through runtime calls.
@@ -167,6 +171,10 @@ Local runtime quirks (not production behaviour)
 - Every state change is one `STATE_CAS` (`state = ? AND version = ?`, `version = version + 1`, check
   `meta.changes == 1`) plus its `event_transitions` insert in the same `batch()`. Moving to `complete` or
   `ignored` also sets `payload = NULL` (CHECK-enforced) and, for `complete`, inserts the `summaries` row.
+  Each dependent insert (transition, summaries row, owner action) is guarded by `changes() = 1`, i.e. the
+  statement just before it changed one row, so a lost CAS writes nothing (a version match alone is not
+  enough: a writer one version behind matches the row another writer has just moved). A transition takes
+  a completed summary or an owner action, never both (`tests/runtime/test_ledger_cas.py`).
 - Statements that write (INSERT/UPDATE/DELETE) are also `Query` constants; name the index of the key they
   hit (`sqlite_autoindex_<table>_1` for primary keys). A plain `INSERT ... VALUES` has no query plan, so
   the test only checks that its index is a unique index of the inserted table.
@@ -179,17 +187,23 @@ Local runtime quirks (not production behaviour)
   requires one Idempotency-Key equal to `event_id` (a value containing "," means repeated → 400), runs
   `contract.parse_mail_event`, answers 204 (stored or same bytes), 409 (different bytes), 400, or 503.
   `MAINTENANCE_MODE` → 503 `maintenance` with `Retry-After`.
-- Newsletter (`reports.serve`, routed from `hooks.py`): Basic, `sha256("user:password")` compared in constant time with
-  every digest in the comma-separated `REPORT_BASIC_AUTH_SHA256` (list two while rotating); failures counted per UTC hour in `auth_failures`, 429
-  after 20. Responses must validate against `api/summary-v1` / `recommendation-v1`.
+- Newsletter (`reports.serve`, routed from `hooks.py`): Basic, `sha256("user:password")` compared in
+  constant time with every digest in the comma-separated `REPORT_BASIC_AUTH_SHA256` (list two while
+  rotating). A correct credential is always served. Failures are counted per UTC hour in `auth_failures`;
+  after 20 a failing request gets 429 and nothing more is written (at most 20 D1 writes an hour). That
+  lockout no longer slows guessing, so the newsletter password must be a random secret of at least 128
+  bits. A stored report is served only when computed since the latest `REPORT_PRECOMPUTE_UTC` time and
+  `ok`/`empty_window`; otherwise the coordinator computes one within 40 s, and anything but a usable
+  report is 503 (the newsletter reads only the HTTP status, so an old or empty-by-failure report is never
+  a 200). Responses must validate against `api/summary-v1` / `recommendation-v1`.
 - Owner API: Access on every request; POSTs also need CSRF (§5 `csrf.py`) and `action_request_id`
   idempotency via `owner_actions`. Anything that parses a mail payload or mutates the ledger runs inside
   the DO (30 s CPU, single writer); plain D1 page reads may run in the Worker (10 ms CPU on Free).
 
-## 5. Module ownership for the next phase (S5/S6)
+## 5. Module contracts
 
-Four parallel owners. Each owns the listed files outright; everything else is read-only for them except
-the named seams. Signatures are the contract between owners — change one only by agreement.
+The build phase split the Worker between four owners (P, O, R, T below); the split still marks the
+module seams. Signatures are the contract between modules — change one together with its callers.
 
 | Owner | Files |
 |---|---|
@@ -220,10 +234,12 @@ Vars (plain, with defaults): `MAIL_SOURCE_ID`, `GEMINI_API_BASE`, `GEMINI_MODELS
 `TODOIST_DEFAULT_PROJECT_ID`, `LOOKUP_DELAY_MS` (120000), `BACKOFF_BASE_MS` (60000),
 `WATCHDOG_MS` (120000), `TODOIST_ATTEMPT_TIMEOUT_MS` (14000), `REPORT_DEFAULT_TOP` (10), `REPORT_PRECOMPUTE_UTC` ("13:30"), `REMINDER_ENABLED`,
 `LEGACY_TEXT_RETENTION_DAYS`, `MAINTENANCE_MODE`, `PROCESSING_PAUSED`, `FORCE_PAUSE_TODOIST`,
-`ACCESS_ISSUER`, `ACCESS_AUDIENCE`, `ACCESS_OWNER`, `ACCESS_OWNER_ALIASES`, `BUILD_SHA`,
-`TODOFY_PUBLIC_HOST`, `TODOFY_HOOKS_HOSTS`. Secrets: `MAIL_WEBHOOK_TOKEN_SHA256`,
-`MAIL_WEBHOOK_TOKEN_SHA256_PREVIOUS`, `REPORT_BASIC_AUTH_SHA256`, `GEMINI_API_KEY`, `TODOIST_API_KEY`,
-`CSRF_SIGNING_KEY` (64 hex). Test configs shorten `*_MS` values; production never sets them.
+`ACCESS_ISSUER`, `ACCESS_AUDIENCE`, `BUILD_SHA`, `TODOFY_PUBLIC_HOST`, `TODOFY_HOOKS_HOSTS`. Secrets set
+by the owner: `MAIL_WEBHOOK_TOKEN_SHA256`, `MAIL_WEBHOOK_TOKEN_SHA256_PREVIOUS`,
+`REPORT_BASIC_AUTH_SHA256`, `GEMINI_API_KEY`, `TODOIST_API_KEY`, `CSRF_SIGNING_KEY` (64 hex). Secrets
+set by every deploy (`--secrets-file`, from GitHub environment secrets, because wrangler prints plain
+vars in the public Actions log): `ACCESS_OWNER`, `ACCESS_OWNER_ALIASES`. Test configs shorten `*_MS`
+values (including `JWKS_REFRESH_COOLDOWN_MS`); production never sets them.
 
 ### coordinator.py (P) — the only writer of the ledger
 Internal routes on `https://coordinator` (never reachable from outside the Worker):
@@ -233,19 +249,27 @@ POST /wake            {"cron": str} → 204
 POST /reconcile       {"owner", "event_id", "action", "version", "action_request_id", "task_id"?} → EventDetail JSON | error
 POST /report          {"kind", "top_n", "owner"?, "action_request_id"?, "budget_ms"} → report JSON | error
 GET  /event/<id>      → EventDetail JSON | 404 (parses the payload, so it runs here)
+GET  /legacy_text/<k> → LegacyText JSON | 404 (up to 1.9 MB: too much for the Worker's 10 ms)
 GET  /state           → {"next_alarm_at", "gemini": {...}, "todoist": {...}} for Overview
 ```
-Alarm loop (v2 §5.3): running guard → maintenance check → watchdog alarm → `ledger.recover_interrupted` →
-at most one step (summary, task, lookup) → `reminder.tick`, `reports.tick`, `retention.tick` when their
-`control` time is due → next alarm = min(ledger due, control times). DO SQLite tables it owns:
-`control(next_reminder_check, next_report, next_maintenance, todoist_blocked_until)`,
-`llm_usage(day, reserved_tokens, used_tokens, calls)`, `todoist_calls(minute_bucket, count)`,
-`report_requests(hour_bucket, count)`. Budget helpers used by R:
+Alarm loop (v2 §5.3): running guard → maintenance check → watchdog alarm → settle the token
+reservation of a summary call an eviction cut short → `ledger.recover_interrupted` → at most one step
+(summary, task, lookup), skipped while `PROCESSING_PAUSED` → `reminder.tick`, `reports.tick`,
+`retention.tick` when their `control` time is due → next alarm = min(ledger due, control times). A
+wake-up that arrives while the loop runs re-arms the alarm for now when the loop ends. DO SQLite tables
+it owns: `control(next_reminder_check, next_report, next_maintenance, todoist_blocked_until)`,
+`llm_usage(day, reserved_tokens, used_tokens, calls)`, `llm_inflight(event_id, day, reserved)`,
+`todoist_calls(minute_bucket, count)`, `report_requests(hour_bucket, count)`,
+`report_failures(kind, top_n, day, count)`. Budget helpers used by R:
 ```python
 def reserve_tokens(self, tokens: int, now: int) -> bool
 def settle_tokens(self, reserved: int, used: int, now: int) -> None
 def take_report_slot(self, now: int) -> bool        # hourly report-computation cap
+def report_failures(self, kind: str, top_n: int, day: str) -> int
+def count_report_failure(self, kind: str, top_n: int, day: str) -> None
 ```
+A summary settles its reservation on every exit: nothing spent before the request goes out, all of it if
+the call dies midway (as `reports._generate`), the real count after an answer.
 
 ### ledger.py (P)
 ```python
@@ -302,7 +326,9 @@ class CreateResult:
 
 async def create_task(env, request: TaskRequest, *, budget_ms: int) -> CreateResult
     # up to TODOIST_MAX_ATTEMPTS while verdict.retry_inline, TODOIST_ATTEMPT_TIMEOUT(_MS) each,
-    # backoff.inline_delay between, same frozen bytes and X-Request-Id every time
+    # backoff.inline_delay between, same frozen bytes and X-Request-Id every time. Once an attempt may
+    # have created the task (a timeout, say), the call ends CREATED or UNKNOWN only
+    # (classify.final_task_verdict): a later 429/5xx never turns into a durable resend.
 async def find_footer_tasks(env, event_id: str) -> list[str] | None
     # GET /api/v1/tasks?project_id=&cursor=, ≤ LOOKUP_MAX_PAGES pages, None on any failure
 ```
@@ -314,7 +340,8 @@ async def tick(env, coordinator, now: int) -> int     # returns the next check t
 async def page(db, before_day: str | None, limit: int) -> tuple[list[dict], str | None]  # for api.py
 ```
 Claims the UTC day with `INSERT ... ON CONFLICT(day) DO NOTHING` before calling `todoist.create_task`;
-`unknown` is never resent that day; `failed` retried hourly up to `REMINDER_MAX_ATTEMPTS`.
+`unknown` is never resent that day; `failed` retried hourly up to `REMINDER_MAX_ATTEMPTS`. Nothing is sent
+while `REMINDER_ENABLED` is off or `FORCE_PAUSE_TODOIST` or `PROCESSING_PAUSED` is on.
 
 ### reports.py (R)
 ```python
@@ -324,10 +351,13 @@ async def serve(request, env, kind: str) -> Response  # /api/summary, /api/recom
 async def latest(db) -> dict                          # ReportsLatest for api.py
 ```
 P wires the two newsletter routes in `hooks.py` to `reports.serve`; R never edits `hooks.py`.
-Precompute only `top_n = REPORT_DEFAULT_TOP` (default 10, what the newsletter asks for); other `top` values
-are computed on demand under the hourly cap (429 with `Retry-After` until the next UTC hour). Stored text must pass
-`report_schema.newsletter_text_ok`; on-demand work goes through coordinator `/report` with a 40 s budget,
-otherwise the older row is served as `stale`.
+Precompute only `top_n = REPORT_DEFAULT_TOP` (default 10, what the newsletter asks for); other `top`
+values are computed on demand under the hourly cap (429 with `Retry-After` until the next UTC hour). A
+summary longer than the newsletter's 12,000 characters is cut at a line break with a notice
+(`report_schema.fit_summary`) rather than failed. `tick` counts failures per report and UTC day in the
+coordinator: a failed or `model_output_invalid` report is retried in 10 minutes, after the other report,
+at most `PRECOMPUTE_ATTEMPTS` (3) times a day. On-demand work goes through coordinator `/report` with a
+40 s budget; see §4.3 for what the newsletter gets.
 
 ### retention.py (R)
 ```python
@@ -339,7 +369,9 @@ Uses only `core.sql.retention` batches (≤ 6 deletes per call); never deletes `
 ```python
 async def authenticate(request, env) -> str           # returns ACCESS_OWNER or raises AccessError(status, ApiError)
 ```
-Add `ACCESS_OWNER_ALIASES` (≤ 8 exact emails, all mapped to `ACCESS_OWNER`).
+`ACCESS_OWNER_ALIASES` (≤ 8 exact emails, e.g. the owner's GitHub-login address) all map to
+`ACCESS_OWNER`. Signing keys are cached per isolate for an hour; a kid the cache does not know refetches
+the certs at most once a minute, so an Access key rotation does not lock the owner out.
 
 ### csrf.py (O)
 ```python
@@ -358,10 +390,13 @@ Same semantics as Mail Hero `security.ts:130-142`: `Origin` must equal `https://
 async def handle(request, env, owner: str, path: str) -> Response   # every /api/v1/* path in the OpenAPI
 ```
 Reads in the Worker: overview (D1 counts + coordinator `GET /state`), events pages, reminders
-(`reminder.page`), `reports/latest` (`reports.latest`), legacy_text, setup, csrf. Via the coordinator:
-`GET /events/{id}` → `/event/<id>`, `POST .../reconcile` → `/reconcile`, `POST reports/recompute` →
-`/report`. Cursors are opaque base64url of `created_at:event_id` (events) or the day (reminders).
+(`reminder.page`), `reports/latest` (`reports.latest`), setup, csrf. Via the coordinator:
+`GET /events/{id}` → `/event/<id>`, `GET /legacy_text/{id}` → `/legacy_text/<id>`,
+`POST .../reconcile` → `/reconcile`, `POST reports/recompute` → `/report`. Cursors are opaque base64url of `created_at:event_id` (events) or the day (reminders).
 Responses must validate against the OpenAPI schemas; T adds runtime tests that validate them.
+Imported `legacy:<hash>` / `legacy:row-<id>` rows (CloudMailin era, or Mail Hero rows with no ledger event)
+are an archive: the reports read their summaries by date, `/legacy_text/{id}` serves their text by exact
+ID, and nothing lists them (browse with `wrangler d1 execute`).
 
 ### health (lead)
 `GET /health` stays inline in `hooks.py` and returns `{"build": BUILD_SHA}` only (lead decision). The

@@ -8,20 +8,23 @@ from typing import Any
 import js
 
 from todofy.core.api_errors import ApiError
-from todofy.runtime.config import csv, flag, local_dev, var
+from todofy.runtime.config import csv, flag, integer, local_dev, var
 from todofy.runtime.interop import fetch_with_timeout, now_ms, to_js
 
 ACCESS_ISSUER = re.compile(r"^https://[a-z0-9-]+\.cloudflareaccess\.com$")
 LOOPBACK_ISSUER = re.compile(r"^http://127\.0\.0\.1:\d{1,5}$")
 MAX_TOKEN_CHARS = 16_000
 JWKS_TTL_MS = 3_600_000
+# An unknown kid refetches the certs (Access signs new tokens with a new key right
+# after a rotation), at most once per this period per isolate.
+JWKS_REFRESH_COOLDOWN_MS = 60_000
 JWKS_TIMEOUT_MS = 5_000
 CLOCK_SKEW_S = 60
 MAX_ALIASES = 8
 MAX_ALIASES_CHARS = 2048
 RS256 = {"name": "RSASSA-PKCS1-v1_5", "hash": "SHA-256"}
 
-# Per-isolate cache: issuer -> (expires_at_ms, {kid: CryptoKey}).
+# Per-isolate cache: issuer -> (fetched_at_ms, {kid: CryptoKey}).
 _keys: dict[str, tuple[int, dict[str, Any]]] = {}
 
 
@@ -69,10 +72,20 @@ def _token(request: Any) -> str:
     return token
 
 
-async def _signing_keys(issuer: str) -> dict[str, Any]:
+async def _signing_key(issuer: str, kid: object, cooldown_ms: int) -> Any:
+    """The CryptoKey for ``kid``, or None.
+
+    Cached keys are used for JWKS_TTL_MS. A kid the cache does not know triggers
+    one refetch, rate-limited per isolate, so a key rotation does not lock the
+    owner out until the cache expires.
+    """
+    if not isinstance(kid, str):
+        return None
     cached = _keys.get(issuer)
-    if cached and cached[0] > now_ms():
-        return cached[1]
+    if cached:
+        age = now_ms() - cached[0]
+        if age < JWKS_TTL_MS and (kid in cached[1] or age < cooldown_ms):
+            return cached[1].get(kid)
     result = await fetch_with_timeout(f"{issuer}/cdn-cgi/access/certs", timeout_ms=JWKS_TIMEOUT_MS)
     if result.status != 200:
         raise AccessError(503, ApiError.UNAVAILABLE)
@@ -82,8 +95,8 @@ async def _signing_keys(issuer: str) -> dict[str, Any]:
             keys[jwk["kid"]] = await js.crypto.subtle.importKey(
                 "jwk", to_js(jwk), to_js(RS256), False, to_js(["verify"])
             )
-    _keys[issuer] = (now_ms() + JWKS_TTL_MS, keys)
-    return keys
+    _keys[issuer] = (now_ms(), keys)
+    return keys.get(kid)
 
 
 async def authenticate(request: Any, env: Any) -> str:
@@ -104,10 +117,12 @@ async def authenticate(request: Any, env: Any) -> str:
         signature = _b64url(signature_b64)
     except ValueError:
         raise _unauthorized() from None
-    if header.get("alg") != "RS256" or not isinstance(claims, dict):
+    if not isinstance(header, dict) or header.get("alg") != "RS256" or not isinstance(claims, dict):
         raise _unauthorized()
 
-    key = (await _signing_keys(issuer)).get(header.get("kid"))
+    # Test configs shorten the cooldown; production uses the constant.
+    cooldown_ms = integer(env, "JWKS_REFRESH_COOLDOWN_MS", JWKS_REFRESH_COOLDOWN_MS)
+    key = await _signing_key(issuer, header.get("kid"), cooldown_ms)
     signed = f"{header_b64}.{payload_b64}".encode()
     if key is None or not await js.crypto.subtle.verify(RS256["name"], key, to_js(signature), to_js(signed)):
         raise _unauthorized()

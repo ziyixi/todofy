@@ -305,6 +305,7 @@ async def reminders(env: Any, query: dict[str, str]) -> Response:
 
 
 async def legacy_text(env: Any, key: str) -> Response:
+    """GET /api/v1/legacy_text/{key}; runs in the coordinator (see _route)."""
     row = await env.DB.prepare(views.LEGACY_TEXT.sql).bind(key).first()
     expires_at = None if row is None else row["expires_at"]
     if row is None or (expires_at is not None and expires_at <= now_ms() // 1000):
@@ -369,7 +370,11 @@ async def _route(request: Any, env: Any, owner: str, path: str) -> Response:
         return await reconcile(request, env, owner, event_id)
     if method == "GET" and (match := LEGACY_TEXT_PATH.fullmatch(path)):
         key = _path_id(match, legacy=True)
-        return error(404, ApiError.NOT_FOUND) if key is None else await legacy_text(env, key)
+        if key is None:
+            return error(404, ApiError.NOT_FOUND)
+        # Imported texts reach 1.9 MB; reading and encoding one can pass the Worker's 10 ms of CPU,
+        # so the coordinator (30 s) builds the response and the Worker only passes it through.
+        return await coordinator(env).fetch(f"https://coordinator/legacy_text/{key}")
     return error(404, ApiError.NOT_FOUND)
 
 

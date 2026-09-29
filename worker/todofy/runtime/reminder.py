@@ -40,7 +40,9 @@ async def tick(env: Any, coordinator: Any, now: int) -> int:
     """
     db = env.DB
     await db.prepare(sql.RECOVER_SENDING.sql).bind(Code.INTERRUPTED_REMINDER_CALL, now).run()
-    if not flag(env, "REMINDER_ENABLED") or flag(env, "FORCE_PAUSE_TODOIST"):
+    # PROCESSING_PAUSED parks the whole Todoist side, including this reminder (a parked
+    # stack after a rollback must not post its own daily task).
+    if not flag(env, "REMINDER_ENABLED") or flag(env, "FORCE_PAUSE_TODOIST") or flag(env, "PROCESSING_PAUSED"):
         return now + REMINDER_CHECK_INTERVAL
     day = _day(now)
     tomorrow = now - now % DAY + DAY

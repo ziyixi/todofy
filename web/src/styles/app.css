@@ -445,6 +445,8 @@ main > .notice {
 }
 
 .btn-icon {
+  /* Next to a long wrapped value (a URL, an ID) a shrinkable icon button drops to 18 px. */
+  flex: none;
   min-height: 32px;
   width: 32px;
   padding: 0;
@@ -539,7 +541,8 @@ main > .notice {
   padding: 1px var(--space-2);
   border-radius: 999px;
   background: color-mix(in srgb, var(--tone) 13%, transparent);
-  color: var(--tone);
+  /* Pulled toward the text colour so every tone keeps 4.5:1 on its tint in both themes. */
+  color: color-mix(in srgb, var(--tone) 85%, var(--fg));
   font-size: var(--text-s);
   font-weight: 600;
   white-space: nowrap;

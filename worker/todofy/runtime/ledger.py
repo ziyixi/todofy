@@ -220,6 +220,9 @@ async def transition(
     ``columns`` sets mutable columns by name; the rest keep their value. A
     terminal state drops the mail body and everything derived from it.
     """
+    if completed and action:
+        # Each dependent insert is guarded by the row count of the statement just before it.
+        raise TypeError("a transition records a completed summary or an owner action, not both")
     terminal = to in TERMINAL_STATES
     if terminal:
         columns = {"summary": "", "todo_body": "", **columns}

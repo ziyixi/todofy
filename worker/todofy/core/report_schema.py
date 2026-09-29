@@ -48,6 +48,30 @@ def newsletter_text_ok(text: object, max_chars: int) -> bool:
     return isinstance(text, str) and bool(text.strip()) and len(text) <= max_chars and not _CONTROL.search(text)
 
 
+# Appended when a long daily summary is cut to fit the newsletter.
+SUMMARY_TRUNCATED_NOTICE = "\n（列表过长，已截断以适应 newsletter。）"
+
+
+def fit_summary(text: str, max_chars: int = MAX_SUMMARY_CHARS) -> str | None:
+    """Model text made acceptable to the newsletter, or None when nothing usable is left.
+
+    Control characters are dropped. Text over ``max_chars`` is cut at the last
+    line break that leaves room for SUMMARY_TRUNCATED_NOTICE (or hard, when a
+    single line is that long), so a long day still gets a summary instead of a
+    failed run that would be retried all day.
+    """
+    cleaned = _CONTROL.sub("", text)
+    if not cleaned.strip():
+        return None
+    if len(cleaned) <= max_chars:
+        return cleaned
+    head = cleaned[: max_chars - len(SUMMARY_TRUNCATED_NOTICE)]
+    if (cut := head.rfind("\n")) > 0:
+        head = head[:cut]
+    head = head.rstrip()
+    return head + SUMMARY_TRUNCATED_NOTICE if head.strip() else None
+
+
 def parse_top_n(value: str | None) -> int:
     """The ``top`` query parameter: absent or empty means the default; else 1..10."""
     if not value:

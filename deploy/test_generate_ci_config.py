@@ -8,7 +8,15 @@ from pathlib import Path
 
 import pytest
 
-from deploy.generate_ci_config import FIXED_VARS, MAX_REPORT_TOP, ROOT, SettingError, generate_config, main
+from deploy.generate_ci_config import (
+    FIXED_VARS,
+    MAX_REPORT_TOP,
+    ROOT,
+    SettingError,
+    generate_config,
+    generate_secrets,
+    main,
+)
 from todofy.core.report_schema import MAX_TOP_N
 
 BASE = tomllib.loads((ROOT / "wrangler.toml").read_text())
@@ -49,8 +57,6 @@ EXPECTED_VARS = {
     "MAIL_SOURCE_ID",
     "ACCESS_ISSUER",
     "ACCESS_AUDIENCE",
-    "ACCESS_OWNER",
-    "ACCESS_OWNER_ALIASES",
     "GEMINI_MODELS",
     "GEMINI_DAILY_TOKEN_BUDGET",
     "TODOIST_DEFAULT_PROJECT_ID",
@@ -66,7 +72,9 @@ EXPECTED_VARS = {
 
 
 def generate(**overrides: str) -> dict:
-    return generate_config(VALID | overrides, BASE)
+    """The config plus the secrets file under the "secrets" key, as main writes them."""
+    env = VALID | overrides
+    return generate_config(env, BASE) | {"secrets": generate_secrets(env)}
 
 
 def test_worker_shape_is_the_shipped_wrangler_toml() -> None:
@@ -113,7 +121,6 @@ def test_valid_variables_fill_account_database_routes_and_vars() -> None:
 def test_defaults_apply_when_optional_variables_are_unset_or_empty() -> None:
     expected = {
         "MAIL_SOURCE_ID": "mail-hero-personal",
-        "ACCESS_OWNER_ALIASES": "",
         "GEMINI_MODELS": "gemini-3.8-flash,gemini-3.7-flash,gemini-3.5-flash-lite",
         "GEMINI_DAILY_TOKEN_BUDGET": "3000000",
         "LOOKUP_DELAY_MS": "120000",
@@ -124,6 +131,8 @@ def test_defaults_apply_when_optional_variables_are_unset_or_empty() -> None:
     for config in (generate(), generate(**dict.fromkeys(OPTIONAL, ""))):
         assert {name: config["vars"][name] for name in expected} == expected
         assert config["d1_databases"][0]["database_name"] == "todofy"
+        # An empty alias list replaces the previous aliases instead of leaving them in place.
+        assert config["secrets"]["ACCESS_OWNER_ALIASES"] == " "
 
 
 def test_optional_variables_are_passed_through_when_valid() -> None:
@@ -137,7 +146,10 @@ def test_optional_variables_are_passed_through_when_valid() -> None:
         TODOFY_MAINTENANCE_MODE="true",
     )
     assert config["d1_databases"][0]["database_name"] == "todofy-prod"
-    assert config["vars"]["ACCESS_OWNER_ALIASES"] == "alias@example.org,other@example.net"
+    assert config["secrets"] == {
+        "ACCESS_OWNER": "owner@example.com",
+        "ACCESS_OWNER_ALIASES": "alias@example.org,other@example.net",
+    }
     assert config["vars"]["GEMINI_MODELS"] == "gemini-3.7-flash"
     assert config["vars"]["REPORT_DEFAULT_TOP"] == "5"
     assert config["vars"]["REPORT_PRECOMPUTE_UTC"] == "23:59"
@@ -148,6 +160,14 @@ def test_optional_variables_are_passed_through_when_valid() -> None:
 def test_build_sha_is_the_40_hex_commit() -> None:
     build = generate()["vars"]["BUILD_SHA"]
     assert build == SHA and re.fullmatch(r"[0-9a-f]{40}", build)
+
+
+def test_owner_emails_are_secrets_never_plain_vars() -> None:
+    # Wrangler prints plain vars with their values in the public Actions log.
+    config = generate(TODOFY_ACCESS_OWNER_ALIASES="alias@example.org")
+    plain = json.dumps({key: value for key, value in config.items() if key != "secrets"})
+    assert "owner@example.com" not in plain and "alias@example.org" not in plain
+    assert set(config["secrets"]) == {"ACCESS_OWNER", "ACCESS_OWNER_ALIASES"}
 
 
 def test_dev_switches_are_never_emitted() -> None:
@@ -187,7 +207,7 @@ def test_bad_hooks_host_lists_are_rejected(hosts: str) -> None:
 def test_every_required_variable_must_be_set(name: str) -> None:
     for env in ({key: value for key, value in VALID.items() if key != name}, VALID | {name: ""}):
         with pytest.raises(SettingError, match=rf"{name}$"):
-            generate_config(env, BASE)
+            generate_config(env, BASE) | generate_secrets(env)
 
 
 @pytest.mark.parametrize(
@@ -243,16 +263,21 @@ def test_limits_match_the_worker() -> None:
     assert {name: BASE["vars"][name] for name in FIXED_VARS} == FIXED_VARS
 
 
-def test_main_writes_a_private_file_and_prints_only_names(
+def test_main_writes_private_files_and_prints_only_names(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     env = VALID | {"TODOFY_ACCESS_OWNER_ALIASES": "alias@example.org"}
     for name, value in env.items():
         monkeypatch.setenv(name, value)
-    output = tmp_path / "wrangler.production.ci.json"
-    assert main(output) == 0
-    assert stat.S_IMODE(output.stat().st_mode) == 0o600
+    output, secrets = tmp_path / "wrangler.production.ci.json", tmp_path / "secrets.json"
+    assert main(output, secrets) == 0
+    for path in (output, secrets):
+        assert stat.S_IMODE(path.stat().st_mode) == 0o600
     assert json.loads(output.read_text()) == generate_config(env, BASE)
+    assert json.loads(secrets.read_text()) == {
+        "ACCESS_OWNER": "owner@example.com",
+        "ACCESS_OWNER_ALIASES": "alias@example.org",
+    }
     printed = capsys.readouterr()
     assert "ACCESS_OWNER" in printed.out
     for value in env.values():
@@ -264,10 +289,14 @@ def test_main_never_overwrites_an_existing_file(
 ) -> None:
     for name, value in VALID.items():
         monkeypatch.setenv(name, value)
-    output = tmp_path / "wrangler.production.ci.json"
+    output, secrets = tmp_path / "wrangler.production.ci.json", tmp_path / "secrets.json"
     output.write_text("local")
-    assert main(output) == 1
-    assert output.read_text() == "local"
+    assert main(output, secrets) == 1
+    assert output.read_text() == "local" and not secrets.exists()
+    output.unlink()
+    secrets.write_text("local")
+    assert main(output, secrets) == 1
+    assert secrets.read_text() == "local" and not output.exists()
     assert "already exists" in capsys.readouterr().err
 
 
@@ -278,7 +307,7 @@ def test_main_reports_the_bad_variable_without_its_value(
         monkeypatch.setenv(name, value)
     monkeypatch.setenv("TODOFY_ACCESS_AUDIENCE", "secret-looking-value")
     output = tmp_path / "wrangler.production.ci.json"
-    assert main(output) == 1
+    assert main(output, tmp_path / "secrets.json") == 1
     assert not output.exists()
     printed = capsys.readouterr()
     assert printed.err.strip() == "Invalid or missing CI setting: TODOFY_ACCESS_AUDIENCE"

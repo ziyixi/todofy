@@ -77,12 +77,13 @@ jobs:
           TODOFY_FORCE_PAUSE_TODOIST: 'false'
         run: |
           uv run python deploy/generate_ci_config.py
-          uv run pywrangler deploy --dry-run --config wrangler.production.ci.json --outdir "$RUNNER_TEMP/todofy-bundle"
+          uv run pywrangler deploy --dry-run --config wrangler.production.ci.json \
+            --secrets-file wrangler.production.secrets.json --outdir "$RUNNER_TEMP/todofy-bundle"
           # The workers SDK is vendored next to the config; a bundle without it cannot start.
           test -d "$RUNNER_TEMP/todofy-bundle/python_modules/workers"
       - name: Remove the placeholder config
         if: always()
-        run: rm -f wrangler.production.ci.json
+        run: rm -f wrangler.production.ci.json wrangler.production.secrets.json
 
   deploy:
     name: Todofy deploy
@@ -117,6 +118,8 @@ jobs:
           uv sync --locked
           npm ci --prefix web --no-audit --no-fund
           npm run build --prefix web
+      # The owner's email addresses are environment secrets (masked in this public log) and reach the
+      # Worker as secrets through --secrets-file; wrangler would print them if they were plain vars.
       - name: Generate the production configuration
         env:
           CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
@@ -127,8 +130,8 @@ jobs:
           TODOFY_MAIL_SOURCE_ID: ${{ vars.TODOFY_MAIL_SOURCE_ID }}
           TODOFY_ACCESS_ISSUER: ${{ vars.TODOFY_ACCESS_ISSUER }}
           TODOFY_ACCESS_AUDIENCE: ${{ vars.TODOFY_ACCESS_AUDIENCE }}
-          TODOFY_ACCESS_OWNER: ${{ vars.TODOFY_ACCESS_OWNER }}
-          TODOFY_ACCESS_OWNER_ALIASES: ${{ vars.TODOFY_ACCESS_OWNER_ALIASES }}
+          TODOFY_ACCESS_OWNER: ${{ secrets.TODOFY_ACCESS_OWNER }}
+          TODOFY_ACCESS_OWNER_ALIASES: ${{ secrets.TODOFY_ACCESS_OWNER_ALIASES }}
           TODOFY_GEMINI_MODELS: ${{ vars.TODOFY_GEMINI_MODELS }}
           TODOFY_GEMINI_DAILY_TOKEN_BUDGET: ${{ vars.TODOFY_GEMINI_DAILY_TOKEN_BUDGET }}
           TODOFY_TODOIST_DEFAULT_PROJECT_ID: ${{ vars.TODOFY_TODOIST_DEFAULT_PROJECT_ID }}
@@ -142,7 +145,7 @@ jobs:
           TODOFY_FORCE_PAUSE_TODOIST: ${{ vars.TODOFY_FORCE_PAUSE_TODOIST }}
         run: uv run python deploy/generate_ci_config.py
       - name: Validate the bundle before changing D1
-        run: uv run pywrangler deploy --dry-run --config wrangler.production.ci.json
+        run: uv run pywrangler deploy --dry-run --config wrangler.production.ci.json --secrets-file wrangler.production.secrets.json
       - name: Apply D1 migrations, then deploy the Worker
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
@@ -150,7 +153,7 @@ jobs:
         run: |
           test -n "$CLOUDFLARE_API_TOKEN"
           npx --no-install wrangler d1 migrations apply DB --remote --config wrangler.production.ci.json
-          uv run pywrangler deploy --config wrangler.production.ci.json
+          uv run pywrangler deploy --config wrangler.production.ci.json --secrets-file wrangler.production.secrets.json
       # A first deploy waits for the Custom Domain certificate and DNS, hence 10 tries x 15 s.
       - name: Wait until the hooks host serves this commit
         run: |
@@ -166,4 +169,4 @@ jobs:
           exit 1
       - name: Remove the generated configuration
         if: always()
-        run: rm -f wrangler.production.ci.json
+        run: rm -f wrangler.production.ci.json wrangler.production.secrets.json

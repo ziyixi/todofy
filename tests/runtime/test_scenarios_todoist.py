@@ -159,6 +159,29 @@ def test_a_timeout_retries_inline_with_the_same_request_then_is_unknown(
     worker.wait_event(event_id, lambda e: e["error_code"] == "lookup_not_found")
 
 
+@pytest.mark.parametrize("then", [Reply(503, "busy"), rate_limited(retry_after_seconds(1))], ids=["503", "429"])
+def test_a_timeout_then_a_retryable_error_is_unknown_not_resent(
+    worker: Worker, fresh_todoist: TodoistFake, then: Reply
+) -> None:
+    # The timed-out attempt may have created the task; a later 5xx/429 must not turn the
+    # call into an automatic resend (X-Request-Id deduplication is never relied on).
+    fresh_todoist.queue("POST", TASKS_PATH, Reply(hang=True))
+    for _ in range(2):
+        fresh_todoist.queue("POST", TASKS_PATH, then)
+    event_id, _ = _arrive(worker)
+
+    worker.wait_event(event_id, lambda e: e["error_code"] == "lookup_not_found", timeout_s=60)
+    time.sleep(SETTLE_S)
+
+    event = worker.event(event_id)
+    assert (event["state"], event["next_attempt_at"]) == ("todo_unknown", None)
+    assert ("todo_sending", "todo_unknown", "todo_result_unknown", "worker") in transitions(event)
+    posts = fresh_todoist.creates_for(event_id)
+    assert 2 <= len(posts) <= 3
+    _frozen(posts)
+    _dismiss(worker, event_id)
+
+
 def test_lookup_finds_the_task_of_a_lost_response(worker: Worker, fresh_todoist: TodoistFake) -> None:
     fresh_todoist.queue("POST", TASKS_PATH, Reply(500, "lost after commit", applied=True))
     event_id, _ = _arrive(worker)

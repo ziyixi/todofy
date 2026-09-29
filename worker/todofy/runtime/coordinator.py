@@ -7,6 +7,7 @@ Internal routes on https://coordinator (only the Worker's own stub reaches them)
     POST /reconcile   owner action -> EventDetail | error
     POST /report      compute one report now -> report | error
     GET  /event/<id>  EventDetail (parses the stored mail, so it runs here)
+    GET  /legacy_text/<key>  LegacyText (up to 1.9 MB of imported text, too much for 10 ms)
     GET  /state       budgets and the next alarm, for the Overview
 
 Each alarm runs at most one ledger step (summary, task creation, lookup or
@@ -21,7 +22,7 @@ import math
 from dataclasses import asdict
 from datetime import UTC, datetime
 from typing import Any
-from urllib.parse import urlsplit
+from urllib.parse import unquote, urlsplit
 
 from pyodide.ffi import JsException
 from workers import DurableObject, Response
@@ -84,6 +85,12 @@ DO_SCHEMA = (
     " used_tokens INTEGER NOT NULL DEFAULT 0, calls INTEGER NOT NULL DEFAULT 0)",
     "CREATE TABLE IF NOT EXISTS todoist_calls (minute_bucket INTEGER PRIMARY KEY, count INTEGER NOT NULL)",
     "CREATE TABLE IF NOT EXISTS report_requests (hour_bucket INTEGER PRIMARY KEY, count INTEGER NOT NULL)",
+    # Failed precompute attempts per report and UTC day (reports.tick caps them).
+    "CREATE TABLE IF NOT EXISTS report_failures (kind TEXT NOT NULL, top_n INTEGER NOT NULL, day TEXT NOT NULL,"
+    " count INTEGER NOT NULL, PRIMARY KEY (kind, top_n, day))",
+    # Summary reservations whose Gemini call is in flight: settled by the step itself, or
+    # by the next alarm after an eviction (counted as spent, like reports._generate).
+    "CREATE TABLE IF NOT EXISTS llm_inflight (event_id TEXT PRIMARY KEY, day TEXT NOT NULL, reserved INTEGER NOT NULL)",
 )
 WRITE_ROUTES = frozenset({"/ingest", "/reconcile", "/report"})
 TICK_COLUMNS = ("next_reminder_check", "next_report", "next_maintenance")
@@ -154,6 +161,9 @@ class TodofyCoordinator(DurableObject):
                     return await self.state()
             if request.method == "GET" and path.startswith("/event/"):
                 return await self.event(path.removeprefix("/event/"))
+            if request.method == "GET" and path.startswith("/legacy_text/"):
+                # The key was validated by the Worker (api._path_id).
+                return await api.legacy_text(self.env, unquote(path.removeprefix("/legacy_text/")))
         except JsException:
             # D1 or storage failed; the platform logs carry the details.
             return error(503, ApiError.UNAVAILABLE)
@@ -396,6 +406,40 @@ class TodofyCoordinator(DurableObject):
         )
         return cursor.rowsWritten > 0
 
+    def report_failures(self, kind: str, top_n: int, day: str) -> int:
+        """Failed precompute attempts of one report on ``day`` (YYYY-MM-DD)."""
+        rows = self.sql.exec(
+            "SELECT count FROM report_failures WHERE kind = ? AND top_n = ? AND day = ?", kind, top_n, day
+        ).toArray()
+        return int(rows[0].count) if rows else 0
+
+    def count_report_failure(self, kind: str, top_n: int, day: str) -> None:
+        self.sql.exec("DELETE FROM report_failures WHERE day < ?", day)
+        self.sql.exec(
+            "INSERT INTO report_failures (kind, top_n, day, count) VALUES (?, ?, ?, 1)"
+            " ON CONFLICT (kind, top_n, day) DO UPDATE SET count = count + 1",
+            kind,
+            top_n,
+            day,
+        )
+
+    def _settle_interrupted_summaries(self) -> None:
+        """Count the reservation of a summary call an eviction cut short as spent.
+
+        Google may have processed (and billed) the request, so the tokens stay
+        counted, but as used on their own day rather than as a reservation that
+        never clears. Runs under the ``running`` guard, so no summary is in flight.
+        """
+        for row in self.sql.exec("SELECT event_id, day, reserved FROM llm_inflight").toArray():
+            self.sql.exec(
+                "UPDATE llm_usage SET reserved_tokens = max(reserved_tokens - ?, 0),"
+                " used_tokens = used_tokens + ?, calls = calls + 1 WHERE day = ?",
+                int(row.reserved),
+                int(row.reserved),
+                row.day,
+            )
+            self.sql.exec("DELETE FROM llm_inflight WHERE event_id = ?", row.event_id)
+
     def _count_todoist_calls(self, calls: int, now: int) -> None:
         """Count calls against Todoist's 1000 per 15 minutes before making them (an upper bound)."""
         self.sql.exec(
@@ -451,6 +495,10 @@ class TodofyCoordinator(DurableObject):
             await self._run()
         finally:
             self.running = False
+            if self.woken:
+                # A wake-up arrived after _next_alarm_ms looked (e.g. during its D1 read):
+                # run again now instead of at the stale next time.
+                await self.wake()
 
     async def _run(self) -> None:
         storage, env = self.ctx.storage, self.env
@@ -459,6 +507,7 @@ class TodofyCoordinator(DurableObject):
             return
         now = now_s()
         await self._arm_watchdog()
+        self._settle_interrupted_summaries()
         await ledger.recover_interrupted(env.DB, now, lookup_at=_after(self._lookup_delay()))
         worked = False
         if not flag(env, "PROCESSING_PAUSED"):
@@ -529,19 +578,33 @@ class TodofyCoordinator(DurableObject):
                 next_attempt_at=tomorrow,
             )
             return
-        running = await ledger.transition(db, row, EventState.SUMMARIZING, actor=WORKER, now=now)
-        if running is None:
-            self.settle_tokens(reserved, 0, now)
-            return
-        result = await gemini.generate(
-            self.env,
-            system=prompts.SUMMARY_EMAIL,
-            user=content,
-            preface=preface,
-            deadline_ms=now_ms() + GEMINI_STEP_BUDGET * 1000,
+        # Every exit settles the reservation against the day it was taken from: nothing
+        # spent before the request goes out, all of it if the call dies midway, the real
+        # count after an answer. llm_inflight covers an eviction (_settle_interrupted_summaries).
+        used = 0
+        self.sql.exec(
+            "INSERT OR REPLACE INTO llm_inflight (event_id, day, reserved) VALUES (?, ?, ?)",
+            row.event_id,
+            _day(now),
+            reserved,
         )
+        try:
+            running = await ledger.transition(db, row, EventState.SUMMARIZING, actor=WORKER, now=now)
+            if running is None:
+                return
+            used = reserved
+            result = await gemini.generate(
+                self.env,
+                system=prompts.SUMMARY_EMAIL,
+                user=content,
+                preface=preface,
+                deadline_ms=now_ms() + GEMINI_STEP_BUDGET * 1000,
+            )
+            used = result.tokens
+        finally:
+            self.sql.exec("DELETE FROM llm_inflight WHERE event_id = ?", row.event_id)
+            self.settle_tokens(reserved, used, now)
         done = now_s()
-        self.settle_tokens(reserved, result.tokens, done)
         verdict = result.verdict
         if verdict.ok:
             summary = clean_summary(_utf8_prefix(result.text, MAX_SUMMARY_BYTES), event)

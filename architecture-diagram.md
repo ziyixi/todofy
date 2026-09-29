@@ -1,85 +1,64 @@
+# Todofy architecture
+
+One Cloudflare Worker (Python) with one SQLite-backed Durable Object and one D1 database, on the
+Workers Free plan. Mail Hero delivers each received mail as a `mail.received.v1` webhook; Todofy
+summarizes it with Gemini and creates one Todoist task, and serves a daily summary and recommendation
+to the newsletter. The owner UI is a React app served from the same Worker behind Cloudflare Access.
+
 ```mermaid
-flowchart TB
-    subgraph Clients["Clients + External Events"]
-        direction LR
-        User[👤 User<br/>Browser / API Client]
-        Email[📧 Cloudmailin<br/>Inbound Email]
+flowchart LR
+    MH["Mail Hero<br/>(mail.received.v1, Bearer)"]
+    NL["newsletter<br/>(Basic, 45 s, no retries)"]
+    Owner["Owner browser"]
+
+    subgraph CF["Cloudflare (Workers Free)"]
+        Access["Cloudflare Access<br/>(UI host only)"]
+        subgraph W["Worker todofy (Python)"]
+            Hooks["hooks hosts<br/>POST /hooks/mail<br/>GET /api/summary, /api/recommendation<br/>GET /health"]
+            OwnerAPI["UI host<br/>React assets + /api/v1/*<br/>(Access JWT, CSRF, action ids)"]
+            Cron["cron */10 min"]
+        end
+        DO["Durable Object TodofyCoordinator (inbox-v1)<br/>single ledger writer, alarm loop,<br/>budgets and schedule in DO SQLite"]
+        D1[("D1 todofy<br/>mail_events, event_transitions,<br/>summaries, daily_reports,<br/>mail_reminders, owner_actions,<br/>legacy_mail_text")]
     end
 
-    subgraph API["Todofy HTTP API :8080"]
-        direction LR
-        Summary[📊 GET /api/summary]
-        Recommend[🏆 GET /api/recommendation]
-        UpdateTodo[📝 POST /api/v1/update_todo]
-        DependencyOps[🔗 /api/v1/dependency/*]
-    end
+    Gemini["Gemini API"]
+    Todoist["Todoist REST v1"]
 
-    Main[🌐 Main Service<br/>Auth, routing, rate limiting]
-
-    subgraph Services["Internal gRPC Services"]
-        direction LR
-        LLM[🧠 todofy-llm<br/>Gemini summarization]
-        Todo[📋 todofy-todo<br/>Todoist + DAG dependency logic]
-        DB[🗄️ todofy-database<br/>SQLite storage]
-    end
-
-    subgraph Providers["External Providers"]
-        direction LR
-        Gemini[🤖 Gemini API]
-        Todoist[✅ Todoist API]
-    end
-
-    subgraph SUT["Behavior-Level SUT Harness"]
-        direction LR
-        SUTTests[🧪 go test ./sut/...]
-        FakeGemini[🧪 Fake Gemini]
-        FakeTodoist[🧪 Fake Todoist]
-    end
-
-    User --> Summary
-    User --> Recommend
-    User --> DependencyOps
-    Email --> UpdateTodo
-
-    Summary --> Main
-    Recommend --> Main
-    UpdateTodo --> Main
-    DependencyOps --> Main
-
-    Main -->|recent queries + writes| DB
-    Main -.->|cache miss only| LLM
-    Main -->|todo + dependency RPCs| Todo
-
-    LLM --> Gemini
-    Todo -->|tasks + labels| Todoist
-
-    SUTTests -->|behavior assertions| Main
-    LLM -.->|SUT base URL override| FakeGemini
-    Todo -.->|SUT base URL override| FakeTodoist
-
-    classDef external fill:#e1f5fe,stroke:#0277bd,stroke-width:2px
-    classDef service fill:#f3e5f5,stroke:#7b1fa2,stroke-width:2px
-    classDef endpoint fill:#e8f5e8,stroke:#388e3c,stroke-width:2px
-    classDef test fill:#fff3e0,stroke:#ef6c00,stroke-width:2px,stroke-dasharray: 5 5
-
-    class User,Email,Gemini,Todoist external
-    class Main,LLM,Todo,DB service
-    class Summary,Recommend,UpdateTodo,DependencyOps endpoint
-    class SUTTests,FakeGemini,FakeTodoist test
+    MH -->|webhook| Hooks
+    NL --> Hooks
+    Owner --> Access --> OwnerAPI
+    Hooks -->|ingest, on-demand report| DO
+    OwnerAPI -->|reads| D1
+    OwnerAPI -->|event detail, reconcile,<br/>recompute, legacy text| DO
+    Cron -->|wake| DO
+    DO --> D1
+    DO -->|summary, reports| Gemini
+    DO -->|create task, footer lookup,<br/>daily reminder| Todoist
 ```
 
-**Architecture Overview:**
+Event lifecycle (one ledger step per alarm; every step is a compare-and-set on `(state, version)`):
 
-- **Main HTTP Server (Port 8080)**: REST API with Basic Authentication and Rate Limiting
-- **LLM Service (Port 50051)**: Handles AI summarization via Google Gemini
-- **Todo Service (Port 50052)**: Manages Todoist task operations and dependency DAG behavior
-- **Database Service (Port 50053)**: SQLite database operations via gRPC
-- **SUT Harness**: Runs behavior-level tests against real internal services with fake external providers
-
-**Key Features:**
-- 📧 **Email-to-Todo**: Inbound email payloads are summarized and converted into Todoist tasks
-- 📊 **Summary API**: Returns JSON summaries of recent tasks with task counts
-- 🔁 **Dependency Scheduler**: Startup + periodic bootstrap and reconcile keep DAG metadata and labels converged
-- 🔗 **Dependency APIs**: Reconcile/bootstrap/clear-metadata/status/issues endpoints under `/api/v1/dependency/*`
-- 🐳 **Containerized**: All services available as Docker containers via GitHub Container Registry
-- 🔒 **Security**: Basic authentication, rate limiting, and health checks
+```mermaid
+stateDiagram-v2
+    [*] --> pending: webhook stored (204)
+    pending --> summarizing
+    pending --> failed_summary: needs review / unreadable payload
+    summarizing --> summarized: Gemini ok
+    summarizing --> pending: retry with backoff
+    summarizing --> failed_summary: gave up (errors or 3 interruptions)
+    summarized --> todo_sending
+    todo_sending --> complete: task created
+    todo_sending --> summarized: retry later (never after a possible create)
+    todo_sending --> todo_unknown: result unknown
+    todo_unknown --> todo_created: footer lookup finds 1 task
+    todo_created --> complete
+    todo_unknown --> summarized: owner task_not_created, then lookup finds none
+    todo_unknown --> todo_created: owner task_created
+    failed_summary --> pending: owner retry_summary
+    todo_unknown --> ignored: owner dismiss
+    failed_summary --> ignored: owner dismiss
+    summarized --> ignored: owner dismiss (todoist_rejected only)
+    complete --> [*]
+    ignored --> [*]
+```

@@ -34,6 +34,41 @@ describe('digest page', () => {
     expect(post?.body).toMatchObject({ kind: 'recommendation', top: 3 })
   })
 
+  it('retries a stored failure with a new action id, but an unknown outcome with the same one', async () => {
+    const user = userEvent.setup()
+    const replies: object[] = [new Error('offline'), apiError(503, 'unavailable'), summaryReport()]
+    const { calls } = mockApi({
+      'GET /api/v1/reports/latest': { summary: null, recommendations: [] },
+      'POST /api/v1/reports/recompute': () => replies.shift()!,
+    })
+    renderApp('/digest')
+    await user.click(await screen.findByRole('button', { name: '重新生成摘要' }))
+    const dialog = screen.getByRole('dialog')
+    expect(dialog).toHaveTextContent('newsletter 下次读取的就是新结果')
+    for (const code of ['network_error', 'unavailable']) {
+      await user.click(within(dialog).getByRole('button', { name: '重新生成' }))
+      expect(await within(dialog).findByRole('alert')).toHaveTextContent(code)
+    }
+    await user.click(within(dialog).getByRole('button', { name: '重新生成' }))
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+    const ids = calls.filter((call) => call.method === 'POST').map((call) => (call.body as { action_request_id: string }).action_request_id)
+    expect(ids).toHaveLength(3)
+    expect(ids[1]).toBe(ids[0])
+    expect(ids[2]).not.toBe(ids[1])
+  })
+
+  it('says when a recompute does not change what the newsletter reads', async () => {
+    const user = userEvent.setup()
+    mockApi({ 'GET /api/v1/reports/latest': { summary: null, recommendations: [] } })
+    renderApp('/digest')
+    await user.click(await screen.findByRole('button', { name: '重新生成推荐' }))
+    const dialog = screen.getByRole('dialog', { name: '重新生成推荐任务' })
+    await user.selectOptions(within(dialog).getByLabelText('推荐数量'), '3')
+    expect(dialog).toHaveTextContent('不会读到这一份')
+    await user.selectOptions(within(dialog).getByLabelText('推荐数量'), '10')
+    expect(dialog).toHaveTextContent('就是这一份')
+  })
+
   it('recomputes the summary without a top', async () => {
     const user = userEvent.setup()
     const { calls } = mockApi({

@@ -1,10 +1,16 @@
 #!/usr/bin/env python3
-"""Generate the production Wrangler config from validated GitHub variables.
+"""Generate the production Wrangler config from validated GitHub variables and secrets.
 
 Python twin of Mail Hero's deploy/generate-ci-config.mjs. The Worker shape (entry, compatibility date and
 flags, assets, bindings, cron) is copied from wrangler.toml so production cannot drift from what the tests
 run; account, database, hostnames and vars come from the environment. Messages name variables and never
 print values, and dev-only switches (DEV_*) are never emitted.
+
+Wrangler prints every plain var with its value when it deploys, and the repository and its Actions logs
+are public. So the owner's email addresses (TODOFY_ACCESS_OWNER and TODOFY_ACCESS_OWNER_ALIASES, GitHub
+environment secrets that Actions masks) are not vars: they go to a separate owner-only JSON file that the
+deploy step passes to `wrangler deploy --secrets-file`, where they become Worker secrets shown as hidden.
+The Worker reads secrets exactly like vars.
 
 The file is written next to wrangler.toml on purpose: wrangler resolves `main`, assets, migrations and the
 vendored `python_modules/` (which holds the `workers` SDK) relative to the config file, so a config placed
@@ -22,6 +28,7 @@ from typing import Any
 
 ROOT = Path(__file__).resolve().parent.parent
 OUTPUT = ROOT / "wrangler.production.ci.json"
+SECRETS_OUTPUT = ROOT / "wrangler.production.secrets.json"
 
 DOMAIN = re.compile(r"(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}")
 EMAIL = re.compile(r"[^\s@]+@[^\s@]+\.[^\s@]+")
@@ -35,7 +42,8 @@ MAX_LIST_CHARS = 2048
 MAX_REPORT_TOP = 10  # core.report_schema.MAX_TOP_N
 DEFAULT_GEMINI_MODELS = "gemini-3.8-flash,gemini-3.7-flash,gemini-3.5-flash-lite"
 # Production upstreams are constants, not variables, so a bad variable cannot send API keys elsewhere.
-# Test-only timing knobs (GEMINI_TIMEOUT_MS, BACKOFF_BASE_MS, WATCHDOG_MS) keep their code defaults.
+# Test-only timing knobs (GEMINI_TIMEOUT_MS, BACKOFF_BASE_MS, WATCHDOG_MS, TODOIST_ATTEMPT_TIMEOUT_MS,
+# JWKS_REFRESH_COOLDOWN_MS) keep their code defaults.
 FIXED_VARS = {
     "GEMINI_API_BASE": "https://generativelanguage.googleapis.com",
     "TODOIST_API_BASE": "https://api.todoist.com",
@@ -89,8 +97,6 @@ def _vars(env: Mapping[str, str], public_host: str, hooks_hosts: list[str]) -> d
             env, "TODOFY_ACCESS_ISSUER", re.compile(r"https://[a-z0-9-]+\.cloudflareaccess\.com")
         ),
         "ACCESS_AUDIENCE": _checked(env, "TODOFY_ACCESS_AUDIENCE", re.compile(r"[a-f0-9]{64}", re.IGNORECASE)),
-        "ACCESS_OWNER": _checked(env, "TODOFY_ACCESS_OWNER", EMAIL),
-        "ACCESS_OWNER_ALIASES": ",".join(_listed(env, "TODOFY_ACCESS_OWNER_ALIASES", EMAIL, MAX_ALIASES)),
         "GEMINI_MODELS": ",".join(_listed(env, "TODOFY_GEMINI_MODELS", re.compile(r"[a-z0-9][a-z0-9.-]{0,63}"), 5))
         or DEFAULT_GEMINI_MODELS,
         "GEMINI_DAILY_TOKEN_BUDGET": _integer(env, "TODOFY_GEMINI_DAILY_TOKEN_BUDGET", "3000000", 1, 1_000_000_000),
@@ -109,6 +115,18 @@ def _vars(env: Mapping[str, str], public_host: str, hooks_hosts: list[str]) -> d
         "MAINTENANCE_MODE": _checked(env, "TODOFY_MAINTENANCE_MODE", FLAG),
         "PROCESSING_PAUSED": _checked(env, "TODOFY_PROCESSING_PAUSED", FLAG),
         "FORCE_PAUSE_TODOIST": _checked(env, "TODOFY_FORCE_PAUSE_TODOIST", FLAG),
+    }
+
+
+def generate_secrets(env: Mapping[str, str]) -> dict[str, str]:
+    """Worker secrets for `wrangler deploy --secrets-file`: the owner's Access identities."""
+    aliases = ",".join(_listed(env, "TODOFY_ACCESS_OWNER_ALIASES", EMAIL, MAX_ALIASES))
+    return {
+        "ACCESS_OWNER": _checked(env, "TODOFY_ACCESS_OWNER", EMAIL),
+        # --secrets-file only adds or replaces secrets, so an emptied list is uploaded as a single
+        # space (the Worker's csv() reads it as no aliases) rather than left out, which would keep
+        # the previous aliases working.
+        "ACCESS_OWNER_ALIASES": aliases or " ",
     }
 
 
@@ -140,23 +158,40 @@ def generate_config(env: Mapping[str, str], base: Mapping[str, Any]) -> dict[str
     }
 
 
-def main(output: Path = OUTPUT) -> int:
+def _write_private(path: Path, data: Mapping[str, Any]) -> None:
+    # Never overwrite: an existing file may be someone's local production config.
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    with os.fdopen(fd, "w") as file:
+        file.write(json.dumps(data, indent=2) + "\n")
+
+
+def main(output: Path = OUTPUT, secrets_output: Path = SECRETS_OUTPUT) -> int:
+    written: list[Path] = []
     try:
         config = generate_config(os.environ, tomllib.loads((ROOT / "wrangler.toml").read_text()))
-        # Never overwrite: an existing file may be someone's local production config.
-        fd = os.open(output, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-        with os.fdopen(fd, "w") as file:
-            file.write(json.dumps(config, indent=2) + "\n")
+        secrets = generate_secrets(os.environ)
+        for path, data in ((output, config), (secrets_output, secrets)):
+            _write_private(path, data)
+            written.append(path)
     except SettingError as error:
         print(error, file=sys.stderr)
         return 1
     except FileExistsError:
+        for path in written:
+            path.unlink()
         print("CI configuration already exists; nothing was overwritten.", file=sys.stderr)
         return 1
     except (OSError, KeyError, IndexError, tomllib.TOMLDecodeError):
+        for path in written:
+            path.unlink(missing_ok=True)
         print("Unable to generate CI configuration.", file=sys.stderr)
         return 1
-    print("Generated production configuration; values were not printed. Vars: " + ", ".join(sorted(config["vars"])))
+    print(
+        "Generated production configuration; values were not printed. Vars: "
+        + ", ".join(sorted(config["vars"]))
+        + ". Secrets file: "
+        + ", ".join(sorted(secrets))
+    )
     return 0
 
 

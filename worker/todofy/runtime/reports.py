@@ -1,10 +1,12 @@
 """Daily summary and recommendation reports for the newsletter (v2 plan §5.3).
 
-Both are precomputed once a day at REPORT_PRECOMPUTE_UTC. A newsletter request
-for a report older than 26 hours (or a ``top`` nobody precomputed) asks the
-coordinator for one within 40 s, sharing its hourly computation cap; when that
-fails the older row is served as ``stale``. Responses validate against
-api/summary-v1 and api/recommendation-v1.
+Both are precomputed once a day at REPORT_PRECOMPUTE_UTC. The newsletter gets a
+stored row only when it was computed since the latest precompute time and is
+usable (``ok`` or ``empty_window``); otherwise it asks the coordinator for one
+within 40 s, sharing its hourly computation cap, and answers 503 when that
+fails. The newsletter reads only the HTTP status, so an old or unusable report
+is never sent as a 200. Responses validate against api/summary-v1 and
+api/recommendation-v1.
 """
 
 import base64
@@ -25,11 +27,10 @@ from todofy.core.backoff import DAY, HOUR, MINUTE, REPORT_ON_DEMAND_BUDGET
 from todofy.core.render import rfc3339
 from todofy.core.report_schema import (
     EMPTY_WINDOW_SUMMARY,
-    MAX_SUMMARY_CHARS,
     MAX_TOP_N,
     WINDOW_HOURS,
     ReportStatus,
-    newsletter_text_ok,
+    fit_summary,
     parse_recommendations,
     parse_top_n,
     recommendation_response_schema,
@@ -44,8 +45,12 @@ from todofy.runtime.interop import now_ms
 SUMMARY = "summary"
 RECOMMENDATION = "recommendation"
 DEFAULT_PRECOMPUTE_UTC = "13:30"
-FRESH_FOR = 26 * HOUR
 RETRY_DELAY = 10 * MINUTE
+# Automatic precompute attempts per report and UTC day; after that only the newsletter
+# (on demand, under the hourly cap) or the owner's recompute tries again.
+PRECOMPUTE_ATTEMPTS = 3
+# Stored statuses the newsletter may be given.
+SERVABLE = frozenset({ReportStatus.OK, ReportStatus.EMPTY_WINDOW})
 LOCKOUT_FAILURES = 20
 # A day normally has about 100 summaries; the cap bounds D1 reads and model input.
 MAX_WINDOW_SUMMARIES = 1000
@@ -93,10 +98,14 @@ async def compute(env: Any, coordinator: Any, kind: str, top_n: int, now: int, b
     else:
         text, model = await _generate(env, coordinator, kind, top_n, summaries, now, budget_ms)
         if kind == SUMMARY:
-            if not newsletter_text_ok(text, MAX_SUMMARY_CHARS):
+            # A long day is cut to fit rather than failed: the same prompt would fail again.
+            fitted = fit_summary(text)
+            if fitted is None:
                 _log(kind, top_n, "model_output_invalid")
                 raise ReportError(503, ApiError.UNAVAILABLE)
-            payload = _summary(text, len(summaries), ReportStatus.OK, model, stamps)
+            if fitted != text:
+                _log(kind, top_n, "summary_fitted")
+            payload = _summary(fitted, len(summaries), ReportStatus.OK, model, stamps)
         else:
             payload = _parsed_recommendation(text, len(summaries), model, top_n, stamps)
 
@@ -122,7 +131,10 @@ async def compute(env: Any, coordinator: Any, kind: str, top_n: int, now: int, b
 async def tick(env: Any, coordinator: Any, now: int) -> int:
     """Precompute today's reports once REPORT_PRECOMPUTE_UTC has passed; returns the next check time.
 
-    One report per call keeps each alarm to a single Gemini call.
+    One report per call keeps each alarm to a single Gemini call. A report that
+    failed (or came back unusable) is retried in RETRY_DELAY, after the other one,
+    and at most PRECOMPUTE_ATTEMPTS times a day, so one bad day cannot spend
+    Gemini calls until midnight or keep the other report from being computed.
     """
     offset = _precompute_offset(var(env, "REPORT_PRECOMPUTE_UTC", DEFAULT_PRECOMPUTE_UTC))
     if offset is None:
@@ -130,17 +142,40 @@ async def tick(env: Any, coordinator: Any, now: int) -> int:
     due = now - now % DAY + offset
     if now < due:
         return due
+    day = _stamp(now)[:10]
+    todo: list[tuple[int, str, int]] = []
     for kind, top_n in ((SUMMARY, 0), (RECOMMENDATION, report_default_top(env))):
         row = await env.DB.prepare(sql.LATEST_REPORT.sql).bind(kind, top_n).first()
-        if row is not None and row.computed_at >= due:
+        if row is not None and row.computed_at >= due and row.status in SERVABLE:
             continue
-        try:
-            await compute(env, coordinator, kind, top_n, now, REPORT_ON_DEMAND_BUDGET * 1000)
-        except ReportError as exc:
-            _log(kind, top_n, exc.code)
-            return now + RETRY_DELAY
-        return now + 1
-    return due + DAY
+        failures = coordinator.report_failures(kind, top_n, day)
+        if failures < PRECOMPUTE_ATTEMPTS:
+            todo.append((failures, kind, top_n))
+    if not todo:
+        return due + DAY
+    _, kind, top_n = min(todo, key=lambda item: item[0])  # stable: the summary first on a tie
+    try:
+        payload = await compute(env, coordinator, kind, top_n, now, REPORT_ON_DEMAND_BUDGET * 1000)
+    except ReportError as exc:
+        _log(kind, top_n, exc.code)
+        coordinator.count_report_failure(kind, top_n, day)
+        return now + RETRY_DELAY
+    if payload["status"] not in SERVABLE:
+        coordinator.count_report_failure(kind, top_n, day)
+        return now + RETRY_DELAY
+    return now + 1
+
+
+def last_precompute(env: Any, now: int) -> int:
+    """The latest precompute time at or before ``now`` (24 hours ago when precompute is off).
+
+    A stored report is fresh for the newsletter only when computed at or after it.
+    """
+    offset = _precompute_offset(var(env, "REPORT_PRECOMPUTE_UTC", DEFAULT_PRECOMPUTE_UTC))
+    if offset is None:
+        return now - DAY
+    due = now - now % DAY + offset
+    return due if now >= due else due - DAY
 
 
 async def serve(request: Any, env: Any, kind: str) -> Response:
@@ -150,11 +185,14 @@ async def serve(request: Any, env: Any, kind: str) -> Response:
         return error(503, ApiError.NOT_CONFIGURED)
     now = now_ms() // 1000
     db = env.DB
-    hour = failure_hour(now)
-    failures = await db.prepare(sql.AUTH_FAILURES_HOUR.sql).bind(hour).first()
-    if failures is not None and failures["count"] >= LOCKOUT_FAILURES:
-        return with_headers(error(429, ApiError.RATE_LIMITED), {"retry-after": str(HOUR - now % HOUR)})
+    # A correct credential always gets through: a lockout that also blocked it would let
+    # anyone deny the newsletter its report with 20 bad requests an hour. The counter
+    # only throttles failures, and stops writing once locked (at most 20 D1 writes an hour).
     if not _basic_ok(request.headers.get("authorization") or "", digests):
+        hour = failure_hour(now)
+        failures = await db.prepare(sql.AUTH_FAILURES_HOUR.sql).bind(hour).first()
+        if failures is not None and failures["count"] >= LOCKOUT_FAILURES:
+            return with_headers(error(429, ApiError.RATE_LIMITED), {"retry-after": str(HOUR - now % HOUR)})
         await db.prepare(sql.COUNT_AUTH_FAILURE.sql).bind(hour).run()
         return with_headers(error(401, ApiError.UNAUTHORIZED), {"www-authenticate": 'Basic realm="todofy"'})
 
@@ -166,14 +204,16 @@ async def serve(request: Any, env: Any, kind: str) -> Response:
             return error(400, ApiError.INVALID_REQUEST)
 
     row = await db.prepare(sql.LATEST_REPORT.sql).bind(kind, top_n).first()
-    if row is not None and row.computed_at >= now - FRESH_FOR:
+    if row is not None and row.computed_at >= last_precompute(env, now) and row.status in SERVABLE:
         return json_response(json.loads(row.payload_json))
     fresh = await _on_demand(env, kind, top_n)
-    if fresh.status == 200 or row is None:
+    if fresh.status != 200:
         return fresh
-    stale = json.loads(row.payload_json)
-    stale["status"] = ReportStatus.STALE
-    return json_response(stale)
+    payload = await fresh.json()
+    if payload.get("status") not in SERVABLE:
+        # model_output_invalid: an empty list would read as "nothing important today".
+        return error(503, ApiError.UNAVAILABLE)
+    return json_response(payload)
 
 
 async def latest(db: Any) -> dict:
@@ -249,7 +289,7 @@ async def _on_demand(env: Any, kind: str, top_n: int) -> Response:
             headers={"content-type": "application/json"},
             body=json.dumps({"kind": kind, "top_n": top_n, "budget_ms": REPORT_ON_DEMAND_BUDGET * 1000}),
         )
-    except Exception:  # any coordinator failure must still let the stale row be served
+    except Exception:  # a coordinator failure is an honest 503 for the newsletter
         return error(503, ApiError.UNAVAILABLE)
 
 

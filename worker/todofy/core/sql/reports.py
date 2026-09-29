@@ -10,7 +10,8 @@ REPORT_WINDOW = Query(
     "summaries_created",
 )
 LATEST_REPORT = Query(
-    "SELECT payload_json, computed_at FROM daily_reports WHERE kind = ? AND top_n = ? ORDER BY day DESC LIMIT 1",
+    "SELECT payload_json, status, computed_at FROM daily_reports"
+    " WHERE kind = ? AND top_n = ? ORDER BY day DESC LIMIT 1",
     "sqlite_autoindex_daily_reports_1",
 )
 AUTH_FAILURES_HOUR = Query("SELECT count FROM auth_failures WHERE hour = ?", "sqlite_autoindex_auth_failures_1")

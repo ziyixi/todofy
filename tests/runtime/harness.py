@@ -215,20 +215,20 @@ class Worker:
         return httpx.get(f"{self.base_url}/cdn-cgi/local/scheduled", params={"cron": cron}, timeout=30)
 
     def d1(self, sql: str) -> list[dict[str, Any]]:
-        result = _wrangler(
-            "d1",
-            "execute",
-            "DB",
-            "--local",
-            "--persist-to",
-            str(self.persist_to),
-            "--config",
-            self.config,
-            "--json",
-            "--command",
-            sql,
-        )
-        return json.loads(result.stdout)[-1]["results"]
+        # A second process reads the SQLite file workerd is writing (the alarm may be mid-step), and
+        # wrangler sets no busy timeout, so a read can hit a transient lock; retry only that case.
+        args = ("d1", "execute", "DB", "--local", "--persist-to", str(self.persist_to), "--config", self.config)
+        for attempt in range(5):
+            try:
+                result = _wrangler(*args, "--json", "--command", sql)
+            except subprocess.CalledProcessError as error:
+                output = f"{error.stdout}\n{error.stderr}"
+                if attempt < 4 and ("SQLITE_BUSY" in output or "database is locked" in output):
+                    time.sleep(0.5)
+                    continue
+                raise AssertionError(f"wrangler d1 execute failed: {output.strip()[-2000:]}") from error
+            return json.loads(result.stdout)[-1]["results"]
+        raise AssertionError("unreachable")
 
     # Mail Hero side.
 
@@ -390,22 +390,35 @@ class AccessIssuer:
     def __init__(self) -> None:
         self.server = FakeServer()
         self.key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
-        numbers = self.key.public_key().public_numbers()
-        jwk = {
+        self.jwks = [self._jwk(self.key, "test-key")]
+        self.server.default("GET", "/cdn-cgi/access/certs", Reply(200, {"keys": self.jwks}))
+
+    @staticmethod
+    def _jwk(key: rsa.RSAPrivateKey, kid: str) -> dict[str, str]:
+        numbers = key.public_key().public_numbers()
+        return {
             "kty": "RSA",
-            "kid": "test-key",
+            "kid": kid,
             "alg": "RS256",
             "use": "sig",
             "n": _b64url(numbers.n.to_bytes((numbers.n.bit_length() + 7) // 8, "big")),
             "e": _b64url(numbers.e.to_bytes(3, "big")),
         }
-        self.server.default("GET", "/cdn-cgi/access/certs", Reply(200, {"keys": [jwk]}))
+
+    def rotate(self, kid: str) -> rsa.RSAPrivateKey:
+        """Publish a new current key ahead of the old one, as Access does on rotation; returns it."""
+        key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+        self.jwks = [self._jwk(key, kid), *self.jwks]
+        self.server.default("GET", "/cdn-cgi/access/certs", Reply(200, {"keys": self.jwks}))
+        return key
 
     @property
     def url(self) -> str:
         return self.server.url
 
-    def token(self, key: rsa.RSAPrivateKey | None = None, alg: str = "RS256", **overrides: Any) -> str:
+    def token(
+        self, key: rsa.RSAPrivateKey | None = None, alg: str = "RS256", kid: str = "test-key", **overrides: Any
+    ) -> str:
         now = int(time.time())
         claims = {
             "iss": self.url,
@@ -415,7 +428,7 @@ class AccessIssuer:
             "iat": now,
             "exp": now + 600,
         } | overrides
-        header = _b64url(json.dumps({"alg": alg, "kid": "test-key", "typ": "JWT"}).encode())
+        header = _b64url(json.dumps({"alg": alg, "kid": kid, "typ": "JWT"}).encode())
         payload = _b64url(json.dumps({k: v for k, v in claims.items() if v is not None}).encode())
         signing_input = f"{header}.{payload}".encode()
         signature = (key or self.key).sign(signing_input, padding.PKCS1v15(), hashes.SHA256())

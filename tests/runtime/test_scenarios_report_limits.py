@@ -1,4 +1,4 @@
-"""Report limits that are global per hour or per Worker: stale fallback, lockout and the computation cap."""
+"""Report limits that are global per hour or per Worker: no stale fallback, lockout and the computation cap."""
 
 import json
 import time
@@ -28,7 +28,7 @@ def _clear_of_the_hour_boundary(margin_s: int = 10) -> None:
 
 
 @pytest.mark.reaches("unavailable")
-def test_without_a_fresh_report_a_failed_run_serves_the_older_one_as_stale(
+def test_without_a_fresh_report_a_failed_run_is_503_even_with_an_older_row(
     launch: Launch, fresh_gemini: GeminiFake
 ) -> None:
     worker = launch()
@@ -61,8 +61,10 @@ def test_without_a_fresh_report_a_failed_run_serves_the_older_one_as_stale(
         f" {old - DAY}, {old}, {old})"
     )
 
-    report = assert_contract(worker.report("/api/summary"), "/api/summary")
-    assert report == stored | {"status": "stale"}
+    # The newsletter reads only the HTTP status: a three-day-old report must not look current.
+    response = worker.report("/api/summary")
+    assert (response.status_code, error_code(response)) == (503, "unavailable")
+    assert_contract(response, "/api/summary")
 
 
 @pytest.fixture(scope="module")
@@ -76,10 +78,14 @@ def test_twenty_bad_passwords_lock_the_newsletter_endpoints_for_the_hour(limited
     for _ in range(LOCKOUT_FAILURES):
         assert limited.report("/api/summary", auth=("newsletter", "guess")).status_code == 401
 
-    for auth in (("newsletter", "guess"), None):
-        response = limited.report("/api/recommendation", auth=auth)
+    wrong = limited.report("/api/recommendation", auth=("newsletter", "guess"))
+    missing = limited.hooks.get("/api/recommendation")
+    for response in (wrong, missing):
         assert (response.status_code, error_code(response)) == (429, "rate_limited")
         assert 0 < int(response.headers["retry-after"]) <= 3600
+    # Failures cannot lock the newsletter out: the right credential still gets its report.
+    assert limited.report("/api/recommendation").status_code == 200
+    assert limited.d1("SELECT count FROM auth_failures") == [{"count": LOCKOUT_FAILURES}]
 
 
 def test_report_computations_are_capped_per_hour(limited: Worker) -> None:

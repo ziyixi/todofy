@@ -17,7 +17,7 @@
     "task_count": {"description": "Summaries in the window.", "type": "integer", "minimum": 0, "maximum": 1000000},
     "time_window_hours": {"const": 24},
     "status": {
-      "description": "stale: no report from the last 26 hours and the on-demand run did not finish within its budget, so an older stored report is served.",
+      "description": "The Worker sends only ok and empty_window. stale is kept for compatibility and is no longer sent: without a report computed since the latest precompute time, the endpoint answers 503.",
       "enum": ["ok", "empty_window", "stale"]
     },
     "model": {"description": "Gemini model name; empty when no model was called.", "type": "string"},

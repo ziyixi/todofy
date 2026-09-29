@@ -11,6 +11,13 @@ read-only and writes, for migrations/0001_init.sql:
   04-legacy-text.sql legacy_mail_text (expires_at NULL; skipped with --no-include-text)
   manifest.json     counts, per-table normalized SHA-256, file hashes, warnings
 
+Mail Hero-era cache rows get their ledger event's ID. CloudMailin-era rows (and
+Mail Hero rows whose event is missing) are imported as ``legacy:<hash>`` /
+``legacy:row-<id>``: they are an archive. The reports read them for their day,
+but no UI page lists them and the owner API only serves their text by exact ID
+(``GET /api/v1/legacy_text/legacy:...``); use ``wrangler d1 execute`` to browse
+them. ``--skip-cloudmailin`` leaves them out (the manifest then warns).
+
 Every statement is an ``INSERT ... ON CONFLICT DO NOTHING`` below D1's 100 KB
 statement limit; longer values are appended by UPDATEs guarded on the current
 byte length, so re-running any file (even after a partial run) is safe. Row
@@ -459,11 +466,13 @@ def read_ledger(inbox: sqlite3.Connection, source_id: str, export: Export) -> di
 
 
 def read_reminders(inbox: sqlite3.Connection, export: Export) -> None:
+    # The frozen subject and body come along: the Worker retries a same-day ``failed``
+    # reminder with exactly these bytes, as the Go worker did.
     cursor = inbox.execute(
-        "SELECT day, state, task_id, attention_count, attempts, last_error_code, created_at, updated_at"
-        " FROM mail_inbox_reminders ORDER BY day"
+        "SELECT day, state, task_id, subject, body, attention_count, attempts, next_attempt_at,"
+        " last_error_code, created_at, updated_at FROM mail_inbox_reminders ORDER BY day"
     )
-    for day, state, task_id, attention, attempts, code, created, updated in cursor:
+    for day, state, task_id, subject, body, attention, attempts, next_at, code, created, updated in cursor:
         if not isinstance(day, str) or not DAY.match(day):
             raise ExportError("mail_inbox_reminders has a malformed day")
         if state not in REMINDER_STATES:
@@ -475,11 +484,11 @@ def read_reminders(inbox: sqlite3.Connection, export: Export) -> None:
                 day,
                 state,
                 task_id,
-                "",
-                "",
+                subject or "",
+                body or "",
                 _int(attention, f"reminder {day} attention_count"),
                 _int(attempts, f"reminder {day} attempts"),
-                0,
+                _int(next_at or 0, f"reminder {day} next_attempt_at"),
                 code,
                 1,
                 _int(created, f"reminder {day} created_at"),
@@ -582,6 +591,9 @@ def read_summaries(
             export.rows[LEGACY_TEXT.name].append((event_id, entry.created_at, entry.text, None))
     if unlinked:
         export.warnings.append({"code": "mailhero_entry_unlinked", "detail": f"{unlinked} cache rows"})
+    if stats["cloudmailin_skipped"]:
+        # An opt-out must not pass the cutover gate ("warnings empty") silently.
+        export.warnings.append({"code": "cloudmailin_skipped", "detail": f"{stats['cloudmailin_skipped']} cache rows"})
     export.stats.update(stats)
 
 
@@ -665,8 +677,8 @@ def write_export(export: Export, out: Path, *, source_id: str, include_text: boo
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
-    parser.add_argument("--inbox", type=Path, required=True, help="inbox.sqlite (a .backup copy)")
-    parser.add_argument("--legacy", type=Path, required=True, help="todofy.db (a .backup copy)")
+    parser.add_argument("--inbox", type=Path, required=True, help="inbox.sqlite (a snapshot.py copy)")
+    parser.add_argument("--legacy", type=Path, required=True, help="todofy.db (a snapshot.py copy)")
     parser.add_argument("--out", type=Path, help="new or empty output directory")
     parser.add_argument("--source-id", default=DEFAULT_SOURCE_ID)
     parser.add_argument(
@@ -677,8 +689,15 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument(
         "--include-cloudmailin",
-        action="store_true",
-        help="also export CloudMailin-era cache rows (not tied to any Mail Hero event)",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="export CloudMailin-era cache rows too, as legacy:<hash> archive rows (default: on)",
+    )
+    parser.add_argument(
+        "--skip-cloudmailin",
+        dest="include_cloudmailin",
+        action="store_false",
+        help="leave CloudMailin-era cache rows out (same as --no-include-cloudmailin; the manifest warns)",
     )
     parser.add_argument("--check-schema", action="store_true", help="only compare the source schemas and exit")
     args = parser.parse_args(argv)

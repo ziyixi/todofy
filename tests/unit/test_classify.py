@@ -7,6 +7,7 @@ from todofy.core.classify import (
     classify_lookup,
     classify_reminder,
     classify_task_create,
+    final_task_verdict,
 )
 from todofy.core.vocab import EVENT_ERROR_CODES, REMINDER_ERROR_CODES, current_codes
 
@@ -80,6 +81,34 @@ def test_todoist_task_creation(outcome, task_id, result, state, code, inline):
 
 def test_todoist_rate_limit_keeps_retry_after():
     assert classify_task_create(status(429, 7), "").retry_after == 7
+
+
+def _call(*attempts: tuple[HttpOutcome, str]):
+    """The verdict of one create call made of these attempts, as runtime/todoist.create_task combines them."""
+    verdicts = [classify_task_create(outcome, task_id) for outcome, task_id in attempts]
+    delivered = any(verdict.result == "unknown" for verdict in verdicts)
+    return final_task_verdict(verdicts[-1], delivered)
+
+
+@pytest.mark.parametrize(
+    ("attempts", "result", "code"),
+    [
+        # A timed-out attempt may have created the task: never an automatic resend afterwards.
+        ([(TIMEOUT, ""), (status(503), "")], "unknown", "todo_result_unknown"),
+        ([(TIMEOUT, ""), (status(429, 3), ""), (status(429, 3), "")], "unknown", "todo_result_unknown"),
+        ([(TIMEOUT, ""), (TIMEOUT, ""), (status(502), "")], "unknown", "todo_result_unknown"),
+        ([(TIMEOUT, ""), (status(401), "")], "unknown", "todo_result_unknown"),
+        ([(TIMEOUT, ""), (status(400), "")], "unknown", "todo_result_unknown"),
+        ([(TIMEOUT, ""), (status(200), "t1")], "created", None),
+        ([(TIMEOUT, ""), (TIMEOUT, ""), (TIMEOUT, "")], "unknown", "todo_result_unknown"),
+        # Nothing could have been created: the last verdict stands.
+        ([(status(503), ""), (status(503), ""), (status(503), "")], "retry_later", "todoist_unavailable"),
+        ([(status(429, 1), ""), (status(401), "")], "blocked", "todoist_auth_blocked"),
+    ],
+)
+def test_a_call_that_may_have_created_the_task_ends_created_or_unknown(attempts, result, code):
+    verdict = _call(*attempts)
+    assert (verdict.result, verdict.code) == (result, code)
 
 
 @pytest.mark.parametrize(

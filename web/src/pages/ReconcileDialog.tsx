@@ -23,7 +23,7 @@ export function ReconcileDialog({ event, action, onClose, onDone }: Props) {
   const inputId = useId()
   const [taskId, setTaskId] = useState('')
   const [typed, setTyped] = useState('')
-  const idFor = useActionId()
+  const { idFor } = useActionId()
   const client = useQueryClient()
   const short = shortId(event.event_id)
 

@@ -113,7 +113,7 @@ export function SetupPage() {
               <li>同一人在其他登录方式下的邮箱写进 ACCESS_OWNER_ALIASES（最多 8 个），它们都等同于所有者。</li>
               <li>
                 Webhook 与 newsletter 主机名不在 Access 之后：webhook 用 Bearer token，/api/summary 与 /api/recommendation 用
-                Basic 认证（REPORT_BASIC_AUTH_SHA256 存 “用户名:密码” 的 SHA-256）；每个 UTC 小时 20 次认证失败后当小时返回 429。
+                Basic 认证（REPORT_BASIC_AUTH_SHA256 存 “用户名:密码” 的 SHA-256）；每个 UTC 小时 20 次认证失败后，错误的凭据在当小时返回 429，正确的凭据不受影响；口令须为随机生成（至少 128 位）。
               </li>
             </Steps>
           </Section>

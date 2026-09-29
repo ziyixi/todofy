@@ -100,14 +100,6 @@ def _number(enum_name: str) -> int:
     return next(number for number, (name, _) in export_tool.MODELS.items() if name == enum_name)
 
 
-@pytest.mark.skipif(not (ROOT / "llm/consts.go").exists(), reason="Go tree already removed")
-def test_model_names_match_the_go_service() -> None:
-    pairs = re.findall(r"pb\.Model_(MODEL_\w+):\s*\"([^\"]+)\"", (ROOT / "llm/consts.go").read_text())
-    assert len(pairs) == 11
-    for enum_name, name in pairs:
-        assert export_tool.MODELS[_number(enum_name)][1] == name
-
-
 # ---------------------------------------------------------------- parsing and SQL
 
 
@@ -178,14 +170,16 @@ def test_export_matches_the_synthetic_sources(sources: tuple[Path, Path, dict], 
     tables = manifest["tables"]
     assert tables["mail_events"]["rows"] == facts["ledger_rows"]
     assert tables["mail_reminders"]["rows"] == facts["reminder_rows"]
-    assert tables["summaries"]["rows"] == facts["mailhero_summaries"]
-    assert tables["legacy_mail_text"]["rows"] == facts["texts_mailhero"]
+    # CloudMailin-era rows are part of the default export (the owner migrates the whole cache).
+    assert tables["summaries"]["rows"] == facts["mailhero_summaries"] + facts["cloudmailin_summaries"]
+    assert tables["legacy_mail_text"]["rows"] == facts["texts_mailhero"] + facts["texts_cloudmailin"]
     assert manifest["state_counts"] == facts["state_counts"]
-    assert manifest["options"] == {"include_text": True, "include_cloudmailin": False}
-    assert manifest["stats"]["cloudmailin_skipped"] == facts["cloudmailin_summaries"]
+    assert manifest["options"] == {"include_text": True, "include_cloudmailin": True}
+    assert manifest["stats"]["cloudmailin_entries"] == facts["cloudmailin_summaries"]
+    assert "cloudmailin_skipped" not in manifest["stats"]
     assert manifest["stats"]["entries_soft_deleted"] == 1
     assert manifest["stats"]["entries_duplicate_dropped"] == 2
-    assert manifest["stats"]["summaries_without_subject"] == 1
+    assert manifest["stats"]["summaries_without_subject"] == 2
     assert {w["code"] for w in manifest["warnings"]} == {"text_chunked", "mailhero_entry_unlinked"}
     chunked = [w["detail"] for w in manifest["warnings"] if w["code"] == "text_chunked"]
     assert chunked == [synthetic.event_id(synthetic.LONG_TEXT_EVENT)]
@@ -261,12 +255,33 @@ def test_exported_rows(sources: tuple[Path, Path, dict], tmp_path: Path) -> None
     ).fetchone()
     assert tuple(long_text) == (synthetic.long_text(), None)
     reminder = db.execute("SELECT * FROM mail_reminders WHERE day = '2026-09-21'").fetchone()
-    assert (reminder["state"], reminder["subject"], reminder["body"], reminder["imported"]) == ("unknown", "", "", 1)
+    assert (reminder["state"], reminder["subject"], reminder["body"], reminder["imported"]) == (
+        "unknown",
+        "subject 2026-09-21",
+        "body",
+        1,
+    )
+    # A same-day failed reminder is retried by the Worker with its frozen text, so it must come along.
+    failed = db.execute("SELECT * FROM mail_reminders WHERE day = '2026-09-22'").fetchone()
+    assert (failed["subject"], failed["body"], failed["next_attempt_at"]) == (
+        "subject 2026-09-22",
+        "body",
+        synthetic.BASE + 3600,
+    )
 
 
-def test_cloudmailin_rows_on_request(sources: tuple[Path, Path, dict], tmp_path: Path) -> None:
+def test_cloudmailin_rows_can_be_skipped_with_a_warning(sources: tuple[Path, Path, dict], tmp_path: Path) -> None:
     inbox, legacy, facts = sources
-    manifest = run_export(inbox, legacy, tmp_path / "out", "--include-cloudmailin")
+    manifest = run_export(inbox, legacy, tmp_path / "out", "--skip-cloudmailin")
+    assert manifest["options"]["include_cloudmailin"] is False
+    assert manifest["tables"]["summaries"]["rows"] == facts["mailhero_summaries"]
+    assert manifest["stats"]["cloudmailin_skipped"] == facts["cloudmailin_summaries"]
+    assert {"code": "cloudmailin_skipped", "detail": "7 cache rows"} in manifest["warnings"]
+
+
+def test_cloudmailin_rows_by_default(sources: tuple[Path, Path, dict], tmp_path: Path) -> None:
+    inbox, legacy, facts = sources
+    manifest = run_export(inbox, legacy, tmp_path / "out")
     expected = facts["mailhero_summaries"] + facts["cloudmailin_summaries"]
     assert manifest["tables"]["summaries"]["rows"] == expected
     assert manifest["tables"]["legacy_mail_text"]["rows"] == facts["texts_mailhero"] + facts["texts_cloudmailin"]
@@ -343,7 +358,7 @@ def test_verify_detects_changes(sources: tuple[Path, Path, dict], tmp_path: Path
         "FAIL mail_events rows=40 expected=40 sha256_match=False",
         'FAIL mail_events state_counts {"complete": 38, "failed_summary": 1, "ignored": 1}',
         "FAIL mail_reminders rows=2 expected=3 sha256_match=False",
-        "FAIL legacy_mail_text rows=40 expected=40 sha256_match=False",
+        "FAIL legacy_mail_text rows=46 expected=46 sha256_match=False",
     ]
 
 

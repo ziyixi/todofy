@@ -1,7 +1,7 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { Newspaper, RefreshCw, Sparkles } from 'lucide-react'
 import { useId, useState } from 'react'
-import { api } from '../api/client'
+import { api, ApiError } from '../api/client'
 import { keys, useReports } from '../api/queries'
 import type { RecommendationReport, RecomputeRequest, SummaryReport } from '../api/types'
 import { useActionId } from '../api/useAction'
@@ -76,9 +76,20 @@ function RecommendationCard({ report }: { report: RecommendationReport }) {
 
 type Kind = RecomputeRequest['kind']
 
+/** The newsletter always asks for ?top=10 (api/recommendation-v1.schema.json). */
+const NEWSLETTER_TOP = 10
+
+/** What a recompute changes for the newsletter, which reads only the `top` it asks for. */
+function newsletterEffect(kind: Kind, top: string): string {
+  if (kind === 'summary') return '成功后，newsletter 下次读取的就是新结果。'
+  if (!top) return '成功后，newsletter 下次读取的就是新结果（前提是 REPORT_DEFAULT_TOP 等于 newsletter 请求的数量 10）。'
+  const read = top === String(NEWSLETTER_TOP) ? '就是这一份' : '不会读到这一份'
+  return `只重新生成并保存「前 ${top} 项」的结果；newsletter 只读取它请求的 ?top=${NEWSLETTER_TOP} 对应的结果，${read}。`
+}
+
 function RecomputeDialog({ kind, onClose }: { kind: Kind; onClose: () => void }) {
   const client = useQueryClient()
-  const idFor = useActionId()
+  const { idFor, forget } = useActionId()
   const selectId = useId()
   const [top, setTop] = useState('')
   const mutation = useMutation({
@@ -86,6 +97,11 @@ function RecomputeDialog({ kind, onClose }: { kind: Kind; onClose: () => void })
     onSuccess: () => {
       void client.invalidateQueries({ queryKey: keys.reports })
       onClose()
+    },
+    onError: (error) => {
+      // The Worker answered and stored this failure: a retry needs a new id, or it is replayed.
+      // Keep the id when the outcome is unknown, so a resend replays a stored success instead.
+      if (error instanceof ApiError && error.code !== 'network_error' && error.code !== 'bad_response') forget()
     },
   })
 
@@ -112,8 +128,8 @@ function RecomputeDialog({ kind, onClose }: { kind: Kind; onClose: () => void })
     >
       <div className="stack">
         <p className="consequence">
-          用最近 24 小时的邮件摘要重新计算，会调用 Gemini（窗口为空时除外）并计入每小时的报告计算上限；成功后
-          newsletter 下次读取到的就是新结果。可能需要几十秒。
+          用最近 24 小时的邮件摘要重新计算，会调用 Gemini（窗口为空时除外）并计入每小时的报告计算上限。
+          {newsletterEffect(kind, top)}可能需要几十秒。
         </p>
         {kind === 'recommendation' ? (
           <div className="field">

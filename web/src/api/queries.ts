@@ -1,4 +1,5 @@
 import { useInfiniteQuery, useQuery } from '@tanstack/react-query'
+import { useRef } from 'react'
 import { api } from './client'
 import type { EventDetail, EventState, EventView } from './types'
 
@@ -36,23 +37,45 @@ export function useEventList(view: EventView, state: EventState | null = null) {
   })
 }
 
-/** Poll an event only while the Worker is about to move it, so a page left open costs no reads. */
+/**
+ * Poll an event only while the Worker is about to move it: a call in flight, or a next step
+ * due within a minute or overdue by at most EVENT_POLL_GRACE_MS (a healthy Worker takes a due row
+ * within seconds). A row that stays overdue is held by a switch, a Todoist block or a backlog,
+ * and polling it every 3 s would only spend the Free plan's shared request quota; the same goes
+ * for any row that has not changed for EVENT_POLL_MAX_MS. Focus or a manual refresh picks it up.
+ */
 export const EVENT_POLL_MS = 3000
 const EVENT_POLL_HORIZON_MS = 60_000
+export const EVENT_POLL_GRACE_MS = 2 * 60_000
+export const EVENT_POLL_MAX_MS = 5 * 60_000
 const IN_FLIGHT: ReadonlySet<EventState> = new Set(['summarizing', 'todo_sending'])
 
-export function eventPollInterval(event: EventDetail | undefined, now: number = Date.now()): number | false {
-  if (!event) return false
+export function eventPollInterval(
+  event: EventDetail | undefined,
+  now: number = Date.now(),
+  unchangedSince: number = now,
+): number | false {
+  if (!event || now - unchangedSince > EVENT_POLL_MAX_MS) return false
   if (IN_FLIGHT.has(event.state)) return EVENT_POLL_MS
   if (event.next_attempt_at === null) return false
-  return Date.parse(event.next_attempt_at) - now <= EVENT_POLL_HORIZON_MS ? EVENT_POLL_MS : false
+  const untilDue = Date.parse(event.next_attempt_at) - now
+  return untilDue <= EVENT_POLL_HORIZON_MS && untilDue >= -EVENT_POLL_GRACE_MS ? EVENT_POLL_MS : false
 }
 
 export function useEvent(id: string) {
+  // When the shown version first appeared; polling stops once it has not changed for a while.
+  const seen = useRef<{ id: string; version: number; since: number } | null>(null)
   return useQuery({
     queryKey: keys.event(id),
     queryFn: () => api.event(id),
-    refetchInterval: (query) => eventPollInterval(query.state.data),
+    refetchInterval: (query) => {
+      const event = query.state.data
+      const now = Date.now()
+      if (event && (seen.current?.id !== id || seen.current.version !== event.version)) {
+        seen.current = { id, version: event.version, since: now }
+      }
+      return eventPollInterval(event, now, seen.current?.since ?? now)
+    },
   })
 }
 

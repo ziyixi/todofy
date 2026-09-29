@@ -218,7 +218,12 @@ export function EventDetailPage() {
   const query = useEvent(eventId)
   const [action, setAction] = useState<ReconcileAction | null>(null)
   const [done, setDone] = useState<ReconcileAction | null>(null)
+  const notice = useRef<HTMLParagraphElement>(null)
   useRefreshOnStateChange(query.data?.state)
+  // The action's button may be gone once the event moves on; keep keyboard focus on the outcome.
+  useEffect(() => {
+    if (done) notice.current?.focus()
+  }, [done])
 
   if (query.isPending) return <Loading />
   if (query.isError) {
@@ -240,7 +245,7 @@ export function EventDetailPage() {
         actions={event.attention ? <Badge tone="warn">需关注</Badge> : null}
       />
       {done ? (
-        <p className="notice tone-ok" role="status">
+        <p ref={notice} tabIndex={-1} className="notice tone-ok" role="status">
           <CircleCheck size={18} aria-hidden="true" />
           <span>
             <strong>已提交：{RECONCILE_ACTIONS[done].title}</strong>

@@ -10,12 +10,14 @@ real ``reports.compute`` and an unlimited budget.
 """
 
 import json
+from dataclasses import replace
 from typing import Any
 from urllib.parse import urlsplit
 
 from workers import DurableObject, Response, WorkerEntrypoint
 
-from todofy.runtime import reminder, reports, retention
+from todofy.core.vocab import EventState
+from todofy.runtime import ledger, reminder, reports, retention
 from todofy.runtime.http import error, json_response
 from todofy.runtime.interop import now_ms
 
@@ -32,12 +34,20 @@ class Overlay:
 
 
 class Budget:
-    """Stands in for the coordinator's hourly report cap and Gemini token budget."""
+    """Stands in for the coordinator's hourly report cap, Gemini token budget and
+    precompute failure counts (``failures`` maps "kind/top_n/day" to a count)."""
 
-    def __init__(self, slots: bool = True, tokens: bool = True) -> None:
+    def __init__(self, slots: bool = True, tokens: bool = True, failures: dict[str, int] | None = None) -> None:
         self.slots = slots
         self.tokens = tokens
+        self.failures = dict(failures or {})
         self.calls: list[list[Any]] = []
+
+    def report_failures(self, kind: str, top_n: int, day: str) -> int:
+        return self.failures.get(f"{kind}/{top_n}/{day}", 0)
+
+    def count_report_failure(self, kind: str, top_n: int, day: str) -> None:
+        self.calls.append(["failure", kind, top_n, day])
 
     def take_report_slot(self, now: int) -> bool:
         self.calls.append(["slot", now])
@@ -73,7 +83,7 @@ class Default(WorkerEntrypoint):
             return await reports.serve(request, env, path.removeprefix("/api/"))
         args = json.loads(await request.text())
         env = Overlay(self.env, args.get("vars", {}))
-        budget = Budget(args.get("slots", True), args.get("tokens", True))
+        budget = Budget(args.get("slots", True), args.get("tokens", True), args.get("failures"))
         data: dict[str, Any] = {}
         match path:
             case "/d1":
@@ -97,6 +107,21 @@ class Default(WorkerEntrypoint):
             case "/reminder/page":
                 items, next_day = await reminder.page(self.env.DB, args.get("before_day"), args["limit"])
                 data |= {"items": items, "next_day": next_day}
+            case "/ledger/transition":
+                # ledger.transition from a row snapshot whose state and version the test chooses.
+                row = await ledger.get(self.env.DB, args["source_id"], args["event_id"])
+                snapshot = replace(row, state=EventState(args["from_state"]), version=args["version"])
+                action = ledger.OwnerAction(**args["action"]) if args.get("action") else None
+                moved = await ledger.transition(
+                    self.env.DB,
+                    snapshot,
+                    EventState(args["to"]),
+                    actor=args["actor"],
+                    now=args["now"],
+                    code=args.get("code", ""),
+                    action=action,
+                )
+                data["moved"] = moved is not None
             case "/retention/tick":
                 data["more"] = await retention.tick(self.env.DB, env, args["now"])
             case _:

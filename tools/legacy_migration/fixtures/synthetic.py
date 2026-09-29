@@ -195,8 +195,9 @@ def build(directory: Path) -> dict:
     ):
         inbox.execute(
             "INSERT INTO mail_inbox_reminders (day, state, task_id, subject, body, attention_count, attempts,"
-            " last_error_code, created_at, updated_at) VALUES (?, ?, ?, 'subject', 'body', 2, 1, ?, ?, ?)",
-            (day, state, task, code, BASE, BASE + 1),
+            " next_attempt_at, last_error_code, created_at, updated_at)"
+            " VALUES (?, ?, ?, ?, 'body', 2, 1, ?, ?, ?, ?)",
+            (day, state, task, f"subject {day}", BASE + 3600 if state == "failed" else 0, code, BASE, BASE + 1),
         )
     for db in (inbox, legacy):
         db.commit()

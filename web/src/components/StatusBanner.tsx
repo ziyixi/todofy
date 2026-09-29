@@ -26,7 +26,7 @@ export function bannerNotices(overview: Overview): Notice[] {
     notices.push({
       kind: 'processing_paused',
       title: '处理已暂停',
-      consequence: '新邮件照常入账，但不会生成摘要或建任务；恢复后按到达顺序继续。',
+      consequence: '新邮件照常入账，但不会生成摘要、建任务或发每日提醒；日报仍按时计算。恢复后按到达顺序继续。',
     })
   }
   if (flags.force_pause_todoist) {

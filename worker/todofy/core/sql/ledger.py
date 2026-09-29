@@ -1,8 +1,11 @@
 """Ledger writes and scheduler reads (runtime/ledger.py, runtime/coordinator.py).
 
 Rows that depend on a state change (its transition, the summaries row, the
-owner action) are INSERT ... SELECT from the event at its new version, so in
-one batch they are written exactly when the compare-and-set above them won.
+owner action) are INSERT ... SELECT from the event at its new version, guarded
+by ``changes() = 1``: in one batch each runs only when the statement just before
+it changed exactly one row, so they are written exactly when the compare-and-set
+above them won. The version alone is not enough: a writer one version behind
+would still match the row that another writer has just moved to that version.
 """
 
 from ..vocab import EventState
@@ -45,13 +48,15 @@ STATE_CAS = Query(
 )
 TRANSITION = Query(
     "INSERT INTO event_transitions (event_id, at, from_state, to_state, error_code, actor)"
-    " SELECT event_id, ?, ?, ?, ?, ? FROM mail_events WHERE source_id = ? AND event_id = ? AND version = ?",
+    " SELECT event_id, ?, ?, ?, ?, ? FROM mail_events"
+    " WHERE source_id = ? AND event_id = ? AND version = ? AND changes() = 1",
     "sqlite_autoindex_mail_events_1",
 )
+# Runs right after TRANSITION (changes() is its insert).
 COMPLETE_SUMMARY = Query(
     "INSERT INTO summaries (event_id, created_at, subject, summary, model, task_id)"
     " SELECT event_id, ?, ?, ?, ?, ? FROM mail_events"
-    " WHERE source_id = ? AND event_id = ? AND version = ? AND state = 'complete'"
+    " WHERE source_id = ? AND event_id = ? AND version = ? AND state = 'complete' AND changes() = 1"
     " ON CONFLICT (event_id) DO NOTHING",
     "sqlite_autoindex_mail_events_1",
 )
@@ -93,12 +98,12 @@ OWNER_ACTION = Query(
     "SELECT request_hash, result_ref, http_status FROM owner_actions WHERE owner = ? AND action_request_id = ?",
     "sqlite_autoindex_owner_actions_1",
 )
-# Recorded together with the reconcile transition it belongs to.
+# Recorded together with the reconcile transition it belongs to, right after TRANSITION.
 ACTION_WITH_TRANSITION = Query(
     "INSERT INTO owner_actions"
     " (owner, action_request_id, kind, event_id, request_hash, result_ref, http_status, created_at)"
     " SELECT ?, ?, ?, event_id, ?, event_id, 200, ? FROM mail_events"
-    " WHERE source_id = ? AND event_id = ? AND version = ?",
+    " WHERE source_id = ? AND event_id = ? AND version = ? AND changes() = 1",
     "sqlite_autoindex_mail_events_1",
 )
 ACTION_CLAIM = Query(

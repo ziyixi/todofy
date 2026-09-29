@@ -88,7 +88,7 @@ class TaskVerdict:
 def classify_task_create(outcome: HttpOutcome, task_id: str) -> TaskVerdict:
     """``task_id`` is the ``id`` of a 2xx response body, or ``""``.
 
-    When in-call attempts run out, the last verdict applies as is.
+    This classifies one attempt; ``final_task_verdict`` combines the attempts of one call.
     """
     if outcome.ok:
         if task_id:
@@ -113,6 +113,20 @@ def classify_task_create(outcome: HttpOutcome, task_id: str) -> TaskVerdict:
     if status in (401, 403):
         return TaskVerdict(TaskResult.BLOCKED, Code.TODOIST_AUTH_BLOCKED)
     return TaskVerdict(TaskResult.RETRY_LATER, Code.TODOIST_REJECTED)
+
+
+def final_task_verdict(last: TaskVerdict, possibly_delivered: bool) -> TaskVerdict:
+    """The verdict of a whole create call, given its last attempt.
+
+    ``possibly_delivered`` is whether any attempt of the call was UNKNOWN (a
+    timeout, a lost connection, a 500, or a 2xx without an id). Once one may have
+    created the task, the call ends as CREATED or UNKNOWN only: a later 429, 5xx,
+    401/403 or 4xx must not turn it into an automatic resend, because nothing
+    relies on Todoist deduplicating ``X-Request-Id``.
+    """
+    if possibly_delivered and last.result not in (TaskResult.CREATED, TaskResult.UNKNOWN):
+        return TaskVerdict(TaskResult.UNKNOWN, Code.TODO_RESULT_UNKNOWN)
+    return last
 
 
 @dataclass(frozen=True, slots=True)

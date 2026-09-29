@@ -27,7 +27,7 @@ PUBLIC_HOST = "todofy.example"
 NEWSLETTER = ("newsletter", "correct horse")
 ROTATED = ("newsletter", "battery staple")
 TABLES = ("mail_events", "mail_reminders", "summaries", "daily_reports", "owner_actions", "auth_failures")
-TABLES += ("legacy_mail_text",)
+TABLES += ("legacy_mail_text", "event_transitions")
 # 2026-09-28T15:00:00Z, after the 13:30 precompute time.
 NOW = int(datetime(2026, 9, 28, 15, tzinfo=UTC).timestamp())
 

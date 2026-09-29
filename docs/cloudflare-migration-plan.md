@@ -2,6 +2,31 @@
 
 > 日期 2026-09-28。本文在 v1（同目录 `cloudflare-migration-plan-v1.md`）的基础上，把 owner 的六点回复与随后追加的六项决定（7–12）落实为决策。依据：todofy `6c46ed4`（main）、mail-hero `5d2b625`、self-host-on-vultr `bcad459`、protos `protobuf` 分支的只读阅读；v1 的三份代码评审与两位评委打分；2026-09-28 新增的三份研究（Python Workers、Rust workers-rs、Workers Free 额度）及其本地实测。所有仓库、主机和 Cloudflare 均未改动，未读取任何 env/token/数据库/真实邮件。平台事实均标注来源 URL 与抓取日期；标注"推断"的内容未经直接验证。文中 `file:line` 未加仓库前缀时指 todofy 仓库。**本文只是计划，不写任何代码。**
 
+> **As-built notes (2026-09-29).** This plan predates the build. Where it differs from the tree, the tree,
+> `docs/dev-notes.md`, `docs/cloudflare-setup.md` and `docs/ci-cd.md` are authoritative; the list below
+> records the differences that matter to an operator (`docs/implementation-order.md` has the same list).
+>
+> - Entry `worker/todofy/runtime/entry.py`; hooks hosts are the list `TODOFY_HOOKS_HOSTS`
+>   (`todofy-hooks.ziyixi.science`, plus `daily.ziyixi.science` moved onto the Worker at cutover).
+> - Secrets: `MAIL_WEBHOOK_TOKEN_SHA256_PREVIOUS` (not `..._PREVIOUS_SHA256`); `REPORT_BASIC_AUTH_SHA256`
+>   takes comma-separated digests (no `REPORT_BASIC_AUTH_PREVIOUS_SHA256`); new `CSRF_SIGNING_KEY`.
+>   `ACCESS_OWNER` / `ACCESS_OWNER_ALIASES` are Worker secrets set by each deploy from GitHub environment
+>   secrets, never plain vars.
+> - `REPORT_DEFAULT_TOP=10`; `LEGACY_TEXT_RETENTION_DAYS=0` (keep) by default.
+> - §4.2/§4.8: full mail text and CloudMailin-era rows are imported by default (`--skip-cloudmailin` opts
+>   out); reminders keep their frozen subject, body and next attempt time. Imported `legacy:` rows are an
+>   archive: reports read them, but only `wrangler d1 execute` or an exact-ID text read reaches them.
+> - §5.3 reports: a stored report is fresh only if computed since the latest precompute time and `ok` or
+>   `empty_window`; otherwise it is computed on demand, and failure is 503 (no `stale` 200). An overlong
+>   summary is cut to 12,000 characters with a notice; precompute retries a failed report at most 3 times a
+>   day, after the other report.
+> - §5.5 newsletter lockout: 20 failures an hour lock out further failures (429, no more writes) but never
+>   a correct credential; the password must be random (≥128 bits).
+> - `PROCESSING_PAUSED` also stops the daily reminder; report precompute continues.
+> - Todoist: once an in-call attempt may have created the task, the call ends `complete` or `todo_unknown`,
+>   never a durable resend. An owner may dismiss a `summarized` row that Todoist keeps rejecting.
+> - Local cron is `/cdn-cgi/local/scheduled`; `/hooks/mail` has no 411 (a chunked body is capped at 1 MiB).
+
 ## 0. 变更记录 v2
 
 | # | 变更 | v1 | v2 |
@@ -189,9 +214,9 @@
 | 源 | 目标 | 规则 |
 |---|---|---|
 | `mail_inbox_events.{source_id,event_id,payload_hash,state,task_id,attempt_count,last_error_code,created_at,updated_at}` | `mail_events` 同名列，`payload=NULL`、`summary=''`、`todo_body=''`、`crashes=0`、`next_attempt_at=0`、`imported=1` | 拒绝 `source_id ≠ mail-hero-personal`；`payload_hash` 必须是 32 字节 BLOB；非终态行存在时仅告警（切换前必须排空） |
-| `mail_inbox_reminders.{day,state,task_id,attention_count,attempts,last_error_code,created_at,updated_at}` | `mail_reminders`，`subject=''`、`body=''` | 只为"当日不重发"的去重语义 |
-| `database_entries.{created_at,summary,llm_model,hash_id}` | `summaries.{created_at(epoch),summary,model(枚举号→模型名),event_id,subject(从 `**SUBJECT: …**` 行解析),task_id(从账本连接),imported=1}` | `deleted_at IS NULL`；同 `hash_id` 多行取 `updated_at` 最新；`mailhero-v1-*` 能连接账本的用真实 `event_id`，连不上的与 CloudMailin 时代行用 `legacy:<hash>`；默认跳过 CloudMailin 时代行（`--include-cloudmailin` 才导） |
-| `database_entries.text` | `legacy_mail_text` | **仅 `--include-text`**；默认不导 |
+| `mail_inbox_reminders.{day,state,task_id,subject,body,attention_count,attempts,next_attempt_at,last_error_code,created_at,updated_at}` | `mail_reminders`（as-built：冻结的 subject/body 与 next_attempt_at 一并导入，当日 `failed` 行按原字节重试） | "当日不重发"的去重语义 |
+| `database_entries.{created_at,summary,llm_model,hash_id}` | `summaries.{created_at(epoch),summary,model(枚举号→模型名),event_id,subject(从 `**SUBJECT: …**` 行解析),task_id(从账本连接),imported=1}` | `deleted_at IS NULL`；同 `hash_id` 多行取 `updated_at` 最新；`mailhero-v1-*` 能连接账本的用真实 `event_id`，连不上的与 CloudMailin 时代行用 `legacy:<hash>`；默认导入 CloudMailin 时代行（as-built；`--skip-cloudmailin` 可跳过） |
+| `database_entries.text` | `legacy_mail_text` | as-built：默认导入（`--no-include-text` 可跳过），见 §0.1 |
 | `database_entries.{prompt,max_tokens,model_family}` | 不迁 | prompt 是常量的副本，`max_tokens` 语义错位（v1 B9） |
 
 模型枚举号到名字的映射来自 protos `proto/todofy/large_language_model.proto`（`Model` 枚举，0 = 未指定；12 = `gemini-3.8-flash` 等），在删除 proto 前把映射表固化进脚本（同目录 `dbmig/legacy_to_d1.py` 已含）。
@@ -287,7 +312,7 @@
 
 ### 4.8 决策 8：CloudMailin 已停用
 
-owner 确认 Mail Hero 已替代 CloudMailin。删除 `/api/v1/update_todo`（`main.go:182`；`handle_updatetodo.go`）与 `utils/cloudmailin.go`（含测试），不做兼容层，不返回 410。Mail Hero `docs/todofy-integration.md:50` 的"迁移期间保留"文字随 §7 C9 的文档 PR 一起删除。迁移脚本默认跳过 CloudMailin 时代的摘要行（§4.2）。
+owner 确认 Mail Hero 已替代 CloudMailin。删除 `/api/v1/update_todo`（`main.go:182`；`handle_updatetodo.go`）与 `utils/cloudmailin.go`（含测试），不做兼容层，不返回 410。Mail Hero `docs/todofy-integration.md:50` 的"迁移期间保留"文字随 §7 C9 的文档 PR 一起删除。（as-built：迁移脚本默认导入 CloudMailin 时代的摘要行与全文，`--skip-cloudmailin` 可跳过。）
 
 ### 4.9 决策 9：Todoist 幂等（已决定）
 

@@ -18,7 +18,7 @@ from todofy.core.backoff import (
     TODOIST_MAX_ATTEMPTS,
     inline_delay,
 )
-from todofy.core.classify import TaskVerdict, classify_task_create
+from todofy.core.classify import TaskResult, TaskVerdict, classify_task_create, final_task_verdict
 from todofy.core.todoist_request import TASKS_PATH, TaskRequest, created_task_id, footer_task_ids, parse_task_page
 from todofy.runtime.config import integer, var
 from todofy.runtime.interop import fetch_with_timeout, now_ms
@@ -32,17 +32,21 @@ MIN_ATTEMPT_MS = 1000
 
 @dataclass(frozen=True, slots=True)
 class CreateResult:
-    verdict: TaskVerdict  # of the last attempt; feed it to the state machine as is
+    verdict: TaskVerdict  # of the whole call (classify.final_task_verdict); feed it to the state machine
     task_id: str  # "" unless created
 
 
 async def create_task(env: Any, request: TaskRequest, *, budget_ms: int) -> CreateResult:
-    """Up to TODOIST_MAX_ATTEMPTS while the verdict allows an inline retry, all within ``budget_ms``."""
+    """Up to TODOIST_MAX_ATTEMPTS while the verdict allows an inline retry, all within ``budget_ms``.
+
+    Once an attempt may have created the task, the call can only end CREATED or UNKNOWN.
+    """
     url = _base(env) + TASKS_PATH
     # Test configs shorten the attempt timeout; production uses the constant.
     attempt_ms = integer(env, "TODOIST_ATTEMPT_TIMEOUT_MS", TODOIST_ATTEMPT_TIMEOUT * 1000)
     deadline = now_ms() + budget_ms
     attempt = 1
+    possibly_delivered = False
     while True:
         upstream = await fetch_with_timeout(
             url,
@@ -54,11 +58,12 @@ async def create_task(env: Any, request: TaskRequest, *, budget_ms: int) -> Crea
         outcome = upstream.outcome()
         task_id = created_task_id(upstream.body) if outcome.ok else ""
         verdict = classify_task_create(outcome, task_id)
+        possibly_delivered |= verdict.result is TaskResult.UNKNOWN
         if not verdict.retry_inline or attempt >= TODOIST_MAX_ATTEMPTS:
-            return CreateResult(verdict, task_id)
+            return CreateResult(final_task_verdict(verdict, possibly_delivered), task_id)
         delay_ms = int(inline_delay(attempt, verdict.retry_after) * 1000)
         if deadline - now_ms() - delay_ms < MIN_ATTEMPT_MS:
-            return CreateResult(verdict, task_id)
+            return CreateResult(final_task_verdict(verdict, possibly_delivered), task_id)
         await asyncio.sleep(delay_ms / 1000)
         attempt += 1
 

@@ -306,7 +306,7 @@ export interface components {
          * @description - task_created: the owner found the Todoist task (`task_id` required); the event completes with it.
          *     - task_not_created: the owner found no task. A footer lookup runs first, then the frozen request is sent again, which can duplicate a task.
          *     - retry_summary: summarize again; not offered for mail_needs_review.
-         *     - dismiss: give up without checking Todoist; the event becomes ignored.
+         *     - dismiss: give up without checking Todoist; the event becomes ignored. Offered for failed_summary, todo_unknown, and summarized rows whose last Todoist request was refused (todoist_rejected).
          * @enum {string}
          */
         ReconcileAction: "task_created" | "task_not_created" | "retry_summary" | "dismiss";
@@ -591,7 +591,7 @@ export interface components {
             /** @constant */
             time_window_hours: 24;
             /**
-             * @description stale: no report from the last 26 hours and the on-demand run did not finish within its budget, so an older stored report is served.
+             * @description The Worker sends only ok and empty_window. stale is kept for compatibility and is no longer sent: without a report computed since the latest precompute time, the endpoint answers 503.
              * @enum {unknown}
              */
             status: "ok" | "empty_window" | "stale";
@@ -625,7 +625,7 @@ export interface components {
             /** @description Summaries in the window. */
             task_count: number;
             /**
-             * @description stale: no report from the last 26 hours and the on-demand run did not finish within its budget, so an older stored report is served.
+             * @description The newsletter endpoint sends only ok and empty_window; model_output_invalid appears only in stored copies the owner API lists. stale is kept for compatibility and is no longer sent: without a report computed since the latest precompute time, the endpoint answers 503.
              * @enum {unknown}
              */
             status: "ok" | "empty_window" | "model_output_invalid" | "stale";
@@ -1038,7 +1038,7 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
-                /** @description A ledger event ID, or `legacy:<hash>` for an imported summary with no ledger event. */
+                /** @description A ledger event ID, or `legacy:<hash>` / `legacy:row-<id>` for an imported cache row with no ledger event (CloudMailin era, or an unlinked Mail Hero row). Those rows are an archive; no endpoint lists them, so their IDs come from D1 (`wrangler d1 execute`). */
                 event_id: components["schemas"]["EventId"] | string;
             };
             cookie?: never;
@@ -1125,7 +1125,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description The latest summary (precomputed daily; on demand when older than 26 hours). */
+            /** @description The summary computed since the latest precompute time (REPORT_PRECOMPUTE_UTC), or computed on demand; any other case is 503, never an older report. */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -1151,7 +1151,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description The latest recommendation for `top` (precomputed daily; on demand when older than 26 hours). */
+            /** @description The recommendation for `top` computed since the latest precompute time, or computed on demand; any other case (including unusable model output) is 503, never an older or empty-by-failure report. */
             200: {
                 headers: {
                     [name: string]: unknown;
