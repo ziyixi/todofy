@@ -173,13 +173,14 @@ def test_invalid_reconcile_bodies_are_400(worker: Worker, body: dict) -> None:
 @pytest.mark.reaches("csrf_failed")
 def test_mutations_need_the_same_origin_and_the_csrf_token(worker: Worker) -> None:
     event_id = _arrive(worker)
-    body = {"action": "dismiss", "version": 1, "action_request_id": str(uuid.uuid4())}
     good = worker.csrf_headers()
+    # No body: CSRF is checked before the body is read, and an unread upload makes wrangler's
+    # local proxy drop the next POST on this dev server (see docs/dev-notes.md).
     for headers in (
         {},
         good | {"origin": "https://evil.example"},
         {k: v for k, v in good.items() if k != "x-csrf-token"},
         good | {"cookie": "todofy_csrf=other"},
     ):
-        response = worker.owner.post(f"/api/v1/events/{event_id}/reconcile", json=body, headers=headers)
+        response = worker.owner.post(f"/api/v1/events/{event_id}/reconcile", headers=headers)
         assert (response.status_code, error_code(response)) == (403, "csrf_failed"), headers
