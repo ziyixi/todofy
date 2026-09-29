@@ -1,0 +1,33 @@
+# Local credentials, mail, dumps, and infrastructure state.
+deploy/runtime.env
+deploy/local.env
+deploy/secrets/
+deploy/certs/
+deploy/backups/
+deploy/backup/*.env
+__pycache__/
+*.py[cod]
+.wrangler/
+wrangler*.production*
+wrangler*.local.*
+.prod.vars*
+*.dump
+*.pgdump
+*.eml
+!tests/fixtures/*.eml
+
+# Build output and tooling.
+/bin/
+/uiassets/dist/
+/web/node_modules/
+/web/dist/
+/web/coverage/
+/cloudflare/node_modules/
+/cloudflare/.wrangler/
+/cloudflare/dist/
+/cloudflare/.dev.vars*
+/cloudflare/.env*
+/coverage/
+*.test
+*.out
+.DS_Store
