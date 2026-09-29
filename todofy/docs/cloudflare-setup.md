@@ -209,6 +209,14 @@ in [gateway-contract.md](gateway-contract.md):
   (inferred from Cloudflare's Custom Domain rules; confirm during the cutover). The digests above must
   then be those of the credentials those callers already send.
 
+- Ops dashboard (contracts/ops-v1, not built yet): a Worker in this account binds the gateway's
+  `Ops` entrypoint (`[[services]] binding = "TODOFY" service = "todofy" entrypoint = "Ops"`). There is
+  no route or Access policy for it and nothing to configure here; `status().ui_url` is built from
+  `TODOFY_PUBLIC_HOST`. A `shed` guard it sets defers only the weekly backup (never past 8 days since
+  the last complete one), retention and the metrics rollup (never past 72 h since their last run);
+  mail, canaries, the reminder and report precompute keep running. Guard and latest report live in the
+  object's storage, not in D1 or the backups.
+
 ## 6. Local checks before the first deploy
 
 ```sh

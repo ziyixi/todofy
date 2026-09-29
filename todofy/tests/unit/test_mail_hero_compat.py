@@ -16,7 +16,14 @@ import jsonschema
 import pytest
 
 from tests import mail_contract
-from todofy.core.contract import MAX_EVENT_BYTES, MAX_TEXT_BYTES, MailEvent, parse_mail_event, utf8_len
+from todofy.core.contract import (
+    MAX_EVENT_BYTES,
+    MAX_TEXT_BYTES,
+    ContractError,
+    MailEvent,
+    parse_mail_event,
+    utf8_len,
+)
 from todofy.core.gemini_wire import summary_content
 from todofy.core.render import FOOTER_PREFIX, content_notice, render_todo_body, task_title
 
@@ -66,10 +73,31 @@ def test_only_the_canary_fixture_carries_the_canary_marker():
     assert json.loads(FIXTURES["canary_event"].read_bytes())["canary"] == {"run_id": "canary-2026-09-28"}
 
 
-@pytest.mark.parametrize("canary", [{}, {"run_id": ""}, {"run_id": "canary 1"}, {"run_id": 7}, "canary-1", None])
+UNREADABLE_CANARIES = [{}, {"run_id": ""}, {"run_id": "canary 1"}, {"run_id": 7}, "canary-1", None]
+
+
+@pytest.mark.parametrize("canary", UNREADABLE_CANARIES)
 def test_the_schema_rejects_an_unreadable_canary_marker(canary):
     document = json.loads(FIXTURES["canary_event"].read_bytes()) | {"canary": canary}
     assert list(SCHEMA.iter_errors(document))
+
+
+def test_the_parser_reads_the_canary_marker_and_only_there():
+    assert event("canary_event").canary_run_id == "canary-2026-09-28"
+    assert [name for name in NAMES if event(name).canary_run_id is not None] == ["canary_event"]
+    # The schema lets Mail Hero add fields to the marker later.
+    document = json.loads(FIXTURES["canary_event"].read_bytes())
+    document["canary"]["attempt"] = 2
+    assert parse_mail_event(json.dumps(document).encode()).canary_run_id == "canary-2026-09-28"
+
+
+@pytest.mark.parametrize("canary", [*UNREADABLE_CANARIES, {"run_id": "canary-1\n"}, {"run_id": "x" * 65}])
+def test_an_unreadable_canary_marker_is_rejected_not_treated_as_mail(canary):
+    """An event that says it is a canary but cannot say which must never become a Todoist task."""
+    document = json.loads(FIXTURES["canary_event"].read_bytes()) | {"canary": canary}
+    with pytest.raises(ContractError) as error:
+        parse_mail_event(json.dumps(document).encode())
+    assert error.value.reason == "canary"
 
 
 # Frozen bytes: retries resend them, so they are never edited. Mail Hero's contract-fixtures.test.mjs

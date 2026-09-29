@@ -3,9 +3,12 @@
 List pages never select mail content (payload, summary, todo_body). A first
 page binds a sentinel cursor that sorts before every row: (2**52, '') for the
 newest-first pages, (-1, '') for the oldest-first attention page.
+
+Lists and counts leave canary events out (REAL_MAIL); the event detail (the
+coordinator's ledger read) still answers for one, marked as a canary.
 """
 
-from . import ACTIVE, ATTENTION, DUE, Query
+from . import ACTIVE, ATTENTION, DUE, REAL_MAIL, Query
 
 # The EventSummary columns, in the order runtime/api.py reads them.
 EVENT_SUMMARY = (
@@ -14,33 +17,36 @@ EVENT_SUMMARY = (
 
 ATTENTION_PAGE = Query(
     f"SELECT {EVENT_SUMMARY} FROM mail_events"
-    f" WHERE source_id = ? AND {ACTIVE} AND {ATTENTION} AND (created_at, event_id) > (?, ?)"
+    f" WHERE source_id = ? AND {ACTIVE} AND {ATTENTION} AND {REAL_MAIL} AND (created_at, event_id) > (?, ?)"
     f" ORDER BY created_at, event_id LIMIT ?",
     "mail_events_active",
 )
 ATTENTION_COUNT = Query(
-    f"SELECT count(*) AS n FROM mail_events WHERE source_id = ? AND {ACTIVE} AND {ATTENTION}", "mail_events_by_state"
+    f"SELECT count(*) AS n FROM mail_events WHERE source_id = ? AND {ACTIVE} AND {ATTENTION} AND {REAL_MAIL}",
+    "mail_events_by_state",
 )
 ACTIVE_COUNTS = Query(
-    f"SELECT state, count(*) AS n FROM mail_events WHERE source_id = ? AND {ACTIVE} GROUP BY state",
+    f"SELECT state, count(*) AS n FROM mail_events WHERE source_id = ? AND {ACTIVE} AND {REAL_MAIL} GROUP BY state",
     "mail_events_by_state",
 )
 RECEIVED_SINCE = Query(
-    "SELECT count(*) AS n FROM mail_events WHERE source_id = ? AND created_at > ?", "mail_events_recent"
+    f"SELECT count(*) AS n FROM mail_events WHERE source_id = ? AND created_at > ? AND {REAL_MAIL}",
+    "mail_events_recent",
 )
 # A due row whose next_attempt_at is 0 has been due since it arrived.
 OLDEST_DUE = Query(
-    f"SELECT min(max(next_attempt_at, created_at)) AS at FROM mail_events WHERE {DUE} AND next_attempt_at <= ?",
+    f"SELECT min(max(next_attempt_at, created_at)) AS at FROM mail_events"
+    f" WHERE {DUE} AND next_attempt_at <= ? AND {REAL_MAIL}",
     "mail_events_due",
 )
 RECENT_PAGE = Query(
     f"SELECT {EVENT_SUMMARY} FROM mail_events WHERE source_id = ? AND (created_at, event_id) < (?, ?)"
-    " ORDER BY created_at DESC, event_id DESC LIMIT ?",
+    f" AND {REAL_MAIL} ORDER BY created_at DESC, event_id DESC LIMIT ?",
     "mail_events_recent",
 )
 RECENT_PAGE_BY_STATE = Query(
     f"SELECT {EVENT_SUMMARY} FROM mail_events WHERE source_id = ? AND state = ? AND (created_at, event_id) < (?, ?)"
-    " ORDER BY created_at DESC, event_id DESC LIMIT ?",
+    f" AND {REAL_MAIL} ORDER BY created_at DESC, event_id DESC LIMIT ?",
     "mail_events_by_state",
 )
 TIMELINE = Query(

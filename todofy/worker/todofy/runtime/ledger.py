@@ -50,6 +50,12 @@ class EventRow:
     imported: bool
     created_at: int
     updated_at: int
+    # Set for a canary event (contracts/ops-v1): processed, never sent to Todoist.
+    canary_run_id: str | None = None
+
+    @property
+    def canary(self) -> bool:
+        return self.canary_run_id is not None
 
     @classmethod
     def from_d1(cls, row: Any) -> "EventRow":
@@ -71,6 +77,7 @@ class EventRow:
             imported=bool(row["imported"]),
             created_at=int(row["created_at"]),
             updated_at=int(row["updated_at"]),
+            canary_run_id=row["canary_run_id"],
         )
 
 
@@ -113,10 +120,12 @@ class CompletedSummary:
     task_id: str
 
 
-async def ingest(db: Any, source_id: str, event_id: str, payload: str, payload_hash: str, now: int) -> Stored:
+async def ingest(
+    db: Any, source_id: str, event_id: str, payload: str, payload_hash: str, now: int, canary_run_id: str | None = None
+) -> Stored:
     results = await db.batch(
         [
-            db.prepare(sql.INGEST.sql).bind(source_id, event_id, payload_hash, payload, now, now, now),
+            db.prepare(sql.INGEST.sql).bind(source_id, event_id, payload_hash, payload, now, now, now, canary_run_id),
             db.prepare(sql.ARRIVAL.sql).bind(now, source_id, event_id),
             db.prepare(sql.INGEST_HASH.sql).bind(source_id, event_id),
         ]
@@ -170,16 +179,28 @@ async def recover_interrupted(db: Any, now: int, *, lookup_at: int) -> None:
 
     An interrupted summary is simply repeated, up to the crash limit; an
     interrupted Todoist call may have created the task, so it is never resent.
+    A canary ends ``ignored`` where real mail would need the owner.
     """
     rows = (await db.prepare(sql.INTERRUPTED.sql).all()).results
     for row in map(EventRow.from_d1, rows):
-        if row.state == EventState.SUMMARIZING:
+        if row.canary and row.state == EventState.TODO_SENDING:
+            # Only a release without canary handling sends a canary to Todoist; never look it up.
+            await transition(
+                db,
+                row,
+                EventState.IGNORED,
+                actor=WORKER,
+                now=now,
+                code=Code.CANARY_SIDE_EFFECT_BLOCKED,
+                next_attempt_at=0,
+            )
+        elif row.state == EventState.SUMMARIZING:
             crashes = row.crashes + 1
             if crashes >= SUMMARY_CRASH_LIMIT:
                 await transition(
                     db,
                     row,
-                    EventState.FAILED_SUMMARY,
+                    EventState.IGNORED if row.canary else EventState.FAILED_SUMMARY,
                     actor=WORKER,
                     now=now,
                     code=Code.PROCESSING_INTERRUPTED_LIMIT,

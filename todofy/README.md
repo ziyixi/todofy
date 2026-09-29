@@ -96,6 +96,16 @@ SQL queries from the owner's machine ([docs/dev-notes.md](docs/dev-notes.md) §6
 effort: a failed write never fails the request or step it describes. After a database restore the
 trends restart counting; the days in between show as not recorded.
 
+## Ops surface and canaries
+
+The gateway exports a named entrypoint `Ops` ([contracts/ops-v1](../contracts/ops-v1/README.md)) for a
+future dashboard Worker in the same account: `status()` (health, switches, signals and counters; codes and
+numbers only), `setGuard()` (a `shed` guard defers only the weekly backup, retention and the metrics
+rollup, each within a bound), `canaryResult()` and `reportOps()`, whose warning and critical items join
+the next daily reminder (still one task per UTC day). A `mail.received.v1` event with `canary` is
+summarised by Gemini like mail and then ends: it never creates a Todoist task and never appears in
+reports, lists, counts or the reminder; its event page is marked 金丝雀.
+
 ## Local development
 
 Prerequisites: Node 26 (`.nvmrc`), uv 0.12.10; Python 3.14 is fetched by uv. No Cloudflare account or

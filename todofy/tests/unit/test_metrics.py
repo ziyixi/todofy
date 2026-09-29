@@ -40,6 +40,11 @@ def test_data_point_cuts_on_a_character_boundary():
             {"gemini_calls": 2, "gemini_tokens:m1": 120},
         ),
         (StepPoint(Step.REPORT, "failed", attempts=1), {"gemini_calls": 1}),
+        # A canary's summary call still spends the day's Gemini budget.
+        (
+            StepPoint(Step.CANARY, "ok", model="m1", tokens_in=10, tokens_out=5, attempts=1),
+            {"gemini_calls": 1, "gemini_tokens:m1": 15},
+        ),
         (StepPoint(Step.TASK, "created", attempts=3), {"todoist_creates": 3}),
         (StepPoint(Step.REMINDER, "retry_later", attempts=1), {"todoist_creates": 1}),
         (StepPoint(Step.LOOKUP, "todo_created"), {"todoist_lookups": 1}),

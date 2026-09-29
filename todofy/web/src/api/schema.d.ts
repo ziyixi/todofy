@@ -315,7 +315,7 @@ export interface components {
         EventState: "pending" | "summarizing" | "summarized" | "todo_sending" | "todo_unknown" | "todo_created" | "complete" | "ignored" | "failed_summary";
         EventErrorCode: components["schemas"]["CurrentEventErrorCode"] | components["schemas"]["LegacyEventErrorCode"];
         /** @enum {string} */
-        CurrentEventErrorCode: "mail_needs_review" | "summary_failed" | "llm_quota" | "llm_budget_exhausted" | "llm_request_rejected" | "processing_interrupted_limit" | "todoist_rejected" | "todoist_auth_blocked" | "todoist_rate_limited" | "todoist_unavailable" | "todo_result_unknown" | "interrupted_todo_call" | "lookup_not_found" | "lookup_failed" | "lookup_ambiguous" | "dismissed_by_owner";
+        CurrentEventErrorCode: "mail_needs_review" | "summary_failed" | "llm_quota" | "llm_budget_exhausted" | "llm_request_rejected" | "processing_interrupted_limit" | "todoist_rejected" | "todoist_auth_blocked" | "todoist_rate_limited" | "todoist_unavailable" | "todo_result_unknown" | "interrupted_todo_call" | "lookup_not_found" | "lookup_failed" | "lookup_ambiguous" | "dismissed_by_owner" | "canary_side_effect_blocked";
         /** @enum {string} */
         LegacyEventErrorCode: "invalid_saved_event" | "llm_client_unavailable" | "summary_render_failed" | "todo_client_unavailable" | "database_client_unavailable" | "cache_write_failed" | "checkpoint_failed";
         /** @enum {string} */
@@ -414,6 +414,11 @@ export interface components {
             transitions: components["schemas"]["Transition"][];
             /** @description GET /api/v1/legacy_text/{event_id} has the imported full text. */
             has_legacy_text: boolean;
+            /**
+             * @description Present (true) only for a synthetic canary event (contracts/ops-v1): processed through Gemini but never sent to Todoist, listed, counted or reminded of.
+             * @constant
+             */
+            canary?: true;
         };
         Transition: {
             at: components["schemas"]["Timestamp"];
@@ -790,6 +795,12 @@ export interface components {
             event_id: string;
             /** Format: date-time */
             received_at: string;
+            /** @description Present only on synthetic end-to-end canary events (contracts/ops-v1). Consumers MUST NOT cause external side effects (tasks, messages, reports) for an event that carries it. An event whose canary is present but unreadable must not cause side effects either: reject it (4xx) or handle it as a canary. */
+            canary?: {
+                run_id: string;
+            } & {
+                [key: string]: unknown;
+            };
             message: (({
                 /** Format: uuid */
                 id: string;

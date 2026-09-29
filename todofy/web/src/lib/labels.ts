@@ -87,6 +87,10 @@ export const EVENT_ERRORS: Record<EventErrorCode, CodeLabel> = {
   lookup_failed: { title: '查找失败', detail: '只读查找 Todoist 任务失败，稍后会再查' },
   lookup_ambiguous: { title: '找到多个任务', detail: '找到多个带本事件页脚的任务，需要人工确认' },
   dismissed_by_owner: { title: '已由你放弃', detail: 'owner 已放弃此事件，账本仍保留去重记录' },
+  canary_side_effect_blocked: {
+    title: '金丝雀已拦截',
+    detail: '金丝雀（合成端到端检查）事件到达了会调用 Todoist 的步骤，已直接结束，不会创建任务',
+  },
   invalid_saved_event: { title: '（旧版）事件无法解析', detail: '（旧版）已保存的事件无法解析' },
   llm_client_unavailable: { title: '（旧版）LLM 服务不可用', detail: '（旧版）无法连接旧 LLM 服务' },
   summary_render_failed: { title: '（旧版）渲染失败', detail: '（旧版）渲染任务描述失败' },

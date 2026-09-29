@@ -16,10 +16,11 @@ DUE_WITHOUT_TODOIST = f"state IN ({sql_list([EventState.PENDING, EventState.TODO
 
 EVENT = Query("SELECT * FROM mail_events WHERE source_id = ? AND event_id = ?", "sqlite_autoindex_mail_events_1")
 
+# canary_run_id is NULL for real mail (contracts/ops-v1 canary events carry the run).
 INGEST = Query(
     "INSERT INTO mail_events"
-    " (source_id, event_id, payload_hash, payload, state, next_attempt_at, created_at, updated_at)"
-    " VALUES (?, ?, ?, ?, 'pending', ?, ?, ?) ON CONFLICT DO NOTHING",
+    " (source_id, event_id, payload_hash, payload, state, next_attempt_at, created_at, updated_at, canary_run_id)"
+    " VALUES (?, ?, ?, ?, 'pending', ?, ?, ?, ?) ON CONFLICT DO NOTHING",
     "sqlite_autoindex_mail_events_1",
 )
 # changes() is the row count of the INGEST just before it in the same batch.

@@ -47,6 +47,18 @@ describe('event detail', () => {
     expect(calls.filter((call) => call.path.startsWith('/api/v1/legacy_text'))).toHaveLength(1)
   })
 
+  it('marks a canary event and offers no action on it', async () => {
+    mockApi({
+      [DETAIL]: eventDetail({ state: 'complete', error_code: null, allowed_actions: [], canary: true, subject: 'Mail Hero canary' }),
+    })
+    renderApp(`/events/${EVENT_ID}`)
+    const status = await screen.findByRole('region', { name: '状态' })
+    expect(status).toHaveTextContent('金丝雀事件')
+    expect(status).toHaveTextContent('不会创建 Todoist')
+    expect(status).toHaveTextContent('金丝雀（合成检查）')
+    expect(screen.queryByRole('region', { name: '需要你处理' })).not.toBeInTheDocument()
+  })
+
   it('shows the code and request ID for a missing event', async () => {
     mockApi({ [DETAIL]: apiError(404, 'not_found', 'req-404') })
     renderApp(`/events/${EVENT_ID}`)

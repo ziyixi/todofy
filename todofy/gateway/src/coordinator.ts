@@ -4,6 +4,13 @@
  * Nothing generates these types from the Python class: keep `Coordinator` in step with the RPC
  * methods of worker/todofy/runtime/coordinator.py and `CoreResult` with `http.Result.wire()`.
  */
+import type {
+  CanaryResult,
+  GuardState,
+  OpsErrorCode,
+  OpsReportReceipt,
+  TodofyStatus,
+} from '../../../contracts/ops-v1/ops-v1.ts';
 import type { Env } from './env.ts';
 import { errorEnvelope, errorResponse, jsonText, type Context } from './http.ts';
 
@@ -31,6 +38,9 @@ export interface CoreSetup {
 
 export type ReportKind = 'summary' | 'recommendation';
 
+/** How an ops-v1 method of the core answers (contracts/ops-v1): a value, or an OpsErrorCode. */
+export type OpsAnswer<T> = { readonly ok: T; readonly error?: undefined } | { readonly error: OpsErrorCode };
+
 /** Arguments come only from the gateway, so client headers never reach the object. */
 export interface Coordinator extends Rpc.DurableObjectBranded {
   /** The Idempotency-Key header (null when absent) and the unread webhook body. */
@@ -51,6 +61,11 @@ export interface Coordinator extends Rpc.DurableObjectBranded {
     body: ReadableStream | null,
   ): Promise<CoreResult>;
   setup(): Promise<CoreSetup>;
+  // ops-v1 (the Ops entrypoint, src/ops.ts). Structured inputs travel as JSON text.
+  ops_status(): Promise<OpsAnswer<TodofyStatus>>;
+  ops_set_guard(input: string): Promise<OpsAnswer<GuardState>>;
+  ops_canary_result(eventId: string): Promise<OpsAnswer<CanaryResult>>;
+  ops_report(report: string): Promise<OpsAnswer<OpsReportReceipt>>;
 }
 
 export function coordinator(env: Env): DurableObjectStub<Coordinator> {

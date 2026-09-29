@@ -31,9 +31,12 @@ class Step(StrEnum):
     REMINDER = "reminder"
     REPORT = "report"
     BACKUP = "backup"
+    # The summary call of a canary event (contracts/ops-v1): its own step, so the summary
+    # latency stays real mail only; its Gemini calls and tokens still count against the day.
+    CANARY = "canary"
 
 
-GEMINI_STEPS = frozenset({Step.SUMMARY, Step.REPORT})
+GEMINI_STEPS = frozenset({Step.SUMMARY, Step.REPORT, Step.CANARY})
 TODOIST_CREATE_STEPS = frozenset({Step.TASK, Step.REMINDER})
 
 # Analytics Engine accepts at most 20 blobs, 20 doubles and one index of at most

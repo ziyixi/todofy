@@ -16,6 +16,8 @@ import pytest
 import todofy.core.sql as sql_package
 from todofy.core.report_schema import ReportStatus
 from todofy.core.sql import ACTIVE_STATES, Query, views
+from todofy.core.sql import metrics as metrics_sql
+from todofy.core.sql import reminders as reminder_sql
 from todofy.core.vocab import TERMINAL_STATES, EventState, ReminderState
 
 MIGRATIONS = sorted((Path(__file__).parents[2] / "migrations").glob("*.sql"))
@@ -236,6 +238,67 @@ def test_attention_page_uses_the_vocabulary_rule(db):
     assert [row[0] for row in rows] == ["old-pending", "new-failed"]
     count_sql = views.ATTENTION_COUNT.sql
     assert db.execute(count_sql, (SOURCE, cutoff)).fetchone() == (2,)
+
+
+def test_ops_columns_are_additive_and_checked(db):
+    """0003_ops.sql: rows written before it read NULL / 0; a run ID is 1-64 characters."""
+    insert_event(db, "real", payload="{}")
+    assert db.execute("SELECT canary_run_id FROM mail_events").fetchall() == [(None,)]
+    insert_event(db, "canary", payload="{}", canary_run_id="canary-2026-09-29")
+    for bad in ("", "x" * 65):
+        with pytest.raises(sqlite3.IntegrityError):
+            insert_event(db, f"bad-{len(bad)}", payload="{}", canary_run_id=bad)
+    db.execute(
+        "INSERT INTO mail_reminders (day, state, attention_count, created_at, updated_at)"
+        " VALUES ('2026-09-29', 'created', 0, 1, 1)"
+    )
+    assert db.execute("SELECT ops_count FROM mail_reminders").fetchall() == [(0,)]
+
+
+def test_canary_events_are_never_listed_counted_or_reminded_of(db):
+    now = 100_000
+    cutoff = now - 6 * 3600
+    for prefix, run in (("real", None), ("canary", "canary-1")):
+        insert_event(db, f"{prefix}-failed", "failed_summary", payload="{}", created_at=now, canary_run_id=run)
+        insert_event(db, f"{prefix}-old", "pending", payload="{}", created_at=cutoff - 1, canary_run_id=run)
+        insert_event(db, f"{prefix}-done", "complete", created_at=now, canary_run_id=run)
+    listed = {
+        "attention_page": db.execute(views.ATTENTION_PAGE.sql, (SOURCE, cutoff, -1, "", 10)).fetchall(),
+        "recent": db.execute(views.RECENT_PAGE.sql, (SOURCE, 2**52, "", 10)).fetchall(),
+        "recent_by_state": db.execute(views.RECENT_PAGE_BY_STATE.sql, (SOURCE, "complete", 2**52, "", 10)).fetchall(),
+        "reminder_rows": db.execute(reminder_sql.ATTENTION_ROWS.sql, (SOURCE, cutoff, 20)).fetchall(),
+    }
+    for name, rows in listed.items():
+        assert rows and all(row[0].startswith("real-") for row in rows), name
+    assert db.execute(views.ATTENTION_COUNT.sql, (SOURCE, cutoff)).fetchone() == (2,)
+    assert db.execute(reminder_sql.ATTENTION_COUNT.sql, (SOURCE, cutoff)).fetchone() == (2,)
+    assert dict(db.execute(views.ACTIVE_COUNTS.sql, (SOURCE,)).fetchall()) == {"failed_summary": 1, "pending": 1}
+    assert db.execute(views.RECEIVED_SINCE.sql, (SOURCE, 0)).fetchone() == (3,)
+    assert db.execute(views.OLDEST_DUE.sql, (now,)).fetchone() == (cutoff - 1,)
+
+
+def test_the_metrics_walk_sees_which_arrivals_and_completions_are_canaries(db):
+    insert_event(db, "real", "complete", created_at=10)
+    insert_event(db, "canary", "complete", created_at=20, canary_run_id="canary-1")
+    for event_id, at, from_state, to_state in (
+        ("real", 10, None, "pending"),
+        ("canary", 20, None, "pending"),
+        ("canary", 21, "pending", "summarizing"),
+        ("canary", 22, "summarizing", "complete"),
+        ("real", 30, "todo_sending", "complete"),
+    ):
+        db.execute(
+            "INSERT INTO event_transitions (event_id, at, from_state, to_state, actor) VALUES (?, ?, ?, ?, 'worker')",
+            (event_id, at, from_state, to_state),
+        )
+    rows = db.execute(metrics_sql.TRANSITIONS_AFTER.sql, (SOURCE, 0, 10)).fetchall()
+    assert [(row[1], row[4], row[5], row[6]) for row in rows] == [
+        ("real", "pending", 10, None),
+        ("canary", "pending", 20, "canary-1"),
+        ("canary", "summarizing", None, None),
+        ("canary", "complete", 20, "canary-1"),
+        ("real", "complete", 10, None),
+    ]
 
 
 # Rows from bound values: VALUES, or json_each over one bound JSON text.

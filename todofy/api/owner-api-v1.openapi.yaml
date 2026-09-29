@@ -558,6 +558,7 @@ components:
         - lookup_failed
         - lookup_ambiguous
         - dismissed_by_owner
+        - canary_side_effect_blocked
     LegacyEventErrorCode:
       x-legacy: true
       type: string
@@ -665,6 +666,12 @@ components:
             has_legacy_text:
               type: boolean
               description: GET /api/v1/legacy_text/{event_id} has the imported full text.
+            canary:
+              type: boolean
+              const: true
+              description: >-
+                Present (true) only for a synthetic canary event (contracts/ops-v1): processed through
+                Gemini but never sent to Todoist, listed, counted or reminded of.
       examples:
         - event_id: f8c1e9a0-1a98-4fb8-8ca1-4c0a3e710001
           state: todo_unknown

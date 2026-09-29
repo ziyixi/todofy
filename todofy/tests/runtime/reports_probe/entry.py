@@ -17,6 +17,7 @@ from urllib.parse import urlsplit
 
 from workers import Response, WorkerEntrypoint
 
+from todofy.core import ops
 from todofy.core.backoff import REPORT_ON_DEMAND_BUDGET
 from todofy.core.vocab import EventState
 from todofy.runtime import ledger, reminder, reports, retention
@@ -38,17 +39,27 @@ class Overlay:
 
 class Budget:
     """Stands in for the coordinator: its hourly report cap, Gemini token budget,
-    precompute failure counts (``failures`` maps "kind/top_n/day" to a count) and
-    on-demand report computation."""
+    precompute failure counts (``failures`` maps "kind/top_n/day" to a count),
+    on-demand report computation and the stored ops report (``ops_report``, an
+    OpsReport the object would hold)."""
 
     def __init__(
-        self, env: Any, slots: bool = True, tokens: bool = True, failures: dict[str, int] | None = None
+        self,
+        env: Any,
+        slots: bool = True,
+        tokens: bool = True,
+        failures: dict[str, int] | None = None,
+        ops_report: dict[str, Any] | None = None,
     ) -> None:
         self.env = env
         self.slots = slots
         self.tokens = tokens
         self.failures = dict(failures or {})
+        self.ops_report = None if ops_report is None else ops.stored_report(ops.compact(ops_report))
         self.calls: list[list[Any]] = []
+
+    def latest_ops_report(self) -> ops.Report | None:
+        return self.ops_report
 
     def report_failures(self, kind: str, top_n: int, day: str) -> int:
         return self.failures.get(f"{kind}/{top_n}/{day}", 0)
@@ -100,7 +111,9 @@ class Default(WorkerEntrypoint):
             return _http(await reports.serve(env, Budget(env), path.removeprefix("/api/"), urlsplit(request.url).query))
         args = json.loads(await request.text())
         env = Overlay(self.env, args.get("vars", {}))
-        budget = Budget(env, args.get("slots", True), args.get("tokens", True), args.get("failures"))
+        budget = Budget(
+            env, args.get("slots", True), args.get("tokens", True), args.get("failures"), args.get("ops_report")
+        )
         data: dict[str, Any] = {}
         match path:
             case "/d1":

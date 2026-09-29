@@ -53,6 +53,8 @@ class Code(StrEnum):
     LOOKUP_FAILED = "lookup_failed"
     LOOKUP_AMBIGUOUS = "lookup_ambiguous"
     DISMISSED_BY_OWNER = "dismissed_by_owner"
+    # A canary event (contracts/ops-v1) reached a step that would call Todoist; it ends there.
+    CANARY_SIDE_EFFECT_BLOCKED = "canary_side_effect_blocked"
     REMINDER_CREATE_FAILED = "reminder_create_failed"
     REMINDER_RESULT_UNKNOWN = "reminder_result_unknown"
     INTERRUPTED_REMINDER_CALL = "interrupted_reminder_call"
@@ -92,6 +94,7 @@ EVENT_ERROR_CODES: dict[Code, CodeInfo] = {
     Code.LOOKUP_FAILED: CodeInfo(),
     Code.LOOKUP_AMBIGUOUS: CodeInfo(),
     Code.DISMISSED_BY_OWNER: CodeInfo(),
+    Code.CANARY_SIDE_EFFECT_BLOCKED: CodeInfo(),
     Code.INVALID_SAVED_EVENT: CodeInfo(legacy=True),
     Code.LLM_CLIENT_UNAVAILABLE: CodeInfo(legacy=True),
     Code.SUMMARY_RENDER_FAILED: CodeInfo(legacy=True),
@@ -121,8 +124,12 @@ def current_codes(table: dict[Code, CodeInfo]) -> frozenset[Code]:
     return frozenset(code for code, info in table.items() if not info.legacy)
 
 
-def allowed_actions(state: str, error_code: str) -> tuple[Reconcile, ...]:
-    """Owner reconcile actions valid for a row, in display order."""
+def allowed_actions(state: str, error_code: str, *, canary: bool = False) -> tuple[Reconcile, ...]:
+    """Owner reconcile actions valid for a row, in display order.
+
+    A canary event (contracts/ops-v1) has none: every action could lead to a Todoist call."""
+    if canary:
+        return ()
     actions: list[Reconcile] = []
     if state == EventState.TODO_UNKNOWN:
         actions += [Reconcile.TASK_CREATED, Reconcile.TASK_NOT_CREATED]

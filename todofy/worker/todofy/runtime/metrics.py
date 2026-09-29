@@ -188,6 +188,8 @@ async def _walk(env: Any, store: Any, cursor: int, first_open: str, midnight: in
             day = core.day_of(at)
             if day < first_open:
                 continue  # a straggler of a day already written
+            if row["canary_run_id"] is not None:
+                continue  # a canary event (contracts/ops-v1) is not mail: never counted
             counts.update((day, key) for key in core.transition_keys(row["from_state"], row["to_state"]))
             if row["to_state"] == EventState.COMPLETE and row["received_at"] is not None:
                 latencies.append((day, max(at - int(row["received_at"]), 0)))

@@ -222,7 +222,8 @@ bug) is the gateway's 503 `unavailable`. A D1/storage `JsException` inside a met
 `CoreResult` is a 503 `unavailable` result (today's `except JsException`).
 
 Python exposes every method of the class over RPC, including `_`-prefixed helpers and the budget
-helpers; only the gateway binds the class and it calls only the six below. `alarm` is reserved and
+helpers; only the gateway binds the class and it calls only the six below and the four `ops_*` methods
+of §3.7. `alarm` is reserved and
 cannot be called.
 
 `MAINTENANCE_MODE` in the DO (defence in depth; the gateway refuses first with a `retry-after`):
@@ -281,6 +282,27 @@ gateway answers `GET /api/v1/setup` with the OpenAPI `Setup` body: `build` (gate
 `mail_source_id` (DO), `access_owner` (canonical owner), `configured` = `{mail_webhook_token:
 MAIL_WEBHOOK_TOKEN_SHA256 non-empty, report_basic_auth: REPORT_BASIC_AUTH_SHA256 non-empty}` merged with
 the DO's `configured`. Call throws → 503 `unavailable`.
+
+### 3.7 The `Ops` entrypoint and the `ops_*` methods (contracts/ops-v1)
+`gateway/src/index.ts` also exports the named `WorkerEntrypoint` class `Ops` (`gateway/src/ops.ts`),
+which a dashboard Worker in the same account binds with `[[services]] service = "todofy" entrypoint =
+"Ops"`. It is not an HTTP route and has no Access check: only a Worker deployed in this account can
+create the binding. The default `fetch`/`scheduled` handlers are unchanged. Each `Ops` method calls one
+object method; structured inputs travel as JSON text, and the object answers `{"ok": value}` or
+`{"error": "invalid_input" | "busy" | "unavailable"}` (never an exception), which `Ops` returns or
+rejects as `new Error(code)`. A thrown call (object down, Python exception) rejects `unavailable`.
+
+| `Ops` method | Object method | Gateway checks first |
+|---|---|---|
+| `status()` | `ops_status()` | – |
+| `setGuard(input)` | `ops_set_guard(json)` | input JSON-serialisable |
+| `canaryResult(eventId)` | `ops_canary_result(event_id)` | a string |
+| `reportOps(report)` | `ops_report(json)` | compact JSON ≤ 8 KiB |
+
+The object validates everything against the contract's rules (`core/ops.py`) and serves these in
+maintenance mode too. Vitest runs `Ops` in Node through a stand-in for `cloudflare:workers`
+(`gateway/test/cloudflare-workers.ts`, aliased in `vitest.config.ts`); `tests/runtime/test_ops.py`
+calls the real entrypoint over a service binding (`tests/runtime/ops_support.py`).
 
 ## 4. Trust and request IDs
 

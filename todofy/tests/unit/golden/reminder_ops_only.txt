@@ -1,0 +1,10 @@
+[Todofy System] 运维：4 项需要关注
+
+运维（仪表盘报告，生成于 2026-09-29T23:40:00Z）：
+- critical · mail-hero · endpoint_blocked · 自 2026-09-29T10:02:11Z · current_blocked=1, waiting_deliveries=3
+- critical · todofy · backup_stale · 自 2026-09-28T10:00:00Z · age_seconds=792000
+- warning · cloudflare · d1_rows_read_high · 自 2026-09-29T14:00:00Z · percent=81.5
+- warning · dashboard · canary_not_delivered · 自 2026-09-29T22:30:00Z · attempts=3, last_http_status=503
+查看仪表盘：https://home.example.com/
+
+此提醒每个 UTC 日最多创建一次。

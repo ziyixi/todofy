@@ -140,6 +140,25 @@ def next_run(env: Any, store: Any) -> int | None:
     return None if _bucket(env) is None else _load(store).next_run
 
 
+def last_backup_at(store: Any) -> int | None:
+    """When the last complete backup finished (Unix seconds), or None."""
+    return _load(store).last_backup_at or None
+
+
+def status_facts(env: Any, store: Any, now: int) -> dict[str, Any]:
+    """What ops status() reports: binding present, a job holding the ledger, the overview
+    status and the last complete backup."""
+    state = _load(store)
+    bound = _bucket(env) is not None
+    active = bound and _holding(state, now)
+    return {
+        "bound": bound,
+        "active": active,
+        "status": "disabled" if not bound else "running" if active else state.last_status,
+        "last_backup_at": state.last_backup_at or None,
+    }
+
+
 def overview(env: Any, store: Any, now: int) -> dict[str, Any]:
     """The Overview's ``backup`` object (OpenAPI BackupStatus)."""
     state = _load(store)
@@ -165,14 +184,17 @@ def overview(env: Any, store: Any, now: int) -> dict[str, Any]:
     }
 
 
-async def run(env: Any, store: Any, now: int) -> int | None:
-    """Start or continue the job: the epoch ms to continue at while it holds the ledger, else None."""
+async def run(env: Any, store: Any, now: int, *, may_start: bool = True) -> int | None:
+    """Start or continue the job: the epoch ms to continue at while it holds the ledger, else None.
+
+    ``may_start`` False (an ops guard defers the weekly backup) only holds back a new job; a
+    running one always continues, since it holds the ledger until it ends."""
     bucket = _bucket(env)
     if bucket is None:
         return None
     state = _load(store)
     if state.job is None:
-        if state.next_run > now:
+        if state.next_run > now or not may_start:
             return None
         state.job = Job(layout.weekly_prefix(now), now)
     job, retry_ms = state.job, CONTINUE_MS

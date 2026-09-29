@@ -29,6 +29,14 @@ function StatusSection({ event }: { event: EventDetail }) {
   const error = event.error_code ? EVENT_ERRORS[event.error_code] : null
   return (
     <Section title="状态" aside={<StateBadge state={event.state} />}>
+      {event.canary ? (
+        <div className="hint-box">
+          <p>
+            <strong>金丝雀事件</strong>：运维面板发出的合成端到端检查，只验证接收与摘要，不会创建 Todoist
+            任务，也不计入列表、统计和提醒。
+          </p>
+        </div>
+      ) : null}
       {error ? (
         <div className="code-explain">
           <p>
@@ -52,7 +60,7 @@ function StatusSection({ event }: { event: EventDetail }) {
           ['尝试次数', event.attempt_count],
           ['摘要中断', `${event.crashes} / 3`],
           ['版本', event.version],
-          ['来源', event.imported ? '从旧 Go 服务导入' : 'Mail Hero webhook'],
+          ['来源', event.canary ? '金丝雀（合成检查）' : event.imported ? '从旧 Go 服务导入' : 'Mail Hero webhook'],
         ]}
       />
     </Section>

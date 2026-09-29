@@ -79,3 +79,10 @@ def test_needs_review_cannot_be_retried_into_side_effects():
     assert Reconcile.RETRY_SUMMARY not in allowed_actions(EventState.FAILED_SUMMARY, Code.MAIL_NEEDS_REVIEW)
     for state in EventState:
         assert Reconcile.RETRY_SUMMARY not in allowed_actions(state, Code.MAIL_NEEDS_REVIEW)
+
+
+@pytest.mark.parametrize("state", list(EventState))
+def test_a_canary_offers_no_owner_action(state):
+    """contracts/ops-v1: every reconcile action could end in a Todoist call."""
+    for code in ("", "todo_result_unknown", "summary_failed", "todoist_rejected"):
+        assert allowed_actions(state, code, canary=True) == ()

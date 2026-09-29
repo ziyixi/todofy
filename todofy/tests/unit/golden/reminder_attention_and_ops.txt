@@ -1,0 +1,25 @@
+[Todofy System] Mail Hero：3 封邮件需要处理；运维 4 项
+
+Todofy 的 Mail Hero 收件箱有 3 个事件需要处理（UTC 2026-09-30）：
+
+- f8c1e9a0-1a98-4fb8-8ca1-4c0a3e710303 · pending · summary_failed · 收到 2026-09-27T04:00:00Z
+- f8c1e9a0-1a98-4fb8-8ca1-4c0a3e710301 · failed_summary · summary_failed · 收到 2026-09-27T05:00:00Z
+- f8c1e9a0-1a98-4fb8-8ca1-4c0a3e710302 · todo_unknown · - · 收到 2026-09-27T11:00:00Z
+
+运维（仪表盘报告，生成于 2026-09-29T23:40:00Z）：
+- critical · mail-hero · endpoint_blocked · 自 2026-09-29T10:02:11Z · current_blocked=1, waiting_deliveries=3
+- critical · todofy · backup_stale · 自 2026-09-28T10:00:00Z · age_seconds=792000
+- warning · cloudflare · d1_rows_read_high · 自 2026-09-29T14:00:00Z · percent=81.5
+- warning · dashboard · canary_not_delivered · 自 2026-09-29T22:30:00Z · attempts=3, last_http_status=503
+查看仪表盘：https://home.example.com/
+
+处理方法：
+1. 打开 https://todofy.example.org/attention（经 Cloudflare Access 登录）查看全部待处理事件。
+2. 进入事件详情，按情况选择对账动作：
+   - 已创建任务（task_created）：Todoist 已有含 `Mail Hero event: <event_id>` 的任务，填入它的任务 ID；
+   - 确认未创建（task_not_created）：已确认 Todoist 没有该任务，会用冻结的正文重新创建，可能重复建任务；
+   - 重新摘要（retry_summary）：重新摘要 failed_summary 事件（mail_needs_review 除外）；
+   - 放弃（dismiss）：放弃 failed_summary 或 todo_unknown 事件，不会检查 Todoist。
+3. 超过 6 小时仍在处理中的事件多半仍在自动重试，可先查看错误码。
+
+此提醒每个 UTC 日最多创建一次。

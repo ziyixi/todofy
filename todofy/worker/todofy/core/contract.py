@@ -6,6 +6,10 @@ Where they differ the schema wins: typed optional fields must have their JSON ty
 (Go silently accepted null), ``received_at`` must be UTC with ``Z`` and attachment
 enums are checked. A ``sent_at`` year Python cannot hold reads as unknown rather than
 failing. Unknown fields are ignored so Mail Hero can add optional ones.
+
+The optional top-level ``canary`` marks a synthetic end-to-end check (contracts/ops-v1):
+Todofy processes it through Gemini but never causes a side effect for it. A marker that is
+present but unreadable is rejected (400, nothing stored) rather than guessed at.
 """
 
 import json
@@ -29,6 +33,7 @@ ATTACHMENT_FIELDS = ("filename", "content_type", "size")
 STORAGE_STATUSES = frozenset({"stored", "omitted"})
 OMITTED_REASONS = frozenset({"size_limit", "message_size_limit", "inline_image", "capacity"})
 
+CANARY_RUN_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}", re.ASCII)
 UUID = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}", re.IGNORECASE | re.ASCII)
 # [0-9], not \d: Python's \d also matches non-ASCII digits.
 _RFC3339 = re.compile(
@@ -82,6 +87,8 @@ class MailEvent:
     warnings: tuple[str, ...] = ()
     content_policy_version: str = ""
     attachments_omitted_count: int = 0
+    # The dashboard's run of a canary event; None for real mail.
+    canary_run_id: str | None = None
 
     @property
     def unreadable(self) -> bool:
@@ -138,6 +145,7 @@ def parse_mail_event(raw: bytes) -> MailEvent:
         warnings=_optional(message, "warnings", _strings, ()),
         content_policy_version=_optional(message, "content_policy_version", _string, ""),
         attachments_omitted_count=_optional(message, "attachments_omitted_count", _integer, 0),
+        canary_run_id=_optional(top, "canary", _canary, None),
     )
     _check_content_policy(event)
     return event
@@ -152,6 +160,17 @@ def _check_content_policy(event: MailEvent) -> None:
         raise ContractError("policy")
     if event.text_truncated and (original is None or original <= size):
         raise ContractError("policy")
+
+
+def _canary(value: Any) -> str:
+    # {"run_id": <RunId>, ...} (the schema lets Mail Hero add fields): an unreadable marker must
+    # not turn a canary into real mail.
+    if not isinstance(value, dict) or "run_id" not in value:
+        raise ContractError("canary")
+    run_id = value["run_id"]
+    if not isinstance(run_id, str) or not CANARY_RUN_ID.fullmatch(run_id):
+        raise ContractError("canary")
+    return run_id
 
 
 def _reject_constant(name: str) -> NoReturn:

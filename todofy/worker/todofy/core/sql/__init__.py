@@ -25,5 +25,7 @@ def sql_list(values: Iterable[str]) -> str:
 ACTIVE_STATES = tuple(state for state in EventState if state not in TERMINAL_STATES)
 ACTIVE = f"state IN ({sql_list(ACTIVE_STATES)})"
 DUE = f"state IN ({sql_list([EventState.PENDING, EventState.SUMMARIZED, EventState.TODO_CREATED])})"
+# Canary events (contracts/ops-v1) are processed but never counted, listed or reminded of.
+REAL_MAIL = "canary_run_id IS NULL"
 # Bind the attention cutoff (now - ATTENTION_AGE_SECONDS) to the placeholder.
 ATTENTION = f"(state IN ({sql_list(sorted(ALWAYS_ATTENTION_STATES))}) OR created_at <= ?)"

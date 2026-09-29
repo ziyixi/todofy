@@ -5,6 +5,12 @@ frozen, so a retry sends the same bytes and X-Request-Id
 (mail_inbox_worker.go:559-666 @ 6c46ed4). Only a failure that cannot have
 created a task (``failed``) is retried, hourly and at most REMINDER_MAX_ATTEMPTS
 times; ``unknown`` is never resent that day.
+
+The day's task also carries the ops digest (contracts/ops-v1): the warning and
+critical items of the dashboard's latest report, while it is at most 36 hours old.
+A day with ops items but nothing needing attention still gets its one task; the
+text is frozen with the claim like the rest, so a report that arrives later never
+causes a second task that day. Canary events are never counted or listed.
 """
 
 import json
@@ -20,6 +26,7 @@ from todofy.core.backoff import (
 )
 from todofy.core.classify import TaskResult, TaskVerdict
 from todofy.core.metrics import Step
+from todofy.core.ops import digest
 from todofy.core.reminder_text import LIST_LIMIT, SENDER, AttentionRow, reminder_body, reminder_title
 from todofy.core.render import rfc3339
 from todofy.core.request_id import todoist_request_id
@@ -57,15 +64,18 @@ async def tick(env: Any, coordinator: Any, now: int) -> int:
 
     source, cutoff = source_id(env), now - ATTENTION_AGE_SECONDS
     attention = (await db.prepare(sql.ATTENTION_COUNT.sql).bind(source, cutoff).first()).n
-    if attention == 0:
+    ops = digest(coordinator.latest_ops_report(), now)
+    if attention == 0 and ops is None:
         return now + REMINDER_CHECK_INTERVAL
     if row is None:
-        attempts = 0
-        listed = await db.prepare(sql.ATTENTION_ROWS.sql).bind(source, cutoff, LIST_LIMIT).all()
-        rows = [AttentionRow(r.event_id, r.state, r.last_error_code, r.created_at) for r in listed.results]
-        subject = reminder_title(attention)
-        body = reminder_body(attention, day, rows, var(env, "TODOFY_PUBLIC_HOST"))
-        claim = await db.prepare(sql.CLAIM_DAY.sql).bind(day, subject, body, attention, now, now).run()
+        attempts, rows = 0, []
+        if attention > 0:
+            listed = await db.prepare(sql.ATTENTION_ROWS.sql).bind(source, cutoff, LIST_LIMIT).all()
+            rows = [AttentionRow(r.event_id, r.state, r.last_error_code, r.created_at) for r in listed.results]
+        ops_count = 0 if ops is None else len(ops.items)
+        subject = reminder_title(attention, ops_count)
+        body = reminder_body(attention, day, rows, var(env, "TODOFY_PUBLIC_HOST"), ops)
+        claim = await db.prepare(sql.CLAIM_DAY.sql).bind(day, subject, body, attention, ops_count, now, now).run()
     else:
         attempts, subject, body = row.attempts, row.subject, row.body
         claim = await db.prepare(sql.CLAIM_RETRY.sql).bind(now, day, attempts, now).run()

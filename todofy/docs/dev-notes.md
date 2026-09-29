@@ -67,7 +67,8 @@ gateway/                       the gateway Worker `todofy` (TypeScript, own pack
   wrangler.toml                gateway base/local config (assets, cron, COORDINATOR → todofy-core)
   wrangler.test.toml           runtime tests: DEV_AUTH_BYPASS
   wrangler.test-auth.toml      runtime tests: real Access JWT checks against a loopback issuer
-migrations/0001_init.sql       the D1 schema; 0002_daily_metrics.sql adds the owner UI's daily trends (§6)
+migrations/0001_init.sql       the D1 schema; 0002_daily_metrics.sql adds the owner UI's daily trends (§6);
+                               0003_ops.sql adds mail_events.canary_run_id and mail_reminders.ops_count (§5, ops-v1)
 api/                           owner-api-v1.openapi.yaml (source of truth for the UI), newsletter report
                                schemas; the webhook body references ../contracts/mail-received-v1 (shared)
 worker/todofy/core/            pure stdlib Python, host-testable, no `js`/`workers` imports
@@ -301,6 +302,9 @@ newsletter_auth_failure()                 count a failed Basic credential → 40
 owner_api(owner, method, path, query,     the owner API (api.handle); owner not an address → 401
           content_length, body)
 setup()                                   {"mail_source_id", "configured": {...}} for the setup page
+ops_status() | ops_set_guard(input_json)  the gateway's Ops entrypoint (contracts/ops-v1, below):
+ops_canary_result(event_id)               {"ok": value} or {"error": "invalid_input" | "busy" | "unavailable"},
+ops_report(report_json)                   never raised; JSON text in, plain dicts out
 ```
 Every other method is callable over RPC too (Python exposes them all, `_`-prefixed ones included); only
 the gateway binds the class, and it calls only these.
@@ -479,6 +483,48 @@ the DO SQLite table `backup_state`; losing it only makes the next backup due now
 pauses for a backup). `tools/backup_restore.py` downloads, checks, and turns a backup into SQL
 (docs/cloudflare-setup.md §7).
 
+### ops-v1 (lead; `core/ops.py`, `runtime/ops.py`, `gateway/src/ops.ts`)
+The operations surface a dashboard Worker in the same account reaches through a service binding to the
+gateway's named entrypoint `Ops` (`[[services]] service = "todofy" entrypoint = "Ops"`); no public route,
+no Access policy. The contract is `../contracts/ops-v1` (README, schema, fixtures, `ops-v1.ts` types the
+gateway imports). `Ops` forwards each method to one `ops_*` RPC method and turns `{"error": code}` into
+`new Error(code)`; a failed call is `unavailable`. `core/ops.py` holds every rule (input checks with
+`fullmatch`, guard expiry, signals and health, canary result, digest items) and builds outputs only from
+numbers, booleans, timestamps and closed codes; `tests/unit/test_ops_core.py` validates them against the
+schema.
+```
+status()          one D1 batch of 5 indexed reads (views.ACTIVE_COUNTS, ATTENTION_COUNT, RECEIVED_SINCE,
+                  OLDEST_DUE, reminders.REMINDER_DAY) + object storage; D1 failure → health "down"
+setGuard(input)   object storage only (ops_guard); idempotent; shed until ≤ 36 h; expires by itself
+canaryResult(id)  one primary-key read (ledger.get)
+reportOps(report) object storage only (ops_report, ≤ 8 KiB); a later generated_at already stored wins
+```
+Object storage (`runtime/ops.DO_SCHEMA`, may be lost like the other object tables): `ops_guard` (epoch ms),
+`ops_job_runs` (last run of each deferrable job), `ops_report` (the dashboard's latest report).
+
+Canary events (`mail.received.v1` with top-level `canary`, `contract.MailEvent.canary_run_id`, stored in
+`mail_events.canary_run_id`): same intake and idempotency; the normal summary step (same prompt, token
+reservation, `llm_inflight`), recorded as Analytics Engine step `canary`; then `complete` without a
+`summaries` row when the answer passes `clean_summary`, `render_todo_body` and `build_task_request`
+(built, never sent), else retried up to 3 attempts for `summary_failed`/`llm_quota` and otherwise
+`ignored` with the code. Where real mail would wait for the owner (`failed_summary`, crash limit, budget)
+a canary ends `ignored`. `_create_task`/`_lookup` and `recover_interrupted` end a canary an older
+release left at a Todoist step as `ignored` `canary_side_effect_blocked`; `allowed_actions(...,
+canary=True)` is empty. `sql.REAL_MAIL` keeps canaries out of every list and count (attention page and
+count, Overview counts, recent pages, the reminder), `metrics._walk` skips them, and the event detail
+answers `canary: true`. A processing pause holds a canary `pending` (reported as `processing`).
+
+Guard `shed` defers only: a new weekly backup (unless the last complete one is older than 8 days or
+there is none; a running job continues), the retention tick and the metrics rollup (each unless it last
+ran 72 h ago). A deferred job's own time moves to min(guard end, bound); ending or changing the guard
+makes them due again and wakes the object. Everything else keeps running: intake, the ledger steps,
+canaries, recovery, the watchdog, the reminder/digest, report precompute and the cron wake.
+
+Digest: `reminder.tick` adds `core.ops.digest(coordinator.latest_ops_report(), now)` (warning and
+critical items of a report at most 36 h old, critical first) to the day's one task; an ops-only day
+still gets its task (title `[Todofy System] 运维：{n} 项需要关注`), the claim freezes the text and
+`mail_reminders.ops_count`, and a day without ops items keeps the exact old text.
+
 ### health (lead)
 `GET /health` on the hooks hosts is answered by the gateway alone: `{"build", "service": "todofy",
 "status": "healthy", "timestamp"}` (the newsletter's preflight reads `service` and `status`). The
@@ -514,7 +560,7 @@ Point layouts (one dataset; `blob1` tells them apart):
 | Writer | `index1` | `blob1` | `blob2` | `blob3` | `blob4` | `double1` | `double2` | `double3` | `double4` |
 |---|---|---|---|---|---|---|---|---|---|
 | gateway, per request and cron | route | host kind: `owner`, `hooks`, `unknown`, `cron` | method (`OTHER` if unusual) | route template (`/api/v1/events/{id}`, `asset`, `page`, `other`, `wake`) | status class `2xx`…`5xx` | wall ms to response headers | request Content-Length (0 if none) | response Content-Length (0 if none) | — |
-| core, per upstream step | step | step: `summary`, `task`, `lookup`, `reminder`, `report`, `backup` | outcome: `ok`/`failed` (Gemini), `TaskResult` (task, reminder), ledger state (lookup) | error code or empty | Gemini model or empty | upstream wall ms | tokens in (prompt) | tokens out (total − prompt) | requests sent (models tried, POSTs; 0 for lookups) |
+| core, per upstream step | step | step: `summary`, `canary` (a canary's summary call), `task`, `lookup`, `reminder`, `report`, `backup` | outcome: `ok`/`failed` (Gemini), `TaskResult` (task, reminder), ledger state (lookup) | error code or empty | Gemini model or empty | upstream wall ms | tokens in (prompt) | tokens out (total − prompt) | requests sent (models tried, POSTs; 0 for lookups) |
 
 Never written: paths, query strings, event IDs, subjects, addresses, the owner's identity, upstream bodies.
 `backup` is one point per job, written when it ends: outcome `ok`/`failed`, code `storage_error` or

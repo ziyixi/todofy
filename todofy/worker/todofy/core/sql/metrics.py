@@ -14,11 +14,13 @@ LAST_TRANSITION = Query("SELECT coalesce(max(id), 0) AS id FROM event_transition
 # are not AUTOINCREMENT, so a restored database (backup restore or D1 Time Travel) reuses ids
 # with other rows, and a cursor whose row changed or vanished must not be walked on from.
 CURSOR_ROW = Query("SELECT event_id, at FROM event_transitions WHERE id = ?", "rowid")
-# Bind the source, the cursor (last counted id), then the page size. The arrival time is
-# looked up only for completions: their end-to-end latency is at - received_at.
+# Bind the source, the cursor (last counted id), then the page size. The event is looked up
+# only for arrivals and completions, the transitions that count: a completion's end-to-end
+# latency is at - received_at, and canary events (canary_run_id set) count as neither.
 TRANSITIONS_AFTER = Query(
-    "SELECT t.id, t.event_id, t.at, t.from_state, t.to_state, e.created_at AS received_at FROM event_transitions t"
-    " LEFT JOIN mail_events e ON t.to_state = 'complete' AND e.source_id = ? AND e.event_id = t.event_id"
+    "SELECT t.id, t.event_id, t.at, t.from_state, t.to_state, e.created_at AS received_at, e.canary_run_id"
+    " FROM event_transitions t LEFT JOIN mail_events e"
+    " ON (t.from_state IS NULL OR t.to_state = 'complete') AND e.source_id = ? AND e.event_id = t.event_id"
     " WHERE t.id > ? ORDER BY t.id LIMIT ?",
     "sqlite_autoindex_mail_events_1",
 )

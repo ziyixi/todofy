@@ -8,7 +8,18 @@ export const HOOKS_HOST = 'todofy-hooks.localhost';
 export const OWNER = 'owner@example.com';
 export const CSRF_KEY = 'ab'.repeat(32);
 
-const CORE_METHODS = ['ingest', 'wake', 'newsletter', 'newsletter_auth_failure', 'owner_api', 'setup'] as const;
+const CORE_METHODS = [
+  'ingest',
+  'wake',
+  'newsletter',
+  'newsletter_auth_failure',
+  'owner_api',
+  'setup',
+  'ops_status',
+  'ops_set_guard',
+  'ops_canary_result',
+  'ops_report',
+] as const;
 
 /** One RPC call the gateway made on the TodofyCore stub. */
 export interface CoreCall {

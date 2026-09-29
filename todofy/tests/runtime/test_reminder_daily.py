@@ -3,8 +3,11 @@ per UTC day, claimed before the call; failed retried hourly with the frozen
 request up to five times; unknown never resent that day (Go
 mail_inbox_attention_test.go:355-561)."""
 
+import json
+
 import pytest
 
+from tests import mail_contract
 from tests.fakes.server import Reply
 from tests.fakes.todoist_fake import PROJECT_ID, TASKS_PATH
 from tests.runtime.reports_support import (  # noqa: F401
@@ -15,6 +18,7 @@ from tests.runtime.reports_support import (  # noqa: F401
     component_errors,
     probe_fixture,
 )
+from todofy.core import ops
 from todofy.core.reminder_text import SENDER, AttentionRow, reminder_body, reminder_title
 from todofy.core.request_id import todoist_request_id
 
@@ -56,8 +60,8 @@ def reminder(probe: Probe, day: str = "2026-09-28") -> dict:
     return row
 
 
-def tick(probe: Probe, now: int, **vars: str) -> int:
-    return probe.call("/reminder/tick", now=now, vars=vars)["next"]
+def tick(probe: Probe, now: int, ops_report: dict | None = None, **vars: str) -> int:
+    return probe.call("/reminder/tick", now=now, vars=vars, ops_report=ops_report)["next"]
 
 
 @pytest.mark.parametrize(
@@ -203,3 +207,80 @@ def test_page_walks_days_newest_first(probe):
         "imported": False,
     }
     assert (items[1]["next_attempt_at"], items[2]["task_id"]) == ("2026-09-28T15:00:00Z", "t1")
+
+
+# ---- the ops digest (contracts/ops-v1) ---------------------------------------------------------
+
+REPORT = json.loads(
+    (mail_contract.TODOFY.parent / "contracts" / "ops-v1" / "fixtures" / "OpsReport" / "daily.json").read_text()
+) | {"generated_at": "2026-09-28T14:00:00Z"}
+
+
+def digest(report: dict = REPORT) -> ops.OpsDigest:
+    found = ops.digest(ops.report(report, NOW), NOW)
+    assert found is not None
+    return found
+
+
+def test_an_ops_only_day_gets_its_one_task(probe):
+    assert tick(probe, NOW, REPORT) == TOMORROW
+    [create] = probe.todoist.creates()
+    title, body = reminder_title(0, 4), reminder_body(0, "2026-09-28", [], PUBLIC_HOST, digest())
+    assert create.json() == {"content": title, "description": body, "project_id": PROJECT_ID}
+    assert create.headers["x-request-id"] == todoist_request_id(title, body, SENDER)
+    row = reminder(probe)
+    assert (row["state"], row["attention_count"], row["ops_count"]) == ("created", 0, 4)
+
+    newer = REPORT | {"generated_at": "2026-09-28T14:30:00Z", "items": REPORT["items"][:1]}
+    assert tick(probe, NOW + 600, newer) == TOMORROW
+    assert len(probe.todoist.creates()) == 1
+
+
+def test_attention_and_ops_share_the_days_one_task(probe, attention):
+    assert tick(probe, NOW, REPORT) == TOMORROW
+    [create] = probe.todoist.creates()
+    assert create.json()["content"] == reminder_title(2, 4) == "[Todofy System] Mail Hero：2 封邮件需要处理；运维 4 项"
+    assert create.json()["description"] == reminder_body(2, "2026-09-28", attention, PUBLIC_HOST, digest())
+    row = reminder(probe)
+    assert (row["attention_count"], row["ops_count"]) == (2, 4)
+
+
+def test_a_day_already_reminded_of_attention_gets_no_second_task_for_ops(probe, attention):
+    assert tick(probe, NOW) == TOMORROW
+    assert tick(probe, NOW + 600, REPORT) == TOMORROW
+    [create] = probe.todoist.creates()
+    assert create.json()["content"] == reminder_title(2)
+    assert reminder(probe)["ops_count"] == 0
+
+
+def test_a_retry_resends_the_frozen_text_whatever_the_report_says_now(probe):
+    probe.todoist.queue("POST", TASKS_PATH, Reply(400, {"error": "no"}))
+    assert tick(probe, NOW, REPORT) == NOW + 3600
+    later = REPORT | {"generated_at": "2026-09-28T15:30:00Z", "items": REPORT["items"][:1]}
+    assert tick(probe, NOW + 3600, later) == TOMORROW
+    first, second = probe.todoist.creates()
+    assert first.body == second.body and first.headers["x-request-id"] == second.headers["x-request-id"]
+
+
+@pytest.mark.parametrize(
+    "report",
+    [
+        REPORT | {"generated_at": "2026-09-27T02:59:59Z"},  # more than 36 hours old
+        REPORT | {"items": [item for item in REPORT["items"] if item["severity"] == "info"]},
+        REPORT | {"items": []},
+        None,
+    ],
+    ids=["stale", "info_only", "empty", "none"],
+)
+def test_nothing_to_report_sends_nothing(probe, report):
+    assert tick(probe, NOW, report) == NOW + 600
+    assert probe.todoist.creates() == []
+    assert probe.sql("SELECT day FROM mail_reminders") == []
+
+
+@pytest.mark.parametrize(
+    "switch", [{"REMINDER_ENABLED": "false"}, {"FORCE_PAUSE_TODOIST": "true"}, {"PROCESSING_PAUSED": "true"}]
+)
+def test_the_switches_hold_the_ops_digest_too(probe, switch):
+    assert tick(probe, NOW, REPORT, **switch) == NOW + 600
+    assert probe.todoist.creates() == []

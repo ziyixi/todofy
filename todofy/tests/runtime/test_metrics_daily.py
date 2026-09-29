@@ -7,12 +7,15 @@ The Analytics Engine binding is bound in the test configs too (a local no-op dat
 step also runs its data-point write.
 """
 
+import json
 import sqlite3
 import time
+import uuid
 from pathlib import Path
 
 import pytest
 
+from tests import mail_contract
 from tests.fakes.gemini_fake import GeminiFake
 from tests.fakes.todoist_fake import TodoistFake
 from tests.runtime.harness import Worker, mail_event, transitions, wait_until
@@ -63,6 +66,11 @@ def test_a_finished_day_is_written_once_and_served(
         ("DELETE FROM metric_counts", ()),
     )
     _complete_one_mail(worker)
+    # A canary event (contracts/ops-v1) is not mail: it spends Gemini budget but counts as no mail.
+    canary = json.loads(mail_contract.fixtures()["canary_event"].read_bytes())
+    canary["event_id"], canary["message"]["id"] = str(uuid.uuid4()), str(uuid.uuid4())
+    assert worker.post_event(json.dumps(canary).encode()).status_code == 204
+    assert worker.wait_event(canary["event_id"], {"complete"})["canary"] is True
     # Move today to yesterday, in D1 and in the object's counters, and let the flush run.
     worker.d1(f"UPDATE event_transitions SET at = at - {DAY}")
     worker.d1(f"UPDATE mail_events SET created_at = created_at - {DAY}, updated_at = updated_at - {DAY}")
@@ -75,9 +83,10 @@ def test_a_finished_day_is_written_once_and_served(
 
     yesterday = _utc_day(-1)
     written = wait_until(lambda: _metric_rows(worker, yesterday) or None, 20, "yesterday's metrics")
-    # Mail counts come from the ledger (both mails); step counters only from the second one.
+    # Mail counts come from the ledger (both mails, not the canary); step counters only from the
+    # second mail and the canary's summary call.
     assert written["mails_received"] == 2 and written["mails_completed"] == 2
-    assert written["todoist_creates"] == 1 and written["gemini_calls"] == 1
+    assert written["todoist_creates"] == 1 and written["gemini_calls"] == 2
     assert written["gemini_tokens:model-a"] > 0
     # Two mails whose end-to-end times may differ by a second on a slow runner.
     assert 0 <= written["latency_p50_s"] <= written["latency_p90_s"] < 60
