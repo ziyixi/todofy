@@ -333,6 +333,11 @@ async function parseJob(env:Env,key:string,attempts=0):Promise<number|null> {
   }
 }
 
+/** The synthetic connection-test message. Its webhook payload comes from the same buildPayload as
+ * real mail; contracts/mail-received-v1 keeps a golden copy of it. */
+export function syntheticTestMail():ParsedMail {
+  return {subject:'Mail Hero webhook test',text:'This is a synthetic Mail Hero connection test.',html:'',from:[{address:'synthetic@example.org',name:'Mail Hero'}],to:[],cc:[],reply_to:[],sent_at:null,rfc_message_id:null,headers:[],attachments:[],needs_review:false,warnings:[]};
+}
 export async function createSyntheticTestDelivery(env:Env,revisionID:string,actionID:string):Promise<string> {
   const old=await first(env,'SELECT event_id FROM deliveries WHERE action_request_id=?',actionID);
   if(old) return old.event_id;
@@ -341,7 +346,7 @@ export async function createSyntheticTestDelivery(env:Env,revisionID:string,acti
   const hash=await sha256(`synthetic:${actionID}`);
   const id=`${hash.slice(0,8)}-${hash.slice(8,12)}-4${hash.slice(13,16)}-8${hash.slice(17,20)}-${hash.slice(20,32)}`;
   const date=now(), key=`parsed/${id}/synthetic/message.json`;
-  const parsed:ParsedMail={subject:'Mail Hero webhook test',text:'This is a synthetic Mail Hero connection test.',html:'',from:[{address:'synthetic@example.org',name:'Mail Hero'}],to:[],cc:[],reply_to:[],sent_at:null,rfc_message_id:null,headers:[],attachments:[],needs_review:false,warnings:[]};
+  const parsed=syntheticTestMail();
   const content=JSON.stringify(parsed), size=utf8.encode(content).length;
   await reserveObjectCapacity(env,`raw/${id}.eml`,size);
   await env.MAIL_STORE.put(key,content,{httpMetadata:{contentType:'application/json'}});

@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "test": "node --test test/*.test.mjs",
+    "contract:update": "node test/contract-fixtures.mjs --write",
     "typecheck": "tsc --noEmit",
     "deploy": "wrangler deploy --config wrangler.native.toml",
     "dev": "wrangler dev --config wrangler.native.toml --ip 127.0.0.1"

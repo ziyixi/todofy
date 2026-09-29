@@ -312,7 +312,7 @@ paths:
           without `Content-Length` the body is read up to 1 MiB and anything longer is 413.
         content:
           application/json:
-            schema: {$ref: './mail-received-v1.schema.json'}
+            schema: {$ref: '../../contracts/mail-received-v1/mail-received-v1.schema.json'}
       responses:
         '204': {description: Stored, or already stored with identical bytes.}
         '400': {$ref: '#/components/responses/BadRequest'}

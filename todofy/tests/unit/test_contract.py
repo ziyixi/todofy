@@ -1,13 +1,13 @@
 import copy
 import json
-from pathlib import Path
 
 import pytest
 
+from tests import mail_contract
 from todofy.core import contract
 from todofy.core.contract import ContractError, parse_mail_event
 
-SCHEMA = json.loads((Path(__file__).parents[2] / "api" / "mail-received-v1.schema.json").read_text())
+SCHEMA = json.loads(mail_contract.SCHEMA.read_text())
 
 
 def encode(payload) -> bytes:

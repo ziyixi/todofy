@@ -1,11 +1,11 @@
 """Strict validation of Mail Hero ``mail.received.v1`` events.
 
 Rules follow the Go consumer (mail_inbox.go:67-122 @ 6c46ed4) and the published
-schema (api/mail-received-v1.schema.json). Where they differ the schema wins:
-typed optional fields must have their JSON type (Go silently accepted null),
-``received_at`` must be UTC with ``Z`` and attachment enums are checked. A
-``sent_at`` year Python cannot hold reads as unknown rather than failing. Unknown
-fields are ignored so Mail Hero can add optional ones.
+schema (the monorepo's contracts/mail-received-v1/mail-received-v1.schema.json).
+Where they differ the schema wins: typed optional fields must have their JSON type
+(Go silently accepted null), ``received_at`` must be UTC with ``Z`` and attachment
+enums are checked. A ``sent_at`` year Python cannot hold reads as unknown rather than
+failing. Unknown fields are ignored so Mail Hero can add optional ones.
 """
 
 import json

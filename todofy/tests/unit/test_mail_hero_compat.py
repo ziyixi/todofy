@@ -1,28 +1,32 @@
 """Every event shape Mail Hero really emits must pass ``parse_mail_event``.
 
-tests/fixtures/mail_hero holds exact webhook bytes produced once by Mail Hero's own
-code at mail-hero 5d2b625: ``parseMail`` on synthetic .eml files, then
-``buildPayload`` as ``createDelivery`` calls it (``pre_storage_v1`` uses the builder
-from before storage-v1, mail-hero 32f6954^). The throwaway node script that made
-them is not kept, so Todofy never depends on Mail Hero's source.
+The fixtures live in the monorepo's contracts/mail-received-v1 (see tests/mail_contract.py).
+Mail Hero's own test (mail-hero/cloudflare/test/contract-fixtures.test.mjs) rebuilds each one
+with ``parseMail`` and ``buildPayload`` on synthetic mail and fails when its builder no longer
+produces these exact bytes, so an incompatible builder change reaches this test before it merges.
+``legacy/pre_storage_v1`` is frozen output of the builder before storage-v1 (mail-hero 32f6954^):
+retries resend frozen bytes, so Todofy keeps accepting it.
 """
 
+import json
 from datetime import UTC, datetime
-from pathlib import Path
 
+import jsonschema
 import pytest
 
+from tests import mail_contract
 from todofy.core.contract import MAX_EVENT_BYTES, MAX_TEXT_BYTES, MailEvent, parse_mail_event, utf8_len
 from todofy.core.gemini_wire import summary_content
 from todofy.core.render import FOOTER_PREFIX, content_notice, render_todo_body, task_title
 
-FIXTURES = Path(__file__).parents[1] / "fixtures" / "mail_hero"
-NAMES = sorted(path.stem for path in FIXTURES.glob("*.json"))
+FIXTURES = mail_contract.fixtures()
+NAMES = list(FIXTURES)
 RECEIVED = datetime(2026, 9, 28, 8, 0, tzinfo=UTC)
+SCHEMA = jsonschema.Draft202012Validator(json.loads(mail_contract.SCHEMA.read_text()))
 
 
 def event(name: str) -> MailEvent:
-    return parse_mail_event((FIXTURES / f"{name}.json").read_bytes())
+    return parse_mail_event(FIXTURES[name].read_bytes())
 
 
 def test_the_fixture_set_covers_every_shape():
@@ -44,6 +48,18 @@ def test_the_fixture_set_covers_every_shape():
         "truncated_ui_and_webhook",
         "truncated_webhook",
     ]
+
+
+@pytest.mark.parametrize("name", NAMES)
+def test_every_fixture_matches_the_published_schema(name):
+    event = json.loads(FIXTURES[name].read_bytes())
+    errors = [f"{list(error.absolute_path)}: {error.message}" for error in SCHEMA.iter_errors(event)]
+    assert errors == []
+
+
+def test_only_legacy_fixtures_are_frozen():
+    legacy = {path.stem for path in (mail_contract.CONTRACT / "fixtures" / "legacy").glob("*.json")}
+    assert legacy == {"pre_storage_v1"}
 
 
 @pytest.mark.parametrize("name", NAMES)
@@ -122,7 +138,7 @@ def test_attachment_metadata_as_mail_hero_reports_it():
 
 
 def test_the_largest_event_fits_the_webhook_limit():
-    raw = (FIXTURES / "max_size.json").read_bytes()
+    raw = FIXTURES["max_size"].read_bytes()
     assert 1_000_000 < len(raw) <= MAX_EVENT_BYTES
     assert utf8_len(parse_mail_event(raw).text) == MAX_TEXT_BYTES
 

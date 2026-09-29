@@ -2,14 +2,14 @@
 
 import json
 import time
-from pathlib import Path
 
 import pytest
 
+from tests import mail_contract
 from tests.fakes.gemini_fake import GeminiFake
 from tests.runtime.harness import PREVIOUS_WEBHOOK_TOKEN, WEBHOOK_TOKEN, Worker, error_code, mail_event, sha256_hex
 
-FIXTURES = Path(__file__).parents[1] / "fixtures" / "mail_hero"
+FIXTURES = mail_contract.fixtures()
 
 
 def test_the_current_and_previous_token_both_deliver_to_one_ledger_row(worker: Worker) -> None:
@@ -89,9 +89,9 @@ def test_contract_violations_are_rejected_and_not_stored(worker: Worker, change:
         assert worker.event(event_id) is None
 
 
-@pytest.mark.parametrize("name", sorted(path.stem for path in FIXTURES.glob("*.json")))
+@pytest.mark.parametrize("name", FIXTURES)
 def test_every_shape_mail_hero_emits_is_accepted(worker: Worker, name: str) -> None:
-    body = (FIXTURES / f"{name}.json").read_bytes()
+    body = FIXTURES[name].read_bytes()
 
     response = worker.post_event(body)
 

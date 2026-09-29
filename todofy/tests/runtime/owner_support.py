@@ -19,13 +19,13 @@ import referencing
 import referencing.jsonschema
 import yaml
 
+from tests.mail_contract import api_schemas
 from tests.runtime.harness import OWNER, PUBLIC_HOST, Worker
 
 ROOT = Path(__file__).resolve().parents[2]
 BASE = "https://todofy.local/api/"
 DOCUMENT = BASE + "owner-api-v1.openapi.yaml"
 SPEC: dict[str, Any] = yaml.safe_load((ROOT / "api" / "owner-api-v1.openapi.yaml").read_text())
-EXTERNAL = ("summary-v1.schema.json", "recommendation-v1.schema.json", "mail-received-v1.schema.json")
 
 CSRF_KEY = "5c" * 32
 ORIGIN = f"http://{PUBLIC_HOST}"
@@ -40,9 +40,9 @@ PRIVATE_HEADERS = {
 def _registry() -> referencing.Registry:
     draft = referencing.jsonschema.DRAFT202012
     resources = [(DOCUMENT, draft.create_resource(SPEC))]
-    for name in EXTERNAL:
-        resource = draft.create_resource(json.loads((ROOT / "api" / name).read_text()))
-        resources += [(BASE + name, resource), (resource.id(), resource)]
+    for url, path in api_schemas(BASE).items():
+        resource = draft.create_resource(json.loads(path.read_text()))
+        resources += [(url, resource), (resource.id(), resource)]
     return referencing.Registry().with_resources(resources)
 
 

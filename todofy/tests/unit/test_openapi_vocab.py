@@ -12,6 +12,7 @@ from typing import Any
 
 import pytest
 
+from tests.mail_contract import SCHEMA_REF, api_schemas
 from todofy.core.api_errors import MESSAGES, ApiError
 from todofy.core.vocab import (
     EVENT_ERROR_CODES,
@@ -33,7 +34,6 @@ BASE = "https://todofy.local/api/"
 DOCUMENT = BASE + "owner-api-v1.openapi.yaml"
 SPEC: dict[str, Any] = yaml.safe_load((ROOT / "api" / "owner-api-v1.openapi.yaml").read_text())
 SCHEMAS: dict[str, Any] = SPEC["components"]["schemas"]
-EXTERNAL = ("summary-v1.schema.json", "recommendation-v1.schema.json", "mail-received-v1.schema.json")
 
 OWNER_PATHS = {
     "/api/v1/csrf",
@@ -61,9 +61,9 @@ ACCESS_AND_CSRF = [{**access, "csrfToken": [], "csrfCookie": []} for access in A
 def registry() -> Any:
     """The document plus the JSON Schemas it references by relative path."""
     resources = [(DOCUMENT, drafts.DRAFT202012.create_resource(SPEC))]
-    for name in EXTERNAL:
-        resource = drafts.DRAFT202012.create_resource(json.loads((ROOT / "api" / name).read_text()))
-        resources += [(BASE + name, resource), (resource.id(), resource)]
+    for url, path in api_schemas(BASE).items():
+        resource = drafts.DRAFT202012.create_resource(json.loads(path.read_text()))
+        resources += [(url, resource), (resource.id(), resource)]
     return referencing.Registry().with_resources(resources)
 
 
@@ -163,9 +163,7 @@ def test_newsletter_and_webhook_bodies_use_the_shared_schemas():
     assert paths["/api/recommendation"]["get"]["responses"]["200"]["content"]["application/json"]["schema"] == {
         "$ref": "./recommendation-v1.schema.json"
     }
-    assert paths["/hooks/mail"]["post"]["requestBody"]["content"]["application/json"]["schema"] == {
-        "$ref": "./mail-received-v1.schema.json"
-    }
+    assert paths["/hooks/mail"]["post"]["requestBody"]["content"]["application/json"]["schema"] == {"$ref": SCHEMA_REF}
 
 
 def test_every_error_response_is_the_envelope():
