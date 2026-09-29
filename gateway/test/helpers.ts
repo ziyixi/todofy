@@ -7,7 +7,7 @@ export const HOOKS_HOST = 'todofy-hooks.localhost';
 export const OWNER = 'owner@example.com';
 export const CSRF_KEY = 'ab'.repeat(32);
 
-/** One request the gateway sent to the TodofyCoordinator stub. */
+/** One request the gateway sent to the TodofyCore stub. */
 export interface CoreCall {
   readonly name: string;
   readonly url: URL;

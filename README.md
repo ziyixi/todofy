@@ -8,7 +8,7 @@ small owner UI for anything that needs a human.
 
 It runs entirely on Cloudflare's Workers Free plan: a thin TypeScript gateway Worker (`todofy`: hosts,
 credentials, static assets, cron), a Python Worker (`todofy-core`) hosting one SQLite-backed Durable
-Object (`TodofyCoordinator`, instance `inbox-v1`) as the single ledger writer and scheduler, and one D1
+Object (`TodofyCore`, instance `inbox-v1`) as the single ledger writer and scheduler, and one D1
 database. All D1, Gemini and Todoist work runs in the Durable Object, which gets 30 s of CPU per call;
 a plain Worker request gets 10 ms on the Free plan, too little for Python. The UI is React/TypeScript,
 built into static assets the gateway serves.

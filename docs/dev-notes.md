@@ -3,7 +3,7 @@
 How to work on Todofy: local commands, repo layout, the Python Workers idioms this code relies on, and
 the contracts between modules. Todofy is two Workers: the TypeScript gateway `todofy` (`gateway/`: host
 routing, Access, CSRF, webhook and Basic credentials, assets, cron) and the Python `todofy-core`
-(`worker/`), which hosts the `TodofyCoordinator` Durable Object where all D1, Gemini and Todoist work
+(`worker/`), which hosts the `TodofyCore` Durable Object where all D1, Gemini and Todoist work
 runs. `gateway-contract.md` is the contract between them. Plans and decisions live in `cloudflare-migration-plan.md` (v2, §0.1
 overrides) and `implementation-order.md`; where they disagree with this file on a name or interface,
 this file reflects what is in the tree. The retired Go service is gone from the tree (S11); it stays in
@@ -90,7 +90,7 @@ Layout and entry
   uploaded and module names are relative to it, so imports are `todofy.core.x` / `todofy.runtime.x`.
   The dry-run bundle lists `todofy/core/*.py`; the runtime tests prove core imports work in Pyodide.
 - `entry.py` exports `Default(WorkerEntrypoint)`, whose `fetch` answers 404 (the core has no public
-  routes), and re-exports `TodofyCoordinator` in `__all__`.
+  routes), and re-exports `TodofyCore` in `__all__`.
 - pywrangler picks the Python version from the root `wrangler.toml` only (`compatibility_date =
   "2026-09-08"` + `python_workers` → Python 3.14 / Pyodide 3.14.2), whatever `--config` says. Every
   generated config must keep the same date and flags (`tests/runtime/test_configs.py` guards the test ones).

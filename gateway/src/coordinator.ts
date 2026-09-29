@@ -12,7 +12,7 @@ interface CoordinatorCall {
 }
 
 /**
- * One request to the TodofyCoordinator object in todofy-core. The request is built from scratch,
+ * One request to the TodofyCore object in todofy-core. The request is built from scratch,
  * so client headers (cookies, tokens, x-todofy-*) never reach the object; the internal marker and
  * the request ID always win over `call.headers`.
  */

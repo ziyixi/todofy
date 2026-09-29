@@ -30,3 +30,6 @@ tools/legacy_migration/out/
 *.sqlite-wal
 *.sqlite-shm
 *.db
+
+# Scratch output of local checks
+/tmp/

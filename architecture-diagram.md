@@ -22,7 +22,7 @@ flowchart LR
             Cron["cron */10 min"]
         end
         subgraph C["Worker todofy-core (Python, no public routes)"]
-            DO["Durable Object TodofyCoordinator (inbox-v1)<br/>single ledger writer, alarm loop, owner API,<br/>reports; budgets and schedule in DO SQLite"]
+            DO["Durable Object TodofyCore (inbox-v1)<br/>single ledger writer, alarm loop, owner API,<br/>reports; budgets and schedule in DO SQLite"]
         end
         D1[("D1 todofy<br/>mail_events, event_transitions,<br/>summaries, daily_reports,<br/>mail_reminders, owner_actions,<br/>legacy_mail_text")]
     end

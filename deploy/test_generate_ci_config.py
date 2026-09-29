@@ -107,7 +107,10 @@ def test_core_shape_is_the_shipped_root_wrangler_toml() -> None:
     # pywrangler reads the Python version from the root config: 2026-09-08 + python_workers = Python 3.14.
     assert core["compatibility_date"] == "2026-09-08"
     assert core["compatibility_flags"] == ["python_workers"]
-    assert core["migrations"] == [{"tag": "v1", "new_sqlite_classes": ["TodofyCoordinator"]}]
+    assert core["migrations"] == [
+        {"tag": "v1", "new_sqlite_classes": ["TodofyCoordinator"]},
+        {"tag": "v2", "renamed_classes": [{"from": "TodofyCoordinator", "to": "TodofyCore"}]},
+    ]
     # No public entry and nothing that would give it one.
     for key in ("routes", "assets", "triggers", "durable_objects"):
         assert key not in core, key
@@ -133,7 +136,7 @@ def test_gateway_binds_the_core_object_and_deletes_its_own_old_class() -> None:
     config = generate()
     core, gateway = config["core"], config["gateway"]
     assert gateway["durable_objects"] == {
-        "bindings": [{"name": "COORDINATOR", "class_name": "TodofyCoordinator", "script_name": core["name"]}]
+        "bindings": [{"name": "COORDINATOR", "class_name": "TodofyCore", "script_name": core["name"]}]
     }
     assert "TodofyCoordinator" in core["migrations"][0]["new_sqlite_classes"]
     # Script "todofy" keeps its applied v1 and deletes the Python class in v2.

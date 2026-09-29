@@ -1,4 +1,4 @@
-"""TodofyCoordinator (`inbox-v1`): the single writer of the ledger and its serial executor.
+"""TodofyCore (`inbox-v1`): the single writer of the ledger and its serial executor.
 
 It runs in the `todofy-core` Worker and is reached only through the gateway's
 COORDINATOR binding (docs/gateway-contract.md §3). Internal routes on
@@ -139,7 +139,7 @@ def _utf8_prefix(text: str, limit: int) -> str:
     return text.encode()[:limit].decode(errors="ignore")
 
 
-class TodofyCoordinator(DurableObject):
+class TodofyCore(DurableObject):
     def __init__(self, ctx: Any, env: Any) -> None:
         super().__init__(ctx, env)
         self.sql = ctx.storage.sql

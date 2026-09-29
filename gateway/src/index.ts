@@ -3,7 +3,7 @@
  *
  * On Workers Free a plain Worker invocation has 10 ms of CPU; this Worker only routes by Host,
  * checks credentials and serves assets, and hands everything that touches D1, mail payloads,
- * Gemini or Todoist to the TodofyCoordinator object (30 s per invocation). See
+ * Gemini or Todoist to the TodofyCore object (30 s per invocation). See
  * docs/gateway-contract.md.
  */
 import { callCoordinator } from './coordinator.ts';

@@ -57,7 +57,7 @@ preview_urls = false
 
 [[durable_objects.bindings]]
 name = "COORDINATOR"
-class_name = "TodofyCoordinator"
+class_name = "TodofyCore"
 script_name = "todofy-core"
 """
 

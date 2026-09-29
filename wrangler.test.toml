@@ -18,6 +18,10 @@ migrations_dir = "migrations"
 tag = "v1"
 new_sqlite_classes = ["TodofyCoordinator"]
 
+[[migrations]]
+tag = "v2"
+renamed_classes = [{ from = "TodofyCoordinator", to = "TodofyCore" }]
+
 [vars]
 # The daily reminder links to the owner UI on this host.
 TODOFY_PUBLIC_HOST = "todofy.localhost"

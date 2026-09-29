@@ -21,10 +21,10 @@ Python check did not require (`nbf`, `sub`; §2.4), which real Access tokens alw
 |---|---|---|
 | Language | TypeScript (strict, ES modules), `gateway/` | Python (Pyodide), `worker/`, pywrangler |
 | Public entry | custom domains: owner host + every `TODOFY_HOOKS_HOSTS` name; cron `*/10 * * * *` | none (`workers_dev = false`, `preview_urls = false`, no routes); `fetch` answers 404 `not_found` |
-| Bindings | `ASSETS` (`uiassets/dist`), `COORDINATOR` → class `TodofyCoordinator` in script `todofy-core` | `DB` (D1 `todofy`). No DO binding: nothing in core calls the DO through a stub any more |
+| Bindings | `ASSETS` (`uiassets/dist`), `COORDINATOR` → class `TodofyCore` in script `todofy-core` | `DB` (D1 `todofy`). No DO binding: nothing in core calls the DO through a stub any more |
 | Vars | `TODOFY_PUBLIC_HOST`, `TODOFY_HOOKS_HOSTS`, `BUILD_SHA`, `ACCESS_ISSUER`, `ACCESS_AUDIENCE`, `MAINTENANCE_MODE`; dev/test only: `DEV_AUTH_BYPASS`, `DEV_ACCESS_LOOPBACK_ISSUER`, `JWKS_REFRESH_COOLDOWN_MS` | `BUILD_SHA`, `MAINTENANCE_MODE`, `TODOFY_PUBLIC_HOST` (the reminder's link), `PROCESSING_PAUSED`, `FORCE_PAUSE_TODOIST`, `REMINDER_ENABLED`, `MAIL_SOURCE_ID`, `GEMINI_API_BASE`, `GEMINI_MODELS`, `GEMINI_TIMEOUT_MS`, `GEMINI_DAILY_TOKEN_BUDGET`, `TODOIST_API_BASE`, `TODOIST_DEFAULT_PROJECT_ID`, `TODOIST_ATTEMPT_TIMEOUT_MS`, `LOOKUP_DELAY_MS`, `BACKOFF_BASE_MS`, `WATCHDOG_MS`, `REPORT_DEFAULT_TOP`, `REPORT_PRECOMPUTE_UTC`, `LEGACY_TEXT_RETENTION_DAYS` |
 | Secrets | `MAIL_WEBHOOK_TOKEN_SHA256`, `MAIL_WEBHOOK_TOKEN_SHA256_PREVIOUS`, `REPORT_BASIC_AUTH_SHA256`, `CSRF_SIGNING_KEY`, `ACCESS_OWNER`, `ACCESS_OWNER_ALIASES` (the last two from `--secrets-file` on every deploy) | `GEMINI_API_KEY`, `TODOIST_API_KEY` |
-| DO class | none (migration `v2` deletes the old one) | `TodofyCoordinator`, instance name `inbox-v1`, SQLite-backed |
+| DO class | none (migration `v2` deletes the old one) | `TodofyCore` (renamed from `TodofyCoordinator` by core migration `v2`), instance name `inbox-v1`, SQLite-backed |
 
 `BUILD_SHA` and `MAINTENANCE_MODE` are set on both from the same deploy value. The gateway never binds
 or queries D1. `gateway/package.json` has its own lockfile with `typescript` and
@@ -265,7 +265,7 @@ not_found_handling = "single-page-application"
 
 [[durable_objects.bindings]]
 name = "COORDINATOR"
-class_name = "TodofyCoordinator"
+class_name = "TodofyCore"
 script_name = "todofy-core"
 
 # Script "todofy" history: v1 created the Python class; v2 deletes it (its state was only counters).
@@ -324,7 +324,7 @@ TODOIST_API_BASE = "https://api.todoist.com"
 It stays at the repo root: pywrangler reads the Python version from the root `wrangler.toml`, and a
 Python config must sit next to `python_modules/` (a core config elsewhere fails with
 `ModuleNotFoundError: No module named 'workers'`, verified). No assets, cron, routes or DO binding.
-`entry.py` keeps a `Default` whose `fetch` returns 404 `not_found` and re-exports `TodofyCoordinator`.
+`entry.py` keeps a `Default` whose `fetch` returns 404 `not_found` and re-exports `TodofyCore`.
 
 ### 6.3 Production generation (`deploy/generate_ci_config.py`)
 Writes three owner-only files, never overwriting: `wrangler.production.ci.json` (core, next to
@@ -379,7 +379,7 @@ First cutover only (owner steps, cannot be done by CI because CI never sees thes
    credential (§5). Opening the owner UI overview proves the Access → owner API path.
 
 Not verified locally (needs the account): that Cloudflare accepts `v2 deleted_classes` on `todofy` in
-the same deploy that binds `TodofyCoordinator` from `todofy-core`. Both configs pass
+the same deploy that binds `TodofyCore` from `todofy-core`. Both configs pass
 `wrangler deploy --dry-run`, which never computes migrations against the account.
 
 After the cutover (`todofy` at tag `v2`): remove both `[[migrations]]` blocks from
@@ -417,6 +417,12 @@ two coordinators run against the same database, in either direction.
    the gateway a new tag `v4` with `deleted_classes`.
 5. Set `TODOFY_MAINTENANCE_MODE=false` and redeploy.
 
+
+> Class name: the core class is `TodofyCore`. Cloudflare refuses a `deleted_classes` migration while any
+> binding names a class of the same name, even in another script (error 10061), so the gateway could not
+> delete its old `TodofyCoordinator` while binding `todofy-core`'s `TodofyCoordinator`. The core renames its
+> class in migration `v2` (`renamed_classes`); the gateway binds `TodofyCore` and keeps its own `v1`/`v2` history.
+
 ## 7. Local dev and runtime tests
 
 One process runs both Workers (verified, §8):
@@ -428,7 +434,7 @@ The first `-c` is the primary: it owns the port, `--var`, `--env-file`, the cron
 (`/cdn-cgi/local/scheduled`) and the assets. `--var`/`--env-file` do **not** reach the second config;
 core vars come from its config, and local core secrets from `.dev.vars` next to the root
 `wrangler.toml` (gitignored). D1 and the DO share the `--persist-to` directory; the object's storage
-is `<persist>/v3/do/todofy-core-TodofyCoordinator/` (so `crash_and_restart`'s `v3/do` glob still works),
+is `<persist>/v3/do/todofy-core-TodofyCore/` (so `crash_and_restart`'s `v3/do` glob still works),
 and `wrangler d1 migrations apply DB --local --persist-to <dir> --config wrangler.toml` writes the
 same database the core reads.
 

@@ -158,7 +158,7 @@ are in [gateway-contract.md](gateway-contract.md) §6.5; in short:
 1. `TODOFY_MAINTENANCE_MODE=true`, redeploy the current `main` (both Workers stop ledger work).
 2. Put `GEMINI_API_KEY` and `TODOIST_API_KEY` back on `todofy` if step 3 above removed them.
 3. Deploy the last pre-split commit with its migrations extended to `v1` new, `v2` deleted, `v3` new
-   (`TodofyCoordinator`), so wrangler sends only `v3`. Do not deploy a plain revert: wrangler does not
+   (`TodofyCore`), so wrangler sends only `v3`. Do not deploy a plain revert: wrangler does not
    refuse it, but sends `v1` again over the published `v2`, and Cloudflare's answer is unverified.
 4. `npx wrangler delete --name todofy-core`.
 5. `TODOFY_MAINTENANCE_MODE=false`, redeploy.
