@@ -9,9 +9,11 @@ from workers import Response
 
 from todofy.core.api_errors import ApiError
 from todofy.core.contract import MAX_EVENT_BYTES
+from todofy.core.render import rfc3339
 from todofy.runtime import reports
 from todofy.runtime.config import coordinator, flag, var
 from todofy.runtime.http import error, json_response, with_headers
+from todofy.runtime.interop import utc_now
 
 # Mail Hero backs off on 503 and honours Retry-After; one cron interval.
 MAINTENANCE_RETRY_AFTER_S = "600"
@@ -68,7 +70,16 @@ async def handle(request: Any, env: Any, path: str) -> Response:
         case "GET", "/api/recommendation":
             return await _report(request, env, reports.RECOMMENDATION)
         case "GET", "/health":
-            return json_response({"build": var(env, "BUILD_SHA", "unknown")})
+            # service/status/timestamp are the Go service's shape; the newsletter's startup
+            # preflight refuses to start unless service == "todofy" and status == "healthy".
+            return json_response(
+                {
+                    "build": var(env, "BUILD_SHA", "unknown"),
+                    "service": "todofy",
+                    "status": "healthy",
+                    "timestamp": rfc3339(utc_now()),
+                }
+            )
     return error(404, ApiError.NOT_FOUND)
 
 

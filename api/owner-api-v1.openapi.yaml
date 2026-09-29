@@ -902,9 +902,20 @@ components:
 
     Health:
       type: object
-      required: [build]
+      required: [build, service, status, timestamp]
       additionalProperties: false
       properties:
         build:
           type: string
           description: BUILD_SHA, the deployed commit.
+        service:
+          type: string
+          enum: [todofy]
+          description: Kept from the Go service; the newsletter preflight requires it.
+        status:
+          type: string
+          enum: [healthy]
+          description: Kept from the Go service; the newsletter preflight requires it.
+        timestamp:
+          type: string
+          format: date-time

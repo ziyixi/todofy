@@ -578,6 +578,18 @@ export interface components {
         Health: {
             /** @description BUILD_SHA, the deployed commit. */
             build: string;
+            /**
+             * @description Kept from the Go service; the newsletter preflight requires it.
+             * @enum {string}
+             */
+            service: "todofy";
+            /**
+             * @description Kept from the Go service; the newsletter preflight requires it.
+             * @enum {string}
+             */
+            status: "healthy";
+            /** Format: date-time */
+            timestamp: string;
         };
         /**
          * Todofy GET /api/summary response

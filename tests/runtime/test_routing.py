@@ -7,7 +7,12 @@ NAVIGATE = {"accept": "text/html", "sec-fetch-mode": "navigate"}
 
 def test_health_reports_the_build_on_the_hooks_host(worker: Worker) -> None:
     response = worker.hooks.get("/health")
-    assert (response.status_code, response.json()) == (200, {"build": "test"})
+    body = response.json()
+    assert response.status_code == 200
+    # The newsletter's startup preflight checks service and status (Go-era shape).
+    expected = {"build": "test", "service": "todofy", "status": "healthy"}
+    assert {k: body[k] for k in expected} == expected
+    assert re.fullmatch(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z", body["timestamp"])
 
 
 def test_workerd_reuses_a_cached_pyodide_bundle(worker: Worker) -> None:
