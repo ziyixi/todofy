@@ -2,21 +2,25 @@
 
 import pytest
 
+from tests.runtime.conftest import Launch
 from tests.runtime.harness import AUTH, Worker, error_code, mail_event, sha256_hex
 
 MIB = 1 << 20
 
 
-def test_one_mebibyte_event_is_hashed_and_stored(worker: Worker) -> None:
+def test_one_mebibyte_event_is_hashed_and_stored(launch: Launch) -> None:
+    # Paused: otherwise the alarm may finish the event, which clears its payload, before the read.
+    worker = launch(PROCESSING_PAUSED="true")
     event_id, body = mail_event(size=MIB)
 
     response = worker.post_event(body)
 
     assert response.status_code == 204, response.text
     [row] = worker.d1(
-        f"SELECT payload_hash, length(CAST(payload AS BLOB)) AS size FROM mail_events WHERE event_id = '{event_id}'"
+        "SELECT state, payload_hash, length(CAST(payload AS BLOB)) AS size"
+        f" FROM mail_events WHERE event_id = '{event_id}'"
     )
-    assert row == {"payload_hash": sha256_hex(body), "size": MIB}
+    assert row == {"state": "pending", "payload_hash": sha256_hex(body), "size": MIB}
 
 
 @pytest.mark.reaches("event_conflict")

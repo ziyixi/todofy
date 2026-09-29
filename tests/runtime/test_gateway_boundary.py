@@ -33,14 +33,18 @@ INTRUDER = "intruder@example.org"
 IMMUTABLE = "private, max-age=31536000, immutable"
 
 # Test-only primary Worker in front of the real core: it forwards every request to the
-# object with the client's own headers, so a test can leave out the gateway's.
+# object with the client's own headers, so a test can leave out the gateway's. It reads the
+# client's body first: the object refuses unmarked requests without reading them, and an
+# upload left unread can make wrangler's local proxy drop the next POST (docs/dev-notes.md).
 PROBE_SCRIPT = """\
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
     if (url.pathname === '/health') return new Response('ok');
     const target = `https://coordinator${url.pathname}${url.search}`;
-    return env.COORDINATOR.getByName('inbox-v1').fetch(new Request(target, request));
+    const body = request.body === null ? null : await request.arrayBuffer();
+    const init = { method: request.method, headers: request.headers, body };
+    return env.COORDINATOR.getByName('inbox-v1').fetch(target, init);
   },
 };
 """
