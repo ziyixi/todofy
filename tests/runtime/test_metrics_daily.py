@@ -79,7 +79,8 @@ def test_a_finished_day_is_written_once_and_served(
     assert written["mails_received"] == 2 and written["mails_completed"] == 2
     assert written["todoist_creates"] == 1 and written["gemini_calls"] == 1
     assert written["gemini_tokens:model-a"] > 0
-    assert 0 <= written["latency_p50_s"] == written["latency_p90_s"] < 60
+    # Two mails whose end-to-end times may differ by a second on a slow runner.
+    assert 0 <= written["latency_p50_s"] <= written["latency_p90_s"] < 60
     assert "mails_failed" not in written  # zero counters are not stored
     with sqlite3.connect(_object_db(worker)) as store:
         # Nothing of a written day is kept in the object; the next flush is after midnight.
