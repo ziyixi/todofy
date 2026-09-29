@@ -24,7 +24,7 @@ The Cloudflare Email Routing limit is 25 MiB. This is an accepted raw-size ceili
 | `ACCESS_ISSUER` | variable | `https://YOUR-TEAM.cloudflareaccess.com`. |
 | `ACCESS_AUDIENCE` | variable | The UI Access application's audience. |
 | `ACCESS_OWNER` | variable | Canonical owner email identity; used for CSRF and UI action ownership. |
-| `ACCESS_OWNER_ALIASES` | optional variable | Comma-separated exact verified email aliases of the same owner. Each also needs a narrowly scoped Access policy; aliases do not bypass JWT verification. |
+| `ACCESS_OWNER_ALIASES` | optional variable | Comma-separated exact verified email aliases of the same owner (printable ASCII, at most 8; `ACCESS_OWNER` too). Each also needs a narrowly scoped Access policy; aliases do not bypass JWT verification. |
 | `CREDENTIAL_KEY` | secret | 32 random bytes encoded as 64 hex characters; encrypts endpoint credentials and signs management tokens. Back it up independently. |
 | `WEBHOOK_ALLOWED_HOSTS` | variable | Comma-separated exact public HTTPS destination hostnames. No arbitrary internal HTTP targets. |
 | `FORCE_SEND_PAUSED` | variable | Start with `true`; overrides UI delivery controls. |

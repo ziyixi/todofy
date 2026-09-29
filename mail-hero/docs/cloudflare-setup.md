@@ -108,7 +108,7 @@ npm test
 
 当前 `mail-hero.ziyixi.science` 已绑定 Access 应用，提供 GitHub 和邮件验证码两种登录方式，没有 Bypass。Gmail 备用策略保留 `xiziyi2015@gmail.com`；GitHub 使用独立 Allow 策略，Include 只含通过 IdP Test 核实的本人精确邮箱，Require 必须是既有 GitHub 登录提供商。不要把邮箱和提供商都放到 Include（那会成为 OR 条件）。应用和策略 ID 见验收记录。
 
-`ACCESS_OWNER` 保留原 Gmail 作为唯一管理员标识，可选 `ACCESS_OWNER_ALIASES` 列出同一个人经核实的其他登录邮箱（逗号分隔，最多 8 个，精确匹配）。JWT 签名、issuer、audience、时效继续校验；alias 成功登录统一映射到原 owner，CSRF 和管理动作身份不变。实际别名保存在 ignored 生产配置；新环境先验证 IdP 实际返回身份，再配置 Access 与应用两层白名单。
+`ACCESS_OWNER` 保留原 Gmail 作为唯一管理员标识，可选 `ACCESS_OWNER_ALIASES` 列出同一个人经核实的其他登录邮箱（逗号分隔，最多 8 个，精确匹配；owner 与 alias 须为可打印 ASCII，否则按未配置 fail closed）。JWT 签名、issuer、audience、时效继续校验；alias 成功登录统一映射到原 owner，CSRF 和管理动作身份不变。实际别名保存在 ignored 生产配置；新环境先验证 IdP 实际返回身份，再配置 Access 与应用两层白名单。
 
 在Worker Domains & Routes添加该Custom Domain，或在配置加入：
 

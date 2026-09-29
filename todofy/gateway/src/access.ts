@@ -3,7 +3,7 @@
  * package (packages/edge-auth, SPEC.md). This file only supplies Todofy's policy values and maps
  * the package's failure reasons to Todofy's error codes.
  */
-import { createAccessVerifier, type AccessPolicy } from '@ziyixi/edge-auth';
+import { asciiLowerCase, createAccessVerifier, type AccessPolicy } from '@ziyixi/edge-auth';
 import { flag, integer, localDev, variable, type Env } from './env.ts';
 import { HttpError } from './http.ts';
 
@@ -40,13 +40,14 @@ function policy(env: Env): AccessPolicy {
     devBypass: {
       enabled: local && flag(env, 'DEV_AUTH_BYPASS'),
       hosts: 'dot-localhost',
-      principal: variable(env, 'ACCESS_OWNER').toLowerCase(),
+      // The same ASCII-only fold the verifier applies to the owner.
+      principal: asciiLowerCase(variable(env, 'ACCESS_OWNER')),
       whenNotLocal: 'verify',
     },
   };
 }
 
-/** ACCESS_OWNER (lowercased) for a valid Access login (an alias maps to it); otherwise throws HttpError. */
+/** ACCESS_OWNER (ASCII-lowercased) for a valid Access login (an alias maps to it); otherwise throws HttpError. */
 export async function authenticate(request: Request, env: Env): Promise<string> {
   const result = await verifier.verify(request, policy(env));
   if (result.ok) return result.owner;

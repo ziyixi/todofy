@@ -35,7 +35,8 @@ GATEWAY_OUTPUT = GATEWAY / "wrangler.production.ci.json"
 SECRETS_OUTPUT = GATEWAY / "wrangler.production.secrets.json"
 
 DOMAIN = re.compile(r"(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}")
-EMAIL = re.compile(r"[^\s@]+@[^\s@]+\.[^\s@]+")
+# Printable ASCII only, as packages/edge-auth requires of the owner and aliases (SPEC.md #36).
+EMAIL = re.compile(r"(?=[\x21-\x7e]+\Z)[^\s@]+@[^\s@]+\.[^\s@]+")
 FLAG = re.compile(r"true|false")
 UUID = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}", re.IGNORECASE)
 INTEGER = re.compile(r"0|[1-9][0-9]{0,11}")

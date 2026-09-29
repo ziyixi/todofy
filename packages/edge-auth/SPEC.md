@@ -99,7 +99,7 @@ and into CSRF and preview tokens. Todofy passes it to the core's `owner_api` and
 | `iat` | required, must be a number; **future values accepted** (probe: `iat = 2100-01-01` accepted) | number, `iat < now + 60` |
 | `nbf` | if present a number, `nbf ≤ now` (**0 s** leeway; probe: `now+1` → 401) | absent or number, `nbf ≤ now + 60` |
 | `sub` | **presence only**: `""` and `7` are accepted (probe) | non-empty string |
-| `email` | `=== owner` or `===` an alias: **exact, case-sensitive** (the test rejects `GITHUB-owner@…`) | string; its lowercase is in {owner, aliases}: **case-insensitive** (the test accepts `OWNER@example.com`) |
+| `email` | `=== owner` or `===` an alias: **exact, case-sensitive** (the test rejects `GITHUB-owner@…`) | string; its lowercase (Unicode `toLowerCase`) is in {owner, aliases}: **case-insensitive** (the test accepts `OWNER@example.com`). The package folds ASCII only (#36) |
 | Any claim or signature failure | 401 "Access 登录无效或无权限" | 401 `unauthorized` |
 
 The Mail Hero entries marked "probe" were run against the current `security.ts` with a stubbed
@@ -212,6 +212,7 @@ Verdicts:
 | 33 | CSP | extended | strict | **P** `csp` input; the package exports `STRICT_CSP` (= Todofy's string) as the default. Mail Hero keeps its string |
 | 34 | Immutable asset cache | none | `/assets/` rule | **P** `cacheControl` override; Todofy computes it as today |
 | 35 | Gate order, maintenance, 405, routes | its own | its own | **App**: unchanged |
+| 36 | Non-ASCII addresses and case folding | any characters, compared exactly | Unicode `toLowerCase` on owner, aliases and `email` | **U→ASCII only** (SEC-1). Owner, aliases and the token `email` must be printable ASCII (`^[\x21-\x7e]+$`); `case-insensitive` folds `A`–`Z` only (`asciiLowerCase`, exported so an app's own principal, such as Todofy's bypass owner, uses the same fold). Unicode lowercasing maps U+212A KELVIN SIGN to ASCII `k`, so a correctly signed `\u212Aate@…` matched owner `kate@…` under Todofy's policy. Tighter for both apps. ASCII owners, aliases and logins behave exactly as before; a non-ASCII `ACCESS_OWNER` or alias now fails closed with `not_configured`, so check the configured values before a release |
 
 **Is Mail Hero weakened by dropping jose?** No. Every jose check is kept or tightened: the RS256
 allow-list, `crit`, ≥ 2048-bit keys, the JWK filters, refusing a duplicate kid, manual redirects, the
@@ -274,6 +275,8 @@ export interface AccessVerifierOptions {
   readonly fetch?: (url: string, init: RequestInit) => Promise<Response>;
 }
 export function createAccessVerifier(options?: AccessVerifierOptions): AccessVerifier;
+/** `A`–`Z` → `a`–`z`, every other code unit kept: the fold `case-insensitive` uses (#36). */
+export function asciiLowerCase(value: string): string;
 
 export const ACCESS_MAX_TOKEN_CHARS = 16_000;
 export const ACCESS_MAX_ALIASES = 8;
@@ -291,9 +294,10 @@ the certs fetch becomes `keys_unavailable`.
 2. **Config.** issuer = trim, strip all trailing `/`; it must match
    `^https://[a-z0-9-]+\.cloudflareaccess\.com$`, or `^http://127\.0\.0\.1:\d{1,5}$` when
    `loopbackIssuer`. Audience trimmed and non-empty. Owner trimmed and matching
-   `^[^\s@]+@[^\s@]+\.[^\s@]+$`. Aliases: the trimmed raw string is ≤ 2048 characters; split on
-   `,`, trim, drop empties; ≤ 8 entries, each matching the same pattern. `case-insensitive`
-   lowercases the owner and the aliases. Any failure → `not_configured`.
+   `^[^\s@]+@[^\s@]+\.[^\s@]+$` and printable ASCII `^[\x21-\x7e]+$`. Aliases: the trimmed raw string
+   is ≤ 2048 characters; split on `,`, trim, drop empties; ≤ 8 entries, each matching the same two
+   patterns. `case-insensitive` lowercases the owner and the aliases with `asciiLowerCase` (`A`–`Z`
+   only; never Unicode `toLowerCase`, #36). Any failure → `not_configured`.
 3. **Token.** Header `cf-access-jwt-assertion`. If it is absent (or empty under `use-cookie`), read
    the `CF_Authorization` cookie at the `first`/`last` occurrence. Cookies are parsed as
    `;`-separated pairs, trimmed, split at the first `=`, exact name match. Empty or > 16,000 → `missing_token`.
@@ -314,8 +318,9 @@ the certs fetch becomes `keys_unavailable`.
    `invalid_token`.
 7. **Claims.** `iss === issuer`; `aud` is a string equal to the audience, or an array containing it;
    `exp` a finite number `> now`; `iat` a finite number `< now + 60`; `nbf` absent or a finite number
-   `≤ now + nbfLeewaySeconds`; `sub` a non-empty string; `email` a string that matches the owner or an
-   alias (`exact`: `===`; `case-insensitive`: lowercased, then `===`). Any failure → `invalid_token`.
+   `≤ now + nbfLeewaySeconds`; `sub` a non-empty string; `email` a printable-ASCII string that matches
+   the owner or an alias (`exact`: `===`; `case-insensitive`: `asciiLowerCase`, then `===`). Any failure
+   → `invalid_token`.
 8. Return `{ok, owner: <canonical owner from step 2>, bypassed: false}`.
 
 ### 5.2 CSRF and keys
@@ -434,7 +439,7 @@ export async function authenticate(request: Request, env: Env): Promise<string> 
     jwks: { ttlMs: 3_600_000, refreshCooldownMs: integer(env, 'JWKS_REFRESH_COOLDOWN_MS', 60_000) },
     loopbackIssuer: localDev(env) && flag(env, 'DEV_ACCESS_LOOPBACK_ISSUER'),
     devBypass: { enabled: localDev(env) && flag(env, 'DEV_AUTH_BYPASS'), hosts: 'dot-localhost',
-      principal: variable(env, 'ACCESS_OWNER').toLowerCase(), whenNotLocal: 'verify' },
+      principal: asciiLowerCase(variable(env, 'ACCESS_OWNER')), whenNotLocal: 'verify' },
   });
   if (result.ok) return result.owner;
   if (result.failure === 'keys_unavailable') throw new HttpError(503, 'unavailable');

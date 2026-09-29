@@ -30,6 +30,8 @@ test('missing pause state, invalid resource identity and malformed alias fail be
     ['MAIL_HERO_D1_DATABASE_ID', '00000000-0000-0000-0000-000000000000'],
     ['MAIL_HERO_WEBHOOK_ALLOWED_HOSTS', 'https://consumer.example.org'],
     ['MAIL_HERO_ACCESS_OWNER_ALIASES', 'owner@example.org\ninjected-value'],
+    ['MAIL_HERO_ACCESS_OWNER', '\u212aate@example.org'], ['MAIL_HERO_ACCESS_OWNER', 'own\u00e9r@example.org'],
+    ['MAIL_HERO_ACCESS_OWNER_ALIASES', 'alias@example.org,\u212aim@example.net'],
   ]) assert.throws(() => generateConfig({ ...environment(), [name]: value }), new RegExp(name))
 })
 

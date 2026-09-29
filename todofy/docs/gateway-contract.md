@@ -120,12 +120,12 @@ the package's failure reasons to Todofy's codes. Todofy's values:
 
 | Parameter | Todofy's value |
 | --- | --- |
-| `emailMatch` | `case-insensitive`: the owner and aliases are lowercased, and so is the token's `email` |
+| `emailMatch` | `case-insensitive`: the owner and aliases are lowercased, and so is the token's `email`, ASCII letters only (`asciiLowerCase`); a non-ASCII owner or alias is `not_configured`, a non-ASCII token `email` is refused |
 | `nbfLeewaySeconds` | 60 |
 | `tokenSource` | header, or when it is absent or empty the **last** `CF_Authorization` cookie |
 | `jwks` | TTL 1 h; unknown-kid refetch cooldown `JWKS_REFRESH_COOLDOWN_MS` (default 60,000; a value at or above the TTL is capped to it, which behaves the same) |
 | `loopbackIssuer` | `TODOFY_PUBLIC_HOST` ends with `.localhost` and `DEV_ACCESS_LOOPBACK_ISSUER == "true"` |
-| `devBypass` | enabled when `TODOFY_PUBLIC_HOST` ends with `.localhost` and `DEV_AUTH_BYPASS == "true"`; hosts `*.localhost`; principal `ACCESS_OWNER` lowercased; not local (a `cf-ray` header) → normal verification |
+| `devBypass` | enabled when `TODOFY_PUBLIC_HOST` ends with `.localhost` and `DEV_AUTH_BYPASS == "true"`; hosts `*.localhost`; principal `ACCESS_OWNER` ASCII-lowercased (`asciiLowerCase`, the verifier's fold); not local (a `cf-ray` header) → normal verification |
 
 | Package result | Todofy answer |
 | --- | --- |
@@ -136,13 +136,13 @@ the package's failure reasons to Todofy's codes. Todofy's values:
 
 The rules, as the package applies them with these values:
 
-- Dev bypass: the flag rule above and no `cf-ray` header → owner = `ACCESS_OWNER` lowercased. Otherwise
+- Dev bypass: the flag rule above and no `cf-ray` header → owner = `ACCESS_OWNER` ASCII-lowercased. Otherwise
   the flag is ignored.
 - Configuration: `ACCESS_ISSUER` trimmed, without trailing `/`, matching
   `^https://[a-z0-9-]+\.cloudflareaccess\.com$`; or, only under the loopback rule above,
   `^http://127\.0\.0\.1:\d{1,5}$`. `ACCESS_AUDIENCE` non-empty. `ACCESS_OWNER` and every
   `ACCESS_OWNER_ALIASES` entry an e-mail address (`^[^\s@]+@[^\s@]+\.[^\s@]+$`, as the deploy config
-  generator already requires); aliases at most 2048 characters and 8 entries. Otherwise 503
+  generator already requires) of printable ASCII only; aliases at most 2048 characters and 8 entries. Otherwise 503
   `access_not_configured`, before the token is read.
 - Token: `cf-access-jwt-assertion` header, else the last `CF_Authorization` cookie; missing or longer
   than 16,000 characters → 401 `unauthorized`. Three base64url parts, header and payload JSON objects;

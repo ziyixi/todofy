@@ -47,7 +47,11 @@ export interface AccessPolicy {
   readonly owner: string | undefined;
   /** Comma-separated verified logins of the same owner; each maps to the canonical owner. */
   readonly aliases: string | undefined;
-  /** `exact`: case-sensitive, owner kept as configured. `case-insensitive`: owner and aliases lowercased. */
+  /**
+   * `exact`: case-sensitive, owner kept as configured. `case-insensitive`: owner, aliases and the token
+   * email lowercased with `asciiLowerCase` (ASCII letters only). Either way every address must be
+   * printable ASCII: a non-ASCII owner or alias is `not_configured`, a non-ASCII token email `invalid_token`.
+   */
   readonly emailMatch: 'exact' | 'case-insensitive';
   /** Tolerance for `nbf` in the future, 0–300 seconds. */
   readonly nbfLeewaySeconds: number;
@@ -82,6 +86,12 @@ export const ACCESS_TOKEN_COOKIE = 'CF_Authorization';
 const ACCESS_ISSUER = /^https:\/\/[a-z0-9-]+\.cloudflareaccess\.com$/;
 const LOOPBACK_ISSUER = /^http:\/\/127\.0\.0\.1:\d{1,5}$/;
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+/**
+ * Owner, aliases and the token's `email` must be printable ASCII. Unicode case folding maps some
+ * non-ASCII characters onto ASCII letters (U+212A KELVIN SIGN lowercases to `k`), so a different
+ * identity could otherwise fold onto the owner.
+ */
+const ASCII_EMAIL = /^[\x21-\x7e]+$/;
 const LOOPBACK_HOSTS: ReadonlySet<string> = new Set(['localhost', '127.0.0.1', '[::1]']);
 const RS256 = { name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-256' } as const;
 const IAT_SKEW_SECONDS = 60;
@@ -114,6 +124,18 @@ interface KeySet {
 
 const fail = (failure: AccessFailure): AccessResult => ({ ok: false, failure });
 
+/**
+ * ASCII-only lowercasing: `A`–`Z` become `a`–`z` and every other code unit is kept. Unlike
+ * `String.prototype.toLowerCase` it never turns a non-ASCII character into an ASCII one. Apps use
+ * it for any principal they derive themselves (such as a dev-bypass owner) so it stays identical
+ * to the owner `verify` returns under `emailMatch: 'case-insensitive'`.
+ */
+export function asciiLowerCase(value: string): string {
+  return value.replace(/[A-Z]/g, (c) => String.fromCharCode(c.charCodeAt(0) + 32));
+}
+
+const validEmail = (email: string): boolean => ASCII_EMAIL.test(email) && EMAIL.test(email);
+
 function requestUrl(request: Request): URL | null {
   try {
     return new URL(request.url);
@@ -143,14 +165,14 @@ function trimmed(value: unknown): string {
 function normaliseConfig(policy: AccessPolicy): Config | null {
   const caseInsensitive = policy.emailMatch === 'case-insensitive';
   if (!caseInsensitive && policy.emailMatch !== 'exact') return null;
-  const fold = (email: string): string => (caseInsensitive ? email.toLowerCase() : email);
+  const fold = (email: string): string => (caseInsensitive ? asciiLowerCase(email) : email);
 
   const issuer = trimmed(policy.issuer).replace(/\/+$/, '');
   if (!ACCESS_ISSUER.test(issuer) && !(policy.loopbackIssuer === true && LOOPBACK_ISSUER.test(issuer))) return null;
 
   const audience = trimmed(policy.audience);
   const owner = fold(trimmed(policy.owner));
-  if (audience === '' || !EMAIL.test(owner)) return null;
+  if (audience === '' || !validEmail(owner)) return null;
 
   const rawAliases = trimmed(policy.aliases);
   if (rawAliases.length > ACCESS_MAX_ALIASES_CHARS) return null;
@@ -158,7 +180,7 @@ function normaliseConfig(policy: AccessPolicy): Config | null {
     .split(',')
     .map((alias) => fold(alias.trim()))
     .filter((alias) => alias !== '');
-  if (aliases.length > ACCESS_MAX_ALIASES || !aliases.every((alias) => EMAIL.test(alias))) return null;
+  if (aliases.length > ACCESS_MAX_ALIASES || !aliases.every(validEmail)) return null;
 
   const ttlMs = policy.jwks?.ttlMs ?? DEFAULT_TTL_MS;
   const cooldownMs = policy.jwks?.refreshCooldownMs ?? DEFAULT_COOLDOWN_MS;
@@ -228,7 +250,8 @@ function claimsValid(claims: JsonObject, config: Config): boolean {
     typeof sub === 'string' &&
     sub !== '' &&
     typeof email === 'string' &&
-    config.emails.has(config.caseInsensitive ? email.toLowerCase() : email)
+    ASCII_EMAIL.test(email) &&
+    config.emails.has(config.caseInsensitive ? asciiLowerCase(email) : email)
   );
 }
 

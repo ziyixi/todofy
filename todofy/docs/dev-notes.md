@@ -201,7 +201,7 @@ Local runtime quirks (not production behaviour)
 - Mail source: every ledger row uses `source_id = var(env, "MAIL_SOURCE_ID", "mail-hero-personal")`.
 - Payload hash: lowercase hex SHA-256 of the exact webhook bytes (`interop.sha256_hex`).
 - Owner identity: the gateway's `access.ts` (Todofy's policy for the shared `packages/edge-auth`
-  verifier) returns `ACCESS_OWNER` lowercased (aliases in `ACCESS_OWNER_ALIASES` map to it) and passes
+  verifier) returns `ACCESS_OWNER` ASCII-lowercased (aliases in `ACCESS_OWNER_ALIASES` map to it) and passes
   it to `owner_api`; `owner_actions.owner` is always that value.
 
 ### 4.2 SQL
@@ -426,7 +426,7 @@ root; its `SPEC.md` has every parameter): they pass Todofy's values and map the 
 reasons to Todofy's codes; the package itself is never edited for one app. `access.ts` (Access JWT:
 RS256 via WebCrypto, keys cached per isolate for an hour, an unknown kid refetches at most once a
 minute; `alg`/`kid`/no `crit`, `iss`, `aud`, `exp`, `iat`, optional `nbf`, non-empty `sub` and `email`
-matched case-insensitively; `ACCESS_OWNER_ALIASES` ≤ 8 emails mapped to `ACCESS_OWNER`),
+matched case-insensitively over ASCII only, non-ASCII addresses refused; `ACCESS_OWNER_ALIASES` ≤ 8 emails mapped to `ACCESS_OWNER`),
 `csrf.ts` (`Origin` must equal `https://<TODOFY_PUBLIC_HOST>`, `http://` only under the `.localhost`
 dev rule; `X-CSRF-Token` must equal the first `todofy_csrf` cookie; an HMAC-signed
 `{kind, owner, nonce, exp}` (12 h) keyed by `CSRF_SIGNING_KEY`, 64 hex; missing or malformed → 503

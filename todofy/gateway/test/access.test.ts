@@ -148,6 +148,8 @@ describe('Access JWT', () => {
       'no owner': { ACCESS_OWNER: undefined },
       'nine aliases': { ACCESS_OWNER_ALIASES: Array.from({ length: 9 }, (_, i) => `a${String(i)}@example.com`).join(',') },
       'aliases too long': { ACCESS_OWNER_ALIASES: `${'a'.repeat(2040)}@example.com` },
+      'non-ASCII owner': { ACCESS_OWNER: '\u212Aate@example.com' },
+      'non-ASCII alias': { ACCESS_OWNER_ALIASES: 'kim@example.net, \u212Aim@example.net' },
     };
     for (const [name, vars] of Object.entries(cases)) {
       const { env } = fakes(accessVars(vars));
@@ -170,11 +172,32 @@ describe('Access JWT', () => {
     expect(certs).toHaveBeenLastCalledWith(`${loopback}/cdn-cgi/access/certs`, expect.anything());
   });
 
+  it('matches the owner case-insensitively for ASCII only: a Kelvin-sign login is not the owner', async () => {
+    // U+212A KELVIN SIGN lowercases to ASCII 'k' with String.prototype.toLowerCase.
+    const { env, core } = fakes(accessVars({ ACCESS_OWNER: ' Kate@Example.com ', ACCESS_OWNER_ALIASES: 'kim@example.net' }), () => ok({}));
+    for (const email of ['\u212Aate@example.com', '\u212AATE@EXAMPLE.COM', '\u212Aim@example.net']) {
+      const response = await send(env, { 'cf-access-jwt-assertion': await token({ claims: { email } }) });
+      expect(response.status, email).toBe(401);
+      expect(await errorCode(response), email).toBe('unauthorized');
+    }
+    expect(core).toHaveLength(0);
+    for (const email of ['KATE@example.com', 'Kim@Example.NET']) {
+      const response = await send(env, { 'cf-access-jwt-assertion': await token({ claims: { email } }) }, '/api/v1/overview');
+      expect(response.status, email).toBe(200);
+    }
+    expect(core.map((call) => call.args[0])).toEqual(['kate@example.com', 'kate@example.com']);
+  });
+
   it('bypasses Access only in local dev and never for a request that came through the edge', async () => {
     const local = fakes({ DEV_AUTH_BYPASS: 'true', ACCESS_OWNER: 'Owner@Example.com' }, () => ok({}));
     const response = await send(local.env, {}, '/api/v1/overview', 'todofy.localhost');
     expect(response.status).toBe(200);
     expect(local.core[0]?.args[0]).toBe('owner@example.com');
+
+    // The bypass principal uses the verifier's ASCII-only fold: a Kelvin sign is not turned into 'k'.
+    const kelvin = fakes({ DEV_AUTH_BYPASS: 'true', ACCESS_OWNER: '\u212AATE@Example.com' }, () => ok({}));
+    expect((await send(kelvin.env, {}, '/api/v1/overview', 'todofy.localhost')).status).toBe(200);
+    expect(kelvin.core[0]?.args[0]).toBe('\u212Aate@example.com');
 
     const edge = await send(local.env, { 'cf-ray': '8f1c2d3e4f5a6b7c-SJC' }, '/', 'todofy.localhost');
     expect(edge.status).toBe(503);

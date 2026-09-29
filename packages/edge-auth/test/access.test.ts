@@ -1,6 +1,7 @@
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   ACCESS_MAX_TOKEN_CHARS,
+  asciiLowerCase,
   createAccessVerifier,
   type AccessPolicy,
   type AccessResult,
@@ -213,6 +214,38 @@ describe('owner and aliases', () => {
   it('never returns the alias itself', async () => {
     const result = await tf(await jwt(TODOFY_ALIAS));
     expect(result.ok && result.owner).toBe(TODOFY_OWNER);
+  });
+
+  // U+212A KELVIN SIGN: String.prototype.toLowerCase maps it to ASCII 'k' (in Node and workerd).
+  const KELVIN = '\u212A';
+
+  it('refuses a correctly signed non-ASCII email that Unicode lowercasing would fold onto the owner, in both modes', async () => {
+    expect(`${KELVIN}ate@example.com`.toLowerCase()).toBe('kate@example.com'); // the premise
+    const tfKate = todofyPolicy({ owner: 'kate@example.com', aliases: 'kim@example.net' });
+    const mhKate = mailHeroPolicy({ owner: 'kate@example.com', aliases: 'kim@example.net' });
+    for (const email of [`${KELVIN}ate@example.com`, `${KELVIN}im@example.net`, `kate@example.com${KELVIN}`]) {
+      expect(await tf(await jwt(email), tfKate), email).toEqual(failure('invalid_token'));
+      expect(await mh(await jwt(email), mhKate), email).toEqual(failure('invalid_token'));
+    }
+    // The ASCII spellings still work: case-insensitively for Todofy, exactly for Mail Hero.
+    expect(await tf(await jwt('KATE@example.com'), tfKate)).toEqual({ ok: true, owner: 'kate@example.com', bypassed: false });
+    expect(await tf(await jwt('Kim@Example.net'), tfKate)).toEqual({ ok: true, owner: 'kate@example.com', bypassed: false });
+    expect(await mh(await jwt('kate@example.com'), mhKate)).toEqual({ ok: true, owner: 'kate@example.com', bypassed: false });
+    expect(await mh(await jwt('KATE@example.com'), mhKate)).toEqual(failure('invalid_token'));
+  });
+
+  it('refuses any non-ASCII token email under both policies', async () => {
+    for (const email of ['own\u00e9r@example.com', 'owner@ex\u00e4mple.com', '\u0130nfo@example.com', 'owner@example.com\u00a0']) {
+      expect(await tf(await jwt(email), todofyPolicy({ aliases: 'x@example.net' })), email).toEqual(failure('invalid_token'));
+      expect(await mh(await jwt(email)), email).toEqual(failure('invalid_token'));
+    }
+  });
+
+  it('lowercases ASCII letters only (asciiLowerCase)', () => {
+    expect(asciiLowerCase('Owner.Name+Tag@Example.COM')).toBe('owner.name+tag@example.com');
+    expect(asciiLowerCase(`${KELVIN}ATE`)).toBe(`${KELVIN}ate`);
+    expect(asciiLowerCase('\u0130\u00c4\u00c9@[]^_`{')).toBe('\u0130\u00c4\u00c9@[]^_`{');
+    expect(asciiLowerCase('')).toBe('');
   });
 });
 
@@ -696,6 +729,10 @@ describe('configuration (fail closed)', () => {
     ['nine aliases', { aliases: Array.from({ length: 9 }, (_, i) => `a${String(i)}@example.com`).join(',') }],
     ['aliases longer than 2048 characters', { aliases: `${'a'.repeat(2038)}@example.com` }],
     ['alias not an email', { aliases: 'a@example.com, not-an-email' }],
+    ['non-ASCII owner', { owner: '\u212Aate@example.com' }],
+    ['non-ASCII owner domain', { owner: 'owner@ex\u00e4mple.com' }],
+    ['owner with a control character', { owner: 'own\u0001er@example.com' }],
+    ['non-ASCII alias', { aliases: 'a@example.com, \u212Aim@example.net' }],
     ['bad emailMatch', { emailMatch: 'loose' as never }],
     ['negative nbf leeway', { nbfLeewaySeconds: -1 }],
     ['fractional nbf leeway', { nbfLeewaySeconds: 1.5 }],

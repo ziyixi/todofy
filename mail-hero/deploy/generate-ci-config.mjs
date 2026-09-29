@@ -6,6 +6,8 @@ const output = new URL('../cloudflare/wrangler.native.production.ci.json', impor
 const fail = name => { throw new Error(`Invalid or missing CI setting: ${name}`) }
 const domainPattern = /^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/
 const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+// Access owner and aliases: printable ASCII only, as packages/edge-auth requires (SPEC.md #36).
+const accessEmailPattern = /^(?=[\x21-\x7e]+$)[^\s@]+@[^\s@]+\.[^\s@]+$/
 function checked(env, name, pattern, fallback) {
   const value = env[name] ?? fallback
   if (typeof value !== 'string' || value !== value.trim() || !pattern.test(value)) fail(name)
@@ -20,7 +22,7 @@ function integer(env, name, fallback, maximum) {
 
 export function generateConfig(env) {
   const aliases = (env.MAIL_HERO_ACCESS_OWNER_ALIASES ?? '').split(',').map(value => value.trim()).filter(Boolean)
-  if (aliases.length > 8 || aliases.join(',').length > 2048 || aliases.some(value => !emailPattern.test(value))) fail('MAIL_HERO_ACCESS_OWNER_ALIASES')
+  if (aliases.length > 8 || aliases.join(',').length > 2048 || aliases.some(value => !accessEmailPattern.test(value))) fail('MAIL_HERO_ACCESS_OWNER_ALIASES')
   const allowed = (env.MAIL_HERO_WEBHOOK_ALLOWED_HOSTS ?? '').split(',').map(value => value.trim()).filter(Boolean)
   if (!allowed.length || allowed.some(value => !domainPattern.test(value))) fail('MAIL_HERO_WEBHOOK_ALLOWED_HOSTS')
   const alertAllowed = (env.MAIL_HERO_ALERT_WEBHOOK_ALLOWED_HOSTS ?? '').split(',').map(value => value.trim()).filter(Boolean)
@@ -43,7 +45,7 @@ export function generateConfig(env) {
       RECEIVE_ADDRESS: checked(env, 'MAIL_HERO_RECEIVE_ADDRESS', emailPattern),
       ACCESS_ISSUER: checked(env, 'MAIL_HERO_ACCESS_ISSUER', /^https:\/\/[a-z0-9-]+\.cloudflareaccess\.com$/),
       ACCESS_AUDIENCE: checked(env, 'MAIL_HERO_ACCESS_AUDIENCE', /^[a-f0-9]{64}$/i),
-      ACCESS_OWNER: checked(env, 'MAIL_HERO_ACCESS_OWNER', emailPattern),
+      ACCESS_OWNER: checked(env, 'MAIL_HERO_ACCESS_OWNER', accessEmailPattern),
       ACCESS_OWNER_ALIASES: aliases.join(','), WEBHOOK_ALLOWED_HOSTS: allowed.join(','),
       ...(alertURL ? { ALERT_WEBHOOK_URL: alertURL, ALERT_WEBHOOK_ALLOWED_HOSTS: (alertAllowed.length ? alertAllowed : allowed).join(',') } : {}),
       FORCE_SEND_PAUSED: flag(env, 'MAIL_HERO_FORCE_SEND_PAUSED'),

@@ -8,6 +8,7 @@ export {
   ACCESS_MAX_TOKEN_CHARS,
   ACCESS_TOKEN_COOKIE,
   ACCESS_TOKEN_HEADER,
+  asciiLowerCase,
   createAccessVerifier,
   type AccessFailure,
   type AccessPolicy,
