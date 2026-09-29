@@ -19,7 +19,14 @@ from todofy.core.vocab import TERMINAL_STATES, EventState, ReminderState
 
 ROOT = Path(__file__).resolve().parents[2]
 MIGRATION = ROOT / "migrations" / "0001_init.sql"
-PROTOS = Path(os.environ.get("TODOFY_PROTOS_DIR", ROOT.parent / "protos"))
+# The protos checkout next to the monorepo checkout (todofy/ is one level below the repository root),
+# or next to a standalone todofy checkout; TODOFY_PROTOS_DIR overrides both. Absent: the check skips.
+_PROTOS_CANDIDATES = (ROOT.parent.parent / "protos", ROOT.parent / "protos")
+PROTOS = (
+    Path(os.environ["TODOFY_PROTOS_DIR"])
+    if os.environ.get("TODOFY_PROTOS_DIR")
+    else next((path for path in _PROTOS_CANDIDATES if path.exists()), _PROTOS_CANDIDATES[0])
+)
 
 
 @pytest.fixture

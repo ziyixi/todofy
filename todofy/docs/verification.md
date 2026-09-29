@@ -13,7 +13,7 @@ The `Todofy checks` sequence was run from a copy holding only tracked and new so
 | `npm ci`, `uv sync --locked` | ok |
 | `ruff check worker tests tools deploy` | all checks passed |
 | `ruff format --check worker tests tools deploy` | 110 files already formatted |
-| `pytest tests/unit tests/fakes tools deploy` | 646 passed, 1 skipped (the proto cross-check needs the sibling `protos` checkout) |
+| `pytest tests/unit tests/fakes tools deploy` | 646 passed, 1 skipped (the proto cross-check needs a `protos` checkout next to the repository checkout, or `TODOFY_PROTOS_DIR`) |
 | `web`: `npm ci`, `check:api`, `typecheck`, `test`, `build`, source guard | generated types match; 8 files, 61 tests passed; build ok; guard ok |
 | `pytest tests/runtime` (workerd, real D1, Durable Object, alarms, cron, assets) | 326 passed in 8 min 16 s |
 | placeholder production config + `pywrangler deploy --dry-run --secrets-file ...` | generated; `ACCESS_OWNER` and `ACCESS_OWNER_ALIASES` shown as `(hidden)`; workers SDK vendored in the bundle |

@@ -32,6 +32,11 @@ generates placeholder production configs for both Workers and dry-runs them. `np
 `uiassets/dist`; without it the runtime harness serves a placeholder `index.html` and one placeholder
 file under `assets/`.
 
+One host test, `tools/legacy_migration/test_legacy_to_d1.py::test_model_table_matches_the_proto`,
+cross-checks the legacy model table against the `protos` checkout. It reads `TODOFY_PROTOS_DIR` if set,
+otherwise a `protos` checkout next to the monorepo checkout (or next to a standalone `todofy` checkout),
+and skips when none is present, as in CI.
+
 Other useful commands (all local, no credentials):
 
 ```sh
