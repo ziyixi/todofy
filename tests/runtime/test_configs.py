@@ -72,10 +72,10 @@ def test_shipped_gateway_sends_every_request_through_the_worker_and_binds_the_co
     assert GATEWAY["assets"]["not_found_handling"] == "single-page-application"
     [binding] = GATEWAY["durable_objects"]["bindings"]
     assert binding == {"name": "COORDINATOR", "class_name": "TodofyCore", "script_name": CORE["name"]}
-    # The core owns the class now; the gateway keeps its applied v1 and exports an empty retired class.
-    # The class delete ships in a gateway-only release of its own (docs/gateway-contract.md §6.5).
+    # The core owns the class now; the gateway's history created the Python class (v1) and deleted it (v2).
     assert GATEWAY["migrations"] == [
         {"tag": "v1", "new_sqlite_classes": ["TodofyCoordinator"]},
+        {"tag": "v2", "deleted_classes": ["TodofyCoordinator"]},
     ]
     assert CORE["migrations"] == [
         {"tag": "v1", "new_sqlite_classes": ["TodofyCoordinator"]},

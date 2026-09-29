@@ -27,7 +27,7 @@ DO's bytes.
 | Bindings | `ASSETS` (`uiassets/dist`), `COORDINATOR` → class `TodofyCore` in script `todofy-core`, `METRICS` (Analytics Engine `todofy_metrics`, one point per request and cron; dev-notes.md §6) | `DB` (D1 `todofy`), `BACKUPS` (private R2 bucket `todofy-backups`, weekly D1 backups; it holds mail content), `METRICS` (the same dataset, one point per upstream step). No DO binding: nothing in core calls the DO through a stub any more |
 | Vars | `TODOFY_PUBLIC_HOST`, `TODOFY_HOOKS_HOSTS`, `BUILD_SHA`, `ACCESS_ISSUER`, `ACCESS_AUDIENCE`, `MAINTENANCE_MODE`; dev/test only: `DEV_AUTH_BYPASS`, `DEV_ACCESS_LOOPBACK_ISSUER`, `JWKS_REFRESH_COOLDOWN_MS` | `BUILD_SHA`, `MAINTENANCE_MODE`, `TODOFY_PUBLIC_HOST` (the reminder's link), `PROCESSING_PAUSED`, `FORCE_PAUSE_TODOIST`, `REMINDER_ENABLED`, `MAIL_SOURCE_ID`, `GEMINI_API_BASE`, `GEMINI_MODELS`, `GEMINI_TIMEOUT_MS`, `GEMINI_DAILY_TOKEN_BUDGET`, `TODOIST_API_BASE`, `TODOIST_DEFAULT_PROJECT_ID`, `TODOIST_ATTEMPT_TIMEOUT_MS`, `LOOKUP_DELAY_MS`, `BACKOFF_BASE_MS`, `WATCHDOG_MS`, `REPORT_DEFAULT_TOP`, `REPORT_PRECOMPUTE_UTC`, `LEGACY_TEXT_RETENTION_DAYS` |
 | Secrets | `MAIL_WEBHOOK_TOKEN_SHA256`, `MAIL_WEBHOOK_TOKEN_SHA256_PREVIOUS`, `REPORT_BASIC_AUTH_SHA256`, `CSRF_SIGNING_KEY`, `ACCESS_OWNER`, `ACCESS_OWNER_ALIASES` (the last two from `--secrets-file` on every deploy) | `GEMINI_API_KEY`, `TODOIST_API_KEY` |
-| DO class | exports only `TodofyCoordinator`, an empty retired class (`src/retired.ts`, migration `v1`) that nothing binds; a gateway-only release of its own deletes it (§6.6) | `TodofyCore` (renamed from `TodofyCoordinator` by core migration `v2`), instance name `inbox-v1`, SQLite-backed |
+| DO class | none: migration `v2` deleted the Python-era `TodofyCoordinator` in a gateway-only release (§6.6) | `TodofyCore` (renamed from `TodofyCoordinator` by core migration `v2`), instance name `inbox-v1`, SQLite-backed |
 
 `BUILD_SHA` and `MAINTENANCE_MODE` are set on both from the same deploy value. The gateway never binds
 or queries D1. `gateway/package.json` has its own lockfile with `typescript` and
@@ -292,11 +292,14 @@ name = "COORDINATOR"
 class_name = "TodofyCore"
 script_name = "todofy-core"
 
-# Script "todofy" history: v1 created the Python class, now an empty class in src/retired.ts.
-# Its deletion (v2 deleted_classes) ships in a gateway-only release of its own (§6.6).
+# Script "todofy" history: v1 created the Python class; v2 deleted it once the gateway replaced it.
 [[migrations]]
 tag = "v1"
 new_sqlite_classes = ["TodofyCoordinator"]
+
+[[migrations]]
+tag = "v2"
+deleted_classes = ["TodofyCoordinator"]
 
 [[analytics_engine_datasets]]
 binding = "METRICS"
@@ -508,6 +511,8 @@ two coordinators run against the same database, in either direction.
 > it ships alone (§6.6), where a refusal cannot take any other change down with it.
 
 ### 6.6 Release notes: deleting the retired class (gateway-only release)
+
+> Shipped 2026-09-29 as its own release after the RPC, backup and metrics release; kept here as the record.
 
 Ship this only after the RPC, backup and metrics release is live and checked (CI's `/health` and core
 probes passed, the owner UI overview loads, a webhook reached `complete`). The commit changes nothing

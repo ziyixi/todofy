@@ -123,9 +123,8 @@ generate both production configs from GitHub variables, dry-run, apply D1 migrat
 `todofy-core` and then the gateway, wait for `/health` to report the commit, then check that a wrong
 newsletter credential gets 401/429 from the Durable Object (proving gateway → object → D1). There are no pull requests; `main` is fast-forwarded. One-time setup
 (D1, R2 bucket, Access, GitHub environment, Worker secrets) is in [docs/cloudflare-setup.md](docs/cloudflare-setup.md).
-A Durable Object class change ships in a release of its own: the gateway still exports the empty
-retired class `TodofyCoordinator`, and a gateway-only release deletes it
-([docs/gateway-contract.md](docs/gateway-contract.md) §6.6).
+A Durable Object class change ships in a release of its own; the gateway-only release that deleted the
+retired class `TodofyCoordinator` is recorded in [docs/gateway-contract.md](docs/gateway-contract.md) §6.6.
 
 ## Repository
 

@@ -13,8 +13,6 @@ import { errorResponse, newRequestId, type Context } from './http.ts';
 import { declaredBytes, recordRequest, routeOf, type HostKind } from './metrics.ts';
 import { handleOwner } from './owner.ts';
 
-export { TodofyCoordinator } from './retired.ts';
-
 /** The public host is matched before the hooks hosts. */
 function hostKind(ctx: Context): HostKind {
   const host = ctx.url.hostname.toLowerCase();

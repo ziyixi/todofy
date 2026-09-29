@@ -17,12 +17,16 @@ name = "COORDINATOR"
 class_name = "TodofyCore"
 script_name = "todofy-core"
 
-# Script "todofy" history: v1 created the Python class, now an empty class in src/retired.ts.
+# Script "todofy" history: v1 created the Python class; v2 deleted it once the gateway replaced it.
 # Its deletion (v2 deleted_classes) ships in a gateway-only release of its own after this one is
 # live, so a refusal (error 10061) never blocks another change (docs/gateway-contract.md §6.5).
 [[migrations]]
 tag = "v1"
 new_sqlite_classes = ["TodofyCoordinator"]
+
+[[migrations]]
+tag = "v2"
+deleted_classes = ["TodofyCoordinator"]
 
 # Operating metrics (Workers Analytics Engine; write-only from the Worker, read with the SQL API).
 [[analytics_engine_datasets]]
