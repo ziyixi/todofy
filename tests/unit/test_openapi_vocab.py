@@ -44,6 +44,7 @@ OWNER_PATHS = {
     "/api/v1/reminders",
     "/api/v1/reports/latest",
     "/api/v1/reports/recompute",
+    "/api/v1/metrics/daily",
     "/api/v1/legacy_text/{event_id}",
     "/api/v1/setup",
 }

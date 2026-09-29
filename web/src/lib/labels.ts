@@ -1,6 +1,7 @@
 import type { ClientErrorCode } from '../api/client'
 import type {
   ApiErrorCode,
+  BackupStatus,
   EventErrorCode,
   EventState,
   RecommendationReport,
@@ -191,6 +192,20 @@ export const SUMMARY_STATUS: Record<SummaryReport['status'], Label> = {
   ok: { label: '正常', tone: 'ok' },
   empty_window: { label: '窗口内没有邮件', tone: 'warn' },
   stale: { label: '过期结果', tone: 'warn' },
+}
+
+export const BACKUP_STATUS: Record<BackupStatus['status'], Label> = {
+  disabled: { label: '未启用', tone: 'neutral' },
+  never: { label: '尚未备份', tone: 'warn' },
+  running: { label: '备份中', tone: 'progress' },
+  ok: { label: '正常', tone: 'ok' },
+  failed: { label: '失败', tone: 'danger' },
+}
+
+const BACKUP_RETRY = '6 小时后自动重试；连续三次失败后等到下个周日 10:00（UTC）。'
+export const BACKUP_ERRORS: Record<NonNullable<BackupStatus['last_error_code']>, string> = {
+  storage_error: `D1 或 R2 连续三次读写失败，这次备份已放弃。${BACKUP_RETRY}`,
+  lease_expired: `30 分钟内没有完成，这次备份已放弃。${BACKUP_RETRY}`,
 }
 
 export const RECOMMENDATION_STATUS: Record<RecommendationReport['status'], Label> = {

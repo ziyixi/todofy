@@ -16,6 +16,7 @@ export const keys = {
   reminders: ['reminders'] as const,
   reports: ['reports'] as const,
   setup: ['setup'] as const,
+  dailyMetrics: (days: number) => ['metrics', 'daily', days] as const,
 }
 
 export function useOverview() {
@@ -94,6 +95,19 @@ export function useReminders() {
 
 export function useReports() {
   return useQuery({ queryKey: keys.reports, queryFn: api.reportsLatest })
+}
+
+/** Daily metrics change once a day (written a few minutes after UTC midnight). */
+export const METRICS_DAYS = 30
+const DAILY_METRICS_STALE_MS = 60 * 60 * 1000
+
+export function useDailyMetrics(days: number = METRICS_DAYS) {
+  return useQuery({
+    queryKey: keys.dailyMetrics(days),
+    queryFn: () => api.dailyMetrics(days),
+    staleTime: DAILY_METRICS_STALE_MS,
+    refetchOnWindowFocus: false,
+  })
 }
 
 export function useSetup() {

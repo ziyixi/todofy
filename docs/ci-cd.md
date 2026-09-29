@@ -45,9 +45,10 @@ The same sequence as local development:
 
 1. install locked dependencies (root, `gateway/`, `web/`) and build the UI from the verified revision
 2. `deploy/generate_ci_config.py` writes three owner-only files, removed at the end even on failure:
-   `wrangler.production.ci.json` (core: D1, the Durable Object migration, vars; no routes),
+   `wrangler.production.ci.json` (core: D1, the `BACKUPS` R2 bucket `todofy-backups`, the `METRICS`
+   Analytics Engine dataset, the Durable Object migrations, vars; no routes),
    `gateway/wrangler.production.ci.json` (gateway: custom domains, assets, cron, the `COORDINATOR`
-   binding to `todofy-core`, migrations, vars) and `gateway/wrangler.production.secrets.json` (the
+   binding to `todofy-core`, the `METRICS` dataset, migrations, vars) and `gateway/wrangler.production.secrets.json` (the
    owner's Access emails, from environment secrets)
 3. dry-run both bundles before changing anything
 4. `wrangler d1 migrations apply DB --remote`, then `pywrangler deploy` of `todofy-core`
@@ -57,19 +58,38 @@ The same sequence as local development:
    for the Custom Domain certificate). The gateway answers `/health` without the Durable Object, so this
    proves the gateway build only.
 7. send one `GET /api/summary` with a wrong Basic credential (up to 5 tries, 10 s apart). The gateway
-   hands a failed credential to the object's `/newsletter/auth-failure`, which reads and writes D1 and
+   hands a failed credential to the object's `newsletter_auth_failure()`, which reads and writes D1 and
    answers 401 (or 429 once this hour's 20 failures are spent). Anything else, such as the 503 of a broken
    core, binding or D1, fails the job. The probe spends one of the hour's 20 failure slots and never blocks
    the real credential, which the gateway sends straight to the report. The Access → owner API path is
    not probed (CI has no Access login); open the owner UI once after a deploy that touches it.
 
-Order matters, and it sets two compatibility rules:
+Order matters, and it sets three rules:
 
-- Only backward-compatible D1 migrations may ship: the migration runs before the new core is live.
-- The core deploys before the gateway, so the object class and every internal route a new gateway calls
+- Only backward-compatible (additive) D1 migrations may ship: the migration runs before the new core is
+  live. The backup restore relies on this too: it loads an older backup into a database with every
+  current migration applied ([cloudflare-setup.md](cloudflare-setup.md) §7).
+- The core deploys before the gateway, so the object class and every RPC method a new gateway calls
   exist before it goes live. Between the two deploys the previous gateway talks to the new core, so a
-  core change must keep serving the previous gateway's requests. If the gateway deploy fails, the new
-  core keeps serving the previous gateway.
+  core change must keep serving the previous gateway's calls, and if the gateway deploy fails the new
+  core keeps serving the previous gateway. The one exception is the release that moves from the
+  internal fetch routes to RPC: its core answers the previous gateway 503 `unavailable` with
+  `Retry-After: 60` ([gateway-contract.md](gateway-contract.md) §6.4). If that release's gateway step
+  fails, webhooks stay on Mail Hero's retry backoff and the owner UI and newsletter answer 503. Rerun
+  the job once (a transient failure). That release carries no Durable Object migration, so it cannot
+  hit the 10061 class-delete refusal; if the rerun fails the same way anyway, roll `todofy-core` alone
+  back to its previous version (the one exception to the next rule, spelled out in gateway-contract.md
+  §6.4), which pairs the previous gateway and core again, and fix forward on `main`.
+- Core and gateway roll back only together: revert the commit on `main` and let this workflow redeploy
+  both. Never `wrangler rollback` (or roll back in the dashboard) one Worker otherwise: across the RPC
+  release an older gateway or core alone cannot talk to the other, and every core-backed route answers
+  503. Once the gateway-only class-delete release is live (`todofy` at migration tag `v2`), a revert of
+  an older release must keep the gateway tomls' `[[migrations]]` at `v1` + `v2` and must not bring back
+  `gateway/src/retired.ts` (gateway-contract.md §6.6).
+- A Durable Object class change ships in a release of its own. The retired gateway class
+  `TodofyCoordinator` is deleted by a gateway-only release after the RPC release (gateway-contract.md
+  §6.6): a deterministic refusal there (error 10061) fails only that release, and a rerun cannot fix
+  it; revert that commit instead.
 
 The first deploy of the split replaces the old single Python Worker `todofy`; its one-time owner steps
 (the core's API keys before the merge, removing them from `todofy` after) and the rollback runbook are in

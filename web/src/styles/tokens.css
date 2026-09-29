@@ -10,6 +10,13 @@
   --danger: #b4382f;
   --warn: #9a5b00;
   --ok: #2c7a4b;
+  /* Categorical chart colours: distinct hue and lightness, each at least 4.5:1 on --surface.
+     Blue and orange come first; they stay apart under red-green colour-vision deficiency. */
+  --series-1: #1f6fc5;
+  --series-2: #b85c00;
+  --series-3: #2b7a4b;
+  --series-4: #8e44ad;
+  --series-5: #c0396b;
 
   --text-s: 0.8125rem;
   --text-m: 0.9375rem;
@@ -35,5 +42,10 @@
     --danger: #f07b71;
     --warn: #e2a84c;
     --ok: #6fcf97;
+    --series-1: #6aa8f0;
+    --series-2: #e39a4a;
+    --series-3: #6fcf97;
+    --series-4: #c08be0;
+    --series-5: #f07fa8;
   }
 }

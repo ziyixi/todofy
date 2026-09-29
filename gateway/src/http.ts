@@ -5,13 +5,14 @@ export interface Context {
   readonly request: Request;
   readonly env: Env;
   readonly url: URL;
-  /** 16 lowercase hex characters; used in the gateway's envelopes and sent to the core. */
+  /** 16 lowercase hex characters; used in every error envelope, the core's included. */
   readonly requestId: string;
 }
 
 /**
- * The error codes the gateway emits, with the UI text from `worker/todofy/core/api_errors.py`
- * (a unit test keeps the two tables equal).
+ * The error codes the gateway emits on its own, with the UI text from
+ * `worker/todofy/core/api_errors.py` (a unit test keeps the two tables equal). The core sends the
+ * message with each of its errors.
  */
 export const MESSAGES = {
   unauthorized: '未登录或凭据无效',
@@ -58,8 +59,9 @@ export function newRequestId(): string {
   ).join('');
 }
 
-export function jsonResponse(data: unknown, status = 200): Response {
-  return new Response(JSON.stringify(data), {
+/** JSON text that is already serialised (the core's bodies keep their bytes). */
+export function jsonText(text: string, status = 200): Response {
+  return new Response(text, {
     status,
     headers: {
       'content-type': 'application/json; charset=utf-8',
@@ -69,20 +71,35 @@ export function jsonResponse(data: unknown, status = 200): Response {
   });
 }
 
-/** The OpenAPI error envelope; only the request ID, status and code are logged. */
+export function jsonResponse(data: unknown, status = 200): Response {
+  return jsonText(JSON.stringify(data), status);
+}
+
+/**
+ * The OpenAPI error envelope for any error, the core's included, so every error is logged here
+ * once; only the request ID, status and code are logged.
+ */
+export function errorEnvelope(
+  requestId: string,
+  status: number,
+  code: string,
+  message: string,
+  headers: Readonly<Record<string, string>> = {},
+): Response {
+  console.log(JSON.stringify({ request_id: requestId, status, code }));
+  const response = jsonResponse({ error: { code, message, request_id: requestId } }, status);
+  for (const [name, value] of Object.entries(headers)) response.headers.set(name, value);
+  return response;
+}
+
+/** An error the gateway emits on its own. */
 export function errorResponse(
   requestId: string,
   status: number,
   code: ErrorCode,
   headers: Readonly<Record<string, string>> = {},
 ): Response {
-  console.log(JSON.stringify({ request_id: requestId, status, code }));
-  const response = jsonResponse(
-    { error: { code, message: MESSAGES[code], request_id: requestId } },
-    status,
-  );
-  for (const [name, value] of Object.entries(headers)) response.headers.set(name, value);
-  return response;
+  return errorEnvelope(requestId, status, code, MESSAGES[code], headers);
 }
 
 /** `content-type` before any parameters, trimmed and lowercased. */

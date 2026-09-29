@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import apiErrors from '../../worker/todofy/core/api_errors.py?raw';
 import { MESSAGES } from '../src/http.ts';
 import worker from '../src/index.ts';
-import { errorCode, fakes, hooks, logged, owner, send } from './helpers.ts';
+import { bodyText, errorCode, fakes, hooks, logged, NO_CONTENT, owner, send } from './helpers.ts';
 
 describe('host routing', () => {
   it('answers an unknown host with 404 and never calls the core', async () => {
@@ -94,8 +94,8 @@ describe('unread uploads', () => {
     const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(token));
     const hex = Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('');
     const { env, core } = fakes({ MAIL_WEBHOOK_TOKEN_SHA256: hex }, async (call) => {
-      await new Response(call.body).text();
-      return new Response(null, { status: 204 });
+      await bodyText(call);
+      return NO_CONTENT;
     });
     const body = upload();
     const request = body.request('http://todofy-hooks.localhost/hooks/mail', {
@@ -147,20 +147,13 @@ describe('health', () => {
 });
 
 describe('cron', () => {
-  it('wakes the coordinator with the internal headers and no body', async () => {
-    const { env, core } = fakes();
+  it('wakes the coordinator', async () => {
+    const { env, core } = fakes({}, () => undefined);
     await worker.scheduled(
       { cron: '*/10 * * * *', scheduledTime: 0, noRetry: () => undefined },
       env,
     );
-    expect(core).toHaveLength(1);
-    const [wake] = core;
-    expect(wake?.name).toBe('inbox-v1');
-    expect(wake?.url.href).toBe('https://coordinator/wake');
-    expect(wake?.method).toBe('POST');
-    expect(wake?.body).toBeNull();
-    expect(wake?.headers.get('x-todofy-internal')).toBe('1');
-    expect(wake?.headers.get('x-todofy-request-id')).toMatch(/^[0-9a-f]{16}$/);
+    expect(core).toEqual([{ instance: 'inbox-v1', method: 'wake', args: [] }]);
   });
 
   it('fails the invocation when the coordinator cannot be reached', async () => {

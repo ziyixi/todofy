@@ -196,7 +196,7 @@ jobs:
           echo "The hooks host never reported build $GITHUB_SHA." >&2
           exit 1
       # /health never reaches todofy-core. A wrong newsletter credential does: the gateway forwards it to
-      # the object's POST /newsletter/auth-failure, which reads and writes D1 and answers 401 (or 429 once
+      # the object's newsletter_auth_failure(), which reads and writes D1 and answers 401 (or 429 once
       # this hour's 20 failures are spent). A broken core, binding or D1 gives 503. The correct credential
       # never reads the counter, so this probe cannot lock the newsletter out.
       - name: Check that the gateway reaches todofy-core

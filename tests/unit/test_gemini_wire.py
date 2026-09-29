@@ -78,7 +78,7 @@ def test_reply_joins_first_candidate_text_and_skips_thoughts():
         "usageMetadata": {"promptTokenCount": 10, "candidatesTokenCount": 5, "totalTokenCount": 21},
     }
     reply = parse_reply(json.dumps(body).encode())
-    assert (reply.text, reply.tokens) == ("摘要。", 21)
+    assert (reply.text, reply.tokens, reply.prompt_tokens) == ("摘要。", 21, 10)
 
 
 @pytest.mark.parametrize(

@@ -5,7 +5,7 @@ import { vi } from 'vitest'
 import { resetCsrfForTests } from '../api/client'
 import { createQueryClient } from '../queryClient'
 import { routes } from '../routes'
-import { overview } from './fixtures'
+import { dailyMetrics, overview } from './fixtures'
 
 export interface Call {
   method: string
@@ -29,13 +29,14 @@ function isReply(value: unknown): value is { status: number; body?: unknown } {
 
 /**
  * Stubs fetch with handlers keyed by "METHOD /api/v1/path". Unmatched requests fail the test
- * loudly. GET /api/v1/csrf and GET /api/v1/overview have defaults so every page can render.
+ * loudly. GET /api/v1/csrf, /overview and /metrics/daily have defaults so every page can render.
  */
 export function mockApi(handlers: Record<string, Handler>) {
   const calls: Call[] = []
   const table: Record<string, Handler> = {
     'GET /api/v1/csrf': { token: 'csrf-token-1' },
     'GET /api/v1/overview': overview(),
+    'GET /api/v1/metrics/daily': dailyMetrics(),
     ...handlers,
   }
   const fetchMock = vi.fn(async (input: RequestInfo | URL, init: RequestInit = {}) => {

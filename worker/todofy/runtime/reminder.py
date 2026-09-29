@@ -19,14 +19,16 @@ from todofy.core.backoff import (
     TODOIST_STEP_BUDGET,
 )
 from todofy.core.classify import TaskResult, TaskVerdict
+from todofy.core.metrics import Step
 from todofy.core.reminder_text import LIST_LIMIT, SENDER, AttentionRow, reminder_body, reminder_title
 from todofy.core.render import rfc3339
 from todofy.core.request_id import todoist_request_id
 from todofy.core.sql import reminders as sql
 from todofy.core.todoist_request import TaskRequest, build_task_request
 from todofy.core.vocab import ATTENTION_AGE_SECONDS, Code, ReminderState
-from todofy.runtime import todoist
+from todofy.runtime import metrics, todoist
 from todofy.runtime.config import flag, source_id, var
+from todofy.runtime.interop import now_ms
 
 # Sorts after every YYYY-MM-DD, so the first page starts at the newest day.
 _AFTER_EVERY_DAY = "9999-99-99"
@@ -70,11 +72,14 @@ async def tick(env: Any, coordinator: Any, now: int) -> int:
     if claim.meta.changes != 1:
         return now + REMINDER_CHECK_INTERVAL
 
+    started = now_ms()
     result = await todoist.create_task(env, _request(env, subject, body), budget_ms=TODOIST_STEP_BUDGET * 1000)
+    point = metrics.task_point(Step.REMINDER, result, now_ms() - started)
     state, code = _outcome(result.verdict)
     retry_at = now + REMINDER_RETRY_DELAY
     retries_left = state == ReminderState.FAILED and attempts + 1 < REMINDER_MAX_ATTEMPTS
     await db.prepare(sql.FINISH.sql).bind(state, result.task_id, retry_at if retries_left else 0, code, now, day).run()
+    coordinator.record_step(point, now)  # after FINISH: the created task is recorded first
     print(json.dumps({"reminder_day": day, "attempt": attempts + 1, "state": state, "error_code": code}))
     return retry_at if retries_left else tomorrow
 

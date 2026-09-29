@@ -6,7 +6,8 @@ the coordinator's alarm loop. POST routes take JSON arguments (``vars``
 overrides Worker vars for that call, ``now`` is the Unix time the module sees);
 the newsletter routes are the real ``reports.serve`` (what the object runs after
 the gateway accepted the Basic credential) with an unlimited ``Budget`` as the
-coordinator, and read overrides from the ``x-probe-vars`` header.
+coordinator, answered the way the gateway turns a ``Result`` into HTTP, and read
+overrides from the ``x-probe-vars`` header.
 """
 
 import json
@@ -19,6 +20,9 @@ from workers import Response, WorkerEntrypoint
 from todofy.core.backoff import REPORT_ON_DEMAND_BUDGET
 from todofy.core.vocab import EventState
 from todofy.runtime import ledger, reminder, reports, retention
+from todofy.runtime.http import Result
+
+JSON = "application/json; charset=utf-8"
 
 
 class Overlay:
@@ -63,12 +67,27 @@ class Budget:
     def settle_tokens(self, reserved: int, used: int, now: int) -> None:
         self.calls.append(["settle", reserved, used, now])
 
+    def record_step(self, point: Any, now: int) -> None:
+        """Metrics are the coordinator's business; the probe only drives the modules."""
+
     async def compute_report(self, kind: str, top_n: int, now: int) -> tuple[int, Any]:
         """The coordinator's on-demand computation, as reports.serve calls it."""
         try:
             return 200, await reports.compute(self.env, self, kind, top_n, now, REPORT_ON_DEMAND_BUDGET * 1000)
         except reports.ReportError as exc:
             return exc.status, exc.code
+
+
+def _http(result: Result) -> Response:
+    """The gateway's response for a core result (gateway/src/coordinator.ts), with a fixed request ID."""
+    wire = result.wire()
+    headers = {"content-type": JSON}
+    if wire["retry_after"] is not None:
+        headers["retry-after"] = str(wire["retry_after"])
+    if wire["error"] is None:
+        return Response(wire["body"], status=wire["status"], headers=headers)
+    envelope = {"error": wire["error"] | {"request_id": "0" * 16}}
+    return Response(json.dumps(envelope, ensure_ascii=False), status=wire["status"], headers=headers)
 
 
 class Default(WorkerEntrypoint):
@@ -78,7 +97,7 @@ class Default(WorkerEntrypoint):
             return Response("ok")
         if request.method == "GET" and path in ("/api/summary", "/api/recommendation"):
             env = Overlay(self.env, json.loads(request.headers.get("x-probe-vars") or "{}"))
-            return await reports.serve(env, Budget(env), path.removeprefix("/api/"), urlsplit(request.url).query)
+            return _http(await reports.serve(env, Budget(env), path.removeprefix("/api/"), urlsplit(request.url).query))
         args = json.loads(await request.text())
         env = Overlay(self.env, args.get("vars", {}))
         budget = Budget(env, args.get("slots", True), args.get("tokens", True), args.get("failures"))

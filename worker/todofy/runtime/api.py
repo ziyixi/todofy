@@ -1,9 +1,10 @@
 """Owner API routes under /api/v1 (api/owner-api-v1.openapi.yaml), served inside the coordinator.
 
 The gateway has already checked Access, CSRF and MAINTENANCE_MODE and passes the
-canonical owner; it answers /api/v1/csrf itself and composes /api/v1/setup from
-its own facts and :func:`setup`. Everything else runs here, in the Durable
-Object (30 s of CPU), which is also the single writer of the ledger.
+canonical owner with the request (coordinator.owner_api); it answers /api/v1/csrf
+itself and composes /api/v1/setup from its own facts and :func:`setup`.
+Everything else runs here, in the Durable Object (30 s of CPU), which is also
+the single writer of the ledger.
 """
 
 import base64
@@ -11,11 +12,10 @@ import binascii
 import json
 import re
 from collections.abc import Mapping
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
-from urllib.parse import parse_qs, unquote, urlsplit
-
-from workers import Response
+from urllib.parse import parse_qs, unquote
 
 from todofy.core.api_errors import ApiError
 from todofy.core.backoff import DAY
@@ -30,9 +30,9 @@ from todofy.core.vocab import (
     EventState,
     Reconcile,
 )
-from todofy.runtime import reminder, reports
+from todofy.runtime import backup, metrics, reminder, reports
 from todofy.runtime.config import flag, report_default_top, source_id, var
-from todofy.runtime.http import error, json_response
+from todofy.runtime.http import Result, failed, ok
 from todofy.runtime.interop import now_ms, read_capped
 
 DEFAULT_LIMIT = 50
@@ -66,6 +66,20 @@ class InvalidRequest(Exception):
     """A query or body the OpenAPI contract rejects: 400 invalid_request."""
 
 
+@dataclass(frozen=True)
+class OwnerRequest:
+    """One /api/v1 request as the gateway passes it over RPC."""
+
+    method: str
+    path: str
+    # The query string without "?".
+    query: str
+    # The declared Content-Length, checked before the body is read.
+    content_length: str | None
+    # The unread JS ReadableStream of a write, or None.
+    body: Any
+
+
 def timestamp(seconds: int) -> str:
     return rfc3339(datetime.fromtimestamp(seconds, UTC))
 
@@ -94,8 +108,8 @@ def event_summary(row: Mapping[str, Any], now: int) -> dict[str, Any]:
     }
 
 
-def _query(request: Any) -> dict[str, str]:
-    pairs = parse_qs(urlsplit(request.url).query, keep_blank_values=True)
+def _query(request: OwnerRequest) -> dict[str, str]:
+    pairs = parse_qs(request.query, keep_blank_values=True)
     if any(len(values) > 1 for values in pairs.values()):
         raise InvalidRequest
     return {name: values[0] for name, values in pairs.items()}
@@ -133,13 +147,13 @@ def _event_cursor(value: str | None, start: tuple[int, str]) -> tuple[int, str]:
     return int(created_at), event_id
 
 
-async def _json_body(request: Any) -> dict[str, Any]:
-    length = request.headers.get("content-length")
+async def _json_body(request: OwnerRequest) -> dict[str, Any]:
+    length = request.content_length
     if length and (not length.isdigit() or int(length) > MAX_BODY_BYTES):
         raise InvalidRequest
     # A chunked body has no Content-Length: stop reading past the cap instead of buffering it all in
     # the object, which also runs ingest and the alarm loop.
-    raw = await read_capped(request.js_object.body, MAX_BODY_BYTES)
+    raw = await read_capped(request.body, MAX_BODY_BYTES)
     if raw is None:
         raise InvalidRequest
     try:
@@ -172,7 +186,7 @@ def _path_id(match: re.Match[str], *, legacy: bool = False) -> str | None:
     return None
 
 
-async def overview(env: Any, coordinator: Any) -> Response:
+async def overview(env: Any, coordinator: Any) -> Result:
     now = now_ms() // 1000
     db, source = env.DB, source_id(env)
     counts, attention, received, due = await db.batch(
@@ -188,7 +202,7 @@ async def overview(env: Any, coordinator: Any) -> Response:
     latest_reminders, _ = await reminder.page(db, None, 1)
     per_state = {row["state"]: row["n"] for row in counts.results}
     oldest_due = due.results[0]["at"]
-    return json_response(
+    return ok(
         {
             "build": var(env, "BUILD_SHA", "unknown"),
             "now": timestamp(now),
@@ -206,11 +220,12 @@ async def overview(env: Any, coordinator: Any) -> Response:
             "oldest_due_at": None if oldest_due is None else timestamp(oldest_due),
             "gemini": budgets["gemini"],
             "todoist": budgets["todoist"],
+            "backup": backup.overview(env, coordinator.sql, now),
         }
     )
 
 
-async def events(env: Any, query: dict[str, str]) -> Response:
+async def events(env: Any, query: dict[str, str]) -> Result:
     now = now_ms() // 1000
     db, source = env.DB, source_id(env)
     limit = _limit(query.get("limit"))
@@ -237,10 +252,10 @@ async def events(env: Any, query: dict[str, str]) -> Response:
     if len(rows) > limit:
         last = rows[limit - 1]
         next_cursor = _encode_cursor(f"{last['created_at']}:{last['event_id']}")
-    return json_response({"items": [event_summary(row, now) for row in rows[:limit]], "next_cursor": next_cursor})
+    return ok({"items": [event_summary(row, now) for row in rows[:limit]], "next_cursor": next_cursor})
 
 
-async def reconcile(request: Any, coordinator: Any, owner: str, event_id: str) -> Response:
+async def reconcile(request: OwnerRequest, coordinator: Any, owner: str, event_id: str) -> Result:
     body = await _json_body(request)
     if not RECONCILE_REQUIRED <= body.keys() <= RECONCILE_FIELDS:
         raise InvalidRequest
@@ -259,7 +274,7 @@ async def reconcile(request: Any, coordinator: Any, owner: str, event_id: str) -
     return await coordinator.reconcile(owner, event_id, action, version, action_request_id, task_id)
 
 
-async def recompute(request: Any, env: Any, coordinator: Any, owner: str) -> Response:
+async def recompute(request: OwnerRequest, env: Any, coordinator: Any, owner: str) -> Result:
     body = await _json_body(request)
     if not RECOMPUTE_REQUIRED <= body.keys() <= RECOMPUTE_FIELDS:
         raise InvalidRequest
@@ -272,7 +287,7 @@ async def recompute(request: Any, env: Any, coordinator: Any, owner: str) -> Res
     return await coordinator.recompute(owner, _action_request_id(body), kind, top_n)
 
 
-async def reminders(env: Any, query: dict[str, str]) -> Response:
+async def reminders(env: Any, query: dict[str, str]) -> Result:
     limit = _limit(query.get("limit"))
     before_day = None
     if (cursor := query.get("cursor")) is not None:
@@ -280,16 +295,27 @@ async def reminders(env: Any, query: dict[str, str]) -> Response:
         if not DAY_CURSOR.fullmatch(before_day):
             raise InvalidRequest
     items, next_day = await reminder.page(env.DB, before_day, limit)
-    return json_response({"items": items, "next_cursor": _encode_cursor(next_day) if next_day else None})
+    return ok({"items": items, "next_cursor": _encode_cursor(next_day) if next_day else None})
 
 
-async def legacy_text(env: Any, key: str) -> Response:
+async def daily_metrics(env: Any, query: dict[str, str]) -> Result:
+    """GET /api/v1/metrics/daily?days=: finished UTC days from daily_metrics, oldest first."""
+    value = query.get("days")
+    days = metrics.DEFAULT_API_DAYS
+    if value is not None:
+        if not value.isascii() or not value.isdigit() or not 1 <= int(value) <= metrics.MAX_API_DAYS:
+            raise InvalidRequest
+        days = int(value)
+    return ok(await metrics.daily(env.DB, days, now_ms() // 1000))
+
+
+async def legacy_text(env: Any, key: str) -> Result:
     """GET /api/v1/legacy_text/{key}: imported texts reach 1.9 MB, fine for the object's 30 s of CPU."""
     row = await env.DB.prepare(views.LEGACY_TEXT.sql).bind(key).first()
     expires_at = None if row is None else row["expires_at"]
     if row is None or (expires_at is not None and expires_at <= now_ms() // 1000):
-        return error(404, ApiError.NOT_FOUND)
-    return json_response(
+        return failed(404, ApiError.NOT_FOUND)
+    return ok(
         {
             "event_id": row["event_id"],
             "created_at": timestamp(row["created_at"]),
@@ -299,22 +325,20 @@ async def legacy_text(env: Any, key: str) -> Response:
     )
 
 
-def setup(env: Any) -> Response:
+def setup(env: Any) -> dict[str, Any]:
     """The core's facts for the setup page (the gateway adds its own): whether each secret is set, never its value."""
-    return json_response(
-        {
-            "mail_source_id": source_id(env),
-            "configured": {
-                "gemini_api_key": bool(var(env, "GEMINI_API_KEY")),
-                "todoist_api_key": bool(var(env, "TODOIST_API_KEY")),
-                "todoist_project": bool(var(env, "TODOIST_DEFAULT_PROJECT_ID")),
-            },
-        }
-    )
+    return {
+        "mail_source_id": source_id(env),
+        "configured": {
+            "gemini_api_key": bool(var(env, "GEMINI_API_KEY")),
+            "todoist_api_key": bool(var(env, "TODOIST_API_KEY")),
+            "todoist_project": bool(var(env, "TODOIST_DEFAULT_PROJECT_ID")),
+        },
+    }
 
 
-async def _route(request: Any, env: Any, coordinator: Any, owner: str, path: str) -> Response:
-    method = request.method
+async def _route(request: OwnerRequest, env: Any, coordinator: Any, owner: str) -> Result:
+    method, path = request.method, request.path
     match method, path:
         case "GET", "/api/v1/overview":
             return await overview(env, coordinator)
@@ -322,31 +346,33 @@ async def _route(request: Any, env: Any, coordinator: Any, owner: str, path: str
             return await events(env, _query(request))
         case "GET", "/api/v1/reminders":
             return await reminders(env, _query(request))
+        case "GET", "/api/v1/metrics/daily":
+            return await daily_metrics(env, _query(request))
         case "GET", "/api/v1/reports/latest":
-            return json_response(await reports.latest(env.DB))
+            return ok(await reports.latest(env.DB))
         case "POST", "/api/v1/reports/recompute":
             return await recompute(request, env, coordinator, owner)
     if method == "GET" and (match := EVENT_PATH.fullmatch(path)):
         event_id = _path_id(match)
         if event_id is None:
-            return error(404, ApiError.NOT_FOUND)
+            return failed(404, ApiError.NOT_FOUND)
         return await coordinator.event(event_id)
     if method == "POST" and (match := RECONCILE_PATH.fullmatch(path)):
         event_id = _path_id(match)
         if event_id is None:
-            return error(404, ApiError.NOT_FOUND)
+            return failed(404, ApiError.NOT_FOUND)
         return await reconcile(request, coordinator, owner, event_id)
     if method == "GET" and (match := LEGACY_TEXT_PATH.fullmatch(path)):
         key = _path_id(match, legacy=True)
         if key is None:
-            return error(404, ApiError.NOT_FOUND)
+            return failed(404, ApiError.NOT_FOUND)
         return await legacy_text(env, key)
-    return error(404, ApiError.NOT_FOUND)
+    return failed(404, ApiError.NOT_FOUND)
 
 
-async def handle(request: Any, env: Any, coordinator: Any, owner: str, path: str) -> Response:
+async def handle(request: OwnerRequest, env: Any, coordinator: Any, owner: str) -> Result:
     """Every /api/v1/* path the gateway forwards (it answers csrf and setup itself: 404 here)."""
     try:
-        return await _route(request, env, coordinator, owner, path)
+        return await _route(request, env, coordinator, owner)
     except InvalidRequest:
-        return error(400, ApiError.INVALID_REQUEST)
+        return failed(400, ApiError.INVALID_REQUEST)

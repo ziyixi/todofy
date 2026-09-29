@@ -118,6 +118,11 @@ def test_core_shape_is_the_shipped_root_wrangler_toml() -> None:
     assert core["observability"] == {"enabled": True}
 
 
+def test_core_binds_the_private_backup_bucket() -> None:
+    assert generate()["core"]["r2_buckets"] == [{"binding": "BACKUPS", "bucket_name": "todofy-backups"}]
+    assert "r2_buckets" not in generate()["gateway"]
+
+
 def test_gateway_shape_is_the_shipped_gateway_wrangler_toml() -> None:
     gateway = generate()["gateway"]
     for key in GATEWAY_SHAPE_KEYS:
@@ -132,6 +137,12 @@ def test_gateway_shape_is_the_shipped_gateway_wrangler_toml() -> None:
     assert gateway["observability"] == {"enabled": True}
 
 
+def test_both_workers_write_to_the_same_metrics_dataset() -> None:
+    config = generate()
+    for worker in (config["core"], config["gateway"]):
+        assert worker["analytics_engine_datasets"] == [{"binding": "METRICS", "dataset": "todofy_metrics"}]
+
+
 def test_gateway_binds_the_core_object_and_deletes_its_own_old_class() -> None:
     config = generate()
     core, gateway = config["core"], config["gateway"]
@@ -139,7 +150,8 @@ def test_gateway_binds_the_core_object_and_deletes_its_own_old_class() -> None:
         "bindings": [{"name": "COORDINATOR", "class_name": "TodofyCore", "script_name": core["name"]}]
     }
     assert "TodofyCoordinator" in core["migrations"][0]["new_sqlite_classes"]
-    # Script "todofy" keeps its applied v1; a later release deletes the retired class (error 10061).
+    # Script "todofy" keeps its applied v1; a gateway-only release of its own deletes the retired
+    # class later, so a refusal (error 10061) cannot hold up this release.
     assert gateway["migrations"] == [
         {"tag": "v1", "new_sqlite_classes": ["TodofyCoordinator"]},
     ]

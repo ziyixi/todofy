@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { PRIVATE_HEADERS } from '../src/http.ts';
-import { CSRF_KEY, errorCode, fakes, OWNER, owner, send, type CoreReply } from './helpers.ts';
+import { bodyText, CSRF_KEY, errorCode, failure, fakes, ok, OWNER, owner, send, type CoreReply } from './helpers.ts';
 
 const ORIGIN = 'http://todofy.localhost:8787';
 const RECONCILE = '/api/v1/events/0b8f5a4e-3c1d-4c52-9f0e-2d7c8b6a5f41/reconcile';
@@ -32,7 +32,7 @@ function expectPrivate(response: Response, cacheControl = 'no-store'): void {
   }
 }
 
-const echo: CoreReply = () => Response.json({ ok: true }, { headers: { 'retry-after': '7' } });
+const echo: CoreReply = () => ok({ ok: true });
 
 describe('private headers and assets', () => {
   it('adds the private headers to assets, the SPA fallback and core answers', async () => {
@@ -42,7 +42,20 @@ describe('private headers and assets', () => {
       expect(response.status, path).toBe(200);
       expectPrivate(response);
     }
-    expect((await owner(env, '/api/v1/overview')).headers.get('retry-after')).toBe('7');
+  });
+
+  it('keeps the core JSON bytes and sends a core 429 with Retry-After and the private headers', async () => {
+    const text = '{"items": [], "next_cursor": null}';
+    const listed = await owner(fakes({}, () => ok(null, text)).env, '/api/v1/events');
+    expect(await listed.text()).toBe(text);
+    expect(listed.headers.get('content-type')).toBe('application/json; charset=utf-8');
+    expectPrivate(listed);
+
+    const limited = await owner(fakes({}, () => failure(429, 'rate_limited', 42)).env, '/api/v1/overview');
+    expect(limited.status).toBe(429);
+    expect(await errorCode(limited)).toBe('rate_limited');
+    expect(limited.headers.get('retry-after')).toBe('42');
+    expectPrivate(limited);
   });
 
   it('lets the browser cache only a real hashed file under /assets/', async () => {
@@ -70,11 +83,11 @@ describe('private headers and assets', () => {
 });
 
 describe('owner API forwarding', () => {
-  it('forwards a write with the verified owner and only the allowed headers', async () => {
+  it('passes a write with the verified owner and nothing else from the client', async () => {
     let received = '';
     const { env, core } = fakes({}, async (call) => {
-      received = await new Response(call.body).text();
-      return Response.json({ event_id: 'x' });
+      received = await bodyText(call);
+      return ok({ event_id: 'x' });
     });
     const body = JSON.stringify({ action: 'retry', version: 3, action_request_id: 'r-1' });
     const token = await mintCsrf();
@@ -94,28 +107,22 @@ describe('owner API forwarding', () => {
     expect(response.status).toBe(200);
     expect(received).toBe(body);
     const [call] = core;
-    expect(call?.url.href).toBe(`https://coordinator${RECONCILE}?a=1`);
-    expect(call?.method).toBe('POST');
-    expect(Object.fromEntries(call?.headers ?? [])).toEqual({
-      'content-length': String(body.length),
-      'content-type': 'application/json',
-      'x-todofy-internal': '1',
-      'x-todofy-owner': OWNER,
-      'x-todofy-request-id': expect.stringMatching(/^[0-9a-f]{16}$/) as string,
-    });
+    expect(call?.method).toBe('owner_api');
+    expect(call?.args.slice(0, 5)).toEqual([OWNER, 'POST', RECONCILE, 'a=1', String(body.length)]);
+    expect(call?.args[5]).toBeInstanceOf(ReadableStream);
   });
 
-  it('forwards reads without a body and every other /api/v1/ path for the core to route', async () => {
+  it('passes reads without a body and every other /api/v1/ path for the core to route', async () => {
     const { env, core } = fakes({}, echo);
     await owner(env, '/api/v1/events?view=attention&limit=5');
     await owner(env, '/api/v1/setup', { method: 'HEAD' });
     await owner(env, '/api/v1/csrf', { method: 'POST', headers: csrfHeaders(await mintCsrf()) });
     await owner(env, '/api/v1/nope');
-    expect(core.map((call) => [call.method, call.url.pathname + call.url.search, call.body])).toEqual([
-      ['GET', '/api/v1/events?view=attention&limit=5', null],
-      ['HEAD', '/api/v1/setup', null],
-      ['POST', '/api/v1/csrf', null],
-      ['GET', '/api/v1/nope', null],
+    expect(core.map((call) => call.args)).toEqual([
+      [OWNER, 'GET', '/api/v1/events', 'view=attention&limit=5', null, null],
+      [OWNER, 'HEAD', '/api/v1/setup', '', null, null],
+      [OWNER, 'POST', '/api/v1/csrf', '', null, null],
+      [OWNER, 'GET', '/api/v1/nope', '', null, null],
     ]);
   });
 
@@ -149,7 +156,7 @@ describe('setup', () => {
   it('merges the gateway facts with the core facts', async () => {
     const { env, core } = fakes(
       { TODOFY_HOOKS_HOSTS: 'Todofy-Hooks.localhost, daily.localhost', MAIL_WEBHOOK_TOKEN_SHA256: 'abc', ACCESS_OWNER: 'Owner@Example.com' },
-      () => Response.json(coreSetup),
+      () => coreSetup,
     );
     const response = await owner(env, '/api/v1/setup');
     expect(response.status).toBe(200);
@@ -169,24 +176,16 @@ describe('setup', () => {
         todoist_project: true,
       },
     });
-    expect(core.map((call) => [call.method, call.url.href, call.headers.get('x-todofy-internal')])).toEqual([
-      ['GET', 'https://coordinator/setup', '1'],
-    ]);
+    expect(core).toEqual([{ instance: 'inbox-v1', method: 'setup', args: [] }]);
   });
 
-  it('answers 503 unavailable when the core has no usable answer', async () => {
-    for (const reply of [
-      () => new Response(null, { status: 503 }),
-      () => new Response('not json'),
-      () => Response.json({ configured: {} }),
-      () => {
-        throw new Error('stub down');
-      },
-    ] satisfies CoreReply[]) {
-      const response = await owner(fakes({}, reply).env, '/api/v1/setup');
-      expect(response.status).toBe(503);
-      expect(await errorCode(response)).toBe('unavailable');
-    }
+  it('answers 503 unavailable when the core cannot answer', async () => {
+    const reply: CoreReply = () => {
+      throw new Error('stub down');
+    };
+    const response = await owner(fakes({}, reply).env, '/api/v1/setup');
+    expect(response.status).toBe(503);
+    expect(await errorCode(response)).toBe('unavailable');
   });
 });
 

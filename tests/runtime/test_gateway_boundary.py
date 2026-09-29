@@ -1,13 +1,16 @@
 """The boundary between the gateway ("todofy") and todofy-core (docs/gateway-contract.md §2–§4).
 
-The object trusts only requests the gateway built: it refuses anything without the
-internal marker, and the gateway never lets a client's own x-todofy-* headers through.
-Hashed assets may be cached, the SPA fallback never; /health never calls the object.
+The object has no HTTP routes: the gateway calls its RPC methods, and every answer is a
+plain result the gateway turns into the response. The previous gateway's fetch calls get a
+retryable 503 for the one release that moves to RPC (§6.4). A client's own x-todofy-* headers do
+nothing. Hashed assets may be cached, the SPA fallback never; /health never calls the object.
 """
 
+import json
 import re
 import uuid
 from collections.abc import Iterator
+from typing import Any
 
 import httpx
 import pytest
@@ -26,25 +29,33 @@ from tests.runtime.harness import (
     start_gateway,
 )
 from tests.runtime.owner_support import PRIVATE_HEADERS, assert_private
+from todofy.core.api_errors import MESSAGES, ApiError
 
 REQUEST_ID = re.compile(r"[0-9a-f]{16}")
 CLIENT_REQUEST_ID = "0123456789abcdef"
 INTRUDER = "intruder@example.org"
 IMMUTABLE = "private, max-age=31536000, immutable"
 
-# Test-only primary Worker in front of the real core: it forwards every request to the
-# object with the client's own headers, so a test can leave out the gateway's. It reads the
-# client's body first: the object refuses unmarked requests without reading them, and an
-# upload left unread can make wrangler's local proxy drop the next POST (docs/dev-notes.md).
+# Test-only primary Worker in front of the real core. /fetch/<path> sends the request to the
+# object's fetch with the client's own headers; /rpc/<method>?args=<JSON list> calls an RPC
+# method (with the request body stream as the last argument when ?body is set) and answers its
+# result as JSON.
+# It reads a body it fetches with first: an upload left unread can make wrangler's local proxy
+# drop the next POST (docs/dev-notes.md).
 PROBE_SCRIPT = """\
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
     if (url.pathname === '/health') return new Response('ok');
-    const target = `https://coordinator${url.pathname}${url.search}`;
+    const core = env.COORDINATOR.getByName('inbox-v1');
+    if (url.pathname.startsWith('/rpc/')) {
+      const args = JSON.parse(url.searchParams.get('args') ?? '[]');
+      if (url.searchParams.has('body')) args.push(request.body);
+      return Response.json((await core[url.pathname.slice(5)](...args)) ?? null);
+    }
+    const target = `https://coordinator${url.pathname.slice(6)}${url.search}`;
     const body = request.body === null ? null : await request.arrayBuffer();
-    const init = { method: request.method, headers: request.headers, body };
-    return env.COORDINATOR.getByName('inbox-v1').fetch(target, init);
+    return core.fetch(target, { method: request.method, headers: request.headers, body });
   },
 };
 """
@@ -83,7 +94,18 @@ def _envelope_id(response: httpx.Response) -> str:
     return request_id
 
 
-INTERNAL_ROUTES = [
+def _rpc(core: Worker, method: str, *args: Any, body: bytes | None = None) -> Any:
+    params = {"args": json.dumps(args)} | ({} if body is None else {"body": "1"})
+    response = core.hooks.post(f"/rpc/{method}", params=params, content=body)
+    assert response.status_code == 200, response.text
+    return response.json()
+
+
+def _error(status: int, code: ApiError) -> dict[str, Any]:
+    return {"status": status, "body": None, "error": {"code": code, "message": MESSAGES[code]}, "retry_after": None}
+
+
+FORMER_ROUTES = [
     ("POST", "/ingest"),
     ("POST", "/wake"),
     ("GET", "/setup"),
@@ -95,49 +117,59 @@ INTERNAL_ROUTES = [
 ]
 
 
-@pytest.mark.parametrize(("method", "path"), INTERNAL_ROUTES)
-@pytest.mark.parametrize("marker", [None, "0", "true", "1, 1"])
-def test_the_object_refuses_requests_without_the_internal_marker(
-    core: Worker, method: str, path: str, marker: str | None
+@pytest.mark.parametrize(("method", "path"), FORMER_ROUTES)
+@pytest.mark.parametrize(
+    ("marker", "status", "code", "retry_after"), [("1", 503, "unavailable", "60"), ("0", 404, "not_found", None)]
+)
+def test_the_object_has_no_http_routes(
+    core: Worker, method: str, path: str, marker: str, status: int, code: str, retry_after: str | None
 ) -> None:
+    # The previous gateway's calls (x-todofy-internal: 1) get a retryable 503 during the RPC
+    # transition, so Mail Hero backs off instead of blocking the endpoint on a 404.
     event_id, body = mail_event()
-    headers = {"x-todofy-owner": OWNER, "content-type": "application/json", "idempotency-key": event_id}
-    if marker is not None:
-        headers["x-todofy-internal"] = marker
-    response = core.hooks.request(method, path, headers=headers, content=body if method == "POST" else None)
-    assert (response.status_code, error_code(response)) == (404, "not_found")
-    _envelope_id(response)
+    headers = {
+        "x-todofy-internal": marker,
+        "x-todofy-owner": OWNER,
+        "x-todofy-request-id": CLIENT_REQUEST_ID,
+        "content-type": "application/json",
+        "idempotency-key": event_id,
+    }
+    response = core.hooks.request(method, f"/fetch{path}", headers=headers, content=body if method == "POST" else None)
+    assert (response.status_code, error_code(response)) == (status, code)
+    assert response.headers.get("retry-after") == retry_after
+    assert _envelope_id(response) != CLIENT_REQUEST_ID
 
 
-def test_refused_requests_change_nothing(core: Worker) -> None:
+def test_fetch_changes_nothing_and_rpc_answers_results(core: Worker) -> None:
     event_id, body = mail_event()
-    headers = {"content-type": "application/json", "idempotency-key": event_id}
-    assert core.hooks.post("/ingest", headers=headers, content=body).status_code == 404
-    assert core.hooks.post("/newsletter/auth-failure").status_code == 404
+    headers = {"x-todofy-internal": "1", "content-type": "application/json", "idempotency-key": event_id}
+    assert core.hooks.post("/fetch/ingest", headers=headers, content=body).status_code == 503
+    assert core.hooks.post("/fetch/newsletter/auth-failure", headers=headers).status_code == 503
     assert core.d1("SELECT count(*) AS n FROM mail_events")[0]["n"] == 0
     assert core.d1("SELECT count(*) AS n FROM auth_failures")[0]["n"] == 0
-    # The same requests with the marker are served: the probe does reach the object.
-    marked = headers | {"x-todofy-internal": "1"}
-    assert core.hooks.post("/ingest", headers=marked, content=body).status_code == 204
-    assert core.hooks.post("/newsletter/auth-failure", headers={"x-todofy-internal": "1"}).status_code == 401
+
+    # The same work through the RPC methods is served, as plain results.
+    no_content = {"status": 204, "body": None, "error": None, "retry_after": None}
+    assert _rpc(core, "ingest", event_id, body=body) == no_content
     assert core.d1(f"SELECT count(*) AS n FROM mail_events WHERE event_id = '{event_id}'")[0]["n"] == 1
-    assert core.hooks.get("/setup", headers={"x-todofy-internal": "1"}).status_code == 200
+    assert _rpc(core, "ingest", str(uuid.uuid4()), body=body) == _error(400, ApiError.INVALID_PAYLOAD)
+    assert _rpc(core, "newsletter_auth_failure") == _error(401, ApiError.UNAUTHORIZED)
+    assert _rpc(core, "newsletter", "weekly", "") == _error(404, ApiError.NOT_FOUND)
+    setup = _rpc(core, "setup")
+    assert set(setup) == {"mail_source_id", "configured"}
+    assert set(setup["configured"]) == {"gemini_api_key", "todoist_api_key", "todoist_project"}
+
+    # A 200 carries the JSON text as the core serialised it (Python's separators).
+    page = _rpc(core, "owner_api", OWNER, "GET", "/api/v1/events", "limit=1", None, None)
+    assert (page["status"], page["error"], page["retry_after"]) == (200, None, None)
+    assert page["body"].startswith('{"items": [{"event_id": ')
+    assert json.loads(page["body"])["items"][0]["event_id"] == event_id
 
 
-@pytest.mark.parametrize("owner", [None, "", "owner.example.com", "a@" + "x" * 253])
-def test_owner_routes_need_a_usable_owner_header(core: Worker, owner: str | None) -> None:
-    headers = {"x-todofy-internal": "1"} | ({} if owner is None else {"x-todofy-owner": owner})
-    response = core.hooks.get("/api/v1/overview", headers=headers)
-    assert (response.status_code, error_code(response)) == (401, "unauthorized")
-
-
-def test_the_object_uses_the_gateway_request_id_only_when_well_formed(core: Worker) -> None:
-    internal = {"x-todofy-internal": "1", "x-todofy-owner": OWNER}
-    unknown = f"/api/v1/events/{uuid.uuid4()}"
-    kept = core.hooks.get(unknown, headers=internal | {"x-todofy-request-id": CLIENT_REQUEST_ID})
-    assert (kept.status_code, _envelope_id(kept)) == (404, CLIENT_REQUEST_ID)
-    replaced = core.hooks.get(unknown, headers=internal | {"x-todofy-request-id": "not-a-request-id"})
-    assert replaced.status_code == 404 and _envelope_id(replaced) != "not-a-request-id"
+@pytest.mark.parametrize("owner", ["", "owner.example.com", "a@" + "x" * 253])
+def test_owner_api_needs_a_usable_owner(core: Worker, owner: str) -> None:
+    result = _rpc(core, "owner_api", owner, "GET", "/api/v1/overview", "", None, None)
+    assert result == _error(401, ApiError.UNAUTHORIZED)
 
 
 def test_client_internal_headers_never_reach_the_object(worker: Worker) -> None:
@@ -198,9 +230,10 @@ def test_health_answers_without_the_object(gateway_alone: Worker) -> None:
     assert (body["build"], body["service"], body["status"]) == ("test", "todofy", "healthy")
     assert re.fullmatch(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z", body["timestamp"])
 
-    # Every route that needs the object fails in this process, so /health above did not use it.
-    # (wrangler dev itself answers a call to a Worker it does not run with a plain-text 503.) The
-    # deploy's core probe, a wrong newsletter credential, is among them: 401 needs the object.
+    # Every route that needs the object fails in this process, so /health above did not use it:
+    # an RPC call to a Worker wrangler dev does not run throws, which the gateway answers with
+    # 503 unavailable. The deploy's core probe, a wrong newsletter credential, is among them:
+    # 401 needs the object.
     _, event = mail_event()
     for response in (
         gateway_alone.post_event(event),
@@ -208,5 +241,4 @@ def test_health_answers_without_the_object(gateway_alone: Worker) -> None:
         gateway_alone.report("/api/summary", auth=("ci-probe", "wrong")),
         gateway_alone.owner.get("/api/v1/overview"),
     ):
-        assert response.status_code == 503
-        assert 'Worker "todofy-core" not found' in response.text
+        assert (response.status_code, error_code(response)) == (503, "unavailable")

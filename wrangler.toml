@@ -15,6 +15,13 @@ database_name = "todofy"
 database_id = "00000000-0000-4000-8000-000000000000"
 migrations_dir = "migrations"
 
+# Weekly D1 backups (runtime/backup.py). A private bucket the owner creates once, before the first
+# deploy that binds it: `npx wrangler r2 bucket create todofy-backups`. The runtime-test config
+# leaves it out, so only tests/runtime/test_backup.py runs backups.
+[[r2_buckets]]
+binding = "BACKUPS"
+bucket_name = "todofy-backups"
+
 [[migrations]]
 tag = "v1"
 new_sqlite_classes = ["TodofyCoordinator"]
@@ -22,6 +29,11 @@ new_sqlite_classes = ["TodofyCoordinator"]
 [[migrations]]
 tag = "v2"
 renamed_classes = [{ from = "TodofyCoordinator", to = "TodofyCore" }]
+
+# Operating metrics (Workers Analytics Engine; write-only from the Worker, read with the SQL API).
+[[analytics_engine_datasets]]
+binding = "METRICS"
+dataset = "todofy_metrics"
 
 [vars]
 # The daily reminder links to the owner UI on this host.

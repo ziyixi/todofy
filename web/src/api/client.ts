@@ -1,5 +1,6 @@
 import type {
   ApiErrorCode,
+  DailyMetrics,
   EventDetail,
   EventPage,
   EventState,
@@ -117,6 +118,7 @@ export const api = {
   recompute: (body: RecomputeRequest) => post<SummaryReport | RecommendationReport>('/reports/recompute', body),
   legacyText: (id: string) => get<LegacyText>(`/legacy_text/${encodeURIComponent(id)}`),
   setup: () => get<Setup>('/setup'),
+  dailyMetrics: (days: number) => get<DailyMetrics>(`/metrics/daily${query({ days })}`),
 }
 
 /** Test hook: forget the cached CSRF token. */

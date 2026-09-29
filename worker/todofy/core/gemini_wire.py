@@ -55,10 +55,11 @@ def build_request(system: str, user: str, response_schema: dict[str, Any] | None
 class Reply:
     text: str  # "" when the response has no usable candidate text
     tokens: int  # usageMetadata.totalTokenCount, 0 when absent
+    prompt_tokens: int = 0  # usageMetadata.promptTokenCount (the input side, for metrics)
 
 
 def parse_reply(body: bytes) -> Reply:
-    """Text of the first candidate (thought parts skipped) and its token count.
+    """Text of the first candidate (thought parts skipped) and its token counts.
 
     Never raises: any unexpected shape reads as empty text, which the
     classifier treats as a failed attempt.
@@ -69,7 +70,9 @@ def parse_reply(body: bytes) -> Reply:
         return Reply("", 0)
     if not isinstance(response, dict):
         return Reply("", 0)
-    return Reply(_first_candidate_text(response), _total_tokens(response))
+    usage = response.get("usageMetadata")
+    usage = usage if isinstance(usage, dict) else {}
+    return Reply(_first_candidate_text(response), _count(usage, "totalTokenCount"), _count(usage, "promptTokenCount"))
 
 
 def _first_candidate_text(response: dict[str, Any]) -> str:
@@ -87,7 +90,6 @@ def _first_candidate_text(response: dict[str, Any]) -> str:
     )
 
 
-def _total_tokens(response: dict[str, Any]) -> int:
-    usage = response.get("usageMetadata")
-    total = usage.get("totalTokenCount") if isinstance(usage, dict) else None
-    return total if isinstance(total, int) and not isinstance(total, bool) and total > 0 else 0
+def _count(usage: dict[str, Any], name: str) -> int:
+    value = usage.get(name)
+    return value if isinstance(value, int) and not isinstance(value, bool) and value > 0 else 0

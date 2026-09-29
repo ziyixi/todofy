@@ -1,4 +1,14 @@
-import type { EventDetail, EventSummary, Overview, RecommendationReport, Reminder, Setup, SummaryReport } from '../api/types'
+import type {
+  DailyMetrics,
+  DailyMetricsDay,
+  EventDetail,
+  EventSummary,
+  Overview,
+  RecommendationReport,
+  Reminder,
+  Setup,
+  SummaryReport,
+} from '../api/types'
 
 // Synthetic IDs only; never real mail.
 export const EVENT_ID = 'f8c1e9a0-1a98-4fb8-8ca1-4c0a3e710001'
@@ -112,5 +122,45 @@ export function setup(patch: Partial<Setup> = {}): Setup {
     access_owner: 'owner@example.com',
     configured: { mail_webhook_token: true, report_basic_auth: true, gemini_api_key: true, todoist_api_key: false, todoist_project: true },
     ...patch,
+  }
+}
+
+export function metricsDay(day: string, patch: Partial<DailyMetricsDay> = {}): DailyMetricsDay {
+  return {
+    day,
+    recorded: true,
+    mails_received: 64,
+    mails_completed: 61,
+    mails_failed: 1,
+    latency_p50_seconds: 18,
+    latency_p90_seconds: 95,
+    gemini_calls: 66,
+    gemini_tokens: { 'gemini-3.8-flash': 402_113, 'gemini-3.7-flash': 8120 },
+    todoist_creates: 62,
+    todoist_lookups: 1,
+    ...patch,
+  }
+}
+
+const NOT_RECORDED = {
+  recorded: false,
+  mails_received: 0,
+  mails_completed: 0,
+  mails_failed: 0,
+  latency_p50_seconds: null,
+  latency_p90_seconds: null,
+  gemini_calls: 0,
+  gemini_tokens: {},
+  todoist_creates: 0,
+  todoist_lookups: 0,
+}
+
+/** 30 days ending 2026-09-27: the first 27 not recorded, then three recorded days. */
+export function dailyMetrics(): DailyMetrics {
+  const days = Array.from({ length: 30 }, (_, index) => new Date(Date.UTC(2026, 7, 29 + index)).toISOString().slice(0, 10))
+  return {
+    days: days.map((day, index) =>
+      index < 27 ? metricsDay(day, NOT_RECORDED) : metricsDay(day, index === 29 ? { mails_received: 70, latency_p90_seconds: 240 } : {}),
+    ),
   }
 }

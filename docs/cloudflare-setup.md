@@ -24,6 +24,25 @@ npx wrangler d1 create todofy
 Put the printed `database_id` into the GitHub variable `TODOFY_D1_DATABASE_ID`. The schema is applied
 by every deploy (`wrangler d1 migrations apply DB --remote`); do not apply it by hand.
 
+Backup bucket (weekly D1 backups, §7), before the first deploy that binds it; a deploy whose config
+names a missing bucket fails:
+
+```sh
+npx wrangler r2 bucket create todofy-backups
+```
+
+Keep it private: no public access, no `r2.dev` URL, no custom domain, no lifecycle rule (the core's
+own retention deletes old backups). It holds mail content (summaries, todo bodies, payloads of unfinished
+events, the imported legacy text). The deploy token (§3) has no R2 permission: wrangler 4.142.0 looks the
+bucket up on the first deploy that binds it and, on a 403, skips that check (read from its source); that
+Cloudflare's upload then accepts the binding without R2 permission is unverified. If the first deploy
+fails on the `BACKUPS` binding, add "Workers R2 Storage: Read" to the token rather than Edit.
+
+Metrics dataset: both Workers bind the Workers Analytics Engine dataset `todofy_metrics` (binding
+`METRICS`, docs/dev-notes.md §6). The dataset needs no create command, but check once in the dashboard
+(Workers & Pages → Analytics Engine) that Analytics Engine is available on the account before the
+first deploy that binds it.
+
 ## 2. Cloudflare Access (UI host only)
 
 Zero Trust → Access → Applications → Self-hosted:
@@ -123,12 +142,12 @@ wrangler asks whether to create it; answer yes. It creates an empty placeholder 
 two secrets, and the first deploy replaces its code and keeps the secrets (wrangler 4.142.0 behaviour,
 read from its source). The gateway secrets can be put after the first deploy.
 
-Also on a fresh account (or after the `todofy` script was deleted), while `gateway/wrangler.toml` still
-carries the cutover history (`v1` creating `TodofyCoordinator`, `v2` deleting it): remove both
-`[[migrations]]` blocks before the first deploy. A script without a migration tag gets every step, and
-the TypeScript gateway does not export that class. `--dry-run` cannot catch this; it never computes
-migrations against the account. The blocks are meant to go once the production cutover has applied `v2`
-([gateway-contract.md](gateway-contract.md) §6.4).
+Also on a fresh account (or after the `todofy` script was deleted): a script without a migration tag
+gets every step in `gateway/wrangler.toml`. Today that is only `v1` creating `TodofyCoordinator`, which
+the gateway still exports as an empty retired class, so it is harmless. Once the gateway-only
+class-delete release has added `v2` ([gateway-contract.md](gateway-contract.md) §6.6), remove the
+`[[migrations]]` blocks before such a first deploy. `--dry-run` cannot catch this; it never computes
+migrations against the account.
 
 ### Moving from the single Python Worker (once)
 
@@ -139,10 +158,13 @@ Before the split, one Python Worker `todofy` held every secret. The first deploy
    pending work without keys as soon as the gateway's cron wakes it.
 2. The deploy applies D1 migrations, deploys `todofy-core` (creating the object class), then deploys the gateway
    over the Python `todofy` in place: its routes, the webhook, CSRF and report secrets and the owner
-   secrets stay. Its migration `v2` deletes the old object and its counters (the day's Gemini token and
-   call counts, the Todoist block time, report failure counts and tick times); rows the old object left
-   mid-step are recovered by the new one without a blind Todoist resend. If the gateway deploy fails, the
-   Python `todofy` keeps serving with its own object and the new object stays idle, so nothing runs twice.
+   secrets stay. It applies no migration: the old object stays as an empty exported class
+   (`gateway/src/retired.ts`) whose counters nothing reads any more (the day's Gemini token and call
+   counts, the Todoist block time, report failure counts and tick times start fresh in the new object).
+   A gateway-only release of its own deletes that class later ([gateway-contract.md](gateway-contract.md)
+   §6.6). Rows the old object left mid-step are recovered by the new one without a blind Todoist resend.
+   If the gateway deploy fails, the Python `todofy` keeps serving with its own object and the new object
+   stays idle, so nothing runs twice.
 3. After the deploy succeeds, remove the keys the gateway no longer needs:
    `npx wrangler secret delete GEMINI_API_KEY --name todofy` and the same for `TODOIST_API_KEY`.
 4. The deploy checks `/health` (the gateway) and then sends one wrong newsletter credential, which must
@@ -157,11 +179,24 @@ are in [gateway-contract.md](gateway-contract.md) §6.5; in short:
 
 1. `TODOFY_MAINTENANCE_MODE=true`, redeploy the current `main` (both Workers stop ledger work).
 2. Put `GEMINI_API_KEY` and `TODOIST_API_KEY` back on `todofy` if step 3 above removed them.
-3. Deploy the last pre-split commit with its migrations extended to `v1` new, `v2` deleted, `v3` new
-   (`TodofyCore`), so wrangler sends only `v3`. Do not deploy a plain revert: wrangler does not
-   refuse it, but sends `v1` again over the published `v2`, and Cloudflare's answer is unverified.
+3. Deploy the last pre-split commit. Before the class-delete release, `todofy` is still at tag `v1` and
+   the pre-split config sends no migration. After it, extend that commit's migrations to `v1` new, `v2`
+   deleted, `v3` new (all `TodofyCoordinator`), so wrangler sends only `v3`; a plain pre-split config
+   would send `v1` again over the published `v2`, and Cloudflare's answer is unverified.
 4. `npx wrangler delete --name todofy-core`.
-5. `TODOFY_MAINTENANCE_MODE=false`, redeploy.
+5. Decide about the bucket `todofy-backups`: nothing rotates or deletes its backups any more, and they
+   hold mail content. Delete its objects and then the bucket (`npx wrangler r2 bucket delete
+   todofy-backups` refuses a non-empty bucket; empty it in the dashboard first), or keep it on purpose.
+6. `TODOFY_MAINTENANCE_MODE=false`, redeploy.
+
+Rolling back a later release (after the split) is a revert on `main` that CI deploys, both Workers
+together; never `wrangler rollback` one Worker ([ci-cd.md](ci-cd.md)). Two exceptions and caveats, both
+in [gateway-contract.md](gateway-contract.md):
+
+- The RPC release: if its gateway step fails twice the same way, roll `todofy-core` alone back to its
+  previous version (§6.4); that recreates the previous matching pair.
+- Once the class-delete release is live (`todofy` at migration tag `v2`), a revert of an older release
+  keeps the gateway tomls' `[[migrations]]` at `v1` + `v2` and does not bring back `retired.ts` (§6.6).
 
 ## 5. Hosts and callers
 
@@ -191,3 +226,80 @@ rm -f wrangler.production.ci.json gateway/wrangler.production.ci.json gateway/wr
 The generator writes the core config next to the root `wrangler.toml` (pywrangler needs it beside
 `python_modules/`) and the gateway config and secrets file into `gateway/`. All three are gitignored and
 created owner-only (0600).
+
+## 7. Backups and restore
+
+The coordinator backs D1 up to the private bucket `todofy-backups` every Sunday at 10:00 UTC, and once
+right after its first deploy or whenever the object lost its state (`worker/todofy/runtime/backup.py`;
+the owner UI's health page shows the last one). Each job writes every table, `legacy_mail_text`
+included, under its own prefix named after the second it started: `backups/<job start>/<table>/<n>.ndjson.gz`
+plus `manifest.json`, written last (tables, columns, row counts, SHA-256 per part, schema version from
+`d1_migrations`); a prefix without a manifest is incomplete. A job never deletes or rewrites another
+backup, so a job that fails cannot cost a complete one. After each new backup, the newest 6 complete
+ones are kept and older complete ones and every older incomplete prefix are deleted. A backup that
+finished early on a Sunday is not repeated at 10:00 the same day. While a backup runs (a few minutes,
+30 at most) mail processing waits and owner writes answer 503; webhooks are still accepted.
+
+Rows that D1 retention deletes (legacy text by `expires_at` or `TODOFY_LEGACY_TEXT_RETENTION_DAYS`,
+summaries and reports after 90 days, owner actions after 180) stay in the backups made before the deletion until those
+rotate out: about 6 weeks while backups succeed, longer while they fail. A restore brings such rows back;
+the next daily retention tick deletes the ones whose time has passed again.
+
+Cost, estimated rather than measured: a backup reads every row of every table once (about 250k D1 rows
+after a year of mail, out of the account's 5M a day shared with Mail Hero, plus one read per legacy text
+row), writes a few dozen R2 objects (Class A) and stores a few MB per week plus the compressed legacy
+text (the imported text was estimated at about 76 MB before compression) in each of the 6 kept backups,
+far below R2's free 10 GB and 1M Class A operations a month. D1 Time Travel (7 days on Free) stays the
+first choice for a recent mistake; these backups cover older points and a lost database. They do not
+hold the Durable Object's state or any secret. Budgets and schedule times default safely. The metrics
+cursor does not simply default: it would point past the ids of a restored database, so the object
+checks the row it points at on every daily flush and restarts counting when that row changed or is
+gone (dev-notes.md §6). `daily_metrics` itself is in every backup.
+
+Restore into a new, empty database (with `--local --persist-to <dir>` the same commands work on a
+local copy). The backup's key is on the health page (e.g. `backups/2026-10-04T100002Z/`):
+
+```sh
+npx wrangler d1 create todofy-restore        # a config naming it: <restore config>
+python3 tools/backup_restore.py download --backup backups/<job start> --out restore/ --remote
+python3 tools/backup_restore.py sql --in restore/ --out restore/restore.sql
+npx wrangler d1 migrations apply DB --remote --config <restore config>
+npx wrangler d1 execute DB --remote --config <restore config> --file restore/restore.sql
+python3 tools/backup_restore.py verify --in restore/ --db DB --remote --config <restore config>
+```
+
+`download` checks every part against the manifest's SHA-256 and row counts, `sql` checks them again,
+and `verify` compares the restored row counts with the manifest and checks that the backup's migration
+is applied. `migrations apply` applies every migration in the current tree, which may be newer than the
+backup; that is fine because migrations are additive and the restore SQL names its columns, and
+`verify` then reports `PASS schema_version <backup's> (later migrations applied: ...)`. One caveat: a
+later migration that rewrites existing rows (a backfill) does not run on rows restored after it. If one
+exists, check out the commit whose newest migration matches the manifest's `schema_version`, apply
+migrations and restore there, then apply the remaining migrations from the current tree.
+`--no-legacy-text` (on all three commands) leaves the imported mail text out.
+
+The `restore/` files hold mail content: keep them owner-only and delete them afterwards.
+
+To switch production to the restored database (gateway-contract.md §6.5 explains why only one
+coordinator may use a database at a time):
+
+1. Set `TODOFY_MAINTENANCE_MODE=true` and run the workflow on `main`: the gateway refuses webhooks (Mail
+   Hero retries) and owner writes, and the object stops ledger work. Mail that arrives from here on is
+   held by Mail Hero, not lost.
+2. Restore and `verify` as above until it prints `PASS`.
+3. Set `TODOFY_D1_DATABASE_ID` (and `TODOFY_D1_DATABASE_NAME` if the restored database has another
+   name) to the restored database and run the workflow on `main`. Its `migrations apply` finds every
+   migration already applied.
+4. Set `TODOFY_MAINTENANCE_MODE=false` and run the workflow on `main`. Mail Hero redelivers what it
+   held during maintenance. Events Todofy acknowledged after the backup was taken are not in the
+   restored database, and Mail Hero does not send an acknowledged event again: compare with Mail Hero's
+   deliveries (or the old database, while it exists) before deciding whether any matter. Check the
+   attention page: a row that was mid-step in the backup, if any, is recovered as after a crash
+   (`summarizing` → `pending`, `todo_sending` → `todo_unknown` with a footer lookup, never a blind
+   resend).
+5. Keep the old database until the restored one has run for a while, then delete it
+   (`npx wrangler d1 delete <old name>`) on purpose; it holds mail content too.
+
+The object keeps its own state across the switch: budgets and tick times stay; the metrics cursor
+notices the other database and restarts, so the switch day and the days back to the last written one
+show "未记录" in the trends. The same happens after a D1 Time Travel restore in place.

@@ -24,6 +24,8 @@ class GeminiResult:
     text: str  # first candidate text when ok, else ""
     model: str  # model that answered (or the last one tried)
     tokens: int  # usageMetadata.totalTokenCount summed over attempts
+    prompt_tokens: int = 0  # usageMetadata.promptTokenCount summed over attempts
+    attempts: int = 0  # requests sent (one per model tried)
 
 
 async def generate(
@@ -50,8 +52,8 @@ async def generate(
     result = GeminiResult(
         classify_gemini(HttpOutcome(failure=Failure.TIMEOUT), None), "", models[0] if models else "", 0
     )
-    tokens = 0
-    for model in models:
+    tokens = prompt_tokens = 0
+    for attempts, model in enumerate(models, start=1):
         remaining = deadline_ms - now_ms()
         if remaining < MIN_ATTEMPT_MS:
             break
@@ -64,8 +66,9 @@ async def generate(
         )
         reply = gemini_wire.parse_reply(upstream.body)
         tokens += reply.tokens
+        prompt_tokens += reply.prompt_tokens
         verdict = classify_gemini(upstream.outcome(), reply.text)
-        result = GeminiResult(verdict, reply.text if verdict.ok else "", model, tokens)
+        result = GeminiResult(verdict, reply.text if verdict.ok else "", model, tokens, prompt_tokens, attempts)
         if verdict.ok or not verdict.next_model:
             break
     return result

@@ -6,10 +6,9 @@
  * headers. The API itself runs in the core; the gateway only adds the verified owner.
  */
 import { authenticate } from './access.ts';
-import { callCoordinator, forward } from './coordinator.ts';
+import { answer, coordinator, type CoreSetup } from './coordinator.ts';
 import { csv, flag, variable } from './env.ts';
 import { issueCsrf, verifyCsrf } from './csrf.ts';
-import { isJsonObject } from './crypto.ts';
 import { errorResponse, HttpError, jsonResponse, withPrivateHeaders, type Context } from './http.ts';
 
 const READ_METHODS: ReadonlySet<string> = new Set(['GET', 'HEAD']);
@@ -40,28 +39,20 @@ async function api(ctx: Context, owner: string): Promise<Response> {
   if (method === 'GET' && path === '/api/v1/csrf') return issueCsrf(ctx, owner);
   if (method === 'GET' && path === '/api/v1/setup') return setup(ctx, owner);
   if (!path.startsWith('/api/v1/')) return errorResponse(ctx.requestId, 404, 'not_found');
-  const headers: Record<string, string> = { 'x-todofy-owner': owner };
-  for (const name of ['content-type', 'content-length']) {
-    const value = ctx.request.headers.get(name);
-    if (value !== null) headers[name] = value;
-  }
-  // The core checks the declared length before it reads the body (16 KiB), so it is forwarded unread.
+  const length = ctx.request.headers.get('content-length');
+  // The core checks the declared length before it reads the body (16 KiB), so it is passed unread.
   const body = READ_METHODS.has(method) ? null : ctx.request.body;
-  return forward(ctx, `${path}${ctx.url.search}`, { method, headers, body });
+  const query = ctx.url.search.slice(1);
+  return answer(ctx, (core) => core.owner_api(owner, method, path, query, length, body));
 }
 
 /** The setup page's integration facts: whether each secret is set, never its value. */
 async function setup(ctx: Context, owner: string): Promise<Response> {
   const { env } = ctx;
-  let core: unknown;
+  let core: CoreSetup;
   try {
-    const response = await callCoordinator(env, ctx.requestId, '/setup', { method: 'GET' });
-    if (response.status !== 200) throw new Error('setup');
-    core = await response.json();
+    core = await coordinator(env).setup();
   } catch {
-    return errorResponse(ctx.requestId, 503, 'unavailable');
-  }
-  if (!isJsonObject(core) || typeof core.mail_source_id !== 'string' || !isJsonObject(core.configured)) {
     return errorResponse(ctx.requestId, 503, 'unavailable');
   }
   return jsonResponse({

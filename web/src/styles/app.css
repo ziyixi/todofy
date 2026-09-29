@@ -838,6 +838,165 @@ pre.pre {
   gap: var(--space-2);
 }
 
+/* Trend charts (inline SVG; marks take their colour from a series class, never a status tone) */
+
+.series-1 {
+  --tone: var(--series-1);
+}
+.series-2 {
+  --tone: var(--series-2);
+}
+.series-3 {
+  --tone: var(--series-3);
+}
+.series-4 {
+  --tone: var(--series-4);
+}
+.series-5 {
+  --tone: var(--series-5);
+}
+.series-danger {
+  --tone: var(--danger);
+}
+
+.trend-grid-layout {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr));
+  gap: var(--space-4) var(--space-3);
+}
+
+.trend {
+  margin: 0;
+  min-width: 0;
+}
+
+.trend-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-1) var(--space-2);
+  margin-bottom: var(--space-2);
+}
+
+.trend-title {
+  font-weight: 600;
+}
+
+.trend-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1) var(--space-3);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: var(--text-s);
+  color: var(--muted);
+}
+
+.trend-legend li {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+.trend-swatch {
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+  background: var(--tone);
+}
+
+.trend-key {
+  width: 20px;
+  height: 10px;
+  stroke: var(--tone);
+  stroke-width: 2;
+}
+
+.trend-plot svg {
+  display: block;
+  width: 100%;
+  height: auto;
+  overflow: visible;
+}
+
+.trend-grid {
+  stroke: var(--border);
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
+}
+
+.trend-line {
+  fill: none;
+  stroke: var(--tone);
+  stroke-width: 2;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+  vector-effect: non-scaling-stroke;
+}
+
+.trend-dot,
+.trend-bar {
+  fill: var(--tone);
+}
+
+/* A thin gap in the page colour between stacked segments. */
+.trend-bar {
+  stroke: var(--surface);
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
+}
+
+.trend-axis {
+  display: flex;
+  justify-content: space-between;
+  margin-top: var(--space-1);
+}
+
+.trend-table {
+  margin-top: var(--space-2);
+  font-size: var(--text-s);
+}
+
+.trend-table summary {
+  cursor: pointer;
+  color: var(--muted);
+  padding: var(--space-1) 0;
+}
+
+.table-scroll {
+  max-height: 320px;
+  overflow: auto;
+}
+
+.trend-table table {
+  width: 100%;
+  border-collapse: collapse;
+  font-variant-numeric: tabular-nums;
+}
+
+.trend-table th,
+.trend-table td {
+  padding: var(--space-1) var(--space-2);
+  border-bottom: 1px solid var(--border);
+  text-align: right;
+  white-space: nowrap;
+}
+
+.trend-table th:first-child {
+  text-align: left;
+  font-weight: 500;
+}
+
+.trend-table thead th {
+  position: sticky;
+  top: 0;
+  background: var(--surface);
+  color: var(--muted);
+  font-weight: 600;
+}
+
 .count-grid li {
   display: flex;
   flex-direction: column;

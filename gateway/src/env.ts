@@ -1,7 +1,11 @@
+import type { Coordinator } from './coordinator.ts';
+
 /** Bindings, vars and secrets of the gateway Worker, read the way the Python `config.py` read them. */
 export interface Env {
   readonly ASSETS: Fetcher;
-  readonly COORDINATOR: DurableObjectNamespace;
+  readonly COORDINATOR: DurableObjectNamespace<Coordinator>;
+  /** Analytics Engine dataset todofy_metrics; absent in unit tests. */
+  readonly METRICS?: AnalyticsEngineDataset;
   readonly TODOFY_PUBLIC_HOST?: string;
   readonly TODOFY_HOOKS_HOSTS?: string;
   readonly BUILD_SHA?: string;
@@ -21,7 +25,7 @@ export interface Env {
   readonly JWKS_REFRESH_COOLDOWN_MS?: string;
 }
 
-type VarName = Exclude<keyof Env, 'ASSETS' | 'COORDINATOR'>;
+type VarName = Exclude<keyof Env, 'ASSETS' | 'COORDINATOR' | 'METRICS'>;
 
 /** A trimmed var; the fallback applies only when the var is not set at all. */
 export function variable(env: Env, name: VarName, fallback = ''): string {

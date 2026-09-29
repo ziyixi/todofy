@@ -218,6 +218,31 @@ paths:
         '429': {$ref: '#/components/responses/TooManyRequests'}
         '503': {$ref: '#/components/responses/Unavailable'}
 
+  /api/v1/metrics/daily:
+    get:
+      operationId: getDailyMetrics
+      tags: [owner]
+      summary: Daily mail, latency, Gemini and Todoist counters for the budget page's trends.
+      description: |
+        The finished UTC days before today, oldest first. The coordinator writes each day
+        once, a few minutes after UTC midnight, from the day's ledger transitions and its
+        own step counters. A day it did not count completely (before metrics began, or
+        after its storage was reset) is `recorded: false` with zero counters.
+      parameters:
+        - name: days
+          in: query
+          description: How many finished days to return.
+          schema: {type: integer, minimum: 1, maximum: 90, default: 30}
+      responses:
+        '200':
+          description: One entry per day.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/DailyMetrics'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '503': {$ref: '#/components/responses/Unavailable'}
+
   /api/v1/legacy_text/{event_id}:
     get:
       operationId: getLegacyText
@@ -812,6 +837,8 @@ components:
             window_seconds: {type: integer, minimum: 1}
             window_calls: {type: integer, minimum: 0}
             window_limit: {type: integer, minimum: 1}
+        backup:
+          $ref: '#/components/schemas/BackupStatus'
       examples:
         - build: 0123456789abcdef0123456789abcdef01234567
           now: '2026-09-28T12:00:00Z'
@@ -824,6 +851,96 @@ components:
           oldest_due_at: '2026-09-28T11:59:00Z'
           gemini: {day: '2026-09-28', token_budget: 3000000, reserved_tokens: 4096, used_tokens: 181233, calls: 41, models: [gemini-3.8-flash, gemini-3.7-flash, gemini-3.5-flash-lite]}
           todoist: {blocked_until: null, window_seconds: 900, window_calls: 3, window_limit: 1000}
+          backup: {status: ok, last_backup_at: '2026-09-27T10:00:41Z', last_backup_key: backups/2026-09-27T100002Z/, last_backup_bytes: 1843200, last_backup_rows: 52311, last_failure_at: null, last_error_code: null, next_backup_at: '2026-10-04T10:00:00Z'}
+
+    BackupStatus:
+      type: object
+      description: |
+        The weekly D1 backup to the private R2 bucket (Sunday 10:00 UTC), every table in
+        each one. While a backup runs (a few minutes, never over 30 minutes) the ledger
+        waits and owner writes get 503 `unavailable`. Not required in Overview so that clients written before it keep
+        validating; the Worker always sends it.
+      required: [status, last_backup_at, last_backup_key, last_backup_bytes, last_backup_rows, last_failure_at, last_error_code, next_backup_at]
+      additionalProperties: false
+      properties:
+        status:
+          type: string
+          description: '`disabled`: the Worker has no BACKUPS bucket binding. `never`: no backup finished or failed yet. Otherwise the running job or the last outcome.'
+          enum: [disabled, never, running, ok, failed]
+        last_backup_at:
+          description: When the newest complete backup finished.
+          anyOf:
+            - $ref: '#/components/schemas/Timestamp'
+            - type: 'null'
+        last_backup_key:
+          description: Its R2 prefix, named after the second its job started, e.g. `backups/2026-09-27T100002Z/` (tools/backup_restore.py reads it).
+          type: [string, 'null']
+        last_backup_bytes: {type: integer, minimum: 0, description: Compressed size of its parts and manifest.}
+        last_backup_rows: {type: integer, minimum: 0, description: Rows in it.}
+        last_failure_at:
+          anyOf:
+            - $ref: '#/components/schemas/Timestamp'
+            - type: 'null'
+        last_error_code:
+          description: Why the last failed job stopped.
+          anyOf:
+            - type: string
+              enum: [storage_error, lease_expired]
+            - type: 'null'
+        next_backup_at:
+          description: Null while disabled or running.
+          anyOf:
+            - $ref: '#/components/schemas/Timestamp'
+            - type: 'null'
+
+    DailyMetrics:
+      type: object
+      required: [days]
+      additionalProperties: false
+      properties:
+        days:
+          type: array
+          maxItems: 90
+          items: {$ref: '#/components/schemas/DailyMetricsDay'}
+
+    DailyMetricsDay:
+      type: object
+      required: [day, recorded, mails_received, mails_completed, mails_failed, latency_p50_seconds,
+        latency_p90_seconds, gemini_calls, gemini_tokens, todoist_creates, todoist_lookups]
+      additionalProperties: false
+      properties:
+        day: {type: string, format: date, description: UTC day.}
+        recorded: {type: boolean, description: False when the day was not counted; its counters are then 0.}
+        mails_received: {type: integer, minimum: 0, description: Webhook events stored.}
+        mails_completed: {type: integer, minimum: 0, description: Events that reached complete.}
+        mails_failed: {type: integer, minimum: 0, description: Moves to failed_summary (an event retried by the owner can fail again).}
+        latency_p50_seconds:
+          description: Median seconds from arrival to complete over the day's completions; null without any.
+          type: [integer, 'null']
+          minimum: 0
+        latency_p90_seconds:
+          description: 90th percentile of the same; null without any completion.
+          type: [integer, 'null']
+          minimum: 0
+        gemini_calls: {type: integer, minimum: 0, description: Gemini requests (summaries and reports; each model tried counts).}
+        gemini_tokens:
+          type: object
+          description: Tokens by the model that answered (or was tried last).
+          additionalProperties: {type: integer, minimum: 0}
+        todoist_creates: {type: integer, minimum: 0, description: Task-creation requests (mail tasks and reminders; retries count).}
+        todoist_lookups: {type: integer, minimum: 0, description: Footer lookups (each may read several pages).}
+      examples:
+        - day: '2026-09-27'
+          recorded: true
+          mails_received: 64
+          mails_completed: 61
+          mails_failed: 1
+          latency_p50_seconds: 18
+          latency_p90_seconds: 95
+          gemini_calls: 66
+          gemini_tokens: {gemini-3.8-flash: 402113, gemini-3.7-flash: 8120}
+          todoist_creates: 62
+          todoist_lookups: 1
 
     ReportsLatest:
       type: object

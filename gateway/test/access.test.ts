@@ -1,6 +1,6 @@
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Env } from '../src/env.ts';
-import { errorCode, fakes, type Vars } from './helpers.ts';
+import { errorCode, fakes, ok, type Vars } from './helpers.ts';
 
 const ISSUER = 'https://team-name.cloudflareaccess.com';
 const AUDIENCE = 'aud-1';
@@ -91,10 +91,10 @@ describe('Access JWT', () => {
   });
 
   it('maps an alias login to the canonical owner', async () => {
-    const { env, core } = fakes(accessVars(), () => Response.json({}));
+    const { env, core } = fakes(accessVars(), () => ok({}));
     const response = await send(env, { 'cf-access-jwt-assertion': await token({ claims: { email: ALIAS } }) }, '/api/v1/overview');
     expect(response.status).toBe(200);
-    expect(core[0]?.headers.get('x-todofy-owner')).toBe('owner@example.com');
+    expect(core[0]?.args[0]).toBe('owner@example.com');
   });
 
   it('rejects every invalid token with 401 before touching assets or the core', async () => {
@@ -171,10 +171,10 @@ describe('Access JWT', () => {
   });
 
   it('bypasses Access only in local dev and never for a request that came through the edge', async () => {
-    const local = fakes({ DEV_AUTH_BYPASS: 'true', ACCESS_OWNER: 'Owner@Example.com' }, () => Response.json({}));
+    const local = fakes({ DEV_AUTH_BYPASS: 'true', ACCESS_OWNER: 'Owner@Example.com' }, () => ok({}));
     const response = await send(local.env, {}, '/api/v1/overview', 'todofy.localhost');
     expect(response.status).toBe(200);
-    expect(local.core[0]?.headers.get('x-todofy-owner')).toBe('owner@example.com');
+    expect(local.core[0]?.args[0]).toBe('owner@example.com');
 
     const edge = await send(local.env, { 'cf-ray': '8f1c2d3e4f5a6b7c-SJC' }, '/', 'todofy.localhost');
     expect(edge.status).toBe(503);

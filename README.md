@@ -8,8 +8,9 @@ small owner UI for anything that needs a human.
 
 It runs entirely on Cloudflare's Workers Free plan: a thin TypeScript gateway Worker (`todofy`: hosts,
 credentials, static assets, cron), a Python Worker (`todofy-core`) hosting one SQLite-backed Durable
-Object (`TodofyCore`, instance `inbox-v1`) as the single ledger writer and scheduler, and one D1
-database. All D1, Gemini and Todoist work runs in the Durable Object, which gets 30 s of CPU per call;
+Object (`TodofyCore`, instance `inbox-v1`) as the single ledger writer and scheduler, one D1
+database, and a private R2 bucket (`todofy-backups`) for weekly D1 backups. All D1, Gemini and Todoist
+work runs in the Durable Object, which gets 30 s of CPU per call;
 a plain Worker request gets 10 ms on the Free plan, too little for Python. The UI is React/TypeScript,
 built into static assets the gateway serves.
 [architecture-diagram.md](architecture-diagram.md) has the diagrams.
@@ -19,8 +20,9 @@ built into static assets the gateway serves.
 Mail Hero --Bearer--> hooks host POST /hooks/mail      --+
 newsletter --Basic--> hooks host GET /api/summary, ... --+--> Durable Object inbox-v1 --> D1
 owner --Access------> UI host: JWT, CSRF, assets,       |     |--> Gemini (summary, reports)
-                      /api/v1/* with the owner  --------+     '--> Todoist (task, lookup, reminder)
-cron */10 ----------> scheduled() -------------------------> /wake
+                      /api/v1/* with the owner  --------+     |--> Todoist (task, lookup, reminder)
+                                                              '--> R2 todofy-backups (weekly D1 backups)
+cron */10 ----------> scheduled() -------------------------> wake() (RPC)
 ```
 
 ## Hosts
@@ -75,6 +77,25 @@ Set as GitHub variables on the `production` environment and applied by a deploy 
 | `TODOFY_FORCE_PAUSE_TODOIST` | summaries continue; rows wait in `summarized`; no reminder |
 | `TODOFY_REMINDER_ENABLED` | the daily attention reminder task is on |
 
+## Backups
+
+Every Sunday at 10:00 UTC (and once right after the first deploy) the Durable Object copies every D1
+table into its own prefix in the private bucket `todofy-backups` (`backups/<job start>/`) and keeps the
+newest 6 complete backups; the UI's health page shows the last one. While a backup runs (a few minutes)
+processing and owner writes wait; webhooks are still accepted. `tools/backup_restore.py` restores one into
+a new, empty D1 database ([docs/cloudflare-setup.md](docs/cloudflare-setup.md) §7). The bucket holds mail
+content: keep it private.
+
+## Metrics
+
+The budget page shows the last 30 finished UTC days (mail received, completed and failed, arrival-to-
+completion time, Gemini tokens by model, Gemini and Todoist calls) from the D1 table `daily_metrics`,
+which the Durable Object writes a few minutes after each UTC midnight. Both Workers also write one
+Workers Analytics Engine point per request or upstream step to the dataset `todofy_metrics`, for ad-hoc
+SQL queries from the owner's machine ([docs/dev-notes.md](docs/dev-notes.md) §6). Metrics are best
+effort: a failed write never fails the request or step it describes. After a database restore the
+trends restart counting; the days in between show as not recorded.
+
 ## Local development
 
 Prerequisites: Node 26 (`.nvmrc`), uv 0.12.10; Python 3.14 is fetched by uv. No Cloudflare account or
@@ -101,7 +122,10 @@ Every push runs the `Todofy checks` job; a push to `main` (or a manual run on `m
 generate both production configs from GitHub variables, dry-run, apply D1 migrations, deploy
 `todofy-core` and then the gateway, wait for `/health` to report the commit, then check that a wrong
 newsletter credential gets 401/429 from the Durable Object (proving gateway → object → D1). There are no pull requests; `main` is fast-forwarded. One-time setup
-(D1, Access, GitHub environment, Worker secrets) is in [docs/cloudflare-setup.md](docs/cloudflare-setup.md).
+(D1, R2 bucket, Access, GitHub environment, Worker secrets) is in [docs/cloudflare-setup.md](docs/cloudflare-setup.md).
+A Durable Object class change ships in a release of its own: the gateway still exports the empty
+retired class `TodofyCoordinator`, and a gateway-only release deletes it
+([docs/gateway-contract.md](docs/gateway-contract.md) §6.6).
 
 ## Repository
 
@@ -113,7 +137,7 @@ migrations/             D1 schema
 api/                    owner OpenAPI contract, newsletter report schemas, Mail Hero event schema
 web/                    owner UI (React + Vite), built into uiassets/dist
 tests/                  unit, fakes and runtime (workerd) tests
-tools/                  legacy SQLite snapshot/export/verify and the webhook smoke test
+tools/                  legacy SQLite snapshot/export/verify, the webhook smoke test, backup restore
 deploy/                 production config generator (both Workers)
 docs/                   setup, CI/CD, verification, dev notes, migration plan
 ```

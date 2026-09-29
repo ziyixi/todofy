@@ -1,4 +1,4 @@
-"""migrations/0001_init.sql on host SQLite (D1 is SQLite): shape, vocabulary and query plans.
+"""migrations/*.sql on host SQLite (D1 is SQLite): shape, vocabulary and query plans.
 
 Every ``Query`` constant under todofy/core/sql is found automatically and must
 use the index it names, so runtime SQL cannot drift from what is tested here.
@@ -18,7 +18,7 @@ from todofy.core.report_schema import ReportStatus
 from todofy.core.sql import ACTIVE_STATES, Query, views
 from todofy.core.vocab import TERMINAL_STATES, EventState, ReminderState
 
-MIGRATION = Path(__file__).parents[2] / "migrations" / "0001_init.sql"
+MIGRATIONS = sorted((Path(__file__).parents[2] / "migrations").glob("*.sql"))
 SOURCE = "mail-hero-personal"
 HASH = "0" * 64
 
@@ -43,7 +43,8 @@ def test_queries_are_discovered():
 @pytest.fixture
 def db() -> Iterator[sqlite3.Connection]:
     connection = sqlite3.connect(":memory:")
-    connection.executescript(MIGRATION.read_text())
+    for migration in MIGRATIONS:
+        connection.executescript(migration.read_text())
     yield connection
     connection.close()
 
@@ -72,9 +73,10 @@ def insert_event(db: sqlite3.Connection, event_id: str, state: str = "pending", 
     db.execute(f"INSERT INTO mail_events ({', '.join(row)}) VALUES ({', '.join('?' * len(row))})", tuple(row.values()))
 
 
-def test_migration_has_only_statements_d1_accepts():
+@pytest.mark.parametrize("migration", MIGRATIONS, ids=lambda path: path.name)
+def test_migration_has_only_statements_d1_accepts(migration):
     """D1 rejects transaction control, and each statement must stay under 100 KB."""
-    code = re.sub(r"--[^\n]*", "", MIGRATION.read_text())
+    code = re.sub(r"--[^\n]*", "", migration.read_text())
     assert not re.search(r"\b(BEGIN|COMMIT|ROLLBACK|SAVEPOINT|PRAGMA|ATTACH|VACUUM)\b", code, re.IGNORECASE)
     assert max(len(statement.encode()) for statement in code.split(";")) < 100_000
 
@@ -90,6 +92,7 @@ def test_tables_and_indexes_are_exactly_the_planned_ones(db):
         "owner_actions",
         "auth_failures",
         "legacy_mail_text",
+        "daily_metrics",
     }
     assert {name for name, kind in objects.items() if kind == "index"} == {
         "mail_events_due",
@@ -235,16 +238,21 @@ def test_attention_page_uses_the_vocabulary_rule(db):
     assert db.execute(count_sql, (SOURCE, cutoff)).fetchone() == (2,)
 
 
-INSERT_VALUES = re.compile(r"INSERT INTO (\w+) \([^)]*\) VALUES ")
+# Rows from bound values: VALUES, or json_each over one bound JSON text.
+INSERT_BOUND = re.compile(r"INSERT INTO (\w+) \([^)]*\) (?:VALUES |SELECT .+ FROM json_each\(\?\))")
 
 
 @pytest.mark.parametrize("name", QUERIES)
 def test_query_uses_its_index(db, name):
     sql, index, sort_allowed = QUERIES[name]
     plan = [row[3] for row in db.execute(f"EXPLAIN QUERY PLAN {sql}", (None,) * sql.count("?"))]
-    if (insert := INSERT_VALUES.match(sql)) is not None:
-        # A plain INSERT ... VALUES has no plan; it must name a unique key of its table.
-        assert not plan, plan
+    if index == "rowid":
+        # Only rowid lookups or ranges (max(rowid) plans as a bare SEARCH), never an index or a scan.
+        assert plan and all(step.startswith("SEARCH") and "INDEX" not in step for step in plan), plan
+        return
+    if (insert := INSERT_BOUND.match(sql)) is not None:
+        # Inserting bound values reads no table; the statement must name a unique key of its table.
+        assert all(step.startswith("SCAN json_each VIRTUAL TABLE") for step in plan), plan
         unique = {row[1] for row in db.execute(f"PRAGMA index_list({insert.group(1)})") if row[2]}
         assert index in unique, unique
         return

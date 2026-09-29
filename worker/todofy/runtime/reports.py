@@ -15,11 +15,10 @@ from datetime import UTC, datetime
 from typing import Any
 from urllib.parse import parse_qs
 
-from workers import Response
-
 from todofy.core import prompts
 from todofy.core.api_errors import ApiError
 from todofy.core.backoff import DAY, HOUR, MINUTE, REPORT_ON_DEMAND_BUDGET
+from todofy.core.metrics import Step
 from todofy.core.render import rfc3339
 from todofy.core.report_schema import (
     EMPTY_WINDOW_SUMMARY,
@@ -32,9 +31,9 @@ from todofy.core.report_schema import (
     recommendation_response_schema,
 )
 from todofy.core.sql import reports as sql
-from todofy.runtime import gemini
+from todofy.runtime import gemini, metrics
 from todofy.runtime.config import flag, report_default_top, var
-from todofy.runtime.http import error, json_response, with_headers
+from todofy.runtime.http import Result, failed, ok
 from todofy.runtime.interop import now_ms
 
 SUMMARY = "summary"
@@ -56,7 +55,7 @@ MAX_RESPONSE_BYTES = 128 * 1024
 
 
 class ReportError(Exception):
-    """No report could be computed now; the coordinator answers ``error(status, code)``."""
+    """No report could be computed now; the coordinator answers ``failed(status, code)``."""
 
     def __init__(self, status: int, code: ApiError) -> None:
         super().__init__(code)
@@ -69,12 +68,9 @@ def failure_hour(timestamp: int) -> str:
     return datetime.fromtimestamp(timestamp, UTC).strftime("%Y-%m-%dT%H")
 
 
-def report_error(status: int, code: ApiError, now: int) -> Response:
+def report_error(status: int, code: ApiError, now: int) -> Result:
     """A report that could not be computed; a 429 says when the hourly cap resets."""
-    response = error(status, code)
-    if status == 429:
-        return with_headers(response, {"retry-after": str(HOUR - now % HOUR)})
-    return response
+    return failed(status, code, HOUR - now % HOUR if status == 429 else None)
 
 
 async def compute(env: Any, coordinator: Any, kind: str, top_n: int, now: int, budget_ms: int) -> dict:
@@ -181,31 +177,31 @@ def last_precompute(env: Any, now: int) -> int:
     return due if now >= due else due - DAY
 
 
-async def serve(env: Any, coordinator: Any, kind: str, query: str) -> Response:
+async def serve(env: Any, coordinator: Any, kind: str, query: str) -> Result:
     """GET /api/summary and /api/recommendation after the gateway accepted the Basic credential."""
     top_n = 0
     if kind == RECOMMENDATION:
         try:
             top_n = parse_top_n(parse_qs(query, keep_blank_values=True).get("top", [None])[0])
         except ValueError:
-            return error(400, ApiError.INVALID_REQUEST)
+            return failed(400, ApiError.INVALID_REQUEST)
 
     now = now_ms() // 1000
     row = await env.DB.prepare(sql.LATEST_REPORT.sql).bind(kind, top_n).first()
     if row is not None and row.computed_at >= last_precompute(env, now) and row.status in SERVABLE:
-        return json_response(json.loads(row.payload_json))
+        return ok(json.loads(row.payload_json))
     if flag(env, "MAINTENANCE_MODE"):
-        return error(503, ApiError.MAINTENANCE)
+        return failed(503, ApiError.MAINTENANCE)
     status, result = await coordinator.compute_report(kind, top_n, now)
     if status != 200:
         return report_error(status, result, now)
     if result["status"] not in SERVABLE:
         # model_output_invalid: an empty list would read as "nothing important today".
-        return error(503, ApiError.UNAVAILABLE)
-    return json_response(result)
+        return failed(503, ApiError.UNAVAILABLE)
+    return ok(result)
 
 
-async def count_auth_failure(db: Any, now: int) -> Response:
+async def count_auth_failure(db: Any, now: int) -> Result:
     """A newsletter request whose Basic credential the gateway rejected.
 
     A correct credential never comes here, so no number of failures can block it
@@ -218,7 +214,8 @@ async def count_auth_failure(db: Any, now: int) -> Response:
     if failures is not None and failures["count"] >= LOCKOUT_FAILURES:
         return report_error(429, ApiError.RATE_LIMITED, now)
     await db.prepare(sql.COUNT_AUTH_FAILURE.sql).bind(hour).run()
-    return with_headers(error(401, ApiError.UNAUTHORIZED), {"www-authenticate": 'Basic realm="todofy"'})
+    # The gateway adds the Basic challenge (WWW-Authenticate) to this 401.
+    return failed(401, ApiError.UNAUTHORIZED)
 
 
 async def latest(db: Any) -> dict:
@@ -240,17 +237,19 @@ async def _generate(
         _log(kind, top_n, "llm_budget_exhausted")
         raise ReportError(503, ApiError.UNAVAILABLE)
     used = reserved  # if the call dies midway, keep the whole reservation counted
+    started = now_ms()
     try:
         result = await gemini.generate(
             env,
             system=system,
             user=user,
-            deadline_ms=now_ms() + budget_ms,
+            deadline_ms=started + budget_ms,
             response_schema=None if kind == SUMMARY else recommendation_response_schema(top_n),
         )
         used = result.tokens
     finally:
         coordinator.settle_tokens(reserved, used, now)
+    coordinator.record_step(metrics.gemini_point(Step.REPORT, result, now_ms() - started), now)
     if not result.verdict.ok:
         _log(kind, top_n, result.verdict.code or "")
         raise ReportError(503, ApiError.UNAVAILABLE)

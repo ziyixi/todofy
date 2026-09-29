@@ -59,7 +59,7 @@ gateway/                       the gateway Worker `todofy` (TypeScript, own pack
   wrangler.toml                gateway base/local config (assets, cron, COORDINATOR → todofy-core)
   wrangler.test.toml           runtime tests: DEV_AUTH_BYPASS
   wrangler.test-auth.toml      runtime tests: real Access JWT checks against a loopback issuer
-migrations/0001_init.sql       the whole D1 schema
+migrations/0001_init.sql       the D1 schema; 0002_daily_metrics.sql adds the owner UI's daily trends (§6)
 api/                           owner-api-v1.openapi.yaml (source of truth for the UI), newsletter report
                                schemas, mail-received-v1 schema copied from Mail Hero
 worker/todofy/core/            pure stdlib Python, host-testable, no `js`/`workers` imports
@@ -102,26 +102,36 @@ Host routing, credentials and assets live in the gateway (`gateway/src`, gateway
   `GET /api/summary`, `GET /api/recommendation`, `GET /health`. Anything else, and any other host → 404.
 - `request.url` carries the Host header under `wrangler dev`, so tests pick the vhost with
   `host: todofy.localhost` / `host: todofy-hooks.localhost`.
-- The gateway calls the object with `env.COORDINATOR.getByName("inbox-v1")` and a request it builds from
-  scratch (`x-todofy-internal: 1`, `x-todofy-request-id`, and `x-todofy-owner` for the owner API); the
-  object answers 404 to anything without the marker. Bodies are forwarded as streams, unread.
+- The gateway calls the object's RPC methods on `env.COORDINATOR.getByName("inbox-v1")` with arguments it
+  picks itself (the owner API gets the canonical owner); the object's `fetch` answers 404, except that for
+  the one release that moves to RPC it answers the previous gateway's calls (`x-todofy-internal: 1`)
+  503 `unavailable` with `Retry-After: 60` (gateway-contract.md §6.4; delete it in a later release, not
+  in the gateway-only class-delete release, which changes nothing else).
+  Bodies are passed as streams, unread. Every method answers with an `http.Result` dict, which the gateway
+  turns into the HTTP response (gateway-contract.md §3).
 
 Env, secrets, bindings (core)
 - `config.var(env, NAME, default)`, `flag()` (== "true"), `csv()` (lowercased list). A missing binding
   raises on the JsProxy; `var` uses getattr with a default. Secrets read exactly like vars.
 - Dev-only switches (`DEV_AUTH_BYPASS`, `DEV_ACCESS_LOOPBACK_ISSUER`) are gateway vars and only work when
   `TODOFY_PUBLIC_HOST` ends with `.localhost`; the generator never emits `DEV_*`.
-- Use `self.env` in handlers. The core has no `scheduled()`: the gateway's cron calls the object's `/wake`.
+- Use `self.env` in handlers. The core has no `scheduled()`: the gateway's cron calls the object's `wake()`.
 
-Requests and responses (`runtime/http.py`)
-- Handlers get a `workers.Request`: `.method`, `.url`, `.headers.get(name)` (case-insensitive; repeated
-  headers come back joined with ", "), `await .bytes()/.text()/.json()`, `.body`, `.js_object`.
-- `json_response(data, status)`, `empty()` (204), `with_headers(resp, headers)` (copies immutable
-  ASSETS/DO responses), `error(status, ApiError.X)`.
+Answers (`runtime/http.py`)
+- RPC methods take plain arguments (JS strings arrive as `str`, null as `None`, a ReadableStream as a
+  JsProxy that `interop.read_capped` reads) and return `Result.wire()`, a plain dict. Build a `Result`
+  with `ok(data)` (200, `json.dumps(ensure_ascii=False)` text), `NO_CONTENT` (204) or
+  `failed(status, ApiError.X, retry_after=None)`. Never raise for an expected outcome: a Python
+  exception reaches the gateway only as an opaque `PythonError` with a traceback (503 there).
+- Return `bytes`, `str`, dicts and lists over RPC, never a tuple (refused) or a memoryview/typed array
+  (converted element by element, about 1.5 s per MiB in workers-runtime-sdk 1.9.0).
 - Every error body is the OpenAPI envelope `{"error": {"code", "message", "request_id"}}`. Codes are the
   closed `core.api_errors.ApiError` (== OpenAPI `ApiErrorCode`, unit-tested), messages come from
-  `api_errors.MESSAGES`; `error()` logs `{request_id, status, code}` and nothing else. A new code means
-  editing `ApiError`, `MESSAGES` and the OpenAPI enum together.
+  `api_errors.MESSAGES`. The gateway's `errorEnvelope()` (`gateway/src/http.ts`) builds the envelope and
+  logs `{request_id, status, code}` once for every error, `failed()` results included; the core builds no
+  envelopes and never sees the request ID, except `http.error_response()` (the fetch handlers' 404 and
+  the transition 503), which makes and logs its own (gateway-contract.md §4). A new code means editing
+  `ApiError`, `MESSAGES` and the OpenAPI enum together.
 
 D1 (`env.DB`, wrapped by the SDK)
 - `stmt = env.DB.prepare(sql).bind(*args)` (Python `None` → NULL); `await stmt.first()` → JsDict or None
@@ -159,9 +169,10 @@ Local runtime quirks (not production behaviour)
   on that dev server with a 500. Send such requests without a body, use `Worker.headers_only_status`, or
   use the per-test `throwaway_worker` fixture.
 - wrangler's local proxy passes a chunked upload on only in large pieces (1.1 MiB unterminated never
-  reached the object in a probe; 3.2 MiB did), so a test that proves the object stops reading early has
-  to send a few MiB (`test_owner_body_limit.py` sends 3.2 MiB
-  and never the terminating chunk; the object's early answer then shows up as the proxy's 500).
+  reached the object in a probe; 3.2 MiB did) and may add a length, so an HTTP test cannot prove that the
+  object stops reading early. `test_owner_body_limit.py` proves the early stop on `interop.read_capped`
+  itself, fed a JS stream through the clients probe's `/read-capped` route, and checks the owner route
+  with a complete chunked body of exactly 16 KiB (served) and 16 KiB + 1 (400, nothing written).
 - A binding to a Worker the dev process does not run (the gateway started alone) gets a plain-text 503
   `Worker "todofy-core" not found` from wrangler itself, not the gateway's `unavailable` envelope.
 - The first object call after startup takes ~2 s (Pyodide cold start); the harness only waits on the
@@ -184,7 +195,7 @@ Local runtime quirks (not production behaviour)
 - Mail source: every ledger row uses `source_id = var(env, "MAIL_SOURCE_ID", "mail-hero-personal")`.
 - Payload hash: lowercase hex SHA-256 of the exact webhook bytes (`interop.sha256_hex`).
 - Owner identity: the gateway's `access.ts` returns `ACCESS_OWNER` (aliases in `ACCESS_OWNER_ALIASES`
-  map to it) and sends it as `x-todofy-owner`; `owner_actions.owner` is always that value.
+  map to it) and passes it to `owner_api`; `owner_actions.owner` is always that value.
 
 ### 4.2 SQL
 - Every D1 statement is a module-level `Query(sql, index, sort_allowed=False)` in `worker/todofy/core/sql/`,
@@ -208,15 +219,15 @@ Local runtime quirks (not production behaviour)
 ### 4.3 HTTP
 - Webhook: the gateway (`hooks.ts`) checks Bearer vs `MAIL_WEBHOOK_TOKEN_SHA256` / `_PREVIOUS` (constant
   time), then `MAINTENANCE_MODE` (503 `maintenance` with `Retry-After`), 415, and 413 for a declared
-  `Content-Length` over 1 MiB, and streams the body to the object's `/ingest` with `content-type` and
-  `idempotency-key`. A request without `Content-Length` is accepted and the object stops reading at 1 MiB
+  `Content-Length` over 1 MiB, and passes the body stream and the `Idempotency-Key` header to the
+  object's `ingest`. A request without `Content-Length` is accepted and the object stops reading at 1 MiB
   (413). The object requires one Idempotency-Key equal to `event_id` (a value containing "," means
   repeated → 400), runs `contract.parse_mail_event`, answers 204 (stored or same bytes), 409 (different
   bytes), 400, or 503.
 - Newsletter: the gateway checks Basic, `sha256("user:password")` compared in constant time with every
   digest in the comma-separated `REPORT_BASIC_AUTH_SHA256` (list two while rotating). A correct credential
-  goes straight to the object's `/newsletter/<kind>` (`reports.serve`) and is always served. A failure goes
-  to `/newsletter/auth-failure` (`reports.count_auth_failure`), counted per UTC hour in `auth_failures`;
+  goes straight to the object's `newsletter(kind, query)` (`reports.serve`) and is always served. A failure
+  goes to `newsletter_auth_failure()` (`reports.count_auth_failure`), counted per UTC hour in `auth_failures`;
   after 20 a failing request gets 429 and nothing more is written (at most 20 D1 writes an hour). That
   lockout no longer slows guessing, so the newsletter password must be a random secret of at least 128
   bits. A stored report is served only when computed since the latest `REPORT_PRECOMPUTE_UTC` time and
@@ -273,16 +284,20 @@ gateway-contract.md §1. Test configs shorten `*_MS` values (including the gatew
 `JWKS_REFRESH_COOLDOWN_MS`); production never sets them.
 
 ### coordinator.py (P) — the only writer of the ledger
-Internal routes on `https://coordinator`, reached only through the gateway's binding; every request
-needs `x-todofy-internal: 1` (else 404), see gateway-contract.md §3:
+RPC methods, called only by the gateway's binding (gateway-contract.md §3; `fetch` answers 404, or 503
+to the previous gateway during the RPC release, §6.4). Each
+returns `Result.wire()` except `wake` and `setup`:
 ```
-POST /ingest                    headers content-type, idempotency-key; body = webhook bytes → 204|400|409|413|503
-POST /wake                      → 204 (the gateway's cron)
-GET  /newsletter/<kind>[?top=]  stored or on-demand report, after the gateway accepted Basic
-POST /newsletter/auth-failure   count a failed Basic credential → 401 | 429
-GET  /setup                     {"mail_source_id", "configured": {...}} for the setup page
-*    /api/v1/...                the owner API (api.handle), owner from x-todofy-owner (else 401)
+ingest(idempotency_key, body)             webhook stream → 204|400|409|413|503
+wake()                                    → None (the gateway's cron)
+newsletter(kind, query)                   stored or on-demand report, after the gateway accepted Basic
+newsletter_auth_failure()                 count a failed Basic credential → 401 | 429
+owner_api(owner, method, path, query,     the owner API (api.handle); owner not an address → 401
+          content_length, body)
+setup()                                   {"mail_source_id", "configured": {...}} for the setup page
 ```
+Every other method is callable over RPC too (Python exposes them all, `_`-prefixed ones included); only
+the gateway binds the class, and it calls only these.
 The owner API calls the object's methods directly: `reconcile(owner, event_id, action, version,
 action_request_id, task_id)`, `recompute(owner, action_request_id, kind, top_n)`,
 `compute_report(kind, top_n, now)`, `event(id)` and `budgets()` (Overview).
@@ -381,8 +396,8 @@ while `REMINDER_ENABLED` is off or `FORCE_PAUSE_TODOIST` or `PROCESSING_PAUSED` 
 ```python
 async def tick(env, coordinator, now: int) -> int     # precompute at REPORT_PRECOMPUTE_UTC; next time
 async def compute(env, coordinator, kind: str, top_n: int, now: int, budget_ms: int) -> dict
-async def serve(env, coordinator, kind: str, query: str) -> Response  # /newsletter/<kind> after the gateway's Basic check
-async def count_auth_failure(db, now: int) -> Response  # a failed Basic credential: 401, or 429 once locked
+async def serve(env, coordinator, kind: str, query: str) -> Result  # newsletter(kind) after the gateway's Basic check
+async def count_auth_failure(db, now: int) -> Result  # a failed Basic credential: 401, or 429 once locked
 async def latest(db) -> dict                          # ReportsLatest for api.py
 ```
 Precompute only `top_n = REPORT_DEFAULT_TOP` (default 10, what the newsletter asks for); other `top`
@@ -408,13 +423,16 @@ dev rule; `X-CSRF-Token` must equal the `todofy_csrf` cookie; an HMAC-signed `{k
 (12 h) keyed by `CSRF_SIGNING_KEY`, 64 hex; missing or malformed → 503 `not_configured` on
 `GET /api/v1/csrf` and every write, reads keep working), `owner.ts` (the gate: Access → CSRF and
 `MAINTENANCE_MODE` on writes → route, private headers on every response; `/api/v1/setup` merges the
-gateway's facts with the object's `/setup`), `hooks.ts` (webhook, newsletter, health). The rules are in
-gateway-contract.md §2; the gateway's unit tests check its error messages against `core.api_errors`.
+gateway's facts with the object's `setup()`), `hooks.ts` (webhook, newsletter, health), `metrics.ts`
+(one Analytics Engine point per request and cron, §6), `retired.ts` (the empty `TodofyCoordinator`
+class this script still exports; a gateway-only release of its own deletes it, gateway-contract.md
+§6.6). The rules are in gateway-contract.md §2; the gateway's unit tests check its error messages
+against `core.api_errors`.
 
 ### api.py (O)
 ```python
-async def handle(request, env, coordinator, owner: str, path: str) -> Response  # /api/v1/* inside the object
-def setup(env) -> Response                            # the object's /setup facts
+async def handle(request: OwnerRequest, env, coordinator, owner: str) -> Result  # /api/v1/* (RPC owner_api)
+def setup(env) -> dict                                 # the object's facts for the setup page (RPC setup())
 ```
 Everything runs in the object: overview (D1 counts + `coordinator.budgets()`), events pages, event detail,
 reminders (`reminder.page`), `reports/latest` (`reports.latest`), legacy text, reconcile and recompute.
@@ -423,6 +441,32 @@ Responses must validate against the OpenAPI schemas; T adds runtime tests that v
 Imported `legacy:<hash>` / `legacy:row-<id>` rows (CloudMailin era, or Mail Hero rows with no ledger event)
 are an archive: the reports read their summaries by date, `/legacy_text/{id}` serves their text by exact
 ID, and nothing lists them (browse with `wrangler d1 execute`).
+
+### backup.py (weekly D1 backup; `core/backup.py`, `core/sql/backup.py`)
+```python
+async def run(env, store, now: int) -> int | None   # called by the alarm loop after recover_interrupted:
+                                                     # epoch ms to continue at while a job holds the ledger
+def holds_ledger(env, store, now: int) -> bool       # owner_api answers POSTs 503 unavailable while True
+def next_run(env, store) -> int | None               # for _next_alarm_ms; None without the BACKUPS binding
+def overview(env, store, now: int) -> dict           # Overview.backup (OpenAPI BackupStatus)
+```
+Sunday 10:00 UTC, or due now on an object with no `backup_state` row (a new or wiped object); after a
+backup the next run is the first Sunday 10:00 on a later UTC day. A job pages every table by rowid
+(`rowid > last AND rowid <= max`, `max` fixed when it starts), reads `mail_events.payload` by rowid at
+most 8 rows at a time, and writes one gzip NDJSON part per table per alarm invocation to
+`backups/<job start>/` (e.g. `backups/2026-10-04T100002Z/`), then `manifest.json` last. Every job has its
+own prefix and never deletes or rewrites another: a second job on the same day (a first deploy early on
+a Sunday, lost object state) cannot cost a complete backup. Every table is in every backup,
+`legacy_mail_text` included, so each backup restores on its own and a row D1 retention deletes leaves R2
+once the last backup holding it rotates out. While the job runs (a few minutes; LEASE = 30 min at most)
+the alarm skips the ledger step and the ticks (the metrics flush included) and owner writes get 503:
+that is what makes the pages one snapshot. A job that ends writes one `backup` metrics point (§6). At most `BACKUP_QUERY_BUDGET` (30; tests use 1) D1 statements and 24 MiB of rows per invocation.
+Retention, after each new manifest, keeps the newest 6 complete prefixes and deletes every incomplete
+one older than the new one (the leftovers of failed or lost jobs). The job state is a JSON document in
+the DO SQLite table `backup_state`; losing it only makes the next backup due now. Only
+`tests/runtime/test_backup.py` binds the bucket (the shared test config has none, so no other scenario
+pauses for a backup). `tools/backup_restore.py` downloads, checks, and turns a backup into SQL
+(docs/cloudflare-setup.md §7).
 
 ### health (lead)
 `GET /health` on the hooks hosts is answered by the gateway alone: `{"build", "service": "todofy",
@@ -435,3 +479,137 @@ Extend `tests/fakes/server.py` rather than forking it: `gemini_fake.py` (x-goog-
 `todoist_fake.py` (Bearer check → 401, auto-increment ids, `GET /api/v1/tasks` paged
 `{results, next_cursor}`, records `X-Request-Id`); both seed 429 with `Retry-After` in seconds and
 HTTP-date forms, `delay_ms`, and `hang`.
+
+## 6. Metrics and ops queries
+
+Two sinks, with different jobs (`core/metrics.py`, `runtime/metrics.py`, `gateway/src/metrics.ts`):
+
+- **Workers Analytics Engine**, binding `METRICS`, dataset `todofy_metrics`, on both Workers. Write-only
+  from the Workers (reading needs the SQL API and an account token, which the Workers never hold), so it
+  serves the owner's ad-hoc queries below, never the UI. Workers Free includes 100,000 points written
+  and 10,000 read queries per day; points are kept three months. Local dev binds a dataset that accepts
+  every write and stores nothing, so shapes are unit-tested instead (≤ 20 blobs, ≤ 20 doubles, one index
+  ≤ 96 bytes, ≤ 250 points per invocation). A failed write never fails the request or step: the core
+  logs it (`{"metrics": "write_failed"}`), the gateway drops it silently.
+- **D1 `daily_metrics(day, key, value)`** (migration `0002`), for the budget page's 30-day trends
+  (`GET /api/v1/metrics/daily?days=1..90`, default 30; finished UTC days only, oldest first). The
+  charts (`web/src/components/TrendChart.tsx`) colour series with the categorical `--series-1…5`
+  tokens, never the status tones (accent and ok are both green); lines also differ by dash, stacked
+  bars have a gap. The token chart shows up to five models, largest total first; with more (a changed
+  model list), the four largest plus one 其他 series, so no two series share a colour. Every chart also has a text summary and a table.
+
+Point layouts (one dataset; `blob1` tells them apart):
+
+| Writer | `index1` | `blob1` | `blob2` | `blob3` | `blob4` | `double1` | `double2` | `double3` | `double4` |
+|---|---|---|---|---|---|---|---|---|---|
+| gateway, per request and cron | route | host kind: `owner`, `hooks`, `unknown`, `cron` | method (`OTHER` if unusual) | route template (`/api/v1/events/{id}`, `asset`, `page`, `other`, `wake`) | status class `2xx`…`5xx` | wall ms to response headers | request Content-Length (0 if none) | response Content-Length (0 if none) | — |
+| core, per upstream step | step | step: `summary`, `task`, `lookup`, `reminder`, `report`, `backup` | outcome: `ok`/`failed` (Gemini), `TaskResult` (task, reminder), ledger state (lookup) | error code or empty | Gemini model or empty | upstream wall ms | tokens in (prompt) | tokens out (total − prompt) | requests sent (models tried, POSTs; 0 for lookups) |
+
+Never written: paths, query strings, event IDs, subjects, addresses, the owner's identity, upstream bodies.
+`backup` is one point per job, written when it ends: outcome `ok`/`failed`, code `storage_error` or
+`lease_expired`, `double1` the job's wall ms from start to end.
+
+`daily_metrics` keys per finished UTC day: `mails_received` (always, 0 included: it marks the day as
+recorded), `mails_completed`, `mails_failed` (moves to `failed_summary`), `latency_p50_s`/`latency_p90_s`
+(arrival → `complete` of the day's completions, nearest rank), `gemini_calls`, `gemini_tokens:<model>`,
+`todoist_creates`, `todoist_lookups`; zero counters are not stored. How it stays within the D1 budget:
+
+- Mail counts and latencies come from `event_transitions`, walked by rowid from a cursor kept in the
+  object's SQLite (`metric_flush`): ≤ 3 pages of 500 per alarm, so each transition is read once (a few
+  hundred rows read per day, never a scan).
+- Step counters (`gemini_*`, `todoist_*`) are added to the object's SQLite (`metric_counts`) when a step
+  ends, not to D1. Like the data point, the counter write is best effort: `runtime/metrics.record`
+  never raises and logs `{"metrics": "count_failed"}` (a full object storage, say), and every caller
+  runs it after the step's result is committed (the ledger transition, the reminder's `FINISH`), so it
+  can never sit between a Gemini call or a created Todoist task and its record. A failed write only
+  under-counts that day (`tests/runtime/test_metrics_daily.py`, `tests/unit/test_metrics_record.py`).
+- A few minutes after UTC midnight (`metric_flush.next_at`, one more time in `_next_alarm_ms`) the
+  object writes each finished day as one `INSERT … SELECT … FROM json_each(?)` statement plus one bounded
+  expiry (400 days), in one batch: about a dozen rows plus their primary-key index, i.e. a few dozen D1
+  rows written per day. A backlog (days without alarms) is caught up at most 7 days per flush, a minute
+  apart.
+- If the object's storage is lost (cutover, `crash_and_restart(lose_object_storage=True)`), counting
+  restarts at the newest transition; that day is only partly seen and stays `recorded: false`, and so
+  do days that were never written. A transition committed just after midnight with an older timestamp
+  than one already walked is dropped rather than rewriting a finished day.
+- The same restart happens when the database changes under a kept object: a backup restore that
+  production is switched to, or a D1 Time Travel restore in place (cloudflare-setup.md §7).
+  `event_transitions.id` has no AUTOINCREMENT, so the restored database hands out ids again from its own
+  `max(id) + 1`; walking on from the old cursor would skip them and write those days with
+  `mails_received = 0`. `metric_flush` therefore keeps the counted row's `event_id` and `at` next to the
+  cursor, and every flush first reads that row by id (`CURSOR_ROW`, one rowid lookup). A missing or
+  different row logs `{"metrics": "cursor_reset"}` and takes the lost-storage path: the switch day and
+  the days since the last written one stay `recorded: false`. Cursor 0 (an empty ledger) is not checked.
+
+### Ops queries (read-only)
+
+For checking production from the owner's machine (`npx wrangler login`). None of these prints row
+content; keep it that way (the repository and its logs are public).
+
+| Question | Where |
+|---|---|
+| Last backup, its key, rows, size, next run, last failure | owner UI → 健康 → 备份 (Overview `backup`, OpenAPI `BackupStatus`) |
+| What the bucket holds | `npx wrangler r2 bucket info todofy-backups` (object count and size; wrangler 4.142.0 has no `r2 object list`, the dashboard's R2 browser lists keys) |
+| One backup's tables, row counts and part hashes | `npx wrangler r2 object get todofy-backups/<key>manifest.json --file manifest.json --remote` (names, counts and SHA-256 only) |
+| Backup job progress or errors | Workers Logs of `todofy-core`, filter on the `backup` field: `planned`, `done` (rows, bytes), `deleted`, `error` (exception type, step), `failed` (`storage_error`, `lease_expired`), `retention_error` |
+| Does a previous gateway still call the core (RPC release only) | Workers Logs of `todofy-core`: `{"request_id", "status": 503, "code": "unavailable"}` lines come only from the transition shim in `fetch`; the gateway logs its own errors under `todofy` |
+| Legacy text size (drives backup size and time) | `SELECT count(*) AS n, sum(length(CAST(text AS BLOB))) AS bytes FROM legacy_mail_text` via `npx wrangler d1 execute <database> --remote --command "..."` (reads each legacy row once) |
+| Account-wide D1 rows read/written today (shared with Mail Hero) | Cloudflare dashboard → D1 → metrics, or Workers & Pages → usage; a backup reads each row of every table once |
+| Daily metrics as stored (counts only, no content) | `SELECT day, key, value FROM daily_metrics WHERE day >= '<YYYY-MM-DD>' ORDER BY day, key` via `npx wrangler d1 execute <database> --remote --command "..."` (the primary-key index; a dozen rows a day) |
+| Metrics write failures or a cursor restart | Workers Logs of `todofy-core`, filter on the `metrics` field: `write_failed` (Analytics Engine), `count_failed` (the object's counters), `cursor_reset` (the ledger database changed, §6); the gateway drops a failed write without a log line |
+
+### Analytics Engine SQL API
+
+Create an account API token with **Account Analytics: Read** only, keep it out of the repo and the
+Workers, and query:
+
+```sh
+curl -s "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/analytics_engine/sql" \
+  -H "Authorization: Bearer $CF_ANALYTICS_TOKEN" --data-binary @query.sql
+```
+
+Rows are sampled at high volume, so always count with `SUM(_sample_interval)` and weight quantiles by it.
+
+1. Gateway traffic and wait per route over the last day (spot a slow or failing path):
+   ```sql
+   SELECT blob1 AS host, blob3 AS route, blob4 AS status, SUM(_sample_interval) AS requests,
+          quantileExactWeighted(0.5)(double1, _sample_interval) AS p50_ms,
+          quantileExactWeighted(0.95)(double1, _sample_interval) AS p95_ms
+   FROM todofy_metrics
+   WHERE timestamp > NOW() - INTERVAL '1' DAY AND blob1 IN ('owner', 'hooks', 'unknown', 'cron')
+   GROUP BY host, route, status
+   ORDER BY requests DESC
+   ```
+2. Failures of upstream steps by code, per hour over the last week:
+   ```sql
+   SELECT toStartOfInterval(timestamp, INTERVAL '1' HOUR) AS hour, blob1 AS step, blob3 AS code,
+          SUM(_sample_interval) AS steps
+   FROM todofy_metrics
+   WHERE timestamp > NOW() - INTERVAL '7' DAY
+     AND blob1 IN ('summary', 'task', 'lookup', 'reminder', 'report', 'backup') AND blob3 != ''
+   GROUP BY hour, step, code
+   ORDER BY hour DESC, steps DESC
+   ```
+3. Gemini tokens and latency by model and step, per day over the last month:
+   ```sql
+   SELECT toStartOfInterval(timestamp, INTERVAL '1' DAY) AS day, blob4 AS model, blob1 AS step,
+          SUM(_sample_interval) AS calls, SUM(double2 * _sample_interval) AS tokens_in,
+          SUM(double3 * _sample_interval) AS tokens_out,
+          quantileExactWeighted(0.9)(double1, _sample_interval) AS p90_ms
+   FROM todofy_metrics
+   WHERE timestamp > NOW() - INTERVAL '30' DAY AND blob1 IN ('summary', 'report')
+   GROUP BY day, model, step
+   ORDER BY day DESC, tokens_in DESC
+   ```
+4. Todoist retries and slow creates (attempts > 1 means inline retries happened):
+   ```sql
+   SELECT blob1 AS step, blob2 AS outcome, SUM(_sample_interval) AS steps,
+          SUM(double4 * _sample_interval) AS requests,
+          quantileExactWeighted(0.95)(double1, _sample_interval) AS p95_ms
+   FROM todofy_metrics
+   WHERE timestamp > NOW() - INTERVAL '7' DAY AND blob1 IN ('task', 'reminder', 'lookup')
+   GROUP BY step, outcome
+   ORDER BY steps DESC
+   ```
+
+These queries were written against Cloudflare's SQL reference and have not been run against the account.

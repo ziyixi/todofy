@@ -1,8 +1,10 @@
 import { ExternalLink } from 'lucide-react'
+import type { ReactNode } from 'react'
 import { useOverview } from '../api/queries'
-import type { Overview } from '../api/types'
+import type { BackupStatus, Overview } from '../api/types'
 import { Badge, ErrorPanel, Facts, Loading, PageHeader, Section, Time } from '../components/ui'
-import { EVENT_STATES } from '../lib/labels'
+import { formatBytes, formatNumber } from '../lib/format'
+import { BACKUP_ERRORS, BACKUP_STATUS, EVENT_STATES } from '../lib/labels'
 import { RefreshOverview, UpdatedAt } from './BudgetPage'
 
 const REPOSITORY = 'https://github.com/ziyixi/todofy'
@@ -30,6 +32,28 @@ function Flags({ flags }: { flags: Overview['flags'] }) {
       <Flag on={flags.force_pause_todoist} label="暂停 Todoist" />
       <Badge tone={flags.reminder_enabled ? 'ok' : 'neutral'}>{flags.reminder_enabled ? '每日提醒：开' : '每日提醒：关'}</Badge>
     </div>
+  )
+}
+
+function Backup({ backup }: { backup: BackupStatus }) {
+  const status = BACKUP_STATUS[backup.status]
+  const failure = backup.last_failure_at && (!backup.last_backup_at || backup.last_failure_at > backup.last_backup_at)
+  const items: [string, ReactNode][] = [
+    ['上次备份', <Time key="l" value={backup.last_backup_at} empty="还没有完成的备份" />],
+    [
+      '大小',
+      backup.last_backup_at ? `${formatBytes(backup.last_backup_bytes)}，${formatNumber(backup.last_backup_rows)} 行` : '—',
+    ],
+    ['下次备份', <Time key="n" value={backup.next_backup_at} empty={backup.status === 'running' ? '正在备份' : '未排期'} />],
+  ]
+  if (failure && backup.last_error_code) {
+    items.push(['上次失败', <span key="f"><Time value={backup.last_failure_at} />：{BACKUP_ERRORS[backup.last_error_code]}</span>])
+  }
+  return (
+    <Section title="备份" aside={<Badge tone={status.tone}>{status.label}</Badge>}>
+      <Facts items={items} />
+      <p className="muted small">每周日 10:00（UTC）把 D1 备份到私有 R2 桶，保留最近 6 份；备份进行时（通常几分钟内）暂停处理和写操作。</p>
+    </Section>
   )
 }
 
@@ -62,6 +86,7 @@ export function HealthPage() {
           <Section title="运行开关">
             <Flags flags={overview.data.flags} />
           </Section>
+          {overview.data.backup && <Backup backup={overview.data.backup} />}
           <Section title="进行中的事件" aside={<span className="muted small">需关注 {overview.data.attention_count} 个</span>}>
             <ul className="count-grid">
               {Object.entries(overview.data.counts).map(([state, count]) => (

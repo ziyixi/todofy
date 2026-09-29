@@ -54,8 +54,28 @@ FIXED_VARS = {
 }
 # The keys copied verbatim from each checked-in config. Everything else in a config is replaced here
 # (workers_dev, preview_urls, d1_databases, vars); a test fails when a config gains a key neither list has.
-CORE_SHAPE_KEYS = ("name", "main", "base_dir", "compatibility_date", "compatibility_flags", "migrations")
-GATEWAY_SHAPE_KEYS = ("name", "main", "compatibility_date", "assets", "durable_objects", "migrations", "triggers")
+# r2_buckets: the private backup bucket (todofy-backups), created once by the owner.
+# analytics_engine_datasets: todofy_metrics, created on first write (dev-notes.md §6).
+CORE_SHAPE_KEYS = (
+    "name",
+    "main",
+    "base_dir",
+    "compatibility_date",
+    "compatibility_flags",
+    "migrations",
+    "r2_buckets",
+    "analytics_engine_datasets",
+)
+GATEWAY_SHAPE_KEYS = (
+    "name",
+    "main",
+    "compatibility_date",
+    "assets",
+    "durable_objects",
+    "migrations",
+    "triggers",
+    "analytics_engine_datasets",
+)
 
 
 class SettingError(ValueError):

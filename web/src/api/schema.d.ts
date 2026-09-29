@@ -150,6 +150,29 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/metrics/daily": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Daily mail, latency, Gemini and Todoist counters for the budget page's trends.
+         * @description The finished UTC days before today, oldest first. The coordinator writes each day
+         *     once, a few minutes after UTC midnight, from the day's ledger transitions and its
+         *     own step counters. A day it did not count completely (before metrics began, or
+         *     after its storage was reset) is `recorded: false` with zero counters.
+         */
+        get: operations["getDailyMetrics"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/legacy_text/{event_id}": {
         parameters: {
             query?: never;
@@ -488,6 +511,16 @@ export interface components {
          *         "window_seconds": 900,
          *         "window_calls": 3,
          *         "window_limit": 1000
+         *       },
+         *       "backup": {
+         *         "status": "ok",
+         *         "last_backup_at": "2026-09-27T10:00:41Z",
+         *         "last_backup_key": "backups/2026-09-27T100002Z/",
+         *         "last_backup_bytes": 1843200,
+         *         "last_backup_rows": 52311,
+         *         "last_failure_at": null,
+         *         "last_error_code": null,
+         *         "next_backup_at": "2026-10-04T10:00:00Z"
          *       }
          *     }
          */
@@ -533,6 +566,83 @@ export interface components {
                 window_calls: number;
                 window_limit: number;
             };
+            backup?: components["schemas"]["BackupStatus"];
+        };
+        /**
+         * @description The weekly D1 backup to the private R2 bucket (Sunday 10:00 UTC), every table in
+         *     each one. While a backup runs (a few minutes, never over 30 minutes) the ledger
+         *     waits and owner writes get 503 `unavailable`. Not required in Overview so that clients written before it keep
+         *     validating; the Worker always sends it.
+         */
+        BackupStatus: {
+            /**
+             * @description `disabled`: the Worker has no BACKUPS bucket binding. `never`: no backup finished or failed yet. Otherwise the running job or the last outcome.
+             * @enum {string}
+             */
+            status: "disabled" | "never" | "running" | "ok" | "failed";
+            /** @description When the newest complete backup finished. */
+            last_backup_at: components["schemas"]["Timestamp"] | null;
+            /** @description Its R2 prefix, named after the second its job started, e.g. `backups/2026-09-27T100002Z/` (tools/backup_restore.py reads it). */
+            last_backup_key: string | null;
+            /** @description Compressed size of its parts and manifest. */
+            last_backup_bytes: number;
+            /** @description Rows in it. */
+            last_backup_rows: number;
+            last_failure_at: components["schemas"]["Timestamp"] | null;
+            /** @description Why the last failed job stopped. */
+            last_error_code: ("storage_error" | "lease_expired") | null;
+            /** @description Null while disabled or running. */
+            next_backup_at: components["schemas"]["Timestamp"] | null;
+        };
+        DailyMetrics: {
+            days: components["schemas"]["DailyMetricsDay"][];
+        };
+        /**
+         * @example {
+         *       "day": "2026-09-27",
+         *       "recorded": true,
+         *       "mails_received": 64,
+         *       "mails_completed": 61,
+         *       "mails_failed": 1,
+         *       "latency_p50_seconds": 18,
+         *       "latency_p90_seconds": 95,
+         *       "gemini_calls": 66,
+         *       "gemini_tokens": {
+         *         "gemini-3.8-flash": 402113,
+         *         "gemini-3.7-flash": 8120
+         *       },
+         *       "todoist_creates": 62,
+         *       "todoist_lookups": 1
+         *     }
+         */
+        DailyMetricsDay: {
+            /**
+             * Format: date
+             * @description UTC day.
+             */
+            day: string;
+            /** @description False when the day was not counted; its counters are then 0. */
+            recorded: boolean;
+            /** @description Webhook events stored. */
+            mails_received: number;
+            /** @description Events that reached complete. */
+            mails_completed: number;
+            /** @description Moves to failed_summary (an event retried by the owner can fail again). */
+            mails_failed: number;
+            /** @description Median seconds from arrival to complete over the day's completions; null without any. */
+            latency_p50_seconds: number | null;
+            /** @description 90th percentile of the same; null without any completion. */
+            latency_p90_seconds: number | null;
+            /** @description Gemini requests (summaries and reports; each model tried counts). */
+            gemini_calls: number;
+            /** @description Tokens by the model that answered (or was tried last). */
+            gemini_tokens: {
+                [key: string]: number;
+            };
+            /** @description Task-creation requests (mail tasks and reminders; retries count). */
+            todoist_creates: number;
+            /** @description Footer lookups (each may read several pages). */
+            todoist_lookups: number;
         };
         ReportsLatest: {
             summary: components["schemas"]["summary-v1.schema"] | null;
@@ -1042,6 +1152,32 @@ export interface operations {
             403: components["responses"]["CsrfFailed"];
             409: components["responses"]["Conflict"];
             429: components["responses"]["TooManyRequests"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    getDailyMetrics: {
+        parameters: {
+            query?: {
+                /** @description How many finished days to return. */
+                days?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description One entry per day. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DailyMetrics"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
             503: components["responses"]["Unavailable"];
         };
     };

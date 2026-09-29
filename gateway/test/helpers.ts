@@ -1,4 +1,5 @@
 import { expect, vi } from 'vitest';
+import type { CoreResult } from '../src/coordinator.ts';
 import type { Env } from '../src/env.ts';
 import worker from '../src/index.ts';
 
@@ -7,16 +8,33 @@ export const HOOKS_HOST = 'todofy-hooks.localhost';
 export const OWNER = 'owner@example.com';
 export const CSRF_KEY = 'ab'.repeat(32);
 
-/** One request the gateway sent to the TodofyCore stub. */
+const CORE_METHODS = ['ingest', 'wake', 'newsletter', 'newsletter_auth_failure', 'owner_api', 'setup'] as const;
+
+/** One RPC call the gateway made on the TodofyCore stub. */
 export interface CoreCall {
-  readonly name: string;
-  readonly url: URL;
-  readonly method: string;
-  readonly headers: Headers;
-  readonly body: ReadableStream | null;
+  readonly instance: string;
+  readonly method: (typeof CORE_METHODS)[number];
+  readonly args: readonly unknown[];
 }
 
-export type CoreReply = (call: CoreCall) => Response | Promise<Response>;
+/** The fake core's answer: a CoreResult, the setup facts, or nothing for wake. */
+export type CoreReply = (call: CoreCall) => unknown;
+
+export const NO_CONTENT: CoreResult = { status: 204, body: null, error: null, retry_after: null };
+
+/** A 200 whose JSON text is `text` (the core serialises with Python's separators). */
+export function ok(data: unknown, text = JSON.stringify(data)): CoreResult {
+  return { status: 200, body: text, error: null, retry_after: null };
+}
+
+export function failure(status: number, code: string, retryAfter: number | null = null): CoreResult {
+  return { status, body: null, error: { code, message: `core: ${code}` }, retry_after: retryAfter };
+}
+
+/** The ReadableStream argument of an ingest or owner_api call, as text. */
+export function bodyText(call: CoreCall | undefined): Promise<string> {
+  return new Response(call?.args.at(-1) as ReadableStream | null).text();
+}
 
 export interface Fakes {
   readonly env: Env;
@@ -24,22 +42,20 @@ export interface Fakes {
   readonly assets: Request[];
 }
 
-function coreStub(calls: CoreCall[], reply: CoreReply): DurableObjectNamespace {
+function coreStub(calls: CoreCall[], reply: CoreReply): Env['COORDINATOR'] {
   return {
-    getByName: (name: string) => ({
-      fetch: async (url: string, init: RequestInit) => {
-        const call: CoreCall = {
-          name,
-          url: new URL(url),
-          method: init.method ?? 'GET',
-          headers: new Headers(init.headers),
-          body: (init.body ?? null) as ReadableStream | null,
-        };
-        calls.push(call);
-        return reply(call);
-      },
-    }),
-  } as unknown as DurableObjectNamespace;
+    getByName: (instance: string) =>
+      Object.fromEntries(
+        CORE_METHODS.map((method) => [
+          method,
+          (...args: unknown[]) => {
+            const call: CoreCall = { instance, method, args };
+            calls.push(call);
+            return Promise.resolve(reply(call));
+          },
+        ]),
+      ),
+  } as unknown as Env['COORDINATOR'];
 }
 
 /** An asset server with the SPA fallback: unknown paths answer index.html. */
@@ -52,13 +68,10 @@ export function spaAssets(request: Request): Response {
   return new Response('<!doctype html>', { headers: { 'content-type': 'text/html' } });
 }
 
-export type Vars = { [Name in Exclude<keyof Env, 'ASSETS' | 'COORDINATOR'>]?: string | undefined };
+export type Vars = { [Name in Exclude<keyof Env, 'ASSETS' | 'COORDINATOR' | 'METRICS'>]?: string | undefined };
 
 /** A gateway env with fake bindings; the core answers 204 unless `reply` says otherwise. */
-export function fakes(
-  vars: Vars = {},
-  reply: CoreReply = () => new Response(null, { status: 204 }),
-): Fakes {
+export function fakes(vars: Vars = {}, reply: CoreReply = () => NO_CONTENT): Fakes {
   const core: CoreCall[] = [];
   const assets: Request[] = [];
   const env = {

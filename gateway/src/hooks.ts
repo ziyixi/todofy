@@ -1,5 +1,5 @@
 /** Machine endpoints on every TODOFY_HOOKS_HOSTS name: health, the Mail Hero webhook, newsletter reports. */
-import { forward } from './coordinator.ts';
+import { answer, type ReportKind } from './coordinator.ts';
 import { base64DecodeStrict, matchesAny, sha256Hex, utf8 } from './crypto.ts';
 import { csv, flag, variable } from './env.ts';
 import { errorResponse, jsonResponse, mediaType, nowSeconds, partition, type Context } from './http.ts';
@@ -64,11 +64,9 @@ async function mail(ctx: Context): Promise<Response> {
   if (/^\d+$/.test(length) && Number(length) > MAX_EVENT_BYTES) {
     return errorResponse(requestId, 413, 'payload_too_large');
   }
-  const headers: Record<string, string> = { 'content-type': 'application/json' };
   const key = request.headers.get('idempotency-key');
-  if (key !== null) headers['idempotency-key'] = key;
   // The body is streamed unread: parsing, hashing and D1 writes run in the object (30 s of CPU).
-  return forward(ctx, '/ingest', { method: 'POST', headers, body: request.body });
+  return answer(ctx, (core) => core.ingest(key, request.body));
 }
 
 async function basicOk(header: string, digests: readonly string[]): Promise<boolean> {
@@ -83,11 +81,11 @@ async function basicOk(header: string, digests: readonly string[]): Promise<bool
  * failures cannot lock the newsletter out. A failure is counted by the core (D1, per UTC hour):
  * 401 until 20, then 429 without further writes.
  */
-async function report(ctx: Context, kind: 'summary' | 'recommendation'): Promise<Response> {
+async function report(ctx: Context, kind: ReportKind): Promise<Response> {
   const digests = csv(ctx.env, 'REPORT_BASIC_AUTH_SHA256');
   if (digests.length === 0) return errorResponse(ctx.requestId, 503, 'not_configured');
   if (await basicOk(ctx.request.headers.get('authorization') ?? '', digests)) {
-    return forward(ctx, `/newsletter/${kind}${ctx.url.search}`, { method: 'GET' });
+    return answer(ctx, (core) => core.newsletter(kind, ctx.url.search.slice(1)));
   }
   const now = nowSeconds();
   const hour = new Date(now * 1000).toISOString().slice(0, 13);
@@ -96,7 +94,8 @@ async function report(ctx: Context, kind: 'summary' | 'recommendation'): Promise
       'retry-after': String(HOUR_S - (now % HOUR_S)),
     });
   }
-  const response = await forward(ctx, '/newsletter/auth-failure', { method: 'POST' });
+  const response = await answer(ctx, (core) => core.newsletter_auth_failure());
+  if (response.status === 401) response.headers.set('www-authenticate', 'Basic realm="todofy"');
   if (response.status === 429) lockedHour = hour;
   return response;
 }

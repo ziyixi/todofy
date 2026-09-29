@@ -34,6 +34,7 @@ MIN_ATTEMPT_MS = 1000
 class CreateResult:
     verdict: TaskVerdict  # of the whole call (classify.final_task_verdict); feed it to the state machine
     task_id: str  # "" unless created
+    attempts: int  # POST requests sent (the same frozen bytes each time)
 
 
 async def create_task(env: Any, request: TaskRequest, *, budget_ms: int) -> CreateResult:
@@ -60,10 +61,10 @@ async def create_task(env: Any, request: TaskRequest, *, budget_ms: int) -> Crea
         verdict = classify_task_create(outcome, task_id)
         possibly_delivered |= verdict.result is TaskResult.UNKNOWN
         if not verdict.retry_inline or attempt >= TODOIST_MAX_ATTEMPTS:
-            return CreateResult(final_task_verdict(verdict, possibly_delivered), task_id)
+            return CreateResult(final_task_verdict(verdict, possibly_delivered), task_id, attempt)
         delay_ms = int(inline_delay(attempt, verdict.retry_after) * 1000)
         if deadline - now_ms() - delay_ms < MIN_ATTEMPT_MS:
-            return CreateResult(final_task_verdict(verdict, possibly_delivered), task_id)
+            return CreateResult(final_task_verdict(verdict, possibly_delivered), task_id, attempt)
         await asyncio.sleep(delay_ms / 1000)
         attempt += 1
 

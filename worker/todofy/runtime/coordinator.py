@@ -1,15 +1,18 @@
 """TodofyCore (`inbox-v1`): the single writer of the ledger and its serial executor.
 
 It runs in the `todofy-core` Worker and is reached only through the gateway's
-COORDINATOR binding (docs/gateway-contract.md §3). Internal routes on
-https://coordinator, each after the gateway's own checks:
+COORDINATOR binding, which calls these methods over JS RPC after its own checks
+(docs/gateway-contract.md §3). Each answers with a ``http.Result`` as a dict:
 
-    POST /ingest                   webhook bytes -> 204 | 400 | 409 | 413 | 503
-    POST /wake                     run the alarm loop now -> 204
-    GET  /newsletter/<kind>        stored or on-demand report (Basic auth passed)
-    POST /newsletter/auth-failure  count a failed Basic credential -> 401 | 429
-    GET  /setup                    the core's facts for the setup page
-    *    /api/v1/...               the owner API (api.py), for x-todofy-owner
+    ingest(idempotency_key, body)          webhook bytes -> 204 | 400 | 409 | 413 | 503
+    wake()                                 run the alarm loop now (the gateway's cron) -> None
+    newsletter(kind, query)                stored or on-demand report (Basic auth passed)
+    newsletter_auth_failure()              count a failed Basic credential -> 401 | 429
+    owner_api(owner, method, path, ...)    the owner API (api.py) for the Access owner
+    setup()                                the core's facts for the setup page -> dict
+
+``fetch`` answers 404: the object has no HTTP routes. For this one release it
+answers the previous, fetch-based gateway 503 with Retry-After (see ``fetch``).
 
 Everything that reads D1, parses mail or calls Gemini/Todoist runs here: a
 Durable Object invocation has 30 s of CPU, a Worker request 10 ms on Workers Free.
@@ -23,11 +26,10 @@ time then defaults to "due now" and the ledger stays in D1.
 import hashlib
 import json
 import math
-import re
+from collections.abc import Awaitable
 from dataclasses import asdict
 from datetime import UTC, datetime
 from typing import Any
-from urllib.parse import urlsplit
 
 from pyodide.ffi import JsException
 from workers import DurableObject, Response
@@ -52,14 +54,15 @@ from todofy.core.backoff import (
 )
 from todofy.core.classify import TaskResult, classify_lookup
 from todofy.core.contract import MAX_EVENT_BYTES, UUID, ContractError, MailEvent, parse_mail_event
+from todofy.core.metrics import Step, StepPoint
 from todofy.core.render import clean_summary, content_notice, render_todo_body, task_title
 from todofy.core.request_id import todoist_request_id
 from todofy.core.sql import views
 from todofy.core.todoist_request import RequestTooLarge, build_task_request
 from todofy.core.vocab import Code, EventState, Reconcile, allowed_actions
-from todofy.runtime import api, gemini, ledger, reminder, reports, retention, todoist
+from todofy.runtime import api, backup, gemini, ledger, metrics, reminder, reports, retention, todoist
 from todofy.runtime.config import flag, gemini_models, integer, source_id, var
-from todofy.runtime.http import REQUEST_ID, empty, error, json_response
+from todofy.runtime.http import NO_CONTENT, Result, error_response, failed, not_found, ok
 from todofy.runtime.interop import now_ms, now_s, read_capped, sha256_hex
 from todofy.runtime.ledger import WORKER, CompletedSummary, EventRow, OwnerAction
 
@@ -98,13 +101,11 @@ DO_SCHEMA = (
     # by the next alarm after an eviction (counted as spent, like reports._generate).
     "CREATE TABLE IF NOT EXISTS llm_inflight (event_id TEXT PRIMARY KEY, day TEXT NOT NULL, reserved INTEGER NOT NULL)",
 )
-# Headers only the gateway's request builder sets (it drops any a client sent).
-INTERNAL = "x-todofy-internal"
-REQUEST_ID_HEADER = "x-todofy-request-id"
-OWNER_HEADER = "x-todofy-owner"
-GATEWAY_REQUEST_ID = re.compile(r"[0-9a-f]{16}")
+# The header the previous, fetch-based gateway put on every call to the object; see fetch().
+PREVIOUS_GATEWAY_MARKER = "x-todofy-internal"
+PREVIOUS_GATEWAY_RETRY_S = 60
 MAX_OWNER_CHARS = 254
-NEWSLETTER_KINDS = {"/newsletter/summary": reports.SUMMARY, "/newsletter/recommendation": reports.RECOMMENDATION}
+NEWSLETTER_KINDS = frozenset({reports.SUMMARY, reports.RECOMMENDATION})
 TICK_COLUMNS = ("next_reminder_check", "next_report", "next_maintenance")
 SET_CONTROL = {
     column: f"UPDATE control SET {column} = ? WHERE id = 1" for column in (*TICK_COLUMNS, "todoist_blocked_until")
@@ -124,12 +125,6 @@ def _request_hash(fields: dict[str, Any]) -> str:
     return hashlib.sha256(json.dumps(fields, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
 
 
-def _owner(request: Any) -> str | None:
-    """The canonical owner the gateway put in x-todofy-owner after Access; None if unusable."""
-    owner = request.headers.get(OWNER_HEADER) or ""
-    return owner if "@" in owner and len(owner) <= MAX_OWNER_CHARS else None
-
-
 def _after(seconds: float) -> int:
     """The D1 deadline ``seconds`` from now, rounded up so a wait (e.g. Retry-After) is never cut short."""
     return math.ceil(now_ms() / 1000 + seconds)
@@ -143,76 +138,90 @@ class TodofyCore(DurableObject):
     def __init__(self, ctx: Any, env: Any) -> None:
         super().__init__(ctx, env)
         self.sql = ctx.storage.sql
-        for statement in DO_SCHEMA:
+        for statement in (*DO_SCHEMA, *backup.DO_SCHEMA, *metrics.DO_SCHEMA):
             self.sql.exec(statement)
         self.running = False
         # A wake-up that arrived while the alarm loop was busy; honoured when it finishes.
         self.woken = False
 
-    # ---- routes -------------------------------------------------------------------------
+    # ---- RPC methods (the gateway's COORDINATOR binding) -------------------------------------
 
     async def fetch(self, request: Any) -> Response:
-        # Only the gateway's binding reaches the object; a request it did not build fails closed.
-        if request.headers.get(INTERNAL) != "1":
-            return error(404, ApiError.NOT_FOUND)
-        request_id = request.headers.get(REQUEST_ID_HEADER) or ""
-        token = REQUEST_ID.set(request_id if GATEWAY_REQUEST_ID.fullmatch(request_id) else None)
+        # Transition shim of the release that moves to RPC; delete it (and PREVIOUS_GATEWAY_*) in a
+        # later release (not the gateway-only class-delete one). CI deploys this core before the new
+        # gateway, so until that step finishes, for as long as a failed gateway step is not rerun, or
+        # after the gateway alone is rolled back, the previous gateway still sends its fetch routes and
+        # passes the answer through. A 503 with Retry-After keeps Mail Hero on its retry backoff; a 404
+        # would block the endpoint revision after 30 minutes. Nothing is read or written.
+        if request.headers.get(PREVIOUS_GATEWAY_MARKER) == "1":
+            return error_response(503, ApiError.UNAVAILABLE, {"retry-after": str(PREVIOUS_GATEWAY_RETRY_S)})
+        return not_found()
+
+    @staticmethod
+    async def _answer(work: Awaitable[Result]) -> dict[str, Any]:
+        """``work``'s Result as an RPC return value; a D1 or storage failure is 503 unavailable."""
         try:
-            return await self._route(request)
+            return (await work).wire()
         except JsException:
-            # D1 or storage failed; the platform logs carry the details.
-            return error(503, ApiError.UNAVAILABLE)
-        finally:
-            REQUEST_ID.reset(token)
+            # The platform logs carry the details.
+            return failed(503, ApiError.UNAVAILABLE).wire()
 
-    async def _route(self, request: Any) -> Response:
-        method, url = request.method, urlsplit(request.url)
-        path, env = url.path, self.env
+    async def ingest(self, idempotency_key: str | None, body: Any) -> dict[str, Any]:
+        """POST /hooks/mail after the gateway's checks: the Idempotency-Key header and the unread body stream."""
         # The gateway refuses writes in maintenance first; this keeps the single writer consistent on its own.
-        maintenance = method == "POST" and flag(env, "MAINTENANCE_MODE")
-        if path.startswith("/api/v1/"):
-            owner = _owner(request)
-            if owner is None:
-                return error(401, ApiError.UNAUTHORIZED)
-            if maintenance:
-                return error(503, ApiError.MAINTENANCE)
-            return await api.handle(request, env, self, owner, path)
-        match method, path:
-            case "POST", "/ingest":
-                return error(503, ApiError.MAINTENANCE) if maintenance else await self.ingest(request)
-            case "POST", "/wake":
-                await self.wake()
-                return empty()
-            case "GET", "/setup":
-                return api.setup(env)
-            case "POST", "/newsletter/auth-failure":
-                return await reports.count_auth_failure(env.DB, now_s())
-            case "GET", _ if path in NEWSLETTER_KINDS:
-                return await reports.serve(env, self, NEWSLETTER_KINDS[path], url.query)
-        return error(404, ApiError.NOT_FOUND)
+        if flag(self.env, "MAINTENANCE_MODE"):
+            return failed(503, ApiError.MAINTENANCE).wire()
+        return await self._answer(self._ingest(idempotency_key or "", body))
 
-    async def ingest(self, request: Any) -> Response:
-        body = await read_capped(request.js_object.body, MAX_EVENT_BYTES)
+    async def newsletter(self, kind: str, query: str) -> dict[str, Any]:
+        """GET /api/<kind> with ``query`` (without "?") after the gateway accepted the Basic credential."""
+        if kind not in NEWSLETTER_KINDS:
+            return failed(404, ApiError.NOT_FOUND).wire()
+        return await self._answer(reports.serve(self.env, self, kind, query))
+
+    async def newsletter_auth_failure(self) -> dict[str, Any]:
+        """A newsletter request whose Basic credential the gateway rejected."""
+        return await self._answer(reports.count_auth_failure(self.env.DB, now_s()))
+
+    async def owner_api(
+        self, owner: str, method: str, path: str, query: str, content_length: str | None, body: Any
+    ) -> dict[str, Any]:
+        """One /api/v1 request for the canonical owner the gateway verified with Access."""
+        if "@" not in owner or len(owner) > MAX_OWNER_CHARS:
+            return failed(401, ApiError.UNAUTHORIZED).wire()
+        if method == "POST" and flag(self.env, "MAINTENANCE_MODE"):
+            return failed(503, ApiError.MAINTENANCE).wire()
+        if method == "POST" and backup.holds_ledger(self.env, self.sql, now_s()):
+            # A backup job keeps the ledger still for a minute or so (at most its lease).
+            return failed(503, ApiError.UNAVAILABLE).wire()
+        request = api.OwnerRequest(method, path, query, content_length, body)
+        return await self._answer(api.handle(request, self.env, self, owner))
+
+    def setup(self) -> dict[str, Any]:
+        """The core's facts for the setup page (never secret values)."""
+        return api.setup(self.env)
+
+    async def _ingest(self, key: str, stream: Any) -> Result:
+        body = await read_capped(stream, MAX_EVENT_BYTES)
         if body is None:
-            return error(413, ApiError.PAYLOAD_TOO_LARGE)
-        key = request.headers.get("idempotency-key") or ""
+            return failed(413, ApiError.PAYLOAD_TOO_LARGE)
         try:
             event = parse_mail_event(body)
         except ContractError as exc:
             _log(ingest="rejected", reason=exc.reason)
-            return error(400, ApiError.INVALID_PAYLOAD)
+            return failed(400, ApiError.INVALID_PAYLOAD)
         # A repeated header arrives joined with ", " and never equals a UUID.
         if key != event.event_id:
             _log(ingest="rejected", reason="idempotency_key")
-            return error(400, ApiError.INVALID_PAYLOAD)
+            return failed(400, ApiError.INVALID_PAYLOAD)
         digest = await sha256_hex(body)
         stored = await ledger.ingest(self.env.DB, source_id(self.env), event.event_id, body.decode(), digest, now_s())
         _log(ingest=stored, event_id=event.event_id)
         if stored == ledger.Stored.CONFLICT:
-            return error(409, ApiError.EVENT_CONFLICT)
+            return failed(409, ApiError.EVENT_CONFLICT)
         if stored == ledger.Stored.NEW:
             await self.wake()
-        return empty()
+        return NO_CONTENT
 
     async def wake(self) -> None:
         """Run the alarm loop as soon as possible."""
@@ -226,22 +235,22 @@ class TodofyCore(DurableObject):
 
     async def reconcile(
         self, owner: str, event_id: str, action: str, version: int, action_request_id: str, task_id: str | None
-    ) -> Response:
+    ) -> Result:
         """An owner action on one event (api.reconcile validated the request)."""
         db, now = self.env.DB, now_s()
         request_hash = _request_hash({"event_id": event_id, "action": action, "version": version, "task_id": task_id})
         claim = await ledger.find_action(db, owner, action_request_id, request_hash)
         if claim.claim == ledger.Claim.CONFLICT:
-            return error(409, ApiError.ACTION_REQUEST_CONFLICT)
+            return failed(409, ApiError.ACTION_REQUEST_CONFLICT)
         if claim.claim == ledger.Claim.REPLAY:
             return await self.event(event_id)
         row = await ledger.get(db, source_id(self.env), event_id)
         if row is None:
-            return error(404, ApiError.NOT_FOUND)
+            return failed(404, ApiError.NOT_FOUND)
         if row.version != version:
-            return error(409, ApiError.VERSION_CONFLICT)
+            return failed(409, ApiError.VERSION_CONFLICT)
         if action not in allowed_actions(row.state, row.last_error_code):
-            return error(409, ApiError.ACTION_NOT_ALLOWED)
+            return failed(409, ApiError.ACTION_NOT_ALLOWED)
         recorded = OwnerAction(owner, action_request_id, action, request_hash)
         match action:
             case Reconcile.TASK_CREATED:
@@ -257,25 +266,25 @@ class TodofyCore(DurableObject):
                 to, code, columns = EventState.IGNORED, Code.DISMISSED_BY_OWNER, {"next_attempt_at": 0}
         moved = await ledger.transition(db, row, to, actor=ledger.OWNER, now=now, code=code, action=recorded, **columns)
         if moved is None:
-            return error(409, ApiError.VERSION_CONFLICT)
+            return failed(409, ApiError.VERSION_CONFLICT)
         _log(reconcile=action, event_id=event_id, state=to)
         await self.wake()
         return await self.event(event_id)
 
-    async def recompute(self, owner: str, action_request_id: str, kind: str, top_n: int) -> Response:
+    async def recompute(self, owner: str, action_request_id: str, kind: str, top_n: int) -> Result:
         """The owner's report recompute, replayed by action_request_id (api.recompute validated it)."""
         db, now = self.env.DB, now_s()
         claim = await ledger.claim_action(
             db, owner, action_request_id, "recompute", _request_hash({"kind": kind, "top_n": top_n}), now
         )
         if claim.claim == ledger.Claim.CONFLICT:
-            return error(409, ApiError.ACTION_REQUEST_CONFLICT)
+            return failed(409, ApiError.ACTION_REQUEST_CONFLICT)
         if claim.claim == ledger.Claim.REPLAY:
             return self._replayed_report(claim)
         status, result = await self.compute_report(kind, top_n, now)
         stored = json.dumps(result, ensure_ascii=False) if status == 200 else result
         await ledger.finish_action(db, owner, action_request_id, stored, status)
-        return json_response(result) if status == 200 else reports.report_error(status, result, now)
+        return ok(result) if status == 200 else reports.report_error(status, result, now)
 
     async def compute_report(self, kind: str, top_n: int, now: int) -> tuple[int, Any]:
         """(200, report) or (status, ApiError) for one on-demand report (newsletter or owner)."""
@@ -288,21 +297,21 @@ class TodofyCore(DurableObject):
             return 503, ApiError.UNAVAILABLE
 
     @staticmethod
-    def _replayed_report(claim: ledger.ActionClaim) -> Response:
+    def _replayed_report(claim: ledger.ActionClaim) -> Result:
         if claim.http_status is None:
             # Still running, or the run that claimed it was evicted: ask for a new action.
-            return error(503, ApiError.UNAVAILABLE)
+            return failed(503, ApiError.UNAVAILABLE)
         if claim.http_status == 200:
-            return json_response(json.loads(claim.result_ref or "null"))
+            return ok(json.loads(claim.result_ref or "null"))
         return reports.report_error(claim.http_status, ApiError(claim.result_ref or ApiError.UNAVAILABLE), now_s())
 
-    async def event(self, event_id: str) -> Response:
+    async def event(self, event_id: str) -> Result:
         if not UUID.fullmatch(event_id):
-            return error(404, ApiError.NOT_FOUND)
+            return failed(404, ApiError.NOT_FOUND)
         db = self.env.DB
         row = await ledger.get(db, source_id(self.env), event_id)
         if row is None:
-            return error(404, ApiError.NOT_FOUND)
+            return failed(404, ApiError.NOT_FOUND)
         now = now_s()
         timeline, summary, legacy = await db.batch(
             [
@@ -335,7 +344,7 @@ class TodofyCore(DurableObject):
             ],
             "has_legacy_text": bool(legacy.results),
         }
-        return json_response(detail)
+        return ok(detail)
 
     async def budgets(self) -> dict[str, Any]:
         """The next alarm and the Gemini/Todoist budgets, in the Overview's API shape."""
@@ -418,6 +427,12 @@ class TodofyCore(DurableObject):
             top_n,
             day,
         )
+
+    def record_step(self, point: StepPoint, now: int) -> None:
+        """Metrics of one upstream step (Analytics Engine point and the day's counters).
+
+        Best effort and never raises; callers run it after the step's result is committed."""
+        metrics.record(self.env, self.sql, point, now)
 
     def _settle_interrupted_summaries(self) -> None:
         """Count the reservation of a summary call an eviction cut short as spent.
@@ -505,6 +520,10 @@ class TodofyCore(DurableObject):
         await self._arm_watchdog()
         self._settle_interrupted_summaries()
         await ledger.recover_interrupted(env.DB, now, lookup_at=_after(self._lookup_delay()))
+        if (resume_at := await backup.run(env, self.sql, now)) is not None:
+            # A backup job holds the ledger and the ticks until it ends (backup.py).
+            await storage.setAlarm(resume_at)
+            return
         worked = False
         if not flag(env, "PROCESSING_PAUSED"):
             worked = await self._step(now, todoist_open=self._todoist_wait(now) is None)
@@ -588,18 +607,21 @@ class TodofyCore(DurableObject):
             running = await ledger.transition(db, row, EventState.SUMMARIZING, actor=WORKER, now=now)
             if running is None:
                 return
-            used = reserved
+            used, started = reserved, now_ms()
             result = await gemini.generate(
                 self.env,
                 system=prompts.SUMMARY_EMAIL,
                 user=content,
                 preface=preface,
-                deadline_ms=now_ms() + GEMINI_STEP_BUDGET * 1000,
+                deadline_ms=started + GEMINI_STEP_BUDGET * 1000,
             )
             used = result.tokens
         finally:
             self.sql.exec("DELETE FROM llm_inflight WHERE event_id = ?", row.event_id)
             self.settle_tokens(reserved, used, now)
+        # Recorded after the ledger commit, so a metrics failure can never sit between the
+        # spent Gemini call and its result (record_step never raises either).
+        point = metrics.gemini_point(Step.SUMMARY, result, now_ms() - started)
         done = now_s()
         verdict = result.verdict
         if verdict.ok:
@@ -619,15 +641,16 @@ class TodofyCore(DurableObject):
                 attempt_count=0,
                 next_attempt_at=done,
             )
-            return
-        code, attempts = verdict.code or Code.SUMMARY_FAILED, running.attempt_count
-        if summary_gives_up(attempts, code, done - row.created_at):
-            to, next_at = EventState.FAILED_SUMMARY, 0
         else:
-            to, next_at = EventState.PENDING, self._retry_at(attempts, verdict.retry_after)
-        await ledger.transition(
-            db, running, to, actor=WORKER, now=done, code=code, attempt_count=attempts + 1, next_attempt_at=next_at
-        )
+            code, attempts = verdict.code or Code.SUMMARY_FAILED, running.attempt_count
+            if summary_gives_up(attempts, code, done - row.created_at):
+                to, next_at = EventState.FAILED_SUMMARY, 0
+            else:
+                to, next_at = EventState.PENDING, self._retry_at(attempts, verdict.retry_after)
+            await ledger.transition(
+                db, running, to, actor=WORKER, now=done, code=code, attempt_count=attempts + 1, next_attempt_at=next_at
+            )
+        self.record_step(point, now)
 
     async def _create_task(self, row: EventRow, now: int) -> None:
         db, env = self.env.DB, self.env
@@ -652,7 +675,9 @@ class TodofyCore(DurableObject):
         if sending is None:
             return
         self._count_todoist_calls(TODOIST_MAX_ATTEMPTS, now)
+        started = now_ms()
         result = await todoist.create_task(env, request, budget_ms=TODOIST_STEP_BUDGET * 1000)
+        point = metrics.task_point(Step.TASK, result, now_ms() - started)
         verdict, done = result.verdict, now_s()
         _log(task=verdict.result, event_id=row.event_id, code=verdict.code)
         match verdict.result:
@@ -696,6 +721,8 @@ class TodofyCore(DurableObject):
             case TaskResult.RETRY_LATER:
                 code = verdict.code or Code.TODOIST_UNAVAILABLE
                 await self._retry_task_later(sending, code, verdict.retry_after, done)
+        # After the commit: the task already exists, and only the ledger may say so first.
+        self.record_step(point, now)
 
     async def _retry_task_later(self, row: EventRow, code: str, retry_after: float, now: int) -> None:
         await ledger.transition(
@@ -722,8 +749,10 @@ class TodofyCore(DurableObject):
         db = self.env.DB
         confirmed = await ledger.owner_confirmed_resend(db, row.event_id)
         self._count_todoist_calls(LOOKUP_MAX_PAGES, now)
+        started = now_ms()
         found = await todoist.find_footer_tasks(self.env, row.event_id)
         state, code = classify_lookup(None if found is None else len(found))
+        point = StepPoint(Step.LOOKUP, state, code=code or "", upstream_ms=now_ms() - started)
         done, attempts = now_s(), row.attempt_count + 1
         _log(lookup=code or state, event_id=row.event_id, owner_confirmed=confirmed)
         if state == EventState.TODO_CREATED:
@@ -741,6 +770,7 @@ class TodofyCore(DurableObject):
             await ledger.transition(
                 db, row, state, actor=WORKER, now=done, code=code, attempt_count=attempts, next_attempt_at=next_at
             )
+        self.record_step(point, now)
 
     async def _ticks(self) -> None:
         """Reminder, report precompute and retention, each when its control time is due."""
@@ -757,6 +787,20 @@ class TodofyCore(DurableObject):
                 _log(tick=column, error=type(exc).__name__)
                 next_at = now + TICK_RETRY
             self.sql.exec(SET_CONTROL[column], next_at)
+        await self._metrics_tick()
+
+    async def _metrics_tick(self) -> None:
+        """Write finished days to daily_metrics (its own schedule in metric_flush)."""
+        now = now_s()
+        if metrics.next_flush(self.sql) > now:
+            return
+        await self._arm_watchdog()
+        try:
+            next_at = await metrics.flush(self.env, self.sql, now)
+        except Exception as exc:
+            _log(tick="metrics", error=type(exc).__name__)
+            next_at = now + TICK_RETRY
+        metrics.set_next_flush(self.sql, next_at)
 
     async def _tick(self, column: str, now: int) -> int:
         match column:
@@ -774,7 +818,9 @@ class TodofyCore(DurableObject):
             return soon  # keep draining
         now = now_s()
         control = self._control()
-        times = [control[column] for column in TICK_COLUMNS]
+        times = [*(control[column] for column in TICK_COLUMNS), metrics.next_flush(self.sql)]
+        if (backup_at := backup.next_run(self.env, self.sql)) is not None:
+            times.append(backup_at)
         if not flag(self.env, "PROCESSING_PAUSED"):
             wait = self._todoist_wait(now)
             if wait:

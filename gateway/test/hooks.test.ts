@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { errorCode, fakes, hooks, send, type CoreCall, type Vars } from './helpers.ts';
+import type { CoreResult } from '../src/coordinator.ts';
+import { bodyText, errorCode, failure, fakes, hooks, logged, NO_CONTENT, ok, send, type CoreCall, type Vars } from './helpers.ts';
 
 async function sha256(text: string): Promise<string> {
   const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text));
@@ -25,11 +26,11 @@ function post(headers: Record<string, string>, body: string | null = EVENT): Req
 const JSON_BEARER = { authorization: `Bearer ${TOKEN}`, 'content-type': 'application/json' };
 
 describe('POST /hooks/mail', () => {
-  it('streams the unread body to the core with only the allowed headers', async () => {
+  it('streams the unread body to the core with only the idempotency key', async () => {
     let received = '';
     const { env, core } = fakes(await webhookVars(), async (call: CoreCall) => {
-      received = await new Response(call.body).text();
-      return new Response(null, { status: 204 });
+      received = await bodyText(call);
+      return NO_CONTENT;
     });
     const request = new Request('http://todofy-hooks.localhost/hooks/mail', {
       method: 'POST',
@@ -47,37 +48,42 @@ describe('POST /hooks/mail', () => {
     const { default: worker } = await import('../src/index.ts');
     const response = await worker.fetch(request as never, env);
     expect(response.status).toBe(204);
+    expect(await response.text()).toBe('');
     expect(core).toHaveLength(1);
     const [ingest] = core;
-    expect(ingest?.url.href).toBe('https://coordinator/ingest');
-    expect(ingest?.method).toBe('POST');
-    expect(ingest?.body).toBe(request.body);
+    expect(ingest?.instance).toBe('inbox-v1');
+    expect(ingest?.method).toBe('ingest');
+    expect(ingest?.args).toHaveLength(2);
+    expect(ingest?.args[0]).toBe('0b8f5a4e-3c1d-4c52-9f0e-2d7c8b6a5f41');
+    expect(ingest?.args[1]).toBe(request.body);
     expect(received).toBe(EVENT);
-    expect(Object.fromEntries(ingest?.headers ?? [])).toEqual({
-      'content-type': 'application/json',
-      'idempotency-key': '0b8f5a4e-3c1d-4c52-9f0e-2d7c8b6a5f41',
-      'x-todofy-internal': '1',
-      'x-todofy-request-id': expect.stringMatching(/^[0-9a-f]{16}$/) as string,
-    });
-    expect(ingest?.headers.get('x-todofy-request-id')).not.toBe('ffffffffffffffff');
   });
 
-  it('accepts the previous token while rotating and copies an empty idempotency key', async () => {
+  it('accepts the previous token while rotating and passes the idempotency key as it came', async () => {
     const { env, core } = fakes(await webhookVars());
-    const response = await hooks(env, '/hooks/mail', post({ ...JSON_BEARER, authorization: `Bearer ${PREVIOUS}`, 'idempotency-key': '' }));
-    expect(response.status).toBe(204);
-    expect(core[0]?.headers.get('idempotency-key')).toBe('');
+    const rotated = { ...JSON_BEARER, authorization: `Bearer ${PREVIOUS}` };
+    expect((await hooks(env, '/hooks/mail', post({ ...rotated, 'idempotency-key': '' }))).status).toBe(204);
+    expect((await hooks(env, '/hooks/mail', post(rotated))).status).toBe(204);
+    expect(core.map((call) => call.args[0])).toEqual(['', null]);
   });
 
-  it('passes the core answer through unchanged', async () => {
-    const conflict = new Response('{"error":{}}', { status: 409, headers: { 'content-type': 'application/json', 'x-core': '1' } });
-    const { env } = fakes(await webhookVars(), () => conflict);
+  it('answers a core error with the envelope, its message and the gateway request ID, logged once', async () => {
+    const { env } = fakes(await webhookVars(), () => failure(409, 'event_conflict'));
     const response = await hooks(env, '/hooks/mail', post(JSON_BEARER));
-    expect(response).toBe(conflict);
+    expect(response.status).toBe(409);
+    expect(response.headers.get('cache-control')).toBe('no-store');
+    expect(response.headers.get('retry-after')).toBeNull();
+    const { error } = await response.json<{ error: { code: string; message: string; request_id: string } }>();
+    expect(error).toEqual({ code: 'event_conflict', message: 'core: event_conflict', request_id: expect.stringMatching(/^[0-9a-f]{16}$/) as string });
+    expect(logged()).toEqual([{ request_id: error.request_id, status: 409, code: 'event_conflict' }]);
   });
 
   it('forwards a body without Content-Length for the core to cap', async () => {
-    const { env, core } = fakes(await webhookVars());
+    let received = '';
+    const { env } = fakes(await webhookVars(), async (call) => {
+      received = await bodyText(call);
+      return NO_CONTENT;
+    });
     const chunked = new ReadableStream<Uint8Array>({
       start(controller) {
         controller.enqueue(new TextEncoder().encode(EVENT));
@@ -86,7 +92,7 @@ describe('POST /hooks/mail', () => {
     });
     const response = await hooks(env, '/hooks/mail', { ...post(JSON_BEARER, null), body: chunked, duplex: 'half' } as RequestInit & { headers: Record<string, string> });
     expect(response.status).toBe(204);
-    expect(core[0]?.headers.has('content-length')).toBe(false);
+    expect(received).toBe(EVENT);
   });
 
   it('rejects in the documented order without calling the core', async () => {
@@ -127,9 +133,9 @@ describe('POST /hooks/mail', () => {
     expect(core).toHaveLength(1);
   });
 
-  it('answers 503 unavailable when the core cannot be reached', async () => {
+  it('answers 503 unavailable when the core cannot be reached or raises', async () => {
     const { env } = fakes(await webhookVars(), () => {
-      throw new Error('stub down');
+      throw new Error('PythonError: Traceback ...');
     });
     const response = await hooks(env, '/hooks/mail', post(JSON_BEARER));
     expect(response.status).toBe(503);
@@ -144,14 +150,14 @@ const basic = (credential: string): string => `Basic ${btoa(credential)}`;
 describe('newsletter reports', () => {
   // A fresh module per test: the lockout hour is per isolate.
   let lockedCalls = 0;
-  const reply = (call: CoreCall): Response => {
-    if (call.url.pathname === '/newsletter/auth-failure') {
+  // The core serialises with Python's json.dumps separators; the gateway keeps its bytes.
+  const REPORT = '{"status": "ok", "summary": "今日"}';
+  const reply = (call: CoreCall): CoreResult => {
+    if (call.method === 'newsletter_auth_failure') {
       lockedCalls += 1;
-      return lockedCalls > 2
-        ? new Response('{}', { status: 429, headers: { 'retry-after': '120' } })
-        : new Response('{}', { status: 401, headers: { 'www-authenticate': 'Basic realm="todofy"' } });
+      return lockedCalls > 2 ? failure(429, 'rate_limited', 120) : failure(401, 'unauthorized');
     }
-    return Response.json({ status: 'ok' });
+    return ok(null, REPORT);
   };
 
   beforeEach(() => {
@@ -178,23 +184,23 @@ describe('newsletter reports', () => {
     const { env, core } = fakes(await reportVars(), reply);
     const summary = await get(env, '/api/summary', basic(REPORT_CREDENTIAL));
     expect(summary.status).toBe(200);
+    expect(summary.headers.get('content-type')).toBe('application/json; charset=utf-8');
+    expect(await summary.text()).toBe(REPORT);
     const recommendation = await get(env, '/api/recommendation?top=5&x=%20y', `basic   ${btoa(REPORT_CREDENTIAL)}  `);
     expect(recommendation.status).toBe(200);
-    expect(core.map((call) => call.url.href)).toEqual([
-      'https://coordinator/newsletter/summary',
-      'https://coordinator/newsletter/recommendation?top=5&x=%20y',
+    expect(core.map((call) => [call.method, ...call.args])).toEqual([
+      ['newsletter', 'summary', ''],
+      ['newsletter', 'recommendation', 'top=5&x=%20y'],
     ]);
-    expect(core.every((call) => call.method === 'GET' && call.headers.get('x-todofy-internal') === '1')).toBe(true);
-    expect(core[0]?.headers.has('authorization')).toBe(false);
   });
 
   it('counts a failure in the core and returns its answer', async () => {
     const { env, core } = fakes(await reportVars(), reply);
     const response = await get(env, '/api/summary', basic('newsletter:wrong'));
     expect(response.status).toBe(401);
+    expect(await errorCode(response)).toBe('unauthorized');
     expect(response.headers.get('www-authenticate')).toBe('Basic realm="todofy"');
-    expect(core.map((call) => [call.method, call.url.pathname])).toEqual([['POST', '/newsletter/auth-failure']]);
-    expect(core[0]?.body).toBeNull();
+    expect(core).toEqual([{ instance: 'inbox-v1', method: 'newsletter_auth_failure', args: [] }]);
   });
 
   it('decodes Basic strictly, as base64.b64decode(validate=True)', async () => {
@@ -210,7 +216,7 @@ describe('newsletter reports', () => {
     ]) {
       expect((await get(env, '/api/summary', header || undefined)).status, header).not.toBe(200);
     }
-    expect(core.every((call) => call.url.pathname === '/newsletter/auth-failure')).toBe(true);
+    expect(core.every((call) => call.method === 'newsletter_auth_failure')).toBe(true);
   });
 
   it('keeps answering 429 without the core once locked, but still serves the correct credential', async () => {
@@ -220,6 +226,7 @@ describe('newsletter reports', () => {
     const locked = await get(env, '/api/summary', basic('x:3'));
     expect(locked.status).toBe(429);
     expect(locked.headers.get('retry-after')).toBe('120');
+    expect(locked.headers.get('www-authenticate')).toBeNull();
     expect(core).toHaveLength(3);
 
     const local = await get(env, '/api/recommendation', basic('x:4'));
