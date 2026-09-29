@@ -1,17 +1,16 @@
-name: Backup collector image
+# Mail Hero's backup collector image (mail-hero/deploy/backup). It is published as a NEW package,
+# ghcr.io/ziyixi/mail-hero-backup-collector, linked to this repository; the old package
+# ghcr.io/ziyixi/mail-hero-backup stays linked to the archived ziyixi/mail-hero. The server keeps
+# its pinned digest of the old package until the next collector upgrade switches the Compose image.
+name: Mail Hero backup collector image
 
 on:
-  pull_request:
-    paths:
-      - .github/workflows/backup-image.yml
-      - deploy/backup/**
-      - cloudflare/migrations/**
   push:
-    branches: [main]
+    branches: ['**']
     paths:
-      - .github/workflows/backup-image.yml
-      - deploy/backup/**
-      - cloudflare/migrations/**
+      - .github/workflows/mail-hero-backup-image.yml
+      - mail-hero/deploy/backup/**
+      - mail-hero/cloudflare/migrations/**
   workflow_dispatch:
 
 permissions:
@@ -22,7 +21,11 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  IMAGE: ghcr.io/ziyixi/mail-hero-backup
+  IMAGE: ghcr.io/ziyixi/mail-hero-backup-collector
+
+defaults:
+  run:
+    working-directory: mail-hero
 
 jobs:
   checks:
@@ -38,10 +41,10 @@ jobs:
       - name: Test collection, recovery and the container scheduler
         run: python3 -m unittest discover -s deploy/backup -p 'test_*.py' -v
 
-  build-pr:
-    name: Build pull request image without publishing
+  build-branch:
+    name: Build branch image without publishing
     needs: checks
-    if: github.event_name == 'pull_request'
+    if: github.ref != 'refs/heads/main'
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
@@ -71,7 +74,7 @@ jobs:
   publish:
     name: Publish the verified collector to GHCR
     needs: checks
-    if: github.repository == 'ziyixi/mail-hero' && github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+    if: github.repository == 'ziyixi/todofy' && github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     permissions:
