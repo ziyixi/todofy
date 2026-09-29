@@ -12,6 +12,8 @@ import { handleHooks } from './hooks.ts';
 import { errorResponse, newRequestId, type Context } from './http.ts';
 import { handleOwner } from './owner.ts';
 
+export { TodofyCoordinator } from './retired.ts';
+
 function route(ctx: Context): Promise<Response> {
   const host = ctx.url.hostname.toLowerCase();
   if (host === variable(ctx.env, 'TODOFY_PUBLIC_HOST').toLowerCase()) return handleOwner(ctx);

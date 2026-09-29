@@ -421,7 +421,12 @@ two coordinators run against the same database, in either direction.
 > Class name: the core class is `TodofyCore`. Cloudflare refuses a `deleted_classes` migration while any
 > binding names a class of the same name, even in another script (error 10061), so the gateway could not
 > delete its old `TodofyCoordinator` while binding `todofy-core`'s `TodofyCoordinator`. The core renames its
-> class in migration `v2` (`renamed_classes`); the gateway binds `TodofyCore` and keeps its own `v1`/`v2` history.
+> class in migration `v2` (`renamed_classes`); the gateway binds `TodofyCore`.
+>
+> The delete still failed with 10061 because the live Python version of `todofy` binds its own
+> `TodofyCoordinator`. So the first gateway release applies no migration and exports an empty
+> `TodofyCoordinator` (`gateway/src/retired.ts`, whose alarm clears the old storage). A later release, when the
+> live version no longer binds the class, removes `retired.ts` and adds `v2 deleted_classes`.
 
 ## 7. Local dev and runtime tests
 

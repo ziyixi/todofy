@@ -17,14 +17,11 @@ name = "COORDINATOR"
 class_name = "TodofyCore"
 script_name = "todofy-core"
 
-# The same history as production: v2 deletes the class this script used to host.
+# Script "todofy" history: v1 created the Python class, now an empty class in src/retired.ts.
 [[migrations]]
 tag = "v1"
 new_sqlite_classes = ["TodofyCoordinator"]
 
-[[migrations]]
-tag = "v2"
-deleted_classes = ["TodofyCoordinator"]
 
 [triggers]
 crons = ["*/10 * * * *"]

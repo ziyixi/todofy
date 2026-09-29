@@ -19,14 +19,11 @@ name = "COORDINATOR"
 class_name = "TodofyCore"
 script_name = "todofy-core"
 
-# Script "todofy" history: v1 created the Python class; v2 deletes it (its state was only counters).
+# Script "todofy" history: v1 created the Python class, now an empty class in src/retired.ts.
 [[migrations]]
 tag = "v1"
 new_sqlite_classes = ["TodofyCoordinator"]
 
-[[migrations]]
-tag = "v2"
-deleted_classes = ["TodofyCoordinator"]
 
 [triggers]
 crons = ["*/10 * * * *"]

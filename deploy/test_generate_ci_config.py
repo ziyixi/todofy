@@ -139,10 +139,9 @@ def test_gateway_binds_the_core_object_and_deletes_its_own_old_class() -> None:
         "bindings": [{"name": "COORDINATOR", "class_name": "TodofyCore", "script_name": core["name"]}]
     }
     assert "TodofyCoordinator" in core["migrations"][0]["new_sqlite_classes"]
-    # Script "todofy" keeps its applied v1 and deletes the Python class in v2.
+    # Script "todofy" keeps its applied v1; a later release deletes the retired class (error 10061).
     assert gateway["migrations"] == [
         {"tag": "v1", "new_sqlite_classes": ["TodofyCoordinator"]},
-        {"tag": "v2", "deleted_classes": ["TodofyCoordinator"]},
     ]
 
 
