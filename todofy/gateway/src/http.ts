@@ -1,3 +1,4 @@
+import { STRICT_CSP, withPrivateHeaders as withHeaders } from '@ziyixi/edge-auth';
 import type { Env } from './env.ts';
 
 /** One incoming request as the handlers see it. */
@@ -38,17 +39,6 @@ export class HttpError extends Error {
     super(code);
   }
 }
-
-export const PRIVATE_HEADERS: Readonly<Record<string, string>> = {
-  'cache-control': 'no-store',
-  'x-content-type-options': 'nosniff',
-  'referrer-policy': 'no-referrer',
-  'x-frame-options': 'DENY',
-  'content-security-policy':
-    "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; " +
-    "img-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'none'; " +
-    "form-action 'self'; frame-ancestors 'none'",
-};
 
 /** Hashed build output under /assets/ never changes, so the browser may keep it. */
 const IMMUTABLE = 'private, max-age=31536000, immutable';
@@ -113,26 +103,14 @@ export function partition(text: string, separator: string): [string, string] {
   return index < 0 ? [text, ''] : [text.slice(0, index), text.slice(index + separator.length)];
 }
 
-/** Every value of the named cookie, in header order. */
-export function cookieValues(request: Request, name: string): string[] {
-  return (request.headers.get('cookie') ?? '').split(';').flatMap((pair) => {
-    const [key, value] = partition(pair.trim(), '=');
-    return key === name ? [value] : [];
-  });
-}
-
 /**
  * Copy a (possibly immutable) response with the owner host's private headers. `asset` marks a
  * response from ASSETS for a path under /assets/: only a 200 that is not the SPA's index.html
  * fallback may be cached.
  */
 export function withPrivateHeaders(response: Response, asset = false): Response {
-  const copy = new Response(response.body, response);
-  for (const [name, value] of Object.entries(PRIVATE_HEADERS)) copy.headers.set(name, value);
-  if (asset && response.status === 200 && mediaType(response.headers) !== 'text/html') {
-    copy.headers.set('cache-control', IMMUTABLE);
-  }
-  return copy;
+  const cacheable = asset && response.status === 200 && mediaType(response.headers) !== 'text/html';
+  return withHeaders(response, cacheable ? { csp: STRICT_CSP, cacheControl: IMMUTABLE } : { csp: STRICT_CSP });
 }
 
 export function nowSeconds(): number {

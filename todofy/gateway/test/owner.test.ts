@@ -1,5 +1,4 @@
 import { describe, expect, it } from 'vitest';
-import { PRIVATE_HEADERS } from '../src/http.ts';
 import { bodyText, CSRF_KEY, errorCode, failure, fakes, ok, OWNER, owner, send, type CoreReply } from './helpers.ts';
 
 const ORIGIN = 'http://todofy.localhost:8787';
@@ -31,6 +30,18 @@ function expectPrivate(response: Response, cacheControl = 'no-store'): void {
     expect(response.headers.get(name), name).toBe(name === 'cache-control' ? cacheControl : value);
   }
 }
+
+/** The owner host's headers, byte for byte (docs/gateway-contract.md §2.3). */
+const PRIVATE_HEADERS: Readonly<Record<string, string>> = {
+  'cache-control': 'no-store',
+  'x-content-type-options': 'nosniff',
+  'referrer-policy': 'no-referrer',
+  'x-frame-options': 'DENY',
+  'content-security-policy':
+    "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; " +
+    "img-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'none'; " +
+    "form-action 'self'; frame-ancestors 'none'",
+};
 
 const echo: CoreReply = () => ok({ ok: true });
 
@@ -228,6 +239,22 @@ describe('CSRF', () => {
     const response = await owner(env, RECONCILE, { method: 'POST', headers: csrfHeaders(await mintCsrf()) });
     expect(response.status).toBe(200);
     expect(core).toHaveLength(1);
+  });
+
+  it('accepts tokens already in browsers (golden vectors from before the shared package)', async () => {
+    // CSRF_SIGNING_KEY = "ab" x 32, owner owner@example.com, exp 4102444800 (packages/edge-auth/SPEC.md §3.1).
+    const golden = [
+      // Minted by the gateway: compact JSON, 22-character nonce.
+      'eyJraW5kIjoiY3NyZiIsIm93bmVyIjoib3duZXJAZXhhbXBsZS5jb20iLCJub25jZSI6IkFBQUFBQUFBQUFBQUFBQUFBQUFBQUEiLCJleHAiOjQxMDI0NDQ4MDB9.lfoeE-7aIjGjl7ay6lmgyn7btoKqiKIVBGkUjvNu65g',
+      // Minted by the former Python core: json.dumps separators.
+      'eyJraW5kIjogImNzcmYiLCAib3duZXIiOiAib3duZXJAZXhhbXBsZS5jb20iLCAibm9uY2UiOiAidGVzdCIsICJleHAiOiA0MTAyNDQ0ODAwfQ.idEgvgFniPRSJdv7P7EcsU0evUgyoX35jRlO6dor7zA',
+    ];
+    const { env, core } = fakes({}, echo);
+    for (const token of golden) {
+      const response = await owner(env, RECONCILE, { method: 'POST', headers: csrfHeaders(token) });
+      expect(response.status).toBe(200);
+    }
+    expect(core).toHaveLength(2);
   });
 
   it('rejects cross-site and forged writes with 403 before calling the core', async () => {

@@ -43,7 +43,7 @@ async function token({ key = issuerKey, header = {}, claims = {} }: TokenOptions
   return `${signingInput}.${b64url(new Uint8Array(signature))}`;
 }
 
-const certs = vi.fn<(url: string) => Promise<Response>>();
+const certs = vi.fn<(url: string, init?: RequestInit) => Promise<Response>>();
 
 function accessVars(extra: Vars = {}): Vars {
   return {
@@ -197,6 +197,57 @@ describe('Access JWT', () => {
       expect(response.status).toBe(503);
       expect(await errorCode(response)).toBe('unavailable');
     }
+  });
+
+  it('answers 503 unavailable when the certs answer with a redirect, and never follows it', async () => {
+    const { env } = fakes(accessVars());
+    certs.mockImplementationOnce(() => Promise.resolve(new Response(null, { status: 302, headers: { location: 'https://evil.example/certs' } })));
+    const response = await send(env, { 'cf-access-jwt-assertion': await token() });
+    expect(response.status).toBe(503);
+    expect(await errorCode(response)).toBe('unavailable');
+    expect(certs).toHaveBeenCalledTimes(1);
+    expect(certs.mock.calls[0]?.[1]).toMatchObject({ redirect: 'manual' });
+  });
+
+  it('refuses a crit header and keys that are not RS256 signing keys of at least 2048 bits', async () => {
+    const small = (await crypto.subtle.generateKey({ ...RS256, modulusLength: 1024 }, true, ['sign', 'verify'])) as CryptoKeyPair;
+    jwks = [
+      ...jwks,
+      await publicJwk(small, 'small'),
+      { ...(await publicJwk(foreignKey, 'encryption')), use: 'enc' },
+      { ...(await publicJwk(foreignKey, 'rs512')), alg: 'RS512' },
+      { ...(await publicJwk(foreignKey, 'sign-only')), key_ops: ['sign'] },
+      await publicJwk(foreignKey, 'twice'),
+      await publicJwk(foreignKey, 'twice'),
+    ];
+    const { env } = fakes(accessVars());
+    expect(await status(env, await token())).toBe(200);
+    const rejected: Record<string, string> = {
+      crit: await token({ header: { crit: ['exp'], exp: 1 } }),
+      'empty kid': await token({ header: { kid: '' } }),
+      '1024-bit key': await token({ key: small, header: { kid: 'small' } }),
+      'use enc': await token({ key: foreignKey, header: { kid: 'encryption' } }),
+      'alg RS512 key': await token({ key: foreignKey, header: { kid: 'rs512' } }),
+      'key_ops without verify': await token({ key: foreignKey, header: { kid: 'sign-only' } }),
+      'kid listed twice': await token({ key: foreignKey, header: { kid: 'twice' } }),
+    };
+    for (const [name, jwt] of Object.entries(rejected)) {
+      const response = await send(env, { 'cf-access-jwt-assertion': jwt });
+      expect(response.status, name).toBe(401);
+      expect(await errorCode(response), name).toBe('unauthorized');
+    }
+  });
+
+  it('accepts the claim edges Todofy has always accepted', async () => {
+    const { env } = fakes(accessVars());
+    const now = Math.floor(Date.now() / 1000);
+    expect(await status(env, await token({ claims: { iat: now + 30 } }))).toBe(200);
+    expect(await status(env, await token({ claims: { nbf: now + 30 } }))).toBe(200);
+  });
+
+  it('treats any cooldown at or above the hour-long cache as the cache itself', async () => {
+    const { env } = fakes(accessVars({ JWKS_REFRESH_COOLDOWN_MS: '99999999999999999999' }));
+    expect(await status(env, await token())).toBe(200);
   });
 
   it('skips keys WebCrypto cannot import', async () => {

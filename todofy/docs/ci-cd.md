@@ -6,14 +6,16 @@ checks from its own directory, a `Contracts` job for the shared `mail.received.v
 The `Todofy checks` and `Todofy deploy` jobs below run with `working-directory: todofy`. They check and deploy
 both Todofy Workers from the same commit: the TypeScript gateway `todofy` (`gateway/`) and the Python
 `todofy-core` (`worker/`, root `wrangler.toml`); see [gateway-contract.md](gateway-contract.md). Actions
-are pinned by commit SHA. The workflow never prints secret values; the owner's emails are environment
+are pinned by commit SHA. The gateway compiles in the shared auth package `packages/edge-auth` (a
+`file:` dependency, never a Worker of its own), so a change there checks and deploys Todofy as well as
+Mail Hero. The workflow never prints secret values; the owner's emails are environment
 secrets, and GitHub masks them.
 
 ## Triggers
 
 | Event | `Todofy checks` | `Todofy deploy` |
 |---|---|---|
-| push to any branch where `todofy/`, `contracts/` or `.github/` changed since the base | runs | only on `main`, and only when `todofy/` changed since the base |
+| push to any branch where `todofy/`, `packages/edge-auth/`, `contracts/` or `.github/` changed since the base | runs | only on `main`, and only when `todofy/` or `packages/edge-auth/` changed since the base |
 | push where none of those changed since the base | skipped | no |
 | `workflow_dispatch` with app `both` or `todofy` | runs | only when dispatched on `main` |
 

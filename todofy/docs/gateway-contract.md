@@ -96,49 +96,88 @@ alarm loop (`tests/runtime/test_owner_body_limit.py`).
 
 ### 2.3 Private headers (owner host)
 
+Implemented by the shared package `packages/edge-auth` (`withPrivateHeaders` with its `STRICT_CSP`,
+which is Todofy's string byte for byte); `gateway/src/http.ts` only decides the cache exception.
+
 Copy the response (`new Response(body, response)`) and set: `cache-control: no-store`,
 `x-content-type-options: nosniff`, `referrer-policy: no-referrer`, `x-frame-options: DENY`,
 `content-security-policy: default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline';
 img-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self';
-frame-ancestors 'none'` (http.py `PRIVATE_HEADERS`, byte-identical).
+frame-ancestors 'none'` (http.py `PRIVATE_HEADERS`, byte-identical; `gateway/test/owner.test.ts` pins
+the bytes).
 
 The one exception: a path under `/assets/` served by `ASSETS` with status 200 and a `content-type` that
 is not `text/html` gets `cache-control: private, max-age=31536000, immutable` in place of `no-store`.
 A missing `/assets/x.js` falls back to `index.html` (200, `text/html`) and keeps `no-store`. The
 other four headers apply unchanged.
 
-### 2.4 Access JWT (`access.ts`; the Python `access_jwt.py` rules plus Mail Hero's `nbf`/`sub` checks)
+### 2.4 Access JWT (`access.ts` → `packages/edge-auth`)
 
-- Dev bypass: `DEV_AUTH_BYPASS == "true"` and `TODOFY_PUBLIC_HOST` ends with `.localhost` and the request
-  has no `cf-ray` header → owner = `ACCESS_OWNER` lowercased. Otherwise the flag is ignored.
-- Issuer: `ACCESS_ISSUER` without a trailing `/`, matching `^https://[a-z0-9-]+\.cloudflareaccess\.com$`;
-  or, only under the same `.localhost` rule with `DEV_ACCESS_LOOPBACK_ISSUER == "true"`,
-  `^http://127\.0\.0\.1:\d{1,5}$`. Otherwise 503 `access_not_configured`. Empty `ACCESS_AUDIENCE` or
-  `ACCESS_OWNER` → 503 `access_not_configured`. `ACCESS_OWNER_ALIASES` longer than 2048 characters or
-  with more than 8 entries → 503 `access_not_configured`.
-- Token: `cf-access-jwt-assertion` header, else the `CF_Authorization` cookie; missing or longer than
-  16,000 characters → 401 `unauthorized`. Three base64url parts; header `alg == "RS256"`, JSON objects,
-  else 401.
+The verification is the shared package's `createAccessVerifier` (`packages/edge-auth/SPEC.md` §5.1),
+compiled into this Worker through the `file:../../packages/edge-auth` dependency; it is never a
+separate Worker. `access.ts` holds one verifier per isolate, passes Todofy's policy values and maps
+the package's failure reasons to Todofy's codes. Todofy's values:
+
+| Parameter | Todofy's value |
+| --- | --- |
+| `emailMatch` | `case-insensitive`: the owner and aliases are lowercased, and so is the token's `email` |
+| `nbfLeewaySeconds` | 60 |
+| `tokenSource` | header, or when it is absent or empty the **last** `CF_Authorization` cookie |
+| `jwks` | TTL 1 h; unknown-kid refetch cooldown `JWKS_REFRESH_COOLDOWN_MS` (default 60,000; a value at or above the TTL is capped to it, which behaves the same) |
+| `loopbackIssuer` | `TODOFY_PUBLIC_HOST` ends with `.localhost` and `DEV_ACCESS_LOOPBACK_ISSUER == "true"` |
+| `devBypass` | enabled when `TODOFY_PUBLIC_HOST` ends with `.localhost` and `DEV_AUTH_BYPASS == "true"`; hosts `*.localhost`; principal `ACCESS_OWNER` lowercased; not local (a `cf-ray` header) → normal verification |
+
+| Package result | Todofy answer |
+| --- | --- |
+| owner | the canonical owner, `ACCESS_OWNER` trimmed and lowercased (an alias maps to it) |
+| `not_configured` | 503 `access_not_configured` |
+| `keys_unavailable` | 503 `unavailable` |
+| `missing_token`, `invalid_token` | 401 `unauthorized` |
+
+The rules, as the package applies them with these values:
+
+- Dev bypass: the flag rule above and no `cf-ray` header → owner = `ACCESS_OWNER` lowercased. Otherwise
+  the flag is ignored.
+- Configuration: `ACCESS_ISSUER` trimmed, without trailing `/`, matching
+  `^https://[a-z0-9-]+\.cloudflareaccess\.com$`; or, only under the loopback rule above,
+  `^http://127\.0\.0\.1:\d{1,5}$`. `ACCESS_AUDIENCE` non-empty. `ACCESS_OWNER` and every
+  `ACCESS_OWNER_ALIASES` entry an e-mail address (`^[^\s@]+@[^\s@]+\.[^\s@]+$`, as the deploy config
+  generator already requires); aliases at most 2048 characters and 8 entries. Otherwise 503
+  `access_not_configured`, before the token is read.
+- Token: `cf-access-jwt-assertion` header, else the last `CF_Authorization` cookie; missing or longer
+  than 16,000 characters → 401 `unauthorized`. Three base64url parts, header and payload JSON objects;
+  header `alg == "RS256"`, `kid` a non-empty string and no `crit` member; else 401.
 - Keys: per-isolate cache `issuer → (fetched_at, {kid: CryptoKey})` from `<issuer>/cdn-cgi/access/certs`
-  (5 s timeout; RSA keys with a `kid` only; `RSASSA-PKCS1-v1_5`/`SHA-256`). Use the cache for 1 h; an
-  unknown kid refetches at most once per `JWKS_REFRESH_COOLDOWN_MS` (default 60,000). Certs fetch
-  non-200 or failing → 503 `unavailable`. Unknown kid after that → 401.
-- Claims: `iss` equal to the issuer; `aud` (string or array) contains `ACCESS_AUDIENCE`; numeric `exp` >
-  now; numeric `iat` < now + 60 s; `nbf` absent or numeric ≤ now + 60 s; `sub` a non-empty string;
-  string `email` whose lowercase is `ACCESS_OWNER` or one of the aliases (all lowercased,
-  comma-separated). Any failure → 401. The result is always `ACCESS_OWNER` lowercased (the canonical
-  owner).
-- Compared with Mail Hero's `security.ts` (jose `jwtVerify` with `requiredClaims: exp, iat, sub,
-  email`): the same claims are required and a future `nbf` is refused. Differences: email matching is
-  case-insensitive here (exact in Mail Hero); `nbf` gets 60 s of clock skew (jose: none); `iat` must
-  also not be in the future (jose only checks that it is a number); an empty `sub` is refused here
-  (jose accepts it).
+  (`GET`, 5 s timeout, redirects **not** followed). Only RSA members with a `kid`, `use` absent or
+  `sig`, `alg` absent or `RS256`, `key_ops` absent or containing `verify`, imported as
+  `RSASSA-PKCS1-v1_5`/`SHA-256` with a modulus of at least 2048 bits; a kid listed twice is dropped;
+  a non-object member is skipped. Use the cache for 1 h; an unknown kid refetches at most once per
+  cooldown. Certs fetch non-200 (a redirect included), failing or not JSON → 503 `unavailable`.
+  Unknown kid after that → 401.
+- Claims: `iss` equal to the issuer; `aud` (string or array) contains `ACCESS_AUDIENCE`; finite numeric
+  `exp` > now; finite numeric `iat` < now + 60 s; `nbf` absent or finite numeric ≤ now + 60 s; `sub` a
+  non-empty string; string `email` whose lowercase is `ACCESS_OWNER` or one of the aliases. Any
+  failure → 401.
+- What the shared package tightened when Todofy adopted it (none of it changes a real Access token's
+  outcome: Access signs RS256 with a `kid`, publishes `use: sig`/`alg: RS256` 2048-bit keys once each
+  and answers the certs with a 200): a `crit` header is refused, the JWK filters and the 2048-bit
+  minimum above, a duplicate kid is dropped rather than the last one winning, the certs redirect is no
+  longer followed (503), numeric claims must be finite, and owner/aliases must be e-mail addresses.
+  A `CF_Authorization` pair without `=` in a hand-built `Cookie` header is ignored rather than read as
+  an empty value.
+- Mail Hero uses the same package with its own values (exact e-mail match, `nbf` without leeway, the
+  first cookie, a 10-minute cache); `packages/edge-auth/SPEC.md` §4 lists every parameter and why.
 
-### 2.5 CSRF (port of `csrf.py`)
+### 2.5 CSRF (`csrf.ts` → `packages/edge-auth`)
 
-- Key: `CSRF_SIGNING_KEY` must match `^[0-9a-fA-F]{64}$`, used as 32 raw bytes for HMAC-SHA256. Missing
-  or malformed → 503 `not_configured` on `GET /api/v1/csrf` and on every write, checked before
-  anything else (reads keep working).
+`csrf.ts` resolves the key and the allowed origins and calls the package's `issueCsrf`/`verifyCsrf`
+(SPEC §5.2) with the cookie name `todofy_csrf` and the package's default nonce and TTL. The token
+format, key and cookie are unchanged, so tokens already in browsers stay valid
+(`gateway/test/owner.test.ts` accepts the golden tokens from SPEC §3.1).
+
+- Key: `CSRF_SIGNING_KEY` trimmed must match `^[0-9a-fA-F]{64}$`, used as 32 raw bytes for HMAC-SHA256
+  (`importHmacKeyHex`). Missing or malformed → 503 `not_configured` on `GET /api/v1/csrf` and on every
+  write, checked before anything else (reads keep working).
 - Issue (`GET /api/v1/csrf`): claims `{"kind":"csrf","owner":<owner>,"nonce":<16 random bytes
   base64url>,"exp":<now s + 43200>}` as compact JSON in that key order; token =
   `b64url(claims) "." b64url(HMAC(key, b64url(claims)))`, no padding. Body `{"token": token}`; header
@@ -146,11 +185,12 @@ other four headers apply unchanged.
   when the request URL is `https:`.
 - Verify (every non-GET/HEAD under `/api/`): `origin` lowercased must be `https://<TODOFY_PUBLIC_HOST
   lowercased>`, or under the `.localhost` rule also `http://<request URL host:port lowercased>`;
-  `x-csrf-token` non-empty, ≤ 1024 characters, equal to the `todofy_csrf` cookie value; signature
-  equal to the recomputed one; payload is a JSON object with `kind == "csrf"`, `owner` equal to the
-  canonical owner and an integer `exp` > now. Any failure → 403 `csrf_failed`. Constant-time compares
-  (length check first, then `crypto.subtle.timingSafeEqual`). Tokens minted by the Python code (and
-  by the tests' `mint_csrf`) must verify unchanged.
+  `x-csrf-token` non-empty, ≤ 1024 characters, equal to the first `todofy_csrf` cookie value;
+  signature text equal to the recomputed canonical one; payload a fatal-UTF-8 JSON object with
+  `kind == "csrf"`, `owner` equal to the canonical owner and an integer `exp` > now. Any failure →
+  403 `csrf_failed`. Compares are constant-time over the UTF-8 bytes (the package's own XOR loop;
+  only the length can leak). Tokens minted by the Python code (and by the tests' `mint_csrf`) verify
+  unchanged.
 
 ## 3. The DO's RPC methods
 

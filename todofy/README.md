@@ -135,6 +135,7 @@ retired class `TodofyCoordinator` is recorded in [docs/gateway-contract.md](docs
 worker/todofy/core/     pure Python rules (vocabulary, contract, prompts, classification, SQL)
 worker/todofy/runtime/  todofy-core: Durable Object, D1 ledger, Gemini/Todoist clients, owner API
 gateway/                the gateway Worker todofy (TypeScript): routing, Access, CSRF, webhook, assets
+                        (Access, CSRF and private headers from ../packages/edge-auth, compiled in)
 migrations/             D1 schema
 api/                    owner OpenAPI contract, newsletter report schemas (the Mail Hero event schema is
                         ../contracts/mail-received-v1, shared with Mail Hero)
