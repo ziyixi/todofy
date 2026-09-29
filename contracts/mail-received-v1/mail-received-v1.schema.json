@@ -8,6 +8,15 @@
     "type": {"const": "mail.received.v1"},
     "event_id": {"type": "string", "format": "uuid"},
     "received_at": {"type": "string", "format": "date-time", "pattern": "Z$"},
+    "canary": {
+      "description": "Present only on synthetic end-to-end canary events (contracts/ops-v1). Consumers MUST NOT cause external side effects (tasks, messages, reports) for an event that carries it. An event whose canary is present but unreadable must not cause side effects either: reject it (4xx) or handle it as a canary.",
+      "type": "object",
+      "required": ["run_id"],
+      "properties": {
+        "run_id": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$"}
+      },
+      "additionalProperties": true
+    },
     "message": {
       "type": "object",
       "required": ["id", "from", "to", "subject", "sent_at", "rfc_message_id", "text", "attachments"],

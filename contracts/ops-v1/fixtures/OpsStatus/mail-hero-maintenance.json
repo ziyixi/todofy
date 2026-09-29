@@ -1,0 +1,37 @@
+{
+  "version": "ops-v1",
+  "app": "mail-hero",
+  "generated_at": "2026-09-29T08:00:00.000Z",
+  "health": "down",
+  "modes": {
+    "maintenance": true,
+    "force_send_paused": false,
+    "send_paused": false,
+    "forwarding": true,
+    "backup_active": false
+  },
+  "guard": {
+    "level": "normal",
+    "reason": null,
+    "until": null,
+    "set_at": null,
+    "deferred": []
+  },
+  "signals": [
+    {
+      "code": "maintenance_mode",
+      "severity": "critical",
+      "metrics": {}
+    }
+  ],
+  "counters": {
+    "jobs_pending": 4,
+    "jobs_failed": 0
+  },
+  "last_backup_at": null,
+  "ui_url": null,
+  "capabilities": [
+    "canary_producer",
+    "guard"
+  ]
+}

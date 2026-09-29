@@ -1,0 +1,6 @@
+{
+  "state": "failed",
+  "attempts": 1,
+  "last_http_status": 400,
+  "error_code": "http_400"
+}

@@ -3,7 +3,8 @@
 //
 // Every fixture is the exact byte string Mail Hero's own code produces: parseMail() on a synthetic
 // .eml, the JSON round trip through R2 that createDelivery() performs, then buildPayload(). The
-// synthetic connection test uses syntheticTestMail(). No real mail is used.
+// synthetic connection test uses syntheticTestMail(), the ops-v1 canary syntheticCanaryMail() plus its
+// top-level `canary` marker. No real mail is used.
 //
 //   npm run contract:update     rewrite the fixtures after an intended builder change
 //   npm test                    contract-fixtures.test.mjs fails while a fixture is stale
@@ -14,7 +15,7 @@
 import { readdirSync, writeFileSync } from 'node:fs'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { parseMail } from '../src/native/parser.ts'
-import { buildPayload, syntheticTestMail } from '../src/native/pipeline.ts'
+import { buildPayload, syntheticCanaryMail, syntheticTestMail } from '../src/native/pipeline.ts'
 
 export const FIXTURES = new URL('../../../contracts/mail-received-v1/fixtures/', import.meta.url)
 const RECEIVED_AT = '2026-09-28T08:00:00.000Z'
@@ -91,6 +92,8 @@ export const CASES = [
   {name: 'sent_at_extended_year', number: 14, raw: () =>
     plain('A spam-like Date header in year 10000.', {Date: 'Sat, 01 Jan 10000 00:00:00 +0000'})},
   {name: 'synthetic_test_event', number: 15, mail: () => syntheticTestMail()},
+  // The contracts/ops-v1 end-to-end canary: consumers must not cause external side effects for it.
+  {name: 'canary_event', number: 16, mail: () => syntheticCanaryMail(), canary: {run_id: 'canary-2026-09-28'}},
 ]
 
 const bucket = {MAIL_STORE: {async put() {}}}
@@ -104,7 +107,7 @@ export async function buildFixture(testCase) {
   }
   // createDelivery reads the parsed message back from R2 as JSON.
   const stored = JSON.parse(JSON.stringify(mail))
-  return buildPayload(eventID(testCase.number), messageID(testCase.number), RECEIVED_AT, stored, INBOX, INBOX)
+  return buildPayload(eventID(testCase.number), messageID(testCase.number), RECEIVED_AT, stored, INBOX, INBOX, testCase.canary)
 }
 
 export const fixtureFiles = () => readdirSync(FIXTURES).filter(name => name.endsWith('.json')).sort()

@@ -1,0 +1,6 @@
+{
+  "state": "pending",
+  "attempts": 2,
+  "last_http_status": 503,
+  "error_code": "http_503"
+}

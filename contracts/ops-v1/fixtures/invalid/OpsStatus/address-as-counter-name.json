@@ -1,0 +1,30 @@
+{
+  "version": "ops-v1",
+  "app": "mail-hero",
+  "generated_at": "2026-09-29T08:00:00.000Z",
+  "health": "ok",
+  "modes": {
+    "maintenance": false,
+    "force_send_paused": false,
+    "send_paused": false,
+    "forwarding": true,
+    "backup_active": false
+  },
+  "guard": {
+    "level": "normal",
+    "reason": null,
+    "until": null,
+    "set_at": null,
+    "deferred": []
+  },
+  "signals": [],
+  "counters": {
+    "owner@example.com": 1
+  },
+  "last_backup_at": "2026-09-29T03:10:00.000Z",
+  "ui_url": "https://mail.example.com/",
+  "capabilities": [
+    "canary_producer",
+    "guard"
+  ]
+}

@@ -1,0 +1,79 @@
+{
+  "version": "ops-v1",
+  "app": "mail-hero",
+  "generated_at": "2026-09-29T15:00:00.000Z",
+  "health": "degraded",
+  "modes": {
+    "maintenance": false,
+    "force_send_paused": false,
+    "send_paused": false,
+    "forwarding": true,
+    "backup_active": false
+  },
+  "guard": {
+    "level": "shed",
+    "reason": "d1_reads_high",
+    "until": "2026-09-30T00:00:00.000Z",
+    "set_at": "2026-09-29T14:05:00.000Z",
+    "deferred": [
+      "raw_reconcile",
+      "lifecycle_retention",
+      "canary_cleanup",
+      "alert_history_purge"
+    ]
+  },
+  "signals": [
+    {
+      "code": "endpoint_blocked",
+      "severity": "critical",
+      "metrics": {
+        "waiting_deliveries": 3,
+        "current_blocked": 1,
+        "auto_recheck": 1
+      },
+      "since": "2026-09-29T10:02:11.000Z"
+    },
+    {
+      "code": "capacity_70",
+      "severity": "warning",
+      "metrics": {
+        "used_bytes": 3865470566,
+        "logical_bytes": 3758096384,
+        "limit_bytes": 5368709120,
+        "percent": 72,
+        "capacity_accounting_available": 1
+      },
+      "since": "2026-09-28T22:40:00.000Z"
+    },
+    {
+      "code": "guard_shed",
+      "severity": "info",
+      "metrics": {
+        "seconds_left": 32100
+      }
+    }
+  ],
+  "counters": {
+    "jobs_pending": 0,
+    "jobs_failed": 0,
+    "parse_failed": 0,
+    "delivery_failed": 0,
+    "policy_error": 0,
+    "blocked_waiting": 3,
+    "paused_waiting": 0,
+    "oldest_pending_age_seconds": 17929,
+    "capacity_used_bytes": 3865470566,
+    "capacity_limit_bytes": 5368709120,
+    "logical_bytes": 3758096384,
+    "ingest_today_messages": 41,
+    "ingest_today_bytes": 9437184,
+    "ingest_limit_messages": 300,
+    "ingest_limit_bytes": 268435456
+  },
+  "last_backup_at": "2026-09-29T03:10:00.000Z",
+  "ui_url": "https://mail.example.com/",
+  "capabilities": [
+    "canary_producer",
+    "guard"
+  ]
+}

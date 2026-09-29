@@ -47,11 +47,15 @@ export interface CreateOptions {
   messageID: string; revisionID: string; eventID?: string; actionID?: string;
   replayOf?: string; retryMode?: 'auto'|'once'; expectedMessageVersion?: number;
 }
-export function buildPayload(eventID: string, messageID: string, receivedAt: string, parsed: ParsedMail, address: string, currentAddress=address): string {
+/** contracts/ops-v1 RunId; also mail.received.v1 `canary.run_id`. */
+export const CANARY_RUN_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
+/** `canary` marks a synthetic end-to-end canary event (contracts/ops-v1): consumers must not act on it.
+ * Without it the bytes are exactly those of earlier releases. */
+export function buildPayload(eventID: string, messageID: string, receivedAt: string, parsed: ParsedMail, address: string, currentAddress=address, canary?: {run_id: string}): string {
   const content = webhookContent(parsed);
   if (utf8.encode(parsed.subject).length > 4096 || parsed.from.length > 50 || parsed.to.length > 50 ||
-      (!parsed.subject.trim() && !content.text.trim())) error(422,'invalid_payload');
-  const payload = JSON.stringify({type:'mail.received.v1', event_id:eventID, received_at:receivedAt, message:{
+      (!parsed.subject.trim() && !content.text.trim()) || (canary && !CANARY_RUN_ID.test(canary.run_id))) error(422,'invalid_payload');
+  const payload = JSON.stringify({type:'mail.received.v1', event_id:eventID, received_at:receivedAt, ...(canary ? {canary:{run_id:canary.run_id}} : {}), message:{
     id:messageID, from:parsed.from.map(a=>({address:a.address,name:a.name ?? ''})),
     to:parsed.to.filter(a=>a.address.toLowerCase() !== address.toLowerCase() && a.address.toLowerCase() !== currentAddress.toLowerCase()).map(a=>({address:a.address,name:a.name ?? ''})),
     subject:parsed.subject, sent_at:parsed.sent_at, rfc_message_id:parsed.rfc_message_id, ...content,
@@ -337,6 +341,11 @@ async function parseJob(env:Env,key:string,attempts=0):Promise<number|null> {
  * real mail; contracts/mail-received-v1 keeps a golden copy of it. */
 export function syntheticTestMail():ParsedMail {
   return {subject:'Mail Hero webhook test',text:'This is a synthetic Mail Hero connection test.',html:'',from:[{address:'synthetic@example.org',name:'Mail Hero'}],to:[],cc:[],reply_to:[],sent_at:null,rfc_message_id:null,headers:[],attachments:[],needs_review:false,warnings:[]};
+}
+/** The synthetic end-to-end canary message (contracts/ops-v1). Its events also carry `canary`;
+ * contracts/mail-received-v1/fixtures/canary_event.json is the golden copy. */
+export function syntheticCanaryMail():ParsedMail {
+  return {subject:'Mail Hero canary',text:'This is a synthetic Mail Hero end-to-end canary. It asks for nothing: consumers must not create tasks, messages or reports for it.',html:'',from:[{address:'synthetic@example.org',name:'Mail Hero'}],to:[],cc:[],reply_to:[],sent_at:null,rfc_message_id:null,headers:[],attachments:[],needs_review:false,warnings:[]};
 }
 export async function createSyntheticTestDelivery(env:Env,revisionID:string,actionID:string):Promise<string> {
   const old=await first(env,'SELECT event_id FROM deliveries WHERE action_request_id=?',actionID);

@@ -48,6 +48,21 @@ Idempotency-Key: f8c1e9a0-1a98-4fb8-8ca1-4c0a3e710001
 
 HTML-only 过限或清理后无可读正文会进入人工检查。Todofy 对收到的 `needs_review`（以及 `html_omitted=true` 且空正文）先持久接管，再停在 `failed_summary / mail_needs_review`，不会自动调用 LLM 或创建任务；它对截断正文的摘要和任务都加固定不完整提示。Mail Hero 的 2xx 语义不因此变成消费者业务成功。
 
+## 金丝雀事件（`canary`）
+
+`canary` 是可选的顶层字段，只出现在合成的端到端金丝雀事件上（运维接口见 [`contracts/ops-v1`](../ops-v1/README.md)）：
+
+```json
+{"type": "mail.received.v1", "event_id": "…", "received_at": "…", "canary": {"run_id": "canary-2026-09-28"}, "message": {"…": "…"}}
+```
+
+- 金丝雀事件由运维面板调用 Mail Hero 的 `Ops.startCanary` 发起，正文是固定的合成文本（golden 字节见 `fixtures/canary_event.json`），发往当前默认目标，走与真实邮件相同的冻结 bytes、认证、退避重试与去重路径。
+- 消费者**不得**因带 `canary` 的事件产生任何外部副作用：不创建任务，不发送消息或提醒，不进入摘要、报告或待处理列表，也不计入真实邮件统计。它仍须像真实事件一样先持久接管再返回 2xx，并可以执行自己的内部处理来检验链路（Todofy 会调用摘要模型并校验结果，然后只记录金丝雀结果）。
+- `canary` 存在但无法读取（不是对象，缺少或不符合规则的 `run_id`）时同样不得产生副作用：返回 4xx 拒收，或按金丝雀处理。
+- `run_id` 匹配 `^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$`，只是运维面板给一次运行起的名字，不是身份或指令。同一 `run_id` 只产生一个事件；owner 在 UI 中把金丝雀邮件“重新发送为新事件”时，新事件仍带同一个 `canary`。
+- 不带 `canary` 的事件字节与之前完全相同。owner 手动触发的连接测试（`fixtures/synthetic_test_event.json`）不带 `canary`，消费者可能把它当真实邮件处理。
+- 不认识 `canary` 的旧消费者会忽略它、按真实邮件处理。所以运维面板只在消费者的 `Ops.status().capabilities` 含 `canary_consumer` 时才发起金丝雀。
+
 ## 消费者确认与去重
 
 任意 2xx 表示消费者**已经把事件持久接管**，推荐返回 204。返回 202 也必须先把事件落入自己的可靠 inbox；只启动一个 goroutine 不能确认。Mail Hero 的 UI 此时显示“已交付”，不推断摘要或任务创建成功。

@@ -36,6 +36,7 @@ def test_the_fixture_set_covers_every_shape():
         "attachments_metadata_limit",
         "attachments_stored_and_omitted",
         "body_only_no_subject",
+        "canary_event",
         "chinese",
         "html_only",
         "max_size",
@@ -56,6 +57,19 @@ def test_every_fixture_matches_the_published_schema(name):
     event = json.loads(FIXTURES[name].read_bytes())
     errors = [f"{list(error.absolute_path)}: {error.message}" for error in SCHEMA.iter_errors(event)]
     assert errors == []
+
+
+def test_only_the_canary_fixture_carries_the_canary_marker():
+    # contracts/ops-v1: consumers must not cause external side effects for these events.
+    marked = sorted(name for name, path in FIXTURES.items() if "canary" in json.loads(path.read_bytes()))
+    assert marked == ["canary_event"]
+    assert json.loads(FIXTURES["canary_event"].read_bytes())["canary"] == {"run_id": "canary-2026-09-28"}
+
+
+@pytest.mark.parametrize("canary", [{}, {"run_id": ""}, {"run_id": "canary 1"}, {"run_id": 7}, "canary-1", None])
+def test_the_schema_rejects_an_unreadable_canary_marker(canary):
+    document = json.loads(FIXTURES["canary_event"].read_bytes()) | {"canary": canary}
+    assert list(SCHEMA.iter_errors(document))
 
 
 # Frozen bytes: retries resend them, so they are never edited. Mail Hero's contract-fixtures.test.mjs

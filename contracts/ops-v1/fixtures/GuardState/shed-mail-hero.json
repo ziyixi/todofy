@@ -1,0 +1,12 @@
+{
+  "level": "shed",
+  "reason": "d1_reads_high",
+  "until": "2026-09-30T00:00:00.000Z",
+  "set_at": "2026-09-29T14:05:00.000Z",
+  "deferred": [
+    "raw_reconcile",
+    "lifecycle_retention",
+    "canary_cleanup",
+    "alert_history_purge"
+  ]
+}

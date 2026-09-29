@@ -1,0 +1,51 @@
+{
+  "generated_at": "2026-09-29T23:40:00Z",
+  "dashboard_url": "https://home.example.com/",
+  "items": [
+    {
+      "source": "mail-hero",
+      "code": "endpoint_blocked",
+      "severity": "critical",
+      "since": "2026-09-29T10:02:11Z",
+      "metrics": {
+        "waiting_deliveries": 3,
+        "current_blocked": 1
+      }
+    },
+    {
+      "source": "todofy",
+      "code": "backup_stale",
+      "severity": "critical",
+      "since": "2026-09-28T10:00:00Z",
+      "metrics": {
+        "age_seconds": 792000
+      }
+    },
+    {
+      "source": "dashboard",
+      "code": "canary_not_delivered",
+      "severity": "warning",
+      "since": "2026-09-29T22:30:00Z",
+      "metrics": {
+        "attempts": 3,
+        "last_http_status": 503
+      }
+    },
+    {
+      "source": "cloudflare",
+      "code": "d1_rows_read_high",
+      "severity": "warning",
+      "since": "2026-09-29T14:00:00Z",
+      "metrics": {
+        "percent": 81.5
+      }
+    },
+    {
+      "source": "dashboard",
+      "code": "canary_ok",
+      "severity": "info",
+      "since": "2026-09-28T22:31:40Z",
+      "metrics": {}
+    }
+  ]
+}

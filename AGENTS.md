@@ -14,7 +14,7 @@
 
 - `mail-hero/`：Mail Hero 收件箱与通用 webhook。开发、验收与安全边界见 [`mail-hero/AGENTS.md`](mail-hero/AGENTS.md)，在该目录内工作时它同样适用。
 - `todofy/`：Todofy，`mail.received.v1` 的独立消费者。说明见 [`todofy/README.md`](todofy/README.md)、[`todofy/docs/dev-notes.md`](todofy/docs/dev-notes.md)、[`todofy/docs/ci-cd.md`](todofy/docs/ci-cd.md) 和 [`todofy/docs/cloudflare-setup.md`](todofy/docs/cloudflare-setup.md)。
-- `contracts/`：跨应用合同，目前只有 `contracts/mail-received-v1/`（JSON Schema、说明和 golden payload）。
+- `contracts/`：跨应用合同：`contracts/mail-received-v1/`（JSON Schema、说明和 golden payload）与 `contracts/ops-v1/`（两个应用供运维面板调用的 `Ops` 接口：类型、Schema、fixture 与实施计划）。
 - `packages/`：共享代码包，目前只有 `packages/edge-auth/`（Cloudflare Access JWT 校验、签名 double-submit CSRF、私有响应头；TypeScript，仅用 Web Crypto，无运行时依赖）。设计与各应用参数见 [`packages/edge-auth/SPEC.md`](packages/edge-auth/SPEC.md)。
 
 单仓库规则：

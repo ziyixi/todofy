@@ -281,17 +281,20 @@ jobs:
           working-directory: todofy
           enable-cache: true
       # Producer: Mail Hero's parser and payload builder must still emit every golden fixture byte for byte.
-      - name: Mail Hero builds the golden mail.received.v1 fixtures
+      # ops-v1: validate.mjs, the ops-v1.ts constants and the fixtures agree with the schema.
+      - name: Mail Hero builds the golden mail.received.v1 fixtures and checks ops-v1
         working-directory: mail-hero/cloudflare
         run: |
           npm ci
-          node --test test/contract-fixtures.test.mjs
-      # Consumer: Todofy validates every fixture (current and legacy) against the schema and parses it.
+          node --test test/contract-fixtures.test.mjs test/ops-contract.test.mjs
+      # Consumer: Todofy validates every fixture (current and legacy) against the schema and parses it;
+      # ops-v1 fixtures get the reference JSON Schema validator's verdict.
       - name: Todofy accepts every fixture
         working-directory: todofy
         run: |
           uv sync --locked
-          uv run pytest tests/unit/test_mail_hero_compat.py tests/unit/test_contract.py tests/unit/test_openapi_vocab.py
+          uv run pytest tests/unit/test_mail_hero_compat.py tests/unit/test_contract.py tests/unit/test_openapi_vocab.py \
+            tests/unit/test_ops_contract.py
 
   gate:
     name: CI gate

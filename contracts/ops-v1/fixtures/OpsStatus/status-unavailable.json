@@ -1,0 +1,31 @@
+{
+  "version": "ops-v1",
+  "app": "todofy",
+  "generated_at": "2026-09-29T08:00:00Z",
+  "health": "down",
+  "modes": {
+    "maintenance": false
+  },
+  "guard": {
+    "level": "normal",
+    "reason": null,
+    "until": null,
+    "set_at": null,
+    "deferred": []
+  },
+  "signals": [
+    {
+      "code": "status_unavailable",
+      "severity": "critical",
+      "metrics": {}
+    }
+  ],
+  "counters": {},
+  "last_backup_at": null,
+  "ui_url": "https://todofy.example.com/",
+  "capabilities": [
+    "canary_consumer",
+    "guard",
+    "ops_digest"
+  ]
+}

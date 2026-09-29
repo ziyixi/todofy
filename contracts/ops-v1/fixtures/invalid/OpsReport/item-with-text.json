@@ -1,0 +1,16 @@
+{
+  "generated_at": "2026-09-29T23:40:00Z",
+  "items": [
+    {
+      "source": "mail-hero",
+      "code": "endpoint_blocked",
+      "severity": "critical",
+      "since": "2026-09-29T10:02:11Z",
+      "metrics": {
+        "waiting_deliveries": 3,
+        "current_blocked": 1
+      },
+      "text": "Mail from boss@example.com"
+    }
+  ]
+}

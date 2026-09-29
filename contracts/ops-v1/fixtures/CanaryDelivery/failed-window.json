@@ -1,0 +1,6 @@
+{
+  "state": "failed",
+  "attempts": 48,
+  "last_http_status": 503,
+  "error_code": "retry_window_expired"
+}

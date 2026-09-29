@@ -1,0 +1,78 @@
+{
+  "version": "ops-v1",
+  "app": "todofy",
+  "generated_at": "2026-09-29T15:00:00Z",
+  "health": "degraded",
+  "modes": {
+    "maintenance": false,
+    "processing_paused": false,
+    "force_pause_todoist": false,
+    "reminder_enabled": true,
+    "backup_active": false
+  },
+  "guard": {
+    "level": "shed",
+    "reason": "d1_reads_high",
+    "until": "2026-09-30T00:00:00Z",
+    "set_at": "2026-09-29T14:05:00Z",
+    "deferred": [
+      "weekly_backup",
+      "retention",
+      "metrics_rollup"
+    ]
+  },
+  "signals": [
+    {
+      "code": "attention",
+      "severity": "warning",
+      "metrics": {
+        "count": 2
+      }
+    },
+    {
+      "code": "backup_stale",
+      "severity": "critical",
+      "metrics": {
+        "age_seconds": 792000,
+        "has_backup": 1
+      }
+    },
+    {
+      "code": "gemini_budget_80",
+      "severity": "warning",
+      "metrics": {
+        "used_tokens": 2460000,
+        "reserved_tokens": 12000,
+        "budget_tokens": 3000000,
+        "percent": 82.4
+      }
+    },
+    {
+      "code": "guard_shed",
+      "severity": "info",
+      "metrics": {
+        "seconds_left": 32400
+      }
+    }
+  ],
+  "counters": {
+    "active_events": 2,
+    "attention_events": 2,
+    "received_24h": 63,
+    "oldest_due_age_seconds": 0,
+    "gemini_used_tokens": 2460000,
+    "gemini_reserved_tokens": 12000,
+    "gemini_token_budget": 3000000,
+    "gemini_calls": 64,
+    "todoist_window_calls": 3,
+    "todoist_window_limit": 1000,
+    "backup_age_seconds": 792000
+  },
+  "last_backup_at": "2026-09-20T10:00:04Z",
+  "ui_url": "https://todofy.example.com/",
+  "capabilities": [
+    "canary_consumer",
+    "guard",
+    "ops_digest"
+  ]
+}

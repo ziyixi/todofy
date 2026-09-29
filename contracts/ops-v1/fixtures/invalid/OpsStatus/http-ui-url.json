@@ -1,0 +1,44 @@
+{
+  "version": "ops-v1",
+  "app": "mail-hero",
+  "generated_at": "2026-09-29T08:00:00.000Z",
+  "health": "ok",
+  "modes": {
+    "maintenance": false,
+    "force_send_paused": false,
+    "send_paused": false,
+    "forwarding": true,
+    "backup_active": false
+  },
+  "guard": {
+    "level": "normal",
+    "reason": null,
+    "until": null,
+    "set_at": null,
+    "deferred": []
+  },
+  "signals": [],
+  "counters": {
+    "jobs_pending": 0,
+    "jobs_failed": 0,
+    "parse_failed": 0,
+    "delivery_failed": 0,
+    "policy_error": 0,
+    "blocked_waiting": 0,
+    "paused_waiting": 0,
+    "oldest_pending_age_seconds": 0,
+    "capacity_used_bytes": 1288490188,
+    "capacity_limit_bytes": 5368709120,
+    "logical_bytes": 1181116006,
+    "ingest_today_messages": 41,
+    "ingest_today_bytes": 9437184,
+    "ingest_limit_messages": 300,
+    "ingest_limit_bytes": 268435456
+  },
+  "last_backup_at": "2026-09-29T03:10:00.000Z",
+  "ui_url": "http://mail.example.com/",
+  "capabilities": [
+    "canary_producer",
+    "guard"
+  ]
+}

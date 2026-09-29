@@ -1,0 +1,11 @@
+{
+  "level": "shed",
+  "reason": "d1_reads_high",
+  "until": "2026-09-30T00:00:00Z",
+  "set_at": "2026-09-29T14:05:00Z",
+  "deferred": [
+    "weekly_backup",
+    "retention",
+    "metrics_rollup"
+  ]
+}
