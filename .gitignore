@@ -1,0 +1,4 @@
+# Each app keeps its own .gitignore (mail-hero/.gitignore, todofy/.gitignore).
+.DS_Store
+node_modules/
+__pycache__/

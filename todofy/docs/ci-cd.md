@@ -1,7 +1,10 @@
 # CI/CD
 
-One workflow, `.github/workflows/native.yml` ("Todofy CI and deploy"), with two jobs. It checks and deploys
-both Workers from the same commit: the TypeScript gateway `todofy` (`gateway/`) and the Python
+Todofy lives in `todofy/` of a monorepo shared with Mail Hero (`mail-hero/`). One root workflow,
+`.github/workflows/ci.yml` ("CI and deploy", described in the root README), runs a `Changes` job, each app's
+checks from its own directory, a `Contracts` job for the shared `mail.received.v1` contract, and `CI gate`.
+The `Todofy checks` and `Todofy deploy` jobs below run with `working-directory: todofy`. They check and deploy
+both Todofy Workers from the same commit: the TypeScript gateway `todofy` (`gateway/`) and the Python
 `todofy-core` (`worker/`, root `wrangler.toml`); see [gateway-contract.md](gateway-contract.md). Actions
 are pinned by commit SHA. The workflow never prints secret values; the owner's emails are environment
 secrets, and GitHub masks them.
@@ -10,8 +13,11 @@ secrets, and GitHub masks them.
 
 | Event | `Todofy checks` | `Todofy deploy` |
 |---|---|---|
-| push to any branch | runs | only on `main` |
-| `workflow_dispatch` | runs | only when dispatched on `main` |
+| push to any branch touching `todofy/`, `contracts/` or `.github/` | runs | only on `main`, and only when `todofy/` changed |
+| push touching none of those | skipped | no |
+| `workflow_dispatch` with app `both` or `todofy` | runs | only when dispatched on `main` |
+
+A push whose previous commit is unknown (a new branch or a force push) runs everything.
 
 There are no pull requests. Work happens on a branch (every push runs the checks); `main` is updated by a
 fast-forward push of a branch whose head passed:
@@ -20,7 +26,8 @@ fast-forward push of a branch whose head passed:
 git fetch origin && git checkout main && git merge --ff-only origin/<branch> && git push origin main
 ```
 
-Branch protection on `main` requires the `Todofy checks` status check. Deploys run in the `production`
+Branch protection on `main` requires the `CI gate` status check (it fails if any check job failed or was
+cancelled; a job skipped because its app is unchanged passes). Deploys run in the `production`
 environment (deployment branch `main` only) and never in parallel (`todofy-production` concurrency group).
 
 ## `Todofy checks`
@@ -41,7 +48,7 @@ The same sequence as local development:
 
 ## `Todofy deploy`
 
-`needs: checks`, so the exact commit that passed is what ships:
+`needs: [changes, todofy-checks, gate]`, so the exact commit that passed is what ships:
 
 1. install locked dependencies (root, `gateway/`, `web/`) and build the UI from the verified revision
 2. `deploy/generate_ci_config.py` writes three owner-only files, removed at the end even on failure:
@@ -102,7 +109,7 @@ Operational switches (`TODOFY_MAINTENANCE_MODE`, `TODOFY_PROCESSING_PAUSED`, `TO
 overwrites the operational state:
 
 1. Settings → Environments → `production` → edit the variable.
-2. Actions → "Todofy CI and deploy" → Run workflow → branch `main`.
+2. Actions → "CI and deploy" → Run workflow → branch `main`, app `todofy`.
 3. The run re-checks and redeploys the current `main` with the new value (the checks take about 10
    minutes, then the deploy).
 

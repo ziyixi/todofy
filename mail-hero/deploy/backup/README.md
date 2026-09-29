@@ -1,6 +1,6 @@
 # Mail Hero backup collector and isolated restore
 
-The collector and its daily scheduler run in a single Docker Compose service. GitHub Actions builds the Python/GPG image; the existing server pulls its immutable GHCR digest. The Mail Hero application and database remain on Cloudflare. Existing Vultr backups and their private environment files are not modified.
+The collector and its daily scheduler run in a single Docker Compose service. GitHub Actions (`.github/workflows/mail-hero-backup-image.yml` at the monorepo root) builds the Python/GPG image as `ghcr.io/ziyixi/mail-hero-backup-collector`; the existing server pulls its immutable GHCR digest. Images published before the monorepo are `ghcr.io/ziyixi/mail-hero-backup`, whose package stays linked to the old `ziyixi/mail-hero` repository: the server keeps that pinned digest until the next collector upgrade, which switches the Compose image to the new package's digest. The Mail Hero application and database remain on Cloudflare. Existing Vultr backups and their private environment files are not modified.
 
 The backup scope is **Mail Hero application data and recovery state only**. It does not back up the host OS, home directory, Docker volumes, or other services. The container runs as UID/GID 1000 with a read-only root filesystem and no Docker socket. No systemd unit, host cron or additional sudo installation is needed.
 

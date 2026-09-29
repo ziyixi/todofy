@@ -33,7 +33,7 @@ npm --prefix cloudflare test
 
 实际账户准备、D1/R2 创建、Access、唯一 Email Routing 规则、Wrangler 命令、验收和备份恢复步骤见 [Cloudflare 设置说明](docs/cloudflare-setup.md)。原生模块与配置合同见 [cloudflare/README.md](cloudflare/README.md)。
 
-正式发布使用 [GitHub Actions CI/CD](docs/ci-cd.md)：`main` 的检查通过后发布原生 Worker 和网页。应用无需自建服务器；独立的[备份工具](deploy/backup/README.md)由CI构建GHCR镜像，现有服务器通过Compose拉取固定digest运行。Todofy在自己的仓库发布镜像，保持独立部署。
+正式发布使用单仓库根目录的 [GitHub Actions CI/CD](docs/ci-cd.md)：`main` 上 `mail-hero/` 有改动且 `CI gate` 通过后发布原生 Worker 和网页。应用无需自建服务器；独立的[备份工具](deploy/backup/README.md)由CI构建GHCR镜像，现有服务器通过Compose拉取固定digest运行。Todofy 位于同一仓库的 [`todofy/`](../todofy/)，是独立的 webhook 消费者，单独检查和发布。
 
 本次部署的 UI 为 [mail-hero.ziyixi.science](https://mail-hero.ziyixi.science)，固定收件地址为 `inbox-mail-hero@inbox.ziyixi.science`。GitHub 登录与单封真实纯文本收件已验证；Todofy 完整业务链路仍需用户测试信验收。实际资源和检查范围见 [部署验收记录](docs/verification-native.md)，验收完成后再由用户切换原邮箱自动转发。
 
@@ -46,7 +46,9 @@ npm --prefix cloudflare test
 - `cloudflare/src/native/`：收信、解析、持久调度、webhook 与管理 API。
 - `cloudflare/migrations/`、`cloudflare/test/`：D1 schema 与原生运行环境测试。
 - `web/`：React UI；构建资源输出到 `uiassets/dist/`。
-- `deploy/`、`.github/workflows/`：账户辅助工具、CI 配置生成与正式发布。
-- `api/`、`docs/`：通用事件合同、接入、部署和恢复说明。
+- `deploy/`：账户辅助工具、CI 配置生成与备份工具；工作流在单仓库根目录的 `.github/workflows/`。
+- `docs/`：接入、部署和恢复说明。通用事件合同在单仓库根目录的 [`contracts/mail-received-v1/`](../contracts/mail-received-v1/)。
 
-消费者合同仍是 [mail.received.v1](api/mail-received-v1.md)；开发协作和验收边界见 [AGENTS.md](AGENTS.md)。
+以下命令都在 `mail-hero/` 目录运行。
+
+消费者合同仍是 [mail.received.v1](../contracts/mail-received-v1/mail-received-v1.md)；开发协作和验收边界见 [AGENTS.md](AGENTS.md)。

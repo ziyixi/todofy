@@ -17,7 +17,7 @@
 - 产品是个人版 CloudMailin：一个固定地址、每天约50–100封、完整收件UI、持久状态与可靠webhook。不是50–100QPS，不增加多地址CRUD或多租户平台。
 - Mail Hero应用全托管在Cloudflare，维护TypeScript Worker和React UI。业务数据库使用D1；SQLite DO负责持久调度。不添加Go、PostgreSQL或自建邮件服务入口。用户另行授权的备份收集器使用独立Docker Compose服务，不能与应用运行架构混淆。
 - 使用Workers Free，目标$0/月，低量预算$1–2/月；未经明确授权不升级Workers Paid或开启不需要的收费产品。R2需订阅且超额计费，预算提醒不是硬消费上限，免费量按账户共享。
-- 唯一地址由Worker `RECEIVE_ADDRESS`配置。Todofy是可选、独立的HTTPS webhook消费者；它自己的Go服务、SQLite inbox及Tunnel属于外部系统，不进入Mail Hero仓库。不导入它的包/proto，不访问其数据库，不绑定发布周期。
+- 唯一地址由Worker `RECEIVE_ADDRESS`配置。Todofy是可选、独立的HTTPS webhook消费者。它现在位于同一单仓库的 `todofy/`（自己的Cloudflare Worker、D1与部署），但仍是独立消费者：Mail Hero不导入它的代码/包，不访问其数据库，不共享发布周期；两者之间只共享根目录 `contracts/` 中的 `mail.received.v1` 合同。
 - 已授权的账户配置可继续；真实邮件内容、原邮箱自动转发、消费者真实业务副作用和根域现有邮箱不能被无声改动。专用子域设置若要求替换根域现有MX，停止核查，保护主邮箱。
 - 不读取、打印、提交真实邮件、私有env、token、凭据、生产数据库或备份内容；验证用合成fixture。账户配置权限不等于读取个人邮件的授权。
 - 不索取密钥到聊天。已确认需要用户登录或保存token时明确最小步骤，不换渠道绕过。不要覆盖其他任务变更；未获授权不commit/push。
@@ -30,7 +30,7 @@
 
 同一个Worker托管React Static Assets及owner API，Cloudflare Access负责入口登录，应用独立验证JWT。单个 `COORDINATOR` binding导出 `MailCoordinator`，固定对象实例 `inbox-v1`。没有Queues、Workflows、Redis、Cron邮箱轮询或通用调度平台。
 
-应用入口和迁移：`cloudflare/src/native/`、`cloudflare/migrations/`、`cloudflare/wrangler.native.toml`。所有Wrangler命令显式指定对应的本地或生产config；正式发布使用 `.github/workflows/native.yml`。
+应用入口和迁移：`cloudflare/src/native/`、`cloudflare/migrations/`、`cloudflare/wrangler.native.toml`。所有Wrangler命令显式指定对应的本地或生产config；正式发布使用单仓库根目录 `.github/workflows/ci.yml` 的 `Mail Hero deploy` job。
 
 | 层 | 责任 |
 | --- | --- |
@@ -71,7 +71,7 @@ MIME原文、HTML、附件均不可信。HTML经清理后在禁脚本/禁网sand
 
 解析任务连续三次运行中断后停止自动重试，保留原件并让owner明确重解析。维护独占一次Alarm调用以遵守Free D1每次最多50条查询；每批至多处理一封安全终态过期邮件和一个待完成内容删除。保留清理必须先由owner确认启用。有积压时约10分钟继续；原件恢复扫描每页最多100个key，未扫描完也约10分钟续页，完成且空闲后恢复每日唤醒，不能循环耗尽免费额度。
 
-通用消费者合同仍为 `mail.received.v1`，见 `api/mail-received-v1.md`。冻结event_id、确切JSON bytes和目标revision；普通retry复用全部身份。2xx表示消费者先持久接管，不代表后续任务完成。消费者至少保留90天去重；同ID不同payload冲突。
+通用消费者合同仍为 `mail.received.v1`，见 `../contracts/mail-received-v1/mail-received-v1.md`；其golden payload由 `cloudflare/test/contract-fixtures.mjs` 用真实 `buildPayload` 生成，修改构建器须运行 `npm run contract:update` 并让Todofy合同测试通过。冻结event_id、确切JSON bytes和目标revision；普通retry复用全部身份。2xx表示消费者先持久接管，不代表后续任务完成。消费者至少保留90天去重；同ID不同payload冲突。
 
 网络错误、408/429/5xx按持久退避，尊重Retry-After；404/405/重定向先按30分钟宽限重试，仍失败则阻断revision并6小时后自动复查，成功即解除；每个revision最多自动复查8次（约2天），之后保持阻断直到owner解除；401/403和策略错误阻断revision，直到轮换凭据或owner明确解除阻断。自动最多48次或7天，普通手动retry保留30天窗口；“新事件重发”明确可能再次触发业务。目标默认约2次/分钟，全局最多10次/分钟，HTTP有超时。
 
@@ -87,7 +87,7 @@ React页面保持收件箱、邮件详情、交付/尝试、目标、设置和�
 
 UI与API验证Access JWT的签名、issuer、audience、过期和唯一owner。不同登录提供商可通过 `ACCESS_OWNER_ALIASES` 明确列出同一人的已核实邮箱，均映射到 `ACCESS_OWNER`，不增加其他管理员；Cloudflare 策略也必须按精确邮箱和相应提供商限制。浏览器mutation还需Origin+CSRF。邮件下载no-store、nosniff；R2保持私有。任何替代域名/预览路径不得绕过鉴权。
 
-管理API保持现有前端所需合同，以 `cloudflare/src/native/api.ts`、共享类型及测试为准；通用事件以 `api/mail-received-v1.md` 和JSON Schema为准。
+管理API保持现有前端所需合同，以 `cloudflare/src/native/api.ts`、共享类型及测试为准；通用事件以 `../contracts/mail-received-v1/` 的说明和JSON Schema为准。
 
 ## 5. 验证与上线记录
 
@@ -126,8 +126,8 @@ D1 Time Travel Free7天只恢复D1，不恢复R2、DO或secrets。完整备份�
 
 - 保留 `cloudflare/` 原生Worker/D1迁移与测试、`web/`、静态构建输出位置 `uiassets/dist/`、通用事件合同和部署/备份工具。不要恢复已经移除的Go服务、PostgreSQL schema、SMTP服务器或中转Worker。`deploy/backup/`中的Dockerfile只封装备份工具，Compose配置属于独立部署仓库。
 - 正式发布从GitHub Actions的同一已验证提交构建UI、应用向后兼容的D1 migration并发布Worker。PR不使用生产密钥。`production` environment只用于授权的main发布；暂停和维护配置需同步GitHub variables，避免下次发布覆盖运维状态。
-- Todofy在自己的仓库通过CI构建GHCR镜像，服务器按digest更新。Mail Hero不构建或部署Todofy镜像。
-- 备份镜像由 `.github/workflows/backup-image.yml` 测试并发布到GHCR，服务器只拉取固定digest，不手工构建。Worker和备份镜像各自发布；备份CI不接触生产凭据或真实邮件。
+- Todofy在同一仓库的 `todofy/`，由根工作流的 `Todofy checks`/`Todofy deploy` 独立检查和发布。Mail Hero不构建、不部署Todofy，也不因Todofy改动而发布。
+- 备份镜像由根目录 `.github/workflows/mail-hero-backup-image.yml` 测试并发布到GHCR新package `ghcr.io/ziyixi/mail-hero-backup-collector`（旧package `mail-hero-backup` 关联原仓库；服务器在下一次升级前继续使用已固定的旧digest），服务器只拉取固定digest，不手工构建。Worker和备份镜像各自发布；备份CI不接触生产凭据或真实邮件。
 - 仓库清理不删除任何生产数据库、桶、邮件、源邮箱转发设置或其他项目资源；不自动导入真实邮件。部署成功、HTTP接管和完整Todofy/Todoist业务验收分别记录。
 
 部署、预算与恢复以 `docs/cloudflare-setup.md` 为准，发布流程见 `docs/ci-cd.md`。

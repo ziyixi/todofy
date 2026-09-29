@@ -12,6 +12,7 @@ the git history at `6c46ed4`.
 ## 1. Run everything locally
 
 Prerequisites: Node 26 (`.nvmrc`), uv 0.12.10, Python 3.14 (`.python-version`; uv fetches it).
+Run everything from `todofy/` in the monorepo.
 
 ```sh
 npm ci --no-audit --no-fund          # wrangler 4.142.0 only; npm 11 warns about workerd/esbuild
@@ -26,7 +27,7 @@ uv run pytest tests/runtime          # real workerd via `pywrangler dev`, ~9 min
 uv run pytest                        # everything (testpaths: tests, tools, deploy)
 ```
 
-These are exactly the steps of the `Todofy checks` job in `.github/workflows/native.yml`, which then
+These are exactly the steps of the `Todofy checks` job in the monorepo's `.github/workflows/ci.yml`, which then
 generates placeholder production configs for both Workers and dry-runs them. `npm run build` writes
 `uiassets/dist`; without it the runtime harness serves a placeholder `index.html` and one placeholder
 file under `assets/`.
@@ -61,7 +62,7 @@ gateway/                       the gateway Worker `todofy` (TypeScript, own pack
   wrangler.test-auth.toml      runtime tests: real Access JWT checks against a loopback issuer
 migrations/0001_init.sql       the D1 schema; 0002_daily_metrics.sql adds the owner UI's daily trends (§6)
 api/                           owner-api-v1.openapi.yaml (source of truth for the UI), newsletter report
-                               schemas, mail-received-v1 schema copied from Mail Hero
+                               schemas; the webhook body references ../contracts/mail-received-v1 (shared)
 worker/todofy/core/            pure stdlib Python, host-testable, no `js`/`workers` imports
   vocab.py api_errors.py contract.py render.py prompts.py reminder_text.py request_id.py
   backoff.py classify.py todoist_request.py report_schema.py gemini_wire.py
@@ -71,7 +72,8 @@ tests/unit/                    host tests for core/, the migration and the API c
 tests/fakes/                   in-process loopback HTTP fake (+ its own tests)
 tests/runtime/                 black-box tests against `pywrangler dev` (gateway + core) with real
                                D1/DO/alarms/cron/assets
-tests/fixtures/mail_hero/      exact webhook bytes Mail Hero emits (compat fixtures, synthetic mail)
+tests/mail_contract.py         paths of the shared contract: ../contracts/mail-received-v1 holds the schema and
+                               the exact webhook bytes Mail Hero's builder emits (compat fixtures, synthetic mail)
 web/                           owner UI (React + Vite); builds into uiassets/dist; types generated from the OpenAPI
 tools/                         legacy SQLite snapshot → D1 export/verify scripts and the webhook smoke test
                                (stdlib, Python 3.9+)

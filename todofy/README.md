@@ -1,7 +1,7 @@
 # Todofy
 
-Todofy turns the owner's mail into Todoist tasks. [Mail Hero](https://github.com/ziyixi/mail-hero)
-receives the mail and POSTs a `mail.received.v1` webhook; Todofy stores it, asks Gemini for a short
+Todofy turns the owner's mail into Todoist tasks. [Mail Hero](../mail-hero/) (in the same monorepo,
+an independent app) receives the mail and POSTs a `mail.received.v1` webhook; Todofy stores it, asks Gemini for a short
 summary, and creates exactly one Todoist task per event. It also serves a daily summary and ranked
 recommendations to the owner's newsletter, sends at most one attention reminder task a day, and has a
 small owner UI for anything that needs a human.
@@ -99,7 +99,8 @@ trends restart counting; the days in between show as not recorded.
 ## Local development
 
 Prerequisites: Node 26 (`.nvmrc`), uv 0.12.10; Python 3.14 is fetched by uv. No Cloudflare account or
-credentials are needed.
+credentials are needed. Run every command from this `todofy/` directory of the monorepo; the only file read
+from outside it is the shared `mail.received.v1` contract in `../contracts/mail-received-v1`.
 
 ```sh
 npm ci --no-audit --no-fund
@@ -118,7 +119,9 @@ contracts.
 
 ## Deploy
 
-Every push runs the `Todofy checks` job; a push to `main` (or a manual run on `main`) then deploys:
+The monorepo's `.github/workflows/ci.yml` runs the `Todofy checks` job for every push that touches
+`todofy/`, `contracts/` or `.github/`; a push to `main` that changes `todofy/` (or a manual run on `main` for
+`both` or `todofy`) then deploys once `CI gate` passes:
 generate both production configs from GitHub variables, dry-run, apply D1 migrations, deploy
 `todofy-core` and then the gateway, wait for `/health` to report the commit, then check that a wrong
 newsletter credential gets 401/429 from the Durable Object (proving gateway → object → D1). There are no pull requests; `main` is fast-forwarded. One-time setup
@@ -133,7 +136,8 @@ worker/todofy/core/     pure Python rules (vocabulary, contract, prompts, classi
 worker/todofy/runtime/  todofy-core: Durable Object, D1 ledger, Gemini/Todoist clients, owner API
 gateway/                the gateway Worker todofy (TypeScript): routing, Access, CSRF, webhook, assets
 migrations/             D1 schema
-api/                    owner OpenAPI contract, newsletter report schemas, Mail Hero event schema
+api/                    owner OpenAPI contract, newsletter report schemas (the Mail Hero event schema is
+                        ../contracts/mail-received-v1, shared with Mail Hero)
 web/                    owner UI (React + Vite), built into uiassets/dist
 tests/                  unit, fakes and runtime (workerd) tests
 tools/                  legacy SQLite snapshot/export/verify, the webhook smoke test, backup restore

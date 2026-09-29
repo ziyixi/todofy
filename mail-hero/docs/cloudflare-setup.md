@@ -68,9 +68,9 @@ D1 保存容量 70% / 85% / 95%、备份超过 36 小时、处理积压超过 1 
 
 需要Node.js 26。通过正规 `wrangler login` 或权限受限的API token认证。已有独立任务token时沿用该本机流程，不覆盖其他项目的登录；不要把token、邮件或密钥发到聊天。
 
-本次独立 token 已在本机保存并核实有效，且已追加仅目标 zone 的 `Zone Settings Write`，不需要再次保存。新环境首次保存时，在仓库根目录运行 `python3 deploy/cloudflare-admin.py save-token`，提示后从 Cloudflare 的一次性成功页复制 token 并粘贴到本机终端（不回显）。助手只新建 owner-only 文件，不覆盖已有文件，不改 Wrangler 全局登录。随后运行 `python3 deploy/cloudflare-admin.py inspect` 核对权限；下文 Wrangler 命令可改用 `python3 deploy/cloudflare-admin.py wrangler <命令与参数>`。包装命令从仓库根目录调用，但实际工作目录为 `cloudflare/`，所以配置参数使用 `--config wrangler.native.production.toml`；凭据只通过进程环境传递。
+本次独立 token 已在本机保存并核实有效，且已追加仅目标 zone 的 `Zone Settings Write`，不需要再次保存。新环境首次保存时，在单仓库的 `mail-hero/` 目录运行 `python3 deploy/cloudflare-admin.py save-token`，提示后从 Cloudflare 的一次性成功页复制 token 并粘贴到本机终端（不回显）。助手只新建 owner-only 文件，不覆盖已有文件，不改 Wrangler 全局登录。随后运行 `python3 deploy/cloudflare-admin.py inspect` 核对权限；下文 Wrangler 命令可改用 `python3 deploy/cloudflare-admin.py wrangler <命令与参数>`。包装命令从单仓库的 `mail-hero/` 目录调用，但实际工作目录为 `cloudflare/`，所以配置参数使用 `--config wrangler.native.production.toml`；凭据只通过进程环境传递。
 
-仅新环境初始化，从仓库根目录：
+仅新环境初始化，从单仓库的 `mail-hero/` 目录：
 
 ```sh
 npm --prefix web ci
@@ -120,7 +120,7 @@ custom_domain = true
 
 应用独立校验JWT的签名、issuer、audience、过期和owner；浏览器写操作校验Origin/CSRF。附件只能通过鉴权后路由访问，不要为下载而公开R2。[Custom Domains](https://developers.cloudflare.com/workers/configuration/routing/custom-domains/)、[Access JWT](https://developers.cloudflare.com/cloudflare-one/access-controls/applications/http-apps/authorization-cookie/validating-json/)
 
-当前 Custom Domain 已绑定，`workers_dev=false`、`preview_urls=false`。日常代码更新通过 [GitHub Actions](ci-cd.md) 发布。需要人工维护部署时，在完成构建与验证后，从仓库根目录明确使用生产配置：
+当前 Custom Domain 已绑定，`workers_dev=false`、`preview_urls=false`。日常代码更新通过 [GitHub Actions](ci-cd.md) 发布。需要人工维护部署时，在完成构建与验证后，从单仓库的 `mail-hero/` 目录明确使用生产配置：
 
 ```sh
 python3 deploy/cloudflare-admin.py wrangler deploy --config wrangler.native.production.toml
