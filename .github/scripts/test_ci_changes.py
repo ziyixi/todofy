@@ -817,9 +817,10 @@ class TodofyJobs(unittest.TestCase):
         self.assertIn('--index "${{ strategy.job-index }}" --total "${{ strategy.job-total }}"', block)
         self.assertIn('$(cat "$RUNNER_TEMP/shard-files.txt")', block)
         self.assertIn('--junitxml="$RUNNER_TEMP/junit/runtime-${{ strategy.job-index }}.xml"', block)
+        self.assertIn('--junitxml="$RUNNER_TEMP/junit/runtime-${{ strategy.job-index }}-serial.xml"', block)
         self.assertIn("name: todofy-runtime-junit-${{ strategy.job-index }}", block)
         commands = self.pytest_commands("todofy-runtime") + self.pytest_commands("todofy-checks")
-        self.assertEqual(len(commands), 3)  # plan, run, completeness
+        self.assertEqual(len(commands), 4)  # plan, xdist run, serial run, completeness
         for option in (" -k", " -m", "--deselect", "--ignore", "--lf", "--last-failed", "--reruns", " -x", "--maxfail"):
             for command in commands:
                 with self.subTest(option=option, command=command):
@@ -827,7 +828,7 @@ class TodofyJobs(unittest.TestCase):
 
     def test_each_shard_runs_whole_files_in_as_many_processes_as_planned(self):
         block = self.code(self.blocks["todofy-runtime"])
-        run = [command for command in self.pytest_commands("todofy-runtime") if "--junitxml" in command]
+        run = [command for command in self.pytest_commands("todofy-runtime") if " -n " in command]
         self.assertEqual(len(run), 1)
         processes = re.findall(r"^uv run pytest -n (\d+) --dist loadfile --no-loadscope-reorder ", run[0])
         self.assertEqual(len(processes), 1, run[0])
@@ -839,6 +840,28 @@ class TodofyJobs(unittest.TestCase):
         self.assertIn('"pytest-xdist==', pyproject)
         # One `pywrangler sync` and the Pyodide download happen before the xdist processes start.
         self.assertLess(block.index("uv run python -m tests.runtime.warm_up"), block.index(run[0]))
+
+    def test_the_serial_files_run_alone_after_the_xdist_run(self):
+        """todofy-runtime-serial.txt: the plan writes this shard's share, one plain pytest process runs it
+        after the xdist run (never with a test server of another process), and a failure of either run
+        fails the step without skipping the other."""
+        block = self.code(self.blocks["todofy-runtime"])
+        self.assertIn(
+            '--serial ../.github/scripts/todofy-runtime-serial.txt --serial-out "$RUNNER_TEMP/serial-files.txt"', block
+        )
+        step = block.split("- name: Runtime tests (", 1)[1].split("\n      - ", 1)[0]
+        xdist, serial = [command for command in self.pytest_commands("todofy-runtime") if "--junitxml" in command]
+        self.assertIn("$(cat \"$RUNNER_TEMP/shard-files.txt\") || status=$?", xdist)
+        self.assertIn("$(cat \"$RUNNER_TEMP/serial-files.txt\") || status=$?", serial)
+        self.assertNotRegex(serial, r" -n |--dist|--numprocesses")
+        self.assertLess(step.index(xdist), step.index(serial))
+        # pytest without paths would run every testpath, so an empty share skips the serial run.
+        guard = 'if [ -s "$RUNNER_TEMP/serial-files.txt" ]; then'
+        self.assertLess(step.index(guard), step.index(serial))
+        self.assertTrue(step.rstrip().endswith('exit "$status"'), step)
+        # Its own basetemp: pytest empties --basetemp when it starts, which would delete the xdist run's logs.
+        self.assertIn('--basetemp="$RUNNER_TEMP/pytest-serial"', serial)
+        self.assertIn("${{ runner.temp }}/pytest-serial/**/dev.log", self.blocks["todofy-runtime"])
 
     def test_the_pyodide_cache_is_restored_only_on_an_exact_key(self):
         block = self.code(self.blocks["todofy-runtime"])
@@ -870,6 +893,9 @@ class TodofyJobs(unittest.TestCase):
         self.assertIn('uv run pytest tests/runtime --collect-only -q -p no:cacheprovider > "$RUNNER_TEMP/collected.txt"', block)
         self.assertIn("python3 ../.github/scripts/pytest_completeness.py", block)
         self.assertIn("--expected-skips ../.github/scripts/todofy-runtime-expected-skips.txt", block)
+        # A test file that vanishes at collection, and a serial file run under xdist, both fail the check.
+        self.assertIn("--test-root tests/runtime", block)
+        self.assertIn("--serial ../.github/scripts/todofy-runtime-serial.txt", block)
 
     def test_the_runtime_suite_has_no_expected_skips_today(self):
         skips = (REPO / ".github" / "scripts" / "todofy-runtime-expected-skips.txt").read_text()

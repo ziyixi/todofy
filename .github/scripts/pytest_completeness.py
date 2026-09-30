@@ -2,18 +2,26 @@
 """Prove that a sharded pytest run ran every collected test exactly once. Standard library only.
 
     python3 pytest_completeness.py --collected ids.txt --junit-dir DIR --shards N \
-        [--expected-skips skips.txt] [--durations-out durations.json]
+        [--test-root tests/runtime] [--serial serial.txt] [--expected-skips skips.txt] \
+        [--durations-out durations.json]
 
-``ids.txt`` is ``pytest <paths> --collect-only -q`` of the same commit; ``DIR`` holds one JUnit XML file
-per shard (``pytest --junitxml``). Fails (exit 1) unless all of these hold:
+``ids.txt`` is ``pytest <paths> --collect-only -q`` of the same commit; ``DIR`` holds the shards' JUnit
+XML files (``pytest --junitxml``): ``<name>-<I>.xml`` for shard I's pytest-xdist run and, when the shard
+ran files alone (pytest_shards.py --serial), ``<name>-<I>-serial.xml``. Fails (exit 1) unless all of
+these hold:
 
-- there are exactly N JUnit files, and none reports a collection error;
+- every shard 0..N-1 has exactly one xdist file and at most one serial file, nothing else is there, and
+  none reports a collection error;
+- the collection itself is clean: pytest reported no collection error and skipped no whole module
+  (``pytest.skip(allow_module_level=True)``, ``importorskip``), and every test file under ``--test-root``
+  (``test_*.py``, ``*_test.py``) has at least one collected id, so a file can never vanish from the plan;
 - the collected ids are unique and their count matches pytest's "N tests collected" line;
 - every collected id ran, exactly once, and nothing else ran;
 - no test failed or errored;
 - the skipped tests are exactly the ids listed in ``skips.txt`` (one id per line, "#" comments): the
   serial baseline's skips, so the skip count equals the baseline's. A listed test that ran instead
-  fails too, until the list is updated.
+  fails too, until the list is updated;
+- the tests of the files in ``serial.txt`` ran only in serial files, and serial files hold nothing else.
 
 JUnit names a test by (classname, name); an id maps to it the way pytest's own junitxml does
 (``mangle_test_address``). The mapping is checked to be one-to-one over the collected ids first, so
@@ -36,6 +44,12 @@ from collections import Counter
 from pathlib import Path
 
 COLLECTED = re.compile(r"^(\d+) tests? collected")
+# What pytest prints about a collector (not a test) that errored or skipped: the "-ra" summary lines of
+# addopts, the ERRORS section and the "N tests collected, M errors" line.
+COLLECTION_TROUBLE = re.compile(
+    r"^(SKIPPED|ERROR|XFAIL|XPASS)\b|^=+ ERRORS =+$|^!+ .*Interrupted|collected.*\berrors?\b"
+)
+JUNIT_FILE = re.compile(r"^.+-(\d+)(-serial)?\.xml$")
 
 
 def junit_key(test_id: str) -> tuple[str, str]:
@@ -55,10 +69,25 @@ def collected_ids(text: str) -> tuple[list[str], int | None]:
 
 
 def expected_skips(path: Path | None) -> set[str]:
+    """The lines of a list file ("#" comments), as a set; also reads --serial's file list."""
     if path is None:
         return set()
     lines = (line.split("#", 1)[0].strip() for line in path.read_text().splitlines())
     return {line for line in lines if line}
+
+
+def collection_trouble(text: str) -> list[str]:
+    """pytest's own lines about collectors that errored or skipped a whole module."""
+    lines = (line.strip() for line in text.splitlines())
+    return [
+        line for line in lines if COLLECTION_TROUBLE.search(line) and not ("::" in line and line.startswith("tests"))
+    ]
+
+
+def test_files(root: Path) -> list[str]:
+    """The files pytest's default python_files patterns select under ``root``, as ids spell them."""
+    found = {*root.rglob("test_*.py"), *root.rglob("*_test.py")}
+    return sorted(path.as_posix() for path in found if "__pycache__" not in path.parts)
 
 
 class Shard:
@@ -73,13 +102,31 @@ class Shard:
 
 
 def check(
-    collected_text: str, junit_files: list[Path], shards: int, skips: set[str]
+    collected_text: str,
+    junit_files: list[Path],
+    shards: int,
+    skips: set[str],
+    serial: set[str] = frozenset(),
+    on_disk: list[str] | None = None,
 ) -> tuple[list[str], dict[str, float], list[str]]:
-    """(problems, seconds per file, summary lines); no problems means the run was complete."""
+    """(problems, seconds per file, summary lines); no problems means the run was complete.
+
+    ``serial`` holds the files that must run alone; ``on_disk`` the test files that must be collected."""
     problems: list[str] = []
     ids, reported = collected_ids(collected_text)
     if not ids:
         problems.append("no collected test ids")
+    trouble = collection_trouble(collected_text)
+    if trouble:
+        problems.append(f"the collection skipped or failed a collector: {trouble}")
+    files = {test_id.split("::", 1)[0] for test_id in ids}
+    if on_disk is not None:
+        uncollected = sorted(set(on_disk) - files)
+        if uncollected:
+            problems.append(f"test files with no collected test: {uncollected}")
+    unknown_serial = sorted(serial - files)
+    if unknown_serial:
+        problems.append(f"serial files that were not collected: {unknown_serial}")
     if reported is not None and reported != len(ids):
         problems.append(f"pytest collected {reported} tests but listed {len(ids)} ids")
     duplicated = sorted(test_id for test_id, count in Counter(ids).items() if count > 1)
@@ -95,20 +142,38 @@ def check(
     if unknown_skips:
         problems.append(f"expected skips that are not collected: {unknown_skips}")
 
-    if len(junit_files) != shards:
-        problems.append(f"expected {shards} JUnit files (one per shard), found {len(junit_files)}")
+    runs: Counter[tuple[int, bool]] = Counter()
+    for path in junit_files:
+        match = JUNIT_FILE.match(path.name)
+        if match is None:
+            problems.append(f"{path.name} is not a shard's JUnit file (<name>-<index>[-serial].xml)")
+        else:
+            runs[int(match.group(1)), bool(match.group(2))] += 1
+    xdist_runs = sorted(index for (index, alone), count in runs.items() if not alone for _ in range(count))
+    if xdist_runs != list(range(shards)):
+        problems.append(f"expected one JUnit file per shard 0..{shards - 1}, found shards {xdist_runs}")
+    for (index, alone), count in sorted(runs.items()):
+        if alone and (count > 1 or not 0 <= index < shards):
+            problems.append(f"expected at most one serial JUnit file for shard {index} of {shards}, found {count}")
     ran: Counter[tuple[str, str]] = Counter()
     skipped: set[str] = set()
     seconds: dict[str, float] = {}
-    summary = ["| JUnit file | tests | failed | errors | skipped | seconds |", "| --- | ---: | ---: | ---: | ---: | ---: |"]
+    summary = [
+        "| JUnit file | tests | failed | errors | skipped | seconds |",
+        "| --- | ---: | ---: | ---: | ---: | ---: |",
+    ]
     for path in sorted(junit_files):
         shard = Shard(path)
         skipped_here = failed_here = errored_here = 0
         shard_seconds = 0.0
+        alone = bool((match := JUNIT_FILE.match(path.name)) and match.group(2))
         for case in shard.cases:
             key = (case.get("classname", ""), case.get("name", ""))
             ran[key] += 1
             test_id = by_key.get(key, f"{key[0]}::{key[1]}")
+            if key in by_key and (test_id.split("::", 1)[0] in serial) != alone:
+                where = "a serial" if alone else "an xdist"
+                problems.append(f"{test_id} ran in {where} run ({path.name}); serial files run alone, and only they do")
             elapsed = float(case.get("time", "0") or 0)
             shard_seconds += elapsed
             if key in by_key:
@@ -155,12 +220,19 @@ def main(argv: list[str]) -> int:
     parser.add_argument("--junit-dir", type=Path, required=True)
     parser.add_argument("--shards", type=int, required=True)
     parser.add_argument("--expected-skips", type=Path)
+    parser.add_argument("--serial", type=Path, help="files that must have run alone (pytest_shards.py --serial)")
+    parser.add_argument("--test-root", type=Path, help="every test file under it must have a collected test")
     parser.add_argument("--durations-out", type=Path)
     args = parser.parse_args(argv)
 
     junit_files = sorted(args.junit_dir.rglob("*.xml"))
     problems, seconds, summary = check(
-        args.collected.read_text(), junit_files, args.shards, expected_skips(args.expected_skips)
+        args.collected.read_text(),
+        junit_files,
+        args.shards,
+        expected_skips(args.expected_skips),
+        expected_skips(args.serial),
+        test_files(args.test_root) if args.test_root else None,
     )
     durations = json.dumps(seconds, indent=2) + "\n"
     report = [*summary, "", "Seconds per file in this run (shard weights):", "```json", durations.rstrip(), "```"]
@@ -175,7 +247,7 @@ def main(argv: list[str]) -> int:
     if problems:
         return 1
     total = len(collected_ids(args.collected.read_text())[0])
-    print(f"OK: all {total} collected tests ran exactly once across {len(junit_files)} shards and passed.")
+    print(f"OK: all {total} collected tests ran exactly once across {args.shards} shards and passed.")
     return 0
 
 

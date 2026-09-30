@@ -39,8 +39,9 @@ Running the runtime suite in parallel:
   and some rely on the ones before them: 13 tests in 9 files fail when their file runs reversed. Files
   are independent of each other: every file passed in a random and in a reversed file order. So
   pytest-xdist runs with `--dist loadfile --no-loadscope-reorder` (the `addopts` default in
-  `pyproject.toml`), and `tests/runtime/conftest.py` refuses a per-test mode (`--dist load`,
-  `worksteal`, `loadgroup`, `each`). Never add pytest-randomly or a rerun plugin.
+  `pyproject.toml`), and the rootdir `conftest.py` refuses every other mode (`--dist load`,
+  `worksteal`, `loadgroup`, `each`, `loadscope`), also for `uv run pytest -n 4` over all testpaths
+  (`tests/unit/test_pytest_setup.py`). Never add pytest-randomly or a rerun plugin.
 - Ports: each pytest process takes the ports of its servers from its own range of 500, from 20000 up
   (the xdist worker number picks the range). That is below the Linux (32768–60999) and macOS
   (49152–65535) ephemeral ranges, where the fakes' and clients' OS-assigned ports live. Each server
@@ -54,19 +55,25 @@ Running the runtime suite in parallel:
 - One assertion has almost no timing margin: `test_alarm.py::test_timeout_really_closes_a_hanging_upstream_connection`
   checks `1.5 <= answered.at - hung.at`, the gap between the fake receiving the hung call and the
   fallback call. workerd arms `AbortSignal.timeout` on the isolate's clock, which stands still while
-  Pyodide builds the request, so the real gap is 1.5 s ± a few ms of CPU on either side. Measured gaps:
-  1.503–1.519 s idle, 1.504–1.523 s next to a `-n 4` run. It failed once (1.496 s) in 9 parallel or
-  sharded full runs, and never in the serial runs.
+  Pyodide builds the request, so the gap is 1.5 s plus or minus the Worker's CPU time around the two
+  calls; the fake's own stamps are within 1 ms of arrival. Alone and idle it measured 1.5008–1.5100 s
+  (12 of 12 passed); alone with the CPU oversubscribed, 1.4968–1.5060 s (6 of 12 failed); it also
+  failed in parallel full runs, and in serial runs of the old `pywrangler dev` harness. So it is not a
+  parallel-only failure, and CI runs `test_alarm.py` alone after each shard's xdist run
+  (`.github/scripts/todofy-runtime-serial.txt`, [ci-cd.md](ci-cd.md)). Locally, run it on its own
+  when a `-n` run fails it: `uv run pytest tests/runtime/test_alarm.py`.
 - Longest first: xdist hands out files in the order pytest collects them, so pass the files heaviest
   first. The CI plan prints them in that order; to run shard `I` of 3 exactly as CI does:
 
   ```sh
   uv run pytest tests/runtime --collect-only -q -p no:cacheprovider > /tmp/collected.txt
   uv run pytest -n 4 $(python3 ../.github/scripts/pytest_shards.py --collected /tmp/collected.txt \
-    --durations ../.github/scripts/todofy-runtime-durations.json --workers 4 --total 3 --index I)
+    --durations ../.github/scripts/todofy-runtime-durations.json --workers 4 --total 3 --index I \
+    --serial ../.github/scripts/todofy-runtime-serial.txt --serial-out /tmp/serial.txt)
+  [ -s /tmp/serial.txt ] && uv run pytest $(cat /tmp/serial.txt)   # this shard's files that run alone
   ```
 
-  `--total 1 --index 0` prints every file, heaviest first, for a single `-n 4` run.
+  Without `--serial`, `--total 1 --index 0` prints every file, heaviest first, for a single `-n 4` run.
 
 One host test, `tools/legacy_migration/test_legacy_to_d1.py::test_model_table_matches_the_proto`,
 cross-checks the legacy model table against the `protos` checkout. It reads `TODOFY_PROTOS_DIR` if set,

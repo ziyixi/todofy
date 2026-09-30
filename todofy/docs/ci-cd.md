@@ -80,18 +80,44 @@ Each shard runs these steps:
    - Files are balanced by the recorded seconds per file in `.github/scripts/todofy-runtime-durations.json`,
      longest first, over all 12 processes (3 shards × 4). A file with no recorded time weighs the mean,
      so a new file is always planned.
-   - The planner refuses an empty shard or a plan that does not cover every file exactly once.
+   - The files in `.github/scripts/todofy-runtime-serial.txt` stay out of the processes: each goes to
+     the shard with the least work, which runs it alone after its xdist run (step 4). Today that is
+     `tests/runtime/test_alarm.py` (see "Files that run alone" below).
+   - The planner refuses an empty shard, a serial file that pytest did not collect, or a plan that does
+     not cover every file exactly once.
 4. `pytest -n 4 --dist loadfile --no-loadscope-reorder <files>`: four pytest-xdist processes on the
    runner's 4 vCPUs.
    - xdist hands each process whole files, heaviest first, and a file's tests run in file order.
-     Some tests rely on the ones before them in the same file; `tests/runtime/conftest.py` refuses any
-     per-test distribution (`--dist load`, `worksteal`, `each`).
+     Some tests rely on the ones before them in the same file; the rootdir `conftest.py` refuses any
+     other distribution (`--dist load`, `worksteal`, `loadgroup`, `each`, `loadscope`), however pytest
+     reaches `tests/runtime`.
    - Each process takes its ports from its own range below the Linux ephemeral range
      (`tests/runtime/harness.py`).
    - No `-k`, `-m`, `--deselect`, retry or rerun plugin (`test_ci_changes.py` checks the command and
      `uv.lock`).
+   - Then, if the shard has serial files, one plain pytest process runs them, with no other test server
+     on the runner, into `runtime-<index>-serial.xml`. Both runs always run, and either failing fails
+     the step.
 5. Upload the shard's JUnit XML (`todofy-runtime-junit-<index>`), plus every server's `dev.log` if the
    shard failed.
+
+#### Files that run alone
+
+`test_alarm.py::test_timeout_really_closes_a_hanging_upstream_connection` checks that the Gemini fake
+receives the fallback model's call at least 1.5 s (`GEMINI_TIMEOUT_MS`) after the hung call. workerd
+arms `AbortSignal.timeout` on the isolate's clock, which does not advance while Pyodide builds the
+request, so the gap the fake sees is 1.5 s plus or minus the Worker's own CPU time around the two
+calls. The fake stamps each request within 1 ms of its arrival (measured from accept to body), so the
+margin is all on the Worker side. Measured on the laptop, 12 runs each:
+
+| Conditions | Gap | Failures |
+| --- | --- | ---: |
+| alone, idle | 1.5008–1.5100 s | 0 |
+| alone, with 14 busy processes on 10 cores | 1.4968–1.5060 s | 6 |
+
+The review also saw it fail once in 8 full `-n 3`–`-n 8` runs, and 2 of 6 serial runs of the old
+`pywrangler dev` harness. The 1.5 s bound stays, and the file runs alone, as the whole suite did before
+the split. Adding a file to `todofy-runtime-serial.txt` needs a measured reason.
 
 The serial suite took 17–18 minutes on the runner. Each shard is expected to take about 4 minutes of
 setup and tests, but that has not been measured on GitHub yet (see "Speed" below).
@@ -106,10 +132,14 @@ following hold:
   cancelled one fails it.
 - `.github/scripts/pytest_completeness.py` accepts the shards' JUnit files. The script checks them
   against `pytest tests/runtime --collect-only -q`, run again on the same commit, and fails unless:
-  - there is one JUnit file per shard (`--shards 3`, which `test_ci_changes.py` keeps equal to the
-    matrix);
+  - there is one xdist JUnit file per shard (`--shards 3`, which `test_ci_changes.py` keeps equal to
+    the matrix), at most one serial file per shard, and nothing else;
+  - the collection is clean: no collection error, no module skipped as a whole
+    (`pytest.skip(allow_module_level=True)`, `importorskip`), and every `test_*.py` under
+    `tests/runtime` has at least one collected id (`--test-root`), so no file can drop out of the plan;
   - every collected id ran exactly once, and nothing else ran;
   - no test failed or errored, and no collection error occurred;
+  - the tests of `todofy-runtime-serial.txt` ran only in serial runs, and serial runs ran nothing else;
   - the skipped tests are exactly `.github/scripts/todofy-runtime-expected-skips.txt`. That list is the
     serial baseline's skips, and it is empty.
 

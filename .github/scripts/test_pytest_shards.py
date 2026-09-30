@@ -9,9 +9,11 @@ import unittest
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
-import pytest_shards  # noqa: E402
+import pytest_shards
 
 DURATIONS = Path(__file__).with_name("todofy-runtime-durations.json")
+SERIAL_LIST = Path(__file__).with_name("todofy-runtime-serial.txt")
+REPO = Path(__file__).resolve().parents[2]
 
 
 def ids(files, per_file=2):
@@ -78,6 +80,44 @@ class Plan(unittest.TestCase):
         self.assertEqual(pytest_shards.collected_files(output), FILES[:2])
 
 
+class SerialFiles(unittest.TestCase):
+    """Files of todofy-runtime-serial.txt run alone after a shard's xdist run, never in a lane."""
+
+    SERIAL = (FILES[0], FILES[5])
+
+    def test_every_file_lands_once_in_the_lanes_or_alone(self):
+        for total in range(1, 6):
+            with self.subTest(total=total):
+                shards, placed = pytest_shards.plan_with_serial(FILES, WEIGHTS, total, 4, self.SERIAL)
+                lanes = [path for shard in shards for path in shard]
+                alone = [path for group in placed for path in group]
+                self.assertEqual(sorted(alone), sorted(self.SERIAL))
+                self.assertFalse(set(lanes) & set(self.SERIAL))
+                self.assertEqual(sorted(lanes + alone), FILES)
+                self.assertEqual(len(lanes + alone), len(set(lanes + alone)))
+
+    def test_serial_files_go_to_the_least_loaded_shards(self):
+        weights = {"a.py": 40.0, "b.py": 20.0, "s1.py": 5.0, "s2.py": 3.0}
+        shards, placed = pytest_shards.plan_with_serial(sorted(weights), weights, 2, 1, ["s1.py", "s2.py"])
+        self.assertEqual(shards, [["a.py"], ["b.py"]])
+        self.assertEqual(placed, [[], ["s1.py", "s2.py"]])
+
+    def test_a_listed_file_that_was_not_collected_is_refused(self):
+        with self.assertRaises(ValueError):
+            pytest_shards.plan_with_serial(FILES, WEIGHTS, 3, 4, ["tests/runtime/test_renamed.py"])
+
+    def test_the_list_file_allows_comments(self):
+        self.assertEqual(pytest_shards.listed_files("# why\n\n tests/runtime/test_a.py  # timing\n"), [FILES[0]])
+
+    def test_the_repository_list_names_runtime_files_that_exist(self):
+        listed = pytest_shards.listed_files(SERIAL_LIST.read_text())
+        self.assertTrue(listed)
+        for path in listed:
+            with self.subTest(path=path):
+                self.assertRegex(path, r"^tests/runtime/test_\w+\.py$")
+                self.assertTrue((REPO / "todofy" / path).is_file())
+
+
 class Main(unittest.TestCase):
     def run_main(self, *args, collected=None):
         with tempfile.TemporaryDirectory() as tmp:
@@ -110,6 +150,40 @@ class Main(unittest.TestCase):
                 self.assertIn("index", err)
         code, files, _ = self.run_main("--total", "6")
         self.assertEqual((code, files), (1, []))
+
+    def test_serial_out_gets_the_shards_serial_files_and_stdout_the_rest(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            serial_list = Path(tmp) / "serial.txt"
+            serial_list.write_text(f"# alone\n{FILES[0]}\n")
+            seen, alone = [], []
+            for index in range(3):
+                out = Path(tmp) / f"serial-{index}.txt"
+                code, files, _ = self.run_main(
+                    "--index",
+                    str(index),
+                    "--total",
+                    "3",
+                    "--workers",
+                    "4",
+                    "--serial",
+                    str(serial_list),
+                    "--serial-out",
+                    str(out),
+                )
+                self.assertEqual(code, 0)
+                seen += files
+                alone += out.read_text().split()
+        self.assertEqual(alone, [FILES[0]])
+        self.assertNotIn(FILES[0], seen)
+        self.assertEqual(sorted(seen + alone), FILES)
+
+    def test_serial_without_serial_out_is_refused(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            serial_list = Path(tmp) / "serial.txt"
+            serial_list.write_text(f"{FILES[0]}\n")
+            code, files, err = self.run_main("--index", "0", "--total", "3", "--serial", str(serial_list))
+        self.assertEqual((code, files), (1, []))
+        self.assertIn("--serial-out", err)
 
     def test_no_collected_ids_is_refused(self):
         code, files, err = self.run_main("--index", "0", "--total", "1", collected=["no tests ran"])

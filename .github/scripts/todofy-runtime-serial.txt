@@ -1,0 +1,9 @@
+# Todofy runtime files that each shard runs alone, in one plain pytest process after its pytest-xdist run,
+# with no other test server on the runner (pytest_shards.py --serial; "Todofy checks" verifies it).
+#
+# test_timeout_really_closes_a_hanging_upstream_connection checks that the fake receives the fallback
+# model's call at least 1.5 s (GEMINI_TIMEOUT_MS) after the hung call. workerd arms AbortSignal.timeout on
+# the isolate's clock, which stands still while Pyodide builds the request, so that gap is 1.5 s plus or
+# minus the Worker's own CPU time around the two calls: 1.500-1.511 s idle, 1.497-1.506 s with the CPU
+# oversubscribed (6 of 12 runs failed). The fake itself stamps a request within 1 ms of its arrival.
+tests/runtime/test_alarm.py

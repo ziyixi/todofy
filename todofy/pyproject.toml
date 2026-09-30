@@ -36,5 +36,5 @@ ignore = ["RUF001", "RUF002", "RUF003"]
 pythonpath = ["worker", "."]
 testpaths = ["tests", "tools", "deploy"]
 # With pytest-xdist (-n N), each process takes whole files, in the order pytest collected them
-# (tests/runtime/conftest.py refuses per-test modes). Without -n these two options do nothing.
+# (the rootdir conftest.py refuses every other mode). Without -n these two options do nothing.
 addopts = "-ra --import-mode=importlib --dist loadfile --no-loadscope-reorder"

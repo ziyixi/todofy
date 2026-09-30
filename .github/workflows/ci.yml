@@ -213,7 +213,7 @@ jobs:
   # time. The plan (.github/scripts/pytest_shards.py) balances recorded seconds per file over every
   # pytest-xdist process of every shard and places each collected file in exactly one shard; inside a
   # shard, xdist gives each process whole files, heaviest first, and a file's tests run in file order
-  # (tests/runtime/conftest.py refuses any per-test distribution). No test is selected, deselected or
+  # (the rootdir conftest.py refuses any per-test distribution). No test is selected, deselected or
   # retried here; "Todofy checks" proves that the shards together ran every collected test once. Changing
   # the shard list also needs the same count in "Todofy checks" (--shards), which
   # .github/scripts/test_ci_changes.py checks.
@@ -282,16 +282,30 @@ jobs:
           uv run pytest tests/runtime --collect-only -q -p no:cacheprovider > "$RUNNER_TEMP/collected.txt"
           python3 ../.github/scripts/pytest_shards.py --collected "$RUNNER_TEMP/collected.txt" \
             --durations ../.github/scripts/todofy-runtime-durations.json --workers 4 \
+            --serial ../.github/scripts/todofy-runtime-serial.txt --serial-out "$RUNNER_TEMP/serial-files.txt" \
             --index "${{ strategy.job-index }}" --total "${{ strategy.job-total }}" > "$RUNNER_TEMP/shard-files.txt"
           cat "$RUNNER_TEMP/shard-files.txt"
+          echo "Alone, afterwards:"
+          cat "$RUNNER_TEMP/serial-files.txt"
       # Each server runs the gateway and todofy-core in one process (docs/gateway-contract.md §7). Four
-      # pytest processes on the runner's 4 vCPUs, each with its own ports (tests/runtime/harness.py).
+      # pytest processes on the runner's 4 vCPUs, each with its own ports (tests/runtime/harness.py). Then
+      # this shard's files of todofy-runtime-serial.txt (timing assertions with no margin for a busy CPU)
+      # in one plain pytest process, with no other test server running. Both runs always run; either
+      # failing fails the step.
       - name: Runtime tests (workerd with the gateway, real D1, Durable Object, alarms, cron and assets)
         run: |
           mkdir -p "$RUNNER_TEMP/junit"
+          status=0
           uv run pytest -n 4 --dist loadfile --no-loadscope-reorder -o junit_family=xunit2 \
             --junitxml="$RUNNER_TEMP/junit/runtime-${{ strategy.job-index }}.xml" \
-            --basetemp="$RUNNER_TEMP/pytest" $(cat "$RUNNER_TEMP/shard-files.txt")
+            --basetemp="$RUNNER_TEMP/pytest" $(cat "$RUNNER_TEMP/shard-files.txt") || status=$?
+          # Guarded: pytest without paths would run every testpath.
+          if [ -s "$RUNNER_TEMP/serial-files.txt" ]; then
+            uv run pytest -o junit_family=xunit2 \
+              --junitxml="$RUNNER_TEMP/junit/runtime-${{ strategy.job-index }}-serial.xml" \
+              --basetemp="$RUNNER_TEMP/pytest-serial" $(cat "$RUNNER_TEMP/serial-files.txt") || status=$?
+          fi
+          exit "$status"
       - name: Keep this shard's results for Todofy checks
         if: ${{ !cancelled() }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -306,13 +320,17 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: todofy-runtime-logs-${{ strategy.job-index }}
-          path: ${{ runner.temp }}/pytest/**/dev.log
+          path: |
+            ${{ runner.temp }}/pytest/**/dev.log
+            ${{ runner.temp }}/pytest-serial/**/dev.log
           if-no-files-found: ignore
           retention-days: 7
 
   # The one Todofy result "Todofy deploy" needs: both jobs above passed, and every runtime test pytest
   # collects on this commit ran exactly once across the shards, passed, and none was skipped
-  # (todofy-runtime-expected-skips.txt lists allowed skips; it is empty).
+  # (todofy-runtime-expected-skips.txt lists allowed skips; it is empty). The collection must be clean
+  # (no collection error or module-level skip, every test file under tests/runtime collected), and the
+  # files of todofy-runtime-serial.txt must have run alone.
   todofy-checks:
     name: Todofy checks
     needs: [changes, todofy-static, todofy-runtime]
@@ -353,7 +371,8 @@ jobs:
         run: |
           uv run pytest tests/runtime --collect-only -q -p no:cacheprovider > "$RUNNER_TEMP/collected.txt"
           python3 ../.github/scripts/pytest_completeness.py --collected "$RUNNER_TEMP/collected.txt" \
-            --junit-dir "$RUNNER_TEMP/junit" --shards 3 \
+            --junit-dir "$RUNNER_TEMP/junit" --shards 3 --test-root tests/runtime \
+            --serial ../.github/scripts/todofy-runtime-serial.txt \
             --expected-skips ../.github/scripts/todofy-runtime-expected-skips.txt
 
   mail-hero-checks:

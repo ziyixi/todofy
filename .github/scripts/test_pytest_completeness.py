@@ -3,6 +3,7 @@
 import contextlib
 import io
 import json
+import os
 import sys
 import tempfile
 import unittest
@@ -10,7 +11,7 @@ from pathlib import Path
 from xml.sax.saxutils import quoteattr
 
 sys.path.insert(0, str(Path(__file__).parent))
-import pytest_completeness  # noqa: E402
+import pytest_completeness
 
 IDS = [
     "tests/runtime/test_a.py::test_one",
@@ -105,7 +106,9 @@ class Check(unittest.TestCase):
 
     def test_a_missing_shard_file_fails(self):
         problems, _ = self.check(self.passing(), expected_shards=3)
-        self.assertTrue(any("expected 3 JUnit files" in problem for problem in problems), problems)
+        self.assertTrue(
+            any("one JUnit file per shard 0..2, found shards [0, 1]" in problem for problem in problems), problems
+        )
 
     def test_a_collection_error_in_a_shard_fails(self):
         shards = self.passing()
@@ -120,10 +123,133 @@ class Check(unittest.TestCase):
     def test_ids_that_share_a_junit_name_are_refused(self):
         aliased = [*IDS, "tests/runtime/test_c/Group.py::test_four"]
         self.assertEqual(
-            pytest_completeness.junit_key(aliased[-1]), pytest_completeness.junit_key("tests/runtime/test_c.py::Group::test_four")
+            pytest_completeness.junit_key(aliased[-1]),
+            pytest_completeness.junit_key("tests/runtime/test_c.py::Group::test_four"),
         )
         problems, _ = self.check(self.passing(), ids=aliased)
         self.assertTrue(any("same JUnit name" in problem for problem in problems), problems)
+
+
+class Collection(unittest.TestCase):
+    """A test file that errors or skips at collection has no ids, so the plan and the id check never see it."""
+
+    def check(self, text, on_disk=None):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "runtime-0.xml"
+            path.write_text(junit([(test_id, None) for test_id in IDS]))
+            return pytest_completeness.check(text, [path], 1, set(), on_disk=on_disk)[0]
+
+    def test_a_clean_collection_passes(self):
+        self.assertEqual(self.check(collected(), on_disk=["tests/runtime/test_a.py", "tests/runtime/test_b.py"]), [])
+
+    def test_a_module_level_skip_fails(self):
+        """pytest.skip(allow_module_level=True) or importorskip: "-ra" (addopts) prints the collector's skip."""
+        text = collected().replace("\n\n", "\n\nSKIPPED [1] tests/runtime/test_d.py:2: not today\n", 1)
+        problems = self.check(text)
+        self.assertTrue(
+            any("skipped or failed a collector" in problem and "test_d.py" in problem for problem in problems)
+        )
+
+    def test_a_collection_error_fails(self):
+        text = collected().replace("4 tests collected in", "4 tests collected, 1 error in")
+        problems = self.check(text)
+        self.assertTrue(any("skipped or failed a collector" in problem for problem in problems), problems)
+
+    def test_a_test_file_on_disk_without_a_collected_test_fails(self):
+        """Also without "-ra": a file that vanished from the collection is found on disk."""
+        on_disk = [
+            "tests/runtime/test_a.py",
+            "tests/runtime/test_b.py",
+            "tests/runtime/test_c.py",
+            "tests/runtime/test_d.py",
+        ]
+        problems = self.check(collected(), on_disk=on_disk)
+        self.assertTrue(
+            any("no collected test" in problem and "test_d.py" in problem for problem in problems), problems
+        )
+
+    def test_test_files_are_found_as_pytest_names_them(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            for name in (
+                "test_x.py",
+                "y_test.py",
+                "helper.py",
+                "conftest.py",
+                "sub/test_z.py",
+                "__pycache__/test_x.py",
+            ):
+                (root / name).parent.mkdir(parents=True, exist_ok=True)
+                (root / name).write_text("")
+            found = [Path(path).relative_to(root).as_posix() for path in pytest_completeness.test_files(root)]
+        self.assertEqual(found, ["sub/test_z.py", "test_x.py", "y_test.py"])
+
+    def test_ids_are_not_mistaken_for_collection_trouble(self):
+        ids = [*IDS, "tests/runtime/test_d.py::test_error_is_reported[ERROR collected errors]"]
+        self.assertEqual(pytest_completeness.collection_trouble(collected(ids)), [])
+
+
+class Serial(unittest.TestCase):
+    """Files of todofy-runtime-serial.txt run alone, after the shard's xdist run, into <name>-<I>-serial.xml."""
+
+    SERIAL = frozenset({"tests/runtime/test_b.py"})
+
+    def check(self, files, shards=2, serial=SERIAL):
+        with tempfile.TemporaryDirectory() as tmp:
+            paths = []
+            for name, cases in files.items():
+                path = Path(tmp) / name
+                path.write_text(junit(cases))
+                paths.append(path)
+            return pytest_completeness.check(collected(), paths, shards, set(), set(serial))[0]
+
+    def passing(self):
+        return {
+            "runtime-0.xml": [(IDS[0], None), (IDS[1], None)],
+            "runtime-1.xml": [(IDS[3], None)],
+            "runtime-1-serial.xml": [(IDS[2], None)],
+        }
+
+    def test_serial_files_in_their_own_run_pass(self):
+        self.assertEqual(self.check(self.passing()), [])
+
+    def test_a_serial_file_run_under_xdist_fails(self):
+        files = self.passing()
+        files["runtime-1.xml"].append(files.pop("runtime-1-serial.xml")[0])
+        problems = self.check(files)
+        self.assertTrue(any(IDS[2] in problem and "xdist run" in problem for problem in problems), problems)
+
+    def test_another_file_in_a_serial_run_fails(self):
+        files = self.passing()
+        files["runtime-1-serial.xml"].append(files["runtime-1.xml"].pop())
+        problems = self.check(files)
+        self.assertTrue(any(IDS[3] in problem and "serial run" in problem for problem in problems), problems)
+
+    def test_a_serial_file_that_was_not_collected_fails(self):
+        problems = self.check(self.passing(), serial={*self.SERIAL, "tests/runtime/test_gone.py"})
+        self.assertTrue(any("serial files that were not collected" in problem for problem in problems), problems)
+
+    def test_a_serial_file_does_not_stand_in_for_a_missing_shard(self):
+        files = self.passing()
+        del files["runtime-1.xml"]
+        files["runtime-1-serial.xml"].append((IDS[3], None))
+        problems = self.check(files, serial={*self.SERIAL, "tests/runtime/test_c.py"})
+        self.assertTrue(any("one JUnit file per shard" in problem for problem in problems), problems)
+
+    def test_unexpected_junit_files_fail(self):
+        for extra in ("runtime-1-serial.xml", "runtime-2-serial.xml", "runtime-0.xml", "notes.xml"):
+            with self.subTest(extra=extra):
+                files = self.passing()
+                files["other/" + extra if extra in files else extra] = []
+                with tempfile.TemporaryDirectory() as tmp:
+                    paths = []
+                    for name, cases in files.items():
+                        path = Path(tmp) / name
+                        path.parent.mkdir(parents=True, exist_ok=True)
+                        path.write_text(junit(cases))
+                        paths.append(path)
+                    problems = pytest_completeness.check(collected(), paths, 2, set(), self.SERIAL)[0]
+                self.assertTrue(problems, extra)
 
 
 class JunitKey(unittest.TestCase):
@@ -133,7 +259,8 @@ class JunitKey(unittest.TestCase):
             ("tests.runtime.test_x", "test_y[a/b::c.py]"),
         )
         self.assertEqual(
-            pytest_completeness.junit_key("tests/runtime/test_x.py::Klass::test_y"), ("tests.runtime.test_x.Klass", "test_y")
+            pytest_completeness.junit_key("tests/runtime/test_x.py::Klass::test_y"),
+            ("tests.runtime.test_x.Klass", "test_y"),
         )
 
 
@@ -151,6 +278,33 @@ class Main(unittest.TestCase):
                 self.assertEqual(pytest_completeness.main(args), 0)
                 self.assertEqual(json.loads((root / "d.json").read_text())["tests/runtime/test_a.py"], 3.0)
                 self.assertEqual(pytest_completeness.main([*args[:5], "2"]), 1)
+
+    def test_test_root_and_serial_options(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "ids.txt").write_text(collected())
+            (root / "junit").mkdir()
+            serial = [test_id for test_id in IDS if test_id.startswith("tests/runtime/test_b.py")]
+            (root / "junit" / "runtime-0.xml").write_text(
+                junit([(test_id, None) for test_id in IDS if test_id not in serial])
+            )
+            (root / "junit" / "runtime-0-serial.xml").write_text(junit([(test_id, None) for test_id in serial]))
+            (root / "serial.txt").write_text("# alone\ntests/runtime/test_b.py  # timing\n")
+            tests = root / "tests" / "runtime"
+            tests.mkdir(parents=True)
+            for name in ("test_a.py", "test_b.py", "test_c.py", "harness.py"):
+                (tests / name).write_text("")
+            args = ["--collected", str(root / "ids.txt"), "--junit-dir", str(root / "junit"), "--shards", "1"]
+            args += ["--serial", str(root / "serial.txt"), "--test-root", "tests/runtime"]
+            cwd = os.getcwd()
+            os.chdir(root)
+            try:
+                with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+                    self.assertEqual(pytest_completeness.main(args), 0)
+                    (tests / "test_d.py").write_text("")  # on disk, never collected
+                    self.assertEqual(pytest_completeness.main(args), 1)
+            finally:
+                os.chdir(cwd)
 
 
 if __name__ == "__main__":
