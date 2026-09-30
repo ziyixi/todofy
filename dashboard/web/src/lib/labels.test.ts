@@ -15,6 +15,8 @@ import mailHeroDegraded from '../../../../contracts/ops-v1/fixtures/OpsStatus/ma
 import todofyDegraded from '../../../../contracts/ops-v1/fixtures/OpsStatus/todofy-degraded.json'
 import mailHeroOk from '../../../../contracts/ops-v1/fixtures/OpsStatus/mail-hero-ok.json'
 import todofyOk from '../../../../contracts/ops-v1/fixtures/OpsStatus/todofy-ok.json'
+import labDegraded from '../../../../contracts/ops-v1/fixtures/OpsStatus/lab-degraded.json'
+import labOk from '../../../../contracts/ops-v1/fixtures/OpsStatus/lab-ok.json'
 import report from '../../../../contracts/ops-v1/fixtures/OpsReport/daily.json'
 
 describe('labels', () => {
@@ -26,11 +28,11 @@ describe('labels', () => {
   })
 
   it('labels every code in the contract fixtures', () => {
-    const signals = [...mailHeroDegraded.signals, ...todofyDegraded.signals].map((signal) => signal.code)
+    const signals = [...mailHeroDegraded.signals, ...todofyDegraded.signals, ...labDegraded.signals].map((signal) => signal.code)
     for (const code of [...signals, ...report.items.map((item) => item.code)]) expect(signalLabel(code)).not.toBe(code)
-    const counters = [mailHeroOk, todofyOk].flatMap((status) => Object.keys(status.counters))
+    const counters = [mailHeroOk, todofyOk, labOk].flatMap((status) => Object.keys(status.counters))
     for (const name of counters) expect(counterInfo(name).label).not.toBe(name)
-    const modes = [mailHeroOk, todofyOk].flatMap((status) => Object.keys(status.modes))
+    const modes = [mailHeroOk, todofyOk, labOk].flatMap((status) => Object.keys(status.modes))
     for (const name of modes) expect(modeInfo(name, false).label).not.toBe(name)
   })
 
@@ -40,6 +42,12 @@ describe('labels', () => {
     expect(counterShort('inbox_open', 23)).toBe('收件箱开放 23')
     expect(signalLabel('review_overdue')).toBe('每周回顾已超过 10 天')
     expect(deferredJobLabel('gtd_snapshot')).toBe('GTD 每日快照')
+  })
+
+  it('labels the task-intent counters of Todofy and the deferred jobs of Lab', () => {
+    expect(counterInfo('intents_pending').label).toBe('待创建的任务提议')
+    expect(counterInfo('intents_failed_7d').label).toBe('近 7 天失败的任务提议')
+    for (const job of labDegraded.guard.deferred) expect(deferredJobLabel(job)).not.toBe(job)
   })
 
   it('keeps unknown codes raw', () => {

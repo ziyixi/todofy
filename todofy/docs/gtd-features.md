@@ -291,8 +291,8 @@ older than 48 h, or none 48 h after the first attempt; metric `age_hours`) and `
 `PROCESSING_PAUSED` / `FORCE_PAUSE_TODOIST`), since only the snapshot's completed list sees a review done;
 otherwise the dashboard's 回顾 stage would claim an overdue review the owner did. `review_overdue` is info on purpose: a
 skipped personal review should not turn the Todofy tile `degraded` or enter the ops digest; the Sunday
-task is the nudge. Values come from `gtd_state` in the object's storage, so `status()` keeps its budget of
-five D1 statements. Counters are left out while unknown (lost storage, partial snapshot, inbox unset).
+task is the nudge. Values come from `gtd_state` in the object's storage, so the GTD ledger adds no D1
+statement to `status()` (five when this was written; six since task-intent-v1's `intents.COUNTS`). Counters are left out while unknown (lost storage, partial snapshot, inbox unset).
 Update `contracts/ops-v1/README.md` (Todofy signal row — the dashboard test derives `knownSignals` from
 it), `IMPLEMENTATION.md` §3 (counters, `GuardState.deferred` gains `gtd_snapshot`) and an `OpsStatus`
 fixture carrying the new counters.

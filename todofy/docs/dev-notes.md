@@ -609,8 +609,8 @@ Worker bound with `entrypoint = "Ops"`, like the dashboard) runs in `Todofy chec
 `contracts/mail-received-v1/fixtures/canary_event.json`; its `event_id` differs from every other fixture's
 (`test_mail_hero_compat.py` checks it), because the runtime suite posts all fixtures to one Worker.
 ```
-status()          one D1 batch of 5 indexed reads (views.ACTIVE_COUNTS, ATTENTION_COUNT, RECEIVED_SINCE,
-                  OLDEST_DUE, reminders.REMINDER_DAY) + object storage; D1 failure → health "down"
+status()          one D1 batch of 6 indexed reads (views.ACTIVE_COUNTS, ATTENTION_COUNT, RECEIVED_SINCE,
+                  OLDEST_DUE, reminders.REMINDER_DAY, intents.COUNTS) + object storage; D1 failure → health "down"
 setGuard(input)   object storage only (ops_guard); idempotent; shed until ≤ 36 h; expires by itself
 canaryResult(id)  one primary-key read (ledger.get)
 reportOps(report) object storage only (ops_report, ≤ 8 KiB); a later generated_at already stored wins

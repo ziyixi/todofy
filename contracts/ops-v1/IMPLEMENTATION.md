@@ -331,10 +331,12 @@ now, so a day whose reminder was not yet created considers the new report at onc
 
 ### 3.5 `status()` and budget
 
-One D1 batch of ≤ 5 statements, no D1 writes: `views.ACTIVE_COUNTS`, `views.ATTENTION_COUNT`,
-`views.RECEIVED_SINCE` (now − 1 day), `views.OLDEST_DUE` (the Overview's batch, canaries excluded) and
-`reminders.REMINDER_DAY` for today. Rows: active events (twice, `mail_events_by_state`), events of the
-last 24 h, due events, one reminder row. Object storage: `budgets()`, `backup.overview`, the guard.
+One D1 batch of ≤ 6 statements, no D1 writes: `views.ACTIVE_COUNTS`, `views.ATTENTION_COUNT`,
+`views.RECEIVED_SINCE` (now − 1 day), `views.OLDEST_DUE` (the Overview's batch, canaries excluded),
+`reminders.REMINDER_DAY` for today and, since task-intent-v1 (2026-09-30), `intents.COUNTS` (pending
+intents and intents failed within 7 days, on the `task_intents_updated` index). Rows: active events
+(twice, `mail_events_by_state`), events of the last 24 h, due events, one reminder row, the intents
+counted. The GTD ledger adds no D1 read (object storage, below). Object storage: `budgets()`, `backup.overview`, the guard.
 
 Signals: `maintenance_mode` (critical); `processing_paused`, `todoist_paused` (warning);
 `reminder_disabled` (info); `attention` (warning, `count`); `due_backlog` (warning, oldest due ≥ 1 h,
@@ -353,10 +355,11 @@ README.md.
 
 Counters: `active_events`, `attention_events`, `received_24h`, `oldest_due_age_seconds`,
 `gemini_used_tokens`, `gemini_reserved_tokens`, `gemini_token_budget`, `gemini_calls`,
-`todoist_window_calls`, `todoist_window_limit`, `backup_age_seconds`, and the GTD ledger's `inbox_open`,
+`todoist_window_calls`, `todoist_window_limit`, `intents_pending`, `intents_failed_7d` (task-intent-v1),
+`backup_age_seconds`, and the GTD ledger's `inbox_open`,
 `inbox_oldest_days`, `overdue`, `carryover_open` (mail tasks of the 14 days before the last 24 h still
 open), `completed_7d` (the latest complete snapshot aggregate, each left out while unknown) and
-`review_age_days` (while the review and the snapshot are on): 17 of the 32 allowed.
+`review_age_days` (while the review and the snapshot are on): at most 19 of the 32 allowed.
 `last_backup_at` from
 `backup.overview`; `ui_url` = `https://{TODOFY_PUBLIC_HOST}/`; capabilities `["canary_consumer",
 "guard", "ops_digest"]`; modes `maintenance`, `processing_paused`, `force_pause_todoist`,
