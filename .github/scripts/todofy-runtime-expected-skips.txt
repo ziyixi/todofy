@@ -1,0 +1,2 @@
+# Runtime test ids (as pytest --collect-only -q prints them) that may be skipped in the Todofy runtime
+# shards; "Todofy checks" fails on any other skip. Empty: the serial suite has no skips.

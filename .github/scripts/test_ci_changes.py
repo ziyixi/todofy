@@ -618,6 +618,10 @@ class DeployConditions(unittest.TestCase):
         for need in before_gate:
             with self.subTest(job=need):
                 self.assertIn(f"${{{{ needs.{need}.result }}}}", gate)
+                # ...into an env var that the loop over results reads.
+                variable = re.search(rf"^ +(\w+): \$\{{\{{ needs\.{need}\.result \}}\}}$", gate, re.MULTILINE)
+                self.assertIsNotNone(variable, need)
+                self.assertRegex(gate, rf'"[^"=]+=\${variable.group(1)}"')
 
     def test_changes_exports_every_output_and_each_is_used(self):
         blocks = self.jobs()
@@ -734,6 +738,149 @@ class WebsiteRelease(unittest.TestCase):
         )
         self.assertEqual(text.count("GITHUB_TOKEN: ${{ github.token }}"), len(with_token))
         self.assertNotIn("GH_TOKEN", text)
+
+
+class TodofyJobs(unittest.TestCase):
+    """Todofy's checks are split into "Todofy static checks", the "Todofy runtime" shards and "Todofy checks".
+
+    Splitting must not drop a check: every change that checks Todofy runs all three, "Todofy checks" (what
+    "Todofy deploy" needs) passes only when the other two passed and the shards ran every collected runtime
+    test once (pytest_completeness.py), and nothing selects, deselects or retries runtime tests.
+    """
+
+    FLAG = "needs.changes.outputs.todofy_check == 'true'"
+
+    def setUp(self):
+        self.blocks = workflow_jobs()
+        self.conditions = DeployConditions()
+
+    @staticmethod
+    def code(block):
+        """The block without its comment lines (comments before the next job belong to this block)."""
+        return "\n".join(line for line in block.splitlines() if not line.lstrip().startswith("#"))
+
+    def pytest_commands(self, job):
+        """Every pytest command of a job, with its continuation lines."""
+        commands = re.findall(r"^ +(uv run pytest (?:.*\\\n)*.*)$", self.code(self.blocks[job]), re.MULTILINE)
+        self.assertTrue(commands, job)
+        return commands
+
+    def shards(self):
+        match = re.search(r"^        shard: \[([\d, ]+)\]$", self.blocks["todofy-runtime"], re.MULTILINE)
+        self.assertIsNotNone(match)
+        return [int(value) for value in match.group(1).split(",")]
+
+    def test_todofy_checks_requires_the_static_checks_and_every_shard(self):
+        block = self.blocks["todofy-checks"]
+        self.assertIn("    name: Todofy checks\n", block)
+        self.assertEqual(self.conditions.needs(block), ["changes", "todofy-static", "todofy-runtime"])
+        # Runs after a failed shard (to report it) but never turns a cancelled run into a pass.
+        self.assertEqual(self.conditions.condition(block), f"${{{{ !cancelled() && {self.FLAG} }}}}")
+        first = re.split(r"^      - ", block, flags=re.MULTILINE)[1]
+        self.assertIn("STATIC: ${{ needs.todofy-static.result }}", first)
+        self.assertIn("RUNTIME: ${{ needs.todofy-runtime.result }}", first)
+        self.assertIn('[ "$STATIC" = success ] && [ "$RUNTIME" = success ]', first)
+
+    def test_static_and_runtime_run_whenever_todofy_is_checked(self):
+        for job in ("todofy-static", "todofy-runtime"):
+            with self.subTest(job=job):
+                self.assertEqual(self.conditions.needs(self.blocks[job]), [])  # needs: changes only
+                self.assertIn("    needs: changes\n", self.blocks[job])
+                self.assertEqual(self.conditions.condition(self.blocks[job]), self.FLAG)
+
+    def test_the_static_job_keeps_every_check_but_the_runtime_suite(self):
+        block = self.blocks["todofy-static"]
+        for command in (
+            "npm ci --no-audit --no-fund\n          uv sync --locked",
+            "uv run ruff check worker tests tools deploy",
+            "uv run ruff format --check worker tests tools deploy",
+            "uv run pytest tests/unit tests/fakes tools deploy",
+            "npm run lint\n          npm run typecheck\n          npm test",
+            "npm run check:api\n          npm run typecheck\n          npm test\n          npm run build",
+            "if grep -rnE 'mail_hero|mail-hero' src; then exit 1; fi",
+            "uv run python deploy/generate_ci_config.py",
+            "uv run pywrangler deploy --dry-run --config wrangler.production.ci.json",
+            "npx --no-install wrangler deploy --dry-run --config gateway/wrangler.production.ci.json",
+        ):
+            with self.subTest(command=command):
+                self.assertIn(command, block)
+        self.assertNotIn("tests/runtime", self.code(block))
+
+    def test_the_shards_run_every_collected_runtime_file_and_nothing_else(self):
+        block = self.blocks["todofy-runtime"]
+        shards = self.shards()
+        self.assertEqual(shards, list(range(1, len(shards) + 1)))
+        self.assertIn(f"    name: Todofy runtime (${{{{ matrix.shard }}}}/{len(shards)})\n", block)
+        self.assertIn("      fail-fast: false\n", block)
+        # The plan comes from pytest's own collection and GitHub's matrix position, never a hand-kept list.
+        self.assertIn('uv run pytest tests/runtime --collect-only -q -p no:cacheprovider > "$RUNNER_TEMP/collected.txt"', block)
+        self.assertIn('--index "${{ strategy.job-index }}" --total "${{ strategy.job-total }}"', block)
+        self.assertIn('$(cat "$RUNNER_TEMP/shard-files.txt")', block)
+        self.assertIn('--junitxml="$RUNNER_TEMP/junit/runtime-${{ strategy.job-index }}.xml"', block)
+        self.assertIn("name: todofy-runtime-junit-${{ strategy.job-index }}", block)
+        commands = self.pytest_commands("todofy-runtime") + self.pytest_commands("todofy-checks")
+        self.assertEqual(len(commands), 3)  # plan, run, completeness
+        for option in (" -k", " -m", "--deselect", "--ignore", "--lf", "--last-failed", "--reruns", " -x", "--maxfail"):
+            for command in commands:
+                with self.subTest(option=option, command=command):
+                    self.assertNotIn(option, command)
+
+    def test_each_shard_runs_whole_files_in_as_many_processes_as_planned(self):
+        block = self.code(self.blocks["todofy-runtime"])
+        run = [command for command in self.pytest_commands("todofy-runtime") if "--junitxml" in command]
+        self.assertEqual(len(run), 1)
+        processes = re.findall(r"^uv run pytest -n (\d+) --dist loadfile --no-loadscope-reorder ", run[0])
+        self.assertEqual(len(processes), 1, run[0])
+        # The plan balances the same number of processes per shard that pytest-xdist starts.
+        self.assertEqual(re.findall(r"--workers (\d+)\b", block), processes)
+        self.assertNotRegex(run[0], r"--dist[ =](?!loadfile)")
+        pyproject = (REPO / "todofy" / "pyproject.toml").read_text()
+        self.assertIn('addopts = "-ra --import-mode=importlib --dist loadfile --no-loadscope-reorder"', pyproject)
+        self.assertIn('"pytest-xdist==', pyproject)
+        # One `pywrangler sync` and the Pyodide download happen before the xdist processes start.
+        self.assertLess(block.index("uv run python -m tests.runtime.warm_up"), block.index(run[0]))
+
+    def test_the_pyodide_cache_is_restored_only_on_an_exact_key(self):
+        block = self.code(self.blocks["todofy-runtime"])
+        step = block.split("- name: Restore the Pyodide bundle\n", 1)[1].split("\n      - ", 1)[0]
+        self.assertIn("uses: actions/cache@", step)
+        self.assertIn("path: todofy/.wrangler/pyodide-cache", step)
+        self.assertNotIn("restore-keys", step)
+        for keyed in ("todofy/package-lock.json", "todofy/tests/runtime/harness.py", "todofy/wrangler.test.toml"):
+            self.assertIn(f"'{keyed}'", step)
+        # Only the shards use it: nothing that deploys restores it.
+        for job, other in self.blocks.items():
+            if job != "todofy-runtime":
+                with self.subTest(job=job):
+                    self.assertNotIn("pyodide-cache", self.code(other))
+
+    def test_todofy_deploy_needs_every_todofy_job(self):
+        block = self.blocks["todofy-deploy"]
+        todofy_jobs = {"todofy-static", "todofy-runtime", "todofy-checks"}
+        self.assertEqual({job for job in self.blocks if job.startswith("todofy-")} - {"todofy-deploy"}, todofy_jobs)
+        self.assertLessEqual(todofy_jobs, set(self.conditions.needs(block)))
+        for job in todofy_jobs:
+            with self.subTest(job=job):
+                self.assertIn(f"needs.{job}.result == 'success'", self.conditions.condition(block))
+
+    def test_the_completeness_check_expects_one_result_per_shard(self):
+        block = self.blocks["todofy-checks"]
+        self.assertEqual(re.findall(r"--shards (\d+)\b", block), [str(len(self.shards()))])
+        self.assertIn("pattern: todofy-runtime-junit-*", block)
+        self.assertIn('uv run pytest tests/runtime --collect-only -q -p no:cacheprovider > "$RUNNER_TEMP/collected.txt"', block)
+        self.assertIn("python3 ../.github/scripts/pytest_completeness.py", block)
+        self.assertIn("--expected-skips ../.github/scripts/todofy-runtime-expected-skips.txt", block)
+
+    def test_the_runtime_suite_has_no_expected_skips_today(self):
+        skips = (REPO / ".github" / "scripts" / "todofy-runtime-expected-skips.txt").read_text()
+        self.assertEqual([line for line in skips.splitlines() if line.strip() and not line.startswith("#")], [])
+
+    def test_no_test_retry_plugin_is_installed(self):
+        """A retried test would hide flakiness (and show up twice in the shards' results)."""
+        lock = (REPO / "todofy" / "uv.lock").read_text()
+        for plugin in ("pytest-rerunfailures", "flaky", "pytest-retry", "pytest-randomly"):
+            with self.subTest(plugin=plugin):
+                self.assertNotIn(f'name = "{plugin}"', lock)
 
 
 @unittest.skipUnless(shutil.which("bash") and shutil.which("jq"), "needs bash and jq (both on the runner)")

@@ -1,18 +1,27 @@
 """Runtime-test harness: real workerd (D1, Durable Object, alarms, cron, assets)
-started with `pywrangler dev` against loopback fakes.
+started with `wrangler dev` against loopback fakes.
 
 A test server is one process running both Workers (docs/gateway-contract.md §7): the
 TypeScript gateway (primary: port, cron, assets, `--var`) and todofy-core, whose vars
 go into a generated config because `--var` reaches only the primary.
+
+Safe to run in several pytest processes at once (pytest-xdist, or concurrent shards):
+each process takes its ports from its own range, persist directories come from
+pytest's per-process ``tmp_path_factory``, and the two things every process shares in
+the checkout (pywrangler's vendored ``python_modules/`` and the Pyodide disk cache) are
+prepared under a file lock. See docs/dev-notes.md §1.
 """
 
 import base64
+import contextlib
+import fcntl
 import functools
 import hashlib
 import json
 import os
 import re
 import shlex
+import shutil
 import signal
 import socket
 import subprocess
@@ -62,10 +71,83 @@ def sha256_hex(data: str | bytes) -> str:
     return hashlib.sha256(data.encode() if isinstance(data, str) else data).hexdigest()
 
 
+# Each pytest process owns PORTS_PER_PROCESS ports from PORT_BASE up, below the Linux (32768-60999) and
+# macOS (49152-65535) ephemeral ranges, where the fakes' and every client's OS-assigned ports live. A port
+# taken from the OS with bind(0) and released would race: another process's workerd could take it first.
+PORT_BASE = 20000
+PORTS_PER_PROCESS = 500
+_next_port = [0]
+
+
+def _port_slot() -> int:
+    """This process's range: the pytest-xdist worker number (gw0, gw1, ...), plus
+    TODOFY_TEST_PORT_SLOT for separate pytest runs at once (e.g. several shards)."""
+    worker = os.environ.get("PYTEST_XDIST_WORKER", "gw0").removeprefix("gw")
+    slot = int(worker or 0) + int(os.environ.get("TODOFY_TEST_PORT_SLOT", "0"))
+    if not 0 <= slot < (32768 - PORT_BASE) // PORTS_PER_PROCESS:
+        raise RuntimeError(f"port slot {slot} is outside {PORT_BASE}-32767")
+    return slot
+
+
 def _free_port() -> int:
-    with socket.socket() as sock:
-        sock.bind(("127.0.0.1", 0))
-        return sock.getsockname()[1]
+    """The next port of this process's range that nothing is bound to (a stopped server's port is
+    skipped while it lingers). Only this process hands out ports from its range."""
+    base = PORT_BASE + _port_slot() * PORTS_PER_PROCESS
+    for _ in range(PORTS_PER_PROCESS):
+        port = base + _next_port[0] % PORTS_PER_PROCESS
+        _next_port[0] += 1
+        with socket.socket() as sock:
+            try:
+                sock.bind(("127.0.0.1", port))
+            except OSError:
+                continue
+            return port
+    raise RuntimeError(f"no free port in {base}-{base + PORTS_PER_PROCESS - 1}")
+
+
+@contextlib.contextmanager
+def _checkout_lock(name: str) -> Iterator[None]:
+    """An exclusive lock shared by every pytest process in this checkout."""
+    path = ROOT / ".wrangler" / f"{name}.lock"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a") as handle:
+        fcntl.flock(handle, fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(handle, fcntl.LOCK_UN)
+
+
+@functools.cache
+def _ensure_synced() -> None:
+    """`pywrangler sync` once per process, before the first server; `pywrangler dev` would run it
+    before every start (and rebuild ``python_modules/`` whenever pyproject.toml or pylock.toml is
+    newer), then run this same `wrangler dev`. A no-op once synced; the lock keeps concurrent
+    processes from rebuilding it under each other's servers."""
+    with _checkout_lock("pywrangler-sync"):
+        subprocess.run(
+            [sys.executable, "-m", "pywrangler", "sync"],
+            cwd=ROOT,
+            env=os.environ | {"CI": "true", "WRANGLER_SEND_METRICS": "false"},
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+
+
+def _pyodide_cached() -> bool:
+    return any(PYODIDE_CACHE.glob("pyodide_*.capnp.bin"))
+
+
+@contextlib.contextmanager
+def _pyodide_download_guard() -> Iterator[None]:
+    """Until the Pyodide bundle is in the disk cache, one server at a time starts (and downloads it),
+    so concurrent processes never write or read a half-written bundle."""
+    if _pyodide_cached():
+        yield
+        return
+    with _checkout_lock("pyodide-cache"):
+        yield
 
 
 def _b64url(data: bytes) -> str:
@@ -133,7 +215,7 @@ def wait_until[T](probe: Callable[[], T | None], timeout_s: float, what: str) ->
 
 
 class Worker:
-    """One `pywrangler dev` process on its own port and persist directory.
+    """One `wrangler dev` process on its own port and persist directory.
 
     ``configs`` are passed in order (the first is the primary, which owns the port, the cron
     trigger, the assets and every ``--var``); ``d1_config`` names the config whose D1
@@ -155,8 +237,15 @@ class Worker:
         return httpx.Client(base_url=self.base_url, headers={"host": host}, timeout=30)
 
     def start(self) -> None:
+        _ensure_synced()
+        with _pyodide_download_guard():
+            self._start()
+
+    def _start(self) -> None:
         port = _free_port()
-        command = [sys.executable, "-m", "pywrangler", "dev"]
+        # The wrangler `pywrangler dev` would run (`npx wrangler` resolves to it), without pywrangler's
+        # per-start `sync` check and `wrangler --version` call: ~1 s less per server.
+        command = [str(WRANGLER), "dev"]
         for config in self.configs:
             command += ["--config", config]
         command += [
@@ -164,6 +253,10 @@ class Worker:
             "127.0.0.1",
             "--port",
             str(port),
+            # Explicit, from this process's range: wrangler's own pick (9229, else a random port) races
+            # with other processes.
+            "--inspector-port",
+            str(_free_port()),
             "--persist-to",
             str(self.persist_to),
             "--show-interactive-dev-session=false",
@@ -215,6 +308,10 @@ class Worker:
             self._process.wait(timeout=15)
         except ProcessLookupError:
             pass  # it already exited, e.g. workerd failed to start; keep that failure visible
+        except PermissionError:
+            # macOS answers EPERM, not ESRCH, for a group whose processes all exited but are not reaped yet.
+            if self._process.poll() is None:
+                raise
         self._process = None
 
     def crash_and_restart(self, lose_object_storage: bool = False) -> None:
@@ -343,11 +440,47 @@ class Worker:
         return self.hooks.get(path, params=params, auth=auth or (REPORT_USER, REPORT_PASSWORD))
 
 
+def _d1_database(config: str) -> tuple[dict[str, Any], Path]:
+    """The DB binding's entry and its resolved migrations directory in a wrangler config (TOML or JSON)."""
+    path = Path(config) if Path(config).is_absolute() else ROOT / config
+    text = path.read_text()
+    parsed = json.loads(text) if path.suffix == ".json" else tomllib.loads(text)
+    [database] = [entry for entry in parsed["d1_databases"] if entry["binding"] == "DB"]
+    return database, (path.parent / database.get("migrations_dir", "migrations")).resolve()
+
+
+def _migrated_template(worker: Worker) -> Path:
+    """A persist directory holding exactly what `wrangler d1 migrations apply --local` writes into an
+    empty one for ``worker.d1_config``, made once per pytest process and database (the binding's entry,
+    its migrations directory and every migration file) next to the workers' own directories."""
+    database, migrations = _d1_database(worker.d1_config)
+    key = hashlib.sha256(json.dumps(database | {"migrations_dir": str(migrations)}, sort_keys=True).encode())
+    for sql in sorted(migrations.glob("*.sql")):
+        key.update(sql.name.encode() + b"\0" + sql.read_bytes() + b"\0")
+    template = worker.persist_to.parent / f"d1-template-{key.hexdigest()[:16]}"
+    if not template.exists():
+        staged = template.with_name(f"{template.name}.{os.getpid()}.{uuid.uuid4().hex}")
+        _wrangler(
+            "d1", "migrations", "apply", "DB", "--local", "--persist-to", str(staged), "--config", worker.d1_config
+        )
+        try:
+            staged.rename(template)
+        except OSError:
+            shutil.rmtree(staged)  # another process made it first
+    return template
+
+
 def _run(worker: Worker) -> Iterator[Worker]:
     _ensure_assets()
     if any((ROOT / "migrations").glob("*.sql")):
-        state = str(worker.persist_to)
-        _wrangler("d1", "migrations", "apply", "DB", "--local", "--persist-to", state, "--config", worker.d1_config)
+        # Migrating an empty directory gives the same files every time, so copy them from a template
+        # migrated once instead of running wrangler (~1.4 s) per server. A directory that already has
+        # state is migrated in place, as before.
+        if not (worker.persist_to / "v3").exists():
+            shutil.copytree(_migrated_template(worker), worker.persist_to, dirs_exist_ok=True)
+        else:
+            state = str(worker.persist_to)
+            _wrangler("d1", "migrations", "apply", "DB", "--local", "--persist-to", state, "--config", worker.d1_config)
     try:
         worker.start()
         yield worker

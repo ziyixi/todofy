@@ -22,15 +22,51 @@ uv run ruff check worker tests tools deploy && uv run ruff format --check worker
 uv run pytest tests/unit tests/fakes tools deploy   # host CPython (tools includes a local-D1 round trip)
 (cd gateway && npm ci --no-audit --no-fund && npm run lint && npm run typecheck && npm test)
 (cd web && npm ci --no-audit --no-fund && npm run check:api && npm run typecheck && npm test && npm run build)
-uv run pytest tests/runtime          # real workerd via `pywrangler dev`, ~9 min (about 30 dev servers,
-                                     # each running the gateway and todofy-core in one process)
+uv run pytest tests/runtime          # real workerd via `wrangler dev`, serially: ~10 min (about 80
+                                     # dev servers, each running the gateway and todofy-core in one process)
+uv run pytest tests/runtime -n 4     # the same tests in 4 processes (pytest-xdist): ~3 min
 uv run pytest                        # everything (testpaths: tests, tools, deploy)
 ```
 
-These are exactly the steps of the `Todofy checks` job in the monorepo's `.github/workflows/ci.yml`, which then
-generates placeholder production configs for both Workers and dry-runs them. `npm run build` writes
-`uiassets/dist`; without it the runtime harness serves a placeholder `index.html` and one placeholder
-file under `assets/`.
+These are the steps of the `Todofy static checks` job and the `Todofy runtime` shards in the monorepo's
+`.github/workflows/ci.yml` ([ci-cd.md](ci-cd.md)); CI also generates placeholder production configs for
+both Workers and dry-runs them. `npm run build` writes `uiassets/dist`; without it the runtime harness
+serves a placeholder `index.html` and one placeholder file under `assets/`.
+
+Running the runtime suite in parallel:
+
+- A file always runs whole, in its own order, in one process. Tests in a file share the module's Worker,
+  and some rely on the ones before them: 13 tests in 9 files fail when their file runs reversed. Files
+  are independent of each other: every file passed in a random and in a reversed file order. So
+  pytest-xdist runs with `--dist loadfile --no-loadscope-reorder` (the `addopts` default in
+  `pyproject.toml`), and `tests/runtime/conftest.py` refuses a per-test mode (`--dist load`,
+  `worksteal`, `loadgroup`, `each`). Never add pytest-randomly or a rerun plugin.
+- Ports: each pytest process takes the ports of its servers from its own range of 500, from 20000 up
+  (the xdist worker number picks the range). That is below the Linux (32768–60999) and macOS
+  (49152–65535) ephemeral ranges, where the fakes' and clients' OS-assigned ports live. Each server
+  also gets an explicit `--inspector-port` from the range; wrangler's own pick (9229, else a random
+  port) races between processes. To run several pytest commands at once, give each a different
+  `TODOFY_TEST_PORT_SLOT` that is at least the previous one plus its `-n` (for example 0, 4 and 8 for
+  three runs with `-n 4`).
+- Shared state in the checkout is prepared under file locks in `.wrangler/`: `pywrangler sync` (once per
+  process) and the first Pyodide download. `uv run python -m tests.runtime.warm_up` does both once, up
+  front; CI runs it before each shard.
+- One assertion has almost no timing margin: `test_alarm.py::test_timeout_really_closes_a_hanging_upstream_connection`
+  checks `1.5 <= answered.at - hung.at`, the gap between the fake receiving the hung call and the
+  fallback call. workerd arms `AbortSignal.timeout` on the isolate's clock, which stands still while
+  Pyodide builds the request, so the real gap is 1.5 s ± a few ms of CPU on either side. Measured gaps:
+  1.503–1.519 s idle, 1.504–1.523 s next to a `-n 4` run. It failed once (1.496 s) in 9 parallel or
+  sharded full runs, and never in the serial runs.
+- Longest first: xdist hands out files in the order pytest collects them, so pass the files heaviest
+  first. The CI plan prints them in that order; to run shard `I` of 3 exactly as CI does:
+
+  ```sh
+  uv run pytest tests/runtime --collect-only -q -p no:cacheprovider > /tmp/collected.txt
+  uv run pytest -n 4 $(python3 ../.github/scripts/pytest_shards.py --collected /tmp/collected.txt \
+    --durations ../.github/scripts/todofy-runtime-durations.json --workers 4 --total 3 --index I)
+  ```
+
+  `--total 1 --index 0` prints every file, heaviest first, for a single `-n 4` run.
 
 One host test, `tools/legacy_migration/test_legacy_to_d1.py::test_model_table_matches_the_proto`,
 cross-checks the legacy model table against the `protos` checkout. It reads `TODOFY_PROTOS_DIR` if set,
@@ -78,8 +114,8 @@ worker/todofy/core/            pure stdlib Python, host-testable, no `js`/`worke
 worker/todofy/runtime/         runs only inside workerd (imports `js`, `workers`, `pyodide`)
 tests/unit/                    host tests for core/, the migration and the API contract (golden/ = Go captures)
 tests/fakes/                   in-process loopback HTTP fake (+ its own tests)
-tests/runtime/                 black-box tests against `pywrangler dev` (gateway + core) with real
-                               D1/DO/alarms/cron/assets
+tests/runtime/                 black-box tests against `wrangler dev` (gateway + core) with real
+                               D1/DO/alarms/cron/assets (harness.py; run serially or in parallel, §1)
 tests/mail_contract.py         paths of the shared contract: ../contracts/mail-received-v1 holds the schema and
                                the exact webhook bytes Mail Hero's builder emits (compat fixtures, synthetic mail)
 web/                           owner UI (React + Vite); builds into uiassets/dist; types generated from the OpenAPI
@@ -189,6 +225,10 @@ Local runtime quirks (not production behaviour)
   stalled a dev server for 77 s and once killed it (`read(): Operation timed out`), so the runtime harness
   launches workerd through `.wrangler/workerd-with-pyodide-cache` (via `MINIFLARE_WORKERD_PATH`), which
   caches it in `.wrangler/pyodide-cache`. Plain `pywrangler dev` still downloads it each time.
+- The harness starts `node_modules/.bin/wrangler dev` itself: `pywrangler dev` runs `pywrangler sync` and
+  `npx wrangler --version` on every start (about 1.2 s) and then the same `npx wrangler dev`. The harness
+  runs `pywrangler sync` once per pytest process instead. A new server's empty persist directory gets a
+  copy of one migrated per process and database, instead of its own `d1 migrations apply` (1.3 s).
 
 ## 4. Contracts every module must keep
 

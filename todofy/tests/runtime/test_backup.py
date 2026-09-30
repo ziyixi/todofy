@@ -147,23 +147,26 @@ def wait_for_backup(worker: Worker) -> dict[str, Any]:
 
 
 def dump(worker: Worker, persist_to: Path) -> dict[str, list[dict[str, Any]]]:
-    tables = {}
-    for table in sql.TABLES.values():
-        statement = f"SELECT {', '.join(table.columns)} FROM {table.name} ORDER BY {', '.join(table.key)}"
-        result = wrangler(
-            "d1",
-            "execute",
-            "DB",
-            *local(worker, persist_to),
-            "--config",
-            worker.d1_config,
-            "--json",
-            "--command",
-            statement,
-        )
-        assert result.returncode == 0, result.stderr[-2000:]
-        tables[table.name] = json.loads(result.stdout)[-1]["results"]
-    return tables
+    """Every backed-up table in key order, read with one `d1 execute` (one result per statement)."""
+    tables = list(sql.TABLES.values())
+    statements = [
+        f"SELECT {', '.join(table.columns)} FROM {table.name} ORDER BY {', '.join(table.key)};" for table in tables
+    ]
+    result = wrangler(
+        "d1",
+        "execute",
+        "DB",
+        *local(worker, persist_to),
+        "--config",
+        worker.d1_config,
+        "--json",
+        "--command",
+        " ".join(statements),
+    )
+    assert result.returncode == 0, result.stderr[-2000:]
+    results = json.loads(result.stdout)
+    assert len(results) == len(tables), [entry.get("meta") for entry in results]
+    return {table.name: entry["results"] for table, entry in zip(tables, results, strict=True)}
 
 
 def next_sunday_ten(now: datetime) -> str:

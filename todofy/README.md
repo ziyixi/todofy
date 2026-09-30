@@ -129,7 +129,8 @@ contracts.
 
 ## Deploy
 
-The monorepo's `.github/workflows/ci.yml` runs the `Todofy checks` job for every push that touches
+The monorepo's `.github/workflows/ci.yml` runs Todofy's checks (`Todofy static checks`, the `Todofy runtime`
+shards and `Todofy checks`, see [docs/ci-cd.md](docs/ci-cd.md)) for every push that touches
 `todofy/`, `contracts/` or `.github/`; a push to `main` that changes `todofy/` (or a manual run on `main` for
 `both` or `todofy`) then deploys once `CI gate` passes:
 generate both production configs from GitHub variables, dry-run, apply D1 migrations, deploy

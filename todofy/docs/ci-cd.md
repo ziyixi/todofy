@@ -7,8 +7,8 @@ tests), a `Contracts` job for the shared contracts (`mail.received.v1` and
 `ops-v1`), and `CI gate`. For Todofy, `Contracts` runs `tests/unit/test_mail_hero_compat.py` (every
 fixture, the canary one included), `test_contract.py`, `test_openapi_vocab.py`, `test_ops_contract.py`
 (ops-v1 fixtures with `jsonschema`), `test_ops_core.py` (the core's ops values against the schema) and the
-gateway's `test/ops.test.ts`; the workerd suite `tests/runtime/test_ops.py` runs in `Todofy checks`.
-The `Todofy checks` and `Todofy deploy` jobs below run with `working-directory: todofy`. They check and deploy
+gateway's `test/ops.test.ts`; the workerd suite `tests/runtime/test_ops.py` runs in the `Todofy runtime` shards.
+The Todofy check jobs and `Todofy deploy` below run with `working-directory: todofy`. They check and deploy
 both Todofy Workers from the same commit: the TypeScript gateway `todofy` (`gateway/`) and the Python
 `todofy-core` (`worker/`, root `wrangler.toml`); see [gateway-contract.md](gateway-contract.md). Actions
 are pinned by commit SHA. The gateway compiles in the shared auth package `packages/edge-auth` (a
@@ -18,7 +18,7 @@ secrets, and GitHub masks them.
 
 ## Triggers
 
-| Event | `Todofy checks` | `Todofy deploy` |
+| Event | Todofy checks (all three jobs) | `Todofy deploy` |
 |---|---|---|
 | push to any branch where `todofy/`, `packages/edge-auth/`, `contracts/` or `.github/` changed since the base | runs | only on `main`, and only when `todofy/`, `packages/edge-auth/` or `contracts/ops-v1/ops-v1.ts` (bundled into the gateway) changed since the base |
 | push where none of those changed since the base | skipped | no |
@@ -41,7 +41,13 @@ Branch protection on `main` requires the `CI gate` status check (it fails if any
 cancelled; a job skipped because its app is unchanged passes). Deploys run in the `production`
 environment (deployment branch `main` only) and never in parallel (`todofy-production` concurrency group).
 
-## `Todofy checks`
+## Todofy checks: three jobs
+
+Todofy's checks run as three jobs. Every change that checks Todofy runs all of them: the same condition
+(`todofy_check`) starts both check jobs, and `Todofy checks` runs whenever that condition holds. It
+runs even when a job it needs failed, but never when the run was cancelled.
+
+### `Todofy static checks`
 
 The same sequence as local development:
 
@@ -52,14 +58,100 @@ The same sequence as local development:
 4. gateway (`gateway/`): `npm ci`, `lint`, `typecheck`, `test`
 5. UI: `npm ci`, `check:api` (generated types match the OpenAPI), `typecheck`, `test`, `build`, and a grep
    that no UI source names the other repository
-6. runtime tests: `pytest tests/runtime` against real workerd; every test server runs the gateway and
-   `todofy-core` in one process, with D1, the Durable Object, alarms, cron and assets
-7. placeholder production configs for both Workers are generated and dry-run, the gateway's with
+6. placeholder production configs for both Workers are generated and dry-run, the gateway's with
    `--secrets-file` (no token needed)
+
+### `Todofy runtime (1/3)`, `(2/3)`, `(3/3)`
+
+The workerd suite `tests/runtime` runs as a matrix of three shards at the same time. Every test server
+runs the gateway and `todofy-core` in one process, with D1, the Durable Object, alarms, cron and assets.
+Each shard runs these steps:
+
+1. `npm ci` (root, `gateway/`, `web/`), `uv sync --locked`, and the UI build the tests serve (without it
+   the harness would serve a placeholder page).
+2. Restore the Pyodide bundle cache, then `python -m tests.runtime.warm_up`. The warm-up runs
+   `pywrangler sync` once and starts and stops one test server through the harness, so the ~14 MB
+   Pyodide bundle is in the harness's disk cache before any test starts. It tries up to 3 times, fails
+   if the launcher did not cache the bundle, and runs no test.
+3. Plan the shard: `pytest tests/runtime --collect-only -q` lists every test id, and
+   `.github/scripts/pytest_shards.py --workers 4 --index <job-index> --total <job-total>` prints this
+   shard's files.
+   - The unit is always a whole file, never a test.
+   - Files are balanced by the recorded seconds per file in `.github/scripts/todofy-runtime-durations.json`,
+     longest first, over all 12 processes (3 shards × 4). A file with no recorded time weighs the mean,
+     so a new file is always planned.
+   - The planner refuses an empty shard or a plan that does not cover every file exactly once.
+4. `pytest -n 4 --dist loadfile --no-loadscope-reorder <files>`: four pytest-xdist processes on the
+   runner's 4 vCPUs.
+   - xdist hands each process whole files, heaviest first, and a file's tests run in file order.
+     Some tests rely on the ones before them in the same file; `tests/runtime/conftest.py` refuses any
+     per-test distribution (`--dist load`, `worksteal`, `each`).
+   - Each process takes its ports from its own range below the Linux ephemeral range
+     (`tests/runtime/harness.py`).
+   - No `-k`, `-m`, `--deselect`, retry or rerun plugin (`test_ci_changes.py` checks the command and
+     `uv.lock`).
+5. Upload the shard's JUnit XML (`todofy-runtime-junit-<index>`), plus every server's `dev.log` if the
+   shard failed.
+
+The serial suite took 17–18 minutes on the runner. Each shard is expected to take about 4 minutes of
+setup and tests, but that has not been measured on GitHub yet (see "Speed" below).
+
+### `Todofy checks`
+
+The result `Todofy deploy` needs, and the status check [cloudflare-setup.md](cloudflare-setup.md)
+requires. The job is named as before, so that setting is unchanged. It passes only when both of the
+following hold:
+
+- `Todofy static checks` and the `Todofy runtime` matrix both succeeded; a failed, skipped or
+  cancelled one fails it.
+- `.github/scripts/pytest_completeness.py` accepts the shards' JUnit files. The script checks them
+  against `pytest tests/runtime --collect-only -q`, run again on the same commit, and fails unless:
+  - there is one JUnit file per shard (`--shards 3`, which `test_ci_changes.py` keeps equal to the
+    matrix);
+  - every collected id ran exactly once, and nothing else ran;
+  - no test failed or errored, and no collection error occurred;
+  - the skipped tests are exactly `.github/scripts/todofy-runtime-expected-skips.txt`. That list is the
+    serial baseline's skips, and it is empty.
+
+  The script also writes each file's measured seconds to the step summary. Copy them into
+  `todofy-runtime-durations.json` when the shards drift out of balance. The weights only change the
+  balance, never what runs.
+
+`CI gate` needs all three jobs, and so does `Todofy deploy`.
+
+### Speed
+
+Measured on the Apple-silicon laptop that profiled the suite (10 cores):
+
+| Runtime suite | Wall time |
+| --- | ---: |
+| serial, before this change (`pywrangler dev`, a D1 migration per server) | 794 s |
+| serial, now | 594 s |
+| `-n 4`, all files in one run, heaviest first | 160–162 s (3 runs); 208 s (2 runs) with another test run alongside |
+| each of the three shards, `-n 4`, as CI runs it (3 runs) | 99–101 s, 61–63 s, 82–84 s |
+
+The harness changes that do not change what any test asserts:
+
+| Change | Saving (laptop) |
+| --- | --- |
+| Start `node_modules/.bin/wrangler dev` directly. `pywrangler dev` runs `pywrangler sync` and `npx wrangler --version` on every start and then runs the same `npx wrangler dev`; the harness runs `pywrangler sync` once per process instead. | 1.19 s per server start (3.61 → 2.42 s), about 90 s per serial run |
+| Migrate an empty persist directory once per process and database, into a template, and copy it for each new server. A directory that already has state is still migrated in place. `test_migrations.py` still checks every applied migration. | 1.33 s → 3 ms per new server, about 80 s per serial run |
+| `test_backup.py` reads the nine backed-up tables with one `wrangler d1 execute` instead of one per table, once per database (the same statements, one result each). | about 15 s of the longest test |
+
+On CI, the serial suite was 1029–1091 s of a 17.6–19.2 minute job. The runtime critical path is now the
+slowest shard: setup plus its share of the suite. The floor is `test_backup.py`, a single test: 85 s on
+the laptop now (102 s before), and about 150 s on the runner before these changes. The runner was
+1.4–1.6× slower than the laptop, which puts the slowest shard at roughly 2.5 minutes of tests plus
+about a minute of setup. Confirm this on real runners before relying on it.
+
+The fixed sleeps stay. Each one either proves that nothing more happens within a timer (no second
+reminder, no resend) or waits for a real-clock boundary. No event marks the end of such a wait without
+a new production-code seam, so none of them can become event-driven.
 
 ## `Todofy deploy`
 
-`needs: [changes, todofy-checks, gate]`, so the exact commit that passed is what ships:
+`needs: [changes, todofy-static, todofy-runtime, todofy-checks, gate]`, each required to succeed, so the exact commit
+that passed is what ships:
 
 1. install locked dependencies (root, `gateway/`, `web/`) and build the UI from the verified revision
 2. `deploy/generate_ci_config.py` writes three owner-only files, removed at the end even on failure:
@@ -121,7 +213,7 @@ overwrites the operational state:
 
 1. Settings → Environments → `production` → edit the variable.
 2. Actions → "CI and deploy" → Run workflow → branch `main`, app `todofy`.
-3. The run re-checks and redeploys the current `main` with the new value (the checks take about 10
+3. The run re-checks and redeploys the current `main` with the new value (the checks take a few
    minutes, then the deploy).
 
 `TODOFY_MAINTENANCE_MODE` reaches both Workers in the same run: the gateway refuses webhook and owner

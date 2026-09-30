@@ -35,6 +35,13 @@ def pytest_configure(config: pytest.Config) -> None:
     config.addinivalue_line(
         "markers", "reaches(*codes): ledger codes and API errors a scenario drives the Worker to (coverage map)"
     )
+    # A module shares its Worker between its tests, some of which rely on the ones before them, so a file
+    # must run whole and in order in one process: pytest-xdist only with --dist loadfile (the default in
+    # pyproject.toml) or loadscope, never per test (load, worksteal, loadgroup, each).
+    dist = config.getoption("dist", "no")
+    distributed = config.getoption("numprocesses", None) or hasattr(config, "workerinput")
+    if distributed and dist not in ("no", "loadfile", "loadscope"):
+        raise pytest.UsageError(f"tests/runtime runs whole files per process: use --dist loadfile, not {dist}")
 
 
 def pipeline_vars(gemini: GeminiFake, todoist: TodoistFake) -> dict[str, str]:

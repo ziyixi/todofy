@@ -304,7 +304,7 @@ maintenance mode too. Vitest runs `Ops` in Node through a stand-in for `cloudfla
 (`gateway/test/cloudflare-workers.ts`, aliased in `vitest.config.ts`); `tests/runtime/test_ops.py`
 calls the real entrypoint over a service binding (`tests/runtime/ops_support.py`). The root CI's
 `Contracts` job runs `test/ops.test.ts` next to both apps' ops-v1 schema checks, so a change under
-`contracts/` re-checks this forwarding; the runtime test runs in `Todofy checks`.
+`contracts/` re-checks this forwarding; the runtime test runs in the `Todofy runtime` shards.
 
 ## 4. Trust and request IDs
 
