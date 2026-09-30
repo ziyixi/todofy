@@ -368,7 +368,8 @@ test('workerd Ops: maintenance mode reports down and refuses canaries without wr
   assert.ok(status.value.signals.some(signal => signal.code === 'maintenance_mode' && signal.severity === 'critical'))
   const result = await ops('startCanary', 'StartCanaryResult', { run_id: 'canary-2026-09-29' })
   assert.deepEqual(result.value, { event_id: null, state: 'unavailable', reason: 'maintenance' })
-  assert.equal(result.statements.length, 0)
+  // Only the run's own idempotency lookup (a queued run keeps its event_id in maintenance).
+  assert.equal(result.statements.length, 1); assert.match(result.statements[0], /^SELECT event_id FROM deliveries WHERE action_request_id=\?$/)
   assert.equal((await ops('setGuard', 'GuardState', { level: 'shed', reason: 'maintenance_window', until: new Date(Date.now() + 3600_000).toISOString() })).value.level, 'shed',
     'the guard is object storage and may be set during maintenance')
   assert.deepEqual(await counts(), before)
@@ -416,4 +417,46 @@ test('workerd Ops: shed defers exactly the four cleanup jobs within their bound 
   await db.prepare("DELETE FROM maintenance WHERE id='raw_reconcile_after'").run()
   groups = await cycle()
   assert.deepEqual(ranJobs(groups), all)
+})
+
+test('workerd Ops: under a renewed shed guard a whole raw scan and the retention and history backlogs still finish once their bound is reached', { timeout: 180000 }, async t => {
+  const { db, bucket, ops, request, cycle, ranJobs } = await runtime(t)
+  const probe = (sql, values) => request('/__probe/sql', { method: 'POST', body: JSON.stringify({ sql, values }) })
+  const lastRun = async job => (await probe('SELECT at FROM ops_job_runs WHERE job=?', [job]))[0]?.at ?? null
+  const setRun = (job, at) => probe('INSERT INTO ops_job_runs(job,at) VALUES(?,?) ON CONFLICT(job) DO UPDATE SET at=excluded.at', [job, at])
+  // 250 raw objects that are not message keys: three list pages, and no parse job for any of them.
+  for (let i = 0; i < 250; i++) await bucket.put(`raw/!filler-${String(i).padStart(3, '0')}`, 'x')
+  // 45 unsettled messages: the retention sweep reads 20 a pass, so it needs three passes to catch up.
+  const received = new Date(Date.now() - 3600_000).toISOString()
+  await db.batch(Array.from({ length: 45 }, (_, i) => db.prepare(`INSERT INTO messages(id,received_at,last_received_at,envelope_from,envelope_recipient,size_bytes,receive_mode,parse_state)
+    VALUES(?,?,?,'a@example.org','b@example.org',1,'archive','failed')`).bind(`00000000-0000-4000-8000-${String(i).padStart(12, '0')}`, received, received)))
+  // 45 alert notifications past their 180 days: the history purge deletes 20 a pass.
+  const expired = new Date(Date.now() - 200 * 86400_000).toISOString()
+  await db.prepare(`INSERT OR IGNORE INTO alerts(code,active,severity,metrics_json,first_seen_at,last_seen_at,last_event_day)
+    VALUES('parse_failed',0,'warning','{}',?,?,'2026-01-01')`).bind(expired, expired).run()
+  await db.batch(Array.from({ length: 45 }, (_, i) => db.prepare(`INSERT INTO alert_notifications(id,code,transition,day,payload_json,state,next_attempt_at,created_at)
+    VALUES(?,'parse_failed','active',?,'{}','sent',?,?)`).bind(`history-${i}`, new Date(Date.parse(expired) - i * 86400_000).toISOString().slice(0, 10), expired, expired)))
+  const jobs = ['raw_reconcile', 'lifecycle_retention', 'alert_history_purge']
+  // Each last completed 48 h ago: the bound is reached although the guard stays on.
+  const old = Date.now() - 48 * 3600_000
+  for (const job of jobs) await setRun(job, old)
+  const ran = []
+  for (let pass = 0; pass < 6; pass++) {
+    // The dashboard renews the guard every time; the next raw page is due (its 10 minutes have passed).
+    await ops('setGuard', 'GuardState', { level: 'shed', reason: 'd1_reads_high', until: new Date(Date.now() + 30 * 3600_000 + pass * 1000).toISOString() })
+    await db.prepare("DELETE FROM maintenance WHERE id='raw_reconcile_after'").run()
+    ran.push(ranJobs(await cycle()).filter(job => jobs.includes(job)))
+    if (pass === 0) {
+      assert.equal(await lastRun('raw_reconcile'), old, 'one page is not a run of the job')
+      assert.equal(await lastRun('lifecycle_retention'), old, 'a pass that left a backlog is not a run of the job')
+      // Even a recent complete pass does not hold back the rest of a pass in progress.
+      await setRun('raw_reconcile', Date.now())
+    }
+  }
+  assert.deepEqual(ran, [jobs, jobs, jobs, [], [], []], 'every page and every batch until caught up, then deferred again')
+  assert.equal((await db.prepare("SELECT value FROM maintenance WHERE id='raw_reconcile_cursor'").first()).value, '', 'the scan reached the end of the bucket')
+  assert.equal((await db.prepare('SELECT count(*) n FROM messages WHERE retention_started_at IS NULL AND resolved_at IS NULL').first()).n, 45)
+  assert.equal((await db.prepare("SELECT value FROM maintenance WHERE id='retention_sweep_cursor'").first()).value, '', 'the sweep caught up')
+  assert.equal((await db.prepare('SELECT count(*) n FROM alert_notifications WHERE created_at=?').bind(expired).first()).n, 0, 'the history purge caught up')
+  for (const job of jobs) assert.ok(await lastRun(job) > Date.now() - 600_000, `${job} recorded its complete run`)
 })

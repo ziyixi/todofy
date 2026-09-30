@@ -4,7 +4,7 @@
  * Content rule: outputs carry only codes, numbers, booleans, timestamps, event IDs and the owner UI URL.
  * Nothing here reads a subject, address, body, header, target URL or remote response. */
 import type { Env } from './types.ts';
-import type { CanaryDelivery, GuardState, MailHeroModes, MailHeroStatus, OpsErrorCode, OpsSeverity, OpsSignal, StartCanaryResult,
+import type { CanaryDelivery, GuardState, MailHeroStatus, OpsErrorCode, OpsSeverity, OpsSignal, StartCanaryResult,
   CanaryPausedReason, CanaryUnavailableReason } from '../../../../contracts/ops-v1/ops-v1.ts';
 import { OPS_ERROR_CODES, OPS_LIMITS, OPS_VERSION } from '../../../../contracts/ops-v1/ops-v1.ts';
 import { alertSignals, alertSnapshot } from './alerts.ts';
@@ -72,7 +72,7 @@ export function buildStatus({ time, env, coordinator, snapshot, active }: Status
   const tail = { ui_url: uiURL(env.PUBLIC_HOST), capabilities: [...MAIL_HERO_CAPABILITIES] };
   if (!coordinator || !snapshot || !active) {
     // Modes from deployment variables only: the others were not read and are not guessed.
-    return { ...base, health: 'down', modes: { maintenance, force_send_paused: forced } as MailHeroModes,
+    return { ...base, health: 'down', modes: { maintenance, force_send_paused: forced },
       guard: coordinator?.guard ?? NORMAL_GUARD, signals: [{ code: 'status_unavailable', severity: 'critical', metrics: {} }],
       counters: {}, last_backup_at: null, ...tail };
   }
@@ -155,13 +155,16 @@ export async function startCanary(env: Env, input: unknown, time = Date.now()): 
   if (!value || typeof value !== 'object' || Array.isArray(value) || Object.keys(value).length !== 1 ||
       typeof value.run_id !== 'string' || !CANARY_RUN_ID.test(value.run_id)) opsError('invalid_input');
   const runID = value!.run_id as string;
-  if (env.MAINTENANCE_MODE === 'true') return unavailable('maintenance');
+  const maintenance = env.MAINTENANCE_MODE === 'true';
   let target: Row | null;
   try {
+    // The run's own event first: a repeated call gets its event_id back even in maintenance, which
+    // stops writes and background work, not this one-row read.
     const existing = await env.DB.prepare('SELECT event_id FROM deliveries WHERE action_request_id=?').bind(canaryActionID(runID)).first<Row>();
     if (existing) return { event_id: existing.event_id, state: 'queued' };
+    if (maintenance) return unavailable('maintenance');
     target = await env.DB.prepare(TARGET_SQL).first<Row>();
-  } catch { return opsError('unavailable'); }
+  } catch { return maintenance ? unavailable('maintenance') : opsError('unavailable'); }
   if (!target) opsError('unavailable');
   if (forceSendPaused(env)) return paused('send_paused');
   if (target!.send_paused) return paused('settings_paused');
@@ -182,14 +185,19 @@ export async function startCanary(env: Env, input: unknown, time = Date.now()): 
   return { event_id: eventID, state: 'queued' };
 }
 
-/** One statement: the event, its message's canary marker, the holds that apply and the last HTTP status. */
+/** One statement: the event, its message's canary marker, the holds that apply (pauses and the revision's
+ * block) and the last HTTP status. */
 export const CANARY_DELIVERY_SQL = `SELECT d.state,d.attempt_count,d.created_at,d.delivered_at,d.last_error,e.paused endpoint_paused,e.archived_at,s.send_paused,
+  r.blocked_reason,r.blocked_until,
   (SELECT a.http_status FROM delivery_attempts a WHERE a.event_id=d.event_id ORDER BY a.attempt_no DESC LIMIT 1) last_http_status
   FROM deliveries d JOIN messages m ON m.id=d.message_id JOIN endpoint_revisions r ON r.id=d.endpoint_revision_id
   JOIN webhook_endpoints e ON e.id=r.endpoint_id JOIN app_settings s ON s.id=1
   WHERE d.event_id=? AND m.canary_run_id IS NOT NULL`;
-/** Pure mapping of that row (null: no canary with this ID, also a real mail's event). */
-export function canaryDeliveryState(row: Row | null, env: Pick<Env, 'FORCE_SEND_PAUSED' | 'MAINTENANCE_MODE'>): CanaryDelivery {
+/** Pure mapping of that row (null: no canary with this ID, also a real mail's event). A hold reads `paused`
+ * exactly where the owner UI shows effective_state paused (api-common deliveryJSON) and startCanary would
+ * answer paused: pauses, and a block of the event's revision that is not yet due for a recheck (then
+ * `error_code` is the block code). */
+export function canaryDeliveryState(row: Row | null, env: Pick<Env, 'FORCE_SEND_PAUSED' | 'MAINTENANCE_MODE'>, time = Date.now()): CanaryDelivery {
   if (!row) return { state: 'unknown', attempts: 0 };
   const attempts = Math.max(0, Number(row.attempt_count) || 0);
   const status = Number(row.last_http_status);
@@ -201,12 +209,14 @@ export function canaryDeliveryState(row: Row | null, env: Pick<Env, 'FORCE_SEND_
   if (row.state === 'failed' || row.state === 'cancelled') {
     return { state: 'failed', attempts, ...http, error_code: error ?? (row.state === 'cancelled' ? 'canary_cancelled' : 'delivery_failed') };
   }
-  const held = forceSendPaused(env) || env.MAINTENANCE_MODE === 'true' || !!row.send_paused || !!row.endpoint_paused || !!row.archived_at;
-  return { state: held ? 'paused' : 'pending', attempts, ...http, ...(error ? { error_code: error } : {}) };
+  const blocked = !!row.blocked_reason && (!row.blocked_until || Date.parse(row.blocked_until) > time);
+  const held = blocked || forceSendPaused(env) || env.MAINTENANCE_MODE === 'true' || !!row.send_paused || !!row.endpoint_paused || !!row.archived_at;
+  const code = blocked && typeof row.blocked_reason === 'string' && CODE.test(row.blocked_reason) ? row.blocked_reason : error;
+  return { state: held ? 'paused' : 'pending', attempts, ...http, ...(code ? { error_code: code } : {}) };
 }
 export async function canaryDelivery(env: Env, eventID: unknown): Promise<CanaryDelivery> {
   if (typeof eventID !== 'string' || !EVENT_ID.test(eventID)) opsError('invalid_input');
   let row: Row | null;
   try { row = await env.DB.prepare(CANARY_DELIVERY_SQL).bind(eventID).first<Row>(); } catch { return opsError('unavailable'); }
-  return canaryDeliveryState(row, env);
+  return canaryDeliveryState(row, env, Date.now());
 }

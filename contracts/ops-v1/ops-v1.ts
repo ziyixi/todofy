@@ -79,25 +79,30 @@ export interface GuardState {
   readonly deferred: readonly Code[];
 }
 
+/**
+ * Deployment variables are always present. The optional keys are read from storage and are left out
+ * of a `status_unavailable` status (health `down`), never guessed.
+ */
 export interface MailHeroModes {
   readonly maintenance: boolean;
   /** FORCE_SEND_PAUSED (deployment variable). */
   readonly force_send_paused: boolean;
   /** app_settings.send_paused (owner switch in the UI). */
-  readonly send_paused: boolean;
+  readonly send_paused?: boolean;
   /** app_settings.mode is forward with a current endpoint. */
-  readonly forwarding: boolean;
+  readonly forwarding?: boolean;
   /** A backup snapshot lease holds API writes and background work. */
-  readonly backup_active: boolean;
+  readonly backup_active?: boolean;
 }
 
+/** As MailHeroModes: the deployment variables always, backup_active not on `status_unavailable`. */
 export interface TodofyModes {
   readonly maintenance: boolean;
   readonly processing_paused: boolean;
   readonly force_pause_todoist: boolean;
   readonly reminder_enabled: boolean;
   /** The weekly backup job holds the ledger. */
-  readonly backup_active: boolean;
+  readonly backup_active?: boolean;
 }
 
 export interface OpsStatus<

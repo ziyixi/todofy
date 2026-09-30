@@ -22,8 +22,10 @@ case in `test/contract-fixtures.mjs`; both sides' contract tests and the `Contra
 3. The dashboard (separate task) binds both, checks `capabilities`, and only then starts canaries.
 
 Each app's release is independent (its own deploy job); CI applies each app's D1 migrations before its
-deploy, and both migrations are additive, so the previous Worker runs correctly against the new schema
-during the deploy gap and after a code rollback.
+deploy, and both migrations are additive, so the previous Worker's SQL runs correctly against the new
+schema during the deploy gap and after a code rollback. That is a schema statement only: a Todofy core
+without canary handling treats any canary it touches as real mail (Todoist task, lists, attention). See
+§4 for the rollback order.
 
 ## 1. Shared pieces
 
@@ -165,9 +167,16 @@ Modes: `maintenance`, `force_send_paused`, `send_paused` (settings), `forwarding
 ### 2.5 Guard: keep or defer (Mail Hero)
 
 `runMaintenance(env, deferral)` receives `{ defers(job): boolean; ran(job): void }` from the
-coordinator: `defers` is true while the guard is effectively `shed` **and** the job ran within its
-bound (48 h, from `ops_job_runs`); `ran` records the run. Without a deferral (tests, older callers)
-everything runs as today. Skipping never moves the maintenance clock or the phase cycle, so there is no
+coordinator: `defers` is true while the guard is effectively `shed` **and** the job last completed
+within its bound (48 h, from `ops_job_runs`); `ran` records a complete run. The bound covers the whole
+job, not one bounded batch of it: `raw_reconcile` is deferred only when a new pass would start (a pass
+in progress, `raw_reconcile_cursor` non-empty, keeps its 10-minute pages) and records `ran` when a pass
+reaches the end of the bucket; `lifecycle_retention` records it only after a pass that left nothing due
+(`runLifecycle` answered `continueSoon: false`), `alert_history_purge` after a delete that did not fill
+its 20-row batch, `canary_cleanup` after a pass that found nothing to clean. So under a guard renewed
+forever a full raw scan still ends within 48 h plus its pages, and retention never falls more than about
+48 h of mail behind (it clears about 288 items a day at its normal cadence against about 100 arriving).
+Without a deferral (tests, older callers) everything runs as today. Skipping never moves the maintenance clock or the phase cycle, so there is no
 busy loop and nothing is rescheduled when the guard ends.
 
 | Job (where) | Shed | Why |
@@ -182,7 +191,7 @@ busy loop and nothing is rescheduled when the guard ends.
 | alerts phase: `evaluateAlerts`, `deliverAlert` | keep | monitoring; `status()` and the owner's alert webhook depend on it |
 | backup lease, receipt sync, backup API | keep | driven by the external collector |
 | DO `ingress_reservations` expiry | keep | DO only |
-| `raw_reconcile`: R2 `raw/` inventory page + receipt lookup, and `collectOrphans` (same block) | **defer** (48 h) | safety net: jobs are registered before the R2 write, so it only finds losses; costs R2 Class A lists; 48 h still finds a lost message within two days |
+| `raw_reconcile`: R2 `raw/` inventory page + receipt lookup, and `collectOrphans` (same block) | **defer** (48 h) | safety net: jobs are registered before the R2 write, so it only finds losses; costs R2 Class A lists; a new pass starts at most 48 h after the last complete one and then runs its pages at the normal cadence, so a lost message is still found within about two days |
 | `lifecycle_retention`: `runLifecycle` (expiry, resolved cleanup, clock sweep) | **defer** (48 h) | cleanup only; nothing is lost by running it later (capacity signals stay visible) |
 | `canary_cleanup` (new, 2.6) | **defer** (48 h) | cleanup of synthetic content |
 | `alert_history_purge`: 180-day `alert_notifications` delete | **defer** (48 h) | cleanup |
@@ -195,9 +204,10 @@ busy loop and nothing is rescheduled when the guard ends.
 `startCanary({run_id})` in `ops.ts`, in this order (≤ 2 D1 reads before any write):
 
 1. `run_id` fails `CANARY_RUN_ID` (`pipeline.ts`) → throw `invalid_input`.
-2. `MAINTENANCE_MODE` → `unavailable/maintenance`.
-3. `SELECT event_id FROM deliveries WHERE action_request_id=?` with `canary:<run_id>` (unique index) →
-   `queued` with that ID (idempotent, whatever the pause state is now).
+2. `SELECT event_id FROM deliveries WHERE action_request_id=?` with `canary:<run_id>` (unique index) →
+   `queued` with that ID (idempotent, whatever the pause or maintenance state is now; maintenance stops
+   writes, not this read).
+3. `MAINTENANCE_MODE` → `unavailable/maintenance` (also when the lookup itself failed).
 4. One read of settings + current endpoint + current revision (the `alertSnapshot` settings join):
    `FORCE_SEND_PAUSED` → `paused/send_paused`; `send_paused` → `paused/settings_paused`; mode not
    `forward` or no endpoint → `unavailable/no_endpoint`; endpoint paused or archived →
@@ -218,7 +228,7 @@ of a canary message is a canary again. The owner's connection test bytes are unc
 `canaryDelivery(eventId)`: UUID check, then one statement:
 
 ```sql
-SELECT d.state,d.attempt_count,d.delivered_at,d.last_error,e.paused,e.archived_at,s.send_paused,
+SELECT d.state,d.attempt_count,d.delivered_at,d.last_error,e.paused,e.archived_at,s.send_paused,r.blocked_reason,r.blocked_until,
   (SELECT a.http_status FROM delivery_attempts a WHERE a.event_id=d.event_id ORDER BY a.attempt_no DESC LIMIT 1) last_http_status
 FROM deliveries d JOIN messages m ON m.id=d.message_id JOIN endpoint_revisions r ON r.id=d.endpoint_revision_id
 JOIN webhook_endpoints e ON e.id=r.endpoint_id JOIN app_settings s ON s.id=1
@@ -227,8 +237,10 @@ WHERE d.event_id=? AND m.canary_run_id IS NOT NULL
 
 No row → `unknown` (also for real mail). `delivered` → `delivered`; `failed`/`cancelled` → `failed`
 (`error_code` = `last_error`, `canary_cancelled` when NULL); `pending/retry_wait/sending` → `paused`
-when `FORCE_SEND_PAUSED`, `MAINTENANCE_MODE`, settings or endpoint pause/archive hold it, else
-`pending` (`error_code` = `last_error` when set).
+when `FORCE_SEND_PAUSED`, `MAINTENANCE_MODE`, settings or endpoint pause/archive, or a block of the
+event's revision not yet due for a recheck (`blocked_until` NULL or later; `error_code` = the block code)
+hold it, as `deliveryJSON`'s `effective_state` and `startCanary`'s `endpoint_blocked`; else `pending`
+(`error_code` = `last_error` when set).
 
 Canary content cleanup (`cleanupCanaryContent`, alerts phase, deferrable): at most one message per pass,
 `SELECT m.id,m.version FROM messages m INDEXED BY messages_canary_idx WHERE canary_run_id IS NOT NULL AND
@@ -251,7 +263,9 @@ forever (owner connection tests keep today's behaviour).
   queued → the fake consumer receives bytes with `canary` equal to what `buildPayload` builds, same
   `event_id` on a second call, `paused`/`unavailable` create nothing (no rows, no R2 objects); the
   endpoint's 503 then 204 → `canaryDelivery` pending (http 503) then delivered; shed skips exactly the
-  four jobs and runs them once `ops_job_runs` is older than 48 h; canary cleanup after 7 days.
+  four jobs and runs them once `ops_job_runs` is older than 48 h; under a renewed guard a multi-page raw
+  scan and multi-batch retention and history backlogs run every cycle until caught up, then defer
+  again; canary cleanup after 7 days.
 - Existing suites unchanged; `contract-fixtures.test.mjs` already covers `canary_event.json`.
 
 ## 3. Todofy
@@ -274,7 +288,7 @@ forever (owner connection tests keep today's behaviour).
 | `worker/todofy/core/sql/{views,reminders}.py` | canary exclusions (3.6) |
 | `worker/todofy/core/reminder_text.py`, `runtime/reminder.py`, `core/sql/reminders.py` | digest (3.7) |
 | `worker/todofy/runtime/api.py` | canary-free counts; `EventDetail.canary`; reconcile passes `canary` to `allowed_actions`; `Reminder.ops_count` |
-| `worker/todofy/core/sql/backup.py` | `MAIL_EVENTS` columns + `canary_run_id`, `MAIL_REMINDERS` + `ops_count` (restore names its columns, so older backups still load) |
+| `worker/todofy/core/sql/backup.py` | `MAIL_EVENTS` columns + `canary_run_id`, `MAIL_REMINDERS` + `ops_count`, `ops_generated_at` (restore names its columns, so older backups still load) |
 | `migrations/0003_ops.sql` (new) | 3.2 |
 | `api/owner-api-v1.openapi.yaml`, `web/src/lib/labels.ts`, `web/` | optional `EventDetail.canary`, `Reminder.ops_count`, the new code's label, a 金丝雀 badge on the event page |
 | docs | `docs/gateway-contract.md` §3 (four RPC methods, the `Ops` entrypoint), `docs/dev-notes.md` §5–§6 (module contracts, canary exclusions, AE step `canary`), `docs/cloudflare-setup.md` (what shed defers) |
@@ -287,6 +301,8 @@ forever (owner connection tests keep today's behaviour).
 ALTER TABLE mail_events ADD COLUMN canary_run_id TEXT CHECK (canary_run_id IS NULL OR length(canary_run_id) BETWEEN 1 AND 64);
 -- Ops items in that day's reminder (the frozen body lists them).
 ALTER TABLE mail_reminders ADD COLUMN ops_count INTEGER NOT NULL DEFAULT 0 CHECK (ops_count >= 0);
+-- generated_at (epoch ms) of the report that day's body lists, 0 for none.
+ALTER TABLE mail_reminders ADD COLUMN ops_generated_at INTEGER NOT NULL DEFAULT 0 CHECK (ops_generated_at >= 0);
 ```
 
 `tests/unit/test_schema_sql.py` then re-checks every query plan; `tests/runtime/test_migrations.py`
@@ -410,9 +426,9 @@ loop every second). `setGuard(normal)` from shed sets `control.next_maintenance`
 | report precompute (`reports.tick`) | keep | deferring moves the cost to the newsletter's on-demand computation, it saves nothing |
 | `todoist_calls`, `llm_usage`, `report_*` DO housekeeping | keep | DO only |
 | cron `wake()` | keep | schedule |
-| `weekly_backup`: starting a new job (`backup.run` with no job) | **defer** unless the last complete backup is older than 8 days or there is none | D1 rows read of a full export; bounded so a renewed shed cannot skip a whole week |
-| `retention` tick (`control.next_maintenance`) | **defer** (72 h since last run) | pure cleanup of expired rows, bounded batches |
-| `metrics_rollup` (`_metrics_tick`, `metrics.flush`) | **defer** (72 h since last flush) | the walk is cursor-based and catches up 7 days per flush, so no day is lost; days only appear later on the trends page |
+| `weekly_backup`: starting a new job (`backup.run` with no job) | **defer** unless the last complete backup is older than 7.5 days or there is none | D1 rows read of a full export; bounded so a renewed shed cannot skip a whole week, and 12 h below `backup_stale` (8 days) so the guard never raises that critical signal itself |
+| `retention` tick (`control.next_maintenance`) | **defer** (72 h since the last sweep that left no expired rows; a sweep that continues in a minute does not count) | pure cleanup of expired rows, bounded batches; once due it drains the whole backlog |
+| `metrics_rollup` (`_metrics_tick`, `metrics.flush`) | **defer** (72 h since the last flush that caught up; one that continues in a minute does not count) | the walk is cursor-based and catches up 7 days per flush, so no day is lost; days only appear later on the trends page |
 
 `GuardState.deferred` for Todofy is `["weekly_backup", "retention", "metrics_rollup"]` while shed.
 
@@ -426,12 +442,18 @@ loop every second). `setGuard(normal)` from shed sets `control.next_maintenance`
 `reminder.tick` (`runtime/reminder.py`): after the existing early exits (disabled, `FORCE_PAUSE_TODOIST`,
 `PROCESSING_PAUSED`, the day already claimed and not retryable), compute `attention` (canary-free) and
 `ops = core.ops.digest_items(stored_report, now)`: only if `now - generated_at ≤ 36 h`, only
-`warning`/`critical` items, sorted by severity (critical first), then `source`, `code`, `since`. If both
-are empty → check again in 10 min (today's behaviour). Otherwise claim the day as today, with
-`subject = reminder_title(attention, len(ops))`, `body = reminder_body(attention, day, rows, host,
-ops=OpsDigest(generated_at, items, dashboard_url))`, `ops_count = len(ops)` bound in `CLAIM_DAY`.
+`warning`/`critical` items, sorted by severity (critical first), then `source`, `code`, `since`. The
+digest is then dropped (`_ops_due`) when an earlier day's reminder already listed that report
+(`OPS_CARRIED`: `ops_generated_at` of the at most two rows from the report's UTC day to yesterday), or
+when nothing needs attention and the report was generated on the current UTC day: on its own a report
+is the next day's digest, so the 23:40 report never makes that evening's task and the next day's, 20
+minutes apart, with the same items. If both are empty → check again in 10 min (today's behaviour).
+Otherwise claim the day as today, with `subject = reminder_title(attention, len(ops))`, `body =
+reminder_body(attention, day, rows, host, ops=OpsDigest(generated_at, items, dashboard_url))`,
+`ops_count = len(ops)` and `ops_generated_at` (the report's epoch ms, 0 for none) bound in `CLAIM_DAY`.
 `ATTENTION_ROWS` runs only when `attention > 0`. Retries (`CLAIM_RETRY`) reuse the frozen subject and
-body, so the `X-Request-Id` stays the same; never a second task on a day.
+body, so the `X-Request-Id` stays the same, and run while mail needs attention or the frozen day lists
+ops items (`ops_count > 0`); never a second task on a day.
 
 Text (`core/reminder_text.py`). Without ops items both functions return today's exact bytes (the Go
 golden tests stay). Titles:
@@ -500,6 +522,15 @@ Example (attention 0, one critical item):
 - A Mail Hero rollback to a release without canary support leaves stored canary messages; an owner's
   manual "resend as new event" of one during that window would lose the marker. Automatic retries reuse
   the frozen bytes and keep it.
+- A Todofy rollback to a core without canary handling is **not** side-effect free. The old parser ignores
+  the unknown `canary` field and its SQL has no canary filter, so a canary row still active in the ledger
+  (for example waiting for a Gemini retry) or a canary event Mail Hero is still retrying (auto retry
+  mode, up to 48 attempts over 7 days) is summarized into a real Todoist task and listed as real mail;
+  the current release only marks such rows `canary_side_effect_blocked` afterwards. Before rolling
+  Todofy back: stop the dashboard's canaries, then either wait until `canaryResult` is terminal for every
+  recent canary and `canaryDelivery` is no longer `pending`/`paused` for any of them, or set Mail Hero's
+  `FORCE_SEND_PAUSED` and Todofy's `PROCESSING_PAUSED` first and keep them until the canary rows are
+  cancelled or completed on the new release.
 - `status()` reads the same partial-index ranges as the 10-minute alert pass; polling every 10 minutes
   at most doubles those reads. If the unsettled range ever grows large (a long outage), both grow
   together; the dashboard may back off to 30 minutes when `health` is `degraded`.

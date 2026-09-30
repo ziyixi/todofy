@@ -81,7 +81,18 @@ def test_no_two_fixtures_share_an_event_or_message_id():
         assert len(set(ids)) == len(ids)
 
 
-UNREADABLE_CANARIES = [{}, {"run_id": ""}, {"run_id": "canary 1"}, {"run_id": 7}, "canary-1", None]
+# Every one fails both the published schema (the reference validator) and the parser; a trailing
+# newline passes an unanchored Python ``$``, hence ``$(?!\n)`` in the schema.
+UNREADABLE_CANARIES = [
+    {},
+    {"run_id": ""},
+    {"run_id": "canary 1"},
+    {"run_id": 7},
+    {"run_id": "canary-1\n"},
+    {"run_id": "x" * 65},
+    "canary-1",
+    None,
+]
 
 
 @pytest.mark.parametrize("canary", UNREADABLE_CANARIES)
@@ -99,7 +110,7 @@ def test_the_parser_reads_the_canary_marker_and_only_there():
     assert parse_mail_event(json.dumps(document).encode()).canary_run_id == "canary-2026-09-28"
 
 
-@pytest.mark.parametrize("canary", [*UNREADABLE_CANARIES, {"run_id": "canary-1\n"}, {"run_id": "x" * 65}])
+@pytest.mark.parametrize("canary", UNREADABLE_CANARIES)
 def test_an_unreadable_canary_marker_is_rejected_not_treated_as_mail(canary):
     """An event that says it is a canary but cannot say which must never become a Todoist task."""
     document = json.loads(FIXTURES["canary_event"].read_bytes()) | {"canary": canary}

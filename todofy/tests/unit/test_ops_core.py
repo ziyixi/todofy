@@ -3,6 +3,7 @@ against the shared schema by the reference validator."""
 
 import ast
 import json
+import re
 from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
@@ -207,7 +208,35 @@ def test_defer_until_holds_a_job_within_its_bound(guard, last_run, expected):
 def test_only_the_three_deferrable_jobs_are_listed():
     assert [str(job) for job in ops.DEFERRED] == ["weekly_backup", "retention", "metrics_rollup"]
     assert set(ops.JOB_BOUND) == {ops.Job.RETENTION, ops.Job.METRICS_ROLLUP}
-    assert ops.BACKUP_BOUND == 8 * 86400
+    assert ops.BACKUP_BOUND == 7 * 86400 + 12 * HOUR
+    assert ops.BACKUP_STALE - ops.BACKUP_BOUND >= 12 * HOUR
+
+
+@pytest.mark.parametrize(
+    ("finished", "next_at", "expected"),
+    [
+        (True, NOW + 86400, True),  # caught up: next run tomorrow
+        (True, NOW + 60, False),  # one batch of a backlog: continues in a minute
+        (False, NOW + 600, False),  # failed: retried, not a run
+    ],
+)
+def test_only_a_run_that_caught_up_restarts_the_bound(finished, next_at, expected):
+    """F2 (Todofy side): the bound covers the whole job, not one batch of it."""
+    assert ops.completed_run(finished, next_at, NOW, 60) is expected
+
+
+def test_a_renewed_shed_guard_never_makes_the_weekly_backup_stale():
+    """F3: a backup on schedule, held by a guard renewed every day, starts before backup_stale."""
+    last = NOW - 7 * 86400  # the weekly slot is now
+    guard = ops.Guard("shed", "d1_reads_high", (NOW + 36 * HOUR) * 1000, NOW * 1000)
+    held_until = ops.defer_until(guard, NOW, last, ops.BACKUP_BOUND)
+    assert held_until == last + ops.BACKUP_BOUND  # the bound comes before the guard's end
+    renewed = ops.Guard("shed", "d1_reads_high", (held_until + 36 * HOUR) * 1000, held_until * 1000)
+    assert ops.defer_until(renewed, held_until, last, ops.BACKUP_BOUND) is None
+    # The job (about a minute; allow an hour) finishes while status() still reads the last one as fresh.
+    for running_for in (0, 60, HOUR):
+        facts = replace(FACTS, now=held_until + running_for, last_backup_at=last, guard=renewed, backup_active=True)
+        assert "backup_stale" not in [code for code, _ in codes(ops.status(facts))]
 
 
 # ---- canary result -------------------------------------------------------------------------
@@ -391,6 +420,27 @@ def test_unavailable_status_matches_the_contract_fixture():
     assert status["health"] == "down"
     assert status["signals"] == [{"code": "status_unavailable", "severity": "critical", "metrics": {}}]
     assert status["counters"] == {}
+    assert status == fixture("OpsStatus/status-unavailable.json") | {"generated_at": "2026-09-29T15:00:00Z"}
+
+
+def required_keys(interface: str) -> list[str]:
+    """Keys an ops-v1.ts interface declares without ``?``: what a dashboard compiled against it relies on."""
+    source = (CONTRACT / "ops-v1.ts").read_text()
+    body = re.search(rf"export interface {interface} \{{([^}}]*)\}}", source)
+    assert body is not None
+    return [name for name, optional in re.findall(r"readonly (\w+)(\??):", body.group(1)) if not optional]
+
+
+def test_every_mode_todofy_modes_requires_is_a_boolean_also_when_unavailable():
+    required = required_keys("TodofyModes")
+    assert required == ["maintenance", "processing_paused", "force_pause_todoist", "reminder_enabled"]
+    switches = ops.Switches(True, True, False, True)
+    for status in (ops.status(FACTS), ops.unavailable_status(NOW, switches, ops.NORMAL, "todofy.example.com")):
+        assert all(isinstance(status["modes"][key], bool) for key in required), status["modes"]
+    for path in sorted((CONTRACT / "fixtures" / "OpsStatus").glob("*.json")):
+        doc = json.loads(path.read_text())
+        keys = required_keys("TodofyModes" if doc["app"] == "todofy" else "MailHeroModes")
+        assert all(isinstance(doc["modes"].get(key), bool) for key in keys), path.name
 
 
 @pytest.mark.parametrize(

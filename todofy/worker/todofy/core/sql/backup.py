@@ -71,6 +71,7 @@ MAIL_REMINDERS = Table(
         "created_at",
         "updated_at",
         "ops_count",
+        "ops_generated_at",
     ),
     ("day",),
     500,

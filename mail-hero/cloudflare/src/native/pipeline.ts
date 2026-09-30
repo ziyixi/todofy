@@ -564,12 +564,14 @@ export async function runMaintenance(env:Env,deferral?:OpsDeferral):Promise<{job
   const phase=(await first(env,"SELECT value FROM maintenance WHERE id='maintenance_phase'"))?.value ?? 'repair';
   if(phase==='alerts') {
     // A shed guard (contracts/ops-v1) defers only cleanup; alert evaluation and delivery always run.
+    // Each job records its run only once it has caught up, so the 48 h bound covers the whole backlog,
+    // not one bounded batch of it: once due, a job keeps its normal cadence until nothing is left.
     const purgeHistory=!deferral?.defers('alert_history_purge');
-    await runAlerts(env,{purgeHistory});
-    if(purgeHistory) deferral?.ran('alert_history_purge');
+    const alerts=await runAlerts(env,{purgeHistory});
+    if(purgeHistory && !alerts.historyBacklog) deferral?.ran('alert_history_purge');
     if(!deferral?.defers('canary_cleanup')) {
       // A failure is retried next cycle; it must not hold the phase cycle (repair) on this phase.
-      try { await cleanupCanaryContent(env); deferral?.ran('canary_cleanup'); } catch { /* next cycle */ }
+      try { if(!await cleanupCanaryContent(env)) deferral?.ran('canary_cleanup'); } catch { /* next cycle */ }
     }
     await env.DB.prepare("INSERT INTO maintenance(id,value) VALUES('maintenance_phase','repair') ON CONFLICT(id) DO UPDATE SET value=excluded.value").run();
     return {jobs:[],continueSoon:false,nextDelayMS:600_000};
@@ -581,8 +583,9 @@ export async function runMaintenance(env:Env,deferral?:OpsDeferral):Promise<{job
       await purgeDeletedContent(env,deleted[0].id);
       await env.DB.prepare('INSERT OR IGNORE INTO maintenance(id,value) VALUES(?,?)').bind(`purged:${deleted[0].id}`,now()).run();
     } else if(!deferral?.defers('lifecycle_retention')) {
-      await runLifecycle(env,{deleteContent:(id,version,resolved)=>deleteMessageContent(env,id,version,resolved ?? true),withMutation:operation=>operation()});
-      deferral?.ran('lifecycle_retention');
+      const lifecycle=await runLifecycle(env,{deleteContent:(id,version,resolved)=>deleteMessageContent(env,id,version,resolved ?? true),withMutation:operation=>operation()});
+      // At most two items a pass: only a pass that left nothing due counts as the job's run.
+      if(!lifecycle.continueSoon) deferral?.ran('lifecycle_retention');
     }
     await env.DB.prepare("UPDATE maintenance SET value='alerts' WHERE id='maintenance_phase'").run();
     return {jobs:[],continueSoon:true,nextDelayMS:1000};
@@ -616,11 +619,15 @@ export async function runMaintenance(env:Env,deferral?:OpsDeferral):Promise<{job
   for(const delivery of deliveries) jobs.push({type:'deliver',eventID:delivery.event_id});
   // Continue recovery pages promptly, but do not rescan an idle bucket every
   // ten minutes merely because the independent alert clock is due.
-  // A shed guard defers this safety net (jobs are registered before the R2 write) within its bound.
-  const checkpoint=deferral?.defers('raw_reconcile')?{value:String(Number.POSITIVE_INFINITY)}:await first(env,"SELECT value FROM maintenance WHERE id='raw_reconcile_after'");
-  if(!checkpoint || Number(checkpoint.value)<=Date.now()) {
-    const cursor=(await first(env,"SELECT value FROM maintenance WHERE id='raw_reconcile_cursor'"))?.value;
-    const raw=await env.MAIL_STORE.list({prefix:'raw/',cursor:cursor || undefined,limit:100});
+  // A shed guard defers this safety net (jobs are registered before the R2 write) within its bound:
+  // only the start of a new pass. A pass in progress keeps its 10-minute pages, and only a finished
+  // pass counts as the job's run, so under a renewed guard a full scan still ends within about
+  // 48 h plus its pages (one read gives both the cursor and the checkpoint).
+  const reconcile=new Map((await all(env,"SELECT id,value FROM maintenance WHERE id IN('raw_reconcile_cursor','raw_reconcile_after')")).map(row=>[row.id,row.value as string]));
+  const cursor=reconcile.get('raw_reconcile_cursor') || undefined, after=reconcile.get('raw_reconcile_after');
+  const deferred=!cursor && !!deferral?.defers('raw_reconcile');
+  if(!deferred && (after===undefined || Number(after)<=Date.now())) {
+    const raw=await env.MAIL_STORE.list({prefix:'raw/',cursor,limit:100});
     const candidates=raw.objects.map(o=>({id:RAW_KEY.exec(o.key)?.[1],key:o.key})).filter(o=>o.id);
     if(candidates.length) {
       const known=await all(env,`SELECT i.external_id,i.message_id,m.content_deleted_at,m.raw_expired_at FROM ingest_receipts i JOIN messages m ON m.id=i.message_id WHERE i.external_id IN(${candidates.map(()=>'?').join(',')})`,...candidates.map(o=>o.id));
@@ -640,7 +647,7 @@ export async function runMaintenance(env:Env,deferral?:OpsDeferral):Promise<{job
       env.DB.prepare("INSERT INTO maintenance(id,value) VALUES('raw_reconcile_after',?) ON CONFLICT(id) DO UPDATE SET value=excluded.value").bind(String(Date.now()+(raw.truncated?600_000:DAY))),
     ]);
     await collectOrphans(env);
-    deferral?.ran('raw_reconcile');
+    if(!raw.truncated) deferral?.ran('raw_reconcile');
   }
   await reconcileCapacity(env);
   await env.DB.prepare("INSERT INTO maintenance(id,value) VALUES('maintenance_phase','lifecycle') ON CONFLICT(id) DO UPDATE SET value=excluded.value").run();

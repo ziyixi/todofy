@@ -51,10 +51,29 @@ class Classify(unittest.TestCase):
         paths = ["contracts/mail-received-v1/fixtures/plain_text.json"]
         self.assertEqual(push(paths), expect(T, T, T, F, F))
 
-    def test_ops_contract_rechecks_both_apps_but_deploys_neither(self):
+    def test_ops_contract_schema_and_fixtures_recheck_both_apps_but_deploy_neither(self):
         paths = ["contracts/ops-v1/ops-v1.schema.json", "contracts/ops-v1/fixtures/OpsStatus/todofy-ok.json"]
         self.assertEqual(push(paths), expect(T, T, T, F, F))
-        self.assertEqual(push(["contracts/ops-v1/ops-v1.ts", "todofy/gateway/src/ops.ts"]), expect(T, T, T, T, F))
+        self.assertEqual(push(["contracts/ops-v1/validate.mjs", "contracts/ops-v1/README.md"]), expect(T, T, T, F, F))
+
+    def test_contract_code_both_workers_bundle_deploys_both(self):
+        """deploy-1: OPS_LIMITS and friends ship inside both Workers, so a change must redeploy both."""
+        self.assertEqual(push(["contracts/ops-v1/ops-v1.ts"]), expect(T, T, T, T, T))
+        self.assertEqual(push(["contracts/ops-v1/ops-v1.ts", "todofy/gateway/src/ops.ts"]), expect(T, T, T, T, T))
+        self.assertEqual(push(["contracts/ops-v1/ops-v1.ts"], ref=BRANCH), expect(T, T, T, T, T))
+
+    def test_bundled_by_both_lists_every_contract_file_a_worker_imports(self):
+        """Every contracts/ file that Worker source imports (value or type) is in BUNDLED_BY_BOTH."""
+        sources = [
+            *(REPO / "mail-hero" / "cloudflare" / "src").rglob("*.ts"),
+            *(REPO / "todofy" / "gateway" / "src").rglob("*.ts"),
+        ]
+        imported = set()
+        for source in sources:
+            for target in re.findall(r"from\s+'([^']*contracts/[^']*)'", source.read_text()):
+                imported.add((source.parent / target).resolve().relative_to(REPO).as_posix())
+        self.assertTrue(imported)
+        self.assertLessEqual(imported, set(ci_changes.BUNDLED_BY_BOTH))
 
     def test_ci_changes_recheck_everything_but_deploy_nothing(self):
         self.assertEqual(push([".github/workflows/ci.yml"]), expect(T, T, T, F, F, packages=T))

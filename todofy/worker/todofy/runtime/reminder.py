@@ -7,10 +7,12 @@ created a task (``failed``) is retried, hourly and at most REMINDER_MAX_ATTEMPTS
 times; ``unknown`` is never resent that day.
 
 The day's task also carries the ops digest (contracts/ops-v1): the warning and
-critical items of the dashboard's latest report, while it is at most 36 hours old.
-A day with ops items but nothing needing attention still gets its one task; the
-text is frozen with the claim like the rest, so a report that arrives later never
-causes a second task that day. Canary events are never counted or listed.
+critical items of the dashboard's latest report, while it is at most 36 hours old
+and no earlier day's reminder listed it. A day with ops items but nothing needing
+attention still gets its one task, from a report generated before that UTC day
+began (the dashboard reports at about 23:40 for the next day). The text is frozen
+with the claim like the rest, so a report that arrives later never causes a
+second task that day. Canary events are never counted or listed.
 """
 
 import json
@@ -26,7 +28,7 @@ from todofy.core.backoff import (
 )
 from todofy.core.classify import TaskResult, TaskVerdict
 from todofy.core.metrics import Step
-from todofy.core.ops import digest
+from todofy.core.ops import Report, digest
 from todofy.core.reminder_text import LIST_LIMIT, SENDER, AttentionRow, reminder_body, reminder_title
 from todofy.core.render import rfc3339
 from todofy.core.request_id import todoist_request_id
@@ -64,19 +66,30 @@ async def tick(env: Any, coordinator: Any, now: int) -> int:
 
     source, cutoff = source_id(env), now - ATTENTION_AGE_SECONDS
     attention = (await db.prepare(sql.ATTENTION_COUNT.sql).bind(source, cutoff).first()).n
-    ops = digest(coordinator.latest_ops_report(), now)
-    if attention == 0 and ops is None:
-        return now + REMINDER_CHECK_INTERVAL
     if row is None:
+        report = coordinator.latest_ops_report()
+        ops = digest(report, now)
+        if ops is not None and not await _ops_due(db, report, day, now, attention > 0):
+            ops = None
+        if attention == 0 and ops is None:
+            return now + REMINDER_CHECK_INTERVAL
         attempts, rows = 0, []
         if attention > 0:
             listed = await db.prepare(sql.ATTENTION_ROWS.sql).bind(source, cutoff, LIST_LIMIT).all()
             rows = [AttentionRow(r.event_id, r.state, r.last_error_code, r.created_at) for r in listed.results]
-        ops_count = 0 if ops is None else len(ops.items)
+        ops_count, ops_generated = (0, 0) if ops is None else (len(ops.items), report.generated_ms)
         subject = reminder_title(attention, ops_count)
         body = reminder_body(attention, day, rows, var(env, "TODOFY_PUBLIC_HOST"), ops)
-        claim = await db.prepare(sql.CLAIM_DAY.sql).bind(day, subject, body, attention, ops_count, now, now).run()
+        claim = (
+            await db.prepare(sql.CLAIM_DAY.sql)
+            .bind(day, subject, body, attention, ops_count, ops_generated, now, now)
+            .run()
+        )
     else:
+        # A failed day is retried with its frozen text while it still has something to say: mail that
+        # needs attention, or the ops items it was claimed for (the digest was due then).
+        if attention == 0 and row.ops_count == 0:
+            return now + REMINDER_CHECK_INTERVAL
         attempts, subject, body = row.attempts, row.subject, row.body
         claim = await db.prepare(sql.CLAIM_RETRY.sql).bind(now, day, attempts, now).run()
     if claim.meta.changes != 1:
@@ -100,6 +113,21 @@ async def page(db: Any, before_day: str | None, limit: int) -> tuple[list[dict],
     rows = await db.prepare(sql.REMINDER_PAGE.sql).bind(before_day or _AFTER_EVERY_DAY, limit + 1).all()
     items = [_item(row) for row in rows.results[:limit]]
     return items, items[-1]["day"] if len(rows.results) > limit else None
+
+
+async def _ops_due(db: Any, report: Report, day: str, now: int, attention: bool) -> bool:
+    """Whether today's new reminder lists ``report``'s digest.
+
+    Each report is listed by at most one day's reminder. On its own (nothing needs attention) a
+    report waits for the first UTC day after the one it was generated on: the dashboard reports at
+    about 23:40 for the next day's reminder, and sending at once would make that day's task and the
+    next day's, 20 minutes apart, list the same items.
+    """
+    if not attention and report.generated_ms >= (now - now % DAY) * 1000:
+        return False
+    first = _day(report.generated_ms // 1000)
+    carried = await db.prepare(sql.OPS_CARRIED.sql).bind(first, day, report.generated_ms).first()
+    return carried.n == 0
 
 
 def _request(env: Any, subject: str, body: str) -> TaskRequest:

@@ -385,7 +385,9 @@ def test_the_daily_reminder_carries_the_ops_digest_once_a_day(
     wait_canary(digesting, canary_id, {"ok"})
     assert fresh_todoist.creates() == []  # nothing needs attention and there is no ops report yet
 
-    report = daily_report(now - 30)
+    # A report generated before today's UTC day began (the dashboard's 23:40 report) is today's
+    # digest; one from today would wait for tomorrow (test_reminder_daily.py).
+    report = daily_report(now - now % 86_400 - 60)
     digesting.ok("reportOps", report, definition="OpsReportReceipt")
     [create] = fresh_todoist.wait_for(lambda: fresh_todoist.creates() or None, 30)
 

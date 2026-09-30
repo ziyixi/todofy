@@ -211,9 +211,11 @@ def test_page_walks_days_newest_first(probe):
 
 # ---- the ops digest (contracts/ops-v1) ---------------------------------------------------------
 
+# Generated the evening before NOW's UTC day, as the dashboard reports (about 23:40 UTC).
 REPORT = json.loads(
     (mail_contract.TODOFY.parent / "contracts" / "ops-v1" / "fixtures" / "OpsReport" / "daily.json").read_text()
-) | {"generated_at": "2026-09-28T14:00:00Z"}
+) | {"generated_at": "2026-09-27T23:40:00Z"}
+REPORT_MS = 1_790_552_400_000  # 2026-09-27T23:40:00Z
 
 
 def digest(report: dict = REPORT) -> ops.OpsDigest:
@@ -230,6 +232,7 @@ def test_an_ops_only_day_gets_its_one_task(probe):
     assert create.headers["x-request-id"] == todoist_request_id(title, body, SENDER)
     row = reminder(probe)
     assert (row["state"], row["attention_count"], row["ops_count"]) == ("created", 0, 4)
+    assert row["ops_generated_at"] == REPORT_MS
 
     newer = REPORT | {"generated_at": "2026-09-28T14:30:00Z", "items": REPORT["items"][:1]}
     assert tick(probe, NOW + 600, newer) == TOMORROW
@@ -284,3 +287,52 @@ def test_nothing_to_report_sends_nothing(probe, report):
 def test_the_switches_hold_the_ops_digest_too(probe, switch):
     assert tick(probe, NOW, REPORT, **switch) == NOW + 600
     assert probe.todoist.creates() == []
+
+
+def test_a_report_from_the_same_utc_day_waits_for_the_next_days_reminder(probe):
+    today = REPORT | {"generated_at": "2026-09-28T14:00:00Z"}
+    assert tick(probe, NOW, today) == NOW + 600
+    assert probe.todoist.creates() == []
+    assert probe.sql("SELECT day FROM mail_reminders") == []
+
+
+def test_a_late_report_makes_exactly_one_task_across_midnight(probe):
+    """F1: a report at 23:40 is the next UTC day's digest, sent once, never also that evening
+    or again the day after while it is still within 36 hours."""
+    late = REPORT | {"generated_at": "2026-09-28T23:40:00Z"}
+    evening = TOMORROW - 20 * 60
+    assert tick(probe, evening, late) == evening + 600
+    assert tick(probe, evening + 600, late) == evening + 1200
+    assert probe.todoist.creates() == []
+
+    assert tick(probe, TOMORROW, late) == TOMORROW + DAY
+    assert tick(probe, TOMORROW + 600, late) == TOMORROW + DAY
+    [create] = probe.todoist.creates()
+    assert create.json()["content"] == reminder_title(0, 4)
+    row = reminder(probe, "2026-09-29")
+    assert (row["ops_count"], row["ops_generated_at"]) == (4, REPORT_MS + DAY * 1000)
+
+    # The day after, the same report is 24 h 20 min old: already listed, so nothing to send.
+    assert tick(probe, TOMORROW + DAY, late) == TOMORROW + DAY + 600
+    assert len(probe.todoist.creates()) == 1
+    assert probe.sql("SELECT day FROM mail_reminders WHERE day = '2026-09-30'") == []
+
+
+def test_a_report_listed_once_is_left_out_of_the_next_days_attention_task(probe, attention):
+    assert tick(probe, NOW, REPORT) == TOMORROW
+    assert reminder(probe)["ops_generated_at"] == REPORT_MS
+    assert tick(probe, TOMORROW + 60, REPORT) == TOMORROW + DAY
+    first, second = probe.todoist.creates()
+    assert "运维" in first.json()["content"] and "运维" not in second.json()["content"]
+    row = reminder(probe, "2026-09-29")
+    assert (row["ops_count"], row["ops_generated_at"]) == (0, 0)
+
+
+def test_a_failed_ops_only_day_is_retried_after_a_newer_same_day_report(probe):
+    probe.todoist.queue("POST", TASKS_PATH, Reply(400, {"error": "no"}))
+    assert tick(probe, NOW, REPORT) == NOW + 3600
+    newer = REPORT | {"generated_at": "2026-09-28T15:30:00Z"}  # not due on its own today
+    assert tick(probe, NOW + 3600, newer) == TOMORROW
+    first, second = probe.todoist.creates()
+    assert first.body == second.body
+    assert reminder(probe)["state"] == "created"

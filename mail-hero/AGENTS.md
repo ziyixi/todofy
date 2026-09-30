@@ -135,7 +135,7 @@ D1 Time Travel Free7天只恢复D1，不恢复R2、DO或secrets。完整备份�
 
 - `src/native/index.ts` 另外导出命名 `WorkerEntrypoint` `Ops`（实现在 `ops.ts`/`ops-core.ts`/`ops-guard.ts`），只经同账户 service binding 调用；不新增公开路由，不改默认 `fetch`/`email` 行为。合同是 `../contracts/ops-v1`，输出须通过其 Schema。
 - `status()` 只做一次 DO 请求和最多6条只读、走索引的 D1 语句，不写入、不做全表聚合，输出不含主题、地址、正文、目标 URL 或远端响应。
-- `shed` guard 存在协调器 SQLite、最多36小时后自动失效，只推迟 `raw_reconcile`、`lifecycle_retention`、`canary_cleanup`、`alert_history_purge`（各满48小时仍运行一次）；收件、解析、投递与重试、修复、容量对账、中断删除续做、提醒及备份永不推迟。新增可推迟工作须同时更新 `docs/cloudflare-setup.md` §2.3 的保持/推迟表。
+- `shed` guard 存在协调器 SQLite、最多36小时后自动失效，只推迟 `raw_reconcile`、`lifecycle_retention`、`canary_cleanup`、`alert_history_purge`（各距上次完整运行满48小时仍运行，并按正常节奏运行到追上积压；进行中的盘点不推迟）；收件、解析、投递与重试、修复、容量对账、中断删除续做、提醒及备份永不推迟。新增可推迟工作须同时更新 `docs/cloudflare-setup.md` §2.3 的保持/推迟表。
 - 金丝雀沿用连接测试路径，带 `mail.received.v1` 顶层 `canary` 标记，按 `run_id` 幂等；强制暂停、维护、阻断等状态报告 `paused`/`unavailable`，不静默排队。owner 连接测试的字节保持不变。
 - `ALERT_WEBHOOK_URL` 保持可选且不配置，统一运维摘要（面板 → Todofy 每日提醒）取代它。
 

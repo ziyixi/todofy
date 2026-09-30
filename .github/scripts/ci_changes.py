@@ -17,7 +17,8 @@ so a change whose run was cancelled or failed is checked (and deployed) again by
                  change on the branch, not only the latest push.
   No usable base (no successful main run yet, API failure, base not an ancestor, no origin/main)
   runs everything. An app's own directory checks and deploys it; contracts/ and .github/ re-check
-  both apps but deploy neither. A shared package packages/<name>/ is compiled into the apps listed in
+  both apps but deploy neither, except the contract files both TypeScript Workers bundle
+  (BUNDLED_BY_BOTH, e.g. OPS_LIMITS in contracts/ops-v1/ops-v1.ts), which also deploy both. A shared package packages/<name>/ is compiled into the apps listed in
   PACKAGE_USERS, so any change inside it runs the package checks and checks AND deploys each of
   those apps. A package missing from PACKAGE_USERS counts as used by both apps (fail safe; the
   tests run by the Changes job also fail until PACKAGE_USERS matches the file: dependencies). A file
@@ -36,6 +37,10 @@ DISPATCH = {"both": ("todofy", "mail-hero"), "todofy": ("todofy",), "mail-hero":
 # packages/<name>/ -> the apps whose Workers compile it in (a "file:../../packages/<name>" dependency).
 PACKAGE_USERS = {"edge-auth": ("todofy", "mail-hero")}
 
+# Contract files whose code the Mail Hero Worker and Todofy's gateway import at runtime, so a change
+# ships only with a deploy of both. test_ci_changes.py checks this against both apps' imports.
+BUNDLED_BY_BOTH = ("contracts/ops-v1/ops-v1.ts",)
+
 
 def everything() -> dict[str, bool]:
     return dict.fromkeys(KEYS, True)
@@ -51,13 +56,14 @@ def classify(paths: Iterable[str]) -> dict[str, bool]:
     ci = any(path.startswith(".github/") for path in paths)
     shared = ci or any(path.startswith("contracts/") for path in paths)
     todofy, mail_hero = "todofy" in apps, "mail-hero" in apps
+    bundled = any(path in BUNDLED_BY_BOTH for path in paths)
     return {
         "todofy_check": todofy or shared,
         "mail_hero_check": mail_hero or shared,
         "contracts": todofy or mail_hero or shared,
         "packages": bool(package_names) or ci,
-        "todofy_deploy": todofy,
-        "mail_hero_deploy": mail_hero,
+        "todofy_deploy": todofy or bundled,
+        "mail_hero_deploy": mail_hero or bundled,
     }
 
 

@@ -20,7 +20,7 @@ secrets, and GitHub masks them.
 
 | Event | `Todofy checks` | `Todofy deploy` |
 |---|---|---|
-| push to any branch where `todofy/`, `packages/edge-auth/`, `contracts/` or `.github/` changed since the base | runs | only on `main`, and only when `todofy/` or `packages/edge-auth/` changed since the base |
+| push to any branch where `todofy/`, `packages/edge-auth/`, `contracts/` or `.github/` changed since the base | runs | only on `main`, and only when `todofy/`, `packages/edge-auth/` or `contracts/ops-v1/ops-v1.ts` (bundled into the gateway) changed since the base |
 | push where none of those changed since the base | skipped | no |
 | `workflow_dispatch` with app `both` or `todofy` | runs | only when dispatched on `main` |
 

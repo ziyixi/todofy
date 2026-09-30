@@ -4,7 +4,10 @@
   "generated_at": "2026-09-29T08:00:00Z",
   "health": "down",
   "modes": {
-    "maintenance": false
+    "maintenance": false,
+    "processing_paused": false,
+    "force_pause_todoist": false,
+    "reminder_enabled": true
   },
   "guard": {
     "level": "normal",

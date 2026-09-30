@@ -61,11 +61,13 @@ a manual run. Actions are pinned by commit SHA.
 | `Mail Hero checks` | `mail-hero/`, `packages/edge-auth/`, `contracts/` or `.github/` changed | Everything Mail Hero's CI ran, from `mail-hero/`: config and backup tool tests, Worker typecheck and tests (workerd bindings, contract fixtures), UI typecheck/tests/build, plus a placeholder config dry-run |
 | `Contracts` | any app, a package an app uses, `contracts/` or `.github/` changed | `mail.received.v1`: Mail Hero rebuilds every golden fixture byte for byte (the canary one included); Todofy validates and parses every fixture; neither side allows two fixtures to share an event ID. `ops-v1`: both sides validate every fixture against the schema (Mail Hero with `validate.mjs`, Todofy with `jsonschema`), and each app's own `Ops` code is checked against it on the host (Mail Hero `native-ops.test.mjs`, Todofy `test_ops_core.py` and the gateway's `ops.test.ts`). Nothing here needs workerd; each app's check job runs the real-binding `Ops` tests |
 | `CI gate` | always | Fails if any job above failed or was cancelled; skipped as unchanged is fine. **The one check to require on `main`** |
-| `Todofy deploy` | `main` only, `todofy/` or `packages/edge-auth/` changed (or dispatched), after `CI gate` | Generate configs, dry-run, D1 migrations, deploy `todofy-core` then the gateway, `/health` and core probes. `production` environment, group `todofy-production` |
-| `Mail Hero deploy` | `main` only, `mail-hero/` or `packages/edge-auth/` changed (or dispatched), after `CI gate` | `generate-ci-config.mjs`, dry-run, D1 migrations, deploy. `production` environment, group `mail-hero-production` |
+| `Todofy deploy` | `main` only, `todofy/`, `packages/edge-auth/` or `contracts/ops-v1/ops-v1.ts` changed (or dispatched), after `CI gate` | Generate configs, dry-run, D1 migrations, deploy `todofy-core` then the gateway, `/health` and core probes. `production` environment, group `todofy-production` |
+| `Mail Hero deploy` | `main` only, `mail-hero/`, `packages/edge-auth/` or `contracts/ops-v1/ops-v1.ts` changed (or dispatched), after `CI gate` | `generate-ci-config.mjs`, dry-run, D1 migrations, deploy. `production` environment, group `mail-hero-production` |
 
-A change to only `contracts/` or `.github/` re-checks both apps but deploys neither; dispatch on `main` to
-redeploy an app. A change to `packages/edge-auth/` (any file in it) runs `Shared packages` and checks
+A change to only `contracts/` or `.github/` re-checks both apps but deploys neither, except
+`contracts/ops-v1/ops-v1.ts`: both TypeScript Workers bundle its constants (`OPS_LIMITS`), so a change to
+it deploys both (`BUNDLED_BY_BOTH` in `.github/scripts/ci_changes.py`). Dispatch on `main` to redeploy an app.
+A change to `packages/edge-auth/` (any file in it) runs `Shared packages` and checks
 **and deploys** both apps, because both Workers compile it in. `ci_changes.py` maps each package to the
 apps that use it (`PACKAGE_USERS`); `test_ci_changes.py` fails unless that map matches every
 `"file:../../packages/<name>"` dependency and lists every `packages/*/` directory, and a package missing

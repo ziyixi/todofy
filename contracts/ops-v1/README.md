@@ -90,7 +90,11 @@ writes and never aggregates a whole table. Poll it no more often than every 10 m
   `critical`; otherwise `ok` (`info` signals allowed).
 - `modes`: booleans; `maintenance` always present. Mail Hero: `force_send_paused` (deployment variable),
   `send_paused` (owner switch), `forwarding` (mode forward with a current endpoint), `backup_active`.
-  Todofy: `processing_paused`, `force_pause_todoist`, `reminder_enabled`, `backup_active`.
+  Todofy: `processing_paused`, `force_pause_todoist`, `reminder_enabled`, `backup_active`. A
+  `status_unavailable` status has only the deployment variables (Mail Hero `maintenance`,
+  `force_send_paused`; Todofy `maintenance`, `processing_paused`, `force_pause_todoist`,
+  `reminder_enabled`); the keys read from storage (Mail Hero `send_paused`, `forwarding`,
+  `backup_active`; Todofy `backup_active`) are left out, so they are optional in `ops-v1.ts`.
 - `guard`: the effective `GuardState` (below).
 - `signals`: active conditions only, at most 16, sorted by severity (critical first) then code. `metrics`
   are numbers only; `since` when the app tracks the start of the episode.
@@ -127,8 +131,10 @@ the dashboard shows unknown ones generically.
 - `deferred` lists the job codes that shed defers in this app. **Shed never stops** ingest, parsing,
   webhook intake, delivery or its retries, Gemini/Todoist processing of real mail, the canary,
   schedule-keeping alarms, integrity repair, the daily reminder/digest or alert evaluation. Each deferred
-  job still runs when its own bound is reached (a guard renewed forever cannot starve it). The per-job
-  table with reasons is in `IMPLEMENTATION.md`.
+  job still runs when its own bound is reached (a guard renewed forever cannot starve it), and the bound
+  covers the whole job: once due, a job that works in pages or batches keeps its normal cadence until
+  it has caught up, and only that complete run restarts its bound. The per-job table with reasons is in
+  `IMPLEMENTATION.md`.
 
 ### `startCanary({run_id})` → `StartCanaryResult` (Mail Hero)
 
@@ -138,7 +144,7 @@ Creates one synthetic canary message (fixed text, `syntheticCanaryMail()` in `pi
 path and the normal delivery path: frozen bytes, authentication, rate limits, retries and backoff.
 
 - Idempotent per `run_id`: a second call returns the same `event_id` with `queued`, even if sending has
-  been paused since.
+  been paused or maintenance turned on since (the one-row lookup runs before any other check).
 - Nothing is queued silently. When sending would be held, nothing is created and the call returns
   `paused` with `send_paused` (`FORCE_SEND_PAUSED`), `settings_paused` (owner switch),
   `endpoint_paused` (endpoint paused or archived) or `endpoint_blocked` (current revision blocked). When
@@ -152,7 +158,10 @@ path and the normal delivery path: frozen bytes, authentication, rate limits, re
 ### `canaryDelivery(eventId)` → `CanaryDelivery` (Mail Hero)
 
 The delivery state of a canary event: `pending` (waiting or retrying; `error_code` is the last delivery
-error such as `http_503`), `paused` (held by a pause), `delivered` (`delivered_at`; the consumer
+error such as `http_503`), `paused` (held: a pause, maintenance, or a block of the event's endpoint
+revision that is not yet due for a recheck, the same holds that make `startCanary` answer `paused` and
+the owner UI show the delivery paused; `error_code` is then the block code, e.g. `http_401`; a held run
+is not a pipeline failure), `delivered` (`delivered_at`; the consumer
 durably took it over), `failed` (`error_code`, e.g. `http_400`, `retry_window_expired`), or `unknown`
 (no canary delivery has this ID; a real mail's event ID also reads `unknown`). `attempts` counts HTTP
 attempts; `last_http_status` is the latest attempt's status when there was a response.
@@ -176,8 +185,10 @@ clock is `invalid_input`. An empty `items` list clears the ops section.
 
 **Digest.** Todofy's daily attention reminder (at most one Todoist task per UTC day, frozen title and
 body, existing retry rules) gains an ops section built from the stored report when its `generated_at`
-is at most 36 hours old: the `warning` and `critical` items, critical first. A day with ops items but no
-attention items still creates that day's one task; there is never a second task on a day. The text holds
+is at most 36 hours old: the `warning` and `critical` items, critical first. Each report is listed by at
+most one day's reminder. A day with ops items but no attention items still creates that day's one task,
+from a report generated before that UTC day began (a report from the current day waits for the next
+day's reminder unless mail needs attention first); there is never a second task on a day. The text holds
 only sources, codes, severities, timestamps, numeric metrics and links (Todofy's owner UI, the
 `dashboard_url`). Days without ops items keep today's exact title and body. Report at about 23:40 UTC so
 the next UTC day's reminder carries it.

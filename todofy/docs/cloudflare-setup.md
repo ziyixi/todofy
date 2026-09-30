@@ -195,6 +195,10 @@ in [gateway-contract.md](gateway-contract.md):
 
 - Once the class-delete release is live (`todofy` at migration tag `v2`), a revert of an older release
   keeps the gateway tomls' `[[migrations]]` at `v1` + `v2` and does not bring back `retired.ts` (§6.6).
+- Reverting to a release before ops-v1 canary handling: that core processes a canary like real mail
+  (Todoist task, lists). Stop the dashboard's canaries first and wait until no canary is pending in
+  either app, or set Mail Hero's `FORCE_SEND_PAUSED` and `TODOFY_PROCESSING_PAUSED=true` first and keep
+  them until those canaries are finished or cancelled (contracts/ops-v1/IMPLEMENTATION.md §4).
 
 ## 5. Hosts and callers
 
@@ -212,9 +216,9 @@ in [gateway-contract.md](gateway-contract.md):
 - Ops dashboard (contracts/ops-v1, not built yet): a Worker in this account binds the gateway's
   `Ops` entrypoint (`[[services]] binding = "TODOFY" service = "todofy" entrypoint = "Ops"`). There is
   no route or Access policy for it and nothing to configure here; `status().ui_url` is built from
-  `TODOFY_PUBLIC_HOST`. A `shed` guard it sets defers only the weekly backup (never past 8 days since
-  the last complete one), retention and the metrics rollup (never past 72 h since their last run);
-  mail, canaries, the reminder and report precompute keep running. Guard and latest report live in the
+  `TODOFY_PUBLIC_HOST`. A `shed` guard it sets defers only the weekly backup (never past 7.5 days since
+  the last complete one, 12 h before `backup_stale` at 8 days), retention and the metrics rollup (never
+  past 72 h since their last complete run; once due they run until caught up); mail, canaries, the reminder and report precompute keep running. Guard and latest report live in the
   object's storage, not in D1 or the backups.
 
 ## 6. Local checks before the first deploy

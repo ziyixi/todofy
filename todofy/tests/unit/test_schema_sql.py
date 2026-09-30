@@ -252,7 +252,7 @@ def test_ops_columns_are_additive_and_checked(db):
         "INSERT INTO mail_reminders (day, state, attention_count, created_at, updated_at)"
         " VALUES ('2026-09-29', 'created', 0, 1, 1)"
     )
-    assert db.execute("SELECT ops_count FROM mail_reminders").fetchall() == [(0,)]
+    assert db.execute("SELECT ops_count, ops_generated_at FROM mail_reminders").fetchall() == [(0, 0)]
 
 
 def test_canary_events_are_never_listed_counted_or_reminded_of(db):

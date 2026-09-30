@@ -185,15 +185,21 @@ export async function alertOverview(env: AlertEnv): Promise<Row> {
     pending_notifications: delivery?.pending ?? 0, failed_notifications: delivery?.failed ?? 0 }
 }
 
+const HISTORY_PURGE_BATCH = 20
 /** Run as its own bounded maintenance phase, under the coordinator backup guard.
- * `purgeHistory: false` (an ops-v1 shed guard) skips only the 180-day history delete. */
-export async function runAlerts(env: AlertEnv, options: { purgeHistory?: boolean } = {}): Promise<{ continueSoon: boolean }> {
-  if (env.MAINTENANCE_MODE === 'true') return { continueSoon: false }
+ * `purgeHistory: false` (an ops-v1 shed guard) skips only the 180-day history delete.
+ * `historyBacklog`: the delete filled its batch, so more expired history may remain. */
+export async function runAlerts(env: AlertEnv, options: { purgeHistory?: boolean } = {}): Promise<{ continueSoon: boolean; historyBacklog: boolean }> {
+  if (env.MAINTENANCE_MODE === 'true') return { continueSoon: false, historyBacklog: false }
   await evaluateAlerts(env)
   await deliverAlert(env)
-  if (options.purgeHistory !== false) await env.DB.prepare(`DELETE FROM alert_notifications WHERE id IN (SELECT id FROM alert_notifications INDEXED BY alert_notifications_created_idx
-    WHERE created_at<? AND state IN('sent','failed','disabled') ORDER BY created_at LIMIT 20)`)
-    .bind(new Date(Date.now() - 180 * DAY).toISOString()).run()
+  let historyBacklog = false
+  if (options.purgeHistory !== false) {
+    const purged = await env.DB.prepare(`DELETE FROM alert_notifications WHERE id IN (SELECT id FROM alert_notifications INDEXED BY alert_notifications_created_idx
+      WHERE created_at<? AND state IN('sent','failed','disabled') ORDER BY created_at LIMIT ${HISTORY_PURGE_BATCH})`)
+      .bind(new Date(Date.now() - 180 * DAY).toISOString()).run()
+    historyBacklog = Number(purged?.meta?.changes ?? 0) >= HISTORY_PURGE_BATCH
+  }
   const pending = await env.DB.prepare(`SELECT 1 FROM alert_notifications WHERE state IN('pending','sending') LIMIT 1`).first()
-  return { continueSoon: alertConfiguration(env).configured && !!pending }
+  return { continueSoon: alertConfiguration(env).configured && !!pending, historyBacklog }
 }

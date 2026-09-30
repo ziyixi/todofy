@@ -252,7 +252,8 @@ class TodofyCore(DurableObject):
             received = ops_rules.report(ops_rules.loads(report_json), now)
             result = ops.store_report(self.sql, received, now)
             if result["stored"]:
-                # A day whose reminder is not created yet considers the new report at once.
+                # A day whose reminder is not created yet considers the new report at once (on its
+                # own it is due only from the UTC day after it was generated; reminder._ops_due).
                 self.sql.exec("UPDATE control SET next_reminder_check = min(next_reminder_check, ?) WHERE id = 1", now)
                 await self.wake()
         except ops_rules.InvalidInput:
@@ -938,14 +939,17 @@ class TodofyCore(DurableObject):
                 self.sql.exec(SET_CONTROL[column], held)
                 continue
             await self._arm_watchdog()
+            finished = False
             try:
                 next_at = await self._tick(column, now)
+                finished = True
             except Exception as exc:
                 # One failing tick must not stall the ledger or the other ticks.
                 _log(tick=column, error=type(exc).__name__)
                 next_at = now + TICK_RETRY
             self.sql.exec(SET_CONTROL[column], next_at)
-            if column == "next_maintenance":
+            # Only a sweep that left no expired rows is retention's run, not one batch of a backlog.
+            if column == "next_maintenance" and ops_rules.completed_run(finished, next_at, now, RETENTION_CONTINUE):
                 ops.ran(self.sql, ops_rules.Job.RETENTION, now)
         await self._metrics_tick()
 
@@ -958,13 +962,17 @@ class TodofyCore(DurableObject):
             metrics.set_next_flush(self.sql, held)
             return
         await self._arm_watchdog()
+        finished = False
         try:
             next_at = await metrics.flush(self.env, self.sql, now)
+            finished = True
         except Exception as exc:
             _log(tick="metrics", error=type(exc).__name__)
             next_at = now + TICK_RETRY
         metrics.set_next_flush(self.sql, next_at)
-        ops.ran(self.sql, ops_rules.Job.METRICS_ROLLUP, now)
+        # A flush that continues in a minute (more transitions or days to write) has not caught up.
+        if ops_rules.completed_run(finished, next_at, now, metrics.CONTINUE):
+            ops.ran(self.sql, ops_rules.Job.METRICS_ROLLUP, now)
 
     async def _tick(self, column: str, now: int) -> int:
         match column:

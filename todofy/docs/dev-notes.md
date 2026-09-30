@@ -68,7 +68,7 @@ gateway/                       the gateway Worker `todofy` (TypeScript, own pack
   wrangler.test.toml           runtime tests: DEV_AUTH_BYPASS
   wrangler.test-auth.toml      runtime tests: real Access JWT checks against a loopback issuer
 migrations/0001_init.sql       the D1 schema; 0002_daily_metrics.sql adds the owner UI's daily trends (§6);
-                               0003_ops.sql adds mail_events.canary_run_id and mail_reminders.ops_count (§5, ops-v1)
+                               0003_ops.sql adds mail_events.canary_run_id, mail_reminders.ops_count/ops_generated_at (§5, ops-v1)
 api/                           owner-api-v1.openapi.yaml (source of truth for the UI), newsletter report
                                schemas; the webhook body references ../contracts/mail-received-v1 (shared)
 worker/todofy/core/            pure stdlib Python, host-testable, no `js`/`workers` imports
@@ -518,16 +518,20 @@ canary=True)` is empty. `sql.REAL_MAIL` keeps canaries out of every list and cou
 count, Overview counts, recent pages, the reminder), `metrics._walk` skips them, and the event detail
 answers `canary: true`. A processing pause holds a canary `pending` (reported as `processing`).
 
-Guard `shed` defers only: a new weekly backup (unless the last complete one is older than 8 days or
-there is none; a running job continues), the retention tick and the metrics rollup (each unless it last
-ran 72 h ago). A deferred job's own time moves to min(guard end, bound); ending or changing the guard
+Guard `shed` defers only: a new weekly backup (unless the last complete one is older than 7.5 days, 12 h
+before `backup_stale` at 8 days, or there is none; a running job continues), the retention tick and the
+metrics rollup (each unless its last complete run is 72 h old; a run that continues in a minute, one batch
+of a backlog, does not count, so once due a job keeps its cadence until it has caught up). A deferred job's own time moves to min(guard end, bound); ending or changing the guard
 makes them due again and wakes the object. Everything else keeps running: intake, the ledger steps,
 canaries, recovery, the watchdog, the reminder/digest, report precompute and the cron wake.
 
 Digest: `reminder.tick` adds `core.ops.digest(coordinator.latest_ops_report(), now)` (warning and
 critical items of a report at most 36 h old, critical first) to the day's one task; an ops-only day
-still gets its task (title `[Todofy System] 运维：{n} 项需要关注`), the claim freezes the text and
-`mail_reminders.ops_count`, and a day without ops items keeps the exact old text.
+still gets its task (title `[Todofy System] 运维：{n} 项需要关注`), the claim freezes the text,
+`mail_reminders.ops_count` and `ops_generated_at`, and a day without ops items keeps the exact old text.
+Each report is listed by at most one day's reminder, and on its own (no attention) only from the UTC
+day after it was generated, so the dashboard's 23:40 report is the next day's digest, never also a task
+that evening.
 
 ### health (lead)
 `GET /health` on the hooks hosts is answered by the gateway alone: `{"build", "service": "todofy",

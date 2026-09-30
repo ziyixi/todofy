@@ -143,6 +143,26 @@ test('status: maintenance is down; an unreadable source is down with only status
   assert.equal('capacity_used_bytes' in noCapacity.counters, false, 'a counter that was not read is left out')
 })
 
+/** Keys an ops-v1.ts interface declares without `?`: what a dashboard compiled against it relies on. */
+function requiredKeys(name) {
+  const source = readFileSync(new URL('../../../contracts/ops-v1/ops-v1.ts', import.meta.url), 'utf8')
+  const body = source.match(new RegExp(`export interface ${name} \\{([^}]*)\\}`))[1]
+  return [...body.matchAll(/readonly (\w+)(\??):/g)].filter(match => !match[2]).map(match => match[1])
+}
+
+test('status: every mode MailHeroModes requires is a boolean, also on status_unavailable', () => {
+  const required = requiredKeys('MailHeroModes')
+  assert.deepEqual(required, ['maintenance', 'force_send_paused'], 'only deployment variables are required')
+  for (const value of [status(), status({ env: { ...env, MAINTENANCE_MODE: 'true' } }), status({ coordinator: null }), status({ snapshot: null })]) {
+    for (const key of required) assert.equal(typeof value.modes[key], 'boolean', `${key} in ${JSON.stringify(value.modes)}`)
+  }
+  for (const file of readdirSync(new URL('../../../contracts/ops-v1/fixtures/OpsStatus/', import.meta.url))) {
+    const fixture = JSON.parse(readFileSync(new URL(`../../../contracts/ops-v1/fixtures/OpsStatus/${file}`, import.meta.url), 'utf8'))
+    const keys = requiredKeys(fixture.app === 'mail-hero' ? 'MailHeroModes' : 'TodofyModes')
+    for (const key of keys) assert.equal(typeof fixture.modes[key], 'boolean', `${file}: ${key}`)
+  }
+})
+
 test('status: signals, metrics and counters stay within the contract bounds', () => {
   const value = status({ snapshot: { ...snapshot, logical_bytes: 5 * 1024 ** 3, parse_failed: 1, delivery_failed: 1, policy_error: 1, current_paused: 1, paused_waiting: 1,
     current_blocked: 1, oldest_pending_at: iso(-3 * HOUR), last_backup_at: null, send_paused: 1, forwarding: 0 },
@@ -167,6 +187,13 @@ test('canaryDelivery mapping for every delivery state', () => {
   assert.equal(map({}, { ...env, FORCE_SEND_PAUSED: 'true' }).state, 'paused')
   assert.equal(map({}, { ...env, MAINTENANCE_MODE: 'true' }).state, 'paused')
   assert.equal(map({ state: 'delivered', attempt_count: 1, delivered_at: iso(0) }, { ...env, FORCE_SEND_PAUSED: 'true' }).state, 'delivered', 'a pause does not hide a result')
+  // contract-4: a blocked revision holds the canary as startCanary and the owner UI say (paused, block code).
+  const blockedAt = (overrides) => valid('CanaryDelivery', canaryDeliveryState({ ...row, state: 'retry_wait', attempt_count: 1, last_error: 'http_401', last_http_status: 401, ...overrides }, env, NOW))
+  assert.deepEqual(blockedAt({ blocked_reason: 'http_401' }), { state: 'paused', attempts: 1, last_http_status: 401, error_code: 'http_401' })
+  assert.deepEqual(blockedAt({ blocked_reason: 'http_404', blocked_until: iso(HOUR) }), { state: 'paused', attempts: 1, last_http_status: 401, error_code: 'http_404' })
+  assert.equal(blockedAt({ blocked_reason: 'http_404', blocked_until: iso(-HOUR) }).state, 'pending', 'a block due for its recheck is sendable')
+  assert.equal(blockedAt({ blocked_reason: 'http_401', state: 'delivered', delivered_at: iso(0) }).state, 'delivered')
+  assert.deepEqual(blockedAt({ blocked_reason: 'Not A Code' }), { state: 'paused', attempts: 1, last_http_status: 401, error_code: 'http_401' })
 })
 
 test('input validation rejects with invalid_input before any binding is touched', async () => {
@@ -187,15 +214,21 @@ test('input validation rejects with invalid_input before any binding is touched'
 
 test('startCanary reports holds as values in order and creates nothing', async () => {
   const target = { mode: 'forward', send_paused: 0, endpoint_id: 'e', paused: 0, archived_at: null, current_revision_id: 'r', revision_id: 'r', blocked_reason: null, blocked_until: null }
-  const fake = (row, variables = {}) => {
+  const fake = (row, variables = {}, queued = null) => {
     const statements = [], touched = []
     return { statements, touched, env: { ...env, ...variables, COORDINATOR: { idFromName() { touched.push('coordinator'); throw new Error('coordinator_down') } },
       DB: { prepare(sql) { statements.push(sql); const statement = { bind: () => statement,
-        async first() { return /action_request_id/.test(sql) ? null : row } }; return statement } } } }
+        async first() { if (queued instanceof Error) throw queued; return /action_request_id/.test(sql) ? queued : row } }; return statement } } } }
   }
-  const run = async (row, variables) => { const value = fake(row, variables); return { result: valid('StartCanaryResult', await startCanary(value.env, { run_id: 'canary-2026-09-29' }, NOW)), statements: value.statements } }
+  const run = async (row, variables, queued) => { const value = fake(row, variables, queued); return { result: valid('StartCanaryResult', await startCanary(value.env, { run_id: 'canary-2026-09-29' }, NOW)), statements: value.statements } }
   assert.deepEqual((await run(target, { MAINTENANCE_MODE: 'true' })).result, { event_id: null, state: 'unavailable', reason: 'maintenance' })
-  assert.deepEqual((await run(target, { MAINTENANCE_MODE: 'true' })).statements, [], 'maintenance reads nothing')
+  assert.equal((await run(target, { MAINTENANCE_MODE: 'true' })).statements.length, 1, 'maintenance reads only the run\'s own event')
+  assert.deepEqual((await run(target, { MAINTENANCE_MODE: 'true' }, new Error('d1_down'))).result.reason, 'maintenance')
+  // contract-3: a run already queued keeps its event_id whatever holds sending now, maintenance included.
+  const queued = { event_id: '6f1f4c1e-3b9a-4f55-9d0e-0a1b2c3d4e5f' }
+  for (const variables of [{ MAINTENANCE_MODE: 'true' }, { FORCE_SEND_PAUSED: 'true' }, {}]) {
+    assert.deepEqual((await run({ ...target, send_paused: 1 }, variables, queued)).result, { event_id: queued.event_id, state: 'queued' }, JSON.stringify(variables))
+  }
   assert.deepEqual((await run({ ...target, send_paused: 1 }, { FORCE_SEND_PAUSED: 'true' })).result.reason, 'send_paused')
   assert.deepEqual((await run({ ...target, send_paused: 1, mode: 'archive' })).result.reason, 'settings_paused')
   assert.deepEqual((await run({ ...target, mode: 'archive', paused: 1 })).result, { event_id: null, state: 'unavailable', reason: 'no_endpoint' })

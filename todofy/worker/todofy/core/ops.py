@@ -71,9 +71,12 @@ class Job(StrEnum):
 DEFERRED = (Job.WEEKLY_BACKUP, Job.RETENTION, Job.METRICS_ROLLUP)
 # A deferred job still runs once its last run is this old, however long the guard is renewed.
 JOB_BOUND = {Job.RETENTION: 72 * 3600, Job.METRICS_ROLLUP: 72 * 3600}
-# A backup starts anyway when the last complete one is older than this (or there is none).
-BACKUP_BOUND = 8 * 86400
-BACKUP_STALE = BACKUP_BOUND
+# status() reports backup_stale (critical) once the last complete backup is older than this.
+BACKUP_STALE = 8 * 86400
+# A held backup starts anyway once the last complete one is this old (or there is none): 12 h
+# after its weekly slot and 12 h before backup_stale, so a renewed shed guard never makes its own
+# weekly backup late enough to raise a critical signal (a job takes about a minute).
+BACKUP_BOUND = 7 * 86400 + 12 * 3600
 DUE_BACKLOG = 3600
 
 
@@ -293,6 +296,13 @@ def defer_until(guard: Guard, now: int, last_run: int | None, bound: int) -> int
         return None
     assert guard.until_ms is not None
     return min(math.ceil(guard.until_ms / 1000), last_run + bound)
+
+
+def completed_run(finished: bool, next_at: int, now: int, continue_after: int) -> bool:
+    """Whether a deferrable job's run restarts its bound: it finished without an error and did not
+    schedule itself to continue within ``continue_after`` (one batch of a larger backlog). So the
+    bound covers the whole job: once due, it keeps its normal cadence until it has caught up."""
+    return finished and next_at > now + continue_after
 
 
 # ---- canary result ---------------------------------------------------------------------
