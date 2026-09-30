@@ -1,13 +1,23 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import worker from "../../integrations/notion-publish/worker.js";
+import worker from "../../relay/src/index";
 
 const env = {
   NOTION_WEBHOOK_SECRET: "not-a-real-secret-000000000000000000000000",
   GITHUB_DISPATCH_TOKEN: "not-a-real-github-token",
+  GITHUB_REPOSITORY: "ziyixi/todofy",
+  RELEASE_WORKFLOW: "website-release.yml",
+  CANONICAL_HOST: "www.ziyixi.science",
+  NOTION_API_VERSION: "2026-03-11",
 };
-const api =
-  "https://api.github.com/repos/ziyixi/ziyixi.science/actions/workflows/production-release.yml";
+const vars = {
+  GITHUB_REPOSITORY: env.GITHUB_REPOSITORY,
+  RELEASE_WORKFLOW: env.RELEASE_WORKFLOW,
+  CANONICAL_HOST: env.CANONICAL_HOST,
+  NOTION_API_VERSION: env.NOTION_API_VERSION,
+};
+const api = "https://api.github.com/repos/ziyixi/todofy/actions/workflows/website-release.yml";
+const workflowPage = "https://github.com/ziyixi/todofy/actions/workflows/website-release.yml";
 
 function request(options: RequestInit = {}, path = "/publish") {
   return new Request(`https://publish.example${path}`, {
@@ -29,7 +39,7 @@ function mockGitHub(runs: unknown[] = [], dispatch = Response.json({ workflow_ru
 afterEach(() => vi.unstubAllGlobals());
 
 describe("Notion publish Worker", () => {
-  it("refreshes status through its fixed workflow without accepting publish overrides", async () => {
+  it("refreshes status through the release workflow's status operation, ignoring overrides", async () => {
     const upstream = mockGitHub();
     const response = await worker.fetch(
       request(
@@ -44,12 +54,18 @@ describe("Notion publish Worker", () => {
       env,
     );
     expect(response.status).toBe(202);
-    expect((await response.json()).workflowUrl).toContain("/notion-status.yml");
-    expect(upstream.mock.calls[0]?.[0]).toContain("/notion-status.yml/runs?");
-    expect(upstream.mock.calls[1]?.[0]).toContain("/notion-status.yml/dispatches");
+    expect((await response.json()).workflowUrl).toBe(workflowPage);
+    expect(upstream.mock.calls[0]?.[0]).toBe(`${api}/runs?branch=main&per_page=50`);
+    expect(upstream.mock.calls[1]?.[0]).toBe(`${api}/dispatches`);
     expect(JSON.parse(String(upstream.mock.calls[1]?.[1]?.body))).toEqual({
       ref: "main",
-      inputs: {},
+      inputs: {
+        operation: "status",
+        confirmation: "status:www.ziyixi.science",
+        force_build: false,
+        allow_empty: false,
+        trigger: "button",
+      },
     });
   });
 
@@ -61,14 +77,14 @@ describe("Notion publish Worker", () => {
     expect(response.status).toBe(200);
     expect(await response.json()).toMatchObject({
       status: "already-running",
-      workflowUrl: "https://github.com/ziyixi/ziyixi.science/actions/workflows/notion-status.yml",
+      workflowUrl: workflowPage,
     });
     expect(upstream).toHaveBeenCalledTimes(1);
   });
 
   it("exposes only a liveness response without checking secrets or contacting GitHub", async () => {
     const upstream = mockGitHub();
-    const response = await worker.fetch(request({ method: "GET" }, "/health"), {});
+    const response = await worker.fetch(request({ method: "GET" }, "/health"), vars);
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({ status: "ok" });
     expect(response.headers.get("Cache-Control")).toBe("no-store");
@@ -112,14 +128,15 @@ describe("Notion publish Worker", () => {
     expect(upstream).not.toHaveBeenCalled();
   });
 
-  it.each([{}, { ...env, NOTION_WEBHOOK_SECRET: "short" }, { ...env, GITHUB_DISPATCH_TOKEN: "" }])(
-    "fails closed with missing or weak configuration",
-    async (bindings) => {
-      const upstream = mockGitHub();
-      expect((await worker.fetch(request(), bindings)).status).toBe(503);
-      expect(upstream).not.toHaveBeenCalled();
-    },
-  );
+  it.each([
+    vars,
+    { ...env, NOTION_WEBHOOK_SECRET: "short" },
+    { ...env, GITHUB_DISPATCH_TOKEN: "" },
+  ])("fails closed with missing or weak configuration", async (bindings) => {
+    const upstream = mockGitHub();
+    expect((await worker.fetch(request(), bindings)).status).toBe(503);
+    expect(upstream).not.toHaveBeenCalled();
+  });
 
   it("dispatches only the fixed ordinary main release, ignoring body and query overrides", async () => {
     const upstream = mockGitHub();
@@ -140,10 +157,9 @@ describe("Notion publish Worker", () => {
     expect(response.status).toBe(202);
     expect(await response.json()).toEqual({
       status: "accepted",
-      workflowUrl:
-        "https://github.com/ziyixi/ziyixi.science/actions/workflows/production-release.yml",
+      workflowUrl: workflowPage,
       runId: 123,
-      runUrl: "https://github.com/ziyixi/ziyixi.science/actions/runs/123",
+      runUrl: "https://github.com/ziyixi/todofy/actions/runs/123",
     });
     expect(upstream).toHaveBeenCalledTimes(2);
     const [url, options] = upstream.mock.calls[1]!;
@@ -158,6 +174,7 @@ describe("Notion publish Worker", () => {
         confirmation: "release:www.ziyixi.science",
         force_build: false,
         allow_empty: false,
+        trigger: "button",
       },
     });
     expect(options?.headers).toMatchObject({
@@ -194,8 +211,7 @@ describe("Notion publish Worker", () => {
     expect(response.status).toBe(202);
     expect(await response.json()).toEqual({
       status: "accepted",
-      workflowUrl:
-        "https://github.com/ziyixi/ziyixi.science/actions/workflows/production-release.yml",
+      workflowUrl: workflowPage,
     });
   });
 

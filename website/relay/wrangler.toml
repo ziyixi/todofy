@@ -1,0 +1,42 @@
+# Worker "ziyixi-notion-publish": the Notion buttons' relay and the scheduled change detector
+# (docs/architecture.md). Deployed only by the "Website relay deploy" job in .github/workflows/ci.yml.
+# Secrets, set once with `wrangler secret put <NAME> --config relay/wrangler.toml` (docs/cutover.md):
+#   GITHUB_DISPATCH_TOKEN  fine-grained PAT, ziyixi/todofy only, Actions: Read and write
+#   NOTION_WEBHOOK_SECRET  the buttons' X-Notion-Publish-Secret header value (32-1024 characters)
+#   NOTION_TOKEN           a Notion integration with Read content on the Blog data source
+#   NOTION_DATA_SOURCE_ID  the Blog data source
+name = "ziyixi-notion-publish"
+account_id = "f57937bd1d93bf59e737b6d8445fb7a3"
+main = "src/index.ts"
+compatibility_date = "2026-09-25"
+# The Notion buttons call https://ziyixi-notion-publish.cloudflare-579.workers.dev/{publish,refresh-status}.
+workers_dev = true
+preview_urls = false
+
+# Every 15 minutes, off the hour. The account's Workers Free plan allows 5 cron triggers; with home
+# (*/30) and todofy (*/10) this is the third.
+[triggers]
+crons = ["7,22,37,52 * * * *"]
+
+# Workers Logs keep only the relay's own lines (result codes and counts). Invocation logs are off:
+# they would record request metadata, and the buttons' requests carry the shared secret header.
+[observability]
+enabled = true
+
+[observability.logs]
+enabled = true
+invocation_logs = false
+
+[vars]
+GITHUB_REPOSITORY = "ziyixi/todofy"
+RELEASE_WORKFLOW = "website-release.yml"
+CANONICAL_HOST = "www.ziyixi.science"
+NOTION_API_VERSION = "2026-03-11"
+# Automatic releases (owner decision: on from the start). "false" keeps only the buttons.
+AUTO_PUBLISH = "true"
+# Publish only after the newest author edit is this many minutes old.
+QUIET_MINUTES = "25"
+# Change-triggered releases per UTC day; the daily reconcile release is separate.
+MAX_AUTO_RELEASES_PER_DAY = "6"
+# The daily reconcile release runs at the first tick at or after this UTC hour.
+RECONCILE_UTC_HOUR = "10"
