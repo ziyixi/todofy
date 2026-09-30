@@ -1,0 +1,282 @@
+# The personal website's release (website/docs/release.md). One workflow, one concurrency group:
+# - dispatched by the Notion relay (website/relay): the 发布网站 button (trigger button), the change
+#   detector (cron, reconcile) and the 刷新状态 button (operation status);
+# - dispatched by hand (manual): bootstrap once, recovery after a blocked release, force_build;
+# - called by "Website deploy" in ci.yml after a website push on main passed the CI gate (push).
+# Every release syncs Notion, builds the static export, verifies it under wrangler dev, uploads a Worker
+# version, deploys it only if production still serves the recorded version, verifies the live hostname and
+# rolls back on failure, then writes the Notion feedback. An unchanged identity skips the deploy.
+name: Website release
+run-name: Website ${{ inputs.operation }} (${{ inputs.trigger }})
+
+on:
+  workflow_dispatch:
+    inputs:
+      operation:
+        description: release, status (Notion feedback only), bootstrap (first release only) or recovery
+        required: true
+        type: choice
+        default: release
+        options: [release, status, bootstrap, recovery]
+      confirmation:
+        description: Type <operation>:www.ziyixi.science; append :allow-empty when intentionally clearing Notion
+        required: true
+        type: string
+      force_build:
+        description: Rebuild and redeploy even when the release identity is unchanged
+        required: true
+        type: boolean
+        default: false
+      allow_empty:
+        description: One-run confirmation that a previously non-empty Notion collection may publish as empty
+        required: true
+        type: boolean
+        default: false
+      trigger:
+        description: Who asked (the relay sets button, cron or reconcile)
+        required: true
+        type: choice
+        default: manual
+        options: [manual, button, cron, reconcile]
+  workflow_call:
+    inputs:
+      operation:
+        type: string
+        required: true
+      confirmation:
+        type: string
+        required: true
+      force_build:
+        type: boolean
+        required: true
+      allow_empty:
+        type: boolean
+        required: true
+      trigger:
+        type: string
+        required: true
+
+permissions:
+  contents: read
+  deployments: write
+
+env:
+  CI: 'true'
+  WRANGLER_SEND_METRICS: 'false'
+  # Static, public production values (website/docs/release.md); secrets come from the production
+  # environment: WEBSITE_NOTION_TOKEN, WEBSITE_NOTION_DATA_SOURCE_ID, CF_API_TOKEN.
+  SITE_URL: https://www.ziyixi.science
+  NOTION_API_VERSION: '2026-03-11'
+  # The first release (operation bootstrap) continues this repository's last successful Vercel-era
+  # release record: the content registry with slug history and feed GUIDs.
+  WEBSITE_LEGACY_REPOSITORY: ziyixi/ziyixi.science
+
+jobs:
+  release:
+    name: Website release
+    if: inputs.operation != 'status'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    environment:
+      name: production
+    # Shared with the status job below and with every other run of this workflow, whoever started it:
+    # releases and Notion writes never overlap, and nothing is cancelled.
+    concurrency:
+      group: website-production
+      queue: max
+      cancel-in-progress: false
+    defaults:
+      run:
+        working-directory: website
+    env:
+      RELEASE_OPERATION: ${{ inputs.operation }}
+      RELEASE_CONFIRMATION: ${{ inputs.confirmation }}
+      ALLOW_EMPTY: ${{ inputs.allow_empty }}
+      FORCE_BUILD: ${{ inputs.force_build }}
+      GITHUB_TOKEN: ${{ github.token }}
+    steps:
+      # The newest main inside the lock, whatever commit triggered this run.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: refs/heads/main
+          # The code identity is the newest commit that touched website/.
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version-file: website/.nvmrc
+      - name: Install the pinned pnpm and locked dependencies
+        run: |
+          corepack enable
+          pnpm install --frozen-lockfile
+      - name: Assert the trusted release context
+        run: pnpm release context
+      - name: Lock the website code identity
+        id: code
+        run: pnpm release code-sha
+      - name: Enforce the GitHub Deployment state gate
+        id: gate
+        env:
+          WEBSITE_BOOTSTRAP_APPROVAL: ${{ vars.WEBSITE_BOOTSTRAP_APPROVAL }}
+        run: pnpm release gate
+      - name: Install the pinned browser
+        if: steps.gate.outputs.bootstrap_required != 'true'
+        run: pnpm exec playwright install --with-deps chromium
+      - name: Reconcile a blocked release with what production serves
+        if: steps.gate.outputs.bootstrap_required != 'true' && inputs.operation == 'recovery'
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+        run: pnpm release recover
+      - name: Verify production still serves the recorded baseline
+        if: steps.gate.outputs.bootstrap_required != 'true' && inputs.operation == 'release'
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+        run: pnpm release check-baseline
+      - name: Run the no-secret checks
+        if: steps.gate.outputs.bootstrap_required != 'true'
+        run: |
+          pnpm content:prepare:empty
+          pnpm check
+      - name: Prepare the Notion snapshot
+        if: steps.gate.outputs.bootstrap_required != 'true'
+        env:
+          NOTION_TOKEN: ${{ secrets.WEBSITE_NOTION_TOKEN }}
+          NOTION_DATA_SOURCE_ID: ${{ secrets.WEBSITE_NOTION_DATA_SOURCE_ID }}
+        run: pnpm release prepare
+      - name: Decide whether the identity changed
+        id: decision
+        if: steps.gate.outputs.bootstrap_required != 'true'
+        env:
+          CODE_SHA: ${{ steps.code.outputs.code_sha }}
+        run: pnpm release decide
+      - name: Build the static export
+        if: steps.decision.outputs.deploy_required == 'true'
+        env:
+          CODE_SHA: ${{ steps.code.outputs.code_sha }}
+        run: pnpm build:site
+      - name: Verify the export under wrangler dev
+        if: steps.decision.outputs.deploy_required == 'true'
+        run: pnpm release verify-artifact
+      - name: Upload the verified export as a Worker version
+        id: upload
+        if: steps.decision.outputs.deploy_required == 'true'
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+        run: pnpm release upload
+      - name: Record the release in progress
+        id: record
+        if: steps.decision.outputs.deploy_required == 'true'
+        run: pnpm release record
+      - name: Deploy the version and the wrangler.toml hostnames
+        id: deploy
+        if: steps.decision.outputs.deploy_required == 'true'
+        continue-on-error: true
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+        run: pnpm release deploy
+      - name: Verify the live hostname
+        id: live
+        if: steps.deploy.outcome == 'success'
+        continue-on-error: true
+        run: pnpm release verify-live
+      - name: Mark the release successful
+        if: steps.deploy.outcome == 'success' && steps.live.outcome == 'success'
+        env:
+          DEPLOYMENT_ID: ${{ steps.record.outputs.deployment_id }}
+        run: pnpm release mark-success
+      # A feedback outage never rolls back a verified website. Without a hostname there is nothing live
+      # to compare Notion with yet.
+      - name: Write the Notion feedback
+        id: feedback
+        if: >-
+          success() && steps.gate.outputs.live_origin != '' &&
+          (steps.live.outcome == 'success' || steps.decision.outputs.deploy_required == 'false')
+        continue-on-error: true
+        env:
+          NOTION_TOKEN: ${{ secrets.WEBSITE_NOTION_TOKEN }}
+          NOTION_DATA_SOURCE_ID: ${{ secrets.WEBSITE_NOTION_DATA_SOURCE_ID }}
+          WEBSITE_LIVE_ORIGIN: ${{ steps.gate.outputs.live_origin }}
+          DEPLOY_REQUIRED: ${{ steps.decision.outputs.deploy_required }}
+        run: |
+          confirmed_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          node --import tsx scripts/notion/sync-status.ts --confirmed-at="$confirmed_at"
+          if [ "$DEPLOY_REQUIRED" = true ]; then
+            node --import tsx scripts/notion/update-site-summary.ts --confirmed-at="$confirmed_at"
+          fi
+      - name: Report a feedback failure without failing the release
+        if: always() && steps.feedback.outcome == 'failure'
+        run: |
+          echo '::warning::The website release succeeded, but the Notion feedback is stale. Use 刷新状态 after fixing the cause; do not roll back.'
+      - name: Restore the recorded previous version
+        id: rollback
+        if: >-
+          always() && steps.record.outputs.deployment_id != '' &&
+          steps.upload.outputs.previous_version_id != '' &&
+          (steps.deploy.outcome != 'success' || steps.live.outcome != 'success')
+        continue-on-error: true
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+        run: pnpm release rollback
+      - name: Record the failure
+        if: >-
+          always() && steps.record.outputs.deployment_id != '' &&
+          (steps.deploy.outcome != 'success' || steps.live.outcome != 'success')
+        env:
+          DEPLOYMENT_ID: ${{ steps.record.outputs.deployment_id }}
+          ROLLED_BACK: ${{ steps.rollback.outcome == 'success' }}
+        run: pnpm release mark-failure
+      - name: Fail after preserving the recovery gate
+        if: >-
+          always() && steps.record.outputs.deployment_id != '' &&
+          (steps.deploy.outcome != 'success' || steps.live.outcome != 'success')
+        run: |
+          echo 'The website release failed; the latest release record now blocks ordinary releases. Use operation recovery (website/docs/release.md).' >&2
+          exit 1
+
+  # 刷新状态: compare Notion with the live site and write the feedback; no build, no deploy.
+  status:
+    name: Website Notion status
+    if: inputs.operation == 'status'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    environment:
+      name: production
+    concurrency:
+      group: website-production
+      queue: max
+      cancel-in-progress: false
+    defaults:
+      run:
+        working-directory: website
+    steps:
+      - name: Assert the trusted status context
+        working-directory: .
+        env:
+          CONFIRMATION: ${{ inputs.confirmation }}
+        run: |
+          [ "$GITHUB_REF" = refs/heads/main ] || { echo 'Status refresh runs only on main.' >&2; exit 1; }
+          [ "$CONFIRMATION" = "status:${SITE_URL#https://}" ] || { echo "The confirmation must be status:${SITE_URL#https://}" >&2; exit 1; }
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: refs/heads/main
+          persist-credentials: false
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version-file: website/.nvmrc
+      - name: Install the pinned pnpm and locked dependencies
+        run: |
+          corepack enable
+          pnpm install --frozen-lockfile
+      - name: Find the live hostname
+        id: live
+        run: pnpm release live-origin
+      - name: Compare Notion with the live website and write the feedback
+        if: steps.live.outputs.live_origin != ''
+        env:
+          NOTION_TOKEN: ${{ secrets.WEBSITE_NOTION_TOKEN }}
+          NOTION_DATA_SOURCE_ID: ${{ secrets.WEBSITE_NOTION_DATA_SOURCE_ID }}
+          WEBSITE_LIVE_ORIGIN: ${{ steps.live.outputs.live_origin }}
+        run: node --import tsx scripts/notion/sync-status.ts
+      - name: Explain a skipped refresh
+        if: steps.live.outputs.live_origin == ''
+        run: echo '::notice::ziyixi-website has no hostname yet (website/wrangler.toml); nothing live to compare.'

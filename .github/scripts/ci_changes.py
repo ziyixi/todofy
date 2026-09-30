@@ -2,14 +2,18 @@
 """Decide which apps a CI run checks and deploys. Standard library only (the runner's python3).
 
 Outputs (GITHUB_OUTPUT, "true"/"false"):
-  todofy_check, mail_hero_check, dashboard_check
+  todofy_check, mail_hero_check, dashboard_check, website_check
                     run that app's full checks
   contracts         run the contract tests: both sides of mail.received.v1 and ops-v1, and the
                     dashboard's ops-v1 caller tests
   packages          run every shared package's own checks (packages/*)
-  todofy_deploy, mail_hero_deploy, dashboard_deploy
+  todofy_deploy, mail_hero_deploy, dashboard_deploy, website_deploy
                     the app, a shared package it compiles in, or a contract file it bundles changed
                     (deploy jobs also require refs/heads/main)
+  website_relay_deploy
+                    website/relay/ (the Notion relay Worker, its own wrangler.toml) changed: deploy
+                    the relay. A change only there checks the website but does not release the site;
+                    a website change elsewhere releases the site but does not redeploy the relay.
 
 push: the files changed between a cumulative base and github.sha, never only this push's own diff,
 so a change whose run was cancelled or failed is checked (and deployed) again by the next run.
@@ -31,7 +35,9 @@ so a change whose run was cancelled or failed is checked (and deployed) again by
   run by the Changes job also fail until PACKAGE_USERS matches the file: dependencies). A file
   directly under packages/ (a README) is root documentation: gate only.
 workflow_dispatch: the "app" input checks and deploys that app ("both" = Todofy and Mail Hero, as
-before; "all" = every app; or one app), and the contracts and shared packages are checked too.
+before; "all" = every app; or one app; "website" = the site and its relay), and the contracts and
+shared packages are checked too. The website uses no contract and no package, so a website-only
+change does not run Contracts.
 """
 
 import os
@@ -39,18 +45,21 @@ import subprocess
 import sys
 from collections.abc import Callable, Iterable
 
-APPS = ("todofy", "mail-hero", "dashboard")
+APPS = ("todofy", "mail-hero", "dashboard", "website")
 # The output key prefix of each app ("<prefix>_check", "<prefix>_deploy").
-PREFIX = {"todofy": "todofy", "mail-hero": "mail_hero", "dashboard": "dashboard"}
+PREFIX = {"todofy": "todofy", "mail-hero": "mail_hero", "dashboard": "dashboard", "website": "website"}
 KEYS = (
     "todofy_check",
     "mail_hero_check",
     "dashboard_check",
+    "website_check",
     "contracts",
     "packages",
     "todofy_deploy",
     "mail_hero_deploy",
     "dashboard_deploy",
+    "website_deploy",
+    "website_relay_deploy",
 )
 DISPATCH = {
     "both": ("todofy", "mail-hero"),
@@ -58,7 +67,12 @@ DISPATCH = {
     "todofy": ("todofy",),
     "mail-hero": ("mail-hero",),
     "dashboard": ("dashboard",),
+    "website": ("website",),
 }
+# The website's second Worker (the Notion relay) deploys on its own (see website_relay_deploy).
+RELAY = "website/relay/"
+# Apps that neither provide nor consume a contract: their own changes do not run Contracts.
+NO_CONTRACTS = {"website"}
 # packages/<name>/ -> the apps whose Workers compile it in (a "file:../../packages/<name>" dependency).
 PACKAGE_USERS = {"edge-auth": ("todofy", "mail-hero", "dashboard")}
 
@@ -77,9 +91,11 @@ def everything() -> dict[str, bool]:
     return dict.fromkeys(KEYS, True)
 
 
-def outputs(checked: Iterable[str], deployed: Iterable[str], contracts: bool, packages: bool) -> dict[str, bool]:
+def outputs(
+    checked: Iterable[str], deployed: Iterable[str], contracts: bool, packages: bool, relay: bool = False
+) -> dict[str, bool]:
     checked, deployed = set(checked), set(deployed)
-    result = {"contracts": contracts, "packages": packages}
+    result = {"contracts": contracts, "packages": packages, "website_relay_deploy": relay}
     for app in APPS:
         result[f"{PREFIX[app]}_check"] = app in checked
         result[f"{PREFIX[app]}_deploy"] = app in deployed
@@ -106,11 +122,20 @@ def classify(paths: Iterable[str]) -> dict[str, bool]:
     ci = any(path.startswith(".github/") for path in paths)
     shared = ci or any(path.startswith("contracts/") for path in paths)
     bundled = {app for path in paths for app in BUNDLED_BY.get(path, ())}
+    # website/relay/ is the relay Worker: it deploys the relay, not the site (unless the site's own
+    # files, or a package counted as used by it, changed too).
+    relay = any(path.startswith(RELAY) for path in paths)
+    site = any(path.startswith("website/") and not path.startswith(RELAY) for path in paths)
+    site |= any("website" in PACKAGE_USERS.get(name, APPS) for name in compiled)
+    deployed = apps | bundled
+    if relay and not site:
+        deployed -= {"website"}
     return outputs(
         checked=APPS if shared else apps | documented,
-        deployed=apps | bundled,
-        contracts=bool(apps | documented) or shared,
+        deployed=deployed,
+        contracts=bool((apps - NO_CONTRACTS) | documented) or shared,
         packages=bool(package_names) or ci,
+        relay=relay,
     )
 
 
@@ -118,7 +143,7 @@ def dispatched(app: str) -> dict[str, bool]:
     if app not in DISPATCH:
         raise ValueError(f"unknown app input {app!r}; expected one of {sorted(DISPATCH)}")
     apps = DISPATCH[app]
-    return outputs(checked=apps, deployed=apps, contracts=True, packages=True)
+    return outputs(checked=apps, deployed=apps, contracts=True, packages=True, relay="website" in apps)
 
 
 MAIN = "refs/heads/main"

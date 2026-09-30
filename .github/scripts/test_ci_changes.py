@@ -32,22 +32,30 @@ def expect(
     packages=False,
     dashboard_check=False,
     dashboard_deploy=False,
+    website_check=False,
+    website_deploy=False,
+    website_relay_deploy=False,
 ):
     return {
         "todofy_check": todofy_check,
         "mail_hero_check": mail_hero_check,
         "dashboard_check": dashboard_check,
+        "website_check": website_check,
         "contracts": contracts,
         "packages": packages,
         "todofy_deploy": todofy_deploy,
         "mail_hero_deploy": mail_hero_deploy,
         "dashboard_deploy": dashboard_deploy,
+        "website_deploy": website_deploy,
+        "website_relay_deploy": website_relay_deploy,
     }
 
 
-# Every app checked (a contracts/ or .github/ change), and every app checked and deployed.
-ALL_CHECKED = {"dashboard_check": True}
+# Every app checked (a contracts/ or .github/ change); the three edge-auth apps checked and deployed
+# (the website compiles in no package); every app with the website's two Workers.
+ALL_CHECKED = {"dashboard_check": True, "website_check": True}
 ALL = {"dashboard_check": True, "dashboard_deploy": True}
+EVERY = {**ALL, "website_check": True, "website_deploy": True}
 
 
 def push(paths, ref=MAIN, last_success=BASE, ancestor=True, merge_base=BASE):
@@ -86,13 +94,14 @@ class Classify(unittest.TestCase):
         """The dashboard validates every Ops answer at runtime with the bundled schema and validate.mjs."""
         for path in ("contracts/ops-v1/ops-v1.schema.json", "contracts/ops-v1/validate.mjs"):
             with self.subTest(path=path):
-                self.assertEqual(push([path]), expect(T, T, T, F, F, **ALL))
+                self.assertEqual(push([path]), expect(T, T, T, F, F, **ALL, website_check=T))
 
     def test_contract_code_the_workers_bundle_deploys_every_app_that_bundles_it(self):
         """OPS_LIMITS and friends ship inside all three Workers, so a change must redeploy each."""
-        self.assertEqual(push(["contracts/ops-v1/ops-v1.ts"]), expect(T, T, T, T, T, **ALL))
-        self.assertEqual(push(["contracts/ops-v1/ops-v1.ts", "todofy/gateway/src/ops.ts"]), expect(T, T, T, T, T, **ALL))
-        self.assertEqual(push(["contracts/ops-v1/ops-v1.ts"], ref=BRANCH), expect(T, T, T, T, T, **ALL))
+        bundled = expect(T, T, T, T, T, **ALL, website_check=T)
+        self.assertEqual(push(["contracts/ops-v1/ops-v1.ts"]), bundled)
+        self.assertEqual(push(["contracts/ops-v1/ops-v1.ts", "todofy/gateway/src/ops.ts"]), bundled)
+        self.assertEqual(push(["contracts/ops-v1/ops-v1.ts"], ref=BRANCH), bundled)
 
     def test_bundled_by_lists_exactly_the_apps_whose_worker_imports_each_contract_file(self):
         """Every contracts/ file that an app's Worker or UI source imports (value or type) is in BUNDLED_BY
@@ -101,6 +110,7 @@ class Classify(unittest.TestCase):
             "mail-hero": [REPO / "mail-hero" / "cloudflare" / "src", REPO / "mail-hero" / "web" / "src"],
             "todofy": [REPO / "todofy" / "gateway" / "src", REPO / "todofy" / "web" / "src"],
             "dashboard": [REPO / "dashboard" / "worker" / "src", REPO / "dashboard" / "web" / "src"],
+            "website": [REPO / "website" / "src", REPO / "website" / "relay" / "src"],
         }
         self.assertEqual(set(roots), set(ci_changes.APPS))
         importers = {}
@@ -137,7 +147,7 @@ class Classify(unittest.TestCase):
             ["packages/edge-auth/docs/notes.md"],
         ):
             with self.subTest(paths=paths):
-                self.assertEqual(push(paths), expect(T, T, T, F, F, packages=T, **ALL_CHECKED))
+                self.assertEqual(push(paths), expect(T, T, T, F, F, packages=T, dashboard_check=T))
         # With the package's code, or with one app, the usual rules apply.
         paths = ["packages/edge-auth/SPEC.md", "packages/edge-auth/src/csrf.ts"]
         self.assertEqual(push(paths), expect(T, T, T, T, T, packages=T, **ALL))
@@ -159,14 +169,14 @@ class Classify(unittest.TestCase):
             "packages/edge-auth/SPEC.md",
             "dashboard/worker/src/state.ts",
         ]
-        self.assertEqual(push(paths), expect(T, T, T, F, F, packages=T, **ALL))
+        self.assertEqual(push(paths), expect(T, T, T, F, F, packages=T, **ALL, website_check=T))
 
     def test_a_package_change_with_one_app_still_deploys_every_user(self):
         paths = ["packages/edge-auth/src/csrf.ts", "todofy/gateway/src/csrf.ts"]
         self.assertEqual(push(paths), expect(T, T, T, T, T, packages=T, **ALL))
 
     def test_an_unregistered_package_counts_as_used_by_every_app(self):
-        self.assertEqual(push(["packages/dashboard-kit/src/index.ts"]), expect(T, T, T, T, T, packages=T, **ALL))
+        self.assertEqual(push(["packages/dashboard-kit/src/index.ts"]), expect(T, T, T, T, T, packages=T, **EVERY))
 
     def test_a_file_directly_under_packages_is_root_documentation(self):
         self.assertEqual(push(["packages/README.md"]), expect(F, F, F, F, F))
@@ -177,7 +187,17 @@ class Classify(unittest.TestCase):
 
     def test_prefixes_are_directories_not_name_prefixes(self):
         self.assertEqual(
-            push(["todofy-notes.md", "mail-hero.md", "dashboard.md", "contracts.md", "packages.md", "packages-old/x.ts"]),
+            push(
+                [
+                    "todofy-notes.md",
+                    "mail-hero.md",
+                    "dashboard.md",
+                    "website.md",
+                    "contracts.md",
+                    "packages.md",
+                    "packages-old/x.ts",
+                ]
+            ),
             expect(F, F, F, F, F),
         )
 
@@ -187,6 +207,25 @@ class Classify(unittest.TestCase):
     def test_a_rename_between_apps_touches_both(self):
         paths = ["todofy/api/mail-received-v1.schema.json", "contracts/mail-received-v1/mail-received-v1.schema.json"]
         self.assertEqual(push(paths), expect(T, T, T, T, F, **ALL_CHECKED))
+
+    def test_the_website_checks_and_releases_only_itself(self):
+        """No contract and no package: a site change runs neither Contracts nor another app."""
+        for path in ("website/src/app/page.tsx", "website/wrangler.toml", "website/docs/release.md"):
+            with self.subTest(path=path):
+                self.assertEqual(push([path]), expect(F, F, F, F, F, website_check=T, website_deploy=T))
+
+    def test_the_relay_deploys_without_releasing_the_site(self):
+        """website/relay/ is the Notion relay Worker: its change deploys the relay only."""
+        self.assertEqual(
+            push(["website/relay/src/detector.ts"]), expect(F, F, F, F, F, website_check=T, website_relay_deploy=T)
+        )
+        both = expect(F, F, F, F, F, website_check=T, website_deploy=T, website_relay_deploy=T)
+        self.assertEqual(push(["website/relay/wrangler.toml", "website/package.json"]), both)
+
+    def test_the_release_workflow_rechecks_every_app_but_deploys_none(self):
+        self.assertEqual(
+            push([".github/workflows/website-release.yml"]), expect(T, T, T, F, F, packages=T, **ALL_CHECKED)
+        )
 
 
 class Unknown(unittest.TestCase):
@@ -240,10 +279,14 @@ class Dispatch(unittest.TestCase):
         # "both" (also the default) keeps meaning Todofy and Mail Hero.
         self.assertEqual(self.dispatch("both"), expect(T, T, T, T, T, packages=T))
         self.assertEqual(self.dispatch(""), expect(T, T, T, T, T, packages=T))
-        self.assertEqual(self.dispatch("all"), expect(T, T, T, T, T, packages=T, **ALL))
+        self.assertEqual(self.dispatch("all"), expect(T, T, T, T, T, packages=T, **EVERY, website_relay_deploy=T))
         self.assertEqual(self.dispatch("todofy"), expect(T, F, T, T, F, packages=T))
         self.assertEqual(self.dispatch("mail-hero"), expect(F, T, T, F, T, packages=T))
         self.assertEqual(self.dispatch("dashboard"), expect(F, F, T, F, F, packages=T, **ALL))
+        self.assertEqual(
+            self.dispatch("website"),
+            expect(F, F, T, F, F, packages=T, website_check=T, website_deploy=T, website_relay_deploy=T),
+        )
 
     def test_the_workflow_offers_exactly_the_dispatch_inputs(self):
         text = WORKFLOW.read_text()
@@ -312,13 +355,16 @@ class RealGit(unittest.TestCase):
         outputs = self.main_run(p3, p0)
         expected = {**dict.fromkeys(ci_changes.KEYS, "true"), "packages": "false"}
         expected.update(dashboard_check="false", dashboard_deploy="false")
+        expected.update(website_check="false", website_deploy="false", website_relay_deploy="false")
         self.assertEqual(outputs, expected)
 
     def test_a_failed_package_run_on_main_deploys_both_apps_next_time(self):
         green = self.commit("README.md")
         self.commit("packages/edge-auth/src/access.ts")
         after = self.commit("README.md.orig")
-        self.assertEqual(set(self.main_run(after, green).values()), {"true"})
+        outputs = self.main_run(after, green)
+        website = {"website_check", "website_deploy", "website_relay_deploy"}
+        self.assertEqual({key for key, value in outputs.items() if value == "false"}, website)
 
     def test_a_failed_run_on_main_is_repeated(self):
         # Push A changed todofy/ and its run failed (a Mail Hero flake); push B fixes only mail-hero/.
@@ -500,7 +546,10 @@ class DeployConditions(unittest.TestCase):
     def test_jobs_after_the_gate_check_every_needed_result(self):
         blocks = self.jobs()
         after_gate = {name: block for name, block in blocks.items() if "gate" in self.needs(block)}
-        self.assertEqual(set(after_gate), {"todofy-deploy", "mail-hero-deploy", "dashboard-deploy"})
+        self.assertEqual(
+            set(after_gate),
+            {"todofy-deploy", "mail-hero-deploy", "dashboard-deploy", "website-deploy", "website-relay-deploy"},
+        )
         for name, block in after_gate.items():
             condition = self.condition(block)
             with self.subTest(job=name):
@@ -540,6 +589,7 @@ class DeployConditions(unittest.TestCase):
                 "todofy-deploy": "todofy-production",
                 "mail-hero-deploy": "mail-hero-production",
                 "dashboard-deploy": "dashboard-production",
+                "website-relay-deploy": "website-relay-production",
             },
         )
 
@@ -549,6 +599,8 @@ class DeployConditions(unittest.TestCase):
             ("todofy-deploy", "todofy-checks", "todofy_deploy"),
             ("mail-hero-deploy", "mail-hero-checks", "mail_hero_deploy"),
             ("dashboard-deploy", "dashboard-checks", "dashboard_deploy"),
+            ("website-deploy", "website-checks", "website_deploy"),
+            ("website-relay-deploy", "website-checks", "website_relay_deploy"),
         ):
             condition = self.condition(blocks[job])
             with self.subTest(job=job):
@@ -577,6 +629,66 @@ class DeployConditions(unittest.TestCase):
 
     def test_shared_packages_run_only_when_flagged(self):
         self.assertEqual(self.condition(self.jobs()["shared-packages"]), "needs.changes.outputs.packages == 'true'")
+
+
+class WebsiteRelease(unittest.TestCase):
+    """Website deploy calls the one release workflow the Notion relay dispatches; its jobs hold the single
+    concurrency group and the production environment, so a push release, a button, the detector and a
+    status refresh never overlap. The caller holds neither: a caller in the same group waits for itself."""
+
+    RELEASE = REPO / ".github" / "workflows" / "website-release.yml"
+
+    def release_jobs(self):
+        text = self.RELEASE.read_text().split("\njobs:\n", 1)[1]
+        starts = [(m.start(), m.group(1)) for m in re.finditer(r"^  ([a-z][a-z0-9-]*):\n", text, re.MULTILINE)]
+        return {
+            name: text[start : starts[index + 1][0] if index + 1 < len(starts) else len(text)]
+            for index, (start, name) in enumerate(starts)
+        }
+
+    def test_website_deploy_calls_the_release_workflow_with_fixed_inputs(self):
+        block = workflow_jobs()["website-deploy"]
+        self.assertIn("    uses: ./.github/workflows/website-release.yml\n", block)
+        for line in (
+            "operation: release",
+            "confirmation: release:www.ziyixi.science",
+            "force_build: false",
+            "allow_empty: false",
+            "trigger: push",
+        ):
+            self.assertIn(f"      {line}\n", block)
+        self.assertNotIn("concurrency:", block)
+        self.assertNotIn("environment:", block)
+        self.assertIn("deployments: write", block)
+
+    def test_every_release_job_shares_one_group_and_the_production_environment(self):
+        jobs = self.release_jobs()
+        self.assertEqual(set(jobs), {"release", "status"})
+        for name, block in jobs.items():
+            with self.subTest(job=name):
+                self.assertIn("      group: website-production\n", block)
+                self.assertIn("      cancel-in-progress: false\n", block)
+                self.assertIn("      name: production\n", block)
+
+    def test_the_relay_and_the_workflow_agree_on_operations_and_triggers(self):
+        text = self.RELEASE.read_text()
+        self.assertIn("run-name: Website ${{ inputs.operation }} (${{ inputs.trigger }})", text)
+        self.assertIn("        options: [release, status, bootstrap, recovery]", text)
+        self.assertIn("        options: [manual, button, cron, reconcile]", text)
+        relay = (REPO / "website" / "relay" / "src" / "github.ts").read_text()
+        self.assertIn("(release|status|bootstrap|recovery) \\((manual|button|cron|reconcile|push)\\)", relay)
+        config = (REPO / "website" / "relay" / "wrangler.toml").read_text()
+        self.assertIn('RELEASE_WORKFLOW = "website-release.yml"', config)
+        self.assertIn('GITHUB_REPOSITORY = "ziyixi/todofy"', config)
+
+    def test_only_the_release_steps_see_credentials(self):
+        text = self.RELEASE.read_text()
+        self.assertNotIn("secrets.VERCEL", text)
+        # Notion credentials only for the snapshot and the feedback; the deploy token only for Cloudflare steps.
+        notion = [line for line in text.splitlines() if "secrets.WEBSITE_NOTION_TOKEN" in line]
+        self.assertEqual(len(notion), 3)
+        cloudflare = [line for line in text.splitlines() if "secrets.CF_API_TOKEN" in line]
+        self.assertEqual(len(cloudflare), 5)
 
 
 @unittest.skipUnless(shutil.which("bash") and shutil.which("jq"), "needs bash and jq (both on the runner)")
