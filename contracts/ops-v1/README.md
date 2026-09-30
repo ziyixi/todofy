@@ -1,7 +1,7 @@
 # `ops-v1`: the operations surface of Mail Hero and Todofy
 
-A small, typed RPC surface on each app so that one future dashboard Worker (`home`, not in this
-repository yet) can show health, run a daily end-to-end canary, apply quota guardrails and hand a
+A small, typed RPC surface on each app so that one dashboard Worker (`home`, in
+[`dashboard/`](../../dashboard/)) can show health, run a daily end-to-end canary, apply quota guardrails and hand a
 single ops digest to Todofy's daily reminder. It is a contract between each app and that dashboard;
 the two apps still never call or import each other.
 
@@ -16,7 +16,9 @@ the two apps still never call or import each other.
 Checks (the `Contracts` CI job, and each app's own tests): `mail-hero/cloudflare/test/ops-contract.test.mjs`
 runs `validate.mjs` over every fixture and compares the constants of `ops-v1.ts` with the schema;
 `todofy/tests/unit/test_ops_contract.py` gives every fixture the verdict of the reference validator
-(Python `jsonschema`) and keeps the schema inside the keyword subset `validate.mjs` implements.
+(Python `jsonschema`) and keeps the schema inside the keyword subset `validate.mjs` implements;
+`dashboard/worker/test/ops-client.test.ts` checks the caller: only declared methods, every declared
+error code.
 
 ## Transport
 

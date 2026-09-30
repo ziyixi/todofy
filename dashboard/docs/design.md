@@ -7,8 +7,10 @@ entrypoints (service bindings) and never imports `mail-hero/` or `todofy/` code.
 `AGENTS.md` rules apply here too: Workers Free, bounded reads and calls, no mail content anywhere,
 synthetic test data only, no secrets in logs.
 
-Status: the Worker, its tests and the config generator are implemented (the UI, CI jobs and production
-checks are separate steps). Nothing is deployed; see `verification.md` once it exists.
+Status: the Worker, the UI, their tests, the config generator and the CI jobs (§10) are implemented
+and pass locally with synthetic data. Nothing is deployed; [`verification.md`](verification.md) records
+what was checked and what is still open in production. Setup: [`setup.md`](setup.md); limits with
+sources: [`limits.md`](limits.md).
 
 ## 1. Layout and ownership
 
@@ -19,7 +21,7 @@ checks are separate steps). Nothing is deployed; see `verification.md` once it e
 | `worker/test/runtime/` | worker | Miniflare harness (`harness.ts`, own `tsconfig.json` with Node types), stub apps from `test/stubs/ops-stub.js` |
 | `deploy/` | worker | `generate-ci-config.mjs` and `test/*.test.mjs` (`node --test`) |
 | `web/` | web | React 19 + Vite 7 + TypeScript UI (Chinese), vitest + testing-library, builds `web/dist` (served by `ASSETS`) |
-| `docs/` | docs | `design.md` (this), `setup.md`, `limits.md` (or §7 here), `verification.md` |
+| `docs/` | docs | `design.md` (this), `setup.md`, `limits.md` (allowances with sources, kept equal to `limits.ts` by `test/limits.test.ts`), `verification.md` |
 | `.github/`, root docs, `packages/edge-auth/SPEC.md` | integration | CI jobs (§10), root README/AGENTS, the SPEC condensation |
 
 Toolchain versions are Todofy's: Node 26, TypeScript 5.9.3, vitest 4.1.11, eslint 10.11.0,
@@ -39,7 +41,7 @@ Worker modules (the worker builder may merge or split, keeping pure logic separa
 | `src/state.ts` | `HomeState` (RPC methods §4), SQL schema (§3), the mutex, persistence |
 | `src/ops-client.ts` | one wrapper per `Ops` method: timeout, error-code mapping, shape guard (§5.1) |
 | `src/usage.ts` | the GraphQL query (verbatim §7.2), fetch, parse, `QuotaRow` building, projection |
-| `src/limits.ts` | Free allowances with doc URLs (§7.1) |
+| `src/limits.ts` | Free allowances with doc URLs (§7.1, `limits.md`) |
 | `src/guard.ts`, `src/canary.ts`, `src/digest.ts` | pure decision functions taking `now` and prior state |
 | `src/time.ts` | UTC day/month helpers, next midnight |
 
@@ -327,44 +329,13 @@ The shapes are `worker/src/api-types.ts`. Details:
 
 ## 7. Limits and the usage query
 
-### 7.1 Workers Free allowances used (checked 2026-09-29)
+### 7.1 Workers Free allowances used
 
-Account-wide: other Workers, databases and buckets in the account count too. "GB" is taken as 10⁹
-bytes (the docs do not say; decimal is the smaller, more cautious limit).
-
-| Resource id | Period | Allowance | Source |
-| --- | --- | --- | --- |
-| `workers_requests` | day (00:00 UTC) | 100,000 requests | [Workers limits](https://developers.cloudflare.com/workers/platform/limits/#daily-requests), [pricing](https://developers.cloudflare.com/workers/platform/pricing/) |
-| `d1_rows_read` | day | 5,000,000 rows | [D1 pricing](https://developers.cloudflare.com/d1/platform/pricing/) |
-| `d1_rows_written` | day | 100,000 rows | same |
-| `d1_storage` | total | 5 GB per account | [D1 limits](https://developers.cloudflare.com/d1/platform/limits/) |
-| `d1_database_max` | per database | 500 MB (largest database) | same |
-| `do_requests` | day | 100,000 (HTTP, RPC sessions, alarms) | [DO pricing](https://developers.cloudflare.com/durable-objects/platform/pricing/) |
-| `do_duration` | day | 13,000 GB-s | same |
-| `do_rows_read` | day | 5,000,000 rows (SQLite) | same |
-| `do_rows_written` | day | 100,000 rows (SQLite; `setAlarm` counts one) | same |
-| `do_storage` | total | 5 GB (SQLite) | same, [DO limits](https://developers.cloudflare.com/durable-objects/platform/limits/) |
-| `r2_class_a` | month | 1,000,000 operations | [R2 pricing](https://developers.cloudflare.com/r2/pricing/) |
-| `r2_class_b` | month | 10,000,000 operations | same |
-| `r2_storage` | month (GB-month) | 10 GB-month | same |
-
-Other limits this design relies on: 10 ms CPU per HTTP request and per cron invocation, 50
-subrequests per invocation, 5 cron triggers per account, 128 MB memory
-([Workers limits](https://developers.cloudflare.com/workers/platform/limits/)); 30 s CPU per Durable
-Object invocation ([DO limits](https://developers.cloudflare.com/durable-objects/platform/limits/));
-requests to static assets are free ([pricing](https://developers.cloudflare.com/workers/platform/pricing/));
-a service-binding call counts as a subrequest, at most 32 Worker invocations per request
-([service bindings](https://developers.cloudflare.com/workers/runtime-apis/bindings/service-bindings/)),
-and "requests made from your Worker to another worker via a Service Binding do not incur additional
-request fees" (pricing); GraphQL Analytics API: 300 queries per 5 minutes
-([limits](https://developers.cloudflare.com/analytics/graphql-api/limits/)). Free daily limits reset at
-00:00 UTC; exceeding one fails further operations of that type (DO pricing). R2's free tier is monthly
-and its GB-month averages the daily peak over the billing period; the dashboard uses the UTC calendar
-month to date as the period and the current bytes against 10 GB, an approximation.
-
-Not verified (to check in production, `verification.md`): whether an app's `Ops` calls show up in
-`workersInvocationsAdaptive` for `mail-hero`/`todofy`; whether R2 `actionType` values beyond the lists
-below occur; the analytics lag at a tick.
+The allowances (resource ids, periods, values, guard triggers) and the platform limits this design
+relies on, each with its Cloudflare source, are in [`limits.md`](limits.md) (checked 2026-09-29);
+`src/limits.ts` holds the same values and `test/limits.test.ts` keeps the two equal. They are
+account-wide. Free daily limits reset at 00:00 UTC; R2's free tier is monthly (the dashboard uses the
+UTC calendar month to date). What is still unverified in production is listed in `limits.md` §4.
 
 ### 7.2 The query (verbatim; verified 2026-09-29 against the live account)
 
@@ -529,7 +500,10 @@ CI (`.github/workflows/ci.yml`, pinned action SHAs as today):
   `dashboard/`), an unmapped package counts as used by all three apps; `BUNDLED_BY_BOTH` becomes a map
   `BUNDLED_BY = {"contracts/ops-v1/ops-v1.ts": ("todofy", "mail-hero", "dashboard")}` (its test also
   scans `dashboard/worker/src` and `dashboard/web/src`); `contracts/` and `.github/` re-check the
-  dashboard; dispatch input gains `dashboard` and `all` (`both` keeps meaning Todofy + Mail Hero).
+  dashboard; dispatch input gains `dashboard` and `all` (`both` keeps meaning Todofy + Mail Hero,
+  and stays the default). A dashboard change also runs `Contracts`, which gained a host-only step in
+  `dashboard/worker` (`test/ops-client.test.ts`, `guard`, `canary`, `digest`): the caller side of ops-v1
+  next to both apps' sides.
 - **Dashboard checks** (`needs: changes`, `if: dashboard_check`, working directory `dashboard`): `npm ci`
   in `worker` and `web`; `node --test deploy/test/*.test.mjs`; worker `lint`, `typecheck`, `test`,
   `test:runtime`; web `lint`, `typecheck`, `test`, `build`; a guard that no file under `worker/src` or
@@ -552,4 +526,3 @@ CI (`.github/workflows/ci.yml`, pinned action SHAs as today):
 - Production checks (verification.md): real Access login and alias; GraphQL with the replacement
   "Account Analytics: Read" token; the first real canary; whether `Ops` calls count in the apps'
   Worker request totals; the deploy probe.
-- `packages/edge-auth/SPEC.md` condensation and the root README/AGENTS updates (integration step).

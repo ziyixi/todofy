@@ -22,15 +22,31 @@ WORKFLOW = REPO / ".github" / "workflows" / "ci.yml"
 T, F = True, False
 
 
-def expect(todofy_check, mail_hero_check, contracts, todofy_deploy, mail_hero_deploy, packages=False):
+def expect(
+    todofy_check,
+    mail_hero_check,
+    contracts,
+    todofy_deploy,
+    mail_hero_deploy,
+    packages=False,
+    dashboard_check=False,
+    dashboard_deploy=False,
+):
     return {
         "todofy_check": todofy_check,
         "mail_hero_check": mail_hero_check,
+        "dashboard_check": dashboard_check,
         "contracts": contracts,
         "packages": packages,
         "todofy_deploy": todofy_deploy,
         "mail_hero_deploy": mail_hero_deploy,
+        "dashboard_deploy": dashboard_deploy,
     }
+
+
+# Every app checked (a contracts/ or .github/ change), and every app checked and deployed.
+ALL_CHECKED = {"dashboard_check": True}
+ALL = {"dashboard_check": True, "dashboard_deploy": True}
 
 
 def push(paths, ref=MAIN, last_success=BASE, ancestor=True, merge_base=BASE):
@@ -44,40 +60,60 @@ class Classify(unittest.TestCase):
         self.assertEqual(push(["todofy/worker/todofy/core/render.py"]), expect(T, F, T, T, F))
         self.assertEqual(push(["mail-hero/cloudflare/src/native/pipeline.ts"]), expect(F, T, T, F, T))
 
+    def test_the_dashboard_checks_and_deploys_only_itself_plus_contracts(self):
+        """Its ops-v1 caller tests run in Contracts; the apps it calls are neither checked nor deployed."""
+        for path in ("dashboard/worker/src/state.ts", "dashboard/web/src/App.tsx", "dashboard/docs/setup.md"):
+            with self.subTest(path=path):
+                self.assertEqual(push([path]), expect(F, F, T, F, F, dashboard_check=T, dashboard_deploy=T))
+
     def test_both_apps(self):
         self.assertEqual(push(["todofy/README.md", "mail-hero/web/src/app/App.tsx"]), expect(T, T, T, T, T))
 
-    def test_contracts_recheck_both_apps_but_deploy_neither(self):
+    def test_all_three_apps(self):
+        paths = ["todofy/README.md", "mail-hero/web/src/app/App.tsx", "dashboard/README.md"]
+        self.assertEqual(push(paths), expect(T, T, T, T, T, **ALL))
+
+    def test_contracts_recheck_every_app_but_deploy_none(self):
         paths = ["contracts/mail-received-v1/fixtures/plain_text.json"]
-        self.assertEqual(push(paths), expect(T, T, T, F, F))
+        self.assertEqual(push(paths), expect(T, T, T, F, F, **ALL_CHECKED))
 
-    def test_ops_contract_schema_and_fixtures_recheck_both_apps_but_deploy_neither(self):
+    def test_ops_contract_schema_and_fixtures_recheck_every_app_but_deploy_none(self):
         paths = ["contracts/ops-v1/ops-v1.schema.json", "contracts/ops-v1/fixtures/OpsStatus/todofy-ok.json"]
-        self.assertEqual(push(paths), expect(T, T, T, F, F))
-        self.assertEqual(push(["contracts/ops-v1/validate.mjs", "contracts/ops-v1/README.md"]), expect(T, T, T, F, F))
+        self.assertEqual(push(paths), expect(T, T, T, F, F, **ALL_CHECKED))
+        paths = ["contracts/ops-v1/validate.mjs", "contracts/ops-v1/README.md"]
+        self.assertEqual(push(paths), expect(T, T, T, F, F, **ALL_CHECKED))
 
-    def test_contract_code_both_workers_bundle_deploys_both(self):
-        """deploy-1: OPS_LIMITS and friends ship inside both Workers, so a change must redeploy both."""
-        self.assertEqual(push(["contracts/ops-v1/ops-v1.ts"]), expect(T, T, T, T, T))
-        self.assertEqual(push(["contracts/ops-v1/ops-v1.ts", "todofy/gateway/src/ops.ts"]), expect(T, T, T, T, T))
-        self.assertEqual(push(["contracts/ops-v1/ops-v1.ts"], ref=BRANCH), expect(T, T, T, T, T))
+    def test_contract_code_the_workers_bundle_deploys_every_app_that_bundles_it(self):
+        """OPS_LIMITS and friends ship inside all three Workers, so a change must redeploy each."""
+        self.assertEqual(push(["contracts/ops-v1/ops-v1.ts"]), expect(T, T, T, T, T, **ALL))
+        self.assertEqual(push(["contracts/ops-v1/ops-v1.ts", "todofy/gateway/src/ops.ts"]), expect(T, T, T, T, T, **ALL))
+        self.assertEqual(push(["contracts/ops-v1/ops-v1.ts"], ref=BRANCH), expect(T, T, T, T, T, **ALL))
 
-    def test_bundled_by_both_lists_every_contract_file_a_worker_imports(self):
-        """Every contracts/ file that Worker source imports (value or type) is in BUNDLED_BY_BOTH."""
-        sources = [
-            *(REPO / "mail-hero" / "cloudflare" / "src").rglob("*.ts"),
-            *(REPO / "todofy" / "gateway" / "src").rglob("*.ts"),
-        ]
-        imported = set()
-        for source in sources:
-            for target in re.findall(r"from\s+'([^']*contracts/[^']*)'", source.read_text()):
-                imported.add((source.parent / target).resolve().relative_to(REPO).as_posix())
-        self.assertTrue(imported)
-        self.assertLessEqual(imported, set(ci_changes.BUNDLED_BY_BOTH))
+    def test_bundled_by_lists_exactly_the_apps_whose_worker_imports_each_contract_file(self):
+        """Every contracts/ file that an app's Worker or UI source imports (value or type) is in BUNDLED_BY
+        with exactly the apps that import it. Tests (*.test.ts, test/) are not bundled and do not count."""
+        roots = {
+            "mail-hero": [REPO / "mail-hero" / "cloudflare" / "src", REPO / "mail-hero" / "web" / "src"],
+            "todofy": [REPO / "todofy" / "gateway" / "src", REPO / "todofy" / "web" / "src"],
+            "dashboard": [REPO / "dashboard" / "worker" / "src", REPO / "dashboard" / "web" / "src"],
+        }
+        self.assertEqual(set(roots), set(ci_changes.APPS))
+        importers = {}
+        for app, directories in roots.items():
+            for directory in directories:
+                for source in [*directory.rglob("*.ts"), *directory.rglob("*.tsx")]:
+                    parts = source.relative_to(directory).parts
+                    if "node_modules" in parts or "test" in parts or re.search(r"\.test\.tsx?$", source.name):
+                        continue
+                    for target in re.findall(r"""from\s+['"]([^'"]*contracts/[^'"]*)['"]""", source.read_text()):
+                        path = (source.parent / target).resolve().relative_to(REPO).as_posix()
+                        importers.setdefault(path, set()).add(app)
+        self.assertIn("contracts/ops-v1/ops-v1.ts", importers)
+        self.assertEqual({path: set(apps) for path, apps in ci_changes.BUNDLED_BY.items()}, importers)
 
     def test_ci_changes_recheck_everything_but_deploy_nothing(self):
-        self.assertEqual(push([".github/workflows/ci.yml"]), expect(T, T, T, F, F, packages=T))
-        self.assertEqual(push([".github/scripts/ci_changes.py"]), expect(T, T, T, F, F, packages=T))
+        self.assertEqual(push([".github/workflows/ci.yml"]), expect(T, T, T, F, F, packages=T, **ALL_CHECKED))
+        self.assertEqual(push([".github/scripts/ci_changes.py"]), expect(T, T, T, F, F, packages=T, **ALL_CHECKED))
 
     def test_a_shared_package_checks_and_deploys_every_app_that_compiles_it_in(self):
         for path in (
@@ -86,14 +122,14 @@ class Classify(unittest.TestCase):
             "packages/edge-auth/SPEC.md",
         ):
             with self.subTest(path=path):
-                self.assertEqual(push([path]), expect(T, T, T, T, T, packages=T))
+                self.assertEqual(push([path]), expect(T, T, T, T, T, packages=T, **ALL))
 
-    def test_a_package_change_with_one_app_still_deploys_both_users(self):
+    def test_a_package_change_with_one_app_still_deploys_every_user(self):
         paths = ["packages/edge-auth/src/csrf.ts", "todofy/gateway/src/csrf.ts"]
-        self.assertEqual(push(paths), expect(T, T, T, T, T, packages=T))
+        self.assertEqual(push(paths), expect(T, T, T, T, T, packages=T, **ALL))
 
-    def test_an_unregistered_package_counts_as_used_by_both_apps(self):
-        self.assertEqual(push(["packages/dashboard-kit/src/index.ts"]), expect(T, T, T, T, T, packages=T))
+    def test_an_unregistered_package_counts_as_used_by_every_app(self):
+        self.assertEqual(push(["packages/dashboard-kit/src/index.ts"]), expect(T, T, T, T, T, packages=T, **ALL))
 
     def test_a_file_directly_under_packages_is_root_documentation(self):
         self.assertEqual(push(["packages/README.md"]), expect(F, F, F, F, F))
@@ -104,7 +140,7 @@ class Classify(unittest.TestCase):
 
     def test_prefixes_are_directories_not_name_prefixes(self):
         self.assertEqual(
-            push(["todofy-notes.md", "mail-hero.md", "contracts.md", "packages.md", "packages-old/x.ts"]),
+            push(["todofy-notes.md", "mail-hero.md", "dashboard.md", "contracts.md", "packages.md", "packages-old/x.ts"]),
             expect(F, F, F, F, F),
         )
 
@@ -113,7 +149,7 @@ class Classify(unittest.TestCase):
 
     def test_a_rename_between_apps_touches_both(self):
         paths = ["todofy/api/mail-received-v1.schema.json", "contracts/mail-received-v1/mail-received-v1.schema.json"]
-        self.assertEqual(push(paths), expect(T, T, T, T, F))
+        self.assertEqual(push(paths), expect(T, T, T, T, F, **ALL_CHECKED))
 
 
 class Unknown(unittest.TestCase):
@@ -163,11 +199,21 @@ class Dispatch(unittest.TestCase):
             "workflow_dispatch", MAIN, SHA, app, "", lambda b, a: [], lambda b, a: True, lambda a: ""
         )[0]
 
-    def test_inputs_force_one_or_both_apps(self):
+    def test_inputs_force_one_two_or_all_apps(self):
+        # "both" (also the default) keeps meaning Todofy and Mail Hero.
         self.assertEqual(self.dispatch("both"), expect(T, T, T, T, T, packages=T))
         self.assertEqual(self.dispatch(""), expect(T, T, T, T, T, packages=T))
+        self.assertEqual(self.dispatch("all"), expect(T, T, T, T, T, packages=T, **ALL))
         self.assertEqual(self.dispatch("todofy"), expect(T, F, T, T, F, packages=T))
         self.assertEqual(self.dispatch("mail-hero"), expect(F, T, T, F, T, packages=T))
+        self.assertEqual(self.dispatch("dashboard"), expect(F, F, T, F, F, packages=T, **ALL))
+
+    def test_the_workflow_offers_exactly_the_dispatch_inputs(self):
+        text = WORKFLOW.read_text()
+        options = re.search(r"^        options: \[(.*)\]$", text, re.MULTILINE)
+        self.assertIsNotNone(options)
+        self.assertEqual({name.strip() for name in options.group(1).split(",")}, set(ci_changes.DISPATCH))
+        self.assertIn("        default: both\n", text)
 
     def test_unknown_input_fails(self):
         with self.assertRaises(ValueError):
@@ -227,7 +273,9 @@ class RealGit(unittest.TestCase):
         self.commit("todofy/worker/a.py")
         p3 = self.commit("mail-hero/docs/b.md")
         outputs = self.main_run(p3, p0)
-        self.assertEqual(outputs, {**dict.fromkeys(ci_changes.KEYS, "true"), "packages": "false"})
+        expected = {**dict.fromkeys(ci_changes.KEYS, "true"), "packages": "false"}
+        expected.update(dashboard_check="false", dashboard_deploy="false")
+        self.assertEqual(outputs, expected)
 
     def test_a_failed_package_run_on_main_deploys_both_apps_next_time(self):
         green = self.commit("README.md")
@@ -315,7 +363,17 @@ class PackageUsers(unittest.TestCase):
 
     def test_users_are_apps_this_script_deploys(self):
         for users in ci_changes.PACKAGE_USERS.values():
-            self.assertLessEqual(set(users), {"todofy", "mail-hero"})
+            self.assertLessEqual(set(users), set(ci_changes.APPS))
+
+    def test_every_app_directory_is_known(self):
+        """A top-level directory with a package.json below it is an app (or packages/); a new one must be
+        added to APPS, or its changes would run nothing."""
+        tops = {
+            manifest.relative_to(REPO).parts[0]
+            for manifest in REPO.glob("*/**/package.json")
+            if "node_modules" not in manifest.parts
+        }
+        self.assertEqual(tops - {"packages", "contracts"}, set(ci_changes.APPS))
 
 
 def workflow_jobs():
@@ -371,6 +429,8 @@ class ContractsJob(unittest.TestCase):
                 "todofy/tests/unit/test_ops_contract.py",
                 "todofy/tests/unit/test_ops_core.py",
                 "todofy/gateway/test/ops.test.ts",
+                # ops-v1 caller: the dashboard calls only declared methods and handles every error code.
+                "dashboard/worker/test/ops-client.test.ts",
             },
             self.named_tests(),
         )
@@ -379,10 +439,15 @@ class ContractsJob(unittest.TestCase):
 class DeployConditions(unittest.TestCase):
     """Every job that needs "CI gate" must spell out its status checks.
 
-    "CI gate" needs both apps' check jobs; one of them is skipped whenever only the other app changed.
-    A job condition without a status function gets an implicit success() that also looks at skipped
+    "CI gate" needs every app's check job; some are skipped whenever only another app changed. A job
+    condition without a status function gets an implicit success() that also looks at skipped
     ancestors, so a single-app deploy would be skipped (actions/runner#491, #2205).
     """
+
+    # (job, need) pairs where "skipped" is as good as "success": the dashboard deploys after both app
+    # deploys (its service bindings need their Ops entrypoints), which do not run when nothing of that
+    # app changed.
+    SKIPPED_OK = {("dashboard-deploy", "todofy-deploy"), ("dashboard-deploy", "mail-hero-deploy")}
 
     def jobs(self):
         return workflow_jobs()
@@ -398,20 +463,52 @@ class DeployConditions(unittest.TestCase):
     def test_jobs_after_the_gate_check_every_needed_result(self):
         blocks = self.jobs()
         after_gate = {name: block for name, block in blocks.items() if "gate" in self.needs(block)}
-        self.assertEqual(set(after_gate), {"todofy-deploy", "mail-hero-deploy"})
+        self.assertEqual(set(after_gate), {"todofy-deploy", "mail-hero-deploy", "dashboard-deploy"})
         for name, block in after_gate.items():
             condition = self.condition(block)
             with self.subTest(job=name):
                 self.assertTrue(condition.startswith("${{ !cancelled()"), condition)
                 for need in self.needs(block):
-                    self.assertIn(f"needs.{need}.result == 'success'", condition)
+                    if (name, need) in self.SKIPPED_OK:
+                        self.assertIn(
+                            f"(needs.{need}.result == 'success' || needs.{need}.result == 'skipped')", condition
+                        )
+                    else:
+                        self.assertIn(f"needs.{need}.result == 'success'", condition)
+                        self.assertNotIn(f"needs.{need}.result == 'skipped'", condition)
                 self.assertIn("github.ref == 'refs/heads/main'", condition)
+
+    def test_the_dashboard_deploys_after_both_apps(self):
+        block = self.jobs()["dashboard-deploy"]
+        self.assertLessEqual({"todofy-deploy", "mail-hero-deploy"}, set(self.needs(block)))
+        self.assertIn("group: dashboard-production", block)
+        # The only token: the one Todofy deploy uses; no other secret reaches wrangler's environment.
+        self.assertIn("CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}", block)
+        self.assertEqual(block.count("CLOUDFLARE_API_TOKEN:"), 1)
+
+    def test_every_production_job_has_its_own_concurrency_group(self):
+        blocks = self.jobs()
+        groups = {}
+        for name, block in blocks.items():
+            if "environment:" in block:
+                match = re.search(r"^      group: (\S+)$", block, re.MULTILINE)
+                self.assertIsNotNone(match, name)
+                groups[name] = match.group(1)
+        self.assertEqual(
+            groups,
+            {
+                "todofy-deploy": "todofy-production",
+                "mail-hero-deploy": "mail-hero-production",
+                "dashboard-deploy": "dashboard-production",
+            },
+        )
 
     def test_each_deploy_requires_its_own_checks_and_flag(self):
         blocks = self.jobs()
         for job, checks, flag in (
             ("todofy-deploy", "todofy-checks", "todofy_deploy"),
             ("mail-hero-deploy", "mail-hero-checks", "mail_hero_deploy"),
+            ("dashboard-deploy", "dashboard-checks", "dashboard_deploy"),
         ):
             condition = self.condition(blocks[job])
             with self.subTest(job=job):

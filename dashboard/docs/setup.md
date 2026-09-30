@@ -1,0 +1,144 @@
+# Home dashboard: setup and operations
+
+How the Worker `home` is configured, deployed, rotated and rolled back. The design is
+[`design.md`](design.md), the limits [`limits.md`](limits.md), and what has been verified
+[`verification.md`](verification.md). No step here reads mail content or needs a secret in a chat or a
+log: secrets are entered only in GitHub's or Cloudflare's own settings pages.
+
+## 1. Resources
+
+| Resource | Name / value | Created by |
+| --- | --- | --- |
+| Worker | `home` (`worker/wrangler.toml`), `workers_dev = false`, `preview_urls = false` | the `Dashboard deploy` job |
+| Custom Domain | `home.ziyixi.science` (`routes = [{pattern, custom_domain: true}]`) | the deploy (DNS record and certificate) |
+| Durable Object | class `HomeState`, SQLite-backed (migration `v1`, `new_sqlite_classes`), one instance named `home-v1` | the deploy |
+| Service bindings | `MAIL_HERO` → Worker `mail-hero`, entrypoint `Ops`; `TODOFY` → Worker `todofy`, entrypoint `Ops` | the deploy; both Workers must already export `Ops` (contracts/ops-v1) |
+| Static assets | `web/dist`, binding `ASSETS`, `run_worker_first = true` | built in the job |
+| Cron Trigger | `*/30 * * * *` (the account's second of 5 Free triggers) | the deploy |
+| Access application | "Home", self-hosted, `home.ziyixi.science` | the owner, once (§2); already exists |
+
+There is no D1 database, R2 bucket, KV namespace or queue. The dashboard's state (latest statuses,
+usage snapshot, guard decision, canary runs of the last 60 days, digest state) lives in the Durable
+Object's SQLite storage. Release order: Todofy with its canary consumer, then Mail Hero with `Ops`,
+then the dashboard (contracts/ops-v1 `IMPLEMENTATION.md` §0); CI enforces that the dashboard deploys
+after both app deploy jobs in the same run.
+
+## 2. Cloudflare Access ("Home")
+
+Zero Trust → Access → Applications → Self-hosted application "Home" for `home.ziyixi.science` (the
+whole host, every path), with the same owner policies and identity providers as Todofy's application:
+allow only the owner's exact e-mail addresses on the matching identity providers.
+
+- The application's AUD tag (64 hex) is the GitHub variable `DASHBOARD_ACCESS_AUDIENCE`; the team
+  domain `https://<team>.cloudflareaccess.com` is `DASHBOARD_ACCESS_ISSUER`.
+- The Worker verifies the Access JWT itself (`packages/edge-auth`, Todofy's parameters with a 10 min key
+  cache, SPEC §5.4) and accepts only `ACCESS_OWNER` or an address in `ACCESS_OWNER_ALIASES` (≤ 8,
+  printable ASCII, compared case-insensitively over ASCII). Put every login the Access policy allows
+  for the owner there; any other Access-authenticated user gets 401.
+- `/health` is exempt from the Worker's own check but still behind Access (the whole host is).
+- Never add an Access bypass or a second hostname: the deploy's probe fails when anything but Access
+  answers an unauthenticated request.
+
+## 3. GitHub `production` environment
+
+The `Dashboard deploy` job uses the existing `production` environment (deployment branch `main`) and
+generates `worker/wrangler.production.ci.json` plus an owner-only secrets file with
+`deploy/generate-ci-config.mjs`. The generator validates every value and names a failing variable
+without printing its value.
+
+| Name | Kind | Rule | Becomes |
+| --- | --- | --- | --- |
+| `CLOUDFLARE_ACCOUNT_ID` | variable (shared) | 32 hex | `account_id`, var `ACCOUNT_ID` (the GraphQL `accountTag`) |
+| `DASHBOARD_PUBLIC_HOST` | variable | a domain, different from both app hosts | route, var `PUBLIC_HOST` (CSRF origin, digest link) |
+| `DASHBOARD_ACCESS_ISSUER` | variable | `https://<team>.cloudflareaccess.com` | var `ACCESS_ISSUER` |
+| `DASHBOARD_ACCESS_AUDIENCE` | variable | 64 hex | var `ACCESS_AUDIENCE` |
+| `MAIL_HERO_PUBLIC_HOST`, `TODOFY_PUBLIC_HOST` | variables (existing) | domains | vars `MAIL_HERO_URL`, `TODOFY_URL` (links on the page) |
+| `DASHBOARD_CANARY_UTC_HOUR` | variable, optional | integer 0–23, default 16 | var `CANARY_UTC_HOUR` |
+| `DASHBOARD_ACCESS_OWNER` | secret | printable-ASCII e-mail | Worker secret `ACCESS_OWNER` |
+| `DASHBOARD_ACCESS_OWNER_ALIASES` | secret, may be empty | ≤ 8 unique printable-ASCII e-mails, ≤ 2048 chars | Worker secret `ACCESS_OWNER_ALIASES` (a single space when empty, so an emptied list replaces the old one) |
+| `DASHBOARD_CSRF_SIGNING_KEY` | secret | 64 hex (for example `openssl rand -hex 32`, run locally) | Worker secret `CSRF_SIGNING_KEY` |
+| `DASHBOARD_CF_ANALYTICS_TOKEN` | secret | `[A-Za-z0-9_-]{20,200}` | Worker secret `CF_ANALYTICS_TOKEN` (§4) |
+| `CF_API_TOKEN` | secret (existing, Todofy's deploy token) | – | `CLOUDFLARE_API_TOKEN` for `wrangler deploy` only |
+
+`GITHUB_SHA` becomes the var `BUILD_SHA` (shown by `/health`). Changing a variable or secret takes
+effect with the next deploy: run the workflow on `main` with `app: dashboard` (or `all`).
+
+## 4. The analytics token (`CF_ANALYTICS_TOKEN`)
+
+The Worker uses this token for one purpose only: as `Authorization: Bearer` on `POST
+https://api.cloudflare.com/client/v4/graphql` (a constant in `worker/src/usage.ts`, not configuration),
+at most once per tick and once per minute on an owner refresh. It is never logged, stored, echoed to
+the page or sent anywhere else, and a unit test checks that it appears only in that one header.
+
+**Today a broader token is reused.** Replace it with a token that can only read analytics:
+
+1. Cloudflare dashboard → My Profile → API Tokens → Create Token → Custom token.
+2. Permissions: **Account → Account Analytics → Read** (the permission the GraphQL API needs for
+   account-level datasets, [docs](https://developers.cloudflare.com/analytics/graphql-api/getting-started/authentication/api-token-auth/)).
+   Nothing else.
+3. Account resources: include only this account. Optionally restrict client IPs (not practical for
+   Workers egress) and set an expiry you will remember to renew.
+4. Save the token value directly into the GitHub secret `DASHBOARD_CF_ANALYTICS_TOKEN` (production
+   environment). Do not paste it anywhere else.
+5. Run the workflow on `main` with `app: dashboard`. The deploy uploads the new secret.
+6. Open the dashboard, press 刷新 (refresh, at most once a minute), and check that the quota section
+   shows fresh data (no "用量数据获取失败" item). Record the date in `verification.md`.
+7. Only then stop using the broader token for this purpose. Do not revoke it if it is still used
+   elsewhere (for example as a deploy token).
+
+If the token fails (revoked, expired, wrong permission), the page and the digest show
+`usage_unavailable` after 2 h; the guard then never enters `shed` on its own (no fresh usage means no
+automatic shed) and an automatic shed already in place lapses at its `until`. Rotation is the same
+procedure with a new token.
+
+## 5. Local development
+
+```sh
+cd dashboard/worker && npm ci
+cd ../web && npm ci && npm run build            # web/dist, served by the Worker
+cd ../worker && npx wrangler dev                 # uses wrangler.toml with placeholder vars
+```
+
+For a local login bypass, create an untracked `worker/.dev.vars` (gitignored) with synthetic values:
+`DEV_AUTH_BYPASS=true`, `ACCESS_OWNER=owner@example.com`, and a locally generated 64-hex
+`CSRF_SIGNING_KEY`. The bypass works only for `http://localhost`, `127.0.0.1` or `[::1]` requests
+without `cf-ray`; anywhere else an enabled bypass answers 503. The production generator never emits
+`DEV_AUTH_BYPASS`. Without the two app Workers running locally, their cards show "无法连接", which is
+the expected state. Use synthetic data only; never point a local run at production resources.
+
+## 6. Operations
+
+- **Guard.** Automatic: any daily resource or monthly R2 operation class ≥ 80 % → `shed` on both apps
+  until the next UTC midnight + 10 min, renewed while still ≥ 70 % that day; cleared below 70 % or on a
+  new UTC day. From the page: 强制降载 (force shed for 24 h) or 解除降载 (clear, and hold automatic shed
+  off until 00:00 UTC). `shed` only defers each app's deferrable cleanup and safety-net jobs within
+  their own bounds; intake, parsing, delivery, retries and real-mail processing continue. A `shed`
+  guard expires by itself (at most 36 h ahead), so a stopped dashboard cannot leave an app shed.
+- **Canary.** Daily at the first tick at or after `CANARY_UTC_HOUR` (UTC), plus up to 3 manual runs a
+  day (立即运行金丝雀). One synthetic `mail.received.v1` event with the `canary` marker travels Mail
+  Hero → Todofy; Todofy makes one Gemini call and records the result, never a Todoist task, list entry
+  or reminder. There is no configuration switch that turns the scheduled canary off; see §7 before
+  rolling Todofy back.
+- **Digest.** Warning and critical items go to `TODOFY.reportOps` when the set changes or every 6 h;
+  Todofy's daily attention reminder (at most one Todoist task per UTC day) carries them. The dashboard
+  creates Todoist tasks in no other way. Mail Hero's own `ALERT_WEBHOOK_URL` stays unconfigured.
+
+## 7. Rollback and removal
+
+- **Worker code.** Revert the commit on `main` and push: CI redeploys the previous code (the change is
+  under `dashboard/`). For an immediate rollback, Cloudflare dashboard → Workers → `home` →
+  Deployments → roll back to the previous version; the next deploy from `main` replaces it again, so
+  revert the commit too. The Durable Object class and its migration `v1` stay; the SQLite tables are
+  created with `IF NOT EXISTS`, so older code reads the same state.
+- **Stop all dashboard activity** (canaries, guard calls, digest reports): Cloudflare dashboard →
+  Workers → `home` → Settings → Trigger events → remove the Cron Trigger. The page keeps working from
+  its cached snapshot. Any `shed` it set expires by itself (≤ 36 h), and Todofy's reminder stops
+  carrying the last ops report once it is older than 36 h (contracts/ops-v1 `README.md`). The next deploy from `main` restores
+  the trigger, so change `worker/wrangler.toml` too if the stop must last.
+- **Before rolling Todofy back** to a release without canary handling, stop the dashboard's canaries
+  first (remove the Cron Trigger as above and do not use 立即运行金丝雀), then follow contracts/ops-v1
+  `IMPLEMENTATION.md` §4.
+- **Remove the dashboard.** Delete the Worker `home` in the Cloudflare dashboard (check afterwards
+  that its Durable Object namespace and the Custom Domain are gone too) and remove the `dashboard/` directory and its CI jobs in one commit. Mail Hero and
+  Todofy need no change: their `Ops` entrypoints stay unused, a `shed` guard expires, and no route of
+  theirs depends on the dashboard.

@@ -1,30 +1,32 @@
-# Mail Hero and Todofy
+# Mail Hero, Todofy and the home dashboard
 
-Two independent Cloudflare apps in one repository, the one contract between them, and the shared code
-compiled into both.
+Three independent Cloudflare apps in one repository, the contracts between them, and the shared code
+compiled into each.
 
 | Directory | What it is | Start here |
 | --- | --- | --- |
 | [`mail-hero/`](mail-hero/) | Personal inbox on Workers Free + D1 + R2 + a SQLite Durable Object: receives mail through Email Routing and POSTs a `mail.received.v1` webhook | [`mail-hero/README.md`](mail-hero/README.md), [`mail-hero/AGENTS.md`](mail-hero/AGENTS.md) |
 | [`todofy/`](todofy/) | The webhook consumer: TypeScript gateway + Python core Workers that turn mail into Todoist tasks, summaries and reminders | [`todofy/README.md`](todofy/README.md), [`todofy/docs/dev-notes.md`](todofy/docs/dev-notes.md) |
-| [`contracts/`](contracts/) | `mail.received.v1`: schema, semantics and golden payloads built by Mail Hero's real builder; `ops-v1`: both apps' `Ops` entrypoints for the ops dashboard | [`contracts/README.md`](contracts/README.md) |
-| [`packages/edge-auth/`](packages/edge-auth/) | Shared auth code compiled into every Worker (Todofy gateway, Mail Hero): Cloudflare Access JWT verification, signed double-submit CSRF, private response headers. TypeScript, Web Crypto only, no runtime dependencies; not a Worker of its own | [`packages/edge-auth/README.md`](packages/edge-auth/README.md), [`SPEC.md`](packages/edge-auth/SPEC.md) |
+| [`dashboard/`](dashboard/) | The owner's ops view `home` (TypeScript Worker + SQLite Durable Object + React UI) on `home.ziyixi.science`: both apps' health through their `Ops` entrypoints, account-wide Workers Free usage with quota guardrails, a daily end-to-end canary and the unified ops digest | [`dashboard/README.md`](dashboard/README.md), [`dashboard/docs/`](dashboard/docs/) |
+| [`contracts/`](contracts/) | `mail.received.v1`: schema, semantics and golden payloads built by Mail Hero's real builder; `ops-v1`: both apps' `Ops` entrypoints, which the dashboard calls | [`contracts/README.md`](contracts/README.md) |
+| [`packages/edge-auth/`](packages/edge-auth/) | Shared auth code compiled into every Worker (Todofy gateway, Mail Hero, dashboard): Cloudflare Access JWT verification, signed double-submit CSRF, private response headers. TypeScript, Web Crypto only, no runtime dependencies; not a Worker of its own | [`packages/edge-auth/README.md`](packages/edge-auth/README.md), [`SPEC.md`](packages/edge-auth/SPEC.md) |
 
 Rules ([`AGENTS.md`](AGENTS.md)): the apps never import each other; shared code lives only in `contracts/`
 and `packages/`; each app deploys on its own. An app uses a package through a
 `"file:../../packages/<name>"` dependency and its bundler compiles it in, so a change to a package checks
 and deploys every app that uses it. `contracts/` holds documents, schemas and fixtures, plus two
 dependency-free files the TypeScript Workers import by relative path (`ops-v1/ops-v1.ts` types,
-`ops-v1/validate.mjs` for tests). Work inside an app's directory: `cd mail-hero` or `cd todofy`, then
-follow that app's README. Both apps were separate repositories until 2026-09-29; their histories are kept
+`ops-v1/validate.mjs` for tests). Work inside an app's directory: `cd mail-hero`, `cd todofy` or
+`cd dashboard`, then follow that app's README. Mail Hero and Todofy were separate repositories until
+2026-09-29; their histories are kept
 (`git log --follow todofy/<file>`, `git log -- mail-hero/<file>`; Mail Hero's old commit IDs are mapped in
 [`mail-hero/docs/history-map.md`](mail-hero/docs/history-map.md)).
 
 ## Ops surface (`contracts/ops-v1`)
 
-Each app's TypeScript Worker also exports a named `WorkerEntrypoint` `Ops` for a future dashboard Worker in
-the same account (not built yet): `[[services]] binding = "MAIL_HERO", service = "mail-hero", entrypoint =
-"Ops"` and `binding = "TODOFY", service = "todofy", entrypoint = "Ops"`. There is no new public route and
+Each app's TypeScript Worker also exports a named `WorkerEntrypoint` `Ops` for the dashboard Worker `home`
+in the same account ([`dashboard/`](dashboard/)): `[[services]] binding = "MAIL_HERO", service =
+"mail-hero", entrypoint = "Ops"` and `binding = "TODOFY", service = "todofy", entrypoint = "Ops"`. There is no new public route and
 no Access check; only a Worker deployed in this account can bind it.
 
 | App | Methods | Where |
@@ -39,13 +41,17 @@ no Access check; only a Worker deployed in this account can bind it.
 - The canary is a synthetic `mail.received.v1` event with a top-level `canary` marker
   ([`fixtures/canary_event.json`](contracts/mail-received-v1/fixtures/canary_event.json)); consumers must
   not cause external side effects for it. Todofy runs it through Gemini and records the result, never
-  Todoist, summaries, reports or reminders.
+  Todoist, summaries, reports or reminders. The dashboard runs it once a day (plus up to 3 manual runs).
 - Todofy's daily attention reminder (still at most one Todoist task per UTC day) carries the warning and
-  critical items of the latest `reportOps` report. Mail Hero's own `ALERT_WEBHOOK_URL` stays optional and
-  unconfigured; the dashboard's report into that digest is meant to replace it.
+  critical items of the latest `reportOps` report, which only the dashboard sends. Mail Hero's own
+  `ALERT_WEBHOOK_URL` stays optional and unconfigured; the dashboard's report replaces it.
+- The dashboard sets `shed` on both apps when an account-wide daily allowance (or a monthly R2
+  operation class) reaches 80 %, and clears it below 70 % or on a new UTC day
+  ([`dashboard/docs/limits.md`](dashboard/docs/limits.md)).
 
-Release order: Todofy (canary consumer) before Mail Hero, then the dashboard. The contract and the per-app
-plan are [`contracts/ops-v1/README.md`](contracts/ops-v1/README.md) and
+Release order: Todofy (canary consumer) before Mail Hero, then the dashboard; in one CI run
+`Dashboard deploy` waits for both app deploys. The contract and the per-app plan are
+[`contracts/ops-v1/README.md`](contracts/ops-v1/README.md) and
 [`IMPLEMENTATION.md`](contracts/ops-v1/IMPLEMENTATION.md).
 
 ## CI
@@ -55,35 +61,41 @@ a manual run. Actions are pinned by commit SHA.
 
 | Job | Runs when | Does |
 | --- | --- | --- |
-| `Changes` | always | Tests and runs [`.github/scripts/ci_changes.py`](.github/scripts/ci_changes.py): `git diff --name-only` from a cumulative base to the pushed commit. On `main` the base is the commit of the last successful push run of this workflow on `main` (read with the job's `actions: read` token), so changes from a failed or cancelled run, including one cancelled while pending, are checked and deployed by the next run. On other branches the base is `git merge-base origin/main HEAD`, so the head commit's gate covers the whole branch. No usable base (first run, API error, base not an ancestor) runs everything. A manual run's `app` input (`both`, `todofy`, `mail-hero`) selects the apps |
+| `Changes` | always | Tests and runs [`.github/scripts/ci_changes.py`](.github/scripts/ci_changes.py): `git diff --name-only` from a cumulative base to the pushed commit. On `main` the base is the commit of the last successful push run of this workflow on `main` (read with the job's `actions: read` token), so changes from a failed or cancelled run, including one cancelled while pending, are checked and deployed by the next run. On other branches the base is `git merge-base origin/main HEAD`, so the head commit's gate covers the whole branch. No usable base (first run, API error, base not an ancestor) runs everything. A manual run's `app` input selects the apps: `both` (the default: Todofy and Mail Hero), `all`, `todofy`, `mail-hero` or `dashboard` |
 | `Shared packages` | `packages/<name>/` or `.github/` changed, or a manual run | For every `packages/*/`, from its own directory: `npm ci`, `npm run typecheck`, `npm test` |
 | `Todofy checks` | `todofy/`, `packages/edge-auth/`, `contracts/` or `.github/` changed | Everything Todofy's CI ran, from `todofy/`: ruff, host tests, gateway lint/typecheck/tests, UI API check/typecheck/tests/build and the no-Mail-Hero guard, workerd runtime tests, placeholder config dry-run of both Workers |
 | `Mail Hero checks` | `mail-hero/`, `packages/edge-auth/`, `contracts/` or `.github/` changed | Everything Mail Hero's CI ran, from `mail-hero/`: config and backup tool tests, Worker typecheck and tests (workerd bindings, contract fixtures), UI typecheck/tests/build, plus a placeholder config dry-run |
-| `Contracts` | any app, a package an app uses, `contracts/` or `.github/` changed | `mail.received.v1`: Mail Hero rebuilds every golden fixture byte for byte (the canary one included); Todofy validates and parses every fixture; neither side allows two fixtures to share an event ID. `ops-v1`: both sides validate every fixture against the schema (Mail Hero with `validate.mjs`, Todofy with `jsonschema`), and each app's own `Ops` code is checked against it on the host (Mail Hero `native-ops.test.mjs`, Todofy `test_ops_core.py` and the gateway's `ops.test.ts`). Nothing here needs workerd; each app's check job runs the real-binding `Ops` tests |
+| `Dashboard checks` | `dashboard/`, `packages/edge-auth/`, `contracts/` or `.github/` changed | From `dashboard/`: config generator tests, Worker lint/typecheck/unit tests, workerd runtime tests (the real `HomeState` with stub `mail-hero`/`todofy` Workers serving the ops-v1 fixtures over `Ops` RPC, a fake GraphQL endpoint and a test Access JWKS), UI lint/typecheck/tests/build, a guard against imports from `mail-hero/` or `todofy/`, and a placeholder production config dry-run |
+| `Contracts` | any app, a package an app uses, `contracts/` or `.github/` changed | `mail.received.v1`: Mail Hero rebuilds every golden fixture byte for byte (the canary one included); Todofy validates and parses every fixture; neither side allows two fixtures to share an event ID. `ops-v1`: both sides validate every fixture against the schema (Mail Hero with `validate.mjs`, Todofy with `jsonschema`), and each app's own `Ops` code is checked against it on the host (Mail Hero `native-ops.test.mjs`, Todofy `test_ops_core.py` and the gateway's `ops.test.ts`), and the caller: the dashboard calls only the methods `ops-v1.ts` declares, handles every declared error code, and every input it sends passes the schema (`dashboard/worker` `ops-client`, `guard`, `canary`, `digest` tests). Nothing here needs workerd; each app's check job runs the real-binding `Ops` tests |
 | `CI gate` | always | Fails if any job above failed or was cancelled; skipped as unchanged is fine. **The one check to require on `main`** |
 | `Todofy deploy` | `main` only, `todofy/`, `packages/edge-auth/` or `contracts/ops-v1/ops-v1.ts` changed (or dispatched), after `CI gate` | Generate configs, dry-run, D1 migrations, deploy `todofy-core` then the gateway, `/health` and core probes. `production` environment, group `todofy-production` |
 | `Mail Hero deploy` | `main` only, `mail-hero/`, `packages/edge-auth/` or `contracts/ops-v1/ops-v1.ts` changed (or dispatched), after `CI gate` | `generate-ci-config.mjs`, dry-run, D1 migrations, deploy. `production` environment, group `mail-hero-production` |
+| `Dashboard deploy` | `main` only, `dashboard/`, `packages/edge-auth/` or `contracts/ops-v1/ops-v1.ts` changed (or dispatched), after `CI gate` and after `Todofy deploy` and `Mail Hero deploy` (each success or skipped: the service bindings need their `Ops` entrypoints live) | Build the UI, `generate-ci-config.mjs`, dry-run, deploy (no D1), then a probe that an unauthenticated `GET /` and `/api/v1/overview` are answered by Access with a 302 to the team domain, never by the app. `production` environment, group `dashboard-production` |
 
-A change to only `contracts/` or `.github/` re-checks both apps but deploys neither, except
-`contracts/ops-v1/ops-v1.ts`: both TypeScript Workers bundle its constants (`OPS_LIMITS`), so a change to
-it deploys both (`BUNDLED_BY_BOTH` in `.github/scripts/ci_changes.py`). Dispatch on `main` to redeploy an app.
-A change to `packages/edge-auth/` (any file in it) runs `Shared packages` and checks
-**and deploys** both apps, because both Workers compile it in. `ci_changes.py` maps each package to the
-apps that use it (`PACKAGE_USERS`); `test_ci_changes.py` fails unless that map matches every
+A change to only `contracts/` or `.github/` re-checks every app but deploys none, except
+`contracts/ops-v1/ops-v1.ts`: all three TypeScript Workers bundle its constants (`OPS_LIMITS`), so a
+change to it deploys all three (`BUNDLED_BY` in `.github/scripts/ci_changes.py` maps each bundled
+contract file to its apps; its test compares the map with the Workers' imports). Dispatch on `main` to
+redeploy an app. A change to `packages/edge-auth/` (any file in it) runs `Shared packages` and checks
+**and deploys** all three apps, because every Worker compiles it in. `ci_changes.py` maps each package
+to the apps that use it (`PACKAGE_USERS`); `test_ci_changes.py` fails unless that map matches every
 `"file:../../packages/<name>"` dependency and lists every `packages/*/` directory, and a package missing
-from it counts as used by both apps. Root-only files (`README.md`, `AGENTS.md`, `packages/README.md`) run
-only `Changes` and `CI gate`.
+from it counts as used by every app. A dashboard-only change checks and deploys only the dashboard (and
+runs `Contracts`); it never redeploys the apps it calls. Root-only files (`README.md`, `AGENTS.md`,
+`packages/README.md`) run only `Changes` and `CI gate`.
 
 The deploy jobs' `if:` must stay explicit: `!cancelled()` plus `needs.<job>.result == 'success'` for every
-job they need. `CI gate` needs both apps' check jobs and one of them is skipped whenever only the other app
-changed; a condition without a status function gets an implicit `success()` that also sees that skipped
-ancestor and would skip the deploy ([actions/runner#2205](https://github.com/actions/runner/issues/2205)).
-`test_ci_changes.py` (run by `Changes`) fails if a job after the gate loses this shape.
-It also fails if the `Contracts` job stops naming both sides' contract tests or names a test file that
+job they need (for `Dashboard deploy`, `success` or `skipped` for the two app deploys). `CI gate` needs
+every app's check job and some are skipped whenever only another app changed; a condition without a
+status function gets an implicit `success()` that also sees that skipped ancestor and would skip the
+deploy ([actions/runner#2205](https://github.com/actions/runner/issues/2205)). `test_ci_changes.py` (run
+by `Changes`) fails if a job after the gate loses this shape, if a production job lacks its own
+concurrency group, or if the dispatch options and `DISPATCH` differ. It also fails if the `Contracts`
+job stops naming both sides' contract tests and the dashboard's caller test, or names a test file that
 does not exist.
 
 The first push run of this workflow on `main` has no earlier successful run of it and therefore checks and
-deploys both apps. (The Go-era `ci.yml` of the old Todofy repository shares the file name; its last green
+deploys every app. (The Go-era `ci.yml` of the old Todofy repository shares the file name; its last green
 `main` commit is either an ancestor, whose diff covers both apps, or not, which also runs everything.)
 
 [`.github/workflows/mail-hero-backup-image.yml`](.github/workflows/mail-hero-backup-image.yml) builds Mail
@@ -94,12 +106,13 @@ pinned digest of it until the next collector upgrade switches the Compose image 
 
 ### Production environment
 
-Both deploy jobs use the one `production` environment (deployment branch `main`).
+All three deploy jobs use the one `production` environment (deployment branch `main`).
 
 | Job | Variables | Secrets |
 | --- | --- | --- |
 | `Todofy deploy` | `CLOUDFLARE_ACCOUNT_ID`, `TODOFY_PUBLIC_HOST`, `TODOFY_D1_DATABASE_ID`, `TODOFY_D1_DATABASE_NAME`, `TODOFY_HOOKS_HOSTS`, `TODOFY_MAIL_SOURCE_ID`, `TODOFY_ACCESS_ISSUER`, `TODOFY_ACCESS_AUDIENCE`, `TODOFY_GEMINI_MODELS`, `TODOFY_GEMINI_DAILY_TOKEN_BUDGET`, `TODOFY_TODOIST_DEFAULT_PROJECT_ID`, `TODOFY_LOOKUP_DELAY_MS`, `TODOFY_REPORT_DEFAULT_TOP`, `TODOFY_REPORT_PRECOMPUTE_UTC`, `TODOFY_LEGACY_TEXT_RETENTION_DAYS`, `TODOFY_REMINDER_ENABLED`, `TODOFY_MAINTENANCE_MODE`, `TODOFY_PROCESSING_PAUSED`, `TODOFY_FORCE_PAUSE_TODOIST` | `CF_API_TOKEN`, `TODOFY_ACCESS_OWNER`, `TODOFY_ACCESS_OWNER_ALIASES` |
 | `Mail Hero deploy` | `CLOUDFLARE_ACCOUNT_ID`, `MAIL_HERO_PUBLIC_HOST`, `MAIL_HERO_D1_DATABASE_ID`, `MAIL_HERO_D1_DATABASE_NAME`, `MAIL_HERO_R2_BUCKET_NAME`, `MAIL_HERO_BACKUP_BUCKET_NAME`, `MAIL_HERO_RECEIVE_ADDRESS`, `MAIL_HERO_ACCESS_ISSUER`, `MAIL_HERO_ACCESS_AUDIENCE`, `MAIL_HERO_ACCESS_OWNER`, `MAIL_HERO_WEBHOOK_ALLOWED_HOSTS`, `MAIL_HERO_ALERT_WEBHOOK_URL`, `MAIL_HERO_ALERT_WEBHOOK_ALLOWED_HOSTS`, `MAIL_HERO_FORCE_SEND_PAUSED`, `MAIL_HERO_MAINTENANCE_MODE`, `MAIL_HERO_INGEST_DAILY_MESSAGE_LIMIT`, `MAIL_HERO_INGEST_DAILY_BYTE_LIMIT` | `MAIL_HERO_CF_API_TOKEN` (named `CF_API_TOKEN` in the old Mail Hero repository), `MAIL_HERO_ACCESS_OWNER_ALIASES` |
+| `Dashboard deploy` | `CLOUDFLARE_ACCOUNT_ID`, `DASHBOARD_PUBLIC_HOST`, `DASHBOARD_ACCESS_ISSUER`, `DASHBOARD_ACCESS_AUDIENCE`, `MAIL_HERO_PUBLIC_HOST`, `TODOFY_PUBLIC_HOST` (links), optional `DASHBOARD_CANARY_UTC_HOUR` | `CF_API_TOKEN` (deploy only), `DASHBOARD_ACCESS_OWNER`, `DASHBOARD_ACCESS_OWNER_ALIASES`, `DASHBOARD_CSRF_SIGNING_KEY`, `DASHBOARD_CF_ANALYTICS_TOKEN` (GraphQL Analytics only; to be replaced by an "Account Analytics: Read" token, [`dashboard/docs/setup.md`](dashboard/docs/setup.md) §4) |
 
-`CLOUDFLARE_ACCOUNT_ID` is shared by both jobs (one Cloudflare account). The backup image workflow uses only
+`CLOUDFLARE_ACCOUNT_ID` is shared by all three jobs (one Cloudflare account). The backup image workflow uses only
 the job's own `GITHUB_TOKEN`.

@@ -1,11 +1,12 @@
 # Cross-app contracts
 
-The only files `mail-hero/` and `todofy/` share. Neither app imports the other; both read these files.
+The only files the apps (`mail-hero/`, `todofy/`, `dashboard/`) share. No app imports another; each reads
+these files.
 
 | Directory | Between | Owner |
 | --- | --- | --- |
 | `mail-received-v1/` | Mail Hero → its webhook consumer (Todofy) | Mail Hero |
-| `ops-v1/` | each app ↔ the future ops dashboard (`Ops` entrypoints, canary, guard, digest) | both apps; see [`ops-v1/README.md`](ops-v1/README.md) |
+| `ops-v1/` | each app ↔ the ops dashboard `home` in [`dashboard/`](../dashboard/) (`Ops` entrypoints, canary, guard, digest) | both apps; see [`ops-v1/README.md`](ops-v1/README.md) |
 
 ## `mail-received-v1/`
 
@@ -47,7 +48,13 @@ dependency-free validator for the TypeScript side (`validate.mjs`), fixtures, th
 - Each app's own `Ops` code, on the host: `test/native-ops.test.mjs` (Mail Hero: guard, status, canary
   delivery, input checks), `tests/unit/test_ops_core.py` (Todofy core rules) and `gateway/test/ops.test.ts`
   (Todofy's entrypoint forwarding); every value they produce is validated against the schema.
+- The caller, on the host: `dashboard/worker` `test/ops-client.test.ts` (the dashboard calls only the
+  methods `MailHeroOps`/`TodofyOps` declare and handles every `OPS_ERROR_CODES` value, timeouts and
+  invalid output) and `test/guard.test.ts`, `canary.test.ts`, `digest.test.ts` (every `SetGuardInput`,
+  `StartCanaryInput` and `OpsReport` it builds passes `validate.mjs`).
 
 The real-binding tests (`mail-hero/cloudflare/test/native-ops-runtime.test.mjs`,
 `todofy/tests/runtime/test_ops.py`) call each app's `Ops` over a service binding in workerd, the way the
-dashboard will; they run in each app's check job, which `contracts/` changes also trigger.
+dashboard does; they run in each app's check job, which `contracts/` changes also trigger. The
+dashboard's own runtime suite (`dashboard/worker/test/runtime/`, in `Dashboard checks`) runs its real
+`HomeState` against stub apps that answer with these fixtures.

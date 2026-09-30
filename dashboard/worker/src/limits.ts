@@ -1,6 +1,7 @@
 /**
- * Workers Free allowances the dashboard measures (docs/design.md §7.1, checked 2026-09-29 against the
- * linked Cloudflare pages). They are account-wide: other Workers, databases and buckets count too.
+ * Workers Free allowances the dashboard measures (docs/limits.md, checked 2026-09-29 against the
+ * linked Cloudflare pages; test/limits.test.ts keeps that table and these values equal). They are
+ * account-wide: other Workers, databases and buckets count too.
  * "GB" is taken as 10^9 bytes (the docs do not say; decimal is the smaller, more cautious limit).
  */
 import type { QuotaPeriod, QuotaResourceId, QuotaUnit } from './api-types.ts';

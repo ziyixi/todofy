@@ -1,8 +1,10 @@
-# One workflow for both apps. "changes" decides what changed since a cumulative base (.github/scripts/ci_changes.py),
-# each app's checks run from its own directory, "Shared packages" checks packages/* (compiled into the apps),
-# "Contracts" runs both sides of mail.received.v1 and ops-v1, and "CI gate" is the single status check to require.
-# Deploys run only on main, only for the app that changed (itself or a shared package it compiles in, or
-# was dispatched), after the gate passes. See README.md "CI".
+# One workflow for the three apps (Todofy, Mail Hero, the home dashboard). "changes" decides what changed since a
+# cumulative base (.github/scripts/ci_changes.py), each app's checks run from its own directory, "Shared packages"
+# checks packages/* (compiled into the apps), "Contracts" runs both sides of mail.received.v1 and ops-v1 plus the
+# dashboard's ops-v1 caller tests, and "CI gate" is the single status check to require. Deploys run only on main,
+# only for the app that changed (itself, a shared package it compiles in, a contract file it bundles, or was
+# dispatched), after the gate passes; the dashboard deploys after both apps whose Ops entrypoints it binds.
+# See README.md "CI".
 name: CI and deploy
 
 on:
@@ -13,7 +15,8 @@ on:
       app:
         description: App to check and (on main) deploy
         type: choice
-        options: [both, todofy, mail-hero]
+        # both = Todofy and Mail Hero (as before the dashboard existed); all = every app.
+        options: [both, all, todofy, mail-hero, dashboard]
         default: both
 
 permissions:
@@ -39,10 +42,12 @@ jobs:
     outputs:
       todofy_check: ${{ steps.decide.outputs.todofy_check }}
       mail_hero_check: ${{ steps.decide.outputs.mail_hero_check }}
+      dashboard_check: ${{ steps.decide.outputs.dashboard_check }}
       contracts: ${{ steps.decide.outputs.contracts }}
       packages: ${{ steps.decide.outputs.packages }}
       todofy_deploy: ${{ steps.decide.outputs.todofy_deploy }}
       mail_hero_deploy: ${{ steps.decide.outputs.mail_hero_deploy }}
+      dashboard_deploy: ${{ steps.decide.outputs.dashboard_deploy }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -260,6 +265,78 @@ jobs:
         if: always()
         run: rm -f cloudflare/wrangler.native.production.ci.json
 
+  # The home dashboard (Worker "home", docs in dashboard/docs). Everything runs from dashboard/ with synthetic data;
+  # the runtime suite runs the real HomeState in workerd next to stub "mail-hero"/"todofy" Workers that serve
+  # the contracts/ops-v1 fixtures over real Ops RPC, a fake GraphQL endpoint and a test Access JWKS.
+  dashboard-checks:
+    name: Dashboard checks
+    needs: changes
+    if: needs.changes.outputs.dashboard_check == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: dashboard
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: '26'
+          cache: npm
+          cache-dependency-path: |
+            dashboard/worker/package-lock.json
+            dashboard/web/package-lock.json
+      - name: Install locked dependencies
+        run: |
+          npm ci --prefix worker --no-audit --no-fund
+          npm ci --prefix web --no-audit --no-fund
+      # The generator reads worker/wrangler.toml with the pinned wrangler, hence after npm ci.
+      - name: Test the production config generator
+        run: node --test deploy/test/*.test.mjs
+      - name: Lint, typecheck and test the Worker
+        working-directory: dashboard/worker
+        run: |
+          npm run lint
+          npm run typecheck
+          npm test
+      - name: Runtime tests (workerd with the real HomeState, stub Ops apps, fake GraphQL and Access)
+        working-directory: dashboard/worker
+        run: npm run test:runtime
+      # Builds web/dist, which the dry-run below serves as static assets.
+      - name: Lint, typecheck, test and build the UI
+        working-directory: dashboard/web
+        run: |
+          npm run lint
+          npm run typecheck
+          npm test
+          npm run build
+      # The dashboard reaches the apps only through their Ops entrypoints; it never imports their code.
+      - name: No imports from mail-hero/ or todofy/
+        run: |
+          if grep -rnE "(from|import)[[:space:]]*\(?[[:space:]]*['\"][^'\"]*(mail-hero|todofy)/" worker/src web/src; then exit 1; fi
+      # The deploy job's generator and dry-run, with placeholder values and no token.
+      - name: Dry-run a placeholder production config
+        env:
+          CLOUDFLARE_ACCOUNT_ID: '00000000000000000000000000000000'
+          DASHBOARD_PUBLIC_HOST: home.example.com
+          DASHBOARD_ACCESS_ISSUER: https://example.cloudflareaccess.com
+          DASHBOARD_ACCESS_AUDIENCE: '0000000000000000000000000000000000000000000000000000000000000000'
+          MAIL_HERO_PUBLIC_HOST: mail-hero.example.com
+          TODOFY_PUBLIC_HOST: todofy.example.com
+          DASHBOARD_ACCESS_OWNER: owner@example.com
+          DASHBOARD_CSRF_SIGNING_KEY: '0000000000000000000000000000000000000000000000000000000000000000'
+          DASHBOARD_CF_ANALYTICS_TOKEN: placeholder-analytics-token-0000000000
+        run: |
+          node deploy/generate-ci-config.mjs
+          cd worker
+          npx --no-install wrangler deploy --dry-run --config wrangler.production.ci.json \
+            --secrets-file wrangler.production.secrets.json --outdir "$RUNNER_TEMP/home-bundle"
+      - name: Remove the placeholder config
+        if: always()
+        run: rm -f worker/wrangler.production.ci.json worker/wrangler.production.secrets.json
+
   contracts:
     name: Contracts
     needs: changes
@@ -277,6 +354,7 @@ jobs:
           cache-dependency-path: |
             mail-hero/cloudflare/package-lock.json
             todofy/gateway/package-lock.json
+            dashboard/worker/package-lock.json
       - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
         with:
           version: '0.12.10'
@@ -306,10 +384,19 @@ jobs:
         run: |
           npm ci --no-audit --no-fund
           npx --no-install vitest run test/ops.test.ts
+      # Caller: the dashboard calls only the Ops methods ops-v1.ts declares (for each app), handles every
+      # declared error code plus timeouts and invalid output, accepts the valid fixtures and refuses the
+      # invalid ones, and every value it sends (SetGuardInput, StartCanaryInput, OpsReport) passes
+      # validate.mjs. Host only (vitest in Node); Dashboard checks runs the workerd flows.
+      - name: The dashboard calls ops-v1 as declared
+        working-directory: dashboard/worker
+        run: |
+          npm ci --no-audit --no-fund
+          npx --no-install vitest run test/ops-client.test.ts test/guard.test.ts test/canary.test.ts test/digest.test.ts
 
   gate:
     name: CI gate
-    needs: [changes, shared-packages, todofy-checks, mail-hero-checks, contracts]
+    needs: [changes, shared-packages, todofy-checks, mail-hero-checks, dashboard-checks, contracts]
     if: always()
     runs-on: ubuntu-24.04
     timeout-minutes: 5
@@ -320,10 +407,12 @@ jobs:
           PACKAGES: ${{ needs.shared-packages.result }}
           TODOFY: ${{ needs.todofy-checks.result }}
           MAIL_HERO: ${{ needs.mail-hero-checks.result }}
+          DASHBOARD: ${{ needs.dashboard-checks.result }}
           CONTRACTS: ${{ needs.contracts.result }}
         run: |
           failed=0
-          for pair in "Changes=$CHANGES" "Shared packages=$PACKAGES" "Todofy checks=$TODOFY" "Mail Hero checks=$MAIL_HERO" "Contracts=$CONTRACTS"; do
+          for pair in "Changes=$CHANGES" "Shared packages=$PACKAGES" "Todofy checks=$TODOFY" "Mail Hero checks=$MAIL_HERO" \
+            "Dashboard checks=$DASHBOARD" "Contracts=$CONTRACTS"; do
             echo "$pair"
             case "${pair#*=}" in
               success|skipped) ;;
@@ -337,8 +426,8 @@ jobs:
   todofy-deploy:
     name: Todofy deploy
     needs: [changes, todofy-checks, gate]
-    # Keep the status function and the results explicit. "gate" needs Mail Hero checks, which is skipped
-    # when only Todofy changed; a bare condition gets an implicit success() that looks at the whole needs
+    # Keep the status function and the results explicit. "gate" needs Mail Hero checks (and Dashboard checks),
+    # which are skipped when only Todofy changed; a bare condition gets an implicit success() that looks at the whole needs
     # chain, sees that skipped job and skips this deploy too (actions/runner#491, #2205).
     # .github/scripts/test_ci_changes.py checks this shape.
     if: >-
@@ -544,3 +633,116 @@ jobs:
       - name: Remove generated configuration
         if: always()
         run: rm -f cloudflare/wrangler.native.production.ci.json
+
+  dashboard-deploy:
+    name: Dashboard deploy
+    # After both app deploys: the service bindings MAIL_HERO and TODOFY name their "Ops" entrypoints, which
+    # must be live first. An app deploy that did not run (nothing of that app changed) is fine; one that
+    # failed or was cancelled stops this job.
+    needs: [changes, dashboard-checks, gate, todofy-deploy, mail-hero-deploy]
+    # Explicit status function and results, as for Todofy deploy (implicit success() and skipped ancestors).
+    if: >-
+      ${{ !cancelled()
+      && needs.changes.result == 'success'
+      && needs.dashboard-checks.result == 'success'
+      && needs.gate.result == 'success'
+      && (needs.todofy-deploy.result == 'success' || needs.todofy-deploy.result == 'skipped')
+      && (needs.mail-hero-deploy.result == 'success' || needs.mail-hero-deploy.result == 'skipped')
+      && github.ref == 'refs/heads/main'
+      && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+      && needs.changes.outputs.dashboard_deploy == 'true' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    environment:
+      name: production
+      url: https://${{ vars.DASHBOARD_PUBLIC_HOST }}
+    concurrency:
+      group: dashboard-production
+      cancel-in-progress: false
+    defaults:
+      run:
+        working-directory: dashboard
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: '26'
+          cache: npm
+          cache-dependency-path: |
+            dashboard/worker/package-lock.json
+            dashboard/web/package-lock.json
+      - name: Build the verified revision
+        run: |
+          npm ci --prefix worker --no-audit --no-fund
+          npm ci --prefix web --no-audit --no-fund
+          npm run build --prefix web
+      # The owner's addresses, the CSRF key and the analytics token are environment secrets (masked in this
+      # public log) and reach the Worker as secrets through --secrets-file; wrangler prints plain vars.
+      - name: Generate the production configuration
+        env:
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+          DASHBOARD_PUBLIC_HOST: ${{ vars.DASHBOARD_PUBLIC_HOST }}
+          DASHBOARD_ACCESS_ISSUER: ${{ vars.DASHBOARD_ACCESS_ISSUER }}
+          DASHBOARD_ACCESS_AUDIENCE: ${{ vars.DASHBOARD_ACCESS_AUDIENCE }}
+          DASHBOARD_CANARY_UTC_HOUR: ${{ vars.DASHBOARD_CANARY_UTC_HOUR }}
+          MAIL_HERO_PUBLIC_HOST: ${{ vars.MAIL_HERO_PUBLIC_HOST }}
+          TODOFY_PUBLIC_HOST: ${{ vars.TODOFY_PUBLIC_HOST }}
+          DASHBOARD_ACCESS_OWNER: ${{ secrets.DASHBOARD_ACCESS_OWNER }}
+          DASHBOARD_ACCESS_OWNER_ALIASES: ${{ secrets.DASHBOARD_ACCESS_OWNER_ALIASES }}
+          DASHBOARD_CSRF_SIGNING_KEY: ${{ secrets.DASHBOARD_CSRF_SIGNING_KEY }}
+          DASHBOARD_CF_ANALYTICS_TOKEN: ${{ secrets.DASHBOARD_CF_ANALYTICS_TOKEN }}
+        run: node deploy/generate-ci-config.mjs
+      - name: Validate the bundle before deploying
+        working-directory: dashboard/worker
+        run: |
+          npx --no-install wrangler deploy --dry-run --config wrangler.production.ci.json \
+            --secrets-file wrangler.production.secrets.json
+      # No D1 and no migration step: the HomeState class migration (v1, new_sqlite_classes) is in the config.
+      - name: Deploy the Worker home
+        working-directory: dashboard/worker
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          test -n "$CLOUDFLARE_API_TOKEN"
+          npx --no-install wrangler deploy --config wrangler.production.ci.json \
+            --secrets-file wrangler.production.secrets.json
+      # Cloudflare Access ("Home") must answer every unauthenticated request with a 302 to the team domain
+      # (the issuer); the app itself must never answer one. A first deploy waits for the Custom Domain's
+      # DNS and certificate, so only "no connection" and 5xx are retried (10 x 15 s). Any other answer, a
+      # 2xx or 4xx from the app or a redirect elsewhere, fails at once. Nothing is followed or printed
+      # except the status code.
+      - name: Check that Access answers unauthenticated requests
+        run: |
+          issuer=$(jq -er '.vars.ACCESS_ISSUER' worker/wrangler.production.ci.json)
+          host=$(jq -er '.vars.PUBLIC_HOST' worker/wrangler.production.ci.json)
+          for path in / /api/v1/overview; do
+            for attempt in $(seq 1 10); do
+              answer=$(curl -sS -o /dev/null --max-time 15 --proto '=https' -w '%{http_code} %{redirect_url}' \
+                "https://$host$path" 2>/dev/null) || true
+              code=${answer%% *}
+              location=${answer#* }
+              case "$code" in
+                302)
+                  if [ "${location#"$issuer/"}" != "$location" ]; then
+                    echo "Access answered $path with 302 to the team domain (attempt $attempt)."
+                    continue 2
+                  fi
+                  echo "$path: 302 to somewhere other than the Access team domain." >&2
+                  exit 1
+                  ;;
+                ''|000|5??) sleep 15 ;;
+                *)
+                  echo "$path was answered with $code without Access." >&2
+                  exit 1
+                  ;;
+              esac
+            done
+            echo "$path never reached Access (last status ${code:-none})." >&2
+            exit 1
+          done
+      - name: Remove the generated configuration
+        if: always()
+        run: rm -f worker/wrangler.production.ci.json worker/wrangler.production.secrets.json

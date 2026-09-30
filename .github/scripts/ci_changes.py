@@ -2,11 +2,14 @@
 """Decide which apps a CI run checks and deploys. Standard library only (the runner's python3).
 
 Outputs (GITHUB_OUTPUT, "true"/"false"):
-  todofy_check, mail_hero_check  run that app's full checks
-  contracts                      run both sides' mail.received.v1 and ops-v1 contract tests
-  packages                       run every shared package's own checks (packages/*)
-  todofy_deploy, mail_hero_deploy  the app, or a shared package it compiles in, changed
-                                 (deploy jobs also require refs/heads/main)
+  todofy_check, mail_hero_check, dashboard_check
+                    run that app's full checks
+  contracts         run the contract tests: both sides of mail.received.v1 and ops-v1, and the
+                    dashboard's ops-v1 caller tests
+  packages          run every shared package's own checks (packages/*)
+  todofy_deploy, mail_hero_deploy, dashboard_deploy
+                    the app, a shared package it compiles in, or a contract file it bundles changed
+                    (deploy jobs also require refs/heads/main)
 
 push: the files changed between a cumulative base and github.sha, never only this push's own diff,
 so a change whose run was cancelled or failed is checked (and deployed) again by the next run.
@@ -17,14 +20,15 @@ so a change whose run was cancelled or failed is checked (and deployed) again by
                  change on the branch, not only the latest push.
   No usable base (no successful main run yet, API failure, base not an ancestor, no origin/main)
   runs everything. An app's own directory checks and deploys it; contracts/ and .github/ re-check
-  both apps but deploy neither, except the contract files both TypeScript Workers bundle
-  (BUNDLED_BY_BOTH, e.g. OPS_LIMITS in contracts/ops-v1/ops-v1.ts), which also deploy both. A shared package packages/<name>/ is compiled into the apps listed in
-  PACKAGE_USERS, so any change inside it runs the package checks and checks AND deploys each of
-  those apps. A package missing from PACKAGE_USERS counts as used by both apps (fail safe; the
-  tests run by the Changes job also fail until PACKAGE_USERS matches the file: dependencies). A file
-  directly under packages/ (a README) is root documentation: gate only.
-workflow_dispatch: the "app" input (both, todofy or mail-hero) checks and deploys that app, and the
-shared packages are checked too.
+  every app but deploy none, except the contract files the TypeScript Workers bundle (BUNDLED_BY,
+  e.g. OPS_LIMITS in contracts/ops-v1/ops-v1.ts), which also deploy every app listed for them. A
+  shared package packages/<name>/ is compiled into the apps listed in PACKAGE_USERS, so any change
+  inside it runs the package checks and checks AND deploys each of those apps. A package missing
+  from PACKAGE_USERS counts as used by every app (fail safe; the tests run by the Changes job also
+  fail until PACKAGE_USERS matches the file: dependencies). A file directly under packages/ (a
+  README) is root documentation: gate only.
+workflow_dispatch: the "app" input checks and deploys that app ("both" = Todofy and Mail Hero, as
+before; "all" = every app; or one app), and the contracts and shared packages are checked too.
 """
 
 import os
@@ -32,54 +36,71 @@ import subprocess
 import sys
 from collections.abc import Callable, Iterable
 
-KEYS = ("todofy_check", "mail_hero_check", "contracts", "packages", "todofy_deploy", "mail_hero_deploy")
-DISPATCH = {"both": ("todofy", "mail-hero"), "todofy": ("todofy",), "mail-hero": ("mail-hero",)}
+APPS = ("todofy", "mail-hero", "dashboard")
+# The output key prefix of each app ("<prefix>_check", "<prefix>_deploy").
+PREFIX = {"todofy": "todofy", "mail-hero": "mail_hero", "dashboard": "dashboard"}
+KEYS = (
+    "todofy_check",
+    "mail_hero_check",
+    "dashboard_check",
+    "contracts",
+    "packages",
+    "todofy_deploy",
+    "mail_hero_deploy",
+    "dashboard_deploy",
+)
+DISPATCH = {
+    "both": ("todofy", "mail-hero"),
+    "all": APPS,
+    "todofy": ("todofy",),
+    "mail-hero": ("mail-hero",),
+    "dashboard": ("dashboard",),
+}
 # packages/<name>/ -> the apps whose Workers compile it in (a "file:../../packages/<name>" dependency).
-PACKAGE_USERS = {"edge-auth": ("todofy", "mail-hero")}
+PACKAGE_USERS = {"edge-auth": ("todofy", "mail-hero", "dashboard")}
 
-# Contract files whose code the Mail Hero Worker and Todofy's gateway import at runtime, so a change
-# ships only with a deploy of both. test_ci_changes.py checks this against both apps' imports.
-BUNDLED_BY_BOTH = ("contracts/ops-v1/ops-v1.ts",)
+# Contract files whose code a TypeScript Worker imports at runtime (constants such as OPS_LIMITS land
+# in its bundle), mapped to the apps that bundle them: a change ships only with a deploy of each.
+# test_ci_changes.py checks this map against the Workers' imports.
+BUNDLED_BY = {"contracts/ops-v1/ops-v1.ts": ("todofy", "mail-hero", "dashboard")}
 
 
 def everything() -> dict[str, bool]:
     return dict.fromkeys(KEYS, True)
 
 
+def outputs(checked: Iterable[str], deployed: Iterable[str], contracts: bool, packages: bool) -> dict[str, bool]:
+    checked, deployed = set(checked), set(deployed)
+    result = {"contracts": contracts, "packages": packages}
+    for app in APPS:
+        result[f"{PREFIX[app]}_check"] = app in checked
+        result[f"{PREFIX[app]}_deploy"] = app in deployed
+    return {key: result[key] for key in KEYS}
+
+
 def classify(paths: Iterable[str]) -> dict[str, bool]:
     paths = [path for path in paths if path]
-    apps = {app for app in ("todofy", "mail-hero") if any(path.startswith(f"{app}/") for path in paths)}
+    apps = {app for app in APPS if any(path.startswith(f"{app}/") for path in paths)}
     # packages/<name>/<file>: at least three components; packages/README.md is documentation.
     package_names = {path.split("/")[1] for path in paths if path.startswith("packages/") and path.count("/") >= 2}
     for name in package_names:
-        apps.update(PACKAGE_USERS.get(name, ("todofy", "mail-hero")))
+        apps.update(PACKAGE_USERS.get(name, APPS))
     ci = any(path.startswith(".github/") for path in paths)
     shared = ci or any(path.startswith("contracts/") for path in paths)
-    todofy, mail_hero = "todofy" in apps, "mail-hero" in apps
-    bundled = any(path in BUNDLED_BY_BOTH for path in paths)
-    return {
-        "todofy_check": todofy or shared,
-        "mail_hero_check": mail_hero or shared,
-        "contracts": todofy or mail_hero or shared,
-        "packages": bool(package_names) or ci,
-        "todofy_deploy": todofy or bundled,
-        "mail_hero_deploy": mail_hero or bundled,
-    }
+    bundled = {app for path in paths for app in BUNDLED_BY.get(path, ())}
+    return outputs(
+        checked=APPS if shared else apps,
+        deployed=apps | bundled,
+        contracts=bool(apps) or shared,
+        packages=bool(package_names) or ci,
+    )
 
 
 def dispatched(app: str) -> dict[str, bool]:
     if app not in DISPATCH:
         raise ValueError(f"unknown app input {app!r}; expected one of {sorted(DISPATCH)}")
     apps = DISPATCH[app]
-    todofy, mail_hero = "todofy" in apps, "mail-hero" in apps
-    return {
-        "todofy_check": todofy,
-        "mail_hero_check": mail_hero,
-        "contracts": True,
-        "packages": True,
-        "todofy_deploy": todofy,
-        "mail_hero_deploy": mail_hero,
-    }
+    return outputs(checked=apps, deployed=apps, contracts=True, packages=True)
 
 
 MAIN = "refs/heads/main"
