@@ -18,7 +18,7 @@
  * | GET  csrf                      | Worker                 | CsrfResponse          | signed token + cookie           |
  * | GET  home[?refresh=1]          | DO, 1 call             | HomeResponse          | ≤ 10 KiB; ≤ 24 rows read        |
  * | GET  flows                     | DO, 1 call             | FlowsResponse         | ≤ 16 KiB; ≤ 24 rows read        |
- * | GET  cloudflare[?refresh=1]    | DO, 1 call             | CloudflareResponse    | ≤ 16 KiB; ≤ 10 rows read        |
+ * | GET  cloudflare[?refresh=1]    | DO, 1 call             | CloudflareResponse    | ≤ 16 KiB; ≤ 24 rows read        |
  * | GET  ops                       | DO, 1 call             | OpsResponse           | ≤ 24 KiB; ≤ 24 rows read        |
  * | POST guard {level}             | DO                     | GuardResponseV2       | CSRF + Origin                   |
  * | POST canary {canary_id}        | DO                     | CanaryStartResponse   | CSRF + Origin                   |
@@ -67,11 +67,12 @@ export const V2_BODY_BUDGET = {
 
 /**
  * Durable Object rows one view may read (SqlStorageCursor.rowsRead per call; the workerd suite asserts
- * it with a full 14-run canary history and 20 Workers, measured 22 / 22 / 7 / 20). Every view reads the
- * shared shell (meta, digest, the two guard docs, both statuses); home, flows and ops add the 14 recent
- * canary runs, cloudflare the usage and cf_scripts documents. Each document is read once per build.
+ * it with a full 14-run canary history and 20 Workers, measured 22 / 22 / 22 / 22). Every view reads the
+ * shared shell (meta, digest, the two guard docs, both statuses) and, for the strip's observed items,
+ * what the evaluation reads (probes, cf_scripts, the 14 recent canary runs); cloudflare adds the usage
+ * document. Each document is read once per build (HomeState's read cache).
  */
-export const V2_ROWS_READ: Readonly<Record<ViewId, number>> = { home: 24, flows: 24, cloudflare: 10, ops: 24 };
+export const V2_ROWS_READ: Readonly<Record<ViewId, number>> = { home: 24, flows: 24, cloudflare: 24, ops: 24 };
 
 /** Outbound calls one tick may make, computed from the registry (tested). Free: 50 subrequests. */
 export const MAX_OUTBOUND_PER_TICK = 30;
@@ -320,11 +321,26 @@ export interface Target {
   readonly script?: string;
 }
 
-/** A digest/banner item (unchanged set, docs/design-v2.md §4) plus where it is shown. */
+/**
+ * A digest/banner item (unchanged set, docs/design-v2.md §4) plus where it is shown, or a page-only
+ * `observed` item: a level the views show (a tile, a flow stage, a Worker's error rate) that no digest
+ * item explains, so the strip never says 全部正常 while a tile or a flow is worse than ok. Observed
+ * items are never sent to Todofy.
+ */
 export interface AttentionItem extends Omit<OpsReportItem, 'since'> {
-  /** Null for page-only items without an episode start (canary_disabled). */
+  /** Null for page-only items without an episode start (canary_disabled, observed items). */
   readonly since: Iso | null;
   readonly target: Target;
+  /**
+   * Set only on an observed item: its level (`code` is then an EntryState/StageState reason, and
+   * `severity` is `critical` for critical, else `warning`). Absent on digest items.
+   */
+  readonly observed?: 'warning' | 'critical' | 'unknown';
+}
+
+/** The strip level of an item: the observed level, else the digest severity. */
+export function attentionLevel(item: Pick<AttentionItem, 'severity' | 'observed'>): 'info' | 'warning' | 'critical' | 'unknown' {
+  return item.observed ?? item.severity;
 }
 
 /** A switch that holds work (maintenance, force-paused delivery, owner shed): shown, never alarmed. */
@@ -335,16 +351,19 @@ export interface HeldItem {
 }
 
 export interface AttentionView {
-  /** Worst of `items` (unknown before anything ran), as the digest's overall level. */
+  /** Worst of `items` (critical > unknown > warning; unknown before anything ran). */
   readonly level: OverallLevel;
-  /** All warning/critical items, worst first (at most 20); the strip shows ATTENTION_SHOWN of them. */
+  /**
+   * The digest's warning/critical items, then the observed ones, worst first (critical > unknown >
+   * warning); the strip shows ATTENTION_SHOWN of them.
+   */
   readonly items: readonly AttentionItem[];
   /** Info items shown on the page only (canary_disabled). */
   readonly info: readonly AttentionItem[];
   readonly held: readonly HeldItem[];
 }
 
-/** Warning + critical items per view, for the tab badges (held and info never count). */
+/** Warning, critical and unknown items per view, for the tab badges (held and info never count). */
 export type Badges = Readonly<Record<ViewId, number>>;
 
 export interface RefreshV2 {

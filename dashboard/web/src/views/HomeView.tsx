@@ -3,7 +3,7 @@ import type { FlowSummary, HomeResponse } from '../../../worker/src/api-v2-types
 import { Launcher } from '../components/Launcher'
 import { MiniQuota } from '../components/QuotaBars'
 import { LevelMark, LevelShape } from '../components/status'
-import { flowLine } from '../lib/flows'
+import { flowLine, flowMark } from '../lib/flows'
 import { formatNumber } from '../lib/format'
 import { LEVEL, USAGE_STATUS } from '../lib/labels'
 import { flowOf, type Reg } from '../lib/registry'
@@ -23,7 +23,7 @@ function FlowRows({ reg, flows, now }: { reg: Reg; flows: readonly FlowSummary[]
           {flows.map((summary) => {
             const flow = flowOf(reg, summary.id)
             const line = flowLine(reg, summary, now)
-            const level = summary.partial ? 'unmonitored' : summary.level
+            const { level } = flowMark(summary)
             const name = flow?.name ?? summary.id
             return (
               <li key={summary.id}>

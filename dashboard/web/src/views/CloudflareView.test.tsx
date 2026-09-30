@@ -1,9 +1,9 @@
 import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { NOW, analyticsUnavailable, guardShed, healthy, quotaRows, withWorkers, type Scenario } from '../test/fixtures'
-import { freezeClock, renderApp, serve } from '../test/harness'
+import { freezeClock, renderApp, serve, type Call } from '../test/harness'
 
-async function showCloudflare(scenario: Scenario | (() => Scenario), hash = '#/cloudflare') {
+async function showCloudflare(scenario: Scenario | ((call: Call) => Scenario), hash = '#/cloudflare') {
   freezeClock()
   const calls = serve(scenario)
   renderApp(hash)
@@ -116,12 +116,13 @@ describe('Cloudflare 监控', () => {
   it('refreshes the usage with refresh=1 and says when it was too soon', async () => {
     let refreshed = true
     const base = healthy()
-    const calls = await showCloudflare(() => ({
+    const calls = await showCloudflare((call) => ({
       ...base,
       cloudflare: {
         ...base.cloudflare,
         usage: { ...base.cloudflare.usage, rows: quotaRows({ workers_requests: { used: 800 } }) },
-        refresh: { ...base.cloudflare.refresh, refreshed, next_refresh_at: NOW.toISOString() },
+        // A declined refresh answers with the Worker's next window (60 s here).
+        refresh: { ...base.cloudflare.refresh, refreshed, next_refresh_at: !refreshed && call.path.includes('refresh=1') ? new Date(NOW.getTime() + 60_000).toISOString() : NOW.toISOString() },
       },
     }))
     const user = userEvent.setup()
@@ -145,7 +146,7 @@ describe('Cloudflare 监控', () => {
     })
     const button = screen.getByRole('button', { name: '刷新用量' })
     expect(button).toBeDisabled()
-    expect(button).toHaveAccessibleDescription('01:00:30 后可再次刷新')
+    expect(button).toHaveAccessibleDescription('1 分钟后可再次刷新')
   })
 
   it('highlights the Worker named in the route', async () => {

@@ -302,6 +302,7 @@ button {
 
 .brand {
   display: flex;
+  flex: none;
   align-items: center;
   gap: 10px;
   min-width: 0;
@@ -515,6 +516,27 @@ button {
   .btn-refresh-label {
     display: inline;
   }
+
+  /* A tab label never breaks inside a word ("操/作/与/记/录" at 720 px). */
+  .tab {
+    white-space: nowrap;
+  }
+}
+
+/* 720–959 px: tighter top bar, and "Cloudflare 监控" keeps only "Cloudflare" (the name stays in the
+   accessible label), so brand, four tabs and the refresh control fit on one 64 px row. */
+@media (min-width: 720px) and (max-width: 959px) {
+  .topbar-inner {
+    gap: 24px;
+  }
+
+  .tabs {
+    gap: 20px;
+  }
+
+  .tab-long {
+    display: none;
+  }
 }
 
 /* ---- page --------------------------------------------------------------------------------- */
@@ -641,6 +663,12 @@ main {
 .strip-critical {
   background: var(--danger-bg);
   border-color: var(--danger-border);
+}
+
+/* 未知: the neutral surface with a dashed edge (a check that says nothing is not healthy). */
+.strip-unknown {
+  border-style: dashed;
+  border-color: var(--neutral-dash);
 }
 
 .strip-head {
@@ -1024,9 +1052,17 @@ main {
     gap: 10px;
   }
 
+  /* Fixed-size tiles that wrap: 4 across where they fit, fewer on a narrow window (never a
+     horizontal page scroll). A wrapping flex row, since a grid's auto-fill cannot size a group that
+     shrinks to its content. */
+  .launch-group {
+    min-width: 0;
+    max-width: 100%;
+  }
+
   .tiles {
-    grid-template-columns: repeat(auto-fill, 176px);
-    grid-auto-flow: column;
+    display: flex;
+    flex-wrap: wrap;
     gap: var(--space-4);
   }
 

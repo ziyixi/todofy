@@ -1,23 +1,39 @@
 import { Info } from 'lucide-react'
 import { useState } from 'react'
-import { ATTENTION_SHOWN, type AttentionItem, type ShellFields } from '../../../worker/src/api-v2-types.ts'
+import { ATTENTION_SHOWN, attentionLevel, type AttentionItem, type ShellFields } from '../../../worker/src/api-v2-types.ts'
 import { formatClock, formatDayTime, formatDuration, formatFullTime } from '../lib/format'
-import { signalLabel } from '../lib/labels'
+import { reasonLabel, signalLabel } from '../lib/labels'
 import { flowOf, nameOf, stageOf, targetHash, targetLabel, type Reg } from '../lib/registry'
 import { LevelMark, LevelShape } from './status'
 
-/** "Gemini 预算超过 80%（82%）": the label, plus a rounded percent metric when the item has one. */
-export function itemText(item: Pick<AttentionItem, 'code' | 'metrics'>): string {
+/**
+ * "Gemini 预算超过 80%（82%）": the label, plus a rounded percent metric when the item has one. An
+ * observed item's code is a tile/stage reason ("无法连接", "HTTP 状态异常").
+ */
+export function itemText(item: Pick<AttentionItem, 'code' | 'metrics' | 'observed'>): string {
+  if (item.observed !== undefined) return reasonLabel(item.code)
   const percent = item.metrics.percent
   return `${signalLabel(item.code)}${typeof percent === 'number' ? `（${Math.round(percent)}%）` : ''}`
 }
 
-function title(items: readonly AttentionItem[]): { level: 'warning' | 'critical'; text: string } {
-  const critical = items.filter((item) => item.severity === 'critical').length
-  const warning = items.length - critical
-  if (critical === 0) return { level: 'warning', text: `${warning} 项需关注` }
-  if (warning === 0) return { level: 'critical', text: `${critical} 项故障` }
-  return { level: 'critical', text: `${critical} 项故障 · ${warning} 项需关注` }
+type StripLevel = 'critical' | 'unknown' | 'warning'
+
+const STRIP_WORDS: readonly (readonly [StripLevel, string])[] = [
+  ['critical', '项故障'],
+  ['unknown', '项未知'],
+  ['warning', '项需关注'],
+]
+
+/** "1 项故障 · 2 项未知 · 1 项需关注", with the worst level (critical > unknown > warning) for the mark. */
+function title(items: readonly AttentionItem[]): { level: StripLevel; text: string } {
+  const count = (level: StripLevel) => items.filter((item) => stripLevel(item) === level).length
+  const parts = STRIP_WORDS.flatMap(([level, word]) => (count(level) > 0 ? [{ level, text: `${count(level)} ${word}` }] : []))
+  return { level: parts[0]?.level ?? 'warning', text: parts.map((part) => part.text).join(' · ') }
+}
+
+function stripLevel(item: AttentionItem): StripLevel {
+  const level = attentionLevel(item)
+  return level === 'info' ? 'warning' : level
 }
 
 /**
@@ -95,8 +111,8 @@ export function AttentionStrip({ reg, shell, now }: { reg: Reg; shell: ShellFiel
           const where = targetLabel(reg, item.target, item.source)
           const text = `${where}：${itemText(item)}`
           return (
-            <li key={`${item.source}:${item.code}:${item.target.flow ?? ''}:${item.target.stage ?? ''}`} className="strip-item">
-              <LevelShape level={item.severity === 'critical' ? 'critical' : 'warning'} size={10} />
+            <li key={`${item.source}:${item.code}:${item.target.view}:${item.target.flow ?? ''}:${item.target.stage ?? ''}:${item.target.script ?? ''}`} className="strip-item">
+              <LevelShape level={stripLevel(item)} size={10} />
               <span className="strip-text">
                 {text}
                 {item.since ? (

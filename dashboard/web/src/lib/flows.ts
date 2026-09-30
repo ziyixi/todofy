@@ -1,5 +1,5 @@
 /** How flows are phrased in one line (首页 rows, 业务流程 cards). */
-import type { Freshness, FlowSummary } from '../../../worker/src/api-v2-types.ts'
+import type { Freshness, FlowSummary, Level } from '../../../worker/src/api-v2-types.ts'
 import { formatDayHour, formatDayTime } from './format'
 import { LEVEL, reasonLabel } from './labels'
 import { flowOf, stageOf, type Reg } from './registry'
@@ -19,6 +19,16 @@ export function freshnessText(freshness: Freshness, now: Date): string | null {
   }
 }
 
+/**
+ * A flow's mark (design §3.3): its rolled-up level, except that a flow seeing fewer than half of its
+ * stages never shows the green dot: ○ 部分接入 replaces 正常 only. Any other level (故障, 未知, 需关注,
+ * 已暂停) is shown as it is, partial or not.
+ */
+export function flowMark(summary: Pick<FlowSummary, 'level' | 'partial'>): { level: Level; word: string } {
+  if (summary.partial && summary.level === 'ok') return { level: 'unmonitored', word: '部分接入' }
+  return { level: summary.level, word: LEVEL[summary.level].word }
+}
+
 /** One line per flow: its first problem, else its freshness; coverage when some stages are unseen. */
 export function flowLine(reg: Reg, summary: FlowSummary, now: Date): { word: string; detail: string; aside: string } {
   const flow = flowOf(reg, summary.id)
@@ -27,7 +37,7 @@ export function flowLine(reg: Reg, summary: FlowSummary, now: Date): { word: str
     ? `${stage?.name ?? summary.first_issue.stage}：${summary.first_issue.code ? reasonLabel(summary.first_issue.code) : LEVEL[summary.level].word}`
     : null
   const fresh = freshnessText(summary.freshness, now)
-  const word = summary.partial ? '部分接入' : LEVEL[summary.level].word
+  const { word } = flowMark(summary)
   const coverage =
     summary.coverage.monitored < summary.coverage.total ? `已监测 ${summary.coverage.monitored}/${summary.coverage.total}` : ''
   const detail = issue ?? fresh ?? (summary.partial ? '部分阶段尚未接入' : '—')

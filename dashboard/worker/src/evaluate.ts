@@ -8,6 +8,7 @@ import type { OpsSignal, OpsStatus } from '../../../contracts/ops-v1/ops-v1.ts';
 import { CANARY_DISABLED_ITEM, type OverallLevel } from './api-types.ts';
 import {
   LEVEL_RANK,
+  attentionLevel,
   type AttentionItem,
   type AttentionView,
   type Badges,
@@ -30,7 +31,7 @@ import {
 } from './api-v2-types.ts';
 import type { CanaryRecord } from './canary.ts';
 import { TICK_STALE_MS, overallLevel } from './digest.ts';
-import { errorLevel, errorPercent, todayOf, type CfScriptsDoc } from './discovery.ts';
+import { errorLevel, errorPercent, todayOf, workerRows, type CfScriptsDoc } from './discovery.ts';
 import type { DigestDoc, ProbeDoc, StatusDoc } from './docs.ts';
 import { usageFresh, type DesiredGuard } from './guard.ts';
 import { PLATFORM_SIGNALS, REGISTRY, stageScripts } from './registry.ts';
@@ -547,17 +548,83 @@ export interface AttentionInput {
   readonly canaryEnabled: boolean;
   readonly desired: DesiredGuard;
   readonly statuses: Readonly<Record<string, StatusDoc>>;
+  /**
+   * What the views evaluate (tiles, flow stages, Workers): levels worse than ok that no digest item
+   * explains become observed items. Omitted (or before anything ran): digest items only.
+   */
+  readonly evaluation?: EvalInput;
 }
 
 type AttentionSource = Omit<AttentionItem, 'target' | 'since'> & { readonly since: string };
 
 export const NO_BADGES: Badges = { home: 0, flows: 0, cloudflare: 0, ops: 0 };
 
+type ObservedLevel = NonNullable<AttentionItem['observed']>;
+
+const isObservedLevel = (level: Level): level is ObservedLevel => level === 'warning' || level === 'critical' || level === 'unknown';
+
+/** Codes that say the same thing about an entry: the view's `unreachable` is the digest's `app_unreachable`. */
+const sameCode = (a: string, b: string): boolean => a === b || (a === 'unreachable' && b === 'app_unreachable') || (a === 'app_unreachable' && b === 'unreachable');
+
+function observedItem(source: string, code: string, level: ObservedLevel, target: Target): AttentionItem {
+  return { source, code, severity: level === 'critical' ? 'critical' : 'warning', since: null, metrics: {}, target, observed: level };
+}
+
 /**
- * The attention strip (design-v2 §1): v1's item set with a target each. A hold signal of its entry
- * (force-paused delivery, paused processing, ...) and an owner's forced shed are shown as ‖ 已暂停 tags
- * instead of alarms (not counted in the level or the badges); maintenance stays critical. Badges count
- * the warning and critical items per target view.
+ * The observed items (design-v2 §3.1/§3.4: the strip and the badges never say less than the views):
+ * one per cause, in this order, each skipped when an item already explains it —
+ * 1. an entry (tile) at warning/critical/unknown, unless a digest item of that entry has the same
+ *    code (its signals, app_unreachable, app_down); target: the tile;
+ * 2. a flow stage at those levels whose cause is not already listed (same entry and code, or an item
+ *    targeting that stage, such as a canary failure); target: the stage;
+ * 3. a Worker whose error rate is warning/critical, unless its entry already has an error_rate item;
+ *    target: its row on the Cloudflare view.
+ * This dashboard's own entry is left out: `tick_stale` (digest) already says the ticks stopped.
+ */
+function observedItems(existing: readonly AttentionItem[], evaluation: EvalInput, registry: Registry): AttentionItem[] {
+  const out: AttentionItem[] = [];
+  const all = (): AttentionItem[] => [...existing, ...out];
+  const explained = (source: string, code: string): boolean => all().some((item) => item.source === source && sameCode(item.code, code));
+
+  for (const entry of registry.entries) {
+    if (entry.status.type === 'self') continue;
+    const state = entryState(entry, evaluation, registry);
+    if (!isObservedLevel(state.level) || state.reason === null) continue;
+    if (existing.some((item) => item.source === entry.id && sameCode(item.code, state.reason as string))) continue;
+    out.push(observedItem(entry.id, state.reason, state.level, { view: 'home', entry: entry.id }));
+  }
+
+  for (const flow of flowStates(evaluation, registry)) {
+    const def = registry.flows.find((f) => f.id === flow.id);
+    for (const stage of flow.stages) {
+      const entryId = def?.stages.find((s) => s.id === stage.id)?.entry ?? null;
+      if (entryId === null || !isObservedLevel(stage.level) || stage.reason === null) continue;
+      if (registry.entries.find((e) => e.id === entryId)?.status.type === 'self') continue;
+      if (explained(entryId, stage.reason)) continue;
+      if (all().some((item) => item.target.flow === flow.id && item.target.stage === stage.id)) continue;
+      out.push(observedItem(entryId, stage.reason, stage.level, { view: 'flows', flow: flow.id, stage: stage.id, entry: entryId }));
+    }
+  }
+
+  if (scriptsFresh(evaluation.scripts, evaluation.now)) {
+    for (const row of workerRows(evaluation.scripts, evaluation.now, registry)) {
+      if (!isObservedLevel(row.level)) continue;
+      if (row.entry !== null && explained(row.entry, 'error_rate')) continue;
+      out.push(observedItem(row.entry ?? 'cloudflare', 'error_rate', row.level, { view: 'cloudflare', script: row.script }));
+    }
+  }
+  return out;
+}
+
+/** Strip order: critical, then unknown, then warning (stable within a level). */
+const STRIP_RANK = { critical: 0, unknown: 1, warning: 2, info: 3 } as const;
+
+/**
+ * The attention strip (design-v2 §1): v1's item set with a target each, plus the observed items
+ * (observedItems) when `evaluation` is given. A hold signal of its entry (force-paused delivery, paused
+ * processing, ...) and an owner's forced shed are shown as ‖ 已暂停 tags instead of alarms (not counted
+ * in the level or the badges); maintenance stays critical. Badges count the warning, critical and
+ * unknown items per target view.
  */
 export function attentionView(input: AttentionInput, registry: Registry = REGISTRY): { attention: AttentionView; badges: Badges } {
   const held: HeldItem[] = [];
@@ -591,10 +658,13 @@ export function attentionView(input: AttentionInput, registry: Registry = REGIST
     if (ownerShed && item.source === 'dashboard' && item.code === 'guard_shed') continue;
     items.push({ ...item, target });
   }
+  if (!input.neverRan && input.evaluation !== undefined) items.push(...observedItems(items, input.evaluation, registry));
+  items.sort((a, b) => STRIP_RANK[attentionLevel(a)] - STRIP_RANK[attentionLevel(b)]);
   const info: AttentionItem[] = input.canaryEnabled
     ? []
     : [{ ...CANARY_DISABLED_ITEM, since: null, metrics: {}, target: targetOf(CANARY_DISABLED_ITEM.source, CANARY_DISABLED_ITEM.code, registry) }];
-  const level: OverallLevel = input.neverRan ? 'unknown' : overallLevel(items.map((item) => ({ ...item, since: item.since ?? '' })));
+  let level: OverallLevel = input.neverRan ? 'unknown' : overallLevel(items.map((item) => ({ ...item, since: item.since ?? '' })));
+  if (level !== 'critical' && items.some((item) => attentionLevel(item) === 'unknown')) level = 'unknown';
   const badges: Record<ViewId, number> = { ...NO_BADGES };
   for (const item of items) badges[item.target.view] += 1;
   return { attention: { level, items, info, held }, badges };

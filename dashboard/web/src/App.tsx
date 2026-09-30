@@ -5,7 +5,7 @@ import { ApiError } from './api/client'
 import { useRefreshHome, useRegistry, useView } from './api/queries'
 import { AttentionStrip } from './components/AttentionStrip'
 import { Button, Notice, useNow } from './components/ui'
-import { browserTimeZone, formatClockSeconds, formatRelative } from './lib/format'
+import { browserTimeZone, formatRelative, refreshDeclinedText, refreshWaitText } from './lib/format'
 import { routeHash, useRoute } from './router'
 import { CloudflareView } from './views/CloudflareView'
 import { FlowsView } from './views/FlowsView'
@@ -196,31 +196,44 @@ function TopRefresh({ shell, home, now }: { shell: ShellFields | undefined; home
     return () => window.clearTimeout(timer)
   }, [nextAt])
 
+  const wait = waiting && home ? refreshWaitText(home.refresh.next_refresh_at, new Date(Math.max(clock, now.getTime()))) : null
+
   function run() {
+    // Inside the Worker's window the button stays focusable and says why nothing happens.
+    if (wait !== null) {
+      setMessage(`${wait}。`)
+      return
+    }
     setMessage(null)
     refresh.mutate(undefined, {
-      onSuccess: (fresh) => setMessage(fresh.refresh.refreshed ? '已刷新。' : '刚刚刷新过，请在 1 分钟后再试。'),
+      onSuccess: (fresh) => setMessage(fresh.refresh.refreshed ? '已刷新。' : refreshDeclinedText(fresh.refresh.next_refresh_at, new Date())),
       onError: (error) => setMessage(`刷新失败：${errorMessage(error)}`),
     })
   }
 
   return (
     <div className="top-refresh">
+      {/* The data age is always shown (design §3.4: the strip does not repeat it). */}
       <span id="refresh-note" className="small muted top-age">
-        {waiting && home ? (
-          `${formatClockSeconds(home.refresh.next_refresh_at)} 后可再次刷新`
-        ) : at ? (
+        {at ? (
           <>
             <span className="top-age-word">数据 </span>
             <time dateTime={at}>{formatRelative(at, now)}</time>
           </>
         ) : null}
       </span>
+      {wait !== null ? (
+        <span id="refresh-wait" className="visually-hidden">
+          {wait}
+        </span>
+      ) : null}
       <Button
         onClick={run}
-        disabled={refresh.isPending || waiting}
+        disabled={refresh.isPending}
+        aria-disabled={wait !== null ? true : undefined}
         aria-label="刷新"
-        aria-describedby="refresh-note"
+        aria-describedby={wait !== null ? 'refresh-note refresh-wait' : 'refresh-note'}
+        title={wait ?? undefined}
         className="btn-refresh"
       >
         <RefreshCw size={16} aria-hidden="true" className={refresh.isPending ? 'spin' : undefined} />

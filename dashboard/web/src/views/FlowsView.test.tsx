@@ -37,6 +37,34 @@ describe('业务流程', () => {
     expect(within(card('运维摘要')).getByText('上次摘要 昨天 23:00 · Todofy 已接收')).toBeInTheDocument()
   })
 
+  it('shows a partial flow\'s real level when it is not ok: 部分接入 only replaces 正常 (F2)', async () => {
+    const base = healthy()
+    const flows = base.flows.flows.map((flow) =>
+      flow.id === 'daily-newsletter'
+        ? {
+            ...flow,
+            level: 'critical' as const,
+            first_issue: { stage: 'report', code: 'unreachable' },
+            stages: flow.stages.map((s) => (s.id === 'report' ? { ...s, level: 'critical' as const, reason: 'unreachable' } : s)),
+          }
+        : flow,
+    )
+    const summaries = base.home.flows.map((summary) =>
+      summary.id === 'daily-newsletter' ? { ...summary, level: 'critical' as const, first_issue: { stage: 'report', code: 'unreachable' } } : summary,
+    )
+    const user = await showFlows({ ...base, flows: { ...base.flows, flows }, home: { ...base.home, flows: summaries } })
+    const newsletter = card('每日 Newsletter')
+    expect(within(newsletter).getByText('故障', { selector: '.level-badge .level-word' })).toBeInTheDocument()
+    expect(within(newsletter).queryByText('部分接入')).toBeNull()
+    expect(within(newsletter).getByText('已监测 1/3')).toBeInTheDocument()
+    // A problem flow opens by default, partial or not.
+    expect(within(newsletter).getByRole('button', { name: '收起 每日 Newsletter' })).toHaveAttribute('aria-expanded', 'true')
+
+    await user.click(screen.getByRole('link', { name: /^首页/ }))
+    const rows = await screen.findByRole('region', { name: '业务流程' })
+    expect(within(rows).getByRole('link', { name: /^每日 Newsletter：故障，/ })).toBeInTheDocument()
+  })
+
   it('opens on the worst stage (the flow\'s first issue), not an earlier lesser one', async () => {
     const base = oneWarning()
     const [mail, ...rest] = base.flows.flows

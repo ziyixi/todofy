@@ -579,6 +579,7 @@ export class HomeState extends DurableObject<Env> {
       canaryEnabled: canaryEnabled(this.env),
       desired: this.currentDesired(now),
       statuses: this.statusDocs(),
+      ...(neverRan ? {} : { evaluation: this.evalInput(now) }),
     });
     let lastRefreshAt: number | null;
     let nextRefreshAt: number;

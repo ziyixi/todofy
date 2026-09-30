@@ -1,7 +1,7 @@
 import { screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { apiError, freezeClock, installFetch, json, renderApp, serve } from '../test/harness'
-import { analyticsUnavailable, healthy, oneWarning, todofyUnreachable, type Scenario } from '../test/fixtures'
+import { analyticsUnavailable, healthy, observedOnly, oneWarning, todofyUnreachable, type Scenario } from '../test/fixtures'
 
 async function showHome(scenario: Scenario) {
   freezeClock()
@@ -137,6 +137,16 @@ describe('首页', () => {
     const strip = screen.getByRole('region', { name: '1 项故障' })
     expect(within(strip).getByRole('listitem')).toHaveTextContent('Todofy：应用无法连接')
     expect(within(strip).getByRole('link')).toHaveAttribute('href', '#/ops')
+  })
+
+  it('never says 全部正常 while a tile is 未知 or 需关注: observed items lead, unknown first, with badges', async () => {
+    await showHome(observedOnly())
+    expect(screen.queryByText('全部正常')).toBeNull()
+    const strip = screen.getByRole('region', { name: '1 项未知 · 1 项需关注' })
+    const items = within(strip).getAllByRole('listitem')
+    expect(items.map((item) => item.textContent)).toEqual(['Todofy：无法连接查看：Todofy：无法连接 →', '个人网站：HTTP 状态异常查看：个人网站：HTTP 状态异常 →'])
+    expect(within(items[0]!).getByRole('link')).toHaveAttribute('href', '#/')
+    expect(screen.getByRole('link', { name: '首页，2 项需关注' })).toBeInTheDocument()
   })
 
   it('says so when Cloudflare usage is unavailable instead of inventing bars', async () => {

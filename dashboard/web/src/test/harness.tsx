@@ -61,12 +61,12 @@ export function freezeClock(at: Date = NOW): void {
  * (mutations) or answers 404. Each view may be a function, to change between requests.
  */
 export function serve(
-  scenario: Scenario | (() => Scenario),
+  scenario: Scenario | ((call: Call) => Scenario),
   other: Handler = () => apiError(404, 'not_found'),
 ): Call[] {
   let tokens = 0
   return installFetch((call) => {
-    const current = typeof scenario === 'function' ? scenario() : scenario
+    const current = typeof scenario === 'function' ? scenario(call) : scenario
     const path = call.path.replace(/\?.*$/, '')
     if (call.method === 'GET') {
       if (path === '/api/v2/csrf') {

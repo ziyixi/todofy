@@ -92,8 +92,9 @@ export const UNREACHABLE_ITEM: AttentionItem = {
 
 function warned(items: AttentionItem[], badges: Partial<ShellFields['badges']>): Partial<ShellFields> {
   const critical = items.some((item) => item.severity === 'critical')
+  const unknown = items.some((item) => item.observed === 'unknown')
   return {
-    attention: { level: critical ? 'critical' : 'warning', items, info: [], held: [] },
+    attention: { level: critical ? 'critical' : unknown ? 'unknown' : 'warning', items, info: [], held: [] },
     badges: { home: 0, flows: 0, cloudflare: 0, ops: 0, ...badges },
   }
 }
@@ -607,6 +608,23 @@ export function todofyUnreachable(): Scenario {
       ),
     },
   }
+}
+
+/**
+ * Todofy's status() failed once (no fresh status left) and the site probe answered 503 once: no digest
+ * item explains either, so the Worker adds observed items (◆ 未知 first, then ▲ 需关注).
+ */
+export function observedOnly(): Scenario {
+  const items: AttentionItem[] = [
+    { source: 'todofy', code: 'unreachable', severity: 'warning', since: null, metrics: {}, target: { view: 'home', entry: 'todofy' }, observed: 'unknown' },
+    { source: 'website', code: 'http_status', severity: 'warning', since: null, metrics: {}, target: { view: 'home', entry: 'website' }, observed: 'warning' },
+  ]
+  return scenario(warned(items, { home: 2 }), {
+    entries: entries({
+      todofy: { level: 'unknown', reason: 'unreachable', consecutive_failures: 1, checked_at: TICK },
+      website: { level: 'warning', reason: 'http_status', consecutive_failures: 1, checked_at: TICK, metric: null },
+    }),
+  })
 }
 
 /** The analytics token is rejected: no usage, no Worker rows. */

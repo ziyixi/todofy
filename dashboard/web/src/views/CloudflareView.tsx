@@ -19,7 +19,8 @@ import { Button, Notice, Time } from '../components/ui'
 import {
   formatBytesDecimal,
   formatClock,
-  formatClockSeconds,
+  refreshDeclinedText,
+  refreshWaitText,
   formatCpu,
   formatDayHour,
   formatNumber,
@@ -53,7 +54,7 @@ function RefreshUsage({ data, now }: { data: CloudflareResponse; now: Date }) {
   function run() {
     setMessage(null)
     refresh.mutate(undefined, {
-      onSuccess: (fresh) => setMessage(fresh.refresh.refreshed ? '用量已刷新。' : '刚刚刷新过，请在 1 分钟后再试。'),
+      onSuccess: (fresh) => setMessage(fresh.refresh.refreshed ? '用量已刷新。' : refreshDeclinedText(fresh.refresh.next_refresh_at, new Date())),
       onError: (error) => setMessage(`刷新失败：${errorText(error)}`),
     })
   }
@@ -65,7 +66,7 @@ function RefreshUsage({ data, now }: { data: CloudflareResponse; now: Date }) {
         {refresh.isPending ? '正在刷新…' : '刷新用量'}
       </Button>
       <span id="cf-refresh-note" className="small muted">
-        {waiting ? `${formatClockSeconds(data.refresh.next_refresh_at)} 后可再次刷新` : '至少间隔 60 秒'}
+        {waiting ? refreshWaitText(data.refresh.next_refresh_at, new Date(Math.max(clock, now.getTime()))) : '至少间隔 60 秒'}
       </span>
       <p className="small refresh-message" role="status" aria-live="polite">
         {message}

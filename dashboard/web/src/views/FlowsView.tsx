@@ -4,7 +4,7 @@ import type { FlowDef, FlowState, FlowsResponse, StageDef, StageState } from '..
 import { CanaryDays, CanaryFacts, CanaryHistory, CanaryToday } from '../components/Canary'
 import { LevelMark, LevelShape } from '../components/status'
 import { Metrics, Pill, Time } from '../components/ui'
-import { freshnessText } from '../lib/flows'
+import { flowMark, freshnessText } from '../lib/flows'
 import { formatDayHour, formatDayTime, formatNumber, formatPercent, utcHourWithLocal } from '../lib/format'
 import { CANARY_BADGE, LEVEL, SEVERITY, counterShort, reasonLabel, signalLabel } from '../lib/labels'
 import { entryOf, nameOf, sortedByOrder, stageScripts, type Reg } from '../lib/registry'
@@ -166,7 +166,8 @@ function CanaryBlock({ flow, state, now }: { flow: FlowDef; state: FlowState; no
 }
 
 function FlowCard({ reg, flow, state, focused, now }: { reg: Reg; flow: FlowDef; state: FlowState | undefined; focused: boolean; now: Date }) {
-  const level = state ? (state.partial ? 'unmonitored' : state.level) : 'unknown'
+  const mark = state ? flowMark(state) : { level: 'unknown' as const, word: LEVEL.unknown.word }
+  const level = mark.level
   const [open, setOpen] = useState(() => focused || ATTENTION.has(level))
   const [selected, setSelected] = useState(() => defaultStage(flow, state))
   const card = useRef<HTMLElement>(null)
@@ -180,7 +181,7 @@ function FlowCard({ reg, flow, state, focused, now }: { reg: Reg; flow: FlowDef;
   }, [focused])
 
   const stageState = (id: string) => state?.stages.find((stage) => stage.id === id)
-  const word = state?.partial ? '部分接入' : LEVEL[level].word
+  const word = mark.word
   const coverage = state && state.coverage.monitored < state.coverage.total ? `已监测 ${state.coverage.monitored}/${state.coverage.total}` : null
   const current = flow.stages.find((stage) => stage.id === selected)
 

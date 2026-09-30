@@ -26,11 +26,14 @@ export interface V2Answer<T> {
 /**
  * What the flow tests read, assembled from GET /api/v2/ops (guard, canary, digest, app details, the
  * shared shell) and GET /api/v2/cloudflare (usage). `overall` is the attention strip as v1's banner
- * was: warning/critical items worst first, then the page-only info items, as {source, code, severity}.
+ * was: the digest's warning/critical items worst first, then the page-only info items, as {source,
+ * code, severity}, with their level; `observed` lists the strip's observed items (tiles, stages,
+ * Workers no digest item explains) apart, so the flow tests keep checking the unchanged item set.
  */
 export interface Snapshot {
   readonly ops: OpsResponse;
   readonly overall: { readonly level: OverallLevel; readonly items: readonly { source: string; code: string; severity: string }[] };
+  readonly observed: readonly { source: string; code: string; level: string }[];
   readonly apps: Readonly<Record<StubApp, AppDetail>>;
   readonly usage: UsageView;
   readonly guard: OpsResponse['guard'];
@@ -134,12 +137,21 @@ export async function startFlows(options: { bindings?: Record<string, string>; u
         if (detail === undefined) throw new Error(`no app detail for ${id}`);
         return detail;
       };
+      const digestItems = ops.attention.items.filter((item) => item.observed === undefined);
+      const level: OverallLevel = digestItems.some((item) => item.severity === 'critical')
+        ? 'critical'
+        : digestItems.some((item) => item.severity === 'warning')
+          ? 'warning'
+          : ops.attention.level === 'unknown' && ops.attention.items.length === 0
+            ? 'unknown'
+            : 'ok';
       return {
         ops,
         overall: {
-          level: ops.attention.level,
-          items: [...ops.attention.items, ...ops.attention.info].map(({ source, code, severity }) => ({ source, code, severity })),
+          level,
+          items: [...digestItems, ...ops.attention.info].map(({ source, code, severity }) => ({ source, code, severity })),
         },
+        observed: ops.attention.items.flatMap((item) => (item.observed === undefined ? [] : [{ source: item.source, code: item.code, level: item.observed }])),
         apps: { 'mail-hero': app('mail-hero'), todofy: app('todofy') },
         usage: cloudflare.usage,
         guard: ops.guard,

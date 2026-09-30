@@ -260,7 +260,8 @@ describe('the attention strip', () => {
     const items = [item('todofy', 'gemini_budget_80'), item('cloudflare', 'd1_rows_read_high', 'critical'), item('dashboard', 'tick_stale')];
     const { attention, badges } = attentionView(base({ items }));
     expect(attention.level).toBe('critical');
-    expect(attention.items.map((i) => i.code)).toEqual(['gemini_budget_80', 'd1_rows_read_high', 'tick_stale']);
+    // Worst first (stable within a level).
+    expect(attention.items.map((i) => i.code)).toEqual(['d1_rows_read_high', 'gemini_budget_80', 'tick_stale']);
     expect(badges).toEqual({ home: 0, flows: 2, cloudflare: 1, ops: 0 });
     expect(attention.info).toEqual([]);
     expect(attentionView(base({ neverRan: true })).attention).toEqual({ level: 'unknown', items: [], info: [], held: [] });
@@ -279,6 +280,65 @@ describe('the attention strip', () => {
     ]);
     expect(badges.flows).toBe(1);
     expect(holdCodes('todofy')).toEqual(new Set(['processing_paused', 'todoist_paused', 'reminder_disabled']));
+  });
+
+  it('never says 全部正常 while a tile or a flow is worse: a failing site probe becomes one observed item (F1)', () => {
+    const failing = probe({ ok: false, http_status: 503, error: 'http_status', consecutive_failures: 1 });
+    const evaluation = input({ probes: { website: failing } });
+    const { attention, badges } = attentionView(base({ evaluation }));
+    expect(attention.level).toBe('warning');
+    // One item for the cause: the 网站发布 stage on the same entry and code is not repeated.
+    expect(attention.items).toEqual([
+      { source: 'website', code: 'http_status', severity: 'warning', since: null, metrics: {}, target: { view: 'home', entry: 'website' }, observed: 'warning' },
+    ]);
+    expect(badges).toEqual({ home: 1, flows: 0, cloudflare: 0, ops: 0 });
+    // The healthy mockup day stays quiet.
+    const quiet = attentionView(base({ evaluation: input() }));
+    expect(quiet.attention).toMatchObject({ level: 'ok', items: [] });
+    // Before anything ran the strip says so, whatever the (never checked) tiles are.
+    expect(attentionView(base({ neverRan: true, evaluation: input({ statuses: {}, probes: {}, scripts: null }) })).attention.items).toEqual([]);
+  });
+
+  it('shows an app that failed once as ◆ 未知 above the warnings, and counts it in the badges (F1)', () => {
+    const down = failedStatus(status('todofy', {}, NOW - 2 * HOUR), 1);
+    const evaluation = input({ statuses: { 'mail-hero': status('mail-hero'), todofy: down } });
+    const gemini = item('mail-hero', 'backup_stale');
+    const { attention, badges } = attentionView(base({ items: [gemini], statuses: evaluation.statuses, evaluation }));
+    expect(attention.level).toBe('unknown');
+    // Worst first: the unknown tile, then the digest warning. Todofy's stages (same cause) are not repeated.
+    expect(attention.items.map((i) => [i.source, i.code, i.observed ?? i.severity])).toEqual([
+      ['todofy', 'unreachable', 'unknown'],
+      ['mail-hero', 'backup_stale', 'warning'],
+    ]);
+    expect(attention.items[0]?.target).toEqual({ view: 'home', entry: 'todofy' });
+    expect(badges).toEqual({ home: 1, flows: 0, cloudflare: 0, ops: 1 });
+    // Two failures: the digest's app_unreachable explains it; no observed duplicate.
+    const twice = input({ statuses: { 'mail-hero': status('mail-hero'), todofy: failedStatus(status('todofy'), 2) } });
+    const digest = item('todofy', 'app_unreachable', 'critical');
+    const critical = attentionView(base({ items: [digest], statuses: twice.statuses, evaluation: twice })).attention;
+    expect(critical.level).toBe('critical');
+    expect(critical.items.map((i) => i.code)).toEqual(['app_unreachable']);
+  });
+
+  it('adds a stage\'s own error rate and an unregistered Worker\'s error rate, each once (F1)', () => {
+    const failing = mergeScripts(
+      scripts(),
+      [
+        { script: 'mail-hero', requests: 100, errors: 30, subrequests: 0, cpu_p50_us: 1, cpu_p99_us: 2, do_requests: null, do_errors: null },
+        { script: 'stray-worker', requests: 50, errors: 5, subrequests: 0, cpu_p50_us: 1, cpu_p99_us: 2, do_requests: null, do_errors: null },
+      ],
+      false,
+      NOW,
+    );
+    const { attention, badges } = attentionView(base({ evaluation: input({ scripts: failing }) }));
+    const rows = attention.items.map((i) => [i.source, i.code, i.observed, i.target]);
+    expect(rows).toContainEqual(['cloudflare', 'error_rate', 'warning', { view: 'cloudflare', script: 'stray-worker' }]);
+    const mailHero = rows.filter((row) => row[0] === 'mail-hero');
+    expect(mailHero).toHaveLength(1);
+    expect(mailHero[0]?.[1]).toBe('error_rate');
+    expect(mailHero[0]?.[2]).toBe('critical');
+    expect(attention.level).toBe('critical');
+    expect(badges.cloudflare).toBe(1);
   });
 
   it('shows the owner\'s forced shed as a hold, an automatic shed as an alarm, and the canary switch as info', () => {

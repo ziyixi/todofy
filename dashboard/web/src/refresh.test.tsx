@@ -6,25 +6,33 @@ import { NOW, healthy } from './test/fixtures'
 import { freezeClock, installFetch, json, renderApp, serve } from './test/harness'
 
 describe('refresh', () => {
-  it('keeps 刷新 disabled until the Worker allows the next refresh', async () => {
+  it('keeps the data age in the top bar and says, relatively, when 刷新 works again (F4)', async () => {
     freezeClock()
     const scenario = healthy()
-    serve({ ...scenario, home: { ...scenario.home, refresh: { ...scenario.home.refresh, next_refresh_at: new Date(NOW.getTime() + 30_000).toISOString() } } })
+    // A status was read 2 minutes ago: the next one is due in 8 minutes.
+    const calls = serve({ ...scenario, home: { ...scenario.home, refresh: { ...scenario.home.refresh, next_refresh_at: new Date(NOW.getTime() + 8 * 60_000).toISOString() } } })
     renderApp()
     await screen.findByRole('link', { name: /打开 Mail Hero/ })
     const button = screen.getByRole('button', { name: '刷新' })
-    await waitFor(() => expect(button).toBeDisabled())
-    // 17:00:30 UTC in Asia/Shanghai.
-    expect(button).toHaveAccessibleDescription('01:00:30 后可再次刷新')
+    await waitFor(() => expect(button).toHaveAttribute('aria-disabled', 'true'))
+    // Still focusable, with the data age and the wait in its description; no wall-clock time with seconds.
+    expect(button).not.toBeDisabled()
+    expect(button).toHaveAccessibleDescription(/^数据 ?29分钟前 8 分钟后可再次刷新$/)
+    expect(screen.getByText('29分钟前')).toBeInTheDocument()
+    await userEvent.setup().click(button)
+    expect(screen.getByText('8 分钟后可再次刷新。')).toHaveAttribute('role', 'status')
+    expect(calls.map((call) => call.path)).not.toContain('/api/v2/home?refresh=1')
   })
 
   it('re-reads the statuses with /home?refresh=1, then the visible view', async () => {
     freezeClock()
     const base = healthy()
     let refreshed = true
-    const calls = serve(() => ({
+    let next = NOW.toISOString()
+    const calls = serve((call) => ({
       ...base,
-      home: { ...base.home, refresh: { ...base.home.refresh, refreshed, last_refresh_at: NOW.toISOString(), next_refresh_at: NOW.toISOString() } },
+      // The page's own GET keeps the button usable; only the declined refresh answers a later window.
+      home: { ...base.home, refresh: { ...base.home.refresh, refreshed, last_refresh_at: NOW.toISOString(), next_refresh_at: call.path.includes('refresh=1') ? next : NOW.toISOString() } },
     }))
     renderApp('#/flows')
     const user = userEvent.setup()
@@ -38,9 +46,11 @@ describe('refresh', () => {
     await waitFor(() => expect(calls.filter((call) => call.path === '/api/v2/flows')).toHaveLength(2))
     expect(calls.map((call) => call.path)).toContain('/api/v2/home?refresh=1')
 
+    // Declined: the note says when the Worker fetches again (next_refresh_at), not a fixed minute.
     refreshed = false
+    next = new Date(NOW.getTime() + 7 * 60_000 + 10_000).toISOString()
     await user.click(screen.getByRole('button', { name: '刷新' }))
-    await waitFor(() => expect(screen.getByText('刚刚刷新过，请在 1 分钟后再试。')).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByText('刚刚刷新过，请在 8 分钟后再试。')).toBeInTheDocument())
   })
 
   it('re-reads only the visible view every 5 minutes', async () => {

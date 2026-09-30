@@ -108,6 +108,22 @@ export function formatClockSeconds(iso: string): string {
   return clockSeconds.format(new Date(iso))
 }
 
+/** Whole minutes from `now` until `iso`, rounded up (0 when it has passed). */
+function minutesUntil(iso: string, now: Date): number {
+  return Math.max(0, Math.ceil((new Date(iso).getTime() - now.getTime()) / 60_000))
+}
+
+/** "8 分钟后可再次刷新" (relative, rounded up to whole minutes; never a wall-clock time with seconds). */
+export function refreshWaitText(nextIso: string, now: Date): string {
+  return `${Math.max(1, minutesUntil(nextIso, now))} 分钟后可再次刷新`
+}
+
+/** The note after a refresh the Worker declined: when the next one fetches, from `next_refresh_at`. */
+export function refreshDeclinedText(nextIso: string, now: Date): string {
+  const minutes = minutesUntil(nextIso, now)
+  return minutes > 0 ? `刚刚刷新过，请在 ${minutes} 分钟后再试。` : '刚刚刷新过，请稍后再试。'
+}
+
 /** Full timestamp with seconds and zone, for title attributes and screen readers. */
 export function formatFullTime(iso: string): string {
   return full.format(new Date(iso))

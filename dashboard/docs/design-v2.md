@@ -25,18 +25,25 @@ Four hash-routed views; hash routing needs no Worker change behind Access. Page 
 v1 anchors map to routes (`web/src/router.ts`): `#apps` → `#/`, `#quota` → `#/cloudflare`, `#canary` →
 `#/flows/mail-to-task`, `#actions`/`#digest`/`#app-*` → `#/ops`. Phones get a fixed bottom tab bar
 (64 px incl. safe area, content padded ~88 px), desktop a tab row under the title; the selected tab
-has colour + weight + underline and `aria-current="page"`. Tab badges count warning + critical items
-whose target is that view; held and info items never count.
+has colour + weight + underline and `aria-current="page"`. Tab badges count warning, critical and
+unknown items whose target is that view; held and info items never count.
 
 The attention strip is on every view: one quiet line "● 全部正常 · 下次巡检 HH:MM" when fine, else
-"▲ N 项需关注" with at most 3 items (worst first) and "还有 N 项"; each item links to its target.
+"■ N 项故障 · ◆ N 项未知 · ▲ N 项需关注" with at most 3 items (worst first: critical > unknown >
+warning) and "还有 N 项"; each item links to its target (a flow stage opens with that stage selected).
 Held switches show as a small ‖ 已暂停 tag (`attention.held`), outside the level and the badges: every
 stage `hold_signals` code of an app's current status (force-paused or owner-paused delivery, forwarding
 off, paused processing, paused Todoist, reminder off) and an owner's forced shed (`home:owner_shed`,
 which then replaces the `dashboard:guard_shed` item); an automatic shed stays an item, and
 `maintenance_mode` stays critical. The item set is otherwise v1's (digest items, `tick_stale`, usage and
 canary items, `canary_disabled` info); v2 only adds a `target`, so the digest sent to Todofy does not
-change. Probe and Worker-analytics problems therefore show on tiles, stages and the Worker table only.
+change. On the page only, the strip also lists **observed** items (`observed: level`, `since: null`)
+so it never says 全部正常 while a tile, a stage or a Worker is worse: one per cause, skipped when an
+item already explains it — a tile at warning/critical/unknown (unless a digest item of that entry has
+the same code; `unreachable` ≡ `app_unreachable`) → the tile; a flow stage whose cause is not already
+listed (same entry and code, or an item targeting that stage) → the stage; a Worker whose error rate is
+warning/critical and whose entry has no `error_rate` item → its Cloudflare row. This dashboard's own
+tile is left to `tick_stale`; nothing observed is listed before the first tick.
 
 Targets (`evaluate.ts` `targetOf`): an app code → the first flow stage (display order) claiming it, else
 the app on 操作与记录; `app_unreachable`/`app_down`/`status_unavailable` → the tile on 首页; quota and
@@ -188,13 +195,13 @@ Measured (unit suite for bytes, workerd suite for rows; a full 14-run canary his
 | --- | --- | --- | --- |
 | home | ≤ 10 KiB (budget) | 8.3 KB | 22 (≤ 24) |
 | flows | 12.7 KB | 20.1 KB | 22 (≤ 24) |
-| cloudflare | ≤ 16 KiB, also with 20 Workers | 17.1 KB | 7 (≤ 10) |
-| ops | ≤ 24 KiB | 24.1 KB | 20 (≤ 24) |
+| cloudflare | ≤ 16 KiB, also with 20 Workers | 17.1 KB | 22 (≤ 24) |
+| ops | ≤ 24 KiB | 24.1 KB | 22 (≤ 24) |
 
 `V2_BODY_BUDGET` holds for a normal day; `V2_BODY_MAX` (32 KiB) bounds the bad day; HomeState logs
 `over_budget` per response. The design's row estimates (1 + N, ≤ 20, 3–4, ≤ 10) did not count the shell
-every view shares (six documents for the attention strip and badges) or the 14 canary rows, so the
-measured counts replace them; they are ~0.01 % of the DO's 5 M free rows a day at a few hundred views.
+every view shares (six documents for the attention strip and badges, plus what the evaluation reads for
+the strip's observed items, §4) or the 14 canary rows, so the measured counts replace them; they are ~0.01 % of the DO's 5 M free rows a day at a few hundred views.
 A partial index (`canary_runs_active`) keeps the "run in progress" lookup at one row for ticks and views.
 
 Per tick: 2 `status()` + 1 probe + 1 GraphQL + ≤ 2 `setGuard` + ≤ 2 canary calls + ≤ 1 `reportOps` = 9

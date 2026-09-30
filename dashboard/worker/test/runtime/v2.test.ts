@@ -164,7 +164,7 @@ describe('GET /api/v2/home', () => {
     expect(Date.parse(second.refresh.next_refresh_at) - Date.parse(refreshed.refresh.last_refresh_at ?? '')).toBeGreaterThanOrEqual(10 * MIN - MIN);
   });
 
-  it('shows a failing website on its tile and flow, without adding to the attention strip', async () => {
+  it('shows a failing website on its tile, its flow and (as one observed item) the strip; the digest is unchanged', async () => {
     h = await mockupDay();
     h.routes.set(WEBSITE_PROBE, () => new Response('bad gateway', { status: 502 }));
     await h.tick(Date.now() - 31 * MIN);
@@ -172,8 +172,15 @@ describe('GET /api/v2/home', () => {
     const home = await view<HomeResponse>(h, 'home');
     expect(home.entries.find((e) => e.id === 'website')).toMatchObject({ level: 'critical', reason: 'http_status', consecutive_failures: 2, metric: null });
     expect(home.flows.find((f) => f.id === 'site-publish')).toMatchObject({ level: 'critical', first_issue: { stage: 'serve', code: 'http_status' } });
-    // The item set (and so the digest to Todofy) is v1's.
-    expect(home.attention.items).toEqual([]);
+    // The strip says what the tile says (F1): one observed item, not one per stage; the badge counts it.
+    expect(home.attention.level).toBe('critical');
+    expect(home.attention.items).toEqual([
+      { source: 'website', code: 'http_status', severity: 'critical', since: null, metrics: {}, target: { view: 'home', entry: 'website' }, observed: 'critical' },
+    ]);
+    expect(home.badges).toEqual({ home: 1, flows: 0, cloudflare: 0, ops: 0 });
+    // The digest to Todofy keeps v1's item set.
+    const ops = await view<OpsResponse>(h, 'ops');
+    expect(ops.digest.items).toEqual([]);
     expect(h.outboundLog.filter((url) => url === WEBSITE_PROBE)).toHaveLength(2);
   });
 });
