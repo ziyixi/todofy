@@ -47,6 +47,37 @@ Earlier, per-component evidence (same synthetic data, before the CI integration)
 Not run locally: the deploy jobs themselves (they need the `production` environment), and nothing
 that needs a real Access login, a real analytics token or the deployed apps.
 
+## 1a. Local, after the review fixes (2026-09-30)
+
+Commits `97df522` and `7b42c68` (the review findings and the `BUNDLED_BY` entries for the schema and
+validator the dashboard now bundles), cloned fresh from the branch into a throwaway directory; macOS,
+Node 26.9.0, the workflow's commands and placeholder values, no token, no Cloudflare API call,
+synthetic data only.
+
+| Job | Step | Result |
+| --- | --- | --- |
+| `Changes` | `python3 -m unittest discover -s .github/scripts` | 48 tests passed (the first clean run failed `test_bundled_by_lists_exactly_the_apps_whose_worker_imports_each_contract_file` because the dashboard now imports `ops-v1.schema.json` and `validate.mjs`; fixed in `7b42c68`) |
+| | `ci_changes.py` as a branch push | 94 files since the merge base; every flag true |
+| `Shared packages` | `packages/edge-auth` typecheck and tests | OK; 195 passed |
+| `Dashboard checks` | generator tests | 6 passed |
+| | worker lint, typecheck, `npm test` | OK; 7 files, 98 tests passed |
+| | worker `npm run test:runtime` (workerd) | 5 files, 42 tests passed |
+| | web lint, typecheck, tests, build | OK; 7 files, 46 tests passed; `dist/` has no cross-origin reference |
+| | import guard | OK |
+| | placeholder config dry-run | OK: the same bindings, the four secrets hidden; the bundle (112 KiB) contains the ops-v1 schema, and its only Cloudflare API URL is the GraphQL endpoint |
+| `Contracts` | Mail Hero `contract-fixtures`, `ops-contract`, `native-ops` | 38 passed |
+| | Todofy contract, compat, vocabulary, ops contract, ops core | 310 passed |
+| | Todofy gateway `test/ops.test.ts` | 10 passed |
+| | Dashboard `ops-client`, `guard`, `canary`, `digest` | 4 files, 54 tests passed (every invalid ops-v1 output fixture refused or, for the consumer rules, tolerated as documented) |
+| `Mail Hero checks` | deploy config and backup tests | 3 passed; 29 ran, 1 skipped (no GPG locally) |
+| | Worker typecheck and tests; UI typecheck, tests, build; placeholder dry-run | OK; 168 passed; OK, 66 passed, OK; OK |
+| `Todofy checks` | ruff check / format; host tests | OK / 128 files formatted; 941 passed, 1 skipped |
+| | gateway lint, typecheck, tests; UI `check:api`, typecheck, tests, build, guard | OK; 86 passed; OK, OK, 76 passed, OK, OK |
+| | workerd runtime tests | 391 passed (13 min) |
+| `CI gate` | the gate script with `Dashboard checks` = success / skipped / failure | exit 0 / 0 / 1 |
+
+Not rerun: the Todofy placeholder dry-runs (nothing under `todofy/` changed since section 1).
+
 ## 2. Production (pending)
 
 None of these has been done; each needs the first `Dashboard deploy` on `main` (after Todofy and Mail

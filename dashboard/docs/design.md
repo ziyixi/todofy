@@ -337,7 +337,7 @@ All paths except `/health` go through Access (edge-auth) first; then `/api/v1/*`
 | `GET /api/v1/csrf` | Access | `CsrfResponse` + `Set-Cookie: home_csrf=...` |
 | `GET /api/v1/overview[?refresh=1]` | Access | `OverviewResponse` from the cached snapshot; `refresh=1` fetches usage (≥ 60 s since the last fetch attempt) and status (per app ≥ 10 min) first, else returns the cache with `refreshed: false` |
 | `POST /api/v1/canary` | Access + Origin + CSRF | 202 `CanaryStartResponse`; 409 `canary_active`; 429 `canary_limit` |
-| `POST /api/v1/guard` | Access + Origin + CSRF | 200 `GuardResponse`, body `GuardRequest` `{level: 'shed' \| 'normal'}` (≤ 1 KiB JSON, else 400) |
+| `POST /api/v1/guard` | Access + Origin + CSRF | 200 `GuardResponse`, body `GuardRequest` `{level: 'shed' \| 'normal'}` (≤ 1 KiB JSON, else 400; a body without Content-Length is read only up to 1 KiB) |
 | other `/api/*` | Access | 404 `not_found`; wrong method 405 |
 | anything else | Access | `ASSETS` (SPA fallback) |
 
