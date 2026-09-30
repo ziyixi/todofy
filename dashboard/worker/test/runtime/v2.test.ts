@@ -130,6 +130,7 @@ describe('GET /api/v2/home', () => {
     expect(tiles['notion-publish']).toMatchObject({ level: 'ok', metric: { kind: 'last_active' } });
     expect(home.flows.map((f) => [f.id, f.level, f.partial])).toEqual([
       ['mail-to-task', 'ok', false],
+      ['gtd', 'ok', false],
       ['site-publish', 'ok', false],
       ['daily-newsletter', 'ok', true],
       ['ops-digest', 'ok', false],
