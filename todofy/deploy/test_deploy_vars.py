@@ -182,6 +182,7 @@ def test_exec_runs_the_command_unchanged_plus_the_vars(
     for value in VALID.values():
         if value:
             assert value not in printed.out + printed.err
+    assert "GTD_REVIEW_ENABLED" in printed.out and "TODOIST_OPS_PROJECT_ID" not in printed.out  # unset: not sent
 
     out.unlink()
     assert main(["exec", "gateway", "--", *command], VALID) == 2  # the core's config for the gateway

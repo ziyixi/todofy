@@ -197,7 +197,7 @@ def _run(argv: Sequence[str], env: Mapping[str, str], spawn: Callable[[list[str]
                 print(f"Refused: {reason}.", file=sys.stderr)
                 return 2
             extra = wrangler_args(worker, env)
-            names = ", ".join(item.name for item in INJECTED[worker])
+            names = ", ".join(injected_vars(worker, env))  # an unset optional var is not sent
             print(f"Adding --var for {names} (values not printed).", flush=True)
             return spawn([*command, *extra])
     print("Usage: deploy_vars.py check | secrets <path> | exec {core|gateway} -- <deploy command…>", file=sys.stderr)
