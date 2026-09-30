@@ -6,6 +6,7 @@
  * response text never leaves this module: failures become codes.
  */
 import type { QuotaResourceId, QuotaRow } from './api-types.ts';
+import { WORKERS_QUERY_LIMIT } from './api-v2-types.ts';
 import { ALLOWANCES, DO_DURATION_GB } from './limits.ts';
 import { DAY_MS, HOUR_MS, daysInUtcMonth, isoSeconds, round1, startOfUtcDay, startOfUtcMonth, utcDay, utcMonthStart } from './time.ts';
 
@@ -13,9 +14,13 @@ export const GRAPHQL_URL = 'https://api.cloudflare.com/client/v4/graphql';
 export const GRAPHQL_TIMEOUT_MS = 15_000;
 export const GRAPHQL_MAX_BYTES = 1_000_000;
 
-/** Verbatim copy of the query verified against the live account on 2026-09-29 (design.md §7.2). */
+/**
+ * Verbatim copy of the query verified against the live account on 2026-09-29 (design.md §7.2); v2 only
+ * raised the `workers` limit from 20 to 50 (design-v2.md §4) and parses the per-script fields it always
+ * returned (errors, subrequests, CPU quantiles, DO requests per script) and the per-resource rows.
+ */
 export const USAGE_QUERY = `query($a: string!, $day: Date!, $start: Time!, $end: Time!, $month: Date!) { viewer { accounts(filter: {accountTag: $a}) {
-  workers: workersInvocationsAdaptive(limit: 20, filter: {datetime_geq: $start, datetime_leq: $end}) { sum { requests errors subrequests } dimensions { scriptName } quantiles { cpuTimeP50 cpuTimeP99 } }
+  workers: workersInvocationsAdaptive(limit: 50, filter: {datetime_geq: $start, datetime_leq: $end}) { sum { requests errors subrequests } dimensions { scriptName } quantiles { cpuTimeP50 cpuTimeP99 } }
   d1: d1AnalyticsAdaptiveGroups(limit: 10, filter: {date: $day}) { sum { rowsRead rowsWritten readQueries writeQueries } dimensions { databaseId } }
   d1s: d1StorageAdaptiveGroups(limit: 10, filter: {date: $day}) { max { databaseSizeBytes } dimensions { databaseId } }
   doInv: durableObjectsInvocationsAdaptiveGroups(limit: 10, filter: {date: $day}) { sum { requests errors } dimensions { scriptName } }
@@ -26,7 +31,7 @@ export const USAGE_QUERY = `query($a: string!, $day: Date!, $start: Time!, $end:
 } } }`;
 
 /** The `limit` of each dataset in USAGE_QUERY: a dataset returning this many rows is truncated. */
-const DATASET_LIMITS = { workers: 20, d1: 10, d1s: 10, doInv: 10, doPer: 10, doSto: 5, r2ops: 50, r2sto: 10 } as const;
+const DATASET_LIMITS = { workers: WORKERS_QUERY_LIMIT, d1: 10, d1s: 10, doInv: 10, doPer: 10, doSto: 5, r2ops: 50, r2sto: 10 } as const;
 type Dataset = keyof typeof DATASET_LIMITS;
 
 /** R2 operation classes (R2 pricing). Any other actionType counts as Class A (cautious). */
@@ -49,9 +54,36 @@ export const R2_ASSUMED_CLASS_A: ReadonlySet<string> = new Set(['DeleteObjects']
 
 export type UsageErrorCode = `http_${string}` | 'graphql_error' | 'network_error' | 'timeout' | 'invalid_response' | 'not_configured';
 
+/** One script's day so far (UTC), from `workers` and `doInv` (design-v2.md §4 "Discovery"). */
+export interface ScriptUsage {
+  readonly script: string;
+  readonly requests: number;
+  readonly errors: number;
+  readonly subrequests: number;
+  /** Microseconds (rounded); null when the dataset reported no quantile for the script. */
+  readonly cpu_p50_us: number | null;
+  readonly cpu_p99_us: number | null;
+  /** From `doInv` by scriptName; null when the script had no Durable Object invocations. */
+  readonly do_requests: number | null;
+  readonly do_errors: number | null;
+}
+
+/** Per-resource rows of the same response, keyed by the GraphQL identifier. */
+export interface ResourceUsage {
+  readonly d1: readonly { readonly id: string; readonly size_bytes: number | null; readonly rows_read: number; readonly rows_written: number }[];
+  readonly do: readonly { readonly id: string; readonly rows_read: number; readonly rows_written: number }[];
+  /** `unclassified`: R2 operations without a bucket name. */
+  readonly r2: readonly { readonly id: string; readonly size_bytes: number | null; readonly class_a: number; readonly class_b: number }[];
+}
+
 export interface UsageData {
   readonly rows: QuotaRow[];
   readonly unclassified_r2_operations: number;
+  /** Scripts of `workers` or `doInv`, most requests first (at most WORKERS_QUERY_LIMIT + doInv's 10). */
+  readonly scripts: ScriptUsage[];
+  /** `workers` returned WORKERS_QUERY_LIMIT rows: more scripts may have run. */
+  readonly workers_truncated: boolean;
+  readonly resources: ResourceUsage;
 }
 
 export type UsageFetchResult =
@@ -276,5 +308,132 @@ export function parseUsage(body: unknown, now: number): UsageData | null {
     const m = measured.get(id);
     return quotaRow(id, m ?? { used: null, truncated: false, breakdown: new Map() }, now);
   });
-  return { rows, unclassified_r2_operations: round1(unclassified) };
+  return {
+    rows,
+    unclassified_r2_operations: round1(unclassified),
+    scripts: parseScripts(sets.workers, sets.doInv),
+    workers_truncated: sets.workers.length >= DATASET_LIMITS.workers,
+    resources: parseResources(sets),
+  };
+}
+
+/** A non-negative finite number, else null (a quantile the dataset did not report). */
+function optional(row: unknown, group: string, name: string): number | null {
+  if (!isObject(row)) return null;
+  const section = row[group];
+  if (!isObject(section)) return null;
+  const value = section[name];
+  const n = typeof value === 'number' ? value : typeof value === 'string' && value !== '' ? Number(value) : Number.NaN;
+  return Number.isFinite(n) && n >= 0 ? Math.round(n) : null;
+}
+
+interface ScriptAcc {
+  requests: number;
+  errors: number;
+  subrequests: number;
+  cpu_p50_us: number | null;
+  cpu_p99_us: number | null;
+  do_requests: number | null;
+  do_errors: number | null;
+}
+
+const maxOrNull = (a: number | null, b: number | null): number | null => (a === null ? b : b === null ? a : Math.max(a, b));
+
+/**
+ * Per-script rows: `workers` (one row per scriptName; a repeated name is summed, its quantiles take the
+ * larger value) joined with `doInv` by scriptName. A script only in `doInv` (a class whose Worker gets
+ * no requests of its own, such as todofy-core) is kept with 0 Worker requests.
+ */
+function parseScripts(workers: readonly unknown[], doInv: readonly unknown[]): ScriptUsage[] {
+  const acc = new Map<string, ScriptAcc>();
+  const get = (script: string): ScriptAcc => {
+    let entry = acc.get(script);
+    if (entry === undefined) {
+      entry = { requests: 0, errors: 0, subrequests: 0, cpu_p50_us: null, cpu_p99_us: null, do_requests: null, do_errors: null };
+      acc.set(script, entry);
+    }
+    return entry;
+  };
+  for (const row of workers) {
+    const entry = get(dimension(row, 'scriptName'));
+    entry.requests += field(row, 'sum', 'requests');
+    entry.errors += field(row, 'sum', 'errors');
+    entry.subrequests += field(row, 'sum', 'subrequests');
+    entry.cpu_p50_us = maxOrNull(entry.cpu_p50_us, optional(row, 'quantiles', 'cpuTimeP50'));
+    entry.cpu_p99_us = maxOrNull(entry.cpu_p99_us, optional(row, 'quantiles', 'cpuTimeP99'));
+  }
+  for (const row of doInv) {
+    const entry = get(dimension(row, 'scriptName'));
+    entry.do_requests = (entry.do_requests ?? 0) + field(row, 'sum', 'requests');
+    entry.do_errors = (entry.do_errors ?? 0) + field(row, 'sum', 'errors');
+  }
+  return [...acc]
+    .map(([script, v]) => ({ script, ...v }))
+    .sort((a, b) => b.requests - a.requests || (b.do_requests ?? 0) - (a.do_requests ?? 0) || a.script.localeCompare(b.script));
+}
+
+/** D1 by databaseId (analytics ∪ storage), DO by namespaceId, R2 by bucketName (operations ∪ storage). */
+function parseResources(sets: Record<Dataset, unknown[]>): ResourceUsage {
+  const d1 = new Map<string, { size_bytes: number | null; rows_read: number; rows_written: number }>();
+  const d1Row = (id: string) => {
+    let row = d1.get(id);
+    if (row === undefined) {
+      row = { size_bytes: null, rows_read: 0, rows_written: 0 };
+      d1.set(id, row);
+    }
+    return row;
+  };
+  for (const row of sets.d1) {
+    const entry = d1Row(dimension(row, 'databaseId'));
+    entry.rows_read += field(row, 'sum', 'rowsRead');
+    entry.rows_written += field(row, 'sum', 'rowsWritten');
+  }
+  for (const row of sets.d1s) {
+    const entry = d1Row(dimension(row, 'databaseId'));
+    entry.size_bytes = maxOrNull(entry.size_bytes, field(row, 'max', 'databaseSizeBytes'));
+  }
+
+  const dObj = new Map<string, { rows_read: number; rows_written: number }>();
+  for (const row of sets.doPer) {
+    const id = dimension(row, 'namespaceId');
+    const entry = dObj.get(id) ?? { rows_read: 0, rows_written: 0 };
+    entry.rows_read += field(row, 'sum', 'rowsRead');
+    entry.rows_written += field(row, 'sum', 'rowsWritten');
+    dObj.set(id, entry);
+  }
+
+  const r2 = new Map<string, { size_bytes: number | null; class_a: number; class_b: number }>();
+  const r2Row = (row: unknown) => {
+    const name = isObject(row) && isObject(row.dimensions) && typeof row.dimensions.bucketName === 'string' && row.dimensions.bucketName !== ''
+      ? row.dimensions.bucketName.slice(0, 80)
+      : 'unclassified';
+    let entry = r2.get(name);
+    if (entry === undefined) {
+      entry = { size_bytes: null, class_a: 0, class_b: 0 };
+      r2.set(name, entry);
+    }
+    return entry;
+  };
+  for (const row of sets.r2ops) {
+    const action = isObject(row) && isObject(row.dimensions) ? row.dimensions.actionType : undefined;
+    if (typeof action === 'string' && R2_FREE.has(action)) continue;
+    const entry = r2Row(row);
+    const requests = field(row, 'sum', 'requests');
+    // As the quota rows: Class B by the list, anything else (unknown included) Class A.
+    if (typeof action === 'string' && R2_CLASS_B.has(action)) entry.class_b += requests;
+    else entry.class_a += requests;
+  }
+  for (const row of sets.r2sto) {
+    const entry = r2Row(row);
+    entry.size_bytes = (entry.size_bytes ?? 0) + field(row, 'max', 'payloadSize') + field(row, 'max', 'metadataSize');
+  }
+
+  const bySize = <T extends { id: string; size_bytes: number | null }>(a: T, b: T): number => (b.size_bytes ?? -1) - (a.size_bytes ?? -1) || a.id.localeCompare(b.id);
+  return {
+    d1: [...d1].map(([id, v]) => ({ id, ...v, rows_read: round1(v.rows_read), rows_written: round1(v.rows_written) })).sort(bySize),
+    do: [...dObj]
+      .map(([id, v]) => ({ id, rows_read: round1(v.rows_read), rows_written: round1(v.rows_written) }))
+      .sort((a, b) => b.rows_written - a.rows_written || b.rows_read - a.rows_read || a.id.localeCompare(b.id)),
+    r2: [...r2].map(([id, v]) => ({ id, ...v, class_a: round1(v.class_a), class_b: round1(v.class_b) })).sort(bySize),
+  };
 }

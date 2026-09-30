@@ -3,9 +3,9 @@
 What v2 changes relative to [`design.md`](design.md) (which stays authoritative for storage, the tick,
 guard, canary, digest, Access/CSRF and the usage query). It condenses the owner-approved redesign
 proposal of 2026-09-29 (steps 1 and 2; every open question takes its recommended default, §8). Status:
-the registry, the v2 types, `GET /api/v2/registry`, `GET /api/v2/csrf`, `POST /api/v2/{guard,canary}`
-and the client/router scaffolding are implemented; the four dynamic views are scaffolds
-(`HomeState.v2View` answers 503) until the builders fill them in.
+the registry, the v2 types and every `/api/v2` route are implemented in the Worker (evaluation in
+`worker/src/evaluate.ts`, discovery in `discovery.ts`, the probe in `probe.ts`, view assembly and ETags
+in `views-v2.ts`, storage in `state.ts`), with unit tests and workerd tests for each endpoint.
 
 ## 1. Views
 
@@ -27,9 +27,18 @@ whose target is that view; held and info items never count.
 
 The attention strip is on every view: one quiet line "● 全部正常 · 下次巡检 HH:MM" when fine, else
 "▲ N 项需关注" with at most 3 items (worst first) and "还有 N 项"; each item links to its target.
-Held switches (maintenance-like modes, force-paused delivery, owner shed) show as a small ‖ 已暂停 tag.
-The item set is v1's (digest items, `tick_stale`, usage and canary items, `canary_disabled` info);
-v2 only adds a `target`, so the digest sent to Todofy does not change.
+Held switches show as a small ‖ 已暂停 tag (`attention.held`), outside the level and the badges: every
+stage `hold_signals` code of an app's current status (force-paused or owner-paused delivery, forwarding
+off, paused processing, paused Todoist, reminder off) and an owner's forced shed (`home:owner_shed`,
+which then replaces the `dashboard:guard_shed` item); an automatic shed stays an item, and
+`maintenance_mode` stays critical. The item set is otherwise v1's (digest items, `tick_stale`, usage and
+canary items, `canary_disabled` info); v2 only adds a `target`, so the digest sent to Todofy does not
+change. Probe and Worker-analytics problems therefore show on tiles, stages and the Worker table only.
+
+Targets (`evaluate.ts` `targetOf`): an app code → the first flow stage (display order) claiming it, else
+the app on 操作与记录; `app_unreachable`/`app_down`/`status_unavailable` → the tile on 首页; quota and
+usage items → Cloudflare; canary items → the mail flow (not delivered and start failures at 投递,
+consumer failures at 摘要); `tick_stale` → 运维摘要 › 巡检; everything else → 操作与记录.
 
 ## 2. Levels
 
@@ -90,27 +99,56 @@ words or account-like IDs).
 it: add a `WORKERS` row (and an `ENTRIES` row if it is a new tile), optionally a flow stage and its
 resources, run `npm test`, merge. No UI or API type change.
 
-## 4. Evaluation (in the DO tick; page requests only read)
+## 4. Evaluation (`worker/src/evaluate.ts`; page requests only read)
 
-- Entry level: ops_v1 → last status health (`down` or 2 consecutive failures → critical, 1 failure →
-  warning, never read → unknown); public_http → code ∈ expect ok, 1 failure warning, ≥ 2 critical;
-  analytics → error-rate rule, idle > `max_idle_hours` → warning; self → `tick_stale` critical;
-  link_only → `link`; none or a disabled probe → `unmonitored`. The tile shows the entry's own health,
-  not the worst of its flows (Q2).
-- Stage level = worst of the entry's reachability, the claimed signals (a hold signal gives `held`)
-  and, with `analytics`, its workers' error rate. A canary failure marks its stage critical; a success
-  only adds the 已验证 badge (never lowers a worse level); held/skipped runs → 未验证（已暂停）; no run
-  within `fresh_hours` → 未验证. Stages with entry null (or link/none entries) are 未接入 and excluded.
-- Flow level = worst monitored stage; fewer than half monitored → `partial` (○ 部分接入, never green).
-  Unclaimed codes of a flow's entries are listed as 未归类的信号, never dropped.
-- Worker error rate is judged only with ≥ 20 requests today: ≥ 5 % warning, ≥ 20 % critical; fewer →
-  "样本太少，不判定". CPU p99 > 8 ms shows "接近 Free 10 ms" (hint, never an alarm). Unregistered Workers
-  never alarm by themselves (Q12).
-- Discovery: the tick's existing GraphQL query (`limit` 20 → 50) now keeps per-script errors,
-  subrequests, CPU p50/p99 and DO requests/errors; one `cf_scripts` state doc remembers scripts seen in
-  the last 30 days (≤ 100), because an idle cron Worker disappears from the day's data. "最近有请求" is
-  hour precision (a tick sees the count grow), never "N 分钟前". DO requests count on the script that
-  defines the class. DO storage is account-wide only.
+Pure functions of the stored documents and `now`; nothing is precomputed, so a level that depends on
+time (a stale status, stopped ticks) is right at every read.
+
+- **Entry level** (the tile, Q2 — never the worst of its flows):
+  - ops_v1: never polled → unknown `never_checked`; 1 failed poll → warning `unreachable`, ≥ 2 →
+    critical; a status older than 75 min → unknown `stale`; health `down` → critical (its critical
+    signal, e.g. `status_unavailable`); then the worst signal, a stage hold code of that app giving
+    `held` (any severity) and other info signals nothing; `degraded` without any shown signal →
+    warning `app_degraded`. Tile metric: the counter named by `tile_metric`.
+  - public_http: not yet probed → unknown; last probe older than 75 min → unknown `stale`; ok; one
+    failure → warning, ≥ 2 → critical, reason `http_status`/`timeout`/`network_error`; `enabled: false`
+    → unmonitored. Metric: latency of the last ok probe.
+  - analytics: no GraphQL data → unknown `never_checked`; data older than 90 min or of another day →
+    unknown `stale`; the error-rate rule over the entry's scripts → `error_rate`; the last active hour
+    more than `max_idle_hours` ago → warning `idle`; never seen → unknown `never_seen` until discovery
+    has watched for `max_idle_hours`, then `idle`. Metric: the last active hour.
+  - self: never ticked → unknown; `tick_stale` → critical. link_only → `link`; none → `unmonitored`.
+- **Stage level** = worst of: the entry's reachability (ops_v1: as above without the other stages'
+  signals; other types: the entry level), the stage's claimed signals (a hold signal → `held`, and
+  `held: true` when nothing worse applies), with `analytics` its scripts' error rate (fresh data only),
+  and a canary failure at that stage → critical `canary_failed`. `reason` names the winning code.
+  Counters are display only (the fresh status's values). Stages with entry null, link_only, none or a
+  disabled probe are 未接入 and excluded.
+- **Canary badges** (only the stages of `stage_map`): the latest finished run within `fresh_hours` (30):
+  ok → both 已验证; skipped → both 未验证（已暂停）; failed at delivery or at the start (Mail Hero could not
+  create the event) → 投递 failed + critical, 摘要 未验证; failed at the consumer → 投递 已验证, 摘要 failed;
+  no run in the window → 未验证. A success never lowers a worse level.
+- **Flow**: level = worst monitored stage (`unmonitored` when none); `partial` when fewer than half are
+  monitored (the UI shows ○ 部分接入, never green); `first_issue` = the first monitored stage that is not
+  ok, with its reason. Freshness: the canary's last ok run and ok/finished counts of the 14 recent runs
+  (mail flow); the digest's last send and receipt (a flow with the dashboard's own stage); the latest
+  active hour of its analytics stages (网站发布); else none. A signal code no stage, `app_only_signals` or
+  the platform places is listed once as 未归类的信号 on the first flow (display order) with that app.
+- **Workers** (`discovery.ts`): the error rate is judged only with ≥ 20 requests today (≥ 5 % warning,
+  ≥ 20 % critical; fewer → `error_percent: null`, 样本太少，不判定). CPU p99 > 8 ms is a UI hint only.
+  Unregistered Workers never raise an item (Q12). Rows sort errors first, then requests.
+- **Discovery**: the tick's GraphQL query (`workers` limit 20 → 50, nothing else changed) is parsed per
+  script — requests, errors, subrequests, CPU p50/p99 (µs, null when not reported) and `doInv`
+  requests/errors by scriptName (a script only in `doInv`, like `todofy-core`, is kept with 0 Worker
+  requests). One `cf_scripts` document remembers every script seen in the last 30 UTC days (≤ 100,
+  most recently seen kept): an idle cron Worker stays in the table with 0 today. `last_active_hour`
+  moves to the hour of the answer (minus 1 ms) when the day's Worker + DO count grew since the previous
+  answer — tick precision, shown as "今天 06 时", never "N 分钟前". DO requests count on the script that
+  defines the class; DO storage is account-wide only (`do_storage_bytes`).
+- **Resources**: D1 by `databaseId` (analytics ∪ storage), DO by `namespaceId` (`doPer` rows), R2 by
+  `bucketName` (operations ∪ storage, classes as the quota rows; no bucket → `unclassified`), each
+  joined with the registry by `match`; unmatched rows keep `resource: null` (未登记 + raw ID). A mapped
+  namespace's `requests` are its defining script's `doInv` count.
 
 ## 5. API v2 and budgets
 
@@ -128,17 +166,38 @@ All under `/api/v2/`, same Access + owner check, error envelope, CSRF + Origin o
 | `POST guard {level}`, `POST canary {canary_id}` | DO (v1 methods) | as v1 |
 
 Every dynamic response shares the shell (attention, badges, refresh/tick times, `rev`) and carries
-`ETag: "<rev>"`; `rev` is bumped by each tick/refresh write, and the DO returns the pre-serialized
-string (or null for a matching If-None-Match → 304) so the plain handler stays ~1–3 ms CPU. Responses
+`ETag: "<rev>-<hash>"`: `rev` is bumped by each tick, refresh that fetched, guard override and manual
+canary start, and the hash (FNV-1a) covers the body without `generated_at` — levels also change with
+time alone, so `rev` by itself could serve a stale 304. Time-derived fields are minute-rounded, so an
+unchanged state keeps its ETag. The DO returns the serialized string (or null for a matching
+If-None-Match → 304) so the plain handler stays ~1–3 ms CPU. Responses
 are `no-store`, so the client keeps the last body + ETag itself (`apiV2` in `web/src/api/client.ts`).
-Only the visible view polls, every 5 minutes; the registry is fetched once per load. Refresh scopes:
-`home` re-polls due statuses (≥ 10 min each, the contract) and probes (≥ 10 min); `cloudflare`
-re-queries GraphQL (≥ 60 s).
+Only the visible view polls, every 5 minutes; the registry is fetched once per load. Refresh scopes
+(each at most once a minute, `meta.last_refresh_{home,cloudflare}_at`): `home` re-polls due statuses
+(≥ 10 min each, the contract) and the due probe (≥ 10 min); `cloudflare` re-queries GraphQL (≥ 60 s
+since the last attempt) and updates discovery. Both rebuild the digest items without sending them, as
+a v1 refresh does. `refresh.next_refresh_at` is the earliest time the scope would fetch again.
+
+Measured (unit suite for bytes, workerd suite for rows; a full 14-run canary history, 20 Workers):
+
+| View | Mockup day | Bad day (20 items, 16 signals/app, 14 failed runs) | Rows read |
+| --- | --- | --- | --- |
+| home | ≤ 10 KiB (budget) | 8.3 KB | 22 (≤ 24) |
+| flows | 12.7 KB | 20.1 KB | 22 (≤ 24) |
+| cloudflare | ≤ 16 KiB, also with 20 Workers | 17.1 KB | 7 (≤ 10) |
+| ops | ≤ 24 KiB | 24.1 KB | 20 (≤ 24) |
+
+`V2_BODY_BUDGET` holds for a normal day; `V2_BODY_MAX` (32 KiB) bounds the bad day; HomeState logs
+`over_budget` per response. The design's row estimates (1 + N, ≤ 20, 3–4, ≤ 10) did not count the shell
+every view shares (six documents for the attention strip and badges) or the 14 canary rows, so the
+measured counts replace them; they are ~0.01 % of the DO's 5 M free rows a day at a few hundred views.
+A partial index (`canary_runs_active`) keeps the "run in progress" lookup at one row for ticks and views.
 
 Per tick: 2 `status()` + 1 probe + 1 GraphQL + ≤ 2 `setGuard` + ≤ 2 canary calls + ≤ 1 `reportOps` = 9
-outbound calls (`outboundPerTick`, tested ≤ 30; Free allows 50). GraphQL stays one query per tick
-(48/day) plus refreshes ≤ 1/min. DO rows written grow by ~2 per tick (`cf_scripts`, `probe:website`).
-Everything else as in [`limits.md`](limits.md).
+outbound calls (`outboundPerTick`, tested ≤ 30 and asserted per tick in workerd; Free allows 50). The
+probe runs in parallel with the status polls. GraphQL stays one query per tick (48/day) plus refreshes
+≤ 1/min. DO rows written grow by ~2 per tick (`cf_scripts`, `probe:website`). Everything else as in
+[`limits.md`](limits.md).
 
 **v1 removal:** once the UI calls only v2, delete `/api/v1/*` (routes, `overview()`/`buildOverview`,
 `OverviewResponse`, v1 tests and fixtures) in the same change, and change the one path in
@@ -148,10 +207,14 @@ is the only URL source; the generator and `wrangler.toml` are otherwise unchange
 
 ## 6. DO storage changes (step 2)
 
-`state` docs `cf_scripts` (≤ 12 KiB), `probe:<entry>` (`checked_at`, `ok`, `http_status`,
-`latency_ms`, `consecutive_failures`), `meta.rev`; `canary_runs` gains `canary_id TEXT NOT NULL
-DEFAULT 'mail-todofy'` (one `ALTER TABLE`, guarded by `PRAGMA user_version`). No other table changes;
-`guard_applied` keeps its CHECK while the ops-v1 apps are the two.
+`state` docs `cf_scripts` (≤ 100 records, under 40 KB; the row cap is 64 KiB), `probe:<entry>`
+(`checked_at`, `ok`, `http_status`, `latency_ms`, `error`, `consecutive_failures`; a probe document of
+an entry no longer probed is deleted by the tick), `usage.resources` (per-resource rows), and `meta.rev`,
+`meta.last_refresh_home_at`, `meta.last_refresh_cloudflare_at`. `canary_runs` gains `canary_id TEXT NOT
+NULL DEFAULT 'mail-todofy'` (one `ALTER TABLE` when `pragma_table_info` lacks it; existing rows are
+mail-todofy) and the partial index `canary_runs_active`. No other table changes; `guard_applied` keeps
+its CHECK while the ops-v1 apps are the two. Everything is additive: the v1 overview reads the same
+tables, and a rollback to the previous build ignores the new documents and column.
 
 ## 7. UI
 

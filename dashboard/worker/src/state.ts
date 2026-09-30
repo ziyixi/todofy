@@ -1,13 +1,15 @@
 /**
  * HomeState: the one SQLite-backed Durable Object ("home-v1") that does all real work
- * (docs/design.md §3–§5): status polling, the GraphQL usage query, guard, canary, digest and the
- * overview assembled from its tables. The fetch and scheduled handlers only call these RPC methods.
+ * (docs/design.md §3–§5, docs/design-v2.md §4–§6): status polling, the website probe, the GraphQL usage
+ * query and Worker discovery, guard, canary, digest, and the v1 overview and v2 views assembled from its
+ * tables. The fetch and scheduled handlers only call these RPC methods.
  *
- * Bounds: every tick makes at most 8 outbound calls (2 status, ≤ 2 setGuard, ≤ 2 canary calls,
- * ≤ 1 reportOps, 1 GraphQL) and writes a few dozen rows; the overview reads about 30 rows.
+ * Bounds: every tick makes at most outboundPerTick() = 9 outbound calls (2 status, 1 probe, 1 GraphQL,
+ * ≤ 2 setGuard, ≤ 2 canary calls, ≤ 1 reportOps) and writes a few dozen rows; a v2 view reads at most
+ * V2_ROWS_READ[view] rows (api-v2-types.ts; tested in workerd).
  */
 import { DurableObject } from 'cloudflare:workers';
-import { OPS_APPS, OPS_LIMITS, type GuardLevel, type GuardState, type OpsApp, type OpsReportItem, type OpsReportReceipt, type OpsStatus, type SetGuardInput } from '../../../contracts/ops-v1/ops-v1.ts';
+import { OPS_APPS, OPS_LIMITS, type GuardLevel, type GuardState, type OpsApp, type OpsStatus, type SetGuardInput } from '../../../contracts/ops-v1/ops-v1.ts';
 import {
   API_VERSION,
   CANARY_DISABLED_ITEM,
@@ -24,9 +26,9 @@ import {
   type GuardAppView,
   type GuardView,
   type OverviewResponse,
-  type QuotaRow,
   type UsageView,
 } from './api-types.ts';
+import { CLOUDFLARE_REFRESH_MIN_SECONDS, PROBE_MIN_INTERVAL_SECONDS, V2_BODY_BUDGET, type ShellFields } from './api-v2-types.ts';
 import {
   CANARY_RETENTION_MS,
   applyDeadline,
@@ -46,6 +48,7 @@ import {
 } from './canary.ts';
 import { analyticsConfigured, buildSha, canaryEnabled, canaryHour, dashboardUrl } from './config.ts';
 import { buildReport, candidates, digestKey, finalizeItems, itemKey, overallLevel, shouldSend, withTickState, DIGEST_REFRESH_MS } from './digest.ts';
+import { NO_DIGEST, NO_META, NO_STATUS, NO_USAGE, type DigestDoc, type MetaDoc, type ProbeDoc, type StatusDoc, type UsageDoc } from './docs.ts';
 import type { Env } from './env.ts';
 import {
   AUTO_NORMAL,
@@ -63,10 +66,15 @@ import {
   type DesiredGuard,
   type GuardOverrideDoc,
 } from './guard.ts';
+import { mergeScripts, type CfScriptsDoc } from './discovery.ts';
+import { attentionView, type EvalInput } from './evaluate.ts';
 import { opsCanaryDelivery, opsCanaryResult, opsReportOps, opsSetGuard, opsStartCanary, opsStatus } from './ops-client.ts';
+import { nextProbeDoc, probeDue, probeUrl } from './probe.ts';
+import { REGISTRY } from './registry.ts';
 import { MINUTE_MS, iso, isoOrNull, utcDay, utcMonthStart } from './time.ts';
 import { fetchUsage, type UsageErrorCode } from './usage.ts';
 import type { V2Body, V2View } from './v2-views.ts';
+import { cloudflareResponse, flowsResponse, homeResponse, opsResponse, serializeView, shell } from './views-v2.ts';
 
 /** Name of the single object instance. */
 export const HOME_OBJECT = 'home-v1';
@@ -76,6 +84,11 @@ export const TICK_DEDUP_MS = 10 * MINUTE_MS;
 /** Ticks, owner refreshes and manual starts poll an app's status() only when its last attempt is at least this old. */
 export const STATUS_REFRESH_MS = OPS_LIMITS.statusMinIntervalSeconds * 1000;
 const REFRESH_MIN_MS = REFRESH_MIN_INTERVAL_SECONDS * 1000;
+const PROBE_MIN_MS = PROBE_MIN_INTERVAL_SECONDS * 1000;
+const CLOUDFLARE_REFRESH_MIN_MS = CLOUDFLARE_REFRESH_MIN_SECONDS * 1000;
+
+/** The public_http entries the tick probes (at most one GET each per tick). */
+const PROBED = REGISTRY.entries.flatMap((entry) => (entry.status.type === 'public_http' && entry.status.enabled ? [{ id: entry.id, url: entry.status.url, expect: entry.status.expect }] : []));
 
 /** Whether an app's status() may be polled at `now`: never polled, or the last attempt is at least 10 minutes old (or from a later clock). */
 function statusDue(doc: { readonly checked_at: number | null }, now: number): boolean {
@@ -113,70 +126,10 @@ const SCHEMA = [
   'CREATE INDEX IF NOT EXISTS canary_runs_by_created ON canary_runs (created_at)',
   'CREATE INDEX IF NOT EXISTS canary_runs_by_day ON canary_runs (day, kind)',
   'CREATE INDEX IF NOT EXISTS canary_runs_by_finished ON canary_runs (finished_at)',
+  // The run in progress (at most one) without scanning the 60-day history (rows read by every tick and view).
+  "CREATE INDEX IF NOT EXISTS canary_runs_active ON canary_runs (created_at) WHERE phase != 'done'",
   'CREATE TABLE IF NOT EXISTS item_since (key TEXT PRIMARY KEY, since INTEGER NOT NULL)',
 ];
-
-interface StatusDoc {
-  readonly checked_at: number | null;
-  readonly ok: boolean | null;
-  readonly error: AppErrorCode | null;
-  readonly consecutive_failures: number;
-  readonly status: OpsStatus | null;
-  readonly status_at: number | null;
-}
-
-interface UsageDoc {
-  readonly fetched_at: number | null;
-  readonly day: string | null;
-  readonly month: string | null;
-  readonly rows: QuotaRow[];
-  readonly unclassified_r2_operations: number;
-  readonly last_error: UsageErrorCode | null;
-  readonly last_error_at: number | null;
-  readonly last_http_status: number | null;
-  readonly consecutive_failures: number;
-  readonly last_attempt_at: number | null;
-}
-
-interface DigestDoc {
-  readonly items: OpsReportItem[];
-  readonly last_key: string | null;
-  readonly last_sent_at: number | null;
-  readonly last_generated_at: number | null;
-  readonly last_receipt: OpsReportReceipt | null;
-  readonly last_error: AppErrorCode | null;
-  readonly last_attempt_at: number | null;
-}
-
-interface MetaDoc {
-  readonly last_tick_at: number | null;
-  readonly last_tick_scheduled: number | null;
-  readonly last_refresh_at: number | null;
-}
-
-const NO_STATUS: StatusDoc = { checked_at: null, ok: null, error: null, consecutive_failures: 0, status: null, status_at: null };
-const NO_USAGE: UsageDoc = {
-  fetched_at: null,
-  day: null,
-  month: null,
-  rows: [],
-  unclassified_r2_operations: 0,
-  last_error: null,
-  last_error_at: null,
-  last_http_status: null,
-  consecutive_failures: 0,
-  last_attempt_at: null,
-};
-const NO_DIGEST: DigestDoc = {
-  items: [],
-  last_key: null,
-  last_sent_at: null,
-  last_generated_at: null,
-  last_receipt: null,
-  last_error: null,
-  last_attempt_at: null,
-};
-const NO_META: MetaDoc = { last_tick_at: null, last_tick_scheduled: null, last_refresh_at: null };
 
 /** A failure of the call itself (the Durable Object) is an exception, which the Worker maps to 503. */
 export type StartCanaryOutcome =
@@ -215,18 +168,27 @@ interface AppliedRow extends Record<string, SqlStorageValue> {
 
 export class HomeState extends DurableObject<Env> {
   private chain: Promise<unknown> = Promise.resolve();
+  /** Rows read by the current v2 view build (SqlStorageCursor.rowsRead). */
+  private rowsRead = 0;
+  /** While a view is built: documents already read (each key once per build). */
+  private readCache: Map<string, unknown> | null = null;
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
     void ctx.blockConcurrencyWhile(() => {
       for (const statement of SCHEMA) ctx.storage.sql.exec(statement);
+      // v2 (design-v2.md §6): runs belong to a canary of the registry; existing rows are mail-todofy.
+      const columns = ctx.storage.sql.exec<{ name: string }>("SELECT name FROM pragma_table_info('canary_runs')").toArray();
+      if (!columns.some((column) => column.name === 'canary_id')) {
+        ctx.storage.sql.exec("ALTER TABLE canary_runs ADD COLUMN canary_id TEXT NOT NULL DEFAULT 'mail-todofy'");
+      }
       return Promise.resolve();
     });
   }
 
   // ---- RPC ----------------------------------------------------------------------------------------
 
-  /** One cron tick at `scheduledTime` (§5): status, usage, guard, canary, digest, cleanup. */
+  /** One cron tick at `scheduledTime` (§5): status and probes, usage, guard, canary, digest, cleanup. */
   tick(scheduledTime: number): Promise<{ ran: boolean }> {
     return this.serialize(async () => {
       const now = scheduledTime;
@@ -239,7 +201,7 @@ export class HomeState extends DurableObject<Env> {
       // status() at most every 10 minutes per app (OPS_LIMITS.statusMinIntervalSeconds), counting the
       // polls of owner refreshes and manual canary starts: a recent answer stands in for this tick's.
       const due = OPS_APPS.filter((app) => statusDue(this.statusDoc(app), now));
-      const polled = await this.pollStatuses(now, due);
+      const [polled, probes] = await Promise.all([this.pollStatuses(now, due), this.pollProbes(now)]);
       const observed: Record<OpsApp, OpsStatus | null> = { 'mail-hero': null, todofy: null };
       for (const app of OPS_APPS) {
         const doc = this.statusDoc(app);
@@ -250,13 +212,15 @@ export class HomeState extends DurableObject<Env> {
       const canary = await this.runCanary(now, true);
       const digest = await this.runDigest(now, guard.desired, true, now);
       this.ctx.storage.sql.exec('DELETE FROM canary_runs WHERE created_at < ?', now - CANARY_RETENTION_MS);
-      this.putDoc('meta', { ...meta, last_tick_at: now, last_tick_scheduled: now }, now);
+      this.dropOrphanProbes();
+      this.putDoc('meta', { ...meta, last_tick_at: now, last_tick_scheduled: now, rev: (meta.rev ?? 0) + 1 }, now);
       console.log(
         JSON.stringify({
           event: 'tick',
           ran: true,
           duration_ms: Date.now() - started,
           status: Object.fromEntries(OPS_APPS.map((app) => [app, !due.includes(app) ? 'recent' : observed[app] === null ? 'failed' : 'ok'])),
+          probes,
           usage: usage ?? 'ok',
           guard: guard.desired.level,
           guard_calls: guard.calls,
@@ -292,14 +256,36 @@ export class HomeState extends DurableObject<Env> {
   }
 
   /**
-   * GET /api/v2/<view> (docs/design-v2.md §5): the view built from the tables and serialized here,
-   * with ETag `"<rev>"`; `body: null` when `ifNoneMatch` names it. `refresh` only for home (due
-   * statuses and probes) and cloudflare (GraphQL), each at most once per minute.
-   * TODO(v2): scaffold only — not implemented yet; the Worker answers 503 `unavailable`.
+   * GET /api/v2/<view> (docs/design-v2.md §5): the view built from the tables and serialized here, with
+   * ETag `"<rev>-<hash>"` (views-v2.ts); `body: null` when `ifNoneMatch` names it (the Worker answers
+   * 304). `refresh` only for home (due statuses and probes) and cloudflare (GraphQL), each scope at most
+   * once per minute; statuses keep their 10 minutes, probes PROBE_MIN_INTERVAL_SECONDS.
    */
-  v2View(view: V2View, refresh: boolean, ifNoneMatch: string | null): Promise<V2Body> {
-    console.log(JSON.stringify({ event: 'v2_view', view, refresh, conditional: ifNoneMatch !== null, implemented: false }));
-    return Promise.reject(new Error('not_implemented'));
+  async v2View(view: V2View, refresh: boolean, ifNoneMatch: string | null): Promise<V2Body> {
+    const refreshed = refresh && (view === 'home' || view === 'cloudflare') ? await this.serialize(() => this.refreshScope(view, Date.now())) : false;
+    const now = Date.now();
+    this.rowsRead = 0;
+    const result = serializeView(this.buildView(view, now, refreshed), ifNoneMatch);
+    console.log(
+      JSON.stringify({
+        event: 'v2_view',
+        view,
+        refreshed,
+        status: result.body === null ? 304 : 200,
+        bytes: result.bytes,
+        over_budget: result.bytes > V2_BODY_BUDGET[view],
+        rows_read: this.rowsRead,
+      }),
+    );
+    return { etag: result.etag, body: result.body };
+  }
+
+  /**
+   * Rows the last v2 view build read (workerd tests: stays within V2_ROWS_READ). Diagnostic only; the
+   * Worker never calls it.
+   */
+  lastRowsRead(): number {
+    return this.rowsRead;
   }
 
   /** POST /api/v1/canary: a manual run with its first start attempt; later steps happen on ticks. */
@@ -317,6 +303,7 @@ export class HomeState extends DurableObject<Env> {
       for (let k = 1; this.runExists(runId); k++) runId = manualRunId(now + k * 1000);
       const run = await this.advance(newRun(runId, 'manual', now), now);
       this.saveRun(run);
+      this.bumpRev(now);
       console.log(JSON.stringify({ event: 'canary_manual', phase: run.phase, outcome: run.outcome, code: run.code }));
       return { ok: true, run: runView(run) };
     });
@@ -331,6 +318,7 @@ export class HomeState extends DurableObject<Env> {
       if (level === 'normal') this.putDoc('guard', AUTO_NORMAL, now);
       const desired = this.currentDesired(now);
       const calls = await this.applyGuard(now, desired, { 'mail-hero': null, todofy: null });
+      this.bumpRev(now);
       console.log(JSON.stringify({ event: 'guard_override', level, guard_calls: calls }));
       return { guard: this.guardView(now) };
     });
@@ -365,6 +353,7 @@ export class HomeState extends DurableObject<Env> {
         month: utcMonthStart(now),
         rows: result.data.rows,
         unclassified_r2_operations: result.data.unclassified_r2_operations,
+        resources: result.data.resources,
         last_error: null,
         last_error_at: null,
         last_http_status: 200,
@@ -383,6 +372,11 @@ export class HomeState extends DurableObject<Env> {
       };
     }
     this.putDoc('usage', doc, now);
+    if (result.ok) {
+      // Worker discovery (design-v2.md §4): one document, rewritten with each successful answer.
+      const scripts = mergeScripts(this.doc<CfScriptsDoc>('cf_scripts'), result.data.scripts, result.data.workers_truncated, now);
+      this.putDoc('cf_scripts', scripts, now);
+    }
     return result.ok ? null : result.code;
   }
 
@@ -517,6 +511,160 @@ export class HomeState extends DurableObject<Env> {
     return { sent, items: items.length };
   }
 
+  /**
+   * The public_http probes that are due (design-v2.md §3), in parallel: one GET each at most, never
+   * more often than PROBE_MIN_INTERVAL_SECONDS (a refresh's probe stands in for the tick's).
+   */
+  private async pollProbes(now: number): Promise<Record<string, string>> {
+    const due = PROBED.filter((probe) => probeDue(this.doc<ProbeDoc>(`probe:${probe.id}`), now));
+    const results = await Promise.all(due.map(async (probe) => [probe, await probeUrl(probe.url, probe.expect)] as const));
+    const summary: Record<string, string> = {};
+    for (const [probe, result] of results) {
+      this.putDoc(`probe:${probe.id}`, nextProbeDoc(this.doc<ProbeDoc>(`probe:${probe.id}`), result, now), now);
+      summary[probe.id] = result.ok ? 'ok' : (result.error ?? 'failed');
+    }
+    return summary;
+  }
+
+  /** Probe documents of entries that are no longer probed (registry change, `enabled: false`). */
+  private dropOrphanProbes(): void {
+    const keep = new Set(PROBED.map((probe) => `probe:${probe.id}`));
+    const keys = this.ctx.storage.sql.exec<{ key: string }>("SELECT key FROM state WHERE key >= 'probe:' AND key < 'probe;'").toArray();
+    for (const { key } of keys) if (!keep.has(key)) this.deleteDoc(key);
+  }
+
+  private bumpRev(now: number): void {
+    const meta = this.doc<MetaDoc>('meta') ?? NO_META;
+    this.putDoc('meta', { ...meta, rev: (meta.rev ?? 0) + 1 }, now);
+  }
+
+  /**
+   * `?refresh=1` of a v2 scope; true when something was fetched. home: due statuses (10 min each) and
+   * probes; cloudflare: GraphQL (60 s). Each scope at most once per minute; the digest items are
+   * rebuilt (not sent) as a v1 refresh does.
+   */
+  private async refreshScope(scope: 'home' | 'cloudflare', now: number): Promise<boolean> {
+    const meta = this.doc<MetaDoc>('meta') ?? NO_META;
+    const last = scope === 'home' ? meta.last_refresh_home_at : meta.last_refresh_cloudflare_at;
+    const min = scope === 'home' ? REFRESH_MIN_MS : CLOUDFLARE_REFRESH_MIN_MS;
+    if (last != null && now - last < min && now >= last) return false;
+    if (scope === 'home') {
+      const statuses = OPS_APPS.filter((app) => statusDue(this.statusDoc(app), now));
+      const probes = PROBED.filter((probe) => probeDue(this.doc<ProbeDoc>(`probe:${probe.id}`), now));
+      if (statuses.length === 0 && probes.length === 0) return false;
+      await Promise.all([statuses.length > 0 ? this.pollStatuses(now, statuses) : Promise.resolve(), probes.length > 0 ? this.pollProbes(now) : Promise.resolve()]);
+    } else {
+      const usage = this.doc<UsageDoc>('usage') ?? NO_USAGE;
+      const due = analyticsConfigured(this.env) && (usage.last_attempt_at === null || now - usage.last_attempt_at >= CLOUDFLARE_REFRESH_MIN_MS || now < usage.last_attempt_at);
+      if (!due) return false;
+      await this.pollUsage(now);
+    }
+    await this.runDigest(now, this.currentDesired(now), false, meta.last_tick_at);
+    const current = this.doc<MetaDoc>('meta') ?? NO_META;
+    const stamp = scope === 'home' ? { last_refresh_home_at: now } : { last_refresh_cloudflare_at: now };
+    this.putDoc('meta', { ...current, ...stamp, rev: (current.rev ?? 0) + 1 }, now);
+    console.log(JSON.stringify({ event: 'v2_refresh', scope }));
+    return true;
+  }
+
+  // ---- v2 views -----------------------------------------------------------------------------------
+
+  /** Everything the evaluation reads (evaluate.ts), from the tables. */
+  private evalInput(now: number): EvalInput {
+    const meta = this.doc<MetaDoc>('meta') ?? NO_META;
+    return {
+      now,
+      lastTickAt: meta.last_tick_at,
+      analyticsConfigured: analyticsConfigured(this.env),
+      statuses: this.statusDocs(),
+      probes: Object.fromEntries(PROBED.flatMap((probe) => {
+        const doc = this.doc<ProbeDoc>(`probe:${probe.id}`);
+        return doc === null ? [] : [[probe.id, doc] as const];
+      })),
+      scripts: this.doc<CfScriptsDoc>('cf_scripts'),
+      digest: this.doc<DigestDoc>('digest') ?? NO_DIGEST,
+      canaryRecent: this.recentRuns(),
+    };
+  }
+
+  private statusDocs(): Record<string, StatusDoc> {
+    return Object.fromEntries(OPS_APPS.map((app) => [app, this.statusDoc(app)]));
+  }
+
+  /** The shared part of every view: attention strip, badges, freshness and this scope's refresh times. */
+  private shellFor(view: V2View, now: number, refreshed: boolean): ShellFields {
+    const meta = this.doc<MetaDoc>('meta') ?? NO_META;
+    const digest = this.doc<DigestDoc>('digest') ?? NO_DIGEST;
+    const homeAt = meta.last_refresh_home_at ?? null;
+    const cloudflareAt = meta.last_refresh_cloudflare_at ?? null;
+    const neverRan = meta.last_tick_at === null && digest.last_attempt_at === null && meta.last_refresh_at === null && homeAt === null && cloudflareAt === null;
+    const { attention, badges } = attentionView({
+      now,
+      neverRan,
+      items: neverRan ? [] : withTickState(digest.items, meta.last_tick_at, now),
+      canaryEnabled: canaryEnabled(this.env),
+      desired: this.currentDesired(now),
+      statuses: this.statusDocs(),
+    });
+    let lastRefreshAt: number | null;
+    let nextRefreshAt: number;
+    if (view === 'home') {
+      lastRefreshAt = homeAt;
+      const dues = [
+        ...OPS_APPS.map((app) => {
+          const checked = this.statusDoc(app).checked_at;
+          return checked === null ? now : checked + STATUS_REFRESH_MS;
+        }),
+        ...PROBED.map((probe) => {
+          const checked = this.doc<ProbeDoc>(`probe:${probe.id}`)?.checked_at;
+          return checked === undefined ? now : checked + PROBE_MIN_MS;
+        }),
+      ];
+      nextRefreshAt = Math.max(Math.min(...dues), homeAt === null ? now : homeAt + REFRESH_MIN_MS);
+    } else if (view === 'cloudflare') {
+      lastRefreshAt = cloudflareAt;
+      const attempt = (this.doc<UsageDoc>('usage') ?? NO_USAGE).last_attempt_at;
+      nextRefreshAt = Math.max(attempt === null ? now : attempt + CLOUDFLARE_REFRESH_MIN_MS, cloudflareAt === null ? now : cloudflareAt + CLOUDFLARE_REFRESH_MIN_MS);
+    } else {
+      lastRefreshAt = homeAt === null ? cloudflareAt : cloudflareAt === null ? homeAt : Math.max(homeAt, cloudflareAt);
+      nextRefreshAt = now;
+    }
+    return shell({
+      now,
+      rev: meta.rev ?? 0,
+      build: buildSha(this.env),
+      attention,
+      badges,
+      lastTickAt: meta.last_tick_at,
+      lastRefreshAt,
+      nextRefreshAt,
+      refreshed,
+    });
+  }
+
+  /** One v2 view from the tables (synchronous: no call interleaves while it reads). */
+  private buildView(view: V2View, now: number, refreshed: boolean): ShellFields {
+    this.readCache = new Map();
+    try {
+      const base = this.shellFor(view, now, refreshed);
+      switch (view) {
+        case 'home':
+          return homeResponse(base, this.evalInput(now), this.usageView(now), this.currentDesired(now));
+        case 'flows':
+          return flowsResponse(base, this.evalInput(now), this.canaryView(now));
+        case 'cloudflare':
+          return cloudflareResponse(base, now, this.usageView(now), this.doc<UsageDoc>('usage') ?? NO_USAGE, this.doc<CfScriptsDoc>('cf_scripts'), this.guardView(now));
+        case 'ops': {
+          const digest = this.doc<DigestDoc>('digest') ?? NO_DIGEST;
+          const todofy = this.statusDoc('todofy');
+          return opsResponse(base, this.guardView(now), this.canaryView(now), this.digestView(digest, todofy.status?.capabilities.includes('ops_digest') === true), this.statusDocs());
+        }
+      }
+    } finally {
+      this.readCache = null;
+    }
+  }
+
   // ---- overview ---------------------------------------------------------------------------------
 
   private buildOverview(now: number, refreshed: boolean): OverviewResponse {
@@ -612,10 +760,7 @@ export class HomeState extends DurableObject<Env> {
 
   private canaryView(now: number): CanaryView {
     const day = utcDay(now);
-    const recent = this.ctx.storage.sql
-      .exec<CanaryRow>('SELECT * FROM canary_runs ORDER BY created_at DESC LIMIT ?', CANARY_RECENT_RUNS)
-      .toArray()
-      .map(fromRow);
+    const recent = this.recentRuns();
     const active = this.activeRun();
     const today = recent.find((run) => run.day === day) ?? null;
     const hour = canaryHour(this.env);
@@ -656,8 +801,28 @@ export class HomeState extends DurableObject<Env> {
   // The caller names the stored document's type (every key has one writer in this class).
   // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-parameters
   private doc<T>(key: string): T | null {
-    const row = this.ctx.storage.sql.exec<{ doc: string }>('SELECT doc FROM state WHERE key = ?', key).toArray()[0];
-    return row === undefined ? null : (JSON.parse(row.doc) as T);
+    if (this.readCache?.has(key) === true) return this.readCache.get(key) as T | null;
+    const row = this.rows<{ doc: string }>('SELECT doc FROM state WHERE key = ?', key)[0];
+    const value = row === undefined ? null : (JSON.parse(row.doc) as T);
+    this.readCache?.set(key, value);
+    return value;
+  }
+
+  /** A query's rows, counted in `rowsRead` (the v2 views' read budget). */
+  private rows<T extends Record<string, SqlStorageValue>>(query: string, ...bindings: SqlStorageValue[]): T[] {
+    const cursor = this.ctx.storage.sql.exec<T>(query, ...bindings);
+    const rows = cursor.toArray();
+    this.rowsRead += cursor.rowsRead;
+    return rows;
+  }
+
+  /** The newest CANARY_RECENT_RUNS runs (once per view build). */
+  private recentRuns(): CanaryRecord[] {
+    const cached = this.readCache?.get('#recent_runs') as CanaryRecord[] | undefined;
+    if (cached !== undefined) return cached;
+    const runs = this.rows<CanaryRow>('SELECT * FROM canary_runs ORDER BY created_at DESC LIMIT ?', CANARY_RECENT_RUNS).map(fromRow);
+    this.readCache?.set('#recent_runs', runs);
+    return runs;
   }
 
   private putDoc(key: string, value: unknown, now: number): void {
@@ -678,7 +843,7 @@ export class HomeState extends DurableObject<Env> {
   }
 
   private applied(app: OpsApp): AppliedGuard {
-    const row = this.ctx.storage.sql.exec<AppliedRow>('SELECT * FROM guard_applied WHERE app = ?', app).toArray()[0];
+    const row = this.rows<AppliedRow>('SELECT * FROM guard_applied WHERE app = ?', app)[0];
     if (row === undefined) return NO_APPLIED;
     return {
       input: row.input === null ? null : (JSON.parse(row.input) as SetGuardInput),
@@ -704,9 +869,7 @@ export class HomeState extends DurableObject<Env> {
   }
 
   private activeRun(): CanaryRecord | null {
-    const row = this.ctx.storage.sql
-      .exec<CanaryRow>("SELECT * FROM canary_runs WHERE phase != 'done' ORDER BY created_at DESC LIMIT 1")
-      .toArray()[0];
+    const row = this.rows<CanaryRow>("SELECT * FROM canary_runs WHERE phase != 'done' ORDER BY created_at DESC LIMIT 1")[0];
     return row === undefined ? null : fromRow(row);
   }
 
@@ -718,16 +881,12 @@ export class HomeState extends DurableObject<Env> {
   }
 
   private manualCount(day: string): number {
-    const row = this.ctx.storage.sql
-      .exec<{ n: number }>("SELECT count(*) AS n FROM canary_runs WHERE day = ? AND kind = 'manual'", day)
-      .toArray()[0];
+    const row = this.rows<{ n: number }>("SELECT count(*) AS n FROM canary_runs WHERE day = ? AND kind = 'manual'", day)[0];
     return row?.n ?? 0;
   }
 
   private scheduledExists(day: string): boolean {
-    return (
-      this.ctx.storage.sql.exec("SELECT 1 FROM canary_runs WHERE day = ? AND kind = 'scheduled' LIMIT 1", day).toArray().length > 0
-    );
+    return this.rows("SELECT 1 AS found FROM canary_runs WHERE day = ? AND kind = 'scheduled' LIMIT 1", day).length > 0;
   }
 
   private runExists(runId: string): boolean {

@@ -11,6 +11,16 @@ import { graphqlBody, type SyntheticUsage } from '../graphql-fixture.ts';
 import { contractSchema, fixture, startHarness, SYNTHETIC_BINDINGS, type Harness, type StubApp } from './harness.ts';
 
 export const GRAPHQL = 'https://api.cloudflare.com/client/v4/graphql';
+/** The website probe of the registry (the only public GET the Worker makes). */
+export const WEBSITE_PROBE = 'https://www.ziyixi.science/build-info.json';
+
+/** A v2 GET: status, ETag and the parsed body (null for 304). */
+export interface V2Answer<T> {
+  readonly status: number;
+  readonly etag: string | null;
+  readonly body: T | null;
+  readonly bytes: number;
+}
 
 export interface Analytics {
   /** What the next GraphQL requests answer: usage numbers, or a Response (errors, statuses). */
@@ -25,6 +35,12 @@ export interface FlowHarness extends Harness {
   readonly routes: Map<string, () => Response>;
   /** Owner API through the loopback dev bypass (DEV_AUTH_BYPASS=true in these harnesses). */
   overview(refresh?: boolean): Promise<OverviewResponse>;
+  /** GET /api/v2/<path> through the dev bypass, optionally conditional. */
+  v2<T>(path: string, etag?: string | null): Promise<V2Answer<T>>;
+  /** Rows the Durable Object read for its last v2 view (HomeState.lastRowsRead over RPC). */
+  lastRowsRead(): Promise<number>;
+  /** Every outbound request "home" made (URL only), GraphQL and probes included. */
+  readonly outboundLog: string[];
   post(path: string, body: unknown): Promise<Response>;
   /** Drains both stubs' call logs as `app.method` strings. */
   called(): Promise<string[]>;
@@ -43,9 +59,11 @@ export type StubAnswer = { value: unknown } | { throw: string } | { sequence: ({
 export async function startFlows(options: { bindings?: Record<string, string>; usage?: SyntheticUsage } = {}): Promise<FlowHarness> {
   const analytics: Analytics = { answer: options.usage ?? {}, requests: [] };
   const routes = new Map<string, () => Response>();
+  const outboundLog: string[] = [];
   const harness = await startHarness({
     bindings: { DEV_AUTH_BYPASS: 'true', ...options.bindings },
     async outbound(request) {
+      outboundLog.push(request.url);
       if (request.url === GRAPHQL) {
         const body = (await request.json()) as { variables: Record<string, string> };
         analytics.requests.push({ authorization: request.headers.get('authorization'), variables: body.variables });
@@ -67,6 +85,23 @@ export async function startFlows(options: { bindings?: Record<string, string>; u
     ...harness,
     analytics,
     routes,
+    outboundLog,
+    async v2<T>(path: string, etag: string | null = null): Promise<V2Answer<T>> {
+      const response = await harness.fetch(`/api/v2/${path}`, etag === null ? {} : { headers: { 'if-none-match': etag } });
+      expect(response.headers.get('cache-control')).toBe('no-store');
+      const text = await response.text();
+      return {
+        status: response.status,
+        etag: response.headers.get('etag'),
+        body: response.status === 200 ? (JSON.parse(text) as T) : null,
+        bytes: new TextEncoder().encode(text).byteLength,
+      };
+    },
+    async lastRowsRead() {
+      const ns = await harness.mf.getDurableObjectNamespace('HOME', 'home');
+      const stub = ns.get(ns.idFromName('home-v1')) as unknown as { lastRowsRead(): Promise<number> };
+      return stub.lastRowsRead();
+    },
     async overview(refresh = false) {
       const response = await harness.fetch(`/api/v1/overview${refresh ? '?refresh=1' : ''}`);
       expect(response.status).toBe(200);
@@ -75,7 +110,7 @@ export async function startFlows(options: { bindings?: Record<string, string>; u
     },
     async post(path, body) {
       if (csrf === null) {
-        const response = await harness.fetch('/api/v1/csrf');
+        const response = await harness.fetch('/api/v2/csrf');
         expect(response.status).toBe(200);
         const token = ((await response.json()) as CsrfResponse).token;
         csrf = { token, cookie: (response.headers.get('set-cookie') ?? '').split(';')[0] ?? '' };

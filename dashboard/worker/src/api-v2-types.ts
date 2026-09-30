@@ -16,12 +16,16 @@
  * | ------------------------------ | ---------------------- | --------------------- | ------------------------------- |
  * | GET  registry                  | Worker (no DO)         | RegistryResponse      | ≤ 12 KiB; ETag "<build>" → 304  |
  * | GET  csrf                      | Worker                 | CsrfResponse          | as v1                           |
- * | GET  home[?refresh=1]          | DO, 1 call             | HomeResponse          | ≤ 10 KiB; ETag "<rev>" → 304    |
- * | GET  flows                     | DO, 1 call             | FlowsResponse         | ≤ 16 KiB; ≤ 20 rows read        |
- * | GET  cloudflare[?refresh=1]    | DO, 1 call             | CloudflareResponse    | ≤ 16 KiB; 3–4 rows read         |
- * | GET  ops                       | DO, 1 call             | OpsResponse           | ≤ 24 KiB; ≤ 10 rows read        |
+ * | GET  home[?refresh=1]          | DO, 1 call             | HomeResponse          | ≤ 10 KiB; ≤ 24 rows read        |
+ * | GET  flows                     | DO, 1 call             | FlowsResponse         | ≤ 16 KiB; ≤ 24 rows read        |
+ * | GET  cloudflare[?refresh=1]    | DO, 1 call             | CloudflareResponse    | ≤ 16 KiB; ≤ 10 rows read        |
+ * | GET  ops                       | DO, 1 call             | OpsResponse           | ≤ 24 KiB; ≤ 24 rows read        |
  * | POST guard {level}             | DO                     | GuardResponseV2       | as v1 (CSRF + Origin)           |
  * | POST canary {canary_id}        | DO                     | CanaryStartResponse   | as v1 (CSRF + Origin)           |
+ *
+ * Dynamic views carry `ETag: "<rev>-<hash>"` (the hash covers the body except generated_at) and answer
+ * 304 to a matching If-None-Match; sizes are a normal day's (V2_BODY_BUDGET, V2_BODY_MAX for a bad
+ * day), rows are V2_ROWS_READ (measured in workerd).
  */
 import type {
   AppCard,
@@ -45,7 +49,14 @@ export const API_V2_VERSION = 'home-v2';
 // ---------------------------------------------------------------------------------------------------
 // Constants shared by the Worker (evaluation) and the UI (explanations).
 
-/** Response size budgets (bytes of the JSON body); a test asserts them with the largest fixture. */
+/**
+ * Response size budgets (bytes of the JSON body) of a normal day (test/views-v2.test.ts: the mockup
+ * day, and the Cloudflare view with 20 Workers). A bad day may exceed them: the attention strip repeats
+ * up to 20 items in every view and the canary strip can hold 14 failed runs; V2_BODY_MAX bounds that
+ * case (20 alarms, 16 signals per app, 14 failed runs, 20 Workers; measured 8–25 KiB). HomeState logs
+ * `over_budget` when a body passes its budget.
+ */
+export const V2_BODY_MAX = 32 * 1024;
 export const V2_BODY_BUDGET = {
   registry: 12 * 1024,
   home: 10 * 1024,
@@ -53,6 +64,14 @@ export const V2_BODY_BUDGET = {
   cloudflare: 16 * 1024,
   ops: 24 * 1024,
 } as const;
+
+/**
+ * Durable Object rows one view may read (SqlStorageCursor.rowsRead per call; the workerd suite asserts
+ * it with a full 14-run canary history and 20 Workers, measured 22 / 22 / 7 / 20). Every view reads the
+ * shared shell (meta, digest, the two guard docs, both statuses); home, flows and ops add the 14 recent
+ * canary runs, cloudflare the usage and cf_scripts documents. Each document is read once per build.
+ */
+export const V2_ROWS_READ: Readonly<Record<ViewId, number>> = { home: 24, flows: 24, cloudflare: 10, ops: 24 };
 
 /** Outbound calls one tick may make, computed from the registry (tested). Free: 50 subrequests. */
 export const MAX_OUTBOUND_PER_TICK = 30;
@@ -343,7 +362,11 @@ export interface RefreshV2 {
 export interface ShellFields {
   readonly version: typeof API_V2_VERSION;
   readonly generated_at: Iso;
-  /** Bumped by every tick/refresh write; the response's ETag is `"<rev>"`. */
+  /**
+   * Bumped by every tick, refresh that fetched, guard override and manual canary start. The response's
+   * ETag is `"<rev>-<hash>"`: levels also change with time alone (a status goes stale), so the hash of
+   * the body (without generated_at) decides whether a 304 is right.
+   */
   readonly rev: number;
   readonly build: string;
   readonly attention: AttentionView;
@@ -420,6 +443,12 @@ export type CanaryBadge = 'verified' | 'failed' | 'held' | 'unverified';
 export interface StageState {
   readonly id: string;
   readonly level: Level;
+  /**
+   * Code explaining a non-ok level: a claimed signal code, `unreachable`, `stale`, `never_checked`,
+   * `app_down`, `app_degraded`, `error_rate`, `idle`, `never_seen`, `http_status`, `timeout`,
+   * `network_error`, `tick_stale` or `canary_failed`; null when ok or unmonitored.
+   */
+  readonly reason: string | null;
   /** A hold signal matched (level is `held` unless something worse applies). */
   readonly held: boolean;
   readonly signals: readonly { readonly code: string; readonly severity: OpsSeverity; readonly since: Iso | null; readonly metrics: Readonly<Record<string, number>> }[];

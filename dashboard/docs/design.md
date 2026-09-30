@@ -401,7 +401,7 @@ UTC calendar month to date). What is still unverified in production is listed in
 
 ```graphql
 query($a: string!, $day: Date!, $start: Time!, $end: Time!, $month: Date!) { viewer { accounts(filter: {accountTag: $a}) {
-  workers: workersInvocationsAdaptive(limit: 20, filter: {datetime_geq: $start, datetime_leq: $end}) { sum { requests errors subrequests } dimensions { scriptName } quantiles { cpuTimeP50 cpuTimeP99 } }
+  workers: workersInvocationsAdaptive(limit: 50, filter: {datetime_geq: $start, datetime_leq: $end}) { sum { requests errors subrequests } dimensions { scriptName } quantiles { cpuTimeP50 cpuTimeP99 } }
   d1: d1AnalyticsAdaptiveGroups(limit: 10, filter: {date: $day}) { sum { rowsRead rowsWritten readQueries writeQueries } dimensions { databaseId } }
   d1s: d1StorageAdaptiveGroups(limit: 10, filter: {date: $day}) { max { databaseSizeBytes } dimensions { databaseId } }
   doInv: durableObjectsInvocationsAdaptiveGroups(limit: 10, filter: {date: $day}) { sum { requests errors } dimensions { scriptName } }
@@ -413,8 +413,10 @@ query($a: string!, $day: Date!, $start: Time!, $end: Time!, $month: Date!) { vie
 ```
 
 `usage.ts` holds this text as a constant; a unit test compares it (whitespace-normalised) with the
-copy above. `durableObjectsStorageGroups` returned `[]` on this account: `do_storage.used` is then
-null ("无数据"), never 0.
+copy above. v2 raised the `workers` row limit from the verified 20 to 50 (a row cap only; the fields
+are the verified ones) and parses its per-script fields and the per-resource rows for the Worker and
+resource tables ([`design-v2.md`](design-v2.md) §4). `durableObjectsStorageGroups` returned `[]` on
+this account: `do_storage.used` is then null ("无数据"), never 0.
 
 ### 7.3 Mapping
 

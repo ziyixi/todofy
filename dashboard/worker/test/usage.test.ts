@@ -16,7 +16,7 @@ import {
   usageVariables,
   type FetchLike,
 } from '../src/usage.ts';
-import { graphqlBody } from './graphql-fixture.ts';
+import { REALISTIC_USAGE, SYNTHETIC_D1, SYNTHETIC_NS, graphqlBody, usageWithScripts } from './graphql-fixture.ts';
 
 const NOW = Date.parse('2026-09-29T12:00:00Z');
 const TOKEN = 'synthetic-analytics-token-000000000000';
@@ -163,6 +163,73 @@ describe('parseUsage', () => {
     const body = graphqlBody() as { data: { viewer: { accounts: Record<string, unknown>[] } } };
     delete body.data.viewer.accounts[0]?.r2ops;
     expect(parseUsage(body, NOW)).toBeNull();
+  });
+});
+
+describe('parseUsage per script and per resource (design-v2.md §4)', () => {
+  it('keeps each script\'s requests, errors, subrequests, CPU quantiles and DO invocations', () => {
+    const data = parseUsage(graphqlBody(REALISTIC_USAGE), NOW);
+    expect(data?.workers_truncated).toBe(false);
+    expect(data?.scripts).toEqual([
+      { script: 'mail-hero', requests: 268, errors: 0, subrequests: 41, cpu_p50_us: 1123, cpu_p99_us: 4811, do_requests: 612, do_errors: 0 },
+      { script: 'todofy', requests: 214, errors: 2, subrequests: 58, cpu_p50_us: 902, cpu_p99_us: 3599, do_requests: null, do_errors: null },
+      { script: 'home', requests: 118, errors: 0, subrequests: 29, cpu_p50_us: 811, cpu_p99_us: 2904, do_requests: 136, do_errors: 0 },
+      { script: 'todofy-core', requests: 96, errors: 0, subrequests: 37, cpu_p50_us: 1403, cpu_p99_us: 6207, do_requests: 632, do_errors: 0 },
+      { script: 'ziyixi-notion-publish', requests: 16, errors: 1, subrequests: 48, cpu_p50_us: 2312, cpu_p99_us: 7402, do_requests: null, do_errors: null },
+    ]);
+    // The quota rows are unchanged by the per-script parse.
+    expect(row(data?.rows ?? [], 'workers_requests')).toMatchObject({ used: 712 });
+    expect(row(data?.rows ?? [], 'do_requests')).toMatchObject({ used: 1380 });
+  });
+
+  it('keeps a script seen only in doInv, sums a repeated name and reads a missing quantile as null', () => {
+    const body = graphqlBody({
+      scripts: [
+        { script: 'a', requests: 5, errors: 1, subrequests: 2, cpuP50: 100, cpuP99: 900 },
+        { script: 'a', requests: 7, errors: 0, subrequests: 1, cpuP50: 300, cpuP99: 200 },
+      ],
+      doScripts: [{ script: 'do-only', requests: 30, errors: 2 }],
+    }) as { data: { viewer: { accounts: { workers: { quantiles?: unknown }[] }[] } } };
+    delete body.data.viewer.accounts[0]?.workers[1]?.quantiles;
+    const data = parseUsage(body, NOW);
+    expect(data?.scripts).toEqual([
+      { script: 'a', requests: 12, errors: 1, subrequests: 3, cpu_p50_us: 100, cpu_p99_us: 900, do_requests: null, do_errors: null },
+      { script: 'do-only', requests: 0, errors: 0, subrequests: 0, cpu_p50_us: null, cpu_p99_us: null, do_requests: 30, do_errors: 2 },
+    ]);
+  });
+
+  it.each([0, 5, 20, 50])('parses %i scripts, and a full page of 50 as truncated', (count) => {
+    const data = parseUsage(graphqlBody(usageWithScripts(count)), NOW);
+    expect(data?.scripts.filter((s) => s.requests > 0)).toHaveLength(count);
+    expect(data?.workers_truncated).toBe(count >= 50);
+    expect(row(data?.rows ?? [], 'workers_requests').truncated).toBe(count >= 50);
+    expect(new Set(data?.scripts.map((s) => s.script)).size).toBe(data?.scripts.length);
+  });
+
+  it('lists D1, DO and R2 resources by their GraphQL identifier, R2 by class', () => {
+    const resources = parseUsage(graphqlBody(REALISTIC_USAGE), NOW)?.resources;
+    expect(resources?.d1).toEqual([
+      { id: SYNTHETIC_D1[0], size_bytes: 38_900_000, rows_read: 5210, rows_written: 318 },
+      { id: SYNTHETIC_D1[1], size_bytes: 7_300_000, rows_read: 1932, rows_written: 168 },
+    ]);
+    expect(resources?.do.map((ns) => ns.id)).toEqual([...SYNTHETIC_NS]);
+    expect(resources?.do[0]).toEqual({ id: SYNTHETIC_NS[0], rows_read: 12_100, rows_written: 1040 });
+    // DeleteObject is free: it adds nothing to either class.
+    expect(resources?.r2).toEqual([
+      { id: 'mail-hero-store', size_bytes: 781_000_000, class_a: 15_900, class_b: 52_800 },
+      { id: 'backup-synthetic', size_bytes: 56_000_000, class_a: 1_210, class_b: 3_100 },
+    ]);
+  });
+
+  it('puts R2 operations without a bucket under unclassified, and a bucket without storage as null size', () => {
+    const body = graphqlBody({
+      r2Ops: [{ actionType: 'ListBuckets', bucketName: '', requests: 4 }, { actionType: 'HeadObject', bucketName: 'b9', requests: 2 }],
+      r2Storage: [],
+    });
+    expect(parseUsage(body, NOW)?.resources.r2).toEqual([
+      { id: 'b9', size_bytes: null, class_a: 0, class_b: 2 },
+      { id: 'unclassified', size_bytes: null, class_a: 4, class_b: 0 },
+    ]);
   });
 });
 
