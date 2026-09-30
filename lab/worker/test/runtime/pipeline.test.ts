@@ -140,6 +140,23 @@ describe('the neuron cap', () => {
     expect(h.requests).toHaveLength(1);
   });
 
+  it('never lets a cap too small for a day hold back the next one', async () => {
+    // One neuron does not pay for a single batch of 50 embeddings: nothing is embedded today.
+    h = await startHarness({ bindings: { LAB_DAILY_NEURONS: '1' } });
+    h.arxiv.feed = { status: 200, body: rssFeed(dayItems('2609')) };
+    const start = now();
+    await h.run(start);
+    expect((await h.get<TodayResponse>('/api/today')).deck).toBeNull();
+    // At the next fetch slot the day is ranked with what exists (no vectors: an explore deck), shown with the
+    // abstract fallbacks, and the new day's fetch goes out.
+    await h.run(nextFetchSlot(start, 6));
+    const deck = await h.get<Deck>('/api/decks/2026-09-30');
+    expect(deck.kind).toBe('explore');
+    expect(deck.cards).toHaveLength(20);
+    expect(deck.cards.every((c) => c.brief === null)).toBe(true);
+    expect(h.requests).toHaveLength(2);
+  });
+
   it('treats the account allowance error as a stop for the day', async () => {
     h = await startHarness();
     h.arxiv.feed = { status: 200, body: rssFeed(dayItems('2609')) };

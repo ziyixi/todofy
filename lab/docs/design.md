@@ -414,7 +414,9 @@ What the implementation (`worker/src/`) settled where this design left room, all
   abstract fallback.
 - **Cap**: once a call would pass the cap (or Workers AI reports the account allowance gone), AI work stops
   for the rest of the UTC day. A deck capped during 简介 is shown at once (`ready_at`) and its missing 简介
-  are written on the next UTC day while it is at most 3 days old.
+  are written on the next UTC day while it is at most 3 days old. A day whose embeddings the cap stops
+  continues after 00:00 UTC; if the next fetch slot comes first, the day is ranked with what was embedded
+  (with no vectors at all, an explore deck), so a cap too small for a day never holds back the next one.
 - **Guard bound** (ops-v1: every deferred job has a bound): when the last successful fetch is more than 48 h
   old, the whole day's pipeline runs to its end despite the shed, then defers again.
 - **Settings** live in D1 (`settings`, the source the GETs read); LabState mirrors the effective cap and the

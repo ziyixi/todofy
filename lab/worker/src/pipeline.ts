@@ -710,13 +710,26 @@ async function advanceJob(deps: Deps, now: number, cap: number, job: JobRow, set
     store.sql.exec('UPDATE jobs SET errors = errors + 1, retry_at = ?, updated_at = ? WHERE day = ?', retry, now, job.day);
     return { next: retry };
   };
-  const capped = (): AlarmPlan => ({ next: nextUtcMidnight(now) });
+  // Stopped by the cap: continue after 00:00 UTC, or at the next fetch slot if that comes first (or has come).
+  const capped = (): AlarmPlan => ({
+    next: Math.max(now + SOON_MS, Math.min(nextUtcMidnight(now), store.getNumber('fetch_next_at') ?? Number.POSITIVE_INFINITY)),
+  });
 
   switch (job.phase) {
     case 'embedding': {
       const result = await embedSlice(deps, now, cap, job.day);
       if (result === 'error') return fail();
-      if (result === 'capped') return capped();
+      if (result === 'capped') {
+        // A cap too small for the whole day must not hold back the next day: once the next fetch slot has
+        // come, the day is ranked with what was embedded (an explore deck needs no vectors).
+        const fetchAt = store.getNumber('fetch_next_at') ?? Number.POSITIVE_INFINITY;
+        if (now < fetchAt) return capped();
+        const left = store.one<{ n: number }>('SELECT count(*) AS n FROM pending_embed WHERE day = ?', job.day)?.n ?? 0;
+        store.sql.exec('DELETE FROM pending_embed WHERE day = ?', job.day);
+        store.count(now, 'embed_skipped_cap', left);
+        setPhase('ranking');
+        return { next: now + SOON_MS };
+      }
       if (result === 'done') setPhase('ranking');
       return { next: now + SOON_MS };
     }
