@@ -100,6 +100,7 @@ describe('the registry', () => {
     expect(resourceByMatch('do', '55c248f9d82c45f3a89d2de1d719d5db')?.id).toBe('mail-coordinator');
     expect(resourceByMatch('do', 'a013ef9fa45048d4b4f7bfcc641b57ea')?.id).toBe('todofy-core-do');
     expect(resourceByMatch('do', 'acddddf88d624194a68af430fd1a90ff')?.id).toBe('home-state');
+    expect(resourceByMatch('do', 'd8b315160669429781ba6229123cb33c')?.id).toBe('lab-state');
     expect(resourceByMatch('r2', 'someone-elses-bucket')).toBeUndefined();
     // Not an app of the monorepo: the self-hosted servers' backups, named under a hidden entry.
     expect(resourceByMatch('r2', 'vultr-backup')).toMatchObject({ id: 'vps-backup', name: 'VPS 备份', entry: 'self-hosted' });

@@ -196,6 +196,8 @@ const RESOURCES: readonly ResourceDef[] = [
   { id: 'todofy-core-do', kind: 'do', name: 'TodofyCore', entry: 'todofy', script: 'todofy-core', match: 'a013ef9fa45048d4b4f7bfcc641b57ea' },
   { id: 'home-state', kind: 'do', name: 'HomeState', entry: 'home', script: 'home', match: 'acddddf88d624194a68af430fd1a90ff' },
   { id: 'lab-db', kind: 'd1', name: 'lab 论文库', entry: 'lab', match: 'f20238dc-93a4-4d1a-91c4-c013f01cbdc9' },
+  // Created by Lab's first deploy (2026-09-30).
+  { id: 'lab-state', kind: 'do', name: 'LabState', entry: 'lab', script: 'lab', match: 'd8b315160669429781ba6229123cb33c' },
   // IDs read from the account's D1, Durable Object namespace and R2 bucket lists (2026-09-30).
   { id: 'mail-hero-store', kind: 'r2', name: 'mail-hero 邮件存储', entry: 'mail-hero', match: 'mail-hero-store' },
   { id: 'mail-hero-backup', kind: 'r2', name: 'mail-hero 备份', entry: 'mail-hero', match: 'mail-hero-backups' },
