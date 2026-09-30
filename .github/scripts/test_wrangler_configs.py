@@ -41,6 +41,7 @@ PRODUCTION = {
     "ziyixi-website": "website/wrangler.toml",
     "ziyixi-notion-publish": "website/relay/wrangler.toml",
     "ziyixi-apex-redirect": "website/apex-redirect/wrangler.toml",
+    "lab": "lab/wrangler.toml",
 }
 # Runtime-test configs stay next to their tests.
 TEST_CONFIGS = {
