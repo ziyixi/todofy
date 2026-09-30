@@ -61,7 +61,9 @@ export const V2_BODY_MAX = 32 * 1024;
 export const V2_BODY_BUDGET = {
   registry: 12 * 1024,
   home: 10 * 1024,
-  flows: 16 * 1024,
+  // Six flows since the GTD loop and Paper Radar (2026-09-30): 16.1 KB on the mockup day, 17.4 KB in the
+  // workerd suite's full canary history with 20 Workers.
+  flows: 20 * 1024,
   cloudflare: 16 * 1024,
   ops: 24 * 1024,
 } as const;

@@ -186,7 +186,7 @@ All under `/api/v2/`, same Access + owner check, error envelope, CSRF + Origin o
 | `GET registry` | Worker, serialized once per isolate; `ETag: "<build>"` → 304 | 0 DO; ≤ 12 KiB |
 | `GET csrf` | Worker (signed token + `home_csrf` cookie, design.md §6) | — |
 | `GET home[?refresh=1]` | DO `v2View('home')` | 1 DO call; ≤ 1 + N rows; ≤ 10 KiB |
-| `GET flows` | DO | ≤ 20 rows; ≤ 16 KiB |
+| `GET flows` | DO | ≤ 20 rows; ≤ 20 KiB (16 KiB until the GTD loop and Paper Radar made six flows) |
 | `GET cloudflare[?refresh=1]` | DO | 3–4 rows; ≤ 16 KiB |
 | `GET ops` | DO | ≤ 10 rows; ≤ 24 KiB |
 | `POST guard {level}`, `POST canary {canary_id}` | DO (`setGuardOverride`, `startCanary`) | Origin + CSRF; ≤ 1 KiB body |
@@ -209,7 +209,7 @@ Measured (unit suite for bytes, workerd suite for rows; a full 14-run canary his
 | View | Mockup day | Bad day (20 items, 16 signals/app, 14 failed runs) | Rows read |
 | --- | --- | --- | --- |
 | home | ≤ 10 KiB (budget) | 8.3 KB | 22 (≤ 24) |
-| flows | 12.7 KB | 20.1 KB | 22 (≤ 24) |
+| flows | 16.1 KB (six flows; 17.4 KB in the workerd suite) | 22.9 KB | 22 (≤ 24) |
 | cloudflare | ≤ 16 KiB, also with 20 Workers | 17.1 KB | 22 (≤ 24) |
 | ops | ≤ 24 KiB | 24.1 KB | 22 (≤ 24) |
 
