@@ -28,11 +28,12 @@ function stageCount(stage: StageDef, state: StageState | undefined): string {
   return stage.entry === null ? '—' : LEVEL[state.level].word
 }
 
-/** The stage a card opens on: the first stage with a problem, else the first monitored one. */
+/** The stage a card opens on: the flow's first issue (its worst stage), else the first stage with a problem, else the first monitored one. */
 function defaultStage(flow: FlowDef, state: FlowState | undefined): string | undefined {
+  if (state?.first_issue) return state.first_issue.stage
   const issue = state?.stages.find((stage) => ATTENTION.has(stage.level) || stage.level === 'held')
   const monitored = state?.stages.find((stage) => stage.level !== 'unmonitored' && stage.level !== 'link')
-  return issue?.id ?? state?.first_issue?.stage ?? monitored?.id ?? flow.stages[0]?.id
+  return issue?.id ?? monitored?.id ?? flow.stages[0]?.id
 }
 
 function freshLine(state: FlowState, now: Date): string {

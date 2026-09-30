@@ -1,7 +1,22 @@
 # Home dashboard (`home`)
 
-The owner's single ops view for Mail Hero and Todofy on `home.ziyixi.science`, behind the Cloudflare
-Access application "Home". It reads both apps only through their `Ops` entrypoints
+The owner's personal console (个人控制台) on `home.ziyixi.science`, behind the Cloudflare Access
+application "Home". Four hash-routed views ([`docs/design-v2.md`](docs/design-v2.md)):
+
+- **首页 `#/`**: launcher tiles for every registered app, site and background service (Mail Hero,
+  Todofy, Flowday, 思源笔记, the website, Notion 发布, the newsletter), each a real link plus an honest
+  health word (link-only entries show only their host; unmonitored ones say 未接入), an attention strip,
+  one line per business flow and four mini quota bars.
+- **业务流程 `#/flows`**: each flow as a chain of stages bound to app signals, counters, Worker analytics
+  and, for 邮件 → 任务, the canary.
+- **Cloudflare 监控 `#/cloudflare`**: the account quotas, an auto-discovered per-Worker table (requests,
+  errors, CPU p50/p99 against the 10 ms Free limit, subrequests, DO requests) and D1/DO/R2 resources
+  named from the registry.
+- **操作与记录 `#/ops`**: guard and canary actions, the digest and each app's full ops-v1 details.
+
+What exists and how it maps to Workers, resources and flows is a typed registry compiled into the
+Worker (`worker/src/registry.ts`) and served by `GET /api/v2/registry`, so no hostname is in the UI
+bundle. It reads Mail Hero and Todofy only through their `Ops` entrypoints
 ([`contracts/ops-v1`](../contracts/ops-v1/README.md)) and never imports `mail-hero/` or `todofy/` code.
 Besides the page it runs three jobs:
 
@@ -19,15 +34,15 @@ Besides the page it runs three jobs:
   fixtures.
 
 Workers Free only: the fetch and cron handlers authenticate, route and make one RPC; all work runs in
-the SQLite Durable Object `HomeState`, every read, call and table is bounded, and nothing holds mail
-content.
+the SQLite Durable Object `HomeState`, every read, call and table is bounded (one GraphQL query and one
+website probe per tick, rate-limited owner refreshes; design-v2 §5), and nothing holds mail content.
 
 | Path | What |
 | --- | --- |
-| `worker/` | TypeScript Worker `home` + Durable Object `HomeState` (`wrangler.toml` is the local/base config) |
-| `web/` | React + Vite UI (Chinese, mobile-first, light/dark), built to `web/dist` and served by the Worker |
+| `worker/` | TypeScript Worker `home` + Durable Object `HomeState` (`wrangler.toml` is the local/base config); `src/registry.ts` is the registry, `src/api-v2-types.ts` the API types the UI imports |
+| `web/` | React + Vite UI (Chinese, mobile-first, light/dark, browser time zone), built to `web/dist` and served by the Worker |
 | `deploy/` | `generate-ci-config.mjs` (production config and secrets file) and its tests |
-| [`docs/design.md`](docs/design.md) | layout, storage, the tick (status, usage, guard, canary, digest), owner API, the usage query, UI, tests, CI |
+| [`docs/design.md`](docs/design.md) | storage, the tick (status, usage, guard, canary, digest), Access/CSRF, the usage query, tests, CI (its v1 API and one-page UI sections are superseded by design-v2) |
 | [`docs/design-v2.md`](docs/design-v2.md) | v2: four views, the registry (entries, workers, resources, flows), levels, API v2 and its budgets |
 | [`docs/setup.md`](docs/setup.md) | resources, Access, GitHub variables and secrets, the analytics token, local dev, rollback |
 | [`docs/limits.md`](docs/limits.md) | every Free allowance and platform limit used, with Cloudflare sources |
@@ -49,5 +64,9 @@ production config. `Contracts` runs the host-side ops-v1 caller tests
 only, after `CI gate` and after both app deploys, and finishes with a probe that an unauthenticated
 request is answered by Access, never by the app. See the root [`README.md`](../README.md) "CI".
 
-Status: implemented and tested locally with synthetic data; not yet deployed
-([`docs/verification.md`](docs/verification.md)).
+To see the built UI against the real Worker locally without any account, see
+[`docs/setup.md`](docs/setup.md) §5.
+
+Status: v2 implemented and tested locally with synthetic data, including a browser pass over the four
+views on desktop and a 390 px phone; the production checks still open are listed in
+[`docs/verification.md`](docs/verification.md) §2.

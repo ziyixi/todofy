@@ -37,6 +37,19 @@ describe('业务流程', () => {
     expect(within(card('运维摘要')).getByText('上次摘要 昨天 23:00 · Todofy 已接收')).toBeInTheDocument()
   })
 
+  it('opens on the worst stage (the flow\'s first issue), not an earlier lesser one', async () => {
+    const base = oneWarning()
+    const [mail, ...rest] = base.flows.flows
+    const stages = mail!.stages.map((s) =>
+      s.id === 'ingest' ? { ...s, level: 'warning' as const, reason: 'capacity_70' } : s.id === 'deliver' ? { ...s, level: 'critical' as const, reason: 'endpoint_blocked' } : s.id === 'consume' ? { ...s, level: 'ok' as const, reason: null, signals: [] } : s,
+    )
+    const worst = { ...mail!, level: 'critical' as const, first_issue: { stage: 'deliver', code: 'endpoint_blocked' }, stages }
+    await showFlows({ ...base, flows: { ...base.flows, flows: [worst, ...rest] } })
+    const nodes = within(within(card('邮件 → 任务')).getByRole('list', { name: '阶段' })).getAllByRole('button')
+    expect(nodes[1]).toHaveAttribute('aria-pressed', 'false')
+    expect(nodes[3]).toHaveAttribute('aria-pressed', 'true')
+  })
+
   it('opens the flow with a problem on its failing stage', async () => {
     await showFlows(oneWarning())
     const mail = card('邮件 → 任务')

@@ -145,7 +145,9 @@ describe('首页', () => {
     expect(within(cf).queryAllByRole('meter')).toHaveLength(0)
     expect(within(cf).getByText('用量无法获取')).toBeInTheDocument()
     expect(within(cf).getByText('还没有用量数据。')).toBeInTheDocument()
-    expect(within(cf).getByRole('link', { name: /0 个 Worker · 今日错误 0/ })).toBeInTheDocument()
+    // No GraphQL answer yet: no made-up "0 个 Worker · 今日错误 0".
+    expect(within(cf).getByRole('link', { name: /Worker 暂无数据/ })).toBeInTheDocument()
+    expect(within(cf).queryByText(/0 个 Worker/)).not.toBeInTheDocument()
   })
 
   it('keeps the tiles as links while loading, with same-size skeletons', async () => {

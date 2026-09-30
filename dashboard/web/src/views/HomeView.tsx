@@ -80,7 +80,10 @@ function CloudflareToday({ home }: { home: HomeResponse }) {
         )}
         <a className="cf-today-foot" href={routeHash({ view: 'cloudflare' })}>
           <span>
-            {formatNumber(summary.workers)} 个 Worker · 今日错误 {formatNumber(summary.errors_today)} ·{' '}
+            {/* Never fetched: no Worker rows exist yet, so "0 个 Worker · 今日错误 0" would be made up. */}
+            {summary.fetched_at === null
+              ? 'Worker 暂无数据 ·'
+              : `${formatNumber(summary.workers)} 个 Worker · 今日错误 ${formatNumber(summary.errors_today)} ·`}{' '}
           </span>
           {shed ? <LevelMark level="held" word="降载中" size={10} /> : <LevelMark level="ok" word="未降载" size={10} />}
           <ChevronRight className="chevron" size={16} aria-hidden="true" />

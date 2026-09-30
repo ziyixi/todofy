@@ -6,7 +6,9 @@ proposal of 2026-09-29 (steps 1 and 2; every open question takes its recommended
 the registry, the v2 types and every `/api/v2` route are implemented in the Worker (evaluation in
 `worker/src/evaluate.ts`, discovery in `discovery.ts`, the probe in `probe.ts`, view assembly and ETags
 in `views-v2.ts`, storage in `state.ts`), with unit tests and workerd tests for each endpoint. The UI
-(`web/`) renders the four views from `/api/v2` only, and the v1 API is removed (§5).
+(`web/`) renders the four views from `/api/v2` only, and the v1 API is removed (§5). The built UI was
+driven end to end against the real Worker in workerd (stub apps, fake GraphQL; desktop and a 390 px
+phone, light and dark): [`verification.md`](verification.md) §1d.
 
 ## 1. Views
 
@@ -107,7 +109,8 @@ time (a stale status, stopped ticks) is right at every read.
 
 - **Entry level** (the tile, Q2 — never the worst of its flows):
   - ops_v1: never polled → unknown `never_checked`; 1 failed poll → warning `unreachable`, ≥ 2 →
-    critical; a status older than 75 min → unknown `stale`; health `down` → critical (its critical
+    critical; no status of the last 75 min → unknown, reason `unreachable` when the last poll failed
+    (e.g. an app never read successfully) else `stale`; health `down` → critical (its critical
     signal, e.g. `status_unavailable`); then the worst signal, a stage hold code of that app giving
     `held` (any severity) and other info signals nothing; `degraded` without any shown signal →
     warning `app_degraded`. Tile metric: the counter named by `tile_metric`.
@@ -130,8 +133,8 @@ time (a stale status, stopped ticks) is right at every read.
   create the event) → 投递 failed + critical, 摘要 未验证; failed at the consumer → 投递 已验证, 摘要 failed;
   no run in the window → 未验证. A success never lowers a worse level.
 - **Flow**: level = worst monitored stage (`unmonitored` when none); `partial` when fewer than half are
-  monitored (the UI shows ○ 部分接入, never green); `first_issue` = the first monitored stage that is not
-  ok, with its reason. Freshness: the canary's last ok run and ok/finished counts of the 14 recent runs
+  monitored (the UI shows ○ 部分接入, never green); `first_issue` = the first monitored stage at the flow's
+  (worst) level, with its reason, so a 故障 row never names a lesser stage (the card opens on it too). Freshness: the canary's last ok run and ok/finished counts of the 14 recent runs
   (mail flow); the digest's last send and receipt (a flow with the dashboard's own stage); the latest
   active hour of its analytics stages (网站发布); else none. A signal code no stage, `app_only_signals` or
   the platform places is listed once as 未归类的信号 on the first flow (display order) with that app.
@@ -242,4 +245,5 @@ notion-publish idle limit 26 h.
 
 Whether `durableObjectsInvocationsAdaptiveGroups.scriptName` is the defining or the calling script;
 whether `cpuTimeP99` includes DO time; the website probe from a same-zone Worker; notion-publish's
-real schedule; the TODO resource identifiers of §3.
+real schedule; the TODO resource identifiers of §3. The full list of pending production checks is in
+[`verification.md`](verification.md) §2.

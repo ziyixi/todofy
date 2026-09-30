@@ -60,6 +60,10 @@ describe('entry health (the tile: the entry\'s own health, Q2)', () => {
     const ok = status('mail-hero');
     expect(state('mail-hero', { statuses: { 'mail-hero': failedStatus(ok, 1) } })).toMatchObject({ level: 'warning', reason: 'unreachable', consecutive_failures: 1 });
     expect(state('mail-hero', { statuses: { 'mail-hero': failedStatus(ok, 2) } })).toMatchObject({ level: 'critical', reason: 'unreachable' });
+    // Never read successfully and the first poll failed: unknown, but the reason is the failure, not "stale".
+    const neverRead = { checked_at: NOW - 2 * MIN, ok: false, error: 'unavailable', consecutive_failures: 1, status: null, status_at: null } as const;
+    expect(state('todofy', { statuses: { todofy: neverRead } })).toMatchObject({ level: 'unknown', reason: 'unreachable', consecutive_failures: 1 });
+    expect(state('todofy', { statuses: { todofy: { ...neverRead, consecutive_failures: 2 } } })).toMatchObject({ level: 'critical', reason: 'unreachable' });
     // A status older than two and a half ticks says nothing any more.
     expect(state('mail-hero', { statuses: { 'mail-hero': status('mail-hero', {}, NOW - 2 * HOUR) } })).toMatchObject({ level: 'unknown', reason: 'stale' });
     const down = { ...status('todofy'), status: unavailable as OpsStatus };
@@ -207,6 +211,14 @@ describe('flows (stage chains)', () => {
     // A code another flow places is not unclassified anywhere.
     const reminder = withSignals('todofy', [signal('reminder_failed', 'warning')]);
     expect(flowStates(input({ statuses: { todofy: reminder } })).flatMap((f) => f.unclassified)).toEqual([]);
+  });
+
+  it('names the worst stage as the first issue, not an earlier lesser one', () => {
+    const mailHero = withSignals('mail-hero', [signal('capacity_70', 'warning', { percent: 72 }), signal('endpoint_blocked', 'critical')]);
+    const mail = flow('mail-to-task', { statuses: { 'mail-hero': mailHero, todofy: status('todofy') } });
+    expect(stage(mail, 'ingest').level).toBe('warning');
+    expect(stage(mail, 'deliver').level).toBe('critical');
+    expect(mail).toMatchObject({ level: 'critical', first_issue: { stage: 'deliver', code: 'endpoint_blocked' } });
   });
 
   it('shows unmonitored stages as 未接入 and an unreachable app on every one of its stages', () => {

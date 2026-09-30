@@ -116,8 +116,19 @@ For a local login bypass, create an untracked `worker/.dev.vars` (gitignored) wi
 `DEV_AUTH_BYPASS=true`, `ACCESS_OWNER=owner@example.com`, and a locally generated 64-hex
 `CSRF_SIGNING_KEY`. The bypass works only for `http://localhost`, `127.0.0.1` or `[::1]` requests
 without `cf-ray`; anywhere else an enabled bypass answers 503. The production generator never emits
-`DEV_AUTH_BYPASS`. Without the two app Workers running locally, their cards show "无法连接", which is
-the expected state. Use synthetic data only; never point a local run at production resources.
+`DEV_AUTH_BYPASS`. Without the two app Workers running locally, their tiles show ◆ 未知 · 无法连接
+after the first poll and ■ 故障 from the second, and without a `CF_ANALYTICS_TOKEN` the Cloudflare view
+has no usage and no Worker rows; both are the expected state. The registry's website probe is the only
+public request a tick makes (one `GET https://www.ziyixi.science/build-info.json`, status and latency
+only); set that entry's `enabled: false` in `worker/src/registry.ts` (uncommitted) to avoid it. Use
+synthetic data only; never point a local run at production resources.
+
+For an end-to-end check of the UI against the real Worker without any account, run the Worker in
+Miniflare the way `worker/test/runtime/harness.ts` does (bundle `src/index.ts`, stub `mail-hero` and
+`todofy` Workers from `test/stubs/ops-stub.js` with the contract fixtures, an `outboundService` that
+answers the GraphQL endpoint with `test/graphql-fixture.ts` and the probe URL with a 200) but with
+`ASSETS` serving `web/dist` and `DEV_AUTH_BYPASS=true`, then open `http://127.0.0.1:<port>/` in a
+browser. [`verification.md`](verification.md) §1d records such a run.
 
 ## 6. Operations
 

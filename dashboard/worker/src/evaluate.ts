@@ -121,7 +121,8 @@ export function freshStatus(doc: StatusDoc | undefined, now: number): OpsStatus 
 
 /**
  * Reachability of an ops_v1 entry: never read → unknown; 2 failed polls in a row → critical, 1 →
- * warning; a status older than OBSERVATION_STALE_MS → unknown; health `down` → critical.
+ * warning; no status fresher than OBSERVATION_STALE_MS → unknown (`unreachable` when the last poll
+ * failed, else `stale`); health `down` → critical.
  */
 function reachability(doc: StatusDoc | undefined, now: number): Verdict {
   if (doc === undefined || doc.checked_at === null) return { level: 'unknown', reason: 'never_checked' };
@@ -129,7 +130,8 @@ function reachability(doc: StatusDoc | undefined, now: number): Verdict {
   if (doc.consecutive_failures >= 2) verdict = { level: 'critical', reason: 'unreachable' };
   else if (doc.consecutive_failures === 1) verdict = { level: 'warning', reason: 'unreachable' };
   const status = freshStatus(doc, now);
-  if (status === null) return worse(verdict, { level: 'unknown', reason: 'stale' });
+  // No usable status: a failed last poll says more than "stale" (an app never read successfully has no old status at all).
+  if (status === null) return worse(verdict, { level: 'unknown', reason: doc.consecutive_failures > 0 ? 'unreachable' : 'stale' });
   if (status.health === 'down') {
     const code = status.signals.find((signal) => signal.severity === 'critical')?.code ?? 'app_down';
     verdict = worse(verdict, { level: 'critical', reason: code });
@@ -460,7 +462,8 @@ export function flowStates(input: EvalInput, registry: Registry = REGISTRY): Omi
     const stages = flow.stages.map((stage) => stageState(stage, input, marks, registry));
     const monitored = stages.filter((stage) => isRollup(stage.level));
     const level = rollup(monitored.map((stage) => stage.level)) ?? 'unmonitored';
-    const issue = monitored.find((stage) => stage.level !== 'ok');
+    // The first stage at the flow's (worst) level, so a 故障 row never shows a lesser stage's reason.
+    const issue = level === 'ok' ? undefined : monitored.find((stage) => stage.level === level);
     const unclassified: FlowState['unclassified'][number][] = [];
     for (const [entryId, flowId] of firstFlowOf) {
       if (flowId !== flow.id) continue;
