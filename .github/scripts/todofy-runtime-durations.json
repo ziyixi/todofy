@@ -38,5 +38,6 @@
   "tests/runtime/test_scenarios_summary.py": 27.3,
   "tests/runtime/test_scenarios_switches.py": 74.9,
   "tests/runtime/test_scenarios_todoist.py": 81.3,
-  "tests/runtime/test_scenarios_webhook.py": 28.5
+  "tests/runtime/test_scenarios_webhook.py": 28.5,
+  "tests/runtime/test_task_intents.py": 44.0
 }
