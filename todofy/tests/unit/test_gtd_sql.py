@@ -2,6 +2,7 @@
 carryover and the aggregate reads return, and that the previous release's SQL keeps working."""
 
 import json
+import re
 import sqlite3
 from collections.abc import Iterator
 from pathlib import Path
@@ -13,6 +14,7 @@ from todofy.core.sql import gtd as sql
 from todofy.core.sql import reminders as reminder_sql
 from todofy.core.sql import reports as report_sql
 from todofy.core.sql import retention as retention_sql
+from todofy.core.vocab import ReminderState
 
 MIGRATIONS = sorted((Path(__file__).parents[2] / "migrations").glob("*.sql"))
 KEY = bytes(32)
@@ -45,6 +47,19 @@ def write_page(db: sqlite3.Connection, day: str, tasks: list[dict]) -> None:
 
 def task(task_id: str, **fields: object) -> dict[str, object]:
     return {"id": task_id, "project_id": "inbox", "content": "t", "description": "", **fields}
+
+
+def test_the_checks_equal_the_vocabulary(db):
+    def values(table: str, column: str) -> set[str]:
+        text = db.execute("SELECT sql FROM sqlite_master WHERE name = ?", (table,)).fetchone()[0]
+        match = re.search(rf"\b{column} TEXT[^,]*?CHECK \({column} IN \(([^)]*)\)\)", text, re.DOTALL)
+        assert match, (table, column)
+        return set(re.findall(r"'([^']*)'", match.group(1)))
+
+    assert values("gtd_snapshots", "status") == set(gtd.SnapshotStatus)
+    assert values("gtd_daily", "scope") == set(gtd.Scope)
+    assert values("gtd_daily", "completed_source") == {"api", "none"}
+    assert values("gtd_reviews", "state") == set(ReminderState)
 
 
 def test_a_page_is_written_in_one_statement_and_rewritten_idempotently(db):

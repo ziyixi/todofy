@@ -62,7 +62,6 @@ MAX_REVIEW_BODY_BYTES = 8192
 MAX_LABELS_BYTES = 2048
 MAX_ID_CHARS = 64
 DAY_TEXT = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}", re.ASCII)
-WEEK_TEXT = re.compile(r"[0-9]{4}-W[0-9]{2}", re.ASCII)
 
 
 class SnapshotStatus(StrEnum):
@@ -96,10 +95,6 @@ class Scope(StrEnum):
 
 def day_of(timestamp: int) -> str:
     return datetime.fromtimestamp(timestamp, UTC).strftime("%Y-%m-%d")
-
-
-def day_start(day: str) -> int:
-    return int(datetime.fromisoformat(day).replace(tzinfo=UTC).timestamp())
 
 
 def shift(day: str, days: int) -> str:
