@@ -95,14 +95,20 @@ describe("live identity verification", () => {
 });
 
 describe("website wrangler.toml", () => {
-  it("is an assets-only Worker without workers.dev, previews or hostnames yet", async () => {
+  it("is an assets-only Worker without workers.dev or previews, on the cutover hostnames only", async () => {
     const config = parseWorkerConfig(await readFile("wrangler.toml", "utf8"));
-    expect(config).toEqual({
-      name: "ziyixi-website",
-      accountId: "f57937bd1d93bf59e737b6d8445fb7a3",
-      hostnames: [],
-    });
-    expect(liveOrigin(config, "https://www.ziyixi.science")).toBeNull();
+    expect(config.name).toBe("ziyixi-website");
+    expect(config.accountId).toBe("f57937bd1d93bf59e737b6d8445fb7a3");
+    // docs/cutover.md: the preview hostname first, then www; nothing else is ever attached here.
+    for (const host of config.hostnames) {
+      expect(["website-preview.ziyixi.science", "www.ziyixi.science"]).toContain(host);
+    }
+    const origin = liveOrigin(config, "https://www.ziyixi.science");
+    if (config.hostnames.length === 0) expect(origin).toBeNull();
+    else
+      expect(origin).toBe(
+        `https://${config.hostnames.includes("www.ziyixi.science") ? "www.ziyixi.science" : config.hostnames[0]}`,
+      );
     const text = await readFile("wrangler.toml", "utf8");
     expect(text).toContain('html_handling = "auto-trailing-slash"');
     expect(text).toContain('not_found_handling = "404-page"');
