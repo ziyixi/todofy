@@ -167,3 +167,23 @@ keyboard map; op queue (optimistic apply, rollback, version conflict); undo acro
 exclusions and preview copy for both modes; every send state's copy and actions; reduced-motion path;
 live-region text. Manual (recorded in `docs/verification.md` later): phone Safari and Chrome with touch,
 desktop keyboard-only, VoiceOver, dark mode.
+
+### Implementation notes (web build, 2026-09-30)
+
+Where `web/` settles a detail this spec left open:
+
+- **Focus.** After a decision or undo, focus moves to the new top card's title, except when it is on an
+  action-bar button: it stays there, so the button can be pressed again with Enter/Space.
+- **Failed operations.** The queue sends one operation at a time. A transient failure is repeated once
+  with the same `op_id`. If the repeat also fails, that operation and every operation queued after it
+  are rolled back, and the deck is re-read. This is stricter than "keeps the rest of the queue": a later
+  undo was planned on top of the failed step and could otherwise take back the wrong card. In practice
+  at most one or two swipes are queued.
+- **Undo depth.** The server reports only the next undo target. After the local queue has taken that one
+  back, 撤销 is briefly disabled ("同步中") until the response names the next target.
+- **Send mode.** The summary's mode starts from the settings default. Changing it there applies to that
+  send only; the default is changed in 设置.
+- **Routes.** Routes are paths: `/`, `/deck/<day>` (the link the Todoist parent task carries), `/liked`,
+  `/seeds`, `/settings`. The Worker's single-page-application fallback serves them.
+- **Two request bodies added to `worker/src/api-types.ts`.** `DELETE /api/seeds` takes `{op_id, paper_id}`
+  and `PUT /api/settings` takes `{op_id, …Settings}` (design.md §8).

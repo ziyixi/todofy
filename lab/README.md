@@ -9,8 +9,9 @@ Free; a SQLite Durable Object `LabState` schedules itself with alarms (no cron);
 records; a hard daily neuron ceiling (`LAB_DAILY_NEURONS`, typical use ≈340 of the account's 10,000)
 keeps AI use bounded.
 
-Status: **scaffold**. Design: [`docs/design.md`](docs/design.md); deck UX: [`docs/ux.md`](docs/ux.md).
-Nothing is implemented or deployed.
+Status: **in progress, not deployed**. `web/` implements the deck UI (`docs/ux.md`) against the owner API
+types and is tested against an in-memory fake of that API. Design: [`docs/design.md`](docs/design.md); deck UX:
+[`docs/ux.md`](docs/ux.md).
 
 | Path | Contents |
 | --- | --- |

@@ -255,8 +255,8 @@ Every `/api/*` route needs the Access owner (edge-auth); mutations also need Ori
 | `POST /api/decks/:day/later` | `{op_id}` → marks 暂不发送 (`later_at`) |
 | `GET /api/liked?cursor=&q=` | liked papers, newest first, 50 per page, optional title filter |
 | `POST /api/feedback` | `{op_id, paper_id, label: 'like'\|'dislike'\|null}` from the 已喜欢 list (source `library`) |
-| `GET/POST/DELETE /api/seeds` | seed IDs (≤ 50), with resolve state |
-| `GET/PUT /api/settings` | categories, λ, cap (≤ ceiling), 简介 model (allow-list), ingest pause, default send mode |
+| `GET/POST/DELETE /api/seeds` | seed IDs (≤ 50), with resolve state; POST `{op_id, ids}`, DELETE `{op_id, paper_id}` |
+| `GET/PUT /api/settings` | categories, λ, cap (≤ ceiling), 简介 model (allow-list), ingest pause, default send mode; PUT `{op_id, …Settings}` → `SettingsResponse` |
 | `GET /api/status` | counters, neurons today/cap, last fetch, guard |
 
 `:day` must match `^\d{4}-\d{2}-\d{2}$` and name an existing deck (404 `deck_not_found`). Deck GETs read

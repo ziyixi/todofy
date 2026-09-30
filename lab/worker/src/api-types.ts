@@ -241,6 +241,10 @@ export interface SeedsResponse {
 export interface AddSeedsRequest extends Mutation {
   readonly ids: readonly string[];
 }
+/** DELETE /api/seeds (JSON body): removes one seed; likes and dislikes stay. */
+export interface RemoveSeedRequest extends Mutation {
+  readonly paper_id: PaperId;
+}
 
 export interface Settings {
   /** e.g. ['cs.IR', 'cs.CL', 'cs.LG'], at most CATEGORIES_MAX. */
@@ -254,6 +258,8 @@ export interface Settings {
   readonly ingest_paused: boolean;
   readonly send_mode: SendMode;
 }
+/** PUT /api/settings: the whole editable set (the Worker refuses a cap above the ceiling). */
+export interface SettingsUpdateRequest extends Mutation, Settings {}
 export interface SettingsResponse extends Settings {
   /** LAB_DAILY_NEURONS (read-only). */
   readonly ceiling: number;
