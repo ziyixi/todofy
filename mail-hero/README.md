@@ -35,7 +35,7 @@ npm --prefix cloudflare test
 
 正式发布使用单仓库根目录的 [GitHub Actions CI/CD](docs/ci-cd.md)：`main` 上 `mail-hero/` 或共享鉴权包 [`packages/edge-auth/`](../packages/edge-auth/) 有改动且 `CI gate` 通过后发布原生 Worker 和网页。应用无需自建服务器；独立的[备份工具](deploy/backup/README.md)由CI构建GHCR镜像，现有服务器通过Compose拉取固定digest运行。Todofy 位于同一仓库的 [`todofy/`](../todofy/)，是独立的 webhook 消费者，单独检查和发布。
 
-本次部署的 UI 为 [mail-hero.ziyixi.science](https://mail-hero.ziyixi.science)，固定收件地址为 `inbox-mail-hero@inbox.ziyixi.science`。GitHub 登录与单封真实纯文本收件已验证；Todofy 完整业务链路仍需用户测试信验收。实际资源和检查范围见 [部署验收记录](docs/verification-native.md)，验收完成后再由用户切换原邮箱自动转发。
+本次部署的 UI 为 [mail-hero.ziyixi.science](https://mail-hero.ziyixi.science)，固定收件地址（`inbox` 子域上的专用地址，值只保存在 GitHub secret `MAIL_HERO_RECEIVE_ADDRESS`，公开仓库不写明）。GitHub 登录与单封真实纯文本收件已验证；Todofy 完整业务链路仍需用户测试信验收。实际资源和检查范围见 [部署验收记录](docs/verification-native.md)，验收完成后再由用户切换原邮箱自动转发。
 
 目标是使用免费额度，把日常增量费用控制在每月 $0–2；**这不是 Cloudflare 的硬账单上限**。不需要 Workers Paid 的 $5/月订阅。R2 仍须单独开通订阅，超额会计费；免费额度由账户内所有项目共享。具体限额、容量预警和停止条件在设置说明中列出。
 

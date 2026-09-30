@@ -2,7 +2,7 @@
 
 Mail Hero 使用 **Workers Free + D1 + 私有 R2 Standard + SQLite Durable Object Alarm + Static Assets + Access**。应用、数据库和网页都由 Cloudflare 托管。Todofy 是独立 webhook 消费者，可以保留自己的服务器和 Tunnel。
 
-当前已部署：唯一地址 **`inbox-mail-hero@inbox.ziyixi.science`**，UI **[mail-hero.ziyixi.science](https://mail-hero.ziyixi.science)**，唯一 owner **`xiziyi2015@gmail.com`**，数据库 `mail-hero`，私有桶 `mail-hero-store`。GitHub 登录和一封真实纯文本邮件的入站、持久保存、解析及 UI 展示已验收；来源自动转发、HTML/附件、大邮件、OTP 备用登录及生产收信额度仍需分别验证。Todofy消费者已具备持久接管接口，完整邮件到任务链路仍待用户测试信验收，见 [消费者接入说明](todofy-integration.md)。
+当前已部署：唯一地址为 `inbox` 子域上的专用地址（GitHub secret `MAIL_HERO_RECEIVE_ADDRESS`，公开仓库不写明），UI **[mail-hero.ziyixi.science](https://mail-hero.ziyixi.science)**，唯一 owner 为 canonical owner 邮箱（GitHub secret `MAIL_HERO_ACCESS_OWNER`），数据库 `mail-hero`，私有桶 `mail-hero-store`。GitHub 登录和一封真实纯文本邮件的入站、持久保存、解析及 UI 展示已验收；来源自动转发、HTML/附件、大邮件、OTP 备用登录及生产收信额度仍需分别验证。Todofy消费者已具备持久接管接口，完整邮件到任务链路仍待用户测试信验收，见 [消费者接入说明](todofy-integration.md)。
 
 本地生产配置为 gitignored `cloudflare/wrangler.native.production.toml`；`cloudflare/wrangler.native.toml` 是配置模板。[GitHub Actions](ci-cd.md) 从仓库变量和production secrets生成独立的CI配置并正式发布。以下资源创建和初始化步骤供新环境参考，**现有部署不需要重建资源或重新生成密钥**。完整证据和待验收项见 [验收记录](verification-native.md)。
 
@@ -130,7 +130,7 @@ npm test
 
 ## 4. UI域名与Access
 
-当前 `mail-hero.ziyixi.science` 已绑定 Access 应用，提供 GitHub 和邮件验证码两种登录方式，没有 Bypass。Gmail 备用策略保留 `xiziyi2015@gmail.com`；GitHub 使用独立 Allow 策略，Include 只含通过 IdP Test 核实的本人精确邮箱，Require 必须是既有 GitHub 登录提供商。不要把邮箱和提供商都放到 Include（那会成为 OR 条件）。应用和策略 ID 见验收记录。
+当前 `mail-hero.ziyixi.science` 已绑定 Access 应用，提供 GitHub 和邮件验证码两种登录方式，没有 Bypass。Gmail 备用策略保留 canonical owner 邮箱；GitHub 使用独立 Allow 策略，Include 只含通过 IdP Test 核实的本人精确邮箱，Require 必须是既有 GitHub 登录提供商。不要把邮箱和提供商都放到 Include（那会成为 OR 条件）。应用和策略 ID 见验收记录。
 
 `ACCESS_OWNER` 保留原 Gmail 作为唯一管理员标识，可选 `ACCESS_OWNER_ALIASES` 列出同一个人经核实的其他登录邮箱（逗号分隔，最多 8 个，精确匹配；owner 与 alias 须为可打印 ASCII，否则按未配置 fail closed）。JWT 签名、issuer、audience、时效继续校验；alias 成功登录统一映射到原 owner，CSRF 和管理动作身份不变。实际别名保存在 ignored 生产配置；新环境先验证 IdP 实际返回身份，再配置 Access 与应用两层白名单。
 
@@ -150,7 +150,7 @@ custom_domain = true
 python3 deploy/cloudflare-admin.py wrangler deploy --config wrangler.native.production.toml
 ```
 
-打开 [UI](https://mail-hero.ziyixi.science)，点击 **GitHub** 即可登录。已使用本人 GitHub 会话成功进入 `/setup`，受保护的配置、D1 状态、调度状态与固定收件地址均正常显示；没有读取私人邮件。之前的拒绝来自 GitHub 返回邮箱与原 Gmail 白名单不一致，现已通过本人 alias 解决。邮件验证码仍可用 **`xiziyi2015@gmail.com`** 作为备用；验证码只填在正规登录网页，本轮未单独重测 OTP 流程。
+打开 [UI](https://mail-hero.ziyixi.science)，点击 **GitHub** 即可登录。已使用本人 GitHub 会话成功进入 `/setup`，受保护的配置、D1 状态、调度状态与固定收件地址均正常显示；没有读取私人邮件。之前的拒绝来自 GitHub 返回邮箱与原 Gmail 白名单不一致，现已通过本人 alias 解决。邮件验证码仍可用 canonical owner 邮箱作为备用；验证码只填在正规登录网页，本轮未单独重测 OTP 流程。
 
 ## 5. 仅设置专用收信子域
 
@@ -158,7 +158,7 @@ python3 deploy/cloudflare-admin.py wrangler deploy --config wrangler.native.prod
 
 1. 记录根域现有 MX/SPF，并取得限定 `inbox.ziyixi.science` 的实时 DNS 预览；待添加的三条 MX 和一条 SPF 都只涉及这个子域。
 2. 确认 DNS API 支持请求 body 后，调用 `POST /zones/{zone_id}/email/routing/dns`，body 为 `{"name":"inbox.ziyixi.science"}`，返回 `enabled: true`、`status: ready`，再次查询 DNS 预览返回 `errors: null`。这一步尚未让 UI 的 Subdomains 列表显示已启用，不能把 API 的 DNS 状态当成全部设置完成。
-3. 启用精确地址规则：`inbox-mail-hero@inbox.ziyixi.science`，action **Send to a Worker**，Worker 为 `mail-hero`。catch-all 保持禁用，未更改。刷新设置后，在 Settings → Subdomains 添加 `inbox`，最终明确显示 **Enabled、DNS Locked**；该 UI 步骤也开启了父级路由标记。
+3. 启用精确地址规则：收件地址（与 `MAIL_HERO_RECEIVE_ADDRESS` 相同），action **Send to a Worker**，Worker 为 `mail-hero`。catch-all 保持禁用，未更改。刷新设置后，在 Settings → Subdomains 添加 `inbox`，最终明确显示 **Enabled、DNS Locked**；该 UI 步骤也开启了父级路由标记。
 4. UI 步骤添加了 Cloudflare 公共 DKIM TXT `cf2024-1._domainkey.ziyixi.science`。操作前后再次核对根域 MX/SPF，精确一致，原有 iCloud `mx01.mail.icloud.com` / `mx02.mail.icloud.com` 保留。公共 DNS 已查到子域三条 Cloudflare MX 与 SPF；DNS 可解析仍不等于真实邮件链路验收。
 
 根域仍使用 iCloud，根域 Email Routing 因此显示 `status: misconfigured`，界面可能提示根域 DNS **Conflicting/Missing**；专用子域已经显示 Enabled、DNS Locked。**不要点击 Add missing records，也不要删除 iCloud MX/SPF 来消除这个根域提示。** 单独设置 `skip_wizard: true` 未完成子域启用；会修改根域的 UI Activate 没有执行。
@@ -177,7 +177,7 @@ UI 会显示解析错误、正文截断和附件省略状态；遇到嵌套邮�
 
 Cloudflare未明确承诺 `email()` 在R2写入前失败时的完整持久重投语义。不能声称“永不丢信”；真实入口故障测试和源邮箱副本仍是必要验收。
 
-收件验收通过后，在 Gmail 的“设置 → 转发和 POP/IMAP → 添加转发地址”填写 **`inbox-mail-hero@inbox.ziyixi.science`**，用 Mail Hero 阅读验证邮件，再回 Gmail 完成确认；选择保留 Gmail 副本，按需使用过滤器只转发需要处理的邮件。Exchange/Outlook 同样填写这个地址，保留原邮箱副本；组织账户可能需要管理员允许外部转发。分别用来源邮箱测试实际到达，不轮询任何来源邮箱。
+收件验收通过后，在 Gmail 的“设置 → 转发和 POP/IMAP → 添加转发地址”填写收件地址（`MAIL_HERO_RECEIVE_ADDRESS` 的值），用 Mail Hero 阅读验证邮件，再回 Gmail 完成确认；选择保留 Gmail 副本，按需使用过滤器只转发需要处理的邮件。Exchange/Outlook 同样填写这个地址，保留原邮箱副本；组织账户可能需要管理员允许外部转发。分别用来源邮箱测试实际到达，不轮询任何来源邮箱。
 
 新环境先保持 archive 和强制暂停，完成下一节的消费者接管验收后再配置 forward并解除暂停，以接收用户主动发送的业务测试信。当前Todofy进度见验收记录；来源邮箱的自动转发由用户在完整链路测试通过后开启。历史archive邮件不会自动释放。
 

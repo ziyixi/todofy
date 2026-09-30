@@ -42,7 +42,7 @@
 | Access | 应用 `ebd92116-4d51-4d90-923a-068b05b7e05a` 绑定 UI，原 Gmail 策略 `018f1a13-1a1b-4cf6-a470-c865c4577851` 保留；新增 GitHub 策略 `eea00ced-7de7-4094-a705-c9741d835b7c` 同时要求本人经 Test 核实的精确邮箱和 GitHub 提供商；audience 保持不变 |
 | 浏览器访问 | 未认证请求到达 Access；本人 GitHub 登录已实际成功进入线上 `/setup`，受保护的配置、D1 和调度状态查询成功，固定收件地址及暂停状态正常显示。OTP 入口保留，未单独重测；未读取私人邮件 |
 | 收信子域 | `inbox.ziyixi.science` 已启用，API 返回 `enabled: true`、`status: ready`，ID `1732b14db00946c684b8705a0fdd051d`；Settings → Subdomains 明确显示 Enabled、DNS Locked |
-| 精确收信规则 | `64ebbe06caa64beaa47c8589db9e785c` 已启用：`inbox-mail-hero@inbox.ziyixi.science` → Worker `mail-hero`；catch-all 仍禁用，未更改 |
+| 精确收信规则 | `64ebbe06caa64beaa47c8589db9e785c` 已启用：收件地址（`MAIL_HERO_RECEIVE_ADDRESS`）→ Worker `mail-hero`；catch-all 仍禁用，未更改 |
 | 公共 DNS | `dig` 已查到收信子域的 Cloudflare MX（18 `route2.mx.cloudflare.net`、26 `route1.mx.cloudflare.net`、92 `route3.mx.cloudflare.net`）及 Cloudflare SPF；根域仍为优先级 10 的 `mx01.mail.icloud.com` / `mx02.mail.icloud.com` |
 | 部署初始化状态 | `archive`、retention NULL、logical_bytes 0、容量 5GiB、messages 0、endpoints 0；消费者强制暂停 |
 | 真实单封收件 | 用户发送的 `Test` 于 `2026-09-26T04:47:58.569Z` 入站；解析 ready，无错误，arrival_count 1，archive，delivery_count 0；R2 原件可读且大小/摘要与 D1 相符，UI 中文正文正常 |

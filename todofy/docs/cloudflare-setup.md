@@ -90,7 +90,7 @@ deploy and names only the variable):
 | `TODOFY_MAIL_SOURCE_ID` | optional, default `mail-hero-personal`; must equal the source ID of the imported ledger |
 | `TODOFY_ACCESS_ISSUER` | `https://<team>.cloudflareaccess.com` |
 | `TODOFY_ACCESS_AUDIENCE` | AUD tag from step 2 |
-| `TODOFY_TODOIST_DEFAULT_PROJECT_ID` | Todoist project for new tasks |
+| `TODOFY_TODOIST_DEFAULT_PROJECT_ID` | Todoist project for new tasks. A **secret**, not a variable: the repository is public and Actions logs print variables |
 | `TODOFY_GEMINI_MODELS` | optional, comma-separated, first is preferred |
 | `TODOFY_GEMINI_DAILY_TOKEN_BUDGET` | optional, default `3000000` |
 | `TODOFY_REPORT_DEFAULT_TOP` | optional, default `10`; must equal the newsletter's `?top=` (10) so its report is precomputed |

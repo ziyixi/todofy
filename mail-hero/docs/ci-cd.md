@@ -24,10 +24,8 @@ Mail Hero 位于单仓库的 `mail-hero/` 目录，与 `todofy/` 共用根目录
 | `MAIL_HERO_D1_DATABASE_ID` | 现有 `mail-hero` D1 UUID |
 | `MAIL_HERO_D1_DATABASE_NAME` | 可省略，默认 `mail-hero` |
 | `MAIL_HERO_R2_BUCKET_NAME` | 可省略，默认 `mail-hero-store` |
-| `MAIL_HERO_RECEIVE_ADDRESS` | `inbox-mail-hero@inbox.ziyixi.science` |
 | `MAIL_HERO_ACCESS_ISSUER` | `https://ziyixi.cloudflareaccess.com` |
 | `MAIL_HERO_ACCESS_AUDIENCE` | 现有 Mail Hero Access application AUD |
-| `MAIL_HERO_ACCESS_OWNER` | 现有 canonical owner 邮箱 |
 | `MAIL_HERO_WEBHOOK_ALLOWED_HOSTS` | `daily.ziyixi.science`；多个精确 hostname 用逗号分隔 |
 | `MAIL_HERO_PUBLIC_HOST` | `mail-hero.ziyixi.science` |
 | `MAIL_HERO_FORCE_SEND_PAUSED` | 明确设为 `true` 或 `false`，与当前运维状态一致 |
@@ -43,6 +41,8 @@ Mail Hero 位于单仓库的 `mail-hero/` 目录，与 `todofy/` 共用根目录
 | Secret | 用途 |
 | --- | --- |
 | `MAIL_HERO_CF_API_TOKEN` | 独立 Cloudflare 部署 token（原仓库中名为 `CF_API_TOKEN`；单仓库的 `production` 中 `CF_API_TOKEN` 属于 Todofy），限定目标账户的 Worker 发布、D1 migration 及现有 zone 的 Worker route 所需权限；不需要 Billing 权限 |
+| `MAIL_HERO_RECEIVE_ADDRESS` | 固定收件地址。仓库公开，这个地址（以及下面的 owner 邮箱）只存为 secret，Actions 日志里显示为 `***` |
+| `MAIL_HERO_ACCESS_OWNER` | canonical owner 邮箱 |
 | `MAIL_HERO_ACCESS_OWNER_ALIASES` | 已核实的同一 owner 登录邮箱；沿用当前 GitHub 登录 alias，逗号分隔且不要加空格。若尚未使用 alias，可留空 |
 
 不要把 token 或 alias 直接写进 workflow、命令参数或提交的配置。现有临时 bootstrap token 到期后，Actions 需要换成有效的专用 token；更新 GitHub secret 即可，不影响本机 Wrangler 登录。
