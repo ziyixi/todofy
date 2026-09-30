@@ -14,5 +14,8 @@ export default defineConfig([
     "playwright-report/**",
     "test-results/**",
     "public/media/**",
+    "public/_img/**",
+    "out/**",
+    "**/.wrangler/**",
   ]),
 ]);

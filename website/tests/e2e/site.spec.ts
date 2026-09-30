@@ -135,6 +135,13 @@ test.describe("public site", () => {
     await inlineImage.scrollIntoViewIfNeeded();
     await expect(inlineImage).toBeVisible();
     await expect(imageLink).toHaveAttribute("href", /^\/media\//);
+    // The static export has no image optimizer: the inline image is a build-time WebP variant
+    // (scripts/images/prepare.ts), while the lightbox below opens the original file.
+    await expect
+      .poll(() =>
+        inlineImage.evaluate((image: HTMLImageElement) => new URL(image.currentSrc).pathname),
+      )
+      .toMatch(/^\/_img\/[a-f0-9]{20}-[0-9]+\.webp$/);
     const inlineImageBox = await inlineImage.boundingBox();
     expect(inlineImageBox?.width).toBeGreaterThan(0);
     expect(inlineImageBox?.height).toBeGreaterThan(0);

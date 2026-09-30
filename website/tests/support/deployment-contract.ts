@@ -1,4 +1,4 @@
-export interface RscResponseContract {
+export interface SegmentPayloadContract {
   contentType: string | undefined;
   requestUrl: string;
   responseUrl: string;
@@ -7,9 +7,7 @@ export interface RscResponseContract {
 
 export interface FixtureDeploymentPolicy {
   allowFixture: boolean;
-  authMode: string | undefined;
   baseUrl: string;
-  bypassSecret: string | undefined;
   sourceMode: "empty" | "fixture" | "notion";
 }
 
@@ -49,45 +47,42 @@ export function assertFixtureDeploymentPolicy(policy: FixtureDeploymentPolicy): 
     throw new Error("fixture deployment contracts require an explicit local-test opt-in");
   }
   const baseUrl = parseHttpUrl(policy.baseUrl, "fixture deployment base URL");
-  if (
-    policy.authMode !== "production" ||
-    policy.bypassSecret !== undefined ||
-    !["127.0.0.1", "localhost", "::1"].includes(baseUrl.hostname)
-  ) {
-    throw new Error(
-      "fixture deployment contracts are allowed only for an uncredentialed local production server",
-    );
+  if (!["127.0.0.1", "localhost", "[::1]"].includes(baseUrl.hostname)) {
+    throw new Error("fixture deployment contracts are allowed only for a local server");
   }
 }
 
-export function makeRscRequestPath(pathname: string): string {
+/**
+ * The static export stores each route's React Server Component payloads as files next to its HTML
+ * (Next 16 segment prefetching): `<route>/__next._tree.txt` is requested before every client-side
+ * navigation to that route. The old `?_rsc=` + `RSC: 1` contract belonged to a Next.js server.
+ */
+export function makeSegmentTreePath(pathname: string): string {
   const url = new URL(pathname, "https://deployment-contract.invalid");
-  if (url.origin !== "https://deployment-contract.invalid" || url.hash) {
-    throw new Error(`RSC route must be a root-relative URL without a fragment: ${pathname}`);
+  if (url.origin !== "https://deployment-contract.invalid" || url.hash || url.search) {
+    throw new Error(`Route must be a root-relative path without query or fragment: ${pathname}`);
   }
-  url.searchParams.delete("_rsc");
-  url.searchParams.set("_rsc", "");
-  return `${url.pathname}${url.search}`;
+  const base = url.pathname.replace(/\/+$/, "");
+  return `${base}/__next._tree.txt`;
 }
 
-export function assertRscResponse(contract: RscResponseContract): void {
+export function assertSegmentPayloadResponse(contract: SegmentPayloadContract): void {
   if (contract.status !== 200) {
-    throw new Error(`RSC response must be 200, received ${contract.status}`);
+    throw new Error(`Segment payload must be 200, received ${contract.status}`);
   }
   const mediaType = contract.contentType?.split(";", 1)[0]?.trim().toLowerCase();
-  if (mediaType !== "text/x-component") {
-    throw new Error(`RSC response must use text/x-component, received ${mediaType ?? "missing"}`);
+  if (mediaType !== "text/plain") {
+    throw new Error(`Segment payload must use text/plain, received ${mediaType ?? "missing"}`);
   }
-  const requestUrl = parseHttpUrl(contract.requestUrl, "RSC request URL");
-  const responseUrl = parseHttpUrl(contract.responseUrl, "RSC response URL");
+  const requestUrl = parseHttpUrl(contract.requestUrl, "segment payload request URL");
+  const responseUrl = parseHttpUrl(contract.responseUrl, "segment payload response URL");
   if (
     requestUrl.origin !== responseUrl.origin ||
     requestUrl.pathname !== responseUrl.pathname ||
-    requestUrl.search !== responseUrl.search ||
-    requestUrl.hash !== responseUrl.hash
+    requestUrl.search !== responseUrl.search
   ) {
     throw new Error(
-      `RSC response changed origin or route: requested ${requestUrl.href}, received ${responseUrl.href}`,
+      `Segment payload changed origin or route: requested ${requestUrl.href}, received ${responseUrl.href}`,
     );
   }
 }

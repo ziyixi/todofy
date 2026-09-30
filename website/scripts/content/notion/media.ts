@@ -88,8 +88,9 @@ export function isManagedNotionMediaUrl(
 export function createMediaResolver(options: MediaResolverOptions) {
   const allowedHostSuffixes = options.allowedHostSuffixes ?? DEFAULT_ALLOWED_HOST_SUFFIXES;
   const maxImageBytes = options.maxImageBytes ?? 20 * 1024 * 1024;
-  const maxAttachmentBytes = options.maxAttachmentBytes ?? 25 * 1024 * 1024;
-  const maxVideoBytes = options.maxVideoBytes ?? 50 * 1024 * 1024;
+  // Workers Static Assets serve at most 25 MiB per file; stay below it (docs/architecture.md).
+  const maxAttachmentBytes = options.maxAttachmentBytes ?? 24 * 1024 * 1024;
+  const maxVideoBytes = options.maxVideoBytes ?? 24 * 1024 * 1024;
   const maxTotalBytes = options.maxTotalBytes ?? 200 * 1024 * 1024;
   const timeoutMs = options.timeoutMs ?? 30_000;
   const mediaDirectory = path.join(options.publicDirectory, "media");

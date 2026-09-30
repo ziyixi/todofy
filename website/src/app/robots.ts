@@ -2,6 +2,9 @@ import type { MetadataRoute } from "next";
 
 import { getSiteData } from "@/app/_site-data";
 
+// Required by `output: "export"`: written once at build time.
+export const dynamic = "force-static";
+
 export default async function robots(): Promise<MetadataRoute.Robots> {
   const { siteConfig } = await getSiteData();
   return {

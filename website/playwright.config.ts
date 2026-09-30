@@ -26,9 +26,13 @@ export default defineConfig({
   webServer: deploymentBaseUrl
     ? undefined
     : {
-        command: process.env.CI
-          ? `pnpm start --hostname 127.0.0.1 --port ${port}`
-          : `pnpm dev --hostname 127.0.0.1 --port ${port}`,
+        // CI (and PLAYWRIGHT_EXPORT=1) tests the static export in out/ exactly as production serves
+        // it: Workers Static Assets under `wrangler dev` with wrangler.toml, _headers and
+        // _redirects (`pnpm start`; run `pnpm build:site` first). Otherwise the Next dev server.
+        command:
+          process.env.CI || process.env.PLAYWRIGHT_EXPORT
+            ? "pnpm start"
+            : `pnpm dev --hostname 127.0.0.1 --port ${port}`,
         url: `http://127.0.0.1:${port}`,
         reuseExistingServer: !process.env.CI,
         timeout: 120_000,

@@ -12,7 +12,7 @@ const FIXED_PUBLIC_ROUTES = new Set([
   "/cv.pdf",
 ]);
 
-const RESERVED_PUBLIC_NAMESPACES = ["/_next", "/media", "/profile", "/fonts"] as const;
+const RESERVED_PUBLIC_NAMESPACES = ["/_next", "/_img", "/media", "/profile", "/fonts"] as const;
 
 /**
  * Next treats redirect sources as path-to-regexp patterns. Content redirects do

@@ -14,8 +14,9 @@
     "content:prepare:fixture": "node --import tsx scripts/content/prepare.ts --source=fixture --baseline=tests/fixtures/baseline-empty.json",
     "content:validate": "node --import tsx scripts/content/validate.ts",
     "dev": "next dev",
-    "build": "pnpm content:validate && next build",
-    "start": "next start",
+    "build": "pnpm content:validate && pnpm build:site",
+    "build:site": "next build && node --import tsx scripts/export/finalize.ts",
+    "start": "wrangler dev --config wrangler.toml --ip 127.0.0.1 --port 4173",
     "lint": "eslint . --max-warnings=0",
     "typecheck": "next typegen && tsc --noEmit",
     "format": "prettier --write .",
@@ -25,8 +26,8 @@
     "test:deployment": "DEPLOYMENT_TEST_REQUIRED=1 playwright test tests/e2e/deployment.spec.ts --project=desktop-chromium",
     "test": "pnpm test:unit",
     "check": "pnpm format:check && pnpm lint && pnpm typecheck && pnpm test:unit",
-    "release:promote": "bash scripts/release/promote.sh",
-    "release:rollback": "bash scripts/release/rollback.sh"
+    "images:prepare": "node --import tsx scripts/images/prepare.ts",
+    "release": "node --import tsx scripts/release/cli.ts"
   },
   "dependencies": {
     "@notionhq/client": "5.26.0",
@@ -51,9 +52,10 @@
     "eslint-config-next": "16.3.5",
     "eslint-config-prettier": "10.1.8",
     "prettier": "3.9.8",
+    "smol-toml": "1.9.0",
     "tsx": "4.23.15",
     "typescript": "6.0.3",
-    "vercel": "59.23.2",
-    "vitest": "5.0.1"
+    "vitest": "5.0.1",
+    "wrangler": "4.142.0"
   }
 }

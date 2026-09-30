@@ -3,6 +3,9 @@ import type { MetadataRoute } from "next";
 import { getContentBundle, getSiteData } from "@/app/_site-data";
 import { articleLanguageAlternates } from "@/lib/metadata";
 
+// Required by `output: "export"`: written once at build time.
+export const dynamic = "force-static";
+
 export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
   const [{ snapshot }, { siteConfig }] = await Promise.all([getContentBundle(), getSiteData()]);
   const route = (path: string) => new URL(path, siteConfig.canonicalOrigin).toString();

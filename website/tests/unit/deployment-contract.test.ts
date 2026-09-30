@@ -3,36 +3,33 @@ import { describe, expect, it } from "vitest";
 import {
   assertEquivalentCanonical,
   assertFixtureDeploymentPolicy,
-  assertRscResponse,
-  makeRscRequestPath,
+  assertSegmentPayloadResponse,
+  makeSegmentTreePath,
 } from "../support/deployment-contract";
 
 describe("fixture deployment-test boundary", () => {
   const localFixture = {
     allowFixture: true,
-    authMode: "production",
     baseUrl: "http://127.0.0.1:4173",
-    bypassSecret: undefined,
     sourceMode: "fixture" as const,
   };
 
-  it("allows an explicit uncredentialed localhost fixture contract", () => {
+  it("allows an explicit localhost fixture contract", () => {
     expect(() => assertFixtureDeploymentPolicy(localFixture)).not.toThrow();
   });
 
-  it("rejects fixture content by default and in remote or credentialed modes", () => {
+  it("rejects fixture content by default and on any remote host", () => {
     expect(() => assertFixtureDeploymentPolicy({ ...localFixture, allowFixture: false })).toThrow(
       /explicit local-test opt-in/,
     );
-    expect(() =>
-      assertFixtureDeploymentPolicy({
-        ...localFixture,
-        baseUrl: "https://candidate.example.vercel.app",
-      }),
-    ).toThrow(/uncredentialed local production server/);
-    expect(() =>
-      assertFixtureDeploymentPolicy({ ...localFixture, bypassSecret: "secret" }),
-    ).toThrow(/uncredentialed local production server/);
+    for (const baseUrl of [
+      "https://www.ziyixi.science",
+      "https://website-preview.ziyixi.science",
+    ]) {
+      expect(() => assertFixtureDeploymentPolicy({ ...localFixture, baseUrl })).toThrow(
+        /only for a local server/,
+      );
+    }
   });
 
   it("does not require the local opt-in for production content modes", () => {
@@ -74,34 +71,31 @@ describe("deployment canonical contract", () => {
   });
 });
 
-describe("RSC deployment contract", () => {
-  it("constructs the fixed Next.js cache-busting query without dropping existing search", () => {
-    expect(makeRscRequestPath("/")).toBe("/?_rsc=");
-    expect(makeRscRequestPath("/blog?view=all")).toBe("/blog?view=all&_rsc=");
+describe("static-export segment payload contract", () => {
+  it("names the route's segment tree file", () => {
+    expect(makeSegmentTreePath("/")).toBe("/__next._tree.txt");
+    expect(makeSegmentTreePath("/blog")).toBe("/blog/__next._tree.txt");
+    expect(makeSegmentTreePath("/blog/a-post")).toBe("/blog/a-post/__next._tree.txt");
+    expect(() => makeSegmentTreePath("/blog?view=all")).toThrow(/without query/);
+    expect(() => makeSegmentTreePath("https://example.com/blog")).toThrow(/root-relative/);
   });
 
-  it("requires an exact 200 component response on the requested origin and route", () => {
+  it("requires an exact 200 text/plain response on the requested origin and route", () => {
     const valid = {
-      contentType: "text/x-component; charset=utf-8",
-      requestUrl: "https://www.ziyixi.science/blog?_rsc=",
-      responseUrl: "https://www.ziyixi.science/blog?_rsc=",
+      contentType: "text/plain; charset=utf-8",
+      requestUrl: "https://www.ziyixi.science/blog/__next._tree.txt",
+      responseUrl: "https://www.ziyixi.science/blog/__next._tree.txt",
       status: 200,
     };
-    expect(() => assertRscResponse(valid)).not.toThrow();
-    expect(() => assertRscResponse({ ...valid, status: 307 })).toThrow(/must be 200/);
-    expect(() => assertRscResponse({ ...valid, contentType: "text/html" })).toThrow(
-      /text\/x-component/,
+    expect(() => assertSegmentPayloadResponse(valid)).not.toThrow();
+    expect(() => assertSegmentPayloadResponse({ ...valid, status: 307 })).toThrow(/must be 200/);
+    expect(() => assertSegmentPayloadResponse({ ...valid, contentType: "text/html" })).toThrow(
+      /text\/plain/,
     );
     expect(() =>
-      assertRscResponse({
+      assertSegmentPayloadResponse({
         ...valid,
-        responseUrl: "https://attacker.example/blog?_rsc=",
-      }),
-    ).toThrow(/changed origin or route/);
-    expect(() =>
-      assertRscResponse({
-        ...valid,
-        responseUrl: "https://www.ziyixi.science/publications?_rsc=",
+        responseUrl: "https://attacker.example/blog/__next._tree.txt",
       }),
     ).toThrow(/changed origin or route/);
   });

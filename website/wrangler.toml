@@ -1,0 +1,27 @@
+# Worker "ziyixi-website": the personal website as a static export (`pnpm build:site` -> out/) on
+# Workers Static Assets. There is no Worker script: every request is answered from the assets, which
+# are free and do not count as Worker requests or CPU. Headers and redirects come from out/_headers
+# and out/_redirects. Production deploys only from GitHub Actions (docs/release.md); locally,
+# `pnpm start` serves out/ with this file through `wrangler dev`.
+name = "ziyixi-website"
+# The one Cloudflare account; not a secret (the Worker names and hosts are public anyway).
+account_id = "f57937bd1d93bf59e737b6d8445fb7a3"
+compatibility_date = "2026-09-25"
+# No *.workers.dev copy of the site and no public per-version preview URLs: releases are verified
+# with `wrangler dev` before upload and on the live hostname after deploy.
+workers_dev = false
+preview_urls = false
+
+[assets]
+directory = "./out"
+# /blog serves out/blog.html; /blog/ and /blog.html redirect (307) to /blog.
+html_handling = "auto-trailing-slash"
+# Unknown paths get out/404.html with status 404.
+not_found_handling = "404-page"
+
+# Hostnames (docs/cutover.md). None yet: the release uploads and deploys versions, and verifies the
+# live site only when a hostname below exists. Each is a one-line change; the next release (or a
+# dispatch of website-release.yml) attaches it with `wrangler triggers deploy`:
+#   routes = [{ pattern = "website-preview.ziyixi.science", custom_domain = true }]
+# and at cutover, after the lead replaced the www CNAME (docs/cutover.md step 3):
+#   routes = [{ pattern = "www.ziyixi.science", custom_domain = true }]

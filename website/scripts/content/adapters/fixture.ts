@@ -1,12 +1,42 @@
+import { mkdir, readFile, writeFile } from "node:fs/promises";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
+import sharp from "sharp";
+
 import { parseContentDate } from "../../../src/lib/content/date";
 import { sha256 } from "../../../src/lib/content/hash";
 import type { Post } from "../../../src/lib/content/schema";
-import type { PreparedSource, SourceContext } from "../types";
+import type { MediaAsset, PreparedSource, SourceContext } from "../types";
 
 const sourceKey = sha256("fixture:v1:reliable-content-pipelines");
 
+// A synthetic diagram (no real content), committed so the fixture exercises article images:
+// media files, the build-time WebP variants and the lightbox (large enough to zoom beyond the
+// fitted size on a desktop viewport).
+const FIXTURE_IMAGE = fileURLToPath(
+  new URL("../../../tests/fixtures/media/fixture-pipeline-diagram.png", import.meta.url),
+);
+
+async function stageFixtureImage(publicDirectory: string): Promise<MediaAsset> {
+  const bytes = await readFile(FIXTURE_IMAGE);
+  const digest = sha256(bytes);
+  const metadata = await sharp(bytes).metadata();
+  const mediaDirectory = path.join(publicDirectory, "media");
+  await mkdir(mediaDirectory, { recursive: true });
+  await writeFile(path.join(mediaDirectory, `${digest}.png`), bytes);
+  return {
+    path: `/media/${digest}.png`,
+    sha256: digest,
+    mimeType: "image/png",
+    sizeBytes: bytes.byteLength,
+    width: metadata.width,
+    height: metadata.height,
+  };
+}
+
 export async function prepareFixtureSource(context: SourceContext): Promise<PreparedSource> {
-  void context;
+  const image = await stageFixtureImage(context.publicDirectory);
   const post: Post = {
     sourceKey,
     feedGuid: `urn:ziyixi:post:${sourceKey}`,
@@ -67,6 +97,16 @@ export async function prepareFixtureSource(context: SourceContext): Promise<Prep
         id: "fixture-equation",
         type: "equation",
         expression: "H = SHA256(C)",
+      },
+      {
+        id: "fixture-image",
+        type: "image",
+        mediaPath: image.path,
+        sha256: image.sha256,
+        width: image.width!,
+        height: image.height!,
+        alt: "Synthetic diagram of three pipeline stages",
+        caption: [{ text: "Fetch, validate, publish." }],
       },
       {
         id: "fixture-table",
@@ -171,7 +211,7 @@ export async function prepareFixtureSource(context: SourceContext): Promise<Prep
       { id: "optional-details", text: "Optional details", level: 2 },
       { id: "nested-section", text: "Nested section", level: 3 },
     ],
-    media: [],
+    media: [image.path],
   };
 
   const chineseSourceKey = sha256("fixture:v1:reliable-content-pipelines:zh-CN");
@@ -208,11 +248,12 @@ export async function prepareFixtureSource(context: SourceContext): Promise<Prep
       },
     ],
     toc: [{ id: "explicit-boundaries", text: "明确内容边界", level: 2 }],
+    media: [],
   };
 
   return {
     posts: [post, chinesePost],
-    media: [],
+    media: [image],
     diagnostics: { draftCount: 0, futureCount: 0, warnings: [] },
   };
 }

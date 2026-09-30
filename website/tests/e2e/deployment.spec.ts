@@ -10,8 +10,8 @@ import { PublicationStateSchema } from "@/lib/content/publication-state";
 import {
   assertEquivalentCanonical,
   assertFixtureDeploymentPolicy,
-  assertRscResponse,
-  makeRscRequestPath,
+  assertSegmentPayloadResponse,
+  makeSegmentTreePath,
 } from "../support/deployment-contract";
 
 interface BuildInfo {
@@ -39,7 +39,6 @@ interface DeploymentContract {
 }
 
 const baseUrl = process.env.DEPLOYMENT_BASE_URL?.replace(/\/$/, "");
-const authMode = process.env.DEPLOYMENT_AUTH_MODE;
 const expectedBuildInfoPath = process.env.EXPECTED_BUILD_INFO_PATH;
 const deploymentContractPath = process.env.DEPLOYMENT_CONTRACT_PATH;
 
@@ -51,13 +50,7 @@ test.describe("deployed artifact", () => {
   test.skip(!baseUrl, "DEPLOYMENT_BASE_URL is set only by the trusted release verifier.");
 
   test.beforeAll(() => {
-    expect(authMode).toMatch(/^(candidate|production)$/);
     expect(expectedBuildInfoPath).toBeTruthy();
-    if (authMode === "candidate") {
-      expect(process.env.VERCEL_AUTOMATION_BYPASS_SECRET).toBeTruthy();
-    } else {
-      expect(process.env.VERCEL_AUTOMATION_BYPASS_SECRET).toBeUndefined();
-    }
   });
 
   test("serves the expected build identity and every recorded route", async ({ request }) => {
@@ -120,19 +113,20 @@ test.describe("deployed artifact", () => {
         expect(responseMediaType, `${route.path} post media type`).toBe("text/html");
       }
       if (route.kind === "post" || (route.kind === "page" && responseMediaType === "text/html")) {
-        const rscPath = makeRscRequestPath(route.path);
-        const rsc = await deploymentGet(request, rscPath, { RSC: "1" });
+        // Client-side navigation fetches the route's segment payload files from the export.
+        const treePath = makeSegmentTreePath(route.path);
+        const tree = await deploymentGet(request, treePath);
         try {
-          assertRscResponse({
-            contentType: rsc.headers()["content-type"],
-            requestUrl: new URL(rscPath, requiredValue(baseUrl, "DEPLOYMENT_BASE_URL")).href,
-            responseUrl: rsc.url(),
-            status: rsc.status(),
+          assertSegmentPayloadResponse({
+            contentType: tree.headers()["content-type"],
+            requestUrl: new URL(treePath, requiredValue(baseUrl, "DEPLOYMENT_BASE_URL")).href,
+            responseUrl: tree.url(),
+            status: tree.status(),
           });
         } catch (error) {
-          throw new Error(`${route.path} RSC contract failed`, { cause: error });
+          throw new Error(`${route.path} segment payload contract failed`, { cause: error });
         }
-        assertNoPrivateSourceMaterial(await rsc.text());
+        assertNoPrivateSourceMaterial(await tree.text());
       }
     }
 
@@ -141,7 +135,6 @@ test.describe("deployed artifact", () => {
   });
 
   test("renders canonical pages without leaking release credentials", async ({ page }) => {
-    await installOriginScopedBypass(page);
     const contract = await readDeploymentContract();
     const consoleErrors: string[] = [];
     page.on("console", (message) => {
@@ -161,9 +154,7 @@ test.describe("deployed artifact", () => {
 
     assertFixtureDeploymentPolicy({
       allowFixture: process.env.ALLOW_FIXTURE_DEPLOYMENT_TESTS === "true",
-      authMode,
       baseUrl: requiredValue(baseUrl, "DEPLOYMENT_BASE_URL"),
-      bypassSecret: process.env.VERCEL_AUTOMATION_BYPASS_SECRET,
       sourceMode: contract.sourceMode,
     });
     await page.goto("/blog", { waitUntil: "networkidle" });
@@ -216,38 +207,9 @@ function requiredValue(value: string | undefined, name: string): string {
   return value;
 }
 
-function candidateHeaders(): Record<string, string> {
-  if (authMode !== "candidate") return {};
-  const secret = process.env.VERCEL_AUTOMATION_BYPASS_SECRET;
-  if (!secret) throw new Error("Candidate verification requires the automation bypass secret.");
-  return { "x-vercel-protection-bypass": secret };
-}
-
-async function deploymentGet(
-  request: APIRequestContext,
-  pathname: string,
-  additionalHeaders: Record<string, string> = {},
-) {
-  return request.get(pathname, {
-    headers: { ...candidateHeaders(), ...additionalHeaders },
-    // Never forward a protection-bypass secret through an unexpected redirect.
-    // Every route has an exact expected status, so redirects are observed rather
-    // than followed.
-    maxRedirects: 0,
-  });
-}
-
-async function installOriginScopedBypass(page: Page): Promise<void> {
-  if (authMode !== "candidate") return;
-  const expectedOrigin = new URL(requiredValue(baseUrl, "DEPLOYMENT_BASE_URL")).origin;
-  const headers = candidateHeaders();
-  await page.route("**/*", async (route) => {
-    if (new URL(route.request().url()).origin !== expectedOrigin) {
-      await route.continue();
-      return;
-    }
-    await route.continue({ headers: { ...route.request().headers(), ...headers } });
-  });
+async function deploymentGet(request: APIRequestContext, pathname: string) {
+  // Every route has an exact expected status, so redirects are observed rather than followed.
+  return request.get(pathname, { maxRedirects: 0 });
 }
 
 async function assertNoSecretInHtml(page: Page): Promise<void> {
@@ -256,7 +218,7 @@ async function assertNoSecretInHtml(page: Page): Promise<void> {
 
 function assertNoPrivateSourceMaterial(text: string): void {
   const sensitiveValues = [
-    process.env.VERCEL_AUTOMATION_BYPASS_SECRET,
+    process.env.CLOUDFLARE_API_TOKEN,
     process.env.NOTION_TOKEN,
     process.env.NOTION_DATA_SOURCE_ID,
   ].filter((value): value is string => Boolean(value));

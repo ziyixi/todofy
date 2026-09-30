@@ -279,10 +279,26 @@ async function fetchPublicJson(url: string, fetchImpl: typeof fetch): Promise<un
   return JSON.parse(body) as unknown;
 }
 
+/**
+ * Where the live publication metadata is read. Normally the canonical origin; while the Worker is
+ * served only on a preview hostname (docs/cutover.md), the release workflow passes that hostname
+ * as WEBSITE_LIVE_ORIGIN so the feedback describes what this pipeline deployed.
+ */
+export function productionOrigin(value = process.env.WEBSITE_LIVE_ORIGIN): string {
+  if (!value) return siteConfig.canonicalOrigin;
+  if (!/^https:\/\/[a-z0-9-]+(\.[a-z0-9-]+)+$/.test(value)) {
+    throw new ContentError(
+      "PRODUCTION_ORIGIN_INVALID",
+      "WEBSITE_LIVE_ORIGIN must be an HTTPS origin without a path.",
+    );
+  }
+  return value;
+}
+
 export async function readProductionState(
   fetchImpl: typeof fetch = fetch,
+  origin: string = productionOrigin(),
 ): Promise<PublicationState> {
-  const origin = siteConfig.canonicalOrigin;
   const before = await fetchPublicJson(`${origin}/build-info.json`, fetchImpl);
   const state = PublicationStateSchema.parse(
     await fetchPublicJson(`${origin}/publication-state.json`, fetchImpl),

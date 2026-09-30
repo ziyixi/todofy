@@ -32,6 +32,7 @@ import {
 import { readSiteData } from "../../src/lib/content/site-data";
 import { stableStringify } from "../../src/lib/content/stable-json";
 import { validateContentSnapshotWithOptions } from "../../src/lib/content/validate";
+import { prepareSiteImages, summarizeReports } from "../images/prepare";
 import { assertKnownArguments, parseCliArguments } from "./args";
 import { assertModeBoundary, parseExplicitSource } from "./mode";
 import { resolveRedirects } from "./redirects";
@@ -485,6 +486,12 @@ async function main(): Promise<void> {
   console.log(
     `Prepared ${manifest.postCount} post(s) from ${manifest.sourceMode}; contentHash=${manifest.contentHash}`,
   );
+  // Responsive WebP variants for the static export (next/image has no optimizer at request time).
+  const { reports } = await prepareSiteImages({
+    contentDirectory: path.resolve(args.values.get("output") ?? ".generated/content"),
+    publicDirectory: path.resolve(args.values.get("public-dir") ?? "public"),
+  });
+  console.log(summarizeReports(reports));
 }
 
 const entrypoint = process.argv[1] ? pathToFileURL(path.resolve(process.argv[1])).href : "";

@@ -10,7 +10,10 @@ out/
 # generated content and publish state
 .generated/
 public/media/
-.vercel/
+public/_img/
+
+# local Workers runtime state
+.wrangler/
 
 # test and diagnostic outputs
 playwright-report/

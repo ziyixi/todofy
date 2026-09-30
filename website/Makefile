@@ -21,7 +21,7 @@ ifneq ($(LOCAL_NODE_BIN),)
 export PATH := $(LOCAL_NODE_BIN):$(PATH)
 endif
 
-.PHONY: help install sync preview dev check deploy-relay notion-status check-runtime
+.PHONY: help install sync preview dev build-export serve-export check notion-status check-runtime
 
 help:
 	@printf '%s\n' \
@@ -29,10 +29,12 @@ help:
 	  'make sync     Sync Notion using .env.local' \
 	  'make preview  Sync Notion, then start the local website' \
 	  'make dev      Start the website using the existing snapshot (no sync)' \
+	  'make build-export  Build the static export (out/) from the existing snapshot' \
+	  'make serve-export  Build out/ and serve it as production does (wrangler dev, port 4173)' \
 	  'make check    Run formatting, lint, type checks, and unit tests' \
-	  'make deploy-relay  Deploy the Notion publish button relay and its secrets' \
 	  'make notion-status  Refresh Notion feedback from the live website (no deployment)' \
-	  'Preview URL: http://localhost:3000 (override with PORT=3001)'
+	  'Preview URL: http://localhost:3000 (override with PORT=3001)' \
+	  'Deploys run only in GitHub Actions (docs/release.md); the relay deploys from CI too.'
 
 check-runtime:
 	@set -eu; \
@@ -72,11 +74,18 @@ dev: check-runtime
 	fi
 	$(PNPM) dev --port "$(PORT)"
 
+build-export: check-runtime
+	@if [ ! -f .generated/content/manifest.json ]; then \
+	  printf '%s\n' 'No local snapshot yet. Run make sync (or pnpm content:prepare:fixture) first.' >&2; \
+	  exit 1; \
+	fi
+	$(PNPM) build:site
+
+serve-export: build-export
+	$(PNPM) start
+
 check: check-runtime
 	$(PNPM) check
-
-deploy-relay: check-runtime
-	"$(NODE)" --env-file=.env.local integrations/notion-publish/deploy.mjs
 
 notion-status: check-runtime
 	"$(NODE)" --env-file=.env.local --import tsx scripts/notion/sync-status.ts
