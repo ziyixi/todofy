@@ -17,7 +17,7 @@
  * | GET  registry                  | Worker (no DO)         | RegistryResponse      | ≤ 12 KiB; ETag "<build>" → 304  |
  * | GET  csrf                      | Worker                 | CsrfResponse          | signed token + cookie           |
  * | GET  home[?refresh=1]          | DO, 1 call             | HomeResponse          | ≤ 10 KiB; ≤ 24 rows read        |
- * | GET  flows                     | DO, 1 call             | FlowsResponse         | ≤ 16 KiB; ≤ 24 rows read        |
+ * | GET  flows                     | DO, 1 call             | FlowsResponse         | ≤ 20 KiB; ≤ 24 rows read        |
  * | GET  cloudflare[?refresh=1]    | DO, 1 call             | CloudflareResponse    | ≤ 16 KiB; ≤ 24 rows read        |
  * | GET  ops                       | DO, 1 call             | OpsResponse           | ≤ 24 KiB; ≤ 24 rows read        |
  * | POST guard {level}             | DO                     | GuardResponseV2       | CSRF + Origin                   |

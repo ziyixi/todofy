@@ -532,9 +532,12 @@ at most `PRECOMPUTE_ATTEMPTS` (3) times a day. On-demand work runs in the object
 ```python
 async def tick(db, env, now: int) -> bool             # one bounded sweep; True if more work remains
 ```
-Uses only `core.sql.retention` batches (≤ 10 deletes per call: the GTD ledger's raw snapshot rows after 14
-days, 1000 a batch; its snapshots and aggregates after 120 days; its reviews after 400); never deletes
-`mail_events`.
+Uses only `core.sql.retention` batches (≤ 13 bounded writes per call, one D1 batch: summaries and reports
+after 90 days, owner actions after 180, auth failures after 30, imported legacy text at its `expires_at` and,
+with `LEGACY_TEXT_RETENTION_DAYS`, after that many days; the GTD ledger's raw snapshot rows after 14 days,
+1000 a batch, its snapshots and aggregates after 120 days, its reviews after 400; a failed task intent's text
+after 30 days (an UPDATE), every finished intent and its task rows 400 days after its last change, task rows
+first); never deletes `mail_events`. `tests/unit/test_intents.py` checks this count against the code.
 
 ### Gateway (G; `gateway/src`)
 `access.ts` and `csrf.ts` are adapters over the shared package `packages/edge-auth` (the repository

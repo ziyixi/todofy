@@ -110,7 +110,8 @@ deploy ([actions/runner#2205](https://github.com/actions/runner/issues/2205)). `
 by `Changes`) fails if a job after the gate loses this shape, if a production job lacks its own
 concurrency group, or if the dispatch options and `DISPATCH` differ. It also fails if the `Contracts`
 job stops naming both sides' contract tests and the dashboard's caller test, or names a test file that
-does not exist.
+does not exist. `test_doc_references.py` (also run by `Changes`) fails if any doc or comment names a D1
+migration file that does not exist, such as a migration's number from before a rebase renumbered it.
 
 The first push run of this workflow on `main` has no earlier successful run of it and therefore checks and
 deploys every app. (The Go-era `ci.yml` of the old Todofy repository shares the file name; its last green

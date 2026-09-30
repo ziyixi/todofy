@@ -58,8 +58,9 @@ daily reminder; the dashboard Worker itself (not built).
 ## task-intent-v1 intake (2026-09-30, macOS, local only, not released)
 
 A clean worktree of branch `lab` at `721bee1` (Todofy's side of `contracts/task-intent-v1`: migration
-`0004_task_intents.sql`, the `Ops` methods, the core RPCs and alarm step, tests and docs), synthetic data
-and placeholder configs only; no GitHub, Cloudflare or Todoist call:
+`0004_task_intents.sql` at the time, renumbered `0005_task_intents.sql` when rebased onto GTD's `0004_gtd.sql`,
+the `Ops` methods, the core RPCs and alarm step, tests and docs), synthetic data and placeholder configs only;
+no GitHub, Cloudflare or Todoist call:
 
 | Step | Result |
 |---|---|
@@ -71,8 +72,9 @@ and placeholder configs only; no GitHub, Cloudflare or Todoist call:
 | `tests/runtime` as CI runs it: 3 shards × 4 processes, serial files alone, `pytest_completeness.py` | 409 of 409 collected passed, each once (`test_task_intents.py`: 18 tests, 43 s) |
 | `Contracts` steps: Mail Hero (38), Todofy Python incl. `test_task_intent_contract.py` (476), gateway `test/ops.test.ts` (18), dashboard (61), Lab `task-intent-contract.test.ts` (6) | all passed |
 
-Pending: migration `0004` on the remote D1 (renumber first if `gtd-features` lands before it), the
-release (Todofy before Lab), and a first real send from Lab reconciled against Todoist.
+Pending: migration `0005_task_intents.sql` on the remote D1 (after GTD's `0004_gtd.sql`, applied by the
+`Todofy deploy` of the Lab merge), the release (Todofy before Lab), and a first real send from Lab reconciled
+against Todoist.
 
 ## Committed production configs (2026-09-30, macOS, local only, not released)
 

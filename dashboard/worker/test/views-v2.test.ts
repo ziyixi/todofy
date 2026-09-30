@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest';
+import designV2 from '../../docs/design-v2.md?raw';
+import apiV2Source from '../src/api-v2-types.ts?raw';
 import type { OpsReportItem, OpsSignal } from '../../../contracts/ops-v1/ops-v1.ts';
 import { CANARY_MANUAL_PER_DAY, type CanaryView, type DigestView, type GuardView } from '../src/api-types.ts';
-import { CF_SCRIPTS_MAX, CF_VIEW_WORKERS_MAX, HOME_QUOTA_IDS, V2_BODY_BUDGET, V2_BODY_MAX, type ShellFields } from '../src/api-v2-types.ts';
+import { CF_SCRIPTS_MAX, CF_VIEW_WORKERS_MAX, HOME_QUOTA_IDS, V2_BODY_BUDGET, V2_BODY_MAX, V2_ROWS_READ, type ShellFields } from '../src/api-v2-types.ts';
 import { runView } from '../src/canary.ts';
 import { attentionView, type EvalInput } from '../src/evaluate.ts';
 import { etagMatches } from '../src/v2-views.ts';
@@ -221,5 +223,36 @@ describe('the views', () => {
     expect(bytes(view)).toBeLessThanOrEqual(V2_BODY_MAX);
     // Under the cap nothing is left out.
     expect(capWorkers(view.workers.slice(0, 10))).toEqual({ rows: view.workers.slice(0, 10), omitted: 0 });
+  });
+});
+
+describe('documented budgets', () => {
+  /** The first "≤ N KiB" (and "≤ M rows read") of each `GET <route>` row of a table in `text`. */
+  function documented(text: string): Map<string, { kib: number; rows: number | null }> {
+    const found = new Map<string, { kib: number; rows: number | null }>();
+    for (const line of text.split('\n')) {
+      const route = /\|\s*`?GET\s+([a-z]+)/.exec(line)?.[1];
+      const kib = /≤ (\d+) KiB/.exec(line)?.[1];
+      if (route === undefined || kib === undefined) continue;
+      const rows = /≤ (\d+) rows read/.exec(line)?.[1];
+      found.set(route, { kib: Number(kib), rows: rows === undefined ? null : Number(rows) });
+    }
+    return found;
+  }
+
+  it('the route table of api-v2-types.ts states V2_BODY_BUDGET and V2_ROWS_READ', () => {
+    const header = apiV2Source.split('*/', 1)[0] ?? '';
+    const rows = documented(header);
+    expect([...rows.keys()].sort()).toEqual(Object.keys(V2_BODY_BUDGET).sort());
+    for (const [view, budget] of Object.entries(V2_BODY_BUDGET)) {
+      expect({ view, kib: rows.get(view)?.kib }).toEqual({ view, kib: budget / 1024 });
+      if (view in V2_ROWS_READ) expect({ view, rows: rows.get(view)?.rows }).toEqual({ view, rows: V2_ROWS_READ[view as keyof typeof V2_ROWS_READ] });
+    }
+  });
+
+  it('the route table of docs/design-v2.md states V2_BODY_BUDGET', () => {
+    const rows = documented(designV2.split('\n| Route | Served by | Budget |', 2)[1]?.split('\n\n', 1)[0] ?? '');
+    expect([...rows.keys()].sort()).toEqual(Object.keys(V2_BODY_BUDGET).sort());
+    for (const [view, budget] of Object.entries(V2_BODY_BUDGET)) expect({ view, kib: rows.get(view)?.kib }).toEqual({ view, kib: budget / 1024 });
   });
 });

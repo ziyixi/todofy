@@ -3,7 +3,9 @@ its hash, task text, the per-task state machine, the intent summary, and the led
 SQLite with every migration applied (the record batch, the daily limit, the proposer's retry,
 retention)."""
 
+import ast
 import json
+import re
 import sqlite3
 from collections.abc import Iterator
 from dataclasses import replace
@@ -458,6 +460,24 @@ def test_retention_drops_failed_text_after_30_days_and_rows_after_400(db):
     rows = {row["intent_id"]: row["payload_json"] for row in db.execute("SELECT * FROM task_intents")}
     assert rows == {"fresh": fresh.canonical, "failed-old": None}
     assert {row[0] for row in db.execute("SELECT DISTINCT intent_id FROM task_intent_tasks")} == {"fresh", "failed-old"}
+
+
+def test_the_retention_tick_uses_every_expiry_within_its_documented_budget():
+    """runtime/retention.tick (not importable on the host) sends one D1 batch: every EXPIRE_* query once, so
+    at most thirteen writes, the number its docstring and docs/dev-notes.md state (D1 Free: 50 per call)."""
+    root = mail_contract.TODOFY
+    source = (root / "worker" / "todofy" / "runtime" / "retention.py").read_text()
+    [tick] = [node for node in ast.walk(ast.parse(source)) if isinstance(node, ast.AsyncFunctionDef)]
+    body = ast.unparse(tick)
+    used = re.findall(r"\bsql\.(EXPIRE_[A-Z_]+)\b", body)
+    expiries = [name for name in vars(retention_sql) if name.startswith("EXPIRE_")]
+    assert sorted(used) == sorted(expiries) and len(set(used)) == len(used)
+    assert body.count("await db.batch(") == 1 and body.count("await ") == 1
+    words = {12: "twelve", 13: "thirteen", 14: "fourteen"}
+    assert f"at most {words[len(used)]} bounded writes" in (ast.get_docstring(tick) or "")
+    notes = (root / "docs" / "dev-notes.md").read_text()
+    assert f"≤ {len(used)} bounded writes per call" in notes
+    assert len(used) <= 50
 
 
 def test_an_intent_goes_only_once_its_tasks_are_gone(db):

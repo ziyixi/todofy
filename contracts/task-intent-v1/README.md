@@ -10,7 +10,7 @@ Status: contract written 2026-09-30 with Lab's design (`lab/docs/design.md` §9)
 implemented (not released): Lab in `lab/worker/src/intent.ts` and `owner.ts`; Todofy in
 `todofy/worker/todofy/core/intents.py` (validation, canonical form, task text, state machine, results),
 `core/sql/intents.py`, `runtime/intents.py`, `todofy/gateway/src/ops.ts` and migration
-`todofy/migrations/0004_task_intents.sql`.
+`todofy/migrations/0005_task_intents.sql`.
 
 | File | Purpose |
 | --- | --- |
