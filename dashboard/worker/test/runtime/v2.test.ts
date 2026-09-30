@@ -15,8 +15,8 @@ import {
   type OpsResponse,
   type RegistryResponse,
 } from '../../src/api-v2-types.ts';
-import { outboundPerTick } from '../../src/registry.ts';
-import { REALISTIC_USAGE, usageWithScripts } from '../graphql-fixture.ts';
+import { REGISTRY, outboundPerTick } from '../../src/registry.ts';
+import { REALISTIC_USAGE, SYNTHETIC_D1, SYNTHETIC_NS, usageWithScripts } from '../graphql-fixture.ts';
 import { accessClaims, testIssuer, type TestIssuer } from '../jwt.ts';
 import { GRAPHQL, SYNTHETIC_BINDINGS, WEBSITE_PROBE, startFlows, status, type FlowHarness } from './flows.ts';
 
@@ -82,7 +82,7 @@ describe('GET /api/v2/registry', () => {
     const first = await h.v2<RegistryResponse>('registry');
     expect(first).toMatchObject({ status: 200, etag: '"test"' });
     expect(first.bytes).toBeLessThanOrEqual(V2_BODY_BUDGET.registry);
-    expect(first.body?.entries.map((e) => e.id)).toEqual(['mail-hero', 'todofy', 'flowday', 'website', 'notion-publish', 'newsletter', 'home']);
+    expect(first.body?.entries.map((e) => e.id)).toEqual(['mail-hero', 'todofy', 'website', 'notion-publish', 'newsletter', 'home']);
     const text = JSON.stringify(first.body);
     expect(text).not.toContain('build-info');
     expect(text).not.toContain('MAIL_HERO');
@@ -93,7 +93,7 @@ describe('GET /api/v2/registry', () => {
 });
 
 describe('GET /api/v2/home', () => {
-  it('is honest before the first tick: unknown, never checked, link-only hosts and 未接入', async () => {
+  it('is honest before the first tick: unknown, never checked and 未接入', async () => {
     h = await mockupDay();
     const home = await view<HomeResponse>(h, 'home');
     expect(home).toMatchObject({ version: API_V2_VERSION, build: 'test', rev: 0, attention: { level: 'unknown', items: [], held: [] } });
@@ -101,7 +101,6 @@ describe('GET /api/v2/home', () => {
     expect(levels).toEqual({
       'mail-hero': ['unknown', 'never_checked'],
       todofy: ['unknown', 'never_checked'],
-      flowday: ['link', null],
       website: ['unknown', 'never_checked'],
       'notion-publish': ['unknown', 'never_checked'],
       newsletter: ['unmonitored', null],
@@ -206,6 +205,51 @@ describe('GET /api/v2/cloudflare', () => {
       const errors = cf.workers.map((w) => w.errors);
       expect(errors).toEqual([...errors].sort((a, b) => b - a));
     }
+  });
+
+  it('names the D1, DO and R2 contributors by the registry, known and unknown IDs alike', async () => {
+    const match = (id: string): string => {
+      const found = REGISTRY.resources.find((r) => r.id === id)?.match;
+      if (found == null) throw new Error(id);
+      return found;
+    };
+    const [db0, db1] = REALISTIC_USAGE.d1Databases ?? [];
+    const [ns0, ns1, ns2] = REALISTIC_USAGE.doNamespaces ?? [];
+    if (db0 === undefined || db1 === undefined || ns0 === undefined || ns1 === undefined || ns2 === undefined) throw new Error('fixture');
+    h = await startFlows({
+      usage: {
+        ...REALISTIC_USAGE,
+        // The registry's own identifiers for one database and two namespaces; the others stay synthetic.
+        d1Databases: [{ ...db0, id: match('mail-hero-db') }, db1],
+        doNamespaces: [{ ...ns0, id: match('mail-coordinator') }, { ...ns1, id: match('todofy-core-do') }, ns2],
+      },
+      bindings: { CANARY_UTC_HOUR: '23' },
+    });
+    await h.tick(Date.now() - MIN);
+    const cf = await view<CloudflareResponse>(h, 'cloudflare');
+    const items = (id: string) => (cf.usage.rows.find((r) => r.id === id)?.breakdown ?? []).map((item) => [item.kind, item.resource]);
+    expect(items('d1_rows_read')).toEqual([
+      ['d1', 'mail-hero-db'],
+      ['d1', null],
+    ]);
+    expect(items('do_rows_written')).toEqual([
+      ['do', 'mail-coordinator'],
+      ['do', 'todofy-core-do'],
+      ['do', null],
+    ]);
+    expect(items('r2_storage')).toEqual([
+      ['r2', 'mail-hero-store'],
+      ['r2', null],
+    ]);
+    expect(cf.usage.rows.find((r) => r.id === 'd1_rows_read')?.breakdown[1]?.name).toBe(SYNTHETIC_D1[1]);
+    expect(cf.usage.rows.find((r) => r.id === 'do_rows_written')?.breakdown[2]?.name).toBe(SYNTHETIC_NS[2]);
+    // Script items keep only their name and value.
+    expect(items('do_requests').every(([kind, resource]) => kind === undefined && resource === undefined)).toBe(true);
+    // The same join as the resource table.
+    expect(cf.resources.filter((r) => r.kind === 'do').map((r) => r.resource)).toEqual(['mail-coordinator', 'todofy-core-do', null]);
+    // 首页's mini bars still carry no contributors.
+    const home = await view<HomeResponse>(h, 'home');
+    expect(home.cloudflare.quota.every((q) => q.breakdown.length === 0)).toBe(true);
   });
 
   it('remembers a Worker that had no request today, and re-queries GraphQL at most once a minute', async () => {

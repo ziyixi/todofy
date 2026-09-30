@@ -5,7 +5,7 @@ import type { EntryDef, FlowState, Registry } from '../src/api-v2-types.ts';
 import { mergeScripts } from '../src/discovery.ts';
 import { attentionView, entryState, flowStates, flowSummaries, holdCodes, rollup, targetOf, type AttentionInput, type EvalInput } from '../src/evaluate.ts';
 import { REGISTRY, entryById } from '../src/registry.ts';
-import { DAY, HOUR, MIN, NOW, failedStatus, fortnight, input, probe, run, scripts, signal, status } from './v2-fixtures.ts';
+import { DAY, HOUR, LINK_ONLY_ENTRY, MIN, NOW, failedStatus, fortnight, input, probe, run, scripts, signal, status, withLinkOnly } from './v2-fixtures.ts';
 
 function entry(id: string, registry: Registry = REGISTRY): EntryDef {
   const found = entryById(id, registry);
@@ -44,10 +44,10 @@ describe('levels', () => {
 
 describe('entry health (the tile: the entry\'s own health, Q2)', () => {
   it('shows the mockup day: apps ok with their counter, link-only hosts, the site\'s latency, Notion\'s last hour', () => {
-    const tiles = Object.fromEntries(REGISTRY.entries.map((e) => [e.id, entryState(e, input())]));
+    const tiles = Object.fromEntries(withLinkOnly().entries.map((e) => [e.id, entryState(e, input())]));
     expect(tiles['mail-hero']).toMatchObject({ level: 'ok', reason: null, metric: { kind: 'counter', name: 'ingest_today_messages', value: 41 }, top_signals: [] });
     expect(tiles.todofy).toMatchObject({ level: 'ok', metric: { kind: 'counter', name: 'received_24h', value: 63 } });
-    expect(tiles.flowday).toMatchObject({ level: 'link', reason: null, metric: null, checked_at: null });
+    expect(tiles[LINK_ONLY_ENTRY.id]).toMatchObject({ level: 'link', reason: null, metric: null, checked_at: null });
     expect(tiles.website).toMatchObject({ level: 'ok', metric: { kind: 'latency', ms: 180 } });
     expect(tiles['notion-publish']).toMatchObject({ level: 'ok', metric: { kind: 'last_active', hour: '2026-09-29T06:00:00.000Z' } });
     expect(tiles.newsletter).toMatchObject({ level: 'unmonitored', reason: null, metric: null });

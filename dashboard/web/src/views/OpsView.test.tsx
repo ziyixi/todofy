@@ -1,5 +1,5 @@
 import { screen, within } from '@testing-library/react'
-import { degradedApps, guardShed, healthy, todofyUnreachable, type Scenario } from '../test/fixtures'
+import { degradedApps, guardShed, healthy, todofyUnreachable, withLinkOnly, type Scenario } from '../test/fixtures'
 import { freezeClock, renderApp, serve } from '../test/harness'
 
 async function showOps(scenario: Scenario) {
@@ -43,15 +43,20 @@ describe('操作与记录', () => {
     expect(rows.map((row) => within(row).getByRole('rowheader').textContent)).toEqual([
       'Mail Hero',
       'Todofy',
-      'Flowday',
       '个人网站',
       'Notion 发布',
       'Newsletter',
       '个人控制台',
     ])
-    expect(rows[2]).toHaveTextContent('仅链接（受 Access 保护，不探测）')
-    expect(rows[3]).toHaveTextContent('公开地址探测')
-    expect(rows[5]).toHaveTextContent('未接入监控')
+    expect(rows[2]).toHaveTextContent('公开地址探测')
+    expect(rows[4]).toHaveTextContent('未接入监控')
+  })
+
+  it('names a link-only entry of the registry as such', async () => {
+    await showOps(withLinkOnly())
+    const about = region('构建与注册表')
+    const row = within(within(about).getByRole('table')).getByRole('rowheader', { name: 'Link Demo' }).closest('tr') as HTMLElement
+    expect(row).toHaveTextContent('仅链接（受 Access 保护，不探测）')
   })
 
   it('shows degraded apps with plain-text signal labels', async () => {

@@ -240,6 +240,22 @@ Synthetic data only, no production call:
 | `Changes` | from `todofy/`: `uv run python -m unittest discover -s ../.github/scripts` | 147 tests OK |
 | browser | built UI against the synthetic fixtures at 1280 px and 375 px | 首页: the AI bar replaces DO 请求 ("300 / 1 万 · 3% · 剩余 9,700"; phones "剩余 9,700"), fits the 2 × 2 phone grid; Cloudflare: the row sits in 每日 with "剩余 … neurons" on its own line, the group note names it as the exception, the guard line never cites it |
 
+## 1h. Local, named quota contributors and the removed Flowday entry (2026-09-30)
+
+The 主要来源 of the D1/DO/R2 quota rows named from the registry instead of raw IDs, and the link-only
+`flowday` entry removed from the registry (the service, its Access app and DNS untouched). Synthetic
+data only, no production call:
+
+| Job | Step | Result |
+| --- | --- | --- |
+| `Dashboard checks` | `node --test deploy/test/*.test.mjs` | 14 passed |
+| | worker lint, typecheck, `npm test` | ok; 13 files, 202 tests passed (every D1/DO/R2 item joined like the resource table, unknown → `resource: null`, script/model items and an item without the dimension unchanged, stored rows never changed; link-only coverage on a synthetic `link-demo` entry) |
+| | worker `npm run test:runtime` (workerd) | 6 files, 64 tests passed (fake GraphQL with the registry's own IDs for one database and two namespaces next to synthetic ones: `mail-hero-db`, `mail-coordinator`, `todofy-core-do`, the rest null; 首页 bars still without contributors) |
+| | web lint, typecheck, tests, build; import guard | ok; 13 files, 106 tests passed; no cross-origin references |
+| | placeholder config dry-run (`GITHUB_SHA` set as in CI) | ok; bindings unchanged, the four secrets hidden |
+| `Changes` | from `todofy/`: `uv run python -m unittest discover -s ../.github/scripts` | 147 tests OK |
+| browser | built UI against the synthetic fixtures at 1280 px and 375 px | Cloudflare: "mail-hero 主库 · Mail Hero", "MailCoordinator · Mail Hero", "TodofyCore · Todofy", "HomeState · 个人控制台", "mail-hero 邮件存储 · Mail Hero", muted "未登记 · 01234567", IDs as tooltips, no horizontal scroll on phones; 首页: 应用 holds Mail Hero and Todofy, the phone row 应用与站点 fills three tiles, no empty cell |
+
 ## 2. Production (pending)
 
 None of these has been done; each needs the first `Dashboard deploy` on `main` (after Todofy and Mail

@@ -28,7 +28,7 @@ import {
   formatUtcDay,
 } from '../lib/format'
 import { QUOTA, USAGE_STATUS, guardReasonLabel, usageErrorLabel } from '../lib/labels'
-import { flowOf, guardedEntries, nameOf, workerOf, type Reg } from '../lib/registry'
+import { flowOf, guardedEntries, nameOf, resourceOf, unregisteredId, workerOf, type Reg } from '../lib/registry'
 import { routeHash } from '../router'
 
 function errorText(error: unknown): string {
@@ -372,12 +372,10 @@ function WorkersTable({ reg, data, focus, now }: { reg: Reg; data: CloudflareRes
 }
 
 function resourceName(reg: Reg, row: ResourceRow): { name: string; registered: boolean; script?: string } {
-  const def = reg.resources.find((resource) => resource.id === row.resource)
+  const def = resourceOf(reg, row.resource)
   if (def) return { name: def.name, registered: true, script: def.script }
   if (row.kind === 'r2' && row.id === 'unclassified') return { name: '未归类操作', registered: true }
-  // Opaque D1/DO ids show their first 8 characters; an R2 bucket's id is its (non-secret) name, in full,
-  // so buckets sharing a prefix stay distinguishable.
-  return { name: `未登记 ${row.kind === 'r2' ? row.id : row.id.slice(0, 8)}`, registered: false }
+  return { name: `未登记 ${unregisteredId(row.kind, row.id)}`, registered: false }
 }
 
 function ResourceTable({ reg, kind, rows, doStorage }: { reg: Reg; kind: ResourceRow['kind']; rows: readonly ResourceRow[]; doStorage: number | null }) {

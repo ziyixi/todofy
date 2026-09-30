@@ -6,10 +6,12 @@ import mailHeroOk from '../../../contracts/ops-v1/fixtures/OpsStatus/mail-hero-o
 import todofyOk from '../../../contracts/ops-v1/fixtures/OpsStatus/todofy-ok.json';
 import type { OpsSignal, OpsStatus } from '../../../contracts/ops-v1/ops-v1.ts';
 import type { UsageView } from '../src/api-types.ts';
+import type { EntryDef, Registry } from '../src/api-v2-types.ts';
 import { finish, newRun, type CanaryRecord } from '../src/canary.ts';
 import { mergeScripts, type CfScriptsDoc } from '../src/discovery.ts';
 import { NO_DIGEST, NO_USAGE, type ProbeDoc, type StatusDoc, type UsageDoc } from '../src/docs.ts';
 import type { EvalInput } from '../src/evaluate.ts';
+import { REGISTRY } from '../src/registry.ts';
 import { parseUsage } from '../src/usage.ts';
 import { graphqlBody, usageWithScripts, type SyntheticUsage } from './graphql-fixture.ts';
 
@@ -18,6 +20,30 @@ export const NOW = Date.parse('2026-09-29T14:30:00Z');
 export const MIN = 60_000;
 export const HOUR = 3_600_000;
 export const DAY = 86_400_000;
+
+/**
+ * A synthetic link-only entry (an Access-protected host shown as a link, never probed): the registry
+ * has none since the owner removed Flowday from the dashboard (2026-09-30), and the kind stays covered.
+ */
+export const LINK_ONLY_ENTRY: EntryDef = {
+  id: 'link-demo',
+  name: 'Link Demo',
+  description: '仅链接的测试条目',
+  group: 'apps',
+  icon: 'calendar-clock',
+  accent: 'teal',
+  url: 'https://link-demo.ziyixi.science/',
+  access: true,
+  status: { type: 'link_only' },
+  tile_metric: null,
+  app_only_signals: [],
+  order: 3,
+};
+
+/** The registry plus LINK_ONLY_ENTRY. */
+export function withLinkOnly(registry: Registry = REGISTRY): Registry {
+  return { ...registry, entries: [...registry.entries, LINK_ONLY_ENTRY] };
+}
 
 export function status(app: 'mail-hero' | 'todofy', patch: Partial<OpsStatus> = {}, at = NOW - 2 * MIN): StatusDoc {
   const base = (app === 'mail-hero' ? mailHeroOk : todofyOk) as OpsStatus;

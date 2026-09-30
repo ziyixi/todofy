@@ -12,6 +12,7 @@ import {
   resourceByMatch,
   validateRegistry,
 } from '../src/registry.ts';
+import { LINK_ONLY_ENTRY, withLinkOnly } from './v2-fixtures.ts';
 
 /**
  * The signal codes each app documents in contracts/ops-v1/README.md ("Signal codes"), read from the
@@ -31,8 +32,9 @@ function contractSignals(): Record<string, string[]> {
 
 type Mutable<T> = { -readonly [K in keyof T]: T[K] extends readonly (infer U)[] ? Mutable<U>[] : T[K] extends object ? Mutable<T[K]> : T[K] };
 
+/** A mutable copy of the registry plus the synthetic link-only entry `link-demo`. */
 function copy(): Mutable<Registry> {
-  return structuredClone(REGISTRY) as Mutable<Registry>;
+  return structuredClone(withLinkOnly()) as Mutable<Registry>;
 }
 
 function entry(registry: Mutable<Registry>, id: string): Mutable<EntryDef> {
@@ -57,7 +59,7 @@ describe('the registry', () => {
 
   it('registers the entries of the design, in their groups and order', () => {
     const byGroup = (group: string) => REGISTRY.entries.filter((e) => e.group === group).sort((a, b) => a.order - b.order).map((e) => e.id);
-    expect(byGroup('apps')).toEqual(['mail-hero', 'todofy', 'flowday']);
+    expect(byGroup('apps')).toEqual(['mail-hero', 'todofy']);
     expect(byGroup('sites')).toEqual(['website']);
     expect(byGroup('services')).toEqual(['notion-publish', 'newsletter']);
     expect(byGroup('hidden')).toEqual(['home']);
@@ -65,7 +67,6 @@ describe('the registry', () => {
     expect(status).toEqual({
       'mail-hero': 'ops_v1',
       todofy: 'ops_v1',
-      flowday: 'link_only',
       website: 'public_http',
       'notion-publish': 'analytics',
       newsletter: 'none',
@@ -113,8 +114,10 @@ describe('the registry', () => {
     expect(body).not.toContain('build-info');
     expect(body).not.toContain('GitHub');
     const view = registryView('abc123');
-    const flowday = view.entries.find((e) => e.id === 'flowday');
-    expect(flowday).toMatchObject({ status_type: 'link_only', host: 'flowday.ziyixi.science', scripts: [] });
+    expect(view.entries.map((e) => e.id)).not.toContain('flowday');
+    const linkOnly = registryView('abc123', withLinkOnly()).entries.find((e) => e.id === LINK_ONLY_ENTRY.id);
+    expect(linkOnly).toMatchObject({ status_type: 'link_only', host: 'link-demo.ziyixi.science', scripts: [] });
+    expect(linkOnly).not.toHaveProperty('status');
     expect(view.entries.find((e) => e.id === 'todofy')?.scripts).toEqual(['todofy', 'todofy-core']);
     expect(view.workers.find((w) => w.script === 'todofy')?.flows).toEqual(['mail-to-task', 'daily-newsletter', 'ops-digest']);
     for (const icon of view.entries.map((e) => e.icon)) expect(ICON_KEYS).toContain(icon);
@@ -125,30 +128,34 @@ describe('validateRegistry', () => {
   const problems = (registry: Mutable<Registry>, knownSignals?: Record<string, string[]>) =>
     validateRegistry(registry, knownSignals === undefined ? {} : { knownSignals });
 
+  it('accepts a link-only entry (the synthetic link-demo of these tests)', () => {
+    expect(problems(copy())).toEqual([]);
+  });
+
   it('rejects duplicate ids, unknown references and a script in two entries', () => {
     const r = copy();
-    r.entries.push({ ...entry(r, 'flowday'), order: 9 });
+    r.entries.push({ ...entry(r, 'link-demo'), order: 9 });
     r.workers.push({ script: 'mail-hero', entry: 'todofy', role: '重复' });
     r.workers.push({ script: 'orphan', entry: 'nowhere', role: '未知' });
     const found = problems(r);
-    expect(found).toContain('entry flowday: duplicate id');
+    expect(found).toContain('entry link-demo: duplicate id');
     expect(found).toContain('worker mail-hero: belongs to more than one entry');
     expect(found).toContain('worker orphan: unknown entry nowhere');
   });
 
   it('accepts only https URLs of the owner zone without query, port or userinfo', () => {
     for (const [url, problem] of [
-      ['http://flowday.ziyixi.science/', 'not https'],
-      ['https://flowday.ziyixi.science/x', 'path must be /'],
-      ['https://flowday.ziyixi.science/?a=1', 'query or fragment'],
-      ['https://user@flowday.ziyixi.science/', 'userinfo'],
-      ['https://flowday.ziyixi.science:8443/', 'explicit port'],
+      ['http://link-demo.ziyixi.science/', 'not https'],
+      ['https://link-demo.ziyixi.science/x', 'path must be /'],
+      ['https://link-demo.ziyixi.science/?a=1', 'query or fragment'],
+      ['https://user@link-demo.ziyixi.science/', 'userinfo'],
+      ['https://link-demo.ziyixi.science:8443/', 'explicit port'],
       ['https://example.com/', 'host outside ziyixi.science'],
       ['https://192.0.2.1/', 'host is not a lowercase domain'],
     ] as const) {
       const r = copy();
-      entry(r, 'flowday').url = url;
-      expect(problems(r).some((p) => p.startsWith('entry flowday url') && p.includes(problem)), url).toBe(true);
+      entry(r, 'link-demo').url = url;
+      expect(problems(r).some((p) => p.startsWith('entry link-demo url') && p.includes(problem)), url).toBe(true);
     }
   });
 
@@ -184,14 +191,14 @@ describe('validateRegistry', () => {
 
   it('checks status sources against kinds, workers and Access', () => {
     const r = copy();
-    entry(r, 'flowday').status = { type: 'public_http', url: 'https://flowday.ziyixi.science/', expect: [200], enabled: true };
+    entry(r, 'link-demo').status = { type: 'public_http', url: 'https://link-demo.ziyixi.science/', expect: [200], enabled: true };
     entry(r, 'newsletter').status = { type: 'analytics', max_idle_hours: 26 };
     const found = problems(r);
-    expect(found).toContain('entry flowday: an Access-protected host cannot be probed publicly');
+    expect(found).toContain('entry link-demo: an Access-protected host cannot be probed publicly');
     expect(found).toContain('entry newsletter: analytics needs a worker');
     const linkOnly = copy();
-    entry(linkOnly, 'flowday').tile_metric = { kind: 'latency' };
-    expect(problems(linkOnly)).toContain('entry flowday: tile_metric latency does not fit status link_only');
+    entry(linkOnly, 'link-demo').tile_metric = { kind: 'latency' };
+    expect(problems(linkOnly)).toContain('entry link-demo: tile_metric latency does not fit status link_only');
   });
 
   it('checks stages: entries, workers, holds, notes and each code once per flow', () => {

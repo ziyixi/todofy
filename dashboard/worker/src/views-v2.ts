@@ -25,7 +25,7 @@ import {
   type ShellFields,
   type WorkerRow,
 } from './api-v2-types.ts';
-import { resourceRows, workerRows, type CfScriptsDoc } from './discovery.ts';
+import { resourceRows, withBreakdownResources, workerRows, type CfScriptsDoc } from './discovery.ts';
 import type { StatusDoc, UsageDoc } from './docs.ts';
 import { entryState, flowStates, flowSummaries, type EvalInput } from './evaluate.ts';
 import type { DesiredGuard } from './guard.ts';
@@ -150,7 +150,7 @@ export function cloudflareResponse(
   const listed = capWorkers(workerRows(scripts, now, registry));
   return {
     ...base,
-    usage,
+    usage: { ...usage, rows: withBreakdownResources(usage.rows, registry) },
     workers: listed.rows,
     workers_omitted: listed.omitted,
     workers_truncated: scripts?.truncated ?? false,

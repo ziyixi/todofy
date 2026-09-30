@@ -6,7 +6,7 @@
  * response text never leaves this module: failures become codes.
  */
 import type { QuotaResourceId, QuotaRow } from './api-types.ts';
-import { WORKERS_QUERY_LIMIT } from './api-v2-types.ts';
+import { WORKERS_QUERY_LIMIT, type ResourceKind } from './api-v2-types.ts';
 import { ALLOWANCES, DO_DURATION_GB } from './limits.ts';
 import { DAY_MS, HOUR_MS, daysInUtcMonth, isoSeconds, round1, startOfUtcDay, startOfUtcMonth, utcDay, utcMonthStart } from './time.ts';
 
@@ -203,12 +203,33 @@ function field(row: unknown, group: string, name: string): number {
   return isObject(section) ? num(section[name]) : 0;
 }
 
+/** The breakdown key of a row without the dimension (never a registry match). */
+export const UNKNOWN_DIMENSION = 'unknown';
+
 function dimension(row: unknown, name: string): string {
-  if (!isObject(row) || !isObject(row.dimensions)) return 'unknown';
+  if (!isObject(row) || !isObject(row.dimensions)) return UNKNOWN_DIMENSION;
   const value = row.dimensions[name];
   // Script names, database/namespace IDs, bucket names and AI model IDs only; bounded for storage.
-  return typeof value === 'string' && value !== '' ? value.slice(0, 80) : 'unknown';
+  return typeof value === 'string' && value !== '' ? value.slice(0, 80) : UNKNOWN_DIMENSION;
 }
+
+/**
+ * The quota rows whose breakdown parseUsage keys by a storage identifier (databaseId, namespaceId,
+ * bucketName); the others are keyed by scriptName (workers_requests, do_requests) or modelId, and
+ * do_storage has none.
+ */
+export const BREAKDOWN_RESOURCE_KIND: Readonly<Partial<Record<QuotaResourceId, ResourceKind>>> = {
+  d1_rows_read: 'd1',
+  d1_rows_written: 'd1',
+  d1_storage: 'd1',
+  d1_database_max: 'd1',
+  do_duration: 'do',
+  do_rows_read: 'do',
+  do_rows_written: 'do',
+  r2_class_a: 'r2',
+  r2_class_b: 'r2',
+  r2_storage: 'r2',
+};
 
 interface Measured {
   readonly used: number | null;

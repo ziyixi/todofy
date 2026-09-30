@@ -1,6 +1,6 @@
 import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { NOW, analyticsUnavailable, guardShed, healthy, quotaRows, withWorkers, type Scenario } from '../test/fixtures'
+import { IDS, NOW, analyticsUnavailable, guardShed, healthy, quotaRows, withWorkers, type Scenario } from '../test/fixtures'
 import { freezeClock, renderApp, serve, type Call } from '../test/harness'
 
 async function showCloudflare(scenario: Scenario | ((call: Call) => Scenario), hash = '#/cloudflare') {
@@ -29,6 +29,47 @@ describe('Cloudflare 监控', () => {
     const item = workers.closest('li') as HTMLElement
     expect(within(item).getByText('mail-hero（Mail Hero）')).toBeInTheDocument()
     expect(within(item).getByText('new-worker')).toBeInTheDocument()
+  })
+
+  it('names D1, Durable Object and R2 contributors from the registry, never by a bare ID', async () => {
+    await showCloudflare(healthy())
+    const quota = section('账户额度')
+    const itemOf = (name: string) => within(quota).getByRole('meter', { name }).closest('li') as HTMLElement
+
+    const d1 = itemOf('D1 读取行数')
+    const mailDb = within(d1).getByText('mail-hero 主库 · Mail Hero')
+    expect(mailDb).toHaveAttribute('title', IDS.mailHeroDb)
+    expect(mailDb.tagName).toBe('SPAN')
+    const unknownDb = within(d1).getByText('未登记 · 8f14e45f')
+    expect(unknownDb).toHaveAttribute('title', IDS.unknownDb)
+    expect(unknownDb).toHaveClass('muted')
+    expect(d1).not.toHaveTextContent(IDS.mailHeroDb)
+
+    const doRows = itemOf('Durable Objects SQLite 写入行数')
+    expect(within(doRows).getByText('MailCoordinator · Mail Hero')).toHaveAttribute('title', IDS.mailCoordinator)
+    expect(within(doRows).getByText('TodofyCore · Todofy')).toBeInTheDocument()
+    expect(within(doRows).getByText('HomeState · 个人控制台')).toBeInTheDocument()
+    expect(within(doRows).getByText('未登记 · 01234567')).toHaveAttribute('title', IDS.unknownNs)
+    expect(doRows).not.toHaveTextContent('a87ff679')
+
+    // DO requests are counted per script: named like the Worker rows.
+    const doRequests = itemOf('Durable Objects 请求')
+    expect(within(doRequests).getByText('mail-hero（Mail Hero）')).toBeInTheDocument()
+    expect(within(doRequests).getByText('todofy-core（Todofy）')).toBeInTheDocument()
+
+    // A bucket: its registry name, the bucket name as the tooltip; an unregistered one in full.
+    const r2 = itemOf('R2 存储')
+    expect(within(r2).getByText('mail-hero 邮件存储 · Mail Hero')).toHaveAttribute('title', 'mail-hero-store')
+    expect(within(r2).getByText('todofy 备份 · Todofy')).toBeInTheDocument()
+    expect(within(r2).getByText('未登记 · scratch-bucket')).toBeInTheDocument()
+  })
+
+  it('still shows a breakdown stored before the resource join by its raw key', async () => {
+    const base = healthy()
+    const rows = quotaRows({ d1_rows_read: { breakdown: [{ name: IDS.mailHeroDb, value: 5_210 }] } })
+    await showCloudflare({ ...base, cloudflare: { ...base.cloudflare, usage: { ...base.cloudflare.usage, rows } } })
+    const item = within(section('账户额度')).getByRole('meter', { name: 'D1 读取行数' }).closest('li') as HTMLElement
+    expect(within(item).getByText(IDS.mailHeroDb).tagName).toBe('CODE')
   })
 
   it('shows Workers AI neurons as a daily row with the neurons left, its top models and no guard', async () => {

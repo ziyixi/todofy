@@ -27,7 +27,7 @@ import type {
   WorkerRow,
 } from '../../../worker/src/api-v2-types.ts'
 import { HOME_QUOTA_IDS } from '../../../worker/src/api-v2-types.ts'
-import { registryView } from '../../../worker/src/registry.ts'
+import { REGISTRY, registryView } from '../../../worker/src/registry.ts'
 
 /** The fixed "now" of every test: 2026-09-29 17:00 UTC (01:00 on 9-30 in Asia/Shanghai). */
 export const NOW = new Date('2026-09-29T17:00:00.000Z')
@@ -102,6 +102,20 @@ function warned(items: AttentionItem[], badges: Partial<ShellFields['badges']>):
 
 // ---- quota ----------------------------------------------------------------------------------------
 
+/**
+ * Made-up D1/DO identifiers of the breakdowns and the resource table (not the account's). The Worker
+ * joins each to the registry (`resource`); the page only names what it was told.
+ */
+export const IDS = {
+  mailHeroDb: '3c59dc04-8b3a-4f1e-9d2c-0000000000cc',
+  unknownDb: '8f14e45f-ceea-467a-9575-0000000000aa',
+  otherDb: 'c9f0f895-fb98-4b91-9f0a-0000000000bb',
+  mailCoordinator: 'a87ff679a2f3471d8c2b0000000000dd',
+  todofyCore: 'e4da3b7fbbce4a5c9f7e0000000000ee',
+  homeState: '1679091c5a884faf9fb50000000000ff',
+  unknownNs: '0123456789abcdef0123456789abcdef',
+} as const
+
 const DOCS = 'https://developers.cloudflare.com/workers/platform/limits/'
 
 function row(partial: Partial<QuotaRow> & Pick<QuotaRow, 'id' | 'period' | 'unit' | 'limit'>): QuotaRow {
@@ -135,12 +149,44 @@ export function quotaRows(overrides: Partial<Record<QuotaRow['id'], Partial<Quot
         { name: 'new-worker', value: 3 },
       ],
     }),
-    row({ id: 'd1_rows_read', period: 'daily', unit: 'rows', limit: 5_000_000, used: 7_142 }),
+    row({
+      id: 'd1_rows_read',
+      period: 'daily',
+      unit: 'rows',
+      limit: 5_000_000,
+      used: 7_142,
+      breakdown: [
+        { name: IDS.mailHeroDb, value: 5_210, kind: 'd1', resource: 'mail-hero-db' },
+        { name: IDS.unknownDb, value: 1_932, kind: 'd1', resource: null },
+      ],
+    }),
     row({ id: 'd1_rows_written', period: 'daily', unit: 'rows', limit: 100_000, used: 486 }),
-    row({ id: 'do_requests', period: 'daily', unit: 'requests', limit: 100_000, used: 1_380 }),
+    row({
+      id: 'do_requests',
+      period: 'daily',
+      unit: 'requests',
+      limit: 100_000,
+      used: 1_380,
+      breakdown: [
+        { name: 'mail-hero', value: 1_020 },
+        { name: 'todofy-core', value: 360 },
+      ],
+    }),
     row({ id: 'do_duration', period: 'daily', unit: 'gb_seconds', limit: 13_000, used: 212 }),
     row({ id: 'do_rows_read', period: 'daily', unit: 'rows', limit: 5_000_000, used: 21_400 }),
-    row({ id: 'do_rows_written', period: 'daily', unit: 'rows', limit: 100_000, used: 1_920 }),
+    row({
+      id: 'do_rows_written',
+      period: 'daily',
+      unit: 'rows',
+      limit: 100_000,
+      used: 1_920,
+      breakdown: [
+        { name: IDS.mailCoordinator, value: 1_020, kind: 'do', resource: 'mail-coordinator' },
+        { name: IDS.todofyCore, value: 610, kind: 'do', resource: 'todofy-core-do' },
+        { name: IDS.homeState, value: 240, kind: 'do', resource: 'home-state' },
+        { name: IDS.unknownNs, value: 50, kind: 'do', resource: null },
+      ],
+    }),
     // Workers AI: daily but never a guard trigger; synthetic public model IDs.
     row({
       id: 'ai_neurons',
@@ -162,7 +208,18 @@ export function quotaRows(overrides: Partial<Record<QuotaRow['id'], Partial<Quot
     row({ id: 'd1_storage', period: 'storage', unit: 'bytes', limit: 5_000_000_000, used: 46_200_000 }),
     row({ id: 'd1_database_max', period: 'storage', unit: 'bytes', limit: 500_000_000, used: 38_900_000 }),
     row({ id: 'do_storage', period: 'storage', unit: 'bytes', limit: 5_000_000_000, used: 12_400_000 }),
-    row({ id: 'r2_storage', period: 'storage', unit: 'bytes', limit: 10_000_000_000, used: 837_000_000 }),
+    row({
+      id: 'r2_storage',
+      period: 'storage',
+      unit: 'bytes',
+      limit: 10_000_000_000,
+      used: 837_000_000,
+      breakdown: [
+        { name: 'mail-hero-store', value: 781_000_000, kind: 'r2', resource: 'mail-hero-store' },
+        { name: 'todofy-backups', value: 52_000_000, kind: 'r2', resource: 'todofy-backups' },
+        { name: 'scratch-bucket', value: 4_000_000, kind: 'r2', resource: null },
+      ],
+    }),
   ]
   return rows.map((item) => {
     const patch = overrides[item.id]
@@ -220,7 +277,6 @@ function entries(patch: Record<string, Partial<EntryState>> = {}): EntryState[] 
   return [
     entry('mail-hero', { metric: { kind: 'counter', name: 'ingest_today_messages', value: 37 }, ...patch['mail-hero'] }),
     entry('todofy', { metric: { kind: 'counter', name: 'received_24h', value: 41 }, ...patch.todofy }),
-    entry('flowday', { level: 'link', checked_at: null, ...patch.flowday }),
     entry('website', { metric: { kind: 'latency', ms: 180 }, ...patch.website }),
     entry('notion-publish', { metric: { kind: 'last_active', hour: '2026-09-29T16:00:00.000Z' }, ...patch['notion-publish'] }),
     entry('newsletter', { level: 'unmonitored', checked_at: null, ...patch.newsletter }),
@@ -543,9 +599,9 @@ function scenario(
       workers_omitted: 0,
       workers_truncated: false,
       resources: [
-        { kind: 'd1', id: '8f14e45f-ceea-467a-9575-0000000000aa', resource: null, entry: null, size_bytes: 38_900_000, rows_read: 5_210, rows_written: 318 },
-        { kind: 'd1', id: 'c9f0f895-fb98-4b91-9f0a-0000000000bb', resource: null, entry: null, size_bytes: 7_300_000, rows_read: 1_932, rows_written: 168 },
-        { kind: 'do', id: '0123456789abcdef0123456789abcdef', resource: null, entry: null, requests: null, rows_read: 4_100, rows_written: 1_020 },
+        { kind: 'd1', id: IDS.unknownDb, resource: null, entry: null, size_bytes: 38_900_000, rows_read: 5_210, rows_written: 318 },
+        { kind: 'd1', id: IDS.otherDb, resource: null, entry: null, size_bytes: 7_300_000, rows_read: 1_932, rows_written: 168 },
+        { kind: 'do', id: IDS.unknownNs, resource: null, entry: null, requests: null, rows_read: 4_100, rows_written: 1_020 },
         { kind: 'r2', id: 'mail-hero-store', resource: 'mail-hero-store', entry: 'mail-hero', size_bytes: 781_000_000, class_a: 15_900, class_b: 52_800 },
         { kind: 'r2', id: 'unclassified', resource: null, entry: null, size_bytes: null, class_a: 1_340, class_b: 5_300 },
       ],
@@ -739,5 +795,32 @@ export function canaryFailed(): Scenario {
     ...base,
     flows: { ...base.flows, flows: [{ ...mail, level: 'critical', stages, canary: { ...canary, last_ok_at: null } }, ...base.flows.flows.slice(1)] },
     ops: { ...base.ops, canary },
+  }
+}
+
+/**
+ * Healthy, plus a synthetic link-only app tile (the registry has none since Flowday was removed from
+ * the dashboard on 2026-09-30): an Access-protected host shown as a link, never probed.
+ */
+export function withLinkOnly(): Scenario {
+  const base = healthy()
+  const linkOnly = {
+    id: 'link-demo',
+    name: 'Link Demo',
+    description: '仅链接的测试条目',
+    group: 'apps',
+    icon: 'calendar-clock',
+    accent: 'teal',
+    url: 'https://link-demo.ziyixi.science/',
+    access: true,
+    status: { type: 'link_only' },
+    tile_metric: null,
+    app_only_signals: [],
+    order: 3,
+  } as const
+  return {
+    ...base,
+    registry: registryView(BUILD, { ...REGISTRY, entries: [...REGISTRY.entries, linkOnly] }),
+    home: { ...base.home, entries: [...base.home.entries, entry('link-demo', { level: 'link', checked_at: null })] },
   }
 }

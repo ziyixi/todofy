@@ -78,21 +78,6 @@ const ENTRIES: readonly EntryDef[] = [
     order: 2,
   },
   {
-    id: 'flowday',
-    name: 'Flowday',
-    description: 'Access 保护的个人站点，仅链接',
-    group: 'apps',
-    icon: 'calendar-clock',
-    accent: 'teal',
-    url: 'https://flowday.ziyixi.science/',
-    access: true,
-    // Access answers an anonymous probe with its login redirect, so it is never probed (Q5).
-    status: { type: 'link_only' },
-    tile_metric: null,
-    app_only_signals: [],
-    order: 3,
-  },
-  {
     id: 'website',
     name: '个人网站',
     description: 'ziyixi.science，内容来自 Notion',

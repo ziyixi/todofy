@@ -90,7 +90,6 @@ Three lists joined by id, compiled into the Worker; the UI gets the public view 
 | --- | --- | --- | --- |
 | Mail Hero | 应用 | `ops_v1` (MAIL_HERO, guard) | 今日收件 |
 | Todofy (`todofy`, `todofy-core`) | 应用 | `ops_v1` (TODOFY, guard) | 24 小时收到 |
-| Flowday | 应用 | `link_only` (never probed) | host |
 | 个人网站 (`ziyixi-website`, assets only) | 站点 | `public_http`: one GET per tick to `www…/build-info.json` (the apex 308s to www), status + latency only, `redirect: 'manual'`, body unread, `enabled` flag. The site's Worker (`website/`) serves static assets only, which are not Worker invocations, so analytics cannot judge it; the file is part of its static export, so the probe survives the cutover | latency |
 | Notion 发布 (`ziyixi-notion-publish`) | 后台服务 | `analytics`: error rate + 26 h idle rule | last request hour |
 | Newsletter | 后台服务 | `none` → 未接入 | — |
@@ -162,6 +161,12 @@ time (a stale status, stopped ticks) is right at every read.
   `bucketName` (operations ∪ storage, classes as the quota rows; no bucket → `unclassified`), each
   joined with the registry by `match`; unmatched rows keep `resource: null` (未登记 + raw ID). A mapped
   namespace's `requests` are its defining script's `doInv` count.
+- **Quota 主要来源**: the stored rows keep the raw GraphQL keys. When `/api/v2/cloudflare` is built, each
+  breakdown item keyed by a D1 `databaseId`, DO `namespaceId` or R2 `bucketName` gets `kind` and
+  `resource` from the same `match` join (additive fields, so snapshots stored earlier get them too;
+  no extra request). The page names it from the registry, "MailCoordinator · Mail Hero", or
+  "未登记 · <first 8 characters>" (a bucket: its full name), the key as the tooltip. Script items
+  (Workers and DO requests) stay "script（entry）"; model items stay raw.
 
 ## 5. API v2 and budgets
 
@@ -248,7 +253,7 @@ while loading; one failing source greys only its own tile. Times in the browser 
 ## 8. Decisions taken (owner-approved defaults)
 
 Q1 title 个人控制台 · Q2 tile = entry's own health · Q3 home keeps one line per flow and 4 mini bars ·
-Q4 home grouped by kind, flows by business · Q5 Flowday link-only (思源笔记 was too until the owner retired it on 2026-09-30) · Q6 probe the website every tick
+Q4 home grouped by kind, flows by business · Q5 Flowday link-only (思源笔记 was too until the owner retired it on 2026-09-30; the owner removed Flowday's entry from the dashboard the same day, so the registry has no link-only entry now and the kind stays supported) · Q6 probe the website every tick
 · Q7 Newsletter 未接入 for now · Q8 24 h sparkline later (step 3, not in scope) · Q9 registry in repo TS
 · Q10 four tabs · Q11 no tile for this dashboard · Q12 unregistered Workers never alarm · Q13
 notion-publish idle limit 26 h.

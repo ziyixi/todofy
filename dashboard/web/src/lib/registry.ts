@@ -2,7 +2,7 @@
  * Lookups over the public registry (`GET /api/v2/registry`). The UI never hard-codes an entry, a
  * Worker or a flow: names, order, groups and links all come from the registry the Worker serves.
  */
-import type { FlowDef, GuardViewV2, RegistryEntryView, RegistryResponse, StageDef, Target } from '../../../worker/src/api-v2-types.ts'
+import type { FlowDef, GuardViewV2, RegistryEntryView, RegistryResponse, ResourceKind, StageDef, Target } from '../../../worker/src/api-v2-types.ts'
 import { routeHash } from '../router'
 import { PLATFORM_SOURCES } from './labels'
 
@@ -23,6 +23,18 @@ export function flowOf(reg: Reg, id: string | null | undefined): FlowDef | undef
 
 export function stageOf(flow: FlowDef | undefined, id: string | null | undefined): StageDef | undefined {
   return id ? flow?.stages.find((stage) => stage.id === id) : undefined
+}
+
+export function resourceOf(reg: Reg, id: string | null | undefined) {
+  return id ? reg.resources.find((resource) => resource.id === id) : undefined
+}
+
+/**
+ * How an unregistered resource is shown after 未登记: an opaque D1/DO ID by its first 8 characters, an
+ * R2 bucket by its (non-secret) name in full, so buckets sharing a prefix stay distinguishable.
+ */
+export function unregisteredId(kind: ResourceKind, id: string): string {
+  return kind === 'r2' ? id : id.slice(0, 8)
 }
 
 export function workerOf(reg: Reg, script: string) {

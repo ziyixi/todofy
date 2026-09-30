@@ -15,9 +15,10 @@ import {
   type ResourceRow,
   type WorkerRow,
 } from './api-v2-types.ts';
+import type { QuotaRow } from './api-types.ts';
 import { REGISTRY, entryOfScript, resourceByMatch } from './registry.ts';
 import { DAY_MS, HOUR_MS, isoOrNull, round1, utcDay } from './time.ts';
-import type { ResourceUsage, ScriptUsage } from './usage.ts';
+import { BREAKDOWN_RESOURCE_KIND, UNKNOWN_DIMENSION, type ResourceUsage, type ScriptUsage } from './usage.ts';
 
 export type ScriptToday = Omit<ScriptUsage, 'script'>;
 
@@ -180,4 +181,24 @@ export function resourceRows(usage: ResourceUsage | undefined, scripts: CfScript
     rows.push({ kind: 'r2', id: bucket.id, resource: def?.id ?? null, entry: def?.entry ?? null, size_bytes: bucket.size_bytes, class_a: bucket.class_a, class_b: bucket.class_b });
   }
   return rows;
+}
+
+/**
+ * The quota rows with each D1/DO/R2 breakdown item joined to the registry like the resource table
+ * (resourceByMatch): `kind` and `resource` (null → 未登记), so the page names "MailCoordinator ·
+ * Mail Hero" instead of a namespace ID. Done when the view is built, never stored: snapshots from
+ * before this field get it too, and a registry change applies at once. Script and model items, and
+ * an item without the dimension, are left as they are.
+ */
+export function withBreakdownResources(rows: readonly QuotaRow[], registry: Registry = REGISTRY): QuotaRow[] {
+  return rows.map((row) => {
+    const kind = BREAKDOWN_RESOURCE_KIND[row.id];
+    if (kind === undefined || row.breakdown.length === 0) return row;
+    return {
+      ...row,
+      breakdown: row.breakdown.map(({ name, value }) =>
+        name === UNKNOWN_DIMENSION ? { name, value } : { name, value, kind, resource: resourceByMatch(kind, name, registry)?.id ?? null },
+      ),
+    };
+  });
 }

@@ -4,7 +4,7 @@ The owner's personal console (个人控制台) on `home.ziyixi.science`, behind 
 application "Home". Four hash-routed views ([`docs/design-v2.md`](docs/design-v2.md)):
 
 - **首页 `#/`**: launcher tiles for every registered app, site and background service (Mail Hero,
-  Todofy, Flowday, the website, Notion 发布, the newsletter), each a real link plus an honest
+  Todofy, the website, Notion 发布, the newsletter), each a real link plus an honest
   health word (link-only entries show only their host; unmonitored ones say 未接入), an attention strip,
   one line per business flow and four mini quota bars (Workers AI neurons among them, with the neurons
   left today).

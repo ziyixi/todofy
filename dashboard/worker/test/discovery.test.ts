@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import { CF_SCRIPTS_MAX, type Registry } from '../src/api-v2-types.ts';
-import { errorLevel, errorPercent, mergeScripts, resourceRows, workerRows, type CfScriptsDoc } from '../src/discovery.ts';
+import { errorLevel, errorPercent, mergeScripts, resourceRows, withBreakdownResources, workerRows, type CfScriptsDoc } from '../src/discovery.ts';
 import { REGISTRY } from '../src/registry.ts';
 import { parseUsage, type ScriptUsage } from '../src/usage.ts';
-import { REALISTIC_USAGE, SYNTHETIC_D1, SYNTHETIC_NS, graphqlBody, usageWithScripts } from './graphql-fixture.ts';
+import { REALISTIC_USAGE, SYNTHETIC_D1, SYNTHETIC_NS, aiNeurons, graphqlBody, usageWithScripts } from './graphql-fixture.ts';
 
 const T0 = Date.parse('2026-09-29T06:30:00Z');
 const MIN = 60_000;
@@ -159,5 +159,77 @@ describe('the resource table', () => {
       rows_read: 7300,
       rows_written: 610,
     });
+  });
+});
+
+describe('the quota breakdowns', () => {
+  /** The registry with two of its resources matched to the synthetic IDs of REALISTIC_USAGE. */
+  const registry: Registry = {
+    ...REGISTRY,
+    resources: REGISTRY.resources.map((r) =>
+      r.id === 'mail-hero-db' ? { ...r, match: SYNTHETIC_D1[0] } : r.id === 'mail-coordinator' ? { ...r, match: SYNTHETIC_NS[0] } : r,
+    ),
+  };
+  const parsed = (extra = {}) => {
+    const data = parseUsage(graphqlBody({ ...REALISTIC_USAGE, ...aiNeurons(3), ...extra }), T0);
+    if (data === null) throw new Error('fixture did not parse');
+    return data.rows;
+  };
+  const breakdown = (rows: ReturnType<typeof parsed>, id: string) => rows.find((r) => r.id === id)?.breakdown;
+
+  it('joins every D1, DO and R2 item to the registry like the resource table (unknown → null)', () => {
+    const stored = parsed();
+    const rows = withBreakdownResources(stored, registry);
+    for (const id of ['d1_rows_read', 'd1_rows_written', 'd1_storage', 'd1_database_max']) {
+      expect(breakdown(rows, id)?.map((item) => [item.name, item.kind, item.resource]), id).toEqual([
+        [SYNTHETIC_D1[0], 'd1', 'mail-hero-db'],
+        [SYNTHETIC_D1[1], 'd1', null],
+      ]);
+    }
+    for (const id of ['do_duration', 'do_rows_read', 'do_rows_written']) {
+      expect(breakdown(rows, id)?.map((item) => [item.name, item.kind, item.resource]), id).toEqual([
+        [SYNTHETIC_NS[0], 'do', 'mail-coordinator'],
+        [SYNTHETIC_NS[1], 'do', null],
+        [SYNTHETIC_NS[2], 'do', null],
+      ]);
+    }
+    for (const id of ['r2_class_a', 'r2_class_b', 'r2_storage']) {
+      expect(breakdown(rows, id)?.map((item) => [item.name, item.kind, item.resource]), id).toEqual([
+        ['mail-hero-store', 'r2', 'mail-hero-store'],
+        ['backup-synthetic', 'r2', null],
+      ]);
+    }
+    expect(breakdown(rows, 'd1_rows_read')?.[0]).toEqual({ name: SYNTHETIC_D1[0], value: 5210, kind: 'd1', resource: 'mail-hero-db' });
+    // The same answer for the same identifier as the resource table.
+    const table = resourceRows(parseUsage(graphqlBody(REALISTIC_USAGE), T0)?.resources, scriptsAt(5, T0), T0, registry);
+    for (const item of rows.flatMap((row) => row.breakdown)) {
+      if (item.kind !== undefined) expect(table.find((r) => r.kind === item.kind && r.id === item.name)?.resource, item.name).toBe(item.resource);
+    }
+  });
+
+  it('leaves script and model items, and rows without a breakdown, as they are; never changes the stored rows', () => {
+    const stored = parsed();
+    const before = structuredClone(stored);
+    const rows = withBreakdownResources(stored, registry);
+    for (const id of ['workers_requests', 'do_requests', 'ai_neurons']) {
+      expect(breakdown(rows, id), id).toEqual(breakdown(stored, id));
+      expect(breakdown(rows, id)?.length, id).toBeGreaterThan(0);
+      expect(breakdown(rows, id)?.every((item) => !('kind' in item) && !('resource' in item)), id).toBe(true);
+    }
+    expect(breakdown(rows, 'do_storage')).toEqual([]);
+    expect(stored).toEqual(before);
+  });
+
+  it('keeps an item without the dimension as it was (never 未登记 · unknown)', () => {
+    const stored = parsed({
+      r2Ops: [
+        { actionType: 'PutObject', bucketName: 'mail-hero-store', requests: 10 },
+        { actionType: 'PutObject', bucketName: '', requests: 4 },
+      ],
+    });
+    expect(breakdown(withBreakdownResources(stored, registry), 'r2_class_a')).toEqual([
+      { name: 'mail-hero-store', value: 10, kind: 'r2', resource: 'mail-hero-store' },
+      { name: 'unknown', value: 4 },
+    ]);
   });
 });

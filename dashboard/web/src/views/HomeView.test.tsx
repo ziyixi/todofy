@@ -1,7 +1,7 @@
 import { screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { apiError, freezeClock, installFetch, json, renderApp, serve } from '../test/harness'
-import { analyticsUnavailable, healthy, observedOnly, oneWarning, shell, todofyUnreachable, type Scenario } from '../test/fixtures'
+import { analyticsUnavailable, healthy, observedOnly, oneWarning, shell, todofyUnreachable, withLinkOnly, type Scenario } from '../test/fixtures'
 
 async function showHome(scenario: Scenario) {
   freezeClock()
@@ -21,7 +21,6 @@ describe('首页', () => {
     expect(links.map((link) => link.getAttribute('aria-label'))).toEqual([
       '打开 Mail Hero（新标签页），mail-hero.ziyixi.science',
       '打开 Todofy（新标签页），todofy.ziyixi.science',
-      '打开 Flowday（新标签页），flowday.ziyixi.science，未接入监控（仅链接）',
     ])
     for (const link of links) {
       expect(link).toHaveAttribute('target', '_blank')
@@ -29,14 +28,14 @@ describe('首页', () => {
       expect(link.getAttribute('href')).toMatch(/^https:\/\/[a-z-]+\.ziyixi\.science\/$/)
     }
     // Access-protected entries carry the lock with its own name; never an emoji.
-    expect(within(apps).getAllByRole('img', { name: '受 Access 保护' })).toHaveLength(3)
+    expect(within(apps).getAllByRole('img', { name: '受 Access 保护' })).toHaveLength(2)
 
     // Status lines are separate buttons (never inside the link).
     const mail = within(apps).getByRole('button', { name: 'Mail Hero 状态：正常，查看详情' })
     expect(mail).toHaveTextContent('正常· 今日收件 37')
     expect(within(apps).getByRole('button', { name: 'Todofy 状态：正常，查看详情' })).toHaveTextContent('24 小时 41 封')
-    // Link-only tiles: no status button, no fake green, the host instead.
-    expect(within(apps).queryByRole('button', { name: /Flowday/ })).toBeNull()
+    expect(within(apps).getAllByRole('button')).toHaveLength(2)
+    expect(within(apps).queryByText(/Flowday/)).toBeNull()
 
     const sites = within(launcher()).getByRole('region', { name: '站点' })
     expect(within(sites).getByRole('link', { name: '打开 个人网站（新标签页），ziyixi.science' })).toHaveAttribute('href', 'https://ziyixi.science/')
@@ -53,6 +52,16 @@ describe('首页', () => {
 
     // The dashboard itself has no tile.
     expect(within(launcher()).queryByText('个人控制台')).toBeNull()
+  })
+
+  it('shows a link-only tile as its host: no status button, no fake green', async () => {
+    await showHome(withLinkOnly())
+    const apps = within(launcher()).getByRole('region', { name: '应用' })
+    const link = within(apps).getByRole('link', { name: '打开 Link Demo（新标签页），link-demo.ziyixi.science，未接入监控（仅链接）' })
+    expect(link).toHaveAttribute('href', 'https://link-demo.ziyixi.science/')
+    expect(link).toHaveAttribute('target', '_blank')
+    expect(within(apps).getAllByRole('img', { name: '受 Access 保护' })).toHaveLength(3)
+    expect(within(apps).queryByRole('button', { name: /Link Demo/ })).toBeNull()
   })
 
   it('shows one quiet line when everything is fine', async () => {

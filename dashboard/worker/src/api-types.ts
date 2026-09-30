@@ -164,9 +164,24 @@ export interface QuotaRow {
   /** The dataset returned as many rows as the query's limit: `used` is a lower bound. */
   readonly truncated: boolean;
   /** Largest contributors, at most 5: script name, D1 database ID, DO namespace ID, bucket name or Workers AI model ID. */
-  readonly breakdown: readonly { readonly name: string; readonly value: number }[];
+  readonly breakdown: readonly QuotaBreakdownItem[];
   /** Cloudflare documentation URL of the limit. */
   readonly source: string;
+}
+
+/**
+ * One contributor of a quota row. `name` is the GraphQL key as measured and stored. The v2 Cloudflare
+ * view adds `kind` and `resource` to the items keyed by a D1 databaseId, DO namespaceId or R2
+ * bucketName (added when the view is built, so snapshots stored before them get them too); script
+ * and Workers AI model items, and older responses, have neither.
+ */
+export interface QuotaBreakdownItem {
+  readonly name: string;
+  readonly value: number;
+  /** The storage kind `name` identifies. */
+  readonly kind?: 'd1' | 'do' | 'r2';
+  /** Registry resource id (`GET /api/v2/registry` names it); null → 未登记 + the first 8 characters (R2: the bucket name). */
+  readonly resource?: string | null;
 }
 
 export type UsageStatus = 'ok' | 'stale' | 'unavailable' | 'not_configured';

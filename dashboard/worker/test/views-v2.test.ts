@@ -8,7 +8,7 @@ import { etagMatches } from '../src/v2-views.ts';
 import { capWorkers, cloudflareResponse, flowsResponse, fnv1a, homeResponse, nextTickAt, opsResponse, serializeView, shell } from '../src/views-v2.ts';
 import type { CfScriptsDoc, ScriptRecord } from '../src/discovery.ts';
 import { REALISTIC_USAGE, usageWithScripts } from './graphql-fixture.ts';
-import { DAY, MIN, NOW, fortnight, input, run, scripts, signal, status, usageDoc, usageView } from './v2-fixtures.ts';
+import { DAY, LINK_ONLY_ENTRY, MIN, NOW, fortnight, input, run, scripts, signal, status, usageDoc, usageView, withLinkOnly } from './v2-fixtures.ts';
 
 const DESIRED = { level: 'normal', reason: 'quota_normal', until: null, source: 'auto' } as const;
 
@@ -108,7 +108,10 @@ describe('the views', () => {
   it('home: every tile but the hidden one, one line per flow, four mini bars without contributors', () => {
     const ev = input();
     const home = homeResponse(base(), ev, usageView(), DESIRED);
-    expect(home.entries.map((e) => e.id)).toEqual(['mail-hero', 'todofy', 'flowday', 'website', 'notion-publish', 'newsletter']);
+    expect(home.entries.map((e) => e.id)).toEqual(['mail-hero', 'todofy', 'website', 'notion-publish', 'newsletter']);
+    // A link-only entry (synthetic: the registry has none) is a tile at level link, never probed.
+    const linked = homeResponse(base(), ev, usageView(), DESIRED, withLinkOnly()).entries.find((e) => e.id === LINK_ONLY_ENTRY.id);
+    expect(linked).toMatchObject({ level: 'link', reason: null, metric: null, checked_at: null });
     expect(home.flows.map((f) => f.id)).toEqual(['mail-to-task', 'site-publish', 'daily-newsletter', 'ops-digest']);
     expect(home.flows[0]).not.toHaveProperty('stages');
     expect(home.cloudflare.quota.map((q) => q.id)).toEqual(HOME_QUOTA_IDS);
@@ -139,6 +142,14 @@ describe('the views', () => {
     expect(view.workers).toHaveLength(count);
     expect(view.usage.rows).toHaveLength(14);
     expect(view.resources.map((r) => r.kind)).toEqual(['d1', 'd1', 'do', 'do', 'do', 'r2', 'r2']);
+    // The stored rows carry raw keys; the view joins the D1/DO/R2 ones to the registry.
+    expect(doc.rows.flatMap((r) => r.breakdown).some((item) => 'kind' in item)).toBe(false);
+    expect(view.usage.rows.find((r) => r.id === 'r2_storage')?.breakdown).toEqual([
+      { name: 'mail-hero-store', value: 781_000_000, kind: 'r2', resource: 'mail-hero-store' },
+      { name: 'backup-synthetic', value: 56_000_000, kind: 'r2', resource: null },
+    ]);
+    expect(view.usage.rows.find((r) => r.id === 'do_rows_written')?.breakdown.every((item) => item.kind === 'do' && item.resource === null)).toBe(true);
+    expect(view.usage.rows.find((r) => r.id === 'workers_requests')?.breakdown.every((item) => !('kind' in item))).toBe(true);
     expect(view.do_storage_bytes).toBeNull();
     expect(view.workers_truncated).toBe(false);
     expect(bytes(view)).toBeLessThanOrEqual(V2_BODY_BUDGET.cloudflare);
