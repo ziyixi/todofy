@@ -1,14 +1,20 @@
 # Lab / Paper Radar: design
 
 The Worker `lab` on `lab.ziyixi.science` (Cloudflare Access app "Lab") ranks each day's arXiv
-cs.IR + cs.CL + cs.LG announcements against the owner's own saves, writes a one-line Chinese TL;DR for
-the top 10, and offers keyboard triage. It runs on Workers Free, is fully deferrable under the
+cs.IR + cs.CL + cs.LG announcements against the owner's own likes and seeds, writes a 2–4 sentence
+Chinese 简介 for each of the day's top 20, and shows them as a **daily deck, one card at a time**: swipe
+right 喜欢, left 不喜欢, undo any number of steps, 重来 the whole deck, and at the end confirm whether to
+send the liked papers to Todofy, which creates the Todoist tasks (`contracts/task-intent-v1`). The
+interaction spec and the research behind it are in [`ux.md`](ux.md). It runs on Workers Free, is fully deferrable under the
 dashboard's guard, and reports to the dashboard through `contracts/ops-v1`. Owner-approved scope:
 the brainstorm "MLE" note §1 and REPORT §3 ⑤ (2026-09-30); the newsletter seed contract, HF Daily
 Papers, v2 learned ranking and citation follow-up are **not** in this version.
 
-Status: design + scaffold. Nothing is implemented or deployed. Facts below were checked on
-2026-09-30 against the linked public docs and one request to the public feed.
+Status: design + scaffold. Nothing is implemented or deployed. The D1 database `lab` and the Access
+app exist (ids committed in `wrangler.toml`). Facts below were checked on 2026-09-30 against the linked
+public docs and one request to the public feed. Revision 2 (same day, owner request): the deck/session
+model (§7), the send step and Todofy intake (§9), 简介 for all 20 cards (§1, §4), labels renamed
+`like`/`dislike`, and the build split (§12).
 
 ## 1. Workers AI quota: the answer first
 
@@ -31,12 +37,14 @@ once (932 unique IDs). Description (abstract) ≈ 1,490 characters on average, �
 | Daily work | Tokens | Neurons |
 | --- | --- | --- |
 | Embed `new` + `cross` (≈632 × ≈370 tokens) | ≈234k | **≈250** |
-| TL;DR, 10 calls × (≈600 in, ≤120 out) on granite | 6k in + 1.2k out | **≈22** |
+| 简介, 20 calls × (≈700 in, ≤300 out) on granite | 14k in + 6k out | **≈83** |
 | Seeds, one-off (20 × 370) | 7.4k | ≈8 |
-| **Typical day** | | **≈270 (2.7 % of the account)** |
+| **Typical day** | | **≈340 (3.4 % of the account)** |
 | Worst case: all 932 items at the 2,000-char cap, estimate at 3 chars/token | ≈650k | ≈720 (7.2 %) |
 
-So yes, the quota is ample: a normal day uses under 3 % of the account budget. `LAB_DAILY_NEURONS`
+So yes, the quota is ample: a normal day uses about 3.4 % of the account budget (with
+`@cf/qwen/qwen3-30b-a3b-fp8` as the 简介 model, 20 × (700 × 4,625 + 300 × 30,475) / 10⁶ ≈ 250 neurons,
+so ≈ 510 a day, still about 5 %). `LAB_DAILY_NEURONS`
 is a **ceiling**, not a forecast: the approved value is 5,000 (half the account). A ceiling of
 1,500 would already be 2× the worst case and leave 85 % to other jobs; the owner may lower it in
 `wrangler.toml` (or in the UI, which can only go lower, §6). Workers AI has no alerting of its own,
@@ -52,11 +60,12 @@ Rate limits (not a concern at this volume): embeddings 3,000 req/min, text gener
 | `lab/wrangler.toml` | the production config (top level = production; run wrangler from `worker/` with `--config ../wrangler.toml`) |
 | `lab/worker/` | TypeScript Worker + SQLite DO `LabState` + `Ops` entrypoint; same toolchain and pins as `dashboard/worker` |
 | `lab/worker/src/api-types.ts` | owner API types shared with the UI (the UI imports it by relative path) |
-| `lab/worker/test/`, `test/runtime/` | Node unit tests (fake bindings); workerd suite (Miniflare, fake AI + fake arXiv) |
+| `lab/worker/test/`, `test/runtime/` | Node unit tests (fake bindings); workerd suite (Miniflare, fake AI + fake arXiv + stub Todofy) |
+| `contracts/task-intent-v1/` | the Lab → Todofy "create these Todoist tasks" contract (§9) |
 | `lab/migrations/` | D1 migrations (`migrations_dir`) |
 | `lab/web/` | React 19 + Vite 7 UI (Chinese), same toolchain as `dashboard/web`, builds `web/dist` |
 | `lab/deploy/` | `deploy-vars.mjs` (BUILD_SHA + owner secrets), `test/*.test.mjs` |
-| `lab/docs/` | this file; later `setup.md`, `verification.md` |
+| `lab/docs/` | this file, [`ux.md`](ux.md) (deck interaction spec + research); later `setup.md`, `verification.md` |
 
 Toolchain = dashboard's (Node 26, TypeScript 5.9.3, vitest 4.1.11, eslint 10.11.0, typescript-eslint
 8.71.0, workers-types 5.20260929.1, wrangler 4.142.0, miniflare 5.20260926.0-alpha, esbuild 0.28.1,
@@ -68,7 +77,7 @@ React 19.3.0, Vite 7.3.6, react-query 5.104.0, lucide-react 1.48.0). `@ziyixi/ed
 - `name = "lab"`, committed `account_id`, `workers_dev = false`, `preview_urls = false`, route
   `lab.ziyixi.science` as a Custom Domain.
 - Bindings: `DB` (D1 `lab`), `LAB` (DO `LabState`, migration `v1` `new_sqlite_classes`), `AI`
-  (`[ai]`), `ASSETS` (`web/dist`, `run_worker_first = true`, SPA fallback). No cron trigger (3/5
+  (`[ai]`), `TODOFY` (service, §9), `ASSETS` (`web/dist`, `run_worker_first = true`, SPA fallback). No cron trigger (3/5
   used): the DO schedules itself with `setAlarm()`.
 - Committed vars: `PUBLIC_HOST`, `ACCESS_ISSUER`, `ACCESS_AUDIENCE`, `LAB_DAILY_NEURONS=5000`,
   `LAB_FETCH_UTC_HOUR=6`. Model ids are **not** vars: `worker/src/models.ts` holds the allow-list with
@@ -76,9 +85,13 @@ React 19.3.0, Vite 7.3.6, react-query 5.104.0, lucide-react 1.48.0). `@ziyixi/ed
   `@cf/ibm-granite/granite-4.0-h-micro`, alternatives `@cf/meta/llama-3.2-1b-instruct`,
   `@cf/qwen/qwen3-30b-a3b-fp8`), and the settings page picks the TL;DR model from that list. (This also
   keeps `@` out of the committed config, which `test_wrangler_configs.py` refuses for wrapped apps.)
-- **Placeholders the lead replaces** before the first deploy: D1 `database_id`
-  `00000000-0000-0000-0000-000000000000` and `ACCESS_AUDIENCE` = 64 zeros. `deploy/deploy-vars.mjs`
-  must refuse to deploy while either is all zeros.
+- Real resources, committed: D1 `lab` `database_id = f20238dc-93a4-4d1a-91c4-c013f01cbdc9`; Access app
+  for `lab.ziyixi.science`, `ACCESS_ISSUER = https://ziyixi.cloudflareaccess.com`, `ACCESS_AUDIENCE =
+  3a8b5e31…c4c8c` (full value in `wrangler.toml`). `deploy/deploy-vars.mjs` still refuses an all-zeros id
+  or AUD, as a guard against a revert.
+- Service binding `TODOFY` → Worker `todofy`, entrypoint `Ops` (contracts/task-intent-v1, §9). Deploy
+  order: Todofy's release with `proposeTasks` should be live before the first send; an older Todofy makes
+  the call reject, which Lab shows as "Todofy 暂不可用" (never a lost or doubled send).
 - Injected at deploy by `deploy/deploy-vars.mjs` (like the dashboard): `--var BUILD_SHA`; Worker
   secrets `ACCESS_OWNER`, `ACCESS_OWNER_ALIASES`, `CSRF_SIGNING_KEY` from GitHub environment secrets
   `LAB_ACCESS_OWNER`, `LAB_ACCESS_OWNER_ALIASES`, `LAB_CSRF_SIGNING_KEY`. No GitHub variable toggles.
@@ -106,31 +119,42 @@ re-arms before returning, and a failed step re-arms with backoff (5 min, 30 min,
 2. **Parse + dedupe**: bounded string scan of `<item>` (no DOM in Workers), ≤ 2,000 items. Per item:
    `id = arxiv:<id>` from `arXiv:<id>v<n>` in the description (version stripped), title, `dc:creator`
    (trimmed to 1,000 chars), `category` list, `arxiv:announce_type`, abstract after `Abstract:`,
-   `dc:rights`. Keep `new` and `cross`; drop `replace`/`replace-cross` unless the ID is saved (then set
-   `new_version` on the saved row). A repeated ID keeps the first. Items are written to D1 in
+   `dc:rights`. Keep `new` and `cross`; drop `replace`/`replace-cross` unless the ID is liked (then set
+   `new_version` on the liked row). A repeated ID keeps the first. Items are written to D1 in
    `INSERT … SELECT … FROM json_each(?)` chunks (≤ 100 items, ≤ 500 KB per statement: D1 Free allows
    50 queries per invocation and 100 bound parameters per query).
    [D1 limits](https://developers.cloudflare.com/d1/platform/limits/)
 3. **Embed** (`embed`): `AI.run('@cf/baai/bge-m3', {text: [...≤50], truncate_inputs: true})`, text =
    `title + "\n\n" + abstract` cut to 2,000 characters; ≤ 8 calls per invocation. Vectors are
    L2-normalised and stored as Float32 BLOBs (1024 × 4 B) in DO SQLite.
-4. **Rank** (`rank`): positives = seed + saved vectors; if ≤ 16, each is a centroid, else spherical
+4. **Rank** (`rank`): positives = seed + liked vectors; if ≤ 16, each is a centroid, else spherical
    k-means with k = 16 (deterministic init, ≤ 10 iterations; cached until labels change). Negative
-   centroid = mean of skipped vectors (latest 500). `score = max_i cos(x, c_i) − λ·cos(x, n)`,
-   λ = 0.3 (setting, 0–1), no negative term without skips. Candidates: the day's items with no label.
-   Top 20 → D1 `picks`. Cold start (no positive vectors): no picks, UI asks for seeds.
-5. **TL;DR** (`tldr`): top 10 picks without a TL;DR, one call each, `max_tokens` 120, temperature
-   0.2; prompt asks for one Chinese sentence ≤ 60 characters from title + abstract. Output is untrusted
-   text: first line only, control characters stripped, ≤ 200 chars, shown as plain text.
+   centroid = mean of disliked vectors (latest 500). `score = max_i cos(x, c_i) − λ·cos(x, n)`,
+   λ = 0.3 (setting, 0–1), no negative term without dislikes. Candidates: the day's items with no
+   label. Top 20 → D1 `picks` with `because_id` = the single positive paper with the highest cosine to
+   the pick (the card's "为什么推荐" line; one pass over ≤ a few hundred positive vectors). Ranking runs
+   once per announcement day, so a deck never reshuffles under the owner. **Cold start** (no positive
+   vectors): an **explore** deck instead: 20 of the day's `new` items taken round-robin over primary
+   categories in feed order (deterministic), `because_id` null. Either way the deck (§7) is created in
+   the same D1 batch as the picks, with `ready_at` null.
+5. **简介** (`brief`, was `tldr`): every card of the day's deck without a 简介, rank order, one call
+   each, `max_tokens` 300, temperature 0.2. Prompt: the title and abstract only, "用 2–4 句简体中文概括这篇
+   论文做了什么、怎么做、结果如何；只使用摘要中的信息，不要推测，不要评价，不要列表，不超过 180 字". Output is
+   untrusted text: control characters stripped, whitespace collapsed, a leading "简介：" or quote removed,
+   ≤ 400 characters, and refused (stored null, counter `brief_rejected`) when it contains no CJK
+   character, a URL, or more than 6 sentences. Shown as plain text only. When every card has a 简介 or a
+   refusal, or the neuron cap stops the step, the deck gets `ready_at` (the UI shows "简介明天补上" for
+   the missing ones and falls back to the first two abstract sentences).
 6. **Seed resolve** (`seed_resolve`): seed IDs not yet in D1 are fetched with **one**
    `GET https://export.arxiv.org/api/query?id_list=<≤20 ids>&max_results=20` per invocation (Atom),
    ≥ 3 s after any other arXiv request, then embedded like step 3.
 7. **Retention** (`retention`, once a day, bounded batches): vectors older than 30 days deleted
-   unless saved/seed; D1 papers older than 90 days deleted unless saved, seed or in `picks`; `picks`
-   kept 365 days; skips kept 180 days. D1 then stays ≈ 150 MB of 500 MB; DO vectors ≈ 60 MB (Free
+   unless liked/seed; D1 papers older than 90 days deleted unless liked, seed or in `picks`; `picks`,
+   decks, cards and deck events kept 365 days; dislikes kept 180 days; `owner_ops` 30 days; `sends`
+   400 days (longer than Todofy keeps the intent), their frozen payload nulled 30 days after settling. D1 then stays ≈ 150 MB of 500 MB; DO vectors ≈ 60 MB (Free
    allows 1 GB per object; hard stop at 60,000 vector rows).
 
-Order per day: fetch → parse → embed → rank → tldr; seed resolve and retention run when the day's
+Order per day: fetch → parse → embed → rank (+ deck) → brief → deck ready; seed resolve and retention run when the day's
 run is idle. Each invocation stays far under 30 s CPU (ranking 632 × 17 × 1024 multiply-adds).
 
 ## 5. Neuron ledger (hard cap, fail-safe)
@@ -148,45 +172,148 @@ run is idle. Each invocation stays far under 30 s CPU (ranking 632 × 17 × 1024
 
 ## 6. Data
 
-**D1 `lab`** (records; the UI reads it directly): `papers(id PK 'arxiv:…', version, title, authors,
-categories JSON, primary_category, announce_type, announced_on, abstract, license, new_version,
-first_seen_at)`, `picks(day, rank, paper_id, score, tldr, tldr_model, PK(day, rank))`,
-`feedback(paper_id PK, label 'save'|'skip', at)`, `seeds(paper_id PK, added_at, state
-'pending'|'resolved'|'not_found')`, `settings(key PK, value)` (categories, λ, cap ≤
-`LAB_DAILY_NEURONS`, TL;DR model, `ingest_paused`).
+**D1 `lab`** (records; written only by `LabState`, read by the Worker for GET routes).
+`migrations/0001_init.sql` is still unapplied (nothing deployed), so revision 2 edits it in place.
+
+| Table | Columns (key points) |
+| --- | --- |
+| `papers` | `id` PK `arxiv:<id>`, version, title, authors, categories JSON, primary_category, announce_type, announced_on, abstract, license, new_version, first_seen_at |
+| `picks` | `(day, rank)` PK, paper_id, score, `because_id` (nearest positive paper or null), `brief` (简介 ≤ 400 chars or null), `brief_model`, created_at |
+| `decks` | `deck_id` PK (= the announce day `YYYY-MM-DD`), `kind` `ranked`\|`explore`, `size` (≤ 20), `version` (bumped by every decision event), `created_at`, `ready_at`, `finished_at`, `later_at` (owner chose 暂不发送) |
+| `deck_cards` | `(deck_id, position)` PK, `paper_id` (UNIQUE per deck), `decision` null\|`like`\|`dislike`, `decided_seq`, `send_excluded` 0/1, `sent_generation` (null until a send containing it is recorded) |
+| `deck_events` | `(deck_id, seq)` PK, `kind` `decide`\|`undo`\|`restart`, `paper_id`, `decision`, `target_seq` (undo: the event it cancels), `at`; append-only, ≤ 400 per deck |
+| `owner_ops` | `op_id` PK (client UUID), `route`, `deck_id`, `status`, `response` JSON (≤ 16 KB), `at`: replay of any mutation; 30 days |
+| `sends` | `(deck_id, generation)` PK, `intent_id` UNIQUE (`deck-<day>-g<n>`), `mode`, `paper_ids` JSON, `payload` (frozen TaskIntent JSON, nulled 30 days after settling), `payload_sha256`, `state` (§9), `recorded` 0/1, `tasks_total`, `tasks_created`, `error_code`, `next_poll_at`, created_at, updated_at |
+| `feedback` | `paper_id` PK, `label` `like`\|`dislike`, `source` `deck`\|`library`, `deck_id`, `at`: the effective label that ranking reads |
+| `seeds` | `paper_id` PK, added_at, state `pending`\|`resolved`\|`not_found` |
+| `settings` | categories, λ, neuron_cap (≤ `LAB_DAILY_NEURONS`), tldr_model (the 简介 model), ingest_paused, `send_mode` (`subtasks` default) |
 
 **DO SQLite** (coordinator): `jobs` (per-day cursor/phase), `vectors(paper_id PK, day, dim, vec BLOB,
-kept)`, `labels(paper_id PK, label, at)` (mirror used for centroids and counters), `centroids`
-cache, `neurons`, `guard`, `fetch_meta` (etag, last_modified, last_ok_at, last_error_code), `counters`.
-The DO is the only writer to D1; owner mutations are DO RPCs.
+kept)`, `labels(paper_id PK, label, at)` (mirror of `feedback` for centroids and counters, rewritten
+after each committed decision), `centroids` cache, `neurons`, `guard`, `fetch_meta` (etag,
+last_modified, last_ok_at, last_error_code), `counters`. The DO is the only writer to D1; owner
+mutations are DO RPCs.
 
-Privacy: saves, skips, seeds and settings are personal. They live only in D1/DO behind Access,
-never in git, logs, fixtures or ops-v1 output (counts only). Logs carry request IDs, job codes,
-counts and error codes. arXiv metadata is public (license per item in `dc:rights`); PDFs are
-linked, never fetched or stored.
+Privacy: likes, dislikes, decks, sends, seeds and settings are personal. They live only in D1/DO
+behind Access (and, for a send, in the Todoist tasks the owner asked for), never in git, logs, fixtures
+or ops-v1 output (counts only). Logs carry request IDs, op IDs, job codes, counts and error codes.
+arXiv metadata is public (license per item in `dc:rights`); PDFs are linked, never fetched or stored.
 
-## 7. Owner API and UI
+## 7. Decks, decisions, undo and 重来
+
+**Session = deck = one arXiv announcement day.** Not a UTC day (arXiv announces once per weekday
+around 04:00 UTC; a weekend has none, and the owner's evening crosses UTC midnight) and not a fetch (a
+re-fetch of an unchanged feed must not make a new deck). The rank step creates the deck with its
+frozen card order; it becomes visible at `ready_at`. `GET /api/today` points at the newest ready deck;
+older unfinished decks (≤ 7 days) are offered separately and never merged.
+
+**Decision log.** Every mutation appends to `deck_events` and updates the materialised
+`deck_cards.decision` and `feedback` in the **same D1 batch** (atomic), with a compare-and-set on
+`decks.version`:
+
+- `decide(paper, like|dislike)`: only for an undecided card of this deck (else 409 `already_decided`);
+  cards may be decided in any order, the UI offers the first undecided one.
+- `undo`: cancels the **latest effective** `decide` or `restart` event (`target_seq`); repeatable until
+  nothing is left (409 `nothing_to_undo`). Undoing a decide clears that card; undoing a restart brings
+  back every decision the restart cleared.
+- `restart` (重来): clears every decision of the deck (the events stay; the restart is one undoable
+  event). Sent papers stay sent (§9).
+- Effective state = replay of the events not cancelled by an undo (decide sets a card, restart clears
+  all). The materialised columns are that replay; a unit test checks them against the pure replay for
+  random operation sequences.
+- `feedback` for the deck's papers is recomputed from `deck_cards` in the same batch (a like/dislike
+  row with `source = deck`, or no row), then the DO rewrites its `labels` mirror. Ranking reads labels
+  at the next day's rank run; today's deck does not reshuffle.
+- `finished_at` is set when every card has a decision and cleared when an undo/restart reopens one.
+
+**Idempotency and concurrency.** Every mutation carries `op_id` (UUID v4 from the browser) and, for
+deck mutations, `base_version`. The DO serialises mutations per deck (an in-memory promise chain; D1
+calls can interleave otherwise) and checks `owner_ops` first: a known `op_id` returns its stored
+response unchanged (a retried request after a lost response is harmless). A stale `base_version` is
+409 `deck_changed` with the current `DeckState`, which the UI adopts (another tab or device). Each
+mutation is at most 6 D1 statements in one batch; a decision costs ≈ 25 rows written, well inside D1
+Free (100,000 rows written per day).
+
+## 8. Owner API and UI
 
 Every `/api/*` route needs the Access owner (edge-auth); mutations also need Origin + CSRF
-(`X-CSRF-Token`, cookie `lab_csrf`). Error envelope `{error: {code, message, request_id}}`. Types
-in `worker/src/api-types.ts`:
+(`X-CSRF-Token`, cookie `lab_csrf`). Error envelope `{error: {code, message, request_id}}`. Types in
+`worker/src/api-types.ts` (updated in revision 2; the UI imports it):
 
 | Route | Purpose |
 | --- | --- |
 | `GET /api/csrf` | `{token}` |
-| `GET /api/today?day=` | the day's top 20 with TL;DR, authors, categories, arXiv + PDF links, label; run state |
-| `GET /api/saved?cursor=` | saved papers, newest first, 50 per page |
-| `POST /api/feedback {paper_id, label: 'save'|'skip'|null}` | triage (null = undo) |
+| `GET /api/today` | `TodayResponse`: newest ready deck id and progress, `building` phase, `next_run_at`, cold start, older unfinished decks |
+| `GET /api/decks/:day` | `Deck`: the frozen cards (paper, 简介, because, links) + `DeckState` + the send status |
+| `POST /api/decks/:day/decide` | `{op_id, base_version, paper_id, decision}` → `DeckMutationResponse` |
+| `POST /api/decks/:day/undo` | `{op_id, base_version}` → `DeckMutationResponse` (with what was undone, for the animation) |
+| `POST /api/decks/:day/restart` | `{op_id, base_version}` → `DeckMutationResponse` |
+| `GET /api/decks/:day/summary` | `DeckSummary`: liked cards with `excluded`/`sent_generation`, counts, the current send |
+| `POST /api/decks/:day/exclude` | `{op_id, paper_id, excluded}` → `DeckSummary` (a flag, not a decision event: no version bump) |
+| `POST /api/decks/:day/send` | `{op_id, mode}` → `SendStatus` (§9) |
+| `GET /api/decks/:day/send` | `SendStatus`; polls Todofy when due (≥ 3 s apart) |
+| `POST /api/decks/:day/later` | `{op_id}` → marks 暂不发送 (`later_at`) |
+| `GET /api/liked?cursor=&q=` | liked papers, newest first, 50 per page, optional title filter |
+| `POST /api/feedback` | `{op_id, paper_id, label: 'like'\|'dislike'\|null}` from the 已喜欢 list (source `library`) |
 | `GET/POST/DELETE /api/seeds` | seed IDs (≤ 50), with resolve state |
-| `GET/PUT /api/settings` | categories, λ, cap (≤ ceiling), TL;DR model (allow-list), ingest pause |
+| `GET/PUT /api/settings` | categories, λ, cap (≤ ceiling), 简介 model (allow-list), ingest pause, default send mode |
 | `GET /api/status` | counters, neurons today/cap, last fetch, guard |
 
-UI (Chinese, the dashboard's calm tokens copied, not imported): 今日 list, 已保存, 种子, 设置.
-Keys: `j`/`k` move, `s` save, `x` skip, `o` open arXiv (`rel="noopener noreferrer"`), `u` undo.
-Mobile: one column, buttons ≥ 44 px. Links are built from the validated ID only
-(`https://arxiv.org/abs/<id>`, `https://arxiv.org/pdf/<id>`), never taken from the feed.
+`:day` must match `^\d{4}-\d{2}-\d{2}$` and name an existing deck (404 `deck_not_found`). Deck GETs read
+D1 directly in the Worker (≤ 3 queries); mutations go to the DO. Links are built from the validated ID
+only (`https://arxiv.org/abs/<id>`, `https://arxiv.org/pdf/<id>`), never taken from the feed.
 
-## 8. ops-v1 and the dashboard (decision: additive third app)
+UI: [`ux.md`](ux.md) is the spec (card anatomy, drag thresholds, keyboard, undo/重来, summary, send
+states, empty/building/done states, accessibility). Views: 今日 (deck → summary → done), 已喜欢, 种子,
+设置. React 19 without a router or gesture library (pointer events + CSS transforms), react-query for
+data, an operation queue for optimistic swipes.
+
+## 9. Sending likes to Todofy (`contracts/task-intent-v1`)
+
+Todofy stays the only Todoist writer. Lab calls `env.TODOFY.proposeTasks(intent)` and
+`taskIntentStatus(ref)` on Todofy's gateway entrypoint `Ops` from inside `LabState` (the only D1
+writer); the contract, states and Todofy's implementation plan are in
+[`contracts/task-intent-v1/README.md`](../../contracts/task-intent-v1/README.md).
+
+**Lab side, per deck:**
+
+- **Generations.** A deck has at most one open send; `sends.generation` counts them. The first send is
+  `deck-<day>-g1`; after it is created, papers liked later in the same deck can go out as `g2`
+  ("补发", title `论文雷达 <day>（补发）· N 篇`), and so on. A paper is in at most one recorded
+  generation (`deck_cards.sent_generation`), so no paper is ever sent twice.
+- **Freeze.** `POST …/send` builds the intent from the liked, not excluded, not yet sent cards in deck
+  order (none → 409 `nothing_to_send`): `mode` from the request; parent `论文雷达 <day> · N 篇`,
+  description `来自 Lab 论文雷达\nhttps://lab.ziyixi.science/deck/<day>`; per paper `title` (whitespace
+  collapsed, ≤ 300 code points with "…"), `url` `https://arxiv.org/abs/<id>`, `description` = the
+  简介's first sentence (≤ 120 chars; absent without 简介). The TaskIntent JSON is stored in `sends`
+  **before** the RPC (state `sending`), then sent.
+- **Outcome** (stored on the row, shown per `ux.md` §5): `pending` (poll), `created`, `duplicate`
+  (both set `sent_generation` on its cards), `paused`, `failed`, `rejected`, or `unknown` when the RPC
+  itself rejected (binding error, older Todofy, `unavailable`/`busy`). `invalid_input` is a Lab bug:
+  stored as `rejected`/`invalid_input`, logged, never retried unchanged.
+- **Retry and edit rules.** Result `recorded = false` (paused, rejected, not_found) means Todofy holds
+  nothing: the generation is **unfrozen** and the next send rebuilds it (same `intent_id`, current
+  likes and mode). Any other state keeps it frozen: 重试 resends the identical payload (Todofy replays or
+  re-queues; never duplicates). `unknown` first asks `taskIntentStatus`; `not_found` → resend the same
+  payload.
+- **Polling.** `GET …/send` refreshes a `pending`/`paused`(recorded)/`unknown` generation through the
+  DO when `next_poll_at` has passed (≥ 3 s, `retry_after_seconds` honoured, backing off to 60 s after
+  2 minutes). No background polling: a send left pending is refreshed the next time the owner looks
+  (and Todofy finishes it anyway).
+- The ops-v1 guard does not defer sends (owner-initiated). Nothing is sent without the owner pressing
+  发送; 暂不发送 only records `later_at`.
+
+**Todofy side** (separate build, keeps all existing behaviour identical): two `Ops` methods forwarding
+to new `TodofyCore` RPCs; migration `todofy/migrations/0004_task_intents.sql` (next free number on
+`origin/main`; the concurrent `gtd-features` branch also adds Todofy migrations, so the lead may
+renumber at merge); a D1 ledger row per intent plus one row per task with a frozen request ID; creation
+in the existing alarm, ≤ 6 tasks per step through the existing `todoist.create_task`, parent first then
+subtasks with `parent_id`; the footer `Todofy intent: lab/<intent_id>#<n>` for the existing read-only
+lookup after an unknown result; `paused` (nothing recorded) under maintenance, processing pause,
+`FORCE_PAUSE_TODOIST`, the Todoist auth block or a backup lease; never Gemini; content dropped once
+created.
+
+## 10. ops-v1 and the dashboard (decision: additive third app)
 
 `status()`/`setGuard()` only. Change to `contracts/ops-v1` (additive, one commit with its tests):
 
@@ -195,11 +322,13 @@ Mobile: one column, buttons ≥ 44 px. Links are built from the validated ID onl
   `LabStatus = OpsStatus<'lab', LabModes>`; `interface LabOps extends OpsCommon<LabStatus> {}`.
 - Fixtures `OpsStatus/lab-ok.json`, `OpsStatus/lab-degraded.json`, `GuardState/shed-lab.json`.
 - README/IMPLEMENTATION: Lab row. Lab is the first app whose shed defers **everything**
-  (`deferred: feed_fetch, embed, rank, tldr, seed_resolve, retention`); owner triage still works.
+  (`deferred: feed_fetch, embed, rank, brief, seed_resolve, retention`); decisions and sends to
+  Todofy still work.
   Status is built from DO SQLite only (no D1 reads).
-- Status: counters `ingested_24h`, `ranked_24h`, `saved_7d`, `neurons_today`, `neuron_cap`; signals
-  `feed_stale` (warning, no successful fetch for > 72 h, metric `hours`), `neuron_cap_hit` (warning,
-  metrics `used`, `cap`); `ui_url` `https://lab.ziyixi.science/`; capabilities `['guard']`.
+- Status: counters `ingested_24h`, `ranked_24h`, `liked_7d`, `decided_7d`, `neurons_today`,
+  `neuron_cap`; signals `feed_stale` (warning, no successful fetch for > 72 h, metric `hours`),
+  `neuron_cap_hit` (warning, metrics `used`, `cap`), `send_unsettled` (warning, a send `failed` or
+  `unknown` for > 24 h, metric `count`); `ui_url` `https://lab.ziyixi.science/`; capabilities `['guard']`.
 
 Dashboard (small, additive; another task edits the registry concurrently):
 
@@ -208,9 +337,9 @@ Dashboard (small, additive; another task edits the registry concurrently):
 - `guard_applied` CHECK must allow `lab`: SQLite cannot alter a CHECK, so a one-time rebuild in
   `HomeState` (inside `transactionSync`, only when `sqlite_master.sql` lacks `'lab'`): create
   `guard_applied_v2`, copy, drop, rename. Covered by a runtime test that opens a v1-shaped store.
-- Registry: entry `lab` (group `apps`, `tile_metric` counter `saved_7d`, `status: ops_v1 LAB
-  guard: true`), flow `paper-radar` "论文雷达" (arXiv → 抓取 → 向量 → 排序 → 分拣), resources D1 `lab`
-  (id filled in by the lead) and DO `LabState`.
+- Registry: entry `lab` (group `apps`, `tile_metric` counter `liked_7d`, `status: ops_v1 LAB
+  guard: true`), flow `paper-radar` "论文雷达" (arXiv → 抓取 → 向量 → 排序 → 简介 → 卡片 → Todofy), resources D1 `lab`
+  (`f20238dc-93a4-4d1a-91c4-c013f01cbdc9`) and DO `LabState`.
 - Tests that hard-code the two apps (`views-v2`, runtime `guard`/`harness`/`flows`/`v2`) gain `lab`;
   the runtime harness gets a third stub.
 - Deploy order: `Dashboard deploy` needs `Lab deploy` (a binding to a missing Worker fails).
@@ -220,16 +349,21 @@ Smallest sound fallback if this proves too large for one change: ship Lab with i
 entrypoint typed locally against `OpsCommon`, register the dashboard entry as `public_http` (Access
 302 probe) with no binding, and land the contract + binding change as the next commit.
 
-## 9. CI
+## 11. CI
 
 - `ci_changes.py`: `APPS += lab`, `PREFIX lab`, `PACKAGE_USERS['edge-auth'] += lab`,
-  `BUNDLED_BY[contracts/ops-v1/ops-v1.ts] += lab`; tests updated.
+  `BUNDLED_BY[contracts/ops-v1/ops-v1.ts] += lab`; new `BUNDLED_BY[contracts/task-intent-v1/task-intent-v1.ts]
+  = lab, todofy` and `contracts/task-intent-v1/**` → Lab checks + Todofy checks + Contracts; tests updated.
+- `Contracts` job: also runs `lab/worker` `test/task-intent-contract.test.ts` and Todofy's
+  `tests/unit/test_task_intent_contract.py` (same fixtures, same verdicts).
 - `Lab checks`: `npm ci` worker + web; `node --test deploy/test/*.test.mjs`; worker lint, typecheck,
   unit tests, runtime tests (workerd, real D1/DO; AI replaced through a wrapped binding / stub
   service exposing `run`, arXiv answered by `outboundService`; no network); web lint, typecheck,
   tests, build (+ `check-dist`); no imports from other apps; dry-run of the committed config through
-  the wrapper with placeholder secrets.
-- `Lab deploy` (main only, after the gate, environment `production`, concurrency `lab-production`):
+  the wrapper with placeholder secrets. The runtime suite binds `TODOFY` to a stub Worker exporting an
+  `Ops` entrypoint that answers from the contract fixtures (pending → created, paused, failed, reject).
+- `Lab deploy` (main only, after the gate and after `Todofy deploy`, environment `production`,
+  concurrency `lab-production`):
   `wrangler d1 migrations apply DB --remote`, deploy through `deploy-vars.mjs exec`, then probe
   `https://lab.ziyixi.science/` expects the Access 302 to `ziyixi.cloudflareaccess.com`.
 - `test_wrangler_configs.py`: `PRODUCTION['lab']`, `WRAPPERS['lab']`, `DEPLOY_JOBS`,
@@ -238,11 +372,31 @@ entrypoint typed locally against `OpsCommon`, register the dashboard entry as `p
   `case-insensitive`, nbf 60, `use-cookie`/`last`, JWKS 600,000/60,000 ms, `loopback-http` bypass,
   `importHmacKeyHex(CSRF_SIGNING_KEY)`, cookie `lab_csrf`, origin `https://<PUBLIC_HOST>`).
 
-## 10. Tests (synthetic only)
+## 12. Tests (synthetic only)
 
 Fake RSS fixtures built in code (ASCII + Chinese titles, cross/replace duplicates, a 5 MB+ body, a
 malformed item, 304), fake Atom for seeds, fake AI returning deterministic vectors and `usage`,
 fixed clocks. Unit: parser, dedupe, ranking maths, k-means determinism, ledger arithmetic and cap,
-guard, retention selection, API validation. Runtime: full day run over several alarms, cap hit
+guard, retention selection, API validation; the deck replay (random decide/undo/restart sequences
+against the materialised columns), `op_id` replay, version conflicts, send generations, freeze and
+unfreeze by `recorded`, intent building (titles, truncation, first-sentence 简介, arXiv-only URLs; every
+built intent passes the task-intent-v1 schema), every result state mapped. Runtime: full day run over several alarms, cap hit
 mid-run then catch-up next day, shed pause and resume, duplicate alarm, restart mid-embed, Access +
-CSRF on every mutation. No network, no real owner data.
+CSRF on every mutation; a full deck (swipe 20, undo 3, 重来 and undo it, finish, exclude one, send,
+poll to created, resend = duplicate, 补发 g2) against the stub Todofy. No network, no real owner data.
+
+## 13. Build split
+
+Revision 2 fixes the shared surfaces first (this commit): `contracts/task-intent-v1/` (schema, types,
+fixtures, Lab's contract test), `worker/src/api-types.ts` (deck API), `migrations/0001_init.sql` (deck
+tables), `wrangler.toml` (real D1 id, Access AUD, `TODOFY` binding), `env.ts`. Then three independent
+builds, in parallel:
+
+| Build | Scope | Depends on |
+| --- | --- | --- |
+| **Lab worker** | pipeline (§4, 简介 for every card, explore deck, `because_id`), neuron ledger, decks/decisions/undo/restart (§7), owner API with edge-auth + CSRF (§8), send client + polling (§9), ops-v1 `lab` + dashboard wiring (§10), CI (§11), runtime suite with fake AI, fake arXiv and a stub Todofy | api-types, migration, contract |
+| **Lab web** | everything in `ux.md` against `api-types.ts` and fixtures (no worker needed): deck, gestures, keyboard, undo/重来 queue, summary + send states, empty/building/done, 已喜欢, 种子, 设置 | api-types |
+| **Todofy intake** | `contracts/task-intent-v1/README.md` "Todofy's side": migration 0004, core RPCs, alarm step, rendering, lookup footer, gateway `Ops` methods, Python contract test, docs; existing behaviour and tests unchanged | contract |
+
+Then a review (quota/security, product/UX on a phone), fixes, and a clean-clone run of every CI job.
+Deploy order: Todofy (with the intake) → Lab → Dashboard.

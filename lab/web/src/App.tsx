@@ -1,11 +1,11 @@
-import { TODAY_LIMIT } from '../../worker/src/api-types.ts'
+import { DECK_SIZE } from '../../worker/src/api-types.ts'
 
-/** Scaffold: the views (今日, 已保存, 种子, 设置) and keyboard triage land here (docs/design.md §7). */
+/** Scaffold: the views (今日 deck → summary → done, 已喜欢, 种子, 设置) land here (docs/ux.md, docs/design.md §8). */
 export function App() {
   return (
     <main>
       <h1>论文雷达</h1>
-      <p>每日前 {TODAY_LIMIT} 篇，建设中。</p>
+      <p>每天 {DECK_SIZE} 张卡片，右滑喜欢，左滑不喜欢。建设中。</p>
     </main>
   )
 }

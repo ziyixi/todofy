@@ -1,12 +1,13 @@
 # Cross-app contracts
 
-The only files the apps (`mail-hero/`, `todofy/`, `dashboard/`) share. No app imports another; each reads
+The only files the apps (`mail-hero/`, `todofy/`, `dashboard/`, `lab/`) share. No app imports another; each reads
 these files.
 
 | Directory | Between | Owner |
 | --- | --- | --- |
 | `mail-received-v1/` | Mail Hero → its webhook consumer (Todofy) | Mail Hero |
 | `ops-v1/` | each app ↔ the ops dashboard `home` in [`dashboard/`](../dashboard/) (`Ops` entrypoints, canary, guard, digest) | both apps; see [`ops-v1/README.md`](ops-v1/README.md) |
+| `task-intent-v1/` | a proposing app (Lab) → Todofy's `Ops` entrypoint: "create these Todoist tasks", idempotent per intent | Todofy; see [`task-intent-v1/README.md`](task-intent-v1/README.md) |
 
 ## `mail-received-v1/`
 
@@ -58,3 +59,11 @@ The real-binding tests (`mail-hero/cloudflare/test/native-ops-runtime.test.mjs`,
 dashboard does; they run in each app's check job, which `contracts/` changes also trigger. The
 dashboard's own runtime suite (`dashboard/worker/test/runtime/`, in `Dashboard checks`) runs its real
 `HomeState` against stub apps that answer with these fixtures.
+
+## `task-intent-v1/`
+
+Schema, TypeScript types and fixtures for `proposeTasks`/`taskIntentStatus` on Todofy's `Ops` entrypoint:
+another app (Lab) proposes up to 30 Todoist tasks under its own idempotency key and Todofy, the only
+Todoist writer, creates them from its ledger. Fixtures are checked with `ops-v1/validate.mjs` by
+`lab/worker/test/task-intent-contract.test.ts`; Todofy adds the Python `jsonschema` check with its
+implementation (`task-intent-v1/README.md`, Checks).

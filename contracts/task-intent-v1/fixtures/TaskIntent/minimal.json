@@ -1,0 +1,14 @@
+{
+  "version": "task-intent-v1",
+  "source": "lab",
+  "intent_id": "deck-2026-10-01-g1",
+  "mode": "subtasks",
+  "parent": {
+    "title": "论文雷达 2026-10-01 · 1 篇"
+  },
+  "items": [
+    {
+      "title": "Minimal Item Without Optional Fields"
+    }
+  ]
+}

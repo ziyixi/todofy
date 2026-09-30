@@ -1,13 +1,19 @@
 /**
  * Bindings, vars and secrets of the Worker "lab" (../wrangler.toml, docs/design.md §3).
  */
+import type { TaskIntentOps } from '../../../contracts/task-intent-v1/task-intent-v1.ts';
 import type { LabState } from './state.ts';
+
+/** Todofy's named entrypoint "Ops" as Lab sees it: only the task-intent-v1 methods (docs/design.md §9). */
+export interface TodofyIntentEntrypoint extends Rpc.WorkerEntrypointBranded, TaskIntentOps {}
 
 export interface Env {
   readonly DB: D1Database;
   readonly LAB: DurableObjectNamespace<LabState>;
   readonly AI: Ai;
   readonly ASSETS: Fetcher;
+  /** Service binding to the Worker "todofy", entrypoint "Ops" (contracts/task-intent-v1). */
+  readonly TODOFY: Service<TodofyIntentEntrypoint>;
 
   // vars (committed in ../wrangler.toml; BUILD_SHA added at deploy by deploy/deploy-vars.mjs)
   /** The Lab's own host, e.g. lab.ziyixi.science: CSRF Origin and the ops-v1 ui_url. */

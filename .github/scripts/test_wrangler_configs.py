@@ -277,10 +277,15 @@ class Files(unittest.TestCase):
         [binding] = gateway["durable_objects"]["bindings"]
         self.assertIn(binding["script_name"], PRODUCTION)
         self.assertEqual(binding["script_name"], "todofy-core")
-        for service in load(PRODUCTION["home"])["services"]:
-            with self.subTest(service=service["binding"]):
-                self.assertIn(service["service"], PRODUCTION)
-                self.assertEqual(service["entrypoint"], "Ops")
+        for worker in ("home", "lab"):
+            for service in load(PRODUCTION[worker])["services"]:
+                with self.subTest(worker=worker, service=service["binding"]):
+                    self.assertIn(service["service"], PRODUCTION)
+                    self.assertEqual(service["entrypoint"], "Ops")
+        # Lab reaches Todofy only through the gateway's Ops entrypoint (contracts/task-intent-v1).
+        self.assertEqual(
+            [(s["binding"], s["service"]) for s in load(PRODUCTION["lab"])["services"]], [("TODOFY", "todofy")]
+        )
 
 
 class LocalDev(unittest.TestCase):

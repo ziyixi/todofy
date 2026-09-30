@@ -7,9 +7,8 @@
 # environment secrets LAB_ACCESS_OWNER, LAB_ACCESS_OWNER_ALIASES, LAB_CSRF_SIGNING_KEY) as Worker secrets with
 # --secrets-file. A plain `wrangler deploy` of this file DELETES BUILD_SHA.
 #
-# PLACEHOLDERS (docs/design.md §3): the D1 database_id below and ACCESS_AUDIENCE are all zeros until the lead
-# creates the D1 database "lab" and the Access app "Lab" and commits their real values. deploy/deploy-vars.mjs
-# refuses to deploy while either is still all zeros.
+# The D1 database "lab" and the Access app "Lab" (lab.ziyixi.science) exist since 2026-09-30; their id and AUD
+# are committed below. deploy/deploy-vars.mjs still refuses an all-zeros id or AUD (a guard against a revert).
 #
 # Run wrangler from worker/ (the pinned wrangler lives in worker/node_modules) with --config ../wrangler.toml.
 # Local dev: local bindings only (D1 commands always --local, never --remote), local values in lab/.dev.vars
@@ -48,9 +47,15 @@ new_sqlite_classes = ["LabState"]
 [[d1_databases]]
 binding = "DB"
 database_name = "lab"
-# PLACEHOLDER: replaced by the lead with the id of the D1 database "lab" before the first deploy.
-database_id = "00000000-0000-0000-0000-000000000000"
+database_id = "f20238dc-93a4-4d1a-91c4-c013f01cbdc9"
 migrations_dir = "migrations"
+
+# contracts/task-intent-v1: "send today's liked papers" goes to Todofy's named entrypoint "Ops" (same account
+# only; no public route). Todofy is the only Todoist writer. The Worker "todofy" must be deployed first.
+[[services]]
+binding = "TODOFY"
+service = "todofy"
+entrypoint = "Ops"
 
 # Workers AI: embeddings and the TL;DR model, under the Lab's own daily neuron ceiling (docs/design.md §5).
 [ai]
@@ -59,8 +64,8 @@ binding = "AI"
 [vars]
 PUBLIC_HOST = "lab.ziyixi.science"
 ACCESS_ISSUER = "https://ziyixi.cloudflareaccess.com"
-# PLACEHOLDER: replaced by the lead with the AUD tag of the Access app "Lab" before the first deploy.
-ACCESS_AUDIENCE = "0000000000000000000000000000000000000000000000000000000000000000"
+# AUD tag of the Access app "Lab".
+ACCESS_AUDIENCE = "3a8b5e31d3fb12e678198ea5e1c4231bc3f80665a9f9a5f18ecff8f6c19f4c8c"
 # Hard ceiling on Workers AI neurons per UTC day for this Worker (the account has 10,000 in total). The
 # settings page can only lower it. A typical day uses about 270 (docs/design.md §1).
 LAB_DAILY_NEURONS = "5000"
