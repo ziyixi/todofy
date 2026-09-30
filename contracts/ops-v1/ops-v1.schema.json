@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://contracts.local/ops-v1/ops-v1.schema.json",
-  "title": "ops-v1: the typed operations surface of Mail Hero and Todofy",
+  "title": "ops-v1: the typed operations surface of Mail Hero, Todofy and Lab",
   "description": "Every input and output of the named WorkerEntrypoint \"Ops\" of both apps, one $defs entry each (README.md maps methods to entries). Outputs are closed (additionalProperties false) so that nothing but codes, numbers, booleans and timestamps can leave an app; consumers still ignore fields they do not know. Only the keywords that validate.mjs implements may be used here. Patterns end with $(?!\\n): Python's re.search also matches $ before a final newline, ECMAScript does not.",
   "$defs": {
     "Timestamp": {
@@ -30,7 +30,7 @@
       "maxLength": 300,
       "pattern": "^https://[a-z0-9]([a-z0-9.-]{0,251}[a-z0-9])?/[A-Za-z0-9._~/-]{0,200}$(?!\\n)"
     },
-    "App": {"enum": ["mail-hero", "todofy"]},
+    "App": {"enum": ["mail-hero", "todofy", "lab"]},
     "Severity": {"enum": ["info", "warning", "critical"]},
     "Health": {"enum": ["ok", "degraded", "down"]},
     "GuardLevel": {"enum": ["normal", "shed"]},

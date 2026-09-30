@@ -1,4 +1,4 @@
-# `ops-v1`: the operations surface of Mail Hero and Todofy
+# `ops-v1`: the operations surface of Mail Hero, Todofy and Lab
 
 A small, typed RPC surface on each app so that one dashboard Worker (`home`, in
 [`dashboard/`](../../dashboard/)) can show health, run a daily end-to-end canary, apply quota guardrails and hand a
@@ -29,6 +29,7 @@ next to its unchanged default handlers:
 | --- | --- | --- | --- |
 | Mail Hero | `mail-hero` | `mail-hero/cloudflare/src/native/index.ts` | in the Worker; state in the `MailCoordinator` object |
 | Todofy | `todofy` (the gateway) | `todofy/gateway/src/index.ts` | forwards to `TodofyCore` RPC methods in `todofy-core` |
+| Lab | `lab` | `lab/worker/src/index.ts` | in the Worker; state in the `LabState` object (its own SQLite only) |
 
 The dashboard binds them with service bindings:
 
@@ -41,6 +42,11 @@ entrypoint = "Ops"
 [[services]]
 binding = "TODOFY"
 service = "todofy"
+entrypoint = "Ops"
+
+[[services]]
+binding = "LAB"
+service = "lab"
 entrypoint = "Ops"
 ```
 
@@ -61,8 +67,8 @@ only JSON values.
 
 | Method | App | Input (`$defs`) | Output (`$defs`) | Writes |
 | --- | --- | --- | --- | --- |
-| `status()` | both | – | `OpsStatus` | none |
-| `setGuard(input)` | both | `SetGuardInput` | `GuardState` | the app's Durable Object storage |
+| `status()` | every app | – | `OpsStatus` | none |
+| `setGuard(input)` | every app | `SetGuardInput` | `GuardState` | the app's Durable Object storage |
 | `startCanary(input)` | Mail Hero | `StartCanaryInput` | `StartCanaryResult` | one synthetic message and delivery (D1, R2) when queued |
 | `canaryDelivery(eventId)` | Mail Hero | `EventId` | `CanaryDelivery` | none |
 | `canaryResult(eventId)` | Todofy | `EventId` | `CanaryResult` | none |
@@ -92,7 +98,9 @@ writes and never aggregates a whole table. Poll it no more often than every 10 m
   `critical`; otherwise `ok` (`info` signals allowed).
 - `modes`: booleans; `maintenance` always present. Mail Hero: `force_send_paused` (deployment variable),
   `send_paused` (owner switch), `forwarding` (mode forward with a current endpoint), `backup_active`.
-  Todofy: `processing_paused`, `force_pause_todoist`, `reminder_enabled`, `backup_active`. A
+  Todofy: `processing_paused`, `force_pause_todoist`, `reminder_enabled`, `backup_active`. Lab:
+  `maintenance` (always false: Lab has no maintenance switch) and `ingest_paused` (the owner's pause of
+  the daily pipeline, read from storage). A
   `status_unavailable` status has only the deployment variables (Mail Hero `maintenance`,
   `force_send_paused`; Todofy `maintenance`, `processing_paused`, `force_pause_todoist`,
   `reminder_enabled`); the keys read from storage (Mail Hero `send_paused`, `forwarding`,
@@ -104,14 +112,15 @@ writes and never aggregates a whole table. Poll it no more often than every 10 m
 - `last_backup_at`: the app's last complete backup, or null.
 - `ui_url`: `https://<owner UI host>/`, or null when the Worker does not know its host.
 - `capabilities`: what this release supports. Mail Hero `canary_producer`, `guard`; Todofy
-  `canary_consumer`, `guard`, `ops_digest`. The dashboard checks them before using a feature.
+  `canary_consumer`, `guard`, `ops_digest`; Lab `guard`. The dashboard checks them before using a feature.
 
 Signal codes (severity):
 
 | App | Codes |
 | --- | --- |
-| both | `maintenance_mode` (critical), `guard_shed` (info, `seconds_left`), `status_unavailable` (critical) |
+| every app | `maintenance_mode` (critical; never raised by Lab), `guard_shed` (info, `seconds_left`), `status_unavailable` (critical) |
 | Mail Hero | the alert signals of `alerts.ts` with their metrics: `capacity_70` (warning), `capacity_85`, `capacity_95`, `backup_stale`, `endpoint_blocked` (critical), `pending_stale`, `parse_failed`, `endpoint_paused`, `delivery_failed`, `policy_error` (warning); plus `force_send_paused`, `send_paused`, `ingest_quota_80` (warning), `forwarding_off`, `backup_active` (info) |
+| Lab | `feed_stale` (warning, `hours`: no successful arXiv fetch for over 72 h), `neuron_cap_hit` (warning, `used`, `cap`: the daily Workers AI ceiling stopped AI work until 00:00 UTC), `send_unsettled` (warning, `count`: a send to Todofy failed or unknown for over 24 h) |
 | Todofy | `attention`, `due_backlog`, `processing_paused`, `todoist_paused`, `gemini_budget_80`, `backup_failed`, `reminder_failed`, `gtd_snapshot_stale` (warning, `age_hours`); `todoist_blocked`, `gemini_budget_95`, `backup_stale` (critical); `reminder_disabled`, `backup_disabled`, `backup_active`, `review_overdue` (info, `days`) |
 
 Counter names are listed per app in `IMPLEMENTATION.md`. New codes and counters may be added in ops-v1;

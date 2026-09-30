@@ -6,6 +6,6 @@
     "lib": ["ES2024"],
     "types": ["node"]
   },
-  "include": ["."],
+  "include": [".", "../validate.d.ts"],
   "exclude": []
 }

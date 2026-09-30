@@ -241,7 +241,7 @@ export interface GuardView {
   };
   readonly override: GuardOverride | null;
   readonly thresholds: { readonly shed_percent: number; readonly clear_percent: number };
-  readonly apps: { readonly 'mail-hero': GuardAppView; readonly todofy: GuardAppView };
+  readonly apps: { readonly 'mail-hero': GuardAppView; readonly todofy: GuardAppView; readonly lab: GuardAppView };
 }
 
 // ---- canary ---------------------------------------------------------------------------------------

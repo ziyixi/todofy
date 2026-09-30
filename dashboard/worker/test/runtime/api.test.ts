@@ -12,7 +12,7 @@ import { afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { QUOTA_RESOURCES } from '../../src/api-types.ts';
 import { API_V2_VERSION, type HomeResponse } from '../../src/api-v2-types.ts';
 import { accessClaims, testIssuer, type TestIssuer } from '../jwt.ts';
-import { expectValid, latest, startFlows, SYNTHETIC_BINDINGS, type FlowHarness } from './flows.ts';
+import { d1Reads, expectValid, latest, startFlows, SYNTHETIC_BINDINGS, type FlowHarness } from './flows.ts';
 
 const ISSUER = SYNTHETIC_BINDINGS.ACCESS_ISSUER ?? '';
 const AUDIENCE = SYNTHETIC_BINDINGS.ACCESS_AUDIENCE ?? '';
@@ -235,6 +235,55 @@ describe('ticks and storage bounds', () => {
         db.close();
       }
       expect(migrated).toBe(1);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+  it('rebuilds a guard_applied table from before Lab joined ops-v1 and keeps its rows', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'home-dashboard-guard-migration-'));
+    const tableSql = (db: DatabaseSync) =>
+      (db.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'guard_applied'").get() as { sql: string } | undefined)?.sql ?? '';
+    try {
+      h = await startFlows({ persist: dir, bindings: { CANARY_UTC_HOUR: '23' }, usage: d1Reads(90) });
+      await h.tick('2026-09-29T10:00:00Z');
+      await h.dispose();
+      h = undefined;
+      // The storage of the previous release: the CHECK knows two apps, and only their rows exist.
+      const files = (await readdir(dir, { recursive: true })).filter((name) => name.endsWith('.sqlite'));
+      let rewritten = 0;
+      for (const file of files) {
+        const db = new DatabaseSync(join(dir, file));
+        if (tableSql(db) !== '') {
+          db.exec(`CREATE TABLE guard_applied_old (
+            app TEXT PRIMARY KEY CHECK (app IN ('mail-hero', 'todofy')),
+            input TEXT, state TEXT, last_call_at INTEGER, last_error TEXT, consecutive_failures INTEGER NOT NULL DEFAULT 0);
+            INSERT INTO guard_applied_old SELECT * FROM guard_applied WHERE app != 'lab';
+            DROP TABLE guard_applied;
+            ALTER TABLE guard_applied_old RENAME TO guard_applied;`);
+          expect(tableSql(db)).not.toContain("'lab'");
+          rewritten++;
+        }
+        db.close();
+      }
+      expect(rewritten).toBe(1);
+
+      // The new release opens it, rebuilds the CHECK, and can record Lab's guard call.
+      h = await startFlows({ persist: dir, bindings: { CANARY_UTC_HOUR: '23' }, usage: d1Reads(90) });
+      await h.tick('2026-09-29T10:30:00Z');
+      const snap = await h.snapshot();
+      expect(snap.guard.apps.lab?.last_error ?? null).toBeNull();
+      await h.dispose();
+      h = undefined;
+      for (const file of files) {
+        const db = new DatabaseSync(join(dir, file));
+        if (tableSql(db) !== '') {
+          expect(tableSql(db)).toContain("'lab'");
+          const rows = db.prepare('SELECT app, input FROM guard_applied ORDER BY app').all() as { app: string; input: string | null }[];
+          expect(rows.map((row) => row.app)).toEqual(['lab', 'mail-hero', 'todofy']);
+          expect(rows.every((row) => row.input?.includes('quota_d1_rows_read') === true)).toBe(true);
+        }
+        db.close();
+      }
     } finally {
       await rm(dir, { recursive: true, force: true });
     }

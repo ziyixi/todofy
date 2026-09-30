@@ -52,6 +52,11 @@ binding = "TODOFY"
 service = "todofy"
 entrypoint = "Ops"
 
+[[services]]
+binding = "LAB"
+service = "lab"
+entrypoint = "Ops"
+
 # One trigger (the account's Free plan allows 5 in total): status, usage, guard, canary, digest.
 [triggers]
 crons = ["*/30 * * * *"]

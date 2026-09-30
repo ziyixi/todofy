@@ -1,6 +1,6 @@
 /**
  * The only code that calls the apps (docs/design.md §5.1): one wrapper per method of `MailHeroOps` /
- * `TodofyOps` in contracts/ops-v1/ops-v1.ts, each with a timeout, the contract's error codes and
+ * `TodofyOps` / `LabOps` in contracts/ops-v1/ops-v1.ts, each with a timeout, the contract's error codes and
  * validation of the answer against the contract schema. Results are values, never exceptions.
  */
 import contractSchema from '../../../contracts/ops-v1/ops-v1.schema.json';
@@ -185,9 +185,10 @@ export function asStatus(app: OpsApp): Conformer<OpsStatus> {
 export const CALLED_METHODS = {
   'mail-hero': ['status', 'setGuard', 'startCanary', 'canaryDelivery'],
   todofy: ['status', 'setGuard', 'canaryResult', 'reportOps'],
+  lab: ['status', 'setGuard'],
 } as const;
 
-type Bindings = Pick<Env, 'MAIL_HERO' | 'TODOFY'>;
+type Bindings = Pick<Env, 'MAIL_HERO' | 'TODOFY' | 'LAB'>;
 
 function missing(): Promise<never> {
   return Promise.reject(new MissingBinding('not_configured'));
@@ -196,6 +197,7 @@ function missing(): Promise<never> {
 export function opsStatus(env: Bindings, app: OpsApp): Promise<OpsCall<OpsStatus>> {
   return callOps(() => {
     if (app === 'mail-hero') return (env.MAIL_HERO as Bindings['MAIL_HERO'] | undefined)?.status() ?? missing();
+    if (app === 'lab') return (env.LAB as Bindings['LAB'] | undefined)?.status() ?? missing();
     return (env.TODOFY as Bindings['TODOFY'] | undefined)?.status() ?? missing();
   }, asStatus(app));
 }
@@ -203,6 +205,7 @@ export function opsStatus(env: Bindings, app: OpsApp): Promise<OpsCall<OpsStatus
 export function opsSetGuard(env: Bindings, app: OpsApp, input: SetGuardInput): Promise<OpsCall<GuardState>> {
   return callOps(() => {
     if (app === 'mail-hero') return (env.MAIL_HERO as Bindings['MAIL_HERO'] | undefined)?.setGuard(input) ?? missing();
+    if (app === 'lab') return (env.LAB as Bindings['LAB'] | undefined)?.setGuard(input) ?? missing();
     return (env.TODOFY as Bindings['TODOFY'] | undefined)?.setGuard(input) ?? missing();
   }, asGuardState);
 }

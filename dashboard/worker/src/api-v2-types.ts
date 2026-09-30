@@ -139,6 +139,7 @@ export const ICON_KEYS = [
   'server',
   'database',
   'link',
+  'flask-conical',
 ] as const;
 export type IconKey = (typeof ICON_KEYS)[number];
 
@@ -149,7 +150,7 @@ export type Accent = (typeof ACCENTS)[number];
 /** Launcher groups (by kind) on 首页. `hidden` entries have no tile (the dashboard itself). */
 export type EntryGroupId = 'apps' | 'sites' | 'services' | 'hidden';
 /** Business groups on 业务流程. */
-export type FlowGroupId = 'mail' | 'content' | 'platform';
+export type FlowGroupId = 'mail' | 'content' | 'research' | 'platform';
 
 export interface GroupDef<Id extends string> {
   readonly id: Id;
@@ -161,7 +162,7 @@ export interface GroupDef<Id extends string> {
 /** Where an entry's own health comes from (docs/design-v2.md §3). */
 export type StatusSource =
   /** contracts/ops-v1 `Ops.status()` over the named service binding (as in v1); guard: receives setGuard. */
-  | { readonly type: 'ops_v1'; readonly binding: 'MAIL_HERO' | 'TODOFY'; readonly guard: boolean }
+  | { readonly type: 'ops_v1'; readonly binding: 'MAIL_HERO' | 'TODOFY' | 'LAB'; readonly guard: boolean }
   /**
    * One GET per tick from the Durable Object to a public (not Access-protected) URL: status code and
    * latency only, `redirect: 'manual'`, body cancelled unread. `enabled: false` shows 未接入 instead.

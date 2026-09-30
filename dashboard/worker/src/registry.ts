@@ -45,7 +45,8 @@ const ENTRY_GROUPS: readonly GroupDef<EntryGroupId>[] = [
 const FLOW_GROUPS: readonly GroupDef<FlowGroupId>[] = [
   { id: 'mail', name: '邮件与任务', order: 1 },
   { id: 'content', name: '内容与发布', order: 2 },
-  { id: 'platform', name: '平台', order: 3 },
+  { id: 'research', name: '研究', order: 3 },
+  { id: 'platform', name: '平台', order: 4 },
 ];
 
 const ENTRIES: readonly EntryDef[] = [
@@ -76,6 +77,22 @@ const ENTRIES: readonly EntryDef[] = [
     tile_metric: { kind: 'counter', name: 'received_24h' },
     app_only_signals: ['backup_stale', 'backup_failed', 'backup_disabled', 'backup_active'],
     order: 2,
+  },
+  {
+    id: 'lab',
+    name: '论文雷达',
+    description: 'arXiv 每日推荐，划卡片挑论文',
+    group: 'apps',
+    icon: 'flask-conical',
+    accent: 'violet',
+    url: 'https://lab.ziyixi.science/',
+    access: true,
+    status: { type: 'ops_v1', binding: 'LAB', guard: true },
+    tile_metric: { kind: 'counter', name: 'liked_7d' },
+    // Lab has no maintenance switch; the code is listed for every app in ops-v1 and never raised by Lab.
+    app_only_signals: ['maintenance_mode'],
+    // After the synthetic link-only test entry's order 3 (test/v2-fixtures.ts).
+    order: 4,
   },
   {
     id: 'website',
@@ -148,6 +165,7 @@ const WORKERS: readonly WorkerDef[] = [
   { script: 'todofy', entry: 'todofy', role: '网关与 UI' },
   { script: 'todofy-core', entry: 'todofy', role: '处理核心（TodofyCore）' },
   { script: 'home', entry: 'home', role: '本面板' },
+  { script: 'lab', entry: 'lab', role: '论文雷达与 UI' },
   { script: 'ziyixi-notion-publish', entry: 'notion-publish', role: '发布 Worker' },
   // website/wrangler.toml: static assets only, so it shows up in the table only if it ever runs code.
   { script: 'ziyixi-website', entry: 'website', role: '静态网站（仅静态资源）' },
@@ -160,6 +178,7 @@ const RESOURCES: readonly ResourceDef[] = [
   // Defined in todofy-core; the gateway `todofy` binds it by script_name.
   { id: 'todofy-core-do', kind: 'do', name: 'TodofyCore', entry: 'todofy', script: 'todofy-core', match: 'a013ef9fa45048d4b4f7bfcc641b57ea' },
   { id: 'home-state', kind: 'do', name: 'HomeState', entry: 'home', script: 'home', match: 'acddddf88d624194a68af430fd1a90ff' },
+  { id: 'lab-db', kind: 'd1', name: 'lab 论文库', entry: 'lab', match: 'f20238dc-93a4-4d1a-91c4-c013f01cbdc9' },
   // IDs read from the account's D1, Durable Object namespace and R2 bucket lists (2026-09-30).
   { id: 'mail-hero-store', kind: 'r2', name: 'mail-hero 邮件存储', entry: 'mail-hero', match: 'mail-hero-store' },
   { id: 'mail-hero-backup', kind: 'r2', name: 'mail-hero 备份', entry: 'mail-hero', match: 'mail-hero-backups' },
@@ -290,6 +309,21 @@ const FLOWS: readonly FlowDef[] = [
       { id: 'report', name: 'Todofy 报告', entry: 'todofy', workers: ['todofy'], signals: [] },
       { id: 'fetch', name: '读取报告', entry: 'newsletter', signals: [], note: '等 Todofy 提供“最近读取时间”计数后接入' },
       { id: 'write', name: '写入 Notion', entry: null, signals: [], note: '在家中服务器和 Notion 上，面板看不到' },
+    ],
+    canary: null,
+  },
+  {
+    id: 'paper-radar',
+    name: '论文雷达',
+    group: 'research',
+    description: 'arXiv 每日公告经向量排序和中文简介做成卡片，喜欢的论文确认后交给 Todofy 创建任务。',
+    order: 1,
+    stages: [
+      { id: 'source', name: 'arXiv', entry: null, signals: [], note: '公开 RSS，每天抓取一次' },
+      { id: 'fetch', name: '抓取', entry: 'lab', analytics: true, signals: ['feed_stale'], counters: ['ingested_24h'] },
+      { id: 'rank', name: '排序与简介', entry: 'lab', signals: ['neuron_cap_hit'], counters: ['ranked_24h', 'neurons_today'] },
+      { id: 'deck', name: '卡片', entry: 'lab', signals: [], counters: ['liked_7d'] },
+      { id: 'send', name: '交给 Todofy', entry: 'lab', signals: ['send_unsettled'] },
     ],
     canary: null,
   },

@@ -1,6 +1,6 @@
 /**
  * workerd harness (docs/design.md §9): bundles src/index.ts with esbuild and runs it in Miniflare as
- * the Worker "home" with a real SQLite HomeState, next to stub "mail-hero" and "todofy" Workers whose
+ * the Worker "home" with a real SQLite HomeState, next to stub "mail-hero", "todofy" and "lab" Workers whose
  * `Ops` entrypoints answer with contracts/ops-v1 fixtures, and an outbound fetch handler that plays the
  * Cloudflare GraphQL API and the Access certs endpoint. All data is synthetic.
  */
@@ -21,7 +21,7 @@ export type StubApp = OpsApp;
 /** The methods ops-v1.ts declares for `app`, parsed from the contract file itself: the stubs expose exactly these. */
 export async function declaredMethodsOf(app: StubApp): Promise<string[]> {
   const source = await readFile(join(CONTRACT, 'ops-v1.ts'), 'utf8');
-  return declaredMethods(source, app === 'mail-hero' ? 'MailHeroOps' : 'TodofyOps');
+  return declaredMethods(source, app === 'mail-hero' ? 'MailHeroOps' : app === 'todofy' ? 'TodofyOps' : 'LabOps');
 }
 
 export async function fixture(path: string): Promise<unknown> {
@@ -41,6 +41,9 @@ async function defaults(app: StubApp): Promise<Record<string, unknown>> {
       startCanary: await fixture('StartCanaryResult/queued.json'),
       canaryDelivery: await fixture('CanaryDelivery/delivered.json'),
     };
+  }
+  if (app === 'lab') {
+    return { status: await fixture('OpsStatus/lab-ok.json'), setGuard: await fixture('GuardState/normal.json') };
   }
   return {
     status: await fixture('OpsStatus/todofy-ok.json'),
@@ -126,7 +129,7 @@ export interface Harness {
 export async function startHarness(options: HarnessOptions = {}): Promise<Harness> {
   const temp = options.persist ?? (await mkdtemp(join(tmpdir(), 'home-dashboard-')));
   const outbound: Outbound = options.outbound ?? (() => new Response('no outbound fetch expected', { status: 599 }));
-  const scripts = { home: await bundle(), 'mail-hero': await stubScript('mail-hero'), todofy: await stubScript('todofy') };
+  const scripts = { home: await bundle(), 'mail-hero': await stubScript('mail-hero'), todofy: await stubScript('todofy'), lab: await stubScript('lab') };
   const configure = (bindings: Record<string, string>): ConstructorParameters<typeof Miniflare>[0] =>
     convertV4MiniflareOptions({
       host: '127.0.0.1',
@@ -143,6 +146,7 @@ export async function startHarness(options: HarnessOptions = {}): Promise<Harnes
           serviceBindings: {
             MAIL_HERO: { name: 'mail-hero', entrypoint: 'Ops' },
             TODOFY: { name: 'todofy', entrypoint: 'Ops' },
+            LAB: { name: 'lab', entrypoint: 'Ops' },
             ASSETS: () => new Response('<!doctype html><title>home</title>', { headers: { 'content-type': 'text/html' } }),
           },
           bindings,
@@ -150,6 +154,7 @@ export async function startHarness(options: HarnessOptions = {}): Promise<Harnes
         },
         { name: 'mail-hero', modules: true, script: scripts['mail-hero'], compatibilityDate: '2026-09-08' },
         { name: 'todofy', modules: true, script: scripts.todofy, compatibilityDate: '2026-09-08' },
+        { name: 'lab', modules: true, script: scripts.lab, compatibilityDate: '2026-09-08' },
         // Calls a stub's Ops method over the same kind of binding "home" has (tests of the stubs).
         {
           name: 'ops-probe',
@@ -157,13 +162,14 @@ export async function startHarness(options: HarnessOptions = {}): Promise<Harnes
           compatibilityDate: '2026-09-08',
           script: `export default { async fetch(request, env) {
             const { app, method, args } = await request.json()
-            const target = app === 'mail-hero' ? env.MAIL_HERO : env.TODOFY
+            const target = app === 'mail-hero' ? env.MAIL_HERO : app === 'lab' ? env.LAB : env.TODOFY
             try { return Response.json({ ok: await target[method](...args) }) }
             catch (error) { return Response.json({ error: error instanceof Error ? error.message : 'not_an_error' }) }
           } }`,
           serviceBindings: {
             MAIL_HERO: { name: 'mail-hero', entrypoint: 'Ops' },
             TODOFY: { name: 'todofy', entrypoint: 'Ops' },
+            LAB: { name: 'lab', entrypoint: 'Ops' },
           },
         },
       ],

@@ -165,7 +165,7 @@ test('status: every mode MailHeroModes requires is a boolean, also on status_una
   }
   for (const file of readdirSync(new URL('../../../contracts/ops-v1/fixtures/OpsStatus/', import.meta.url))) {
     const fixture = JSON.parse(readFileSync(new URL(`../../../contracts/ops-v1/fixtures/OpsStatus/${file}`, import.meta.url), 'utf8'))
-    const keys = requiredKeys(fixture.app === 'mail-hero' ? 'MailHeroModes' : 'TodofyModes')
+    const keys = requiredKeys({ 'mail-hero': 'MailHeroModes', todofy: 'TodofyModes', lab: 'LabModes' }[fixture.app])
     for (const key of keys) assert.equal(typeof fixture.modes[key], 'boolean', `${file}: ${key}`)
   }
 })

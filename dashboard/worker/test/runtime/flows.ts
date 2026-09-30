@@ -96,12 +96,12 @@ export async function startFlows(options: { bindings?: Record<string, string>; u
     },
   });
   let csrf: { token: string; cookie: string } | null = null;
-  const pending: Record<StubApp, { app: StubApp; method: string; args: unknown[] }[]> = { 'mail-hero': [], todofy: [] };
+  const pending: Record<StubApp, { app: StubApp; method: string; args: unknown[] }[]> = { 'mail-hero': [], todofy: [], lab: [] };
   const drain = async (app: StubApp) => {
     pending[app].push(...(await harness.calls(app)));
     return pending[app].splice(0);
   };
-  const scenarios: Record<StubApp, Record<string, StubAnswer>> = { 'mail-hero': {}, todofy: {} };
+  const scenarios: Record<StubApp, Record<string, StubAnswer>> = { 'mail-hero': {}, todofy: {}, lab: {} };
   const flows: FlowHarness = {
     ...harness,
     analytics,
@@ -152,7 +152,7 @@ export async function startFlows(options: { bindings?: Record<string, string>; u
           items: [...digestItems, ...ops.attention.info].map(({ source, code, severity }) => ({ source, code, severity })),
         },
         observed: ops.attention.items.flatMap((item) => (item.observed === undefined ? [] : [{ source: item.source, code: item.code, level: item.observed }])),
-        apps: { 'mail-hero': app('mail-hero'), todofy: app('todofy') },
+        apps: { 'mail-hero': app('mail-hero'), todofy: app('todofy'), lab: app('lab') },
         usage: cloudflare.usage,
         guard: ops.guard,
         canary: ops.canary,
@@ -190,9 +190,9 @@ export async function startFlows(options: { bindings?: Record<string, string>; u
       await harness.scenario(app, scenarios[app]);
     },
     async redeploy(bindings) {
-      for (const app of ['mail-hero', 'todofy'] as const) pending[app].push(...(await harness.calls(app)));
+      for (const app of ['mail-hero', 'todofy', 'lab'] as const) pending[app].push(...(await harness.calls(app)));
       await harness.rebind(bindings);
-      for (const app of ['mail-hero', 'todofy'] as const) await harness.scenario(app, scenarios[app]);
+      for (const app of ['mail-hero', 'todofy', 'lab'] as const) await harness.scenario(app, scenarios[app]);
     },
   };
   return flows;

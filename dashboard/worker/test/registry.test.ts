@@ -26,8 +26,8 @@ function contractSignals(): Record<string, string[]> {
     // Parentheses hold severities and metric names (`seconds_left`), not signal codes.
     return [...line.replace(/\([^)]*\)/g, '').matchAll(/`([a-z][a-z0-9_]*)`/g)].map((match) => match[1] as string);
   };
-  const both = row('both');
-  return { 'mail-hero': [...both, ...row('Mail Hero')], todofy: [...both, ...row('Todofy')] };
+  const every = row('every app');
+  return { 'mail-hero': [...every, ...row('Mail Hero')], todofy: [...every, ...row('Todofy')], lab: [...every, ...row('Lab')] };
 }
 
 type Mutable<T> = { -readonly [K in keyof T]: T[K] extends readonly (infer U)[] ? Mutable<U>[] : T[K] extends object ? Mutable<T[K]> : T[K] };
@@ -54,12 +54,13 @@ describe('the registry', () => {
     const known = contractSignals();
     expect(known['mail-hero']).toContain('endpoint_blocked');
     expect(known.todofy).toContain('gemini_budget_80');
+    expect(known.lab).toContain('send_unsettled');
     expect(validateRegistry(REGISTRY, { knownSignals: known })).toEqual([]);
   });
 
   it('registers the entries of the design, in their groups and order', () => {
     const byGroup = (group: string) => REGISTRY.entries.filter((e) => e.group === group).sort((a, b) => a.order - b.order).map((e) => e.id);
-    expect(byGroup('apps')).toEqual(['mail-hero', 'todofy']);
+    expect(byGroup('apps')).toEqual(['mail-hero', 'todofy', 'lab']);
     expect(byGroup('sites')).toEqual(['website']);
     expect(byGroup('services')).toEqual(['notion-publish', 'newsletter']);
     expect(byGroup('hidden')).toEqual(['home']);
@@ -67,6 +68,7 @@ describe('the registry', () => {
     expect(status).toEqual({
       'mail-hero': 'ops_v1',
       todofy: 'ops_v1',
+      lab: 'ops_v1',
       website: 'public_http',
       'notion-publish': 'analytics',
       newsletter: 'none',
@@ -82,6 +84,7 @@ describe('the registry', () => {
     expect(flowsOfScript('mail-hero')).toEqual(['mail-to-task']);
     expect(flowsOfScript('todofy')).toEqual(['mail-to-task', 'daily-newsletter', 'ops-digest']);
     expect(flowsOfScript('todofy-core')).toEqual(['mail-to-task', 'gtd']);
+    expect(flowsOfScript('lab')).toEqual(['paper-radar']);
     expect(flowsOfScript('home')).toEqual(['ops-digest']);
     expect(flowsOfScript('ziyixi-notion-publish')).toEqual(['site-publish']);
   });
@@ -92,6 +95,7 @@ describe('the registry', () => {
     expect(resourceByMatch('r2', 'mail-hero-backups')?.id).toBe('mail-hero-backup');
     expect(resourceByMatch('d1', '6c13e4c3-e239-42fb-a7a4-96810fa8d7dc')?.id).toBe('mail-hero-db');
     expect(resourceByMatch('d1', '151c1306-3885-4679-9592-08887b30ae68')?.id).toBe('todofy-db');
+    expect(resourceByMatch('d1', 'f20238dc-93a4-4d1a-91c4-c013f01cbdc9')?.id).toBe('lab-db');
     expect(resourceByMatch('do', '55c248f9d82c45f3a89d2de1d719d5db')?.id).toBe('mail-coordinator');
     expect(resourceByMatch('do', 'a013ef9fa45048d4b4f7bfcc641b57ea')?.id).toBe('todofy-core-do');
     expect(resourceByMatch('do', 'acddddf88d624194a68af430fd1a90ff')?.id).toBe('home-state');
@@ -100,10 +104,10 @@ describe('the registry', () => {
   });
 
   it('keeps the tick within the Workers Free subrequest budget', () => {
-    // 2 status() + 1 probe + 1 GraphQL + 2 setGuard + 2 canary calls + 1 reportOps.
-    expect(outboundPerTick()).toBe(9);
+    // 3 status() + 1 probe + 1 GraphQL + 3 setGuard + 2 canary calls + 1 reportOps.
+    expect(outboundPerTick()).toBe(11);
     expect(outboundPerTick()).toBeLessThanOrEqual(MAX_OUTBOUND_PER_TICK);
-    expect(outboundPerRefresh()).toBe(3);
+    expect(outboundPerRefresh()).toBe(4);
   });
 
   it('serves a public view without bindings or probe URLs, within its budget', () => {

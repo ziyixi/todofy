@@ -528,6 +528,23 @@ Example (attention 0, one critical item):
   after `setGuard(normal)`; `test_scenarios_webhook.py` keeps posting every fixture (the canary one now
   ends `complete` without a task).
 
+## 3a. Lab (added 2026-09-30, additive)
+
+Lab (`lab/`, Worker `lab`, `lab/docs/design.md` §10) is the third app: `OPS_APPS` and the schema's `App`
+gained `lab`, `LabModes`/`LabStatus`/`LabOps` were added, fixtures `OpsStatus/lab-ok.json`,
+`OpsStatus/lab-degraded.json` and `GuardState/shed-lab.json`. Nothing of Mail Hero's or Todofy's surface
+changed; the dashboard binds `LAB` next to the two others.
+
+- Files: `lab/worker/src/ops.ts` (the entrypoint, forwards to `LabState`), `lab/worker/src/ops-status.ts`
+  (status and guard, pure over the object's SQLite). `status()` reads **no D1**: counters come from
+  LabState's own tables (`activity`, `labels`, `neurons`), so its budget is 0 D1 statements.
+- Counters: `ingested_24h`, `ranked_24h`, `liked_7d`, `decided_7d`, `neurons_today`, `neuron_cap`.
+  Signals: `feed_stale`, `neuron_cap_hit`, `send_unsettled` (warning), `guard_shed` (info).
+- Guard: Lab is the first app whose shed defers **everything** in the background
+  (`feed_fetch`, `embed`, `rank`, `brief`, `seed_resolve`, `retention`); the owner's deck decisions and
+  sends to Todofy are never deferred. Bound: when the last successful fetch is more than 48 h old, the
+  whole day's pipeline runs to its end despite the shed (then defers again).
+
 ## 4. Risks and open points
 
 - A consumer other than Todofy behind Mail Hero's default endpoint may act on canaries; the dashboard

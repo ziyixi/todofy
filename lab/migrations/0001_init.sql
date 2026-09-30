@@ -47,7 +47,9 @@ CREATE TABLE decks (
   created_at INTEGER NOT NULL,
   ready_at INTEGER,
   finished_at INTEGER,
-  later_at INTEGER
+  later_at INTEGER,
+  -- What the next undo takes back (api-types UndoTarget as JSON), materialised with every decision event.
+  undo TEXT CHECK (undo IS NULL OR (json_valid(undo) AND length(undo) <= 300))
 );
 CREATE INDEX decks_by_ready ON decks (ready_at);
 

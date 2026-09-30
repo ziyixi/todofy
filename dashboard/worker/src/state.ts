@@ -75,6 +75,37 @@ import { cloudflareResponse, flowsResponse, homeResponse, opsResponse, serialize
 /** Name of the single object instance. */
 export const HOME_OBJECT = 'home-v1';
 
+/** One value per ops-v1 app (OPS_APPS), so a new app cannot be forgotten in a literal. */
+export function perApp<T>(value: (app: OpsApp) => T): Record<OpsApp, T> {
+  return Object.fromEntries(OPS_APPS.map((app) => [app, value(app)])) as Record<OpsApp, T>;
+}
+
+/**
+ * guard_applied's CHECK lists the apps; SQLite cannot alter a CHECK, so a store created before Lab joined
+ * ops-v1 (2026-09-30) is rebuilt once, rows kept: new table, copy, drop, rename, in one transaction.
+ */
+export function migrateGuardApplied(storage: DurableObjectStorage): void {
+  const sql = storage.sql.exec<{ sql: string }>("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'guard_applied'").toArray()[0]?.sql ?? '';
+  if (sql === '' || sql.includes("'lab'")) return;
+  storage.transactionSync(() => {
+    storage.sql.exec(
+      `CREATE TABLE guard_applied_v2 (
+        app TEXT PRIMARY KEY CHECK (app IN ('mail-hero', 'todofy', 'lab')),
+        input TEXT,
+        state TEXT,
+        last_call_at INTEGER,
+        last_error TEXT,
+        consecutive_failures INTEGER NOT NULL DEFAULT 0
+      )`,
+    );
+    storage.sql.exec(
+      'INSERT INTO guard_applied_v2 (app, input, state, last_call_at, last_error, consecutive_failures) SELECT app, input, state, last_call_at, last_error, consecutive_failures FROM guard_applied',
+    );
+    storage.sql.exec('DROP TABLE guard_applied');
+    storage.sql.exec('ALTER TABLE guard_applied_v2 RENAME TO guard_applied');
+  });
+}
+
 /** A cron event within this of the last completed tick is a retry and is skipped. */
 export const TICK_DEDUP_MS = 10 * MINUTE_MS;
 /** Ticks, owner refreshes and manual starts poll an app's status() only when its last attempt is at least this old. */
@@ -98,7 +129,7 @@ const SCHEMA = [
     updated_at INTEGER NOT NULL
   )`,
   `CREATE TABLE IF NOT EXISTS guard_applied (
-    app TEXT PRIMARY KEY CHECK (app IN ('mail-hero', 'todofy')),
+    app TEXT PRIMARY KEY CHECK (app IN ('mail-hero', 'todofy', 'lab')),
     input TEXT,
     state TEXT,
     last_call_at INTEGER,
@@ -178,6 +209,7 @@ export class HomeState extends DurableObject<Env> {
       if (!columns.some((column) => column.name === 'canary_id')) {
         ctx.storage.sql.exec("ALTER TABLE canary_runs ADD COLUMN canary_id TEXT NOT NULL DEFAULT 'mail-todofy'");
       }
+      migrateGuardApplied(ctx.storage);
       return Promise.resolve();
     });
   }
@@ -198,7 +230,7 @@ export class HomeState extends DurableObject<Env> {
       // polls of owner refreshes and manual canary starts: a recent answer stands in for this tick's.
       const due = OPS_APPS.filter((app) => statusDue(this.statusDoc(app), now));
       const [polled, probes] = await Promise.all([this.pollStatuses(now, due), this.pollProbes(now)]);
-      const observed: Record<OpsApp, OpsStatus | null> = { 'mail-hero': null, todofy: null };
+      const observed = perApp<OpsStatus | null>(() => null);
       for (const app of OPS_APPS) {
         const doc = this.statusDoc(app);
         observed[app] = due.includes(app) ? polled[app] : doc.ok === true ? doc.status : null;
@@ -291,7 +323,7 @@ export class HomeState extends DurableObject<Env> {
       // A cleared episode must not come back when the override ends (the auto shed's own until).
       if (level === 'normal') this.putDoc('guard', AUTO_NORMAL, now);
       const desired = this.currentDesired(now);
-      const calls = await this.applyGuard(now, desired, { 'mail-hero': null, todofy: null });
+      const calls = await this.applyGuard(now, desired, perApp(() => null));
       this.bumpRev(now);
       console.log(JSON.stringify({ event: 'guard_override', level, guard_calls: calls }));
       return { guard: this.guardView(now) };
@@ -302,7 +334,7 @@ export class HomeState extends DurableObject<Env> {
 
   /** status() of the given apps in parallel; returns the statuses this call obtained (null on failure). */
   private async pollStatuses(now: number, apps: readonly OpsApp[]): Promise<Record<OpsApp, OpsStatus | null>> {
-    const observed: Record<OpsApp, OpsStatus | null> = { 'mail-hero': null, todofy: null };
+    const observed = perApp<OpsStatus | null>(() => null);
     const results = await Promise.all(apps.map(async (app) => [app, await opsStatus(this.env, app)] as const));
     for (const [app, result] of results) {
       const previous = this.statusDoc(app);
@@ -368,10 +400,11 @@ export class HomeState extends DurableObject<Env> {
     const auto = override?.level === 'normal' ? AUTO_NORMAL : evaluateAuto(now, usage, this.doc<AutoGuard>('guard'));
     this.putDoc('guard', auto, now);
     const desired = desiredGuard(now, auto, override);
-    const calls = await this.applyGuard(now, desired, {
-      'mail-hero': observed['mail-hero']?.guard ?? null,
-      todofy: observed.todofy?.guard ?? null,
-    });
+    const calls = await this.applyGuard(
+      now,
+      desired,
+      perApp((app) => observed[app]?.guard ?? null),
+    );
     return { desired, calls };
   }
 
@@ -461,10 +494,10 @@ export class HomeState extends DurableObject<Env> {
         last_http_status: usage.last_http_status,
       },
       desired,
-      guardFailures: { 'mail-hero': this.applied('mail-hero').consecutive_failures, todofy: this.applied('todofy').consecutive_failures },
+      guardFailures: perApp((app) => this.applied(app).consecutive_failures),
       latestFinished: this.latestFinished(),
       lastTickAt,
-      apps: { 'mail-hero': this.statusDoc('mail-hero'), todofy: this.statusDoc('todofy') },
+      apps: perApp((app) => this.statusDoc(app)),
     });
     const firstSeen = this.syncSince(list.map(itemKey), now);
     const items = finalizeItems(list, firstSeen, now);
@@ -682,7 +715,7 @@ export class HomeState extends DurableObject<Env> {
       desired: { level: desired.level, reason: desired.reason, until: isoOrNull(desired.until), source: desired.source },
       override: override === null ? null : { level: override.level, until: iso(override.until), set_at: iso(override.set_at) },
       thresholds: { shed_percent: GUARD_SHED_PERCENT, clear_percent: GUARD_CLEAR_PERCENT },
-      apps: { 'mail-hero': appView('mail-hero'), todofy: appView('todofy') },
+      apps: perApp(appView),
     };
   }
 

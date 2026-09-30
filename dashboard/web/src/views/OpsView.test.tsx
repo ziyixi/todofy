@@ -43,13 +43,15 @@ describe('操作与记录', () => {
     expect(rows.map((row) => within(row).getByRole('rowheader').textContent)).toEqual([
       'Mail Hero',
       'Todofy',
+      '论文雷达',
       '个人网站',
       'Notion 发布',
       'Newsletter',
       '个人控制台',
     ])
-    expect(rows[2]).toHaveTextContent('公开地址探测')
-    expect(rows[4]).toHaveTextContent('未接入监控')
+    expect(rows[2]).toHaveTextContent('ops-v1 状态接口')
+    expect(rows[3]).toHaveTextContent('公开地址探测')
+    expect(rows[5]).toHaveTextContent('未接入监控')
   })
 
   it('names a link-only entry of the registry as such', async () => {

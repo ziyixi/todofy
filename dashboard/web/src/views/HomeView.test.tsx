@@ -21,6 +21,7 @@ describe('首页', () => {
     expect(links.map((link) => link.getAttribute('aria-label'))).toEqual([
       '打开 Mail Hero（新标签页），mail-hero.ziyixi.science',
       '打开 Todofy（新标签页），todofy.ziyixi.science',
+      '打开 论文雷达（新标签页），lab.ziyixi.science',
     ])
     for (const link of links) {
       expect(link).toHaveAttribute('target', '_blank')
@@ -28,13 +29,14 @@ describe('首页', () => {
       expect(link.getAttribute('href')).toMatch(/^https:\/\/[a-z-]+\.ziyixi\.science\/$/)
     }
     // Access-protected entries carry the lock with its own name; never an emoji.
-    expect(within(apps).getAllByRole('img', { name: '受 Access 保护' })).toHaveLength(2)
+    expect(within(apps).getAllByRole('img', { name: '受 Access 保护' })).toHaveLength(3)
 
     // Status lines are separate buttons (never inside the link).
     const mail = within(apps).getByRole('button', { name: 'Mail Hero 状态：正常，查看详情' })
     expect(mail).toHaveTextContent('正常· 今日收件 37')
     expect(within(apps).getByRole('button', { name: 'Todofy 状态：正常，查看详情' })).toHaveTextContent('24 小时 41 封')
-    expect(within(apps).getAllByRole('button')).toHaveLength(2)
+    // Lab's tile has its own status button (its ops-v1 status is not in these fixtures: 未知).
+    expect(within(apps).getAllByRole('button')).toHaveLength(3)
     expect(within(apps).queryByText(/Flowday/)).toBeNull()
 
     const sites = within(launcher()).getByRole('region', { name: '站点' })
@@ -60,7 +62,7 @@ describe('首页', () => {
     const link = within(apps).getByRole('link', { name: '打开 Link Demo（新标签页），link-demo.ziyixi.science，未接入监控（仅链接）' })
     expect(link).toHaveAttribute('href', 'https://link-demo.ziyixi.science/')
     expect(link).toHaveAttribute('target', '_blank')
-    expect(within(apps).getAllByRole('img', { name: '受 Access 保护' })).toHaveLength(3)
+    expect(within(apps).getAllByRole('img', { name: '受 Access 保护' })).toHaveLength(4)
     expect(within(apps).queryByRole('button', { name: /Link Demo/ })).toBeNull()
   })
 

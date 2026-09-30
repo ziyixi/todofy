@@ -53,13 +53,14 @@ describe('workerd harness', () => {
   // The stubs' list is parsed from ops-v1.ts (test/declared-methods.ts); test/ops-client.test.ts checks
   // the dashboard's CALLED_METHODS against the same parse, so stubs and client cannot drift apart.
   it('exposes every method ops-v1.ts declares for the app', async () => {
-    for (const app of ['mail-hero', 'todofy'] as const) {
+    for (const app of ['mail-hero', 'todofy', 'lab'] as const) {
       const declared = await declaredMethodsOf(app);
-      expect(declared.length).toBeGreaterThanOrEqual(4);
+      expect(declared.length).toBeGreaterThanOrEqual(app === 'lab' ? 2 : 4);
       for (const method of declared) expect((await harness.rpc(app, method)).error ?? '').not.toMatch(/does not implement|not a function/);
     }
     await harness.calls('mail-hero');
     await harness.calls('todofy');
+    await harness.calls('lab');
   });
 
   it('rejects methods the contract does not declare for that app', async () => {

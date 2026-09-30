@@ -4,7 +4,8 @@
  */
 import mailHeroOk from '../../../contracts/ops-v1/fixtures/OpsStatus/mail-hero-ok.json';
 import todofyOk from '../../../contracts/ops-v1/fixtures/OpsStatus/todofy-ok.json';
-import type { OpsSignal, OpsStatus } from '../../../contracts/ops-v1/ops-v1.ts';
+import labOk from '../../../contracts/ops-v1/fixtures/OpsStatus/lab-ok.json';
+import type { OpsApp, OpsSignal, OpsStatus } from '../../../contracts/ops-v1/ops-v1.ts';
 import type { UsageView } from '../src/api-types.ts';
 import type { EntryDef, Registry } from '../src/api-v2-types.ts';
 import { finish, newRun, type CanaryRecord } from '../src/canary.ts';
@@ -45,8 +46,8 @@ export function withLinkOnly(registry: Registry = REGISTRY): Registry {
   return { ...registry, entries: [...registry.entries, LINK_ONLY_ENTRY] };
 }
 
-export function status(app: 'mail-hero' | 'todofy', patch: Partial<OpsStatus> = {}, at = NOW - 2 * MIN): StatusDoc {
-  const base = (app === 'mail-hero' ? mailHeroOk : todofyOk) as OpsStatus;
+export function status(app: OpsApp, patch: Partial<OpsStatus> = {}, at = NOW - 2 * MIN): StatusDoc {
+  const base = (app === 'mail-hero' ? mailHeroOk : app === 'todofy' ? todofyOk : labOk) as OpsStatus;
   return { checked_at: at, ok: true, error: null, consecutive_failures: 0, status: { ...base, ...patch }, status_at: at };
 }
 
@@ -101,7 +102,7 @@ export function input(patch: Partial<EvalInput> = {}): EvalInput {
     now: NOW,
     lastTickAt: NOW,
     analyticsConfigured: true,
-    statuses: { 'mail-hero': status('mail-hero'), todofy: status('todofy') },
+    statuses: { 'mail-hero': status('mail-hero'), todofy: status('todofy'), lab: status('lab') },
     probes: { website: probe() },
     scripts: scripts(),
     digest: {

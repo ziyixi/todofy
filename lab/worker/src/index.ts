@@ -1,16 +1,17 @@
 /**
- * Worker "lab" (docs/design.md). The fetch handler only authenticates, routes and calls LabState over RPC
- * (Workers Free: 10 ms CPU per request); LabState does the work in its alarm (30 s CPU per invocation).
- * No cron trigger: LabState schedules itself with setAlarm().
+ * Worker "lab" (docs/design.md). The fetch handler only authenticates, validates, reads D1 for the deck
+ * pages and calls LabState over RPC (Workers Free: 10 ms CPU per request); LabState does the pipeline in its
+ * alarm (30 s CPU per invocation). No cron trigger: LabState schedules itself with setAlarm(), bootstrapped
+ * by the first GET /api/today.
  */
 import type { Env } from './env.ts';
+import { handleRequest } from './http.ts';
 
 export { LabState } from './state.ts';
 export { Ops } from './ops.ts';
 
 export default {
-  // Scaffold: the owner API, Access/CSRF (packages/edge-auth) and the assets hand-off land in http.ts.
-  fetch(): Promise<Response> {
-    return Promise.resolve(Response.json({ error: { code: 'not_implemented', message: '尚未实现' } }, { status: 503 }));
+  fetch(request, env): Promise<Response> {
+    return handleRequest(request, env);
   },
 } satisfies ExportedHandler<Env>;

@@ -1,17 +1,19 @@
 /**
- * ops-v1: types of the named WorkerEntrypoint "Ops" that Mail Hero and Todofy export
+ * ops-v1: types of the named WorkerEntrypoint "Ops" that Mail Hero, Todofy and Lab export
  * (README.md). Dependency-free and erasable-only TypeScript (no enums, namespaces or parameter
  * properties), so it compiles under both apps' tsconfig and Node's type stripping can import it.
  *
  * Import it by relative path:
  *   mail-hero/cloudflare/src/native/ops.ts  '../../../../contracts/ops-v1/ops-v1.ts'
  *   todofy/gateway/src/ops.ts               '../../../contracts/ops-v1/ops-v1.ts'
+ *   lab/worker/src/ops.ts                   '../../../contracts/ops-v1/ops-v1.ts'
  * Use `import type` for the types. The few constants below are the bounds every side enforces;
  * test/ops-contract.test.mjs (Mail Hero) checks them against ops-v1.schema.json.
  */
 
 export const OPS_VERSION = 'ops-v1';
-export const OPS_APPS = ['mail-hero', 'todofy'] as const;
+/** Additive: `lab` joined on 2026-09-30 (README.md "Versioning"). */
+export const OPS_APPS = ['mail-hero', 'todofy', 'lab'] as const;
 export const OPS_SEVERITIES = ['info', 'warning', 'critical'] as const;
 export const OPS_HEALTH = ['ok', 'degraded', 'down'] as const;
 export const GUARD_LEVELS = ['normal', 'shed'] as const;
@@ -105,6 +107,13 @@ export interface TodofyModes {
   readonly backup_active?: boolean;
 }
 
+/** Lab has no maintenance switch (always false); ingest_paused is the owner's pause of the daily pipeline. */
+export interface LabModes {
+  readonly maintenance: boolean;
+  /** settings.ingest_paused, read from the object's storage; left out of a `status_unavailable` status. */
+  readonly ingest_paused?: boolean;
+}
+
 export interface OpsStatus<
   A extends OpsApp = OpsApp,
   M extends { readonly maintenance: boolean } = { readonly maintenance: boolean } & Readonly<Record<Code, boolean>>,
@@ -127,6 +136,7 @@ export interface OpsStatus<
 }
 export type MailHeroStatus = OpsStatus<'mail-hero', MailHeroModes>;
 export type TodofyStatus = OpsStatus<'todofy', TodofyModes>;
+export type LabStatus = OpsStatus<'lab', LabModes>;
 
 export type SetGuardInput =
   | { readonly level: 'shed'; readonly reason: Code; readonly until: Timestamp }
@@ -211,4 +221,9 @@ export interface MailHeroOps extends OpsCommon<MailHeroStatus> {
 export interface TodofyOps extends OpsCommon<TodofyStatus> {
   canaryResult(eventId: EventId): Promise<CanaryResult>;
   reportOps(report: OpsReport): Promise<OpsReportReceipt>;
+}
+
+/** `export class Ops extends WorkerEntrypoint<Env> implements LabOps` in lab/worker. */
+export interface LabOps extends OpsCommon<LabStatus> {
+  // status() and setGuard() only.
 }

@@ -32,6 +32,8 @@ export interface Env {
   /** 64 hex characters: HMAC key of the lab_csrf tokens. */
   readonly CSRF_SIGNING_KEY?: string;
 
-  // local development only (.dev.vars); never in the production config
+  // local development and tests only (.dev.vars, the workerd harness); never in the production config
   readonly DEV_AUTH_BYPASS?: string;
+  /** `true`: LabState never arms its alarm; the workerd tests drive `step(now)` through the object binding. */
+  readonly DEV_MANUAL_ALARMS?: string;
 }

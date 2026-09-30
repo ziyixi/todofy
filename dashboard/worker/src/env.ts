@@ -2,15 +2,17 @@
  * Bindings, vars and secrets of the Worker "home" (../wrangler.toml, docs/design.md §2). The apps are
  * reached only through their `Ops` entrypoints (contracts/ops-v1); nothing here imports app code.
  */
-import type { MailHeroOps, TodofyOps } from '../../../contracts/ops-v1/ops-v1.ts';
+import type { LabOps, MailHeroOps, TodofyOps } from '../../../contracts/ops-v1/ops-v1.ts';
 import type { HomeState } from './state.ts';
 
 export interface MailHeroOpsEntrypoint extends Rpc.WorkerEntrypointBranded, MailHeroOps {}
 export interface TodofyOpsEntrypoint extends Rpc.WorkerEntrypointBranded, TodofyOps {}
+export interface LabOpsEntrypoint extends Rpc.WorkerEntrypointBranded, LabOps {}
 
 export interface Env {
   readonly MAIL_HERO: Service<MailHeroOpsEntrypoint>;
   readonly TODOFY: Service<TodofyOpsEntrypoint>;
+  readonly LAB: Service<LabOpsEntrypoint>;
   readonly HOME: DurableObjectNamespace<HomeState>;
   readonly ASSETS: Fetcher;
 

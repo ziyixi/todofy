@@ -3,7 +3,7 @@
  * its `OpsCommon<S>` base, parsed from the file's source. Shared by the unit tests (the dashboard calls
  * only these) and the workerd harness (the stub apps expose exactly these).
  */
-export function declaredMethods(source: string, name: 'MailHeroOps' | 'TodofyOps'): string[] {
+export function declaredMethods(source: string, name: 'MailHeroOps' | 'TodofyOps' | 'LabOps'): string[] {
   const block = (interfaceName: string): string => {
     const match = new RegExp(`export interface ${interfaceName}[^{]*\\{([\\s\\S]*?)\\n\\}`).exec(source);
     if (!match?.[1]) throw new Error(`interface ${interfaceName} not found`);
