@@ -68,16 +68,23 @@ test('guard store: idempotent set, last writer wins, normal clears, expiry reads
 })
 
 test('deferral: only while shed and only within 48 h of the job\'s last run', () => {
+  // ran() records the real clock, so this test's guard follows the real clock too (a fixed NOW made it
+  // fail once the wall clock passed NOW + 30 h).
+  const t = Date.now()
+  const at = offset => new Date(t + offset).toISOString()
   const store = new OpsGuardStore(sqlStorage())
   const all = deferral => DEFERRABLE_JOBS.filter(job => deferral.defers(job))
-  assert.deepEqual(all(store.deferral(NOW)), [], 'normal defers nothing')
-  store.set({ level: 'shed', reason: 'd1_reads_high', until: iso(30 * HOUR) }, NOW)
-  assert.deepEqual(all(store.deferral(NOW)), [], 'a job that never ran runs once even while shed')
-  const deferral = store.deferral(NOW)
+  assert.deepEqual(all(store.deferral(t)), [], 'normal defers nothing')
+  store.set({ level: 'shed', reason: 'd1_reads_high', until: at(30 * HOUR) }, t)
+  assert.deepEqual(all(store.deferral(t)), [], 'a job that never ran runs once even while shed')
+  const deferral = store.deferral(t)
   for (const job of DEFERRABLE_JOBS) deferral.ran(job)
   assert.deepEqual(all(store.deferral(Date.now())), [...DEFERRABLE_JOBS])
-  assert.deepEqual(all(store.deferral(Date.now() + DEFER_BOUND_MS)), [], 'the bound is reached even under a renewed guard')
-  store.set({ level: 'normal', reason: 'quota_recovered', until: null }, NOW)
+  const late = t + DEFER_BOUND_MS + 1000
+  store.set({ level: 'shed', reason: 'd1_reads_high', until: at(DEFER_BOUND_MS + 2 * HOUR) }, late - HOUR)
+  assert.equal(store.read(late).level, 'shed')
+  assert.deepEqual(all(store.deferral(late)), [], 'the bound is reached even under a renewed guard')
+  store.set({ level: 'normal', reason: 'quota_recovered', until: null }, t)
   assert.deepEqual(all(store.deferral(Date.now())), [], 'normal again')
 })
 
