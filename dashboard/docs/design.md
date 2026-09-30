@@ -553,8 +553,10 @@ CI (`.github/workflows/ci.yml`, pinned action SHAs as today):
 - `ci_changes.py`: keys `dashboard_check`, `dashboard_deploy`; `dashboard/` checks and deploys the
   dashboard; `PACKAGE_USERS["edge-auth"]` gains `dashboard` (the `file:` consistency test also scans
   `dashboard/`), an unmapped package counts as used by all three apps; `BUNDLED_BY_BOTH` becomes a map
-  `BUNDLED_BY = {"contracts/ops-v1/ops-v1.ts": ("todofy", "mail-hero", "dashboard")}` (its test also
-  scans `dashboard/worker/src` and `dashboard/web/src`); `contracts/` and `.github/` re-check the
+  `BUNDLED_BY = {"contracts/ops-v1/ops-v1.ts": ("todofy", "mail-hero", "dashboard"),
+  "contracts/ops-v1/ops-v1.schema.json": ("dashboard",), "contracts/ops-v1/validate.mjs": ("dashboard",)}`
+  (the dashboard validates every `Ops` answer with them; its test also scans `dashboard/worker/src`
+  and `dashboard/web/src`); `contracts/` and `.github/` re-check the
   dashboard; dispatch input gains `dashboard` and `all` (`both` keeps meaning Todofy + Mail Hero,
   and stays the default). A dashboard change also runs `Contracts`, which gained a host-only step in
   `dashboard/worker` (`test/ops-client.test.ts`, `guard`, `canary`, `digest`): the caller side of ops-v1

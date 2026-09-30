@@ -77,11 +77,15 @@ class Classify(unittest.TestCase):
         paths = ["contracts/mail-received-v1/fixtures/plain_text.json"]
         self.assertEqual(push(paths), expect(T, T, T, F, F, **ALL_CHECKED))
 
-    def test_ops_contract_schema_and_fixtures_recheck_every_app_but_deploy_none(self):
-        paths = ["contracts/ops-v1/ops-v1.schema.json", "contracts/ops-v1/fixtures/OpsStatus/todofy-ok.json"]
+    def test_ops_contract_fixtures_and_docs_recheck_every_app_but_deploy_none(self):
+        paths = ["contracts/ops-v1/fixtures/OpsStatus/todofy-ok.json", "contracts/ops-v1/README.md"]
         self.assertEqual(push(paths), expect(T, T, T, F, F, **ALL_CHECKED))
-        paths = ["contracts/ops-v1/validate.mjs", "contracts/ops-v1/README.md"]
-        self.assertEqual(push(paths), expect(T, T, T, F, F, **ALL_CHECKED))
+
+    def test_ops_schema_and_validator_also_deploy_the_dashboard(self):
+        """The dashboard validates every Ops answer at runtime with the bundled schema and validate.mjs."""
+        for path in ("contracts/ops-v1/ops-v1.schema.json", "contracts/ops-v1/validate.mjs"):
+            with self.subTest(path=path):
+                self.assertEqual(push([path]), expect(T, T, T, F, F, **ALL))
 
     def test_contract_code_the_workers_bundle_deploys_every_app_that_bundles_it(self):
         """OPS_LIMITS and friends ship inside all three Workers, so a change must redeploy each."""

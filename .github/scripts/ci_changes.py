@@ -21,7 +21,8 @@ so a change whose run was cancelled or failed is checked (and deployed) again by
   No usable base (no successful main run yet, API failure, base not an ancestor, no origin/main)
   runs everything. An app's own directory checks and deploys it; contracts/ and .github/ re-check
   every app but deploy none, except the contract files the TypeScript Workers bundle (BUNDLED_BY,
-  e.g. OPS_LIMITS in contracts/ops-v1/ops-v1.ts), which also deploy every app listed for them. A
+  e.g. OPS_LIMITS in contracts/ops-v1/ops-v1.ts, or the schema and validate.mjs the dashboard checks
+  answers with), which also deploy every app listed for them. A
   shared package packages/<name>/ is compiled into the apps listed in PACKAGE_USERS, so any change
   inside it runs the package checks and checks AND deploys each of those apps. A package missing
   from PACKAGE_USERS counts as used by every app (fail safe; the tests run by the Changes job also
@@ -60,9 +61,14 @@ DISPATCH = {
 PACKAGE_USERS = {"edge-auth": ("todofy", "mail-hero", "dashboard")}
 
 # Contract files whose code a TypeScript Worker imports at runtime (constants such as OPS_LIMITS land
-# in its bundle), mapped to the apps that bundle them: a change ships only with a deploy of each.
+# in its bundle; the dashboard also validates every Ops answer with the schema and validate.mjs),
+# mapped to the apps that bundle them: a change ships only with a deploy of each.
 # test_ci_changes.py checks this map against the Workers' imports.
-BUNDLED_BY = {"contracts/ops-v1/ops-v1.ts": ("todofy", "mail-hero", "dashboard")}
+BUNDLED_BY = {
+    "contracts/ops-v1/ops-v1.ts": ("todofy", "mail-hero", "dashboard"),
+    "contracts/ops-v1/ops-v1.schema.json": ("dashboard",),
+    "contracts/ops-v1/validate.mjs": ("dashboard",),
+}
 
 
 def everything() -> dict[str, bool]:

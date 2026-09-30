@@ -70,11 +70,13 @@ a manual run. Actions are pinned by commit SHA.
 | `CI gate` | always | Fails if any job above failed or was cancelled; skipped as unchanged is fine. **The one check to require on `main`** |
 | `Todofy deploy` | `main` only, `todofy/`, `packages/edge-auth/` or `contracts/ops-v1/ops-v1.ts` changed (or dispatched), after `CI gate` | Generate configs, dry-run, D1 migrations, deploy `todofy-core` then the gateway, `/health` and core probes. `production` environment, group `todofy-production` |
 | `Mail Hero deploy` | `main` only, `mail-hero/`, `packages/edge-auth/` or `contracts/ops-v1/ops-v1.ts` changed (or dispatched), after `CI gate` | `generate-ci-config.mjs`, dry-run, D1 migrations, deploy. `production` environment, group `mail-hero-production` |
-| `Dashboard deploy` | `main` only, `dashboard/`, `packages/edge-auth/` or `contracts/ops-v1/ops-v1.ts` changed (or dispatched), after `CI gate` and after `Todofy deploy` and `Mail Hero deploy` (each success or skipped: the service bindings need their `Ops` entrypoints live) | Build the UI, `generate-ci-config.mjs`, dry-run, deploy (no D1), then a probe that an unauthenticated `GET /` and `/api/v1/overview` are answered by Access with a 302 to the team domain, never by the app. `production` environment, group `dashboard-production` |
+| `Dashboard deploy` | `main` only, `dashboard/`, `packages/edge-auth/`, `contracts/ops-v1/ops-v1.ts`, `ops-v1.schema.json` or `validate.mjs` changed (or dispatched), after `CI gate` and after `Todofy deploy` and `Mail Hero deploy` (each success or skipped: the service bindings need their `Ops` entrypoints live) | Build the UI, `generate-ci-config.mjs`, dry-run, deploy (no D1), then a probe that an unauthenticated `GET /` and `/api/v1/overview` are answered by Access with a 302 to the team domain, never by the app. `production` environment, group `dashboard-production` |
 
-A change to only `contracts/` or `.github/` re-checks every app but deploys none, except
-`contracts/ops-v1/ops-v1.ts`: all three TypeScript Workers bundle its constants (`OPS_LIMITS`), so a
-change to it deploys all three (`BUNDLED_BY` in `.github/scripts/ci_changes.py` maps each bundled
+A change to only `contracts/` or `.github/` re-checks every app but deploys none, except the contract
+files the Workers bundle: all three TypeScript Workers bundle the constants of
+`contracts/ops-v1/ops-v1.ts` (`OPS_LIMITS`), so a change to it deploys all three, and the dashboard
+bundles `ops-v1.schema.json` and `validate.mjs` (it validates every `Ops` answer), so a change to
+those also deploys the dashboard (`BUNDLED_BY` in `.github/scripts/ci_changes.py` maps each bundled
 contract file to its apps; its test compares the map with the Workers' imports). Dispatch on `main` to
 redeploy an app. A change to `packages/edge-auth/` (any file in it) runs `Shared packages` and checks
 **and deploys** all three apps, because every Worker compiles it in. `ci_changes.py` maps each package
