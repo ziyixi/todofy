@@ -349,17 +349,24 @@ The release that adds [gtd-features.md](gtd-features.md) needs these owner steps
 2. Optional, any time: create the Todoist projects "Ops" and "Review" by hand and store their IDs as the
    environment secrets `TODOFY_TODOIST_OPS_PROJECT_ID` and `TODOFY_TODOIST_REVIEW_PROJECT_ID` (the ID is the
    last part of the project's URL). Unset, both tasks go to the default project, as before.
-3. Before merging: confirm the newsletter (separate repository) ignores unknown fields of
-   `recommendation-v1` (its `_decode_recommendation`); the report gains `new_count` and `carryover_count`.
+3. Before merging, in the newsletter (separate repository): change its recommendation captions, which
+   say "近 24 小时" (`source_label` and `_LIMITATIONS` in `src/newsletter/todofy.py`), to cover older
+   still-open tasks, e.g. "近 24 小时 + 仍未完成的旧任务". Carried picks start their reason with
+   "（N 天前）". Its `_decode_recommendation` already ignores the new `new_count` and `carryover_count`
+   (checked at newsletter commit `28882c2`; the v1 schema itself has `additionalProperties: false`, so a
+   strict schema validator would not).
 4. Merge. The deploy applies migration `0004_gtd.sql` (additive: the previous release keeps working on it)
    and ships the code. The first snapshot is taken at the next 13:00 UTC; until then the recommendation is
    the plain 24 h report and the ops status has no GTD counters.
 5. After a day: the owner UI's GTD page shows the first snapshot; `status()` carries `inbox_open`,
-   `inbox_oldest_days`, `overdue`, `carryover_open` and `completed_7d`. Then set
+   `inbox_oldest_days`, `overdue`, `carryover_open` and `completed_7d`; the day's recommendation has
+   `carryover_count` > 0 when older mail tasks are still open. Then set
    `TODOFY_GTD_REVIEW_ENABLED=true` and run the workflow on `main` (app `todofy`): the next Sunday at 17:00
    UTC creates the first review task.
 
 Rollback: `REPORT_CARRYOVER_DAYS = "0"` (a commit) turns the carryover off; `GTD_COLLECT_UTC = "off"` (a
-commit) stops the snapshot; `TODOFY_GTD_REVIEW_ENABLED=false` (a variable) stops the review. A code
+commit) stops the snapshot, and with it the carryover, the GTD counters, `review_age_days` and
+`review_overdue` (a review's completion is only seen by the snapshot); `TODOFY_GTD_REVIEW_ENABLED=false`
+(a variable) stops the review. A code
 rollback keeps working on the migrated database; the four `gtd_*` tables then stop growing and are removed
 by nothing (drop them by hand with `wrangler d1 execute --remote` only if the feature is abandoned).

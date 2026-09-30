@@ -397,7 +397,8 @@ class Facts:
     public_host: str
     # The GTD ledger (docs/gtd-features.md §8), from the object's storage: the latest complete
     # aggregate's counters, how long the snapshot has been stale (None: it is not), and the days since
-    # the last review (None: no review yet) while the weekly review is enabled.
+    # the last review (None: no review yet) while the weekly review is enabled and the daily snapshot
+    # runs (core/gtd.py review_watched: only its completed list sees a review done).
     gtd_counters: Mapping[str, int] = field(default_factory=dict)
     gtd_stale_seconds: int | None = None
     review_enabled: bool = False

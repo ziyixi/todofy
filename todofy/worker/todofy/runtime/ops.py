@@ -199,8 +199,8 @@ async def status(env: Any, coordinator: Any, now: int) -> dict[str, Any]:
             public_host=var(env, "TODOFY_PUBLIC_HOST"),
             gtd_counters=ledger_facts.counters,
             gtd_stale_seconds=gtd_rules.snapshot_age(ledger_facts, now),
-            review_enabled=ledger_facts.review_enabled,
-            review_age_days=gtd_rules.review_age_days(ledger_facts, now) if ledger_facts.review_enabled else None,
+            review_enabled=gtd_rules.review_watched(ledger_facts),
+            review_age_days=gtd_rules.review_age_days(ledger_facts, now),
         )
     )
 

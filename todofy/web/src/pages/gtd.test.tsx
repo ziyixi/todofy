@@ -56,7 +56,7 @@ describe('GTD page', () => {
       全部开放: '57',
       逾期: '3',
       '近 7 天新建 / 完成': '35 / 42',
-      '14 天内仍开着的邮件任务': '9',
+      '1–14 天前收到、仍开着的邮件任务': '9',
     })
     expect(within(screen.getByRole('region', { name: '每周回顾' })).getByText('2026-W40 · 已创建')).toBeInTheDocument()
     const charts = within(screen.getByRole('region', { name: '近 30 天趋势' })).getAllByRole('figure')

@@ -57,12 +57,21 @@ CLOSED_SINCE = Query(
     " AND NOT EXISTS (SELECT 1 FROM gtd_snapshot_tasks t WHERE t.day = ? AND t.task_id = y.task_id)",
     TASKS_INDEX,
 )
-# Mail tasks of a window (bind its start and end) still open in the day's snapshot (bind the day):
-# walks summaries_created (about 100 rows a day) plus one primary-key probe each.
+# Mail tasks of a window (bind its start and end: the 14 days before the last 24 h, the morning brief's
+# carryover pool without its cap of 30) still open in the day's snapshot (bind the day): walks
+# summaries_created (about 100 rows a day) plus one primary-key probe each.
 MAIL_OPEN = Query(
     "SELECT count(*) AS n FROM summaries WHERE created_at > ? AND created_at <= ? AND task_id <> ''"
     " AND EXISTS (SELECT 1 FROM gtd_snapshot_tasks g WHERE g.day = ? AND g.task_id = summaries.task_id)",
     "summaries_created",
+)
+# The review's links: a day's oldest tasks of one project (bind the day, the project and a cap), IDs only.
+# The sort sees at most one day's rows (MAX_SNAPSHOT_ROWS), bounded by the primary key's day prefix.
+OLDEST_TASKS = Query(
+    "SELECT task_id FROM gtd_snapshot_tasks WHERE day = ? AND project_id = ? AND added_at IS NOT NULL"
+    " ORDER BY added_at, task_id LIMIT ?",
+    TASKS_INDEX,
+    sort_allowed=True,
 )
 WRITE_DAILY = Query(
     "INSERT INTO gtd_daily (day, scope, open, age_0_7, age_8_14, age_15_30, age_31_plus, oldest_days, overdue,"

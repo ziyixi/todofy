@@ -91,7 +91,7 @@ export function GtdPage() {
               ['逾期', formatNumber(all.overdue)],
               ['无日期', formatNumber(all.undated)],
               ['近 7 天新建 / 完成', `${orUnknown(all.created_7d)} / ${orUnknown(all.completed_7d)}`],
-              ['14 天内仍开着的邮件任务', orUnknown(all.mail_open)],
+              ['1–14 天前收到、仍开着的邮件任务', orUnknown(all.mail_open)],
             ]}
           />
         </Section>

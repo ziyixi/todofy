@@ -103,6 +103,8 @@ CARRYOVER_EDITS = (
         '\nIMPORTANT: An item that starts with "[N 天前]" arrived N days ago and its Todoist task is still open.\n'
         "  Its age alone is neither a reason to rank it higher nor a reason to skip it.\n"
         "  Never call it overdue unless its summary states a date that has passed.\n"
+        '  When you select such an item, start its "reason" with "（N 天前）" using the same N,\n'
+        "  so I can tell it apart from new mail. Never add that prefix to an item from the last 24 hours.\n"
         "\nExample output when no task requires action:\n",
     ),
     (

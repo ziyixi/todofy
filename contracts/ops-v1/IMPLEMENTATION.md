@@ -346,15 +346,17 @@ last one older than 8 days; `age_seconds, has_backup`), `backup_failed` (warning
 attempts left, or `unknown`; `attempts`); `guard_shed` (info); from the GTD ledger
 (todofy/docs/gtd-features.md, object storage only): `gtd_snapshot_stale` (warning, `age_hours`: the daily
 Todoist snapshot is allowed and its last ok run, or the first attempt, is over 48 h old) and
-`review_overdue` (info, `days`: the weekly review is on and its last completion is over 10 days old;
+`review_overdue` (info, `days`: the weekly review and the daily snapshot that sees it done are both on,
+and its last completion is over 10 days old;
 info on purpose, so a skipped personal review never degrades the tile or enters the digest). Health as in
 README.md.
 
 Counters: `active_events`, `attention_events`, `received_24h`, `oldest_due_age_seconds`,
 `gemini_used_tokens`, `gemini_reserved_tokens`, `gemini_token_budget`, `gemini_calls`,
 `todoist_window_calls`, `todoist_window_limit`, `backup_age_seconds`, and the GTD ledger's `inbox_open`,
-`inbox_oldest_days`, `overdue`, `carryover_open`, `completed_7d` (the latest complete snapshot aggregate,
-each left out while unknown) and `review_age_days` (while the review is on): 17 of the 32 allowed.
+`inbox_oldest_days`, `overdue`, `carryover_open` (mail tasks of the 14 days before the last 24 h still
+open), `completed_7d` (the latest complete snapshot aggregate, each left out while unknown) and
+`review_age_days` (while the review and the snapshot are on): 17 of the 32 allowed.
 `last_backup_at` from
 `backup.overview`; `ui_url` = `https://{TODOFY_PUBLIC_HOST}/`; capabilities `["canary_consumer",
 "guard", "ops_digest"]`; modes `maintenance`, `processing_paused`, `force_pause_todoist`,

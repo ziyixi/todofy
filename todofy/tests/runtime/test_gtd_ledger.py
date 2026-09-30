@@ -126,7 +126,8 @@ def test_the_aggregates_count_ages_dues_scopes_completions_and_closed_tasks(prob
         probe.insert(
             "gtd_snapshot_tasks", day=YESTERDAY, task_id=task_id, project_id="p", priority=1, content_hmac="0" * 64
         )
-    # Mail tasks of the last 14 days: a and b are still open, x was completed.
+    # Mail tasks of the last 14 days: a and b are still open (b arrived in the last 24 h, so it is not in
+    # the carryover pool), x was completed.
     for event_id, created_at, task_id in (
         ("m-a", NOW - 2 * DAY, a.id),
         ("m-b", NOW - HOUR, b.id),
@@ -159,7 +160,7 @@ def test_the_aggregates_count_ages_dues_scopes_completions_and_closed_tasks(prob
         "created_7d": 3,
         "completed_7d": 2,
         "closed_1d": 1,
-        "mail_open": 2,
+        "mail_open": 1,
     }
     assert rows["inbox"] == common | {
         "scope": "inbox",
@@ -180,7 +181,7 @@ def test_the_aggregates_count_ages_dues_scopes_completions_and_closed_tasks(prob
         "inbox_open": 4,
         "inbox_oldest_days": 40,
         "overdue": 3,
-        "carryover_open": 2,
+        "carryover_open": 1,
         "completed_7d": 2,
     }
     assert result["facts"]["last_ok_at"] == NOW and result["facts"]["snapshot_age"] is None
@@ -269,10 +270,14 @@ def test_a_pause_mid_way_resumes_from_the_cursor(probe):
     assert [row["task_id"] for row in stored] == sorted(task.id for task in tasks)
 
 
-def test_a_failed_completed_list_keeps_the_snapshot_without_completions(probe):
+@pytest.mark.parametrize("status", [500, 401, 403])
+def test_a_failed_completed_list_keeps_the_snapshot_without_completions(probe, status):
     seed(probe)
-    probe.todoist.queue("GET", COMPLETED_PATH, Reply(500, {"error": "boom"}))
+    probe.todoist.queue("GET", COMPLETED_PATH, Reply(status, {"error": "boom"}))
     result = tick(probe, NOW)
+    # Even a 401/403 on this optional read never blocks Todoist (mail tasks keep being created).
+    assert not any(call[0] == "block" for call in result["calls"])
+    assert result["state"]["next_collect"] == TOMORROW_COLLECT
     assert probe.sql("SELECT status FROM gtd_snapshots") == [{"status": "ok"}]
     rows = probe.sql("SELECT scope, completed_7d, created_7d, completed_source FROM gtd_daily ORDER BY scope")
     assert rows == [
@@ -383,6 +388,23 @@ def review(probe: Probe, now: int, **overrides: str) -> dict:
 def test_the_review_is_one_task_per_iso_week_with_counts_only(probe):
     seed_days(probe, "2026-10-04", inbox_open=23, all_open=57)
     seed_days(probe, "2026-09-27", inbox_open=31, all_open=57)
+    for task_id, project, added in (
+        ("old-2", PROJECT_ID, SUNDAY - 50 * DAY),
+        ("old-1", PROJECT_ID, SUNDAY - 60 * DAY),
+        ("work-0", "work", SUNDAY - 90 * DAY),
+        ("undated", PROJECT_ID, None),
+        ("old-3", PROJECT_ID, SUNDAY - 40 * DAY),
+        ("young", PROJECT_ID, SUNDAY - DAY),
+    ):
+        probe.insert(
+            "gtd_snapshot_tasks",
+            day="2026-10-04",
+            task_id=task_id,
+            project_id=project,
+            priority=1,
+            added_at=added,
+            content_hmac="0" * 64,
+        )
     result = review(probe, SUNDAY, TODOIST_REVIEW_PROJECT_ID="review-project")
     [create] = probe.todoist.creates()
     sent = create.json()
@@ -392,8 +414,13 @@ def test_the_review_is_one_task_per_iso_week_with_counts_only(probe):
     )
     body = sent["description"]
     assert body.startswith("快照 2026-10-04（Todoist 元数据，只含计数）\n收件箱：开放 23（上周 31，-8）")
-    assert "全部项目：开放 57（上周 57，持平） · 逾期 2 · 无日期 5" in body
-    assert "近 7 天：新建 7 · 完成 9\n邮件任务：14 天内仍开着 3\n" in body
+    assert "全部项目：开放 57（上周 57，持平） · 逾期 2（上周 2，持平） · 无日期 5（上周 5，持平）" in body
+    assert "近 7 天：新建 7 · 完成 9（上周 9，持平）\n邮件任务：1–14 天前收到、仍开着 3（晨报最多带入 30 条）\n" in body
+    # Title-free links to the snapshot day's three oldest inbox tasks, oldest first (other projects and
+    # undated rows are not candidates).
+    oldest = [f"https://app.todoist.com/app/task/old-{n}" for n in (1, 2, 3)]
+    assert f"收件箱最老的任务：{'  '.join(oldest)}\n" in body
+    assert "本周重点：收件箱里超过 30 天的 1 项：逐个决定 做 / 委派 / 删除\n" in body
     assert "Todofy：需处理事件 0；运维：（仪表盘报告 2026-10-03 23:00 UTC）mail-hero parse_failed count=1\n" in body
     assert "backup_active" not in body  # info items are not listed
     assert f"面板：https://home.ziyixi.science/   Todofy GTD：https://{PUBLIC_HOST}/gtd" in body
@@ -513,6 +540,11 @@ def test_a_completed_review_is_seen_by_the_next_snapshot(probe):
     assert result["facts"]["review_age_days"] == 0
     later = probe.call("/gtd", op="facts", now=SUNDAY + 3 * HOUR + 11 * DAY, vars=ENABLED)
     assert later["facts"]["review_age_days"] == 11
+    # Without the daily snapshot nothing would see the next review done: no age, so no review_overdue.
+    off = probe.call("/gtd", op="facts", now=SUNDAY + 3 * HOUR + 11 * DAY, vars=ENABLED | {"GTD_COLLECT_UTC": "off"})
+    assert off["facts"]["review_age_days"] is None
+    paused = probe.call("/gtd", op="facts", now=SUNDAY + 11 * DAY, vars=ENABLED | {"FORCE_PAUSE_TODOIST": "true"})
+    assert paused["facts"]["review_age_days"] is None
     # A deleted review task never counts as done.
     review(probe, SUNDAY + 7 * DAY)
     probe.todoist.delete(probe.todoist.tasks[-1].id)

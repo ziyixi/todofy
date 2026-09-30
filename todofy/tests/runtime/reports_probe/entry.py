@@ -59,6 +59,7 @@ class FailingDb:
 class Budget:
     """Stands in for the coordinator: its hourly report cap, Gemini token budget,
     precompute failure counts (``failures`` maps "kind/top_n/day" to a count),
+    the largest token reservation it grants (``token_limit``; None: any),
     on-demand report computation and the stored ops report (``ops_report``, an
     OpsReport the object would hold)."""
 
@@ -69,10 +70,12 @@ class Budget:
         tokens: bool = True,
         failures: dict[str, int] | None = None,
         ops_report: dict[str, Any] | None = None,
+        token_limit: int | None = None,
     ) -> None:
         self.env = env
         self.slots = slots
         self.tokens = tokens
+        self.token_limit = token_limit
         self.failures = dict(failures or {})
         self.ops_report = None if ops_report is None else ops.stored_report(ops.compact(ops_report))
         self.calls: list[list[Any]] = []
@@ -92,7 +95,7 @@ class Budget:
 
     def reserve_tokens(self, tokens: int, now: int) -> bool:
         self.calls.append(["reserve", tokens, now])
-        return self.tokens
+        return self.tokens and (self.token_limit is None or tokens <= self.token_limit)
 
     def settle_tokens(self, reserved: int, used: int, now: int) -> None:
         self.calls.append(["settle", reserved, used, now])
@@ -209,7 +212,12 @@ class Default(WorkerEntrypoint):
             overrides["DB"] = FailingDb(self.env.DB, marker)
         env = Overlay(self.env, overrides)
         budget = Budget(
-            env, args.get("slots", True), args.get("tokens", True), args.get("failures"), args.get("ops_report")
+            env,
+            args.get("slots", True),
+            args.get("tokens", True),
+            args.get("failures"),
+            args.get("ops_report"),
+            args.get("token_limit"),
         )
         data: dict[str, Any] = {}
         match path:

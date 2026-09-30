@@ -1,7 +1,9 @@
 """The morning brief that remembers (docs/gtd-features.md §3) in real workerd: the recommendation also
 sees mail tasks of the last 14 days that the day's Todoist snapshot still lists as open, tagged
-"[N 天前]"; without a usable snapshot the model input, prompt and payload are exactly the 24 h report;
-and the [Todofy System] reminder goes to its own project, frozen with the day's claim."""
+"[N 天前]" and spread over the days they arrived; without today's scheduled snapshot (never yesterday's
+list), after a failed attempt that day, or when the token budget cannot take the carried lines, the model
+input, prompt and payload are exactly the 24 h report; and the [Todofy System] reminder goes to its own
+project, frozen with the day's claim."""
 
 import json
 import time
@@ -86,17 +88,30 @@ def test_open_older_mail_tasks_are_carried_after_the_new_ones(probe, mail):
     assert stored["task_count"] == 4 and json.loads(stored["payload_json"]) == report
 
 
-def test_carryover_is_capped_at_30_newest_first(probe):
+def test_carryover_is_capped_at_30_and_spread_over_the_days(probe):
+    """A normal volume: 35 open tasks from yesterday must not push out the ones open for 5 and 12 days."""
     ids = [f"t{index}" for index in range(35)]
     for index, task_id in enumerate(ids):
-        summary(probe, f"e{index}", NOW - DAY - HOUR * (index + 1), f"旧 {index}", task_id)
-    snapshot(probe, ids)
+        summary(probe, f"e{index}", NOW - DAY - 60 * (index + 1), f"昨天 {index}", task_id)
+    summary(probe, "d5", NOW - 5 * DAY, "五天前仍开着", "t-5")
+    summary(probe, "d12", NOW - 12 * DAY, "十二天前仍开着", "t-12")
+    snapshot(probe, [*ids, "t-5", "t-12"])
     report = recommendation(probe)
     [call] = probe.gemini.calls()
     lines = [line for line in call.user.splitlines() if line.startswith("[")]
-    assert len(lines) == 30 and lines[0] == "[1 天前] 旧 0" and lines[-1] == "[2 天前] 旧 29"
+    assert len(lines) == 30 and "[5 天前] 五天前仍开着" in lines and lines[-1] == "[12 天前] 十二天前仍开着"
+    assert lines[:28] == [f"[1 天前] 昨天 {index}" for index in range(28)]  # newest first
     assert (report["new_count"], report["carryover_count"], report["task_count"]) == (0, 30, 30)
     assert report["status"] == "ok"  # no new mail, but open tasks: not an empty window
+
+
+def test_a_long_stored_summary_is_carried_cut(probe, mail):
+    summary(probe, "long", NOW - 3 * DAY, "长" * 20_000, "t-long")
+    snapshot(probe, ["t-long"])
+    recommendation(probe)
+    [call] = probe.gemini.calls()
+    [line] = [line for line in call.user.splitlines() if line.startswith("[3 天前]")]
+    assert len(line.encode()) <= gtd.CARRYOVER_LINE_BYTES + len("[3 天前] ".encode())
 
 
 @pytest.mark.parametrize(
@@ -106,10 +121,31 @@ def test_carryover_is_capped_at_30_newest_first(probe):
         (lambda probe: snapshot(probe, ["t-open-2"], status="failed"), {}),
         (lambda probe: snapshot(probe, ["t-open-2"], status="partial"), {}),
         (lambda probe: snapshot(probe, ["t-open-2"], status="collecting"), {}),
-        (lambda probe: snapshot(probe, ["t-open-2"], finished_at=NOW - 26 * HOUR - 1, day=gtd.shift(TODAY, -1)), {}),
+        # Yesterday's ok list, even 24.5 h old, never stands in for today's failed or missing one.
+        (lambda probe: snapshot(probe, ["t-open-2"], finished_at=NOW - 24 * HOUR - 1800, day=gtd.shift(TODAY, -1)), {}),
+        (
+            lambda probe: (
+                snapshot(probe, ["t-open-2"], finished_at=NOW - 26 * HOUR, day=gtd.shift(TODAY, -1)),
+                snapshot(probe, [], status="failed"),
+            ),
+            {},
+        ),
+        # Today's ok snapshot taken before 13:00 (the object's state was lost) is not the scheduled one.
+        (lambda probe: snapshot(probe, ["t-open-2"], finished_at=NOW - 3 * HOUR), {}),
         (lambda probe: snapshot(probe, ["t-open-2"]), {"REPORT_CARRYOVER_DAYS": "0"}),
+        (lambda probe: snapshot(probe, ["t-open-2"]), {"GTD_COLLECT_UTC": "off"}),
     ],
-    ids=["no_snapshot", "failed", "partial", "collecting", "stale", "switched_off"],
+    ids=[
+        "no_snapshot",
+        "failed",
+        "partial",
+        "collecting",
+        "yesterday_only",
+        "today_failed",
+        "before_the_slot",
+        "switched_off",
+        "collect_off",
+    ],
 )
 def test_without_a_usable_snapshot_the_report_is_exactly_the_24_hour_one(probe, mail, setup, overrides):
     setup(probe)
@@ -131,9 +167,50 @@ def test_a_failed_carryover_read_falls_back_to_the_24_hour_report(probe, mail, m
     assert (report["status"], report["new_count"], report["carryover_count"]) == ("ok", 2, 0)
 
 
-def test_a_stale_snapshot_just_inside_26_hours_still_serves(probe, mail):
-    snapshot(probe, ["t-open-2"], finished_at=NOW - 26 * HOUR, day=gtd.shift(TODAY, -1))
-    assert recommendation(probe)["carryover_count"] == 1
+def test_before_today_s_slot_yesterday_s_scheduled_snapshot_serves(probe, mail):
+    """A recompute at 10:00 UTC: the latest scheduled collection is yesterday's 13:00 one."""
+    morning = NOW - 5 * HOUR
+    snapshot(probe, ["t-open-2"], finished_at=morning - 20 * HOUR, day=gtd.shift(TODAY, -1))
+    probe.gemini.queue_generate(text_reply(json.dumps(TASKS, ensure_ascii=False)))
+    report = probe.call("/reports/compute", kind="recommendation", top_n=10, now=morning, budget_ms=10_000)["report"]
+    assert report["carryover_count"] == 1
+
+
+def test_after_a_failed_attempt_today_the_report_is_exactly_the_24_hour_one(probe, mail):
+    """A Gemini error or unusable answer with the carryover costs the brief one attempt at most."""
+    snapshot(probe, ["t-open-2", "t-open-9"])
+    probe.gemini.queue_generate(text_reply(json.dumps(TASKS, ensure_ascii=False)))
+    failures = {f"recommendation/10/{TODAY}": 1}
+    args = {"kind": "recommendation", "top_n": 10, "now": NOW, "budget_ms": 10_000, "failures": failures}
+    report = probe.call("/reports/compute", **args)["report"]
+    [call] = probe.gemini.calls()
+    assert call.system == prompts.recommend_prompt(10) and "天前" not in call.user
+    assert (report["status"], report["new_count"], report["carryover_count"]) == ("ok", 2, 0)
+
+
+def test_a_token_budget_too_small_for_the_carryover_falls_back_to_the_24_hour_report(probe, mail):
+    # What the 24 h report alone reserves.
+    plain = probe.call("/reports/compute", kind="recommendation", top_n=10, now=NOW, budget_ms=10_000, tokens=False)
+    [[_, reserve, _]] = [call for call in plain["budget"] if call[0] == "reserve"]
+    snapshot(probe, ["t-open-2", "t-open-9"])
+    probe.gemini.queue_generate(text_reply(json.dumps(TASKS, ensure_ascii=False)))
+    args = {"kind": "recommendation", "top_n": 10, "now": NOW, "budget_ms": 10_000, "token_limit": reserve}
+    result = probe.call("/reports/compute", **args)
+    reserves = [call[1] for call in result["budget"] if call[0] == "reserve"]
+    assert len(reserves) == 2 and reserves[0] > reserve and reserves[1] == reserve
+    [call] = probe.gemini.calls()  # one Gemini call: the refused reservation made none
+    assert call.system == prompts.recommend_prompt(10) and "天前" not in call.user
+    report = result["report"]
+    assert (report["status"], report["task_count"], report["new_count"], report["carryover_count"]) == ("ok", 2, 2, 0)
+
+
+def test_without_new_mail_a_refused_carryover_is_an_empty_window(probe):
+    summary(probe, "old", NOW - 3 * DAY, "三天前仍开着", "t-old")
+    snapshot(probe, ["t-old"])
+    args = {"kind": "recommendation", "top_n": 10, "now": NOW, "budget_ms": 10_000, "tokens": False}
+    report = probe.call("/reports/compute", **args)["report"]
+    assert (report["status"], report["new_count"], report["carryover_count"]) == ("empty_window", 0, 0)
+    assert probe.gemini.calls() == []
 
 
 def test_an_empty_day_without_open_tasks_is_still_an_empty_window(probe):
@@ -163,7 +240,8 @@ def test_the_newsletter_gets_the_counts_on_demand(probe):
     now = int(time.time())
     summary(probe, "new", now - HOUR, "新邮件", "t-new")
     summary(probe, "old", now - 3 * DAY, "三天前仍开着", "t-old")
-    snapshot(probe, ["t-old"], finished_at=now - HOUR, day=gtd.day_of(now - HOUR))
+    slot = gtd.last_collect(now, 13 * HOUR)  # the latest scheduled collection
+    snapshot(probe, ["t-old"], finished_at=slot, day=gtd.day_of(slot))
     response = probe.worker.hooks.get("/api/recommendation", params={"top": "10"}, auth=NEWSLETTER)
     assert response.status_code == 200, response.text
     body = response.json()

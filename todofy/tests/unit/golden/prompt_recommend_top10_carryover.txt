@@ -34,6 +34,8 @@ IMPORTANT: MERGE similar or duplicate tasks into ONE entry.
 IMPORTANT: An item that starts with "[N 天前]" arrived N days ago and its Todoist task is still open.
   Its age alone is neither a reason to rank it higher nor a reason to skip it.
   Never call it overdue unless its summary states a date that has passed.
+  When you select such an item, start its "reason" with "（N 天前）" using the same N,
+  so I can tell it apart from new mail. Never add that prefix to an item from the last 24 hours.
 
 Example output when no task requires action:
 []

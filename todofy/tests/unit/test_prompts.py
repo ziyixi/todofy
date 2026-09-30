@@ -153,5 +153,7 @@ def test_the_carryover_prompt_differs_only_by_its_three_edits():
     assert rebuilt == plain
     assert '"[N 天前]"' in carried and "still open" in carried
     assert "Never call it overdue unless its summary states a date that has passed" in carried
+    # The age reaches the reader: a carried pick's reason starts with it (the newsletter shows reasons).
+    assert 'start its "reason" with "（N 天前）"' in carried
     for fragment in ("pick up to 3 distinct tasks", "never exceeding #3", "Output at most 3 items"):
         assert fragment in carried

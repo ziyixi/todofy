@@ -6,7 +6,8 @@ usable (``ok`` or ``empty_window``); otherwise the coordinator computes one
 within 40 s, under its hourly computation cap, and answers 503 when that
 fails. The recommendation's input is the 24 h window plus the carryover: older
 mail tasks the day's Todoist snapshot still lists as open (docs/gtd-features.md
-§3); without a usable snapshot it is exactly the 24 h report. The newsletter
+§3); without that snapshot, after a failed attempt that day, or when the token
+budget cannot take the carried lines, it is exactly the 24 h report. The newsletter
 reads only the HTTP status, so an old or unusable report is never sent as a 200.
 Responses validate against api/summary-v1 and api/recommendation-v1.
 """
@@ -65,6 +66,13 @@ class ReportError(Exception):
         self.code = code
 
 
+class TokenBudgetError(ReportError):
+    """The day's Gemini token budget cannot take this call (no call was made)."""
+
+    def __init__(self) -> None:
+        super().__init__(503, ApiError.UNAVAILABLE)
+
+
 def failure_hour(timestamp: int) -> str:
     """The ``auth_failures`` key: the UTC hour as ``YYYY-MM-DDTHH``."""
     return datetime.fromtimestamp(timestamp, UTC).strftime("%Y-%m-%dT%H")
@@ -87,32 +95,47 @@ async def compute(env: Any, coordinator: Any, kind: str, top_n: int, now: int, b
         raise ReportError(429, ApiError.RATE_LIMITED)
     start = now - WINDOW_HOURS * HOUR
     window = await env.DB.prepare(sql.REPORT_WINDOW.sql).bind(start, now, MAX_WINDOW_SUMMARIES).all()
-    summaries = [row.summary for row in window.results]
+    new = [row.summary for row in window.results]
     stamps = {"computed_at": _stamp(now), "window_start": _stamp(start), "window_end": _stamp(now)}
     # The recommendation also sees older mail tasks still open in Todoist (never the summary report).
-    carried = await carryover(env, start, now) if kind == RECOMMENDATION else []
-    counts = {"new_count": len(summaries), "carryover_count": len(carried)}
-    summaries += carried
+    # After a failed attempt today (Gemini error or unusable answer), every later attempt is exactly
+    # the 24 h report, so the carryover can cost the brief at most one attempt.
+    carried: list[str] = []
+    if kind == RECOMMENDATION and coordinator.report_failures(kind, top_n, _stamp(now)[:10]) == 0:
+        carried = await carryover(env, start, now)
 
-    if not summaries:
-        model = ""
+    text: str | None = None
+    model = ""
+    if new or carried:
+        try:
+            text, model = await _generate(env, coordinator, kind, top_n, new + carried, now, budget_ms, bool(carried))
+        except TokenBudgetError:
+            if not carried:
+                raise
+            # The carried lines do not fit the day's token budget: the 24 h report alone may.
+            _log(kind, top_n, "carryover_dropped")
+            carried = []
+            if new:
+                text, model = await _generate(env, coordinator, kind, top_n, new, now, budget_ms)
+    summaries = new + carried
+    counts = {"new_count": len(new), "carryover_count": len(carried)}
+
+    if text is None:
         if kind == SUMMARY:
             payload = _summary(EMPTY_WINDOW_SUMMARY, 0, ReportStatus.EMPTY_WINDOW, model, stamps)
         else:
             payload = _recommendation([], 0, ReportStatus.EMPTY_WINDOW, model, top_n, stamps | counts)
+    elif kind == SUMMARY:
+        # A long day is cut to fit rather than failed: the same prompt would fail again.
+        fitted = fit_summary(text)
+        if fitted is None:
+            _log(kind, top_n, "model_output_invalid")
+            raise ReportError(503, ApiError.UNAVAILABLE)
+        if fitted != text:
+            _log(kind, top_n, "summary_fitted")
+        payload = _summary(fitted, len(summaries), ReportStatus.OK, model, stamps)
     else:
-        text, model = await _generate(env, coordinator, kind, top_n, summaries, now, budget_ms, bool(carried))
-        if kind == SUMMARY:
-            # A long day is cut to fit rather than failed: the same prompt would fail again.
-            fitted = fit_summary(text)
-            if fitted is None:
-                _log(kind, top_n, "model_output_invalid")
-                raise ReportError(503, ApiError.UNAVAILABLE)
-            if fitted != text:
-                _log(kind, top_n, "summary_fitted")
-            payload = _summary(fitted, len(summaries), ReportStatus.OK, model, stamps)
-        else:
-            payload = _parsed_recommendation(text, len(summaries), model, top_n, stamps | counts)
+        payload = _parsed_recommendation(text, len(summaries), model, top_n, stamps | counts)
 
     await (
         env.DB.prepare(sql.STORE_REPORT.sql)
@@ -233,29 +256,37 @@ async def latest(db: Any) -> dict:
 
 
 async def carryover(env: Any, window_start: int, now: int) -> list[str]:
-    """Mail tasks from the REPORT_CARRYOVER_DAYS before the 24 h window that today's Todoist snapshot
-    still lists as open, newest first, at most CARRYOVER_MAX_ROWS, each as ``[N 天前] summary``.
+    """Mail tasks from the REPORT_CARRYOVER_DAYS before the 24 h window that the latest scheduled
+    Todoist snapshot still lists as open: at most CARRYOVER_MAX_ROWS, spread over the days they
+    arrived (core.gtd.pick_carried), each ``[N 天前] summary`` cut to CARRYOVER_LINE_BYTES, newest first.
 
-    Empty (and the recommendation exactly the 24 h report) without an ``ok`` snapshot finished in
-    the last 26 hours (runtime/gtd.py takes it at 13:00 UTC), with REPORT_CARRYOVER_DAYS = 0, or when
-    anything here fails: the carryover never costs the morning brief.
+    Empty (and the recommendation exactly the 24 h report) unless the snapshot of the latest
+    GTD_COLLECT_UTC time at or before now is ``ok`` (never an older day's list), with
+    REPORT_CARRYOVER_DAYS = 0 or GTD_COLLECT_UTC = off, or when anything here fails.
     """
     days = min(integer(env, "REPORT_CARRYOVER_DAYS", gtd.DEFAULT_CARRYOVER_DAYS), gtd.MAX_CARRYOVER_DAYS)
-    if days == 0:
+    offset = gtd.utc_offset(var(env, "GTD_COLLECT_UTC", gtd.DEFAULT_COLLECT_UTC))
+    if days <= 0 or offset is None:
         return []
     db = env.DB
     try:
-        fresh = now - gtd.SNAPSHOT_FRESH
-        snapshot = await db.prepare(sql.LATEST_OK_SNAPSHOT.sql).bind(gtd.day_of(fresh), gtd.day_of(now), fresh).first()
+        slot = gtd.last_collect(now, offset)
+        snapshot = await db.prepare(sql.SLOT_SNAPSHOT.sql).bind(gtd.day_of(slot), slot).first()
         if snapshot is None:
             print(json.dumps({"report": RECOMMENDATION, "carryover": "no_snapshot"}))
             return []
-        rows = await (
-            db.prepare(sql.CARRYOVER.sql)
-            .bind(now - days * DAY, window_start, snapshot["day"], gtd.CARRYOVER_MAX_ROWS)
+        candidates = await (
+            db.prepare(sql.CARRYOVER_CANDIDATES.sql)
+            .bind(now - days * DAY, window_start, snapshot["day"], gtd.MAX_SNAPSHOT_ROWS)
             .all()
         )
-        carried = [gtd.carried_line(row["summary"], now, int(row["created_at"])) for row in rows.results]
+        order = gtd.pick_carried([dict(row) for row in candidates.results], now)
+        if not order:
+            print(json.dumps({"report": RECOMMENDATION, "carryover": 0}))
+            return []
+        ids = order + [""] * (gtd.CARRYOVER_MAX_ROWS - len(order))
+        rows = await db.prepare(sql.CARRYOVER_SUMMARIES.sql).bind(gtd.CARRYOVER_READ_CHARS, *ids).all()
+        carried = gtd.carried_lines([dict(row) for row in rows.results], order, now)
     except Exception as exc:
         print(json.dumps({"report": RECOMMENDATION, "carryover": "failed", "error": type(exc).__name__}))
         return []
@@ -279,7 +310,7 @@ async def _generate(
     reserved = math.ceil(len((system + user).encode()) / 2) + OUTPUT_TOKEN_ALLOWANCE
     if not coordinator.reserve_tokens(reserved, now):
         _log(kind, top_n, "llm_budget_exhausted")
-        raise ReportError(503, ApiError.UNAVAILABLE)
+        raise TokenBudgetError()
     used = reserved  # if the call dies midway, keep the whole reservation counted
     started = now_ms()
     try:

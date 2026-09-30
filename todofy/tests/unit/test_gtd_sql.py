@@ -148,7 +148,7 @@ def summary(db: sqlite3.Connection, event_id: str, created_at: int, task_id: str
     )
 
 
-def test_carryover_is_older_open_mail_newest_first_and_capped(db):
+def test_carryover_candidates_are_older_open_mail_and_the_picks_are_read_by_id(db):
     write_page(db, TODAY, [task(f"t{index}") for index in range(40)])
     summary(db, "in-window", NOW - 3600, "t0", "今天的")
     summary(db, "edge", NOW - DAY, "t1", "正好 24 小时")  # the window is (now-24h, now]: carried
@@ -157,29 +157,52 @@ def test_carryover_is_older_open_mail_newest_first_and_capped(db):
     summary(db, "too-old", NOW - 14 * DAY, "t2", "太旧")
     for index in range(3, 40):
         summary(db, f"e{index}", NOW - DAY - 60 * index, f"t{index}", f"摘要 {index}")
-    rows = db.execute(report_sql.CARRYOVER.sql, (NOW - 14 * DAY, NOW - DAY, TODAY, gtd.CARRYOVER_MAX_ROWS)).fetchall()
-    assert [row["summary"] for row in rows] == ["正好 24 小时"] + [f"摘要 {index}" for index in range(3, 32)]
-    assert len(rows) == gtd.CARRYOVER_MAX_ROWS
-    count = db.execute(sql.MAIL_OPEN.sql, (NOW - 14 * DAY, NOW, TODAY)).fetchone()[0]
-    assert count == 1 + 1 + 37  # in the window, the edge, e3..e39; not closed, taskless or too old
+    summary(db, "long", NOW - 3 * DAY, "t3", "长" * 5000)
+    bind = (NOW - 14 * DAY, NOW - DAY, TODAY, gtd.MAX_SNAPSHOT_ROWS)
+    rows = [dict(row) for row in db.execute(report_sql.CARRYOVER_CANDIDATES.sql, bind)]
+    # IDs and times only, newest first, every open one (the cap of 30 is pick_carried's).
+    assert set(rows[0]) == {"event_id", "created_at"}
+    assert [row["event_id"] for row in rows] == ["edge"] + [f"e{index}" for index in range(3, 40)] + ["long"]
+    order = gtd.pick_carried(rows, NOW)
+    assert len(order) == gtd.CARRYOVER_MAX_ROWS and order[0] == "long"  # the oldest day first
+    ids = order + [""] * (gtd.CARRYOVER_MAX_ROWS - len(order))
+    picked = {
+        row["event_id"]: row["summary"]
+        for row in db.execute(report_sql.CARRYOVER_SUMMARIES.sql, (gtd.CARRYOVER_READ_CHARS, *ids))
+    }
+    assert set(picked) == set(order) and len(picked["long"]) == gtd.CARRYOVER_READ_CHARS
+    # Unused places are bound to '' and match nothing.
+    assert list(db.execute(report_sql.CARRYOVER_SUMMARIES.sql, (10, "edge", *[""] * 29))) != []
+    count = db.execute(sql.MAIL_OPEN.sql, (NOW - 14 * DAY, NOW - DAY, TODAY)).fetchone()[0]
+    assert count == 1 + 37 + 1  # the edge, e3..e39 and long; not today's, closed, taskless or too old
 
 
-def test_only_a_fresh_ok_snapshot_serves_the_carryover(db):
-    def latest(now: int) -> str | None:
-        fresh = now - gtd.SNAPSHOT_FRESH
-        found = db.execute(report_sql.LATEST_OK_SNAPSHOT.sql, (gtd.day_of(fresh), gtd.day_of(now), fresh)).fetchone()
+def test_only_the_latest_scheduled_snapshot_serves_the_carryover(db):
+    offset = 13 * 3600
+    slot_today = NOW - NOW % DAY + offset
+
+    def serving(now: int) -> str | None:
+        slot = gtd.last_collect(now, offset)
+        found = db.execute(report_sql.SLOT_SNAPSHOT.sql, (gtd.day_of(slot), slot)).fetchone()
         return None if found is None else found["day"]
 
-    yesterday = gtd.shift(TODAY, -1)
-    db.execute(sql.SNAPSHOT_START.sql, (yesterday, NOW - DAY))
-    db.execute(sql.SNAPSHOT_FINISH.sql, ("ok", 1, 0, 1, "", NOW - DAY, yesterday))
-    db.execute(sql.SNAPSHOT_START.sql, (TODAY, NOW))
-    assert latest(NOW) == yesterday  # today's is still collecting
-    db.execute(sql.SNAPSHOT_FINISH.sql, ("partial", 2000, 0, 10, "page_cap", NOW, TODAY))
-    assert latest(NOW) == yesterday
-    assert latest(NOW - DAY + gtd.SNAPSHOT_FRESH + 1) is None  # 26 h after it finished: stale
-    db.execute(sql.SNAPSHOT_FINISH.sql, ("ok", 2, 0, 1, "", NOW, TODAY))
-    assert latest(NOW) == TODAY
+    yesterday = gtd.shift(gtd.day_of(slot_today), -1)
+    db.execute(sql.SNAPSHOT_START.sql, (yesterday, slot_today - DAY))
+    db.execute(sql.SNAPSHOT_FINISH.sql, ("ok", 1, 0, 1, "", slot_today - DAY + 600, yesterday))
+    assert serving(slot_today - 1) == yesterday  # before today's slot: yesterday's is the latest
+    today = gtd.day_of(slot_today)
+    db.execute(sql.SNAPSHOT_START.sql, (today, slot_today))
+    # Today's is collecting, then failed, then partial: nothing, never yesterday's list.
+    assert serving(slot_today + 1800) is None
+    db.execute(sql.SNAPSHOT_FINISH.sql, ("failed", 0, 0, 0, "todoist_unavailable", slot_today, today))
+    assert serving(slot_today + 1800) is None
+    db.execute(sql.SNAPSHOT_FINISH.sql, ("partial", 2000, 0, 10, "page_cap", slot_today, today))
+    assert serving(slot_today + 1800) is None
+    db.execute(sql.SNAPSHOT_FINISH.sql, ("ok", 2, 0, 1, "", slot_today + 900, today))
+    assert serving(slot_today + 1800) == today and serving(slot_today + 10 * 3600) == today
+    # An ok snapshot of the same day taken before the slot (after the object's state was lost) does not.
+    db.execute(sql.SNAPSHOT_FINISH.sql, ("ok", 2, 0, 1, "", slot_today - 3600, today))
+    assert serving(slot_today + 1800) is None
 
 
 def test_daily_rows_upsert_and_read_back(db):

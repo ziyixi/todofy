@@ -711,7 +711,7 @@ export interface components {
             completed_source: "api" | "none";
             /** @description Tasks in the previous day's snapshot missing from this one (completions and deletions); only for `all`. */
             closed_1d: number | null;
-            /** @description Mail tasks of the last 14 days still open; only for `all`. */
+            /** @description Mail tasks that arrived 1 to 14 days before the snapshot (the morning brief's carryover pool, before its cap of 30) still open; only for `all`. */
             mail_open: number | null;
             /** @description False when the snapshot hit its page cap (over 2 */
             complete: boolean;

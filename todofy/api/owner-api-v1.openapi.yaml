@@ -1030,7 +1030,7 @@ components:
         mail_open:
           type: [integer, 'null']
           minimum: 0
-          description: Mail tasks of the last 14 days still open; only for `all`.
+          description: Mail tasks that arrived 1 to 14 days before the snapshot (the morning brief's carryover pool, before its cap of 30) still open; only for `all`.
         complete: {type: boolean, description: False when the snapshot hit its page cap (over 2,000 tasks).}
 
     GtdReview:

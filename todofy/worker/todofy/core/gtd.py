@@ -40,13 +40,19 @@ SNAPSHOT_TASK_DAYS = 14
 DAILY_DAYS = 120
 REVIEW_DAYS = 400
 
-# The morning brief's carryover (runtime/reports.py).
+# The morning brief's carryover (runtime/reports.py). Only the snapshot of the latest scheduled
+# collection (GTD_COLLECT_UTC at or before now) serves it: the 13:30 precompute, the newsletter's
+# on-demand call and an owner recompute later the same day use today's 13:00 snapshot, and when that
+# one failed, is partial or has not finished, nothing is carried (never yesterday's list).
 CARRYOVER_MAX_ROWS = 30
 DEFAULT_CARRYOVER_DAYS = 14
 MAX_CARRYOVER_DAYS = 14  # snapshot rows are kept 14 days; older mail would never match anyway
-# A snapshot serves the brief while it is at most this old: the 13:30 precompute, the newsletter's
-# on-demand call and an owner recompute later the same day all use the 13:00 snapshot.
-SNAPSHOT_FRESH = 26 * HOUR
+# Each carried summary is cut to this many UTF-8 bytes (the SQL reads at most CARRYOVER_READ_CHARS
+# characters of it), and the carried block stops at CARRYOVER_MAX_BYTES: at most about 8K tokens more
+# than the 24 h report, whatever the stored summaries' size (up to 64 KiB each).
+CARRYOVER_READ_CHARS = 1024
+CARRYOVER_LINE_BYTES = 1024
+CARRYOVER_MAX_BYTES = 16 * 1024
 
 # ops-v1: gtd_snapshot_stale (review_overdue's threshold is core/ops.py REVIEW_OVERDUE_DAYS).
 SNAPSHOT_STALE = 48 * HOUR
@@ -119,6 +125,12 @@ def next_collect(now: int, offset: int) -> int:
     """Today's collection time if it is still ahead, else tomorrow's."""
     due = now - now % DAY + offset
     return due if now < due else due + DAY
+
+
+def last_collect(now: int, offset: int) -> int:
+    """The latest scheduled collection time at or before ``now`` (today's, or yesterday's before it)."""
+    due = now - now % DAY + offset
+    return due if now >= due else due - DAY
 
 
 def iso_week(timestamp: int) -> str:
@@ -486,8 +498,18 @@ def status_counters(daily_all: Daily | None, daily_inbox: Daily | None) -> dict[
     return counters
 
 
+def review_watched(facts: GtdFacts) -> bool:
+    """Whether review_age_days and review_overdue mean anything: a review's completion is only seen by
+    the daily snapshot's completed list, so with collection off or paused they would go stale while
+    the owner does every review."""
+    return facts.review_enabled and facts.collect_enabled
+
+
 def review_age_days(facts: GtdFacts, now: int) -> int | None:
-    """Days since the last completed review, or since the first review task when none was completed."""
+    """Days since the last completed review, or since the first review task when none was completed;
+    None while the review is not watched (review_watched)."""
+    if not review_watched(facts):
+        return None
     since = facts.last_review_at if facts.last_review_at is not None else facts.first_review_at
     return None if since is None else max((now - since) // DAY, 0)
 
@@ -507,9 +529,55 @@ def snapshot_age(facts: GtdFacts, now: int) -> int | None:
 # ---- the morning brief's carryover -----------------------------------------------------------
 
 
+def carried_days(now: int, created_at: int) -> int:
+    """How many days ago a carried mail arrived (N >= 1: it is older than the 24 h window)."""
+    return max((now - created_at) // DAY, 1)
+
+
 def carried_line(summary: str, now: int, created_at: int) -> str:
-    """A carried summary for the recommendation input: ``[N 天前] summary`` (N >= 1)."""
-    return f"[{max((now - created_at) // DAY, 1)} 天前] {summary}"
+    """A carried summary for the recommendation input: ``[N 天前] summary`` (N >= 1), the summary cut
+    to CARRYOVER_LINE_BYTES on a UTF-8 boundary."""
+    text = summary.encode()[:CARRYOVER_LINE_BYTES].decode(errors="ignore")
+    return f"[{carried_days(now, created_at)} 天前] {text}"
+
+
+def pick_carried(candidates: Sequence[Mapping[str, Any]], now: int, cap: int = CARRYOVER_MAX_ROWS) -> list[str]:
+    """Which still-open mail tasks the brief carries: ``candidates`` are ``{event_id, created_at}`` rows
+    (any order); returns at most ``cap`` event IDs, spread over the days they arrived.
+
+    Round-robin over the "N 天前" days, oldest day first and the newest mail of a day first, so an
+    ordinary day's 30+ open tasks cannot push out the ones open for a week or more (the most
+    forgotten ones, the reason for the carryover)."""
+    by_day: dict[int, list[tuple[int, str]]] = {}
+    for row in candidates:
+        created_at = int(row["created_at"])
+        by_day.setdefault(carried_days(now, created_at), []).append((created_at, str(row["event_id"])))
+    queues = [sorted(by_day[day], reverse=True) for day in sorted(by_day, reverse=True)]
+    picked: list[str] = []
+    while len(picked) < cap and any(queues):
+        for queue in queues:
+            if queue and len(picked) < cap:
+                picked.append(queue.pop(0)[1])
+    return picked
+
+
+def carried_lines(rows: Sequence[Mapping[str, Any]], order: Sequence[str], now: int) -> list[str]:
+    """The carried input lines for the picked rows (``{event_id, summary, created_at}``): taken in
+    ``order`` (pick_carried's priority) until CARRYOVER_MAX_BYTES, then newest first."""
+    by_id = {str(row["event_id"]): row for row in rows}
+    kept: list[tuple[int, str]] = []
+    total = 0
+    for event_id in order:
+        row = by_id.get(event_id)
+        if row is None:
+            continue  # expired between the two reads
+        line = carried_line(str(row["summary"]), now, int(row["created_at"]))
+        size = len(line.encode()) + 1
+        if total + size > CARRYOVER_MAX_BYTES:
+            break
+        total += size
+        kept.append((int(row["created_at"]), line))
+    return [line for _, line in sorted(kept, key=lambda item: item[0], reverse=True)]
 
 
 # ---- the Sunday review ---------------------------------------------------------------------
@@ -534,6 +602,13 @@ class ReviewFacts:
     last_review_at: int | None
     public_host: str
     dashboard_url: str | None
+    # Up to REVIEW_OLDEST_LINKS IDs of the snapshot day's oldest inbox tasks, oldest first (links only).
+    oldest_inbox: tuple[str, ...] = ()
+
+
+REVIEW_OLDEST_LINKS = 3
+TASK_URL = "https://app.todoist.com/app/task/"
+TASK_ID = re.compile(r"[A-Za-z0-9_-]{1,64}", re.ASCII)
 
 
 def _trend(now: int, before: int | None) -> str:
@@ -547,32 +622,62 @@ def _stamp(seconds: int) -> str:
     return datetime.fromtimestamp(seconds, UTC).strftime("%Y-%m-%d %H:%M UTC")
 
 
+def _value(daily: Daily | None, name: str) -> int | None:
+    return None if daily is None else getattr(daily, name)
+
+
+def _focus(every: Daily, inbox: Daily | None, every_before: Daily | None, inbox_before: Daily | None) -> list[str]:
+    """At most two lines on what the numbers ask for this week (empty when nothing stands out)."""
+    lines = []
+    if inbox is not None and inbox.age_31_plus:
+        lines.append(f"收件箱里超过 30 天的 {inbox.age_31_plus} 项：逐个决定 做 / 委派 / 删除")
+    grown = None if every_before is None else every.overdue - every_before.overdue
+    if grown is not None and grown > 0:
+        lines.append(f"逾期比上周多 {grown} 项：重排日期，或删掉不再做的")
+    elif every.overdue and not lines:
+        lines.append(f"逾期 {every.overdue} 项：重排日期，或删掉不再做的")
+    before_open = _value(inbox_before, "open")
+    if inbox is not None and before_open is not None and inbox.open > before_open and len(lines) < 2:
+        lines.append(f"收件箱比上周多 {inbox.open - before_open} 项：先清空到 0")
+    return lines[:2]
+
+
 def review_body(facts: ReviewFacts, now: int) -> str:
-    """The review task's description: counts, trends and links, never a task title."""
+    """The review task's description: counts, trends against a week before, what stands out, and
+    links (the oldest inbox tasks by ID only), never a task title."""
     lines: list[str] = []
+    focus: list[str] = []
     if facts.all is None or facts.snapshot_day is None:
         lines.append("快照：本周没有可用的 Todoist 快照（只含计数，稍后可在 Todofy 查看）。")
     else:
         partial = "" if facts.all.complete else "；任务过多，快照不完整"
         lines.append(f"快照 {facts.snapshot_day}（Todoist 元数据，只含计数{partial}）")
-        inbox = facts.inbox
+        inbox, inbox_before = facts.inbox, facts.inbox_week_ago
         if inbox is not None:
-            before = None if facts.inbox_week_ago is None else facts.inbox_week_ago.open
+            oldest = _trend(inbox.oldest_days, _value(inbox_before, "oldest_days"))
             lines.append(
-                f"收件箱：开放 {inbox.open}{_trend(inbox.open, before)}；最老 {inbox.oldest_days} 天；"
+                f"收件箱：开放 {inbox.open}{_trend(inbox.open, _value(inbox_before, 'open'))}；"
+                f"最老 {inbox.oldest_days} 天{oldest}；"
                 f"0–7 天 {inbox.age_0_7} · 8–14 天 {inbox.age_8_14} · 15–30 天 {inbox.age_15_30}"
                 f" · >30 天 {inbox.age_31_plus}"
             )
-        every = facts.all
-        before = None if facts.all_week_ago is None else facts.all_week_ago.open
+        every, before = facts.all, facts.all_week_ago
         lines.append(
-            f"全部项目：开放 {every.open}{_trend(every.open, before)} · 逾期 {every.overdue} · 无日期 {every.undated}"
+            f"全部项目：开放 {every.open}{_trend(every.open, _value(before, 'open'))}"
+            f" · 逾期 {every.overdue}{_trend(every.overdue, _value(before, 'overdue'))}"
+            f" · 无日期 {every.undated}{_trend(every.undated, _value(before, 'undated'))}"
         )
         created = "不可用" if every.created_7d is None else str(every.created_7d)
-        completed = "不可用" if every.completed_7d is None else str(every.completed_7d)
+        completed = "不可用"
+        if every.completed_7d is not None:
+            completed = f"{every.completed_7d}{_trend(every.completed_7d, _value(before, 'completed_7d'))}"
         lines.append(f"近 7 天：新建 {created} · 完成 {completed}")
         if every.mail_open is not None:
-            lines.append(f"邮件任务：14 天内仍开着 {every.mail_open}")
+            lines.append(f"邮件任务：1–14 天前收到、仍开着 {every.mail_open}（晨报最多带入 {CARRYOVER_MAX_ROWS} 条）")
+        focus = _focus(every, inbox, before, inbox_before)
+        oldest_links = [f"{TASK_URL}{task_id}" for task_id in facts.oldest_inbox if TASK_ID.fullmatch(task_id)]
+        if oldest_links:
+            lines.append("收件箱最老的任务：" + "  ".join(oldest_links[:REVIEW_OLDEST_LINKS]))
     todofy = "不可用" if facts.attention_events is None else str(facts.attention_events)
     ops_text = "无"
     if facts.ops is not None and facts.ops.items:
@@ -589,6 +694,7 @@ def review_body(facts: ReviewFacts, now: int) -> str:
     else:
         ago = max((now - facts.last_review_at) // DAY, 0)
         lines.append(f"上次回顾：{day_of(facts.last_review_at)} 完成（{ago} 天前）")
+    lines.extend(f"本周重点：{line}" for line in focus)
     lines.append("步骤：清空收件箱 → 看逾期与无日期 → 看项目与等待 → 想想下周")
     links = []
     if facts.dashboard_url:

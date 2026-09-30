@@ -314,9 +314,10 @@ async def _completed_page(env: Any, coordinator: Any, state: State, now: int) ->
             code = GtdCode.MALFORMED_PAGE
     coordinator.record_step(_point(code, started), now)
     if code:
-        if code == GtdCode.TODOIST_AUTH_BLOCKED:
-            coordinator.block_todoist(now)
-        # Completions are then unknown (completed_source 'none'); the snapshot itself still counts.
+        # Completions are then unknown (completed_source 'none'); the snapshot itself still counts. Even
+        # a 401/403 here never blocks Todoist: this optional read may be refused (plan, workspace or
+        # permission) while the token is valid, and a block would stop mail-task creation for 6 hours
+        # every day. A revoked token is caught by the task list and by mail-task creation.
         state.tally, state.phase, state.cursor = None, AGGREGATE, ""
         _log(collect="completed_failed", day=state.day, code=code)
         return
@@ -341,7 +342,8 @@ async def _aggregate(env: Any, coordinator: Any, state: State, now: int, offset:
             db.prepare(sql.SNAPSHOT_ROWS.sql).bind(day, rules.MAX_SNAPSHOT_ROWS),
             db.prepare(sql.SNAPSHOT_DAY.sql).bind(yesterday),
             db.prepare(sql.CLOSED_SINCE.sql).bind(yesterday, day),
-            db.prepare(sql.MAIL_OPEN.sql).bind(now - rules.MAX_CARRYOVER_DAYS * DAY, now, day),
+            # The brief's carryover pool, uncapped: mail of the 14 days before the last 24 h.
+            db.prepare(sql.MAIL_OPEN.sql).bind(now - rules.MAX_CARRYOVER_DAYS * DAY, now - DAY, day),
             db.prepare(sql.REVIEW_HISTORY.sql).bind(first_week, HISTORY_WEEKS + 1),
         ]
     )
@@ -528,6 +530,13 @@ async def _review_body(env: Any, coordinator: Any, state: State, week: str, now:
     )
     _refresh_reviews(state, [dict(row) for row in history.results], {})
     picked = rules.pick_days([dict(row) for row in days.results], today)
+    oldest: tuple[str, ...] = ()
+    inbox_project = var(env, "TODOIST_DEFAULT_PROJECT_ID")
+    if picked["day"] is not None and inbox_project:
+        found = await (
+            db.prepare(sql.OLDEST_TASKS.sql).bind(picked["day"], inbox_project, rules.REVIEW_OLDEST_LINKS).all()
+        )
+        oldest = tuple(str(row["task_id"]) for row in found.results)
     report = coordinator.latest_ops_report()
     digest = ops_rules.digest(report, now)
     facts = rules.ReviewFacts(
@@ -542,6 +551,7 @@ async def _review_body(env: Any, coordinator: Any, state: State, week: str, now:
         last_review_at=state.last_review_at,
         public_host=var(env, "TODOFY_PUBLIC_HOST"),
         dashboard_url=None if report is None else report.dashboard_url,
+        oldest_inbox=oldest,
     )
     return rules.review_body(facts, now)
 

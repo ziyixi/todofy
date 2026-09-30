@@ -244,6 +244,12 @@ def test_facts_for_the_two_signals():
     assert gtd.snapshot_age(ok, NOW + 47 * 3600) is None and gtd.snapshot_age(ok, NOW + 48 * 3600) == 49 * 3600
     assert gtd.snapshot_age(replace(tried, collect_enabled=False), NOW + DAY) is None
     assert gtd.review_age_days(facts, NOW) is None
+    # A review is only seen done by the daily snapshot: with collection off (or paused), or the review
+    # switched off, neither review_age_days nor review_overdue is reported.
+    watched = replace(facts, first_review_at=NOW - 30 * DAY)
+    assert gtd.review_watched(watched) and gtd.review_age_days(watched, NOW) == 30
+    for off in (replace(watched, collect_enabled=False), replace(watched, review_enabled=False)):
+        assert not gtd.review_watched(off) and gtd.review_age_days(off, NOW) is None
     assert gtd.review_age_days(replace(facts, first_review_at=NOW - 3 * DAY), NOW) == 3
     assert gtd.review_age_days(replace(facts, first_review_at=NOW - 30 * DAY, last_review_at=NOW - DAY), NOW) == 1
 
@@ -321,6 +327,57 @@ def test_carried_lines_say_how_many_days_ago():
     assert gtd.carried_line("缴费", NOW, NOW - DAY - 5) == "[1 天前] 缴费"
     assert gtd.carried_line("缴费", NOW, NOW - 13 * DAY) == "[13 天前] 缴费"
     assert gtd.carried_line("缴费", NOW, NOW - 3600) == "[1 天前] 缴费"  # never "0 days"
+    # A long stored summary (up to 64 KiB) is cut on a UTF-8 boundary.
+    long = gtd.carried_line("缴" * 2000, NOW, NOW - 2 * DAY)
+    assert long.startswith("[2 天前] 缴") and len(long.encode()) <= gtd.CARRYOVER_LINE_BYTES + len("[2 天前] ".encode())
+    long.encode().decode()
+
+
+def test_the_last_collect_is_today_s_slot_once_it_passed_else_yesterday_s():
+    midnight = NOW - NOW % DAY
+    offset = 13 * 3600
+    assert gtd.last_collect(midnight + offset, offset) == midnight + offset
+    assert gtd.last_collect(midnight + offset + 1800, offset) == midnight + offset
+    assert gtd.last_collect(midnight + offset - 1, offset) == midnight + offset - DAY
+
+
+def candidates(now: int, per_day: dict[int, int]) -> list[dict[str, object]]:
+    """``per_day`` maps "N 天前" to how many open mail tasks arrived that day."""
+    rows = []
+    for days, count in per_day.items():
+        for index in range(count):
+            rows.append({"event_id": f"d{days}-{index}", "created_at": now - days * DAY - 60 * (index + 1)})
+    return rows
+
+
+def test_the_carryover_is_spread_over_the_days_oldest_day_first():
+    # A normal week: 40 open tasks from yesterday, 5 from 2 days ago, 2 each from 9 and 13 days ago.
+    picked = gtd.pick_carried(candidates(NOW, {1: 40, 2: 5, 9: 2, 13: 2}), NOW)
+    assert len(picked) == gtd.CARRYOVER_MAX_ROWS
+    days = {day: sum(event.startswith(f"d{day}-") for event in picked) for day in (1, 2, 9, 13)}
+    # Every older task is carried; yesterday's fill the rest, newest first.
+    assert days == {1: 21, 2: 5, 9: 2, 13: 2}
+    assert picked[:4] == ["d13-0", "d9-0", "d2-0", "d1-0"]
+    assert [event for event in picked if event.startswith("d1-")] == [f"d1-{index}" for index in range(21)]
+    # More days than slots in a round: the oldest days go first.
+    many = gtd.pick_carried(candidates(NOW, {day: 5 for day in range(1, 14)}), NOW, cap=15)
+    assert sorted({int(event[1:].split("-")[0]) for event in many[:13]}) == list(range(1, 14))
+    assert many[13:] == ["d13-1", "d12-1"]
+    assert gtd.pick_carried([], NOW) == []
+
+
+def test_carried_lines_keep_the_pick_order_until_the_byte_cap_then_newest_first():
+    rows = [
+        {"event_id": "old", "summary": "旧", "created_at": NOW - 9 * DAY},
+        {"event_id": "new", "summary": "新", "created_at": NOW - DAY - 60},
+    ]
+    assert gtd.carried_lines(rows, ["old", "new", "gone"], NOW) == ["[1 天前] 新", "[9 天前] 旧"]
+    big = [{"event_id": f"e{i}", "summary": "长" * 400, "created_at": NOW - (2 + i) * DAY} for i in range(30)]
+    lines = gtd.carried_lines(big, [f"e{i}" for i in range(30)], NOW)
+    assert sum(len(line.encode()) + 1 for line in lines) <= gtd.CARRYOVER_MAX_BYTES
+    # The cap keeps the first picks in pick order (e0, e1, ...), shown newest first.
+    assert 0 < len(lines) < 30
+    assert lines[0].startswith("[2 天前]") and lines[-1].startswith(f"[{1 + len(lines)} 天前]")
 
 
 def daily(**fields: object) -> gtd.Daily:
@@ -350,15 +407,36 @@ def test_the_review_body_is_counts_trends_and_links():
     body = gtd.review_body(facts, NOW + 4 * 3600)
     assert body == (
         "快照 2026-10-04（Todoist 元数据，只含计数）\n"
-        "收件箱：开放 23（上周 31，-8）；最老 41 天；0–7 天 12 · 8–14 天 5 · 15–30 天 4 · >30 天 2\n"
-        "全部项目：开放 57（上周 57，持平） · 逾期 3 · 无日期 40\n"
-        "近 7 天：新建 35 · 完成 42\n"
-        "邮件任务：14 天内仍开着 9\n"
+        "收件箱：开放 23（上周 31，-8）；最老 41 天（上周 41，持平）；"
+        "0–7 天 12 · 8–14 天 5 · 15–30 天 4 · >30 天 2\n"
+        "全部项目：开放 57（上周 57，持平） · 逾期 3（上周 3，持平） · 无日期 40（上周 40，持平）\n"
+        "近 7 天：新建 35 · 完成 42（上周 42，持平）\n"
+        "邮件任务：1–14 天前收到、仍开着 9（晨报最多带入 30 条）\n"
         "Todofy：需处理事件 0；运维：（仪表盘报告 2026-10-04 00:00 UTC）mail-hero parse_failed count=1\n"
         "上次回顾：2026-09-27 完成（7 天前）\n"
+        "本周重点：收件箱里超过 30 天的 2 项：逐个决定 做 / 委派 / 删除\n"
         "步骤：清空收件箱 → 看逾期与无日期 → 看项目与等待 → 想想下周\n"
         "面板：https://home.ziyixi.science/   Todofy GTD：https://todofy.example/gtd\n"
     )
+    # Week-over-week changes, what stands out, and title-free links to the oldest inbox tasks.
+    moved = replace(
+        facts,
+        all=daily(open=60, overdue=7, undated=38, completed_7d=30),
+        inbox=daily(age_31_plus=0, oldest_days=20, open=35),
+        all_week_ago=daily(open=57, overdue=3, undated=40, completed_7d=42),
+        inbox_week_ago=daily(open=31, oldest_days=41),
+        oldest_inbox=("6XR4GqQQCW6Gv9h4", "bad id/../x", "abc_123-Z"),
+    )
+    text = gtd.review_body(moved, NOW + 4 * 3600)
+    assert "最老 20 天（上周 41，-21）" in text
+    assert "开放 60（上周 57，+3） · 逾期 7（上周 3，+4） · 无日期 38（上周 40，-2）" in text
+    assert "完成 30（上周 42，-12）" in text
+    assert "本周重点：逾期比上周多 4 项：重排日期，或删掉不再做的\n本周重点：收件箱比上周多 4 项：先清空到 0\n" in text
+    assert (
+        "收件箱最老的任务：https://app.todoist.com/app/task/6XR4GqQQCW6Gv9h4"
+        "  https://app.todoist.com/app/task/abc_123-Z\n"
+    ) in text
+    assert "bad id" not in text
     assert gtd.review_title("2026-W40") == "每周回顾 2026-W40"
 
 

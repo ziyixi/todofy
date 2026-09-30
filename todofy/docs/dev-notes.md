@@ -506,11 +506,16 @@ async def count_auth_failure(db, now: int) -> Result  # a failed Basic credentia
 async def latest(db) -> dict                          # ReportsLatest for api.py
 ```
 The recommendation's input is the 24 h window plus the **carryover** (`reports.carryover`): mail tasks of
-the `REPORT_CARRYOVER_DAYS` (≤ 14) before the window whose `task_id` the newest `ok` snapshot finished in the
-last 26 h still lists, newest first, at most 30, each as `[N 天前] summary`, after the new rows; the prompt
-is then `prompts.recommend_prompt(top_n, carryover=True)`. Without such a snapshot (none, `failed`,
-`partial`, `collecting`, stale), with `REPORT_CARRYOVER_DAYS = 0` or on any error in that read, the input,
-prompt and payload are exactly the 24 h report. The payload adds `new_count` and `carryover_count`
+the `REPORT_CARRYOVER_DAYS` (≤ 14) before the window whose `task_id` the `ok` snapshot of the latest
+scheduled collection (`gtd.last_collect`: today's `GTD_COLLECT_UTC` once passed, else yesterday's; never an
+older list) still lists, at most 30 picked round-robin over the days they arrived (`gtd.pick_carried`,
+oldest day first), each `[N 天前] summary` cut to 1 KiB, the block ≤ 16 KiB, newest first after the new
+rows; the prompt is then `prompts.recommend_prompt(top_n, carryover=True)`, which asks for a "（N 天前）"
+reason prefix on carried picks. Without that snapshot (none, `failed`, `partial`, `collecting`, taken
+before the slot), with `REPORT_CARRYOVER_DAYS = 0`, `GTD_COLLECT_UTC = off`, on any error in those reads,
+or once a precompute attempt of the recommendation failed that UTC day, the input, prompt and payload are
+exactly the 24 h report; a token reservation refused with the carried lines is retried at once without
+them. The payload adds `new_count` and `carryover_count`
 (`task_count` is their sum; `empty_window` only when both are 0). The summary report never carries.
 Precompute only `top_n = REPORT_DEFAULT_TOP` (default 10, what the newsletter asks for); other `top`
 values are computed on demand under the hourly cap (429 with `Retry-After` until the next UTC hour). A
