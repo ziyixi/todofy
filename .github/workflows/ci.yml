@@ -824,11 +824,12 @@ jobs:
         if: always()
         run: rm -f worker/wrangler.production.ci.json worker/wrangler.production.secrets.json
 
-  # The site release: the same reusable workflow the Notion buttons and the relay's detector dispatch
-  # (.github/workflows/website-release.yml, docs in website/docs/release.md). Its job holds the one
-  # concurrency group "website-production" (shared with every dispatched release and status refresh) and the
-  # production environment; this caller has neither, or it would wait for itself. A push releases only when
-  # the website's code identity or the Notion content changed; an unchanged identity skips the deploy.
+  # The site release: dispatches website-release.yml (docs in website/docs/release.md), the same workflow the
+  # Notion buttons and the relay's detector dispatch, and returns at once. The release's job holds the one
+  # concurrency group "website-production" and the production environment; this CI run neither waits for a
+  # queued release nor ties other apps' deploys to it, and the relay sees the release like any other run.
+  # The release builds the newest main commit whose push run passed the CI gate (this one, once it is green).
+  # A push releases only when the website's code identity or the Notion content changed.
   website-deploy:
     name: Website deploy
     needs: [changes, website-checks, gate]
@@ -841,17 +842,20 @@ jobs:
       && github.ref == 'refs/heads/main'
       && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
       && needs.changes.outputs.website_deploy == 'true' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
     permissions:
-      contents: read
-      deployments: write
-    uses: ./.github/workflows/website-release.yml
-    with:
-      operation: release
-      confirmation: release:www.ziyixi.science
-      force_build: false
-      allow_empty: false
-      trigger: push
-    secrets: inherit
+      # workflow_dispatch of website-release.yml (a dispatch by GITHUB_TOKEN does start a run).
+      actions: write
+    steps:
+      - name: Dispatch the website release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh workflow run website-release.yml --repo "$GITHUB_REPOSITORY" --ref main \
+            -f operation=release -f confirmation=release:www.ziyixi.science \
+            -f force_build=false -f allow_empty=false -f trigger=push
+          echo "::notice::Dispatched Website release (push); see Actions → Website release."
 
   # The Notion relay Worker ziyixi-notion-publish (website/relay): buttons and the change detector's cron.
   # Its secrets are Worker secrets (website/relay/README.md) and survive this deploy.

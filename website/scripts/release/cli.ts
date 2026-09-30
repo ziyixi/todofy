@@ -15,6 +15,7 @@ import { readContentBundle } from "../../src/lib/content/reader";
 import { ContentRegistrySchema } from "../../src/lib/content/schema";
 import { CloudflareApi, WranglerCli } from "./cloudflare";
 import { GitHubClient } from "./github";
+import { optionsFromEnvironment, passedGate } from "./green-commit";
 import {
   GateStateSchema,
   ReleasePayloadSchema,
@@ -53,8 +54,6 @@ const files = {
   contract: path.join(stateDirectory, "verification-contract.json"),
   previousBuildInfo: path.join(stateDirectory, "previous-build-info.json"),
 };
-/** The monorepo directory whose newest commit is the website's code identity. */
-const WEBSITE_DIRECTORY = "website";
 
 function env(name: string): string {
   const value = process.env[name];
@@ -122,7 +121,8 @@ async function deps(): Promise<ReleaseDeps> {
     config,
     github: new GitHubClient({
       apiUrl: process.env.GITHUB_API_URL ?? "https://api.github.com",
-      token: env("GITHUB_TOKEN"),
+      // Only the steps that need it get GITHUB_TOKEN; the client refuses to call GitHub without it.
+      token: process.env.GITHUB_TOKEN ?? "",
       repository: env("GITHUB_REPOSITORY"),
     }),
     worker: new CloudflareApi({ config, token: cloudflareToken }),
@@ -169,8 +169,18 @@ async function verifyRecorded(payload: {
 }
 
 const commands: Record<string, () => Promise<void>> = {
+  /** The operation, and the checked-out commit is one whose push run passed the CI gate. */
   async context() {
-    await output("operation", operation());
+    const op = operation();
+    const { stdout } = await execFileAsync("git", ["rev-parse", "HEAD"], { cwd: root });
+    const sha = stdout.trim();
+    if (!(await passedGate(optionsFromEnvironment(), sha))) {
+      throw new ReleaseError(
+        `The checked-out commit ${sha.slice(0, 12)} has no passed CI gate on main; refusing to release it.`,
+      );
+    }
+    await output("operation", op);
+    await output("commit", sha);
   },
 
   /** The newest commit that touched website/: the code part of the release identity. */
@@ -331,7 +341,7 @@ const commands: Record<string, () => Promise<void>> = {
       canonicalOrigin: siteUrl(),
     });
     await writeJson(files.payload, payload);
-    // The record's ref is the monorepo commit this run checked out (main inside the release lock).
+    // The record's ref is the monorepo commit this run built: the newest CI-green main commit.
     const { stdout } = await execFileAsync("git", ["rev-parse", "HEAD"], { cwd: root });
     const id = await record(d, payload, { ref: stdout.trim(), logUrl: workflowUrl() });
     await output("deployment_id", String(id));
@@ -342,7 +352,6 @@ const commands: Record<string, () => Promise<void>> = {
     await deploy(d, {
       upload: await readJson<UploadResult>(files.upload),
       identity: await expectedIdentity(),
-      websiteDirectory: WEBSITE_DIRECTORY,
     });
   },
 

@@ -13,7 +13,7 @@ Notion Blog data source ──(read: sync)────────────�
    │                                                   │ workflow_dispatch, fixed inputs
    │                                                   ▼
    │                     .github/workflows/website-release.yml (concurrency group website-production)
-   │                        ◄── also called by ci.yml "Website deploy" after a website push on main
+   │                        ◄── also dispatched by ci.yml "Website deploy" after a website push on main
    │                        Notion sync → next build (export) → wrangler dev verify → versions upload
    │                        → versions deploy → triggers deploy → live verify → rollback on failure
    └──(write: feedback)──── Notion status properties + database description

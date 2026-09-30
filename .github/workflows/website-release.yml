@@ -2,10 +2,13 @@
 # - dispatched by the Notion relay (website/relay): the 发布网站 button (trigger button), the change
 #   detector (cron, reconcile) and the 刷新状态 button (operation status);
 # - dispatched by hand (manual): bootstrap once, recovery after a blocked release, force_build;
-# - called by "Website deploy" in ci.yml after a website push on main passed the CI gate (push).
-# Every release syncs Notion, builds the static export, verifies it under wrangler dev, uploads a Worker
-# version, deploys it only if production still serves the recorded version, verifies the live hostname and
-# rolls back on failure, then writes the Notion feedback. An unchanged identity skips the deploy.
+# - dispatched by "Website deploy" in ci.yml after a website push on main passed the CI gate (push).
+# Every release is a run of this workflow, so the relay sees all of them (running, window, failures).
+# Every run builds the newest main commit whose push run passed the CI gate (green-commit.ts), never a
+# newer red, running or [skip ci] one. A release syncs Notion, builds the static export, verifies it under
+# wrangler dev, uploads a Worker version, deploys it only if production still serves the recorded version,
+# verifies the live hostname and rolls back on failure, then writes the Notion feedback. An unchanged
+# identity skips the deploy.
 name: Website release
 run-name: Website ${{ inputs.operation }} (${{ inputs.trigger }})
 
@@ -37,28 +40,15 @@ on:
         required: true
         type: choice
         default: manual
-        options: [manual, button, cron, reconcile]
-  workflow_call:
-    inputs:
-      operation:
-        type: string
-        required: true
-      confirmation:
-        type: string
-        required: true
-      force_build:
-        type: boolean
-        required: true
-      allow_empty:
-        type: boolean
-        required: true
-      trigger:
-        type: string
-        required: true
+        options: [manual, button, cron, reconcile, push]
 
+# GITHUB_TOKEN: read the CI gate results (checks, actions) and write the release records
+# (deployments). Only the steps that need it get it (step env), never install, build or test steps.
 permissions:
   contents: read
   deployments: write
+  checks: read
+  actions: read
 
 env:
   CI: 'true'
@@ -93,23 +83,31 @@ jobs:
       RELEASE_CONFIRMATION: ${{ inputs.confirmation }}
       ALLOW_EMPTY: ${{ inputs.allow_empty }}
       FORCE_BUILD: ${{ inputs.force_build }}
-      GITHUB_TOKEN: ${{ github.token }}
     steps:
-      # The newest main inside the lock, whatever commit triggered this run.
+      # main inside the lock, whatever commit triggered this run; then the newest commit of it that
+      # passed the CI gate. The code identity is the newest commit at or before it that touched website/.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: refs/heads/main
-          # The code identity is the newest commit that touched website/.
           fetch-depth: 0
           persist-credentials: false
       - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
         with:
           node-version-file: website/.nvmrc
+      # Plain node, no install: nothing from a commit CI has not passed is installed or run after this.
+      - name: Check out the newest main commit that passed the CI gate
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          sha="$(node --disable-warning=ExperimentalWarning scripts/release/green-commit.ts)"
+          git -c advice.detachedHead=false checkout --detach "$sha"
       - name: Install the pinned pnpm and locked dependencies
         run: |
           corepack enable
           pnpm install --frozen-lockfile
-      - name: Assert the trusted release context
+      - name: Assert the trusted release context and the pinned commit
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
         run: pnpm release context
       - name: Lock the website code identity
         id: code
@@ -117,6 +115,7 @@ jobs:
       - name: Enforce the GitHub Deployment state gate
         id: gate
         env:
+          GITHUB_TOKEN: ${{ github.token }}
           WEBSITE_BOOTSTRAP_APPROVAL: ${{ vars.WEBSITE_BOOTSTRAP_APPROVAL }}
         run: pnpm release gate
       - name: Install the pinned browser
@@ -125,6 +124,7 @@ jobs:
       - name: Reconcile a blocked release with what production serves
         if: steps.gate.outputs.bootstrap_required != 'true' && inputs.operation == 'recovery'
         env:
+          GITHUB_TOKEN: ${{ github.token }}
           CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
         run: pnpm release recover
       - name: Verify production still serves the recorded baseline
@@ -166,6 +166,8 @@ jobs:
       - name: Record the release in progress
         id: record
         if: steps.decision.outputs.deploy_required == 'true'
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
         run: pnpm release record
       - name: Deploy the version and the wrangler.toml hostnames
         id: deploy
@@ -182,6 +184,7 @@ jobs:
       - name: Mark the release successful
         if: steps.deploy.outcome == 'success' && steps.live.outcome == 'success'
         env:
+          GITHUB_TOKEN: ${{ github.token }}
           DEPLOYMENT_ID: ${{ steps.record.outputs.deployment_id }}
         run: pnpm release mark-success
       # A feedback outage never rolls back a verified website. Without a hostname there is nothing live
@@ -222,6 +225,7 @@ jobs:
           always() && steps.record.outputs.deployment_id != '' &&
           (steps.deploy.outcome != 'success' || steps.live.outcome != 'success')
         env:
+          GITHUB_TOKEN: ${{ github.token }}
           DEPLOYMENT_ID: ${{ steps.record.outputs.deployment_id }}
           ROLLED_BACK: ${{ steps.rollback.outcome == 'success' }}
         run: pnpm release mark-failure
@@ -259,10 +263,18 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: refs/heads/main
+          fetch-depth: 0
           persist-credentials: false
       - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
         with:
           node-version-file: website/.nvmrc
+      # The Notion write-back runs only code that passed the CI gate, as a release does.
+      - name: Check out the newest main commit that passed the CI gate
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          sha="$(node --disable-warning=ExperimentalWarning scripts/release/green-commit.ts)"
+          git -c advice.detachedHead=false checkout --detach "$sha"
       - name: Install the pinned pnpm and locked dependencies
         run: |
           corepack enable

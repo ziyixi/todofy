@@ -5,26 +5,37 @@ every production change of the site. Its two jobs share the concurrency group `w
 (`queue: max`, never cancelled) and the GitHub `production` environment, so releases, status refreshes and
 Notion writes never overlap, whoever started them.
 
-| Started by               | How                                                                                     | Inputs                                   |
-| ------------------------ | --------------------------------------------------------------------------------------- | ---------------------------------------- |
-| A website push on `main` | `ci.yml` → `Website deploy` (after `Website checks` and the CI gate) calls the workflow | `release`, trigger `push`                |
-| 发布网站 button          | relay `/publish`                                                                        | `release`, trigger `button`              |
-| Change detector          | relay `scheduled()` ([`architecture.md`](architecture.md#automatic-releases))           | `release`, trigger `cron` or `reconcile` |
-| 刷新状态 button          | relay `/refresh-status`                                                                 | `status`, trigger `button`               |
-| You                      | Actions → Website release → Run workflow                                                | any operation, trigger `manual`          |
+| Started by               | How                                                                                | Inputs                                   |
+| ------------------------ | ---------------------------------------------------------------------------------- | ---------------------------------------- |
+| A website push on `main` | `ci.yml` → `Website deploy` (after `Website checks` and the CI gate) dispatches it | `release`, trigger `push`                |
+| 发布网站 button          | relay `/publish`                                                                   | `release`, trigger `button`              |
+| Change detector          | relay `scheduled()` ([`architecture.md`](architecture.md#automatic-releases))      | `release`, trigger `cron` or `reconcile` |
+| 刷新状态 button          | relay `/refresh-status`                                                            | `status`, trigger `button`               |
+| You                      | Actions → Website release → Run workflow                                           | any operation, trigger `manual`          |
 
 The confirmation input must be `<operation>:www.ziyixi.science` (plus `:allow-empty` when `allow_empty` is
-set). The relay and the CI caller send fixed inputs; no request can choose a ref, recovery or
-`allow_empty`.
+set). The relay and `Website deploy` send fixed inputs; no request can choose a ref, recovery or
+`allow_empty`. `Website deploy` only dispatches (`gh workflow run` with its `actions: write` token) and
+returns: a main CI run never waits for a queued release, and every release is a run of this workflow, which
+is what the relay lists (running release, release window, failures).
+
+**Which commit is built.** Every run checks out `main` inside the lock, then
+[`scripts/release/green-commit.ts`](../scripts/release/green-commit.ts) (plain `node`, before any install)
+picks the newest first-parent commit of it whose **push** run of `ci.yml` on `main` has a successful
+`CI gate` check (the monorepo's single required check; `Changes` diffs push runs from the last successful
+one, so a passed gate covers every website change up to that commit) and checks it out. A newer commit that
+is red, still running or `[skip ci]` is never built; if none of the newest 50 passed, the run fails before
+the gate step, without a record. `context` checks the pinned commit again with the pinned code.
 
 ## What a release does
 
 Each step is one `pnpm release <command>` ([`scripts/release/cli.ts`](../scripts/release/cli.ts)), run from
-`website/` on the newest `main` checked out inside the lock:
+`website/` on the pinned CI-green commit:
 
-1. `context`: only `main`, only a push or a dispatch, and the exact confirmation.
-2. `code-sha`: the code identity is the newest commit that touched `website/` (so a Todofy commit does
-   not redeploy the site).
+1. `context`: only `main`, only a workflow dispatch, the exact confirmation, and the checked-out commit
+   passed the CI gate.
+2. `code-sha`: the code identity is the newest commit at or before it that touched `website/` (so a
+   Todofy commit does not redeploy the site).
 3. `gate`: reads the `website-release` GitHub Deployment records of this repository. A `release` needs the
    latest one to be `success` (it becomes the baseline); anything else needs `recovery`. With no record at
    all a release stops with a notice asking for `bootstrap` (the job stays green).
@@ -43,9 +54,11 @@ Each step is one `pnpm release <command>` ([`scripts/release/cli.ts`](../scripts
    version cannot be uploaded to a Worker that does not exist.)
 9. `record`: a GitHub Deployment (payload schema 3: identity, version, previous version, live hostname,
    content registry, route contract), status `in_progress`. An interrupted run leaves this record blocking.
-10. `deploy`: refuses a stale build (main has newer website code) and a production that changed meanwhile;
-    `wrangler versions deploy <version>@100%`; confirms the active version; when `wrangler.toml` lists
+10. `deploy`: refuses a production that changed meanwhile; `wrangler versions deploy <version>@100%`; confirms the active version; when `wrangler.toml` lists
     hostnames, `wrangler triggers deploy` applies them as Custom Domains (and keeps workers.dev off).
+    Newer website code landing on `main` meanwhile is not a reason to stop: this build passed CI and the
+    release that push dispatched is queued behind this one and builds the newer code (refusing here would
+    record a failure that blocks the gate for that release too).
 11. `verify-live`: the live hostname (the canonical host once attached, otherwise the preview host) must
     become reachable (a new Custom Domain: up to 20 × 15 s), serve the identity 3 times in a row
     (12 × 5 s) and pass the route contract. With no hostname yet this step is skipped: the version was
@@ -97,5 +110,8 @@ Worker, account and hostnames in [`wrangler.toml`](../wrangler.toml). GitHub `pr
 | `CF_API_TOKEN`                  | secret (shared with Todofy and the dashboard) | Cloudflare reads, `versions upload/deploy`, `triggers deploy`, the relay deploy |
 | `WEBSITE_BOOTSTRAP_APPROVAL`    | variable, optional                            | only an empty-registry bootstrap                                                |
 
-The job's `GITHUB_TOKEN` (`contents: read`, `deployments: write`) writes the records. Logs print commit
+The job's `GITHUB_TOKEN` (`contents: read`, `deployments: write`, `checks: read`, `actions: read`) reads the
+CI results and writes the records. It is in the `env` of only the steps that need it (pin the commit,
+`context`, `gate`, `recover`, `record`, `mark-success`, `mark-failure`), never of the install, build or test
+steps, so a dependency's install script cannot forge a release record. Logs print commit
 IDs, version IDs, status codes and counts only; never a token, a response body or Notion content.

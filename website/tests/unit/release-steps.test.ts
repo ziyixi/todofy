@@ -15,6 +15,7 @@ import {
   decide,
   deploy,
   gate,
+  record,
   recover,
   rollback,
   upload,
@@ -71,7 +72,6 @@ function fakeGitHub(
       (repository ? legacy : records).states[Number(id)] ?? "missing",
     createRecord,
     setState,
-    latestCommitTouching: async () => NEW.codeSha,
   };
   return { github, setState, createRecord };
 }
@@ -140,9 +140,11 @@ describe("release context", () => {
     siteUrl: SITE,
   };
 
-  it("accepts a push or a dispatch on main with the exact confirmation", () => {
+  it("accepts a dispatch on main with the exact confirmation", () => {
     expect(assertReleaseContext(base)).toBe("release");
-    expect(assertReleaseContext({ ...base, eventName: "push" })).toBe("release");
+    // CI's Website deploy dispatches the workflow too; nothing calls it inline any more.
+    expect(() => assertReleaseContext({ ...base, eventName: "push" })).toThrow(/dispatch/);
+    expect(() => assertReleaseContext({ ...base, eventName: "workflow_call" })).toThrow(/dispatch/);
   });
 
   it("requires the allow-empty suffix when the one-run switch is enabled", () => {
@@ -160,7 +162,7 @@ describe("release context", () => {
 
   it("refuses other refs, events, operations and confirmations", () => {
     expect(() => assertReleaseContext({ ...base, ref: "refs/heads/feature" })).toThrow(/main/);
-    expect(() => assertReleaseContext({ ...base, eventName: "pull_request" })).toThrow(/push/);
+    expect(() => assertReleaseContext({ ...base, eventName: "pull_request" })).toThrow(/dispatch/);
     expect(() => assertReleaseContext({ ...base, operation: "status" })).toThrow(/Unsupported/);
     expect(() => assertReleaseContext({ ...base, confirmation: "release" })).toThrow(/exactly/);
     expect(() =>
@@ -348,7 +350,7 @@ describe("upload, deploy and rollback", () => {
     const d = deps(github, cloudflare);
     const uploaded = await upload(d, { state: releaseState(), identity: NEW });
     expect(uploaded).toEqual({ versionId: V2, firstDeploy: false, previousVersionId: V1 });
-    await deploy(d, { upload: uploaded, identity: NEW, websiteDirectory: "website" });
+    await deploy(d, { upload: uploaded, identity: NEW });
     expect(cloudflare.wrangler.deployVersion).toHaveBeenCalledWith(V2, expect.any(String));
     expect(cloudflare.wrangler.deployTriggers).toHaveBeenCalledTimes(1);
   });
@@ -364,23 +366,44 @@ describe("upload, deploy and rollback", () => {
       deploy(deps(github, cloudflare), {
         upload: { versionId: V2, firstDeploy: false, previousVersionId: V1 },
         identity: NEW,
-        websiteDirectory: "website",
       }),
     ).rejects.toThrow(/changed during the release/);
     expect(cloudflare.wrangler.deployVersion).not.toHaveBeenCalled();
   });
 
-  it("refuses a stale build when main has newer website code", async () => {
+  it("deploys its CI-green build when main has newer website code, so the next gate still passes", async () => {
+    // A release built commit OLDER; meanwhile a website push landed (its own release is queued).
+    const OLDER = identity("f".repeat(40));
+    const records = {
+      rows: [row(10, payload(), 1)],
+      states: { 10: "success" } as Record<number, string>,
+    };
+    const { github, createRecord, setState } = fakeGitHub(records);
     const cloudflare = fakeWorker(V1);
-    const { github } = fakeGitHub({ rows: [], states: {} });
-    await expect(
-      deploy(deps(github, cloudflare), {
-        upload: { versionId: V2, firstDeploy: false, previousVersionId: V1 },
-        identity: identity("f".repeat(40)),
-        websiteDirectory: "website",
-      }),
-    ).rejects.toThrow(/stale build/);
-    expect(cloudflare.wrangler.deployVersion).not.toHaveBeenCalled();
+    const d = deps(github, cloudflare);
+    const uploaded = await upload(d, { state: releaseState(), identity: OLDER });
+    await record(
+      d,
+      payload({ identity: OLDER, workerVersionId: V2, previousWorkerVersionId: V1 }),
+      {
+        ref: OLDER.codeSha,
+        logUrl: "https://github.com/ziyixi/todofy/actions/runs/2",
+      },
+    );
+    expect(createRecord).toHaveBeenCalledTimes(1);
+    await deploy(d, { upload: uploaded, identity: OLDER });
+    expect(cloudflare.wrangler.deployVersion).toHaveBeenCalledWith(V2, expect.any(String));
+    // The run marks its record successful; the queued release's gate accepts it as the baseline.
+    expect(setState).toHaveBeenCalledWith(99, "in_progress", expect.anything());
+    records.rows.unshift(
+      row(99, payload({ identity: OLDER, workerVersionId: V2, previousWorkerVersionId: V1 }), 2),
+    );
+    records.states[99] = "success";
+    const next = await gate(d, { operation: "release", siteUrl: SITE });
+    expect(next).toMatchObject({
+      bootstrapRequired: false,
+      state: { baseline: { deploymentId: "99" } },
+    });
   });
 
   it("creates the Worker with its first deploy only for bootstrap", async () => {
@@ -393,11 +416,7 @@ describe("upload, deploy and rollback", () => {
     const uploaded = await upload(deps(github, cloudflare), { state: bootstrap, identity: NEW });
     expect(uploaded).toEqual({ versionId: V3, firstDeploy: true, previousVersionId: null });
     // Before any hostname exists there are no triggers to apply.
-    await deploy(deps(github, cloudflare, []), {
-      upload: uploaded,
-      identity: NEW,
-      websiteDirectory: "website",
-    });
+    await deploy(deps(github, cloudflare, []), { upload: uploaded, identity: NEW });
     expect(cloudflare.wrangler.deployVersion).not.toHaveBeenCalled();
     expect(cloudflare.wrangler.deployTriggers).not.toHaveBeenCalled();
     await expect(

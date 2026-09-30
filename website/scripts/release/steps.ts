@@ -18,7 +18,7 @@ import type { WorkerConfig } from "./worker-config";
 
 export type GitHub = Pick<
   GitHubClient,
-  "releaseRecords" | "latestState" | "createRecord" | "setState" | "latestCommitTouching"
+  "releaseRecords" | "latestState" | "createRecord" | "setState"
 >;
 
 export interface ReleaseDeps {
@@ -48,16 +48,17 @@ export interface ReleaseInputs {
 }
 
 /**
- * Only main, only from a push (the CI deploy job) or a dispatch (website-release.yml: buttons,
- * cron, manual), and the typed confirmation must name the operation and the canonical host.
+ * Only main, only from a dispatch of website-release.yml (CI's Website deploy after a push, the
+ * buttons, the change detector, by hand), and the typed confirmation must name the operation and the
+ * canonical host. Which commit is built is pinned separately (green-commit.ts).
  */
 export function assertReleaseContext(inputs: ReleaseInputs): Operation {
   const operation = inputs.operation;
   if (operation !== "release" && operation !== "bootstrap" && operation !== "recovery") {
     fail(`Unsupported release operation: ${operation}`);
   }
-  if (inputs.eventName !== "workflow_dispatch" && inputs.eventName !== "push") {
-    fail("A production release runs only from a push to main or a workflow dispatch.");
+  if (inputs.eventName !== "workflow_dispatch") {
+    fail("A production release runs only from a workflow dispatch on main.");
   }
   if (inputs.ref !== "refs/heads/main")
     fail("A production release runs only from refs/heads/main.");
@@ -405,16 +406,15 @@ export async function record(
 
 /**
  * Makes the uploaded version serve 100 % of traffic, then applies wrangler.toml's Custom Domains.
- * Refuses a stale artifact (main has newer website code) and a production that changed meanwhile.
+ * Refuses a production that changed meanwhile. Newer website code on main is not a reason to stop:
+ * this build is CI-green and newer than the baseline, and the release that newer push dispatched is
+ * queued behind this one in the same concurrency group (stopping here would record a failure that
+ * blocks the gate for that release too).
  */
 export async function deploy(
   deps: ReleaseDeps,
-  options: { upload: UploadResult; identity: BuildIdentity; websiteDirectory: string },
+  options: { upload: UploadResult; identity: BuildIdentity },
 ): Promise<void> {
-  const newest = await deps.github.latestCommitTouching(options.websiteDirectory);
-  if (newest !== options.identity.codeSha) {
-    fail(`main has newer website code (${newest.slice(0, 12)}); refusing to deploy a stale build.`);
-  }
   const { upload: uploaded } = options;
   if (!uploaded.firstDeploy) {
     const active = await deps.worker.activeVersion();

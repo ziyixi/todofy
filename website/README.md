@@ -73,7 +73,7 @@ pnpm exec wrangler deploy --dry-run --config relay/wrangler.toml
 ## Production
 
 Deploys run only from GitHub Actions on `main` (never from a laptop): a website change on `main` runs
-`Website deploy` after the CI gate, the Notion buttons and the relay's detector dispatch the same
-workflow, and a `website/relay/` change runs `Website relay deploy`. The GitHub `production` environment
+`Website deploy` after the CI gate, which dispatches `website-release.yml` just as the Notion buttons and
+the relay's detector do (every release builds the newest `main` commit that passed the CI gate), and a `website/relay/` change runs `Website relay deploy`. The GitHub `production` environment
 holds `WEBSITE_NOTION_TOKEN`, `WEBSITE_NOTION_DATA_SOURCE_ID` and the monorepo's `CF_API_TOKEN`; every
 other production value is committed (`wrangler.toml`, `relay/wrangler.toml`, the workflow's `env`).

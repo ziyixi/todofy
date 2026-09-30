@@ -50,8 +50,8 @@ third.
 
 ## 1. Merge, then bootstrap
 
-1. Merge to `main`. CI runs `Website checks`, then `Website deploy` (its gate finds no release record and
-   stops green with the notice "dispatch bootstrap") and `Website relay deploy` (the relay now targets
+1. Merge to `main`. CI runs `Website checks`, then `Website deploy` dispatches a Website release (its gate
+   finds no release record and stops green with the notice "dispatch bootstrap") and `Website relay deploy` (the relay now targets
    ziyixi/todofy and gets its cron). The Notion buttons keep their URL.
 2. Actions → **Website release** → Run workflow: operation `bootstrap`, confirmation
    `bootstrap:www.ziyixi.science`. It continues the content registry of the last successful Vercel release

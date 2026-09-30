@@ -53,6 +53,8 @@ export class GitHubClient {
   }
 
   async request<T>(method: string, path: string, body?: unknown, repository?: string): Promise<T> {
+    // Only the steps that read or write release records get the token (website-release.yml).
+    if (!this.options.token) throw new Error("GITHUB_TOKEN is not available to this step.");
     const repo = repository ?? this.options.repository;
     const response = await (this.options.fetchImpl ?? fetch)(
       `${this.options.apiUrl}/repos/${repo}${path}`,
@@ -139,16 +141,5 @@ export class GitHubClient {
       auto_inactive: false,
       ...(options.environmentUrl ? { environment_url: options.environmentUrl } : {}),
     });
-  }
-
-  /** The newest commit on `branch` that touched `directory` (the website's code identity). */
-  async latestCommitTouching(directory: string, branch = "main"): Promise<string> {
-    const commits = await this.request<{ sha: string }[]>(
-      "GET",
-      `/commits?sha=${encodeURIComponent(branch)}&path=${encodeURIComponent(directory)}&per_page=1`,
-    );
-    const sha = commits[0]?.sha;
-    if (!sha || !/^[0-9a-f]{40}$/.test(sha)) throw new Error(`No commit touches ${directory}.`);
-    return sha;
   }
 }

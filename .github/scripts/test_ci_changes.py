@@ -632,9 +632,10 @@ class DeployConditions(unittest.TestCase):
 
 
 class WebsiteRelease(unittest.TestCase):
-    """Website deploy calls the one release workflow the Notion relay dispatches; its jobs hold the single
-    concurrency group and the production environment, so a push release, a button, the detector and a
-    status refresh never overlap. The caller holds neither: a caller in the same group waits for itself."""
+    """Website deploy dispatches the one release workflow the Notion relay dispatches and returns at once;
+    the release's jobs hold the single concurrency group and the production environment, so a push release,
+    a button, the detector and a status refresh never overlap, every release is a run of that workflow (the
+    relay sees it), and a main CI run never waits for a queued release."""
 
     RELEASE = REPO / ".github" / "workflows" / "website-release.yml"
 
@@ -646,20 +647,39 @@ class WebsiteRelease(unittest.TestCase):
             for index, (start, name) in enumerate(starts)
         }
 
-    def test_website_deploy_calls_the_release_workflow_with_fixed_inputs(self):
+    def test_website_deploy_dispatches_the_release_workflow_with_fixed_inputs(self):
         block = workflow_jobs()["website-deploy"]
-        self.assertIn("    uses: ./.github/workflows/website-release.yml\n", block)
-        for line in (
-            "operation: release",
-            "confirmation: release:www.ziyixi.science",
-            "force_build: false",
-            "allow_empty: false",
-            "trigger: push",
+        self.assertNotIn("uses: ./.github/workflows/website-release.yml", block)
+        self.assertIn("gh workflow run website-release.yml --repo \"$GITHUB_REPOSITORY\" --ref main", block)
+        for flag in (
+            "-f operation=release",
+            "-f confirmation=release:www.ziyixi.science",
+            "-f force_build=false",
+            "-f allow_empty=false",
+            "-f trigger=push",
         ):
-            self.assertIn(f"      {line}\n", block)
+            self.assertIn(flag, block)
+        # Only the dispatch permission; no environment, secret or lock of its own.
+        self.assertIn("      actions: write\n", block)
+        self.assertNotIn("contents:", block)
+        self.assertNotIn("deployments:", block)
         self.assertNotIn("concurrency:", block)
         self.assertNotIn("environment:", block)
-        self.assertIn("deployments: write", block)
+        self.assertNotIn("secrets.", block)
+        # Nothing calls the release inline any more.
+        self.assertNotIn("workflow_call:", self.RELEASE.read_text())
+
+    def test_every_release_builds_a_commit_that_passed_the_ci_gate(self):
+        jobs = self.release_jobs()
+        for name, block in jobs.items():
+            with self.subTest(job=name):
+                pin = block.index("- name: Check out the newest main commit that passed the CI gate\n")
+                install = block.index("- name: Install the pinned pnpm and locked dependencies\n")
+                self.assertLess(pin, install)
+                self.assertIn("scripts/release/green-commit.ts", block[pin:install])
+                self.assertIn('git -c advice.detachedHead=false checkout --detach "$sha"', block[pin:install])
+                self.assertIn("          fetch-depth: 0\n", block)
+        self.assertIn("run: pnpm release context", jobs["release"])
 
     def test_every_release_job_shares_one_group_and_the_production_environment(self):
         jobs = self.release_jobs()
@@ -674,7 +694,7 @@ class WebsiteRelease(unittest.TestCase):
         text = self.RELEASE.read_text()
         self.assertIn("run-name: Website ${{ inputs.operation }} (${{ inputs.trigger }})", text)
         self.assertIn("        options: [release, status, bootstrap, recovery]", text)
-        self.assertIn("        options: [manual, button, cron, reconcile]", text)
+        self.assertIn("        options: [manual, button, cron, reconcile, push]", text)
         relay = (REPO / "website" / "relay" / "src" / "github.ts").read_text()
         self.assertIn("(release|status|bootstrap|recovery) \\((manual|button|cron|reconcile|push)\\)", relay)
         config = (REPO / "website" / "relay" / "wrangler.toml").read_text()
@@ -689,6 +709,31 @@ class WebsiteRelease(unittest.TestCase):
         self.assertEqual(len(notion), 3)
         cloudflare = [line for line in text.splitlines() if "secrets.CF_API_TOKEN" in line]
         self.assertEqual(len(cloudflare), 5)
+        # GITHUB_TOKEN never in a job or workflow env (install scripts, builds and tests would see it): only
+        # in the env of the steps that read the CI results or read and write the release records.
+        steps = [step for job in self.release_jobs().values() for step in job.split("\n      - ")[1:]]
+        with_token = sorted(
+            step.split("\n", 1)[0].removeprefix("name: ")
+            for step in steps
+            if "GITHUB_TOKEN: ${{ github.token }}" in step
+        )
+        self.assertEqual(
+            with_token,
+            sorted(
+                [
+                    "Check out the newest main commit that passed the CI gate",
+                    "Check out the newest main commit that passed the CI gate",
+                    "Assert the trusted release context and the pinned commit",
+                    "Enforce the GitHub Deployment state gate",
+                    "Reconcile a blocked release with what production serves",
+                    "Record the release in progress",
+                    "Mark the release successful",
+                    "Record the failure",
+                ]
+            ),
+        )
+        self.assertEqual(text.count("GITHUB_TOKEN: ${{ github.token }}"), len(with_token))
+        self.assertNotIn("GH_TOKEN", text)
 
 
 @unittest.skipUnless(shutil.which("bash") and shutil.which("jq"), "needs bash and jq (both on the runner)")
