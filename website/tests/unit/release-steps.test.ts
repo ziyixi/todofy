@@ -99,12 +99,16 @@ function fakeWorker(initial: string | null) {
   };
 }
 
-function deps(github: GitHub, cloudflare: ReturnType<typeof fakeWorker>): ReleaseDeps {
+function deps(
+  github: GitHub,
+  cloudflare: ReturnType<typeof fakeWorker>,
+  hostnames: string[] = ["website-preview.ziyixi.science"],
+): ReleaseDeps {
   return {
     github,
     worker: cloudflare.worker,
     wrangler: cloudflare.wrangler,
-    config: { name: "ziyixi-website", accountId: "f".repeat(32), hostnames: [] },
+    config: { name: "ziyixi-website", accountId: "f".repeat(32), hostnames },
     log: () => undefined,
   };
 }
@@ -388,13 +392,14 @@ describe("upload, deploy and rollback", () => {
     const cloudflare = fakeWorker(null);
     const uploaded = await upload(deps(github, cloudflare), { state: bootstrap, identity: NEW });
     expect(uploaded).toEqual({ versionId: V3, firstDeploy: true, previousVersionId: null });
-    await deploy(deps(github, cloudflare), {
+    // Before any hostname exists there are no triggers to apply.
+    await deploy(deps(github, cloudflare, []), {
       upload: uploaded,
       identity: NEW,
       websiteDirectory: "website",
     });
     expect(cloudflare.wrangler.deployVersion).not.toHaveBeenCalled();
-    expect(cloudflare.wrangler.deployTriggers).toHaveBeenCalledTimes(1);
+    expect(cloudflare.wrangler.deployTriggers).not.toHaveBeenCalled();
     await expect(
       upload(deps(github, fakeWorker(null)), {
         state: releaseState({ workerVersionId: null }),

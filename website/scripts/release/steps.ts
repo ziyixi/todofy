@@ -427,7 +427,9 @@ export async function deploy(
   if (serving !== uploaded.versionId) {
     fail(`After the deploy, production serves ${serving ?? "none"}, not ${uploaded.versionId}.`);
   }
-  await deps.wrangler.deployTriggers();
+  // Custom Domains from wrangler.toml. With none listed there is nothing to apply (wrangler would not
+  // detach a hostname attached elsewhere either), and workers.dev stays off since the first deploy.
+  if (deps.config.hostnames.length > 0) await deps.wrangler.deployTriggers();
 }
 
 /** Restores the recorded previous version, only if production serves this release's version. */

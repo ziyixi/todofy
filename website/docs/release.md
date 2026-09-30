@@ -44,8 +44,8 @@ Each step is one `pnpm release <command>` ([`scripts/release/cli.ts`](../scripts
 9. `record`: a GitHub Deployment (payload schema 3: identity, version, previous version, live hostname,
    content registry, route contract), status `in_progress`. An interrupted run leaves this record blocking.
 10. `deploy`: refuses a stale build (main has newer website code) and a production that changed meanwhile;
-    `wrangler versions deploy <version>@100%`; confirms the active version; `wrangler triggers deploy`
-    applies `wrangler.toml`'s Custom Domains (and keeps workers.dev off).
+    `wrangler versions deploy <version>@100%`; confirms the active version; when `wrangler.toml` lists
+    hostnames, `wrangler triggers deploy` applies them as Custom Domains (and keeps workers.dev off).
 11. `verify-live`: the live hostname (the canonical host once attached, otherwise the preview host) must
     become reachable (a new Custom Domain: up to 20 × 15 s), serve the identity 3 times in a row
     (12 × 5 s) and pass the route contract. With no hostname yet this step is skipped: the version was
