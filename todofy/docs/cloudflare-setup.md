@@ -281,14 +281,22 @@ Restore into a new, empty database (with `--local --persist-to <dir>` the same c
 local copy). The backup's key is on the health page (e.g. `backups/2026-10-04T100002Z/`):
 
 ```sh
-npx wrangler d1 create todofy-restore        # <restore config>: a scratch copy of wrangler.toml outside
-                                             # the repo naming this database (never committed)
+npx wrangler d1 create todofy-restore        # prints the new database's id
+restore_config=<a path outside the repo>/todofy-restore.toml
+python3 tools/backup_restore.py restore-config --database-name todofy-restore \
+  --database-id <the new id> --out "$restore_config"
 python3 tools/backup_restore.py download --backup backups/<job start> --out restore/ --remote
 python3 tools/backup_restore.py sql --in restore/ --out restore/restore.sql
-npx wrangler d1 migrations apply DB --remote --config <restore config>
-npx wrangler d1 execute DB --remote --config <restore config> --file restore/restore.sql
-python3 tools/backup_restore.py verify --in restore/ --db DB --remote --config <restore config>
+npx wrangler d1 migrations apply DB --remote --config "$restore_config"
+npx wrangler d1 execute DB --remote --config "$restore_config" --file restore/restore.sql
+python3 tools/backup_restore.py verify --in restore/ --db DB --remote --config "$restore_config"
 ```
+
+`restore-config` writes a config with only the new database's `DB` binding, the committed account and
+this checkout's `migrations/` by absolute path; it has no Worker, so nothing can be deployed with it. It
+refuses the production database's id or name, a path inside the repository and an existing file. Never
+copy `wrangler.toml` for a restore: it is production, so its `database_id` is the live database (the
+restore SQL would go into production), and its relative `migrations_dir` fails outside `todofy/`.
 
 `download` checks every part against the manifest's SHA-256 and row counts, `sql` checks them again,
 and `verify` compares the restored row counts with the manifest and checks that the backup's migration

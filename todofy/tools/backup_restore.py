@@ -7,12 +7,19 @@
             migrations applied and no rows (checked again against the manifest first)
   verify    compare the restored database's row counts with the manifest and check that the
             backup's migration is applied (later, additive migrations are fine)
+  restore-config
+            write the wrangler config of the new database: only its D1 binding, this checkout's
+            migrations by absolute path and the committed account; it refuses the production
+            database's id or name and a path inside the repository. Never copy wrangler.toml for this:
+            it is production (its database_id is the live one) and its migrations_dir is relative.
 
   python3 tools/backup_restore.py download --backup backups/2026-10-04T100000Z --out restore/ --remote
   python3 tools/backup_restore.py sql --in restore/ --out restore/restore.sql
-  npx wrangler d1 migrations apply DB --remote --config <new database's config>
-  npx wrangler d1 execute DB --remote --config <new database's config> --file restore/restore.sql
-  python3 tools/backup_restore.py verify --in restore/ --db DB --remote --config <new database's config>
+  python3 tools/backup_restore.py restore-config --database-name todofy-restore --database-id <uuid> \
+    --out <outside the repo>/todofy-restore.toml
+  npx wrangler d1 migrations apply DB --remote --config <outside the repo>/todofy-restore.toml
+  npx wrangler d1 execute DB --remote --config <outside the repo>/todofy-restore.toml --file restore/restore.sql
+  python3 tools/backup_restore.py verify --in restore/ --db DB --remote --config <outside the repo>/todofy-restore.toml
 
 Local dev and tests use `--local --persist-to <dir>` in place of `--remote`. Every statement is an
 ``INSERT ... ON CONFLICT DO NOTHING`` below D1's 100 KB statement limit; longer values are appended
@@ -28,6 +35,7 @@ import gzip
 import hashlib
 import json
 import os
+import re
 import shlex
 import subprocess
 import sys
@@ -47,8 +55,75 @@ CHUNK_BYTES = 80_000
 LONG_VALUE_BYTES = 4_000
 
 
+APP = Path(__file__).resolve().parents[1]
+# The committed production config (todofy-core) and the migrations it applies.
+PRODUCTION_CONFIG = APP / "wrangler.toml"
+MIGRATIONS_DIR = APP / "migrations"
+UUID = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
+
+
 class RestoreError(Exception):
     """A backup that does not match its manifest, or a failed command; never contains row content."""
+
+
+def production_database(config: Path = PRODUCTION_CONFIG) -> dict[str, str]:
+    """account_id and the DB binding's database_name / database_id from the committed production config
+    (stdlib only: read with patterns, not a TOML parser)."""
+    text = config.read_text()
+    account = re.search(r'^account_id\s*=\s*"([0-9a-f]{32})"', text, re.M)
+    blocks = [block for block in text.split("[[d1_databases]]")[1:] if re.search(r'^binding\s*=\s*"DB"', block, re.M)]
+    if account is None or len(blocks) != 1:
+        raise RestoreError(f"{config} has no account_id or not exactly one DB binding")
+    block = blocks[0].split("\n[", 1)[0]
+    name = re.search(r'^database_name\s*=\s*"([^"]+)"', block, re.M)
+    uuid = re.search(r'^database_id\s*=\s*"([^"]+)"', block, re.M)
+    if name is None or uuid is None:
+        raise RestoreError(f"{config} has no database_name or database_id for DB")
+    return {"account_id": account.group(1), "database_name": name.group(1), "database_id": uuid.group(1)}
+
+
+def _toml_string(value: str) -> str:
+    return json.dumps(value)  # a JSON string of these values is a valid TOML basic string
+
+
+def write_restore_config(
+    out: Path, name: str, uuid: str, *, production: Path = PRODUCTION_CONFIG, migrations: Path = MIGRATIONS_DIR
+) -> list[str]:
+    """The restore target's config. It has no Worker (no name, no main), so it cannot be deployed."""
+    live = production_database(production)
+    uuid = uuid.strip().lower()
+    if not UUID.match(uuid):
+        raise RestoreError("--database-id is not a D1 database id (a UUID, from `wrangler d1 create`)")
+    if uuid == live["database_id"] or name == live["database_name"]:
+        raise RestoreError("that is the production database: restore only into a new, empty one")
+    if not re.fullmatch(r"[a-z0-9][a-z0-9-]{0,62}", name):
+        raise RestoreError("--database-name must be the new database's name")
+    target = out.resolve()
+    repository = APP.parent if (APP.parent / ".git").exists() else APP
+    if target == repository or repository in target.parents:
+        raise RestoreError(f"write it outside the repository ({repository}), never next to the committed configs")
+    body = "\n".join(
+        [
+            "# The restore target of tools/backup_restore.py restore-config (docs/cloudflare-setup.md §7).",
+            "# Only for `wrangler d1 migrations apply`, `d1 execute` and `backup_restore.py verify`. It has no",
+            "# Worker, so nothing can be deployed with it. Never commit it; delete it after the restore.",
+            f"account_id = {_toml_string(live['account_id'])}",
+            "",
+            "[[d1_databases]]",
+            'binding = "DB"',
+            f"database_name = {_toml_string(name)}",
+            f"database_id = {_toml_string(uuid)}",
+            f"migrations_dir = {_toml_string(str(migrations.resolve()))}",
+            "",
+        ]
+    )
+    target.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        with open(target, "x", encoding="utf-8") as stream:
+            stream.write(body)
+    except FileExistsError:
+        raise RestoreError(f"{target} exists; nothing was written") from None
+    return [f"wrote {target}: DB = {name} ({uuid}), migrations {migrations.resolve()}"]
 
 
 def _private_opener(path: str, flags: int) -> int:
@@ -289,6 +364,10 @@ def main(argv: list[str] | None = None) -> int:
         command.add_argument("--config", help="a wrangler config (verify: the one naming the restored database)")
         command.add_argument("--wrangler", default="npx --no-install wrangler", help="how to run wrangler")
 
+    restore_config = commands.add_parser("restore-config")
+    restore_config.add_argument("--database-name", required=True, help="the new database, e.g. todofy-restore")
+    restore_config.add_argument("--database-id", required=True, help="its id, from `wrangler d1 create`")
+    restore_config.add_argument("--out", type=Path, required=True, help="the config to write, outside the repo")
     for name in ("download", "sql", "verify"):
         command = commands.add_parser(name)
         command.add_argument(
@@ -308,7 +387,9 @@ def main(argv: list[str] | None = None) -> int:
             target(command)
     args = parser.parse_args(argv)
     try:
-        if args.command == "sql":
+        if args.command == "restore-config":
+            lines, ok = write_restore_config(args.out, args.database_name, args.database_id), True
+        elif args.command == "sql":
             lines, ok = write_sql(args.root, args.out, legacy_text=args.legacy_text), True
         else:
             flags = ["--remote"] if args.remote else ["--local"]

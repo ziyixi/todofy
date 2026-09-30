@@ -217,7 +217,7 @@ npx wrangler d1 export DB --remote --config ../wrangler.toml --output "$mailhero
 
 恢复到**新的空D1和新的私有桶**，不要直接覆盖生产：
 
-1. 新配置保持维护和强制暂停，不绑定真实Email Routing。隔离演练用的临时配置放在仓库外（仓库只允许 `mail-hero/wrangler.toml` 一个 Mail Hero 配置，`.github/scripts/test_wrangler_configs.py` 检查）；真正把生产切到新的 D1 或桶，是在维护模式下提交修改后的 `mail-hero/wrangler.toml`（D1 ID/桶名），经 CI 发布。
+1. 新配置保持维护和强制暂停，不绑定真实Email Routing。隔离演练用的临时配置放在仓库外（仓库只允许 `mail-hero/wrangler.toml` 一个 Mail Hero 配置，`.github/scripts/test_wrangler_configs.py` 检查）。不要原样复制 `mail-hero/wrangler.toml`：它就是生产配置，D1 `database_id`、两个桶名和 `routes` 都指向生产。临时配置必须改用新的 Worker `name`、新 D1 的 `database_name`/`database_id`、新的桶名，删除 `routes`，把 `main`、`migrations_dir` 和 `[assets].directory` 改成指向本仓库的绝对路径（相对路径按临时配置所在目录解析，放到仓库外会找不到），并在其 `[vars]` 写入 `MAINTENANCE_MODE = "true"`、`FORCE_SEND_PAUSED = "true"` 及合成的 `RECEIVE_ADDRESS`/`ACCESS_OWNER`；使用前用 `grep` 确认其中没有生产的 D1 ID、桶名或主机名，再先 `--dry-run`。真正把生产切到新的 D1 或桶，是在维护模式下提交修改后的 `mail-hero/wrangler.toml`（D1 ID/桶名），经 CI 发布。
 2. 导入D1 SQL，恢复R2全部字节与metadata，装入原 `CREDENTIAL_KEY`。[D1导入导出](https://developers.cloudflare.com/d1/best-practices/import-export-data/)
 3. 校验D1引用的原件、正文、附件和冻结payload存在且散列一致。记录未引用对象，不能盲删。
 4. DO调度状态不在D1导出中。通过应用恢复逻辑重新登记pending、retry_wait及未索引raw，对不确定sending先核查。不能假定新DO自动拥有旧Alarm任务。

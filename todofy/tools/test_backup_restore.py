@@ -18,11 +18,14 @@ from tools.backup_restore import (
     MANIFEST,
     MAX_STATEMENT_BYTES,
     PARTS,
+    PRODUCTION_CONFIG,
     RestoreError,
     load_tables,
     main,
+    production_database,
     row_statements,
     verify,
+    write_restore_config,
     write_sql,
 )
 
@@ -243,3 +246,69 @@ def test_long_values_are_appended_by_key_and_short_rows_stay_one_insert():
     assert statements[0].endswith("VALUES ('e''1', 1, 's', '', 'm', '', 0) ON CONFLICT DO NOTHING;")
     assert all("WHERE event_id = 'e''1' AND length(CAST(summary AS BLOB)) = " in line for line in statements[1:])
     assert len(statements) == 5  # 300,000 bytes in pieces of at most 80,000
+
+
+RESTORE_ID = "11111111-2222-4333-8444-555555555555"
+
+
+def test_restore_config_names_only_the_new_database(tmp_path: Path) -> None:
+    import tomllib
+
+    live = production_database()
+    committed = tomllib.loads(PRODUCTION_CONFIG.read_text())
+    [database] = committed["d1_databases"]
+    assert live == {
+        "account_id": committed["account_id"],
+        "database_name": database["database_name"],
+        "database_id": database["database_id"],
+    }
+    out = tmp_path / "restore" / "todofy-restore.toml"
+    assert (
+        main(["restore-config", "--database-name", "todofy-restore", "--database-id", RESTORE_ID, "--out", str(out)])
+        == 0
+    )
+    config = tomllib.loads(out.read_text())
+    # No Worker (nothing deployable), the committed account, and this checkout's migrations by absolute path.
+    assert set(config) == {"account_id", "d1_databases"}
+    assert config["account_id"] == live["account_id"]
+    assert config["d1_databases"] == [
+        {
+            "binding": "DB",
+            "database_name": "todofy-restore",
+            "database_id": RESTORE_ID,
+            "migrations_dir": str((PRODUCTION_CONFIG.parent / "migrations").resolve()),
+        }
+    ]
+    assert Path(config["d1_databases"][0]["migrations_dir"]).is_absolute()
+    assert live["database_id"] not in out.read_text()
+
+
+@pytest.mark.parametrize(
+    ("name", "uuid", "message"),
+    [
+        ("todofy-restore", "production", "production database"),
+        ("production", RESTORE_ID, "production database"),
+        ("todofy-restore", "not-a-uuid", "not a D1 database id"),
+        ("Todofy Restore", RESTORE_ID, "--database-name"),
+    ],
+)
+def test_restore_config_refuses_the_production_database(tmp_path: Path, name: str, uuid: str, message: str) -> None:
+    live = production_database()
+    name = live["database_name"] if name == "production" else name
+    uuid = live["database_id"].upper() if uuid == "production" else uuid
+    out = tmp_path / "restore.toml"
+    with pytest.raises(RestoreError, match=message):
+        write_restore_config(out, name, uuid)
+    assert not out.exists()
+
+
+def test_restore_config_stays_outside_the_repository_and_never_overwrites(tmp_path: Path) -> None:
+    inside = PRODUCTION_CONFIG.parent / "restore-target.toml"
+    with pytest.raises(RestoreError, match="outside the repository"):
+        write_restore_config(inside, "todofy-restore", RESTORE_ID)
+    assert not inside.exists()
+    out = tmp_path / "restore.toml"
+    out.write_text("keep")
+    with pytest.raises(RestoreError, match="exists"):
+        write_restore_config(out, "todofy-restore", RESTORE_ID)
+    assert out.read_text() == "keep"
