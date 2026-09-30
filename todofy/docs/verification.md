@@ -55,6 +55,25 @@ Pending for ops-v1: release (Todofy first, then Mail Hero, per `contracts/ops-v1
 migration `0003_ops` on the remote D1; a live canary through Mail Hero; the first ops section in a real
 daily reminder; the dashboard Worker itself (not built).
 
+## task-intent-v1 intake (2026-09-30, macOS, local only, not released)
+
+A clean worktree of branch `lab` at `721bee1` (Todofy's side of `contracts/task-intent-v1`: migration
+`0004_task_intents.sql`, the `Ops` methods, the core RPCs and alarm step, tests and docs), synthetic data
+and placeholder configs only; no GitHub, Cloudflare or Todoist call:
+
+| Step | Result |
+|---|---|
+| ruff check and format (`worker tests tools deploy`) | ok |
+| host tests `tests/unit tests/fakes tools deploy` | 1163 passed, 1 skipped (the protos cross-check) |
+| gateway lint, typecheck, `npm test` | ok; 94 passed |
+| `web`: `check:api`, typecheck, tests, source guard | 76 passed; guard ok |
+| both production dry-runs with placeholder values | ok; the core bundle has `todofy/core/intents.py`, the gateway bundle `proposeTasks` |
+| `tests/runtime` as CI runs it: 3 shards × 4 processes, serial files alone, `pytest_completeness.py` | 409 of 409 collected passed, each once (`test_task_intents.py`: 18 tests, 43 s) |
+| `Contracts` steps: Mail Hero (38), Todofy Python incl. `test_task_intent_contract.py` (476), gateway `test/ops.test.ts` (18), dashboard (61), Lab `task-intent-contract.test.ts` (6) | all passed |
+
+Pending: migration `0004` on the remote D1 (renumber first if `gtd-features` lands before it), the
+release (Todofy before Lab), and a first real send from Lab reconciled against Todoist.
+
 ## Committed production configs (2026-09-30, macOS, local only, not released)
 
 `wrangler.toml` (todofy-core) and `gateway/wrangler.toml` became the committed production configs (top
