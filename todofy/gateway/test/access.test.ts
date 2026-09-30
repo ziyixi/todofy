@@ -1,4 +1,4 @@
-import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeAll, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import type { Env } from '../src/env.ts';
 import { errorCode, fakes, ok, type Vars } from './helpers.ts';
 
@@ -98,6 +98,13 @@ describe('Access JWT', () => {
   });
 
   it('rejects every invalid token with 401 before touching assets or the core', async () => {
+    // Frozen clock: 'issued in the future' sits exactly on the 60 s iat bound, which a second
+    // boundary between signing and verifying would otherwise move (then the token is accepted).
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-09-29T12:00:00Z'));
+    onTestFinished(() => {
+      vi.useRealTimers();
+    });
     const { env, core, assets } = fakes(accessVars());
     const now = Math.floor(Date.now() / 1000);
     const valid = await token();
