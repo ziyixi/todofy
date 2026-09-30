@@ -27,6 +27,34 @@ Limits of these runs: workerd does not enforce or report CPU time locally, so Wo
 (10 ms per Worker request, 30 s per Durable Object invocation) are not proven here; production CPU comes
 from Workers Logs. Cloudflare Access, Custom Domains, TLS and D1 remote behaviour are not exercised.
 
+## ops-v1 (2026-09-29, macOS, local only, not released)
+
+A clean clone of branch `ops-layer` at `5774907` (the ops-v1 spec, both apps' `Ops` code, CI and docs),
+synthetic data and placeholder configs only, no production call:
+
+| Step | Result |
+|---|---|
+| `Changes`: `python3 -m unittest discover -s .github/scripts` | 28 tests OK |
+| `Contracts`: Mail Hero `contract-fixtures`, `ops-contract`, `native-ops` | 37 passed |
+| `Contracts`: `test_mail_hero_compat`, `test_contract`, `test_openapi_vocab`, `test_ops_contract`, `test_ops_core` | 302 passed |
+| `Contracts`: gateway `vitest run test/ops.test.ts` | 10 passed |
+| `Todofy checks`: `npm ci`, `uv sync --locked`, ruff check and format | ok |
+| host tests `tests/unit tests/fakes tools deploy` | 929 passed, 1 skipped (the protos cross-check) |
+| gateway lint, typecheck, `npm test` | lint and typecheck ok; 80 passed in 3 of 5 runs, the other 2 failed only `access.test.ts` "issued in the future" (see below) |
+| `web`: `npm ci`, `check:api`, typecheck, tests, build, source guard | 76 passed; build ok; guard ok |
+| `tests/runtime` (workerd; includes `test_ops.py` and the canary through fake Gemini) | 387 passed in 12 min 46 s |
+| placeholder configs + both dry-runs (`GITHUB_SHA` set as Actions does) | ok; the gateway bundle exports `Ops` and `default`; workers SDK vendored |
+
+`access.test.ts` "rejects every invalid token" signs a token with `iat = now + 60` and expects 401;
+`claimsValid` accepts `iat < now + 60` with its own `now`, so when the wall clock passes a second boundary
+between the test's `Date.now()` and the check (about fifteen tokens are signed in between), the token is
+accepted. The test and `access.ts` are the same
+as on `main`; this is a timing flake that `ops-layer` does not touch, left for the shared-auth work.
+
+Pending for ops-v1: release (Todofy first, then Mail Hero, per `contracts/ops-v1/IMPLEMENTATION.md`);
+migration `0003_ops` on the remote D1; a live canary through Mail Hero; the first ops section in a real
+daily reminder; the dashboard Worker itself (not built).
+
 ## Production
 
 Observed on the live account, hosts and callers on 2026-09-29; times are UTC. Only IDs, counts, status
@@ -121,3 +149,6 @@ First-day samples, not the one-week usage check.
 - The checklist items still open: `/health` reporting the deployed commit and the UI host's 401 without
   Access; the alias login.
 - Deleting the snapshot on the host after 2026-10-29.
+- ops-v1 (local only so far, see above): the release with migration `0003_ops`, `status().capabilities`
+  reporting `canary_consumer` in production, a live Mail Hero canary ending `ok` with no Todoist task, and
+  the first real reminder with an ops section.
