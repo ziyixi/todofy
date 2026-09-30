@@ -1,6 +1,7 @@
 /**
  * Digest and app-health flows in workerd (docs/design.md §5.1, §5.5): reports go to Todofy's
- * reportOps on a change, at least every 6 h and at 23:30 UTC; failures retry; an unreachable app
+ * reportOps on a change, at least every 6 h and at 23:30 UTC, never replacing an earlier day's report
+ * during 00:00–00:20 UTC; failures retry; an unreachable app
  * becomes an item while the other app is still handled.
  */
 import { afterEach, describe, expect, it } from 'vitest';
@@ -52,10 +53,15 @@ describe('the digest', () => {
     await h.tick('2026-09-29T23:30:00Z');
     expect((await reports(h)).map((r) => r.generated_at)).toEqual(['2026-09-29T23:30:00.000Z']);
 
-    // Back to healthy: an empty report clears Todofy's ops section.
+    // Back to healthy at midnight. The 00:00 tick does not replace the 23:30 report, which Todofy's
+    // first reminder check of the new day (every 10 min) still has to list; the 00:30 tick sends the
+    // empty report that clears Todofy's ops section.
     await h.answer('mail-hero', 'status', undefined);
     await h.tick('2026-09-30T00:00:00Z');
-    expect((await reports(h)).map((r) => r.items)).toEqual([[]]);
+    expect(await reports(h)).toEqual([]);
+    expect((await h.overview()).digest).toMatchObject({ items: [], last_sent_at: '2026-09-29T23:30:00.000Z' });
+    await h.tick('2026-09-30T00:30:00Z');
+    expect((await reports(h)).map((r) => [r.generated_at, r.items])).toEqual([['2026-09-30T00:30:00.000Z', []]]);
   });
 
   it('carries quota items with numeric metrics and keeps `since` across ticks', async () => {

@@ -2,7 +2,20 @@ import { describe, expect, it, vi } from 'vitest';
 import design from '../../docs/design.md?raw';
 import { QUOTA_RESOURCES, type QuotaRow } from '../src/api-types.ts';
 import { ALLOWANCES } from '../src/limits.ts';
-import { GRAPHQL_URL, USAGE_QUERY, fetchUsage, parseUsage, projection, usageVariables, type FetchLike } from '../src/usage.ts';
+import limitsDoc from '../../docs/limits.md?raw';
+import {
+  GRAPHQL_URL,
+  R2_ASSUMED_CLASS_A,
+  R2_CLASS_A,
+  R2_CLASS_B,
+  R2_FREE,
+  USAGE_QUERY,
+  fetchUsage,
+  parseUsage,
+  projection,
+  usageVariables,
+  type FetchLike,
+} from '../src/usage.ts';
 import { graphqlBody } from './graphql-fixture.ts';
 
 const NOW = Date.parse('2026-09-29T12:00:00Z');
@@ -89,6 +102,31 @@ describe('parseUsage', () => {
     expect(data?.unclassified_r2_operations).toBe(7);
     expect(row(rows, 'r2_storage')).toMatchObject({ used: 3_005_000_000 });
     expect(rows.every((r) => !r.truncated)).toBe(true);
+  });
+
+  it('counts the bulk DeleteObjects as Class A without calling it unclassified (seen live 2026-09-30)', () => {
+    // Every actionType the live account returned in the verified sample: none is unclassified.
+    const data = parseUsage(
+      graphqlBody({
+        r2Ops: [
+          { actionType: 'PutObject', bucketName: 'b1', requests: 10 },
+          { actionType: 'CompleteMultipartUpload', bucketName: 'b1', requests: 2 },
+          { actionType: 'DeleteObjects', bucketName: 'b1', requests: 3 },
+          { actionType: 'GetBucketLifecycleConfiguration', bucketName: 'b2', requests: 4 },
+          { actionType: 'PutBucket', bucketName: 'b2', requests: 1 },
+        ],
+      }),
+      NOW,
+    );
+    expect(row(data?.rows ?? [], 'r2_class_a')).toMatchObject({ used: 16 });
+    expect(row(data?.rows ?? [], 'r2_class_b')).toMatchObject({ used: 4 });
+    expect(data?.unclassified_r2_operations).toBe(0);
+  });
+
+  it('documents every R2 operation it classifies (limits.md)', () => {
+    for (const action of [...R2_CLASS_A, ...R2_CLASS_B, ...R2_FREE, ...R2_ASSUMED_CLASS_A]) {
+      expect(limitsDoc).toContain(`\`${action}\``);
+    }
   });
 
   it('projects daily use over the UTC day and monthly use over the month', () => {

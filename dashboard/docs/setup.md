@@ -37,7 +37,13 @@ allow only the owner's exact e-mail addresses on the matching identity providers
   for the owner there; any other Access-authenticated user gets 401.
 - `/health` is exempt from the Worker's own check but still behind Access (the whole host is).
 - Never add an Access bypass or a second hostname: the deploy's probe fails when anything but Access
-  answers an unauthenticated request.
+  answers an unauthenticated request. It accepts only a 302 to Access's login page for this host
+  (`https://<team>.cloudflareaccess.com/cdn-cgi/access/login/home.ziyixi.science…`); any other redirect
+  fails it, including one to the team domain itself.
+- No zone Redirect Rule or Page Rule may match `home.ziyixi.science` (for example the App Launcher
+  redirect suggested in `todofy/docs/ui-and-portal-research.md`): such rules run before Access and the
+  Worker and would make the dashboard unreachable. Check the zone's Rules pages (read only) before the
+  first merge; the probe would now fail on such a rule, but only after the deploy.
 
 ## 3. GitHub `production` environment
 
@@ -59,7 +65,7 @@ without printing its value.
 | `DASHBOARD_ACCESS_OWNER_ALIASES` | secret, may be empty | ≤ 8 unique printable-ASCII e-mails, ≤ 2048 chars | Worker secret `ACCESS_OWNER_ALIASES` (a single space when empty, so an emptied list replaces the old one) |
 | `DASHBOARD_CSRF_SIGNING_KEY` | secret | 64 hex (for example `openssl rand -hex 32`, run locally) | Worker secret `CSRF_SIGNING_KEY` |
 | `DASHBOARD_CF_ANALYTICS_TOKEN` | secret | `[A-Za-z0-9_-]{20,200}` | Worker secret `CF_ANALYTICS_TOKEN` (§4) |
-| `CF_API_TOKEN` | secret (existing, Todofy's deploy token) | – | `CLOUDFLARE_API_TOKEN` for `wrangler deploy` only |
+| `CF_API_TOKEN` | secret (existing, Todofy's deploy token) | – | `CLOUDFLARE_API_TOKEN` for `wrangler deploy` only; the generator also receives it, only to refuse a `DASHBOARD_CF_ANALYTICS_TOKEN` equal to it (never written anywhere) |
 
 `GITHUB_SHA` becomes the var `BUILD_SHA` (shown by `/health`). Changing a variable or secret takes
 effect with the next deploy: run the workflow on `main` with `app: dashboard` (or `all`).
@@ -71,7 +77,13 @@ https://api.cloudflare.com/client/v4/graphql` (a constant in `worker/src/usage.t
 at most once per tick and once per minute on an owner refresh. It is never logged, stored, echoed to
 the page or sent anywhere else, and a unit test checks that it appears only in that one header.
 
-**Today a broader token is reused.** Replace it with a token that can only read analytics:
+**Today a broader token is reused.** A token for this secret becomes a Worker secret of an
+internet-facing Worker, so it must be able to do no more than read analytics: any future bug in the
+Worker would otherwise expose account write access. The generator refuses (by name, without printing a
+value) a `DASHBOARD_CF_ANALYTICS_TOKEN` equal to the deploy token `CF_API_TOKEN`, so if the bootstrap
+token is that token the deploy stops before anything is uploaded; it cannot check the scope of any other
+token. Replace it, ideally before the first deploy and at the latest right after it, with a token that
+can only read analytics:
 
 1. Cloudflare dashboard → My Profile → API Tokens → Create Token → Custom token.
 2. Permissions: **Account → Account Analytics → Read** (the permission the GraphQL API needs for
@@ -110,7 +122,7 @@ the expected state. Use synthetic data only; never point a local run at producti
 ## 6. Operations
 
 - **Guard.** Automatic: any daily resource or monthly R2 operation class ≥ 80 % → `shed` on both apps
-  until the next UTC midnight + 10 min, renewed while still ≥ 70 % that day; cleared below 70 % or on a
+  until the next UTC midnight + 60 min, renewed while still ≥ 70 % that day; cleared below 70 % or on a
   new UTC day. From the page: 强制降载 (force shed for 24 h) or 解除降载 (clear, and hold automatic shed
   off until 00:00 UTC). `shed` only defers each app's deferrable cleanup and safety-net jobs within
   their own bounds (Mail Hero: raw reconcile, retention, canary and alert-history cleanup, each at most
@@ -140,14 +152,30 @@ the expected state. Use synthetic data only; never point a local run at producti
   workflow on `main` with `app: dashboard`; a change takes effect with that deploy, not before.
   Switching back to `true` starts the day's scheduled run at the next tick if the hour has passed and
   none ran that UTC day.
-- **Digest.** Warning and critical items go to `TODOFY.reportOps` when the set changes or every 6 h;
+- **Digest.** Warning and critical items go to `TODOFY.reportOps` when the set changes or every 6 h
+  (not during 00:00–00:20 UTC while the last report is from the previous day, so that day's reminder
+  still lists it);
   Todofy's daily attention reminder (at most one Todoist task per UTC day) carries them. The dashboard
   creates Todoist tasks in no other way. Mail Hero's own `ALERT_WEBHOOK_URL` stays unconfigured.
 
 ## 7. Rollback and removal
 
-- **Worker code.** Revert the commit on `main` and push: CI redeploys the previous code (the change is
-  under `dashboard/`). For an immediate rollback, Cloudflare dashboard → Workers → `home` →
+- **The first release is different.** `wrangler deploy` makes the Worker live as soon as it uploads it,
+  then creates the Custom Domain (DNS record and certificate) and the Cron Trigger, all before the
+  "Check that Access answers" step. So if `Dashboard deploy` fails at or after "Deploy the Worker home"
+  (a probe failure, a Custom Domain error), the Worker, its Durable Object namespace, its secrets and its
+  `*/30` cron are already live, and each tick calls both apps' `Ops` (status, `setGuard`, the daily
+  canary with its synthetic Mail Hero event and up to 3 Gemini calls in Todofy, `reportOps` into
+  Todofy's reminder). There is no previous version to roll back to, and **reverting the merge commit does
+  not undo the deploy**: the revert also removes the `Dashboard deploy` job, so CI never touches the live
+  Worker again, and (because it also changes `ci.yml`) it re-checks every app. To stop it: Cloudflare
+  dashboard → Workers → `home` → Settings → Trigger events → remove the Cron Trigger (the Worker stays
+  reachable only through Access), or delete the Worker `home` and check that its Custom Domain and
+  Durable Object namespace are gone ("Remove the dashboard" below). Only then revert or fix on `main`;
+  a fixed deploy recreates the trigger. Any `shed` it set expires by itself (≤ 36 h).
+
+- **Worker code** (after the first release). Revert the commit on `main` and push: CI redeploys the
+  previous code (the change is under `dashboard/`). For an immediate rollback, Cloudflare dashboard → Workers → `home` →
   Deployments → roll back to the previous version; the next deploy from `main` replaces it again, so
   revert the commit too. The Durable Object class and its migration `v1` stay; the SQLite tables are
   created with `IF NOT EXISTS`, so older code reads the same state.

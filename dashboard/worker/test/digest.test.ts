@@ -67,6 +67,13 @@ describe('digest items', () => {
     expect(items()).toEqual([]);
   });
 
+  it('judges quota items on the measured value, not the percent rounded to 0.1', () => {
+    // 79.95 % and 94.95 % display as 80.0 and 95.0 but are below the thresholds.
+    const edge = (id: QuotaRow['id'], used: number): QuotaRow => ({ ...quota(id, Math.round(used / 100) / 10), used });
+    const list = items({ usage: { ...input().usage, rows: [edge('d1_rows_read', 79_950), edge('do_rows_written', 94_950)] } });
+    expect(list.map((i) => [i.code, i.severity])).toEqual([['do_rows_written_high', 'warning']]);
+  });
+
   it('reports quota rows at 80 % (warning) and 95 % (critical) with numeric metrics', () => {
     const list = items({ usage: { ...input().usage, rows: [quota('d1_rows_read', 81.5), quota('do_rows_written', 96), quota('workers_requests', 50)] } });
     expect(list.map((i) => [i.source, i.code, i.severity])).toEqual([
@@ -224,6 +231,30 @@ describe('sending', () => {
     expect(shouldSend(key, { last_key: key, last_sent_at: late - 60 * 60_000 }, late)).toBe(true);
     expect(shouldSend(key, { last_key: key, last_sent_at: late - 30 * 60_000 }, late)).toBe(false);
     expect(shouldSend(key, { last_key: key, last_sent_at: late - 90 * 60_000 }, Date.parse('2026-09-29T23:00:00Z') + 0)).toBe(false);
+  });
+
+  it('does not overwrite the 23:30 report at the 00:00 tick (Todofy lists only the latest, from before the day)', () => {
+    // 23:30: D1 reads at 86 % and the guard shed; the report is sent for the next day's reminder.
+    const lateAt = Date.parse('2026-09-15T23:30:00Z');
+    const breach = digestKey([
+      { source: 'cloudflare', code: 'd1_rows_read_high', severity: 'warning', since: '2026-09-15T20:00:00Z', metrics: {} },
+      { source: 'dashboard', code: 'guard_shed', severity: 'warning', since: '2026-09-15T20:00:00Z', metrics: {} },
+    ]);
+    const sent = { last_key: breach, last_sent_at: lateAt };
+    // 00:00: the daily quota reset, the items are gone. Sending now would replace the 23:30 report
+    // before Todofy's first reminder check of the day (every 10 min) claimed it.
+    expect(shouldSend('', sent, Date.parse('2026-09-16T00:00:00Z'))).toBe(false);
+    expect(shouldSend('', sent, Date.parse('2026-09-16T00:00:30Z'))).toBe(false);
+    // Also a plain refresh (same key, last success ≥ 6 h old) waits.
+    expect(shouldSend(breach, { last_key: breach, last_sent_at: Date.parse('2026-09-15T17:00:00Z') }, Date.parse('2026-09-16T00:00:00Z'))).toBe(false);
+    // 00:30: the reminder check has run; the change is sent.
+    expect(shouldSend('', sent, Date.parse('2026-09-16T00:30:00Z'))).toBe(true);
+    // A report already sent today is not held; nor is the very first report.
+    const today = { last_key: breach, last_sent_at: Date.parse('2026-09-16T00:00:00Z') };
+    expect(shouldSend('', today, Date.parse('2026-09-16T00:10:00Z'))).toBe(true);
+    expect(shouldSend('', { last_key: null, last_sent_at: null }, Date.parse('2026-09-16T00:00:00Z'))).toBe(true);
+    // The first of a month (a monthly R2 item clearing) is the same rule.
+    expect(shouldSend('', sent, Date.parse('2026-10-01T00:00:00Z'))).toBe(false);
   });
 
   it('derives the banner level from the items', () => {

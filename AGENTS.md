@@ -22,7 +22,7 @@
 
 - 应用之间从不互相导入代码、包、配置或测试工具；共享的只有 `contracts/` 和 `packages/`。应用读取 `contracts/` 的文件、依赖 `packages/` 的包，不读取另一个应用的目录；包从不导入任何应用。`contracts/` 里的共享代码仅限无依赖、按相对路径导入的文件（`ops-v1/ops-v1.ts` 类型与常量、测试用的 `ops-v1/validate.mjs`）；不在其中放运行时逻辑、包或任一应用的实现。
 - 包以 `"file:../../packages/<name>"` 依赖写进使用它的应用的 `package.json` 和 lockfile，由该应用的打包器编译进它自己的 Worker；包从不作为独立 Worker、service binding 或单独发布。`packages/edge-auth` 保持零运行时依赖。
-- 包的任何改动都会重新检查**并发布**每个使用它的应用（`.github/scripts/ci_changes.py` 的 `PACKAGE_USERS`，`Shared packages` job 运行包自己的检查）。新增包或新增使用者时同步 `PACKAGE_USERS`，`test_ci_changes.py` 会核对它与各 `file:` 依赖一致。
+- 包的任何代码改动都会重新检查**并发布**每个使用它的应用（`.github/scripts/ci_changes.py` 的 `PACKAGE_USERS`，`Shared packages` job 运行包自己的检查）；只改包内 Markdown 文档（`packages/<name>/**/*.md`，如 `README.md`、`SPEC.md`）时运行包检查并检查这些应用，但不发布（文档不编译进任何 Worker）。新增包或新增使用者时同步 `PACKAGE_USERS`，`test_ci_changes.py` 会核对它与各 `file:` 依赖一致。
 - 鉴权相关的对外行为（cookie 名、CSRF token 格式与密钥派生、邮箱匹配、nbf 宽限、token 来源、开发绕过、错误映射）是各应用传入 `packages/edge-auth` 的参数（SPEC §4，各应用取值见 SPEC §5.4）；改一个应用的参数就是改该应用的行为。不要在应用内重新实现或复制鉴权代码。
 - 每个应用独立部署：各自的 `production` 发布 job、Cloudflare 资源、密钥和 concurrency group。一个应用的改动不发布另一个应用；只有 `packages/` 包（发布它的每个使用者）和各 Worker 打包的 `contracts/ops-v1/ops-v1.ts`（`ci_changes.py` 的 `BUNDLED_BY`，发布三者；面板另外打包的 `ops-v1.schema.json` 与 `validate.mjs` 只发布面板）会同时发布多个应用。`Dashboard deploy` 排在两个应用的发布之后（它的 service binding 需要对方的 `Ops` 入口已上线）。
 - Mail Hero 拥有 `mail.received.v1`。改动 payload 构建器时在 `mail-hero/cloudflare` 运行 `npm run contract:update`，把 `contracts/` 的变更放进同一提交；`Contracts` job 必须在合并前证明 Todofy 仍接受每个 fixture。`contracts/mail-received-v1/fixtures/legacy/` 是历史冻结字节，不能改写。

@@ -5,10 +5,18 @@
 import { OPS_APPS, OPS_LIMITS, type OpsApp, type OpsReport, type OpsReportItem, type OpsSeverity, type OpsStatus } from '../../../contracts/ops-v1/ops-v1.ts';
 import { GUARD_SHED_PERCENT, QUOTA_CRITICAL_PERCENT, type CanaryStage, type OverallLevel, type QuotaRow } from './api-types.ts';
 import { CANARY_DISABLED_CODE, type CanaryRecord } from './canary.ts';
-import { hoursLeft, type DesiredGuard } from './guard.ts';
-import { HOUR_MS, MINUTE_MS, iso, isTimestamp } from './time.ts';
+import { hoursLeft, reachesPercent, type DesiredGuard } from './guard.ts';
+import { HOUR_MS, MINUTE_MS, iso, isTimestamp, startOfUtcDay } from './time.ts';
 
 export const DIGEST_REFRESH_MS = 6 * HOUR_MS;
+/**
+ * No report replaces one from an earlier UTC day during this start of the day. Todofy keeps only the
+ * latest report and lists it in a day's reminder only if it was generated before that day began
+ * (contracts/ops-v1 README: report at about 23:40 for the next day's reminder); its reminder check runs
+ * every 10 min. The 00:00 tick therefore must not overwrite the 23:30 report before that check has
+ * claimed it (a quota item that clears at midnight would never be reported); the 00:30 tick may send.
+ */
+export const DIGEST_DAY_START_HOLD_MS = 20 * MINUTE_MS;
 /** A usage fetch failing for this long becomes `usage_unavailable`. */
 export const USAGE_UNAVAILABLE_AFTER_MS = 2 * HOUR_MS;
 /** App statuses older than this do not contribute signals. */
@@ -113,13 +121,13 @@ export function candidates(input: DigestInput): Candidate[] {
   }
   if (usage.fresh) {
     for (const row of usage.rows) {
-      if (row.percent === null || row.percent < GUARD_SHED_PERCENT || row.used === null) continue;
+      if (row.percent === null || row.used === null || !reachesPercent(row, GUARD_SHED_PERCENT)) continue;
       const metrics: Record<string, number> = { percent: row.percent, used: row.used, limit: row.limit };
       if (row.projected_percent !== null) metrics.projected_percent = row.projected_percent;
       out.push({
         source: 'cloudflare',
         code: `${row.id}_high`,
-        severity: row.percent >= QUOTA_CRITICAL_PERCENT ? 'critical' : 'warning',
+        severity: reachesPercent(row, QUOTA_CRITICAL_PERCENT) ? 'critical' : 'warning',
         metrics,
       });
     }
@@ -255,9 +263,15 @@ export interface DigestSendState {
   readonly last_sent_at: number | null;
 }
 
-/** Send on a change, at least every 6 h, and at the 23:30 UTC tick when the last send is ≥ 60 min old. */
+/**
+ * Send on a change, at least every 6 h, and at the 23:30 UTC tick when the last send is ≥ 60 min old;
+ * never during the first DIGEST_DAY_START_HOLD_MS of a UTC day when the last report is from an earlier
+ * day (it is still waiting for today's reminder).
+ */
 export function shouldSend(key: string, state: DigestSendState, now: number): boolean {
   if (state.last_sent_at === null || state.last_key === null) return true;
+  const dayStart = startOfUtcDay(now);
+  if (now - dayStart < DIGEST_DAY_START_HOLD_MS && state.last_sent_at < dayStart) return false;
   if (key !== state.last_key) return true;
   const age = now - state.last_sent_at;
   if (age >= DIGEST_REFRESH_MS) return true;

@@ -3,6 +3,7 @@
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -123,10 +124,42 @@ class Classify(unittest.TestCase):
         for path in (
             "packages/edge-auth/src/access.ts",
             "packages/edge-auth/package-lock.json",
-            "packages/edge-auth/SPEC.md",
+            "packages/edge-auth/test/helpers.ts",
         ):
             with self.subTest(path=path):
                 self.assertEqual(push([path]), expect(T, T, T, T, T, packages=T, **ALL))
+
+    def test_a_package_document_checks_every_user_but_deploys_none(self):
+        """A README or SPEC is compiled into no Worker: an edit must not redeploy production."""
+        for paths in (
+            ["packages/edge-auth/SPEC.md"],
+            ["packages/edge-auth/README.md", "packages/edge-auth/SPEC.md"],
+            ["packages/edge-auth/docs/notes.md"],
+        ):
+            with self.subTest(paths=paths):
+                self.assertEqual(push(paths), expect(T, T, T, F, F, packages=T, **ALL_CHECKED))
+        # With the package's code, or with one app, the usual rules apply.
+        paths = ["packages/edge-auth/SPEC.md", "packages/edge-auth/src/csrf.ts"]
+        self.assertEqual(push(paths), expect(T, T, T, T, T, packages=T, **ALL))
+        paths = ["packages/edge-auth/SPEC.md", "dashboard/docs/design.md"]
+        self.assertEqual(push(paths), expect(T, T, T, F, F, packages=T, **ALL))
+        # An unregistered package's documents are checked by every app, deployed by none.
+        self.assertEqual(push(["packages/new-kit/README.md"]), expect(T, T, T, F, F, packages=T, **ALL_CHECKED))
+
+    def test_this_branch_redeploys_only_the_dashboard(self):
+        """The dashboard branch's non-dashboard files: CI, root and contract docs, the edge-auth docs."""
+        paths = [
+            ".github/scripts/ci_changes.py",
+            ".github/workflows/ci.yml",
+            "AGENTS.md",
+            "README.md",
+            "contracts/README.md",
+            "contracts/ops-v1/README.md",
+            "packages/edge-auth/README.md",
+            "packages/edge-auth/SPEC.md",
+            "dashboard/worker/src/state.ts",
+        ]
+        self.assertEqual(push(paths), expect(T, T, T, F, F, packages=T, **ALL))
 
     def test_a_package_change_with_one_app_still_deploys_every_user(self):
         paths = ["packages/edge-auth/src/csrf.ts", "todofy/gateway/src/csrf.ts"]
@@ -489,6 +522,9 @@ class DeployConditions(unittest.TestCase):
         # The only token: the one Todofy deploy uses; no other secret reaches wrangler's environment.
         self.assertIn("CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}", block)
         self.assertEqual(block.count("CLOUDFLARE_API_TOKEN:"), 1)
+        # The generator compares (never writes) the deploy token, to refuse it as the analytics token.
+        generate = block.split("- name: Generate the production configuration\n", 1)[1].split("\n      - ", 1)[0]
+        self.assertIn("CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}", generate)
 
     def test_every_production_job_has_its_own_concurrency_group(self):
         blocks = self.jobs()
@@ -541,6 +577,95 @@ class DeployConditions(unittest.TestCase):
 
     def test_shared_packages_run_only_when_flagged(self):
         self.assertEqual(self.condition(self.jobs()["shared-packages"]), "needs.changes.outputs.packages == 'true'")
+
+
+@unittest.skipUnless(shutil.which("bash") and shutil.which("jq"), "needs bash and jq (both on the runner)")
+class AccessProbe(unittest.TestCase):
+    """The Dashboard deploy's Access probe, run as the workflow runs it, against a stubbed curl.
+
+    Only Access's own login page for this host passes; a 302 to anywhere else on the team domain (for
+    example a zone Redirect Rule to the App Launcher, which runs before Access and the Worker) fails.
+    """
+
+    ISSUER = "https://example.cloudflareaccess.com"
+    HOST = "home.example.org"
+
+    def script(self):
+        block = workflow_jobs()["dashboard-deploy"]
+        step = block.split("- name: Check that Access answers unauthenticated requests\n", 1)[1]
+        body = step.split("        run: |\n", 1)[1]
+        lines = []
+        for line in body.splitlines():
+            if line.strip() and not line.startswith("          "):
+                break
+            lines.append(line[10:])
+        return "\n".join(lines) + "\n"
+
+    def probe(self, *answers):
+        """Runs the step; curl answers each request with the next of `answers` ("<code> <location>"), the
+        last one repeating."""
+        with tempfile.TemporaryDirectory() as root:
+            Path(root, "worker").mkdir()
+            Path(root, "worker", "wrangler.production.ci.json").write_text(
+                json.dumps({"vars": {"ACCESS_ISSUER": self.ISSUER, "PUBLIC_HOST": self.HOST}})
+            )
+            bin_dir = Path(root, "bin")
+            bin_dir.mkdir()
+            Path(root, "answers").write_text("\n".join(answers) + "\n")
+            curl = bin_dir / "curl"
+            curl.write_text(
+                "#!/usr/bin/env bash\n"
+                f'answers="{root}/answers"\n'
+                # The last answer repeats for every later request.
+                'line=$(head -n 1 "$answers")\n'
+                'if [ "$(wc -l < "$answers")" -gt 1 ]; then tail -n +2 "$answers" > "$answers.next"; mv "$answers.next" "$answers"; fi\n'
+                'printf "%s" "$line"\n'
+            )
+            (bin_dir / "sleep").write_text("#!/usr/bin/env bash\nexit 0\n")
+            for tool in (curl, bin_dir / "sleep"):
+                tool.chmod(0o755)
+            env = {**os.environ, "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}"}
+            result = subprocess.run(
+                ["bash", "-e", "-c", self.script()], cwd=root, env=env, capture_output=True, text=True, check=False
+            )
+            return result.returncode, result.stdout + result.stderr
+
+    def test_the_login_page_for_this_host_passes(self):
+        login = f"{self.ISSUER}/cdn-cgi/access/login/{self.HOST}"
+        code, output = self.probe(f"302 {login}?kid=abc&redirect_url=%2F", f"302 {login}?kid=abc&redirect_url=%2Fapi")
+        self.assertEqual(code, 0, output)
+        code, output = self.probe("000 ", f"302 {login}", f"302 {login}/")
+        self.assertEqual(code, 0, output)
+
+    def test_a_redirect_to_the_team_domain_root_fails(self):
+        """A Redirect Rule to the App Launcher would leave the dashboard unreachable."""
+        code, output = self.probe(f"302 {self.ISSUER}/")
+        self.assertEqual(code, 1, output)
+        self.assertIn("302 to somewhere other than the Access login page", output)
+
+    def test_other_hosts_and_look_alikes_fail(self):
+        for location in (
+            f"{self.ISSUER}/cdn-cgi/access/login/other.example.org?kid=abc",
+            f"{self.ISSUER}/cdn-cgi/access/login/{self.HOST}.evil.example?kid=abc",
+            f"{self.ISSUER}.evil.example/cdn-cgi/access/login/{self.HOST}",
+            f"https://{self.HOST}/login",
+        ):
+            with self.subTest(location=location):
+                code, output = self.probe(f"302 {location}")
+                self.assertEqual(code, 1, output)
+                self.assertIn("/: 302 to somewhere other than the Access login page", output)
+
+    def test_an_answer_from_the_app_fails(self):
+        for answer in ("200 ", "401 "):
+            with self.subTest(answer=answer):
+                code, output = self.probe(answer)
+                self.assertEqual(code, 1, output)
+                self.assertIn("was answered with", output)
+
+    def test_no_connection_is_retried_then_fails(self):
+        code, output = self.probe("000 ")
+        self.assertEqual(code, 1, output)
+        self.assertIn("/ never reached Access", output)
 
 
 if __name__ == "__main__":

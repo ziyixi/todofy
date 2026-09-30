@@ -40,6 +40,12 @@ export const R2_CLASS_B: ReadonlySet<string> = new Set([
   'GetBucketCors', 'GetBucketLifecycleConfiguration',
 ]);
 export const R2_FREE: ReadonlySet<string> = new Set(['DeleteObject', 'DeleteBucket', 'AbortMultipartUpload']);
+/**
+ * Seen on the live account (2026-09-30) but on neither class list of the R2 pricing page: the bulk
+ * delete (`DeleteObjects`, a Worker's `bucket.delete([...])`). Counted as Class A on purpose (cautious;
+ * the page names only the single `DeleteObject` as free), so it is not reported as unclassified.
+ */
+export const R2_ASSUMED_CLASS_A: ReadonlySet<string> = new Set(['DeleteObjects']);
 
 export type UsageErrorCode = `http_${string}` | 'graphql_error' | 'network_error' | 'timeout' | 'invalid_response' | 'not_configured';
 
@@ -252,7 +258,7 @@ export function parseUsage(body: unknown, now: number): UsageData | null {
       classB.set(name, (classB.get(name) ?? 0) + requests);
       continue;
     }
-    if (typeof action !== 'string' || !R2_CLASS_A.has(action)) unclassified += requests;
+    if (typeof action !== 'string' || !(R2_CLASS_A.has(action) || R2_ASSUMED_CLASS_A.has(action))) unclassified += requests;
     sumA += requests;
     classA.set(name, (classA.get(name) ?? 0) + requests);
   }

@@ -36,8 +36,8 @@ const MAX_ALIASES = 8
 const MAX_LIST_CHARS = 2048
 
 export class SettingError extends Error {
-  constructor(name) {
-    super(`Invalid or missing CI setting: ${name}`)
+  constructor(name, reason = 'Invalid or missing CI setting') {
+    super(`${reason}: ${name}`)
   }
 }
 
@@ -106,9 +106,23 @@ export function generateSecrets(env) {
     // no aliases) rather than left out, which would keep the previous aliases working.
     ACCESS_OWNER_ALIASES: list.join(',') || ' ',
     CSRF_SIGNING_KEY: checked(env, 'DASHBOARD_CSRF_SIGNING_KEY', /^[0-9a-fA-F]{64}$/),
-    // Used only for the GraphQL Analytics API; should be an "Account Analytics: Read" token.
-    CF_ANALYTICS_TOKEN: checked(env, 'DASHBOARD_CF_ANALYTICS_TOKEN', /^[A-Za-z0-9_-]{20,200}$/),
+    CF_ANALYTICS_TOKEN: analyticsToken(env),
   }
+}
+
+/**
+ * Used only for the GraphQL Analytics API; should be an "Account Analytics: Read" token (docs/setup.md
+ * §4). The token scope cannot be read from here, but the one broad token this job is known to hold, the
+ * deploy token (CF_API_TOKEN, passed to this step only for the comparison), must never become a
+ * secret of an internet-facing Worker: refused by name, values never printed.
+ */
+function analyticsToken(env) {
+  const token = checked(env, 'DASHBOARD_CF_ANALYTICS_TOKEN', /^[A-Za-z0-9_-]{20,200}$/)
+  const deploy = typeof env.CF_API_TOKEN === 'string' ? env.CF_API_TOKEN.trim() : ''
+  if (deploy !== '' && deploy === token) {
+    throw new SettingError('DASHBOARD_CF_ANALYTICS_TOKEN', 'Must not be the deploy token CF_API_TOKEN (use an "Account Analytics: Read" token, docs/setup.md §4)')
+  }
+  return token
 }
 
 /** wrangler.toml as Wrangler itself parses it (the pinned wrangler in worker/node_modules). */

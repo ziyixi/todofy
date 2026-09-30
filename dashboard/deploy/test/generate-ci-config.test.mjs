@@ -76,6 +76,23 @@ test('the secrets file holds the owner, aliases, CSRF key and analytics token', 
   assert.equal(generateSecrets({ ...environment(), DASHBOARD_ACCESS_OWNER_ALIASES: undefined }).ACCESS_OWNER_ALIASES, ' ')
 })
 
+test('the analytics token must not be the deploy token', () => {
+  const token = environment().DASHBOARD_CF_ANALYTICS_TOKEN
+  assert.throws(() => generateSecrets({ ...environment(), CF_API_TOKEN: token }), (error) => {
+    assert.match(error.message, /DASHBOARD_CF_ANALYTICS_TOKEN/)
+    assert.ok(!error.message.includes(token))
+    return true
+  })
+  assert.throws(() => generateSecrets({ ...environment(), CF_API_TOKEN: ` ${token}\n` }), /deploy token/)
+  // A different deploy token, or none (the checks job's placeholder run), is fine.
+  assert.equal(generateSecrets({ ...environment(), CF_API_TOKEN: 'synthetic-deploy-token-0000000000000000' }).CF_ANALYTICS_TOKEN, token)
+  assert.equal(generateSecrets({ ...environment(), CF_API_TOKEN: '' }).CF_ANALYTICS_TOKEN, token)
+  // The deploy token never lands in either file.
+  const env = { ...environment(), CF_API_TOKEN: 'synthetic-deploy-token-0000000000000000' }
+  const both = JSON.stringify([generateConfig(env, base), generateSecrets(env)])
+  assert.ok(!both.includes('synthetic-deploy-token'))
+})
+
 test('the canary hour is optional and bounded', () => {
   assert.equal(generateConfig({ ...environment(), DASHBOARD_CANARY_UTC_HOUR: '' }, base).vars.CANARY_UTC_HOUR, '16')
   assert.equal(generateConfig({ ...environment(), DASHBOARD_CANARY_UTC_HOUR: '0' }, base).vars.CANARY_UTC_HOUR, '0')

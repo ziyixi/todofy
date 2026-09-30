@@ -50,7 +50,8 @@ Worker modules (the worker builder may merge or split, keeping pure logic separa
 
 Bindings: `MAIL_HERO` = service `mail-hero`, entrypoint `Ops`; `TODOFY` = service `todofy`, entrypoint
 `Ops`; `HOME` = Durable Object class `HomeState` (migration `v1`, `new_sqlite_classes`); `ASSETS`
-(`../web/dist`, `run_worker_first = true`, SPA fallback). `workers_dev = false`, `preview_urls = false`,
+(`../web/dist`, `run_worker_first = true`, SPA fallback; every asset request therefore invokes the Worker
+and counts as a Worker request, `limits.md` §2). `workers_dev = false`, `preview_urls = false`,
 route `home.ziyixi.science` with `custom_domain = true` (production config only). One cron
 `*/30 * * * *` (the account uses 1 of its 5 Free cron triggers today).
 
@@ -216,9 +217,13 @@ Desired state, evaluated each tick in this order:
    still ≤ 90 min old, with only its **monthly** rows (R2 operations do not reset at midnight, so a
    GraphQL outage at the day change must not lift a monthly shed and then shed again; daily rows never
    carry over):
-   - enter shed when any trigger resource has `percent ≥ 80`. `reason` = `quota_<resource id>` of the
-     highest percent (e.g. `quota_d1_rows_read`), `until` = next UTC midnight + 10 min (always ≤ 24 h
-     10 min ahead, inside the contract's 36 h). `entered_day` = today;
+   - enter shed when any trigger resource uses ≥ 80 % of its allowance, compared on the measured value
+     (`used × 100 ≥ limit × 80`), never on the displayed `percent` (rounded to 0.1, so 79.95 % shows as
+     80.0 and does not shed; the same holds for 70 % and the 95 % critical item). `reason` =
+     `quota_<resource id>` of the highest share (e.g. `quota_d1_rows_read`), `until` = next UTC
+     midnight + 60 min (always ≤ 25 h ahead, inside the contract's 36 h; the hour lets a continuing
+     shed renewed at the 00:00 tick survive one failed or late `setGuard` there, retried at 00:30).
+     `entered_day` = today;
    - stay shed while the auto guard's `entered_day` is today and the highest trigger percent is ≥ 70
      (hysteresis); reason and `entered_day` stay, `until` is recomputed (same value within a day);
    - otherwise normal (`reason: 'quota_normal'`). A new UTC day therefore starts normal and re-enters
@@ -326,7 +331,12 @@ present, else the first tick the key was active (`item_since`).
 Sending (`TODOFY.reportOps`, only while Todofy's last status lists `ops_digest`): the key is the sorted
 list of `source:code:severity`. Send when the key differs from the last **successfully** sent key, or
 the last success is ≥ 6 h old, or at the 23:30 UTC tick when the last success is ≥ 60 min old (so the
-next day's reminder carries fresh metrics). Report: `{generated_at: tick time, items,
+next day's reminder carries fresh metrics). Nothing is sent during the first 20 min of a UTC day while
+the last success is from an earlier day (the 00:00 tick waits for 00:30): Todofy keeps only the latest
+report and lists it in a day's reminder only if it was generated before that day, and its reminder
+check runs every 10 min, so an 00:00 report (for example an empty one because the daily quotas reset)
+would replace the 23:30 report before that day's reminder claimed it, and the breach would never be
+reported. Report: `{generated_at: tick time, items,
 dashboard_url: 'https://<PUBLIC_HOST>/'}`; an empty `items` list is sent when the set becomes empty (it
 clears Todofy's ops section). A receipt with `stored: false` counts as sent. Failures keep the old key,
 so the next tick retries. This is the only way the dashboard creates Todoist tasks (through Todofy's
@@ -418,7 +428,7 @@ null ("无数据"), never 0.
 | `do_duration` | Σ `doPer[].sum.activeTime` | µs → GB-s: `activeTime / 1e6 × 0.128` (128 MB / 1 GB, as DO pricing's examples compute it) | `namespaceId` |
 | `do_rows_read` / `do_rows_written` | Σ `doPer[].sum.rowsRead` / `rowsWritten` | – | `namespaceId` |
 | `do_storage` | max `doSto[].max.storedBytes` (null if `[]`) | bytes | – |
-| `r2_class_a` | Σ `r2ops[].sum.requests` where `actionType` ∈ A, plus unclassified | – | `bucketName` |
+| `r2_class_a` | Σ `r2ops[].sum.requests` where `actionType` ∈ A or `DeleteObjects`, plus unclassified | – | `bucketName` |
 | `r2_class_b` | Σ `r2ops[].sum.requests` where `actionType` ∈ B | – | `bucketName` |
 | `r2_storage` | Σ `r2sto[].max.payloadSize + metadataSize` | bytes | `bucketName` |
 
@@ -426,8 +436,10 @@ Class A: `ListBuckets, PutBucket, ListObjects, PutObject, CopyObject, CompleteMu
 CreateMultipartUpload, LifecycleStorageTierTransition, ListMultipartUploads, UploadPart, UploadPartCopy,
 ListParts, PutBucketEncryption, PutBucketCors, PutBucketLifecycleConfiguration`. Class B: `HeadBucket,
 HeadObject, GetObject, UsageSummary, GetBucketEncryption, GetBucketLocation, GetBucketCors,
-GetBucketLifecycleConfiguration`. Free: `DeleteObject, DeleteBucket, AbortMultipartUpload`. Any other
-`actionType` counts as Class A (cautious) and adds to `unclassified_r2_operations`. A dataset that
+GetBucketLifecycleConfiguration`. Free: `DeleteObject, DeleteBucket, AbortMultipartUpload`.
+`DeleteObjects` (bulk delete; returned by the live account, on neither class list of the pricing page)
+counts as Class A on purpose and is not unclassified (`limits.md` §1). Any other `actionType` counts as
+Class A (cautious) and adds to `unclassified_r2_operations`. A dataset that
 returns exactly its `limit` rows sets `truncated` on its rows (the sum is a lower bound). Worker CPU
 quantiles (µs) and error counts are not quota rows; the UI may show them per script.
 
@@ -494,14 +506,15 @@ Unit (`worker`, vitest in Node, `cloudflare:workers` aliased to `test/cloudflare
 - `usage`: the query constant equals §7.2; mapping of a synthetic GraphQL response (units, sums, max,
   empty `doSto` → null, truncation, R2 classes and unclassified, breakdown top 5); every failure code;
   projections at period edges; the token only ever in the one header of the one URL (fetch spy).
-- `guard`: decision table (enter at 80, hold ≥ 70 same day, clear < 70, new day, R2 monthly renewal,
+- `guard`: decision table (enter at 80, hold ≥ 70 same day, clear < 70, the 79.95 % and 69.95 % edges,
+  new day, R2 monthly renewal surviving a failed 00:00 call,
   stale usage keeps then lapses as `usage_unknown`, a monthly R2 shed carried across midnight when
   GraphQL fails, overrides and their expiry, until ≤ 36 h); apply rules (no call when unchanged,
   re-apply when the app lost it, capability gate, failures cleared once no call is pending).
 - `canary`: every transition of §5.4 including all deadlines, idempotent start, limits of manual runs,
   run-ID format against `RunId`.
-- `digest`: item table, ordering, 20 items, 8192 bytes, `since`, change key, 6 h and 23:30 rules, empty
-  report; every report validated with `validate.mjs` as `OpsReport`.
+- `digest`: item table, ordering, 20 items, 8192 bytes, `since`, change key, 6 h and 23:30 rules, the
+  hold at the start of a UTC day (23:30 breach, 00:00 cleared: no send until 00:30), empty report; every report validated with `validate.mjs` as `OpsReport`.
 - `ops-client`: **only declared methods** (a recording proxy env; the called names equal the method
   names parsed from `ops-v1.ts` interfaces `MailHeroOps`/`TodofyOps` by `test/declared-methods.ts`,
   the same parse the runtime stubs use) and **every `OPS_ERROR_CODES` value** plus timeout, foreign

@@ -13,10 +13,15 @@ import { Card, Notice, Pill, Time } from './ui'
 
 const PERIOD_ORDER: readonly QuotaPeriod[] = ['daily', 'monthly', 'storage']
 
-function rowTone(percent: number | null): { tone: Tone; label: string } {
-  if (percent === null) return { tone: 'neutral', label: '无数据' }
-  if (percent >= QUOTA_CRITICAL_PERCENT) return { tone: 'danger', label: `超过 ${QUOTA_CRITICAL_PERCENT}%` }
-  if (percent >= GUARD_SHED_PERCENT) return { tone: 'warn', label: `超过 ${GUARD_SHED_PERCENT}%` }
+/** Judged on the measured value like the Worker's guard, not on `percent` (rounded: 79.95 reads 80.0). */
+function reaches(row: QuotaRow, percent: number): boolean {
+  return row.used !== null && row.limit > 0 && row.used * 100 >= row.limit * percent
+}
+
+function rowTone(row: QuotaRow): { tone: Tone; label: string } {
+  if (row.percent === null || row.used === null) return { tone: 'neutral', label: '无数据' }
+  if (reaches(row, QUOTA_CRITICAL_PERCENT)) return { tone: 'danger', label: `超过 ${QUOTA_CRITICAL_PERCENT}%` }
+  if (reaches(row, GUARD_SHED_PERCENT)) return { tone: 'warn', label: `超过 ${GUARD_SHED_PERCENT}%` }
   return { tone: 'ok', label: '正常' }
 }
 
@@ -92,7 +97,7 @@ export function QuotaSection({ usage, now }: { usage: UsageView; now: Date }) {
 function QuotaItem({ row }: { row: QuotaRow }) {
   const labelId = useId()
   const label = QUOTA[row.id] ?? row.id
-  const tone = rowTone(row.percent)
+  const tone = rowTone(row)
   const width = row.percent === null ? 0 : Math.min(100, Math.max(0, row.percent))
   const projected = row.projected_percent === null ? null : Math.min(100, Math.max(0, row.projected_percent))
   const source = httpsUrl(row.source)

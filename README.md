@@ -13,8 +13,8 @@ compiled into each.
 
 Rules ([`AGENTS.md`](AGENTS.md)): the apps never import each other; shared code lives only in `contracts/`
 and `packages/`; each app deploys on its own. An app uses a package through a
-`"file:../../packages/<name>"` dependency and its bundler compiles it in, so a change to a package checks
-and deploys every app that uses it. `contracts/` holds documents, schemas and fixtures, plus two
+`"file:../../packages/<name>"` dependency and its bundler compiles it in, so a change to a package's code
+checks and deploys every app that uses it (its Markdown documents only check them). `contracts/` holds documents, schemas and fixtures, plus two
 dependency-free files the TypeScript Workers import by relative path (`ops-v1/ops-v1.ts` types,
 `ops-v1/validate.mjs` for tests). Work inside an app's directory: `cd mail-hero`, `cd todofy` or
 `cd dashboard`, then follow that app's README. Mail Hero and Todofy were separate repositories until
@@ -70,7 +70,7 @@ a manual run. Actions are pinned by commit SHA.
 | `CI gate` | always | Fails if any job above failed or was cancelled; skipped as unchanged is fine. **The one check to require on `main`** |
 | `Todofy deploy` | `main` only, `todofy/`, `packages/edge-auth/` or `contracts/ops-v1/ops-v1.ts` changed (or dispatched), after `CI gate` | Generate configs, dry-run, D1 migrations, deploy `todofy-core` then the gateway, `/health` and core probes. `production` environment, group `todofy-production` |
 | `Mail Hero deploy` | `main` only, `mail-hero/`, `packages/edge-auth/` or `contracts/ops-v1/ops-v1.ts` changed (or dispatched), after `CI gate` | `generate-ci-config.mjs`, dry-run, D1 migrations, deploy. `production` environment, group `mail-hero-production` |
-| `Dashboard deploy` | `main` only, `dashboard/`, `packages/edge-auth/`, `contracts/ops-v1/ops-v1.ts`, `ops-v1.schema.json` or `validate.mjs` changed (or dispatched), after `CI gate` and after `Todofy deploy` and `Mail Hero deploy` (each success or skipped: the service bindings need their `Ops` entrypoints live) | Build the UI, `generate-ci-config.mjs`, dry-run, deploy (no D1), then a probe that an unauthenticated `GET /` and `/api/v1/overview` are answered by Access with a 302 to the team domain, never by the app. `production` environment, group `dashboard-production` |
+| `Dashboard deploy` | `main` only, `dashboard/`, `packages/edge-auth/`, `contracts/ops-v1/ops-v1.ts`, `ops-v1.schema.json` or `validate.mjs` changed (or dispatched), after `CI gate` and after `Todofy deploy` and `Mail Hero deploy` (each success or skipped: the service bindings need their `Ops` entrypoints live) | Build the UI, `generate-ci-config.mjs`, dry-run, deploy (no D1), then a probe that an unauthenticated `GET /` and `/api/v1/overview` are answered by Access with a 302 to its login page for this host (`<issuer>/cdn-cgi/access/login/<host>`), never by the app or another redirect. `production` environment, group `dashboard-production` |
 
 A change to only `contracts/` or `.github/` re-checks every app but deploys none, except the contract
 files the Workers bundle: all three TypeScript Workers bundle the constants of
@@ -78,8 +78,10 @@ files the Workers bundle: all three TypeScript Workers bundle the constants of
 bundles `ops-v1.schema.json` and `validate.mjs` (it validates every `Ops` answer), so a change to
 those also deploys the dashboard (`BUNDLED_BY` in `.github/scripts/ci_changes.py` maps each bundled
 contract file to its apps; its test compares the map with the Workers' imports). Dispatch on `main` to
-redeploy an app. A change to `packages/edge-auth/` (any file in it) runs `Shared packages` and checks
-**and deploys** all three apps, because every Worker compiles it in. `ci_changes.py` maps each package
+redeploy an app. A change to `packages/edge-auth/` runs `Shared packages` and checks **and deploys** all
+three apps, because every Worker compiles it in; a change to only its Markdown documents
+(`packages/<name>/**/*.md`, e.g. `README.md`, `SPEC.md`) runs `Shared packages` and checks the three apps
+but deploys none (nothing of it is compiled in). `ci_changes.py` maps each package
 to the apps that use it (`PACKAGE_USERS`); `test_ci_changes.py` fails unless that map matches every
 `"file:../../packages/<name>"` dependency and lists every `packages/*/` directory, and a package missing
 from it counts as used by every app. A dashboard-only change checks and deploys only the dashboard (and

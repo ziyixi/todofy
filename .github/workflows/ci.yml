@@ -680,6 +680,8 @@ jobs:
           npm run build --prefix web
       # The owner's addresses, the CSRF key and the analytics token are environment secrets (masked in this
       # public log) and reach the Worker as secrets through --secrets-file; wrangler prints plain vars.
+      # CF_API_TOKEN is passed only so the generator can refuse it as the analytics token (it never
+      # writes it): the deploy token must not become a secret of the internet-facing Worker.
       - name: Generate the production configuration
         env:
           CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
@@ -694,6 +696,7 @@ jobs:
           DASHBOARD_ACCESS_OWNER_ALIASES: ${{ secrets.DASHBOARD_ACCESS_OWNER_ALIASES }}
           DASHBOARD_CSRF_SIGNING_KEY: ${{ secrets.DASHBOARD_CSRF_SIGNING_KEY }}
           DASHBOARD_CF_ANALYTICS_TOKEN: ${{ secrets.DASHBOARD_CF_ANALYTICS_TOKEN }}
+          CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
         run: node deploy/generate-ci-config.mjs
       - name: Validate the bundle before deploying
         working-directory: dashboard/worker
@@ -710,11 +713,14 @@ jobs:
           test -n "$CLOUDFLARE_API_TOKEN"
           npx --no-install wrangler deploy --config wrangler.production.ci.json \
             --secrets-file wrangler.production.secrets.json
-      # Cloudflare Access ("Home") must answer every unauthenticated request with a 302 to the team domain
-      # (the issuer); the app itself must never answer one. A first deploy waits for the Custom Domain's
-      # DNS and certificate, so only "no connection" and 5xx are retried (10 x 15 s). Any other answer, a
-      # 2xx or 4xx from the app or a redirect elsewhere, fails at once. Nothing is followed or printed
-      # except the status code.
+      # Cloudflare Access ("Home") must answer every unauthenticated request with a 302 to its login page
+      # for this host, <issuer>/cdn-cgi/access/login/<host> (then end, "?" or "/"); the app itself must
+      # never answer one. Any other 302, even one to the team domain's root (a zone Redirect Rule to the
+      # App Launcher runs before Access and the Worker), fails. A first deploy waits for the Custom
+      # Domain's DNS and certificate, so only "no connection" and 5xx are retried (10 x 15 s). Any other
+      # answer, a 2xx or 4xx from the app or a redirect elsewhere, fails at once. Nothing is followed or
+      # printed except the status code. This proves Access guards the host, not that the Worker runs:
+      # /health (BUILD_SHA) needs an owner login (docs/verification.md).
       - name: Check that Access answers unauthenticated requests
         run: |
           issuer=$(jq -er '.vars.ACCESS_ISSUER' worker/wrangler.production.ci.json)
@@ -727,11 +733,14 @@ jobs:
               location=${answer#* }
               case "$code" in
                 302)
-                  if [ "${location#"$issuer/"}" != "$location" ]; then
-                    echo "Access answered $path with 302 to the team domain (attempt $attempt)."
-                    continue 2
-                  fi
-                  echo "$path: 302 to somewhere other than the Access team domain." >&2
+                  login="$issuer/cdn-cgi/access/login/$host"
+                  case "$location" in
+                    "$login"|"$login?"*|"$login/"*)
+                      echo "Access answered $path with 302 to its login page for this host (attempt $attempt)."
+                      continue 2
+                      ;;
+                  esac
+                  echo "$path: 302 to somewhere other than the Access login page for this host." >&2
                   exit 1
                   ;;
                 ''|000|5??) sleep 15 ;;

@@ -8,6 +8,7 @@ import {
   degradedOverview,
   guardActiveOverview,
   healthyOverview,
+  quotaRows,
   unreachableOverview,
 } from './test/fixtures'
 import { apiError, freezeClock, installFetch, json, renderApp } from './test/harness'
@@ -161,6 +162,25 @@ describe('overview page', () => {
     expect(within(item).getByText('超过 80%')).toBeInTheDocument()
     expect(within(item).getByText(/按此速度将超出上限/)).toBeInTheDocument()
     expect(within(item).getByText(/查询结果已达行数上限/)).toBeInTheDocument()
+  })
+
+  it('marks a quota row by its measured value, as the guard does (79.95 % reads 80 % but is below it)', async () => {
+    const overview = healthyOverview()
+    await showOverview({
+      ...overview,
+      usage: {
+        ...overview.usage,
+        rows: quotaRows({ d1_rows_read: { used: 3_997_500 }, d1_rows_written: { used: 80_000 } }),
+      },
+    })
+    const quota = card('Cloudflare 用量（Workers Free）')
+    const meter = within(quota).getByRole('meter', { name: 'D1 读取行数' })
+    expect(meter).toHaveAttribute('aria-valuenow', '80')
+    const edge = meter.closest('li') as HTMLElement
+    expect(edge).toHaveClass('quota-ok')
+    expect(within(edge).queryByText('超过 80%')).toBeNull()
+    const over = within(quota).getByRole('meter', { name: 'D1 写入行数' }).closest('li') as HTMLElement
+    expect(within(over).getByText('超过 80%')).toBeInTheDocument()
   })
 
   it('shows a failed canary with the stage that stopped it', async () => {

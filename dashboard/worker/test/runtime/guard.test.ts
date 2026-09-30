@@ -36,7 +36,7 @@ async function appsReport(harness: FlowHarness, input: SetGuardInput, setAt: str
 describe('automatic guard', () => {
   it('sheds at 80 %, stays quiet, re-applies a lost state, holds at 70 % and clears below', async () => {
     h = await startFlows({ bindings: { CANARY_UTC_HOUR: '23' }, usage: d1Reads(81) });
-    const shed: SetGuardInput = { level: 'shed', reason: 'quota_d1_rows_read', until: '2026-09-30T00:10:00.000Z' };
+    const shed: SetGuardInput = { level: 'shed', reason: 'quota_d1_rows_read', until: '2026-09-30T01:00:00.000Z' };
 
     await h.tick('2026-09-29T10:00:00Z');
     expect(await guardCalls(h)).toEqual({ 'mail-hero': [shed], todofy: [shed] });
@@ -74,12 +74,12 @@ describe('automatic guard', () => {
     h = await startFlows({ bindings: { CANARY_UTC_HOUR: '23' }, usage: r2 });
     await h.tick('2026-09-29T22:30:00Z');
     const first = await guardCalls(h);
-    expect(first['mail-hero']).toEqual([{ level: 'shed', reason: 'quota_r2_class_a', until: '2026-09-30T00:10:00.000Z' }]);
+    expect(first['mail-hero']).toEqual([{ level: 'shed', reason: 'quota_r2_class_a', until: '2026-09-30T01:00:00.000Z' }]);
     await appsReport(h, first['mail-hero']?.[0] as SetGuardInput, '2026-09-29T22:30:00.000Z');
 
     // The 23:00 tick would start a canary (CANARY_UTC_HOUR 23); jump to midnight.
     await h.tick('2026-09-30T00:00:00Z');
-    const renewed = { level: 'shed', reason: 'quota_r2_class_a', until: '2026-10-01T00:10:00.000Z' } as const;
+    const renewed = { level: 'shed', reason: 'quota_r2_class_a', until: '2026-10-01T01:00:00.000Z' } as const;
     expect(await guardCalls(h)).toEqual({ 'mail-hero': [renewed], todofy: [renewed] });
     expect(h.analytics.requests.at(-1)?.variables).toMatchObject({ day: '2026-09-30', month: '2026-09-01' });
   });
@@ -105,7 +105,7 @@ describe('automatic guard', () => {
     await h.tick('2026-09-30T01:00:00Z');
     const later = await h.overview();
     expect(later.usage.last_error).toBe('graphql_error');
-    // The shed lapsed at 00:10: both apps are told normal, and nothing new is shed. The reason says
+    // The shed lapsed at 01:00: both apps are told normal, and nothing new is shed. The reason says
     // that no usage is known (not that the quota is normal).
     const calls = await guardCalls(h);
     expect(calls['mail-hero']).toEqual([{ level: 'normal', reason: 'usage_unknown', until: null }]);
@@ -117,12 +117,12 @@ describe('automatic guard', () => {
     h = await startFlows({ bindings: { CANARY_UTC_HOUR: '12' }, usage: r2 });
     await h.tick('2026-09-29T23:30:00Z');
     const first = await guardCalls(h);
-    expect(first['mail-hero']).toEqual([{ level: 'shed', reason: 'quota_r2_class_a', until: '2026-09-30T00:10:00.000Z' }]);
+    expect(first['mail-hero']).toEqual([{ level: 'shed', reason: 'quota_r2_class_a', until: '2026-09-30T01:00:00.000Z' }]);
     await appsReport(h, first['mail-hero']?.[0] as SetGuardInput, '2026-09-29T23:30:00.000Z');
 
     h.analytics.answer = () => new Response('upstream', { status: 503 });
     await h.tick('2026-09-30T00:00:00Z');
-    const renewed = { level: 'shed', reason: 'quota_r2_class_a', until: '2026-10-01T00:10:00.000Z' } as const;
+    const renewed = { level: 'shed', reason: 'quota_r2_class_a', until: '2026-10-01T01:00:00.000Z' } as const;
     expect(await guardCalls(h)).toEqual({ 'mail-hero': [renewed], todofy: [renewed] });
     await appsReport(h, renewed, '2026-09-30T00:00:00.000Z');
     await h.tick('2026-09-30T00:30:00Z');

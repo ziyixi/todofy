@@ -24,10 +24,12 @@ so a change whose run was cancelled or failed is checked (and deployed) again by
   e.g. OPS_LIMITS in contracts/ops-v1/ops-v1.ts, or the schema and validate.mjs the dashboard checks
   answers with), which also deploy every app listed for them. A
   shared package packages/<name>/ is compiled into the apps listed in PACKAGE_USERS, so any change
-  inside it runs the package checks and checks AND deploys each of those apps. A package missing
-  from PACKAGE_USERS counts as used by every app (fail safe; the tests run by the Changes job also
-  fail until PACKAGE_USERS matches the file: dependencies). A file directly under packages/ (a
-  README) is root documentation: gate only.
+  inside it runs the package checks and checks AND deploys each of those apps. Its Markdown documents
+  (packages/<name>/**/*.md: README, SPEC) are compiled into nothing: they run the package checks and
+  check those apps (tests cite the SPEC) but deploy none, so a documentation edit never redeploys
+  production. A package missing from PACKAGE_USERS counts as used by every app (fail safe; the tests
+  run by the Changes job also fail until PACKAGE_USERS matches the file: dependencies). A file
+  directly under packages/ (a README) is root documentation: gate only.
 workflow_dispatch: the "app" input checks and deploys that app ("both" = Todofy and Mail Hero, as
 before; "all" = every app; or one app), and the contracts and shared packages are checked too.
 """
@@ -84,20 +86,30 @@ def outputs(checked: Iterable[str], deployed: Iterable[str], contracts: bool, pa
     return {key: result[key] for key in KEYS}
 
 
+def is_package_document(path: str) -> bool:
+    """A Markdown file inside a package (packages/<name>/**/*.md): documentation, never compiled in."""
+    return path.startswith("packages/") and path.count("/") >= 2 and path.endswith(".md")
+
+
 def classify(paths: Iterable[str]) -> dict[str, bool]:
     paths = [path for path in paths if path]
     apps = {app for app in APPS if any(path.startswith(f"{app}/") for path in paths)}
     # packages/<name>/<file>: at least three components; packages/README.md is documentation.
-    package_names = {path.split("/")[1] for path in paths if path.startswith("packages/") and path.count("/") >= 2}
+    package_paths = [path for path in paths if path.startswith("packages/") and path.count("/") >= 2]
+    package_names = {path.split("/")[1] for path in package_paths}
+    # Users of a package whose code (anything but its documents) changed are checked and deployed;
+    # users of a package whose documents alone changed are only checked.
+    compiled = {path.split("/")[1] for path in package_paths if not is_package_document(path)}
+    documented: set[str] = set()
     for name in package_names:
-        apps.update(PACKAGE_USERS.get(name, APPS))
+        (apps if name in compiled else documented).update(PACKAGE_USERS.get(name, APPS))
     ci = any(path.startswith(".github/") for path in paths)
     shared = ci or any(path.startswith("contracts/") for path in paths)
     bundled = {app for path in paths for app in BUNDLED_BY.get(path, ())}
     return outputs(
-        checked=APPS if shared else apps,
+        checked=APPS if shared else apps | documented,
         deployed=apps | bundled,
-        contracts=bool(apps) or shared,
+        contracts=bool(apps | documented) or shared,
         packages=bool(package_names) or ci,
     )
 

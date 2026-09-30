@@ -11,8 +11,13 @@ import { DAY_MS, HOUR_MS, MINUTE_MS, iso, nextUtcMidnight, utcDay, utcMonthStart
 
 /** Usage older than this (or of another UTC day) is not fresh. */
 export const USAGE_FRESH_MS = 90 * MINUTE_MS;
-/** An automatic shed lasts until the next UTC midnight plus this margin (renewed while still over). */
-export const SHED_MARGIN_MS = 10 * MINUTE_MS;
+/**
+ * An automatic shed lasts until the next UTC midnight plus this margin (renewed while still over). A
+ * shed that continues past midnight (monthly R2 operations) is renewed by the 00:00 tick's setGuard;
+ * the margin covers that call failing or the tick running late, so the 00:30 tick's retry still lands
+ * before the apps' stored `until` (ops-v1: shed only while now < until). Far inside the 36 h bound.
+ */
+export const SHED_MARGIN_MS = 60 * MINUTE_MS;
 /** An owner's forced shed lasts this long unless cleared. */
 export const OWNER_SHED_MS = DAY_MS;
 
@@ -68,12 +73,20 @@ export function usableTriggerRows(usage: UsageSnapshot | null, now: number): rea
   return null;
 }
 
-/** The trigger row with the highest percent (ties: the first in QUOTA_RESOURCES order). */
-export function highestTrigger(rows: readonly QuotaRow[]): { readonly id: QuotaRow['id']; readonly percent: number } | null {
-  let best: { id: QuotaRow['id']; percent: number } | null = null;
+/**
+ * Whether `row` uses at least `percent` % of its allowance. Compared on the measured value, never on the
+ * displayed `percent` (rounded to 0.1): 79.95 % shows as 80 but is below the 80 % threshold.
+ */
+export function reachesPercent(row: Pick<QuotaRow, 'used' | 'limit'>, percent: number): boolean {
+  return row.used !== null && row.limit > 0 && row.used * 100 >= row.limit * percent;
+}
+
+/** The trigger row with the highest share of its allowance (ties: the first in QUOTA_RESOURCES order). */
+export function highestTrigger(rows: readonly QuotaRow[]): QuotaRow | null {
+  let best: QuotaRow | null = null;
   for (const row of rows) {
-    if (!row.guard_trigger || row.percent === null) continue;
-    if (best === null || row.percent > best.percent) best = { id: row.id, percent: row.percent };
+    if (!row.guard_trigger || row.used === null || !(row.limit > 0)) continue;
+    if (best === null || row.used / row.limit > (best.used ?? 0) / best.limit) best = row;
   }
   return best;
 }
@@ -97,10 +110,10 @@ export function evaluateAuto(now: number, usage: UsageSnapshot | null, previous:
   }
   const top = highestTrigger(rows);
   const sameEpisode = previous?.level === 'shed' && previous.entered_day === today;
-  if (sameEpisode && top !== null && top.percent >= GUARD_CLEAR_PERCENT) {
+  if (sameEpisode && top !== null && reachesPercent(top, GUARD_CLEAR_PERCENT)) {
     return { ...previous, until: shedUntil(now) };
   }
-  if (top !== null && top.percent >= GUARD_SHED_PERCENT) {
+  if (top !== null && reachesPercent(top, GUARD_SHED_PERCENT)) {
     return { level: 'shed', reason: `quota_${top.id}`, until: shedUntil(now), entered_day: today, entered_at: now };
   }
   return AUTO_NORMAL;
