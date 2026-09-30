@@ -1,7 +1,8 @@
 # GTD features: a morning brief that remembers, and a GTD ledger with a Sunday review
 
-Status: design, owner-approved scope (2026-09-30). Nothing here is implemented yet. Two features share
-one daily, read-only Todoist snapshot taken inside `TodofyCore`:
+Status: implemented on branch `gtd-features` (2026-09-30), tested locally, not deployed (see
+[verification.md](verification.md) "GTD ledger" and §14 below for what differs from this design). Two
+features share one daily, read-only Todoist snapshot taken inside `TodofyCore`:
 
 1. **Morning brief remembers** — the recommendation report also sees mail tasks from the last 14 days
    that are still open in Todoist, and system reminders can go to their own Todoist project.
@@ -335,3 +336,39 @@ fixtures and `validate.mjs`/`jsonschema` verdicts.
 Owner actions (outside the code): create Todoist projects "Ops" and "Review" and store their IDs as the
 GitHub environment secrets above (optional); set `TODOFY_GTD_REVIEW_ENABLED` (`false` for the first deploy,
 `true` when ready); check the newsletter decoder tolerates unknown fields.
+
+## 14. As built (2026-09-30)
+
+What the code does where it differs from, or adds to, the sections above:
+
+- **Object state** is one JSON document in the DO table `gtd_state` (`runtime/gtd.State`: schedule,
+  collection cursor and tally, ops facts, `last_review_at`, `first_review_at`, HMAC key), like
+  `backup_state`, so later fields need no DO schema change.
+- **Collection** runs as one loop per alarm: task pages, then completed pages, then the aggregate, at most
+  5 Todoist GETs per invocation, continuing 1 s later. A page write is one `WRITE_PAGE` statement; the
+  aggregate reads the day back once (≤ 2,000 rows) together with yesterday's snapshot row, `CLOSED_SINCE`,
+  `MAIL_OPEN` and the recent reviews in one batch, then writes both `gtd_daily` rows, the snapshot's final
+  row and any review completions in one batch. A new attempt on the same day clears that day's rows first.
+  A collection still unfinished when the UTC day changes is recorded `failed` / `interrupted`. A pause
+  (`PROCESSING_PAUSED`, `FORCE_PAUSE_TODOIST`) or a Todoist block mid-way resumes later from the stored
+  cursor. `GTD_PAGE_TIMEOUT_MS` (default 20 s) exists for the tests only.
+- **Review completion**: the completed list is matched against created reviews of the last 3 ISO weeks
+  (`OPEN_REVIEWS`), and `last_review_at` / `first_review_at` are refreshed from `gtd_reviews` at every
+  collection and review, so a lost object storage heals within a day.
+- **Review schedule**: outside Sunday 17:00 UTC – Monday 00:00 UTC nothing runs; inside it, a disabled or
+  paused review is looked at again every 10 minutes (switching it on during the window still makes that
+  week's task). `review_age_days` is reported only while `GTD_REVIEW_ENABLED`.
+- **Carryover**: `REPORT_CARRYOVER_DAYS` is capped at 14 (snapshot rows are kept 14 days). The owner UI's
+  日报 page shows "（其中 M 条是前几天仍未完成的任务）" next to the summary count.
+- **Owner API and UI**: `GET /api/v1/gtd/daily?days=1..120` (OpenAPI `GtdDaily`, days up to today, oldest
+  first, plus the latest review) and the page 更多 → GTD (latest snapshot facts, the latest review, three
+  30-day charts).
+- **Dashboard**: the GTD stages name `workers: ['todofy-core']`, so `flowsOfScript('todofy-core')` gains
+  `gtd` (the gateway `todofy` is unchanged). A stage `note` is shown only while the stage is unmonitored,
+  so only 执行's note reaches the page.
+- **Tests** (synthetic tasks, sentinel titles): `tests/unit/test_gtd.py`, `test_gtd_sql.py` (including the
+  previous release's reminder SQL on a migrated database), prompt goldens, schema and ops-core cases;
+  runtime `test_gtd_ledger.py` (the probe's Durable Object `GtdProbe` runs `runtime/gtd.py` at any time),
+  `test_reports_carryover.py`, `test_gtd_alarm.py` (the shipped stack, ops-v1 status validated against
+  the schema); a failed D1 read inside the carryover is injected by the probe (`fail_sql`). Not covered: a
+  backup part in the privacy sweep (backups copy the D1 tables the sweep checks).

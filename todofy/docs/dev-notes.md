@@ -121,12 +121,14 @@ gateway/                       the gateway Worker `todofy` (TypeScript, own pack
   wrangler.test.toml           runtime tests: DEV_AUTH_BYPASS
   wrangler.test-auth.toml      runtime tests: real Access JWT checks against a loopback issuer
 migrations/0001_init.sql       the D1 schema; 0002_daily_metrics.sql adds the owner UI's daily trends (§6);
-                               0003_ops.sql adds mail_events.canary_run_id, mail_reminders.ops_count/ops_generated_at (§5, ops-v1)
+                               0003_ops.sql adds mail_events.canary_run_id, mail_reminders.ops_count/ops_generated_at (§5, ops-v1);
+                               0004_gtd.sql adds the GTD ledger (gtd_snapshots, gtd_snapshot_tasks, gtd_daily,
+                               gtd_reviews) and mail_reminders.project_id (gtd-features.md)
 api/                           owner-api-v1.openapi.yaml (source of truth for the UI), newsletter report
                                schemas; the webhook body references ../contracts/mail-received-v1 (shared)
 worker/todofy/core/            pure stdlib Python, host-testable, no `js`/`workers` imports
   vocab.py api_errors.py contract.py render.py prompts.py reminder_text.py request_id.py
-  backoff.py classify.py todoist_request.py report_schema.py gemini_wire.py
+  backoff.py classify.py todoist_request.py report_schema.py gemini_wire.py gtd.py
   sql/                         every D1 statement, one module per owning runtime module
 worker/todofy/runtime/         runs only inside workerd (imports `js`, `workers`, `pyodide`)
 tests/unit/                    host tests for core/, the migration and the API contract (golden/ = Go captures)
@@ -266,7 +268,8 @@ Local runtime quirks (not production behaviour)
 
 ### 4.2 SQL
 - Every D1 statement is a module-level `Query(sql, index, sort_allowed=False)` in `worker/todofy/core/sql/`,
-  in the module named after its runtime owner (`ledger`, `views`, `reminders`, `reports`, `retention`).
+  in the module named after its runtime owner (`ledger`, `views`, `reminders`, `reports`, `retention`,
+  `metrics`, `gtd`).
   `tests/unit/test_schema_sql.py` discovers all of them and checks each query plan uses its index with no
   unbounded scan, so adding or widening a statement needs no test edit. Placeholder column lists
   (`SELECT event_id ...`) are meant to be widened by the owner.
@@ -344,7 +347,10 @@ Vars (plain, with defaults): `MAIL_SOURCE_ID`, `GEMINI_API_BASE`, `GEMINI_MODELS
 `TODOIST_DEFAULT_PROJECT_ID`, `LOOKUP_DELAY_MS` (120000), `BACKOFF_BASE_MS` (60000),
 `WATCHDOG_MS` (120000), `TODOIST_ATTEMPT_TIMEOUT_MS` (14000), `REPORT_DEFAULT_TOP` (10), `REPORT_PRECOMPUTE_UTC` ("13:30"), `REMINDER_ENABLED`,
 `LEGACY_TEXT_RETENTION_DAYS`, `MAINTENANCE_MODE`, `PROCESSING_PAUSED`, `FORCE_PAUSE_TODOIST`,
-`BUILD_SHA`, `TODOFY_PUBLIC_HOST` (the reminder's link). Core secrets set by the owner: `GEMINI_API_KEY`,
+`BUILD_SHA`, `TODOFY_PUBLIC_HOST` (the reminder's link); the GTD ledger's `GTD_COLLECT_UTC` ("13:00", `off`
+in the test config), `GTD_REVIEW_ENABLED`, `REPORT_CARRYOVER_DAYS` (14; 0 turns the carryover off),
+`TODOIST_OPS_PROJECT_ID` and `TODOIST_REVIEW_PROJECT_ID` (optional; unset = the default project) and the
+test knob `GTD_PAGE_TIMEOUT_MS` (20000). Core secrets set by the owner: `GEMINI_API_KEY`,
 `TODOIST_API_KEY`. The gateway's vars and secrets (`ACCESS_*`, `TODOFY_HOOKS_HOSTS`,
 `MAIL_WEBHOOK_TOKEN_SHA256(_PREVIOUS)`, `REPORT_BASIC_AUTH_SHA256`, `CSRF_SIGNING_KEY`) are listed in
 gateway-contract.md §1. Test configs shorten `*_MS` values (including the gateway's
@@ -373,12 +379,14 @@ action_request_id, task_id)`, `recompute(owner, action_request_id, kind, top_n)`
 Alarm loop (v2 §5.3): running guard → maintenance check → watchdog alarm → settle the token
 reservation of a summary call an eviction cut short → `ledger.recover_interrupted` → at most one step
 (summary, task, lookup), skipped while `PROCESSING_PAUSED` → `reminder.tick`, `reports.tick`,
-`retention.tick` when their `control` time is due → next alarm = min(ledger due, control times). A
+`retention.tick` when their `control` time is due → `gtd.tick` when `gtd_state` says the snapshot or the
+review is due → next alarm = min(ledger due, control times, GTD times). A
 wake-up that arrives while the loop runs re-arms the alarm for now when the loop ends. DO SQLite tables
 it owns: `control(next_reminder_check, next_report, next_maintenance, todoist_blocked_until)`,
 `llm_usage(day, reserved_tokens, used_tokens, calls)`, `llm_inflight(event_id, day, reserved)`,
 `todoist_calls(minute_bucket, count)`, `report_requests(hour_bucket, count)`,
-`report_failures(kind, top_n, day, count)`. Budget helpers used by R:
+`report_failures(kind, top_n, day, count)`; `gtd_state` (runtime/gtd.py) holds the GTD ledger's schedule,
+collection cursor, ops facts and HMAC key as one JSON document. Budget helpers used by R:
 ```python
 def reserve_tokens(self, tokens: int, now: int) -> bool
 def settle_tokens(self, reserved: int, used: int, now: int) -> None
@@ -457,9 +465,37 @@ Build requests with `todoist_request.build_task_request` and `request_id.todoist
 async def tick(env, coordinator, now: int) -> int     # returns the next check time
 async def page(db, before_day: str | None, limit: int) -> tuple[list[dict], str | None]  # for api.py
 ```
-Claims the UTC day with `INSERT ... ON CONFLICT(day) DO NOTHING` before calling `todoist.create_task`;
+Claims the UTC day with `INSERT ... ON CONFLICT(day) DO NOTHING` before calling `todoist.create_task`,
+freezing the project (`TODOIST_OPS_PROJECT_ID`, else `TODOIST_DEFAULT_PROJECT_ID`; a row from before
+migration 0004 has `project_id = ''` and retries into the default project);
 `unknown` is never resent that day; `failed` retried hourly up to `REMINDER_MAX_ATTEMPTS`. Nothing is sent
 while `REMINDER_ENABLED` is off or `FORCE_PAUSE_TODOIST` or `PROCESSING_PAUSED` is on.
+
+### gtd.py (R; `core/gtd.py`, `core/sql/gtd.py`; [gtd-features.md](gtd-features.md))
+```python
+async def tick(env, coordinator, now: int) -> None    # the snapshot and/or the review, each on its own time
+def next_at(store) -> int                              # for _next_alarm_ms
+def facts(env, store) -> core.gtd.GtdFacts             # ops status(): object storage only
+def release(store, now) / retry_later(store, now, at)  # a shed guard ended / a tick raised
+async def daily(db, days: int, now: int) -> dict       # GET /api/v1/gtd/daily (OpenAPI GtdDaily)
+```
+The coordinator stands in for the Todoist budget (`count_todoist_calls`, `todoist_wait`, `block_todoist`)
+and step metrics (`record_step`). **Snapshot**: once a UTC day at `GTD_COLLECT_UTC`, `GET /api/v1/tasks`
+(every project, `limit=200`, ≤ 10 pages), then `GET /api/v1/tasks/completed/by_completion_date` (7-day
+window, ≤ 5 pages), then the aggregates: at most `CALLS_PER_ALARM` (5) GETs per invocation, continuing a
+second later from the cursor in `gtd_state`. Each page is one `INSERT … SELECT … FROM json_each(?)` of
+`core.gtd.snapshot_row` objects: a metadata whitelist plus `content_hmac` (HMAC-SHA256 with a key made in
+and never leaving the object's storage); titles and descriptions are dropped with the page. A failed list
+is retried in 10 minutes (Retry-After honoured; 401/403 blocks Todoist for 6 h like any call) at most three
+times a UTC day; more than 10 pages is `partial` (aggregates stored with `complete = 0`, no counters, no
+carryover); a failed completed list leaves `completed_7d` NULL (`completed_source = 'none'`). Skipped while
+`PROCESSING_PAUSED`, `FORCE_PAUSE_TODOIST`, a Todoist block or a full call window; a `shed` guard defers a
+new snapshot (job `gtd_snapshot`, 48 h bound). **Review**: Sunday 17:00 UTC to the end of the ISO week, when
+`GTD_REVIEW_ENABLED`: one Todoist task per ISO week (`gtd_reviews`, claimed before the POST with its title,
+body and project frozen; `X-Request-Id = todoist_request_id(subject, body, "todofy-review:" + week)`);
+`unknown` is never resent, `failed` is retried hourly up to 5 times within the week, a week left `sending`
+becomes `unknown`. The body holds counts, trends and links only (`core.gtd.review_body`). The daily
+completed list marks a review task done (`completed_at`), which drives `review_age_days`.
 
 ### reports.py (R)
 ```python
@@ -469,6 +505,13 @@ async def serve(env, coordinator, kind: str, query: str) -> Result  # newsletter
 async def count_auth_failure(db, now: int) -> Result  # a failed Basic credential: 401, or 429 once locked
 async def latest(db) -> dict                          # ReportsLatest for api.py
 ```
+The recommendation's input is the 24 h window plus the **carryover** (`reports.carryover`): mail tasks of
+the `REPORT_CARRYOVER_DAYS` (≤ 14) before the window whose `task_id` the newest `ok` snapshot finished in the
+last 26 h still lists, newest first, at most 30, each as `[N 天前] summary`, after the new rows; the prompt
+is then `prompts.recommend_prompt(top_n, carryover=True)`. Without such a snapshot (none, `failed`,
+`partial`, `collecting`, stale), with `REPORT_CARRYOVER_DAYS = 0` or on any error in that read, the input,
+prompt and payload are exactly the 24 h report. The payload adds `new_count` and `carryover_count`
+(`task_count` is their sum; `empty_window` only when both are 0). The summary report never carries.
 Precompute only `top_n = REPORT_DEFAULT_TOP` (default 10, what the newsletter asks for); other `top`
 values are computed on demand under the hourly cap (429 with `Retry-After` until the next UTC hour). A
 summary longer than the newsletter's 12,000 characters is cut at a line break with a notice
@@ -481,7 +524,9 @@ at most `PRECOMPUTE_ATTEMPTS` (3) times a day. On-demand work runs in the object
 ```python
 async def tick(db, env, now: int) -> bool             # one bounded sweep; True if more work remains
 ```
-Uses only `core.sql.retention` batches (≤ 6 deletes per call); never deletes `mail_events`.
+Uses only `core.sql.retention` batches (≤ 10 deletes per call: the GTD ledger's raw snapshot rows after 14
+days, 1000 a batch; its snapshots and aggregates after 120 days; its reviews after 400); never deletes
+`mail_events`.
 
 ### Gateway (G; `gateway/src`)
 `access.ts` and `csrf.ts` are adapters over the shared package `packages/edge-auth` (the repository
@@ -562,6 +607,11 @@ setGuard(input)   object storage only (ops_guard); idempotent; shed until ≤ 36
 canaryResult(id)  one primary-key read (ledger.get)
 reportOps(report) object storage only (ops_report, ≤ 8 KiB); a later generated_at already stored wins
 ```
+`status()` also reports the GTD ledger from the object's `gtd_state` (no D1 read): counters `inbox_open`,
+`inbox_oldest_days`, `overdue`, `carryover_open`, `completed_7d` (the latest complete aggregate; left out
+while unknown) and `review_age_days` (while `GTD_REVIEW_ENABLED`); signals `gtd_snapshot_stale` (warning,
+`age_hours`: collection allowed and the last ok snapshot, or the first attempt, over 48 h ago) and
+`review_overdue` (info, `days` > 10: shown, never `degraded`, never in the digest).
 Object storage (`runtime/ops.DO_SCHEMA`, may be lost like the other object tables): `ops_guard` (epoch ms),
 `ops_job_runs` (last run of each deferrable job), `ops_report` (the dashboard's latest report).
 
@@ -578,8 +628,8 @@ count, Overview counts, recent pages, the reminder), `metrics._walk` skips them,
 answers `canary: true`. A processing pause holds a canary `pending` (reported as `processing`).
 
 Guard `shed` defers only: a new weekly backup (unless the last complete one is older than 7.5 days, 12 h
-before `backup_stale` at 8 days, or there is none; a running job continues), the retention tick and the
-metrics rollup (each unless its last complete run is 72 h old; a run that continues in a minute, one batch
+before `backup_stale` at 8 days, or there is none; a running job continues), a new GTD snapshot (unless the
+last one is 48 h old), the retention tick and the metrics rollup (each unless its last complete run is 72 h old; a run that continues in a minute, one batch
 of a backlog, does not count, so once due a job keeps its cadence until it has caught up). A deferred job's own time moves to min(guard end, bound); ending or changing the guard
 makes them due again and wakes the object. Everything else keeps running: intake, the ledger steps,
 canaries, recovery, the watchdog, the reminder/digest, report precompute and the cron wake.
@@ -601,8 +651,11 @@ that evening.
 Extend `tests/fakes/server.py` rather than forking it: `gemini_fake.py` (x-goog-api-key check,
 `generateContent` queue, `usageMetadata`, records `systemInstruction`/`responseSchema`) and
 `todoist_fake.py` (Bearer check → 401, auto-increment ids, `GET /api/v1/tasks` paged
-`{results, next_cursor}`, records `X-Request-Id`); both seed 429 with `Retry-After` in seconds and
-HTTP-date forms, `delay_ms`, and `hang`.
+`{results, next_cursor}` for one project or all, `GET /api/v1/tasks/completed/by_completion_date` paged
+`{items, next_cursor}` with the cursor left out on the last page, task metadata (priority, due, deadline,
+labels, added_at), `complete()`/`delete()`, records `X-Request-Id`); both seed 429 with `Retry-After` in
+seconds and HTTP-date forms, `delay_ms`, and `hang`. The reports probe (`tests/runtime/reports_probe`) also
+has a Durable Object, `GtdProbe`, that runs `runtime/gtd.py` on a real object storage at any `now`.
 
 ## 6. Metrics and ops queries
 
@@ -627,7 +680,7 @@ Point layouts (one dataset; `blob1` tells them apart):
 | Writer | `index1` | `blob1` | `blob2` | `blob3` | `blob4` | `double1` | `double2` | `double3` | `double4` |
 |---|---|---|---|---|---|---|---|---|---|
 | gateway, per request and cron | route | host kind: `owner`, `hooks`, `unknown`, `cron` | method (`OTHER` if unusual) | route template (`/api/v1/events/{id}`, `asset`, `page`, `other`, `wake`) | status class `2xx`…`5xx` | wall ms to response headers | request Content-Length (0 if none) | response Content-Length (0 if none) | — |
-| core, per upstream step | step | step: `summary`, `canary` (a canary's summary call), `task`, `lookup`, `reminder`, `report`, `backup` | outcome: `ok`/`failed` (Gemini), `TaskResult` (task, reminder), ledger state (lookup) | error code or empty | Gemini model or empty | upstream wall ms | tokens in (prompt) | tokens out (total − prompt) | requests sent (models tried, POSTs; 0 for lookups) |
+| core, per upstream step | step | step: `summary`, `canary` (a canary's summary call), `task`, `lookup`, `reminder`, `report`, `backup`, `gtd` (one read-only snapshot page), `review` (the Sunday review's create) | outcome: `ok`/`failed` (Gemini), `TaskResult` (task, reminder), ledger state (lookup) | error code or empty | Gemini model or empty | upstream wall ms | tokens in (prompt) | tokens out (total − prompt) | requests sent (models tried, POSTs; 0 for lookups) |
 
 Never written: paths, query strings, event IDs, subjects, addresses, the owner's identity, upstream bodies.
 `backup` is one point per job, written when it ends: outcome `ok`/`failed`, code `storage_error` or
@@ -678,6 +731,7 @@ content; keep it that way (the repository and its logs are public).
 | Backup job progress or errors | Workers Logs of `todofy-core`, filter on the `backup` field: `planned`, `done` (rows, bytes), `deleted`, `error` (exception type, step), `failed` (`storage_error`, `lease_expired`), `retention_error` |
 | Legacy text size (drives backup size and time) | `SELECT count(*) AS n, sum(length(CAST(text AS BLOB))) AS bytes FROM legacy_mail_text` via `npx wrangler d1 execute <database> --remote --command "..."` (reads each legacy row once) |
 | Account-wide D1 rows read/written today (shared with Mail Hero) | Cloudflare dashboard → D1 → metrics, or Workers & Pages → usage; a backup reads each row of every table once |
+| GTD ledger: the day's snapshot and aggregates (counts only, no task text) | owner UI → 更多 → GTD, or `SELECT day, status, task_count, pages, error_code FROM gtd_snapshots WHERE day >= '<YYYY-MM-DD>'` and `SELECT * FROM gtd_daily WHERE day >= '<YYYY-MM-DD>'` via `npx wrangler d1 execute <database> --remote --command "..."`; Workers Logs field `gtd` (`collect`, `review`: states, codes, counts) |
 | Daily metrics as stored (counts only, no content) | `SELECT day, key, value FROM daily_metrics WHERE day >= '<YYYY-MM-DD>' ORDER BY day, key` via `npx wrangler d1 execute <database> --remote --command "..."` (the primary-key index; a dozen rows a day) |
 | Metrics write failures or a cursor restart | Workers Logs of `todofy-core`, filter on the `metrics` field: `write_failed` (Analytics Engine), `count_failed` (the object's counters), `cursor_reset` (the ledger database changed, §6); the gateway drops a failed write without a log line |
 
@@ -709,7 +763,7 @@ Rows are sampled at high volume, so always count with `SUM(_sample_interval)` an
           SUM(_sample_interval) AS steps
    FROM todofy_metrics
    WHERE timestamp > NOW() - INTERVAL '7' DAY
-     AND blob1 IN ('summary', 'task', 'lookup', 'reminder', 'report', 'backup') AND blob3 != ''
+     AND blob1 IN ('summary', 'task', 'lookup', 'reminder', 'report', 'backup', 'gtd', 'review') AND blob3 != ''
    GROUP BY hour, step, code
    ORDER BY hour DESC, steps DESC
    ```

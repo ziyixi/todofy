@@ -72,6 +72,45 @@ level = production, real static values from the GitHub production variables, rea
 Pending: the release; afterwards compare both Workers' bindings and var hashes with the previous version
 (only `BUILD_SHA` may differ) and check that pywrangler's echoed command shows the Todoist project masked.
 
+## GTD ledger and the morning-brief carryover (2026-09-30, macOS, local only, not released)
+
+Branch `gtd-features` (a clone of `main` at `dec8ac7` plus the feature commits; [gtd-features.md](gtd-features.md)),
+synthetic tasks and placeholder values only, no GitHub, Cloudflare or Todoist call:
+
+| Step | Result |
+|---|---|
+| `Changes`: `python3 -m unittest discover -s .github/scripts` | 147 tests OK |
+| `Contracts`: Mail Hero `contract-fixtures`, `ops-contract`, `native-ops` | 38 passed |
+| `Contracts`: `test_mail_hero_compat`, `test_contract`, `test_openapi_vocab`, `test_ops_contract`, `test_ops_core` | 311 passed |
+| `Contracts`: gateway `test/ops.test.ts`; dashboard `ops-client`, `guard`, `canary`, `digest` | 10 and 61 passed |
+| `Todofy static checks`: ruff check and format; host tests `tests/unit tests/fakes tools deploy` | ok; 1069 passed, 1 skipped (the protos cross-check) |
+| gateway lint, typecheck, `npm test`; `web` `check:api`, typecheck, tests, build, source guard | ok; 87 and 79 passed; build and guard ok |
+| both dry-runs through `deploy_vars.py` (review switch `false`, Ops project unset, Review project a placeholder) | ok; `GTD_REVIEW_ENABLED` and `TODOIST_REVIEW_PROJECT_ID` added as `(hidden)`, no `TODOIST_OPS_PROJECT_ID`; `GTD_COLLECT_UTC` `13:00`, `REPORT_CARRYOVER_DAYS` `14`; `todofy/core/gtd.py` in the bundle |
+| `Todofy runtime`: the three shards as CI plans them (`pytest_shards.py`, `-n 4`), `test_alarm.py` alone, then `pytest_completeness.py` | 159 + 161 + 132 passed, 2 alone; "all 454 collected tests ran exactly once across 3 shards and passed" |
+| `Dashboard checks`: worker lint, typecheck, tests, `test:runtime`; web lint, typecheck, tests, build; `deploy/test` | 187, 61 and 100 passed; build ok; 14 passed |
+
+The new runtime files: `test_gtd_ledger.py` (the probe's `GtdProbe` object runs `runtime/gtd.py` at any
+time: paging across alarms, the page cap, aggregates, retries and blocks, switches, the shed guard, the
+Sunday review once per ISO week including 2026-W53 and the US DST Sunday, completion detection, retention,
+and a privacy sweep of every D1 table, the object's state, the review text, the owner API and the probe's
+log), `test_reports_carryover.py` (carryover, every fallback including an injected D1 failure, the
+newsletter path, the Ops project) and `test_gtd_alarm.py` (the shipped stack: the alarm's snapshot, ops-v1
+status validated against the schema, the owner API, an owner recompute that carries an open task, a
+paused Todoist).
+
+One earlier full run with 4 processes on the same machine failed
+`test_cron.py::test_cron_heals_an_alarm_lost_with_the_object_storage` once (`crashes` 2, expected 1) while
+other suites were running; it passed 3 times alone and in the CI-planned shard run above. Not seen before;
+left as a possible timing flake under load.
+
+Pending: the owner steps in [cloudflare-setup.md](cloudflare-setup.md) §8 (the switch
+`TODOFY_GTD_REVIEW_ENABLED`, the optional project secrets, the newsletter decoder check); the release with
+migration `0004_gtd`; the first real 13:00 snapshot and its row counts and CPU in Workers Logs; the first
+carried-over morning brief; the first Sunday review task; the dashboard's GTD flow with real counters.
+Unverified against the real Todoist: whether completing a recurring task appears in the completed list
+(it only affects `completed_7d` and `closed_1d`), and the completed list's real maximum `limit` (200 is
+used).
+
 ## Production
 
 Observed on the live account, hosts and callers on 2026-09-29; times are UTC. Only IDs, counts, status
@@ -169,3 +208,4 @@ First-day samples, not the one-week usage check.
 - ops-v1 (local only so far, see above): the release with migration `0003_ops`, `status().capabilities`
   reporting `canary_consumer` in production, a live Mail Hero canary ending `ok` with no Todoist task, and
   the first real reminder with an ops section.
+- The GTD ledger and the morning-brief carryover (local only so far, see above).
