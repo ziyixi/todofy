@@ -38,8 +38,9 @@ export const USAGE_QUERY = `query($a: string!, $day: Date!, $start: Time!, $end:
 const DATASET_LIMITS = { workers: WORKERS_QUERY_LIMIT, d1: 10, d1s: 10, doInv: 10, doPer: 10, doSto: 5, r2ops: 50, r2sto: 10, ai: 20 } as const;
 type Dataset = keyof typeof DATASET_LIMITS;
 /**
- * Datasets whose absence (not an array) leaves only their own rows without data instead of refusing the
- * whole answer: Workers AI does not gate the guard, so it must never cost the other rows.
+ * Datasets whose absence (not an array), or whose own GraphQL error (an `errors` entry whose path is
+ * that dataset, see withoutFailedOptionalDatasets), leaves only their own rows without data instead of
+ * refusing the whole answer: Workers AI does not gate the guard, so it must never cost the other rows.
  */
 const OPTIONAL_DATASETS: ReadonlySet<Dataset> = new Set<Dataset>(['ai']);
 
@@ -148,13 +149,43 @@ export async function fetchUsage(
     return { ok: false, code: timedOut ? 'timeout' : 'invalid_response', http_status: 200 };
   }
   if (isObject(body) && Array.isArray(body.errors) && body.errors.length > 0) {
-    return { ok: false, code: 'graphql_error', http_status: 200 };
+    const partial = withoutFailedOptionalDatasets(body, body.errors);
+    if (partial === null) return { ok: false, code: 'graphql_error', http_status: 200 };
+    body = partial;
   }
   const data = parseUsage(body, now);
   return data === null ? { ok: false, code: 'invalid_response', http_status: 200 } : { ok: true, data };
 }
 
 type JsonObject = Record<string, unknown>;
+
+/**
+ * A GraphQL answer with `errors` that all concern optional datasets of the account (each error's `path`
+ * is `viewer.accounts.0.<optional dataset>...`): the same answer with those datasets removed, so only
+ * their rows read "无数据" and every other row (and so the guard) still parses. When one dataset fails
+ * (token scope, entitlement, a per-dataset outage), GraphQL answers it as null next to an `errors`
+ * entry with its path. Any other error (no path, another dataset, the whole account) returns null:
+ * the answer stays `graphql_error`, as before.
+ */
+function withoutFailedOptionalDatasets(body: JsonObject, errors: readonly unknown[]): JsonObject | null {
+  const failed = new Set<string>();
+  for (const error of errors) {
+    const path: unknown = isObject(error) ? error.path : undefined;
+    if (!Array.isArray(path)) return null;
+    const steps = path as readonly unknown[];
+    if (steps[0] !== 'viewer' || steps[1] !== 'accounts' || steps[2] !== 0) return null;
+    const name = steps[3];
+    if (typeof name !== 'string' || !OPTIONAL_DATASETS.has(name as Dataset)) return null;
+    failed.add(name);
+  }
+  if (!isObject(body.data) || !isObject(body.data.viewer)) return null;
+  const accounts: unknown = body.data.viewer.accounts;
+  if (!Array.isArray(accounts)) return null;
+  const [first, ...rest] = accounts as readonly unknown[];
+  if (!isObject(first)) return null;
+  const account = Object.fromEntries(Object.entries(first).filter(([name]) => !failed.has(name)));
+  return { data: { ...body.data, viewer: { ...body.data.viewer, accounts: [account, ...rest] } } };
+}
 
 function isObject(value: unknown): value is JsonObject {
   return typeof value === 'object' && value !== null && !Array.isArray(value);

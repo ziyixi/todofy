@@ -16,7 +16,7 @@ import {
   usageVariables,
   type FetchLike,
 } from '../src/usage.ts';
-import { REALISTIC_USAGE, SYNTHETIC_D1, SYNTHETIC_NS, aiNeurons, graphqlBody, usageWithScripts } from './graphql-fixture.ts';
+import { REALISTIC_USAGE, SYNTHETIC_D1, SYNTHETIC_NS, aiNeurons, graphqlBody, graphqlBodyWithAiError, usageWithScripts } from './graphql-fixture.ts';
 
 const NOW = Date.parse('2026-09-29T12:00:00Z');
 const TOKEN = 'synthetic-analytics-token-000000000000';
@@ -322,6 +322,49 @@ describe('fetchUsage', () => {
     expect(await fetchUsage(undefined, ACCOUNT, NOW, fn)).toEqual({ ok: false, code: 'not_configured', http_status: null });
     expect(await fetchUsage('  ', ACCOUNT, NOW, fn)).toEqual({ ok: false, code: 'not_configured', http_status: null });
     expect(calls).toHaveLength(0);
+  });
+
+  it('keeps every other row when only the `ai` dataset answers a GraphQL error', async () => {
+    const result = await fetchUsage(TOKEN, ACCOUNT, NOW, fetcher(() => Response.json(graphqlBodyWithAiError({ workersRequests: 500, d1RowsRead: 4_500_000 }))).fn);
+    expect(result.ok).toBe(true);
+    const rows = result.ok ? result.data.rows : [];
+    expect(row(rows, 'ai_neurons')).toMatchObject({ used: null, percent: null, projected: null, breakdown: [] });
+    expect(row(rows, 'workers_requests').used).toBe(500);
+    expect(row(rows, 'd1_rows_read')).toMatchObject({ used: 4_500_000, percent: 90 });
+    expect(row(rows, 'r2_class_a').used).toBe(3000);
+    expect(JSON.stringify(result)).not.toContain('secret-text');
+  });
+
+  it('drops a failed `ai` dataset even when its error path points inside it', async () => {
+    const body = graphqlBody(aiNeurons(40)) as { data: unknown };
+    const answer = { data: body.data, errors: [{ message: 'x', path: ['viewer', 'accounts', 0, 'ai', 1, 'sum'] }] };
+    const result = await fetchUsage(TOKEN, ACCOUNT, NOW, fetcher(() => Response.json(answer)).fn);
+    expect(result.ok && row(result.data.rows, 'ai_neurons').used).toBeNull();
+  });
+
+  it('still refuses the answer when any error is not about an optional dataset', async () => {
+    const aiError = graphqlBodyWithAiError() as { data: unknown; errors: unknown[] };
+    const refused: unknown[] = [
+      // An error without a path, next to the `ai` one.
+      { data: aiError.data, errors: [...aiError.errors, { message: 'x' }] },
+      // A required dataset failed.
+      { data: aiError.data, errors: [{ message: 'x', path: ['viewer', 'accounts', 0, 'd1'] }] },
+      // The whole account failed.
+      { data: aiError.data, errors: [{ message: 'x', path: ['viewer', 'accounts', 0] }] },
+      // Another account index, or a path that is not a list.
+      { data: aiError.data, errors: [{ message: 'x', path: ['viewer', 'accounts', 1, 'ai'] }] },
+      { data: aiError.data, errors: [{ message: 'x', path: 'viewer.accounts.0.ai' }] },
+      // The `ai` path, but no account data to keep.
+      { data: null, errors: [{ message: 'x', path: ['viewer', 'accounts', 0, 'ai'] }] },
+      { data: { viewer: { accounts: [] } }, errors: [{ message: 'x', path: ['viewer', 'accounts', 0, 'ai'] }] },
+    ];
+    for (const answer of refused) {
+      expect(await fetchUsage(TOKEN, ACCOUNT, NOW, fetcher(() => Response.json(answer)).fn)).toEqual({
+        ok: false,
+        code: 'graphql_error',
+        http_status: 200,
+      });
+    }
   });
 
   it('turns every failure into a code without remote text', async () => {

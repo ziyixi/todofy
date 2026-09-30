@@ -433,8 +433,11 @@ this account: `do_storage.used` is then null ("无数据"), never 0. The `ai` da
 added on 2026-09-30 after the owner checked `aiInferenceAdaptiveGroups` with this filter and these
 fields on the live account (it answered `[]`: no AI calls yet); it rides in the same request, so a tick
 still makes one GraphQL call. Unlike storage, an answered `[]` there is a day without AI calls:
-`ai_neurons.used` is 0. Only an answer without the `ai` field leaves that one row at null ("无数据");
-the other rows still parse (every other dataset missing refuses the answer, as before).
+`ai_neurons.used` is 0. An answer without the `ai` field, or one whose `errors` all have a `path`
+into it (`viewer.accounts.0.ai…`, what GraphQL sends when only that dataset fails: token scope,
+entitlement, a per-dataset outage), leaves that one row at null ("无数据"); the other rows still parse
+and the guard still sees them. Any other error (no path, another dataset, the whole account) keeps the
+answer `graphql_error`, and every other dataset missing refuses it, as before.
 
 ### 7.3 Mapping
 

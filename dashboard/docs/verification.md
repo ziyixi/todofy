@@ -233,8 +233,8 @@ Synthetic data only, no production call:
 | Job | Step | Result |
 | --- | --- | --- |
 | `Dashboard checks` | `node --test deploy/test/*.test.mjs` | 14 passed |
-| | worker lint, typecheck, `npm test` | ok; 13 files, 195 tests passed (`[]` → 0 used, a missing `ai` field → 无数据 for that row only, per-model breakdown, 20-row truncation, projection, `ai_neurons_high` at 80/95 %, the guard ignoring the row) |
-| | worker `npm run test:runtime` (workerd) | 6 files, 62 tests passed (the fake GraphQL's `ai: []` reads 0; at 97 % the digest carries `ai_neurons_high` critical and neither app gets `setGuard`) |
+| | worker lint, typecheck, `npm test` | ok; 13 files, 198 tests passed (`[]` → 0 used, a missing `ai` field or a GraphQL error whose path is only `ai` → 无数据 for that row only while every other row parses, any other error still `graphql_error`, per-model breakdown, 20-row truncation, projection, `ai_neurons_high` at 80/95 %, the guard ignoring the row) |
+| | worker `npm run test:runtime` (workerd) | 6 files, 63 tests passed (the fake GraphQL's `ai: []` reads 0; at 97 % the digest carries `ai_neurons_high` critical and neither app gets `setGuard`; with `ai` failing alone (null plus an `errors` entry on its path) D1 at 90 % still sheds both apps) |
 | | web lint, typecheck, tests, build; import guard | ok; 13 files, 102 tests passed; no cross-origin references |
 | | placeholder config dry-run (`GITHUB_SHA` set as in CI) | ok; bindings unchanged, the four secrets hidden; 173.03 KiB |
 | `Changes` | from `todofy/`: `uv run python -m unittest discover -s ../.github/scripts` | 147 tests OK |

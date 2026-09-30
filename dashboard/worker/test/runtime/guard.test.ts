@@ -6,7 +6,7 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import type { SetGuardInput } from '../../../../contracts/ops-v1/ops-v1.ts';
 import type { GuardResponseV2 } from '../../src/api-v2-types.ts';
-import { aiNeurons } from '../graphql-fixture.ts';
+import { aiNeurons, graphqlBodyWithAiError } from '../graphql-fixture.ts';
 import { d1Reads, expectValid, shedState, startFlows, status, type FlowHarness } from './flows.ts';
 
 let h: FlowHarness | undefined;
@@ -151,6 +151,20 @@ describe('automatic guard', () => {
     await h.tick('2026-09-29T12:30:00Z');
     expect(await guardCalls(h)).toEqual({ 'mail-hero': [], todofy: [] });
     expect((await h.snapshot()).digest.items.find((i) => i.code === 'ai_neurons_high')?.severity).toBe('warning');
+  });
+
+  it('still sheds for D1 when only the Workers AI dataset answers a GraphQL error', async () => {
+    h = await startFlows({ bindings: { CANARY_UTC_HOUR: '23' } });
+    h.analytics.answer = () => Response.json(graphqlBodyWithAiError(d1Reads(90)));
+    await h.tick('2026-09-29T10:00:00Z');
+    const shed: SetGuardInput = { level: 'shed', reason: 'quota_d1_rows_read', until: '2026-09-30T01:00:00.000Z' };
+    expect(await guardCalls(h)).toEqual({ 'mail-hero': [shed], todofy: [shed] });
+    const snap = await h.snapshot();
+    expect(snap.usage.last_error).toBeNull();
+    expect(snap.usage.rows.find((row) => row.id === 'ai_neurons')).toMatchObject({ used: null, percent: null });
+    expect(snap.usage.rows.find((row) => row.id === 'd1_rows_read')).toMatchObject({ percent: 90 });
+    expect(snap.digest.items.map((i) => i.code)).not.toContain('usage_unavailable');
+    expect(JSON.stringify(snap)).not.toContain('secret-text');
   });
 
   it('clears guard_apply_failed once the shed that failed is no longer wanted', async () => {

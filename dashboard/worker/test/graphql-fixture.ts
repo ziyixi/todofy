@@ -187,3 +187,17 @@ export function graphqlBody(usage: SyntheticUsage = {}): unknown {
     errors: null,
   };
 }
+
+/**
+ * The answer GraphQL gives when only the `ai` dataset fails (token scope, entitlement, a per-dataset
+ * outage): `ai` is null and one `errors` entry names its path; every other dataset is answered.
+ */
+export function graphqlBodyWithAiError(usage: SyntheticUsage = {}): unknown {
+  const body = graphqlBody(usage) as { data: { viewer: { accounts: Record<string, unknown>[] } } };
+  const account = body.data.viewer.accounts[0];
+  if (account !== undefined) account.ai = null;
+  return {
+    data: body.data,
+    errors: [{ message: 'synthetic secret-text: not authorized for aiInferenceAdaptiveGroups', path: ['viewer', 'accounts', 0, 'ai'] }],
+  };
+}
