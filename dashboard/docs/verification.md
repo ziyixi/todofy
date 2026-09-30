@@ -175,6 +175,41 @@ first stage at the flow's worst level, and the card opens on it); the home Cloud
 | `Contracts` | Dashboard `ops-client`, `guard`, `canary`, `digest` | 4 files, 61 tests passed |
 | `Changes` | `uv run python -m unittest discover -s ../.github/scripts` (from `todofy/`) | 63 tests OK |
 
+## 1e. Local, the v2 review fixes (2026-09-30)
+
+Branch `dashboard-v2` at `4fb05d5` on `origin/main` `3a46388`: the two commits after `923c973` fix the
+fidelity and correctness review (strip and badges never say less than the views, 部分接入 only in
+place of 正常, narrow-desktop layout, data age always in the top bar, stage links, stage facts, canary
+list semantics, compact phone Worker cards and quota rows, sortable Worker table, full R2 names, D1/DO
+`match` accepted by the privacy scan, the Cloudflare view capped at 50 rows, and the three UI tests
+lost with v1). Same machine and synthetic setup as §1d.
+
+**Browser pass** (same Miniflare harness and headless Chromium as §1d), seven scenarios × five routes ×
+1280/390 px, light and dark: no console error or warning, no failed request, no horizontal overflow.
+Measured, not only styled:
+
+| Check | Result |
+| --- | --- |
+| Top bar and tiles at 720 / 740 / 768 / 800 / 900 / 960 / 1280 px | `scrollWidth − clientWidth` 0 at every width; tabs 64 px high, one line each; brand ends left of the tabs; tiles wrap 3 + 1 below 800 px and never pass the 16 px gutter |
+| Todofy `status()` throws once | strip "◆ 1 项未知 · Todofy：无法连接" linking to 首页; 首页 badge 1; tile "◆ 无法连接 · 连续 1 次" with the word on one line |
+| Website probe fails | strip "▲ 1 项需关注 · 个人网站：HTTP 状态异常"; the 网站发布 stage is not listed twice |
+| Mail Hero degraded | strip "1 项故障 · 1 项需关注"; 查看 opens `#/flows/mail-to-task/<stage>` on that stage |
+| 20 Workers at 390 px | each Worker card 95–97 px (was ~240): name, app; 请求 · 错误 · p99 bar; flows, subrequests, DO requests and last request behind 更多 |
+| Quota rows at 1280 px | every row 82 px; estimates below 80 % behind the row's disclosure |
+
+**CI steps from a fresh clone** of the branch, the workflow's commands and placeholder values:
+
+| Job | Step | Result |
+| --- | --- | --- |
+| `Dashboard checks` | generator tests | 8 passed |
+| | worker lint, typecheck, `npm test` | OK; 13 files, 186 tests passed |
+| | worker `npm run test:runtime` (workerd) | 6 files, 61 tests passed |
+| | web lint, typecheck, tests, build | OK; 13 files, 99 tests passed; bundle 365 kB (113 kB gzip); no cross-origin references |
+| | import guard | OK |
+| | placeholder config dry-run (`GITHUB_SHA` set as in CI) | OK: bindings `HOME`, `MAIL_HERO`, `TODOFY`, `ASSETS`; the four secrets hidden; 172.76 KiB |
+| `Contracts` | Dashboard `ops-client`, `guard`, `canary`, `digest` | 4 files, 61 tests passed |
+| `Changes` | `python3 -m unittest discover -s .github/scripts`, and from `todofy/` with `uv run` | 63 tests OK (both) |
+
 ## 2. Production (pending)
 
 None of these has been done; each needs the first `Dashboard deploy` on `main` (after Todofy and Mail
@@ -199,6 +234,8 @@ Hero with ops-v1 are live) and, where stated, the owner in a browser.
 | v2: resource names | fill the registry's TODO identifiers (two D1 database IDs, three DO namespace IDs, the Mail Hero backup bucket) so the resource tables stop showing 未登记 for them | open |
 | v2: website probe | from the production Worker, `GET https://www.ziyixi.science/build-info.json` answers 200 without a redirect (same-zone fetch) and the 个人网站 tile shows its latency; if not, set `enabled: false` (未接入) | pending |
 | v2: notion-publish idle rule | the 26 h `max_idle_hours` fits the Worker's real schedule (no false 需关注 on a normal day) | pending |
+| v2: observed strip items | after the v2 deploy, the strip and badges match the tiles and flows: nothing "全部正常" while a tile says 需关注/故障/未知. Expect "◆ Notion 发布：还没有观察到请求" for up to 26 h after the first v2 tick if `ziyixi-notion-publish` gets no request in that window (discovery starts empty) | pending |
+| v2: layout on real devices | the owner's phone (two-line Worker cards, bottom tabs) and a narrow desktop window (720–960 px: tabs on one row, tiles wrapping, no sideways scroll) | pending |
 | v2: request budget | a day's `home` Worker and `HomeState` request counts stay within limits.md's estimate with the four views open (ETag 304s, one GraphQL query and one probe per tick) | pending |
 | Open questions from `limits.md` §4 | whether `Ops` calls appear in the apps' Worker request totals; unclassified R2 action types; analytics lag at a tick; `durableObjectsStorageGroups` data | pending |
 
