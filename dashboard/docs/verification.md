@@ -97,6 +97,33 @@ so the app jobs were not rerun.
 | `Contracts` | Dashboard `ops-client`, `guard`, `canary`, `digest` | 4 files, 55 tests passed |
 | workflow | `ci.yml` parsed as YAML | the `Dashboard deploy` generator step passes `vars.DASHBOARD_CANARY_ENABLED` |
 
+## 1c. Local, the release review fixes (2026-09-30)
+
+Commit `24922cb` (the digest's day-start hold, guard thresholds on measured usage, the 60 min shed
+margin, `DeleteObjects` as Class A, the Access probe's login-page check, the generator refusing the
+deploy token as the analytics token, package documents check-only in `ci_changes.py`), cloned fresh from
+the branch into a throwaway directory; macOS, Node 26.9.0, the workflow's commands and placeholder
+values, no token, no Cloudflare API call, synthetic data only. Nothing under `todofy/` changed, so the
+Todofy runtime suite and dry-runs were not rerun.
+
+| Job | Step | Result |
+| --- | --- | --- |
+| `Changes` | `python3 -m unittest discover -s .github/scripts` (from `todofy/` with `uv run`) | 55 tests passed. New: package Markdown checks every user and deploys none (this branch's own non-dashboard files deploy only the dashboard); the Access probe step run with a stubbed `curl` passes only a 302 to `<issuer>/cdn-cgi/access/login/<host>` (end, `?` or `/`) and fails a 302 to the team domain root, another host, look-alike hosts, a 200/401, and no connection after 10 tries; the generator step receives `CF_API_TOKEN` |
+| | `ci_changes.py` classification of `git diff c2bc62a` | every check, `contracts` and `packages` true; `dashboard_deploy` true; `todofy_deploy` and `mail_hero_deploy` false |
+| `Shared packages` | `packages/edge-auth` typecheck and tests | OK; 195 passed |
+| `Dashboard checks` | generator tests | 8 passed (new: `DASHBOARD_CF_ANALYTICS_TOKEN` equal to `CF_API_TOKEN`, also with whitespace, is refused by name without its value; a different or empty deploy token is fine and never written) |
+| | worker lint, typecheck, `npm test` | OK; 8 files, 110 tests passed. New: 79.95 % (displayed 80.0) does not shed and 69.95 % clears (real `parseUsage` rows); quota items at 79.95/94.95 %; a shed continuing past midnight stays in force past a late 00:30 retry; the 23:30 report is not replaced at 00:00 (also not by a 6 h refresh), is at 00:30, and a same-day or first report is not held; `DeleteObjects` counts as Class A with no unclassified operations for the live sample's action types; every classified R2 operation is in `limits.md` |
+| | worker `npm run test:runtime` (workerd) | 5 files, 45 tests passed (the digest flow now expects no report at 00:00 and the empty report at 00:30; guard `until` values at 01:00) |
+| | web lint, typecheck, tests, build | OK; 7 files, 50 tests passed (new: a 79.95 % row is not marked "超过 80%") |
+| | import guard | OK |
+| | placeholder config dry-run | OK: the same bindings, the four secrets hidden, `BUILD_SHA` the commit; 111.77 KiB |
+| `Contracts` | Mail Hero `contract-fixtures`, `ops-contract`, `native-ops` | 38 passed |
+| | Todofy contract, compat, vocabulary, ops contract, ops core | 310 passed |
+| | Todofy gateway `test/ops.test.ts` | 10 passed |
+| | Dashboard `ops-client`, `guard`, `canary`, `digest` | 4 files, 61 tests passed |
+| `Mail Hero checks` | Worker typecheck and tests; UI typecheck and tests | OK; 168 passed; OK; 66 passed |
+| `Todofy checks` | gateway lint, typecheck, tests; host tests (`tests/unit tests/fakes tools deploy`) | OK; 86 passed; 940 passed, 2 skipped |
+
 ## 2. Production (pending)
 
 None of these has been done; each needs the first `Dashboard deploy` on `main` (after Todofy and Mail
