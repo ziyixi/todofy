@@ -68,15 +68,18 @@ jobs:
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         env:
           GH_TOKEN: ${{ github.token }}
-        # The API's status=success filter lags and once returned a months-old run, so list the
-        # newest push runs of this workflow (by its numeric id: the Go-era CI shared the path)
-        # and pick the first successful one here.
+        # Walk this commit's first-parent history (git decides the order, never the API's run listing,
+        # which twice returned a months-old Go-era run first) and take the newest commit whose push run
+        # of this workflow (by its numeric id: the Go-era CI shared the path) on main concluded success.
         run: |
           workflow_id=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" --jq '.workflow_id') || workflow_id=''
           sha=''
           if [ -n "$workflow_id" ]; then
-            sha=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/$workflow_id/runs?branch=main&event=push&per_page=30" \
-              --jq '[.workflow_runs[] | select(.conclusion == "success")][0].head_sha // empty') || sha=''
+            for commit in $(git rev-list --first-parent --max-count=50 "$GITHUB_SHA~1" 2>/dev/null); do
+              ok=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/$workflow_id/runs?head_sha=$commit&branch=main&event=push&per_page=10" \
+                --jq '[.workflow_runs[] | select(.conclusion == "success")] | length') || ok=0
+              if [ "${ok:-0}" -gt 0 ]; then sha=$commit; break; fi
+            done
           fi
           echo "Last successful main run: ${sha:-none}"
           echo "sha=$sha" >> "$GITHUB_OUTPUT"
