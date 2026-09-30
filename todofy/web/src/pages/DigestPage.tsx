@@ -20,7 +20,12 @@ function Window({ report }: { report: SummaryReport | RecommendationReport }) {
             <Time value={report.window_start} /> – <Time value={report.window_end} />
           </span>,
         ],
-        ['邮件摘要数', report.task_count],
+        [
+          '邮件摘要数',
+          'carryover_count' in report && report.carryover_count
+            ? `${report.task_count}（其中 ${report.carryover_count} 条是前几天仍未完成的任务）`
+            : report.task_count,
+        ],
         ['模型', report.model ? <code key="m">{report.model}</code> : <span key="m" className="muted">未调用</span>],
       ]}
     />

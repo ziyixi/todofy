@@ -17,6 +17,7 @@ export const keys = {
   reports: ['reports'] as const,
   setup: ['setup'] as const,
   dailyMetrics: (days: number) => ['metrics', 'daily', days] as const,
+  gtdDaily: (days: number) => ['gtd', 'daily', days] as const,
 }
 
 export function useOverview() {
@@ -105,6 +106,18 @@ export function useDailyMetrics(days: number = METRICS_DAYS) {
   return useQuery({
     queryKey: keys.dailyMetrics(days),
     queryFn: () => api.dailyMetrics(days),
+    staleTime: DAILY_METRICS_STALE_MS,
+    refetchOnWindowFocus: false,
+  })
+}
+
+/** The GTD ledger's daily aggregates change once a day (the 13:00 UTC Todoist snapshot). */
+export const GTD_DAYS = 30
+
+export function useGtdDaily(days: number = GTD_DAYS) {
+  return useQuery({
+    queryKey: keys.gtdDaily(days),
+    queryFn: () => api.gtdDaily(days),
     staleTime: DAILY_METRICS_STALE_MS,
     refetchOnWindowFocus: false,
   })

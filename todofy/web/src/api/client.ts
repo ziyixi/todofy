@@ -5,6 +5,7 @@ import type {
   EventPage,
   EventState,
   EventView,
+  GtdDaily,
   LegacyText,
   Overview,
   RecommendationReport,
@@ -119,6 +120,7 @@ export const api = {
   legacyText: (id: string) => get<LegacyText>(`/legacy_text/${encodeURIComponent(id)}`),
   setup: () => get<Setup>('/setup'),
   dailyMetrics: (days: number) => get<DailyMetrics>(`/metrics/daily${query({ days })}`),
+  gtdDaily: (days: number) => get<GtdDaily>(`/gtd/daily${query({ days })}`),
 }
 
 /** Test hook: forget the cached CSRF token. */

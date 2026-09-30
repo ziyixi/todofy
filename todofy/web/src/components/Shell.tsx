@@ -1,4 +1,4 @@
-import { AlarmClock, BellRing, Ellipsis, Gauge, HeartPulse, Inbox, Newspaper, Settings, TriangleAlert } from 'lucide-react'
+import { AlarmClock, BellRing, Ellipsis, Gauge, HeartPulse, Inbox, ListChecks, Newspaper, Settings, TriangleAlert } from 'lucide-react'
 import type { ComponentType } from 'react'
 import { NavLink, Outlet, useLocation } from 'react-router'
 import { ApiError } from '../api/client'
@@ -17,6 +17,7 @@ const EVENTS: NavItem = { to: '/events', label: '事件', Icon: Inbox }
 const DIGEST: NavItem = { to: '/digest', label: '日报', Icon: Newspaper }
 export const MORE_ITEMS: NavItem[] = [
   { to: '/reminders', label: '提醒', Icon: AlarmClock, description: '每个 UTC 日的 Todoist 提醒' },
+  { to: '/gtd', label: 'GTD', Icon: ListChecks, description: 'Todoist 每日快照计数与每周回顾' },
   { to: '/budget', label: '预算', Icon: Gauge, description: 'Gemini token 与 Todoist 调用额度' },
   { to: '/health', label: '健康', Icon: HeartPulse, description: '部署版本、运行开关与进行中的事件' },
   { to: '/setup', label: '设置', Icon: Settings, description: 'Mail Hero 接入、密钥状态与 Access' },

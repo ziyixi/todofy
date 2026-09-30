@@ -143,6 +143,6 @@ describe('more page', () => {
     mockApi({})
     renderApp('/more')
     const main = await screen.findByRole('main')
-    expect(within(main).getAllByRole('link').map((link) => link.getAttribute('href'))).toEqual(['/reminders', '/budget', '/health', '/setup'])
+    expect(within(main).getAllByRole('link').map((link) => link.getAttribute('href'))).toEqual(['/reminders', '/gtd', '/budget', '/health', '/setup'])
   })
 })

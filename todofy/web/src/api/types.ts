@@ -25,6 +25,9 @@ export type LegacyText = Schemas['LegacyText']
 export type Setup = Schemas['Setup']
 export type DailyMetrics = Schemas['DailyMetrics']
 export type DailyMetricsDay = Schemas['DailyMetricsDay']
+export type GtdDaily = Schemas['GtdDaily']
+export type GtdDay = Schemas['GtdDay']
+export type GtdScope = Schemas['GtdScope']
 export type ErrorBody = Schemas['Error']
 
 export type EventView = 'recent' | 'attention'
