@@ -304,6 +304,21 @@ describe('Cloudflare 监控', () => {
     expect(within(r2).getByText('未登记 · mail-hero-backup-old')).toBeInTheDocument()
   })
 
+  it('names the backup bucket of the self-hosted servers VPS 备份 under 自托管服务器, not 未登记', async () => {
+    const base = healthy()
+    const resources = [
+      ...base.cloudflare.resources,
+      { kind: 'r2' as const, id: 'vultr-backup', resource: 'vps-backup', entry: 'self-hosted', size_bytes: 790_000_000, class_a: 12, class_b: 3 },
+    ]
+    await showCloudflare({ ...base, cloudflare: { ...base.cloudflare, resources } })
+    const r2 = within(section('存储与资源')).getByRole('region', { name: 'R2 存储桶' })
+    const row = within(r2).getByText('VPS 备份').closest('tr') as HTMLElement
+    expect(row).not.toHaveClass('row-muted')
+    expect(within(row).getByText('自托管服务器')).toBeInTheDocument()
+    expect(within(row).getByText('790 MB')).toBeInTheDocument()
+    expect(within(r2).queryByText(/vultr-backup/)).toBeNull()
+  })
+
   it('shows the guard read-only with a link to its actions', async () => {
     await showCloudflare(guardShed())
     const guard = section('降载')

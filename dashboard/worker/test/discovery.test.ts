@@ -144,6 +144,13 @@ describe('the resource table', () => {
     expect(resourceRows(undefined, scripts, T0)).toEqual([]);
   });
 
+  it('names the backup bucket of the self-hosted servers, which belongs to no monorepo app', () => {
+    const usage = { d1: [], do: [], r2: [{ id: 'vultr-backup', size_bytes: 790_000_000, class_a: 12, class_b: 3 }] };
+    expect(resourceRows(usage, null, T0)).toEqual([
+      { kind: 'r2', id: 'vultr-backup', resource: 'vps-backup', entry: 'self-hosted', size_bytes: 790_000_000, class_a: 12, class_b: 3 },
+    ]);
+  });
+
   it('gives a mapped namespace the DO requests of the script defining its class', () => {
     const registry: Registry = {
       ...REGISTRY,

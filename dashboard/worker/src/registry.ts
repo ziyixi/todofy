@@ -158,6 +158,23 @@ const ENTRIES: readonly EntryDef[] = [
     app_only_signals: [],
     order: 1,
   },
+  {
+    // Not a monorepo app: the self-hosted VPS and home server keep their backups in the account's R2
+    // (bucket vultr-backup). A resource needs an entry, so this hidden one exists only to name that
+    // bucket's row; no tile, no Worker, nothing probed.
+    id: 'self-hosted',
+    name: '自托管服务器',
+    description: 'VPS 与家中服务器；只登记其 R2 备份桶，无磁贴',
+    group: 'hidden',
+    icon: 'server',
+    accent: 'slate',
+    url: null,
+    access: false,
+    status: { type: 'none' },
+    tile_metric: null,
+    app_only_signals: [],
+    order: 2,
+  },
 ];
 
 const WORKERS: readonly WorkerDef[] = [
@@ -183,6 +200,8 @@ const RESOURCES: readonly ResourceDef[] = [
   { id: 'mail-hero-store', kind: 'r2', name: 'mail-hero 邮件存储', entry: 'mail-hero', match: 'mail-hero-store' },
   { id: 'mail-hero-backup', kind: 'r2', name: 'mail-hero 备份', entry: 'mail-hero', match: 'mail-hero-backups' },
   { id: 'todofy-backups', kind: 'r2', name: 'todofy 备份', entry: 'todofy', match: 'todofy-backups' },
+  // The self-hosted servers' backups (~790 MB on 2026-09-30), outside this repository.
+  { id: 'vps-backup', kind: 'r2', name: 'VPS 备份', entry: 'self-hosted', match: 'vultr-backup' },
 ];
 
 const FLOWS: readonly FlowDef[] = [

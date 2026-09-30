@@ -94,6 +94,7 @@ Three lists joined by id, compiled into the Worker; the UI gets the public view 
 | Notion 发布 (`ziyixi-notion-publish`) | 后台服务 | `analytics`: error rate + 26 h idle rule | last request hour |
 | Newsletter | 后台服务 | `none` → 未接入 | — |
 | 个人控制台 (`home`) | hidden | `self` (`tick_stale`) | no tile; Cloudflare row only |
+| 自托管服务器 (`self-hosted`, no Worker) | hidden | `none` | no tile; exists only to name the R2 bucket `vultr-backup` (VPS 备份: the self-hosted VPS and home server's backups, not a monorepo app), since a resource must belong to an entry |
 
 Flows: 邮件 → 任务 (来源转发 ○ → 收件与保存 → 解析 → Webhook 投递 → Todofy 摘要 → Todoist 与提醒; canary
 `mail-todofy` verifies 投递 and 摘要 only), 网站发布 (Notion ○ → 发布 → 网站可用), 每日 Newsletter
