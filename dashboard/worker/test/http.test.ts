@@ -1,5 +1,6 @@
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ApiError, CsrfResponse, HealthResponse } from '../src/api-types.ts';
+import type { RegistryResponse } from '../src/api-v2-types.ts';
 import type { Env } from '../src/env.ts';
 import worker from '../src/index.ts';
 import { CSRF_COOKIE, MESSAGES } from '../src/http.ts';
@@ -53,6 +54,9 @@ function makeEnv(overrides: Partial<Env> = {}, answers: { startCanary?: unknown;
       return Promise.resolve(answers.guard ?? { guard: { desired: { level } } });
     },
     tick: vi.fn(() => Promise.resolve({ ran: true })),
+    v2View: vi.fn((view: string, refresh: boolean, ifNoneMatch: string | null) =>
+      Promise.resolve(ifNoneMatch === '"7"' ? { etag: '"7"', body: null } : { etag: '"7"', body: JSON.stringify({ view, refresh }) }),
+    ),
   };
   const assets: string[] = [];
   const env = {
@@ -409,6 +413,63 @@ describe('routing', () => {
     expect(Object.keys(JSON.parse(lines[0] ?? '{}') as object).sort()).toEqual(['code', 'request_id', 'status']);
     expect(lines[0]).not.toContain('someone');
     expect(lines[0]).not.toContain(jwt.slice(0, 20));
+  });
+});
+
+describe('API v2', () => {
+  it('serves the registry from the Worker with the build as ETag, and 304 for it', async () => {
+    const { env, stub } = makeEnv();
+    const response = await call(env, '/api/v2/registry');
+    expect(response.status).toBe(200);
+    expect(response.headers.get('etag')).toBe('"abc123"');
+    expectPrivate(response);
+    const body = await response.json<RegistryResponse>();
+    expect(body).toMatchObject({ version: 'home-v2', build: 'abc123' });
+    expect(body.entries.map((entry) => entry.id)).toContain('mail-hero');
+    const again = await call(env, '/api/v2/registry', { headers: { 'if-none-match': '"abc123"' } });
+    expect(again.status).toBe(304);
+    expect(again.headers.get('etag')).toBe('"abc123"');
+    expect(await again.text()).toBe('');
+    expect(stub.v2View).not.toHaveBeenCalled();
+    expect((await call(env, '/api/v2/registry', { jwt: null })).status).toBe(401);
+  });
+
+  it('passes a view through with its ETag, refresh only where a view has one', async () => {
+    const { env, stub } = makeEnv();
+    const home = await call(env, '/api/v2/home?refresh=1');
+    expect(home.status).toBe(200);
+    expect(home.headers.get('etag')).toBe('"7"');
+    expect(home.headers.get('content-type')).toBe('application/json; charset=utf-8');
+    expectPrivate(home);
+    expect(await home.json()).toEqual({ view: 'home', refresh: true });
+    await call(env, '/api/v2/flows?refresh=1');
+    await call(env, '/api/v2/cloudflare?refresh=1');
+    await call(env, '/api/v2/ops');
+    expect(stub.v2View.mock.calls.map((args) => [args[0], args[1]])).toEqual([
+      ['home', true],
+      ['flows', false],
+      ['cloudflare', true],
+      ['ops', false],
+    ]);
+    const cached = await call(env, '/api/v2/home', { headers: { 'if-none-match': '"7"' } });
+    expect(cached.status).toBe(304);
+    expect(await cached.text()).toBe('');
+  });
+
+  it('keeps the v1 mutation rules, with canary_id required', async () => {
+    const { env, calls } = makeEnv();
+    const pair = await csrf(env);
+    expect(await errorCode(await mutate(env, '/api/v2/canary', {}, { csrf: pair }))).toBe('bad_request');
+    expect(await errorCode(await mutate(env, '/api/v2/canary', { canary_id: 'other' }, { csrf: pair }))).toBe('bad_request');
+    expect(calls.startCanary).toBe(0);
+    expect((await mutate(env, '/api/v2/canary', { canary_id: 'mail-todofy' }, { csrf: pair })).status).toBe(202);
+    expect((await mutate(env, '/api/v2/canary', { canary_id: 'mail-todofy' }, { csrf: null })).status).toBe(403);
+    expect((await mutate(env, '/api/v2/guard', { level: 'shed' }, { csrf: pair })).status).toBe(200);
+    expect((await mutate(env, '/api/v2/guard', { level: 'shed' }, { origin: 'https://evil.example.com', csrf: pair })).status).toBe(403);
+    expect(calls).toMatchObject({ startCanary: 1, guard: ['shed'] });
+    const v2csrf = await call(env, '/api/v2/csrf');
+    expect(v2csrf.status).toBe(200);
+    expect(v2csrf.headers.get('set-cookie')).toMatch(new RegExp(`^${CSRF_COOKIE}=`));
   });
 });
 

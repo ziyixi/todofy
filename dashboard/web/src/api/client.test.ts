@@ -1,4 +1,4 @@
-import { ApiError, NETWORK_MESSAGE, api } from './client'
+import { ApiError, NETWORK_MESSAGE, api, apiV2 } from './client'
 import { apiError, installFetch, json } from '../test/harness'
 
 describe('api client', () => {
@@ -77,5 +77,28 @@ describe('api client', () => {
     await expect(api.overview()).rejects.toMatchObject({ status: 500, code: 'bad_response' })
     installFetch(() => new Response('not json', { status: 200 }))
     await expect(api.overview()).rejects.toMatchObject({ status: 200, code: 'bad_response' })
+  })
+
+  it('revalidates v2 views with If-None-Match and reuses the kept body on 304', async () => {
+    const calls = installFetch((call) =>
+      call.headers['if-none-match'] === '"4"'
+        ? new Response(null, { status: 304, headers: { ETag: '"4"' } })
+        : new Response(JSON.stringify({ rev: 4 }), { status: 200, headers: { ETag: '"4"', 'content-type': 'application/json' } }),
+    )
+    expect(await apiV2.home()).toEqual({ rev: 4 })
+    expect(await apiV2.home()).toEqual({ rev: 4 })
+    expect(await apiV2.home(true)).toEqual({ rev: 4 })
+    expect(calls.map((call) => [call.path, call.headers['if-none-match'] ?? null])).toEqual([
+      ['/api/v2/home', null],
+      ['/api/v2/home', '"4"'],
+      ['/api/v2/home?refresh=1', null],
+    ])
+  })
+
+  it('sends v2 mutations with the CSRF token and the canary id', async () => {
+    const calls = installFetch((call) => (call.path === '/api/v1/csrf' ? json({ token: 'tok' }) : json({ run: {} }, 202)))
+    await apiV2.startCanary('mail-todofy')
+    expect(calls[1]).toMatchObject({ method: 'POST', path: '/api/v2/canary', body: '{"canary_id":"mail-todofy"}' })
+    expect(calls[1]?.headers['x-csrf-token']).toBe('tok')
   })
 })

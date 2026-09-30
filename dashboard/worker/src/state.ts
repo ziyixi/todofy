@@ -66,6 +66,7 @@ import {
 import { opsCanaryDelivery, opsCanaryResult, opsReportOps, opsSetGuard, opsStartCanary, opsStatus } from './ops-client.ts';
 import { MINUTE_MS, iso, isoOrNull, utcDay, utcMonthStart } from './time.ts';
 import { fetchUsage, type UsageErrorCode } from './usage.ts';
+import type { V2Body, V2View } from './v2-views.ts';
 
 /** Name of the single object instance. */
 export const HOME_OBJECT = 'home-v1';
@@ -288,6 +289,17 @@ export class HomeState extends DurableObject<Env> {
       this.putDoc('meta', { ...meta, last_refresh_at: now }, now);
       return this.buildOverview(now, true);
     });
+  }
+
+  /**
+   * GET /api/v2/<view> (docs/design-v2.md §5): the view built from the tables and serialized here,
+   * with ETag `"<rev>"`; `body: null` when `ifNoneMatch` names it. `refresh` only for home (due
+   * statuses and probes) and cloudflare (GraphQL), each at most once per minute.
+   * TODO(v2): scaffold only — not implemented yet; the Worker answers 503 `unavailable`.
+   */
+  v2View(view: V2View, refresh: boolean, ifNoneMatch: string | null): Promise<V2Body> {
+    console.log(JSON.stringify({ event: 'v2_view', view, refresh, conditional: ifNoneMatch !== null, implemented: false }));
+    return Promise.reject(new Error('not_implemented'));
   }
 
   /** POST /api/v1/canary: a manual run with its first start attempt; later steps happen on ticks. */

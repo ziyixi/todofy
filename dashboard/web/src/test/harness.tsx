@@ -23,7 +23,7 @@ export function apiError(status: number, code: string, message = '错误', reque
   return json({ error: { code, message, request_id: requestId } }, status)
 }
 
-/** Replaces fetch with a recorder; every call must be a same-origin /api/v1 path. */
+/** Replaces fetch with a recorder; every call must be a same-origin /api/v1 or /api/v2 path. */
 export function installFetch(handler: Handler): Call[] {
   const calls: Call[] = []
   resetCsrfForTests()
@@ -31,7 +31,7 @@ export function installFetch(handler: Handler): Call[] {
     'fetch',
     vi.fn(async (input: RequestInfo | URL, init: RequestInit = {}) => {
       const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url
-      if (!url.startsWith('/api/v1/')) throw new Error(`unexpected request to ${url}`)
+      if (!/^\/api\/v[12]\//.test(url)) throw new Error(`unexpected request to ${url}`)
       const headers: Record<string, string> = {}
       new Headers(init.headers).forEach((value, key) => {
         headers[key] = value

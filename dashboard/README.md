@@ -28,6 +28,7 @@ content.
 | `web/` | React + Vite UI (Chinese, mobile-first, light/dark), built to `web/dist` and served by the Worker |
 | `deploy/` | `generate-ci-config.mjs` (production config and secrets file) and its tests |
 | [`docs/design.md`](docs/design.md) | layout, storage, the tick (status, usage, guard, canary, digest), owner API, the usage query, UI, tests, CI |
+| [`docs/design-v2.md`](docs/design-v2.md) | v2: four views, the registry (entries, workers, resources, flows), levels, API v2 and its budgets |
 | [`docs/setup.md`](docs/setup.md) | resources, Access, GitHub variables and secrets, the analytics token, local dev, rollback |
 | [`docs/limits.md`](docs/limits.md) | every Free allowance and platform limit used, with Cloudflare sources |
 | [`docs/verification.md`](docs/verification.md) | what was checked locally and what is still open in production |

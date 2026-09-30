@@ -16,9 +16,12 @@ import {
 } from '@ziyixi/edge-auth';
 import { GUARD_LEVELS, type GuardLevel } from '../../../contracts/ops-v1/ops-v1.ts';
 import type { ApiError, ApiErrorCode, CsrfResponse, GuardRequest, HealthResponse, OverviewResponse } from './api-types.ts';
+import type { CanaryStartRequestV2, GuardResponseV2 } from './api-v2-types.ts';
 import { buildSha, publicHost } from './config.ts';
 import type { Env } from './env.ts';
+import { registryBody } from './registry.ts';
 import { HOME_OBJECT, type GuardOverrideOutcome, type HomeState, type StartCanaryOutcome } from './state.ts';
+import { V2_REFRESHABLE, etagMatches, type V2Body, type V2View } from './v2-views.ts';
 
 export const CSRF_COOKIE = 'home_csrf';
 export const MAX_BODY_BYTES = 1024;
@@ -226,7 +229,66 @@ const API_ROUTES: Readonly<Record<string, string>> = {
   '/api/v1/overview': 'GET',
   '/api/v1/canary': 'POST',
   '/api/v1/guard': 'POST',
+  // v2 (docs/design-v2.md §5; types in api-v2-types.ts). v1 stays until the UI no longer calls it.
+  '/api/v2/csrf': 'GET',
+  '/api/v2/registry': 'GET',
+  '/api/v2/home': 'GET',
+  '/api/v2/flows': 'GET',
+  '/api/v2/cloudflare': 'GET',
+  '/api/v2/ops': 'GET',
+  '/api/v2/canary': 'POST',
+  '/api/v2/guard': 'POST',
 };
+
+async function csrfResponse(ctx: Context, owner: string): Promise<Response> {
+  const key = await csrfKey(ctx.env);
+  const issued = await issueCsrf(ctx.request, owner, { cookieName: CSRF_COOKIE, key });
+  const body: CsrfResponse = { token: issued.token };
+  const response = jsonResponse(body);
+  response.headers.set('set-cookie', issued.setCookie);
+  return response;
+}
+
+/** A pre-serialized JSON body with its ETag, or 304 when If-None-Match already names it. */
+function etagResponse(etag: string, body: string | null): Response {
+  const headers = { etag, 'cache-control': 'no-store' };
+  if (body === null) return new Response(null, { status: 304, headers });
+  return new Response(body, { status: 200, headers: { ...headers, 'content-type': 'application/json; charset=utf-8' } });
+}
+
+/** GET /api/v2/registry: static per build, never reaches the Durable Object. */
+function registryResponse(ctx: Context): Response {
+  const build = buildSha(ctx.env);
+  const etag = `"${build}"`;
+  const body = etagMatches(ctx.request.headers.get('if-none-match'), etag) ? null : registryBody(build);
+  return etagResponse(etag, body);
+}
+
+/** GET /api/v2/{home,flows,cloudflare,ops}: one RPC; the Worker passes the DO's string through. */
+async function viewResponse(ctx: Context, view: V2View): Promise<Response> {
+  const refresh = V2_REFRESHABLE.has(view) && ctx.url.searchParams.get('refresh') === '1';
+  const ifNoneMatch = ctx.request.headers.get('if-none-match');
+  const result = await callHome(() => home(ctx.env).v2View(view, refresh, ifNoneMatch) as unknown as Promise<V2Body>);
+  return etagResponse(result.etag, result.body);
+}
+
+async function startCanaryResponse(ctx: Context): Promise<Response> {
+  const result = await callHome(() => home(ctx.env).startCanary() as unknown as Promise<StartCanaryOutcome>);
+  if (result.ok) return jsonResponse({ run: result.run }, 202);
+  if (result.code === 'canary_disabled') throw new HttpError(409, 'canary_disabled');
+  if (result.code === 'canary_active') throw new HttpError(409, 'canary_active');
+  throw new HttpError(429, 'canary_limit');
+}
+
+async function guardResponse(ctx: Context): Promise<GuardOverrideOutcome> {
+  const body = await readBody(ctx.request);
+  const level = body.level;
+  if (Object.keys(body).length !== 1 || !(GUARD_LEVELS as readonly unknown[]).includes(level)) {
+    throw new HttpError(400, 'bad_request');
+  }
+  const input: GuardRequest = { level: level as GuardLevel };
+  return callHome(() => home(ctx.env).setGuardOverride(input.level) as unknown as Promise<GuardOverrideOutcome>);
+}
 
 async function api(ctx: Context, owner: string, bypassed: boolean): Promise<Response> {
   const { request, url, env } = ctx;
@@ -235,13 +297,31 @@ async function api(ctx: Context, owner: string, bypassed: boolean): Promise<Resp
   if (request.method !== method) throw methodNotAllowed(method);
 
   switch (url.pathname) {
-    case '/api/v1/csrf': {
-      const key = await csrfKey(env);
-      const issued = await issueCsrf(request, owner, { cookieName: CSRF_COOKIE, key });
-      const body: CsrfResponse = { token: issued.token };
-      const response = jsonResponse(body);
-      response.headers.set('set-cookie', issued.setCookie);
-      return response;
+    case '/api/v1/csrf':
+    case '/api/v2/csrf':
+      return csrfResponse(ctx, owner);
+    case '/api/v2/registry':
+      return registryResponse(ctx);
+    case '/api/v2/home':
+      return viewResponse(ctx, 'home');
+    case '/api/v2/flows':
+      return viewResponse(ctx, 'flows');
+    case '/api/v2/cloudflare':
+      return viewResponse(ctx, 'cloudflare');
+    case '/api/v2/ops':
+      return viewResponse(ctx, 'ops');
+    case '/api/v2/canary': {
+      await checkCsrf(ctx, owner, bypassed);
+      const body = await readBody(request);
+      const input = body as Partial<CanaryStartRequestV2>;
+      if (Object.keys(body).length !== 1 || input.canary_id !== 'mail-todofy') throw new HttpError(400, 'bad_request');
+      return startCanaryResponse(ctx);
+    }
+    case '/api/v2/guard': {
+      await checkCsrf(ctx, owner, bypassed);
+      // GuardView.apps (keyed by the two ops_v1 entry ids) is already a GuardViewV2.
+      const result: GuardResponseV2 = { guard: (await guardResponse(ctx)).guard };
+      return jsonResponse(result);
     }
     case '/api/v1/overview': {
       const refresh = url.searchParams.get('refresh') === '1';
@@ -251,23 +331,12 @@ async function api(ctx: Context, owner: string, bypassed: boolean): Promise<Resp
       await checkCsrf(ctx, owner, bypassed);
       const body = await readBody(request);
       if (Object.keys(body).length > 0) throw new HttpError(400, 'bad_request');
-      const result = await callHome(() => home(env).startCanary() as unknown as Promise<StartCanaryOutcome>);
-      if (result.ok) return jsonResponse({ run: result.run }, 202);
-      if (result.code === 'canary_disabled') throw new HttpError(409, 'canary_disabled');
-      if (result.code === 'canary_active') throw new HttpError(409, 'canary_active');
-      throw new HttpError(429, 'canary_limit');
+      return startCanaryResponse(ctx);
     }
     default: {
       // '/api/v1/guard'
       await checkCsrf(ctx, owner, bypassed);
-      const body = await readBody(request);
-      const level = body.level;
-      if (Object.keys(body).length !== 1 || !(GUARD_LEVELS as readonly unknown[]).includes(level)) {
-        throw new HttpError(400, 'bad_request');
-      }
-      const input: GuardRequest = { level: level as GuardLevel };
-      const result = await callHome(() => home(env).setGuardOverride(input.level) as unknown as Promise<GuardOverrideOutcome>);
-      return jsonResponse({ guard: result.guard });
+      return jsonResponse({ guard: (await guardResponse(ctx)).guard });
     }
   }
 }
