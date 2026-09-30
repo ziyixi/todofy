@@ -2,10 +2,12 @@
 node_modules/
 # Vite output, served by the Worker as static assets (wrangler.toml [assets])
 web/dist/
-# Local workerd state and dev secrets
+# Local workerd state and dev values (see .dev.vars.example)
 .wrangler/
 worker/.wrangler/
 .dev.vars*
-# Written by deploy/generate-ci-config.mjs in CI; never commit (the secrets file holds owner emails and tokens)
+!.dev.vars.example
+# Written by the retired CI config generator (production is the committed wrangler.toml now); a local copy
+# may still hold owner emails and tokens, so keep ignoring them
 worker/wrangler.production.ci.json
 worker/wrangler.production.secrets.json

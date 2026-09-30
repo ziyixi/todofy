@@ -39,9 +39,10 @@ website probe per tick, rate-limited owner refreshes; design-v2 §5), and nothin
 
 | Path | What |
 | --- | --- |
-| `worker/` | TypeScript Worker `home` + Durable Object `HomeState` (`wrangler.toml` is the local/base config); `src/registry.ts` is the registry, `src/api-v2-types.ts` the API types the UI imports |
+| `wrangler.toml` | the production config of the Worker `home` (committed, top level = production; run wrangler from `worker/` with `--config ../wrangler.toml`; local values in `.dev.vars`, see `.dev.vars.example`) |
+| `worker/` | TypeScript Worker `home` + Durable Object `HomeState`; `src/registry.ts` is the registry, `src/api-v2-types.ts` the API types the UI imports |
 | `web/` | React + Vite UI (Chinese, mobile-first, light/dark, browser time zone), built to `web/dist` and served by the Worker |
-| `deploy/` | `generate-ci-config.mjs` (production config and secrets file) and its tests |
+| `deploy/` | `deploy-vars.mjs` (what the deploy adds: `--var` values and the secrets file) and the tests of it and of `wrangler.toml` |
 | [`docs/design.md`](docs/design.md) | storage, the tick (status, usage, guard, canary, digest), Access/CSRF, the usage query, tests, CI (its v1 API and one-page UI sections are superseded by design-v2) |
 | [`docs/design-v2.md`](docs/design-v2.md) | v2: four views, the registry (entries, workers, resources, flows), levels, API v2 and its budgets |
 | [`docs/setup.md`](docs/setup.md) | resources, Access, GitHub variables and secrets, the analytics token, local dev, rollback |
@@ -58,8 +59,8 @@ node --test deploy/test/*.test.mjs                      # needs worker/node_modu
 (cd web && npm run lint && npm run typecheck && npm test && npm run build)
 ```
 
-The job also refuses any import from `mail-hero/` or `todofy/` and dry-runs a generated placeholder
-production config. `Contracts` runs the host-side ops-v1 caller tests
+The job also refuses any import from `mail-hero/` or `todofy/` and dry-runs the committed production
+config through `deploy/deploy-vars.mjs` with placeholder values for what the deploy adds. `Contracts` runs the host-side ops-v1 caller tests
 (`worker/test/ops-client.test.ts`, `guard`, `canary`, `digest`). `Dashboard deploy` runs on `main`
 only, after `CI gate` and after both app deploys, and finishes with a probe that an unauthenticated
 request is answered by Access, never by the app. See the root [`README.md`](../README.md) "CI".

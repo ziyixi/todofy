@@ -1,0 +1,15 @@
+# Local development only. Copy to dashboard/.dev.vars (gitignored; wrangler reads the .dev.vars next to
+# wrangler.toml) and run, from worker/: npx wrangler dev --config ../wrangler.toml (docs/setup.md §5).
+# The committed wrangler.toml is production: local dev uses local bindings only (never --remote).
+# Synthetic values only; never a real owner address, key or token.
+#
+# The local host and the values CI adds at deploy (deploy/deploy-vars.mjs):
+PUBLIC_HOST=home.localhost
+BUILD_SHA=dev
+CANARY_ENABLED=true
+# Loopback-only login bypass (http://localhost, 127.0.0.1 or [::1] without cf-ray; 503 anywhere else):
+DEV_AUTH_BYPASS=true
+ACCESS_OWNER=owner@example.com
+# A locally generated 64-hex key, e.g. `openssl rand -hex 32`:
+CSRF_SIGNING_KEY=0000000000000000000000000000000000000000000000000000000000000000
+# Without CF_ANALYTICS_TOKEN the Cloudflare view has no usage rows (the expected local state).

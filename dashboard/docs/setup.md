@@ -9,7 +9,7 @@ log: secrets are entered only in GitHub's or Cloudflare's own settings pages.
 
 | Resource | Name / value | Created by |
 | --- | --- | --- |
-| Worker | `home` (`worker/wrangler.toml`), `workers_dev = false`, `preview_urls = false` | the `Dashboard deploy` job |
+| Worker | `home` (`dashboard/wrangler.toml`, the committed production config), `workers_dev = false`, `preview_urls = false` | the `Dashboard deploy` job |
 | Custom Domain | `home.ziyixi.science` (`routes = [{pattern, custom_domain: true}]`) | the deploy (DNS record and certificate) |
 | Durable Object | class `HomeState`, SQLite-backed (migration `v1`, `new_sqlite_classes`), one instance named `home-v1` | the deploy |
 | Service bindings | `MAIL_HERO` → Worker `mail-hero`, entrypoint `Ops`; `TODOFY` → Worker `todofy`, entrypoint `Ops` | the deploy; both Workers must already export `Ops` (contracts/ops-v1) |
@@ -29,8 +29,8 @@ Zero Trust → Access → Applications → Self-hosted application "Home" for `h
 whole host, every path), with the same owner policies and identity providers as Todofy's application:
 allow only the owner's exact e-mail addresses on the matching identity providers.
 
-- The application's AUD tag (64 hex) is the GitHub variable `DASHBOARD_ACCESS_AUDIENCE`; the team
-  domain `https://<team>.cloudflareaccess.com` is `DASHBOARD_ACCESS_ISSUER`.
+- The application's AUD tag (64 hex) is `ACCESS_AUDIENCE` and the team domain
+  `https://<team>.cloudflareaccess.com` is `ACCESS_ISSUER`, both committed in `dashboard/wrangler.toml`.
 - The Worker verifies the Access JWT itself (`packages/edge-auth`, Todofy's parameters with a 10 min key
   cache, SPEC §5.4) and accepts only `ACCESS_OWNER` or an address in `ACCESS_OWNER_ALIASES` (≤ 8,
   printable ASCII, compared case-insensitively over ASCII). Put every login the Access policy allows
@@ -47,27 +47,28 @@ allow only the owner's exact e-mail addresses on the matching identity providers
 
 ## 3. GitHub `production` environment
 
-The `Dashboard deploy` job uses the existing `production` environment (deployment branch `main`) and
-generates `worker/wrangler.production.ci.json` plus an owner-only secrets file with
-`deploy/generate-ci-config.mjs`. The generator validates every value and names a failing variable
-without printing its value.
+The Worker's production config is the committed `dashboard/wrangler.toml` (top level = production, no
+`[env.*]`, no `keep_vars`; the repository is public, so nothing personal or secret goes there): account ID
+(also the var `ACCOUNT_ID`, the GraphQL `accountTag`), the route and `PUBLIC_HOST` (CSRF origin, digest
+link; different from both app hosts, and the registry's app links, `worker/src/registry.ts`, must match
+the apps' hosts: `.github/scripts/test_wrangler_configs.py`), `ACCESS_ISSUER`, `ACCESS_AUDIENCE` and
+`CANARY_UTC_HOUR` (0–23, 16). Changing one is a commit to that file.
+
+The `Dashboard deploy` job uses the existing `production` environment (deployment branch `main`).
+`deploy/deploy-vars.mjs` adds only what is never committed, validating every value and naming a failing
+setting without printing its value (a deploy without a var deletes it, so a missing one fails the job):
 
 | Name | Kind | Rule | Becomes |
 | --- | --- | --- | --- |
-| `CLOUDFLARE_ACCOUNT_ID` | variable (shared) | 32 hex | `account_id`, var `ACCOUNT_ID` (the GraphQL `accountTag`) |
-| `DASHBOARD_PUBLIC_HOST` | variable | a domain, different from both app hosts | route, var `PUBLIC_HOST` (CSRF origin, digest link) |
-| `DASHBOARD_ACCESS_ISSUER` | variable | `https://<team>.cloudflareaccess.com` | var `ACCESS_ISSUER` |
-| `DASHBOARD_ACCESS_AUDIENCE` | variable | 64 hex | var `ACCESS_AUDIENCE` |
-| `MAIL_HERO_PUBLIC_HOST`, `TODOFY_PUBLIC_HOST` | variables (existing) | domains | checked only: the dashboard host must differ from both (the page's app links come from the registry, `worker/src/registry.ts`) |
-| `DASHBOARD_CANARY_UTC_HOUR` | variable, optional | integer 0–23, default 16 | var `CANARY_UTC_HOUR` |
-| `DASHBOARD_CANARY_ENABLED` | variable, optional | exactly `true` or `false`, default `true` when unset or empty; any other value (`False`, `0`, `no`, a stray space) fails the generator and the deploy | var `CANARY_ENABLED` (§6, §7) |
+| `DASHBOARD_CANARY_ENABLED` | variable, optional | exactly `true` or `false`, default `true` when unset or empty; any other value (`False`, `0`, `no`, a stray space) fails the deploy | `--var CANARY_ENABLED` (§6, §7) |
 | `DASHBOARD_ACCESS_OWNER` | secret | printable-ASCII e-mail | Worker secret `ACCESS_OWNER` |
 | `DASHBOARD_ACCESS_OWNER_ALIASES` | secret, may be empty | ≤ 8 unique printable-ASCII e-mails, ≤ 2048 chars | Worker secret `ACCESS_OWNER_ALIASES` (a single space when empty, so an emptied list replaces the old one) |
 | `DASHBOARD_CSRF_SIGNING_KEY` | secret | 64 hex (for example `openssl rand -hex 32`, run locally) | Worker secret `CSRF_SIGNING_KEY` |
 | `DASHBOARD_CF_ANALYTICS_TOKEN` | secret | `[A-Za-z0-9_-]{20,200}` | Worker secret `CF_ANALYTICS_TOKEN` (§4) |
-| `CF_API_TOKEN` | secret (existing, Todofy's deploy token) | – | `CLOUDFLARE_API_TOKEN` for `wrangler deploy` only; the generator also receives it, only to warn when `DASHBOARD_CF_ANALYTICS_TOKEN` equals it (never written anywhere) |
+| `CF_API_TOKEN` | secret (existing, Todofy's deploy token) | – | `CLOUDFLARE_API_TOKEN` for `wrangler deploy` only; the secrets step also receives it, only to warn when `DASHBOARD_CF_ANALYTICS_TOKEN` equals it (never written anywhere) |
 
-`GITHUB_SHA` becomes the var `BUILD_SHA` (shown by `/health`). Changing a variable or secret takes
+The secrets go to `$RUNNER_TEMP` (mode 0600) for `wrangler deploy --secrets-file` and are removed at the
+end. `GITHUB_SHA` becomes `--var BUILD_SHA` (shown by `/health`). Changing a variable or secret takes
 effect with the next deploy: run the workflow on `main` with `app: dashboard` (or `all`).
 
 ## 4. The analytics token (`CF_ANALYTICS_TOKEN`)
@@ -81,7 +82,7 @@ the page or sent anywhere else, and a unit test checks that it appears only in t
 internet-facing Worker, so it must be able to do no more than read analytics: any future bug in the
 Worker would otherwise expose account write access. The owner allowed reusing the deploy token until a
 read-only token is saved (2026-09-30), so when `DASHBOARD_CF_ANALYTICS_TOKEN` equals the deploy token
-`CF_API_TOKEN` the generator only adds a "Broad analytics token" warning to the run (by name, without a
+`CF_API_TOKEN` `deploy-vars.mjs` only adds a "Broad analytics token" warning to the run (by name, without a
 value); it cannot check the scope of any other token. Replace it with a token that can only read
 analytics:
 
@@ -109,14 +110,17 @@ procedure with a new token.
 ```sh
 cd dashboard/worker && npm ci
 cd ../web && npm ci && npm run build            # web/dist, served by the Worker
-cd ../worker && npx wrangler dev                 # uses wrangler.toml with placeholder vars
+cp ../.dev.vars.example ../.dev.vars           # local values, gitignored; edit the CSRF key
+cd ../worker && npx wrangler dev --config ../wrangler.toml   # local bindings only, never --remote
 ```
 
-For a local login bypass, create an untracked `worker/.dev.vars` (gitignored) with synthetic values:
-`DEV_AUTH_BYPASS=true`, `ACCESS_OWNER=owner@example.com`, and a locally generated 64-hex
-`CSRF_SIGNING_KEY`. The bypass works only for `http://localhost`, `127.0.0.1` or `[::1]` requests
-without `cf-ray`; anywhere else an enabled bypass answers 503. The production generator never emits
-`DEV_AUTH_BYPASS`. Without the two app Workers running locally, their tiles show ◆ 未知 · 无法连接
+`dashboard/wrangler.toml` is production, so local work always uses local bindings, and the local values
+come from the untracked `dashboard/.dev.vars` next to it (wrangler reads the `.dev.vars` beside the
+config), with synthetic values only: the local `PUBLIC_HOST`, `BUILD_SHA`, `CANARY_ENABLED`,
+`DEV_AUTH_BYPASS=true`, `ACCESS_OWNER=owner@example.com` and a locally generated 64-hex
+`CSRF_SIGNING_KEY` ([`.dev.vars.example`](../.dev.vars.example)). The bypass works only for
+`http://localhost`, `127.0.0.1` or `[::1]` requests without `cf-ray`; anywhere else an enabled bypass
+answers 503. The production config never holds `DEV_AUTH_BYPASS` (tests check it). Without the two app Workers running locally, their tiles show ◆ 未知 · 无法连接
 after the first poll and ■ 故障 from the second, and without a `CF_ANALYTICS_TOKEN` the Cloudflare view
 has no usage and no Worker rows; both are the expected state. The registry's website probe is the only
 public request a tick makes (one `GET https://www.ziyixi.science/build-info.json`, status and latency
@@ -194,7 +198,7 @@ browser. [`verification.md`](verification.md) §1d records such a run.
   Workers → `home` → Settings → Trigger events → remove the Cron Trigger. The page keeps working from
   its cached snapshot. Any `shed` it set expires by itself (≤ 36 h), and Todofy's reminder stops
   carrying the last ops report once it is older than 36 h (contracts/ops-v1 `README.md`). The next deploy from `main` restores
-  the trigger, so change `worker/wrangler.toml` too if the stop must last.
+  the trigger, so change `dashboard/wrangler.toml` too if the stop must last.
 - **Before rolling Todofy back** to a release without canary handling (contracts/ops-v1
   `IMPLEMENTATION.md` §4: such a release would turn a canary it still sees into a real Todoist task and
   list it as mail):

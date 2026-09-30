@@ -8,7 +8,7 @@ entrypoints (service bindings) and never imports `mail-hero/` or `todofy/` code.
 `AGENTS.md` rules apply here too: Workers Free, bounded reads and calls, no mail content anywhere,
 synthetic test data only, no secrets in logs.
 
-Status: the Worker, the UI, their tests, the config generator and the CI jobs (§10) are implemented
+Status: the Worker, the UI, their tests, the committed production config and the CI jobs (§10) are implemented
 and pass locally with synthetic data. Nothing is deployed; [`verification.md`](verification.md) records
 what was checked and what is still open in production. Setup: [`setup.md`](setup.md); limits with
 sources: [`limits.md`](limits.md).
@@ -23,10 +23,11 @@ this document are unchanged and still apply to the v2 routes (`POST /api/v2/guar
 
 | Path | Owner (build step) | Contents |
 | --- | --- | --- |
-| `worker/` | worker | TypeScript Worker + SQLite Durable Object; `package.json`/lockfile, `tsconfig.json` (Todofy gateway flags + `erasableSyntaxOnly`), `eslint.config.js` (strictTypeChecked), `wrangler.toml` (base/local shape), `vitest.config.ts` (Node unit tests), `vitest.runtime.config.ts` (workerd suite) |
+| `worker/` | worker | TypeScript Worker + SQLite Durable Object; `package.json`/lockfile, `tsconfig.json` (Todofy gateway flags + `erasableSyntaxOnly`), `eslint.config.js` (strictTypeChecked), `vitest.config.ts` (Node unit tests), `vitest.runtime.config.ts` (workerd suite) |
 | `worker/src/api-types.ts` | worker (shared) | Owner API types and constants; the UI imports it by relative path. Change it only together with the UI |
 | `worker/test/runtime/` | worker | Miniflare harness (`harness.ts`, own `tsconfig.json` with Node types), stub apps from `test/stubs/ops-stub.js` |
-| `deploy/` | worker | `generate-ci-config.mjs` and `test/*.test.mjs` (`node --test`) |
+| `wrangler.toml` | worker | the production config (top level = production; run wrangler from `worker/` with `--config ../wrangler.toml`) |
+| `deploy/` | worker | `deploy-vars.mjs` (what the deploy adds) and `test/*.test.mjs` (`node --test`) |
 | `web/` | web | React 19 + Vite 7 + TypeScript UI (Chinese), vitest + testing-library, builds `web/dist` (served by `ASSETS`) |
 | `docs/` | docs | `design.md` (this), `setup.md`, `limits.md` (allowances with sources, kept equal to `limits.ts` by `test/limits.test.ts`), `verification.md` |
 | `.github/`, root docs, `packages/edge-auth/SPEC.md` | integration | CI jobs (§10), root README/AGENTS, the SPEC condensation |
@@ -58,7 +59,7 @@ Bindings: `MAIL_HERO` = service `mail-hero`, entrypoint `Ops`; `TODOFY` = servic
 `Ops`; `HOME` = Durable Object class `HomeState` (migration `v1`, `new_sqlite_classes`); `ASSETS`
 (`../web/dist`, `run_worker_first = true`, SPA fallback; every asset request therefore invokes the Worker
 and counts as a Worker request, `limits.md` §2). `workers_dev = false`, `preview_urls = false`,
-route `home.ziyixi.science` with `custom_domain = true` (production config only). One cron
+route `home.ziyixi.science` with `custom_domain = true`. One cron
 `*/30 * * * *` (the account uses 1 of its 5 Free cron triggers today).
 
 | Name | Kind | Value / rule |
@@ -67,12 +68,12 @@ route `home.ziyixi.science` with `custom_domain = true` (production config only)
 | `ACCESS_ISSUER`, `ACCESS_AUDIENCE` | var | the Access app "Home" (issuer `https://<team>.cloudflareaccess.com`, AUD 64 hex) |
 | `ACCOUNT_ID` | var | 32 hex, the GraphQL `accountTag` |
 | `CANARY_UTC_HOUR` | var | integer 0–23, default 16; invalid → 16 |
-| `CANARY_ENABLED` | var | `true` or `false` (§5.4 "Switch"); unset or empty → `true`; any other value → `false` (the switch exists to stop canaries, so an unreadable value never starts one; the generator emits only `true`/`false`) |
+| `CANARY_ENABLED` | var | `true` or `false` (§5.4 "Switch"); unset or empty → `true`; any other value → `false` (the switch exists to stop canaries, so an unreadable value never starts one; `deploy-vars.mjs` sends only `true`/`false`) |
 | `BUILD_SHA` | var | the deployed commit (`dev` locally) |
 | `ACCESS_OWNER`, `ACCESS_OWNER_ALIASES` | secret | printable-ASCII emails, ≤ 8 aliases, ≤ 2048 chars; empty aliases uploaded as `" "` |
 | `CSRF_SIGNING_KEY` | secret | `^[0-9a-fA-F]{64}$` |
 | `CF_ANALYTICS_TOKEN` | secret | API token used **only** as `Authorization: Bearer` on `POST https://api.cloudflare.com/client/v4/graphql` (URL is a constant, not config). Never logged, stored, echoed or sent elsewhere. Today a broader token is reused; replace it with an "Account Analytics: Read" token (setup.md) |
-| `DEV_AUTH_BYPASS` | local only | `true` enables the loopback bypass; the generator never emits it |
+| `DEV_AUTH_BYPASS` | local only | `true` enables the loopback bypass; never in the production config (tests check it) |
 
 ## 3. Durable Object storage (`HomeState`, instance `home-v1`)
 
@@ -570,31 +571,28 @@ namespaces.
 
 ## 10. Deployment and CI
 
-`deploy/generate-ci-config.mjs` (Mail Hero's style; messages name variables, never print values;
-writes with `wx` and mode 0600; `node --test deploy/test/*.test.mjs`):
+The production config is the committed `dashboard/wrangler.toml` (top level = production, no `[env.*]`,
+no `keep_vars`): account, route and `PUBLIC_HOST`, Access issuer and AUD, `ACCOUNT_ID`, `CANARY_UTC_HOUR`,
+entry `worker/src/index.ts`, assets `web/dist`, the Durable Object, its migration, the service bindings and
+the cron. `deploy/test/wrangler-config.test.mjs` reads it with the pinned wrangler's own
+`experimental_readRawConfig` (from `worker/node_modules`, so `npm ci` in `worker/` comes first) and checks
+the known keys, formats and bounds; `.github/scripts/test_wrangler_configs.py` checks that its host differs
+from both apps' hosts and that the registry's app links match them. What is never committed is added at
+deploy by `deploy/deploy-vars.mjs` (Mail Hero's style; messages name settings, never print values):
 
 | Input | Rule | Output |
 | --- | --- | --- |
-| `CLOUDFLARE_ACCOUNT_ID` (var) | `^[a-f0-9]{32}$`i | `account_id`, var `ACCOUNT_ID` |
-| `DASHBOARD_PUBLIC_HOST` (var) | domain regex | route `{pattern, custom_domain: true}`, var `PUBLIC_HOST` |
-| `DASHBOARD_ACCESS_ISSUER` (var) | `^https://[a-z0-9-]+\.cloudflareaccess\.com$` | var |
-| `DASHBOARD_ACCESS_AUDIENCE` (var) | `^[a-f0-9]{64}$`i | var |
-| `MAIL_HERO_PUBLIC_HOST`, `TODOFY_PUBLIC_HOST` (existing vars) | domain regex | checked only: `DASHBOARD_PUBLIC_HOST` must differ from both (the app links come from the registry) |
-| `DASHBOARD_CANARY_UTC_HOUR` (optional var) | integer 0–23, default 16 | var `CANARY_UTC_HOUR` |
-| `DASHBOARD_CANARY_ENABLED` (optional var) | exactly `true` or `false`, default `true` when unset/empty; anything else fails | var `CANARY_ENABLED` |
-| `GITHUB_SHA` | 40 hex | var `BUILD_SHA` |
+| `DASHBOARD_CANARY_ENABLED` (optional var) | exactly `true` or `false`, default `true` when unset/empty; anything else fails | `--var CANARY_ENABLED` |
+| `GITHUB_SHA` | 40 hex | `--var BUILD_SHA` |
 | `DASHBOARD_ACCESS_OWNER` (secret) | printable-ASCII email | secrets file `ACCESS_OWNER` |
 | `DASHBOARD_ACCESS_OWNER_ALIASES` (secret) | ≤ 8, ≤ 2048 chars, unique, each printable-ASCII email | `ACCESS_OWNER_ALIASES` (`" "` when empty) |
 | `DASHBOARD_CSRF_SIGNING_KEY` (secret) | `^[0-9a-fA-F]{64}$` | `CSRF_SIGNING_KEY` |
 | `DASHBOARD_CF_ANALYTICS_TOKEN` (secret) | `^[A-Za-z0-9_-]{20,200}$` | `CF_ANALYTICS_TOKEN` |
 
-It copies the shape keys of `worker/wrangler.toml` (`name, main, compatibility_date, assets,
-durable_objects, migrations, services, triggers`; a test fails on an unknown key), read with the pinned
-wrangler's own `experimental_readRawConfig` from `worker/node_modules` (so `npm ci` in `worker/` comes
-first; Node has no TOML parser and the Python generators' `tomllib` needs Python ≥ 3.11). It refuses a
-`DASHBOARD_PUBLIC_HOST` equal to either app's host, sets `workers_dev:
-false`, `preview_urls: false`, `observability: {enabled: true}`, and writes
-`worker/wrangler.production.ci.json` and `worker/wrangler.production.secrets.json` (both gitignored).
+`secrets <path>` writes the secrets file for `--secrets-file` (mode 0600, never over an existing file,
+into `$RUNNER_TEMP`); `exec -- <wrangler deploy …>` validates, then runs the command with the `--var` flags
+appended, and refuses `--env`, `--keep-vars`, the caller's own `--var` and any other config. A missing
+value fails the deploy, because a deploy without a var deletes it.
 
 CI (`.github/workflows/ci.yml`, pinned action SHAs as today):
 
@@ -612,16 +610,18 @@ CI (`.github/workflows/ci.yml`, pinned action SHAs as today):
 - **Dashboard checks** (`needs: changes`, `if: dashboard_check`, working directory `dashboard`): `npm ci`
   in `worker` and `web`; `node --test deploy/test/*.test.mjs`; worker `lint`, `typecheck`, `test`,
   `test:runtime`; web `lint`, `typecheck`, `test`, `build`; a guard that no file under `worker/src` or
-  `web/src` imports from `mail-hero/` or `todofy/`; generate a placeholder production config and
-  `wrangler deploy --dry-run --config wrangler.production.ci.json --secrets-file
-  wrangler.production.secrets.json --outdir "$RUNNER_TEMP/home-bundle"`; remove it (`if: always()`).
+  `web/src` imports from `mail-hero/` or `todofy/`; from `worker/`, `deploy-vars.mjs secrets` with
+  placeholder values, then `deploy-vars.mjs exec -- wrangler deploy --dry-run --config ../wrangler.toml
+  --secrets-file "$RUNNER_TEMP/home-secrets.json" --outdir "$RUNNER_TEMP/home-bundle"`; remove the secrets
+  file (`if: always()`).
   `CI gate` needs and checks it.
 - **Dashboard deploy**: `needs: [changes, dashboard-checks, gate, todofy-deploy, mail-hero-deploy]`;
   `if: !cancelled() && changes, dashboard-checks, gate == 'success' && todofy-deploy and mail-hero-deploy
   ∈ {success, skipped} && main && (push || dispatch) && dashboard_deploy` (the service bindings need
   both `Ops` entrypoints live; `test_ci_changes.py`'s shape test learns the success-or-skipped form for
-  these two); `environment: production`, `concurrency: dashboard-production`; build, generate, dry-run,
-  `wrangler deploy` with `CLOUDFLARE_API_TOKEN: secrets.CF_API_TOKEN`; no D1. Probe: an unauthenticated
+  these two); `environment: production`, `concurrency: dashboard-production`; read the host and issuer from the
+  committed config, build, write the secrets file, dry-run, `deploy-vars.mjs exec -- wrangler deploy` with
+  `CLOUDFLARE_API_TOKEN: secrets.CF_API_TOKEN`; no D1. Probe: an unauthenticated
   `GET https://<host>/` (and `/api/v2/home`) must be a 302 whose `Location` starts with
   `ACCESS_ISSUER + '/'`; retry 10 × 15 s only while the answer is 5xx or no connection (certificate/DNS);
   any 2xx/4xx means the app answered without Access and fails the job at once.

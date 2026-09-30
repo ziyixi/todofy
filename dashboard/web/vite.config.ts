@@ -5,7 +5,7 @@ import { defineConfig } from 'vite'
 export default defineConfig({
   plugins: [react()],
   build: {
-    // Served by the Worker "home" as static assets (../worker/wrangler.toml [assets]).
+    // Served by the Worker "home" as static assets (../wrangler.toml [assets]).
     outDir: 'dist',
     emptyOutDir: true,
     // The Worker's CSP allows only same-origin scripts, so nothing may be inlined as a data: module.
@@ -13,7 +13,8 @@ export default defineConfig({
     sourcemap: false,
   },
   server: {
-    // Local loop: `npx wrangler dev` in ../worker on 8787 with DEV_AUTH_BYPASS; Vite proxies the API.
+    // Local loop: `npx wrangler dev --config ../wrangler.toml` in ../worker on 8787 with DEV_AUTH_BYPASS
+    // (../.dev.vars); Vite proxies the API.
     proxy: { '/api': 'http://127.0.0.1:8787' },
   },
   test: {

@@ -16,7 +16,7 @@ export function canaryHour(env: Pick<Env, 'CANARY_UTC_HOUR'>): number {
 /**
  * CANARY_ENABLED: unset or empty (older configs, local runs) and `true` enable canary starts; `false`
  * disables them. Any other value also disables them: the switch exists to stop canaries (before a
- * Todofy rollback), so a value it cannot read never starts one. The generator emits only true/false.
+ * Todofy rollback), so a value it cannot read never starts one. deploy/deploy-vars.mjs sends only true/false.
  */
 export function canaryEnabled(env: Pick<Env, 'CANARY_ENABLED'>): boolean {
   const raw = (env.CANARY_ENABLED ?? '').trim();

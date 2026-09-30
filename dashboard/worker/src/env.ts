@@ -1,5 +1,5 @@
 /**
- * Bindings, vars and secrets of the Worker "home" (wrangler.toml, docs/design.md §2). The apps are
+ * Bindings, vars and secrets of the Worker "home" (../wrangler.toml, docs/design.md §2). The apps are
  * reached only through their `Ops` entrypoints (contracts/ops-v1); nothing here imports app code.
  */
 import type { MailHeroOps, TodofyOps } from '../../../contracts/ops-v1/ops-v1.ts';
@@ -14,7 +14,7 @@ export interface Env {
   readonly HOME: DurableObjectNamespace<HomeState>;
   readonly ASSETS: Fetcher;
 
-  // vars (generated from GitHub production variables)
+  // vars (committed in ../wrangler.toml; BUILD_SHA and CANARY_ENABLED added at deploy by deploy/deploy-vars.mjs)
   /** The dashboard's own host, e.g. home.ziyixi.science: CSRF Origin and the digest's dashboard_url. */
   readonly PUBLIC_HOST: string;
   readonly ACCESS_ISSUER: string;
@@ -38,6 +38,6 @@ export interface Env {
   /** Used only for POST https://api.cloudflare.com/client/v4/graphql; never logged or sent elsewhere. */
   readonly CF_ANALYTICS_TOKEN?: string;
 
-  // local development only; never emitted by the config generator
+  // local development only (.dev.vars); never in the production config
   readonly DEV_AUTH_BYPASS?: string;
 }

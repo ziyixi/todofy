@@ -1,0 +1,66 @@
+# Worker "home": the owner's ops dashboard (docs/design.md). The production configuration and its single
+# source of truth: top level = production, never [env.*] or keep_vars. Every static value is committed here
+# (the repository is public: nothing personal, no secret).
+#
+# Deployed only by CI ("Dashboard deploy" in .github/workflows/ci.yml) through deploy/deploy-vars.mjs, which
+# appends with --var BUILD_SHA (the commit) and CANARY_ENABLED (GitHub environment variable
+# DASHBOARD_CANARY_ENABLED; unset means "true"), and passes ACCESS_OWNER, ACCESS_OWNER_ALIASES,
+# CSRF_SIGNING_KEY and CF_ANALYTICS_TOKEN (GitHub environment secrets) as Worker secrets with --secrets-file.
+# A plain `wrangler deploy` of this file DELETES BUILD_SHA and CANARY_ENABLED.
+#
+# Run wrangler from worker/ (the pinned wrangler lives in worker/node_modules) with --config ../wrangler.toml.
+# Local dev (docs/setup.md §5): local bindings only, local values in dashboard/.dev.vars (see
+# .dev.vars.example). The route must stay this dashboard's own host, never an app's
+# (.github/scripts/test_wrangler_configs.py checks it against mail-hero/ and todofy/).
+name = "home"
+account_id = "f57937bd1d93bf59e737b6d8445fb7a3"
+main = "worker/src/index.ts"
+compatibility_date = "2026-09-08"
+workers_dev = false
+preview_urls = false
+# The Access-protected custom domain (Cloudflare Access app "Home"); vars.PUBLIC_HOST names the same host.
+routes = [{ pattern = "home.ziyixi.science", custom_domain = true }]
+
+[observability]
+enabled = true
+
+# The UI (web/, `npm run build`). Every request reaches the Worker first: it checks Access and adds
+# the private headers before handing a path to ASSETS.
+[assets]
+directory = "web/dist"
+binding = "ASSETS"
+run_worker_first = true
+not_found_handling = "single-page-application"
+
+# One SQLite-backed object ("home-v1") holds the snapshot, guard, canary runs and digest state.
+[[durable_objects.bindings]]
+name = "HOME"
+class_name = "HomeState"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["HomeState"]
+
+# contracts/ops-v1: each app's named WorkerEntrypoint "Ops" (same account only).
+[[services]]
+binding = "MAIL_HERO"
+service = "mail-hero"
+entrypoint = "Ops"
+
+[[services]]
+binding = "TODOFY"
+service = "todofy"
+entrypoint = "Ops"
+
+# One trigger (the account's Free plan allows 5 in total): status, usage, guard, canary, digest.
+[triggers]
+crons = ["*/30 * * * *"]
+
+[vars]
+PUBLIC_HOST = "home.ziyixi.science"
+ACCESS_ISSUER = "https://ziyixi.cloudflareaccess.com"
+ACCESS_AUDIENCE = "7e0d033509e69a7f59c947ed4219b3898b79dffd24bfd4c1ea78e4d69269d5cc"
+# The account the GraphQL Analytics API queries: the same as account_id.
+ACCOUNT_ID = "f57937bd1d93bf59e737b6d8445fb7a3"
+# The daily end-to-end canary's UTC hour (0-23).
+CANARY_UTC_HOUR = "16"

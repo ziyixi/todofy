@@ -210,6 +210,20 @@ Measured, not only styled:
 | `Contracts` | Dashboard `ops-client`, `guard`, `canary`, `digest` | 4 files, 61 tests passed |
 | `Changes` | `python3 -m unittest discover -s .github/scripts`, and from `todofy/` with `uv run` | 63 tests OK (both) |
 
+## 1f. Local, the committed production config (2026-09-30)
+
+`worker/wrangler.toml` and `deploy/generate-ci-config.mjs` were replaced by the committed
+`dashboard/wrangler.toml` (top level = production) and `deploy/deploy-vars.mjs`, which adds `CANARY_ENABLED`
+and `BUILD_SHA` with `--var` and writes the secrets file. Synthetic values only, no production call:
+
+| Job | Step | Result |
+|---|---|---|
+| `Dashboard checks` | `node --test deploy/test/*.test.mjs` (config and deploy values) | 14 passed |
+| | worker lint, typecheck, unit, runtime | ok; 186 and 61 passed |
+| | web lint, typecheck, tests, build; import guard | ok; 99 passed |
+| | dry-run of the committed config through `deploy-vars.mjs` (placeholder secrets) | ok; `CANARY_ENABLED`, `BUILD_SHA` and the four secrets shown as `(hidden)` |
+| equivalence | the old generator path and the new one, each a full `wrangler deploy` against a local mock of the Cloudflare API (loopback only, placeholder token), with the real static GitHub variables and placeholder secrets | the same 17 requests; bindings identical in value and order; custom domain, cron, DO migration and assets identical; the uploaded script differs only in esbuild's `// path` comments (normalized sha256 `9b36b3c6…` on both sides); `metadata.package_dependencies` is no longer sent (no `package.json` in `dashboard/`) |
+
 ## 2. Production (pending)
 
 None of these has been done; each needs the first `Dashboard deploy` on `main` (after Todofy and Mail
