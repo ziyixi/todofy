@@ -11,7 +11,8 @@
     "typecheck": "tsc --noEmit && tsc --noEmit -p test/runtime/tsconfig.json",
     "lint": "eslint .",
     "test": "vitest run",
-    "test:runtime": "vitest run --config vitest.runtime.config.ts"
+    "test:runtime": "vitest run --config vitest.runtime.config.ts",
+    "dev": "wrangler dev --config ../wrangler.toml --ip 127.0.0.1 --port 8787 --local-upstream 127.0.0.1:8787"
   },
   "dependencies": {
     "@ziyixi/edge-auth": "file:../../packages/edge-auth"

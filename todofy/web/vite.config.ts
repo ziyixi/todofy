@@ -12,8 +12,12 @@ export default defineConfig({
     sourcemap: false,
   },
   server: {
-    // Local loop: `uv run pywrangler dev` on 8787 with DEV_AUTH_BYPASS; Vite proxies the API to it.
-    proxy: { '/api': 'http://127.0.0.1:8787' },
+    // Local loop: `uv run pywrangler dev ... --local-upstream todofy.localhost:8787` with DEV_AUTH_BYPASS
+    // (docs/dev-notes.md §1); Vite proxies the API to it. wrangler dev pins every request URL to that owner
+    // origin, so the proxied Origin is that origin too, or the gateway's CSRF Origin check refuses mutations.
+    proxy: {
+      '/api': { target: 'http://127.0.0.1:8787', changeOrigin: true, headers: { origin: 'http://todofy.localhost:8787' } },
+    },
   },
   test: {
     environment: 'jsdom',

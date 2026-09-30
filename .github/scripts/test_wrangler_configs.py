@@ -207,6 +207,54 @@ class Files(unittest.TestCase):
                 self.assertEqual(service["entrypoint"], "Ops")
 
 
+class LocalDev(unittest.TestCase):
+    """`wrangler dev` takes a config's first route as every local request's URL unless --local-upstream (or
+    --host) names the origin. With the production routes committed, a bare dev command would make the Worker
+    see its production host: the loopback / *.localhost DEV_AUTH_BYPASS then refuses (Mail Hero, dashboard)
+    and the gateway's host routing matches no local host. Every documented or scripted `wrangler dev` of a
+    production config therefore pins the origin. The website is left out: its Worker has no code that reads
+    the request URL (static assets only). Markdown table rows are records of past experiments, not commands."""
+
+    DEV = re.compile(r"\b(?:py)?wrangler(?:@\S+)?\s+dev\b")
+    PRODUCTION_CONFIG = re.compile(r"(?:-c|--config)[ =](?:\.\./)?(?:gateway/)?wrangler\.toml\b")
+
+    def commands(self):
+        """(path, command) for each `wrangler dev` line of a production config, backslash continuations joined."""
+        found = []
+        for path in tracked_files():
+            if path.startswith("website/") or "node_modules/" in path or path.endswith("package-lock.json"):
+                continue
+            if not re.search(r"\.(md|json|ts|mjs|toml|py|sh|yml|example)$", path):
+                continue
+            try:
+                text = (REPO / path).read_text()
+            except (OSError, UnicodeDecodeError):
+                continue
+            for line in re.sub(r"\\\n\s*#?", " ", text).splitlines():
+                if line.lstrip().startswith("|"):
+                    continue
+                if self.DEV.search(line) and self.PRODUCTION_CONFIG.search(line):
+                    found.append((path, line.strip()))
+        return found
+
+    def test_the_production_configs_with_routes_are_the_ones_dev_runs(self):
+        for worker in ("mail-hero", "todofy", "home"):
+            with self.subTest(worker=worker):
+                self.assertTrue(load(PRODUCTION[worker]).get("routes"))
+
+    def test_every_dev_command_of_a_production_config_pins_its_origin(self):
+        commands = self.commands()
+        paths = {path for path, _ in commands}
+        # The scripted and documented entry points of each app are all found (the scan still sees them).
+        self.assertLessEqual(
+            {"mail-hero/cloudflare/package.json", "dashboard/worker/package.json", "todofy/docs/dev-notes.md"}, paths
+        )
+        for path, command in commands:
+            with self.subTest(path=path, command=command):
+                self.assertRegex(command, r"--local-upstream[ =]\S+|--host[ =]\S+")
+                self.assertNotIn("--remote", command)
+
+
 class Hosts(unittest.TestCase):
     """The dashboard's own host, the apps' hosts and the dashboard's links to the apps agree."""
 

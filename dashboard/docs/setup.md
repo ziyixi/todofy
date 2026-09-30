@@ -111,7 +111,7 @@ procedure with a new token.
 cd dashboard/worker && npm ci
 cd ../web && npm ci && npm run build            # web/dist, served by the Worker
 cp ../.dev.vars.example ../.dev.vars           # local values, gitignored; edit the CSRF key
-cd ../worker && npx wrangler dev --config ../wrangler.toml   # local bindings only, never --remote
+cd ../worker && npm run dev                      # http://127.0.0.1:8787, local bindings only, never --remote
 ```
 
 `dashboard/wrangler.toml` is production, so local work always uses local bindings, and the local values
@@ -120,7 +120,11 @@ config), with synthetic values only: the local `PUBLIC_HOST`, `BUILD_SHA`, `CANA
 `DEV_AUTH_BYPASS=true`, `ACCESS_OWNER=owner@example.com` and a locally generated 64-hex
 `CSRF_SIGNING_KEY` ([`.dev.vars.example`](../.dev.vars.example)). The bypass works only for
 `http://localhost`, `127.0.0.1` or `[::1]` requests without `cf-ray`; anywhere else an enabled bypass
-answers 503. The production config never holds `DEV_AUTH_BYPASS` (tests check it). Without the two app Workers running locally, their tiles show ◆ 未知 · 无法连接
+answers 503. `npm run dev` (`worker/package.json`) pins the local origin with `--ip 127.0.0.1 --port 8787
+--local-upstream 127.0.0.1:8787`: wrangler dev otherwise takes the config's first route as every local
+request's URL, so the Worker would see `https://home.ziyixi.science` and refuse the bypass (503
+`access_not_configured`). Change `--port` and `--local-upstream` together, and never run a bare
+`wrangler dev` of this config; `web/`'s Vite proxy sends that origin as `Origin`. The production config never holds `DEV_AUTH_BYPASS` (tests check it). Without the two app Workers running locally, their tiles show ◆ 未知 · 无法连接
 after the first poll and ■ 故障 from the second, and without a `CF_ANALYTICS_TOKEN` the Cloudflare view
 has no usage and no Worker rows; both are the expected state. The registry's website probe is the only
 public request a tick makes (one `GET https://www.ziyixi.science/build-info.json`, status and latency

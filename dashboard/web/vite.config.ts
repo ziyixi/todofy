@@ -13,9 +13,13 @@ export default defineConfig({
     sourcemap: false,
   },
   server: {
-    // Local loop: `npx wrangler dev --config ../wrangler.toml` in ../worker on 8787 with DEV_AUTH_BYPASS
-    // (../.dev.vars); Vite proxies the API.
-    proxy: { '/api': 'http://127.0.0.1:8787' },
+    // Local loop: `npm run dev` in ../worker (wrangler dev on http://127.0.0.1:8787 with DEV_AUTH_BYPASS
+    // from ../.dev.vars); Vite proxies the API. That script pins every request URL to http://127.0.0.1:8787
+    // (--local-upstream: ../wrangler.toml's production route would otherwise become the URL), so the
+    // proxied Origin is that origin too, or the Worker's same-origin CSRF check refuses mutations.
+    proxy: {
+      '/api': { target: 'http://127.0.0.1:8787', changeOrigin: true, headers: { origin: 'http://127.0.0.1:8787' } },
+    },
   },
   test: {
     environment: 'jsdom',

@@ -561,10 +561,13 @@ One process runs both Workers (verified, §8):
 
 ```sh
 uv run pywrangler dev -c gateway/wrangler.toml -c wrangler.toml \
+  --port 8787 --local-upstream todofy.localhost:8787 \
   --var TODOFY_PUBLIC_HOST:todofy.localhost --var TODOFY_HOOKS_HOSTS:todofy-hooks.localhost \
   --var BUILD_SHA:dev                                                # from todofy/, local bindings only
 ```
 Both configs are the production ones, so the local hosts come in with `--var` (docs/dev-notes.md §1).
+Without `--local-upstream`, wrangler dev makes the first production route every request's URL, whatever
+the Host header, and no request reaches a local host; `--local-upstream` picks the one host a run serves.
 The first `-c` is the primary: it owns the port, `--var`, `--env-file`, the cron trigger
 (`/cdn-cgi/local/scheduled`) and the assets. `--var`/`--env-file` do **not** reach the second config;
 core vars come from its config, and local core secrets from `.dev.vars` next to the root

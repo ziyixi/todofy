@@ -124,9 +124,10 @@ uv run pytest tests/runtime                               # real workerd, gatewa
 
 `wrangler.toml` (todofy-core) and `gateway/wrangler.toml` (the gateway) are the committed production
 configs (top level = production); what is never committed is added at deploy by `deploy/deploy_vars.py`.
-`uv run pywrangler dev -c gateway/wrangler.toml -c wrangler.toml --var TODOFY_PUBLIC_HOST:todofy.localhost
---var TODOFY_HOOKS_HOSTS:todofy-hooks.localhost --var BUILD_SHA:dev` runs both Workers locally with local
-bindings only (docs/dev-notes.md §1).
+`uv run pywrangler dev -c gateway/wrangler.toml -c wrangler.toml --local-upstream todofy.localhost:8787
+--port 8787 --var TODOFY_PUBLIC_HOST:todofy.localhost --var TODOFY_HOOKS_HOSTS:todofy-hooks.localhost
+--var BUILD_SHA:dev` runs both Workers locally with local bindings only; `--local-upstream` keeps the
+production route out of the local request URL (docs/dev-notes.md §1).
 [docs/dev-notes.md](docs/dev-notes.md) covers the layout, the Python Workers idioms and the module
 contracts.
 

@@ -5,6 +5,7 @@
 # commands always pass --local. The gateway is the primary of the combined process, so its local values go
 # on the command line (docs/dev-notes.md §1):
 #   uv run pywrangler dev -c gateway/wrangler.toml -c wrangler.toml \
+#     --port 8787 --local-upstream todofy.localhost:8787 \
 #     --var TODOFY_PUBLIC_HOST:todofy.localhost --var TODOFY_HOOKS_HOSTS:todofy-hooks.localhost \
 #     --var BUILD_SHA:dev --var MAINTENANCE_MODE:false --var DEV_AUTH_BYPASS:true
 #

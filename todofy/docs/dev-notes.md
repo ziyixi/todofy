@@ -83,9 +83,14 @@ Other useful commands (all local, no credentials):
 ```sh
 # Both Workers in one local process (gateway first: it owns the port, the cron trigger, the assets and
 # --var). The committed configs are production: local bindings only, never --remote. The local hosts
-# replace the production ones; DEV_AUTH_BYPASS answers only loopback requests. Core-only local values
-# and secrets go in todofy/.dev.vars (.dev.vars.example; the runtime tests' cores read it too).
+# replace the production ones. wrangler dev would otherwise make the gateway's first production route
+# every request's URL (whatever the Host header), which is neither local host, so --local-upstream pins
+# the URL to the owner host: browse http://todofy.localhost:8787. To reach the hooks host instead (e.g.
+# tools/smoke_webhook.py), restart with --local-upstream todofy-hooks.localhost:8787. DEV_AUTH_BYPASS
+# applies only to *.localhost hosts. Core-only local values and secrets go in todofy/.dev.vars
+# (.dev.vars.example; the runtime tests' cores read it too).
 uv run pywrangler dev -c gateway/wrangler.toml -c wrangler.toml \
+  --port 8787 --local-upstream todofy.localhost:8787 \
   --var TODOFY_PUBLIC_HOST:todofy.localhost --var TODOFY_HOOKS_HOSTS:todofy-hooks.localhost \
   --var BUILD_SHA:dev --var MAINTENANCE_MODE:false --var DEV_AUTH_BYPASS:true
 # Apply D1 migrations to a throwaway local database

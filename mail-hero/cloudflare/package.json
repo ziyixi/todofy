@@ -7,7 +7,7 @@
     "test": "node --test test/*.test.mjs",
     "contract:update": "node test/contract-fixtures.mjs --write",
     "typecheck": "tsc --noEmit",
-    "dev": "wrangler dev --config ../wrangler.toml --ip 127.0.0.1"
+    "dev": "wrangler dev --config ../wrangler.toml --ip 127.0.0.1 --port 8787 --local-upstream 127.0.0.1:8787"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "5.20260926.1",

@@ -12,7 +12,8 @@
 #
 # Runtime tests use wrangler.test.toml and wrangler.test-auth.toml (next to this file). Local dev runs both
 # Workers in one process from todofy/ with local values (docs/dev-notes.md §1, .dev.vars.example):
-#   uv run pywrangler dev -c gateway/wrangler.toml -c wrangler.toml
+#   uv run pywrangler dev -c gateway/wrangler.toml -c wrangler.toml --local-upstream todofy.localhost:8787 ...
+# (never without --local-upstream: wrangler dev would make the first route below every local request's URL).
 name = "todofy"
 account_id = "f57937bd1d93bf59e737b6d8445fb7a3"
 main = "src/index.ts"
