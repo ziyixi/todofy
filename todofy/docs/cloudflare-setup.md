@@ -74,6 +74,8 @@ Environment secrets:
 | `TODOFY_ACCESS_OWNER` | the owner's primary Access email |
 | `TODOFY_ACCESS_OWNER_ALIASES` | comma-separated other logins of the owner (may be empty) |
 | `TODOFY_TODOIST_DEFAULT_PROJECT_ID` | Todoist project for new tasks. Added to the core with `--var`; a secret because the repository is public and pywrangler echoes its command line (Actions masks secrets there) |
+| `TODOFY_TODOIST_OPS_PROJECT_ID` | optional: the Todoist project of the daily `[Todofy System]` reminder (with the ops digest). Unset or empty: the default project, as before. Sent with `--var` only when set; a day's project is frozen with its claim, so changing it affects the next day ([gtd-features.md](gtd-features.md) §3) |
+| `TODOFY_TODOIST_REVIEW_PROJECT_ID` | optional: the project of the Sunday review task; unset or empty: the default project |
 
 The two owner secrets are secrets rather than variables because wrangler prints every plain var with its
 value in the deploy log. The deploy passes them to the gateway `todofy` as Worker secrets
@@ -89,6 +91,7 @@ the operational state ([ci-cd.md](ci-cd.md) "Changing a switch"). `deploy/deploy
 | `TODOFY_MAINTENANCE_MODE` | `true` / `false` (required); set on both Workers |
 | `TODOFY_PROCESSING_PAUSED` | `true` / `false` (required); core |
 | `TODOFY_FORCE_PAUSE_TODOIST` | `true` / `false` (required); core |
+| `TODOFY_GTD_REVIEW_ENABLED` | `true` / `false` (required); core. The Sunday review task ([gtd-features.md](gtd-features.md) §7); `false` stops it without a code change. The daily snapshot itself is committed (`GTD_COLLECT_UTC`) |
 
 Every other setting is committed in the two production configs (top level = production; the repository
 is public, so nothing personal or secret goes there), and changing one is a commit:
@@ -103,6 +106,7 @@ is public, so nothing personal or secret goes there), and changing one is a comm
 | Gemini models, daily token budget | `wrangler.toml` `GEMINI_MODELS` (first is preferred), `GEMINI_DAILY_TOKEN_BUDGET` |
 | report top and precompute time | `wrangler.toml` `REPORT_DEFAULT_TOP` (must equal the newsletter's `?top=`, 10, so its report is precomputed), `REPORT_PRECOMPUTE_UTC` |
 | lookup delay, legacy text retention | `wrangler.toml` `LOOKUP_DELAY_MS`, `LEGACY_TEXT_RETENTION_DAYS` (`0` keeps imported mail text forever) |
+| GTD snapshot time, carryover | `wrangler.toml` `GTD_COLLECT_UTC` (`13:00`, before the 13:30 precompute; `off` stops the snapshot and with it the carryover and the GTD counters), `REPORT_CARRYOVER_DAYS` (`14`, at most 14; `0` turns the carryover off) |
 
 The Gemini and Todoist base URLs are fixed in `wrangler.toml` and pinned by tests. `BUILD_SHA` (the commit)
 is added at deploy on both Workers. Each Worker gets only the vars it reads: hosts and `ACCESS_*` go to the
@@ -224,7 +228,9 @@ in [gateway-contract.md](gateway-contract.md):
   no route or Access policy for it and nothing to configure here; `status().ui_url` is built from
   `TODOFY_PUBLIC_HOST`. A `shed` guard it sets defers only the weekly backup (never past 7.5 days since
   the last complete one, 12 h before `backup_stale` at 8 days), retention and the metrics rollup (never
-  past 72 h since their last complete run; once due they run until caught up); mail, canaries, the reminder and report precompute keep running. Guard and latest report live in the
+  past 72 h since their last complete run; once due they run until caught up) and the GTD ledger's daily
+  Todoist snapshot (never past 48 h since the last one); mail, canaries, the reminder, the Sunday review and
+  report precompute keep running. Guard and latest report live in the
   object's storage, not in D1 or the backups.
 
 ## 6. Local checks before the first deploy
@@ -236,7 +242,7 @@ locally too. Build the UI first (`npm run build --prefix web`).
 ```sh
 export GITHUB_SHA=$(git rev-parse HEAD) TODOFY_MAINTENANCE_MODE=false TODOFY_PROCESSING_PAUSED=false \
   TODOFY_FORCE_PAUSE_TODOIST=false TODOFY_REMINDER_ENABLED=false TODOFY_TODOIST_DEFAULT_PROJECT_ID=placeholder \
-  TODOFY_ACCESS_OWNER=owner@example.com TODOFY_ACCESS_OWNER_ALIASES=
+  TODOFY_GTD_REVIEW_ENABLED=false TODOFY_ACCESS_OWNER=owner@example.com TODOFY_ACCESS_OWNER_ALIASES=
 secrets=$(mktemp -d)/todofy-gateway-secrets.json
 uv run python deploy/deploy_vars.py secrets "$secrets"
 uv run python deploy/deploy_vars.py exec core -- uv run pywrangler deploy --dry-run --config wrangler.toml
@@ -333,3 +339,27 @@ coordinator may use a database at a time):
 The object keeps its own state across the switch: budgets and tick times stay; the metrics cursor
 notices the other database and restarts, so the switch day and the days back to the last written one
 show "未记录" in the trends. The same happens after a D1 Time Travel restore in place.
+
+## 8. GTD ledger and the morning-brief carryover (first rollout)
+
+The release that adds [gtd-features.md](gtd-features.md) needs these owner steps; the rest is automatic.
+
+1. Before merging: set the GitHub environment variable `TODOFY_GTD_REVIEW_ENABLED` to `false` (Settings →
+   Environments → `production`). The deploy refuses to run without it, like every switch.
+2. Optional, any time: create the Todoist projects "Ops" and "Review" by hand and store their IDs as the
+   environment secrets `TODOFY_TODOIST_OPS_PROJECT_ID` and `TODOFY_TODOIST_REVIEW_PROJECT_ID` (the ID is the
+   last part of the project's URL). Unset, both tasks go to the default project, as before.
+3. Before merging: confirm the newsletter (separate repository) ignores unknown fields of
+   `recommendation-v1` (its `_decode_recommendation`); the report gains `new_count` and `carryover_count`.
+4. Merge. The deploy applies migration `0004_gtd.sql` (additive: the previous release keeps working on it)
+   and ships the code. The first snapshot is taken at the next 13:00 UTC; until then the recommendation is
+   the plain 24 h report and the ops status has no GTD counters.
+5. After a day: the owner UI's GTD page shows the first snapshot; `status()` carries `inbox_open`,
+   `inbox_oldest_days`, `overdue`, `carryover_open` and `completed_7d`. Then set
+   `TODOFY_GTD_REVIEW_ENABLED=true` and run the workflow on `main` (app `todofy`): the next Sunday at 17:00
+   UTC creates the first review task.
+
+Rollback: `REPORT_CARRYOVER_DAYS = "0"` (a commit) turns the carryover off; `GTD_COLLECT_UTC = "off"` (a
+commit) stops the snapshot; `TODOFY_GTD_REVIEW_ENABLED=false` (a variable) stops the review. A code
+rollback keeps working on the migrated database; the four `gtd_*` tables then stop growing and are removed
+by nothing (drop them by hand with `wrangler d1 execute --remote` only if the feature is abandoned).

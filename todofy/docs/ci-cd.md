@@ -199,7 +199,9 @@ that passed is what ships:
    `deploy/deploy_vars.py` adds with `--var` what is never committed and refuses a missing or invalid value,
    because a deploy without a var deletes it: `BUILD_SHA` (the commit) and `MAINTENANCE_MODE` on both
    Workers; `TODOIST_DEFAULT_PROJECT_ID` (an environment secret: pywrangler echoes its command line, and
-   Actions masks secrets), `REMINDER_ENABLED`, `PROCESSING_PAUSED` and `FORCE_PAUSE_TODOIST` on the core. It
+   Actions masks secrets), `REMINDER_ENABLED`, `PROCESSING_PAUSED`, `FORCE_PAUSE_TODOIST` and
+   `GTD_REVIEW_ENABLED` on the core, plus `TODOIST_OPS_PROJECT_ID` and `TODOIST_REVIEW_PROJECT_ID` (optional
+   environment secrets) only when set: an unset one adds no `--var`, so the Worker keeps it unset. It
    refuses `--env`, `--keep-vars`, its caller's own `--var` and any other config file. The static checks the
    retired generator made are unit tests on the committed files (`deploy/test_wrangler_configs.py`); the
    checks across apps and ci.yml are in the root `.github/scripts/test_wrangler_configs.py`.
@@ -247,7 +249,8 @@ The first deploy of the split replaces the old single Python Worker `todofy`; it
 ## Changing a switch
 
 Operational switches (`TODOFY_MAINTENANCE_MODE`, `TODOFY_PROCESSING_PAUSED`, `TODOFY_FORCE_PAUSE_TODOIST`,
-`TODOFY_REMINDER_ENABLED`) are the only GitHub environment variables the deploy reads, so a deploy never
+`TODOFY_REMINDER_ENABLED`, `TODOFY_GTD_REVIEW_ENABLED`) are the only GitHub environment variables the deploy
+reads, so a deploy never
 overwrites the operational state:
 
 1. Settings → Environments → `production` → edit the variable.

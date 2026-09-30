@@ -25,7 +25,7 @@ DO's bytes.
 | Language | TypeScript (strict, ES modules), `gateway/` | Python (Pyodide), `worker/`, pywrangler |
 | Public entry | custom domains: owner host + every `TODOFY_HOOKS_HOSTS` name; cron `*/10 * * * *` | none (`workers_dev = false`, `preview_urls = false`, no routes); the object's RPC methods (§3) for the gateway's binding; every `fetch` answers 404 `not_found` (for the RPC release only, the previous gateway's calls get 503, §6.4) |
 | Bindings | `ASSETS` (`uiassets/dist`), `COORDINATOR` → class `TodofyCore` in script `todofy-core`, `METRICS` (Analytics Engine `todofy_metrics`, one point per request and cron; dev-notes.md §6) | `DB` (D1 `todofy`), `BACKUPS` (private R2 bucket `todofy-backups`, weekly D1 backups; it holds mail content), `METRICS` (the same dataset, one point per upstream step). No DO binding: nothing in core calls the DO through a stub any more |
-| Vars | `TODOFY_PUBLIC_HOST`, `TODOFY_HOOKS_HOSTS`, `BUILD_SHA`, `ACCESS_ISSUER`, `ACCESS_AUDIENCE`, `MAINTENANCE_MODE`; dev/test only: `DEV_AUTH_BYPASS`, `DEV_ACCESS_LOOPBACK_ISSUER`, `JWKS_REFRESH_COOLDOWN_MS` | `BUILD_SHA`, `MAINTENANCE_MODE`, `TODOFY_PUBLIC_HOST` (the reminder's link), `PROCESSING_PAUSED`, `FORCE_PAUSE_TODOIST`, `REMINDER_ENABLED`, `MAIL_SOURCE_ID`, `GEMINI_API_BASE`, `GEMINI_MODELS`, `GEMINI_TIMEOUT_MS`, `GEMINI_DAILY_TOKEN_BUDGET`, `TODOIST_API_BASE`, `TODOIST_DEFAULT_PROJECT_ID`, `TODOIST_ATTEMPT_TIMEOUT_MS`, `LOOKUP_DELAY_MS`, `BACKOFF_BASE_MS`, `WATCHDOG_MS`, `REPORT_DEFAULT_TOP`, `REPORT_PRECOMPUTE_UTC`, `LEGACY_TEXT_RETENTION_DAYS` |
+| Vars | `TODOFY_PUBLIC_HOST`, `TODOFY_HOOKS_HOSTS`, `BUILD_SHA`, `ACCESS_ISSUER`, `ACCESS_AUDIENCE`, `MAINTENANCE_MODE`; dev/test only: `DEV_AUTH_BYPASS`, `DEV_ACCESS_LOOPBACK_ISSUER`, `JWKS_REFRESH_COOLDOWN_MS` | `BUILD_SHA`, `MAINTENANCE_MODE`, `TODOFY_PUBLIC_HOST` (the reminder's link), `PROCESSING_PAUSED`, `FORCE_PAUSE_TODOIST`, `REMINDER_ENABLED`, `GTD_REVIEW_ENABLED`, `MAIL_SOURCE_ID`, `GEMINI_API_BASE`, `GEMINI_MODELS`, `GEMINI_TIMEOUT_MS`, `GEMINI_DAILY_TOKEN_BUDGET`, `TODOIST_API_BASE`, `TODOIST_DEFAULT_PROJECT_ID`, `TODOIST_OPS_PROJECT_ID` and `TODOIST_REVIEW_PROJECT_ID` (optional), `TODOIST_ATTEMPT_TIMEOUT_MS`, `LOOKUP_DELAY_MS`, `BACKOFF_BASE_MS`, `WATCHDOG_MS`, `REPORT_DEFAULT_TOP`, `REPORT_PRECOMPUTE_UTC`, `REPORT_CARRYOVER_DAYS`, `GTD_COLLECT_UTC`, `GTD_PAGE_TIMEOUT_MS` (tests), `LEGACY_TEXT_RETENTION_DAYS` |
 | Secrets | `MAIL_WEBHOOK_TOKEN_SHA256`, `MAIL_WEBHOOK_TOKEN_SHA256_PREVIOUS`, `REPORT_BASIC_AUTH_SHA256`, `CSRF_SIGNING_KEY`, `ACCESS_OWNER`, `ACCESS_OWNER_ALIASES` (the last two from `--secrets-file` on every deploy) | `GEMINI_API_KEY`, `TODOIST_API_KEY` |
 | DO class | none: migration `v2` deleted the Python-era `TodofyCoordinator` in a gateway-only release (§6.6) | `TodofyCore` (renamed from `TodofyCoordinator` by core migration `v2`), instance name `inbox-v1`, SQLite-backed |
 
@@ -355,7 +355,8 @@ Domain for the public host and then one per hooks host, the `COORDINATOR` bindin
 
 The core has one test config: the two gateway test configs differ only in gateway vars (Access
 bypass vs. loopback issuer), so both pair with root `wrangler.test.toml` (short timings, fake
-upstream placeholders, `REMINDER_ENABLED = "false"`, `REPORT_PRECOMPUTE_UTC = "off"`). The old root
+upstream placeholders, `REMINDER_ENABLED = "false"`, `REPORT_PRECOMPUTE_UTC = "off"`, `GTD_COLLECT_UTC =
+"off"`, `GTD_REVIEW_ENABLED = "false"`). The old root
 `wrangler.test-auth.toml` is gone.
 
 `main = "worker/todofy/runtime/entry.py"`, `base_dir = "worker"`, `compatibility_flags =
@@ -364,7 +365,7 @@ migrations (`v1` new `TodofyCoordinator`, `v2` renamed to `TodofyCore`), the `ME
 vars: the fixed upstreams `GEMINI_API_BASE`/`TODOIST_API_BASE`, `TODOFY_PUBLIC_HOST` (`reminder.py`
 puts `https://<TODOFY_PUBLIC_HOST>/attention` into the daily reminder, so the core needs the public host
 too), `MAIL_SOURCE_ID`, `GEMINI_MODELS`, `GEMINI_DAILY_TOKEN_BUDGET`, `LOOKUP_DELAY_MS`, `REPORT_*`,
-`LEGACY_TEXT_RETENTION_DAYS`. Test-only timing knobs (`GEMINI_TIMEOUT_MS`, ...) keep their code defaults.
+`GTD_COLLECT_UTC`, `LEGACY_TEXT_RETENTION_DAYS`. Test-only timing knobs (`GEMINI_TIMEOUT_MS`, ...) keep their code defaults.
 It keeps its name and place: pywrangler reads the Python version only from the root `wrangler.toml`, and
 a Python config must sit next to `python_modules/` (a core config elsewhere fails with
 `ModuleNotFoundError: No module named 'workers'`, verified). No assets, cron, routes or DO binding.
@@ -373,8 +374,9 @@ a Python config must sit next to `python_modules/` (a core config elsewhere fail
 ### 6.3 What the deploy adds (`deploy/deploy_vars.py`)
 `exec core|gateway -- <deploy command>` appends `--var` flags (plain_text vars, exactly like `[vars]`;
 wrangler prints them as `(hidden)`): `BUILD_SHA` (the commit) and `MAINTENANCE_MODE` on both Workers;
-`TODOIST_DEFAULT_PROJECT_ID`, `REMINDER_ENABLED`, `PROCESSING_PAUSED` and `FORCE_PAUSE_TODOIST` on the
-core. `secrets <path>` writes the gateway's owner-only secrets file (`ACCESS_OWNER`,
+`TODOIST_DEFAULT_PROJECT_ID`, `REMINDER_ENABLED`, `PROCESSING_PAUSED`, `FORCE_PAUSE_TODOIST` and
+`GTD_REVIEW_ENABLED` on the core, and `TODOIST_OPS_PROJECT_ID` / `TODOIST_REVIEW_PROJECT_ID` only when set
+(an unset optional project adds no `--var`, so the Worker keeps it unset). `secrets <path>` writes the gateway's owner-only secrets file (`ACCESS_OWNER`,
 `ACCESS_OWNER_ALIASES`, an emptied list sent as one space) for `--secrets-file`; the core has no secrets
 file (its secrets are set by the owner). A missing or invalid value fails the deploy by name, because a
 deploy without a var deletes it; `--env`, `--keep-vars`, the caller's own `--var` and any other config are

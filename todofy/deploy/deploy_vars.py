@@ -7,7 +7,10 @@ The committed production configs are wrangler.toml (todofy-core) and gateway/wra
 - `--var NAME:value` (a plain_text var, exactly like a [vars] entry): BUILD_SHA (the commit) and the
   operational switches (GitHub environment variables; a release restates them and never overwrites them)
   on both Workers, and the core's TODOIST_DEFAULT_PROJECT_ID (a GitHub environment secret: pywrangler
-  echoes its command line, and Actions masks secrets in every log line).
+  echoes its command line, and Actions masks secrets in every log line). The core's optional Todoist
+  projects TODOIST_OPS_PROJECT_ID and TODOIST_REVIEW_PROJECT_ID (GitHub environment secrets too) are
+  sent only when set: an empty or unset one adds no --var, so the Worker sees it unset and uses the
+  default project.
 - `--secrets-file` for the gateway: the owner's Access emails (GitHub environment secrets), which become
   Worker secrets shown as hidden.
 
@@ -25,6 +28,7 @@ refuses to run unless every value is present and valid. Messages name the settin
 # runs `exec core`, `exec gateway` or `secrets` must set each input of that mode (Actions sets GITHUB_*).
 # deploy-vars-inputs core: GITHUB_SHA TODOFY_MAINTENANCE_MODE TODOFY_TODOIST_DEFAULT_PROJECT_ID
 # deploy-vars-inputs core: TODOFY_REMINDER_ENABLED TODOFY_PROCESSING_PAUSED TODOFY_FORCE_PAUSE_TODOIST
+# deploy-vars-inputs core: TODOFY_GTD_REVIEW_ENABLED TODOFY_TODOIST_OPS_PROJECT_ID TODOFY_TODOIST_REVIEW_PROJECT_ID
 # deploy-vars-inputs gateway: GITHUB_SHA TODOFY_MAINTENANCE_MODE
 # deploy-vars-inputs secrets: TODOFY_ACCESS_OWNER TODOFY_ACCESS_OWNER_ALIASES
 
@@ -59,7 +63,7 @@ class SettingError(ValueError):
 class Injected:
     name: str  # the Worker var
     source: str  # the environment variable CI sets
-    kind: str  # "build", "toggle" or "personal"
+    kind: str  # "build", "toggle", "personal" or "optional" (a personal value that may be unset)
     pattern: re.Pattern[str]
 
 
@@ -78,6 +82,10 @@ INJECTED: dict[str, tuple[Injected, ...]] = {
         Injected("REMINDER_ENABLED", "TODOFY_REMINDER_ENABLED", "toggle", FLAG),
         Injected("PROCESSING_PAUSED", "TODOFY_PROCESSING_PAUSED", "toggle", FLAG),
         Injected("FORCE_PAUSE_TODOIST", "TODOFY_FORCE_PAUSE_TODOIST", "toggle", FLAG),
+        Injected("GTD_REVIEW_ENABLED", "TODOFY_GTD_REVIEW_ENABLED", "toggle", FLAG),
+        # docs/gtd-features.md §10: the [Todofy System] reminder's and the Sunday review's projects.
+        Injected("TODOIST_OPS_PROJECT_ID", "TODOFY_TODOIST_OPS_PROJECT_ID", "optional", PROJECT_ID),
+        Injected("TODOIST_REVIEW_PROJECT_ID", "TODOFY_TODOIST_REVIEW_PROJECT_ID", "optional", PROJECT_ID),
     ),
     "gateway": _shared(),
 }
@@ -92,9 +100,25 @@ def _required(env: Mapping[str, str], name: str, pattern: re.Pattern[str]) -> st
     return value
 
 
+def _optional(env: Mapping[str, str], name: str, pattern: re.Pattern[str]) -> str:
+    """An optional value: absent or empty means unset; anything else must be valid."""
+    value = env.get(name) or ""
+    if value and not pattern.fullmatch(value):
+        raise SettingError(name)
+    return value
+
+
 def injected_vars(worker: str, env: Mapping[str, str]) -> dict[str, str]:
-    """{NAME: value} for every var `worker` ("core" or "gateway") gets at deploy."""
-    return {item.name: _required(env, item.source, item.pattern) for item in INJECTED[worker]}
+    """{NAME: value} for every var `worker` ("core" or "gateway") gets at deploy; an optional var that
+    is unset is left out, so the deploy leaves it unset on the Worker."""
+    values = {}
+    for item in INJECTED[worker]:
+        if item.kind == "optional":
+            if value := _optional(env, item.source, item.pattern):
+                values[item.name] = value
+        else:
+            values[item.name] = _required(env, item.source, item.pattern)
+    return values
 
 
 def wrangler_args(worker: str, env: Mapping[str, str]) -> list[str]:

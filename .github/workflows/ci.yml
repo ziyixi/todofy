@@ -194,6 +194,10 @@ jobs:
           TODOFY_MAINTENANCE_MODE: 'false'
           TODOFY_PROCESSING_PAUSED: 'false'
           TODOFY_FORCE_PAUSE_TODOIST: 'false'
+          TODOFY_GTD_REVIEW_ENABLED: 'false'
+          # The optional projects: one unset (no --var) and one set, so both paths are bundled.
+          TODOFY_TODOIST_OPS_PROJECT_ID: ''
+          TODOFY_TODOIST_REVIEW_PROJECT_ID: placeholder
         run: |
           uv run python deploy/deploy_vars.py secrets "$RUNNER_TEMP/todofy-gateway-secrets.json"
           uv run python deploy/deploy_vars.py exec core -- uv run pywrangler deploy --dry-run --config wrangler.toml \
@@ -730,6 +734,9 @@ jobs:
           TODOFY_MAINTENANCE_MODE: ${{ vars.TODOFY_MAINTENANCE_MODE }}
           TODOFY_PROCESSING_PAUSED: ${{ vars.TODOFY_PROCESSING_PAUSED }}
           TODOFY_FORCE_PAUSE_TODOIST: ${{ vars.TODOFY_FORCE_PAUSE_TODOIST }}
+          TODOFY_GTD_REVIEW_ENABLED: ${{ vars.TODOFY_GTD_REVIEW_ENABLED }}
+          TODOFY_TODOIST_OPS_PROJECT_ID: ${{ secrets.TODOFY_TODOIST_OPS_PROJECT_ID }}
+          TODOFY_TODOIST_REVIEW_PROJECT_ID: ${{ secrets.TODOFY_TODOIST_REVIEW_PROJECT_ID }}
         run: |
           uv run python deploy/deploy_vars.py secrets "$RUNNER_TEMP/todofy-gateway-secrets.json"
           uv run python deploy/deploy_vars.py exec core -- uv run pywrangler deploy --dry-run --config wrangler.toml
@@ -745,6 +752,9 @@ jobs:
           TODOFY_MAINTENANCE_MODE: ${{ vars.TODOFY_MAINTENANCE_MODE }}
           TODOFY_PROCESSING_PAUSED: ${{ vars.TODOFY_PROCESSING_PAUSED }}
           TODOFY_FORCE_PAUSE_TODOIST: ${{ vars.TODOFY_FORCE_PAUSE_TODOIST }}
+          TODOFY_GTD_REVIEW_ENABLED: ${{ vars.TODOFY_GTD_REVIEW_ENABLED }}
+          TODOFY_TODOIST_OPS_PROJECT_ID: ${{ secrets.TODOFY_TODOIST_OPS_PROJECT_ID }}
+          TODOFY_TODOIST_REVIEW_PROJECT_ID: ${{ secrets.TODOFY_TODOIST_REVIEW_PROJECT_ID }}
         run: |
           test -n "$CLOUDFLARE_API_TOKEN"
           npx --no-install wrangler d1 migrations apply DB --remote --config wrangler.toml

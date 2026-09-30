@@ -76,6 +76,22 @@ Set as GitHub variables on the `production` environment and applied by a deploy 
 | `TODOFY_PROCESSING_PAUSED` | mail is accepted and stored but no summary, task or daily reminder is made; report precompute and the newsletter endpoints keep working |
 | `TODOFY_FORCE_PAUSE_TODOIST` | summaries continue; rows wait in `summarized`; no reminder |
 | `TODOFY_REMINDER_ENABLED` | the daily attention reminder task is on |
+| `TODOFY_GTD_REVIEW_ENABLED` | the Sunday review task is on (one Todoist task per ISO week, [docs/gtd-features.md](docs/gtd-features.md)) |
+
+Optional environment secrets `TODOFY_TODOIST_OPS_PROJECT_ID` and `TODOFY_TODOIST_REVIEW_PROJECT_ID` send the
+`[Todofy System]` reminder and the Sunday review to their own Todoist projects; unset, both go to the
+default project.
+
+## GTD ledger and the morning brief
+
+Once a day (13:00 UTC) the Durable Object reads Todoist's active tasks and the last 7 days of completions,
+read-only, and keeps metadata and counts only, never a task title or description: open, age buckets,
+overdue, undated, created and completed, per inbox and for all projects. The 13:30 recommendation then
+also sees mail tasks of the last 14 days that are still open (up to 30, marked `[N 天前]`); without a
+usable snapshot it is exactly the 24 h report. Every Sunday from 17:00 UTC one review task per ISO week
+carries the week's counts, trends and links. The owner UI's GTD page shows the trends; ops-v1 status
+carries the counters and the dashboard shows them as the "GTD 循环" flow
+([docs/gtd-features.md](docs/gtd-features.md)).
 
 ## Backups
 

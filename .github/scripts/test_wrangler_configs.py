@@ -60,13 +60,22 @@ WRAPPERS = {
     "dashboard": ("dashboard/deploy/deploy-vars.mjs", r"deploy-vars\.mjs (exec|secrets)\b", ["home"]),
 }
 # Worker vars that must never be committed: personal values (GitHub environment secrets) ...
-PERSONAL_VARS = {"RECEIVE_ADDRESS", "ACCESS_OWNER", "ACCESS_OWNER_ALIASES", "TODOIST_DEFAULT_PROJECT_ID"}
+PERSONAL_VARS = {
+    "RECEIVE_ADDRESS",
+    "ACCESS_OWNER",
+    "ACCESS_OWNER_ALIASES",
+    "TODOIST_DEFAULT_PROJECT_ID",
+    "TODOIST_OPS_PROJECT_ID",
+    "TODOIST_REVIEW_PROJECT_ID",
+}
 # ... and the GitHub names they come from. In ci.yml they are only ever secrets (or checks' placeholders).
 PERSONAL_INPUTS = {
     "MAIL_HERO_RECEIVE_ADDRESS",
     "MAIL_HERO_ACCESS_OWNER",
     "MAIL_HERO_ACCESS_OWNER_ALIASES",
     "TODOFY_TODOIST_DEFAULT_PROJECT_ID",
+    "TODOFY_TODOIST_OPS_PROJECT_ID",
+    "TODOFY_TODOIST_REVIEW_PROJECT_ID",
     "TODOFY_ACCESS_OWNER",
     "TODOFY_ACCESS_OWNER_ALIASES",
     "DASHBOARD_ACCESS_OWNER",
@@ -80,6 +89,7 @@ TOGGLES = {
     "TODOFY_PROCESSING_PAUSED",
     "TODOFY_FORCE_PAUSE_TODOIST",
     "TODOFY_REMINDER_ENABLED",
+    "TODOFY_GTD_REVIEW_ENABLED",
     "DASHBOARD_CANARY_ENABLED",
 }
 DEPLOY_JOBS = ("todofy-deploy", "mail-hero-deploy", "dashboard-deploy")

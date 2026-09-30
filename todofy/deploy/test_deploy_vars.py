@@ -30,6 +30,9 @@ VALID = {
     "TODOFY_REMINDER_ENABLED": "true",
     "TODOFY_PROCESSING_PAUSED": "false",
     "TODOFY_FORCE_PAUSE_TODOIST": "false",
+    "TODOFY_GTD_REVIEW_ENABLED": "false",
+    "TODOFY_TODOIST_OPS_PROJECT_ID": "",
+    "TODOFY_TODOIST_REVIEW_PROJECT_ID": "",
     "TODOFY_ACCESS_OWNER": "owner@example.com",
     "TODOFY_ACCESS_OWNER_ALIASES": "",
 }
@@ -44,6 +47,7 @@ def test_each_worker_gets_the_build_its_switches_and_the_core_its_project() -> N
         "REMINDER_ENABLED": "true",
         "PROCESSING_PAUSED": "false",
         "FORCE_PAUSE_TODOIST": "false",
+        "GTD_REVIEW_ENABLED": "false",
     }
     assert injected_vars("gateway", VALID) == {"BUILD_SHA": SHA, "MAINTENANCE_MODE": "false"}
     assert wrangler_args("gateway", VALID | {"TODOFY_MAINTENANCE_MODE": "true"}) == [
@@ -70,8 +74,11 @@ def test_the_marker_lists_every_input() -> None:
 @pytest.mark.parametrize(
     ("name", "value"),
     [
-        *[(item.source, None) for item in INJECTED["core"]],
-        *[(item.source, "") for item in INJECTED["core"]],
+        *[(item.source, None) for item in INJECTED["core"] if item.kind != "optional"],
+        *[(item.source, "") for item in INJECTED["core"] if item.kind != "optional"],
+        ("TODOFY_GTD_REVIEW_ENABLED", "on"),
+        ("TODOFY_TODOIST_OPS_PROJECT_ID", "ops project"),
+        ("TODOFY_TODOIST_REVIEW_PROJECT_ID", "r" * 65),
         ("GITHUB_SHA", SHA[:39]),
         ("GITHUB_SHA", SHA.upper()),
         ("TODOFY_MAINTENANCE_MODE", "1"),
@@ -87,6 +94,27 @@ def test_a_missing_or_invalid_value_names_only_the_setting(name: str, value: str
     with pytest.raises(SettingError) as raised:
         wrangler_args("core", env)
     assert str(raised.value) == f"Invalid or missing deploy setting: {name}"
+
+
+@pytest.mark.parametrize("unset", [None, ""])
+def test_optional_projects_are_sent_only_when_set(unset: str | None) -> None:
+    """An unset optional project adds no --var, so the deploy leaves it unset (the default project)."""
+    env = {key: value for key, value in VALID.items() if not key.endswith(("_OPS_PROJECT_ID", "_REVIEW_PROJECT_ID"))}
+    if unset is not None:
+        env |= {"TODOFY_TODOIST_OPS_PROJECT_ID": unset, "TODOFY_TODOIST_REVIEW_PROJECT_ID": unset}
+    names = set(injected_vars("core", env))
+    assert "TODOIST_OPS_PROJECT_ID" not in names and "TODOIST_REVIEW_PROJECT_ID" not in names
+    both = env | {"TODOFY_TODOIST_OPS_PROJECT_ID": "6OpsProj", "TODOFY_TODOIST_REVIEW_PROJECT_ID": "6Review_1"}
+    assert injected_vars("core", both) | {} == injected_vars("core", env) | {
+        "TODOIST_OPS_PROJECT_ID": "6OpsProj",
+        "TODOIST_REVIEW_PROJECT_ID": "6Review_1",
+    }
+    assert wrangler_args("core", both)[-4:] == [
+        "--var",
+        "TODOIST_OPS_PROJECT_ID:6OpsProj",
+        "--var",
+        "TODOIST_REVIEW_PROJECT_ID:6Review_1",
+    ]
 
 
 def test_the_secrets_are_the_owner_and_the_aliases() -> None:
