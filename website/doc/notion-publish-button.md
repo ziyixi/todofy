@@ -1,12 +1,17 @@
-# 从 Notion 一键发布网站
+# 从 Notion 发布网站
 
-## 平时只需要三步
+> 2026-09-30 起：网站代码在 monorepo `ziyixi/todofy` 的 `website/`，托管在 Cloudflare（Worker
+> `ziyixi-website`，静态导出），发布工作流是 `website-release.yml`。改动 Notion 后**会自动发布**；按钮仍可立即发布。
+> 架构与规则见 [`docs/architecture.md`](../docs/architecture.md)，发布流程见 [`docs/release.md`](../docs/release.md)。
+
+## 平时
 
 1. 在 **Blog** 数据库写好文章，检查 `Status = Published`、`PublishedAt`、`Slug` 和 `Language` 等原有必填项。
-2. 切换到 **发布管理**，点击 **发布网站**。任意一行的按钮作用相同：同步整个数据库的已发布文章，不只是这一行；按钮不会修改作者设置的 `Status`。
-3. 查看 [GitHub 发布进度](https://github.com/ziyixi/ziyixi.science/actions/workflows/production-release.yml)（Blog 顶部说明也有这个地址）。等待最新运行显示绿色，再查看 [网站](https://www.ziyixi.science)。刚打开时可能需要刷新一次才看到新运行。
+2. 什么都不用点：中转 Worker 每 15 分钟检查一次，最后一次编辑满 **25 分钟**（静默期，避免写到一半就上线）后自动发布；到了 `PublishedAt` 的「待定时发布」文章也会自动上线（只写日期时按 UTC 0 点生效）。每天 UTC 10 点后还有一次对账发布。
+3. 想马上发布：切换到 **发布管理**，点击 **发布网站**。任意一行的按钮作用相同：同步整个数据库的已发布文章，不只是这一行；按钮不会修改作者设置的 `Status`。
+4. 查看 [GitHub 发布进度](https://github.com/ziyixi/todofy/actions/workflows/website-release.yml)。运行名是 `Website release (button|cron|reconcile)`。等待最新运行显示绿色，再查看 [网站](https://www.ziyixi.science)。
 
-日常改 Notion 内容不需要 `git push`、本地同步或手动进入 Vercel。改网站代码时仍需先提交并推送，再发布。
+日常改 Notion 内容不需要 `git push` 或本地同步。改网站代码时提交并推送到 `main`，CI 通过后会自动发布。
 
 Notion 的“成功”表示请求已送出，不表示网站已经部署完成。最终以 GitHub 的发布验收结果为准。发布进行中再次点击通常会复用当前运行；如果这时又修改了文章，请等它结束后再点一次。
 
@@ -22,7 +27,7 @@ Tags 留在写作视图；两个按钮放在发布管理。所有视图使用同
 
 ## 怎么知道文章有没有更新到网站
 
-写完之后，可以先点 **刷新状态**。它启动单独的 [状态检查](https://github.com/ziyixi/ziyixi.science/actions/workflows/notion-status.yml)，比较整库文章与当前正式网站，并回写状态；**不构建、不部署网站**。等待检查结束后查看：
+写完之后，可以先点 **刷新状态**。它启动同一工作流的状态检查（运行名 `Website status (button)`），比较整库文章与当前正式网站，并回写状态；**不构建、不部署网站**。等待检查结束后查看：
 
 | 网站状态     | 含义                                                                      |
 | ------------ | ------------------------------------------------------------------------- |
@@ -30,7 +35,7 @@ Tags 留在写作视图；两个按钮放在发布管理。所有视图使用同
 | 有修改待发布 | 已上线，但当前 Notion 内容与线上版本不同                                  |
 | 未上线       | 正式网站还没有这一篇；Draft 也会显示此状态                                |
 | 待下线       | 线上仍有这篇，但 Notion 已改成 Draft 或未来发布日期；下次成功发布才会移除 |
-| 待定时发布   | 发布日期还没到，线上没有此篇；到日期后仍需点击发布，当前没有定时任务      |
+| 待定时发布   | 发布日期还没到，线上没有此篇；到日期后的下一次自动检查会发布它            |
 | 检查失败     | 当前记录无法完成比较，查看状态检查运行详情                                |
 
 `Status` 是你填写的 **Draft / Published 发布意图**，`网站状态` 是检查得出的 **实际网站情况**，两者分开。发布成功后也会自动检查并回写，所以通常只需要点「发布网站」。状态不是实时订阅：修改后在下一次刷新或发布前，旧状态仍可能显示为「已同步」。
@@ -65,43 +70,42 @@ node --env-file=.env.local --import tsx scripts/notion/sync-status.ts --dry-run
 ## 已配置的连接
 
 ```text
-Notion Blog「发布网站」
-  → Cloudflare Worker 验证专用密钥
-  → GitHub production-release.yml（main / release）
-  → 拉取最新 Notion 内容、校验、构建、部署及验收 Vercel
+Notion Blog「发布网站」/ 每 15 分钟的自动检查
+  → Cloudflare Worker ziyixi-notion-publish（按钮验证专用密钥）
+  → GitHub ziyixi/todofy 的 website-release.yml（main / release）
+  → 拉取最新 Notion 内容、校验、静态导出、本地验收、上传 Worker 版本、部署、线上验收、失败自动回退
 ```
 
-- 中转：`https://ziyixi-notion-publish.cloudflare-579.workers.dev/publish`。
-- 刷新状态：同一中转的 `/refresh-status`，固定触发 `notion-status.yml`，没有部署参数。使用相同的专用请求头密钥，不发送文章属性。
+- 中转：`https://ziyixi-notion-publish.cloudflare-579.workers.dev/publish`（地址不变）。
+- 刷新状态：同一中转的 `/refresh-status`，固定触发同一工作流的 `operation=status`，没有部署参数。使用相同的专用请求头密钥，不发送文章属性。
 - 请求：POST；自定义请求头 `X-Notion-Publish-Secret`。
 - 按钮不发送文章属性给中转；中转也不读取、记录或转发 Notion 请求正文。
-- 发布参数固定为 `operation=release`、`confirmation=release:www.ziyixi.science`、`force_build=false`、`allow_empty=false`。按钮无法选择恢复模式或其他仓库/分支。
+- 发布参数固定为 `operation=release`、`confirmation=release:www.ziyixi.science`、`force_build=false`、`allow_empty=false`、`trigger=button`（自动检查用 `cron`/`reconcile`）。按钮无法选择恢复模式或其他仓库/分支。
 - GitHub 上原来的校验、串行发布、正式环境规则和回退机制继续生效。
 - 发布与状态检查共用串行队列，避免状态回写与内容读取同时进行；队列允许等待的请求保留，不会因为按刷新而替换等待中的发布。
-- Worker 使用 `workers.dev` 地址，不需要修改网站域名、DNS 或 Vercel 设置。
+- Worker 使用 `workers.dev` 地址，由 monorepo 的 CI 部署（不再从笔记本部署）。
 
-## 两种密钥分别放在哪里
+## 密钥分别放在哪里
 
-| 名称                    | 用途                           | 保存位置                                                          |
-| ----------------------- | ------------------------------ | ----------------------------------------------------------------- |
-| `GITHUB_DISPATCH_TOKEN` | 只允许目标仓库的 Actions 读写  | 本机 `.env.local` 和 Cloudflare Worker 的 Secret                  |
-| `NOTION_WEBHOOK_SECRET` | 验证来自私人 Notion 按钮的请求 | 本机 `.env.local`、Cloudflare Worker 的 Secret、Notion 按钮请求头 |
+| 名称                                    | 用途                                 | 保存位置                                                          |
+| --------------------------------------- | ------------------------------------ | ----------------------------------------------------------------- |
+| `GITHUB_DISPATCH_TOKEN`                 | 只允许 ziyixi/todofy 的 Actions 读写 | 本机 `.env.local` 和 Cloudflare Worker 的 Secret                  |
+| `NOTION_WEBHOOK_SECRET`                 | 验证来自私人 Notion 按钮的请求       | 本机 `.env.local`、Cloudflare Worker 的 Secret、Notion 按钮请求头 |
+| `NOTION_TOKEN`、`NOTION_DATA_SOURCE_ID` | 自动检查只读查询 Blog 数据源         | Cloudflare Worker 的 Secret（建议单独的只读 integration）         |
 
-这两项都不需要放入 Vercel 或 GitHub Actions Secrets，也不要提交到 Git。不要把 GitHub token 填入 Notion。保持 Blog 及按钮编辑权限私有；能读到按钮请求头的人具有触发发布的能力。
+GitHub 的发布本身用 production 环境的 `WEBSITE_NOTION_TOKEN`、`WEBSITE_NOTION_DATA_SOURCE_ID`。都不要提交到 Git，不要把 GitHub token 填入 Notion。保持 Blog 及按钮编辑权限私有；能读到按钮请求头的人具有触发发布的能力。
 
 ## Token 到期时怎么换
 
-1. 在 [GitHub fine-grained tokens](https://github.com/settings/personal-access-tokens) 创建新的 token：Owner 选 `ziyixi`，只选 `ziyixi.science` 仓库，Repository permissions 只增加 **Actions → Read and write**。设置合适的到期时间，并记下续期提醒。
+1. 在 [GitHub fine-grained tokens](https://github.com/settings/personal-access-tokens) 创建新的 token：Owner 选 `ziyixi`，只选 `todofy` 仓库，Repository permissions 只增加 **Actions → Read and write**。设置合适的到期时间，并记下续期提醒。token 过期后按钮返回 502，自动检查在 Workers Logs 里记 `GITHUB_UNAVAILABLE`。
 2. 在本机 `.env.local` 更新 `GITHUB_DISPATCH_TOKEN`。
-3. 在项目目录运行 `make deploy-relay`。如本机 Cloudflare 登录已失效，先执行下方登录命令。
-4. 从 Notion 点击按钮，确认新的 GitHub 运行启动。替换 GitHub token 不需要改 Notion 按钮。
+3. 在 `website/` 目录更新 Worker Secret（交互输入，不经过聊天）：
 
 ```sh
-npx --yes wrangler@4.141.0 login --scopes account:read user:read workers_scripts:write
-make deploy-relay
+npx wrangler secret put GITHUB_DISPATCH_TOKEN --config relay/wrangler.toml
 ```
 
-`make deploy-relay` 只上传中转代码和上述两项 Secret，不会上传 `.env.local` 里的 Notion、Vercel 等其他密钥。它临时使用仅本机当前用户可读取的文件，完成后删除。
+4. 从 Notion 点击按钮，确认新的 GitHub 运行启动。替换 GitHub token 不需要改 Notion 按钮。
 
 如果要更换 `NOTION_WEBHOOK_SECRET`，本机和 Cloudflare 更新后，还必须同步修改 Notion **两个按钮**里的 `X-Notion-Publish-Secret` 值。
 
@@ -114,6 +118,6 @@ make deploy-relay
 - **网络超时**：先查 GitHub；请求可能已经到达，避免立刻重复触发。
 - **运行成功但没有新部署**：如果代码和已发布内容都未变化，流程可以正常跳过重复构建。
 
-中转无持久化去重数据库；两个几乎同时到达的点击仍可能创建多次运行。GitHub 的并发组会串行发布，内容未变化时会跳过重建。
+中转无持久化去重数据库；两个几乎同时到达的点击仍可能创建多次运行。GitHub 的并发组会串行发布，内容未变化时会跳过重建。自动检查每天最多触发 6 次变更发布，同一天 3 次发布失败后当天不再自动触发。
 
-实现和安全测试见 [中转说明](../integrations/notion-publish/README.md)。官方参考：[Notion webhook](https://www.notion.com/help/webhook-actions)、[GitHub workflow dispatch](https://docs.github.com/en/rest/actions/workflows#create-a-workflow-dispatch-event)、[Cloudflare Secrets](https://developers.cloudflare.com/workers/configuration/secrets/)。
+实现和安全测试见 [中转说明](../relay/README.md)。官方参考：[Notion webhook](https://www.notion.com/help/webhook-actions)、[GitHub workflow dispatch](https://docs.github.com/en/rest/actions/workflows#create-a-workflow-dispatch-event)、[Cloudflare Secrets](https://developers.cloudflare.com/workers/configuration/secrets/)。

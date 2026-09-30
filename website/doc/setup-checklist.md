@@ -1,5 +1,9 @@
 # 上线前 Pending List：Notion、GitHub、Vercel 与域名
 
+> **2026-09-30：本文描述 Vercel 时期。** 网站已迁入 monorepo `ziyixi/todofy` 的 `website/`，托管改为
+> Cloudflare Workers Static Assets；发布、按钮与切换以 [`docs/release.md`](../docs/release.md)、
+> [`relay/README.md`](../relay/README.md)、[`docs/cutover.md`](../docs/cutover.md) 为准。
+
 更新时间：2026-09-21。本文根据当前实现、修复记录及当日官方文档整理；所有勾选框表示**待执行或待账户持有人确认**，不是已完成配置。此轮没有创建账号资源、写入密钥、发布网站、修改 DNS 或发起域名转移。
 
 建议继续使用当前代码中的主地址 **https://www.ziyixi.science**，让 **https://ziyixi.science** 重定向到它。主线优先复用现有 Vercel 项目；若希望保留完全独立的旧项目，第 3.4 节提供新项目分支。

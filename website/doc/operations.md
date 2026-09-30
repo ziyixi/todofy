@@ -1,5 +1,9 @@
 # 网站发布与恢复手册
 
+> **2026-09-30：本文描述 Vercel 时期。** 网站已迁入 monorepo `ziyixi/todofy` 的 `website/`，托管改为
+> Cloudflare Workers Static Assets；发布、按钮与切换以 [`docs/release.md`](../docs/release.md)、
+> [`relay/README.md`](../relay/README.md)、[`docs/cutover.md`](../docs/cutover.md) 为准。
+
 本手册描述仓库已经落下的离线 CI/发布骨架，以及把它连接到真实 GitHub、Vercel、Notion 和域名之前必须完成的人工核对。它不是“已经上线”的记录。
 
 当前边界：本地目录尚未连接可验证的 GitHub 仓库或 Vercel 项目；本轮没有读取账号、调用 GitHub/Vercel API、修改 DNS、绑定域名或部署。`ziyixi.science` 的实际托管、apex/www 指向、证书、邮件 DNS 记录、Vercel 套餐与 Deployment Protection 设置都未验证。Notion 数据源也未连接；仓库当前正式内容模式为 `empty`。

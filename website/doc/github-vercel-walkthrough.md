@@ -1,5 +1,9 @@
 # 直接覆盖上线：GitHub + Vercel
 
+> **2026-09-30：本文描述 Vercel 时期。** 网站已迁入 monorepo `ziyixi/todofy` 的 `website/`，托管改为
+> Cloudflare Workers Static Assets；发布、按钮与切换以 [`docs/release.md`](../docs/release.md)、
+> [`relay/README.md`](../relay/README.md)、[`docs/cutover.md`](../docs/cutover.md) 为准。
+
 2026-09-21，按用户最新要求：直接覆盖现有仓库与项目，不保留旧内容，不迁移旧 URL，不备份或演练恢复旧站。旧站恢复衔接不再作为上线前提。
 
 2026-09-21 已完成代码覆盖；下面保留配置步骤供日后查阅。新站使用现有构建和部署测试。
