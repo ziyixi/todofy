@@ -444,7 +444,7 @@ jobs:
           server=$!
           trap 'kill "$server" 2>/dev/null || true' EXIT
           for attempt in $(seq 1 60); do
-            curl -fsS -o /dev/null http://127.0.0.1:4173/build-info.json && break
+            curl -fs -o /dev/null http://127.0.0.1:4173/build-info.json && break
             sleep 1
           done
           ALLOW_FIXTURE_DEPLOYMENT_TESTS=true DEPLOYMENT_BASE_URL=http://127.0.0.1:4173 \
