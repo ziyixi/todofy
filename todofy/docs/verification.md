@@ -103,8 +103,29 @@ One earlier full run with 4 processes on the same machine failed
 other suites were running; it passed 3 times alone and in the CI-planned shard run above. Not seen before;
 left as a possible timing flake under load.
 
+### After the review fixes (2026-09-30, rebased on `main` at `67b082d`)
+
+The review's findings were fixed with regression tests (gtd-features.md §3, §6–§9, §11): only today's
+scheduled snapshot serves the carryover; the 30 carried tasks are spread over the days; carried lines are
+cut to 1 KiB and 16 KiB; a failed attempt or a refused token reservation falls back to the 24 h report; a
+"（N 天前）" reason prefix; the completed list never blocks Todoist; `mail_open` is the carryover pool;
+`review_age_days`/`review_overdue` need the snapshot; the review body's trends, focus lines and oldest-task
+links; the GTD flow's 执行 stage has no entry now that `main` removed Flowday. Every CI job's steps, from a
+clean clone of the branch (macOS; the website with Node 24):
+
+| Job | Result |
+|---|---|
+| `Changes` | 129 tests OK (1 skipped) |
+| `Shared packages` (`packages/edge-auth`) | ok |
+| `Todofy static checks` | ruff ok; 1075 passed, 1 skipped; gateway 87 passed; web tests and build ok; both dry-runs ok |
+| `Todofy runtime` (3 shards, `-n 4`, serial files alone) + `Todofy checks` | 159 + 163 + 139 passed, 2 alone; "all 463 collected tests ran exactly once across 3 shards and passed" |
+| `Contracts` | 38, 311, 10 and 63 passed |
+| `Dashboard checks` | worker 203, runtime 64, web 110 passed; build, import guard and dry-run ok |
+| `Mail Hero checks` | deploy tests ok, Worker 168 passed, UI 66 passed, build and dry-run ok |
+| `Website checks` | `pnpm check` 300 passed; e2e empty 20 and fixture 28 passed; deployment 2 passed; three dry-runs ok |
+
 Pending: the owner steps in [cloudflare-setup.md](cloudflare-setup.md) §8 (the switch
-`TODOFY_GTD_REVIEW_ENABLED`, the optional project secrets, the newsletter decoder check); the release with
+`TODOFY_GTD_REVIEW_ENABLED`, the optional project secrets, the newsletter captions); the release with
 migration `0004_gtd`; the first real 13:00 snapshot and its row counts and CPU in Workers Logs; the first
 carried-over morning brief; the first Sunday review task; the dashboard's GTD flow with real counters.
 Unverified against the real Todoist: whether completing a recurring task appears in the completed list
