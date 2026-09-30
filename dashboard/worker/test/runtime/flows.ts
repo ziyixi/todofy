@@ -6,7 +6,8 @@
 import { expect } from 'vitest';
 import { validate } from '../../../../contracts/ops-v1/validate.mjs';
 import type { GuardState, OpsStatus } from '../../../../contracts/ops-v1/ops-v1.ts';
-import type { CanaryRun, CsrfResponse, OverviewResponse } from '../../src/api-types.ts';
+import type { CanaryRun, CsrfResponse, OverallLevel, UsageView } from '../../src/api-types.ts';
+import type { AppDetail, CloudflareResponse, OpsResponse } from '../../src/api-v2-types.ts';
 import { graphqlBody, type SyntheticUsage } from '../graphql-fixture.ts';
 import { contractSchema, fixture, startHarness, SYNTHETIC_BINDINGS, type Harness, type StubApp } from './harness.ts';
 
@@ -22,6 +23,22 @@ export interface V2Answer<T> {
   readonly bytes: number;
 }
 
+/**
+ * What the flow tests read, assembled from GET /api/v2/ops (guard, canary, digest, app details, the
+ * shared shell) and GET /api/v2/cloudflare (usage). `overall` is the attention strip as v1's banner
+ * was: warning/critical items worst first, then the page-only info items, as {source, code, severity}.
+ */
+export interface Snapshot {
+  readonly ops: OpsResponse;
+  readonly overall: { readonly level: OverallLevel; readonly items: readonly { source: string; code: string; severity: string }[] };
+  readonly apps: Readonly<Record<StubApp, AppDetail>>;
+  readonly usage: UsageView;
+  readonly guard: OpsResponse['guard'];
+  readonly canary: OpsResponse['canary'];
+  readonly digest: OpsResponse['digest'];
+  readonly refresh: OpsResponse['refresh'];
+}
+
 export interface Analytics {
   /** What the next GraphQL requests answer: usage numbers, or a Response (errors, statuses). */
   answer: SyntheticUsage | (() => Response);
@@ -33,8 +50,8 @@ export interface FlowHarness extends Harness {
   readonly analytics: Analytics;
   /** Extra outbound answers (e.g. the Access certs) by exact URL. */
   readonly routes: Map<string, () => Response>;
-  /** Owner API through the loopback dev bypass (DEV_AUTH_BYPASS=true in these harnesses). */
-  overview(refresh?: boolean): Promise<OverviewResponse>;
+  /** The ops and cloudflare views through the loopback dev bypass (DEV_AUTH_BYPASS=true in these harnesses). */
+  snapshot(): Promise<Snapshot>;
   /** GET /api/v2/<path> through the dev bypass, optionally conditional. */
   v2<T>(path: string, etag?: string | null): Promise<V2Answer<T>>;
   /** Rows the Durable Object read for its last v2 view (HomeState.lastRowsRead over RPC). */
@@ -56,12 +73,13 @@ export interface FlowHarness extends Harness {
 /** A stub answer: a value, an error code thrown, or a sequence of them (the last one repeats). */
 export type StubAnswer = { value: unknown } | { throw: string } | { sequence: ({ value: unknown } | { throw: string })[] };
 
-export async function startFlows(options: { bindings?: Record<string, string>; usage?: SyntheticUsage } = {}): Promise<FlowHarness> {
+export async function startFlows(options: { bindings?: Record<string, string>; usage?: SyntheticUsage; persist?: string } = {}): Promise<FlowHarness> {
   const analytics: Analytics = { answer: options.usage ?? {}, requests: [] };
   const routes = new Map<string, () => Response>();
   const outboundLog: string[] = [];
   const harness = await startHarness({
     bindings: { DEV_AUTH_BYPASS: 'true', ...options.bindings },
+    ...(options.persist === undefined ? {} : { persist: options.persist }),
     async outbound(request) {
       outboundLog.push(request.url);
       if (request.url === GRAPHQL) {
@@ -102,11 +120,33 @@ export async function startFlows(options: { bindings?: Record<string, string>; u
       const stub = ns.get(ns.idFromName('home-v1')) as unknown as { lastRowsRead(): Promise<number> };
       return stub.lastRowsRead();
     },
-    async overview(refresh = false) {
-      const response = await harness.fetch(`/api/v1/overview${refresh ? '?refresh=1' : ''}`);
-      expect(response.status).toBe(200);
-      expect(response.headers.get('cache-control')).toBe('no-store');
-      return (await response.json()) as OverviewResponse;
+    async snapshot() {
+      const read = async <T>(path: string): Promise<T> => {
+        const response = await harness.fetch(`/api/v2/${path}`);
+        expect(response.status).toBe(200);
+        expect(response.headers.get('cache-control')).toBe('no-store');
+        return (await response.json()) as T;
+      };
+      const ops = await read<OpsResponse>('ops');
+      const cloudflare = await read<CloudflareResponse>('cloudflare');
+      const app = (id: StubApp): AppDetail => {
+        const detail = ops.apps.find((entry) => entry.entry === id);
+        if (detail === undefined) throw new Error(`no app detail for ${id}`);
+        return detail;
+      };
+      return {
+        ops,
+        overall: {
+          level: ops.attention.level,
+          items: [...ops.attention.items, ...ops.attention.info].map(({ source, code, severity }) => ({ source, code, severity })),
+        },
+        apps: { 'mail-hero': app('mail-hero'), todofy: app('todofy') },
+        usage: cloudflare.usage,
+        guard: ops.guard,
+        canary: ops.canary,
+        digest: ops.digest,
+        refresh: ops.refresh,
+      };
     },
     async post(path, body) {
       if (csrf === null) {
@@ -169,8 +209,8 @@ export async function expectValid(name: string, value: unknown): Promise<void> {
   expect(validate(await contractSchema(), name, value)).toEqual([]);
 }
 
-export function latest(overview: OverviewResponse): CanaryRun {
-  const run = overview.canary.recent[0];
+export function latest(snapshot: Snapshot): CanaryRun {
+  const run = snapshot.canary.recent[0];
   if (run === undefined) throw new Error('no canary run');
   return run;
 }

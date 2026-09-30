@@ -52,8 +52,6 @@ test('the production config keeps the shape and replaces account, route and vars
     ACCESS_ISSUER: 'https://example.cloudflareaccess.com',
     ACCESS_AUDIENCE: 'b'.repeat(64),
     ACCOUNT_ID: 'a'.repeat(32),
-    MAIL_HERO_URL: 'https://mail.example.org/',
-    TODOFY_URL: 'https://todofy.example.org/',
     CANARY_UTC_HOUR: '16',
     CANARY_ENABLED: 'true',
     BUILD_SHA: 'c'.repeat(40),

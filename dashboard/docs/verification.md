@@ -133,7 +133,7 @@ Hero with ops-v1 are live) and, where stated, the owner in a browser.
 | --- | --- | --- |
 | First deploy | `Dashboard deploy` succeeds; Custom Domain `home.ziyixi.science` gets DNS and a certificate | pending |
 | No redirect in front of Access | before the first merge, read only: no zone Redirect Rule or Page Rule matches `home.ziyixi.science` (setup.md §2) | pending |
-| Access fronts the host | the job's probe (302 to `<issuer>/cdn-cgi/access/login/home.ziyixi.science` for `/` and `/api/v1/overview`) | pending |
+| Access fronts the host | the job's probe (302 to `<issuer>/cdn-cgi/access/login/home.ziyixi.science` for `/` and `/api/v2/home`) | pending |
 | The Worker runs the merged build | after the owner's first login: `/health` shows `BUILD_SHA` = the merged commit (the probe cannot see past Access) | pending |
 | Real Access login | the owner opens the page with the primary login and, where configured, an alias; one refresh and one confirmed write (解除降载 is harmless when nothing is shed) | pending |
 | Analytics token | the GraphQL query with the production token returns every dataset; then the token is replaced by an "Account Analytics: Read" token (setup.md §4) and checked again; record the replacement date here. Not done while the broad bootstrap token is still the Worker secret `CF_ANALYTICS_TOKEN` (the deploy refuses it only if it equals `CF_API_TOKEN`) | open (a broader token is still reused) |

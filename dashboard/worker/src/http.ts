@@ -15,7 +15,7 @@ import {
   type AccessPolicy,
 } from '@ziyixi/edge-auth';
 import { GUARD_LEVELS, type GuardLevel } from '../../../contracts/ops-v1/ops-v1.ts';
-import type { ApiError, ApiErrorCode, CsrfResponse, GuardRequest, HealthResponse, OverviewResponse } from './api-types.ts';
+import type { ApiError, ApiErrorCode, CsrfResponse, GuardRequest, HealthResponse } from './api-types.ts';
 import type { CanaryStartRequestV2, GuardResponseV2 } from './api-v2-types.ts';
 import { buildSha, publicHost } from './config.ts';
 import type { Env } from './env.ts';
@@ -224,12 +224,8 @@ async function callHome<T>(fn: () => Promise<T>): Promise<T> {
   }
 }
 
+/** API v2 (docs/design-v2.md §5; types in api-v2-types.ts). v1 is gone: its paths answer 404. */
 const API_ROUTES: Readonly<Record<string, string>> = {
-  '/api/v1/csrf': 'GET',
-  '/api/v1/overview': 'GET',
-  '/api/v1/canary': 'POST',
-  '/api/v1/guard': 'POST',
-  // v2 (docs/design-v2.md §5; types in api-v2-types.ts). v1 stays until the UI no longer calls it.
   '/api/v2/csrf': 'GET',
   '/api/v2/registry': 'GET',
   '/api/v2/home': 'GET',
@@ -291,13 +287,12 @@ async function guardResponse(ctx: Context): Promise<GuardOverrideOutcome> {
 }
 
 async function api(ctx: Context, owner: string, bypassed: boolean): Promise<Response> {
-  const { request, url, env } = ctx;
+  const { request, url } = ctx;
   const method = API_ROUTES[url.pathname];
   if (method === undefined) throw new HttpError(404, 'not_found');
   if (request.method !== method) throw methodNotAllowed(method);
 
   switch (url.pathname) {
-    case '/api/v1/csrf':
     case '/api/v2/csrf':
       return csrfResponse(ctx, owner);
     case '/api/v2/registry':
@@ -323,21 +318,8 @@ async function api(ctx: Context, owner: string, bypassed: boolean): Promise<Resp
       const result: GuardResponseV2 = { guard: (await guardResponse(ctx)).guard };
       return jsonResponse(result);
     }
-    case '/api/v1/overview': {
-      const refresh = url.searchParams.get('refresh') === '1';
-      return jsonResponse(await callHome(() => home(env).overview(refresh) as unknown as Promise<OverviewResponse>));
-    }
-    case '/api/v1/canary': {
-      await checkCsrf(ctx, owner, bypassed);
-      const body = await readBody(request);
-      if (Object.keys(body).length > 0) throw new HttpError(400, 'bad_request');
-      return startCanaryResponse(ctx);
-    }
-    default: {
-      // '/api/v1/guard'
-      await checkCsrf(ctx, owner, bypassed);
-      return jsonResponse({ guard: (await guardResponse(ctx)).guard });
-    }
+    default:
+      throw new HttpError(404, 'not_found');
   }
 }
 

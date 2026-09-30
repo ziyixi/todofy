@@ -5,7 +5,7 @@
  */
 import { afterEach, describe, expect, it } from 'vitest';
 import type { SetGuardInput } from '../../../../contracts/ops-v1/ops-v1.ts';
-import type { GuardResponse } from '../../src/api-types.ts';
+import type { GuardResponseV2 } from '../../src/api-v2-types.ts';
 import { d1Reads, expectValid, shedState, startFlows, status, type FlowHarness } from './flows.ts';
 
 let h: FlowHarness | undefined;
@@ -64,9 +64,9 @@ describe('automatic guard', () => {
 
     await h.tick('2026-09-29T12:30:00Z');
     expect(await guardCalls(h)).toEqual({ 'mail-hero': [], todofy: [] });
-    const overview = await h.overview();
-    expect(overview.guard.desired).toMatchObject({ level: 'normal', source: 'auto' });
-    expect(overview.guard.apps['mail-hero'].last_error).toBeNull();
+    const snap = await h.snapshot();
+    expect(snap.guard.desired).toMatchObject({ level: 'normal', source: 'auto' });
+    expect(snap.guard.apps['mail-hero']?.last_error).toBeNull();
   });
 
   it('renews a monthly R2 shed on the new UTC day before it expires', async () => {
@@ -94,16 +94,16 @@ describe('automatic guard', () => {
     for (const at of ['10:30', '11:00', '11:30', '12:00']) await h.tick(`2026-09-29T${at}:00Z`);
     // The shed stays (no normal call) although no usage arrived for two hours.
     expect(await guardCalls(h)).toEqual({ 'mail-hero': [], todofy: [] });
-    const overview = await h.overview();
-    expect(overview.usage).toMatchObject({ last_error: 'http_401', consecutive_failures: 4 });
-    expect(overview.digest.items.map((i) => `${i.source}:${i.code}`)).toContain('dashboard:usage_unavailable');
-    expect(JSON.stringify(overview)).not.toContain('secret-text');
-    expect(JSON.stringify(overview)).not.toContain('synthetic-analytics-token');
+    const snap = await h.snapshot();
+    expect(snap.usage).toMatchObject({ last_error: 'http_401', consecutive_failures: 4 });
+    expect(snap.digest.items.map((i) => `${i.source}:${i.code}`)).toContain('dashboard:usage_unavailable');
+    expect(JSON.stringify(snap)).not.toContain('secret-text');
+    expect(JSON.stringify(snap)).not.toContain('synthetic-analytics-token');
 
     // A GraphQL error body with 200 is a failure too; still no new shed without data.
     h.analytics.answer = () => Response.json({ data: null, errors: [{ message: 'x' }] });
     await h.tick('2026-09-30T01:00:00Z');
-    const later = await h.overview();
+    const later = await h.snapshot();
     expect(later.usage.last_error).toBe('graphql_error');
     // The shed lapsed at 01:00: both apps are told normal, and nothing new is shed. The reason says
     // that no usage is known (not that the quota is normal).
@@ -135,8 +135,8 @@ describe('automatic guard', () => {
     await h.answer('mail-hero', 'setGuard', { throw: 'unavailable' });
     await h.tick('2026-09-29T10:00:00Z');
     await h.tick('2026-09-29T10:30:00Z');
-    let overview = await h.overview();
-    expect(overview.digest.items.map((i) => `${i.source}:${i.code}`)).toContain('mail-hero:guard_apply_failed');
+    let snap = await h.snapshot();
+    expect(snap.digest.items.map((i) => `${i.source}:${i.code}`)).toContain('mail-hero:guard_apply_failed');
     // Todofy took the shed; Mail Hero never did.
     const calls = await guardCalls(h);
     expect(calls['mail-hero']).toHaveLength(2);
@@ -149,9 +149,9 @@ describe('automatic guard', () => {
     const after = await guardCalls(h);
     expect(after['mail-hero']).toEqual([]);
     expect(after.todofy).toEqual([{ level: 'normal', reason: 'quota_normal', until: null }]);
-    overview = await h.overview();
-    expect(overview.digest.items.map((i) => `${i.source}:${i.code}`)).not.toContain('mail-hero:guard_apply_failed');
-    expect(overview.guard.apps['mail-hero'].last_error).toBeNull();
+    snap = await h.snapshot();
+    expect(snap.digest.items.map((i) => `${i.source}:${i.code}`)).not.toContain('mail-hero:guard_apply_failed');
+    expect(snap.guard.apps['mail-hero']?.last_error).toBeNull();
   });
 
   it('never calls setGuard on an app that does not list the guard capability', async () => {
@@ -169,9 +169,9 @@ describe('automatic guard', () => {
     await h.tick('2026-09-29T10:00:00Z');
     await h.tick('2026-09-29T10:30:00Z');
     expect((await guardCalls(h)).todofy).toHaveLength(2);
-    const overview = await h.overview();
-    expect(overview.guard.apps.todofy.last_error).toBe('busy');
-    expect(overview.digest.items.map((i) => `${i.source}:${i.code}`)).toContain('todofy:guard_apply_failed');
+    const snap = await h.snapshot();
+    expect(snap.guard.apps.todofy?.last_error).toBe('busy');
+    expect(snap.digest.items.map((i) => `${i.source}:${i.code}`)).toContain('todofy:guard_apply_failed');
   });
 });
 
@@ -182,9 +182,9 @@ describe('owner override', () => {
     await h.tick(Date.now() - 20 * 60_000);
     await guardCalls(h);
 
-    const forced = await h.post('/api/v1/guard', { level: 'shed' });
+    const forced = await h.post('/api/v2/guard', { level: 'shed' });
     expect(forced.status).toBe(200);
-    const body = (await forced.json()) as GuardResponse;
+    const body = (await forced.json()) as GuardResponseV2;
     expect(body.guard.desired).toMatchObject({ level: 'shed', reason: 'owner_shed', source: 'owner' });
     expect(body.guard.override?.level).toBe('shed');
     const shedCalls = await guardCalls(h);
@@ -194,9 +194,9 @@ describe('owner override', () => {
     expect(until - Date.now()).toBeGreaterThan(23 * 3_600_000);
     expect(until - Date.now()).toBeLessThanOrEqual(24 * 3_600_000);
 
-    const cleared = await h.post('/api/v1/guard', { level: 'normal' });
+    const cleared = await h.post('/api/v2/guard', { level: 'normal' });
     expect(cleared.status).toBe(200);
-    const clearedBody = (await cleared.json()) as GuardResponse;
+    const clearedBody = (await cleared.json()) as GuardResponseV2;
     expect(clearedBody.guard.desired).toMatchObject({ level: 'normal', reason: 'owner_clear', source: 'owner' });
     expect(await guardCalls(h)).toEqual({
       'mail-hero': [{ level: 'normal', reason: 'owner_clear', until: null }],
@@ -210,7 +210,7 @@ describe('owner override', () => {
 
   it('refuses the override without CSRF', async () => {
     h = await startFlows();
-    const response = await h.fetch('/api/v1/guard', { method: 'POST', headers: { origin: 'http://127.0.0.1' }, body: '{"level":"shed"}' });
+    const response = await h.fetch('/api/v2/guard', { method: 'POST', headers: { origin: 'http://127.0.0.1' }, body: '{"level":"shed"}' });
     expect(response.status).toBe(403);
     expect(await h.called()).toEqual([]);
   });

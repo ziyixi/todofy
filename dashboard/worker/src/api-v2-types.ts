@@ -15,20 +15,20 @@
  * | Route                          | Served by              | Body                  | Budget per call                 |
  * | ------------------------------ | ---------------------- | --------------------- | ------------------------------- |
  * | GET  registry                  | Worker (no DO)         | RegistryResponse      | ≤ 12 KiB; ETag "<build>" → 304  |
- * | GET  csrf                      | Worker                 | CsrfResponse          | as v1                           |
+ * | GET  csrf                      | Worker                 | CsrfResponse          | signed token + cookie           |
  * | GET  home[?refresh=1]          | DO, 1 call             | HomeResponse          | ≤ 10 KiB; ≤ 24 rows read        |
  * | GET  flows                     | DO, 1 call             | FlowsResponse         | ≤ 16 KiB; ≤ 24 rows read        |
  * | GET  cloudflare[?refresh=1]    | DO, 1 call             | CloudflareResponse    | ≤ 16 KiB; ≤ 10 rows read        |
  * | GET  ops                       | DO, 1 call             | OpsResponse           | ≤ 24 KiB; ≤ 24 rows read        |
- * | POST guard {level}             | DO                     | GuardResponseV2       | as v1 (CSRF + Origin)           |
- * | POST canary {canary_id}        | DO                     | CanaryStartResponse   | as v1 (CSRF + Origin)           |
+ * | POST guard {level}             | DO                     | GuardResponseV2       | CSRF + Origin                   |
+ * | POST canary {canary_id}        | DO                     | CanaryStartResponse   | CSRF + Origin                   |
  *
  * Dynamic views carry `ETag: "<rev>-<hash>"` (the hash covers the body except generated_at) and answer
  * 304 to a matching If-None-Match; sizes are a normal day's (V2_BODY_BUDGET, V2_BODY_MAX for a bad
  * day), rows are V2_ROWS_READ (measured in workerd).
  */
 import type {
-  AppCard,
+  AppStatusView,
   CanaryView,
   DigestView,
   GuardAppView,
@@ -335,7 +335,7 @@ export interface HeldItem {
 }
 
 export interface AttentionView {
-  /** Worst of `items` (unknown before anything ran), as v1's overall.level. */
+  /** Worst of `items` (unknown before anything ran), as the digest's overall level. */
   readonly level: OverallLevel;
   /** All warning/critical items, worst first (at most 20); the strip shows ATTENTION_SHOWN of them. */
   readonly items: readonly AttentionItem[];
@@ -541,7 +541,7 @@ export type ResourceRow =
       readonly class_b: number;
     };
 
-/** v1's GuardView with apps keyed by entry id (the entries whose status is ops_v1 with guard). */
+/** GuardView with apps keyed by entry id (the entries whose status is ops_v1 with guard). */
 export interface GuardViewV2 extends Omit<GuardView, 'apps'> {
   readonly apps: Readonly<Record<string, GuardAppView>>;
 }
@@ -561,7 +561,7 @@ export interface CloudflareResponse extends ShellFields {
 // ---------------------------------------------------------------------------------------------------
 // GET /api/v2/ops -> 200 OpsResponse: guard/canary actions, digest, full per-app ops-v1 details.
 
-export interface AppDetail extends Omit<AppCard, 'app' | 'url'> {
+export interface AppDetail extends AppStatusView {
   readonly entry: string;
 }
 
@@ -574,8 +574,8 @@ export interface OpsResponse extends ShellFields {
 }
 
 // ---------------------------------------------------------------------------------------------------
-// POST /api/v2/guard {level} -> 200 GuardResponseV2 (as v1: force shed 24 h / clear until 00:00 UTC).
-// POST /api/v2/canary {canary_id: 'mail-todofy'} -> 202 CanaryStartResponse; the v1 errors
+// POST /api/v2/guard {level} -> 200 GuardResponseV2 (force shed 24 h / clear until 00:00 UTC).
+// POST /api/v2/canary {canary_id: 'mail-todofy'} -> 202 CanaryStartResponse; the errors
 // (409 canary_disabled, 409 canary_active, 429 canary_limit); 400 bad_request for another canary_id.
 
 export interface CanaryStartRequestV2 {

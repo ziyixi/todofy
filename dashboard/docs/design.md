@@ -13,6 +13,12 @@ and pass locally with synthetic data. Nothing is deployed; [`verification.md`](v
 what was checked and what is still open in production. Setup: [`setup.md`](setup.md); limits with
 sources: [`limits.md`](limits.md).
 
+**Superseded parts (v2):** the one-page UI, `GET /api/v1/overview` and the other `/api/v1/*` routes
+below were replaced by the four v2 views and `/api/v2/*` ([`design-v2.md`](design-v2.md) §5); the v1
+paths now answer 404. The guard, canary and digest logic, the owner checks, CSRF and the limits in
+this document are unchanged and still apply to the v2 routes (`POST /api/v2/guard`, `POST
+/api/v2/canary {canary_id}`, `GET /api/v2/csrf`).
+
 ## 1. Layout and ownership
 
 | Path | Owner (build step) | Contents |
@@ -60,7 +66,6 @@ route `home.ziyixi.science` with `custom_domain = true` (production config only)
 | `PUBLIC_HOST` | var | the dashboard host; CSRF origin `https://<host>` and the digest's `dashboard_url` |
 | `ACCESS_ISSUER`, `ACCESS_AUDIENCE` | var | the Access app "Home" (issuer `https://<team>.cloudflareaccess.com`, AUD 64 hex) |
 | `ACCOUNT_ID` | var | 32 hex, the GraphQL `accountTag` |
-| `MAIL_HERO_URL`, `TODOFY_URL` | var | `https://<host>/` links to the app UIs (from the existing `MAIL_HERO_PUBLIC_HOST`, `TODOFY_PUBLIC_HOST`) |
 | `CANARY_UTC_HOUR` | var | integer 0–23, default 16; invalid → 16 |
 | `CANARY_ENABLED` | var | `true` or `false` (§5.4 "Switch"); unset or empty → `true`; any other value → `false` (the switch exists to stop canaries, so an unreadable value never starts one; the generator emits only `true`/`false`) |
 | `BUILD_SHA` | var | the deployed commit (`dev` locally) |
@@ -131,7 +136,7 @@ RPC results are values, never thrown errors:
 ```ts
 class HomeState extends DurableObject<Env> {
   tick(scheduledTime: number): Promise<{ ran: boolean }>;                      // cron
-  overview(refresh: boolean): Promise<OverviewResponse>;                      // GET /api/v1/overview
+  v2View(view: V2View, refresh: boolean, ifNoneMatch: string | null): Promise<V2Body>; // GET /api/v2/<view> (design-v2.md §5)
   startCanary(): Promise<{ ok: true; run: CanaryRun } | { ok: false; code: 'canary_disabled' | 'canary_active' | 'canary_limit' }>;
   setGuardOverride(level: GuardLevel): Promise<{ guard: GuardView }>;
 }
@@ -143,9 +148,9 @@ A failure of the object itself (reset, storage error) is an exception, which the
 - `scheduled` **awaits** `tick(controller.scheduledTime)` (not `waitUntil`, whose 30 s tail could cut a
   slow tick; a cron invocation may run 15 min wall time). A tick whose `scheduledTime` is within 10 min
   of the last completed tick is skipped (`ran: false`), so a retried cron event is harmless.
-- `tick`, a refreshing `overview`, `startCanary` and `setGuardOverride` run one at a time through an
-  in-memory promise chain (service calls await, so input gates alone would interleave them). A plain
-  `overview(false)` only reads `state`/`canary_runs` and is not serialized.
+- `tick`, a refreshing `v2View`, `startCanary` and `setGuardOverride` run one at a time through an
+  in-memory promise chain (service calls await, so input gates alone would interleave them). A view
+  without refresh is built from the tables in the same chain.
 - Every decision function takes `now` explicitly: the tick passes `scheduledTime`, the API paths
   `Date.now()`. The runtime tests drive time through `scheduledTime`.
 - Log one JSON line per tick and per API error: codes, counts and durations only (never the token,
@@ -354,7 +359,9 @@ labels each as "<app>：<label>" and links it to the card that explains it.
 
 ## 6. Owner API
 
-All paths except `/health` go through Access (edge-auth) first; then `/api/v1/*` or assets.
+All paths except `/health` go through Access (edge-auth) first; then `/api/v2/*` or assets. The v1
+routes of this table are retired (404); their v2 successors and the view endpoints are in
+[`design-v2.md`](design-v2.md) §5, with the same auth, CSRF and body rules.
 
 | Route | Auth | Result |
 | --- | --- | --- |
@@ -572,7 +579,7 @@ writes with `wx` and mode 0600; `node --test deploy/test/*.test.mjs`):
 | `DASHBOARD_PUBLIC_HOST` (var) | domain regex | route `{pattern, custom_domain: true}`, var `PUBLIC_HOST` |
 | `DASHBOARD_ACCESS_ISSUER` (var) | `^https://[a-z0-9-]+\.cloudflareaccess\.com$` | var |
 | `DASHBOARD_ACCESS_AUDIENCE` (var) | `^[a-f0-9]{64}$`i | var |
-| `MAIL_HERO_PUBLIC_HOST`, `TODOFY_PUBLIC_HOST` (existing vars) | domain regex | vars `MAIL_HERO_URL`, `TODOFY_URL` = `https://<host>/` |
+| `MAIL_HERO_PUBLIC_HOST`, `TODOFY_PUBLIC_HOST` (existing vars) | domain regex | checked only: `DASHBOARD_PUBLIC_HOST` must differ from both (the app links come from the registry) |
 | `DASHBOARD_CANARY_UTC_HOUR` (optional var) | integer 0–23, default 16 | var `CANARY_UTC_HOUR` |
 | `DASHBOARD_CANARY_ENABLED` (optional var) | exactly `true` or `false`, default `true` when unset/empty; anything else fails | var `CANARY_ENABLED` |
 | `GITHUB_SHA` | 40 hex | var `BUILD_SHA` |
@@ -615,7 +622,7 @@ CI (`.github/workflows/ci.yml`, pinned action SHAs as today):
   both `Ops` entrypoints live; `test_ci_changes.py`'s shape test learns the success-or-skipped form for
   these two); `environment: production`, `concurrency: dashboard-production`; build, generate, dry-run,
   `wrangler deploy` with `CLOUDFLARE_API_TOKEN: secrets.CF_API_TOKEN`; no D1. Probe: an unauthenticated
-  `GET https://<host>/` (and `/api/v1/overview`) must be a 302 whose `Location` starts with
+  `GET https://<host>/` (and `/api/v2/home`) must be a 302 whose `Location` starts with
   `ACCESS_ISSUER + '/'`; retry 10 × 15 s only while the answer is 5xx or no connection (certificate/DNS);
   any 2xx/4xx means the app answered without Access and fails the job at once.
 

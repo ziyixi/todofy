@@ -1,8 +1,8 @@
 /**
  * HomeState: the one SQLite-backed Durable Object ("home-v1") that does all real work
  * (docs/design.md §3–§5, docs/design-v2.md §4–§6): status polling, the website probe, the GraphQL usage
- * query and Worker discovery, guard, canary, digest, and the v1 overview and v2 views assembled from its
- * tables. The fetch and scheduled handlers only call these RPC methods.
+ * query and Worker discovery, guard, canary, digest, and the v2 views assembled from its tables. The
+ * fetch and scheduled handlers only call these RPC methods.
  *
  * Bounds: every tick makes at most outboundPerTick() = 9 outbound calls (2 status, 1 probe, 1 GraphQL,
  * ≤ 2 setGuard, ≤ 2 canary calls, ≤ 1 reportOps) and writes a few dozen rows; a v2 view reads at most
@@ -11,21 +11,17 @@
 import { DurableObject } from 'cloudflare:workers';
 import { OPS_APPS, OPS_LIMITS, type GuardLevel, type GuardState, type OpsApp, type OpsStatus, type SetGuardInput } from '../../../contracts/ops-v1/ops-v1.ts';
 import {
-  API_VERSION,
-  CANARY_DISABLED_ITEM,
   CANARY_MANUAL_PER_DAY,
   CANARY_RECENT_RUNS,
   GUARD_CLEAR_PERCENT,
   GUARD_SHED_PERCENT,
   REFRESH_MIN_INTERVAL_SECONDS,
-  type AppCard,
   type AppErrorCode,
   type CanaryRun,
   type CanaryView,
   type DigestView,
   type GuardAppView,
   type GuardView,
-  type OverviewResponse,
   type UsageView,
 } from './api-types.ts';
 import { CLOUDFLARE_REFRESH_MIN_SECONDS, PROBE_MIN_INTERVAL_SECONDS, V2_BODY_BUDGET, type ShellFields } from './api-v2-types.ts';
@@ -47,7 +43,7 @@ import {
   type CanaryRecord,
 } from './canary.ts';
 import { analyticsConfigured, buildSha, canaryEnabled, canaryHour, dashboardUrl } from './config.ts';
-import { buildReport, candidates, digestKey, finalizeItems, itemKey, overallLevel, shouldSend, withTickState, DIGEST_REFRESH_MS } from './digest.ts';
+import { buildReport, candidates, digestKey, finalizeItems, itemKey, shouldSend, withTickState, DIGEST_REFRESH_MS } from './digest.ts';
 import { NO_DIGEST, NO_META, NO_STATUS, NO_USAGE, type DigestDoc, type MetaDoc, type ProbeDoc, type StatusDoc, type UsageDoc } from './docs.ts';
 import type { Env } from './env.ts';
 import {
@@ -233,28 +229,6 @@ export class HomeState extends DurableObject<Env> {
     });
   }
 
-  /** GET /api/v1/overview; `refresh` polls what is due first (usage ≥ 60 s, status ≥ 10 min per app). */
-  overview(refresh: boolean): Promise<OverviewResponse> {
-    if (!refresh) return Promise.resolve(this.buildOverview(Date.now(), false));
-    return this.serialize(async () => {
-      const now = Date.now();
-      const statuses = OPS_APPS.filter((app) => statusDue(this.statusDoc(app), now));
-      const usage = this.doc<UsageDoc>('usage') ?? NO_USAGE;
-      const usageDue =
-        analyticsConfigured(this.env) &&
-        (usage.last_attempt_at === null || now - usage.last_attempt_at >= REFRESH_MIN_MS || now < usage.last_attempt_at);
-      const meta = this.doc<MetaDoc>('meta') ?? NO_META;
-      const refreshDue = meta.last_refresh_at === null || now - meta.last_refresh_at >= REFRESH_MIN_MS || now < meta.last_refresh_at;
-      if (!refreshDue || (statuses.length === 0 && !usageDue)) return this.buildOverview(now, false);
-      if (statuses.length > 0) await this.pollStatuses(now, statuses);
-      if (usageDue) await this.pollUsage(now);
-      const desired = this.currentDesired(now);
-      await this.runDigest(now, desired, false, meta.last_tick_at);
-      this.putDoc('meta', { ...meta, last_refresh_at: now }, now);
-      return this.buildOverview(now, true);
-    });
-  }
-
   /**
    * GET /api/v2/<view> (docs/design-v2.md §5): the view built from the tables and serialized here, with
    * ETag `"<rev>-<hash>"` (views-v2.ts); `body: null` when `ifNoneMatch` names it (the Worker answers
@@ -288,7 +262,7 @@ export class HomeState extends DurableObject<Env> {
     return this.rowsRead;
   }
 
-  /** POST /api/v1/canary: a manual run with its first start attempt; later steps happen on ticks. */
+  /** POST /api/v2/canary: a manual run with its first start attempt; later steps happen on ticks. */
   startCanary(): Promise<StartCanaryOutcome> {
     return this.serialize(async (): Promise<StartCanaryOutcome> => {
       const now = Date.now();
@@ -309,7 +283,7 @@ export class HomeState extends DurableObject<Env> {
     });
   }
 
-  /** POST /api/v1/guard: force shed for 24 h, or clear and suppress the automatic shed until 00:00 UTC. */
+  /** POST /api/v2/guard: force shed for 24 h, or clear and suppress the automatic shed until 00:00 UTC. */
   setGuardOverride(level: GuardLevel): Promise<GuardOverrideOutcome> {
     return this.serialize(async (): Promise<GuardOverrideOutcome> => {
       const now = Date.now();
@@ -541,7 +515,7 @@ export class HomeState extends DurableObject<Env> {
   /**
    * `?refresh=1` of a v2 scope; true when something was fetched. home: due statuses (10 min each) and
    * probes; cloudflare: GraphQL (60 s). Each scope at most once per minute; the digest items are
-   * rebuilt (not sent) as a v1 refresh does.
+   * rebuilt from the new data (a report is sent only by a tick).
    */
   private async refreshScope(scope: 'home' | 'cloudflare', now: number): Promise<boolean> {
     const meta = this.doc<MetaDoc>('meta') ?? NO_META;
@@ -665,54 +639,7 @@ export class HomeState extends DurableObject<Env> {
     }
   }
 
-  // ---- overview ---------------------------------------------------------------------------------
-
-  private buildOverview(now: number, refreshed: boolean): OverviewResponse {
-    const meta = this.doc<MetaDoc>('meta') ?? NO_META;
-    const digest = this.doc<DigestDoc>('digest') ?? NO_DIGEST;
-    const todofy = this.statusDoc('todofy');
-    const lastRefresh = meta.last_refresh_at;
-    const neverRan = meta.last_tick_at === null && digest.last_attempt_at === null && lastRefresh === null;
-    // The stored items are as old as the last tick or refresh; whether the ticks still run is judged now.
-    const items = neverRan ? [] : withTickState(digest.items, meta.last_tick_at, now);
-    const banner = items.slice(0, OPS_LIMITS.reportMaxItems).map((item) => ({ source: item.source, code: item.code, severity: item.severity }));
-    return {
-      version: API_VERSION,
-      generated_at: iso(now),
-      overall: {
-        level: neverRan ? 'unknown' : overallLevel(items),
-        // The switch is shown on the page only: an info item is never part of the digest or a report.
-        // It takes the last of the 20 places.
-        items: canaryEnabled(this.env) ? banner : [...banner.slice(0, OPS_LIMITS.reportMaxItems - 1), { ...CANARY_DISABLED_ITEM }],
-      },
-      apps: { 'mail-hero': this.appCard('mail-hero'), todofy: this.appCard('todofy') },
-      usage: this.usageView(now),
-      guard: this.guardView(now),
-      canary: this.canaryView(now),
-      digest: this.digestView(digest, todofy.status?.capabilities.includes('ops_digest') === true),
-      refresh: {
-        last_tick_at: isoOrNull(meta.last_tick_at),
-        last_refresh_at: isoOrNull(lastRefresh),
-        next_refresh_at: iso(lastRefresh === null ? now : Math.max(now, lastRefresh + REFRESH_MIN_MS)),
-        refreshed,
-      },
-      build: buildSha(this.env),
-    };
-  }
-
-  private appCard(app: OpsApp): AppCard {
-    const doc = this.statusDoc(app);
-    return {
-      app,
-      url: app === 'mail-hero' ? this.env.MAIL_HERO_URL : this.env.TODOFY_URL,
-      reachable: doc.ok,
-      checked_at: isoOrNull(doc.checked_at),
-      error: doc.error,
-      consecutive_failures: doc.consecutive_failures,
-      status: doc.status,
-      status_at: isoOrNull(doc.status_at),
-    };
-  }
+  // ---- parts of the v2 views ----------------------------------------------------------------------
 
   private usageView(now: number): UsageView {
     const usage = this.doc<UsageDoc>('usage') ?? NO_USAGE;

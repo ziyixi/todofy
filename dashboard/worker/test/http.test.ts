@@ -33,18 +33,15 @@ beforeEach(() => {
 });
 
 interface HomeCalls {
-  overview: boolean[];
+  /** v2View calls as `<view>:<refresh>`. */
+  views: string[];
   startCanary: number;
   guard: string[];
 }
 
-function makeEnv(overrides: Partial<Env> = {}, answers: { startCanary?: unknown; guard?: unknown; overview?: () => unknown } = {}) {
-  const calls: HomeCalls = { overview: [], startCanary: 0, guard: [] };
+function makeEnv(overrides: Partial<Env> = {}, answers: { startCanary?: unknown; guard?: unknown; view?: () => unknown } = {}) {
+  const calls: HomeCalls = { views: [], startCanary: 0, guard: [] };
   const stub = {
-    overview(refresh: boolean) {
-      calls.overview.push(refresh);
-      return Promise.resolve(answers.overview ? answers.overview() : { version: 'home-v1', refreshed: refresh });
-    },
     startCanary() {
       calls.startCanary++;
       return Promise.resolve(answers.startCanary ?? { ok: true, run: { run_id: 'canary-manual-20260929T160000Z' } });
@@ -54,9 +51,11 @@ function makeEnv(overrides: Partial<Env> = {}, answers: { startCanary?: unknown;
       return Promise.resolve(answers.guard ?? { guard: { desired: { level } } });
     },
     tick: vi.fn(() => Promise.resolve({ ran: true })),
-    v2View: vi.fn((view: string, refresh: boolean, ifNoneMatch: string | null) =>
-      Promise.resolve(ifNoneMatch === '"7"' ? { etag: '"7"', body: null } : { etag: '"7"', body: JSON.stringify({ view, refresh }) }),
-    ),
+    v2View: vi.fn((view: string, refresh: boolean, ifNoneMatch: string | null) => {
+      calls.views.push(`${view}:${String(refresh)}`);
+      if (answers.view) return Promise.resolve(answers.view());
+      return Promise.resolve(ifNoneMatch === '"7"' ? { etag: '"7"', body: null } : { etag: '"7"', body: JSON.stringify({ view, refresh }) });
+    }),
   };
   const assets: string[] = [];
   const env = {
@@ -78,8 +77,6 @@ function makeEnv(overrides: Partial<Env> = {}, answers: { startCanary?: unknown;
     ACCESS_ISSUER: ISSUER,
     ACCESS_AUDIENCE: AUDIENCE,
     ACCOUNT_ID: '0'.repeat(32),
-    MAIL_HERO_URL: 'https://mail.example.com/',
-    TODOFY_URL: 'https://todofy.example.com/',
     ACCESS_OWNER: OWNER,
     ACCESS_OWNER_ALIASES: 'second@example.org',
     CSRF_SIGNING_KEY: 'ab'.repeat(32),
@@ -117,7 +114,7 @@ function expectPrivate(response: Response, cache = 'no-store'): void {
 }
 
 async function csrf(env: Env): Promise<{ token: string; cookie: string }> {
-  const response = await call(env, '/api/v1/csrf');
+  const response = await call(env, '/api/v2/csrf');
   expect(response.status).toBe(200);
   const body = await response.json<CsrfResponse>();
   const setCookie = response.headers.get('set-cookie') ?? '';
@@ -147,7 +144,7 @@ describe('/health', () => {
     expect(response.status).toBe(200);
     expect(await response.json<HealthResponse>()).toEqual({ service: 'home', status: 'ok', build: 'abc123' });
     expectPrivate(response);
-    expect(calls.overview).toEqual([]);
+    expect(calls.views).toEqual([]);
     expect((await call(env, '/health', { method: 'POST', jwt: null })).status).toBe(405);
   });
 });
@@ -156,7 +153,7 @@ describe('Access', () => {
   it('lets the owner, an alias and any ASCII case of them in', async () => {
     const { env } = makeEnv();
     for (const email of ['owner@example.com', 'OWNER@EXAMPLE.COM', 'Second@Example.org']) {
-      const response = await call(env, '/api/v1/overview', { jwt: await token(email) });
+      const response = await call(env, '/api/v2/home', { jwt: await token(email) });
       expect(response.status).toBe(200);
     }
     // The key set was fetched once for all of them.
@@ -177,12 +174,12 @@ describe('Access', () => {
       (await token()).slice(0, -4) + 'AAAA',
     ];
     for (const jwt of cases) {
-      const response = await call(env, '/api/v1/overview', { jwt });
+      const response = await call(env, '/api/v2/home', { jwt });
       expect(response.status).toBe(401);
       expect(await errorCode(response)).toBe('unauthorized');
       expectPrivate(response);
     }
-    expect(calls.overview).toEqual([]);
+    expect(calls.views).toEqual([]);
   });
 
   it('guards the UI assets too', async () => {
@@ -199,24 +196,24 @@ describe('Access', () => {
 
   it('fails closed on bad configuration and unreachable keys', async () => {
     const bad = makeEnv({ ACCESS_AUDIENCE: '' });
-    const response = await call(bad.env, '/api/v1/overview');
+    const response = await call(bad.env, '/api/v2/home');
     expect(response.status).toBe(503);
     expect(await errorCode(response)).toBe('access_not_configured');
     const noOwner = makeEnv({ ACCESS_OWNER: undefined } as unknown as Partial<Env>);
     expect(await errorCode(await call(noOwner.env, '/'))).toBe('access_not_configured');
     const other = makeEnv({ ACCESS_ISSUER: 'https://unreachable.cloudflareaccess.com' });
-    const keys = await call(other.env, '/api/v1/overview', { jwt: await issuer.sign(accessClaims('https://unreachable.cloudflareaccess.com', AUDIENCE, 'owner@example.com')) });
+    const keys = await call(other.env, '/api/v2/home', { jwt: await issuer.sign(accessClaims('https://unreachable.cloudflareaccess.com', AUDIENCE, 'owner@example.com')) });
     expect(keys.status).toBe(503);
     expect(await errorCode(keys)).toBe('unavailable');
   });
 
   it('allows the dev bypass only on loopback http without cf-ray, and refuses it elsewhere', async () => {
     const { env } = makeEnv({ DEV_AUTH_BYPASS: 'true' });
-    const local = await worker.fetch(incoming('http://127.0.0.1:8787/api/v1/overview'), env);
+    const local = await worker.fetch(incoming('http://127.0.0.1:8787/api/v2/home'), env);
     expect(local.status).toBe(200);
-    const viaEdge = await worker.fetch(incoming('http://127.0.0.1:8787/api/v1/overview', { headers: { 'cf-ray': 'x' } }), env);
+    const viaEdge = await worker.fetch(incoming('http://127.0.0.1:8787/api/v2/home', { headers: { 'cf-ray': 'x' } }), env);
     expect(viaEdge.status).toBe(503);
-    const production = await call(env, '/api/v1/overview');
+    const production = await call(env, '/api/v2/home');
     expect(production.status).toBe(503);
     expect(await errorCode(production)).toBe('access_not_configured');
   });
@@ -232,22 +229,21 @@ describe('CSRF and mutations', () => {
 
   it('starts a canary with Origin + CSRF', async () => {
     const { env, calls } = makeEnv();
-    const response = await mutate(env, '/api/v1/canary', {});
+    const response = await mutate(env, '/api/v2/canary', { canary_id: 'mail-todofy' });
     expect(response.status).toBe(202);
     expect(await response.json()).toEqual({ run: { run_id: 'canary-manual-20260929T160000Z' } });
     expect(calls.startCanary).toBe(1);
-    expect((await mutate(env, '/api/v1/canary', '')).status).toBe(202);
   });
 
   it('refuses a wrong Origin, a missing or foreign token, before reading the body or calling the object', async () => {
     const { env, calls } = makeEnv();
     const pair = await csrf(env);
     const cases = [
-      await mutate(env, '/api/v1/canary', {}, { origin: 'https://evil.example.com', csrf: pair }),
-      await mutate(env, '/api/v1/canary', {}, { origin: 'http://home.example.com', csrf: pair }),
-      await mutate(env, '/api/v1/canary', {}, { csrf: null }),
-      await mutate(env, '/api/v1/canary', {}, { csrf: { token: pair.token, cookie: `${CSRF_COOKIE}=other` } }),
-      await mutate(env, '/api/v1/guard', 'not json', { csrf: { token: `${pair.token}x`, cookie: `${CSRF_COOKIE}=${pair.token}x` } }),
+      await mutate(env, '/api/v2/canary', { canary_id: 'mail-todofy' }, { origin: 'https://evil.example.com', csrf: pair }),
+      await mutate(env, '/api/v2/canary', { canary_id: 'mail-todofy' }, { origin: 'http://home.example.com', csrf: pair }),
+      await mutate(env, '/api/v2/canary', { canary_id: 'mail-todofy' }, { csrf: null }),
+      await mutate(env, '/api/v2/canary', { canary_id: 'mail-todofy' }, { csrf: { token: pair.token, cookie: `${CSRF_COOKIE}=other` } }),
+      await mutate(env, '/api/v2/guard', 'not json', { csrf: { token: `${pair.token}x`, cookie: `${CSRF_COOKIE}=${pair.token}x` } }),
     ];
     for (const response of cases) {
       expect(response.status).toBe(403);
@@ -255,25 +251,25 @@ describe('CSRF and mutations', () => {
     }
     // A token minted with another key does not verify.
     const other = makeEnv({ CSRF_SIGNING_KEY: 'cd'.repeat(32) });
-    expect((await mutate(env, '/api/v1/guard', { level: 'shed' }, { csrf: await csrf(other.env) })).status).toBe(403);
+    expect((await mutate(env, '/api/v2/guard', { level: 'shed' }, { csrf: await csrf(other.env) })).status).toBe(403);
     expect(calls.startCanary).toBe(0);
     expect(calls.guard).toEqual([]);
   });
 
   it('needs a signing key for the CSRF token and every mutation', async () => {
     const { env, calls } = makeEnv({ CSRF_SIGNING_KEY: 'short' });
-    expect(await errorCode(await call(env, '/api/v1/csrf'))).toBe('not_configured');
-    const response = await mutate(env, '/api/v1/guard', { level: 'shed' }, { csrf: { token: 'a.b', cookie: `${CSRF_COOKIE}=a.b` } });
+    expect(await errorCode(await call(env, '/api/v2/csrf'))).toBe('not_configured');
+    const response = await mutate(env, '/api/v2/guard', { level: 'shed' }, { csrf: { token: 'a.b', cookie: `${CSRF_COOKIE}=a.b` } });
     expect(response.status).toBe(503);
     expect(await errorCode(response)).toBe('not_configured');
     expect(calls.guard).toEqual([]);
     // Reads keep working.
-    expect((await call(env, '/api/v1/overview')).status).toBe(200);
+    expect((await call(env, '/api/v2/home')).status).toBe(200);
   });
 
   it('sets the guard override from {level}', async () => {
     const { env, calls } = makeEnv();
-    const response = await mutate(env, '/api/v1/guard', { level: 'normal' });
+    const response = await mutate(env, '/api/v2/guard', { level: 'normal' });
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({ guard: { desired: { level: 'normal' } } });
     expect(calls.guard).toEqual(['normal']);
@@ -282,11 +278,13 @@ describe('CSRF and mutations', () => {
   it('refuses malformed bodies with 400', async () => {
     const { env, calls } = makeEnv();
     for (const body of ['not json', '[]', JSON.stringify({ level: 'panic' }), JSON.stringify({ level: 'shed', extra: 1 }), JSON.stringify({ level: 'shed', pad: 'x'.repeat(2000) })]) {
-      const response = await mutate(env, '/api/v1/guard', body);
+      const response = await mutate(env, '/api/v2/guard', body);
       expect(response.status).toBe(400);
       expect(await errorCode(response)).toBe('bad_request');
     }
-    expect(await errorCode(await mutate(env, '/api/v1/canary', { run_id: 'mine' }))).toBe('bad_request');
+    for (const body of ['', {}, { run_id: 'mine' }, { canary_id: 'other' }, { canary_id: 'mail-todofy', extra: 1 }]) {
+      expect(await errorCode(await mutate(env, '/api/v2/canary', body))).toBe('bad_request');
+    }
     expect(calls.guard).toEqual([]);
     expect(calls.startCanary).toBe(0);
   });
@@ -298,17 +296,17 @@ describe('CSRF and mutations', () => {
       [{ ok: false, code: 'canary_limit' }, 429, 'canary_limit'],
     ] as const) {
       const { env } = makeEnv({}, { startCanary: answer });
-      const response = await mutate(env, '/api/v1/canary', {});
+      const response = await mutate(env, '/api/v2/canary', { canary_id: 'mail-todofy' });
       expect(response.status).toBe(status);
       expect(await errorCode(response)).toBe(code);
     }
     // The switch names the variable that turns it back on.
-    const disabled = await mutate(makeEnv({}, { startCanary: { ok: false, code: 'canary_disabled' } }).env, '/api/v1/canary', {});
+    const disabled = await mutate(makeEnv({}, { startCanary: { ok: false, code: 'canary_disabled' } }).env, '/api/v2/canary', { canary_id: 'mail-todofy' });
     expect((await disabled.json<ApiError>()).error.message).toBe('金丝雀已关闭（DASHBOARD_CANARY_ENABLED=false）');
     const { env, stub } = makeEnv();
     stub.startCanary = () => Promise.reject(new Error('object reset'));
     stub.setGuardOverride = () => Promise.reject(new Error('object reset'));
-    for (const [path, body] of [['/api/v1/canary', {}], ['/api/v1/guard', { level: 'shed' }]] as const) {
+    for (const [path, body] of [['/api/v2/canary', { canary_id: 'mail-todofy' }], ['/api/v2/guard', { level: 'shed' }]] as const) {
       const response = await mutate(env, path, body);
       expect(response.status).toBe(503);
       expect(await errorCode(response)).toBe('unavailable');
@@ -330,7 +328,7 @@ describe('CSRF and mutations', () => {
         cancelled = true;
       },
     });
-    const request = incoming(`https://${HOST}/api/v1/guard`, {
+    const request = incoming(`https://${HOST}/api/v2/guard`, {
       method: 'POST',
       headers: { 'cf-access-jwt-assertion': await token(), origin: ORIGIN, 'x-csrf-token': pair.token, cookie: pair.cookie },
       body: endless,
@@ -353,7 +351,7 @@ describe('CSRF and mutations', () => {
       },
     });
     const ok = await worker.fetch(
-      incoming(`https://${HOST}/api/v1/guard`, {
+      incoming(`https://${HOST}/api/v2/guard`, {
         method: 'POST',
         headers: { 'cf-access-jwt-assertion': await token(), origin: ORIGIN, 'x-csrf-token': pair.token, cookie: pair.cookie },
         body: small,
@@ -365,7 +363,7 @@ describe('CSRF and mutations', () => {
     expect(calls.guard).toEqual(['shed']);
     // A declared length above the limit or a malformed one is refused before reading.
     for (const length of ['1025', 'abc', '-1']) {
-      const refused = await mutate(env, '/api/v1/guard', { level: 'shed' }, { csrf: pair, headers: { 'content-length': length } });
+      const refused = await mutate(env, '/api/v2/guard', { level: 'shed' }, { csrf: pair, headers: { 'content-length': length } });
       expect(refused.status, length).toBe(400);
     }
     expect(calls.guard).toEqual(['shed']);
@@ -373,30 +371,34 @@ describe('CSRF and mutations', () => {
 });
 
 describe('routing', () => {
-  it('passes ?refresh=1 to the overview', async () => {
+  it('passes only ?refresh=1 on as a refresh', async () => {
     const { env, calls } = makeEnv();
-    await call(env, '/api/v1/overview');
-    await call(env, '/api/v1/overview?refresh=1');
-    await call(env, '/api/v1/overview?refresh=yes');
-    expect(calls.overview).toEqual([false, true, false]);
+    await call(env, '/api/v2/home');
+    await call(env, '/api/v2/home?refresh=1');
+    await call(env, '/api/v2/home?refresh=yes');
+    expect(calls.views).toEqual(['home:false', 'home:true', 'home:false']);
   });
 
   it('answers unknown API paths 404 and wrong methods 405 with Allow', async () => {
     const { env } = makeEnv();
-    const missing = await call(env, '/api/v1/nothing');
-    expect(missing.status).toBe(404);
-    expect(await errorCode(missing)).toBe('not_found');
+    for (const path of ['/api/v2/nothing', '/api/v1/overview', '/api/v1/csrf']) {
+      const missing = await call(env, path);
+      expect(missing.status, path).toBe(404);
+      expect(await errorCode(missing)).toBe('not_found');
+    }
+    // v1 is retired: its mutations are unknown paths too (404 before any CSRF check).
+    expect((await call(env, '/api/v1/guard', { method: 'POST', body: '{"level":"shed"}' })).status).toBe(404);
     expect(await errorCode(await call(env, '/api'))).toBe('not_found');
-    const wrong = await call(env, '/api/v1/canary');
+    const wrong = await call(env, '/api/v2/canary');
     expect(wrong.status).toBe(405);
     expect(wrong.headers.get('allow')).toBe('POST');
     expect(await errorCode(wrong)).toBe('method_not_allowed');
-    expect((await call(env, '/api/v1/overview', { method: 'POST' })).headers.get('allow')).toBe('GET');
+    expect((await call(env, '/api/v2/home', { method: 'POST' })).headers.get('allow')).toBe('GET');
   });
 
   it('turns a failing Durable Object into 503 unavailable', async () => {
-    const { env } = makeEnv({}, { overview: () => { throw new Error('storage exploded with detail'); } });
-    const response = await call(env, '/api/v1/overview');
+    const { env } = makeEnv({}, { view: () => { throw new Error('storage exploded with detail'); } });
+    const response = await call(env, '/api/v2/home');
     expect(response.status).toBe(503);
     const text = await response.text();
     expect(text).not.toContain('exploded');
@@ -407,7 +409,7 @@ describe('routing', () => {
     const log = vi.spyOn(console, 'log');
     const { env } = makeEnv();
     const jwt = await token('someone@example.com');
-    await call(env, '/api/v1/overview', { jwt });
+    await call(env, '/api/v2/home', { jwt });
     const lines = log.mock.calls.map((args) => String(args[0]));
     expect(lines).toHaveLength(1);
     expect(Object.keys(JSON.parse(lines[0] ?? '{}') as object).sort()).toEqual(['code', 'request_id', 'status']);
@@ -456,7 +458,7 @@ describe('API v2', () => {
     expect(await cached.text()).toBe('');
   });
 
-  it('keeps the v1 mutation rules, with canary_id required', async () => {
+  it('requires canary_id on the canary mutation and serves the CSRF token', async () => {
     const { env, calls } = makeEnv();
     const pair = await csrf(env);
     expect(await errorCode(await mutate(env, '/api/v2/canary', {}, { csrf: pair }))).toBe('bad_request');

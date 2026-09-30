@@ -70,7 +70,9 @@ export function generateConfig(env, base) {
   const host = checked(env, 'DASHBOARD_PUBLIC_HOST', DOMAIN)
   const mailHeroHost = checked(env, 'MAIL_HERO_PUBLIC_HOST', DOMAIN)
   const todofyHost = checked(env, 'TODOFY_PUBLIC_HOST', DOMAIN)
-  // The dashboard's custom domain must be its own; claiming an app's host would take its route.
+  // The app hosts are read only for this check (the links to the apps come from the registry compiled
+  // into the Worker): the dashboard's custom domain must be its own; claiming an app's host would take
+  // its route.
   if (host === mailHeroHost || host === todofyHost) throw new SettingError('DASHBOARD_PUBLIC_HOST')
   const hour = checked(env, 'DASHBOARD_CANARY_UTC_HOUR', /^(?:[0-9]|1[0-9]|2[0-3])$/, '16')
   // The canary switch: exactly "true" or "false" (unset means true); anything else fails the deploy
@@ -88,8 +90,6 @@ export function generateConfig(env, base) {
       ACCESS_ISSUER: checked(env, 'DASHBOARD_ACCESS_ISSUER', /^https:\/\/[a-z0-9-]+\.cloudflareaccess\.com$/),
       ACCESS_AUDIENCE: checked(env, 'DASHBOARD_ACCESS_AUDIENCE', /^[a-f0-9]{64}$/i),
       ACCOUNT_ID: accountId,
-      MAIL_HERO_URL: `https://${mailHeroHost}/`,
-      TODOFY_URL: `https://${todofyHost}/`,
       CANARY_UTC_HOUR: hour,
       CANARY_ENABLED: canaryEnabled,
       BUILD_SHA: checked(env, 'GITHUB_SHA', /^[0-9a-f]{40}$/),

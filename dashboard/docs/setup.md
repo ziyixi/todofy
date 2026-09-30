@@ -58,7 +58,7 @@ without printing its value.
 | `DASHBOARD_PUBLIC_HOST` | variable | a domain, different from both app hosts | route, var `PUBLIC_HOST` (CSRF origin, digest link) |
 | `DASHBOARD_ACCESS_ISSUER` | variable | `https://<team>.cloudflareaccess.com` | var `ACCESS_ISSUER` |
 | `DASHBOARD_ACCESS_AUDIENCE` | variable | 64 hex | var `ACCESS_AUDIENCE` |
-| `MAIL_HERO_PUBLIC_HOST`, `TODOFY_PUBLIC_HOST` | variables (existing) | domains | vars `MAIL_HERO_URL`, `TODOFY_URL` (links on the page) |
+| `MAIL_HERO_PUBLIC_HOST`, `TODOFY_PUBLIC_HOST` | variables (existing) | domains | checked only: the dashboard host must differ from both (the page's app links come from the registry, `worker/src/registry.ts`) |
 | `DASHBOARD_CANARY_UTC_HOUR` | variable, optional | integer 0–23, default 16 | var `CANARY_UTC_HOUR` |
 | `DASHBOARD_CANARY_ENABLED` | variable, optional | exactly `true` or `false`, default `true` when unset or empty; any other value (`False`, `0`, `no`, a stray space) fails the generator and the deploy | var `CANARY_ENABLED` (§6, §7) |
 | `DASHBOARD_ACCESS_OWNER` | secret | printable-ASCII e-mail | Worker secret `ACCESS_OWNER` |
@@ -139,7 +139,7 @@ the expected state. Use synthetic data only; never point a local run at producti
   digest as `canary_skipped` with its reason.
 - **Canary switch** (`DASHBOARD_CANARY_ENABLED`, default `true`). With `false` the dashboard starts no
   canary: the scheduled run is not created, 立即运行金丝雀 is disabled with
-  "金丝雀已关闭（DASHBOARD_CANARY_ENABLED=false）", and `POST /api/v1/canary` answers 409
+  "金丝雀已关闭（DASHBOARD_CANARY_ENABLED=false）", and `POST /api/v2/canary` answers 409
   `canary_disabled` with the same message. A run already queued is still polled every 30 minutes until
   it ends (at most 2 h after queuing), so its verdict is recorded; a run not yet queued (Mail Hero
   answered paused/unavailable, or the call failed) gets no further start attempt and ends at the next

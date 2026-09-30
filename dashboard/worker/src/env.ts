@@ -21,8 +21,6 @@ export interface Env {
   readonly ACCESS_AUDIENCE: string;
   /** Cloudflare account tag for the GraphQL Analytics query. */
   readonly ACCOUNT_ID: string;
-  readonly MAIL_HERO_URL: string;
-  readonly TODOFY_URL: string;
   /** UTC hour (0-23) of the daily canary; default 16. */
   readonly CANARY_UTC_HOUR?: string;
   /**

@@ -85,6 +85,8 @@ export interface HarnessOptions {
   readonly bindings?: Record<string, string>;
   /** Every outbound fetch of "home" (GraphQL, Access certs); default: 599 so nothing leaves the test. */
   readonly outbound?: Outbound;
+  /** Directory of the Durable Object storage, kept after dispose (a later harness reopens it); default: a temp dir removed on dispose. */
+  readonly persist?: string;
 }
 
 export const SYNTHETIC_BINDINGS: Readonly<Record<string, string>> = {
@@ -92,8 +94,6 @@ export const SYNTHETIC_BINDINGS: Readonly<Record<string, string>> = {
   ACCESS_ISSUER: 'https://synthetic.cloudflareaccess.com',
   ACCESS_AUDIENCE: 'a'.repeat(64),
   ACCOUNT_ID: '0'.repeat(32),
-  MAIL_HERO_URL: 'https://mail.example.com/',
-  TODOFY_URL: 'https://todofy.example.com/',
   CANARY_UTC_HOUR: '16',
   BUILD_SHA: 'test',
   ACCESS_OWNER: 'owner@example.com',
@@ -124,14 +124,15 @@ export interface Harness {
 }
 
 export async function startHarness(options: HarnessOptions = {}): Promise<Harness> {
-  const temp = await mkdtemp(join(tmpdir(), 'home-dashboard-'));
+  const temp = options.persist ?? (await mkdtemp(join(tmpdir(), 'home-dashboard-')));
   const outbound: Outbound = options.outbound ?? (() => new Response('no outbound fetch expected', { status: 599 }));
   const scripts = { home: await bundle(), 'mail-hero': await stubScript('mail-hero'), todofy: await stubScript('todofy') };
   const configure = (bindings: Record<string, string>): ConstructorParameters<typeof Miniflare>[0] =>
     convertV4MiniflareOptions({
       host: '127.0.0.1',
       port: 0,
-      durableObjectsPersist: join(temp, 'do'),
+      // Durable Object storage (SQLite files) under temp/do/, kept across rebind() and, with `persist`, across harnesses.
+      resourcePersistencePath: temp,
       workers: [
         {
           name: 'home',
@@ -197,7 +198,7 @@ export async function startHarness(options: HarnessOptions = {}): Promise<Harnes
     },
     async dispose() {
       await mf.dispose();
-      await rm(temp, { recursive: true, force: true });
+      if (options.persist === undefined) await rm(temp, { recursive: true, force: true });
     },
   };
 }

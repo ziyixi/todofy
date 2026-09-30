@@ -59,7 +59,7 @@ describe('the digest', () => {
     await h.answer('mail-hero', 'status', undefined);
     await h.tick('2026-09-30T00:00:00Z');
     expect(await reports(h)).toEqual([]);
-    expect((await h.overview()).digest).toMatchObject({ items: [], last_sent_at: '2026-09-29T23:30:00.000Z' });
+    expect((await h.snapshot()).digest).toMatchObject({ items: [], last_sent_at: '2026-09-29T23:30:00.000Z' });
     await h.tick('2026-09-30T00:30:00Z');
     expect((await reports(h)).map((r) => [r.generated_at, r.items])).toEqual([['2026-09-30T00:30:00.000Z', []]]);
   });
@@ -86,7 +86,7 @@ describe('the digest', () => {
     await h.tick('2026-09-29T10:00:00Z');
     await h.tick('2026-09-29T17:00:00Z');
     expect(await reports(h)).toEqual([]);
-    expect((await h.overview()).digest).toMatchObject({ enabled: false, last_sent_at: null });
+    expect((await h.snapshot()).digest).toMatchObject({ enabled: false, last_sent_at: null });
   });
 
   it('retries a failed reportOps on the next tick', async () => {
@@ -94,10 +94,10 @@ describe('the digest', () => {
     await h.answer('todofy', 'reportOps', { sequence: [{ throw: 'unavailable' }, { value: await fixture('OpsReportReceipt/stored.json') }] });
     await h.tick('2026-09-29T10:00:00Z');
     expect(await reports(h)).toHaveLength(1);
-    expect((await h.overview()).digest).toMatchObject({ last_error: 'unavailable', last_sent_at: null });
+    expect((await h.snapshot()).digest).toMatchObject({ last_error: 'unavailable', last_sent_at: null });
     await h.tick('2026-09-29T10:30:00Z');
     expect(await reports(h)).toHaveLength(1);
-    const digest = (await h.overview()).digest;
+    const digest = (await h.snapshot()).digest;
     expect(digest).toMatchObject({ last_error: null, last_sent_at: '2026-09-29T10:30:00.000Z', next_due_at: '2026-09-29T16:30:00.000Z' });
     expect(digest.last_receipt).toEqual(await fixture('OpsReportReceipt/stored.json'));
     await h.tick('2026-09-29T11:00:00Z');
@@ -126,13 +126,13 @@ describe('app health', () => {
     expect(keys(report)).toEqual(['mail-hero:app_unreachable:critical']);
     expect(report?.items[0]?.metrics).toEqual({ consecutive_failures: 2 });
 
-    const overview = await h.overview();
-    expect(overview.overall.level).toBe('critical');
+    const snap = await h.snapshot();
+    expect(snap.overall.level).toBe('critical');
     // (These synthetic ticks lie in the past, so the banner also says the ticks stopped.)
-    expect(overview.overall.items.filter((item) => item.code !== 'tick_stale')).toEqual([{ source: 'mail-hero', code: 'app_unreachable', severity: 'critical' }]);
-    expect(overview.apps['mail-hero']).toMatchObject({ reachable: false, error: 'unavailable', consecutive_failures: 2, checked_at: '2026-09-29T11:00:00.000Z', status_at: '2026-09-29T10:00:00.000Z' });
-    expect(overview.apps['mail-hero'].status).not.toBeNull();
-    expect(overview.apps.todofy).toMatchObject({ reachable: true, consecutive_failures: 0 });
+    expect(snap.overall.items.filter((item) => item.code !== 'tick_stale')).toEqual([{ source: 'mail-hero', code: 'app_unreachable', severity: 'critical' }]);
+    expect(snap.apps['mail-hero']).toMatchObject({ reachable: false, error: 'unavailable', consecutive_failures: 2, checked_at: '2026-09-29T11:00:00.000Z', status_at: '2026-09-29T10:00:00.000Z' });
+    expect(snap.apps['mail-hero'].status).not.toBeNull();
+    expect(snap.apps.todofy).toMatchObject({ reachable: true, consecutive_failures: 0 });
   });
 
   it('keeps the source of each banner item, so the same code from both apps stays two entries', async () => {
@@ -142,8 +142,8 @@ describe('app health', () => {
     const now = Date.now();
     await h.tick(now - 40 * 60_000);
     await h.tick(now - 5 * 60_000);
-    const overview = await h.overview();
-    expect(overview.overall).toEqual({
+    const snap = await h.snapshot();
+    expect(snap.overall).toEqual({
       level: 'critical',
       items: [
         { source: 'mail-hero', code: 'app_unreachable', severity: 'critical' },
@@ -157,9 +157,9 @@ describe('app health', () => {
     await h.answer('mail-hero', 'status', { throw: 'busy' });
     await h.answer('todofy', 'status', { value: await fixture('invalid/OpsStatus/missing-guard.json') });
     await h.tick('2026-09-29T10:00:00Z');
-    const overview = await h.overview();
-    expect(overview.apps['mail-hero']).toMatchObject({ reachable: false, error: 'busy', status: null });
-    expect(overview.apps.todofy).toMatchObject({ reachable: false, error: 'invalid_output', status: null });
+    const snap = await h.snapshot();
+    expect(snap.apps['mail-hero']).toMatchObject({ reachable: false, error: 'busy', status: null });
+    expect(snap.apps.todofy).toMatchObject({ reachable: false, error: 'invalid_output', status: null });
     // Without any Todofy status: no digest, no canary, no guard calls.
     expect(await h.called()).toEqual(['mail-hero.status', 'todofy.status']);
   });

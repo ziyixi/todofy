@@ -82,8 +82,8 @@ few `setGuard`, canary and `reportOps` calls; one canary a day (one synthetic me
 Hero's R2 and D1 and normally one Gemini call in Todofy, up to 3 when a transient failure is retried),
 up to 3 more when the owner runs it by hand; at most 48 public GETs of the website's `build-info.json`
 (v2 probe, outside Cloudflare's allowances) plus owner refreshes (≥ 10 min apart). Each tick
-writes about 10–40 SQLite rows in `HomeState` (v2 adds two: `cf_scripts` and `probe:website`); a v1
-overview reads at most 30, a v2 view at most 24 (`V2_ROWS_READ`, measured in workerd). Each owner page load
+writes about 10–40 SQLite rows in `HomeState` (v2 adds two: `cf_scripts` and `probe:website`); a v2
+view reads at most 24 (`V2_ROWS_READ`, measured in workerd). Each owner page load
 counts one Worker request per fetched file (HTML, scripts, styles, icon: `run_worker_first`, §2) plus one
 per API call, and a DO request per API call. All of this is far below every allowance in §1.
 

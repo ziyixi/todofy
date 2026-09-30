@@ -5,7 +5,8 @@ guard, canary, digest, Access/CSRF and the usage query). It condenses the owner-
 proposal of 2026-09-29 (steps 1 and 2; every open question takes its recommended default, §8). Status:
 the registry, the v2 types and every `/api/v2` route are implemented in the Worker (evaluation in
 `worker/src/evaluate.ts`, discovery in `discovery.ts`, the probe in `probe.ts`, view assembly and ETags
-in `views-v2.ts`, storage in `state.ts`), with unit tests and workerd tests for each endpoint.
+in `views-v2.ts`, storage in `state.ts`), with unit tests and workerd tests for each endpoint. The UI
+(`web/`) renders the four views from `/api/v2` only, and the v1 API is removed (§5).
 
 ## 1. Views
 
@@ -158,12 +159,12 @@ All under `/api/v2/`, same Access + owner check, error envelope, CSRF + Origin o
 | Route | Served by | Budget |
 | --- | --- | --- |
 | `GET registry` | Worker, serialized once per isolate; `ETag: "<build>"` → 304 | 0 DO; ≤ 12 KiB |
-| `GET csrf` | Worker (as v1) | — |
+| `GET csrf` | Worker (signed token + `home_csrf` cookie, design.md §6) | — |
 | `GET home[?refresh=1]` | DO `v2View('home')` | 1 DO call; ≤ 1 + N rows; ≤ 10 KiB |
 | `GET flows` | DO | ≤ 20 rows; ≤ 16 KiB |
 | `GET cloudflare[?refresh=1]` | DO | 3–4 rows; ≤ 16 KiB |
 | `GET ops` | DO | ≤ 10 rows; ≤ 24 KiB |
-| `POST guard {level}`, `POST canary {canary_id}` | DO (v1 methods) | as v1 |
+| `POST guard {level}`, `POST canary {canary_id}` | DO (`setGuardOverride`, `startCanary`) | Origin + CSRF; ≤ 1 KiB body |
 
 Every dynamic response shares the shell (attention, badges, refresh/tick times, `rev`) and carries
 `ETag: "<rev>-<hash>"`: `rev` is bumped by each tick, refresh that fetched, guard override and manual
@@ -175,8 +176,8 @@ are `no-store`, so the client keeps the last body + ETag itself (`apiV2` in `web
 Only the visible view polls, every 5 minutes; the registry is fetched once per load. Refresh scopes
 (each at most once a minute, `meta.last_refresh_{home,cloudflare}_at`): `home` re-polls due statuses
 (≥ 10 min each, the contract) and the due probe (≥ 10 min); `cloudflare` re-queries GraphQL (≥ 60 s
-since the last attempt) and updates discovery. Both rebuild the digest items without sending them, as
-a v1 refresh does. `refresh.next_refresh_at` is the earliest time the scope would fetch again.
+since the last attempt) and updates discovery. Both rebuild the digest items without sending them
+(only a tick sends a report). `refresh.next_refresh_at` is the earliest time the scope would fetch again.
 
 Measured (unit suite for bytes, workerd suite for rows; a full 14-run canary history, 20 Workers):
 
@@ -199,10 +200,10 @@ probe runs in parallel with the status polls. GraphQL stays one query per tick (
 ≤ 1/min. DO rows written grow by ~2 per tick (`cf_scripts`, `probe:website`). Everything else as in
 [`limits.md`](limits.md).
 
-**v1 removal:** once the UI calls only v2, delete `/api/v1/*` (routes, `overview()`/`buildOverview`,
-`OverviewResponse`, v1 tests and fixtures) in the same change, and change the one path in
-`.github/workflows/ci.yml` (`Dashboard deploy` probes `/api/v1/overview` for the Access redirect) to
-`/api/v2/home`. `MAIL_HERO_URL`/`TODOFY_URL` remain until v1 goes (v1 `AppCard.url`), then the registry
+**v1 removal (done):** the UI calls only v2, so `/api/v1/*` is gone (routes, `overview()`/`buildOverview`,
+`OverviewResponse`, `AppCard`, v1 tests; the paths answer 404, tested). The workerd flow tests read the
+ops and cloudflare views instead (`snapshot()` in `test/runtime/flows.ts`). `Dashboard deploy` probes
+`/api/v2/home` for the Access redirect. The vars `MAIL_HERO_URL`/`TODOFY_URL` are dropped: the registry
 is the only URL source; the generator and `wrangler.toml` are otherwise unchanged.
 
 ## 6. DO storage changes (step 2)
@@ -213,8 +214,8 @@ an entry no longer probed is deleted by the tick), `usage.resources` (per-resour
 `meta.last_refresh_home_at`, `meta.last_refresh_cloudflare_at`. `canary_runs` gains `canary_id TEXT NOT
 NULL DEFAULT 'mail-todofy'` (one `ALTER TABLE` when `pragma_table_info` lacks it; existing rows are
 mail-todofy) and the partial index `canary_runs_active`. No other table changes; `guard_applied` keeps
-its CHECK while the ops-v1 apps are the two. Everything is additive: the v1 overview reads the same
-tables, and a rollback to the previous build ignores the new documents and column.
+its CHECK while the ops-v1 apps are the two. Everything is additive: a rollback to the previous build
+ignores the new documents and column (the workerd suite migrates a pre-v2 `canary_runs` table).
 
 ## 7. UI
 

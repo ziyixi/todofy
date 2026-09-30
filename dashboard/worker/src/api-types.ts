@@ -1,5 +1,7 @@
 /**
- * The owner API of the Worker "home" (docs/design.md §6). Shared by the Worker and the web UI, which
+ * Shared parts of the owner API of the Worker "home" (docs/design.md §6): errors, CSRF, usage, guard,
+ * canary and digest views, which the v2 responses (api-v2-types.ts, docs/design-v2.md §5) embed. The
+ * v1 routes and their overview response are retired. Shared by the Worker and the web UI, which
  * imports this file by relative path (`../../worker/src/api-types.ts`). Rules, because both toolchains
  * compile it: types and plain constants only, `import type` for everything imported, erasable syntax,
  * no Workers or DOM types, no runtime imports.
@@ -26,8 +28,6 @@ export type { OpsApp, OpsSeverity, OpsStatus, GuardLevel, GuardState, OpsReportI
 /** RFC 3339 UTC. */
 export type Iso = string;
 
-export const API_VERSION = 'home-v1';
-
 /** Guard thresholds (percent of a Free allowance, actual usage). */
 export const GUARD_SHED_PERCENT = 80;
 export const GUARD_CLEAR_PERCENT = 70;
@@ -35,14 +35,14 @@ export const GUARD_CLEAR_PERCENT = 70;
 export const QUOTA_CRITICAL_PERCENT = 95;
 /** Manual canary runs per UTC day. */
 export const CANARY_MANUAL_PER_DAY = 3;
-/** Canary runs shown in the overview (newest first). */
+/** Canary runs shown in the flows and ops views (newest first). */
 export const CANARY_RECENT_RUNS = 14;
 /**
- * The info item the overview banner shows while CANARY_ENABLED=false. Page only: the digest carries
+ * The info item the attention strip shows while CANARY_ENABLED=false. Page only: the digest carries
  * warning and critical items, so it never reaches Todofy's reportOps.
  */
 export const CANARY_DISABLED_ITEM = { source: 'dashboard', code: 'canary_disabled', severity: 'info' } as const;
-/** Minimum seconds between two owner refreshes (`GET /api/v1/overview?refresh=1`). */
+/** Minimum seconds between two owner refreshes of the home scope (`GET /api/v2/home?refresh=1`). */
 export const REFRESH_MIN_INTERVAL_SECONDS = 60;
 
 // ---------------------------------------------------------------------------------------------------
@@ -72,7 +72,7 @@ export interface ApiError {
 }
 
 // ---------------------------------------------------------------------------------------------------
-// GET /api/v1/csrf -> 200 CsrfResponse, plus `Set-Cookie: home_csrf=<token>; Path=/; HttpOnly;
+// GET /api/v2/csrf -> 200 CsrfResponse, plus `Set-Cookie: home_csrf=<token>; Path=/; HttpOnly;
 // SameSite=Strict; Max-Age=43200; Secure`. Mutations send the token as `X-CSRF-Token`.
 
 export interface CsrfResponse {
@@ -80,55 +80,15 @@ export interface CsrfResponse {
 }
 
 // ---------------------------------------------------------------------------------------------------
-// GET /api/v1/overview[?refresh=1] -> 200 OverviewResponse
+// Parts of the v2 views.
 
+/** Worst of the attention items (ok, warning, critical), `unknown` before anything ran. */
 export type OverallLevel = 'ok' | 'warning' | 'critical' | 'unknown';
-
-export interface OverviewResponse {
-  readonly version: typeof API_VERSION;
-  /** When the Durable Object assembled this response. */
-  readonly generated_at: Iso;
-  /**
-   * Banner: the worst of the digest items (which include app reachability), plus `tick_stale` when no
-   * cron tick completed for 75 minutes; `unknown` before anything ran. Items keep their source, so the
-   * same code from both apps stays two distinct entries. While the canary is switched off, the info
-   * item CANARY_DISABLED_ITEM comes last (it never changes the level and is not part of the digest).
-   */
-  readonly overall: { readonly level: OverallLevel; readonly items: readonly OverallItem[] };
-  readonly apps: { readonly 'mail-hero': AppCard; readonly todofy: AppCard };
-  readonly usage: UsageView;
-  readonly guard: GuardView;
-  readonly canary: CanaryView;
-  readonly digest: DigestView;
-  readonly refresh: RefreshInfo;
-  /** BUILD_SHA of the Worker (`dev` locally). */
-  readonly build: string;
-}
-
-export interface OverallItem {
-  /** `mail-hero`, `todofy`, `cloudflare` (account usage) or `dashboard` (guard, canary, the ticks). */
-  readonly source: string;
-  readonly code: string;
-  readonly severity: OpsSeverity;
-}
-
-export interface RefreshInfo {
-  /** Last completed cron tick. */
-  readonly last_tick_at: Iso | null;
-  /** Last owner refresh that actually fetched (status and/or usage). */
-  readonly last_refresh_at: Iso | null;
-  /** Earliest time the next `?refresh=1` fetches again; earlier ones return the cached snapshot. */
-  readonly next_refresh_at: Iso;
-  /** True when this response's request performed a refresh. */
-  readonly refreshed: boolean;
-}
 
 export type AppErrorCode = 'unavailable' | 'busy' | 'invalid_input' | 'timeout' | 'invalid_output' | 'not_configured';
 
-export interface AppCard {
-  readonly app: OpsApp;
-  /** The app's owner UI from the Worker config (MAIL_HERO_URL / TODOFY_URL). */
-  readonly url: string;
+/** The last ops-v1 status() attempt of an app and its last successful answer (ops view). */
+export interface AppStatusView {
   /** Result of the last status() attempt. */
   readonly reachable: boolean | null;
   readonly checked_at: Iso | null;
@@ -341,25 +301,16 @@ export interface DigestView {
 }
 
 // ---------------------------------------------------------------------------------------------------
-// POST /api/v1/canary  (body `{}`) -> 202 CanaryStartResponse; 409 canary_disabled (CANARY_ENABLED=false,
-// checked first); 409 canary_active; 429 canary_limit.
-// The Worker makes the first start attempt at once; later polls happen on cron ticks.
+// POST /api/v2/canary -> 202 CanaryStartResponse; POST /api/v2/guard {level} (GuardRequest): `shed`
+// forces shed on both apps for 24 h (until cleared), `normal` ends a forced shed and suppresses the
+// automatic shed until the next UTC midnight (request and errors: api-v2-types.ts).
 
-export type CanaryStartRequest = Record<string, never>;
 export interface CanaryStartResponse {
   readonly run: CanaryRun;
 }
 
-// ---------------------------------------------------------------------------------------------------
-// POST /api/v1/guard {level} -> 200 GuardResponse. `shed`: force shed on both apps for 24 h (until
-// cleared). `normal`: end a forced shed and suppress the automatic shed until the next UTC midnight.
-// The Worker calls setGuard on both apps before answering; per-app errors are in guard.apps.
-
 export interface GuardRequest {
   readonly level: GuardLevel;
-}
-export interface GuardResponse {
-  readonly guard: GuardView;
 }
 
 // ---------------------------------------------------------------------------------------------------

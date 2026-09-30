@@ -795,7 +795,7 @@ jobs:
         run: |
           issuer=$(jq -er '.vars.ACCESS_ISSUER' worker/wrangler.production.ci.json)
           host=$(jq -er '.vars.PUBLIC_HOST' worker/wrangler.production.ci.json)
-          for path in / /api/v1/overview; do
+          for path in / /api/v2/home; do
             for attempt in $(seq 1 10); do
               answer=$(curl -sS -o /dev/null --max-time 15 --proto '=https' -w '%{http_code} %{redirect_url}' \
                 "https://$host$path" 2>/dev/null) || true
