@@ -78,6 +78,25 @@ synthetic data only.
 
 Not rerun: the Todofy placeholder dry-runs (nothing under `todofy/` changed since section 1).
 
+## 1b. Local, the canary switch (2026-09-30)
+
+Commit `2848f0e` (`DASHBOARD_CANARY_ENABLED` → `CANARY_ENABLED`), cloned fresh from the branch into a
+throwaway directory; macOS, Node 26.9.0, the workflow's commands and placeholder values, no token, no
+Cloudflare API call, synthetic data only. Only the dashboard, the workflow and the root README changed,
+so the app jobs were not rerun.
+
+| Job | Step | Result |
+| --- | --- | --- |
+| `Changes` | `python3 -m unittest discover -s .github/scripts` (from `todofy/` with `uv run`) | 48 tests passed |
+| `Dashboard checks` | generator tests | 7 passed (new: the switch defaults to `true`, accepts exactly `true`/`false`, and names `DASHBOARD_CANARY_ENABLED` for `False`, `0`, `no`, `off`, a stray space or newline) |
+| | worker lint, typecheck, `npm test` | OK; 8 files, 102 tests passed (new `config.test.ts`; `holdWhenDisabled`; no digest item for a `canary_disabled` skip; 409 `canary_disabled` with its message) |
+| | worker `npm run test:runtime` (workerd) | 5 files, 45 tests passed. New: with `CANARY_ENABLED=false` no `startCanary` over six ticks past the hour, a manual start is 409 `canary_disabled` without any app call, the banner has the info item at level `ok`, and every report sent to `reportOps` is schema-valid with no canary item; a queued run in flight when the Worker is redeployed with `false` (same Durable Object storage) is polled to `ok`, no run starts the next day, and `true` again starts the day's run; a run still `starting` ends as `skipped/start/canary_disabled` without another `startCanary` |
+| | web lint, typecheck, tests, build | OK; 7 files, 49 tests passed (the disabled button and its description, the 409 message, the banner item and the canary section's note); `dist/` has no cross-origin reference |
+| | import guard | OK |
+| | placeholder config dry-run, with the variable unset and with `false` | OK: `env.CANARY_ENABLED ("true")` / `("false")`, the four secrets hidden; `DASHBOARD_CANARY_ENABLED=off` fails the generator by name and writes no file |
+| `Contracts` | Dashboard `ops-client`, `guard`, `canary`, `digest` | 4 files, 55 tests passed |
+| workflow | `ci.yml` parsed as YAML | the `Dashboard deploy` generator step passes `vars.DASHBOARD_CANARY_ENABLED` |
+
 ## 2. Production (pending)
 
 None of these has been done; each needs the first `Dashboard deploy` on `main` (after Todofy and Mail
