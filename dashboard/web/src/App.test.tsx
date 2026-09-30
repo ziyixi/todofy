@@ -3,6 +3,7 @@ import userEvent from '@testing-library/user-event'
 import type { OverviewResponse } from '../../worker/src/api-types.ts'
 import {
   analyticsUnavailableOverview,
+  canaryDisabledOverview,
   canaryFailedOverview,
   degradedOverview,
   guardActiveOverview,
@@ -10,6 +11,7 @@ import {
   unreachableOverview,
 } from './test/fixtures'
 import { apiError, freezeClock, installFetch, json, renderApp } from './test/harness'
+import { CANARY_DISABLED_NOTE } from './components/CanarySection'
 
 function serve(overview: OverviewResponse) {
   return installFetch((call) => {
@@ -241,6 +243,25 @@ describe('overview page', () => {
     expect(within(banner).queryByText(/都没有需要处理的问题/)).not.toBeInTheDocument()
     expect(within(banner).getByText('定时检查已 3 小时 未运行：自动降载、金丝雀和运维摘要都已停止，下方数据可能过时。')).toBeInTheDocument()
     expect(within(banner).getByRole('link', { name: '运维面板：定时检查已停止' })).toBeInTheDocument()
+  })
+
+  it('shows a switched-off canary as information only, with the run still in progress', async () => {
+    await showOverview(canaryDisabledOverview())
+    const banner = screen.getByRole('region', { name: /总体状态/ })
+    // The level stays 正常: the info item never raises it.
+    expect(within(banner).getByText('正常')).toBeInTheDocument()
+    const chip = within(within(banner).getByRole('list', { name: '当前问题' })).getByRole('link', { name: '运维面板：金丝雀已关闭' })
+    expect(chip).toHaveAttribute('href', '#canary')
+
+    const canary = card('投递与处理金丝雀')
+    expect(within(canary).getByText(CANARY_DISABLED_NOTE)).toBeInTheDocument()
+    expect(CANARY_DISABLED_NOTE).toBe(
+      '金丝雀已关闭（DASHBOARD_CANARY_ENABLED=false）：不会开始新的定时或手动运行；正在进行的运行仍会每 30 分钟检查一次，直到结束。在 GitHub production 环境把 DASHBOARD_CANARY_ENABLED 改为 true（或删除）并重新部署后恢复。',
+    )
+    expect(within(canary).getByText('下次定时运行').nextElementSibling).toHaveTextContent('已关闭')
+    // The run in flight is still shown (and polled by the Worker) until it ends.
+    expect(within(canary).getByRole('heading', { name: '正在运行' })).toBeInTheDocument()
+    expect(within(canary).getByText('canary-manual-20260929T165500Z')).toBeInTheDocument()
   })
 
   it('names the canary scope and the UTC day it counts by', async () => {

@@ -10,6 +10,7 @@ import { DurableObject } from 'cloudflare:workers';
 import { OPS_APPS, OPS_LIMITS, type GuardLevel, type GuardState, type OpsApp, type OpsReportItem, type OpsReportReceipt, type OpsStatus, type SetGuardInput } from '../../../contracts/ops-v1/ops-v1.ts';
 import {
   API_VERSION,
+  CANARY_DISABLED_ITEM,
   CANARY_MANUAL_PER_DAY,
   CANARY_RECENT_RUNS,
   GUARD_CLEAR_PERCENT,
@@ -33,6 +34,7 @@ import {
   applyResult,
   applyStart,
   finish,
+  holdWhenDisabled,
   manualRunId,
   newRun,
   nextScheduledAt,
@@ -42,7 +44,7 @@ import {
   waitForStatus,
   type CanaryRecord,
 } from './canary.ts';
-import { analyticsConfigured, buildSha, canaryHour, dashboardUrl } from './config.ts';
+import { analyticsConfigured, buildSha, canaryEnabled, canaryHour, dashboardUrl } from './config.ts';
 import { buildReport, candidates, digestKey, finalizeItems, itemKey, overallLevel, shouldSend, withTickState, DIGEST_REFRESH_MS } from './digest.ts';
 import type { Env } from './env.ts';
 import {
@@ -176,7 +178,9 @@ const NO_DIGEST: DigestDoc = {
 const NO_META: MetaDoc = { last_tick_at: null, last_tick_scheduled: null, last_refresh_at: null };
 
 /** A failure of the call itself (the Durable Object) is an exception, which the Worker maps to 503. */
-export type StartCanaryOutcome = { readonly ok: true; readonly run: CanaryRun } | { readonly ok: false; readonly code: 'canary_active' | 'canary_limit' };
+export type StartCanaryOutcome =
+  | { readonly ok: true; readonly run: CanaryRun }
+  | { readonly ok: false; readonly code: 'canary_disabled' | 'canary_active' | 'canary_limit' };
 export interface GuardOverrideOutcome {
   readonly guard: GuardView;
 }
@@ -290,6 +294,8 @@ export class HomeState extends DurableObject<Env> {
   startCanary(): Promise<StartCanaryOutcome> {
     return this.serialize(async (): Promise<StartCanaryOutcome> => {
       const now = Date.now();
+      // Switched off: refused before anything is read or called.
+      if (!canaryEnabled(this.env)) return { ok: false, code: 'canary_disabled' };
       if (this.activeRun() !== null) return { ok: false, code: 'canary_active' };
       if (this.manualCount(utcDay(now)) >= CANARY_MANUAL_PER_DAY) return { ok: false, code: 'canary_limit' };
       const stale = OPS_APPS.filter((app) => statusDue(this.statusDoc(app), now));
@@ -417,14 +423,20 @@ export class HomeState extends DurableObject<Env> {
     return targets.length;
   }
 
-  /** Advances the active run, or starts the day's scheduled run when due (§5.4). */
+  /**
+   * Advances the active run, or starts the day's scheduled run when due (§5.4). While the canary is
+   * switched off, a queued run is still polled to its verdict (so a Todofy rollback can wait for it),
+   * a run not yet queued ends without another start call, and no new run starts.
+   */
   private async runCanary(now: number, scheduled: boolean): Promise<string> {
-    const active = this.activeRun();
+    const found = this.activeRun();
+    const active = found !== null && !canaryEnabled(this.env) ? holdWhenDisabled(found, now) : found;
     if (active !== null) {
       const run = await this.advance(active, now);
       this.saveRun(run);
       return run.phase === 'done' ? `${run.outcome ?? 'done'}:${run.code ?? ''}` : run.phase;
     }
+    if (!canaryEnabled(this.env)) return 'disabled';
     const day = utcDay(now);
     if (!scheduled || new Date(now).getUTCHours() < canaryHour(this.env) || this.scheduledExists(day)) return 'idle';
     const run = await this.advance(newRun(scheduledRunId(now), 'scheduled', now), now);
@@ -503,12 +515,15 @@ export class HomeState extends DurableObject<Env> {
     const neverRan = meta.last_tick_at === null && digest.last_attempt_at === null && lastRefresh === null;
     // The stored items are as old as the last tick or refresh; whether the ticks still run is judged now.
     const items = neverRan ? [] : withTickState(digest.items, meta.last_tick_at, now);
+    const banner = items.slice(0, OPS_LIMITS.reportMaxItems).map((item) => ({ source: item.source, code: item.code, severity: item.severity }));
     return {
       version: API_VERSION,
       generated_at: iso(now),
       overall: {
         level: neverRan ? 'unknown' : overallLevel(items),
-        items: items.slice(0, OPS_LIMITS.reportMaxItems).map((item) => ({ source: item.source, code: item.code, severity: item.severity })),
+        // The switch is shown on the page only: an info item is never part of the digest or a report.
+        // It takes the last of the 20 places.
+        items: canaryEnabled(this.env) ? banner : [...banner.slice(0, OPS_LIMITS.reportMaxItems - 1), { ...CANARY_DISABLED_ITEM }],
       },
       apps: { 'mail-hero': this.appCard('mail-hero'), todofy: this.appCard('todofy') },
       usage: this.usageView(now),
@@ -592,9 +607,11 @@ export class HomeState extends DurableObject<Env> {
     const active = this.activeRun();
     const today = recent.find((run) => run.day === day) ?? null;
     const hour = canaryHour(this.env);
+    const enabled = canaryEnabled(this.env);
     return {
+      enabled,
       hour_utc: hour,
-      next_scheduled_at: iso(nextScheduledAt(now, hour, this.scheduledExists(day))),
+      next_scheduled_at: enabled ? iso(nextScheduledAt(now, hour, this.scheduledExists(day))) : null,
       today: today === null ? null : runView(today),
       active: active === null ? null : runView(active),
       recent: recent.map(runView),

@@ -33,6 +33,8 @@ export interface FlowHarness extends Harness {
   tick(at: string | number): Promise<void>;
   /** Sets (or with undefined, resets to the fixture default) one stub method's answer. */
   answer(app: StubApp, method: string, entry: StubAnswer | undefined): Promise<void>;
+  /** Redeploys "home" with these vars, keeping its storage, pending call logs and the stub scenarios. */
+  redeploy(bindings: Record<string, string>): Promise<void>;
 }
 
 /** A stub answer: a value, an error code thrown, or a sequence of them (the last one repeats). */
@@ -99,6 +101,11 @@ export async function startFlows(options: { bindings?: Record<string, string>; u
       const rest = Object.fromEntries(Object.entries(scenarios[app]).filter(([name]) => name !== method));
       scenarios[app] = entry === undefined ? rest : { ...rest, [method]: entry };
       await harness.scenario(app, scenarios[app]);
+    },
+    async redeploy(bindings) {
+      for (const app of ['mail-hero', 'todofy'] as const) pending[app].push(...(await harness.calls(app)));
+      await harness.rebind(bindings);
+      for (const app of ['mail-hero', 'todofy'] as const) await harness.scenario(app, scenarios[app]);
     },
   };
   return flows;

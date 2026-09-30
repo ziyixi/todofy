@@ -51,5 +51,6 @@ describe('labels', () => {
     expect(usageErrorLabel('graphql_error')).toBe('GraphQL 返回错误')
     expect(canaryCodeLabel('http_503')).toBe('HTTP 503')
     expect(canaryCodeLabel('canary_consumer_missing')).toBe('Todofy 未提供金丝雀功能')
+    expect(canaryCodeLabel('canary_disabled')).toBe('金丝雀已关闭，未再尝试启动')
   })
 })

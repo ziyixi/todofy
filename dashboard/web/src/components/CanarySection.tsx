@@ -1,7 +1,7 @@
 import type { CanaryRun, CanaryStage, CanaryView } from '../../../worker/src/api-types.ts'
 import { between, formatClock, formatDuration, formatFullTime, formatTime, utcDay, utcHourWithLocal } from '../lib/format'
-import { CANARY_KIND, CANARY_OUTCOME, CANARY_PHASE, CANARY_STAGE, appErrorLabel, canaryCodeLabel, type Tone } from '../lib/labels'
-import { Card, Fact, Facts, Pill, Time } from './ui'
+import { CANARY_DISABLED_TEXT, CANARY_KIND, CANARY_OUTCOME, CANARY_PHASE, CANARY_STAGE, appErrorLabel, canaryCodeLabel, type Tone } from '../lib/labels'
+import { Card, Fact, Facts, Notice, Pill, Time } from './ui'
 
 type StepState = 'done' | 'current' | 'failed' | 'skipped' | 'waiting'
 
@@ -75,11 +75,15 @@ function runDetail(run: CanaryRun): string | null {
 export const CANARY_SCOPE =
   '覆盖：Mail Hero 投递（webhook）→ Todofy 接收、Gemini 摘要与校验；不覆盖：来源邮箱转发、Email Routing 收件、原件保存与 MIME 解析。'
 
+/** What the switch does; the section shows it while CANARY_ENABLED=false. */
+export const CANARY_DISABLED_NOTE = `${CANARY_DISABLED_TEXT}：不会开始新的定时或手动运行；正在进行的运行仍会每 30 分钟检查一次，直到结束。在 GitHub production 环境把 DASHBOARD_CANARY_ENABLED 改为 true（或删除）并重新部署后恢复。`
+
 export function CanarySection({ canary, now }: { canary: CanaryView; now: Date }) {
   const current = canary.active ?? canary.today
   const day = utcDay(now)
   return (
     <Card id="canary" title="投递与处理金丝雀">
+      {canary.enabled ? null : <Notice tone="info">{CANARY_DISABLED_NOTE}</Notice>}
       <p className="small muted">
         每天 {utcHourWithLocal(canary.hour_utc, now)}之后的第一次定时检查会让 Mail Hero 直接生成一封合成测试邮件，经正常投递链路交给
         Todofy 处理并校验；不涉及真实邮件，也不会创建 Todoist 任务。
@@ -87,7 +91,7 @@ export function CanarySection({ canary, now }: { canary: CanaryView; now: Date }
       <p className="small">{CANARY_SCOPE}</p>
       <Facts>
         <Fact label="下次定时运行">
-          <Time iso={canary.next_scheduled_at} now={now} />
+          {canary.next_scheduled_at === null ? '已关闭' : <Time iso={canary.next_scheduled_at} now={now} />}
         </Fact>
         <Fact label={`本 UTC 日（${day}）手动运行`}>
           {canary.manual_today} / {canary.manual_limit} 次

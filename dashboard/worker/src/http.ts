@@ -37,6 +37,7 @@ export const MESSAGES: Readonly<Record<ApiErrorCode, string>> = {
   not_found: '找不到该资源',
   method_not_allowed: '不支持该请求方法',
   canary_active: '已有金丝雀运行正在进行',
+  canary_disabled: '金丝雀已关闭（DASHBOARD_CANARY_ENABLED=false）',
   canary_limit: '今天的手动金丝雀次数已用完',
   unavailable: '依赖服务暂时不可用，请稍后再试',
 };
@@ -252,6 +253,7 @@ async function api(ctx: Context, owner: string, bypassed: boolean): Promise<Resp
       if (Object.keys(body).length > 0) throw new HttpError(400, 'bad_request');
       const result = await callHome(() => home(env).startCanary() as unknown as Promise<StartCanaryOutcome>);
       if (result.ok) return jsonResponse({ run: result.run }, 202);
+      if (result.code === 'canary_disabled') throw new HttpError(409, 'canary_disabled');
       if (result.code === 'canary_active') throw new HttpError(409, 'canary_active');
       throw new HttpError(429, 'canary_limit');
     }

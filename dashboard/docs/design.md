@@ -61,6 +61,7 @@ route `home.ziyixi.science` with `custom_domain = true` (production config only)
 | `ACCOUNT_ID` | var | 32 hex, the GraphQL `accountTag` |
 | `MAIL_HERO_URL`, `TODOFY_URL` | var | `https://<host>/` links to the app UIs (from the existing `MAIL_HERO_PUBLIC_HOST`, `TODOFY_PUBLIC_HOST`) |
 | `CANARY_UTC_HOUR` | var | integer 0–23, default 16; invalid → 16 |
+| `CANARY_ENABLED` | var | `true` or `false` (§5.4 "Switch"); unset or empty → `true`; any other value → `false` (the switch exists to stop canaries, so an unreadable value never starts one; the generator emits only `true`/`false`) |
 | `BUILD_SHA` | var | the deployed commit (`dev` locally) |
 | `ACCESS_OWNER`, `ACCESS_OWNER_ALIASES` | secret | printable-ASCII emails, ≤ 8 aliases, ≤ 2048 chars; empty aliases uploaded as `" "` |
 | `CSRF_SIGNING_KEY` | secret | `^[0-9a-fA-F]{64}$` |
@@ -130,7 +131,7 @@ RPC results are values, never thrown errors:
 class HomeState extends DurableObject<Env> {
   tick(scheduledTime: number): Promise<{ ran: boolean }>;                      // cron
   overview(refresh: boolean): Promise<OverviewResponse>;                      // GET /api/v1/overview
-  startCanary(): Promise<{ ok: true; run: CanaryRun } | { ok: false; code: 'canary_active' | 'canary_limit' }>;
+  startCanary(): Promise<{ ok: true; run: CanaryRun } | { ok: false; code: 'canary_disabled' | 'canary_active' | 'canary_limit' }>;
   setGuardOverride(level: GuardLevel): Promise<{ guard: GuardView }>;
 }
 ```
@@ -251,6 +252,17 @@ Email Routing, the ingest quota, raw storage or MIME parsing. The page names the
 
 At most one active run (phase ≠ `done`) at a time.
 
+- **Switch** (`CANARY_ENABLED`, from the GitHub variable `DASHBOARD_CANARY_ENABLED`, default `true`):
+  with `false` no run starts. The tick still advances a queued run (`delivering`, `consuming`) to its
+  verdict (so a Todofy rollback can wait for it, setup.md §7) but creates no scheduled run; a run still
+  `starting` gets no further `startCanary` call and ends as `skipped/start/canary_disabled` (no event is
+  created after the switch; the digest reports no item for this code); `startCanary` answers
+  `canary_disabled` before any other check, reading and calling nothing. The overview reports `canary.enabled` and
+  `next_scheduled_at: null`. A day without a run raises no digest item (there is no "not run today"
+  item at all); the latest finished run's item (§5.5) stays as it was. Switching back on starts the
+  day's scheduled run at the next tick if the hour has passed and no scheduled run exists that UTC day.
+  A config change takes effect with the deploy that carries it.
+
 - **Scheduled start**: at the first tick with UTC hour ≥ `CANARY_UTC_HOUR` on a day without a
   scheduled run (and no active run), create `canary-YYYY-MM-DD` (`kind: scheduled`, `deadline_at` =
   created + 2 h) and make the first start attempt in the same tick. A manual run in progress delays it
@@ -321,7 +333,10 @@ so the next tick retries. This is the only way the dashboard creates Todoist tas
 one-per-day reminder); Mail Hero's `ALERT_WEBHOOK_URL` stays unconfigured.
 
 The overview banner (`overall`) is `critical` if any item is critical, else `warning` if any is
-warning, else `ok`; `unknown` before anything ran. The stored items are as old as the last tick or
+warning, else `ok`; `unknown` before anything ran. While `CANARY_ENABLED` is `false` the banner's items
+end with the info item `{source: 'dashboard', code: 'canary_disabled', severity: 'info'}` (taking the
+last of the 20 places): it never changes the level and is not a digest item, so it is never sent to
+Todofy (ops-v1 reports carry warning and critical items only). The stored items are as old as the last tick or
 refresh, so the overview judges the ticks at read time: `tick_stale` is added when no tick completed
 for 75 min (cron removed, or every tick failing), which turns a clean banner into a warning. `items`
 lists `{source, code, severity}` (≤ 20), so the same code from both apps stays two entries; the UI
@@ -336,7 +351,7 @@ All paths except `/health` go through Access (edge-auth) first; then `/api/v1/*`
 | `GET /health` | none (Access still fronts the host) | `HealthResponse` `{service: 'home', status: 'ok', build}`; no DO call |
 | `GET /api/v1/csrf` | Access | `CsrfResponse` + `Set-Cookie: home_csrf=...` |
 | `GET /api/v1/overview[?refresh=1]` | Access | `OverviewResponse` from the cached snapshot; `refresh=1` fetches usage (≥ 60 s since the last fetch attempt) and status (per app ≥ 10 min) first, else returns the cache with `refreshed: false` |
-| `POST /api/v1/canary` | Access + Origin + CSRF | 202 `CanaryStartResponse`; 409 `canary_active`; 429 `canary_limit` |
+| `POST /api/v1/canary` | Access + Origin + CSRF | 202 `CanaryStartResponse`; 409 `canary_disabled` ("金丝雀已关闭（DASHBOARD_CANARY_ENABLED=false）", checked first); 409 `canary_active`; 429 `canary_limit` |
 | `POST /api/v1/guard` | Access + Origin + CSRF | 200 `GuardResponse`, body `GuardRequest` `{level: 'shed' \| 'normal'}` (≤ 1 KiB JSON, else 400; a body without Content-Length is read only up to 1 KiB) |
 | other `/api/*` | Access | 404 `not_found`; wrong method 405 |
 | anything else | Access | `ASSETS` (SPA fallback) |
@@ -445,14 +460,19 @@ durations in words.
   "本 UTC 日（YYYY-MM-DD）", since canary days and the manual limit count by UTC while times show in the
   browser's zone) with a stage timeline (创建 → 已排队 → 已投递 → Todofy 完成 → 结束), waiting reasons
   (`start_code`, `waiting_code`, `last_call_error`), outcome and code, the scheduled hour as
-  "16:00 UTC（本地 HH:MM）", next scheduled time; table of the last 14 runs.
+  "16:00 UTC（本地 HH:MM）", next scheduled time; table of the last 14 runs. While the switch is off: an
+  info note "金丝雀已关闭（DASHBOARD_CANARY_ENABLED=false）：不会开始新的定时或手动运行；正在进行的运行仍会
+  每 30 分钟检查一次，直到结束。…", "下次定时运行" reads 已关闭, and a run still in progress is shown as
+  usual.
 - **Digest**: current items, last sent time and receipt, error.
 - **Actions** with confirmation text that states exactly what happens:
   - 立即运行金丝雀: "调用 Mail Hero 直接创建一封固定内容的合成测试邮件（不经过来源转发、Email Routing
     收件、原件保存与解析），经正常投递链路发给 Todofy；Todofy 按正常流程调用 Gemini 摘要并校验（暂时性
     失败最多尝试 3 次，计入 Gemini 预算），不创建 Todoist 任务、不进入列表或提醒。本 UTC 日还可手动运行
     N 次。" A start answered paused/unavailable reports "未能立即启动金丝雀 …：<reason>；截止前每 30 分钟
-    重试一次。"
+    重试一次。" While the switch is off the button is `disabled` and described by
+    "金丝雀已关闭（DASHBOARD_CANARY_ENABLED=false），不能手动运行。"; a 409 `canary_disabled` (switched off
+    after the page loaded) is shown as "未能启动金丝雀：金丝雀已关闭（DASHBOARD_CANARY_ENABLED=false）…"
   - 强制降载 (the deferred jobs of contracts/ops-v1/IMPLEMENTATION.md §2.5 and §3.7): "立即让两个应用
     降载 24 小时：Mail Hero 推迟原件对账、保留期清理、金丝雀清理和告警历史清理（每项最多推迟 48 小时）；
     Todofy 推迟开始新一轮每周备份（上次完整备份超过 7.5 天仍会执行）、过期数据清理和趋势统计汇总（最多推迟
@@ -506,7 +526,12 @@ fixture or validated with `validate.mjs`. Flows, driven by `scheduled()` with ch
 - canary: start → pending → delivered → ok (timeline stored); failed delivery; consumer failed;
   timeout at 2 h; paused/unavailable start → skipped with `start_code` shown while waiting and a
   `canary_skipped` item after; missing capability → skipped without a `startCanary` call; manual run
-  limits and `canary_active`;
+  limits and `canary_active`; the switch: `CANARY_ENABLED=false` starts no scheduled run and answers a
+  manual start 409 `canary_disabled` without any app call, shows the info item, and sends reports
+  without canary items; a queued run in flight when the Worker is redeployed with `false` (`rebind`,
+  same Durable Object storage) is polled to `ok`, a run still `starting` ends as
+  `skipped/start/canary_disabled` without another `startCanary` and without a digest item, no run starts
+  the next day, and switching back on starts the day's run;
 - digest: first report; unchanged items → no call; change → call; 6 h refresh; 23:30 rule; Todofy
   without `ops_digest` → no call; `reportOps` failing → retried next tick;
 - an unreachable app (stub throws/unknown method) → `app_unreachable` after 2 ticks, other app still
@@ -534,6 +559,7 @@ writes with `wx` and mode 0600; `node --test deploy/test/*.test.mjs`):
 | `DASHBOARD_ACCESS_AUDIENCE` (var) | `^[a-f0-9]{64}$`i | var |
 | `MAIL_HERO_PUBLIC_HOST`, `TODOFY_PUBLIC_HOST` (existing vars) | domain regex | vars `MAIL_HERO_URL`, `TODOFY_URL` = `https://<host>/` |
 | `DASHBOARD_CANARY_UTC_HOUR` (optional var) | integer 0–23, default 16 | var `CANARY_UTC_HOUR` |
+| `DASHBOARD_CANARY_ENABLED` (optional var) | exactly `true` or `false`, default `true` when unset/empty; anything else fails | var `CANARY_ENABLED` |
 | `GITHUB_SHA` | 40 hex | var `BUILD_SHA` |
 | `DASHBOARD_ACCESS_OWNER` (secret) | printable-ASCII email | secrets file `ACCESS_OWNER` |
 | `DASHBOARD_ACCESS_OWNER_ALIASES` (secret) | ≤ 8, ≤ 2048 chars, unique, each printable-ASCII email | `ACCESS_OWNER_ALIASES` (`" "` when empty) |

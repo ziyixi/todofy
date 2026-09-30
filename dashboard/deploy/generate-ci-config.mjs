@@ -73,6 +73,9 @@ export function generateConfig(env, base) {
   // The dashboard's custom domain must be its own; claiming an app's host would take its route.
   if (host === mailHeroHost || host === todofyHost) throw new SettingError('DASHBOARD_PUBLIC_HOST')
   const hour = checked(env, 'DASHBOARD_CANARY_UTC_HOUR', /^(?:[0-9]|1[0-9]|2[0-3])$/, '16')
+  // The canary switch: exactly "true" or "false" (unset means true); anything else fails the deploy
+  // rather than guessing whether canaries should run (docs/setup.md §7, before a Todofy rollback).
+  const canaryEnabled = checked(env, 'DASHBOARD_CANARY_ENABLED', /^(?:true|false)$/, 'true')
   return {
     ...Object.fromEntries(SHAPE_KEYS.map((key) => [key, base[key]])),
     account_id: accountId,
@@ -88,6 +91,7 @@ export function generateConfig(env, base) {
       MAIL_HERO_URL: `https://${mailHeroHost}/`,
       TODOFY_URL: `https://${todofyHost}/`,
       CANARY_UTC_HOUR: hour,
+      CANARY_ENABLED: canaryEnabled,
       BUILD_SHA: checked(env, 'GITHUB_SHA', /^[0-9a-f]{40}$/),
     },
   }

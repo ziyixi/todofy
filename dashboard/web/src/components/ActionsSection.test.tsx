@@ -1,7 +1,7 @@
 import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import type { CanaryRun, GuardView, OverviewResponse } from '../../../worker/src/api-types.ts'
-import { canaryActiveOverview, guardActiveOverview, healthyOverview } from '../test/fixtures'
+import { canaryActiveOverview, canaryDisabledOverview, guardActiveOverview, healthyOverview } from '../test/fixtures'
 import { apiError, freezeClock, installFetch, json, renderApp, type Call, type Handler } from '../test/harness'
 import { SHED_CONFIRM_TEXT, canaryConfirmText, clearConfirmText } from './ActionsSection'
 
@@ -131,6 +131,30 @@ describe('actions', () => {
     await user.click(button)
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
     expect(posts(calls)).toHaveLength(0)
+  })
+
+  it('disables the canary button while CANARY_ENABLED=false, even with a run in progress', async () => {
+    const { calls, actions, user } = await open(canaryDisabledOverview(), () => json({}))
+    const button = within(actions).getByRole('button', { name: '立即运行金丝雀' })
+    expect(button).toBeDisabled()
+    expect(button).not.toHaveAttribute('aria-disabled')
+    expect(button).toHaveAccessibleDescription('金丝雀已关闭（DASHBOARD_CANARY_ENABLED=false），不能手动运行。')
+    await user.click(button)
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    expect(posts(calls)).toHaveLength(0)
+  })
+
+  it('shows the Worker\'s canary_disabled refusal (switched off since the page loaded)', async () => {
+    const { calls, actions, user } = await open(healthyOverview(), () =>
+      apiError(409, 'canary_disabled', '金丝雀已关闭（DASHBOARD_CANARY_ENABLED=false）', 'dddddddddddddddd'),
+    )
+    await user.click(within(actions).getByRole('button', { name: '立即运行金丝雀' }))
+    await user.click(screen.getByRole('button', { name: '确认运行' }))
+
+    expect(await within(actions).findByRole('alert')).toHaveTextContent(
+      '未能启动金丝雀：金丝雀已关闭（DASHBOARD_CANARY_ENABLED=false）（请求 dddddddddddddddd）',
+    )
+    expect(posts(calls)).toHaveLength(1)
   })
 
   it('stops manual runs at the daily limit', async () => {

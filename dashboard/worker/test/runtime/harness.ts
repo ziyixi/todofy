@@ -114,13 +114,20 @@ export interface Harness {
   rpc(app: StubApp, method: string, ...args: unknown[]): Promise<{ ok?: unknown; error?: string }>;
   /** Drains the stub's call log. */
   calls(app: StubApp): Promise<{ app: StubApp; method: string; args: unknown[] }[]>;
+  /**
+   * Redeploys "home" with these vars on top of the synthetic defaults (and the harness's own), keeping
+   * its Durable Object storage: a config change such as CANARY_ENABLED=false between ticks. Every worker
+   * restarts, so the stubs lose their scenarios and call logs (drain and set them again).
+   */
+  rebind(bindings: Record<string, string>): Promise<void>;
   dispose(): Promise<void>;
 }
 
 export async function startHarness(options: HarnessOptions = {}): Promise<Harness> {
   const temp = await mkdtemp(join(tmpdir(), 'home-dashboard-'));
   const outbound: Outbound = options.outbound ?? (() => new Response('no outbound fetch expected', { status: 599 }));
-  const mf = new Miniflare(
+  const scripts = { home: await bundle(), 'mail-hero': await stubScript('mail-hero'), todofy: await stubScript('todofy') };
+  const configure = (bindings: Record<string, string>): ConstructorParameters<typeof Miniflare>[0] =>
     convertV4MiniflareOptions({
       host: '127.0.0.1',
       port: 0,
@@ -129,7 +136,7 @@ export async function startHarness(options: HarnessOptions = {}): Promise<Harnes
         {
           name: 'home',
           modules: true,
-          script: await bundle(),
+          script: scripts.home,
           compatibilityDate: '2026-09-08',
           durableObjects: { HOME: { className: 'HomeState', useSQLite: true } },
           serviceBindings: {
@@ -137,11 +144,11 @@ export async function startHarness(options: HarnessOptions = {}): Promise<Harnes
             TODOFY: { name: 'todofy', entrypoint: 'Ops' },
             ASSETS: () => new Response('<!doctype html><title>home</title>', { headers: { 'content-type': 'text/html' } }),
           },
-          bindings: { ...SYNTHETIC_BINDINGS, ...options.bindings },
+          bindings,
           outboundService: (request: Request) => outbound(request),
         },
-        { name: 'mail-hero', modules: true, script: await stubScript('mail-hero'), compatibilityDate: '2026-09-08' },
-        { name: 'todofy', modules: true, script: await stubScript('todofy'), compatibilityDate: '2026-09-08' },
+        { name: 'mail-hero', modules: true, script: scripts['mail-hero'], compatibilityDate: '2026-09-08' },
+        { name: 'todofy', modules: true, script: scripts.todofy, compatibilityDate: '2026-09-08' },
         // Calls a stub's Ops method over the same kind of binding "home" has (tests of the stubs).
         {
           name: 'ops-probe',
@@ -159,8 +166,9 @@ export async function startHarness(options: HarnessOptions = {}): Promise<Harnes
           },
         },
       ],
-    }),
-  );
+    });
+  const base = { ...SYNTHETIC_BINDINGS, ...options.bindings };
+  const mf = new Miniflare(configure(base));
   await mf.ready;
   const stub = (app: StubApp) => mf.getWorker(app);
   return {
@@ -182,6 +190,10 @@ export async function startHarness(options: HarnessOptions = {}): Promise<Harnes
     async calls(app) {
       const response = await (await stub(app)).fetch('http://stub/__calls');
       return (await response.json()) as { app: StubApp; method: string; args: unknown[] }[];
+    },
+    async rebind(bindings) {
+      await mf.setOptions(configure({ ...base, ...bindings }));
+      await mf.ready;
     },
     async dispose() {
       await mf.dispose();

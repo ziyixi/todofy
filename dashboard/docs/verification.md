@@ -93,7 +93,6 @@ Hero with ops-v1 are live) and, where stated, the owner in a browser.
 | First scheduled canary | the day's run reaches `ok` (Mail Hero delivered, Todofy summarized it, no Todoist task, not listed as mail); this does not exercise Email Routing, raw storage or parsing | pending |
 | Guard round trip | only if a real ≥ 80 % day happens, or by the owner's 强制降载 then 解除降载: both apps report the guard in `status()` and clear it | pending |
 | Digest | Todofy's next daily reminder carries the dashboard's warning/critical items, or none | pending |
+| Canary switch | once, before or after the first canary: deploy with `DASHBOARD_CANARY_ENABLED=false`, check the banner item, the disabled button and that no run starts at the canary hour; deploy again with `true` (or unset) | pending |
 | Open questions from `limits.md` §4 | whether `Ops` calls appear in the apps' Worker request totals; unclassified R2 action types; analytics lag at a tick; `durableObjectsStorageGroups` data | pending |
 
-Known gap: there is no configuration switch to pause the scheduled canary. To stop it (for example
-before a Todofy rollback), remove the Worker's Cron Trigger ([`setup.md`](setup.md) §7).

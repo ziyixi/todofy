@@ -289,6 +289,7 @@ describe('CSRF and mutations', () => {
 
   it('maps the object\'s refusals to 409 and 429, and its failure to 503', async () => {
     for (const [answer, status, code] of [
+      [{ ok: false, code: 'canary_disabled' }, 409, 'canary_disabled'],
       [{ ok: false, code: 'canary_active' }, 409, 'canary_active'],
       [{ ok: false, code: 'canary_limit' }, 429, 'canary_limit'],
     ] as const) {
@@ -297,6 +298,9 @@ describe('CSRF and mutations', () => {
       expect(response.status).toBe(status);
       expect(await errorCode(response)).toBe(code);
     }
+    // The switch names the variable that turns it back on.
+    const disabled = await mutate(makeEnv({}, { startCanary: { ok: false, code: 'canary_disabled' } }).env, '/api/v1/canary', {});
+    expect((await disabled.json<ApiError>()).error.message).toBe('金丝雀已关闭（DASHBOARD_CANARY_ENABLED=false）');
     const { env, stub } = makeEnv();
     stub.startCanary = () => Promise.reject(new Error('object reset'));
     stub.setGuardOverride = () => Promise.reject(new Error('object reset'));

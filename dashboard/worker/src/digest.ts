@@ -4,7 +4,7 @@
  */
 import { OPS_APPS, OPS_LIMITS, type OpsApp, type OpsReport, type OpsReportItem, type OpsSeverity, type OpsStatus } from '../../../contracts/ops-v1/ops-v1.ts';
 import { GUARD_SHED_PERCENT, QUOTA_CRITICAL_PERCENT, type CanaryStage, type OverallLevel, type QuotaRow } from './api-types.ts';
-import type { CanaryRecord } from './canary.ts';
+import { CANARY_DISABLED_CODE, type CanaryRecord } from './canary.ts';
 import { hoursLeft, type DesiredGuard } from './guard.ts';
 import { HOUR_MS, MINUTE_MS, iso, isTimestamp } from './time.ts';
 
@@ -144,7 +144,9 @@ export function candidates(input: DigestInput): Candidate[] {
       const metrics: Record<string, number> = { attempts: run.delivery.attempts, timed_out: run.code === 'timeout' ? 1 : 0 };
       if (run.delivery.last_http_status !== null) metrics.last_http_status = run.delivery.last_http_status;
       out.push({ source: 'dashboard', code: CANARY_CODES[run.stage], severity: 'critical', since, metrics });
-    } else if (run.outcome === 'skipped') {
+    } else if (run.outcome === 'skipped' && run.code !== CANARY_DISABLED_CODE) {
+      // (A run ended by switching the canary off is the owner's doing, not a condition to report: the
+      // page shows the switch as an info item instead.)
       // contracts/ops-v1 README "Daily canary": a skip (paused, unavailable, a missing capability, a held
       // run) is reported with its reason, never as a pipeline failure. The reason is a metric key
       // (numbers only), e.g. {"no_endpoint": 1}.

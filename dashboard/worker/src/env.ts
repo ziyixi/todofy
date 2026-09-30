@@ -25,6 +25,11 @@ export interface Env {
   readonly TODOFY_URL: string;
   /** UTC hour (0-23) of the daily canary; default 16. */
   readonly CANARY_UTC_HOUR?: string;
+  /**
+   * `true` (default when unset) or `false`: whether canary runs may start (scheduled and manual). A run
+   * already in progress is still polled to its end. Any other value counts as `false`.
+   */
+  readonly CANARY_ENABLED?: string;
   readonly BUILD_SHA?: string;
 
   // secrets

@@ -214,6 +214,7 @@ export function healthyOverview(): OverviewResponse {
       },
     },
     canary: {
+      enabled: true,
       hour_utc: 16,
       next_scheduled_at: '2026-09-30T16:00:00.000Z',
       today: RUN_OK_TODAY,
@@ -395,5 +396,15 @@ export function canaryActiveOverview(): OverviewResponse {
   return {
     ...base,
     canary: { ...base.canary, today: active, active, recent: [active, ...base.canary.recent], manual_today: 1 },
+  }
+}
+
+/** CANARY_ENABLED=false with a run still in progress (it is polled to its end); the banner's info item. */
+export function canaryDisabledOverview(): OverviewResponse {
+  const base = canaryActiveOverview()
+  return {
+    ...base,
+    overall: { level: 'ok', items: [{ source: 'dashboard', code: 'canary_disabled', severity: 'info' }] },
+    canary: { ...base.canary, enabled: false, next_scheduled_at: null },
   }
 }

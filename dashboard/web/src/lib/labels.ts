@@ -90,6 +90,8 @@ const SIGNALS: Readonly<Record<string, string>> = {
   canary_not_delivered: '金丝雀未投递',
   canary_consumer_failed: '金丝雀在 Todofy 失败',
   canary_skipped: '金丝雀已跳过（未测试链路）',
+  // Page only (info): CANARY_ENABLED=false.
+  canary_disabled: '金丝雀已关闭',
   // Not emitted by this dashboard (it reports warning/critical only); kept for reports such as the
   // contract's OpsReport fixture, which Todofy also renders.
   canary_ok: '金丝雀成功',
@@ -299,6 +301,7 @@ export function canaryCodeLabel(code: string): string {
       status_unavailable: '没有可用的应用状态',
       canary_producer_missing: 'Mail Hero 未提供金丝雀功能',
       canary_consumer_missing: 'Todofy 未提供金丝雀功能',
+      canary_disabled: '金丝雀已关闭，未再尝试启动',
       send_paused: '投递已强制暂停',
       settings_paused: '投递已在设置中暂停',
       endpoint_paused: '投递目标已暂停',
@@ -321,6 +324,9 @@ export function canaryCodeLabel(code: string): string {
   )
 }
 
+/** Shown on the canary button, in the canary section and as the 409 answer's fallback message. */
+export const CANARY_DISABLED_TEXT = '金丝雀已关闭（DASHBOARD_CANARY_ENABLED=false）'
+
 export const API_ERRORS: Readonly<Record<ApiErrorCode, string>> = {
   unauthorized: '登录已过期，请刷新页面',
   access_not_configured: '访问控制未配置',
@@ -330,6 +336,7 @@ export const API_ERRORS: Readonly<Record<ApiErrorCode, string>> = {
   not_found: '接口不存在',
   method_not_allowed: '请求方法不允许',
   canary_active: '已有金丝雀正在运行',
+  canary_disabled: CANARY_DISABLED_TEXT,
   canary_limit: '今天的手动运行次数已用完',
   unavailable: '服务暂时不可用',
 }

@@ -37,6 +37,11 @@ export const QUOTA_CRITICAL_PERCENT = 95;
 export const CANARY_MANUAL_PER_DAY = 3;
 /** Canary runs shown in the overview (newest first). */
 export const CANARY_RECENT_RUNS = 14;
+/**
+ * The info item the overview banner shows while CANARY_ENABLED=false. Page only: the digest carries
+ * warning and critical items, so it never reaches Todofy's reportOps.
+ */
+export const CANARY_DISABLED_ITEM = { source: 'dashboard', code: 'canary_disabled', severity: 'info' } as const;
 /** Minimum seconds between two owner refreshes (`GET /api/v1/overview?refresh=1`). */
 export const REFRESH_MIN_INTERVAL_SECONDS = 60;
 
@@ -52,6 +57,7 @@ export type ApiErrorCode =
   | 'not_found' // 404: unknown /api/ path
   | 'method_not_allowed' // 405
   | 'canary_active' // 409: a canary run is still in progress
+  | 'canary_disabled' // 409: CANARY_ENABLED=false (DASHBOARD_CANARY_ENABLED); no run may start
   | 'canary_limit' // 429: CANARY_MANUAL_PER_DAY manual runs already started today
   | 'unavailable'; // 503: the Durable Object or an internal call failed
 
@@ -85,7 +91,8 @@ export interface OverviewResponse {
   /**
    * Banner: the worst of the digest items (which include app reachability), plus `tick_stale` when no
    * cron tick completed for 75 minutes; `unknown` before anything ran. Items keep their source, so the
-   * same code from both apps stays two distinct entries.
+   * same code from both apps stays two distinct entries. While the canary is switched off, the info
+   * item CANARY_DISABLED_ITEM comes last (it never changes the level and is not part of the digest).
    */
   readonly overall: { readonly level: OverallLevel; readonly items: readonly OverallItem[] };
   readonly apps: { readonly 'mail-hero': AppCard; readonly todofy: AppCard };
@@ -296,9 +303,17 @@ export interface CanaryRun {
 }
 
 export interface CanaryView {
+  /**
+   * CANARY_ENABLED (GitHub variable DASHBOARD_CANARY_ENABLED). False: no scheduled or manual run
+   * starts; a run already in progress is still polled to its end.
+   */
+  readonly enabled: boolean;
   readonly hour_utc: number;
-  /** Next scheduled start (first tick at or after hour_utc on a day without a scheduled run). */
-  readonly next_scheduled_at: Iso;
+  /**
+   * Next scheduled start (first tick at or after hour_utc on a day without a scheduled run); null while
+   * the canary is disabled.
+   */
+  readonly next_scheduled_at: Iso | null;
   /** The most recent run of the current UTC day (scheduled or manual), if any. */
   readonly today: CanaryRun | null;
   /** The run in progress, if any (at most one at a time). */
@@ -326,7 +341,8 @@ export interface DigestView {
 }
 
 // ---------------------------------------------------------------------------------------------------
-// POST /api/v1/canary  (body `{}`) -> 202 CanaryStartResponse; 409 canary_active; 429 canary_limit.
+// POST /api/v1/canary  (body `{}`) -> 202 CanaryStartResponse; 409 canary_disabled (CANARY_ENABLED=false,
+// checked first); 409 canary_active; 429 canary_limit.
 // The Worker makes the first start attempt at once; later polls happen on cron ticks.
 
 export type CanaryStartRequest = Record<string, never>;

@@ -130,6 +130,8 @@ describe('digest items', () => {
       ]);
     }
     expect(items({ latestFinished: finish(run, 'ok', null, null, NOW) })).toEqual([]);
+    // Ended by the switch (CANARY_ENABLED=false): nothing to report.
+    expect(items({ latestFinished: finish(run, 'skipped', 'start', 'canary_disabled', NOW) })).toEqual([]);
   });
 
   it('reports unreachable and down apps and passes on warning/critical signals', () => {

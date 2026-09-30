@@ -23,6 +23,7 @@ import {
   applyDelivery,
   applyResult,
   applyStart,
+  holdWhenDisabled,
   isRunId,
   manualRunId,
   newRun,
@@ -90,6 +91,22 @@ describe('the start phase', () => {
     const busy = applyStart(newRun('r', 'manual', NOW), err('busy'), NOW);
     expect(busy.phase).toBe('starting');
     expect(applyDeadline(busy, NOW + CANARY_DEADLINE_MS)).toMatchObject({ outcome: 'failed', stage: 'start', code: 'busy' });
+  });
+
+  it('ends a run not yet queued when the canary is switched off, and leaves a queued one alone', () => {
+    const waiting = applyStart(newRun('r', 'scheduled', NOW), ok<StartCanaryResult>(pausedStart), NOW);
+    expect(holdWhenDisabled(waiting, NOW + 30 * 60_000)).toMatchObject({
+      phase: 'done',
+      outcome: 'skipped',
+      stage: 'start',
+      code: 'canary_disabled',
+      finished_at: NOW + 30 * 60_000,
+      polls: 1,
+    });
+    const run = queuedRun();
+    expect(holdWhenDisabled(run, NOW + 30 * 60_000)).toBe(run);
+    const consuming = applyDelivery(run, ok<CanaryDelivery>(delivered), NOW);
+    expect(holdWhenDisabled(consuming, NOW)).toBe(consuming);
   });
 
   it('is skipped with status_unavailable when statuses never arrived', () => {

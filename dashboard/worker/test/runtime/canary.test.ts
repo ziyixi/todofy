@@ -198,3 +198,90 @@ describe('manual canary runs', () => {
     expect(await h.callsOf('mail-hero', 'status')).toHaveLength(1);
   });
 });
+
+describe('the canary switch (CANARY_ENABLED)', () => {
+  it('starts nothing while false, refuses manual runs, and never reports a missing run', async () => {
+    // Hour 0: every tick is past the canary hour. Ticks up to a minute ago keep the overview current.
+    h = await startFlows({ bindings: { CANARY_ENABLED: 'false', CANARY_UTC_HOUR: '0' } });
+    const now = Date.now();
+    for (const minutes of [150, 120, 90, 60, 30, 1]) await h.tick(now - minutes * 60_000);
+    // The digest went out, without any canary item (none for "not run today" either).
+    const reports = (await h.callsOf('todofy', 'reportOps')).map((args) => args[0] as OpsReport);
+    expect(reports.length).toBeGreaterThan(0);
+    for (const report of reports) {
+      await expectValid('OpsReport', report);
+      expect(report.items.filter((item) => item.code.startsWith('canary_'))).toEqual([]);
+    }
+    expect(await canaryCalls(h)).toEqual([]);
+
+    const response = await h.post('/api/v1/canary', {});
+    expect(response.status).toBe(409);
+    expect(await response.json()).toMatchObject({
+      error: { code: 'canary_disabled', message: '金丝雀已关闭（DASHBOARD_CANARY_ENABLED=false）' },
+    });
+    // Refused before anything is called (no status poll, no startCanary).
+    expect(await h.called()).toEqual([]);
+
+    const overview = await h.overview();
+    expect(overview.canary).toMatchObject({ enabled: false, next_scheduled_at: null, active: null, today: null, recent: [], manual_today: 0 });
+    // Shown on the page as an info item that leaves the level alone ...
+    expect(overview.overall).toEqual({ level: 'ok', items: [{ source: 'dashboard', code: 'canary_disabled', severity: 'info' }] });
+    // ... and never part of the digest.
+    expect(overview.digest.items).toEqual([]);
+  });
+
+  it('keeps polling a run in progress to its end, then starts no new one until switched back on', async () => {
+    h = await startFlows();
+    await h.answer('mail-hero', 'canaryDelivery', { value: await fixture('CanaryDelivery/pending-retrying.json') });
+    await h.tick('2026-09-29T16:00:00Z');
+    expect(latest(await h.overview())).toMatchObject({ run_id: 'canary-2026-09-29', phase: 'delivering' });
+    await canaryCalls(h);
+
+    // Switched off with the run in flight (the step before a Todofy rollback).
+    await h.redeploy({ CANARY_ENABLED: 'false' });
+    const manual = await h.post('/api/v1/canary', {});
+    expect(manual.status).toBe(409);
+    expect(await manual.json()).toMatchObject({ error: { code: 'canary_disabled' } });
+    const during = await h.overview();
+    expect(during.canary).toMatchObject({ enabled: false, next_scheduled_at: null, active: { run_id: 'canary-2026-09-29' } });
+
+    await h.tick('2026-09-29T16:30:00Z');
+    expect(await canaryCalls(h)).toEqual(['mail-hero.canaryDelivery']);
+    await h.answer('mail-hero', 'canaryDelivery', undefined);
+    await h.tick('2026-09-29T17:00:00Z');
+    expect(await canaryCalls(h)).toEqual(['mail-hero.canaryDelivery', 'todofy.canaryResult']);
+    const drained = await h.overview();
+    expect(drained.canary.active).toBeNull();
+    expect(latest(drained)).toMatchObject({ run_id: 'canary-2026-09-29', phase: 'done', outcome: 'ok' });
+
+    // No run the next day while off.
+    for (const at of ['2026-09-30T16:00:00Z', '2026-09-30T16:30:00Z']) await h.tick(at);
+    expect(await canaryCalls(h)).toEqual([]);
+    expect((await h.overview()).digest.items.filter((i) => i.code.startsWith('canary_'))).toEqual([]);
+
+    // Switched back on: the day's scheduled run starts at the next tick.
+    await h.redeploy({ CANARY_ENABLED: 'true' });
+    const enabled = await h.overview();
+    expect(enabled.canary.enabled).toBe(true);
+    expect(enabled.canary.next_scheduled_at).toEqual(expect.any(String));
+    expect(enabled.overall.items.filter((item) => item.code === 'canary_disabled')).toEqual([]);
+    await h.tick('2026-09-30T17:00:00Z');
+    expect(await h.callsOf('mail-hero', 'startCanary')).toEqual([[{ run_id: 'canary-2026-09-30' }]]);
+  });
+
+  it('ends a run that was not queued yet without another start attempt, and without a digest item', async () => {
+    h = await startFlows();
+    await h.answer('mail-hero', 'startCanary', { value: await fixture('StartCanaryResult/paused-send-paused.json') });
+    await h.tick('2026-09-29T16:00:00Z');
+    expect(latest(await h.overview())).toMatchObject({ phase: 'starting', start_code: 'send_paused' });
+    await canaryCalls(h);
+
+    await h.redeploy({ CANARY_ENABLED: 'false' });
+    await h.tick('2026-09-29T16:30:00Z');
+    expect(await canaryCalls(h)).toEqual([]);
+    const overview = await h.overview();
+    expect(overview.canary.active).toBeNull();
+    expect(latest(overview)).toMatchObject({ phase: 'done', outcome: 'skipped', stage: 'start', code: 'canary_disabled', polls: 1 });
+    expect(overview.digest.items.filter((i) => i.code.startsWith('canary_'))).toEqual([]);
+  });
+});

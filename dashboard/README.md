@@ -10,6 +10,8 @@ Besides the page it runs three jobs:
   unified ops digest that Todofy's daily reminder carries. The canary covers Mail Hero delivery →
   Todofy intake, Gemini summary and verification; it does not cover source forwarding, Email Routing,
   raw storage or MIME parsing, so a green run says nothing about whether mail is being received.
+  The GitHub variable `DASHBOARD_CANARY_ENABLED=false` stops new runs (for example before a Todofy
+  rollback, [`docs/setup.md`](docs/setup.md) §7); a run already queued is still polled to its end.
 - **Quota guardrails.** Account-wide Workers Free usage from the GraphQL Analytics API; at ≥ 80 % of a
   daily allowance (or a monthly R2 operation class) both apps defer their non-critical jobs (`shed`).
 - **Cross-app contract tests.** The caller side of ops-v1: only declared methods, every declared error

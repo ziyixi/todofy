@@ -13,6 +13,16 @@ export function canaryHour(env: Pick<Env, 'CANARY_UTC_HOUR'>): number {
   return hour <= 23 ? hour : DEFAULT_CANARY_UTC_HOUR;
 }
 
+/**
+ * CANARY_ENABLED: unset or empty (older configs, local runs) and `true` enable canary starts; `false`
+ * disables them. Any other value also disables them: the switch exists to stop canaries (before a
+ * Todofy rollback), so a value it cannot read never starts one. The generator emits only true/false.
+ */
+export function canaryEnabled(env: Pick<Env, 'CANARY_ENABLED'>): boolean {
+  const raw = (env.CANARY_ENABLED ?? '').trim();
+  return raw === '' || raw === 'true';
+}
+
 /** The dashboard's own host (lowercase), or null when PUBLIC_HOST is not a plain domain. */
 export function publicHost(env: Pick<Env, 'PUBLIC_HOST'>): string | null {
   const host = (env.PUBLIC_HOST as string | undefined)?.trim().toLowerCase() ?? '';

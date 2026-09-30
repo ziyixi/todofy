@@ -7,6 +7,12 @@ import type { AppErrorCode, CanaryKind, CanaryOutcome, CanaryPhase, CanaryRun, C
 import type { OpsCall } from './ops-client.ts';
 import { HOUR_MS, iso, isoOrNull, parseTimestamp, utcDay } from './time.ts';
 
+/**
+ * Skip code of a run that had not been queued when the canary was switched off (CANARY_ENABLED=false):
+ * it ends without another startCanary call, so no canary event is created after the switch.
+ */
+export const CANARY_DISABLED_CODE = 'canary_disabled';
+
 /** Start phase: created + 2 h; after queuing: queued + 2 h. */
 export const CANARY_DEADLINE_MS = 2 * HOUR_MS;
 /** Statuses older than this do not count for the start preconditions. */
@@ -118,6 +124,14 @@ export function startPrecondition(mailHero: StatusAt, todofy: StatusAt, now: num
   if (td !== null && !td.capabilities.includes('canary_consumer')) return { kind: 'skip', code: 'canary_consumer_missing' };
   if (mh === null || td === null) return { kind: 'wait' };
   return { kind: 'call' };
+}
+
+/**
+ * A run still `starting` when the canary is switched off ends as skipped/start/canary_disabled without
+ * a call; a queued run (delivering, consuming) is unchanged and keeps being polled to its verdict.
+ */
+export function holdWhenDisabled(run: CanaryRecord, now: number): CanaryRecord {
+  return run.phase === 'starting' ? finish(run, 'skipped', 'start', CANARY_DISABLED_CODE, now) : run;
 }
 
 export function waitForStatus(run: CanaryRecord): CanaryRecord {

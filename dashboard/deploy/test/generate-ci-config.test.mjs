@@ -55,6 +55,7 @@ test('the production config keeps the shape and replaces account, route and vars
     MAIL_HERO_URL: 'https://mail.example.org/',
     TODOFY_URL: 'https://todofy.example.org/',
     CANARY_UTC_HOUR: '16',
+    CANARY_ENABLED: 'true',
     BUILD_SHA: 'c'.repeat(40),
   })
   const text = JSON.stringify(config)
@@ -81,6 +82,16 @@ test('the canary hour is optional and bounded', () => {
   assert.equal(generateConfig({ ...environment(), DASHBOARD_CANARY_UTC_HOUR: '23' }, base).vars.CANARY_UTC_HOUR, '23')
   for (const hour of ['24', '-1', '07', '1.5', ' 3']) {
     assert.throws(() => generateConfig({ ...environment(), DASHBOARD_CANARY_UTC_HOUR: hour }, base), /DASHBOARD_CANARY_UTC_HOUR/)
+  }
+})
+
+test('the canary switch is optional, defaults to true and accepts exactly true or false', () => {
+  assert.equal(generateConfig(environment(), base).vars.CANARY_ENABLED, 'true')
+  assert.equal(generateConfig({ ...environment(), DASHBOARD_CANARY_ENABLED: '' }, base).vars.CANARY_ENABLED, 'true')
+  assert.equal(generateConfig({ ...environment(), DASHBOARD_CANARY_ENABLED: 'true' }, base).vars.CANARY_ENABLED, 'true')
+  assert.equal(generateConfig({ ...environment(), DASHBOARD_CANARY_ENABLED: 'false' }, base).vars.CANARY_ENABLED, 'false')
+  for (const value of ['False', 'TRUE', '0', '1', 'no', 'off', ' false', 'false ', 'false\n', 'yes']) {
+    assert.throws(() => generateConfig({ ...environment(), DASHBOARD_CANARY_ENABLED: value }, base), /CI setting: DASHBOARD_CANARY_ENABLED$/, JSON.stringify(value))
   }
 })
 

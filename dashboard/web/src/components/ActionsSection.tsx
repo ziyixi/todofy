@@ -6,6 +6,7 @@ import { useSetGuard, useStartCanary } from '../api/queries'
 import { formatClock, formatFullTime, formatTime } from '../lib/format'
 import {
   APP_NAMES,
+  CANARY_DISABLED_TEXT,
   CANARY_OUTCOME,
   CANARY_PHASE,
   CANARY_STAGE,
@@ -81,11 +82,14 @@ export function ActionsSection({ overview, now }: { overview: OverviewResponse; 
 
   const { desired, override, thresholds } = overview.guard
   const remaining = Math.max(0, overview.canary.manual_limit - overview.canary.manual_today)
-  const canaryBlocked = overview.canary.active
-    ? `已有运行 ${overview.canary.active.run_id} 正在进行，结束后才能再次运行。`
-    : remaining === 0
-      ? `本 UTC 日的 ${overview.canary.manual_limit} 次手动运行已用完。`
-      : null
+  const canaryDisabled = !overview.canary.enabled
+  const canaryBlocked = canaryDisabled
+    ? `${CANARY_DISABLED_TEXT}，不能手动运行。`
+    : overview.canary.active
+      ? `已有运行 ${overview.canary.active.run_id} 正在进行，结束后才能再次运行。`
+      : remaining === 0
+        ? `本 UTC 日的 ${overview.canary.manual_limit} 次手动运行已用完。`
+        : null
 
   function close() {
     if (!busy) setDialog(null)
@@ -162,12 +166,13 @@ export function ActionsSection({ overview, now }: { overview: OverviewResponse; 
           description={`本 UTC 日已手动运行 ${overview.canary.manual_today} / ${overview.canary.manual_limit} 次。`}
           blocked={canaryBlocked}
           button={
-            // aria-disabled rather than disabled: the button keeps focus (and its reason) after a run starts.
+            // aria-disabled rather than disabled while a run is active or the limit is reached: the button
+            // keeps focus (and its reason) after a run starts. Switched off by configuration: disabled.
             <Button
               variant="primary"
               onClick={() => canaryBlocked === null && setDialog('canary')}
-              disabled={busy}
-              aria-disabled={canaryBlocked !== null ? true : undefined}
+              disabled={busy || canaryDisabled}
+              aria-disabled={canaryBlocked !== null && !canaryDisabled ? true : undefined}
               aria-describedby="action-canary-desc"
             >
               <Play size={16} aria-hidden="true" />

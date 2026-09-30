@@ -54,6 +54,7 @@ without printing its value.
 | `DASHBOARD_ACCESS_AUDIENCE` | variable | 64 hex | var `ACCESS_AUDIENCE` |
 | `MAIL_HERO_PUBLIC_HOST`, `TODOFY_PUBLIC_HOST` | variables (existing) | domains | vars `MAIL_HERO_URL`, `TODOFY_URL` (links on the page) |
 | `DASHBOARD_CANARY_UTC_HOUR` | variable, optional | integer 0–23, default 16 | var `CANARY_UTC_HOUR` |
+| `DASHBOARD_CANARY_ENABLED` | variable, optional | exactly `true` or `false`, default `true` when unset or empty; any other value (`False`, `0`, `no`, a stray space) fails the generator and the deploy | var `CANARY_ENABLED` (§6, §7) |
 | `DASHBOARD_ACCESS_OWNER` | secret | printable-ASCII e-mail | Worker secret `ACCESS_OWNER` |
 | `DASHBOARD_ACCESS_OWNER_ALIASES` | secret, may be empty | ≤ 8 unique printable-ASCII e-mails, ≤ 2048 chars | Worker secret `ACCESS_OWNER_ALIASES` (a single space when empty, so an emptied list replaces the old one) |
 | `DASHBOARD_CSRF_SIGNING_KEY` | secret | 64 hex (for example `openssl rand -hex 32`, run locally) | Worker secret `CSRF_SIGNING_KEY` |
@@ -123,8 +124,22 @@ the expected state. Use synthetic data only; never point a local run at producti
   summarizes it through the normal path (one Gemini call, up to 3 when a transient failure is retried,
   counted in the Gemini budget) and records the result, never a Todoist task, list entry or reminder.
   A skipped run (sending paused, no endpoint, maintenance, a missing capability) is reported in the
-  digest as `canary_skipped` with its reason. There is no configuration switch that turns the scheduled canary off; see §7 before
-  rolling Todofy back.
+  digest as `canary_skipped` with its reason.
+- **Canary switch** (`DASHBOARD_CANARY_ENABLED`, default `true`). With `false` the dashboard starts no
+  canary: the scheduled run is not created, 立即运行金丝雀 is disabled with
+  "金丝雀已关闭（DASHBOARD_CANARY_ENABLED=false）", and `POST /api/v1/canary` answers 409
+  `canary_disabled` with the same message. A run already queued is still polled every 30 minutes until
+  it ends (at most 2 h after queuing), so its verdict is recorded; a run not yet queued (Mail Hero
+  answered paused/unavailable, or the call failed) gets no further start attempt and ends at the next
+  tick as skipped at the start stage with code `canary_disabled` (no digest item for it). While off, the page shows
+  an info item "金丝雀已关闭" in the banner and a note in the canary section; it never raises the level,
+  it is not a digest item and it never reaches Todofy (the digest carries warning and critical items
+  only, contracts/ops-v1). No item is raised for the days without a run. The digest still reports the
+  latest finished run as before (a failure or skip stays listed until a later run finishes, which needs
+  the switch back on). To change it: set the variable in the GitHub `production` environment and run the
+  workflow on `main` with `app: dashboard`; a change takes effect with that deploy, not before.
+  Switching back to `true` starts the day's scheduled run at the next tick if the hour has passed and
+  none ran that UTC day.
 - **Digest.** Warning and critical items go to `TODOFY.reportOps` when the set changes or every 6 h;
   Todofy's daily attention reminder (at most one Todoist task per UTC day) carries them. The dashboard
   creates Todoist tasks in no other way. Mail Hero's own `ALERT_WEBHOOK_URL` stays unconfigured.
@@ -141,9 +156,35 @@ the expected state. Use synthetic data only; never point a local run at producti
   its cached snapshot. Any `shed` it set expires by itself (≤ 36 h), and Todofy's reminder stops
   carrying the last ops report once it is older than 36 h (contracts/ops-v1 `README.md`). The next deploy from `main` restores
   the trigger, so change `worker/wrangler.toml` too if the stop must last.
-- **Before rolling Todofy back** to a release without canary handling, stop the dashboard's canaries
-  first (remove the Cron Trigger as above and do not use 立即运行金丝雀), then follow contracts/ops-v1
-  `IMPLEMENTATION.md` §4.
+- **Before rolling Todofy back** to a release without canary handling (contracts/ops-v1
+  `IMPLEMENTATION.md` §4: such a release would turn a canary it still sees into a real Todoist task and
+  list it as mail):
+  1. Stop new canaries: set `DASHBOARD_CANARY_ENABLED=false` in the GitHub `production` environment and
+     run the workflow on `main` with `app: dashboard`. Check the page: the banner shows
+     "运维面板：金丝雀已关闭", 立即运行金丝雀 is disabled, "下次定时运行" says 已关闭. Do not rely on the
+     dashboard noticing Todofy's missing `canary_consumer` capability instead: statuses may be up to an
+     hour old, and an old release may not answer `status()` at all.
+  2. Drain what is in flight. The canary section's "正在运行" run, if any, keeps being polled until it
+     ends (at most 2 h after it was queued; one not yet queued ends at the next tick). Then, for every canary of the last 7 days
+     (Mail Hero retries a canary delivery for up to 7 days; the table lists the last 14 runs, so more
+     than 14 runs in 7 days means you cannot see them all), the contract's condition is that its delivery
+     is no longer `pending`/`paused` and its Todofy result is terminal. Settled: a run that ended `ok`; one
+     that failed at the consumer stage with Todofy's own code (for example `llm_quota`); one skipped at
+     the start stage with a reason other than `canary_disabled` (Mail Hero answered paused/unavailable
+     and wrote nothing, or no call was made). Not known to be settled, because the dashboard stopped
+     polling it: a start that failed on a call error (the event may exist), a start skipped as
+     `canary_disabled` (the page does not show whether an earlier attempt failed on a call error), any
+     delivery-stage failure or skip, and a consumer-stage `timeout`, `not_seen`, `unreachable` or hold
+     (`processing` with a waiting code).
+  3. If any run is unsettled or you cannot tell, do not wait on it: set Mail Hero's
+     `MAIL_HERO_FORCE_SEND_PAUSED=true` and Todofy's `TODOFY_PROCESSING_PAUSED=true` (GitHub variables,
+     each app's own deploy) before the rollback, and keep both until the canary rows are cancelled or
+     completed on a release with canary handling again.
+  4. Roll Todofy back. Once a release with canary handling (`canary_consumer` in its `status()`) is live
+     again, set `DASHBOARD_CANARY_ENABLED=true` (or delete it) and deploy the dashboard.
+
+  Removing the Cron Trigger (above) also stops canaries, but it stops the guard and the digest too, and
+  the next deploy restores it; the switch is the intended way.
 - **Remove the dashboard.** Delete the Worker `home` in the Cloudflare dashboard (check afterwards
   that its Durable Object namespace and the Custom Domain are gone too) and remove the `dashboard/` directory and its CI jobs in one commit. Mail Hero and
   Todofy need no change: their `Ops` entrypoints stay unused, a `shed` guard expires, and no route of
