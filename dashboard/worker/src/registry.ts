@@ -183,15 +183,15 @@ const WORKERS: readonly WorkerDef[] = [
 ];
 
 const RESOURCES: readonly ResourceDef[] = [
-  { id: 'mail-hero-db', kind: 'd1', name: 'mail-hero 主库', entry: 'mail-hero', match: null, todo: 'GitHub 变量 MAIL_HERO_D1_DATABASE_ID' },
-  { id: 'todofy-db', kind: 'd1', name: 'todofy 主库', entry: 'todofy', match: null, todo: 'GitHub 变量 TODOFY_D1_DATABASE_ID' },
-  { id: 'mail-coordinator', kind: 'do', name: 'MailCoordinator', entry: 'mail-hero', script: 'mail-hero', match: null, todo: 'DO 命名空间 ID（Cloudflare 控制台）' },
+  { id: 'mail-hero-db', kind: 'd1', name: 'mail-hero 主库', entry: 'mail-hero', match: '6c13e4c3-e239-42fb-a7a4-96810fa8d7dc' },
+  { id: 'todofy-db', kind: 'd1', name: 'todofy 主库', entry: 'todofy', match: '151c1306-3885-4679-9592-08887b30ae68' },
+  { id: 'mail-coordinator', kind: 'do', name: 'MailCoordinator', entry: 'mail-hero', script: 'mail-hero', match: '55c248f9d82c45f3a89d2de1d719d5db' },
   // Defined in todofy-core; the gateway `todofy` binds it by script_name.
-  { id: 'todofy-core-do', kind: 'do', name: 'TodofyCore', entry: 'todofy', script: 'todofy-core', match: null, todo: 'DO 命名空间 ID（Cloudflare 控制台）' },
-  { id: 'home-state', kind: 'do', name: 'HomeState', entry: 'home', script: 'home', match: null, todo: 'DO 命名空间 ID（Cloudflare 控制台）' },
-  // The default of GitHub variable MAIL_HERO_R2_BUCKET_NAME (mail-hero/docs/ci-cd.md).
+  { id: 'todofy-core-do', kind: 'do', name: 'TodofyCore', entry: 'todofy', script: 'todofy-core', match: 'a013ef9fa45048d4b4f7bfcc641b57ea' },
+  { id: 'home-state', kind: 'do', name: 'HomeState', entry: 'home', script: 'home', match: 'acddddf88d624194a68af430fd1a90ff' },
+  // IDs read from the account's D1, Durable Object namespace and R2 bucket lists (2026-09-30).
   { id: 'mail-hero-store', kind: 'r2', name: 'mail-hero 邮件存储', entry: 'mail-hero', match: 'mail-hero-store' },
-  { id: 'mail-hero-backup', kind: 'r2', name: 'mail-hero 备份', entry: 'mail-hero', match: null, todo: 'GitHub 变量 MAIL_HERO_BACKUP_BUCKET_NAME' },
+  { id: 'mail-hero-backup', kind: 'r2', name: 'mail-hero 备份', entry: 'mail-hero', match: 'mail-hero-backups' },
   { id: 'todofy-backups', kind: 'r2', name: 'todofy 备份', entry: 'todofy', match: 'todofy-backups' },
 ];
 

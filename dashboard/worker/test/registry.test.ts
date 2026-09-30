@@ -86,13 +86,17 @@ describe('the registry', () => {
     expect(flowsOfScript('ziyixi-notion-publish')).toEqual(['site-publish']);
   });
 
-  it('maps resources by their GraphQL identifier; TODO placeholders match nothing', () => {
+  it('maps every resource by its GraphQL identifier', () => {
     expect(resourceByMatch('r2', 'mail-hero-store')?.entry).toBe('mail-hero');
     expect(resourceByMatch('r2', 'todofy-backups')?.entry).toBe('todofy');
+    expect(resourceByMatch('r2', 'mail-hero-backups')?.id).toBe('mail-hero-backup');
+    expect(resourceByMatch('d1', '6c13e4c3-e239-42fb-a7a4-96810fa8d7dc')?.id).toBe('mail-hero-db');
+    expect(resourceByMatch('d1', '151c1306-3885-4679-9592-08887b30ae68')?.id).toBe('todofy-db');
+    expect(resourceByMatch('do', '55c248f9d82c45f3a89d2de1d719d5db')?.id).toBe('mail-coordinator');
+    expect(resourceByMatch('do', 'a013ef9fa45048d4b4f7bfcc641b57ea')?.id).toBe('todofy-core-do');
+    expect(resourceByMatch('do', 'acddddf88d624194a68af430fd1a90ff')?.id).toBe('home-state');
     expect(resourceByMatch('r2', 'someone-elses-bucket')).toBeUndefined();
-    const placeholders = REGISTRY.resources.filter((r) => r.match === null);
-    expect(placeholders.map((r) => r.id).sort()).toEqual(['home-state', 'mail-coordinator', 'mail-hero-backup', 'mail-hero-db', 'todofy-core-do', 'todofy-db']);
-    for (const r of placeholders) expect(r.todo).toBeTruthy();
+    expect(REGISTRY.resources.filter((r) => r.match === null)).toEqual([]);
   });
 
   it('keeps the tick within the Workers Free subrequest budget', () => {
@@ -228,7 +232,9 @@ describe('validateRegistry', () => {
     d1.match = 'not-a-uuid';
     const home = r.resources.find((x) => x.id === 'home-state') as Mutable<ResourceDef>;
     home.script = 'todofy';
+    // A placeholder without a note on where its identifier comes from is refused.
     const backup = r.resources.find((x) => x.id === 'mail-hero-backup') as Mutable<ResourceDef>;
+    backup.match = null;
     delete backup.todo;
     const found = problems(r);
     expect(found).toContain('resource mail-hero-db: D1 UUID');
