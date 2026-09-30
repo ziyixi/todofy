@@ -53,7 +53,7 @@ Without `NOTION_TOKEN`/`NOTION_DATA_SOURCE_ID` the buttons keep working and the 
 
 Workers Logs keep only one JSON line per tick, `{"relay":"detector","code":…,"counts":…}`; invocation
 logs are off (they would record request metadata). Codes: `DISPATCH_CHANGES`, `DISPATCH_RECONCILE`,
-`NO_CHANGE`, `QUIET_PERIOD`, `AUTO_CAP_REACHED`, `RUN_ACTIVE`, `AUTO_PUBLISH_OFF`, `NOT_CONFIGURED`,
+`NO_CHANGE`, `QUIET_PERIOD`, `AUTO_CAP_REACHED`, `FAILURES_TODAY`, `RUN_ACTIVE`, `AUTO_PUBLISH_OFF`, `NOT_CONFIGURED`,
 `GITHUB_UNAVAILABLE`, `NOTION_UNAVAILABLE`, `DISPATCH_FAILED`, `DETECTOR_ERROR`. Counts are the
 number of rows returned and of edited, due and pending rows; nothing else leaves Notion.
 

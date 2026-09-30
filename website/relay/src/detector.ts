@@ -31,6 +31,8 @@ const MINUTE = 60_000;
 const EDIT_PRECISION = MINUTE;
 /** The status write-back edits a row within seconds of the check time it writes. */
 const WRITE_BACK_WINDOW = 3 * MINUTE;
+/** After this many failed release runs in a UTC day the detector stops dispatching until tomorrow. */
+export const MAX_FAILED_RELEASES_PER_DAY = 3;
 
 export interface NotionRow {
   lastEditedTime: number;
@@ -224,6 +226,14 @@ export function decide(input: {
   }
 
   const today = utcMidnight(now);
+  // A release that keeps failing (e.g. a blocked gate that needs recovery) must not be retried all day:
+  // GitHub has already notified the owner of each failure.
+  const failedToday = runs.filter(
+    (run) => run.operation === "release" && run.conclusion === "failure" && run.createdAt >= today,
+  ).length;
+  if (failedToday >= MAX_FAILED_RELEASES_PER_DAY) {
+    return { action: "skip", code: "FAILURES_TODAY", counts };
+  }
   const reconcileDue =
     new Date(now).getUTCHours() >= settings.reconcileUtcHour &&
     !runs.some((run) => run.trigger === "reconcile" && run.createdAt >= today);

@@ -167,6 +167,17 @@ describe("change detector rules", () => {
     });
   });
 
+  it("stops for the day after three failed releases", () => {
+    const edited = row({ lastEditedTime: NOW - 60 * MINUTE, checkedAt: null });
+    const failed = [1, 2, 3].map((id) =>
+      run({ id, startedAgo: 120 + id, conclusion: "failure", trigger: "button" }),
+    );
+    expect(decideWith([edited], [...failed, reconciled])).toMatchObject({ code: "FAILURES_TODAY" });
+    expect(decideWith([edited], [...failed.slice(1), reconciled])).toMatchObject({
+      code: "DISPATCH_CHANGES",
+    });
+  });
+
   it("dispatches one reconcile release a day, after the configured hour", () => {
     expect(decideWith([], [run()])).toMatchObject({
       trigger: "reconcile",

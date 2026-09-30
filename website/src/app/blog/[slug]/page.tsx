@@ -8,7 +8,11 @@ import { ArticleToc } from "@/components/ArticleToc";
 import { formatPostDate } from "@/components/BlogList";
 import { JsonLd } from "@/components/JsonLd";
 import { PageShell } from "@/components/PageShell";
-import { findPostBySlug, getPostTranslations } from "@/lib/content";
+import {
+  EMPTY_COLLECTION_PLACEHOLDER_SLUG,
+  findPostBySlug,
+  getPostTranslations,
+} from "@/lib/content";
 import { articleLanguageAlternates, createArticleOpenGraph } from "@/lib/metadata";
 import styles from "@/styles/site.module.css";
 
@@ -20,6 +24,7 @@ export const dynamicParams = false;
 
 export async function generateStaticParams() {
   const { snapshot } = await getContentBundle();
+  if (snapshot.posts.length === 0) return [{ slug: EMPTY_COLLECTION_PLACEHOLDER_SLUG }];
   return snapshot.posts.map((post) => ({ slug: post.slug }));
 }
 

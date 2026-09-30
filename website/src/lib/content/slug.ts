@@ -2,6 +2,13 @@ import { ContentError } from "./errors";
 
 export const SLUG_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 
+/**
+ * `output: "export"` needs at least one /blog/[slug] route. With no posts the article page is built
+ * once for this value (which no slug can take), and scripts/export/finalize.ts deletes its files, so
+ * every /blog/<anything> stays a real 404.
+ */
+export const EMPTY_COLLECTION_PLACEHOLDER_SLUG = "_none";
+
 export const RESERVED_SLUGS = new Set([
   "about",
   "api",

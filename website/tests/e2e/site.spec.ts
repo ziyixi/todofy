@@ -139,7 +139,9 @@ test.describe("public site", () => {
     // (scripts/images/prepare.ts), while the lightbox below opens the original file.
     await expect
       .poll(() =>
-        inlineImage.evaluate((image: HTMLImageElement) => new URL(image.currentSrc).pathname),
+        inlineImage.evaluate((image: HTMLImageElement) =>
+          image.currentSrc ? new URL(image.currentSrc).pathname : "",
+        ),
       )
       .toMatch(/^\/_img\/[a-f0-9]{20}-[0-9]+\.webp$/);
     const inlineImageBox = await inlineImage.boundingBox();

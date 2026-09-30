@@ -1,8 +1,9 @@
-import { readdir, readFile, stat, writeFile } from "node:fs/promises";
+import { readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 
 import { readContentBundle } from "../../src/lib/content/reader";
+import { EMPTY_COLLECTION_PLACEHOLDER_SLUG } from "../../src/lib/content/slug";
 import { assertAssetLimits, renderHeadersFile, renderRedirectsFile } from "./site-files";
 
 /** Files every export must contain: the release verifier and the Notion status check read them. */
@@ -45,6 +46,15 @@ export async function finalizeExport(
     });
   }
   const { snapshot, manifest } = await readContentBundle(path.join(root, ".generated", "content"));
+  if (snapshot.posts.length === 0) {
+    // The article route's build-only placeholder (see EMPTY_COLLECTION_PLACEHOLDER_SLUG) must 404.
+    const placeholder = path.join(outDirectory, "blog", EMPTY_COLLECTION_PLACEHOLDER_SLUG);
+    await Promise.all(
+      [placeholder, `${placeholder}.html`, `${placeholder}.txt`].map((target) =>
+        rm(target, { recursive: true, force: true }),
+      ),
+    );
+  }
   await writeFile(path.join(outDirectory, "_headers"), renderHeadersFile());
   await writeFile(path.join(outDirectory, "_redirects"), renderRedirectsFile(snapshot.redirects));
 

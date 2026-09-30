@@ -261,6 +261,28 @@ describe("release gate", () => {
     ).resolves.toMatchObject({ state: { baseline: { deploymentId: "empty" } } });
   });
 
+  it("recovery also reconciles a successful latest record after a manual rollback", async () => {
+    const latest = payload({ identity: NEW, workerVersionId: V2, previousWorkerVersionId: V1 });
+    const { github, setState } = fakeGitHub({
+      rows: [row(11, latest, 2), row(10, payload(), 1)],
+      states: { 11: "success", 10: "success" },
+    });
+    const result = await gate(deps(github, fakeWorker(V1)), {
+      operation: "recovery",
+      siteUrl: SITE,
+    });
+    expect(result).toMatchObject({
+      state: { blocking: { state: "success" }, baseline: { deploymentId: "10" } },
+    });
+    if (result.bootstrapRequired) throw new Error("unexpected");
+    const next = await recover(deps(github, fakeWorker(V2)), result.state, {
+      verifyRecorded: async () => undefined,
+      logUrl: "u",
+    });
+    expect(setState).not.toHaveBeenCalled();
+    expect(next.baseline.workerVersionId).toBe(V2);
+  });
+
   it("recovery carries the blocked record and the earlier successful baseline", async () => {
     const blocked = payload({ identity: NEW, workerVersionId: V2, previousWorkerVersionId: V1 });
     const { github } = fakeGitHub({

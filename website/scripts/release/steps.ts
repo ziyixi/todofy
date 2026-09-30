@@ -194,9 +194,8 @@ export async function gate(
     };
   }
 
-  if (latestState === "success") {
-    fail("recovery requires a failed, errored or unfinished latest record; use release.");
-  }
+  // A successful latest record is accepted too: production may have been rolled back by hand to its
+  // predecessor (docs/release.md), which only recovery can reconcile.
   const blocking = parsePayload(latest.payload);
   const earlier = await latestSuccessful(deps.github, rows.slice(1));
   const baseline = earlier
@@ -264,12 +263,14 @@ export async function recover(
       fail("The blocked version does not descend from the trusted baseline.");
     }
     await options.verifyRecorded(blocking.payload);
-    await deps.github.setState(blocking.deploymentId, "success", {
-      description: "Recovered after the live version was verified again",
-      environmentUrl: blocking.payload.liveOrigin,
-      logUrl: options.logUrl,
-    });
-    deps.log(`recovery: production serves the blocked version ${active}; recorded as success`);
+    if (blocking.state !== "success") {
+      await deps.github.setState(blocking.deploymentId, "success", {
+        description: "Recovered after the live version was verified again",
+        environmentUrl: blocking.payload.liveOrigin,
+        logUrl: options.logUrl,
+      });
+    }
+    deps.log(`recovery: production serves the latest recorded version ${active}; verified`);
     return GateStateSchema.parse({
       ...state,
       blocking: { ...blocking, state: "success" },
