@@ -323,6 +323,8 @@ export interface SyncStatusOptions {
   confirmedAt?: Date;
   dryRun?: boolean;
   fetchImpl?: typeof fetch;
+  /** The clock for each row's written 检查时间 (tests). */
+  now?: () => Date;
 }
 
 export async function syncNotionStatus(options: SyncStatusOptions): Promise<{
@@ -331,7 +333,9 @@ export async function syncNotionStatus(options: SyncStatusOptions): Promise<{
   failed: number;
   statuses: Partial<Record<WebsiteStatus, number>>;
 }> {
+  // The instant the check reads Notion and production: the scheduled-post cutoff and the status.
   const checkedAt = options.checkedAt ?? new Date();
+  const now = options.now ?? (() => new Date());
   const production = await readProductionState(options.fetchImpl);
   const schema = await options.client.dataSources.retrieve({
     data_source_id: options.dataSourceId,
@@ -388,8 +392,15 @@ export async function syncNotionStatus(options: SyncStatusOptions): Promise<{
     result.statuses[plan.status] = (result.statuses[plan.status] ?? 0) + 1;
     if (plan.status === "检查失败") result.failed += 1;
     if (options.dryRun) continue;
+    // 检查时间 is written as the instant of this row's own write, not the start of the check: the
+    // relay's change detector recognizes the write-back's edit by it (an edit within minutes after the
+    // 检查时间 it records), and the full content read plus earlier rows' writes can take far longer.
+    const writtenAt = new Date(Math.max(now().getTime(), checkedAt.getTime())).toISOString();
     try {
-      await options.client.pages.update({ page_id: plan.pageId, properties: plan.properties });
+      await options.client.pages.update({
+        page_id: plan.pageId,
+        properties: { ...plan.properties, 检查时间: { date: { start: writtenAt } } },
+      });
       result.written += 1;
     } catch {
       // Never replace a previously confirmed live timestamp/hash with an error

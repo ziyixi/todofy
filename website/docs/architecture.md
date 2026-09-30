@@ -100,30 +100,38 @@ the route contract. See [`release.md`](release.md).
 ## Automatic releases
 
 The relay's `scheduled()` handler runs every 15 minutes (`7,22,37,52 * * * *`; the account's third of five
-Workers Free cron triggers, after `home` and `todofy`). Each tick makes at most three subrequests and keeps
-no state of its own:
+Workers Free cron triggers, after `home` and `todofy`). Each tick normally makes three subrequests (at most
+five) and keeps no state of its own:
 
 1. **GitHub**: list the newest 50 runs of `website-release.yml` on `main`. If one is queued or running,
    stop (`RUN_ACTIVE`). The newest release run (any trigger, any outcome) defines the window: `since` = its
    start, `finishedAt` = its last update. Its trigger is read from the run name
    `Website <operation> (<trigger>)`.
-2. **Notion**: one data-source query (page size 25) for rows that were edited since `since` − 1 minute
-   (Notion reports edit times to the minute), or are `待定时发布` with `PublishedAt` ≤ **now** (an
-   instant, not "today": a date-only date is due at UTC midnight, exactly as the build reads it), or are
-   `有修改待发布` / `待下线`. Only the rule fields are read.
+2. **Notion**: a data-source query (page size 100, newest edit first) for rows that were edited since
+   `since` − 1 minute (Notion reports edit times to the minute), or are `待定时发布` with `PublishedAt` ≤
+   **now** (an instant, not "today": a date-only date is due at UTC midnight, exactly as the build reads
+   it), or are `有修改待发布` / `待下线`. Only the rule fields are read. Every release's write-back edits
+   every row, so right after one every row matches: the detector reads a second result page if there is
+   one, and if still more rows match, one more query for only the due and pending rows (the newest edits,
+   the only ones that can be author edits, are already on the first pages).
 3. **Rules**:
    - an _author edit_ is a row edited since `since` whose last edit is not the status write-back (the
-     write-back edits a row within seconds of the `检查时间` it records, so an edit between that minute and
+     write-back records each row's `检查时间` as the instant of that row's own write, so its edit lands
+     within seconds of it, however long the check's content read took; an edit between that minute and
      three minutes later is the bot's; `IGNORED_EDITOR_IDS` can list more editors) and that is not a draft
      that was never public;
    - a _due post_ is `待定时发布` whose `PublishedAt` passed after `since` (a release that started after it
      became due already published it);
    - a _pending state_ is `有修改待发布`/`待下线` written by a check after `finishedAt`, i.e. a 刷新状态 run
-     that found changes a bot edit had masked. A release's own write-back happens before it finishes, so a
-     release that cannot converge never re-triggers itself;
+     that found changes a bot edit had masked;
+   - a _follow-up_ is such a state written by the newest release's own write-back (between `since` and
+     `finishedAt`): the author changed the row while that release ran, after its Notion snapshot, and the
+     write-back's edit masked the author's edit time. It dispatches one release with `trigger=pending`;
+     states written by a `pending` release never count, so a release that cannot converge re-triggers
+     itself at most once;
    - **quiet period**: nothing is dispatched while the newest author edit (or pending check) is less than
      25 minutes old (`QUIET_MINUTES`);
-   - **circuit breaker**: at most 6 change-triggered (`trigger=cron`) releases per UTC day
+   - **circuit breaker**: at most 6 automatic (`trigger=cron` or `pending`) releases per UTC day
      (`MAX_AUTO_RELEASES_PER_DAY`), then `AUTO_CAP_REACHED`;
    - **failure stop**: after 3 failed release runs in a UTC day (for example a blocked gate that needs
      `recovery`), nothing more is dispatched that day (`FAILURES_TODAY`); each failure already sent
@@ -133,7 +141,7 @@ no state of its own:
      release's earlier edits, edits to synced blocks elsewhere, and child-block edits that do not move the
      page's edit time.
 4. **Dispatch**: `operation=release`, `confirmation=release:www.ziyixi.science`, `force_build=false`,
-   `allow_empty=false`, `trigger=cron|reconcile`. The release skips the deploy when the identity did not
+   `allow_empty=false`, `trigger=cron|pending|reconcile`. The release skips the deploy when the identity did not
    change, so a reconcile on an unchanged day costs one short Actions run and refreshes the Notion feedback.
 
 `AUTO_PUBLISH = "false"` in `relay/wrangler.toml` turns the detector off (buttons keep working). Known
@@ -143,7 +151,7 @@ failed run's GitHub notification is the alert); a dispatch PAT that expires make
 
 ## Costs (Workers Free)
 
-Page views: static assets, free and unlimited. Relay: 96 scheduled invocations and up to ~290 subrequests a
-day plus the button clicks, each far under 10 ms CPU. GitHub Actions: public repository, standard runners.
+Page views: static assets, free and unlimited. Relay: 96 scheduled invocations and normally ~290 subrequests a
+day (at most 5 per tick) plus the button clicks, each far under 10 ms CPU for a blog of this size. GitHub Actions: public repository, standard runners.
 The live site has no analytics beacon today (checked 2026-09-30: no `cloudflareinsights` in the HTML of any
 page); adding Cloudflare Web Analytics would be a separate owner decision, not part of the migration.

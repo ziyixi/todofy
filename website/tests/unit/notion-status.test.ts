@@ -1,5 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
+import { isWriteBackEdit, type NotionRow } from "../../relay/src/detector";
+
 import {
   planStatusUpdates,
   readProductionState,
@@ -420,6 +422,46 @@ describe("status synchronization boundaries", () => {
     expect(result.statuses).toEqual({ 已同步: 1 });
     expect(notion.pages.update.mock.calls[0]?.[0].properties.线上版本时间).toEqual({
       date: { start: "2026-09-20T10:00:00.000Z" },
+    });
+  });
+
+  it("records each row's own write instant as 检查时间, so the detector never takes a slow write-back for an author edit", async () => {
+    const notion = client([row(), row({ id: otherPageId })]);
+    // The full content read took 10 minutes; the second row is written a minute after the first.
+    const writes = [new Date("2026-09-25T12:10:00Z"), new Date("2026-09-25T12:11:30Z")];
+    let clock = 0;
+    const result = await syncNotionStatus({
+      ...options(notion),
+      fetchImpl: publicFetch(production([post(), post(otherPageId)])),
+      now: () => writes[clock++]!,
+    });
+    expect(result).toMatchObject({ checked: 2, written: 2, failed: 0 });
+    const written = notion.pages.update.mock.calls.map((call) => call[0].properties.检查时间);
+    expect(written).toEqual([
+      { date: { start: "2026-09-25T12:10:00.000Z" } },
+      { date: { start: "2026-09-25T12:11:30.000Z" } },
+    ]);
+
+    // Notion reports the write's edit time to the minute; the detector must see the bot's edit.
+    const detectorRow = (checked: Date, edited: string): NotionRow => ({
+      id: pageId,
+      lastEditedTime: Date.parse(edited),
+      lastEditedBy: null,
+      authorStatus: "Published",
+      siteStatus: "已同步",
+      checkedAt: checked.getTime(),
+      publishedAt: null,
+    });
+    expect(isWriteBackEdit(detectorRow(writes[1]!, "2026-09-25T12:11:00Z"), new Set())).toBe(true);
+    // With the check's start instant (the old behaviour) the same edit looked like an author's.
+    expect(isWriteBackEdit(detectorRow(checkedAt, "2026-09-25T12:11:00Z"), new Set())).toBe(false);
+  });
+
+  it("never writes a 检查时间 before the check itself", async () => {
+    const notion = client();
+    await syncNotionStatus({ ...options(notion), now: () => new Date("2026-09-25T11:00:00Z") });
+    expect(notion.pages.update.mock.calls[0]?.[0].properties.检查时间).toEqual({
+      date: { start: checkedAt.toISOString() },
     });
   });
 });

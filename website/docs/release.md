@@ -5,13 +5,13 @@ every production change of the site. Its two jobs share the concurrency group `w
 (`queue: max`, never cancelled) and the GitHub `production` environment, so releases, status refreshes and
 Notion writes never overlap, whoever started them.
 
-| Started by               | How                                                                                | Inputs                                   |
-| ------------------------ | ---------------------------------------------------------------------------------- | ---------------------------------------- |
-| A website push on `main` | `ci.yml` → `Website deploy` (after `Website checks` and the CI gate) dispatches it | `release`, trigger `push`                |
-| 发布网站 button          | relay `/publish`                                                                   | `release`, trigger `button`              |
-| Change detector          | relay `scheduled()` ([`architecture.md`](architecture.md#automatic-releases))      | `release`, trigger `cron` or `reconcile` |
-| 刷新状态 button          | relay `/refresh-status`                                                            | `status`, trigger `button`               |
-| You                      | Actions → Website release → Run workflow                                           | any operation, trigger `manual`          |
+| Started by               | How                                                                                | Inputs                                              |
+| ------------------------ | ---------------------------------------------------------------------------------- | --------------------------------------------------- |
+| A website push on `main` | `ci.yml` → `Website deploy` (after `Website checks` and the CI gate) dispatches it | `release`, trigger `push`                           |
+| 发布网站 button          | relay `/publish`                                                                   | `release`, trigger `button`                         |
+| Change detector          | relay `scheduled()` ([`architecture.md`](architecture.md#automatic-releases))      | `release`, trigger `cron`, `pending` or `reconcile` |
+| 刷新状态 button          | relay `/refresh-status`                                                            | `status`, trigger `button`                          |
+| You                      | Actions → Website release → Run workflow                                           | any operation, trigger `manual`                     |
 
 The confirmation input must be `<operation>:www.ziyixi.science` (plus `:allow-empty` when `allow_empty` is
 set). The relay and `Website deploy` send fixed inputs; no request can choose a ref, recovery or
@@ -65,7 +65,7 @@ Each step is one `pnpm release <command>` ([`scripts/release/cli.ts`](../scripts
     verified locally.
 12. `mark-success`, then the **Notion feedback**: `sync-status.ts` compares every row with the live
     `publication-state.json` (on the hostname above, `WEBSITE_LIVE_ORIGIN`) and writes `网站状态`,
-    `线上版本时间`, `检查时间`, `网站链接`, `已上线指纹`; after a deploy `update-site-summary.ts` updates the
+    `线上版本时间`, `检查时间` (the instant of that row's write), `网站链接`, `已上线指纹`; after a deploy `update-site-summary.ts` updates the
     database description. A feedback failure is a warning, never a rollback. Without a hostname it is
     skipped.
 13. On a failed deploy or live check: `rollback` deploys the recorded previous version again (only if

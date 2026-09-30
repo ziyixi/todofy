@@ -6,7 +6,7 @@ export interface DispatchInputs {
   confirmation: string;
   force_build: false;
   allow_empty: false;
-  trigger: "button" | "cron" | "reconcile";
+  trigger: "button" | "cron" | "pending" | "reconcile";
 }
 
 export const ACTIVE_STATUSES = new Set([
@@ -30,7 +30,7 @@ export interface RunSummary {
 }
 
 const RUN_NAME =
-  /^Website (release|status|bootstrap|recovery) \((manual|button|cron|reconcile|push)\)$/;
+  /^Website (release|status|bootstrap|recovery) \((manual|button|cron|reconcile|pending|push)\)$/;
 
 export function workflowApi(env: RelayEnv): string {
   return `https://api.github.com/repos/${env.GITHUB_REPOSITORY}/actions/workflows/${env.RELEASE_WORKFLOW}`;

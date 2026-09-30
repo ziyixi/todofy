@@ -9,10 +9,10 @@ import {
 } from "./github";
 
 /**
- * The scheduled change detector (docs/architecture.md, "Automatic releases"). Every tick costs at
- * most three subrequests: one GitHub run listing, one Notion query, one dispatch. All state lives
- * in GitHub (the release runs) and Notion (the rows and their feedback properties); the Worker
- * stores nothing.
+ * The scheduled change detector (docs/architecture.md, "Automatic releases"). A tick normally costs
+ * three subrequests (one GitHub run listing, one Notion query, one dispatch) and at most five (two
+ * Notion result pages plus one due/pending query when more rows match). All state lives in GitHub
+ * (the release runs) and Notion (the rows and their feedback properties); the Worker stores nothing.
  */
 
 /** Notion property names and website statuses, as content/site.config.ts and scripts/notion/status.ts. */
@@ -29,12 +29,20 @@ export const NOT_ONLINE = "未上线";
 const MINUTE = 60_000;
 /** Notion reports last_edited_time to the minute; widen every "since" by one minute. */
 const EDIT_PRECISION = MINUTE;
-/** The status write-back edits a row within seconds of the check time it writes. */
+/**
+ * The status write-back writes each row's 检查时间 as the instant of that row's own write
+ * (scripts/notion/status.ts), so its edit lands within seconds of it.
+ */
 const WRITE_BACK_WINDOW = 3 * MINUTE;
+/** Notion's largest page size; the query's result pages read per tick before the fallback query. */
+export const QUERY_PAGE_SIZE = 100;
+export const MAX_QUERY_PAGES = 2;
 /** After this many failed release runs in a UTC day the detector stops dispatching until tomorrow. */
 export const MAX_FAILED_RELEASES_PER_DAY = 3;
 
 export interface NotionRow {
+  /** The page ID ("" if absent): merges the fallback query's rows. */
+  id: string;
   lastEditedTime: number;
   lastEditedBy: string | null;
   authorStatus: string | null;
@@ -52,13 +60,20 @@ export interface DetectorSettings {
 
 export type Decision =
   | { action: "skip"; code: string; counts?: Counts }
-  | { action: "dispatch"; trigger: "cron" | "reconcile"; code: string; counts: Counts };
+  | {
+      action: "dispatch";
+      trigger: "cron" | "pending" | "reconcile";
+      code: string;
+      counts: Counts;
+    };
 
 export interface Counts {
   rows: number;
   edited: number;
   due: number;
   pending: number;
+  /** Pending states the newest release's own write-back found (see decide). */
+  followUp: number;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -89,6 +104,11 @@ function dateStart(value: unknown): number | null {
 
 /** Only the fields the rules read; titles, bodies and other properties are never touched. */
 export function parseRows(body: unknown): NotionRow[] | null {
+  return parsePage(body)?.rows ?? null;
+}
+
+/** One page of query results and where the next one starts. */
+export function parsePage(body: unknown): { rows: NotionRow[]; nextCursor: string | null } | null {
   if (!isRecord(body) || !Array.isArray(body.results)) return null;
   const rows: NotionRow[] = [];
   for (const page of body.results) {
@@ -96,6 +116,7 @@ export function parseRows(body: unknown): NotionRow[] | null {
     const lastEditedTime = parseTime(page.last_edited_time);
     if (lastEditedTime === null) continue;
     rows.push({
+      id: typeof page.id === "string" ? page.id : "",
       lastEditedTime,
       lastEditedBy:
         isRecord(page.last_edited_by) && typeof page.last_edited_by.id === "string"
@@ -107,7 +128,9 @@ export function parseRows(body: unknown): NotionRow[] | null {
       publishedAt: dateStart(prop(page, NOTION.publishedAt)?.date),
     });
   }
-  return rows;
+  const nextCursor =
+    body.has_more === true && typeof body.next_cursor === "string" ? body.next_cursor : null;
+  return { rows, nextCursor };
 }
 
 function utcMidnight(now: number): number {
@@ -120,6 +143,8 @@ export interface ReleaseWindow {
   since: number;
   /** When it finished (a check after that is newer than the release's own write-back). */
   finishedAt: number;
+  /** Its trigger; null without any release run in the listing. */
+  trigger: string | null;
 }
 
 /**
@@ -131,21 +156,40 @@ export function releaseWindow(runs: RunSummary[], now: number): ReleaseWindow {
   const last = [...runs]
     .sort((left, right) => right.createdAt - left.createdAt)
     .find((run) => run.operation !== null && run.operation !== "status");
-  if (!last) return { since: now - 24 * 60 * MINUTE, finishedAt: now - 24 * 60 * MINUTE };
-  return { since: last.startedAt, finishedAt: last.updatedAt };
+  if (!last) {
+    const dayAgo = now - 24 * 60 * MINUTE;
+    return { since: dayAgo, finishedAt: dayAgo, trigger: null };
+  }
+  return { since: last.startedAt, finishedAt: last.updatedAt, trigger: last.trigger };
 }
 
-/** The Notion filter: anything edited since the last release, due scheduled posts, pending states. */
-export function notionQuery(window: ReleaseWindow, now: number): Record<string, unknown> {
+/**
+ * The Notion filter: anything edited since the last release, due scheduled posts, pending states;
+ * newest edit first. `dueOrPendingOnly` drops the edited-since branch: the fallback query when more
+ * rows matched than the pages read (every release's write-back edits every row, so right after a
+ * release all rows match; the newest edits come first, but a due or pending row can be anywhere).
+ */
+export function notionQuery(
+  window: ReleaseWindow,
+  now: number,
+  options: { startCursor?: string; dueOrPendingOnly?: boolean } = {},
+): Record<string, unknown> {
   return {
-    page_size: 25,
+    page_size: QUERY_PAGE_SIZE,
     sorts: [{ timestamp: "last_edited_time", direction: "descending" }],
+    ...(options.startCursor ? { start_cursor: options.startCursor } : {}),
     filter: {
       or: [
-        {
-          timestamp: "last_edited_time",
-          last_edited_time: { on_or_after: new Date(window.since - EDIT_PRECISION).toISOString() },
-        },
+        ...(options.dueOrPendingOnly
+          ? []
+          : [
+              {
+                timestamp: "last_edited_time",
+                last_edited_time: {
+                  on_or_after: new Date(window.since - EDIT_PRECISION).toISOString(),
+                },
+              },
+            ]),
         {
           and: [
             { property: NOTION.siteStatus, select: { equals: SCHEDULED } },
@@ -197,28 +241,38 @@ export function decide(input: {
       row.publishedAt <= now &&
       row.publishedAt > since,
   );
-  // A check after the last release finished still sees unpublished changes: an author edit that a
-  // later write-back masked (e.g. 刷新状态 after editing). The release's own write-back happens
-  // before it finishes, so a release that cannot converge never re-triggers itself.
-  const pending = rows.filter(
-    (row) =>
+  const pendingStates = rows.filter(
+    (row): row is NotionRow & { checkedAt: number } =>
       row.siteStatus !== null &&
       (PENDING as readonly string[]).includes(row.siteStatus) &&
-      row.checkedAt !== null &&
-      row.checkedAt > window.finishedAt,
+      row.checkedAt !== null,
   );
+  // A check after the last release finished still sees unpublished changes: an author edit that a
+  // later write-back masked (e.g. 刷新状态 after editing).
+  const pending = pendingStates.filter((row) => row.checkedAt > window.finishedAt);
+  // The newest release's own write-back found unpublished changes: an author edit made while it ran,
+  // after its Notion snapshot, whose edit time that write-back then masked. One follow-up release
+  // (trigger "pending") publishes it; a follow-up's own pending states never count, so a release
+  // that cannot converge re-triggers itself at most once.
+  const followUp =
+    window.trigger !== null && window.trigger !== "pending"
+      ? pendingStates.filter(
+          (row) => row.checkedAt >= window.since && row.checkedAt <= window.finishedAt,
+        )
+      : [];
   const counts: Counts = {
     rows: rows.length,
     edited: edited.length,
     due: due.length,
     pending: pending.length,
+    followUp: followUp.length,
   };
 
   // Quiet period: never publish while the author is still editing (a pending row's masked edit is
   // at the latest its check time).
   const newestEdit = Math.max(
     ...edited.map((row) => row.lastEditedTime),
-    ...pending.map((row) => row.checkedAt ?? Number.NEGATIVE_INFINITY),
+    ...[...pending, ...followUp].map((row) => row.checkedAt),
     Number.NEGATIVE_INFINITY,
   );
   if (now - newestEdit < settings.quietMinutes * MINUTE) {
@@ -239,10 +293,14 @@ export function decide(input: {
     !runs.some((run) => run.trigger === "reconcile" && run.createdAt >= today);
   const changed = edited.length + due.length + pending.length > 0;
 
-  if (changed) {
-    const autoToday = runs.filter((run) => run.trigger === "cron" && run.createdAt >= today).length;
+  if (changed || followUp.length > 0) {
+    const autoToday = runs.filter(
+      (run) => (run.trigger === "cron" || run.trigger === "pending") && run.createdAt >= today,
+    ).length;
     if (autoToday < settings.maxAutoReleasesPerDay) {
-      return { action: "dispatch", trigger: "cron", code: "DISPATCH_CHANGES", counts };
+      return changed
+        ? { action: "dispatch", trigger: "cron", code: "DISPATCH_CHANGES", counts }
+        : { action: "dispatch", trigger: "pending", code: "DISPATCH_FOLLOW_UP", counts };
     }
     if (!reconcileDue) return { action: "skip", code: "AUTO_CAP_REACHED", counts };
   }
@@ -288,23 +346,53 @@ export async function runDetector(env: RelayEnv, now: Date): Promise<DetectorRes
     if (runs.some((run) => ACTIVE_STATUSES.has(run.status))) return { code: "RUN_ACTIVE" };
 
     const window = releaseWindow(runs, now.getTime());
-    const queried = await fetch(
-      `https://api.notion.com/v1/data_sources/${encodeURIComponent(env.NOTION_DATA_SOURCE_ID)}/query`,
-      {
+    const queryUrl = `https://api.notion.com/v1/data_sources/${encodeURIComponent(env.NOTION_DATA_SOURCE_ID)}/query`;
+    const notionToken = env.NOTION_TOKEN;
+    /** One result page, or the failure to report (the HTTP status only when Notion refused). */
+    const query = async (
+      body: Record<string, unknown>,
+    ): Promise<
+      { page: NonNullable<ReturnType<typeof parsePage>> } | { page: null; failure: DetectorResult }
+    > => {
+      const queried = await fetch(queryUrl, {
         method: "POST",
         headers: {
-          Authorization: `Bearer ${env.NOTION_TOKEN}`,
+          Authorization: `Bearer ${notionToken}`,
           "Notion-Version": env.NOTION_API_VERSION,
           "Content-Type": "application/json",
         },
-        body: JSON.stringify(notionQuery(window, now.getTime())),
+        body: JSON.stringify(body),
         signal,
         redirect: "manual",
-      },
-    );
-    if (!queried.ok) return { code: "NOTION_UNAVAILABLE", notionStatus: queried.status };
-    const rows = parseRows(await queried.json());
-    if (!rows) return { code: "NOTION_UNAVAILABLE" };
+      });
+      if (!queried.ok) {
+        return {
+          page: null,
+          failure: { code: "NOTION_UNAVAILABLE", notionStatus: queried.status },
+        };
+      }
+      const page = parsePage(await queried.json());
+      return page ? { page } : { page: null, failure: { code: "NOTION_UNAVAILABLE" } };
+    };
+
+    const rows: NotionRow[] = [];
+    let cursor: string | undefined;
+    for (let page = 0; page < MAX_QUERY_PAGES; page += 1) {
+      const result = await query(
+        notionQuery(window, now.getTime(), cursor ? { startCursor: cursor } : {}),
+      );
+      if (!result.page) return result.failure;
+      rows.push(...result.page.rows);
+      cursor = result.page.nextCursor ?? undefined;
+      if (!cursor) break;
+    }
+    if (cursor) {
+      // More rows matched than were read. The newest edits are in; due and pending rows may not be.
+      const result = await query(notionQuery(window, now.getTime(), { dueOrPendingOnly: true }));
+      if (!result.page) return result.failure;
+      const seen = new Set(rows.map((row) => row.id).filter(Boolean));
+      rows.push(...result.page.rows.filter((row) => !row.id || !seen.has(row.id)));
+    }
 
     const decision = decide({ now: now.getTime(), runs, rows, settings: settingsFrom(env) });
     if (decision.action === "skip") return { code: decision.code, counts: decision.counts };

@@ -8,7 +8,8 @@ on `main` with fixed inputs:
   `operation=release`, `POST /refresh-status` («刷新状态») requests `operation=status`.
 - **`scheduled`: the change detector.** Every 15 minutes (`7,22,37,52 * * * *`) it decides whether
   Notion changed since the last release and, if so, dispatches `operation=release` with
-  `trigger=cron`; once a day it dispatches a reconcile release (`trigger=reconcile`). The rules are
+  `trigger=cron` (or once `trigger=pending` for a change the last release's own write-back found);
+  once a day it dispatches a reconcile release (`trigger=reconcile`). The rules are
   in [`../docs/architecture.md`](../docs/architecture.md#automatic-releases).
 
 It lives in `website/relay/` (it was `integrations/notion-publish/` in the old repository) because

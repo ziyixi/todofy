@@ -52,6 +52,7 @@ const reconciled = run({ id: 9, startedAgo: 300, trigger: "reconcile" });
 
 function row(overrides: Partial<NotionRow> = {}): NotionRow {
   return {
+    id: "",
     lastEditedTime: NOW - 300 * MINUTE,
     lastEditedBy: "author",
     authorStatus: "Published",
@@ -147,13 +148,52 @@ describe("change detector rules", () => {
       code: "DISPATCH_CHANGES",
       counts: { pending: 1 },
     });
-    // The same state written by the release itself (a release that cannot converge) is ignored.
+  });
+
+  it("follows up once on changes the newest release's own write-back found", () => {
+    // The author fixed something while the cron release ran, after its Notion snapshot; its
+    // write-back then edited the row (masking the author's edit time) and found the change pending.
     const ownWriteBack = row({
-      siteStatus: PENDING[1],
-      lastEditedTime: NOW - 118.5 * MINUTE,
+      siteStatus: PENDING[0],
+      lastEditedTime: NOW - 119 * MINUTE,
       checkedAt: NOW - 118.6 * MINUTE,
     });
-    expect(decideWith([ownWriteBack])).toMatchObject({ code: "NO_CHANGE" });
+    expect(decideWith([ownWriteBack])).toMatchObject({
+      action: "dispatch",
+      trigger: "pending",
+      code: "DISPATCH_FOLLOW_UP",
+      counts: { edited: 0, pending: 0, followUp: 1 },
+    });
+    // The follow-up's own write-back still finds it pending (a release that cannot converge, or
+    // another edit during the follow-up): no further release; the daily reconcile catches it.
+    const followUp = run({ id: 2, startedAgo: 120, trigger: "pending" });
+    expect(decideWith([ownWriteBack], [followUp, reconciled])).toMatchObject({
+      code: "NO_CHANGE",
+      counts: { followUp: 0 },
+    });
+    // Still inside the quiet period after the write-back: wait.
+    const recent = run({ id: 3, startedAgo: 12 });
+    const justWritten = { ...ownWriteBack, checkedAt: NOW - 10.5 * MINUTE };
+    expect(decideWith([justWritten], [recent, reconciled])).toMatchObject({
+      code: "QUIET_PERIOD",
+    });
+    // Follow-ups count against the daily cap of automatic releases.
+    const today = Array.from({ length: 6 }, (_, index) =>
+      run({ id: 100 + index, startedAgo: 120 + index, trigger: index % 2 ? "cron" : "pending" }),
+    );
+    expect(
+      decideWith([ownWriteBack], [run({ startedAgo: 120 }), ...today, reconciled]),
+    ).toMatchObject({ code: "AUTO_CAP_REACHED" });
+    // Without any release run in the listing there is no write-back to follow up on (the state
+    // counts as an ordinary pending state of the last 24 hours instead).
+    expect(
+      decide({
+        now: NOW,
+        runs: [],
+        rows: [ownWriteBack],
+        settings: { ...settings, reconcileUtcHour: 23 },
+      }),
+    ).toMatchObject({ trigger: "cron", counts: { pending: 1, followUp: 0 } });
   });
 
   it("stops after the daily cap of change-triggered releases", () => {
@@ -193,8 +233,10 @@ describe("change detector rules", () => {
   });
 
   it("queries edits since the last release start, due posts at this instant and pending states", () => {
-    const query = notionQuery({ since: NOW - 120 * MINUTE, finishedAt: NOW - 118 * MINUTE }, NOW);
-    expect(query).toMatchObject({ page_size: 25 });
+    const window = { since: NOW - 120 * MINUTE, finishedAt: NOW - 118 * MINUTE, trigger: "cron" };
+    const query = notionQuery(window, NOW);
+    expect(query).toMatchObject({ page_size: 100 });
+    expect(query).not.toHaveProperty("start_cursor");
     const branches = (query.filter as { or: unknown[] }).or;
     expect(branches[0]).toEqual({
       timestamp: "last_edited_time",
@@ -202,6 +244,11 @@ describe("change detector rules", () => {
     });
     expect(JSON.stringify(branches[1])).toContain(new Date(NOW).toISOString());
     expect(branches).toHaveLength(2 + PENDING.length);
+    expect(notionQuery(window, NOW, { startCursor: "c2" })).toMatchObject({ start_cursor: "c2" });
+    // The fallback: only due and pending rows, whatever was edited.
+    const fallback = notionQuery(window, NOW, { dueOrPendingOnly: true });
+    expect(JSON.stringify(fallback)).not.toContain('last_edited_time":{');
+    expect((fallback.filter as { or: unknown[] }).or).toHaveLength(1 + PENDING.length);
   });
 });
 
@@ -225,6 +272,7 @@ describe("change detector parsing", () => {
     });
     expect(rows).toEqual([
       {
+        id: "",
         lastEditedTime: Date.parse("2026-10-02T14:00:00.000Z"),
         lastEditedBy: "u1",
         authorStatus: "Published",
@@ -346,6 +394,53 @@ describe("scheduled handler", () => {
     });
   });
 
+  it("reads further pages, then only due and pending rows, when more rows match", async () => {
+    // Right after a release its write-back edited every row, so every row matches "edited since".
+    const botEdited = (id: number) => ({
+      id: `page-${id}`,
+      last_edited_time: new Date(NOW - 119 * MINUTE).toISOString(),
+      last_edited_by: { object: "user", id: "bot" },
+      properties: {
+        [NOTION.authorStatus]: { status: { name: "Published" } },
+        [NOTION.siteStatus]: { select: { name: "已同步" } },
+        [NOTION.checkedAt]: { date: { start: new Date(NOW - 119.2 * MINUTE).toISOString() } },
+      },
+    });
+    const page = (from: number, next: string | null) =>
+      Response.json({
+        results: Array.from({ length: 100 }, (_, index) => botEdited(from + index)),
+        has_more: next !== null,
+        next_cursor: next,
+      });
+    const due = {
+      ...botEdited(250),
+      properties: {
+        ...botEdited(250).properties,
+        [NOTION.siteStatus]: { select: { name: SCHEDULED } },
+        [NOTION.publishedAt]: { date: { start: new Date(NOW - 60 * MINUTE).toISOString() } },
+      },
+    };
+    const upstream = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(listing([finished, reconcileRun]))
+      .mockResolvedValueOnce(page(0, "c2"))
+      .mockResolvedValueOnce(page(100, "c3"))
+      .mockResolvedValueOnce(
+        Response.json({ results: [botEdited(5), due], has_more: false, next_cursor: null }),
+      )
+      .mockResolvedValueOnce(new Response(null, { status: 204 }));
+    vi.stubGlobal("fetch", upstream);
+    await expect(runDetector(env, new Date(NOW))).resolves.toMatchObject({
+      code: "DISPATCH_CHANGES",
+      counts: { rows: 201, edited: 0, due: 1 },
+    });
+    expect(upstream).toHaveBeenCalledTimes(5);
+    const bodies = upstream.mock.calls.slice(1, 4).map((call) => JSON.parse(String(call[1]?.body)));
+    expect(bodies[0]).not.toHaveProperty("start_cursor");
+    expect(bodies[1]).toMatchObject({ start_cursor: "c2" });
+    expect(bodies[2].filter.or).toHaveLength(1 + PENDING.length);
+  });
+
   it("does nothing while a release runs, when switched off, or without Notion credentials", async () => {
     const upstream = vi
       .fn<typeof fetch>()
@@ -398,7 +493,7 @@ describe("scheduled handler", () => {
     expect(JSON.parse(line)).toEqual({
       relay: "detector",
       code: "DISPATCH_CHANGES",
-      counts: { rows: 1, edited: 1, due: 0, pending: 0 },
+      counts: { rows: 1, edited: 1, due: 0, pending: 0, followUp: 0 },
     });
     for (const secret of [env.GITHUB_DISPATCH_TOKEN, env.NOTION_TOKEN, env.NOTION_DATA_SOURCE_ID]) {
       expect(line).not.toContain(secret);

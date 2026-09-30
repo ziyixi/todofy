@@ -36,11 +36,11 @@ on:
         type: boolean
         default: false
       trigger:
-        description: Who asked (the relay sets button, cron or reconcile)
+        description: Who asked (the relay sets button, cron, pending or reconcile; Website deploy sets push)
         required: true
         type: choice
         default: manual
-        options: [manual, button, cron, reconcile, push]
+        options: [manual, button, cron, reconcile, pending, push]
 
 # GITHUB_TOKEN: read the CI gate results (checks, actions) and write the release records
 # (deployments). Only the steps that need it get it (step env), never install, build or test steps.
