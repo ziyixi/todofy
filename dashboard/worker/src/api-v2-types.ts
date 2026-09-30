@@ -53,7 +53,8 @@ export const API_V2_VERSION = 'home-v2';
  * Response size budgets (bytes of the JSON body) of a normal day (test/views-v2.test.ts: the mockup
  * day, and the Cloudflare view with 20 Workers). A bad day may exceed them: the attention strip repeats
  * up to 20 items in every view and the canary strip can hold 14 failed runs; V2_BODY_MAX bounds that
- * case (20 alarms, 16 signals per app, 14 failed runs, 20 Workers; measured 8–25 KiB). HomeState logs
+ * case (20 alarms, 16 signals per app, 14 failed runs, and the Cloudflare view at its row cap of
+ * CF_VIEW_WORKERS_MAX Workers out of CF_SCRIPTS_MAX remembered; all tested). HomeState logs
  * `over_budget` when a body passes its budget.
  */
 export const V2_BODY_MAX = 32 * 1024;
@@ -93,6 +94,12 @@ export const WORKERS_QUERY_LIMIT = 50;
 /** Scripts not seen for this many UTC days leave the remembered `cf_scripts` set; at most this many kept. */
 export const CF_SCRIPTS_RETENTION_DAYS = 30;
 export const CF_SCRIPTS_MAX = 100;
+/**
+ * Rows the Cloudflare view lists at most (≈ 300 B each). Scripts active today come first, then the most
+ * recently seen; the rest is counted in `workers_omitted`, so the body stays under V2_BODY_MAX even
+ * with CF_SCRIPTS_MAX remembered scripts.
+ */
+export const CF_VIEW_WORKERS_MAX = 50;
 
 /** A public_http probe runs at most once per tick, and an owner refresh re-probes only after this. */
 export const PROBE_MIN_INTERVAL_SECONDS = 600;
@@ -484,6 +491,11 @@ export interface StageState {
   } | null;
   /** Stage whose entry is probed (public_http). */
   readonly probe: { readonly checked_at: Iso | null; readonly ok: boolean | null; readonly http_status: number | null; readonly latency_ms: number | null } | null;
+  /**
+   * When the stage's entry was last read: its ops-v1 status poll (successful or not), or this
+   * dashboard's last tick for a `self` entry; null for other sources (their facts are above).
+   */
+  readonly checked_at: Iso | null;
 }
 
 export interface FlowState extends FlowSummary {
@@ -568,7 +580,10 @@ export interface GuardViewV2 extends Omit<GuardView, 'apps'> {
 export interface CloudflareResponse extends ShellFields {
   readonly usage: UsageView;
   /** Remembered scripts (≤ CF_SCRIPTS_MAX): errors first, then requests. */
+  /** At most CF_VIEW_WORKERS_MAX rows, in table order (errors first, then requests). */
   readonly workers: readonly WorkerRow[];
+  /** Remembered scripts left out by CF_VIEW_WORKERS_MAX (none active today unless > 50 were). */
+  readonly workers_omitted: number;
   /** The workers dataset returned WORKERS_QUERY_LIMIT rows: the list is a lower bound. */
   readonly workers_truncated: boolean;
   readonly resources: readonly ResourceRow[];

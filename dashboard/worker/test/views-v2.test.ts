@@ -1,11 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import type { OpsReportItem, OpsSignal } from '../../../contracts/ops-v1/ops-v1.ts';
 import { CANARY_MANUAL_PER_DAY, type CanaryView, type DigestView, type GuardView } from '../src/api-types.ts';
-import { HOME_QUOTA_IDS, V2_BODY_BUDGET, V2_BODY_MAX, type ShellFields } from '../src/api-v2-types.ts';
+import { CF_SCRIPTS_MAX, CF_VIEW_WORKERS_MAX, HOME_QUOTA_IDS, V2_BODY_BUDGET, V2_BODY_MAX, type ShellFields } from '../src/api-v2-types.ts';
 import { runView } from '../src/canary.ts';
 import { attentionView, type EvalInput } from '../src/evaluate.ts';
 import { etagMatches } from '../src/v2-views.ts';
-import { cloudflareResponse, flowsResponse, fnv1a, homeResponse, nextTickAt, opsResponse, serializeView, shell } from '../src/views-v2.ts';
+import { capWorkers, cloudflareResponse, flowsResponse, fnv1a, homeResponse, nextTickAt, opsResponse, serializeView, shell } from '../src/views-v2.ts';
+import type { CfScriptsDoc, ScriptRecord } from '../src/discovery.ts';
 import { REALISTIC_USAGE, usageWithScripts } from './graphql-fixture.ts';
 import { DAY, MIN, NOW, fortnight, input, run, scripts, signal, status, usageDoc, usageView } from './v2-fixtures.ts';
 
@@ -178,5 +179,33 @@ describe('the views', () => {
       ops: bytes(opsResponse(shellHeavy, GUARD, canaryView(ev), digestView(HEAVY_ITEMS), ev.statuses)),
     };
     for (const view of ['home', 'flows', 'cloudflare', 'ops'] as const) expect({ view, bytes: sizes[view] }).toEqual({ view, bytes: Math.min(sizes[view], V2_BODY_MAX) });
+  });
+
+  it('bounds the Cloudflare view at CF_SCRIPTS_MAX remembered scripts on a heavy day, active ones first (C2)', () => {
+    // 100 remembered scripts with long names: 30 active today, 70 seen on earlier days.
+    const record = (i: number): ScriptRecord => {
+      const active = i < 30;
+      return {
+        script: `a-long-remembered-worker-name-${String(i).padStart(3, '0')}`,
+        first_seen_day: '2026-09-01',
+        last_seen_day: active ? '2026-09-29' : `2026-09-${String(1 + (i % 28)).padStart(2, '0')}`,
+        last_active_hour: active ? NOW - 60 * MIN : null,
+        day: '2026-09-29',
+        today: active
+          ? { requests: 1_000_000 + i, errors: 99_999, subrequests: 999_999, cpu_p50_us: 9_999, cpu_p99_us: 99_999, do_requests: 999_999, do_errors: 9_999 }
+          : { requests: 0, errors: 0, subrequests: 0, cpu_p50_us: null, cpu_p99_us: null, do_requests: null, do_errors: null },
+      };
+    };
+    const doc: CfScriptsDoc = { since: NOW - 30 * DAY, observed_at: NOW, day: '2026-09-29', truncated: true, scripts: Array.from({ length: CF_SCRIPTS_MAX }, (_, i) => record(i)) };
+    const view = cloudflareResponse(base({}, HEAVY_ITEMS), NOW, usageView(usageWithScripts(20)), usageDoc(usageWithScripts(20)), doc, GUARD);
+    expect(view.workers).toHaveLength(CF_VIEW_WORKERS_MAX);
+    expect(view.workers_omitted).toBe(CF_SCRIPTS_MAX - CF_VIEW_WORKERS_MAX);
+    // Every script active today is listed; the omitted ones are the least recently seen.
+    expect(view.workers.filter((row) => row.requests > 0)).toHaveLength(30);
+    const listedIdle = view.workers.filter((row) => row.requests === 0).map((row) => row.last_seen_day);
+    expect(Math.min(...listedIdle.map((day) => Date.parse(day)))).toBeGreaterThanOrEqual(Date.parse('2026-09-08'));
+    expect(bytes(view)).toBeLessThanOrEqual(V2_BODY_MAX);
+    // Under the cap nothing is left out.
+    expect(capWorkers(view.workers.slice(0, 10))).toEqual({ rows: view.workers.slice(0, 10), omitted: 0 });
   });
 });

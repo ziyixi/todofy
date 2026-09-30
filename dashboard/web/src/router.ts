@@ -7,7 +7,7 @@ import type { ViewId } from '../../worker/src/api-v2-types.ts'
 
 export type Route =
   | { readonly view: 'home' }
-  | { readonly view: 'flows'; readonly flow?: string }
+  | { readonly view: 'flows'; readonly flow?: string; readonly stage?: string }
   | { readonly view: 'cloudflare'; readonly script?: string }
   | { readonly view: 'ops' }
 
@@ -31,8 +31,11 @@ export function parseHash(hash: string): Route {
   const parts = legacy.replace(/^#\/?/, '').split('/').filter((part) => part !== '')
   const [view, ...rest] = parts
   if (view === 'flows') {
-    const flow = rest.length === 1 && FLOW_ID.test(rest[0] as string) ? rest[0] : undefined
-    return flow === undefined ? { view: 'flows' } : { view: 'flows', flow }
+    // #/flows/<flow>[/<stage>]: an attention item opens its flow with that stage selected.
+    const flow = (rest.length === 1 || rest.length === 2) && FLOW_ID.test(rest[0] as string) ? rest[0] : undefined
+    if (flow === undefined) return { view: 'flows' }
+    const stage = rest.length === 2 && FLOW_ID.test(rest[1] as string) ? rest[1] : undefined
+    return stage === undefined ? { view: 'flows', flow } : { view: 'flows', flow, stage }
   }
   if (view === 'cloudflare') {
     const script = rest.length === 2 && rest[0] === 'worker' && SCRIPT.test(rest[1] as string) ? rest[1] : undefined
@@ -48,7 +51,8 @@ export function routeHash(route: Route): string {
     case 'home':
       return '#/'
     case 'flows':
-      return route.flow === undefined ? '#/flows' : `#/flows/${route.flow}`
+      if (route.flow === undefined) return '#/flows'
+      return route.stage === undefined ? `#/flows/${route.flow}` : `#/flows/${route.flow}/${route.stage}`
     case 'cloudflare':
       return route.script === undefined ? '#/cloudflare' : `#/cloudflare/worker/${route.script}`
     case 'ops':

@@ -357,7 +357,7 @@ function canaryMarks(flow: FlowDef, input: EvalInput): Map<string, CanaryMark> {
 }
 
 function unmonitoredStage(stage: StageDef): StageState {
-  return { id: stage.id, level: 'unmonitored', reason: null, held: false, signals: [], counters: [], canary: null, analytics: null, probe: null };
+  return { id: stage.id, level: 'unmonitored', reason: null, held: false, signals: [], counters: [], canary: null, analytics: null, probe: null, checked_at: null };
 }
 
 function stageState(stage: StageDef, input: EvalInput, marks: Map<string, CanaryMark>, registry: Registry): StageState {
@@ -415,6 +415,8 @@ function stageState(stage: StageDef, input: EvalInput, marks: Map<string, Canary
   const mark = marks.get(stage.id);
   if (mark?.failed === true) verdict = worse(verdict, { level: 'critical', reason: 'canary_failed' });
 
+  const checkedAt = entry.status.type === 'ops_v1' ? (input.statuses[entry.id]?.checked_at ?? null) : entry.status.type === 'self' ? input.lastTickAt : null;
+
   return {
     id: stage.id,
     level: verdict.level,
@@ -425,6 +427,7 @@ function stageState(stage: StageDef, input: EvalInput, marks: Map<string, Canary
     canary: mark?.badge ?? null,
     analytics,
     probe,
+    checked_at: isoOrNull(checkedAt),
   };
 }
 

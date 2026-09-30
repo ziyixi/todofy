@@ -1,4 +1,4 @@
-import { screen, within } from '@testing-library/react'
+import { act, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { CANARY_DISABLED_NOTE } from '../components/Canary'
 import { canaryDisabled, canaryFailed, healthy, oneWarning, todofyUnreachable, type Scenario } from '../test/fixtures'
@@ -78,6 +78,34 @@ describe('业务流程', () => {
     expect(nodes[3]).toHaveAttribute('aria-pressed', 'true')
   })
 
+  it('selects the stage named in the route, not the worst one, also when the card is already open (F5)', async () => {
+    const base = oneWarning()
+    const [mail, ...rest] = base.flows.flows
+    const stages = mail!.stages.map((s) => (s.id === 'ingest' ? { ...s, level: 'warning' as const, reason: 'capacity_70' } : s))
+    const scenario = { ...base, flows: { ...base.flows, flows: [{ ...mail!, stages }, ...rest] } }
+    await showFlows(scenario, '#/flows/mail-to-task/ingest')
+    const nodes = () => within(within(card('邮件 → 任务')).getByRole('list', { name: '阶段' })).getAllByRole('button')
+    expect(nodes()[1]).toHaveAttribute('aria-pressed', 'true')
+    expect(nodes()[4]).toHaveAttribute('aria-pressed', 'false')
+    expect(within(card('邮件 → 任务')).getByRole('region', { name: /^收件与保存/ })).toBeInTheDocument()
+
+    // Another strip link into the same, already open card moves the selection.
+    act(() => {
+      window.location.hash = '#/flows/mail-to-task/consume'
+      window.dispatchEvent(new HashChangeEvent('hashchange'))
+    })
+    await waitFor(() => expect(nodes()[4]).toHaveAttribute('aria-pressed', 'true'))
+    expect(nodes()[1]).toHaveAttribute('aria-pressed', 'false')
+  })
+
+  it('shows a real fact on a stage without a counter, never its level word twice (F7)', async () => {
+    await showFlows(healthy(), '#/flows/daily-newsletter')
+    const nodes = within(within(card('每日 Newsletter')).getByRole('list', { name: '阶段' })).getAllByRole('button')
+    // TICK (16:30:04 UTC) in Asia/Shanghai: 00:30 today.
+    expect(nodes[0]).toHaveAttribute('aria-label', '阶段 1 Todofy 报告：正常，可达 · 今天 00:30 检查')
+    expect(within(nodes[0]!).queryAllByText('正常')).toHaveLength(1)
+  })
+
   it('opens the flow with a problem on its failing stage', async () => {
     await showFlows(oneWarning())
     const mail = card('邮件 → 任务')
@@ -120,8 +148,12 @@ describe('业务流程', () => {
   it('shows the canary inside the mail flow: 14 days, today and its scope verbatim', async () => {
     await showFlows(oneWarning())
     const canary = within(card('邮件 → 任务')).getByRole('region', { name: /^金丝雀 · 每天 16:00 UTC（本地 00:00） ?定时$/ })
-    const days = within(within(canary).getByRole('list', { name: '近 14 天金丝雀结果（按 UTC 日）' })).getAllByRole('img')
+    const list = within(canary).getByRole('list', { name: '近 14 天金丝雀结果（按 UTC 日）' })
+    // Real list semantics (F8): 14 listitems, each holding one named cell.
+    expect(within(list).getAllByRole('listitem')).toHaveLength(14)
+    const days = within(list).getAllByRole('img')
     expect(days).toHaveLength(14)
+    for (const day of days) expect(day.closest('li')?.getAttribute('role')).toBeNull()
     expect(days[0]).toHaveAccessibleName('9月16日：成功，用时 6 分钟')
     expect(days[6]).toHaveAccessibleName('9月22日：已跳过（Todofy 处理已暂停，未测试链路）')
     expect(days[13]).toHaveAccessibleName('9月29日（今天，UTC）：成功，用时 6 分钟')

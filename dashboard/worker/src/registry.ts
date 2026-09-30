@@ -6,8 +6,10 @@
  * `GET /api/v2/registry`, so no hostname enters the UI bundle.
  *
  * Only public DNS names of the owner's zone may appear here; no address, email, token or account
- * identifier (test/registry.test.ts enforces it). Identifiers kept in GitHub variables stay `match:
- * null` TODO placeholders: they match nothing, and the account's row stays 未登记 with its raw ID.
+ * identifier (test/registry.test.ts enforces it). The one exception is a D1 database UUID or DO
+ * namespace ID in a resource's `match` (format-checked, never served by /api/v2/registry), which may be
+ * filled in to name that row. Until then they stay `match: null` TODO placeholders: they match nothing,
+ * and the account's row stays 未登记 with its raw ID.
  *
  * Adding a Worker (docs/design-v2.md §3.4): it appears in the Cloudflare table on its first request
  * without any change here; add a `workers` row (and an entry, if it is new) to name it, optionally a
@@ -638,8 +640,11 @@ export function validateRegistry(registry: Registry, options: ValidationOptions 
   add(outboundPerTick(registry) <= MAX_OUTBOUND_PER_TICK, `budget: ${String(outboundPerTick(registry))} outbound calls per tick > ${String(MAX_OUTBOUND_PER_TICK)}`);
   add(outboundPerRefresh(registry) <= MAX_OUTBOUND_PER_REFRESH, `budget: outbound calls per refresh > ${String(MAX_OUTBOUND_PER_REFRESH)}`);
 
-  // Privacy: nothing that looks like an address, a credential or an account identifier.
-  const text = JSON.stringify(registry);
+  // Privacy: nothing that looks like an address, a credential or an account identifier. A D1 or DO
+  // resource's `match` is such an identifier by design (checked by its format above, never served:
+  // the public registry drops `match`), so only that field is left out of the scan.
+  const scanned = { ...registry, resources: registry.resources.map((resource) => (resource.kind === 'r2' ? resource : { ...resource, match: null })) };
+  const text = JSON.stringify(scanned);
   for (const [name, pattern] of FORBIDDEN) add(!pattern.test(text), `privacy: the registry contains a ${name}`);
 
   return problems;

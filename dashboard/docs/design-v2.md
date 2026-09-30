@@ -77,7 +77,9 @@ Three lists joined by id, compiled into the Worker; the UI gets the public view 
   URL, Access lock, status source, tile metric, app-only signals, order.
 - **Workers**: script → one entry. **Resources**: D1 / DO / R2 → entry; `match` is the GraphQL
   identifier. IDs kept in GitHub variables are `match: null` TODO placeholders (with a `todo` note):
-  they match nothing, so the account's rows stay 未登记 + first 8 characters of the raw ID. Known today:
+  they match nothing, so the account's rows stay 未登记 + the first 8 characters of an opaque D1/DO ID
+  (an R2 bucket shows its full name). Filling one in is allowed: a D1 UUID or DO namespace ID in
+  `match` is format-checked and exempt from the privacy scan (never served). Known today:
   R2 `mail-hero-store` (the default name) and `todofy-backups`. TODO: both D1 IDs, the three DO
   namespace IDs, the Mail Hero backup bucket name.
 - **Flows**: ordered stages; a stage names an entry (or null = outside the dashboard, with a note),
@@ -103,7 +105,7 @@ Flows: 邮件 → 任务 (来源转发 ○ → 收件与保存 → 解析 → We
 (no public probe of an Access host), each `(entry, code)` once per flow, that every signal code of the
 ops-v1 README table is placed (a stage, `app_only_signals`, or the platform codes `status_unavailable`
 and `guard_shed`), the outbound budget (§5), and a privacy scan (no email, IP, `localhost`, credential
-words or account-like IDs).
+words or account-like IDs, except a D1/DO `match`).
 
 **Adding a Worker:** nothing — it appears in the Cloudflare table on its first request as 未登记. To name
 it: add a `WORKERS` row (and an `ENTRIES` row if it is a new tile), optionally a flow stage and its
@@ -198,7 +200,10 @@ Measured (unit suite for bytes, workerd suite for rows; a full 14-run canary his
 | cloudflare | ≤ 16 KiB, also with 20 Workers | 17.1 KB | 22 (≤ 24) |
 | ops | ≤ 24 KiB | 24.1 KB | 22 (≤ 24) |
 
-`V2_BODY_BUDGET` holds for a normal day; `V2_BODY_MAX` (32 KiB) bounds the bad day; HomeState logs
+`V2_BODY_BUDGET` holds for a normal day; `V2_BODY_MAX` (32 KiB) bounds the bad day. The Cloudflare view
+lists at most `CF_VIEW_WORKERS_MAX` (50) of the up to `CF_SCRIPTS_MAX` (100) remembered scripts —
+every script active today first, then the most recently seen — and counts the rest in
+`workers_omitted` (shown as a note), so 100 remembered scripts stay under `V2_BODY_MAX` (tested); HomeState logs
 `over_budget` per response. The design's row estimates (1 + N, ≤ 20, 3–4, ≤ 10) did not count the shell
 every view shares (six documents for the attention strip and badges, plus what the evaluation reads for
 the strip's observed items, §4) or the 14 canary rows, so the measured counts replace them; they are ~0.01 % of the DO's 5 M free rows a day at a few hundred views.

@@ -67,12 +67,26 @@ function breakdownName(reg: Reg, name: string): string {
   return worker ? `${name}（${nameOf(reg, worker.entry)}）` : name
 }
 
-/** One quota in full: value, bar, linear estimate, top-5 breakdown and the limit's documentation. */
+/**
+ * One quota: value and bar on one compact row; the linear estimate and the top-5 breakdown behind one
+ * disclosure, except an estimate reaching the 80 % guard line, which stays visible (design §3.5:
+ * compact rows, the forecast on demand).
+ */
 export function QuotaItem({ row, reg }: { row: QuotaRow; reg: Reg }) {
   const labelId = useId()
   const label = QUOTA[row.id] ?? row.id
   const tone = quotaTone(row)
   const source = httpsUrl(row.source)
+  const forecast =
+    row.projected !== null && row.projected_percent !== null ? (
+      <span className={row.projected_percent >= 100 ? 'text-warn' : 'muted'}>
+        按当前速度线性估算，{row.period === 'daily' ? '本 UTC 日' : '本月'}结束约 {formatQuantity(row.projected, row.unit)}（
+        {formatPercent(row.projected_percent)}）{row.projected_percent >= 100 ? '，按此速度将超出上限' : ''}
+      </span>
+    ) : null
+  const urgent = row.projected_percent !== null && row.projected_percent >= GUARD_SHED_PERCENT
+  const hidden = forecast !== null && !urgent
+  const summary = hidden && row.breakdown.length > 0 ? '估算与主要来源' : hidden ? '估算' : '主要来源'
   return (
     <li className={`quota quota-${tone.tone}`}>
       <div className="quota-head">
@@ -90,26 +104,24 @@ export function QuotaItem({ row, reg }: { row: QuotaRow; reg: Reg }) {
           {row.used === null ? '无数据' : formatQuantity(row.used, row.unit)} / {formatQuantity(row.limit, row.unit)}
           {row.truncated ? <span className="muted">（下限：查询结果已达行数上限）</span> : null}
         </span>
-        {row.projected !== null && row.projected_percent !== null ? (
-          <span className={row.projected_percent >= 100 ? 'text-warn' : 'muted'}>
-            按当前速度线性估算，{row.period === 'daily' ? '本 UTC 日' : '本月'}结束约 {formatQuantity(row.projected, row.unit)}（
-            {formatPercent(row.projected_percent)}）{row.projected_percent >= 100 ? '，按此速度将超出上限' : ''}
-          </span>
-        ) : null}
+        {urgent ? forecast : null}
       </div>
-      {row.breakdown.length > 0 || source ? (
+      {row.breakdown.length > 0 || hidden || source ? (
         <div className="quota-extra small">
-          {row.breakdown.length > 0 ? (
+          {row.breakdown.length > 0 || hidden ? (
             <details className="more">
-              <summary>主要来源</summary>
-              <ul className="breakdown">
-                {row.breakdown.map((item) => (
-                  <li key={item.name}>
-                    <code className="wrap">{breakdownName(reg, item.name)}</code>
-                    <span>{formatQuantity(item.value, row.unit)}</span>
-                  </li>
-                ))}
-              </ul>
+              <summary>{summary}</summary>
+              {hidden ? <p className="quota-forecast">{forecast}</p> : null}
+              {row.breakdown.length > 0 ? (
+                <ul className="breakdown">
+                  {row.breakdown.map((item) => (
+                    <li key={item.name}>
+                      <code className="wrap">{breakdownName(reg, item.name)}</code>
+                      <span>{formatQuantity(item.value, row.unit)}</span>
+                    </li>
+                  ))}
+                </ul>
+              ) : null}
             </details>
           ) : null}
           {source ? (

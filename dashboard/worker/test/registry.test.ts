@@ -157,6 +157,28 @@ describe('validateRegistry', () => {
     }
   });
 
+  it('accepts real D1 and DO identifiers in `match`, and still refuses them anywhere else (C1)', () => {
+    const r = copy();
+    const d1 = r.resources.find((res) => res.id === 'mail-hero-db') as { match: string | null; todo?: string };
+    const ns = r.resources.find((res) => res.id === 'home-state') as { match: string | null; todo?: string };
+    d1.match = '8f14e45f-ceea-467a-9575-0123456789ab';
+    delete d1.todo;
+    ns.match = 'a'.repeat(32);
+    delete ns.todo;
+    expect(problems(r)).toEqual([]);
+    // The same strings in a description are still an account-like identifier.
+    for (const text of ['8f14e45f-ceea-467a-9575-0123456789ab', 'a'.repeat(32)]) {
+      const leaked = copy();
+      entry(leaked, 'newsletter').description = text;
+      expect(problems(leaked)).toContain('privacy: the registry contains a account-like identifier');
+    }
+    // A malformed match is refused by its format check.
+    const bad = copy();
+    const badD1 = bad.resources.find((res) => res.id === 'mail-hero-db') as { match: string | null; todo?: string };
+    badD1.match = 'not-a-uuid';
+    expect(problems(bad)).toContain('resource mail-hero-db: D1 UUID');
+  });
+
   it('checks status sources against kinds, workers and Access', () => {
     const r = copy();
     entry(r, 'flowday').status = { type: 'public_http', url: 'https://flowday.ziyixi.science/', expect: [200], enabled: true };

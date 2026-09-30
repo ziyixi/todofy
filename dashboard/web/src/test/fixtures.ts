@@ -225,6 +225,7 @@ function stage(id: string, patch: Partial<StageState> = {}): StageState {
     canary: null,
     analytics: null,
     probe: null,
+    checked_at: patch.level === 'unmonitored' ? null : TICK,
     ...patch,
   }
 }
@@ -524,6 +525,7 @@ function scenario(
       ...base,
       usage: use,
       workers,
+      workers_omitted: 0,
       workers_truncated: false,
       resources: [
         { kind: 'd1', id: '8f14e45f-ceea-467a-9575-0000000000aa', resource: null, entry: null, size_bytes: 38_900_000, rows_read: 5_210, rows_written: 318 },

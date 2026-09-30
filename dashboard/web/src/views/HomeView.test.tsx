@@ -1,7 +1,7 @@
 import { screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { apiError, freezeClock, installFetch, json, renderApp, serve } from '../test/harness'
-import { analyticsUnavailable, healthy, observedOnly, oneWarning, todofyUnreachable, type Scenario } from '../test/fixtures'
+import { analyticsUnavailable, healthy, observedOnly, oneWarning, shell, todofyUnreachable, type Scenario } from '../test/fixtures'
 
 async function showHome(scenario: Scenario) {
   freezeClock()
@@ -93,7 +93,7 @@ describe('首页', () => {
     const strip = screen.getByRole('region', { name: '1 项需关注' })
     const item = within(strip).getByRole('listitem')
     expect(item).toHaveTextContent('邮件 → 任务 › Todofy 摘要：Gemini 预算超过 80%（82%） · 开始于 昨天 11:20')
-    expect(within(item).getByRole('link')).toHaveAttribute('href', '#/flows/mail-to-task')
+    expect(within(item).getByRole('link')).toHaveAttribute('href', '#/flows/mail-to-task/consume')
 
     const todofy = within(launcher()).getByRole('button', { name: 'Todofy 状态：需关注，查看详情' })
     expect(todofy).toHaveTextContent('需关注· 24 小时 41 封')
@@ -132,7 +132,7 @@ describe('首页', () => {
   it('greys only the unreachable app and says why', async () => {
     await showHome(todofyUnreachable())
     const todofy = within(launcher()).getByRole('button', { name: 'Todofy 状态：无法连接，查看详情' })
-    expect(todofy).toHaveTextContent('无法连接· 连续 2 次失败')
+    expect(todofy).toHaveTextContent('无法连接· 连续 2 次')
     expect(within(launcher()).getByRole('button', { name: 'Mail Hero 状态：正常，查看详情' })).toBeInTheDocument()
     const strip = screen.getByRole('region', { name: '1 项故障' })
     expect(within(strip).getByRole('listitem')).toHaveTextContent('Todofy：应用无法连接')
@@ -147,6 +147,37 @@ describe('首页', () => {
     expect(items.map((item) => item.textContent)).toEqual(['Todofy：无法连接查看：Todofy：无法连接 →', '个人网站：HTTP 状态异常查看：个人网站：HTTP 状态异常 →'])
     expect(within(items[0]!).getByRole('link')).toHaveAttribute('href', '#/')
     expect(screen.getByRole('link', { name: '首页，2 项需关注' })).toBeInTheDocument()
+  })
+
+  it('says so when the scheduled checks stopped (C3)', async () => {
+    const base = healthy()
+    const lastTick = '2026-09-29T14:00:00.000Z'
+    const item = {
+      source: 'dashboard',
+      code: 'tick_stale',
+      severity: 'warning' as const,
+      since: lastTick,
+      metrics: { minutes_since: 180 },
+      target: { view: 'flows' as const, flow: 'ops-digest', stage: 'collect' },
+    }
+    const home = {
+      ...base.home,
+      attention: { level: 'warning' as const, items: [item], info: [], held: [] },
+      badges: { ...base.home.badges, flows: 1 },
+      refresh: { ...base.home.refresh, last_tick_at: lastTick },
+    }
+    await showHome({ ...base, home })
+    const strip = screen.getByRole('region', { name: '1 项需关注' })
+    expect(within(strip).getByText(/定时检查已/, { selector: '.strip-note' })).toHaveTextContent('定时检查已 3 小时 未运行：自动降载、金丝雀和运维摘要都已停止，页面数据可能过时。')
+    expect(within(strip).getByRole('listitem')).toHaveTextContent('运维摘要 › 巡检：定时检查已停止')
+  })
+
+  it('shows the first-tick state before any data exists, never 全部正常 (C3)', async () => {
+    const base = healthy()
+    const fresh = shell({ attention: { level: 'unknown', items: [], info: [], held: [] }, refresh: { ...base.home.refresh, last_tick_at: null } })
+    await showHome({ ...base, home: { ...base.home, ...fresh } })
+    expect(screen.getByRole('region', { name: /^尚未完成巡检 ?· 下次巡检 01:30$/ })).toBeInTheDocument()
+    expect(screen.queryByText('全部正常')).toBeNull()
   })
 
   it('says so when Cloudflare usage is unavailable instead of inventing bars', async () => {

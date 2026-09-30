@@ -52,7 +52,8 @@ export function flowsOfEntry(reg: Reg, entry: string): FlowDef[] {
 export function targetHash(target: Target): string {
   switch (target.view) {
     case 'flows':
-      return routeHash(target.flow ? { view: 'flows', flow: target.flow } : { view: 'flows' })
+      if (!target.flow) return routeHash({ view: 'flows' })
+      return routeHash(target.stage ? { view: 'flows', flow: target.flow, stage: target.stage } : { view: 'flows', flow: target.flow })
     case 'cloudflare':
       return routeHash(target.script ? { view: 'cloudflare', script: target.script } : { view: 'cloudflare' })
     case 'ops':

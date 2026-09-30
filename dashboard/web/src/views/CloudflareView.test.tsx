@@ -31,6 +31,21 @@ describe('Cloudflare 监控', () => {
     expect(within(item).getByText('new-worker')).toBeInTheDocument()
   })
 
+  it('marks a quota row by its measured value, as the guard does: 79.95 % reads 80 % but is below it (C3)', async () => {
+    const base = healthy()
+    const rows = quotaRows({ d1_rows_read: { used: 3_997_500 }, d1_rows_written: { used: 80_000 } })
+    await showCloudflare({ ...base, cloudflare: { ...base.cloudflare, usage: { ...base.cloudflare.usage, rows } } })
+    const quota = section('账户额度')
+    const read = within(quota).getByRole('meter', { name: 'D1 读取行数' })
+    expect(read).toHaveAttribute('aria-valuenow', '80')
+    const readItem = read.closest('li') as HTMLElement
+    expect(readItem).toHaveClass('quota-ok')
+    expect(within(readItem).queryByText('超过 80%')).toBeNull()
+    const written = within(quota).getByRole('meter', { name: 'D1 写入行数' }).closest('li') as HTMLElement
+    expect(written).toHaveClass('quota-warn')
+    expect(within(written).getByText('超过 80%')).toBeInTheDocument()
+  })
+
   it('lists the discovered Workers with owner, flows, errors and CPU against 10 ms', async () => {
     await showCloudflare(healthy())
     const table = within(section('Worker · 5 个（自动发现）')).getByRole('table')
@@ -54,14 +69,56 @@ describe('Cloudflare 监控', () => {
     expect(within(todofy).getByRole('img', { name: 'CPU p99 3.6 ms，Free 上限 10 ms' })).toBeInTheDocument()
 
     const notion = rows[1] as HTMLElement
-    expect(within(notion).getByText('样本太少（< 20 次），不判定')).toBeInTheDocument()
+    expect(within(notion).getByText('样本太少（< 20 次），不判定', { selector: '.cell-note' })).toBeInTheDocument()
     expect(within(notion).getByRole('img', { name: 'CPU p99 8.4 ms，Free 上限 10 ms，接近上限' })).toBeInTheDocument()
     expect(within(notion).getByText('接近 Free 10 ms')).toBeInTheDocument()
 
-    expect(within(rows[2] as HTMLElement).getByText('612')).toBeInTheDocument()
+    expect(within(rows[2] as HTMLElement).getByText('612', { selector: 'td' })).toBeInTheDocument()
     expect(within(rows[3] as HTMLElement).getByText('个人控制台')).toBeInTheDocument()
     const total = rows[5] as HTMLElement
-    expect(within(total).getAllByRole('cell').map((cell) => cell.textContent)).toEqual(['', '712', '3', '', '213', '1,380', ''])
+    expect(within(total).getAllByRole('cell').map((cell) => cell.textContent)).toEqual(['', '712', '3', '', '213', '1,380', '', ''])
+  })
+
+  it('re-sorts the Worker table by its headers; errors first is the default (F11)', async () => {
+    await showCloudflare(healthy())
+    const table = within(section('Worker · 5 个（自动发现）')).getByRole('table')
+    const names = () => within(table).getAllByRole('row').slice(1, -1).map((row) => within(row).getAllByRole('rowheader')[0]?.textContent)
+    const header = (name: string) => within(table).getByRole('columnheader', { name: new RegExp(`^${name}`) })
+    expect(header('错误')).toHaveAttribute('aria-sort', 'descending')
+    expect(header('今日请求')).toHaveAttribute('aria-sort', 'none')
+    const user = userEvent.setup()
+    await user.click(within(header('今日请求')).getByRole('button'))
+    expect(header('今日请求')).toHaveAttribute('aria-sort', 'descending')
+    expect(header('错误')).toHaveAttribute('aria-sort', 'none')
+    expect(names()).toEqual(['mail-hero', 'todofy', 'home', 'todofy-core', 'ziyixi-notion-publish'])
+    await user.click(within(header('今日请求')).getByRole('button'))
+    expect(header('今日请求')).toHaveAttribute('aria-sort', 'ascending')
+    expect(names()[0]).toBe('ziyixi-notion-publish')
+    await user.click(within(header('CPU')).getByRole('button'))
+    expect(names()[0]).toBe('ziyixi-notion-publish')
+  })
+
+  it('keeps a phone card to two lines: the rest of a Worker is behind 更多 (F9)', async () => {
+    await showCloudflare(healthy())
+    const table = within(section('Worker · 5 个（自动发现）')).getByRole('table')
+    const todofy = within(table).getAllByRole('row')[1] as HTMLElement
+    const more = within(todofy).getByText('更多', { selector: 'summary' }).closest('details') as HTMLElement
+    expect(more).not.toHaveAttribute('open')
+    expect(within(more).getByText('子请求').nextElementSibling).toHaveTextContent(/^\d/)
+    expect(within(more).getByText('流程').nextElementSibling).toHaveTextContent('邮件 → 任务、每日 Newsletter、运维摘要')
+  })
+
+  it('keeps quota rows compact: an estimate is behind a disclosure unless it reaches 80 % (F9)', async () => {
+    const base = healthy()
+    const rows = base.cloudflare.usage.rows.map((row) =>
+      row.id === 'd1_rows_written' ? { ...row, projected: 90_000, projected_percent: 90 } : row,
+    )
+    await showCloudflare({ ...base, cloudflare: { ...base.cloudflare, usage: { ...base.cloudflare.usage, rows } } })
+    const quota = section('账户额度')
+    const quiet = within(quota).getByText(/按当前速度线性估算，本 UTC 日结束约 790 次/)
+    expect(quiet.closest('details')).not.toBeNull()
+    const urgent = within(quota).getByText(/按当前速度线性估算，本 UTC 日结束约 90,000 行/)
+    expect(urgent.closest('details')).toBeNull()
   })
 
   it('shows an empty table honestly with no Workers', async () => {
@@ -76,6 +133,14 @@ describe('Cloudflare 监控', () => {
     const table = within(section('Worker · 20 个（自动发现）')).getByRole('table')
     expect(within(table).getAllByRole('row')).toHaveLength(22)
     expect(within(table).getAllByText('未登记')).toHaveLength(20)
+  })
+
+  it('says how many remembered Workers the capped table leaves out (C2)', async () => {
+    const base = withWorkers(20)
+    await showCloudflare({ ...base, cloudflare: { ...base.cloudflare, workers_omitted: 7 } })
+    expect(screen.getByText(/另有 7 个近 30 天出现过的 Worker 未列出/)).toHaveTextContent(
+      '另有 7 个近 30 天出现过的 Worker 未列出：今天有请求的全部在表中，其余按最近出现时间列出前 20 个。',
+    )
   })
 
   it('explains unavailable analytics without inventing numbers', async () => {
@@ -99,6 +164,19 @@ describe('Cloudflare 监控', () => {
     const r2 = within(resources).getByRole('region', { name: 'R2 存储桶' })
     expect(within(r2).getByText('mail-hero 邮件存储')).toBeInTheDocument()
     expect(within(r2).getByText('未归类操作')).toBeInTheDocument()
+  })
+
+  it('shows an unregistered R2 bucket by its full name, so shared prefixes stay apart (F10)', async () => {
+    const base = healthy()
+    const resources = [
+      ...base.cloudflare.resources,
+      { kind: 'r2' as const, id: 'mail-hero-backup', resource: null, entry: null, size_bytes: 1_000, class_a: 1, class_b: 1 },
+      { kind: 'r2' as const, id: 'mail-hero-backup-old', resource: null, entry: null, size_bytes: 1_000, class_a: 1, class_b: 1 },
+    ]
+    await showCloudflare({ ...base, cloudflare: { ...base.cloudflare, resources } })
+    const r2 = within(section('存储与资源')).getByRole('region', { name: 'R2 存储桶' })
+    expect(within(r2).getByText('未登记 mail-hero-backup')).toBeInTheDocument()
+    expect(within(r2).getByText('未登记 mail-hero-backup-old')).toBeInTheDocument()
   })
 
   it('shows the guard read-only with a link to its actions', async () => {

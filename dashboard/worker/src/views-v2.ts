@@ -11,6 +11,7 @@
 import type { CanaryView, DigestView, GuardView, QuotaRow, UsageView } from './api-types.ts';
 import {
   API_V2_VERSION,
+  CF_VIEW_WORKERS_MAX,
   HOME_QUOTA_IDS,
   type AppDetail,
   type AttentionView,
@@ -22,6 +23,7 @@ import {
   type Registry,
   type RefreshV2,
   type ShellFields,
+  type WorkerRow,
 } from './api-v2-types.ts';
 import { resourceRows, workerRows, type CfScriptsDoc } from './discovery.ts';
 import type { StatusDoc, UsageDoc } from './docs.ts';
@@ -119,6 +121,23 @@ export function flowsResponse(base: ShellFields, input: EvalInput, canary: Canar
   };
 }
 
+/**
+ * The Worker rows the Cloudflare view lists: all of them up to `max`, else the scripts active today
+ * (requests or DO requests) first, then the most recently seen, kept in table order.
+ */
+export function capWorkers(rows: readonly WorkerRow[], max: number = CF_VIEW_WORKERS_MAX): { rows: WorkerRow[]; omitted: number } {
+  if (rows.length <= max) return { rows: [...rows], omitted: 0 };
+  const active = (row: WorkerRow): number => (row.requests > 0 || (row.do_requests ?? 0) > 0 ? 1 : 0);
+  const keep = new Set(
+    rows
+      .map((row, index) => ({ row, index }))
+      .sort((a, b) => active(b.row) - active(a.row) || b.row.last_seen_day.localeCompare(a.row.last_seen_day) || a.index - b.index)
+      .slice(0, max)
+      .map(({ row }) => row.script),
+  );
+  return { rows: rows.filter((row) => keep.has(row.script)), omitted: rows.length - keep.size };
+}
+
 export function cloudflareResponse(
   base: ShellFields,
   now: number,
@@ -128,10 +147,12 @@ export function cloudflareResponse(
   guard: GuardView,
   registry: Registry = REGISTRY,
 ): CloudflareResponse {
+  const listed = capWorkers(workerRows(scripts, now, registry));
   return {
     ...base,
     usage,
-    workers: workerRows(scripts, now, registry),
+    workers: listed.rows,
+    workers_omitted: listed.omitted,
     workers_truncated: scripts?.truncated ?? false,
     resources: resourceRows(usageDoc.resources, scripts, now, registry),
     do_storage_bytes: usage.rows.find((row) => row.id === 'do_storage')?.used ?? null,

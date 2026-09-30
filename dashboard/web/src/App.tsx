@@ -148,7 +148,7 @@ export function App() {
             ) : active.isPending ? (
               <ViewLoading />
             ) : null}
-            {route.view === 'flows' && flows.data ? <FlowsView registry={registry.data} flows={flows.data} focus={route.flow} now={now} /> : null}
+            {route.view === 'flows' && flows.data ? <FlowsView registry={registry.data} flows={flows.data} focus={route.flow} focusStage={route.stage} now={now} /> : null}
             {route.view === 'cloudflare' && cloudflare.data ? (
               <CloudflareView registry={registry.data} cloudflare={cloudflare.data} focus={route.script} now={now} />
             ) : null}

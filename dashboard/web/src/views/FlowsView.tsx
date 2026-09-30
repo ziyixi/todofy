@@ -13,8 +13,11 @@ import { routeHash } from '../router'
 
 const ATTENTION = new Set(['warning', 'critical', 'unknown'])
 
-/** The one number a stage node shows. */
-function stageCount(stage: StageDef, state: StageState | undefined): string {
+/**
+ * The one fact a stage node shows under its level word: a counter, the probe, today's requests, or
+ * when its app was last read ("可达 · 14:30 检查"); never the level word again.
+ */
+function stageCount(stage: StageDef, state: StageState | undefined, now: Date): string {
   if (!state || state.level === 'unmonitored' || state.level === 'link') return '—'
   const counter = state.counters[0]
   if (counter) return counterShort(counter.name, counter.value)
@@ -25,7 +28,11 @@ function stageCount(stage: StageDef, state: StageState | undefined): string {
       : '无法访问'
   }
   if (state.analytics) return `今日 ${formatNumber(state.analytics.requests)} 次请求`
-  return stage.entry === null ? '—' : LEVEL[state.level].word
+  if (stage.entry === null || state.checked_at === null) return '—'
+  const at = formatDayTime(state.checked_at, now)
+  if (state.reason === 'unreachable') return `无法连接 · ${at} 检查`
+  if (state.reason === 'stale' || state.reason === 'tick_stale') return `上次 ${at}`
+  return `可达 · ${at} 检查`
 }
 
 /** The stage a card opens on: the flow's first issue (its worst stage), else the first stage with a problem, else the first monitored one. */
@@ -165,11 +172,27 @@ function CanaryBlock({ flow, state, now }: { flow: FlowDef; state: FlowState; no
   )
 }
 
-function FlowCard({ reg, flow, state, focused, now }: { reg: Reg; flow: FlowDef; state: FlowState | undefined; focused: boolean; now: Date }) {
+function FlowCard({
+  reg,
+  flow,
+  state,
+  focused,
+  focusStage,
+  now,
+}: {
+  reg: Reg
+  flow: FlowDef
+  state: FlowState | undefined
+  focused: boolean
+  /** The stage of the route (#/flows/<flow>/<stage>): selected and scrolled to, also when the card is open. */
+  focusStage: string | undefined
+  now: Date
+}) {
   const mark = state ? flowMark(state) : { level: 'unknown' as const, word: LEVEL.unknown.word }
   const level = mark.level
   const [open, setOpen] = useState(() => focused || ATTENTION.has(level))
-  const [selected, setSelected] = useState(() => defaultStage(flow, state))
+  const routeStage = focused && focusStage !== undefined && flow.stages.some((stage) => stage.id === focusStage) ? focusStage : undefined
+  const [selected, setSelected] = useState(() => routeStage ?? defaultStage(flow, state))
   const card = useRef<HTMLElement>(null)
   const bodyId = useId()
   const titleId = useId()
@@ -177,8 +200,9 @@ function FlowCard({ reg, flow, state, focused, now }: { reg: Reg; flow: FlowDef;
   useEffect(() => {
     if (!focused) return
     setOpen(true)
+    if (routeStage !== undefined) setSelected(routeStage)
     card.current?.scrollIntoView?.({ block: 'start' })
-  }, [focused])
+  }, [focused, routeStage])
 
   const stageState = (id: string) => state?.stages.find((stage) => stage.id === id)
   const word = mark.word
@@ -213,7 +237,7 @@ function FlowCard({ reg, flow, state, focused, now }: { reg: Reg; flow: FlowDef;
             {flow.stages.map((stage, index) => {
               const item = stageState(stage.id)
               const stageLevel = item?.level ?? 'unknown'
-              const count = stageCount(stage, item)
+              const count = stageCount(stage, item, now)
               const badge = item?.canary ? CANARY_BADGE[item.canary] : null
               return (
                 <li key={stage.id} className="stage">
@@ -288,7 +312,19 @@ function FlowCard({ reg, flow, state, focused, now }: { reg: Reg; flow: FlowDef;
 }
 
 /** 业务流程 `#/flows[/<flow>]`: cards by business group; each flow a chain of stages. */
-export function FlowsView({ registry, flows, focus, now }: { registry: Reg; flows: FlowsResponse; focus?: string; now: Date }) {
+export function FlowsView({
+  registry,
+  flows,
+  focus,
+  focusStage,
+  now,
+}: {
+  registry: Reg
+  flows: FlowsResponse
+  focus?: string
+  focusStage?: string
+  now: Date
+}) {
   const groups = sortedByOrder(registry.flow_groups)
     .map((group) => ({ group, items: sortedByOrder(registry.flows.filter((flow) => flow.group === group.id)) }))
     .filter(({ items }) => items.length > 0)
@@ -312,6 +348,7 @@ export function FlowsView({ registry, flows, focus, now }: { registry: Reg; flow
                 flow={flow}
                 state={flows.flows.find((item) => item.id === flow.id)}
                 focused={focus === flow.id}
+                focusStage={focus === flow.id ? focusStage : undefined}
                 now={now}
               />
             ))}

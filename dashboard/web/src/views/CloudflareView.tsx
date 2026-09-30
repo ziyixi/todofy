@@ -122,6 +122,9 @@ function CpuCell({ row }: { row: WorkerRow }) {
       <span className="cpu-text">
         p50 {row.cpu_p50_us === null ? '—' : formatCpu(row.cpu_p50_us)} / p99 {formatCpu(row.cpu_p99_us)}
       </span>
+      <span className="cpu-short" aria-hidden="true">
+        p99 {formatCpu(row.cpu_p99_us)}
+      </span>
       <span
         className={`cpu-bar${near ? ' cpu-bar-near' : ''}`}
         role="img"
@@ -140,8 +143,56 @@ function lastActive(row: WorkerRow, now: Date): string {
   return row.requests > 0 ? '今天' : `今天无请求 · 上次 ${formatUtcDay(row.last_seen_day)}`
 }
 
+type SortKey = 'errors' | 'requests' | 'cpu' | 'subrequests'
+
+const SORT_VALUE: Readonly<Record<SortKey, (row: WorkerRow) => number>> = {
+  errors: (row) => row.errors,
+  requests: (row) => row.requests,
+  cpu: (row) => row.cpu_p99_us ?? -1,
+  subrequests: (row) => row.subrequests,
+}
+
+/**
+ * The rows in the chosen order. The default (错误, descending) is the Worker's order: errors first,
+ * then requests; every order falls back to requests, then the name, so it is stable.
+ */
+export function sortWorkers(rows: readonly WorkerRow[], key: SortKey, descending: boolean): WorkerRow[] {
+  const value = SORT_VALUE[key]
+  const sign = descending ? -1 : 1
+  return [...rows].sort((a, b) => sign * (value(a) - value(b)) || b.requests - a.requests || a.script.localeCompare(b.script))
+}
+
+/** A column header that re-sorts the table; `aria-sort` on the sorted one. */
+function SortHeader({
+  label,
+  column,
+  sort,
+  onSort,
+  className,
+}: {
+  label: string
+  column: SortKey
+  sort: { key: SortKey; descending: boolean }
+  onSort: (key: SortKey) => void
+  className?: string
+}) {
+  const active = sort.key === column
+  return (
+    <th role="columnheader" scope="col" className={className} aria-sort={active ? (sort.descending ? 'descending' : 'ascending') : 'none'}>
+      <button type="button" className="sort-button" onClick={() => onSort(column)}>
+        {label}
+        <span aria-hidden="true" className="sort-arrow">
+          {active ? (sort.descending ? '↓' : '↑') : ''}
+        </span>
+      </button>
+    </th>
+  )
+}
+
 function WorkersTable({ reg, data, focus, now }: { reg: Reg; data: CloudflareResponse; focus?: string; now: Date }) {
-  const rows = data.workers
+  const [sort, setSort] = useState<{ key: SortKey; descending: boolean }>({ key: 'errors', descending: true })
+  const onSort = (key: SortKey) => setSort((current) => (current.key === key ? { key, descending: !current.descending } : { key, descending: true }))
+  const rows = sortWorkers(data.workers, sort.key, sort.descending)
   const unavailable = data.usage.status === 'unavailable' || data.usage.status === 'not_configured'
   const total = rows.reduce(
     (sum, row) => ({
@@ -163,6 +214,11 @@ function WorkersTable({ reg, data, focus, now }: { reg: Reg; data: CloudflareRes
       <h2 id="workers-title">
         Worker · {rows.length} 个（自动发现）
       </h2>
+      {data.workers_omitted > 0 ? (
+        <Notice tone="neutral">
+          另有 {data.workers_omitted} 个近 30 天出现过的 Worker 未列出：今天有请求的全部在表中，其余按最近出现时间列出前 {rows.length} 个。
+        </Notice>
+      ) : null}
       {data.workers_truncated ? (
         <Notice tone="info">查询结果达到 {WORKERS_QUERY_LIMIT} 行上限，列表可能不完整。</Notice>
       ) : null}
@@ -184,12 +240,15 @@ function WorkersTable({ reg, data, focus, now }: { reg: Reg; data: CloudflareRes
               <tr role="row">
                 <th role="columnheader" scope="col">Worker</th>
                 <th role="columnheader" scope="col">所属应用 / 流程</th>
-                <th role="columnheader" scope="col" className="num">今日请求</th>
-                <th role="columnheader" scope="col">错误</th>
-                <th role="columnheader" scope="col">CPU p50 / p99（上限 10 ms）</th>
-                <th role="columnheader" scope="col" className="num">子请求</th>
+                <SortHeader label="今日请求" column="requests" sort={sort} onSort={onSort} className="num" />
+                <SortHeader label="错误" column="errors" sort={sort} onSort={onSort} />
+                <SortHeader label="CPU p50 / p99（上限 10 ms）" column="cpu" sort={sort} onSort={onSort} />
+                <SortHeader label="子请求" column="subrequests" sort={sort} onSort={onSort} className="num" />
                 <th role="columnheader" scope="col" className="num">DO 请求</th>
                 <th role="columnheader" scope="col">最近有请求</th>
+                <th role="columnheader" scope="col" className="phone-only">
+                  更多
+                </th>
               </tr>
             </thead>
             <tbody role="rowgroup">
@@ -248,6 +307,34 @@ function WorkersTable({ reg, data, focus, now }: { reg: Reg; data: CloudflareRes
                     <td role="cell" data-label="最近有请求">
                       {lastActive(row, now)}
                     </td>
+                    {/* Phone: the card's second line is 请求 · 错误 · p99; the rest is behind this disclosure. */}
+                    <td role="cell" className="phone-only worker-more">
+                      <details className="more">
+                        <summary>
+                          更多<span className="visually-hidden">：{row.script}</span>
+                        </summary>
+                        <dl className="worker-more-list">
+                          {flows.length > 0 ? (
+                            <>
+                              <dt>流程</dt>
+                              <dd>{flows.join('、')}</dd>
+                            </>
+                          ) : null}
+                          <dt>子请求</dt>
+                          <dd>{formatNumber(row.subrequests)}</dd>
+                          <dt>DO 请求</dt>
+                          <dd>{row.do_requests === null ? '—' : formatNumber(row.do_requests)}</dd>
+                          <dt>最近有请求</dt>
+                          <dd>{lastActive(row, now)}</dd>
+                          {errors.note ? (
+                            <>
+                              <dt>错误说明</dt>
+                              <dd>{errors.note}</dd>
+                            </>
+                          ) : null}
+                        </dl>
+                      </details>
+                    </td>
                   </tr>
                 )
               })}
@@ -270,6 +357,7 @@ function WorkersTable({ reg, data, focus, now }: { reg: Reg; data: CloudflareRes
                   {formatNumber(total.doRequests)}
                 </td>
                 <td role="cell" className="cell-empty" />
+                <td role="cell" className="cell-empty phone-only" />
               </tr>
             </tfoot>
           </table>
@@ -287,7 +375,9 @@ function resourceName(reg: Reg, row: ResourceRow): { name: string; registered: b
   const def = reg.resources.find((resource) => resource.id === row.resource)
   if (def) return { name: def.name, registered: true, script: def.script }
   if (row.kind === 'r2' && row.id === 'unclassified') return { name: '未归类操作', registered: true }
-  return { name: `未登记 ${row.id.slice(0, 8)}`, registered: false }
+  // Opaque D1/DO ids show their first 8 characters; an R2 bucket's id is its (non-secret) name, in full,
+  // so buckets sharing a prefix stay distinguishable.
+  return { name: `未登记 ${row.kind === 'r2' ? row.id : row.id.slice(0, 8)}`, registered: false }
 }
 
 function ResourceTable({ reg, kind, rows, doStorage }: { reg: Reg; kind: ResourceRow['kind']; rows: readonly ResourceRow[]; doStorage: number | null }) {

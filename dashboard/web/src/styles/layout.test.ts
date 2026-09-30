@@ -40,3 +40,11 @@ describe('desktop layout from 720 px (F3)', () => {
     expect(rulesIn('max-width: 959px', '.tab-long').join('\n')).toMatch(/display:\s*none/)
   })
 })
+
+describe('tile status line (F6)', () => {
+  it('never breaks the level word; the detail gives way with an ellipsis', () => {
+    expect(css).toMatch(/\.tile-status \.level\s*\{[^}]*flex:\s*none;[^}]*white-space:\s*nowrap/)
+    expect(css).toMatch(/\.tile-detail\s*\{[^}]*text-overflow:\s*ellipsis/)
+    expect(css).toMatch(/\.tile-detail\s*\{[^}]*min-width:\s*0/)
+  })
+})

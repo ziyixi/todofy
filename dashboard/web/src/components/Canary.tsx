@@ -120,8 +120,11 @@ export function CanaryDays({ canary, now }: { canary: CanaryView; now: Date }) {
         {cells.map((cell) => {
           const label = `${formatUtcDay(cell.day)}${cell.day === today ? '（今天，UTC）' : ''}：${cell.text}`
           return (
-            <li key={cell.day} className={`day-cell day-${cell.state}`} role="img" aria-label={label} title={label}>
-              <span aria-hidden="true">{CELL_MARK[cell.state]}</span>
+            // The li stays a listitem (the list keeps its "14 项"); the cell inside is the named image.
+            <li key={cell.day} className="day-slot">
+              <span className={`day-cell day-${cell.state}`} role="img" aria-label={label} title={label}>
+                <span aria-hidden="true">{CELL_MARK[cell.state]}</span>
+              </span>
             </li>
           )
         })}

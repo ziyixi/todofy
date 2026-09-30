@@ -36,7 +36,8 @@ export function statusLine(entry: RegistryEntryView, state: EntryState | undefin
   if (state.level === 'unmonitored') return { level: 'unmonitored', word: '未接入监控', detail: null }
   if (state.reason === 'never_checked') return { level: 'unknown', word: '尚未检查', detail: null }
   if (state.reason === 'unreachable' && state.consecutive_failures > 0) {
-    return { level: state.level, word: '无法连接', detail: `连续 ${state.consecutive_failures} 次失败` }
+    // "连续 N 次" fits a 176 px tile next to the word; the sheet says "连续失败 N 次".
+    return { level: state.level, word: '无法连接', detail: `连续 ${state.consecutive_failures} 次` }
   }
   const metric = metricText(state.metric, now)
   const reason = state.level !== 'ok' && state.reason ? reasonLabel(state.reason) : null
