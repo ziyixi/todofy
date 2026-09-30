@@ -64,9 +64,11 @@ D1 保存容量 70% / 85% / 95%、备份超过 36 小时、处理积压超过 1 
 
 外部通知使用 Bearer、稳定 `Idempotency-Key` 和冻结 JSON 字节；单次超时 5 秒，不跟随跳转。网络错误、408、429、5xx 持久退避，尊重不超过一天的 Retry-After，最多 8 次；认证错误及其他不可重试响应停止并在设置页显示失败。已结束通知记录保留 180 天后分批清理。提醒不是扣费硬上限，也不是完整备份成功的替代证据。
 
+按 ops-v1 计划，`ALERT_WEBHOOK_URL`（及 `ALERT_WEBHOOK_TOKEN`、CI 变量 `MAIL_HERO_ALERT_WEBHOOK_URL`）保持可选且不配置：活跃提醒作为 `Ops.status()` 的 signals 由运维面板读取，再经 Todofy 的 `reportOps` 进入每天至多一条的统一运维摘要，不需要第二个通知通道。代码与上面的行为保持不变，以后确有需要仍可配置。面板尚未建成，在此之前提醒只在设置页显示，owner 需要自己查看。
+
 ## 2.3 运维入口（ops-v1）
 
-Worker 导出命名入口 `Ops`，只能由同一 Cloudflare 账户内部署的 Worker 通过 service binding（`service = "mail-hero"`、`entrypoint = "Ops"`）调用；没有公开 HTTP 路由，也不经过 Access。合同见 [`contracts/ops-v1`](../../contracts/ops-v1/README.md)。输出只含代码、数字、布尔值、时间、事件 ID 和 UI 地址，不含主题、地址、正文、目标 URL 或远端响应。
+Worker 导出命名入口 `Ops`（`src/native/ops.ts`，`index.ts` 只加一行导出），只能由同一 Cloudflare 账户内部署的 Worker 通过 service binding（`[[services]] binding = "MAIL_HERO"`、`service = "mail-hero"`、`entrypoint = "Ops"`）调用；没有公开 HTTP 路由，也不经过 Access。合同见 [`contracts/ops-v1`](../../contracts/ops-v1/README.md)。输出只含代码、数字、布尔值、时间、事件 ID 和 UI 地址，不含主题、地址、正文、目标 URL 或远端响应。
 
 - 变量 `PUBLIC_HOST`：UI 自定义域名，`status()` 以 `https://<PUBLIC_HOST>/` 返回 `ui_url`。CI 直接取已有的 `MAIL_HERO_PUBLIC_HOST`，不需要新的仓库变量。
 - `status()`：一次 DO 请求加最多 6 条 D1 只读查询（与每10分钟的提醒阶段读取相同的部分索引范围），不写入。调用方至少间隔10分钟。

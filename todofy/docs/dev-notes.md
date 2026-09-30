@@ -491,7 +491,11 @@ gateway imports). `Ops` forwards each method to one `ops_*` RPC method and turns
 `new Error(code)`; a failed call is `unavailable`. `core/ops.py` holds every rule (input checks with
 `fullmatch`, guard expiry, signals and health, canary result, digest items) and builds outputs only from
 numbers, booleans, timestamps and closed codes; `tests/unit/test_ops_core.py` validates them against the
-schema.
+schema. CI: the root `Contracts` job runs `test_ops_contract.py`, `test_ops_core.py` and the gateway's
+`test/ops.test.ts` (with Mail Hero's side of ops-v1); `tests/runtime/test_ops.py` (real bindings, a probe
+Worker bound with `entrypoint = "Ops"`, like the dashboard) runs in `Todofy checks`. The golden canary is
+`contracts/mail-received-v1/fixtures/canary_event.json`; its `event_id` differs from every other fixture's
+(`test_mail_hero_compat.py` checks it), because the runtime suite posts all fixtures to one Worker.
 ```
 status()          one D1 batch of 5 indexed reads (views.ACTIVE_COUNTS, ATTENTION_COUNT, RECEIVED_SINCE,
                   OLDEST_DUE, reminders.REMINDER_DAY) + object storage; D1 failure → health "down"

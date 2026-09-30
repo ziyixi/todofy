@@ -73,6 +73,14 @@ def test_only_the_canary_fixture_carries_the_canary_marker():
     assert json.loads(FIXTURES["canary_event"].read_bytes())["canary"] == {"run_id": "canary-2026-09-28"}
 
 
+def test_no_two_fixtures_share_an_event_or_message_id():
+    # Todofy deduplicates by event_id: tests/runtime/test_scenarios_webhook.py posts every fixture to one
+    # Worker, and a reused ID would be answered 409 event_conflict instead of being parsed.
+    documents = [json.loads(path.read_bytes()) for path in FIXTURES.values()]
+    for ids in ([d["event_id"] for d in documents], [d["message"]["id"] for d in documents]):
+        assert len(set(ids)) == len(ids)
+
+
 UNREADABLE_CANARIES = [{}, {"run_id": ""}, {"run_id": "canary 1"}, {"run_id": 7}, "canary-1", None]
 
 

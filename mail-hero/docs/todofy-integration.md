@@ -52,7 +52,11 @@ Mail Hero 的 Todofy 目标为 `https://daily.ziyixi.science/hooks/mail`，Beare
 `contracts/mail-received-v1/` 是两个应用唯一共享的文件：语义说明、唯一的 JSON Schema（Todofy 的 OpenAPI 按相对路径引用）、`fixtures/*.json` golden 请求体（由 Mail Hero 真实的 `parseMail` + `buildPayload` 从合成邮件生成，逐字节固定、无结尾换行）和 `fixtures/legacy/` 冻结旧字节（两侧测试固定其 SHA-256）。
 
 - Mail Hero 拥有该合同。修改构建器后在 `mail-hero/cloudflare` 运行 `npm run contract:update`，检查 fixture diff，并与 `contracts/` 的变更放在同一提交。
-- 根 CI 的 `Contracts` job：Mail Hero 逐字节重建每个 fixture；Todofy 用 Schema 校验并用自己的解析器解析每个 fixture（含 legacy）。另外 `Todofy checks` job 的 runtime 测试（`contracts/` 改动时也会运行）把它们 POST 到真实 workerd 网关。不兼容的改动在合并前失败。详见 [`contracts/README.md`](../../contracts/README.md)。
+- 根 CI 的 `Contracts` job：Mail Hero 逐字节重建每个 fixture；Todofy 用 Schema 校验并用自己的解析器解析每个 fixture（含 legacy）；两侧都检查所有 fixture 的 `event_id`、`message.id` 互不重复。另外 `Todofy checks` job 的 runtime 测试（`contracts/` 改动时也会运行）把它们 POST 到真实 workerd 网关。不兼容的改动在合并前失败。详见 [`contracts/README.md`](../../contracts/README.md)。
+
+## 金丝雀事件（ops-v1）
+
+`Ops.startCanary` 发出的事件带顶层 `canary: {"run_id"}`（golden 字节见 `contracts/mail-received-v1/fixtures/canary_event.json`），走与真实邮件相同的冻结字节、认证、退避重试与去重。合同要求消费者不对它产生外部副作用。Todofy（`status().capabilities` 含 `canary_consumer` 的版本）正常接管并调用 Gemini、校验结果，只记录金丝雀结果；不创建 Todoist 任务，不进入摘要、newsletter 报告、关注列表、提醒或真实邮件指标。结果由面板经 Todofy 的 `Ops.canaryResult` 读取。在 Todofy 的支持版本上线前不要发起金丝雀。
 
 ## 接管之后：在 Todofy 对账
 

@@ -1,6 +1,6 @@
 # GitHub Actions 原生部署
 
-Mail Hero 位于单仓库的 `mail-hero/` 目录，与 `todofy/` 共用根目录的 `.github/workflows/ci.yml`（"CI and deploy"，说明见根 [README](../../README.md)）。任何分支的 push 若相对累计基准改动了 `mail-hero/`、`packages/edge-auth/`（编译进本Worker的共享鉴权包）、`contracts/` 或 `.github/`，`Mail Hero checks` job 就在 `mail-hero/` 下安装 lockfile 中的依赖、检查 TypeScript、执行 Worker 和 React 测试、构建 UI，并用占位值生成配置做 Wrangler dry-run；`packages/edge-auth/` 改动时 `Shared packages` job 还会在包自己的目录运行它的 typecheck 与 vitest；`Contracts` job 检查 `contracts/mail-received-v1` 的 golden payload 仍由当前 `buildPayload` 逐字节生成，并由 Todofy 解析。Worker 测试包含真正的 workerd D1/R2/SQLite Durable Object 绑定与合成大附件。Node 使用 26，Actions 固定到已核实的提交 SHA。
+Mail Hero 位于单仓库的 `mail-hero/` 目录，与 `todofy/` 共用根目录的 `.github/workflows/ci.yml`（"CI and deploy"，说明见根 [README](../../README.md)）。任何分支的 push 若相对累计基准改动了 `mail-hero/`、`packages/edge-auth/`（编译进本Worker的共享鉴权包）、`contracts/` 或 `.github/`，`Mail Hero checks` job 就在 `mail-hero/` 下安装 lockfile 中的依赖、检查 TypeScript、执行 Worker 和 React 测试、构建 UI，并用占位值生成配置做 Wrangler dry-run；`packages/edge-auth/` 改动时 `Shared packages` job 还会在包自己的目录运行它的 typecheck 与 vitest；`Contracts` job 检查 `contracts/mail-received-v1` 的 golden payload（含金丝雀 `canary_event.json`）仍由当前 `buildPayload` 逐字节生成、所有 fixture 的 event ID 互不重复，并由 Todofy 解析；同一 job 用 `validate.mjs` 校验 `contracts/ops-v1` 的 fixture 与常量，并在主机上运行 `test/native-ops.test.mjs`，确认 Mail Hero `Ops` 产生的值符合 Schema（Todofy 侧用 `jsonschema` 做同样的检查）。经 service binding 调用真实 `Ops` 的 workerd 测试 `native-ops-runtime.test.mjs` 属于 Worker 测试。Worker 测试包含真正的 workerd D1/R2/SQLite Durable Object 绑定与合成大附件。Node 使用 26，Actions 固定到已核实的提交 SHA。
 
 累计基准不是上一个提交：`main` 上是该 workflow 最近一次成功的 `main` push run 的提交，因此失败或排队时被取消的 run 中的改动会由下一次 run 重新检查并发布；其他分支上是与 `origin/main` 的 merge base，分支 head 的 `CI gate` 覆盖整个分支。找不到可用基准（首次运行、API 错误、基准不是祖先）时全部运行。
 
@@ -35,7 +35,7 @@ Mail Hero 位于单仓库的 `mail-hero/` 目录，与 `todofy/` 共用根目录
 | `MAIL_HERO_INGEST_DAILY_MESSAGE_LIMIT` | 可省略，默认 `300` |
 | `MAIL_HERO_INGEST_DAILY_BYTE_LIMIT` | 可省略，默认 `268435456` |
 | `MAIL_HERO_BACKUP_BUCKET_NAME` | 已启用备份时必须照旧设置（现有私有备份桶名）；省略则发布的 Worker 没有 `BACKUP_STORE` binding，备份 API 不可用 |
-| `MAIL_HERO_ALERT_WEBHOOK_URL` | 可选，见 [cloudflare-setup.md](cloudflare-setup.md) 的告警说明；已使用时必须照旧设置 |
+| `MAIL_HERO_ALERT_WEBHOOK_URL` | 可选；按 ops-v1 计划不配置，统一运维摘要取代它（见 [cloudflare-setup.md](cloudflare-setup.md) §2.2）。若已设置，删除前确认不再需要，否则下次发布照旧使用 |
 | `MAIL_HERO_ALERT_WEBHOOK_ALLOWED_HOSTS` | 可选，省略时沿用 `MAIL_HERO_WEBHOOK_ALLOWED_HOSTS` |
 
 在 `production` environment 添加 secrets：

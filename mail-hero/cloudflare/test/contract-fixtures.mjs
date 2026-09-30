@@ -48,7 +48,9 @@ const filePart = (filename, type, size, disposition = 'attachment') =>
   `Content-Type: ${type}\r\nContent-Disposition: ${disposition}; filename="${filename}"\r\n` +
   `Content-Transfer-Encoding: base64\r\n\r\n${base64(Buffer.alloc(size, 0x61))}\r\n`
 
-/** name -> how Mail Hero received it. Numbers fix the event/message IDs; never reuse one. */
+/** name -> how Mail Hero received it. Numbers fix the event/message IDs; never reuse one, including the
+ * numbers of fixtures/legacy/ (pre_storage_v1 is 16): consumers deduplicate by event_id, so a reused
+ * number turns a fixture into a 409 conflict when both are posted to one consumer. */
 export const CASES = [
   {name: 'plain_text', number: 1, raw: () => plain('Please review the attached numbers & reply by Friday <soon>.\n\nThanks,\n"Sender"\n')},
   {name: 'chinese', number: 2, raw: () => plain('您好，\n\n请在 10 月 15 日前完成季度预缴税。#重要 附件见邮件。\n\n—— 合成测试邮件\n', {
@@ -93,7 +95,7 @@ export const CASES = [
     plain('A spam-like Date header in year 10000.', {Date: 'Sat, 01 Jan 10000 00:00:00 +0000'})},
   {name: 'synthetic_test_event', number: 15, mail: () => syntheticTestMail()},
   // The contracts/ops-v1 end-to-end canary: consumers must not cause external side effects for it.
-  {name: 'canary_event', number: 16, mail: () => syntheticCanaryMail(), canary: {run_id: 'canary-2026-09-28'}},
+  {name: 'canary_event', number: 17, mail: () => syntheticCanaryMail(), canary: {run_id: 'canary-2026-09-28'}},
 ]
 
 const bucket = {MAIL_STORE: {async put() {}}}

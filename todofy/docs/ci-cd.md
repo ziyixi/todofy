@@ -3,7 +3,11 @@
 Todofy lives in `todofy/` of a monorepo shared with Mail Hero (`mail-hero/`). One root workflow,
 `.github/workflows/ci.yml` ("CI and deploy", described in the root README), runs a `Changes` job, each app's
 checks from its own directory, a `Shared packages` job for `packages/*` (each package's own typecheck and
-tests), a `Contracts` job for the shared `mail.received.v1` contract, and `CI gate`.
+tests), a `Contracts` job for the shared contracts (`mail.received.v1` and
+`ops-v1`), and `CI gate`. For Todofy, `Contracts` runs `tests/unit/test_mail_hero_compat.py` (every
+fixture, the canary one included), `test_contract.py`, `test_openapi_vocab.py`, `test_ops_contract.py`
+(ops-v1 fixtures with `jsonschema`), `test_ops_core.py` (the core's ops values against the schema) and the
+gateway's `test/ops.test.ts`; the workerd suite `tests/runtime/test_ops.py` runs in `Todofy checks`.
 The `Todofy checks` and `Todofy deploy` jobs below run with `working-directory: todofy`. They check and deploy
 both Todofy Workers from the same commit: the TypeScript gateway `todofy` (`gateway/`) and the Python
 `todofy-core` (`worker/`, root `wrangler.toml`); see [gateway-contract.md](gateway-contract.md). Actions

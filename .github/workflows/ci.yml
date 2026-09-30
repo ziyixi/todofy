@@ -1,6 +1,6 @@
 # One workflow for both apps. "changes" decides what changed since a cumulative base (.github/scripts/ci_changes.py),
 # each app's checks run from its own directory, "Shared packages" checks packages/* (compiled into the apps),
-# "Contracts" runs both sides of mail.received.v1, and "CI gate" is the single status check to require.
+# "Contracts" runs both sides of mail.received.v1 and ops-v1, and "CI gate" is the single status check to require.
 # Deploys run only on main, only for the app that changed (itself or a shared package it compiles in, or
 # was dispatched), after the gate passes. See README.md "CI".
 name: CI and deploy
@@ -274,27 +274,38 @@ jobs:
         with:
           node-version: '26'
           cache: npm
-          cache-dependency-path: mail-hero/cloudflare/package-lock.json
+          cache-dependency-path: |
+            mail-hero/cloudflare/package-lock.json
+            todofy/gateway/package-lock.json
       - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
         with:
           version: '0.12.10'
           working-directory: todofy
           enable-cache: true
       # Producer: Mail Hero's parser and payload builder must still emit every golden fixture byte for byte.
-      # ops-v1: validate.mjs, the ops-v1.ts constants and the fixtures agree with the schema.
+      # ops-v1: validate.mjs, the ops-v1.ts constants and the fixtures agree with the schema, and every
+      # value Mail Hero's Ops code derives (status, guard, canary) passes the schema. Host only, no workerd.
       - name: Mail Hero builds the golden mail.received.v1 fixtures and checks ops-v1
         working-directory: mail-hero/cloudflare
         run: |
           npm ci
-          node --test test/contract-fixtures.test.mjs test/ops-contract.test.mjs
+          node --test test/contract-fixtures.test.mjs test/ops-contract.test.mjs test/native-ops.test.mjs
       # Consumer: Todofy validates every fixture (current and legacy) against the schema and parses it;
-      # ops-v1 fixtures get the reference JSON Schema validator's verdict.
-      - name: Todofy accepts every fixture
+      # ops-v1 fixtures get the reference JSON Schema validator's verdict, and every value core/ops.py
+      # derives (status, guard, canary result, report, digest items) is validated with it.
+      - name: Todofy accepts every fixture and checks ops-v1
         working-directory: todofy
         run: |
           uv sync --locked
           uv run pytest tests/unit/test_mail_hero_compat.py tests/unit/test_contract.py tests/unit/test_openapi_vocab.py \
-            tests/unit/test_ops_contract.py
+            tests/unit/test_ops_contract.py tests/unit/test_ops_core.py
+      # The gateway's Ops entrypoint (what the dashboard binds) forwards to todofy-core and returns
+      # schema-valid values; checked with validate.mjs, like Mail Hero.
+      - name: Todofy's Ops entrypoint returns ops-v1 values
+        working-directory: todofy/gateway
+        run: |
+          npm ci --no-audit --no-fund
+          npx --no-install vitest run test/ops.test.ts
 
   gate:
     name: CI gate

@@ -51,6 +51,11 @@ class Classify(unittest.TestCase):
         paths = ["contracts/mail-received-v1/fixtures/plain_text.json"]
         self.assertEqual(push(paths), expect(T, T, T, F, F))
 
+    def test_ops_contract_rechecks_both_apps_but_deploys_neither(self):
+        paths = ["contracts/ops-v1/ops-v1.schema.json", "contracts/ops-v1/fixtures/OpsStatus/todofy-ok.json"]
+        self.assertEqual(push(paths), expect(T, T, T, F, F))
+        self.assertEqual(push(["contracts/ops-v1/ops-v1.ts", "todofy/gateway/src/ops.ts"]), expect(T, T, T, T, F))
+
     def test_ci_changes_recheck_everything_but_deploy_nothing(self):
         self.assertEqual(push([".github/workflows/ci.yml"]), expect(T, T, T, F, F, packages=T))
         self.assertEqual(push([".github/scripts/ci_changes.py"]), expect(T, T, T, F, F, packages=T))
@@ -294,6 +299,64 @@ class PackageUsers(unittest.TestCase):
             self.assertLessEqual(set(users), {"todofy", "mail-hero"})
 
 
+def workflow_jobs():
+    text = WORKFLOW.read_text().split("\njobs:\n", 1)[1]
+    starts = [
+        (match.start(), match.group(1)) for match in re.finditer(r"^  ([a-z][a-z0-9-]*):\n", text, re.MULTILINE)
+    ]
+    blocks = {}
+    for index, (start, name) in enumerate(starts):
+        end = starts[index + 1][0] if index + 1 < len(starts) else len(text)
+        blocks[name] = text[start:end]
+    return blocks
+
+
+class ContractsJob(unittest.TestCase):
+    """The Contracts job runs both sides of both contracts, and every test file it names exists.
+
+    pytest and node --test fail on a missing file, but a renamed test must not silently drop out of a
+    command that also lists other files; this keeps the job's list and the repository in step.
+    """
+
+    TEST_FILE = re.compile(r"(?<![\w/.-])(tests?/[\w/.-]+\.(?:mjs|py|ts))")
+
+    def steps(self):
+        block = workflow_jobs()["contracts"]
+        return [step for step in re.split(r"^      - ", block, flags=re.MULTILINE)[1:] if "run: |" in step]
+
+    def named_tests(self):
+        found = set()
+        for step in self.steps():
+            directory = re.search(r"^        working-directory: (\S+)$", step, re.MULTILINE)
+            self.assertIsNotNone(directory, step)
+            for path in self.TEST_FILE.findall(step):
+                found.add(f"{directory.group(1)}/{path}")
+        return found
+
+    def test_every_named_test_file_exists(self):
+        names = self.named_tests()
+        self.assertTrue(names)
+        for name in sorted(names):
+            with self.subTest(file=name):
+                self.assertTrue((REPO / name).is_file(), f"{name} is named by the Contracts job but missing")
+
+    def test_both_sides_of_both_contracts_run(self):
+        self.assertLessEqual(
+            {
+                # mail.received.v1: producer rebuilds the golden bytes, consumer parses every fixture.
+                "mail-hero/cloudflare/test/contract-fixtures.test.mjs",
+                "todofy/tests/unit/test_mail_hero_compat.py",
+                # ops-v1: fixtures against the schema with both validators, and each app's derived values.
+                "mail-hero/cloudflare/test/ops-contract.test.mjs",
+                "mail-hero/cloudflare/test/native-ops.test.mjs",
+                "todofy/tests/unit/test_ops_contract.py",
+                "todofy/tests/unit/test_ops_core.py",
+                "todofy/gateway/test/ops.test.ts",
+            },
+            self.named_tests(),
+        )
+
+
 class DeployConditions(unittest.TestCase):
     """Every job that needs "CI gate" must spell out its status checks.
 
@@ -303,15 +366,7 @@ class DeployConditions(unittest.TestCase):
     """
 
     def jobs(self):
-        text = WORKFLOW.read_text().split("\njobs:\n", 1)[1]
-        starts = [
-            (match.start(), match.group(1)) for match in re.finditer(r"^  ([a-z][a-z0-9-]*):\n", text, re.MULTILINE)
-        ]
-        blocks = {}
-        for index, (start, name) in enumerate(starts):
-            end = starts[index + 1][0] if index + 1 < len(starts) else len(text)
-            blocks[name] = text[start:end]
-        return blocks
+        return workflow_jobs()
 
     def condition(self, block):
         match = re.search(r"^    if: (>-\n(?:      .*\n)+|.*\n)", block, re.MULTILINE)

@@ -302,7 +302,9 @@ rejects as `new Error(code)`. A thrown call (object down, Python exception) reje
 The object validates everything against the contract's rules (`core/ops.py`) and serves these in
 maintenance mode too. Vitest runs `Ops` in Node through a stand-in for `cloudflare:workers`
 (`gateway/test/cloudflare-workers.ts`, aliased in `vitest.config.ts`); `tests/runtime/test_ops.py`
-calls the real entrypoint over a service binding (`tests/runtime/ops_support.py`).
+calls the real entrypoint over a service binding (`tests/runtime/ops_support.py`). The root CI's
+`Contracts` job runs `test/ops.test.ts` next to both apps' ops-v1 schema checks, so a change under
+`contracts/` re-checks this forwarding; the runtime test runs in `Todofy checks`.
 
 ## 4. Trust and request IDs
 

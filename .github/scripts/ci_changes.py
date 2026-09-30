@@ -3,7 +3,7 @@
 
 Outputs (GITHUB_OUTPUT, "true"/"false"):
   todofy_check, mail_hero_check  run that app's full checks
-  contracts                      run both sides' mail.received.v1 contract tests
+  contracts                      run both sides' mail.received.v1 and ops-v1 contract tests
   packages                       run every shared package's own checks (packages/*)
   todofy_deploy, mail_hero_deploy  the app, or a shared package it compiles in, changed
                                  (deploy jobs also require refs/heads/main)

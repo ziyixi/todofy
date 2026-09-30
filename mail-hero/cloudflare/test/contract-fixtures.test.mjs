@@ -35,6 +35,20 @@ for (const testCase of CASES) {
   })
 }
 
+test('no two fixtures, current or legacy, share an event or message ID', () => {
+  // Consumers deduplicate by event_id: Todofy's runtime suite posts every fixture to one Worker, and a
+  // reused ID would be answered 409 event_conflict instead of being parsed.
+  const legacy = new URL('legacy/', FIXTURES)
+  const documents = [
+    ...fixtureFiles().map(name => JSON.parse(readFileSync(new URL(name, FIXTURES), 'utf8'))),
+    ...readdirSync(legacy).filter(name => name.endsWith('.json')).map(name => JSON.parse(readFileSync(new URL(name, legacy), 'utf8'))),
+  ]
+  for (const key of ['event_id', 'message']) {
+    const ids = documents.map(document => key === 'message' ? document.message.id : document.event_id)
+    assert.equal(new Set(ids).size, ids.length, `two fixtures share a ${key === 'message' ? 'message.id' : 'event_id'}`)
+  }
+})
+
 test('legacy fixtures stay frozen byte for byte, valid JSON of the same event type', () => {
   const legacy = new URL('legacy/', FIXTURES)
   const names = readdirSync(legacy).filter(name => name.endsWith('.json'))

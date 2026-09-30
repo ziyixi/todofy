@@ -13,10 +13,40 @@ compiled into both.
 Rules ([`AGENTS.md`](AGENTS.md)): the apps never import each other; shared code lives only in `contracts/`
 and `packages/`; each app deploys on its own. An app uses a package through a
 `"file:../../packages/<name>"` dependency and its bundler compiles it in, so a change to a package checks
-and deploys every app that uses it. Work inside an app's directory: `cd mail-hero` or `cd todofy`, then
+and deploys every app that uses it. `contracts/` holds documents, schemas and fixtures, plus two
+dependency-free files the TypeScript Workers import by relative path (`ops-v1/ops-v1.ts` types,
+`ops-v1/validate.mjs` for tests). Work inside an app's directory: `cd mail-hero` or `cd todofy`, then
 follow that app's README. Both apps were separate repositories until 2026-09-29; their histories are kept
 (`git log --follow todofy/<file>`, `git log -- mail-hero/<file>`; Mail Hero's old commit IDs are mapped in
 [`mail-hero/docs/history-map.md`](mail-hero/docs/history-map.md)).
+
+## Ops surface (`contracts/ops-v1`)
+
+Each app's TypeScript Worker also exports a named `WorkerEntrypoint` `Ops` for a future dashboard Worker in
+the same account (not built yet): `[[services]] binding = "MAIL_HERO", service = "mail-hero", entrypoint =
+"Ops"` and `binding = "TODOFY", service = "todofy", entrypoint = "Ops"`. There is no new public route and
+no Access check; only a Worker deployed in this account can bind it.
+
+| App | Methods | Where |
+| --- | --- | --- |
+| Mail Hero | `status()`, `setGuard()`, `startCanary({run_id})`, `canaryDelivery(event_id)` | [`mail-hero/docs/cloudflare-setup.md`](mail-hero/docs/cloudflare-setup.md) §2.3, [`mail-hero/cloudflare/README.md`](mail-hero/cloudflare/README.md) |
+| Todofy | `status()`, `setGuard()`, `canaryResult(event_id)`, `reportOps(report)` | [`todofy/docs/gateway-contract.md`](todofy/docs/gateway-contract.md) §3.7, [`todofy/docs/dev-notes.md`](todofy/docs/dev-notes.md) |
+
+- `status()` uses a small, documented number of indexed D1 reads and returns codes, numbers, booleans,
+  times and the UI URL only; never mail content.
+- A `shed` guard expires by itself (at most 36 h ahead) and defers only cleanup and safety-net jobs, each
+  within a bound; it never stops intake, parsing, delivery, retries or real-mail processing.
+- The canary is a synthetic `mail.received.v1` event with a top-level `canary` marker
+  ([`fixtures/canary_event.json`](contracts/mail-received-v1/fixtures/canary_event.json)); consumers must
+  not cause external side effects for it. Todofy runs it through Gemini and records the result, never
+  Todoist, summaries, reports or reminders.
+- Todofy's daily attention reminder (still at most one Todoist task per UTC day) carries the warning and
+  critical items of the latest `reportOps` report. Mail Hero's own `ALERT_WEBHOOK_URL` stays optional and
+  unconfigured; the dashboard's report into that digest is meant to replace it.
+
+Release order: Todofy (canary consumer) before Mail Hero, then the dashboard. The contract and the per-app
+plan are [`contracts/ops-v1/README.md`](contracts/ops-v1/README.md) and
+[`IMPLEMENTATION.md`](contracts/ops-v1/IMPLEMENTATION.md).
 
 ## CI
 
@@ -29,7 +59,7 @@ a manual run. Actions are pinned by commit SHA.
 | `Shared packages` | `packages/<name>/` or `.github/` changed, or a manual run | For every `packages/*/`, from its own directory: `npm ci`, `npm run typecheck`, `npm test` |
 | `Todofy checks` | `todofy/`, `packages/edge-auth/`, `contracts/` or `.github/` changed | Everything Todofy's CI ran, from `todofy/`: ruff, host tests, gateway lint/typecheck/tests, UI API check/typecheck/tests/build and the no-Mail-Hero guard, workerd runtime tests, placeholder config dry-run of both Workers |
 | `Mail Hero checks` | `mail-hero/`, `packages/edge-auth/`, `contracts/` or `.github/` changed | Everything Mail Hero's CI ran, from `mail-hero/`: config and backup tool tests, Worker typecheck and tests (workerd bindings, contract fixtures), UI typecheck/tests/build, plus a placeholder config dry-run |
-| `Contracts` | any app, a package an app uses, `contracts/` or `.github/` changed | Mail Hero rebuilds every golden fixture byte for byte; Todofy validates and parses every fixture; both sides check the `ops-v1` fixtures (Mail Hero with `validate.mjs`, Todofy with `jsonschema`) |
+| `Contracts` | any app, a package an app uses, `contracts/` or `.github/` changed | `mail.received.v1`: Mail Hero rebuilds every golden fixture byte for byte (the canary one included); Todofy validates and parses every fixture; neither side allows two fixtures to share an event ID. `ops-v1`: both sides validate every fixture against the schema (Mail Hero with `validate.mjs`, Todofy with `jsonschema`), and each app's own `Ops` code is checked against it on the host (Mail Hero `native-ops.test.mjs`, Todofy `test_ops_core.py` and the gateway's `ops.test.ts`). Nothing here needs workerd; each app's check job runs the real-binding `Ops` tests |
 | `CI gate` | always | Fails if any job above failed or was cancelled; skipped as unchanged is fine. **The one check to require on `main`** |
 | `Todofy deploy` | `main` only, `todofy/` or `packages/edge-auth/` changed (or dispatched), after `CI gate` | Generate configs, dry-run, D1 migrations, deploy `todofy-core` then the gateway, `/health` and core probes. `production` environment, group `todofy-production` |
 | `Mail Hero deploy` | `main` only, `mail-hero/` or `packages/edge-auth/` changed (or dispatched), after `CI gate` | `generate-ci-config.mjs`, dry-run, D1 migrations, deploy. `production` environment, group `mail-hero-production` |
@@ -47,6 +77,8 @@ job they need. `CI gate` needs both apps' check jobs and one of them is skipped 
 changed; a condition without a status function gets an implicit `success()` that also sees that skipped
 ancestor and would skip the deploy ([actions/runner#2205](https://github.com/actions/runner/issues/2205)).
 `test_ci_changes.py` (run by `Changes`) fails if a job after the gate loses this shape.
+It also fails if the `Contracts` job stops naming both sides' contract tests or names a test file that
+does not exist.
 
 The first push run of this workflow on `main` has no earlier successful run of it and therefore checks and
 deploys both apps. (The Go-era `ci.yml` of the old Todofy repository shares the file name; its last green
