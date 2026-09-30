@@ -17,9 +17,9 @@ Four hash-routed views; hash routing needs no Worker change behind Access. Page 
 
 | View | Route | Content | Endpoint |
 | --- | --- | --- | --- |
-| 首页 | `#/` | attention strip; launcher tiles grouped 应用 / 站点 / 后台服务 (registry order, never reordered by status); one line per flow; four mini quota bars + "N 个 Worker · 今日错误 N · 降载状态" | `/api/v2/home` |
+| 首页 | `#/` | attention strip; launcher tiles grouped 应用 / 站点 / 后台服务 (registry order, never reordered by status); one line per flow; four mini quota bars (Workers 请求, D1 读取行数, Workers AI neurons with 剩余, R2 存储; `HOME_QUOTA_IDS`) + "N 个 Worker · 今日错误 N · 降载状态" | `/api/v2/home` |
 | 业务流程 | `#/flows`, `#/flows/<flow>` | flow cards by business group (邮件与任务 / 内容与发布 / 平台), stage chains; the mail flow owns the canary (14-day strip, today's timeline, scope note verbatim) | `/api/v2/flows` |
-| Cloudflare 监控 | `#/cloudflare`, `#/cloudflare/worker/<script>` | the 13 quota rows (daily / monthly / storage), the auto-discovered Worker table, D1 / DO / R2 resources, read-only guard | `/api/v2/cloudflare` |
+| Cloudflare 监控 | `#/cloudflare`, `#/cloudflare/worker/<script>` | the 14 quota rows (daily / monthly / storage; Workers AI neurons among the daily ones, with the neurons left), the auto-discovered Worker table, D1 / DO / R2 resources, read-only guard | `/api/v2/cloudflare` |
 | 操作与记录 | `#/ops` | guard and canary actions (confirmation texts and CSRF flow unchanged), digest, full ops-v1 details per app (the old `AppCard` body), build, time zone, registry list | `/api/v2/ops` |
 
 v1 anchors map to routes (`web/src/router.ts`): `#apps` → `#/`, `#quota` → `#/cloudflare`, `#canary` →
@@ -90,7 +90,7 @@ Three lists joined by id, compiled into the Worker; the UI gets the public view 
 | --- | --- | --- | --- |
 | Mail Hero | 应用 | `ops_v1` (MAIL_HERO, guard) | 今日收件 |
 | Todofy (`todofy`, `todofy-core`) | 应用 | `ops_v1` (TODOFY, guard) | 24 小时收到 |
-| Flowday, 思源笔记 | 应用 | `link_only` (never probed) | host |
+| Flowday | 应用 | `link_only` (never probed) | host |
 | 个人网站 (`ziyixi-website`, assets only) | 站点 | `public_http`: one GET per tick to `www…/build-info.json` (the apex 308s to www), status + latency only, `redirect: 'manual'`, body unread, `enabled` flag. The site's Worker (`website/`) serves static assets only, which are not Worker invocations, so analytics cannot judge it; the file is part of its static export, so the probe survives the cutover | latency |
 | Notion 发布 (`ziyixi-notion-publish`) | 后台服务 | `analytics`: error rate + 26 h idle rule | last request hour |
 | Newsletter | 后台服务 | `none` → 未接入 | — |
@@ -248,7 +248,7 @@ while loading; one failing source greys only its own tile. Times in the browser 
 ## 8. Decisions taken (owner-approved defaults)
 
 Q1 title 个人控制台 · Q2 tile = entry's own health · Q3 home keeps one line per flow and 4 mini bars ·
-Q4 home grouped by kind, flows by business · Q5 Flowday/思源 link-only · Q6 probe the website every tick
+Q4 home grouped by kind, flows by business · Q5 Flowday link-only (思源笔记 was too until the owner retired it on 2026-09-30) · Q6 probe the website every tick
 · Q7 Newsletter 未接入 for now · Q8 24 h sparkline later (step 3, not in scope) · Q9 registry in repo TS
 · Q10 four tabs · Q11 no tile for this dashboard · Q12 unregistered Workers never alarm · Q13
 notion-publish idle limit 26 h.

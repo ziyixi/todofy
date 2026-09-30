@@ -17,7 +17,10 @@ export const GRAPHQL_MAX_BYTES = 1_000_000;
 /**
  * Verbatim copy of the query verified against the live account on 2026-09-29 (design.md §7.2); v2 only
  * raised the `workers` limit from 20 to 50 (design-v2.md §4) and parses the per-script fields it always
- * returned (errors, subrequests, CPU quantiles, DO requests per script) and the per-resource rows.
+ * returned (errors, subrequests, CPU quantiles, DO requests per script) and the per-resource rows. The
+ * `ai` dataset (Workers AI neurons by model, same day window as `workers`) was added on 2026-09-30 after
+ * the owner checked `aiInferenceAdaptiveGroups` with these filters and fields on the live account: it is
+ * part of this one request, so a tick still makes a single GraphQL call.
  */
 export const USAGE_QUERY = `query($a: string!, $day: Date!, $start: Time!, $end: Time!, $month: Date!) { viewer { accounts(filter: {accountTag: $a}) {
   workers: workersInvocationsAdaptive(limit: 50, filter: {datetime_geq: $start, datetime_leq: $end}) { sum { requests errors subrequests } dimensions { scriptName } quantiles { cpuTimeP50 cpuTimeP99 } }
@@ -28,11 +31,17 @@ export const USAGE_QUERY = `query($a: string!, $day: Date!, $start: Time!, $end:
   doSto: durableObjectsStorageGroups(limit: 5, filter: {date: $day}) { max { storedBytes } }
   r2ops: r2OperationsAdaptiveGroups(limit: 50, filter: {date_geq: $month, date_leq: $day}) { sum { requests } dimensions { actionType bucketName } }
   r2sto: r2StorageAdaptiveGroups(limit: 10, filter: {date: $day}) { max { payloadSize metadataSize objectCount } dimensions { bucketName } }
+  ai: aiInferenceAdaptiveGroups(limit: 20, filter: {datetime_geq: $start, datetime_leq: $end}) { sum { totalNeurons } dimensions { modelId } }
 } } }`;
 
 /** The `limit` of each dataset in USAGE_QUERY: a dataset returning this many rows is truncated. */
-const DATASET_LIMITS = { workers: WORKERS_QUERY_LIMIT, d1: 10, d1s: 10, doInv: 10, doPer: 10, doSto: 5, r2ops: 50, r2sto: 10 } as const;
+const DATASET_LIMITS = { workers: WORKERS_QUERY_LIMIT, d1: 10, d1s: 10, doInv: 10, doPer: 10, doSto: 5, r2ops: 50, r2sto: 10, ai: 20 } as const;
 type Dataset = keyof typeof DATASET_LIMITS;
+/**
+ * Datasets whose absence (not an array) leaves only their own rows without data instead of refusing the
+ * whole answer: Workers AI does not gate the guard, so it must never cost the other rows.
+ */
+const OPTIONAL_DATASETS: ReadonlySet<Dataset> = new Set<Dataset>(['ai']);
 
 /** R2 operation classes (R2 pricing). Any other actionType counts as Class A (cautious). */
 export const R2_CLASS_A: ReadonlySet<string> = new Set([
@@ -166,7 +175,7 @@ function field(row: unknown, group: string, name: string): number {
 function dimension(row: unknown, name: string): string {
   if (!isObject(row) || !isObject(row.dimensions)) return 'unknown';
   const value = row.dimensions[name];
-  // Script names, database/namespace IDs and bucket names only; bounded for storage.
+  // Script names, database/namespace IDs, bucket names and AI model IDs only; bounded for storage.
   return typeof value === 'string' && value !== '' ? value.slice(0, 80) : 'unknown';
 }
 
@@ -239,9 +248,15 @@ export function parseUsage(body: unknown, now: number): UsageData | null {
   if (!Array.isArray(accounts) || !isObject(accounts[0])) return null;
   const account = accounts[0];
   const sets = {} as Record<Dataset, unknown[]>;
+  const missing = new Set<Dataset>();
   for (const name of Object.keys(DATASET_LIMITS) as Dataset[]) {
     const value = account[name];
-    if (!Array.isArray(value)) return null;
+    if (!Array.isArray(value)) {
+      if (!OPTIONAL_DATASETS.has(name)) return null;
+      missing.add(name);
+      sets[name] = [];
+      continue;
+    }
     sets[name] = value as unknown[];
   }
 
@@ -268,6 +283,9 @@ export function parseUsage(body: unknown, now: number): UsageData | null {
   );
   measured.set('do_rows_read', sumBy(sets.doPer, 'doPer', (r) => field(r, 'sum', 'rowsRead'), namespace));
   measured.set('do_rows_written', sumBy(sets.doPer, 'doPer', (r) => field(r, 'sum', 'rowsWritten'), namespace));
+  // An answered `[]` is a day without AI calls: 0 used, not "no data" (only a missing dataset is null).
+  const ai = sumBy(sets.ai, 'ai', (r) => field(r, 'sum', 'totalNeurons'), (r) => dimension(r, 'modelId'));
+  measured.set('ai_neurons', missing.has('ai') ? { ...ai, used: null } : ai);
   const doStorage = sets.doSto.map((r) => field(r, 'max', 'storedBytes'));
   measured.set('do_storage', {
     used: doStorage.length === 0 ? null : Math.max(...doStorage),
@@ -302,7 +320,7 @@ export function parseUsage(body: unknown, now: number): UsageData | null {
 
   const order: readonly QuotaResourceId[] = [
     'workers_requests', 'd1_rows_read', 'd1_rows_written', 'do_requests', 'do_duration', 'do_rows_read',
-    'do_rows_written', 'r2_class_a', 'r2_class_b', 'd1_storage', 'd1_database_max', 'do_storage', 'r2_storage',
+    'do_rows_written', 'ai_neurons', 'r2_class_a', 'r2_class_b', 'd1_storage', 'd1_database_max', 'do_storage', 'r2_storage',
   ];
   const rows = order.map((id) => {
     const m = measured.get(id);

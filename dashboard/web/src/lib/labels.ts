@@ -146,7 +146,11 @@ const SIGNALS: Readonly<Record<string, string>> = {
 export function signalLabel(code: string): string {
   if (Object.hasOwn(SIGNALS, code)) return SIGNALS[code] as string
   const quota = /^(.+)_high$/.exec(code)
-  if (quota && isQuotaId(quota[1] as string)) return `${QUOTA[quota[1] as QuotaResourceId]}用量高`
+  if (quota && isQuotaId(quota[1] as string)) {
+    const name = QUOTA[quota[1] as QuotaResourceId]
+    // A name ending in Latin letters ("Workers AI neurons") keeps a space before the Chinese.
+    return `${name}${/[A-Za-z]$/.test(name) ? ' ' : ''}用量高`
+  }
   return code
 }
 
@@ -158,6 +162,7 @@ export const QUOTA: Readonly<Record<QuotaResourceId, string>> = {
   do_duration: 'Durable Objects 时长',
   do_rows_read: 'Durable Objects SQLite 读取行数',
   do_rows_written: 'Durable Objects SQLite 写入行数',
+  ai_neurons: 'Workers AI neurons',
   r2_class_a: 'R2 A 类操作',
   r2_class_b: 'R2 B 类操作',
   d1_storage: 'D1 存储（全部数据库）',

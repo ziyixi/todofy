@@ -22,7 +22,6 @@ describe('首页', () => {
       '打开 Mail Hero（新标签页），mail-hero.ziyixi.science',
       '打开 Todofy（新标签页），todofy.ziyixi.science',
       '打开 Flowday（新标签页），flowday.ziyixi.science，未接入监控（仅链接）',
-      '打开 思源笔记（新标签页），siyuan.ziyixi.science，未接入监控（仅链接）',
     ])
     for (const link of links) {
       expect(link).toHaveAttribute('target', '_blank')
@@ -30,7 +29,7 @@ describe('首页', () => {
       expect(link.getAttribute('href')).toMatch(/^https:\/\/[a-z-]+\.ziyixi\.science\/$/)
     }
     // Access-protected entries carry the lock with its own name; never an emoji.
-    expect(within(apps).getAllByRole('img', { name: '受 Access 保护' })).toHaveLength(4)
+    expect(within(apps).getAllByRole('img', { name: '受 Access 保护' })).toHaveLength(3)
 
     // Status lines are separate buttons (never inside the link).
     const mail = within(apps).getByRole('button', { name: 'Mail Hero 状态：正常，查看详情' })
@@ -38,7 +37,6 @@ describe('首页', () => {
     expect(within(apps).getByRole('button', { name: 'Todofy 状态：正常，查看详情' })).toHaveTextContent('24 小时 41 封')
     // Link-only tiles: no status button, no fake green, the host instead.
     expect(within(apps).queryByRole('button', { name: /Flowday/ })).toBeNull()
-    expect(within(apps).queryByRole('button', { name: /思源笔记/ })).toBeNull()
 
     const sites = within(launcher()).getByRole('region', { name: '站点' })
     expect(within(sites).getByRole('link', { name: '打开 个人网站（新标签页），ziyixi.science' })).toHaveAttribute('href', 'https://ziyixi.science/')
@@ -80,11 +78,19 @@ describe('首页', () => {
     expect(meters.map((meter) => meter.getAttribute('aria-valuetext'))).toEqual([
       '已用 712 次，上限 100,000 次，0.7%',
       '已用 7,142 行，上限 5,000,000 行，0.1%',
-      '已用 1,380 次，上限 100,000 次，1.4%',
+      '已用 300 neurons，上限 10,000 neurons，3%，剩余 9,700 neurons',
       '已用 837 MB，上限 10 GB，8.4%',
     ])
     expect(within(cf).getByText('712 / 10 万 ·')).toBeInTheDocument()
     expect(within(cf).getByText('837 MB / 10 GB ·')).toBeInTheDocument()
+    // Workers AI states the neurons left today (on phones in place of the percent, which the bar shows).
+    const ai = within(cf).getByRole('meter', { name: 'Workers AI neurons' }).closest('li') as HTMLElement
+    expect(within(ai).getByText('剩余 9,700')).toHaveClass('mini-quota-remaining')
+    expect(within(ai).getByText('300 / 1 万 ·')).toHaveClass('mini-quota-amount')
+    expect(within(ai).getByText('3% ·')).toHaveClass('mini-quota-amount')
+    expect(within(ai).getByText('AI neurons')).toHaveClass('name-short')
+    // DO requests left the home bars for Workers AI; it stays on the Cloudflare view.
+    expect(within(cf).queryByRole('meter', { name: 'Durable Objects 请求' })).toBeNull()
     expect(within(cf).getByRole('link', { name: /5 个 Worker · 今日错误 3/ })).toHaveTextContent('未降载')
   })
 

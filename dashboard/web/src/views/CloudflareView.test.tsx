@@ -14,13 +14,13 @@ async function showCloudflare(scenario: Scenario | ((call: Call) => Scenario), h
 const section = (name: string) => screen.getByRole('region', { name })
 
 describe('Cloudflare 监控', () => {
-  it('shows the 13 allowances in three groups, with the guard ticks and estimates', async () => {
+  it('shows the 14 allowances in three groups, with the guard ticks and estimates', async () => {
     await showCloudflare(healthy())
     expect(screen.getByText(/数据来自 Cloudflare GraphQL/)).toHaveTextContent('获取于 00:30（统计日 2026-09-29 UTC） · 最新')
     expect(screen.getByText('用量按整个账户统计，其他项目也算在内。')).toBeInTheDocument()
 
     const quota = section('账户额度')
-    expect(within(quota).getAllByRole('meter')).toHaveLength(13)
+    expect(within(quota).getAllByRole('meter')).toHaveLength(14)
     for (const name of ['每日', '每月', '存储']) expect(within(quota).getByRole('region', { name })).toBeInTheDocument()
     const workers = within(quota).getByRole('meter', { name: 'Workers 请求' })
     expect(workers).toHaveAttribute('aria-valuetext', '已用 712 次，上限 100,000 次，0.7%')
@@ -29,6 +29,49 @@ describe('Cloudflare 监控', () => {
     const item = workers.closest('li') as HTMLElement
     expect(within(item).getByText('mail-hero（Mail Hero）')).toBeInTheDocument()
     expect(within(item).getByText('new-worker')).toBeInTheDocument()
+  })
+
+  it('shows Workers AI neurons as a daily row with the neurons left, its top models and no guard', async () => {
+    await showCloudflare(healthy())
+    const daily = within(section('账户额度')).getByRole('region', { name: '每日' })
+    expect(within(daily).getByText(/每天 00:00 UTC 重置/)).toHaveTextContent('每天 00:00 UTC 重置，计入自动降载（Workers AI neurons 除外）')
+    const meter = within(daily).getByRole('meter', { name: 'Workers AI neurons' })
+    expect(meter).toHaveAttribute('aria-valuetext', '已用 300 neurons，上限 10,000 neurons，3%，剩余 9,700 neurons')
+    const item = meter.closest('li') as HTMLElement
+    expect(item).toHaveClass('quota-ok')
+    expect(within(item).getByText('剩余 9,700 neurons')).toHaveClass('quota-remaining')
+    expect(within(item).getByText('估算与主要来源')).toBeInTheDocument()
+    expect(within(item).getByText('@cf/meta/llama-3.1-8b-instruct')).toBeInTheDocument()
+    expect(within(item).getByText('225 neurons')).toBeInTheDocument()
+    expect(within(item).getByText(/本 UTC 日结束约 423.5 neurons（4.2%）/)).toBeInTheDocument()
+    expect(within(item).getByRole('link', { name: /限额说明/ })).toHaveAttribute('href', 'https://developers.cloudflare.com/workers-ai/platform/pricing/')
+    // No other row states a remainder.
+    expect(within(section('账户额度')).getAllByText(/^剩余 /)).toHaveLength(1)
+  })
+
+  it('reads a day without AI calls as 0 used with everything left, and a high one as a warning that never sheds', async () => {
+    const base = healthy()
+    const idle = quotaRows({ ai_neurons: { used: 0, projected: 0, projected_percent: 0, breakdown: [] } })
+    await showCloudflare({ ...base, cloudflare: { ...base.cloudflare, usage: { ...base.cloudflare.usage, rows: idle } } })
+    const meter = within(section('账户额度')).getByRole('meter', { name: 'Workers AI neurons' })
+    expect(meter).toHaveAttribute('aria-valuetext', '已用 0 neurons，上限 10,000 neurons，0%，剩余 10,000 neurons')
+    expect(within(meter.closest('li') as HTMLElement).getByText('0 neurons / 10,000 neurons')).toBeInTheDocument()
+    expect(within(meter.closest('li') as HTMLElement).getByText('剩余 10,000 neurons')).toBeInTheDocument()
+    expect(meter.closest('li')).not.toHaveTextContent('无数据')
+  })
+
+  it('warns on Workers AI at 80 % but never names it as the guard\'s highest trigger', async () => {
+    const base = healthy()
+    const high = quotaRows({ ai_neurons: { used: 9_650.4, projected: null, projected_percent: null } })
+    await showCloudflare({ ...base, cloudflare: { ...base.cloudflare, usage: { ...base.cloudflare.usage, rows: high } } })
+    const item = within(section('账户额度')).getByRole('meter', { name: 'Workers AI neurons' }).closest('li') as HTMLElement
+    expect(item).toHaveClass('quota-danger')
+    expect(within(item).getByText('超过 95%')).toBeInTheDocument()
+    // Rounded down: 349.6 left reads 349, never more than there is.
+    expect(within(item).getByText('剩余 349 neurons')).toBeInTheDocument()
+    const guard = section('降载')
+    expect(guard).toHaveTextContent('未降载')
+    expect(guard).not.toHaveTextContent('Workers AI')
   })
 
   it('marks a quota row by its measured value, as the guard does: 79.95 % reads 80 % but is below it (C3)', async () => {

@@ -224,6 +224,22 @@ and `BUILD_SHA` with `--var` and writes the secrets file. Synthetic values only,
 | | dry-run of the committed config through `deploy-vars.mjs` (placeholder secrets) | ok; `CANARY_ENABLED`, `BUILD_SHA` and the four secrets shown as `(hidden)` |
 | equivalence | the old generator path and the new one, each a full `wrangler deploy` against a local mock of the Cloudflare API (loopback only, placeholder token), with the real static GitHub variables and placeholder secrets | the same 17 requests; bindings identical in value and order; custom domain, cron, DO migration and assets identical; the uploaded script differs only in esbuild's `// path` comments (normalized sha256 `9b36b3c6…` on both sides); `metadata.package_dependencies` is no longer sent (no `package.json` in `dashboard/`) |
 
+## 1g. Local, Workers AI neurons and the retired 思源笔记 (2026-09-30)
+
+A daily quota row `ai_neurons` (Workers AI, 10,000 neurons, not a guard trigger; limits.md §1) read
+from the `ai` dataset added to the same single GraphQL query, and the registry entry `siyuan` removed.
+Synthetic data only, no production call:
+
+| Job | Step | Result |
+| --- | --- | --- |
+| `Dashboard checks` | `node --test deploy/test/*.test.mjs` | 14 passed |
+| | worker lint, typecheck, `npm test` | ok; 13 files, 195 tests passed (`[]` → 0 used, a missing `ai` field → 无数据 for that row only, per-model breakdown, 20-row truncation, projection, `ai_neurons_high` at 80/95 %, the guard ignoring the row) |
+| | worker `npm run test:runtime` (workerd) | 6 files, 62 tests passed (the fake GraphQL's `ai: []` reads 0; at 97 % the digest carries `ai_neurons_high` critical and neither app gets `setGuard`) |
+| | web lint, typecheck, tests, build; import guard | ok; 13 files, 102 tests passed; no cross-origin references |
+| | placeholder config dry-run (`GITHUB_SHA` set as in CI) | ok; bindings unchanged, the four secrets hidden; 173.03 KiB |
+| `Changes` | from `todofy/`: `uv run python -m unittest discover -s ../.github/scripts` | 147 tests OK |
+| browser | built UI against the synthetic fixtures at 1280 px and 375 px | 首页: the AI bar replaces DO 请求 ("300 / 1 万 · 3% · 剩余 9,700"; phones "剩余 9,700"), fits the 2 × 2 phone grid; Cloudflare: the row sits in 每日 with "剩余 … neurons" on its own line, the group note names it as the exception, the guard line never cites it |
+
 ## 2. Production (pending)
 
 None of these has been done; each needs the first `Dashboard deploy` on `main` (after Todofy and Mail
@@ -238,6 +254,7 @@ Hero with ops-v1 are live) and, where stated, the owner in a browser.
 | Real Access login | the owner opens the page with the primary login and, where configured, an alias; one refresh and one confirmed write (解除降载 is harmless when nothing is shed) | pending |
 | Analytics token | the GraphQL query with the production token returns every dataset; then the token is replaced by an "Account Analytics: Read" token (setup.md §4) and checked again; record the replacement date here. Not done while the broad bootstrap token is still the Worker secret `CF_ANALYTICS_TOKEN` (the deploy refuses it only if it equals `CF_API_TOKEN`) | open (a broader token is still reused) |
 | Quota numbers | spot-check the page's daily numbers against the Cloudflare dashboard's usage pages for the same UTC day | pending |
+| Workers AI neurons | once the account makes Workers AI calls, the `ai_neurons` row matches the Workers AI dashboard's Neurons for the same UTC day (only the empty `[]` answer has been seen live, 2026-09-30) | pending |
 | First scheduled canary | the day's run reaches `ok` (Mail Hero delivered, Todofy summarized it, no Todoist task, not listed as mail); this does not exercise Email Routing, raw storage or parsing | pending |
 | Guard round trip | only if a real ≥ 80 % day happens, or by the owner's 强制降载 then 解除降载: both apps report the guard in `status()` and clear it | pending |
 | Digest | Todofy's next daily reminder carries the dashboard's warning/critical items, or none | pending |

@@ -26,6 +26,7 @@ import type {
   StageState,
   WorkerRow,
 } from '../../../worker/src/api-v2-types.ts'
+import { HOME_QUOTA_IDS } from '../../../worker/src/api-v2-types.ts'
 import { registryView } from '../../../worker/src/registry.ts'
 
 /** The fixed "now" of every test: 2026-09-29 17:00 UTC (01:00 on 9-30 in Asia/Shanghai). */
@@ -140,6 +141,22 @@ export function quotaRows(overrides: Partial<Record<QuotaRow['id'], Partial<Quot
     row({ id: 'do_duration', period: 'daily', unit: 'gb_seconds', limit: 13_000, used: 212 }),
     row({ id: 'do_rows_read', period: 'daily', unit: 'rows', limit: 5_000_000, used: 21_400 }),
     row({ id: 'do_rows_written', period: 'daily', unit: 'rows', limit: 100_000, used: 1_920 }),
+    // Workers AI: daily but never a guard trigger; synthetic public model IDs.
+    row({
+      id: 'ai_neurons',
+      period: 'daily',
+      unit: 'neurons',
+      limit: 10_000,
+      used: 300,
+      projected: 423.5,
+      projected_percent: 4.2,
+      guard_trigger: false,
+      breakdown: [
+        { name: '@cf/meta/llama-3.1-8b-instruct', value: 225 },
+        { name: '@cf/baai/bge-m3', value: 75 },
+      ],
+      source: 'https://developers.cloudflare.com/workers-ai/platform/pricing/',
+    }),
     row({ id: 'r2_class_a', period: 'monthly', unit: 'operations', limit: 1_000_000, used: 18_450 }),
     row({ id: 'r2_class_b', period: 'monthly', unit: 'operations', limit: 10_000_000, used: 61_200 }),
     row({ id: 'd1_storage', period: 'storage', unit: 'bytes', limit: 5_000_000_000, used: 46_200_000 }),
@@ -156,7 +173,6 @@ export function quotaRows(overrides: Partial<Record<QuotaRow['id'], Partial<Quot
   })
 }
 
-const HOME_QUOTA = ['workers_requests', 'd1_rows_read', 'do_requests', 'r2_storage']
 
 function usage(patch: Partial<UsageView> = {}): UsageView {
   return {
@@ -205,7 +221,6 @@ function entries(patch: Record<string, Partial<EntryState>> = {}): EntryState[] 
     entry('mail-hero', { metric: { kind: 'counter', name: 'ingest_today_messages', value: 37 }, ...patch['mail-hero'] }),
     entry('todofy', { metric: { kind: 'counter', name: 'received_24h', value: 41 }, ...patch.todofy }),
     entry('flowday', { level: 'link', checked_at: null, ...patch.flowday }),
-    entry('siyuan', { level: 'link', checked_at: null, ...patch.siyuan }),
     entry('website', { metric: { kind: 'latency', ms: 180 }, ...patch.website }),
     entry('notion-publish', { metric: { kind: 'last_active', hour: '2026-09-29T16:00:00.000Z' }, ...patch['notion-publish'] }),
     entry('newsletter', { level: 'unmonitored', checked_at: null, ...patch.newsletter }),
@@ -513,7 +528,7 @@ function scenario(
       cloudflare: {
         usage_status: use.status,
         fetched_at: use.fetched_at,
-        quota: use.rows.filter((item) => HOME_QUOTA.includes(item.id)),
+        quota: use.rows.filter((item) => HOME_QUOTA_IDS.includes(item.id)),
         workers: workers.length,
         errors_today: workers.reduce((sum, item) => sum + item.errors, 0),
         guard_level: guard.desired.level,

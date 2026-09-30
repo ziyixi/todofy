@@ -110,6 +110,7 @@ export type QuotaResourceId =
   | 'do_duration'
   | 'do_rows_read'
   | 'do_rows_written'
+  | 'ai_neurons'
   | 'r2_class_a'
   | 'r2_class_b'
   | 'd1_storage'
@@ -125,6 +126,7 @@ export const QUOTA_RESOURCES: readonly QuotaResourceId[] = [
   'do_duration',
   'do_rows_read',
   'do_rows_written',
+  'ai_neurons',
   'r2_class_a',
   'r2_class_b',
   'd1_storage',
@@ -135,7 +137,14 @@ export const QUOTA_RESOURCES: readonly QuotaResourceId[] = [
 
 /** daily: resets 00:00 UTC; monthly: UTC calendar month to date; storage: current size. */
 export type QuotaPeriod = 'daily' | 'monthly' | 'storage';
-export type QuotaUnit = 'requests' | 'rows' | 'gb_seconds' | 'operations' | 'bytes';
+export type QuotaUnit = 'requests' | 'rows' | 'gb_seconds' | 'operations' | 'bytes' | 'neurons';
+
+/**
+ * Rows whose remaining allowance the UI states in words ("剩余 9,700"). Workers AI: on Workers Free
+ * calls above 10,000 neurons a day fail until 00:00 UTC, and the guard does not act on it (it does not
+ * trigger shed, docs/limits.md §1), so the headroom left today is the number that matters.
+ */
+export const QUOTA_SHOW_REMAINING: readonly QuotaResourceId[] = ['ai_neurons'];
 
 export interface QuotaRow {
   readonly id: QuotaResourceId;
@@ -150,11 +159,11 @@ export interface QuotaRow {
   /** Linear end-of-period projection; null for storage and when too little of the period has passed. */
   readonly projected: number | null;
   readonly projected_percent: number | null;
-  /** Counts for the guard rule (daily resources and R2 operations; never storage). */
+  /** Counts for the guard rule (daily resources except `ai_neurons`, and R2 operations; never storage). */
   readonly guard_trigger: boolean;
   /** The dataset returned as many rows as the query's limit: `used` is a lower bound. */
   readonly truncated: boolean;
-  /** Largest contributors, at most 5: script name, D1 database ID, DO namespace ID or bucket name. */
+  /** Largest contributors, at most 5: script name, D1 database ID, DO namespace ID, bucket name or Workers AI model ID. */
   readonly breakdown: readonly { readonly name: string; readonly value: number }[];
   /** Cloudflare documentation URL of the limit. */
   readonly source: string;

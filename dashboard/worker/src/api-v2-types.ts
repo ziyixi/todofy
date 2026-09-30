@@ -441,8 +441,13 @@ export interface FlowSummary {
   readonly freshness: Freshness;
 }
 
-/** The four mini bars of 首页 (workers_requests, d1_rows_read, do_requests, r2_storage). */
-export const HOME_QUOTA_IDS: readonly QuotaResourceId[] = ['workers_requests', 'd1_rows_read', 'do_requests', 'r2_storage'];
+/**
+ * The four mini bars of 首页 (Q3 keeps four, next to the four flow lines). `ai_neurons` replaced
+ * `do_requests` on 2026-09-30 as the least informative of the four: the same 100,000-a-day allowance
+ * as `workers_requests` and driven by the same app traffic, while the Workers AI headroom (a hard daily
+ * cap the guard does not act on) was otherwise only on the Cloudflare view, where DO requests stay.
+ */
+export const HOME_QUOTA_IDS: readonly QuotaResourceId[] = ['workers_requests', 'd1_rows_read', 'ai_neurons', 'r2_storage'];
 
 export interface CloudflareSummary {
   readonly usage_status: UsageView['status'];

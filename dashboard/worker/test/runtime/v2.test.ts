@@ -82,7 +82,7 @@ describe('GET /api/v2/registry', () => {
     const first = await h.v2<RegistryResponse>('registry');
     expect(first).toMatchObject({ status: 200, etag: '"test"' });
     expect(first.bytes).toBeLessThanOrEqual(V2_BODY_BUDGET.registry);
-    expect(first.body?.entries.map((e) => e.id)).toEqual(['mail-hero', 'todofy', 'flowday', 'siyuan', 'website', 'notion-publish', 'newsletter', 'home']);
+    expect(first.body?.entries.map((e) => e.id)).toEqual(['mail-hero', 'todofy', 'flowday', 'website', 'notion-publish', 'newsletter', 'home']);
     const text = JSON.stringify(first.body);
     expect(text).not.toContain('build-info');
     expect(text).not.toContain('MAIL_HERO');
@@ -102,7 +102,6 @@ describe('GET /api/v2/home', () => {
       'mail-hero': ['unknown', 'never_checked'],
       todofy: ['unknown', 'never_checked'],
       flowday: ['link', null],
-      siyuan: ['link', null],
       website: ['unknown', 'never_checked'],
       'notion-publish': ['unknown', 'never_checked'],
       newsletter: ['unmonitored', null],
@@ -136,7 +135,7 @@ describe('GET /api/v2/home', () => {
       ['ops-digest', 'ok', false],
     ]);
     expect(home.cloudflare).toMatchObject({ usage_status: 'ok', workers: 5, errors_today: 3, guard_level: 'normal' });
-    expect(home.cloudflare.quota.map((q) => q.id)).toEqual(['workers_requests', 'd1_rows_read', 'do_requests', 'r2_storage']);
+    expect(home.cloudflare.quota.map((q) => q.id)).toEqual(['workers_requests', 'd1_rows_read', 'ai_neurons', 'r2_storage']);
     expect(home.digest.accepted).toBe(true);
 
     const again = await h.v2('home', first.etag);
@@ -186,7 +185,7 @@ describe('GET /api/v2/home', () => {
 });
 
 describe('GET /api/v2/cloudflare', () => {
-  it.each([0, 5, 20])('lists %i discovered Workers, their resources and the 13 quota rows', async (count) => {
+  it.each([0, 5, 20])('lists %i discovered Workers, their resources and the 14 quota rows', async (count) => {
     h = await startFlows({ usage: usageWithScripts(count), bindings: { CANARY_UTC_HOUR: '23' } });
     await h.tick(Date.now() - MIN);
     const answer = await h.v2<CloudflareResponse>('cloudflare');
@@ -194,7 +193,7 @@ describe('GET /api/v2/cloudflare', () => {
     if (cf === null) throw new Error('no body');
     expect(answer.bytes).toBeLessThanOrEqual(V2_BODY_BUDGET.cloudflare);
     expect(await h.lastRowsRead()).toBeLessThanOrEqual(V2_ROWS_READ.cloudflare);
-    expect(cf.usage.rows).toHaveLength(13);
+    expect(cf.usage.rows).toHaveLength(14);
     expect(cf.workers).toHaveLength(count);
     expect(cf.workers.filter((w) => w.entry === null)).toHaveLength(Math.max(0, count - 5));
     expect(cf.workers_truncated).toBe(false);

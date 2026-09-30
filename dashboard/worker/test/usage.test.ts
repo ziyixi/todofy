@@ -16,7 +16,7 @@ import {
   usageVariables,
   type FetchLike,
 } from '../src/usage.ts';
-import { REALISTIC_USAGE, SYNTHETIC_D1, SYNTHETIC_NS, graphqlBody, usageWithScripts } from './graphql-fixture.ts';
+import { REALISTIC_USAGE, SYNTHETIC_D1, SYNTHETIC_NS, aiNeurons, graphqlBody, usageWithScripts } from './graphql-fixture.ts';
 
 const NOW = Date.parse('2026-09-29T12:00:00Z');
 const TOKEN = 'synthetic-analytics-token-000000000000';
@@ -50,7 +50,8 @@ describe('the usage query', () => {
   it('has one allowance per resource, with a Cloudflare docs source', () => {
     for (const id of QUOTA_RESOURCES) {
       expect(ALLOWANCES[id].source).toMatch(/^https:\/\/developers\.cloudflare\.com\//);
-      expect(ALLOWANCES[id].guardTrigger).toBe(ALLOWANCES[id].period !== 'storage');
+      // Workers AI is the one daily row that never sheds (limits.md §1).
+      expect(ALLOWANCES[id].guardTrigger).toBe(ALLOWANCES[id].period !== 'storage' && id !== 'ai_neurons');
     }
   });
 });
@@ -163,6 +164,60 @@ describe('parseUsage', () => {
     const body = graphqlBody() as { data: { viewer: { accounts: Record<string, unknown>[] } } };
     delete body.data.viewer.accounts[0]?.r2ops;
     expect(parseUsage(body, NOW)).toBeNull();
+  });
+});
+
+describe('parseUsage: Workers AI neurons', () => {
+  it('is part of the one query, over the same UTC day window as the Worker requests', () => {
+    expect(USAGE_QUERY).toContain(
+      'ai: aiInferenceAdaptiveGroups(limit: 20, filter: {datetime_geq: $start, datetime_leq: $end}) { sum { totalNeurons } dimensions { modelId } }',
+    );
+    expect(ALLOWANCES.ai_neurons).toMatchObject({
+      period: 'daily',
+      unit: 'neurons',
+      limit: 10_000,
+      guardTrigger: false,
+      source: 'https://developers.cloudflare.com/workers-ai/platform/pricing/',
+    });
+  });
+
+  it('reads an answered [] as 0 used, not as no data', () => {
+    const ai = row(parseUsage(graphqlBody({ aiModels: [] }), NOW)?.rows ?? [], 'ai_neurons');
+    expect(ai).toMatchObject({ used: 0, limit: 10_000, percent: 0, projected: 0, projected_percent: 0, guard_trigger: false, truncated: false, breakdown: [] });
+  });
+
+  it('sums neurons over models, lists the top models as the breakdown and projects the day', () => {
+    const rows = parseUsage(graphqlBody(aiNeurons(30)), NOW)?.rows ?? [];
+    // 12:00 UTC: half the day gone, so 3,000 neurons project to 6,000 (60 %).
+    expect(row(rows, 'ai_neurons')).toMatchObject({ period: 'daily', unit: 'neurons', used: 3000, percent: 30, projected: 6000, projected_percent: 60 });
+    expect(row(rows, 'ai_neurons').breakdown).toEqual([
+      { name: '@cf/meta/llama-3.1-8b-instruct', value: 2250 },
+      { name: '@cf/baai/bge-m3', value: 750 },
+    ]);
+  });
+
+  it('keeps fractional neurons to one decimal, sums a repeated model and caps the breakdown at 5', () => {
+    const aiModels = [
+      { model: 'm-a', neurons: 10.04 },
+      { model: 'm-a', neurons: 5.02 },
+      ...Array.from({ length: 6 }, (_, i) => ({ model: `m-${String(i)}`, neurons: i + 1 })),
+    ];
+    const ai = row(parseUsage(graphqlBody({ aiModels }), NOW)?.rows ?? [], 'ai_neurons');
+    expect(ai.used).toBe(36.1);
+    expect(ai.breakdown).toHaveLength(5);
+    expect(ai.breakdown[0]).toEqual({ name: 'm-a', value: 15.1 });
+  });
+
+  it('marks a full page of 20 models as truncated', () => {
+    const aiModels = Array.from({ length: 20 }, (_, i) => ({ model: `m-${String(i)}`, neurons: 1 }));
+    expect(row(parseUsage(graphqlBody({ aiModels }), NOW)?.rows ?? [], 'ai_neurons')).toMatchObject({ used: 20, truncated: true });
+  });
+
+  it('shows no data for a missing `ai` dataset without refusing the other rows', () => {
+    const data = parseUsage(graphqlBody({ omitAi: true, workersRequests: 500 }), NOW);
+    expect(data).not.toBeNull();
+    expect(row(data?.rows ?? [], 'ai_neurons')).toMatchObject({ used: null, percent: null, projected: null });
+    expect(row(data?.rows ?? [], 'workers_requests').used).toBe(500);
   });
 });
 

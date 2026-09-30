@@ -1522,6 +1522,13 @@ main {
   color: var(--fg-2);
 }
 
+/* Workers AI: the headroom left today, the number that matters for a hard daily cap. */
+.quota-remaining,
+.mini-quota-remaining {
+  color: var(--fg);
+  font-weight: 600;
+}
+
 .quota-extra {
   display: flex;
   flex-wrap: wrap;

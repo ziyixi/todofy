@@ -43,7 +43,7 @@ export function formatBytesBinary(value: number): string {
   return `${unit === 0 ? size : Math.round(size * 10) / 10} ${BINARY_UNITS[unit]}`
 }
 
-/** A quota amount in its unit, e.g. "12,345 次", "1.2 GB", "310.5 GB·s". */
+/** A quota amount in its unit, e.g. "12,345 次", "1.2 GB", "310.5 GB·s", "9,700 neurons". */
 export function formatQuantity(value: number, unit: QuotaUnit): string {
   switch (unit) {
     case 'bytes':
@@ -55,6 +55,9 @@ export function formatQuantity(value: number, unit: QuotaUnit): string {
     case 'requests':
     case 'operations':
       return `${formatNumber(Math.round(value))} 次`
+    case 'neurons':
+      // Fractional (Workers AI bills per request in fractions of a neuron): one decimal at most.
+      return `${formatNumber(value)} neurons`
   }
 }
 

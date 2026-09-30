@@ -44,15 +44,14 @@ describe('操作与记录', () => {
       'Mail Hero',
       'Todofy',
       'Flowday',
-      '思源笔记',
       '个人网站',
       'Notion 发布',
       'Newsletter',
       '个人控制台',
     ])
     expect(rows[2]).toHaveTextContent('仅链接（受 Access 保护，不探测）')
-    expect(rows[4]).toHaveTextContent('公开地址探测')
-    expect(rows[6]).toHaveTextContent('未接入监控')
+    expect(rows[3]).toHaveTextContent('公开地址探测')
+    expect(rows[5]).toHaveTextContent('未接入监控')
   })
 
   it('shows degraded apps with plain-text signal labels', async () => {

@@ -57,7 +57,7 @@ describe('the registry', () => {
 
   it('registers the entries of the design, in their groups and order', () => {
     const byGroup = (group: string) => REGISTRY.entries.filter((e) => e.group === group).sort((a, b) => a.order - b.order).map((e) => e.id);
-    expect(byGroup('apps')).toEqual(['mail-hero', 'todofy', 'flowday', 'siyuan']);
+    expect(byGroup('apps')).toEqual(['mail-hero', 'todofy', 'flowday']);
     expect(byGroup('sites')).toEqual(['website']);
     expect(byGroup('services')).toEqual(['notion-publish', 'newsletter']);
     expect(byGroup('hidden')).toEqual(['home']);
@@ -66,7 +66,6 @@ describe('the registry', () => {
       'mail-hero': 'ops_v1',
       todofy: 'ops_v1',
       flowday: 'link_only',
-      siyuan: 'link_only',
       website: 'public_http',
       'notion-publish': 'analytics',
       newsletter: 'none',
@@ -187,11 +186,12 @@ describe('validateRegistry', () => {
     const r = copy();
     entry(r, 'flowday').status = { type: 'public_http', url: 'https://flowday.ziyixi.science/', expect: [200], enabled: true };
     entry(r, 'newsletter').status = { type: 'analytics', max_idle_hours: 26 };
-    entry(r, 'siyuan').tile_metric = { kind: 'latency' };
     const found = problems(r);
     expect(found).toContain('entry flowday: an Access-protected host cannot be probed publicly');
     expect(found).toContain('entry newsletter: analytics needs a worker');
-    expect(found).toContain('entry siyuan: tile_metric latency does not fit status link_only');
+    const linkOnly = copy();
+    entry(linkOnly, 'flowday').tile_metric = { kind: 'latency' };
+    expect(problems(linkOnly)).toContain('entry flowday: tile_metric latency does not fit status link_only');
   });
 
   it('checks stages: entries, workers, holds, notes and each code once per flow', () => {

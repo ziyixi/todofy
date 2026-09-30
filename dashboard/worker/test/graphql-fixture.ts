@@ -36,6 +36,24 @@ export interface SyntheticUsage {
   readonly d1Databases?: readonly { readonly id: string; readonly rowsRead: number; readonly rowsWritten: number }[];
   /** The `doPer` rows; default: one namespace with the doActiveTimeUs/doRowsRead/doRowsWritten. */
   readonly doNamespaces?: readonly { readonly id: string; readonly activeTimeUs: number; readonly rowsRead: number; readonly rowsWritten: number }[];
+  /**
+   * The `ai` rows (Workers AI neurons by model). Empty (the default) like the live account on
+   * 2026-09-30, which answered `[]`: no AI calls yet, so `ai_neurons` reads 0 used.
+   */
+  readonly aiModels?: readonly { readonly model: string; readonly neurons: number }[];
+  /** Leave `ai` out of the answer (a dataset the response did not carry). */
+  readonly omitAi?: boolean;
+}
+
+/** `aiModels` whose neurons sum to `percent` % of the Free 10,000 a day, split 3:1 over two public model IDs. */
+export function aiNeurons(percent: number): SyntheticUsage {
+  const total = percent * 100;
+  return {
+    aiModels: [
+      { model: '@cf/meta/llama-3.1-8b-instruct', neurons: total * 0.75 },
+      { model: '@cf/baai/bge-m3', neurons: total * 0.25 },
+    ],
+  };
 }
 
 /** Synthetic D1 database IDs and DO namespace IDs (not the account's; the registry leaves them unmapped). */
@@ -159,6 +177,9 @@ export function graphqlBody(usage: SyntheticUsage = {}): unknown {
               max: { payloadSize: b.payloadSize, metadataSize: b.metadataSize, objectCount: 100 },
               dimensions: { bucketName: b.bucketName },
             })),
+            ...(usage.omitAi
+              ? {}
+              : { ai: (usage.aiModels ?? []).map((m) => ({ sum: { totalNeurons: m.neurons }, dimensions: { modelId: m.model } })) }),
           },
         ],
       },

@@ -529,7 +529,8 @@ export function CloudflareView({ registry, cloudflare, focus, now }: { registry:
       <section className="cf-section" aria-labelledby="quota-title">
         <h2 id="quota-title">账户额度</h2>
         <p className="small muted">
-          达到 80% 的每日项目或每月 R2 操作会让应用自动降载。“按当前速度线性估算”只是把已用量按已过时间等比放大，不是预测：本 UTC
+          达到 80% 的每日项目或每月 R2 操作会让应用自动降载；Workers AI neurons 除外：超出免费额度只会让 AI
+          调用失败到 00:00 UTC，降载也减少不了它，所以只提醒并显示剩余量。“按当前速度线性估算”只是把已用量按已过时间等比放大，不是预测：本 UTC
           日开头的一次集中任务会让估算偏高，每日项目在 00:00 UTC 后 3 小时内不估算。
         </p>
         {usage.rows.length > 0 ? <QuotaGroups rows={usage.rows} reg={registry} /> : <p className="empty">还没有用量数据。</p>}

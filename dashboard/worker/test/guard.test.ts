@@ -6,7 +6,7 @@ import normalFixture from '../../../contracts/ops-v1/fixtures/GuardState/normal.
 import { OPS_LIMITS, type GuardState } from '../../../contracts/ops-v1/ops-v1.ts';
 import type { QuotaRow } from '../src/api-types.ts';
 import { parseUsage } from '../src/usage.ts';
-import { graphqlBody } from './graphql-fixture.ts';
+import { aiNeurons, graphqlBody } from './graphql-fixture.ts';
 import {
   AUTO_NORMAL,
   AUTO_UNKNOWN,
@@ -77,6 +77,16 @@ describe('the automatic rule', () => {
 
   it('never triggers on storage', () => {
     expect(evaluateAuto(at, usage(at, [quota('d1_storage', 99, false)]), null).level).toBe('normal');
+  });
+
+  it('never triggers on Workers AI neurons, however high (only AI calls fail above the allowance)', () => {
+    const rows = parseUsage(graphqlBody({ ...aiNeurons(100), workersRequests: 50_000 }), at)?.rows ?? [];
+    const ai = rows.find((row) => row.id === 'ai_neurons');
+    expect(ai).toMatchObject({ used: 10_000, percent: 100, guard_trigger: false });
+    expect(evaluateAuto(at, usage(at, rows), null)).toEqual(AUTO_NORMAL);
+    // Nor does it hold a shed that another row started: 50 % workers is below the 70 % hold line.
+    const shed = evaluateAuto(at, usage(at, [quota('workers_requests', 85)]), null);
+    expect(evaluateAuto(at + 1_800_000, usage(at + 1_800_000, rows), shed)).toEqual(AUTO_NORMAL);
   });
 
   it('holds at 70 % or more on the same day and clears below', () => {

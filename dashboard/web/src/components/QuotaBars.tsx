@@ -2,10 +2,11 @@ import { useId } from 'react'
 import {
   GUARD_SHED_PERCENT,
   QUOTA_CRITICAL_PERCENT,
+  QUOTA_SHOW_REMAINING,
   type QuotaPeriod,
   type QuotaRow,
 } from '../../../worker/src/api-types.ts'
-import { formatAmountShort, formatLimitShort, formatPercent, formatQuantity } from '../lib/format'
+import { formatAmountShort, formatLimitShort, formatNumber, formatPercent, formatQuantity } from '../lib/format'
 import { PERIODS, QUOTA, type Tone } from '../lib/labels'
 import { nameOf, workerOf, type Reg } from '../lib/registry'
 import { httpsUrl } from '../lib/url'
@@ -15,6 +16,7 @@ import { Pill } from './ui'
 const QUOTA_SHORT: Partial<Record<QuotaRow['id'], string>> = {
   d1_rows_read: 'D1 读取',
   do_requests: 'DO 请求',
+  ai_neurons: 'AI neurons',
 }
 
 export const PERIOD_ORDER: readonly QuotaPeriod[] = ['daily', 'monthly', 'storage']
@@ -22,6 +24,15 @@ export const PERIOD_ORDER: readonly QuotaPeriod[] = ['daily', 'monthly', 'storag
 /** Judged on the measured value like the Worker's guard, not on `percent` (rounded: 79.95 reads 80.0). */
 function reaches(row: QuotaRow, percent: number): boolean {
   return row.used !== null && row.limit > 0 && row.used * 100 >= row.limit * percent
+}
+
+/**
+ * What is left of the allowance, rounded down (never overstates the headroom), for the rows that state
+ * it (QUOTA_SHOW_REMAINING: Workers AI); null for the others and without data.
+ */
+export function quotaRemaining(row: QuotaRow): number | null {
+  if (!QUOTA_SHOW_REMAINING.includes(row.id) || row.used === null) return null
+  return Math.max(0, Math.floor(row.limit - row.used))
 }
 
 export function quotaTone(row: QuotaRow): { tone: Tone; label: string } {
@@ -39,10 +50,13 @@ function clamp(value: number): number {
 function Meter({ row, labelId, compact = false }: { row: QuotaRow; labelId: string; compact?: boolean }) {
   const width = row.percent === null ? 0 : clamp(row.percent)
   const projected = row.projected_percent === null ? null : clamp(row.projected_percent)
+  const remaining = quotaRemaining(row)
   const valueText =
     row.used === null
       ? '无数据'
-      : `已用 ${formatQuantity(row.used, row.unit)}，上限 ${formatQuantity(row.limit, row.unit)}，${formatPercent(row.percent ?? 0)}`
+      : `已用 ${formatQuantity(row.used, row.unit)}，上限 ${formatQuantity(row.limit, row.unit)}，${formatPercent(row.percent ?? 0)}${
+          remaining === null ? '' : `，剩余 ${formatQuantity(remaining, row.unit)}`
+        }`
   return (
     <div
       className={`meter${compact ? ' meter-compact' : ''}`}
@@ -86,6 +100,7 @@ export function QuotaItem({ row, reg }: { row: QuotaRow; reg: Reg }) {
     ) : null
   const urgent = row.projected_percent !== null && row.projected_percent >= GUARD_SHED_PERCENT
   const hidden = forecast !== null && !urgent
+  const remaining = quotaRemaining(row)
   const summary = hidden && row.breakdown.length > 0 ? '估算与主要来源' : hidden ? '估算' : '主要来源'
   return (
     <li className={`quota quota-${tone.tone}`}>
@@ -104,6 +119,8 @@ export function QuotaItem({ row, reg }: { row: QuotaRow; reg: Reg }) {
           {row.used === null ? '无数据' : formatQuantity(row.used, row.unit)} / {formatQuantity(row.limit, row.unit)}
           {row.truncated ? <span className="muted">（下限：查询结果已达行数上限）</span> : null}
         </span>
+        {/* Its own line: the headroom is the number that matters (the group note says it never sheds). */}
+        {remaining !== null ? <strong className="quota-remaining">剩余 {formatQuantity(remaining, row.unit)}</strong> : null}
         {urgent ? forecast : null}
       </div>
       {row.breakdown.length > 0 || hidden || source ? (
@@ -135,6 +152,14 @@ export function QuotaItem({ row, reg }: { row: QuotaRow; reg: Reg }) {
   )
 }
 
+/** Whether a group counts for the guard; a mixed group (每日, with Workers AI) names its exceptions. */
+function groupGuardNote(items: readonly QuotaRow[]): string {
+  if (items.every((row) => row.guard_trigger)) return '，计入自动降载'
+  if (!items.some((row) => row.guard_trigger)) return '，不触发降载'
+  const except = items.filter((row) => !row.guard_trigger).map((row) => QUOTA[row.id] ?? row.id)
+  return `，计入自动降载（${except.join('、')} 除外）`
+}
+
 /** The account allowances in three groups (每日 / 每月 / 存储), each with its reset rule. */
 export function QuotaGroups({ rows, reg }: { rows: readonly QuotaRow[]; reg: Reg }) {
   const groups = PERIOD_ORDER.map((period) => ({ period, rows: rows.filter((row) => row.period === period) })).filter(
@@ -147,7 +172,7 @@ export function QuotaGroups({ rows, reg }: { rows: readonly QuotaRow[]; reg: Reg
           <h4 id={`quota-${period}`}>{PERIODS[period].title}</h4>
           <p className="small muted">
             {PERIODS[period].note}
-            {items.every((row) => row.guard_trigger) ? '，计入自动降载' : items.some((row) => row.guard_trigger) ? '' : '，不触发降载'}
+            {groupGuardNote(items)}
           </p>
           <ul className="quota-list">
             {items.map((row) => (
@@ -160,11 +185,16 @@ export function QuotaGroups({ rows, reg }: { rows: readonly QuotaRow[]; reg: Reg
   )
 }
 
-/** A mini bar of 首页: name, bar, "712 / 10 万 · 0.7%" (phones: name and percent only). */
+/**
+ * A mini bar of 首页: name, bar, "712 / 10 万 · 0.7%" (phones: name and percent only); a row that
+ * states its remaining allowance shows it on every width: "300 / 1 万 · 3% · 剩余 9,700" (phones:
+ * "剩余 9,700", the percent is the bar).
+ */
 export function MiniQuota({ row }: { row: QuotaRow }) {
   const labelId = useId()
   const tone = quotaTone(row)
   const percent = row.percent === null ? '无数据' : formatPercent(row.percent)
+  const remaining = quotaRemaining(row)
   return (
     <li className={`mini-quota quota-${tone.tone}`}>
       <span id={labelId} className="visually-hidden">
@@ -183,7 +213,14 @@ export function MiniQuota({ row }: { row: QuotaRow }) {
             <span className="mini-quota-amount">
               {formatAmountShort(row.used, row.unit)} / {formatLimitShort(row.limit, row.unit)} ·{' '}
             </span>
-            {percent}
+            {remaining === null ? (
+              percent
+            ) : (
+              <>
+                <span className="mini-quota-amount">{percent} · </span>
+                <span className="mini-quota-remaining">剩余 {formatNumber(remaining)}</span>
+              </>
+            )}
             {tone.tone === 'warn' || tone.tone === 'danger' ? <span className="visually-hidden">，{tone.label}</span> : null}
           </>
         )}

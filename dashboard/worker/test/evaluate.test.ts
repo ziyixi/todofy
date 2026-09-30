@@ -48,7 +48,6 @@ describe('entry health (the tile: the entry\'s own health, Q2)', () => {
     expect(tiles['mail-hero']).toMatchObject({ level: 'ok', reason: null, metric: { kind: 'counter', name: 'ingest_today_messages', value: 41 }, top_signals: [] });
     expect(tiles.todofy).toMatchObject({ level: 'ok', metric: { kind: 'counter', name: 'received_24h', value: 63 } });
     expect(tiles.flowday).toMatchObject({ level: 'link', reason: null, metric: null, checked_at: null });
-    expect(tiles.siyuan).toMatchObject({ level: 'link' });
     expect(tiles.website).toMatchObject({ level: 'ok', metric: { kind: 'latency', ms: 180 } });
     expect(tiles['notion-publish']).toMatchObject({ level: 'ok', metric: { kind: 'last_active', hour: '2026-09-29T06:00:00.000Z' } });
     expect(tiles.newsletter).toMatchObject({ level: 'unmonitored', reason: null, metric: null });

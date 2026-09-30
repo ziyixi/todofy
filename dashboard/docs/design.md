@@ -207,8 +207,12 @@ values keep one decimal.
 
 ### 5.3 Guard (`guard.ts`)
 
-Trigger resources (`guard_trigger: true`): the seven daily ones and `r2_class_a`, `r2_class_b`. Storage
-never triggers (shed defers cleanup, which would make storage worse).
+Trigger resources (`guard_trigger: true`): the seven daily Workers/D1/DO ones and `r2_class_a`,
+`r2_class_b`. Storage never triggers (shed defers cleanup, which would make storage worse). Workers AI
+neurons (`ai_neurons`, daily) never trigger either: shed only defers the apps' cleanup and safety nets,
+none of which calls Workers AI, so it could not lower neuron use, and above the Free allocation only
+AI calls fail (no bill, nothing else stops). The row is shown and reported (`ai_neurons_high`) but
+does not shed ([`limits.md`](limits.md) §1).
 
 Desired state, evaluated each tick in this order:
 
@@ -417,6 +421,7 @@ query($a: string!, $day: Date!, $start: Time!, $end: Time!, $month: Date!) { vie
   doSto: durableObjectsStorageGroups(limit: 5, filter: {date: $day}) { max { storedBytes } }
   r2ops: r2OperationsAdaptiveGroups(limit: 50, filter: {date_geq: $month, date_leq: $day}) { sum { requests } dimensions { actionType bucketName } }
   r2sto: r2StorageAdaptiveGroups(limit: 10, filter: {date: $day}) { max { payloadSize metadataSize objectCount } dimensions { bucketName } }
+  ai: aiInferenceAdaptiveGroups(limit: 20, filter: {datetime_geq: $start, datetime_leq: $end}) { sum { totalNeurons } dimensions { modelId } }
 } } }
 ```
 
@@ -424,7 +429,12 @@ query($a: string!, $day: Date!, $start: Time!, $end: Time!, $month: Date!) { vie
 copy above. v2 raised the `workers` row limit from the verified 20 to 50 (a row cap only; the fields
 are the verified ones) and parses its per-script fields and the per-resource rows for the Worker and
 resource tables ([`design-v2.md`](design-v2.md) §4). `durableObjectsStorageGroups` returned `[]` on
-this account: `do_storage.used` is then null ("无数据"), never 0.
+this account: `do_storage.used` is then null ("无数据"), never 0. The `ai` dataset (Workers AI) was
+added on 2026-09-30 after the owner checked `aiInferenceAdaptiveGroups` with this filter and these
+fields on the live account (it answered `[]`: no AI calls yet); it rides in the same request, so a tick
+still makes one GraphQL call. Unlike storage, an answered `[]` there is a day without AI calls:
+`ai_neurons.used` is 0. Only an answer without the `ai` field leaves that one row at null ("无数据");
+the other rows still parse (every other dataset missing refuses the answer, as before).
 
 ### 7.3 Mapping
 
@@ -437,6 +447,7 @@ this account: `do_storage.used` is then null ("无数据"), never 0.
 | `do_requests` | Σ `doInv[].sum.requests` | – | `scriptName` |
 | `do_duration` | Σ `doPer[].sum.activeTime` | µs → GB-s: `activeTime / 1e6 × 0.128` (128 MB / 1 GB, as DO pricing's examples compute it) | `namespaceId` |
 | `do_rows_read` / `do_rows_written` | Σ `doPer[].sum.rowsRead` / `rowsWritten` | – | `namespaceId` |
+| `ai_neurons` | Σ `ai[].sum.totalNeurons` (0 if `[]`) | neurons (fractional, one decimal) | `modelId` |
 | `do_storage` | max `doSto[].max.storedBytes` (null if `[]`) | bytes | – |
 | `r2_class_a` | Σ `r2ops[].sum.requests` where `actionType` ∈ A or `DeleteObjects`, plus unclassified | – | `bucketName` |
 | `r2_class_b` | Σ `r2ops[].sum.requests` where `actionType` ∈ B | – | `bucketName` |

@@ -1,7 +1,8 @@
 # Home dashboard: Workers Free limits
 
 The allowances the dashboard measures and guards, and the platform limits its design relies on. Every
-value was checked against the linked Cloudflare page on **2026-09-29** (Workers Free plan). Re-check
+value was checked against the linked Cloudflare page on **2026-09-29** (Workers Free plan); the Workers
+AI row on **2026-09-30**. Re-check
 the pages before changing a value; `worker/src/limits.ts` holds the same numbers, and
 `worker/test/limits.test.ts` fails when a row below and `limits.ts` disagree (value or source).
 
@@ -22,6 +23,7 @@ cautious limit).
 | `do_duration` | day | 13,000 GB-s | 13000 | yes | [DO pricing](https://developers.cloudflare.com/durable-objects/platform/pricing/) |
 | `do_rows_read` | day | 5,000,000 rows (SQLite) | 5000000 | yes | [DO pricing](https://developers.cloudflare.com/durable-objects/platform/pricing/) |
 | `do_rows_written` | day | 100,000 rows (SQLite; each `setAlarm()` is one) | 100000 | yes | [DO pricing](https://developers.cloudflare.com/durable-objects/platform/pricing/) |
+| `ai_neurons` | day | 10,000 Neurons (Workers AI, all models) | 10000 | no | [Workers AI pricing](https://developers.cloudflare.com/workers-ai/platform/pricing/) |
 | `r2_class_a` | month | 1,000,000 operations | 1000000 | yes | [R2 pricing](https://developers.cloudflare.com/r2/pricing/) |
 | `r2_class_b` | month | 10,000,000 operations | 10000000 | yes | [R2 pricing](https://developers.cloudflare.com/r2/pricing/) |
 | `d1_storage` | total | 5 GB per account | 5000000000 | no | [D1 limits](https://developers.cloudflare.com/d1/platform/limits/) |
@@ -34,6 +36,14 @@ What the pages say about periods and overruns:
 - Workers: the daily request limit resets at midnight UTC; above it requests fail with error 1027.
 - D1 and Durable Objects: "Free limits reset daily at 00:00 UTC"; above any one free limit "further
   operations of that type will fail with an error" (DO pricing).
+- Workers AI (pricing page, checked 2026-09-30): "Our free allocation allows anyone to use a total of
+  10,000 Neurons per day at no charge"; for Workers Free the table lists "10,000 Neurons per day" and,
+  above it, "N/A - Upgrade to Workers Paid"; "All limits reset daily at 00:00 UTC. If you exceed any
+  one of the above limits, further operations will fail with an error." So on Free an overrun is no
+  bill: AI calls fail until 00:00 UTC. The dashboard reads `aiInferenceAdaptiveGroups`
+  `sum.totalNeurons` for the UTC day so far, by `modelId` (the 主要来源), in the same single GraphQL
+  query, and states the remaining neurons (`10,000 − used`) on the page. An answered `[]` is 0 used
+  (the live account answered `[]` on 2026-09-30: no AI calls yet).
 - DO duration is wall-clock active time × 128 MB. The DO pricing page computes "1,000,000 seconds * 128
   MB / 1 GB = 128,000 GB-s", so the dashboard converts `activeTime` (µs) as `activeTime / 1e6 × 0.128`.
 - R2: the free tier is monthly and applies to Standard storage only. "A GB-month is calculated by
@@ -52,7 +62,12 @@ operation class at ≥ 80 % of its allowance puts both apps into `shed` until th
 min (renewed while still ≥ 70 % that day; the hour covers one failed or late renewal at the 00:00
 tick). The thresholds compare the measured value with the allowance (`used ≥ 0.8 × allowance`), not the
 percent shown, which is rounded to 0.1 (79.95 % shows as 80.0 % and does not shed); storage never triggers, because `shed` defers cleanup,
-which would make storage worse. Details: [`design.md`](design.md) §5.3.
+which would make storage worse. Workers AI neurons never trigger either, although daily: `shed` only
+defers Mail Hero's and Todofy's cleanup and safety nets, none of which calls Workers AI (neither app
+binds it), so shedding them could not lower neuron use, and on Free exceeding the allocation only makes
+further AI calls fail until 00:00 UTC; it stops nothing else and bills nothing. The row still reports
+`ai_neurons_high` at ≥ 80 % (warning) and ≥ 95 % (critical) like every quota row. Details:
+[`design.md`](design.md) §5.3.
 
 **Projection** ("按当前速度线性估算"): daily `used × 86400 / elapsed seconds` of the UTC day (none
 during the first 3 hours, where one early job would dominate); monthly `used × days in month / elapsed
@@ -93,6 +108,8 @@ To be checked in production and recorded in [`verification.md`](verification.md)
 
 - whether an app's `Ops` calls appear in `workersInvocationsAdaptive` for `mail-hero`/`todofy` (they
   are service-binding calls, which carry no request fee);
+- that `ai_neurons` matches the Workers AI dashboard's daily Neurons figure once the account makes AI
+  calls (on 2026-09-30 the dataset answered `[]`, so only the empty case was seen live);
 - whether R2 `actionType` values beyond the lists above occur (they would show as unclassified).
   `DeleteObjects` did (live sample of 2026-09-30) and is now counted as Class A (§1); the other values
   of that sample (`PutObject`, `CompleteMultipartUpload`, `GetBucketLifecycleConfiguration`,

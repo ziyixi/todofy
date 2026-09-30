@@ -6,6 +6,7 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import type { SetGuardInput } from '../../../../contracts/ops-v1/ops-v1.ts';
 import type { GuardResponseV2 } from '../../src/api-v2-types.ts';
+import { aiNeurons } from '../graphql-fixture.ts';
 import { d1Reads, expectValid, shedState, startFlows, status, type FlowHarness } from './flows.ts';
 
 let h: FlowHarness | undefined;
@@ -128,6 +129,28 @@ describe('automatic guard', () => {
     await h.tick('2026-09-30T00:30:00Z');
     // No normal in between: the deferred jobs never start while R2 stays above 80 %.
     expect(await guardCalls(h)).toEqual({ 'mail-hero': [], todofy: [] });
+  });
+
+  it('never sheds for Workers AI neurons: the digest reports them, the apps are not called', async () => {
+    h = await startFlows({ bindings: { CANARY_UTC_HOUR: '23' }, usage: aiNeurons(97) });
+    await h.tick('2026-09-29T12:00:00Z');
+    expect(h.analytics.requests).toHaveLength(1);
+    expect(await guardCalls(h)).toEqual({ 'mail-hero': [], todofy: [] });
+    const snap = await h.snapshot();
+    expect(snap.guard.desired).toMatchObject({ level: 'normal', reason: 'quota_normal', source: 'auto' });
+    const ai = snap.usage.rows.find((row) => row.id === 'ai_neurons');
+    expect(ai).toMatchObject({ used: 9700, limit: 10_000, percent: 97, guard_trigger: false, projected: 19_400, projected_percent: 194 });
+    expect(ai?.breakdown.map((b) => b.name)).toEqual(['@cf/meta/llama-3.1-8b-instruct', '@cf/baai/bge-m3']);
+    const item = snap.digest.items.find((i) => i.code === 'ai_neurons_high');
+    expect(item).toMatchObject({ source: 'cloudflare', severity: 'critical', metrics: { percent: 97, used: 9700, limit: 10_000 } });
+    await expectValid('OpsReportItem', item);
+    expect(snap.digest.items.map((i) => i.code)).not.toContain('guard_shed');
+
+    // 85 %: still reported (warning), still no guard call.
+    h.analytics.answer = aiNeurons(85);
+    await h.tick('2026-09-29T12:30:00Z');
+    expect(await guardCalls(h)).toEqual({ 'mail-hero': [], todofy: [] });
+    expect((await h.snapshot()).digest.items.find((i) => i.code === 'ai_neurons_high')?.severity).toBe('warning');
   });
 
   it('clears guard_apply_failed once the shed that failed is no longer wanted', async () => {

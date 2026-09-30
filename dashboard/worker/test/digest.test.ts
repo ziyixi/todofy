@@ -85,6 +85,18 @@ describe('digest items', () => {
     expect(items({ usage: { ...input().usage, fresh: false, rows: [quota('d1_rows_read', 99)] } })).toEqual([]);
   });
 
+  it('reports Workers AI neurons as ai_neurons_high at 80 % (warning) and 95 % (critical)', () => {
+    const ai = (percent: number): QuotaRow => ({ ...quota('ai_neurons', percent), unit: 'neurons', used: percent * 100, limit: 10_000, guard_trigger: false });
+    const at = (percent: number) => items({ usage: { ...input().usage, rows: [ai(percent)] } }).map((i) => [i.source, i.code, i.severity]);
+    expect(at(79.9)).toEqual([]);
+    expect(at(80)).toEqual([['cloudflare', 'ai_neurons_high', 'warning']]);
+    expect(at(94.9)).toEqual([['cloudflare', 'ai_neurons_high', 'warning']]);
+    expect(at(95)).toEqual([['cloudflare', 'ai_neurons_high', 'critical']]);
+    expect(items({ usage: { ...input().usage, rows: [ai(97)] } })[0]?.metrics).toEqual({ percent: 97, used: 9700, limit: 10_000, projected_percent: 145.5 });
+    // Not a guard trigger, so no guard_shed item comes with it (the desired guard stays normal).
+    expect(items({ usage: { ...input().usage, rows: [ai(99)] } }).map(itemKey)).toEqual(['cloudflare:ai_neurons_high']);
+  });
+
   it('reports the analytics token missing or failing for 2 h', () => {
     expect(items({ usage: { ...input().usage, configured: false } }).map(itemKey)).toEqual(['dashboard:usage_not_configured']);
     const failing = { ...input().usage, consecutive_failures: 5, fetched_at: NOW - 2 * 3_600_000, last_http_status: 401 };

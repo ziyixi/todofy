@@ -18,6 +18,7 @@ describe('labels', () => {
   it('names every quota resource', () => {
     for (const id of QUOTA_RESOURCES) expect(QUOTA[id]).toBeTruthy()
     expect(signalLabel('d1_rows_read_high')).toBe('D1 读取行数用量高')
+    expect(signalLabel('ai_neurons_high')).toBe('Workers AI neurons 用量高')
     expect(guardReasonLabel('quota_r2_class_a')).toBe('配额：R2 A 类操作')
   })
 

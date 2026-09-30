@@ -108,7 +108,7 @@ describe('the views', () => {
   it('home: every tile but the hidden one, one line per flow, four mini bars without contributors', () => {
     const ev = input();
     const home = homeResponse(base(), ev, usageView(), DESIRED);
-    expect(home.entries.map((e) => e.id)).toEqual(['mail-hero', 'todofy', 'flowday', 'siyuan', 'website', 'notion-publish', 'newsletter']);
+    expect(home.entries.map((e) => e.id)).toEqual(['mail-hero', 'todofy', 'flowday', 'website', 'notion-publish', 'newsletter']);
     expect(home.flows.map((f) => f.id)).toEqual(['mail-to-task', 'site-publish', 'daily-newsletter', 'ops-digest']);
     expect(home.flows[0]).not.toHaveProperty('stages');
     expect(home.cloudflare.quota.map((q) => q.id)).toEqual(HOME_QUOTA_IDS);
@@ -137,7 +137,7 @@ describe('the views', () => {
     const doc = usageDoc(usage);
     const view = cloudflareResponse(base(), NOW, usageView(usage), doc, count === 0 ? null : scripts(usage), GUARD);
     expect(view.workers).toHaveLength(count);
-    expect(view.usage.rows).toHaveLength(13);
+    expect(view.usage.rows).toHaveLength(14);
     expect(view.resources.map((r) => r.kind)).toEqual(['d1', 'd1', 'do', 'do', 'do', 'r2', 'r2']);
     expect(view.do_storage_bytes).toBeNull();
     expect(view.workers_truncated).toBe(false);
