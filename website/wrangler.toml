@@ -11,6 +11,8 @@ compatibility_date = "2026-09-25"
 # with `wrangler dev` before upload and on the live hostname after deploy.
 workers_dev = false
 preview_urls = false
+# Top-level key: keep it above [assets], or TOML reads it as assets.routes.
+routes = [{ pattern = "website-preview.ziyixi.science", custom_domain = true }]
 
 [assets]
 directory = "./out"
@@ -20,10 +22,8 @@ html_handling = "auto-trailing-slash"
 not_found_handling = "404-page"
 
 # Hostnames (docs/cutover.md). None yet: the release uploads and deploys versions, and verifies the
-# live site only when a hostname below exists. Each is a one-line change; the next release (or a
+# live site only when a hostname below exists. Each is a one-line top-level `routes` (above [assets]); the next release (or a
 # dispatch of website-release.yml) attaches it with `wrangler triggers deploy`:
 #   routes = [{ pattern = "website-preview.ziyixi.science", custom_domain = true }]
 # and at cutover, after the lead replaced the www CNAME (docs/cutover.md step 3):
 #   routes = [{ pattern = "www.ziyixi.science", custom_domain = true }]
-
-routes = [{ pattern = "website-preview.ziyixi.science", custom_domain = true }]
