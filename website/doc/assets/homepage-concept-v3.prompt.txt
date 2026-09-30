@@ -1,0 +1,24 @@
+Use case: ui-mockup.
+Asset type: third revision of a compact personal academic homepage; static planning concept.
+Input image is the rejected v2 website. Preserve its absence of images, cards and separators, but completely correct the overly loose rhythm and weak hierarchy. The user dislikes excessive whitespace, scrolling to see the focus, and generic AI-template styling.
+
+Generate exactly ONE flat website screenshot at 1376 x 768, a real landscape laptop viewport, no browser chrome. Entire homepage content including identity, biography, two publications, three blog links, and tiny footer must be visible within this one viewport. This is a tightly composed working scholar's personal page. NOT an oversized landing page or a long scrolling page. Do not solve by scaling everything down to illegible size.
+
+Use a centered column about 720px wide, beginning x=328, ending x=1048. Content from y=42 to about y=646. All body content left aligned. Balanced, compact. Main text 16px, metadata 13–14px, body line height 24px. Text must be crisp like a screenshot. Background nearly white #FCFCFA, body near black #272A28, links subdued dark teal #365950, metadata #5E6661. No background textures. One modest serif name in Source Serif style, everything else a precise contemporary sans-serif like a well typeset human-edited academic profile. Avoid Times New Roman web-default appearance.
+
+Detailed composition:
+1. At y~44 a compact single header row: "Your Name" at left in 30px refined serif, medium weight. On the SAME baseline at right, 13px quiet navigation "Publications   Blog   CV". No standalone nav row above the name, no duplicate name, no header border. Name is the only large type.
+2. At y~99 a compact factual introduction in 16px sans-serif, two to three natural lines: "I work on scientific computing and inverse problems, with an interest in reliable methods for learning from observations." Then a short second sentence on a following line: "This site collects my papers, software, and research notes." No marketing slogan, no job-title subheading.
+3. At y~184 simple 13px text links in a single close row: "Email   Google Scholar   GitHub". Keep all content inline, no buttons, no decorative separators, underline these small inline links only.
+4. At y~232 heading "Selected publications" in 17px semibold sans-serif, and "All publications" as a quiet 12px text link at far right on same baseline, no arrows.
+First entry begins y~269, title 17px semibold dark charcoal: "Learning structure from complex observations". Next line 13px subdued metadata "Your Name et al.   Publication details, 2026". One concise 15px note below: "Reliable inference when observations are incomplete." This is the main editorial focus: make this first title subtly stronger than all other list entries.
+Second entry begins y~351, title 16px medium weight: "Open tools for reproducible research". Next line 13px metadata: "Your Name et al.   Publication details, 2025". No extra explanatory paragraph or Paper/Code/PDF button row.
+5. At y~426 heading "Recent writing" in 17px semibold and quiet 12px "All writing" at right on same baseline.
+Then three compact, unboxed rows at y~463, y~497, y~531:
+"On reproducibility and small tools" with small muted "Sep 2026" flush right.
+"What changes when observations are incomplete?" with "Aug 2026" flush right.
+"Notes on numerical experiments" with "Jul 2026" flush right.
+Titles 16px regular dark teal, no full-width underline rules. Dates share the title baseline; not on separate lines or in a timeline. Let natural title lengths vary.
+6. Footer around y~616: small quiet "© 2026 Your Name" at left, "RSS" at right. No line above.
+
+Absolutely no horizontal or vertical divider lines, cards, shadows, big page headings, huge margins BETWEEN content groups, badges, chips, icons, all-caps eyebrow text, ornamental quotes, gradients, illustrations, images, rounded panels, decorative arrows, simulated handwriting or paper texture. No three equal feature columns, no marketing CTA. Header and footer are not sticky. This site should feel carefully edited by its owner, with clear emphasis and sufficient content density, not generic minimalism achieved by empty space. Current date 2026-09-20; identity and paper text are illustrative. The header, 2 publications, all 3 writings, and footer must fit the laptop screenshot with body text still around 16px. Do not output a tall portrait image or a zoomed-in crop.

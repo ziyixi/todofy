@@ -1,0 +1,48 @@
+name: Refresh Notion publication status
+run-name: Refresh Notion status from the live website
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Status writeback changes Notion last_edited_time. Keep it outside every
+# release snapshot read, including runs of the other workflow.
+concurrency:
+  group: website-production-release
+  queue: max
+  cancel-in-progress: false
+
+jobs:
+  refresh:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    environment: production
+    steps:
+      - name: Check out latest main inside the shared release lock
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          ref: refs/heads/main
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Use Node 24
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38
+        with:
+          node-version: 24.x
+          check-latest: false
+          package-manager-cache: false
+
+      - name: Install pinned dependencies
+        run: |
+          corepack enable
+          pnpm install --frozen-lockfile
+
+      - name: Compare Notion with the live website and update feedback
+        env:
+          SITE_URL: ${{ vars.SITE_URL }}
+          NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
+          NOTION_DATA_SOURCE_ID: ${{ secrets.NOTION_DATA_SOURCE_ID }}
+          NOTION_API_VERSION: ${{ vars.NOTION_API_VERSION }}
+        run: node --import tsx scripts/notion/sync-status.ts

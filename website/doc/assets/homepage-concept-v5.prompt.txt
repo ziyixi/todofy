@@ -1,0 +1,48 @@
+Use case: ui-mockup.
+Create ONE substantial redesign of the personal academic homepage in image 3.
+Image 1: Tianyu Gao's publications page, reference for compact readable academic bibliographic metadata and left-aligned navigation.
+Image 2: Omar Khattab's homepage, reference for intentional section rules and substantive biographical text. Do not copy portrait or permanent sidebar.
+Image 3: rejected v4 edit target. Do NOT preserve its oversized serif name, right-aligned navigation, undifferentiated smooth minimalism, absent section boundaries, or identical paper/blog rows.
+
+User's requirements: modest name, navigation on the LEFT, clear section boundaries, paper authors and journal/venue must remain visible in small type, publications visibly distinct from blog, sharper angular graphic structure, refined academic personality without flashy visuals or old-web clutter. Compact first viewport, no decorative images.
+
+Canvas 1376 x 768 landscape laptop viewport. Center a restrained 780px-wide page, x298 to1078. Flat almost-white background #FAFBFA. Crisp ink #212B31, slate blue link accent #294D66, secondary text #59656C, precise structural rules #B8C1C6. No gradients, shadows, rounded corners, photos, illustrations, badges, decorative floating shapes or big hero. Avoid soft green literary-blog look. Use sharp grid alignment and straight lines to feel deliberately composed.
+
+Use a genuinely different editorial grid:
+- Small masthead at x298 y35: "Your Name" ONLY 18px regular sans serif, same approximate size as section labels, NOT big, NOT bold, NOT serif. Never repeat the name as a hero. It is a quiet identifier.
+- Directly below, at x298 y72, left-aligned navigation clustered toward left: "About", "Publications", "Blog", "CV". 14px plain type. About is active, shown as a small 58x25px pale-blue rectangular tab with perfectly SQUARE corners and a dark bottom edge; other links plain. Whole nav remains left-aligned, not pushed to the far right. A thin horizontal rule spans page at y101. No button-heavy UI.
+
+Section layout below is a shared editorial grid, NOT a permanent side navigation: small labels in a 112px LEFT label gutter, content begins x430, width648. This modest offset creates structure and edge. No enclosing cards or borders around text.
+
+ABOUT block, y127:
+Left label "About" at x298 y127, 17px semibold sans serif.
+Right content x430 y127, 16px sans-serif line-height23, two paragraphs:
+"I work on scientific computing and inverse problems. My research asks how we can draw reliable conclusions from incomplete measurements, and how numerical methods can help us investigate those questions."
+Second paragraph, only 10px paragraph gap:
+"Alongside research, I build tools for inspecting experiments and making results reproducible. Here I collect my papers, software, and notes on the ideas and practical details that emerge from the work."
+Under content, compact 13px text links "Email   Scholar   GitHub".
+All biography and links must end by approximately y323.
+A crisp full-width 1px rule at y349 separates the next major block.
+
+PUBLICATIONS block from y374:
+Left gutter label on TWO modest lines: "Selected" then "papers", 17px semibold. Under the label, 12px blue link "View all". This is not another navigation sidebar, just the section label beside its content.
+Right content x430, TWO compact bibliographic entries, each TWO text lines, about 52px per entry:
+First title at y374, 16px medium serif (restrained academic citation typography): "Learning structure from complex observations"
+Second line at y398 in 13px sans-serif: "A. Author, Your Name, B. Author · Journal name, 2026"
+Your Name within authors may have a subtle underline. Journal name italic.
+Second title at y434: "Open tools for reproducible research"
+Metadata at y458: "Your Name, C. Author · Conference name, 2025"
+These are placeholder citations, not claims of real publications. No third summary line, no thumbnail, no button row, no separate year column. Both papers same visual treatment, neither featured. Serif publication titles plus scholarly second-line metadata differentiate this section clearly from the blog.
+A full-width 1px rule at y495.
+
+WRITING block from y520:
+Left gutter label "Writing", 17px semibold sans, beneath it 12px "View all".
+Right content consists of THREE tight one-line date-led entries, 16px sans-serif titles and 12–13px monospaced muted dates:
+"2026.09   On reproducibility and small tools"
+"2026.08   What changes when observations are incomplete?"
+"2026.07   Notes on numerical experiments"
+Rows about 30px apart. Dates left of titles, NOT right aligned. No author/venue line in blog; no repeated dividers per item; no summaries.
+
+Small footer around y665 aligned with main page left: "© 2026 Your Name" and "RSS" nearby, 12px secondary type, no floating right navigation. Complete content visible by y700.
+
+Use only about three major straight rules (nav base and major section boundaries), not separators around every row. Deliberate geometric edges without black boxing the whole page. No oversized name: max18px. No display-size serif anywhere. Academic book-index precision with a modern, sharp digital grid. Do not reproduce the old rejected smooth single-column layout. Render a realistic fully typeset screenshot, not a written design spec. Current date 2026-09-20. Exactly one revision.

@@ -1,0 +1,37 @@
+Use case: ui-mockup.
+Asset type: one revised homepage concept screenshot, planning only.
+Input image: previous homepage concept. It is an edit target showing what to simplify, NOT a visual style to preserve.
+Revise this personal academic website substantially according to precise feedback: the current design is too flashy, too wide, too large in typography, and uses far too many separators. Create a much quieter, narrower, more beautiful and restrained personal homepage. Artistic quality comes entirely from balanced book-like typography and whitespace. It should feel contemporary, personal, elegant, and intellectually serious. Avoid old-web nostalgia and avoid a luxury brand / marketing look.
+
+Target: flat desktop browser content screenshot at 1440 x 1120, landscape leaning aspect ratio, no browser chrome or device. Very important: one narrow content column, only about 660–680px wide, horizontally centered with broad blank side margins. ALL text left aligned on the same axis. No side columns. Content must fit naturally and not be enlarged to fill the canvas. It is OK and desired to have substantial blank margins. No oversized heading or hero.
+
+Plain near-white background #FCFCFA with no texture. Charcoal #2E302D text, muted slate #646A65 metadata, subtle desaturated green-gray links #4D6157. No illustrations, photos, shadows, cards, icons, gradients, badges, underlined section rules, vertical rules, timelines, all-caps labels, pull quotes, big arrows, decorative flourishes, or background art. Absolutely ZERO horizontal or vertical divider lines anywhere. Avoid ornamental typefaces and wide letterspacing.
+
+Typography: quiet literary serif similar to Source Serif 4 for the name, reading text and content titles. Clean unobtrusive sans-serif for the small navigation and metadata. Name ONLY about 32px relative to the 1440px desktop width; body 17px, line height 28px; section labels 18–20px, medium weight; metadata 13–14px. Page should look finely typeset, readable, unpretentious. A touch of human warmth without contrived art direction.
+
+Composition and exact text, all illustrative:
+Top about 76px from edge, small understated inline navigation: "About    Publications    Blog    CV". No logo, no duplicate name in navigation, no header rule. Keep same left alignment as text.
+After 50px whitespace: "Your Name" as a modest 32px title.
+Below, two short paragraphs: "I am a researcher working on scientific computing and the ways we make sense of complex systems." Then "Here I collect my work, occasional essays, and things I am learning along the way." These should wrap naturally within narrow column.
+Below, discreet links separated by natural whitespace only: "Email    Scholar    GitHub". No button treatment.
+After about 48px whitespace: "Selected work" in modest 19px type, not a display headline.
+Two entries with unembellished text:
+"Learning structure from complex observations"
+"Your Name et al.   Publication details, 2026"
+then about 22px whitespace
+"Open tools for reproducible research"
+"Your Name et al.   Publication details, 2025"
+Each title is the paper link, no extra Paper/Code button rows. Metadata is quiet secondary text, no date column or vertical line.
+Below, small text link "All publications".
+After 48px whitespace: "Writing" as 19px section heading.
+Three entries with simple text title then smaller date, no excerpt:
+"On reproducibility and small tools"
+"September 12, 2026"
+then "A notebook for difficult ideas"
+"August 24, 2026"
+then "What makes a useful research tool?"
+"July 8, 2026"
+About 20px separation between entries, no list bullets and absolutely no separators.
+Small link "All writing".
+Footer after 54px whitespace: very quiet "© 2026 Your Name" and "RSS" nearby, same narrow column, no footer rule.
+Current date is 2026-09-20. These identities, papers and dates are placeholders. Preserve a realistic website rather than a decorative printed poster. Render just ONE revision. It should be visibly simpler and narrower than the input image.

@@ -1,0 +1,11 @@
+.generated/
+.next/
+.pnpm-store/
+node_modules/
+playwright-report/
+test-results/
+pnpm-lock.yaml
+
+# Planning inputs are preserved as authored source material.
+doc/plan.md
+doc/cs-homepage-survey.md

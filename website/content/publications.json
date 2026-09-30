@@ -1,0 +1,236 @@
+{
+  "publications": [
+    {
+      "id": "xi-2024-deep-earthquakes",
+      "title": "Deep learning for deep earthquakes: insights from OBS observations of the Tonga subduction zone",
+      "authors": [
+        { "name": "Ziyi Xi", "siteOwner": true },
+        { "name": "S. Shawn Wei" },
+        { "name": "Weiqiang Zhu" },
+        { "name": "Gregory C. Beroza" },
+        { "name": "Yaqi Jie" },
+        { "name": "Nooshin Saloor" }
+      ],
+      "homeAuthors": "Ziyi Xi, S. Shawn Wei, et al.",
+      "venue": "Geophysical Journal International",
+      "year": 2024,
+      "volume": "238",
+      "issue": "2",
+      "pages": "1073–1088",
+      "doi": "10.1093/gji/ggae200",
+      "links": [
+        {
+          "label": "DOI",
+          "url": "https://doi.org/10.1093/gji/ggae200"
+        },
+        {
+          "label": "Publisher",
+          "url": "https://academic.oup.com/gji/article/238/2/1073/7689220"
+        }
+      ],
+      "featuredOrder": 1
+    },
+    {
+      "id": "xi-2024-eara",
+      "title": "EARA2024: a new radially anisotropic seismic velocity model for the crust and upper mantle beneath East Asia and Northwestern pacific subduction zones",
+      "authors": [
+        { "name": "Ziyi Xi", "siteOwner": true },
+        { "name": "Min Chen" },
+        { "name": "Songqiao Shawn Wei" },
+        { "name": "Jiaqi Li" },
+        { "name": "Tong Zhou" },
+        { "name": "Baoshan Wang" },
+        { "name": "YoungHee Kim" }
+      ],
+      "homeAuthors": "Ziyi Xi, Min Chen, et al.",
+      "venue": "Geophysical Journal International",
+      "year": 2024,
+      "volume": "239",
+      "issue": "2",
+      "pages": "914–935",
+      "doi": "10.1093/gji/ggae302",
+      "links": [
+        {
+          "label": "DOI",
+          "url": "https://doi.org/10.1093/gji/ggae302"
+        },
+        {
+          "label": "Publisher",
+          "url": "https://academic.oup.com/gji/article/239/2/914/7740793"
+        }
+      ],
+      "featuredOrder": 2
+    },
+    {
+      "id": "xi-2024-dissertation",
+      "title": "Seismic Studies of Western Pacific Subduction Zones With High-Performance Computing and Deep Learning",
+      "authors": [{ "name": "Ziyi Xi", "siteOwner": true }],
+      "homeAuthors": "Ziyi Xi",
+      "venue": "Michigan State University, Ph.D. dissertation",
+      "year": 2024,
+      "doi": "10.25335/mmdh-gp84",
+      "links": [
+        { "label": "DOI", "url": "https://doi.org/10.25335/mmdh-gp84" },
+        { "label": "Publisher", "url": "https://d.lib.msu.edu/etd/51756" },
+        { "label": "PDF", "url": "https://par.nsf.gov/servlets/purl/10584469" }
+      ],
+      "orderWithinYear": 1
+    },
+    {
+      "id": "li-2023-changbaishan",
+      "title": "Deep Geophysical Anomalies Beneath the Changbaishan Volcano",
+      "authors": [
+        { "name": "Shaohua Li" },
+        { "name": "Jiaqi Li" },
+        { "name": "Thomas P. Ferrand" },
+        { "name": "Tong Zhou" },
+        { "name": "Mingda Lv" },
+        { "name": "Ziyi Xi", "siteOwner": true },
+        { "name": "Ross Maguire" },
+        { "name": "Guangjie Han" },
+        { "name": "Juan Li" },
+        { "name": "Xiyuan Bao" },
+        { "name": "Yiran Jiang" },
+        { "name": "Tiezhao Bao" }
+      ],
+      "homeAuthors": "Shaohua Li, Jiaqi Li, et al.",
+      "venue": "Journal of Geophysical Research: Solid Earth",
+      "year": 2023,
+      "volume": "128",
+      "issue": "4",
+      "pages": "e2022JB025671",
+      "doi": "10.1029/2022JB025671",
+      "links": [
+        { "label": "DOI", "url": "https://doi.org/10.1029/2022JB025671" },
+        {
+          "label": "Publisher",
+          "url": "https://agupubs.onlinelibrary.wiley.com/doi/10.1029/2022JB025671"
+        }
+      ]
+    },
+    {
+      "id": "zhou-2022-cusra",
+      "title": "CUSRA2021: A Radially Anisotropic Model of the Contiguous US and Surrounding Regions by Full-Waveform Inversion",
+      "authors": [
+        { "name": "Tong Zhou" },
+        { "name": "Jiaqi Li" },
+        { "name": "Ziyi Xi", "siteOwner": true },
+        { "name": "Guoliang Li" },
+        { "name": "Min Chen" }
+      ],
+      "homeAuthors": "Tong Zhou, Jiaqi Li, et al.",
+      "venue": "Journal of Geophysical Research: Solid Earth",
+      "year": 2022,
+      "volume": "127",
+      "issue": "8",
+      "pages": "e2021JB023893",
+      "doi": "10.1029/2021JB023893",
+      "links": [
+        { "label": "DOI", "url": "https://doi.org/10.1029/2021JB023893" },
+        {
+          "label": "Publisher",
+          "url": "https://agupubs.onlinelibrary.wiley.com/doi/10.1029/2021JB023893"
+        }
+      ],
+      "orderWithinYear": 1
+    },
+    {
+      "id": "mao-2022-slab-hydration",
+      "title": "Unsupervised machine learning reveals slab hydration variations from deep earthquake distributions beneath the northwest Pacific",
+      "authors": [
+        { "name": "Gilbert L. Mao" },
+        { "name": "Thomas P. Ferrand" },
+        { "name": "Jiaqi Li" },
+        { "name": "Brian Zhu" },
+        { "name": "Ziyi Xi", "siteOwner": true },
+        { "name": "Min Chen" }
+      ],
+      "homeAuthors": "Gilbert L. Mao, Thomas P. Ferrand, et al.",
+      "venue": "Communications Earth & Environment",
+      "year": 2022,
+      "volume": "3",
+      "pages": "56",
+      "doi": "10.1038/s43247-022-00377-x",
+      "links": [
+        { "label": "DOI", "url": "https://doi.org/10.1038/s43247-022-00377-x" },
+        {
+          "label": "Publisher",
+          "url": "https://www.nature.com/articles/s43247-022-00377-x"
+        }
+      ],
+      "orderWithinYear": 2
+    },
+    {
+      "id": "zhou-2022-model-assessment",
+      "title": "Assessment of seismic tomographic models of the contiguous United States using intermediate-period 3-D wavefield simulation",
+      "authors": [
+        { "name": "Tong Zhou" },
+        { "name": "Ziyi Xi", "siteOwner": true },
+        { "name": "Min Chen" },
+        { "name": "Jiaqi Li" }
+      ],
+      "homeAuthors": "Tong Zhou, Ziyi Xi, et al.",
+      "venue": "Geophysical Journal International",
+      "year": 2022,
+      "volume": "228",
+      "issue": "2",
+      "pages": "1392–1409",
+      "doi": "10.1093/gji/ggab406",
+      "links": [
+        { "label": "DOI", "url": "https://doi.org/10.1093/gji/ggab406" },
+        {
+          "label": "Publisher",
+          "url": "https://academic.oup.com/gji/article/228/2/1392/6382133"
+        }
+      ],
+      "orderWithinYear": 3
+    },
+    {
+      "id": "li-2021-fasttrip",
+      "title": "FastTrip: A Fast MPI-Accelerated 1D Triplication Waveform Inversion Package for Constraining Mantle Transition Zone Discontinuities",
+      "authors": [
+        { "name": "Jiaqi Li" },
+        { "name": "Min Chen" },
+        { "name": "Keith D. Koper" },
+        { "name": "Tong Zhou" },
+        { "name": "Ziyi Xi", "siteOwner": true },
+        { "name": "Shaohua Li" },
+        { "name": "Guoliang Li" }
+      ],
+      "homeAuthors": "Jiaqi Li, Min Chen, et al.",
+      "venue": "Seismological Research Letters",
+      "year": 2021,
+      "volume": "92",
+      "issue": "4",
+      "pages": "2647–2656",
+      "doi": "10.1785/0220200475",
+      "links": [
+        { "label": "DOI", "url": "https://doi.org/10.1785/0220200475" },
+        { "label": "PDF", "url": "https://par.nsf.gov/servlets/purl/10267619" }
+      ],
+      "orderWithinYear": 1
+    },
+    {
+      "id": "xi-2021-pyfk",
+      "title": "PyFK: A Fast MPI and CUDA Accelerated Python Package for Calculating Synthetic Seismograms Based on the Frequency-Wavenumber Method",
+      "authors": [
+        { "name": "Ziyi Xi", "siteOwner": true },
+        { "name": "Jiaqi Li" },
+        { "name": "Min Chen" },
+        { "name": "S. Shawn Wei" }
+      ],
+      "homeAuthors": "Ziyi Xi, Jiaqi Li, et al.",
+      "venue": "AGU Fall Meeting Abstracts",
+      "year": 2021,
+      "pages": "S15E-0288",
+      "links": [
+        {
+          "label": "Publisher",
+          "url": "https://ui.adsabs.harvard.edu/abs/2021AGUFM.S15E0288X/abstract"
+        },
+        { "label": "Code", "url": "https://github.com/ziyixi/pyfk" }
+      ],
+      "orderWithinYear": 2
+    }
+  ]
+}

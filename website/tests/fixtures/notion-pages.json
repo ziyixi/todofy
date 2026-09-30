@@ -1,0 +1,44 @@
+{
+  "results": [
+    {
+      "id": "11111111-1111-1111-1111-111111111111",
+      "in_trash": false,
+      "last_edited_time": "2025-02-04T10:00:00.000Z",
+      "properties": {
+        "Title": { "type": "title", "title": [{ "plain_text": "A public note" }] },
+        "Slug": { "type": "rich_text", "rich_text": [{ "plain_text": "public-note" }] },
+        "Status": { "type": "status", "status": { "name": "Published" } },
+        "PublishedAt": { "type": "date", "date": { "start": "2025-02-03" } },
+        "Summary": { "type": "rich_text", "rich_text": [{ "plain_text": "A synthetic summary." }] },
+        "Language": { "type": "select", "select": { "name": "en" } },
+        "Tags": { "type": "multi_select", "multi_select": [{ "name": "systems" }] }
+      }
+    },
+    {
+      "id": "22222222-2222-2222-2222-222222222222",
+      "in_trash": false,
+      "properties": {
+        "Title": { "type": "title", "title": [{ "plain_text": "A draft" }] },
+        "Slug": { "type": "rich_text", "rich_text": [{ "plain_text": "draft-note" }] },
+        "Status": { "type": "status", "status": { "name": "Draft" } },
+        "PublishedAt": { "type": "date", "date": null },
+        "Summary": { "type": "rich_text", "rich_text": [] },
+        "Language": { "type": "select", "select": null },
+        "Tags": { "type": "multi_select", "multi_select": [] }
+      }
+    },
+    {
+      "id": "33333333-3333-3333-3333-333333333333",
+      "in_trash": false,
+      "properties": {
+        "Title": { "type": "title", "title": [{ "plain_text": "A future note" }] },
+        "Slug": { "type": "rich_text", "rich_text": [{ "plain_text": "future-note" }] },
+        "Status": { "type": "status", "status": { "name": "Published" } },
+        "PublishedAt": { "type": "date", "date": { "start": "2099-01-01" } },
+        "Summary": { "type": "rich_text", "rich_text": [{ "plain_text": "Not public yet." }] },
+        "Language": { "type": "select", "select": { "name": "en" } },
+        "Tags": { "type": "multi_select", "multi_select": [] }
+      }
+    }
+  ]
+}

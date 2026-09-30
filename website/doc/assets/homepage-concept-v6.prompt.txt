@@ -1,0 +1,53 @@
+Use case: ui-mockup. Create ONE refined desktop homepage concept for Ziyi Xi. This is a static visual design revision, not an implemented website. Target canvas 1440 x 900, straight-on website content only; no browser frame, device, angled perspective or surrounding presentation.
+
+INPUTS:
+Image 1 is the actual portrait from the user's existing ziyixi.science homepage. Use this exact person/photo as a small square portrait inside the biography; preserve the face, glasses, hair, gray shirt and pale background faithfully. Do not invent a replacement face or beautify it. Image 2 is the prior v5 concept and provides the restrained academic visual vocabulary, small name, left-aligned navigation and muted ink palette. Revise its composition as directed below: remove horizontal section rules and the large left-side label gutter, put Blog before Publications, and add real biography and the supplied portrait.
+
+DESIGN INTENT:
+A carefully typeset personal academic/engineering homepage: compact, elegant, quiet, slightly angular, not promotional. Center a column roughly 800px wide on a plain near-white #FAFBFA background. Slate-black #212B31 body, restrained dark blue #294D66 links, secondary #59656C. No texture, shadows, cards, gradients, rounded containers, decorative illustration, hero banner, buttons, icon row or oversized lettering. Have structure from alignment, measured vertical spacing, clear headings and typographic contrast. Zero full-width horizontal divider lines. No vertical dividers. Do not make whitespace expansive.
+Use a clear humanist sans serif for biography/nav/blog; a modest book serif for paper titles. Body about 16px, line height 24px. Name only 18px normal weight; it must NOT be largest or boldest on the page. Section titles 17px semibold, in ordinary title case.
+
+COMPOSITION:
+Content left edge about x320, right edge x1120. Start at y42.
+Small name "Ziyi Xi" alone at the left. Directly below, a left-aligned compact text navigation row "About    Blog    Publications". About is current, indicated by a small dark-blue underline only beneath its text; no bar under the whole nav, no filled tab box, and no right-aligned navigation.
+Then roughly 26px gap before the biography. A modest "About" heading above text, all with the same left edge. Two short continuous paragraphs occupy roughly 640px; the exact supplied portrait is about 112x112px, square with straight edges, aligned to the top of the first paragraph on the right with a 24px gap. Photo is present but subordinate, without border or shadow.
+Under biography, a compact left-aligned text-link row "Email    GitHub    LinkedIn    Scholar".
+Between sections use 28–34px gaps; within sections heading-to-content only 10–12px. Blog comes next. Publications comes last. All section headings left aligned above their own content, NO side label column. Footer follows with a modest normal gap. Contents should be comfortably visible together, without large dead zones.
+
+EXACT VISIBLE COPY:
+Name: "Ziyi Xi"
+Navigation: "About    Blog    Publications"
+Section: "About"
+Biography paragraph 1:
+"I'm a software engineer on Google Cloud's Platform Infrastructure Engineering team, building systems for hardware validation and automated machine repairs."
+Biography paragraph 2:
+"I earned my Ph.D. in Computational Science at Michigan State University, after undergraduate studies in geophysics and computer science at USTC. I'm interested in ML systems and computational infrastructure. Outside work, I enjoy photography and exploring Bay Area food."
+Links: "Email    GitHub    LinkedIn    Scholar"
+
+Next section title: "Blog"
+Under it, one quiet muted empty-state sentence: "Writing will appear here."
+IMPORTANT: The user explicitly said to REMOVE the CUDA blog and will migrate Notion posts later. Do NOT show CUDA, Google Colab, fake post titles, post dates, language links, Notion implementation text or invented articles. This deliberately quiet empty state is correct.
+
+Next section title: "Selected publications"
+Then two compact bibliographic entries:
+1 title, modest serif 16–17px:
+"Deep learning for deep earthquakes: insights from OBS observations of the Tonga subduction zone"
+1 metadata, sans serif 13px:
+"Ziyi Xi, S. Shawn Wei, et al. · Geophysical Journal International, 2024"
+2 title, same modest serif:
+"EARA2024: a new radially anisotropic seismic velocity model for the crust and upper mantle beneath East Asia and Northwestern pacific subduction zones"
+2 metadata, same small sans:
+"Ziyi Xi, Min Chen, et al. · Geophysical Journal International, 2024"
+Preserve the full real titles; allow a natural second title line rather than truncation. Metadata stays readable and complete. Use subtle italic for journal name, slightly stronger author Ziyi Xi but do not underline it as a fake link. No paper abstracts, thumbnails, tags, boxed resources or buttons. Paper titles have matching weight; never spotlight the first paper. Each entry compact; roughly 12–14px between entries. After list, a small text link "All publications".
+Small footer: "© 2026 Ziyi Xi    RSS"
+
+QUALITY:
+Clear real typography, professional academic reading density, exact words, clean alignment. Actual identity and source content bring a personal feel. Preserve the photo faithfully as a photograph, not illustration. The page must feel connected and naturally grouped, not divided into rigid horizontal bands. No cut off text; no huge name; no content filled in beyond specified copy. The current date is 2026-09-21; 2024 paper dates are real publication years and should be preserved.
+
+Reference provenance (not additional visible UI copy):
+- Portrait: user's existing https://www.ziyixi.science/ homepage, approved in this conversation; local copy ziyixi-portrait-reference.png.
+- Biography: https://www.ziyixi.science/about (author's current website self-description; not independently verified for freshness).
+- Paper 1: https://academic.oup.com/gji/article/238/2/1073/7689220
+- Paper 2: https://doi.org/10.1093/gji/ggae302
+- User specifically removed the CUDA blog content. Blog intentionally remains an empty state.
+- Generated with the built-in ImageGen tool. Static concept only; no website implementation.
