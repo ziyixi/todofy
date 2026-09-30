@@ -1,0 +1,55 @@
+import { QUOTA_RESOURCES } from '../../../worker/src/api-types.ts'
+import {
+  QUOTA,
+  canaryCodeLabel,
+  counterInfo,
+  guardReasonLabel,
+  modeInfo,
+  signalLabel,
+  usageErrorLabel,
+} from './labels'
+import mailHeroDegraded from '../../../../contracts/ops-v1/fixtures/OpsStatus/mail-hero-degraded.json'
+import todofyDegraded from '../../../../contracts/ops-v1/fixtures/OpsStatus/todofy-degraded.json'
+import mailHeroOk from '../../../../contracts/ops-v1/fixtures/OpsStatus/mail-hero-ok.json'
+import todofyOk from '../../../../contracts/ops-v1/fixtures/OpsStatus/todofy-ok.json'
+import report from '../../../../contracts/ops-v1/fixtures/OpsReport/daily.json'
+
+describe('labels', () => {
+  it('names every quota resource', () => {
+    for (const id of QUOTA_RESOURCES) expect(QUOTA[id]).toBeTruthy()
+    expect(signalLabel('d1_rows_read_high')).toBe('D1 读取行数用量高')
+    expect(guardReasonLabel('quota_r2_class_a')).toBe('配额：R2 A 类操作')
+  })
+
+  it('labels every code in the contract fixtures', () => {
+    const signals = [...mailHeroDegraded.signals, ...todofyDegraded.signals].map((signal) => signal.code)
+    for (const code of [...signals, ...report.items.map((item) => item.code)]) expect(signalLabel(code)).not.toBe(code)
+    const counters = [mailHeroOk, todofyOk].flatMap((status) => Object.keys(status.counters))
+    for (const name of counters) expect(counterInfo(name).label).not.toBe(name)
+    const modes = [mailHeroOk, todofyOk].flatMap((status) => Object.keys(status.modes))
+    for (const name of modes) expect(modeInfo(name, false).label).not.toBe(name)
+  })
+
+  it('keeps unknown codes raw', () => {
+    expect(signalLabel('brand_new')).toBe('brand_new')
+    expect(signalLabel('toString')).toBe('toString')
+    expect(guardReasonLabel('d1_reads_high')).toBe('d1_reads_high')
+    expect(canaryCodeLabel('llm_new_code')).toBe('llm_new_code')
+    expect(counterInfo('__proto__')).toEqual({ label: '__proto__', kind: 'count' })
+  })
+
+  it('marks unusual modes', () => {
+    expect(modeInfo('forwarding', false).usual).toBe(false)
+    expect(modeInfo('forwarding', true).usual).toBe(true)
+    expect(modeInfo('maintenance', true).usual).toBe(false)
+    expect(modeInfo('unknown_flag', true).usual).toBe(false)
+  })
+
+  it('explains usage and canary errors', () => {
+    expect(usageErrorLabel('http_401')).toBe('HTTP 401：令牌无效或权限不足')
+    expect(usageErrorLabel('http_500')).toBe('HTTP 500')
+    expect(usageErrorLabel('graphql_error')).toBe('GraphQL 返回错误')
+    expect(canaryCodeLabel('http_503')).toBe('HTTP 503')
+    expect(canaryCodeLabel('canary_consumer_missing')).toBe('Todofy 未提供金丝雀功能')
+  })
+})
