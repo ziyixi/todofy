@@ -59,7 +59,7 @@ jobs:
           # The full history of every branch: the base (last successful main run, or the merge base
           # with origin/main) must be in the clone.
           fetch-depth: 0
-      - name: Test the change detection
+      - name: Test the change detection and the Wrangler configs
         run: python3 -m unittest discover -s .github/scripts
       # Only for a push to main. A run that failed or was cancelled (also while pending in the
       # concurrency group) is not "success", so its changes stay in this run's diff. Any error here
@@ -161,7 +161,7 @@ jobs:
         run: |
           uv run ruff check worker tests tools deploy
           uv run ruff format --check worker tests tools deploy
-      - name: Host tests (core, fakes, migration tools, config generator)
+      - name: Host tests (core, fakes, migration tools, production configs and deploy values)
         run: uv run pytest tests/unit tests/fakes tools deploy
       # The gateway Worker "todofy" (TypeScript); the root wrangler bundles it for the tests and the deploy.
       - name: Check and test the gateway
@@ -182,33 +182,30 @@ jobs:
           npm run build
           # The UI is Todofy's own code; nothing may be copied from Mail Hero.
           if grep -rnE 'mail_hero|mail-hero' src; then exit 1; fi
-      # The generated production configs must be ones wrangler accepts before any deploy
-      # relies on them. Placeholder values only; no token is needed for --dry-run.
-      - name: Dry-run placeholder production configs
+      # The committed production configs (wrangler.toml, gateway/wrangler.toml), run exactly as the deploy
+      # runs them, with placeholder values for what the deploy adds (deploy/deploy_vars.py). No token is
+      # needed for --dry-run.
+      - name: Dry-run the committed production configs
         env:
-          CLOUDFLARE_ACCOUNT_ID: '00000000000000000000000000000000'
-          TODOFY_D1_DATABASE_ID: 00000000-0000-4000-8000-000000000000
-          TODOFY_PUBLIC_HOST: todofy.example.com
-          TODOFY_HOOKS_HOSTS: todofy-hooks.example.com
-          TODOFY_ACCESS_ISSUER: https://example.cloudflareaccess.com
-          TODOFY_ACCESS_AUDIENCE: '0000000000000000000000000000000000000000000000000000000000000000'
           TODOFY_ACCESS_OWNER: owner@example.com
+          TODOFY_ACCESS_OWNER_ALIASES: ''
           TODOFY_TODOIST_DEFAULT_PROJECT_ID: placeholder
           TODOFY_REMINDER_ENABLED: 'false'
           TODOFY_MAINTENANCE_MODE: 'false'
           TODOFY_PROCESSING_PAUSED: 'false'
           TODOFY_FORCE_PAUSE_TODOIST: 'false'
         run: |
-          uv run python deploy/generate_ci_config.py
-          uv run pywrangler deploy --dry-run --config wrangler.production.ci.json \
+          uv run python deploy/deploy_vars.py secrets "$RUNNER_TEMP/todofy-gateway-secrets.json"
+          uv run python deploy/deploy_vars.py exec core -- uv run pywrangler deploy --dry-run --config wrangler.toml \
             --outdir "$RUNNER_TEMP/todofy-core-bundle"
           # The workers SDK is vendored next to the core config; a bundle without it cannot start.
           test -d "$RUNNER_TEMP/todofy-core-bundle/python_modules/workers"
-          npx --no-install wrangler deploy --dry-run --config gateway/wrangler.production.ci.json \
-            --secrets-file gateway/wrangler.production.secrets.json --outdir "$RUNNER_TEMP/todofy-gateway-bundle"
-      - name: Remove the placeholder configs
+          uv run python deploy/deploy_vars.py exec gateway -- npx --no-install wrangler deploy --dry-run \
+            --config gateway/wrangler.toml --secrets-file "$RUNNER_TEMP/todofy-gateway-secrets.json" \
+            --outdir "$RUNNER_TEMP/todofy-gateway-bundle"
+      - name: Remove the placeholder secrets file
         if: always()
-        run: rm -f wrangler.production.ci.json gateway/wrangler.production.ci.json gateway/wrangler.production.secrets.json
+        run: rm -f "$RUNNER_TEMP/todofy-gateway-secrets.json"
 
   # The workerd runtime suite (tests/runtime), split into shards of whole test files that run at the same
   # time. The plan (.github/scripts/pytest_shards.py) balances recorded seconds per file over every
@@ -416,27 +413,19 @@ jobs:
           npm run typecheck
           npm test
           npm run build
-      # The deploy job's generator and dry-run, with placeholder values and no token.
-      - name: Dry-run a placeholder production config
+      # The committed production config (mail-hero/wrangler.toml), run exactly as the deploy runs it, with
+      # placeholder values for what the deploy adds (deploy/deploy-vars.mjs). No token is needed for --dry-run.
+      - name: Dry-run the committed production config
+        working-directory: mail-hero/cloudflare
         env:
-          CLOUDFLARE_ACCOUNT_ID: '00000000000000000000000000000000'
-          MAIL_HERO_D1_DATABASE_ID: 00000000-0000-4000-8000-000000000000
           MAIL_HERO_RECEIVE_ADDRESS: inbox@mail-hero.example.com
-          MAIL_HERO_ACCESS_ISSUER: https://example.cloudflareaccess.com
-          MAIL_HERO_ACCESS_AUDIENCE: '0000000000000000000000000000000000000000000000000000000000000000'
           MAIL_HERO_ACCESS_OWNER: owner@example.com
-          MAIL_HERO_WEBHOOK_ALLOWED_HOSTS: todofy-hooks.example.com
-          MAIL_HERO_PUBLIC_HOST: mail-hero.example.com
+          MAIL_HERO_ACCESS_OWNER_ALIASES: ''
           MAIL_HERO_FORCE_SEND_PAUSED: 'true'
           MAIL_HERO_MAINTENANCE_MODE: 'false'
         run: |
-          node deploy/generate-ci-config.mjs
-          cd cloudflare
-          npx --no-install wrangler deploy --dry-run --config wrangler.native.production.ci.json \
+          node ../deploy/deploy-vars.mjs exec -- npx --no-install wrangler deploy --dry-run --config ../wrangler.toml \
             --outdir "$RUNNER_TEMP/mail-hero-bundle"
-      - name: Remove the placeholder config
-        if: always()
-        run: rm -f cloudflare/wrangler.native.production.ci.json
 
   # The home dashboard (Worker "home", docs in dashboard/docs). Everything runs from dashboard/ with synthetic data;
   # the runtime suite runs the real HomeState in workerd next to stub "mail-hero"/"todofy" Workers that serve
@@ -465,8 +454,8 @@ jobs:
         run: |
           npm ci --prefix worker --no-audit --no-fund
           npm ci --prefix web --no-audit --no-fund
-      # The generator reads worker/wrangler.toml with the pinned wrangler, hence after npm ci.
-      - name: Test the production config generator
+      # The config test reads wrangler.toml with the pinned wrangler (worker/node_modules), hence after npm ci.
+      - name: Test the production config and deploy values
         run: node --test deploy/test/*.test.mjs
       - name: Lint, typecheck and test the Worker
         working-directory: dashboard/worker
@@ -489,26 +478,23 @@ jobs:
       - name: No imports from mail-hero/ or todofy/
         run: |
           if grep -rnE "(from|import)[[:space:]]*\(?[[:space:]]*['\"][^'\"]*(mail-hero|todofy)/" worker/src web/src; then exit 1; fi
-      # The deploy job's generator and dry-run, with placeholder values and no token.
-      - name: Dry-run a placeholder production config
+      # The committed production config (dashboard/wrangler.toml), run exactly as the deploy runs it, with
+      # placeholder values for what the deploy adds (deploy/deploy-vars.mjs). No token is needed for --dry-run.
+      - name: Dry-run the committed production config
+        working-directory: dashboard/worker
         env:
-          CLOUDFLARE_ACCOUNT_ID: '00000000000000000000000000000000'
-          DASHBOARD_PUBLIC_HOST: home.example.com
-          DASHBOARD_ACCESS_ISSUER: https://example.cloudflareaccess.com
-          DASHBOARD_ACCESS_AUDIENCE: '0000000000000000000000000000000000000000000000000000000000000000'
-          MAIL_HERO_PUBLIC_HOST: mail-hero.example.com
-          TODOFY_PUBLIC_HOST: todofy.example.com
+          DASHBOARD_CANARY_ENABLED: ''
           DASHBOARD_ACCESS_OWNER: owner@example.com
+          DASHBOARD_ACCESS_OWNER_ALIASES: ''
           DASHBOARD_CSRF_SIGNING_KEY: '0000000000000000000000000000000000000000000000000000000000000000'
           DASHBOARD_CF_ANALYTICS_TOKEN: placeholder-analytics-token-0000000000
         run: |
-          node deploy/generate-ci-config.mjs
-          cd worker
-          npx --no-install wrangler deploy --dry-run --config wrangler.production.ci.json \
-            --secrets-file wrangler.production.secrets.json --outdir "$RUNNER_TEMP/home-bundle"
-      - name: Remove the placeholder config
+          node ../deploy/deploy-vars.mjs secrets "$RUNNER_TEMP/home-secrets.json"
+          node ../deploy/deploy-vars.mjs exec -- npx --no-install wrangler deploy --dry-run --config ../wrangler.toml \
+            --secrets-file "$RUNNER_TEMP/home-secrets.json" --outdir "$RUNNER_TEMP/home-bundle"
+      - name: Remove the placeholder secrets file
         if: always()
-        run: rm -f worker/wrangler.production.ci.json worker/wrangler.production.secrets.json
+        run: rm -f "$RUNNER_TEMP/home-secrets.json"
 
   contracts:
     name: Contracts
@@ -687,7 +673,7 @@ jobs:
     timeout-minutes: 15
     environment:
       name: production
-      url: https://${{ vars.TODOFY_PUBLIC_HOST }}
+      url: ${{ steps.config.outputs.url }}
     concurrency:
       group: todofy-production
       cancel-in-progress: false
@@ -711,6 +697,18 @@ jobs:
           version: '0.12.10'
           working-directory: todofy
           enable-cache: true
+      # Every static production value (account, D1, hosts, Access, limits) is committed in wrangler.toml
+      # (todofy-core) and gateway/wrangler.toml; the environment URL and the probes read the hosts there.
+      - name: Read the hosts from the committed gateway config
+        id: config
+        run: |
+          python3 - >> "$GITHUB_OUTPUT" <<'EOF'
+          import tomllib
+          with open("gateway/wrangler.toml", "rb") as file:
+              variables = tomllib.load(file)["vars"]
+          print("url=https://" + variables["TODOFY_PUBLIC_HOST"])
+          print("hooks_host=" + variables["TODOFY_HOOKS_HOSTS"].split(",")[0])
+          EOF
       - name: Build the verified revision
         run: |
           npm ci --no-audit --no-fund
@@ -718,60 +716,54 @@ jobs:
           npm ci --prefix gateway --no-audit --no-fund
           npm ci --prefix web --no-audit --no-fund
           npm run build --prefix web
-      # The owner's email addresses are environment secrets (masked in this public log) and reach the
-      # gateway as secrets through --secrets-file; wrangler would print them if they were plain vars.
-      - name: Generate the production configuration
+      # deploy/deploy_vars.py adds what is never committed and refuses a missing or invalid value (a deploy
+      # without a var deletes it): the switches (production variables) and BUILD_SHA as --var on both
+      # Workers, the Todoist project as --var on the core, and the owner's email addresses as gateway
+      # secrets through --secrets-file. The project and the addresses are environment secrets, masked in
+      # this public log (pywrangler echoes its command line).
+      - name: Validate both bundles before changing D1
         env:
-          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
-          TODOFY_D1_DATABASE_ID: ${{ vars.TODOFY_D1_DATABASE_ID }}
-          TODOFY_D1_DATABASE_NAME: ${{ vars.TODOFY_D1_DATABASE_NAME }}
-          TODOFY_PUBLIC_HOST: ${{ vars.TODOFY_PUBLIC_HOST }}
-          TODOFY_HOOKS_HOSTS: ${{ vars.TODOFY_HOOKS_HOSTS }}
-          TODOFY_MAIL_SOURCE_ID: ${{ vars.TODOFY_MAIL_SOURCE_ID }}
-          TODOFY_ACCESS_ISSUER: ${{ vars.TODOFY_ACCESS_ISSUER }}
-          TODOFY_ACCESS_AUDIENCE: ${{ vars.TODOFY_ACCESS_AUDIENCE }}
           TODOFY_ACCESS_OWNER: ${{ secrets.TODOFY_ACCESS_OWNER }}
           TODOFY_ACCESS_OWNER_ALIASES: ${{ secrets.TODOFY_ACCESS_OWNER_ALIASES }}
-          TODOFY_GEMINI_MODELS: ${{ vars.TODOFY_GEMINI_MODELS }}
-          TODOFY_GEMINI_DAILY_TOKEN_BUDGET: ${{ vars.TODOFY_GEMINI_DAILY_TOKEN_BUDGET }}
           TODOFY_TODOIST_DEFAULT_PROJECT_ID: ${{ secrets.TODOFY_TODOIST_DEFAULT_PROJECT_ID }}
-          TODOFY_LOOKUP_DELAY_MS: ${{ vars.TODOFY_LOOKUP_DELAY_MS }}
-          TODOFY_REPORT_DEFAULT_TOP: ${{ vars.TODOFY_REPORT_DEFAULT_TOP }}
-          TODOFY_REPORT_PRECOMPUTE_UTC: ${{ vars.TODOFY_REPORT_PRECOMPUTE_UTC }}
-          TODOFY_LEGACY_TEXT_RETENTION_DAYS: ${{ vars.TODOFY_LEGACY_TEXT_RETENTION_DAYS }}
           TODOFY_REMINDER_ENABLED: ${{ vars.TODOFY_REMINDER_ENABLED }}
           TODOFY_MAINTENANCE_MODE: ${{ vars.TODOFY_MAINTENANCE_MODE }}
           TODOFY_PROCESSING_PAUSED: ${{ vars.TODOFY_PROCESSING_PAUSED }}
           TODOFY_FORCE_PAUSE_TODOIST: ${{ vars.TODOFY_FORCE_PAUSE_TODOIST }}
-        run: uv run python deploy/generate_ci_config.py
-      - name: Validate both bundles before changing D1
         run: |
-          uv run pywrangler deploy --dry-run --config wrangler.production.ci.json
-          npx --no-install wrangler deploy --dry-run --config gateway/wrangler.production.ci.json \
-            --secrets-file gateway/wrangler.production.secrets.json
+          uv run python deploy/deploy_vars.py secrets "$RUNNER_TEMP/todofy-gateway-secrets.json"
+          uv run python deploy/deploy_vars.py exec core -- uv run pywrangler deploy --dry-run --config wrangler.toml
+          uv run python deploy/deploy_vars.py exec gateway -- npx --no-install wrangler deploy --dry-run \
+            --config gateway/wrangler.toml --secrets-file "$RUNNER_TEMP/todofy-gateway-secrets.json"
       # todofy-core first: the Durable Object class and every route a new gateway calls must exist before
       # the gateway that binds and calls them goes live.
       - name: Apply D1 migrations, then deploy todofy-core
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+          TODOFY_TODOIST_DEFAULT_PROJECT_ID: ${{ secrets.TODOFY_TODOIST_DEFAULT_PROJECT_ID }}
+          TODOFY_REMINDER_ENABLED: ${{ vars.TODOFY_REMINDER_ENABLED }}
+          TODOFY_MAINTENANCE_MODE: ${{ vars.TODOFY_MAINTENANCE_MODE }}
+          TODOFY_PROCESSING_PAUSED: ${{ vars.TODOFY_PROCESSING_PAUSED }}
+          TODOFY_FORCE_PAUSE_TODOIST: ${{ vars.TODOFY_FORCE_PAUSE_TODOIST }}
         run: |
           test -n "$CLOUDFLARE_API_TOKEN"
-          npx --no-install wrangler d1 migrations apply DB --remote --config wrangler.production.ci.json
-          uv run pywrangler deploy --config wrangler.production.ci.json
+          npx --no-install wrangler d1 migrations apply DB --remote --config wrangler.toml
+          uv run python deploy/deploy_vars.py exec core -- uv run pywrangler deploy --config wrangler.toml
       - name: Deploy the gateway todofy
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+          TODOFY_MAINTENANCE_MODE: ${{ vars.TODOFY_MAINTENANCE_MODE }}
         run: |
           test -n "$CLOUDFLARE_API_TOKEN"
-          npx --no-install wrangler deploy --config gateway/wrangler.production.ci.json \
-            --secrets-file gateway/wrangler.production.secrets.json
+          uv run python deploy/deploy_vars.py exec gateway -- npx --no-install wrangler deploy \
+            --config gateway/wrangler.toml --secrets-file "$RUNNER_TEMP/todofy-gateway-secrets.json"
       # A first deploy waits for the Custom Domain certificate and DNS, hence 10 tries x 15 s. /health is
       # answered by the gateway alone, so this proves the gateway build; the next step proves the core.
       - name: Wait until the hooks host serves this commit
+        env:
+          HOOKS_HOST: ${{ steps.config.outputs.hooks_host }}
         run: |
-          host=$(jq -r '.vars.TODOFY_HOOKS_HOSTS | split(",")[0]' gateway/wrangler.production.ci.json)
+          host=$HOOKS_HOST
           for attempt in $(seq 1 10); do
             if build=$(curl -fsS --max-time 10 "https://$host/health" | jq -er .build) && [ "$build" = "$GITHUB_SHA" ]; then
               echo "The hooks host serves $GITHUB_SHA (attempt $attempt)."
@@ -786,8 +778,10 @@ jobs:
       # this hour's 20 failures are spent). A broken core, binding or D1 gives 503. The correct credential
       # never reads the counter, so this probe cannot lock the newsletter out.
       - name: Check that the gateway reaches todofy-core
+        env:
+          HOOKS_HOST: ${{ steps.config.outputs.hooks_host }}
         run: |
-          host=$(jq -r '.vars.TODOFY_HOOKS_HOSTS | split(",")[0]' gateway/wrangler.production.ci.json)
+          host=$HOOKS_HOST
           for attempt in $(seq 1 5); do
             code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 20 -u ci-probe:wrong "https://$host/api/summary")
             if [ "$code" = 401 ] || [ "$code" = 429 ]; then
@@ -798,9 +792,9 @@ jobs:
           done
           echo "The gateway did not reach todofy-core (last status $code)." >&2
           exit 1
-      - name: Remove the generated configuration
+      - name: Remove the secrets file
         if: always()
-        run: rm -f wrangler.production.ci.json gateway/wrangler.production.ci.json gateway/wrangler.production.secrets.json
+        run: rm -f "$RUNNER_TEMP/todofy-gateway-secrets.json"
 
   mail-hero-deploy:
     name: Mail Hero deploy
@@ -818,7 +812,7 @@ jobs:
     timeout-minutes: 15
     environment:
       name: production
-      url: https://${{ vars.MAIL_HERO_PUBLIC_HOST }}
+      url: ${{ steps.config.outputs.url }}
     concurrency:
       group: mail-hero-production
       cancel-in-progress: false
@@ -836,48 +830,47 @@ jobs:
           cache-dependency-path: |
             mail-hero/cloudflare/package-lock.json
             mail-hero/web/package-lock.json
+      # Every static production value (account, D1, buckets, host, Access, limits) is committed in
+      # mail-hero/wrangler.toml; the environment URL reads the host there.
+      - name: Read the host from the committed config
+        id: config
+        run: |
+          python3 - >> "$GITHUB_OUTPUT" <<'EOF'
+          import tomllib
+          with open("wrangler.toml", "rb") as file:
+              print("url=https://" + tomllib.load(file)["vars"]["PUBLIC_HOST"])
+          EOF
       - name: Build the verified revision
         run: |
           npm ci --prefix cloudflare
           npm ci --prefix web
           npm run build --prefix web
-      - name: Generate native production configuration
-        env:
-          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
-          MAIL_HERO_D1_DATABASE_ID: ${{ vars.MAIL_HERO_D1_DATABASE_ID }}
-          MAIL_HERO_D1_DATABASE_NAME: ${{ vars.MAIL_HERO_D1_DATABASE_NAME || 'mail-hero' }}
-          MAIL_HERO_R2_BUCKET_NAME: ${{ vars.MAIL_HERO_R2_BUCKET_NAME || 'mail-hero-store' }}
-          MAIL_HERO_BACKUP_BUCKET_NAME: ${{ vars.MAIL_HERO_BACKUP_BUCKET_NAME }}
-          MAIL_HERO_RECEIVE_ADDRESS: ${{ secrets.MAIL_HERO_RECEIVE_ADDRESS }}
-          MAIL_HERO_ACCESS_ISSUER: ${{ vars.MAIL_HERO_ACCESS_ISSUER }}
-          MAIL_HERO_ACCESS_AUDIENCE: ${{ vars.MAIL_HERO_ACCESS_AUDIENCE }}
-          MAIL_HERO_ACCESS_OWNER: ${{ secrets.MAIL_HERO_ACCESS_OWNER }}
-          MAIL_HERO_ACCESS_OWNER_ALIASES: ${{ secrets.MAIL_HERO_ACCESS_OWNER_ALIASES }}
-          MAIL_HERO_WEBHOOK_ALLOWED_HOSTS: ${{ vars.MAIL_HERO_WEBHOOK_ALLOWED_HOSTS }}
-          MAIL_HERO_ALERT_WEBHOOK_URL: ${{ vars.MAIL_HERO_ALERT_WEBHOOK_URL }}
-          MAIL_HERO_ALERT_WEBHOOK_ALLOWED_HOSTS: ${{ vars.MAIL_HERO_ALERT_WEBHOOK_ALLOWED_HOSTS }}
-          MAIL_HERO_PUBLIC_HOST: ${{ vars.MAIL_HERO_PUBLIC_HOST }}
-          MAIL_HERO_FORCE_SEND_PAUSED: ${{ vars.MAIL_HERO_FORCE_SEND_PAUSED }}
-          MAIL_HERO_MAINTENANCE_MODE: ${{ vars.MAIL_HERO_MAINTENANCE_MODE }}
-          MAIL_HERO_INGEST_DAILY_MESSAGE_LIMIT: ${{ vars.MAIL_HERO_INGEST_DAILY_MESSAGE_LIMIT || '300' }}
-          MAIL_HERO_INGEST_DAILY_BYTE_LIMIT: ${{ vars.MAIL_HERO_INGEST_DAILY_BYTE_LIMIT || '268435456' }}
-        run: node deploy/generate-ci-config.mjs
+      # deploy/deploy-vars.mjs adds what is never committed, as --var, and refuses a missing or invalid value
+      # (a deploy without a var deletes it): the receive address and the owner's addresses (environment
+      # secrets, masked in this public log) and the pause and maintenance switches (production variables).
       - name: Validate the native deployment bundle before changing D1
         working-directory: mail-hero/cloudflare
-        run: npx --no-install wrangler deploy --dry-run --config wrangler.native.production.ci.json
+        env:
+          MAIL_HERO_RECEIVE_ADDRESS: ${{ secrets.MAIL_HERO_RECEIVE_ADDRESS }}
+          MAIL_HERO_ACCESS_OWNER: ${{ secrets.MAIL_HERO_ACCESS_OWNER }}
+          MAIL_HERO_ACCESS_OWNER_ALIASES: ${{ secrets.MAIL_HERO_ACCESS_OWNER_ALIASES }}
+          MAIL_HERO_FORCE_SEND_PAUSED: ${{ vars.MAIL_HERO_FORCE_SEND_PAUSED }}
+          MAIL_HERO_MAINTENANCE_MODE: ${{ vars.MAIL_HERO_MAINTENANCE_MODE }}
+        run: node ../deploy/deploy-vars.mjs exec -- npx --no-install wrangler deploy --dry-run --config ../wrangler.toml
       # Mail Hero's own token: this environment also holds Todofy's CF_API_TOKEN.
       - name: Apply migrations, then deploy the native Worker
         working-directory: mail-hero/cloudflare
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.MAIL_HERO_CF_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+          MAIL_HERO_RECEIVE_ADDRESS: ${{ secrets.MAIL_HERO_RECEIVE_ADDRESS }}
+          MAIL_HERO_ACCESS_OWNER: ${{ secrets.MAIL_HERO_ACCESS_OWNER }}
+          MAIL_HERO_ACCESS_OWNER_ALIASES: ${{ secrets.MAIL_HERO_ACCESS_OWNER_ALIASES }}
+          MAIL_HERO_FORCE_SEND_PAUSED: ${{ vars.MAIL_HERO_FORCE_SEND_PAUSED }}
+          MAIL_HERO_MAINTENANCE_MODE: ${{ vars.MAIL_HERO_MAINTENANCE_MODE }}
         run: |
           test -n "$CLOUDFLARE_API_TOKEN"
-          npx --no-install wrangler d1 migrations apply DB --remote --config wrangler.native.production.ci.json
-          npx --no-install wrangler deploy --config wrangler.native.production.ci.json
-      - name: Remove generated configuration
-        if: always()
-        run: rm -f cloudflare/wrangler.native.production.ci.json
+          npx --no-install wrangler d1 migrations apply DB --remote --config ../wrangler.toml
+          node ../deploy/deploy-vars.mjs exec -- npx --no-install wrangler deploy --config ../wrangler.toml
 
   dashboard-deploy:
     name: Dashboard deploy
@@ -900,7 +893,7 @@ jobs:
     timeout-minutes: 15
     environment:
       name: production
-      url: https://${{ vars.DASHBOARD_PUBLIC_HOST }}
+      url: ${{ steps.config.outputs.url }}
     concurrency:
       group: dashboard-production
       cancel-in-progress: false
@@ -918,6 +911,19 @@ jobs:
           cache-dependency-path: |
             dashboard/worker/package-lock.json
             dashboard/web/package-lock.json
+      # Every static production value (account, host, Access, canary hour) is committed in
+      # dashboard/wrangler.toml; the environment URL and the Access probe read it there.
+      - name: Read the host and the Access issuer from the committed config
+        id: config
+        run: |
+          python3 - >> "$GITHUB_OUTPUT" <<'EOF'
+          import tomllib
+          with open("wrangler.toml", "rb") as file:
+              variables = tomllib.load(file)["vars"]
+          print("url=https://" + variables["PUBLIC_HOST"])
+          print("host=" + variables["PUBLIC_HOST"])
+          print("access_issuer=" + variables["ACCESS_ISSUER"])
+          EOF
       - name: Build the verified revision
         run: |
           npm ci --prefix worker --no-audit --no-fund
@@ -925,39 +931,36 @@ jobs:
           npm run build --prefix web
       # The owner's addresses, the CSRF key and the analytics token are environment secrets (masked in this
       # public log) and reach the Worker as secrets through --secrets-file; wrangler prints plain vars.
-      # CF_API_TOKEN is passed only so the generator can warn when it is reused as the analytics token
+      # CF_API_TOKEN is passed only so deploy-vars.mjs can warn when it is reused as the analytics token
       # (it never writes it); the owner allowed that reuse until a read-only token is saved.
-      - name: Generate the production configuration
+      - name: Write the Worker secrets file
+        working-directory: dashboard/worker
         env:
-          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
-          DASHBOARD_PUBLIC_HOST: ${{ vars.DASHBOARD_PUBLIC_HOST }}
-          DASHBOARD_ACCESS_ISSUER: ${{ vars.DASHBOARD_ACCESS_ISSUER }}
-          DASHBOARD_ACCESS_AUDIENCE: ${{ vars.DASHBOARD_ACCESS_AUDIENCE }}
-          DASHBOARD_CANARY_UTC_HOUR: ${{ vars.DASHBOARD_CANARY_UTC_HOUR }}
-          DASHBOARD_CANARY_ENABLED: ${{ vars.DASHBOARD_CANARY_ENABLED }}
-          MAIL_HERO_PUBLIC_HOST: ${{ vars.MAIL_HERO_PUBLIC_HOST }}
-          TODOFY_PUBLIC_HOST: ${{ vars.TODOFY_PUBLIC_HOST }}
           DASHBOARD_ACCESS_OWNER: ${{ secrets.DASHBOARD_ACCESS_OWNER }}
           DASHBOARD_ACCESS_OWNER_ALIASES: ${{ secrets.DASHBOARD_ACCESS_OWNER_ALIASES }}
           DASHBOARD_CSRF_SIGNING_KEY: ${{ secrets.DASHBOARD_CSRF_SIGNING_KEY }}
           DASHBOARD_CF_ANALYTICS_TOKEN: ${{ secrets.DASHBOARD_CF_ANALYTICS_TOKEN }}
           CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
-        run: node deploy/generate-ci-config.mjs
+        run: node ../deploy/deploy-vars.mjs secrets "$RUNNER_TEMP/home-secrets.json"
+      # deploy-vars.mjs adds BUILD_SHA and the canary switch (production variable DASHBOARD_CANARY_ENABLED,
+      # unset means true) as --var and refuses an invalid value (a deploy without a var deletes it).
       - name: Validate the bundle before deploying
         working-directory: dashboard/worker
+        env:
+          DASHBOARD_CANARY_ENABLED: ${{ vars.DASHBOARD_CANARY_ENABLED }}
         run: |
-          npx --no-install wrangler deploy --dry-run --config wrangler.production.ci.json \
-            --secrets-file wrangler.production.secrets.json
+          node ../deploy/deploy-vars.mjs exec -- npx --no-install wrangler deploy --dry-run --config ../wrangler.toml \
+            --secrets-file "$RUNNER_TEMP/home-secrets.json"
       # No D1 and no migration step: the HomeState class migration (v1, new_sqlite_classes) is in the config.
       - name: Deploy the Worker home
         working-directory: dashboard/worker
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+          DASHBOARD_CANARY_ENABLED: ${{ vars.DASHBOARD_CANARY_ENABLED }}
         run: |
           test -n "$CLOUDFLARE_API_TOKEN"
-          npx --no-install wrangler deploy --config wrangler.production.ci.json \
-            --secrets-file wrangler.production.secrets.json
+          node ../deploy/deploy-vars.mjs exec -- npx --no-install wrangler deploy --config ../wrangler.toml \
+            --secrets-file "$RUNNER_TEMP/home-secrets.json"
       # Cloudflare Access ("Home") must answer every unauthenticated request with a 302 to its login page
       # for this host, <issuer>/cdn-cgi/access/login/<host> (then end, "?" or "/"); the app itself must
       # never answer one. Any other 302, even one to the team domain's root (a zone Redirect Rule to the
@@ -967,9 +970,13 @@ jobs:
       # printed except the status code. This proves Access guards the host, not that the Worker runs:
       # /health (BUILD_SHA) needs an owner login (docs/verification.md).
       - name: Check that Access answers unauthenticated requests
+        env:
+          ACCESS_ISSUER: ${{ steps.config.outputs.access_issuer }}
+          PUBLIC_HOST: ${{ steps.config.outputs.host }}
         run: |
-          issuer=$(jq -er '.vars.ACCESS_ISSUER' worker/wrangler.production.ci.json)
-          host=$(jq -er '.vars.PUBLIC_HOST' worker/wrangler.production.ci.json)
+          issuer=$ACCESS_ISSUER
+          host=$PUBLIC_HOST
+          test -n "$issuer" && test -n "$host"
           for path in / /api/v2/home; do
             for attempt in $(seq 1 10); do
               answer=$(curl -sS -o /dev/null --max-time 15 --proto '=https' -w '%{http_code} %{redirect_url}' \
@@ -998,9 +1005,9 @@ jobs:
             echo "$path never reached Access (last status ${code:-none})." >&2
             exit 1
           done
-      - name: Remove the generated configuration
+      - name: Remove the secrets file
         if: always()
-        run: rm -f worker/wrangler.production.ci.json worker/wrangler.production.secrets.json
+        run: rm -f "$RUNNER_TEMP/home-secrets.json"
 
   # The site release: dispatches website-release.yml (docs in website/docs/release.md), the same workflow the
   # Notion buttons and the relay's detector dispatch, and returns at once. The release's job holds the one

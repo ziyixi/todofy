@@ -93,8 +93,8 @@ Every implementation test that calls an ops method validates its result with one
 | `src/native/pipeline.ts` | `runMaintenance(env, deferral?)` skips deferrable jobs (2.5); `createSyntheticCanaryDelivery(env, revisionID, runID)` next to `createSyntheticTestDelivery` (shared helper, `canary_run_id` column); `createDelivery` passes `{run_id: message.canary_run_id}` to `buildPayload` when set; `cleanupCanaryContent(env)` |
 | `src/native/alerts.ts` | `alertSnapshot`/`alertSignals` reused unchanged; `evaluateAlerts` upsert maintains `alerts.active_since` (2.2) |
 | `src/native/types.ts` | `Env.PUBLIC_HOST?: string` |
-| `deploy/generate-ci-config.mjs` (+ its test) | `vars.PUBLIC_HOST` from the already validated `MAIL_HERO_PUBLIC_HOST` |
-| `wrangler.native.toml` | `PUBLIC_HOST = "mail.example.com"` placeholder |
+| `deploy/generate-ci-config.mjs` (+ its test) | `vars.PUBLIC_HOST` from the already validated `MAIL_HERO_PUBLIC_HOST` (since 2026-09-30 the generator is retired and `PUBLIC_HOST` is committed in `mail-hero/wrangler.toml`) |
+| `wrangler.native.toml` | `PUBLIC_HOST = "mail.example.com"` placeholder (the template is retired; see above) |
 | `migrations/0010_ops_canary.sql` (new) | 2.2 |
 | `src/native/api-messages.ts` | delivery JSON gains `canary: boolean` (message has `canary_run_id`); UI labels such deliveries 金丝雀 (optional, `web/`) |
 | docs | `mail-hero/README.md`, `docs/cloudflare-setup.md` (the `Ops` entrypoint, `PUBLIC_HOST`, what shed defers), `docs/verification-native.md` (evidence once run) |

@@ -208,6 +208,21 @@ class Classify(unittest.TestCase):
             expect(F, F, F, F, F),
         )
 
+    def test_a_production_config_checks_and_deploys_only_its_app(self):
+        """Each Worker's committed production config is that app's code: its app is checked and deployed."""
+        self.assertEqual(push(["mail-hero/wrangler.toml"]), expect(F, T, T, F, T))
+        for path in ("todofy/wrangler.toml", "todofy/gateway/wrangler.toml", "todofy/deploy/deploy_vars.py"):
+            with self.subTest(path=path):
+                self.assertEqual(push([path]), expect(T, F, T, T, F))
+        for path in ("dashboard/wrangler.toml", "dashboard/deploy/deploy-vars.mjs"):
+            with self.subTest(path=path):
+                self.assertEqual(push([path]), expect(F, F, T, F, F, dashboard_check=T, dashboard_deploy=T))
+        self.assertEqual(push(["mail-hero/deploy/deploy-vars.mjs"]), expect(F, T, T, F, T))
+
+    def test_a_config_at_the_repo_root_deploys_nothing(self):
+        """test_wrangler_configs.py forbids it; were it committed, it would only run the gate."""
+        self.assertEqual(push(["wrangler.toml"]), expect(F, F, F, F, F))
+
     def test_backup_tool_counts_as_mail_hero(self):
         self.assertEqual(push(["mail-hero/deploy/backup/Dockerfile"]), expect(F, T, T, F, T))
 
@@ -627,9 +642,9 @@ class DeployConditions(unittest.TestCase):
         # The only token: the one Todofy deploy uses; no other secret reaches wrangler's environment.
         self.assertIn("CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}", block)
         self.assertEqual(block.count("CLOUDFLARE_API_TOKEN:"), 1)
-        # The generator compares (never writes) the deploy token, to refuse it as the analytics token.
-        generate = block.split("- name: Generate the production configuration\n", 1)[1].split("\n      - ", 1)[0]
-        self.assertIn("CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}", generate)
+        # deploy-vars.mjs compares (never writes) the deploy token, to warn when it is the analytics token.
+        secrets = block.split("- name: Write the Worker secrets file\n", 1)[1].split("\n      - ", 1)[0]
+        self.assertIn("CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}", secrets)
 
     def test_every_production_job_has_its_own_concurrency_group(self):
         blocks = self.jobs()
@@ -897,9 +912,10 @@ class TodofyJobs(unittest.TestCase):
             "npm run lint\n          npm run typecheck\n          npm test",
             "npm run check:api\n          npm run typecheck\n          npm test\n          npm run build",
             "if grep -rnE 'mail_hero|mail-hero' src; then exit 1; fi",
-            "uv run python deploy/generate_ci_config.py",
-            "uv run pywrangler deploy --dry-run --config wrangler.production.ci.json",
-            "npx --no-install wrangler deploy --dry-run --config gateway/wrangler.production.ci.json",
+            'uv run python deploy/deploy_vars.py secrets "$RUNNER_TEMP/todofy-gateway-secrets.json"',
+            "uv run python deploy/deploy_vars.py exec core -- uv run pywrangler deploy --dry-run --config wrangler.toml",
+            "uv run python deploy/deploy_vars.py exec gateway -- npx --no-install wrangler deploy --dry-run",
+            'test -d "$RUNNER_TEMP/todofy-core-bundle/python_modules/workers"',
         ):
             with self.subTest(command=command):
                 self.assertIn(command, block)
@@ -1008,7 +1024,7 @@ class TodofyJobs(unittest.TestCase):
                 self.assertNotIn(f'name = "{plugin}"', lock)
 
 
-@unittest.skipUnless(shutil.which("bash") and shutil.which("jq"), "needs bash and jq (both on the runner)")
+@unittest.skipUnless(shutil.which("bash"), "needs bash (on the runner)")
 class AccessProbe(unittest.TestCase):
     """The Dashboard deploy's Access probe, run as the workflow runs it, against a stubbed curl.
 
@@ -1031,13 +1047,9 @@ class AccessProbe(unittest.TestCase):
         return "\n".join(lines) + "\n"
 
     def probe(self, *answers):
-        """Runs the step; curl answers each request with the next of `answers` ("<code> <location>"), the
-        last one repeating."""
+        """Runs the step with the issuer and host the config step reads from dashboard/wrangler.toml; curl
+        answers each request with the next of `answers` ("<code> <location>"), the last one repeating."""
         with tempfile.TemporaryDirectory() as root:
-            Path(root, "worker").mkdir()
-            Path(root, "worker", "wrangler.production.ci.json").write_text(
-                json.dumps({"vars": {"ACCESS_ISSUER": self.ISSUER, "PUBLIC_HOST": self.HOST}})
-            )
             bin_dir = Path(root, "bin")
             bin_dir.mkdir()
             Path(root, "answers").write_text("\n".join(answers) + "\n")
@@ -1053,11 +1065,25 @@ class AccessProbe(unittest.TestCase):
             (bin_dir / "sleep").write_text("#!/usr/bin/env bash\nexit 0\n")
             for tool in (curl, bin_dir / "sleep"):
                 tool.chmod(0o755)
-            env = {**os.environ, "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}"}
+            env = {
+                **os.environ,
+                "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}",
+                "ACCESS_ISSUER": self.ISSUER,
+                "PUBLIC_HOST": self.HOST,
+            }
             result = subprocess.run(
                 ["bash", "-e", "-c", self.script()], cwd=root, env=env, capture_output=True, text=True, check=False
             )
             return result.returncode, result.stdout + result.stderr
+
+    def test_the_issuer_and_host_come_from_the_committed_config(self):
+        block = workflow_jobs()["dashboard-deploy"]
+        name = "- name: Check that Access answers unauthenticated requests\n"
+        step = block.split(name, 1)[1].split("\n      - ", 1)[0]
+        self.assertIn("ACCESS_ISSUER: ${{ steps.config.outputs.access_issuer }}", step)
+        self.assertIn("PUBLIC_HOST: ${{ steps.config.outputs.host }}", step)
+        config = block.split("- name: Read the host and the Access issuer from the committed config\n", 1)[1]
+        self.assertIn('open("wrangler.toml", "rb")', config.split("\n      - ", 1)[0])
 
     def test_the_login_page_for_this_host_passes(self):
         login = f"{self.ISSUER}/cdn-cgi/access/login/{self.HOST}"
