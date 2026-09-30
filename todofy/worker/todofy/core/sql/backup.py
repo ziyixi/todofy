@@ -72,6 +72,7 @@ MAIL_REMINDERS = Table(
         "updated_at",
         "ops_count",
         "ops_generated_at",
+        "project_id",
     ),
     ("day",),
     500,
@@ -109,6 +110,76 @@ DAILY_METRICS = Table("daily_metrics", ("day", "key", "value"), ("day", "key"), 
 # backups made before (restores of older backups never depend on a shared copy). Texts reach
 # 1.9 MB, hence the small page.
 LEGACY_MAIL_TEXT = Table("legacy_mail_text", ("event_id", "created_at", "text", "expires_at"), ("event_id",), 8)
+# The GTD ledger (migration 0004): metadata and counts only, never task text.
+GTD_SNAPSHOTS = Table(
+    "gtd_snapshots",
+    ("day", "status", "task_count", "skipped", "pages", "error_code", "started_at", "finished_at"),
+    ("day",),
+    500,
+)
+GTD_SNAPSHOT_TASKS = Table(
+    "gtd_snapshot_tasks",
+    (
+        "day",
+        "task_id",
+        "project_id",
+        "parent_id",
+        "labels",
+        "priority",
+        "due_date",
+        "due_at",
+        "due_recurring",
+        "deadline_date",
+        "added_at",
+        "checked",
+        "content_hmac",
+    ),
+    ("day", "task_id"),
+    500,
+)
+GTD_DAILY = Table(
+    "gtd_daily",
+    (
+        "day",
+        "scope",
+        "open",
+        "age_0_7",
+        "age_8_14",
+        "age_15_30",
+        "age_31_plus",
+        "oldest_days",
+        "overdue",
+        "undated",
+        "created_7d",
+        "completed_7d",
+        "completed_source",
+        "closed_1d",
+        "mail_open",
+        "complete",
+        "computed_at",
+    ),
+    ("day", "scope"),
+    500,
+)
+GTD_REVIEWS = Table(
+    "gtd_reviews",
+    (
+        "week",
+        "state",
+        "project_id",
+        "task_id",
+        "subject",
+        "body",
+        "attempts",
+        "next_attempt_at",
+        "last_error_code",
+        "completed_at",
+        "created_at",
+        "updated_at",
+    ),
+    ("week",),
+    200,
+)
 
 TABLES = {
     table.name: table
@@ -122,6 +193,10 @@ TABLES = {
         AUTH_FAILURES,
         DAILY_METRICS,
         LEGACY_MAIL_TEXT,
+        GTD_SNAPSHOTS,
+        GTD_SNAPSHOT_TASKS,
+        GTD_DAILY,
+        GTD_REVIEWS,
     )
 }
 

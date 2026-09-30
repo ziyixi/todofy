@@ -34,10 +34,14 @@ class Step(StrEnum):
     # The summary call of a canary event (contracts/ops-v1): its own step, so the summary
     # latency stays real mail only; its Gemini calls and tokens still count against the day.
     CANARY = "canary"
+    # The GTD ledger (docs/gtd-features.md): one point per read-only Todoist page of the daily
+    # snapshot, and the weekly review task's create call.
+    GTD = "gtd"
+    REVIEW = "review"
 
 
 GEMINI_STEPS = frozenset({Step.SUMMARY, Step.REPORT, Step.CANARY})
-TODOIST_CREATE_STEPS = frozenset({Step.TASK, Step.REMINDER})
+TODOIST_CREATE_STEPS = frozenset({Step.TASK, Step.REMINDER, Step.REVIEW})
 
 # Analytics Engine accepts at most 20 blobs, 20 doubles and one index of at most
 # 96 bytes per point, and 250 points per invocation. A point here has 4 of each and

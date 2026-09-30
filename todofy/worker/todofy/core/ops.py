@@ -11,7 +11,7 @@ import json
 import math
 import re
 from collections.abc import Iterable, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from enum import StrEnum
 from typing import Any, NoReturn
@@ -66,11 +66,13 @@ class Job(StrEnum):
     WEEKLY_BACKUP = "weekly_backup"
     RETENTION = "retention"
     METRICS_ROLLUP = "metrics_rollup"
+    # The GTD ledger's daily Todoist snapshot (docs/gtd-features.md): a few hundred D1 rows written.
+    GTD_SNAPSHOT = "gtd_snapshot"
 
 
-DEFERRED = (Job.WEEKLY_BACKUP, Job.RETENTION, Job.METRICS_ROLLUP)
+DEFERRED = (Job.WEEKLY_BACKUP, Job.RETENTION, Job.METRICS_ROLLUP, Job.GTD_SNAPSHOT)
 # A deferred job still runs once its last run is this old, however long the guard is renewed.
-JOB_BOUND = {Job.RETENTION: 72 * 3600, Job.METRICS_ROLLUP: 72 * 3600}
+JOB_BOUND = {Job.RETENTION: 72 * 3600, Job.METRICS_ROLLUP: 72 * 3600, Job.GTD_SNAPSHOT: 48 * 3600}
 # status() reports backup_stale (critical) once the last complete backup is older than this.
 BACKUP_STALE = 8 * 86400
 # A held backup starts anyway once the last complete one is this old (or there is none): 12 h
@@ -78,6 +80,8 @@ BACKUP_STALE = 8 * 86400
 # weekly backup late enough to raise a critical signal (a job takes about a minute).
 BACKUP_BOUND = 7 * 86400 + 12 * 3600
 DUE_BACKLOG = 3600
+# The GTD counters status() passes on (core/gtd.py status_counters), plus review_age_days.
+GTD_COUNTERS = ("inbox_open", "inbox_oldest_days", "overdue", "carryover_open", "completed_7d")
 
 
 def _invalid() -> NoReturn:
@@ -391,6 +395,17 @@ class Facts:
     last_backup_at: int | None
     guard: Guard
     public_host: str
+    # The GTD ledger (docs/gtd-features.md §8), from the object's storage: the latest complete
+    # aggregate's counters, how long the snapshot has been stale (None: it is not), and the days since
+    # the last review (None: no review yet) while the weekly review is enabled.
+    gtd_counters: Mapping[str, int] = field(default_factory=dict)
+    gtd_stale_seconds: int | None = None
+    review_enabled: bool = False
+    review_age_days: int | None = None
+
+
+# review_overdue: the weekly review has not been done for this many days.
+REVIEW_OVERDUE_DAYS = 10
 
 
 def status(facts: Facts) -> dict[str, Any]:
@@ -442,6 +457,12 @@ def status(facts: Facts) -> dict[str, Any]:
     if facts.guard.shed(now * 1000):
         assert facts.guard.until_ms is not None
         signals.append(signal("guard_shed", Severity.INFO, seconds_left=max(facts.guard.until_ms // 1000 - now, 0)))
+    if facts.gtd_stale_seconds is not None:
+        signals.append(signal("gtd_snapshot_stale", Severity.WARNING, age_hours=facts.gtd_stale_seconds // 3600))
+    # Info on purpose: a skipped personal review never makes the tile degraded or enters the digest;
+    # the Sunday task itself is the nudge.
+    if facts.review_enabled and facts.review_age_days is not None and facts.review_age_days > REVIEW_OVERDUE_DAYS:
+        signals.append(signal("review_overdue", Severity.INFO, days=facts.review_age_days))
     signals = ordered(signals)
     counters = {
         "active_events": facts.active_events,
@@ -457,6 +478,9 @@ def status(facts: Facts) -> dict[str, Any]:
     }
     if backup_age is not None:
         counters["backup_age_seconds"] = backup_age
+    counters |= {name: int(value) for name, value in facts.gtd_counters.items() if name in GTD_COUNTERS}
+    if facts.review_age_days is not None:
+        counters["review_age_days"] = facts.review_age_days
     return {
         "version": VERSION,
         "app": APP,

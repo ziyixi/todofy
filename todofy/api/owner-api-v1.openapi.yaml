@@ -243,6 +243,30 @@ paths:
         '401': {$ref: '#/components/responses/Unauthorized'}
         '503': {$ref: '#/components/responses/Unavailable'}
 
+  /api/v1/gtd/daily:
+    get:
+      operationId: getGtdDaily
+      tags: [owner]
+      summary: The GTD ledger's daily Todoist aggregates and the latest weekly review.
+      description: |
+        Counts from the daily read-only Todoist snapshot (13:00 UTC), per scope: every project
+        (`all`) and the inbox (`TODOIST_DEFAULT_PROJECT_ID`). Numbers only, never task text. Days
+        up to today, oldest first; a day without a snapshot is `recorded: false`. Kept 120 days.
+      parameters:
+        - name: days
+          in: query
+          description: How many UTC days, ending today.
+          schema: {type: integer, minimum: 1, maximum: 120, default: 30}
+      responses:
+        '200':
+          description: One entry per day, and the latest review week.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/GtdDaily'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '503': {$ref: '#/components/responses/Unavailable'}
+
   /api/v1/legacy_text/{event_id}:
     get:
       operationId: getLegacyText
@@ -934,7 +958,7 @@ components:
           type: object
           description: Tokens by the model that answered (or was tried last).
           additionalProperties: {type: integer, minimum: 0}
-        todoist_creates: {type: integer, minimum: 0, description: Task-creation requests (mail tasks and reminders; retries count).}
+        todoist_creates: {type: integer, minimum: 0, description: Task-creation requests (mail tasks, reminders and weekly reviews; retries count).}
         todoist_lookups: {type: integer, minimum: 0, description: Footer lookups (each may read several pages).}
       examples:
         - day: '2026-09-27'
@@ -948,6 +972,80 @@ components:
           gemini_tokens: {gemini-3.8-flash: 402113, gemini-3.7-flash: 8120}
           todoist_creates: 62
           todoist_lookups: 1
+
+    GtdDaily:
+      type: object
+      required: [days, latest_review]
+      additionalProperties: false
+      properties:
+        days:
+          type: array
+          maxItems: 120
+          items: {$ref: '#/components/schemas/GtdDay'}
+        latest_review:
+          description: The newest weekly review task (at most 12 weeks back), or null.
+          anyOf:
+            - $ref: '#/components/schemas/GtdReview'
+            - type: 'null'
+
+    GtdDay:
+      type: object
+      required: [day, recorded, all, inbox]
+      additionalProperties: false
+      properties:
+        day: {type: string, format: date, description: UTC day.}
+        recorded: {type: boolean, description: Whether the day has a snapshot aggregate.}
+        all:
+          description: Every project; null when the day is not recorded.
+          anyOf:
+            - $ref: '#/components/schemas/GtdScope'
+            - type: 'null'
+        inbox:
+          description: The inbox project; null when not recorded or no inbox project is configured.
+          anyOf:
+            - $ref: '#/components/schemas/GtdScope'
+            - type: 'null'
+
+    GtdScope:
+      type: object
+      required: [open, age_0_7, age_8_14, age_15_30, age_31_plus, oldest_days, overdue, undated, created_7d,
+        completed_7d, completed_source, closed_1d, mail_open, complete]
+      additionalProperties: false
+      properties:
+        open: {type: integer, minimum: 0, description: Active tasks (sub-tasks included).}
+        age_0_7: {type: integer, minimum: 0, description: Open tasks added 0–7 days ago.}
+        age_8_14: {type: integer, minimum: 0}
+        age_15_30: {type: integer, minimum: 0}
+        age_31_plus: {type: integer, minimum: 0, description: Tasks with an unknown creation time are in no bucket.}
+        oldest_days: {type: integer, minimum: 0}
+        overdue: {type: integer, minimum: 0, description: 'A fixed-time due before the snapshot, or a date before its UTC date.'}
+        undated: {type: integer, minimum: 0, description: Without a due date (a deadline alone does not date a task).}
+        created_7d: {type: [integer, 'null'], minimum: 0, description: 'Added in the last 7 days (open or completed); null without the completed list.'}
+        completed_7d: {type: [integer, 'null'], minimum: 0, description: "Completed in the last 7 days per Todoist's completed list; null when that call failed."}
+        completed_source: {type: string, enum: [api, none]}
+        closed_1d:
+          type: [integer, 'null']
+          minimum: 0
+          description: Tasks in the previous day's snapshot missing from this one (completions and deletions); only for `all`.
+        mail_open:
+          type: [integer, 'null']
+          minimum: 0
+          description: Mail tasks of the last 14 days still open; only for `all`.
+        complete: {type: boolean, description: False when the snapshot hit its page cap (over 2,000 tasks).}
+
+    GtdReview:
+      type: object
+      required: [week, state, created_at, completed_at]
+      additionalProperties: false
+      properties:
+        week: {type: string, pattern: '^[0-9]{4}-W[0-9]{2}$', description: ISO week.}
+        state: {type: string, enum: [sending, created, unknown, failed]}
+        created_at: {$ref: '#/components/schemas/Timestamp'}
+        completed_at:
+          description: When the daily snapshot first saw the task completed.
+          anyOf:
+            - $ref: '#/components/schemas/Timestamp'
+            - type: 'null'
 
     ReportsLatest:
       type: object

@@ -25,6 +25,7 @@ describe('route labels', () => {
     ['owner', `/api/v1/events/${EVENT_ID}/reconcile`, '/api/v1/events/{id}/reconcile'],
     ['owner', '/api/v1/legacy_text/legacy:abc', '/api/v1/legacy_text/{id}'],
     ['owner', '/api/v1/metrics/daily', '/api/v1/metrics/daily'],
+    ['owner', '/api/v1/gtd/daily', '/api/v1/gtd/daily'],
     ['owner', '/api/v1/anything/else', '/api/other'],
     ['owner', '/assets/app-1a2b3c.js', 'asset'],
     ['owner', `/events/${EVENT_ID}`, 'page'],

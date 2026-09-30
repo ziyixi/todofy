@@ -6,8 +6,9 @@ from pathlib import Path
 
 from tests.runtime.harness import ROOT, Worker, start_worker
 
-# Same runtime as the shipped core; D1 with the real migrations. No assets, cron or
-# Durable Object: the probe passes its own budget to the modules as the coordinator.
+# Same runtime as the shipped core; D1 with the real migrations. No assets or cron: the probe
+# passes its own budget to the modules as the coordinator. Its one Durable Object, GtdProbe, only
+# gives runtime/gtd.py a real object storage (its gtd_state and the ops tables); it runs no alarm.
 CONFIG = """\
 name = "todofy-reports-probe"
 main = "entry.py"
@@ -21,6 +22,14 @@ binding = "DB"
 database_name = "todofy"
 database_id = "00000000-0000-4000-8000-000000000000"
 migrations_dir = "{migrations}"
+
+[[durable_objects.bindings]]
+name = "GTD_PROBE"
+class_name = "GtdProbe"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["GtdProbe"]
 """
 
 

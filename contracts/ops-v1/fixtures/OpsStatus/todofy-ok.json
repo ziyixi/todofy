@@ -29,7 +29,13 @@
     "gemini_calls": 64,
     "todoist_window_calls": 3,
     "todoist_window_limit": 1000,
-    "backup_age_seconds": 363600
+    "backup_age_seconds": 363600,
+    "inbox_open": 23,
+    "inbox_oldest_days": 41,
+    "overdue": 3,
+    "carryover_open": 9,
+    "completed_7d": 42,
+    "review_age_days": 2
   },
   "last_backup_at": "2026-09-27T10:00:02Z",
   "ui_url": "https://todofy.example.com/",

@@ -15,7 +15,7 @@ from tests.fakes.server import (
     retry_after_http_date,
     retry_after_seconds,
 )
-from tests.fakes.todoist_fake import PROJECT_ID, TASKS_PATH, TOKEN, TodoistFake
+from tests.fakes.todoist_fake import COMPLETED_PATH, PROJECT_ID, TASKS_PATH, TOKEN, TodoistFake, stamp
 
 GEMINI_KEY = {"x-goog-api-key": API_KEY}
 TODOIST_AUTH = {"authorization": f"Bearer {TOKEN}"}
@@ -229,3 +229,32 @@ def test_todoist_seed_and_state_over_http(todoist: TodoistFake) -> None:
     assert (task["content"], task["checked"], task["project_id"]) == ("seeded", True, PROJECT_ID)
     httpx.post(todoist.url + "/admin/reset")
     assert todoist.tasks == []
+
+
+def test_todoist_lists_every_project_without_a_filter(todoist: TodoistFake) -> None:
+    todoist.add_task("a")
+    todoist.add_task("b", project_id="other", priority=4, due={"date": "2026-10-05"}, labels=["x"])
+    page = httpx.get(todoist.url + TASKS_PATH, params={"limit": 200}, headers=TODOIST_AUTH).json()
+    assert [(task["project_id"], task["priority"]) for task in page["results"]] == [(PROJECT_ID, 1), ("other", 4)]
+    assert page["results"][1]["due"] == {"date": "2026-10-05"} and page["next_cursor"] is None
+
+
+def test_todoist_lists_completed_tasks_in_a_window_and_omits_the_last_cursor(todoist: TodoistFake) -> None:
+    todoist.max_page_size = 2
+    now = 1_790_000_000.0
+    done = [todoist.add_task(f"d{n}", added_at=stamp(now - 86_400)) for n in range(3)]
+    for offset, task in enumerate(done):
+        todoist.complete(task.id, now - 60 * offset)
+    old = todoist.add_task("old")
+    todoist.complete(old.id, now - 8 * 86_400)
+    todoist.add_task("open")
+    params = {"since": stamp(now - 7 * 86_400), "until": stamp(now + 1), "limit": 200}
+    first = httpx.get(todoist.url + COMPLETED_PATH, params=params, headers=TODOIST_AUTH).json()
+    assert [task["content"] for task in first["items"]] == ["d0", "d1"] and first["next_cursor"]
+    second = httpx.get(
+        todoist.url + COMPLETED_PATH, params=params | {"cursor": first["next_cursor"]}, headers=TODOIST_AUTH
+    ).json()
+    assert [task["content"] for task in second["items"]] == ["d2"] and "next_cursor" not in second
+    active = httpx.get(todoist.url + TASKS_PATH, headers=TODOIST_AUTH).json()["results"]
+    assert [task["content"] for task in active] == ["open"]
+    assert httpx.get(todoist.url + COMPLETED_PATH, params={"limit": 5}, headers=TODOIST_AUTH).status_code == 400

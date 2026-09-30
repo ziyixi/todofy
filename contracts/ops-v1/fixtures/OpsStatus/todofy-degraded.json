@@ -18,7 +18,8 @@
     "deferred": [
       "weekly_backup",
       "retention",
-      "metrics_rollup"
+      "metrics_rollup",
+      "gtd_snapshot"
     ]
   },
   "signals": [

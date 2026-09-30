@@ -33,6 +33,7 @@ const OWNER_API_ROUTES: ReadonlySet<string> = new Set([
   '/api/v1/reports/latest',
   '/api/v1/reports/recompute',
   '/api/v1/metrics/daily',
+  '/api/v1/gtd/daily',
 ]);
 const OWNER_API_TEMPLATES: readonly (readonly [RegExp, string])[] = [
   [/^\/api\/v1\/events\/[^/]+$/, '/api/v1/events/{id}'],

@@ -30,7 +30,7 @@ from todofy.core.vocab import (
     EventState,
     Reconcile,
 )
-from todofy.runtime import backup, metrics, reminder, reports
+from todofy.runtime import backup, gtd, metrics, reminder, reports
 from todofy.runtime.config import flag, report_default_top, source_id, var
 from todofy.runtime.http import Result, failed, ok
 from todofy.runtime.interop import now_ms, read_capped
@@ -309,6 +309,17 @@ async def daily_metrics(env: Any, query: dict[str, str]) -> Result:
     return ok(await metrics.daily(env.DB, days, now_ms() // 1000))
 
 
+async def gtd_daily(env: Any, query: dict[str, str]) -> Result:
+    """GET /api/v1/gtd/daily?days=: the GTD ledger's daily aggregates up to today, oldest first."""
+    value = query.get("days")
+    days = gtd.DEFAULT_API_DAYS
+    if value is not None:
+        if not value.isascii() or not value.isdigit() or not 1 <= int(value) <= gtd.MAX_API_DAYS:
+            raise InvalidRequest
+        days = int(value)
+    return ok(await gtd.daily(env.DB, days, now_ms() // 1000))
+
+
 async def legacy_text(env: Any, key: str) -> Result:
     """GET /api/v1/legacy_text/{key}: imported texts reach 1.9 MB, fine for the object's 30 s of CPU."""
     row = await env.DB.prepare(views.LEGACY_TEXT.sql).bind(key).first()
@@ -348,6 +359,8 @@ async def _route(request: OwnerRequest, env: Any, coordinator: Any, owner: str) 
             return await reminders(env, _query(request))
         case "GET", "/api/v1/metrics/daily":
             return await daily_metrics(env, _query(request))
+        case "GET", "/api/v1/gtd/daily":
+            return await gtd_daily(env, _query(request))
         case "GET", "/api/v1/reports/latest":
             return ok(await reports.latest(env.DB))
         case "POST", "/api/v1/reports/recompute":

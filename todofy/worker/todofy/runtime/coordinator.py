@@ -67,7 +67,7 @@ from todofy.core.request_id import todoist_request_id
 from todofy.core.sql import views
 from todofy.core.todoist_request import RequestTooLarge, build_task_request
 from todofy.core.vocab import Code, EventState, Reconcile, allowed_actions
-from todofy.runtime import api, backup, gemini, ledger, metrics, ops, reminder, reports, retention, todoist
+from todofy.runtime import api, backup, gemini, gtd, ledger, metrics, ops, reminder, reports, retention, todoist
 from todofy.runtime.config import flag, gemini_models, integer, source_id, var
 from todofy.runtime.http import NO_CONTENT, Result, failed, not_found, ok
 from todofy.runtime.interop import now_ms, now_s, read_capped, sha256_hex
@@ -145,7 +145,7 @@ class TodofyCore(DurableObject):
     def __init__(self, ctx: Any, env: Any) -> None:
         super().__init__(ctx, env)
         self.sql = ctx.storage.sql
-        for statement in (*DO_SCHEMA, *backup.DO_SCHEMA, *metrics.DO_SCHEMA, *ops.DO_SCHEMA):
+        for statement in (*DO_SCHEMA, *backup.DO_SCHEMA, *metrics.DO_SCHEMA, *ops.DO_SCHEMA, *gtd.DO_SCHEMA):
             self.sql.exec(statement)
         self.running = False
         # A wake-up that arrived while the alarm loop was busy; honoured when it finishes.
@@ -227,6 +227,7 @@ class TodofyCore(DurableObject):
                 now = now_s()
                 self.sql.exec("UPDATE control SET next_maintenance = min(next_maintenance, ?) WHERE id = 1", now)
                 metrics.set_next_flush(self.sql, min(metrics.next_flush(self.sql), now))
+                gtd.release(self.sql, now)
                 await self.wake()
         except ops_rules.InvalidInput:
             return self._ops_error(ops_rules.OpsError.INVALID_INPUT)
@@ -267,6 +268,10 @@ class TodofyCore(DurableObject):
     def latest_ops_report(self) -> ops_rules.Report | None:
         """The dashboard's latest report, for the reminder's ops digest (reminder.tick)."""
         return ops.latest_report(self.sql)
+
+    def gtd_facts(self) -> Any:
+        """The GTD ledger's facts for ops status() (core.gtd.GtdFacts, object storage only)."""
+        return gtd.facts(self.env, self.sql)
 
     def usage_facts(self, now: int) -> dict[str, int]:
         """The Gemini and Todoist budgets as numbers, for ops status()."""
@@ -534,6 +539,19 @@ class TodofyCore(DurableObject):
             )
             self.sql.exec("DELETE FROM llm_inflight WHERE event_id = ?", row.event_id)
 
+    # The Todoist budget for runtime/gtd.py (read-only snapshot pages and the weekly review).
+    def count_todoist_calls(self, calls: int, now: int) -> None:
+        self._count_todoist_calls(calls, now)
+
+    def todoist_wait(self, now: int) -> int | None:
+        return self._todoist_wait(now)
+
+    def block_todoist(self, now: int) -> int:
+        """A 401/403 from Todoist: pause every Todoist call for TODOIST_AUTH_BLOCK; returns its end."""
+        until = now + TODOIST_AUTH_BLOCK
+        self.sql.exec(SET_CONTROL["todoist_blocked_until"], until)
+        return until
+
     def _count_todoist_calls(self, calls: int, now: int) -> None:
         """Count calls against Todoist's 1000 per 15 minutes before making them (an upper bound)."""
         self.sql.exec(
@@ -612,6 +630,7 @@ class TodofyCore(DurableObject):
         if not flag(env, "PROCESSING_PAUSED"):
             worked = await self._step(now, todoist_open=self._todoist_wait(now) is None)
         await self._ticks()
+        await self._gtd_tick()
         await storage.setAlarm(await self._next_alarm_ms(worked))
 
     async def _arm_watchdog(self) -> None:
@@ -974,6 +993,19 @@ class TodofyCore(DurableObject):
         if ops_rules.completed_run(finished, next_at, now, metrics.CONTINUE):
             ops.ran(self.sql, ops_rules.Job.METRICS_ROLLUP, now)
 
+    async def _gtd_tick(self) -> None:
+        """The GTD ledger's daily snapshot and weekly review (runtime/gtd.py), when either is due."""
+        now = now_s()
+        if gtd.next_at(self.sql) > now:
+            return
+        await self._arm_watchdog()
+        try:
+            await gtd.tick(self.env, self, now)
+        except Exception as exc:
+            # Like the other ticks: one failure must not stall the ledger; the job resumes from its state.
+            _log(tick="gtd", error=type(exc).__name__)
+            gtd.retry_later(self.sql, now, now + TICK_RETRY)
+
     async def _tick(self, column: str, now: int) -> int:
         match column:
             case "next_reminder_check":
@@ -990,7 +1022,7 @@ class TodofyCore(DurableObject):
             return soon  # keep draining
         now = now_s()
         control = self._control()
-        times = [*(control[column] for column in TICK_COLUMNS), metrics.next_flush(self.sql)]
+        times = [*(control[column] for column in TICK_COLUMNS), metrics.next_flush(self.sql), gtd.next_at(self.sql)]
         if (backup_at := backup.next_run(self.env, self.sql)) is not None:
             # A backup an ops guard holds back is considered again when the guard allows it.
             times.append(max(backup_at, ops.backup_defer_until(self.sql, now) or 0))

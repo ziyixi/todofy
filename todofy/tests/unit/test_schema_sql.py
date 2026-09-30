@@ -95,6 +95,10 @@ def test_tables_and_indexes_are_exactly_the_planned_ones(db):
         "auth_failures",
         "legacy_mail_text",
         "daily_metrics",
+        "gtd_snapshots",
+        "gtd_snapshot_tasks",
+        "gtd_daily",
+        "gtd_reviews",
     }
     assert {name for name, kind in objects.items() if kind == "index"} == {
         "mail_events_due",
@@ -109,6 +113,7 @@ def test_tables_and_indexes_are_exactly_the_planned_ones(db):
         "owner_actions_created",
         "legacy_mail_text_expires",
         "legacy_mail_text_created",
+        "gtd_reviews_sending",
     }
 
 

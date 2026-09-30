@@ -173,6 +173,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/gtd/daily": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The GTD ledger's daily Todoist aggregates and the latest weekly review.
+         * @description Counts from the daily read-only Todoist snapshot (13:00 UTC), per scope: every project
+         *     (`all`) and the inbox (`TODOIST_DEFAULT_PROJECT_ID`). Numbers only, never task text. Days
+         *     up to today, oldest first; a day without a snapshot is `recorded: false`. Kept 120 days.
+         */
+        get: operations["getGtdDaily"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/legacy_text/{event_id}": {
         parameters: {
             query?: never;
@@ -644,10 +666,64 @@ export interface components {
             gemini_tokens: {
                 [key: string]: number;
             };
-            /** @description Task-creation requests (mail tasks and reminders; retries count). */
+            /** @description Task-creation requests (mail tasks */
             todoist_creates: number;
             /** @description Footer lookups (each may read several pages). */
             todoist_lookups: number;
+        };
+        GtdDaily: {
+            days: components["schemas"]["GtdDay"][];
+            /** @description The newest weekly review task (at most 12 weeks back), or null. */
+            latest_review: components["schemas"]["GtdReview"] | null;
+        };
+        GtdDay: {
+            /**
+             * Format: date
+             * @description UTC day.
+             */
+            day: string;
+            /** @description Whether the day has a snapshot aggregate. */
+            recorded: boolean;
+            /** @description Every project; null when the day is not recorded. */
+            all: components["schemas"]["GtdScope"] | null;
+            /** @description The inbox project; null when not recorded or no inbox project is configured. */
+            inbox: components["schemas"]["GtdScope"] | null;
+        };
+        GtdScope: {
+            /** @description Active tasks (sub-tasks included). */
+            open: number;
+            /** @description Open tasks added 0–7 days ago. */
+            age_0_7: number;
+            age_8_14: number;
+            age_15_30: number;
+            /** @description Tasks with an unknown creation time are in no bucket. */
+            age_31_plus: number;
+            oldest_days: number;
+            /** @description A fixed-time due before the snapshot, or a date before its UTC date. */
+            overdue: number;
+            /** @description Without a due date (a deadline alone does not date a task). */
+            undated: number;
+            /** @description Added in the last 7 days (open or completed); null without the completed list. */
+            created_7d: number | null;
+            /** @description Completed in the last 7 days per Todoist's completed list; null when that call failed. */
+            completed_7d: number | null;
+            /** @enum {string} */
+            completed_source: "api" | "none";
+            /** @description Tasks in the previous day's snapshot missing from this one (completions and deletions); only for `all`. */
+            closed_1d: number | null;
+            /** @description Mail tasks of the last 14 days still open; only for `all`. */
+            mail_open: number | null;
+            /** @description False when the snapshot hit its page cap (over 2 */
+            complete: boolean;
+        };
+        GtdReview: {
+            /** @description ISO week. */
+            week: string;
+            /** @enum {string} */
+            state: "sending" | "created" | "unknown" | "failed";
+            created_at: components["schemas"]["Timestamp"];
+            /** @description When the daily snapshot first saw the task completed. */
+            completed_at: components["schemas"]["Timestamp"] | null;
         };
         ReportsLatest: {
             summary: components["schemas"]["summary-v1.schema"] | null;
@@ -749,8 +825,12 @@ export interface components {
             }[];
             /** @description Gemini model name; empty when no model was called. */
             model: string;
-            /** @description Summaries in the window. */
+            /** @description Summaries the model saw: new_count + carryover_count (JSON Schema cannot express the sum). */
             task_count: number;
+            /** @description Summaries of mail that arrived in the 24 h window (window_start, window_end]. Added 2026-09-30; absent from reports stored before. */
+            new_count?: number;
+            /** @description Older mail tasks (up to 14 days, at most 30) that the day's Todoist snapshot still lists as open, shown to the model as "[N 天前] summary"; 0 when no usable snapshot existed, and then the report is exactly the 24 h one. Added 2026-09-30; absent from reports stored before. */
+            carryover_count?: number;
             /**
              * @description The newsletter endpoint sends only ok and empty_window; model_output_invalid appears only in stored copies the owner API lists. stale is kept for compatibility and is no longer sent: without a report computed since the latest precompute time, the endpoint answers 503.
              * @enum {unknown}
@@ -1185,6 +1265,32 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["DailyMetrics"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    getGtdDaily: {
+        parameters: {
+            query?: {
+                /** @description How many UTC days, ending today. */
+                days?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description One entry per day, and the latest review week. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GtdDaily"];
                 };
             };
             400: components["responses"]["BadRequest"];

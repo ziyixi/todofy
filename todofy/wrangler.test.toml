@@ -44,3 +44,6 @@ GEMINI_MODELS = "model-a,model-b"
 REMINDER_ENABLED = "false"
 # No daily report precompute, whatever the time of day the suite runs (scenarios opt in with "00:00").
 REPORT_PRECOMPUTE_UTC = "off"
+# No daily GTD snapshot and no weekly review task either (scenarios opt in, e.g. GTD_COLLECT_UTC = "00:00").
+GTD_COLLECT_UTC = "off"
+GTD_REVIEW_ENABLED = "false"

@@ -289,7 +289,7 @@ def test_set_guard_is_idempotent_bounded_and_expires(stack: OpsStack) -> None:
     shed = {"level": "shed", "reason": "d1_reads_high", "until": stamp(now + 3600)}
     first = stack.ok("setGuard", shed, definition="GuardState")
     assert (first["level"], first["reason"], first["until"]) == ("shed", "d1_reads_high", shed["until"])
-    assert first["deferred"] == ["weekly_backup", "retention", "metrics_rollup"]
+    assert first["deferred"] == ["weekly_backup", "retention", "metrics_rollup", "gtd_snapshot"]
     time.sleep(1.1)
     assert stack.ok("setGuard", shed, definition="GuardState") == first  # same set_at
     status = stack.ok("status", definition="OpsStatus")

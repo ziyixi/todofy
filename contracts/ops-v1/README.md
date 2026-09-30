@@ -112,7 +112,7 @@ Signal codes (severity):
 | --- | --- |
 | both | `maintenance_mode` (critical), `guard_shed` (info, `seconds_left`), `status_unavailable` (critical) |
 | Mail Hero | the alert signals of `alerts.ts` with their metrics: `capacity_70` (warning), `capacity_85`, `capacity_95`, `backup_stale`, `endpoint_blocked` (critical), `pending_stale`, `parse_failed`, `endpoint_paused`, `delivery_failed`, `policy_error` (warning); plus `force_send_paused`, `send_paused`, `ingest_quota_80` (warning), `forwarding_off`, `backup_active` (info) |
-| Todofy | `attention`, `due_backlog`, `processing_paused`, `todoist_paused`, `gemini_budget_80`, `backup_failed`, `reminder_failed` (warning); `todoist_blocked`, `gemini_budget_95`, `backup_stale` (critical); `reminder_disabled`, `backup_disabled`, `backup_active` (info) |
+| Todofy | `attention`, `due_backlog`, `processing_paused`, `todoist_paused`, `gemini_budget_80`, `backup_failed`, `reminder_failed`, `gtd_snapshot_stale` (warning, `age_hours`); `todoist_blocked`, `gemini_budget_95`, `backup_stale` (critical); `reminder_disabled`, `backup_disabled`, `backup_active`, `review_overdue` (info, `days`) |
 
 Counter names are listed per app in `IMPLEMENTATION.md`. New codes and counters may be added in ops-v1;
 the dashboard shows unknown ones generically.

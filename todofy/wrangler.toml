@@ -6,9 +6,10 @@
 # from todofy/wrangler.toml, next to pyproject.toml and python_modules/.
 #
 # Deployed only by CI ("Todofy deploy" in .github/workflows/ci.yml) through deploy/deploy_vars.py, which
-# validates and appends the values that are never committed, with --var: TODOIST_DEFAULT_PROJECT_ID (GitHub
-# environment secret); MAINTENANCE_MODE, PROCESSING_PAUSED, FORCE_PAUSE_TODOIST, REMINDER_ENABLED (GitHub
-# environment variables); BUILD_SHA (the commit). A plain `pywrangler deploy` of this file DELETES those vars.
+# validates and appends the values that are never committed, with --var: TODOIST_DEFAULT_PROJECT_ID and, only
+# when set, TODOIST_OPS_PROJECT_ID and TODOIST_REVIEW_PROJECT_ID (GitHub environment secrets); MAINTENANCE_MODE,
+# PROCESSING_PAUSED, FORCE_PAUSE_TODOIST, REMINDER_ENABLED, GTD_REVIEW_ENABLED (GitHub environment variables);
+# BUILD_SHA (the commit). A plain `pywrangler deploy` of this file DELETES those vars.
 # Worker secrets (GEMINI_API_KEY, TODOIST_API_KEY) survive every deploy.
 #
 # Runtime tests use wrangler.test.toml. Local dev (docs/dev-notes.md §1) uses local bindings only; local core
@@ -65,5 +66,9 @@ GEMINI_DAILY_TOKEN_BUDGET = "3000000"
 LOOKUP_DELAY_MS = "120000"
 REPORT_DEFAULT_TOP = "10"
 REPORT_PRECOMPUTE_UTC = "13:30"
+# The GTD ledger's daily read-only Todoist snapshot (docs/gtd-features.md), before the report precompute.
+GTD_COLLECT_UTC = "13:00"
+# Days of still-open mail tasks the morning brief carries over (0 turns the carryover off; at most 14).
+REPORT_CARRYOVER_DAYS = "14"
 # 0 keeps imported mail text forever.
 LEGACY_TEXT_RETENTION_DAYS = "0"

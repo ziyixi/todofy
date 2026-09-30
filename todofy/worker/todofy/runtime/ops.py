@@ -5,12 +5,14 @@ this module. State lives in the object's SQLite only (not D1, not in backups): t
 the last run of each deferrable job and the dashboard's latest report. Losing it reads as a
 normal guard, jobs that may run now and no report until the next one.
 
-D1 budget: ``status`` runs one batch of five bounded reads (STATUS_STATEMENTS); ``canary``
+D1 budget: ``status`` runs one batch of five bounded reads (STATUS_STATEMENTS; the GTD ledger's
+counters and signals come from the object's ``gtd_state``, runtime/gtd.py); ``canary``
 one primary-key read; ``set_guard`` and ``store_report`` none.
 """
 
 from typing import Any
 
+from todofy.core import gtd as gtd_rules
 from todofy.core import ops as core
 from todofy.core.backoff import DAY, REMINDER_MAX_ATTEMPTS
 from todofy.core.sql import reminders as reminder_sql
@@ -161,6 +163,8 @@ async def status(env: Any, coordinator: Any, now: int) -> dict[str, Any]:
     )
     usage = coordinator.usage_facts(now)
     state = backup.status_facts(env, store, now)
+    # The GTD ledger's counters and signals come from the object's storage too (no D1 read).
+    ledger_facts = coordinator.gtd_facts()
     reminder = day.results[0] if day.results else None
     oldest = due.results[0]["at"]
     switch = switches(env)
@@ -193,6 +197,10 @@ async def status(env: Any, coordinator: Any, now: int) -> dict[str, Any]:
             last_backup_at=state["last_backup_at"],
             guard=guard(store),
             public_host=var(env, "TODOFY_PUBLIC_HOST"),
+            gtd_counters=ledger_facts.counters,
+            gtd_stale_seconds=gtd_rules.snapshot_age(ledger_facts, now),
+            review_enabled=ledger_facts.review_enabled,
+            review_age_days=gtd_rules.review_age_days(ledger_facts, now) if ledger_facts.review_enabled else None,
         )
     )
 

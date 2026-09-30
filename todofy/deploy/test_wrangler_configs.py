@@ -37,6 +37,8 @@ CORE_VARS = {
     "REPORT_DEFAULT_TOP",
     "REPORT_PRECOMPUTE_UTC",
     "LEGACY_TEXT_RETENTION_DAYS",
+    "GTD_COLLECT_UTC",
+    "REPORT_CARRYOVER_DAYS",
 }
 GATEWAY_VARS = {"TODOFY_PUBLIC_HOST", "TODOFY_HOOKS_HOSTS", "ACCESS_ISSUER", "ACCESS_AUDIENCE"}
 
@@ -65,9 +67,23 @@ def test_the_committed_vars_are_exactly_the_static_ones() -> None:
     for worker, config in (("core", CORE), ("gateway", GATEWAY)):
         assert not set(config["vars"]) & {item.name for item in INJECTED[worker]}, worker
     # Test-only timing knobs keep their code defaults; the build is the deploy's commit.
-    never = ("GEMINI_TIMEOUT_MS", "BUILD_SHA", "ACCESS_OWNER", "ACCESS_OWNER_ALIASES", "TODOIST_DEFAULT_PROJECT_ID")
+    never = (
+        "GEMINI_TIMEOUT_MS",
+        "BUILD_SHA",
+        "ACCESS_OWNER",
+        "ACCESS_OWNER_ALIASES",
+        "TODOIST_DEFAULT_PROJECT_ID",
+        "TODOIST_OPS_PROJECT_ID",
+        "TODOIST_REVIEW_PROJECT_ID",
+    )
     for name in never:
         assert name not in CORE["vars"] and name not in GATEWAY["vars"], name
+
+
+def test_the_gtd_schedule_and_the_carryover_are_production_values() -> None:
+    """docs/gtd-features.md §10: the snapshot at 13:00 UTC, before the 13:30 precompute; 14 days carried."""
+    assert CORE["vars"]["GTD_COLLECT_UTC"] == "13:00" < CORE["vars"]["REPORT_PRECOMPUTE_UTC"]
+    assert _integer(CORE["vars"]["REPORT_CARRYOVER_DAYS"], 0, 14)
 
 
 def test_both_workers_share_account_date_and_public_host() -> None:

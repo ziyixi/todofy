@@ -205,9 +205,11 @@ def test_defer_until_holds_a_job_within_its_bound(guard, last_run, expected):
     assert ops.defer_until(guard, NOW, last_run, 72 * HOUR) == expected
 
 
-def test_only_the_three_deferrable_jobs_are_listed():
-    assert [str(job) for job in ops.DEFERRED] == ["weekly_backup", "retention", "metrics_rollup"]
-    assert set(ops.JOB_BOUND) == {ops.Job.RETENTION, ops.Job.METRICS_ROLLUP}
+def test_only_the_four_deferrable_jobs_are_listed():
+    assert [str(job) for job in ops.DEFERRED] == ["weekly_backup", "retention", "metrics_rollup", "gtd_snapshot"]
+    assert set(ops.JOB_BOUND) == {ops.Job.RETENTION, ops.Job.METRICS_ROLLUP, ops.Job.GTD_SNAPSHOT}
+    # A held snapshot still runs within 48 h: carryover and the counters are then at most two days old.
+    assert ops.JOB_BOUND[ops.Job.GTD_SNAPSHOT] == 48 * 3600
     assert ops.BACKUP_BOUND == 7 * 86400 + 12 * HOUR
     assert ops.BACKUP_STALE - ops.BACKUP_BOUND >= 12 * HOUR
 
@@ -309,6 +311,9 @@ FACTS = ops.Facts(
     last_backup_at=NOW - 363_600,
     guard=ops.NORMAL,
     public_host="todofy.example.com",
+    gtd_counters={"inbox_open": 23, "inbox_oldest_days": 41, "overdue": 3, "carryover_open": 9, "completed_7d": 42},
+    review_enabled=True,
+    review_age_days=2,
 )
 
 
@@ -360,7 +365,7 @@ def test_signals_health_and_order():
     }
     assert by_code["backup_stale"] == {"age_seconds": 792_000, "has_backup": 1}
     assert by_code["guard_shed"] == {"seconds_left": 32_400}
-    assert status["guard"]["deferred"] == ["weekly_backup", "retention", "metrics_rollup"]
+    assert status["guard"]["deferred"] == ["weekly_backup", "retention", "metrics_rollup", "gtd_snapshot"]
     assert status["counters"]["oldest_due_age_seconds"] == 2 * HOUR
 
 
@@ -407,6 +412,25 @@ def test_info_signals_keep_health_ok():
     assert status["health"] == "ok"
     running = ops.status(replace(FACTS, backup_active=True, backup_status="running"))
     assert (codes(running), running["modes"]["backup_active"]) == ([("backup_active", "info")], True)
+
+
+def test_gtd_counters_and_signals():
+    gtd = {"inbox_open": 23, "inbox_oldest_days": 41, "overdue": 3, "carryover_open": 9, "completed_7d": 42}
+    status = ops.status(replace(FACTS, gtd_counters=gtd | {"stray": 1}, review_enabled=True, review_age_days=7))
+    assert errors("OpsStatus", status) == []
+    assert {name: status["counters"][name] for name in gtd} == gtd and "stray" not in status["counters"]
+    assert status["counters"]["review_age_days"] == 7
+    assert len(status["counters"]) <= 32 and codes(status) == [] and status["health"] == "ok"
+    # review_overdue is info: after 10 days it is shown, and the app stays ok (never in the digest).
+    assert codes(ops.status(replace(FACTS, review_enabled=True, review_age_days=10))) == []
+    overdue = ops.status(replace(FACTS, review_enabled=True, review_age_days=11))
+    assert (codes(overdue), overdue["health"]) == ([("review_overdue", "info")], "ok")
+    assert overdue["signals"][0]["metrics"] == {"days": 11}
+    assert codes(ops.status(replace(FACTS, review_enabled=False, review_age_days=30))) == []
+    stale = ops.status(replace(FACTS, gtd_stale_seconds=50 * HOUR + 59))
+    assert errors("OpsStatus", stale) == []
+    assert (codes(stale), stale["health"]) == ([("gtd_snapshot_stale", "warning")], "degraded")
+    assert stale["signals"][0]["metrics"] == {"age_hours": 50}
 
 
 def test_a_failed_reminder_with_retries_left_is_not_a_signal():

@@ -36,3 +36,21 @@ EXPIRE_LEGACY_TEXT_OLD = Query(
     " (SELECT rowid FROM legacy_mail_text WHERE created_at < ? ORDER BY created_at LIMIT ?)",
     "legacy_mail_text_created",
 )
+# The GTD ledger (docs/gtd-features.md §5): raw snapshot rows 14 days, snapshots and aggregates 120 days,
+# reviews 400 days. Bind the first day (or ISO week) to keep, then the batch size.
+EXPIRE_GTD_TASKS = Query(
+    "DELETE FROM gtd_snapshot_tasks WHERE rowid IN (SELECT rowid FROM gtd_snapshot_tasks WHERE day < ? LIMIT ?)",
+    "sqlite_autoindex_gtd_snapshot_tasks_1",
+)
+EXPIRE_GTD_SNAPSHOTS = Query(
+    "DELETE FROM gtd_snapshots WHERE rowid IN (SELECT rowid FROM gtd_snapshots WHERE day < ? LIMIT ?)",
+    "sqlite_autoindex_gtd_snapshots_1",
+)
+EXPIRE_GTD_DAILY = Query(
+    "DELETE FROM gtd_daily WHERE rowid IN (SELECT rowid FROM gtd_daily WHERE day < ? LIMIT ?)",
+    "sqlite_autoindex_gtd_daily_1",
+)
+EXPIRE_GTD_REVIEWS = Query(
+    "DELETE FROM gtd_reviews WHERE rowid IN (SELECT rowid FROM gtd_reviews WHERE week < ? LIMIT ?)",
+    "sqlite_autoindex_gtd_reviews_1",
+)
