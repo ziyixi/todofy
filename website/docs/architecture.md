@@ -32,21 +32,31 @@ Notion Blog data source ──(read: sync)────────────�
   `robots.ts` and `sitemap.ts` needed `dynamic = "force-static"`.
 - The Worker has no script (`wrangler.toml` has no `main`). Requests for static assets are free and do not
   count against the Workers Free request or CPU limits. `html_handling = "auto-trailing-slash"` serves
-  `/blog` from `blog.html` and redirects `/blog/` and `/blog.html` to `/blog` with **307** (Vercel used
-  308; the target is canonical and every page has `rel=canonical`). `not_found_handling = "404-page"`
-  answers unknown paths with `404.html` and status 404.
+  `/blog` from `blog.html`; the trailing-slash form of every canonical page and feed path (`/blog/`,
+  `/blog/<slug>/`, `/feed.xml/`, …) is a **308** from `_redirects` (below), as on Vercel, and only
+  `.html` forms such as `/blog.html` get html_handling's 307. `not_found_handling = "404-page"` answers
+  unknown paths with `404.html` and status 404. `finalize.ts` removes Next's internal `_not-found` copy,
+  so `/_not-found` is a 404 too.
+- **Known differences from Vercel** (accepted): `/404` answers the not-found page with status **200**
+  (auto-trailing-slash serves `404.html` for it; only a Worker script could change that; the page is
+  `noindex`); `OPTIONS` answers 405 instead of 204 (simple cross-origin GETs need no preflight); old
+  `/_next/image?url=…` URLs answer 404 (see Images).
 - `workers_dev = false` and `preview_urls = false`: no `*.workers.dev` copy and no public per-version URL.
 - **Headers** (`out/_headers`, from [`scripts/export/site-files.ts`](../scripts/export/site-files.ts)):
   exactly the headers `next.config.ts headers()` sent on Vercel on every path (Referrer-Policy,
   X-Content-Type-Options, X-Frame-Options DENY, Permissions-Policy), plus
   `Strict-Transport-Security: max-age=63072000` (what Vercel sent; the zone's own HSTS is off; no
-  includeSubDomains or preload, other subdomains are separate apps); `no-store` on `/build-info.json` and
+  includeSubDomains or preload, other subdomains are separate apps) and `Access-Control-Allow-Origin: *`
+  (Vercel sent it on every static response; browser-based feed readers rely on it); `no-store` on `/build-info.json` and
   `/publication-state.json` (the release verifier and the Notion status check read them and refuse cached
   answers); `application/rss+xml; charset=utf-8` on `/feed.xml`; `immutable` on the content-addressed
   `/_next/static/*`, `/media/*` and `/_img/*`.
 - **Redirects** (`out/_redirects`): the snapshot's slug-change and configured redirects as literal 308
-  rules (validated again: no placeholders or splats, internal targets, at most 2,000). Redirects run before
-  assets. The apex → www redirect cannot live here (no host rules); it is a zone Single Redirect.
+  rules, each also in its trailing-slash form (`/blog/old/` → new slug; Vercel reached it through its own
+  slash 308), plus `<path>/ → <path>` 308 for every canonical page, post and feed path (validated again: no
+  placeholders or splats, internal targets, at most 2,000 lines). Redirects run before assets and
+  html_handling. A lowercase percent-encoded old URL first gets the platform's 307 to the uppercase form,
+  then the 308. The apex → www redirect cannot live here (no host rules); it is a zone Single Redirect.
 - **Limits** checked by `scripts/export/finalize.ts`: at most 20,000 files per version and every file
   under 25 MiB (Workers Free static assets). The Notion media downloader caps video and attachments at
   24 MiB (images 20 MiB) to stay below it.
@@ -75,6 +85,10 @@ variants at build time ([`scripts/images/prepare.ts`](../scripts/images/prepare.
   - the whole export with that content: 270 files, 9.9 MB (`wrangler deploy --dry-run` reads 285 files,
     counting `_headers` and `_redirects` and wrangler's own manifest entries).
 - The Open Graph image is still the original portrait PNG (crawlers fetch it rarely).
+- Old image URLs: Vercel's pages referenced `/_next/image?url=…&w=…&q=75`; those URLs answer 404 after the
+  cutover (`_redirects` cannot match a query string). Only image-search entries and external hotlinks to
+  them break; every page links the new `/_img/` variants. Keeping them would need a small Worker script
+  (`run_worker_first` on `/_next/image`) that maps `url=` to the original or a variant; accepted as is.
 
 ## Release state
 
@@ -131,5 +145,5 @@ failed run's GitHub notification is the alert); a dispatch PAT that expires make
 
 Page views: static assets, free and unlimited. Relay: 96 scheduled invocations and up to ~290 subrequests a
 day plus the button clicks, each far under 10 ms CPU. GitHub Actions: public repository, standard runners.
-Cloudflare Web Analytics is enabled for the zone (automatic injection); whether it still injects into
-responses served by a Worker is checked at cutover.
+The live site has no analytics beacon today (checked 2026-09-30: no `cloudflareinsights` in the HTML of any
+page); adding Cloudflare Web Analytics would be a separate owner decision, not part of the migration.

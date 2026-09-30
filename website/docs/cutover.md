@@ -77,7 +77,9 @@ releases if needed.
 
 2. Look at it: <https://website-preview.ziyixi.science> (portrait sharp and small, article images,
    lightbox, feed, `/nope` → 404). `curl -sI https://website-preview.ziyixi.science/build-info.json` shows
-   `cache-control: no-store, max-age=0` and `strict-transport-security: max-age=63072000`. Click 刷新状态
+   `cache-control: no-store, max-age=0`, `strict-transport-security: max-age=63072000` and
+   `access-control-allow-origin: *`; `curl -sI https://website-preview.ziyixi.science/blog/` is a `308` to
+   `/blog`. Click 刷新状态
    and 发布网站 once; both runs appear under Actions → Website release.
 
 Rollback: remove the line and push (the next release detaches the hostname).
@@ -106,10 +108,9 @@ Rollback: remove the line and push (the next release detaches the hostname).
 2. Check at once: `curl -sI https://www.ziyixi.science/` has no `x-vercel-id`;
    `curl -s https://www.ziyixi.science/build-info.json` shows the Worker's `contentHash` (the same as the
    preview host); `robots.txt`, `build-info.json` and `publication-state.json` are not rewritten by the zone
-   cache (`cache-control` as in step 2); HSTS present; `/blog/` → 307 `/blog`; `/nope` → 404;
-   `/feed.xml` is `application/rss+xml`. View the page source in a browser: the Cloudflare Web Analytics
-   beacon (`static.cloudflareinsights.com/beacon.min.js`) should still be injected; if it is not, add the
-   public snippet from the Web Analytics page to `src/app/layout.tsx`.
+   cache (`cache-control` as in step 2); HSTS and `access-control-allow-origin: *` present; `/blog/` → 308
+   `/blog`; `/nope` → 404; `/feed.xml` is `application/rss+xml`. The live site has no analytics beacon
+   today and the new one has none either; adding analytics is a separate decision, not a cutover step.
 3. Keep `wrangler.toml` the only place that attaches hostnames: once it lists any, every release makes its
    list the complete set for this Worker, so a hostname attached only in the dashboard would be detached by
    the next release.
@@ -124,8 +125,20 @@ Rules → Create rule (or the "Redirect from root to WWW" template):
   status code **308**, **Preserve query string** on.
 
 Leave the apex A record as it is (proxied; the rule answers at the edge before any origin). Later you may
-change it to a proxied `AAAA 100::` so no request can reach Vercel. Check:
-`curl -sI 'https://ziyixi.science/blog?x=1'` → `308`, `location: https://www.ziyixi.science/blog?x=1`.
+change it to a proxied `AAAA 100::` so no request can reach Vercel.
+
+**Apex HSTS.** Vercel's apex 308 carries `strict-transport-security: max-age=63072000`; a Single Redirect
+answers at the edge without it, and the www Worker's `_headers` never reach the apex. Browsers that already
+saw the header keep it until it expires (two years), so nothing breaks at once, but it is no longer
+refreshed. To keep it, add a Response Header Transform Rule in the same dashboard (Rules → Transform
+Rules → Modify Response Header): when Hostname equals `ziyixi.science`, **set static**
+`Strict-Transport-Security` = `max-age=63072000` (no includeSubDomains or preload: other subdomains are
+separate apps). Do not use the zone-wide HSTS setting, which would apply to every subdomain. Whether the
+header rule applies to a Single Redirect's own response is checked by the curl below; if it does not,
+accept the loss (the www host keeps its own HSTS).
+
+Check: `curl -sI 'https://ziyixi.science/blog?x=1'` → `308`, `location: https://www.ziyixi.science/blog?x=1`,
+and look for `strict-transport-security` (present if the transform rule applies).
 
 ## 5. Cleanup (after one to two weeks)
 

@@ -304,6 +304,20 @@ test.describe("public site", () => {
     await expect(page.locator('meta[name="robots"]')).toHaveAttribute("content", /noindex/);
   });
 
+  test("trailing slashes redirect permanently and there are no soft 404s", async ({ request }) => {
+    for (const path of ["/blog", "/publications", "/feed.xml", "/sitemap.xml"]) {
+      const response = await request.get(`${path}/?x=1`, { maxRedirects: 0 });
+      expect(response.status(), `${path}/`).toBe(308);
+      expect(new URL(response.headers().location!, "http://x").pathname).toBe(path);
+      expect(response.headers().location).toContain("?x=1");
+    }
+    for (const path of ["/_not-found", "/_not-found.txt"]) {
+      expect((await request.get(path, { maxRedirects: 0 })).status(), path).toBe(404);
+    }
+    // Vercel's CORS header, kept for browser-based feed readers.
+    expect((await request.get("/feed.xml")).headers()["access-control-allow-origin"]).toBe("*");
+  });
+
   test("machine-readable routes remain public and deterministic", async ({ request }) => {
     const [feed, sitemap, robots, buildInfo] = await Promise.all([
       request.get("/feed.xml"),

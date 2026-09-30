@@ -130,8 +130,25 @@ test.describe("deployed artifact", () => {
       }
     }
 
+    // Trailing-slash forms stay permanent redirects (as on Vercel), also for old slugs.
+    for (const route of contract.routes) {
+      if (route.path === "/" || !["page", "post", "feed", "redirect"].includes(route.kind))
+        continue;
+      const slash = await deploymentGet(request, `${route.path}/`);
+      expect(slash.status(), `${route.path}/`).toBe(308);
+      const location = new URL(
+        slash.headers().location ?? "",
+        requiredValue(baseUrl, "DEPLOYMENT_BASE_URL"),
+      );
+      expect(`${location.pathname}${location.search}`, `${route.path}/ location`).toBe(
+        route.kind === "redirect" ? route.expectedLocation : route.path,
+      );
+    }
+
     const missing = await deploymentGet(request, "/deployment-check-missing-page");
     expect(missing.status()).toBe(404);
+    // Next's internal not-found route is not a public 200 page.
+    expect((await deploymentGet(request, "/_not-found")).status()).toBe(404);
   });
 
   test("renders canonical pages without leaking release credentials", async ({ page }) => {

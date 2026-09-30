@@ -55,8 +55,22 @@ export async function finalizeExport(
       ),
     );
   }
+  // Next's internal copy of the not-found page: 404.html already serves unknown paths with status
+  // 404, while auto-trailing-slash would answer /_not-found with status 200 (a soft 404).
+  await Promise.all(
+    ["_not-found", "_not-found.html", "_not-found.txt"].map((target) =>
+      rm(path.join(outDirectory, target), { recursive: true, force: true }),
+    ),
+  );
   await writeFile(path.join(outDirectory, "_headers"), renderHeadersFile());
-  await writeFile(path.join(outDirectory, "_redirects"), renderRedirectsFile(snapshot.redirects));
+  // Trailing-slash forms of every canonical page and feed path stay permanent redirects.
+  const canonicalPaths = manifest.routes
+    .filter((route) => route.kind === "page" || route.kind === "post" || route.kind === "feed")
+    .map((route) => route.path);
+  await writeFile(
+    path.join(outDirectory, "_redirects"),
+    renderRedirectsFile(snapshot.redirects, canonicalPaths),
+  );
 
   // The export must describe the snapshot it was built from.
   const buildInfo = JSON.parse(

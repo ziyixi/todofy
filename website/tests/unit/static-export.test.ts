@@ -46,6 +46,11 @@ describe("_headers", () => {
     expect(text).not.toMatch(/includeSubDomains|preload/);
   });
 
+  it("keeps Vercel's Access-Control-Allow-Origin: * on every path", () => {
+    const site = text.split("\n\n").find((block) => block.includes("/*\n"))!;
+    expect(site).toContain("  Access-Control-Allow-Origin: *");
+  });
+
   it("never caches the release identity and serves RSS and hashed files correctly", () => {
     expect(text).toContain("/build-info.json\n  Cache-Control: no-store, max-age=0");
     expect(text).toContain("/publication-state.json\n  Cache-Control: no-store, max-age=0");
@@ -62,6 +67,37 @@ describe("_redirects", () => {
       "/blog/old-slug /blog/new-slug 308\n",
     );
     expect(renderRedirectsFile([])).not.toMatch(/308/);
+  });
+
+  it("also redirects the trailing-slash form of each old URL (Vercel reached it via its slash 308)", () => {
+    const text = renderRedirectsFile([
+      { from: "/blog/old-slug", to: "/blog/new-slug" },
+      { from: "/blog/旧文章", to: "/blog/新文章" },
+    ]);
+    expect(text).toContain("/blog/old-slug/ /blog/new-slug 308\n");
+    expect(text).toContain(
+      "/blog/%E6%97%A7%E6%96%87%E7%AB%A0/ /blog/%E6%96%B0%E6%96%87%E7%AB%A0 308\n",
+    );
+  });
+
+  it("keeps the trailing-slash forms of canonical paths permanent (308, not html_handling's 307)", () => {
+    const text = renderRedirectsFile(
+      [{ from: "/blog/old-slug", to: "/blog/new-slug" }],
+      ["/", "/blog", "/blog/new-slug", "/feed.xml", "/sitemap.xml"],
+    );
+    for (const path of ["/blog", "/blog/new-slug", "/feed.xml", "/sitemap.xml"]) {
+      expect(text).toContain(`${path}/ ${path} 308\n`);
+    }
+    expect(text).not.toMatch(/^\/\/ /m);
+    expect(() => renderRedirectsFile([], ["/blog/"])).toThrow(/trailing slash/);
+    expect(() => renderRedirectsFile([{ from: "/blog", to: "/x" }], [])).toThrow();
+  });
+
+  it("counts every written line against the 2,000-rule limit", () => {
+    const paths = Array.from({ length: 1001 }, (_, index) => `/blog/post-${index}`);
+    expect(() => renderRedirectsFile([], paths.slice(0, 1000))).not.toThrow();
+    const redirects = paths.map((path) => ({ from: `${path}-old`, to: path }));
+    expect(() => renderRedirectsFile(redirects)).toThrow(/Too many redirects/);
   });
 
   it("refuses placeholders, splats, external targets and duplicates", () => {
