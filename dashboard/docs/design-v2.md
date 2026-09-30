@@ -99,7 +99,7 @@ Flows: 邮件 → 任务 (来源转发 ○ → 收件与保存 → 解析 → We
 `mail-todofy` verifies 投递 and 摘要 only), 网站发布 (Notion ○ → 发布 → 网站可用), 每日 Newsletter
 (Todofy 报告 → 读取报告 ○ → 写入 Notion ○; partial), 运维摘要 (巡检 → 提交摘要 → 每日提醒), and GTD 循环
 (收集 → 理清 → 组织 → 回顾 → 执行 ○: Todofy's `received_24h`, then the counters of its daily read-only
-Todoist snapshot, `review_overdue` (info) and `gtd_snapshot_stale` at 回顾; 执行 links to Flowday only;
+Todoist snapshot, `review_overdue` (info) and `gtd_snapshot_stale` at 回顾; 执行 is done in Todoist, outside the dashboard (no entry since Flowday was removed);
 todofy/docs/gtd-features.md §9).
 
 `validateRegistry` (test/registry.test.ts) checks ids and references, https URLs inside

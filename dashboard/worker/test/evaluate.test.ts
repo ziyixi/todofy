@@ -178,7 +178,7 @@ describe('flows (stage chains)', () => {
       { name: 'inbox_oldest_days', value: 41 },
     ]);
     expect(stage(gtd, 'reflect').counters.map((c) => c.name)).toEqual(['review_age_days', 'completed_7d']);
-    expect(stage(gtd, 'engage').level).toBe('unmonitored'); // FlowDay is a link only
+    expect(stage(gtd, 'engage').level).toBe('unmonitored'); // done in Todoist, outside the dashboard
     const overdue = withSignals('todofy', [signal('review_overdue', 'info')], 'ok');
     const late = flow('gtd', { statuses: { 'mail-hero': status('mail-hero'), todofy: overdue } });
     expect(stage(late, 'reflect').level).toBe('ok');

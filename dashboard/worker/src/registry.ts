@@ -263,7 +263,7 @@ const FLOWS: readonly FlowDef[] = [
         signals: ['review_overdue', 'gtd_snapshot_stale'],
         counters: ['review_age_days', 'completed_7d'],
       },
-      { id: 'engage', name: '执行', entry: 'flowday', signals: [], note: 'FlowDay 只读 Todoist，面板只给链接' },
+      { id: 'engage', name: '执行', entry: null, signals: [], note: '在 Todoist 中完成，面板之外' },
     ],
     canary: null,
   },
