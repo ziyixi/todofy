@@ -124,6 +124,8 @@ const SIGNALS: Readonly<Record<string, string>> = {
   backup_disabled: '备份未启用',
   reminder_failed: '每日提醒发送失败',
   reminder_disabled: '每日提醒已关闭',
+  gtd_snapshot_stale: 'GTD 快照过旧',
+  review_overdue: '每周回顾已超过 10 天',
   // dashboard digest items
   usage_unavailable: '用量数据获取失败',
   usage_not_configured: '未配置用量查询令牌',
@@ -238,7 +240,7 @@ export function modeInfo(name: string, value: boolean): { label: string; usual: 
   return { label: known ? known.label : name, usual: known ? known.normal === value : !value }
 }
 
-type CounterKind = 'count' | 'seconds' | 'bytes' | 'tokens'
+type CounterKind = 'count' | 'seconds' | 'bytes' | 'tokens' | 'days'
 const COUNTERS: Readonly<Record<string, { label: string; kind: CounterKind }>> = {
   // Mail Hero
   jobs_pending: { label: '待处理任务', kind: 'count' },
@@ -268,6 +270,13 @@ const COUNTERS: Readonly<Record<string, { label: string; kind: CounterKind }>> =
   todoist_window_calls: { label: 'Todoist 窗口内调用', kind: 'count' },
   todoist_window_limit: { label: 'Todoist 窗口上限', kind: 'count' },
   backup_age_seconds: { label: '距上次备份', kind: 'seconds' },
+  // Todofy's GTD ledger (daily Todoist snapshot, counts only)
+  inbox_open: { label: '收件箱开放', kind: 'count' },
+  inbox_oldest_days: { label: '收件箱最老', kind: 'days' },
+  overdue: { label: '逾期', kind: 'count' },
+  carryover_open: { label: '多日未完成邮件任务', kind: 'count' },
+  completed_7d: { label: '近 7 天完成', kind: 'count' },
+  review_age_days: { label: '距上次回顾', kind: 'days' },
 }
 
 export function counterInfo(name: string): { label: string; kind: CounterKind } {
@@ -279,6 +288,7 @@ export function counterValue(name: string, value: number): string {
   const { kind } = counterInfo(name)
   if (kind === 'bytes') return formatBytesBinary(value)
   if (kind === 'seconds') return value === 0 ? '无' : formatDuration(value * 1000)
+  if (kind === 'days') return `${formatNumber(value)} 天`
   return formatNumber(value)
 }
 
@@ -314,6 +324,7 @@ export function deferredJobLabel(job: string): string {
       weekly_backup: '每周备份',
       retention: '过期数据清理',
       metrics_rollup: '指标汇总',
+      gtd_snapshot: 'GTD 每日快照',
     },
     job,
   )

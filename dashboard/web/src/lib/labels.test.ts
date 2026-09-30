@@ -3,6 +3,9 @@ import {
   QUOTA,
   canaryCodeLabel,
   counterInfo,
+  counterShort,
+  counterValue,
+  deferredJobLabel,
   guardReasonLabel,
   modeInfo,
   signalLabel,
@@ -29,6 +32,14 @@ describe('labels', () => {
     for (const name of counters) expect(counterInfo(name).label).not.toBe(name)
     const modes = [mailHeroOk, todofyOk].flatMap((status) => Object.keys(status.modes))
     for (const name of modes) expect(modeInfo(name, false).label).not.toBe(name)
+  })
+
+  it('shows the GTD counters in their units', () => {
+    expect(counterInfo('inbox_oldest_days')).toEqual({ label: '收件箱最老', kind: 'days' })
+    expect(counterValue('review_age_days', 12)).toBe('12 天')
+    expect(counterShort('inbox_open', 23)).toBe('收件箱开放 23')
+    expect(signalLabel('review_overdue')).toBe('每周回顾已超过 10 天')
+    expect(deferredJobLabel('gtd_snapshot')).toBe('GTD 每日快照')
   })
 
   it('keeps unknown codes raw', () => {

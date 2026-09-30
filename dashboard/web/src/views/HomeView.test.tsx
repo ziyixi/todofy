@@ -132,6 +132,7 @@ describe('首页', () => {
     const links = within(within(sheet).getByRole('list', { name: '相关位置' })).getAllByRole('link')
     expect(links.map((link) => [link.textContent, link.getAttribute('href')])).toEqual([
       ['查看流程：邮件 → 任务 →', '#/flows/mail-to-task'],
+      ['查看流程：GTD 循环 →', '#/flows/gtd'],
       ['查看流程：每日 Newsletter →', '#/flows/daily-newsletter'],
       ['查看流程：运维摘要 →', '#/flows/ops-digest'],
       ['查看 Worker：todofy →', '#/cloudflare/worker/todofy'],

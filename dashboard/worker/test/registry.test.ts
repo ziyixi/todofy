@@ -81,7 +81,7 @@ describe('the registry', () => {
     expect(entryOfScript('new-worker')).toBeUndefined();
     expect(flowsOfScript('mail-hero')).toEqual(['mail-to-task']);
     expect(flowsOfScript('todofy')).toEqual(['mail-to-task', 'daily-newsletter', 'ops-digest']);
-    expect(flowsOfScript('todofy-core')).toEqual(['mail-to-task']);
+    expect(flowsOfScript('todofy-core')).toEqual(['mail-to-task', 'gtd']);
     expect(flowsOfScript('home')).toEqual(['ops-digest']);
     expect(flowsOfScript('ziyixi-notion-publish')).toEqual(['site-publish']);
   });

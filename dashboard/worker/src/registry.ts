@@ -227,6 +227,47 @@ const FLOWS: readonly FlowDef[] = [
     },
   },
   {
+    // docs: todofy/docs/gtd-features.md §9. The GTD loop over what Todofy already measures: mail
+    // arrives (收集), the daily Todoist snapshot counts the inbox, overdue work and still-open mail
+    // tasks, and the Sunday review task closes the week. 理清 and 组织 stay manual in Todoist.
+    id: 'gtd',
+    name: 'GTD 循环',
+    group: 'mail',
+    description: '邮件成为 Todoist 任务后，每日快照计数、每周日生成回顾任务；理清与组织在 Todoist 中手动完成。',
+    order: 2,
+    stages: [
+      { id: 'capture', name: '收集', entry: 'todofy', workers: ['todofy-core'], signals: [], counters: ['received_24h'] },
+      {
+        id: 'clarify',
+        name: '理清',
+        entry: 'todofy',
+        workers: ['todofy-core'],
+        signals: [],
+        counters: ['inbox_open', 'inbox_oldest_days'],
+        note: '标题仍是邮件主题；理清靠人工',
+      },
+      {
+        id: 'organize',
+        name: '组织',
+        entry: 'todofy',
+        workers: ['todofy-core'],
+        signals: [],
+        counters: ['overdue', 'carryover_open'],
+        note: '在 Todoist 中手动整理',
+      },
+      {
+        id: 'reflect',
+        name: '回顾',
+        entry: 'todofy',
+        workers: ['todofy-core'],
+        signals: ['review_overdue', 'gtd_snapshot_stale'],
+        counters: ['review_age_days', 'completed_7d'],
+      },
+      { id: 'engage', name: '执行', entry: 'flowday', signals: [], note: 'FlowDay 只读 Todoist，面板只给链接' },
+    ],
+    canary: null,
+  },
+  {
     id: 'site-publish',
     name: '网站发布',
     group: 'content',

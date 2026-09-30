@@ -167,7 +167,27 @@ describe('flows (stage chains)', () => {
     // 1 of 3 stages monitored: 部分接入, whatever the level.
     expect(flows['daily-newsletter']).toMatchObject({ level: 'ok', partial: true, coverage: { monitored: 1, total: 3 }, freshness: { kind: 'none' } });
     expect(flows['ops-digest']).toMatchObject({ level: 'ok', freshness: { kind: 'digest', at: '2026-09-29T07:00:00.000Z', accepted: true } });
-    expect(flowSummaries(input()).map((f) => f.id)).toEqual(['mail-to-task', 'site-publish', 'daily-newsletter', 'ops-digest']);
+    expect(flowSummaries(input()).map((f) => f.id)).toEqual(['mail-to-task', 'gtd', 'site-publish', 'daily-newsletter', 'ops-digest']);
+  });
+
+  it('maps the GTD loop onto Todofy counters; a late review is shown but is not a fault', () => {
+    const gtd = flow('gtd');
+    expect(gtd.coverage).toEqual({ monitored: 4, total: 5 });
+    expect(stage(gtd, 'clarify').counters).toEqual([
+      { name: 'inbox_open', value: 23 },
+      { name: 'inbox_oldest_days', value: 41 },
+    ]);
+    expect(stage(gtd, 'reflect').counters.map((c) => c.name)).toEqual(['review_age_days', 'completed_7d']);
+    expect(stage(gtd, 'engage').level).toBe('unmonitored'); // FlowDay is a link only
+    const overdue = withSignals('todofy', [signal('review_overdue', 'info')], 'ok');
+    const late = flow('gtd', { statuses: { 'mail-hero': status('mail-hero'), todofy: overdue } });
+    expect(stage(late, 'reflect').level).toBe('ok');
+    expect(stage(late, 'reflect').signals.map((s) => s.code)).toEqual(['review_overdue']);
+    const stale = withSignals('todofy', [signal('gtd_snapshot_stale', 'warning')]);
+    expect(stage(flow('gtd', { statuses: { 'mail-hero': status('mail-hero'), todofy: stale } }), 'reflect')).toMatchObject({
+      level: 'warning',
+      reason: 'gtd_snapshot_stale',
+    });
   });
 
   it('shows a hold as 已暂停 on its stage, never as a fault', () => {

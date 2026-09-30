@@ -97,7 +97,10 @@ Three lists joined by id, compiled into the Worker; the UI gets the public view 
 
 Flows: 邮件 → 任务 (来源转发 ○ → 收件与保存 → 解析 → Webhook 投递 → Todofy 摘要 → Todoist 与提醒; canary
 `mail-todofy` verifies 投递 and 摘要 only), 网站发布 (Notion ○ → 发布 → 网站可用), 每日 Newsletter
-(Todofy 报告 → 读取报告 ○ → 写入 Notion ○; partial), 运维摘要 (巡检 → 提交摘要 → 每日提醒).
+(Todofy 报告 → 读取报告 ○ → 写入 Notion ○; partial), 运维摘要 (巡检 → 提交摘要 → 每日提醒), and GTD 循环
+(收集 → 理清 → 组织 → 回顾 → 执行 ○: Todofy's `received_24h`, then the counters of its daily read-only
+Todoist snapshot, `review_overdue` (info) and `gtd_snapshot_stale` at 回顾; 执行 links to Flowday only;
+todofy/docs/gtd-features.md §9).
 
 `validateRegistry` (test/registry.test.ts) checks ids and references, https URLs inside
 `ziyixi.science` (path `/`, no query/port/userinfo), one entry per script, status/kind consistency
