@@ -77,6 +77,7 @@ describe('the registry', () => {
   it('maps scripts to entries and to the flows they take part in (many-to-many)', () => {
     expect(entryOfScript('todofy-core')).toBe('todofy');
     expect(entryOfScript('ziyixi-notion-publish')).toBe('notion-publish');
+    expect(entryOfScript('ziyixi-website')).toBe('website');
     expect(entryOfScript('new-worker')).toBeUndefined();
     expect(flowsOfScript('mail-hero')).toEqual(['mail-to-task']);
     expect(flowsOfScript('todofy')).toEqual(['mail-to-task', 'daily-newsletter', 'ops-digest']);

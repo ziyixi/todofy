@@ -115,7 +115,9 @@ const ENTRIES: readonly EntryDef[] = [
     access: false,
     // Q6: one public GET per tick. The apex answers 308 to www, so the probe asks www's small JSON
     // build file directly (200 on 2026-09-29); status code and latency only, the body is never read.
-    // Set enabled: false to show 未接入 instead; once the site is a Worker here, add its script.
+    // Set enabled: false to show 未接入 instead. The site's own Worker (website/, `ziyixi-website`) is
+    // assets-only: asset requests are not Worker invocations, so analytics cannot judge it and the
+    // probe stays its status source (build-info.json is in the static export too, website/docs).
     status: { type: 'public_http', url: 'https://www.ziyixi.science/build-info.json', expect: [200], enabled: true },
     tile_metric: { kind: 'latency' },
     app_only_signals: [],
@@ -174,6 +176,8 @@ const WORKERS: readonly WorkerDef[] = [
   { script: 'todofy-core', entry: 'todofy', role: '处理核心（TodofyCore）' },
   { script: 'home', entry: 'home', role: '本面板' },
   { script: 'ziyixi-notion-publish', entry: 'notion-publish', role: '发布 Worker' },
+  // website/wrangler.toml: static assets only, so it shows up in the table only if it ever runs code.
+  { script: 'ziyixi-website', entry: 'website', role: '静态网站（仅静态资源）' },
 ];
 
 const RESOURCES: readonly ResourceDef[] = [

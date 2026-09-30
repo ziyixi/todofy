@@ -82,7 +82,7 @@ Three lists joined by id, compiled into the Worker; the UI gets the public view 
 | Mail Hero | 应用 | `ops_v1` (MAIL_HERO, guard) | 今日收件 |
 | Todofy (`todofy`, `todofy-core`) | 应用 | `ops_v1` (TODOFY, guard) | 24 小时收到 |
 | Flowday, 思源笔记 | 应用 | `link_only` (never probed) | host |
-| 个人网站 | 站点 | `public_http`: one GET per tick to `www…/build-info.json` (the apex 308s to www), status + latency only, `redirect: 'manual'`, body unread, `enabled` flag | latency |
+| 个人网站 (`ziyixi-website`, assets only) | 站点 | `public_http`: one GET per tick to `www…/build-info.json` (the apex 308s to www), status + latency only, `redirect: 'manual'`, body unread, `enabled` flag. The site's Worker (`website/`) serves static assets only, which are not Worker invocations, so analytics cannot judge it; the file is part of its static export, so the probe survives the cutover | latency |
 | Notion 发布 (`ziyixi-notion-publish`) | 后台服务 | `analytics`: error rate + 26 h idle rule | last request hour |
 | Newsletter | 后台服务 | `none` → 未接入 | — |
 | 个人控制台 (`home`) | hidden | `self` (`tick_stale`) | no tile; Cloudflare row only |
