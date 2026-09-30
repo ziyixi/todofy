@@ -156,9 +156,10 @@ Measured on the Apple-silicon laptop that profiled the suite (10 cores):
 | Runtime suite | Wall time |
 | --- | ---: |
 | serial, before this change (`pywrangler dev`, a D1 migration per server) | 794 s |
-| serial, now | 594 s |
+| serial, now | 590–594 s |
 | `-n 4`, all files in one run, heaviest first | 160–162 s (3 runs); 208 s (2 runs) with another test run alongside |
 | each of the three shards, `-n 4`, as CI runs it (3 runs) | 99–101 s, 61–63 s, 82–84 s |
+| the same with `test_alarm.py` alone after shard 3's xdist run (clean clone) | 98 s, 61 s, 83 s + 8 s |
 
 The harness changes that do not change what any test asserts:
 
