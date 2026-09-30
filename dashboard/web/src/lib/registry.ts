@@ -37,6 +37,16 @@ export function unregisteredId(kind: ResourceKind, id: string): string {
   return kind === 'r2' ? id : id.slice(0, 8)
 }
 
+/** The one wording of an unregistered resource, in the resource table and the quota breakdowns alike. */
+export function unregisteredLabel(kind: ResourceKind, id: string): string {
+  return `未登记 · ${unregisteredId(kind, id)}`
+}
+
+/** Usage measured without its resource dimension (R2 operations without a bucket, like the table). */
+export function unclassifiedLabel(kind: ResourceKind): string {
+  return kind === 'r2' ? '未归类操作' : '未归类'
+}
+
 export function workerOf(reg: Reg, script: string) {
   return reg.workers.find((worker) => worker.script === script)
 }

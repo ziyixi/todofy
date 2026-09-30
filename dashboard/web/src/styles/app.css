@@ -1549,6 +1549,12 @@ main {
   gap: var(--space-3);
 }
 
+/* Only the name wraps: a long bucket or script name never squeezes "1 KB" onto two lines. */
+.breakdown-value {
+  flex: none;
+  white-space: nowrap;
+}
+
 .more summary {
   cursor: pointer;
   color: var(--accent);

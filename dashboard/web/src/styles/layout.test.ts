@@ -48,3 +48,9 @@ describe('tile status line (F6)', () => {
     expect(css).toMatch(/\.tile-detail\s*\{[^}]*min-width:\s*0/)
   })
 })
+
+describe('quota breakdown rows (UX-3)', () => {
+  it('never wraps or squeezes the value; only the name wraps', () => {
+    expect(css).toMatch(/\.breakdown-value\s*\{[^}]*flex:\s*none;[^}]*white-space:\s*nowrap/)
+  })
+})

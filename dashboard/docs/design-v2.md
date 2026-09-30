@@ -159,14 +159,18 @@ time (a stale status, stopped ticks) is right at every read.
   defines the class; DO storage is account-wide only (`do_storage_bytes`).
 - **Resources**: D1 by `databaseId` (analytics ∪ storage), DO by `namespaceId` (`doPer` rows), R2 by
   `bucketName` (operations ∪ storage, classes as the quota rows; no bucket → `unclassified`), each
-  joined with the registry by `match`; unmatched rows keep `resource: null` (未登记 + raw ID). A mapped
+  joined with the registry by `match`; unmatched rows keep `resource: null` (shown "未登记 · <first 8
+  characters>", a bucket in full, the ID as the tooltip; `unclassified` reads 未归类操作). A mapped
   namespace's `requests` are its defining script's `doInv` count.
 - **Quota 主要来源**: the stored rows keep the raw GraphQL keys. When `/api/v2/cloudflare` is built, each
   breakdown item keyed by a D1 `databaseId`, DO `namespaceId` or R2 `bucketName` gets `kind` and
   `resource` from the same `match` join (additive fields, so snapshots stored earlier get them too;
   no extra request). The page names it from the registry, "MailCoordinator · Mail Hero", or
-  "未登记 · <first 8 characters>" (a bucket: its full name), the key as the tooltip. Script items
-  (Workers and DO requests) stay "script（entry）"; model items stay raw.
+  "未登记 · <first 8 characters>" (a bucket: its full name) worded exactly as in the resource table
+  (one helper), the key as the tooltip. An item measured without the dimension (key `unknown`,
+  `BREAKDOWN_UNCLASSIFIED`) also gets `kind` with `resource: null` and reads 未归类 (R2: 未归类操作,
+  like the table), never "unknown". Script items (Workers and DO requests) stay "script（entry）";
+  model items stay raw. Only the name wraps; the value never does.
 
 ## 5. API v2 and budgets
 

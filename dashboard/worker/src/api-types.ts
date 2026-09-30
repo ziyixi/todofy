@@ -170,6 +170,13 @@ export interface QuotaRow {
 }
 
 /**
+ * The breakdown key of a measured row without its dimension (no scriptName, databaseId, namespaceId,
+ * bucketName or modelId). On a D1/DO/R2 item (`kind` set) the page reads it as 未归类 (R2: 未归类操作,
+ * like the resource table), never as an ID.
+ */
+export const BREAKDOWN_UNCLASSIFIED = 'unknown';
+
+/**
  * One contributor of a quota row. `name` is the GraphQL key as measured and stored. The v2 Cloudflare
  * view adds `kind` and `resource` to the items keyed by a D1 databaseId, DO namespaceId or R2
  * bucketName (added when the view is built, so snapshots stored before them get them too); script
@@ -180,7 +187,10 @@ export interface QuotaBreakdownItem {
   readonly value: number;
   /** The storage kind `name` identifies. */
   readonly kind?: 'd1' | 'do' | 'r2';
-  /** Registry resource id (`GET /api/v2/registry` names it); null → 未登记 + the first 8 characters (R2: the bucket name). */
+  /**
+   * Registry resource id (`GET /api/v2/registry` names it); null → 未登记 + the first 8 characters (R2:
+   * the bucket name), or 未归类 when `name` is BREAKDOWN_UNCLASSIFIED.
+   */
   readonly resource?: string | null;
 }
 

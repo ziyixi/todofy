@@ -5,7 +5,7 @@
  * constant, not configuration). It is never logged, stored, echoed or sent anywhere else, and remote
  * response text never leaves this module: failures become codes.
  */
-import type { QuotaResourceId, QuotaRow } from './api-types.ts';
+import { BREAKDOWN_UNCLASSIFIED, type QuotaResourceId, type QuotaRow } from './api-types.ts';
 import { WORKERS_QUERY_LIMIT, type ResourceKind } from './api-v2-types.ts';
 import { ALLOWANCES, DO_DURATION_GB } from './limits.ts';
 import { DAY_MS, HOUR_MS, daysInUtcMonth, isoSeconds, round1, startOfUtcDay, startOfUtcMonth, utcDay, utcMonthStart } from './time.ts';
@@ -204,7 +204,7 @@ function field(row: unknown, group: string, name: string): number {
 }
 
 /** The breakdown key of a row without the dimension (never a registry match). */
-export const UNKNOWN_DIMENSION = 'unknown';
+export const UNKNOWN_DIMENSION = BREAKDOWN_UNCLASSIFIED;
 
 function dimension(row: unknown, name: string): string {
   if (!isObject(row) || !isObject(row.dimensions)) return UNKNOWN_DIMENSION;

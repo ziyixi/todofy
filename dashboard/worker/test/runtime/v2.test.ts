@@ -5,6 +5,7 @@
  * canary on the mail flow and the v2 mutations. All data is synthetic.
  */
 import { afterEach, beforeAll, describe, expect, it } from 'vitest';
+import { BREAKDOWN_UNCLASSIFIED } from '../../src/api-types.ts';
 import {
   API_V2_VERSION,
   V2_BODY_BUDGET,
@@ -222,6 +223,8 @@ describe('GET /api/v2/cloudflare', () => {
         // The registry's own identifiers for one database and two namespaces; the others stay synthetic.
         d1Databases: [{ ...db0, id: match('mail-hero-db') }, db1],
         doNamespaces: [{ ...ns0, id: match('mail-coordinator') }, { ...ns1, id: match('todofy-core-do') }, ns2],
+        // One R2 operation without a bucket: marked r2 with no resource (the page reads 未归类操作).
+        r2Ops: [...(REALISTIC_USAGE.r2Ops ?? []), { actionType: 'PutObject', bucketName: '', requests: 5 }],
       },
       bindings: { CANARY_UTC_HOUR: '23' },
     });
@@ -241,6 +244,7 @@ describe('GET /api/v2/cloudflare', () => {
       ['r2', 'mail-hero-store'],
       ['r2', null],
     ]);
+    expect(cf.usage.rows.find((r) => r.id === 'r2_class_a')?.breakdown.at(-1)).toEqual({ name: BREAKDOWN_UNCLASSIFIED, value: 5, kind: 'r2', resource: null });
     expect(cf.usage.rows.find((r) => r.id === 'd1_rows_read')?.breakdown[1]?.name).toBe(SYNTHETIC_D1[1]);
     expect(cf.usage.rows.find((r) => r.id === 'do_rows_written')?.breakdown[2]?.name).toBe(SYNTHETIC_NS[2]);
     // Script items keep only their name and value.

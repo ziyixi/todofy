@@ -64,6 +64,47 @@ describe('Cloudflare 监控', () => {
     expect(within(r2).getByText('未登记 · scratch-bucket')).toBeInTheDocument()
   })
 
+  it('words an unregistered ID the same in the resource table and in 主要来源 (UX-1)', async () => {
+    await showCloudflare(healthy())
+    const view = document.body
+    // Both places: one wording, "未登记 · <first 8>", the full ID as the tooltip.
+    for (const [id, text] of [
+      [IDS.unknownDb, '未登记 · 8f14e45f'],
+      [IDS.unknownNs, '未登记 · 01234567'],
+    ] as const) {
+      const shown = within(view).getAllByText(text)
+      expect(shown.length, text).toBeGreaterThanOrEqual(2)
+      expect(shown.some((el) => el.closest('.breakdown') !== null), text).toBe(true)
+      expect(shown.some((el) => el.closest('.res') !== null), text).toBe(true)
+      for (const el of shown) expect(el).toHaveAttribute('title', id)
+    }
+    expect(within(view).queryByText(/^未登记 [^·]/)).toBeNull()
+  })
+
+  it('reads a D1, DO or R2 contributor measured without its identifier as 未归类, never as unknown (UX-2)', async () => {
+    const base = healthy()
+    const unclassified = (kind: 'd1' | 'do' | 'r2', value: number) => ({ name: 'unknown', value, kind, resource: null })
+    const rows = quotaRows({
+      d1_rows_written: { breakdown: [{ name: IDS.mailHeroDb, value: 300, kind: 'd1', resource: 'mail-hero-db' }, unclassified('d1', 18)] },
+      do_rows_read: { breakdown: [unclassified('do', 40)] },
+      r2_class_a: { breakdown: [{ name: 'mail-hero-store', value: 900, kind: 'r2', resource: 'mail-hero-store' }, unclassified('r2', 4)] },
+    })
+    await showCloudflare({ ...base, cloudflare: { ...base.cloudflare, usage: { ...base.cloudflare.usage, rows } } })
+    const quota = section('账户额度')
+    const itemOf = (name: string) => within(quota).getByRole('meter', { name }).closest('li') as HTMLElement
+    const d1 = within(itemOf('D1 写入行数')).getByText('未归类')
+    expect(d1).toHaveAttribute('title', 'unknown')
+    expect(d1.tagName).toBe('SPAN')
+    expect(d1).not.toHaveClass('muted')
+    expect(within(itemOf('Durable Objects SQLite 读取行数')).getByText('未归类')).toBeInTheDocument()
+    // R2: the table's wording for operations without a bucket.
+    expect(within(itemOf('R2 A 类操作')).getByText('未归类操作')).toHaveAttribute('title', 'unknown')
+    expect(within(quota).queryByText('unknown')).toBeNull()
+    // The value keeps its own non-wrapping cell next to the name (UX-3).
+    expect(within(itemOf('D1 写入行数')).getByText('18 行')).toHaveClass('breakdown-value')
+    expect(within(section('存储与资源')).getByText('未归类操作')).toBeInTheDocument()
+  })
+
   it('still shows a breakdown stored before the resource join by its raw key', async () => {
     const base = healthy()
     const rows = quotaRows({ d1_rows_read: { breakdown: [{ name: IDS.mailHeroDb, value: 5_210 }] } })
@@ -240,10 +281,10 @@ describe('Cloudflare 监控', () => {
     await showCloudflare(healthy())
     const resources = section('存储与资源')
     const d1 = within(resources).getByRole('region', { name: 'D1 数据库' })
-    expect(within(d1).getByText('未登记 8f14e45f')).toBeInTheDocument()
+    expect(within(d1).getByText('未登记 · 8f14e45f')).toBeInTheDocument()
     expect(within(d1).getByText('38.9 MB')).toBeInTheDocument()
     const durable = within(resources).getByRole('region', { name: 'Durable Objects' })
-    expect(within(durable).getByText('未登记 01234567')).toBeInTheDocument()
+    expect(within(durable).getByText('未登记 · 01234567')).toBeInTheDocument()
     expect(within(durable).getByText('存储只有账户总量（12.4 MB），见上方“存储”额度。')).toBeInTheDocument()
     const r2 = within(resources).getByRole('region', { name: 'R2 存储桶' })
     expect(within(r2).getByText('mail-hero 邮件存储')).toBeInTheDocument()
@@ -259,8 +300,8 @@ describe('Cloudflare 监控', () => {
     ]
     await showCloudflare({ ...base, cloudflare: { ...base.cloudflare, resources } })
     const r2 = within(section('存储与资源')).getByRole('region', { name: 'R2 存储桶' })
-    expect(within(r2).getByText('未登记 mail-hero-backup')).toBeInTheDocument()
-    expect(within(r2).getByText('未登记 mail-hero-backup-old')).toBeInTheDocument()
+    expect(within(r2).getByText('未登记 · mail-hero-backup')).toBeInTheDocument()
+    expect(within(r2).getByText('未登记 · mail-hero-backup-old')).toBeInTheDocument()
   })
 
   it('shows the guard read-only with a link to its actions', async () => {

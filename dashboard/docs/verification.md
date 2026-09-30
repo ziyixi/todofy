@@ -256,6 +256,24 @@ data only, no production call:
 | `Changes` | from `todofy/`: `uv run python -m unittest discover -s ../.github/scripts` | 147 tests OK |
 | browser | built UI against the synthetic fixtures at 1280 px and 375 px | Cloudflare: "mail-hero 主库 · Mail Hero", "MailCoordinator · Mail Hero", "TodofyCore · Todofy", "HomeState · 个人控制台", "mail-hero 邮件存储 · Mail Hero", muted "未登记 · 01234567", IDs as tooltips, no horizontal scroll on phones; 首页: 应用 holds Mail Hero and Todofy, the phone row 应用与站点 fills three tiles, no empty cell |
 
+## 1i. Local, the contributor wording review fixes (2026-09-30)
+
+Three review findings on 1h, fixed: an unregistered ID now reads "未登记 · <first 8>" in the resource
+table too (one helper for both places); a D1/DO/R2 item measured without its identifier carries
+`kind` with `resource: null` and reads 未归类 (R2: 未归类操作, as in the table) instead of `unknown`;
+the breakdown value never wraps. From a clean clone of the branch, synthetic data only:
+
+| Job | Step | Result |
+| --- | --- | --- |
+| `Dashboard checks` | `node --test deploy/test/*.test.mjs` | 14 passed |
+| | worker lint, typecheck, `npm test` | ok; 13 files, 202 tests passed (a dimension-less item marked with its kind and never joined, even to a registry `match` of `unknown`) |
+| | worker `npm run test:runtime` (workerd) | 6 files, 64 tests passed (fake GraphQL with an R2 operation without a bucket: `{ name: 'unknown', kind: 'r2', resource: null }`) |
+| | web lint, typecheck, tests, build; import guard | ok; 13 files, 109 tests passed (same wording in table and 主要来源, 未归类/未归类操作 with the key as tooltip, value cell class and its CSS rule); no cross-origin references |
+| | placeholder config dry-run (`GITHUB_SHA` set as in CI) | ok; the four secrets hidden |
+| `Contracts` | dashboard ops-client, guard, canary, digest | 4 files, 63 tests passed |
+| `Changes` | from `todofy/`: `uv run python -m unittest discover -s ../.github/scripts` | 147 tests OK |
+| browser | built UI, synthetic fixture plus a 63-character unregistered bucket and dimension-less D1/R2 items, 1280 px and 375 px | every value on one line (the long name wraps instead); "未归类" and "未归类操作" with tooltip `unknown`, no raw `unknown`; table and 主要来源 both "未登记 · 8f14e45f" / "未登记 · 01234567"; no horizontal scroll at 375 px |
+
 ## 2. Production (pending)
 
 None of these has been done; each needs the first `Dashboard deploy` on `main` (after Todofy and Mail

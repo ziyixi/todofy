@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { BREAKDOWN_UNCLASSIFIED } from '../src/api-types.ts';
 import { CF_SCRIPTS_MAX, type Registry } from '../src/api-v2-types.ts';
 import { errorLevel, errorPercent, mergeScripts, resourceRows, withBreakdownResources, workerRows, type CfScriptsDoc } from '../src/discovery.ts';
 import { REGISTRY } from '../src/registry.ts';
@@ -220,7 +221,7 @@ describe('the quota breakdowns', () => {
     expect(stored).toEqual(before);
   });
 
-  it('keeps an item without the dimension as it was (never 未登记 · unknown)', () => {
+  it('marks an item without the dimension with its kind and no resource (the page reads 未归类, never 未登记 · unknown)', () => {
     const stored = parsed({
       r2Ops: [
         { actionType: 'PutObject', bucketName: 'mail-hero-store', requests: 10 },
@@ -229,7 +230,16 @@ describe('the quota breakdowns', () => {
     });
     expect(breakdown(withBreakdownResources(stored, registry), 'r2_class_a')).toEqual([
       { name: 'mail-hero-store', value: 10, kind: 'r2', resource: 'mail-hero-store' },
-      { name: 'unknown', value: 4 },
+      { name: BREAKDOWN_UNCLASSIFIED, value: 4, kind: 'r2', resource: null },
     ]);
+    // Even a registry entry whose match reads "unknown" is never joined to the dimension-less key.
+    const trap = { ...registry, resources: registry.resources.map((r) => (r.id === 'mail-hero-db' ? { ...r, match: BREAKDOWN_UNCLASSIFIED } : r)) };
+    const d1 = parsed({ d1Databases: [{ id: SYNTHETIC_D1[0], rowsRead: 50, rowsWritten: 2 }, { id: '', rowsRead: 7, rowsWritten: 1 }] });
+    expect(breakdown(withBreakdownResources(d1, trap), 'd1_rows_read')?.find((item) => item.name === BREAKDOWN_UNCLASSIFIED)).toEqual({
+      name: BREAKDOWN_UNCLASSIFIED,
+      value: 7,
+      kind: 'd1',
+      resource: null,
+    });
   });
 });

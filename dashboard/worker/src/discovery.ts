@@ -187,8 +187,9 @@ export function resourceRows(usage: ResourceUsage | undefined, scripts: CfScript
  * The quota rows with each D1/DO/R2 breakdown item joined to the registry like the resource table
  * (resourceByMatch): `kind` and `resource` (null → 未登记), so the page names "MailCoordinator ·
  * Mail Hero" instead of a namespace ID. Done when the view is built, never stored: snapshots from
- * before this field get it too, and a registry change applies at once. Script and model items, and
- * an item without the dimension, are left as they are.
+ * before this field get it too, and a registry change applies at once. An item without the dimension
+ * gets `kind` and `resource: null` (the page reads 未归类, not 未登记); script and model items are
+ * left as they are.
  */
 export function withBreakdownResources(rows: readonly QuotaRow[], registry: Registry = REGISTRY): QuotaRow[] {
   return rows.map((row) => {
@@ -197,7 +198,8 @@ export function withBreakdownResources(rows: readonly QuotaRow[], registry: Regi
     return {
       ...row,
       breakdown: row.breakdown.map(({ name, value }) =>
-        name === UNKNOWN_DIMENSION ? { name, value } : { name, value, kind, resource: resourceByMatch(kind, name, registry)?.id ?? null },
+        // Without the dimension: still marked with its kind (the page reads 未归类), never matched.
+        ({ name, value, kind, resource: name === UNKNOWN_DIMENSION ? null : (resourceByMatch(kind, name, registry)?.id ?? null) }),
       ),
     };
   });

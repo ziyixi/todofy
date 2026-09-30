@@ -1,5 +1,6 @@
 import { useId } from 'react'
 import {
+  BREAKDOWN_UNCLASSIFIED,
   GUARD_SHED_PERCENT,
   QUOTA_CRITICAL_PERCENT,
   QUOTA_SHOW_REMAINING,
@@ -9,7 +10,7 @@ import {
 } from '../../../worker/src/api-types.ts'
 import { formatAmountShort, formatLimitShort, formatNumber, formatPercent, formatQuantity } from '../lib/format'
 import { PERIODS, QUOTA, type Tone } from '../lib/labels'
-import { nameOf, resourceOf, unregisteredId, workerOf, type Reg } from '../lib/registry'
+import { nameOf, resourceOf, unclassifiedLabel, unregisteredLabel, workerOf, type Reg } from '../lib/registry'
 import { httpsUrl } from '../lib/url'
 import { Pill } from './ui'
 
@@ -87,8 +88,9 @@ interface BreakdownLabel {
 
 /**
  * A breakdown name. A D1/DO/R2 item the Worker joined to the registry (`kind`): "MailCoordinator ·
- * Mail Hero", or "未登记 · 55c248f9" like the resource table, the ID as its tooltip. Otherwise a script
- * with its entry, or the raw key (unknown scripts, Workers AI models, responses without `kind`).
+ * Mail Hero", "未登记 · 55c248f9" worded as in the resource table, or 未归类 without the dimension,
+ * the key as its tooltip. Otherwise a script with its entry, or the raw key (unknown scripts, Workers
+ * AI models, responses without `kind`).
  */
 export function breakdownLabel(reg: Reg, item: QuotaBreakdownItem): BreakdownLabel {
   if (item.kind !== undefined) {
@@ -96,7 +98,9 @@ export function breakdownLabel(reg: Reg, item: QuotaBreakdownItem): BreakdownLab
     if (def) return { text: `${def.name} · ${nameOf(reg, def.entry)}`, code: false, registered: true, title: item.name }
     // A resource this page's registry does not know yet (a newer Worker build): its id, never 未登记.
     if (item.resource) return { text: item.resource, code: true, registered: true, title: item.name }
-    return { text: `未登记 · ${unregisteredId(item.kind, item.name)}`, code: false, registered: false, title: item.name }
+    // Measured without its database/namespace/bucket: 未归类 (R2: 未归类操作, like the table), not an ID.
+    if (item.name === BREAKDOWN_UNCLASSIFIED) return { text: unclassifiedLabel(item.kind), code: false, registered: true, title: item.name }
+    return { text: unregisteredLabel(item.kind, item.name), code: false, registered: false, title: item.name }
   }
   const worker = workerOf(reg, item.name)
   return { text: worker ? `${item.name}（${nameOf(reg, worker.entry)}）` : item.name, code: true, registered: true }
@@ -171,7 +175,7 @@ export function QuotaItem({ row, reg }: { row: QuotaRow; reg: Reg }) {
                   {row.breakdown.map((item) => (
                     <li key={item.name}>
                       <BreakdownName reg={reg} item={item} />
-                      <span>{formatQuantity(item.value, row.unit)}</span>
+                      <span className="breakdown-value">{formatQuantity(item.value, row.unit)}</span>
                     </li>
                   ))}
                 </ul>
