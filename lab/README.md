@@ -58,9 +58,42 @@ The workerd suite (`worker/test/runtime/`) runs the real `LabState` and D1 (migr
 fake AI binding (`test/stubs/fake-ai.ts`), a stub Todofy whose `Ops` validates every task-intent-v1 input
 (`test/stubs/todofy-stub.ts`) and an outbound handler that plays rss.arxiv.org and export.arxiv.org; the
 pipeline is driven with explicit clocks through `LabState.step(now)` (`DEV_MANUAL_ALARMS=true`, a test-only
-binding like `DEV_AUTH_BYPASS`; never in the production config).
+binding like `DEV_AUTH_BYPASS`; never in the production config). One test runs without it: ops-v1 `status()` on
+a fresh object must leave an alarm armed, the bootstrap after a deploy (`docs/design.md` §4).
 
 Local dev: copy `.dev.vars.example` to `.dev.vars`, apply migrations with
 `npx --no-install wrangler d1 migrations apply DB --local --config ../wrangler.toml` from `worker/`,
 then `npm run dev` in `worker/` and `npm run dev` in `web/`. Never `--remote`; deploys run only from
 GitHub Actions.
+
+### Rollback and removal
+
+- **The first release is different.** `wrangler deploy` makes the Worker `lab`, its Custom Domain
+  `lab.ziyixi.science` and the `LabState` namespace live as soon as it uploads, before "Check that Access
+  answers unauthenticated requests", and the D1 `lab` already has migration 0001. So if `Lab deploy` fails
+  at or after "Apply D1 migrations, then deploy the Worker lab" (the probe, a Custom Domain or certificate
+  timeout), everything stays live and there is no earlier version to roll back to. The dashboard's next
+  30-minute `status()` call arms the pipeline alarm (`docs/design.md` §4), which then re-arms itself: a daily
+  arXiv fetch and up to `LAB_DAILY_NEURONS` (5000) neurons a day. **Reverting the merge commit does not
+  undo the deploy**: the revert also removes the `Lab deploy` job, so CI never touches the live Worker
+  again. Stop it first (below), then revert or fix on `main`.
+- **Stop background work** (fetch, embeddings, 简介): 设置 → 暂停抓取新论文 → 保存 (`ingest_paused`). The
+  alarm then only runs the hourly retention; decks, decisions and sends keep working. A dashboard `shed`
+  guard is not a stop switch: it defers work for at most 48 h, then Lab catches up. Without the UI, delete
+  the Worker (below).
+- **Worker code** (after the first release). Revert the commit on `main` and push: CI redeploys the previous
+  code. For an immediate rollback, Cloudflare dashboard → Workers → `lab` → Deployments → roll back to the
+  previous version; the next deploy from `main` replaces it again, so revert the commit too. D1 migrations
+  are additive and the `LabState` tables are created with `IF NOT EXISTS`, so older code reads the same data.
+- **Remove Lab.** In one commit, remove the dashboard's `LAB` service binding (`dashboard/wrangler.toml`),
+  its `lab` registry entry, flow and resources, and Lab's CI jobs, and deploy the dashboard; a binding to a
+  missing Worker fails `Dashboard deploy`, so this goes first. Then delete the Worker `lab` in the
+  Cloudflare dashboard and check that its Custom Domain and Durable Object namespace are gone too. Delete
+  the D1 `lab` only on purpose (it holds the owner's likes and seeds; export it first with
+  `wrangler d1 export`), and delete the environment secret `LAB_CSRF_SIGNING_KEY`
+  (`gh secret delete LAB_CSRF_SIGNING_KEY -R ziyixi/todofy --env production`). The dashboard's
+  `DASHBOARD_ACCESS_OWNER*` secrets stay: the dashboard still uses them. Delete the Access app "Lab".
+- **Todofy** needs no change. Intents it has already recorded keep going to Todoist (a created task is never
+  withdrawn); its migration `0005_task_intents.sql` is additive. To stop accepting new ones, add
+  `TASK_INTENT_SOURCES = ""` to the `[vars]` of `todofy/wrangler.toml` and deploy Todofy
+  (`todofy/docs/cloudflare-setup.md` §5).

@@ -493,6 +493,39 @@ class Workflow(unittest.TestCase):
         self.assertEqual(len(lab), 3)
         self.assertEqual(lab, dashboard)
 
+    def test_the_lab_rollback_note_covers_what_its_first_release_leaves_live(self):
+        """Lab's first release has no earlier version: its README must name what `Lab deploy` makes live (Worker,
+        Custom Domain, Durable Object, D1), the steps after which that is so, the stop switch, what the dashboard
+        must drop first, Lab's own secrets and Todofy's intake switch."""
+        section = (REPO / "lab/README.md").read_text().split("### Rollback and removal", 1)[1].split("\n#", 1)[0]
+        lab = load(PRODUCTION["lab"])
+        names = {lab["name"], *(route["pattern"] for route in lab["routes"])}
+        names |= {binding["class_name"] for binding in lab["durable_objects"]["bindings"]}
+        names |= {database["database_name"] for database in lab["d1_databases"]}
+        names |= {s["binding"] for s in load(PRODUCTION["home"])["services"] if s["service"] == lab["name"]}
+        read = {job: set(re.findall(r"secrets\.([A-Z0-9_]+)", self.jobs[job])) for job in DEPLOY_JOBS}
+        own = read["lab-deploy"] - set().union(*(read[job] for job in DEPLOY_JOBS if job != "lab-deploy"))
+        self.assertEqual(own - {"CLOUDFLARE_API_TOKEN"}, {"LAB_CSRF_SIGNING_KEY"})
+        names |= own - {"CLOUDFLARE_API_TOKEN"}
+        names |= {"TASK_INTENT_SOURCES", "LAB_DAILY_NEURONS", "ingest_paused"}
+        for name in sorted(names):
+            with self.subTest(name=name):
+                self.assertRegex(section, rf"`{re.escape(name)}(`| = )")
+        lab_steps = steps(self.jobs["lab-deploy"])
+        # The live deploy step and the Access probe right after it, quoted by name (line breaks aside).
+        [index] = [
+            i for i, s in enumerate(lab_steps) if "deploy" in wrangler_commands(s["run"]) and "--dry-run" not in s["run"]
+        ]
+        flat = " ".join(section.split())
+        for step in lab_steps[index : index + 2]:
+            with self.subTest(step=step["name"]):
+                self.assertIn(f'"{step["name"]}"', flat)
+        self.assertIn("curl", lab_steps[index + 1]["run"])
+        # The stop switch as the settings page labels it.
+        label = "暂停抓取新论文"
+        self.assertIn(label, (REPO / "lab/web/src/views/Settings.tsx").read_text())
+        self.assertIn(label, section)
+
     def test_deploy_jobs_pass_values_through_env_only(self):
         """No ${{ }} inside a deploy job's scripts (values reach them through env:), no account variable
         (account_id is committed), and only the environment's switches and secrets."""
