@@ -81,7 +81,7 @@ function runDetail(run: CanaryRun): string | null {
 }
 
 /** What the switch does; the flow card shows it while CANARY_ENABLED=false. */
-export const CANARY_DISABLED_NOTE = `${CANARY_DISABLED_TEXT}：不会开始新的定时或手动运行；正在进行的运行仍会每 30 分钟检查一次，直到结束。在 GitHub production 环境把 DASHBOARD_CANARY_ENABLED 改为 true（或删除）并重新部署后恢复。`
+export const CANARY_DISABLED_NOTE = `${CANARY_DISABLED_TEXT}：不会开始新的定时或手动运行；正在进行的运行仍会每 30 分钟检查一次，直到结束。在 GitHub production 环境把 DASHBOARD_CANARY_ENABLED 改为 true 并重新部署后恢复。`
 
 /** The latest run of each of the last `days` UTC days ending today (runs are newest first). */
 export function canaryDays(recent: readonly CanaryRun[], today: string, days = 14): { day: string; run: CanaryRun | null }[] {

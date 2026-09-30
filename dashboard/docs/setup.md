@@ -60,7 +60,7 @@ setting without printing its value (a deploy without a var deletes it, so a miss
 
 | Name | Kind | Rule | Becomes |
 | --- | --- | --- | --- |
-| `DASHBOARD_CANARY_ENABLED` | variable, optional | exactly `true` or `false`, default `true` when unset or empty; any other value (`False`, `0`, `no`, a stray space) fails the deploy | `--var CANARY_ENABLED` (§6, §7) |
+| `DASHBOARD_CANARY_ENABLED` | variable | exactly `true` or `false`; unset, empty or any other value (`False`, `0`, `no`, a stray space) fails the deploy, so a deleted variable never turns stopped canaries back on | `--var CANARY_ENABLED` (§6, §7) |
 | `DASHBOARD_ACCESS_OWNER` | secret | printable-ASCII e-mail | Worker secret `ACCESS_OWNER` |
 | `DASHBOARD_ACCESS_OWNER_ALIASES` | secret, may be empty | ≤ 8 unique printable-ASCII e-mails, ≤ 2048 chars | Worker secret `ACCESS_OWNER_ALIASES` (a single space when empty, so an emptied list replaces the old one) |
 | `DASHBOARD_CSRF_SIGNING_KEY` | secret | 64 hex (for example `openssl rand -hex 32`, run locally) | Worker secret `CSRF_SIGNING_KEY` |
@@ -156,7 +156,7 @@ browser. [`verification.md`](verification.md) §1d records such a run.
   counted in the Gemini budget) and records the result, never a Todoist task, list entry or reminder.
   A skipped run (sending paused, no endpoint, maintenance, a missing capability) is reported in the
   digest as `canary_skipped` with its reason.
-- **Canary switch** (`DASHBOARD_CANARY_ENABLED`, default `true`). With `false` the dashboard starts no
+- **Canary switch** (`DASHBOARD_CANARY_ENABLED`, `true` or `false`; required). With `false` the dashboard starts no
   canary: the scheduled run is not created, 立即运行金丝雀 is disabled with
   "金丝雀已关闭（DASHBOARD_CANARY_ENABLED=false）", and `POST /api/v2/canary` answers 409
   `canary_disabled` with the same message. A run already queued is still polled every 30 minutes until
@@ -228,7 +228,8 @@ browser. [`verification.md`](verification.md) §1d records such a run.
      each app's own deploy) before the rollback, and keep both until the canary rows are cancelled or
      completed on a release with canary handling again.
   4. Roll Todofy back. Once a release with canary handling (`canary_consumer` in its `status()`) is live
-     again, set `DASHBOARD_CANARY_ENABLED=true` (or delete it) and deploy the dashboard.
+     again, set `DASHBOARD_CANARY_ENABLED=true` and deploy the dashboard (never delete the variable:
+     the deploy refuses an unset switch).
 
   Removing the Cron Trigger (above) also stops canaries, but it stops the guard and the digest too, and
   the next deploy restores it; the switch is the intended way.

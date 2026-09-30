@@ -263,7 +263,7 @@ Email Routing, the ingest quota, raw storage or MIME parsing. The page names the
 
 At most one active run (phase ≠ `done`) at a time.
 
-- **Switch** (`CANARY_ENABLED`, from the GitHub variable `DASHBOARD_CANARY_ENABLED`, default `true`):
+- **Switch** (`CANARY_ENABLED`, from the GitHub variable `DASHBOARD_CANARY_ENABLED`, required at deploy):
   with `false` no run starts. The tick still advances a queued run (`delivering`, `consuming`) to its
   verdict (so a Todofy rollback can wait for it, setup.md §7) but creates no scheduled run; a run still
   `starting` gets no further `startCanary` call and ends as `skipped/start/canary_disabled` (no event is
@@ -582,7 +582,7 @@ deploy by `deploy/deploy-vars.mjs` (Mail Hero's style; messages name settings, n
 
 | Input | Rule | Output |
 | --- | --- | --- |
-| `DASHBOARD_CANARY_ENABLED` (optional var) | exactly `true` or `false`, default `true` when unset/empty; anything else fails | `--var CANARY_ENABLED` |
+| `DASHBOARD_CANARY_ENABLED` (var) | exactly `true` or `false`; unset, empty or anything else fails | `--var CANARY_ENABLED` |
 | `GITHUB_SHA` | 40 hex | `--var BUILD_SHA` |
 | `DASHBOARD_ACCESS_OWNER` (secret) | printable-ASCII email | secrets file `ACCESS_OWNER` |
 | `DASHBOARD_ACCESS_OWNER_ALIASES` (secret) | ≤ 8, ≤ 2048 chars, unique, each printable-ASCII email | `ACCESS_OWNER_ALIASES` (`" "` when empty) |

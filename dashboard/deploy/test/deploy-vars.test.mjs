@@ -14,7 +14,7 @@ const WORKER = fileURLToPath(new URL('../../worker/', import.meta.url))
 function environment() {
   return {
     GITHUB_SHA: 'c'.repeat(40),
-    DASHBOARD_CANARY_ENABLED: '',
+    DASHBOARD_CANARY_ENABLED: 'true',
     DASHBOARD_ACCESS_OWNER: 'owner@example.org',
     DASHBOARD_ACCESS_OWNER_ALIASES: 'alias@example.org, second@example.net',
     DASHBOARD_CSRF_SIGNING_KEY: 'd'.repeat(64),
@@ -40,11 +40,11 @@ test('the build and the canary switch become --var flags', () => {
   ])
 })
 
-test('the canary switch: unset means true, otherwise exactly true or false', () => {
-  assert.equal(injectedVars({ ...environment(), DASHBOARD_CANARY_ENABLED: '' }).CANARY_ENABLED, 'true')
+test('the canary switch: exactly true or false; unset, empty or anything else is refused', () => {
   assert.equal(injectedVars({ ...environment(), DASHBOARD_CANARY_ENABLED: 'true' }).CANARY_ENABLED, 'true')
   assert.equal(injectedVars({ ...environment(), DASHBOARD_CANARY_ENABLED: 'false' }).CANARY_ENABLED, 'false')
-  for (const value of ['False', 'TRUE', '0', '1', 'no', 'off', ' false', 'false ', 'false\n', 'yes', undefined]) {
+  // An empty value is a deleted or renamed GitHub variable: it must not turn stopped canaries back on.
+  for (const value of ['', 'False', 'TRUE', '0', '1', 'no', 'off', ' false', 'false ', 'false\n', 'yes', undefined]) {
     const env = { ...environment(), DASHBOARD_CANARY_ENABLED: value }
     if (value === undefined) delete env.DASHBOARD_CANARY_ENABLED
     assert.throws(() => injectedVars(env), /deploy setting: DASHBOARD_CANARY_ENABLED$/, JSON.stringify(value))

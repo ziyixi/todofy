@@ -483,7 +483,7 @@ jobs:
       - name: Dry-run the committed production config
         working-directory: dashboard/worker
         env:
-          DASHBOARD_CANARY_ENABLED: ''
+          DASHBOARD_CANARY_ENABLED: 'true'
           DASHBOARD_ACCESS_OWNER: owner@example.com
           DASHBOARD_ACCESS_OWNER_ALIASES: ''
           DASHBOARD_CSRF_SIGNING_KEY: '0000000000000000000000000000000000000000000000000000000000000000'

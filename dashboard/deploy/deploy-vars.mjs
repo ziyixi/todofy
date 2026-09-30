@@ -3,7 +3,8 @@
 //
 // - with `wrangler deploy --var NAME:value` (a plain_text var, exactly like a [vars] entry): BUILD_SHA (the
 //   commit) and CANARY_ENABLED (the GitHub environment variable DASHBOARD_CANARY_ENABLED; exactly "true" or
-//   "false", unset or empty means "true", docs/setup.md §7);
+//   "false": unset or empty is refused like every other switch, so a deleted variable can never turn the
+//   canaries back on, docs/setup.md §7);
 // - with `--secrets-file` (Worker secrets, hidden in wrangler's output): the owner's addresses, the CSRF key
 //   and the analytics token (GitHub environment secrets, masked in the public Actions log).
 //
@@ -40,24 +41,23 @@ export class SettingError extends Error {
   }
 }
 
-/** Worker var <- environment name. `fallback` applies to an empty value; an absent one is always refused. */
+/** Worker var <- environment name. An absent or empty value is refused (GitHub passes an unset variable as ""). */
 export const INJECTED = [
   // In this order, the bindings keep the order the retired generator gave them (CANARY_ENABLED, BUILD_SHA last).
-  { name: 'CANARY_ENABLED', from: 'DASHBOARD_CANARY_ENABLED', kind: 'toggle', pattern: /^(?:true|false)$/, fallback: 'true' },
+  { name: 'CANARY_ENABLED', from: 'DASHBOARD_CANARY_ENABLED', kind: 'toggle', pattern: /^(?:true|false)$/ },
   { name: 'BUILD_SHA', from: 'GITHUB_SHA', kind: 'build', pattern: /^[0-9a-f]{40}$/ },
 ]
 
-function checked(env, name, pattern, fallback) {
-  // Absent means the CI step forgot the setting. GitHub passes an unset variable as "".
-  if (typeof env[name] !== 'string') throw new SettingError(name)
-  const value = env[name] || fallback
+function checked(env, name, pattern) {
+  // Absent means the CI step forgot the setting; empty, that the GitHub variable or secret is unset.
+  const value = env[name]
   if (typeof value !== 'string' || !pattern.test(value)) throw new SettingError(name)
   return value
 }
 
 /** {NAME: value} for every injected var. */
 export function injectedVars(env) {
-  return Object.fromEntries(INJECTED.map(({ name, from, pattern, fallback }) => [name, checked(env, from, pattern, fallback)]))
+  return Object.fromEntries(INJECTED.map(({ name, from, pattern }) => [name, checked(env, from, pattern)]))
 }
 
 /** The flags appended to the wrangler command: --var NAME:value (wrangler splits at the first colon). */

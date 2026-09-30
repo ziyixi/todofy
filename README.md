@@ -127,7 +127,7 @@ All deploy jobs use the one `production` environment (deployment branch `main`).
 | `Website deploy` (the release workflow) | none: `SITE_URL`, `NOTION_API_VERSION` and the legacy repository are committed in the workflow, the account and hostnames in `website/wrangler.toml`; optional `WEBSITE_BOOTSTRAP_APPROVAL` (only an empty-registry bootstrap) | `CF_API_TOKEN`, `WEBSITE_NOTION_TOKEN`, `WEBSITE_NOTION_DATA_SOURCE_ID` |
 | `Website relay deploy` | none (its settings are committed in `website/relay/wrangler.toml`; its four secrets are Worker secrets) | `CF_API_TOKEN` |
 | `Website apex deploy` | none (everything is committed in `website/apex-redirect/wrangler.toml`; no Worker secrets) | `CF_API_TOKEN` |
-| `Dashboard deploy` | optional `DASHBOARD_CANARY_ENABLED` (`true`/`false`, default `true`) | `CF_API_TOKEN` (deploy only), `DASHBOARD_ACCESS_OWNER`, `DASHBOARD_ACCESS_OWNER_ALIASES`, `DASHBOARD_CSRF_SIGNING_KEY`, `DASHBOARD_CF_ANALYTICS_TOKEN` (GraphQL Analytics only; to be replaced by an "Account Analytics: Read" token, [`dashboard/docs/setup.md`](dashboard/docs/setup.md) §4) |
+| `Dashboard deploy` | `DASHBOARD_CANARY_ENABLED` (exactly `true` or `false`; unset is refused) | `CF_API_TOKEN` (deploy only), `DASHBOARD_ACCESS_OWNER`, `DASHBOARD_ACCESS_OWNER_ALIASES`, `DASHBOARD_CSRF_SIGNING_KEY`, `DASHBOARD_CF_ANALYTICS_TOKEN` (GraphQL Analytics only; to be replaced by an "Account Analytics: Read" token, [`dashboard/docs/setup.md`](dashboard/docs/setup.md) §4) |
 
 Every Worker's production config is one committed file named `wrangler.toml` in the folder that names
 the Worker: `mail-hero/wrangler.toml`, `todofy/wrangler.toml` (todofy-core), `todofy/gateway/wrangler.toml`

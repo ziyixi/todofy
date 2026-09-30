@@ -4,7 +4,7 @@
 #
 # Deployed only by CI ("Dashboard deploy" in .github/workflows/ci.yml) through deploy/deploy-vars.mjs, which
 # appends with --var BUILD_SHA (the commit) and CANARY_ENABLED (GitHub environment variable
-# DASHBOARD_CANARY_ENABLED; unset means "true"), and passes ACCESS_OWNER, ACCESS_OWNER_ALIASES,
+# DASHBOARD_CANARY_ENABLED; exactly true or false, unset is refused), and passes ACCESS_OWNER, ACCESS_OWNER_ALIASES,
 # CSRF_SIGNING_KEY and CF_ANALYTICS_TOKEN (GitHub environment secrets) as Worker secrets with --secrets-file.
 # A plain `wrangler deploy` of this file DELETES BUILD_SHA and CANARY_ENABLED.
 #
