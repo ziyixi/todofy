@@ -153,3 +153,24 @@ commands with `--local`) and each app's `.dev.vars` (see its `.dev.vars.example`
 The repository is public, and Actions prints a step's variables in its log, so personal values (the receive
 address, owner emails, the Todoist project id) are secrets even though they are not credentials. The backup image workflow uses only
 the job's own `GITHUB_TOKEN`.
+
+#### Rolling back the committed-config layout
+
+Before the committed configs, CI generated each config from GitHub variables. These production variables
+are still set but **nothing reads them now**; changing one has no effect (change the committed
+`wrangler.toml` instead): `CLOUDFLARE_ACCOUNT_ID`, `MAIL_HERO_PUBLIC_HOST`, `MAIL_HERO_D1_DATABASE_ID`,
+`MAIL_HERO_D1_DATABASE_NAME`, `MAIL_HERO_R2_BUCKET_NAME`, `MAIL_HERO_BACKUP_BUCKET_NAME`,
+`MAIL_HERO_ACCESS_ISSUER`, `MAIL_HERO_ACCESS_AUDIENCE`, `MAIL_HERO_WEBHOOK_ALLOWED_HOSTS`,
+`MAIL_HERO_INGEST_DAILY_MESSAGE_LIMIT`, `MAIL_HERO_INGEST_DAILY_BYTE_LIMIT`, `TODOFY_PUBLIC_HOST`,
+`TODOFY_D1_DATABASE_ID`, `TODOFY_HOOKS_HOSTS`, `TODOFY_ACCESS_ISSUER`, `TODOFY_ACCESS_AUDIENCE`,
+`DASHBOARD_PUBLIC_HOST`, `DASHBOARD_ACCESS_ISSUER`, `DASHBOARD_ACCESS_AUDIENCE`.
+
+They are the rollback path: reverting the layout's merge commit on `main` brings the generators back, CI
+redeploys Mail Hero, both Todofy Workers (together, as `todofy/docs/ci-cd.md` requires) and the dashboard
+from them, and a generator refuses a missing one ("Invalid or missing CI setting"). So keep all of them
+until every Worker has had at least one successful deploy and one full cron cycle (a day) on the new
+layout, and delete them in a follow-up change only after that. A revert deploys the values in these
+variables, not the committed ones: if a committed value changed since the merge, update its variable
+before reverting. Without them, the only rollback is Cloudflare's `wrangler rollback`, which Todofy allows
+only for both Workers to their pre-merge pair; Mail Hero or the dashboard alone may be rolled back that
+way in an emergency.

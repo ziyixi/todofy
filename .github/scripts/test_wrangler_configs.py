@@ -83,6 +83,29 @@ TOGGLES = {
     "DASHBOARD_CANARY_ENABLED",
 }
 DEPLOY_JOBS = ("todofy-deploy", "mail-hero-deploy", "dashboard-deploy")
+# The retired generators' required GitHub variables, still set in production: a revert of the committed-config
+# layout needs them (README "Rolling back the committed-config layout"), and nothing may read them now.
+LEGACY_VARIABLES = {
+    "CLOUDFLARE_ACCOUNT_ID",
+    "MAIL_HERO_PUBLIC_HOST",
+    "MAIL_HERO_D1_DATABASE_ID",
+    "MAIL_HERO_D1_DATABASE_NAME",
+    "MAIL_HERO_R2_BUCKET_NAME",
+    "MAIL_HERO_BACKUP_BUCKET_NAME",
+    "MAIL_HERO_ACCESS_ISSUER",
+    "MAIL_HERO_ACCESS_AUDIENCE",
+    "MAIL_HERO_WEBHOOK_ALLOWED_HOSTS",
+    "MAIL_HERO_INGEST_DAILY_MESSAGE_LIMIT",
+    "MAIL_HERO_INGEST_DAILY_BYTE_LIMIT",
+    "TODOFY_PUBLIC_HOST",
+    "TODOFY_D1_DATABASE_ID",
+    "TODOFY_HOOKS_HOSTS",
+    "TODOFY_ACCESS_ISSUER",
+    "TODOFY_ACCESS_AUDIENCE",
+    "DASHBOARD_PUBLIC_HOST",
+    "DASHBOARD_ACCESS_ISSUER",
+    "DASHBOARD_ACCESS_AUDIENCE",
+}
 
 
 def load(path: str) -> dict:
@@ -394,6 +417,13 @@ class Workflow(unittest.TestCase):
                     with self.subTest(job=job_name, step=step["name"], name=name):
                         self.assertEqual(step["env"][name], f"${{{{ vars.{name} }}}}")
         self.assertEqual(seen, TOGGLES)
+
+    def test_the_rollback_note_names_every_legacy_variable_and_ci_reads_none(self):
+        readme = (REPO / "README.md").read_text()
+        section = readme.split("#### Rolling back the committed-config layout", 1)[1].split("\n#", 1)[0]
+        self.assertEqual(set(re.findall(r"`([A-Z][A-Z0-9_]+)`", section)) & LEGACY_VARIABLES, LEGACY_VARIABLES)
+        self.assertFalse(LEGACY_VARIABLES & set(re.findall(r"\b(?:vars|env)\.([A-Z0-9_]+)", WORKFLOW.read_text())))
+        self.assertFalse(LEGACY_VARIABLES & TOGGLES)
 
     def test_github_variables_are_only_the_switches(self):
         used = set(re.findall(r"\bvars\.([A-Z0-9_]+)", WORKFLOW.read_text()))
