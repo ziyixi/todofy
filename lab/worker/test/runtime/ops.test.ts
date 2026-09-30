@@ -55,6 +55,31 @@ describe('Ops', () => {
   });
 });
 
+describe('Bootstrap', () => {
+  it('arms the alarm from ops-v1 status(), so the pipeline starts before the owner opens the UI', async () => {
+    // Production scheduling (no manual alarms). The deploy probe never reaches the Worker (Access answers
+    // it), so the dashboard's status() tick is the first call a fresh deploy gets.
+    h = await startHarness({ bindings: { DEV_MANUAL_ALARMS: 'false' } });
+    expect(await h.alarmAt()).toBeNull();
+    const before = Date.now();
+    const status = await h.ops('status');
+    expect(status.ok).toMatchObject({ app: 'lab', health: 'ok' });
+    const at = await h.alarmAt();
+    expect(at).not.toBeNull();
+    // Armed about a second out (or already fired and re-armed by the alarm itself: never null again).
+    expect(at ?? 0).toBeGreaterThanOrEqual(before);
+    // A second status() leaves an armed alarm alone.
+    await h.ops('status');
+    expect(await h.alarmAt()).not.toBeNull();
+  });
+
+  it('keeps status() free of scheduling when the tests drive the alarms', async () => {
+    h = await startHarness();
+    await h.ops('status');
+    expect(await h.alarmAt()).toBeNull();
+  });
+});
+
 describe('Access and CSRF', () => {
   let issuer: TestIssuer;
   beforeAll(async () => {

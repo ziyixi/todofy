@@ -74,7 +74,11 @@ export class LabState extends DurableObject<Env> {
 
   // ---- scheduling ------------------------------------------------------------------------------------
 
-  /** Arms the alarm if none is set (first request, deploy probe, every /api/today). */
+  /**
+   * Arms the alarm if none is set: every GET /api/today and every ops-v1 status() (the dashboard's
+   * 30-minute tick), so the pipeline starts after a deploy without the owner opening the UI. The deploy
+   * probe cannot do it: Access answers its unauthenticated requests before they reach the Worker.
+   */
   async ensureAlarm(): Promise<void> {
     if (this.manualAlarms()) return;
     if ((await this.ctx.storage.getAlarm()) === null) await this.ctx.storage.setAlarm(Date.now() + WAKE_MS);
@@ -184,8 +188,14 @@ export class LabState extends DurableObject<Env> {
 
   // ---- ops-v1 -------------------------------------------------------------------------------------------
 
-  opsStatus(): LabStatus {
+  async opsStatus(): Promise<LabStatus> {
+    await this.ensureAlarm();
     return labStatus(this.store, this.env, Date.now());
+  }
+
+  /** The armed alarm's time, or null (workerd tests and diagnostics; never reachable over HTTP). */
+  alarmAt(): Promise<number | null> {
+    return this.ctx.storage.getAlarm();
   }
 
   async opsSetGuard(input: unknown): Promise<{ ok: GuardState } | { error: 'invalid_input' }> {

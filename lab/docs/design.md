@@ -105,9 +105,13 @@ React 19.3.0, Vite 7.3.6, react-query 5.104.0, lucide-react 1.48.0). `@ziyixi/ed
 
 One object `lab-v1`. Every step is idempotent, keyed by the feed's announce date, with a cursor in
 DO SQLite; each alarm invocation does a bounded slice and re-arms the alarm (2 s) while work
-remains, else at the next fetch time (daily `LAB_FETCH_UTC_HOUR`:30 UTC). Bootstrap: the first
-request to the Worker (or the deploy probe) calls `LAB.ensureAlarm()`; the alarm handler always
-re-arms before returning, and a failed step re-arms with backoff (5 min, 30 min, next day).
+remains, else at the next fetch time (daily `LAB_FETCH_UTC_HOUR`:30 UTC). Bootstrap: `GET /api/today`
+and every ops-v1 `status()` call `LabState.ensureAlarm()` (a no-op once an alarm is set), so after the
+first `Lab deploy` the dashboard's next 30-minute tick starts the pipeline even if the owner never opens
+the UI. The deploy probe cannot: Access answers its unauthenticated requests before they reach the
+Worker. The alarm handler always re-arms before returning, and a failed step re-arms with backoff
+(5 min, 30 min, next day). The workerd suite checks that `status()` on a fresh object leaves an alarm
+armed (`test/runtime/ops.test.ts` "Bootstrap").
 
 1. **Fetch** (`feed_fetch`): one `GET https://rss.arxiv.org/rss/<cats joined by +>` per UTC day,
    every day (weekends/holidays return the unchanged feed: harmless, deduped), with
@@ -331,7 +335,8 @@ created.
 - README/IMPLEMENTATION: Lab row. Lab is the first app whose shed defers **everything**
   (`deferred: feed_fetch, embed, rank, brief, seed_resolve, retention`); decisions and sends to
   Todofy still work.
-  Status is built from DO SQLite only (no D1 reads).
+  Status is built from DO SQLite only (no D1 reads). It also arms the alarm when none is set (§4), so
+  the dashboard's tick bootstraps a fresh deploy.
 - Status: counters `ingested_24h`, `ranked_24h`, `liked_7d`, `decided_7d`, `neurons_today`,
   `neuron_cap`; signals `feed_stale` (warning, no successful fetch for > 72 h, metric `hours`),
   `neuron_cap_hit` (warning, metrics `used`, `cap`), `send_unsettled` (warning, a send `failed` or
@@ -372,7 +377,8 @@ entrypoint typed locally against `OpsCommon`, register the dashboard entry as `p
 - `Lab deploy` (main only, after the gate and after `Todofy deploy`, environment `production`,
   concurrency `lab-production`):
   `wrangler d1 migrations apply DB --remote`, deploy through `deploy-vars.mjs exec`, then probe
-  `https://lab.ziyixi.science/` expects the Access 302 to `ziyixi.cloudflareaccess.com`.
+  `https://lab.ziyixi.science/` expects the Access 302 to `ziyixi.cloudflareaccess.com`. The first
+  release has no previous version to fall back to: `lab/README.md` "Rollback and removal".
 - `test_wrangler_configs.py`: `PRODUCTION['lab']`, `WRAPPERS['lab']`, `DEPLOY_JOBS`,
   `PERSONAL_INPUTS` (`LAB_ACCESS_OWNER*`), `SHARED_SECRETS` (Lab deploy reads them from
   `DASHBOARD_ACCESS_OWNER*`), dev-command origin pin.
@@ -442,6 +448,7 @@ What the implementation (`worker/src/`) settled where this design left room, all
   test-only binding, refused in production by the config tests) it never arms a real alarm, and the workerd
   suite passes explicit clocks (next UTC day, the 48 h bound).
 - **Dashboard**: the 论文雷达 flow has 5 stages (arXiv → 抓取 → 排序与简介 → 卡片 → 交给 Todofy) because 8
-  stages pushed the flows view past its 16 KiB budget; the `LabState` namespace is not in the registry's
+  stages pushed the flows view past its budget, then 16 KiB. With GTD's flow merged the view has six flows
+  and the budget is 20 KiB (`dashboard/worker/src/api-v2-types.ts` `V2_BODY_BUDGET.flows`); 5 stages stay; the `LabState` namespace is not in the registry's
   resources yet (every registered resource must name its ID; add it after the first deploy). ops-v1's
   signal table row "both" became "every app".

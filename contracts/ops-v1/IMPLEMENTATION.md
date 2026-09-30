@@ -540,7 +540,9 @@ changed; the dashboard binds `LAB` next to the two others.
 
 - Files: `lab/worker/src/ops.ts` (the entrypoint, forwards to `LabState`), `lab/worker/src/ops-status.ts`
   (status and guard, pure over the object's SQLite). `status()` reads **no D1**: counters come from
-  LabState's own tables (`activity`, `labels`, `neurons`), so its budget is 0 D1 statements.
+  LabState's own tables (`activity`, `labels`, `neurons`), so its budget is 0 D1 statements. Its one write:
+  when LabState has no alarm set it arms one (`ensureAlarm`, a no-op otherwise), so the dashboard's first
+  tick after a deploy starts Lab's pipeline; the deploy's Access probe never reaches the Worker.
 - Counters: `ingested_24h`, `ranked_24h`, `liked_7d`, `decided_7d`, `neurons_today`, `neuron_cap`.
   Signals: `feed_stale`, `neuron_cap_hit`, `send_unsettled` (warning), `guard_shed` (info).
 - Guard: Lab is the first app whose shed defers **everything** in the background

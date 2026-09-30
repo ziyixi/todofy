@@ -3,7 +3,8 @@
  * Worker "lab" with a real D1 database (migrations/ applied) and a real SQLite LabState, next to
  *   - "todofy": a stub whose `Ops` entrypoint answers task-intent-v1 (test/stubs/todofy-stub.ts),
  *   - "fake-ai": the AI binding (test/stubs/fake-ai.ts),
- *   - "probe": calls LabState.step(now) and Lab's own Ops entrypoint over real bindings,
+ *   - "probe": calls LabState.step(now), reads LabState.alarmAt() and calls Lab's own Ops entrypoint over
+ *     real bindings,
  * and an outbound handler that plays rss.arxiv.org and export.arxiv.org. DEV_MANUAL_ALARMS=true: the tests
  * drive the pipeline with explicit clocks. All data is synthetic; nothing leaves the process.
  */
@@ -107,6 +108,8 @@ export interface Harness {
   mutate<T>(method: 'POST' | 'PUT' | 'DELETE', path: string, body: unknown): Promise<{ status: number; body: T }>;
   /** One LabState pipeline slice at `now`. */
   step(now: number): Promise<{ next: number }>;
+  /** The time of LabState's armed alarm, or null when none is set. */
+  alarmAt(): Promise<number | null>;
   /** Steps from `now` until nothing is left to do soon (next alarm more than a minute away); returns the last clock. */
   run(now: number, max?: number): Promise<number>;
   /** Calls a method of Lab's own Ops entrypoint: the value or the rejection message. */
@@ -183,6 +186,7 @@ export async function startHarness(options: HarnessOptions = {}): Promise<Harnes
             const { op, args } = await request.json()
             try {
               if (op === 'step') return Response.json({ ok: await env.LAB.get(env.LAB.idFromName('lab-v1')).step(args[0]) })
+              if (op === 'alarm') return Response.json({ ok: await env.LAB.get(env.LAB.idFromName('lab-v1')).alarmAt() })
               return Response.json({ ok: await env.OPS[args[0]](...args.slice(1)) })
             } catch (error) { return Response.json({ error: error instanceof Error ? error.message : 'not_an_error' }) }
           } }`,
@@ -226,6 +230,11 @@ export async function startHarness(options: HarnessOptions = {}): Promise<Harnes
       const result = await probe('step', [now]);
       if (result.error !== undefined) throw new Error(`step: ${result.error}`);
       return result.ok as { next: number };
+    },
+    async alarmAt() {
+      const result = await probe('alarm', []);
+      if (result.error !== undefined) throw new Error(`alarm: ${result.error}`);
+      return result.ok as number | null;
     },
     async run(now: number, max = 60) {
       // Like the alarm: each slice runs at the time the previous one asked for, while that is within a minute.
