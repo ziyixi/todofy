@@ -55,12 +55,13 @@ Each step is one `pnpm release <command>` ([`scripts/release/cli.ts`](../scripts
 9. `record`: a GitHub Deployment (payload schema 3: identity, version, previous version, live hostname,
    content registry, route contract), status `in_progress`. An interrupted run leaves this record blocking.
 10. `deploy`: refuses a production that changed meanwhile; `wrangler versions deploy <version>@100%`; confirms the active version; when `wrangler.toml` lists
-    hostnames, `wrangler triggers deploy` applies them as Custom Domains (and keeps workers.dev off).
+    hostnames, `wrangler triggers deploy` applies them: Custom Domains (the preview host) and whole-host
+    zone routes (`www.ziyixi.science/*`, which changes no DNS), and keeps workers.dev off.
     Newer website code landing on `main` meanwhile is not a reason to stop: this build passed CI and the
     release that push dispatched is queued behind this one and builds the newer code (refusing here would
     record a failure that blocks the gate for that release too).
-11. `verify-live`: the live hostname (the canonical host once attached, otherwise the preview host) must
-    become reachable (a new Custom Domain: up to 20 × 15 s), serve the identity 3 times in a row
+11. `verify-live`: the live hostname (the canonical host once attached as a Custom Domain or a zone
+    route, otherwise the preview host) must become reachable (a new hostname: up to 20 × 15 s), serve the identity 3 times in a row
     (12 × 5 s) and pass the route contract. With no hostname yet this step is skipped: the version was
     verified locally.
 12. `mark-success`, then the **Notion feedback**: `sync-status.ts` compares every row with the live
@@ -103,12 +104,12 @@ Each step is one `pnpm release <command>` ([`scripts/release/cli.ts`](../scripts
 Committed: `SITE_URL`, `NOTION_API_VERSION` and `WEBSITE_LEGACY_REPOSITORY` in the workflow's `env`; the
 Worker, account and hostnames in [`wrangler.toml`](../wrangler.toml). GitHub `production` environment:
 
-| Name                            | Kind                                          | Used by                                                                         |
-| ------------------------------- | --------------------------------------------- | ------------------------------------------------------------------------------- |
-| `WEBSITE_NOTION_TOKEN`          | secret                                        | the Notion sync and the feedback (needs Read and Update content)                |
-| `WEBSITE_NOTION_DATA_SOURCE_ID` | secret                                        | same                                                                            |
-| `CF_API_TOKEN`                  | secret (shared with Todofy and the dashboard) | Cloudflare reads, `versions upload/deploy`, `triggers deploy`, the relay deploy |
-| `WEBSITE_BOOTSTRAP_APPROVAL`    | variable, optional                            | only an empty-registry bootstrap                                                |
+| Name                            | Kind                                          | Used by                                                                                                                                                    |
+| ------------------------------- | --------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `WEBSITE_NOTION_TOKEN`          | secret                                        | the Notion sync and the feedback (needs Read and Update content)                                                                                           |
+| `WEBSITE_NOTION_DATA_SOURCE_ID` | secret                                        | same                                                                                                                                                       |
+| `CF_API_TOKEN`                  | secret (shared with Todofy and the dashboard) | Cloudflare reads, `versions upload/deploy`, `triggers deploy` (Custom Domains, Workers Routes), the relay and apex deploys; it cannot edit DNS or rulesets |
+| `WEBSITE_BOOTSTRAP_APPROVAL`    | variable, optional                            | only an empty-registry bootstrap                                                                                                                           |
 
 The job's `GITHUB_TOKEN` (`contents: read`, `deployments: write`, `checks: read`, `actions: read`) reads the
 CI results and writes the records. It is in the `env` of only the steps that need it (pin the commit,

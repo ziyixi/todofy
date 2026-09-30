@@ -1,0 +1,14 @@
+# Worker "ziyixi-apex-redirect": the apex ziyixi.science answers every request with a 308 to the same
+# path and query on https://www.ziyixi.science (README.md). It replaces Vercel's apex redirect through a
+# zone Workers Route on the existing proxied apex record; routes never change DNS, so the apex's A, MX,
+# TXT and DKIM records stay as they are. Deployed only by the "Website apex deploy" job in
+# .github/workflows/ci.yml.
+name = "ziyixi-apex-redirect"
+account_id = "f57937bd1d93bf59e737b6d8445fb7a3"
+main = "src/index.ts"
+compatibility_date = "2026-09-25"
+# Only the apex route: no *.workers.dev copy and no per-version preview URLs.
+workers_dev = false
+preview_urls = false
+# Exactly the apex host (not "*ziyixi.science/*", which would also match every subdomain).
+routes = [{ pattern = "ziyixi.science/*", zone_name = "ziyixi.science" }]

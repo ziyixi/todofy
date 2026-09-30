@@ -139,7 +139,7 @@ async function expectedIdentity(): Promise<BuildIdentity> {
   return PublicationIdentitySchema.parse(await readJson(files.buildInfo));
 }
 
-/** Identity read of a live hostname: waits for a new Custom Domain, then 3 matches in a row. */
+/** Identity read of a live hostname: waits for a new hostname, then 3 matches in a row. */
 function verifyLiveIdentity(origin: string, identity: BuildIdentity): Promise<void> {
   return waitForIdentity(origin, identity, {
     reachAttempts: 20,

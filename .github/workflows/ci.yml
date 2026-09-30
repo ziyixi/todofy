@@ -51,6 +51,7 @@ jobs:
       dashboard_deploy: ${{ steps.decide.outputs.dashboard_deploy }}
       website_deploy: ${{ steps.decide.outputs.website_deploy }}
       website_relay_deploy: ${{ steps.decide.outputs.website_relay_deploy }}
+      website_apex_deploy: ${{ steps.decide.outputs.website_apex_deploy }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -567,7 +568,8 @@ jobs:
           npx --no-install vitest run test/ops-client.test.ts test/guard.test.ts test/canary.test.ts test/digest.test.ts
 
   # The personal website (website/, docs in website/docs): a Next.js static export on the assets-only Worker
-  # ziyixi-website, plus the Notion relay Worker ziyixi-notion-publish (website/relay). No Notion secret: the
+  # ziyixi-website, plus the Notion relay Worker ziyixi-notion-publish (website/relay) and the apex redirect Worker
+  # ziyixi-apex-redirect (website/apex-redirect, its tests run in `pnpm check`). No Notion secret: the
   # builds use the committed synthetic fixture (and the empty source), Playwright runs against the export
   # under `wrangler dev` with the production wrangler.toml, _headers and _redirects.
   website-checks:
@@ -591,7 +593,7 @@ jobs:
           corepack enable
           pnpm --version
           pnpm install --frozen-lockfile
-      - name: Format, lint, typecheck and unit tests (release, relay and detector included)
+      - name: Format, lint, typecheck and unit tests (release, relay, detector and apex redirect included)
         run: |
           pnpm content:prepare:empty
           pnpm check
@@ -618,16 +620,17 @@ jobs:
           done
           ALLOW_FIXTURE_DEPLOYMENT_TESTS=true DEPLOYMENT_BASE_URL=http://127.0.0.1:4173 \
             EXPECTED_BUILD_INFO_PATH=out/build-info.json pnpm test:deployment
-      # Both Workers' production configs, as the deploy jobs use them. No token is needed for --dry-run.
-      - name: Dry-run both Workers
+      # The three Workers' production configs, as the deploy jobs use them. No token is needed for --dry-run.
+      - name: Dry-run the three Workers
         run: |
           pnpm exec wrangler deploy --dry-run --config wrangler.toml
           pnpm exec wrangler deploy --dry-run --config relay/wrangler.toml --outdir "$RUNNER_TEMP/relay-bundle"
+          pnpm exec wrangler deploy --dry-run --config apex-redirect/wrangler.toml --outdir "$RUNNER_TEMP/apex-bundle"
       # The website never imports another app, a package or a contract.
       - name: No imports from other apps
         run: |
           if grep -rnE "(from|import)[[:space:]]*\(?[[:space:]]*['\"][^'\"]*(mail-hero|todofy|dashboard|contracts|packages)/" \
-            src scripts relay/src tests; then exit 1; fi
+            src scripts relay/src apex-redirect/src apex-redirect/test tests; then exit 1; fi
 
   gate:
     name: CI gate
@@ -1084,4 +1087,69 @@ jobs:
             sleep 6
           done
           echo "The relay's /health did not answer." >&2
+          exit 1
+
+  # The apex redirect Worker ziyixi-apex-redirect (website/apex-redirect): a zone Workers Route on the proxied
+  # apex record answers every request with a 308 to https://www.ziyixi.science and the same path and query.
+  # The route changes no DNS (the apex's MX, TXT and DKIM records are never touched). No secrets or bindings.
+  website-apex-deploy:
+    name: Website apex deploy
+    needs: [changes, website-checks, gate]
+    # Explicit status function and results, as for Todofy deploy (implicit success() and skipped ancestors).
+    if: >-
+      ${{ !cancelled()
+      && needs.changes.result == 'success'
+      && needs.website-checks.result == 'success'
+      && needs.gate.result == 'success'
+      && github.ref == 'refs/heads/main'
+      && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+      && needs.changes.outputs.website_apex_deploy == 'true' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    environment:
+      name: production
+    concurrency:
+      group: website-apex-production
+      cancel-in-progress: false
+    defaults:
+      run:
+        working-directory: website
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version-file: website/.nvmrc
+      - name: Install the pinned pnpm and locked dependencies
+        run: |
+          corepack enable
+          pnpm install --frozen-lockfile
+      - name: Validate the bundle before deploying
+        run: pnpm exec wrangler deploy --dry-run --config apex-redirect/wrangler.toml
+      - name: Deploy the Worker ziyixi-apex-redirect and its apex route
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+        run: |
+          test -n "$CLOUDFLARE_API_TOKEN"
+          pnpm exec wrangler deploy --config apex-redirect/wrangler.toml
+      # The Worker's own answer: 308, exact Location with the path and query, HSTS, and no x-vercel-* header
+      # (Vercel's apex redirect, which the route replaces, sends the same status and Location).
+      - name: Check the apex answers with the Worker's redirect
+        env:
+          PROBE: https://ziyixi.science/ci-apex-probe/%E4%B8%AD?run=1&x=%2F
+          WANT: https://www.ziyixi.science/ci-apex-probe/%E4%B8%AD?run=1&x=%2F
+        run: |
+          for attempt in $(seq 1 10); do
+            headers=$(curl -sSI --max-time 10 "$PROBE" | tr -d '\r') || headers=''
+            if printf '%s\n' "$headers" | head -n 1 | grep -Eq '^HTTP/[0-9.]+ 308( |$)' \
+              && printf '%s\n' "$headers" | grep -Fixq "location: $WANT" \
+              && printf '%s\n' "$headers" | grep -Fixq 'strict-transport-security: max-age=63072000' \
+              && ! printf '%s\n' "$headers" | grep -iq '^x-vercel-'; then
+              echo "The apex answers with the Worker's 308 (attempt $attempt)."
+              exit 0
+            fi
+            sleep 6
+          done
+          echo "The apex did not answer with the Worker's 308." >&2
           exit 1

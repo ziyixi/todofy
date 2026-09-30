@@ -35,6 +35,7 @@ def expect(
     website_check=False,
     website_deploy=False,
     website_relay_deploy=False,
+    website_apex_deploy=False,
 ):
     return {
         "todofy_check": todofy_check,
@@ -48,11 +49,13 @@ def expect(
         "dashboard_deploy": dashboard_deploy,
         "website_deploy": website_deploy,
         "website_relay_deploy": website_relay_deploy,
+        "website_apex_deploy": website_apex_deploy,
     }
 
 
 # Every app checked (a contracts/ or .github/ change); the three edge-auth apps checked and deployed
-# (the website compiles in no package); every app with the website's two Workers.
+# (the website compiles in no package); every app with the website Worker (the relay and apex Workers
+# are added where a test expects them).
 ALL_CHECKED = {"dashboard_check": True, "website_check": True}
 ALL = {"dashboard_check": True, "dashboard_deploy": True}
 EVERY = {**ALL, "website_check": True, "website_deploy": True}
@@ -110,7 +113,11 @@ class Classify(unittest.TestCase):
             "mail-hero": [REPO / "mail-hero" / "cloudflare" / "src", REPO / "mail-hero" / "web" / "src"],
             "todofy": [REPO / "todofy" / "gateway" / "src", REPO / "todofy" / "web" / "src"],
             "dashboard": [REPO / "dashboard" / "worker" / "src", REPO / "dashboard" / "web" / "src"],
-            "website": [REPO / "website" / "src", REPO / "website" / "relay" / "src"],
+            "website": [
+                REPO / "website" / "src",
+                REPO / "website" / "relay" / "src",
+                REPO / "website" / "apex-redirect" / "src",
+            ],
         }
         self.assertEqual(set(roots), set(ci_changes.APPS))
         importers = {}
@@ -222,6 +229,33 @@ class Classify(unittest.TestCase):
         both = expect(F, F, F, F, F, website_check=T, website_deploy=T, website_relay_deploy=T)
         self.assertEqual(push(["website/relay/wrangler.toml", "website/package.json"]), both)
 
+    def test_the_apex_redirect_deploys_without_releasing_the_site_or_the_relay(self):
+        """website/apex-redirect/ is the apex -> www Worker: its change (code, tests, config, docs) deploys it only."""
+        for path in (
+            "website/apex-redirect/src/redirect.ts",
+            "website/apex-redirect/test/redirect.test.ts",
+            "website/apex-redirect/wrangler.toml",
+            "website/apex-redirect/README.md",
+        ):
+            with self.subTest(path=path):
+                self.assertEqual(push([path]), expect(F, F, F, F, F, website_check=T, website_apex_deploy=T))
+        # Not a prefix match on the folder name alone.
+        self.assertEqual(push(["website/apex-redirect.md"]), expect(F, F, F, F, F, website_check=T, website_deploy=T))
+        self.assertEqual(
+            push(["website/apex-redirect/src/index.ts", "website/relay/src/github.ts"]),
+            expect(F, F, F, F, F, website_check=T, website_relay_deploy=T, website_apex_deploy=T),
+        )
+        self.assertEqual(
+            push(["website/apex-redirect/wrangler.toml", "website/wrangler.toml"]),
+            expect(F, F, F, F, F, website_check=T, website_deploy=T, website_apex_deploy=T),
+        )
+        # A site change alone never redeploys the apex Worker; a branch push computes the same outputs.
+        self.assertEqual(push(["website/src/app/page.tsx"])["website_apex_deploy"], False)
+        self.assertEqual(
+            push(["website/apex-redirect/src/index.ts"], ref=BRANCH),
+            expect(F, F, F, F, F, website_check=T, website_apex_deploy=T),
+        )
+
     def test_the_release_workflow_rechecks_every_app_but_deploys_none(self):
         self.assertEqual(
             push([".github/workflows/website-release.yml"]), expect(T, T, T, F, F, packages=T, **ALL_CHECKED)
@@ -279,13 +313,27 @@ class Dispatch(unittest.TestCase):
         # "both" (also the default) keeps meaning Todofy and Mail Hero.
         self.assertEqual(self.dispatch("both"), expect(T, T, T, T, T, packages=T))
         self.assertEqual(self.dispatch(""), expect(T, T, T, T, T, packages=T))
-        self.assertEqual(self.dispatch("all"), expect(T, T, T, T, T, packages=T, **EVERY, website_relay_deploy=T))
+        self.assertEqual(
+            self.dispatch("all"),
+            expect(T, T, T, T, T, packages=T, **EVERY, website_relay_deploy=T, website_apex_deploy=T),
+        )
         self.assertEqual(self.dispatch("todofy"), expect(T, F, T, T, F, packages=T))
         self.assertEqual(self.dispatch("mail-hero"), expect(F, T, T, F, T, packages=T))
         self.assertEqual(self.dispatch("dashboard"), expect(F, F, T, F, F, packages=T, **ALL))
         self.assertEqual(
             self.dispatch("website"),
-            expect(F, F, T, F, F, packages=T, website_check=T, website_deploy=T, website_relay_deploy=T),
+            expect(
+                F,
+                F,
+                T,
+                F,
+                F,
+                packages=T,
+                website_check=T,
+                website_deploy=T,
+                website_relay_deploy=T,
+                website_apex_deploy=T,
+            ),
         )
 
     def test_the_workflow_offers_exactly_the_dispatch_inputs(self):
@@ -356,6 +404,7 @@ class RealGit(unittest.TestCase):
         expected = {**dict.fromkeys(ci_changes.KEYS, "true"), "packages": "false"}
         expected.update(dashboard_check="false", dashboard_deploy="false")
         expected.update(website_check="false", website_deploy="false", website_relay_deploy="false")
+        expected.update(website_apex_deploy="false")
         self.assertEqual(outputs, expected)
 
     def test_a_failed_package_run_on_main_deploys_both_apps_next_time(self):
@@ -363,7 +412,7 @@ class RealGit(unittest.TestCase):
         self.commit("packages/edge-auth/src/access.ts")
         after = self.commit("README.md.orig")
         outputs = self.main_run(after, green)
-        website = {"website_check", "website_deploy", "website_relay_deploy"}
+        website = {"website_check", "website_deploy", "website_relay_deploy", "website_apex_deploy"}
         self.assertEqual({key for key, value in outputs.items() if value == "false"}, website)
 
     def test_a_failed_run_on_main_is_repeated(self):
@@ -548,7 +597,14 @@ class DeployConditions(unittest.TestCase):
         after_gate = {name: block for name, block in blocks.items() if "gate" in self.needs(block)}
         self.assertEqual(
             set(after_gate),
-            {"todofy-deploy", "mail-hero-deploy", "dashboard-deploy", "website-deploy", "website-relay-deploy"},
+            {
+                "todofy-deploy",
+                "mail-hero-deploy",
+                "dashboard-deploy",
+                "website-deploy",
+                "website-relay-deploy",
+                "website-apex-deploy",
+            },
         )
         for name, block in after_gate.items():
             condition = self.condition(block)
@@ -590,6 +646,7 @@ class DeployConditions(unittest.TestCase):
                 "mail-hero-deploy": "mail-hero-production",
                 "dashboard-deploy": "dashboard-production",
                 "website-relay-deploy": "website-relay-production",
+                "website-apex-deploy": "website-apex-production",
             },
         )
 
@@ -601,6 +658,7 @@ class DeployConditions(unittest.TestCase):
             ("dashboard-deploy", "dashboard-checks", "dashboard_deploy"),
             ("website-deploy", "website-checks", "website_deploy"),
             ("website-relay-deploy", "website-checks", "website_relay_deploy"),
+            ("website-apex-deploy", "website-checks", "website_apex_deploy"),
         ):
             condition = self.condition(blocks[job])
             with self.subTest(job=job):
@@ -738,6 +796,47 @@ class WebsiteRelease(unittest.TestCase):
         )
         self.assertEqual(text.count("GITHUB_TOKEN: ${{ github.token }}"), len(with_token))
         self.assertNotIn("GH_TOKEN", text)
+
+
+class WebsiteApexDeploy(unittest.TestCase):
+    """The apex redirect Worker is checked with the website and deployed by its own job, from its own config."""
+
+    CONFIG = REPO / "website" / "apex-redirect" / "wrangler.toml"
+
+    def test_the_job_dry_runs_deploys_and_probes_the_apex(self):
+        block = workflow_jobs()["website-apex-deploy"]
+        dry = block.index("pnpm exec wrangler deploy --dry-run --config apex-redirect/wrangler.toml")
+        deploy = block.index("pnpm exec wrangler deploy --config apex-redirect/wrangler.toml")
+        probe = block.index("- name: Check the apex answers with the Worker's redirect")
+        self.assertLess(dry, deploy)
+        self.assertLess(deploy, probe)
+        # The deploy token, once, only in the deploy step; no other secret.
+        self.assertEqual(block.count("secrets."), 1)
+        self.assertIn("CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}", block[:probe])
+        self.assertIn("      name: production\n", block)
+        # The probe asks the apex and accepts only the Worker's answer.
+        self.assertIn("PROBE: https://ziyixi.science/", block)
+        self.assertIn("WANT: https://www.ziyixi.science/", block)
+        self.assertIn("strict-transport-security: max-age=63072000", block)
+        self.assertIn("x-vercel-", block)
+
+    def test_website_checks_test_and_dry_run_it(self):
+        block = workflow_jobs()["website-checks"]
+        self.assertIn("pnpm check", block)
+        self.assertIn("pnpm exec wrangler deploy --dry-run --config apex-redirect/wrangler.toml", block)
+        self.assertIn("apex-redirect/src apex-redirect/test", block)
+        vitest = (REPO / "website" / "vitest.config.ts").read_text()
+        self.assertIn('"apex-redirect/test/**/*.test.ts"', vitest)
+
+    def test_the_config_is_one_apex_route_and_nothing_else(self):
+        text = self.CONFIG.read_text()
+        self.assertIn('name = "ziyixi-apex-redirect"\n', text)
+        self.assertIn('routes = [{ pattern = "ziyixi.science/*", zone_name = "ziyixi.science" }]\n', text)
+        self.assertIn("workers_dev = false\n", text)
+        self.assertIn("preview_urls = false\n", text)
+        # Routes only: the apex's DNS records (A, MX, TXT, DKIM) are never managed from here.
+        self.assertNotIn("custom_domain", text)
+        self.assertEqual(text.count("pattern ="), 1)
 
 
 class TodofyJobs(unittest.TestCase):

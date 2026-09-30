@@ -73,7 +73,7 @@ export interface Wrangler {
   uploadVersion(message: string): Promise<WranglerResult>;
   /** `wrangler versions deploy <id>@100%`. */
   deployVersion(versionId: string, message: string): Promise<void>;
-  /** `wrangler triggers deploy`: Custom Domains from wrangler.toml, workers.dev off. */
+  /** `wrangler triggers deploy`: Custom Domains and zone routes from wrangler.toml, workers.dev off. */
   deployTriggers(): Promise<void>;
 }
 

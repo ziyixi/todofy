@@ -4,12 +4,13 @@ Personal academic and engineering website for Ziyi Xi: Next.js App Router, built
 from a validated, immutable content snapshot. Blog posts come from a Notion data source; visitor requests
 never reach Notion or any Worker code.
 
-| Part        | What it is                                                                                                                                                 | Docs                                           |
-| ----------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------- |
-| The site    | `next build` with `output: "export"` → `out/`, served by the assets-only Worker **`ziyixi-website`** ([`wrangler.toml`](wrangler.toml))                    | [`docs/architecture.md`](docs/architecture.md) |
-| The release | `.github/workflows/website-release.yml` (repository root): Notion sync, build, verify, Worker version upload/deploy, live check, rollback, Notion feedback | [`docs/release.md`](docs/release.md)           |
-| The relay   | Worker **`ziyixi-notion-publish`** ([`relay/`](relay/)): the Notion buttons and the 15-minute change detector that publishes automatically                 | [`relay/README.md`](relay/README.md)           |
-| The cutover | Preview hostname → `www` → apex redirect; rollback to Vercel                                                                                               | [`docs/cutover.md`](docs/cutover.md)           |
+| Part        | What it is                                                                                                                                                    | Docs                                                 |
+| ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------- |
+| The site    | `next build` with `output: "export"` → `out/`, served by the assets-only Worker **`ziyixi-website`** ([`wrangler.toml`](wrangler.toml))                       | [`docs/architecture.md`](docs/architecture.md)       |
+| The release | `.github/workflows/website-release.yml` (repository root): Notion sync, build, verify, Worker version upload/deploy, live check, rollback, Notion feedback    | [`docs/release.md`](docs/release.md)                 |
+| The relay   | Worker **`ziyixi-notion-publish`** ([`relay/`](relay/)): the Notion buttons and the 15-minute change detector that publishes automatically                    | [`relay/README.md`](relay/README.md)                 |
+| The apex    | Worker **`ziyixi-apex-redirect`** ([`apex-redirect/`](apex-redirect/)): `ziyixi.science/*` → 308 to `https://www.ziyixi.science` with the same path and query | [`apex-redirect/README.md`](apex-redirect/README.md) |
+| The cutover | Preview hostname → `www` route → apex Worker; rollback to Vercel                                                                                              | [`docs/cutover.md`](docs/cutover.md)                 |
 
 This directory is one app of the monorepo (root [`README.md`](../README.md), [`AGENTS.md`](../AGENTS.md)). It
 was the separate repository `ziyixi/ziyixi.science` until 2026-09-30; its history is kept
@@ -64,6 +65,7 @@ for mode in empty fixture; do
 done
 pnpm exec wrangler deploy --dry-run --config wrangler.toml
 pnpm exec wrangler deploy --dry-run --config relay/wrangler.toml
+pnpm exec wrangler deploy --dry-run --config apex-redirect/wrangler.toml
 ```
 
 `pnpm test:deployment` (the release's route contract) needs `DEPLOYMENT_BASE_URL` and an expected
@@ -74,6 +76,6 @@ pnpm exec wrangler deploy --dry-run --config relay/wrangler.toml
 
 Deploys run only from GitHub Actions on `main` (never from a laptop): a website change on `main` runs
 `Website deploy` after the CI gate, which dispatches `website-release.yml` just as the Notion buttons and
-the relay's detector do (every release builds the newest `main` commit that passed the CI gate), and a `website/relay/` change runs `Website relay deploy`. The GitHub `production` environment
+the relay's detector do (every release builds the newest `main` commit that passed the CI gate), a `website/relay/` change runs `Website relay deploy`, and a `website/apex-redirect/` change runs `Website apex deploy`. The GitHub `production` environment
 holds `WEBSITE_NOTION_TOKEN`, `WEBSITE_NOTION_DATA_SOURCE_ID` and the monorepo's `CF_API_TOKEN`; every
-other production value is committed (`wrangler.toml`, `relay/wrangler.toml`, the workflow's `env`).
+other production value is committed (`wrangler.toml`, `relay/wrangler.toml`, `apex-redirect/wrangler.toml`, the workflow's `env`).

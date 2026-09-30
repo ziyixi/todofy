@@ -2,7 +2,8 @@
 
 For the lead. Every step keeps `www.ziyixi.science` answering; each has a rollback. Vercel is not touched
 until the cleanup at the end, so it stays the fallback (frozen at its last release: after step 1 new Notion
-content goes only to the Worker).
+content goes only to the Worker). Steps 3 and 4 use zone Workers Routes on the existing proxied records, so
+the cutover changes no DNS record at all.
 
 State before the cutover (2026-09-29): the zone is on Cloudflare (Free, DNSSEC). `www` is a proxied CNAME to
 `cname.vercel-dns.com`; the apex is a proxied A `76.76.21.21` (Vercel, which answers 308 → www) next to the
@@ -84,26 +85,29 @@ releases if needed.
 
 Rollback: remove the line and push (the next release detaches the hostname).
 
-## 3. www
+## 3. www (zone route)
 
-1. Change the line to list both hostnames (keep the preview host or drop it later):
+**Why a route, not a Custom Domain.** The first attempt listed `{ pattern = "www.ziyixi.science",
+custom_domain = true }`. That release failed at `wrangler triggers deploy` because `www` already has a
+proxied CNAME to `cname.vercel-dns.com` ("already has externally managed DNS records"), and `CF_API_TOKEN`
+may neither edit DNS nor rulesets (both 403, checked 2026-09-30). The release rolled the version back and
+`www` kept serving Vercel. The token may create and delete zone **Workers Routes** (checked with a probe
+route, then deleted), and a route changes no DNS: it runs the Worker in front of the existing proxied
+record, so the CNAME stays and Vercel is simply no longer reached.
+
+1. `website/wrangler.toml` lists the preview Custom Domain and the `www` route:
 
    ```toml
    routes = [
-     { pattern = "www.ziyixi.science", custom_domain = true },
      { pattern = "website-preview.ziyixi.science", custom_domain = true },
+     { pattern = "www.ziyixi.science/*", zone_name = "ziyixi.science" },
    ]
    ```
 
-   Push to `main`. Run non-interactively, `wrangler triggers deploy` replaces the existing `www` CNAME to
-   Vercel with the Worker's Custom Domain record in one API call (wrangler 4.142 sets
-   `override_existing_dns_record` outside a terminal). There is no moment without a `www` record. From now
-   on the release verifies on `https://www.ziyixi.science`.
-   _Not verified:_ whether `CF_API_TOKEN` may replace an existing DNS record. If the release's deploy step
-   fails there, the release rolls the version back and records a failure while `www` still serves Vercel;
-   then attach `www.ziyixi.science` in the dashboard (Workers → ziyixi-website → Settings → Domains &
-   Routes → Add → Custom Domain, and accept replacing the existing record) and dispatch Website release
-   with operation `recovery`.
+   The push to `main` releases: `wrangler triggers deploy` keeps the preview Custom Domain and creates the
+   route, and from then on the release verifies on `https://www.ziyixi.science` (identity three times in a
+   row, then the whole route contract) and writes the Notion feedback against it. If the route cannot be
+   created, the deploy step fails, the release rolls the version back and `www` keeps serving Vercel.
 
 2. Check at once: `curl -sI https://www.ziyixi.science/` has no `x-vercel-id`;
    `curl -s https://www.ziyixi.science/build-info.json` shows the Worker's `contentHash` (the same as the
@@ -111,40 +115,41 @@ Rollback: remove the line and push (the next release detaches the hostname).
    cache (`cache-control` as in step 2); HSTS and `access-control-allow-origin: *` present; `/blog/` → 308
    `/blog`; `/nope` → 404; `/feed.xml` is `application/rss+xml`. The live site has no analytics beacon
    today and the new one has none either; adding analytics is a separate decision, not a cutover step.
-3. Keep `wrangler.toml` the only place that attaches hostnames: once it lists any, every release makes its
-   list the complete set for this Worker, so a hostname attached only in the dashboard would be detached by
-   the next release.
+3. Keep `wrangler.toml` the only place that attaches hostnames to `ziyixi-website`: every release makes
+   its Custom Domains the complete set, and its zone routes the complete set whenever it lists at least one.
 
-## 4. Apex
+**Later, optional: www as a Custom Domain.** Only the owner can do it (the token cannot replace DNS):
+Workers → ziyixi-website → Settings → Domains & Routes → Add → Custom Domain `www.ziyixi.science`, accept
+replacing the existing CNAME; then change the `www` line in `wrangler.toml` to
+`{ pattern = "www.ziyixi.science", custom_domain = true }` and push. The route is not needed after that;
+delete it in the dashboard (Workers Routes), because a release that lists no zone route leaves existing
+routes in place. Nothing requires this move: the route serves the same Worker.
 
-The deploy token has no ruleset permission; do this in the dashboard: ziyixi.science → Rules → Redirect
-Rules → Create rule (or the "Redirect from root to WWW" template):
+## 4. Apex (Worker ziyixi-apex-redirect)
 
-- When incoming requests match: Hostname equals `ziyixi.science`
-- Then: URL redirect, Dynamic, expression `concat("https://www.ziyixi.science", http.request.uri.path)`,
-  status code **308**, **Preserve query string** on.
+The apex keeps its proxied A `76.76.21.21` and its MX, TXT and DKIM records. A second small Worker,
+[`ziyixi-apex-redirect`](../apex-redirect/README.md) (`website/apex-redirect/`), is attached by the zone
+route `ziyixi.science/*` and answers every request with a **308** to `https://www.ziyixi.science` plus the
+same path and query, with `strict-transport-security: max-age=63072000` (what Vercel's apex 308 sent; no
+includeSubDomains or preload). It replaces Vercel's apex redirect exactly and needs no ruleset permission.
+The job **Website apex deploy** deploys it (on `main`, after the CI gate, for a change under
+`website/apex-redirect/`, or a dispatch with `website`/`all`) and then requires the apex to answer with the
+Worker's 308: exact Location, HSTS, and no `x-vercel-*` header.
 
-Leave the apex A record as it is (proxied; the rule answers at the edge before any origin). Later you may
-change it to a proxied `AAAA 100::` so no request can reach Vercel.
+Check by hand: `curl -sI 'https://ziyixi.science/blog?x=1'` → `308`,
+`location: https://www.ziyixi.science/blog?x=1`, `strict-transport-security: max-age=63072000`, no
+`x-vercel-id`.
 
-**Apex HSTS.** Vercel's apex 308 carries `strict-transport-security: max-age=63072000`; a Single Redirect
-answers at the edge without it, and the www Worker's `_headers` never reach the apex. Browsers that already
-saw the header keep it until it expires (two years), so nothing breaks at once, but it is no longer
-refreshed. To keep it, add a Response Header Transform Rule in the same dashboard (Rules → Transform
-Rules → Modify Response Header): when Hostname equals `ziyixi.science`, **set static**
-`Strict-Transport-Security` = `max-age=63072000` (no includeSubDomains or preload: other subdomains are
-separate apps). Do not use the zone-wide HSTS setting, which would apply to every subdomain. Whether the
-header rule applies to a Single Redirect's own response is checked by the curl below; if it does not,
-accept the loss (the www host keeps its own HSTS).
+Once `www` and the apex are both served by Workers, **deleting Vercel is safe**: no request reaches it.
 
-Check: `curl -sI 'https://ziyixi.science/blog?x=1'` → `308`, `location: https://www.ziyixi.science/blog?x=1`,
-and look for `strict-transport-security` (present if the transform rule applies).
-
-## 5. Cleanup (after one to two weeks)
+## 5. Cleanup (whenever the owner wants; nothing depends on Vercel any more)
 
 - **Vercel**: export Web Analytics history if wanted (collection had already stopped); remove the domains
   from the project `ziyixi-science`; delete the project; revoke `VERCEL_TOKEN` and the automation-bypass
-  secret.
+  secret. After that the `www` CNAME and the apex A record point at nothing that answers, but they stay:
+  the Workers answer in front of them, and a proxied record is what a route needs. Optionally the owner
+  may later change the apex A to a proxied `AAAA 100::` and the `www` CNAME likewise; never touch the MX,
+  TXT or DKIM records.
 - **ziyixi/ziyixi.science**: delete its `Production` environment secrets (`VERCEL_*`, `NOTION_*`), then
   archive the repository (its Deployments stay readable; the bootstrap no longer needs them). If the
   dispatch token still lists ziyixi.science, remove it.
@@ -153,9 +158,9 @@ and look for `strict-transport-security` (present if the transform rule applies)
 
 ## Rollback
 
-| Where you are                | Rollback                                                                                                                                                                                                                                                                                                                  |
-| ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Steps 1–2                    | Nothing public changed. Remove the preview line if wanted.                                                                                                                                                                                                                                                                |
-| After step 3, a bad release  | It rolls itself back; or [release.md](release.md#rollback-by-hand).                                                                                                                                                                                                                                                       |
-| After step 3, back to Vercel | Dashboard → Workers → ziyixi-website → Settings → Domains & Routes → remove `www.ziyixi.science`; DNS → add CNAME `www` → `cname.vercel-dns.com`, **proxied**. Then at once remove the `www` line from `wrangler.toml` and push, or the next release attaches `www` again. Vercel serves the content of its last release. |
-| After step 4                 | Delete the Redirect Rule: Vercel's own apex 308 answers again (the A record was not changed).                                                                                                                                                                                                                             |
+| Where you are                | Rollback                                                                                                                                                                                                                                                                                                                                                                                                            |
+| ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Steps 1–2                    | Nothing public changed. Remove the preview line if wanted.                                                                                                                                                                                                                                                                                                                                                          |
+| After step 3, a bad release  | It rolls itself back; or [release.md](release.md#rollback-by-hand).                                                                                                                                                                                                                                                                                                                                                 |
+| After step 3, back to Vercel | Only while the Vercel project still exists. Dashboard → ziyixi.science → Workers Routes → delete `www.ziyixi.science/*` (the CNAME was never changed, so Vercel answers at once). Then remove the `www` line from `website/wrangler.toml` and push, or the next release creates the route again (removing the line alone does not delete the route: with no zone route listed, wrangler leaves routes as they are). |
+| After step 4                 | Dashboard → ziyixi.science → Workers Routes → delete `ziyixi.science/*`: Vercel's own apex 308 answers again while the Vercel project exists (the A record was not changed). After Vercel is deleted there is no fallback; fix and redeploy the Worker instead.                                                                                                                                                     |

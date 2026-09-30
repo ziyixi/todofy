@@ -405,7 +405,8 @@ export async function record(
 }
 
 /**
- * Makes the uploaded version serve 100 % of traffic, then applies wrangler.toml's Custom Domains.
+ * Makes the uploaded version serve 100 % of traffic, then applies wrangler.toml's routes (Custom
+ * Domains and zone routes).
  * Refuses a production that changed meanwhile. Newer website code on main is not a reason to stop:
  * this build is CI-green and newer than the baseline, and the release that newer push dispatched is
  * queued behind this one in the same concurrency group (stopping here would record a failure that
@@ -427,8 +428,9 @@ export async function deploy(
   if (serving !== uploaded.versionId) {
     fail(`After the deploy, production serves ${serving ?? "none"}, not ${uploaded.versionId}.`);
   }
-  // Custom Domains from wrangler.toml. With none listed there is nothing to apply (wrangler would not
-  // detach a hostname attached elsewhere either), and workers.dev stays off since the first deploy.
+  // Custom Domains and zone routes from wrangler.toml. With none listed there is nothing to apply
+  // (wrangler would not detach a hostname attached elsewhere either), and workers.dev stays off since
+  // the first deploy.
   if (deps.config.hostnames.length > 0) await deps.wrangler.deployTriggers();
 }
 

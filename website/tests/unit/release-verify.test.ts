@@ -1,5 +1,6 @@
 import { readFile } from "node:fs/promises";
 
+import { parse } from "smol-toml";
 import { describe, expect, it, vi } from "vitest";
 
 import { CloudflareApi } from "../../scripts/release/cloudflare";
@@ -95,27 +96,29 @@ describe("live identity verification", () => {
 });
 
 describe("website wrangler.toml", () => {
-  it("is an assets-only Worker without workers.dev or previews, on the cutover hostnames only", async () => {
-    const config = parseWorkerConfig(await readFile("wrangler.toml", "utf8"));
+  it("is an assets-only Worker without workers.dev or previews, on the preview domain and the www route", async () => {
+    const text = await readFile("wrangler.toml", "utf8");
+    const config = parseWorkerConfig(text);
     expect(config.name).toBe("ziyixi-website");
     expect(config.accountId).toBe("f57937bd1d93bf59e737b6d8445fb7a3");
-    // docs/cutover.md: the preview hostname first, then www; nothing else is ever attached here.
-    for (const host of config.hostnames) {
-      expect(["website-preview.ziyixi.science", "www.ziyixi.science"]).toContain(host);
-    }
-    const origin = liveOrigin(config, "https://www.ziyixi.science");
-    if (config.hostnames.length === 0) expect(origin).toBeNull();
-    else
-      expect(origin).toBe(
-        `https://${config.hostnames.includes("www.ziyixi.science") ? "www.ziyixi.science" : config.hostnames[0]}`,
-      );
-    const text = await readFile("wrangler.toml", "utf8");
+    // docs/cutover.md: exactly the preview Custom Domain and the www zone route; the apex is the
+    // separate Worker ziyixi-apex-redirect, and nothing else is ever attached here.
+    expect(config.hostnames).toEqual(["website-preview.ziyixi.science", "www.ziyixi.science"]);
+    expect((parse(text) as { routes: unknown }).routes).toEqual([
+      { pattern: "website-preview.ziyixi.science", custom_domain: true },
+      { pattern: "www.ziyixi.science/*", zone_name: "ziyixi.science" },
+    ]);
+    expect(liveOrigin(config, "https://www.ziyixi.science")).toBe("https://www.ziyixi.science");
     expect(text).toContain('html_handling = "auto-trailing-slash"');
     expect(text).toContain('not_found_handling = "404-page"');
   });
 
+  const base = `name = "ziyixi-website"\naccount_id = "${"f".repeat(32)}"\nworkers_dev = false\npreview_urls = false\n`;
+
   it("verifies the canonical host once attached, otherwise the first hostname", () => {
-    const base = `name = "ziyixi-website"\naccount_id = "${"f".repeat(32)}"\nworkers_dev = false\npreview_urls = false\n`;
+    const none = parseWorkerConfig(base);
+    expect(none.hostnames).toEqual([]);
+    expect(liveOrigin(none, "https://www.ziyixi.science")).toBeNull();
     const preview = parseWorkerConfig(
       `${base}routes = [{ pattern = "website-preview.ziyixi.science", custom_domain = true }]\n`,
     );
@@ -128,17 +131,63 @@ describe("website wrangler.toml", () => {
     expect(liveOrigin(both, "https://www.ziyixi.science")).toBe("https://www.ziyixi.science");
   });
 
-  it("refuses zone routes, a script, or a workers.dev copy", () => {
-    const base = `name = "ziyixi-website"\naccount_id = "${"f".repeat(32)}"\n`;
-    expect(() => parseWorkerConfig(`${base}workers_dev = true\npreview_urls = false\n`)).toThrow();
+  it("reads a whole-host zone route as its hostname", () => {
+    const route = parseWorkerConfig(
+      `${base}routes = [{ pattern = "website-preview.ziyixi.science", custom_domain = true }, { pattern = "www.ziyixi.science/*", zone_name = "ziyixi.science" }]\n`,
+    );
+    expect(route.hostnames).toEqual(["website-preview.ziyixi.science", "www.ziyixi.science"]);
+    expect(liveOrigin(route, "https://www.ziyixi.science")).toBe("https://www.ziyixi.science");
+    const onlyRoute = parseWorkerConfig(
+      `${base}routes = [{ pattern = "www.ziyixi.science/*", zone_name = "ziyixi.science" }]\n`,
+    );
+    expect(liveOrigin(onlyRoute, "https://www.ziyixi.science")).toBe("https://www.ziyixi.science");
+    const apexZone = parseWorkerConfig(
+      `${base}routes = [{ pattern = "ziyixi.science/*", zone_name = "ziyixi.science" }]\n`,
+    );
+    expect(apexZone.hostnames).toEqual(["ziyixi.science"]);
+    expect(liveOrigin(apexZone, "https://www.ziyixi.science")).toBe("https://ziyixi.science");
+  });
+
+  it("refuses partial or wildcard routes, a script, or a workers.dev copy", () => {
+    const head = `name = "ziyixi-website"\naccount_id = "${"f".repeat(32)}"\n`;
+    expect(() => parseWorkerConfig(`${head}workers_dev = true\npreview_urls = false\n`)).toThrow();
     expect(() =>
-      parseWorkerConfig(`${base}main = "x.js"\nworkers_dev = false\npreview_urls = false\n`),
+      parseWorkerConfig(`${head}main = "x.js"\nworkers_dev = false\npreview_urls = false\n`),
     ).toThrow(/assets-only/);
-    expect(() =>
-      parseWorkerConfig(
-        `${base}workers_dev = false\npreview_urls = false\nroutes = ["www.ziyixi.science/*"]\n`,
-      ),
-    ).toThrow(/Custom Domains/);
+    const refused: [string, RegExp][] = [
+      ['"www.ziyixi.science/*"', /Custom Domains .* or whole-host zone routes/],
+      ['{ pattern = "www.ziyixi.science/*" }', /whole-host zone routes/],
+      ['{ pattern = "www.ziyixi.science/*", zone_id = "abc" }', /whole-host zone routes/],
+      [
+        '{ pattern = "www.ziyixi.science/*", zone_name = "ziyixi.science", custom_domain = false }',
+        /whole-host zone routes/,
+      ],
+      ['{ pattern = "www.ziyixi.science", custom_domain = true, zone_name = "x" }', /zone routes/],
+      ['{ pattern = "www.ziyixi.science/*", custom_domain = true }', /bare hostname/],
+      ['{ pattern = "www.ziyixi.science", zone_name = "ziyixi.science" }', /"<host>\/\*"/],
+      ['{ pattern = "www.ziyixi.science/blog/*", zone_name = "ziyixi.science" }', /"<host>\/\*"/],
+      ['{ pattern = "*.ziyixi.science/*", zone_name = "ziyixi.science" }', /"<host>\/\*"/],
+      ['{ pattern = "*ziyixi.science/*", zone_name = "ziyixi.science" }', /"<host>\/\*"/],
+      [
+        '{ pattern = "https://www.ziyixi.science/*", zone_name = "ziyixi.science" }',
+        /"<host>\/\*"/,
+      ],
+      ['{ pattern = "www.example.com/*", zone_name = "ziyixi.science" }', /outside its zone/],
+      ['{ pattern = "wwwziyixi.science/*", zone_name = "ziyixi.science" }', /outside its zone/],
+      [
+        '{ pattern = "www.ziyixi.science/*", zone_name = "ziyixi.science" }, { pattern = "www.ziyixi.science", custom_domain = true }',
+        /twice/,
+      ],
+    ];
+    for (const [routes, message] of refused) {
+      expect(
+        () =>
+          parseWorkerConfig(
+            `${head}workers_dev = false\npreview_urls = false\nroutes = [${routes}]\n`,
+          ),
+        routes,
+      ).toThrow(message);
+    }
   });
 });
 

@@ -1,6 +1,6 @@
 # Architecture
 
-Two Cloudflare Workers on Workers Free, both deployed only from GitHub Actions, plus the build and the
+Three Cloudflare Workers on Workers Free, all deployed only from GitHub Actions, plus the build and the
 Notion write-back in GitHub Actions. No Worker ever renders a page or reads Notion content at request
 time.
 
@@ -19,8 +19,10 @@ Notion Blog data source ──(read: sync)────────────�
    └──(write: feedback)──── Notion status properties + database description
                                                        ▼
                                Worker ziyixi-website (assets only, wrangler.toml)
-                               www.ziyixi.science (Custom Domain, at cutover)
-                               ziyixi.science ─ zone Single Redirect 308 → www (at cutover)
+                               website-preview.ziyixi.science (Custom Domain)
+                               www.ziyixi.science/* (zone route on the proxied www record)
+                               ziyixi.science/* ─ Worker ziyixi-apex-redirect (apex-redirect/):
+                                                  308 → https://www.ziyixi.science + path + query
 ```
 
 ## The site: static export on Workers Static Assets
@@ -56,7 +58,8 @@ Notion Blog data source ──(read: sync)────────────�
   slash 308), plus `<path>/ → <path>` 308 for every canonical page, post and feed path (validated again: no
   placeholders or splats, internal targets, at most 2,000 lines). Redirects run before assets and
   html_handling. A lowercase percent-encoded old URL first gets the platform's 307 to the uppercase form,
-  then the 308. The apex → www redirect cannot live here (no host rules); it is a zone Single Redirect.
+  then the 308. The apex → www redirect cannot live here (no host rules); it is the Worker `ziyixi-apex-redirect`
+  ([`apex-redirect/`](../apex-redirect/README.md)) on the zone route `ziyixi.science/*`.
 - **Limits** checked by `scripts/export/finalize.ts`: at most 20,000 files per version and every file
   under 25 MiB (Workers Free static assets). The Notion media downloader caps video and attachments at
   24 MiB (images 20 MiB) to stay below it.
@@ -151,7 +154,8 @@ failed run's GitHub notification is the alert); a dispatch PAT that expires make
 
 ## Costs (Workers Free)
 
-Page views: static assets, free and unlimited. Relay: 96 scheduled invocations and normally ~290 subrequests a
+Page views: static assets, free and unlimited (also through the `www` route). Apex redirect: one Worker
+request per apex hit (links point at www, so few), well under 1 ms CPU, no subrequest. Relay: 96 scheduled invocations and normally ~290 subrequests a
 day (at most 5 per tick) plus the button clicks, each far under 10 ms CPU for a blog of this size. GitHub Actions: public repository, standard runners.
 The live site has no analytics beacon today (checked 2026-09-30: no `cloudflareinsights` in the HTML of any
 page); adding Cloudflare Web Analytics would be a separate owner decision, not part of the migration.

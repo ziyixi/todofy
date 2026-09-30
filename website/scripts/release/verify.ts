@@ -10,7 +10,7 @@ export interface IdentityWaitOptions {
   fetchImpl?: Fetch;
   sleep?: (milliseconds: number) => Promise<void>;
   log?: (message: string) => void;
-  /** Tries while the host cannot be reached yet (new Custom Domain: DNS and certificate). */
+  /** Tries while the host cannot be reached yet (a new Custom Domain's DNS and certificate, a new route). */
   reachAttempts?: number;
   reachDelayMs?: number;
   /** Identity reads once reachable; `consecutive` matching reads in a row are required. */
