@@ -25,5 +25,8 @@ def test_timeout_really_closes_a_hanging_upstream_connection(worker: Worker, fre
     hung, answered = fresh_gemini.calls_mentioning(event_id)
     # The core's wrangler.test.toml sets GEMINI_TIMEOUT_MS = 1500; a timeout moves on to the next model.
     assert (hung.model, answered.model) == ("model-a", "model-b")
-    assert 1.5 <= answered.at - hung.at < 10
+    # workerd arms the timeout on the isolate clock, which stands still while Pyodide builds the request,
+    # so the gap the fake sees on the real clock is 1.5 s give or take a few ms (1.496-1.523 s measured).
+    # 50 ms of slack still proves the call waited out the timeout rather than failing at once.
+    assert 1.45 <= answered.at - hung.at < 10
     assert fresh_gemini.wait_for(lambda: fresh_gemini.disconnects, timeout_s=5) == [model_path("model-a")]

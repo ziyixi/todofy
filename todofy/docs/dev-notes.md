@@ -52,16 +52,14 @@ Running the runtime suite in parallel:
 - Shared state in the checkout is prepared under file locks in `.wrangler/`: `pywrangler sync` (once per
   process) and the first Pyodide download. `uv run python -m tests.runtime.warm_up` does both once, up
   front; CI runs it before each shard.
-- One assertion has almost no timing margin: `test_alarm.py::test_timeout_really_closes_a_hanging_upstream_connection`
-  checks `1.5 <= answered.at - hung.at`, the gap between the fake receiving the hung call and the
-  fallback call. workerd arms `AbortSignal.timeout` on the isolate's clock, which stands still while
-  Pyodide builds the request, so the gap is 1.5 s plus or minus the Worker's CPU time around the two
-  calls; the fake's own stamps are within 1 ms of arrival. Alone and idle it measured 1.5008–1.5100 s
-  (12 of 12 passed); alone with the CPU oversubscribed, 1.4968–1.5060 s (6 of 12 failed); it also
-  failed in parallel full runs, and in serial runs of the old `pywrangler dev` harness. So it is not a
-  parallel-only failure, and CI runs `test_alarm.py` alone after each shard's xdist run
-  (`.github/scripts/todofy-runtime-serial.txt`, [ci-cd.md](ci-cd.md)). Locally, run it on its own
-  when a `-n` run fails it: `uv run pytest tests/runtime/test_alarm.py`.
+- `test_alarm.py::test_timeout_really_closes_a_hanging_upstream_connection` measures the gap between
+  the fake receiving the hung call and the fallback call against the 1.5 s `GEMINI_TIMEOUT_MS`. workerd
+  arms `AbortSignal.timeout` on the isolate's clock, which stands still while Pyodide builds the
+  request, so the gap on the real clock is 1.5 s give or take the Worker's CPU time around the two calls
+  (1.4968–1.523 s measured; the fake's own stamps are within 1 ms of arrival). The bound is therefore
+  `1.45 <=`: 50 ms of slack still proves the call waited out the timeout. It used to be `1.5 <=` and
+  failed now and then, in parallel and serial runs alike. CI still runs `test_alarm.py` alone after each
+  shard's xdist run (`.github/scripts/todofy-runtime-serial.txt`, [ci-cd.md](ci-cd.md)).
 - Longest first: xdist hands out files in the order pytest collects them, so pass the files heaviest
   first. The CI plan prints them in that order; to run shard `I` of 3 exactly as CI does:
 
