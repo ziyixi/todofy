@@ -1,7 +1,7 @@
 import { readFileSync, readdirSync, statSync } from 'node:fs'
 import { join, relative } from 'node:path'
 
-// The page may talk only to its own origin (/api/v1/*, /api/v2/*): no remote fonts, scripts, images or APIs.
+// The page may talk only to its own origin (/api/v2/*): no remote fonts, scripts, images or APIs.
 const root = join(import.meta.dirname, '..', '..')
 
 function files(dir: string): string[] {

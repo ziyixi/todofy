@@ -1,13 +1,13 @@
 import { ExternalLink } from 'lucide-react'
-import type { AppCard as AppCardData, GuardAppView, OpsStatus } from '../../../worker/src/api-types.ts'
-import { formatBytesBinary, formatDuration, formatNumber, formatRelative, formatTime } from '../lib/format'
+import type { GuardAppView, OpsStatus } from '../../../worker/src/api-types.ts'
+import type { AppDetail, RegistryEntryView } from '../../../worker/src/api-v2-types.ts'
+import { formatRelative, formatTime } from '../lib/format'
 import {
-  APP_NAMES,
   HEALTH,
-  KEY_COUNTERS,
   SEVERITY,
   appErrorLabel,
   counterInfo,
+  counterValue,
   deferredJobLabel,
   guardReasonLabel,
   modeInfo,
@@ -20,25 +20,32 @@ import { Card, Fact, Facts, Metrics, Notice, Pill, Time } from './ui'
 /** A status older than this is marked as possibly outdated (the cron reads it every 30 minutes). */
 const STATUS_STALE_MS = 60 * 60_000
 
-function headline(card: AppCardData): { label: string; tone: Tone } {
+function headline(card: AppDetail): { label: string; tone: Tone } {
   if (card.reachable === false) return { label: '无法连接', tone: 'danger' }
   if (!card.status) return { label: '暂无状态', tone: 'neutral' }
   return HEALTH[card.status.health] ?? { label: card.status.health, tone: 'neutral' }
 }
 
-function counterValue(name: string, value: number): string {
-  const { kind } = counterInfo(name)
-  if (kind === 'bytes') return formatBytesBinary(value)
-  if (kind === 'seconds') return value === 0 ? '无' : formatDuration(value * 1000)
-  return formatNumber(value)
-}
-
-export function AppCard({ card, guard, now }: { card: AppCardData; guard: GuardAppView; now: Date }) {
-  const name = APP_NAMES[card.app]
+/**
+ * The full ops-v1 status of one app (操作与记录 › 应用详情): reachability, modes, guard, every signal
+ * and every counter. The tiles and flow stages show only a level and one number.
+ */
+export function AppDetails({
+  card,
+  entry,
+  guard,
+  now,
+}: {
+  card: AppDetail
+  entry: RegistryEntryView | undefined
+  guard: GuardAppView | undefined
+  now: Date
+}) {
+  const name = entry?.name ?? card.entry
   const status = card.status
   const head = headline(card)
-  const id = `app-${card.app}`
-  const link = httpsUrl(card.url)
+  const id = `app-${card.entry}`
+  const link = httpsUrl(entry?.url)
   const stale = card.status_at !== null && now.getTime() - new Date(card.status_at).getTime() > STATUS_STALE_MS
 
   return (
@@ -51,7 +58,7 @@ export function AppCard({ card, guard, now }: { card: AppCardData; guard: GuardA
           <a className="link-out" href={link} target="_blank" rel="noreferrer noopener">
             打开 {name}
             <ExternalLink size={14} aria-hidden="true" />
-            <span className="visually-hidden">（新窗口）</span>
+            <span className="visually-hidden">（新标签页）</span>
           </a>
         ) : null
       }
@@ -81,31 +88,20 @@ export function AppCard({ card, guard, now }: { card: AppCardData; guard: GuardA
         <Notice tone="warn">状态数据来自 {formatRelative(card.status_at, now)}，可能已过时。</Notice>
       ) : null}
 
-      {status ? <StatusDetails status={status} guard={guard} now={now} app={card.app} /> : null}
+      {status ? <StatusDetails status={status} guard={guard} now={now} /> : null}
     </Card>
   )
 }
 
-function StatusDetails({
-  status,
-  guard,
-  now,
-  app,
-}: {
-  status: OpsStatus
-  guard: GuardAppView
-  now: Date
-  app: AppCardData['app']
-}) {
-  const effective = guard.state ?? status.guard
+function StatusDetails({ status, guard, now }: { status: OpsStatus; guard: GuardAppView | undefined; now: Date }) {
+  const effective = guard?.state ?? status.guard
   const modes = Object.entries(status.modes)
-  const keys = KEY_COUNTERS[app].filter((key) => Object.hasOwn(status.counters, key))
   const all = Object.entries(status.counters)
 
   return (
     <>
       <div className="subsection">
-        <h3>运行模式</h3>
+        <h4>运行模式</h4>
         <ul className="chips" aria-label="运行模式">
           {modes.map(([mode, value]) => {
             const info = modeInfo(mode, value)
@@ -120,7 +116,7 @@ function StatusDetails({
       </div>
 
       <div className="subsection">
-        <h3>降载</h3>
+        <h4>降载</h4>
         <div className="row-wrap">
           {effective.level === 'shed' ? <Pill tone="warn">降载中</Pill> : <Pill tone="ok">正常</Pill>}
           {effective.level === 'shed' && effective.reason ? (
@@ -135,13 +131,13 @@ function StatusDetails({
         {effective.level === 'shed' && effective.deferred.length > 0 ? (
           <p className="small muted">推迟的任务：{effective.deferred.map(deferredJobLabel).join('、')}</p>
         ) : null}
-        {guard.last_error ? (
+        {guard?.last_error ? (
           <Notice tone="warn">上次下发降载设置失败：{appErrorLabel(guard.last_error)}，下次定时检查会重试。</Notice>
         ) : null}
       </div>
 
       <div className="subsection">
-        <h3>当前信号</h3>
+        <h4>当前信号</h4>
         {status.signals.length === 0 ? (
           <p className="small muted">没有活动信号。</p>
         ) : (
@@ -170,31 +166,19 @@ function StatusDetails({
       </div>
 
       <div className="subsection">
-        <h3>关键计数</h3>
-        {keys.length === 0 ? (
+        <h4>计数</h4>
+        {all.length === 0 ? (
           <p className="small muted">没有可读的计数。</p>
         ) : (
           <dl className="counters">
-            {keys.map((key) => (
+            {all.map(([key, value]) => (
               <div key={key} className="counter">
                 <dt>{counterInfo(key).label}</dt>
-                <dd>{counterValue(key, status.counters[key] as number)}</dd>
+                <dd>{counterValue(key, value)}</dd>
               </div>
             ))}
           </dl>
         )}
-        {all.length > keys.length ? (
-          <details className="more">
-            <summary>全部计数（{all.length}）</summary>
-            <Facts>
-              {all.map(([key, value]) => (
-                <Fact key={key} label={counterInfo(key).label}>
-                  {counterValue(key, value)}
-                </Fact>
-              ))}
-            </Facts>
-          </details>
-        ) : null}
       </div>
 
       <Facts>

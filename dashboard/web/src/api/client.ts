@@ -1,15 +1,8 @@
 /**
  * The owner API client (docs/design.md §6, §8; v2: docs/design-v2.md §5). Same-origin only: every
- * request goes to /api/v1/* or /api/v2/* with the Access cookie; nothing else leaves the page.
+ * request goes to /api/v2/* with the Access cookie; nothing else leaves the page.
  */
-import type {
-  ApiErrorCode,
-  CanaryStartResponse,
-  CsrfResponse,
-  GuardLevel,
-  GuardResponse,
-  OverviewResponse,
-} from '../../../worker/src/api-types.ts'
+import type { ApiErrorCode, CanaryStartResponse, CsrfResponse, GuardLevel } from '../../../worker/src/api-types.ts'
 import type {
   CanaryStartRequestV2,
   CloudflareResponse,
@@ -21,7 +14,6 @@ import type {
 } from '../../../worker/src/api-v2-types.ts'
 import { API_ERRORS } from '../lib/labels'
 
-const PREFIX = '/api/v1'
 const PREFIX_V2 = '/api/v2'
 
 /** Codes the browser produces itself when no API error envelope is available. */
@@ -42,7 +34,7 @@ export class ApiError extends Error {
 }
 
 /** Shown when fetch itself fails: no network, or Access redirected an expired session (redirect: 'error'). */
-export const NETWORK_MESSAGE = '无法连接运维面板，或登录已过期，请刷新页面'
+export const NETWORK_MESSAGE = '无法连接个人控制台，或登录已过期，请刷新页面'
 
 let csrfToken: string | null = null
 
@@ -65,7 +57,7 @@ async function readError(response: Response): Promise<ApiError> {
   return new ApiError(response.status, 'bad_response', `服务返回了无法识别的响应（HTTP ${response.status}）`)
 }
 
-/** `path` is the full same-origin path (/api/v1/... or /api/v2/...). */
+/** `path` is the full same-origin path (/api/v2/...). */
 async function send(path: string, init: RequestInit): Promise<Response> {
   try {
     // redirect: 'error' so an expired Access session surfaces as an error, not as the login page's HTML.
@@ -85,18 +77,12 @@ async function readJson<T>(response: Response): Promise<T> {
 
 async function csrf(): Promise<string> {
   if (csrfToken) return csrfToken
-  const response = await send(`${PREFIX}/csrf`, { headers: { Accept: 'application/json' } })
+  const response = await send(`${PREFIX_V2}/csrf`, { headers: { Accept: 'application/json' } })
   if (!response.ok) throw await readError(response)
   const body = await readJson<Partial<CsrfResponse>>(response)
   if (typeof body.token !== 'string' || !body.token) throw new ApiError(response.status, 'bad_response', '无法取得页面安全令牌')
   csrfToken = body.token
   return csrfToken
-}
-
-async function get<T>(path: string): Promise<T> {
-  const response = await send(`${PREFIX}${path}`, { headers: { Accept: 'application/json' } })
-  if (!response.ok) throw await readError(response)
-  return readJson<T>(response)
 }
 
 /**
@@ -113,12 +99,6 @@ async function post<T>(path: string, body: unknown): Promise<T> {
     if (error.code === 'csrf_failed' && attempt === 0) continue
     throw error
   }
-}
-
-export const api = {
-  overview: (refresh = false) => get<OverviewResponse>(refresh ? '/overview?refresh=1' : '/overview'),
-  startCanary: () => post<CanaryStartResponse>(`${PREFIX}/canary`, {}),
-  setGuard: (level: GuardLevel) => post<GuardResponse>(`${PREFIX}/guard`, { level }),
 }
 
 /**

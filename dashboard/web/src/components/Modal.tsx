@@ -10,9 +10,11 @@ interface ModalProps {
   title: string
   onClose: () => void
   children: ReactNode
-  footer: ReactNode
+  footer?: ReactNode
   /** Blocks Escape, the backdrop and the close button while a request is in flight. */
   busy?: boolean
+  /** `sheet`: a detail panel (bottom sheet on a phone) rather than a confirmation. */
+  variant?: 'dialog' | 'sheet'
 }
 
 /**
@@ -20,7 +22,7 @@ interface ModalProps {
  * closes, focus returns to the opener. A div dialog rather than <dialog> so jsdom tests exercise the
  * same focus code the browser runs.
  */
-export function Modal({ title, onClose, children, footer, busy = false }: ModalProps) {
+export function Modal({ title, onClose, children, footer, busy = false, variant = 'dialog' }: ModalProps) {
   const titleId = useId()
   const bodyId = useId()
   const panel = useRef<HTMLDivElement>(null)
@@ -71,7 +73,7 @@ export function Modal({ title, onClose, children, footer, busy = false }: ModalP
 
   return createPortal(
     <div className="modal-backdrop" onMouseDown={(event) => event.target === event.currentTarget && !busy && onClose()}>
-      <div className="modal" role="dialog" aria-modal="true" aria-labelledby={titleId} aria-describedby={bodyId} ref={panel}>
+      <div className={`modal modal-${variant}`} role="dialog" aria-modal="true" aria-labelledby={titleId} aria-describedby={variant === 'dialog' ? bodyId : undefined} ref={panel}>
         <div className="modal-head">
           <h2 id={titleId}>{title}</h2>
           <Button variant="ghost" className="btn-icon" onClick={onClose} disabled={busy} aria-label="关闭">
@@ -81,7 +83,7 @@ export function Modal({ title, onClose, children, footer, busy = false }: ModalP
         <div className="modal-body" id={bodyId}>
           {children}
         </div>
-        <div className="modal-foot">{footer}</div>
+        {footer ? <div className="modal-foot">{footer}</div> : null}
       </div>
     </div>,
     document.body,

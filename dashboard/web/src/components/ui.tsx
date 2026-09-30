@@ -1,22 +1,22 @@
-import { CircleAlert, CircleCheck, CircleDashed, CircleX, Info, TriangleAlert } from 'lucide-react'
+import { CircleAlert, CircleCheck, CircleDashed, Info, TriangleAlert } from 'lucide-react'
 import { useEffect, useState, type ButtonHTMLAttributes, type ReactNode } from 'react'
 import { formatFullTime, formatRelative, formatTime } from '../lib/format'
 import type { Tone } from '../lib/labels'
+import { Mark, toneShape } from './status'
 
-const TONE_ICON = {
+const NOTICE_ICON = {
   ok: CircleCheck,
   warn: TriangleAlert,
-  danger: CircleX,
+  danger: CircleAlert,
   info: Info,
   neutral: CircleDashed,
 } as const
 
-/** A status label: icon + text, coloured by tone. The text carries the meaning, never the colour alone. */
+/** A status label: shape + text, coloured by tone. The text carries the meaning, never the colour alone. */
 export function Pill({ tone, children, strong = false }: { tone: Tone; children: ReactNode; strong?: boolean }) {
-  const Icon = TONE_ICON[tone]
   return (
     <span className={`pill pill-${tone}${strong ? ' pill-strong' : ''}`}>
-      <Icon size={14} aria-hidden="true" />
+      <Mark shape={toneShape(tone)} tone={tone} size={10} />
       <span>{children}</span>
     </span>
   )
@@ -28,18 +28,22 @@ export function Card({
   actions,
   children,
   className = '',
+  level = 3,
 }: {
   title: ReactNode
   id?: string
   actions?: ReactNode
   children: ReactNode
   className?: string
+  /** Heading level of the title (views have an h2, their cards h3). */
+  level?: 2 | 3
 }) {
   const headingId = id ? `${id}-title` : undefined
+  const Heading = level === 2 ? 'h2' : 'h3'
   return (
     <section className={`card ${className}`} id={id} aria-labelledby={headingId}>
       <div className="card-head">
-        <h2 id={headingId}>{title}</h2>
+        <Heading id={headingId}>{title}</Heading>
         {actions ? <div className="card-actions">{actions}</div> : null}
       </div>
       {children}
@@ -65,7 +69,7 @@ export function Time({ iso, now, relative = true }: { iso: string; now: Date; re
 
 /** Plain-text inline notice; `role="alert"` only for errors the owner must see now. */
 export function Notice({ tone, children, alert = false }: { tone: Tone; children: ReactNode; alert?: boolean }) {
-  const Icon = tone === 'danger' ? CircleAlert : TONE_ICON[tone]
+  const Icon = NOTICE_ICON[tone]
   return (
     <div className={`notice notice-${tone}`} role={alert ? 'alert' : undefined}>
       <Icon size={16} aria-hidden="true" />

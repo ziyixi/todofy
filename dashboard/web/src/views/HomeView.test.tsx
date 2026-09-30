@@ -1,0 +1,172 @@
+import { screen, within } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
+import { apiError, freezeClock, installFetch, json, renderApp, serve } from '../test/harness'
+import { analyticsUnavailable, healthy, oneWarning, todofyUnreachable, type Scenario } from '../test/fixtures'
+
+async function showHome(scenario: Scenario) {
+  freezeClock()
+  const calls = serve(scenario)
+  renderApp()
+  await screen.findByRole('region', { name: '业务流程' })
+  return calls
+}
+
+const launcher = () => screen.getByRole('region', { name: '入口' })
+
+describe('首页', () => {
+  it('shows the tiles grouped by kind, in registry order, as real links to new tabs', async () => {
+    await showHome(healthy())
+    const apps = within(launcher()).getByRole('region', { name: '应用' })
+    const links = within(apps).getAllByRole('link')
+    expect(links.map((link) => link.getAttribute('aria-label'))).toEqual([
+      '打开 Mail Hero（新标签页），mail-hero.ziyixi.science',
+      '打开 Todofy（新标签页），todofy.ziyixi.science',
+      '打开 Flowday（新标签页），flowday.ziyixi.science，未接入监控（仅链接）',
+      '打开 思源笔记（新标签页），siyuan.ziyixi.science，未接入监控（仅链接）',
+    ])
+    for (const link of links) {
+      expect(link).toHaveAttribute('target', '_blank')
+      expect(link).toHaveAttribute('rel', 'noreferrer noopener')
+      expect(link.getAttribute('href')).toMatch(/^https:\/\/[a-z-]+\.ziyixi\.science\/$/)
+    }
+    // Access-protected entries carry the lock with its own name; never an emoji.
+    expect(within(apps).getAllByRole('img', { name: '受 Access 保护' })).toHaveLength(4)
+
+    // Status lines are separate buttons (never inside the link).
+    const mail = within(apps).getByRole('button', { name: 'Mail Hero 状态：正常，查看详情' })
+    expect(mail).toHaveTextContent('正常· 今日收件 37')
+    expect(within(apps).getByRole('button', { name: 'Todofy 状态：正常，查看详情' })).toHaveTextContent('24 小时 41 封')
+    // Link-only tiles: no status button, no fake green, the host instead.
+    expect(within(apps).queryByRole('button', { name: /Flowday/ })).toBeNull()
+    expect(within(apps).queryByRole('button', { name: /思源笔记/ })).toBeNull()
+
+    const sites = within(launcher()).getByRole('region', { name: '站点' })
+    expect(within(sites).getByRole('link', { name: '打开 个人网站（新标签页），ziyixi.science' })).toHaveAttribute('href', 'https://ziyixi.science/')
+    expect(within(sites).getByRole('button', { name: '个人网站 状态：正常，查看详情' })).toHaveTextContent('响应 180 ms')
+
+    const services = within(launcher()).getByRole('region', { name: '后台服务' })
+    expect(within(services).getByRole('link', { name: 'Notion 发布：正常，今天 00 时有请求，查看 Cloudflare 中的 Worker' })).toHaveAttribute(
+      'href',
+      '#/cloudflare/worker/ziyixi-notion-publish',
+    )
+    const newsletter = within(services).getByRole('link', { name: 'Newsletter：未接入监控，查看业务流程' })
+    expect(newsletter).toHaveAttribute('href', '#/flows/daily-newsletter')
+    expect(newsletter).toHaveTextContent('未接入监控')
+
+    // The dashboard itself has no tile.
+    expect(within(launcher()).queryByText('个人控制台')).toBeNull()
+  })
+
+  it('shows one quiet line when everything is fine', async () => {
+    await showHome(healthy())
+    const strip = screen.getByRole('region', { name: /^全部正常 ?· 下次巡检 01:30$/ })
+    expect(within(strip).queryByRole('list')).toBeNull()
+  })
+
+  it('lists one line per flow and four mini bars', async () => {
+    await showHome(healthy())
+    const flows = screen.getByRole('region', { name: '业务流程' })
+    const rows = within(flows).getAllByRole('link').filter((link) => link.getAttribute('href')?.startsWith('#/flows/'))
+    expect(rows.map((row) => row.getAttribute('aria-label'))).toEqual([
+      '邮件 → 任务：正常，端到端成功 今天 00:06，已监测 5/6',
+      '网站发布：正常，最近有请求 今天 00 时，已监测 2/3',
+      '每日 Newsletter：部分接入，部分阶段尚未接入，已监测 1/3',
+      '运维摘要：正常，上次摘要 昨天 23:00 · Todofy 已接收',
+    ])
+    expect(within(flows).getByRole('link', { name: '全部流程 →' })).toHaveAttribute('href', '#/flows')
+
+    const cf = screen.getByRole('region', { name: 'Cloudflare 今日' })
+    const meters = within(cf).getAllByRole('meter')
+    expect(meters.map((meter) => meter.getAttribute('aria-valuetext'))).toEqual([
+      '已用 712 次，上限 100,000 次，0.7%',
+      '已用 7,142 行，上限 5,000,000 行，0.1%',
+      '已用 1,380 次，上限 100,000 次，1.4%',
+      '已用 837 MB，上限 10 GB，8.4%',
+    ])
+    expect(within(cf).getByText('712 / 10 万 ·')).toBeInTheDocument()
+    expect(within(cf).getByText('837 MB / 10 GB ·')).toBeInTheDocument()
+    expect(within(cf).getByRole('link', { name: /5 个 Worker · 今日错误 3/ })).toHaveTextContent('未降载')
+  })
+
+  it('shows one warning on its tile, its flow and the strip', async () => {
+    await showHome(oneWarning())
+    const strip = screen.getByRole('region', { name: '1 项需关注' })
+    const item = within(strip).getByRole('listitem')
+    expect(item).toHaveTextContent('邮件 → 任务 › Todofy 摘要：Gemini 预算超过 80%（82%） · 开始于 昨天 11:20')
+    expect(within(item).getByRole('link')).toHaveAttribute('href', '#/flows/mail-to-task')
+
+    const todofy = within(launcher()).getByRole('button', { name: 'Todofy 状态：需关注，查看详情' })
+    expect(todofy).toHaveTextContent('需关注· 24 小时 41 封')
+    expect(within(launcher()).getByRole('button', { name: 'Mail Hero 状态：正常，查看详情' })).toBeInTheDocument()
+
+    const flows = screen.getByRole('region', { name: '业务流程' })
+    expect(
+      within(flows).getByRole('link', { name: '邮件 → 任务：需关注，Todofy 摘要：Gemini 预算超过 80%，端到端成功 今天 00:06' }),
+    ).toBeInTheDocument()
+  })
+
+  it('opens a tile\'s detail sheet from its status line and returns focus', async () => {
+    await showHome(oneWarning())
+    const user = userEvent.setup()
+    const button = within(launcher()).getByRole('button', { name: 'Todofy 状态：需关注，查看详情' })
+    await user.click(button)
+    const sheet = screen.getByRole('dialog', { name: 'Todofy 状态' })
+    expect(within(sheet).getByText('原因').nextElementSibling).toHaveTextContent('Gemini 预算超过 80%')
+    const signals = within(sheet).getByRole('list', { name: '主要信号' })
+    expect(within(signals).getByText('gemini_budget_80')).toBeInTheDocument()
+    const links = within(within(sheet).getByRole('list', { name: '相关位置' })).getAllByRole('link')
+    expect(links.map((link) => [link.textContent, link.getAttribute('href')])).toEqual([
+      ['查看流程：邮件 → 任务 →', '#/flows/mail-to-task'],
+      ['查看流程：每日 Newsletter →', '#/flows/daily-newsletter'],
+      ['查看流程：运维摘要 →', '#/flows/ops-digest'],
+      ['查看 Worker：todofy →', '#/cloudflare/worker/todofy'],
+      ['查看 Worker：todofy-core →', '#/cloudflare/worker/todofy-core'],
+      ['应用详情 →', '#/ops'],
+      ['打开 Todofy（新标签页）', 'https://todofy.ziyixi.science/'],
+    ])
+    await user.keyboard('{Escape}')
+    expect(screen.queryByRole('dialog')).toBeNull()
+    expect(button).toHaveFocus()
+  })
+
+  it('greys only the unreachable app and says why', async () => {
+    await showHome(todofyUnreachable())
+    const todofy = within(launcher()).getByRole('button', { name: 'Todofy 状态：无法连接，查看详情' })
+    expect(todofy).toHaveTextContent('无法连接· 连续 2 次失败')
+    expect(within(launcher()).getByRole('button', { name: 'Mail Hero 状态：正常，查看详情' })).toBeInTheDocument()
+    const strip = screen.getByRole('region', { name: '1 项故障' })
+    expect(within(strip).getByRole('listitem')).toHaveTextContent('Todofy：应用无法连接')
+    expect(within(strip).getByRole('link')).toHaveAttribute('href', '#/ops')
+  })
+
+  it('says so when Cloudflare usage is unavailable instead of inventing bars', async () => {
+    await showHome(analyticsUnavailable())
+    const cf = screen.getByRole('region', { name: 'Cloudflare 今日' })
+    expect(within(cf).queryAllByRole('meter')).toHaveLength(0)
+    expect(within(cf).getByText('用量无法获取')).toBeInTheDocument()
+    expect(within(cf).getByText('还没有用量数据。')).toBeInTheDocument()
+    expect(within(cf).getByRole('link', { name: /0 个 Worker · 今日错误 0/ })).toBeInTheDocument()
+  })
+
+  it('keeps the tiles as links while loading, with same-size skeletons', async () => {
+    freezeClock()
+    const scenario = healthy()
+    installFetch((call) => (call.path === '/api/v2/registry' ? json(scenario.registry) : new Promise<Response>(() => undefined)))
+    renderApp()
+    await screen.findByRole('link', { name: /打开 Mail Hero/ })
+    expect(launcher()).toHaveAttribute('aria-busy', 'true')
+    expect(within(launcher()).getByRole('status')).toHaveTextContent('正在加载')
+    expect(within(launcher()).queryAllByRole('button')).toHaveLength(0)
+  })
+
+  it('marks every status unknown when the view fails, keeping the links', async () => {
+    freezeClock()
+    const scenario = healthy()
+    installFetch((call) => (call.path === '/api/v2/registry' ? json(scenario.registry) : apiError(503, 'unavailable', '服务暂时不可用')))
+    renderApp()
+    expect(await screen.findByRole('alert')).toHaveTextContent('无法加载首页数据：服务暂时不可用')
+    const mail = await within(launcher()).findByRole('button', { name: 'Mail Hero 状态：未知，查看详情' })
+    expect(mail).toHaveTextContent('无法获取这一项的数据')
+    expect(within(launcher()).getByRole('link', { name: /打开 Mail Hero/ })).toBeInTheDocument()
+  })
+})

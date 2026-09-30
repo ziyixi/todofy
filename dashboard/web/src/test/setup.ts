@@ -7,6 +7,7 @@ process.env.TZ = 'Asia/Shanghai'
 
 afterEach(() => {
   cleanup()
+  window.history.replaceState(null, '', window.location.pathname)
   vi.unstubAllGlobals()
   vi.useRealTimers()
 })

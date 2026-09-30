@@ -9,13 +9,13 @@ import type {
   CanaryOutcome,
   CanaryPhase,
   CanaryStage,
-  OpsApp,
   OpsSeverity,
-  OverallLevel,
   QuotaPeriod,
   QuotaResourceId,
   UsageStatus,
 } from '../../../worker/src/api-types.ts'
+import type { CanaryBadge, Level, StatusSourceType } from '../../../worker/src/api-v2-types.ts'
+import { formatBytesBinary, formatDuration, formatNumber } from './format'
 
 /** Visual tone of a status; always rendered together with a text label. */
 export type Tone = 'ok' | 'warn' | 'danger' | 'info' | 'neutral'
@@ -24,17 +24,59 @@ function lookup(table: Readonly<Record<string, string>>, code: string): string {
   return Object.hasOwn(table, code) ? (table[code] as string) : code
 }
 
-export const APP_NAMES: Readonly<Record<OpsApp, string>> = { 'mail-hero': 'Mail Hero', todofy: 'Todofy' }
+/** Sources that are not registry entries (digest items of the dashboard itself and of the account). */
+export const PLATFORM_SOURCES: Readonly<Record<string, string>> = { dashboard: '个人控制台', cloudflare: 'Cloudflare' }
 
-export function sourceLabel(source: string): string {
-  return lookup({ 'mail-hero': 'Mail Hero', todofy: 'Todofy', dashboard: '运维面板', cloudflare: 'Cloudflare' }, source)
+/**
+ * The shared level vocabulary (docs/design-v2.md §2): always shape + word, never colour alone.
+ * `link` has no mark (the tile shows its host); `unmonitored` is a hollow circle.
+ */
+export const LEVEL: Readonly<Record<Level, { word: string; tone: Tone }>> = {
+  ok: { word: '正常', tone: 'ok' },
+  held: { word: '已暂停', tone: 'info' },
+  warning: { word: '需关注', tone: 'warn' },
+  critical: { word: '故障', tone: 'danger' },
+  unknown: { word: '未知', tone: 'neutral' },
+  link: { word: '仅链接', tone: 'neutral' },
+  unmonitored: { word: '未接入', tone: 'neutral' },
 }
 
-export const OVERALL: Readonly<Record<OverallLevel, { label: string; tone: Tone }>> = {
-  ok: { label: '正常', tone: 'ok' },
-  warning: { label: '需要关注', tone: 'warn' },
-  critical: { label: '严重', tone: 'danger' },
-  unknown: { label: '暂无数据', tone: 'neutral' },
+const REASONS: Readonly<Record<string, string>> = {
+  unreachable: '无法连接',
+  http_status: 'HTTP 状态异常',
+  idle: '长时间没有请求',
+  never_checked: '尚未检查',
+  tick_stale: '定时检查已停止',
+  error_rate: '错误率偏高',
+  stale: '数据已过期',
+  app_down: '应用报告不可用',
+  app_degraded: '应用报告降级',
+  never_seen: '还没有观察到请求',
+  timeout: '请求超时',
+  network_error: '网络错误',
+  canary_failed: '金丝雀在这一阶段失败',
+}
+
+/** Why an entry is not ok (EntryState.reason): one of REASONS or a signal code. */
+export function reasonLabel(code: string): string {
+  return Object.hasOwn(REASONS, code) ? (REASONS[code] as string) : signalLabel(code)
+}
+
+/** How an entry's status is obtained (操作与记录 › 注册表). */
+export const STATUS_SOURCE: Readonly<Record<StatusSourceType, string>> = {
+  ops_v1: 'ops-v1 状态接口',
+  public_http: '公开地址探测',
+  analytics: 'Cloudflare 分析数据',
+  self: '本面板的巡检',
+  link_only: '仅链接（受 Access 保护，不探测）',
+  none: '未接入监控',
+}
+
+export const CANARY_BADGE: Readonly<Record<CanaryBadge, { label: string; tone: Tone }>> = {
+  verified: { label: '已验证', tone: 'ok' },
+  failed: { label: '金丝雀失败', tone: 'danger' },
+  held: { label: '已暂停未验证', tone: 'info' },
+  unverified: { label: '未验证', tone: 'neutral' },
 }
 
 export const HEALTH: Readonly<Record<string, { label: string; tone: Tone }>> = {
@@ -227,10 +269,19 @@ export function counterInfo(name: string): { label: string; kind: CounterKind } 
   return Object.hasOwn(COUNTERS, name) ? (COUNTERS[name] as { label: string; kind: CounterKind }) : { label: name, kind: 'count' }
 }
 
-/** The counters shown on each card; the rest sit behind "全部计数". */
-export const KEY_COUNTERS: Readonly<Record<OpsApp, readonly string[]>> = {
-  'mail-hero': ['ingest_today_messages', 'jobs_pending', 'jobs_failed', 'delivery_failed', 'blocked_waiting', 'capacity_used_bytes'],
-  todofy: ['received_24h', 'active_events', 'attention_events', 'gemini_calls', 'gemini_used_tokens', 'todoist_window_calls'],
+/** A counter value in its kind: bytes binary, seconds as a duration, the rest as numbers. */
+export function counterValue(name: string, value: number): string {
+  const { kind } = counterInfo(name)
+  if (kind === 'bytes') return formatBytesBinary(value)
+  if (kind === 'seconds') return value === 0 ? '无' : formatDuration(value * 1000)
+  return formatNumber(value)
+}
+
+/** The short form a tile or stage shows for one counter ("今日收件 37", "24 小时 41 封"). */
+export function counterShort(name: string, value: number): string {
+  if (name === 'ingest_today_messages') return `今日 ${formatNumber(value)} 封`
+  if (name === 'received_24h') return `24 小时 ${formatNumber(value)} 封`
+  return `${counterInfo(name).label} ${counterValue(name, value)}`
 }
 
 const GUARD_REASONS: Readonly<Record<string, string>> = {

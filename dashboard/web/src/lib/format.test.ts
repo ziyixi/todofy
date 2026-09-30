@@ -3,11 +3,17 @@ import {
   formatBytesBinary,
   formatBytesDecimal,
   formatClock,
+  formatCpu,
+  formatDayHour,
+  formatDayTime,
+  formatLimitShort,
+  formatUtcDay,
   formatDuration,
   formatPercent,
   formatQuantity,
   formatRelative,
   formatTime,
+  utcDayBefore,
 } from './format'
 import { httpsUrl } from './url'
 
@@ -51,5 +57,27 @@ describe('format', () => {
     expect(httpsUrl('javascript:alert(1)')).toBeNull()
     expect(httpsUrl('/relative')).toBeNull()
     expect(httpsUrl(null)).toBeNull()
+  })
+
+  it('names days relative to the browser today and keeps tick-precise times to the hour', () => {
+    // now is 01:00 on 9-30 in Asia/Shanghai.
+    expect(formatDayTime('2026-09-29T16:06:00Z', now)).toBe('今天 00:06')
+    expect(formatDayTime('2026-09-29T03:20:00Z', now)).toBe('昨天 11:20')
+    expect(formatDayTime('2026-09-30T16:00:00Z', now)).toBe('明天 00:00')
+    expect(formatDayTime('2026-09-27T03:20:00Z', now)).toBe('9月27日 11:20')
+    expect(formatDayHour('2026-09-29T22:00:00Z', now)).toBe('今天 06 时')
+    expect(formatDayHour('2026-09-26T22:00:00Z', now)).toBe('9月27日 06 时')
+  })
+
+  it('formats UTC days, compact limits and CPU times', () => {
+    expect(formatUtcDay('2026-09-22')).toBe('9月22日')
+    expect(formatUtcDay('bad')).toBe('bad')
+    expect(utcDayBefore('2026-10-01', 1)).toBe('2026-09-30')
+    expect(formatLimitShort(100_000, 'requests')).toBe('10 万')
+    expect(formatLimitShort(5_000_000, 'rows')).toBe('500 万')
+    expect(formatLimitShort(10_000_000_000, 'bytes')).toBe('10 GB')
+    expect(formatLimitShort(13_000, 'gb_seconds')).toBe('13,000 GB·s')
+    expect(formatCpu(4_800)).toBe('4.8 ms')
+    expect(formatCpu(10_000)).toBe('10 ms')
   })
 })

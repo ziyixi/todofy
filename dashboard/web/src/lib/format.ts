@@ -160,3 +160,65 @@ export function utcHourWithLocal(hourUtc: number, now: Date): string {
   const utc = `${String(hourUtc).padStart(2, '0')}:00 UTC`
   return at.getTimezoneOffset() === 0 ? utc : `${utc}（本地 ${formatClock(at.toISOString())}）`
 }
+
+/** The browser-local calendar day of an instant, as a comparable number. */
+function localDay(date: Date): number {
+  return Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()) / 86_400_000
+}
+
+function dayWord(iso: string, now: Date): string | null {
+  const offset = localDay(new Date(iso)) - localDay(now)
+  if (offset === 0) return '今天'
+  if (offset === -1) return '昨天'
+  if (offset === 1) return '明天'
+  return null
+}
+
+/** "今天 09:06", "昨天 23:30", "明天 00:00", otherwise "9月27日 09:06" (browser time zone). */
+export function formatDayTime(iso: string, now: Date = new Date()): string {
+  const word = dayWord(iso, now)
+  return word === null ? formatTime(iso, now) : `${word} ${formatClock(iso)}`
+}
+
+const hourOnly = new Intl.DateTimeFormat('zh-CN', { hour: '2-digit', hourCycle: 'h23' })
+const monthDay = new Intl.DateTimeFormat('zh-CN', { month: 'short', day: 'numeric' })
+
+/** Hour precision for data that is only tick-precise: "今天 06 时", "9月27日 06 时". */
+export function formatDayHour(iso: string, now: Date = new Date()): string {
+  const date = new Date(iso)
+  const hour = hourOnly.format(date).replace(/\D/g, '').padStart(2, '0')
+  return `${dayWord(iso, now) ?? monthDay.format(date)} ${hour} 时`
+}
+
+/** A UTC day `YYYY-MM-DD` as "9月22日" (the day itself, not converted to the browser's zone). */
+export function formatUtcDay(day: string): string {
+  const [, , month, date] = /^(\d{4})-(\d{2})-(\d{2})$/.exec(day) ?? []
+  return month && date ? `${Number(month)}月${Number(date)}日` : day
+}
+
+/** The UTC day `offset` days before `day` (YYYY-MM-DD). */
+export function utcDayBefore(day: string, offset: number): string {
+  const at = new Date(`${day}T00:00:00.000Z`)
+  at.setUTCDate(at.getUTCDate() - offset)
+  return at.toISOString().slice(0, 10)
+}
+
+/** A limit in the short Chinese form of the mini bars: "10 万", "500 万", "10 GB", "13,000 GB·s". */
+export function formatLimitShort(value: number, unit: QuotaUnit): string {
+  if (unit === 'bytes') return formatBytesDecimal(value)
+  if (unit === 'gb_seconds') return `${formatNumber(value)} GB·s`
+  if (value >= 10_000 && value % 10_000 === 0) return `${formatNumber(value / 10_000)} 万`
+  return formatNumber(value)
+}
+
+/** A used amount without its unit word, for the compact bars: "7,142", "837 MB", "212 GB·s". */
+export function formatAmountShort(value: number, unit: QuotaUnit): string {
+  if (unit === 'bytes') return formatBytesDecimal(value)
+  if (unit === 'gb_seconds') return `${formatNumber(value)} GB·s`
+  return formatNumber(Math.round(value))
+}
+
+/** CPU microseconds as milliseconds with one decimal: "4.8 ms". */
+export function formatCpu(us: number): string {
+  return `${formatNumber(Math.round(us / 100) / 10)} ms`
+}

@@ -1,10 +1,11 @@
 import type { DigestView } from '../../../worker/src/api-types.ts'
-import { SEVERITY, appErrorLabel, signalLabel, sourceLabel } from '../lib/labels'
+import { SEVERITY, appErrorLabel, signalLabel } from '../lib/labels'
+import { nameOf, type Reg } from '../lib/registry'
 import { Card, Fact, Facts, Metrics, Notice, Pill, Time } from './ui'
 
-export function DigestSection({ digest, now }: { digest: DigestView; now: Date }) {
+export function DigestSection({ reg, digest, now }: { reg: Reg; digest: DigestView; now: Date }) {
   return (
-    <Card id="digest" title="运维摘要">
+    <Card id="digest" title="运维摘要" level={2}>
       <p className="small muted">
         每次定时检查汇总警告和严重项目；项目变化时或至少每 6 小时发给 Todofy，由 Todofy 的每日提醒最多创建一条 Todoist 任务。
       </p>
@@ -24,7 +25,7 @@ export function DigestSection({ digest, now }: { digest: DigestView; now: Date }
               <li key={`${item.source}:${item.code}`} className="signal">
                 <div className="signal-head">
                   <Pill tone={severity.tone}>{severity.label}</Pill>
-                  <span className="signal-source">{sourceLabel(item.source)}</span>
+                  <span className="signal-source">{nameOf(reg, item.source)}</span>
                   <span className="signal-label">{label}</span>
                   {label !== item.code ? <code className="small muted">{item.code}</code> : null}
                 </div>

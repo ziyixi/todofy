@@ -1,127 +1,192 @@
-import { RefreshCw } from 'lucide-react'
-import { useEffect, useState } from 'react'
-import type { OverviewResponse } from '../../worker/src/api-types.ts'
+import { Cloud, Gauge, House, RefreshCw, Settings2, Workflow, type LucideIcon } from 'lucide-react'
+import { useEffect, useRef, useState, type MouseEvent } from 'react'
+import type { HomeResponse, ShellFields, ViewId } from '../../worker/src/api-v2-types.ts'
 import { ApiError } from './api/client'
-import { useOverview, useRefresh } from './api/queries'
-import { ActionsSection } from './components/ActionsSection'
-import { AppCard } from './components/AppCard'
-import { CanarySection } from './components/CanarySection'
-import { DigestSection } from './components/DigestSection'
-import { QuotaSection } from './components/QuotaSection'
-import { StatusBanner } from './components/StatusBanner'
-import { Button, Notice, Time, useNow } from './components/ui'
+import { useRefreshHome, useRegistry, useView } from './api/queries'
+import { AttentionStrip } from './components/AttentionStrip'
+import { Button, Notice, useNow } from './components/ui'
 import { browserTimeZone, formatClockSeconds, formatRelative } from './lib/format'
+import { routeHash, useRoute } from './router'
+import { CloudflareView } from './views/CloudflareView'
+import { FlowsView } from './views/FlowsView'
+import { HomeView } from './views/HomeView'
+import { OpsView } from './views/OpsView'
 
-const SECTIONS = [
-  ['apps', '应用'],
-  ['quota', '用量'],
-  ['canary', '金丝雀'],
-  ['actions', '操作'],
-  ['digest', '摘要'],
-] as const
+interface Tab {
+  readonly view: ViewId
+  readonly label: string
+  /** The part of the label a phone's bottom bar leaves out. */
+  readonly longTail?: string
+  readonly icon: LucideIcon
+}
+
+/** The four views (docs/design-v2.md §1): a tab row on desktop, a fixed bottom bar on a phone. */
+const TABS: readonly Tab[] = [
+  { view: 'home', label: '首页', icon: House },
+  { view: 'flows', label: '业务流程', icon: Workflow },
+  { view: 'cloudflare', label: 'Cloudflare', longTail: ' 监控', icon: Cloud },
+  { view: 'ops', label: '操作与记录', icon: Settings2 },
+]
+
+function tabName(view: ViewId): string {
+  const tab = TABS.find((item) => item.view === view)
+  return tab ? `${tab.label}${tab.longTail ?? ''}` : ''
+}
 
 function errorMessage(error: unknown): string {
   if (error instanceof ApiError) return error.requestId ? `${error.message}（请求 ${error.requestId}）` : error.message
   return '加载失败，请稍后重试'
 }
 
-export function App() {
-  const overview = useOverview()
-  const now = useNow()
-  const data = overview.data
-  const loaded = data !== undefined
+/** When the shown data was last produced by a tick or an owner refresh. */
+function dataAt(shell: ShellFields): string | null {
+  const { last_tick_at: tick, last_refresh_at: refresh } = shell.refresh
+  if (tick && refresh) return new Date(tick) > new Date(refresh) ? tick : refresh
+  return tick ?? refresh
+}
 
-  // A link to a section (#canary) arrives before the data; scroll once the sections exist.
+export function App() {
+  const route = useRoute()
+  const now = useNow()
+  const registry = useRegistry()
+  const home = useView('home', route.view === 'home')
+  const flows = useView('flows', route.view === 'flows')
+  const cloudflare = useView('cloudflare', route.view === 'cloudflare')
+  const ops = useView('ops', route.view === 'ops')
+  const active = { home, flows, cloudflare, ops }[route.view]
+  const shell: ShellFields | undefined = active.data
+  const main = useRef<HTMLElement>(null)
+  const firstView = useRef(true)
+
   useEffect(() => {
-    if (!loaded || !window.location.hash) return
-    const id = window.location.hash.slice(1)
-    if (/^[a-z-]+$/.test(id)) document.getElementById(id)?.scrollIntoView?.()
-  }, [loaded])
+    document.title = route.view === 'home' ? '个人控制台' : `${tabName(route.view)} · 个人控制台`
+    if (firstView.current) {
+      firstView.current = false
+      return
+    }
+    // A tab change is a page change for keyboard and screen-reader users: start at the new view.
+    main.current?.focus({ preventScroll: true })
+    window.scrollTo?.({ top: 0 })
+  }, [route.view])
+
+  function skipToMain(event: MouseEvent<HTMLAnchorElement>) {
+    // The hash is the router's: move focus without changing it.
+    event.preventDefault()
+    main.current?.focus()
+  }
 
   return (
     <>
-      <a className="skip-link" href="#main">
+      <a className="skip-link" href="#main" onClick={skipToMain}>
         跳到主要内容
       </a>
       <header className="topbar">
         <div className="topbar-inner">
           <div className="brand">
-            <h1>运维面板</h1>
-            <span className="small muted">Mail Hero · Todofy · Cloudflare</span>
+            <Gauge size={22} aria-hidden="true" className="brand-icon" />
+            <span className="brand-name">个人控制台</span>
           </div>
-          {data ? <RefreshControl overview={data} now={now} /> : null}
-        </div>
-        {data ? (
-          <nav className="section-nav" aria-label="页面部分">
-            {SECTIONS.map(([id, label]) => (
-              <a key={id} href={`#${id}`}>
-                {label}
-              </a>
-            ))}
+          <nav className="tabs" aria-label="视图">
+            {TABS.map((tab) => {
+              const current = route.view === tab.view
+              const badge = shell?.badges[tab.view] ?? 0
+              const Icon = tab.icon
+              return (
+                <a key={tab.view} className="tab" href={routeHash({ view: tab.view })} aria-current={current ? 'page' : undefined}>
+                  <span className="tab-icon-wrap">
+                    <Icon size={20} aria-hidden="true" className="tab-icon" />
+                    {badge > 0 ? (
+                      <span className="tab-badge" aria-hidden="true">
+                        {badge}
+                      </span>
+                    ) : null}
+                  </span>
+                  <span className="tab-label" aria-hidden="true">
+                    {tab.label}
+                    {tab.longTail ? <span className="tab-long">{tab.longTail}</span> : null}
+                  </span>
+                  <span className="visually-hidden">
+                    {tabName(tab.view)}
+                    {badge > 0 ? `，${badge} 项需关注` : ''}
+                  </span>
+                </a>
+              )
+            })}
           </nav>
-        ) : null}
+          <TopRefresh shell={shell} home={home.data} now={now} />
+        </div>
       </header>
 
-      <main id="main" tabIndex={-1} aria-busy={overview.isFetching}>
-        {overview.isPending ? (
-          <p className="loading" role="status">
-            正在加载…
-          </p>
-        ) : null}
-        {overview.isError && !data ? (
+      <main id="main" ref={main} tabIndex={-1} aria-busy={active.isFetching}>
+        {registry.isPending ? <ViewLoading /> : null}
+        {registry.isError && !registry.data ? (
           <div className="load-error">
             <Notice tone="danger" alert>
-              无法加载运维数据：{errorMessage(overview.error)}
+              无法加载页面配置：{errorMessage(registry.error)}
             </Notice>
-            <Button onClick={() => void overview.refetch()}>重试</Button>
+            <Button onClick={() => void registry.refetch()}>重试</Button>
           </div>
         ) : null}
-        {data ? (
+        {registry.data ? (
           <>
-            {overview.isError ? (
+            {shell ? <AttentionStrip key={route.view} reg={registry.data} shell={shell} now={now} /> : null}
+            {active.isError && active.data ? (
               <Notice tone="warn" alert>
-                自动更新失败：{errorMessage(overview.error)}。下面显示的是 {formatRelative(data.generated_at, now)} 的数据。
+                自动更新失败：{errorMessage(active.error)}。下面显示的是 {formatRelative(active.data.generated_at, now)} 的数据。
               </Notice>
             ) : null}
-            <Dashboard overview={data} now={now} />
+            {active.isError && !active.data ? (
+              <div className="load-error">
+                <Notice tone="danger" alert>
+                  无法加载{tabName(route.view)}数据：{errorMessage(active.error)}
+                </Notice>
+                <Button onClick={() => void active.refetch()}>重试</Button>
+              </div>
+            ) : null}
+            {route.view === 'home' ? (
+              <HomeView registry={registry.data} home={home.data} failed={home.isError && !home.data} now={now} />
+            ) : active.isPending ? (
+              <ViewLoading />
+            ) : null}
+            {route.view === 'flows' && flows.data ? <FlowsView registry={registry.data} flows={flows.data} focus={route.flow} now={now} /> : null}
+            {route.view === 'cloudflare' && cloudflare.data ? (
+              <CloudflareView registry={registry.data} cloudflare={cloudflare.data} focus={route.script} now={now} />
+            ) : null}
+            {route.view === 'ops' && ops.data ? <OpsView registry={registry.data} ops={ops.data} now={now} /> : null}
           </>
         ) : null}
       </main>
 
       <footer className="footer small muted">
-        <span>时间按浏览器时区（{browserTimeZone()}）显示</span>
-        {data ? <span>版本 {data.build.slice(0, 12)}</span> : null}
+        <span>时区：浏览器本地（{browserTimeZone()}）</span>
+        {registry.data ? <span>构建 {registry.data.build.slice(0, 7)}</span> : null}
+        <span>用量为整个 Cloudflare 账户</span>
       </footer>
     </>
   )
 }
 
-function Dashboard({ overview, now }: { overview: OverviewResponse; now: Date }) {
+function ViewLoading() {
   return (
-    <div className="layout">
-      <StatusBanner overview={overview} now={now} />
-      <section id="apps" className="apps" aria-label="应用">
-        <AppCard card={overview.apps['mail-hero']} guard={overview.guard.apps['mail-hero']} now={now} />
-        <AppCard card={overview.apps.todofy} guard={overview.guard.apps.todofy} now={now} />
-      </section>
-      <QuotaSection usage={overview.usage} now={now} />
-      <div className="columns">
-        <CanarySection canary={overview.canary} now={now} />
-        <div className="stack">
-          <ActionsSection overview={overview} now={now} />
-          <DigestSection digest={overview.digest} now={now} />
-        </div>
-      </div>
+    <div className="view-loading" role="status">
+      <span className="visually-hidden">正在加载</span>
+      <div className="skeleton-block" aria-hidden="true" />
+      <div className="skeleton-block" aria-hidden="true" />
     </div>
   )
 }
 
-function RefreshControl({ overview, now }: { overview: OverviewResponse; now: Date }) {
-  const refresh = useRefresh()
+/**
+ * 刷新: re-reads the app statuses and probes now (`/home?refresh=1`, which the Worker answers with fresh
+ * data at most once a minute), then the visible view. Disabled until the Worker's window opens.
+ */
+function TopRefresh({ shell, home, now }: { shell: ShellFields | undefined; home: HomeResponse | undefined; now: Date }) {
+  const refresh = useRefreshHome()
   const [message, setMessage] = useState<string | null>(null)
   const [clock, setClock] = useState(() => Date.now())
-  const nextAt = new Date(overview.refresh.next_refresh_at).getTime()
+  const nextAt = home ? new Date(home.refresh.next_refresh_at).getTime() : 0
   const waiting = nextAt > Math.max(clock, now.getTime())
+  const at = shell ? dataAt(shell) : null
 
   // Re-enable the button exactly when the Worker's one-per-minute refresh window opens.
   useEffect(() => {
@@ -134,28 +199,33 @@ function RefreshControl({ overview, now }: { overview: OverviewResponse; now: Da
   function run() {
     setMessage(null)
     refresh.mutate(undefined, {
-      onSuccess: (fresh) => setMessage(fresh.refresh.refreshed ? '已刷新。' : '距上次刷新不足 1 分钟，显示的是缓存数据。'),
+      onSuccess: (fresh) => setMessage(fresh.refresh.refreshed ? '已刷新。' : '刚刚刷新过，请在 1 分钟后再试。'),
       onError: (error) => setMessage(`刷新失败：${errorMessage(error)}`),
     })
   }
 
   return (
-    <div className="refresh">
-      <div className="refresh-row">
-        <Button onClick={run} disabled={refresh.isPending || waiting} aria-describedby="refresh-note">
-          <RefreshCw size={16} aria-hidden="true" className={refresh.isPending ? 'spin' : undefined} />
-          {refresh.isPending ? '正在刷新…' : '刷新'}
-        </Button>
-        <span id="refresh-note" className="small muted">
-          {waiting ? (
-            <>{formatClockSeconds(overview.refresh.next_refresh_at)} 后可再次刷新</>
-          ) : (
-            <>
-              数据生成于 <Time iso={overview.generated_at} now={now} relative={false} />
-            </>
-          )}
-        </span>
-      </div>
+    <div className="top-refresh">
+      <span id="refresh-note" className="small muted top-age">
+        {waiting && home ? (
+          `${formatClockSeconds(home.refresh.next_refresh_at)} 后可再次刷新`
+        ) : at ? (
+          <>
+            <span className="top-age-word">数据 </span>
+            <time dateTime={at}>{formatRelative(at, now)}</time>
+          </>
+        ) : null}
+      </span>
+      <Button
+        onClick={run}
+        disabled={refresh.isPending || waiting}
+        aria-label="刷新"
+        aria-describedby="refresh-note"
+        className="btn-refresh"
+      >
+        <RefreshCw size={16} aria-hidden="true" className={refresh.isPending ? 'spin' : undefined} />
+        <span className="btn-refresh-label">{refresh.isPending ? '正在刷新…' : '刷新'}</span>
+      </Button>
       <p className="small refresh-message" role="status" aria-live="polite">
         {message}
       </p>

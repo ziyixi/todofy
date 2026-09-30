@@ -1,11 +1,11 @@
 import { Play, ShieldAlert, ShieldCheck } from 'lucide-react'
 import { useState, type ReactNode } from 'react'
-import type { CanaryRun, GuardLevel, GuardView, OverviewResponse } from '../../../worker/src/api-types.ts'
+import type { CanaryRun, GuardLevel } from '../../../worker/src/api-types.ts'
+import type { GuardViewV2, OpsResponse } from '../../../worker/src/api-v2-types.ts'
 import { ApiError } from '../api/client'
 import { useSetGuard, useStartCanary } from '../api/queries'
 import { formatClock, formatFullTime, formatTime } from '../lib/format'
 import {
-  APP_NAMES,
   CANARY_DISABLED_TEXT,
   CANARY_OUTCOME,
   CANARY_PHASE,
@@ -14,6 +14,7 @@ import {
   canaryCodeLabel,
   guardReasonLabel,
 } from '../lib/labels'
+import { guardedEntries, nameOf, type Reg } from '../lib/registry'
 import { Modal } from './Modal'
 import { Button, Card, Fact, Facts, Pill, Time } from './ui'
 
@@ -56,10 +57,10 @@ function canaryResultText(run: CanaryRun): string {
   return `已启动金丝雀 ${run.run_id}（${CANARY_PHASE[run.phase]}），之后每 30 分钟检查一次进度。`
 }
 
-function guardResultText(level: GuardLevel, guard: GuardView): string {
-  const failed = (['mail-hero', 'todofy'] as const)
-    .filter((app) => guard.apps[app].last_error)
-    .map((app) => `${APP_NAMES[app]} 调用失败（${appErrorLabel(guard.apps[app].last_error ?? 'unavailable')}），下次定时检查会重试`)
+function guardResultText(reg: Reg, level: GuardLevel, guard: GuardViewV2): string {
+  const failed = guardedEntries(reg, guard)
+    .filter((app) => guard.apps[app]?.last_error)
+    .map((app) => `${nameOf(reg, app)} 调用失败（${appErrorLabel(guard.apps[app]?.last_error ?? 'unavailable')}），下次定时检查会重试`)
   const head =
     level === 'shed'
       ? `已要求两个应用降载${guard.desired.until ? `，直到 ${formatTime(guard.desired.until)}` : ''}。`
@@ -67,28 +68,37 @@ function guardResultText(level: GuardLevel, guard: GuardView): string {
   return failed.length ? `${head}${failed.join('；')}。` : head
 }
 
-const SOURCE_LABEL: Readonly<Record<GuardView['desired']['source'], string>> = {
+const SOURCE_LABEL: Readonly<Record<GuardViewV2['desired']['source'], string>> = {
   auto: '自动（按配额）',
   owner: '手动',
   none: '—',
 }
 
-export function ActionsSection({ overview, now }: { overview: OverviewResponse; now: Date }) {
+/**
+ * 操作与记录's actions (docs/design.md §8, unchanged texts): the guard (force shed, clear) and the
+ * manual run of the canary bound to the mail flow. Every mutation is confirmed first and sent with the
+ * CSRF token.
+ */
+export function ActionsSection({ reg, ops, now }: { reg: Reg; ops: OpsResponse; now: Date }) {
   const [dialog, setDialog] = useState<Dialog>(null)
   const [result, setResult] = useState<Result | null>(null)
   const canary = useStartCanary()
   const guard = useSetGuard()
   const busy = canary.isPending || guard.isPending
 
-  const { desired, override, thresholds } = overview.guard
-  const remaining = Math.max(0, overview.canary.manual_limit - overview.canary.manual_today)
-  const canaryDisabled = !overview.canary.enabled
-  const canaryBlocked = canaryDisabled
+  const { desired, override, thresholds } = ops.guard
+  // The canary is one the registry binds to a flow (the runner cannot be invented by the page).
+  const canaryDef = reg.flows.find((flow) => flow.canary?.id === ops.canary.id)?.canary ?? null
+  const remaining = Math.max(0, ops.canary.manual_limit - ops.canary.manual_today)
+  const canaryDisabled = !ops.canary.enabled || canaryDef === null
+  const canaryBlocked = canaryDef === null
+    ? '注册表没有登记这个金丝雀，不能手动运行。'
+    : canaryDisabled
     ? `${CANARY_DISABLED_TEXT}，不能手动运行。`
-    : overview.canary.active
-      ? `已有运行 ${overview.canary.active.run_id} 正在进行，结束后才能再次运行。`
+    : ops.canary.active
+      ? `已有运行 ${ops.canary.active.run_id} 正在进行，结束后才能再次运行。`
       : remaining === 0
-        ? `本 UTC 日的 ${overview.canary.manual_limit} 次手动运行已用完。`
+        ? `本 UTC 日的 ${ops.canary.manual_limit} 次手动运行已用完。`
         : null
 
   function close() {
@@ -97,7 +107,8 @@ export function ActionsSection({ overview, now }: { overview: OverviewResponse; 
 
   function runCanary() {
     setResult(null)
-    canary.mutate(undefined, {
+    if (canaryDef === null) return
+    canary.mutate(canaryDef.id, {
       onSuccess: ({ run }) => setResult({ kind: 'ok', text: canaryResultText(run) }),
       onError: (error) => setResult({ kind: 'error', text: `未能启动金丝雀：${errorText(error)}` }),
       onSettled: () => setDialog(null),
@@ -107,14 +118,14 @@ export function ActionsSection({ overview, now }: { overview: OverviewResponse; 
   function applyGuard(level: GuardLevel) {
     setResult(null)
     guard.mutate(level, {
-      onSuccess: (response) => setResult({ kind: 'ok', text: guardResultText(level, response.guard) }),
+      onSuccess: (response) => setResult({ kind: 'ok', text: guardResultText(reg, level, response.guard) }),
       onError: (error) => setResult({ kind: 'error', text: `${level === 'shed' ? '未能强制降载' : '未能解除降载'}：${errorText(error)}` }),
       onSettled: () => setDialog(null),
     })
   }
 
   return (
-    <Card id="actions" title="降载与操作">
+    <Card id="actions" title="降载与操作" level={2}>
       <div className="guard-summary">
         <div className="row-wrap">
           {desired.level === 'shed' ? (
@@ -143,12 +154,12 @@ export function ActionsSection({ overview, now }: { overview: OverviewResponse; 
               </time>
             </Fact>
           ) : null}
-          {(['mail-hero', 'todofy'] as const).map((app) => {
-            const view = overview.guard.apps[app]
+          {guardedEntries(reg, ops.guard).map((app) => {
+            const view = ops.guard.apps[app]
             return (
-              <Fact key={app} label={APP_NAMES[app]}>
-                {view.state ? (view.state.level === 'shed' ? '降载中' : '正常') : '未知'}
-                {view.last_error ? `（上次下发失败：${appErrorLabel(view.last_error)}）` : ''}
+              <Fact key={app} label={nameOf(reg, app)}>
+                {view?.state ? (view.state.level === 'shed' ? '降载中' : '正常') : '未知'}
+                {view?.last_error ? `（上次下发失败：${appErrorLabel(view.last_error)}）` : ''}
               </Fact>
             )
           })}
@@ -163,7 +174,7 @@ export function ActionsSection({ overview, now }: { overview: OverviewResponse; 
         <ActionItem
           id="action-canary"
           title="立即运行金丝雀"
-          description={`本 UTC 日已手动运行 ${overview.canary.manual_today} / ${overview.canary.manual_limit} 次。`}
+          description={`本 UTC 日已手动运行 ${ops.canary.manual_today} / ${ops.canary.manual_limit} 次。`}
           blocked={canaryBlocked}
           button={
             // aria-disabled rather than disabled while a run is active or the limit is reached: the button

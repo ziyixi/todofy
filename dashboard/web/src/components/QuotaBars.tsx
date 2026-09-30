@@ -1,0 +1,181 @@
+import { useId } from 'react'
+import {
+  GUARD_SHED_PERCENT,
+  QUOTA_CRITICAL_PERCENT,
+  type QuotaPeriod,
+  type QuotaRow,
+} from '../../../worker/src/api-types.ts'
+import { formatAmountShort, formatLimitShort, formatPercent, formatQuantity } from '../lib/format'
+import { PERIODS, QUOTA, type Tone } from '../lib/labels'
+import { nameOf, workerOf, type Reg } from '../lib/registry'
+import { httpsUrl } from '../lib/url'
+import { Pill } from './ui'
+
+/** Phone labels of the mini bars (the full name stays the meter's accessible name). */
+const QUOTA_SHORT: Partial<Record<QuotaRow['id'], string>> = {
+  d1_rows_read: 'D1 读取',
+  do_requests: 'DO 请求',
+}
+
+export const PERIOD_ORDER: readonly QuotaPeriod[] = ['daily', 'monthly', 'storage']
+
+/** Judged on the measured value like the Worker's guard, not on `percent` (rounded: 79.95 reads 80.0). */
+function reaches(row: QuotaRow, percent: number): boolean {
+  return row.used !== null && row.limit > 0 && row.used * 100 >= row.limit * percent
+}
+
+export function quotaTone(row: QuotaRow): { tone: Tone; label: string } {
+  if (row.percent === null || row.used === null) return { tone: 'neutral', label: '无数据' }
+  if (reaches(row, QUOTA_CRITICAL_PERCENT)) return { tone: 'danger', label: `超过 ${QUOTA_CRITICAL_PERCENT}%` }
+  if (reaches(row, GUARD_SHED_PERCENT)) return { tone: 'warn', label: `超过 ${GUARD_SHED_PERCENT}%` }
+  return { tone: 'ok', label: '正常' }
+}
+
+function clamp(value: number): number {
+  return Math.min(100, Math.max(0, value))
+}
+
+/** The bar with the 80 % (自动降载) and 95 % (严重) ticks; a meter with its full value in words. */
+function Meter({ row, labelId, compact = false }: { row: QuotaRow; labelId: string; compact?: boolean }) {
+  const width = row.percent === null ? 0 : clamp(row.percent)
+  const projected = row.projected_percent === null ? null : clamp(row.projected_percent)
+  const valueText =
+    row.used === null
+      ? '无数据'
+      : `已用 ${formatQuantity(row.used, row.unit)}，上限 ${formatQuantity(row.limit, row.unit)}，${formatPercent(row.percent ?? 0)}`
+  return (
+    <div
+      className={`meter${compact ? ' meter-compact' : ''}`}
+      role="meter"
+      aria-labelledby={labelId}
+      aria-valuemin={0}
+      aria-valuemax={100}
+      aria-valuenow={row.percent === null ? undefined : width}
+      aria-valuetext={valueText}
+    >
+      {!compact && projected !== null && projected > width ? <span className="meter-projection" style={{ width: `${projected}%` }} /> : null}
+      {row.used !== null ? <span className="meter-fill" style={{ width: `${width}%` }} /> : null}
+      <span className="meter-mark" style={{ left: `${GUARD_SHED_PERCENT}%` }} title="自动降载" aria-hidden="true" />
+      <span className="meter-mark" style={{ left: `${QUOTA_CRITICAL_PERCENT}%` }} title="严重" aria-hidden="true" />
+    </div>
+  )
+}
+
+/** A breakdown name: a script with its entry, or the raw identifier (D1/DO IDs, bucket names). */
+function breakdownName(reg: Reg, name: string): string {
+  const worker = workerOf(reg, name)
+  return worker ? `${name}（${nameOf(reg, worker.entry)}）` : name
+}
+
+/** One quota in full: value, bar, linear estimate, top-5 breakdown and the limit's documentation. */
+export function QuotaItem({ row, reg }: { row: QuotaRow; reg: Reg }) {
+  const labelId = useId()
+  const label = QUOTA[row.id] ?? row.id
+  const tone = quotaTone(row)
+  const source = httpsUrl(row.source)
+  return (
+    <li className={`quota quota-${tone.tone}`}>
+      <div className="quota-head">
+        <span id={labelId} className="quota-label">
+          {label}
+        </span>
+        <span className="quota-percent">
+          {row.percent === null ? '无数据' : formatPercent(row.percent)}
+          {row.percent !== null && tone.tone !== 'ok' ? <Pill tone={tone.tone}>{tone.label}</Pill> : null}
+        </span>
+      </div>
+      <Meter row={row} labelId={labelId} />
+      <div className="quota-meta small">
+        <span>
+          {row.used === null ? '无数据' : formatQuantity(row.used, row.unit)} / {formatQuantity(row.limit, row.unit)}
+          {row.truncated ? <span className="muted">（下限：查询结果已达行数上限）</span> : null}
+        </span>
+        {row.projected !== null && row.projected_percent !== null ? (
+          <span className={row.projected_percent >= 100 ? 'text-warn' : 'muted'}>
+            按当前速度线性估算，{row.period === 'daily' ? '本 UTC 日' : '本月'}结束约 {formatQuantity(row.projected, row.unit)}（
+            {formatPercent(row.projected_percent)}）{row.projected_percent >= 100 ? '，按此速度将超出上限' : ''}
+          </span>
+        ) : null}
+      </div>
+      {row.breakdown.length > 0 || source ? (
+        <div className="quota-extra small">
+          {row.breakdown.length > 0 ? (
+            <details className="more">
+              <summary>主要来源</summary>
+              <ul className="breakdown">
+                {row.breakdown.map((item) => (
+                  <li key={item.name}>
+                    <code className="wrap">{breakdownName(reg, item.name)}</code>
+                    <span>{formatQuantity(item.value, row.unit)}</span>
+                  </li>
+                ))}
+              </ul>
+            </details>
+          ) : null}
+          {source ? (
+            <a href={source} target="_blank" rel="noreferrer noopener" className="muted">
+              限额说明<span className="visually-hidden">：{label}（新标签页）</span>
+            </a>
+          ) : null}
+        </div>
+      ) : null}
+    </li>
+  )
+}
+
+/** The account allowances in three groups (每日 / 每月 / 存储), each with its reset rule. */
+export function QuotaGroups({ rows, reg }: { rows: readonly QuotaRow[]; reg: Reg }) {
+  const groups = PERIOD_ORDER.map((period) => ({ period, rows: rows.filter((row) => row.period === period) })).filter(
+    (group) => group.rows.length > 0,
+  )
+  return (
+    <div className="quota-columns">
+      {groups.map(({ period, rows: items }) => (
+        <section key={period} className="panel quota-group" aria-labelledby={`quota-${period}`}>
+          <h4 id={`quota-${period}`}>{PERIODS[period].title}</h4>
+          <p className="small muted">
+            {PERIODS[period].note}
+            {items.every((row) => row.guard_trigger) ? '，计入自动降载' : items.some((row) => row.guard_trigger) ? '' : '，不触发降载'}
+          </p>
+          <ul className="quota-list">
+            {items.map((row) => (
+              <QuotaItem key={row.id} row={row} reg={reg} />
+            ))}
+          </ul>
+        </section>
+      ))}
+    </div>
+  )
+}
+
+/** A mini bar of 首页: name, bar, "712 / 10 万 · 0.7%" (phones: name and percent only). */
+export function MiniQuota({ row }: { row: QuotaRow }) {
+  const labelId = useId()
+  const tone = quotaTone(row)
+  const percent = row.percent === null ? '无数据' : formatPercent(row.percent)
+  return (
+    <li className={`mini-quota quota-${tone.tone}`}>
+      <span id={labelId} className="visually-hidden">
+        {QUOTA[row.id] ?? row.id}
+      </span>
+      <span className="mini-quota-name" aria-hidden="true">
+        <span className="name-long">{QUOTA[row.id] ?? row.id}</span>
+        <span className="name-short">{QUOTA_SHORT[row.id] ?? QUOTA[row.id] ?? row.id}</span>
+      </span>
+      <Meter row={row} labelId={labelId} compact />
+      <span className="mini-quota-value">
+        {row.used === null ? (
+          '无数据'
+        ) : (
+          <>
+            <span className="mini-quota-amount">
+              {formatAmountShort(row.used, row.unit)} / {formatLimitShort(row.limit, row.unit)} ·{' '}
+            </span>
+            {percent}
+            {tone.tone === 'warn' || tone.tone === 'danger' ? <span className="visually-hidden">，{tone.label}</span> : null}
+          </>
+        )}
+      </span>
+    </li>
+  )
+}

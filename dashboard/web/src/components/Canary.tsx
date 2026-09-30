@@ -1,7 +1,16 @@
 import type { CanaryRun, CanaryStage, CanaryView } from '../../../worker/src/api-types.ts'
-import { between, formatClock, formatDuration, formatFullTime, formatTime, utcDay, utcHourWithLocal } from '../lib/format'
+import {
+  between,
+  formatClock,
+  formatDuration,
+  formatFullTime,
+  formatTime,
+  formatUtcDay,
+  utcDay,
+  utcDayBefore,
+} from '../lib/format'
 import { CANARY_DISABLED_TEXT, CANARY_KIND, CANARY_OUTCOME, CANARY_PHASE, CANARY_STAGE, appErrorLabel, canaryCodeLabel, type Tone } from '../lib/labels'
-import { Card, Fact, Facts, Notice, Pill, Time } from './ui'
+import { Fact, Facts, Notice, Pill, Time } from './ui'
 
 type StepState = 'done' | 'current' | 'failed' | 'skipped' | 'waiting'
 
@@ -71,84 +80,152 @@ function runDetail(run: CanaryRun): string | null {
   return null
 }
 
-/** What the canary does and does not test; shown on the page and in the docs. */
-export const CANARY_SCOPE =
-  '覆盖：Mail Hero 投递（webhook）→ Todofy 接收、Gemini 摘要与校验；不覆盖：来源邮箱转发、Email Routing 收件、原件保存与 MIME 解析。'
-
-/** What the switch does; the section shows it while CANARY_ENABLED=false. */
+/** What the switch does; the flow card shows it while CANARY_ENABLED=false. */
 export const CANARY_DISABLED_NOTE = `${CANARY_DISABLED_TEXT}：不会开始新的定时或手动运行；正在进行的运行仍会每 30 分钟检查一次，直到结束。在 GitHub production 环境把 DASHBOARD_CANARY_ENABLED 改为 true（或删除）并重新部署后恢复。`
 
-export function CanarySection({ canary, now }: { canary: CanaryView; now: Date }) {
+/** The latest run of each of the last `days` UTC days ending today (runs are newest first). */
+export function canaryDays(recent: readonly CanaryRun[], today: string, days = 14): { day: string; run: CanaryRun | null }[] {
+  return Array.from({ length: days }, (_, index) => {
+    const day = utcDayBefore(today, days - 1 - index)
+    return { day, run: recent.find((run) => run.day === day) ?? null }
+  })
+}
+
+function dayCell(run: CanaryRun | null): { state: 'ok' | 'failed' | 'skipped' | 'running' | 'none'; text: string } {
+  if (!run) return { state: 'none', text: '无运行' }
+  if (run.phase !== 'done' || !run.outcome) return { state: 'running', text: `进行中（${CANARY_PHASE[run.phase]}）` }
+  const why = run.code ? `（${canaryCodeLabel(run.code)}${run.outcome === 'skipped' ? '，未测试链路' : ''}）` : ''
+  if (run.outcome === 'ok') {
+    const took = between(run.created_at, run.finished_at)
+    return { state: 'ok', text: `成功${took === null ? '' : `，用时 ${formatDuration(took)}`}` }
+  }
+  return { state: run.outcome, text: `${CANARY_OUTCOME[run.outcome].label}${why}` }
+}
+
+const CELL_MARK = { ok: '', failed: '■', skipped: '‖', running: '…', none: '' } as const
+
+/** 14 day cells (UTC days, oldest first), each named for screen readers; and the run counts. */
+export function CanaryDays({ canary, now }: { canary: CanaryView; now: Date }) {
+  const today = utcDay(now)
+  const days = canaryDays(canary.recent, today)
+  const cells = days.map(({ day, run }) => ({ day, ...dayCell(run) }))
+  const count = (state: string) => cells.filter((cell) => cell.state === state).length
+  const first = days[0]?.day ?? today
+  return (
+    <div className="canary-days">
+      <p className="small canary-days-sum">
+        14 天：{count('ok')} 次成功 · {count('skipped')} 次跳过 · {count('failed')} 次失败
+      </p>
+      <ol className="day-cells" aria-label="近 14 天金丝雀结果（按 UTC 日）">
+        {cells.map((cell) => {
+          const label = `${formatUtcDay(cell.day)}${cell.day === today ? '（今天，UTC）' : ''}：${cell.text}`
+          return (
+            <li key={cell.day} className={`day-cell day-${cell.state}`} role="img" aria-label={label} title={label}>
+              <span aria-hidden="true">{CELL_MARK[cell.state]}</span>
+            </li>
+          )
+        })}
+      </ol>
+      <div className="day-scale small muted" aria-hidden="true">
+        <span>{formatUtcDay(first)}</span>
+        <span>{formatUtcDay(today)}（UTC）</span>
+      </div>
+      <ul className="day-legend small muted" aria-hidden="true">
+        <li>
+          <span className="day-cell day-ok" />
+          成功
+        </li>
+        <li>
+          <span className="day-cell day-skipped">‖</span>
+          已跳过
+        </li>
+        <li>
+          <span className="day-cell day-failed">■</span>
+          失败
+        </li>
+        <li>
+          <span className="day-cell day-none" />
+          无运行
+        </li>
+      </ul>
+    </div>
+  )
+}
+
+/** The latest run in words ("定时 · 成功 · 用时 6 分钟") and its step timeline. */
+export function CanaryToday({ canary, now }: { canary: CanaryView; now: Date }) {
   const current = canary.active ?? canary.today
   const day = utcDay(now)
   return (
-    <Card id="canary" title="投递与处理金丝雀">
+    <div className="subsection">
+      <h5>{canary.active ? '正在运行' : `本 UTC 日（${day}）`}</h5>
+      {current ? <RunTimeline run={current} now={now} /> : <p className="small muted">本 UTC 日还没有运行。</p>}
+    </div>
+  )
+}
+
+/** The recent runs as a table (behind a disclosure on the flow card). */
+export function CanaryHistory({ canary, now }: { canary: CanaryView; now: Date }) {
+  if (canary.recent.length === 0) return <p className="small muted">还没有运行记录。</p>
+  return (
+    <details className="more">
+      <summary>最近 {canary.recent.length} 次运行</summary>
+      <div className="table-scroll" role="region" aria-label="最近的金丝雀运行" tabIndex={0}>
+        <table className="runs">
+          <thead>
+            <tr>
+              <th scope="col">开始</th>
+              <th scope="col">类型</th>
+              <th scope="col">结果</th>
+              <th scope="col">原因</th>
+              <th scope="col">用时</th>
+            </tr>
+          </thead>
+          <tbody>
+            {canary.recent.map((run) => {
+              const status = runStatus(run)
+              const took = between(run.created_at, run.finished_at)
+              return (
+                <tr key={run.run_id}>
+                  <td>
+                    <time dateTime={run.created_at} title={`${formatFullTime(run.created_at)} · ${run.run_id}`}>
+                      {formatTime(run.created_at, now)}
+                    </time>
+                  </td>
+                  <td>{CANARY_KIND[run.kind]}</td>
+                  <td>
+                    <Pill tone={status.tone}>{status.label}</Pill>
+                  </td>
+                  <td className="small">{runDetail(run) ?? <span className="muted">—</span>}</td>
+                  <td className="small">{took === null ? <span className="muted">—</span> : formatDuration(took)}</td>
+                </tr>
+              )
+            })}
+          </tbody>
+        </table>
+      </div>
+    </details>
+  )
+}
+
+/** Schedule, the switch and the manual-run count. */
+export function CanaryFacts({ canary, now }: { canary: CanaryView; now: Date }) {
+  return (
+    <>
       {canary.enabled ? null : <Notice tone="info">{CANARY_DISABLED_NOTE}</Notice>}
-      <p className="small muted">
-        每天 {utcHourWithLocal(canary.hour_utc, now)}之后的第一次定时检查会让 Mail Hero 直接生成一封合成测试邮件，经正常投递链路交给
-        Todofy 处理并校验；不涉及真实邮件，也不会创建 Todoist 任务。
-      </p>
-      <p className="small">{CANARY_SCOPE}</p>
       <Facts>
         <Fact label="下次定时运行">
           {canary.next_scheduled_at === null ? '已关闭' : <Time iso={canary.next_scheduled_at} now={now} />}
         </Fact>
-        <Fact label={`本 UTC 日（${day}）手动运行`}>
+        <Fact label={`本 UTC 日（${utcDay(now)}）手动运行`}>
           {canary.manual_today} / {canary.manual_limit} 次
         </Fact>
       </Facts>
-
-      <div className="subsection">
-        <h3>{canary.active ? '正在运行' : `本 UTC 日（${day}）`}</h3>
-        {current ? <RunTimeline run={current} now={now} /> : <p className="small muted">本 UTC 日还没有运行。</p>}
-      </div>
-
-      <div className="subsection">
-        <h3>最近 {canary.recent.length} 次</h3>
-        {canary.recent.length === 0 ? (
-          <p className="small muted">还没有运行记录。</p>
-        ) : (
-          <div className="table-scroll" role="region" aria-label="最近的金丝雀运行" tabIndex={0}>
-            <table className="runs">
-              <thead>
-                <tr>
-                  <th scope="col">开始</th>
-                  <th scope="col">类型</th>
-                  <th scope="col">结果</th>
-                  <th scope="col">原因</th>
-                  <th scope="col">用时</th>
-                </tr>
-              </thead>
-              <tbody>
-                {canary.recent.map((run) => {
-                  const status = runStatus(run)
-                  const took = between(run.created_at, run.finished_at)
-                  return (
-                    <tr key={run.run_id}>
-                      <td>
-                        <time dateTime={run.created_at} title={`${formatFullTime(run.created_at)} · ${run.run_id}`}>
-                          {formatTime(run.created_at, now)}
-                        </time>
-                      </td>
-                      <td>{CANARY_KIND[run.kind]}</td>
-                      <td>
-                        <Pill tone={status.tone}>{status.label}</Pill>
-                      </td>
-                      <td className="small">{runDetail(run) ?? <span className="muted">—</span>}</td>
-                      <td className="small">{took === null ? <span className="muted">—</span> : formatDuration(took)}</td>
-                    </tr>
-                  )
-                })}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </div>
-    </Card>
+    </>
   )
 }
 
-function RunTimeline({ run, now }: { run: CanaryRun; now: Date }) {
+export function RunTimeline({ run, now }: { run: CanaryRun; now: Date }) {
   const status = runStatus(run)
   const detail = runDetail(run)
   const states = stepStates(run)
