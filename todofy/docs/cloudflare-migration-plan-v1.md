@@ -2,6 +2,12 @@
 
 > 日期 2026-09-28。依据：todofy `6c46ed4`（main）、mail-hero `5d2b625`、self-host-on-vultr `bcad459`、protos `protobuf` 分支的只读阅读；三份代码评审、三份平台事实简报、三份候选设计及两位评委的打分。所有仓库、主机和 Cloudflare 均未改动；未读取任何 env/token/数据库/真实邮件。平台事实的抓取日期均为 2026-09-27。标注"推断"的内容未经直接验证。文中 `file:line` 未加仓库前缀时指 todofy 仓库。
 
+> **Config layout (2026-09-30).** The CI config generators this plan describes (`deploy/generate_ci_config.py`,
+> Mail Hero's `deploy/generate-ci-config.mjs`) and their generated `wrangler.production.ci.json` files are
+> retired: each Worker's production config is its committed `wrangler.toml` (here `wrangler.toml` for
+> todofy-core and `gateway/wrangler.toml`), and `deploy/deploy_vars.py` adds at deploy what is never
+> committed ([ci-cd.md](ci-cd.md)).
+
 ## 1. 结论摘要
 
 **推荐：把 Todofy 重写为一个 TypeScript Worker + 一个 SQLite Durable Object 执行器 + D1 账本，不使用 Cloudflare Containers，不保留 Go 代码。** 两位评委独立打分后都选了这个方案（各 45/50），Containers 方案 32/31，Workflows 方案 31/34。

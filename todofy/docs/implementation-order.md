@@ -2,6 +2,12 @@
 
 > 依据：todofy `6c46ed4`（main，工作区含另一任务的未提交修改）、mail-hero `5d2b625`、self-host-on-vultr `bcad459`、protos `protobuf`/`main` 分支的只读阅读；方案 v2 `docs/cloudflare-migration-plan.md` 与 UI/门户研究 `docs/ui-and-portal-research.md`。owner 2026-09-28 的最新决定优先于两份文档。本文只是计划：未改任何仓库、主机或 Cloudflare 资源，未读 env、token、数据库或真实邮件。`file:line` 无仓库前缀时指 todofy；平台事实沿用两份文档已标注的来源；"推断"表示未经实测。
 
+> **Config layout (2026-09-30).** The CI config generators this plan describes (`deploy/generate_ci_config.py`,
+> Mail Hero's `deploy/generate-ci-config.mjs`) and their generated `wrangler.production.ci.json` files are
+> retired: each Worker's production config is its committed `wrangler.toml` (here `wrangler.toml` for
+> todofy-core and `gateway/wrangler.toml`), and `deploy/deploy_vars.py` adds at deploy what is never
+> committed ([ci-cd.md](ci-cd.md)).
+
 > **As-built notes (2026-09-29).** The rewrite is built on `cf-rewrite`; where this plan and the tree
 > differ, the tree and `docs/dev-notes.md` win. Setup and CI details: `docs/cloudflare-setup.md`,
 > `docs/ci-cd.md`; what actually ran: `docs/verification.md`.

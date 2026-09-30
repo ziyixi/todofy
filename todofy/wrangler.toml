@@ -1,7 +1,20 @@
-# todofy-core: the Python Worker that hosts the TodofyCore Durable Object. It has no public
-# routes; the TypeScript gateway (gateway/wrangler.toml, script "todofy") binds the object by
-# script_name. It stays at the repo root: pywrangler reads the Python version from this file only.
+# Worker "todofy-core": the Python Worker that hosts the TodofyCore Durable Object. It has no public routes;
+# the gateway (gateway/wrangler.toml, script "todofy") binds the object by script_name. This is the
+# production configuration and its single source of truth: top level = production, never [env.*] or
+# keep_vars. Every static value is committed here (the repository is public: nothing personal, no secret).
+# It keeps this exact name and place: pywrangler reads the Python version (compatibility_date + flags) only
+# from todofy/wrangler.toml, next to pyproject.toml and python_modules/.
+#
+# Deployed only by CI ("Todofy deploy" in .github/workflows/ci.yml) through deploy/deploy_vars.py, which
+# validates and appends the values that are never committed, with --var: TODOIST_DEFAULT_PROJECT_ID (GitHub
+# environment secret); MAINTENANCE_MODE, PROCESSING_PAUSED, FORCE_PAUSE_TODOIST, REMINDER_ENABLED (GitHub
+# environment variables); BUILD_SHA (the commit). A plain `pywrangler deploy` of this file DELETES those vars.
+# Worker secrets (GEMINI_API_KEY, TODOIST_API_KEY) survive every deploy.
+#
+# Runtime tests use wrangler.test.toml. Local dev (docs/dev-notes.md §1) uses local bindings only; local core
+# values and secrets go in todofy/.dev.vars (see .dev.vars.example), and D1 commands always pass --local.
 name = "todofy-core"
+account_id = "f57937bd1d93bf59e737b6d8445fb7a3"
 main = "worker/todofy/runtime/entry.py"
 base_dir = "worker"
 compatibility_date = "2026-09-08"
@@ -9,10 +22,13 @@ compatibility_flags = ["python_workers"]
 workers_dev = false
 preview_urls = false
 
+[observability]
+enabled = true
+
 [[d1_databases]]
 binding = "DB"
 database_name = "todofy"
-database_id = "00000000-0000-4000-8000-000000000000"
+database_id = "151c1306-3885-4679-9592-08887b30ae68"
 migrations_dir = "migrations"
 
 # Weekly D1 backups (runtime/backup.py). A private bucket the owner creates once, before the first
@@ -36,9 +52,18 @@ binding = "METRICS"
 dataset = "todofy_metrics"
 
 [vars]
-# The daily reminder links to the owner UI on this host.
-TODOFY_PUBLIC_HOST = "todofy.localhost"
-BUILD_SHA = "dev"
+# Fixed upstreams, never variables, so a bad setting cannot send the API keys elsewhere (tests pin them).
 GEMINI_API_BASE = "https://generativelanguage.googleapis.com"
-GEMINI_TIMEOUT_MS = "60000"
 TODOIST_API_BASE = "https://api.todoist.com"
+# The daily reminder links to the owner UI on this host (the gateway's TODOFY_PUBLIC_HOST).
+TODOFY_PUBLIC_HOST = "todofy.ziyixi.science"
+# The mail.received.v1 source this consumer accepts.
+MAIL_SOURCE_ID = "mail-hero-personal"
+# Gemini models, tried in order (at most 5).
+GEMINI_MODELS = "gemini-3.8-flash,gemini-3.7-flash,gemini-3.5-flash-lite"
+GEMINI_DAILY_TOKEN_BUDGET = "3000000"
+LOOKUP_DELAY_MS = "120000"
+REPORT_DEFAULT_TOP = "10"
+REPORT_PRECOMPUTE_UTC = "13:30"
+# 0 keeps imported mail text forever.
+LEGACY_TEXT_RETENTION_DAYS = "0"

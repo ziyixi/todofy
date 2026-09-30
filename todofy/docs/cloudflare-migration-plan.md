@@ -2,6 +2,12 @@
 
 > 日期 2026-09-28。本文在 v1（同目录 `cloudflare-migration-plan-v1.md`）的基础上，把 owner 的六点回复与随后追加的六项决定（7–12）落实为决策。依据：todofy `6c46ed4`（main）、mail-hero `5d2b625`、self-host-on-vultr `bcad459`、protos `protobuf` 分支的只读阅读；v1 的三份代码评审与两位评委打分；2026-09-28 新增的三份研究（Python Workers、Rust workers-rs、Workers Free 额度）及其本地实测。所有仓库、主机和 Cloudflare 均未改动，未读取任何 env/token/数据库/真实邮件。平台事实均标注来源 URL 与抓取日期；标注"推断"的内容未经直接验证。文中 `file:line` 未加仓库前缀时指 todofy 仓库。**本文只是计划，不写任何代码。**
 
+> **Config layout (2026-09-30).** The CI config generators this plan describes (`deploy/generate_ci_config.py`,
+> Mail Hero's `deploy/generate-ci-config.mjs`) and their generated `wrangler.production.ci.json` files are
+> retired: each Worker's production config is its committed `wrangler.toml` (here `wrangler.toml` for
+> todofy-core and `gateway/wrangler.toml`), and `deploy/deploy_vars.py` adds at deploy what is never
+> committed ([ci-cd.md](ci-cd.md)).
+
 > **As-built notes (2026-09-29).** This plan predates the build. Where it differs from the tree, the tree,
 > `docs/dev-notes.md`, `docs/cloudflare-setup.md` and `docs/ci-cd.md` are authoritative; the list below
 > records the differences that matter to an operator (`docs/implementation-order.md` has the same list).

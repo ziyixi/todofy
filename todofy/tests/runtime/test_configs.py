@@ -20,7 +20,6 @@ CORE_SHAPE = (
     "base_dir",
     "compatibility_date",
     "compatibility_flags",
-    "d1_databases",
     "migrations",
     "analytics_engine_datasets",
 )
@@ -40,6 +39,11 @@ def test_core_test_config_matches_the_shipped_core() -> None:
     assert config["name"] == CORE["name"] == "todofy-core"
     for key in CORE_SHAPE:
         assert config[key] == CORE[key], key
+    # The shipped config names the production database; the test one a placeholder id.
+    [database] = config["d1_databases"]
+    [shipped] = CORE["d1_databases"]
+    for key in ("binding", "migrations_dir"):
+        assert database[key] == shipped[key], key
     for key in ("assets", "durable_objects", "triggers", "routes"):
         assert key not in config and key not in CORE, key
     assert config["vars"]["TODOFY_PUBLIC_HOST"].endswith(".localhost")
@@ -58,6 +62,8 @@ def test_dev_switches_never_appear_in_the_shipped_configs() -> None:
     for shipped in (CORE, GATEWAY):
         assert not [name for name in shipped["vars"] if name.startswith("DEV_")]
         assert shipped["workers_dev"] is False and shipped["preview_urls"] is False
+        # The shipped configs are production: the tests' loopback hosts never appear in them.
+        assert not shipped["vars"]["TODOFY_PUBLIC_HOST"].endswith(".localhost")
 
 
 def test_shipped_core_pins_python_314() -> None:

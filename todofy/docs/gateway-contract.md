@@ -141,8 +141,8 @@ The rules, as the package applies them with these values:
 - Configuration: `ACCESS_ISSUER` trimmed, without trailing `/`, matching
   `^https://[a-z0-9-]+\.cloudflareaccess\.com$`; or, only under the loopback rule above,
   `^http://127\.0\.0\.1:\d{1,5}$`. `ACCESS_AUDIENCE` non-empty. `ACCESS_OWNER` and every
-  `ACCESS_OWNER_ALIASES` entry an e-mail address (`^[^\s@]+@[^\s@]+\.[^\s@]+$`, as the deploy config
-  generator already requires) of printable ASCII only; aliases at most 2048 characters and 8 entries. Otherwise 503
+  `ACCESS_OWNER_ALIASES` entry an e-mail address (`^[^\s@]+@[^\s@]+\.[^\s@]+$`, as
+  `deploy/deploy_vars.py` requires at deploy) of printable ASCII only; aliases at most 2048 characters and 8 entries. Otherwise 503
   `access_not_configured`, before the token is read.
 - Token: `cf-access-jwt-assertion` header, else the last `CF_Authorization` cookie; missing or longer
   than 16,000 characters → 401 `unauthorized`. Three base64url parts, header and payload JSON objects;
@@ -336,49 +336,20 @@ the private headers.
 
 ## 6. Wrangler configs and deploy
 
-### 6.1 `gateway/wrangler.toml` (base/local; tests: `gateway/wrangler.test.toml`, `gateway/wrangler.test-auth.toml`)
-```toml
-name = "todofy"
-main = "src/index.ts"
-compatibility_date = "2026-09-08"
-workers_dev = false
-preview_urls = false
+Both production configs are committed and are the single source of truth; the top level is production
+(no `[env.*]`, no `keep_vars`). Every static value is in them (account, D1, hosts, Access, limits); what
+is never committed is added at deploy by `deploy/deploy_vars.py` (§6.3). Read the files themselves rather
+than a copy here.
 
-[assets]
-directory = "../uiassets/dist"
-binding = "ASSETS"
-run_worker_first = true
-not_found_handling = "single-page-application"
+### 6.1 `gateway/wrangler.toml` = the gateway `todofy` (tests: `gateway/wrangler.test.toml`, `gateway/wrangler.test-auth.toml`)
 
-[[durable_objects.bindings]]
-name = "COORDINATOR"
-class_name = "TodofyCore"
-script_name = "todofy-core"
-
-# Script "todofy" history: v1 created the Python class; v2 deleted it once the gateway replaced it.
-[[migrations]]
-tag = "v1"
-new_sqlite_classes = ["TodofyCoordinator"]
-
-[[migrations]]
-tag = "v2"
-deleted_classes = ["TodofyCoordinator"]
-
-[[analytics_engine_datasets]]
-binding = "METRICS"
-dataset = "todofy_metrics"
-
-[triggers]
-crons = ["*/10 * * * *"]
-
-[vars]
-TODOFY_PUBLIC_HOST = "todofy.localhost"
-TODOFY_HOOKS_HOSTS = "todofy-hooks.localhost"
-BUILD_SHA = "dev"
-```
-Test variants add the gateway test vars (`DEV_AUTH_BYPASS`, `ACCESS_OWNER`, `ACCESS_AUDIENCE`,
-`DEV_ACCESS_LOOPBACK_ISSUER`, `ACCESS_OWNER_ALIASES`, `JWKS_REFRESH_COOLDOWN_MS`) and keep
-`script_name = "todofy-core"`.
+`main = "src/index.ts"`, assets `../uiassets/dist` (`run_worker_first`, SPA fallback), `routes` = a Custom
+Domain for the public host and then one per hooks host, the `COORDINATOR` binding to `TodofyCore` with
+`script_name = "todofy-core"`, its migration history (`v1` new `TodofyCoordinator`, `v2` deleted, §6.6), the
+`METRICS` dataset, the `*/10 * * * *` cron and the vars `TODOFY_PUBLIC_HOST`, `TODOFY_HOOKS_HOSTS`,
+`ACCESS_ISSUER`, `ACCESS_AUDIENCE`. Test variants use `.localhost` hosts, add the gateway test vars
+(`DEV_AUTH_BYPASS`, `ACCESS_OWNER`, `ACCESS_AUDIENCE`, `DEV_ACCESS_LOOPBACK_ISSUER`,
+`ACCESS_OWNER_ALIASES`, `JWKS_REFRESH_COOLDOWN_MS`) and keep `script_name = "todofy-core"`.
 
 ### 6.2 Root `wrangler.toml` = `todofy-core` (tests: root `wrangler.test.toml`, also named `todofy-core`)
 
@@ -386,74 +357,37 @@ The core has one test config: the two gateway test configs differ only in gatewa
 bypass vs. loopback issuer), so both pair with root `wrangler.test.toml` (short timings, fake
 upstream placeholders, `REMINDER_ENABLED = "false"`, `REPORT_PRECOMPUTE_UTC = "off"`). The old root
 `wrangler.test-auth.toml` is gone.
-```toml
-name = "todofy-core"
-main = "worker/todofy/runtime/entry.py"
-base_dir = "worker"
-compatibility_date = "2026-09-08"
-compatibility_flags = ["python_workers"]
-workers_dev = false
-preview_urls = false
 
-[[d1_databases]]
-binding = "DB"
-database_name = "todofy"
-database_id = "00000000-0000-4000-8000-000000000000"
-migrations_dir = "migrations"
-
-[[r2_buckets]]
-binding = "BACKUPS"
-bucket_name = "todofy-backups"
-
-[[migrations]]
-tag = "v1"
-new_sqlite_classes = ["TodofyCoordinator"]
-
-[[migrations]]
-tag = "v2"
-renamed_classes = [{ from = "TodofyCoordinator", to = "TodofyCore" }]
-
-[[analytics_engine_datasets]]
-binding = "METRICS"
-dataset = "todofy_metrics"
-
-[vars]
-TODOFY_PUBLIC_HOST = "todofy.localhost"
-BUILD_SHA = "dev"
-GEMINI_API_BASE = "https://generativelanguage.googleapis.com"
-GEMINI_TIMEOUT_MS = "60000"
-TODOIST_API_BASE = "https://api.todoist.com"
-```
-It stays at the repo root: pywrangler reads the Python version from the root `wrangler.toml`, and a
-Python config must sit next to `python_modules/` (a core config elsewhere fails with
+`main = "worker/todofy/runtime/entry.py"`, `base_dir = "worker"`, `compatibility_flags =
+["python_workers"]`, D1 `DB` (`migrations_dir = "migrations"`), the `BACKUPS` bucket, both of its
+migrations (`v1` new `TodofyCoordinator`, `v2` renamed to `TodofyCore`), the `METRICS` dataset and its
+vars: the fixed upstreams `GEMINI_API_BASE`/`TODOIST_API_BASE`, `TODOFY_PUBLIC_HOST` (`reminder.py`
+puts `https://<TODOFY_PUBLIC_HOST>/attention` into the daily reminder, so the core needs the public host
+too), `MAIL_SOURCE_ID`, `GEMINI_MODELS`, `GEMINI_DAILY_TOKEN_BUDGET`, `LOOKUP_DELAY_MS`, `REPORT_*`,
+`LEGACY_TEXT_RETENTION_DAYS`. Test-only timing knobs (`GEMINI_TIMEOUT_MS`, ...) keep their code defaults.
+It keeps its name and place: pywrangler reads the Python version only from the root `wrangler.toml`, and
+a Python config must sit next to `python_modules/` (a core config elsewhere fails with
 `ModuleNotFoundError: No module named 'workers'`, verified). No assets, cron, routes or DO binding.
 `entry.py` keeps a `Default` whose `fetch` returns 404 `not_found` and re-exports `TodofyCore`.
 
-### 6.3 Production generation (`deploy/generate_ci_config.py`)
-Writes three owner-only files, never overwriting: `wrangler.production.ci.json` (core, next to
-`python_modules/`), `gateway/wrangler.production.ci.json`, `gateway/wrangler.production.secrets.json`
-(`ACCESS_OWNER`, `ACCESS_OWNER_ALIASES`), and no core secrets file (the core's secrets are set by the
-owner). Gateway gets `routes` (custom domains for the public host and every hooks host), assets, the
-DO binding with `script_name`, its migration history (`v1` only until §6.6), the `METRICS` dataset, the cron and its vars; core gets
-D1, the `BACKUPS` bucket, the `METRICS` dataset, both of its migrations and its vars (the current `FIXED_VARS`, `MAIL_SOURCE_ID`, `GEMINI_*`, `TODOIST_DEFAULT_PROJECT_ID`,
-`LOOKUP_DELAY_MS`, `REPORT_*`, `LEGACY_TEXT_RETENTION_DAYS`, the four switches); both get
-`account_id`, `workers_dev: false`, `preview_urls: false`, `observability.enabled`, `BUILD_SHA`,
-`MAINTENANCE_MODE` and `TODOFY_PUBLIC_HOST`. The core needs the public host too (deviation from §1's
-table, found while writing the generator): `reminder.py` puts `https://<TODOFY_PUBLIC_HOST>/attention`
-into the daily reminder body, and `tests/runtime/test_reminder_daily.py` checks it, so the core's test
-vars need it as well. The shape of each config is copied from its checked-in toml by an explicit key
-list (core: `name`, `main`, `base_dir`, `compatibility_date`, `compatibility_flags`, `migrations`,
-`r2_buckets`, `analytics_engine_datasets`; gateway: `name`, `main`, `compatibility_date`, `assets`, `durable_objects`,
-`migrations`, `triggers`, `analytics_engine_datasets`);
-a unit test fails when either toml gains a key the generator neither copies nor replaces.
-`.gitignore` adds the gateway files (`wrangler.test-run-*.json` belongs to the harness change, §7).
+### 6.3 What the deploy adds (`deploy/deploy_vars.py`)
+`exec core|gateway -- <deploy command>` appends `--var` flags (plain_text vars, exactly like `[vars]`;
+wrangler prints them as `(hidden)`): `BUILD_SHA` (the commit) and `MAINTENANCE_MODE` on both Workers;
+`TODOIST_DEFAULT_PROJECT_ID`, `REMINDER_ENABLED`, `PROCESSING_PAUSED` and `FORCE_PAUSE_TODOIST` on the
+core. `secrets <path>` writes the gateway's owner-only secrets file (`ACCESS_OWNER`,
+`ACCESS_OWNER_ALIASES`, an emptied list sent as one space) for `--secrets-file`; the core has no secrets
+file (its secrets are set by the owner). A missing or invalid value fails the deploy by name, because a
+deploy without a var deletes it; `--env`, `--keep-vars`, the caller's own `--var` and any other config are
+refused. `deploy/test_wrangler_configs.py` checks the committed values the retired generator validated
+(host lists, UUID, model list, bounds, the core/gateway pairing).
 
 ### 6.4 Deploy order (CI, from one verified commit)
 ```sh
-npx --no-install wrangler d1 migrations apply DB --remote --config wrangler.production.ci.json
-uv run pywrangler deploy --config wrangler.production.ci.json                       # todofy-core first
-npx --no-install wrangler deploy --config gateway/wrangler.production.ci.json \
-  --secrets-file gateway/wrangler.production.secrets.json                           # then the gateway
+npx --no-install wrangler d1 migrations apply DB --remote --config wrangler.toml
+uv run python deploy/deploy_vars.py exec core -- \
+  uv run pywrangler deploy --config wrangler.toml                                   # todofy-core first
+uv run python deploy/deploy_vars.py exec gateway -- npx --no-install wrangler deploy \
+  --config gateway/wrangler.toml --secrets-file "$RUNNER_TEMP/todofy-gateway-secrets.json"  # then the gateway
 ```
 Core always deploys first, so the methods a new gateway calls exist before it calls them; a core change
 must keep serving the previous gateway's calls until the gateway deploy finishes. Adding a method or a
@@ -591,7 +525,7 @@ but the gateway's class history:
    ```
    and update their history comment.
 3. Expect `v1` + `v2` in `tests/runtime/test_configs.py` (`GATEWAY["migrations"]`) and
-   `deploy/test_generate_ci_config.py` (`gateway["migrations"]`); update §1's table and §6.1.
+   `deploy/test_wrangler_configs.py` (`GATEWAY["migrations"]`); update §1's table and §6.1.
 
 What it does: wrangler sees the published tag `v1` and sends only `v2`; Cloudflare deletes the old
 object and its storage (counters of the Python era, nothing the ledger needs). The core deploy step of
@@ -618,7 +552,7 @@ revert the revert) and rerun. If the class is ever needed again, add a new tag `
 `new_sqlite_classes`.
 
 After it is live: the `[[migrations]]` blocks may be removed from the three gateway tomls (make
-`deploy/test_generate_ci_config.py` assert no gateway migrations); wrangler sends nothing for an empty
+`deploy/test_wrangler_configs.py` assert no gateway migrations); wrangler sends nothing for an empty
 list, which is right for the live `todofy` and for a fresh account.
 
 ## 7. Local dev and runtime tests
@@ -626,8 +560,11 @@ list, which is right for the live `todofy` and for a fresh account.
 One process runs both Workers (verified, §8):
 
 ```sh
-uv run pywrangler dev -c gateway/wrangler.toml -c wrangler.toml     # from the repo root
+uv run pywrangler dev -c gateway/wrangler.toml -c wrangler.toml \
+  --var TODOFY_PUBLIC_HOST:todofy.localhost --var TODOFY_HOOKS_HOSTS:todofy-hooks.localhost \
+  --var BUILD_SHA:dev                                                # from todofy/, local bindings only
 ```
+Both configs are the production ones, so the local hosts come in with `--var` (docs/dev-notes.md §1).
 The first `-c` is the primary: it owns the port, `--var`, `--env-file`, the cron trigger
 (`/cdn-cgi/local/scheduled`) and the assets. `--var`/`--env-file` do **not** reach the second config;
 core vars come from its config, and local core secrets from `.dev.vars` next to the root

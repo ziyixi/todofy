@@ -10,7 +10,9 @@ fixture, the canary one included), `test_contract.py`, `test_openapi_vocab.py`, 
 gateway's `test/ops.test.ts`; the workerd suite `tests/runtime/test_ops.py` runs in the `Todofy runtime` shards.
 The Todofy check jobs and `Todofy deploy` below run with `working-directory: todofy`. They check and deploy
 both Todofy Workers from the same commit: the TypeScript gateway `todofy` (`gateway/`) and the Python
-`todofy-core` (`worker/`, root `wrangler.toml`); see [gateway-contract.md](gateway-contract.md). Actions
+`todofy-core` (`worker/`, root `wrangler.toml`); see [gateway-contract.md](gateway-contract.md). Both
+production configs are committed, top level = production: `wrangler.toml` (todofy-core; pywrangler needs
+this exact name) and `gateway/wrangler.toml` (the gateway). Nothing is generated. Actions
 are pinned by commit SHA. The gateway compiles in the shared auth package `packages/edge-auth` (a
 `file:` dependency, never a Worker of its own), so a change there checks and deploys Todofy as well as
 Mail Hero. The workflow never prints secret values; the owner's emails are environment
@@ -185,16 +187,22 @@ a new production-code seam, so none of them can become event-driven.
 that passed is what ships:
 
 1. install locked dependencies (root, `gateway/`, `web/`) and build the UI from the verified revision
-2. `deploy/generate_ci_config.py` writes three owner-only files, removed at the end even on failure:
-   `wrangler.production.ci.json` (core: D1, the `BACKUPS` R2 bucket `todofy-backups`, the `METRICS`
-   Analytics Engine dataset, the Durable Object migrations, vars; no routes),
-   `gateway/wrangler.production.ci.json` (gateway: custom domains, assets, cron, the `COORDINATOR`
-   binding to `todofy-core`, the `METRICS` dataset, migrations, vars) and `gateway/wrangler.production.secrets.json` (the
-   owner's Access emails, from environment secrets)
-3. dry-run both bundles before changing anything
-4. `wrangler d1 migrations apply DB --remote`, then `pywrangler deploy` of `todofy-core`
-5. `wrangler deploy --secrets-file ...` of the gateway `todofy` (the owner emails become gateway secrets,
-   shown as hidden)
+2. read the hosts from the committed `gateway/wrangler.toml` (the environment URL and the probes below)
+3. `deploy/deploy_vars.py secrets` writes the gateway's owner-only secrets file (the owner's Access emails,
+   from environment secrets) to `$RUNNER_TEMP`, removed at the end even on failure; then dry-run both
+   bundles before changing anything
+4. `wrangler d1 migrations apply DB --remote --config wrangler.toml`, then
+   `deploy_vars.py exec core -- pywrangler deploy --config wrangler.toml` of `todofy-core`
+5. `deploy_vars.py exec gateway -- wrangler deploy --config gateway/wrangler.toml --secrets-file ...` of the
+   gateway `todofy` (the owner emails become gateway secrets, shown as hidden)
+
+   `deploy/deploy_vars.py` adds with `--var` what is never committed and refuses a missing or invalid value,
+   because a deploy without a var deletes it: `BUILD_SHA` (the commit) and `MAINTENANCE_MODE` on both
+   Workers; `TODOIST_DEFAULT_PROJECT_ID` (an environment secret: pywrangler echoes its command line, and
+   Actions masks secrets), `REMINDER_ENABLED`, `PROCESSING_PAUSED` and `FORCE_PAUSE_TODOIST` on the core. It
+   refuses `--env`, `--keep-vars`, its caller's own `--var` and any other config file. The static checks the
+   retired generator made are unit tests on the committed files (`deploy/test_wrangler_configs.py`); the
+   checks across apps and ci.yml are in the root `.github/scripts/test_wrangler_configs.py`.
 6. poll `https://<first hooks host>/health` until it reports this commit (10 × 15 s; the first deploy waits
    for the Custom Domain certificate). The gateway answers `/health` without the Durable Object, so this
    proves the gateway build only.
@@ -239,7 +247,7 @@ The first deploy of the split replaces the old single Python Worker `todofy`; it
 ## Changing a switch
 
 Operational switches (`TODOFY_MAINTENANCE_MODE`, `TODOFY_PROCESSING_PAUSED`, `TODOFY_FORCE_PAUSE_TODOIST`,
-`TODOFY_REMINDER_ENABLED`) and every other setting are GitHub environment variables, so a deploy never
+`TODOFY_REMINDER_ENABLED`) are the only GitHub environment variables the deploy reads, so a deploy never
 overwrites the operational state:
 
 1. Settings → Environments → `production` → edit the variable.
@@ -250,5 +258,10 @@ overwrites the operational state:
 `TODOFY_MAINTENANCE_MODE` reaches both Workers in the same run: the gateway refuses webhook and owner
 writes first, and the core stops its own work. The other three switches are core-only.
 
+Every other setting (account, D1, hosts, Access, models, limits, schedules) is committed in `wrangler.toml`
+or `gateway/wrangler.toml`: change it with a commit, which is checked and deployed like code.
+
 Do not change vars in the Cloudflare dashboard or with `wrangler`: the next deploy replaces them, on
-either Worker. Worker secrets set with `wrangler secret put` are kept across deploys.
+either Worker. Never run a plain `wrangler deploy` or `pywrangler deploy` of these configs either: it
+deletes the injected vars (the switches read as false, the maintenance mode lifts). Worker secrets set with
+`wrangler secret put` are kept across deploys.

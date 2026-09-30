@@ -122,8 +122,11 @@ uv run pytest tests/unit tests/fakes tools deploy        # host tests
 uv run pytest tests/runtime                               # real workerd, gateway + core, D1, DO, alarms, cron (~9 min)
 ```
 
-`uv run pywrangler dev -c gateway/wrangler.toml -c wrangler.toml` runs both Workers locally
-(`todofy.localhost` / `todofy-hooks.localhost`).
+`wrangler.toml` (todofy-core) and `gateway/wrangler.toml` (the gateway) are the committed production
+configs (top level = production); what is never committed is added at deploy by `deploy/deploy_vars.py`.
+`uv run pywrangler dev -c gateway/wrangler.toml -c wrangler.toml --var TODOFY_PUBLIC_HOST:todofy.localhost
+--var TODOFY_HOOKS_HOSTS:todofy-hooks.localhost --var BUILD_SHA:dev` runs both Workers locally with local
+bindings only (docs/dev-notes.md §1).
 [docs/dev-notes.md](docs/dev-notes.md) covers the layout, the Python Workers idioms and the module
 contracts.
 
@@ -133,7 +136,7 @@ The monorepo's `.github/workflows/ci.yml` runs Todofy's checks (`Todofy static c
 shards and `Todofy checks`, see [docs/ci-cd.md](docs/ci-cd.md)) for every push that touches
 `todofy/`, `contracts/` or `.github/`; a push to `main` that changes `todofy/` (or a manual run on `main` for
 `both` or `todofy`) then deploys once `CI gate` passes:
-generate both production configs from GitHub variables, dry-run, apply D1 migrations, deploy
+dry-run the committed production configs with the values `deploy/deploy_vars.py` adds, apply D1 migrations, deploy
 `todofy-core` and then the gateway, wait for `/health` to report the commit, then check that a wrong
 newsletter credential gets 401/429 from the Durable Object (proving gateway → object → D1). There are no pull requests; `main` is fast-forwarded. One-time setup
 (D1, R2 bucket, Access, GitHub environment, Worker secrets) is in [docs/cloudflare-setup.md](docs/cloudflare-setup.md).

@@ -1,0 +1,19 @@
+# Local development only: todofy-core's local values. Copy to todofy/.dev.vars (gitignored; wrangler reads
+# the .dev.vars next to wrangler.toml). Synthetic or your own test values only, never production keys.
+#
+# The committed wrangler.toml is production. Local dev uses local bindings only (never --remote) and D1
+# commands always pass --local. The gateway is the primary of the combined process, so its local values go
+# on the command line (docs/dev-notes.md §1):
+#   uv run pywrangler dev -c gateway/wrangler.toml -c wrangler.toml \
+#     --var TODOFY_PUBLIC_HOST:todofy.localhost --var TODOFY_HOOKS_HOSTS:todofy-hooks.localhost \
+#     --var BUILD_SHA:dev --var MAINTENANCE_MODE:false --var DEV_AUTH_BYPASS:true
+#
+# The runtime tests start their core from todofy/ as well, and this file overrides their core's vars: never
+# put a switch (MAINTENANCE_MODE, PROCESSING_PAUSED, ...), BUILD_SHA or a timing knob here, and remove the
+# file if a runtime test behaves unexpectedly. Unset, the switches CI adds at deploy read as false.
+#
+# The reminder links to the local owner UI (the same host the tests use).
+TODOFY_PUBLIC_HOST=todofy.localhost
+# Worker secrets, only to call the real upstreams from a local core:
+# GEMINI_API_KEY=
+# TODOIST_API_KEY=

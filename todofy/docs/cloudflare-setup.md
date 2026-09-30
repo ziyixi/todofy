@@ -21,7 +21,8 @@ Todofy is two Workers ([gateway-contract.md](gateway-contract.md)):
 npx wrangler d1 create todofy
 ```
 
-Put the printed `database_id` into the GitHub variable `TODOFY_D1_DATABASE_ID`. The schema is applied
+Put the printed `database_id` into `[[d1_databases]]` of the committed `wrangler.toml` and commit it (a
+D1 ID is not a secret). The schema is applied
 by every deploy (`wrangler d1 migrations apply DB --remote`); do not apply it by hand.
 
 Backup bucket (weekly D1 backups, §7), before the first deploy that binds it; a deploy whose config
@@ -72,48 +73,52 @@ Environment secrets:
 | `CF_API_TOKEN` | Cloudflare API token: Workers Scripts edit (covers both Workers), D1 edit, zone Workers Routes / Custom Domains and DNS edit for the zone, account settings read. No billing permissions. |
 | `TODOFY_ACCESS_OWNER` | the owner's primary Access email |
 | `TODOFY_ACCESS_OWNER_ALIASES` | comma-separated other logins of the owner (may be empty) |
+| `TODOFY_TODOIST_DEFAULT_PROJECT_ID` | Todoist project for new tasks. Added to the core with `--var`; a secret because the repository is public and pywrangler echoes its command line (Actions masks secrets there) |
 
 The two owner secrets are secrets rather than variables because wrangler prints every plain var with its
 value in the deploy log. The deploy passes them to the gateway `todofy` as Worker secrets
 (`--secrets-file`); the core never sees them.
 
-Environment variables (validated by `deploy/generate_ci_config.py`; a bad or missing one fails the
-deploy and names only the variable):
+Environment variables: only the operational switches, stated at every deploy so a release never overwrites
+the operational state ([ci-cd.md](ci-cd.md) "Changing a switch"). `deploy/deploy_vars.py` validates them
+(a bad or missing one fails the deploy and names only the variable) and adds them with `--var`:
 
 | Variable | Value |
 |---|---|
-| `CLOUDFLARE_ACCOUNT_ID` | 32 hex |
-| `TODOFY_D1_DATABASE_ID` | from step 1 |
-| `TODOFY_D1_DATABASE_NAME` | optional, default `todofy` |
-| `TODOFY_PUBLIC_HOST` | UI host, e.g. `todofy.ziyixi.science` |
-| `TODOFY_HOOKS_HOSTS` | comma-separated machine hosts (at most 4), e.g. `todofy-hooks.ziyixi.science`; at cutover add `daily.ziyixi.science` |
-| `TODOFY_MAIL_SOURCE_ID` | optional, default `mail-hero-personal`; must equal the source ID of the imported ledger |
-| `TODOFY_ACCESS_ISSUER` | `https://<team>.cloudflareaccess.com` |
-| `TODOFY_ACCESS_AUDIENCE` | AUD tag from step 2 |
-| `TODOFY_TODOIST_DEFAULT_PROJECT_ID` | Todoist project for new tasks. A **secret**, not a variable: the repository is public and Actions logs print variables |
-| `TODOFY_GEMINI_MODELS` | optional, comma-separated, first is preferred |
-| `TODOFY_GEMINI_DAILY_TOKEN_BUDGET` | optional, default `3000000` |
-| `TODOFY_REPORT_DEFAULT_TOP` | optional, default `10`; must equal the newsletter's `?top=` (10) so its report is precomputed |
-| `TODOFY_REPORT_PRECOMPUTE_UTC` | optional, default `13:30` |
-| `TODOFY_LOOKUP_DELAY_MS` | optional, default `120000` |
-| `TODOFY_LEGACY_TEXT_RETENTION_DAYS` | optional, default `0` (keep imported mail text forever) |
-| `TODOFY_REMINDER_ENABLED` | `true` / `false` (required) |
+| `TODOFY_REMINDER_ENABLED` | `true` / `false` (required); core |
 | `TODOFY_MAINTENANCE_MODE` | `true` / `false` (required); set on both Workers |
-| `TODOFY_PROCESSING_PAUSED` | `true` / `false` (required) |
-| `TODOFY_FORCE_PAUSE_TODOIST` | `true` / `false` (required) |
+| `TODOFY_PROCESSING_PAUSED` | `true` / `false` (required); core |
+| `TODOFY_FORCE_PAUSE_TODOIST` | `true` / `false` (required); core |
 
-`BUILD_SHA`, the Gemini and Todoist base URLs and the routes are written by the generator, not set. The
-generator gives each Worker only the vars it reads: hosts and `ACCESS_*` go to the gateway; the mail source,
-Gemini, Todoist, report, retention and switch settings go to the core; `BUILD_SHA`, `MAINTENANCE_MODE`
-and `TODOFY_PUBLIC_HOST` (the reminder links to the UI) go to both.
+Every other setting is committed in the two production configs (top level = production; the repository
+is public, so nothing personal or secret goes there), and changing one is a commit:
+
+| Setting | Where |
+|---|---|
+| account ID | `account_id` in both |
+| D1 name and ID (step 1) | `wrangler.toml` `[[d1_databases]]` |
+| UI host, hooks hosts (at most 4; `daily.ziyixi.science` since cutover) | `gateway/wrangler.toml` `routes` (the UI host first, then each hooks host) and `[vars]` `TODOFY_PUBLIC_HOST`, `TODOFY_HOOKS_HOSTS`; the core's `TODOFY_PUBLIC_HOST` (the reminder links to the UI) must be the same |
+| Access issuer and AUD (step 2) | `gateway/wrangler.toml` `ACCESS_ISSUER`, `ACCESS_AUDIENCE` |
+| mail source ID | `wrangler.toml` `MAIL_SOURCE_ID` (`mail-hero-personal`; must equal the source ID of the imported ledger) |
+| Gemini models, daily token budget | `wrangler.toml` `GEMINI_MODELS` (first is preferred), `GEMINI_DAILY_TOKEN_BUDGET` |
+| report top and precompute time | `wrangler.toml` `REPORT_DEFAULT_TOP` (must equal the newsletter's `?top=`, 10, so its report is precomputed), `REPORT_PRECOMPUTE_UTC` |
+| lookup delay, legacy text retention | `wrangler.toml` `LOOKUP_DELAY_MS`, `LEGACY_TEXT_RETENTION_DAYS` (`0` keeps imported mail text forever) |
+
+The Gemini and Todoist base URLs are fixed in `wrangler.toml` and pinned by tests. `BUILD_SHA` (the commit)
+is added at deploy on both Workers. Each Worker gets only the vars it reads: hosts and `ACCESS_*` go to the
+gateway; the mail source, Gemini, Todoist, report, retention and switch settings go to the core;
+`BUILD_SHA`, `MAINTENANCE_MODE` and `TODOFY_PUBLIC_HOST` go to both. `deploy/test_wrangler_configs.py`
+checks the committed values (formats, bounds, host order, the core/gateway pairing).
 
 ## 4. Worker secrets
 
-Set from the owner's machine (`npx wrangler login` first), and again only to rotate. Each command
-prompts for the value; nothing goes on the command line or into a file.
+Set from the owner's machine (`npx wrangler login` first), from `todofy/`, and again only to rotate. Each
+command prompts for the value; nothing goes on the command line or into a file. Name the Worker's
+committed config (a Worker secret survives every deploy):
 
 ```sh
-npx wrangler secret put <NAME> --name <WORKER>
+npx wrangler secret put <NAME> --config gateway/wrangler.toml     # the gateway todofy
+npx wrangler secret put <NAME> --config wrangler.toml             # todofy-core
 ```
 
 Gateway `todofy`:
@@ -202,13 +207,14 @@ in [gateway-contract.md](gateway-contract.md):
 
 ## 5. Hosts and callers
 
-- Both hosts are Custom Domains of the gateway `todofy`, created by the deploy from the generated routes.
+- Both hosts are Custom Domains of the gateway `todofy`, created by the deploy from the `routes` committed
+  in `gateway/wrangler.toml`.
   `todofy-core` has no route, `workers.dev` or preview URL; only the gateway's binding reaches it.
 - Mail Hero: its webhook host allowlist must include the hooks host, and its target posts to
   `https://<hooks host>/hooks/mail` with the Bearer token above.
 - Newsletter: `https://<hooks host>/api/summary` and `/api/recommendation?top=10` with Basic.
 - Cutover: `daily.ziyixi.science` (the old service's host, which Mail Hero's existing target and the
-  newsletter already use) is added to `TODOFY_HOOKS_HOSTS` after the old Tunnel public hostname and its
+  newsletter already use) is added to the committed `TODOFY_HOOKS_HOSTS` and `routes` after the old Tunnel public hostname and its
   DNS record are removed; the Custom Domain cannot be created while another record holds the name
   (inferred from Cloudflare's Custom Domain rules; confirm during the cutover). The digests above must
   then be those of the credentials those callers already send.
@@ -223,19 +229,24 @@ in [gateway-contract.md](gateway-contract.md):
 
 ## 6. Local checks before the first deploy
 
+The deploy's own dry-run, with local placeholder values (or the real ones exported in your shell; the
+wrapper prints names only). `GITHUB_SHA` (40 hex, set by Actions) becomes `BUILD_SHA`, so export it
+locally too. Build the UI first (`npm run build --prefix web`).
+
 ```sh
-# with the variables and secrets exported; prints names only. GITHUB_SHA (40 hex, set by Actions)
-# becomes BUILD_SHA, so export it locally too. Build the UI first (npm run build --prefix web).
-GITHUB_SHA=$(git rev-parse HEAD) uv run python deploy/generate_ci_config.py
-uv run pywrangler deploy --dry-run --config wrangler.production.ci.json
-npx --no-install wrangler deploy --dry-run --config gateway/wrangler.production.ci.json \
-  --secrets-file gateway/wrangler.production.secrets.json
-rm -f wrangler.production.ci.json gateway/wrangler.production.ci.json gateway/wrangler.production.secrets.json
+export GITHUB_SHA=$(git rev-parse HEAD) TODOFY_MAINTENANCE_MODE=false TODOFY_PROCESSING_PAUSED=false \
+  TODOFY_FORCE_PAUSE_TODOIST=false TODOFY_REMINDER_ENABLED=false TODOFY_TODOIST_DEFAULT_PROJECT_ID=placeholder \
+  TODOFY_ACCESS_OWNER=owner@example.com TODOFY_ACCESS_OWNER_ALIASES=
+secrets=$(mktemp -d)/todofy-gateway-secrets.json
+uv run python deploy/deploy_vars.py secrets "$secrets"
+uv run python deploy/deploy_vars.py exec core -- uv run pywrangler deploy --dry-run --config wrangler.toml
+uv run python deploy/deploy_vars.py exec gateway -- npx --no-install wrangler deploy --dry-run \
+  --config gateway/wrangler.toml --secrets-file "$secrets"
+rm -f "$secrets"
 ```
 
-The generator writes the core config next to the root `wrangler.toml` (pywrangler needs it beside
-`python_modules/`) and the gateway config and secrets file into `gateway/`. All three are gitignored and
-created owner-only (0600).
+The committed configs are production: never run them without `--dry-run` from a laptop (a plain deploy
+deletes the injected vars), and run `wrangler dev` and D1 commands with local bindings only (`--local`).
 
 ## 7. Backups and restore
 
@@ -270,7 +281,8 @@ Restore into a new, empty database (with `--local --persist-to <dir>` the same c
 local copy). The backup's key is on the health page (e.g. `backups/2026-10-04T100002Z/`):
 
 ```sh
-npx wrangler d1 create todofy-restore        # a config naming it: <restore config>
+npx wrangler d1 create todofy-restore        # <restore config>: a scratch copy of wrangler.toml outside
+                                             # the repo naming this database (never committed)
 python3 tools/backup_restore.py download --backup backups/<job start> --out restore/ --remote
 python3 tools/backup_restore.py sql --in restore/ --out restore/restore.sql
 npx wrangler d1 migrations apply DB --remote --config <restore config>
@@ -297,9 +309,9 @@ coordinator may use a database at a time):
    Hero retries) and owner writes, and the object stops ledger work. Mail that arrives from here on is
    held by Mail Hero, not lost.
 2. Restore and `verify` as above until it prints `PASS`.
-3. Set `TODOFY_D1_DATABASE_ID` (and `TODOFY_D1_DATABASE_NAME` if the restored database has another
-   name) to the restored database and run the workflow on `main`. Its `migrations apply` finds every
-   migration already applied.
+3. Commit the restored database's `database_id` (and `database_name` if it has another name) to
+   `[[d1_databases]]` in `wrangler.toml` on `main`; that push checks and deploys Todofy. Its
+   `migrations apply` finds every migration already applied.
 4. Set `TODOFY_MAINTENANCE_MODE=false` and run the workflow on `main`. Mail Hero redelivers what it
    held during maintenance. Events Todofy acknowledged after the backup was taken are not in the
    restored database, and Mail Hero does not send an acknowledged event again: compare with Mail Hero's

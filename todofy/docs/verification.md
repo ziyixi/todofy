@@ -55,6 +55,23 @@ Pending for ops-v1: release (Todofy first, then Mail Hero, per `contracts/ops-v1
 migration `0003_ops` on the remote D1; a live canary through Mail Hero; the first ops section in a real
 daily reminder; the dashboard Worker itself (not built).
 
+## Committed production configs (2026-09-30, macOS, local only, not released)
+
+`wrangler.toml` (todofy-core) and `gateway/wrangler.toml` became the committed production configs (top
+level = production, real static values from the GitHub production variables, read only), and
+`deploy/deploy_vars.py` replaced `deploy/generate_ci_config.py`. Synthetic values only, no production call:
+
+| Step | Result |
+|---|---|
+| ruff check and format; host tests `tests/unit tests/fakes tools deploy` | ok; 927 passed, 1 skipped (the protos cross-check) |
+| gateway lint, typecheck, `npm test`; `web` checks and build | ok; 86 and 76 passed |
+| fresh `pywrangler sync` from the committed `wrangler.toml` (python_modules and .venv-workers removed), then `tests/runtime` with 4 processes, `test_alarm.py` alone | 389 + 2 passed |
+| dry-run of both configs through `deploy_vars.py` (placeholder secrets) | ok; the injected vars and both owner secrets shown as `(hidden)`; workers SDK vendored |
+| equivalence: old generator path and new path, each a full deploy against a local mock of the Cloudflare API (loopback only, placeholder token), real static values, placeholder secrets | core: the same 11 requests, the same 70 modules byte for byte; gateway: the same 19 requests, the same script (sha256 `2b0a149e…` on both sides, the config stayed in `gateway/`), the same custom domains, cron, secrets and `keep_bindings`; for both only the order of the bindings differs (the injected vars come last); `d1 migrations apply DB --remote` byte-identical |
+
+Pending: the release; afterwards compare both Workers' bindings and var hashes with the previous version
+(only `BUILD_SHA` may differ) and check that pywrangler's echoed command shows the Todoist project masked.
+
 ## Production
 
 Observed on the live account, hosts and callers on 2026-09-29; times are UTC. Only IDs, counts, status
