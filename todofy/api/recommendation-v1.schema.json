@@ -36,7 +36,9 @@
       }
     },
     "model": {"description": "Gemini model name; empty when no model was called.", "type": "string"},
-    "task_count": {"description": "Summaries in the window.", "type": "integer", "minimum": 0, "maximum": 1000000},
+    "task_count": {"description": "Summaries the model saw: new_count + carryover_count (JSON Schema cannot express the sum).", "type": "integer", "minimum": 0, "maximum": 1000000},
+    "new_count": {"description": "Summaries of mail that arrived in the 24 h window (window_start, window_end]. Added 2026-09-30; absent from reports stored before.", "type": "integer", "minimum": 0, "maximum": 1000000},
+    "carryover_count": {"description": "Older mail tasks (up to 14 days, at most 30) that the day's Todoist snapshot still lists as open, shown to the model as \"[N 天前] summary\"; 0 when no usable snapshot existed, and then the report is exactly the 24 h one. Added 2026-09-30; absent from reports stored before.", "type": "integer", "minimum": 0, "maximum": 1000000},
     "status": {
       "description": "The newsletter endpoint sends only ok and empty_window; model_output_invalid appears only in stored copies the owner API lists. stale is kept for compatibility and is no longer sent: without a report computed since the latest precompute time, the endpoint answers 503.",
       "enum": ["ok", "empty_window", "model_output_invalid", "stale"]

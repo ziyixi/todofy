@@ -3,7 +3,7 @@
 from . import ACTIVE, ATTENTION, REAL_MAIL, Query
 
 REMINDER_DAY = Query(
-    "SELECT state, attempts, next_attempt_at, subject, body, ops_count FROM mail_reminders WHERE day = ?",
+    "SELECT state, attempts, next_attempt_at, subject, body, ops_count, project_id FROM mail_reminders WHERE day = ?",
     "sqlite_autoindex_mail_reminders_1",
 )
 REMINDER_PAGE = Query(
@@ -28,12 +28,13 @@ OPS_CARRIED = Query(
     "SELECT count(*) AS n FROM mail_reminders WHERE day >= ? AND day < ? AND ops_generated_at = ?",
     "sqlite_autoindex_mail_reminders_1",
 )
-# Claims the day before Todoist is called; ops_count is the number of ops items the body lists and
-# ops_generated_at the listed report's generated_at (epoch ms, 0 for none).
+# Claims the day before Todoist is called; ops_count is the number of ops items the body lists,
+# ops_generated_at the listed report's generated_at (epoch ms, 0 for none) and project_id the Todoist
+# project the task goes to (frozen, like the text, for every retry of the day).
 CLAIM_DAY = Query(
     "INSERT INTO mail_reminders"
-    " (day, state, subject, body, attention_count, ops_count, ops_generated_at, created_at, updated_at)"
-    " VALUES (?, 'sending', ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (day) DO NOTHING",
+    " (day, state, subject, body, attention_count, ops_count, ops_generated_at, project_id, created_at, updated_at)"
+    " VALUES (?, 'sending', ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (day) DO NOTHING",
     "sqlite_autoindex_mail_reminders_1",
 )
 # Re-claims a failed day with its frozen subject and body, so the retry keeps its X-Request-Id.

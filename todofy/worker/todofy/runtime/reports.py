@@ -4,9 +4,11 @@ Both are precomputed once a day at REPORT_PRECOMPUTE_UTC. The newsletter gets a
 stored row only when it was computed since the latest precompute time and is
 usable (``ok`` or ``empty_window``); otherwise the coordinator computes one
 within 40 s, under its hourly computation cap, and answers 503 when that
-fails. The newsletter reads only the HTTP status, so an old or unusable report
-is never sent as a 200. Responses validate against api/summary-v1 and
-api/recommendation-v1.
+fails. The recommendation's input is the 24 h window plus the carryover: older
+mail tasks the day's Todoist snapshot still lists as open (docs/gtd-features.md
+§3); without a usable snapshot it is exactly the 24 h report. The newsletter
+reads only the HTTP status, so an old or unusable report is never sent as a 200.
+Responses validate against api/summary-v1 and api/recommendation-v1.
 """
 
 import json
@@ -15,7 +17,7 @@ from datetime import UTC, datetime
 from typing import Any
 from urllib.parse import parse_qs
 
-from todofy.core import prompts
+from todofy.core import gtd, prompts
 from todofy.core.api_errors import ApiError
 from todofy.core.backoff import DAY, HOUR, MINUTE, REPORT_ON_DEMAND_BUDGET
 from todofy.core.metrics import Step
@@ -32,7 +34,7 @@ from todofy.core.report_schema import (
 )
 from todofy.core.sql import reports as sql
 from todofy.runtime import gemini, metrics
-from todofy.runtime.config import flag, report_default_top, var
+from todofy.runtime.config import flag, integer, report_default_top, var
 from todofy.runtime.http import Result, failed, ok
 from todofy.runtime.interop import now_ms
 
@@ -87,15 +89,19 @@ async def compute(env: Any, coordinator: Any, kind: str, top_n: int, now: int, b
     window = await env.DB.prepare(sql.REPORT_WINDOW.sql).bind(start, now, MAX_WINDOW_SUMMARIES).all()
     summaries = [row.summary for row in window.results]
     stamps = {"computed_at": _stamp(now), "window_start": _stamp(start), "window_end": _stamp(now)}
+    # The recommendation also sees older mail tasks still open in Todoist (never the summary report).
+    carried = await carryover(env, start, now) if kind == RECOMMENDATION else []
+    counts = {"new_count": len(summaries), "carryover_count": len(carried)}
+    summaries += carried
 
     if not summaries:
         model = ""
         if kind == SUMMARY:
             payload = _summary(EMPTY_WINDOW_SUMMARY, 0, ReportStatus.EMPTY_WINDOW, model, stamps)
         else:
-            payload = _recommendation([], 0, ReportStatus.EMPTY_WINDOW, model, top_n, stamps)
+            payload = _recommendation([], 0, ReportStatus.EMPTY_WINDOW, model, top_n, stamps | counts)
     else:
-        text, model = await _generate(env, coordinator, kind, top_n, summaries, now, budget_ms)
+        text, model = await _generate(env, coordinator, kind, top_n, summaries, now, budget_ms, bool(carried))
         if kind == SUMMARY:
             # A long day is cut to fit rather than failed: the same prompt would fail again.
             fitted = fit_summary(text)
@@ -106,7 +112,7 @@ async def compute(env: Any, coordinator: Any, kind: str, top_n: int, now: int, b
                 _log(kind, top_n, "summary_fitted")
             payload = _summary(fitted, len(summaries), ReportStatus.OK, model, stamps)
         else:
-            payload = _parsed_recommendation(text, len(summaries), model, top_n, stamps)
+            payload = _parsed_recommendation(text, len(summaries), model, top_n, stamps | counts)
 
     await (
         env.DB.prepare(sql.STORE_REPORT.sql)
@@ -226,11 +232,49 @@ async def latest(db: Any) -> dict:
     return {"summary": stored[0], "recommendations": [report for report in stored[1:] if report is not None]}
 
 
+async def carryover(env: Any, window_start: int, now: int) -> list[str]:
+    """Mail tasks from the REPORT_CARRYOVER_DAYS before the 24 h window that today's Todoist snapshot
+    still lists as open, newest first, at most CARRYOVER_MAX_ROWS, each as ``[N 天前] summary``.
+
+    Empty (and the recommendation exactly the 24 h report) without an ``ok`` snapshot finished in
+    the last 26 hours (runtime/gtd.py takes it at 13:00 UTC), with REPORT_CARRYOVER_DAYS = 0, or when
+    anything here fails: the carryover never costs the morning brief.
+    """
+    days = min(integer(env, "REPORT_CARRYOVER_DAYS", gtd.DEFAULT_CARRYOVER_DAYS), gtd.MAX_CARRYOVER_DAYS)
+    if days == 0:
+        return []
+    db = env.DB
+    try:
+        fresh = now - gtd.SNAPSHOT_FRESH
+        snapshot = await db.prepare(sql.LATEST_OK_SNAPSHOT.sql).bind(gtd.day_of(fresh), gtd.day_of(now), fresh).first()
+        if snapshot is None:
+            print(json.dumps({"report": RECOMMENDATION, "carryover": "no_snapshot"}))
+            return []
+        rows = await (
+            db.prepare(sql.CARRYOVER.sql)
+            .bind(now - days * DAY, window_start, snapshot["day"], gtd.CARRYOVER_MAX_ROWS)
+            .all()
+        )
+        carried = [gtd.carried_line(row["summary"], now, int(row["created_at"])) for row in rows.results]
+    except Exception as exc:
+        print(json.dumps({"report": RECOMMENDATION, "carryover": "failed", "error": type(exc).__name__}))
+        return []
+    print(json.dumps({"report": RECOMMENDATION, "carryover": len(carried)}))
+    return carried
+
+
 async def _generate(
-    env: Any, coordinator: Any, kind: str, top_n: int, summaries: list[str], now: int, budget_ms: int
+    env: Any,
+    coordinator: Any,
+    kind: str,
+    top_n: int,
+    summaries: list[str],
+    now: int,
+    budget_ms: int,
+    carryover: bool = False,
 ) -> tuple[str, str]:
     """Gemini text and model name; raises ReportError without a usable answer."""
-    system = prompts.SUMMARY_RANGE if kind == SUMMARY else prompts.recommend_prompt(top_n)
+    system = prompts.SUMMARY_RANGE if kind == SUMMARY else prompts.recommend_prompt(top_n, carryover)
     user = prompts.report_input(summaries)
     reserved = math.ceil(len((system + user).encode()) / 2) + OUTPUT_TOKEN_ALLOWANCE
     if not coordinator.reserve_tokens(reserved, now):
@@ -256,7 +300,7 @@ async def _generate(
     return result.text, result.model
 
 
-def _parsed_recommendation(text: str, count: int, model: str, top_n: int, stamps: dict[str, str]) -> dict:
+def _parsed_recommendation(text: str, count: int, model: str, top_n: int, stamps: dict[str, Any]) -> dict:
     recommendations = parse_recommendations(text, top_n)
     if recommendations is not None:
         tasks = [{"rank": r.rank, "title": r.title, "reason": r.reason} for r in recommendations]
@@ -279,9 +323,10 @@ def _summary(text: str, count: int, status: ReportStatus, model: str, stamps: di
 
 
 def _recommendation(
-    tasks: list[dict], count: int, status: ReportStatus, model: str, top_n: int, stamps: dict[str, str]
+    tasks: list[dict], count: int, status: ReportStatus, model: str, top_n: int, fields: dict[str, Any]
 ) -> dict:
-    return {"tasks": tasks, "model": model, "task_count": count, "status": status, "top_n": top_n, **stamps}
+    """``fields``: the timestamps plus new_count and carryover_count (task_count is their sum)."""
+    return {"tasks": tasks, "model": model, "task_count": count, "status": status, "top_n": top_n, **fields}
 
 
 def _precompute_offset(value: str) -> int | None:

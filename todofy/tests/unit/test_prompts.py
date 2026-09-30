@@ -129,3 +129,29 @@ def test_report_input_matches_go_handlers(golden):
     summaries = ["第一条合成摘要", "Second synthetic summary"]
     assert prompts.report_input(summaries).encode() == golden.bytes("report_input.txt")
     assert prompts.report_input([]) == prompts.REPORT_SEPARATOR
+
+
+# ---- the morning brief's carryover (docs/gtd-features.md §3) ---------------------------------
+
+
+@pytest.mark.parametrize("top_n", [1, 3, 10])
+def test_without_carryover_the_prompt_is_the_old_one(golden, top_n):
+    assert prompts.recommend_prompt(top_n, carryover=False).encode() == golden.bytes(f"prompt_recommend_top{top_n}.txt")
+
+
+def test_the_carryover_prompt_is_pinned(golden):
+    """Changing this text changes what the model is told about older tasks: update the golden on purpose."""
+    assert prompts.recommend_prompt(10, carryover=True).encode() == golden.bytes("prompt_recommend_top10_carryover.txt")
+
+
+def test_the_carryover_prompt_differs_only_by_its_three_edits():
+    plain, carried = prompts.recommend_prompt(3), prompts.recommend_prompt(3, carryover=True)
+    rebuilt = carried
+    for old, new in prompts.CARRYOVER_EDITS:
+        assert new.replace("{top_n}", "3") in carried
+        rebuilt = rebuilt.replace(new, old)
+    assert rebuilt == plain
+    assert '"[N 天前]"' in carried and "still open" in carried
+    assert "Never call it overdue unless its summary states a date that has passed" in carried
+    for fragment in ("pick up to 3 distinct tasks", "never exceeding #3", "Output at most 3 items"):
+        assert fragment in carried

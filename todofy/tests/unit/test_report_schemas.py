@@ -177,8 +177,20 @@ def test_summary_rejects(response):
         recommendation(tasks=[], task_count=0, status="empty_window", model=""),
         recommendation(tasks=[], status="model_output_invalid"),
         recommendation(status="stale", top_n=3),
+        recommendation(new_count=1, carryover_count=3),
+        recommendation(new_count=0, carryover_count=4),
+        recommendation(tasks=[], task_count=0, status="empty_window", model="", new_count=0, carryover_count=0),
     ],
-    ids=["ok", "none_worth_it", "empty_window", "model_output_invalid", "stale"],
+    ids=[
+        "ok",
+        "none_worth_it",
+        "empty_window",
+        "model_output_invalid",
+        "stale",
+        "carryover",
+        "only_carried",
+        "empty_with_counts",
+    ],
 )
 def test_recommendation_accepts(response):
     assert errors(RECOMMENDATION, response) == []
@@ -198,6 +210,8 @@ def test_recommendation_accepts(response):
         recommendation(tasks=[{"rank": n, "title": "t", "reason": "r"} for n in range(1, 12)]),
         recommendation(top_n=11),
         {key: value for key, value in recommendation().items() if key != "model"},
+        recommendation(carryover_count=-1),
+        recommendation(new_count="1"),
     ],
     ids=[
         "tasks_without_count",
@@ -211,6 +225,8 @@ def test_recommendation_accepts(response):
         "eleven_tasks",
         "top_n",
         "legacy_field_missing",
+        "negative_carryover",
+        "count_as_text",
     ],
 )
 def test_recommendation_rejects(response):
@@ -259,3 +275,9 @@ def test_summary_text_rule_matches_the_schema():
     for text in ("报告\n\t- 一项", " ", "a\x07b", "x" * (MAX_SUMMARY_CHARS + 1)):
         schema_ok = errors(SUMMARY, summary(summary=text)) == []
         assert newsletter_text_ok(text, MAX_SUMMARY_CHARS) == schema_ok, repr(text)
+
+
+def test_the_new_counts_are_additive():
+    """Reports stored before the carryover (without the counts) keep validating: never required."""
+    assert {"new_count", "carryover_count"} <= RECOMMENDATION["properties"].keys()
+    assert not {"new_count", "carryover_count"} & set(RECOMMENDATION["required"])

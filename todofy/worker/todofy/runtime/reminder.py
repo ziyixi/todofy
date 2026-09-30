@@ -1,7 +1,8 @@
 """The owner's daily attention reminder: at most one Todoist task per UTC day (v2 plan §5.3).
 
-The day is claimed in D1 before Todoist is called and its title and body are
-frozen, so a retry sends the same bytes and X-Request-Id
+The day is claimed in D1 before Todoist is called and its title, body and project
+(TODOIST_OPS_PROJECT_ID when set, else the default project) are frozen, so a retry
+sends the same bytes and X-Request-Id
 (mail_inbox_worker.go:559-666 @ 6c46ed4). Only a failure that cannot have
 created a task (``failed``) is retried, hourly and at most REMINDER_MAX_ATTEMPTS
 times; ``unknown`` is never resent that day.
@@ -80,9 +81,10 @@ async def tick(env: Any, coordinator: Any, now: int) -> int:
         ops_count, ops_generated = (0, 0) if ops is None else (len(ops.items), report.generated_ms)
         subject = reminder_title(attention, ops_count)
         body = reminder_body(attention, day, rows, var(env, "TODOFY_PUBLIC_HOST"), ops)
+        project = reminder_project(env)
         claim = (
             await db.prepare(sql.CLAIM_DAY.sql)
-            .bind(day, subject, body, attention, ops_count, ops_generated, now, now)
+            .bind(day, subject, body, attention, ops_count, ops_generated, project, now, now)
             .run()
         )
     else:
@@ -91,12 +93,14 @@ async def tick(env: Any, coordinator: Any, now: int) -> int:
         if attention == 0 and row.ops_count == 0:
             return now + REMINDER_CHECK_INTERVAL
         attempts, subject, body = row.attempts, row.subject, row.body
+        # A row claimed before migration 0004 has no project: it went to the default project.
+        project = row.project_id or var(env, "TODOIST_DEFAULT_PROJECT_ID")
         claim = await db.prepare(sql.CLAIM_RETRY.sql).bind(now, day, attempts, now).run()
     if claim.meta.changes != 1:
         return now + REMINDER_CHECK_INTERVAL
 
     started = now_ms()
-    result = await todoist.create_task(env, _request(env, subject, body), budget_ms=TODOIST_STEP_BUDGET * 1000)
+    result = await todoist.create_task(env, _request(env, subject, body, project), budget_ms=TODOIST_STEP_BUDGET * 1000)
     point = metrics.task_point(Step.REMINDER, result, now_ms() - started)
     state, code = _outcome(result.verdict)
     retry_at = now + REMINDER_RETRY_DELAY
@@ -130,11 +134,16 @@ async def _ops_due(db: Any, report: Report, day: str, now: int, attention: bool)
     return carried.n == 0
 
 
-def _request(env: Any, subject: str, body: str) -> TaskRequest:
+def reminder_project(env: Any) -> str:
+    """The project of a new day's reminder: TODOIST_OPS_PROJECT_ID when set, else the default project."""
+    return var(env, "TODOIST_OPS_PROJECT_ID") or var(env, "TODOIST_DEFAULT_PROJECT_ID")
+
+
+def _request(env: Any, subject: str, body: str, project: str) -> TaskRequest:
     return build_task_request(
         subject,
         body,
-        var(env, "TODOIST_DEFAULT_PROJECT_ID"),
+        project,
         todoist_request_id(subject, body, SENDER),
         var(env, "TODOIST_API_KEY"),
     )

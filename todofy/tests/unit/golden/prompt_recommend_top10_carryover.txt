@@ -1,0 +1,44 @@
+Below is a list of task summaries I received in the last 24 hours, plus older tasks that are still open. Based on these tasks, please pick up to 10 distinct tasks that genuinely require my attention today or in the near future. For each task, provide a title and a reason.
+
+Rank only the selected tasks consecutively from #1, never exceeding #10.
+
+IMPORTANT: You MUST respond with ONLY a valid JSON array, no other text before or after.
+IMPORTANT: Each element must have exactly these fields:
+  "rank" (integer 1-10), "title" (string, one-line), "reason" (string, 1-2 sentences).
+IMPORTANT: Output at most 10 items. Fewer items are correct; return [] when none qualify.
+  Never fill unused slots, invent an action, or repeat a task to reach the limit.
+IMPORTANT: Please use Chinese as response language for title and reason.
+IMPORTANT: Rank by the specific unresolved action, concrete risk if ignored, and time remaining.
+  Each concise reason should identify what I need to do and the supported risk or deadline.
+  Do not invent deadlines or imply that already resolved actions remain open.
+IMPORTANT: Focus on tasks that require ACTION from me, not merely important-sounding topics.
+  Ignore promotional emails, coupons, marketing offers, expired or time-bound deals,
+  routine notifications (e.g. charging station check-ins, subscription renewals),
+  and anything that does not need a concrete action from me.
+  Think carefully: does this task REALLY need my attention, or is it just noise?
+  For example, a 30-minute EV charging reservation is routine — skip it.
+IMPORTANT: A statement being available is not evidence that a payment action is required.
+  Ordinary bills with confirmed autopay and no unresolved issue must not consume a priority slot.
+  Autopay must be explicitly supported for that account or bill; never infer that all cards use autopay.
+  If autopay status is not given, treat it as unknown and explicitly say "自动扣款状态未知"
+  when relevant to a selected payment task. Unknown autopay alone is not a reason to create a task.
+IMPORTANT: Never suppress unresolved exceptions just because autopay is confirmed or the topic is routine:
+  overdue obligations, failed or returned payments, partial payments leaving an amount due,
+  insufficient funds, suspicious activity or security alerts, changed obligations requiring action,
+  and actual deadlines requiring a specific unresolved action must remain eligible for priority.
+  Apply this protection to financial/tax and work-related tasks as well as other consequential tasks.
+IMPORTANT: MERGE similar or duplicate tasks into ONE entry.
+  Multiple emails about the same unresolved issue should be combined into a single recommendation,
+  while distinct risks or actions must not be collapsed merely because they concern the same service.
+
+IMPORTANT: An item that starts with "[N 天前]" arrived N days ago and its Todoist task is still open.
+  Its age alone is neither a reason to rank it higher nor a reason to skip it.
+  Never call it overdue unless its summary states a date that has passed.
+
+Example output when no task requires action:
+[]
+
+Example output when only one task qualifies, even if the limit is higher:
+[{"rank":1,"title":"处理扣款失败","reason":"自动扣款已失败，需在邮件明确的截止时间前处理尚未支付的款项。"}]
+
+The task summaries from the last 24 hours, followed by older tasks that are still open, are as follows:

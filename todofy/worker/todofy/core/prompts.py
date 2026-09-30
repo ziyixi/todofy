@@ -91,9 +91,34 @@ RECOMMEND_TOP_TASKS = (
 
 REPORT_SEPARATOR = "=" * 25 + "\n"
 
+# The morning brief's carryover (docs/gtd-features.md §3): with older still-open tasks in the input, the
+# prompt says so and adds one rule. Without carryover the prompt is RECOMMEND_TOP_TASKS byte for byte.
+CARRYOVER_EDITS = (
+    (
+        "Below is a list of task summaries I received in the last 24 hours. ",
+        "Below is a list of task summaries I received in the last 24 hours, plus older tasks that are still open. ",
+    ),
+    (
+        "\nExample output when no task requires action:\n",
+        '\nIMPORTANT: An item that starts with "[N 天前]" arrived N days ago and its Todoist task is still open.\n'
+        "  Its age alone is neither a reason to rank it higher nor a reason to skip it.\n"
+        "  Never call it overdue unless its summary states a date that has passed.\n"
+        "\nExample output when no task requires action:\n",
+    ),
+    (
+        "The task summaries from the last 24 hours are as follows:",
+        "The task summaries from the last 24 hours, followed by older tasks that are still open, are as follows:",
+    ),
+)
 
-def recommend_prompt(top_n: int) -> str:
-    return RECOMMEND_TOP_TASKS.replace("{top_n}", str(top_n))
+
+def recommend_prompt(top_n: int, carryover: bool = False) -> str:
+    prompt = RECOMMEND_TOP_TASKS
+    if carryover:
+        for old, new in CARRYOVER_EDITS:
+            assert prompt.count(old) == 1
+            prompt = prompt.replace(old, new)
+    return prompt.replace("{top_n}", str(top_n))
 
 
 def report_input(summaries: Iterable[str]) -> str:
