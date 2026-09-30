@@ -124,6 +124,57 @@ Todofy runtime suite and dry-runs were not rerun.
 | `Mail Hero checks` | Worker typecheck and tests; UI typecheck and tests | OK; 168 passed; OK; 66 passed |
 | `Todofy checks` | gateway lint, typecheck, tests; host tests (`tests/unit tests/fakes tools deploy`) | OK; 86 passed; 940 passed, 2 skipped |
 
+## 1d. Local, dashboard v2 end to end (2026-09-30)
+
+Branch `dashboard-v2` at `8ded1db`, rebased on `origin/main` `3a46388` (which added `website/`): the v2
+registry, `/api/v2`, the four views, the v1 API removed, the integration fixes below, and the website's
+assets-only Worker `ziyixi-website` registered under 个人网站. macOS, Node 26.9.0, synthetic data only,
+no token, no Cloudflare API call.
+
+**Browser pass.** The real Worker (`src/index.ts` bundled with esbuild) in Miniflare with a SQLite
+`HomeState`, `ASSETS` serving the built `web/dist`, stub `mail-hero`/`todofy` `Ops` Workers answering the
+ops-v1 fixtures, an outbound handler answering the GraphQL endpoint with `test/graphql-fixture.ts` and
+the website probe with a 200, and the loopback dev bypass (setup.md §5). Headless Chromium
+(`playwright-core` 1.63 in a scratch directory, not a repo dependency) opened `#/`, `#/flows`,
+`#/flows/mail-to-task`, `#/cloudflare` and `#/ops` at 1280×900 and 390×844, light and dark, in
+seven scenarios, each on fresh storage after one tick:
+
+| Scenario | What it shows |
+| --- | --- |
+| healthy (the mockup's day, 5 Workers) | 全部正常; tiles 正常 with their one number, Flowday/思源 host only, Newsletter 未接入监控; 5 Worker rows joined to their apps and flows; unregistered synthetic D1/DO/R2 IDs as 未登记 + 8 characters |
+| Mail Hero degraded (fixture) | strip "1 项故障 · 1 项需关注" linking to the two stages; tile 故障; the mail flow opens on Webhook 投递 |
+| Todofy `status()` throws | Todofy tile 无法连接 · 连续 1 次失败; the flows' Todofy stages 未知; Mail Hero unaffected |
+| GraphQL 500 | strip item 用量数据获取失败 → Cloudflare; no bars, "Worker 暂无数据", Notion 发布 未知 |
+| 20 Workers / 0 Workers | "Worker · 20 个（自动发现）" with every row (15 synthetic scripts not in the registry) / "今天还没有 Worker 的请求数据。"; no overflow at 390 px |
+| website probe fails | 个人网站 需关注; 网站发布 需关注 on its 网站可用 stage |
+
+Every page: no console error or warning, no failed or 4xx/5xx request, no horizontal overflow. Clicked
+through on both sizes: tile links (`target="_blank"`, `rel="noreferrer noopener"`), the status button's
+detail sheet (focus moves in, Escape closes and returns focus) and its links, flow rows → the flow's
+card, expand/collapse (`aria-expanded`), a Worker row → `#/cloudflare/worker/<script>`, 刷新用量 and
+its cooldown text, and 立即运行金丝雀 / 强制降载 / 解除降载 through their confirmation dialogs (each
+`POST /api/v2/canary|guard` carried the CSRF header and was accepted; the result line appeared; on the
+phone the canary button was disabled with the running run's id, as intended). The phone's bottom tab
+bar does not cover the last content.
+
+Found and fixed in "Integrate the dashboard v2 Worker and UI end to end" (with regression tests): an app whose first-ever poll failed said
+数据已过期 instead of 无法连接; a 故障 flow row named an earlier 需关注 stage (`first_issue` is now the
+first stage at the flow's worst level, and the card opens on it); the home Cloudflare card said
+"0 个 Worker · 今日错误 0" before any GraphQL answer.
+
+**CI steps from a fresh clone** of the branch, the workflow's commands and placeholder values:
+
+| Job | Step | Result |
+| --- | --- | --- |
+| `Dashboard checks` | generator tests | 8 passed |
+| | worker lint, typecheck, `npm test` | OK; 13 files, 181 tests passed |
+| | worker `npm run test:runtime` (workerd) | 6 files, 61 tests passed (every v2 endpoint, 0/5/20 Workers, v1 paths 404, the `canary_id` migration) |
+| | web lint, typecheck, tests, build | OK; 12 files, 84 tests passed; bundle 361 kB (112 kB gzip); no cross-origin references |
+| | import guard | OK |
+| | placeholder config dry-run (`GITHUB_SHA` set as in CI) | OK: bindings `HOME`, `MAIL_HERO`, `TODOFY`, `ASSETS`; no `MAIL_HERO_URL`/`TODOFY_URL`; the four secrets hidden; 168.90 KiB |
+| `Contracts` | Dashboard `ops-client`, `guard`, `canary`, `digest` | 4 files, 61 tests passed |
+| `Changes` | `uv run python -m unittest discover -s ../.github/scripts` (from `todofy/`) | 63 tests OK |
+
 ## 2. Production (pending)
 
 None of these has been done; each needs the first `Dashboard deploy` on `main` (after Todofy and Mail
@@ -142,5 +193,12 @@ Hero with ops-v1 are live) and, where stated, the owner in a browser.
 | Guard round trip | only if a real ≥ 80 % day happens, or by the owner's 强制降载 then 解除降载: both apps report the guard in `status()` and clear it | pending |
 | Digest | Todofy's next daily reminder carries the dashboard's warning/critical items, or none | pending |
 | Canary switch | once, before or after the first canary: deploy with `DASHBOARD_CANARY_ENABLED=false`, check the banner item, the disabled button and that no run starts at the canary hour; deploy again with `true` (or unset) | pending |
+| v2: the four views as the owner | after the v2 deploy: `#/`, `#/flows`, `#/cloudflare`, `#/ops` load on a desktop browser and a phone; `/health` shows the merged `BUILD_SHA`; the old v1 anchors (`#apps`, `#quota`, `#canary`, ...) land on their v2 views | pending |
+| v2: storage migration | the first v2 tick adds `canary_runs.canary_id` once (existing runs become `mail-todofy`); the canary history and manual count carry over | pending |
+| v2: Worker table | the auto-discovered rows (requests, errors, CPU p50/p99, subrequests, DO requests) match the Cloudflare dashboard's Workers pages for the same UTC day; whether `durableObjectsInvocationsAdaptiveGroups.scriptName` is the defining or the calling script and whether `cpuTimeP99` includes DO time (design-v2 §9) | pending |
+| v2: resource names | fill the registry's TODO identifiers (two D1 database IDs, three DO namespace IDs, the Mail Hero backup bucket) so the resource tables stop showing 未登记 for them | open |
+| v2: website probe | from the production Worker, `GET https://www.ziyixi.science/build-info.json` answers 200 without a redirect (same-zone fetch) and the 个人网站 tile shows its latency; if not, set `enabled: false` (未接入) | pending |
+| v2: notion-publish idle rule | the 26 h `max_idle_hours` fits the Worker's real schedule (no false 需关注 on a normal day) | pending |
+| v2: request budget | a day's `home` Worker and `HomeState` request counts stay within limits.md's estimate with the four views open (ETag 304s, one GraphQL query and one probe per tick) | pending |
 | Open questions from `limits.md` §4 | whether `Ops` calls appear in the apps' Worker request totals; unclassified R2 action types; analytics lag at a tick; `durableObjectsStorageGroups` data | pending |
 
