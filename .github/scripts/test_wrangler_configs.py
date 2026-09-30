@@ -85,6 +85,12 @@ PERSONAL_INPUTS = {
     "LAB_ACCESS_OWNER",
     "LAB_ACCESS_OWNER_ALIASES",
 }
+# Personal inputs a deploy job reads from another app's secret: Lab's owner is the dashboard's owner (one person,
+# the same Access identities), so Lab deploy reads the dashboard's secrets (lab/README.md "Deploy secrets").
+SHARED_SECRETS = {
+    "LAB_ACCESS_OWNER": "DASHBOARD_ACCESS_OWNER",
+    "LAB_ACCESS_OWNER_ALIASES": "DASHBOARD_ACCESS_OWNER_ALIASES",
+}
 # The only GitHub variables CI reads: the operational switches, stated at every deploy (mail-hero AGENTS.md §8).
 TOGGLES = {
     "MAIL_HERO_FORCE_SEND_PAUSED",
@@ -458,9 +464,34 @@ class Workflow(unittest.TestCase):
                     value = step["env"][name]
                     with self.subTest(job=job_name, step=step["name"], name=name):
                         if job_name in DEPLOY_JOBS:
-                            self.assertEqual(value, f"${{{{ secrets.{name} }}}}")
+                            self.assertEqual(value, f"${{{{ secrets.{SHARED_SECRETS.get(name, name)} }}}}")
                         else:
                             self.assertRegex(value, r"^(''|placeholder|[a-z.-]*@([a-z-]+\.)*example\.com)$")
+
+    def test_lab_deploy_reads_the_dashboard_owner_and_its_own_csrf_key(self):
+        """Lab's owner addresses come from the dashboard's secrets (no LAB_ACCESS_OWNER* secret exists); its CSRF
+        key stays its own. The secrets are read only where the secrets file is written."""
+        self.assertLessEqual(set(SHARED_SECRETS), PERSONAL_INPUTS)
+        self.assertLessEqual(set(SHARED_SECRETS.values()), PERSONAL_INPUTS)
+        read = {}
+        for step in steps(self.jobs["lab-deploy"]):
+            for name, value in step["env"].items():
+                if match := re.fullmatch(r"\$\{\{ secrets\.([A-Z0-9_]+) \}\}", value):
+                    read.setdefault(name, set()).add(match.group(1))
+        self.assertEqual(read["LAB_ACCESS_OWNER"], {"DASHBOARD_ACCESS_OWNER"})
+        self.assertEqual(read["LAB_ACCESS_OWNER_ALIASES"], {"DASHBOARD_ACCESS_OWNER_ALIASES"})
+        self.assertEqual(read["LAB_CSRF_SIGNING_KEY"], {"LAB_CSRF_SIGNING_KEY"})
+        self.assertNotIn("DASHBOARD_CSRF_SIGNING_KEY", {secret for names in read.values() for secret in names})
+        self.assertNotRegex(WORKFLOW.read_text(), r"secrets\.LAB_ACCESS_OWNER")
+
+    def test_lab_accepts_exactly_the_owner_values_the_dashboard_accepts(self):
+        """The same secrets feed both wrappers: their owner and alias rules must be the same lines, or a valid
+        dashboard value could stop Lab deploy (or the reverse)."""
+        rules = r"^(?:const ACCESS_EMAIL|const MAX_ALIASES|const MAX_LIST_CHARS) = .+$"
+        lab = re.findall(rules, (REPO / "lab/deploy/deploy-vars.mjs").read_text(), re.M)
+        dashboard = re.findall(rules, (REPO / "dashboard/deploy/deploy-vars.mjs").read_text(), re.M)
+        self.assertEqual(len(lab), 3)
+        self.assertEqual(lab, dashboard)
 
     def test_deploy_jobs_pass_values_through_env_only(self):
         """No ${{ }} inside a deploy job's scripts (values reach them through env:), no account variable

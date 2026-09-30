@@ -13,8 +13,29 @@ Status: **implemented, not deployed** (2026-09-30). `worker/` implements the pip
 deck/decision/undo/重来 API, the send to Todofy with polling, ops-v1 and Access + CSRF; `web/` implements the
 deck UI (`docs/ux.md`). Both run in CI (`Lab checks`), and `Lab deploy` releases them from `main` after
 `Todofy deploy`. Design: [`docs/design.md`](docs/design.md); deck UX: [`docs/ux.md`](docs/ux.md).
-Before the first deploy: the GitHub environment secrets `LAB_ACCESS_OWNER`, `LAB_ACCESS_OWNER_ALIASES` and
-`LAB_CSRF_SIGNING_KEY` (a fresh `openssl rand -hex 32`), and Todofy's release with `proposeTasks`.
+Before the first deploy: the GitHub environment secret `LAB_CSRF_SIGNING_KEY` (below) and Todofy's release
+with `proposeTasks`.
+
+### Deploy secrets
+
+`Lab deploy` (`.github/workflows/ci.yml`) writes three Worker secrets through `deploy/deploy-vars.mjs`:
+
+| Worker secret | From the `production` environment secret | Why |
+| --- | --- | --- |
+| `ACCESS_OWNER` | `DASHBOARD_ACCESS_OWNER` (existing) | Lab's owner is the dashboard's owner: one person with the same Access identities, so Lab reuses the dashboard's secrets instead of a copy that could drift |
+| `ACCESS_OWNER_ALIASES` | `DASHBOARD_ACCESS_OWNER_ALIASES` (existing) | as above; changing the dashboard's aliases changes Lab's at its next deploy |
+| `CSRF_SIGNING_KEY` | `LAB_CSRF_SIGNING_KEY` (new, Lab's own) | a separate key per app: a token of one app never verifies at another |
+
+Inside the job (and in `deploy-vars.mjs`) the inputs keep their `LAB_*` names; only the job's `env:` maps them
+to the dashboard's secrets, and `.github/scripts/test_wrangler_configs.py` checks that mapping. The one owner
+step before the first deploy (64 hex characters, never pasted anywhere; run where `gh` is logged in):
+
+```sh
+openssl rand -hex 32 | gh secret set LAB_CSRF_SIGNING_KEY -R ziyixi/todofy --env production
+```
+
+Rotating it later is the same command followed by a Lab deploy. The Access app "Lab" must allow the same
+identities as the dashboard's app.
 
 | Path | Contents |
 | --- | --- |

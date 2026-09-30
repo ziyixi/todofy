@@ -93,8 +93,11 @@ React 19.3.0, Vite 7.3.6, react-query 5.104.0, lucide-react 1.48.0). `@ziyixi/ed
   order: Todofy's release with `proposeTasks` should be live before the first send; an older Todofy makes
   the call reject, which Lab shows as "Todofy 暂不可用" (never a lost or doubled send).
 - Injected at deploy by `deploy/deploy-vars.mjs` (like the dashboard): `--var BUILD_SHA`; Worker
-  secrets `ACCESS_OWNER`, `ACCESS_OWNER_ALIASES`, `CSRF_SIGNING_KEY` from GitHub environment secrets
-  `LAB_ACCESS_OWNER`, `LAB_ACCESS_OWNER_ALIASES`, `LAB_CSRF_SIGNING_KEY`. No GitHub variable toggles.
+  secrets `ACCESS_OWNER`, `ACCESS_OWNER_ALIASES`, `CSRF_SIGNING_KEY` from the wrapper inputs
+  `LAB_ACCESS_OWNER`, `LAB_ACCESS_OWNER_ALIASES`, `LAB_CSRF_SIGNING_KEY`. In `Lab deploy` the first two
+  are the dashboard's existing environment secrets `DASHBOARD_ACCESS_OWNER` / `DASHBOARD_ACCESS_OWNER_ALIASES`
+  (the same owner); `LAB_CSRF_SIGNING_KEY` is Lab's own secret (`lab/README.md` "Deploy secrets"). No
+  GitHub variable toggles.
 - Local dev: `lab/.dev.vars` (gitignored) with `DEV_AUTH_BYPASS=true`, loopback only; `npm run dev`
   pins `--local-upstream 127.0.0.1:8788`. D1 only `--local`.
 
@@ -371,7 +374,8 @@ entrypoint typed locally against `OpsCommon`, register the dashboard entry as `p
   `wrangler d1 migrations apply DB --remote`, deploy through `deploy-vars.mjs exec`, then probe
   `https://lab.ziyixi.science/` expects the Access 302 to `ziyixi.cloudflareaccess.com`.
 - `test_wrangler_configs.py`: `PRODUCTION['lab']`, `WRAPPERS['lab']`, `DEPLOY_JOBS`,
-  `PERSONAL_INPUTS` (`LAB_ACCESS_OWNER*`), dev-command origin pin.
+  `PERSONAL_INPUTS` (`LAB_ACCESS_OWNER*`), `SHARED_SECRETS` (Lab deploy reads them from
+  `DASHBOARD_ACCESS_OWNER*`), dev-command origin pin.
 - Root README/AGENTS app tables, `packages/edge-auth/SPEC.md` §5.4 Lab column (as the dashboard:
   `case-insensitive`, nbf 60, `use-cookie`/`last`, JWKS 600,000/60,000 ms, `loopback-http` bypass,
   `importHmacKeyHex(CSRF_SIGNING_KEY)`, cookie `lab_csrf`, origin `https://<PUBLIC_HOST>`).

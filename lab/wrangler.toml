@@ -4,8 +4,9 @@
 #
 # Deployed only by CI ("Lab deploy" in .github/workflows/ci.yml) through deploy/deploy-vars.mjs, which appends
 # --var BUILD_SHA (the commit) and passes ACCESS_OWNER, ACCESS_OWNER_ALIASES and CSRF_SIGNING_KEY (GitHub
-# environment secrets LAB_ACCESS_OWNER, LAB_ACCESS_OWNER_ALIASES, LAB_CSRF_SIGNING_KEY) as Worker secrets with
-# --secrets-file. A plain `wrangler deploy` of this file DELETES BUILD_SHA.
+# environment secrets DASHBOARD_ACCESS_OWNER and DASHBOARD_ACCESS_OWNER_ALIASES, the same owner as the dashboard,
+# and Lab's own LAB_CSRF_SIGNING_KEY; lab/README.md "Deploy secrets") as Worker secrets with --secrets-file.
+# A plain `wrangler deploy` of this file DELETES BUILD_SHA.
 #
 # The D1 database "lab" and the Access app "Lab" (lab.ziyixi.science) exist since 2026-09-30; their id and AUD
 # are committed below. deploy/deploy-vars.mjs still refuses an all-zeros id or AUD (a guard against a revert).

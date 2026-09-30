@@ -1158,12 +1158,14 @@ jobs:
           npm ci --prefix web --no-audit --no-fund
           npm run build --prefix web
       # The owner's addresses and the CSRF key are environment secrets (masked in this public log) and reach the
-      # Worker as secrets through --secrets-file; wrangler prints plain vars.
+      # Worker as secrets through --secrets-file; wrangler prints plain vars. Lab's owner is the dashboard's owner
+      # (one person, the same Access identities), so the addresses come from the dashboard's existing secrets and
+      # cannot drift apart; the CSRF key is Lab's own (a separate key per app). lab/README.md "Deploy secrets".
       - name: Write the Worker secrets file
         working-directory: lab/worker
         env:
-          LAB_ACCESS_OWNER: ${{ secrets.LAB_ACCESS_OWNER }}
-          LAB_ACCESS_OWNER_ALIASES: ${{ secrets.LAB_ACCESS_OWNER_ALIASES }}
+          LAB_ACCESS_OWNER: ${{ secrets.DASHBOARD_ACCESS_OWNER }}
+          LAB_ACCESS_OWNER_ALIASES: ${{ secrets.DASHBOARD_ACCESS_OWNER_ALIASES }}
           LAB_CSRF_SIGNING_KEY: ${{ secrets.LAB_CSRF_SIGNING_KEY }}
         run: node ../deploy/deploy-vars.mjs secrets "$RUNNER_TEMP/lab-secrets.json"
       # deploy-vars.mjs adds BUILD_SHA as --var and refuses the all-zeros D1 id or Access AUD.

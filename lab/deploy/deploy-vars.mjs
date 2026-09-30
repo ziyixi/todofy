@@ -4,8 +4,10 @@
 // - with `wrangler deploy --var NAME:value` (a plain_text var, exactly like a [vars] entry): BUILD_SHA (the
 //   commit). Lab has no GitHub-variable switches (its pause is an owner setting in D1);
 // - with `--secrets-file` (Worker secrets, hidden in wrangler's output): the owner's addresses and the CSRF key
-//   (GitHub environment secrets LAB_ACCESS_OWNER, LAB_ACCESS_OWNER_ALIASES, LAB_CSRF_SIGNING_KEY, masked in the
-//   public Actions log).
+//   (inputs LAB_ACCESS_OWNER, LAB_ACCESS_OWNER_ALIASES, LAB_CSRF_SIGNING_KEY, masked in the public Actions log).
+//   "Lab deploy" fills the first two from the dashboard's environment secrets DASHBOARD_ACCESS_OWNER and
+//   DASHBOARD_ACCESS_OWNER_ALIASES (the same owner) and the key from Lab's own LAB_CSRF_SIGNING_KEY
+//   (../README.md "Deploy secrets").
 //
 // Wrangler silently DELETES a var that a deploy does not send (the config has no keep_vars), so this
 // wrapper refuses to run unless every value is present and valid. It also refuses a config whose D1 id or
