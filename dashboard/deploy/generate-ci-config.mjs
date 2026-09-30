@@ -112,17 +112,19 @@ export function generateSecrets(env) {
 
 /**
  * Used only for the GraphQL Analytics API; should be an "Account Analytics: Read" token (docs/setup.md
- * §4). The token scope cannot be read from here, but the one broad token this job is known to hold, the
- * deploy token (CF_API_TOKEN, passed to this step only for the comparison), must never become a
- * secret of an internet-facing Worker: refused by name, values never printed.
+ * §4). The token scope cannot be read from here. The owner allowed reusing the deploy token until a
+ * read-only one is saved, so reuse is a warning, not a refusal (see deployTokenReused).
  */
 function analyticsToken(env) {
-  const token = checked(env, 'DASHBOARD_CF_ANALYTICS_TOKEN', /^[A-Za-z0-9_-]{20,200}$/)
+  return checked(env, 'DASHBOARD_CF_ANALYTICS_TOKEN', /^[A-Za-z0-9_-]{20,200}$/)
+}
+
+/** Whether the analytics token is the deploy token (CF_API_TOKEN, passed to this step only for this
+ * comparison): a broad token then sits in an internet-facing Worker. Values are never printed. */
+export function deployTokenReused(env) {
   const deploy = typeof env.CF_API_TOKEN === 'string' ? env.CF_API_TOKEN.trim() : ''
-  if (deploy !== '' && deploy === token) {
-    throw new SettingError('DASHBOARD_CF_ANALYTICS_TOKEN', 'Must not be the deploy token CF_API_TOKEN (use an "Account Analytics: Read" token, docs/setup.md §4)')
-  }
-  return token
+  const token = typeof env.DASHBOARD_CF_ANALYTICS_TOKEN === 'string' ? env.DASHBOARD_CF_ANALYTICS_TOKEN.trim() : ''
+  return deploy !== '' && deploy === token
 }
 
 /** wrangler.toml as Wrangler itself parses it (the pinned wrangler in worker/node_modules). */
@@ -147,6 +149,9 @@ export async function main(env = process.env, outputs = { config: CONFIG_OUTPUT,
       written.push(path)
     }
     console.log(`Generated production configuration; values were not printed. Vars: ${Object.keys(config.vars).sort().join(', ')}. Secrets file: ${Object.keys(secrets).sort().join(', ')}.`)
+    if (deployTokenReused(env)) {
+      console.log('::warning title=Broad analytics token::DASHBOARD_CF_ANALYTICS_TOKEN is the deploy token CF_API_TOKEN; replace it with an "Account Analytics: Read" token (dashboard/docs/setup.md §4).')
+    }
     return 0
   } catch (error) {
     // Never leave half a pair behind, and never remove a file this run did not write.

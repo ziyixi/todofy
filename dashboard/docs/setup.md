@@ -65,7 +65,7 @@ without printing its value.
 | `DASHBOARD_ACCESS_OWNER_ALIASES` | secret, may be empty | ≤ 8 unique printable-ASCII e-mails, ≤ 2048 chars | Worker secret `ACCESS_OWNER_ALIASES` (a single space when empty, so an emptied list replaces the old one) |
 | `DASHBOARD_CSRF_SIGNING_KEY` | secret | 64 hex (for example `openssl rand -hex 32`, run locally) | Worker secret `CSRF_SIGNING_KEY` |
 | `DASHBOARD_CF_ANALYTICS_TOKEN` | secret | `[A-Za-z0-9_-]{20,200}` | Worker secret `CF_ANALYTICS_TOKEN` (§4) |
-| `CF_API_TOKEN` | secret (existing, Todofy's deploy token) | – | `CLOUDFLARE_API_TOKEN` for `wrangler deploy` only; the generator also receives it, only to refuse a `DASHBOARD_CF_ANALYTICS_TOKEN` equal to it (never written anywhere) |
+| `CF_API_TOKEN` | secret (existing, Todofy's deploy token) | – | `CLOUDFLARE_API_TOKEN` for `wrangler deploy` only; the generator also receives it, only to warn when `DASHBOARD_CF_ANALYTICS_TOKEN` equals it (never written anywhere) |
 
 `GITHUB_SHA` becomes the var `BUILD_SHA` (shown by `/health`). Changing a variable or secret takes
 effect with the next deploy: run the workflow on `main` with `app: dashboard` (or `all`).
@@ -79,11 +79,11 @@ the page or sent anywhere else, and a unit test checks that it appears only in t
 
 **Today a broader token is reused.** A token for this secret becomes a Worker secret of an
 internet-facing Worker, so it must be able to do no more than read analytics: any future bug in the
-Worker would otherwise expose account write access. The generator refuses (by name, without printing a
-value) a `DASHBOARD_CF_ANALYTICS_TOKEN` equal to the deploy token `CF_API_TOKEN`, so if the bootstrap
-token is that token the deploy stops before anything is uploaded; it cannot check the scope of any other
-token. Replace it, ideally before the first deploy and at the latest right after it, with a token that
-can only read analytics:
+Worker would otherwise expose account write access. The owner allowed reusing the deploy token until a
+read-only token is saved (2026-09-30), so when `DASHBOARD_CF_ANALYTICS_TOKEN` equals the deploy token
+`CF_API_TOKEN` the generator only adds a "Broad analytics token" warning to the run (by name, without a
+value); it cannot check the scope of any other token. Replace it with a token that can only read
+analytics:
 
 1. Cloudflare dashboard → My Profile → API Tokens → Create Token → Custom token.
 2. Permissions: **Account → Account Analytics → Read** (the permission the GraphQL API needs for

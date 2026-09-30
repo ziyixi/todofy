@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { mkdtempSync, readFileSync, rmSync, statSync, writeFileSync, existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { REPLACED_KEYS, SHAPE_KEYS, generateConfig, generateSecrets, main, readBase } from '../generate-ci-config.mjs'
+import { REPLACED_KEYS, SHAPE_KEYS, deployTokenReused, generateConfig, generateSecrets, main, readBase } from '../generate-ci-config.mjs'
 
 // Synthetic values only.
 function environment() {
@@ -76,17 +76,15 @@ test('the secrets file holds the owner, aliases, CSRF key and analytics token', 
   assert.equal(generateSecrets({ ...environment(), DASHBOARD_ACCESS_OWNER_ALIASES: undefined }).ACCESS_OWNER_ALIASES, ' ')
 })
 
-test('the analytics token must not be the deploy token', () => {
+test('reusing the deploy token as the analytics token is flagged, not refused', () => {
   const token = environment().DASHBOARD_CF_ANALYTICS_TOKEN
-  assert.throws(() => generateSecrets({ ...environment(), CF_API_TOKEN: token }), (error) => {
-    assert.match(error.message, /DASHBOARD_CF_ANALYTICS_TOKEN/)
-    assert.ok(!error.message.includes(token))
-    return true
-  })
-  assert.throws(() => generateSecrets({ ...environment(), CF_API_TOKEN: ` ${token}\n` }), /deploy token/)
-  // A different deploy token, or none (the checks job's placeholder run), is fine.
-  assert.equal(generateSecrets({ ...environment(), CF_API_TOKEN: 'synthetic-deploy-token-0000000000000000' }).CF_ANALYTICS_TOKEN, token)
-  assert.equal(generateSecrets({ ...environment(), CF_API_TOKEN: '' }).CF_ANALYTICS_TOKEN, token)
+  // The owner allowed the reuse until a read-only token is saved: the secret is still written.
+  assert.equal(generateSecrets({ ...environment(), CF_API_TOKEN: token }).CF_ANALYTICS_TOKEN, token)
+  assert.equal(deployTokenReused({ ...environment(), CF_API_TOKEN: token }), true)
+  assert.equal(deployTokenReused({ ...environment(), CF_API_TOKEN: ` ${token}\n` }), true)
+  // A different deploy token, or none (the checks job's placeholder run), is not flagged.
+  assert.equal(deployTokenReused({ ...environment(), CF_API_TOKEN: 'synthetic-deploy-token-0000000000000000' }), false)
+  assert.equal(deployTokenReused({ ...environment(), CF_API_TOKEN: '' }), false)
   // The deploy token never lands in either file.
   const env = { ...environment(), CF_API_TOKEN: 'synthetic-deploy-token-0000000000000000' }
   const both = JSON.stringify([generateConfig(env, base), generateSecrets(env)])

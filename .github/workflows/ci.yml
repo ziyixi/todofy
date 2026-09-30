@@ -680,8 +680,8 @@ jobs:
           npm run build --prefix web
       # The owner's addresses, the CSRF key and the analytics token are environment secrets (masked in this
       # public log) and reach the Worker as secrets through --secrets-file; wrangler prints plain vars.
-      # CF_API_TOKEN is passed only so the generator can refuse it as the analytics token (it never
-      # writes it): the deploy token must not become a secret of the internet-facing Worker.
+      # CF_API_TOKEN is passed only so the generator can warn when it is reused as the analytics token
+      # (it never writes it); the owner allowed that reuse until a read-only token is saved.
       - name: Generate the production configuration
         env:
           CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
