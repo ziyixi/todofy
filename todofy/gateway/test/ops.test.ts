@@ -7,11 +7,18 @@ import shed from '../../../contracts/ops-v1/fixtures/GuardState/shed-todofy.json
 import processing from '../../../contracts/ops-v1/fixtures/CanaryResult/processing-paused.json';
 import daily from '../../../contracts/ops-v1/fixtures/OpsReport/daily.json';
 import stored from '../../../contracts/ops-v1/fixtures/OpsReportReceipt/stored.json';
+import intentSchema from '../../../contracts/task-intent-v1/task-intent-v1.schema.json';
+import type { TaskIntent, TaskIntentOps, TaskIntentRef } from '../../../contracts/task-intent-v1/task-intent-v1.ts';
+import subtasks from '../../../contracts/task-intent-v1/fixtures/TaskIntent/subtasks-3.json';
+import labRef from '../../../contracts/task-intent-v1/fixtures/TaskIntentRef/lab.json';
+import pendingNew from '../../../contracts/task-intent-v1/fixtures/TaskIntentResult/pending-new.json';
+import created from '../../../contracts/task-intent-v1/fixtures/TaskIntentResult/created.json';
 import { Ops as Exported } from '../src/index.ts';
 import { Ops } from '../src/ops.ts';
 import { fakes, type CoreReply } from './helpers.ts';
 
 const SCHEMA = schema as { $defs: Record<string, unknown> };
+const INTENT_SCHEMA = intentSchema as { $defs: Record<string, unknown> };
 const EVENT_ID = 'f8c1e9a0-1a98-4fb8-8ca1-4c0a3e710016';
 
 function entrypoint(reply: CoreReply) {
@@ -94,6 +101,62 @@ describe('the Ops entrypoint (contracts/ops-v1)', () => {
     const big = { generated_at: '2026-09-29T23:40:00Z', items: Array.from({ length: 20 }, () => ({ ...item, metrics })) };
     expect(new TextEncoder().encode(JSON.stringify(big)).byteLength).toBeGreaterThan(8192);
     expect(await rejection(ops.reportOps(big as never))).toBe('invalid_input');
+    expect(core).toEqual([]);
+  });
+});
+
+describe('the task-intent-v1 methods of the Ops entrypoint (contracts/task-intent-v1)', () => {
+  const intent = subtasks as TaskIntent;
+  const ref = labRef as TaskIntentRef;
+
+  it('implements TaskIntentOps', () => {
+    const { ops } = entrypoint(() => ({ ok: created }));
+    const declared: TaskIntentOps = ops;
+    expect(typeof declared.proposeTasks).toBe('function');
+    expect(typeof declared.taskIntentStatus).toBe('function');
+  });
+
+  it('forwards proposeTasks as compact JSON and returns the core value, a valid TaskIntentResult', async () => {
+    const { ops, core } = entrypoint(() => ({ ok: pendingNew }));
+    const result = await ops.proposeTasks(intent);
+    expect(result).toEqual(pendingNew);
+    expect(validate(INTENT_SCHEMA, 'TaskIntentResult', result)).toEqual([]);
+    expect(core.map((call) => [call.instance, call.method, call.args])).toEqual([
+      ['inbox-v1', 'task_intent_propose', [JSON.stringify(intent)]],
+    ]);
+  });
+
+  it('forwards taskIntentStatus by reference', async () => {
+    const { ops, core } = entrypoint(() => ({ ok: created }));
+    expect(validate(INTENT_SCHEMA, 'TaskIntentResult', await ops.taskIntentStatus(ref))).toEqual([]);
+    expect(core.map((call) => [call.method, call.args])).toEqual([['task_intent_status', [JSON.stringify(ref)]]]);
+  });
+
+  it.each(['invalid_input', 'busy', 'unavailable'])('rejects with the core error code %s', async (code) => {
+    const { ops } = entrypoint(() => ({ error: code }));
+    expect(await rejection(ops.proposeTasks(intent))).toBe(code);
+    expect(await rejection(ops.taskIntentStatus(ref))).toBe(code);
+  });
+
+  it('rejects unavailable when the core call itself fails', async () => {
+    const { ops } = entrypoint(() => {
+      throw new Error('PythonError: Traceback (most recent call last) ...');
+    });
+    expect(await rejection(ops.proposeTasks(intent))).toBe('unavailable');
+    expect(await rejection(ops.taskIntentStatus(ref))).toBe('unavailable');
+  });
+
+  it('refuses input over 64 KiB or not JSON without waking the core', async () => {
+    const { ops, core } = entrypoint(() => ({ ok: pendingNew }));
+    const item = { title: 'x'.repeat(300), url: 'https://arxiv.org/abs/2609.00001', description: 'y'.repeat(1000) };
+    const items = Array.from({ length: 60 }, (_, i) => ({ ...item, title: `${String(i)} ${item.title}` }));
+    const big = { ...intent, items };
+    expect(new TextEncoder().encode(JSON.stringify(big)).byteLength).toBeGreaterThan(65536);
+    expect(await rejection(ops.proposeTasks(big))).toBe('invalid_input');
+    expect(await rejection(ops.proposeTasks(undefined as unknown as TaskIntent))).toBe('invalid_input');
+    const cyclic: Record<string, unknown> = {};
+    cyclic['self'] = cyclic;
+    expect(await rejection(ops.taskIntentStatus(cyclic as never))).toBe('invalid_input');
     expect(core).toEqual([]);
   });
 });

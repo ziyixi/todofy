@@ -12,6 +12,8 @@ COORDINATOR binding, which calls these methods over JS RPC after its own checks
     setup()                                the core's facts for the setup page -> dict
     ops_status() / ops_set_guard(json) /   the gateway's ``Ops`` entrypoint (contracts/ops-v1):
     ops_canary_result(id) / ops_report(json)   {"ok": value} or {"error": OpsErrorCode}
+    task_intent_propose(json) /            the same entrypoint's task-intent-v1 methods (runtime/intents.py):
+    task_intent_status(json)                   {"ok": TaskIntentResult} or {"error": OpsErrorCode}
 
 ``fetch`` answers 404: the object has no HTTP routes. For this one release it
 answers the previous, fetch-based gateway 503 with Retry-After (see ``fetch``).
@@ -20,7 +22,8 @@ Everything that reads D1, parses mail or calls Gemini/Todoist runs here: a
 Durable Object invocation has 30 s of CPU, a Worker request 10 ms on Workers Free.
 
 Each alarm runs at most one ledger step (summary, task creation, lookup or
-completion), then any due reminder, report and retention ticks (v2 plan §5.3).
+completion) or one task-intent step (when both are due they take turns), then
+any due reminder, report and retention ticks (v2 plan §5.3).
 A canary event (contracts/ops-v1) takes the same summary step and then ends:
 it never reaches Todoist, the reports, the attention list or the reminder.
 An ops guard (``shed``) defers only the weekly backup, retention and the
@@ -41,6 +44,7 @@ from pyodide.ffi import JsException
 from workers import DurableObject, Response
 
 from todofy.core import gemini_wire, prompts
+from todofy.core import intents as intent_rules
 from todofy.core import ops as ops_rules
 from todofy.core.api_errors import ApiError
 from todofy.core.backoff import (
@@ -67,7 +71,20 @@ from todofy.core.request_id import todoist_request_id
 from todofy.core.sql import views
 from todofy.core.todoist_request import RequestTooLarge, build_task_request
 from todofy.core.vocab import Code, EventState, Reconcile, allowed_actions
-from todofy.runtime import api, backup, gemini, gtd, ledger, metrics, ops, reminder, reports, retention, todoist
+from todofy.runtime import (
+    api,
+    backup,
+    gemini,
+    gtd,
+    intents,
+    ledger,
+    metrics,
+    ops,
+    reminder,
+    reports,
+    retention,
+    todoist,
+)
 from todofy.runtime.config import flag, gemini_models, integer, source_id, var
 from todofy.runtime.http import NO_CONTENT, Result, failed, not_found, ok
 from todofy.runtime.interop import now_ms, now_s, read_capped, sha256_hex
@@ -150,6 +167,8 @@ class TodofyCore(DurableObject):
         self.running = False
         # A wake-up that arrived while the alarm loop was busy; honoured when it finishes.
         self.woken = False
+        # Whether a due task intent goes before due mail at the next step (they take turns).
+        self.intent_turn = False
 
     # ---- RPC methods (the gateway's COORDINATOR binding) -------------------------------------
 
@@ -264,6 +283,45 @@ class TodofyCore(DurableObject):
             return self._ops_error(ops_rules.OpsError.UNAVAILABLE)
         _log(ops="report", stored=result["stored"], items=result["item_count"])
         return {"ok": result}
+
+    # ---- task-intent-v1 (the same Ops entrypoint; contracts/task-intent-v1) -------------------
+    # Each returns {"ok": TaskIntentResult} or {"error": OpsErrorCode} and never raises.
+
+    async def task_intent_propose(self, input_json: str) -> dict[str, Any]:
+        return await self._intent_call("propose", intents.propose, input_json)
+
+    async def task_intent_status(self, input_json: str) -> dict[str, Any]:
+        return await self._intent_call("status", intents.status, input_json)
+
+    async def _intent_call(self, name: str, method: Any, input_json: str) -> dict[str, Any]:
+        try:
+            return {"ok": await method(self.env, self, input_json, now_s())}
+        except ops_rules.InvalidInput:
+            return self._ops_error(ops_rules.OpsError.INVALID_INPUT)
+        except Exception as exc:
+            _log(intent=f"{name}_failed", error=type(exc).__name__)
+            return self._ops_error(ops_rules.OpsError.UNAVAILABLE)
+
+    def intent_pause(self, now: int) -> intent_rules.Pause | None:
+        """Why intents are held now (nothing new is recorded, recorded ones wait), or None."""
+        env = self.env
+        return intent_rules.pause(
+            maintenance=flag(env, "MAINTENANCE_MODE"),
+            processing_paused=flag(env, "PROCESSING_PAUSED"),
+            force_pause=flag(env, "FORCE_PAUSE_TODOIST"),
+            blocked_until=self._control()["todoist_blocked_until"],
+            backup_active=backup.holds_ledger(env, self.sql, now),
+            now=now,
+        )
+
+    async def arm_watchdog(self) -> None:
+        await self._arm_watchdog()
+
+    def backoff_base(self) -> float:
+        return self._backoff_base()
+
+    def lookup_delay(self) -> float:
+        return self._lookup_delay()
 
     def latest_ops_report(self) -> ops_rules.Report | None:
         """The dashboard's latest report, for the reminder's ops digest (reminder.tick)."""
@@ -539,7 +597,8 @@ class TodofyCore(DurableObject):
             )
             self.sql.exec("DELETE FROM llm_inflight WHERE event_id = ?", row.event_id)
 
-    # The Todoist budget for runtime/gtd.py (read-only snapshot pages and the weekly review).
+    # The mail pipeline's Todoist gate and budgets, shared with runtime/gtd.py (read-only snapshot
+    # pages and the weekly review) and runtime/intents.py (task-intent-v1 creates).
     def count_todoist_calls(self, calls: int, now: int) -> None:
         self._count_todoist_calls(calls, now)
 
@@ -638,9 +697,18 @@ class TodofyCore(DurableObject):
         await self.ctx.storage.setAlarm(now_ms() + self._ms("WATCHDOG_MS", DEFAULT_WATCHDOG_MS))
 
     async def _step(self, now: int, *, todoist_open: bool) -> bool:
-        """At most one unit of ledger work; whether there was any."""
+        """At most one unit of ledger or task-intent work; whether there was any.
+
+        Intents need Todoist for every step, so they are considered only while it is open; when
+        mail and an intent are both due they take turns, so neither holds up the other."""
         db = self.env.DB
         row = await ledger.next_due(db, now, todoist=todoist_open)
+        intent_first = todoist_open and (row is None or self.intent_turn)
+        if intent_first and (intent := await intents.next_due(db, now)) is not None:
+            self.intent_turn = False
+            await intents.step(self.env, self, intent)
+            return True
+        self.intent_turn = True
         if row is not None:
             match row.state:
                 case EventState.PENDING:
@@ -1033,4 +1101,6 @@ class TodofyCore(DurableObject):
             due = await ledger.next_wake_at(self.env.DB, todoist=wait is None)
             if due is not None:
                 times.append(due)
+            if wait is None and (intent_due := await intents.next_wake_at(self.env.DB)) is not None:
+                times.append(intent_due)
         return max(min(times) * 1000, soon)

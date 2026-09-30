@@ -38,10 +38,14 @@ class Step(StrEnum):
     # snapshot, and the weekly review task's create call.
     GTD = "gtd"
     REVIEW = "review"
+    # task-intent-v1: one Todoist create of a proposed task, and the footer lookup after an unknown one.
+    INTENT = "intent"
+    INTENT_LOOKUP = "intent_lookup"
 
 
 GEMINI_STEPS = frozenset({Step.SUMMARY, Step.REPORT, Step.CANARY})
-TODOIST_CREATE_STEPS = frozenset({Step.TASK, Step.REMINDER, Step.REVIEW})
+TODOIST_CREATE_STEPS = frozenset({Step.TASK, Step.REMINDER, Step.REVIEW, Step.INTENT})
+LOOKUP_STEPS = frozenset({Step.LOOKUP, Step.INTENT_LOOKUP})
 
 # Analytics Engine accepts at most 20 blobs, 20 doubles and one index of at most
 # 96 bytes per point, and 250 points per invocation. A point here has 4 of each and
@@ -116,7 +120,7 @@ class StepPoint:
                 counts[tokens_key(self.model)] = self.tokens_in + self.tokens_out
         elif self.step in TODOIST_CREATE_STEPS:
             counts = {Key.TODOIST_CREATES.value: self.attempts}
-        elif self.step == Step.LOOKUP:
+        elif self.step in LOOKUP_STEPS:
             counts = {Key.TODOIST_LOOKUPS.value: 1}
         else:
             counts = {}

@@ -7,6 +7,7 @@ retry sends the same frozen bytes and ``X-Request-Id``.
 """
 
 import asyncio
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 from urllib.parse import urlencode
@@ -19,7 +20,8 @@ from todofy.core.backoff import (
     inline_delay,
 )
 from todofy.core.classify import TaskResult, TaskVerdict, classify_task_create, final_task_verdict
-from todofy.core.todoist_request import TASKS_PATH, TaskRequest, created_task_id, footer_task_ids, parse_task_page
+from todofy.core.render import has_footer
+from todofy.core.todoist_request import TASKS_PATH, TaskRequest, created_task_id, matching_task_ids, parse_task_page
 from todofy.runtime.config import integer, var
 from todofy.runtime.interop import fetch_with_timeout, now_ms
 
@@ -75,6 +77,12 @@ async def find_footer_tasks(env: Any, event_id: str) -> list[str] | None:
     None when the scan failed or did not finish within LOOKUP_MAX_PAGES pages:
     only a complete scan can prove how many tasks exist.
     """
+    return await find_tasks(env, lambda description: has_footer(description, event_id))
+
+
+async def find_tasks(env: Any, matches: Callable[[str], bool]) -> list[str] | None:
+    """IDs of active tasks in the default project whose description ``matches`` (a footer test:
+    the mail event's, or a task intent's); None unless the whole scan finished."""
     headers = {"Authorization": f"Bearer {var(env, 'TODOIST_API_KEY')}"}
     query: dict[str, str | int] = {"limit": LOOKUP_PAGE_SIZE}
     if project_id := var(env, "TODOIST_DEFAULT_PROJECT_ID"):
@@ -93,10 +101,10 @@ async def find_footer_tasks(env: Any, event_id: str) -> list[str] | None:
             tasks, cursor = parse_task_page(upstream.body)
         except ValueError:
             return None
-        matches = footer_task_ids(tasks, event_id)
-        if not all(matches):
+        ids = matching_task_ids(tasks, matches)
+        if not all(ids):
             return None  # a matching task without an id cannot be counted or resolved
-        found += [task_id for task_id in matches if task_id not in found]
+        found += [task_id for task_id in ids if task_id not in found]
         if not cursor:
             return found
         query["cursor"] = cursor

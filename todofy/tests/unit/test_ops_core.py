@@ -325,10 +325,20 @@ def test_a_healthy_status_matches_the_contract_fixture_shape():
     status = ops.status(FACTS)
     assert errors("OpsStatus", status) == []
     expected = fixture("OpsStatus/todofy-ok.json")
+    # task-intent-v1 added two counters after the fixture was written (counters are an open map).
+    counters = expected["counters"] | {"intents_pending": 0, "intents_failed_7d": 0}
     assert status == expected | {
         "generated_at": "2026-09-29T15:00:00Z",
         "last_backup_at": "2026-09-25T10:00:00Z",
+        "counters": counters,
     }
+
+
+def test_status_counts_task_intents():
+    status = ops.status(replace(FACTS, intents_pending=2, intents_failed_7d=1))
+    assert errors("OpsStatus", status) == []
+    assert (status["counters"]["intents_pending"], status["counters"]["intents_failed_7d"]) == (2, 1)
+    assert status["health"] == "ok"  # counters only: a failed intent is the proposer's to show
 
 
 def test_signals_health_and_order():
@@ -463,7 +473,8 @@ def test_every_mode_todofy_modes_requires_is_a_boolean_also_when_unavailable():
         assert all(isinstance(status["modes"][key], bool) for key in required), status["modes"]
     for path in sorted((CONTRACT / "fixtures" / "OpsStatus").glob("*.json")):
         doc = json.loads(path.read_text())
-        keys = required_keys("TodofyModes" if doc["app"] == "todofy" else "MailHeroModes")
+        # Each app's own modes interface: mail-hero -> MailHeroModes, todofy -> TodofyModes, and so on.
+        keys = required_keys("".join(part.capitalize() for part in doc["app"].split("-")) + "Modes")
         assert all(isinstance(doc["modes"].get(key), bool) for key in keys), path.name
 
 
@@ -519,13 +530,14 @@ def test_metric_text(value, text):
 # ---- D1 budget of the runtime (the object runs it; its source is checked here) ---------------
 
 
-def test_status_reads_d1_once_with_five_bounded_statements():
-    """ops-v1 budget: status() is one D1 batch of five indexed reads (test_schema_sql checks
-    their plans); canaryResult one primary-key read; setGuard and reportOps none."""
+def test_status_reads_d1_once_with_six_bounded_statements():
+    """ops-v1 budget: status() is one D1 batch of six indexed reads (five of the mail ledger, one
+    of task intents; test_schema_sql checks their plans); canaryResult one primary-key read;
+    setGuard and reportOps none."""
     source = (mail_contract.TODOFY / "worker" / "todofy" / "runtime" / "ops.py").read_text()
     functions = {node.name: node for node in ast.walk(ast.parse(source)) if isinstance(node, ast.AsyncFunctionDef)}
     status = ast.unparse(functions["status"])
-    assert status.count("db.prepare(") == 5 == ops_runtime_statements(source)
+    assert status.count("db.prepare(") == 6 == ops_runtime_statements(source)
     assert status.count("await db.batch(") == 1 and status.count("await ") == 1
     canary = ast.unparse(functions["canary"])
     assert canary.count("await ") == 1 and "ledger.get(" in canary

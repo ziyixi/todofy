@@ -11,6 +11,7 @@ import type {
   OpsReportReceipt,
   TodofyStatus,
 } from '../../../contracts/ops-v1/ops-v1.ts';
+import type { TaskIntentResult } from '../../../contracts/task-intent-v1/task-intent-v1.ts';
 import type { Env } from './env.ts';
 import { errorEnvelope, errorResponse, jsonText, type Context } from './http.ts';
 
@@ -66,6 +67,9 @@ export interface Coordinator extends Rpc.DurableObjectBranded {
   ops_set_guard(input: string): Promise<OpsAnswer<GuardState>>;
   ops_canary_result(eventId: string): Promise<OpsAnswer<CanaryResult>>;
   ops_report(report: string): Promise<OpsAnswer<OpsReportReceipt>>;
+  // task-intent-v1 (the same Ops entrypoint): a TaskIntent / TaskIntentRef as JSON text.
+  task_intent_propose(intent: string): Promise<OpsAnswer<TaskIntentResult>>;
+  task_intent_status(ref: string): Promise<OpsAnswer<TaskIntentResult>>;
 }
 
 export function coordinator(env: Env): DurableObjectStub<Coordinator> {

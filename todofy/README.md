@@ -122,6 +122,14 @@ the next daily reminder (still one task per UTC day). A `mail.received.v1` event
 summarised by Gemini like mail and then ends: it never creates a Todoist task and never appears in
 reports, lists, counts or the reminder; its event page is marked 金丝雀.
 
+The same entrypoint takes task intents ([contracts/task-intent-v1](../contracts/task-intent-v1/README.md)):
+another app in the account (Lab, for "send today's liked papers to Todoist") proposes a parent task with
+subtasks, or separate tasks, under its own idempotency key. Todofy records it once in D1, creates the
+tasks in its alarm with the same Todoist client, gate and frozen request IDs as mail, looks a task up by
+its footer instead of resending it after an unknown result, and answers with codes and counts only. A
+repeated proposal never creates a task twice; pauses, the Todoist auth block and backups hold intents
+like mail. No Gemini call, no public route.
+
 ## Local development
 
 Prerequisites: Node 26 (`.nvmrc`), uv 0.12.10; Python 3.14 is fetched by uv. No Cloudflare account or

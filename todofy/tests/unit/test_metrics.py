@@ -50,6 +50,8 @@ def test_data_point_cuts_on_a_character_boundary():
         (StepPoint(Step.LOOKUP, "todo_created"), {"todoist_lookups": 1}),
         (StepPoint(Step.REVIEW, "created", attempts=1), {"todoist_creates": 1}),
         (StepPoint(Step.GTD, "ok"), {}),
+        (StepPoint(Step.INTENT, "created", attempts=2), {"todoist_creates": 2}),
+        (StepPoint(Step.INTENT_LOOKUP, "created"), {"todoist_lookups": 1}),
         (StepPoint(Step.TASK, "retry_later", attempts=0), {}),
         (StepPoint(Step.BACKUP, "ok", attempts=4), {}),
     ],

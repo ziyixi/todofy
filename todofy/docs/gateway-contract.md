@@ -25,7 +25,7 @@ DO's bytes.
 | Language | TypeScript (strict, ES modules), `gateway/` | Python (Pyodide), `worker/`, pywrangler |
 | Public entry | custom domains: owner host + every `TODOFY_HOOKS_HOSTS` name; cron `*/10 * * * *` | none (`workers_dev = false`, `preview_urls = false`, no routes); the object's RPC methods (§3) for the gateway's binding; every `fetch` answers 404 `not_found` (for the RPC release only, the previous gateway's calls get 503, §6.4) |
 | Bindings | `ASSETS` (`uiassets/dist`), `COORDINATOR` → class `TodofyCore` in script `todofy-core`, `METRICS` (Analytics Engine `todofy_metrics`, one point per request and cron; dev-notes.md §6) | `DB` (D1 `todofy`), `BACKUPS` (private R2 bucket `todofy-backups`, weekly D1 backups; it holds mail content), `METRICS` (the same dataset, one point per upstream step). No DO binding: nothing in core calls the DO through a stub any more |
-| Vars | `TODOFY_PUBLIC_HOST`, `TODOFY_HOOKS_HOSTS`, `BUILD_SHA`, `ACCESS_ISSUER`, `ACCESS_AUDIENCE`, `MAINTENANCE_MODE`; dev/test only: `DEV_AUTH_BYPASS`, `DEV_ACCESS_LOOPBACK_ISSUER`, `JWKS_REFRESH_COOLDOWN_MS` | `BUILD_SHA`, `MAINTENANCE_MODE`, `TODOFY_PUBLIC_HOST` (the reminder's link), `PROCESSING_PAUSED`, `FORCE_PAUSE_TODOIST`, `REMINDER_ENABLED`, `GTD_REVIEW_ENABLED`, `MAIL_SOURCE_ID`, `GEMINI_API_BASE`, `GEMINI_MODELS`, `GEMINI_TIMEOUT_MS`, `GEMINI_DAILY_TOKEN_BUDGET`, `TODOIST_API_BASE`, `TODOIST_DEFAULT_PROJECT_ID`, `TODOIST_OPS_PROJECT_ID` and `TODOIST_REVIEW_PROJECT_ID` (optional), `TODOIST_ATTEMPT_TIMEOUT_MS`, `LOOKUP_DELAY_MS`, `BACKOFF_BASE_MS`, `WATCHDOG_MS`, `REPORT_DEFAULT_TOP`, `REPORT_PRECOMPUTE_UTC`, `REPORT_CARRYOVER_DAYS`, `GTD_COLLECT_UTC`, `GTD_PAGE_TIMEOUT_MS` (tests), `LEGACY_TEXT_RETENTION_DAYS` |
+| Vars | `TODOFY_PUBLIC_HOST`, `TODOFY_HOOKS_HOSTS`, `BUILD_SHA`, `ACCESS_ISSUER`, `ACCESS_AUDIENCE`, `MAINTENANCE_MODE`; dev/test only: `DEV_AUTH_BYPASS`, `DEV_ACCESS_LOOPBACK_ISSUER`, `JWKS_REFRESH_COOLDOWN_MS` | `BUILD_SHA`, `MAINTENANCE_MODE`, `TODOFY_PUBLIC_HOST` (the reminder's link), `PROCESSING_PAUSED`, `FORCE_PAUSE_TODOIST`, `REMINDER_ENABLED`, `GTD_REVIEW_ENABLED`, `MAIL_SOURCE_ID`, `GEMINI_API_BASE`, `GEMINI_MODELS`, `GEMINI_TIMEOUT_MS`, `GEMINI_DAILY_TOKEN_BUDGET`, `TODOIST_API_BASE`, `TODOIST_DEFAULT_PROJECT_ID`, `TODOIST_OPS_PROJECT_ID` and `TODOIST_REVIEW_PROJECT_ID` (optional), `TODOIST_ATTEMPT_TIMEOUT_MS`, `LOOKUP_DELAY_MS`, `BACKOFF_BASE_MS`, `WATCHDOG_MS`, `REPORT_DEFAULT_TOP`, `REPORT_PRECOMPUTE_UTC`, `REPORT_CARRYOVER_DAYS`, `GTD_COLLECT_UTC`, `GTD_PAGE_TIMEOUT_MS` (tests), `LEGACY_TEXT_RETENTION_DAYS`; optional, unset in production: `TASK_INTENT_SOURCES` (§3.8) |
 | Secrets | `MAIL_WEBHOOK_TOKEN_SHA256`, `MAIL_WEBHOOK_TOKEN_SHA256_PREVIOUS`, `REPORT_BASIC_AUTH_SHA256`, `CSRF_SIGNING_KEY`, `ACCESS_OWNER`, `ACCESS_OWNER_ALIASES` (the last two from `--secrets-file` on every deploy) | `GEMINI_API_KEY`, `TODOIST_API_KEY` |
 | DO class | none: migration `v2` deleted the Python-era `TodofyCoordinator` in a gateway-only release (§6.6) | `TodofyCore` (renamed from `TodofyCoordinator` by core migration `v2`), instance name `inbox-v1`, SQLite-backed |
 
@@ -305,6 +305,24 @@ maintenance mode too. Vitest runs `Ops` in Node through a stand-in for `cloudfla
 calls the real entrypoint over a service binding (`tests/runtime/ops_support.py`). The root CI's
 `Contracts` job runs `test/ops.test.ts` next to both apps' ops-v1 schema checks, so a change under
 `contracts/` re-checks this forwarding; the runtime test runs in the `Todofy runtime` shards.
+
+### 3.8 task-intent-v1 on the same entrypoint (contracts/task-intent-v1)
+`Ops` also implements `TaskIntentOps`: another app in the account (today only Lab, binding `TODOFY` →
+`todofy`/`Ops`) proposes Todoist tasks, and Todofy stays the only Todoist writer. Same forwarding, same
+error codes, same trust boundary as §3.7.
+
+| `Ops` method | Object method | Gateway checks first |
+|---|---|---|
+| `proposeTasks(intent)` | `task_intent_propose(json)` | input JSON-serialisable, compact JSON ≤ 64 KiB |
+| `taskIntentStatus(ref)` | `task_intent_status(json)` | input JSON-serialisable, compact JSON ≤ 64 KiB |
+
+The object (`runtime/intents.py`, rules in `core/intents.py`) validates the input against the schema's
+rules (`invalid_input` otherwise), records a new intent in D1 (`task_intents`, `task_intent_tasks`,
+migration `0005_task_intents.sql`) and answers `pending`; its alarm creates the tasks through the
+same Todoist client, gate and 15-minute window as mail. Every expected outcome is a `TaskIntentResult`
+value (`created`, `duplicate`, `paused`, `failed`, `rejected`, `not_found`), never an exception.
+`test/ops.test.ts` covers the forwarding and the 64 KiB bound; `tests/runtime/test_task_intents.py` calls
+the real entrypoint over a service binding with the fake Todoist.
 
 ## 4. Trust and request IDs
 

@@ -304,9 +304,8 @@ writer); the contract, states and Todofy's implementation plan are in
   发送; 暂不发送 only records `later_at`.
 
 **Todofy side** (separate build, keeps all existing behaviour identical): two `Ops` methods forwarding
-to new `TodofyCore` RPCs; migration `todofy/migrations/0004_task_intents.sql` (next free number on
-`origin/main`; the concurrent `gtd-features` branch also adds Todofy migrations, so the lead may
-renumber at merge); a D1 ledger row per intent plus one row per task with a frozen request ID; creation
+to new `TodofyCore` RPCs; migration `todofy/migrations/0005_task_intents.sql` (renumbered from 0004
+at merge, after the GTD ledger's `0004_gtd.sql`; additive and independent of it); a D1 ledger row per intent plus one row per task with a frozen request ID; creation
 in the existing alarm, ≤ 6 tasks per step through the existing `todoist.create_task`, parent first then
 subtasks with `parent_id`; the footer `Todofy intent: lab/<intent_id>#<n>` for the existing read-only
 lookup after an unknown result; `paused` (nothing recorded) under maintenance, processing pause,
@@ -396,7 +395,7 @@ builds, in parallel:
 | --- | --- | --- |
 | **Lab worker** | pipeline (§4, 简介 for every card, explore deck, `because_id`), neuron ledger, decks/decisions/undo/restart (§7), owner API with edge-auth + CSRF (§8), send client + polling (§9), ops-v1 `lab` + dashboard wiring (§10), CI (§11), runtime suite with fake AI, fake arXiv and a stub Todofy | api-types, migration, contract |
 | **Lab web** | everything in `ux.md` against `api-types.ts` and fixtures (no worker needed): deck, gestures, keyboard, undo/重来 queue, summary + send states, empty/building/done, 已喜欢, 种子, 设置 | api-types |
-| **Todofy intake** | `contracts/task-intent-v1/README.md` "Todofy's side": migration 0004, core RPCs, alarm step, rendering, lookup footer, gateway `Ops` methods, Python contract test, docs; existing behaviour and tests unchanged | contract |
+| **Todofy intake** | `contracts/task-intent-v1/README.md` "Todofy's side": migration 0005, core RPCs, alarm step, rendering, lookup footer, gateway `Ops` methods, Python contract test, docs; existing behaviour and tests unchanged | contract |
 
 Then a review (quota/security, product/UX on a phone), fixes, and a clean-clone run of every CI job.
 Deploy order: Todofy (with the intake) → Lab → Dashboard.

@@ -5,7 +5,7 @@ this module. State lives in the object's SQLite only (not D1, not in backups): t
 the last run of each deferrable job and the dashboard's latest report. Losing it reads as a
 normal guard, jobs that may run now and no report until the next one.
 
-D1 budget: ``status`` runs one batch of five bounded reads (STATUS_STATEMENTS; the GTD ledger's
+D1 budget: ``status`` runs one batch of six bounded reads (STATUS_STATEMENTS; the GTD ledger's
 counters and signals come from the object's ``gtd_state``, runtime/gtd.py); ``canary``
 one primary-key read; ``set_guard`` and ``store_report`` none.
 """
@@ -15,6 +15,7 @@ from typing import Any
 from todofy.core import gtd as gtd_rules
 from todofy.core import ops as core
 from todofy.core.backoff import DAY, REMINDER_MAX_ATTEMPTS
+from todofy.core.sql import intents as intent_sql
 from todofy.core.sql import reminders as reminder_sql
 from todofy.core.sql import views
 from todofy.core.vocab import ATTENTION_AGE_SECONDS, ReminderState
@@ -31,7 +32,9 @@ DO_SCHEMA = (
     "CREATE TABLE IF NOT EXISTS ops_report (id INTEGER PRIMARY KEY CHECK (id = 1), generated_at INTEGER NOT NULL,"
     " received_at INTEGER NOT NULL, doc TEXT NOT NULL CHECK (length(doc) <= 8192))",
 )
-STATUS_STATEMENTS = 5
+STATUS_STATEMENTS = 6
+# status() counts task intents that failed within this window (contracts/task-intent-v1).
+INTENTS_FAILED_WINDOW = 7 * DAY
 
 
 def switches(env: Any) -> core.Switches:
@@ -152,15 +155,17 @@ async def status(env: Any, coordinator: Any, now: int) -> dict[str, Any]:
     """OpsStatus from one batch of STATUS_STATEMENTS bounded reads plus the object's storage."""
     db, source, store = env.DB, source_id(env), coordinator.sql
     today = core.timestamp(now)[:10]
-    counts, attention, received, due, day = await db.batch(
+    counts, attention, received, due, day, intent_counts = await db.batch(
         [
             db.prepare(views.ACTIVE_COUNTS.sql).bind(source),
             db.prepare(views.ATTENTION_COUNT.sql).bind(source, now - ATTENTION_AGE_SECONDS),
             db.prepare(views.RECEIVED_SINCE.sql).bind(source, now - DAY),
             db.prepare(views.OLDEST_DUE.sql).bind(now),
             db.prepare(reminder_sql.REMINDER_DAY.sql).bind(today),
+            db.prepare(intent_sql.COUNTS.sql).bind(now - INTENTS_FAILED_WINDOW),
         ]
     )
+    intent_row = intent_counts.results[0]
     usage = coordinator.usage_facts(now)
     state = backup.status_facts(env, store, now)
     # The GTD ledger's counters and signals come from the object's storage too (no D1 read).
@@ -201,6 +206,8 @@ async def status(env: Any, coordinator: Any, now: int) -> dict[str, Any]:
             gtd_stale_seconds=gtd_rules.snapshot_age(ledger_facts, now),
             review_enabled=gtd_rules.review_watched(ledger_facts),
             review_age_days=gtd_rules.review_age_days(ledger_facts, now),
+            intents_pending=int(intent_row["pending"]),
+            intents_failed_7d=int(intent_row["failed"]),
         )
     )
 

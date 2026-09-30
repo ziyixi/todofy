@@ -5,8 +5,9 @@ lists active tasks (not completed, not deleted) of one project, or of every proj
 without ``project_id``, in pages of ``{"results", "next_cursor"}``;
 ``GET /api/v1/tasks/completed/by_completion_date`` lists completed tasks with
 ``completed_at`` in ``[since, until)`` in pages of ``{"items", "next_cursor"}``, with
-``next_cursor`` left out on the last page, as Todoist does. ``max_page_size`` caps every
-page whatever ``limit`` the client asks for, so tests can force paging with a handful of
+``next_cursor`` left out on the last page, as Todoist does. A create with ``parent_id`` makes a
+subtask in its parent's project (an unknown parent is a 400, as upstream). ``max_page_size`` caps
+every page whatever ``limit`` the client asks for, so tests can force paging with a handful of
 tasks. Task text is synthetic: tests seed sentinels and check they never leave the Worker.
 """
 
@@ -115,6 +116,10 @@ class TodoistFake(FakeServer):
         """Every POST /api/v1/tasks the Worker sent, including rejected ones."""
         return self.received("POST", TASKS_PATH)
 
+    def request_ids(self) -> list[str | None]:
+        """X-Request-Id of every POST /api/v1/tasks, in order."""
+        return [r.headers.get("x-request-id") for r in self.creates()]
+
     def creates_for(self, event_id: str) -> list[Recorded]:
         return [r for r in self.creates() if event_id in r.json().get("description", "")]
 
@@ -140,14 +145,22 @@ class TodoistFake(FakeServer):
         if not isinstance(fields, dict) or not isinstance(fields.get("content"), str) or not fields["content"].strip():
             return Reply(400, {"error": "content is required"})
         with self._tasks_lock:
+            project = fields.get("project_id") or PROJECT_ID
+            parent_id = fields.get("parent_id")
+            if parent_id is not None:
+                parent = next((task for task in self._tasks if task.id == parent_id), None)
+                if parent is None:
+                    return Reply(400, {"error": "parent not found"})
+                project = parent.project_id
             task = Task(
                 self._next_id(),
                 fields["content"],
                 fields.get("description", ""),
-                fields.get("project_id") or PROJECT_ID,
+                project,
                 list(fields.get("labels", [])),
                 request_id=request.headers.get("x-request-id"),
                 added_at=stamp(request.at),
+                parent_id=parent_id,
             )
             self._tasks.append(task)
         return Reply(200, task.json())

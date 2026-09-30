@@ -123,12 +123,13 @@ gateway/                       the gateway Worker `todofy` (TypeScript, own pack
 migrations/0001_init.sql       the D1 schema; 0002_daily_metrics.sql adds the owner UI's daily trends (§6);
                                0003_ops.sql adds mail_events.canary_run_id, mail_reminders.ops_count/ops_generated_at (§5, ops-v1);
                                0004_gtd.sql adds the GTD ledger (gtd_snapshots, gtd_snapshot_tasks, gtd_daily,
-                               gtd_reviews) and mail_reminders.project_id (gtd-features.md)
+                               gtd_reviews) and mail_reminders.project_id (gtd-features.md);
+                               0005_task_intents.sql adds task_intents and task_intent_tasks (§5, task-intent-v1)
 api/                           owner-api-v1.openapi.yaml (source of truth for the UI), newsletter report
                                schemas; the webhook body references ../contracts/mail-received-v1 (shared)
 worker/todofy/core/            pure stdlib Python, host-testable, no `js`/`workers` imports
   vocab.py api_errors.py contract.py render.py prompts.py reminder_text.py request_id.py
-  backoff.py classify.py todoist_request.py report_schema.py gemini_wire.py gtd.py
+  backoff.py classify.py todoist_request.py report_schema.py gemini_wire.py gtd.py ops.py intents.py
   sql/                         every D1 statement, one module per owning runtime module
 worker/todofy/runtime/         runs only inside workerd (imports `js`, `workers`, `pyodide`)
 tests/unit/                    host tests for core/, the migration and the API contract (golden/ = Go captures)
@@ -370,6 +371,8 @@ setup()                                   {"mail_source_id", "configured": {...}
 ops_status() | ops_set_guard(input_json)  the gateway's Ops entrypoint (contracts/ops-v1, below):
 ops_canary_result(event_id)               {"ok": value} or {"error": "invalid_input" | "busy" | "unavailable"},
 ops_report(report_json)                   never raised; JSON text in, plain dicts out
+task_intent_propose(intent_json)          the same entrypoint's task-intent-v1 methods (below), same shape
+task_intent_status(ref_json)
 ```
 Every other method is callable over RPC too (Python exposes them all, `_`-prefixed ones included); only
 the gateway binds the class, and it calls only these.
@@ -646,6 +649,50 @@ still gets its task (title `[Todofy System] 运维：{n} 项需要关注`), the 
 Each report is listed by at most one day's reminder, and on its own (no attention) only from the UTC
 day after it was generated, so the dashboard's 23:40 report is the next day's digest, never also a task
 that evening.
+
+### task-intent-v1 (`core/intents.py`, `core/sql/intents.py`, `runtime/intents.py`, `gateway/src/ops.ts`)
+Another app in the account proposes Todoist tasks through the gateway's `Ops` entrypoint
+(`proposeTasks`, `taskIntentStatus`; contract `../contracts/task-intent-v1`). Todofy never calls Gemini
+for an intent, never fetches its URLs, and logs only the source, intent ID, task number, counts and codes.
+
+Recording (`propose`, in this order): the input is checked against every schema rule (`core/intents.py`,
+`fullmatch`, closed objects, code-point lengths, distinct items; a lone surrogate is refused) and frozen
+as its canonical JSON (schema key order, compact, absent optionals left out) with its SHA-256. (1) A row
+for `(source, intent_id)` answers first: another hash → `rejected`/`intent_conflict`; created →
+`duplicate`; failed → re-queued unless a pause holds (`REQUEUE` + `REQUEUE_TASKS` in one batch: refused
+tasks back to `pending`, unknown ones to `recheck`, a new 48-try/7-day window, the text restored if
+retention had dropped it); otherwise its state (`pending`, or `paused` recorded while a pause holds).
+(2) `TASK_INTENT_SOURCES` (unset: every source the contract knows; empty: none, an off switch that
+leaves mail running) → `source_not_allowed`; an item URL whose host is not exactly on the source's list (lab:
+`arxiv.org`) → `url_not_allowed`. (3) Maintenance, processing pause, `FORCE_PAUSE_TODOIST`, the Todoist
+auth block, a backup lease → `paused`, nothing written. (4) One batch: the intent row, inserted only while
+the source has fewer than 10 intents that UTC day (`RECORD`, count on `task_intents_created`), its task
+rows with a frozen UUID `X-Request-Id` each (`RECORD_TASKS`, guarded by `changes() = 1`), and the row as
+stored; no insert and no row → `daily_limit`, a row → a concurrent twin, replayed. Then the alarm is woken.
+
+Creating (`step`, from `coordinator._step`): intents need Todoist, so they are considered only while
+`_todoist_wait` allows calls; when mail and an intent are both due they take turns (`intent_turn`). A
+step works on the oldest due intent: a task left `sending` was interrupted and becomes `unknown`; then at
+most one read-only footer lookup and six creates, each re-gated by `_todoist_wait`, counted in the
+15-minute window, under the watchdog, and no new call once the step has run 60 s. In subtasks mode the
+parent (n = 0) goes first and every child sends `parent_id` instead of `project_id`
+(`build_task_request(..., parent_id=)`); no child is sent before the parent exists or after it failed.
+Task states (`core.intents.TaskState`): created; unknown (a timeout, lost answer, 500 or 2xx without an
+ID) → footer lookup after `LOOKUP_DELAY_MS`: a match is created (the first of several), none fails the
+task `todoist_result_unknown`, a failed scan retries up to 6 times; recheck (after the proposer's retry)
+→ the same lookup, none resends the frozen request; 401/403 → the existing 6 h block, the task waits;
+another 4xx or a request Todoist would refuse → failed `todoist_rejected`; 429/502-504/not sent →
+durable backoff (`rate_limited` / `retry_wait`) until 48 tries or 7 days, then failed
+`todoist_rejected`. The intent is `created` when every task exists (its text is dropped in the same
+statement), `failed` when no task can progress, else `pending` due at its earliest actionable task.
+Task text (`task_text`): content is the title as given; the description is the item's description, its
+URL, in separate mode `— <parent title>`, and the footer `Todofy intent: <source>/<intent_id>#<n>`
+(`has_footer` matches it only as the last line, so quoted text cannot pass for another task), as blocks separated by a blank line. D1 per step: at most 17
+statements. Metrics: Analytics Engine steps `intent` (counted in `todoist_creates`) and `intent_lookup`
+(`todoist_lookups`); `status()` counters `intents_pending` and `intents_failed_7d` (its sixth read).
+Retention: a failed intent's text after 30 days; finished intents 400 days after their last change,
+their task rows first. Both tables are in the weekly backup; a restored pending intent resumes
+creating its unfinished tasks (reconcile with the proposer first, like mail).
 
 ### health (lead)
 `GET /health` on the hooks hosts is answered by the gateway alone: `{"build", "service": "todofy",

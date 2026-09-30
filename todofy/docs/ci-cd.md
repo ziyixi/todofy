@@ -7,7 +7,11 @@ tests), a `Contracts` job for the shared contracts (`mail.received.v1` and
 `ops-v1`), and `CI gate`. For Todofy, `Contracts` runs `tests/unit/test_mail_hero_compat.py` (every
 fixture, the canary one included), `test_contract.py`, `test_openapi_vocab.py`, `test_ops_contract.py`
 (ops-v1 fixtures with `jsonschema`), `test_ops_core.py` (the core's ops values against the schema) and the
-gateway's `test/ops.test.ts`; the workerd suite `tests/runtime/test_ops.py` runs in the `Todofy runtime` shards.
+gateway's `test/ops.test.ts` (which also covers the task-intent-v1 methods); the workerd suites
+`tests/runtime/test_ops.py` and `tests/runtime/test_task_intents.py` run in the `Todofy runtime` shards.
+task-intent-v1's Python side (`tests/unit/test_task_intent_contract.py`: fixtures with `jsonschema`, the
+core's input checks against the schema's verdicts, the `task-intent-v1.ts` constants, every result) runs
+with the host tests in `Todofy static checks`; adding it to `Contracts` is a root `ci.yml` change.
 The Todofy check jobs and `Todofy deploy` below run with `working-directory: todofy`. They check and deploy
 both Todofy Workers from the same commit: the TypeScript gateway `todofy` (`gateway/`) and the Python
 `todofy-core` (`worker/`, root `wrangler.toml`); see [gateway-contract.md](gateway-contract.md). Both

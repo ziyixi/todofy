@@ -5,7 +5,7 @@ Tasks carry no labels (the dependency DAG is gone).
 """
 
 import json
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from typing import Any
 
@@ -26,9 +26,15 @@ class TaskRequest:
     headers: dict[str, str]
 
 
-def build_task_request(content: str, description: str, project_id: str, request_id: str, token: str) -> TaskRequest:
+def build_task_request(
+    content: str, description: str, project_id: str, request_id: str, token: str, *, parent_id: str = ""
+) -> TaskRequest:
+    """``parent_id`` makes a subtask (task-intent-v1): it is sent instead of ``project_id``, since a
+    subtask always lives in its parent's project."""
     fields = {"content": content, "description": description}
-    if project_id:
+    if parent_id:
+        fields["parent_id"] = parent_id
+    elif project_id:
         fields["project_id"] = project_id
     body = json.dumps(fields, ensure_ascii=False, separators=(",", ":")).encode()
     if len(body) > MAX_POST_BODY_BYTES:
@@ -74,8 +80,13 @@ def parse_task_page(body: bytes) -> tuple[list[dict[str, Any]], str]:
 
 def footer_task_ids(tasks: Iterable[dict[str, Any]], event_id: str) -> list[str]:
     """IDs of tasks whose description carries the event's footer."""
+    return matching_task_ids(tasks, lambda description: has_footer(description, event_id))
+
+
+def matching_task_ids(tasks: Iterable[dict[str, Any]], matches: Callable[[str], bool]) -> list[str]:
+    """IDs of tasks whose description ``matches`` (a footer test)."""
     return [
         str(task.get("id", ""))
         for task in tasks
-        if isinstance(task.get("description"), str) and has_footer(task["description"], event_id)
+        if isinstance(task.get("description"), str) and matches(task["description"])
     ]

@@ -19,6 +19,8 @@ const CORE_METHODS = [
   'ops_set_guard',
   'ops_canary_result',
   'ops_report',
+  'task_intent_propose',
+  'task_intent_status',
 ] as const;
 
 /** One RPC call the gateway made on the TodofyCore stub. */

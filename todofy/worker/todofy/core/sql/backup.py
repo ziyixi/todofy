@@ -180,6 +180,44 @@ GTD_REVIEWS = Table(
     ("week",),
     200,
 )
+# task-intent-v1 (migrations/0005_task_intents.sql); payload_json reaches 64 KiB, hence the small page.
+TASK_INTENTS = Table(
+    "task_intents",
+    (
+        "source",
+        "intent_id",
+        "payload_sha256",
+        "mode",
+        "tasks_total",
+        "tasks_created",
+        "state",
+        "error_code",
+        "payload_json",
+        "next_attempt_at",
+        "created_at",
+        "updated_at",
+    ),
+    ("source", "intent_id"),
+    50,
+)
+TASK_INTENT_TASKS = Table(
+    "task_intent_tasks",
+    (
+        "source",
+        "intent_id",
+        "n",
+        "request_id",
+        "state",
+        "attempts",
+        "next_attempt_at",
+        "todoist_id",
+        "error_code",
+        "started_at",
+        "updated_at",
+    ),
+    ("source", "intent_id", "n"),
+    500,
+)
 
 TABLES = {
     table.name: table
@@ -197,6 +235,8 @@ TABLES = {
         GTD_SNAPSHOT_TASKS,
         GTD_DAILY,
         GTD_REVIEWS,
+        TASK_INTENTS,
+        TASK_INTENT_TASKS,
     )
 }
 

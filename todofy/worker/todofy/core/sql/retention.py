@@ -54,3 +54,24 @@ EXPIRE_GTD_REVIEWS = Query(
     "DELETE FROM gtd_reviews WHERE rowid IN (SELECT rowid FROM gtd_reviews WHERE week < ? LIMIT ?)",
     "sqlite_autoindex_gtd_reviews_1",
 )
+
+# task-intent-v1 (core/intents.py): a failed intent's text 30 days after it failed (the proposer's
+# retry brings it back with the same hash), then every finished intent 400 days after its last
+# change, tasks first; an intent goes once none of its tasks is left, so no task row is orphaned.
+EXPIRE_FAILED_INTENT_TEXT = Query(
+    "UPDATE task_intents SET payload_json = NULL WHERE rowid IN (SELECT rowid FROM task_intents"
+    " WHERE state = 'failed' AND updated_at < ? AND payload_json IS NOT NULL LIMIT ?)",
+    "task_intents_updated",
+)
+EXPIRE_INTENT_TASKS = Query(
+    "DELETE FROM task_intent_tasks WHERE rowid IN (SELECT t.rowid FROM task_intents AS i"
+    " JOIN task_intent_tasks AS t ON t.source = i.source AND t.intent_id = i.intent_id"
+    " WHERE i.state IN ('created', 'failed') AND i.updated_at < ? LIMIT ?)",
+    "task_intents_updated",
+)
+EXPIRE_INTENTS = Query(
+    "DELETE FROM task_intents WHERE rowid IN (SELECT rowid FROM task_intents AS i"
+    " WHERE state IN ('created', 'failed') AND updated_at < ? AND NOT EXISTS (SELECT 1 FROM task_intent_tasks AS t"
+    " WHERE t.source = i.source AND t.intent_id = i.intent_id) LIMIT ?)",
+    "task_intents_updated",
+)

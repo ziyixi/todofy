@@ -96,9 +96,8 @@ task text, Todoist IDs or remote response text. Todofy logs only `source`, `inte
 
 ## Todofy's side (to implement; keeps every existing behaviour identical)
 
-- **Migration** `todofy/migrations/0004_task_intents.sql` (the next free number on `origin/main` on
-  2026-09-30; the `gtd-features` branch also adds Todofy migrations, so the lead may renumber at merge:
-  the file is additive and independent of theirs):
+- **Migration** `todofy/migrations/0005_task_intents.sql` (renumbered from 0004 at merge, after the
+  GTD ledger's `0004_gtd.sql`; the file is additive and independent of it):
   `task_intents(source, intent_id, payload_sha256, mode, tasks_total, tasks_created, state, error_code,
   payload_json NULL, created_at, updated_at, PK(source, intent_id))` and
   `task_intent_tasks(source, intent_id, n, request_id, state, attempts, next_attempt_at, todoist_id NULL,

@@ -9,7 +9,12 @@
  * `{error}`; this class turns an error into `new Error(code)` (the message crosses RPC intact).
  * A failed core call (object down, deploy in progress, Python exception) rejects `unavailable`.
  * The core validates every input against the schema's rules; the gateway only refuses what it
- * cannot even pass on (a non-string ID, input that is not JSON, a report over 8 KiB).
+ * cannot even pass on (a non-string ID, input that is not JSON, a report over 8 KiB, a task
+ * intent over 64 KiB).
+ *
+ * The same entrypoint carries task-intent-v1 (contracts/task-intent-v1/README.md): another app in
+ * the account proposes Todoist tasks with `proposeTasks` and reads the outcome with
+ * `taskIntentStatus`; Todofy stays the only Todoist writer.
  */
 import { WorkerEntrypoint } from 'cloudflare:workers';
 import { OPS_LIMITS } from '../../../contracts/ops-v1/ops-v1.ts';
@@ -24,6 +29,13 @@ import type {
   TodofyOps,
   TodofyStatus,
 } from '../../../contracts/ops-v1/ops-v1.ts';
+import { TASK_INTENT_LIMITS } from '../../../contracts/task-intent-v1/task-intent-v1.ts';
+import type {
+  TaskIntent,
+  TaskIntentOps,
+  TaskIntentRef,
+  TaskIntentResult,
+} from '../../../contracts/task-intent-v1/task-intent-v1.ts';
 import { coordinator, type Coordinator, type OpsAnswer } from './coordinator.ts';
 import type { Env } from './env.ts';
 
@@ -44,7 +56,7 @@ function json(value: unknown): string {
   }
 }
 
-export class Ops extends WorkerEntrypoint<Env> implements TodofyOps {
+export class Ops extends WorkerEntrypoint<Env> implements TodofyOps, TaskIntentOps {
   private async call<T>(method: (core: DurableObjectStub<Coordinator>) => Promise<OpsAnswer<T>>): Promise<T> {
     let answer: OpsAnswer<T>;
     try {
@@ -75,5 +87,18 @@ export class Ops extends WorkerEntrypoint<Env> implements TodofyOps {
     // Compact JSON is what the core stores; refuse an oversized report before waking the object.
     if (encoder.encode(text).byteLength > OPS_LIMITS.reportMaxBytes) throw fail('invalid_input');
     return await this.call((core) => core.ops_report(text));
+  }
+
+  async proposeTasks(intent: TaskIntent): Promise<TaskIntentResult> {
+    const text = json(intent);
+    // The bound of the contract, on the compact JSON the core parses; refused before waking the object.
+    if (encoder.encode(text).byteLength > TASK_INTENT_LIMITS.intentMaxBytes) throw fail('invalid_input');
+    return await this.call((core) => core.task_intent_propose(text));
+  }
+
+  async taskIntentStatus(ref: TaskIntentRef): Promise<TaskIntentResult> {
+    const text = json(ref);
+    if (encoder.encode(text).byteLength > TASK_INTENT_LIMITS.intentMaxBytes) throw fail('invalid_input');
+    return await this.call((core) => core.task_intent_status(text));
   }
 }

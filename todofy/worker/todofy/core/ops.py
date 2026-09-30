@@ -403,6 +403,9 @@ class Facts:
     gtd_stale_seconds: int | None = None
     review_enabled: bool = False
     review_age_days: int | None = None
+    # task-intent-v1: intents still being created, and intents failed within 7 days.
+    intents_pending: int = 0
+    intents_failed_7d: int = 0
 
 
 # review_overdue: the weekly review has not been done for this many days.
@@ -476,6 +479,8 @@ def status(facts: Facts) -> dict[str, Any]:
         "gemini_calls": facts.gemini_calls,
         "todoist_window_calls": facts.todoist_window_calls,
         "todoist_window_limit": facts.todoist_window_limit,
+        "intents_pending": facts.intents_pending,
+        "intents_failed_7d": facts.intents_failed_7d,
     }
     if backup_age is not None:
         counters["backup_age_seconds"] = backup_age

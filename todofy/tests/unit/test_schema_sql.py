@@ -99,6 +99,8 @@ def test_tables_and_indexes_are_exactly_the_planned_ones(db):
         "gtd_snapshot_tasks",
         "gtd_daily",
         "gtd_reviews",
+        "task_intents",
+        "task_intent_tasks",
     }
     assert {name for name, kind in objects.items() if kind == "index"} == {
         "mail_events_due",
@@ -114,6 +116,9 @@ def test_tables_and_indexes_are_exactly_the_planned_ones(db):
         "legacy_mail_text_expires",
         "legacy_mail_text_created",
         "gtd_reviews_sending",
+        "task_intents_due",
+        "task_intents_updated",
+        "task_intents_created",
     }
 
 
@@ -329,9 +334,12 @@ def test_query_uses_its_index(db, name):
     for step in plan:
         used = re.search(r"INDEX (\w+)", step)
         bounded = used is not None and used.group(1) in partial
-        # A SCAN reads a whole table or index. source_id is a constant, so a
-        # search on it alone does too, unless LIMIT stops an in-order walk.
-        if step.startswith("SCAN") or (step.endswith("(source_id=?)") and "LIMIT" not in sql):
+        # A SCAN reads a whole table or index (not the one constant row of a SELECT without
+        # FROM). source_id is a constant, so a search on it alone does too, unless LIMIT stops
+        # an in-order walk.
+        if (step.startswith("SCAN") and step != "SCAN CONSTANT ROW") or (
+            step.endswith("(source_id=?)") and "LIMIT" not in sql
+        ):
             assert bounded, plan
     if not sort_allowed:
         assert not any("TEMP B-TREE" in step for step in plan), plan
