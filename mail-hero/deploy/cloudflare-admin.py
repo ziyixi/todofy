@@ -90,6 +90,20 @@ def inspect(token):
             print(json.dumps({label: {"error": str(error)}}))
 
 
+# Wrangler's global options that take a value, possibly as the next argument (--config=x is one argument).
+VALUE_OPTIONS = {"-c", "--config", "-e", "--env", "--cwd", "--env-file"}
+
+
+def wrangler_command(argv):
+    """The wrangler command argv names, after any global options: `--config x deploy` and `-e y versions
+    upload` name "deploy" and "versions upload" as much as `deploy` does."""
+    position = 0
+    while position < len(argv) and argv[position].startswith("-"):
+        position += 1 if argv[position] == "--" else (2 if argv[position] in VALUE_OPTIONS else 1)
+    words = argv[position:position + 2]
+    return " ".join(words) if words[:1] == ["versions"] else " ".join(words[:1])
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--token-file", type=Path, default=DEFAULT_TOKEN)
@@ -120,7 +134,7 @@ def main():
         parser.error("wrangler requires command arguments")
     # ../wrangler.toml is production and holds no personal values or switches: a deploy without the
     # --var flags of deploy/deploy-vars.mjs would delete them. Deploys run in CI, or through that wrapper.
-    if argv[0] == "deploy" or argv[:2] == ["versions", "upload"]:
+    if wrangler_command(argv) in ("deploy", "versions upload"):
         parser.error("deploy only through CI or: node ../deploy/deploy-vars.mjs exec -- npx --no-install "
                      "wrangler deploy --config ../wrangler.toml (from cloudflare/)")
     result = subprocess.run([str(ROOT / "cloudflare/node_modules/.bin/wrangler"), *argv],
