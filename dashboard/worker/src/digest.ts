@@ -1,0 +1,230 @@
+/**
+ * The unified ops digest (docs/design.md §5.5): pure functions building the OpsReport items (codes,
+ * severities, times and numbers only) and deciding when to send them to Todofy's `reportOps`.
+ */
+import { OPS_APPS, OPS_LIMITS, type OpsApp, type OpsReport, type OpsReportItem, type OpsSeverity, type OpsStatus } from '../../../contracts/ops-v1/ops-v1.ts';
+import { GUARD_SHED_PERCENT, QUOTA_CRITICAL_PERCENT, type OverallLevel, type QuotaRow } from './api-types.ts';
+import type { CanaryRecord } from './canary.ts';
+import { hoursLeft, type DesiredGuard } from './guard.ts';
+import { HOUR_MS, MINUTE_MS, iso, isTimestamp } from './time.ts';
+
+export const DIGEST_REFRESH_MS = 6 * HOUR_MS;
+/** A usage fetch failing for this long becomes `usage_unavailable`. */
+export const USAGE_UNAVAILABLE_AFTER_MS = 2 * HOUR_MS;
+/** App statuses older than this do not contribute signals. */
+export const STATUS_SIGNAL_MAX_AGE_MS = HOUR_MS;
+
+const CODE = /^[a-z][a-z0-9_]{0,47}$/;
+const SOURCE = /^[a-z][a-z0-9-]{0,31}$/;
+
+/** An item before its `since` is resolved. */
+export interface Candidate {
+  readonly source: string;
+  readonly code: string;
+  readonly severity: OpsSeverity;
+  readonly metrics: Readonly<Record<string, number>>;
+  readonly since?: string;
+}
+
+export interface AppHealthInput {
+  readonly consecutive_failures: number;
+  readonly status: OpsStatus | null;
+  readonly status_at: number | null;
+}
+
+export interface DigestInput {
+  readonly now: number;
+  readonly usage: {
+    readonly configured: boolean;
+    readonly fresh: boolean;
+    readonly rows: readonly QuotaRow[];
+    readonly fetched_at: number | null;
+    readonly consecutive_failures: number;
+    readonly last_http_status: number | null;
+  };
+  readonly desired: DesiredGuard;
+  readonly guardFailures: Readonly<Record<OpsApp, number>>;
+  /** The run that finished most recently, if any. */
+  readonly latestFinished: CanaryRecord | null;
+  readonly apps: Readonly<Record<OpsApp, AppHealthInput>>;
+}
+
+/** Numbers only, named by codes, at most 12 keys. */
+export function cleanMetrics(metrics: Readonly<Record<string, unknown>>): Record<string, number> {
+  const out: Record<string, number> = {};
+  let count = 0;
+  for (const [key, value] of Object.entries(metrics)) {
+    if (count >= OPS_LIMITS.metricsMaxKeys) break;
+    if (!CODE.test(key) || typeof value !== 'number' || !Number.isFinite(value)) continue;
+    out[key] = value;
+    count++;
+  }
+  return out;
+}
+
+const CANARY_CODES: Readonly<Record<string, string>> = {
+  start: 'canary_start_failed',
+  delivery: 'canary_not_delivered',
+  consumer: 'canary_consumer_failed',
+};
+
+/** Every warning or critical condition of this tick (§5.5 table). */
+export function candidates(input: DigestInput): Candidate[] {
+  const { now, usage } = input;
+  const out: Candidate[] = [];
+
+  if (!usage.configured) {
+    out.push({ source: 'dashboard', code: 'usage_not_configured', severity: 'warning', metrics: {} });
+  } else if (usage.consecutive_failures > 0 && (usage.fetched_at === null || now - usage.fetched_at >= USAGE_UNAVAILABLE_AFTER_MS)) {
+    out.push({
+      source: 'dashboard',
+      code: 'usage_unavailable',
+      severity: 'warning',
+      metrics: { consecutive_failures: usage.consecutive_failures, http_status: usage.last_http_status ?? 0 },
+    });
+  }
+  if (usage.fresh) {
+    for (const row of usage.rows) {
+      if (row.percent === null || row.percent < GUARD_SHED_PERCENT || row.used === null) continue;
+      const metrics: Record<string, number> = { percent: row.percent, used: row.used, limit: row.limit };
+      if (row.projected_percent !== null) metrics.projected_percent = row.projected_percent;
+      out.push({
+        source: 'cloudflare',
+        code: `${row.id}_high`,
+        severity: row.percent >= QUOTA_CRITICAL_PERCENT ? 'critical' : 'warning',
+        metrics,
+      });
+    }
+  }
+
+  if (input.desired.level === 'shed') {
+    out.push({
+      source: 'dashboard',
+      code: 'guard_shed',
+      severity: 'warning',
+      metrics: { hours_left: hoursLeft(input.desired.until, now), manual: input.desired.source === 'owner' ? 1 : 0 },
+    });
+  }
+
+  const run = input.latestFinished;
+  if (run !== null && run.finished_at !== null) {
+    const since = iso(run.finished_at);
+    if (run.outcome === 'failed' && run.stage !== null) {
+      const metrics: Record<string, number> = { attempts: run.delivery.attempts, timed_out: run.code === 'timeout' ? 1 : 0 };
+      if (run.delivery.last_http_status !== null) metrics.last_http_status = run.delivery.last_http_status;
+      out.push({ source: 'dashboard', code: CANARY_CODES[run.stage] ?? 'canary_failed', severity: 'critical', since, metrics });
+    } else if (run.outcome === 'skipped' && (run.code === 'canary_producer_missing' || run.code === 'canary_consumer_missing')) {
+      out.push({ source: 'dashboard', code: 'canary_unsupported', severity: 'warning', since, metrics: {} });
+    }
+  }
+
+  for (const app of OPS_APPS) {
+    const health = input.apps[app];
+    if (input.guardFailures[app] >= 2) {
+      out.push({
+        source: app,
+        code: 'guard_apply_failed',
+        severity: 'warning',
+        metrics: { consecutive_failures: input.guardFailures[app] },
+      });
+    }
+    if (health.consecutive_failures >= 2) {
+      out.push({ source: app, code: 'app_unreachable', severity: 'critical', metrics: { consecutive_failures: health.consecutive_failures } });
+    }
+    const status = health.status;
+    if (status === null || health.status_at === null || now - health.status_at > STATUS_SIGNAL_MAX_AGE_MS) continue;
+    if (status.health === 'down') out.push({ source: app, code: 'app_down', severity: 'critical', metrics: {} });
+    for (const signal of status.signals) {
+      if (signal.severity === 'info' || !CODE.test(signal.code)) continue;
+      out.push({
+        source: app,
+        code: signal.code,
+        severity: signal.severity,
+        metrics: signal.metrics,
+        ...(isTimestamp(signal.since) ? { since: signal.since } : {}),
+      });
+    }
+  }
+  return out;
+}
+
+const RANK: Readonly<Record<OpsSeverity, number>> = { critical: 0, warning: 1, info: 2 };
+
+export function itemKey(item: { readonly source: string; readonly code: string }): string {
+  return `${item.source}:${item.code}`;
+}
+
+/**
+ * Warning/critical only, deduplicated by source:code (highest severity wins), critical first then
+ * source then code, at most 20. `since` is the app's own when it has one, else `firstSeen` of the key.
+ */
+export function finalizeItems(list: readonly Candidate[], firstSeen: ReadonlyMap<string, number>, now: number): OpsReportItem[] {
+  const byKey = new Map<string, Candidate>();
+  for (const candidate of list) {
+    if (candidate.severity === 'info' || !SOURCE.test(candidate.source) || !CODE.test(candidate.code)) continue;
+    const key = itemKey(candidate);
+    const existing = byKey.get(key);
+    if (existing === undefined || RANK[candidate.severity] < RANK[existing.severity]) byKey.set(key, candidate);
+  }
+  return [...byKey.values()]
+    .sort((a, b) => RANK[a.severity] - RANK[b.severity] || a.source.localeCompare(b.source) || a.code.localeCompare(b.code))
+    .slice(0, OPS_LIMITS.reportMaxItems)
+    .map((c) => ({
+      source: c.source,
+      code: c.code,
+      severity: c.severity,
+      since: c.since ?? iso(firstSeen.get(itemKey(c)) ?? now),
+      metrics: cleanMetrics(c.metrics),
+    }));
+}
+
+const encoder = new TextEncoder();
+
+export function reportBytes(report: OpsReport): number {
+  return encoder.encode(JSON.stringify(report)).byteLength;
+}
+
+/** The report, trimmed from the end until its compact JSON is at most 8192 bytes. */
+export function buildReport(items: readonly OpsReportItem[], now: number, dashboardUrl: string | null): OpsReport {
+  const kept = items.slice(0, OPS_LIMITS.reportMaxItems);
+  const make = (list: readonly OpsReportItem[]): OpsReport => ({
+    generated_at: iso(now),
+    items: list,
+    ...(dashboardUrl !== null ? { dashboard_url: dashboardUrl } : {}),
+  });
+  let report = make(kept);
+  while (kept.length > 0 && reportBytes(report) > OPS_LIMITS.reportMaxBytes) {
+    kept.pop();
+    report = make(kept);
+  }
+  return report;
+}
+
+/** The change key: sorted `source:code:severity`. */
+export function digestKey(items: readonly OpsReportItem[]): string {
+  return items
+    .map((item) => `${item.source}:${item.code}:${item.severity}`)
+    .sort()
+    .join(',');
+}
+
+export interface DigestSendState {
+  readonly last_key: string | null;
+  readonly last_sent_at: number | null;
+}
+
+/** Send on a change, at least every 6 h, and at the 23:30 UTC tick when the last send is ≥ 60 min old. */
+export function shouldSend(key: string, state: DigestSendState, now: number): boolean {
+  if (state.last_sent_at === null || state.last_key === null) return true;
+  if (key !== state.last_key) return true;
+  const age = now - state.last_sent_at;
+  if (age >= DIGEST_REFRESH_MS) return true;
+  const date = new Date(now);
+  return date.getUTCHours() === 23 && date.getUTCMinutes() >= 30 && age >= 60 * MINUTE_MS;
+}
+
+export function overallLevel(items: readonly OpsReportItem[]): OverallLevel {
+  if (items.some((item) => item.severity === 'critical')) return 'critical';
+  if (items.some((item) => item.severity === 'warning')) return 'warning';
+  return 'ok';
+}

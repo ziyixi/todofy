@@ -22,6 +22,9 @@ describe('workerd harness', () => {
     expect(response.status).toBeGreaterThanOrEqual(200);
     await response.arrayBuffer();
     await harness.scheduled(new Date('2026-09-29T16:00:00Z'));
+    // The tick's own calls (statuses, the day's canary start, the first digest); flows are tested elsewhere.
+    expect((await harness.calls('mail-hero')).map((call) => call.method)).toEqual(['status', 'startCanary']);
+    expect((await harness.calls('todofy')).map((call) => call.method)).toEqual(['status', 'reportOps']);
   });
 
   it('serves schema-valid fixtures over RPC and records the calls', async () => {

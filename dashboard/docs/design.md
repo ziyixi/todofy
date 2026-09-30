@@ -7,7 +7,8 @@ entrypoints (service bindings) and never imports `mail-hero/` or `todofy/` code.
 `AGENTS.md` rules apply here too: Workers Free, bounded reads and calls, no mail content anywhere,
 synthetic test data only, no secrets in logs.
 
-Status: design and scaffold (this commit). Nothing is deployed; see `verification.md` once it exists.
+Status: the Worker, its tests and the config generator are implemented (the UI, CI jobs and production
+checks are separate steps). Nothing is deployed; see `verification.md` once it exists.
 
 ## 1. Layout and ownership
 
@@ -190,7 +191,9 @@ Desired state, evaluated each tick in this order:
 1. **Owner override** (§6 `POST /api/v1/guard`) while `now < override.until`:
    `shed` → `{level: 'shed', reason: 'owner_shed', until: override.until}` (until = set time + 24 h);
    `normal` → `{level: 'normal', reason: 'owner_clear'}`, which suppresses the automatic shed until the
-   next UTC midnight (the override's `until`). An expired override is deleted.
+   next UTC midnight (the override's `until`). While a `normal` override is in force the automatic
+   decision is held at normal (setting it also resets an automatic shed), so a cleared episode cannot
+   come back through the old shed's own `until` when the override ends. An expired override is deleted.
 2. **Fresh usage** (fetched for the tick's UTC day, ≤ 90 min old):
    - enter shed when any trigger resource has `percent ≥ 80`. `reason` = `quota_<resource id>` of the
      highest percent (e.g. `quota_d1_rows_read`), `until` = next UTC midnight + 10 min (always ≤ 24 h
@@ -224,7 +227,9 @@ At most one active run (phase ≠ `done`) at a time.
   to the next tick after it ends (still that day).
 - **Manual start** (`POST /api/v1/canary`): refused with `canary_active` while a run is active and
   `canary_limit` after 3 manual runs this UTC day; run ID `canary-manual-YYYYMMDDTHHMMSSZ` (UTC, fits
-  `RunId`); first start attempt at once; later steps on ticks.
+  `RunId`; a run ID is never reused, because Mail Hero is idempotent per `run_id`: a collision within
+  the same second takes the next free second); first start attempt at once, after polling any
+  `status()` whose last attempt is ≥ 10 min old; later steps on ticks.
 - **Start attempt** (phase `starting`, at most one `startCanary` per tick):
   preconditions from the last successful statuses ≤ 60 min old: Mail Hero lacks `canary_producer` →
   done `skipped/start/canary_producer_missing`; Todofy lacks `canary_consumer` → done
@@ -237,14 +242,17 @@ At most one active run (phase ≠ `done`) at a time.
   paused/unavailable, `skipped/start/status_unavailable` if statuses were missing, else
   `failed/start/<last error code>`.
 - **Delivering** (one `canaryDelivery(event_id)` per tick): `delivered` → store `delivered_at`,
-  phase `consuming`, and call `canaryResult` in the same tick; `failed` → done
+  phase `consuming`, and call `canaryResult` in the same tick (the deadline is not applied in that
+  tick, so a delivery completing at the deadline still gets one consumer poll); `failed` → done
   `failed/delivery/<error_code>`; `unknown` → done `failed/delivery/unknown_event`; `pending`/`paused`
   → wait. At the deadline: `pending` → `failed/delivery/timeout`; `paused` → `skipped/delivery/<error_code
-  or 'paused'>` (a held run is not a pipeline failure).
+  or 'paused'>` (a held run is not a pipeline failure); no answer ever (every call failed) →
+  `failed/delivery/unreachable`. Each phase polls first and then applies the deadline to what it saw.
 - **Consuming** (one `canaryResult(event_id)` per tick): `ok` → done `ok`, `completed_at`; `failed` →
   done `failed/consumer/<error_code>`; `not_seen`/`processing` → wait. At the deadline:
   `processing` with `waiting_code` → `skipped/consumer/<waiting_code>`; `processing` without →
-  `failed/consumer/timeout`; `not_seen` → `failed/consumer/not_seen`.
+  `failed/consumer/timeout`; `not_seen` → `failed/consumer/not_seen`; no answer →
+  `failed/consumer/unreachable`.
 - Every call increments `polls` and stores `attempts`, `last_http_status`, `error_code`,
   `waiting_code`. The UI timeline uses `created_at`, `queued_at`, `delivered_at` (Mail Hero's value),
   `completed_at` (Todofy's value) and `finished_at`.
@@ -386,7 +394,7 @@ null ("无数据"), never 0.
 | `d1_storage` | Σ `d1s[].max.databaseSizeBytes` | bytes | `databaseId` |
 | `d1_database_max` | max `d1s[].max.databaseSizeBytes` | bytes | `databaseId` |
 | `do_requests` | Σ `doInv[].sum.requests` | – | `scriptName` |
-| `do_duration` | Σ `doPer[].sum.activeTime` | µs → GB-s: `activeTime / 1e6 × 0.125` (128 MB) | `namespaceId` |
+| `do_duration` | Σ `doPer[].sum.activeTime` | µs → GB-s: `activeTime / 1e6 × 0.128` (128 MB / 1 GB, as DO pricing's examples compute it) | `namespaceId` |
 | `do_rows_read` / `do_rows_written` | Σ `doPer[].sum.rowsRead` / `rowsWritten` | – | `namespaceId` |
 | `do_storage` | max `doSto[].max.storedBytes` (null if `[]`) | bytes | – |
 | `r2_class_a` | Σ `r2ops[].sum.requests` where `actionType` ∈ A, plus unclassified | – | `bucketName` |
@@ -507,7 +515,10 @@ writes with `wx` and mode 0600; `node --test deploy/test/*.test.mjs`):
 | `DASHBOARD_CF_ANALYTICS_TOKEN` (secret) | `^[A-Za-z0-9_-]{20,200}$` | `CF_ANALYTICS_TOKEN` |
 
 It copies the shape keys of `worker/wrangler.toml` (`name, main, compatibility_date, assets,
-durable_objects, migrations, services, triggers`; a test fails on an unknown key), sets `workers_dev:
+durable_objects, migrations, services, triggers`; a test fails on an unknown key), read with the pinned
+wrangler's own `experimental_readRawConfig` from `worker/node_modules` (so `npm ci` in `worker/` comes
+first; Node has no TOML parser and the Python generators' `tomllib` needs Python ≥ 3.11). It refuses a
+`DASHBOARD_PUBLIC_HOST` equal to either app's host, sets `workers_dev:
 false`, `preview_urls: false`, `observability: {enabled: true}`, and writes
 `worker/wrangler.production.ci.json` and `worker/wrangler.production.secrets.json` (both gitignored).
 

@@ -17,4 +17,9 @@ cd dashboard/worker && npm ci && npm run lint && npm run typecheck && npm test &
 cd dashboard/web && npm ci && npm run lint && npm run typecheck && npm test && npm run build
 ```
 
-Status: scaffold and design only; nothing is deployed.
+```sh
+cd dashboard && node --test deploy/test/*.test.mjs   # after npm ci in worker/ (it reads wrangler.toml with wrangler)
+```
+
+Status: the Worker (`worker/`) and the config generator (`deploy/`) are implemented and tested locally
+with synthetic data; nothing is deployed.
