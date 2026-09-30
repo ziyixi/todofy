@@ -1,10 +1,10 @@
 # GitHub Actions 原生部署
 
-Mail Hero 位于单仓库的 `mail-hero/` 目录，与 `todofy/` 共用根目录的 `.github/workflows/ci.yml`（"CI and deploy"，说明见根 [README](../../README.md)）。任何分支的 push 若相对累计基准改动了 `mail-hero/`、`packages/edge-auth/`（编译进本Worker的共享鉴权包）、`contracts/` 或 `.github/`，`Mail Hero checks` job 就在 `mail-hero/` 下安装 lockfile 中的依赖、检查 TypeScript、执行 Worker 和 React 测试、构建 UI，并用占位值生成配置做 Wrangler dry-run；`packages/edge-auth/` 改动时 `Shared packages` job 还会在包自己的目录运行它的 typecheck 与 vitest；`Contracts` job 检查 `contracts/mail-received-v1` 的 golden payload（含金丝雀 `canary_event.json`）仍由当前 `buildPayload` 逐字节生成、所有 fixture 的 event ID 互不重复，并由 Todofy 解析；同一 job 用 `validate.mjs` 校验 `contracts/ops-v1` 的 fixture 与常量，并在主机上运行 `test/native-ops.test.mjs`，确认 Mail Hero `Ops` 产生的值符合 Schema（Todofy 侧用 `jsonschema` 做同样的检查）。经 service binding 调用真实 `Ops` 的 workerd 测试 `native-ops-runtime.test.mjs` 属于 Worker 测试。Worker 测试包含真正的 workerd D1/R2/SQLite Durable Object 绑定与合成大附件。Node 使用 26，Actions 固定到已核实的提交 SHA。
+Mail Hero 位于单仓库的 `mail-hero/` 目录，与 `todofy/` 共用根目录的 `.github/workflows/ci.yml`（"CI and deploy"，说明见根 [README](../../README.md)）。任何分支的 push 若相对累计基准改动了 `mail-hero/`、`packages/edge-auth/`（编译进本Worker的共享鉴权包）、`contracts/` 或 `.github/`，`Mail Hero checks` job 就在 `mail-hero/` 下安装 lockfile 中的依赖、检查 TypeScript、执行 Worker 和 React 测试、构建 UI，并以部署同样的方式（占位的个人值与开关）对提交的 `mail-hero/wrangler.toml` 做 Wrangler dry-run；`packages/edge-auth/` 改动时 `Shared packages` job 还会在包自己的目录运行它的 typecheck 与 vitest；`Contracts` job 检查 `contracts/mail-received-v1` 的 golden payload（含金丝雀 `canary_event.json`）仍由当前 `buildPayload` 逐字节生成、所有 fixture 的 event ID 互不重复，并由 Todofy 解析；同一 job 用 `validate.mjs` 校验 `contracts/ops-v1` 的 fixture 与常量，并在主机上运行 `test/native-ops.test.mjs`，确认 Mail Hero `Ops` 产生的值符合 Schema（Todofy 侧用 `jsonschema` 做同样的检查）。经 service binding 调用真实 `Ops` 的 workerd 测试 `native-ops-runtime.test.mjs` 属于 Worker 测试。Worker 测试包含真正的 workerd D1/R2/SQLite Durable Object 绑定与合成大附件。Node 使用 26，Actions 固定到已核实的提交 SHA。
 
 累计基准不是上一个提交：`main` 上是该 workflow 最近一次成功的 `main` push run 的提交，因此失败或排队时被取消的 run 中的改动会由下一次 run 重新检查并发布；其他分支上是与 `origin/main` 的 merge base，分支 head 的 `CI gate` 覆盖整个分支。找不到可用基准（首次运行、API 错误、基准不是祖先）时全部运行。
 
-只有 `main` 上相对该基准改动了 `mail-hero/`、`packages/edge-auth/`（或两个 Worker 都打包的 `contracts/ops-v1/ops-v1.ts`）的 push，或在 `main` 上手工运行并选择 `both`/`mail-hero`，且 `Mail Hero checks` 与 `CI gate` 成功，`Mail Hero deploy` 才进入 GitHub `production` environment。只改 `contracts/` 的其他文件或 `.github/` 会重新检查但不发布；`ops-v1.ts` 的常量（如 `OPS_LIMITS`）打包进 Worker，改它会同时发布两个应用。部署从同一提交重新构建 UI，生成专用原生配置，先做 Wrangler dry-run，再依次应用 D1 migrations、发布 Worker。并发部署排队，不中断正在应用的 migration。非 `main` 分支不接触生产密钥。
+只有 `main` 上相对该基准改动了 `mail-hero/`、`packages/edge-auth/`（或两个 Worker 都打包的 `contracts/ops-v1/ops-v1.ts`）的 push，或在 `main` 上手工运行并选择 `both`/`mail-hero`，且 `Mail Hero checks` 与 `CI gate` 成功，`Mail Hero deploy` 才进入 GitHub `production` environment。只改 `contracts/` 的其他文件或 `.github/` 会重新检查但不发布；`ops-v1.ts` 的常量（如 `OPS_LIMITS`）打包进 Worker，改它会同时发布两个应用。部署从同一提交重新构建 UI，用提交的 `mail-hero/wrangler.toml` 加部署时注入的值先做 Wrangler dry-run，再依次应用 D1 migrations、发布 Worker。并发部署排队，不中断正在应用的 migration。非 `main` 分支不接触生产密钥。
 
 这条流水线发布 Cloudflare Worker 和静态资源，使用现有D1、R2和SQLite DO资源。来源邮箱转发、Access策略及根域MX由各自设置管理；流水线不会创建新的Cloudflare收费计划。Todofy 在同一仓库的 `todofy/` 中，由独立的 `Todofy checks`/`Todofy deploy` job 发布；两者只共享 `contracts/` 与 `packages/`（目前是 `packages/edge-auth`，由各自Worker编译进去），互不导入代码；共享包改动会同时检查并发布两者，其余发布互不依赖。
 
@@ -16,38 +16,29 @@ Mail Hero 位于单仓库的 `mail-hero/` 目录，与 `todofy/` 共用根目录
 
 在 GitHub 仓库 Settings → Environments 创建 `production`，将可部署分支限制为 `main`。个人使用可以直接自动部署；若希望每次人工确认，可添加 required reviewer。给 `main` 开启分支保护时，将 `CI gate` 设为 required check（它汇总共享包、两个应用及合同检查，未改动而跳过的 job 视为通过）。
 
-在 Settings → Secrets and variables → Actions 配置以下 repository variables；也可放入 `production` environment variables。值必须与现有资源一致，不要新建重复资源。
+生产配置提交在 [`mail-hero/wrangler.toml`](../wrangler.toml)，顶层即生产（不用 `[env.*]`，不设 `keep_vars`）：account ID、D1（名称与 ID）、R2 桶 `MAIL_STORE` 与备份桶 `BACKUP_STORE`、自定义域名与 `PUBLIC_HOST`、Access issuer/AUD、`WEBHOOK_ALLOWED_HOSTS`、每日接收上限、兼容日期、Durable Object 绑定与迁移。改这些值就是改这个文件（公开提交，走同样的检查与发布）；它们不是 GitHub variables。值必须与现有资源一致，不要新建重复资源。换 D1 或桶（例如恢复到新资源）同样是在维护模式下提交这个文件。可选的 metadata 告警按 ops-v1 计划不配置；若将来启用，只把不含凭据的 `ALERT_WEBHOOK_URL` 与 `ALERT_WEBHOOK_ALLOWED_HOSTS` 提交进该文件，`ALERT_WEBHOOK_TOKEN` 仍是 Worker secret。
 
-| Variable | 当前部署的值或来源 |
+部署时由 [`deploy/deploy-vars.mjs`](../deploy/deploy-vars.mjs) 校验并以 `wrangler deploy --var NAME:value` 加入（与 `[vars]` 相同的 plain_text var，Wrangler 输出里显示为 `(hidden)`）的值只有两类：两个运维开关（GitHub variables）和三个个人值（GitHub secrets `MAIL_HERO_RECEIVE_ADDRESS`、`MAIL_HERO_ACCESS_OWNER`、`MAIL_HERO_ACCESS_OWNER_ALIASES`）。缺少或非法时拒绝发布（未发送的 var 会被删除）。
+
+在 `production` environment 添加 variables（只有运维开关）：
+
+| Variable | 用途 |
 | --- | --- |
-| `CLOUDFLARE_ACCOUNT_ID` | 现有 Cloudflare account ID |
-| `MAIL_HERO_D1_DATABASE_ID` | 现有 `mail-hero` D1 UUID |
-| `MAIL_HERO_D1_DATABASE_NAME` | 可省略，默认 `mail-hero` |
-| `MAIL_HERO_R2_BUCKET_NAME` | 可省略，默认 `mail-hero-store` |
-| `MAIL_HERO_ACCESS_ISSUER` | `https://ziyixi.cloudflareaccess.com` |
-| `MAIL_HERO_ACCESS_AUDIENCE` | 现有 Mail Hero Access application AUD |
-| `MAIL_HERO_WEBHOOK_ALLOWED_HOSTS` | `daily.ziyixi.science`；多个精确 hostname 用逗号分隔 |
-| `MAIL_HERO_PUBLIC_HOST` | `mail-hero.ziyixi.science` |
-| `MAIL_HERO_FORCE_SEND_PAUSED` | 明确设为 `true` 或 `false`，与当前运维状态一致 |
-| `MAIL_HERO_MAINTENANCE_MODE` | 明确设为 `true` 或 `false`，正常运行是 `false` |
-| `MAIL_HERO_INGEST_DAILY_MESSAGE_LIMIT` | 可省略，默认 `300` |
-| `MAIL_HERO_INGEST_DAILY_BYTE_LIMIT` | 可省略，默认 `268435456` |
-| `MAIL_HERO_BACKUP_BUCKET_NAME` | 已启用备份时必须照旧设置（现有私有备份桶名）；省略则发布的 Worker 没有 `BACKUP_STORE` binding，备份 API 不可用 |
-| `MAIL_HERO_ALERT_WEBHOOK_URL` | 可选；按 ops-v1 计划不配置，统一运维摘要取代它（见 [cloudflare-setup.md](cloudflare-setup.md) §2.2）。若已设置，删除前确认不再需要，否则下次发布照旧使用 |
-| `MAIL_HERO_ALERT_WEBHOOK_ALLOWED_HOSTS` | 可选，省略时沿用 `MAIL_HERO_WEBHOOK_ALLOWED_HOSTS` |
+| `MAIL_HERO_FORCE_SEND_PAUSED` | 明确设为 `true` 或 `false`，与当前运维状态一致；注入为 `FORCE_SEND_PAUSED` |
+| `MAIL_HERO_MAINTENANCE_MODE` | 明确设为 `true` 或 `false`，正常运行是 `false`；注入为 `MAINTENANCE_MODE` |
 
 在 `production` environment 添加 secrets：
 
 | Secret | 用途 |
 | --- | --- |
 | `MAIL_HERO_CF_API_TOKEN` | 独立 Cloudflare 部署 token（原仓库中名为 `CF_API_TOKEN`；单仓库的 `production` 中 `CF_API_TOKEN` 属于 Todofy），限定目标账户的 Worker 发布、D1 migration 及现有 zone 的 Worker route 所需权限；不需要 Billing 权限 |
-| `MAIL_HERO_RECEIVE_ADDRESS` | 固定收件地址。仓库公开，这个地址（以及下面的 owner 邮箱）只存为 secret，Actions 日志里显示为 `***` |
-| `MAIL_HERO_ACCESS_OWNER` | canonical owner 邮箱 |
-| `MAIL_HERO_ACCESS_OWNER_ALIASES` | 已核实的同一 owner 登录邮箱；沿用当前 GitHub 登录 alias，逗号分隔且不要加空格。若尚未使用 alias，可留空 |
+| `MAIL_HERO_RECEIVE_ADDRESS` | 固定收件地址，注入为 `RECEIVE_ADDRESS`。仓库公开，这个地址（以及下面的 owner 邮箱）只存为 secret，Actions 日志里显示为 `***` |
+| `MAIL_HERO_ACCESS_OWNER` | canonical owner 邮箱，注入为 `ACCESS_OWNER` |
+| `MAIL_HERO_ACCESS_OWNER_ALIASES` | 已核实的同一 owner 登录邮箱，注入为 `ACCESS_OWNER_ALIASES`；沿用当前 GitHub 登录 alias，逗号分隔。若尚未使用 alias，可留空（注入空值） |
 
 不要把 token 或 alias 直接写进 workflow、命令参数或提交的配置。现有临时 bootstrap token 到期后，Actions 需要换成有效的专用 token；更新 GitHub secret 即可，不影响本机 Wrangler 登录。
 
-`CREDENTIAL_KEY`、可选的 Access service client secrets 继续保存在现有 Worker 中。普通 `wrangler deploy` 保留 Worker secret bindings；流水线不读取、复制、轮换或重新上传主密钥。D1 内保存的 webhook 凭据也不由流水线重写。
+`CREDENTIAL_KEY`、可选的 Access service client secrets 继续保存在现有 Worker 中（`wrangler secret put <NAME> --config ../wrangler.toml`，在 `cloudflare/` 运行）。部署保留 Worker secret bindings；流水线不读取、复制、轮换或重新上传主密钥。D1 内保存的 webhook 凭据也不由流水线重写。
 
 ## 日常发布和失败恢复
 
@@ -55,9 +46,9 @@ Mail Hero 位于单仓库的 `mail-hero/` 目录，与 `todofy/` 共用根目录
 2. Actions 的 `Mail Hero deploy` 成功后，记录提交 SHA 和 Wrangler 输出的 Worker version ID。
 3. 查看 Mail Hero 登录、收件与新测试事件的交付状态。部署成功仅证明发布步骤成功，不等于真实邮箱到 Todofy/Todoist 的业务链路通过。
 
-`deploy/generate-ci-config.mjs` 生成 `cloudflare/wrangler.native.production.ci.json`，权限为 0600；此文件被 git ignore，CI 最后删除，不上传为 artifact。不要把本机私有 `wrangler.native.production.toml` 提交到 GitHub。生成器只输出成功/错误字段名，不打印配置值。
+不再生成配置文件：部署的就是提交的 `mail-hero/wrangler.toml`，外加 `deploy/deploy-vars.mjs exec` 追加的五个 `--var`。包装器只输出字段名，从不打印值；它拒绝 `--env`、`--keep-vars`、自带的 `--var` 以及其他配置文件。不得手动 `wrangler deploy`（会删除这五个 var：未知收件人被拒收，暂停解除）；应急手动发布在 `cloudflare/` 运行 `node ../deploy/deploy-vars.mjs exec -- npx --no-install wrangler deploy --config ../wrangler.toml`，环境里给出同样的五个值。`deploy/cloudflare-admin.py wrangler` 拒绝 `deploy`。静态值的校验在 `deploy/test/wrangler-config.test.mjs`，跨应用的一致性（唯一配置文件、主机名、ci.yml 注入名）在根目录 `.github/scripts/test_wrangler_configs.py`。
 
-`FORCE_SEND_PAUSED` 与 `MAINTENANCE_MODE` 是部署配置来源的一部分。紧急暂停后，应同步修改 GitHub variable，否则下一次部署会恢复仓库设置的值。数据库中的 archive/forward 模式、目标选择和目标暂停由应用 UI 管理，不随普通部署重置。
+`FORCE_SEND_PAUSED` 与 `MAINTENANCE_MODE` 是部署配置来源的一部分，每次发布都从 GitHub variables 重新声明。紧急暂停后，应同步修改 GitHub variable，否则下一次部署会恢复 variable 的值；最快的途径是改 variable 后手工运行该应用的 workflow（Cloudflare 控制台直接改 var 立即生效，但下一次部署会覆盖，除非 variable 也改了）。数据库中的 archive/forward 模式、目标选择和目标暂停由应用 UI 管理，不随普通部署重置。
 
 Migration 在旧 Worker 仍运行时执行，因此自动发布中的 migration 必须向后兼容，例如添加表或列。破坏性 schema 变更需另行维护窗口与备份计划。若 migration 成功而 Worker 发布失败，修复后重跑同一 workflow；已记录的 migration 不会重复执行。不要自动回滚 D1 或重新生成 webhook 事件。回滚应用代码也不能假定数据库会一起回滚。
 

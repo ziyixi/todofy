@@ -1,0 +1,70 @@
+# Worker "mail-hero": the production configuration and its single source of truth. Top level = production;
+# never add [env.*] sections or keep_vars. Every static value is committed here (the repository is public:
+# nothing personal and no secret belongs in this file).
+#
+# Deployed only by CI ("Mail Hero deploy" in .github/workflows/ci.yml) through deploy/deploy-vars.mjs, which
+# validates and appends the values that are never committed, with --var:
+#   RECEIVE_ADDRESS, ACCESS_OWNER, ACCESS_OWNER_ALIASES   personal: GitHub environment secrets
+#   FORCE_SEND_PAUSED, MAINTENANCE_MODE                   operational state: GitHub environment variables
+# A plain `wrangler deploy` of this file DELETES those five vars (mail to the unknown address is rejected and
+# the pauses lift). An emergency manual deploy uses the same wrapper, from cloudflare/:
+#   node ../deploy/deploy-vars.mjs exec -- npx --no-install wrangler deploy --config ../wrangler.toml
+# Worker secrets (CREDENTIAL_KEY, BACKUP_TOKEN, BACKUP_RECEIPT_KEY, ALERT_WEBHOOK_TOKEN, ACCESS_CLIENT_ID,
+# ACCESS_CLIENT_SECRET) are set with `wrangler secret put --config ../wrangler.toml` and survive every deploy.
+#
+# Run wrangler from cloudflare/ (the pinned wrangler lives in cloudflare/node_modules) with
+# --config ../wrangler.toml. Local dev: `npm --prefix cloudflare run dev` with local bindings only and the
+# five injected values in mail-hero/.dev.vars (see .dev.vars.example); D1 commands always pass --local.
+name = "mail-hero"
+account_id = "f57937bd1d93bf59e737b6d8445fb7a3"
+main = "cloudflare/src/native/index.ts"
+compatibility_date = "2026-09-07"
+workers_dev = false
+preview_urls = false
+# The owner UI's custom domain (Cloudflare Access app); vars.PUBLIC_HOST names the same host.
+routes = [{ pattern = "mail-hero.ziyixi.science", custom_domain = true }]
+
+[assets]
+directory = "uiassets/dist"
+binding = "ASSETS"
+not_found_handling = "single-page-application"
+run_worker_first = true
+
+[vars]
+ACCESS_ISSUER = "https://ziyixi.cloudflareaccess.com"
+ACCESS_AUDIENCE = "688d6408f95a046a74f94a7fbbbc0241f22553436fcae394bfabb92657614849"
+# Exact public HTTPS hosts a webhook target may use (comma-separated).
+WEBHOOK_ALLOWED_HOSTS = "daily.ziyixi.science"
+# Optional metadata-only alerts stay unconfigured (root AGENTS.md). If ever enabled, commit
+# ALERT_WEBHOOK_URL (only a URL without any credential in it) and ALERT_WEBHOOK_ALLOWED_HOSTS here and keep
+# ALERT_WEBHOOK_TOKEN a Worker secret.
+INGEST_DAILY_MESSAGE_LIMIT = "300"
+INGEST_DAILY_BYTE_LIMIT = "268435456"
+# contracts/ops-v1 status() returns https://<PUBLIC_HOST>/ as ui_url; the same host as the route.
+PUBLIC_HOST = "mail-hero.ziyixi.science"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "mail-hero"
+database_id = "6c13e4c3-e239-42fb-a7a4-96810fa8d7dc"
+migrations_dir = "cloudflare/migrations"
+
+[[r2_buckets]]
+binding = "MAIL_STORE"
+bucket_name = "mail-hero-store"
+
+# The private backup bucket (AGENTS.md §7). Removing this binding removes the backup API on the next deploy.
+[[r2_buckets]]
+binding = "BACKUP_STORE"
+bucket_name = "mail-hero-backups"
+
+[[durable_objects.bindings]]
+name = "COORDINATOR"
+class_name = "MailCoordinator"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["MailCoordinator"]
+
+[observability]
+enabled = false

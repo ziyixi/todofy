@@ -7,8 +7,7 @@
     "test": "node --test test/*.test.mjs",
     "contract:update": "node test/contract-fixtures.mjs --write",
     "typecheck": "tsc --noEmit",
-    "deploy": "wrangler deploy --config wrangler.native.toml",
-    "dev": "wrangler dev --config wrangler.native.toml --ip 127.0.0.1"
+    "dev": "wrangler dev --config ../wrangler.toml --ip 127.0.0.1"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "5.20260926.1",

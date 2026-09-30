@@ -30,7 +30,7 @@
 
 同一个Worker托管React Static Assets及owner API，Cloudflare Access负责入口登录，应用独立验证JWT。单个 `COORDINATOR` binding导出 `MailCoordinator`，固定对象实例 `inbox-v1`。没有Queues、Workflows、Redis、Cron邮箱轮询或通用调度平台。
 
-应用入口和迁移：`cloudflare/src/native/`、`cloudflare/migrations/`、`cloudflare/wrangler.native.toml`。所有Wrangler命令显式指定对应的本地或生产config；正式发布使用单仓库根目录 `.github/workflows/ci.yml` 的 `Mail Hero deploy` job。
+应用入口和迁移：`cloudflare/src/native/`、`cloudflare/migrations/`；生产配置为 `mail-hero/wrangler.toml`（顶层即生产，提交的唯一真源，不含个人值、运维开关与密钥；不得添加 `[env.*]` 或 `keep_vars`）。Wrangler命令在 `mail-hero/cloudflare` 运行（固定版本的wrangler在其 `node_modules`）并显式 `--config ../wrangler.toml`；本地开发只用本地绑定和 `mail-hero/.dev.vars`（见 `.dev.vars.example`），D1命令一律 `--local`，不得 `--remote`。正式发布使用单仓库根目录 `.github/workflows/ci.yml` 的 `Mail Hero deploy` job。
 
 | 层 | 责任 |
 | --- | --- |
@@ -48,7 +48,7 @@ R2、D1和DO之间没有跨存储事务。每一步必须可恢复、可去重�
 ## 2. 配置及平台限制
 
 - bindings：`DB`、`MAIL_STORE`、`COORDINATOR`、`ASSETS`。
-- vars：`RECEIVE_ADDRESS`、`ACCESS_ISSUER`、`ACCESS_AUDIENCE`、`ACCESS_OWNER`、可选 `ACCESS_OWNER_ALIASES`、`WEBHOOK_ALLOWED_HOSTS`、`FORCE_SEND_PAUSED`、`MAINTENANCE_MODE`、`INGEST_DAILY_MESSAGE_LIMIT`、`INGEST_DAILY_BYTE_LIMIT`。
+- vars：`RECEIVE_ADDRESS`、`ACCESS_ISSUER`、`ACCESS_AUDIENCE`、`ACCESS_OWNER`、可选 `ACCESS_OWNER_ALIASES`、`WEBHOOK_ALLOWED_HOSTS`、`FORCE_SEND_PAUSED`、`MAINTENANCE_MODE`、`INGEST_DAILY_MESSAGE_LIMIT`、`INGEST_DAILY_BYTE_LIMIT`、`PUBLIC_HOST`。`RECEIVE_ADDRESS`、`ACCESS_OWNER`、`ACCESS_OWNER_ALIASES` 由 GitHub environment secrets、`FORCE_SEND_PAUSED`、`MAINTENANCE_MODE` 由 GitHub variables 在部署时经 `deploy/deploy-vars.mjs` 校验后以 `--var` 注入（缺失或非法即拒绝发布，因为未注入的var会被删除）；其余vars与绑定提交在 `mail-hero/wrangler.toml`。
 - secret：`CREDENTIAL_KEY`为64位hex，独立备份；消费者需Access时可配精确`ACCESS_SERVICE_ORIGIN`及秘密`ACCESS_CLIENT_ID`/`ACCESS_CLIENT_SECRET`。
 - `FORCE_SEND_PAUSED=true`阻止消费者投递，继续归档；`MAINTENANCE_MODE=true`用于维护，停止新入站、管理写入及Alarm工作。两者不能混用。维护退出后核对唤醒与pending恢复。
 - `DEV_AUTH_BYPASS`只能本机loopback模拟，不能生产部署。`workers_dev`/预览URL默认关闭，UI只经Access自定义域名。
@@ -125,7 +125,7 @@ D1 Time Travel Free7天只恢复D1，不恢复R2、DO或secrets。完整备份�
 ## 8. 仓库与发布边界
 
 - 保留 `cloudflare/` 原生Worker/D1迁移与测试、`web/`、静态构建输出位置 `uiassets/dist/`、通用事件合同和部署/备份工具。不要恢复已经移除的Go服务、PostgreSQL schema、SMTP服务器或中转Worker。`deploy/backup/`中的Dockerfile只封装备份工具，Compose配置属于独立部署仓库。
-- 正式发布从GitHub Actions的同一已验证提交构建UI、应用向后兼容的D1 migration并发布Worker。PR不使用生产密钥。`production` environment只用于授权的main发布；暂停和维护配置需同步GitHub variables，避免下次发布覆盖运维状态。
+- 正式发布从GitHub Actions的同一已验证提交构建UI、应用向后兼容的D1 migration并发布Worker。PR不使用生产密钥。`production` environment只用于授权的main发布；暂停和维护配置需同步GitHub variables，避免下次发布覆盖运维状态。其余静态配置只在 `mail-hero/wrangler.toml` 修改（公开提交）；不得手动 `wrangler deploy`（会删除注入的vars），应急手动发布只用 `deploy/deploy-vars.mjs exec`；不得添加 `[env.*]` 或 `keep_vars`。
 - Todofy在同一仓库的 `todofy/`，由根工作流的 `Todofy checks`/`Todofy deploy` 独立检查和发布。Mail Hero不构建、不部署Todofy，也不因Todofy改动而发布。
 - 应用之间互不导入；共享代码只在根目录 `contracts/` 与 `packages/`。`cloudflare/package.json` 以 `file:../../packages/edge-auth` 依赖共享鉴权包并由打包器编译进Worker；`packages/edge-auth/` 改动会重新检查并发布Mail Hero（及其他使用它的应用）。`jose` 仅作为测试签发合成JWT的devDependency。
 - 备份镜像由根目录 `.github/workflows/mail-hero-backup-image.yml` 测试并发布到GHCR新package `ghcr.io/ziyixi/mail-hero-backup-collector`（旧package `mail-hero-backup` 关联原仓库；服务器在下一次升级前继续使用已固定的旧digest），服务器只拉取固定digest，不手工构建。Worker和备份镜像各自发布；备份CI不接触生产凭据或真实邮件。

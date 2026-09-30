@@ -1,6 +1,6 @@
 # Mail Hero on Cloudflare
 
-The application is `src/native/index.ts`, configured by **`wrangler.native.toml`**. It runs entirely on Workers Free with D1, a private R2 Standard bucket, one SQLite-backed Durable Object coordinator, Static Assets, and Access. A separate consumer such as Todofy may use its own server and Tunnel; its deployment is independent of this Worker.
+The application is `src/native/index.ts`, configured by **`../wrangler.toml`** (`mail-hero/wrangler.toml`: the production config, committed, top level = production). It runs entirely on Workers Free with D1, a private R2 Standard bucket, one SQLite-backed Durable Object coordinator, Static Assets, and Access. A separate consumer such as Todofy may use its own server and Tunnel; its deployment is independent of this Worker.
 
 ## Runtime boundary
 
@@ -20,18 +20,18 @@ The Cloudflare Email Routing limit is 25 MiB. This is an accepted raw-size ceili
 | `MAIL_STORE` | private R2 binding | Raw and derived sensitive content. Standard storage; no public bucket URLs. |
 | `COORDINATOR` | SQLite Durable Object binding | `MailCoordinator`, singleton `inbox-v1`; persistent scheduling and alarms. |
 | `ASSETS` | Static Assets binding | Built React files in `../uiassets/dist`. |
-| `RECEIVE_ADDRESS` | variable | One exact full recipient; no catch-all. |
-| `ACCESS_ISSUER` | variable | `https://YOUR-TEAM.cloudflareaccess.com`. |
+| `RECEIVE_ADDRESS` | variable, added at deploy | One exact full recipient; no catch-all. Personal: GitHub secret `MAIL_HERO_RECEIVE_ADDRESS`, never committed. |
+| `ACCESS_ISSUER` | variable | `https://<team>.cloudflareaccess.com`. |
 | `ACCESS_AUDIENCE` | variable | The UI Access application's audience. |
-| `ACCESS_OWNER` | variable | Canonical owner email identity; used for CSRF and UI action ownership. |
-| `ACCESS_OWNER_ALIASES` | optional variable | Comma-separated exact verified email aliases of the same owner (printable ASCII, at most 8; `ACCESS_OWNER` too). Each also needs a narrowly scoped Access policy; aliases do not bypass JWT verification. |
+| `ACCESS_OWNER` | variable, added at deploy | Canonical owner email identity; used for CSRF and UI action ownership. GitHub secret `MAIL_HERO_ACCESS_OWNER`. |
+| `ACCESS_OWNER_ALIASES` | optional variable, added at deploy (GitHub secret `MAIL_HERO_ACCESS_OWNER_ALIASES`) | Comma-separated exact verified email aliases of the same owner (printable ASCII, at most 8; `ACCESS_OWNER` too). Each also needs a narrowly scoped Access policy; aliases do not bypass JWT verification. |
 | `CREDENTIAL_KEY` | secret | 32 random bytes encoded as 64 hex characters; encrypts endpoint credentials and signs management tokens. Back it up independently. |
 | `WEBHOOK_ALLOWED_HOSTS` | variable | Comma-separated exact public HTTPS destination hostnames. No arbitrary internal HTTP targets. |
-| `FORCE_SEND_PAUSED` | variable | Start with `true`; overrides UI delivery controls. |
-| `MAINTENANCE_MODE` | variable | Stop intake, management writes and background processing for a coordinated backup or restore. |
+| `FORCE_SEND_PAUSED` | variable, added at deploy | GitHub variable `MAIL_HERO_FORCE_SEND_PAUSED`. Start with `true`; overrides UI delivery controls. |
+| `MAINTENANCE_MODE` | variable, added at deploy | GitHub variable `MAIL_HERO_MAINTENANCE_MODE`. Stop intake, management writes and background processing for a coordinated backup or restore. |
 | `INGEST_DAILY_MESSAGE_LIMIT` | variable | Default `300` accepted intake reservations per UTC day. |
 | `INGEST_DAILY_BYTE_LIMIT` | variable | Default `268435456` (256 MiB) raw bytes reserved per UTC day. |
-| `PUBLIC_HOST` | variable | The owner UI's custom domain (CI copies `MAIL_HERO_PUBLIC_HOST`); ops-v1 `status()` returns `https://<PUBLIC_HOST>/` as `ui_url`. |
+| `PUBLIC_HOST` | variable | The owner UI's custom domain, the same host as the config's one route; ops-v1 `status()` returns `https://<PUBLIC_HOST>/` as `ui_url`. |
 | `DEV_AUTH_BYPASS` | local-only variable | Optional local development bypass; rejected on public requests. Never deploy it. |
 | `ACCESS_SERVICE_ORIGIN` | optional variable | Exact HTTPS consumer origin whose Access application uses a service token. |
 | `ACCESS_CLIENT_ID`, `ACCESS_CLIENT_SECRET` | optional paired secrets | That consumer's Access service token, separate from webhook authentication. |
@@ -47,13 +47,13 @@ cd cloudflare
 npm ci
 npm run typecheck
 npm test
-npx wrangler d1 migrations apply mail-hero --local --config wrangler.native.toml
-npx wrangler dev --config wrangler.native.toml --ip 127.0.0.1
+npx wrangler d1 migrations apply DB --local --config ../wrangler.toml
+npm run dev          # wrangler dev --config ../wrangler.toml --ip 127.0.0.1 (local bindings only)
 ```
 
-Use a local `.dev.vars` containing a disposable `CREDENTIAL_KEY` and, if needed, `DEV_AUTH_BYPASS=true`; keep it untracked. Wrangler local D1, R2 and DO data are synthetic test state. Local success does not prove account-level Free quotas, Email Routing failure behavior, or real SMTP arrival.
+`../wrangler.toml` is production, so local work always uses local bindings: never `--remote`, and every D1 command passes `--local`. Copy `../.dev.vars.example` to `mail-hero/.dev.vars` (wrangler reads the `.dev.vars` next to the config; it is gitignored): it holds the values CI adds at deploy (`RECEIVE_ADDRESS`, `ACCESS_OWNER`, `ACCESS_OWNER_ALIASES`, `FORCE_SEND_PAUSED`, `MAINTENANCE_MODE`), a disposable `CREDENTIAL_KEY` and, if needed, `DEV_AUTH_BYPASS=true`, all synthetic. Wrangler local D1, R2 and DO data are synthetic test state. Local success does not prove account-level Free quotas, Email Routing failure behavior, or real SMTP arrival.
 
-For deployment and the budget/backup procedure, follow [the setup guide](../docs/cloudflare-setup.md). Formal releases use [GitHub Actions](../docs/ci-cd.md). Every Wrangler command should explicitly select its local or production configuration. Deployment needs an authorized account session; never put credentials in source or chat.
+For deployment and the budget/backup procedure, follow [the setup guide](../docs/cloudflare-setup.md). Formal releases use [GitHub Actions](../docs/ci-cd.md). Every Wrangler command runs from this directory with `--config ../wrangler.toml`. A plain `wrangler deploy` would delete the vars CI injects (the receive address, the owner, the switches), so there is no `npm run deploy`: releases run in CI, and an emergency manual deploy uses `node ../deploy/deploy-vars.mjs exec -- npx --no-install wrangler deploy --config ../wrangler.toml` with the same values in the environment. Deployment needs an authorized account session; never put credentials in source or chat.
 
 ## Ops entrypoint (contracts/ops-v1)
 

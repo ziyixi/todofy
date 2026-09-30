@@ -4,7 +4,7 @@ Mail Hero 使用 **Workers Free + D1 + 私有 R2 Standard + SQLite Durable Objec
 
 当前已部署：唯一地址为 `inbox` 子域上的专用地址（GitHub secret `MAIL_HERO_RECEIVE_ADDRESS`，公开仓库不写明），UI **[mail-hero.ziyixi.science](https://mail-hero.ziyixi.science)**，唯一 owner 为 canonical owner 邮箱（GitHub secret `MAIL_HERO_ACCESS_OWNER`），数据库 `mail-hero`，私有桶 `mail-hero-store`。GitHub 登录和一封真实纯文本邮件的入站、持久保存、解析及 UI 展示已验收；来源自动转发、HTML/附件、大邮件、OTP 备用登录及生产收信额度仍需分别验证。Todofy消费者已具备持久接管接口，完整邮件到任务链路仍待用户测试信验收，见 [消费者接入说明](todofy-integration.md)。
 
-本地生产配置为 gitignored `cloudflare/wrangler.native.production.toml`；`cloudflare/wrangler.native.toml` 是配置模板。[GitHub Actions](ci-cd.md) 从仓库变量和production secrets生成独立的CI配置并正式发布。以下资源创建和初始化步骤供新环境参考，**现有部署不需要重建资源或重新生成密钥**。完整证据和待验收项见 [验收记录](verification-native.md)。
+生产配置是提交的 [`mail-hero/wrangler.toml`](../wrangler.toml)（顶层即生产，不含个人值、运维开关与密钥）；[GitHub Actions](ci-cd.md) 部署它，并由 `deploy/deploy-vars.mjs` 以 `--var` 加入收件地址、owner 邮箱（production secrets）与运维开关（production variables）。本地开发只用本地绑定和 `mail-hero/.dev.vars`（见 `.dev.vars.example`），D1 命令一律 `--local`。以下资源创建和初始化步骤供新环境参考，**现有部署不需要重建资源或重新生成密钥**。完整证据和待验收项见 [验收记录](verification-native.md)。
 
 UI 的投递 Dashboard 可按浏览器时区的本地小时或日期查看成功、进入重试、终止失败及结果未确认的 webhook 尝试，并进入对应投递记录。统计单位、时间边界和历史数据的限制见 [投递 Dashboard 统计口径](delivery-dashboard.md)。
 
@@ -70,7 +70,7 @@ D1 保存容量 70% / 85% / 95%、备份超过 36 小时、处理积压超过 1 
 
 Worker 导出命名入口 `Ops`（`src/native/ops.ts`，`index.ts` 只加一行导出），只能由同一 Cloudflare 账户内部署的 Worker 通过 service binding（`[[services]] binding = "MAIL_HERO"`、`service = "mail-hero"`、`entrypoint = "Ops"`）调用；没有公开 HTTP 路由，也不经过 Access。合同见 [`contracts/ops-v1`](../../contracts/ops-v1/README.md)。输出只含代码、数字、布尔值、时间、事件 ID 和 UI 地址，不含主题、地址、正文、目标 URL 或远端响应。
 
-- 变量 `PUBLIC_HOST`：UI 自定义域名，`status()` 以 `https://<PUBLIC_HOST>/` 返回 `ui_url`。CI 直接取已有的 `MAIL_HERO_PUBLIC_HOST`，不需要新的仓库变量。
+- 变量 `PUBLIC_HOST`：UI 自定义域名，`status()` 以 `https://<PUBLIC_HOST>/` 返回 `ui_url`。与 `mail-hero/wrangler.toml` 的自定义域名同在该文件中提交（配置测试核对两者一致）。
 - `status()`：一次 DO 请求加最多 6 条 D1 只读查询（与每10分钟的提醒阶段读取相同的部分索引范围），不写入。调用方至少间隔10分钟。
 - 降载 guard（`setGuard`）：保存在协调器自身 SQLite，到 `until`（最多36小时后）自动失效，不需要 Alarm，不进入备份。`shed` 只推迟以下清理与安全网，且每项距上次完整运行满48小时仍会执行，并按正常节奏一直执行到追上积压为止：已开始的 R2 盘点继续逐页扫描，扫完整个桶才算一次运行；保留期清理、提醒历史清理和金丝雀清理只有在没有剩余到期项时才算一次运行。所以上限覆盖整个任务，而不是其中一页或一批：
 
@@ -92,7 +92,7 @@ Worker 导出命名入口 `Ops`（`src/native/ops.ts`，`index.ts` 只加一行�
 
 需要Node.js 26。通过正规 `wrangler login` 或权限受限的API token认证。已有独立任务token时沿用该本机流程，不覆盖其他项目的登录；不要把token、邮件或密钥发到聊天。
 
-本次独立 token 已在本机保存并核实有效，且已追加仅目标 zone 的 `Zone Settings Write`，不需要再次保存。新环境首次保存时，在单仓库的 `mail-hero/` 目录运行 `python3 deploy/cloudflare-admin.py save-token`，提示后从 Cloudflare 的一次性成功页复制 token 并粘贴到本机终端（不回显）。助手只新建 owner-only 文件，不覆盖已有文件，不改 Wrangler 全局登录。随后运行 `python3 deploy/cloudflare-admin.py inspect` 核对权限；下文 Wrangler 命令可改用 `python3 deploy/cloudflare-admin.py wrangler <命令与参数>`。包装命令从单仓库的 `mail-hero/` 目录调用，但实际工作目录为 `cloudflare/`，所以配置参数使用 `--config wrangler.native.production.toml`；凭据只通过进程环境传递。
+本次独立 token 已在本机保存并核实有效，且已追加仅目标 zone 的 `Zone Settings Write`，不需要再次保存。新环境首次保存时，在单仓库的 `mail-hero/` 目录运行 `python3 deploy/cloudflare-admin.py save-token`，提示后从 Cloudflare 的一次性成功页复制 token 并粘贴到本机终端（不回显）。助手只新建 owner-only 文件，不覆盖已有文件，不改 Wrangler 全局登录。随后运行 `python3 deploy/cloudflare-admin.py inspect` 核对权限；下文 Wrangler 命令可改用 `python3 deploy/cloudflare-admin.py wrangler <命令与参数>`。包装命令从单仓库的 `mail-hero/` 目录调用，但实际工作目录为 `cloudflare/`，所以配置参数使用 `--config ../wrangler.toml`；凭据只通过进程环境传递。它拒绝 `deploy`（发布只经 CI 或 `deploy/deploy-vars.mjs exec`）。
 
 仅新环境初始化，从单仓库的 `mail-hero/` 目录：
 
@@ -106,12 +106,12 @@ npx wrangler d1 create mail-hero
 npx wrangler r2 bucket create mail-hero-store
 ```
 
-已经创建的资源只核对，不重复创建。将D1返回的ID填入 `wrangler.native.toml`，检查：
+已经创建的资源只核对，不重复创建。将D1返回的ID填入 `mail-hero/wrangler.toml` 并提交（D1 ID、桶名、主机名等都不是秘密），检查：
 
 - `DB`对应D1，`MAIL_STORE`对应私有Standard桶。
 - `COORDINATOR`对应 `MailCoordinator`，migration使用 `new_sqlite_classes`；应用固定实例名 `inbox-v1`。
-- `RECEIVE_ADDRESS`为最终唯一地址；改地址必须同步路由和来源转发。
-- `FORCE_SEND_PAUSED="true"`、`MAINTENANCE_MODE="false"`，默认archive。
+- `RECEIVE_ADDRESS`为最终唯一地址（GitHub secret `MAIL_HERO_RECEIVE_ADDRESS`，部署时注入，不写进配置）；改地址必须同步路由和来源转发。
+- 首次部署时 GitHub variables `MAIL_HERO_FORCE_SEND_PAUSED=true`、`MAIL_HERO_MAINTENANCE_MODE=false`，默认archive。
 - `INGEST_DAILY_MESSAGE_LIMIT="300"`、`INGEST_DAILY_BYTE_LIMIT="268435456"`，按UTC日计量。
 - `WEBHOOK_ALLOWED_HOSTS`为允许的消费者精确域名；没有消费者可留空。
 - `workers_dev=false`、`preview_urls=false`；使用Access保护的自定义域名。
@@ -120,8 +120,8 @@ npx wrangler r2 bucket create mail-hero-store
 仅首次初始化时生成并在密码管理器独立保存 `CREDENTIAL_KEY`：32随机字节，以64位十六进制表示。当前生产密钥已经生成并安装，不要重生成或覆盖。经Wrangler交互输入，不写入 `[vars]`：
 
 ```sh
-npx wrangler secret put CREDENTIAL_KEY --config wrangler.native.toml
-npx wrangler d1 migrations apply mail-hero --remote --config wrangler.native.toml
+npx wrangler secret put CREDENTIAL_KEY --config ../wrangler.toml
+npx wrangler d1 migrations apply DB --remote --config ../wrangler.toml
 npm run typecheck
 npm test
 ```
@@ -132,23 +132,23 @@ npm test
 
 当前 `mail-hero.ziyixi.science` 已绑定 Access 应用，提供 GitHub 和邮件验证码两种登录方式，没有 Bypass。Gmail 备用策略保留 canonical owner 邮箱；GitHub 使用独立 Allow 策略，Include 只含通过 IdP Test 核实的本人精确邮箱，Require 必须是既有 GitHub 登录提供商。不要把邮箱和提供商都放到 Include（那会成为 OR 条件）。应用和策略 ID 见验收记录。
 
-`ACCESS_OWNER` 保留原 Gmail 作为唯一管理员标识，可选 `ACCESS_OWNER_ALIASES` 列出同一个人经核实的其他登录邮箱（逗号分隔，最多 8 个，精确匹配；owner 与 alias 须为可打印 ASCII，否则按未配置 fail closed）。JWT 签名、issuer、audience、时效继续校验；alias 成功登录统一映射到原 owner，CSRF 和管理动作身份不变。实际别名保存在 ignored 生产配置；新环境先验证 IdP 实际返回身份，再配置 Access 与应用两层白名单。
+`ACCESS_OWNER` 保留原 Gmail 作为唯一管理员标识，可选 `ACCESS_OWNER_ALIASES` 列出同一个人经核实的其他登录邮箱（逗号分隔，最多 8 个，精确匹配；owner 与 alias 须为可打印 ASCII，否则按未配置 fail closed）。JWT 签名、issuer、audience、时效继续校验；alias 成功登录统一映射到原 owner，CSRF 和管理动作身份不变。实际 owner 与别名只保存在 GitHub secrets `MAIL_HERO_ACCESS_OWNER`、`MAIL_HERO_ACCESS_OWNER_ALIASES`，部署时注入；新环境先验证 IdP 实际返回身份，再配置 Access 与应用两层白名单。
 
-在Worker Domains & Routes添加该Custom Domain，或在配置加入：
+Custom Domain 写在提交的 `mail-hero/wrangler.toml`（每次部署都以它为准）：
 
 ```toml
-[[routes]]
-pattern = "mail-hero.ziyixi.science"
-custom_domain = true
+routes = [{ pattern = "mail-hero.ziyixi.science", custom_domain = true }]
 ```
 
 应用独立校验JWT的签名（仅RS256）、issuer、audience、过期和owner；浏览器写操作校验Origin/CSRF。两者由共享包 `packages/edge-auth` 实现，配置项不变。附件只能通过鉴权后路由访问，不要为下载而公开R2。[Custom Domains](https://developers.cloudflare.com/workers/configuration/routing/custom-domains/)、[Access JWT](https://developers.cloudflare.com/cloudflare-one/access-controls/applications/http-apps/authorization-cookie/validating-json/)
 
-当前 Custom Domain 已绑定，`workers_dev=false`、`preview_urls=false`。日常代码更新通过 [GitHub Actions](ci-cd.md) 发布。需要人工维护部署时，在完成构建与验证后，从单仓库的 `mail-hero/` 目录明确使用生产配置：
+当前 Custom Domain 已绑定，`workers_dev=false`、`preview_urls=false`。日常代码更新和运维开关变更通过 [GitHub Actions](ci-cd.md) 发布（改 GitHub variable 后手工运行 workflow）。确需人工部署时，在完成构建与验证后，从 `mail-hero/cloudflare` 经包装器发布，环境中给出与 CI 相同的五个值（`MAIL_HERO_RECEIVE_ADDRESS` 等，只在本机 shell，不进聊天或文件）：
 
 ```sh
-python3 deploy/cloudflare-admin.py wrangler deploy --config wrangler.native.production.toml
+node ../deploy/deploy-vars.mjs exec -- npx --no-install wrangler deploy --config ../wrangler.toml
 ```
+
+普通 `wrangler deploy` 会删除这五个 var（收件被拒、暂停解除），不要使用。
 
 打开 [UI](https://mail-hero.ziyixi.science)，点击 **GitHub** 即可登录。已使用本人 GitHub 会话成功进入 `/setup`，受保护的配置、D1 状态、调度状态与固定收件地址均正常显示；没有读取私人邮件。之前的拒绝来自 GitHub 返回邮箱与原 Gmail 白名单不一致，现已通过本人 alias 解决。邮件验证码仍可用 canonical owner 邮箱作为备用；验证码只填在正规登录网页，本轮未单独重测 OTP 流程。
 
@@ -196,14 +196,14 @@ D1 Free Time Travel只有最近 **7天**，不包含R2、DO状态或secrets，�
 目前没有自动化的一致原生备份，也没有完成离机灾难恢复验收。以下是待执行并验证的维护窗口流程；不能把“导出 D1 并复制正在变化的桶”称为一致快照：
 
 1. 保留源邮箱副本，暂停来源转发，记录窗口和最后收件ID。
-2. 部署 `FORCE_SEND_PAUSED=true`、`MAINTENANCE_MODE=true`。维护模式拒绝新入站及管理写入，Alarm停止工作。等待在途任务结束，确认无解析、投递、删除、入站写入；外部已在途副作用仍需对账。
+2. 把 GitHub variables `MAIL_HERO_FORCE_SEND_PAUSED`、`MAIL_HERO_MAINTENANCE_MODE` 设为 `true` 并手工运行 workflow 部署（`FORCE_SEND_PAUSED=true`、`MAINTENANCE_MODE=true`）。维护模式拒绝新入站及管理写入，Alarm停止工作。等待在途任务结束，确认无解析、投递、删除、入站写入；外部已在途副作用仍需对账。
 3. 在仓库外的受限目录导出D1，例如在 `cloudflare/` 中：
 
 ```sh
 umask 077
 mailhero_backup_dir="$HOME/mail-hero-backups/$(date -u +%Y%m%dT%H%M%SZ)"
 mkdir -p "$mailhero_backup_dir"
-npx wrangler d1 export mail-hero --remote --config wrangler.native.production.toml --output "$mailhero_backup_dir/d1.sql"
+npx wrangler d1 export DB --remote --config ../wrangler.toml --output "$mailhero_backup_dir/d1.sql"
 ```
 
 4. 通过受限S3/R2工具复制整个私有桶，清单包含 **key、大小、内容校验值、自定义metadata** 并逐项校验。raw metadata中的envelope、received_at、raw_size、mode/revision对未索引邮件恢复有用。普通文件复制或丢metadata的rclone副本不能冒充完整备份。
@@ -217,7 +217,7 @@ npx wrangler d1 export mail-hero --remote --config wrangler.native.production.to
 
 恢复到**新的空D1和新的私有桶**，不要直接覆盖生产：
 
-1. 新配置保持维护和强制暂停，不绑定真实Email Routing。
+1. 新配置保持维护和强制暂停，不绑定真实Email Routing。隔离演练用的临时配置放在仓库外（仓库只允许 `mail-hero/wrangler.toml` 一个 Mail Hero 配置，`.github/scripts/test_wrangler_configs.py` 检查）；真正把生产切到新的 D1 或桶，是在维护模式下提交修改后的 `mail-hero/wrangler.toml`（D1 ID/桶名），经 CI 发布。
 2. 导入D1 SQL，恢复R2全部字节与metadata，装入原 `CREDENTIAL_KEY`。[D1导入导出](https://developers.cloudflare.com/d1/best-practices/import-export-data/)
 3. 校验D1引用的原件、正文、附件和冻结payload存在且散列一致。记录未引用对象，不能盲删。
 4. DO调度状态不在D1导出中。通过应用恢复逻辑重新登记pending、retry_wait及未索引raw，对不确定sending先核查。不能假定新DO自动拥有旧Alarm任务。

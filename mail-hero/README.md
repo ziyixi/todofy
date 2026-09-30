@@ -21,7 +21,7 @@ flowchart LR
 
 ## 开发与部署
 
-需要 Node.js 26 和 npm。应用配置是 `cloudflare/wrangler.native.toml`。
+需要 Node.js 26 和 npm。生产配置是提交的 [`wrangler.toml`](wrangler.toml)（顶层即生产）；个人值与运维开关不提交，由 CI 部署时经 `deploy/deploy-vars.mjs` 注入。本地开发只用本地绑定，把 [`.dev.vars.example`](.dev.vars.example) 复制为 `.dev.vars`。
 
 ```sh
 npm --prefix web ci

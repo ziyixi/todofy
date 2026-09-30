@@ -11,7 +11,7 @@ ui:
 	$(NPM) run build --prefix web
 
 build: ui
-	cd cloudflare && $(NPM) exec -- wrangler deploy --dry-run --config wrangler.native.toml
+	cd cloudflare && $(NPM) exec -- wrangler deploy --dry-run --config ../wrangler.toml --outdir "$(CURDIR)/.wrangler/dry-run"
 
 check:
 	$(NPM) run typecheck --prefix cloudflare

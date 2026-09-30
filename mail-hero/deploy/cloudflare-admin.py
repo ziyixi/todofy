@@ -118,6 +118,11 @@ def main():
         argv = argv[1:]
     if not argv:
         parser.error("wrangler requires command arguments")
+    # ../wrangler.toml is production and holds no personal values or switches: a deploy without the
+    # --var flags of deploy/deploy-vars.mjs would delete them. Deploys run in CI, or through that wrapper.
+    if argv[0] == "deploy" or argv[:2] == ["versions", "upload"]:
+        parser.error("deploy only through CI or: node ../deploy/deploy-vars.mjs exec -- npx --no-install "
+                     "wrangler deploy --config ../wrangler.toml (from cloudflare/)")
     result = subprocess.run([str(ROOT / "cloudflare/node_modules/.bin/wrangler"), *argv],
         cwd=ROOT / "cloudflare", env=environment)
     sys.exit(result.returncode)

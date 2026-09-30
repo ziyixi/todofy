@@ -1,0 +1,16 @@
+# Local development only. Copy to mail-hero/.dev.vars (gitignored; wrangler reads the .dev.vars next to
+# wrangler.toml) and run `npm --prefix cloudflare run dev`. Synthetic values only: never a real address,
+# owner email or production key. `wrangler dev` without --remote uses local D1, R2 and Durable Object state;
+# D1 commands always pass --local, e.g. from cloudflare/:
+#   npx wrangler d1 migrations apply DB --local --config ../wrangler.toml
+#
+# The values CI adds with --var at deploy (deploy/deploy-vars.mjs):
+RECEIVE_ADDRESS=inbox@example.com
+ACCESS_OWNER=owner@example.com
+ACCESS_OWNER_ALIASES=
+FORCE_SEND_PAUSED=true
+MAINTENANCE_MODE=false
+# Worker secrets: a disposable 64-hex key, never the production CREDENTIAL_KEY.
+CREDENTIAL_KEY=0000000000000000000000000000000000000000000000000000000000000000
+# Loopback-only login bypass for http://127.0.0.1 (refused on any other host):
+# DEV_AUTH_BYPASS=true

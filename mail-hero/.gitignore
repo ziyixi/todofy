@@ -26,6 +26,10 @@ wrangler*.local.*
 /cloudflare/.wrangler/
 /cloudflare/dist/
 /cloudflare/.dev.vars*
+# Local dev values next to wrangler.toml (see .dev.vars.example)
+/.dev.vars*
+!/.dev.vars.example
+/.env*
 /cloudflare/.env*
 /coverage/
 *.test

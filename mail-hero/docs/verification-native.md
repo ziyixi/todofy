@@ -18,7 +18,7 @@
 | `npm --prefix cloudflare test` | 仓库清理后32/32原生测试通过，包含API、核心边界、25 MiB workerd及完整workerd链路 |
 | `node --test deploy/test/*.test.mjs` | 2/2 CI配置生成测试通过 |
 | `npm --prefix web run build` / `npm --prefix web test` | 构建通过；3/3 前端测试 |
-| 原生部署打包 | Wrangler 4.141.0 `deploy --config wrangler.native.toml --dry-run` 通过；541.77 KiB；生产发布另见下表 |
+| 原生部署打包 | Wrangler 4.141.0 `deploy --config wrangler.native.toml --dry-run` 通过（当时的模板文件；2026-09-30 起生产配置为 `mail-hero/wrangler.toml`）；541.77 KiB；生产发布另见下表 |
 | 完整 workerd 链路 | 实际 D1/R2/SQLite DO；合成邮件保存解析、受保护 API、附件、fake consumer 503 后同事件/同正文重试至 204、删除后重复入站不复活 |
 | 恢复和额度边界 | DO 重建后的配额、并发 enqueue 版本、三次解析中断后停止、R2 失败不确认、截断原件拒绝、超大 Retry-After 不溢出 |
 | 大邮件 | 精确 25 MiB 的合成 MIME/base64 附件由本地 workerd 解析通过；不是生产 CPU/内存计量证明 |
@@ -47,7 +47,7 @@
 | 部署初始化状态 | `archive`、retention NULL、logical_bytes 0、容量 5GiB、messages 0、endpoints 0；消费者强制暂停 |
 | 真实单封收件 | 用户发送的 `Test` 于 `2026-09-26T04:47:58.569Z` 入站；解析 ready，无错误，arrival_count 1，archive，delivery_count 0；R2 原件可读且大小/摘要与 D1 相符，UI 中文正文正常 |
 
-生产配置在 gitignored `cloudflare/wrangler.native.production.toml`。GitHub owner 登录、受保护页面及用户发送的一封真实纯文本邮件的入站、存储、后台解析与 UI 展示已验证。这不覆盖自动转发、大邮件、故障重试和恢复。
+当时生产配置在 gitignored `cloudflare/wrangler.native.production.toml`（2026-09-30 起改为提交的 `mail-hero/wrangler.toml`，个人值与开关由 CI 注入，见文末）。GitHub owner 登录、受保护页面及用户发送的一封真实纯文本邮件的入站、存储、后台解析与 UI 展示已验证。这不覆盖自动转发、大邮件、故障重试和恢复。
 
 此次子域启用前，先核对限定子域的 DNS 预览：待添加的三条 MX 和一条 SPF 都仅作用于 `inbox.ziyixi.science`。随后调用 `POST /zones/{zone_id}/email/routing/dns`，body 为 `{"name":"inbox.ziyixi.science"}`，成功返回上述 ready 状态，再次查询 DNS 预览返回 `errors: null`。仅这一步还没有让 UI 的 Subdomains 列表显示已启用；创建规则并刷新后，又在 Settings → Subdomains 添加 `inbox`，才确认 Enabled、DNS Locked。该操作同时开启父级路由标记，并添加 Cloudflare 公共 DKIM TXT `cf2024-1._domainkey.ziyixi.science`。两次核对根域 MX/SPF 都精确一致，现有 iCloud 邮箱未变。
 
@@ -242,3 +242,9 @@ HTTP 接管、容器重建存活与 Mail Hero 解析测试不能代替用户测�
 - 金丝雀 fixture 的事件编号原为16，与冻结的 `legacy/pre_storage_v1.json` 相同，Todofy runtime 测试因此得到 409 `event_conflict`；已改为17（只改变 `canary_event.json` 的两个 ID），两侧合同测试现在拒绝重复的 `event_id`/`message.id`。
 - CI 与文档提交 `5774907` 的干净克隆（2026-09-29，macOS，合成数据，占位配置，无生产调用）：`Changes` 的 `test_ci_changes.py` 28项通过；`Contracts` 各步骤通过（Mail Hero `contract-fixtures`、`ops-contract`、`native-ops` 共37项；Todofy 合同与 ops 单元测试302项；网关 `ops.test.ts` 10项）；“Mail Hero checks”全部步骤通过：部署配置3项、备份29项（1项因无 GPG 跳过）、Worker 类型检查及161项测试、前端类型检查与66项测试和构建、占位配置 dry-run（打包导出 `MailCoordinator`、`Ops`、`default`）。
 - 未做：生产部署、真实仪表盘调用、与 Todofy `canary_consumer` 的端到端联调。按 ops-v1 发布顺序，应先发布支持金丝雀的 Todofy，再发布本变更。
+
+## 生产配置提交到 `mail-hero/wrangler.toml`（2026-09-30，本地实现，未发布）
+
+- 改动：删除 `cloudflare/wrangler.native.toml` 与 CI 配置生成器 `deploy/generate-ci-config.mjs`；生产配置即提交的 `mail-hero/wrangler.toml`（顶层即生产，无 `[env.*]`、无 `keep_vars`，`main`/`migrations_dir` 指向 `cloudflare/`），静态值取自当时的 GitHub production variables（只读核对）。`RECEIVE_ADDRESS`、`ACCESS_OWNER`、`ACCESS_OWNER_ALIASES`（GitHub secrets）与 `FORCE_SEND_PAUSED`、`MAINTENANCE_MODE`（GitHub variables）由 `deploy/deploy-vars.mjs` 校验后以 `--var` 注入，缺失或非法即拒绝。生成器的静态校验移到 `deploy/test/wrangler-config.test.mjs`；跨应用检查在 `.github/scripts/test_wrangler_configs.py`。
+- 等价性（本地，只对 127.0.0.1 上的模拟 Cloudflare API，无 token、无真实调用；静态值为真实 variables，个人值两侧同为占位）：旧命令（生成器 + `wrangler deploy --config wrangler.native.production.ci.json`）与新命令（`deploy-vars.mjs exec -- wrangler deploy --config ../wrangler.toml`）各发出18个请求，逐一相同；绑定（名称、类型、值、类、桶、D1 ID）集合相同，仅顺序不同（注入的 var 排在最后）；`metadata.package_dependencies` 在新布局中不再发送（`mail-hero/` 无 `package.json`，仅为统计元数据）。上传脚本原始 sha256 `6a69f455…` → `ce2f6501…`，只因 esbuild 的 `// 路径` 注释相对于配置目录；规范化后两侧均为 `b38d2e8a…`。自定义域名、兼容日期、observability、DO 迁移标签与资产清单相同；`d1 migrations apply DB --remote` 的10个请求逐字节相同。
+- 未做：生产发布。发布后由 owner 只读核对 `mail-hero` 的绑定与 var 值散列（尤其 `RECEIVE_ADDRESS`）与发布前一致，并在 UI 设置/诊断中确认“唯一收信地址”为 ok。
