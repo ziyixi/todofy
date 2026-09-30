@@ -12,7 +12,10 @@ compatibility_date = "2026-09-25"
 workers_dev = false
 preview_urls = false
 # Top-level key: keep it above [assets], or TOML reads it as assets.routes.
-routes = [{ pattern = "website-preview.ziyixi.science", custom_domain = true }]
+routes = [
+  { pattern = "website-preview.ziyixi.science", custom_domain = true },
+  { pattern = "www.ziyixi.science", custom_domain = true },
+]
 
 [assets]
 directory = "./out"
