@@ -1,4 +1,5 @@
 import { spawn, type ChildProcess } from "node:child_process";
+import path from "node:path";
 
 import { PublicationIdentitySchema } from "../../src/lib/content/publication-state";
 import { sameIdentity, type BuildIdentity } from "./payload";
@@ -136,7 +137,10 @@ export async function runDeploymentTests(options: {
   if (code !== 0) throw new Error(`Deployment route tests failed against ${options.baseUrl}.`);
 }
 
-/** `pnpm start` (wrangler dev serving out/ with wrangler.toml) until `stop()` is called. */
+/**
+ * `wrangler dev` serving out/ with wrangler.toml (what `pnpm start` runs) until `stop()` is called.
+ * The binary is started directly so stopping it does not make a package-manager wrapper log a failure.
+ */
 export async function startLocalServer(options: {
   cwd: string;
   env: NodeJS.ProcessEnv;
@@ -146,7 +150,10 @@ export async function startLocalServer(options: {
   const origin = options.origin ?? "http://127.0.0.1:4173";
   const env: NodeJS.ProcessEnv = { ...options.env, WRANGLER_SEND_METRICS: "false" };
   delete env.CLOUDFLARE_API_TOKEN;
-  const child: ChildProcess = spawn("pnpm", ["start"], {
+  const { hostname, port } = new URL(origin);
+  const wrangler = path.join(options.cwd, "node_modules", ".bin", "wrangler");
+  const args = ["dev", "--config", "wrangler.toml", "--ip", hostname, "--port", port];
+  const child: ChildProcess = spawn(wrangler, args, {
     cwd: options.cwd,
     env,
     stdio: ["ignore", "inherit", "inherit"],
