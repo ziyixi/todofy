@@ -478,10 +478,12 @@ kbd {
   transform: translateY(16px) scale(0.92);
 }
 
+/* Peeking cards are plain edges: their content (clipped buttons, text) would show below the top card. */
 .paper-card.depth-1 .card-scroll,
-.paper-card.depth-2 .card-scroll {
-  opacity: 0.5;
-  overflow: hidden;
+.paper-card.depth-2 .card-scroll,
+.paper-card.depth-1 .stamp,
+.paper-card.depth-2 .stamp {
+  visibility: hidden;
 }
 
 .paper-card.is-dragging {
@@ -503,6 +505,10 @@ kbd {
 .card-scroll {
   height: 100%;
   overflow-y: auto;
+  /* overflow-y: auto makes overflow-x auto too, and a nested scroller would take horizontal pans for itself
+     (pointercancel, no swipe on touch). Vertical pans still scroll the card. */
+  overflow-x: hidden;
+  touch-action: pan-y;
   overscroll-behavior: contain;
   padding: var(--space-4) var(--space-4) var(--space-5);
   display: flex;
@@ -1043,15 +1049,18 @@ kbd {
   color: var(--fg-2);
 }
 
-/* The send step's buttons stay in thumb reach while the list scrolls. */
+/* The send button sits in the send box after the mode and its preview, in reading order, never pinned to
+   the bottom: right after the last card that spot is under the thumb that just pressed 不喜欢 / 喜欢. */
+.send-actions {
+  margin-top: var(--space-1);
+}
+
 .summary-actions {
-  position: sticky;
-  bottom: 0;
-  z-index: 5;
-  margin: 0 calc(-1 * var(--space-4));
-  padding: var(--space-3) var(--space-4) calc(var(--space-3) + env(safe-area-inset-bottom));
-  background: var(--surface);
-  border-top: 1px solid var(--line);
+  padding-bottom: env(safe-area-inset-bottom);
+}
+
+.summary-actions:empty {
+  display: none;
 }
 
 .card-title:focus-visible {

@@ -229,7 +229,10 @@ older unfinished decks (≤ 7 days) are offered separately and never merged.
 **Idempotency and concurrency.** Every mutation carries `op_id` (UUID v4 from the browser) and, for
 deck mutations, `base_version`. The DO serialises mutations per deck (an in-memory promise chain; D1
 calls can interleave otherwise) and checks `owner_ops` first: a known `op_id` returns its stored
-response unchanged (a retried request after a lost response is harmless). A stale `base_version` is
+response unchanged (a retried request after a lost response is harmless). A replay also re-derives
+LabState's mirrors from D1 (`labels` for the deck's cards or the one paper from `feedback`; `seed_ids`
+from `seeds`): the first attempt's D1 batch may have committed while the call failed before the mirror
+was written, and ranking must not miss that like, dislike or seed for good. A stale `base_version` is
 409 `deck_changed` with the current `DeckState`, which the UI adopts (another tab or device). Each
 mutation is at most 6 D1 statements in one batch; a decision costs ≈ 25 rows written, well inside D1
 Free (100,000 rows written per day).
@@ -295,10 +298,12 @@ writer); the contract, states and Todofy's implementation plan are in
   nothing: the generation is **unfrozen** and the next send rebuilds it (same `intent_id`, current
   likes and mode). Any other state keeps it frozen: 重试 resends the identical payload (Todofy replays or
   re-queues; never duplicates). `unknown` first asks `taskIntentStatus`; `not_found` → resend the same
-  payload.
+  payload. A retry of a `failed` generation that Todofy answers `paused` (recorded: it held a pause and
+  re-queued nothing) stays `failed` here with the pause as its `error_code` and no poll, so the owner is told
+  the retry did not happen, not that it resumes by itself.
 - **Polling.** `GET …/send` refreshes a `pending`/`paused`(recorded)/`unknown` generation through the
   DO when `next_poll_at` has passed (≥ 3 s, `retry_after_seconds` honoured, backing off to 60 s after
-  2 minutes). No background polling: a send left pending is refreshed the next time the owner looks
+  2 minutes of the current attempt: `sends.created_at` is reset by every retry, rebuild and re-propose). No background polling: a send left pending is refreshed the next time the owner looks
   (and Todofy finishes it anyway).
 - The ops-v1 guard does not defer sends (owner-initiated). Nothing is sent without the owner pressing
   发送; 暂不发送 only records `later_at`.

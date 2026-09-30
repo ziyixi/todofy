@@ -661,7 +661,9 @@ as its canonical JSON (schema key order, compact, absent optionals left out) wit
 for `(source, intent_id)` answers first: another hash → `rejected`/`intent_conflict`; created →
 `duplicate`; failed → re-queued unless a pause holds (`REQUEUE` + `REQUEUE_TASKS` in one batch: refused
 tasks back to `pending`, unknown ones to `recheck`, a new 48-try/7-day window, the text restored if
-retention had dropped it); otherwise its state (`pending`, or `paused` recorded while a pause holds).
+retention had dropped it); otherwise its state (`pending`, or `paused` recorded while a pause holds). A failed intent proposed again while a pause
+holds is answered `paused` (recorded, the pause's code), not its old failure: nothing was re-queued;
+`taskIntentStatus` keeps answering `failed` until a proposal after the pause re-queues it.
 (2) `TASK_INTENT_SOURCES` (unset: every source the contract knows; empty: none, an off switch that
 leaves mail running) → `source_not_allowed`; an item URL whose host is not exactly on the source's list (lab:
 `arxiv.org`) → `url_not_allowed`. (3) Maintenance, processing pause, `FORCE_PAUSE_TODOIST`, the Todoist

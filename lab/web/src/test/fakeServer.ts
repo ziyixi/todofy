@@ -59,6 +59,8 @@ export class FakeServer {
   sendScript: SendStatus[] = []
   /** Runs first on every call; a Response short-circuits the fake. */
   interceptors: Interceptor[] = []
+  /** Milliseconds every request waits before the fake handles it (a slow network). */
+  latency = 0
   private tokens = 0
 
   constructor(cards: DeckCard[], today: TodayResponse = todayFixture({}, 'ranked', cards.length), kind: DeckKind = 'ranked') {
@@ -232,7 +234,8 @@ export class FakeServer {
         const body = typeof init.body === 'string' ? (JSON.parse(init.body) as Record<string, unknown>) : null
         const call: Call = { method: init.method ?? 'GET', path: url, headers, body }
         this.calls.push(call)
-        return Promise.resolve(this.handle(call))
+        if (this.latency > 0) await new Promise((resolve) => setTimeout(resolve, this.latency))
+        return this.handle(call)
       }),
     )
     return this

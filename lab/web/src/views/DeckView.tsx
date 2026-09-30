@@ -15,7 +15,7 @@ import { Link } from '../components/Link'
 import { SwipeDeck, titleIdOf, type EnterFrom, type SwipeDeckHandle } from '../components/SwipeDeck'
 import { useDeckSession } from '../hooks/useDeckSession'
 import { useReducedMotion } from '../hooks/useReducedMotion'
-import { countDecisions, planDecide, planRestart, planUndo, undecidedCards } from '../lib/deckModel'
+import { canUndo, countDecisions, planDecide, planRestart, planUndo, undecidedCards } from '../lib/deckModel'
 import { formatDay, newOpId, safeArxivUrl, shortTitle } from '../lib/format'
 import { deckKeyAction } from '../lib/keys'
 import { DoneState } from './States'
@@ -118,7 +118,12 @@ export function DeckView({ day, today }: DeckViewProps) {
     focusTitle.current = shouldMoveFocus()
     enterNonce.current += 1
     const target = op.target
-    if (target.kind === 'decide') {
+    if (target === null) {
+      // Pressed again while the previous undo is on its way: the server takes back its next entry and the
+      // card comes back with its answer.
+      setEnter(null)
+      announce('正在撤销上一步…')
+    } else if (target.kind === 'decide') {
       const card = cards.find((item) => item.paper.id === target.paper_id)
       setEnter({ paper_id: target.paper_id, from: target.decision, nonce: enterNonce.current })
       announce(`已撤销：${card?.paper.title ?? ''}`)
@@ -151,8 +156,20 @@ export function DeckView({ day, today }: DeckViewProps) {
 
   const fling = useCallback((decision: Decision) => deckRef.current?.fling(decision), [])
 
-  // Keyboard (docs/ux.md §3), only while cards are showing and no sheet is open.
+  // Keyboard (docs/ux.md §3), only while cards are showing and no sheet is open. On the summary and done
+  // screens only Z / ⌘Z / Ctrl+Z (撤销上一张) is live.
   const showingCards = top !== null
+  useEffect(() => {
+    if (showingCards || helpOpen) return
+    function onKey(event: KeyboardEvent) {
+      if (deckKeyAction(event) !== 'undo' || event.repeat) return
+      if (document.querySelector('[role="dialog"]')) return
+      event.preventDefault()
+      undoRef.current()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [showingCards, helpOpen])
   useEffect(() => {
     if (!showingCards || helpOpen) return
     function onKey(event: KeyboardEvent) {
@@ -236,6 +253,10 @@ export function DeckView({ day, today }: DeckViewProps) {
           day={day}
           deck={deck}
           isToday={isToday}
+          counts={counts}
+          saving={session.saving}
+          canUndo={canUndo(effective)}
+          onUndo={undo}
           onDone={() => setScreen('done')}
           onRestart={restart}
         />
@@ -247,6 +268,8 @@ export function DeckView({ day, today }: DeckViewProps) {
         isToday={isToday}
         today={today}
         counts={counts}
+        canUndo={canUndo(effective)}
+        onUndo={undo}
         onOpenSummary={() => setScreen('summary')}
         onRestart={restart}
       />
@@ -280,7 +303,7 @@ export function DeckView({ day, today }: DeckViewProps) {
       <ActionBar
         onDecide={fling}
         onUndo={undo}
-        canUndo={effective.undoTop !== null}
+        canUndo={canUndo(effective)}
         undoBusy={effective.undoWaiting}
         lean={lean}
         disabled={false}

@@ -16,7 +16,12 @@ export type UndoEntry =
 
 export type LocalOp =
   | { readonly kind: 'decide'; readonly op_id: string; readonly paper_id: PaperId; readonly decision: Decision }
-  | { readonly kind: 'undo'; readonly op_id: string; readonly target: UndoEntry }
+  /**
+   * `target` is what the undo takes back, known when it was planned; null for an undo pressed while the
+   * previous one is still in flight (the server takes back its latest entry; the model resolves the target
+   * once the answer before it names the next entry).
+   */
+  | { readonly kind: 'undo'; readonly op_id: string; readonly target: UndoEntry | null }
   | { readonly kind: 'restart'; readonly op_id: string; readonly snapshot: Decisions }
 
 export interface SessionModel {
@@ -32,6 +37,8 @@ export interface Effective {
   readonly undoTop: UndoEntry | null
   /** The queue took back the server's last known entry; the next one is known once the queue drains. */
   readonly undoWaiting: boolean
+  /** Undos queued whose target is not known yet (their cards come back with the server's answer). */
+  readonly undosUnresolved: number
   /** An undo of a restart this tab did not make is queued: its cards come back with the server's answer. */
   readonly restoring: boolean
 }
@@ -49,6 +56,7 @@ export function simulate(model: SessionModel): Effective {
   const stack: UndoEntry[] = serverTop ? [serverTop] : []
   let poppedServerEntry = false
   let restoring = false
+  let unresolved = 0
   for (const op of model.pending) {
     if (op.kind === 'decide') {
       decisions[op.paper_id] = op.decision
@@ -57,9 +65,13 @@ export function simulate(model: SessionModel): Effective {
       decisions = {}
       stack.push({ kind: 'restart', cleared: Object.keys(op.snapshot).length, snapshot: op.snapshot })
     } else {
-      stack.pop()
+      const popped = stack.pop()
       if (stack.length === 0 && serverTop) poppedServerEntry = true
-      const target = op.target
+      const target = op.target ?? popped ?? null
+      if (target === null) {
+        unresolved += 1
+        continue
+      }
       if (target.kind === 'decide') {
         const rest = { ...decisions }
         delete rest[target.paper_id]
@@ -72,7 +84,7 @@ export function simulate(model: SessionModel): Effective {
     }
   }
   const undoTop = stack[stack.length - 1] ?? null
-  return { decisions, undoTop, undoWaiting: undoTop === null && poppedServerEntry, restoring }
+  return { decisions, undoTop, undoWaiting: undoTop === null && (poppedServerEntry || unresolved > 0), restoring, undosUnresolved: unresolved }
 }
 
 export type ModelAction =
@@ -133,8 +145,22 @@ export function planDecide(effective: Effective, card: DeckCard | null, decision
   return { kind: 'decide', op_id: opId, paper_id: card.paper.id, decision }
 }
 
+/** Most undos queued ahead of the server's answer (pressing 撤销 quickly rewinds several steps). */
+export const UNDO_QUEUE_MAX = 10
+
+/** Whether 撤销 does something now (see planUndo). */
+export function canUndo(effective: Effective): boolean {
+  return effective.undoTop !== null || (effective.undoWaiting && effective.undosUnresolved < UNDO_QUEUE_MAX)
+}
+
+/**
+ * An undo of the known latest entry, or, while the queue has taken back every entry the server named so
+ * far, an undo whose target the server resolves (never dropped because an earlier undo is in flight).
+ */
 export function planUndo(effective: Effective, opId: string): LocalOp | null {
-  return effective.undoTop ? { kind: 'undo', op_id: opId, target: effective.undoTop } : null
+  if (effective.undoTop) return { kind: 'undo', op_id: opId, target: effective.undoTop }
+  if (effective.undoWaiting && effective.undosUnresolved < UNDO_QUEUE_MAX) return { kind: 'undo', op_id: opId, target: null }
+  return null
 }
 
 export function planRestart(effective: Effective, opId: string): LocalOp | null {

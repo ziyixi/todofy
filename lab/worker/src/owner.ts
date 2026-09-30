@@ -23,7 +23,7 @@ import { iso, neuronCeiling, publicHost } from './config.ts';
 import { deckState, mutate, replay, type DeckEvent, type Mutation } from './deck.ts';
 import { frozenPapers, readDeck, readSeeds, readSettings, sendRowFrom, sendableCards, stateFromRows, summaryView, type DeckBundle, type SendDbRow } from './db.ts';
 import type { Env } from './env.ts';
-import { asResult, buildIntent, completed, freeze, nextPoll, pollable, sendStatus, sha256Hex, unfrozen, withRejection, withResult, type SendRow } from './intent.ts';
+import { asResult, buildIntent, completed, freeze, heldRetry, nextPoll, pollable, sendStatus, sha256Hex, unfrozen, withRejection, withResult, type SendRow } from './intent.ts';
 import { TLDR_MODELS } from './models.ts';
 import type { Store } from './store.ts';
 
@@ -55,6 +55,57 @@ function opStatement(db: D1Database, opId: string, route: string, deckId: string
     .bind(opId, route, deckId, status, json.length <= 16_000 ? json : '{}', now);
 }
 
+// ---- the ranking mirror ------------------------------------------------------------------------------------
+
+interface FeedbackRow {
+  paper_id: string;
+  label: Decision | null;
+  source: 'deck' | 'library' | null;
+  deck_id: string | null;
+  at: number | null;
+}
+
+/**
+ * Copies D1 `feedback` (the record) for these papers into LabState's `labels` mirror, which ranking reads.
+ * Idempotent. A replayed op_id runs it: the first request's D1 batch may have committed while the call itself
+ * failed before the mirror was written, and the retry must not leave the two apart for good.
+ */
+function mirrorLabels(store: Store, rows: readonly FeedbackRow[]): void {
+  for (const row of rows) {
+    if (row.label === null || row.source === null || row.at === null) {
+      store.sql.exec('DELETE FROM labels WHERE paper_id = ?', row.paper_id);
+    } else {
+      store.sql.exec(
+        `INSERT INTO labels (paper_id, label, source, deck_id, at) VALUES (?, ?, ?, ?, ?)
+         ON CONFLICT (paper_id) DO UPDATE SET label = excluded.label, source = excluded.source, deck_id = excluded.deck_id, at = excluded.at`,
+        row.paper_id,
+        row.label,
+        row.source,
+        row.deck_id,
+        row.at,
+      );
+    }
+  }
+}
+
+/** The mirror of every card of a deck, re-read from D1 (one query). */
+async function resyncDeckLabels(deps: OwnerDeps, deckId: string): Promise<void> {
+  const { results } = await deps.db
+    .prepare(
+      `SELECT c.paper_id, f.label, f.source, f.deck_id, f.at FROM deck_cards c LEFT JOIN feedback f ON f.paper_id = c.paper_id
+       WHERE c.deck_id = ?`,
+    )
+    .bind(deckId)
+    .all<FeedbackRow>();
+  mirrorLabels(deps.store, results);
+}
+
+/** The mirror of one paper, re-read from D1. */
+async function resyncPaperLabel(deps: OwnerDeps, paperId: string): Promise<void> {
+  const row = await deps.db.prepare('SELECT paper_id, label, source, deck_id, at FROM feedback WHERE paper_id = ?').bind(paperId).first<FeedbackRow>();
+  mirrorLabels(deps.store, [row ?? { paper_id: paperId, label: null, source: null, deck_id: null, at: null }]);
+}
+
 // ---- deck decisions ---------------------------------------------------------------------------------------
 
 interface EventRow {
@@ -75,7 +126,10 @@ const MUTATION_STATUS: Readonly<Record<string, number>> = { not_in_deck: 404, al
 export async function mutateDeck(deps: OwnerDeps, deckId: string, input: DeckMutationInput, now: number): Promise<OwnerResult<DeckMutationResponse>> {
   const { db, store } = deps;
   const stored = await storedOp(db, input.op_id);
-  if (stored !== null) return done(JSON.parse(stored.response) as DeckMutationResponse, stored.status);
+  if (stored !== null) {
+    await resyncDeckLabels(deps, deckId);
+    return done(JSON.parse(stored.response) as DeckMutationResponse, stored.status);
+  }
   const bundle = await readDeck(db, deckId);
   if (bundle === null || bundle.deck.ready_at === null) return fail(404, 'deck_not_found');
   const current = stateFromRows(bundle.deck, bundle.cards);
@@ -224,7 +278,8 @@ function upsertSend(db: D1Database, row: SendRow): D1PreparedStatement {
          error_code, next_poll_at, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT (deck_id, generation) DO UPDATE SET mode = excluded.mode, paper_ids = excluded.paper_ids, payload = excluded.payload,
          payload_sha256 = excluded.payload_sha256, state = excluded.state, recorded = excluded.recorded, tasks_total = excluded.tasks_total,
-         tasks_created = excluded.tasks_created, error_code = excluded.error_code, next_poll_at = excluded.next_poll_at, updated_at = excluded.updated_at`,
+         tasks_created = excluded.tasks_created, error_code = excluded.error_code, next_poll_at = excluded.next_poll_at,
+         created_at = excluded.created_at, updated_at = excluded.updated_at`,
     )
     .bind(
       row.deck_id,
@@ -291,8 +346,9 @@ export async function send(deps: OwnerDeps, deckId: string, opId: string, mode: 
   let row: SendRow;
   if (last !== null && !completed(last) && !unfrozen(last)) {
     // The open generation is frozen: a retry resends the identical payload (Todofy replays, never duplicates).
+    // A new attempt starts the fast poll window again (created_at is the current attempt's start).
     if (last.payload === null) return fail(409, 'send_in_progress');
-    row = { ...last, state: 'sending', next_poll_at: now + 3_000, updated_at: now };
+    row = { ...last, state: 'sending', next_poll_at: now + 3_000, created_at: now, updated_at: now };
   } else {
     const generation = last === null ? 1 : completed(last) ? last.generation + 1 : last.generation;
     const cards = sendableCards(bundle);
@@ -320,13 +376,16 @@ export async function send(deps: OwnerDeps, deckId: string, opId: string, mode: 
       tasks_created: 0,
       error_code: null,
       next_poll_at: now + 3_000,
-      created_at: last !== null && last.generation === generation ? last.created_at : now,
+      created_at: now,
       updated_at: now,
     };
   }
   // Frozen before the call: a lost response or an evicted object leaves `sending`, which a poll resolves.
   await saveSend(deps, row, [opStatement(db, opId, 'deck.send', deckId, 200, {}, now)]);
-  const after = await propose(deps, row, now);
+  const answered = await propose(deps, row, now);
+  // Retrying a failed generation while Todofy is paused re-queues nothing there: it stays failed here,
+  // with the pause as the reason, instead of reading as "handed over, resumes by itself".
+  const after = last !== null && last.generation === row.generation && last.state === 'failed' ? heldRetry(answered) : answered;
   await saveSend(deps, after);
   return done(sendStatus(after));
 }
@@ -346,8 +405,8 @@ export async function pollSend(deps: OwnerDeps, deckId: string, now: number): Pr
     // Status unreadable: keep what we know and ask again later.
     after = { ...row, next_poll_at: nextPoll(now, row.created_at, null, row.state, row.recorded) ?? now + 60_000, updated_at: now };
   } else if (result.state === 'not_found') {
-    // Todofy never recorded it (the propose was lost): send the identical payload again.
-    after = await propose(deps, { ...row, state: 'sending', recorded: false }, now);
+    // Todofy never recorded it (the propose was lost): send the identical payload again (a new attempt).
+    after = await propose(deps, { ...row, state: 'sending', recorded: false, created_at: now }, now);
   } else {
     after = withResult(row, result, now);
   }
@@ -372,16 +431,9 @@ export async function feedback(deps: OwnerDeps, opId: string, paperId: string, l
             )
             .bind(paperId, label, now);
     await db.batch([write, opStatement(db, opId, 'feedback', null, 200, {}, now)]);
-    if (label === null) store.sql.exec('DELETE FROM labels WHERE paper_id = ?', paperId);
-    else {
-      store.sql.exec(
-        `INSERT INTO labels (paper_id, label, source, deck_id, at) VALUES (?, ?, 'library', NULL, ?)
-         ON CONFLICT (paper_id) DO UPDATE SET label = excluded.label, source = 'library', deck_id = NULL, at = excluded.at`,
-        paperId,
-        label,
-        now,
-      );
-    }
+    mirrorLabels(store, [label === null ? { paper_id: paperId, label: null, source: null, deck_id: null, at: null } : { paper_id: paperId, label, source: 'library', deck_id: null, at: now }]);
+  } else {
+    await resyncPaperLabel(deps, paperId);
   }
   const row = await db.prepare('SELECT label FROM feedback WHERE paper_id = ?').bind(paperId).first<{ label: Decision }>();
   return done({ paper_id: paperId, label: row?.label ?? null });
@@ -402,6 +454,14 @@ export async function addSeeds(deps: OwnerDeps, opId: string, inputs: readonly s
       opStatement(db, opId, 'seeds.add', null, 200, {}, now),
     ]);
     for (const id of added) store.sql.exec("INSERT OR IGNORE INTO seed_ids (paper_id, state, added_at) VALUES (?, 'pending', ?)", id, now);
+  } else {
+    // A replay: the seeds D1 holds for this request reach seed_ids even if the first call stopped after D1.
+    const ids = [...new Set(inputs.map(parseSeedInput).filter((id): id is string => id !== null))].map(paperKey);
+    const { results } = await db
+      .prepare('SELECT paper_id, added_at FROM seeds WHERE paper_id IN (SELECT value FROM json_each(?))')
+      .bind(JSON.stringify(ids))
+      .all<{ paper_id: string; added_at: number }>();
+    for (const row of results) store.sql.exec("INSERT OR IGNORE INTO seed_ids (paper_id, state, added_at) VALUES (?, 'pending', ?)", row.paper_id, row.added_at);
   }
   return done({ seeds: await readSeeds(db) });
 }
@@ -410,6 +470,10 @@ export async function removeSeed(deps: OwnerDeps, opId: string, paperId: string,
   const { db, store } = deps;
   if ((await storedOp(db, opId)) === null) {
     await db.batch([db.prepare('DELETE FROM seeds WHERE paper_id = ?').bind(paperId), opStatement(db, opId, 'seeds.remove', null, 200, {}, now)]);
+    store.sql.exec('DELETE FROM seed_ids WHERE paper_id = ?', paperId);
+    store.sql.exec("DELETE FROM pending_embed WHERE paper_id = ? AND day = 'seed'", paperId);
+  } else if ((await db.prepare('SELECT 1 AS x FROM seeds WHERE paper_id = ?').bind(paperId).first()) === null) {
+    // A replay: D1 no longer has the seed, so LabState must not keep ranking with it.
     store.sql.exec('DELETE FROM seed_ids WHERE paper_id = ?', paperId);
     store.sql.exec("DELETE FROM pending_embed WHERE paper_id = ? AND day = 'seed'", paperId);
   }

@@ -7,6 +7,7 @@ import {
   completed,
   contractErrors,
   freeze,
+  heldRetry,
   intentId,
   nextPoll,
   parentTitle,
@@ -133,5 +134,17 @@ describe('the send row', () => {
     expect(nextPoll(10_000, 0, 3, 'paused', true)).toBe(70_000);
     expect(nextPoll(10_000, 0, 3, 'created', true)).toBeNull();
     expect(nextPoll(10_000, 0, 3, 'paused', false)).toBeNull();
+  });
+
+  it('keeps a retry of a failed send failed when Todofy held it for a pause (nothing was re-queued)', () => {
+    const held = heldRetry(row({ state: 'paused', recorded: true, error_code: 'todoist_paused', tasks_total: 3, tasks_created: 1, next_poll_at: 5 }));
+    expect(held).toMatchObject({ state: 'failed', recorded: true, error_code: 'todoist_paused', tasks_created: 1, next_poll_at: null });
+    expect(pollable(held)).toBe(false);
+    expect(sendStatus(held).frozen).toBe(true);
+    // Anything else passes through.
+    const pending = row({ state: 'pending', recorded: true });
+    expect(heldRetry(pending)).toBe(pending);
+    const unrecorded = row({ state: 'paused', recorded: false });
+    expect(heldRetry(unrecorded)).toBe(unrecorded);
   });
 });

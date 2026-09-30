@@ -10,16 +10,21 @@ import schema from '../../../../contracts/task-intent-v1/task-intent-v1.schema.j
 import type { TaskIntent, TaskIntentRef, TaskIntentResult } from '../../../../contracts/task-intent-v1/task-intent-v1.ts';
 
 interface Scenario {
-  /** accept (record, then create 6 tasks per status call), paused (record nothing), throw (reject unavailable), daily_limit. */
-  propose?: 'accept' | 'paused' | 'throw' | 'daily_limit';
-  /** normal, or throw (reject unavailable). */
-  status?: 'normal' | 'throw';
+  /**
+   * accept (record, then create 6 tasks per status call), paused (record nothing), throw (reject unavailable),
+   * daily_limit, held (Todofy's answer while a pause holds: a recorded failed intent is answered paused and
+   * re-queued nothing).
+   */
+  propose?: 'accept' | 'paused' | 'throw' | 'daily_limit' | 'held';
+  /** normal, throw (reject unavailable), or failed (Todoist refused a task: the intent fails). */
+  status?: 'normal' | 'throw' | 'failed';
 }
 
 interface Stored {
   json: string;
   total: number;
   created: number;
+  failed: boolean;
   intent: TaskIntent;
 }
 
@@ -62,11 +67,13 @@ export class Ops extends WorkerEntrypoint {
     if (existing !== undefined) {
       if (existing.json !== json) return Promise.resolve(result(intent.intent_id, 'rejected', true, existing, 'intent_conflict'));
       if (existing.created >= existing.total) return Promise.resolve(result(intent.intent_id, 'duplicate', true, existing));
+      if (existing.failed && scenario.propose === 'held') return Promise.resolve(result(intent.intent_id, 'paused', true, existing, 'todoist_paused'));
+      existing.failed = false; // re-queued
       return Promise.resolve(result(intent.intent_id, 'pending', true, existing));
     }
     if (scenario.propose === 'paused') return Promise.resolve(result(intent.intent_id, 'paused', false, undefined, 'todoist_paused'));
     if (scenario.propose === 'daily_limit') return Promise.resolve(result(intent.intent_id, 'rejected', false, undefined, 'daily_limit'));
-    const stored: Stored = { json, total: intent.items.length + (intent.mode === 'subtasks' ? 1 : 0), created: 0, intent };
+    const stored: Stored = { json, total: intent.items.length + (intent.mode === 'subtasks' ? 1 : 0), created: 0, failed: false, intent };
     intents.set(intent.intent_id, stored);
     return Promise.resolve(result(intent.intent_id, 'pending', true, stored));
   }
@@ -80,6 +87,10 @@ export class Ops extends WorkerEntrypoint {
     if (scenario.status === 'throw') return Promise.reject(new Error('unavailable'));
     const stored = intents.get(ref.intent_id);
     if (stored === undefined) return Promise.resolve(result(ref.intent_id, 'not_found', false, undefined));
+    if (scenario.status === 'failed' || stored.failed) {
+      stored.failed = true;
+      return Promise.resolve(result(ref.intent_id, 'failed', true, stored, 'todoist_rejected'));
+    }
     stored.created = Math.min(stored.total, stored.created + 6);
     return Promise.resolve(result(ref.intent_id, stored.created >= stored.total ? 'created' : 'pending', true, stored));
   }

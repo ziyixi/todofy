@@ -6,8 +6,11 @@ title and up to 30 items, under an idempotency key the proposer chooses. Todofy 
 D1 ledger, creates the tasks with its existing Todoist client and answers with counts. The proposer
 never sees a Todoist token, and a repeated or retried proposal never creates a task twice.
 
-Status: contract written 2026-09-30 with Lab's design (`lab/docs/design.md` §9). Todofy's side is
-specified below and not implemented yet.
+Status: contract written 2026-09-30 with Lab's design (`lab/docs/design.md` §9). Both sides are
+implemented (not released): Lab in `lab/worker/src/intent.ts` and `owner.ts`; Todofy in
+`todofy/worker/todofy/core/intents.py` (validation, canonical form, task text, state machine, results),
+`core/sql/intents.py`, `runtime/intents.py`, `todofy/gateway/src/ops.ts` and migration
+`todofy/migrations/0004_task_intents.sql`.
 
 | File | Purpose |
 | --- | --- |
@@ -81,7 +84,7 @@ The same `(source, intent_id)` with the same hash is a replay; with another hash
 | `created` | true | Every task exists. From `taskIntentStatus`, or from `proposeTasks` never (creation is asynchronous). | done |
 | `duplicate` | true | `proposeTasks` for an intent that was **already** fully created: nothing new was sent. | show "already sent" |
 | `paused` | false | Todofy does not accept intents now: `maintenance`, `processing_paused`, `todoist_paused` (`FORCE_PAUSE_TODOIST`), `todoist_blocked` (auth block), `backup_active`. **Nothing was recorded.** | may edit and propose again later (same `intent_id` is fine) |
-| `paused` | true | Recorded earlier, creation held for the same reasons; resumes by itself. | poll less often |
+| `paused` | true | Recorded earlier, creation held for the same reasons; resumes by itself. Also the answer to `proposeTasks` for a **failed** intent while a pause holds: nothing was re-queued, and `taskIntentStatus` keeps answering `failed`. | poll less often; after a retry of a failed intent, show it as still failed and retry after the pause |
 | `failed` | true | Todoist refused a task (`todoist_rejected`) or its result stayed unknown after the footer lookup (`todoist_result_unknown`); `tasks_created` < `tasks_total`. | offer retry: `proposeTasks` again with the **same** content re-queues only the unfinished tasks (unknown ones get a lookup first) |
 | `rejected` | false | Refused, nothing recorded or sent: `daily_limit`, `url_not_allowed`, `source_not_allowed`. | show the reason |
 | `rejected` | true | `intent_conflict`: another content already holds this `intent_id` (counts are that intent's). | a proposer bug: never reuse an id with new content |
@@ -94,7 +97,7 @@ owner looks at the send screen).
 **Content rule.** Results carry codes, counts, booleans, the caller's own IDs and a timestamp: never
 task text, Todoist IDs or remote response text. Todofy logs only `source`, `intent_id`, counts and codes.
 
-## Todofy's side (to implement; keeps every existing behaviour identical)
+## Todofy's side (implemented; keeps every existing behaviour identical)
 
 - **Migration** `todofy/migrations/0005_task_intents.sql` (renumbered from 0004 at merge, after the
   GTD ledger's `0004_gtd.sql`; the file is additive and independent of it):
@@ -106,8 +109,10 @@ task text, Todoist IDs or remote response text. Todofy logs only `source`, `inte
 - **Record** (`task_intent_propose`): validate against the schema rules (the core owns validation, like
   ops-v1), then in this order: (1) an existing row for `(source, intent_id)` → replay, answered before
   any other check (like ops-v1's `startCanary`): another hash → `rejected`/`intent_conflict`; created →
-  `duplicate`; `failed` → re-queue the unfinished tasks (unless a pause below holds) → `pending`;
-  otherwise its current state, reported as `paused` (recorded) while a pause holds; (2) maintenance /
+  `duplicate`; `failed` → re-queue the unfinished tasks → `pending`, but while a pause below holds nothing
+  is re-queued (no write under a pause) and the answer is `paused` (recorded, the pause's code;
+  `taskIntentStatus` still answers `failed`); otherwise its current state, reported as `paused`
+  (recorded) while a pause holds; (2) maintenance /
   processing paused / force pause / auth block / backup lease → `paused`, nothing written; (3)
   `daily_limit` (10 new intents per source and UTC day) → `rejected`; (4) insert the intent and its task
   rows in one D1 batch and wake the alarm → `pending`. It never calls Gemini.
@@ -124,7 +129,7 @@ task text, Todoist IDs or remote response text. Todofy logs only `source`, `inte
   (`paused`/`todoist_blocked`); UNKNOWN → a read-only footer lookup (existing `find_footer_tasks`
   generalised to a footer string) before anything is resent; a 4xx refusal → `failed`/`todoist_rejected`.
   Automatic attempts stop after 48 tries or 7 days per task (→ `failed`).
-- **Task text** (deterministic, `core/intent_render.py`): content = the title; description = the
+- **Task text** (deterministic, `core/intents.py`: `task_text`, `footer`): content = the title; description = the
   item's description, then its URL on its own line, then a footer line
   `Todofy intent: <source>/<intent_id>#<n>` (the lookup key, like the mail footer). In separate mode the
   parent title is added as a line above the footer (`— 论文雷达 2026-09-30 · 3 篇`). Titles are sent as
@@ -141,8 +146,8 @@ task text, Todoist IDs or remote response text. Todofy logs only `source`, `inte
 ## Checks
 
 - Schema/fixtures with both validators: Lab's `lab/worker/test/task-intent-contract.test.ts`
-  (`../ops-v1/validate.mjs` over every fixture, constants of `task-intent-v1.ts` against the schema) and,
-  when Todofy implements it, `todofy/tests/unit/test_task_intent_contract.py` (Python `jsonschema` on the
+  (`../ops-v1/validate.mjs` over every fixture, constants of `task-intent-v1.ts` against the schema) and
+  `todofy/tests/unit/test_task_intent_contract.py` (Python `jsonschema` on the
   same fixtures, same verdicts). Both run in the `Contracts` CI job.
 - Todofy: unit tests of validation, canonical hash, rendering and the state machine; runtime tests over a
   real service binding (fake Todoist): replay, conflict, pause, unknown + lookup, partial failure retry,

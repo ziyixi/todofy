@@ -5,8 +5,8 @@
  * follows every task-intent-v1 state. Papers liked after a delivered send go out as a separate 补发.
  */
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Check, RotateCcw, Send } from 'lucide-react'
-import { useCallback, useEffect, useId, useState } from 'react'
+import { Check, RotateCcw, Send, Undo2 } from 'lucide-react'
+import { useCallback, useEffect, useId, useRef, useState } from 'react'
 import type { Day, Deck, DeckCard, DeckSummary, SendMode, SendStatus, SummaryItem } from '../../../worker/src/api-types.ts'
 import { SEND_POLL_MIN_SECONDS } from '../../../worker/src/api-types.ts'
 import { ApiError, api, errorMessage, withRetry } from '../api/client'
@@ -80,11 +80,25 @@ interface SummaryViewProps {
   readonly day: Day
   readonly deck: Deck
   readonly isToday: boolean
+  /** The deck's counts from this session's decisions (the server's summary may still be catching up). */
+  readonly counts: { readonly total: number; readonly liked: number; readonly disliked: number }
+  /** Decisions of this session not yet confirmed by the server. */
+  readonly saving: boolean
+  readonly canUndo: boolean
+  /** 撤销上一张: reopens the last decided card; the rest of the deck stays as it is. */
+  readonly onUndo: () => void
   readonly onDone: () => void
   readonly onRestart: () => void
 }
 
-export function SummaryView({ day, deck, isToday, onDone, onRestart }: SummaryViewProps) {
+/**
+ * The summary's buttons ignore activation for this long after it appears, also under reduced motion: the
+ * last card's 不喜欢 / 喜欢 sit where 发送 now is, and a double tap must never send (docs/ux.md §5).
+ */
+export const SUMMARY_ARM_MS = 800
+
+export function SummaryView(props: SummaryViewProps) {
+  const { day } = props
   const summaryQuery = useQuery({ queryKey: ['summary', day], queryFn: () => api.summary(day) })
   if (summaryQuery.isPending) {
     return (
@@ -103,20 +117,44 @@ export function SummaryView({ day, deck, isToday, onDone, onRestart }: SummaryVi
       </section>
     )
   }
-  return <SummaryBody day={day} deck={deck} isToday={isToday} summary={summaryQuery.data} onDone={onDone} onRestart={onRestart} />
+  return <SummaryBody {...props} summary={summaryQuery.data} refreshing={summaryQuery.isFetching} />
 }
 
-function SummaryBody({ day, deck, summary, isToday, onDone, onRestart }: SummaryViewProps & { summary: DeckSummary }) {
+function useArmed(ms: number): boolean {
+  const [armed, setArmed] = useState(false)
+  useEffect(() => {
+    const timer = window.setTimeout(() => setArmed(true), ms)
+    return () => window.clearTimeout(timer)
+  }, [ms])
+  return armed
+}
+
+function SummaryBody({
+  day,
+  deck,
+  summary,
+  refreshing,
+  isToday,
+  counts,
+  saving,
+  canUndo,
+  onUndo,
+  onDone,
+  onRestart,
+}: SummaryViewProps & { summary: DeckSummary; refreshing: boolean }) {
   const client = useQueryClient()
-  const { announce, snack } = useFeedback()
+  const { announce, snack, dismissSnack } = useFeedback()
   const { status, adopt } = useSendStatus(day, summary.send)
   const [mode, setMode] = useState<SendMode>(summary.send && isLocked(summary.send) ? summary.send.mode : summary.default_mode)
   const [dismissed, setDismissed] = useState<string | null>(null)
   const [sendError, setSendError] = useState<string | null>(null)
   const [preview, setPreview] = useState<DeckCard | null>(null)
   const modeName = useId()
+  const heading = useRef<HTMLHeadingElement>(null)
+  const armed = useArmed(SUMMARY_ARM_MS)
+  // The list and the counts wait for every decision of this session: a send never freezes half of them.
+  const catchingUp = saving || refreshing
 
-  const counts = summary.state.counts
   const liked = summary.liked
   const statusKey = status ? `${status.generation}:${status.updated_at}` : null
   // A rejected send the owner dismissed with 返回: back to the editable confirm step.
@@ -183,8 +221,35 @@ function SummaryBody({ day, deck, summary, isToday, onDone, onRestart }: Summary
   const copy = shown ? sendCopy(shown) : null
   const title = isToday ? '今天' : formatDay(day)
 
+  const confirmOpen = !shown || (!locked && !delivered && (shown.state === 'paused' || shown.state === 'rejected') && !shown.recorded)
+  // After a delivered send the list is re-read before 补发 is offered (it would flash with the old count).
+  const showConfirm = sendable > 0 && (confirmOpen || (delivered && !send.isPending && !refreshing))
+  // While Todofy is still creating, the only thing to do is wait (docs/ux.md §5: no actions).
+  const settlingNow = shown !== null && (shown.state === 'sending' || shown.state === 'pending')
+  const cardFor = (paperId: string) => deck.cards.find((card) => card.paper.id === paperId) ?? null
+
+  // Focus lands on the heading (never on a button) and the confirm step is announced. The last swipe's
+  // snackbar goes: it would cover the send preview, and 撤销上一张 is on this screen.
+  const firstAnnouncement = useRef(true)
+  useEffect(() => {
+    heading.current?.focus({ preventScroll: true })
+    dismissSnack()
+  }, [dismissSnack])
+  useEffect(() => {
+    if (!firstAnnouncement.current || catchingUp) return
+    firstAnnouncement.current = false
+    if (liked.length === 0) announce(`看完了，${title}没有喜欢的论文`)
+    else if (showConfirm) announce(`看完了，喜欢 ${String(counts.liked)} 篇。${delivered ? `补发新增的 ${String(sendable)} 篇？` : '是否发送到 Todofy？'}`)
+    else announce(`看完了，喜欢 ${String(counts.liked)} 篇`)
+  }, [announce, catchingUp, counts.liked, delivered, liked.length, sendable, showConfirm, title])
+
+  /** Every button of this screen: ignored during the arming window. */
+  const guard = (run: () => void) => () => {
+    if (armed) run()
+  }
+
   function runAction(action: SendAction) {
-    if (action === 'done') onDone()
+    if (action === 'done' || action === 'later') onDone()
     else if (action === 'back') setDismissed(statusKey)
     else if (action === 'retry' && shown) send.mutate(shown.mode)
     else send.mutate(mode)
@@ -195,36 +260,53 @@ function SummaryBody({ day, deck, summary, isToday, onDone, onRestart }: Summary
     retry: '重试（不会重复创建）',
     resend: '再试一次',
     back: '返回',
+    later: '稍后再说',
   }
 
-  const confirmOpen = !shown || (!locked && !delivered && (shown.state === 'paused' || shown.state === 'rejected') && !shown.recorded)
-  const showConfirm = sendable > 0 && (confirmOpen || (delivered && !send.isPending))
-  // While Todofy is still creating, the only thing to do is wait (docs/ux.md §5: no actions).
-  const settlingNow = shown !== null && (shown.state === 'sending' || shown.state === 'pending')
-  const cardFor = (paperId: string) => deck.cards.find((card) => card.paper.id === paperId) ?? null
+  const undoButton =
+    canUndo && !send.isPending && !settlingNow && !locked ? (
+      <button type="button" className="btn btn-quiet" aria-disabled={!armed} onClick={guard(onUndo)}>
+        <Undo2 size={18} aria-hidden="true" /> 撤销上一张
+      </button>
+    ) : null
+  const restartButton = (
+    <button type="button" className="btn btn-ghost" aria-disabled={!armed} onClick={guard(onRestart)}>
+      <RotateCcw size={18} aria-hidden="true" /> 回到卡片重来
+    </button>
+  )
+  const laterButton = (
+    <button type="button" className="btn btn-quiet" disabled={later.isPending || catchingUp} aria-disabled={!armed} onClick={guard(() => later.mutate())}>
+      暂不发送
+    </button>
+  )
 
   return (
     <section className="panel summary" aria-labelledby="summary-title">
       <header className="summary-head">
-        <h2 id="summary-title" tabIndex={-1}>
+        <h2 id="summary-title" tabIndex={-1} ref={heading}>
           {counts.total} 篇看完了 · 喜欢 {counts.liked} · 不喜欢 {counts.disliked}
         </h2>
         <p className="muted">喜欢和不喜欢都已记下，明天的排序会参考它们。</p>
       </header>
 
-      {liked.length === 0 ? (
+      {catchingUp ? (
+        <p className="status-line tone-busy" role="status">
+          正在保存你的选择…
+        </p>
+      ) : null}
+
+      {liked.length === 0 && !catchingUp ? (
         <div className="summary-empty">
           <p>{title}没有喜欢的论文。</p>
           <div className="button-row">
-            <button type="button" className="btn btn-primary" onClick={onDone}>
+            <button type="button" className="btn btn-primary" aria-disabled={!armed} onClick={guard(onDone)}>
               <Check size={18} aria-hidden="true" /> 完成
             </button>
-            <button type="button" className="btn btn-quiet" onClick={onRestart}>
-              <RotateCcw size={18} aria-hidden="true" /> 回到卡片重来
-            </button>
+            {undoButton}
+            {restartButton}
           </div>
         </div>
-      ) : (
+      ) : liked.length === 0 ? null : (
         <>
           <h3 className="list-title">喜欢的论文</h3>
           <ul className="liked-list" aria-label="喜欢的论文">
@@ -246,7 +328,7 @@ function SummaryBody({ day, deck, summary, isToday, onDone, onRestart }: Summary
                     <button
                       type="button"
                       className="btn btn-quiet btn-small"
-                      disabled={locked || exclude.isPending}
+                      disabled={locked || exclude.isPending || catchingUp}
                       aria-label={`${item.excluded ? '恢复' : '移出'}：${item.title}`}
                       onClick={() => exclude.mutate(item)}
                     >
@@ -259,8 +341,8 @@ function SummaryBody({ day, deck, summary, isToday, onDone, onRestart }: Summary
           </ul>
 
           {showConfirm ? (
-            <div className="send-box">
-              <h3>{delivered ? `补发新增的 ${sendable} 篇？` : '发送到 Todofy？'}</h3>
+            <div className="send-box" role="group" aria-labelledby="send-title">
+              <h3 id="send-title">{delivered ? `补发新增的 ${sendable} 篇？` : '发送到 Todofy？'}</h3>
               <fieldset className="segmented">
                 <legend className="sr-only">发送方式</legend>
                 <label className={mode === 'subtasks' ? 'is-on' : ''}>
@@ -273,8 +355,20 @@ function SummaryBody({ day, deck, summary, isToday, onDone, onRestart }: Summary
                 </label>
               </fieldset>
               <p className="send-preview" data-testid="send-preview">
-                {sendPreview(mode, day, sendable, nextGeneration)}
+                {catchingUp ? '正在保存你的选择…' : sendPreview(mode, day, sendable, nextGeneration)}
               </p>
+              <div className="button-row send-actions">
+                <button
+                  type="button"
+                  className="btn btn-primary"
+                  disabled={send.isPending || sendable === 0 || catchingUp}
+                  aria-disabled={!armed}
+                  onClick={guard(() => send.mutate(mode))}
+                >
+                  <Send size={18} aria-hidden="true" /> {delivered ? `补发新增的 ${sendable} 篇` : '发送到 Todofy'}
+                </button>
+                {confirmOpen && !send.isPending ? laterButton : null}
+              </div>
             </div>
           ) : sendable === 0 && !shown ? (
             <p className="muted">全部移出了，这次没有要发送的论文。</p>
@@ -289,13 +383,8 @@ function SummaryBody({ day, deck, summary, isToday, onDone, onRestart }: Summary
           </div>
 
           <div className="button-row summary-actions">
-            {showConfirm ? (
-              <button type="button" className="btn btn-primary" disabled={send.isPending || sendable === 0} onClick={() => send.mutate(mode)}>
-                <Send size={18} aria-hidden="true" /> {delivered ? `补发新增的 ${sendable} 篇` : '发送到 Todofy'}
-              </button>
-            ) : null}
             {!send.isPending && sendError && !showConfirm ? (
-              <button type="button" className="btn btn-primary" onClick={() => send.mutate(shown?.frozen ? shown.mode : mode)}>
+              <button type="button" className="btn btn-primary" aria-disabled={!armed} onClick={guard(() => send.mutate(shown?.frozen ? shown.mode : mode))}>
                 重试（不会重复创建）
               </button>
             ) : null}
@@ -303,21 +392,20 @@ function SummaryBody({ day, deck, summary, isToday, onDone, onRestart }: Summary
               ? copy.actions
                   .filter((action) => !(showConfirm && (action === 'resend' || action === 'back')))
                   .map((action) => (
-                    <button key={action} type="button" className="btn btn-primary" onClick={() => runAction(action)}>
+                    <button
+                      key={action}
+                      type="button"
+                      className={action === 'later' ? 'btn btn-quiet' : 'btn btn-primary'}
+                      aria-disabled={!armed}
+                      onClick={guard(() => runAction(action))}
+                    >
                       {ACTION_LABEL[action]}
                     </button>
                   ))
               : null}
-            {confirmOpen && !send.isPending ? (
-              <button type="button" className="btn btn-quiet" disabled={later.isPending} onClick={() => later.mutate()}>
-                暂不发送
-              </button>
-            ) : null}
-            {!send.isPending && !settlingNow ? (
-              <button type="button" className="btn btn-ghost" onClick={onRestart}>
-                <RotateCcw size={18} aria-hidden="true" /> 回到卡片重来
-              </button>
-            ) : null}
+            {confirmOpen && !send.isPending && !showConfirm ? laterButton : null}
+            {undoButton}
+            {!send.isPending && !settlingNow ? restartButton : null}
           </div>
         </>
       )}

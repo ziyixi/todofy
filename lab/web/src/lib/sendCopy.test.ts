@@ -13,9 +13,21 @@ describe('send status copy (docs/ux.md §5)', () => {
       ['resend'],
     ],
     [sendStatus({ state: 'paused', recorded: true, error_code: 'maintenance' }), '已交给 Todofy，等它恢复后会自动创建（Todofy 维护中）', ['done']],
-    [sendStatus({ state: 'failed', tasks_total: 6, tasks_created: 4 }), '部分失败：已创建 4 / 6', ['retry']],
+    [sendStatus({ state: 'failed', tasks_total: 6, tasks_created: 4 }), '部分失败：已创建 4 / 6', ['retry', 'later']],
+    // Nothing created is not a "partial" failure.
+    [
+      sendStatus({ state: 'failed', tasks_total: 3, tasks_created: 0, error_code: 'todoist_rejected' }),
+      '发送失败：没有创建任务（Todoist 拒绝了请求）',
+      ['retry', 'later'],
+    ],
+    // A retry Todofy held because it is paused: nothing was retried, and the copy says so.
+    [
+      sendStatus({ state: 'failed', tasks_total: 3, tasks_created: 1, error_code: 'todoist_paused' }),
+      'Todofy 暂停中（Todoist 已暂停），这次重试没有进行：已创建 1 / 3，恢复后再重试',
+      ['retry', 'later'],
+    ],
     [sendStatus({ state: 'rejected', recorded: false, frozen: false, error_code: 'daily_limit' }), '没有发送：今天发送次数已达上限', ['back']],
-    [sendStatus({ state: 'unknown' }), '结果未知：重试不会重复创建', ['retry']],
+    [sendStatus({ state: 'unknown' }), '结果未知：重试不会重复创建', ['retry', 'later']],
   ] as const)('%#: %s', (status, text, actions) => {
     const copy = sendCopy(status)
     expect(copy.text).toBe(text)

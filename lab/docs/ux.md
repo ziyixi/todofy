@@ -59,9 +59,12 @@ legible; only the top card is interactive (`inert` on the others).
 
 **Drag** (pointer events on the top card, no library):
 
-- `touch-action: pan-y` on the card so vertical scrolling of a long abstract keeps working; the drag
-  starts only after 8 px of movement with |dx| > |dy| (direction lock), then `setPointerCapture`.
-  Drags starting on a link or button are ignored.
+- `touch-action: pan-y` on the card **and on its inner scroller** (with `overflow-x: hidden`: an
+  `overflow-y: auto` child would otherwise take horizontal pans itself and Chromium cancels the pointer), so
+  vertical scrolling of a long abstract keeps working; the drag starts only after 8 px of movement with
+  |dx| > |dy| (direction lock), then `setPointerCapture`. Only the card's own `lostpointercapture` cancels a
+  drag (a touch's implicit capture on a child ends with a bubbling one when the card takes over).
+  Drags starting on a link or button are ignored. Peeking cards behind the top one show only their edge.
 - While dragging: `transform: translate3d(dx, dy·0.15, 0) rotate(clamp(dx / width · 12°, −12°, 12°))`,
   updated in `requestAnimationFrame`. A stamp fades in from the leading edge: right = green "喜欢" (top
   left of the card, −12°), left = grey-red "不喜欢" (top right, +12°); opacity = clamp(|dx| / threshold,
@@ -90,7 +93,9 @@ native meaning): `→` or `L` 喜欢, `←` or `H` 不喜欢, `Space`/`Enter` �
 ## 4. Undo and 重来
 
 - **撤销** pops the latest action, any number of times, back to the first card: the card flies back in
-  from the side it left (reduced motion: fades in) and becomes the top card again. The snackbar after
+  from the side it left (reduced motion: fades in) and becomes the top card again. Presses faster than the
+  network are queued (up to 10 ahead), never dropped. After the last card, **撤销上一张** on the summary and
+  the done screen (and Z / ⌘Z there) reopens just that card; the rest of the deck stays decided. The snackbar after
   each swipe ("已喜欢《短标题…》 · 撤销", 5 s, one at a time) is a shortcut to the same action.
 - **重来** ("回到卡片重来", on the summary and in the deck's menu) clears this deck's decisions and returns
   to card 1. No dialog: the snackbar "已清空 12 个选择 · 撤销" (8 s) restores them, and 撤销 later does too
@@ -102,16 +107,23 @@ native meaning): `→` or `L` 喜欢, `←` or `H` 不喜欢, `Space`/`Enter` �
 
 ## 5. End of deck: summary and the send step
 
-After the last card: a 600 ms "看完了" moment (reduced motion: none), then the summary.
+After the last card: a 600 ms "看完了" moment (reduced motion: none), then the summary. Focus moves to its
+heading, the last swipe's snackbar goes away (it would cover the preview; 撤销上一张 is on the summary), and
+"看完了，喜欢 5 篇。是否发送到 Todofy？" is announced. For 800 ms after it appears every button of the summary
+ignores taps, also under reduced motion: the last card's 喜欢 / 不喜欢 were where the buttons now are, and a
+double tap must never send. While this session's swipes are still being saved, "正在保存你的选择…" shows and
+发送 / 暂不发送 / 移出 wait, so one send carries every like.
 
-- Header: "20 篇看完了 · 喜欢 5 · 不喜欢 15".
+- Header: "20 篇看完了 · 喜欢 5 · 不喜欢 15" (this session's decisions).
 - **Liked list** in deck order: title, the 简介's first sentence, and a `移出` button per row
   (removes it from **this send** only, the like stays; the row turns grey with `恢复`). Tapping a row
   reopens that card read-only.
 - **Mode** (segmented control, remembered in settings): "一个父任务 + 子任务" (default) · "每篇单独一条".
   Live preview under it: "将在 Todoist 创建「论文雷达 2026-09-30 · 5 篇」和 5 个子任务" or "将创建 5 个任务".
-- Actions: primary **发送到 Todofy** · secondary **暂不发送** (goes to the done screen; can send later from
-  there) · tertiary **回到卡片重来**. With 0 likes: "今天没有喜欢的论文" and only 完成 / 回到卡片重来.
+- Actions: primary **发送到 Todofy** and secondary **暂不发送** (goes to the done screen; can send later from
+  there) sit in the send box after the mode and its preview, in reading order, never pinned to the bottom
+  of the screen; below it **撤销上一张** · **回到卡片重来**. With 0 likes: "今天没有喜欢的论文" and only 完成 /
+  撤销上一张 / 回到卡片重来.
 - Send states (one status line under the button, `aria-live="polite"`):
 
 | State | Copy | Actions |
@@ -122,9 +134,10 @@ After the last card: a 600 ms "看完了" moment (reduced motion: none), then th
 | duplicate | 这组已经发送过，不会重复创建 | 完成 |
 | paused (not recorded) | Todofy 暂停中（Todoist 已暂停 / 维护中…），这次没有发送 | 稍后重试 |
 | paused (recorded) | 已交给 Todofy，等它恢复后会自动创建 | 完成 |
-| failed | 部分失败：已创建 4 / 6 | 重试（不会重复创建） |
+| failed | 部分失败：已创建 4 / 6; nothing created: 发送失败：没有创建任务（原因） | 重试（不会重复创建） · 稍后再说 |
+| failed, retried during a Todofy pause | Todofy 暂停中（原因），这次重试没有进行：已创建 1 / 3，恢复后再重试 | 重试 · 稍后再说 |
 | rejected | 没有发送：原因（今天发送次数已达上限 …） | 返回 |
-| unknown | 结果未知：重试不会重复创建 | 重试 |
+| unknown | 结果未知：重试不会重复创建 | 重试 · 稍后再说 |
 
 - Once a send exists, its content is frozen: the list shows "已发送" badges and mode is locked. If the
   owner later likes more papers in this deck (undo/重来 after sending), the summary offers
@@ -180,7 +193,9 @@ Where `web/` settles a detail this spec left open:
   undo was planned on top of the failed step and could otherwise take back the wrong card. In practice
   at most one or two swipes are queued.
 - **Undo depth.** The server reports only the next undo target. After the local queue has taken that one
-  back, 撤销 is briefly disabled ("同步中") until the response names the next target.
+  back, further 撤销 presses are queued without a known target (at most 10); the server takes back its
+  latest entry for each, and the card comes back with the answer before it. One with nothing left to undo
+  says "没有更多可以撤销的了" and changes nothing.
 - **Send mode.** The summary's mode starts from the settings default. Changing it there applies to that
   send only; the default is changed in 设置.
 - **Routes.** Routes are paths: `/`, `/deck/<day>` (the link the Todoist parent task carries), `/liked`,

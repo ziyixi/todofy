@@ -18,7 +18,19 @@ async function finished(server = new FakeServer(cards(3))) {
   await user.click(screen.getByRole('button', { name: '喜欢' }))
   await user.click(screen.getByRole('button', { name: '不喜欢' }))
   await screen.findByRole('heading', { name: '3 篇看完了 · 喜欢 2 · 不喜欢 1' })
+  await settled()
   return { server, user }
+}
+
+/** The summary has saved every decision and its arming window (SUMMARY_ARM_MS) is over. */
+async function settled() {
+  await waitFor(
+    () => {
+      expect(document.querySelector('.summary [aria-disabled="true"]')).toBeNull()
+      expect(screen.queryByText('正在保存你的选择…')).not.toBeInTheDocument()
+    },
+    { timeout: 3000 },
+  )
 }
 
 const sendButton = () => screen.getByRole('button', { name: /发送到 Todofy/ })
@@ -177,6 +189,7 @@ describe('end of deck', () => {
     await user.click(screen.getByRole('button', { name: '喜欢' }))
     await user.click(screen.getByRole('button', { name: '喜欢' }))
     await screen.findByRole('heading', { name: '3 篇看完了 · 喜欢 3 · 不喜欢 0' })
+    await settled()
     server.sendScript = [sendStatus({ generation: 2, intent_id: 'deck-2026-09-30-g2', items: 1, tasks_total: 2, tasks_created: 2, updated_at: '2026-09-30T13:00:00Z' })]
     const again = await screen.findByRole('button', { name: '补发新增的 1 篇' })
     expect(screen.getByTestId('send-preview')).toHaveTextContent('「论文雷达 2026-09-30（补发）· 1 篇」')
@@ -195,6 +208,99 @@ describe('end of deck', () => {
     expect(await screen.findByRole('heading', { name: '发送到 Todofy？' })).toBeInTheDocument()
   })
 
+  it('never sends on a double tap on the last card: the summary ignores taps at first, sends only from the send box', async () => {
+    motion.reduced = true // the summary appears at once, with no "看完了" moment
+    const server = new FakeServer(cards(2)).install()
+    renderApp('/')
+    await screen.findByRole('article', { name: title(1) })
+    const user = userEvent.setup()
+    await user.click(screen.getByRole('button', { name: '喜欢' }))
+    await user.click(screen.getByRole('button', { name: '喜欢' }))
+    // The second tap of a double tap lands on whatever is there now.
+    const send = await screen.findByRole('button', { name: /发送到 Todofy/ })
+    // Focus is on the heading, not on a button, and the last swipe's snackbar does not cover the preview.
+    expect(screen.getByRole('heading', { name: '2 篇看完了 · 喜欢 2 · 不喜欢 0' })).toHaveFocus()
+    expect(screen.queryByTestId('snackbar')).not.toBeInTheDocument()
+    await user.click(send)
+    await user.click(screen.getByRole('button', { name: '暂不发送' }))
+    await user.click(screen.getByRole('button', { name: /回到卡片重来/ }))
+    await new Promise((resolve) => setTimeout(resolve, 100))
+    expect(server.mutations('/send')).toHaveLength(0)
+    expect(server.mutations('/later')).toHaveLength(0)
+    expect(server.mutations('/restart')).toHaveLength(0)
+    // The confirm step is announced.
+    await waitFor(() => expect(screen.getByTestId('live-region')).toHaveTextContent('看完了，喜欢 2 篇。是否发送到 Todofy？'))
+    // The button belongs to the send box, after the mode and its preview.
+    const box = screen.getByRole('group', { name: '发送到 Todofy？' })
+    const preview = within(box).getByTestId('send-preview')
+    expect(within(box).getByRole('button', { name: /发送到 Todofy/ })).toBe(send)
+    expect(preview.compareDocumentPosition(send) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    await settled()
+    await user.click(send)
+    await waitFor(() => expect(status()).toHaveTextContent('已发送'))
+    expect(server.mutations('/send')).toHaveLength(1)
+  })
+
+  it('waits for every swipe to be saved before it lets the owner send, so one send carries every like', async () => {
+    motion.reduced = true
+    const server = new FakeServer(cards(4))
+    server.latency = 150
+    server.install()
+    renderApp('/')
+    await screen.findByRole('article', { name: title(1) })
+    const user = userEvent.setup()
+    for (let i = 0; i < 4; i++) await user.click(screen.getByRole('button', { name: '喜欢' }))
+    // The header counts this session's decisions at once; the send waits for the server.
+    expect(await screen.findByRole('heading', { name: '4 篇看完了 · 喜欢 4 · 不喜欢 0' })).toBeInTheDocument()
+    expect(screen.getAllByText('正在保存你的选择…').length).toBeGreaterThan(0)
+    // Nothing can be sent or put off while a swipe is still on its way.
+    for (const name of [/发送到 Todofy/, '暂不发送']) {
+      for (const button of screen.queryAllByRole('button', { name })) expect(button).toBeDisabled()
+    }
+    await settled()
+    expect(screen.getByTestId('send-preview')).toHaveTextContent('「论文雷达 2026-09-30 · 4 篇」和 4 个子任务')
+    await user.click(screen.getByRole('button', { name: /发送到 Todofy/ }))
+    await waitFor(() => expect(status()).toHaveTextContent('已发送'))
+    expect(new Set(server.sentGeneration.values())).toEqual(new Set([1]))
+    expect(server.sentGeneration.size).toBe(4)
+    await settled()
+    expect(screen.queryByRole('button', { name: /补发/ })).not.toBeInTheDocument()
+  })
+
+  it('undoes just the last card from the summary and the done screen (button and Z), keeping the rest', async () => {
+    const { server, user } = await finished()
+    await user.click(screen.getByRole('button', { name: '撤销上一张' }))
+    expect(await screen.findByRole('article', { name: title(3) })).toBeInTheDocument()
+    await waitFor(() => expect(Object.keys(server.decisions())).toHaveLength(2))
+    await user.click(screen.getByRole('button', { name: '喜欢' }))
+    await screen.findByRole('heading', { name: '3 篇看完了 · 喜欢 3 · 不喜欢 0' })
+    await settled()
+    await user.keyboard('z')
+    expect(await screen.findByRole('article', { name: title(3) })).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: '不喜欢' }))
+    await screen.findByRole('heading', { name: '3 篇看完了 · 喜欢 2 · 不喜欢 1' })
+    await settled()
+    await user.click(screen.getByRole('button', { name: '暂不发送' }))
+    // 暂不发送 lands on the done screen with focus on its heading; 撤销上一张 works there too.
+    expect(await screen.findByRole('heading', { name: '今天的 3 篇都看完了' })).toHaveFocus()
+    await user.keyboard('{Meta>}z{/Meta}')
+    expect(await screen.findByRole('article', { name: title(3) })).toBeInTheDocument()
+    await waitFor(() => expect(server.decisions()).toEqual({ 'arxiv:2609.10001': 'like', 'arxiv:2609.10002': 'like' }))
+  })
+
+  it('says a send created nothing without calling it partial, and 稍后再说 leaves without wiping the deck', async () => {
+    const server = new FakeServer(cards(3))
+    server.sendScript = [sendStatus({ state: 'failed', tasks_total: 3, tasks_created: 0, error_code: 'todoist_rejected', updated_at: '2026-09-30T12:00:01Z' })]
+    const { user } = await finished(server)
+    await user.click(sendButton())
+    await waitFor(() => expect(status()).toHaveTextContent('发送失败：没有创建任务（Todoist 拒绝了请求）'))
+    expect(status()).not.toHaveTextContent('部分失败')
+    await user.click(screen.getByRole('button', { name: '稍后再说' }))
+    expect(await screen.findByRole('heading', { name: '今天的 3 篇都看完了' })).toBeInTheDocument()
+    expect(server.mutations('/restart')).toHaveLength(0)
+    expect(Object.keys(server.decisions())).toHaveLength(3)
+  })
+
   it('with no likes offers only 完成 and 回到卡片重来', async () => {
     motion.reduced = true
     const server = new FakeServer(cards(2)).install()
@@ -205,6 +311,7 @@ describe('end of deck', () => {
     await user.click(screen.getByRole('button', { name: '不喜欢' }))
     expect(await screen.findByText('今天没有喜欢的论文。')).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /发送到 Todofy/ })).not.toBeInTheDocument()
+    await settled()
     await user.click(screen.getByRole('button', { name: /回到卡片重来/ }))
     expect(await screen.findByRole('article', { name: title(1) })).toBeInTheDocument()
     await waitFor(() => expect(server.mutations('/restart')).toHaveLength(1))

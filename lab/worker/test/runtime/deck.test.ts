@@ -5,7 +5,7 @@
  * response). Every intent Todofy received passed the task-intent-v1 schema.
  */
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import type { Deck, DeckMutationResponse, DeckState, DeckSummary, FeedbackResponse, LikedResponse, SendStatus, SettingsResponse } from '../../src/api-types.ts';
+import type { Deck, DeckMutationResponse, DeckState, DeckSummary, FeedbackResponse, LikedResponse, SeedsResponse, SendStatus, SettingsResponse } from '../../src/api-types.ts';
 import { dayItems, rssFeed } from '../feeds.ts';
 import { op, startHarness, type Harness } from './harness.ts';
 
@@ -204,6 +204,72 @@ describe('sending to Todofy', () => {
     expect(status).toMatchObject({ state: 'pending', recorded: true });
     const todofy = await h.todofyState();
     expect(todofy.calls.map((c) => c.method)).toEqual(['proposeTasks', 'taskIntentStatus', 'proposeTasks']);
+  });
+});
+
+describe('retries and replays', () => {
+  it('polls fast again after a retry, and keeps a retry Todofy held during a pause failed with the pause as reason', async () => {
+    await swipeAll([1, 2]);
+    const sent = await h.mutate<SendStatus>('POST', `/api/decks/${DAY}/send`, { op_id: op(), mode: 'subtasks' });
+    expect(sent.body.state).toBe('pending');
+    // Todoist refuses a task; the first attempt is long past the fast poll window by now.
+    await h.todofy({ status: 'failed' });
+    await h.sql('UPDATE sends SET next_poll_at = 0, created_at = created_at - 600000');
+    const failed = await h.get<SendStatus>(`/api/decks/${DAY}/send`);
+    expect(failed).toMatchObject({ state: 'failed', error_code: 'todoist_rejected', poll_after: null, frozen: true });
+
+    // 重试 while Todofy is paused: nothing is re-queued there, so it stays failed here (no "resumes by itself").
+    await h.todofy({ propose: 'held' });
+    const held = await h.mutate<SendStatus>('POST', `/api/decks/${DAY}/send`, { op_id: op(), mode: 'subtasks' });
+    expect(held.body).toMatchObject({ generation: 1, state: 'failed', recorded: true, error_code: 'todoist_paused', poll_after: null, frozen: true });
+
+    // 重试 after the pause: Todofy re-queues it, and Lab asks again within seconds, not a minute.
+    await h.todofy({});
+    const before = Date.now();
+    const retried = await h.mutate<SendStatus>('POST', `/api/decks/${DAY}/send`, { op_id: op(), mode: 'subtasks' });
+    expect(retried.body).toMatchObject({ generation: 1, state: 'pending', recorded: true });
+    const wait = Date.parse(retried.body.poll_after ?? '') - before;
+    expect(wait).toBeGreaterThanOrEqual(2_000);
+    expect(wait).toBeLessThan(10_000);
+    const todofy = await h.todofyState();
+    expect(todofy.intents).toHaveLength(1);
+    expect(todofy.invalid).toBe(0);
+  });
+
+  it('re-derives LabState’s ranking mirror and seeds from D1 when a request is replayed after its D1 write committed', async () => {
+    const counters = async () => ((await h.ops('status')).ok as { counters: { liked_7d: number; decided_7d: number } }).counters;
+    const [first, second, , , , sixth] = deck.cards;
+    if (!first || !second || !sixth) throw new Error('deck too small');
+    const answer = await decide(first.paper.id, 'like', 0);
+    expect(await counters()).toMatchObject({ liked_7d: 1, decided_7d: 1 });
+
+    // A decide whose D1 batch committed but whose call failed before the mirror was written (the D1 rows it
+    // wrote, as the batch writes them); the client retries with the same op_id.
+    const decideOp = op();
+    const now = Date.now();
+    await h.sql("INSERT INTO feedback (paper_id, label, source, deck_id, at) VALUES (?, 'like', 'deck', ?, ?)", second.paper.id, DAY, now);
+    await h.sql("INSERT INTO owner_ops (op_id, route, deck_id, status, response, at) VALUES (?, 'deck.decide', ?, 200, ?, ?)", decideOp, DAY, JSON.stringify(answer.body), now);
+    expect((await counters()).liked_7d).toBe(1);
+    expect((await decide(second.paper.id, 'like', 1, decideOp)).status).toBe(200);
+    expect(await counters()).toMatchObject({ liked_7d: 2, decided_7d: 2 });
+
+    // The same for library feedback (取消喜欢)…
+    const unlikeOp = op();
+    await h.sql('DELETE FROM feedback WHERE paper_id = ?', first.paper.id);
+    await h.sql("INSERT INTO owner_ops (op_id, route, deck_id, status, response, at) VALUES (?, 'feedback', NULL, 200, '{}', ?)", unlikeOp, now);
+    const unliked = await h.mutate<FeedbackResponse>('POST', '/api/feedback', { op_id: unlikeOp, paper_id: first.paper.id, label: null });
+    expect(unliked.body).toEqual({ paper_id: first.paper.id, label: null });
+    expect((await counters()).liked_7d).toBe(1);
+
+    // …and for a seed: LabState learns it, so the pipeline resolves it (here at once: its vector exists).
+    const seedOp = op();
+    await h.sql("INSERT INTO seeds (paper_id, added_at, state) VALUES (?, ?, 'pending')", sixth.paper.id, now);
+    await h.sql("INSERT INTO owner_ops (op_id, route, deck_id, status, response, at) VALUES (?, 'seeds.add', NULL, 200, '{}', ?)", seedOp, now);
+    const seeded = await h.mutate<SeedsResponse>('POST', '/api/seeds', { op_id: seedOp, ids: [sixth.paper.id.replace('arxiv:', '')] });
+    expect(seeded.status).toBe(200);
+    await h.run(T0 + 3_600_000);
+    const seeds = await h.get<SeedsResponse>('/api/seeds');
+    expect(seeds.seeds.map((s) => [s.paper_id, s.state])).toEqual([[sixth.paper.id, 'resolved']]);
   });
 });
 

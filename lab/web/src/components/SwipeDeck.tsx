@@ -294,6 +294,14 @@ function StackCard({ card, depth, kind, reducedMotion, expanded, onToggle, onCom
     springBack()
   }
 
+  // Only the card's own capture ending cancels the drag. A touch starts with an implicit capture on the
+  // element under the finger; taking it over for the card makes that child fire lostpointercapture, which
+  // bubbles up here and must not abort the drag that just started (docs/ux.md §3).
+  function onLostCapture(event: ReactPointerEvent<HTMLElement>) {
+    if (event.target !== event.currentTarget) return
+    onPointerCancel(event)
+  }
+
   const titleId = titleIdOf(card)
   return (
     <article
@@ -309,7 +317,7 @@ function StackCard({ card, depth, kind, reducedMotion, expanded, onToggle, onCom
       onPointerMove={onPointerMove}
       onPointerUp={onPointerUp}
       onPointerCancel={onPointerCancel}
-      onLostPointerCapture={onPointerCancel}
+      onLostPointerCapture={onLostCapture}
     >
       <span className="stamp stamp-like" aria-hidden="true">
         喜欢

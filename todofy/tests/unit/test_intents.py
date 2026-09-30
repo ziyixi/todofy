@@ -315,6 +315,24 @@ def test_pause_precedence_and_retry_hints():
     assert held(backup_active=True) == ("backup_active", 120)
 
 
+def test_a_failed_intent_proposed_again_during_a_pause_is_answered_paused():
+    row = intents.IntentRow(
+        "lab", "deck-2026-09-30-g1", "a" * 64, "subtasks", 4, 1, "failed", "todoist_rejected", 0, NOW, NOW
+    )
+    held = ("todoist_paused", 3600)
+    replayed = intents.describe(row, held, NOW, proposing=True)
+    assert (replayed["state"], replayed["recorded"], replayed["error_code"], replayed["retry_after_seconds"]) == (
+        "paused",
+        True,
+        "todoist_paused",
+        3600,
+    )
+    assert (replayed["tasks_total"], replayed["tasks_created"]) == (4, 1)
+    # taskIntentStatus reports what the ledger holds; without a pause the replay is the failure.
+    assert intents.describe(row, held, NOW, proposing=False)["state"] == "failed"
+    assert intents.describe(row, None, NOW, proposing=True)["state"] == "failed"
+
+
 def test_the_daily_limit_resets_at_utc_midnight():
     assert intents.day_start(NOW) % DAY == 0 and intents.day_start(NOW) <= NOW
     assert intents.until_tomorrow(NOW) == intents.day_start(NOW) + DAY - NOW

@@ -483,6 +483,27 @@ def test_force_pause_refuses_new_intents_and_holds_recorded_ones(
     seed(held_stack, doc, created_at=now, tasks={})
     for answer in (status(held_stack, doc), propose(held_stack, doc)):
         assert (answer["state"], answer["recorded"], answer["error_code"]) == ("paused", True, "todoist_paused")
+
+    # A failed intent proposed again (Lab's 重试) while the pause holds: answered paused, nothing re-queued,
+    # and taskIntentStatus still reports the failure.
+    failed_doc = new_intent("minimal.json")
+    seed(
+        held_stack,
+        failed_doc,
+        created_at=now,
+        tasks={0: {"state": "created", "todoist_id": "6X0"}, 1: {"state": "failed", "error_code": "todoist_rejected"}},
+    )
+    key = f"source = '{failed_doc['source']}' AND intent_id = '{failed_doc['intent_id']}'"
+    held_stack.d1(
+        f"UPDATE task_intents SET state = 'failed', error_code = 'todoist_rejected', tasks_created = 1 WHERE {key}"
+    )
+    replayed = propose(held_stack, failed_doc)
+    assert (replayed["state"], replayed["recorded"], replayed["error_code"]) == ("paused", True, "todoist_paused")
+    assert (replayed["retry_after_seconds"], replayed["tasks_created"], replayed["tasks_total"]) == (3600, 1, 2)
+    assert status(held_stack, failed_doc)["state"] == "failed"
+    intent_row, task_rows = rows(held_stack, failed_doc)
+    assert intent_row["state"] == "failed"
+    assert [row["state"] for row in task_rows] == ["created", "failed"]
     time.sleep(2)
     assert fresh_todoist.creates() == []
 

@@ -1,6 +1,7 @@
 /** The non-deck states of 今日 (docs/ux.md §6): empty, building, done for today, plus the shared banners. */
 import { useQuery } from '@tanstack/react-query'
-import { ChevronRight, Heart, Settings, Sprout } from 'lucide-react'
+import { ChevronRight, Heart, Settings, Sprout, Undo2 } from 'lucide-react'
+import { useEffect, useRef } from 'react'
 import type { Day, DeckPointer, DeckSummary, TodayResponse } from '../../../worker/src/api-types.ts'
 import { api } from '../api/client'
 import { Link } from '../components/Link'
@@ -91,18 +92,26 @@ interface DoneStateProps {
   readonly isToday: boolean
   readonly today: TodayResponse | null
   readonly counts: { readonly total: number; readonly liked: number; readonly disliked: number }
+  readonly canUndo: boolean
+  /** 撤销上一张: reopens the last decided card. */
+  readonly onUndo: () => void
   readonly onOpenSummary: () => void
   readonly onRestart: () => void
 }
 
-export function DoneState({ day, isToday, today, counts, onOpenSummary, onRestart }: DoneStateProps) {
+export function DoneState({ day, isToday, today, counts, canUndo, onUndo, onOpenSummary, onRestart }: DoneStateProps) {
   const summary = useQuery({ queryKey: ['summary', day], queryFn: () => api.summary(day) })
   const data: DeckSummary | undefined = summary.data
   const copy = data?.send ? sendCopy(data.send) : null
   const others = (today?.older_unfinished ?? []).filter((deck) => deck.deck_id !== day)
+  const heading = useRef<HTMLHeadingElement>(null)
+  // Focus follows every screen change (docs/ux.md §7): 暂不发送, 完成 and 稍后再说 all land here.
+  useEffect(() => {
+    heading.current?.focus({ preventScroll: true })
+  }, [])
   return (
     <section className="panel state-panel done" aria-labelledby="done-title">
-      <h2 id="done-title" tabIndex={-1}>
+      <h2 id="done-title" tabIndex={-1} ref={heading}>
         {isToday ? '今天' : formatDay(day)}的 {counts.total} 篇都看完了
       </h2>
       <p>
@@ -124,9 +133,16 @@ export function DoneState({ day, isToday, today, counts, onOpenSummary, onRestar
       <NextRun today={isToday ? today : null} />
       <OlderDecks decks={others} />
       <QuickLinks />
-      <button type="button" className="btn btn-ghost btn-small" onClick={onRestart}>
-        回到卡片重来
-      </button>
+      <div className="button-row">
+        {canUndo ? (
+          <button type="button" className="btn btn-ghost btn-small" onClick={onUndo}>
+            <Undo2 size={16} aria-hidden="true" /> 撤销上一张
+          </button>
+        ) : null}
+        <button type="button" className="btn btn-ghost btn-small" onClick={onRestart}>
+          回到卡片重来
+        </button>
+      </div>
     </section>
   )
 }

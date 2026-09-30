@@ -581,6 +581,11 @@ def describe(row: IntentRow, held: Pause | None, now: int, *, proposing: bool) -
         state = ResultState.DUPLICATE if proposing else ResultState.CREATED
         return result(row.source, row.intent_id, state, **common)
     if row.state == IntentState.FAILED:
+        if proposing and held is not None:
+            # The proposer's retry while a pause holds: nothing is re-queued (no write under a pause), so the
+            # answer is the pause, not the old failure. taskIntentStatus keeps answering failed; a proposal
+            # after the pause re-queues the unfinished tasks.
+            return result(row.source, row.intent_id, ResultState.PAUSED, code=held[0], retry_after=held[1], **common)
         return result(row.source, row.intent_id, ResultState.FAILED, code=row.error_code or None, **common)
     if held is not None:
         return result(row.source, row.intent_id, ResultState.PAUSED, code=held[0], retry_after=held[1], **common)

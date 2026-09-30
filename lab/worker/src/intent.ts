@@ -99,6 +99,7 @@ export interface SendRow {
   readonly tasks_created: number;
   readonly error_code: LabErrorCode;
   readonly next_poll_at: number | null;
+  /** Start of the current attempt (the first send, a retry or a re-propose): the fast poll window counts from it. */
   readonly created_at: number;
   readonly updated_at: number;
 }
@@ -144,6 +145,15 @@ export function withResult(row: SendRow, result: TaskIntentResult, now: number):
     next_poll_at: nextPoll(now, row.created_at, result.retry_after_seconds, state, recorded),
     updated_at: now,
   };
+}
+
+/**
+ * A retry of a `failed` generation answered `paused` (recorded): Todofy holds a pause and re-queued nothing, so
+ * after the pause the intent is still failed. Keep it failed with the pause as its reason (no poll).
+ */
+export function heldRetry(row: SendRow): SendRow {
+  if (row.state !== 'paused' || !row.recorded) return row;
+  return { ...row, state: 'failed', next_poll_at: null };
 }
 
 /** The row after the RPC itself rejected (or answered something that is not a valid result). */

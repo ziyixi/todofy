@@ -119,6 +119,61 @@ describe('the daily deck', () => {
     await waitFor(() => expect(server.state().decisions).toEqual({ 'arxiv:2609.10001': 'dislike' }))
   })
 
+  it('keeps a touch drag alive when the child the finger started on loses its implicit capture', async () => {
+    const server = new FakeServer(cards(3))
+    await openDeck(server)
+    const article = topCard()
+    // Chromium gives a touch an implicit capture on the element under the finger (here the 简介 text).
+    // When the card takes the capture over, that child fires lostpointercapture, which bubbles to the card.
+    const brief = within(article).getByText(/这是第 1 篇合成论文的简介/)
+    fireEvent.pointerDown(brief, { pointerId: 7, clientX: 100, clientY: 300, pointerType: 'touch' })
+    fireEvent.pointerMove(brief, { pointerId: 7, clientX: 130, clientY: 302, pointerType: 'touch' })
+    fireEvent.lostPointerCapture(brief, { pointerId: 7, pointerType: 'touch' })
+    fireEvent.pointerMove(article, { pointerId: 7, clientX: 260, clientY: 306, pointerType: 'touch' })
+    fireEvent.pointerUp(article, { pointerId: 7, clientX: 260, clientY: 306, pointerType: 'touch' })
+    expect(topCard()).toHaveAccessibleName(title(2))
+    await waitFor(() => expect(server.state().decisions).toEqual({ 'arxiv:2609.10001': 'like' }))
+    // The card's own capture ending (the browser took the gesture) still cancels and springs back.
+    const next = topCard()
+    fireEvent.pointerDown(next, { pointerId: 8, clientX: 100, clientY: 300, pointerType: 'touch' })
+    fireEvent.pointerMove(next, { pointerId: 8, clientX: 140, clientY: 301, pointerType: 'touch' })
+    fireEvent.lostPointerCapture(next, { pointerId: 8, pointerType: 'touch' })
+    fireEvent.pointerMove(next, { pointerId: 8, clientX: 300, clientY: 301, pointerType: 'touch' })
+    fireEvent.pointerUp(next, { pointerId: 8, clientX: 300, clientY: 301, pointerType: 'touch' })
+    expect(topCard()).toHaveAccessibleName(title(2))
+  })
+
+  it('rewinds several steps when 撤销 is pressed quickly while the network is slow', async () => {
+    const server = new FakeServer(cards(6))
+    await openDeck(server)
+    const user = userEvent.setup()
+    for (const name of ['喜欢', '不喜欢', '喜欢'] as const) await user.click(screen.getByRole('button', { name }))
+    await waitFor(() => expect(Object.keys(server.state().decisions)).toHaveLength(3))
+    server.latency = 300
+    await user.keyboard('z')
+    await user.keyboard('z')
+    await user.keyboard('z')
+    await waitFor(() => expect(topCard()).toHaveAccessibleName(title(1)), { timeout: 4000 })
+    await waitFor(() => expect(server.state().decisions).toEqual({}), { timeout: 4000 })
+    expect(server.mutations('/undo')).toHaveLength(3)
+    expect(screen.getByTestId('progress')).toHaveTextContent('1 / 6 篇 · 已喜欢 0')
+  })
+
+  it('a quick extra 撤销 with nothing left says so and changes nothing', async () => {
+    const server = new FakeServer(cards(3))
+    await openDeck(server)
+    const user = userEvent.setup()
+    await user.click(screen.getByRole('button', { name: '喜欢' }))
+    await waitFor(() => expect(server.mutations('/decide')).toHaveLength(1))
+    await waitFor(() => expect(server.state().decisions).toEqual({ 'arxiv:2609.10001': 'like' }))
+    server.latency = 300
+    await user.keyboard('z')
+    await user.keyboard('z')
+    await waitFor(() => expect(screen.getByTestId('snackbar')).toHaveTextContent('没有更多可以撤销的了'), { timeout: 4000 })
+    expect(topCard()).toHaveAccessibleName(title(1))
+    expect(server.state().decisions).toEqual({})
+  })
+
   it('ignores drags that start on a link or button', async () => {
     await openDeck(new FakeServer(cards(2)))
     const link = within(topCard()).getByRole('link', { name: 'arXiv' })
@@ -227,7 +282,9 @@ describe('the daily deck', () => {
     await user.click(screen.getByRole('button', { name: '不喜欢' }))
     expect(screen.getByText('看完了')).toBeInTheDocument()
     expect(await screen.findByRole('heading', { name: '2 篇看完了 · 喜欢 1 · 不喜欢 1' }, { timeout: 2000 })).toBeInTheDocument()
-    await waitFor(() => expect(liveText()).toBe('不喜欢。2 篇都看完了'))
+    // The last decision is announced, then the summary's confirm step.
+    await waitFor(() => expect(liveText()).toBe('看完了，喜欢 1 篇。是否发送到 Todofy？'))
+    expect(screen.getByRole('heading', { name: '2 篇看完了 · 喜欢 1 · 不喜欢 1' })).toHaveFocus()
     expect(DAY).toBe('2026-09-30')
   })
 })

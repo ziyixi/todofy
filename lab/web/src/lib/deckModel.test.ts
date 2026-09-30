@@ -1,6 +1,8 @@
 import type { DeckState } from '../../../worker/src/api-types.ts'
 import { cards } from '../test/fixtures'
 import {
+  UNDO_QUEUE_MAX,
+  canUndo,
   countDecisions,
   currentCard,
   planDecide,
@@ -91,6 +93,39 @@ describe('deck model', () => {
     expect(eff.decisions).toEqual({ [a]: 'like' })
     expect(eff.undoTop).toBeNull()
     expect(eff.undoWaiting).toBe(true)
+  })
+
+  it('queues an undo pressed before the server named the next target, and resolves it with the answer', () => {
+    const server = state({ version: 5, decisions: { [a]: 'like', [b]: 'like' }, undo: { kind: 'decide', paper_id: b, decision: 'like' } })
+    let model: SessionModel = { server, pending: [] }
+    model = act(model, (eff) => planUndo(eff, 'u1'))
+    // Pressed again while u1 is in flight: never dropped.
+    expect(canUndo(simulate(model))).toBe(true)
+    model = act(model, (eff) => planUndo(eff, 'u2'))
+    expect(model.pending[1]).toMatchObject({ kind: 'undo', target: null })
+    let eff = simulate(model)
+    expect(eff.decisions).toEqual({ [a]: 'like' })
+    expect(eff.undosUnresolved).toBe(1)
+    // u1's answer names the next entry (a); u2 takes it back at once.
+    model = reduceModel(model, {
+      type: 'confirmed',
+      op_id: 'u1',
+      state: state({ version: 6, decisions: { [a]: 'like' }, undo: { kind: 'decide', paper_id: a, decision: 'like' } }),
+    })
+    eff = simulate(model)
+    expect(eff.decisions).toEqual({})
+    expect(eff.undosUnresolved).toBe(0)
+    expect(eff.undoTop).toBeNull()
+    expect(eff.undoWaiting).toBe(true)
+  })
+
+  it('bounds the undos queued ahead of the server', () => {
+    const server = state({ version: 5, decisions: { [a]: 'like' }, undo: { kind: 'decide', paper_id: a, decision: 'like' } })
+    let model: SessionModel = { server, pending: [] }
+    for (let i = 0; i <= UNDO_QUEUE_MAX; i += 1) model = act(model, (eff) => planUndo(eff, id()))
+    expect(simulate(model).undosUnresolved).toBe(UNDO_QUEUE_MAX)
+    expect(planUndo(simulate(model), id())).toBeNull()
+    expect(canUndo(simulate(model))).toBe(false)
   })
 
   it('waits for the server to restore a restart made elsewhere', () => {

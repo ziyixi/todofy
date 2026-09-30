@@ -94,7 +94,8 @@ export function useDeckSession(day: Day): DeckSession {
           notify('已同步其他设备上的选择')
         } else if (error instanceof ApiError && !error.transient) {
           dispatch({ type: 'rollback', op_id: op.op_id })
-          notify(error.message)
+          // An undo pressed ahead of the server's answer found nothing left to take back.
+          notify(op.kind === 'undo' && error.code === 'nothing_to_undo' ? '没有更多可以撤销的了' : error.message)
           void resync()
         } else {
           dispatch({ type: 'rollback', op_id: op.op_id })
