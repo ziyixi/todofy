@@ -25,3 +25,5 @@ not_found_handling = "404-page"
 #   routes = [{ pattern = "website-preview.ziyixi.science", custom_domain = true }]
 # and at cutover, after the lead replaced the www CNAME (docs/cutover.md step 3):
 #   routes = [{ pattern = "www.ziyixi.science", custom_domain = true }]
+
+routes = [{ pattern = "website-preview.ziyixi.science", custom_domain = true }]
