@@ -10,11 +10,11 @@ dashboard's guard, and reports to the dashboard through `contracts/ops-v1`. Owne
 the brainstorm "MLE" note §1 and REPORT §3 ⑤ (2026-09-30); the newsletter seed contract, HF Daily
 Papers, v2 learned ranking and citation follow-up are **not** in this version.
 
-Status: design + scaffold. Nothing is implemented or deployed. The D1 database `lab` and the Access
-app exist (ids committed in `wrangler.toml`). Facts below were checked on 2026-09-30 against the linked
-public docs and one request to the public feed. Revision 2 (same day, owner request): the deck/session
-model (§7), the send step and Todofy intake (§9), 简介 for all 20 cards (§1, §4), labels renamed
-`like`/`dislike`, and the build split (§12).
+Status: implemented, not deployed (worker and UI, 2026-09-30); §14 lists what the worker build decided
+beyond this design. The D1 database `lab` and the Access app exist (ids committed in `wrangler.toml`). Facts
+below were checked on 2026-09-30 against the linked public docs and one request to the public feed.
+Revision 2 (same day, owner request): the deck/session model (§7), the send step and Todofy intake (§9),
+简介 for all 20 cards (§1, §4), labels renamed `like`/`dislike`, and the build split (§12).
 
 ## 1. Workers AI quota: the answer first
 
@@ -399,3 +399,38 @@ builds, in parallel:
 
 Then a review (quota/security, product/UX on a phone), fixes, and a clean-clone run of every CI job.
 Deploy order: Todofy (with the intake) → Lab → Dashboard.
+
+## 14. Worker build notes (2026-09-30)
+
+What the implementation (`worker/src/`) settled where this design left room, all covered by tests:
+
+- **Order in an alarm slice**: an unfinished day's job first (embed → rank → 简介), then pending seeds (one
+  export.arxiv.org request, so a seed entered before the slot already shapes that day's deck), then the
+  daily fetch, then retention. arXiv requests keep ≥ 3 s between them across both hosts. The first run after
+  deploy fetches at once instead of waiting for the next slot.
+- **Failures**: a failed fetch retries after 5 min and 30 min, then waits for the next slot. A step that fails
+  5 times in a row is given up so it cannot block later days (embed: the rest of that day's texts are dropped
+  and ranking uses what exists; rank: the day has no deck); a card whose 简介 call fails 3 times keeps the
+  abstract fallback.
+- **Cap**: once a call would pass the cap (or Workers AI reports the account allowance gone), AI work stops
+  for the rest of the UTC day. A deck capped during 简介 is shown at once (`ready_at`) and its missing 简介
+  are written on the next UTC day while it is at most 3 days old.
+- **Guard bound** (ops-v1: every deferred job has a bound): when the last successful fetch is more than 48 h
+  old, the whole day's pipeline runs to its end despite the shed, then defers again.
+- **Settings** live in D1 (`settings`, the source the GETs read); LabState mirrors the effective cap and the
+  ingest pause into its own storage so `status()` needs no D1 read. `PUT /api/settings` replaces the whole
+  set (`SettingsUpdateRequest`); a cap above `LAB_DAILY_NEURONS` is refused.
+- **Replay**: `owner_ops` stores the exact response of decide/undo/重来 (a repeated `op_id` never applies
+  twice); for the idempotent mutations (exclude, 暂不发送, send, feedback, seeds, settings) a repeated `op_id`
+  returns the current view without applying anything again (a replayed send never proposes again).
+  `decks.undo` materialises the next undo target (migration 0001, unapplied, edited in place).
+- **Send**: `GET …/send` answers 404 `not_found` before the first send. The card's `sent_generation` is set
+  as soon as Todofy has *recorded* the generation (pending included), so 补发 never repeats a paper; the open
+  frozen generation's papers are also held back while its outcome is unknown.
+- **Tests drive the alarm**: `LabState.step(now)` is the alarm body; with `DEV_MANUAL_ALARMS=true` (a
+  test-only binding, refused in production by the config tests) it never arms a real alarm, and the workerd
+  suite passes explicit clocks (next UTC day, the 48 h bound).
+- **Dashboard**: the 论文雷达 flow has 5 stages (arXiv → 抓取 → 排序与简介 → 卡片 → 交给 Todofy) because 8
+  stages pushed the flows view past its 16 KiB budget; the `LabState` namespace is not in the registry's
+  resources yet (every registered resource must name its ID; add it after the first deploy). ops-v1's
+  signal table row "both" became "every app".

@@ -36,12 +36,15 @@ def expect(
     website_deploy=False,
     website_relay_deploy=False,
     website_apex_deploy=False,
+    lab_check=False,
+    lab_deploy=False,
 ):
     return {
         "todofy_check": todofy_check,
         "mail_hero_check": mail_hero_check,
         "dashboard_check": dashboard_check,
         "website_check": website_check,
+        "lab_check": lab_check,
         "contracts": contracts,
         "packages": packages,
         "todofy_deploy": todofy_deploy,
@@ -50,14 +53,17 @@ def expect(
         "website_deploy": website_deploy,
         "website_relay_deploy": website_relay_deploy,
         "website_apex_deploy": website_apex_deploy,
+        "lab_deploy": lab_deploy,
     }
 
 
-# Every app checked (a contracts/ or .github/ change); the three edge-auth apps checked and deployed
-# (the website compiles in no package); every app with the website Worker (the relay and apex Workers
-# are added where a test expects them).
-ALL_CHECKED = {"dashboard_check": True, "website_check": True}
-ALL = {"dashboard_check": True, "dashboard_deploy": True}
+# Every app checked (a contracts/ or .github/ change); the dashboard and Lab each checked and deployed;
+# the four edge-auth apps (the website compiles in no package) are todofy and mail-hero plus ALL; every
+# app with the website Worker (the relay and apex Workers are added where a test expects them).
+ALL_CHECKED = {"dashboard_check": True, "website_check": True, "lab_check": True}
+DASH = {"dashboard_check": True, "dashboard_deploy": True}
+LAB = {"lab_check": True, "lab_deploy": True}
+ALL = {**DASH, **LAB}
 EVERY = {**ALL, "website_check": True, "website_deploy": True}
 
 
@@ -83,7 +89,22 @@ class Classify(unittest.TestCase):
 
     def test_all_three_apps(self):
         paths = ["todofy/README.md", "mail-hero/web/src/app/App.tsx", "dashboard/README.md"]
-        self.assertEqual(push(paths), expect(T, T, T, T, T, **ALL))
+        self.assertEqual(push(paths), expect(T, T, T, T, T, **DASH))
+
+    def test_lab_checks_and_deploys_only_itself_plus_contracts(self):
+        """Its task-intent-v1 and ops-v1 tests run in Contracts; Todofy and the dashboard are neither checked
+        nor deployed by a Lab-only change."""
+        for path in ("lab/worker/src/state.ts", "lab/web/src/App.tsx", "lab/migrations/0001_init.sql", "lab/wrangler.toml", "lab/docs/ux.md"):
+            with self.subTest(path=path):
+                self.assertEqual(push([path]), expect(F, F, T, F, F, **LAB))
+
+    def test_task_intent_code_deploys_lab_and_todofy(self):
+        """TASK_INTENT_LIMITS ship in Lab and in Todofy's gateway; the schema only in Lab."""
+        self.assertEqual(push(["contracts/task-intent-v1/task-intent-v1.ts"]), expect(T, T, T, T, F, **ALL_CHECKED, lab_deploy=T))
+        self.assertEqual(
+            push(["contracts/task-intent-v1/task-intent-v1.schema.json"]), expect(T, T, T, F, F, **ALL_CHECKED, lab_deploy=T)
+        )
+        self.assertEqual(push(["contracts/task-intent-v1/fixtures/TaskIntent/minimal.json"]), expect(T, T, T, F, F, **ALL_CHECKED))
 
     def test_contracts_recheck_every_app_but_deploy_none(self):
         paths = ["contracts/mail-received-v1/fixtures/plain_text.json"]
@@ -113,6 +134,7 @@ class Classify(unittest.TestCase):
             "mail-hero": [REPO / "mail-hero" / "cloudflare" / "src", REPO / "mail-hero" / "web" / "src"],
             "todofy": [REPO / "todofy" / "gateway" / "src", REPO / "todofy" / "web" / "src"],
             "dashboard": [REPO / "dashboard" / "worker" / "src", REPO / "dashboard" / "web" / "src"],
+            "lab": [REPO / "lab" / "worker" / "src", REPO / "lab" / "web" / "src"],
             "website": [
                 REPO / "website" / "src",
                 REPO / "website" / "relay" / "src",
@@ -154,12 +176,12 @@ class Classify(unittest.TestCase):
             ["packages/edge-auth/docs/notes.md"],
         ):
             with self.subTest(paths=paths):
-                self.assertEqual(push(paths), expect(T, T, T, F, F, packages=T, dashboard_check=T))
+                self.assertEqual(push(paths), expect(T, T, T, F, F, packages=T, dashboard_check=T, lab_check=T))
         # With the package's code, or with one app, the usual rules apply.
         paths = ["packages/edge-auth/SPEC.md", "packages/edge-auth/src/csrf.ts"]
         self.assertEqual(push(paths), expect(T, T, T, T, T, packages=T, **ALL))
         paths = ["packages/edge-auth/SPEC.md", "dashboard/docs/design.md"]
-        self.assertEqual(push(paths), expect(T, T, T, F, F, packages=T, **ALL))
+        self.assertEqual(push(paths), expect(T, T, T, F, F, packages=T, **DASH, lab_check=T))
         # An unregistered package's documents are checked by every app, deployed by none.
         self.assertEqual(push(["packages/new-kit/README.md"]), expect(T, T, T, F, F, packages=T, **ALL_CHECKED))
 
@@ -176,7 +198,7 @@ class Classify(unittest.TestCase):
             "packages/edge-auth/SPEC.md",
             "dashboard/worker/src/state.ts",
         ]
-        self.assertEqual(push(paths), expect(T, T, T, F, F, packages=T, **ALL, website_check=T))
+        self.assertEqual(push(paths), expect(T, T, T, F, F, packages=T, **DASH, website_check=T, lab_check=T))
 
     def test_a_package_change_with_one_app_still_deploys_every_user(self):
         paths = ["packages/edge-auth/src/csrf.ts", "todofy/gateway/src/csrf.ts"]
@@ -217,6 +239,9 @@ class Classify(unittest.TestCase):
         for path in ("dashboard/wrangler.toml", "dashboard/deploy/deploy-vars.mjs"):
             with self.subTest(path=path):
                 self.assertEqual(push([path]), expect(F, F, T, F, F, dashboard_check=T, dashboard_deploy=T))
+        for path in ("lab/wrangler.toml", "lab/deploy/deploy-vars.mjs"):
+            with self.subTest(path=path):
+                self.assertEqual(push([path]), expect(F, F, T, F, F, **LAB))
         self.assertEqual(push(["mail-hero/deploy/deploy-vars.mjs"]), expect(F, T, T, F, T))
 
     def test_a_config_at_the_repo_root_deploys_nothing(self):
@@ -334,7 +359,8 @@ class Dispatch(unittest.TestCase):
         )
         self.assertEqual(self.dispatch("todofy"), expect(T, F, T, T, F, packages=T))
         self.assertEqual(self.dispatch("mail-hero"), expect(F, T, T, F, T, packages=T))
-        self.assertEqual(self.dispatch("dashboard"), expect(F, F, T, F, F, packages=T, **ALL))
+        self.assertEqual(self.dispatch("dashboard"), expect(F, F, T, F, F, packages=T, **DASH))
+        self.assertEqual(self.dispatch("lab"), expect(F, F, T, F, F, packages=T, **LAB))
         self.assertEqual(
             self.dispatch("website"),
             expect(
@@ -419,7 +445,7 @@ class RealGit(unittest.TestCase):
         expected = {**dict.fromkeys(ci_changes.KEYS, "true"), "packages": "false"}
         expected.update(dashboard_check="false", dashboard_deploy="false")
         expected.update(website_check="false", website_deploy="false", website_relay_deploy="false")
-        expected.update(website_apex_deploy="false")
+        expected.update(website_apex_deploy="false", lab_check="false", lab_deploy="false")
         self.assertEqual(outputs, expected)
 
     def test_a_failed_package_run_on_main_deploys_both_apps_next_time(self):
@@ -578,6 +604,11 @@ class ContractsJob(unittest.TestCase):
                 "todofy/gateway/test/ops.test.ts",
                 # ops-v1 caller: the dashboard calls only declared methods and handles every error code.
                 "dashboard/worker/test/ops-client.test.ts",
+                # task-intent-v1: both validators give every fixture the same verdict; Lab's intents and
+                # its reading of every result state; Todofy's gateway forwards the two methods.
+                "lab/worker/test/task-intent-contract.test.ts",
+                "lab/worker/test/intent.test.ts",
+                "todofy/tests/unit/test_task_intent_contract.py",
             },
             self.named_tests(),
         )
@@ -591,10 +622,15 @@ class DeployConditions(unittest.TestCase):
     ancestors, so a single-app deploy would be skipped (actions/runner#491, #2205).
     """
 
-    # (job, need) pairs where "skipped" is as good as "success": the dashboard deploys after both app
-    # deploys (its service bindings need their Ops entrypoints), which do not run when nothing of that
-    # app changed.
-    SKIPPED_OK = {("dashboard-deploy", "todofy-deploy"), ("dashboard-deploy", "mail-hero-deploy")}
+    # (job, need) pairs where "skipped" is as good as "success": the dashboard deploys after the app
+    # deploys (its service bindings need their Ops entrypoints), and Lab after Todofy's (its TODOFY
+    # binding names Todofy's Ops), which do not run when nothing of that app changed.
+    SKIPPED_OK = {
+        ("dashboard-deploy", "todofy-deploy"),
+        ("dashboard-deploy", "mail-hero-deploy"),
+        ("dashboard-deploy", "lab-deploy"),
+        ("lab-deploy", "todofy-deploy"),
+    }
 
     def jobs(self):
         return workflow_jobs()
@@ -619,6 +655,7 @@ class DeployConditions(unittest.TestCase):
                 "website-deploy",
                 "website-relay-deploy",
                 "website-apex-deploy",
+                "lab-deploy",
             },
         )
         for name, block in after_gate.items():
@@ -635,9 +672,10 @@ class DeployConditions(unittest.TestCase):
                         self.assertNotIn(f"needs.{need}.result == 'skipped'", condition)
                 self.assertIn("github.ref == 'refs/heads/main'", condition)
 
-    def test_the_dashboard_deploys_after_both_apps(self):
+    def test_the_dashboard_deploys_after_the_apps_and_lab_after_todofy(self):
+        self.assertLessEqual({"todofy-deploy"}, set(self.needs(self.jobs()["lab-deploy"])))
         block = self.jobs()["dashboard-deploy"]
-        self.assertLessEqual({"todofy-deploy", "mail-hero-deploy"}, set(self.needs(block)))
+        self.assertLessEqual({"todofy-deploy", "mail-hero-deploy", "lab-deploy"}, set(self.needs(block)))
         self.assertIn("group: dashboard-production", block)
         # The only token: the one Todofy deploy uses; no other secret reaches wrangler's environment.
         self.assertIn("CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}", block)
@@ -662,6 +700,7 @@ class DeployConditions(unittest.TestCase):
                 "dashboard-deploy": "dashboard-production",
                 "website-relay-deploy": "website-relay-production",
                 "website-apex-deploy": "website-apex-production",
+                "lab-deploy": "lab-production",
             },
         )
 
@@ -674,6 +713,7 @@ class DeployConditions(unittest.TestCase):
             ("website-deploy", "website-checks", "website_deploy"),
             ("website-relay-deploy", "website-checks", "website_relay_deploy"),
             ("website-apex-deploy", "website-checks", "website_apex_deploy"),
+            ("lab-deploy", "lab-checks", "lab_deploy"),
         ):
             condition = self.condition(blocks[job])
             with self.subTest(job=job):
@@ -1075,6 +1115,16 @@ class AccessProbe(unittest.TestCase):
                 ["bash", "-e", "-c", self.script()], cwd=root, env=env, capture_output=True, text=True, check=False
             )
             return result.returncode, result.stdout + result.stderr
+
+    def test_lab_deploy_runs_the_same_probe_from_its_own_config(self):
+        """The Lab deploy's probe is this very script (so these tests cover it), fed from lab/wrangler.toml."""
+        name = "- name: Check that Access answers unauthenticated requests\n"
+        step = lambda job: workflow_jobs()[job].split(name, 1)[1].split("\n      - ", 1)[0]  # noqa: E731
+        body = lambda job: step(job).split("        run: |\n", 1)[1]  # noqa: E731
+        self.assertEqual(body("lab-deploy").replace("/api/today", "/api/v2/home"), body("dashboard-deploy"))
+        self.assertIn("ACCESS_ISSUER: ${{ steps.config.outputs.access_issuer }}", step("lab-deploy"))
+        config = workflow_jobs()["lab-deploy"].split("- name: Read the host and the Access issuer from the committed config\n", 1)[1]
+        self.assertIn('open("wrangler.toml", "rb")', config.split("\n      - ", 1)[0])
 
     def test_the_issuer_and_host_come_from_the_committed_config(self):
         block = workflow_jobs()["dashboard-deploy"]

@@ -23,7 +23,8 @@ describe('Ops', () => {
     expect(first.ok).toMatchObject({ app: 'lab', health: 'ok', modes: { maintenance: false, ingest_paused: false }, capabilities: ['guard'], ui_url: 'https://lab.example.com/' });
 
     h.arxiv.feed = { status: 200, body: rssFeed(dayItems('2609')) };
-    await h.run(Date.parse('2026-09-30T06:30:00Z'));
+    // The 24 h and 7 d counters are windows over the real clock.
+    await h.run(Date.now());
     const card = (await h.sql<{ paper_id: string }>('SELECT paper_id FROM deck_cards ORDER BY position LIMIT 1'))[0];
     await h.mutate('POST', '/api/decks/2026-09-30/decide', { op_id: op(), base_version: 0, paper_id: card?.paper_id, decision: 'like' });
     const after = await h.ops('status');

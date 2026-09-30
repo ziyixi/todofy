@@ -2,12 +2,12 @@
 """Decide which apps a CI run checks and deploys. Standard library only (the runner's python3).
 
 Outputs (GITHUB_OUTPUT, "true"/"false"):
-  todofy_check, mail_hero_check, dashboard_check, website_check
+  todofy_check, mail_hero_check, dashboard_check, website_check, lab_check
                     run that app's full checks
-  contracts         run the contract tests: both sides of mail.received.v1 and ops-v1, and the
-                    dashboard's ops-v1 caller tests
+  contracts         run the contract tests: both sides of mail.received.v1, ops-v1 and
+                    task-intent-v1, and the dashboard's ops-v1 caller tests
   packages          run every shared package's own checks (packages/*)
-  todofy_deploy, mail_hero_deploy, dashboard_deploy, website_deploy
+  todofy_deploy, mail_hero_deploy, dashboard_deploy, website_deploy, lab_deploy
                     the app, a shared package it compiles in, or a contract file it bundles changed
                     (deploy jobs also require refs/heads/main)
   website_relay_deploy
@@ -50,14 +50,15 @@ import subprocess
 import sys
 from collections.abc import Callable, Iterable
 
-APPS = ("todofy", "mail-hero", "dashboard", "website")
+APPS = ("todofy", "mail-hero", "dashboard", "website", "lab")
 # The output key prefix of each app ("<prefix>_check", "<prefix>_deploy").
-PREFIX = {"todofy": "todofy", "mail-hero": "mail_hero", "dashboard": "dashboard", "website": "website"}
+PREFIX = {"todofy": "todofy", "mail-hero": "mail_hero", "dashboard": "dashboard", "website": "website", "lab": "lab"}
 KEYS = (
     "todofy_check",
     "mail_hero_check",
     "dashboard_check",
     "website_check",
+    "lab_check",
     "contracts",
     "packages",
     "todofy_deploy",
@@ -66,6 +67,7 @@ KEYS = (
     "website_deploy",
     "website_relay_deploy",
     "website_apex_deploy",
+    "lab_deploy",
 )
 DISPATCH = {
     "both": ("todofy", "mail-hero"),
@@ -74,6 +76,7 @@ DISPATCH = {
     "mail-hero": ("mail-hero",),
     "dashboard": ("dashboard",),
     "website": ("website",),
+    "lab": ("lab",),
 }
 # The website's two small Workers deploy on their own: the Notion relay (website_relay_deploy) and the
 # apex -> www redirect (website_apex_deploy).
@@ -82,16 +85,20 @@ APEX = "website/apex-redirect/"
 # Apps that neither provide nor consume a contract: their own changes do not run Contracts.
 NO_CONTRACTS = {"website"}
 # packages/<name>/ -> the apps whose Workers compile it in (a "file:../../packages/<name>" dependency).
-PACKAGE_USERS = {"edge-auth": ("todofy", "mail-hero", "dashboard")}
+PACKAGE_USERS = {"edge-auth": ("todofy", "mail-hero", "dashboard", "lab")}
 
 # Contract files whose code a TypeScript Worker imports at runtime (constants such as OPS_LIMITS land
 # in its bundle; the dashboard also validates every Ops answer with the schema and validate.mjs),
 # mapped to the apps that bundle them: a change ships only with a deploy of each.
 # test_ci_changes.py checks this map against the Workers' imports.
 BUNDLED_BY = {
-    "contracts/ops-v1/ops-v1.ts": ("todofy", "mail-hero", "dashboard"),
-    "contracts/ops-v1/ops-v1.schema.json": ("dashboard",),
-    "contracts/ops-v1/validate.mjs": ("dashboard",),
+    "contracts/ops-v1/ops-v1.ts": ("todofy", "mail-hero", "dashboard", "lab"),
+    # The dashboard validates every Ops answer; Lab validates setGuard input, its intents and Todofy's answers.
+    "contracts/ops-v1/ops-v1.schema.json": ("dashboard", "lab"),
+    "contracts/ops-v1/validate.mjs": ("dashboard", "lab"),
+    # task-intent-v1: Lab proposes (bounds, schema), Todofy's gateway forwards (bounds, types).
+    "contracts/task-intent-v1/task-intent-v1.ts": ("lab", "todofy"),
+    "contracts/task-intent-v1/task-intent-v1.schema.json": ("lab",),
 }
 
 

@@ -59,6 +59,7 @@ WRAPPERS = {
         ["todofy-core", "todofy"],
     ),
     "dashboard": ("dashboard/deploy/deploy-vars.mjs", r"deploy-vars\.mjs (exec|secrets)\b", ["home"]),
+    "lab": ("lab/deploy/deploy-vars.mjs", r"deploy-vars\.mjs (exec|secrets)\b", ["lab"]),
 }
 # Worker vars that must never be committed: personal values (GitHub environment secrets) ...
 PERSONAL_VARS = {
@@ -81,6 +82,8 @@ PERSONAL_INPUTS = {
     "TODOFY_ACCESS_OWNER_ALIASES",
     "DASHBOARD_ACCESS_OWNER",
     "DASHBOARD_ACCESS_OWNER_ALIASES",
+    "LAB_ACCESS_OWNER",
+    "LAB_ACCESS_OWNER_ALIASES",
 }
 # The only GitHub variables CI reads: the operational switches, stated at every deploy (mail-hero AGENTS.md §8).
 TOGGLES = {
@@ -93,7 +96,7 @@ TOGGLES = {
     "TODOFY_GTD_REVIEW_ENABLED",
     "DASHBOARD_CANARY_ENABLED",
 }
-DEPLOY_JOBS = ("todofy-deploy", "mail-hero-deploy", "dashboard-deploy")
+DEPLOY_JOBS = ("todofy-deploy", "mail-hero-deploy", "dashboard-deploy", "lab-deploy")
 # The retired generators' required GitHub variables, still set in production: a revert of the committed-config
 # layout needs them (README "Rolling back the committed-config layout"), and nothing may read them now.
 LEGACY_VARIABLES = {
@@ -319,7 +322,7 @@ class LocalDev(unittest.TestCase):
         return found
 
     def test_the_production_configs_with_routes_are_the_ones_dev_runs(self):
-        for worker in ("mail-hero", "todofy", "home"):
+        for worker in ("mail-hero", "todofy", "home", "lab"):
             with self.subTest(worker=worker):
                 self.assertTrue(load(PRODUCTION[worker]).get("routes"))
 
@@ -328,7 +331,7 @@ class LocalDev(unittest.TestCase):
         paths = {path for path, _ in commands}
         # The scripted and documented entry points of each app are all found (the scan still sees them).
         self.assertLessEqual(
-            {"mail-hero/cloudflare/package.json", "dashboard/worker/package.json", "todofy/docs/dev-notes.md"}, paths
+            {"mail-hero/cloudflare/package.json", "dashboard/worker/package.json", "lab/worker/package.json", "todofy/docs/dev-notes.md"}, paths
         )
         for path, command in commands:
             with self.subTest(path=path, command=command):
@@ -364,8 +367,11 @@ class Hosts(unittest.TestCase):
 
     def test_the_dashboard_links_to_the_app_hosts(self):
         registry = (REPO / "dashboard" / "worker" / "src" / "registry.ts").read_text()
-        urls = dict(re.findall(r"id: '(mail-hero|todofy)',[^}]*?url: '([^']+)'", registry, re.S))
-        self.assertEqual(urls, {"mail-hero": f"https://{self.mail_hero}/", "todofy": f"https://{self.todofy}/"})
+        urls = dict(re.findall(r"id: '(mail-hero|todofy|lab)',[^}]*?url: '([^']+)'", registry, re.S))
+        lab = load(PRODUCTION["lab"])["vars"]["PUBLIC_HOST"]
+        self.assertEqual(
+            urls, {"mail-hero": f"https://{self.mail_hero}/", "todofy": f"https://{self.todofy}/", "lab": f"https://{lab}/"}
+        )
 
 
 class Workflow(unittest.TestCase):

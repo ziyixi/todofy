@@ -16,8 +16,22 @@ afterEach(async () => {
   h = undefined;
 });
 
+/** A fixed slot for tests that read no real-clock view. */
 const T0 = Date.parse('2026-09-30T06:30:00Z');
 const DAY = 86_400_000;
+/**
+ * The owner's views (status, today's notice, the 24 h counters, the neuron ledger of "today") read the real
+ * clock, so tests that assert them run the pipeline at the real time; the deck id still comes from the feed.
+ */
+const now = (): number => Date.now();
+// src/config.ts's helpers, restated: the runtime suite type-checks with Node's types, not the Worker's.
+const utcDay = (at: number): string => new Date(at).toISOString().slice(0, 10);
+const iso = (at: number): string => new Date(Math.floor(at / 1000) * 1000).toISOString().replace('.000Z', 'Z');
+const nextFetchSlot = (at: number, hour: number): number => {
+  const slot = Date.parse(`${utcDay(at)}T00:00:00Z`) + hour * 3_600_000 + 30 * 60_000;
+  return slot > at ? slot : slot + DAY;
+};
+const nextUtcDay = (at: number, minutes = 5): number => Date.parse(`${utcDay(at + DAY)}T00:00:00Z`) + minutes * 60_000;
 
 describe('a day at cold start', () => {
   it('fetches once, embeds, builds an explore deck with 简介 and stays idle until the next slot', async () => {
@@ -27,8 +41,9 @@ describe('a day at cold start', () => {
     expect(before.deck).toBeNull();
     expect(before.cold_start).toBe(true);
 
-    const end = await h.run(T0);
-    expect(end).toBeGreaterThan(T0);
+    const start = now();
+    const end = await h.run(start);
+    expect(end).toBeGreaterThan(start);
     // One feed request with the proper User-Agent; nothing else left the Worker.
     expect(h.requests).toHaveLength(1);
     expect(h.requests[0]?.url).toBe('https://rss.arxiv.org/rss/cs.IR+cs.CL+cs.LG');
@@ -37,7 +52,7 @@ describe('a day at cold start', () => {
     const today = await h.get<TodayResponse>('/api/today');
     expect(today.deck).toMatchObject({ deck_id: '2026-09-30', kind: 'explore', total: 20, decided: 0, finished: false });
     expect(today.building).toBeNull();
-    expect(today.next_run_at).toBe('2026-10-01T06:30:00Z');
+    expect(today.next_run_at).toBe(iso(nextFetchSlot(end, 6)));
 
     const deck = await h.get<Deck>('/api/decks/2026-09-30');
     expect(deck.cards).toHaveLength(20);
@@ -58,10 +73,10 @@ describe('a day at cold start', () => {
     expect(status.counters.neurons_today).toBeLessThan(100);
 
     // The same slot again (a duplicate alarm) does nothing: no request, no new deck.
-    await h.run(T0 + 60_000);
+    await h.run(end + 60_000);
     expect(h.requests).toHaveLength(1);
     // The next day's slot sends the validators; an unchanged feed is a 304 and makes no deck.
-    await h.run(T0 + DAY);
+    await h.run(nextFetchSlot(end, 6));
     expect(h.requests[1]?.ifNoneMatch).toBe('"day1"');
     expect((await h.sql<{ n: number }>('SELECT count(*) AS n FROM decks'))[0]?.n).toBe(1);
   });
@@ -101,7 +116,8 @@ describe('the neuron cap', () => {
     // 40 texts ≈ 40 × 30 tokens × 1075 / 1e6 ≈ 1.3 neurons per embed batch; a 20-card 简介 set ≈ 20 × 3.7.
     h = await startHarness({ bindings: { LAB_DAILY_NEURONS: '20' } });
     h.arxiv.feed = { status: 200, body: rssFeed(dayItems('2609')) };
-    await h.run(T0);
+    const start = now();
+    await h.run(start);
     const today = await h.get<TodayResponse>('/api/today');
     // The deck is shown with the 简介 written so far; the rest fall back to the abstract.
     expect(today.deck?.deck_id).toBe('2026-09-30');
@@ -116,10 +132,11 @@ describe('the neuron cap', () => {
     expect(signals.signals.map((s) => s.code)).toContain('neuron_cap_hit');
 
     // Next UTC day, before the next fetch slot: the missing 简介 are written.
-    await h.run(Date.parse('2026-10-01T00:05:00Z'));
+    await h.run(nextUtcDay(start));
     deck = await h.get<Deck>('/api/decks/2026-09-30');
     expect(deck.cards.filter((c) => c.brief !== null).length).toBeGreaterThan(written);
-    expect((await h.get<TodayResponse>('/api/today')).notice).toBeNull();
+    // No new fetch before the slot; the ledger of the simulated day is its own (the notice follows the real clock).
+    expect((await h.get<TodayResponse>('/api/today')).deck?.deck_id).toBe('2026-09-30');
     expect(h.requests).toHaveLength(1);
   });
 
@@ -127,7 +144,8 @@ describe('the neuron cap', () => {
     h = await startHarness();
     h.arxiv.feed = { status: 200, body: rssFeed(dayItems('2609')) };
     await h.ai({ fail: 'allowance' });
-    await h.run(T0);
+    const start = now();
+    await h.run(start);
     const today = await h.get<TodayResponse>('/api/today');
     expect(today.deck).toBeNull();
     expect(today.notice).toBe('cap_hit');
@@ -135,7 +153,7 @@ describe('the neuron cap', () => {
     // One failed call, then no more AI calls today.
     expect((await h.aiCalls()).length).toBe(1);
     await h.ai({});
-    await h.run(Date.parse('2026-10-01T00:05:00Z'));
+    await h.run(nextUtcDay(start));
     expect((await h.get<TodayResponse>('/api/today')).deck?.deck_id).toBe('2026-09-30');
   });
 });

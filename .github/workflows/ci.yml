@@ -1,9 +1,10 @@
-# One workflow for the three apps (Todofy, Mail Hero, the home dashboard). "changes" decides what changed since a
+# One workflow for the apps (Todofy, Mail Hero, the home dashboard, the website, Lab). "changes" decides what changed since a
 # cumulative base (.github/scripts/ci_changes.py), each app's checks run from its own directory, "Shared packages"
-# checks packages/* (compiled into the apps), "Contracts" runs both sides of mail.received.v1 and ops-v1 plus the
-# dashboard's ops-v1 caller tests, and "CI gate" is the single status check to require. Deploys run only on main,
-# only for the app that changed (itself, a shared package it compiles in, a contract file it bundles, or was
-# dispatched), after the gate passes; the dashboard deploys after both apps whose Ops entrypoints it binds.
+# checks packages/* (compiled into the apps), "Contracts" runs both sides of mail.received.v1, ops-v1 and
+# task-intent-v1 plus the dashboard's ops-v1 caller tests, and "CI gate" is the single status check to require.
+# Deploys run only on main, only for the app that changed (itself, a shared package it compiles in, a contract
+# file it bundles, or was dispatched), after the gate passes; Lab deploys after Todofy (its TODOFY binding) and
+# the dashboard after every app whose Ops entrypoint it binds.
 # See README.md "CI".
 name: CI and deploy
 
@@ -16,7 +17,7 @@ on:
         description: App to check and (on main) deploy
         type: choice
         # both = Todofy and Mail Hero (as before the dashboard existed); all = every app.
-        options: [both, all, todofy, mail-hero, dashboard, website]
+        options: [both, all, todofy, mail-hero, dashboard, website, lab]
         default: both
 
 permissions:
@@ -44,6 +45,7 @@ jobs:
       mail_hero_check: ${{ steps.decide.outputs.mail_hero_check }}
       dashboard_check: ${{ steps.decide.outputs.dashboard_check }}
       website_check: ${{ steps.decide.outputs.website_check }}
+      lab_check: ${{ steps.decide.outputs.lab_check }}
       contracts: ${{ steps.decide.outputs.contracts }}
       packages: ${{ steps.decide.outputs.packages }}
       todofy_deploy: ${{ steps.decide.outputs.todofy_deploy }}
@@ -52,6 +54,7 @@ jobs:
       website_deploy: ${{ steps.decide.outputs.website_deploy }}
       website_relay_deploy: ${{ steps.decide.outputs.website_relay_deploy }}
       website_apex_deploy: ${{ steps.decide.outputs.website_apex_deploy }}
+      lab_deploy: ${{ steps.decide.outputs.lab_deploy }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -500,6 +503,74 @@ jobs:
         if: always()
         run: rm -f "$RUNNER_TEMP/home-secrets.json"
 
+  # Lab / Paper Radar (Worker "lab", docs in lab/docs). Everything runs from lab/ with synthetic data: the runtime
+  # suite runs the real LabState and D1 in workerd with a fake AI binding, a fake arXiv and a stub Todofy whose Ops
+  # entrypoint checks every task-intent-v1 input; no network.
+  lab-checks:
+    name: Lab checks
+    needs: changes
+    if: needs.changes.outputs.lab_check == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: lab
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: '26'
+          cache: npm
+          cache-dependency-path: |
+            lab/worker/package-lock.json
+            lab/web/package-lock.json
+      - name: Install locked dependencies
+        run: |
+          npm ci --prefix worker --no-audit --no-fund
+          npm ci --prefix web --no-audit --no-fund
+      # The config test reads wrangler.toml with the pinned wrangler (worker/node_modules), hence after npm ci.
+      - name: Test the production config and deploy values
+        run: node --test deploy/test/*.test.mjs
+      - name: Lint, typecheck and test the Worker
+        working-directory: lab/worker
+        run: |
+          npm run lint
+          npm run typecheck
+          npm test
+      - name: Runtime tests (workerd with the real LabState and D1, fake AI and arXiv, stub Todofy)
+        working-directory: lab/worker
+        run: npm run test:runtime
+      # Builds web/dist, which the dry-run below serves as static assets.
+      - name: Lint, typecheck, test and build the UI
+        working-directory: lab/web
+        run: |
+          npm run lint
+          npm run typecheck
+          npm test
+          npm run build
+      # Lab reaches Todofy only through its Ops entrypoint and the dashboard only through its own; it never
+      # imports another app's code.
+      - name: No imports from other apps
+        run: |
+          if grep -rnE "(from|import)[[:space:]]*\(?[[:space:]]*['\"][^'\"]*(mail-hero|todofy|dashboard|website)/" worker/src web/src; then exit 1; fi
+      # The committed production config (lab/wrangler.toml), run exactly as the deploy runs it, with placeholder
+      # values for what the deploy adds (deploy/deploy-vars.mjs). No token is needed for --dry-run.
+      - name: Dry-run the committed production config
+        working-directory: lab/worker
+        env:
+          LAB_ACCESS_OWNER: owner@example.com
+          LAB_ACCESS_OWNER_ALIASES: ''
+          LAB_CSRF_SIGNING_KEY: '0000000000000000000000000000000000000000000000000000000000000000'
+        run: |
+          node ../deploy/deploy-vars.mjs secrets "$RUNNER_TEMP/lab-secrets.json"
+          node ../deploy/deploy-vars.mjs exec -- npx --no-install wrangler deploy --dry-run --config ../wrangler.toml \
+            --secrets-file "$RUNNER_TEMP/lab-secrets.json" --outdir "$RUNNER_TEMP/lab-bundle"
+      - name: Remove the placeholder secrets file
+        if: always()
+        run: rm -f "$RUNNER_TEMP/lab-secrets.json"
+
   contracts:
     name: Contracts
     needs: changes
@@ -518,6 +589,7 @@ jobs:
             mail-hero/cloudflare/package-lock.json
             todofy/gateway/package-lock.json
             dashboard/worker/package-lock.json
+            lab/worker/package-lock.json
       - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
         with:
           version: '0.12.10'
@@ -539,7 +611,7 @@ jobs:
         run: |
           uv sync --locked
           uv run pytest tests/unit/test_mail_hero_compat.py tests/unit/test_contract.py tests/unit/test_openapi_vocab.py \
-            tests/unit/test_ops_contract.py tests/unit/test_ops_core.py
+            tests/unit/test_ops_contract.py tests/unit/test_ops_core.py tests/unit/test_task_intent_contract.py
       # The gateway's Ops entrypoint (what the dashboard binds) forwards to todofy-core and returns
       # schema-valid values; checked with validate.mjs, like Mail Hero.
       - name: Todofy's Ops entrypoint returns ops-v1 values
@@ -556,6 +628,14 @@ jobs:
         run: |
           npm ci --no-audit --no-fund
           npx --no-install vitest run test/ops-client.test.ts test/guard.test.ts test/canary.test.ts test/digest.test.ts
+      # task-intent-v1, the proposer: every fixture gets validate.mjs's verdict (Todofy's step above gives the same
+      # fixtures the Python jsonschema verdict), the ts constants match the schema, every intent Lab builds passes
+      # the schema and Lab maps every result fixture. Host only; Lab checks runs the workerd send flows.
+      - name: Lab proposes task-intent-v1 as declared
+        working-directory: lab/worker
+        run: |
+          npm ci --no-audit --no-fund
+          npx --no-install vitest run test/task-intent-contract.test.ts test/intent.test.ts
 
   # The personal website (website/, docs in website/docs): a Next.js static export on the assets-only Worker
   # ziyixi-website, plus the Notion relay Worker ziyixi-notion-publish (website/relay) and the apex redirect Worker
@@ -624,7 +704,7 @@ jobs:
 
   gate:
     name: CI gate
-    needs: [changes, shared-packages, todofy-static, todofy-runtime, todofy-checks, mail-hero-checks, dashboard-checks, website-checks, contracts]
+    needs: [changes, shared-packages, todofy-static, todofy-runtime, todofy-checks, mail-hero-checks, dashboard-checks, website-checks, lab-checks, contracts]
     if: always()
     runs-on: ubuntu-24.04
     timeout-minutes: 5
@@ -639,12 +719,13 @@ jobs:
           MAIL_HERO: ${{ needs.mail-hero-checks.result }}
           DASHBOARD: ${{ needs.dashboard-checks.result }}
           WEBSITE: ${{ needs.website-checks.result }}
+          LAB: ${{ needs.lab-checks.result }}
           CONTRACTS: ${{ needs.contracts.result }}
         run: |
           failed=0
           for pair in "Changes=$CHANGES" "Shared packages=$PACKAGES" "Todofy static checks=$TODOFY_STATIC" \
             "Todofy runtime=$TODOFY_RUNTIME" "Todofy checks=$TODOFY" "Mail Hero checks=$MAIL_HERO" \
-            "Dashboard checks=$DASHBOARD" "Website checks=$WEBSITE" "Contracts=$CONTRACTS"; do
+            "Dashboard checks=$DASHBOARD" "Website checks=$WEBSITE" "Lab checks=$LAB" "Contracts=$CONTRACTS"; do
             echo "$pair"
             case "${pair#*=}" in
               success|skipped) ;;
@@ -884,10 +965,10 @@ jobs:
 
   dashboard-deploy:
     name: Dashboard deploy
-    # After both app deploys: the service bindings MAIL_HERO and TODOFY name their "Ops" entrypoints, which
+    # After the app deploys: the service bindings MAIL_HERO, TODOFY and LAB name their "Ops" entrypoints, which
     # must be live first. An app deploy that did not run (nothing of that app changed) is fine; one that
     # failed or was cancelled stops this job.
-    needs: [changes, dashboard-checks, gate, todofy-deploy, mail-hero-deploy]
+    needs: [changes, dashboard-checks, gate, todofy-deploy, mail-hero-deploy, lab-deploy]
     # Explicit status function and results, as for Todofy deploy (implicit success() and skipped ancestors).
     if: >-
       ${{ !cancelled()
@@ -896,6 +977,7 @@ jobs:
       && needs.gate.result == 'success'
       && (needs.todofy-deploy.result == 'success' || needs.todofy-deploy.result == 'skipped')
       && (needs.mail-hero-deploy.result == 'success' || needs.mail-hero-deploy.result == 'skipped')
+      && (needs.lab-deploy.result == 'success' || needs.lab-deploy.result == 'skipped')
       && github.ref == 'refs/heads/main'
       && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
       && needs.changes.outputs.dashboard_deploy == 'true' }}
@@ -1018,6 +1100,128 @@ jobs:
       - name: Remove the secrets file
         if: always()
         run: rm -f "$RUNNER_TEMP/home-secrets.json"
+
+  # Lab (Worker "lab"): after Todofy's deploy (the TODOFY binding names Todofy's Ops entrypoint) and before the
+  # dashboard's (it binds LAB). Migrations first (additive), then the Worker through deploy-vars.mjs, then the
+  # same Access probe as the dashboard's. The deploy token is Todofy's CF_API_TOKEN (D1, Workers, Workers AI).
+  lab-deploy:
+    name: Lab deploy
+    needs: [changes, lab-checks, gate, todofy-deploy]
+    # Explicit status function and results, as for Todofy deploy (implicit success() and skipped ancestors).
+    if: >-
+      ${{ !cancelled()
+      && needs.changes.result == 'success'
+      && needs.lab-checks.result == 'success'
+      && needs.gate.result == 'success'
+      && (needs.todofy-deploy.result == 'success' || needs.todofy-deploy.result == 'skipped')
+      && github.ref == 'refs/heads/main'
+      && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+      && needs.changes.outputs.lab_deploy == 'true' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    environment:
+      name: production
+      url: ${{ steps.config.outputs.url }}
+    concurrency:
+      group: lab-production
+      cancel-in-progress: false
+    defaults:
+      run:
+        working-directory: lab
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: '26'
+          cache: npm
+          cache-dependency-path: |
+            lab/worker/package-lock.json
+            lab/web/package-lock.json
+      # Every static production value (account, D1, host, Access, neuron ceiling, fetch hour) is committed in
+      # lab/wrangler.toml; the environment URL and the Access probe read it there.
+      - name: Read the host and the Access issuer from the committed config
+        id: config
+        run: |
+          python3 - >> "$GITHUB_OUTPUT" <<'EOF'
+          import tomllib
+          with open("wrangler.toml", "rb") as file:
+              variables = tomllib.load(file)["vars"]
+          print("url=https://" + variables["PUBLIC_HOST"])
+          print("host=" + variables["PUBLIC_HOST"])
+          print("access_issuer=" + variables["ACCESS_ISSUER"])
+          EOF
+      - name: Build the verified revision
+        run: |
+          npm ci --prefix worker --no-audit --no-fund
+          npm ci --prefix web --no-audit --no-fund
+          npm run build --prefix web
+      # The owner's addresses and the CSRF key are environment secrets (masked in this public log) and reach the
+      # Worker as secrets through --secrets-file; wrangler prints plain vars.
+      - name: Write the Worker secrets file
+        working-directory: lab/worker
+        env:
+          LAB_ACCESS_OWNER: ${{ secrets.LAB_ACCESS_OWNER }}
+          LAB_ACCESS_OWNER_ALIASES: ${{ secrets.LAB_ACCESS_OWNER_ALIASES }}
+          LAB_CSRF_SIGNING_KEY: ${{ secrets.LAB_CSRF_SIGNING_KEY }}
+        run: node ../deploy/deploy-vars.mjs secrets "$RUNNER_TEMP/lab-secrets.json"
+      # deploy-vars.mjs adds BUILD_SHA as --var and refuses the all-zeros D1 id or Access AUD.
+      - name: Validate the bundle before changing D1
+        working-directory: lab/worker
+        run: |
+          node ../deploy/deploy-vars.mjs exec -- npx --no-install wrangler deploy --dry-run --config ../wrangler.toml \
+            --secrets-file "$RUNNER_TEMP/lab-secrets.json"
+      - name: Apply D1 migrations, then deploy the Worker lab
+        working-directory: lab/worker
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+        run: |
+          test -n "$CLOUDFLARE_API_TOKEN"
+          npx --no-install wrangler d1 migrations apply DB --remote --config ../wrangler.toml
+          node ../deploy/deploy-vars.mjs exec -- npx --no-install wrangler deploy --config ../wrangler.toml \
+            --secrets-file "$RUNNER_TEMP/lab-secrets.json"
+      # Cloudflare Access ("Lab") must answer every unauthenticated request with a 302 to its login page for this
+      # host, exactly as the dashboard's probe checks (same script; test_ci_changes.py runs it).
+      - name: Check that Access answers unauthenticated requests
+        env:
+          ACCESS_ISSUER: ${{ steps.config.outputs.access_issuer }}
+          PUBLIC_HOST: ${{ steps.config.outputs.host }}
+        run: |
+          issuer=$ACCESS_ISSUER
+          host=$PUBLIC_HOST
+          test -n "$issuer" && test -n "$host"
+          for path in / /api/today; do
+            for attempt in $(seq 1 10); do
+              answer=$(curl -sS -o /dev/null --max-time 15 --proto '=https' -w '%{http_code} %{redirect_url}' \
+                "https://$host$path" 2>/dev/null) || true
+              code=${answer%% *}
+              location=${answer#* }
+              case "$code" in
+                302)
+                  login="$issuer/cdn-cgi/access/login/$host"
+                  case "$location" in
+                    "$login"|"$login?"*|"$login/"*)
+                      echo "Access answered $path with 302 to its login page for this host (attempt $attempt)."
+                      continue 2
+                      ;;
+                  esac
+                  echo "$path: 302 to somewhere other than the Access login page for this host." >&2
+                  exit 1
+                  ;;
+                ''|000|5??) sleep 15 ;;
+                *)
+                  echo "$path was answered with $code without Access." >&2
+                  exit 1
+                  ;;
+              esac
+            done
+            echo "$path never reached Access (last status ${code:-none})." >&2
+            exit 1
+          done
+      - name: Remove the secrets file
+        if: always()
+        run: rm -f "$RUNNER_TEMP/lab-secrets.json"
 
   # The site release: dispatches website-release.yml (docs in website/docs/release.md), the same workflow the
   # Notion buttons and the relay's detector dispatch, and returns at once. The release's job holds the one

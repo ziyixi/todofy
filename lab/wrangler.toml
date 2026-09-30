@@ -67,7 +67,7 @@ ACCESS_ISSUER = "https://ziyixi.cloudflareaccess.com"
 # AUD tag of the Access app "Lab".
 ACCESS_AUDIENCE = "3a8b5e31d3fb12e678198ea5e1c4231bc3f80665a9f9a5f18ecff8f6c19f4c8c"
 # Hard ceiling on Workers AI neurons per UTC day for this Worker (the account has 10,000 in total). The
-# settings page can only lower it. A typical day uses about 270 (docs/design.md §1).
+# settings page can only lower it. A typical day uses about 340 (docs/design.md §1).
 LAB_DAILY_NEURONS = "5000"
 # The daily feed fetch runs at this UTC hour, minute 30 (the arXiv feed updates at midnight US Eastern).
 LAB_FETCH_UTC_HOUR = "6"
