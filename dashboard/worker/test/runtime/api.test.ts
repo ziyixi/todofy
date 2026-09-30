@@ -70,7 +70,7 @@ describe('the overview', () => {
   it('is unknown before the first tick and complete after it', async () => {
     h = await startFlows();
     const before = await h.overview();
-    expect(before.overall).toEqual({ level: 'unknown', codes: [] });
+    expect(before.overall).toEqual({ level: 'unknown', items: [] });
     expect(before.apps['mail-hero']).toMatchObject({ reachable: null, status: null, url: 'https://mail.example.com/' });
     expect(before.usage).toMatchObject({ status: 'unavailable', rows: [] });
     expect(before.canary).toMatchObject({ hour_utc: 16, today: null, active: null, recent: [], manual_today: 0, manual_limit: 3 });
@@ -116,12 +116,42 @@ describe('the overview', () => {
     expect(h.analytics.requests.length).toBe(requests + 1);
   });
 
+  it('turns the banner to a warning when the cron ticks stopped, however clean the last items were', async () => {
+    h = await startFlows({ bindings: { CANARY_UTC_HOUR: '23' } });
+    const now = Date.now();
+    await h.tick(now - 60_000);
+    expect((await h.overview()).overall).toEqual({ level: 'ok', items: [] });
+    // Three hours without a tick (cron removed or every tick failing): the stored items are still clean.
+    await h.tick(now - 4 * 3_600_000);
+    const stale = await h.overview();
+    expect(stale.digest.items).toEqual([]);
+    expect(stale.overall).toEqual({ level: 'warning', items: [{ source: 'dashboard', code: 'tick_stale', severity: 'warning' }] });
+  });
+
+  it('keeps 10 minutes between status() polls across refreshes and ticks', async () => {
+    h = await startFlows({ bindings: { CANARY_UTC_HOUR: '23' } });
+    const refreshed = await h.overview(true);
+    expect(refreshed.refresh.refreshed).toBe(true);
+    expect((await h.called()).sort()).toEqual(['mail-hero.status', 'todofy.status']);
+    const polledAt = Date.parse(refreshed.apps.todofy.checked_at ?? '');
+    // A tick 5 minutes after the refresh reuses those statuses (and still reports).
+    await h.tick(polledAt + 5 * 60_000);
+    const calls = await h.called();
+    expect(calls.filter((call) => call.endsWith('.status'))).toEqual([]);
+    expect(calls).toContain('todofy.reportOps');
+    const overview = await h.overview();
+    expect(overview.apps.todofy.checked_at).toBe(refreshed.apps.todofy.checked_at);
+    // The next tick, 35 minutes after the refresh, polls again.
+    await h.tick(polledAt + 35 * 60_000);
+    expect((await h.called()).filter((call) => call.endsWith('.status')).sort()).toEqual(['mail-hero.status', 'todofy.status']);
+  });
+
   it('polls stale statuses on refresh', async () => {
     h = await startFlows({ bindings: { CF_ANALYTICS_TOKEN: '' } });
     const refreshed = await h.overview(true);
     expect(refreshed.refresh.refreshed).toBe(true);
     expect(refreshed.usage.status).toBe('not_configured');
-    expect(refreshed.overall.codes).toContain('usage_not_configured');
+    expect(refreshed.overall.items).toContainEqual({ source: 'dashboard', code: 'usage_not_configured', severity: 'warning' });
     expect((await h.called()).sort()).toEqual(['mail-hero.status', 'todofy.status']);
     expect(h.analytics.requests).toEqual([]);
   });

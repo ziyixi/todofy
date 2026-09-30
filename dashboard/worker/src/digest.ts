@@ -3,7 +3,7 @@
  * severities, times and numbers only) and deciding when to send them to Todofy's `reportOps`.
  */
 import { OPS_APPS, OPS_LIMITS, type OpsApp, type OpsReport, type OpsReportItem, type OpsSeverity, type OpsStatus } from '../../../contracts/ops-v1/ops-v1.ts';
-import { GUARD_SHED_PERCENT, QUOTA_CRITICAL_PERCENT, type OverallLevel, type QuotaRow } from './api-types.ts';
+import { GUARD_SHED_PERCENT, QUOTA_CRITICAL_PERCENT, type CanaryStage, type OverallLevel, type QuotaRow } from './api-types.ts';
 import type { CanaryRecord } from './canary.ts';
 import { hoursLeft, type DesiredGuard } from './guard.ts';
 import { HOUR_MS, MINUTE_MS, iso, isTimestamp } from './time.ts';
@@ -13,6 +13,8 @@ export const DIGEST_REFRESH_MS = 6 * HOUR_MS;
 export const USAGE_UNAVAILABLE_AFTER_MS = 2 * HOUR_MS;
 /** App statuses older than this do not contribute signals. */
 export const STATUS_SIGNAL_MAX_AGE_MS = HOUR_MS;
+/** No completed cron tick for this long (two and a half ticks) is `tick_stale`: guard, canary and digest have stopped. */
+export const TICK_STALE_MS = 75 * MINUTE_MS;
 
 const CODE = /^[a-z][a-z0-9_]{0,47}$/;
 const SOURCE = /^[a-z][a-z0-9-]{0,31}$/;
@@ -46,6 +48,8 @@ export interface DigestInput {
   readonly guardFailures: Readonly<Record<OpsApp, number>>;
   /** The run that finished most recently, if any. */
   readonly latestFinished: CanaryRecord | null;
+  /** The last completed cron tick (a tick passes its own time). */
+  readonly lastTickAt: number | null;
   readonly apps: Readonly<Record<OpsApp, AppHealthInput>>;
 }
 
@@ -62,11 +66,35 @@ export function cleanMetrics(metrics: Readonly<Record<string, unknown>>): Record
   return out;
 }
 
-const CANARY_CODES: Readonly<Record<string, string>> = {
+const CANARY_CODES: Readonly<Record<CanaryStage, string>> = {
   start: 'canary_start_failed',
   delivery: 'canary_not_delivered',
   consumer: 'canary_consumer_failed',
 };
+
+/** The `tick_stale` item when no tick completed within TICK_STALE_MS (or none ever did), else null. */
+export function tickStale(lastTickAt: number | null, now: number): Candidate | null {
+  if (lastTickAt !== null && now - lastTickAt <= TICK_STALE_MS) return null;
+  return {
+    source: 'dashboard',
+    code: 'tick_stale',
+    severity: 'warning',
+    metrics: lastTickAt === null ? {} : { minutes_since: Math.floor((now - lastTickAt) / MINUTE_MS) },
+    ...(lastTickAt === null ? {} : { since: iso(lastTickAt) }),
+  };
+}
+
+/**
+ * Stored items as of `now`: `tick_stale` is added when the ticks stopped since the items were built,
+ * and dropped when a tick ran since (the overview is served from the stored snapshot).
+ */
+export function withTickState(items: readonly OpsReportItem[], lastTickAt: number | null, now: number): OpsReportItem[] {
+  const rest = items.filter((item) => !(item.source === 'dashboard' && item.code === 'tick_stale'));
+  const stale = tickStale(lastTickAt, now);
+  if (stale === null) return rest;
+  const item: OpsReportItem = { source: stale.source, code: stale.code, severity: stale.severity, since: stale.since ?? iso(now), metrics: cleanMetrics(stale.metrics) };
+  return [...rest.filter((i) => i.severity === 'critical'), item, ...rest.filter((i) => i.severity !== 'critical')];
+}
 
 /** Every warning or critical condition of this tick (§5.5 table). */
 export function candidates(input: DigestInput): Candidate[] {
@@ -97,6 +125,9 @@ export function candidates(input: DigestInput): Candidate[] {
     }
   }
 
+  const stale = tickStale(input.lastTickAt, now);
+  if (stale !== null) out.push(stale);
+
   if (input.desired.level === 'shed') {
     out.push({
       source: 'dashboard',
@@ -112,9 +143,18 @@ export function candidates(input: DigestInput): Candidate[] {
     if (run.outcome === 'failed' && run.stage !== null) {
       const metrics: Record<string, number> = { attempts: run.delivery.attempts, timed_out: run.code === 'timeout' ? 1 : 0 };
       if (run.delivery.last_http_status !== null) metrics.last_http_status = run.delivery.last_http_status;
-      out.push({ source: 'dashboard', code: CANARY_CODES[run.stage] ?? 'canary_failed', severity: 'critical', since, metrics });
-    } else if (run.outcome === 'skipped' && (run.code === 'canary_producer_missing' || run.code === 'canary_consumer_missing')) {
-      out.push({ source: 'dashboard', code: 'canary_unsupported', severity: 'warning', since, metrics: {} });
+      out.push({ source: 'dashboard', code: CANARY_CODES[run.stage], severity: 'critical', since, metrics });
+    } else if (run.outcome === 'skipped') {
+      // contracts/ops-v1 README "Daily canary": a skip (paused, unavailable, a missing capability, a held
+      // run) is reported with its reason, never as a pipeline failure. The reason is a metric key
+      // (numbers only), e.g. {"no_endpoint": 1}.
+      out.push({
+        source: 'dashboard',
+        code: 'canary_skipped',
+        severity: 'warning',
+        since,
+        metrics: run.code !== null && CODE.test(run.code) ? { [run.code]: 1 } : {},
+      });
     }
   }
 

@@ -43,7 +43,7 @@ import {
   type CanaryRecord,
 } from './canary.ts';
 import { analyticsConfigured, buildSha, canaryHour, dashboardUrl } from './config.ts';
-import { buildReport, candidates, digestKey, finalizeItems, itemKey, overallLevel, shouldSend, DIGEST_REFRESH_MS } from './digest.ts';
+import { buildReport, candidates, digestKey, finalizeItems, itemKey, overallLevel, shouldSend, withTickState, DIGEST_REFRESH_MS } from './digest.ts';
 import type { Env } from './env.ts';
 import {
   AUTO_NORMAL,
@@ -54,6 +54,7 @@ import {
   guardInput,
   needsApply,
   ownerOverride,
+  settled,
   usageFresh,
   type AppliedGuard,
   type AutoGuard,
@@ -69,9 +70,14 @@ export const HOME_OBJECT = 'home-v1';
 
 /** A cron event within this of the last completed tick is a retry and is skipped. */
 export const TICK_DEDUP_MS = 10 * MINUTE_MS;
-/** Owner refreshes poll an app's status() only when its last attempt is at least this old. */
+/** Ticks, owner refreshes and manual starts poll an app's status() only when its last attempt is at least this old. */
 export const STATUS_REFRESH_MS = OPS_LIMITS.statusMinIntervalSeconds * 1000;
 const REFRESH_MIN_MS = REFRESH_MIN_INTERVAL_SECONDS * 1000;
+
+/** Whether an app's status() may be polled at `now`: never polled, or the last attempt is at least 10 minutes old (or from a later clock). */
+function statusDue(doc: { readonly checked_at: number | null }, now: number): boolean {
+  return doc.checked_at === null || now - doc.checked_at >= STATUS_REFRESH_MS || now < doc.checked_at;
+}
 
 const SCHEMA = [
   `CREATE TABLE IF NOT EXISTS state (
@@ -169,8 +175,11 @@ const NO_DIGEST: DigestDoc = {
 };
 const NO_META: MetaDoc = { last_tick_at: null, last_tick_scheduled: null, last_refresh_at: null };
 
-export type StartCanaryOutcome = { readonly ok: true; readonly run: CanaryRun } | { readonly ok: false; readonly code: 'canary_active' | 'canary_limit' | 'unavailable' };
-export type GuardOverrideOutcome = { readonly ok: true; readonly guard: GuardView } | { readonly ok: false; readonly code: 'unavailable' };
+/** A failure of the call itself (the Durable Object) is an exception, which the Worker maps to 503. */
+export type StartCanaryOutcome = { readonly ok: true; readonly run: CanaryRun } | { readonly ok: false; readonly code: 'canary_active' | 'canary_limit' };
+export interface GuardOverrideOutcome {
+  readonly guard: GuardView;
+}
 
 interface CanaryRow extends Record<string, SqlStorageValue> {
   run_id: string;
@@ -222,11 +231,19 @@ export class HomeState extends DurableObject<Env> {
         return { ran: false };
       }
       const started = Date.now();
-      const observed = await this.pollStatuses(now, OPS_APPS);
+      // status() at most every 10 minutes per app (OPS_LIMITS.statusMinIntervalSeconds), counting the
+      // polls of owner refreshes and manual canary starts: a recent answer stands in for this tick's.
+      const due = OPS_APPS.filter((app) => statusDue(this.statusDoc(app), now));
+      const polled = await this.pollStatuses(now, due);
+      const observed: Record<OpsApp, OpsStatus | null> = { 'mail-hero': null, todofy: null };
+      for (const app of OPS_APPS) {
+        const doc = this.statusDoc(app);
+        observed[app] = due.includes(app) ? polled[app] : doc.ok === true ? doc.status : null;
+      }
       const usage = await this.pollUsage(now);
       const guard = await this.runGuard(now, observed);
       const canary = await this.runCanary(now, true);
-      const digest = await this.runDigest(now, guard.desired, true);
+      const digest = await this.runDigest(now, guard.desired, true, now);
       this.ctx.storage.sql.exec('DELETE FROM canary_runs WHERE created_at < ?', now - CANARY_RETENTION_MS);
       this.putDoc('meta', { ...meta, last_tick_at: now, last_tick_scheduled: now }, now);
       console.log(
@@ -234,7 +251,7 @@ export class HomeState extends DurableObject<Env> {
           event: 'tick',
           ran: true,
           duration_ms: Date.now() - started,
-          status: Object.fromEntries(OPS_APPS.map((app) => [app, observed[app] === null ? 'failed' : 'ok'])),
+          status: Object.fromEntries(OPS_APPS.map((app) => [app, !due.includes(app) ? 'recent' : observed[app] === null ? 'failed' : 'ok'])),
           usage: usage ?? 'ok',
           guard: guard.desired.level,
           guard_calls: guard.calls,
@@ -252,10 +269,7 @@ export class HomeState extends DurableObject<Env> {
     if (!refresh) return Promise.resolve(this.buildOverview(Date.now(), false));
     return this.serialize(async () => {
       const now = Date.now();
-      const statuses = OPS_APPS.filter((app) => {
-        const doc = this.statusDoc(app);
-        return doc.checked_at === null || now - doc.checked_at >= STATUS_REFRESH_MS || now < doc.checked_at;
-      });
+      const statuses = OPS_APPS.filter((app) => statusDue(this.statusDoc(app), now));
       const usage = this.doc<UsageDoc>('usage') ?? NO_USAGE;
       const usageDue =
         analyticsConfigured(this.env) &&
@@ -266,7 +280,7 @@ export class HomeState extends DurableObject<Env> {
       if (statuses.length > 0) await this.pollStatuses(now, statuses);
       if (usageDue) await this.pollUsage(now);
       const desired = this.currentDesired(now);
-      await this.runDigest(now, desired, false);
+      await this.runDigest(now, desired, false, meta.last_tick_at);
       this.putDoc('meta', { ...meta, last_refresh_at: now }, now);
       return this.buildOverview(now, true);
     });
@@ -278,10 +292,7 @@ export class HomeState extends DurableObject<Env> {
       const now = Date.now();
       if (this.activeRun() !== null) return { ok: false, code: 'canary_active' };
       if (this.manualCount(utcDay(now)) >= CANARY_MANUAL_PER_DAY) return { ok: false, code: 'canary_limit' };
-      const stale = OPS_APPS.filter((app) => {
-        const doc = this.statusDoc(app);
-        return doc.checked_at === null || now - doc.checked_at >= STATUS_REFRESH_MS;
-      });
+      const stale = OPS_APPS.filter((app) => statusDue(this.statusDoc(app), now));
       if (stale.length > 0) await this.pollStatuses(now, stale);
       // Run IDs have one-second resolution and Mail Hero is idempotent per run_id: never reuse one.
       let runId = manualRunId(now);
@@ -303,7 +314,7 @@ export class HomeState extends DurableObject<Env> {
       const desired = this.currentDesired(now);
       const calls = await this.applyGuard(now, desired, { 'mail-hero': null, todofy: null });
       console.log(JSON.stringify({ event: 'guard_override', level, guard_calls: calls }));
-      return { ok: true, guard: this.guardView(now) };
+      return { guard: this.guardView(now) };
     });
   }
 
@@ -385,6 +396,14 @@ export class HomeState extends DurableObject<Env> {
       const status = this.statusDoc(app).status;
       return status !== null && status.capabilities.includes('guard') && needsApply(input, this.applied(app), observed[app]);
     });
+    // An app that needs no call has nothing pending: earlier failures (for a level no longer wanted,
+    // or already in place) stop counting.
+    for (const app of OPS_APPS) {
+      if (targets.includes(app)) continue;
+      const applied = this.applied(app);
+      const next = settled(applied);
+      if (next !== applied) this.saveApplied(app, next);
+    }
     const results = await Promise.all(targets.map(async (app) => [app, await opsSetGuard(this.env, app, input)] as const));
     for (const [app, result] of results) {
       const previous = this.applied(app);
@@ -437,7 +456,7 @@ export class HomeState extends DurableObject<Env> {
   }
 
   /** Builds this tick's items; on a tick, sends them when due (§5.5). */
-  private async runDigest(now: number, desired: DesiredGuard, send: boolean): Promise<{ sent: string; items: number }> {
+  private async runDigest(now: number, desired: DesiredGuard, send: boolean, lastTickAt: number | null): Promise<{ sent: string; items: number }> {
     const usage = this.doc<UsageDoc>('usage') ?? NO_USAGE;
     const list = candidates({
       now,
@@ -452,6 +471,7 @@ export class HomeState extends DurableObject<Env> {
       desired,
       guardFailures: { 'mail-hero': this.applied('mail-hero').consecutive_failures, todofy: this.applied('todofy').consecutive_failures },
       latestFinished: this.latestFinished(),
+      lastTickAt,
       apps: { 'mail-hero': this.statusDoc('mail-hero'), todofy: this.statusDoc('todofy') },
     });
     const firstSeen = this.syncSince(list.map(itemKey), now);
@@ -480,12 +500,15 @@ export class HomeState extends DurableObject<Env> {
     const digest = this.doc<DigestDoc>('digest') ?? NO_DIGEST;
     const todofy = this.statusDoc('todofy');
     const lastRefresh = meta.last_refresh_at;
+    const neverRan = meta.last_tick_at === null && digest.last_attempt_at === null && lastRefresh === null;
+    // The stored items are as old as the last tick or refresh; whether the ticks still run is judged now.
+    const items = neverRan ? [] : withTickState(digest.items, meta.last_tick_at, now);
     return {
       version: API_VERSION,
       generated_at: iso(now),
       overall: {
-        level: meta.last_tick_at === null && digest.last_attempt_at === null && lastRefresh === null ? 'unknown' : overallLevel(digest.items),
-        codes: digest.items.map((item) => item.code).slice(0, OPS_LIMITS.reportMaxItems),
+        level: neverRan ? 'unknown' : overallLevel(items),
+        items: items.slice(0, OPS_LIMITS.reportMaxItems).map((item) => ({ source: item.source, code: item.code, severity: item.severity })),
       },
       apps: { 'mail-hero': this.appCard('mail-hero'), todofy: this.appCard('todofy') },
       usage: this.usageView(now),

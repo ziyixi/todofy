@@ -243,5 +243,7 @@ export function runView(run: CanaryRecord): CanaryRun {
     delivery: { ...run.delivery },
     consumer: { ...run.consumer },
     polls: run.polls,
+    start_code: run.phase === 'starting' ? run.start_code : null,
+    last_call_error: run.last_call_error,
   };
 }

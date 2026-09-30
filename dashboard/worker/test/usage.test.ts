@@ -95,8 +95,10 @@ describe('parseUsage', () => {
     const rows = parseUsage(graphqlBody({ workersRequests: 30_000 }), NOW)?.rows ?? [];
     // Half the day gone: twice the use.
     expect(row(rows, 'workers_requests')).toMatchObject({ projected: 60_000, projected_percent: 60 });
-    expect(projection('daily', 100, Date.parse('2026-09-29T00:59:00Z'))).toBeNull();
-    expect(projection('daily', 100, Date.parse('2026-09-29T01:00:00Z'))).toBe(2400);
+    // Not in the first 3 hours: a burst just after midnight would read as ~20x the day.
+    expect(projection('daily', 100, Date.parse('2026-09-29T01:05:00Z'))).toBeNull();
+    expect(projection('daily', 100, Date.parse('2026-09-29T02:59:00Z'))).toBeNull();
+    expect(projection('daily', 100, Date.parse('2026-09-29T03:00:00Z'))).toBe(800);
     expect(projection('monthly', 100, Date.parse('2026-09-01T23:00:00Z'))).toBeNull();
     expect(projection('monthly', 100, Date.parse('2026-09-16T00:00:00Z'))).toBe(200);
     expect(projection('storage', 100, NOW)).toBeNull();

@@ -112,6 +112,8 @@ function run(partial: Partial<CanaryRun> & Pick<CanaryRun, 'run_id' | 'day' | 'c
     delivery: { state: 'delivered', attempts: 1, last_http_status: 204, error_code: null },
     consumer: { state: 'ok', waiting_code: null, error_code: null },
     polls: 3,
+    start_code: null,
+    last_call_error: null,
     ...partial,
   }
 }
@@ -168,7 +170,7 @@ export function healthyOverview(): OverviewResponse {
   return {
     version: 'home-v1',
     generated_at: '2026-09-29T16:30:04.000Z',
-    overall: { level: 'ok', codes: [] },
+    overall: { level: 'ok', items: [] },
     apps: {
       'mail-hero': {
         app: 'mail-hero',
@@ -244,7 +246,14 @@ export function degradedOverview(): OverviewResponse {
   const base = healthyOverview()
   return {
     ...base,
-    overall: { level: 'critical', codes: ['endpoint_blocked', 'backup_stale', 'capacity_70', 'attention', 'gemini_budget_80'] },
+    overall: {
+      level: 'critical',
+      items: [
+        { source: 'mail-hero', code: 'endpoint_blocked', severity: 'critical' },
+        { source: 'todofy', code: 'backup_stale', severity: 'critical' },
+        { source: 'mail-hero', code: 'capacity_70', severity: 'warning' },
+      ],
+    },
     apps: {
       'mail-hero': { ...base.apps['mail-hero'], status: { ...status.mailHeroDegraded, guard: guards.normal } },
       todofy: { ...base.apps.todofy, status: { ...status.todofyDegraded, guard: guards.normal } },
@@ -272,7 +281,7 @@ export function unreachableOverview(): OverviewResponse {
   const base = healthyOverview()
   return {
     ...base,
-    overall: { level: 'critical', codes: ['app_unreachable'] },
+    overall: { level: 'critical', items: [{ source: 'todofy', code: 'app_unreachable', severity: 'critical' }] },
     apps: {
       ...base.apps,
       todofy: {
@@ -305,7 +314,13 @@ export function guardActiveOverview(): OverviewResponse {
   const base = healthyOverview()
   return {
     ...base,
-    overall: { level: 'warning', codes: ['d1_rows_read_high', 'guard_shed'] },
+    overall: {
+      level: 'warning',
+      items: [
+        { source: 'cloudflare', code: 'd1_rows_read_high', severity: 'warning' },
+        { source: 'dashboard', code: 'guard_shed', severity: 'warning' },
+      ],
+    },
     apps: {
       'mail-hero': { ...base.apps['mail-hero'], status: { ...status.mailHeroOk, guard: guards.shedMailHero } },
       todofy: { ...base.apps.todofy, status: { ...status.todofyOk, guard: guards.shedTodofy } },
@@ -332,7 +347,7 @@ export function canaryFailedOverview(): OverviewResponse {
   const base = healthyOverview()
   return {
     ...base,
-    overall: { level: 'critical', codes: ['canary_not_delivered'] },
+    overall: { level: 'critical', items: [{ source: 'dashboard', code: 'canary_not_delivered', severity: 'critical' }] },
     canary: {
       ...base.canary,
       today: RUN_FAILED_TODAY,
@@ -347,7 +362,7 @@ export function analyticsUnavailableOverview(): OverviewResponse {
   const base = healthyOverview()
   return {
     ...base,
-    overall: { level: 'warning', codes: ['usage_unavailable'] },
+    overall: { level: 'warning', items: [{ source: 'dashboard', code: 'usage_unavailable', severity: 'warning' }] },
     usage: {
       status: 'unavailable',
       fetched_at: null,

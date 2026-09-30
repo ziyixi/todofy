@@ -6,7 +6,7 @@
  */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { validate } from '../../../../contracts/ops-v1/validate.mjs';
-import { contractSchema, startHarness, type Harness } from './harness.ts';
+import { contractSchema, declaredMethodsOf, startHarness, type Harness } from './harness.ts';
 
 let harness: Harness;
 beforeAll(async () => {
@@ -48,6 +48,18 @@ describe('workerd harness', () => {
     expect(await harness.rpc('mail-hero', 'canaryDelivery', 'x')).toEqual({ ok: { state: 'pending', attempts: 1 } });
     expect(await harness.rpc('mail-hero', 'canaryDelivery', 'x')).toEqual({ error: 'unavailable' });
     await harness.scenario('mail-hero', {});
+  });
+
+  // The stubs' list is parsed from ops-v1.ts (test/declared-methods.ts); test/ops-client.test.ts checks
+  // the dashboard's CALLED_METHODS against the same parse, so stubs and client cannot drift apart.
+  it('exposes every method ops-v1.ts declares for the app', async () => {
+    for (const app of ['mail-hero', 'todofy'] as const) {
+      const declared = await declaredMethodsOf(app);
+      expect(declared.length).toBeGreaterThanOrEqual(4);
+      for (const method of declared) expect((await harness.rpc(app, method)).error ?? '').not.toMatch(/does not implement|not a function/);
+    }
+    await harness.calls('mail-hero');
+    await harness.calls('todofy');
   });
 
   it('rejects methods the contract does not declare for that app', async () => {

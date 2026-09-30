@@ -150,12 +150,18 @@ function sumBy(rows: readonly unknown[], dataset: Dataset, value: (row: unknown)
   return { used, truncated: rows.length >= DATASET_LIMITS[dataset], breakdown };
 }
 
-/** Linear end-of-period projection (design.md §5.2); null when too little of the period has passed. */
+/** Daily rows are not projected in the first hours of the UTC day, where one early job dominates. */
+export const DAILY_PROJECTION_AFTER_MS = 3 * HOUR_MS;
+
+/**
+ * Linear end-of-period projection (design.md §5.2): used / elapsed × period, a straight-line estimate,
+ * not a forecast; null when too little of the period has passed.
+ */
 export function projection(period: QuotaRow['period'], used: number | null, now: number): number | null {
   if (used === null) return null;
   if (period === 'daily') {
     const elapsed = now - startOfUtcDay(now);
-    return elapsed < HOUR_MS ? null : round1((used * DAY_MS) / elapsed);
+    return elapsed < DAILY_PROJECTION_AFTER_MS ? null : round1((used * DAY_MS) / elapsed);
   }
   if (period === 'monthly') {
     const elapsedDays = (now - startOfUtcMonth(now)) / DAY_MS;

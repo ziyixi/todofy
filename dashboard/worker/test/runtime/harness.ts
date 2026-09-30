@@ -10,16 +10,19 @@ import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { build } from 'esbuild';
 import { Miniflare, convertV4MiniflareOptions } from 'miniflare';
+import type { OpsApp } from '../../../../contracts/ops-v1/ops-v1.ts';
+import { declaredMethods } from '../declared-methods.ts';
 
 const ROOT = resolve(fileURLToPath(new URL('../..', import.meta.url)));
 const CONTRACT = resolve(ROOT, '../../contracts/ops-v1');
 
-/** Methods ops-v1.ts declares per app (test/ops-surface checks this list against the file). */
-export const DECLARED_METHODS = {
-  'mail-hero': ['status', 'setGuard', 'startCanary', 'canaryDelivery'],
-  todofy: ['status', 'setGuard', 'canaryResult', 'reportOps'],
-} as const;
-export type StubApp = keyof typeof DECLARED_METHODS;
+export type StubApp = OpsApp;
+
+/** The methods ops-v1.ts declares for `app`, parsed from the contract file itself: the stubs expose exactly these. */
+export async function declaredMethodsOf(app: StubApp): Promise<string[]> {
+  const source = await readFile(join(CONTRACT, 'ops-v1.ts'), 'utf8');
+  return declaredMethods(source, app === 'mail-hero' ? 'MailHeroOps' : 'TodofyOps');
+}
 
 export async function fixture(path: string): Promise<unknown> {
   return JSON.parse(await readFile(join(CONTRACT, 'fixtures', path), 'utf8')) as unknown;
@@ -51,7 +54,7 @@ async function stubScript(app: StubApp): Promise<string> {
   const template = await readFile(join(ROOT, 'test/stubs/ops-stub.js'), 'utf8');
   return template
     .replace('const APP = __APP__', `const APP = ${JSON.stringify(app)}`)
-    .replace('const METHODS = __METHODS__', `const METHODS = ${JSON.stringify(DECLARED_METHODS[app])}`)
+    .replace('const METHODS = __METHODS__', `const METHODS = ${JSON.stringify(await declaredMethodsOf(app))}`)
     .replace('const DEFAULTS = __DEFAULTS__', `const DEFAULTS = ${JSON.stringify(await defaults(app))}`);
 }
 

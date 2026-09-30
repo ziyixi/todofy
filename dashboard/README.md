@@ -5,9 +5,11 @@ Access application "Home". It reads both apps only through their `Ops` entrypoin
 ([`contracts/ops-v1`](../contracts/ops-v1/README.md)) and never imports `mail-hero/` or `todofy/` code.
 Besides the page it runs three jobs:
 
-- **Canary and digest.** A daily end-to-end canary (one synthetic `mail.received.v1` event from Mail
-  Hero to Todofy, no Todoist side effects) and one unified ops digest that Todofy's daily reminder
-  carries.
+- **Canary and digest.** A daily delivery-and-processing canary (one synthetic `mail.received.v1`
+  event that Mail Hero creates directly and delivers to Todofy, no Todoist side effects) and one
+  unified ops digest that Todofy's daily reminder carries. The canary covers Mail Hero delivery →
+  Todofy intake, Gemini summary and verification; it does not cover source forwarding, Email Routing,
+  raw storage or MIME parsing, so a green run says nothing about whether mail is being received.
 - **Quota guardrails.** Account-wide Workers Free usage from the GraphQL Analytics API; at ≥ 80 % of a
   daily allowance (or a monthly R2 operation class) both apps defer their non-critical jobs (`shed`).
 - **Cross-app contract tests.** The caller side of ops-v1: only declared methods, every declared error

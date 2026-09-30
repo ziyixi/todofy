@@ -17,6 +17,7 @@ import {
   overallLevel,
   reportBytes,
   shouldSend,
+  withTickState,
   type DigestInput,
 } from '../src/digest.ts';
 
@@ -48,6 +49,7 @@ function input(overrides: Partial<DigestInput> = {}): DigestInput {
     desired: { level: 'normal', reason: 'quota_normal', until: null, source: 'auto' },
     guardFailures: { 'mail-hero': 0, todofy: 0 },
     latestFinished: null,
+    lastTickAt: NOW,
     apps: {
       'mail-hero': { consecutive_failures: 0, status: null, status_at: null },
       todofy: { consecutive_failures: 0, status: todofyOk as OpsStatus, status_at: NOW - 60_000 },
@@ -84,6 +86,22 @@ describe('digest items', () => {
     expect(items({ usage: { ...failing, fetched_at: null, last_http_status: null } })).toMatchObject([{ metrics: { http_status: 0 } }]);
   });
 
+  it('reports stopped cron ticks (none completed for 75 minutes, or none ever)', () => {
+    expect(items({ lastTickAt: NOW - 75 * 60_000 })).toEqual([]);
+    expect(items({ lastTickAt: NOW - 3 * 3_600_000 })).toEqual([
+      { source: 'dashboard', code: 'tick_stale', severity: 'warning', since: '2026-09-29T11:00:00.000Z', metrics: { minutes_since: 180 } },
+    ]);
+    expect(items({ lastTickAt: null }).map(itemKey)).toEqual(['dashboard:tick_stale']);
+  });
+
+  it('judges stored items against the current time', () => {
+    const critical = { source: 'todofy', code: 'app_unreachable', severity: 'critical', since: '2026-09-29T10:00:00.000Z', metrics: {} } as const;
+    const stale = withTickState([critical], NOW - 3 * 3_600_000, NOW);
+    expect(stale.map(itemKey)).toEqual(['todofy:app_unreachable', 'dashboard:tick_stale']);
+    expect(withTickState(stale, NOW - 60_000, NOW).map(itemKey)).toEqual(['todofy:app_unreachable']);
+    expect(withTickState([], NOW - 60_000, NOW)).toEqual([]);
+  });
+
   it('reports an active shed and repeated setGuard failures', () => {
     const list = items({
       desired: { level: 'shed', reason: 'owner_shed', until: NOW + 5_400_000, source: 'owner' },
@@ -93,7 +111,7 @@ describe('digest items', () => {
     expect(list[0]?.metrics).toEqual({ hours_left: 1.5, manual: 1 });
   });
 
-  it('reports the latest finished canary run when it failed or was unsupported', () => {
+  it('reports the latest finished canary run when it failed (critical) or was skipped (warning, with its reason)', () => {
     const run = newRun('canary-2026-09-29', 'scheduled', NOW - 3 * 3_600_000);
     const failed = finish({ ...run, delivery: { state: 'pending', attempts: 3, last_http_status: 503, error_code: 'http_503' } }, 'failed', 'delivery', 'timeout', NOW - 3_600_000);
     const list = items({ latestFinished: failed });
@@ -102,8 +120,15 @@ describe('digest items', () => {
     ]);
     expect(items({ latestFinished: finish(run, 'failed', 'start', 'invalid_input', NOW) })[0]?.code).toBe('canary_start_failed');
     expect(items({ latestFinished: finish(run, 'failed', 'consumer', 'llm_quota', NOW) })[0]?.code).toBe('canary_consumer_failed');
-    expect(items({ latestFinished: finish(run, 'skipped', 'start', 'canary_consumer_missing', NOW) })[0]).toMatchObject({ code: 'canary_unsupported', severity: 'warning' });
-    expect(items({ latestFinished: finish(run, 'skipped', 'start', 'maintenance', NOW) })).toEqual([]);
+    expect(items({ latestFinished: finish(run, 'skipped', 'start', 'canary_consumer_missing', NOW) })).toEqual([
+      { source: 'dashboard', code: 'canary_skipped', severity: 'warning', since: '2026-09-29T14:00:00.000Z', metrics: { canary_consumer_missing: 1 } },
+    ]);
+    // contracts/ops-v1 "Daily canary" step 2: paused/unavailable is reported with its reason, never as a failure.
+    for (const [stage, code] of [['start', 'no_endpoint'], ['start', 'send_paused'], ['start', 'maintenance'], ['delivery', 'endpoint_paused'], ['consumer', 'processing_paused']] as const) {
+      expect(items({ latestFinished: finish(run, 'skipped', stage, code, NOW) })).toEqual([
+        { source: 'dashboard', code: 'canary_skipped', severity: 'warning', since: '2026-09-29T14:00:00.000Z', metrics: { [code]: 1 } },
+      ]);
+    }
     expect(items({ latestFinished: finish(run, 'ok', null, null, NOW) })).toEqual([]);
   });
 

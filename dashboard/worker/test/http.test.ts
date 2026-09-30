@@ -50,7 +50,7 @@ function makeEnv(overrides: Partial<Env> = {}, answers: { startCanary?: unknown;
     },
     setGuardOverride(level: string) {
       calls.guard.push(level);
-      return Promise.resolve(answers.guard ?? { ok: true, guard: { desired: { level } } });
+      return Promise.resolve(answers.guard ?? { guard: { desired: { level } } });
     },
     tick: vi.fn(() => Promise.resolve({ ran: true })),
   };
@@ -121,9 +121,14 @@ async function csrf(env: Env): Promise<{ token: string; cookie: string }> {
   return { token: body.token, cookie: setCookie.split(';')[0] ?? '' };
 }
 
-async function mutate(env: Env, path: string, body: unknown, options: { origin?: string; csrf?: { token: string; cookie: string } | null } = {}): Promise<Response> {
+async function mutate(
+  env: Env,
+  path: string,
+  body: unknown,
+  options: { origin?: string; csrf?: { token: string; cookie: string } | null; headers?: Record<string, string> } = {},
+): Promise<Response> {
   const pair = options.csrf === undefined ? await csrf(env) : options.csrf;
-  const headers: Record<string, string> = { 'content-type': 'application/json', origin: options.origin ?? ORIGIN };
+  const headers: Record<string, string> = { 'content-type': 'application/json', origin: options.origin ?? ORIGIN, ...options.headers };
   if (pair !== null) {
     headers['x-csrf-token'] = pair.token;
     headers.cookie = pair.cookie;
@@ -282,17 +287,80 @@ describe('CSRF and mutations', () => {
     expect(calls.startCanary).toBe(0);
   });
 
-  it('maps the object\'s refusals to 409, 429 and 503', async () => {
+  it('maps the object\'s refusals to 409 and 429, and its failure to 503', async () => {
     for (const [answer, status, code] of [
       [{ ok: false, code: 'canary_active' }, 409, 'canary_active'],
       [{ ok: false, code: 'canary_limit' }, 429, 'canary_limit'],
-      [{ ok: false, code: 'unavailable' }, 503, 'unavailable'],
     ] as const) {
       const { env } = makeEnv({}, { startCanary: answer });
       const response = await mutate(env, '/api/v1/canary', {});
       expect(response.status).toBe(status);
       expect(await errorCode(response)).toBe(code);
     }
+    const { env, stub } = makeEnv();
+    stub.startCanary = () => Promise.reject(new Error('object reset'));
+    stub.setGuardOverride = () => Promise.reject(new Error('object reset'));
+    for (const [path, body] of [['/api/v1/canary', {}], ['/api/v1/guard', { level: 'shed' }]] as const) {
+      const response = await mutate(env, path, body);
+      expect(response.status).toBe(503);
+      expect(await errorCode(response)).toBe('unavailable');
+    }
+  });
+
+  it('reads at most 1 KiB of a chunked body (no Content-Length) and never buffers the rest', async () => {
+    const { env, calls } = makeEnv();
+    const pair = await csrf(env);
+    let pulled = 0;
+    let cancelled = false;
+    // An endless upload: 64 KiB chunks until cancelled.
+    const endless = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        pulled++;
+        controller.enqueue(new Uint8Array(65_536).fill(0x20));
+      },
+      cancel() {
+        cancelled = true;
+      },
+    });
+    const request = incoming(`https://${HOST}/api/v1/guard`, {
+      method: 'POST',
+      headers: { 'cf-access-jwt-assertion': await token(), origin: ORIGIN, 'x-csrf-token': pair.token, cookie: pair.cookie },
+      body: endless,
+      duplex: 'half',
+    } as RequestInit);
+    expect(request.headers.get('content-length')).toBeNull();
+    const response = await worker.fetch(request, env);
+    expect(response.status).toBe(400);
+    expect(await errorCode(response)).toBe('bad_request');
+    expect(cancelled).toBe(true);
+    expect(pulled).toBeLessThanOrEqual(3);
+    expect(calls.guard).toEqual([]);
+
+    // A small chunked body is read normally.
+    const small = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode('{"level":'));
+        controller.enqueue(new TextEncoder().encode('"shed"}'));
+        controller.close();
+      },
+    });
+    const ok = await worker.fetch(
+      incoming(`https://${HOST}/api/v1/guard`, {
+        method: 'POST',
+        headers: { 'cf-access-jwt-assertion': await token(), origin: ORIGIN, 'x-csrf-token': pair.token, cookie: pair.cookie },
+        body: small,
+        duplex: 'half',
+      } as RequestInit),
+      env,
+    );
+    expect(ok.status).toBe(200);
+    expect(calls.guard).toEqual(['shed']);
+    // A declared length above the limit or a malformed one is refused before reading.
+    for (const length of ['1025', 'abc', '-1']) {
+      const refused = await mutate(env, '/api/v1/guard', { level: 'shed' }, { csrf: pair, headers: { 'content-length': length } });
+      expect(refused.status, length).toBe(400);
+    }
+    expect(calls.guard).toEqual(['shed']);
   });
 });
 

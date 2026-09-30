@@ -7,6 +7,7 @@ import { OPS_LIMITS, type GuardState } from '../../../contracts/ops-v1/ops-v1.ts
 import type { QuotaRow } from '../src/api-types.ts';
 import {
   AUTO_NORMAL,
+  AUTO_UNKNOWN,
   NO_APPLIED,
   desiredGuard,
   evaluateAuto,
@@ -14,6 +15,8 @@ import {
   hoursLeft,
   needsApply,
   ownerOverride,
+  settled,
+  usableTriggerRows,
   usageFresh,
   type AutoGuard,
   type UsageSnapshot,
@@ -25,7 +28,7 @@ const T = (s: string): number => Date.parse(s);
 function quota(id: QuotaRow['id'], percent: number | null, trigger = true): QuotaRow {
   return {
     id,
-    period: trigger ? 'daily' : 'storage',
+    period: !trigger ? 'storage' : id.startsWith('r2_') ? 'monthly' : 'daily',
     unit: 'rows',
     used: percent,
     limit: 100,
@@ -40,7 +43,8 @@ function quota(id: QuotaRow['id'], percent: number | null, trigger = true): Quot
 }
 
 function usage(at: number, rows: QuotaRow[]): UsageSnapshot {
-  return { fetched_at: at, day: new Date(at).toISOString().slice(0, 10), rows };
+  const day = new Date(at).toISOString().slice(0, 10);
+  return { fetched_at: at, day, month: `${day.slice(0, 7)}-01`, rows };
 }
 
 describe('usage freshness', () => {
@@ -95,9 +99,35 @@ describe('the automatic rule', () => {
     const stale = usage(at, [quota('d1_rows_read', 90)]);
     const later = at + 2 * 3_600_000;
     expect(evaluateAuto(later, stale, shed)).toEqual(shed);
-    expect(evaluateAuto(T('2026-09-30T00:10:00Z'), stale, shed)).toEqual(AUTO_NORMAL);
-    expect(evaluateAuto(later, stale, null)).toEqual(AUTO_NORMAL);
-    expect(evaluateAuto(later, null, null)).toEqual(AUTO_NORMAL);
+    expect(evaluateAuto(T('2026-09-30T00:10:00Z'), stale, shed)).toEqual(AUTO_UNKNOWN);
+    expect(evaluateAuto(later, stale, null)).toEqual(AUTO_UNKNOWN);
+    expect(evaluateAuto(later, null, null)).toEqual(AUTO_UNKNOWN);
+    // Without data the reason says so (the UI must not claim "配额正常").
+    expect(AUTO_UNKNOWN).toMatchObject({ level: 'normal', reason: 'usage_unknown' });
+    expect(desiredGuard(later, AUTO_UNKNOWN, null)).toEqual({ level: 'normal', reason: 'usage_unknown', until: null, source: 'auto' });
+  });
+
+  it('keeps a monthly R2 shed across midnight when GraphQL fails at the day change (no flap)', () => {
+    // Yesterday 23:30: R2 Class A at 85 % of the month; the auto shed lasts until 00:10.
+    const lastFetch = T('2026-09-29T23:30:00Z');
+    const snapshot = usage(lastFetch, [quota('d1_rows_read', 90), quota('r2_class_a', 85)]);
+    const shed = evaluateAuto(lastFetch, snapshot, null);
+    expect(shed).toMatchObject({ level: 'shed', reason: 'quota_d1_rows_read', until: T('2026-09-30T00:10:00Z') });
+    // 00:00 and 00:30 fetches fail: the daily row no longer counts, the monthly one still does.
+    expect(usableTriggerRows(snapshot, T('2026-09-30T00:30:00Z'))?.map((row) => row.id)).toEqual(['r2_class_a']);
+    const at0000 = evaluateAuto(T('2026-09-30T00:00:00Z'), snapshot, shed);
+    expect(at0000).toMatchObject({ level: 'shed', reason: 'quota_r2_class_a', entered_day: '2026-09-30', until: T('2026-10-01T00:10:00Z') });
+    const at0030 = evaluateAuto(T('2026-09-30T00:30:00Z'), snapshot, at0000);
+    expect(desiredGuard(T('2026-09-30T00:30:00Z'), at0030, null)).toMatchObject({ level: 'shed', reason: 'quota_r2_class_a' });
+    // With only a daily resource high, the new day starts normal, as with fresh data.
+    const dailyOnly = usage(lastFetch, [quota('d1_rows_read', 90), quota('r2_class_a', 20)]);
+    expect(evaluateAuto(T('2026-09-30T00:30:00Z'), dailyOnly, evaluateAuto(lastFetch, dailyOnly, null))).toEqual(AUTO_NORMAL);
+    // Beyond the 90-minute window, or into a new month, nothing carries over.
+    expect(usableTriggerRows(snapshot, T('2026-09-30T01:01:00Z'))).toBeNull();
+    const monthEnd = usage(T('2026-09-30T23:30:00Z'), [quota('r2_class_a', 85)]);
+    expect(usableTriggerRows(monthEnd, T('2026-10-01T00:00:00Z'))).toBeNull();
+    // Snapshots stored before the month field existed never carry over.
+    expect(usableTriggerRows({ fetched_at: lastFetch, day: '2026-09-29', rows: snapshot.rows }, T('2026-09-30T00:00:00Z'))).toBeNull();
   });
 });
 
@@ -156,6 +186,14 @@ describe('applying the guard', () => {
   it('re-applies when the app lost the state or the last call failed', () => {
     expect(needsApply(shedInput, applied, normalState)).toBe(true);
     expect(needsApply(shedInput, { ...applied, consecutive_failures: 1, last_error: 'unavailable' }, null)).toBe(true);
+  });
+
+  it('drops pending failures once no call is needed', () => {
+    const failed = { ...NO_APPLIED, last_call_at: now, last_error: 'unavailable', consecutive_failures: 2 } as const;
+    // shed failed twice and was never applied; now normal is wanted and nothing needs sending.
+    expect(needsApply(normalInput, failed, null)).toBe(false);
+    expect(settled(failed)).toEqual({ ...failed, last_error: null, consecutive_failures: 0 });
+    expect(settled(applied)).toBe(applied);
   });
 
   it('sends normal only to an app that is, or was last left, shed', () => {

@@ -1,11 +1,13 @@
 /**
  * Quota guardrails (docs/design.md §5.3): pure decisions, `now` passed in. Shed at 80 % actual usage
  * of any trigger resource, hold while at least 70 % on the same UTC day, clear below 70 % or on a new
- * UTC day; never shed without fresh usage; owner overrides win while they last.
+ * UTC day; never shed without fresh usage; owner overrides win while they last. Monthly R2 operations
+ * do not reset at midnight, so a snapshot from the end of the previous day of the same month still
+ * counts for them (daily resources never carry over).
  */
 import { OPS_LIMITS, type GuardLevel, type GuardState, type SetGuardInput } from '../../../contracts/ops-v1/ops-v1.ts';
 import { GUARD_CLEAR_PERCENT, GUARD_SHED_PERCENT, type AppErrorCode, type GuardSource, type QuotaRow } from './api-types.ts';
-import { DAY_MS, HOUR_MS, MINUTE_MS, iso, nextUtcMidnight, utcDay } from './time.ts';
+import { DAY_MS, HOUR_MS, MINUTE_MS, iso, nextUtcMidnight, utcDay, utcMonthStart } from './time.ts';
 
 /** Usage older than this (or of another UTC day) is not fresh. */
 export const USAGE_FRESH_MS = 90 * MINUTE_MS;
@@ -17,6 +19,8 @@ export const OWNER_SHED_MS = DAY_MS;
 export interface UsageSnapshot {
   readonly fetched_at: number | null;
   readonly day: string | null;
+  /** UTC month start (YYYY-MM-01) of the fetch; monthly rows carry over midnight only within it. */
+  readonly month?: string | null;
   readonly rows: readonly QuotaRow[];
 }
 
@@ -44,14 +48,24 @@ export interface DesiredGuard {
   readonly source: GuardSource;
 }
 
+function recent(usage: UsageSnapshot | null, now: number): usage is UsageSnapshot & { readonly fetched_at: number } {
+  return usage !== null && usage.fetched_at !== null && now - usage.fetched_at <= USAGE_FRESH_MS && now >= usage.fetched_at - 5 * MINUTE_MS;
+}
+
 export function usageFresh(usage: UsageSnapshot | null, now: number): boolean {
-  return (
-    usage !== null &&
-    usage.fetched_at !== null &&
-    usage.day === utcDay(now) &&
-    now - usage.fetched_at <= USAGE_FRESH_MS &&
-    now >= usage.fetched_at - 5 * MINUTE_MS
-  );
+  return recent(usage, now) && usage.day === utcDay(now);
+}
+
+/**
+ * The trigger rows the automatic rule may use at `now`: all rows of fresh usage; right after midnight,
+ * the monthly rows of a snapshot from the previous day of the same month that is still within the
+ * freshness window (a GraphQL outage at the day change must not lift a monthly R2 shed); else null.
+ */
+export function usableTriggerRows(usage: UsageSnapshot | null, now: number): readonly QuotaRow[] | null {
+  if (usage === null) return null;
+  if (usageFresh(usage, now)) return usage.rows;
+  if (recent(usage, now) && usage.month === utcMonthStart(now)) return usage.rows.filter((row) => row.period === 'monthly');
+  return null;
 }
 
 /** The trigger row with the highest percent (ties: the first in QUOTA_RESOURCES order). */
@@ -69,16 +83,19 @@ export function shedUntil(now: number): number {
 }
 
 export const AUTO_NORMAL: AutoGuard = { level: 'normal', reason: 'quota_normal', until: null, entered_day: null, entered_at: null };
+/** Normal because there is no usable usage (no token, or GraphQL failing): nothing is known, nothing is shed. */
+export const AUTO_UNKNOWN: AutoGuard = { ...AUTO_NORMAL, reason: 'usage_unknown' };
 
 /** One evaluation of the automatic rule (§5.3 steps 2–3). */
 export function evaluateAuto(now: number, usage: UsageSnapshot | null, previous: AutoGuard | null): AutoGuard {
   const today = utcDay(now);
-  if (!usageFresh(usage, now)) {
-    // No fresh data: keep an existing shed until it lapses; never enter shed without data.
+  const rows = usableTriggerRows(usage, now);
+  if (rows === null) {
+    // No usable data: keep an existing shed until it lapses; never enter shed without data.
     if (previous?.level === 'shed' && previous.until !== null && now < previous.until) return previous;
-    return AUTO_NORMAL;
+    return AUTO_UNKNOWN;
   }
-  const top = highestTrigger(usage?.rows ?? []);
+  const top = highestTrigger(rows);
   const sameEpisode = previous?.level === 'shed' && previous.entered_day === today;
   if (sameEpisode && top !== null && top.percent >= GUARD_CLEAR_PERCENT) {
     return { ...previous, until: shedUntil(now) };
@@ -103,7 +120,7 @@ export function desiredGuard(now: number, auto: AutoGuard | null, override: Guar
   if (auto.level === 'shed' && auto.until !== null && now < auto.until) {
     return { level: 'shed', reason: auto.reason, until: auto.until, source: 'auto' };
   }
-  return { level: 'normal', reason: 'quota_normal', until: null, source: 'auto' };
+  return { level: 'normal', reason: auto.level === 'normal' ? auto.reason : 'quota_normal', until: null, source: 'auto' };
 }
 
 /** The owner's override for `level` set at `now`: shed for 24 h, or clear until the next UTC midnight. */
@@ -151,6 +168,15 @@ export function needsApply(input: SetGuardInput, applied: AppliedGuard, observed
   if (!sameAsLast || applied.consecutive_failures > 0) return true;
   // The app lost its state or it expired: re-apply.
   return observed !== null && !(observed.level === 'shed' && sameUntil(observed.until, input.until));
+}
+
+/**
+ * The failure record after a tick in which no call was needed: a failure only counts while the call it
+ * belongs to is still pending, so the level it was for no longer being wanted (or being in place)
+ * clears it (`guard_apply_failed` then disappears).
+ */
+export function settled(applied: AppliedGuard): AppliedGuard {
+  return applied.consecutive_failures === 0 && applied.last_error === null ? applied : { ...applied, last_error: null, consecutive_failures: 0 };
 }
 
 /** Hours left of a shed, one decimal (digest metric). */

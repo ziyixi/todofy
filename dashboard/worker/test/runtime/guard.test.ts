@@ -105,9 +105,53 @@ describe('automatic guard', () => {
     await h.tick('2026-09-30T01:00:00Z');
     const later = await h.overview();
     expect(later.usage.last_error).toBe('graphql_error');
-    // The shed lapsed at 00:10: both apps are told normal, and nothing new is shed.
+    // The shed lapsed at 00:10: both apps are told normal, and nothing new is shed. The reason says
+    // that no usage is known (not that the quota is normal).
     const calls = await guardCalls(h);
-    expect(calls['mail-hero']).toEqual([{ level: 'normal', reason: 'quota_normal', until: null }]);
+    expect(calls['mail-hero']).toEqual([{ level: 'normal', reason: 'usage_unknown', until: null }]);
+    expect(later.guard.desired).toMatchObject({ level: 'normal', reason: 'usage_unknown', source: 'auto' });
+  });
+
+  it('does not lift a monthly R2 shed when GraphQL fails at the day change', async () => {
+    const r2 = { r2Ops: [{ actionType: 'PutObject', bucketName: 'bucket-synthetic', requests: 850_000 }] };
+    h = await startFlows({ bindings: { CANARY_UTC_HOUR: '12' }, usage: r2 });
+    await h.tick('2026-09-29T23:30:00Z');
+    const first = await guardCalls(h);
+    expect(first['mail-hero']).toEqual([{ level: 'shed', reason: 'quota_r2_class_a', until: '2026-09-30T00:10:00.000Z' }]);
+    await appsReport(h, first['mail-hero']?.[0] as SetGuardInput, '2026-09-29T23:30:00.000Z');
+
+    h.analytics.answer = () => new Response('upstream', { status: 503 });
+    await h.tick('2026-09-30T00:00:00Z');
+    const renewed = { level: 'shed', reason: 'quota_r2_class_a', until: '2026-10-01T00:10:00.000Z' } as const;
+    expect(await guardCalls(h)).toEqual({ 'mail-hero': [renewed], todofy: [renewed] });
+    await appsReport(h, renewed, '2026-09-30T00:00:00.000Z');
+    await h.tick('2026-09-30T00:30:00Z');
+    // No normal in between: the deferred jobs never start while R2 stays above 80 %.
+    expect(await guardCalls(h)).toEqual({ 'mail-hero': [], todofy: [] });
+  });
+
+  it('clears guard_apply_failed once the shed that failed is no longer wanted', async () => {
+    h = await startFlows({ bindings: { CANARY_UTC_HOUR: '23' }, usage: d1Reads(90) });
+    await h.answer('mail-hero', 'setGuard', { throw: 'unavailable' });
+    await h.tick('2026-09-29T10:00:00Z');
+    await h.tick('2026-09-29T10:30:00Z');
+    let overview = await h.overview();
+    expect(overview.digest.items.map((i) => `${i.source}:${i.code}`)).toContain('mail-hero:guard_apply_failed');
+    // Todofy took the shed; Mail Hero never did.
+    const calls = await guardCalls(h);
+    expect(calls['mail-hero']).toHaveLength(2);
+    await appsReport(h, calls.todofy?.[0] as SetGuardInput, '2026-09-29T10:00:00.000Z');
+    await h.answer('mail-hero', 'status', undefined);
+
+    h.analytics.answer = d1Reads(50);
+    await h.tick('2026-09-29T11:00:00Z');
+    // Normal goes only to Todofy (Mail Hero never shed), and Mail Hero's failures stop counting.
+    const after = await guardCalls(h);
+    expect(after['mail-hero']).toEqual([]);
+    expect(after.todofy).toEqual([{ level: 'normal', reason: 'quota_normal', until: null }]);
+    overview = await h.overview();
+    expect(overview.digest.items.map((i) => `${i.source}:${i.code}`)).not.toContain('mail-hero:guard_apply_failed');
+    expect(overview.guard.apps['mail-hero'].last_error).toBeNull();
   });
 
   it('never calls setGuard on an app that does not list the guard capability', async () => {

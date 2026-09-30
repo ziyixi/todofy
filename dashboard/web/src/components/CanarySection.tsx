@@ -1,6 +1,6 @@
 import type { CanaryRun, CanaryStage, CanaryView } from '../../../worker/src/api-types.ts'
-import { between, formatClock, formatDuration, formatFullTime, formatTime } from '../lib/format'
-import { CANARY_KIND, CANARY_OUTCOME, CANARY_PHASE, CANARY_STAGE, canaryCodeLabel, type Tone } from '../lib/labels'
+import { between, formatClock, formatDuration, formatFullTime, formatTime, utcDay, utcHourWithLocal } from '../lib/format'
+import { CANARY_KIND, CANARY_OUTCOME, CANARY_PHASE, CANARY_STAGE, appErrorLabel, canaryCodeLabel, type Tone } from '../lib/labels'
 import { Card, Fact, Facts, Pill, Time } from './ui'
 
 type StepState = 'done' | 'current' | 'failed' | 'skipped' | 'waiting'
@@ -71,26 +71,32 @@ function runDetail(run: CanaryRun): string | null {
   return null
 }
 
+/** What the canary does and does not test; shown on the page and in the docs. */
+export const CANARY_SCOPE =
+  '覆盖：Mail Hero 投递（webhook）→ Todofy 接收、Gemini 摘要与校验；不覆盖：来源邮箱转发、Email Routing 收件、原件保存与 MIME 解析。'
+
 export function CanarySection({ canary, now }: { canary: CanaryView; now: Date }) {
   const current = canary.active ?? canary.today
+  const day = utcDay(now)
   return (
-    <Card id="canary" title="端到端金丝雀">
+    <Card id="canary" title="投递与处理金丝雀">
       <p className="small muted">
-        每天 {String(canary.hour_utc).padStart(2, '0')}:00 UTC 之后的第一次定时检查会让 Mail Hero 生成一封合成测试邮件，经正常投递链路交给
-        Todofy 校验；不涉及真实邮件，也不会创建 Todoist 任务。
+        每天 {utcHourWithLocal(canary.hour_utc, now)}之后的第一次定时检查会让 Mail Hero 直接生成一封合成测试邮件，经正常投递链路交给
+        Todofy 处理并校验；不涉及真实邮件，也不会创建 Todoist 任务。
       </p>
+      <p className="small">{CANARY_SCOPE}</p>
       <Facts>
         <Fact label="下次定时运行">
           <Time iso={canary.next_scheduled_at} now={now} />
         </Fact>
-        <Fact label="今天手动运行">
+        <Fact label={`本 UTC 日（${day}）手动运行`}>
           {canary.manual_today} / {canary.manual_limit} 次
         </Fact>
       </Facts>
 
       <div className="subsection">
-        <h3>{canary.active ? '正在运行' : '今天'}</h3>
-        {current ? <RunTimeline run={current} now={now} /> : <p className="small muted">今天还没有运行。</p>}
+        <h3>{canary.active ? '正在运行' : `本 UTC 日（${day}）`}</h3>
+        {current ? <RunTimeline run={current} now={now} /> : <p className="small muted">本 UTC 日还没有运行。</p>}
       </div>
 
       <div className="subsection">
@@ -184,8 +190,14 @@ function RunTimeline({ run, now }: { run: CanaryRun; now: Date }) {
                       : ''}
                   </span>
                 ) : null}
+                {step.key === 'queued' && run.start_code && state === 'current' ? (
+                  <span className="small muted">等待：{canaryCodeLabel(run.start_code)}（每 30 分钟重试，直到截止）</span>
+                ) : null}
                 {step.key === 'completed' && run.consumer.waiting_code && state !== 'done' ? (
                   <span className="small muted">等待：{canaryCodeLabel(run.consumer.waiting_code)}</span>
+                ) : null}
+                {run.last_call_error && state === 'current' && (step.key === 'delivered' || step.key === 'completed') ? (
+                  <span className="small muted">上次查询失败：{appErrorLabel(run.last_call_error)}，下次定时检查重试</span>
                 ) : null}
               </div>
             </li>

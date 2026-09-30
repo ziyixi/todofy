@@ -121,10 +121,29 @@ describe('app health', () => {
     expect(report?.items[0]?.metrics).toEqual({ consecutive_failures: 2 });
 
     const overview = await h.overview();
-    expect(overview.overall).toEqual({ level: 'critical', codes: ['app_unreachable'] });
+    expect(overview.overall.level).toBe('critical');
+    // (These synthetic ticks lie in the past, so the banner also says the ticks stopped.)
+    expect(overview.overall.items.filter((item) => item.code !== 'tick_stale')).toEqual([{ source: 'mail-hero', code: 'app_unreachable', severity: 'critical' }]);
     expect(overview.apps['mail-hero']).toMatchObject({ reachable: false, error: 'unavailable', consecutive_failures: 2, checked_at: '2026-09-29T11:00:00.000Z', status_at: '2026-09-29T10:00:00.000Z' });
     expect(overview.apps['mail-hero'].status).not.toBeNull();
     expect(overview.apps.todofy).toMatchObject({ reachable: true, consecutive_failures: 0 });
+  });
+
+  it('keeps the source of each banner item, so the same code from both apps stays two entries', async () => {
+    h = await startFlows({ bindings: { CANARY_UTC_HOUR: '23' } });
+    await h.answer('mail-hero', 'status', { throw: 'unavailable' });
+    await h.answer('todofy', 'status', { throw: 'busy' });
+    const now = Date.now();
+    await h.tick(now - 40 * 60_000);
+    await h.tick(now - 5 * 60_000);
+    const overview = await h.overview();
+    expect(overview.overall).toEqual({
+      level: 'critical',
+      items: [
+        { source: 'mail-hero', code: 'app_unreachable', severity: 'critical' },
+        { source: 'todofy', code: 'app_unreachable', severity: 'critical' },
+      ],
+    });
   });
 
   it('keeps the contract error codes and refuses invalid output', async () => {

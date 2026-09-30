@@ -30,7 +30,8 @@ export function QuotaSection({ usage, now }: { usage: UsageView; now: Date }) {
     <Card id="quota" title="Cloudflare 用量（Workers Free）" actions={<Pill tone={status.tone}>{status.label}</Pill>}>
       <p className="small muted">
         整个 Cloudflare 账户的用量，包括其他 Worker、数据库和存储桶。达到 {GUARD_SHED_PERCENT}% 的每日项目或每月 R2
-        操作会让两个应用自动降载。
+        操作会让两个应用自动降载。“按当前速度线性估算”只是把已用量按已过时间等比放大，不是预测：本 UTC
+        日开头的一次集中任务会让估算偏高，每日项目在 00:00 UTC 后 3 小时内不估算。
       </p>
       <p className="small">
         {usage.fetched_at ? (
@@ -132,8 +133,8 @@ function QuotaItem({ row }: { row: QuotaRow }) {
         </span>
         {row.projected !== null && row.projected_percent !== null ? (
           <span className={row.projected_percent >= 100 ? 'text-warn' : 'muted'}>
-            预计{row.period === 'daily' ? '今日' : '本月'}结束 {formatQuantity(row.projected, row.unit)}（
-            {formatPercent(row.projected_percent)}）{row.projected_percent >= 100 ? '，将超出上限' : ''}
+            按当前速度线性估算，{row.period === 'daily' ? '本 UTC 日' : '本月'}结束约 {formatQuantity(row.projected, row.unit)}（
+            {formatPercent(row.projected_percent)}）{row.projected_percent >= 100 ? '，按此速度将超出上限' : ''}
           </span>
         ) : null}
       </div>

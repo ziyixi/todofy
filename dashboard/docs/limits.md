@@ -53,9 +53,10 @@ operation class at ≥ 80 % of its allowance puts both apps into `shed` until th
 min (renewed while still ≥ 70 % that day); storage never triggers, because `shed` defers cleanup,
 which would make storage worse. Details: [`design.md`](design.md) §5.3.
 
-**Projection** ("预计"): daily `used × 86400 / elapsed seconds` of the UTC day (none during the first
-hour); monthly `used × days in month / elapsed days` (none during the first day); none for storage. It
-is a straight-line estimate, not a forecast.
+**Projection** ("按当前速度线性估算"): daily `used × 86400 / elapsed seconds` of the UTC day (none
+during the first 3 hours, where one early job would dominate); monthly `used × days in month / elapsed
+days` (none during the first day); none for storage. It is a straight-line estimate, not a forecast,
+and the page says so.
 
 ## 2. Platform limits the design relies on
 
@@ -77,7 +78,8 @@ is a straight-line estimate, not a forecast.
 48 cron ticks: 48 Worker requests and 48 Durable Object requests; at most 96 `status()` calls (Mail
 Hero ≤ 6 and Todofy ≤ 5 indexed D1 statements each, contracts/ops-v1); at most 48 GraphQL queries; a
 few `setGuard`, canary and `reportOps` calls; one canary a day (one synthetic message stored in Mail
-Hero's R2 and D1 and one Gemini call in Todofy), up to 3 more when the owner runs it by hand. Each tick
+Hero's R2 and D1 and normally one Gemini call in Todofy, up to 3 when a transient failure is retried),
+up to 3 more when the owner runs it by hand. Each tick
 writes about 10–40 SQLite rows in `HomeState`; a page load reads at most 30. Owner page loads add a
 few Worker and DO requests. All of this is far below every allowance in §1.
 

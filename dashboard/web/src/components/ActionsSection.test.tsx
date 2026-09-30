@@ -3,7 +3,7 @@ import userEvent from '@testing-library/user-event'
 import type { CanaryRun, GuardView, OverviewResponse } from '../../../worker/src/api-types.ts'
 import { canaryActiveOverview, guardActiveOverview, healthyOverview } from '../test/fixtures'
 import { apiError, freezeClock, installFetch, json, renderApp, type Call, type Handler } from '../test/harness'
-import { CLEAR_CONFIRM_TEXT, SHED_CONFIRM_TEXT, canaryConfirmText } from './ActionsSection'
+import { SHED_CONFIRM_TEXT, canaryConfirmText, clearConfirmText } from './ActionsSection'
 
 const STARTED: CanaryRun = {
   ...canaryActiveOverview().canary.active!,
@@ -45,7 +45,7 @@ describe('actions', () => {
     expect(dialog).toHaveAccessibleDescription(canaryConfirmText(3))
     expect(within(dialog).getByText(canaryConfirmText(3))).toBeInTheDocument()
     expect(canaryConfirmText(3)).toBe(
-      '调用 Mail Hero 创建一封固定内容的合成测试邮件，经正常投递链路发给 Todofy；Todofy 只调用一次 Gemini 并校验结果，不创建 Todoist 任务、不进入列表或提醒。今天还可手动运行 3 次。',
+      '调用 Mail Hero 直接创建一封固定内容的合成测试邮件（不经过来源转发、Email Routing 收件、原件保存与解析），经正常投递链路发给 Todofy；Todofy 按正常流程调用 Gemini 摘要并校验（暂时性失败最多尝试 3 次，计入 Gemini 预算），不创建 Todoist 任务、不进入列表或提醒。本 UTC 日还可手动运行 3 次。',
     )
     // Focus starts on 取消, so Enter never confirms by accident.
     expect(within(dialog).getByRole('button', { name: '取消' })).toHaveFocus()
@@ -99,6 +99,28 @@ describe('actions', () => {
     expect(posts(calls)).toHaveLength(1)
   })
 
+  it('says why a manual run did not start at once (paused or unavailable)', async () => {
+    const waiting: CanaryRun = { ...STARTED, start_code: 'send_paused' }
+    let current = healthyOverview()
+    const { actions, user } = await open(
+      () => current,
+      () => {
+        current = { ...current, canary: { ...current.canary, active: waiting, today: waiting, recent: [waiting, ...current.canary.recent], manual_today: 1 } }
+        return json({ run: waiting }, 202)
+      },
+    )
+    await user.click(within(actions).getByRole('button', { name: '立即运行金丝雀' }))
+    await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: '确认运行' }))
+    await waitFor(() =>
+      expect(within(actions).getByRole('status')).toHaveTextContent(
+        '未能立即启动金丝雀 canary-manual-20260929T170000Z：投递已强制暂停；截止前每 30 分钟重试一次。',
+      ),
+    )
+    const canary = screen.getByRole('region', { name: '投递与处理金丝雀' })
+    const steps = within(within(canary).getByRole('list', { name: '运行阶段' })).getAllByRole('listitem')
+    expect(steps[1]?.textContent).toBe('已排队进行中等待：投递已强制暂停（每 30 分钟重试，直到截止）')
+  })
+
   it('keeps the canary button focusable but inert while a run is active', async () => {
     const { calls, actions, user } = await open(canaryActiveOverview(), () => json({}))
     const button = within(actions).getByRole('button', { name: '立即运行金丝雀' })
@@ -116,7 +138,7 @@ describe('actions', () => {
     const { actions } = await open({ ...overview, canary: { ...overview.canary, manual_today: 3 } }, () => json({}))
     const button = within(actions).getByRole('button', { name: '立即运行金丝雀' })
     expect(button).toHaveAttribute('aria-disabled', 'true')
-    expect(button).toHaveAccessibleDescription('今天的 3 次手动运行已用完。')
+    expect(button).toHaveAccessibleDescription('本 UTC 日的 3 次手动运行已用完。')
   })
 
   it('forces shed after confirmation and reports per-app failures', async () => {
@@ -139,7 +161,7 @@ describe('actions', () => {
     const dialog = screen.getByRole('dialog', { name: '强制降载？' })
     expect(dialog).toHaveAccessibleDescription(SHED_CONFIRM_TEXT)
     expect(SHED_CONFIRM_TEXT).toBe(
-      '立即让 Mail Hero 和 Todofy 在 24 小时内推迟可推迟的清理和安全网任务（各任务仍有自身上限）；收件、解析、投递、重试和真实邮件处理不受影响。可随时解除。',
+      '立即让两个应用降载 24 小时：Mail Hero 推迟原件对账、保留期清理、金丝雀清理和告警历史清理（每项最多推迟 48 小时）；Todofy 推迟开始新一轮每周备份（上次完整备份超过 7.5 天仍会执行）、过期数据清理和趋势统计汇总（最多推迟 72 小时，之后补上）。收件、解析、投递、重试、已在进行的备份和真实邮件处理不受影响。可随时解除。',
     )
     await user.click(within(dialog).getByRole('button', { name: '确认降载' }))
 
@@ -169,9 +191,10 @@ describe('actions', () => {
     await user.click(within(actions).getByRole('button', { name: '解除降载' }))
 
     const dialog = screen.getByRole('dialog', { name: '解除降载？' })
-    expect(dialog).toHaveAccessibleDescription(CLEAR_CONFIRM_TEXT)
-    expect(CLEAR_CONFIRM_TEXT).toBe(
-      '立即结束两个应用的降载，并在本 UTC 日剩余时间内暂停自动降载；次日 00:00 UTC 起恢复自动判断。',
+    // The fixed clock is 17:00 UTC; the next 00:00 UTC is 08:00 in Asia/Shanghai.
+    expect(dialog).toHaveAccessibleDescription(clearConfirmText('08:00'))
+    expect(clearConfirmText('08:00')).toBe(
+      '立即结束两个应用的降载，并在本 UTC 日剩余时间内暂停自动降载；次日 00:00 UTC（本地 08:00）起恢复自动判断。',
     )
     await user.click(within(dialog).getByRole('button', { name: '确认解除' }))
 

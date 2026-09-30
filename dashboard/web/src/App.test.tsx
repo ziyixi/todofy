@@ -71,13 +71,14 @@ describe('overview page', () => {
     const workers = within(quota).getByRole('meter', { name: 'Workers 请求' })
     expect(workers).toHaveAttribute('aria-valuenow', '12.3')
     expect(workers).toHaveAttribute('aria-valuetext', '已用 12,345 次，上限 100,000 次，12.3%')
-    expect(within(quota).getByText(/预计今日结束 17,428 次（17.4%）/)).toBeInTheDocument()
+    expect(within(quota).getByText(/按当前速度线性估算，本 UTC 日结束约 17,428 次（17.4%）/)).toBeInTheDocument()
+    expect(within(quota).getByText(/只是把已用量按已过时间等比放大，不是预测/)).toBeInTheDocument()
     const doStorage = within(quota).getByRole('meter', { name: 'Durable Objects SQLite 存储' })
     expect(doStorage).not.toHaveAttribute('aria-valuenow')
     expect(doStorage).toHaveAttribute('aria-valuetext', '无数据')
     expect(within(quota).getAllByRole('meter')).toHaveLength(13)
 
-    const canary = card('端到端金丝雀')
+    const canary = card('投递与处理金丝雀')
     expect(within(canary).getAllByText('成功').length).toBeGreaterThan(0)
     const steps = within(within(canary).getByRole('list', { name: '运行阶段' })).getAllByRole('listitem')
     expect(steps.map((step) => step.textContent)).toEqual([
@@ -103,8 +104,11 @@ describe('overview page', () => {
     const banner = screen.getByRole('region', { name: /总体状态/ })
     expect(within(banner).getByText('严重')).toBeInTheDocument()
     const issues = within(banner).getByRole('list', { name: '当前问题' })
-    expect(within(issues).getByText('投递目标已阻断')).toBeInTheDocument()
-    expect(within(issues).getByText('Gemini 预算超过 80%')).toBeInTheDocument()
+    // Each chip names its app and links to the card that explains it.
+    const blocked = within(issues).getByRole('link', { name: 'Mail Hero：投递目标已阻断' })
+    expect(blocked).toHaveAttribute('href', '#app-mail-hero')
+    expect(within(issues).getByRole('link', { name: 'Todofy：备份过旧' })).toHaveAttribute('href', '#app-todofy')
+    expect(within(issues).getByRole('link', { name: 'Mail Hero：存储容量超过 70%' })).toBeInTheDocument()
 
     const mail = card('Mail Hero')
     expect(within(mail).getByText('降级')).toBeInTheDocument()
@@ -131,7 +135,7 @@ describe('overview page', () => {
     expect(within(todofy).getByText(/最近一次 status\(\) 调用失败：超时（连续 3 次）/)).toBeInTheDocument()
     expect(within(todofy).getByText(/下方是 9月29日 23:30 的最后一次成功状态/)).toBeInTheDocument()
     expect(within(card('Mail Hero')).getAllByText('正常')[0]).toBeInTheDocument()
-    expect(within(screen.getByRole('list', { name: '当前问题' })).getByText('应用无法连接')).toBeInTheDocument()
+    expect(within(screen.getByRole('list', { name: '当前问题' })).getByText('Todofy：应用无法连接')).toBeInTheDocument()
   })
 
   it('shows an active guard, its reason and per-app results', async () => {
@@ -153,14 +157,14 @@ describe('overview page', () => {
     expect(meter).toHaveAttribute('aria-valuenow', '84')
     const item = meter.closest('li') as HTMLElement
     expect(within(item).getByText('超过 80%')).toBeInTheDocument()
-    expect(within(item).getByText(/将超出上限/)).toBeInTheDocument()
+    expect(within(item).getByText(/按此速度将超出上限/)).toBeInTheDocument()
     expect(within(item).getByText(/查询结果已达行数上限/)).toBeInTheDocument()
   })
 
   it('shows a failed canary with the stage that stopped it', async () => {
     await showOverview(canaryFailedOverview())
 
-    const canary = card('端到端金丝雀')
+    const canary = card('投递与处理金丝雀')
     const today = within(canary).getByRole('list', { name: '运行阶段' }).parentElement as HTMLElement
     expect(within(today).getAllByText('失败')[0]).toBeInTheDocument()
     expect(within(today).getByText('投递阶段：HTTP 503')).toBeInTheDocument()
@@ -180,7 +184,7 @@ describe('overview page', () => {
     expect(within(quota).getByText('还没有成功获取过用量数据。')).toBeInTheDocument()
     expect(within(quota).getByText(/没有最新用量时不会自动进入降载。/)).toBeInTheDocument()
     expect(within(quota).queryAllByRole('meter')).toHaveLength(0)
-    expect(within(screen.getByRole('list', { name: '当前问题' })).getByText('用量数据获取失败')).toBeInTheDocument()
+    expect(within(screen.getByRole('list', { name: '当前问题' })).getByRole('link', { name: '运维面板：用量数据获取失败' })).toHaveAttribute('href', '#quota')
   })
 
   it('shows unknown codes as they are and never links a non-https URL', async () => {
@@ -190,7 +194,7 @@ describe('overview page', () => {
     if (!status) throw new Error('fixture')
     await showOverview({
       ...overview,
-      overall: { level: 'warning', codes: ['brand_new_code'] },
+      overall: { level: 'warning', items: [{ source: 'mail-hero', code: 'brand_new_code', severity: 'warning' }] },
       apps: {
         ...overview.apps,
         'mail-hero': {
@@ -201,16 +205,67 @@ describe('overview page', () => {
       },
     })
 
-    expect(within(screen.getByRole('list', { name: '当前问题' })).getByText('brand_new_code')).toBeInTheDocument()
+    expect(within(screen.getByRole('list', { name: '当前问题' })).getByText('Mail Hero：brand_new_code')).toBeInTheDocument()
     expect(within(card('Mail Hero')).getByText('brand_new_signal')).toBeInTheDocument()
     expect(within(card('Mail Hero')).queryByRole('link')).not.toBeInTheDocument()
+  })
+
+  it('keeps the same code from both apps apart', async () => {
+    const overview = unreachableOverview()
+    await showOverview({
+      ...overview,
+      overall: {
+        level: 'critical',
+        items: [
+          { source: 'mail-hero', code: 'app_unreachable', severity: 'critical' },
+          { source: 'todofy', code: 'app_unreachable', severity: 'critical' },
+        ],
+      },
+    })
+    const issues = within(screen.getByRole('list', { name: '当前问题' }))
+    expect(issues.getAllByRole('listitem')).toHaveLength(2)
+    expect(issues.getByRole('link', { name: 'Mail Hero：应用无法连接' })).toHaveAttribute('href', '#app-mail-hero')
+    expect(issues.getByRole('link', { name: 'Todofy：应用无法连接' })).toHaveAttribute('href', '#app-todofy')
+  })
+
+  it('says so when the scheduled checks stopped', async () => {
+    const overview = healthyOverview()
+    await showOverview({
+      ...overview,
+      overall: { level: 'warning', items: [{ source: 'dashboard', code: 'tick_stale', severity: 'warning' }] },
+      // The fixed clock is 17:00 UTC: three hours without a tick.
+      refresh: { ...overview.refresh, last_tick_at: '2026-09-29T14:00:00.000Z' },
+    })
+    const banner = screen.getByRole('region', { name: /总体状态/ })
+    expect(within(banner).getByText('需要关注')).toBeInTheDocument()
+    expect(within(banner).queryByText(/都没有需要处理的问题/)).not.toBeInTheDocument()
+    expect(within(banner).getByText('定时检查已 3 小时 未运行：自动降载、金丝雀和运维摘要都已停止，下方数据可能过时。')).toBeInTheDocument()
+    expect(within(banner).getByRole('link', { name: '运维面板：定时检查已停止' })).toBeInTheDocument()
+  })
+
+  it('names the canary scope and the UTC day it counts by', async () => {
+    await showOverview(healthyOverview())
+    const canary = card('投递与处理金丝雀')
+    expect(within(canary).getByText(/不覆盖：来源邮箱转发、Email Routing 收件、原件保存与 MIME 解析/)).toBeInTheDocument()
+    // 17:00 UTC on 9-29 is already 9-30 in Asia/Shanghai: the page says which day it means.
+    expect(within(canary).getByText(/每天 16:00 UTC（本地 00:00）之后/)).toBeInTheDocument()
+    expect(within(canary).getByRole('heading', { name: '本 UTC 日（2026-09-29）' })).toBeInTheDocument()
+    expect(within(canary).getByText('本 UTC 日（2026-09-29）手动运行')).toBeInTheDocument()
+  })
+
+  it('does not claim the quota is normal when there is no usage data', async () => {
+    const overview = analyticsUnavailableOverview()
+    await showOverview({ ...overview, guard: { ...overview.guard, desired: { level: 'normal', reason: 'usage_unknown', until: null, source: 'auto' } } })
+    const actions = card('降载与操作')
+    expect(within(actions).getByText('原因：无最新用量，不会自动降载')).toBeInTheDocument()
+    expect(within(actions).queryByText(/配额正常/)).not.toBeInTheDocument()
   })
 
   it('shows the first-tick state before any data exists', async () => {
     const overview = healthyOverview()
     await showOverview({
       ...overview,
-      overall: { level: 'unknown', codes: [] },
+      overall: { level: 'unknown', items: [] },
       refresh: { ...overview.refresh, last_tick_at: null },
     })
     const banner = screen.getByRole('region', { name: /总体状态/ })

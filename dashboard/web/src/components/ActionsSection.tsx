@@ -3,7 +3,7 @@ import { useState, type ReactNode } from 'react'
 import type { CanaryRun, GuardLevel, GuardView, OverviewResponse } from '../../../worker/src/api-types.ts'
 import { ApiError } from '../api/client'
 import { useSetGuard, useStartCanary } from '../api/queries'
-import { formatFullTime, formatTime } from '../lib/format'
+import { formatClock, formatFullTime, formatTime } from '../lib/format'
 import {
   APP_NAMES,
   CANARY_OUTCOME,
@@ -24,12 +24,20 @@ interface Result {
 
 /** The exact confirmation texts (docs/design.md §8); tests compare them verbatim. */
 export function canaryConfirmText(remaining: number): string {
-  return `调用 Mail Hero 创建一封固定内容的合成测试邮件，经正常投递链路发给 Todofy；Todofy 只调用一次 Gemini 并校验结果，不创建 Todoist 任务、不进入列表或提醒。今天还可手动运行 ${remaining} 次。`
+  return `调用 Mail Hero 直接创建一封固定内容的合成测试邮件（不经过来源转发、Email Routing 收件、原件保存与解析），经正常投递链路发给 Todofy；Todofy 按正常流程调用 Gemini 摘要并校验（暂时性失败最多尝试 3 次，计入 Gemini 预算），不创建 Todoist 任务、不进入列表或提醒。本 UTC 日还可手动运行 ${remaining} 次。`
 }
+/** What shed defers (contracts/ops-v1/IMPLEMENTATION.md §2.5 and §3.7). */
 export const SHED_CONFIRM_TEXT =
-  '立即让 Mail Hero 和 Todofy 在 24 小时内推迟可推迟的清理和安全网任务（各任务仍有自身上限）；收件、解析、投递、重试和真实邮件处理不受影响。可随时解除。'
-export const CLEAR_CONFIRM_TEXT =
-  '立即结束两个应用的降载，并在本 UTC 日剩余时间内暂停自动降载；次日 00:00 UTC 起恢复自动判断。'
+  '立即让两个应用降载 24 小时：Mail Hero 推迟原件对账、保留期清理、金丝雀清理和告警历史清理（每项最多推迟 48 小时）；Todofy 推迟开始新一轮每周备份（上次完整备份超过 7.5 天仍会执行）、过期数据清理和趋势统计汇总（最多推迟 72 小时，之后补上）。收件、解析、投递、重试、已在进行的备份和真实邮件处理不受影响。可随时解除。'
+/** `resetLocal`: the next 00:00 UTC in the browser's time zone. */
+export function clearConfirmText(resetLocal: string): string {
+  return `立即结束两个应用的降载，并在本 UTC 日剩余时间内暂停自动降载；次日 00:00 UTC（本地 ${resetLocal}）起恢复自动判断。`
+}
+
+/** The next 00:00 UTC after `now`, as ISO. */
+function nextUtcMidnight(now: Date): string {
+  return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1)).toISOString()
+}
 
 function errorText(error: unknown): string {
   if (error instanceof ApiError) return error.requestId ? `${error.message}（请求 ${error.requestId}）` : error.message
@@ -37,6 +45,9 @@ function errorText(error: unknown): string {
 }
 
 function canaryResultText(run: CanaryRun): string {
+  if (run.phase === 'starting' && run.start_code) {
+    return `未能立即启动金丝雀 ${run.run_id}：${canaryCodeLabel(run.start_code)}；截止前每 30 分钟重试一次。`
+  }
   if (run.phase === 'done' && run.outcome) {
     const where = run.stage ? `，${CANARY_STAGE[run.stage]}阶段：${run.code ? canaryCodeLabel(run.code) : '无代码'}` : ''
     return `金丝雀 ${run.run_id} 已结束：${CANARY_OUTCOME[run.outcome].label}${where}。`
@@ -73,7 +84,7 @@ export function ActionsSection({ overview, now }: { overview: OverviewResponse; 
   const canaryBlocked = overview.canary.active
     ? `已有运行 ${overview.canary.active.run_id} 正在进行，结束后才能再次运行。`
     : remaining === 0
-      ? `今天的 ${overview.canary.manual_limit} 次手动运行已用完。`
+      ? `本 UTC 日的 ${overview.canary.manual_limit} 次手动运行已用完。`
       : null
 
   function close() {
@@ -148,7 +159,7 @@ export function ActionsSection({ overview, now }: { overview: OverviewResponse; 
         <ActionItem
           id="action-canary"
           title="立即运行金丝雀"
-          description={`今天已手动运行 ${overview.canary.manual_today} / ${overview.canary.manual_limit} 次。`}
+          description={`本 UTC 日已手动运行 ${overview.canary.manual_today} / ${overview.canary.manual_limit} 次。`}
           blocked={canaryBlocked}
           button={
             // aria-disabled rather than disabled: the button keeps focus (and its reason) after a run starts.
@@ -178,7 +189,7 @@ export function ActionsSection({ overview, now }: { overview: OverviewResponse; 
         <ActionItem
           id="action-clear"
           title="解除降载"
-          description="结束降载并暂停今天的自动降载。"
+          description="结束降载，并暂停自动降载到下一个 00:00 UTC。"
           button={
             <Button onClick={() => setDialog('clear')} disabled={busy} aria-describedby="action-clear-desc">
               <ShieldCheck size={16} aria-hidden="true" />
@@ -249,7 +260,7 @@ export function ActionsSection({ overview, now }: { overview: OverviewResponse; 
             </>
           }
         >
-          <p>{CLEAR_CONFIRM_TEXT}</p>
+          <p>{clearConfirmText(formatClock(nextUtcMidnight(now)))}</p>
         </Modal>
       ) : null}
     </Card>

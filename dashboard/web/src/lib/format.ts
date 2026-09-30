@@ -148,3 +148,15 @@ export function between(from: string | null, to: string | null): number | null {
   if (!from || !to) return null
   return new Date(to).getTime() - new Date(from).getTime()
 }
+
+/** The UTC day (YYYY-MM-DD) of an instant; canary days and manual-run limits count by it. */
+export function utcDay(now: Date): string {
+  return now.toISOString().slice(0, 10)
+}
+
+/** "16:00 UTC（本地 00:00）": a fixed UTC hour of the day with its local clock time in the browser's zone. */
+export function utcHourWithLocal(hourUtc: number, now: Date): string {
+  const at = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), hourUtc))
+  const utc = `${String(hourUtc).padStart(2, '0')}:00 UTC`
+  return at.getTimezoneOffset() === 0 ? utc : `${utc}（本地 ${formatClock(at.toISOString())}）`
+}

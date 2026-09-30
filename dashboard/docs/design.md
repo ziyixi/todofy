@@ -1,7 +1,8 @@
 # Home dashboard: design
 
 The Worker `home` on `home.ziyixi.science` is the owner's single ops view for Mail Hero and Todofy,
-and it runs three jobs: a daily end-to-end canary with a unified ops digest, quota guardrails, and the
+and it runs three jobs: a daily delivery-and-processing canary (scope in §5.4) with a unified ops
+digest, quota guardrails, and the
 cross-app contract tests of `contracts/ops-v1`. It talks to the apps only through their `Ops`
 entrypoints (service bindings) and never imports `mail-hero/` or `todofy/` code. Mail Hero's
 `AGENTS.md` rules apply here too: Workers Free, bounded reads and calls, no mail content anywhere,
@@ -39,7 +40,7 @@ Worker modules (the worker builder may merge or split, keeping pure logic separa
 | `src/env.ts` | `Env` (§2) |
 | `src/http.ts` | routing, edge-auth adapter (Access, CSRF, private headers), error envelopes, request IDs |
 | `src/state.ts` | `HomeState` (RPC methods §4), SQL schema (§3), the mutex, persistence |
-| `src/ops-client.ts` | one wrapper per `Ops` method: timeout, error-code mapping, shape guard (§5.1) |
+| `src/ops-client.ts` | one wrapper per `Ops` method: timeout, error-code mapping, contract-schema validation (§5.1) |
 | `src/usage.ts` | the GraphQL query (verbatim §7.2), fetch, parse, `QuotaRow` building, projection |
 | `src/limits.ts` | Free allowances with doc URLs (§7.1, `limits.md`) |
 | `src/guard.ts`, `src/canary.ts`, `src/digest.ts` | pure decision functions taking `now` and prior state |
@@ -129,10 +130,13 @@ RPC results are values, never thrown errors:
 class HomeState extends DurableObject<Env> {
   tick(scheduledTime: number): Promise<{ ran: boolean }>;                      // cron
   overview(refresh: boolean): Promise<OverviewResponse>;                      // GET /api/v1/overview
-  startCanary(): Promise<{ ok: true; run: CanaryRun } | { ok: false; code: 'canary_active' | 'canary_limit' | 'unavailable' }>;
-  setGuardOverride(level: GuardLevel): Promise<{ ok: true; guard: GuardView } | { ok: false; code: 'unavailable' }>;
+  startCanary(): Promise<{ ok: true; run: CanaryRun } | { ok: false; code: 'canary_active' | 'canary_limit' }>;
+  setGuardOverride(level: GuardLevel): Promise<{ guard: GuardView }>;
 }
 ```
+
+A failure of the object itself (reset, storage error) is an exception, which the Worker maps to 503
+`unavailable`; per-app `setGuard` failures are inside `guard.apps`.
 
 - `scheduled` **awaits** `tick(controller.scheduledTime)` (not `waitUntil`, whose 30 s tail could cut a
   slow tick; a cron invocation may run 15 min wall time). A tick whose `scheduledTime` is within 10 min
@@ -158,11 +162,19 @@ subrequests and 32 Worker invocations per request.
 - Result: `{ok: true, value}` or `{ok: false, code}`. A rejection whose `Error.message` is an
   `OpsErrorCode` (`invalid_input`, `busy`, `unavailable`) keeps that code; the timeout gives `timeout`;
   any other rejection (binding error, deploy in progress, unknown method) gives `unavailable`; a value
-  that fails a minimal shape guard (discriminant fields and types the dashboard reads) gives
-  `invalid_output`. All of these are "unavailable" for decisions; `invalid_input` is logged as a
-  dashboard bug and never retried in a tight loop (at most once per tick).
-- `status()` of each app: once per tick (every 30 min ≥ `OPS_LIMITS.statusMinIntervalSeconds`), and
-  on an owner refresh only if the last attempt for that app is ≥ 10 min old. Both in parallel.
+  over 32 KiB of JSON or one that `contracts/ops-v1/validate.mjs` rejects against the method's `$defs`
+  entry gives `invalid_output`. Before validating, the two consumer rules of the contract's
+  "Versioning" section are applied, because an app can ship an additive change before this Worker is
+  redeployed: fields the schema does not declare are removed (never stored or shown), and new values
+  of the enums `reason`, `waiting_code` and `error_code` are accepted when they are codes. Anything
+  else outside the closed schema (an address as a counter name, free text in a code, an http URL, an
+  offset timestamp) is refused, so it never reaches DO storage or the page. All of these are
+  "unavailable" for decisions; `invalid_input` is logged as a dashboard bug and never retried in a
+  tight loop (at most once per tick).
+- `status()` of each app at most every 10 min (`OPS_LIMITS.statusMinIntervalSeconds`), counting every
+  path: a tick, an owner refresh and a manual canary start each poll an app only when its last attempt
+  is ≥ 10 min old (or carries a later clock). A tick that skips the poll uses the stored status (if
+  that attempt succeeded) as this tick's observation for the guard. Both apps in parallel.
 - Capabilities come from the last successful status of that app: `guard` gates `setGuard`;
   `canary_producer` (Mail Hero) and `canary_consumer` (Todofy) gate the canary; `ops_digest` (Todofy)
   gates `reportOps`.
@@ -179,9 +191,11 @@ bearer token; a response over 1 MB, a non-200 status (`http_<n>`), an `errors` a
 `ok` when fetched for the current UTC day within the last 90 min, else `stale`, `unavailable` before
 the first success, `not_configured` without a token. Rows and conversion: §7.
 
-Projection: daily `used × 86400 / elapsed_seconds` of the UTC day (null while elapsed < 1 h); monthly
-`used × days_in_month / elapsed_days` (elapsed in fractional days since 00:00 UTC on the 1st, null
-while < 1 day); storage none. Percent values keep one decimal.
+Projection (a straight-line estimate, labelled "按当前速度线性估算" on the page, not a forecast): daily
+`used × 86400 / elapsed_seconds` of the UTC day (null while elapsed < 3 h, so one job just after
+midnight does not read as twenty times the day); monthly `used × days_in_month / elapsed_days`
+(elapsed in fractional days since 00:00 UTC on the 1st, null while < 1 day); storage none. Percent
+values keep one decimal.
 
 ### 5.3 Guard (`guard.ts`)
 
@@ -196,7 +210,11 @@ Desired state, evaluated each tick in this order:
    next UTC midnight (the override's `until`). While a `normal` override is in force the automatic
    decision is held at normal (setting it also resets an automatic shed), so a cleared episode cannot
    come back through the old shed's own `until` when the override ends. An expired override is deleted.
-2. **Fresh usage** (fetched for the tick's UTC day, ≤ 90 min old):
+2. **Usable usage**: fresh usage (fetched for the tick's UTC day, ≤ 90 min old) with all trigger
+   rows; or, right after midnight, a snapshot from the previous UTC day of the same month that is
+   still ≤ 90 min old, with only its **monthly** rows (R2 operations do not reset at midnight, so a
+   GraphQL outage at the day change must not lift a monthly shed and then shed again; daily rows never
+   carry over):
    - enter shed when any trigger resource has `percent ≥ 80`. `reason` = `quota_<resource id>` of the
      highest percent (e.g. `quota_d1_rows_read`), `until` = next UTC midnight + 10 min (always ≤ 24 h
      10 min ahead, inside the contract's 36 h). `entered_day` = today;
@@ -205,8 +223,9 @@ Desired state, evaluated each tick in this order:
    - otherwise normal (`reason: 'quota_normal'`). A new UTC day therefore starts normal and re-enters
      shed only at ≥ 80 % of that day's usage (monthly R2 operations can re-enter at the first tick of a
      new day; that renewal is the new day's `until`).
-3. **No fresh usage**: keep an auto shed until its `until` without renewing it (it then lapses to
-   normal, the safe default); never enter shed without data.
+3. **No usable usage**: keep an auto shed until its `until` without renewing it (it then lapses to
+   normal, the safe default); never enter shed without data. The normal state then carries
+   `reason: 'usage_unknown'` (the page says "无最新用量，不会自动降载", not "配额正常").
 
 Applying (per app, only if its last status lists `guard`):
 
@@ -217,9 +236,18 @@ Applying (per app, only if its last status lists `guard`):
   state makes no calls; a day with an 80 % breach makes at most one shed call and one clear call per
   app plus retries. An `invalid_input` answer (e.g. clock skew beyond 36 h) is recorded and retried at
   most once per tick.
-- Both apps are called in parallel; each result updates `guard_applied`.
+- Both apps are called in parallel; each result updates `guard_applied`. A failure counts only while
+  its call is still pending: an app that needs no call this tick (the level that failed is no longer
+  wanted, or is in place) has its failure count and last error cleared, so `guard_apply_failed`
+  disappears when, say, a shed that never reached Mail Hero is no longer wanted.
 
 ### 5.4 Canary (`canary.ts`)
+
+Scope: Mail Hero's `startCanary` creates the synthetic message directly (pre-parsed, in D1 and R2
+`parsed/`) and delivers it through its normal webhook path. A green run therefore covers Mail Hero
+delivery → Todofy intake, Gemini summary and verification; it does **not** cover source forwarding,
+Email Routing, the ingest quota, raw storage or MIME parsing. The page names the section
+"投递与处理金丝雀" and states this scope.
 
 At most one active run (phase ≠ `done`) at a time.
 
@@ -256,7 +284,9 @@ At most one active run (phase ≠ `done`) at a time.
   `failed/consumer/timeout`; `not_seen` → `failed/consumer/not_seen`; no answer →
   `failed/consumer/unreachable`.
 - Every call increments `polls` and stores `attempts`, `last_http_status`, `error_code`,
-  `waiting_code`. The UI timeline uses `created_at`, `queued_at`, `delivered_at` (Mail Hero's value),
+  `waiting_code`. The API shows a waiting start's reason (`start_code`: the paused/unavailable reason,
+  the call error or `status_unavailable`) and the last failed poll (`last_call_error`), so a run held
+  in `starting` says why. The UI timeline uses `created_at`, `queued_at`, `delivered_at` (Mail Hero's value),
   `completed_at` (Todofy's value) and `finished_at`.
 - Calls per day: about 1 start + 4 delivery/result polls per run; ≤ 4 runs a day.
 
@@ -275,7 +305,8 @@ present, else the first tick the key was active (`item_since`).
 | `dashboard` | `guard_shed` | warning | desired guard is shed | `hours_left`, `manual` (0/1) |
 | `mail-hero` / `todofy` | `guard_apply_failed` | warning | ≥ 2 consecutive `setGuard` failures | `consecutive_failures` |
 | `dashboard` | `canary_start_failed` / `canary_not_delivered` / `canary_consumer_failed` | critical | the latest finished run failed at stage start / delivery / consumer | `attempts`, `last_http_status` (if any), `timed_out` (0/1) |
-| `dashboard` | `canary_unsupported` | warning | the latest finished run was skipped for a missing capability | – |
+| `dashboard` | `canary_skipped` | warning | the latest finished run was skipped (paused, unavailable, a missing capability, no status, a held consumer), as contracts/ops-v1 "Daily canary" asks: reported with its reason, never as a failure | the skip code as a key with value 1, e.g. `{"no_endpoint": 1}` |
+| `dashboard` | `tick_stale` | warning | no cron tick completed for 75 min, or none ever (only on refresh-built items; the overview also adds it at read time) | `minutes_since` |
 | `mail-hero` / `todofy` | `app_unreachable` | critical | ≥ 2 consecutive failed `status()` calls | `consecutive_failures` |
 | `mail-hero` / `todofy` | `app_down` | critical | last status `health: down` | – |
 | `mail-hero` / `todofy` | each active signal's `code` | its severity | warning/critical signals of the last status (≤ 60 min old) | the signal's metrics |
@@ -290,7 +321,11 @@ so the next tick retries. This is the only way the dashboard creates Todoist tas
 one-per-day reminder); Mail Hero's `ALERT_WEBHOOK_URL` stays unconfigured.
 
 The overview banner (`overall`) is `critical` if any item is critical, else `warning` if any is
-warning, else `ok`; `unknown` before the first tick. `codes` lists the item codes (≤ 20).
+warning, else `ok`; `unknown` before anything ran. The stored items are as old as the last tick or
+refresh, so the overview judges the ticks at read time: `tick_stale` is added when no tick completed
+for 75 min (cron removed, or every tick failing), which turns a clean banner into a warning. `items`
+lists `{source, code, severity}` (≤ 20), so the same code from both apps stays two entries; the UI
+labels each as "<app>：<label>" and links it to the card that explains it.
 
 ## 6. Owner API
 
@@ -385,33 +420,45 @@ quantiles (µs) and error counts are not quota rows; the UI may show them per sc
 
 48 cron ticks → 48 Worker requests + 48 DO requests; ≤ 96 `status()` calls (Mail Hero ≤ 6 and Todofy
 ≤ 5 D1 statements each); ≤ 48 GraphQL queries; a few `setGuard`/canary/`reportOps` calls; one canary a
-day (one synthetic message, one Gemini call in Todofy). Owner page loads add a few Worker and DO
+day (one synthetic message; normally one Gemini call in Todofy, up to 3 when a transient failure is
+retried). Owner page loads add a few Worker and DO
 requests each. All far below every row above.
 
 ## 8. UI (`web/`)
 
 One page, Chinese, mobile-first (single column < 720 px, two columns above), keyboard accessible
-(native buttons, `<dialog>` confirmations with focus return, visible focus), light/dark through
+(native buttons, confirmation modals built as a `div` with `role="dialog"`, `aria-modal`, a focus
+trap and focus return, visible focus), light/dark through
 `prefers-color-scheme` CSS tokens, system font stack, no remote fonts, images or requests other than
 same-origin `/api/v1/*`. Times with `Intl.DateTimeFormat('zh-CN', …)` in the browser's time zone,
 durations in words.
 
-- **Banner**: `overall.level` with text (正常 / 需要关注 / 严重 / 暂无数据) and the item codes as labels.
+- **Banner**: `overall.level` with text (正常 / 需要关注 / 严重 / 暂无数据), a sentence when the ticks
+  stopped, and each item as "<app>：<label>" linking to its section.
 - **App cards** (Mail Hero, Todofy): health, reachability and last check, modes, guard (level, reason,
   until, deferred jobs), active signals with plain-text labels (unknown codes shown raw), key counters,
   last backup, link to the app UI (`url`, `rel="noreferrer"`).
 - **Quota**: groups 每日 / 每月 / 存储; each row a bar (`<meter>` or `role="meter"` with text) with
   used / limit / percent / projection, 80 % and 95 % marks, `truncated` and "无数据" states, the source
   link, and the account-wide note ("整个 Cloudflare 账户的用量，包括其他 Worker、数据库和存储桶").
-- **Canary**: today's run with a stage timeline (创建 → 已排队 → 已投递 → Todofy 完成 → 结束), outcome and
-  code, next scheduled time; table of the last 14 runs.
+- **Canary** ("投递与处理金丝雀", with its scope sentence from §5.4): the current UTC day's run (labelled
+  "本 UTC 日（YYYY-MM-DD）", since canary days and the manual limit count by UTC while times show in the
+  browser's zone) with a stage timeline (创建 → 已排队 → 已投递 → Todofy 完成 → 结束), waiting reasons
+  (`start_code`, `waiting_code`, `last_call_error`), outcome and code, the scheduled hour as
+  "16:00 UTC（本地 HH:MM）", next scheduled time; table of the last 14 runs.
 - **Digest**: current items, last sent time and receipt, error.
 - **Actions** with confirmation text that states exactly what happens:
-  - 立即运行金丝雀: "调用 Mail Hero 创建一封固定内容的合成测试邮件，经正常投递链路发给 Todofy；Todofy
-    只调用一次 Gemini 并校验结果，不创建 Todoist 任务、不进入列表或提醒。今天还可手动运行 N 次。"
-  - 强制降载: "立即让 Mail Hero 和 Todofy 在 24 小时内推迟可推迟的清理和安全网任务（各任务仍有自身上限）；
-    收件、解析、投递、重试和真实邮件处理不受影响。可随时解除。"
-  - 解除降载: "立即结束两个应用的降载，并在本 UTC 日剩余时间内暂停自动降载；次日 00:00 UTC 起恢复自动判断。"
+  - 立即运行金丝雀: "调用 Mail Hero 直接创建一封固定内容的合成测试邮件（不经过来源转发、Email Routing
+    收件、原件保存与解析），经正常投递链路发给 Todofy；Todofy 按正常流程调用 Gemini 摘要并校验（暂时性
+    失败最多尝试 3 次，计入 Gemini 预算），不创建 Todoist 任务、不进入列表或提醒。本 UTC 日还可手动运行
+    N 次。" A start answered paused/unavailable reports "未能立即启动金丝雀 …：<reason>；截止前每 30 分钟
+    重试一次。"
+  - 强制降载 (the deferred jobs of contracts/ops-v1/IMPLEMENTATION.md §2.5 and §3.7): "立即让两个应用
+    降载 24 小时：Mail Hero 推迟原件对账、保留期清理、金丝雀清理和告警历史清理（每项最多推迟 48 小时）；
+    Todofy 推迟开始新一轮每周备份（上次完整备份超过 7.5 天仍会执行）、过期数据清理和趋势统计汇总（最多推迟
+    72 小时，之后补上）。收件、解析、投递、重试、已在进行的备份和真实邮件处理不受影响。可随时解除。"
+  - 解除降载: "立即结束两个应用的降载，并在本 UTC 日剩余时间内暂停自动降载；次日 00:00 UTC（本地 HH:MM）
+    起恢复自动判断。"
   - 刷新: no dialog; disabled until `refresh.next_refresh_at`.
 - Data: `@tanstack/react-query`; overview refetched every 5 min while the page is visible; the client
   uses `credentials: 'same-origin'`, `redirect: 'error'` (an expired Access session shows
@@ -428,18 +475,23 @@ Unit (`worker`, vitest in Node, `cloudflare:workers` aliased to `test/cloudflare
   empty `doSto` → null, truncation, R2 classes and unclassified, breakdown top 5); every failure code;
   projections at period edges; the token only ever in the one header of the one URL (fetch spy).
 - `guard`: decision table (enter at 80, hold ≥ 70 same day, clear < 70, new day, R2 monthly renewal,
-  stale usage keeps then lapses, overrides and their expiry, until ≤ 36 h); apply rules (no call when
-  unchanged, re-apply when the app lost it, capability gate).
+  stale usage keeps then lapses as `usage_unknown`, a monthly R2 shed carried across midnight when
+  GraphQL fails, overrides and their expiry, until ≤ 36 h); apply rules (no call when unchanged,
+  re-apply when the app lost it, capability gate, failures cleared once no call is pending).
 - `canary`: every transition of §5.4 including all deadlines, idempotent start, limits of manual runs,
   run-ID format against `RunId`.
 - `digest`: item table, ordering, 20 items, 8192 bytes, `since`, change key, 6 h and 23:30 rules, empty
   report; every report validated with `validate.mjs` as `OpsReport`.
-- `ops-client`: **only declared methods** (a recording proxy env; the called names ⊆ the method names
-  parsed from `ops-v1.ts` interfaces `MailHeroOps`/`TodofyOps`) and **every `OPS_ERROR_CODES` value**
-  plus timeout, foreign rejection and invalid output, for every method.
+- `ops-client`: **only declared methods** (a recording proxy env; the called names equal the method
+  names parsed from `ops-v1.ts` interfaces `MailHeroOps`/`TodofyOps` by `test/declared-methods.ts`,
+  the same parse the runtime stubs use) and **every `OPS_ERROR_CODES` value** plus timeout, foreign
+  rejection and invalid output, for every method; every invalid output fixture of
+  `contracts/ops-v1/fixtures/invalid/` is refused except the ones the consumer rules tolerate (an
+  extra field is dropped, a new additive enum code is read).
 - `http`: Access via edge-auth with a test JWKS (Web Crypto RSA keys, stubbed `fetch`), alias and case
   fold, missing/invalid token, CSRF (Origin, header/cookie, signature, key missing), private headers,
-  error envelopes, 404/405, `/health` without auth, API shapes against `api-types.ts`.
+  error envelopes, 404/405, `/health` without auth, API shapes against `api-types.ts`, a chunked body
+  without Content-Length cut off after 1 KiB.
 
 Runtime (`npm run test:runtime`, Miniflare; `test/runtime/harness.ts`): the bundled Worker with the
 real SQLite `HomeState`; stub `mail-hero` and `todofy` Workers exporting `Ops` with only their declared
@@ -448,17 +500,20 @@ an outbound handler playing GraphQL and the Access certs endpoint. Every value a
 fixture or validated with `validate.mjs`. Flows, driven by `scheduled()` with chosen times:
 
 - guard: 81 % → shed on both apps with the expected input; same state → no call; renew on a new day
-  (R2); < 70 % → normal; the app reporting normal after losing state → re-apply; owner force/clear with
-  CSRF and their expiry;
+  (R2), also when GraphQL fails at midnight (no normal in between); < 70 % → normal; the app reporting
+  normal after losing state → re-apply; a shed that failed on one app and is no longer wanted clears
+  `guard_apply_failed`; owner force/clear with CSRF and their expiry;
 - canary: start → pending → delivered → ok (timeline stored); failed delivery; consumer failed;
-  timeout at 2 h; paused/unavailable start → skipped; missing capability → skipped without a
-  `startCanary` call; manual run limits and `canary_active`;
+  timeout at 2 h; paused/unavailable start → skipped with `start_code` shown while waiting and a
+  `canary_skipped` item after; missing capability → skipped without a `startCanary` call; manual run
+  limits and `canary_active`;
 - digest: first report; unchanged items → no call; change → call; 6 h refresh; 23:30 rule; Todofy
   without `ops_digest` → no call; `reportOps` failing → retried next tick;
 - an unreachable app (stub throws/unknown method) → `app_unreachable` after 2 ticks, other app still
   handled; GraphQL 401/500/errors → `usage_unavailable`, guard unchanged;
 - auth end to end (JWT from the test JWKS through the outbound handler), overview shape, refresh rate
-  limit, 60-day canary retention, DO rows bounded.
+  limit, status() spacing of 10 min across a refresh and the next tick, `tick_stale` when ticks stop,
+  banner items that keep their source, 60-day canary retention, DO rows bounded.
 
 Web (vitest + testing-library + jsdom): rendering from a synthetic `OverviewResponse` fixture (all
 sections, unknown codes, null usage, dark/light independent), times in a fixed test time zone,

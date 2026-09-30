@@ -82,8 +82,12 @@ export interface OverviewResponse {
   readonly version: typeof API_VERSION;
   /** When the Durable Object assembled this response. */
   readonly generated_at: Iso;
-  /** Banner: the worst of the digest items and app reachability; `unknown` before the first tick. */
-  readonly overall: { readonly level: OverallLevel; readonly codes: readonly string[] };
+  /**
+   * Banner: the worst of the digest items (which include app reachability), plus `tick_stale` when no
+   * cron tick completed for 75 minutes; `unknown` before anything ran. Items keep their source, so the
+   * same code from both apps stays two distinct entries.
+   */
+  readonly overall: { readonly level: OverallLevel; readonly items: readonly OverallItem[] };
   readonly apps: { readonly 'mail-hero': AppCard; readonly todofy: AppCard };
   readonly usage: UsageView;
   readonly guard: GuardView;
@@ -92,6 +96,13 @@ export interface OverviewResponse {
   readonly refresh: RefreshInfo;
   /** BUILD_SHA of the Worker (`dev` locally). */
   readonly build: string;
+}
+
+export interface OverallItem {
+  /** `mail-hero`, `todofy`, `cloudflare` (account usage) or `dashboard` (guard, canary, the ticks). */
+  readonly source: string;
+  readonly code: string;
+  readonly severity: OpsSeverity;
 }
 
 export interface RefreshInfo {
@@ -274,6 +285,14 @@ export interface CanaryRun {
   };
   /** Ticks (and the manual start) that called an app for this run. */
   readonly polls: number;
+  /**
+   * While `starting`: why Mail Hero has not queued it yet — its paused/unavailable reason
+   * (send_paused, no_endpoint, ...), a call error (unavailable, busy, timeout, ...) or
+   * `status_unavailable`; null once queued.
+   */
+  readonly start_code: string | null;
+  /** Error of the last delivery/result call that failed (the next tick retries), null after an answer. */
+  readonly last_call_error: AppErrorCode | null;
 }
 
 export interface CanaryView {

@@ -114,15 +114,18 @@ describe('the scheduled canary', () => {
     h = await startFlows();
     await h.answer('mail-hero', 'startCanary', { value: await fixture('StartCanaryResult/paused-send-paused.json') });
     for (const at of ['16:00', '16:30', '17:00', '17:30']) await h.tick(`2026-09-29T${at}:00Z`);
-    expect(latest(await h.overview())).toMatchObject({ phase: 'starting', outcome: null });
+    // While it waits, the overview says why.
+    expect(latest(await h.overview())).toMatchObject({ phase: 'starting', outcome: null, start_code: 'send_paused', last_call_error: null });
     await h.tick('2026-09-29T18:00:00Z');
     expect(latest(await h.overview())).toMatchObject({ phase: 'done', outcome: 'skipped', stage: 'start', code: 'send_paused', polls: 5 });
     // Each attempt reused the day's run_id.
     const starts = await h.callsOf('mail-hero', 'startCanary');
     expect(new Set(starts.map((args) => JSON.stringify(args[0])))).toEqual(new Set([JSON.stringify({ run_id: 'canary-2026-09-29' })]));
     expect(starts).toHaveLength(5);
-    // A skipped run is not a failure item.
-    expect((await h.overview()).digest.items.filter((i) => i.code.startsWith('canary_'))).toEqual([]);
+    // A skipped run is reported with its reason (contracts/ops-v1 "Daily canary" step 2), as a warning, not a failure.
+    expect((await h.overview()).digest.items.filter((i) => i.code.startsWith('canary_'))).toEqual([
+      { source: 'dashboard', code: 'canary_skipped', severity: 'warning', since: '2026-09-29T18:00:00.000Z', metrics: { send_paused: 1 } },
+    ]);
   });
 
   it('is skipped at the consumer stage when Todofy holds it', async () => {
@@ -140,7 +143,9 @@ describe('the scheduled canary', () => {
     expect(await h.callsOf('mail-hero', 'startCanary')).toEqual([]);
     const overview = await h.overview();
     expect(latest(overview)).toMatchObject({ outcome: 'skipped', stage: 'start', code: 'canary_consumer_missing', polls: 0 });
-    expect(overview.digest.items).toContainEqual(expect.objectContaining({ source: 'dashboard', code: 'canary_unsupported', severity: 'warning' }));
+    expect(overview.digest.items).toContainEqual(
+      expect.objectContaining({ source: 'dashboard', code: 'canary_skipped', severity: 'warning', metrics: { canary_consumer_missing: 1 } }),
+    );
   });
 
   it('waits for statuses and is skipped as status_unavailable when they never come', async () => {

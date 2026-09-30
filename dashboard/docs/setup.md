@@ -112,12 +112,18 @@ the expected state. Use synthetic data only; never point a local run at producti
   until the next UTC midnight + 10 min, renewed while still ≥ 70 % that day; cleared below 70 % or on a
   new UTC day. From the page: 强制降载 (force shed for 24 h) or 解除降载 (clear, and hold automatic shed
   off until 00:00 UTC). `shed` only defers each app's deferrable cleanup and safety-net jobs within
-  their own bounds; intake, parsing, delivery, retries and real-mail processing continue. A `shed`
-  guard expires by itself (at most 36 h ahead), so a stopped dashboard cannot leave an app shed.
+  their own bounds (Mail Hero: raw reconcile, retention, canary and alert-history cleanup, each at most
+  48 h; Todofy: starting a new weekly backup unless the last one is older than 7.5 days, retention,
+  metrics rollup, at most 72 h); intake, parsing, delivery, retries, a backup already running and
+  real-mail processing continue. A `shed` guard expires by itself (at most 36 h ahead), so a stopped
+  dashboard cannot leave an app shed.
 - **Canary.** Daily at the first tick at or after `CANARY_UTC_HOUR` (UTC), plus up to 3 manual runs a
-  day (立即运行金丝雀). One synthetic `mail.received.v1` event with the `canary` marker travels Mail
-  Hero → Todofy; Todofy makes one Gemini call and records the result, never a Todoist task, list entry
-  or reminder. There is no configuration switch that turns the scheduled canary off; see §7 before
+  UTC day (立即运行金丝雀). Mail Hero creates one synthetic `mail.received.v1` event with the `canary`
+  marker directly (no Email Routing, raw storage or parsing) and delivers it to Todofy; Todofy
+  summarizes it through the normal path (one Gemini call, up to 3 when a transient failure is retried,
+  counted in the Gemini budget) and records the result, never a Todoist task, list entry or reminder.
+  A skipped run (sending paused, no endpoint, maintenance, a missing capability) is reported in the
+  digest as `canary_skipped` with its reason. There is no configuration switch that turns the scheduled canary off; see §7 before
   rolling Todofy back.
 - **Digest.** Warning and critical items go to `TODOFY.reportOps` when the set changes or every 6 h;
   Todofy's daily attention reminder (at most one Todoist task per UTC day) carries them. The dashboard

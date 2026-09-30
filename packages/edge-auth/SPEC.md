@@ -367,9 +367,10 @@ production secret reaches the package job.
   formats and cookies are pinned by the golden vectors, and Access sessions are Cloudflare's cookies,
   so browser state survives a deploy. Mail Hero's preview tokens stay on its own code.
 - The tightenings (#6–#12, #14, #19, #20, #36) should be invisible for real Access tokens. After a
-  deploy that changes them, the owner opens each UI and makes one write (for example a Mail Hero
-  settings save, a Todofy dismiss, a dashboard refresh), with the primary login and, where
-  configured, an alias login. Before releasing #36, check that no configured owner or alias contains
+  deploy that changes them, the owner opens each UI and makes one write that passes Origin and CSRF
+  (for example a Mail Hero settings save, a Todofy dismiss, a confirmed 解除降载 on the dashboard,
+  which is harmless when nothing is shed; a refresh is a GET and checks neither), with the primary
+  login and, where configured, an alias login. Before releasing #36, check that no configured owner or alias contains
   a non-ASCII character (the generators refuse one).
 - A 401 on a real login means reverting the package commit, which redeploys every user, and comparing
   the real token's header and claims (never logged) against §2 and §5.1.

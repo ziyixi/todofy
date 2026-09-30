@@ -89,8 +89,11 @@ const SIGNALS: Readonly<Record<string, string>> = {
   canary_start_failed: '金丝雀启动失败',
   canary_not_delivered: '金丝雀未投递',
   canary_consumer_failed: '金丝雀在 Todofy 失败',
-  canary_unsupported: '应用不支持金丝雀',
+  canary_skipped: '金丝雀已跳过（未测试链路）',
+  // Not emitted by this dashboard (it reports warning/critical only); kept for reports such as the
+  // contract's OpsReport fixture, which Todofy also renders.
   canary_ok: '金丝雀成功',
+  tick_stale: '定时检查已停止',
   app_unreachable: '应用无法连接',
   app_down: '应用不可用',
 }
@@ -232,6 +235,7 @@ const GUARD_REASONS: Readonly<Record<string, string>> = {
   owner_shed: '手动降载',
   owner_clear: '手动解除',
   quota_normal: '配额正常',
+  usage_unknown: '无最新用量，不会自动降载',
 }
 
 /** `quota_<resource id>` → "配额：<resource>"; unknown reasons stay raw. */

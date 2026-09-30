@@ -1,7 +1,8 @@
 /**
  * The cross-app contract from the dashboard's side: it calls only the methods ops-v1.ts declares for
  * each app, handles every declared error code (plus timeouts, foreign rejections and bad outputs) for
- * every method, and accepts every valid fixture while refusing the invalid ones its guards cover.
+ * every method, and reads answers exactly as the contract schema allows: every valid fixture passes,
+ * every invalid output fixture is refused, except where the contract's consumer rules tolerate it.
  */
 import { describe, expect, it } from 'vitest';
 import opsSource from '../../../contracts/ops-v1/ops-v1.ts?raw';
@@ -38,26 +39,18 @@ import resultProcessing from '../../../contracts/ops-v1/fixtures/CanaryResult/pr
 import receiptKept from '../../../contracts/ops-v1/fixtures/OpsReportReceipt/kept-newer.json';
 import receiptStored from '../../../contracts/ops-v1/fixtures/OpsReportReceipt/stored.json';
 import reportDaily from '../../../contracts/ops-v1/fixtures/OpsReport/daily.json';
-import invalidDeliveredNoTime from '../../../contracts/ops-v1/fixtures/invalid/CanaryDelivery/delivered-without-time.json';
-import invalidFailedNoCode from '../../../contracts/ops-v1/fixtures/invalid/CanaryDelivery/failed-without-code.json';
-import invalidResultFailed from '../../../contracts/ops-v1/fixtures/invalid/CanaryResult/failed-without-code.json';
-import invalidGuardLevel from '../../../contracts/ops-v1/fixtures/invalid/GuardState/unknown-level.json';
-import invalidStatusMissingGuard from '../../../contracts/ops-v1/fixtures/invalid/OpsStatus/missing-guard.json';
-import invalidStatusStringMode from '../../../contracts/ops-v1/fixtures/invalid/OpsStatus/string-mode.json';
-import invalidStatusUnknownApp from '../../../contracts/ops-v1/fixtures/invalid/OpsStatus/unknown-app.json';
-import invalidStartQueued from '../../../contracts/ops-v1/fixtures/invalid/StartCanaryResult/queued-without-event.json';
-import invalidStartPaused from '../../../contracts/ops-v1/fixtures/invalid/StartCanaryResult/paused-with-event.json';
-import invalidReceipt from '../../../contracts/ops-v1/fixtures/invalid/OpsReportReceipt/too-many.json';
 import type { Env } from '../src/env.ts';
+import { declaredMethods as parseDeclared } from './declared-methods.ts';
 import {
   CALLED_METHODS,
+  CONSUMER_SCHEMA,
+  asCanaryDelivery,
+  asCanaryResult,
+  asGuardState,
+  asReceipt,
+  asStartCanaryResult,
+  asStatus,
   callOps,
-  isCanaryDelivery,
-  isCanaryResult,
-  isGuardState,
-  isReceipt,
-  isStartCanaryResult,
-  isStatus,
   opsCanaryDelivery,
   opsCanaryResult,
   opsReportOps,
@@ -70,15 +63,8 @@ import {
 const SCHEMA = schema as { $defs: Record<string, unknown> };
 const EVENT_ID = '6d3b2f0e-4c1a-4b7e-8a52-0c9e7f1d2a31';
 
-/** The method names ops-v1.ts declares in `interface <name> ... { ... }` (and its OpsCommon base). */
-function declaredMethods(name: string): string[] {
-  const block = (interfaceName: string): string => {
-    const match = new RegExp(`export interface ${interfaceName}[^{]*\\{([\\s\\S]*?)\\n\\}`).exec(opsSource);
-    if (!match?.[1]) throw new Error(`interface ${interfaceName} not found`);
-    return match[1];
-  };
-  const methods = (body: string): string[] => [...body.matchAll(/^\s+([a-zA-Z]+)\(/gm)].map((m) => m[1] ?? '');
-  return [...methods(block('OpsCommon<S>')), ...methods(block(name))].sort();
+function declaredMethods(name: 'MailHeroOps' | 'TodofyOps'): string[] {
+  return parseDeclared(opsSource, name);
 }
 
 type Calls = { app: OpsApp; method: string; args: unknown[] }[];
@@ -166,36 +152,87 @@ describe('error handling for every method', () => {
       const huge = recordingEnv({ [wrapper.method]: () => ({ ...(wrapper.valid as object), padding: 'x'.repeat(40_000) }) });
       expect(await wrapper.call(huge.env)).toEqual({ ok: false, code: 'invalid_output' });
     }
-    expect(await callOps(() => new Promise(() => undefined), isGuardState, 20)).toEqual({ ok: false, code: 'timeout' });
+    expect(await callOps(() => new Promise(() => undefined), asGuardState, 20)).toEqual({ ok: false, code: 'timeout' });
   });
 });
 
-describe('shape guards over the contract fixtures', () => {
-  it('accept every valid fixture', () => {
-    for (const status of [mailHeroOk, mailHeroDegraded, mailHeroMaintenance]) expect(isStatus('mail-hero')(status)).toBe(true);
-    for (const status of [todofyOk, todofyDegraded, statusUnavailable]) expect(isStatus('todofy')(status)).toBe(true);
-    expect(isStatus('todofy')(mailHeroOk)).toBe(false);
-    for (const guard of [guardNormal, guardShedMail, guardShedTodofy]) expect(isGuardState(guard)).toBe(true);
-    for (const result of [startQueued, startPausedBlocked, startPausedSend, startMaintenance, startNoEndpoint]) expect(isStartCanaryResult(result)).toBe(true);
-    for (const d of [deliveryDelivered, deliveryFailedWindow, deliveryFailed, deliveryPausedBlocked, deliveryPaused, deliveryPendingFirst, deliveryPendingRetry, deliveryUnknown]) {
-      expect(isCanaryDelivery(d)).toBe(true);
+describe('answers are validated against the contract schema', () => {
+  it('accepts every valid fixture unchanged', () => {
+    for (const status of [mailHeroOk, mailHeroDegraded, mailHeroMaintenance]) expect(asStatus('mail-hero')(status)).toEqual(status);
+    for (const status of [todofyOk, todofyDegraded, statusUnavailable]) expect(asStatus('todofy')(status)).toEqual(status);
+    expect(asStatus('todofy')(mailHeroOk)).toBeNull();
+    for (const guard of [guardNormal, guardShedMail, guardShedTodofy]) expect(asGuardState(guard)).toEqual(guard);
+    for (const result of [startQueued, startPausedBlocked, startPausedSend, startMaintenance, startNoEndpoint]) {
+      expect(asStartCanaryResult(result)).toEqual(result);
     }
-    for (const r of [resultFailed, resultNotSeen, resultOk, resultProcessingPaused, resultProcessing]) expect(isCanaryResult(r)).toBe(true);
-    for (const r of [receiptKept, receiptStored]) expect(isReceipt(r)).toBe(true);
+    for (const d of [deliveryDelivered, deliveryFailedWindow, deliveryFailed, deliveryPausedBlocked, deliveryPaused, deliveryPendingFirst, deliveryPendingRetry, deliveryUnknown]) {
+      expect(asCanaryDelivery(d)).toEqual(d);
+    }
+    for (const r of [resultFailed, resultNotSeen, resultOk, resultProcessingPaused, resultProcessing]) expect(asCanaryResult(r)).toEqual(r);
+    for (const r of [receiptKept, receiptStored]) expect(asReceipt(r)).toEqual(r);
   });
 
-  it('refuse the invalid fixtures whose fields the dashboard reads', () => {
-    expect(isCanaryDelivery(invalidDeliveredNoTime)).toBe(false);
-    expect(isCanaryDelivery(invalidFailedNoCode)).toBe(false);
-    expect(isCanaryResult(invalidResultFailed)).toBe(false);
-    expect(isGuardState(invalidGuardLevel)).toBe(false);
-    expect(isStatus('mail-hero')(invalidStatusMissingGuard)).toBe(false);
-    expect(isStatus('mail-hero')(invalidStatusStringMode)).toBe(false);
-    expect(isStatus('mail-hero')(invalidStatusUnknownApp)).toBe(false);
-    expect(isStartCanaryResult(invalidStartQueued)).toBe(false);
-    expect(isStartCanaryResult(invalidStartPaused)).toBe(false);
-    // The receipt guard reads only stored/generated_at/item_count; the schema refuses this one.
-    expect(validate(SCHEMA, 'OpsReportReceipt', invalidReceipt)).not.toEqual([]);
+  // Every invalid fixture of an output type. The contract's consumer rules (README "Versioning")
+  // tolerate exactly these: unknown fields are dropped, and new codes of an additive enum are read.
+  const invalid = import.meta.glob('../../../contracts/ops-v1/fixtures/invalid/*/*.json', { import: 'default', eager: true });
+  const OUTPUTS: Readonly<Record<string, (value: unknown) => unknown>> = {
+    OpsStatus: asStatus('mail-hero'),
+    GuardState: asGuardState,
+    StartCanaryResult: asStartCanaryResult,
+    CanaryDelivery: asCanaryDelivery,
+    CanaryResult: asCanaryResult,
+    OpsReportReceipt: asReceipt,
+  };
+  const without = (field: string) => (value: Record<string, unknown>) => Object.fromEntries(Object.entries(value).filter(([key]) => key !== field));
+  const TOLERATED: Readonly<Record<string, (value: Record<string, unknown>) => unknown>> = {
+    'OpsStatus/extra-field-subject.json': without('subject'),
+    'CanaryResult/ok-with-summary.json': without('summary'),
+    'StartCanaryResult/unknown-reason.json': (value) => value,
+  };
+
+  it('refuses every invalid output fixture the consumer rules do not tolerate', () => {
+    const seen: string[] = [];
+    for (const [path, value] of Object.entries(invalid)) {
+      const name = /invalid\/([^/]+)\/([^/]+)$/.exec(path);
+      const type = name?.[1] ?? '';
+      const read = OUTPUTS[type];
+      if (read === undefined) continue; // inputs (SetGuardInput, StartCanaryInput, OpsReport) are ours
+      const key = `${type}/${name?.[2] ?? ''}`;
+      seen.push(key);
+      const tolerated = TOLERATED[key];
+      if (tolerated === undefined) {
+        expect(read(value), key).toBeNull();
+      } else {
+        const expected = tolerated(value as Record<string, unknown>);
+        expect(read(value), key).toEqual(expected);
+      }
+    }
+    // Every OpsStatus leak fixture is covered (address as a counter, free text, extra field, http URL, ...).
+    expect(seen.filter((key) => key.startsWith('OpsStatus/')).length).toBeGreaterThanOrEqual(10);
+    expect(Object.keys(TOLERATED).every((key) => seen.includes(key))).toBe(true);
+  });
+
+  it('never stores a field the schema does not declare, at any depth', () => {
+    const leaky = {
+      ...mailHeroOk,
+      subject: 'Quarterly report',
+      guard: { ...guardNormal, note: 'owner@example.com' },
+      signals: [{ code: 'send_paused', severity: 'warning', metrics: {}, text: 'Mail from owner@example.com' }],
+    };
+    const read = asStatus('mail-hero')(leaky);
+    expect(read).not.toBeNull();
+    expect(JSON.stringify(read)).not.toContain('owner@');
+    expect(read).toEqual({ ...mailHeroOk, signals: [{ code: 'send_paused', severity: 'warning', metrics: {} }] });
+  });
+
+  it('reads a new waiting_code or start reason (additive within ops-v1) but never free text', () => {
+    expect(asCanaryResult({ state: 'processing', waiting_code: 'gemini_cooldown' })).toEqual({ state: 'processing', waiting_code: 'gemini_cooldown' });
+    expect(asCanaryResult({ state: 'processing', waiting_code: 'Waiting for Gemini' })).toBeNull();
+    expect(asStartCanaryResult({ event_id: null, state: 'paused', reason: 'new_pause' })).toEqual({ event_id: null, state: 'paused', reason: 'new_pause' });
+    expect(asStartCanaryResult({ event_id: null, state: 'paused', reason: 'owner@example.com' })).toBeNull();
+    // The widening is limited to those enums: the reference schema itself is unchanged.
+    expect(validate(SCHEMA, 'CanaryResult', { state: 'processing', waiting_code: 'gemini_cooldown' })).not.toEqual([]);
+    expect(validate(CONSUMER_SCHEMA, 'OpsStatus', { ...mailHeroOk, health: 'fine' })).not.toEqual([]);
   });
 });
 

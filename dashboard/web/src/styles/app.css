@@ -418,6 +418,15 @@ main {
   font-weight: 600;
 }
 
+.chip-link {
+  color: inherit;
+  text-underline-offset: 3px;
+}
+
+.banner-stale {
+  font-weight: 600;
+}
+
 .chip-code {
   color: var(--muted);
   font-size: var(--text-xs);

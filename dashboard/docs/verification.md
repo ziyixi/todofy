@@ -56,10 +56,10 @@ Hero with ops-v1 are live) and, where stated, the owner in a browser.
 | --- | --- | --- |
 | First deploy | `Dashboard deploy` succeeds; Custom Domain `home.ziyixi.science` gets DNS and a certificate | pending |
 | Access fronts the host | the job's probe (302 to the team domain for `/` and `/api/v1/overview`) | pending |
-| Real Access login | the owner opens the page with the primary login and, where configured, an alias; one refresh and one confirmed action | pending |
+| Real Access login | the owner opens the page with the primary login and, where configured, an alias; one refresh and one confirmed write (解除降载 is harmless when nothing is shed) | pending |
 | Analytics token | the GraphQL query with the production token returns every dataset; then the token is replaced by an "Account Analytics: Read" token (setup.md §4) and checked again | pending (a broader token is still reused) |
 | Quota numbers | spot-check the page's daily numbers against the Cloudflare dashboard's usage pages for the same UTC day | pending |
-| First scheduled canary | the day's run reaches `ok` (Mail Hero delivered, Todofy one Gemini call, no Todoist task, not listed as mail) | pending |
+| First scheduled canary | the day's run reaches `ok` (Mail Hero delivered, Todofy summarized it, no Todoist task, not listed as mail); this does not exercise Email Routing, raw storage or parsing | pending |
 | Guard round trip | only if a real ≥ 80 % day happens, or by the owner's 强制降载 then 解除降载: both apps report the guard in `status()` and clear it | pending |
 | Digest | Todofy's next daily reminder carries the dashboard's warning/critical items, or none | pending |
 | Open questions from `limits.md` §4 | whether `Ops` calls appear in the apps' Worker request totals; unclassified R2 action types; analytics lag at a tick; `durableObjectsStorageGroups` data | pending |
