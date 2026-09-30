@@ -434,24 +434,39 @@ export async function deploy(
   if (deps.config.hostnames.length > 0) await deps.wrangler.deployTriggers();
 }
 
-/** Restores the recorded previous version, only if production serves this release's version. */
+/**
+ * Restores the recorded previous version, only if production serves this release's version, then
+ * verifies it where the baseline was last verified (`baseline.liveOrigin`), never at a hostname this
+ * failed release was adding: when `wrangler triggers deploy` failed, that hostname (www on its first
+ * attach) still serves whatever answered before, and checking it would turn a clean rollback into an
+ * unverified one (`error`).
+ */
 export async function rollback(
   deps: ReleaseDeps,
-  options: { upload: UploadResult; message: string },
+  options: {
+    upload: UploadResult;
+    message: string;
+    baseline: GateState["baseline"];
+    verifyIdentity: (origin: string, identity: BuildIdentity) => Promise<void>;
+  },
 ): Promise<string> {
   const restore =
     options.upload.previousVersionId ?? fail("There is no recorded version to restore.");
   const active = await deps.worker.activeVersion();
   if (active === restore) {
     deps.log("rollback: production already serves the recorded previous version");
-    return restore;
+  } else {
+    if (active !== options.upload.versionId) {
+      fail(`Production serves ${active ?? "none"}; refusing to overwrite a concurrent change.`);
+    }
+    await deps.wrangler.deployVersion(restore, options.message);
+    const settled = await deps.worker.activeVersion();
+    if (settled !== restore) {
+      fail(`Rollback did not settle: production serves ${settled ?? "none"}.`);
+    }
   }
-  if (active !== options.upload.versionId) {
-    fail(`Production serves ${active ?? "none"}; refusing to overwrite a concurrent change.`);
-  }
-  await deps.wrangler.deployVersion(restore, options.message);
-  const settled = await deps.worker.activeVersion();
-  if (settled !== restore) fail(`Rollback did not settle: production serves ${settled ?? "none"}.`);
+  const { liveOrigin, identity } = options.baseline;
+  if (liveOrigin && identity) await options.verifyIdentity(liveOrigin, identity);
   return restore;
 }
 

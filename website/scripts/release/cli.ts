@@ -392,13 +392,13 @@ const commands: Record<string, () => Promise<void>> = {
     const d = await deps();
     const state = await gateState();
     const uploaded = await readJson<UploadResult>(files.upload);
+    // Verified on the baseline's recorded hostname, not this config's (steps.ts rollback).
     const restored = await rollback(d, {
       upload: uploaded,
       message: `rollback to ${state.baseline.deploymentId}`,
+      baseline: state.baseline,
+      verifyIdentity: verifyLiveIdentity,
     });
-    const origin = liveOrigin(d.config, siteUrl());
-    if (origin && state.baseline.identity)
-      await verifyLiveIdentity(origin, state.baseline.identity);
     await output("restored_version_id", restored);
   },
 

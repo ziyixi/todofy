@@ -28,5 +28,7 @@ not_found_handling = "404-page"
 
 # Hostnames (docs/cutover.md): `routes` above is their complete list. Every release applies it with
 # `wrangler triggers deploy` and verifies the live site on www once www is listed (otherwise on the first
-# hostname). Removing a line detaches that hostname at the next release. The apex ziyixi.science is not
-# this Worker: its 308 to www is the Worker ziyixi-apex-redirect (apex-redirect/wrangler.toml).
+# hostname). It only adds: removing a line does not detach that hostname (with none of its kind left
+# listed, wrangler sends no change), so also delete it in the dashboard (docs/cutover.md step 3). The apex
+# ziyixi.science is not this Worker: its 308 to www is the Worker ziyixi-apex-redirect
+# (apex-redirect/wrangler.toml).

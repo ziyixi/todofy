@@ -115,6 +115,19 @@ describe("website wrangler.toml", () => {
 
   const base = `name = "ziyixi-website"\naccount_id = "${"f".repeat(32)}"\nworkers_dev = false\npreview_urls = false\n`;
 
+  it("relies on wrangler leaving hostnames of a kind it no longer lists (docs/cutover.md step 3)", async () => {
+    // The runbook says removing a line detaches nothing: `wrangler triggers deploy` sends the replacing
+    // route PUT and the replace_state Custom Domain changeset only when at least one of that kind is
+    // listed. After a wrangler upgrade, re-read triggersDeploy and update the runbook if this changed.
+    const cli = await readFile("node_modules/wrangler/wrangler-dist/cli.js", "utf8");
+    expect(cli).toContain("if (routesOnly.length > 0) {");
+    expect(cli).toContain("if (customDomainsOnly.length > 0) {");
+    expect(cli).toContain("/domains/changeset?replace_state=true");
+    const docs = await readFile("docs/cutover.md", "utf8");
+    expect(docs).not.toMatch(/detaches the hostname|complete set/);
+    expect(await readFile("wrangler.toml", "utf8")).not.toMatch(/Removing a line detaches/);
+  });
+
   it("verifies the canonical host once attached, otherwise the first hostname", () => {
     const none = parseWorkerConfig(base);
     expect(none.hostnames).toEqual([]);

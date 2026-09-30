@@ -70,8 +70,11 @@ Each step is one `pnpm release <command>` ([`scripts/release/cli.ts`](../scripts
     database description. A feedback failure is a warning, never a rollback. Without a hostname it is
     skipped.
 13. On a failed deploy or live check: `rollback` deploys the recorded previous version again (only if
-    production serves this release's version), verifies it, and `mark-failure` records `failure`
-    (restored) or `error`. The job fails; the next release must be `recovery`.
+    production serves this release's version), verifies it on the hostname where the baseline was
+    verified (the baseline record's live hostname, not a hostname this release was adding: if attaching
+    it failed, it still serves what answered before), and `mark-failure` records `failure` (restored and
+    verified) or `error`. The job fails; every later `release` (push, buttons, relay cron) stops at the
+    gate until someone dispatches `recovery`.
 
 ## Operations
 
@@ -85,7 +88,9 @@ Each step is one `pnpm release <command>` ([`scripts/release/cli.ts`](../scripts
   Then a full release runs (recovery always rebuilds).
 - **status**: the 刷新状态 button; only the Notion feedback, no build.
 - **force_build**: rebuild and redeploy an unchanged identity (for example to re-run the live checks or to
-  re-attach a hostname that was removed by hand).
+  re-attach a hostname that was removed by hand; not the recorded live hostname: while that one does not
+  serve the Worker, the baseline check stops every release first, see
+  [`cutover.md`](cutover.md#rollback)).
 - **allow_empty**: one run may publish an empty collection after a non-empty one.
 
 ## Rollback by hand

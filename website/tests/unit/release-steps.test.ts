@@ -431,20 +431,137 @@ describe("upload, deploy and rollback", () => {
     const { github } = fakeGitHub({ rows: [], states: {} });
     const uploaded = { versionId: V2, firstDeploy: false, previousVersionId: V1 };
     const cloudflare = fakeWorker(V2);
+    const verifyIdentity = vi.fn(async () => undefined);
+    const options = { message: "m", baseline: releaseState().baseline, verifyIdentity };
     await expect(
-      rollback(deps(github, cloudflare), { upload: uploaded, message: "m" }),
+      rollback(deps(github, cloudflare), { ...options, upload: uploaded }),
     ).resolves.toBe(V1);
     expect(cloudflare.wrangler.deployVersion).toHaveBeenCalledWith(V1, "m");
+    // A baseline without a live hostname (verified locally only) has nothing live to check.
+    expect(verifyIdentity).not.toHaveBeenCalled();
     const concurrent = fakeWorker(V3);
     await expect(
-      rollback(deps(github, concurrent), { upload: uploaded, message: "m" }),
+      rollback(deps(github, concurrent), { ...options, upload: uploaded }),
     ).rejects.toThrow(/concurrent change/);
     await expect(
       rollback(deps(github, fakeWorker(V2)), {
+        ...options,
         upload: { ...uploaded, previousVersionId: null },
-        message: "m",
       }),
     ).rejects.toThrow(/no recorded version/);
+  });
+});
+
+// Run 36703886018: the release that first listed www failed at `wrangler triggers deploy` (www kept
+// serving Vercel), restored the baseline, then checked it on www and recorded `error`.
+describe("attaching www after the preview host", () => {
+  const PREVIEW = "https://website-preview.ziyixi.science";
+  const HOSTS = ["website-preview.ziyixi.science", "www.ziyixi.science"];
+  const baselinePayload = payload({ liveOrigin: PREVIEW });
+  const failedPayload = payload({
+    identity: NEW,
+    workerVersionId: V2,
+    previousWorkerVersionId: V1,
+    liveOrigin: SITE,
+  });
+
+  it("verifies a rollback where the baseline was verified, not on the hostname being added", async () => {
+    const { github } = fakeGitHub({ rows: [], states: {} });
+    const cloudflare = fakeWorker(V1);
+    vi.mocked(cloudflare.wrangler.deployTriggers).mockRejectedValueOnce(
+      new Error("already has externally managed DNS records"),
+    );
+    const d = deps(github, cloudflare, HOSTS);
+    const state = releaseState({ liveOrigin: PREVIEW });
+    const uploaded = await upload(d, { state, identity: NEW });
+    await expect(deploy(d, { upload: uploaded, identity: NEW })).rejects.toThrow(/externally/);
+    // www serves Vercel: only a check there would fail.
+    const verifyIdentity = vi.fn(async (origin: string) => {
+      if (origin === SITE) throw new Error("identity mismatch");
+    });
+    await expect(
+      rollback(d, { upload: uploaded, message: "m", baseline: state.baseline, verifyIdentity }),
+    ).resolves.toBe(V1);
+    expect(verifyIdentity.mock.calls).toEqual([[PREVIEW, OLD]]);
+  });
+
+  it("still verifies when production already serves the baseline, and reports a failed check", async () => {
+    const { github } = fakeGitHub({ rows: [], states: {} });
+    const uploaded = { versionId: V2, firstDeploy: false, previousVersionId: V1 };
+    const baseline = releaseState({ liveOrigin: PREVIEW }).baseline;
+    const verifyIdentity = vi.fn(async () => undefined);
+    await rollback(deps(github, fakeWorker(V1), HOSTS), {
+      upload: uploaded,
+      message: "m",
+      baseline,
+      verifyIdentity,
+    });
+    expect(verifyIdentity).toHaveBeenCalledWith(PREVIEW, OLD);
+    await expect(
+      rollback(deps(github, fakeWorker(V2), HOSTS), {
+        upload: uploaded,
+        message: "m",
+        baseline,
+        verifyIdentity: async () => {
+          throw new Error("does not serve the expected build identity");
+        },
+      }),
+    ).rejects.toThrow(/expected build identity/);
+  });
+
+  it("needs recovery after the errored record, which re-verifies the preview baseline and attaches www", async () => {
+    const records = {
+      rows: [row(11, failedPayload, 2), row(10, baselinePayload, 1)],
+      states: { 11: "error", 10: "success" } as Record<number, string>,
+    };
+    const { github, setState } = fakeGitHub(records);
+    const cloudflare = fakeWorker(V1);
+    const d = deps(github, cloudflare, HOSTS);
+    // The push-dispatched release (and every relay release) stops at the gate.
+    await expect(gate(d, { operation: "release", siteUrl: SITE })).rejects.toThrow(
+      /state is error; only recovery/,
+    );
+    const result = await gate(d, { operation: "recovery", siteUrl: SITE });
+    if (result.bootstrapRequired) throw new Error("unexpected");
+    const verifyRecorded = vi.fn(async () => undefined);
+    const state = await recover(d, result.state, { verifyRecorded, logUrl: "u" });
+    expect(verifyRecorded).toHaveBeenCalledWith(
+      expect.objectContaining({ liveOrigin: PREVIEW, identity: OLD }),
+    );
+    expect(setState).not.toHaveBeenCalled();
+    const uploaded = await upload(d, { state, identity: NEW });
+    expect(uploaded).toMatchObject({ firstDeploy: false, previousVersionId: V1 });
+    await deploy(d, { upload: uploaded, identity: NEW });
+    expect(cloudflare.wrangler.deployTriggers).toHaveBeenCalledTimes(1);
+  });
+
+  it("refuses releases and recovery once www stops serving the Worker after it was recorded", async () => {
+    // Back to Vercel by deleting the www route: the recorded live hostname is www, never the preview.
+    const attached = payload({
+      workerVersionId: V2,
+      previousWorkerVersionId: V1,
+      liveOrigin: SITE,
+    });
+    const { github } = fakeGitHub({
+      rows: [row(12, attached, 3), row(10, baselinePayload, 1)],
+      states: { 12: "success", 10: "success" },
+    });
+    const d = deps(github, fakeWorker(V2), ["website-preview.ziyixi.science"]);
+    const verify = vi.fn(async (origin: string) => {
+      if (origin === SITE) throw new Error("identity mismatch");
+    });
+    const released = await gate(d, { operation: "release", siteUrl: SITE });
+    if (released.bootstrapRequired) throw new Error("unexpected");
+    await expect(checkBaseline(d, released.state, verify)).rejects.toThrow(/mismatch/);
+    const recovering = await gate(d, { operation: "recovery", siteUrl: SITE });
+    if (recovering.bootstrapRequired) throw new Error("unexpected");
+    await expect(
+      recover(d, recovering.state, {
+        verifyRecorded: (recorded) => verify(recorded.liveOrigin ?? ""),
+        logUrl: "u",
+      }),
+    ).rejects.toThrow(/mismatch/);
+    expect(verify).not.toHaveBeenCalledWith(PREVIEW, expect.anything());
   });
 });
 

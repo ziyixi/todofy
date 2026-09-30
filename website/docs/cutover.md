@@ -83,7 +83,9 @@ releases if needed.
    `/blog`. Click 刷新状态
    and 发布网站 once; both runs appear under Actions → Website release.
 
-Rollback: remove the line and push (the next release detaches the hostname).
+Rollback: none needed; nothing public depends on the preview host. Keep it at least until a release has
+succeeded on `www` (step 3): until then it is the recorded live hostname, where every release checks the
+baseline first. Removing its line alone would not detach it anyway (step 5).
 
 ## 3. www (zone route)
 
@@ -91,9 +93,10 @@ Rollback: remove the line and push (the next release detaches the hostname).
 custom_domain = true }`. That release failed at `wrangler triggers deploy` because `www` already has a
 proxied CNAME to `cname.vercel-dns.com` ("already has externally managed DNS records"), and `CF_API_TOKEN`
 may neither edit DNS nor rulesets (both 403, checked 2026-09-30). The release rolled the version back and
-`www` kept serving Vercel. The token may create and delete zone **Workers Routes** (checked with a probe
-route, then deleted), and a route changes no DNS: it runs the Worker in front of the existing proxied
-record, so the CNAME stays and Vercel is simply no longer reached.
+`www` kept serving Vercel, but its record is `error`, which blocks ordinary releases (item 2). The token
+may create and delete zone **Workers Routes** (checked with a probe route, then deleted), and a route
+changes no DNS: it runs the Worker in front of the existing proxied record, so the CNAME stays and Vercel
+is simply no longer reached.
 
 1. `website/wrangler.toml` lists the preview Custom Domain and the `www` route:
 
@@ -104,19 +107,41 @@ record, so the CNAME stays and Vercel is simply no longer reached.
    ]
    ```
 
-   The push to `main` releases: `wrangler triggers deploy` keeps the preview Custom Domain and creates the
-   route, and from then on the release verifies on `https://www.ziyixi.science` (identity three times in a
-   row, then the whole route contract) and writes the Notion feedback against it. If the route cannot be
-   created, the deploy step fails, the release rolls the version back and `www` keeps serving Vercel.
+2. **After the merge, dispatch `recovery`; the push's own release is expected to fail.** The failed Custom
+   Domain attempt (run 36703886018) left the newest `website-release` record (6757408059) in state `error`
+   (its rollback restored the previous version but then checked it on `www`, which still served Vercel, so
+   it counted as unverified; fixed since: a rollback now verifies where the baseline was verified). An
+   `error` record blocks ordinary releases, so the `release` that `Website deploy` dispatches after the
+   merge, the buttons and the relay's automatic releases all stop at **Enforce the GitHub Deployment state
+   gate** ("only recovery may cross this gate"). They change nothing; the relay stops dispatching for the
+   day after 3 such failures.
 
-2. Check at once: `curl -sI https://www.ziyixi.science/` has no `x-vercel-id`;
+   Wait until the merge commit's CI run is green (a recovery builds the newest CI-green `main` commit; an
+   earlier dispatch would rebuild the failed Custom Domain config). Then Actions → **Website release** →
+   Run workflow: operation `recovery`, confirmation `recovery:www.ziyixi.science`. It finds production
+   still serving the baseline version `770a5b2c-…` of record 6757076528 and verifies it again on the
+   preview host, where it was recorded. Then it rebuilds, uploads, deploys, `wrangler triggers deploy`
+   keeps the preview Custom Domain and creates the `www` route, and the release verifies on
+   `https://www.ziyixi.science` (identity three times in a row, then the whole route contract) and writes
+   the Notion feedback against it. From then on the recorded live hostname is `www`, and ordinary
+   releases pass the gate again.
+
+   If the route cannot be created or `www` fails verification, the release restores the baseline version,
+   verifies it on the preview host, records `failure`, and `www` keeps serving Vercel (if the route was
+   created, it serves the restored baseline). The next attempt is again a `recovery`.
+
+3. Check at once: `curl -sI https://www.ziyixi.science/` has no `x-vercel-id`;
    `curl -s https://www.ziyixi.science/build-info.json` shows the Worker's `contentHash` (the same as the
    preview host); `robots.txt`, `build-info.json` and `publication-state.json` are not rewritten by the zone
    cache (`cache-control` as in step 2); HSTS and `access-control-allow-origin: *` present; `/blog/` → 308
    `/blog`; `/nope` → 404; `/feed.xml` is `application/rss+xml`. The live site has no analytics beacon
    today and the new one has none either; adding analytics is a separate decision, not a cutover step.
-3. Keep `wrangler.toml` the only place that attaches hostnames to `ziyixi-website`: every release makes
-   its Custom Domains the complete set, and its zone routes the complete set whenever it lists at least one.
+4. Keep `wrangler.toml` the only place that attaches hostnames to `ziyixi-website`, but know that it only
+   adds: every release creates what it lists, and removing a line does not reliably detach anything.
+   `wrangler triggers deploy` sends no Custom Domain change when none is listed and no route change when no
+   zone route is listed (wrangler 4.142.0), and a token without All-Zones permission makes it add routes
+   one by one without deleting unlisted ones. To detach a hostname, remove its line and also delete it in
+   the dashboard (Workers → ziyixi-website → Settings → Domains & Routes).
 
 **Later, optional: www as a Custom Domain.** Only the owner can do it (the token cannot replace DNS):
 Workers → ziyixi-website → Settings → Domains & Routes → Add → Custom Domain `www.ziyixi.science`, accept
@@ -154,13 +179,17 @@ Once `www` and the apex are both served by Workers, **deleting Vercel is safe**:
   archive the repository (its Deployments stay readable; the bootstrap no longer needs them). If the
   dispatch token still lists ziyixi.science, remove it.
 - **`.env.local`** (laptop): drop `VERCEL_TOKEN` and `VERCEL_AUTOMATION_BYPASS_SECRET`.
-- Optionally drop the preview hostname from `wrangler.toml`.
+- Optionally drop the preview hostname, once a release has succeeded on `www`: remove its line from
+  `wrangler.toml` and push (the release passes, but the Custom Domain stays attached: with no Custom Domain
+  listed, `wrangler triggers deploy` sends no change for it), then delete it in the dashboard (Workers →
+  ziyixi-website → Settings → Domains & Routes, which also removes its DNS record). In the other order the
+  next release would create it again.
 
 ## Rollback
 
-| Where you are                | Rollback                                                                                                                                                                                                                                                                                                                                                                                                            |
-| ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Steps 1–2                    | Nothing public changed. Remove the preview line if wanted.                                                                                                                                                                                                                                                                                                                                                          |
-| After step 3, a bad release  | It rolls itself back; or [release.md](release.md#rollback-by-hand).                                                                                                                                                                                                                                                                                                                                                 |
-| After step 3, back to Vercel | Only while the Vercel project still exists. Dashboard → ziyixi.science → Workers Routes → delete `www.ziyixi.science/*` (the CNAME was never changed, so Vercel answers at once). Then remove the `www` line from `website/wrangler.toml` and push, or the next release creates the route again (removing the line alone does not delete the route: with no zone route listed, wrangler leaves routes as they are). |
-| After step 4                 | Dashboard → ziyixi.science → Workers Routes → delete `ziyixi.science/*`: Vercel's own apex 308 answers again while the Vercel project exists (the A record was not changed). After Vercel is deleted there is no fallback; fix and redeploy the Worker instead.                                                                                                                                                     |
+| Where you are                | Rollback                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Steps 1–2                    | Nothing public changed. Keep the preview host (step 2).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| After step 3, a bad release  | It rolls itself back and verifies the restored version; or [release.md](release.md#rollback-by-hand).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| After step 3, back to Vercel | Only while the Vercel project exists, and it stops website releases until undone. First set `AUTO_PUBLISH = "false"` in `website/relay/wrangler.toml` and push (the relay's cron stops dispatching; the buttons still dispatch, and fail). Then Dashboard → ziyixi.science → Workers Routes → delete `www.ziyixi.science/*` (the CNAME was never changed, so Vercel answers at once). From then on every website `release` and `recovery` fails before deploying anything: they verify the recorded live hostname, `www`, and it no longer serves the Worker (nothing is uploaded and no record is written). Removing the `www` line from `wrangler.toml` does not help (the check uses the recorded hostname, not the file), so leave it. To resume: re-create the route (Workers Routes → Add route `www.ziyixi.science/*`, Worker `ziyixi-website`), check that `curl -sI https://www.ziyixi.science/` has no `x-vercel-id`, set `AUTO_PUBLISH = "true"` again, and dispatch a release. There is no switch that moves the recorded hostname back to the preview host. |
+| After step 4                 | Dashboard → ziyixi.science → Workers Routes → delete `ziyixi.science/*`: Vercel's own apex 308 answers again while the Vercel project exists (the A record was not changed). The next **Website apex deploy** (a change under `website/apex-redirect/` or a `website`/`all` dispatch) creates the route again, so avoid those until the apex should be the Worker again. After Vercel is deleted there is no fallback; fix and redeploy the Worker instead.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
