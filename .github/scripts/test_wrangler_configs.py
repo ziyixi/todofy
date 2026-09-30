@@ -1,5 +1,10 @@
 """Checks across the apps' Wrangler configs and ci.yml: python3 -m unittest discover -s .github/scripts
 
+Needs Python 3.11+ (tomllib), as CI's ubuntu-24.04 python3 (3.12) has. With an older python3 (macOS ships
+3.9) this module is skipped with a message, and the other script tests still run; run all of them with
+    uv run --no-project --python 3.12 python -m unittest discover -s .github/scripts
+Under GitHub Actions a missing tomllib is an error, never a skip.
+
 Every Worker's production config is one committed file named wrangler.toml in the folder that names the
 Worker, and its top level is production (no [env.*], no keep_vars). What is never committed (personal values,
 operational switches, the build) is added at deploy by each app's deploy-vars wrapper, which refuses a missing
@@ -7,11 +12,22 @@ value; these tests keep ci.yml, the wrappers and the configs in step. They read 
 why they live here and not in any app (root AGENTS.md). Standard library only.
 """
 
+import os
 import re
 import subprocess
-import tomllib
+import sys
 import unittest
 from pathlib import Path
+
+try:
+    import tomllib
+except ModuleNotFoundError:
+    if os.environ.get("GITHUB_ACTIONS") == "true":
+        raise
+    raise unittest.SkipTest(
+        f"test_wrangler_configs needs Python 3.11+ (tomllib), this is {sys.version.split()[0]}: "
+        "uv run --no-project --python 3.12 python -m unittest discover -s .github/scripts"
+    ) from None
 
 REPO = Path(__file__).resolve().parents[2]
 WORKFLOW = REPO / ".github" / "workflows" / "ci.yml"
@@ -96,6 +112,32 @@ def markers(wrapper: str) -> dict[str, list[str]]:
     found: dict[str, list[str]] = {}
     for mode, names in re.findall(r"^(?:#|//) deploy-vars-inputs (\w+): (.+)$", (REPO / wrapper).read_text(), re.M):
         found.setdefault(mode, []).extend(names.split())
+    return found
+
+
+# wrangler options that take a value (the value may be the next token): skipped to find the command.
+WRANGLER_VALUE_OPTIONS = {"-c", "--config", "-e", "--env", "--cwd", "--env-file"}
+
+
+def wrangler_commands(line: str) -> list[str]:
+    """The command of each wrangler call on a shell line ("deploy", "versions upload", "d1", ...), found by
+    skipping global options before it: `wrangler --config x deploy`, `wrangler@4.141.0 deploy`, `pywrangler
+    -c x deploy` all name "deploy"."""
+    found = []
+    tokens = line.replace("\\\n", " ").split()
+    for index, token in enumerate(tokens):
+        if not re.fullmatch(r"(?:\S*/)?(?:py)?wrangler(?:@\S+)?", token):
+            continue
+        rest = tokens[index + 1 :]
+        position = 0
+        while position < len(rest) and rest[position].startswith("-"):
+            option = rest[position]
+            position += 2 if option in WRANGLER_VALUE_OPTIONS else 1
+        if position < len(rest):
+            command = rest[position]
+            if command == "versions" and position + 1 < len(rest):
+                command = f"versions {rest[position + 1]}"
+            found.append(command)
     return found
 
 
@@ -316,10 +358,42 @@ class Workflow(unittest.TestCase):
             for job_name, job in self.app_jobs(app).items():
                 for step in steps(job):
                     for line in step["run"].replace("\\\n", " ").splitlines():
-                        if re.search(r"\b(?:py)?wrangler (deploy|versions upload)\b", line):
+                        if {"deploy", "versions upload"} & set(wrangler_commands(line)):
                             with self.subTest(job=job_name, line=line.strip()):
                                 self.assertRegex(line, r"deploy[-_]vars\.(mjs|py) exec( core| gateway)? -- ")
                                 self.assertNotRegex(line, r"--env\b|--keep-vars|--var\b|wrangler\.production")
+
+    def test_the_deploy_detector_sees_every_spelling(self):
+        for line in (
+            "npx --no-install wrangler deploy --config ../wrangler.toml",
+            "npx --no-install wrangler --config ../wrangler.toml deploy",
+            "wrangler -c ../wrangler.toml deploy",
+            "npm exec -- wrangler@4.141.0 deploy --config=../wrangler.toml",
+            "node_modules/.bin/wrangler --env-file x versions upload",
+            "uv run pywrangler deploy --config wrangler.toml",
+            "uv run pywrangler --config wrangler.toml deploy",
+        ):
+            with self.subTest(line=line):
+                self.assertTrue({"deploy", "versions upload"} & set(wrangler_commands(line)))
+        for line in (
+            "npx --no-install wrangler d1 migrations apply DB --remote --config ../wrangler.toml",
+            "npx --no-install wrangler --config ../wrangler.toml versions list",
+            "echo wrangler.toml deploy",
+        ):
+            with self.subTest(line=line):
+                self.assertFalse({"deploy", "versions upload"} & set(wrangler_commands(line)))
+
+    def test_deploy_jobs_restate_every_switch_from_its_variable(self):
+        """A deploy step that set a switch to a literal would overwrite the live pause or maintenance state:
+        in the deploy jobs each switch a step sets comes exactly from its GitHub variable."""
+        seen = set()
+        for job_name in DEPLOY_JOBS:
+            for step in steps(self.jobs[job_name]):
+                for name in TOGGLES & set(step["env"]):
+                    seen.add(name)
+                    with self.subTest(job=job_name, step=step["name"], name=name):
+                        self.assertEqual(step["env"][name], f"${{{{ vars.{name} }}}}")
+        self.assertEqual(seen, TOGGLES)
 
     def test_github_variables_are_only_the_switches(self):
         used = set(re.findall(r"\bvars\.([A-Z0-9_]+)", WORKFLOW.read_text()))
