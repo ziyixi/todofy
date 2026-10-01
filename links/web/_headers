@@ -1,0 +1,8 @@
+# Headers of the launcher's hashed files (/_/assets/*), which the asset layer serves without the Worker
+# (../wrangler.toml run_worker_first). scripts/finish-dist.mjs copies this file to dist/_headers. Access guards the path
+# at the edge; the files hold no data. Everything else the Worker answers sets its own private headers.
+/_/assets/*
+  Cache-Control: private, max-age=31536000, immutable
+  X-Content-Type-Options: nosniff
+  X-Robots-Tag: noindex
+  Referrer-Policy: no-referrer

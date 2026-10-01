@@ -1,0 +1,304 @@
+/* The launcher's styles: mobile first, one column, light and dark from the system setting. No external font. */
+:root {
+  color-scheme: light dark;
+  --bg: #fafaf9;
+  --panel: #ffffff;
+  --fg: #1c1917;
+  --muted: #57534e;
+  --line: #e7e5e4;
+  --accent: #1d4ed8;
+  --accent-fg: #ffffff;
+  --warn: #b45309;
+  --public: #047857;
+  --focus: #2563eb;
+  font: 16px/1.45 system-ui, -apple-system, 'PingFang SC', 'Noto Sans CJK SC', sans-serif;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #1c1917;
+    --panel: #292524;
+    --fg: #f5f5f4;
+    --muted: #a8a29e;
+    --line: #44403c;
+    --accent: #3b82f6;
+    --accent-fg: #ffffff;
+    --warn: #fbbf24;
+    --public: #34d399;
+    --focus: #93c5fd;
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+}
+
+#app {
+  max-width: 44rem;
+  margin: 0 auto;
+  padding: 0 0.75rem calc(4.5rem + env(safe-area-inset-bottom));
+}
+
+.bar {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+  padding: calc(0.75rem + env(safe-area-inset-top)) 0 0.75rem;
+  background: var(--bg);
+}
+
+.brand {
+  font: 700 1.25rem ui-monospace, SFMono-Regular, Menlo, monospace;
+  color: var(--accent);
+}
+
+input,
+select,
+button {
+  font: inherit;
+  color: inherit;
+}
+
+input,
+select {
+  min-height: 2.75rem;
+  padding: 0.5rem 0.75rem;
+  border: 1px solid var(--line);
+  border-radius: 0.6rem;
+  background: var(--panel);
+  width: 100%;
+}
+
+#q {
+  flex: 1;
+  font-size: 1.0625rem;
+}
+
+button,
+.button {
+  min-height: 2.75rem;
+  padding: 0.5rem 0.9rem;
+  border: 1px solid var(--line);
+  border-radius: 0.6rem;
+  background: var(--panel);
+  cursor: pointer;
+  white-space: nowrap;
+  display: inline-flex;
+  align-items: center;
+}
+
+button.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-fg);
+}
+
+button:disabled {
+  opacity: 0.6;
+  cursor: progress;
+}
+
+:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
+.status,
+.more {
+  color: var(--muted);
+  text-align: center;
+}
+
+.list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.25rem 0.5rem;
+  padding: 0.6rem 0.25rem;
+  border-bottom: 1px solid var(--line);
+}
+
+.row.selected {
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+  border-radius: 0.5rem;
+}
+
+.open {
+  flex: 1 1 16rem;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  color: inherit;
+  text-decoration: none;
+}
+
+.line {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.key {
+  font: 600 1.0625rem ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+.desc {
+  color: var(--fg);
+}
+
+.target {
+  color: var(--muted);
+  font-size: 0.8125rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.badges {
+  display: inline-flex;
+  gap: 0.25rem;
+}
+
+.badge {
+  font-size: 0.75rem;
+  padding: 0 0.4rem;
+  border: 1px solid var(--line);
+  border-radius: 1rem;
+  color: var(--muted);
+}
+
+.badge.public {
+  color: var(--public);
+  border-color: currentColor;
+}
+
+.badge.warn {
+  color: var(--warn);
+  border-color: currentColor;
+}
+
+.actions {
+  display: flex;
+  gap: 0.25rem;
+}
+
+.actions button {
+  min-height: 2.25rem;
+  padding: 0.25rem 0.6rem;
+  font-size: 0.875rem;
+}
+
+.offer {
+  width: 100%;
+  justify-content: center;
+  border-style: dashed;
+}
+
+.form {
+  margin: 0.5rem 0 1rem;
+  padding: 1rem;
+  border: 1px solid var(--line);
+  border-radius: 0.8rem;
+  background: var(--panel);
+}
+
+.form h2 {
+  margin: 0 0 0.75rem;
+  font-size: 1.125rem;
+}
+
+.field {
+  display: grid;
+  gap: 0.25rem;
+  margin-bottom: 0.75rem;
+}
+
+.field small {
+  color: var(--muted);
+}
+
+.error {
+  color: var(--warn);
+  min-height: 1.2em;
+}
+
+.error button {
+  margin-left: 0.5rem;
+}
+
+.buttons {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.footer {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+  justify-content: flex-end;
+  padding: 1rem 0;
+  color: var(--muted);
+}
+
+.footer label:not(.button) {
+  margin-right: auto;
+  display: inline-flex;
+  gap: 0.35rem;
+  align-items: center;
+}
+
+.footer input[type='checkbox'] {
+  width: auto;
+  min-height: 0;
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+}
+
+.toast {
+  position: fixed;
+  left: 50%;
+  bottom: calc(1rem + env(safe-area-inset-bottom));
+  transform: translateX(-50%);
+  max-width: calc(100% - 1.5rem);
+  display: flex;
+  gap: 0.75rem;
+  align-items: center;
+  padding: 0.6rem 0.9rem;
+  border-radius: 0.8rem;
+  background: var(--fg);
+  color: var(--bg);
+  box-shadow: 0 4px 16px rgb(0 0 0 / 0.2);
+}
+
+.toast button {
+  min-height: 2.25rem;
+  background: transparent;
+  color: inherit;
+  border-color: currentColor;
+}
+
+[hidden] {
+  display: none !important;
+}
