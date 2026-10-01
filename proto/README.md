@@ -16,7 +16,9 @@ The wire bytes did not change (each side's tests pin them). `contracts/task-inte
 Schema and fixtures as the published wire description, and `task-intent-v1.ts` only the value rules the IDL
 cannot express (bounds, URL hosts). `lab/ui/v1` is Lab's owner API (2026-10-01): Lab's Worker serves it
 through `ts/http-transcoder.ts` and Lab's UI calls it through `ts/http-client.ts`; it is the pilot of the
-HTTP APIs, which ops-v1, recommendation-v1, mail-received-v1 and every app's UI API follow.
+HTTP APIs, which ops-v1, recommendation-v1, mail-received-v1 and every app's UI API follow. `links/ui/v1` is the
+links app's owner API (2026-10-01, checked but not deployed yet): the second app on the same runtime, under the path
+prefix `/_/api/v1/` (its host's other paths are short links).
 
 ## Rules
 
@@ -65,7 +67,7 @@ HTTP APIs, which ops-v1, recommendation-v1, mail-received-v1 and every app's UI 
 | --- | --- |
 | `buf.yaml`, `buf.lock` | The module (`path: .`, tooling directories excluded), lint and breaking rules, the `buf.build/googleapis/googleapis` dependency pinned by commit and digest |
 | `buf.gen.yaml` | protobuf-es v2 (`target=ts`, `import_extension=ts`, `erasable_syntax=true`) into `ts/` |
-| `<package path>/*.proto` | One directory per proto package: `todofy/taskintent/v1/task_intent.proto` is `todofy.taskintent.v1`; `lab/ui/v1/*.proto` is `lab.ui.v1`, Lab's owner UI API; `common/errors/v1/errors.proto` is `common.errors.v1`, the error reasons every HTTP API shares |
+| `<package path>/*.proto` | One directory per proto package: `todofy/taskintent/v1/task_intent.proto` is `todofy.taskintent.v1`; `lab/ui/v1/*.proto` is `lab.ui.v1`, Lab's owner UI API; `links/ui/v1/*.proto` is `links.ui.v1`, the links app's owner API; `common/errors/v1/errors.proto` is `common.errors.v1`, the error reasons every HTTP API shares |
 | `package.json`, `package-lock.json` | The toolchain pins (`dependencies`: buf, protoc-gen-es, the runtime) and this folder's test tools (`devDependencies`) |
 | `ts/` | The TypeScript package `@ziyixi/proto`. Committed: `package.json` (its exports), `wire-json.ts` and `field-mask.ts` (the codec), `http-path.ts`, `http-rule.ts`, `http-transcoder.ts`, `http-client.ts` and `rpc-status.ts` (the HTTP runtime, [HTTP APIs](#http-apis)), `page-token.ts` and `filter.ts` (AIP-158 page tokens and the AIP-160 subset for list methods), `protobuf.ts` / `protobuf-wkt.ts` (the runtime re-exports). Generated: every directory (`ts/todofy/...`, `ts/lab/...`, `ts/common/...`, `ts/google/...`) |
 | `python/` | The Python package `ziyixi-proto`. Committed: `pyproject.toml` (static metadata, uv cache keys), `build_backend.py`, `src/ziyixi_proto/__init__.py` and `wire_json.py` (the codec). Generated: every directory under `src/ziyixi_proto/`, for the packages `tools/gen_py.py` lists in `PYTHON_PACKAGES` only; the wheel leaves the test-only ones out (`TEST_ONLY_PACKAGES`) |
@@ -286,7 +288,10 @@ UI API follow the same pattern.
   `INTERNAL` (the transcoder's default), which a client never repeats by itself.
 - Paths under `/api/v1/` (`/api/v1/{name=decks/*}:decide`): `/api` stays the prefix that separates an app's
   API from its static UI on the one host, and the version is in the path. An app's other HTTP surface (the
-  CSRF token at `GET /api/csrf`, `/health`) is transport and stays outside the service.
+  CSRF token at `GET /api/csrf`, `/health`) is transport and stays outside the service. An app whose host
+  root belongs to something else keeps everything of its own under one reserved segment instead: the links app's
+  host answers every `/<key>`, so its UI and API live under `/_/` (`/_/api/v1/...`, `/_/api/csrf`), with a
+  file-wide `core::0122::camel-case-uris` exception for that `_`.
 - Resource-oriented design (AIP-121/122/123): `google.api.resource` with a pattern on every resource,
   `resource_reference` on every field that names one, singletons for per-owner state (`settings`); standard
   methods where they fit (AIP-131/132/133/134/135) and custom methods (AIP-136, `:verb`) for actions.
@@ -413,13 +418,14 @@ runs everything: first run, unusable base, dispatch), `breaking.sh` compares wit
 the log; a base that predates `proto/` has nothing to break. The job is in `CI gate`'s needs and in
 `CHECK_JOBS` (a push to `main` reuses a green branch run only if it passed Proto checks).
 
-A `proto/` change also re-checks every app in `PROTO_USERS` (Lab and Todofy) and runs `Contracts` (the
+A `proto/` change also re-checks every app in `PROTO_USERS` (Lab, Todofy and the links app) and runs `Contracts` (the
 task-intent-v1 tests check the codecs against the schema). It deploys only the apps whose production bundle
 the changed path reaches (`proto_deploys` in `.github/scripts/ci_changes.py`). `PROTO_USERS` names each
-user's bundled languages: Lab `"ts"` (its Worker and UI), Todofy `"python"` (todofy-core vendors the wheel;
-its gateway imports types only, which compile to nothing). A language's runtime and generator reach that
-language's users (`proto/ts/` and `buf.gen.yaml`: Lab; `proto/python/` and `tools/gen_py.py`: Todofy); a
-package reaches the apps that import it (`PROTO_PACKAGES`: `todofy/taskintent/` both, `lab/ui/` Lab,
+user's bundled languages: Lab `"ts"` (its Worker and UI), the links app `"ts"` (its Worker and UI; checked only,
+`CHECK_ONLY`, so nothing deploys it yet), Todofy `"python"` (todofy-core vendors the wheel; its gateway imports
+types only, which compile to nothing). A language's runtime and generator reach that language's users (`proto/ts/`
+and `buf.gen.yaml`: Lab and the links app; `proto/python/` and `tools/gen_py.py`: Todofy); a package reaches the apps
+that import it (`PROTO_PACKAGES`: `todofy/taskintent/` Lab and Todofy, `lab/ui/` Lab, `links/ui/` the links app,
 `common/errors/` and `prototest/` none); the module and toolchain files (`buf.yaml`, `buf.lock`,
 `package-lock.json`, `tools/ensure.mjs`) and any path not mapped reach every user; tests, test data, the
 check scripts, the api-linter tool module, check configs and Markdown reach none. `test_proto.py` derives

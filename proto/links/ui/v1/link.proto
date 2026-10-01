@@ -1,0 +1,85 @@
+// The owner's short link: s.ziyixi.science/<key> redirects to its target (links/docs/design.md §2-§4).
+
+syntax = "proto3";
+
+package links.ui.v1;
+
+import "google/api/field_behavior.proto";
+import "google/api/resource.proto";
+import "google/protobuf/timestamp.proto";
+
+option java_multiple_files = true;
+option java_outer_classname = "LinkProto";
+option java_package = "science.ziyixi.links.ui.v1";
+
+// A short link. Deleting it is a soft delete (AIP-164): the link stops resolving at once, keeps its key and
+// is purged for good at `purge_time` (30 days later), until which UndeleteLink brings it back. Every change
+// is a revision (AIP-162): ListLinkRevisions lists the last 20, RollbackLink restores one of them.
+message Link {
+  option (google.api.resource) = {
+    type: "s.ziyixi.science/Link"
+    pattern: "links/{link}"
+    singular: "link"
+    plural: "links"
+  };
+
+  // Which part of the request path after the key reaches the target.
+  enum PathMode {
+    // Not set: read as EXACT on input, never written.
+    PATH_MODE_UNSPECIFIED = 0;
+    // The target as stored; a request with more path after the key (`/<key>/<rest>`) is refused.
+    PATH_MODE_EXACT = 1;
+    // `/<key>/<rest>` appends <rest> (segment by segment, percent-encoded) to the target's path.
+    PATH_MODE_APPEND = 2;
+    // The target holds exactly one `{path}`, replaced by <rest> (percent-encoded; empty without a rest).
+    PATH_MODE_TEMPLATE = 3;
+  }
+
+  // Who may follow the link.
+  enum Visibility {
+    // Not set: read as PRIVATE on input, never written.
+    VISIBILITY_UNSPECIFIED = 0;
+    // Only the owner: anyone else gets the same answer as for a key that does not exist (a redirect to the
+    // login-protected /_/k/<key>), so private keys cannot be told from unknown ones.
+    VISIBILITY_PRIVATE = 1;
+    // Anyone with the URL, without logging in.
+    VISIBILITY_PUBLIC = 2;
+  }
+
+  // links/{link}, where {link} is the key: 1 to 63 characters of `a-z`, `0-9` and `-`, starting with a letter
+  // or digit (^[a-z0-9][a-z0-9-]{0,62}$). Keys are case-insensitive: the Worker stores and answers them in
+  // lower case. Reserved keys (`_`, `s`, `api`, `v1`, `search`, `cdn-cgi`, `favicon.ico`, `robots.txt`,
+  // `.well-known`) are refused.
+  string name = 1 [(google.api.field_behavior) = IDENTIFIER];
+  // The destination: an absolute `https:` URL of at most 2048 characters, without user name or password, on
+  // another host than s.ziyixi.science. For TEMPLATE it holds exactly one `{path}`, after the host.
+  string target = 2 [(google.api.field_behavior) = REQUIRED];
+  // How the path after the key reaches the target (EXACT when unspecified).
+  PathMode path_mode = 3 [(google.api.field_behavior) = OPTIONAL];
+  // Who may follow the link (PRIVATE when unspecified).
+  Visibility visibility = 4 [(google.api.field_behavior) = OPTIONAL];
+  // A note for the owner's launcher, at most 500 characters.
+  string description = 5 [(google.api.field_behavior) = OPTIONAL];
+  // Up to 8 distinct tags of `a-z`, `0-9` and `-` (at most 32 characters each, lower case).
+  repeated string tags = 6 [(google.api.field_behavior) = OPTIONAL];
+  // When the link stops resolving (AIP-214); unset: never. An expired link answers like an unknown key.
+  // (-- api-linter: core::0214::resource-expiry=disabled
+  //     aip.dev/not-precedent: the owner picks a day in the launcher; an input-only `ttl` would be a second
+  //     way to write the same field with no caller. --)
+  google.protobuf.Timestamp expire_time = 7 [(google.api.field_behavior) = OPTIONAL];
+  // When the link was created.
+  google.protobuf.Timestamp create_time = 8 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // When the link last changed.
+  google.protobuf.Timestamp update_time = 9 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // When the link was deleted; unset while it is not.
+  google.protobuf.Timestamp delete_time = 10 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // When a deleted link is purged for good; unset while it is not deleted.
+  google.protobuf.Timestamp purge_time = 11 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // AIP-154: changes with every revision. An UpdateLink that carries the etag it read is refused with
+  // ETAG_MISMATCH when the link changed since; one without an etag replaces unconditionally.
+  string etag = 12 [(google.api.field_behavior) = OPTIONAL];
+  // AIP-162: the revision this state is, the decimal sequence number of the change (`1` is the creation).
+  string revision_id = 13 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // When this revision was made.
+  google.protobuf.Timestamp revision_create_time = 14 [(google.api.field_behavior) = OUTPUT_ONLY];
+}

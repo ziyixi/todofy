@@ -1,0 +1,53 @@
+// The errors of LinksUiService (AIP-193).
+//
+// Every error is a google.rpc.Status in Google's HTTP JSON form, written by the shared transcoder
+// (proto/ts/http-transcoder.ts):
+//
+//   {"error": {"code": <HTTP status>, "message": <English, for developers>, "status": <google.rpc.Code name>,
+//              "details": [
+//                {"@type": "type.googleapis.com/google.rpc.ErrorInfo", "reason": "ETAG_MISMATCH",
+//                 "domain": "s.ziyixi.science"},
+//                {"@type": "type.googleapis.com/google.rpc.LocalizedMessage", "locale": "zh-CN", "message": ...},
+//                {"@type": "type.googleapis.com/google.rpc.RequestInfo", "request_id": <16 hex>},
+//                {"@type": "type.googleapis.com/links.ui.v1.Link", ...}]}}
+//
+// The UI branches on ErrorInfo.reason only: a value name without its prefix, of ErrorReason below (the links
+// app's own reasons) or of common.errors.v1.CommonReason (the reasons every API shares). A reason the UI does
+// not know is shown with the LocalizedMessage, never read as success.
+
+syntax = "proto3";
+
+package links.ui.v1;
+
+option java_multiple_files = true;
+option java_outer_classname = "ErrorsProto";
+option java_package = "science.ziyixi.links.ui.v1";
+
+// The links app's own reasons: ErrorInfo.reason is the value's name without `ERROR_REASON_`. The HTTP status
+// follows the google.rpc.Code listed for each value (the AIP-193 mapping).
+enum ErrorReason {
+  // Never sent.
+  ERROR_REASON_UNSPECIFIED = 0;
+  // ALREADY_EXISTS (409): CreateLink for a key that is taken, by a live link or by a deleted one that is
+  // not purged yet (AIP-164). The error carries that links.ui.v1.Link as a detail: its `delete_time` tells
+  // the UI to offer UndeleteLink instead.
+  ERROR_REASON_LINK_EXISTS = 1;
+  // FAILED_PRECONDITION (400): the link is deleted; undelete it first (UpdateLink, DeleteLink, RollbackLink).
+  ERROR_REASON_LINK_DELETED = 2;
+  // FAILED_PRECONDITION (400): UndeleteLink of a link that is not deleted.
+  ERROR_REASON_NOT_DELETED = 3;
+  // ABORTED (409): the request's etag is stale (AIP-154). The error carries the current links.ui.v1.Link.
+  ERROR_REASON_ETAG_MISMATCH = 4;
+  // INVALID_ARGUMENT (400): the key is not 1-63 characters of `a-z`, `0-9` and `-` starting with a letter or
+  // digit.
+  ERROR_REASON_INVALID_KEY = 5;
+  // INVALID_ARGUMENT (400): the key is reserved for the service itself.
+  ERROR_REASON_RESERVED_KEY = 6;
+  // INVALID_ARGUMENT (400): the target is not an `https:` URL the link may point to (Link.target).
+  ERROR_REASON_INVALID_TARGET = 7;
+  // FAILED_PRECONDITION (400): the store holds the most links it may (LINKS_MAX, 1,000, deleted ones
+  // included until they are purged).
+  ERROR_REASON_LINKS_FULL = 8;
+  // NOT_FOUND (404): RollbackLink to a revision the link does not have (never made, or no longer kept).
+  ERROR_REASON_REVISION_NOT_FOUND = 9;
+}

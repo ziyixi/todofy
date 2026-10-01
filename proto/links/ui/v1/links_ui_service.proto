@@ -1,0 +1,334 @@
+// The links app's owner API: the HTTP/JSON interface between its launcher UI (links/web) and the Worker "links"
+// (links/worker), which also serves the short links themselves (s.ziyixi.science/<key>, outside this service).
+//
+// Callers. Only the launcher calls it (same origin, s.ziyixi.science). No other app calls these routes.
+//
+// Transport. google.api.http bindings under /_/api/v1: everything of the owner's lives under /_/ (the one
+// path prefix a key can never take), behind a path-scoped Cloudflare Access application, so the rest of the
+// host stays free for keys. Served by the shared transcoder (proto/ts/http-transcoder.ts) and called through
+// the shared client (proto/ts/http-client.ts). Bodies, query parameters and responses are JSON in the wire JSON
+// profile (proto/README.md): proto field names (snake_case), enum values in lower case without their prefix
+// (`Link.Visibility.VISIBILITY_PUBLIC` is "public"), timestamps in RFC 3339 UTC. Inputs are read strictly (an unknown
+// field or enum name is INVALID_ARGUMENT), outputs leniently. Request bodies are at most 128 KiB. Errors:
+// errors.proto (this app's reasons) and common/errors/v1/errors.proto (the reasons every API shares).
+//
+// Authentication, in front of the transcoder (packages/edge-auth, the links app's parameters in its SPEC
+// §5.4): every route needs the Cloudflare Access JWT of the owner (header Cf-Access-Jwt-Assertion or cookie
+// CF_Authorization); every method other than GET also needs the same-origin Origin header and the signed
+// double-submit CSRF token (header X-CSRF-Token, cookie links_csrf), issued by GET /_/api/csrf, which is
+// transport, not part of this service. Every mutation takes a `request_id` (AIP-155, a UUID4 the browser makes
+// once per user action): repeating a request with the same ID within 24 hours answers the first response and
+// changes nothing. Without one the Worker makes one up, so nothing is deduplicated.
+//
+// Value rules the IDL cannot express (lengths, patterns, counts) are in each field's comment and enforced by
+// the Worker; the constants are in links/worker/src/limits.ts.
+//
+// (-- api-linter: core::0122::camel-case-uris=disabled
+//     aip.dev/not-precedent: every path starts with the literal segment `_`, the one prefix no key can take
+//     (keys start with a letter or digit), which keeps the owner's API and UI apart from the short links on
+//     the one host; it is not a snake_case word. --)
+
+syntax = "proto3";
+
+package links.ui.v1;
+
+import "google/api/annotations.proto";
+import "google/api/client.proto";
+import "google/api/field_behavior.proto";
+import "google/api/field_info.proto";
+import "google/api/resource.proto";
+import "google/protobuf/field_mask.proto";
+import "links/ui/v1/link.proto";
+
+option java_multiple_files = true;
+option java_outer_classname = "LinksUiServiceProto";
+option java_package = "science.ziyixi.links.ui.v1";
+
+// The owner's short links: list and search them, create, edit, delete and restore them, undo a change, and move
+// them in and out as JSON Lines.
+service LinksUiService {
+  option (google.api.default_host) = "s.ziyixi.science";
+
+  // A link, deleted or not (AIP-131, AIP-164); NOT_FOUND once purged or never made.
+  rpc GetLink(GetLinkRequest) returns (Link) {
+    option (google.api.http) = {get: "/_/api/v1/{name=links/*}"};
+    option (google.api.method_signature) = "name";
+  }
+
+  // The links in key order (AIP-132, AIP-158, AIP-160); deleted ones only with `show_deleted`.
+  rpc ListLinks(ListLinksRequest) returns (ListLinksResponse) {
+    option (google.api.http) = {get: "/_/api/v1/links"};
+    option (google.api.method_signature) = "";
+  }
+
+  // Creates a link under the key `link_id` (AIP-133); LINK_EXISTS when a live or deleted link holds the key.
+  rpc CreateLink(CreateLinkRequest) returns (Link) {
+    option (google.api.http) = {
+      post: "/_/api/v1/links"
+      body: "link"
+    };
+    option (google.api.method_signature) = "link,link_id";
+  }
+
+  // Replaces the fields `update_mask` names, or every field the owner sets without one (AIP-134), as a new
+  // revision; with the link's `etag`, only if the link did not change since (AIP-154).
+  rpc UpdateLink(UpdateLinkRequest) returns (Link) {
+    option (google.api.http) = {
+      patch: "/_/api/v1/{link.name=links/*}"
+      body: "link"
+    };
+    option (google.api.method_signature) = "link,update_mask";
+  }
+
+  // Soft-deletes a link (AIP-135, AIP-164): it stops resolving at once and is purged 30 days later. Answers the
+  // deleted link; NOT_FOUND when there is no link, LINK_DELETED when it is deleted already.
+  rpc DeleteLink(DeleteLinkRequest) returns (Link) {
+    option (google.api.http) = {delete: "/_/api/v1/{name=links/*}"};
+    option (google.api.method_signature) = "name";
+  }
+
+  // Restores a deleted link before its purge (AIP-164) as it was; NOT_DELETED when it is not deleted.
+  rpc UndeleteLink(UndeleteLinkRequest) returns (Link) {
+    option (google.api.http) = {
+      post: "/_/api/v1/{name=links/*}:undelete"
+      body: "*"
+    };
+  }
+
+  // The link's kept revisions, newest first (AIP-162): the last 20 changes.
+  rpc ListLinkRevisions(ListLinkRevisionsRequest) returns (ListLinkRevisionsResponse) {
+    option (google.api.http) = {get: "/_/api/v1/{name=links/*}:listRevisions"};
+    option (google.api.method_signature) = "name";
+  }
+
+  // Makes a kept revision the link's state again, as a new revision (AIP-162): the launcher's undo of an edit.
+  rpc RollbackLink(RollbackLinkRequest) returns (Link) {
+    option (google.api.http) = {
+      post: "/_/api/v1/{name=links/*}:rollback"
+      body: "*"
+    };
+  }
+
+  // Adds links from JSON Lines (one Link per line, as ExportLinks writes them): each valid line becomes a link,
+  // every other line is reported. All the links are written at once, or none.
+  rpc ImportLinks(ImportLinksRequest) returns (ImportLinksResponse) {
+    option (google.api.http) = {
+      post: "/_/api/v1/links:import"
+      body: "*"
+    };
+  }
+
+  // The live links as JSON Lines (one Link per line, in key order), a page at a time, for a backup or a move.
+  rpc ExportLinks(ExportLinksRequest) returns (ExportLinksResponse) {
+    option (google.api.http) = {get: "/_/api/v1/links:export"};
+  }
+}
+
+// Input of GetLink.
+message GetLinkRequest {
+  // links/{link}.
+  string name = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (google.api.resource_reference).type = "s.ziyixi.science/Link"
+  ];
+}
+
+// Input of ListLinks.
+message ListLinksRequest {
+  // At most this many links (AIP-158): 0 means 100, and a larger value is read as 100.
+  int32 page_size = 1 [(google.api.field_behavior) = OPTIONAL];
+  // The previous page's `next_page_token`, with the same `filter` and `show_deleted` (others are
+  // INVALID_ARGUMENT).
+  string page_token = 2 [(google.api.field_behavior) = OPTIONAL];
+  // An AIP-160 filter in the subset proto/ts/filter.ts parses: up to 8 literals, bare words or quoted strings,
+  // separated by whitespace or AND; each literal must occur in the key, the description, the target or a tag
+  // (ASCII letters case-insensitively). Anything else (OR, NOT, `-`, fields, comparisons, functions) is
+  // INVALID_ARGUMENT. At most 200 characters. Empty lists everything.
+  string filter = 3 [(google.api.field_behavior) = OPTIONAL];
+  // Also list deleted links that are not purged yet (AIP-164).
+  bool show_deleted = 4 [(google.api.field_behavior) = OPTIONAL];
+}
+
+// Output of ListLinks.
+message ListLinksResponse {
+  // The page, in key order.
+  repeated Link links = 1 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The next page's token; empty on the last page.
+  string next_page_token = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
+}
+
+// Input of CreateLink.
+message CreateLinkRequest {
+  // The link to create: its `name` is ignored (the key is `link_id`).
+  Link link = 1 [(google.api.field_behavior) = REQUIRED];
+  // The key of the new link (a query parameter), by Link.name's rule; upper-case letters are read as lower
+  // case. The answer's name is `links/<link_id in lower case>`.
+  string link_id = 2 [(google.api.field_behavior) = REQUIRED];
+  // The idempotency key (AIP-155), a query parameter; see LinksUiService.
+  string request_id = 3 [
+    (google.api.field_info).format = UUID4,
+    (google.api.field_behavior) = OPTIONAL
+  ];
+}
+
+// Input of UpdateLink.
+message UpdateLinkRequest {
+  // The new values: the fields `update_mask` names (each REQUIRED one must be present), or every field the
+  // owner sets without one; output-only fields are ignored. Its `etag`, when set, must be the link's current
+  // one (AIP-154), whatever the mask names.
+  Link link = 1 [(google.api.field_behavior) = REQUIRED];
+  // AIP-134: the Link fields to replace (a query parameter, `update_mask=target,visibility`). Absent, empty or
+  // `*` replaces every field the owner sets; an unknown field is INVALID_ARGUMENT, and output-only fields are
+  // ignored.
+  google.protobuf.FieldMask update_mask = 2 [(google.api.field_behavior) = OPTIONAL];
+  // The idempotency key (AIP-155), a query parameter; see LinksUiService.
+  string request_id = 3 [
+    (google.api.field_info).format = UUID4,
+    (google.api.field_behavior) = OPTIONAL
+  ];
+}
+
+// Input of DeleteLink.
+message DeleteLinkRequest {
+  // links/{link}.
+  string name = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (google.api.resource_reference).type = "s.ziyixi.science/Link"
+  ];
+  // When set, the link's current etag (AIP-154); a stale one is ETAG_MISMATCH. A query parameter.
+  string etag = 2 [(google.api.field_behavior) = OPTIONAL];
+  // The idempotency key (AIP-155), a query parameter; see LinksUiService.
+  string request_id = 3 [
+    (google.api.field_info).format = UUID4,
+    (google.api.field_behavior) = OPTIONAL
+  ];
+}
+
+// Input of UndeleteLink.
+message UndeleteLinkRequest {
+  // links/{link}.
+  string name = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (google.api.resource_reference).type = "s.ziyixi.science/Link"
+  ];
+  // When set, the deleted link's etag (AIP-154); a stale one is ETAG_MISMATCH.
+  string etag = 2 [(google.api.field_behavior) = OPTIONAL];
+  // The idempotency key (AIP-155); see LinksUiService.
+  string request_id = 3 [
+    (google.api.field_info).format = UUID4,
+    (google.api.field_behavior) = OPTIONAL
+  ];
+}
+
+// Input of ListLinkRevisions.
+message ListLinkRevisionsRequest {
+  // links/{link}.
+  string name = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (google.api.resource_reference).type = "s.ziyixi.science/Link"
+  ];
+  // At most this many revisions (AIP-158): 0 means 20, and a larger value is read as 20.
+  int32 page_size = 2 [(google.api.field_behavior) = OPTIONAL];
+  // The previous page's `next_page_token`.
+  string page_token = 3 [(google.api.field_behavior) = OPTIONAL];
+}
+
+// Output of ListLinkRevisions.
+message ListLinkRevisionsResponse {
+  // The link at each kept revision, newest first: `revision_id` and `revision_create_time` name the revision;
+  // `etag`, `delete_time` and `purge_time` are the link's current ones.
+  repeated Link links = 1 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The next page's token; empty on the last page.
+  string next_page_token = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
+}
+
+// Input of RollbackLink.
+message RollbackLinkRequest {
+  // links/{link}.
+  string name = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (google.api.resource_reference).type = "s.ziyixi.science/Link"
+  ];
+  // The kept revision to restore (Link.revision_id); REVISION_NOT_FOUND for any other.
+  string revision_id = 2 [(google.api.field_behavior) = REQUIRED];
+  // The idempotency key (AIP-155); see LinksUiService.
+  string request_id = 3 [
+    (google.api.field_info).format = UUID4,
+    (google.api.field_behavior) = OPTIONAL
+  ];
+}
+
+// Input of ImportLinks.
+message ImportLinksRequest {
+  // JSON Lines: one Link per line in the wire JSON profile, as ExportLinks writes them (`name` names the key;
+  // output-only fields and `etag` are ignored); blank lines are skipped. At most 100 links and 65,536
+  // characters per request: a larger file is sent in parts.
+  string content = 1 [(google.api.field_behavior) = REQUIRED];
+  // A line whose key holds a live link replaces it (as a new revision) instead of being skipped. A deleted
+  // link is never replaced: undelete it first.
+  bool overwrite = 2 [(google.api.field_behavior) = OPTIONAL];
+  // The idempotency key (AIP-155); see LinksUiService.
+  string request_id = 3 [
+    (google.api.field_info).format = UUID4,
+    (google.api.field_behavior) = OPTIONAL
+  ];
+}
+
+// Output of ImportLinks.
+message ImportLinksResponse {
+  // Links created.
+  int32 created_count = 1 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Live links replaced (`overwrite`).
+  int32 replaced_count = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Lines not imported, each listed in `problems`.
+  int32 skipped_count = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Why each skipped line was skipped, in line order.
+  repeated ImportProblem problems = 4 [(google.api.field_behavior) = OUTPUT_ONLY];
+}
+
+// A line ImportLinks skipped.
+message ImportProblem {
+  // Why the line was skipped.
+  enum Reason {
+    // Never sent.
+    REASON_UNSPECIFIED = 0;
+    // Not a Link in the wire JSON profile (not JSON, an unknown field, a wrong type, no `name`).
+    REASON_INVALID_LINE = 1;
+    // The key breaks Link.name's rule.
+    REASON_INVALID_KEY = 2;
+    // The key is reserved.
+    REASON_RESERVED_KEY = 3;
+    // The target breaks Link.target's rule, or another field its value rule.
+    REASON_INVALID_VALUE = 4;
+    // An earlier line of this request has the same key.
+    REASON_DUPLICATE_KEY = 5;
+    // A live link holds the key (and `overwrite` is not set).
+    REASON_LINK_EXISTS = 6;
+    // A deleted link holds the key.
+    REASON_LINK_DELETED = 7;
+    // The store is full (LINKS_MAX).
+    REASON_LINKS_FULL = 8;
+  }
+
+  // The line's number in `content`, from 1.
+  int32 line_number = 1 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Why.
+  Reason reason = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
+}
+
+// Input of ExportLinks.
+message ExportLinksRequest {
+  // At most this many links (AIP-158): 0 means 250, and a larger value is read as 250.
+  int32 page_size = 1 [(google.api.field_behavior) = OPTIONAL];
+  // The previous page's `next_page_token`.
+  string page_token = 2 [(google.api.field_behavior) = OPTIONAL];
+}
+
+// Output of ExportLinks.
+message ExportLinksResponse {
+  // The page's live links in key order, each one line of JSON Lines: a Link in the wire JSON profile, without its
+  // newline. All pages' lines, each followed by a newline, are the whole export, which ImportLinks reads back.
+  repeated string lines = 1 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The next page's token; empty on the last page.
+  string next_page_token = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
+}
