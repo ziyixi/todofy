@@ -274,6 +274,7 @@ The reviews moved to the browser because they ran per minute of logged time. On 
 | Worker runtime | `worker/test/runtime/*.test.ts` (Miniflare/workerd, real D1, a fake Todoist Sync API with full item shapes) | Schema and query plans; every store module (the container's query tests, async), including more than 100 ids and row counts; the API over HTTP with CSRF; Access with real RS256 JWTs; CSRF and Origin; PWA exceptions; CSP; E2E gating; the sync rules, throttle, concurrency, backoff, chunked passes, archived projects and the sealed key; the write budget; CPU |
 | UI unit and integration | `web/__tests__` (Vitest, an in-memory fake of the API) | Stores, the request wrapper (CSRF retry, session expiry, banner), the auto-sync scheduler, reviews and exports from rows |
 | Playwright | `web/__tests__/ui` against `wrangler dev` (`web/scripts/e2e-server.mjs`: E2E export, local D1, bypass) | The 52 UI scenarios. All passed locally (Chromium headless shell). CI does not run them yet, as before F1 |
+| Import tool | `deploy/migrate/test_flowday_migrate.py` (Python, synthetic container-era files only) | One operand per value for every hard text (quotes, SQL syntax, emoji, all control characters, hundreds of CRLFs, transaction keywords), exact reals, the statement limit, a WAL that only the staged checkpoint applies, untouched source files, the host's hashes, the excluded key, refusals (a NULL primary key, a cloud-synced work directory); a full export, import into a local D1 (the pinned wrangler and the committed migrations) with edge reals and ±Inf, verify and reset, and no wrangler debug log left behind; the `--remote` paths and the daily write budget against a fake wrangler |
 | Config and wrapper | `deploy/test/*.test.mjs`, `.github/scripts/test_wrangler_configs.py`, `test_ci_changes.py`, `test_drift_desired.py` | No route and no hostname (F2), the real D1 id and AUD, no personal value, the placeholder guard; the deploy job's secrets (the dashboard's owner, FlowDay's own keys), migrations before the Worker, the hostname guard, and its production check against a stubbed wrangler; the dashboard's desired state for drift |
 
 The README figures and the UI goldens (`docs/readme`, `docs/ui-goldens`) are compared pixel by pixel on Ubuntu
@@ -333,19 +334,72 @@ first (`cd ../web && npm run build`), and apply the migrations locally:
     detach the Custom Domain by hand: a deploy whose config lists no route leaves the Worker's live Custom Domains
     alone, so the revert alone does not remove it. Then remove the staging destinations from both Access apps.
     [`../README.md`](../README.md) "Rollback and removal".
-- **F4 (data cutover, owner present, about 15 minutes frozen).**
-  - Stop the container.
-  - Copy the db and wal off the host. Never open the live file; open the copy with `file:<copy>?immutable=1`.
-  - Export each table with `.headers on` and `.mode insert <table> --escape off`, and assert there is no
-    `unistr(` and that every INSERT names its columns. A column-order test exists, but named columns make the
-    order irrelevant. Export `settings` **without** the `todoist_api_key` row (the Worker uses only a key
-    sealed under its own secret). Keep the copy and the dump files only in a private scratch
-    directory and delete them after the comparison below.
-  - Import with `wrangler d1 execute flowday --remote --file`. Compare per table `count(*)`, `total(length(col))`
-    and sorted-dump SHA-256s, without printing any rows.
-  - The owner enters the Todoist key once in Settings (stored sealed). The first sync is then a full sync, in
-    chunks of 200 tasks. It writes `todoist_project_id` once into every Todoist task row: about one row each, a
-    one-off cost of roughly the task count.
+- **F4 (data cutover, owner present).** Frozen from the container stop until the cutover commit's deploy passes:
+  export, import, verify and one `FlowDay deploy` job (about 5 minutes, with the checks reused). The data moves with
+  `deploy/migrate/flowday_migrate.py` (standard library only; its tests in FlowDay checks use synthetic files and a
+  local D1). It never prints a row: only table names, counts, byte totals and digests (prefixes at export, equal or
+  DIFFERENT at verify). Every file it writes stays in a private work directory (mode 0700) on a local disk: it
+  refuses one inside the repository or under a cloud-synced folder (`~/Library/CloudStorage`, iCloud Drive,
+  `~/Desktop`, `~/Documents`, Dropbox, OneDrive), so make it with `mktemp -d`. Every wrangler call runs with
+  `WRANGLER_WRITE_LOGS=false`: by default wrangler appends all it prints, the rows `verify` reads included, to a
+  debug log kept 30 days in its global config directory (`~/.wrangler/logs` when `~/.wrangler` exists, otherwise
+  `~/Library/Preferences/.wrangler/logs` on macOS and `~/.config/.wrangler/logs` on Linux). Run any manual
+  `wrangler d1 execute` that returns rows with the same switch, or delete its log afterwards.
+  - **What the tool does.** `export --source <copy>/flowday.db --workdir <private> --expect-sha256 <copy>/host.sha256`
+    checks the copied files against the hashes taken on the host after the stop, copies them into the work
+    directory and checkpoints that copy (`file:<copy>?immutable=1` alone would ignore the WAL and lose its last
+    commits), checks it (`integrity_check`), proves the source files byte-identical afterwards, and refuses a table
+    or column that is not migration 0001's, invalid UTF-8, a settings key only the Worker writes, a row with a NULL
+    primary key, a `-wal` none of whose frames apply, and more than `--max-rows-written` (50,000) estimated D1 rows
+    written (index entries included). It writes `import.sql`: one INSERT per row with named columns and one operand
+    per value (no `unistr(`; a text with a control character such as CR, or with "BEGIN TRANSACTION"/"COMMIT;"
+    that wrangler's trimmer would rewrite, as `CAST(X'<utf-8>' AS TEXT)`; a real as its exact mantissa times powers
+    of two), `settings` **without** the `todoist_api_key` row (the Worker uses only a key sealed under its own
+    secret), and every statement under D1's 100,000 bytes (a longer text is inserted empty, then appended in
+    chunks). One file, because wrangler imports a `--remote` file atomically. `import` runs `check-empty` and then
+    `wrangler d1 execute DB --remote --file import.sql --yes` (wrangler's own output goes only to the work
+    directory). `verify` compares per table `count(*)`, the total length of each column's text and BLOBs, and the
+    SHA-256 of the sorted canonical rows (reals exactly, ±Inf included), from read-only SELECTs, and checks that D1
+    holds no `todoist_api_key` row and no `todoist_project_id` yet. `reset` empties D1 again: `--bookmark-env NAME`
+    restores a Time Travel bookmark (writes no rows through SQL), `--delete-all-rows --workdir <private>` deletes
+    every row in one atomic file.
+  - **The daily write budget.** The account's 100,000 rows written per UTC day are shared by every app, and a
+    deletion costs about as many rows as the import did. `import` and `reset --delete-all-rows` record their
+    estimates per UTC day in `<private>/d1-writes.json` and refuse above `--max-rows-written-per-day` (50,000): an
+    import at the cap, a reset by deletion and a retry cannot pass the allowance. After a failed verify, reset with
+    the bookmark; a retry that would pass the day's budget waits for the next UTC day (00:00 UTC).
+  - **Landing the commits.** Three commits on top of each other: the import tool (no host change; it can land any
+    time), the cutover commit (the hostname move below) and the commit that clears its cf-guard allowances. Never
+    push or merge them in one go: CI deploys only the last commit of a push, and the clearing commit deployed while
+    the staging host is still attached and the tunnel CNAME is still in place fails cf-guard (an unlisted live
+    Custom Domain and an unallowed DNS conflict), with the container already stopped. Push each by its SHA with
+    `git push origin <sha>:main`, and the next one only after its `FlowDay deploy` passed. The cutover commit
+    touches `.github/`, so every app's checks run for it (Website Playwright, Todofy runtime and more): run them
+    before the freeze on a branch (`git push origin <cutover sha>:refs/heads/flowday-f4-cutover`, a branch run never
+    deploys), and the push of the same SHA to `main` then reuses that green run and goes straight to the deploy
+    (README "CI", `checks_reused`). `main` must not move in between: a rebased cutover commit is a new SHA, which
+    needs its own branch run first.
+  - **Before the freeze.** Land the import tool. Check that the F3 Time Travel bookmark is still within its 7 days
+    and hold it in an environment variable, never in a file in the repository. Save the current DNS record of
+    `flowday.ziyixi.science` (the tunnel CNAME: target, proxied flag, TTL) somewhere private for the rollback.
+    Push the cutover commit to the branch and wait for its run to pass.
+  - **The freeze, in order.** (1) Close every `flowday-next.ziyixi.science` tab and uninstall the staging PWA on
+    every device: a keepalive or queued timer write (section 8) would land in the freshly imported D1. (2) Stop the
+    container; this is required, not just closing tabs: a clean stop checkpoints the WAL, and the container must
+    not take a write after the copy, which would never reach D1 (it keeps serving `flowday.ziyixi.science` until
+    the cutover deploy). It stays stopped until that deploy passed, or until the rollback below. (3) On the host,
+    after the stop, record `sha256sum flowday.db*` into `host.sha256`; copy it, `flowday.db` and, if present,
+    `flowday.db-wal` into a local directory that is not cloud-synced. Never open the live file. (4) `export` (with
+    `--expect-sha256`). (5) `check-empty --remote`; if staging left rows, first `reset --remote --bookmark-env
+    NAME`. (6) `import`, then
+    `verify`; on DIFFERENT or any error stop here: reset with the bookmark and start the container again (nothing
+    else changed). (7) `verify` once more, then push the cutover commit's SHA to `main`. (8) When its
+    `FlowDay deploy` passed, `verify` again before the owner first signs in on `flowday.ziyixi.science`.
+  - **After the cutover deploy.** The owner signs in on `flowday.ziyixi.science` and checks the data, then enters
+    the Todoist key once in Settings (stored sealed). The first sync is then a full sync, in chunks of 200 tasks.
+    It writes `todoist_project_id` once into every Todoist task row (about one row each, a one-off cost of roughly
+    the task count), so `verify` reports that column from then on. Push the clearing commit. Delete the work
+    directory, the copy and `host.sha256`.
   - The hostname move is its own commit: `wrangler.toml` lists only `flowday.ziyixi.science` and sets `PUBLIC_HOST`
     to it (writes from the staging host stop). wrangler applies the listed Custom Domains as the Worker's complete
     set, so the deploy detaches `flowday-next.ziyixi.science`; and CI's non-interactive wrangler overwrites an

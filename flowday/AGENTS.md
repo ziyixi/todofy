@@ -9,7 +9,10 @@ The root [`AGENTS.md`](../AGENTS.md) applies here too. FlowDay-specific rules:
   The Todoist key is stored only sealed (AES-GCM under the `CREDENTIAL_KEY` secret, `worker/src/credentials.ts`);
   never store, export or log it in plain text.
   Never open the live FlowDay database; when a real copy is needed, copy it first and open the copy
-  read-only (`file:<copy>?immutable=1`).
+  read-only (`file:<copy>?immutable=1`), or, when its WAL must be applied, let `deploy/migrate/flowday_migrate.py
+  export` checkpoint a second copy in a private local directory (`mktemp -d`; never in the repository or a
+  cloud-synced folder). Never print a row of it, and run any wrangler command that returns rows with
+  `WRANGLER_WRITE_LOGS=false` (wrangler otherwise keeps all it prints in a debug log in its config directory).
 - **Status (F3).** CI deploys the Worker `flowday` (`worker/`, `migrations/`, `wrangler.toml`) with its static-export
   UI (`web/`) and its D1 migrations ("FlowDay deploy"). Its only hostname is the staging Custom Domain
   `flowday-next.ziyixi.science` (`PUBLIC_HOST`), covered by the Access apps "flowday" and, for `/pwa/*`,

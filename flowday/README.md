@@ -31,7 +31,7 @@ again before it imports the container's data.
 | `worker/` | The Worker: `src/` (router, Access and CSRF, API, D1 stores, the read-only Todoist sync), `test/` (Node unit tests; `test/runtime/` on workerd with real D1) |
 | `migrations/` | D1 schema: `0001` is the container-era SQLite schema, unchanged; `0002` adds `tasks.todoist_project_id`; `0003` drops four indexes no query needs |
 | `web/` | The UI (`app/`, `components/`, `features/`, `lib/`), its tests (`web/__tests__/`) and scripts |
-| `deploy/` | `deploy-vars.mjs` (the deploy wrapper, Lab's shape: `BUILD_SHA` and the Worker secrets at deploy; refuses a placeholder D1 id or AUD) and its tests |
+| `deploy/` | `deploy-vars.mjs` (the deploy wrapper, Lab's shape: `BUILD_SHA` and the Worker secrets at deploy; refuses a placeholder D1 id or AUD) and its tests; `migrate/flowday_migrate.py`, the F4 import of the container's SQLite file into D1 (export, check-empty, import, verify, reset; [`docs/design.md`](docs/design.md) section 11) |
 | `docs/design.md` | The Workers Free design: sync, write budget, limits, security, migration plan |
 | `docs/prd.md` | Product requirements from the standalone repository (historical in parts) |
 | `docs/ui-test-plan.md` | The UI test catalog; every `UI-###` id must match a Playwright test (`ui-test-plan-sync.test.ts`) |
@@ -59,6 +59,7 @@ npm run dev                            # http://127.0.0.1:8789, local D1, loopba
 | `web/` | `npm run test:ui` | Playwright (`desktop` and `portrait`) against `wrangler dev` with an `E2E_TEST_MODE=1` export and a fresh local D1 (`scripts/e2e-server.mjs`) |
 | `web/` | `npm run screenshots:readme[:check]`, `npm run screenshots:ui[:check]` | Regenerate (or compare) the README figures and the goldens |
 | `flowday/` | `node --test deploy/test/*.test.mjs` | The committed config and the deploy wrapper |
+| `flowday/` | `python3 -m unittest discover -s deploy/migrate -p 'test_*.py'` | The F4 import tool on synthetic files, with a local D1 through the pinned wrangler (`npm ci` in `worker/` first) |
 
 `E2E_TEST_MODE=1` exports include the `window.__FLOWDAY_E2E__` bridge, and the Worker serves `/api/test/*` only
 with `E2E_TEST_ROUTES=true` under the loopback bypass. Screenshots and goldens are rendered on Ubuntu 24.04 with a

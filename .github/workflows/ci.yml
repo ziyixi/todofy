@@ -646,6 +646,13 @@ jobs:
       # The config test reads wrangler.toml with the pinned wrangler (worker/node_modules), hence after npm ci.
       - name: Test the production config and deploy values
         run: node --test deploy/test/*.test.mjs
+      # The F4 import tool (deploy/migrate, docs/design.md section 11) on synthetic container-era files: export with the
+      # WAL applied to a private copy, import into a local D1 with the committed migrations (the pinned wrangler, so a
+      # missing one fails here instead of skipping), verify, reset. Never a real database.
+      - name: Test the D1 import tool
+        env:
+          FLOWDAY_MIGRATE_REQUIRE_WRANGLER: '1'
+        run: python3 -m unittest discover -s deploy/migrate -p 'test_*.py'
       - name: Lint, typecheck and test the Worker
         working-directory: flowday/worker
         run: |
