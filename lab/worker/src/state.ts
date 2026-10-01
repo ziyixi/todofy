@@ -75,7 +75,7 @@ export class LabState extends DurableObject<Env> {
   // ---- scheduling ------------------------------------------------------------------------------------
 
   /**
-   * Arms the alarm if none is set: every GET /api/today and every ops-v1 status() (the dashboard's
+   * Arms the alarm if none is set: every GetToday and every ops-v1 status() (the dashboard's
    * 30-minute tick), so the pipeline starts after a deploy without the owner opening the UI. The deploy
    * probe cannot do it: Access answers its unauthenticated requests before they reach the Worker.
    */

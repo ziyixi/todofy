@@ -11,7 +11,9 @@ keeps AI use bounded.
 
 Status: **implemented, not deployed** (2026-09-30). `worker/` implements the pipeline, the neuron ledger, the
 deck/decision/undo/重来 API, the send to Todofy with polling, ops-v1 and Access + CSRF; `web/` implements the
-deck UI (`docs/ux.md`). Both run in CI (`Lab checks`), and `Lab deploy` releases them from `main` after
+deck UI (`docs/ux.md`). The owner API between them is `lab.ui.v1` ([`proto/lab/ui/v1/`](../proto/lab/ui/v1/),
+design §8): the Worker serves it through the shared transcoder, the UI calls it through the shared typed
+client, both from the same generated descriptors. Both run in CI (`Lab checks`), and `Lab deploy` releases them from `main` after
 `Todofy deploy`. Design: [`docs/design.md`](docs/design.md); deck UX: [`docs/ux.md`](docs/ux.md).
 Before the first deploy: the GitHub environment secret `LAB_CSRF_SIGNING_KEY` (below) and Todofy's release
 with `proposeTasks`.
@@ -40,7 +42,7 @@ identities as the dashboard's app.
 | Path | Contents |
 | --- | --- |
 | `wrangler.toml` | production config (real D1 id and Access AUD; `TODOFY` service binding to Todofy's `Ops`) |
-| `worker/` | TypeScript Worker, `LabState`, `Ops` entrypoint, tests |
+| `worker/` | TypeScript Worker, `LabState`, `Ops` entrypoint, the owner API's handlers (`src/api.ts`), tests (`test/runtime/cpu.test.ts` measures the heaviest requests' CPU) |
 | `web/` | React UI (Chinese), built into `web/dist` |
 | `migrations/` | D1 migrations |
 | `deploy/` | `deploy-vars.mjs` (BUILD_SHA and the owner secrets at deploy; refuses a placeholder D1 id or AUD) and its tests |

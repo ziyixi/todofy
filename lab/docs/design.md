@@ -59,7 +59,9 @@ Rate limits (not a concern at this volume): embeddings 3,000 req/min, text gener
 | --- | --- |
 | `lab/wrangler.toml` | the production config (top level = production; run wrangler from `worker/` with `--config ../wrangler.toml`) |
 | `lab/worker/` | TypeScript Worker + SQLite DO `LabState` + `Ops` entrypoint; same toolchain and pins as `dashboard/worker` |
-| `lab/worker/src/api-types.ts` | owner API types shared with the UI (the UI imports it by relative path) |
+| `proto/lab/ui/v1/` | the owner API, `lab.ui.v1` (§8): its resources, methods, HTTP bindings and errors, the one description of what the UI and the Worker exchange |
+| `lab/worker/src/api.ts`, `http.ts` | the owner API's handlers (served by `proto/ts/http-transcoder.ts`) and the HTTP surface around them |
+| `lab/worker/src/model.ts`, `limits.ts` | Lab's internal records (what D1 and LabState produce, mapped to `lab.ui.v1` by `api.ts`); the API's value rules, which the UI imports too |
 | `lab/worker/test/`, `test/runtime/` | Node unit tests (fake bindings); workerd suite (Miniflare, fake AI + fake arXiv + stub Todofy) |
 | `contracts/task-intent-v1/` | the Lab → Todofy "create these Todoist tasks" contract (§9) |
 | `lab/migrations/` | D1 migrations (`migrations_dir`) |
@@ -105,7 +107,7 @@ React 19.3.0, Vite 7.3.6, react-query 5.104.0, lucide-react 1.48.0). `@ziyixi/ed
 
 One object `lab-v1`. Every step is idempotent, keyed by the feed's announce date, with a cursor in
 DO SQLite; each alarm invocation does a bounded slice and re-arms the alarm (2 s) while work
-remains, else at the next fetch time (daily `LAB_FETCH_UTC_HOUR`:30 UTC). Bootstrap: `GET /api/today`
+remains, else at the next fetch time (daily `LAB_FETCH_UTC_HOUR`:30 UTC). Bootstrap: `GetToday`
 and every ops-v1 `status()` call `LabState.ensureAlarm()` (a no-op once an alarm is set), so after the
 first `Lab deploy` the dashboard's next 30-minute tick starts the pipeline even if the owner never opens
 the UI. The deploy probe cannot: Access answers its unauthenticated requests before they reach the
@@ -211,7 +213,7 @@ arXiv metadata is public (license per item in `dc:rights`); PDFs are linked, nev
 **Session = deck = one arXiv announcement day.** Not a UTC day (arXiv announces once per weekday
 around 04:00 UTC; a weekend has none, and the owner's evening crosses UTC midnight) and not a fetch (a
 re-fetch of an unchanged feed must not make a new deck). The rank step creates the deck with its
-frozen card order; it becomes visible at `ready_at`. `GET /api/today` points at the newest ready deck;
+frozen card order; it becomes visible at `ready_at`. `GetToday` points at the newest ready deck;
 older unfinished decks (≤ 7 days) are offered separately and never merged.
 
 **Decision log.** Every mutation appends to `deck_events` and updates the materialised
@@ -233,43 +235,58 @@ older unfinished decks (≤ 7 days) are offered separately and never merged.
   at the next day's rank run; today's deck does not reshuffle.
 - `finished_at` is set when every card has a decision and cleared when an undo/restart reopens one.
 
-**Idempotency and concurrency.** Every mutation carries `op_id` (UUID v4 from the browser) and, for
-deck mutations, `base_version`. The DO serialises mutations per deck (an in-memory promise chain; D1
+**Idempotency and concurrency.** Every mutation carries `op_id` (the API's `request_id`, a UUID v4 from the
+browser; without one the Worker makes one up) and, for deck mutations, `base_version`. The DO serialises mutations per deck (an in-memory promise chain; D1
 calls can interleave otherwise) and checks `owner_ops` first: a known `op_id` returns its stored
 response unchanged (a retried request after a lost response is harmless). A replay also re-derives
 LabState's mirrors from D1 (`labels` for the deck's cards or the one paper from `feedback`; `seed_ids`
 from `seeds`): the first attempt's D1 batch may have committed while the call failed before the mirror
 was written, and ranking must not miss that like, dislike or seed for good. A stale `base_version` is
-409 `deck_changed` with the current `DeckState`, which the UI adopts (another tab or device). Each
+409 `DECK_CHANGED` with the current `DeckState`, which the UI adopts (another tab or device). Each
 mutation is at most 6 D1 statements in one batch; a decision costs ≈ 25 rows written, well inside D1
 Free (100,000 rows written per day).
 
 ## 8. Owner API and UI
 
-Every `/api/*` route needs the Access owner (edge-auth); mutations also need Origin + CSRF
-(`X-CSRF-Token`, cookie `lab_csrf`). Error envelope `{error: {code, message, request_id}}`. Types in
-`worker/src/api-types.ts` (updated in revision 2; the UI imports it):
+The owner API is `lab.ui.v1` ([`proto/lab/ui/v1/`](../../proto/lab/ui/v1/), since 2026-10-01): AIP resources
+and methods with `google.api.http` bindings under `/api/v1`, JSON in the wire profile (snake_case,
+lower-case enum names), errors as google.rpc.Status with the reasons of `errors.proto`. The Worker serves
+it through the shared transcoder (`proto/ts/http-transcoder.ts`, handlers in `worker/src/api.ts`); the UI
+calls it through the shared typed client (`proto/ts/http-client.ts`, transport in
+`web/src/api/client.ts`); both are driven by the same generated descriptors
+([`proto/README.md`](../../proto/README.md), HTTP APIs). Every `/api/*` path needs the Access owner
+(edge-auth) first; every method but GET also needs Origin + CSRF (`X-CSRF-Token`, cookie `lab_csrf`, token
+from `GET /api/csrf`), checked by the transcoder's `authorize` hook before the body is read. Request bodies
+are at most 16 KiB.
 
-| Route | Purpose |
-| --- | --- |
-| `GET /api/csrf` | `{token}` |
-| `GET /api/today` | `TodayResponse`: newest ready deck id and progress, `building` phase, `next_run_at`, cold start, older unfinished decks |
-| `GET /api/decks/:day` | `Deck`: the frozen cards (paper, 简介, because, links) + `DeckState` + the send status |
-| `POST /api/decks/:day/decide` | `{op_id, base_version, paper_id, decision}` → `DeckMutationResponse` |
-| `POST /api/decks/:day/undo` | `{op_id, base_version}` → `DeckMutationResponse` (with what was undone, for the animation) |
-| `POST /api/decks/:day/restart` | `{op_id, base_version}` → `DeckMutationResponse` |
-| `GET /api/decks/:day/summary` | `DeckSummary`: liked cards with `excluded`/`sent_generation`, counts, the current send |
-| `POST /api/decks/:day/exclude` | `{op_id, paper_id, excluded}` → `DeckSummary` (a flag, not a decision event: no version bump) |
-| `POST /api/decks/:day/send` | `{op_id, mode}` → `SendStatus` (§9) |
-| `GET /api/decks/:day/send` | `SendStatus`; polls Todofy when due (≥ 3 s apart) |
-| `POST /api/decks/:day/later` | `{op_id}` → marks 暂不发送 (`later_at`) |
-| `GET /api/liked?cursor=&q=` | liked papers, newest first, 50 per page, optional title filter |
-| `POST /api/feedback` | `{op_id, paper_id, label: 'like'\|'dislike'\|null}` from the 已喜欢 list (source `library`) |
-| `GET/POST/DELETE /api/seeds` | seed IDs (≤ 50), with resolve state; POST `{op_id, ids}`, DELETE `{op_id, paper_id}` |
-| `GET/PUT /api/settings` | categories, λ, cap (≤ ceiling), 简介 model (allow-list), ingest pause, default send mode; PUT `{op_id, …Settings}` → `SettingsResponse` |
-| `GET /api/status` | counters, neurons today/cap, last fetch, guard |
+| rpc | HTTP | Purpose (the route it replaced) |
+| --- | --- | --- |
+| `GetToday` | `GET /api/v1/today` | newest ready deck and progress, `building` phase, next fetch, cold start, older unfinished decks (`GET /api/today`) |
+| `GetDeck` | `GET /api/v1/decks/{day}` | the frozen cards (paper, 简介, because, links), `DeckState`, the latest send (`GET /api/decks/:day`) |
+| `DecideDeck` | `POST /api/v1/decks/{day}:decide` | `{request_id, base_version, paper_id, decision}` → `{state}` (`…/decide`) |
+| `UndoDeck` | `POST /api/v1/decks/{day}:undo` | `{request_id, base_version}` → `{state, undone}` (what was taken back, for the animation) |
+| `RestartDeck` | `POST /api/v1/decks/{day}:restart` | `{request_id, base_version}` → `{state, cleared_count}` |
+| `SnoozeDeck` | `POST /api/v1/decks/{day}:snooze` | 暂不发送 → `{snooze_time}` (`…/later`) |
+| `GetDeckSummary` | `GET /api/v1/decks/{day}/summary` | liked cards with `excluded`/`sent_generation`, sendable count, the latest send |
+| `ExcludePaper` | `POST /api/v1/decks/{day}/summary:excludePaper` | `{request_id, paper_id, excluded}` → `DeckSummary` (a flag, not a decision event: no version bump) |
+| `SendDeck` | `POST /api/v1/decks/{day}:send` | `{request_id, mode}` → `{send}` (§9) |
+| `GetSend` | `GET /api/v1/decks/{day}/send` | the latest send; asks Todofy first when its poll time has come (≥ 3 s apart) |
+| `ListLikedPapers` | `GET /api/v1/likedPapers?page_token=&filter=` | liked papers, newest first, 50 per page, `filter` matched against the title (`GET /api/liked`) |
+| `DeleteLikedPaper` | `DELETE /api/v1/likedPapers/{id}?request_id=` | 取消喜欢 (`POST /api/feedback` with `label: null`) |
+| `CreateLikedPaper` | `POST /api/v1/likedPapers?liked_paper_id={id}` | 恢复喜欢; ALREADY_LIKED when liked (`label: 'like'`) |
+| `ListSeeds`, `ImportSeeds`, `DeleteSeed` | `GET /api/v1/seeds`, `POST /api/v1/seeds:import`, `DELETE /api/v1/seeds/{id}` | seeds (≤ 50) with their resolve state; import takes pasted IDs or links (`/api/seeds`) |
+| `GetSettings`, `UpdateSettings` | `GET`, `PATCH /api/v1/settings` | categories, λ (`dislike_weight`), cap (≤ ceiling), 简介 model (allow-list), ingest pause, default send mode; replaced as a whole (`/api/settings`) |
+| `GetPipelineStatus` | `GET /api/v1/pipelineStatus` | counters, neurons today/cap, last fetch, guard; no UI page reads it (`GET /api/status`) |
 
-`:day` must match `^\d{4}-\d{2}-\d{2}$` and name an existing deck (404 `deck_not_found`). Deck GETs read
+`{id}` of a liked paper or seed is the bare arXiv ID, with an old-style ID's `/` written as `~`
+(`hep-th~9901001`). Every mutation takes a `request_id` (AIP-155, the `op_id` of the DO's op log). Errors:
+`{"error": {"code": <HTTP status>, "message", "status", "details": [ErrorInfo, LocalizedMessage,
+RequestInfo, …]}}`; the reasons are the old error codes in upper case (`DECK_CHANGED` carries the current
+`DeckState` as a detail), and the UI branches on them. The routes before `lab.ui.v1` answer 410
+`reload_required` in the old envelope `{error: {code, message, request_id}}`, so a tab still running the old
+UI tells the owner to reload; that answer goes after one release (2026-11-01).
+
+`{day}` must match `^\d{4}-\d{2}-\d{2}$` and name an existing deck (404 `DECK_NOT_FOUND`). Deck GETs read
 D1 directly in the Worker (≤ 3 queries); mutations go to the DO. Links are built from the validated ID
 only (`https://arxiv.org/abs/<id>`, `https://arxiv.org/pdf/<id>`), never taken from the feed.
 
@@ -291,8 +308,8 @@ writer); the contract, states and Todofy's implementation plan are in
   `deck-<day>-g1`; after it is created, papers liked later in the same deck can go out as `g2`
   ("补发", title `论文雷达 <day>（补发）· N 篇`), and so on. A paper is in at most one recorded
   generation (`deck_cards.sent_generation`), so no paper is ever sent twice.
-- **Freeze.** `POST …/send` builds the intent from the liked, not excluded, not yet sent cards in deck
-  order (none → 409 `nothing_to_send`): `mode` from the request; parent `论文雷达 <day> · N 篇`,
+- **Freeze.** `SendDeck` builds the intent from the liked, not excluded, not yet sent cards in deck
+  order (none → `NOTHING_TO_SEND`): `mode` from the request; parent `论文雷达 <day> · N 篇`,
   description `来自 Lab 论文雷达\nhttps://lab.ziyixi.science/deck/<day>`; per paper `title` (whitespace
   collapsed, ≤ 300 code points with "…"), `url` `https://arxiv.org/abs/<id>`, `description` = the
   简介's first sentence (≤ 120 chars; absent without 简介). The intent is a message of the generated
@@ -314,7 +331,7 @@ writer); the contract, states and Todofy's implementation plan are in
   payload. A retry of a `failed` generation that Todofy answers `paused` (recorded: it held a pause and
   re-queued nothing) stays `failed` here with the pause as its `error_code` and no poll, so the owner is told
   the retry did not happen, not that it resumes by itself.
-- **Polling.** `GET …/send` refreshes a `pending`/`paused`(recorded)/`unknown` generation through the
+- **Polling.** `GetSend` refreshes a `pending`/`paused`(recorded)/`unknown` generation through the
   DO when `next_poll_at` has passed (≥ 3 s, `retry_after_seconds` honoured, backing off to 60 s after
   2 minutes of the current attempt: `sends.created_at` is reset by every retry, rebuild and re-propose). No background polling: a send left pending is refreshed the next time the owner looks
   (and Todofy finishes it anyway).
@@ -408,7 +425,8 @@ poll to created, resend = duplicate, 补发 g2) against the stub Todofy. No netw
 ## 13. Build split
 
 Revision 2 fixes the shared surfaces first (this commit): `contracts/task-intent-v1/` (schema, types,
-fixtures, Lab's contract test), `worker/src/api-types.ts` (deck API), `migrations/0001_init.sql` (deck
+fixtures, Lab's contract test), `worker/src/api-types.ts` (deck API; since 2026-10-01 the API is `lab.ui.v1`, §8,
+and that file is `model.ts`), `migrations/0001_init.sql` (deck
 tables), `wrangler.toml` (real D1 id, Access AUD, `TODOFY` binding), `env.ts`. Then three independent
 builds, in parallel:
 
@@ -441,13 +459,13 @@ What the implementation (`worker/src/`) settled where this design left room, all
 - **Guard bound** (ops-v1: every deferred job has a bound): when the last successful fetch is more than 48 h
   old, the whole day's pipeline runs to its end despite the shed, then defers again.
 - **Settings** live in D1 (`settings`, the source the GETs read); LabState mirrors the effective cap and the
-  ingest pause into its own storage so `status()` needs no D1 read. `PUT /api/settings` replaces the whole
-  set (`SettingsUpdateRequest`); a cap above `LAB_DAILY_NEURONS` is refused.
-- **Replay**: `owner_ops` stores the exact response of decide/undo/重来 (a repeated `op_id` never applies
-  twice); for the idempotent mutations (exclude, 暂不发送, send, feedback, seeds, settings) a repeated `op_id`
+  ingest pause into its own storage so `status()` needs no D1 read. `UpdateSettings` replaces the whole
+  editable set (no field mask); a cap above `LAB_DAILY_NEURONS` is refused.
+- **Replay**: `owner_ops` stores the exact response of decide/undo/重来 (a repeated `request_id` never applies
+  twice); for the idempotent mutations (exclude, 暂不发送, send, likes, seeds, settings) a repeated `request_id`
   returns the current view without applying anything again (a replayed send never proposes again).
   `decks.undo` materialises the next undo target (migration 0001, unapplied, edited in place).
-- **Send**: `GET …/send` answers 404 `not_found` before the first send. The card's `sent_generation` is set
+- **Send**: `GetSend` answers 404 `NOT_FOUND` before the first send. The card's `sent_generation` is set
   as soon as Todofy has *recorded* the generation (pending included), so 补发 never repeats a paper; the open
   frozen generation's papers are also held back while its outcome is unknown.
 - **Tests drive the alarm**: `LabState.step(now)` is the alarm body; with `DEV_MANUAL_ALARMS=true` (a

@@ -1,9 +1,12 @@
-# `proto/`: protobuf as the IDL of the cross-app contracts
+# `proto/`: protobuf as the IDL of the cross-app contracts and the apps' UI APIs
 
-Protobuf is the interface definition language (IDL) of every cross-app contract. The wire does **not**
-change: each contract keeps its JSON bytes through a small *wire JSON profile* codec per language. The
-`.proto` files give every app generated types and enum tables, and `buf lint` and `buf breaking` make
-"renamed, renumbered, retyped or removed" a CI failure.
+Protobuf is the interface definition language (IDL) of every interface the repository defines: the
+cross-app contracts and each app's UI API (the HTTP/JSON between its UI and its Worker, [HTTP
+APIs](#http-apis)). The wire stays JSON: each contract keeps its JSON bytes, and every API speaks the same
+snake_case form, through a small *wire JSON profile* codec per language. The `.proto` files give every app
+generated types and enum tables, `buf lint`, `buf breaking` and Google's api-linter make "renamed,
+renumbered, retyped, removed or not AIP-shaped" a CI failure, and a shared transcoder and client route and
+call the HTTP APIs from the same descriptors.
 
 Status: `task_intent.proto` is the IDL of `contracts/task-intent-v1`, and both sides run on the generated
 code (2026-10-01): Lab (TypeScript) builds its intents as generated messages and reads Todofy's results with
@@ -11,7 +14,9 @@ the codec; todofy-core (Python) reads every input strictly with the codec and wr
 generated message. Todofy's gateway takes its method signatures from the generated service (types only).
 The wire bytes did not change (each side's tests pin them). `contracts/task-intent-v1` keeps the JSON
 Schema and fixtures as the published wire description, and `task-intent-v1.ts` only the value rules the IDL
-cannot express (bounds, URL hosts).
+cannot express (bounds, URL hosts). `lab/ui/v1` is Lab's owner API (2026-10-01): Lab's Worker serves it
+through `ts/http-transcoder.ts` and Lab's UI calls it through `ts/http-client.ts`; it is the pilot of the
+HTTP APIs, which ops-v1, recommendation-v1, mail-received-v1 and every app's UI API follow.
 
 ## Rules
 
@@ -27,11 +32,14 @@ cannot express (bounds, URL hosts).
    runtime from `@ziyixi/proto/protobuf`, which resolves this folder's copy, so every bundle holds exactly
    the runtime the generator targets. `.github/scripts/test_proto.py` enforces it (and the wiring below).
    Generation is deterministic; CI generates twice and compares.
-4. **Lint and breaking.** `buf lint` uses `STANDARD` (AIP-aligned: `_UNSPECIFIED` zero values, enum
-   prefixes, `lower_snake_case`, versioned packages) and `COMMENTS` (every element documented); exceptions
-   are written next to the element with `buf:lint:ignore` and a reason. `buf breaking` uses `FILE`, the
-   strictest category. `tools/profile_breaking.py` adds what buf cannot see but the profile treats as wire:
-   an existing field gaining or losing `(google.api.field_behavior) = REQUIRED` or explicit presence
+4. **Lint and breaking.** `buf lint` uses `STANDARD` (AIP-aligned: `_UNSPECIFIED` zero values, enum prefixes,
+   `lower_snake_case`, versioned packages) and `COMMENTS` (every element documented); exceptions are written
+   next to the element with `buf:lint:ignore` and a reason, and the AIP-shaped HTTP packages are excused (in
+   `buf.yaml`) only from the two response-name rules the AIPs contradict. Google's api-linter
+   (`scripts/api-lint.sh`, one pinned version) checks every package but `prototest/` against the AIPs; its
+   exceptions are `(-- api-linter: ... --)` comments with a reason, next to the element. `buf breaking` uses
+   `FILE`, the strictest category. `tools/profile_breaking.py` adds what buf cannot see but the profile treats
+   as wire: an existing field gaining or losing `(google.api.field_behavior) = REQUIRED` or explicit presence
    (`optional`), and a new `REQUIRED` field in an existing message. `scripts/rules-selftest.sh` proves the
    rules bite (17 cases).
 5. **Adding an enum value is compatible by design**, so neither buf nor the profile check flags it. What
@@ -88,19 +96,19 @@ build backend passes its own interpreter), else `python3`, or `python` on Window
 paths are exercised (locally and in CI); the shell scripts under `scripts/` are for CI and need a POSIX
 shell.
 
-**TypeScript.** An app declares `"@ziyixi/proto": "file:../../proto/ts"` and
-`"postinstall": "node ../../proto/tools/ensure.mjs"`. npm links `node_modules/@ziyixi/proto` to `proto/ts`
-whether or not anything is generated, then the postinstall generates. Every npm script that compiles,
-tests or serves the generated code (`tsc`, `vitest`, `wrangler`) has a `pre<script>` that runs the same
-command, in the app and in any package that imports the app's sources (Lab's UI imports the Worker's API
-types), so `npm run typecheck`, `npm test` or `npm run dev` after a pull or a branch switch that changed a
-`.proto` file regenerates first instead of using stale types (`test_proto.py` requires those scripts). Generated files import
-`@bufbuild/protobuf`, which Node, TypeScript, vitest and wrangler's esbuild resolve from the real path,
-`proto/node_modules`: one copy for every app, no `paths`, `dedupe` or alias settings. Measured on
-2026-10-01 with Lab's production dry-run: its `index.js` grew from 166,530 to 336,996 bytes (gzip 44,365 to
-79,211; wrangler's upload total 162.63 to 329.10 KiB, gzip 43.45 to 77.70 KiB), of which the protobuf-es
-runtime is about 145 KB (descriptor decoding: `descriptor_pb`, the registry, the binary reader) and the
-generated code and `wire-json.ts` about 21 KB. Todofy's gateway imports types only: +0.1 KiB (a new bound).
+**TypeScript.** An app declares `"@ziyixi/proto": "file:../../proto/ts"` and `"postinstall": "node
+../../proto/tools/ensure.mjs"`. npm links `node_modules/@ziyixi/proto` to `proto/ts` whether or not anything
+is generated, then the postinstall generates. Every npm script that compiles, tests or serves the generated
+code (`tsc`, `vitest`, `wrangler`) has a `pre<script>` that runs the same command, in the app and in any
+package that imports the app's sources, so `npm run typecheck`, `npm test` or `npm run dev` after a pull or a
+branch switch that changed a `.proto` file regenerates first instead of using stale types (`test_proto.py`
+requires those scripts). Generated files import `@bufbuild/protobuf`, which Node, TypeScript, vitest and
+wrangler's esbuild resolve from the real path, `proto/node_modules`: one copy for every app, no `paths`,
+`dedupe` or alias settings. Measured on 2026-10-01 with Lab's production dry-run: its `index.js` grew from
+166,530 to 336,996 bytes (gzip 44,365 to 79,211; wrangler's upload total 162.63 to 329.10 KiB, gzip 43.45 to
+77.70 KiB), of which the protobuf-es runtime is about 145 KB (descriptor decoding: `descriptor_pb`, the
+registry, the binary reader) and the generated code and `wire-json.ts` about 21 KB. Todofy's gateway imports
+types only: +0.1 KiB (a new bound).
 
 ```ts
 import { create } from '@ziyixi/proto/protobuf';
@@ -116,8 +124,8 @@ into the entrypoint's methods (`proposeTasks(input: WireObject): Promise<WireObj
 binding with it, the implementation `implements` it, and both sides keep plain JSON objects on the wire.
 `wireEnum(ModeSchema, Mode)` gives one enum's wire names and back for code that stores or shows them outside a
 message (a D1 column, an owner API), and `WireName<typeof Mode>` is the union of those names as a type
-(`'subtasks' | 'separate'`): Lab's UI types derive from it, so a new enum value fails its typecheck until the
-UI handles it. Python has `wire_name(member)` and `wire_member(cls, name)`.
+(`'subtasks' | 'separate'`): Lab's internal records derive from it, so a new enum value fails Lab's typecheck
+until it maps it to `lab.ui.v1`. Python has `wire_name(member)` and `wire_member(cls, name)`.
 
 **Python.** Todofy declares `ziyixi-proto` in its `[project] dependencies` (todofy-core imports it) with
 `[tool.uv.sources] ziyixi-proto = { path = "../proto/python" }`. uv builds it with
@@ -167,6 +175,7 @@ cd proto
 npm ci                                   # the toolchain and this folder's test tools
 npm run generate                         # regenerate now (any app's npm install / uv sync also does it)
 npm run lint                             # buf format + buf lint
+npm run api-lint                         # Google's api-linter (needs Go; tools/api-linter/go.mod)
 npm run breaking -- "$(git merge-base HEAD origin/main)"   # buf breaking + the profile rules
 npm run selftest                         # the rules still bite
 npm run check:deterministic              # generate twice more, compare with the installed output
@@ -270,26 +279,38 @@ be present"; an `OUTPUT_ONLY` field is omitted when unset, which a typed client 
 
 **The transcoder** (`ts/http-transcoder.ts`, `HttpTranscoder`). The app keeps its own fetch handler:
 authentication (Cloudflare Access through `packages/edge-auth`) runs first for every path, then
-`transcoder.handle(request, context, requestId)` routes by the bindings, calls the app's `authorize` hook
-with the matched route before reading the body (CSRF and Origin for every method but GET), builds the
-request message from the path variables, the body (`*` or one field, `application/json`, at most
-`maxBodyBytes`) and the query (`a.b=1`, repeated keys; form encoding, so `+` is a space), checks UUID4 fields
-and clears `OUTPUT_ONLY` input fields (AIP-203), calls the typed handler and writes the answer (`no-store`,
-`nosniff`). A path no binding has returns null, for the app's other routes; another method on a known path
-is 405 with `Allow`; `OPTIONS` is 204 with `Allow` and no CORS headers (same-origin only); `HEAD` is `GET`
-without the body. Handlers throw `RpcError(code, reason, message, {details})`; the body is a google.rpc.Status
-in Google's HTTP form (`{"error": {"code": <HTTP status>, "message", "status": <code name>, "details": [ErrorInfo,
-LocalizedMessage, RequestInfo, typed details]}}`, `ts/rpc-status.ts`). Messages are fixed English; nothing from
-the request is echoed. Path templates (`ts/http-path.ts`) follow http.proto (`*`, `**`, `{field.path=...}`,
-`:verb`, its percent-decoding rules), with the precise choices written at the top of the file (a raw `:` in
-the last segment is a verb; literals beat `*` beat `**`). Unsupported bindings (`custom`, `response_body`, a
-body on GET or DELETE, a non-message body field) fail when the routes are built, on the first request.
+`transcoder.handle(request, context, requestId)` routes by the bindings, calls the app's `authorize` hook with
+the matched route before reading the body (CSRF and Origin for every method but GET), builds the request
+message from the path variables, the body (`*` or one field, `application/json`, at most `maxBodyBytes`) and
+the query (`a.b=1`, repeated keys; form encoding, so `+` is a space), checks UUID4 fields and clears
+`OUTPUT_ONLY` input fields (AIP-203), calls the typed handler and writes the answer (`no-store`, `nosniff`). A
+path no binding has returns null, for the app's other routes; another method on a known path is 405 with
+`Allow`; `OPTIONS` is 204 with `Allow` and no CORS headers (same-origin only); `HEAD` is `GET` without the
+body. Handlers throw `RpcError(code, reason, message, {details})`; the body is a google.rpc.Status in Google's
+HTTP form (`{"error": {"code": <HTTP status>, "message", "status": <code name>, "details": [ErrorInfo,
+LocalizedMessage, RequestInfo, typed details]}}`, `ts/rpc-status.ts`). Messages are fixed English; nothing
+from the request is echoed. Path templates (`ts/http-path.ts`) follow http.proto (`*`, `**`,
+`{field.path=...}`, `:verb`, its percent-decoding rules), with the precise choices written at the top of the
+file (a raw `:` in the last segment is a verb; literals beat `*` beat `**`). Unsupported bindings (`custom`,
+`response_body`, a body on GET or DELETE, a non-message body field) fail when the routes are built, on the
+first request.
 
 **The client** (`ts/http-client.ts`, `createHttpClient(Service, send)`): one typed method per rpc
 (`client.getDeck({ name: 'decks/2026-09-30' })` resolves to a `Deck`), laid out by the rpc's primary binding;
 `send` is the app's transport (credentials, CSRF header, retries). A non-2xx answer throws `RpcStatusError`
 with the parsed Status (`reason`, `localizedMessage`, `requestId`, `readDetail(status, Schema)`), or
 `HttpResponseError` when the body is not one (a proxy page, an expired Access session).
+
+**Cost** (measured 2026-10-01 on Lab, `lab/worker/test/runtime/cpu.test.ts`: a sampled DevTools CPU profile of
+the workerd isolate around each request, LabState included; noisy at 0.1 ms resolution, medians of 10 warm
+runs, three runs each). Warm requests: a 20-card deck 0.9 → 1.1 ms, a full page of 50 likes 1.0-1.25 →
+1.4-1.6 ms, a decide plus an undo 2.6-3.0 → 2.6-3.3 ms (the transcoder's decode, the map to messages and
+`toWire` are a few tenths of a millisecond). The isolate's first API request (a deck) 1.9 → 3.9 ms, from
+running the new code paths once; the route table itself is built when the Worker's global scope constructs
+the transcoder (about 2 ms in a fresh Node process), outside any request. Bundles: Lab's Worker 329.2 →
+405.7 KiB (gzip 77.8 → 101.3 KiB, wrangler's dry run), its UI's JavaScript 327.7 → 442.6 kB (gzip
+103.6 → 139.3 kB): the protobuf-es runtime in the UI and the embedded descriptors of `lab.ui.v1` and
+`google/api`.
 
 **Adding a UI API.**
 
