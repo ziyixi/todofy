@@ -3,7 +3,8 @@
 # copies the module to a temporary directory, applies one edit to one .proto file (task_intent.proto unless
 # the case names another) and expects a verdict. "breaking" is what scripts/breaking.sh runs against its
 # base: buf breaking (FILE) plus tools/profile_breaking.py (REQUIRED and presence, which the wire profile
-# treats as wire, and the HTTP APIs' bindings, signatures, resources, OUTPUT_ONLY inputs and formats). Exit
+# treats as wire, the value rules and closed enums of common/wire/v1, and the HTTP APIs' bindings, signatures,
+# resources, OUTPUT_ONLY inputs and formats). Exit
 # status 0 only when every verdict is the expected one.
 set -eu
 cd "$(dirname "$0")/.."
@@ -73,7 +74,23 @@ case_ "add a format to an existing field (ExcludePaperRequest.paper_id UUID4)" b
 # The wire options of common/wire/v1 (tools/profile_breaking.py): buf passes both, though the bytes or the calls change.
 case_ "drop keep_order from OpsStatus.counters (every producer's counters would be reordered)" breaking fail 's/(key_format: "Code"\n      max_items: 32\n)      keep_order: true\n/$1/' "$OPS"
 case_ "take canaryDelivery's request as one object (drop positional)" breaking fail 's/(rpc CanaryDelivery\(CanaryDeliveryRequest\) returns \(.ops.v1.CanaryDelivery\) \{\n)    option \(common.wire.v1.method\).positional = true;\n  \}/$1  }/' "$OPS"
-case_ "widen a value rule (Code up to 64 characters): reviewed with the fixtures, not a breaking rule" breaking pass 's/\[a-z\]\[a-z0-9_\]\{0,47\}/[a-z][a-z0-9_]{0,63}/' "$OPS"
+# The value rules and closed enums of common/wire/v1 (tools/profile_breaking.py): both codecs check them on every read.
+# An output's rule may not change either way (older and newer readers check older and newer writers):
+case_ "widen Code to 64 characters (older dashboards refuse a newer app's longer code)" breaking fail 's/\[a-z\]\[a-z0-9_\]\{0,47\}/[a-z][a-z0-9_]{0,63}/' "$OPS"
+case_ "narrow Code to 30 characters (a newer dashboard refuses an older app's code)" breaking fail 's/\[a-z\]\[a-z0-9_\]\{0,47\}/[a-z][a-z0-9_]{0,29}/' "$OPS"
+case_ "lower OpsStatus.counters max_items 32 -> 16" breaking fail 's/max_items: 32/max_items: 16/' "$OPS"
+case_ "drop mail-hero from OpsStatus.app's allowed list" breaking fail 's/        "mail-hero",\n//' "$OPS"
+case_ "close StartCanaryResult.reason (drop open)" breaking fail 's/(    format: "Code"\n)    open: true\n(    cases: \{\n      when: "paused")/$1$2/' "$OPS"
+case_ "drop non_null from CanaryDelivery.state (a newer producer may write null)" breaking fail 's/(  State state = 1 \[\n    \(google.api.field_behavior\) = REQUIRED),\n    \(common.wire.v1.field\).non_null = true\n/$1\n/' "$OPS"
+case_ "add a code to an open list (StartCanaryResult paused: consumer_paused)" breaking pass 's/          "endpoint_blocked"\n/          "endpoint_blocked",\n          "consumer_paused"\n/' "$OPS"
+# An input's rule may loosen (the apps deploy before the dashboard), never tighten:
+case_ "raise OpsReport.items max_items 20 -> 30 (an input accepts more)" breaking pass 's/\(common.wire.v1.field\).max_items = 20/(common.wire.v1.field).max_items = 30/' "$OPS"
+case_ "lower OpsReport.items max_items 20 -> 10 (an input refuses older reports)" breaking fail 's/\(common.wire.v1.field\).max_items = 20/(common.wire.v1.field).max_items = 10/' "$OPS"
+case_ "drop StartCanaryInput.run_id's format (an input accepts more)" breaking pass 's/(string run_id = 1 \[\n    \(google.api.field_behavior\) = REQUIRED),\n    \(common.wire.v1.field\).format = "RunId"\n/$1\n/' "$OPS"
+case_ "give StartCanaryInput.run_id an allowed list (an input refuses older run IDs)" breaking fail 's/\(common.wire.v1.field\).format = "RunId"/(common.wire.v1.field) = {\n      format: "RunId"\n      allowed: "canary-1"\n    }/' "$OPS"
+# A closed enum's values are fixed for the major version; buf (FILE) allows the new value.
+case_ "add HEALTH_PARTIAL to the closed Health" breaking fail 's/(  HEALTH_DOWN = 3;\n)/$1  \/\/ Partly down.\n  HEALTH_PARTIAL = 4;\n/' "$OPS"
+case_ "open the closed Health (drop closed)" breaking fail 's/(enum Health \{\n)  option \(common.wire.v1.closed\) = true;\n\n/$1/' "$OPS"
 case_ "change a binding of the test fixtures (prototest is ignored, as by buf)" breaking pass 's/\{get: "\/v1\/\{parent=shelves\/\*\}\/books"\}/{get: "\/v2\/{parent=shelves\/*}\/books"}/' prototest/v1/prototest.proto
 case_ "zero value without _UNSPECIFIED (MODE_UNSPECIFIED -> MODE_NONE)" lint fail 's/MODE_UNSPECIFIED = 0/MODE_NONE = 0/'
 case_ "enum value without its prefix (SOURCE_LAB -> LAB)" lint fail 's/SOURCE_LAB = 1/LAB = 1/'

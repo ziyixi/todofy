@@ -1,0 +1,147 @@
+"""tools/profile_breaking.py's value-rule and closed-enum checks on synthetic buf images (JSON form), next to the
+module's own self-test (scripts/rules-selftest.sh, which edits the real .proto files): an output's rules may not
+change either way, an input's may only loosen, an open list may change, a closed enum may not grow.
+"""
+
+import copy
+import sys
+import unittest
+from typing import Any
+
+from proto_test_support import PROTO
+
+sys.path.insert(0, str(PROTO / "tools"))
+import profile_breaking
+
+CODE = {"name": "Code", "pattern": "[a-z]{1,8}"}
+
+
+def image(
+    out_rules: dict | None = None,
+    in_rules: dict | None = None,
+    *,
+    formats: list | None = None,
+    states: int = 2,
+    closed: bool = False,
+    union: str | None = None,
+    case_rules: dict | None = None,
+) -> dict[str, Any]:
+    """A file `t.v1` with `service S { rpc M(In) returns (Out); }`: Out.code (a string with `out_rules`), In.code
+    (with `in_rules`), Out.state (an enum of `states` values, `closed` if asked), and a message `Lone` no method
+    reaches, whose `code` has `out_rules` too. `union` makes Out a union on that field; `case_rules` are the rules
+    of Out.note."""
+
+    def string(name: str, number: int, rules: dict | None, **extra: Any) -> dict:
+        field = {"name": name, "number": number, "label": "LABEL_OPTIONAL", "type": "TYPE_STRING", **extra}
+        if rules is not None:
+            field["options"] = {"[common.wire.v1.field]": rules}
+        return field
+
+    state = {"name": "state", "number": 2, "label": "LABEL_OPTIONAL", "type": "TYPE_ENUM", "typeName": ".t.v1.State"}
+    out = {"name": "Out", "field": [string("code", 1, out_rules), state]}
+    if case_rules is not None:
+        out["field"].append(string("note", 3, case_rules, proto3Optional=True))
+    if union is not None:
+        out["options"] = {"[common.wire.v1.message]": {"discriminator": union}}
+    values = [{"name": "STATE_UNSPECIFIED", "number": 0}] + [
+        {"name": f"STATE_V{i}", "number": i} for i in range(1, states + 1)
+    ]
+    enum: dict[str, Any] = {"name": "State", "value": values}
+    if closed:
+        enum["options"] = {"[common.wire.v1.closed]": True}
+    file: dict[str, Any] = {
+        "name": "t/v1/t.proto",
+        "package": "t.v1",
+        "syntax": "proto3",
+        "messageType": [
+            {"name": "In", "field": [string("code", 1, in_rules)]},
+            out,
+            {"name": "Lone", "field": [string("code", 1, out_rules)]},
+        ],
+        "enumType": [enum],
+        "service": [{"name": "S", "method": [{"name": "M", "inputType": ".t.v1.In", "outputType": ".t.v1.Out"}]}],
+    }
+    if formats is not None:
+        file["options"] = {"[common.wire.v1.formats]": formats}
+    return {"file": [file]}
+
+
+def rules_of(base: dict, head: dict) -> list[str]:
+    """Each violation's rule and element (`PROFILE_RULE_SAME t.v1.Out.code`), without the field number or detail."""
+    return [" ".join(line.split()[:2]).rstrip(":") for line in profile_breaking.violations(base, head)]
+
+
+class OutputRulesTest(unittest.TestCase):
+    def test_an_outputs_rule_may_not_change_either_way(self) -> None:
+        base = image({"maxItems": 0, "allowed": ["a", "b"]})
+        for name, rules in [
+            ("a value added to a closed list", {"allowed": ["a", "b", "c"]}),
+            ("a value removed", {"allowed": ["a"]}),
+            ("the list dropped", {}),
+        ]:
+            with self.subTest(name):
+                self.assertEqual(
+                    rules_of(base, image(rules)),
+                    ["PROFILE_RULE_SAME t.v1.Out.code", "PROFILE_RULE_SAME t.v1.Lone.code"],
+                )
+        wide = image({"format": "Code"}, formats=[{**CODE, "pattern": "[a-z]{1,16}"}])
+        narrow = image({"format": "Code"}, formats=[CODE])
+        self.assertIn("PROFILE_RULE_SAME t.v1.Out.code", rules_of(narrow, wide))
+        self.assertIn("PROFILE_RULE_SAME t.v1.Out.code", rules_of(wide, narrow))
+
+    def test_an_open_list_may_change_and_a_list_may_open(self) -> None:
+        base = image({"allowed": ["a", "b"], "open": True})
+        self.assertEqual(rules_of(base, image({"allowed": ["a", "b", "c"], "open": True})), [])
+        self.assertEqual(rules_of(base, image({"allowed": ["a"], "open": True})), [])
+        self.assertEqual(rules_of(image({"allowed": ["a", "b"]}), base), [])
+        self.assertEqual(
+            rules_of(base, image({"allowed": ["a", "b"]})),
+            ["PROFILE_RULE_SAME t.v1.Out.code", "PROFILE_RULE_SAME t.v1.Lone.code"],
+        )
+
+    def test_a_format_compares_by_pattern_not_name(self) -> None:
+        base = image({"format": "Code"}, formats=[CODE])
+        renamed = image({"format": "Name"}, formats=[{**CODE, "name": "Name"}])
+        self.assertEqual(rules_of(base, renamed), [])
+
+
+class InputRulesTest(unittest.TestCase):
+    def test_an_inputs_rule_may_loosen_never_tighten(self) -> None:
+        base = image(None, {"allowed": ["a", "b"]})
+        self.assertEqual(rules_of(base, image(None, {"allowed": ["a", "b", "c"]})), [])
+        self.assertEqual(rules_of(base, image(None, {})), [])
+        self.assertEqual(rules_of(base, image(None, {"allowed": ["a"]})), ["PROFILE_RULE_NOT_TIGHTER t.v1.In.code"])
+        self.assertEqual(
+            rules_of(image(None, {}), image(None, {"format": "Code"}, formats=[CODE])),
+            ["PROFILE_RULE_NOT_TIGHTER t.v1.In.code"],
+        )
+
+
+class UnionAndEnumTest(unittest.TestCase):
+    def test_a_changed_discriminator_breaks(self) -> None:
+        self.assertEqual(rules_of(image(), image(union="state")), ["PROFILE_RULE_SAME_UNION t.v1.Out"])
+
+    def test_a_case_for_a_new_value_of_an_open_enum_is_new(self) -> None:
+        case = {"cases": [{"when": ["v1"], "presence": "PRESENCE_REQUIRED"}]}
+        grown = copy.deepcopy(case)
+        grown["cases"].append({"when": ["v3"], "presence": "PRESENCE_ABSENT"})
+        self.assertEqual(
+            rules_of(image(union="state", case_rules=case), image(union="state", case_rules=grown, states=3)), []
+        )
+        changed = {"cases": [{"when": ["v1"], "presence": "PRESENCE_ABSENT"}]}
+        self.assertEqual(
+            rules_of(image(union="state", case_rules=case), image(union="state", case_rules=changed)),
+            ["PROFILE_RULE_SAME t.v1.Out.note"],
+        )
+
+    def test_a_closed_enum_may_not_grow_or_change_its_closedness(self) -> None:
+        self.assertEqual(rules_of(image(states=2), image(states=3)), [])
+        self.assertEqual(
+            rules_of(image(states=2, closed=True), image(states=3, closed=True)), ["PROFILE_ENUM_CLOSED t.v1.State"]
+        )
+        self.assertEqual(rules_of(image(closed=True), image()), ["PROFILE_ENUM_CLOSED t.v1.State"])
+        self.assertEqual(rules_of(image(), image(closed=True)), ["PROFILE_ENUM_CLOSED t.v1.State"])
+
+
+if __name__ == "__main__":
+    unittest.main()

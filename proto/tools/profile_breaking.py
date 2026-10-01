@@ -22,8 +22,28 @@ whether a reader refuses a missing field; presence decides between ``null`` and 
 - ``PROFILE_METHOD_SAME_ARGUMENTS``: an existing method gained or lost ``(common.wire.v1.method).positional``: a
   service binding's callers and receivers would pass and expect different arguments.
 
-Value rules (``(common.wire.v1.field)``'s formats, allowed lists, bounds and cases) are not compared: like a JSON
-Schema's, a change is reviewed with the contract's fixtures, which both codecs check.
+The value rules of ``common/wire/v1`` (both codecs check them on every read, a consumer's lenient read included, so
+a rule is as much wire as a field's type). Older and newer builds of each side run at the same time, so:
+
+- ``PROFILE_RULE_SAME``: a rule of an existing field of an output (a message reachable from a method's output, or
+  from no method at all) changed. Each side's readers check what the other side's writers write, old against new
+  and new against old, so any change breaks one of them: a narrower format, bound, size or list refuses what older
+  producers write; a wider one lets newer producers write what older consumers refuse. Formats compare by pattern
+  and length (a renamed format with the same pattern is the same rule). One exception: an ``open`` allowed list
+  (a lenient read accepts any value of its format) may change while the list stays open on the side that reads it,
+  and a list may become ``open``.
+- ``PROFILE_RULE_NOT_TIGHTER``: a rule of an existing field of an input (reachable only from methods' inputs, read
+  strictly by the method's implementation) accepts less than it did: a changed format pattern, a lower
+  ``max_length``, ``max_items``, ``maximum`` or a higher ``minimum``, a value removed from ``allowed`` (or a list
+  added), a new ``unique``, ``key_format`` or required key, ``non_null`` added, or a case presence that now
+  requires or forbids a value. Older callers' inputs would be refused. Loosening is compatible: the apps deploy
+  before the dashboard that calls them (README.md, CI).
+- ``PROFILE_RULE_SAME_UNION``: an existing message gained, lost or changed its discriminator.
+- ``PROFILE_ENUM_CLOSED``: a closed enum (``(common.wire.v1.closed)``) gained a value (its consumers refuse it: a new
+  major version), or an existing enum gained or lost ``closed``.
+
+A case for a value the discriminator did not have before is new and compared with nothing (a new value of an open
+enum is compatible).
 
 The HTTP APIs (the URL is the wire: an open tab of an older UI, and every other client, keeps calling the
 paths it was built with; the transcoder clears OUTPUT_ONLY input fields and checks formats):
@@ -53,6 +73,8 @@ import re
 import sys
 from collections.abc import Iterator
 from typing import Any
+
+import wire_rules
 
 BEHAVIOR = "[google.api.field_behavior]"
 FIELD_INFO = "[google.api.field_info]"
@@ -206,6 +228,171 @@ def method_violations(name: str, method: dict[str, Any], old: dict[str, Any]) ->
     return found
 
 
+def output_messages(image: dict[str, Any], ignore: tuple[str, ...]) -> set[str]:
+    """Full names of every method output and of every message reachable from one through its fields."""
+    by_name = dict(messages(image))
+    pending = [method["outputType"].lstrip(".") for _, method in methods(image, ignore)]
+    seen: set[str] = set()
+    while pending:
+        name = pending.pop()
+        if name in seen or name not in by_name:
+            continue
+        seen.add(name)
+        pending += [
+            f["typeName"].lstrip(".") for f in by_name[name].get("field", []) if f.get("type") == "TYPE_MESSAGE"
+        ]
+    return seen
+
+
+def top_level(image: dict[str, Any], ignore: tuple[str, ...]) -> dict[str, tuple[dict[str, Any], dict[str, Any]]]:
+    """Full name -> (file, message) of every top-level message (the ones that carry value rules)."""
+    return {
+        f"{file.get('package', '')}.{message['name']}": (file, message)
+        for file in files(image, ignore)
+        for message in file.get("messageType", [])
+    }
+
+
+class Rules:
+    """A field's resolved value rules (a format by its pattern and length, not its name), and its per-variant view."""
+
+    def __init__(self, file: dict[str, Any], message: dict[str, Any], field: dict[str, Any], enums: dict) -> None:
+        rules = wire_rules.field_rules(file, message, field, enums, wire_rules.entry_of(message, field))
+        self.format = None if rules is None or rules.format is None else (rules.format.pattern, rules.format.max_length)
+        self.key_format = (
+            None
+            if rules is None or rules.key_format is None
+            else (rules.key_format.pattern, rules.key_format.max_length)
+        )
+        self.allowed = None if rules is None else rules.bounds.allowed
+        self.open = bool(rules and rules.open)
+        self.minimum = None if rules is None else rules.bounds.minimum
+        self.maximum = None if rules is None else rules.bounds.maximum
+        self.max_items = 0 if rules is None else rules.max_items
+        self.unique = bool(rules and rules.unique)
+        self.required_keys = frozenset(rules.required_keys if rules else ())
+        self.non_null = bool(rules and rules.non_null)
+        # Discriminator value -> (presence, allowed, minimum, maximum) of this field in that variant (cases merged).
+        self.variants: dict[str, tuple[str, Any, Any, Any]] = {}
+        for variant in wire_rules.variants(file, message, enums):
+            if variant.value is None:
+                continue
+            view = next(v for v in variant.fields if v.field["number"] == field["number"])
+            self.variants[variant.value] = (view.presence, view.allowed, view.minimum, view.maximum)
+
+
+def _accepts_allowed(reader: Any, writer: Any) -> bool:
+    """Whether a reader with the allowed list ``reader`` accepts every value a writer with ``writer`` writes."""
+    return reader is None or (writer is not None and set(writer) <= set(reader))
+
+
+def _accepts_bounds(reader: tuple[Any, Any], writer: tuple[Any, Any]) -> bool:
+    """Whether a reader's (minimum, maximum) accepts every number a writer's bounds allow."""
+    low, high = reader
+    w_low, w_high = writer
+    return (low is None or (w_low is not None and w_low >= low)) and (
+        high is None or (w_high is not None and w_high <= high)
+    )
+
+
+def _accepts_size(reader: int, writer: int) -> bool:
+    """Whether a reader's max_items (0: no bound) accepts every list a writer's allows."""
+    return reader == 0 or (writer != 0 and writer <= reader)
+
+
+def _accepts_format(reader: Any, writer: Any) -> bool:
+    """Whether a reader's format accepts every value a writer's allows (patterns compare only as equal)."""
+    if reader is None:
+        return True
+    if writer is None or writer[0] != reader[0]:
+        return False
+    return _accepts_size(reader[1], writer[1])
+
+
+def accepts(reader: Rules, writer: Rules, lenient: bool) -> list[str]:
+    """What a reader with ``reader``'s rules refuses of what a writer with ``writer``'s rules writes (rule names)."""
+    refused = []
+    if not _accepts_format(reader.format, writer.format):
+        refused.append("format")
+    if not _accepts_format(reader.key_format, writer.key_format):
+        refused.append("key_format")
+    if not (lenient and reader.open) and not _accepts_allowed(reader.allowed, writer.allowed):
+        refused.append("allowed")
+    if not _accepts_bounds((reader.minimum, reader.maximum), (writer.minimum, writer.maximum)):
+        refused.append("minimum/maximum")
+    if not _accepts_size(reader.max_items, writer.max_items):
+        refused.append("max_items")
+    if reader.unique and not writer.unique:
+        refused.append("unique")
+    if not reader.required_keys <= writer.required_keys:
+        refused.append("required_keys")
+    if reader.non_null and not writer.non_null:
+        refused.append("non_null")
+    for value in sorted(set(reader.variants) & set(writer.variants)):
+        r_presence, r_allowed, r_min, r_max = reader.variants[value]
+        w_presence, w_allowed, w_min, w_max = writer.variants[value]
+        if r_presence in ("required", "absent") and w_presence != r_presence:
+            refused.append(f"presence when {value}")
+        if not (lenient and reader.open) and not _accepts_allowed(r_allowed, w_allowed):
+            refused.append(f"allowed when {value}")
+        if not _accepts_bounds((r_min, r_max), (w_min, w_max)):
+            refused.append(f"minimum/maximum when {value}")
+    return refused
+
+
+def rule_violations(base: dict[str, Any], head: dict[str, Any], ignore: tuple[str, ...]) -> list[str]:
+    """The value rules and closed enums (common/wire/v1) of existing elements, by direction (module docstring)."""
+    found = []
+    before = top_level(base, ignore)
+    inputs, outputs = input_messages(head, ignore), output_messages(head, ignore)
+    base_enums, head_enums = wire_rules.enum_index(base), wire_rules.enum_index(head)
+    for name, (file, message) in top_level(head, ignore).items():
+        if name not in before:
+            continue
+        old_file, old = before[name]
+        if wire_rules.discriminator(old) != wire_rules.discriminator(message):
+            found.append(f"PROFILE_RULE_SAME_UNION {name}: (common.wire.v1.message).discriminator changed")
+            continue
+        # An input only: the implementation reads strictly what older callers write. Anything else (an output, a
+        # message both ways, or one no method reaches yet) is read by older and newer builds both ways.
+        input_only = name in inputs and name not in outputs
+        previous_fields = {f["number"]: f for f in old.get("field", [])}
+        for field in message.get("field", []):
+            previous = previous_fields.get(field["number"])
+            if previous is None or previous.get("type") != field.get("type"):
+                continue  # a new field, or buf's FIELD_SAME_TYPE
+            path = f"{name}.{field['name']} ({field['number']})"
+            was = Rules(old_file, old, previous, base_enums)
+            now = Rules(file, message, field, head_enums)
+            if input_only:
+                refused = accepts(now, was, lenient=False)
+                if refused:
+                    found.append(
+                        f"PROFILE_RULE_NOT_TIGHTER {path}: refuses what older callers send ({', '.join(refused)})"
+                    )
+                continue
+            refused = sorted(set(accepts(was, now, lenient=True)) | set(accepts(now, was, lenient=True)))
+            if was.open and not now.open:
+                refused.append("open")
+            if refused:
+                found.append(f"PROFILE_RULE_SAME {path}: changed ({', '.join(refused)})")
+    checked = wire_rules.enum_index({"file": list(files(head, ignore))})
+    for name, enum in checked.items():
+        old_enum = base_enums.get(name)
+        if old_enum is None:
+            continue
+        if wire_rules.closed(old_enum) != wire_rules.closed(enum):
+            change = "gained" if wire_rules.closed(enum) else "lost"
+            found.append(f"PROFILE_ENUM_CLOSED {name.lstrip('.')}: {change} (common.wire.v1.closed)")
+        elif wire_rules.closed(enum):
+            added = {v["number"] for v in enum.get("value", [])} - {v["number"] for v in old_enum.get("value", [])}
+            if added:
+                found.append(
+                    f"PROFILE_ENUM_CLOSED {name.lstrip('.')}: a closed enum gained a value (a new major version)"
+                )
+    return found
+
+
 def violations(base: dict[str, Any], head: dict[str, Any], ignore: tuple[str, ...] = ()) -> list[str]:
     before = dict(messages(base, ignore))
     inputs = input_messages(head, ignore)
@@ -219,6 +406,7 @@ def violations(base: dict[str, Any], head: dict[str, Any], ignore: tuple[str, ..
     for name, method in methods(head, ignore):
         if name in old_methods:
             found += method_violations(name, method, old_methods[name])
+    found += rule_violations(base, head, ignore)
     return found
 
 
