@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import type { GuardState } from '../../../contracts/ops-v1/ops-v1.ts';
-import schema from '../../../contracts/ops-v1/ops-v1.schema.json';
+import { CanaryResultSchema, GuardStateSchema, OpsReportReceiptSchema, OpsStatusSchema } from '@ziyixi/proto/ops/v1/ops_pb';
+import type * as wire from '@ziyixi/proto/ops/v1/ops_wire';
+import { fromWire } from '@ziyixi/proto/wire-json';
 import { validate } from '../../../contracts/ops-v1/validate.mjs';
 import degraded from '../../../contracts/ops-v1/fixtures/OpsStatus/todofy-degraded.json';
 import shed from '../../../contracts/ops-v1/fixtures/GuardState/shed-todofy.json';
@@ -10,6 +11,7 @@ import stored from '../../../contracts/ops-v1/fixtures/OpsReportReceipt/stored.j
 import intentSchema from '../../../contracts/task-intent-v1/task-intent-v1.schema.json';
 import type { TaskIntentService } from '@ziyixi/proto/todofy/taskintent/v1/task_intent_pb';
 import type { WireObject, WireService } from '@ziyixi/proto/wire-json';
+import type { DescMessage } from '@ziyixi/proto/protobuf';
 import subtasks from '../../../contracts/task-intent-v1/fixtures/TaskIntent/subtasks-3.json';
 import labRef from '../../../contracts/task-intent-v1/fixtures/TaskIntentRef/lab.json';
 import pendingNew from '../../../contracts/task-intent-v1/fixtures/TaskIntentResult/pending-new.json';
@@ -18,13 +20,17 @@ import { Ops as Exported } from '../src/index.ts';
 import { Ops } from '../src/ops.ts';
 import { fakes, type CoreReply } from './helpers.ts';
 
-const SCHEMA = schema as { $defs: Record<string, unknown> };
 const INTENT_SCHEMA = intentSchema as { $defs: Record<string, unknown> };
 const EVENT_ID = 'f8c1e9a0-1a98-4fb8-8ca1-4c0a3e710016';
 
 function entrypoint(reply: CoreReply) {
   const { env, core } = fakes({}, reply);
   return { ops: new Ops({} as ExecutionContext, env), core };
+}
+
+/** Whether `value` keeps ops-v1's rules as a producer writes them (a strict read; it throws otherwise). */
+function valid(schema: DescMessage, value: unknown): boolean {
+  return fromWire(schema, value, { strict: true }).unrecognized.length === 0;
 }
 
 async function rejection(promise: Promise<unknown>): Promise<string> {
@@ -45,29 +51,29 @@ describe('the Ops entrypoint (contracts/ops-v1)', () => {
     const { ops, core } = entrypoint(() => ({ ok: degraded }));
     const status = await ops.status();
     expect(status).toEqual(degraded);
-    expect(validate(SCHEMA, 'OpsStatus', status)).toEqual([]);
+    expect(valid(OpsStatusSchema, status)).toBe(true);
     expect(core.map((call) => [call.instance, call.method, call.args])).toEqual([['inbox-v1', 'ops_status', []]]);
   });
 
   it('passes setGuard input on as JSON text and returns the GuardState', async () => {
     const { ops, core } = entrypoint(() => ({ ok: shed }));
     const input = { level: 'shed', reason: 'd1_reads_high', until: '2026-09-30T00:00:00Z' } as const;
-    const state: GuardState = await ops.setGuard(input);
-    expect(validate(SCHEMA, 'GuardState', state)).toEqual([]);
+    const state: wire.GuardState = await ops.setGuard(input);
+    expect(valid(GuardStateSchema, state)).toBe(true);
     expect(core[0]?.method).toBe('ops_set_guard');
     expect(JSON.parse(core[0]?.args[0] as string)).toEqual(input);
   });
 
   it('forwards canaryResult by event ID', async () => {
     const { ops, core } = entrypoint(() => ({ ok: processing }));
-    expect(validate(SCHEMA, 'CanaryResult', await ops.canaryResult(EVENT_ID))).toEqual([]);
+    expect(valid(CanaryResultSchema, await ops.canaryResult(EVENT_ID))).toBe(true);
     expect(core[0]?.args).toEqual([EVENT_ID]);
   });
 
   it('forwards reportOps as compact JSON and returns the receipt', async () => {
     const { ops, core } = entrypoint(() => ({ ok: stored }));
     const receipt = await ops.reportOps(daily as Parameters<Ops['reportOps']>[0]);
-    expect(validate(SCHEMA, 'OpsReportReceipt', receipt)).toEqual([]);
+    expect(valid(OpsReportReceiptSchema, receipt)).toBe(true);
     expect(core[0]?.args).toEqual([JSON.stringify(daily)]);
   });
 

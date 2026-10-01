@@ -250,7 +250,7 @@ class Classify(unittest.TestCase):
             "proto/todofy/taskintent/v1/task_intent.proto": {"lab", "todofy"},
             # ops-v1: the Ops entrypoints that bundle its generated code (Todofy's gateway takes types only, its core
             # reads ops.v1 in Python).
-            "proto/ops/v1/ops.proto": {"mail-hero", "lab"},
+            "proto/ops/v1/ops.proto": {"mail-hero", "lab", "todofy"},
             # Lab's UI API: only Lab imports it (Python does not even generate it).
             "proto/lab/ui/v1/lab_ui_service.proto": {"lab"},
             "proto/lab/ui/v1/deck.proto": {"lab"},

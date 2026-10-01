@@ -16,11 +16,17 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+import jsonschema
+
 from tests import mail_contract
 from todofy.core import ops
 
 GOLDEN = Path(__file__).parent / "golden" / "ops-v1.json"
-FIXTURES = mail_contract.TODOFY.parent / "contracts" / "ops-v1" / "fixtures"
+CONTRACT = mail_contract.TODOFY.parent / "contracts" / "ops-v1"
+FIXTURES = CONTRACT / "fixtures"
+# The hand-written schema the dashboards deployed before ops-v1 moved onto proto/ validate every answer with.
+LEGACY = json.loads((CONTRACT / "legacy" / "ops-v1.schema.json").read_text())
+DEFS = {"status": "OpsStatus", "guard": "GuardState", "canary": "CanaryResult", "receipt": "OpsReportReceipt"}
 NOW = int(datetime(2026, 9, 29, 15, tzinfo=UTC).timestamp())
 NOW_MS = NOW * 1000
 HOUR = 3600
@@ -164,3 +170,15 @@ def test_every_ops_answer_for_the_synthetic_states_is_byte_for_byte_the_golden_o
             assert value == golden[name], name
         else:
             assert compact(value) == compact(golden[name]), name
+
+
+def test_every_golden_answer_passes_the_checks_of_the_dashboards_deployed_before_the_move():
+    """Rollout (the apps and the dashboard deploy separately): an older dashboard validates every answer against the
+    hand-written schema; each answer passes it, so this Todofy and such a dashboard work together, and the bytes are the
+    earlier Todofy's, so that Todofy and a new dashboard do too (the dashboard's own tests read every fixture)."""
+    for name, value in cases().items():
+        kind = name.split("/")[0]
+        if kind == "report":
+            continue  # stored text, not an answer
+        validator = jsonschema.Draft202012Validator({**LEGACY, "$ref": f"#/$defs/{DEFS[kind]}"})
+        assert [error.message for error in validator.iter_errors(js(value))] == [], name

@@ -235,11 +235,12 @@ jobs:
           uv run python deploy/deploy_vars.py secrets gateway "$RUNNER_TEMP/todofy-gateway-secrets.json"
           uv run python deploy/deploy_vars.py exec core -- uv run pywrangler deploy --dry-run --config wrangler.toml \
             --secrets-file "$RUNNER_TEMP/todofy-core-secrets.json" --outdir "$RUNNER_TEMP/todofy-core-bundle"
-          # The workers SDK and the generated task-intent-v1 package (ziyixi_proto, proto/README.md) are vendored
-          # next to the core config; a bundle without either cannot start. Only the packages a Python Worker
+          # The workers SDK and the generated task-intent-v1 and ops-v1 packages (ziyixi_proto, proto/README.md) are
+          # vendored next to the core config; a bundle without them cannot start. Only the packages a Python Worker
           # imports are generated, and the runtimes' fixtures stay out of the wheel (proto/tools/gen_py.py).
           test -d "$RUNNER_TEMP/todofy-core-bundle/python_modules/workers"
           test -f "$RUNNER_TEMP/todofy-core-bundle/python_modules/ziyixi_proto/todofy/taskintent/v1/task_intent_pb.py"
+          test -f "$RUNNER_TEMP/todofy-core-bundle/python_modules/ziyixi_proto/ops/v1/ops_pb.py"
           test ! -e "$RUNNER_TEMP/todofy-core-bundle/python_modules/ziyixi_proto/prototest"
           test ! -e "$RUNNER_TEMP/todofy-core-bundle/python_modules/ziyixi_proto/lab"
           uv run python deploy/deploy_vars.py exec gateway -- npx --no-install wrangler deploy --dry-run \

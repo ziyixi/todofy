@@ -171,7 +171,7 @@ PROTO_PACKAGES: dict[str, tuple[str, ...]] = {
     # CommonReason: Lab reads its names as types only.
     "proto/common/errors/": (),
     # ops-v1 (contracts/ops-v1): every app's Ops entrypoint and the dashboard that calls them.
-    "proto/ops/": ("mail-hero", "lab"),
+    "proto/ops/": ("mail-hero", "lab", "todofy"),
     # The runtimes' test fixtures (never imported by an app; not in the Python wheel).
     "proto/prototest/": (),
 }

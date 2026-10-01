@@ -1,10 +1,11 @@
-"""ops-v1 rules for Todofy (contracts/ops-v1): input checks, guard, status signals, digest items.
+"""ops-v1 rules for Todofy (contracts/ops-v1, proto/ops/v1/ops.proto): inputs, guard, status signals, digest items.
 
-Pure stdlib, host-tested. Everything that leaves the app through the ``Ops`` entrypoint is built
-here from numbers, booleans, timestamps and closed codes only, so a status or receipt can never
-carry mail content (tests validate every value against contracts/ops-v1/ops-v1.schema.json).
-Patterns use ``fullmatch`` and ``[0-9]``: ``$`` would accept a trailing newline, ``\\d`` other
-scripts' digits.
+Pure stdlib, host-tested. Every answer that leaves the app through the ``Ops`` entrypoint is a generated message
+(``ziyixi_proto.ops.v1``) written with the wire codec, which checks the contract's value rules before a byte leaves:
+names are codes, metrics and counters numbers, URLs plain https ones, so a status or receipt can never carry mail
+content. Inputs are read strictly with the same rules (``from_wire``). What the IDL cannot say stays here: a guard's
+``until`` within 36 hours, a report generated at most 5 minutes ahead and at most 8 KiB as compact JSON. The answers
+are plain dicts (``to_wire``), the JSON the dashboard reads; tests pin their bytes (tests/unit/test_ops_golden.py).
 """
 
 import json
@@ -16,47 +17,55 @@ from datetime import UTC, datetime
 from enum import StrEnum
 from typing import Any, NoReturn
 
+from ziyixi_proto.ops.v1 import ops_pb as pb
+from ziyixi_proto.wire_json import (
+    WireJsonError,
+    field_rules,
+    format_matches,
+    from_wire,
+    to_wire,
+    wire_member,
+    wire_name,
+)
+
 VERSION = "ops-v1"
 APP = "todofy"
 CAPABILITIES = ("canary_consumer", "guard", "ops_digest")
 
-# OPS_LIMITS of contracts/ops-v1/ops-v1.ts.
+# OPS_LIMITS of contracts/ops-v1/ops-v1.ts: the rules relative to a clock or to a whole message, which the IDL cannot
+# hold.
 GUARD_MAX_AHEAD = 36 * 3600
 DIGEST_WINDOW = 36 * 3600
 REPORT_FUTURE_SKEW = 300
-REPORT_MAX_ITEMS = 20
 REPORT_MAX_BYTES = 8192
-MAX_SIGNALS = 16
-MAX_METRICS = 12
+# The contract's bounds, read where proto/ops/v1/ops.proto states them.
+REPORT_MAX_ITEMS = field_rules(pb.OpsReport, "items").max_items
+MAX_SIGNALS = field_rules(pb.OpsStatus, "signals").max_items
+MAX_METRICS = field_rules(pb.Signal, "metrics").max_items
 
-CODE = re.compile(r"[a-z][a-z0-9_]{0,47}", re.ASCII)
-RUN_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}", re.ASCII)
-EVENT_ID = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}", re.ASCII)
-TIMESTAMP = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\.[0-9]{1,3})?Z", re.ASCII)
-SOURCE = re.compile(r"[a-z][a-z0-9-]{0,31}", re.ASCII)
-HTTPS_URL = re.compile(r"https://[a-z0-9]([a-z0-9.-]{0,251}[a-z0-9])?/[A-Za-z0-9._~/-]{0,200}", re.ASCII)
+# A host name, for the owner UI's URL (ui_url then keeps the contract's HttpsUrl format).
 HOST = re.compile(r"[a-z0-9]([a-z0-9.-]{0,251}[a-z0-9])?", re.ASCII)
-MAX_URL_CHARS = 300
 
 
-class OpsError(StrEnum):
-    """The message of the Error an Ops method rejects with (OpsErrorCode)."""
+def _wire_enum(name: str, cls: Any, doc: str) -> Any:
+    """A StrEnum of a generated enum's wire names (member INFO is "info"), for code that keeps wire JSON as dicts."""
+    enum = StrEnum(name, [(member.name, wire_name(member)) for member in cls if member != 0])
+    enum.__doc__ = doc
+    return enum
 
-    INVALID_INPUT = "invalid_input"
-    BUSY = "busy"
-    UNAVAILABLE = "unavailable"
+
+# The message of the Error an Ops method rejects with (ops.v1.ErrorCode): invalid_input, busy, unavailable.
+OpsError = _wire_enum(
+    "OpsError", pb.ErrorCode, "The message of the Error an Ops method rejects with (ops.v1.ErrorCode)."
+)
 
 
 class InvalidInput(ValueError):
     """An input the schema or a bound rejects: the caller must not retry it unchanged."""
 
 
-class Severity(StrEnum):
-    INFO = "info"
-    WARNING = "warning"
-    CRITICAL = "critical"
-
-
+# A signal's or report item's severity by wire name (ops.v1.Severity): info, warning, critical.
+Severity = _wire_enum("Severity", pb.Severity, "A signal's or a report item's severity (ops.v1.Severity).")
 SEVERITY_RANK = {Severity.CRITICAL: 0, Severity.WARNING: 1, Severity.INFO: 2}
 
 
@@ -88,12 +97,25 @@ def _invalid() -> NoReturn:
     raise InvalidInput(OpsError.INVALID_INPUT)
 
 
+def is_code(value: Any) -> bool:
+    """Whether ``value`` is an ops-v1 ``Code`` (the contract's format): a name this app writes without choosing it."""
+    return isinstance(value, str) and format_matches(pb.FORMATS["Code"], value)
+
+
+def _read(cls: type, value: Any) -> Any:
+    """An input message read strictly with the contract's rules; anything else is invalid input."""
+    try:
+        return from_wire(cls, value, strict=True).message
+    except WireJsonError:
+        _invalid()
+
+
 # ---- time ------------------------------------------------------------------------------
 
 
 def parse_timestamp_ms(value: Any) -> int:
     """Epoch ms of an ops-v1 Timestamp (UTC, ``Z``, up to milliseconds)."""
-    if not isinstance(value, str) or not TIMESTAMP.fullmatch(value):
+    if not isinstance(value, str) or not format_matches(pb.FORMATS["Timestamp"], value):
         _invalid()
     try:
         moment = datetime.fromisoformat(value.replace("Z", "+00:00"))
@@ -132,32 +154,6 @@ def compact(value: Any) -> str:
 # ---- inputs ----------------------------------------------------------------------------
 
 
-def _code(value: Any) -> str:
-    if not isinstance(value, str) or not CODE.fullmatch(value):
-        _invalid()
-    return value
-
-
-def _number(value: Any) -> int | float:
-    if isinstance(value, bool) or not isinstance(value, int | float):
-        _invalid()
-    if isinstance(value, float) and not math.isfinite(value):
-        _invalid()
-    return value
-
-
-def _metrics(value: Any) -> dict[str, int | float]:
-    if not isinstance(value, dict) or len(value) > MAX_METRICS:
-        _invalid()
-    return {_code(name): _number(number) for name, number in value.items()}
-
-
-def _exact_keys(value: Any, required: set[str], optional: frozenset[str] = frozenset()) -> dict[str, Any]:
-    if not isinstance(value, dict) or not required <= value.keys() <= required | optional:
-        _invalid()
-    return value
-
-
 @dataclass(frozen=True, slots=True)
 class GuardInput:
     level: str  # normal | shed
@@ -166,30 +162,20 @@ class GuardInput:
 
 
 def guard_input(value: Any, now_ms: int) -> GuardInput:
-    """SetGuardInput: shed needs ``until`` in (now, now + 36 h]; normal needs ``until`` null."""
-    doc = _exact_keys(value, {"level", "reason", "until"})
-    reason = _code(doc["reason"])
-    match doc["level"]:
-        case "normal":
-            if doc["until"] is not None:
-                _invalid()
-            return GuardInput("normal", reason, None)
-        case "shed":
-            until = parse_timestamp_ms(doc["until"])
-            if not now_ms < until <= now_ms + GUARD_MAX_AHEAD * 1000:
-                _invalid()
-            return GuardInput("shed", reason, until)
-    _invalid()
+    """SetGuardInput (the contract's rules: shed has ``until``, normal has it null), then the clock: ``until`` in
+    (now, now + 36 h]."""
+    wanted = _read(pb.SetGuardInput, value)
+    if wanted.level == pb.GuardLevel.NORMAL:
+        return GuardInput("normal", wanted.reason, None)
+    until = parse_timestamp_ms(wanted.until)
+    if not now_ms < until <= now_ms + GUARD_MAX_AHEAD * 1000:
+        _invalid()
+    return GuardInput("shed", wanted.reason, until)
 
 
 def event_id(value: Any) -> str:
-    if not isinstance(value, str) or not EVENT_ID.fullmatch(value):
-        _invalid()
-    return value
-
-
-def run_id(value: Any) -> bool:
-    return isinstance(value, str) and RUN_ID.fullmatch(value) is not None
+    """The event ID of ``canaryResult(eventId)`` (its request's positional field), read with the contract's rules."""
+    return _read(pb.CanaryResultRequest, {"event_id": value}).event_id
 
 
 @dataclass(frozen=True, slots=True)
@@ -202,45 +188,20 @@ class Report:
     doc: str
 
 
-def _url(value: Any) -> str:
-    if not isinstance(value, str) or len(value) > MAX_URL_CHARS or not HTTPS_URL.fullmatch(value):
-        _invalid()
-    return value
-
-
-def _item(value: Any) -> dict[str, Any]:
-    doc = _exact_keys(value, {"source", "code", "severity", "since", "metrics"})
-    if not isinstance(doc["source"], str) or not SOURCE.fullmatch(doc["source"]):
-        _invalid()
-    if doc["severity"] not in set(Severity):
-        _invalid()
-    parse_timestamp_ms(doc["since"])
-    return {
-        "source": doc["source"],
-        "code": _code(doc["code"]),
-        "severity": doc["severity"],
-        "since": doc["since"],
-        "metrics": _metrics(doc["metrics"]),
-    }
-
-
 def report(value: Any, now: int) -> Report:
-    """OpsReport: at most 20 items and 8 KiB of compact JSON, generated at most 5 minutes ahead."""
-    doc = _exact_keys(value, {"generated_at", "items"}, frozenset({"dashboard_url"}))
-    generated = parse_timestamp_ms(doc["generated_at"])
+    """OpsReport (the contract's rules: at most 20 items of codes and numbers, a plain https URL), generated at most 5
+    minutes ahead and at most 8 KiB of compact JSON."""
+    message = _read(pb.OpsReport, value)
+    generated = parse_timestamp_ms(message.generated_at)
     if generated > (now + REPORT_FUTURE_SKEW) * 1000:
         _invalid()
-    if not isinstance(doc["items"], list) or len(doc["items"]) > REPORT_MAX_ITEMS:
-        _invalid()
-    items = tuple(_item(item) for item in doc["items"])
-    url = _url(doc["dashboard_url"]) if "dashboard_url" in doc else None
-    stored: dict[str, Any] = {"generated_at": doc["generated_at"], "items": list(items)}
-    if url is not None:
-        stored["dashboard_url"] = url
+    for item in message.items:
+        parse_timestamp_ms(item.since)  # a real calendar time: the digest reads it
+    stored = to_wire(message)
     text = compact(stored)
     if len(text.encode()) > REPORT_MAX_BYTES:
         _invalid()
-    return Report(generated, items, url, text)
+    return Report(generated, tuple(stored["items"]), message.dashboard_url, text)
 
 
 def stored_report(doc: str) -> Report | None:
@@ -254,7 +215,9 @@ def stored_report(doc: str) -> Report | None:
 
 def receipt(stored: bool, kept: Report) -> dict[str, Any]:
     """OpsReportReceipt describing ``kept``, the report stored after the call."""
-    return {"stored": stored, "generated_at": timestamp_ms(kept.generated_ms), "item_count": len(kept.items)}
+    return to_wire(
+        pb.OpsReportReceipt(stored=stored, generated_at=timestamp_ms(kept.generated_ms), item_count=len(kept.items))
+    )
 
 
 # ---- guard -----------------------------------------------------------------------------
@@ -278,16 +241,21 @@ NORMAL = Guard("normal", None, None, None)
 
 def guard_state(guard: Guard, now_ms: int) -> dict[str, Any]:
     """GuardState: an expired or normal guard reads as normal with nulls."""
+    return to_wire(guard_message(guard, now_ms))
+
+
+def guard_message(guard: Guard, now_ms: int) -> pb.GuardState:
+    """The effective guard as a message (shed only while now < until)."""
     if not guard.shed(now_ms):
-        return {"level": "normal", "reason": None, "until": None, "set_at": None, "deferred": []}
+        return pb.GuardState(level=pb.GuardLevel.NORMAL)
     assert guard.until_ms is not None and guard.set_ms is not None
-    return {
-        "level": "shed",
-        "reason": guard.reason,
-        "until": timestamp_ms(guard.until_ms),
-        "set_at": timestamp_ms(guard.set_ms),
-        "deferred": [str(job) for job in DEFERRED],
-    }
+    return pb.GuardState(
+        level=pb.GuardLevel.SHED,
+        reason=guard.reason,
+        until=timestamp_ms(guard.until_ms),
+        set_at=timestamp_ms(guard.set_ms),
+        deferred=tuple(str(job) for job in DEFERRED),
+    )
 
 
 def defer_until(guard: Guard, now: int, last_run: int | None, bound: int) -> int | None:
@@ -316,45 +284,51 @@ def canary_result(
     row: Mapping[str, Any] | None, *, maintenance: bool, processing_paused: bool, backup_active: bool
 ) -> dict[str, Any]:
     """CanaryResult of one ledger row (``state``, ``last_error_code``, ``updated_at``, ``canary_run_id``)."""
+    state = pb.CanaryResult_State
     if row is None or row["canary_run_id"] is None:
-        return {"state": "not_seen"}
-    state, code = row["state"], row["last_error_code"] or ""
-    if state in ("pending", "summarizing"):
-        result: dict[str, Any] = {"state": "processing"}
+        return to_wire(pb.CanaryResult(state=state.NOT_SEEN))
+    status, code = row["state"], row["last_error_code"] or ""
+    if status in ("pending", "summarizing"):
+        waiting = None
         if maintenance:
-            result["waiting_code"] = "maintenance"
+            waiting = "maintenance"
         elif processing_paused:
-            result["waiting_code"] = "processing_paused"
+            waiting = "processing_paused"
         elif backup_active:
-            result["waiting_code"] = "backup_active"
+            waiting = "backup_active"
         elif code:
-            result["waiting_code"] = "retry_wait"
-        return result
+            waiting = "retry_wait"
+        return to_wire(pb.CanaryResult(state=state.PROCESSING, waiting_code=waiting))
     completed = timestamp(int(row["updated_at"]))
-    if state == "complete":
-        return {"state": "ok", "completed_at": completed}
-    if state == "ignored" and CODE.fullmatch(code):
-        return {"state": "failed", "completed_at": completed, "error_code": code}
+    if status == "complete":
+        return to_wire(pb.CanaryResult(state=state.OK, completed_at=completed))
+    if status == "ignored" and is_code(code):
+        return to_wire(pb.CanaryResult(state=state.FAILED, completed_at=completed, error_code=code))
     # Only a release without canary handling moves a canary anywhere else.
-    return {"state": "failed", "completed_at": completed, "error_code": "canary_side_effect_blocked"}
+    return to_wire(pb.CanaryResult(state=state.FAILED, completed_at=completed, error_code="canary_side_effect_blocked"))
 
 
 # ---- status ----------------------------------------------------------------------------
 
 
-def signal(code: str, severity: Severity, **metrics: int | float) -> dict[str, Any]:
-    return {"code": code, "severity": str(severity), "metrics": metrics}
+def signal(code: str, severity: Severity, **metrics: int | float) -> pb.Signal:
+    """One active condition, its metrics in the order given (the contract keeps it)."""
+    return pb.Signal(code=code, severity=wire_member(pb.Severity, str(severity)), metrics=metrics)
 
 
-def ordered(signals: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
+def _rank(signal: pb.Signal) -> int:
+    return SEVERITY_RANK[Severity(wire_name(signal.severity))]
+
+
+def ordered(signals: Iterable[pb.Signal]) -> list[pb.Signal]:
     """Critical first, then by code; at most MAX_SIGNALS."""
-    return sorted(signals, key=lambda s: (SEVERITY_RANK[Severity(s["severity"])], s["code"]))[:MAX_SIGNALS]
+    return sorted(signals, key=lambda s: (_rank(s), s.code))[:MAX_SIGNALS]
 
 
-def health(signals: Sequence[dict[str, Any]], maintenance: bool) -> str:
+def health(signals: Sequence[pb.Signal], maintenance: bool) -> pb.Health:
     if maintenance:
-        return "down"
-    return "degraded" if any(s["severity"] != Severity.INFO for s in signals) else "ok"
+        return pb.Health.DOWN
+    return pb.Health.DEGRADED if any(s.severity != pb.Severity.INFO for s in signals) else pb.Health.OK
 
 
 def percent(part: int, whole: int) -> float:
@@ -413,9 +387,9 @@ REVIEW_OVERDUE_DAYS = 10
 
 
 def status(facts: Facts) -> dict[str, Any]:
-    """OpsStatus from ``facts``; only numbers, booleans, codes and timestamps."""
+    """OpsStatus from ``facts``; only numbers, booleans, codes and timestamps (the codec checks every rule)."""
     now = facts.now
-    signals: list[dict[str, Any]] = []
+    signals: list[pb.Signal] = []
     if facts.maintenance:
         signals.append(signal("maintenance_mode", Severity.CRITICAL))
     if facts.processing_paused:
@@ -487,19 +461,21 @@ def status(facts: Facts) -> dict[str, Any]:
     counters |= {name: int(value) for name, value in facts.gtd_counters.items() if name in GTD_COUNTERS}
     if facts.review_age_days is not None:
         counters["review_age_days"] = facts.review_age_days
-    return {
-        "version": VERSION,
-        "app": APP,
-        "generated_at": timestamp(now),
-        "health": health(signals, facts.maintenance),
-        "modes": modes(facts, facts.backup_active),
-        "guard": guard_state(facts.guard, now * 1000),
-        "signals": signals,
-        "counters": counters,
-        "last_backup_at": None if facts.last_backup_at is None else timestamp(facts.last_backup_at),
-        "ui_url": ui_url(facts.public_host),
-        "capabilities": list(CAPABILITIES),
-    }
+    return to_wire(
+        pb.OpsStatus(
+            version=VERSION,
+            app=APP,
+            generated_at=timestamp(now),
+            health=health(signals, facts.maintenance),
+            modes=modes(facts, facts.backup_active),
+            guard=guard_message(facts.guard, now * 1000),
+            signals=tuple(signals),
+            counters=counters,
+            last_backup_at=None if facts.last_backup_at is None else timestamp(facts.last_backup_at),
+            ui_url=ui_url(facts.public_host),
+            capabilities=CAPABILITIES,
+        )
+    )
 
 
 def modes(facts: Any, backup_active: bool | None) -> dict[str, bool]:
@@ -525,19 +501,19 @@ class Switches:
 
 def unavailable_status(now: int, switches: Switches, guard: Guard, public_host: str) -> dict[str, Any]:
     """The status when the snapshot could not be read: down, one signal, no counters."""
-    return {
-        "version": VERSION,
-        "app": APP,
-        "generated_at": timestamp(now),
-        "health": "down",
-        "modes": modes(switches, None),
-        "guard": guard_state(guard, now * 1000),
-        "signals": [signal("status_unavailable", Severity.CRITICAL)],
-        "counters": {},
-        "last_backup_at": None,
-        "ui_url": ui_url(public_host),
-        "capabilities": list(CAPABILITIES),
-    }
+    return to_wire(
+        pb.OpsStatus(
+            version=VERSION,
+            app=APP,
+            generated_at=timestamp(now),
+            health=pb.Health.DOWN,
+            modes=modes(switches, None),
+            guard=guard_message(guard, now * 1000),
+            signals=(signal("status_unavailable", Severity.CRITICAL),),
+            ui_url=ui_url(public_host),
+            capabilities=CAPABILITIES,
+        )
+    )
 
 
 # ---- digest ----------------------------------------------------------------------------

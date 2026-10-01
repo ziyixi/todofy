@@ -4,13 +4,7 @@
  * Nothing generates these types from the Python class: keep `Coordinator` in step with the RPC
  * methods of worker/todofy/runtime/coordinator.py and `CoreResult` with `http.Result.wire()`.
  */
-import type {
-  CanaryResult,
-  GuardState,
-  OpsErrorCode,
-  OpsReportReceipt,
-  TodofyStatus,
-} from '../../../contracts/ops-v1/ops-v1.ts';
+import type * as ops from '@ziyixi/proto/ops/v1/ops_wire';
 import type { WireObject } from '@ziyixi/proto/wire-json';
 import type { Env } from './env.ts';
 import { errorEnvelope, errorResponse, jsonText, type Context } from './http.ts';
@@ -39,8 +33,8 @@ export interface CoreSetup {
 
 export type ReportKind = 'summary' | 'recommendation';
 
-/** How an ops-v1 method of the core answers (contracts/ops-v1): a value, or an OpsErrorCode. */
-export type OpsAnswer<T> = { readonly ok: T; readonly error?: undefined } | { readonly error: OpsErrorCode };
+/** How an ops-v1 method of the core answers (contracts/ops-v1): a value, or an ops.v1 ErrorCode. */
+export type OpsAnswer<T> = { readonly ok: T; readonly error?: undefined } | { readonly error: ops.ErrorCode };
 
 /** Arguments come only from the gateway, so client headers never reach the object. */
 export interface Coordinator extends Rpc.DurableObjectBranded {
@@ -62,11 +56,12 @@ export interface Coordinator extends Rpc.DurableObjectBranded {
     body: ReadableStream | null,
   ): Promise<CoreResult>;
   setup(): Promise<CoreSetup>;
-  // ops-v1 (the Ops entrypoint, src/ops.ts). Structured inputs travel as JSON text.
-  ops_status(): Promise<OpsAnswer<TodofyStatus>>;
-  ops_set_guard(input: string): Promise<OpsAnswer<GuardState>>;
-  ops_canary_result(eventId: string): Promise<OpsAnswer<CanaryResult>>;
-  ops_report(report: string): Promise<OpsAnswer<OpsReportReceipt>>;
+  // ops-v1 (the Ops entrypoint, src/ops.ts). Structured inputs travel as JSON text; the core reads them strictly and
+  // writes every answer with the wire JSON profile (worker/todofy/core/ops.py).
+  ops_status(): Promise<OpsAnswer<ops.OpsStatus>>;
+  ops_set_guard(input: string): Promise<OpsAnswer<ops.GuardState>>;
+  ops_canary_result(eventId: string): Promise<OpsAnswer<ops.CanaryResult>>;
+  ops_report(report: string): Promise<OpsAnswer<ops.OpsReportReceipt>>;
   // task-intent-v1 (the same Ops entrypoint): a TaskIntent / TaskIntentRef as JSON text; the answer is a
   // TaskIntentResult in wire JSON (worker/todofy/core/intents.py writes it with the wire JSON profile).
   task_intent_propose(intent: string): Promise<OpsAnswer<WireObject>>;

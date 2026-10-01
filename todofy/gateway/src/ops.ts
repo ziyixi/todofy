@@ -12,6 +12,9 @@
  * cannot even pass on (a non-string ID, input that is not JSON, a report over 8 KiB, a task
  * intent over 64 KiB).
  *
+ * Its ops-v1 methods are the generated OpsService, CanaryConsumerService and OpsDigestService of
+ * proto/ops/v1 (ops_wire.ts, types only): wire JSON in and out, read and written by the core.
+ *
  * The same entrypoint carries task-intent-v1 (contracts/task-intent-v1/README.md): another app in
  * the account proposes Todoist tasks with `proposeTasks` and reads the outcome with
  * `taskIntentStatus`; Todofy stays the only Todoist writer. Their signatures come from the generated
@@ -21,17 +24,7 @@
  */
 import { WorkerEntrypoint } from 'cloudflare:workers';
 import { OPS_LIMITS } from '../../../contracts/ops-v1/ops-v1.ts';
-import type {
-  CanaryResult,
-  EventId,
-  GuardState,
-  OpsErrorCode,
-  OpsReport,
-  OpsReportReceipt,
-  SetGuardInput,
-  TodofyOps,
-  TodofyStatus,
-} from '../../../contracts/ops-v1/ops-v1.ts';
+import type * as ops from '@ziyixi/proto/ops/v1/ops_wire';
 import { TASK_INTENT_LIMITS } from '../../../contracts/task-intent-v1/task-intent-v1.ts';
 import type { TaskIntentService } from '@ziyixi/proto/todofy/taskintent/v1/task_intent_pb';
 import type { WireObject, WireService } from '@ziyixi/proto/wire-json';
@@ -40,7 +33,7 @@ import type { Env } from './env.ts';
 
 const encoder = new TextEncoder();
 
-function fail(code: OpsErrorCode): Error {
+function fail(code: ops.ErrorCode): Error {
   return new Error(code);
 }
 
@@ -55,7 +48,10 @@ function json(value: unknown): string {
   }
 }
 
-export class Ops extends WorkerEntrypoint<Env> implements TodofyOps, WireService<typeof TaskIntentService> {
+export class Ops
+  extends WorkerEntrypoint<Env>
+  implements ops.OpsService, ops.CanaryConsumerService, ops.OpsDigestService, WireService<typeof TaskIntentService>
+{
   private async call<T>(method: (core: DurableObjectStub<Coordinator>) => Promise<OpsAnswer<T>>): Promise<T> {
     let answer: OpsAnswer<T>;
     try {
@@ -67,21 +63,21 @@ export class Ops extends WorkerEntrypoint<Env> implements TodofyOps, WireService
     return answer.ok;
   }
 
-  async status(): Promise<TodofyStatus> {
+  async status(): Promise<ops.OpsStatus> {
     return await this.call((core) => core.ops_status());
   }
 
-  async setGuard(input: SetGuardInput): Promise<GuardState> {
+  async setGuard(input: ops.SetGuardInput): Promise<ops.GuardState> {
     const text = json(input);
     return await this.call((core) => core.ops_set_guard(text));
   }
 
-  async canaryResult(eventId: EventId): Promise<CanaryResult> {
+  async canaryResult(eventId: string): Promise<ops.CanaryResult> {
     if (typeof eventId !== 'string') throw fail('invalid_input');
     return await this.call((core) => core.ops_canary_result(eventId));
   }
 
-  async reportOps(report: OpsReport): Promise<OpsReportReceipt> {
+  async reportOps(report: ops.OpsReport): Promise<ops.OpsReportReceipt> {
     const text = json(report);
     // Compact JSON is what the core stores; refuse an oversized report before waking the object.
     if (encoder.encode(text).byteLength > OPS_LIMITS.reportMaxBytes) throw fail('invalid_input');
