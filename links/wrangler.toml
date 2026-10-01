@@ -1,0 +1,58 @@
+# Worker "links": the owner's short links (s.ziyixi.science/<key>) and, under /_/, their launcher and owner API on D1
+# (docs/design.md). The production configuration and its single source of truth: top level = production, never
+# [env.*] or keep_vars. Every static value is committed here (the repository is public: nothing personal, no secret).
+#
+# NOT DEPLOYED YET (docs/design.md §11, step L1): CI checks this config ("Links checks": a --dry-run through
+# deploy/deploy-vars.mjs, which refuses a real deploy while the placeholders below are committed) and nothing deploys
+# it. Before the first deploy (L2) the D1 database "links" and the path-scoped Access application exist, their id and
+# AUD replace the all-zeros placeholders, the Custom Domain s.ziyixi.science is added as `routes`, and a "Links
+# deploy" job runs this file through deploy/deploy-vars.mjs, which appends --var BUILD_SHA and passes ACCESS_OWNER,
+# ACCESS_OWNER_ALIASES and CSRF_SIGNING_KEY as Worker secrets with --secrets-file. A plain `wrangler deploy` of this
+# file DELETES BUILD_SHA.
+#
+# Run wrangler from worker/ (the pinned wrangler lives in worker/node_modules) with --config ../wrangler.toml.
+# Local dev: local bindings only (D1 commands always --local, never --remote), local values in links/.dev.vars (see
+# .dev.vars.example). No cron trigger, no Durable Object, no KV: a redirect is one D1 read.
+name = "links"
+account_id = "f57937bd1d93bf59e737b6d8445fb7a3"
+main = "worker/src/index.ts"
+compatibility_date = "2026-09-08"
+workers_dev = false
+preview_urls = false
+
+# The Worker's own log lines (an owner API refusal: request ID, status, reason) are kept; the invocation logs, which
+# record every request's URL and so every key and path, are off, and so are traces. The Worker never logs a key, a
+# path or a target itself.
+[observability]
+enabled = true
+
+[observability.logs]
+enabled = true
+invocation_logs = false
+
+[observability.traces]
+enabled = false
+
+# The launcher (web/, `npm run build`: web/dist/_/index.html and web/dist/_/assets/*). Every request reaches the
+# Worker first, except the launcher's hashed files under /_/assets/, which Access still guards at the edge (they carry
+# no data). No not_found_handling: the default "none" answers a missing file with 404. The single-page-application
+# fallback must never be set: with it a key path that is not an asset would be answered by the asset layer with
+# index.html instead of reaching the Worker (deploy/test/wrangler-config.test.mjs).
+[assets]
+directory = "web/dist"
+binding = "ASSETS"
+run_worker_first = ["/*", "!/_/assets/*"]
+
+# links, link_revisions and request_log (migrations/). The all-zeros id is a placeholder until the database exists.
+[[d1_databases]]
+binding = "DB"
+database_name = "links"
+database_id = "00000000-0000-0000-0000-000000000000"
+migrations_dir = "migrations"
+
+[vars]
+# The links host: the only origin a mutation may come from (CSRF), and the one host no target may name.
+PUBLIC_HOST = "s.ziyixi.science"
+ACCESS_ISSUER = "https://ziyixi.cloudflareaccess.com"
+# AUD tag of the path-scoped Access application for s.ziyixi.science/_/* (all zeros until it exists).
+ACCESS_AUDIENCE = "0000000000000000000000000000000000000000000000000000000000000000"

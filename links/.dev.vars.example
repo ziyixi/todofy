@@ -1,0 +1,15 @@
+# Local development only. Copy to links/.dev.vars (gitignored; wrangler reads the .dev.vars next to wrangler.toml)
+# and run, from worker/: npm run dev (http://127.0.0.1:8790; it pins the local origin with --local-upstream, which
+# the bypass below needs). Build the UI first (cd ../web && npm run build): the Worker serves web/dist.
+# The committed wrangler.toml is production: local dev uses local bindings only (D1 commands always --local, never
+# --remote). Synthetic values only; never a real owner address, key or token.
+PUBLIC_HOST=s.localhost
+BUILD_SHA=dev
+# Loopback-only login bypass (http://localhost, 127.0.0.1 or [::1] without cf-ray; 503 anywhere else). Under /_/
+# every request is the owner. On a short link (/<key>) the Worker only asks Access when the request carries an
+# Access token, so locally a request without one is anonymous and one with any CF_Authorization cookie (e.g.
+# `CF_Authorization=dev`) is the owner.
+DEV_AUTH_BYPASS=true
+ACCESS_OWNER=owner@example.com
+# A locally generated 64-hex key, e.g. `openssl rand -hex 32`:
+CSRF_SIGNING_KEY=0000000000000000000000000000000000000000000000000000000000000000
