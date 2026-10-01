@@ -107,11 +107,12 @@ shell.
 
 **TypeScript.** An app declares `"@ziyixi/proto": "file:../../proto/ts"` and `"postinstall": "node
 ../../proto/tools/ensure.mjs"`. npm links `node_modules/@ziyixi/proto` to `proto/ts` whether or not anything
-is generated, then the postinstall generates. Every npm script that compiles, tests or serves the generated
-code (`tsc`, `vitest`, `wrangler`) has a `pre<script>` that runs the same command, in the app and in any
-package that imports the app's sources, so `npm run typecheck`, `npm test` or `npm run dev` after a pull or a
-branch switch that changed a `.proto` file regenerates first instead of using stale types (`test_proto.py`
-requires those scripts). Generated files import `@bufbuild/protobuf`, which Node, TypeScript, vitest and
+is generated, then the postinstall generates. Every npm script that compiles, tests, lints with types, bundles
+or serves the generated code (`tsc`, `vitest`, `eslint` through typescript-eslint's project service, `wrangler`,
+`vite`) has a `pre<script>` that runs the same command, in the app and in any package that imports the app's
+sources, so `npm run typecheck`, `npm run lint`, `npm test` or `npm run dev` after a pull or a branch switch that
+changed a `.proto` file regenerates first instead of using stale types (`test_proto.py` requires those scripts).
+Generated files import `@bufbuild/protobuf`, which Node, TypeScript, vitest and
 wrangler's esbuild resolve from the real path, `proto/node_modules`: one copy for every app, no `paths`,
 `dedupe` or alias settings. Measured on 2026-10-01 with Lab's production dry-run: its `index.js` grew from
 166,530 to 336,996 bytes (gzip 44,365 to 79,211; wrangler's upload total 162.63 to 329.10 KiB, gzip 43.45 to

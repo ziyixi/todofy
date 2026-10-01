@@ -9,10 +9,10 @@ python3 -m unittest discover -s .github/scripts -p test_proto.py (the Proto chec
   every bundle holds exactly the runtime the generator targets.
 - Wiring: every TypeScript user depends on "file:<...>/proto/ts" and runs proto/tools/ensure.mjs as its
   postinstall; every Python user takes ziyixi-proto from proto/python as a non-editable path source.
-- Freshness: every npm script that compiles, tests or serves the generated code (tsc, vitest, wrangler) in
-  a TypeScript user, or in a package whose sources import a user's sources, runs ensure.mjs first as its
-  pre-script, so a pull or branch switch that changes a .proto
-  file cannot leave stale generated types behind (uv's cache keys do the same for Python).
+- Freshness: every npm script that compiles, tests, type-aware lints, bundles or serves the generated code (tsc,
+  vitest, eslint, wrangler, vite) in a TypeScript user, or in a package whose sources import a user's sources, runs
+  ensure.mjs first as its pre-script, so a pull or branch switch that changes a .proto file cannot leave stale
+  generated types behind (uv's cache keys do the same for Python).
 - ci_changes.PROTO_USERS lists exactly those users, each with the languages its production bundles compile
   in (a TypeScript "dependencies" entry with a value import in production code, a Python [project]
   dependency); a user marked test-only has no production import of it; ci_changes.PROTO_PACKAGES names
@@ -52,8 +52,9 @@ RUNTIME = "@bufbuild/protobuf"
 TS_PACKAGE = "@ziyixi/proto"
 PY_PACKAGE = "ziyixi-proto"
 ENSURE = PROTO / "tools" / "ensure.mjs"
-# Script commands that read the generated code; the script's pre-script must run ensure.mjs.
-READS_GENERATED = re.compile(r"(^|[\s;&|(])(tsc|vitest|wrangler)\b")
+# Script commands that read the generated code (compile, test, type-aware lint, bundle or serve it); the script's
+# pre-script must run ensure.mjs. `vite\b` does not match vitest (the s is a word character).
+READS_GENERATED = re.compile(r"(^|[\s;&|(])(tsc|vitest|wrangler|eslint|vite)\b")
 RELATIVE_IMPORT = re.compile(r"""(?:\bfrom|\bimport)\s*\(?\s*['"](\.\.?/[^'"]+)['"]""")
 EXACT = re.compile(r"\d+\.\d+\.\d+")
 SKIP_PARTS = {"node_modules", ".venv", ".venv-workers", "python_modules", ".wrangler"}
@@ -291,6 +292,24 @@ class Users(unittest.TestCase):
                     match = re.fullmatch(r"node (\S+/tools/ensure\.mjs)", scripts.get(f"pre{name}", ""))
                     self.assertIsNotNone(match, f"add \"pre{name}\": \"node <...>/proto/tools/ensure.mjs\"")
                     self.assertEqual((manifest.parent / match.group(1)).resolve(), ENSURE)
+
+    def test_the_freshness_rule_names_every_tool_that_reads_the_generated_code(self):
+        """eslint reads the generated types through typescript-eslint's project service, vite compiles them."""
+        for command in (
+            "tsc --noEmit",
+            "tsc --noEmit && tsc --noEmit -p test/runtime/tsconfig.json",
+            "vitest run --config vitest.runtime.config.ts",
+            "wrangler deploy --dry-run",
+            "eslint .",
+            "npm run check && eslint src",
+            "vite",
+            "tsc --noEmit && vite build && node scripts/check-dist.mjs",
+        ):
+            with self.subTest(command=command):
+                self.assertRegex(command, READS_GENERATED)
+        for command in ("node scripts/check-dist.mjs", "prettier --check .", "node ../../proto/tools/ensure.mjs", "my-eslint-report"):
+            with self.subTest(command=command):
+                self.assertNotRegex(command, READS_GENERATED)
 
     def test_python_users_build_the_package_from_proto_not_editable(self):
         users = py_users()

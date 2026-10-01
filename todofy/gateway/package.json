@@ -13,6 +13,7 @@
     "typecheck": "tsc --noEmit",
     "pretest": "node ../../proto/tools/ensure.mjs",
     "test": "vitest run",
+    "prelint": "node ../../proto/tools/ensure.mjs",
     "lint": "eslint ."
   },
   "devDependencies": {

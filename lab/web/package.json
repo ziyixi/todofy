@@ -13,6 +13,7 @@
     "dev": "vite",
     "pretypecheck": "node ../../proto/tools/ensure.mjs",
     "typecheck": "tsc --noEmit",
+    "prelint": "node ../../proto/tools/ensure.mjs",
     "lint": "eslint .",
     "pretest": "node ../../proto/tools/ensure.mjs",
     "test": "vitest run",
