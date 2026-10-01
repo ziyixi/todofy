@@ -4,10 +4,16 @@ moved onto the generated proto/todofy/report/v1 messages. No real mail: every te
 
 A case is (name, kind, input). kind ``summary`` and ``recommendation`` are a built report (status, counts and
 tasks as given); ``parsed`` is a model answer turned into a recommendation (an unusable one becomes
-model_output_invalid without the counts).
+model_output_invalid with no tasks, and keeps new_count and carryover_count, as the code before always wrote).
+``recommendation_model_output_invalid`` has no counts: a shape the runtime no longer writes, kept for the reports
+stored before 2026-09-30 that the owner API still lists.
+
+newsletter_text_ok is the newsletter's own text rule, written as it writes it, an oracle the tests compare the
+contract's formats with; production code checks text only with the formats.
 """
 
 import json
+import re
 from typing import Any
 
 from todofy.core.report_schema import EMPTY_WINDOW_SUMMARY, MAX_REASON_CHARS, MAX_TITLE_CHARS, fit_summary
@@ -18,6 +24,19 @@ STAMPS = {
     "window_end": "2026-09-28T13:30:00Z",
 }
 MODEL = "gemini-3.8-flash"
+# The control characters the newsletter refuses (newsletter src/newsletter/todofy.py _decode).
+NEWSLETTER_CONTROL = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
+
+
+def newsletter_text_ok(text: object, max_chars: int) -> bool:
+    """Non-blank text the newsletter accepts, as its _decode writes the rule (str.strip(), a length, no control
+    character but tab, line feed and carriage return). report.proto's formats Title, Reason and SummaryText state
+    the same rule; tests/unit/test_report_wire.py compares them character by character."""
+    return (
+        isinstance(text, str) and bool(text.strip()) and len(text) <= max_chars and not NEWSLETTER_CONTROL.search(text)
+    )
+
+
 # Longer than the newsletter takes: fit_summary cuts it at a line break and appends its notice.
 LONG_DAY = "\n".join(f"- item {n}: renew the example contract" for n in range(1, 600))
 TASKS = [

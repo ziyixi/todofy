@@ -21,12 +21,11 @@ import pytest
 from ziyixi_proto.todofy.report.v1 import report_pb as pb
 from ziyixi_proto.wire_json import WireJsonError, format_matches, from_wire, to_wire
 
-from tests.unit.report_cases import CASES, STAMPS
+from tests.unit.report_cases import CASES, STAMPS, newsletter_text_ok
 from todofy.core.report_schema import (
     EMPTY_WINDOW_SUMMARY,
     Recommendation,
     ReportStatus,
-    newsletter_text_ok,
     recommendation_from_answer,
     recommendation_report,
     summary_report,

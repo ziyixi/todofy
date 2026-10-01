@@ -39,7 +39,9 @@ MAX_SUMMARY_CHARS = SUMMARY_TEXT.max_length
 )
 
 _INTEGER = re.compile(r"[+-]?[0-9]+")
-# The newsletter drops a whole section when any text holds one of these.
+# The control characters fit_summary drops from model text (the newsletter drops a whole section when any text
+# holds one). Only a cleanup: what a report may hold is the contract's formats (Title, Reason, SummaryText), which
+# the codec checks on every write.
 _CONTROL = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
 
 # todofy.report.v1.ReportStatus by its wire names (OK is "ok"), as D1's status column stores them.
@@ -52,12 +54,6 @@ class Recommendation:
     rank: int
     title: str
     reason: str
-
-
-def newsletter_text_ok(text: object, max_chars: int) -> bool:
-    """Non-blank text the newsletter accepts (its _decode rules, as it writes them). The contract states the same
-    rule as the formats Title, Reason and SummaryText, which every report is checked with when it is written."""
-    return isinstance(text, str) and bool(text.strip()) and len(text) <= max_chars and not _CONTROL.search(text)
 
 
 # Appended when a long daily summary is cut to fit the newsletter.

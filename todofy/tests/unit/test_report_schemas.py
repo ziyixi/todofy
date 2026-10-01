@@ -15,6 +15,7 @@ from typing import Any
 
 import pytest
 
+from tests.unit.report_cases import newsletter_text_ok
 from todofy.core.prompts import RECOMMEND_TOP_TASKS
 from todofy.core.report_schema import (
     EMPTY_WINDOW_SUMMARY,
@@ -24,7 +25,6 @@ from todofy.core.report_schema import (
     MAX_TOP_N,
     WINDOW_HOURS,
     ReportStatus,
-    newsletter_text_ok,
     parse_recommendations,
     recommendation_response_schema,
 )
@@ -298,7 +298,7 @@ def test_what_the_newsletter_rejects_core_rejects_too(items):
 
 
 def test_summary_text_rule_matches_the_schema():
-    """S5 stores a daily summary only if it passes newsletter_text_ok (task_count > 0 needs non-blank)."""
+    """The newsletter's text rule (newsletter_text_ok) and the summary schema agree (non-blank when task_count > 0)."""
     assert branch(SUMMARY, "ok")["properties"]["summary"]["maxLength"] == MAX_SUMMARY_CHARS
     for text in ("报告\n\t- 一项", " ", "a\x07b", "x" * (MAX_SUMMARY_CHARS + 1)):
         schema_ok = errors(SUMMARY, summary(summary=text)) == []

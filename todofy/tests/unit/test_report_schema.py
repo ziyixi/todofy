@@ -2,6 +2,7 @@ import json
 
 import pytest
 
+from tests.unit.report_cases import newsletter_text_ok
 from todofy.core.report_schema import (
     DEFAULT_TOP_N,
     EMPTY_WINDOW_SUMMARY,
@@ -11,7 +12,6 @@ from todofy.core.report_schema import (
     WINDOW_HOURS,
     Recommendation,
     fit_summary,
-    newsletter_text_ok,
     parse_recommendations,
     parse_top_n,
     recommendation_response_schema,
