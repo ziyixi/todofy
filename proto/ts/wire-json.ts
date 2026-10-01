@@ -206,14 +206,23 @@ function timestampFromWire(text: string): Date | undefined {
 
 function scalarToWire(field: DescField, scalar: ScalarType | undefined, value: unknown): JsonValue {
   switch (scalar) {
+    // A message built in code is not checked by protobuf-es (create() takes any number for an int32): the
+    // writer refuses what a reader would refuse, so a producer bug never reaches the wire.
     case ScalarType.STRING:
+      if (typeof value !== 'string') throw new WireJsonError(`${field.name}: not a string`);
+      return value;
     case ScalarType.BOOL:
+      if (typeof value !== 'boolean') throw new WireJsonError(`${field.name}: not a boolean`);
+      return value;
     case ScalarType.INT32:
-    case ScalarType.UINT32:
     case ScalarType.SINT32:
-    case ScalarType.FIXED32:
     case ScalarType.SFIXED32:
-      return value as JsonValue;
+      if (!(typeof value === 'number' && Number.isInteger(value) && value >= -0x80000000 && value <= 0x7fffffff)) throw new WireJsonError(`${field.name}: not an int32`);
+      return value;
+    case ScalarType.UINT32:
+    case ScalarType.FIXED32:
+      if (!(typeof value === 'number' && Number.isInteger(value) && value >= 0 && value <= 0xffffffff)) throw new WireJsonError(`${field.name}: not a uint32`);
+      return value;
     case ScalarType.DOUBLE:
       // JSON.stringify would write null for these; refusing keeps a typo from turning into "no value".
       if (!Number.isFinite(value)) throw new WireJsonError(`${field.name}: not a finite number`);

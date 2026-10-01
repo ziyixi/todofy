@@ -85,8 +85,8 @@ message PipelineStatus {
   int32 liked_last_week = 4 [(google.api.field_behavior) = OUTPUT_ONLY];
   // Decisions in the last 7 days.
   int32 decided_last_week = 5 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // Workers AI neurons used today (UTC).
-  int32 neurons_today = 6 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Workers AI neurons used today (UTC); fractional, as the ledger prices each call.
+  double neurons_today = 6 [(google.api.field_behavior) = OUTPUT_ONLY];
   // Today's neuron cap.
   int32 neuron_cap = 7 [(google.api.field_behavior) = OUTPUT_ONLY];
   // The last successful feed fetch; unset before the first.

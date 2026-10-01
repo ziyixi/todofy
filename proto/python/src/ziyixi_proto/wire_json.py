@@ -184,15 +184,26 @@ def to_wire(message: Any) -> dict[str, Any]:
 
 
 def _value_out(kind: str, field: Field, value: Any) -> Any:
-    if kind == "message":
-        return to_wire(value)
-    if kind == "enum":
-        return _enum_out(value)
-    if kind == "double":
-        try:
-            return _double_out(value)
-        except WireJsonError:
-            raise WireJsonError(f"{field.name}: not a finite number") from None
+    # The dataclasses do not check their values: the writer refuses what a reader would refuse, so a
+    # producer bug never reaches the wire.
+    match kind:
+        case "message":
+            return to_wire(value)
+        case "enum":
+            return _enum_out(value)
+        case "double":
+            if isinstance(value, bool) or not isinstance(value, (int, float)):
+                raise WireJsonError(f"{field.name}: not a number")
+            try:
+                return _double_out(float(value))
+            except WireJsonError:
+                raise WireJsonError(f"{field.name}: not a finite number") from None
+        case "int32" if isinstance(value, bool) or not isinstance(value, int) or value not in INT32:
+            raise WireJsonError(f"{field.name}: not an int32")
+        case "string" if not isinstance(value, str):
+            raise WireJsonError(f"{field.name}: not a string")
+        case "bool" if not isinstance(value, bool):
+            raise WireJsonError(f"{field.name}: not a boolean")
     return value
 
 

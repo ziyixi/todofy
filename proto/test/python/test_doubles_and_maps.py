@@ -28,6 +28,18 @@ class DoublesAndMapsTest(unittest.TestCase):
         with self.assertRaises(WireJsonError):
             to_wire(pb.Book(regional_genres={"eu": pb.Genre.UNSPECIFIED}))
 
+    def test_the_writer_refuses_scalars_a_reader_would_refuse(self) -> None:
+        for book in (
+            pb.Book(pages=1.5),  # type: ignore[arg-type]
+            pb.Book(pages=2**31),
+            pb.Book(pages=True),
+            pb.Book(copies={"a": -0.5}),  # type: ignore[dict-item]
+            pb.Book(title=7),  # type: ignore[arg-type]
+            pb.Book(hardcover=1),  # type: ignore[arg-type]
+        ):
+            with self.subTest(book=book), self.assertRaises(WireJsonError):
+                to_wire(book)
+
     def test_map_entries_set_in_any_order_write_the_same_bytes(self) -> None:
         first = pb.Book(copies={"b": 1, "a": 2})
         second = pb.Book(copies={"a": 2, "b": 1})

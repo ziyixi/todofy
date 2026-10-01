@@ -30,6 +30,13 @@ describe('doubles and maps', () => {
     expect(first).toBe('{"copies":{"a":2,"b":1}}');
   });
 
+  test('the writer refuses scalars a reader would refuse (create() does not check them)', () => {
+    expect(() => toWire(BookSchema, create(BookSchema, { pages: 1.5 }))).toThrow(WireJsonError);
+    expect(() => toWire(BookSchema, create(BookSchema, { pages: 2 ** 31 }))).toThrow(WireJsonError);
+    expect(() => toWire(BookSchema, create(BookSchema, { copies: { a: -0.5 } }))).toThrow(WireJsonError);
+    expect(() => toWire(BookSchema, { ...create(BookSchema), title: 7 as unknown as string })).toThrow(WireJsonError);
+  });
+
   test('a __proto__ map key is an ordinary entry', () => {
     const read = fromWire(BookSchema, JSON.parse('{"labels": {"__proto__": "x", "a": "y"}}'), { strict: true });
     expect(Object.getPrototypeOf(read.message.labels)).toBe(Object.prototype);
