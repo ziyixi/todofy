@@ -66,10 +66,33 @@ describe('errors under /api/v1', () => {
     expect(reason(await status(big))).toBe('BAD_REQUEST');
     expect((await h.mutate('POST', '/api/v1/seeds:import', { request_id: op(), inputs: ['2601.00042'], ids: [] })).status).toBe(400);
     expect((await h.fetch('/api/v1/seeds?color=red')).status).toBe(400);
-    // A DELETE answers google.protobuf.Empty.
+    // A query value that is not UTF-8 is refused, not read as U+FFFD.
+    const latin1 = await h.fetch('/api/v1/likedPapers?filter=%FF');
+    expect(latin1.status).toBe(400);
+    expect(reason(await status(latin1))).toBe('BAD_REQUEST');
+    // A DELETE answers google.protobuf.Empty; a seed that is not there is NOT_FOUND (AIP-135).
+    expect((await h.mutate('POST', '/api/v1/seeds:import', { request_id: op(), inputs: ['2601.00042'] })).status).toBe(200);
     const deleted = await h.mutate('DELETE', `/api/v1/seeds/2601.00042?request_id=${op()}`);
     expect(deleted.status).toBe(200);
     expect(await deleted.json()).toEqual({});
+    const gone = await h.mutate('DELETE', `/api/v1/seeds/2601.00042?request_id=${op()}`);
+    expect(gone.status).toBe(404);
+    expect(reason(await status(gone))).toBe('NOT_FOUND');
+  });
+
+  it('answer a failed D1 read UNAVAILABLE (the UI may repeat it), never a bug', async () => {
+    // Every handler's direct D1 read goes through the same wrapper as LabState's calls.
+    await h.sql('ALTER TABLE sends RENAME TO sends_gone');
+    try {
+      const failed = await h.fetch('/api/v1/decks/2026-09-30/send');
+      expect(failed.status).toBe(503);
+      const error = await status(failed);
+      expect(error.status).toBe('UNAVAILABLE');
+      expect(reason(error)).toBe('UNAVAILABLE');
+      expect(JSON.stringify(error)).not.toContain('sends');
+    } finally {
+      await h.sql('ALTER TABLE sends_gone RENAME TO sends');
+    }
   });
 });
 

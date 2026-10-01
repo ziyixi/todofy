@@ -71,31 +71,34 @@ message DeckState {
     (google.api.field_behavior) = OUTPUT_ONLY,
     (google.api.resource_reference).type = "lab.ziyixi.science/Deck"
   ];
-  // Bumped by every decide, undo and restart; a mutation sends it back as `base_version` (an etag in the
-  // sense of AIP-154: a stale one is refused with DECK_CHANGED).
-  int32 version = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // AIP-154: an opaque token of this state. A deck mutation (DecideDeck, UndoDeck, RestartDeck) sends back
+  // the etag it was asked on, and a stale one is refused with ABORTED (DECK_CHANGED). Clients never parse it.
+  string etag = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Bumped by every decide, undo and restart: orders two states of one deck, so a client never replaces a
+  // newer state with an older answer that arrived late. Preconditions use `etag`, not this.
+  int32 version = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
   // The effective decision per paper (`arxiv:<id>`); undecided papers are absent.
-  map<string, Decision> decisions = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
+  map<string, Decision> decisions = 4 [(google.api.field_behavior) = OUTPUT_ONLY];
   // The counts.
-  DeckCounts counts = 4 [(google.api.field_behavior) = OUTPUT_ONLY];
+  DeckCounts counts = 5 [(google.api.field_behavior) = OUTPUT_ONLY];
   // The position of the first undecided card; unset when every card is decided.
-  optional int32 next_position = 5 [(google.api.field_behavior) = OUTPUT_ONLY];
+  optional int32 next_position = 6 [(google.api.field_behavior) = OUTPUT_ONLY];
   // When the last card was decided; unset while cards remain.
-  google.protobuf.Timestamp finish_time = 6 [(google.api.field_behavior) = OUTPUT_ONLY];
+  google.protobuf.Timestamp finish_time = 7 [(google.api.field_behavior) = OUTPUT_ONLY];
   // What the next undo takes back; unset when there is nothing to undo.
-  UndoTarget undo = 7 [(google.api.field_behavior) = OUTPUT_ONLY];
+  UndoTarget undo = 8 [(google.api.field_behavior) = OUTPUT_ONLY];
 }
 
 // Decision counts of a deck.
 message DeckCounts {
   // Cards in the deck.
-  int32 total = 1 [(google.api.field_behavior) = OUTPUT_ONLY];
+  int32 card_count = 1 [(google.api.field_behavior) = OUTPUT_ONLY];
   // Cards decided.
-  int32 decided = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
+  int32 decided_count = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
   // Cards liked.
-  int32 liked = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
+  int32 liked_count = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
   // Cards disliked.
-  int32 disliked = 4 [(google.api.field_behavior) = OUTPUT_ONLY];
+  int32 disliked_count = 4 [(google.api.field_behavior) = OUTPUT_ONLY];
 }
 
 // What an undo takes back (the button label and the fly-back animation).
@@ -157,9 +160,9 @@ message Send {
   // Papers in this send.
   int32 item_count = 7 [(google.api.field_behavior) = OUTPUT_ONLY];
   // Tasks the intent creates.
-  int32 tasks_total = 8 [(google.api.field_behavior) = OUTPUT_ONLY];
+  int32 total_task_count = 8 [(google.api.field_behavior) = OUTPUT_ONLY];
   // Tasks created so far.
-  int32 tasks_created = 9 [(google.api.field_behavior) = OUTPUT_ONLY];
+  int32 created_task_count = 9 [(google.api.field_behavior) = OUTPUT_ONLY];
   // Why the state is not plain progress; unset when there is none.
   SendErrorCode error_code = 10 [(google.api.field_behavior) = OUTPUT_ONLY];
   // The content is frozen: a retry resends it unchanged.

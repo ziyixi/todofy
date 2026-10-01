@@ -301,7 +301,7 @@ export function summaryView(bundle: DeckBundle, defaultMode: SendMode): DeckSumm
 
 // ---- liked list and seeds -----------------------------------------------------------------------------
 
-/** D1 refuses LIKE patterns over 50 bytes: the query text is cut to fit `%q%` with escapes. */
+/** D1 refuses LIKE patterns over 50 bytes: each filter literal is cut to fit `%q%` with escapes. */
 export const LIKE_PATTERN_MAX_BYTES = 50;
 
 export function likePattern(q: string): string | null {
@@ -348,18 +348,21 @@ function likedFrom(row: LikedRow): LikedPaper {
   return { ...paperFrom(row), liked_at: iso(row.at), deck_id: row.deck_id, brief: row.brief };
 }
 
-/** A page of at most `pageSize` (1-LIKED_PAGE) liked papers, newest first, after `cursor`, whose title matches `q`. */
-export async function readLiked(db: D1Database, cursor: LikedCursor | null, q: string | null, pageSize = LIKED_PAGE): Promise<LikedResponse> {
+/**
+ * A page of at most `pageSize` (1-LIKED_PAGE) liked papers, newest first, after `cursor`, whose title contains
+ * every one of `literals` (a ListLikedPapers filter's literals: each one LIKE pattern, ANDed).
+ */
+export async function readLiked(db: D1Database, cursor: LikedCursor | null, literals: readonly string[], pageSize = LIKED_PAGE): Promise<LikedResponse> {
   const size = Math.max(1, Math.min(LIKED_PAGE, Math.trunc(pageSize)));
-  const pattern = q === null ? null : likePattern(q);
+  const patterns = literals.map(likePattern).filter((pattern): pattern is string => pattern !== null);
+  const matches = patterns.map((_, i) => `\n          AND p.title LIKE ?${String(i + 4)} ESCAPE '\\'`).join('');
   const { results } = await db
     .prepare(
       `${LIKED_SQL}
-          AND (?1 IS NULL OR f.at < ?1 OR (f.at = ?1 AND f.paper_id < ?2))
-          AND (?3 IS NULL OR p.title LIKE ?3 ESCAPE '\\')
-        ORDER BY f.at DESC, f.paper_id DESC LIMIT ?4`,
+          AND (?1 IS NULL OR f.at < ?1 OR (f.at = ?1 AND f.paper_id < ?2))${matches}
+        ORDER BY f.at DESC, f.paper_id DESC LIMIT ?3`,
     )
-    .bind(cursor?.at ?? null, cursor?.id ?? '', pattern, size + 1)
+    .bind(cursor?.at ?? null, cursor?.id ?? '', size + 1, ...patterns)
     .all<LikedRow>();
   const page = results.slice(0, size);
   const last = page[page.length - 1];

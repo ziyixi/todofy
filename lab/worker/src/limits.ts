@@ -15,7 +15,9 @@ export const BRIEF_MAX_CHARS = 400;
 export const LIKED_PAGE = 50;
 /** Characters of a ListLikedPapers filter. */
 export const LIKED_FILTER_MAX = 200;
-/** Seeds at most; ListSeeds answers all of them on one page. */
+/** Literals of a ListLikedPapers filter (each one LIKE pattern in D1's query). */
+export const LIKED_FILTER_LITERALS_MAX = 8;
+/** Seeds at most; ListSeeds answers all of them on one page unless page_size is smaller. */
 export const SEEDS_MAX = 50;
 /** Characters of one ImportSeeds input. */
 export const SEED_INPUT_MAX = 200;

@@ -10,8 +10,9 @@
  *   NOT_FOUND like any other path);
  * - everything else: the UI's static assets (GET and HEAD).
  *
- * Errors are google.rpc.Status bodies (proto/lab/ui/v1/errors.proto), logged as one line with the request
- * ID, status and reason only. Private headers on every response. Workers Free gives this handler 10 ms of CPU:
+ * Errors are google.rpc.Status bodies (proto/lab/ui/v1/errors.proto, common/errors/v1/errors.proto), logged as
+ * one line with the request ID, status and reason only. A failed dependency (D1, LabState, Access's keys, the
+ * asset store) is UNAVAILABLE, which the UI may repeat; anything else unexpected is a bug, INTERNAL. Private headers on every response. Workers Free gives this handler 10 ms of CPU:
  * bodies are at most MAX_BODY_BYTES, answers are bounded.
  */
 import {
@@ -120,8 +121,8 @@ const api = new HttpTranscoder(LabUiService, handlers, {
   maxBodyBytes: MAX_BODY_BYTES,
   authorize,
   localize: (reason) => (isReason(reason) ? { locale: 'zh-CN', message: REASONS[reason].zh } : undefined),
-  // A failed LabState or D1 call: the request may be repeated with its request_id.
-  onUnexpected: () => labError('UNAVAILABLE'),
+  // A bug (api.ts wraps its D1 and LabState calls as UNAVAILABLE itself): never answered as retryable.
+  onUnexpected: () => labError('INTERNAL'),
 });
 
 function methodNotAllowed(allow: string): RpcError {
@@ -165,7 +166,8 @@ async function route(base: Context): Promise<Routed> {
   try {
     ctx = { ...base, ...(await authenticate(base)) };
   } catch (error) {
-    const rpc = error instanceof RpcError ? error : labError('UNAVAILABLE');
+    // edge-auth reports a failed key fetch as `keys_unavailable` (UNAVAILABLE): anything it throws is a bug.
+    const rpc = error instanceof RpcError ? error : labError('INTERNAL');
     if (legacyApi(url.pathname)) {
       const message = isReason(rpc.reason) ? REASONS[rpc.reason].zh : REASONS.UNAVAILABLE.zh;
       return { response: legacyError(base, rpc.httpStatus, rpc.reason.toLowerCase(), message), asset: false, reason: rpc.reason };
@@ -180,7 +182,7 @@ async function route(base: Context): Promise<Routed> {
     try {
       return { response: await csrfResponse(ctx), asset: false };
     } catch (error) {
-      return fail(error instanceof RpcError ? error : labError('UNAVAILABLE'));
+      return fail(error instanceof RpcError ? error : labError('INTERNAL'));
     }
   }
   if (url.pathname === '/api/v1' || url.pathname.startsWith(API_PREFIX)) {

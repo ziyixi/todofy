@@ -37,6 +37,8 @@ const PATHS = {
   decide: `/api/v1/decks/${DAY}:decide`,
   undo: `/api/v1/decks/${DAY}:undo`,
   liked: '/api/v1/likedPapers',
+  // Three literals of the AIP-160 subset, each a LIKE pattern, all in every synthetic title: a full page.
+  likedFiltered: `/api/v1/likedPapers?filter=${encodeURIComponent('"e" AND l i')}`,
   settings: '/api/v1/settings',
 } as const;
 
@@ -145,33 +147,36 @@ describe('CPU per request (Workers Free: 10 ms)', () => {
     // loaded): what a cold request adds on top of a warm one, e.g. building the transcoder's route table.
     const cold = await cpu(() => text(PATHS.deck))
     console.log(`cpu GET deck as the isolate's first API request: ${cold.toFixed(2)} ms`)
-    const deck = JSON.parse(await text(PATHS.deck)) as { cards: { paper: { id: string } }[]; state: { version?: number } };
+    const deck = JSON.parse(await text(PATHS.deck)) as { cards: { paper: { id: string } }[]; state: { etag: string } };
     expect(deck.cards).toHaveLength(DECK_SIZE);
     // A full page of likes: every paper of the feed, liked from the library (fixed times, newest first).
     const papers = await h.sql<{ id: string }>('SELECT id FROM papers ORDER BY id LIMIT ?', LIKED_PAGE + 5);
     for (const [index, paper] of papers.entries()) {
       await h.sql("INSERT INTO feedback (paper_id, label, source, deck_id, at) VALUES (?, 'like', 'library', NULL, ?)", paper.id, T0 + index);
     }
-    const liked = JSON.parse(await text(PATHS.liked)) as { liked_papers: unknown[] };
+    const liked = JSON.parse(await text(PATHS.liked)) as { liked_papers: unknown[]; next_page_token: string };
     expect(liked.liked_papers).toHaveLength(LIKED_PAGE);
+    const nextPage = `${PATHS.liked}?page_token=${encodeURIComponent(liked.next_page_token)}`;
 
     const results = [
       await measure('GET today', () => text(PATHS.today)),
       await measure(`GET deck (${String(DECK_SIZE)} cards)`, () => text(PATHS.deck)),
       await measure('GET deck summary', () => text(PATHS.summary)),
       await measure(`GET liked (${String(LIKED_PAGE)} papers)`, () => text(PATHS.liked)),
+      await measure('GET liked, filtered by 3 literals', () => text(PATHS.likedFiltered)),
+      await measure('GET liked, the next page (page token)', () => text(nextPage)),
       await measure('GET settings', () => text(PATHS.settings)),
     ];
     // A decide and its undo (two requests, each a LabState RPC with D1 reads and one batch), measured together and
     // reported per request (the harness fetched the CSRF token once, before the first run).
-    let version = deck.state.version ?? 0;
+    let etag = deck.state.etag;
     const card = deck.cards[0]?.paper.id ?? '';
     const pair = await measure('POST decide + POST undo (one each)', async () => {
-      const decided = await h.mutate('POST', PATHS.decide, { request_id: op(), base_version: version, paper_id: card, decision: 'like' });
-      const after = (await decided.json()) as { state: { version: number } };
-      const undone = await h.mutate('POST', PATHS.undo, { request_id: op(), base_version: after.state.version });
+      const decided = await h.mutate('POST', PATHS.decide, { request_id: op(), etag, paper_id: card, decision: 'like' });
+      const after = (await decided.json()) as { state: { etag: string } };
+      const undone = await h.mutate('POST', PATHS.undo, { request_id: op(), etag: after.state.etag });
       if (decided.status !== 200 || undone.status !== 200) throw new Error('mutation failed');
-      version = ((await undone.json()) as { state: { version: number } }).state.version;
+      etag = ((await undone.json()) as { state: { etag: string } }).state.etag;
     });
     console.log(`cpu POST decide or undo: about ${(pair.median / 2).toFixed(2)} ms each`);
     for (const { best } of results) expect(best).toBeLessThan(WARM_BOUND_MS);

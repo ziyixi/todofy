@@ -435,9 +435,11 @@ export async function pollSend(deps: OwnerDeps, deckId: string, now: number): Pr
 // ---- library feedback, seeds, settings ----------------------------------------------------------------------------
 
 /**
- * Library feedback: `label` null removes the paper's label, a decision sets it. With `create`, liking a paper
- * that is liked already is refused (`already_liked`, CreateLikedPaper's ALREADY_EXISTS); a replay of the same
- * op is not.
+ * Library feedback: `label` null removes the paper's like (DeleteLikedPaper), a decision sets the label. Removing
+ * a like that does not exist is refused (`not_found`, AIP-135), also when the paper is disliked: that dislike is
+ * not the liked paper being deleted, so it stays. With `create`, liking a paper that is liked already is refused
+ * (`already_liked`, CreateLikedPaper's ALREADY_EXISTS). A replay of the same op is never refused: it answers
+ * the current label, as the first request may have succeeded.
  */
 export async function feedback(
   deps: OwnerDeps,
@@ -454,6 +456,7 @@ export async function feedback(
       .bind(paperId)
       .first<{ id: string; label: Decision | null }>();
     if (paper === null) return fail(404, 'not_found');
+    if (label === null && paper.label !== 'like') return fail(404, 'not_found');
     if (create && label === 'like' && paper.label === 'like') return fail(409, 'already_liked');
     const write =
       label === null
@@ -500,9 +503,11 @@ export async function addSeeds(deps: OwnerDeps, opId: string, inputs: readonly s
   return done({ seeds: await readSeeds(db) });
 }
 
+/** DeleteSeed: a seed that does not exist is refused (`not_found`, AIP-135), except on a replay of the op. */
 export async function removeSeed(deps: OwnerDeps, opId: string, paperId: string, now: number): Promise<OwnerResult<SeedsResponse>> {
   const { db, store } = deps;
   if ((await storedOp(db, opId)) === null) {
+    if ((await db.prepare('SELECT 1 AS x FROM seeds WHERE paper_id = ?').bind(paperId).first()) === null) return fail(404, 'not_found');
     await db.batch([db.prepare('DELETE FROM seeds WHERE paper_id = ?').bind(paperId), opStatement(db, opId, 'seeds.remove', null, 200, {}, now)]);
     store.sql.exec('DELETE FROM seed_ids WHERE paper_id = ?', paperId);
     store.sql.exec("DELETE FROM pending_embed WHERE paper_id = ? AND day = 'seed'", paperId);
@@ -520,19 +525,18 @@ export async function settingsResponse(deps: Pick<OwnerDeps, 'db' | 'env'>): Pro
   return { ...stored, neuron_cap: Math.min(ceiling, stored.neuron_cap ?? ceiling), ceiling, tldr_models: [...TLDR_MODELS] };
 }
 
-/** Replaces the settings (validated by the Worker); a cap above the ceiling is refused. */
-export async function putSettings(deps: OwnerDeps, opId: string, settings: Settings, now: number): Promise<OwnerResult<SettingsResponse>> {
+/**
+ * Replaces the settings in `patch` (validated by the Worker; AIP-134: the fields of the update mask, or all of
+ * them) and keeps the others: each setting is its own row, so two updates of different fields never undo
+ * each other. A cap above the ceiling is refused.
+ */
+export async function putSettings(deps: OwnerDeps, opId: string, patch: Partial<Settings>, now: number): Promise<OwnerResult<SettingsResponse>> {
   const { db, store, env } = deps;
   if ((await storedOp(db, opId)) === null) {
-    if (settings.neuron_cap > neuronCeiling(env)) return fail(400, 'bad_request');
-    const rows: [string, unknown][] = [
-      ['categories', settings.categories],
-      ['lambda', settings.lambda],
-      ['neuron_cap', settings.neuron_cap],
-      ['tldr_model', settings.tldr_model],
-      ['ingest_paused', settings.ingest_paused],
-      ['send_mode', settings.send_mode],
-    ];
+    if (patch.neuron_cap !== undefined && patch.neuron_cap > neuronCeiling(env)) return fail(400, 'bad_request');
+    const rows = (['categories', 'lambda', 'neuron_cap', 'tldr_model', 'ingest_paused', 'send_mode'] as const)
+      .filter((key) => patch[key] !== undefined)
+      .map((key): [string, unknown] => [key, patch[key]]);
     await db.batch([
       db
         .prepare(
@@ -542,8 +546,8 @@ export async function putSettings(deps: OwnerDeps, opId: string, settings: Setti
         .bind(now, JSON.stringify(rows.map(([k, v]) => ({ k, v: JSON.stringify(v) })))),
       opStatement(db, opId, 'settings', null, 200, {}, now),
     ]);
-    store.set('mirror_ingest_paused', settings.ingest_paused ? 1 : 0);
-    store.set('mirror_neuron_cap', Math.min(settings.neuron_cap, neuronCeiling(env)));
+    if (patch.ingest_paused !== undefined) store.set('mirror_ingest_paused', patch.ingest_paused ? 1 : 0);
+    if (patch.neuron_cap !== undefined) store.set('mirror_neuron_cap', Math.min(patch.neuron_cap, neuronCeiling(env)));
   }
   return done(await settingsResponse(deps));
 }

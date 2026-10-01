@@ -2,11 +2,13 @@
  * An in-memory stand-in for the Worker's owner API (proto/lab/ui/v1, docs/design.md §7–§9), served by the same
  * shared transcoder the Worker uses: every request is routed, decoded strictly and answered in the wire JSON
  * profile exactly as in production, so a UI request the Worker would refuse fails here too. Faithful where
- * the UI depends on it: the decision log with undo of the latest effective decide/restart, versions with
+ * the UI depends on it: the decision log with undo of the latest effective decide/restart, etags with
  * DECK_CHANGED (carrying the current state), request_id replay, CSRF on mutations, summary with exclusions
  * and send generations, likes, seeds and settings. Every request must be a same-origin /api path.
  */
 import { vi } from 'vitest'
+import { updatePaths } from '@ziyixi/proto/field-mask'
+import { parseLiteralFilter } from '@ziyixi/proto/filter'
 import { HttpTranscoder, type ServiceHandlers, type ShapeOf } from '@ziyixi/proto/http-transcoder'
 import {
   DeckKind,
@@ -38,6 +40,7 @@ import { LikedPaperSchema, Seed_State, SeedSchema, type LikedPaper, type Seed } 
 import { Decision } from '@ziyixi/proto/lab/ui/v1/paper_pb'
 import { create } from '@ziyixi/proto/protobuf'
 import { EmptySchema, timestampFromDate } from '@ziyixi/proto/protobuf/wkt'
+import { decodePageToken, encodePageToken } from '@ziyixi/proto/page-token'
 import { Code, errorDetail, RpcError, statusBody } from '@ziyixi/proto/rpc-status'
 import { resetClientForTests } from '../api/client'
 import { idOf, paperOf } from '../lib/messages'
@@ -154,9 +157,10 @@ export class FakeServer {
     const next = this.cards.find((item) => decisions[idOf(item)] === undefined)
     return create(DeckStateSchema, {
       deck: NAME,
+      etag: String(this.version),
       version: this.version,
       decisions: Object.fromEntries(Object.entries(decisions).map(([paper, choice]) => [paper, DECISION[choice]])),
-      counts: { total: this.cards.length, decided: values.length, liked, disliked: values.length - liked },
+      counts: { cardCount: this.cards.length, decidedCount: values.length, likedCount: liked, dislikedCount: values.length - liked },
       nextPosition: next?.position,
       finishTime: next ? undefined : time('2026-09-30T12:05:00Z'),
       undo: this.undoTarget(),
@@ -189,7 +193,7 @@ export class FakeServer {
   private nextSend(mode: SendMode): Send {
     const scripted = this.sendScript.length > 1 ? this.sendScript.shift() : this.sendScript[0]
     const summary = this.summary()
-    const base = scripted ?? sendStatus({ item_count: summary.sendableCount, tasks_total: summary.sendableCount + 1, tasks_created: summary.sendableCount + 1 })
+    const base = scripted ?? sendStatus({ item_count: summary.sendableCount, total_task_count: summary.sendableCount + 1, created_task_count: summary.sendableCount + 1 })
     const status = { ...base, mode: base.frozen && this.send?.frozen ? this.send.mode : mode }
     if (status.state === Send_State.CREATED || status.state === Send_State.DUPLICATE) {
       for (const item of summary.likedItems) if (!item.excluded && item.sentGeneration === undefined) this.sentGeneration.set(item.paperId, status.generation)
@@ -198,8 +202,8 @@ export class FakeServer {
     return status
   }
 
-  private mutateDeck(baseVersion: number, mutation: { kind: 'decide'; paperId: string; decision: Decision } | { kind: 'undo' | 'restart' }): DeckState {
-    if (baseVersion !== this.version) fail(Code.ABORTED, 'DECK_CHANGED', [errorDetail(DeckStateSchema, this.state())])
+  private mutateDeck(etag: string, mutation: { kind: 'decide'; paperId: string; decision: Decision } | { kind: 'undo' | 'restart' }): DeckState {
+    if (etag !== this.state().etag) fail(Code.ABORTED, 'DECK_CHANGED', [errorDetail(DeckStateSchema, this.state())])
     if (mutation.kind === 'decide') {
       if (this.decisions()[mutation.paperId]) fail(Code.ALREADY_EXISTS, 'ALREADY_DECIDED')
       const decision: Choice = mutation.decision === Decision.LIKE ? 'like' : 'dislike'
@@ -238,19 +242,19 @@ export class FakeServer {
       },
       decideDeck: (request) => {
         deck(request.name)
-        const state = this.mutateDeck(request.baseVersion, { kind: 'decide', paperId: request.paperId, decision: request.decision })
+        const state = this.mutateDeck(request.etag, { kind: 'decide', paperId: request.paperId, decision: request.decision })
         return Promise.resolve(create(DecideDeckResponseSchema, { state }))
       },
       undoDeck: (request) => {
         deck(request.name)
         const undone = this.undoTarget()
-        const state = this.mutateDeck(request.baseVersion, { kind: 'undo' })
+        const state = this.mutateDeck(request.etag, { kind: 'undo' })
         return Promise.resolve(create(UndoDeckResponseSchema, { state, undone: undone && create(UndoTargetSchema, undone) }))
       },
       restartDeck: (request) => {
         deck(request.name)
         const cleared = Object.keys(this.decisions()).length
-        return Promise.resolve(create(RestartDeckResponseSchema, { state: this.mutateDeck(request.baseVersion, { kind: 'restart' }), clearedCount: cleared }))
+        return Promise.resolve(create(RestartDeckResponseSchema, { state: this.mutateDeck(request.etag, { kind: 'restart' }), clearedCount: cleared }))
       },
       snoozeDeck: (request) => {
         deck(request.name)
@@ -279,11 +283,19 @@ export class FakeServer {
         return Promise.resolve(this.sendScript.length > 0 ? this.nextSend(this.send.mode) : this.send)
       },
       listLikedPapers: ({ pageToken, filter, pageSize }) => {
-        const matching = this.liked.filter((paper) => (paper.paper?.title ?? '').toLowerCase().includes(filter.toLowerCase()))
-        const start = pageToken === '' ? 0 : Number(pageToken.replace(/^p/, ''))
+        // The Worker's rules: the AIP-160 subset (every literal in the title) and tokens bound to the filter.
+        let literals: string[]
+        let start = 0
+        try {
+          literals = parseLiteralFilter(filter, 8)
+          if (pageToken !== '') start = Number(decodePageToken(pageToken, { filter }))
+        } catch {
+          fail(Code.INVALID_ARGUMENT, 'BAD_REQUEST')
+        }
+        const matching = this.liked.filter((paper) => literals.every((literal) => (paper.paper?.title ?? '').toLowerCase().includes(literal.toLowerCase())))
         const size = Math.min(pageSize || 50, this.likedPageSize)
         const page = matching.slice(start, start + size)
-        const nextPageToken = start + size < matching.length ? `p${String(start + size)}` : ''
+        const nextPageToken = start + size < matching.length ? encodePageToken(start + size, { filter }) : ''
         return Promise.resolve(create(ListLikedPapersResponseSchema, { likedPapers: page, nextPageToken }))
       },
       deleteLikedPaper: ({ name }) => {
@@ -306,13 +318,23 @@ export class FakeServer {
         return Promise.resolve(create(ImportSeedsResponseSchema, { seeds: this.seeds }))
       },
       deleteSeed: ({ name }) => {
+        if (!this.seeds.some((seed) => seed.name === name)) fail(Code.NOT_FOUND, 'NOT_FOUND')
         this.seeds = this.seeds.filter((seed) => seed.name !== name)
         return Promise.resolve(create(EmptySchema))
       },
       getSettings: () => Promise.resolve(this.settings),
-      updateSettings: ({ settings }) => {
+      updateSettings: ({ settings, updateMask }) => {
         if (!settings || settings.neuronCap > this.settings.neuronCeiling) fail(Code.INVALID_ARGUMENT, 'BAD_REQUEST')
-        this.settings = { ...this.settings, ...settings, neuronCeiling: this.settings.neuronCeiling, summaryModels: this.settings.summaryModels }
+        // AIP-134: the masked fields only (all editable ones without a mask), as the Worker does.
+        const paths = updatePaths(updateMask)
+        const editable = ['categories', 'dislike_weight', 'neuron_cap', 'summary_model', 'ingest_paused', 'send_mode'] as const
+        const next = { ...this.settings }
+        for (const field of SettingsSchema.fields) {
+          if ((editable as readonly string[]).includes(field.name) && (paths === '*' || paths.includes(field.name))) {
+            ;(next as Record<string, unknown>)[field.localName] = (settings as unknown as Record<string, unknown>)[field.localName]
+          }
+        }
+        this.settings = next
         return Promise.resolve(this.settings)
       },
     }

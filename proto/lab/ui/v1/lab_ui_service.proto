@@ -8,7 +8,8 @@
 // query parameters and responses are JSON in the wire JSON profile (proto/README.md): proto field names
 // (snake_case), enum values in lower case without their prefix (`DECISION_LIKE` is "like"), timestamps in
 // RFC 3339 UTC. Inputs are read strictly (an unknown field or enum name is INVALID_ARGUMENT), outputs
-// leniently. Request bodies are at most 16 KiB. Errors: errors.proto.
+// leniently. Request bodies are at most 16 KiB. Errors: errors.proto (Lab's reasons) and
+// common/errors/v1/errors.proto (the reasons every API shares).
 //
 // Authentication, in front of the transcoder (packages/edge-auth, Lab's parameters in its SPEC §5.4):
 // every route needs the Cloudflare Access JWT of the owner (header Cf-Access-Jwt-Assertion or cookie
@@ -17,7 +18,8 @@
 // transport, not part of this service. Every mutation takes a `request_id` (AIP-155, a UUID4 the browser
 // makes once per user action): repeating a request with the same ID applies it once (deck mutations answer
 // the stored first response, the others the current view). Without one the Worker makes one up, so nothing
-// is deduplicated.
+// is deduplicated. A Delete of a resource that does not exist is NOT_FOUND (AIP-135), except for the replay
+// of a request_id whose first request deleted it.
 //
 // Value rules the IDL cannot express (lengths, ranges, counts) are in each field's comment and enforced by
 // the Worker; the shared constants are in lab/worker/src/limits.ts.
@@ -36,6 +38,7 @@ import "google/api/field_behavior.proto";
 import "google/api/field_info.proto";
 import "google/api/resource.proto";
 import "google/protobuf/empty.proto";
+import "google/protobuf/field_mask.proto";
 import "google/protobuf/timestamp.proto";
 import "lab/ui/v1/deck.proto";
 import "lab/ui/v1/home.proto";
@@ -90,7 +93,7 @@ service LabUiService {
     };
   }
 
-  // 重来: clears every decision in one undoable step (nothing to clear is a no-op that keeps the version).
+  // 重来: clears every decision in one undoable step (nothing to clear is a no-op that keeps the etag).
   // Replaces POST /api/decks/{day}/restart.
   rpc RestartDeck(RestartDeckRequest) returns (RestartDeckResponse) {
     option (google.api.http) = {
@@ -145,7 +148,8 @@ service LabUiService {
     option (google.api.method_signature) = "";
   }
 
-  // 取消喜欢: removes the like (ranking stops using it from the next run). Replaces POST /api/feedback with
+  // 取消喜欢: removes the like (ranking stops using it from the next run). NOT_FOUND when the paper is not
+  // liked (never liked, or disliked since: the dislike stays). Replaces POST /api/feedback with
   // `"label": null`.
   rpc DeleteLikedPaper(DeleteLikedPaperRequest) returns (google.protobuf.Empty) {
     option (google.api.http) = {delete: "/api/v1/{name=likedPapers/*}"};
@@ -177,7 +181,8 @@ service LabUiService {
     };
   }
 
-  // Removes a seed; likes and dislikes stay. Replaces DELETE /api/seeds (which took a JSON body).
+  // Removes a seed; likes and dislikes stay. NOT_FOUND when there is no such seed. Replaces DELETE /api/seeds
+  // (which took a JSON body).
   rpc DeleteSeed(DeleteSeedRequest) returns (google.protobuf.Empty) {
     option (google.api.http) = {delete: "/api/v1/{name=seeds/*}"};
     option (google.api.method_signature) = "name";
@@ -189,17 +194,14 @@ service LabUiService {
     option (google.api.method_signature) = "name";
   }
 
-  // Replaces the editable settings as a whole (a cap above the ceiling is BAD_REQUEST); answers the
-  // stored settings. Replaces PUT /api/settings.
-  // (-- api-linter: core::0134::method-signature=disabled
-  //     aip.dev/not-precedent: no update_mask (UpdateSettingsRequest), so the signature is the resource
-  //     alone. --)
+  // Replaces the editable settings that `update_mask` names, or all of them without one (AIP-134; a cap
+  // above the ceiling is BAD_REQUEST); answers the stored settings. Replaces PUT /api/settings.
   rpc UpdateSettings(UpdateSettingsRequest) returns (Settings) {
     option (google.api.http) = {
       patch: "/api/v1/{settings.name=settings}"
       body: "settings"
     };
-    option (google.api.method_signature) = "settings";
+    option (google.api.method_signature) = "settings,update_mask";
   }
 }
 
@@ -237,8 +239,8 @@ message DecideDeckRequest {
     (google.api.field_behavior) = REQUIRED,
     (google.api.resource_reference).type = "lab.ziyixi.science/Deck"
   ];
-  // The deck's `version` this decision was made on (0-1000000).
-  int32 base_version = 2 [(google.api.field_behavior) = REQUIRED];
+  // The DeckState.etag this decision was made on (AIP-154); a stale one is DECK_CHANGED.
+  string etag = 2 [(google.api.field_behavior) = REQUIRED];
   // The card's paper (`arxiv:<id>`).
   string paper_id = 3 [(google.api.field_behavior) = REQUIRED];
   // Like or dislike.
@@ -263,8 +265,8 @@ message UndoDeckRequest {
     (google.api.field_behavior) = REQUIRED,
     (google.api.resource_reference).type = "lab.ziyixi.science/Deck"
   ];
-  // The deck's `version` the undo was asked on.
-  int32 base_version = 2 [(google.api.field_behavior) = REQUIRED];
+  // The DeckState.etag the undo was asked on (AIP-154); a stale one is DECK_CHANGED.
+  string etag = 2 [(google.api.field_behavior) = REQUIRED];
   // The idempotency key (AIP-155).
   string request_id = 3 [
     (google.api.field_info).format = UUID4,
@@ -287,8 +289,8 @@ message RestartDeckRequest {
     (google.api.field_behavior) = REQUIRED,
     (google.api.resource_reference).type = "lab.ziyixi.science/Deck"
   ];
-  // The deck's `version` the 重来 was asked on.
-  int32 base_version = 2 [(google.api.field_behavior) = REQUIRED];
+  // The DeckState.etag the 重来 was asked on (AIP-154); a stale one is DECK_CHANGED.
+  string etag = 2 [(google.api.field_behavior) = REQUIRED];
   // The idempotency key (AIP-155).
   string request_id = 3 [
     (google.api.field_info).format = UUID4,
@@ -384,12 +386,15 @@ message GetSendRequest {
 
 // Input of ListLikedPapers.
 message ListLikedPapersRequest {
-  // At most this many papers (default and maximum LIKED_PAGE, 50).
+  // At most this many papers (AIP-158): 0 means LIKED_PAGE (50), and a larger value is read as 50.
   int32 page_size = 1 [(google.api.field_behavior) = OPTIONAL];
-  // The previous page's `next_page_token`.
+  // The previous page's `next_page_token`, with the same `filter` (another filter is INVALID_ARGUMENT).
   string page_token = 2 [(google.api.field_behavior) = OPTIONAL];
-  // An AIP-160 filter of one bare literal, matched against the title (at most 200 characters; the
-  // match uses its first 50 bytes, D1's LIKE limit). Empty lists everything.
+  // An AIP-160 filter in the subset proto/ts/filter.ts parses: up to 8 literals, bare words or quoted
+  // strings ("graph neural"), separated by whitespace or AND; every literal must occur in the title
+  // (ASCII letters case-insensitively). Anything else (OR, NOT, `-`, fields, comparisons, functions) is
+  // INVALID_ARGUMENT. At most 200 characters; each literal is matched by its first 50 bytes (D1's LIKE
+  // limit). Empty lists everything.
   string filter = 3 [(google.api.field_behavior) = OPTIONAL];
 }
 
@@ -419,7 +424,9 @@ message DeleteLikedPaperRequest {
 message CreateLikedPaperRequest {
   // The like to create: every field is output only, so the body is `{}`.
   LikedPaper liked_paper = 1 [(google.api.field_behavior) = REQUIRED];
-  // The bare arXiv ID of a paper Lab stored (a query parameter), e.g. `2609.35773`.
+  // The resource ID of the new like (a query parameter): the bare arXiv ID of a paper Lab stored, e.g.
+  // `2609.35773`, with an old-style ID's `/` written as `~` (`hep-th~9901001`); an ID with `/` is
+  // INVALID_ARGUMENT. The answer's name is `likedPapers/<liked_paper_id>`.
   string liked_paper_id = 2 [(google.api.field_behavior) = REQUIRED];
   // The idempotency key (AIP-155), a query parameter; see LabUiService.
   string request_id = 3 [
@@ -430,9 +437,10 @@ message CreateLikedPaperRequest {
 
 // Input of ListSeeds.
 message ListSeedsRequest {
-  // At most this many seeds. Lab answers every seed (at most SEEDS_MAX, 50) on one page.
+  // At most this many seeds (AIP-158): 0 means SEEDS_MAX (50, so one page holds every seed), and a larger
+  // value is read as 50.
   int32 page_size = 1 [(google.api.field_behavior) = OPTIONAL];
-  // The previous page's `next_page_token` (always empty today).
+  // The previous page's `next_page_token`.
   string page_token = 2 [(google.api.field_behavior) = OPTIONAL];
 }
 
@@ -485,15 +493,17 @@ message GetSettingsRequest {
 }
 
 // Input of UpdateSettings.
-// (-- api-linter: core::0134::request-mask-required=disabled
-//     aip.dev/not-precedent: the settings are one small form saved as a whole, every editable field
-//     REQUIRED; a field mask would add a partial-update path the UI never uses. --)
 message UpdateSettingsRequest {
-  // The whole editable set; the output-only fields are ignored.
+  // The new values: the fields `update_mask` names (each REQUIRED one must be present), or every editable
+  // field without a mask. Output-only fields are ignored.
   Settings settings = 1 [(google.api.field_behavior) = REQUIRED];
   // The idempotency key (AIP-155), a query parameter; see LabUiService.
   string request_id = 2 [
     (google.api.field_info).format = UUID4,
     (google.api.field_behavior) = OPTIONAL
   ];
+  // AIP-134: the Settings fields to replace (a query parameter, `update_mask=send_mode,neuron_cap`). Absent,
+  // empty or `*` replaces every editable field; an unknown field is INVALID_ARGUMENT, and output-only fields
+  // are ignored.
+  google.protobuf.FieldMask update_mask = 3 [(google.api.field_behavior) = OPTIONAL];
 }

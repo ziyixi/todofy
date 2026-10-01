@@ -26,7 +26,7 @@ describe('Ops', () => {
     // The 24 h and 7 d counters are windows over the real clock.
     await h.run(Date.now());
     const card = (await h.sql<{ paper_id: string }>('SELECT paper_id FROM deck_cards ORDER BY position LIMIT 1'))[0];
-    expect((await h.mutate('POST', '/api/v1/decks/2026-09-30:decide', { request_id: op(), base_version: 0, paper_id: card?.paper_id, decision: 'like' })).status).toBe(200);
+    expect((await h.mutate('POST', '/api/v1/decks/2026-09-30:decide', { request_id: op(), etag: '0', paper_id: card?.paper_id, decision: 'like' })).status).toBe(200);
     const after = await h.ops('status');
     expect(validate(schema, 'OpsStatus', after.ok)).toEqual([]);
     const counters = (after.ok as { counters: Record<string, number> }).counters;

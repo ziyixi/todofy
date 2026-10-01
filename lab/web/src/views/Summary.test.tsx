@@ -78,9 +78,9 @@ describe('end of deck', () => {
     const server = new FakeServer(cards(3))
     const soon = new Date(Date.now() + 100).toISOString()
     server.sendScript = [
-      sendStatus({ state: 'pending', tasks_total: 3, tasks_created: 1, next_poll_time: soon, update_time: '2026-09-30T12:00:01Z' }),
-      sendStatus({ state: 'pending', tasks_total: 3, tasks_created: 2, next_poll_time: soon, update_time: '2026-09-30T12:00:04Z' }),
-      sendStatus({ state: 'created', tasks_total: 3, tasks_created: 3, update_time: '2026-09-30T12:00:07Z' }),
+      sendStatus({ state: 'pending', total_task_count: 3, created_task_count: 1, next_poll_time: soon, update_time: '2026-09-30T12:00:01Z' }),
+      sendStatus({ state: 'pending', total_task_count: 3, created_task_count: 2, next_poll_time: soon, update_time: '2026-09-30T12:00:04Z' }),
+      sendStatus({ state: 'created', total_task_count: 3, created_task_count: 3, update_time: '2026-09-30T12:00:07Z' }),
     ]
     const { user } = await finished(server)
     await user.click(sendButton())
@@ -95,8 +95,8 @@ describe('end of deck', () => {
   it('retries a partly failed send with the frozen payload and never duplicates', async () => {
     const server = new FakeServer(cards(3))
     server.sendScript = [
-      sendStatus({ state: 'failed', tasks_total: 3, tasks_created: 2, update_time: '2026-09-30T12:00:01Z' }),
-      sendStatus({ state: 'created', tasks_total: 3, tasks_created: 3, update_time: '2026-09-30T12:00:05Z' }),
+      sendStatus({ state: 'failed', total_task_count: 3, created_task_count: 2, update_time: '2026-09-30T12:00:01Z' }),
+      sendStatus({ state: 'created', total_task_count: 3, created_task_count: 3, update_time: '2026-09-30T12:00:05Z' }),
     ]
     const { user } = await finished(server)
     await user.click(sendButton())
@@ -123,7 +123,7 @@ describe('end of deck', () => {
   it('keeps the confirm step open when Todofy is paused and nothing was recorded', async () => {
     const server = new FakeServer(cards(3))
     server.sendScript = [
-      sendStatus({ state: 'paused', recorded: false, frozen: false, error_code: 'todoist_paused', tasks_created: 0 }),
+      sendStatus({ state: 'paused', recorded: false, frozen: false, error_code: 'todoist_paused', created_task_count: 0 }),
       sendStatus({ state: 'created', update_time: '2026-09-30T12:01:00Z' }),
     ]
     const { user } = await finished(server)
@@ -138,7 +138,7 @@ describe('end of deck', () => {
 
   it('reports a recorded pause as handed over', async () => {
     const server = new FakeServer(cards(3))
-    server.sendScript = [sendStatus({ state: 'paused', recorded: true, error_code: 'maintenance', tasks_created: 0, next_poll_time: undefined })]
+    server.sendScript = [sendStatus({ state: 'paused', recorded: true, error_code: 'maintenance', created_task_count: 0, next_poll_time: undefined })]
     const { user } = await finished(server)
     await user.click(sendButton())
     await waitFor(() => expect(status()).toHaveTextContent('已交给 Todofy，等它恢复后会自动创建（Todofy 维护中）'))
@@ -146,7 +146,7 @@ describe('end of deck', () => {
 
   it('shows why a send was rejected', async () => {
     const server = new FakeServer(cards(3))
-    server.sendScript = [sendStatus({ state: 'rejected', recorded: false, frozen: false, error_code: 'daily_limit', tasks_created: 0 })]
+    server.sendScript = [sendStatus({ state: 'rejected', recorded: false, frozen: false, error_code: 'daily_limit', created_task_count: 0 })]
     const { user } = await finished(server)
     await user.click(sendButton())
     await waitFor(() => expect(status()).toHaveTextContent('没有发送：今天发送次数已达上限'))
@@ -155,7 +155,7 @@ describe('end of deck', () => {
 
   it('offers a safe retry when the outcome is unknown', async () => {
     const server = new FakeServer(cards(3))
-    server.sendScript = [sendStatus({ state: 'unknown', tasks_created: 0, next_poll_time: undefined }), sendStatus({ state: 'created', update_time: '2026-09-30T12:02:00Z' })]
+    server.sendScript = [sendStatus({ state: 'unknown', created_task_count: 0, next_poll_time: undefined }), sendStatus({ state: 'created', update_time: '2026-09-30T12:02:00Z' })]
     const { user } = await finished(server)
     await user.click(sendButton())
     await waitFor(() => expect(status()).toHaveTextContent('结果未知：重试不会重复创建'))
@@ -190,7 +190,7 @@ describe('end of deck', () => {
     await user.click(screen.getByRole('button', { name: '喜欢' }))
     await screen.findByRole('heading', { name: '3 篇看完了 · 喜欢 3 · 不喜欢 0' })
     await settled()
-    server.sendScript = [sendStatus({ generation: 2, intent_id: 'deck-2026-09-30-g2', item_count: 1, tasks_total: 2, tasks_created: 2, update_time: '2026-09-30T13:00:00Z' })]
+    server.sendScript = [sendStatus({ generation: 2, intent_id: 'deck-2026-09-30-g2', item_count: 1, total_task_count: 2, created_task_count: 2, update_time: '2026-09-30T13:00:00Z' })]
     const again = await screen.findByRole('button', { name: '补发新增的 1 篇' })
     expect(screen.getByTestId('send-preview')).toHaveTextContent('「论文雷达 2026-09-30（补发）· 1 篇」')
     await user.click(again)
@@ -290,7 +290,7 @@ describe('end of deck', () => {
 
   it('says a send created nothing without calling it partial, and 稍后再说 leaves without wiping the deck', async () => {
     const server = new FakeServer(cards(3))
-    server.sendScript = [sendStatus({ state: 'failed', tasks_total: 3, tasks_created: 0, error_code: 'todoist_rejected', update_time: '2026-09-30T12:00:01Z' })]
+    server.sendScript = [sendStatus({ state: 'failed', total_task_count: 3, created_task_count: 0, error_code: 'todoist_rejected', update_time: '2026-09-30T12:00:01Z' })]
     const { user } = await finished(server)
     await user.click(sendButton())
     await waitFor(() => expect(status()).toHaveTextContent('发送失败：没有创建任务（Todoist 拒绝了请求）'))

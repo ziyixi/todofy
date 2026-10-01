@@ -21,7 +21,7 @@ const deck = cards(4)
 const [a, b, c] = deck.map(idOf) as [string, string, string, string]
 
 function state(overrides: Omit<MessageInitShape<typeof DeckStateSchema>, '$typeName'> = {}): DeckState {
-  return create(DeckStateSchema, { deck: 'decks/2026-09-30', version: 1, counts: { total: 4 }, nextPosition: 1, ...overrides })
+  return create(DeckStateSchema, { deck: 'decks/2026-09-30', version: 1, etag: '1', counts: { cardCount: 4 }, nextPosition: 1, ...overrides })
 }
 
 let n = 0

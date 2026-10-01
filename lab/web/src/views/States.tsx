@@ -25,7 +25,7 @@ export function OlderDecks({ decks }: { decks: readonly DeckPointer[] }) {
     <div className="older-decks">
       {decks.map((deck) => (
         <Link key={deck.deck} to={{ view: 'deck', day: dayOf(deck.deck) }} className="chip-link">
-          {formatDay(dayOf(deck.deck))} 还剩 {deck.total - deck.decided} 篇 <ChevronRight size={16} aria-hidden="true" />
+          {formatDay(dayOf(deck.deck))} 还剩 {deck.cardCount - deck.decidedCount} 篇 <ChevronRight size={16} aria-hidden="true" />
         </Link>
       ))}
     </div>

@@ -240,8 +240,8 @@ export class LabState extends DurableObject<Env> {
     return this.serial('owner', () => owner.removeSeed(this.ownerDeps(), opId, paperId, Date.now()));
   }
 
-  async putSettings(opId: string, settings: Settings): Promise<OwnerResult<SettingsResponse>> {
-    const result = await this.serial('owner', () => owner.putSettings(this.ownerDeps(), opId, settings, Date.now()));
+  async putSettings(opId: string, patch: Partial<Settings>): Promise<OwnerResult<SettingsResponse>> {
+    const result = await this.serial('owner', () => owner.putSettings(this.ownerDeps(), opId, patch, Date.now()));
     if (result.ok) await this.wake();
     return result;
   }

@@ -76,12 +76,13 @@ export function useDeckSession(day: string): DeckSession {
   }, [client, day])
 
   const pending = model?.pending
-  const baseVersion = model?.server.version
+  // AIP-154: each operation is sent on the etag of the state the previous answer returned.
+  const etag = model?.server.etag
   useEffect(() => {
     const op = pending?.[0]
-    if (!op || baseVersion === undefined || inflight.current === op.op_id) return
+    if (!op || etag === undefined || inflight.current === op.op_id) return
     inflight.current = op.op_id
-    const request = { name: deckName(day), requestId: op.op_id, baseVersion }
+    const request = { name: deckName(day), requestId: op.op_id, etag }
     const run = async (): Promise<DeckState> => {
       const response =
         op.kind === 'decide'
@@ -116,7 +117,7 @@ export function useDeckSession(day: string): DeckSession {
         }
         void client.invalidateQueries({ queryKey: ['summary', day] })
       })
-  }, [pending, baseVersion, day, client, notify, resync])
+  }, [pending, etag, day, client, notify, resync])
 
   const enqueue = useCallback((op: LocalOp) => dispatch({ type: 'enqueue', op }), [])
   const effective = useMemo(() => (model ? simulate(model) : null), [model])

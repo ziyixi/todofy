@@ -6,7 +6,7 @@ import type { Env } from '../src/env.ts';
 import { SettingsSchema } from '@ziyixi/proto/lab/ui/v1/home_pb';
 import { RpcError } from '@ziyixi/proto/rpc-status';
 import { fromWire, WireJsonError } from '@ziyixi/proto/wire-json';
-import { settingsOf } from '../src/api.ts';
+import { settingsPatchOf } from '../src/api.ts';
 
 const env = (vars: Partial<Record<keyof Env, string>>) => vars as unknown as Env;
 
@@ -68,7 +68,10 @@ describe('settings', () => {
       send_mode: 'separate',
     };
     const read = (wire: unknown) => fromWire(SettingsSchema, wire, { strict: true }).message;
-    expect(settingsOf(read(good))).toEqual({ categories: ['cs.IR', 'cs.CL'], lambda: 0.5, neuron_cap: 1200, tldr_model: '@cf/qwen/qwen3-30b-a3b-fp8', ingest_paused: false, send_mode: 'separate' });
+    expect(settingsPatchOf(read(good), '*')).toEqual({ categories: ['cs.IR', 'cs.CL'], lambda: 0.5, neuron_cap: 1200, tldr_model: '@cf/qwen/qwen3-30b-a3b-fp8', ingest_paused: false, send_mode: 'separate' });
+    // AIP-134: a mask replaces only the fields it names; output-only fields in it are ignored.
+    expect(settingsPatchOf(read(good), ['send_mode', 'neuron_ceiling', 'name'])).toEqual({ send_mode: 'separate' });
+    expect(settingsPatchOf(read(good), ['dislike_weight', 'ingest_paused'])).toEqual({ lambda: 0.5, ingest_paused: false });
     // What the transcoder's strict read refuses (BAD_REQUEST before any handler runs).
     for (const bad of [{ ...good, extra: 1 }, { ...good, neuron_cap: 1.5 }, { ...good, ingest_paused: 'no' }, { ...good, send_mode: 'bulk' }, { ...good, categories: undefined }]) {
       expect(() => read(JSON.parse(JSON.stringify(bad))), JSON.stringify(bad)).toThrow(WireJsonError);
@@ -83,8 +86,11 @@ describe('settings', () => {
       { ...good, neuron_cap: -1 },
       { ...good, summary_model: '@cf/meta/llama-3.1-70b-instruct' },
     ]) {
-      expect(() => settingsOf(read(bad)), JSON.stringify(bad)).toThrow(RpcError);
+      expect(() => settingsPatchOf(read(bad), '*'), JSON.stringify(bad)).toThrow(RpcError);
     }
+    // A value rule applies to a masked field only: an unmasked invalid value is not replaced, so not checked.
+    expect(settingsPatchOf(read({ ...good, dislike_weight: 1.5 }), ['send_mode'])).toEqual({ send_mode: 'separate' });
+    expect(() => settingsPatchOf(read({ ...good, dislike_weight: 1.5 }), ['dislike_weight'])).toThrow(RpcError);
   });
 });
 

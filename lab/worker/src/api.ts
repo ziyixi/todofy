@@ -3,7 +3,9 @@
  * (proto/ts/http-transcoder.ts) from src/http.ts after authentication. A handler validates what the IDL
  * cannot (value rules, limits.ts), reads D1 for the views or hands the mutation to LabState in one RPC (Workers
  * Free: 10 ms of CPU per request), and maps Lab's internal records (model.ts) to the API's messages. Errors are
- * RpcErrors with an ErrorReason (errors.proto); REASONS gives each its google.rpc.Code and its copy.
+ * RpcErrors with a reason of lab.ui.v1.ErrorReason or common.errors.v1.CommonReason; REASONS gives each its
+ * google.rpc.Code and its copy. Only a failed call to a dependency (D1, LabState) is UNAVAILABLE (`dependency`);
+ * anything else a handler throws is a bug, answered INTERNAL by the transcoder.
  */
 import { create, type MessageInitShape } from '@ziyixi/proto/protobuf';
 import { timestampFromDate, type Timestamp } from '@ziyixi/proto/protobuf/wkt';
@@ -22,6 +24,7 @@ import {
   type Send as SendMessage,
   type UndoTarget as UndoTargetMessage,
 } from '@ziyixi/proto/lab/ui/v1/deck_pb';
+import type { CommonReason } from '@ziyixi/proto/common/errors/v1/errors_pb';
 import type { ErrorReason } from '@ziyixi/proto/lab/ui/v1/errors_pb';
 import { BuildPhase, GuardLevel, Notice, PipelineStatusSchema, SettingsSchema, TodaySchema, type Settings as SettingsMessage } from '@ziyixi/proto/lab/ui/v1/home_pb';
 import {
@@ -37,7 +40,10 @@ import {
 } from '@ziyixi/proto/lab/ui/v1/lab_ui_service_pb';
 import { LikedPaperSchema, Seed_State, SeedSchema } from '@ziyixi/proto/lab/ui/v1/library_pb';
 import { AnnounceType, Decision as DecisionValue, PaperSchema } from '@ziyixi/proto/lab/ui/v1/paper_pb';
+import { updatePaths } from '@ziyixi/proto/field-mask';
+import { FilterError, parseLiteralFilter } from '@ziyixi/proto/filter';
 import type { ServiceHandlers, ShapeOf } from '@ziyixi/proto/http-transcoder';
+import { decodePageToken, encodePageToken, PageTokenError } from '@ziyixi/proto/page-token';
 import { Code, errorDetail, RpcError, type ErrorDetail } from '@ziyixi/proto/rpc-status';
 import { EmptySchema } from '@ziyixi/proto/protobuf/wkt';
 import { isArxivId, paperKey, bareId } from './arxiv.ts';
@@ -45,7 +51,7 @@ import { isDay } from './config.ts';
 import { CATEGORY_SETTING_RE, decodeCursor, deckView, readDeck, readLiked, readLikedPaper, readSeeds, readSettings, sendRowFrom, summaryView, type SendDbRow } from './db.ts';
 import type { Env } from './env.ts';
 import { pollable, SEND_MODES, sendStatus } from './intent.ts';
-import { CATEGORIES_MAX, DECK_VERSION_MAX, LIKED_FILTER_MAX, LIKED_PAGE, SEED_INPUT_MAX, SEEDS_MAX } from './limits.ts';
+import { CATEGORIES_MAX, DECK_VERSION_MAX, LIKED_FILTER_LITERALS_MAX, LIKED_FILTER_MAX, LIKED_PAGE, SEED_INPUT_MAX, SEEDS_MAX } from './limits.ts';
 import type * as model from './model.ts';
 import { TLDR_MODELS } from './models.ts';
 import { settingsResponse, type DeckMutationInput, type OwnerResult } from './owner.ts';
@@ -56,7 +62,8 @@ export interface ApiContext {
   readonly env: Env;
 }
 
-type Reason = Exclude<keyof typeof ErrorReason, 'UNSPECIFIED'>;
+/** An ErrorInfo reason Lab answers: its own (lab.ui.v1.ErrorReason) or one every API shares (CommonReason). */
+type Reason = Exclude<keyof typeof ErrorReason | keyof typeof CommonReason, 'UNSPECIFIED'>;
 
 /**
  * Each reason's code (errors.proto lists the same), its developer message and its user-facing copy (the
@@ -71,6 +78,7 @@ export const REASONS: Readonly<Record<Reason, { readonly code: Code; readonly me
   NOT_FOUND: { code: Code.NOT_FOUND, message: 'no such resource', zh: '找不到该资源' },
   METHOD_NOT_ALLOWED: { code: Code.UNIMPLEMENTED, message: 'this method is not allowed on this path', zh: '不支持该请求方法' },
   UNAVAILABLE: { code: Code.UNAVAILABLE, message: 'the service is unavailable; repeat the request', zh: '服务暂时不可用，请稍后再试' },
+  INTERNAL: { code: Code.INTERNAL, message: 'internal error', zh: '服务出错了，请稍后刷新页面' },
   DECK_NOT_FOUND: { code: Code.NOT_FOUND, message: 'no ready deck for that day', zh: '找不到这组卡片' },
   DECK_CHANGED: { code: Code.ABORTED, message: 'the deck changed since base_version', zh: '这组卡片已在其他设备上改动' },
   ALREADY_DECIDED: { code: Code.ALREADY_EXISTS, message: 'the card is decided already', zh: '这张卡片已经选过了' },
@@ -116,10 +124,17 @@ export function resourceIdOf(key: string): string {
   return (bareId(key) ?? key).replace('/', '~');
 }
 
+/**
+ * The paper key of `likedPapers/{id}` or `seeds/{id}`: BAD_REQUEST unless {id} is a resource ID (no `/`, the
+ * old-style ID's `/` written as `~`) of an arXiv ID. A `/` in {id} (sent as %2F) is refused, so one paper has
+ * exactly one resource name.
+ */
 function keyOfResource(name: string, collection: 'likedPapers' | 'seeds'): string {
   const prefix = `${collection}/`;
-  const id = name.startsWith(prefix) ? name.slice(prefix.length).replace('~', '/') : '';
-  return isArxivId(id) ? paperKey(id) : bad();
+  const id = name.startsWith(prefix) ? name.slice(prefix.length) : '';
+  if (id.includes('/')) bad();
+  const arxiv = id.replace('~', '/');
+  return isArxivId(arxiv) ? paperKey(arxiv) : bad();
 }
 
 /** The op ID of a mutation: its request_id (the transcoder checked and lower-cased it), else a fresh one. */
@@ -202,12 +217,25 @@ function undoMessage(undo: model.UndoTarget): MessageInitShape<typeof DeckStateS
     : { kind: UndoKind.RESTART, clearedCount: undo.cleared };
 }
 
+/** AIP-154: the etag of a deck state. Opaque to clients; Lab writes the version's decimal digits. */
+export function etagOf(version: number): string {
+  return String(version);
+}
+
+/** The version a deck mutation's `etag` names; BAD_REQUEST for a string Lab never wrote. */
+function versionOfEtag(etag: string): number {
+  const version = /^(0|[1-9][0-9]{0,6})$/.test(etag) ? Number(etag) : -1;
+  return version >= 0 && version <= DECK_VERSION_MAX ? version : bad();
+}
+
 export function deckStateMessage(state: model.DeckState): DeckStateMessage {
+  const { total, decided, liked, disliked } = state.counts;
   return create(DeckStateSchema, {
     deck: `decks/${state.deck_id}`,
+    etag: etagOf(state.version),
     version: state.version,
     decisions: Object.fromEntries(Object.entries(state.decisions).map(([paper, decision]) => [paper, DECISIONS[decision]])),
-    counts: { ...state.counts },
+    counts: { cardCount: total, decidedCount: decided, likedCount: liked, dislikedCount: disliked },
     nextPosition: state.next_position ?? undefined,
     finishTime: time(state.finished_at),
     undo: undoMessage(state.undo),
@@ -223,8 +251,8 @@ export function sendMessage(deckId: string, send: model.SendStatus): SendMessage
     state: SEND_STATES[send.state],
     recorded: send.recorded,
     itemCount: send.items,
-    tasksTotal: send.tasks_total,
-    tasksCreated: send.tasks_created,
+    totalTaskCount: send.tasks_total,
+    createdTaskCount: send.tasks_created,
     errorCode: send.error_code === null ? SendErrorCode.UNSPECIFIED : SEND_ERRORS[send.error_code],
     frozen: send.frozen,
     nextPollTime: time(send.poll_after),
@@ -305,7 +333,7 @@ const NOTICES = { cap_hit: Notice.CAP_HIT, feed_stale: Notice.FEED_STALE, paused
 const KINDS = { ranked: DeckKind.RANKED, explore: DeckKind.EXPLORE } as const satisfies Record<model.DeckKind, DeckKind>;
 
 function pointerMessage(pointer: model.DeckPointer) {
-  return { deck: `decks/${pointer.deck_id}`, kind: KINDS[pointer.kind], total: pointer.total, decided: pointer.decided, finished: pointer.finished };
+  return { deck: `decks/${pointer.deck_id}`, kind: KINDS[pointer.kind], cardCount: pointer.total, decidedCount: pointer.decided, finished: pointer.finished };
 }
 
 // ---- LabState ---------------------------------------------------------------------------------------------------
@@ -314,8 +342,11 @@ function lab(env: Env): DurableObjectStub<LabState> {
   return env.LAB.get(env.LAB.idFromName(LAB_OBJECT));
 }
 
-/** Any failure of the Durable Object call is UNAVAILABLE (the request may be repeated with its request_id). */
-async function callLab<T>(fn: () => Promise<T>): Promise<T> {
+/**
+ * A call to a dependency (D1, or LabState over its stub): any failure is UNAVAILABLE, which the client may
+ * repeat (with the same request_id). Only these calls are wrapped, so a bug in Lab's own code stays INTERNAL.
+ */
+async function dependency<T>(fn: () => Promise<T>): Promise<T> {
   try {
     return await fn();
   } catch (error) {
@@ -326,7 +357,7 @@ async function callLab<T>(fn: () => Promise<T>): Promise<T> {
 
 /** An OwnerResult's body, or its failure as the reason of the same name (DECK_CHANGED carries the current state). */
 async function owned<T>(fn: () => Promise<OwnerResult<T>>): Promise<T> {
-  const result = (await callLab(fn as () => Promise<unknown>)) as OwnerResult<T>;
+  const result = (await dependency(fn as () => Promise<unknown>)) as OwnerResult<T>;
   if (result.ok) return result.body;
   const reason = result.code.toUpperCase();
   const details = result.state === undefined ? [] : [errorDetail(DeckStateSchema, deckStateMessage(result.state))];
@@ -337,46 +368,70 @@ function deckMutation(day: string, input: DeckMutationInput, env: Env): Promise<
   return owned(() => lab(env).mutateDeck(day, input) as Promise<OwnerResult<model.DeckMutationResponse>>);
 }
 
-function baseVersion(value: number): number {
-  return value >= 0 && value <= DECK_VERSION_MAX ? value : bad();
-}
-
 function paperIdOf(value: string): string {
   return bareId(value) === null ? bad() : value;
 }
 
+/** Each editable Settings field (by its proto name) as the stored setting it replaces, after its value rule. */
+const SETTINGS_FIELDS = {
+  categories: (s: SettingsMessage): Partial<model.Settings> => {
+    const categories = s.categories;
+    const valid = categories.length >= 1 && categories.length <= CATEGORIES_MAX && categories.every((c) => CATEGORY_SETTING_RE.test(c)) && new Set(categories).size === categories.length;
+    return valid ? { categories: [...categories] } : bad();
+  },
+  dislike_weight: (s: SettingsMessage): Partial<model.Settings> => (s.dislikeWeight >= 0 && s.dislikeWeight <= 1 ? { lambda: s.dislikeWeight } : bad()),
+  neuron_cap: (s: SettingsMessage): Partial<model.Settings> => (s.neuronCap >= 0 ? { neuron_cap: s.neuronCap } : bad()),
+  summary_model: (s: SettingsMessage): Partial<model.Settings> =>
+    (TLDR_MODELS as readonly string[]).includes(s.summaryModel) ? { tldr_model: s.summaryModel as model.Settings['tldr_model'] } : bad(),
+  ingest_paused: (s: SettingsMessage): Partial<model.Settings> => ({ ingest_paused: s.ingestPaused }),
+  send_mode: (s: SettingsMessage): Partial<model.Settings> => ({ send_mode: sendModeOf(s.sendMode) }),
+} as const;
+
 /**
- * The editable settings of an UpdateSettings request after the value rules the IDL cannot express (1 to
- * CATEGORIES_MAX distinct categories, λ in 0-1, a known model); BAD_REQUEST otherwise. LabState refuses a cap
- * above the ceiling.
+ * The stored settings an UpdateSettings request replaces (AIP-134): the editable fields its mask names, or all
+ * of them without one, each after the value rule the IDL cannot express (1 to CATEGORIES_MAX distinct
+ * categories, λ in 0-1, a known model); BAD_REQUEST otherwise. A masked output-only field (`name`,
+ * `neuron_ceiling`, `summary_models`) is ignored; the transcoder refused unknown paths and checked that every
+ * masked REQUIRED field is present. LabState refuses a cap above the ceiling.
  */
-export function settingsOf(settings: SettingsMessage): model.Settings {
-  const categories = settings.categories;
-  const valid =
-    categories.length >= 1 &&
-    categories.length <= CATEGORIES_MAX &&
-    categories.every((c) => CATEGORY_SETTING_RE.test(c)) &&
-    new Set(categories).size === categories.length &&
-    settings.dislikeWeight >= 0 &&
-    settings.dislikeWeight <= 1 &&
-    settings.neuronCap >= 0 &&
-    (TLDR_MODELS as readonly string[]).includes(settings.summaryModel);
-  if (!valid) bad();
-  return {
-    categories: [...categories],
-    lambda: settings.dislikeWeight,
-    neuron_cap: settings.neuronCap,
-    tldr_model: settings.summaryModel as model.Settings['tldr_model'],
-    ingest_paused: settings.ingestPaused,
-    send_mode: sendModeOf(settings.sendMode),
-  };
+export function settingsPatchOf(settings: SettingsMessage, mask: '*' | readonly string[]): Partial<model.Settings> {
+  const names = mask === '*' ? (Object.keys(SETTINGS_FIELDS) as (keyof typeof SETTINGS_FIELDS)[]) : mask.filter((path) => Object.hasOwn(SETTINGS_FIELDS, path));
+  return Object.assign({}, ...names.map((name) => SETTINGS_FIELDS[name as keyof typeof SETTINGS_FIELDS](settings))) as Partial<model.Settings>;
+}
+
+/** The literals of a ListLikedPapers filter (proto/ts/filter.ts); BAD_REQUEST when it is outside the subset. */
+function filterLiterals(filter: string): string[] {
+  if (filter.length > LIKED_FILTER_MAX) bad();
+  try {
+    return parseLiteralFilter(filter, LIKED_FILTER_LITERALS_MAX);
+  } catch (error) {
+    if (error instanceof FilterError) bad();
+    throw error;
+  }
+}
+
+/** The cursor of an AIP-158 page token made for `parameters`; BAD_REQUEST for any other string. */
+function cursorOf<T>(token: string, parameters: Readonly<Record<string, string>>, read: (cursor: unknown) => T | null): T | null {
+  if (token === '') return null;
+  try {
+    return read(decodePageToken(token, parameters)) ?? bad();
+  } catch (error) {
+    if (error instanceof PageTokenError) bad();
+    throw error;
+  }
+}
+
+/** page_size of a list (AIP-158): 0 means `max`, larger values are read as `max`, negative ones are BAD_REQUEST. */
+function pageSize(value: number, max: number): number {
+  if (value < 0) bad();
+  return value === 0 ? max : Math.min(value, max);
 }
 
 // ---- the handlers -------------------------------------------------------------------------------------------------
 
 export const handlers: ServiceHandlers<ShapeOf<typeof LabUiService>, ApiContext> = {
   async getToday(_request, { env }) {
-    const today = await callLab(() => lab(env).today() as Promise<model.TodayResponse>);
+    const today = await dependency(() => lab(env).today() as Promise<model.TodayResponse>);
     return create(TodaySchema, {
       name: 'today',
       deck: today.deck === null ? undefined : pointerMessage(today.deck),
@@ -389,13 +444,13 @@ export const handlers: ServiceHandlers<ShapeOf<typeof LabUiService>, ApiContext>
   },
 
   async getPipelineStatus(_request, { env }) {
-    const status = await callLab(() => lab(env).statusView() as Promise<model.StatusResponse>);
+    const status = await dependency(() => lab(env).statusView() as Promise<model.StatusResponse>);
     return create(PipelineStatusSchema, {
       name: 'pipelineStatus',
-      ingestedLastDay: status.counters.ingested_24h,
-      rankedLastDay: status.counters.ranked_24h,
-      likedLastWeek: status.counters.liked_7d,
-      decidedLastWeek: status.counters.decided_7d,
+      ingestedLastDayCount: status.counters.ingested_24h,
+      rankedLastDayCount: status.counters.ranked_24h,
+      likedLastWeekCount: status.counters.liked_7d,
+      decidedLastWeekCount: status.counters.decided_7d,
       neuronsToday: status.counters.neurons_today,
       neuronCap: status.counters.neuron_cap,
       lastFetchTime: time(status.last_fetch_at),
@@ -407,7 +462,8 @@ export const handlers: ServiceHandlers<ShapeOf<typeof LabUiService>, ApiContext>
   },
 
   async getDeck(request, { env }) {
-    const bundle = await readDeck(env.DB, dayOf(request.name));
+    const day = dayOf(request.name);
+    const bundle = await dependency(() => readDeck(env.DB, day));
     if (bundle === null || bundle.deck.ready_at === null) throw labError('DECK_NOT_FOUND');
     const deck = deckView(bundle);
     return create(DeckSchema, {
@@ -431,7 +487,7 @@ export const handlers: ServiceHandlers<ShapeOf<typeof LabUiService>, ApiContext>
     const input: DeckMutationInput = {
       kind: 'decide',
       op_id: opOf(request.requestId),
-      base_version: baseVersion(request.baseVersion),
+      base_version: versionOfEtag(request.etag),
       paper_id: paperIdOf(request.paperId),
       decision: decisionOf(request.decision),
     };
@@ -441,7 +497,7 @@ export const handlers: ServiceHandlers<ShapeOf<typeof LabUiService>, ApiContext>
 
   async undoDeck(request, { env }) {
     const day = dayOf(request.name);
-    const result = await deckMutation(day, { kind: 'undo', op_id: opOf(request.requestId), base_version: baseVersion(request.baseVersion) }, env);
+    const result = await deckMutation(day, { kind: 'undo', op_id: opOf(request.requestId), base_version: versionOfEtag(request.etag) }, env);
     // A stored response of an older build may lack `applied`; the state is what the UI adopts.
     const undone = result.applied.kind === 'undo' ? undoTargetMessage(result.applied.undone) : undefined;
     return create(UndoDeckResponseSchema, { state: deckStateMessage(result.state), undone });
@@ -449,7 +505,7 @@ export const handlers: ServiceHandlers<ShapeOf<typeof LabUiService>, ApiContext>
 
   async restartDeck(request, { env }) {
     const day = dayOf(request.name);
-    const result = await deckMutation(day, { kind: 'restart', op_id: opOf(request.requestId), base_version: baseVersion(request.baseVersion) }, env);
+    const result = await deckMutation(day, { kind: 'restart', op_id: opOf(request.requestId), base_version: versionOfEtag(request.etag) }, env);
     return create(RestartDeckResponseSchema, { state: deckStateMessage(result.state), clearedCount: result.applied.kind === 'restart' ? result.applied.cleared : 0 });
   },
 
@@ -478,32 +534,36 @@ export const handlers: ServiceHandlers<ShapeOf<typeof LabUiService>, ApiContext>
 
   async getDeckSummary(request, { env }) {
     const day = dayOf(request.name, 'summary');
-    const [bundle, settings] = await Promise.all([readDeck(env.DB, day), readSettings(env.DB)]);
+    const [bundle, settings] = await dependency(() => Promise.all([readDeck(env.DB, day), readSettings(env.DB)]));
     if (bundle === null || bundle.deck.ready_at === null) throw labError('DECK_NOT_FOUND');
     return summaryMessage(summaryView(bundle, settings.send_mode));
   },
 
   async getSend(request, { env }) {
     const day = dayOf(request.name, 'send');
-    const row = await env.DB.prepare('SELECT * FROM sends WHERE deck_id = ? ORDER BY generation DESC LIMIT 1').bind(day).first<SendDbRow>();
+    const row = await dependency(() => env.DB.prepare('SELECT * FROM sends WHERE deck_id = ? ORDER BY generation DESC LIMIT 1').bind(day).first<SendDbRow>());
     if (row === null) throw labError('NOT_FOUND');
     const send = sendRowFrom(row);
     // A send waiting for Todofy is refreshed by LabState once its poll time has come.
     if (pollable(send) && (send.next_poll_at === null || send.next_poll_at <= Date.now())) {
-      const result = await callLab(() => lab(env).pollSend(day) as Promise<OwnerResult<model.SendStatus | null>>);
+      const result = await dependency(() => lab(env).pollSend(day) as Promise<OwnerResult<model.SendStatus | null>>);
       if (result.ok && result.body !== null) return sendMessage(day, result.body);
     }
     return sendMessage(day, sendStatus(send));
   },
 
   async listLikedPapers(request, { env }) {
-    if (request.pageSize < 0 || request.filter.length > LIKED_FILTER_MAX) bad();
-    const cursor = decodeCursor(request.pageToken);
-    if (request.pageToken !== '' && cursor === null) bad();
-    const page = await readLiked(env.DB, cursor, request.filter === '' ? null : request.filter, request.pageSize === 0 ? LIKED_PAGE : request.pageSize);
-    return create(ListLikedPapersResponseSchema, { likedPapers: page.papers.map(likedMessage), nextPageToken: page.next_cursor ?? '' });
+    const size = pageSize(request.pageSize, LIKED_PAGE);
+    const literals = filterLiterals(request.filter);
+    // AIP-158: a token continues only the list it was made for (page_size may change between pages).
+    const parameters = { filter: request.filter };
+    const cursor = cursorOf(request.pageToken, parameters, (c) => (typeof c === 'string' ? decodeCursor(c) : null));
+    const page = await dependency(() => readLiked(env.DB, cursor, literals, size));
+    const next = page.next_cursor === null ? '' : encodePageToken(page.next_cursor, parameters);
+    return create(ListLikedPapersResponseSchema, { likedPapers: page.papers.map(likedMessage), nextPageToken: next });
   },
 
+  /** AIP-135: NOT_FOUND unless the paper is liked (a dislike is another resource's state and stays). */
   async deleteLikedPaper(request, { env }) {
     const paper = keyOfResource(request.name, 'likedPapers');
     const op = opOf(request.requestId);
@@ -511,19 +571,27 @@ export const handlers: ServiceHandlers<ShapeOf<typeof LabUiService>, ApiContext>
     return create(EmptySchema);
   },
 
+  /** AIP-133: the answer's name is likedPapers/<liked_paper_id>, so the ID is the resource ID (`~`, never `/`). */
   async createLikedPaper(request, { env }) {
     const paper = keyOfResource(`likedPapers/${request.likedPaperId}`, 'likedPapers');
     const op = opOf(request.requestId);
     await owned(() => lab(env).feedback(op, paper, 'like', true) as Promise<OwnerResult<model.FeedbackResponse>>);
-    const liked = await readLikedPaper(env.DB, paper);
-    if (liked === null) throw labError('UNAVAILABLE');
+    const liked = await dependency(() => readLikedPaper(env.DB, paper));
+    // Another request removed the like between the two calls: the like this request made is gone.
+    if (liked === null) throw labError('NOT_FOUND');
     return create(LikedPaperSchema, likedMessage(liked));
   },
 
   async listSeeds(request, { env }) {
-    if (request.pageSize < 0 || request.pageToken !== '') bad();
-    const seeds = await readSeeds(env.DB);
-    return create(ListSeedsResponseSchema, { seeds: seeds.map(seedMessage) });
+    const size = pageSize(request.pageSize, SEEDS_MAX);
+    // Keyset cursor [added_at, paper_id] in the list's order; every seed is read (at most SEEDS_MAX).
+    const cursor = cursorOf(request.pageToken, {}, (c) => (Array.isArray(c) && c.length === 2 && typeof c[0] === 'number' && typeof c[1] === 'string' ? ([c[0], c[1]] as const) : null));
+    const seeds = await dependency(() => readSeeds(env.DB));
+    const rest = cursor === null ? seeds : seeds.filter((s) => { const at = Date.parse(s.added_at); return at < cursor[0] || (at === cursor[0] && s.paper_id > cursor[1]); });
+    const page = rest.slice(0, size);
+    const last = page[page.length - 1];
+    const next = rest.length > size && last !== undefined ? encodePageToken([Date.parse(last.added_at), last.paper_id], {}) : '';
+    return create(ListSeedsResponseSchema, { seeds: page.map(seedMessage), nextPageToken: next });
   },
 
   async importSeeds(request, { env }) {
@@ -534,6 +602,7 @@ export const handlers: ServiceHandlers<ShapeOf<typeof LabUiService>, ApiContext>
     return create(ImportSeedsResponseSchema, { seeds: seeds.seeds.map(seedMessage) });
   },
 
+  /** AIP-135: NOT_FOUND when there is no such seed. */
   async deleteSeed(request, { env }) {
     const paper = keyOfResource(request.name, 'seeds');
     const op = opOf(request.requestId);
@@ -542,12 +611,12 @@ export const handlers: ServiceHandlers<ShapeOf<typeof LabUiService>, ApiContext>
   },
 
   async getSettings(_request, { env }) {
-    return settingsMessage(await settingsResponse({ db: env.DB, env }));
+    return settingsMessage(await dependency(() => settingsResponse({ db: env.DB, env })));
   },
 
   async updateSettings(request, { env }) {
-    const next = settingsOf(request.settings ?? bad());
+    const patch = settingsPatchOf(request.settings ?? bad(), updatePaths(request.updateMask));
     const op = opOf(request.requestId);
-    return settingsMessage(await owned(() => lab(env).putSettings(op, next) as Promise<OwnerResult<model.SettingsResponse>>));
+    return settingsMessage(await owned(() => lab(env).putSettings(op, patch) as Promise<OwnerResult<model.SettingsResponse>>));
   },
 };

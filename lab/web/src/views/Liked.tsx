@@ -2,6 +2,7 @@
 import { useInfiniteQuery, useMutation } from '@tanstack/react-query'
 import { ExternalLink, FileText, Search } from 'lucide-react'
 import { useEffect, useId, useState } from 'react'
+import { quoteLiteral } from '@ziyixi/proto/filter'
 import type { LikedPaper } from '@ziyixi/proto/lab/ui/v1/library_pb'
 import { LIKED_FILTER_MAX } from '../../../worker/src/limits.ts'
 import { errorMessage, lab, withRetry } from '../api/client'
@@ -24,7 +25,8 @@ export function LikedView() {
   const q = useDebounced(text.trim(), 300)
   const liked = useInfiniteQuery({
     queryKey: ['liked', q],
-    queryFn: ({ pageParam }) => lab.listLikedPapers({ pageToken: pageParam, filter: q }),
+    // The box searches for its text as one phrase: an AIP-160 quoted literal, whatever the owner typed.
+    queryFn: ({ pageParam }) => lab.listLikedPapers({ pageToken: pageParam, filter: quoteLiteral(q) }),
     initialPageParam: '',
     getNextPageParam: (last) => (last.nextPageToken === '' ? undefined : last.nextPageToken),
   })

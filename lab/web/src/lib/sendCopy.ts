@@ -51,12 +51,12 @@ export function sendCopy(status: Send): SendCopy {
     case Send_State.PENDING:
       return {
         tone: 'busy',
-        text: status.tasksTotal > 0 ? `Todofy 正在创建：${status.tasksCreated} / ${status.tasksTotal}` : 'Todofy 正在创建…',
+        text: status.totalTaskCount > 0 ? `Todofy 正在创建：${status.createdTaskCount} / ${status.totalTaskCount}` : 'Todofy 正在创建…',
         actions: [],
         settling: true,
       }
     case Send_State.CREATED:
-      return { tone: 'ok', text: `已发送：Todoist 里新增了 ${status.tasksCreated || status.tasksTotal} 个任务`, actions: ['done'], settling: false }
+      return { tone: 'ok', text: `已发送：Todoist 里新增了 ${status.createdTaskCount || status.totalTaskCount} 个任务`, actions: ['done'], settling: false }
     case Send_State.DUPLICATE:
       return { tone: 'ok', text: '这组已经发送过，不会重复创建', actions: ['done'], settling: false }
     case Send_State.PAUSED:
@@ -68,7 +68,7 @@ export function sendCopy(status: Send): SendCopy {
         // A retry while Todofy is paused: nothing was re-queued (docs/design.md §9).
         return {
           tone: 'warn',
-          text: `Todofy 暂停中（${reason ?? '已暂停'}），这次重试没有进行：已创建 ${status.tasksCreated} / ${status.tasksTotal}，恢复后再重试`,
+          text: `Todofy 暂停中（${reason ?? '已暂停'}），这次重试没有进行：已创建 ${status.createdTaskCount} / ${status.totalTaskCount}，恢复后再重试`,
           actions: ['retry', 'later'],
           settling: false,
         }
@@ -76,9 +76,9 @@ export function sendCopy(status: Send): SendCopy {
       return {
         tone: 'danger',
         text:
-          status.tasksCreated === 0
+          status.createdTaskCount === 0
             ? `发送失败：没有创建任务${reason ? `（${reason}）` : ''}`
-            : `部分失败：已创建 ${status.tasksCreated} / ${status.tasksTotal}${reason ? `（${reason}）` : ''}`,
+            : `部分失败：已创建 ${status.createdTaskCount} / ${status.totalTaskCount}${reason ? `（${reason}）` : ''}`,
         actions: ['retry', 'later'],
         settling: false,
       }

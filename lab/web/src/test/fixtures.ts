@@ -69,7 +69,7 @@ export function likedPaper(n: number, overrides: Wire = {}): LikedPaper {
 export function today(overrides: Wire = {}, kind = 'ranked', total = 4): Today {
   return read(TodaySchema, {
     name: 'today',
-    deck: { deck: `decks/${DAY}`, kind, total },
+    deck: { deck: `decks/${DAY}`, kind, card_count: total },
     next_fetch_time: '2026-10-01T06:30:00Z',
     ...overrides,
   })
@@ -84,8 +84,8 @@ export function sendStatus(overrides: Wire = {}): Send {
     state: 'created',
     recorded: true,
     item_count: 2,
-    tasks_total: 3,
-    tasks_created: 3,
+    total_task_count: 3,
+    created_task_count: 3,
     frozen: true,
     update_time: '2026-09-30T12:00:00Z',
     ...overrides,

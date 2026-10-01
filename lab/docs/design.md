@@ -236,12 +236,13 @@ older unfinished decks (≤ 7 days) are offered separately and never merged.
 - `finished_at` is set when every card has a decision and cleared when an undo/restart reopens one.
 
 **Idempotency and concurrency.** Every mutation carries `op_id` (the API's `request_id`, a UUID v4 from the
-browser; without one the Worker makes one up) and, for deck mutations, `base_version`. The DO serialises mutations per deck (an in-memory promise chain; D1
+browser; without one the Worker makes one up) and, for deck mutations, the `etag` of the state they were made on
+(AIP-154; Lab writes the deck's `version`, which the DO compares). The DO serialises mutations per deck (an in-memory promise chain; D1
 calls can interleave otherwise) and checks `owner_ops` first: a known `op_id` returns its stored
 response unchanged (a retried request after a lost response is harmless). A replay also re-derives
 LabState's mirrors from D1 (`labels` for the deck's cards or the one paper from `feedback`; `seed_ids`
 from `seeds`): the first attempt's D1 batch may have committed while the call failed before the mirror
-was written, and ranking must not miss that like, dislike or seed for good. A stale `base_version` is
+was written, and ranking must not miss that like, dislike or seed for good. A stale `etag` is
 409 `DECK_CHANGED` with the current `DeckState`, which the UI adopts (another tab or device). Each
 mutation is at most 6 D1 statements in one batch; a decision costs ≈ 25 rows written, well inside D1
 Free (100,000 rows written per day).
@@ -250,7 +251,8 @@ Free (100,000 rows written per day).
 
 The owner API is `lab.ui.v1` ([`proto/lab/ui/v1/`](../../proto/lab/ui/v1/), since 2026-10-01): AIP resources
 and methods with `google.api.http` bindings under `/api/v1`, JSON in the wire profile (snake_case,
-lower-case enum names), errors as google.rpc.Status with the reasons of `errors.proto`. The Worker serves
+lower-case enum names), errors as google.rpc.Status with the reasons of `errors.proto` and the shared
+`common/errors/v1/errors.proto`. The Worker serves
 it through the shared transcoder (`proto/ts/http-transcoder.ts`, handlers in `worker/src/api.ts`); the UI
 calls it through the shared typed client (`proto/ts/http-client.ts`, transport in
 `web/src/api/client.ts`); both are driven by the same generated descriptors
@@ -263,26 +265,27 @@ are at most 16 KiB.
 | --- | --- | --- |
 | `GetToday` | `GET /api/v1/today` | newest ready deck and progress, `building` phase, next fetch, cold start, older unfinished decks (`GET /api/today`) |
 | `GetDeck` | `GET /api/v1/decks/{day}` | the frozen cards (paper, 简介, because, links), `DeckState`, the latest send (`GET /api/decks/:day`) |
-| `DecideDeck` | `POST /api/v1/decks/{day}:decide` | `{request_id, base_version, paper_id, decision}` → `{state}` (`…/decide`) |
-| `UndoDeck` | `POST /api/v1/decks/{day}:undo` | `{request_id, base_version}` → `{state, undone}` (what was taken back, for the animation) |
-| `RestartDeck` | `POST /api/v1/decks/{day}:restart` | `{request_id, base_version}` → `{state, cleared_count}` |
+| `DecideDeck` | `POST /api/v1/decks/{day}:decide` | `{request_id, etag, paper_id, decision}` → `{state}` (`…/decide`) |
+| `UndoDeck` | `POST /api/v1/decks/{day}:undo` | `{request_id, etag}` → `{state, undone}` (what was taken back, for the animation) |
+| `RestartDeck` | `POST /api/v1/decks/{day}:restart` | `{request_id, etag}` → `{state, cleared_count}` |
 | `SnoozeDeck` | `POST /api/v1/decks/{day}:snooze` | 暂不发送 → `{snooze_time}` (`…/later`) |
 | `GetDeckSummary` | `GET /api/v1/decks/{day}/summary` | liked cards with `excluded`/`sent_generation`, sendable count, the latest send |
 | `ExcludePaper` | `POST /api/v1/decks/{day}/summary:excludePaper` | `{request_id, paper_id, excluded}` → `DeckSummary` (a flag, not a decision event: no version bump) |
 | `SendDeck` | `POST /api/v1/decks/{day}:send` | `{request_id, mode}` → `{send}` (§9) |
 | `GetSend` | `GET /api/v1/decks/{day}/send` | the latest send; asks Todofy first when its poll time has come (≥ 3 s apart) |
-| `ListLikedPapers` | `GET /api/v1/likedPapers?page_token=&filter=` | liked papers, newest first, 50 per page, `filter` matched against the title (`GET /api/liked`) |
-| `DeleteLikedPaper` | `DELETE /api/v1/likedPapers/{id}?request_id=` | 取消喜欢 (`POST /api/feedback` with `label: null`) |
+| `ListLikedPapers` | `GET /api/v1/likedPapers?page_size=&page_token=&filter=` | liked papers, newest first, 50 per page (opaque page tokens bound to the filter); `filter` is the AIP-160 subset of `proto/ts/filter.ts`, every literal in the title (the UI sends the search box as one quoted phrase) (`GET /api/liked`) |
+| `DeleteLikedPaper` | `DELETE /api/v1/likedPapers/{id}?request_id=` | 取消喜欢; `NOT_FOUND` unless the paper is liked (a dislike stays) (`POST /api/feedback` with `label: null`) |
 | `CreateLikedPaper` | `POST /api/v1/likedPapers?liked_paper_id={id}` | 恢复喜欢; ALREADY_LIKED when liked (`label: 'like'`) |
-| `ListSeeds`, `ImportSeeds`, `DeleteSeed` | `GET /api/v1/seeds`, `POST /api/v1/seeds:import`, `DELETE /api/v1/seeds/{id}` | seeds (≤ 50) with their resolve state; import takes pasted IDs or links (`/api/seeds`) |
-| `GetSettings`, `UpdateSettings` | `GET`, `PATCH /api/v1/settings` | categories, λ (`dislike_weight`), cap (≤ ceiling), 简介 model (allow-list), ingest pause, default send mode; replaced as a whole (`/api/settings`) |
+| `ListSeeds`, `ImportSeeds`, `DeleteSeed` | `GET /api/v1/seeds`, `POST /api/v1/seeds:import`, `DELETE /api/v1/seeds/{id}` | seeds (≤ 50, one page unless `page_size` is smaller) with their resolve state; import takes pasted IDs or links; deleting a seed that is not there is `NOT_FOUND` (`/api/seeds`) |
+| `GetSettings`, `UpdateSettings` | `GET`, `PATCH /api/v1/settings?update_mask=` | categories, λ (`dislike_weight`), cap (≤ ceiling), 简介 model (allow-list), ingest pause, default send mode; the masked fields are replaced (AIP-134; all of them without a mask), each its own D1 row, so the UI sends only what changed (`/api/settings`) |
 | `GetPipelineStatus` | `GET /api/v1/pipelineStatus` | counters, neurons today/cap, last fetch, guard; no UI page reads it (`GET /api/status`) |
 
 `{id}` of a liked paper or seed is the bare arXiv ID, with an old-style ID's `/` written as `~`
-(`hep-th~9901001`). Every mutation takes a `request_id` (AIP-155, the `op_id` of the DO's op log). Errors:
+(`hep-th~9901001`); an ID with `/` is `BAD_REQUEST`. Every mutation takes a `request_id` (AIP-155, the `op_id` of the DO's op log). Errors:
 `{"error": {"code": <HTTP status>, "message", "status", "details": [ErrorInfo, LocalizedMessage,
 RequestInfo, …]}}`; the reasons are the old error codes in upper case (`DECK_CHANGED` carries the current
-`DeckState` as a detail), and the UI branches on them. The routes before `lab.ui.v1` answer 410
+`DeckState` as a detail), and the UI branches on them. A failed D1 or LabState call is `UNAVAILABLE` (the UI
+repeats it once with the same `request_id`); anything else unexpected is a bug, `INTERNAL`, never repeated. The routes before `lab.ui.v1` answer 410
 `reload_required` in the old envelope `{error: {code, message, request_id}}`, so a tab still running the old
 UI tells the owner to reload; that answer goes after one release (2026-11-01).
 

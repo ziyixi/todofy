@@ -62,7 +62,7 @@ describe('a day at cold start', () => {
     expect(h.requests[0]?.userAgent).toBe(USER_AGENT);
 
     const today = await h.api.getToday({ name: 'today' });
-    expect(today.deck).toMatchObject({ deck: DECK, kind: DeckKind.EXPLORE, total: 20, decided: 0, finished: false });
+    expect(today.deck).toMatchObject({ deck: DECK, kind: DeckKind.EXPLORE, cardCount: 20, decidedCount: 0, finished: false });
     expect(today.building).toBeUndefined();
     expect(today.nextFetchTime === undefined ? undefined : iso(timestampMs(today.nextFetchTime))).toBe(iso(nextFetchSlot(end, 6)));
 
@@ -74,13 +74,13 @@ describe('a day at cold start', () => {
     expect(deck.cards.every((c) => c.brief === '本文提出一种合成的检索方法。作者在玩具数据集上评估。结果显示召回率有所提升。')).toBe(true);
     expect(deck.cards.every((c) => c.because === undefined)).toBe(true);
     expect(deck.cards[0]?.paper?.abstractUri).toMatch(/^https:\/\/arxiv\.org\/abs\/2609\.\d{5}$/);
-    expect(deck.state).toMatchObject({ version: 0, nextPosition: 1, counts: { total: 20, decided: 0 } });
+    expect(deck.state).toMatchObject({ version: 0, etag: '0', nextPosition: 1, counts: { cardCount: 20, decidedCount: 0 } });
 
     const calls = await h.aiCalls();
     expect(calls.filter((c) => c.model === '@cf/baai/bge-m3').reduce((n, c) => n + c.count, 0)).toBe(40);
     expect(calls.filter((c) => c.model === '@cf/ibm-granite/granite-4.0-h-micro')).toHaveLength(20);
     const status = await h.api.getPipelineStatus({ name: 'pipelineStatus' });
-    expect(status.ingestedLastDay).toBe(40);
+    expect(status.ingestedLastDayCount).toBe(40);
     expect(status.neuronsToday).toBeGreaterThan(0);
     expect(status.neuronsToday).toBeLessThan(100);
 

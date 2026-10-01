@@ -8,6 +8,7 @@
  * answered with the first response.
  */
 import { createHttpClient, HttpEncodeError, HttpResponseError, RpcStatusError, type HttpCall } from '@ziyixi/proto/http-client'
+import type { CommonReason } from '@ziyixi/proto/common/errors/v1/errors_pb'
 import { DeckStateSchema, type DeckState } from '@ziyixi/proto/lab/ui/v1/deck_pb'
 import type { ErrorReason } from '@ziyixi/proto/lab/ui/v1/errors_pb'
 import { LabUiService } from '@ziyixi/proto/lab/ui/v1/lab_ui_service_pb'
@@ -15,8 +16,8 @@ import { parseStatus, readDetail } from '@ziyixi/proto/rpc-status'
 
 export const CSRF_HEADER = 'X-CSRF-Token'
 
-/** An ErrorInfo reason of lab.ui.v1 (errors.proto). */
-export type Reason = Exclude<keyof typeof ErrorReason, 'UNSPECIFIED'>
+/** An ErrorInfo reason Lab answers: lab.ui.v1's own (errors.proto) or one every API shares (CommonReason). */
+export type Reason = Exclude<keyof typeof ErrorReason | keyof typeof CommonReason, 'UNSPECIFIED'>
 /** Codes the browser produces itself when no Status is available. */
 export type ClientCode = 'NETWORK_ERROR' | 'BAD_RESPONSE'
 
@@ -40,8 +41,14 @@ export class ApiError extends Error {
     this.state = state
   }
 
-  /** Worth repeating with the same request_id: the request may never have arrived, or the server hiccupped. */
+  /**
+   * Worth repeating with the same request_id: the request may never have arrived (a network error), a
+   * dependency failed (UNAVAILABLE), or something between answered that is not the API (BAD_RESPONSE, e.g. a
+   * proxy's 502). Never INTERNAL (a bug answers the same way again) or BAD_REQUEST (an input the client could
+   * not even encode, or one the server refused).
+   */
   get transient(): boolean {
+    if (this.reason === 'INTERNAL' || this.reason === 'BAD_REQUEST') return false
     return this.status === 0 || this.status >= 500 || this.reason === 'BAD_RESPONSE'
   }
 }
@@ -83,7 +90,8 @@ export function toApiError(error: unknown): ApiError {
     const state = reason === 'DECK_CHANGED' ? (readDetail(status, DeckStateSchema) ?? null) : null
     return new ApiError(status.httpStatus, reason, message, status.requestId ?? null, state)
   }
-  if (error instanceof HttpEncodeError) return new ApiError(0, 'BAD_REQUEST', '输入有误')
+  // Nothing was sent: the same input fails the same way, so it is a 400, never a network failure to retry.
+  if (error instanceof HttpEncodeError) return new ApiError(400, 'BAD_REQUEST', '输入有误')
   if (error instanceof HttpResponseError) return unreadable(error.httpStatus)
   return unreadable(0)
 }

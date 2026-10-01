@@ -202,4 +202,6 @@ Where `web/` settles a detail this spec left open:
   `/seeds`, `/settings`. The Worker's single-page-application fallback serves them.
 - **Two request bodies added to `worker/src/api-types.ts`.** `DELETE /api/seeds` takes `{op_id, paper_id}`
   and `PUT /api/settings` takes `{op_id, …Settings}` (design.md §8). Since `lab.ui.v1` (2026-10-01) they are
-  `DeleteSeed` (`DELETE /api/v1/seeds/{id}`, no body) and `UpdateSettings` (`PATCH /api/v1/settings`).
+  `DeleteSeed` (`DELETE /api/v1/seeds/{id}`, no body) and `UpdateSettings` (`PATCH /api/v1/settings`,
+  `update_mask` naming the fields the owner changed, so a save never undoes another tab's change to other
+  fields).

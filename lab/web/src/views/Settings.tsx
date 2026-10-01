@@ -30,6 +30,21 @@ export function parseCategories(text: string): { readonly ok: readonly string[];
   return { ok, bad }
 }
 
+/** The editable Settings fields (proto names) whose value differs between `before` and `after`, in field order. */
+export function changedPaths(before: Settings, after: Settings): string[] {
+  const same: Readonly<Record<string, (a: Settings, b: Settings) => boolean>> = {
+    categories: (a, b) => a.categories.join('\n') === b.categories.join('\n'),
+    dislike_weight: (a, b) => a.dislikeWeight === b.dislikeWeight,
+    neuron_cap: (a, b) => a.neuronCap === b.neuronCap,
+    summary_model: (a, b) => a.summaryModel === b.summaryModel,
+    ingest_paused: (a, b) => a.ingestPaused === b.ingestPaused,
+    send_mode: (a, b) => a.sendMode === b.sendMode,
+  }
+  return Object.entries(same)
+    .filter(([, equal]) => !equal(before, after))
+    .map(([path]) => path)
+}
+
 const MODEL_NAMES: Readonly<Record<string, string>> = {
   '@cf/ibm-granite/granite-4.0-h-micro': 'Granite 4.0 Micro（默认，最省额度）',
   '@cf/meta/llama-3.2-1b-instruct': 'Llama 3.2 1B',
@@ -74,8 +89,9 @@ function SettingsForm({ initial }: { initial: Settings }) {
   const valid = capOk && categoriesOk
 
   const save = useMutation({
-    mutationFn: (next: Settings) => {
-      const request = { settings: next, requestId: newOpId() }
+    mutationFn: ({ next, paths }: { next: Settings; paths: readonly string[] }) => {
+      // AIP-134: the fields that changed, by update_mask; nothing changed saves the whole form (no mask).
+      const request = { settings: next, requestId: newOpId(), ...(paths.length > 0 ? { updateMask: { paths: [...paths] } } : {}) }
       return withRetry(() => lab.updateSettings(request))
     },
     onSuccess: (next) => {
@@ -89,7 +105,8 @@ function SettingsForm({ initial }: { initial: Settings }) {
   function onSubmit(event: FormEvent) {
     event.preventDefault()
     if (!valid) return
-    save.mutate({ ...initial, categories: [...parsed.ok], summaryModel: model, neuronCap: capValue, sendMode: mode, ingestPaused: paused, dislikeWeight: lambda })
+    const next = { ...initial, categories: [...parsed.ok], summaryModel: model, neuronCap: capValue, sendMode: mode, ingestPaused: paused, dislikeWeight: lambda }
+    save.mutate({ next, paths: changedPaths(initial, next) })
   }
 
   return (

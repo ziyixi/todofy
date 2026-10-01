@@ -3,6 +3,7 @@
  * old-style arXiv IDs, and the internal records as lab.ui.v1 messages in the wire JSON profile.
  */
 import { describe, expect, it } from 'vitest';
+import { CommonReason } from '@ziyixi/proto/common/errors/v1/errors_pb';
 import { ErrorReason } from '@ziyixi/proto/lab/ui/v1/errors_pb';
 import { DeckStateSchema, SendSchema } from '@ziyixi/proto/lab/ui/v1/deck_pb';
 import { TRANSCODER_REASONS } from '@ziyixi/proto/http-transcoder';
@@ -11,15 +12,28 @@ import { toWire } from '@ziyixi/proto/wire-json';
 import { deckStateMessage, REASONS, resourceIdOf, sendMessage } from '../src/api.ts';
 
 describe('reasons', () => {
-  it('cover every ErrorReason and every reason of the transcoder but INTERNAL (Lab answers UNAVAILABLE)', () => {
-    const declared = Object.keys(ErrorReason).filter((name) => name !== 'UNSPECIFIED');
+  it("cover exactly Lab's ErrorReason and the shared CommonReason, the transcoder's reasons among them", () => {
+    const declared = [...Object.keys(ErrorReason), ...Object.keys(CommonReason)].filter((name) => name !== 'UNSPECIFIED');
     expect(Object.keys(REASONS).sort()).toEqual(declared.sort());
-    for (const reason of Object.values(TRANSCODER_REASONS).filter((r) => r !== 'INTERNAL')) expect(REASONS).toHaveProperty(reason);
+    expect(new Set(declared).size).toBe(declared.length); // no name means two things in one domain
+    for (const reason of Object.values(TRANSCODER_REASONS)) expect(REASONS).toHaveProperty(reason);
   });
 
-  it('keep the HTTP statuses errors.proto documents', () => {
+  it('keep the HTTP statuses the two errors.proto files document', () => {
     const http = Object.fromEntries(Object.entries(REASONS).map(([reason, { code }]) => [reason, HTTP_STATUS[codeName(code)]]));
-    expect(http).toMatchObject({ UNAUTHORIZED: 401, CSRF_FAILED: 403, BAD_REQUEST: 400, DECK_NOT_FOUND: 404, DECK_CHANGED: 409, ALREADY_DECIDED: 409, NOTHING_TO_UNDO: 400, UNAVAILABLE: 503, ALREADY_LIKED: 409 });
+    expect(http).toMatchObject({
+      UNAUTHORIZED: 401,
+      CSRF_FAILED: 403,
+      BAD_REQUEST: 400,
+      NOT_FOUND: 404,
+      DECK_NOT_FOUND: 404,
+      DECK_CHANGED: 409,
+      ALREADY_DECIDED: 409,
+      NOTHING_TO_UNDO: 400,
+      UNAVAILABLE: 503,
+      INTERNAL: 500,
+      ALREADY_LIKED: 409,
+    });
   });
 });
 
@@ -44,9 +58,10 @@ describe('records as messages', () => {
     expect(JSON.stringify(toWire(DeckStateSchema, state))).toBe(
       JSON.stringify({
         deck: 'decks/2026-09-30',
+        etag: '3',
         version: 3,
         decisions: { 'arxiv:2609.00001': 'like', 'arxiv:2609.00002': 'dislike' },
-        counts: { total: 20, decided: 2, liked: 1, disliked: 1 },
+        counts: { card_count: 20, decided_count: 2, liked_count: 1, disliked_count: 1 },
         next_position: 3,
         undo: { kind: 'decide', paper_id: 'arxiv:2609.00002', decision: 'dislike' },
       }),

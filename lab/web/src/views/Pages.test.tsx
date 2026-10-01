@@ -26,11 +26,11 @@ describe('今日 states', () => {
   it('done for today: counts, send state, next batch, older deck chip and links', async () => {
     const server = new FakeServer(
       cards(2),
-      today({ older_unfinished_decks: [{ deck: 'decks/2026-09-29', kind: 'ranked', total: 20, decided: 12, finished: false }], notice: 'cap_hit' }, 'ranked', 2),
+      today({ older_unfinished_decks: [{ deck: 'decks/2026-09-29', kind: 'ranked', card_count: 20, decided_count: 12, finished: false }], notice: 'cap_hit' }, 'ranked', 2),
     )
     server.decideElsewhere('arxiv:2609.10001', 'like')
     server.decideElsewhere('arxiv:2609.10002', 'dislike')
-    server.send = sendStatus({ state: 'created', tasks_created: 2 })
+    server.send = sendStatus({ state: 'created', created_task_count: 2 })
     server.sentGeneration.set('arxiv:2609.10001', 1)
     server.install()
     renderApp('/')
@@ -97,10 +97,15 @@ describe('已喜欢', () => {
     const created = server.mutations().find((call) => call.method === 'POST')
     expect(created?.path).toMatch(/^\/api\/v1\/likedPapers\?liked_paper_id=2609\.10001&request_id=[0-9a-f-]{36}$/)
     expect(created?.body).toEqual({})
+    // The box's text is one quoted literal (AIP-160), so words that are operators stay text.
     await user.type(screen.getByRole('searchbox', { name: '按标题搜索' }), 'seven')
-    await waitFor(() => expect(server.calls.some((call) => call.path === '/api/v1/likedPapers?filter=seven')).toBe(true))
+    await waitFor(() => expect(server.calls.some((call) => call.path === `/api/v1/likedPapers?filter=${encodeURIComponent('"seven"')}`)).toBe(true))
     expect(await screen.findByText('第 7 篇的简介。')).toBeInTheDocument()
     expect(screen.queryByText('第 3 篇的简介。')).not.toBeInTheDocument()
+    await user.clear(screen.getByRole('searchbox', { name: '按标题搜索' }))
+    await user.type(screen.getByRole('searchbox', { name: '按标题搜索' }), 'OR "x')
+    await waitFor(() => expect(server.calls.some((call) => call.path === `/api/v1/likedPapers?filter=${encodeURIComponent('"OR \\"x"')}`)).toBe(true))
+    expect(await screen.findByText('没有找到标题匹配的论文。')).toBeInTheDocument()
   })
 })
 
@@ -142,9 +147,10 @@ describe('设置', () => {
     await user.click(screen.getByRole('radio', { name: '每篇单独一条' }))
     await user.click(screen.getByRole('button', { name: '保存' }))
     expect(await screen.findByText('已保存，下一次排序生效')).toBeInTheDocument()
+    // AIP-134: only what changed is sent, named by update_mask, so another tab's change to other fields stays.
     const patch = server.mutations().find((call) => call.method === 'PATCH')
-    expect(patch?.path).toMatch(/^\/api\/v1\/settings\?request_id=[0-9a-f-]{36}$/)
-    expect(patch?.body).toMatchObject({ neuron_cap: 1500, send_mode: 'separate', categories: ['cs.IR', 'cs.CL', 'cs.LG'] })
-    expect(server.settings).toMatchObject({ neuronCap: 1500, neuronCeiling: 5000 })
+    expect(patch?.path).toMatch(/^\/api\/v1\/settings\?request_id=[0-9a-f-]{36}&update_mask=neuron_cap%2Csend_mode$/)
+    expect(patch?.body).toEqual({ neuron_cap: 1500, send_mode: 'separate' })
+    expect(server.settings).toMatchObject({ neuronCap: 1500, neuronCeiling: 5000, categories: ['cs.IR', 'cs.CL', 'cs.LG'] })
   })
 })

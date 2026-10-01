@@ -50,9 +50,9 @@ message DeckPointer {
   // How it was made.
   DeckKind kind = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
   // Cards in it.
-  int32 total = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
+  int32 card_count = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
   // Cards decided.
-  int32 decided = 4 [(google.api.field_behavior) = OUTPUT_ONLY];
+  int32 decided_count = 4 [(google.api.field_behavior) = OUTPUT_ONLY];
   // Every card is decided.
   bool finished = 5 [(google.api.field_behavior) = OUTPUT_ONLY];
 }
@@ -78,13 +78,13 @@ message PipelineStatus {
   // Always `pipelineStatus`.
   string name = 1 [(google.api.field_behavior) = IDENTIFIER];
   // Papers stored in the last 24 hours.
-  int32 ingested_last_day = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
+  int32 ingested_last_day_count = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
   // Papers ranked in the last 24 hours.
-  int32 ranked_last_day = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
+  int32 ranked_last_day_count = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
   // Likes in the last 7 days.
-  int32 liked_last_week = 4 [(google.api.field_behavior) = OUTPUT_ONLY];
+  int32 liked_last_week_count = 4 [(google.api.field_behavior) = OUTPUT_ONLY];
   // Decisions in the last 7 days.
-  int32 decided_last_week = 5 [(google.api.field_behavior) = OUTPUT_ONLY];
+  int32 decided_last_week_count = 5 [(google.api.field_behavior) = OUTPUT_ONLY];
   // Workers AI neurons used today (UTC); fractional, as the ledger prices each call.
   double neurons_today = 6 [(google.api.field_behavior) = OUTPUT_ONLY];
   // Today's neuron cap.
@@ -101,7 +101,8 @@ message PipelineStatus {
   string build = 12 [(google.api.field_behavior) = OUTPUT_ONLY];
 }
 
-// The owner's settings. A singleton, replaced as a whole by UpdateSettings.
+// The owner's settings. A singleton: UpdateSettings replaces the fields its update_mask names (all editable
+// fields without one).
 message Settings {
   option (google.api.resource) = {
     type: "lab.ziyixi.science/Settings"

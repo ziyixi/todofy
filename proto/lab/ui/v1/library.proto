@@ -23,7 +23,9 @@ message LikedPaper {
     plural: "likedPapers"
   };
 
-  // likedPapers/{liked_paper}, where {liked_paper} is the bare arXiv ID, e.g. `2609.35773`.
+  // likedPapers/{liked_paper}, where {liked_paper} is the bare arXiv ID, e.g. `2609.35773`. A resource ID has
+  // no `/` (AIP-122), so the `/` of an old-style ID is written as `~`: hep-th/9901001 is
+  // `likedPapers/hep-th~9901001` (proto/README.md, HTTP APIs).
   string name = 1 [(google.api.field_behavior) = IDENTIFIER];
   // The paper.
   Paper paper = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
@@ -59,7 +61,8 @@ message Seed {
     STATE_NOT_FOUND = 3;
   }
 
-  // seeds/{seed}, where {seed} is the bare arXiv ID, e.g. `2601.00042`.
+  // seeds/{seed}, where {seed} is the bare arXiv ID, e.g. `2601.00042`; an old-style ID's `/` is written as
+  // `~` (`seeds/hep-th~9901001`), as in LikedPaper.name.
   string name = 1 [(google.api.field_behavior) = IDENTIFIER];
   // The paper (`arxiv:<id>`).
   string paper_id = 2 [(google.api.field_behavior) = OUTPUT_ONLY];

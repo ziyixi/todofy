@@ -34,7 +34,7 @@ describe('the daily deck', () => {
     expect(screen.getAllByRole('article')).toHaveLength(1)
   })
 
-  it('likes with the button: optimistic, one POST with request_id and base_version, focus and announcement', async () => {
+  it('likes with the button: optimistic, one POST with request_id and etag, focus and announcement', async () => {
     const server = new FakeServer(cards(4))
     await openDeck(server)
     const user = userEvent.setup()
@@ -43,7 +43,7 @@ describe('the daily deck', () => {
     expect(screen.getByTestId('progress')).toHaveTextContent('2 / 4 篇 · 已喜欢 1')
     await waitFor(() => expect(server.mutations('decide')).toHaveLength(1))
     const body = server.mutations('decide')[0]?.body
-    expect(body).toMatchObject({ base_version: 1, paper_id: 'arxiv:2609.10001', decision: 'like' })
+    expect(body).toMatchObject({ etag: '1', paper_id: 'arxiv:2609.10001', decision: 'like' })
     expect(body?.request_id).toMatch(/^[0-9a-f-]{36}$/)
     expect(server.mutations('decide')[0]?.headers['x-csrf-token']).toBe('token-1')
     await waitFor(() => expect(liveText()).toBe(`已喜欢。第 2 篇，共 4 篇：${title(2)}`))
@@ -83,7 +83,7 @@ describe('the daily deck', () => {
     const kinds = server.mutations().map((call) => call.path.split(':').pop())
     expect(kinds).toEqual(['decide', 'decide', 'undo', 'undo', 'decide'])
     // Each request carried the version the previous response returned.
-    expect(server.mutations().map((call) => call.body?.base_version)).toEqual([1, 2, 3, 4, 5])
+    expect(server.mutations().map((call) => call.body?.etag)).toEqual(['1', '2', '3', '4', '5'])
   })
 
   it('opens arXiv with O in a new tab without a referrer', async () => {
