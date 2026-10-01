@@ -2,7 +2,7 @@
 """Decide which apps a CI run checks and deploys. Standard library only (the runner's python3).
 
 Outputs (GITHUB_OUTPUT, "true"/"false"):
-  todofy_check, mail_hero_check, dashboard_check, website_check, lab_check, flowday_check, links_check
+  todofy_check, mail_hero_check, dashboard_check, website_check, lab_check, flowday_check, links_check, watch_check
                     run that app's full checks
   contracts         run the contract tests: both sides of mail.received.v1, ops-v1 and
                     task-intent-v1, and the dashboard's ops-v1 caller tests (also on a proto/ change: the
@@ -28,17 +28,20 @@ Outputs (GITHUB_OUTPUT, "true"/"false"):
   deploys it too. The links app (links/, the short links on s.ziyixi.science) is checked and deployed since L2
   (links/docs/design.md section 11). It uses no contract and compiles in packages/edge-auth and the TypeScript proto
   runtime with proto/links/ui/, so a change to those checks and deploys it too. CHECK_ONLY (apps checked but never
-  deployed, with no "<prefix>_deploy" output) is where a new app starts, until its first deploy job; it is empty.
+  deployed, with no "<prefix>_deploy" output) is where a new app starts, until its first deploy job: it holds the
+  watch app (watch/, the web watches on watch.ziyixi.science: watch/docs/design.md section 11) until its first deploy
+  job (W2): it has no watch_deploy output. It uses no contract and compiles in packages/edge-auth and the TypeScript
+  proto runtime with proto/watch/ui/, so a change to those checks it too.
 
 proto/ (the protobuf IDL, proto/README.md) checks every app in PROTO_USERS (an app that depends on
 @ziyixi/proto or ziyixi-proto) and deploys only the apps whose bundle the changed path reaches
 (proto_deploys): PROTO_USERS[app] names the languages whose generated code and runtime the app's
-production bundles compile in ("ts": Lab's and the links app's Workers and UIs, Mail Hero's Worker and the dashboard's
-Worker (ops.v1 and the wire codec); "python": todofy-core, through the wheel
-pywrangler vendors; Todofy's gateway and UI import types only, so neither makes Todofy a "ts" user),
-PROTO_RUNTIMES maps a language's runtime and generator to that language's users, and PROTO_PACKAGES maps each proto package to
-the apps that import its generated code (lab/ui reaches Lab only, links/ui the links app only; prototest, the runtimes' fixtures,
-reaches no app). Tests, test data, the check scripts, the api-linter tool module, check configs and
+production bundles compile in ("ts": Lab's, the links app's and the watch app's Workers and UIs, Mail Hero's Worker and
+the dashboard's Worker (ops.v1 and the wire codec); "python": todofy-core, through the wheel pywrangler vendors;
+Todofy's gateway and UI import types only, so neither makes Todofy a "ts" user), PROTO_RUNTIMES maps a language's
+runtime and generator to that language's users, and PROTO_PACKAGES maps each proto package to the apps that import its
+generated code (lab/ui reaches Lab only, links/ui the links app only, watch/ui the watch app only; prototest, the
+runtimes' fixtures, reaches no app). Tests, test data, the check scripts, the api-linter tool module, check configs and
 Markdown (PROTO_NOT_BUNDLED) deploy nothing; any other proto/ path (buf.yaml, buf.lock, the toolchain
 lockfile, ensure.mjs, a package not listed yet) deploys every user (fail safe). test_proto.py derives
 PROTO_USERS and the packages' importers from the sources. It also runs Contracts. A change to a contract proto/'s
@@ -90,7 +93,7 @@ import urllib.parse
 import urllib.request
 from collections.abc import Callable, Iterable
 
-APPS = ("todofy", "mail-hero", "dashboard", "website", "lab", "flowday", "links")
+APPS = ("todofy", "mail-hero", "dashboard", "website", "lab", "flowday", "links", "watch")
 # The output key prefix of each app ("<prefix>_check", "<prefix>_deploy").
 PREFIX = {
     "todofy": "todofy",
@@ -100,11 +103,12 @@ PREFIX = {
     "lab": "lab",
     "flowday": "flowday",
     "links": "links",
+    "watch": "watch",
 }
 # Apps that are checked but never deployed by CI (no "<prefix>_deploy" output): a new app until its Worker has its
-# Cloudflare resources and a deploy job. None today: the links app left at L2 (links/docs/design.md section 11), as
-# FlowDay did at F2.
-CHECK_ONLY: set[str] = set()
+# Cloudflare resources and a deploy job. The watch app until W2 (watch/docs/design.md section 11), as the links app was
+# until L2 and FlowDay until F2.
+CHECK_ONLY: set[str] = {"watch"}
 KEYS = (
     "todofy_check",
     "mail_hero_check",
@@ -113,6 +117,7 @@ KEYS = (
     "lab_check",
     "flowday_check",
     "links_check",
+    "watch_check",
     "contracts",
     "packages",
     "infra",
@@ -136,16 +141,17 @@ DISPATCH = {
     "lab": ("lab",),
     "flowday": ("flowday",),
     "links": ("links",),
+    "watch": ("watch",),
 }
 # The website's Notion relay Worker deploys on its own (website_relay_deploy).
 RELAY = "website/relay/"
 # Apps that neither provide nor consume a contract: their own changes do not run Contracts.
-NO_CONTRACTS = {"website", "flowday", "links"}
+NO_CONTRACTS = {"website", "flowday", "links", "watch"}
 # The OpenTofu configuration (infra/README.md) and its plan-summary tool: checked here without a token; only
 # .github/workflows/infra.yml plans it against Cloudflare, and only the manually dispatched infra-apply.yml applies it.
 INFRA = ("infra/", "tools/infra-plan-summary/")
 # packages/<name>/ -> the apps whose Workers compile it in (a "file:../../packages/<name>" dependency).
-PACKAGE_USERS = {"edge-auth": ("todofy", "mail-hero", "dashboard", "lab", "flowday", "links")}
+PACKAGE_USERS = {"edge-auth": ("todofy", "mail-hero", "dashboard", "lab", "flowday", "links", "watch")}
 # The protobuf IDL (proto/README.md): app -> the languages ("ts", "python") whose generated code and runtime
 # its production bundles compile in; () for a user whose bundles take nothing from it (types only, tests
 # only). test_proto.py derives this map from the apps' manifests and sources.
@@ -156,6 +162,7 @@ PROTO_USERS: dict[str, tuple[str, ...]] = {
     "links": ("ts",),
     "mail-hero": ("ts",),
     "dashboard": ("ts",),
+    "watch": ("ts",),
 }
 # The hand-written runtimes and generators: a change reaches every user of each language listed. The wire
 # profile's own options (common/wire/v1: value rules, map order, binding arguments) are part of both runtimes:
@@ -178,6 +185,7 @@ PROTO_PACKAGES: dict[str, tuple[str, ...]] = {
     "proto/todofy/report/": ("todofy",),
     "proto/lab/ui/": ("lab",),
     "proto/links/ui/": ("links",),
+    "proto/watch/ui/": ("watch",),
     # CommonReason: Lab reads its names as types only.
     "proto/common/errors/": (),
     # ops-v1 (contracts/ops-v1): every app's Ops entrypoint and the dashboard that calls them.
@@ -239,6 +247,7 @@ CHECK_JOBS = {
     "lab_check": ("Lab checks",),
     "flowday_check": ("FlowDay checks",),
     "links_check": ("Links checks",),
+    "watch_check": ("Watch checks",),
     "contracts": ("Contracts",),
     "packages": ("Shared packages",),
     "infra": ("Infra checks",),

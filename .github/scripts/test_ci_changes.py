@@ -44,6 +44,7 @@ def expect(
     flowday_deploy=False,
     links_check=False,
     links_deploy=False,
+    watch_check=False,
 ):
     return {
         "todofy_check": todofy_check,
@@ -53,6 +54,7 @@ def expect(
         "lab_check": lab_check,
         "flowday_check": flowday_check,
         "links_check": links_check,
+        "watch_check": watch_check,
         "contracts": contracts,
         "packages": packages,
         "infra": infra,
@@ -68,19 +70,20 @@ def expect(
     }
 
 
-# Every app checked (a contracts/ or .github/ change, FlowDay and the links app included); the dashboard and Lab each
-# checked and deployed; the edge-auth apps (the website compiles in no package) are todofy and mail-hero plus EDGE_AUTH;
-# every app with the website Worker (the relay Worker is added where a test expects it).
-ALL_CHECKED = {"dashboard_check": True, "website_check": True, "lab_check": True, "flowday_check": True, "links_check": True}
+# Every app checked (a contracts/ or .github/ change, FlowDay, the links app and the watch app included); the dashboard
+# and Lab each checked and deployed; the edge-auth apps (the website compiles in no package) are todofy and mail-hero
+# plus EDGE_AUTH; every app with the website Worker (the relay Worker is added where a test expects it). The watch app
+# is checked only (ci_changes.CHECK_ONLY until W2): it has no deploy output.
+ALL_CHECKED = {"dashboard_check": True, "website_check": True, "lab_check": True, "flowday_check": True, "links_check": True, "watch_check": True}
 DASH = {"dashboard_check": True, "dashboard_deploy": True}
 LAB = {"lab_check": True, "lab_deploy": True}
 FLOWDAY = {"flowday_check": True, "flowday_deploy": True}
 LINKS = {"links_check": True, "links_deploy": True}
 ALL = {**DASH, **LAB}
 # Every app that compiles in packages/edge-auth besides Todofy and Mail Hero: the dashboard, Lab, FlowDay and the links
-# app, each checked and deployed.
-EDGE_AUTH = {**ALL, **FLOWDAY, **LINKS}
-EVERY = {**ALL, "website_check": True, "website_deploy": True, **FLOWDAY, **LINKS}
+# app, each checked and deployed, and the watch app (checked only).
+EDGE_AUTH = {**ALL, **FLOWDAY, **LINKS, "watch_check": True}
+EVERY = {**ALL, "website_check": True, "website_deploy": True, **FLOWDAY, **LINKS, "watch_check": True}
 
 
 def push(paths, ref=MAIN, last_success=BASE, ancestor=True, merge_base=BASE):
@@ -131,9 +134,9 @@ class Classify(unittest.TestCase):
                 self.assertEqual(push([path], ref=BRANCH), expect(F, F, F, F, F, **FLOWDAY))
 
     def test_every_app_but_the_check_only_ones_has_a_deploy_output(self):
-        """Each app has a checks output; each but the CHECK_ONLY ones a deploy output. None is check-only today: the
+        """Each app has a checks output; each but the CHECK_ONLY ones (the watch app until W2) a deploy output. The
         links app left CHECK_ONLY at L2 (links/docs/design.md section 11), as FlowDay did at F2."""
-        self.assertEqual(ci_changes.CHECK_ONLY, set())
+        self.assertEqual(ci_changes.CHECK_ONLY, {"watch"})
         for app in ci_changes.APPS:
             with self.subTest(app=app):
                 self.assertIn(f"{ci_changes.PREFIX[app]}_check", ci_changes.KEYS)
@@ -155,6 +158,23 @@ class Classify(unittest.TestCase):
             with self.subTest(path=path):
                 self.assertEqual(push([path]), expect(F, F, F, F, F, **LINKS))
                 self.assertEqual(push([path], ref=BRANCH), expect(F, F, F, F, F, **LINKS))
+
+    def test_watch_is_checked_alone_and_never_deployed(self):
+        """The watch app uses no contract (NO_CONTRACTS) and has no deploy job yet (until W2): its changes run only its
+        checks, on main too."""
+        for path in (
+            "watch/worker/src/pipeline.ts",
+            "watch/web/src/views/add.ts",
+            "watch/wrangler.toml",
+            "watch/deploy/deploy-vars.mjs",
+            "watch/web/package-lock.json",
+            "watch/docs/design.md",
+            "watch/README.md",
+        ):
+            with self.subTest(path=path):
+                self.assertEqual(push([path]), expect(F, F, F, F, F, watch_check=T))
+                self.assertEqual(push([path], ref=BRANCH), expect(F, F, F, F, F, watch_check=T))
+        self.assertNotIn("watch_deploy", ci_changes.KEYS)
 
     def test_task_intent_code_deploys_lab_and_todofy(self):
         """TASK_INTENT_LIMITS ship in Lab and in Todofy's gateway; the schema only in Lab (its types are generated).
@@ -200,12 +220,12 @@ class Classify(unittest.TestCase):
         self.assertEqual(push(["contracts/ops-v1/ops-v1.schema.json"]), expect(T, T, T, F, F, **ALL_CHECKED, proto=T))
         self.assertEqual(
             push(["contracts/ops-v1/validate.mjs"]),
-            expect(T, T, T, F, F, dashboard_check=T, **LAB, website_check=T, flowday_check=T, links_check=T, proto=T),
+            expect(T, T, T, F, F, dashboard_check=T, **LAB, website_check=T, flowday_check=T, links_check=T, watch_check=T, proto=T),
         )
 
     def test_contract_code_the_workers_bundle_deploys_every_app_that_bundles_it(self):
         """OPS_LIMITS and friends ship inside all three Workers, so a change must redeploy each."""
-        bundled = expect(T, T, T, T, T, **ALL, website_check=T, flowday_check=T, links_check=T, proto=T)
+        bundled = expect(T, T, T, T, T, **ALL, website_check=T, flowday_check=T, links_check=T, watch_check=T, proto=T)
         self.assertEqual(push(["contracts/ops-v1/ops-v1.ts"]), bundled)
         self.assertEqual(push(["contracts/ops-v1/ops-v1.ts", "todofy/gateway/src/ops.ts"]), bundled)
         self.assertEqual(push(["contracts/ops-v1/ops-v1.ts"], ref=BRANCH), bundled)
@@ -221,6 +241,7 @@ class Classify(unittest.TestCase):
             "website": [REPO / "website" / "src", REPO / "website" / "relay" / "src"],
             "flowday": [REPO / "flowday" / "worker" / "src", *(REPO / "flowday" / "web" / name for name in ("app", "components", "features", "lib"))],
             "links": [REPO / "links" / "worker" / "src", REPO / "links" / "web" / "src"],
+            "watch": [REPO / "watch" / "worker" / "src", REPO / "watch" / "web" / "src"],
         }
         self.assertEqual(set(roots), set(ci_changes.APPS))
         importers = {}
@@ -261,9 +282,10 @@ class Classify(unittest.TestCase):
         codecs and the generated schemas); it deploys an app only when the changed path reaches that app's bundle."""
         self.assertEqual(
             ci_changes.PROTO_USERS,
-            {"lab": ("ts",), "todofy": ("python",), "links": ("ts",), "mail-hero": ("ts",), "dashboard": ("ts",)},
+            {"lab": ("ts",), "todofy": ("python",), "links": ("ts",), "mail-hero": ("ts",), "dashboard": ("ts",), "watch": ("ts",)},
         )
-        ts, python = {"lab", "mail-hero", "dashboard", "links"}, {"todofy"}
+        # The watch app is a TypeScript user but checked only (CHECK_ONLY): it has no deploy output to set.
+        ts, python = {"lab", "mail-hero", "dashboard", "links", "watch"}, {"todofy"}
         every, none = ts | python, set()
         cases = {
             # task-intent-v1, bundled by Lab's TypeScript and todofy-core's Python.
@@ -278,6 +300,8 @@ class Classify(unittest.TestCase):
             "proto/lab/ui/v1/deck.proto": {"lab"},
             # The links app's UI API reaches only the links app.
             "proto/links/ui/v1/links_ui_service.proto": {"links"},
+            # The watch app's UI API reaches only the watch app (checked only: no deploy output yet).
+            "proto/watch/ui/v1/watch_ui_service.proto": {"watch"},
             # The TypeScript runtime and generator: every TypeScript user.
             "proto/ts/wire-json.ts": ts,
             "proto/ts/wire-rules.ts": ts,
@@ -336,6 +360,7 @@ class Classify(unittest.TestCase):
                 dashboard_deploy="dashboard" in deployed,
                 links_check=T,
                 links_deploy="links" in deployed,
+                watch_check=T,
             )
 
         for path, deployed in cases.items():
@@ -349,6 +374,8 @@ class Classify(unittest.TestCase):
         )
         self.assertEqual(ci_changes.proto_deploys("proto/ts/http-transcoder.ts"), ts)
         self.assertEqual(ci_changes.proto_deploys("proto/links/ui/v1/link.proto"), {"links"})
+        self.assertEqual(ci_changes.proto_deploys("proto/watch/ui/v1/watch.proto"), {"watch"})
+        self.assertEqual(ci_changes.proto_deploys("proto/watch/ui/v1/watch.proto"), {"watch"})
 
     def test_every_proto_package_and_runtime_is_mapped(self):
         """Each package directory under proto/ (a directory holding .proto files) is in PROTO_PACKAGES, and every
@@ -404,12 +431,12 @@ class Classify(unittest.TestCase):
             ["packages/edge-auth/docs/notes.md"],
         ):
             with self.subTest(paths=paths):
-                self.assertEqual(push(paths), expect(T, T, T, F, F, packages=T, dashboard_check=T, lab_check=T, flowday_check=T, links_check=T))
+                self.assertEqual(push(paths), expect(T, T, T, F, F, packages=T, dashboard_check=T, lab_check=T, flowday_check=T, links_check=T, watch_check=T))
         # With the package's code, or with one app, the usual rules apply.
         paths = ["packages/edge-auth/SPEC.md", "packages/edge-auth/src/csrf.ts"]
         self.assertEqual(push(paths), expect(T, T, T, T, T, packages=T, **EDGE_AUTH))
         paths = ["packages/edge-auth/SPEC.md", "dashboard/docs/design.md"]
-        self.assertEqual(push(paths), expect(T, T, T, F, F, packages=T, **DASH, lab_check=T, flowday_check=T, links_check=T))
+        self.assertEqual(push(paths), expect(T, T, T, F, F, packages=T, **DASH, lab_check=T, flowday_check=T, links_check=T, watch_check=T))
         # An unregistered package's documents are checked by every app, deployed by none.
         self.assertEqual(push(["packages/new-kit/README.md"]), expect(T, T, T, F, F, packages=T, **ALL_CHECKED))
 
@@ -428,7 +455,7 @@ class Classify(unittest.TestCase):
         ]
         self.assertEqual(
             push(paths),
-            expect(T, T, T, F, F, packages=T, infra=T, proto=T, **DASH, website_check=T, lab_check=T, flowday_check=T, links_check=T),
+            expect(T, T, T, F, F, packages=T, infra=T, proto=T, **DASH, website_check=T, lab_check=T, flowday_check=T, links_check=T, watch_check=T),
         )
 
     def test_a_package_change_with_one_app_still_deploys_every_user(self):
@@ -691,7 +718,7 @@ class RealGit(unittest.TestCase):
         expected = {**dict.fromkeys(ci_changes.KEYS, "true"), "packages": "false", "infra": "false", "proto": "false"}
         expected.update(dashboard_check="false", dashboard_deploy="false")
         expected.update(website_check="false", website_deploy="false", website_relay_deploy="false")
-        expected.update(lab_check="false", lab_deploy="false", flowday_check="false", flowday_deploy="false", links_check="false", links_deploy="false")
+        expected.update(lab_check="false", lab_deploy="false", flowday_check="false", flowday_deploy="false", links_check="false", links_deploy="false", watch_check="false")
         self.assertEqual(outputs, expected)
 
     def test_a_failed_package_run_on_main_deploys_both_apps_next_time(self):
@@ -2217,6 +2244,7 @@ class Reuse(unittest.TestCase):
             "Lab checks",
             "FlowDay checks",
             "Links checks",
+            "Watch checks",
             "Contracts",
             "Shared packages",
             "Infra checks",

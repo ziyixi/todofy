@@ -261,39 +261,42 @@ ignores a pair without `=`.
 Each app's adapter is the only place these values live: Mail Hero
 `mail-hero/cloudflare/src/native/security.ts`, Todofy `todofy/gateway/src/access.ts` and `csrf.ts`
 (`http.ts` for headers), the dashboard `dashboard/worker/src/http.ts`, Lab `lab/worker/src/http.ts`, FlowDay
-`flowday/worker/src/http.ts`, the links app `links/worker/src/auth.ts` (deployed since its step L2). On a short link
-(outside its path-scoped Access application) the links app verifies only a request that carries a token, and reads
-every failure there as anonymous; under `/_/` it maps the failures as the table below says.
+`flowday/worker/src/http.ts`, the links app `links/worker/src/auth.ts` (deployed since its step L2), the watch app
+`watch/worker/src/auth.ts` (checked, not deployed before its step W2). On a short link (outside its path-scoped Access
+application) the links app verifies only a request that carries a token, and reads every failure there as anonymous;
+under `/_/` it maps the failures as the table below says. The watch app verifies every path but `/health` (its whole
+host is behind Access), checks CSRF in its fetch handler and forwards the owner API to its Durable Object.
 
-| Parameter | Mail Hero | Todofy gateway | Dashboard `home` | Lab `lab` | FlowDay `flowday` | Links `links` |
-| --- | --- | --- | --- | --- | --- | --- |
-| `emailMatch` | `exact` | `case-insensitive` | `case-insensitive` | `case-insensitive` | `case-insensitive` | `case-insensitive` |
-| `nbfLeewaySeconds` | 0 | 60 | 60 | 60 | 60 | 60 |
-| `tokenSource` | `missing`, `first` | `use-cookie`, `last` | `use-cookie`, `last` | `use-cookie`, `last` | `use-cookie`, `last` | `use-cookie`, `last` |
-| `jwks` TTL / cooldown | 600,000 / 30,000 ms | 3,600,000 / 60,000 ms (cooldown from `JWKS_REFRESH_COOLDOWN_MS`, capped at the TTL) | 600,000 / 60,000 ms | 600,000 / 60,000 ms | 600,000 / 60,000 ms | 600,000 / 60,000 ms |
-| `loopbackIssuer` | – | local dev + `DEV_ACCESS_LOOPBACK_ISSUER` | – | – | – | – |
-| `devBypass` | `DEV_AUTH_BYPASS === 'true'`, `loopback-http`, principal `local-development`, `refuse` | local dev (`*.localhost` public host) + `DEV_AUTH_BYPASS`, `dot-localhost`, `asciiLowerCase(owner)`, `verify` | `DEV_AUTH_BYPASS === 'true'`, `loopback-http`, `asciiLowerCase(owner)`, `refuse` | same as the dashboard | same as the dashboard | same as the dashboard (`DEV_AUTH_BYPASS`; a short link only when it carries a token) |
-| CSRF key | lazy `deriveHmacKeyHkdf(CREDENTIAL_KEY, 'mail-hero', 'tokens-v1')` (also signs preview tokens and `actionHash`) | `importHmacKeyHex(CSRF_SIGNING_KEY)`, resolved first | `importHmacKeyHex(CSRF_SIGNING_KEY)`, resolved first | `importHmacKeyHex(CSRF_SIGNING_KEY)`, resolved first | `importHmacKeyHex(CSRF_SIGNING_KEY)`, resolved first | `importHmacKeyHex(CSRF_SIGNING_KEY)`, resolved first |
-| `cookieName` | `mail_hero_csrf` | `todofy_csrf` | `home_csrf` | `lab_csrf` | `flowday_csrf` | `links_csrf` |
-| `nonce`, `ttlSeconds` | `crypto.randomUUID()`, 43200 | defaults | defaults | defaults | defaults | defaults |
-| `allowedOrigins` | `[new URL(request.url).origin]` | `https://<TODOFY_PUBLIC_HOST>` (+ the request origin in local dev) | `https://<PUBLIC_HOST>` (+ the request origin when bypassed) | same as the dashboard | same as the dashboard | same as the dashboard |
-| CSP / cache | Mail Hero CSP; always `no-store` | `STRICT_CSP`; immutable for a 200 non-HTML `ASSETS` answer under `/assets/` | same as Todofy | same as Todofy | `STRICT_CSP`, with the SHA-256 of each inline script added for HTML pages; immutable for a 200 under `/_next/static/` | `STRICT_CSP`; `private, no-store` on every answer (the launcher files under `/_/assets/` bypass the Worker, `_headers`) |
+| Parameter | Mail Hero | Todofy gateway | Dashboard `home` | Lab `lab` | FlowDay `flowday` | Links `links` | Watch `watch` |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| `emailMatch` | `exact` | `case-insensitive` | `case-insensitive` | `case-insensitive` | `case-insensitive` | `case-insensitive` | `case-insensitive` |
+| `nbfLeewaySeconds` | 0 | 60 | 60 | 60 | 60 | 60 | 60 |
+| `tokenSource` | `missing`, `first` | `use-cookie`, `last` | `use-cookie`, `last` | `use-cookie`, `last` | `use-cookie`, `last` | `use-cookie`, `last` | `use-cookie`, `last` |
+| `jwks` TTL / cooldown | 600,000 / 30,000 ms | 3,600,000 / 60,000 ms (cooldown from `JWKS_REFRESH_COOLDOWN_MS`, capped at the TTL) | 600,000 / 60,000 ms | 600,000 / 60,000 ms | 600,000 / 60,000 ms | 600,000 / 60,000 ms | 600,000 / 60,000 ms |
+| `loopbackIssuer` | – | local dev + `DEV_ACCESS_LOOPBACK_ISSUER` | – | – | – | – | – |
+| `devBypass` | `DEV_AUTH_BYPASS === 'true'`, `loopback-http`, principal `local-development`, `refuse` | local dev (`*.localhost` public host) + `DEV_AUTH_BYPASS`, `dot-localhost`, `asciiLowerCase(owner)`, `verify` | `DEV_AUTH_BYPASS === 'true'`, `loopback-http`, `asciiLowerCase(owner)`, `refuse` | same as the dashboard | same as the dashboard | same as the dashboard (`DEV_AUTH_BYPASS`; a short link only when it carries a token) | same as the dashboard |
+| CSRF key | lazy `deriveHmacKeyHkdf(CREDENTIAL_KEY, 'mail-hero', 'tokens-v1')` (also signs preview tokens and `actionHash`) | `importHmacKeyHex(CSRF_SIGNING_KEY)`, resolved first | `importHmacKeyHex(CSRF_SIGNING_KEY)`, resolved first | `importHmacKeyHex(CSRF_SIGNING_KEY)`, resolved first | `importHmacKeyHex(CSRF_SIGNING_KEY)`, resolved first | `importHmacKeyHex(CSRF_SIGNING_KEY)`, resolved first | `importHmacKeyHex(CSRF_SIGNING_KEY)`, resolved first |
+| `cookieName` | `mail_hero_csrf` | `todofy_csrf` | `home_csrf` | `lab_csrf` | `flowday_csrf` | `links_csrf` | `watch_csrf` |
+| `nonce`, `ttlSeconds` | `crypto.randomUUID()`, 43200 | defaults | defaults | defaults | defaults | defaults | defaults |
+| `allowedOrigins` | `[new URL(request.url).origin]` | `https://<TODOFY_PUBLIC_HOST>` (+ the request origin in local dev) | `https://<PUBLIC_HOST>` (+ the request origin when bypassed) | same as the dashboard | same as the dashboard | same as the dashboard | same as the dashboard |
+| CSP / cache | Mail Hero CSP; always `no-store` | `STRICT_CSP`; immutable for a 200 non-HTML `ASSETS` answer under `/assets/` | same as Todofy | same as Todofy | `STRICT_CSP`, with the SHA-256 of each inline script added for HTML pages; immutable for a 200 under `/_next/static/` | `STRICT_CSP`; `private, no-store` on every answer (the launcher files under `/_/assets/` bypass the Worker, `_headers`) | same as Todofy (the UI under `/assets/`) |
 
 Failure mapping (each app's own codes and messages):
 
-| Failure | Mail Hero | Todofy | Dashboard | Lab | FlowDay | Links |
-| --- | --- | --- | --- | --- | --- | --- |
-| `not_configured` | 503 `access_not_configured` | 503 `access_not_configured` | 503 `access_not_configured` | 503 `access_not_configured` | 503 `access_not_configured` | 503 `access_not_configured` |
-| `dev_bypass_refused` | 503 `invalid_auth_configuration` | (cannot occur) | 503 `access_not_configured` | 503 `access_not_configured` | 503 `access_not_configured` | 503 `access_not_configured` |
-| `missing_token` | 401 `unauthorized` "需要通过 Cloudflare Access 登录" | 401 `unauthorized` | 401 `unauthorized` | 401 `unauthorized` | 401 `unauthorized` | 401 `unauthorized` |
-| `invalid_token` | 401 `unauthorized` "Access 登录无效或无权限" | 401 `unauthorized` | 401 `unauthorized` | 401 `unauthorized` | 401 `unauthorized` | 401 `unauthorized` |
-| `keys_unavailable` | 401, as `invalid_token` | 503 `unavailable` | 503 `unavailable` | 503 `unavailable` | 503 `unavailable` | 503 `unavailable` |
-| CSRF key missing | issue 503 `service_unavailable`; verify 403 | 503 `not_configured` | 503 `not_configured` | 503 `not_configured` | 503 `not_configured` | 503 `not_configured` |
-| CSRF failure | 403 `csrf_failed` | 403 `csrf_failed` | 403 `csrf_failed` | 403 `csrf_failed` | 403 `csrf_failed` | 403 `csrf_failed` |
+| Failure | Mail Hero | Todofy | Dashboard | Lab | FlowDay | Links | Watch |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| `not_configured` | 503 `access_not_configured` | 503 `access_not_configured` | 503 `access_not_configured` | 503 `access_not_configured` | 503 `access_not_configured` | 503 `access_not_configured` | 503 `access_not_configured` |
+| `dev_bypass_refused` | 503 `invalid_auth_configuration` | (cannot occur) | 503 `access_not_configured` | 503 `access_not_configured` | 503 `access_not_configured` | 503 `access_not_configured` | 503 `access_not_configured` |
+| `missing_token` | 401 `unauthorized` "需要通过 Cloudflare Access 登录" | 401 `unauthorized` | 401 `unauthorized` | 401 `unauthorized` | 401 `unauthorized` | 401 `unauthorized` | 401 `unauthorized` |
+| `invalid_token` | 401 `unauthorized` "Access 登录无效或无权限" | 401 `unauthorized` | 401 `unauthorized` | 401 `unauthorized` | 401 `unauthorized` | 401 `unauthorized` | 401 `unauthorized` |
+| `keys_unavailable` | 401, as `invalid_token` | 503 `unavailable` | 503 `unavailable` | 503 `unavailable` | 503 `unavailable` | 503 `unavailable` | 503 `unavailable` |
+| CSRF key missing | issue 503 `service_unavailable`; verify 403 | 503 `not_configured` | 503 `not_configured` | 503 `not_configured` | 503 `not_configured` | 503 `not_configured` | 503 `not_configured` |
+| CSRF failure | 403 `csrf_failed` | 403 `csrf_failed` | 403 `csrf_failed` | 403 `csrf_failed` | 403 `csrf_failed` | 403 `csrf_failed` | 403 `csrf_failed` |
 
-The dashboard (and Lab, FlowDay and the links app, which copy its adapter) also refuses non-ASCII owners in its generator and keeps the error envelope of Todofy
-(`{error: {code, message, request_id}}`, one log line with ID, status and code); Lab's and the links app's owner APIs
-answer the same failures as google.rpc.Status bodies whose ErrorInfo reason is the code in upper case (`UNAUTHORIZED`).
+The dashboard (and Lab, FlowDay, the links app and the watch app, which copy its adapter) also refuses non-ASCII owners in
+its generator and keeps the error envelope of Todofy (`{error: {code, message, request_id}}`, one log line with ID,
+status and code); Lab's, the links app's and the watch app's owner APIs answer the same failures as google.rpc.Status
+bodies whose ErrorInfo reason is the code in upper case (`UNAUTHORIZED`).
 
 ### 5.5 Bounds and edge cases
 
@@ -338,7 +341,8 @@ Its dev dependencies are pinned to the Todofy gateway's versions (TypeScript 5.9
 ## 7. CI
 
 `.github/scripts/ci_changes.py` maps each package to the apps that compile it in
-(`PACKAGE_USERS = {"edge-auth": ("todofy", "mail-hero", "dashboard", "lab", "flowday", "links")}`). Any change inside
+(`PACKAGE_USERS = {"edge-auth": ("todofy", "mail-hero", "dashboard", "lab", "flowday", "links", "watch")}`; the watch
+app is checked only until its first deploy job, `CHECK_ONLY`). Any change inside
 `packages/edge-auth/` (this file included) runs the `Shared packages` job (`npm ci`, `npm run
 typecheck`, `npm test` in every `packages/*/`) and **checks and deploys** every user; an unmapped
 package counts as used by every app. `test_ci_changes.py` fails until `PACKAGE_USERS` matches every
