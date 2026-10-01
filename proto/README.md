@@ -47,7 +47,7 @@ cannot express (bounds, URL hosts).
 | `buf.gen.yaml` | protobuf-es v2 (`target=ts`, `import_extension=ts`, `erasable_syntax=true`) into `ts/` |
 | `<package path>/*.proto` | One directory per proto package: `todofy/taskintent/v1/task_intent.proto` is `todofy.taskintent.v1`; `lab/ui/v1/*.proto` is `lab.ui.v1`, Lab's owner UI API |
 | `package.json`, `package-lock.json` | The toolchain pins (`dependencies`: buf, protoc-gen-es, the runtime) and this folder's test tools (`devDependencies`) |
-| `ts/` | The TypeScript package `@ziyixi/proto`. Committed: `package.json` (its exports), `wire-json.ts` (the codec), `protobuf.ts` / `protobuf-wkt.ts` (the runtime re-exports). Generated: every directory (`ts/todofy/...`, `ts/google/...`) |
+| `ts/` | The TypeScript package `@ziyixi/proto`. Committed: `package.json` (its exports), `wire-json.ts` (the codec), `http-path.ts`, `http-rule.ts`, `http-transcoder.ts`, `http-client.ts` and `rpc-status.ts` (the HTTP runtime, [HTTP APIs](#http-apis)), `protobuf.ts` / `protobuf-wkt.ts` (the runtime re-exports). Generated: every directory (`ts/todofy/...`, `ts/lab/...`, `ts/google/...`) |
 | `python/` | The Python package `ziyixi-proto`. Committed: `pyproject.toml` (static metadata, uv cache keys), `build_backend.py`, `src/ziyixi_proto/__init__.py` and `wire_json.py` (the codec). Generated: every directory under `src/ziyixi_proto/` |
 | `tools/ensure.mjs` | Installs the pinned toolchain when `node_modules/` does not match the lockfile, and generates both languages when its stamp (`.generated.json`, ignored) does not match |
 | `tools/gen_py.py` | The stdlib-only Python generator (frozen dataclasses, `IntEnum`s, field tables) |
@@ -55,6 +55,7 @@ cannot express (bounds, URL hosts).
 | `scripts/breaking.sh`, `scripts/rules-selftest.sh` | The breaking gate against a base commit; the rules self-test |
 | `scripts/api-lint.sh`, `tools/api-linter/` | Google's api-linter on every package but `prototest/`: a Go tool module (`go.mod` pins api-linter and the Go toolchain, `go.sum` every checksum) that the script builds into `.tools/` (ignored) |
 | `prototest/v1/prototest.proto` | Test fixtures of the runtimes, never used by an app: a message with every field kind of the profile and a service with every kind of HTTP binding |
+| `testdata/http-cases.json` | The HTTP runtime's cases on `prototest.v1.BookService`: 46 requests and what the transcoder answers, 12 request messages and what the client sends; every implementation (a Python transcoder later) runs them |
 | `testdata/wire-profile-cases.json` | 62 edge cases (timestamps, integer and double spellings, enum look-alikes, maps, missing fields, null) that both codecs must answer identically |
 | `test/*.test.ts`, `test/python/` | The codec and IDL tests, the same cases in both languages; `test/cross-language.test.ts` pipes bytes through both codecs (`test/python/roundtrip.py` in a child process); `test/ensure.test.ts` runs `tools/ensure.mjs` on a copy of this folder (a deleted toolchain, an abandoned lock, the commands Windows needs) |
 
@@ -232,6 +233,80 @@ gzip 136.54 to 142.01 KiB; in local workerd without a memory snapshot, importing
 costs about 7 ms more than the hand-written version did). The protobuf-es runtime adds about 34 KB gzip to
 a TypeScript Worker that bundles it.
 
+## HTTP APIs
+
+Each app's UI API (the HTTP/JSON interface between its UI and its Worker) is a proto service here too, in
+Google's style: resources and methods by the AIPs, `google.api.http` bindings, google.rpc.Status errors. The
+Worker serves it through the shared transcoder and the UI calls it through the shared client, both driven by
+the generated descriptors, so the `.proto` file is the one description of routes, shapes and errors. Lab's
+owner API is the first (`lab/ui/v1`, 2026-10-01); ops-v1, recommendation-v1, mail-received-v1 and every app's
+UI API follow the same pattern.
+
+**Conventions** (what api-linter does not already enforce):
+
+- Package `<app>.ui.v1` in `<app>/ui/v1/`, one service `<App>UiService`, resources in their own files and the
+  service with its request and response messages in `<app>_ui_service.proto`; `errors.proto` holds the
+  `ErrorReason` enum (each value's name without `ERROR_REASON_` is an `ErrorInfo.reason`, and the enum lists
+  the transcoder's `BAD_REQUEST`, `NOT_FOUND` and `METHOD_NOT_ALLOWED`). Java options as AIP-191 asks.
+- Paths under `/api/v1/` (`/api/v1/{name=decks/*}:decide`): `/api` stays the prefix that separates an app's
+  API from its static UI on the one host, and the version is in the path. An app's other HTTP surface (the
+  CSRF token at `GET /api/csrf`, `/health`) is transport and stays outside the service.
+- Resource-oriented design (AIP-121/122/123): `google.api.resource` with a pattern on every resource,
+  `resource_reference` on every field that names one, singletons for per-owner state (`settings`); standard
+  methods where they fit (AIP-131/132/133/134/135, with AIP-158 page tokens on lists) and custom methods
+  (AIP-136, `:verb`) for actions. `(google.api.field_behavior)` on every field: `REQUIRED`/`OPTIONAL` on
+  inputs, `OUTPUT_ONLY` on what the server computes, `IDENTIFIER` on `name`. A mutation takes an AIP-155
+  `request_id` with `(google.api.field_info).format = UUID4`.
+- An api-linter exception is written next to the element with its reason, `(-- api-linter: <rule>=disabled
+  aip.dev/not-precedent: <why> --)`; file-wide ones go in the file's header comment. Never in a config file.
+
+**JSON.** Bodies, query parameters and answers use the [wire JSON profile](#wire-json-profile), not ProtoJSON:
+snake_case field names, lower-case enum names without their prefix, RFC 3339 timestamps. The transcoder
+reads a request strictly (an unknown field, enum name or query parameter, a wrong type or a missing
+`REQUIRED` field is `INVALID_ARGUMENT`) and writes the answer with `toWire`; the client writes the request
+with `toWire` and reads the answer leniently (unknown fields and enum names are skipped and reported, so an
+older UI keeps working against a newer Worker). Under the profile, `REQUIRED` on an input field means "must
+be present"; an `OUTPUT_ONLY` field is omitted when unset, which a typed client reads as unset.
+
+**The transcoder** (`ts/http-transcoder.ts`, `HttpTranscoder`). The app keeps its own fetch handler:
+authentication (Cloudflare Access through `packages/edge-auth`) runs first for every path, then
+`transcoder.handle(request, context, requestId)` routes by the bindings, calls the app's `authorize` hook
+with the matched route before reading the body (CSRF and Origin for every method but GET), builds the
+request message from the path variables, the body (`*` or one field, `application/json`, at most
+`maxBodyBytes`) and the query (`a.b=1`, repeated keys; form encoding, so `+` is a space), checks UUID4 fields
+and clears `OUTPUT_ONLY` input fields (AIP-203), calls the typed handler and writes the answer (`no-store`,
+`nosniff`). A path no binding has returns null, for the app's other routes; another method on a known path
+is 405 with `Allow`; `OPTIONS` is 204 with `Allow` and no CORS headers (same-origin only); `HEAD` is `GET`
+without the body. Handlers throw `RpcError(code, reason, message, {details})`; the body is a google.rpc.Status
+in Google's HTTP form (`{"error": {"code": <HTTP status>, "message", "status": <code name>, "details": [ErrorInfo,
+LocalizedMessage, RequestInfo, typed details]}}`, `ts/rpc-status.ts`). Messages are fixed English; nothing from
+the request is echoed. Path templates (`ts/http-path.ts`) follow http.proto (`*`, `**`, `{field.path=...}`,
+`:verb`, its percent-decoding rules), with the precise choices written at the top of the file (a raw `:` in
+the last segment is a verb; literals beat `*` beat `**`). Unsupported bindings (`custom`, `response_body`, a
+body on GET or DELETE, a non-message body field) fail when the routes are built, on the first request.
+
+**The client** (`ts/http-client.ts`, `createHttpClient(Service, send)`): one typed method per rpc
+(`client.getDeck({ name: 'decks/2026-09-30' })` resolves to a `Deck`), laid out by the rpc's primary binding;
+`send` is the app's transport (credentials, CSRF header, retries). A non-2xx answer throws `RpcStatusError`
+with the parsed Status (`reason`, `localizedMessage`, `requestId`, `readDetail(status, Schema)`), or
+`HttpResponseError` when the body is not one (a proxy page, an expired Access session).
+
+**Adding a UI API.**
+
+1. Write `<app>/ui/v1/*.proto` by the conventions above; `npm run lint && npm run api-lint` until clean.
+2. Add the app's UI package (its `web/`) as a TypeScript user: `"@ziyixi/proto": "file:../../proto/ts"` in
+   `dependencies`, the `postinstall` and the pre-scripts (Rules); the Worker is one already if it uses proto.
+3. Worker: `new HttpTranscoder(<App>UiService, handlers, { domain, maxBodyBytes, authorize, localize,
+   onUnexpected })` after authentication; keep the app's error copy as `localize`. UI: `createHttpClient`
+   with a transport that adds credentials and the CSRF header, and read errors by `status.reason`.
+4. Move the old routes off: an old UI tab calls the old paths until it reloads, so either keep them for one
+   release as `additional_bindings` (when the old request and answer shapes still decode) or answer them
+   with a "reload" error in the old envelope (what Lab did, `lab/worker/src/http.ts`); remove that after
+   one release.
+
+Python: a Python Worker's transcoder will implement the same behaviour and run `testdata/http-cases.json`;
+the profile's Python twin already supports every kind these APIs use.
+
 ## CI
 
 The **Proto checks** job (`.github/workflows/ci.yml`) runs when `proto/`, `.github/` or `tools/` changed,
@@ -251,8 +326,7 @@ outside tests, test data, the check scripts, the api-linter tool module and Mark
 
 ## Later
 
-Planned, not in this foundation: `google.api.http` annotations and AIP-style resource methods for each
-app's owner UI API with an in-repository transcoder, and the full replacement of `ops-v1`,
+Planned: every other app's UI API on the [HTTP APIs](#http-apis) pattern, and the full replacement of `ops-v1`,
 `mail-received-v1` and `recommendation-v1` (each a package per service, e.g. `ops/status/v1`,
 `mailhero/webhook/v1`). Shared types come from the same googleapis dependency (`google.rpc.Status`) or a
 `common/<name>/v1` package. Each contract moves the way task-intent-v1 did: the IDL and tests first, then

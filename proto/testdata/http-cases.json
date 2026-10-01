@@ -1,0 +1,897 @@
+{
+  "description": "HTTP transcoding cases of the google.api.http runtime (proto/README.md, HTTP APIs), against prototest.v1.BookService. transcode: an HTTP request (method, path, raw query, headers, and a body as json, raw text or base64) and what the transcoder answers: status null for no route, else the HTTP status, the rpc and its decoded input in the wire JSON profile, or the ErrorInfo reason (and the Allow header). The transcoder under test allows every request (authorize is the app's) and reads bodies of at most 1024 bytes. encode: a request message of an rpc (wire JSON) and the HTTP request the client sends, or error. Every implementation (TypeScript now, Python later) runs this file.",
+  "service": "prototest.v1.BookService",
+  "max_body_bytes": 1024,
+  "transcode": [
+    {
+      "name": "a multi-segment variable",
+      "request": {
+        "method": "GET",
+        "path": "/v1/shelves/s1/books/b1"
+      },
+      "expect": {
+        "status": 200,
+        "rpc": "GetBook",
+        "input": {
+          "name": "shelves/s1/books/b1"
+        }
+      }
+    },
+    {
+      "name": "query parameters fill the fields the path does not",
+      "request": {
+        "method": "GET",
+        "path": "/v1/shelves/s1/books/b1",
+        "query": "view=full&include_labels=true"
+      },
+      "expect": {
+        "status": 200,
+        "rpc": "GetBook",
+        "input": {
+          "name": "shelves/s1/books/b1",
+          "view": "full",
+          "include_labels": true
+        }
+      }
+    },
+    {
+      "name": "a multi-segment variable decodes every escape but %2F",
+      "request": {
+        "method": "GET",
+        "path": "/v1/shelves/s%201/books/b%2F1%3A2"
+      },
+      "expect": {
+        "status": 200,
+        "rpc": "GetBook",
+        "input": {
+          "name": "shelves/s 1/books/b%2F1:2"
+        }
+      }
+    },
+    {
+      "name": "an additional binding takes the rest of the path",
+      "request": {
+        "method": "GET",
+        "path": "/v1/legacy/a/b/c"
+      },
+      "expect": {
+        "status": 200,
+        "rpc": "GetBook",
+        "input": {
+          "name": "a/b/c"
+        }
+      }
+    },
+    {
+      "name": "an unknown query parameter is refused",
+      "request": {
+        "method": "GET",
+        "path": "/v1/shelves/s1/books/b1",
+        "query": "color=red"
+      },
+      "expect": {
+        "status": 400,
+        "reason": "BAD_REQUEST"
+      }
+    },
+    {
+      "name": "a singular query parameter given twice is refused",
+      "request": {
+        "method": "GET",
+        "path": "/v1/shelves/s1/books/b1",
+        "query": "view=a&view=b"
+      },
+      "expect": {
+        "status": 400,
+        "reason": "BAD_REQUEST"
+      }
+    },
+    {
+      "name": "a boolean query parameter is true or false",
+      "request": {
+        "method": "GET",
+        "path": "/v1/shelves/s1/books/b1",
+        "query": "include_labels=yes"
+      },
+      "expect": {
+        "status": 400,
+        "reason": "BAD_REQUEST"
+      }
+    },
+    {
+      "name": "a query parameter may not set a path field",
+      "request": {
+        "method": "GET",
+        "path": "/v1/shelves/s1/books/b1",
+        "query": "name=shelves/s2/books/b2"
+      },
+      "expect": {
+        "status": 400,
+        "reason": "BAD_REQUEST"
+      }
+    },
+    {
+      "name": "every kind of query parameter",
+      "request": {
+        "method": "GET",
+        "path": "/v1/shelves/s1/books",
+        "query": "page_size=10&page_token=t&tags=a&tags=b&genre=poetry&genres=fiction&genres=science&author.display_name=Ada+Lovelace&author.birth_year=1815&min_rating=4.5&hardcover=true&subtitle="
+      },
+      "expect": {
+        "status": 200,
+        "rpc": "ListBooks",
+        "input": {
+          "parent": "shelves/s1",
+          "page_size": 10,
+          "page_token": "t",
+          "tags": [
+            "a",
+            "b"
+          ],
+          "genre": "poetry",
+          "genres": [
+            "fiction",
+            "science"
+          ],
+          "author": {
+            "display_name": "Ada Lovelace",
+            "birth_year": 1815
+          },
+          "min_rating": 4.5,
+          "hardcover": true,
+          "subtitle": ""
+        }
+      }
+    },
+    {
+      "name": "an unknown enum name in the query is refused",
+      "request": {
+        "method": "GET",
+        "path": "/v1/shelves/s1/books",
+        "query": "genre=opera"
+      },
+      "expect": {
+        "status": 400,
+        "reason": "BAD_REQUEST"
+      }
+    },
+    {
+      "name": "an integer query parameter has no fraction",
+      "request": {
+        "method": "GET",
+        "path": "/v1/shelves/s1/books",
+        "query": "page_size=1.5"
+      },
+      "expect": {
+        "status": 400,
+        "reason": "BAD_REQUEST"
+      }
+    },
+    {
+      "name": "an int32 query parameter out of range is refused",
+      "request": {
+        "method": "GET",
+        "path": "/v1/shelves/s1/books",
+        "query": "page_size=2147483648"
+      },
+      "expect": {
+        "status": 400,
+        "reason": "BAD_REQUEST"
+      }
+    },
+    {
+      "name": "a message field cannot be a query parameter",
+      "request": {
+        "method": "GET",
+        "path": "/v1/shelves/s1/books",
+        "query": "author=x"
+      },
+      "expect": {
+        "status": 400,
+        "reason": "BAD_REQUEST"
+      }
+    },
+    {
+      "name": "a body field and a parent variable",
+      "request": {
+        "method": "POST",
+        "path": "/v1/shelves/s1/books",
+        "query": "book_id=b9",
+        "headers": {
+          "content-type": "application/json"
+        },
+        "json": {
+          "title": "T",
+          "rating": 4
+        }
+      },
+      "expect": {
+        "status": 200,
+        "rpc": "CreateBook",
+        "input": {
+          "parent": "shelves/s1",
+          "book_id": "b9",
+          "book": {
+            "title": "T",
+            "rating": 4
+          }
+        }
+      }
+    },
+    {
+      "name": "output-only fields of the body are ignored",
+      "request": {
+        "method": "POST",
+        "path": "/v1/shelves/s1/books",
+        "headers": {
+          "content-type": "application/json"
+        },
+        "json": {
+          "title": "T",
+          "state": "archived"
+        }
+      },
+      "expect": {
+        "status": 200,
+        "rpc": "CreateBook",
+        "input": {
+          "parent": "shelves/s1",
+          "book": {
+            "title": "T"
+          }
+        }
+      }
+    },
+    {
+      "name": "a body needs application/json",
+      "request": {
+        "method": "POST",
+        "path": "/v1/shelves/s1/books",
+        "headers": {
+          "content-type": "text/plain"
+        },
+        "json": {
+          "title": "T"
+        }
+      },
+      "expect": {
+        "status": 400,
+        "reason": "BAD_REQUEST"
+      }
+    },
+    {
+      "name": "a body with a charset is application/json too",
+      "request": {
+        "method": "POST",
+        "path": "/v1/shelves/s1/books",
+        "headers": {
+          "content-type": "application/json; charset=UTF-8"
+        },
+        "json": {}
+      },
+      "expect": {
+        "status": 200,
+        "rpc": "CreateBook",
+        "input": {
+          "parent": "shelves/s1",
+          "book": {}
+        }
+      }
+    },
+    {
+      "name": "a method with a body needs one",
+      "request": {
+        "method": "POST",
+        "path": "/v1/shelves/s1/books",
+        "headers": {
+          "content-type": "application/json"
+        }
+      },
+      "expect": {
+        "status": 400,
+        "reason": "BAD_REQUEST"
+      }
+    },
+    {
+      "name": "a body is a JSON object",
+      "request": {
+        "method": "POST",
+        "path": "/v1/shelves/s1/books",
+        "headers": {
+          "content-type": "application/json"
+        },
+        "body": "[\"T\"]"
+      },
+      "expect": {
+        "status": 400,
+        "reason": "BAD_REQUEST"
+      }
+    },
+    {
+      "name": "a body is JSON",
+      "request": {
+        "method": "POST",
+        "path": "/v1/shelves/s1/books",
+        "headers": {
+          "content-type": "application/json"
+        },
+        "body": "{\"title\": "
+      },
+      "expect": {
+        "status": 400,
+        "reason": "BAD_REQUEST"
+      }
+    },
+    {
+      "name": "a body is UTF-8",
+      "request": {
+        "method": "POST",
+        "path": "/v1/shelves/s1/books",
+        "headers": {
+          "content-type": "application/json"
+        },
+        "body_base64": "eyJ0aXRsZSI6ICL/In0="
+      },
+      "expect": {
+        "status": 400,
+        "reason": "BAD_REQUEST"
+      }
+    },
+    {
+      "name": "an unknown body field is refused",
+      "request": {
+        "method": "POST",
+        "path": "/v1/shelves/s1/books",
+        "headers": {
+          "content-type": "application/json"
+        },
+        "json": {
+          "title": "T",
+          "color": "red"
+        }
+      },
+      "expect": {
+        "status": 400,
+        "reason": "BAD_REQUEST"
+      }
+    },
+    {
+      "name": "a query parameter may not set the body field",
+      "request": {
+        "method": "POST",
+        "path": "/v1/shelves/s1/books",
+        "query": "book.title=x",
+        "headers": {
+          "content-type": "application/json"
+        },
+        "json": {}
+      },
+      "expect": {
+        "status": 400,
+        "reason": "BAD_REQUEST"
+      }
+    },
+    {
+      "name": "a body larger than the limit is refused",
+      "request": {
+        "method": "POST",
+        "path": "/v1/shelves/s1/books",
+        "headers": {
+          "content-type": "application/json"
+        },
+        "json": {
+          "title": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+        }
+      },
+      "expect": {
+        "status": 400,
+        "reason": "BAD_REQUEST"
+      }
+    },
+    {
+      "name": "a variable bound to a field of the body field",
+      "request": {
+        "method": "PATCH",
+        "path": "/v1/shelves/s1/books/b1",
+        "headers": {
+          "content-type": "application/json"
+        },
+        "json": {
+          "title": "New"
+        }
+      },
+      "expect": {
+        "status": 200,
+        "rpc": "UpdateBook",
+        "input": {
+          "book": {
+            "name": "shelves/s1/books/b1",
+            "title": "New"
+          }
+        }
+      }
+    },
+    {
+      "name": "the body may repeat a path value",
+      "request": {
+        "method": "PATCH",
+        "path": "/v1/shelves/s1/books/b1",
+        "headers": {
+          "content-type": "application/json"
+        },
+        "json": {
+          "name": "shelves/s1/books/b1",
+          "title": "New"
+        }
+      },
+      "expect": {
+        "status": 200,
+        "rpc": "UpdateBook",
+        "input": {
+          "book": {
+            "name": "shelves/s1/books/b1",
+            "title": "New"
+          }
+        }
+      }
+    },
+    {
+      "name": "the body may not contradict a path value",
+      "request": {
+        "method": "PATCH",
+        "path": "/v1/shelves/s1/books/b1",
+        "headers": {
+          "content-type": "application/json"
+        },
+        "json": {
+          "name": "shelves/s1/books/b2"
+        }
+      },
+      "expect": {
+        "status": 400,
+        "reason": "BAD_REQUEST"
+      }
+    },
+    {
+      "name": "a custom verb with the whole request as the body; a UUID4 is lower-cased",
+      "request": {
+        "method": "POST",
+        "path": "/v1/shelves/s1/books/b1:archive",
+        "headers": {
+          "content-type": "application/json"
+        },
+        "json": {
+          "force": true,
+          "request_id": "0D8F7A9E-1C2B-4D3E-8F4A-5B6C7D8E9F0A"
+        }
+      },
+      "expect": {
+        "status": 200,
+        "rpc": "ArchiveBook",
+        "input": {
+          "name": "shelves/s1/books/b1",
+          "force": true,
+          "request_id": "0d8f7a9e-1c2b-4d3e-8f4a-5b6c7d8e9f0a"
+        }
+      }
+    },
+    {
+      "name": "a UUID4 field must be a UUID v4",
+      "request": {
+        "method": "POST",
+        "path": "/v1/shelves/s1/books/b1:archive",
+        "headers": {
+          "content-type": "application/json"
+        },
+        "json": {
+          "request_id": "0d8f7a9e-1c2b-1d3e-8f4a-5b6c7d8e9f0a"
+        }
+      },
+      "expect": {
+        "status": 400,
+        "reason": "BAD_REQUEST"
+      }
+    },
+    {
+      "name": "a REQUIRED field must be present",
+      "request": {
+        "method": "POST",
+        "path": "/v1/shelves/s1/books/b1:archive",
+        "headers": {
+          "content-type": "application/json"
+        },
+        "json": {
+          "force": true
+        }
+      },
+      "expect": {
+        "status": 400,
+        "reason": "BAD_REQUEST"
+      }
+    },
+    {
+      "name": "a body of * takes no query parameters",
+      "request": {
+        "method": "POST",
+        "path": "/v1/shelves/s1/books/b1:archive",
+        "query": "force=true",
+        "headers": {
+          "content-type": "application/json"
+        },
+        "json": {
+          "request_id": "0d8f7a9e-1c2b-4d3e-8f4a-5b6c7d8e9f0a"
+        }
+      },
+      "expect": {
+        "status": 400,
+        "reason": "BAD_REQUEST"
+      }
+    },
+    {
+      "name": "DELETE: everything from the path and the query",
+      "request": {
+        "method": "DELETE",
+        "path": "/v1/shelves/s1/books/b1",
+        "query": "allow_missing=true"
+      },
+      "expect": {
+        "status": 200,
+        "rpc": "DeleteBook",
+        "input": {
+          "name": "shelves/s1/books/b1",
+          "allow_missing": true
+        }
+      }
+    },
+    {
+      "name": "DELETE takes no body",
+      "request": {
+        "method": "DELETE",
+        "path": "/v1/shelves/s1/books/b1",
+        "headers": {
+          "content-type": "application/json"
+        },
+        "json": {
+          "allow_missing": true
+        }
+      },
+      "expect": {
+        "status": 400,
+        "reason": "BAD_REQUEST"
+      }
+    },
+    {
+      "name": "another method on a known path is 405 with Allow",
+      "request": {
+        "method": "PUT",
+        "path": "/v1/shelves/s1/books/b1"
+      },
+      "expect": {
+        "status": 405,
+        "reason": "METHOD_NOT_ALLOWED",
+        "allow": "GET, HEAD, PATCH, DELETE, OPTIONS"
+      }
+    },
+    {
+      "name": "a verb path read with GET is 405",
+      "request": {
+        "method": "GET",
+        "path": "/v1/shelves/s1/books/b1:archive"
+      },
+      "expect": {
+        "status": 405,
+        "reason": "METHOD_NOT_ALLOWED",
+        "allow": "POST, OPTIONS"
+      }
+    },
+    {
+      "name": "HEAD is GET without the body",
+      "request": {
+        "method": "HEAD",
+        "path": "/v1/shelves/s1/books/b1"
+      },
+      "expect": {
+        "status": 200,
+        "rpc": "GetBook",
+        "input": {
+          "name": "shelves/s1/books/b1"
+        },
+        "empty_body": true
+      }
+    },
+    {
+      "name": "OPTIONS lists the methods, without CORS headers",
+      "request": {
+        "method": "OPTIONS",
+        "path": "/v1/shelves/s1/books/b1"
+      },
+      "expect": {
+        "status": 204,
+        "allow": "GET, HEAD, PATCH, DELETE, OPTIONS",
+        "empty_body": true
+      }
+    },
+    {
+      "name": "** followed by a verb",
+      "request": {
+        "method": "GET",
+        "path": "/v1/files/a/b/c.txt:download"
+      },
+      "expect": {
+        "status": 200,
+        "rpc": "DownloadFile",
+        "input": {
+          "name": "files/a/b/c.txt"
+        }
+      }
+    },
+    {
+      "name": "** matches no segment too",
+      "request": {
+        "method": "GET",
+        "path": "/v1/files:download"
+      },
+      "expect": {
+        "status": 200,
+        "rpc": "DownloadFile",
+        "input": {
+          "name": "files"
+        }
+      }
+    },
+    {
+      "name": "an unnamed wildcard binds nothing; a single-segment variable decodes %2F",
+      "request": {
+        "method": "GET",
+        "path": "/v1/regions/us/shelves/a%2Fb:count"
+      },
+      "expect": {
+        "status": 200,
+        "rpc": "CountBooks",
+        "input": {
+          "shelf": "a/b"
+        }
+      }
+    },
+    {
+      "name": "an unknown verb matches no route",
+      "request": {
+        "method": "GET",
+        "path": "/v1/shelves/s1/books/b1:delete"
+      },
+      "expect": {
+        "status": null
+      }
+    },
+    {
+      "name": "an unencoded colon in the last segment is a verb",
+      "request": {
+        "method": "GET",
+        "path": "/v1/regions/us/shelves/a:b"
+      },
+      "expect": {
+        "status": null
+      }
+    },
+    {
+      "name": "a trailing slash matches no route",
+      "request": {
+        "method": "GET",
+        "path": "/v1/shelves/s1/books/b1/"
+      },
+      "expect": {
+        "status": null
+      }
+    },
+    {
+      "name": "an empty segment matches no route",
+      "request": {
+        "method": "GET",
+        "path": "/v1/shelves//books/b1"
+      },
+      "expect": {
+        "status": null
+      }
+    },
+    {
+      "name": "literals compare as sent",
+      "request": {
+        "method": "GET",
+        "path": "/v1/shelve%73/s1/books/b1"
+      },
+      "expect": {
+        "status": null
+      }
+    },
+    {
+      "name": "malformed escapes in a variable are refused",
+      "request": {
+        "method": "GET",
+        "path": "/v1/shelves/s1/books/b%ZZ"
+      },
+      "expect": {
+        "status": 400,
+        "reason": "BAD_REQUEST"
+      }
+    }
+  ],
+  "encode": [
+    {
+      "name": "path and query",
+      "rpc": "GetBook",
+      "input": {
+        "name": "shelves/s1/books/b1",
+        "view": "full",
+        "include_labels": true
+      },
+      "expect": {
+        "method": "GET",
+        "url": "/v1/shelves/s1/books/b1?view=full&include_labels=true",
+        "body": null
+      }
+    },
+    {
+      "name": "a multi-segment variable keeps its slashes and encodes the rest",
+      "rpc": "GetBook",
+      "input": {
+        "name": "shelves/s 1/books/b:1"
+      },
+      "expect": {
+        "method": "GET",
+        "url": "/v1/shelves/s%201/books/b%3A1",
+        "body": null
+      }
+    },
+    {
+      "name": "non-ASCII is encoded as UTF-8",
+      "rpc": "GetBook",
+      "input": {
+        "name": "shelves/书/books/b"
+      },
+      "expect": {
+        "method": "GET",
+        "url": "/v1/shelves/%E4%B9%A6/books/b",
+        "body": null
+      }
+    },
+    {
+      "name": "a value that does not fit its pattern is refused",
+      "rpc": "GetBook",
+      "input": {
+        "name": "books/b1"
+      },
+      "expect": {
+        "error": true
+      }
+    },
+    {
+      "name": "an empty path value is refused",
+      "rpc": "GetBook",
+      "input": {
+        "name": "",
+        "view": "full"
+      },
+      "expect": {
+        "error": true
+      }
+    },
+    {
+      "name": "a body field, the rest in the query",
+      "rpc": "CreateBook",
+      "input": {
+        "parent": "shelves/s1",
+        "book_id": "b9",
+        "book": {
+          "title": "T"
+        }
+      },
+      "expect": {
+        "method": "POST",
+        "url": "/v1/shelves/s1/books?book_id=b9",
+        "body": {
+          "title": "T"
+        }
+      }
+    },
+    {
+      "name": "a path field leaves the body",
+      "rpc": "UpdateBook",
+      "input": {
+        "book": {
+          "name": "shelves/s1/books/b1",
+          "title": "New"
+        },
+        "request_id": "0d8f7a9e-1c2b-4d3e-8f4a-5b6c7d8e9f0a"
+      },
+      "expect": {
+        "method": "PATCH",
+        "url": "/v1/shelves/s1/books/b1?request_id=0d8f7a9e-1c2b-4d3e-8f4a-5b6c7d8e9f0a",
+        "body": {
+          "title": "New"
+        }
+      }
+    },
+    {
+      "name": "body * with a verb",
+      "rpc": "ArchiveBook",
+      "input": {
+        "name": "shelves/s1/books/b1",
+        "force": true,
+        "request_id": "0d8f7a9e-1c2b-4d3e-8f4a-5b6c7d8e9f0a"
+      },
+      "expect": {
+        "method": "POST",
+        "url": "/v1/shelves/s1/books/b1:archive",
+        "body": {
+          "force": true,
+          "request_id": "0d8f7a9e-1c2b-4d3e-8f4a-5b6c7d8e9f0a"
+        }
+      }
+    },
+    {
+      "name": "DELETE without a body",
+      "rpc": "DeleteBook",
+      "input": {
+        "name": "shelves/s1/books/b1",
+        "allow_missing": true
+      },
+      "expect": {
+        "method": "DELETE",
+        "url": "/v1/shelves/s1/books/b1?allow_missing=true",
+        "body": null
+      }
+    },
+    {
+      "name": "every kind of query parameter, in field-number order",
+      "rpc": "ListBooks",
+      "input": {
+        "parent": "shelves/s1",
+        "page_size": 10,
+        "page_token": "t&u",
+        "tags": [
+          "a",
+          "b c"
+        ],
+        "genre": "poetry",
+        "genres": [
+          "fiction",
+          "science"
+        ],
+        "author": {
+          "display_name": "Ada",
+          "birth_year": 1815
+        },
+        "min_rating": 4.5,
+        "hardcover": true,
+        "subtitle": ""
+      },
+      "expect": {
+        "method": "GET",
+        "url": "/v1/shelves/s1/books?page_size=10&page_token=t%26u&tags=a&tags=b%20c&genre=poetry&genres=fiction&genres=science&author.display_name=Ada&author.birth_year=1815&min_rating=4.5&hardcover=true&subtitle=",
+        "body": null
+      }
+    },
+    {
+      "name": "** keeps slashes; a verb is appended",
+      "rpc": "DownloadFile",
+      "input": {
+        "name": "files/a/b c.txt"
+      },
+      "expect": {
+        "method": "GET",
+        "url": "/v1/files/a/b%20c.txt:download",
+        "body": null
+      }
+    },
+    {
+      "name": "an unnamed wildcard cannot be expanded",
+      "rpc": "CountBooks",
+      "input": {
+        "shelf": "s1"
+      },
+      "expect": {
+        "error": true
+      }
+    }
+  ]
+}
