@@ -291,9 +291,10 @@ HTTP form (`{"error": {"code": <HTTP status>, "message", "status": <code name>, 
 LocalizedMessage, RequestInfo, typed details]}}`, `ts/rpc-status.ts`). Messages are fixed English; nothing
 from the request is echoed. Path templates (`ts/http-path.ts`) follow http.proto (`*`, `**`,
 `{field.path=...}`, `:verb`, its percent-decoding rules), with the precise choices written at the top of the
-file (a raw `:` in the last segment is a verb; literals beat `*` beat `**`). Unsupported bindings (`custom`,
-`response_body`, a body on GET or DELETE, a non-message body field) fail when the routes are built, on the
-first request.
+file (a raw `:` in the last segment is a verb; literals beat `*` beat `**`). The constructor builds the route
+table, so a Worker that constructs its transcoder at global scope reads the options during startup, and an
+unsupported binding (`custom`, `response_body`, a body on GET or DELETE, a non-message body field) fails the
+Worker's startup, which is its deploy, instead of a request.
 
 **The client** (`ts/http-client.ts`, `createHttpClient(Service, send)`): one typed method per rpc
 (`client.getDeck({ name: 'decks/2026-09-30' })` resolves to a `Deck`), laid out by the rpc's primary binding;
