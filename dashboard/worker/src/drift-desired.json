@@ -204,14 +204,13 @@
         },
         {
           "name": "ACCESS_OWNER",
-          "type": "plain_text",
+          "type": "secret_text",
           "source": "deploy"
         },
         {
           "name": "ACCESS_OWNER_ALIASES",
-          "type": "plain_text",
-          "source": "deploy",
-          "optional": true
+          "type": "secret_text",
+          "source": "deploy"
         },
         {
           "name": "ASSETS",
@@ -232,6 +231,11 @@
           "name": "BACKUP_TOKEN",
           "type": "secret_text",
           "source": "manual"
+        },
+        {
+          "name": "BUILD_SHA",
+          "type": "plain_text",
+          "source": "deploy"
         },
         {
           "name": "COORDINATOR",
@@ -280,7 +284,7 @@
         },
         {
           "name": "RECEIVE_ADDRESS",
-          "type": "plain_text",
+          "type": "secret_text",
           "source": "deploy"
         },
         {
@@ -289,11 +293,7 @@
           "source": "config"
         }
       ],
-      "personal": [
-        "ACCESS_OWNER",
-        "ACCESS_OWNER_ALIASES",
-        "RECEIVE_ADDRESS"
-      ]
+      "personal": []
     },
     "todofy": {
       "config": "todofy/gateway/wrangler.toml",

@@ -24,7 +24,7 @@ export interface LiveTweaks {
   /** Script -> binding -> live type, or null to remove the binding. */
   readonly bindings?: Readonly<Record<string, Readonly<Record<string, string | null>>>>;
   readonly workersDev?: Readonly<Record<string, boolean>>;
-  /** Personal values live as plain_text (as Mail Hero's are before they move to secrets). */
+  /** Personal values live as plain_text (as Todofy's `--var` personal value is today). */
   readonly personalPlain?: boolean;
   /** Answers a matching path with this HTTP status instead. */
   readonly fail?: { readonly path: RegExp; readonly status: number };

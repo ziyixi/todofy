@@ -79,6 +79,19 @@ class DesiredState(unittest.TestCase):
                 self.assertLessEqual(names, bindings)
         self.assertIn("TODOIST_DEFAULT_PROJECT_ID", personal["todofy-core"])
 
+    def test_mail_hero_personal_values_are_deploy_secrets(self):
+        """Mail Hero writes its receive address and owner addresses with --secrets-file (as the dashboard and Lab
+        write theirs), so they are wanted as secret_text bindings; the vars it adds are the switches and BUILD_SHA."""
+        worker = self.state["workers"]["mail-hero"]
+        bindings = {b["name"]: b for b in worker["bindings"]}
+        for name in ("RECEIVE_ADDRESS", "ACCESS_OWNER", "ACCESS_OWNER_ALIASES"):
+            with self.subTest(name=name):
+                self.assertEqual(bindings[name], {"name": name, "type": "secret_text", "source": "deploy"})
+        for name in ("FORCE_SEND_PAUSED", "MAINTENANCE_MODE", "BUILD_SHA"):
+            with self.subTest(name=name):
+                self.assertEqual(bindings[name], {"name": name, "type": "plain_text", "source": "deploy"})
+        self.assertEqual(worker["personal"], [])
+
     def test_the_generator_refuses_an_unknown_binding_section(self):
         with self.assertRaises(drift_desired.GeneratorError):
             drift_desired.config_bindings("x", {"name": "x", "kv_namespaces": [{"binding": "KV"}]})

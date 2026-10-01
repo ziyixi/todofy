@@ -323,7 +323,9 @@ remote text never leaves `drift.ts` (failures become `http_<n>`, `timeout`, `net
 | `personal` | a personal value (wrapper kind `personal`/`optional`) whose live binding is not `secret_text` |
 
 A personal value is reported whatever way its wrapper sends it today; a known difference is a finding
-until the live account or the committed state changes, never a special case.
+until the live account or the committed state changes, never a special case. A personal value a wrapper
+writes with `--secrets-file` (the owner addresses of Mail Hero, the dashboard and Lab, and Mail Hero's
+receive address) is wanted as a `secret_text` binding, so a live `plain_text` one is a `bindings` change.
 
 **Storage and views.** `state` documents `drift_run` (today's run across ticks: the live names and
 types read so far; deleted when the run ends) and `drift` (the last completed check: counts per

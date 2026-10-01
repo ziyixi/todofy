@@ -175,15 +175,13 @@ describe('comparison', () => {
   it('reports personal values that are plain_text on the live Workers today, without special cases', async () => {
     const { doc } = await fullCheck({ personalPlain: true });
     const personal = doc.findings.filter((f) => f.category === 'personal');
-    expect(personal.map((f) => `${f.script}:${f.name}`)).toEqual([
-      'mail-hero:ACCESS_OWNER',
-      'mail-hero:RECEIVE_ADDRESS',
-      'todofy-core:TODOIST_DEFAULT_PROJECT_ID',
-    ]);
+    // Mail Hero's receive address and owner addresses are written with --secrets-file (secret_text bindings,
+    // like the dashboard's and Lab's owner addresses), so only Todofy's --var personal value remains.
+    expect(personal.map((f) => `${f.script}:${f.name}`)).toEqual(['todofy-core:TODOIST_DEFAULT_PROJECT_ID']);
     expect(personal.every((f) => f.expected === 'secret_text' && f.actual === 'plain_text')).toBe(true);
     // Nothing else differs: the wrapper sends them as plain_text, which is what the bindings expect.
     expect(doc.findings.filter((f) => f.category !== 'personal')).toEqual([]);
-    expect(driftView(doc, true, AT('03:00'))).toMatchObject({ status: 'drift', counts: { personal: 3 } });
+    expect(driftView(doc, true, AT('03:00'))).toMatchObject({ status: 'drift', counts: { personal: 1 } });
   });
 
   it('detects a toml change: a Custom Domain removed from the committed state is reported as extra', async () => {
