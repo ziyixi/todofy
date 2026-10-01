@@ -758,14 +758,16 @@ jobs:
           # The wrapper would copy tofu's output into step outputs; plans must never be captured.
           tofu_wrapper: false
           github_token: ${{ github.token }}
-      # File names only for the email check, so a committed address is not repeated in the log.
-      - name: Guards (data sources, provisioners, providers, email addresses, state and values)
+      # File names only for the email check, so a committed address is not repeated in the log. The greps are
+      # a quick first line; infra_guard.py reads the HCL structure (bare labels, nested blocks, every config
+      # file kind) and is the authority. Quoted or bare labels, any file except the docs.
+      - name: Guards (data sources, provisioners, providers, email addresses, file kinds, structure)
         run: |
           failed=0
-          if grep -rnE --include='*.tf' 'data[[:space:]]+"(external|http)"' .; then
+          if grep -rnE --exclude='*.md' --exclude-dir=.terraform '^[[:space:]]*data[[:space:]]+"?(external|http)"?[[:space:]]' .; then
             echo "::error::external/http data sources can run code or send data out"; failed=1
           fi
-          if grep -rnE --include='*.tf' '^[[:space:]]*provisioner[[:space:]]+"' .; then
+          if grep -rnE --exclude='*.md' --exclude-dir=.terraform '(^|[[:space:]{])provisioner[[:space:]]+"?[A-Za-z_-]+"?[[:space:]]*\{' .; then
             echo "::error::provisioners are not allowed in infra/"; failed=1
           fi
           if [ "$(grep -c '^provider ' .terraform.lock.hcl)" != 1 ] || ! grep -q '^provider "registry.opentofu.org/cloudflare/cloudflare"' .terraform.lock.hcl; then
@@ -774,9 +776,11 @@ jobs:
           if grep -rlIE '[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}' .; then
             echo "::error::email addresses come from sensitive variables, never from files in infra/"; failed=1
           fi
-          if git ls-files -- . | grep -E '\.tfstate|\.tfplan$|(^|/)plan\.(bin|json)$|\.tfvars(\.json)?$'; then
-            echo "::error::state, plans and tfvars never enter the repository"; failed=1
+          # An allowlist of committed file kinds: a state, plan, values or log file fails whatever its name.
+          if git ls-files -- . | grep -vE '^([A-Za-z0-9_-]+\.tf|\.terraform\.lock\.hcl|\.gitignore|README\.md|local\.tfvars\.example|(scripts|tests)/[A-Za-z0-9_]+\.py)$'; then
+            echo "::error::only *.tf, the lock file, docs, the example values and the scripts are committed in infra/"; failed=1
           fi
+          python3 ../.github/scripts/infra_guard.py . || failed=1
           exit "$failed"
       - name: Format
         run: tofu fmt -check -recursive -diff

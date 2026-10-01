@@ -10,4 +10,4 @@
 #
 # Add a cloudflare_dns_record only for a record that a monorepo app needs AND that neither wrangler nor
 # Email Routing owns (for example a future sending-domain DKIM record), with its value from a variable,
-# and extend ALLOWED_TYPES in .github/scripts/test_infra_config.py in the same change.
+# and extend ALLOWED_TYPES in .github/scripts/infra_guard.py in the same change.

@@ -1,8 +1,10 @@
 """Tests for summary.py: python3 -m unittest discover -s tools/infra-plan-summary
 
 The sentinel values stand in for personal data (an Access policy email, a TXT verification value, the
-account id inside an import id). They are planted everywhere `tofu show -json` can carry a value; the
-summary must never contain any of them, whatever the plan looks like.
+account id inside an import id, a bare token, a dotted hostname-like value). They are planted everywhere
+`tofu show -json` can carry a value, for_each keys of addresses included; the summary must never contain
+any of them, whatever the plan looks like. The --keys-from fixture holds the sentinels only in value
+positions, so they never become printable keys.
 """
 
 import copy
@@ -23,8 +25,23 @@ SENTINELS = (
     "sentinel-owner@example.invalid",
     "sentinel-verification=7f3c9e1d2b",
     "5e171e1000000000000000000000beef",
+    "c0ffee5e171e10ab",
+    "sentinel.dotted.example",
+    "google-site-verification-Sent1nel_xyz",
 )
-EMAIL, TXT, ACCOUNT = SENTINELS
+EMAIL, TXT, ACCOUNT, TOKEN, DOTTED, VERIFICATION = SENTINELS
+KEYS_DIR = tempfile.TemporaryDirectory()
+# Committed map keys are printable; the same sentinels as values (or comments) must not make them so.
+Path(KEYS_DIR.name, "fixture.tf").write_text(
+    "locals {\n"
+    "  apps = {\n"
+    f'    "mail-hero"      = "{ACCOUNT}"\n'
+    f'    "todofy-backups" = "{DOTTED}"\n'
+    f'    "lab"            = {{ id = "{TOKEN}", key = "{VERIFICATION}" }}\n'
+    "  }\n"
+    "}\n"
+    f"# {ACCOUNT} = 1\n"
+)
 
 
 def change(actions, before=None, after=None, importing=None):
@@ -66,9 +83,14 @@ def plan():
             # A for_each key that is a personal value: the address itself must be withheld.
             {"address": f'cloudflare_dns_record.by_value["{EMAIL}"]', "change": change(["create"], None, RECORD)},
             {"address": f'cloudflare_dns_record.by_value["{TXT}"]', "change": change(["create"], None, RECORD)},
+            # for_each keys that are values but look like plain keys: replaced by placeholders.
+            {"address": f'cloudflare_dns_record.by_key["{ACCOUNT}"]', "change": change(["create"], None, RECORD)},
+            {"address": f'cloudflare_dns_record.by_key["{TOKEN}"]', "change": change(["create"], None, RECORD)},
+            {"address": f'module.m["{DOTTED}"].cloudflare_dns_record.by_key["{VERIFICATION}"]', "change": change(["update"], RECORD, RECORD)},
         ],
         "resource_drift": [
             {"address": "cloudflare_zero_trust_access_policy.owner", "change": change(["update"], POLICY, changed)},
+            {"address": f'cloudflare_dns_record.by_key["{DOTTED}"]', "change": change(["update"], RECORD, RECORD)},
         ],
         "output_changes": {
             "access_aud": change(["update"], {"x": EMAIL}, {"x": TXT}),
@@ -77,7 +99,8 @@ def plan():
     }
 
 
-def run(data, *args):
+def run(data, *args, keys=True):
+    args = (("--keys-from", KEYS_DIR.name) if keys else ()) + args
     out, err = io.StringIO(), io.StringIO()
     text = data if isinstance(data, str) else json.dumps(data)
     code = summary.main(list(args), stdin=io.StringIO(text), stdout=out, stderr=err)
@@ -93,14 +116,30 @@ class NeverPrintsValues(unittest.TestCase):
             self.assertNotIn("sentinel-owner", text)
             self.assertNotIn("example.invalid", text)
             self.assertNotIn("7f3c9e1d2b", text)
+            self.assertNotIn("Sent1nel", text)
 
     def test_the_summary_of_a_plan_full_of_sentinels_contains_none(self):
-        for flags in ((), ("--all",), ("--fail-on-destroy",), ("--all", "--fail-on-destroy")):
-            with self.subTest(flags=flags):
-                code, out, err = run(plan(), *flags)
-                self.assertIn(code, (0, 3))
-                self.assert_clean(out, err)
-                self.assertIn(summary.WITHHELD, out)
+        for keys in (True, False):
+            for flags in ((), ("--all",), ("--fail-on-destroy",), ("--all", "--fail-on-destroy")):
+                with self.subTest(keys=keys, flags=flags):
+                    code, out, err = run(plan(), *flags, keys=keys)
+                    self.assertIn(code, (0, 3))
+                    self.assert_clean(out, err)
+                    self.assertIn(summary.WITHHELD, out)
+                    self.assertRegex(out, r'\["<key [0-9]+>"\]')
+
+    def test_value_like_for_each_keys_become_placeholders(self):
+        keys = summary.Keys(summary.config_keys(KEYS_DIR.name))
+        self.assertEqual(keys.allowed, {"mail-hero", "todofy-backups", "lab"})
+        for key in (ACCOUNT, TOKEN, DOTTED, VERIFICATION, "lab.example", "MAIL-HERO"):
+            with self.subTest(key=key[:6]):
+                address = summary.safe_address(f'a.b["{key}"]', keys)
+                self.assertNotIn(key, address)
+                self.assertRegex(address, r'^a\.b\["<key [0-9]+>"\]$')
+        # The same key gets the same placeholder within one summary; committed keys print as they are.
+        self.assertEqual(summary.safe_address(f'c.d["{TOKEN}"]', keys), 'c.d' + summary.safe_address(f'a.b["{TOKEN}"]', keys)[3:])
+        self.assertEqual(summary.safe_address('module.x["lab"].a.b["mail-hero"]', keys), 'module.x["lab"].a.b["mail-hero"]')
+        self.assertEqual(summary.safe_address('a.b["mail-hero"]'), 'a.b["<key 1>"]')
 
     def test_invalid_input_is_never_quoted(self):
         for text in (f'{{"format_version": "1.2", "resource_changes": [{{"address": "{EMAIL}"', TXT, EMAIL,
@@ -134,8 +173,8 @@ class Actions(unittest.TestCase):
     def test_counts_and_rows(self):
         code, out, _ = run(plan())
         self.assertEqual(code, 0)
-        self.assertIn("import: 2, create: 3, update: 2, replace: 1, delete: 1, forget: 0, read: 0, no-op: 1", out)
-        self.assertIn("changed outside OpenTofu: 1; output changes: 1", out)
+        self.assertIn("import: 2, create: 5, update: 3, replace: 1, delete: 1, forget: 0, read: 0, no-op: 1", out)
+        self.assertIn("changed outside OpenTofu: 2; output changes: 1", out)
         self.assertIn("| import | `cloudflare_zero_trust_access_policy.owner` |", out)
         self.assertIn("| import+update | `cloudflare_zero_trust_access_application.adopted` |", out)
         self.assertIn('| replace | `cloudflare_r2_bucket.app["todofy-backups"]` |', out)
@@ -172,8 +211,10 @@ class Actions(unittest.TestCase):
         self.assertEqual(summary.classify({"actions": ["no-op"], "importing": {"id": "x"}}), "import")
 
     def test_addresses(self):
-        for address in ("a.b", 'module.x.cloudflare_r2_bucket.app["mail-hero-store"]', "a.b[0]", "data.x.y"):
+        for address in ("a.b", "a.b[0]", "data.x.y", "module.x[2].a.b[1]"):
             self.assertEqual(summary.safe_address(address), address)
+        self.assertEqual(summary.safe_address('module.x.cloudflare_r2_bucket.app["mail-hero-store"]', summary.Keys(frozenset({"mail-hero-store"}))),
+                         'module.x.cloudflare_r2_bucket.app["mail-hero-store"]')
         for address in ('a.b["x y"]', 'a.b["a@b"]', "a b", "", None, 3, "a." * 200 + "b", 'a.b["x"]\n| x |'):
             self.assertEqual(summary.safe_address(address), summary.WITHHELD)
 

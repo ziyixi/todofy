@@ -33,8 +33,10 @@ terraform {
   #   # endpoints = { s3 = "https://<account id>.r2.cloudflarestorage.com" }   # -backend-config, not here
   # }
   #
-  # Client-side state AND plan encryption. The passphrase is the GitHub secret INFRA_STATE_PASSPHRASE
-  # (the owner keeps an offline copy), passed as TF_VAR_state_passphrase; uncomment the variable
+  # Client-side state AND plan encryption. .github/scripts/infra_guard.py rejects a backend (in any file)
+  # without this block enforcing both, and without a sensitive state_passphrase variable. The passphrase
+  # is the GitHub secret INFRA_STATE_PASSPHRASE (the owner keeps an offline copy), passed as
+  # TF_VAR_state_passphrase; uncomment the variable
   # "state_passphrase" in variables.tf together with this block. Start the remote state fresh (import
   # again in CI) so no unencrypted fallback is needed.
   #

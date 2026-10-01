@@ -1,7 +1,7 @@
 # Adopt the existing objects. With local or (later) remote state, a plan that still contains these blocks
 # reports them as "import" until an apply records them; after the first P4 apply they are no-ops and may be
-# deleted. The ids are opaque object ids (D1 ids are already public in each wrangler.toml); the account id
-# comes from a variable. Written by hand from the read-only API inventory (cf-terraforming was not needed
+# deleted. The ids are opaque ids of the objects infra/ manages, committed on purpose (README.md
+# "Variables": D1 ids are already public in each wrangler.toml); the account id comes from a variable. Written by hand from the read-only API inventory (cf-terraforming was not needed
 # for 13 objects); README.md "Import notes" records each one.
 
 locals {

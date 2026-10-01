@@ -814,10 +814,11 @@ class InfraJob(unittest.TestCase):
             "tofu_wrapper: false",
             "python3 -m unittest discover -s ../tools/infra-plan-summary",
             "python3 -m unittest discover -s tests",
-            'data[[:space:]]+"(external|http)"',
+            'data[[:space:]]+"?(external|http)"?',
             "provisioner[[:space:]]+",
             "grep -rlIE",
             "git ls-files -- .",
+            "python3 ../.github/scripts/infra_guard.py .",
         ):
             with self.subTest(required=required):
                 self.assertIn(required, block)

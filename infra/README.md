@@ -23,11 +23,22 @@ in the IaC plan (OpenTofu import, plan only). P4 is apply.
 Only objects that belong to the monorepo apps go here: mail-hero, todofy and todofy-core, the dashboard
 `home`, `lab`, the website `ziyixi-website` and the relay `ziyixi-notion-publish`. Nothing unrelated is
 imported, declared, read or modelled, not even read-only.
-[`test_infra_config.py`](../.github/scripts/test_infra_config.py) enforces the boundary on every push:
+[`infra_guard.py`](../.github/scripts/infra_guard.py) enforces the boundary on every push (through
+[`test_infra_config.py`](../.github/scripts/test_infra_config.py) in `Changes`, and again in
+`Infra checks`). It reads the HCL block structure, so quoted and bare labels (`resource "a" "b"` and
+`resource a b`) and nested blocks are all seen, and anything it cannot read fails:
 
-- it allows only four resource types;
-- it allows no data source, no module and no provisioner;
-- every resource must have `prevent_destroy`.
+- only four resource types, and every resource has its own `lifecycle { prevent_destroy = true }`;
+- no data source (not even inside a `check` block), module, `check`, `ephemeral` or `removed` block,
+  no provisioner or connection, and no provider other than `cloudflare`;
+- committed files are only `*.tf`, the lock file, the docs, `local.tfvars.example` and the Python
+  scripts and tests. Any other file fails whatever its name: `*.tofu`, `*.tf.json` and `*.tofu.json`
+  (OpenTofu would load them too), and state, plan, values or log files such as `tfplan` or `plan.out`;
+- a `backend` or `cloud` block is accepted only together with an `encryption` block that enforces both
+  state and plan encryption and a sensitive `state_passphrase` variable.
+
+[`test_infra_guard.py`](../.github/scripts/test_infra_guard.py) tests the guard itself against
+configurations built to slip past it.
 
 ### Managed here (13 objects)
 
@@ -50,9 +61,10 @@ Every object has `prevent_destroy`, for two reasons:
 - **Storage.** A destroyed database or bucket means lost data. A recreated one gets an id that no
   `wrangler.toml` knows.
 
-**The two reusable policies are shared.** Each is attached to six Access applications: the five
-monorepo apps above, plus self-hosted services outside the monorepo. Changing a policy here therefore
-also changes who can reach those services. This prototype never changes a policy's identity rules,
+**The two reusable policies are shared.** Each is attached to six Access applications: the four
+owner-facing monorepo apps (Mail Hero, Todofy, Home, Lab), plus two applications of self-hosted
+services outside the monorepo. The Mail Hero backup API uses only its own application-scoped policy.
+Changing a reusable policy here therefore also changes who can reach those two outside services. This prototype never changes a policy's identity rules,
 because the include/require values are exactly the live values, passed in through variables. Renaming
 them to neutral names (`owner`, `owner-github`) is a P4 decision for the owner, because it affects
 those other apps too.
@@ -97,7 +109,8 @@ only, no values were copied). Every record that a monorepo app depends on alread
 So the set of records that a monorepo app needs and that neither wrangler nor Email Routing owns is
 **empty**. [`dns.tf`](dns.tf) explains this in comments only. Add a record here only when an app needs
 one that no one else owns, for example a future sending-domain DKIM record. Take its value from a
-variable, and add `cloudflare_dns_record` to `ALLOWED_TYPES` in the same change.
+variable, and add `cloudflare_dns_record` to `ALLOWED_TYPES` in
+[`infra_guard.py`](../.github/scripts/infra_guard.py) in the same change.
 
 ## Storage
 
@@ -131,9 +144,17 @@ and variables ([`variables.tf`](variables.tf), [`local.tfvars.example`](local.tf
 | `access_allowed_idp_ids` | no | Identity provider ids allowed on the four owner-facing apps |
 | `access_github_idp_id` | no | The GitHub identity provider that "Mail Hero GitHub owner" requires |
 
-The committed ids in [`imports.tf`](imports.tf) and [`scripts/local_tfvars.py`](scripts/local_tfvars.py)
-(Access app ids, reusable policy ids, the backup app's policy id, D1 ids) are opaque object ids, not
-credentials. The D1 ids were already public in the wrangler configs.
+**Which ids are committed (one rule).** Ids of the objects this directory manages are committed:
+the Access application ids, the two reusable policy ids and the backup app's application-scoped policy
+id (in [`imports.tf`](imports.tf), [`access.tf`](access.tf) and
+[`scripts/local_tfvars.py`](scripts/local_tfvars.py)), and the D1 ids. They are opaque object handles,
+not credentials: no API call can use them without a token for the account. Import needs them, and a
+reviewer has to be able to see which object each address adopts. The D1 ids, the Mail Hero app id and the
+two reusable policy ids were already public (in the wrangler configs and
+`mail-hero/docs/verification-native.md`). Ids of objects **outside** the monorepo boundary that
+this configuration only references, namely the identity providers and the account, come from variables,
+so `infra/` adds no copy of them. The guard test rejects any 32-hex-digit value (the format of account
+and zone ids) under `infra/`.
 
 Even with sensitive variables, `tofu show -json` writes **every value in plain text**: the sensitive
 variables, the include emails read back from the API, and the account id inside import ids. Plan files
@@ -162,8 +183,12 @@ cd infra && tofu init -input=false
 # 3. Plan. Raw output goes to a file outside the repo, never to the terminal you might paste from.
 tofu plan -input=false -lock=false -state="$WORK/terraform.tfstate" -var-file="$VALUES" \
   -out="$WORK/plan.bin" -detailed-exitcode > "$WORK/plan.log" 2>&1; echo "exit $?"
-tofu show -json "$WORK/plan.bin" | python3 ../tools/infra-plan-summary/summary.py
+tofu show -json "$WORK/plan.bin" | python3 ../tools/infra-plan-summary/summary.py --keys-from .
 ```
+
+`--keys-from .` lets the summary print the `for_each` keys that are written as map keys in the
+committed `*.tf` files (such as `"mail-hero"`). Those are already public. Any other key, for example
+one that is an id, a hostname or a token, is printed as a numbered placeholder (`["<key 1>"]`).
 
 With an empty state, the plan reports **13 to import, 0 to add, 0 to change, 0 to destroy**. To get a
 zero-diff baseline without any apply, adopt the objects into the local state. `tofu import` writes only
@@ -238,6 +263,11 @@ repository, the read-only token was used through the environment, and the person
 4. A summary of that real plan with `--all` contained none of the values from the local values file.
 5. By hand, the live AUDs of Mail Hero, Todofy, Home and Lab were checked against the committed
    `ACCESS_AUDIENCE` values: all four match.
+6. After the guard and summary hardening (structural guard, file allowlist, for_each key
+   placeholders), the plan was run again against the same local state: "No changes" (exit 0), summary
+   `no-op: 13`, `--fail-on-destroy` exit 0. Two addresses were "changed outside OpenTofu"
+   (`cloudflare_d1_database.app["mail-hero"]` and `["todofy"]`, `file_size` only). The `--all` summary
+   contained none of the values from the local values file.
 
 No `tofu apply` was run, and nothing was written to Cloudflare or GitHub.
 
@@ -248,11 +278,14 @@ The job runs when `infra/`, `tools/infra-plan-summary/` or `.github/` changes
 uses no Cloudflare token, no state and no plan. Steps:
 
 - **Guards.** Fail on:
-  - `external` or `http` data sources, which can run code or send data out;
+  - `external` or `http` data sources, which can run code or send data out (quoted or bare labels);
   - provisioners;
   - a lock file holding any provider other than Cloudflare;
   - any email address in `infra/` (only file names are printed);
-  - tracked state, plan or tfvars files.
+  - any tracked file outside the allowed kinds (an allowlist, so a plan named `tfplan` or `plan.out`
+    fails too);
+  - anything [`infra_guard.py`](../.github/scripts/infra_guard.py) reports (see [Scope](#scope)). The
+    greps are a quick first line; the guard reads the structure and is the authority.
 - `tofu fmt -check -recursive`.
 - `tofu init -backend=false -lockfile=readonly` and `tofu validate`. Init only downloads the provider,
   checked against the committed hashes.
@@ -295,11 +328,12 @@ plan assumed. They need **no DNS, zone, tunnel or Email Routing permission**.
   - Verify that the S3 credentials derived from the token work.
   - Test whether R2 honours `If-None-Match: *`; enable `use_lockfile` only if it does. Until then,
     rely on a GitHub `concurrency` group.
-  - Uncomment the `backend "s3"` and `encryption` blocks and the `state_passphrase` variable, then
-    import again into the new encrypted state.
+  - Uncomment the `backend "s3"` and `encryption` blocks and the `state_passphrase` variable
+    **together**, then import again into the new encrypted state. The guard rejects a backend without
+    an encryption block that enforces both state and plan encryption, wherever the backend is declared.
 - **Plan job on branch pushes.** It uses the `infra-plan` environment and the read token, and runs
-  `tofu plan -out` with stdout and stderr sent to `/dev/null`. Only `summary.py` output goes to the
-  step summary. No artifact is uploaded. A sentinel check runs against the job log.
+  `tofu plan -out` with stdout and stderr sent to `/dev/null`. Only the output of
+  `summary.py --keys-from infra` goes to the step summary. No artifact is uploaded. A sentinel check runs against the job log.
 - **Nightly drift.** Run `tofu plan -detailed-exitcode` and report through the redacted summary only.
   Fail on planned actions, not on "changed outside" entries (see [Drift signal](#drift-signal)).
 

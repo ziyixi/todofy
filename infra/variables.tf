@@ -32,9 +32,9 @@ variable "access_github_owner_emails" {
   }
 }
 
-# Opaque identifiers of account objects this configuration references but does not manage (identity
-# providers). Not secret, but kept out of the public repository
-# with the rest of the account-specific values.
+# Opaque identifiers of account objects OUTSIDE the monorepo boundary that this configuration only
+# references (identity providers). Not secret; the rule (README.md "Variables"): ids of objects infra/
+# manages are committed, ids of objects outside the boundary (identity providers, the account) are not.
 variable "access_allowed_idp_ids" {
   description = "Identity provider ids allowed on the owner-facing Access applications (Mail Hero, Todofy, Home, Lab)."
   type        = set(string)

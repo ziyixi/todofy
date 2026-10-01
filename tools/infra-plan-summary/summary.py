@@ -2,15 +2,20 @@
 """Turn `tofu show -json <plan>` into a redacted summary: resource addresses and actions, nothing else.
 
 Usage:
-  tofu show -json plan.bin | python3 tools/infra-plan-summary/summary.py [--all] [--fail-on-destroy]
-  python3 tools/infra-plan-summary/summary.py plan.json
+  tofu show -json plan.bin | python3 tools/infra-plan-summary/summary.py --keys-from infra [--all] [--fail-on-destroy]
+  python3 tools/infra-plan-summary/summary.py --keys-from infra plan.json
 
 Why: the JSON form of a plan carries every attribute value in plain text, including values that came
 from sensitive variables (Access policy emails) and values read back from the API. ziyixi/todofy is a
 public repository, so a plan's raw output must never reach a log, an issue, a commit or an artifact.
 This script reads only the keys it needs (addresses and action lists) and never echoes a value, an
 import id, a variable or a parse error's text. An address that does not look like a plain OpenTofu
-address (for example a for_each key that is not a simple name) is withheld rather than printed.
+address is withheld rather than printed.
+
+for_each keys are part of an address but can be values (an id, a hostname, a token). A string key is
+printed only if it is written as a quoted map key in the committed *.tf files of --keys-from (so it is
+already public in the repository); any other key is replaced by a numbered placeholder such as
+["<key 1>"]. Without --keys-from every string key is replaced.
 
 Exit codes: 0 summary written; 2 the input is not a plan in JSON form; 3 --fail-on-destroy and the plan
 deletes, replaces or forgets something (the future apply gate, infra/README.md).
@@ -25,12 +30,16 @@ import json
 import re
 import sys
 from collections import Counter
+from pathlib import Path
 from typing import Any, TextIO
 
 # module.<name>. ... <type>.<name> with optional [<number>] or ["<simple key>"] after any part.
 _PART = r'[A-Za-z_][A-Za-z0-9_-]*(?:\[(?:[0-9]+|"[A-Za-z0-9_.-]+")\])?'
 SAFE_ADDRESS = re.compile(rf"^{_PART}(?:\.{_PART})*$")
 WITHHELD = "<address withheld: unexpected characters>"
+_KEY = re.compile(r'\["([^"]*)"\]')
+# A quoted map key in HCL: `"mail-hero" = ...` at the start of a line.
+_CONFIG_KEY = re.compile(r'^\s*"([A-Za-z0-9_.-]+)"\s*=', re.MULTILINE)
 
 ORDER = ("import", "create", "update", "replace", "delete", "forget", "read", "no-op")
 DESTRUCTIVE = {"replace", "delete", "forget"}
@@ -40,8 +49,34 @@ class NotAPlan(ValueError):
     """The input is not `tofu show -json` output for a plan. Its message never quotes the input."""
 
 
-def safe_address(value: Any) -> str:
-    return value if isinstance(value, str) and len(value) <= 300 and SAFE_ADDRESS.match(value) else WITHHELD
+class Keys:
+    """Prints a for_each key only if the committed configuration spells it; numbers the others."""
+
+    def __init__(self, allowed: frozenset[str] = frozenset()):
+        self.allowed = allowed
+        self.placeholders: dict[str, str] = {}
+
+    def __call__(self, match: re.Match) -> str:
+        key = match.group(1)
+        if key in self.allowed:
+            return match.group(0)
+        if key not in self.placeholders:
+            self.placeholders[key] = f'["<key {len(self.placeholders) + 1}>"]'
+        return self.placeholders[key]
+
+
+def config_keys(directory: str) -> frozenset[str]:
+    """The quoted map keys written in the committed *.tf files of a directory (public by construction)."""
+    keys: set[str] = set()
+    for path in sorted(Path(directory).glob("*.tf")):
+        keys.update(_CONFIG_KEY.findall(path.read_text(encoding="utf-8")))
+    return frozenset(keys)
+
+
+def safe_address(value: Any, keys: Keys | None = None) -> str:
+    if not (isinstance(value, str) and len(value) <= 300 and SAFE_ADDRESS.match(value)):
+        return WITHHELD
+    return _KEY.sub(keys or Keys(), value)
 
 
 def classify(change: Any) -> str:
@@ -66,7 +101,8 @@ def classify(change: Any) -> str:
     return word
 
 
-def summarize(plan: Any) -> dict[str, Any]:
+def summarize(plan: Any, keys: Keys | None = None) -> dict[str, Any]:
+    keys = keys or Keys()
     if not isinstance(plan, dict) or "format_version" not in plan:
         raise NotAPlan("not `tofu show -json` output")
     changes = plan.get("resource_changes") or []
@@ -78,17 +114,17 @@ def summarize(plan: Any) -> dict[str, Any]:
     for item in changes:
         if not isinstance(item, dict):
             raise NotAPlan("a resource change is not an object")
-        rows.append((classify(item.get("change")), safe_address(item.get("address"))))
+        rows.append((classify(item.get("change")), safe_address(item.get("address"), keys)))
     drifted = []
     for item in drift:
         if not isinstance(item, dict):
             raise NotAPlan("a drift entry is not an object")
-        drifted.append((classify(item.get("change")), safe_address(item.get("address"))))
+        drifted.append((classify(item.get("change")), safe_address(item.get("address"), keys)))
     output_rows = []
     for name, change in outputs.items():
         word = classify(change)
         if word != "no-op":
-            output_rows.append((word, safe_address(name)))
+            output_rows.append((word, safe_address(name, keys)))
     return {"rows": rows, "drift": drifted, "outputs": output_rows}
 
 
@@ -145,6 +181,7 @@ def main(argv: list[str] | None = None, stdin: TextIO | None = None, stdout: Tex
     parser.add_argument("plan", nargs="?", help="tofu show -json output (default: stdin)")
     parser.add_argument("--all", action="store_true", help="also list resources without changes")
     parser.add_argument("--fail-on-destroy", action="store_true", help="exit 3 if anything is deleted, replaced or forgotten")
+    parser.add_argument("--keys-from", metavar="DIR", help="print for_each keys written as map keys in DIR/*.tf (e.g. infra)")
     args = parser.parse_args(argv)
     try:
         if args.plan:
@@ -156,13 +193,14 @@ def main(argv: list[str] | None = None, stdin: TextIO | None = None, stdout: Tex
             plan = json.loads(text)
         except ValueError:
             raise NotAPlan("input is not valid JSON") from None
-        summary = summarize(plan)
+        keys = Keys(config_keys(args.keys_from) if args.keys_from else frozenset())
+        summary = summarize(plan, keys)
     except NotAPlan as error:
         # The message is one of the fixed strings above; the input itself is never quoted.
         print(f"infra-plan-summary: {error}", file=stderr)
         return 2
-    except OSError:
-        print("infra-plan-summary: cannot read the plan file", file=stderr)
+    except (OSError, UnicodeDecodeError):
+        print("infra-plan-summary: cannot read the plan file or the --keys-from directory", file=stderr)
         return 2
     stdout.write(render(summary, show_all=args.all))
     if args.fail_on_destroy and destructive(summary):

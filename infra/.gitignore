@@ -1,17 +1,29 @@
-# State, plans and values never enter the repository (infra/README.md "Running a plan locally").
+# State, plans, values and logs never enter the repository (infra/README.md "Running a plan locally").
+# This list is a convenience: .github/scripts/infra_guard.py allows only the committed file kinds
+# (ALLOWED_FILES) and fails on anything else under infra/, whatever its name.
 .terraform/
 *.tfstate
 *.tfstate.*
 .terraform.tfstate.lock.info
+# Plans hold every value in plain text, sensitive variables included.
+tfplan
+tfplan.*
 *.tfplan
-plan.bin
-plan.json
+*.tfplan.*
+plan
+plan.*
+*.plan
+*.out
+*.json
+*.log
 *.tfvars
 *.tfvars.json
 !local.tfvars.example
 crash.log
 crash.*.log
+# OpenTofu loads these too; infra/ uses *.tf only.
+*.tofu
+*.tofu.json
+*.tf.json
 override.tf
-override.tf.json
 *_override.tf
-*_override.tf.json

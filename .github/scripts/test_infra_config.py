@@ -2,15 +2,17 @@
 
 They live here, not in infra/, for the reason test_wrangler_configs.py does: they read other apps' folders,
 and the Changes job runs this directory on every push, so a wrangler.toml change that infra/ no longer
-matches fails at once, not at the next infra/ change. No OpenTofu and no network: a regex reading of the
-.tf files is enough for these guards ("Infra checks" also runs `tofu validate`). Needs Python 3.11+
+matches fails at once, not at the next infra/ change. No OpenTofu and no network: infra_guard.py reads the
+HCL structure, and regexes read the locals maps ("Infra checks" also runs `tofu validate`). Needs Python 3.11+
 (tomllib), as CI's ubuntu-24.04 python3 has; with an older python3 the module is skipped locally (under
 GitHub Actions a missing tomllib is an error):
     uv run --no-project --python 3.12 python -m unittest discover -s .github/scripts
 
 What they keep true (infra/README.md):
-- infra/ declares only the four resource types of the monorepo boundary, no data source, no module, no
-  provisioner, and every resource has prevent_destroy.
+- infra_guard.py finds nothing: only the four resource types of the monorepo boundary, each with its own
+  prevent_destroy; no data source, module, provisioner, other config file kind or state/plan/values file;
+  no backend without enforced state and plan encryption (test_infra_guard.py tests the guard itself).
+- The prototype has no backend at all yet (state stays local, outside the repository).
 - Every owner-facing Access application gates a Custom Domain its app's wrangler.toml declares.
 - The D1 databases and R2 buckets are exactly those the production configs bind, and each D1 import id is
   the database_id committed there.
@@ -33,16 +35,10 @@ except ModuleNotFoundError:
         "uv run --no-project --python 3.12 python -m unittest discover -s .github/scripts"
     ) from None
 
+import infra_guard  # noqa: E402  (same directory; unittest discover puts it on sys.path)
+
 REPO = Path(__file__).resolve().parents[2]
 INFRA = REPO / "infra"
-
-# The monorepo boundary (owner rule 2026-10-01). Adding a type here is a deliberate scope decision.
-ALLOWED_TYPES = {
-    "cloudflare_zero_trust_access_application",
-    "cloudflare_zero_trust_access_policy",
-    "cloudflare_d1_database",
-    "cloudflare_r2_bucket",
-}
 # Worker name -> production config (the same list as test_wrangler_configs.py).
 PRODUCTION = {
     "mail-hero": "mail-hero/wrangler.toml",
@@ -53,10 +49,6 @@ PRODUCTION = {
     "ziyixi-notion-publish": "website/relay/wrangler.toml",
     "lab": "lab/wrangler.toml",
 }
-
-
-def tf_text() -> str:
-    return "\n".join(path.read_text() for path in sorted(INFRA.glob("*.tf")))
 
 
 def uncommented(text: str) -> str:
@@ -77,19 +69,16 @@ def hcl_map(text: str, name: str) -> dict[str, str]:
 
 
 class Boundary(unittest.TestCase):
-    def test_only_the_monorepo_resource_types(self):
-        code = uncommented(tf_text())
-        types = set(re.findall(r'^\s*resource\s+"([^"]+)"', code, re.MULTILINE))
-        self.assertTrue(types)
-        self.assertLessEqual(types, ALLOWED_TYPES)
-        self.assertNotRegex(code, r'(?m)^\s*data\s+"', "data sources read objects outside the boundary; none are needed")
-        self.assertNotRegex(code, r'(?m)^\s*module\s+"')
-        self.assertNotRegex(code, r'(?m)^\s*provisioner\s+"')
+    def test_the_guard_finds_nothing(self):
+        self.assertEqual(infra_guard.check(INFRA), [])
 
-    def test_every_resource_is_protected_from_destroy(self):
-        code = uncommented(tf_text())
-        resources = len(re.findall(r'^resource\s+"', code, re.MULTILINE))
-        self.assertEqual(code.count("prevent_destroy = true"), resources)
+    def test_no_backend_in_the_prototype(self):
+        for path in sorted(INFRA.glob("*.tf")):
+            for block in infra_guard.parse(path.read_text()).blocks:
+                if block.type == "terraform":
+                    with self.subTest(path=path.name):
+                        self.assertEqual([b.type for b in block.blocks if b.type in ("backend", "cloud")], [],
+                                         "remote state is not enabled in the prototype")
 
     def test_one_provider_pinned_exactly_and_locked(self):
         versions = uncommented((INFRA / "versions.tf").read_text())
@@ -98,10 +87,8 @@ class Boundary(unittest.TestCase):
         lock = (INFRA / ".terraform.lock.hcl").read_text()
         self.assertEqual(re.findall(r'^provider "([^"]+)"', lock, re.MULTILINE), ["registry.opentofu.org/cloudflare/cloudflare"])
         self.assertIn(f'version     = "{pin.group(1)}"', lock)
-        self.assertNotRegex(versions, r'(?m)^\s*backend\s+"', "remote state is not enabled in the prototype")
-        self.assertNotRegex(versions, r"(?m)^\s*cloud\s*\{")
 
-    def test_no_account_ids_emails_or_state_committed(self):
+    def test_no_account_ids_or_emails_committed(self):
         for path in sorted(INFRA.rglob("*")):
             if not path.is_file() or ".terraform" in path.parts or path.suffix == ".pyc":
                 continue
@@ -109,9 +96,7 @@ class Boundary(unittest.TestCase):
             with self.subTest(path=path.relative_to(REPO).as_posix()):
                 self.assertNotRegex(text, r"(?<![0-9a-f-])[0-9a-f]{32}(?![0-9a-f-])")
                 self.assertNotRegex(text, r"[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}")
-                self.assertNotRegex(path.name, r"\.tfstate|\.tfplan$|^plan\.(bin|json)$")
-                if path.name.endswith(".tfvars") or path.name.endswith(".tfvars.json"):
-                    self.fail("tfvars files hold account values and stay outside the repository")
+        # State, plan and values files of any name: infra_guard.ALLOWED_FILES (test_the_guard_finds_nothing).
 
 
 class MatchesTheApps(unittest.TestCase):
