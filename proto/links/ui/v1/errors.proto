@@ -32,9 +32,10 @@ enum ErrorReason {
   // not purged yet (AIP-164). The error carries that links.ui.v1.Link as a detail: its `delete_time` tells
   // the UI to offer UndeleteLink instead.
   ERROR_REASON_LINK_EXISTS = 1;
-  // FAILED_PRECONDITION (400): the link is deleted; undelete it first (UpdateLink, DeleteLink, RollbackLink).
+  // FAILED_PRECONDITION (400): the link is deleted; undelete it first (UpdateLink, RollbackLink). DeleteLink of a
+  // deleted link is NOT_FOUND instead (AIP-164), with the deleted links.ui.v1.Link as a detail.
   ERROR_REASON_LINK_DELETED = 2;
-  // FAILED_PRECONDITION (400): UndeleteLink of a link that is not deleted.
+  // ALREADY_EXISTS (409): UndeleteLink of a link that is not deleted (AIP-164). The error carries the link.
   ERROR_REASON_NOT_DELETED = 3;
   // ABORTED (409): the request's etag is stale (AIP-154). The error carries the current links.ui.v1.Link.
   ERROR_REASON_ETAG_MISMATCH = 4;

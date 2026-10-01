@@ -71,7 +71,7 @@ export const REASONS: Readonly<Record<Reason, { readonly code: Code; readonly me
   INTERNAL: { code: Code.INTERNAL, message: 'internal error', zh: '服务出错了，请稍后刷新页面' },
   LINK_EXISTS: { code: Code.ALREADY_EXISTS, message: 'a link holds this key', zh: '这个短链接已存在' },
   LINK_DELETED: { code: Code.FAILED_PRECONDITION, message: 'the link is deleted', zh: '这个短链接已删除，请先恢复' },
-  NOT_DELETED: { code: Code.FAILED_PRECONDITION, message: 'the link is not deleted', zh: '这个短链接没有被删除' },
+  NOT_DELETED: { code: Code.ALREADY_EXISTS, message: 'the link is not deleted', zh: '这个短链接没有被删除' },
   ETAG_MISMATCH: { code: Code.ABORTED, message: 'the link changed since the etag', zh: '这个短链接已在别处修改' },
   INVALID_KEY: { code: Code.INVALID_ARGUMENT, message: 'not a valid key', zh: '短链接名只能用小写字母、数字和连字符（不能以连字符开头，最多 63 个字符）' },
   RESERVED_KEY: { code: Code.INVALID_ARGUMENT, message: 'the key is reserved', zh: '这个名字保留给服务自身使用' },
@@ -291,13 +291,14 @@ export const handlers: ServiceHandlers<ShapeOf<typeof LinksUiService>, ApiContex
     return settle(LinkSchema, outcome, (row) => linkMessage(row));
   },
 
-  /** AIP-164: a soft delete that answers the deleted link. */
+  /** AIP-164: a soft delete that answers the deleted link; NOT_FOUND (with the link) when it is deleted already. */
   async deleteLink(request, { env, now }) {
     const key = keyOf(request.name);
     const outcome = await dependency(() => store.deleteLink(writeContext(env, now, request.requestId), key, request.etag, respondLink));
     return settle(LinkSchema, outcome, (row) => linkMessage(row));
   },
 
+  /** AIP-164: NOT_DELETED, ALREADY_EXISTS (409), when the link is not deleted. */
   async undeleteLink(request, { env, now }) {
     const key = keyOf(request.name);
     const outcome = await dependency(() => store.undeleteLink(writeContext(env, now, request.requestId), key, request.etag, respondLink));

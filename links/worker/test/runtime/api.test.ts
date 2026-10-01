@@ -133,9 +133,14 @@ describe('update', () => {
   it('refuses to change a deleted link', async () => {
     const link = await createLink(h, 'a', { target: 'https://a.example/' });
     await h.mutate('DELETE', `/_/api/v1/links/a?etag=${link.etag ?? ''}`);
-    expect(reasonOf((await h.mutate('PATCH', '/_/api/v1/links/a', { target: 'https://b.example/' })).body)).toBe('LINK_DELETED');
-    expect(reasonOf((await h.mutate('DELETE', '/_/api/v1/links/a')).body)).toBe('LINK_DELETED');
-    expect(reasonOf((await h.mutate('POST', '/_/api/v1/links/a:rollback', { revision_id: '1' })).body)).toBe('LINK_DELETED');
+    const patched = await h.mutate('PATCH', '/_/api/v1/links/a', { target: 'https://b.example/' });
+    expect([patched.status, reasonOf(patched.body)]).toEqual([400, 'LINK_DELETED']);
+    // AIP-164: deleting a deleted resource is NOT_FOUND (no allow_missing); the deleted link comes as a detail.
+    const again = await h.mutate('DELETE', '/_/api/v1/links/a');
+    expect([again.status, reasonOf(again.body)]).toEqual([404, 'NOT_FOUND']);
+    expect(JSON.stringify(again.body)).toContain('"delete_time"');
+    const rolled = await h.mutate('POST', '/_/api/v1/links/a:rollback', { revision_id: '1' });
+    expect([rolled.status, reasonOf(rolled.body)]).toEqual([400, 'LINK_DELETED']);
   });
 });
 
@@ -151,7 +156,10 @@ describe('delete, undelete, revisions and rollback (the launcher undo)', () => {
     expect(restored.body.delete_time).toBeUndefined();
     expect(restored.body.revision_id).toBe('1');
     expect((await h.fetch('/a')).headers.get('location')).toBe('https://a.example/');
-    expect(reasonOf((await h.mutate('POST', '/_/api/v1/links/a:undelete', {})).body)).toBe('NOT_DELETED');
+    // AIP-164: undeleting a resource that is not deleted is ALREADY_EXISTS (409).
+    const live = await h.mutate('POST', '/_/api/v1/links/a:undelete', {});
+    expect([live.status, reasonOf(live.body)]).toEqual([409, 'NOT_DELETED']);
+    expect(JSON.stringify(live.body)).toContain('"type.googleapis.com/links.ui.v1.Link"');
   });
 
   it('keeps the last 20 revisions newest first and rolls back to one as a new revision', async () => {

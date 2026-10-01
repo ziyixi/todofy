@@ -81,13 +81,15 @@ service LinksUiService {
   }
 
   // Soft-deletes a link (AIP-135, AIP-164): it stops resolving at once and is purged 30 days later. Answers the
-  // deleted link; NOT_FOUND when there is no link, LINK_DELETED when it is deleted already.
+  // deleted link; NOT_FOUND when there is no link, and when it is deleted already (AIP-164: then the error carries
+  // the deleted link as a detail).
   rpc DeleteLink(DeleteLinkRequest) returns (Link) {
     option (google.api.http) = {delete: "/_/api/v1/{name=links/*}"};
     option (google.api.method_signature) = "name";
   }
 
-  // Restores a deleted link before its purge (AIP-164) as it was; NOT_DELETED when it is not deleted.
+  // Restores a deleted link before its purge (AIP-164) as it was; NOT_DELETED (ALREADY_EXISTS) when it is not
+  // deleted.
   rpc UndeleteLink(UndeleteLinkRequest) returns (Link) {
     option (google.api.http) = {
       post: "/_/api/v1/{name=links/*}:undelete"

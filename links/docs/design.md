@@ -123,8 +123,8 @@ edit 2, a delete 2 (the purge index), a list with nothing due 0, an import 2 per
 | ListLinks | `GET /_/api/v1/links` | key order, `page_size` (100), AIP-158 tokens bound to `filter` and `show_deleted`, AIP-160 literals over key, description, target and tags |
 | CreateLink | `POST /_/api/v1/links?link_id=` | `LINK_EXISTS` (with the link as a detail) for a live or not yet purged deleted key, `LINKS_FULL` |
 | UpdateLink | `PATCH /_/api/v1/{link.name=links/*}` | AIP-134 `update_mask`; the link's `etag` (AIP-154) as a precondition when sent; a new revision |
-| DeleteLink | `DELETE /_/api/v1/{name=links/*}` | soft; answers the deleted link |
-| UndeleteLink | `POST ...:undelete` | `NOT_DELETED` |
+| DeleteLink | `DELETE /_/api/v1/{name=links/*}` | soft; answers the deleted link; `NOT_FOUND` (404, the link as a detail) when it is deleted already (AIP-164) |
+| UndeleteLink | `POST ...:undelete` | `NOT_DELETED`, `ALREADY_EXISTS` (409), for a live link (AIP-164) |
 | ListLinkRevisions | `GET ...:listRevisions` | newest first |
 | RollbackLink | `POST ...:rollback` | a kept revision's content as a new revision |
 | ImportLinks | `POST /_/api/v1/links:import` | JSON Lines, at most 100 links and 65,536 characters; every bad line is reported, the rest is written in one batch |

@@ -110,12 +110,28 @@ async function readForWrite(ctx: WriteContext, key: string, extra: D1PreparedSta
   return { replay, row: present(row, ctx.now), extra: results.slice(offset + 1) };
 }
 
+/** Why a mutation cannot apply to the link in its current state, or null when it can. */
+type Refusal = (row: LinkRow) => Failure['reason'] | null;
+
+/** UpdateLink and RollbackLink change live links only. */
+const liveOnly: Refusal = (row) => (row.delete_time === null ? null : 'LINK_DELETED');
+
+/**
+ * DeleteLink of a deleted link is NOT_FOUND, UndeleteLink of a live one ALREADY_EXISTS (NOT_DELETED), as AIP-164
+ * says; each with the link as a detail.
+ */
+const toggles =
+  (deleted: boolean): Refusal =>
+  (row) => {
+    if ((row.delete_time !== null) !== deleted) return null;
+    return deleted ? 'NOT_FOUND' : 'NOT_DELETED';
+  };
+
 /** After a conditional write changed nothing: why, from the link's state now. */
-async function lostRace<T>(ctx: WriteContext, key: string, deleted: 'LINK_DELETED' | 'NOT_DELETED'): Promise<Outcome<T>> {
+async function lostRace<T>(ctx: WriteContext, key: string, refusal: Refusal): Promise<Outcome<T>> {
   const row = present(await selectLink(ctx.db, key).first<LinkRow>(), ctx.now);
   if (row === null) return failed('NOT_FOUND');
-  if ((row.delete_time !== null) === (deleted === 'LINK_DELETED')) return failed(deleted, row);
-  return failed('ETAG_MISMATCH', row);
+  return failed(refusal(row) ?? 'ETAG_MISMATCH', row);
 }
 
 // ---- reads ------------------------------------------------------------------------------------------------------
@@ -231,13 +247,14 @@ export async function updateLink(ctx: WriteContext, key: string, etag: string, m
     if (read.replay !== null) return { kind: 'replay', response: read.replay };
     const row = read.row;
     if (row === null) return failed('NOT_FOUND');
-    if (row.delete_time !== null) return failed('LINK_DELETED', row);
+    const refused = liveOnly(row);
+    if (refused !== null) return failed(refused, row);
     if (etag !== '' && etag !== row.etag) return failed('ETAG_MISMATCH', row);
     const content = merge(row);
     if (sameContent(content, row)) return ok(row);
     const written = await writeRevision(ctx, row, content, respond);
     if (written !== null) return written;
-    if (etag !== '' || attempt > 0) return lostRace(ctx, key, 'LINK_DELETED');
+    if (etag !== '' || attempt > 0) return lostRace(ctx, key, liveOnly);
   }
 }
 
@@ -249,20 +266,24 @@ export async function rollbackLink(ctx: WriteContext, key: string, revision: num
   if (read.replay !== null) return { kind: 'replay', response: read.replay };
   const row = read.row;
   if (row === null) return failed('NOT_FOUND');
-  if (row.delete_time !== null) return failed('LINK_DELETED', row);
+  const refused = liveOnly(row);
+  if (refused !== null) return failed(refused, row);
   const kept = read.extra[0]?.results[0] as RevisionRow | undefined;
   if (kept === undefined) return failed('REVISION_NOT_FOUND');
   const content: LinkContent = { target: kept.target, path_mode: kept.path_mode, visibility: kept.visibility, description: kept.description, tags: kept.tags, expire_time: kept.expire_time };
   if (sameContent(content, row)) return ok(row);
-  return (await writeRevision(ctx, row, content, respond)) ?? lostRace(ctx, key, 'LINK_DELETED');
+  return (await writeRevision(ctx, row, content, respond)) ?? lostRace(ctx, key, liveOnly);
 }
 
-/** Soft-deletes the link (AIP-164): it stops resolving now and is purged PURGE_AFTER_MS later. */
+/**
+ * Soft-deletes the link (AIP-164): it stops resolving now and is purged PURGE_AFTER_MS later. A link that is deleted
+ * already is NOT_FOUND (AIP-164, no allow_missing), with the deleted link as a detail.
+ */
 export async function deleteLink(ctx: WriteContext, key: string, etag: string, respond: (row: LinkRow) => string): Promise<Outcome<LinkRow>> {
   return setDeleted(ctx, key, etag, true, respond);
 }
 
-/** Restores a deleted link that is not purged yet (AIP-164). */
+/** Restores a deleted link that is not purged yet (AIP-164); a live one is NOT_DELETED (ALREADY_EXISTS). */
 export async function undeleteLink(ctx: WriteContext, key: string, etag: string, respond: (row: LinkRow) => string): Promise<Outcome<LinkRow>> {
   return setDeleted(ctx, key, etag, false, respond);
 }
@@ -272,7 +293,8 @@ async function setDeleted(ctx: WriteContext, key: string, etag: string, deleted:
   if (read.replay !== null) return { kind: 'replay', response: read.replay };
   const row = read.row;
   if (row === null) return failed('NOT_FOUND');
-  if ((row.delete_time !== null) === deleted) return failed(deleted ? 'LINK_DELETED' : 'NOT_DELETED', row);
+  const refused = toggles(deleted)(row);
+  if (refused !== null) return failed(refused, row);
   if (etag !== '' && etag !== row.etag) return failed('ETAG_MISMATCH', row);
   const { now, db } = ctx;
   const next: LinkRow = { ...row, update_time: now, delete_time: deleted ? now : null, purge_time: deleted ? now + PURGE_AFTER_MS : null, etag: newEtag() };
@@ -285,7 +307,7 @@ async function setDeleted(ctx: WriteContext, key: string, etag: string, deleted:
   ];
   const results = await writeBatch(ctx, statements);
   if ('replay' in results) return { kind: 'replay', response: results.replay };
-  return changes(results[PURGES]) === 1 ? ok(next) : lostRace(ctx, key, deleted ? 'LINK_DELETED' : 'NOT_DELETED');
+  return changes(results[PURGES]) === 1 ? ok(next) : lostRace(ctx, key, toggles(deleted));
 }
 
 // ---- import -----------------------------------------------------------------------------------------------------------

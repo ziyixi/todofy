@@ -139,12 +139,12 @@ export class FakeServer {
       },
       deleteLink: (request) => {
         const base = this.current(request.name)
-        if (base.deleteTime !== undefined) fail(Code.FAILED_PRECONDITION, 'LINK_DELETED', base)
+        if (base.deleteTime !== undefined) fail(Code.NOT_FOUND, 'NOT_FOUND', base)
         return Promise.resolve(this.next(base, { deleteTime: timestampFromMs(NOW), purgeTime: timestampFromMs(NOW + 30 * 86_400_000) }, false))
       },
       undeleteLink: (request) => {
         const base = this.current(request.name)
-        if (base.deleteTime === undefined) fail(Code.FAILED_PRECONDITION, 'NOT_DELETED', base)
+        if (base.deleteTime === undefined) fail(Code.ALREADY_EXISTS, 'NOT_DELETED', base)
         return Promise.resolve(this.next(base, { deleteTime: undefined, purgeTime: undefined }, false))
       },
       listLinkRevisions: (request) => {
