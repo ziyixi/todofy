@@ -98,8 +98,8 @@ key.
   etag (16 random hex digits, new on every write). The only secondary index is `links_purge (purge_time) WHERE
   purge_time IS NOT NULL`, which costs a write only for deleted rows.
 - `link_revisions` (`WITHOUT ROWID`, `(key, revision)`): the content of each change, the last 20 per link.
-- `request_log` (`WITHOUT ROWID`, request_id, a UUID4 by a `CHECK`): the first response of each mutation sent with a
-  request ID, for 24 hours, with the rpc (`method`) and the resource it named (`name`, `links/<key>`, empty for an
+- `request_log` (`WITHOUT ROWID`, request_id: a UUID4, which the transcoder checks, of 36 characters, which a `CHECK`
+  holds): the first response of each mutation sent with a request ID, for 24 hours, with the rpc (`method`) and the resource it named (`name`, `links/<key>`, empty for an
   import). A repeat is answered with that response only when both match; the ID reused for another rpc or link is
   `INVALID_ARGUMENT` (`BAD_REQUEST`) and applies nothing.
 
