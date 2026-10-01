@@ -2,8 +2,17 @@
  * CPU of the heaviest handlers inside workerd, against Workers Free's 10 ms per request (../../../docs/design.md
  * "Free limits"). workerd's DevTools inspector records a sampled CPU profile of the Worker's isolate around each
  * request; the CPU time is the sum of the sampled intervals that are not idle (D1 and outbound I/O run outside the
- * isolate and are not counted, as on Cloudflare). This is an estimate on the test machine, not Cloudflare's meter. Each request runs several times; the first includes the isolate's
- * warm-up and is reported separately.
+ * isolate and are not counted, as on Cloudflare). This is an estimate on the test machine, not Cloudflare's meter.
+ * Each request runs several times; the first includes the isolate's warm-up and is reported separately.
+ *
+ * The bounds are milliseconds of the reference machine (an Apple M1 Max), and the measured CPU scales with the
+ * machine running the test: GitHub runners measure the sync 1.1-2.1x the reference, varying 2x within an hour. So
+ * the test calibrates the machine in the same isolate: after the handlers, a fixed, deterministic workload shaped
+ * like the sync's work (CALIBRATION_SETUP) runs in the Worker's own global scope through the inspector's
+ * Runtime.evaluate, with the profiler running as for the handlers. Its warm median over CALIBRATION_REFERENCE_MS is
+ * the machine's speed (calibrate). Both bounds are multiplied by it, clamped to at least 1 so a faster machine never
+ * tightens the check against the Free limit. A speed above MAX_SPEED fails the test: a broken calibration or a
+ * machine too busy to measure must not hide a regression.
  */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { Meter } from '../../src/db.ts';
@@ -16,14 +25,14 @@ import { startHarness, storeTodoistKey, type FakeItem, type Harness } from './ha
 const PORT = 9_000 + Math.floor(Math.random() * 500);
 const FREE_CPU_MS = 10;
 /**
- * The bound for an isolate's first run of the sync. On the test machine it measures below FREE_CPU_MS (about 8.6 ms
- * for MAX_SYNC_ITEMS, of which about 6 ms is the first run of the sync's code with any answer size; 2,000 items
- * measured 10-14 ms). A CI runner is slower than the test machine, so this bound only catches a large regression;
- * the printed number is the one to watch. On Cloudflare a request stopped for CPU resumes from its pending chunk
- * after the failure backoff (../../src/sync.ts).
+ * The bound for an isolate's first run of the sync, in reference milliseconds. The reference machine measures about
+ * 8.6 ms for MAX_SYNC_ITEMS, of which about 6 ms is the first run of the sync's code with any answer size; 2,000
+ * items measured 10-14 ms. A first run is a single measurement, not a best of several, so the bound keeps room for
+ * its noise and only catches a large regression; the printed number is the one to watch. On Cloudflare a request
+ * stopped for CPU resumes from its pending chunk after the failure backoff (../../src/sync.ts).
  */
 const COLD_BOUND_MS = 1.5 * FREE_CPU_MS;
-/** Warm runs keep a margin below the limit. */
+/** Warm runs keep a margin below the limit (reference milliseconds). */
 const WARM_BOUND_MS = 0.6 * FREE_CPU_MS;
 const SAMPLE_US = 100;
 /**
@@ -32,14 +41,93 @@ const SAMPLE_US = 100;
  */
 const MAX_SAMPLE_US = 4 * SAMPLE_US;
 
+/** The global the calibration workload is installed as, in the Worker's isolate of this test only. */
+const CALIBRATION_FN = '__flowdayCpuCalibration';
+const CALIBRATION_ITEMS = 1000;
+/** Passes per measured call: one pass is about 1.3 ms, too few 100 µs samples for a steady number. */
+const CALIBRATION_PASSES = 4;
+/**
+ * Installs the calibration workload in the Worker's global scope. Setup, outside any measurement: a fixed synthetic
+ * Todoist answer of CALIBRATION_ITEMS items with every field of an API v1 item (about 590 KiB of JSON; the ids are
+ * a fixed permutation, so the sort has work to do). Each call then makes CALIBRATION_PASSES passes of the sync's kind
+ * of work over it: parse the answer, drop completed items, sort by id, map each item to a row (labels serialised,
+ * the due date cut to a day) and serialise the rows. No clock, randomness or I/O: the same work on every machine,
+ * and the call returns CALIBRATION_CHARS. Any change to it changes its cost: measure CALIBRATION_REFERENCE_MS again.
+ */
+const CALIBRATION_SETUP = `(() => {
+  const items = [];
+  for (let i = 0; i < ${String(CALIBRATION_ITEMS)}; i += 1) {
+    items.push({
+      id: 'cal-' + String((i * 7919) % ${String(CALIBRATION_ITEMS)}).padStart(5, '0'),
+      user_id: '1', project_id: 'p-' + String(i % 8), section_id: i % 3 === 0 ? 's-' + String(i % 8) : null,
+      parent_id: null, added_by_uid: '1', assigned_by_uid: null, responsible_uid: null,
+      content: 'Calibration task ' + String(i) + ' with a realistic, somewhat longer title',
+      description: i % 3 === 0 ? 'A synthetic description of moderate length, two sentences. Nothing real.' : '',
+      priority: 1 + (i % 4), labels: i % 5 === 0 ? ['quick', 'home'] : [],
+      due: i % 2 === 0 ? { date: '2026-04-13T09:30:00', timezone: null, string: 'every weekday', lang: 'en', is_recurring: false } : null,
+      deadline: null, duration: i % 4 === 0 ? { amount: 30, unit: 'minute' } : null,
+      child_order: i, day_order: -1, is_collapsed: false, note_count: 0, checked: i % 50 === 0, is_deleted: false,
+      added_at: '2026-04-01T00:00:00.000000Z', updated_at: '2026-04-02T08:15:30.000000Z', completed_at: null,
+    });
+  }
+  const projects = Array.from({ length: 8 }, (_, n) => ({ id: 'p-' + String(n), name: 'Project ' + String(n), color: 'blue', is_deleted: false, is_archived: false }));
+  const text = JSON.stringify({ sync_token: 'calibration', full_sync: true, items, projects, user: {} });
+  globalThis.${CALIBRATION_FN} = () => {
+    let chars = 0;
+    for (let pass = 0; pass < ${String(CALIBRATION_PASSES)}; pass += 1) {
+      const answer = JSON.parse(text);
+      const names = new Map(answer.projects.map((project) => [project.id, project.name]));
+      const rows = answer.items
+        .filter((item) => !item.checked && !item.is_deleted)
+        .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
+        .map((item) => ({
+          id: item.id, todoist_id: item.id, title: item.content, description: item.description === '' ? null : item.description,
+          project_name: names.get(item.project_id) ?? null, priority: item.priority, labels: JSON.stringify(item.labels),
+          estimated_mins: item.duration === null ? null : item.duration.amount,
+          due_date: item.due === null ? null : item.due.date.slice(0, 10), created_at: item.added_at,
+        }));
+      chars += JSON.stringify(rows).length;
+    }
+    return chars;
+  };
+})()`;
+/** What a call of the calibration returns: proof that it ran the whole workload. */
+const CALIBRATION_CHARS = CALIBRATION_PASSES * 293_004;
+/**
+ * The calibration's warm median wall time on the reference machine (an Apple M1 Max, workerd 1.20260926.1): the
+ * median of 12 runs of this file, which measured 4.59-5.28 ms. Measure it again when the workload or a workerd
+ * update changes its cost.
+ */
+const CALIBRATION_REFERENCE_MS = 4.8;
+const CALIBRATION_WARMUP = 3;
+const CALIBRATION_RUNS = 10;
+/**
+ * The slowest machine the bounds are scaled for: GitHub runners measure about 1.1-2.1, the reference machine with all
+ * but one core busy up to 3.5.
+ */
+const MAX_SPEED = 5;
+
 let h: Harness;
-let send: (method: string, params?: Record<string, unknown>) => Promise<{ result?: { profile?: Profile } }>;
+let send: (method: string, params?: Record<string, unknown>) => Promise<Reply>;
 let socket: WebSocket;
+/** The Worker's execution context (its global scope), the target of Runtime.evaluate. */
+let workerContext: string | undefined;
 
 interface Profile {
   nodes: { id: number; callFrame: { functionName: string } }[];
   samples: number[];
   timeDeltas: number[];
+}
+
+/** An inspector reply: Profiler.stop's profile or Runtime.evaluate's value. */
+interface Reply {
+  error?: { message: string };
+  result?: { profile?: Profile; result?: { value?: unknown }; exceptionDetails?: unknown };
+}
+
+interface InspectorEvent {
+  method?: string;
+  params?: { context?: { uniqueId?: string } };
 }
 
 beforeAll(async () => {
@@ -52,8 +140,9 @@ beforeAll(async () => {
   let next = 0;
   const pending = new Map<number, (message: unknown) => void>();
   socket.addEventListener('message', (event) => {
-    const message = JSON.parse(String(event.data)) as { id?: number };
+    const message = JSON.parse(String(event.data)) as { id?: number } & InspectorEvent;
     if (message.id !== undefined) pending.get(message.id)?.(message);
+    if (message.method === 'Runtime.executionContextCreated') workerContext ??= message.params?.context?.uniqueId;
   });
   send = (method, params = {}) =>
     new Promise((resolve) => {
@@ -61,6 +150,11 @@ beforeAll(async () => {
       pending.set(next, resolve as (message: unknown) => void);
       socket.send(JSON.stringify({ id: next, method, params }));
     });
+  // Runtime.enable announces the Worker's execution context before it answers. Runtime stays disabled during the
+  // measurements, so the Worker's console lines are not also sent to this socket.
+  await send('Runtime.enable');
+  await send('Runtime.disable');
+  if (workerContext === undefined) throw new Error('no execution context for the Worker');
   await send('Profiler.enable');
   await send('Profiler.setSamplingInterval', { interval: SAMPLE_US });
 });
@@ -93,11 +187,48 @@ async function cpu(run: () => Promise<unknown>): Promise<number> {
   return micros / 1000;
 }
 
+/** Evaluates `expression` in the Worker's global scope (its isolate) and returns the value. */
+async function evaluate(expression: string): Promise<unknown> {
+  const reply = await send('Runtime.evaluate', { expression, uniqueContextId: workerContext, returnByValue: true });
+  if (reply.error !== undefined) throw new Error(`Runtime.evaluate: ${reply.error.message}`);
+  if (reply.result?.exceptionDetails !== undefined) throw new Error(`Runtime.evaluate: ${JSON.stringify(reply.result.exceptionDetails)}`);
+  return reply.result?.result?.value;
+}
+
+/**
+ * The machine's speed: the calibration's warm median (after CALIBRATION_WARMUP runs) over CALIBRATION_REFERENCE_MS;
+ * above 1 the machine is slower than the reference. Each run is timed from Node around Runtime.evaluate. On an idle
+ * machine that wall time matches the profile's CPU within about 0.1 ms, but unlike the profile it cannot lose time:
+ * on a busy machine the sampler thread is not always scheduled, and a calibration read from its own profile then
+ * sometimes lost most of its samples, clamping the speed to 1 while the sync's first run read high. The median, not
+ * the best: the best of ten finds a quiet moment that the sync's single first run and four warm runs do not.
+ */
+async function calibrate(): Promise<{ cpu: number; wall: number; speed: number }> {
+  await evaluate(CALIBRATION_SETUP);
+  const cpus: number[] = [];
+  const walls: number[] = [];
+  for (let index = 0; index < CALIBRATION_WARMUP + CALIBRATION_RUNS; index += 1) {
+    let wall = 0;
+    const used = await cpu(async () => {
+      const start = performance.now();
+      const chars = await evaluate(`${CALIBRATION_FN}()`);
+      wall = performance.now() - start;
+      if (chars !== CALIBRATION_CHARS) throw new Error(`calibration returned ${String(chars)}, not ${String(CALIBRATION_CHARS)}`);
+    });
+    if (index < CALIBRATION_WARMUP) continue;
+    cpus.push(used);
+    walls.push(wall);
+  }
+  const median = (values: number[]) => [...values].sort((a, b) => a - b)[Math.floor(values.length / 2)] ?? 0;
+  return { cpu: median(cpus), wall: median(walls), speed: median(walls) / CALIBRATION_REFERENCE_MS };
+}
+
 /**
  * Runs `run` several times: the first run (the isolate's warm-up of that code path, as on a cold isolate), then the
- * warm median and the warm best. Noise on a busy CI machine can only raise these numbers, never lower them.
+ * warm median and the warm best. Noise on a busy machine mostly raises these numbers; a sampler thread that is not
+ * scheduled loses samples and lowers them.
  */
-async function measure(label: string, run: () => Promise<unknown>, times = 5): Promise<{ first: number; median: number; best: number }> {
+async function measure(label: string, run: () => Promise<unknown>, times = 5): Promise<{ label: string; first: number; median: number; best: number }> {
   const samples: number[] = [];
   for (let index = 0; index < times; index += 1) samples.push(await cpu(run));
   const [first = 0, ...warm] = samples;
@@ -105,7 +236,7 @@ async function measure(label: string, run: () => Promise<unknown>, times = 5): P
   const median = sorted[Math.floor(sorted.length / 2)] ?? first;
   const best = sorted[0] ?? first;
   console.log(`cpu ${label}: first ${first.toFixed(2)} ms, warm median ${median.toFixed(2)} ms, warm best ${best.toFixed(2)} ms`);
-  return { first, median, best };
+  return { label, first, median, best };
 }
 
 function items(count: number): FakeItem[] {
@@ -170,8 +301,23 @@ describe('CPU per request (Workers Free: 10 ms)', () => {
     const week = await measure('GET /api/analytics (one week)', () => h.fetch('/api/analytics?start=2026-04-06&end=2026-04-12').then((response) => response.text()));
     const page = await measure('GET / (page CSP hashing)', () => h.fetch('/').then((response) => response.text()));
 
+    // Calibrated after the handlers, so the sync's first run above is still the isolate's first work of that size.
+    const calibration = await calibrate();
+    const speed = Math.max(1, calibration.speed);
+    const coldBound = COLD_BOUND_MS * speed;
+    const warmBound = WARM_BOUND_MS * speed;
+    console.log(
+      `cpu calibration: warm median ${calibration.wall.toFixed(2)} ms wall, ${calibration.cpu.toFixed(2)} ms CPU ` +
+        `(reference ${CALIBRATION_REFERENCE_MS.toFixed(2)} ms wall): speed ${calibration.speed.toFixed(2)}, ` +
+        `bounds: first < ${coldBound.toFixed(2)} ms, warm best < ${warmBound.toFixed(2)} ms`,
+    );
+    expect(
+      calibration.speed,
+      `the calibration measured this machine ${calibration.speed.toFixed(2)}x slower than the reference, beyond MAX_SPEED: ` +
+        'too slow (or too busy) for CPU bounds to mean anything, or the calibration is broken',
+    ).toBeLessThanOrEqual(MAX_SPEED);
     // The sync runs rarely, so it often lands on code the isolate has not run yet: its first run is bounded too.
-    expect(firstChunk.first).toBeLessThan(COLD_BOUND_MS);
-    for (const { best } of [firstChunk, lastChunk, incremental, tasks, stats, week, page]) expect(best).toBeLessThan(WARM_BOUND_MS);
+    expect(firstChunk.first, `${firstChunk.label}: first run`).toBeLessThan(coldBound);
+    for (const { label, best } of [firstChunk, lastChunk, incremental, tasks, stats, week, page]) expect(best, `${label}: warm best`).toBeLessThan(warmBound);
   });
 });
