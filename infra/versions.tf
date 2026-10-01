@@ -12,49 +12,46 @@ terraform {
     }
   }
 
-  # ---------------------------------------------------------------------------------------------------
-  # NOT ENABLED YET (P3, README.md "Next steps"). Today the state is local and lives outside the repository.
-  #
-  # Remote state in a private R2 bucket "infra-state" (to be created in P3), via the S3 backend with a
-  # partial configuration: the endpoint (it contains the account id) and the credentials come from
-  # `-backend-config=` / AWS_* environment variables in CI, never from this file.
-  #
-  # backend "s3" {
-  #   bucket                      = "infra-state"
-  #   key                         = "monorepo/terraform.tfstate"
-  #   region                      = "auto"
-  #   use_path_style              = true
-  #   skip_credentials_validation = true
-  #   skip_region_validation      = true
-  #   skip_requesting_account_id  = true
-  #   skip_metadata_api_check     = true
-  #   skip_s3_checksum            = true
-  #   # use_lockfile = true   # only after a concurrency test proves R2 honours If-None-Match: *
-  #   # endpoints = { s3 = "https://<account id>.r2.cloudflarestorage.com" }   # -backend-config, not here
-  # }
-  #
-  # Client-side state AND plan encryption. .github/scripts/infra_guard.py rejects a backend (in any file)
-  # without this block enforcing both, and without a sensitive state_passphrase variable. The passphrase
-  # is the GitHub secret INFRA_STATE_PASSPHRASE (the owner keeps an offline copy), passed as
-  # TF_VAR_state_passphrase; uncomment the variable
-  # "state_passphrase" in variables.tf together with this block. Start the remote state fresh (import
-  # again in CI) so no unencrypted fallback is needed.
-  #
-  # encryption {
-  #   key_provider "pbkdf2" "state" {
-  #     passphrase = var.state_passphrase
-  #   }
-  #   method "aes_gcm" "state" {
-  #     keys = key_provider.pbkdf2.state
-  #   }
-  #   state {
-  #     method   = method.aes_gcm.state
-  #     enforced = true
-  #   }
-  #   plan {
-  #     method   = method.aes_gcm.state
-  #     enforced = true
-  #   }
-  # }
-  # ---------------------------------------------------------------------------------------------------
+  # Remote state in the private R2 bucket "infra-state", one object per environment, through the S3 backend
+  # with a partial configuration. Not in this file, on purpose:
+  # - key: `-backend-config=key=<environment>/terraform.tfstate` (scripts/infra_state.py);
+  # - endpoint: AWS_ENDPOINT_URL_S3=https://<account id>.r2.cloudflarestorage.com (it contains the account id);
+  # - credentials: AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY, derived from the Cloudflare API token at runtime
+  #   (README.md "Remote state").
+  # No lock file: R2's conditional writes (If-None-Match: *) are not proven for this bucket yet, so
+  # .github/workflows/infra.yml serialises runs with the GitHub concurrency group infra-production instead.
+  # bootstrap_state.py probes conditional writes; enable use_lockfile only in a later change, after it passes.
+  backend "s3" {
+    bucket                      = "infra-state"
+    region                      = "auto"
+    use_path_style              = true
+    skip_credentials_validation = true
+    skip_region_validation      = true
+    skip_requesting_account_id  = true
+    skip_metadata_api_check     = true
+    skip_s3_checksum            = true
+  }
+
+  # Client-side state AND plan encryption, enforced: without the passphrase every command that reads or
+  # writes state or a plan fails, and there is no fallback block, so nothing is ever read or written
+  # unencrypted. The passphrase is the GitHub secret INFRA_STATE_PASSPHRASE (the owner keeps a copy), passed
+  # as TF_VAR_state_passphrase. scripts/infra_state.py strips TF_ENCRYPTION from tofu's environment, because
+  # that variable could add a fallback behind this file. .github/scripts/infra_guard.py rejects a backend
+  # without this block, a fallback, an unencrypted method or a non-sensitive passphrase variable.
+  encryption {
+    key_provider "pbkdf2" "state" {
+      passphrase = var.state_passphrase
+    }
+    method "aes_gcm" "state" {
+      keys = key_provider.pbkdf2.state
+    }
+    state {
+      method   = method.aes_gcm.state
+      enforced = true
+    }
+    plan {
+      method   = method.aes_gcm.state
+      enforced = true
+    }
+  }
 }

@@ -12,7 +12,8 @@ What they keep true (infra/README.md):
 - infra_guard.py finds nothing: only the four resource types of the monorepo boundary, each with its own
   prevent_destroy; no data source, module, provisioner, other config file kind or state/plan/values file;
   no backend without enforced state and plan encryption (test_infra_guard.py tests the guard itself).
-- The prototype has no backend at all yet (state stays local, outside the repository).
+- The state lives in the R2 bucket infra-state through a partial S3 backend (no key, endpoint or credentials
+  committed), encrypted with the state_passphrase variable only, no fallback.
 - Every owner-facing Access application gates a Custom Domain its app's wrangler.toml declares.
 - The D1 databases and R2 buckets are exactly those the production configs bind, and each D1 import id is
   the database_id committed there.
@@ -72,13 +73,49 @@ class Boundary(unittest.TestCase):
     def test_the_guard_finds_nothing(self):
         self.assertEqual(infra_guard.check(INFRA), [])
 
-    def test_no_backend_in_the_prototype(self):
-        for path in sorted(INFRA.glob("*.tf")):
-            for block in infra_guard.parse(path.read_text()).blocks:
-                if block.type == "terraform":
-                    with self.subTest(path=path.name):
-                        self.assertEqual([b.type for b in block.blocks if b.type in ("backend", "cloud")], [],
-                                         "remote state is not enabled in the prototype")
+    def test_remote_state_is_the_r2_bucket_with_a_partial_configuration(self):
+        """One S3 backend (R2 bucket infra-state, path-style, AWS-only checks skipped). The key, the endpoint (it
+        holds the account id) and the credentials are never committed: infra_state.py passes them at runtime.
+        No lock file until R2's conditional writes are proven (README.md "Remote state")."""
+        backends = [
+            (path.name, b)
+            for path in sorted(INFRA.glob("*.tf"))
+            for block in infra_guard.parse(path.read_text()).blocks if block.type == "terraform"
+            for b in block.blocks if b.type in ("backend", "cloud")
+        ]
+        self.assertEqual([(name, b.type, b.labels) for name, b in backends], [("versions.tf", "backend", ["s3"])])
+        backend = backends[0][1]
+        self.assertEqual(backend.attrs["bucket"], [("STR", '"infra-state"')])
+        self.assertEqual(backend.attrs["region"], [("STR", '"auto"')])
+        for flag in ("use_path_style", "skip_credentials_validation", "skip_region_validation",
+                     "skip_requesting_account_id", "skip_metadata_api_check", "skip_s3_checksum"):
+            with self.subTest(flag=flag):
+                self.assertTrue(backend.is_true(flag))
+        for name in ("key", "endpoint", "endpoints", "access_key", "secret_key", "token", "profile",
+                     "shared_credentials_files", "use_lockfile", "dynamodb_table", "workspace_key_prefix"):
+            with self.subTest(attribute=name):
+                self.assertNotIn(name, backend.attrs)
+                self.assertFalse(backend.children(name))
+
+    def test_state_and_plan_encryption_use_the_passphrase_variable_only(self):
+        terraform = [b for path in sorted(INFRA.glob("*.tf")) for b in infra_guard.parse(path.read_text()).blocks
+                     if b.type == "terraform"]
+        [encryption] = [b for t in terraform for b in t.children("encryption")]
+        [provider] = encryption.children("key_provider")
+        # The provider's name changes at every passphrase rotation (state, state_2, ...); the method's never does.
+        self.assertEqual(provider.labels[0], "pbkdf2")
+        self.assertRegex(provider.labels[1], r"^state(_[0-9]+)?$")
+        [method] = encryption.children("method")
+        self.assertEqual(method.labels, ["aes_gcm", "state"])
+        for kind in ("state", "plan"):
+            with self.subTest(kind=kind):
+                [block] = encryption.children(kind)
+                self.assertTrue(block.is_true("enforced"))
+                self.assertFalse(block.children("fallback"))
+        variables = (INFRA / "variables.tf").read_text()
+        block = re.search(r'^variable "state_passphrase" \{\n(.*?)^\}', variables, re.MULTILINE | re.DOTALL).group(1)
+        self.assertNotIn("default", block)
+        self.assertIn("length(var.state_passphrase) >= 16", block)
 
     def test_one_provider_pinned_exactly_and_locked(self):
         versions = uncommented((INFRA / "versions.tf").read_text())

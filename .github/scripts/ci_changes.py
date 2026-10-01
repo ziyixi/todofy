@@ -94,7 +94,8 @@ DISPATCH = {
 RELAY = "website/relay/"
 # Apps that neither provide nor consume a contract: their own changes do not run Contracts.
 NO_CONTRACTS = {"website"}
-# The plan-only OpenTofu configuration (infra/README.md) and its plan-summary tool: checked, never applied.
+# The OpenTofu configuration (infra/README.md) and its plan-summary tool: checked here without a token; only
+# .github/workflows/infra.yml plans it against Cloudflare, and nothing applies it yet.
 INFRA = ("infra/", "tools/infra-plan-summary/")
 # packages/<name>/ -> the apps whose Workers compile it in (a "file:../../packages/<name>" dependency).
 PACKAGE_USERS = {"edge-auth": ("todofy", "mail-hero", "dashboard", "lab")}

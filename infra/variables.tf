@@ -45,10 +45,13 @@ variable "access_github_idp_id" {
   type        = string
 }
 
-# NOT ENABLED YET (P3): the state/plan encryption passphrase, with the encryption block in versions.tf.
-#
-# variable "state_passphrase" {
-#   description = "OpenTofu state and plan encryption passphrase (GitHub secret INFRA_STATE_PASSPHRASE)."
-#   type        = string
-#   sensitive   = true
-# }
+# The state and plan encryption passphrase (versions.tf "encryption"). No default: a run without it fails.
+variable "state_passphrase" {
+  description = "OpenTofu state and plan encryption passphrase (GitHub secret INFRA_STATE_PASSPHRASE)."
+  type        = string
+  sensitive   = true
+  validation {
+    condition     = length(var.state_passphrase) >= 16
+    error_message = "The state passphrase must have at least 16 characters."
+  }
+}

@@ -167,7 +167,25 @@ class Guard(unittest.TestCase):
         self.assert_flags({"backend.tf": backend, "enc.tf": encryption.replace("PLAN", "true"),
                            "var.tf": variable.replace("true", "false")}, "sensitive state_passphrase")
         # The complete pair passes.
-        self.assertEqual(run({"backend.tf": backend, "enc.tf": encryption.replace("PLAN", "true"), "var.tf": variable}), [])
+        complete = encryption.replace("PLAN", "true")
+        self.assertEqual(run({"backend.tf": backend, "enc.tf": complete, "var.tf": variable}), [])
+        # A fallback (reads or migrates unencrypted state), the unencrypted method, a literal or other passphrase.
+        fallback = complete.replace("  state {\n", "  state {\n    fallback {\n      method = method.unencrypted.off\n    }\n", 1)
+        unencrypted = complete.replace('method "aes_gcm" "state" {', 'method "unencrypted" "off" {}\n    method "aes_gcm" "state" {')
+        bare = complete.replace('method "aes_gcm" "state" {', 'method unencrypted off {}\n    method "aes_gcm" "state" {')
+        literal = complete.replace("passphrase = var.state_passphrase", 'passphrase = "a-committed-passphrase"')
+        other = complete.replace("passphrase = var.state_passphrase", "passphrase = var.other")
+        cases = {
+            "fallback": (fallback, "has a fallback"),
+            "unencrypted method": (unencrypted, "unencrypted method"),
+            "bare-label unencrypted method": (bare, "unencrypted method"),
+            "literal passphrase": (literal, "not exactly var.state_passphrase"),
+            "another variable": (other, "not exactly var.state_passphrase"),
+        }
+        for name, (text, needle) in cases.items():
+            with self.subTest(case=name):
+                self.assertNotEqual(text, complete)
+                self.assert_flags({"backend.tf": backend, "enc.tf": text, "var.tf": variable}, needle)
 
 
 class TheRealConfiguration(unittest.TestCase):

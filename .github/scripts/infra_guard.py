@@ -15,7 +15,8 @@ What it keeps true (infra/README.md "Scope" and "Next steps"):
 - No provisioner or connection block anywhere (terraform_data/null_resource are not allowed types either).
 - Every resource is one of ALLOWED_TYPES and has its own lifecycle { prevent_destroy = true }.
 - A backend or cloud block is only allowed together with an encryption block that enforces both state
-  and plan encryption, and a sensitive state_passphrase variable.
+  and plan encryption, and a sensitive state_passphrase variable. That block has no fallback and no
+  unencrypted method, and every key_provider's passphrase is exactly var.state_passphrase.
 """
 
 from __future__ import annotations
@@ -42,6 +43,8 @@ ALLOWED_FILES = re.compile(
     r"|scripts/[A-Za-z0-9_]+\.py|tests/[A-Za-z0-9_]+\.py)$"
 )
 OTHER_CONFIG = ("*.tofu", "*.tf.json", "*.tofu.json")
+# The only passphrase expression allowed in the encryption block: never a literal, never another variable.
+PASSPHRASE_REFERENCE = [("ID", "var"), ("P", "."), ("ID", "state_passphrase")]
 
 
 class ParseError(ValueError):
@@ -283,6 +286,15 @@ def check(infra: Path) -> list[str]:
         )
         if not enforced:
             problems.append("a backend is configured without one encryption block enforcing both state and plan")
+        for block in encryption:
+            nested = [block, *block.walk()]
+            if any(b.type == "fallback" for b in nested):
+                problems.append("the encryption block has a fallback: state or plans could be read unencrypted")
+            if any(b.type == "method" and b.labels[:1] == ["unencrypted"] for b in nested):
+                problems.append("the encryption block declares the unencrypted method")
+            for provider in block.children("key_provider"):
+                if provider.attrs.get("passphrase") != PASSPHRASE_REFERENCE:
+                    problems.append("a key_provider passphrase is not exactly var.state_passphrase")
         passphrase = variables.get("state_passphrase")
         if passphrase is None or not passphrase.is_true("sensitive"):
             problems.append("a backend is configured without a sensitive state_passphrase variable")

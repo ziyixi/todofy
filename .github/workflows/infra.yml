@@ -1,0 +1,59 @@
+# Drift plan of infra/ against the encrypted remote state in R2 (infra/README.md "Drift plan"). Plan only: there
+# is no apply job (that is P4). A separate workflow, not a job in ci.yml, because:
+# - its triggers differ (a daily schedule, and pushes to main that touch infra/ only);
+# - Cloudflare drift is not a property of the commit: a red drift run must not fail "CI gate" and hold back the
+#   app deploys, and a green branch run must never be reused for it;
+# - it holds the production environment's token, which no check job in ci.yml does;
+# - it needs its own concurrency group, infra-production, which P4's apply will share.
+# The public log shows only the redacted summary (addresses and action counts) and sanitised error headlines;
+# tofu's own output goes to a private file that is deleted with the runner. Nothing is uploaded.
+name: Infra drift
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - infra/**
+      - tools/infra-plan-summary/**
+      - .github/workflows/infra.yml
+  schedule:
+    - cron: '23 13 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# The S3 backend keeps no lock file until R2's conditional writes are proven (versions.tf), so this group
+# serialises every run that reads or (from P4) writes the state. Never cancel one half way.
+concurrency:
+  group: infra-production
+  cancel-in-progress: false
+
+jobs:
+  plan:
+    name: Infra drift plan
+    # The production environment admits main only; a dispatch from another branch is skipped here.
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    environment: production
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: opentofu/setup-opentofu@a1320f892987e89d278cc92dc5adc984fb93aca4 # v2.0.2
+        with:
+          tofu_version: 1.12.6
+          # The wrapper would copy tofu's output into step outputs; plans must never be captured.
+          tofu_wrapper: false
+          github_token: ${{ github.token }}
+      # Exit 0 no planned action; 1 error; 2 planned actions (drift); 3 delete/replace/forget. Every non-zero
+      # code fails the job. "Changed outside OpenTofu" entries alone (a D1 file_size) do not.
+      - name: Plan against the remote state (redacted summary only)
+        env:
+          # The existing deploy token for now (owner decision 2026-10-01); CF_INFRA_READ_TOKEN replaces it later
+          # (infra/README.md "Replacing the token"). The R2 S3 credentials are derived from it and masked.
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+          INFRA_STATE_PASSPHRASE: ${{ secrets.INFRA_STATE_PASSPHRASE }}
+          INFRA_TFVARS: ${{ secrets.INFRA_TFVARS }}
+        run: python3 infra/scripts/infra_state.py plan --environment production

@@ -11,7 +11,7 @@ compiled into each.
 | [`website/`](website/) | The personal website `www.ziyixi.science`: Next.js static export on the assets-only Worker `ziyixi-website`, Notion as the content source, and the Notion relay Worker `ziyixi-notion-publish` (buttons plus a 15-minute change detector that publishes automatically; the release workflow's own schedule dispatches the daily reconcile release when the relay has not). `www` (canonical) and the apex `ziyixi.science` are both Custom Domains of the site Worker, sharing one certificate that covers no app host ([`website/docs/architecture.md`](website/docs/architecture.md#hostnames)). Uses no contract and no package | [`website/README.md`](website/README.md), [`website/docs/`](website/docs/) |
 | [`lab/`](lab/) | Lab / Paper Radar `lab` (TypeScript Worker + SQLite Durable Object + D1 + Workers AI + React UI) on `lab.ziyixi.science`: ranks each day's arXiv cs.IR/cs.CL/cs.LG papers against the owner's likes and seeds, writes a Chinese 简介 per card under a hard daily neuron cap, serves them as a swipe deck (like / dislike, undo, 重来) and, after an explicit confirm, sends the liked papers to Todofy as Todoist tasks | [`lab/README.md`](lab/README.md), [`lab/docs/`](lab/docs/) |
 | [`contracts/`](contracts/) | `mail.received.v1`: schema, semantics and golden payloads built by Mail Hero's real builder; `ops-v1`: the `Ops` entrypoints of Mail Hero, Todofy and Lab, which the dashboard calls; `task-intent-v1`: Lab proposes Todoist tasks to Todofy's `Ops` entrypoint | [`contracts/README.md`](contracts/README.md) |
-| [`infra/`](infra/) | Plan-only OpenTofu prototype for the account and zone objects the monorepo apps depend on but wrangler does not own: their Cloudflare Access applications and policies, and the existence of their D1 databases and R2 buckets. Never applied yet; manages no Worker, domain, route, DNS record, Email Routing setting or anything outside the monorepo | [`infra/README.md`](infra/README.md) |
+| [`infra/`](infra/) | OpenTofu for the account objects the monorepo apps depend on but wrangler does not own: their Cloudflare Access applications and policies, and the existence of their D1 databases and R2 buckets. Encrypted remote state in R2 and a daily drift plan; nothing applies it yet (no Cloudflare object is ever changed from here). Manages no Worker, domain, route, DNS record, Email Routing setting or anything outside the monorepo | [`infra/README.md`](infra/README.md) |
 | [`packages/edge-auth/`](packages/edge-auth/) | Shared auth code compiled into every Worker (Todofy gateway, Mail Hero, dashboard, Lab): Cloudflare Access JWT verification, signed double-submit CSRF, private response headers. TypeScript, Web Crypto only, no runtime dependencies; not a Worker of its own | [`packages/edge-auth/README.md`](packages/edge-auth/README.md), [`SPEC.md`](packages/edge-auth/SPEC.md) |
 
 Rules ([`AGENTS.md`](AGENTS.md)): the apps never import each other; shared code lives only in `contracts/`
@@ -64,6 +64,12 @@ deploys. The contract and the per-app plan are
 
 [`.github/workflows/ci.yml`](.github/workflows/ci.yml) ("CI and deploy") runs on a push to any branch and on
 a manual run. Actions are pinned by commit SHA.
+
+[`.github/workflows/infra.yml`](.github/workflows/infra.yml) ("Infra drift") is separate: on `main` only
+(a push that changes `infra/`, daily, or a manual run), in the `production` environment and the
+`infra-production` concurrency group, it plans `infra/` against its encrypted remote state and fails on any
+planned action. Its log holds only the redacted summary; it applies nothing and is not part of `CI gate`
+([`infra/README.md`](infra/README.md) "Drift plan").
 
 | Job | Runs when | Does |
 | --- | --- | --- |

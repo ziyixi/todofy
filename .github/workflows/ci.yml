@@ -736,10 +736,12 @@ jobs:
           if grep -rnE "(from|import)[[:space:]]*\(?[[:space:]]*['\"][^'\"]*(mail-hero|todofy|dashboard|contracts|packages)/" \
             src scripts relay/src tests; then exit 1; fi
 
-  # infra/: the plan-only OpenTofu configuration (infra/README.md). No Cloudflare token, no state and no plan
-  # here: the locked provider download, format and validation, the guards that keep infra/ free of code-running
-  # data sources, provisioners, personal values and state, and the plan-summary tests. The checks of infra/
-  # against the apps' wrangler.toml files run in Changes (.github/scripts/test_infra_config.py).
+  # infra/: the OpenTofu configuration (infra/README.md). No Cloudflare token, no state and no plan here: the
+  # locked provider download, format and validation, the guards that keep infra/ free of code-running data
+  # sources, provisioners, personal values and state, and the plan-summary and state-driver tests (fake tofu,
+  # no network). The checks of infra/ against the apps' wrangler.toml files run in Changes
+  # (.github/scripts/test_infra_config.py). The drift plan against the encrypted remote state is
+  # .github/workflows/infra.yml, which holds the token; nothing applies infra/ yet (P4).
   infra-checks:
     name: Infra checks
     needs: changes
@@ -789,7 +791,7 @@ jobs:
         run: |
           tofu init -backend=false -input=false -lockfile=readonly
           tofu validate
-      - name: Plan-summary and local-values tests
+      - name: Plan-summary, local-values and state-driver tests
         run: |
           python3 -m unittest discover -s ../tools/infra-plan-summary
           python3 -m unittest discover -s tests
