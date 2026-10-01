@@ -392,20 +392,22 @@ a Python config must sit next to `python_modules/` (a core config elsewhere fail
 ### 6.3 What the deploy adds (`deploy/deploy_vars.py`)
 `exec core|gateway -- <deploy command>` appends `--var` flags (plain_text vars, exactly like `[vars]`;
 wrangler prints them as `(hidden)`): `BUILD_SHA` (the commit) and `MAINTENANCE_MODE` on both Workers;
-`TODOIST_DEFAULT_PROJECT_ID`, `REMINDER_ENABLED`, `PROCESSING_PAUSED`, `FORCE_PAUSE_TODOIST` and
-`GTD_REVIEW_ENABLED` on the core, and `TODOIST_OPS_PROJECT_ID` / `TODOIST_REVIEW_PROJECT_ID` only when set
-(an unset optional project adds no `--var`, so the Worker keeps it unset). `secrets <path>` writes the gateway's owner-only secrets file (`ACCESS_OWNER`,
-`ACCESS_OWNER_ALIASES`, an emptied list sent as one space) for `--secrets-file`; the core has no secrets
-file (its secrets are set by the owner). A missing or invalid value fails the deploy by name, because a
-deploy without a var deletes it; `--env`, `--keep-vars`, the caller's own `--var` and any other config are
-refused. `deploy/test_wrangler_configs.py` checks the committed values the retired generator validated
+`REMINDER_ENABLED`, `PROCESSING_PAUSED`, `FORCE_PAUSE_TODOIST` and `GTD_REVIEW_ENABLED` on the core.
+`secrets core <path>` and `secrets gateway <path>` write each Worker's owner-only secrets file for
+`--secrets-file` (Worker secrets, hidden in the Cloudflare dashboard and API): the core's
+`TODOIST_DEFAULT_PROJECT_ID`, `TODOIST_OPS_PROJECT_ID` and `TODOIST_REVIEW_PROJECT_ID`, the gateway's
+`ACCESS_OWNER` and `ACCESS_OWNER_ALIASES`. An unset optional project and an emptied alias list are uploaded
+as one space, which the Workers read as unset (a deploy keeps every secret it does not upload). The core's
+`GEMINI_API_KEY` and `TODOIST_API_KEY` are set by the owner. A missing or invalid value fails the deploy by
+name, because a deploy without a var deletes it; a deploy without exactly one valid secrets file of that
+Worker, `--env`, `--keep-vars`, the caller's own `--var` and any other config are refused. `deploy/test_wrangler_configs.py` checks the committed values the retired generator validated
 (host lists, UUID, model list, bounds, the core/gateway pairing).
 
 ### 6.4 Deploy order (CI, from one verified commit)
 ```sh
 npx --no-install wrangler d1 migrations apply DB --remote --config wrangler.toml
-uv run python deploy/deploy_vars.py exec core -- \
-  uv run pywrangler deploy --config wrangler.toml                                   # todofy-core first
+uv run python deploy/deploy_vars.py exec core -- uv run pywrangler deploy \
+  --config wrangler.toml --secrets-file "$RUNNER_TEMP/todofy-core-secrets.json"     # todofy-core first
 uv run python deploy/deploy_vars.py exec gateway -- npx --no-install wrangler deploy \
   --config gateway/wrangler.toml --secrets-file "$RUNNER_TEMP/todofy-gateway-secrets.json"  # then the gateway
 ```

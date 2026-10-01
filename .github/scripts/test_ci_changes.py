@@ -1120,8 +1120,10 @@ class TodofyJobs(unittest.TestCase):
             "npm run lint\n          npm run typecheck\n          npm test",
             "npm run check:api\n          npm run typecheck\n          npm test\n          npm run build",
             "if grep -rnE 'mail_hero|mail-hero' src; then exit 1; fi",
-            'uv run python deploy/deploy_vars.py secrets "$RUNNER_TEMP/todofy-gateway-secrets.json"',
+            'uv run python deploy/deploy_vars.py secrets core "$RUNNER_TEMP/todofy-core-secrets.json"',
+            'uv run python deploy/deploy_vars.py secrets gateway "$RUNNER_TEMP/todofy-gateway-secrets.json"',
             "uv run python deploy/deploy_vars.py exec core -- uv run pywrangler deploy --dry-run --config wrangler.toml",
+            '--secrets-file "$RUNNER_TEMP/todofy-core-secrets.json" --outdir "$RUNNER_TEMP/todofy-core-bundle"',
             "uv run python deploy/deploy_vars.py exec gateway -- npx --no-install wrangler deploy --dry-run",
             'test -d "$RUNNER_TEMP/todofy-core-bundle/python_modules/workers"',
         ):

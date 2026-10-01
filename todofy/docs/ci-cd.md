@@ -192,23 +192,39 @@ that passed is what ships:
 
 1. install locked dependencies (root, `gateway/`, `web/`) and build the UI from the verified revision
 2. read the hosts from the committed `gateway/wrangler.toml` (the environment URL and the probes below)
-3. `deploy/deploy_vars.py secrets` writes the gateway's owner-only secrets file (the owner's Access emails,
-   from environment secrets) to `$RUNNER_TEMP`, removed at the end even on failure; then dry-run both
-   bundles before changing anything
+3. "Write the Worker secrets files", the only step that reads the personal environment secrets:
+   `deploy/deploy_vars.py secrets core` writes the core's owner-only secrets file (the Todoist projects) and
+   `secrets gateway` the gateway's (the owner's Access emails), both in `$RUNNER_TEMP`, removed at the end
+   even on failure; then dry-run both bundles before changing anything
 4. `wrangler d1 migrations apply DB --remote --config wrangler.toml`, then
-   `deploy_vars.py exec core -- pywrangler deploy --config wrangler.toml` of `todofy-core`
+   `deploy_vars.py exec core -- pywrangler deploy --config wrangler.toml --secrets-file ...` of `todofy-core`
+   (the projects become core secrets, shown as hidden)
 5. `deploy_vars.py exec gateway -- wrangler deploy --config gateway/wrangler.toml --secrets-file ...` of the
    gateway `todofy` (the owner emails become gateway secrets, shown as hidden)
 
-   `deploy/deploy_vars.py` adds with `--var` what is never committed and refuses a missing or invalid value,
-   because a deploy without a var deletes it: `BUILD_SHA` (the commit) and `MAINTENANCE_MODE` on both
-   Workers; `TODOIST_DEFAULT_PROJECT_ID` (an environment secret: pywrangler echoes its command line, and
-   Actions masks secrets), `REMINDER_ENABLED`, `PROCESSING_PAUSED`, `FORCE_PAUSE_TODOIST` and
-   `GTD_REVIEW_ENABLED` on the core, plus `TODOIST_OPS_PROJECT_ID` and `TODOIST_REVIEW_PROJECT_ID` (optional
-   environment secrets) only when set: an unset one adds no `--var`, so the Worker keeps it unset. It
-   refuses `--env`, `--keep-vars`, its caller's own `--var` and any other config file. The static checks the
-   retired generator made are unit tests on the committed files (`deploy/test_wrangler_configs.py`); the
-   checks across apps and ci.yml are in the root `.github/scripts/test_wrangler_configs.py`.
+   `deploy/deploy_vars.py` adds what is never committed and refuses a missing or invalid value, because a
+   deploy without a var deletes it. With `--var`: `BUILD_SHA` (the commit) and `MAINTENANCE_MODE` on both
+   Workers; `REMINDER_ENABLED`, `PROCESSING_PAUSED`, `FORCE_PAUSE_TODOIST` and `GTD_REVIEW_ENABLED` on the
+   core. With `--secrets-file`, as Worker secrets (wrangler and the Cloudflare dashboard show a plain var's
+   value, and pywrangler echoes its command line): `TODOIST_DEFAULT_PROJECT_ID` (required),
+   `TODOIST_OPS_PROJECT_ID` and `TODOIST_REVIEW_PROJECT_ID` (optional) on the core; `ACCESS_OWNER` and
+   `ACCESS_OWNER_ALIASES` on the gateway. A deploy keeps every secret it does not upload, so an unset
+   optional project (or an empty alias list) is uploaded as one space, which the Worker reads as unset;
+   leaving it out would keep the previous project. `exec` refuses a deploy without exactly one valid
+   secrets file of that Worker, `--env`, `--keep-vars`, its caller's own `--var` and any other config file.
+   The static checks the retired generator made are unit tests on the committed files
+   (`deploy/test_wrangler_configs.py`); the checks across apps and ci.yml are in the root
+   `.github/scripts/test_wrangler_configs.py`.
+
+   Until 2026-10 the three projects were plain_text vars. The first deploy of this version replaces each
+   by a secret of the same name in the same upload (the upload carries the whole binding list with
+   `keep_bindings` secret_text/secret_key, so the plain_text bindings are dropped with no moment without
+   the values; Mail Hero's receive address and owner addresses moved the same way). Never move them with
+   `wrangler secret put` or `secret bulk`: those are separate deployments next to the var of the same name.
+   Rolling this change back (a revert) sends the projects as `--var` again next to the secrets of the same
+   name; that direction is not verified in production. If Cloudflare refuses that deploy, delete the three
+   secrets (`npx wrangler secret delete <NAME> --config wrangler.toml`, from `todofy/`) and rerun the
+   workflow at once (between the two, new tasks have no project and go to the Todoist inbox).
 6. poll `https://<first hooks host>/health` until it reports this commit (10 × 15 s; the first deploy waits
    for the Custom Domain certificate). The gateway answers `/health` without the Durable Object, so this
    proves the gateway build only.

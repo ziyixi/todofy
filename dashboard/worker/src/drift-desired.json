@@ -507,27 +507,21 @@
         },
         {
           "name": "TODOIST_DEFAULT_PROJECT_ID",
-          "type": "plain_text",
+          "type": "secret_text",
           "source": "deploy"
         },
         {
           "name": "TODOIST_OPS_PROJECT_ID",
-          "type": "plain_text",
-          "source": "deploy",
-          "optional": true
+          "type": "secret_text",
+          "source": "deploy"
         },
         {
           "name": "TODOIST_REVIEW_PROJECT_ID",
-          "type": "plain_text",
-          "source": "deploy",
-          "optional": true
+          "type": "secret_text",
+          "source": "deploy"
         }
       ],
-      "personal": [
-        "TODOIST_DEFAULT_PROJECT_ID",
-        "TODOIST_OPS_PROJECT_ID",
-        "TODOIST_REVIEW_PROJECT_ID"
-      ]
+      "personal": []
     },
     "ziyixi-notion-publish": {
       "config": "website/relay/wrangler.toml",

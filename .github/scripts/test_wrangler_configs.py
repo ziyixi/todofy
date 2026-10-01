@@ -54,7 +54,7 @@ WRAPPERS = {
     "mail-hero": ("mail-hero/deploy/deploy-vars.mjs", r"deploy-vars\.mjs (exec|secrets)\b", ["mail-hero"]),
     "todofy": (
         "todofy/deploy/deploy_vars.py",
-        r"deploy_vars\.py (exec core|exec gateway|secrets)\b",
+        r"deploy_vars\.py (exec core|exec gateway|secrets core|secrets gateway)\b",
         ["todofy-core", "todofy"],
     ),
     "dashboard": ("dashboard/deploy/deploy-vars.mjs", r"deploy-vars\.mjs (exec|secrets)\b", ["home"]),
@@ -147,6 +147,13 @@ def tracked_files() -> list[str]:
         return [path for path in output.split("\0") if path]
     except (OSError, subprocess.CalledProcessError):
         return [path.relative_to(REPO).as_posix() for path in REPO.rglob("*") if path.is_file()]
+
+
+def wrapper_mode(call: str) -> str:
+    """The `deploy-vars-inputs` mode of a wrapper call: "exec" / "secrets" (Mail Hero, dashboard, Lab); "core" /
+    "gateway" for Todofy's `exec core` / `exec gateway`, and "secrets_core" / "secrets_gateway" for its `secrets`."""
+    words = call.split()
+    return words[-1] if words[0] == "exec" else "_".join(words)
 
 
 def markers(wrapper: str) -> dict[str, list[str]]:
@@ -415,8 +422,7 @@ class Workflow(unittest.TestCase):
             for job_name, job in self.app_jobs(app).items():
                 for step in steps(job):
                     for call in re.findall(pattern, step["run"]):
-                        # "exec" / "secrets" (Mail Hero, dashboard); "exec core" / "exec gateway" / "secrets" (Todofy).
-                        mode = call.split()[-1]
+                        mode = wrapper_mode(call)
                         needed = {name for name in inputs[mode] if not name.startswith("GITHUB_")}
                         calls += 1
                         with self.subTest(job=job_name, step=step["name"], call=call):
@@ -453,32 +459,39 @@ class Workflow(unittest.TestCase):
             with self.subTest(line=line):
                 self.assertFalse({"deploy", "versions upload"} & set(wrangler_commands(line)))
 
-    def test_receive_address_and_owner_identities_are_worker_secrets(self):
-        """The receive address and the owners' Access identities reach every Worker as Worker secrets (the wrapper's
-        `secrets` mode, deployed with --secrets-file), never as a --var: Wrangler and the Cloudflare dashboard show a
-        plain var's value. Every deploy that runs `exec` of such a wrapper passes the file the `secrets` step wrote."""
-        identities = {name for name in PERSONAL_INPUTS if re.search(r"_(RECEIVE_ADDRESS|ACCESS_OWNER|ACCESS_OWNER_ALIASES)$", name)}
-        self.assertEqual(len(identities), 9)
+    def test_personal_values_are_worker_secrets(self):
+        """Every personal value (the receive address, the owners' Access identities, Todofy's Todoist projects) reaches
+        its Worker as a Worker secret (a wrapper's `secrets` mode, deployed with --secrets-file), never as a --var:
+        Wrangler and the Cloudflare dashboard show a plain var's value. Every deploy (and dry-run) that runs `exec` of
+        such a wrapper passes exactly the file that the same job's `secrets` call wrote for that Worker."""
         found = set()
+        written_pattern = re.compile(r"deploy[-_]vars\.(?:mjs|py) secrets(?: (core|gateway))? (\S+)")
+        exec_pattern = re.compile(r"deploy[-_]vars\.(?:mjs|py) exec(?: (core|gateway))? -- .*\b(?:py)?wrangler deploy\b")
         for app, (wrapper, _, _) in WRAPPERS.items():
             inputs = markers(wrapper)
             with self.subTest(app=app):
+                secret_modes = {mode for mode in inputs if mode == "secrets" or mode.startswith("secrets_")}
                 for mode, names in inputs.items():
-                    if mode != "secrets":
-                        self.assertFalse(identities & set(names), mode)
-                found |= identities & set(inputs.get("secrets", []))
-                if not identities & set(inputs.get("secrets", [])):
+                    if mode not in secret_modes:
+                        self.assertFalse(PERSONAL_INPUTS & set(names), mode)
+                personal = PERSONAL_INPUTS & {name for mode in secret_modes for name in inputs[mode]}
+                found |= personal
+                if not personal:
                     continue
                 calls = 0
                 for job_name, job in self.app_jobs(app).items():
+                    written: dict[str, str] = {}
                     for step in steps(job):
                         for line in step["run"].replace("\\\n", " ").splitlines():
-                            if re.search(r"deploy[-_]vars\.(mjs|py) exec( gateway)? -- .*\bwrangler deploy\b", line):
+                            if match := written_pattern.search(line):
+                                written[match.group(1) or ""] = match.group(2)
+                            if match := exec_pattern.search(line):
                                 calls += 1
-                                with self.subTest(job=job_name, step=step["name"]):
-                                    self.assertRegex(line, r"--secrets-file[ =]\S+")
+                                with self.subTest(job=job_name, step=step["name"], worker=match.group(1)):
+                                    files = re.findall(r"--secrets-file[ =](\S+)", line)
+                                    self.assertEqual(files, [written.get(match.group(1) or "")])
                 self.assertGreaterEqual(calls, 2)
-        self.assertEqual(found, identities)
+        self.assertEqual(found, PERSONAL_INPUTS)
 
     def test_deploy_jobs_restate_every_switch_from_its_variable(self):
         """A deploy step that set a switch to a literal would overwrite the live pause or maintenance state:

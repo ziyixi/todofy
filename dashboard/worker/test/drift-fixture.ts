@@ -24,8 +24,6 @@ export interface LiveTweaks {
   /** Script -> binding -> live type, or null to remove the binding. */
   readonly bindings?: Readonly<Record<string, Readonly<Record<string, string | null>>>>;
   readonly workersDev?: Readonly<Record<string, boolean>>;
-  /** Personal values live as plain_text (as Todofy's `--var` personal value is today). */
-  readonly personalPlain?: boolean;
   /** Answers a matching path with this HTTP status instead. */
   readonly fail?: { readonly path: RegExp; readonly status: number };
 }
@@ -73,7 +71,8 @@ export function fakeCloudflare(url: string, tweaks: LiveTweaks, desired: Desired
     return envelope({ enabled: tweaks.workersDev?.[script] ?? worker?.workers_dev ?? false, previews_enabled: worker?.preview_urls ?? false });
   }
   const types = new Map((worker?.bindings ?? []).map((b) => [b.name, b.optional === true ? null : b.type]));
-  if (worker !== undefined && tweaks.personalPlain !== true) for (const name of worker.personal) if (types.get(name) != null) types.set(name, 'secret_text');
+  // A personal value (a wrapper --var of a personal kind) lives as a secret: the wanted end state.
+  if (worker !== undefined) for (const name of worker.personal) if (types.get(name) != null) types.set(name, 'secret_text');
   for (const [name, type] of Object.entries(tweaks.bindings?.[script] ?? {})) types.set(name, type);
   const bindings = [...types].flatMap(([name, type]) =>
     type === null ? [] : [type === 'plain_text' ? { name, type, text: SENTINEL_VALUE } : type === 'secret_text' ? { name, type } : { name, type, id: 'e'.repeat(32) }],

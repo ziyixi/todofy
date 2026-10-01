@@ -6,11 +6,12 @@
 # from todofy/wrangler.toml, next to pyproject.toml and python_modules/.
 #
 # Deployed only by CI ("Todofy deploy" in .github/workflows/ci.yml) through deploy/deploy_vars.py, which
-# validates and appends the values that are never committed, with --var: TODOIST_DEFAULT_PROJECT_ID and, only
-# when set, TODOIST_OPS_PROJECT_ID and TODOIST_REVIEW_PROJECT_ID (GitHub environment secrets); MAINTENANCE_MODE,
-# PROCESSING_PAUSED, FORCE_PAUSE_TODOIST, REMINDER_ENABLED, GTD_REVIEW_ENABLED (GitHub environment variables);
-# BUILD_SHA (the commit). A plain `pywrangler deploy` of this file DELETES those vars.
-# Worker secrets (GEMINI_API_KEY, TODOIST_API_KEY) survive every deploy.
+# validates and adds the values that are never committed: with --var, MAINTENANCE_MODE, PROCESSING_PAUSED,
+# FORCE_PAUSE_TODOIST, REMINDER_ENABLED, GTD_REVIEW_ENABLED (GitHub environment variables) and BUILD_SHA (the
+# commit); with --secrets-file, as Worker secrets, TODOIST_DEFAULT_PROJECT_ID, TODOIST_OPS_PROJECT_ID and
+# TODOIST_REVIEW_PROJECT_ID (GitHub environment secrets; an unset optional project is uploaded as one space,
+# read as unset). A plain `pywrangler deploy` of this file DELETES those vars. Worker secrets (GEMINI_API_KEY,
+# TODOIST_API_KEY set by hand, and the projects) survive every deploy.
 #
 # Runtime tests use wrangler.test.toml. Local dev (docs/dev-notes.md §1) uses local bindings only; local core
 # values and secrets go in todofy/.dev.vars (see .dev.vars.example), and D1 commands always pass --local.

@@ -213,21 +213,22 @@ jobs:
           TODOFY_PROCESSING_PAUSED: 'false'
           TODOFY_FORCE_PAUSE_TODOIST: 'false'
           TODOFY_GTD_REVIEW_ENABLED: 'false'
-          # The optional projects: one unset (no --var) and one set, so both paths are bundled.
+          # The optional projects: one unset (uploaded as unset) and one set, so both paths are written.
           TODOFY_TODOIST_OPS_PROJECT_ID: ''
           TODOFY_TODOIST_REVIEW_PROJECT_ID: placeholder
         run: |
-          uv run python deploy/deploy_vars.py secrets "$RUNNER_TEMP/todofy-gateway-secrets.json"
+          uv run python deploy/deploy_vars.py secrets core "$RUNNER_TEMP/todofy-core-secrets.json"
+          uv run python deploy/deploy_vars.py secrets gateway "$RUNNER_TEMP/todofy-gateway-secrets.json"
           uv run python deploy/deploy_vars.py exec core -- uv run pywrangler deploy --dry-run --config wrangler.toml \
-            --outdir "$RUNNER_TEMP/todofy-core-bundle"
+            --secrets-file "$RUNNER_TEMP/todofy-core-secrets.json" --outdir "$RUNNER_TEMP/todofy-core-bundle"
           # The workers SDK is vendored next to the core config; a bundle without it cannot start.
           test -d "$RUNNER_TEMP/todofy-core-bundle/python_modules/workers"
           uv run python deploy/deploy_vars.py exec gateway -- npx --no-install wrangler deploy --dry-run \
             --config gateway/wrangler.toml --secrets-file "$RUNNER_TEMP/todofy-gateway-secrets.json" \
             --outdir "$RUNNER_TEMP/todofy-gateway-bundle"
-      - name: Remove the placeholder secrets file
+      - name: Remove the placeholder secrets files
         if: always()
-        run: rm -f "$RUNNER_TEMP/todofy-gateway-secrets.json"
+        run: rm -f "$RUNNER_TEMP/todofy-core-secrets.json" "$RUNNER_TEMP/todofy-gateway-secrets.json"
 
   # The workerd runtime suite (tests/runtime), split into shards of whole test files that run at the same
   # time. The plan (.github/scripts/pytest_shards.py) balances recorded seconds per file over every
@@ -905,25 +906,31 @@ jobs:
           npm ci --prefix web --no-audit --no-fund
           npm run build --prefix web
       # deploy/deploy_vars.py adds what is never committed and refuses a missing or invalid value (a deploy
-      # without a var deletes it): the switches (production variables) and BUILD_SHA as --var on both
-      # Workers, the Todoist project as --var on the core, and the owner's email addresses as gateway
-      # secrets through --secrets-file. The project and the addresses are environment secrets, masked in
-      # this public log (pywrangler echoes its command line).
-      - name: Validate both bundles before changing D1
+      # without a var deletes it). The switches (production variables) and BUILD_SHA are --var on both
+      # Workers. The personal values are environment secrets (masked in this public log) and reach the
+      # Workers as Worker secrets through --secrets-file, in the same upload as the code (wrangler and the
+      # Cloudflare dashboard show plain vars): the Todoist projects on the core, the owner's email addresses
+      # on the gateway. Only this step reads the personal secrets.
+      - name: Write the Worker secrets files
         env:
           TODOFY_ACCESS_OWNER: ${{ secrets.TODOFY_ACCESS_OWNER }}
           TODOFY_ACCESS_OWNER_ALIASES: ${{ secrets.TODOFY_ACCESS_OWNER_ALIASES }}
           TODOFY_TODOIST_DEFAULT_PROJECT_ID: ${{ secrets.TODOFY_TODOIST_DEFAULT_PROJECT_ID }}
+          TODOFY_TODOIST_OPS_PROJECT_ID: ${{ secrets.TODOFY_TODOIST_OPS_PROJECT_ID }}
+          TODOFY_TODOIST_REVIEW_PROJECT_ID: ${{ secrets.TODOFY_TODOIST_REVIEW_PROJECT_ID }}
+        run: |
+          uv run python deploy/deploy_vars.py secrets core "$RUNNER_TEMP/todofy-core-secrets.json"
+          uv run python deploy/deploy_vars.py secrets gateway "$RUNNER_TEMP/todofy-gateway-secrets.json"
+      - name: Validate both bundles before changing D1
+        env:
           TODOFY_REMINDER_ENABLED: ${{ vars.TODOFY_REMINDER_ENABLED }}
           TODOFY_MAINTENANCE_MODE: ${{ vars.TODOFY_MAINTENANCE_MODE }}
           TODOFY_PROCESSING_PAUSED: ${{ vars.TODOFY_PROCESSING_PAUSED }}
           TODOFY_FORCE_PAUSE_TODOIST: ${{ vars.TODOFY_FORCE_PAUSE_TODOIST }}
           TODOFY_GTD_REVIEW_ENABLED: ${{ vars.TODOFY_GTD_REVIEW_ENABLED }}
-          TODOFY_TODOIST_OPS_PROJECT_ID: ${{ secrets.TODOFY_TODOIST_OPS_PROJECT_ID }}
-          TODOFY_TODOIST_REVIEW_PROJECT_ID: ${{ secrets.TODOFY_TODOIST_REVIEW_PROJECT_ID }}
         run: |
-          uv run python deploy/deploy_vars.py secrets "$RUNNER_TEMP/todofy-gateway-secrets.json"
-          uv run python deploy/deploy_vars.py exec core -- uv run pywrangler deploy --dry-run --config wrangler.toml
+          uv run python deploy/deploy_vars.py exec core -- uv run pywrangler deploy --dry-run --config wrangler.toml \
+            --secrets-file "$RUNNER_TEMP/todofy-core-secrets.json"
           uv run python deploy/deploy_vars.py exec gateway -- npx --no-install wrangler deploy --dry-run \
             --config gateway/wrangler.toml --secrets-file "$RUNNER_TEMP/todofy-gateway-secrets.json"
       # tools/cf-guard (read-only GETs; prints listed hostnames, counts, PASS/FAIL): wrangler applies a config's Custom
@@ -942,18 +949,16 @@ jobs:
       - name: Apply D1 migrations, then deploy todofy-core
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
-          TODOFY_TODOIST_DEFAULT_PROJECT_ID: ${{ secrets.TODOFY_TODOIST_DEFAULT_PROJECT_ID }}
           TODOFY_REMINDER_ENABLED: ${{ vars.TODOFY_REMINDER_ENABLED }}
           TODOFY_MAINTENANCE_MODE: ${{ vars.TODOFY_MAINTENANCE_MODE }}
           TODOFY_PROCESSING_PAUSED: ${{ vars.TODOFY_PROCESSING_PAUSED }}
           TODOFY_FORCE_PAUSE_TODOIST: ${{ vars.TODOFY_FORCE_PAUSE_TODOIST }}
           TODOFY_GTD_REVIEW_ENABLED: ${{ vars.TODOFY_GTD_REVIEW_ENABLED }}
-          TODOFY_TODOIST_OPS_PROJECT_ID: ${{ secrets.TODOFY_TODOIST_OPS_PROJECT_ID }}
-          TODOFY_TODOIST_REVIEW_PROJECT_ID: ${{ secrets.TODOFY_TODOIST_REVIEW_PROJECT_ID }}
         run: |
           test -n "$CLOUDFLARE_API_TOKEN"
           npx --no-install wrangler d1 migrations apply DB --remote --config wrangler.toml
-          uv run python deploy/deploy_vars.py exec core -- uv run pywrangler deploy --config wrangler.toml
+          uv run python deploy/deploy_vars.py exec core -- uv run pywrangler deploy --config wrangler.toml \
+            --secrets-file "$RUNNER_TEMP/todofy-core-secrets.json"
       - name: Deploy the gateway todofy
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
@@ -997,9 +1002,9 @@ jobs:
           done
           echo "The gateway did not reach todofy-core (last status $code)." >&2
           exit 1
-      - name: Remove the secrets file
+      - name: Remove the secrets files
         if: always()
-        run: rm -f "$RUNNER_TEMP/todofy-gateway-secrets.json"
+        run: rm -f "$RUNNER_TEMP/todofy-core-secrets.json" "$RUNNER_TEMP/todofy-gateway-secrets.json"
 
   mail-hero-deploy:
     name: Mail Hero deploy

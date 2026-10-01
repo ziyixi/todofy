@@ -74,7 +74,7 @@ describe('the daily drift check', () => {
   it('reports drift by name on the Cloudflare view and by counts in the digest, never a value', async () => {
     h = await startFlows();
     h.cloudflare.tweaks = {
-      personalPlain: true,
+      bindings: { 'todofy-core': { TODOIST_DEFAULT_PROJECT_ID: 'plain_text' } },
       extraScripts: ['synthetic-orphan'],
       extraDomains: [{ hostname: 'stray.ziyixi.science', service: 'home' }],
     };
@@ -83,20 +83,20 @@ describe('the daily drift check', () => {
     await h.tick(start + 30 * MIN);
     const cloudflare = await view<CloudflareResponse>(h, 'cloudflare');
     expect(cloudflare.drift.status).toBe('drift');
-    expect(cloudflare.drift.counts).toEqual({ scripts: 1, custom_domains: 1, routes: 0, crons: 0, bindings: 0, workers_dev: 0, personal: 1 });
+    expect(cloudflare.drift.counts).toEqual({ scripts: 1, custom_domains: 1, routes: 0, crons: 0, bindings: 1, workers_dev: 0, personal: 0 });
     expect(cloudflare.drift.findings).toContainEqual({ category: 'scripts', script: 'synthetic-orphan', name: 'synthetic-orphan', kind: 'extra' });
     expect(cloudflare.drift.findings).toContainEqual({ category: 'custom_domains', script: 'home', name: 'stray.ziyixi.science', kind: 'extra' });
-    expect(cloudflare.drift.findings).toContainEqual({ category: 'personal', script: 'todofy-core', name: 'TODOIST_DEFAULT_PROJECT_ID', kind: 'changed', expected: 'secret_text', actual: 'plain_text' });
+    expect(cloudflare.drift.findings).toContainEqual({ category: 'bindings', script: 'todofy-core', name: 'TODOIST_DEFAULT_PROJECT_ID', kind: 'changed', expected: 'secret_text', actual: 'plain_text' });
     // The strip points at the Cloudflare view.
     expect(cloudflare.attention.items).toContainEqual(expect.objectContaining({ source: 'dashboard', code: 'config_drift', target: { view: 'cloudflare' } }));
 
     const ops = await view<OpsResponse>(h, 'ops');
     const item = ops.digest.items.find((i) => i.code === 'config_drift');
-    expect(item).toMatchObject({ source: 'dashboard', severity: 'warning', metrics: { total: 3, scripts: 1, custom_domains: 1, personal: 1 } });
+    expect(item).toMatchObject({ source: 'dashboard', severity: 'warning', metrics: { total: 3, scripts: 1, custom_domains: 1, bindings: 1 } });
     // Todofy got it in a report: counts only.
     const reports = (await h.callsOf('todofy', 'reportOps')).map((args) => args[0] as OpsReport);
     const last = reports.at(-1);
-    expect(last?.items.find((i) => i.code === 'config_drift')?.metrics).toEqual({ total: 3, scripts: 1, custom_domains: 1, personal: 1 });
+    expect(last?.items.find((i) => i.code === 'config_drift')?.metrics).toEqual({ total: 3, scripts: 1, custom_domains: 1, bindings: 1 });
     const reportText = JSON.stringify(reports);
     expect(reportText).not.toContain('TODOIST_DEFAULT_PROJECT_ID');
     expect(reportText).not.toContain('synthetic-orphan');

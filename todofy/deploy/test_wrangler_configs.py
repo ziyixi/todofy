@@ -9,7 +9,7 @@ from typing import Any
 
 import pytest
 
-from deploy.deploy_vars import CONFIGS, INJECTED, ROOT
+from deploy.deploy_vars import CONFIGS, INJECTED, ROOT, SECRETS
 from todofy.core.report_schema import MAX_TOP_N
 
 
@@ -65,7 +65,7 @@ def test_the_committed_vars_are_exactly_the_static_ones() -> None:
     assert set(CORE["vars"]) == CORE_VARS
     assert set(GATEWAY["vars"]) == GATEWAY_VARS
     for worker, config in (("core", CORE), ("gateway", GATEWAY)):
-        assert not set(config["vars"]) & {item.name for item in INJECTED[worker]}, worker
+        assert not set(config["vars"]) & {item.name for item in (*INJECTED[worker], *SECRETS[worker])}, worker
     # Test-only timing knobs keep their code defaults; the build is the deploy's commit.
     never = (
         "GEMINI_TIMEOUT_MS",

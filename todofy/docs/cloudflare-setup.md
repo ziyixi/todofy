@@ -73,17 +73,20 @@ Environment secrets:
 | `CF_API_TOKEN` | Cloudflare API token: Workers Scripts edit (covers both Workers), D1 edit, zone Workers Routes / Custom Domains and DNS edit for the zone, account settings read. No billing permissions. |
 | `TODOFY_ACCESS_OWNER` | the owner's primary Access email |
 | `TODOFY_ACCESS_OWNER_ALIASES` | comma-separated other logins of the owner (may be empty) |
-| `TODOFY_TODOIST_DEFAULT_PROJECT_ID` | Todoist project for new tasks. Added to the core with `--var`; a secret because the repository is public and pywrangler echoes its command line (Actions masks secrets there) |
-| `TODOFY_TODOIST_OPS_PROJECT_ID` | optional: the Todoist project of the daily `[Todofy System]` reminder (with the ops digest). Unset or empty: the default project, as before. Sent with `--var` only when set; a day's project is frozen with its claim, so changing it affects the next day ([gtd-features.md](gtd-features.md) §3) |
-| `TODOFY_TODOIST_REVIEW_PROJECT_ID` | optional: the project of the Sunday review task; unset or empty: the default project |
+| `TODOFY_TODOIST_DEFAULT_PROJECT_ID` | Todoist project for new tasks (required). Deployed to the core as the Worker secret `TODOIST_DEFAULT_PROJECT_ID` |
+| `TODOFY_TODOIST_OPS_PROJECT_ID` | optional: the Todoist project of the daily `[Todofy System]` reminder (with the ops digest). Unset or empty: the default project, as before. Deployed as the core secret `TODOIST_OPS_PROJECT_ID`, uploaded as one space when unset (read as unset; removing the GitHub secret therefore also unsets it on the Worker at the next deploy); a day's project is frozen with its claim, so changing it affects the next day ([gtd-features.md](gtd-features.md) §3) |
+| `TODOFY_TODOIST_REVIEW_PROJECT_ID` | optional: the project of the Sunday review task, the core secret `TODOIST_REVIEW_PROJECT_ID`; unset or empty: the default project (uploaded as one space, like the Ops project) |
 
-The two owner secrets are secrets rather than variables because wrangler prints every plain var with its
-value in the deploy log. The deploy passes them to the gateway `todofy` as Worker secrets
-(`--secrets-file`); the core never sees them.
+These are secrets rather than variables because the repository is public and wrangler prints every plain
+var with its value in the deploy log (pywrangler also echoes its command line). The deploy's "Write the
+Worker secrets files" step writes each Worker's own owner-only file, and the deploy passes it as Worker
+secrets (`--secrets-file`, hidden in the Cloudflare dashboard and API): the owner emails to the gateway
+`todofy` only, the Todoist projects to `todofy-core` only.
 
 Environment variables: only the operational switches, stated at every deploy so a release never overwrites
 the operational state ([ci-cd.md](ci-cd.md) "Changing a switch"). `deploy/deploy_vars.py` validates them
-(a bad or missing one fails the deploy and names only the variable) and adds them with `--var`:
+(a bad or missing one fails the deploy and names only the variable) and adds them with `--var` (plain
+vars, as is `BUILD_SHA`):
 
 | Variable | Value |
 |---|---|
@@ -253,16 +256,20 @@ locally too. Build the UI first (`npm run build --prefix web`).
 export GITHUB_SHA=$(git rev-parse HEAD) TODOFY_MAINTENANCE_MODE=false TODOFY_PROCESSING_PAUSED=false \
   TODOFY_FORCE_PAUSE_TODOIST=false TODOFY_REMINDER_ENABLED=false TODOFY_TODOIST_DEFAULT_PROJECT_ID=placeholder \
   TODOFY_GTD_REVIEW_ENABLED=false TODOFY_ACCESS_OWNER=owner@example.com TODOFY_ACCESS_OWNER_ALIASES=
-secrets=$(mktemp -d)/todofy-gateway-secrets.json
-uv run python deploy/deploy_vars.py secrets "$secrets"
-uv run python deploy/deploy_vars.py exec core -- uv run pywrangler deploy --dry-run --config wrangler.toml
+secrets=$(mktemp -d)
+uv run python deploy/deploy_vars.py secrets core "$secrets/core.json"
+uv run python deploy/deploy_vars.py secrets gateway "$secrets/gateway.json"
+uv run python deploy/deploy_vars.py exec core -- uv run pywrangler deploy --dry-run --config wrangler.toml \
+  --secrets-file "$secrets/core.json"
 uv run python deploy/deploy_vars.py exec gateway -- npx --no-install wrangler deploy --dry-run \
-  --config gateway/wrangler.toml --secrets-file "$secrets"
-rm -f "$secrets"
+  --config gateway/wrangler.toml --secrets-file "$secrets/gateway.json"
+rm -rf "$secrets"
 ```
 
-The committed configs are production: never run them without `--dry-run` from a laptop (a plain deploy
-deletes the injected vars), and run `wrangler dev` and D1 commands with local bindings only (`--local`).
+The dry-run's binding table lists the projects and owner emails as `(hidden)` environment variables, as it
+lists the `--var` values: wrangler's table does not tell secrets apart; the upload sends them as
+`secret_text`. The committed configs are production: never run them without `--dry-run` from a laptop (a
+plain deploy deletes the injected vars), and run `wrangler dev` and D1 commands with local bindings only (`--local`).
 
 ## 7. Backups and restore
 

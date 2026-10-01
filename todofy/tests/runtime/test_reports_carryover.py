@@ -281,9 +281,12 @@ def test_the_reminder_goes_to_the_ops_project_when_one_is_set(probe):
     assert probe.sql("SELECT project_id FROM mail_reminders") == [{"project_id": "ops-project"}]
 
 
-def test_without_an_ops_project_the_reminder_keeps_the_default_project(probe):
+# The deploy uploads an unset optional project as a single space (the secret must be overwritten,
+# not kept), so a blank value must read as unset.
+@pytest.mark.parametrize("unset", [{}, {"TODOIST_OPS_PROJECT_ID": " "}])
+def test_without_an_ops_project_the_reminder_keeps_the_default_project(probe, unset):
     attention(probe)
-    probe.call("/reminder/tick", now=NOW)
+    probe.call("/reminder/tick", now=NOW, vars=unset)
     [create] = probe.todoist.creates()
     assert create.json()["project_id"] == PROJECT_ID
     assert probe.sql("SELECT project_id FROM mail_reminders") == [{"project_id": PROJECT_ID}]

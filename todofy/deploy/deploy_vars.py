@@ -6,31 +6,44 @@ The committed production configs are wrangler.toml (todofy-core) and gateway/wra
 
 - `--var NAME:value` (a plain_text var, exactly like a [vars] entry): BUILD_SHA (the commit) and the
   operational switches (GitHub environment variables; a release restates them and never overwrites them)
-  on both Workers, and the core's TODOIST_DEFAULT_PROJECT_ID (a GitHub environment secret: pywrangler
-  echoes its command line, and Actions masks secrets in every log line). The core's optional Todoist
-  projects TODOIST_OPS_PROJECT_ID and TODOIST_REVIEW_PROJECT_ID (GitHub environment secrets too) are
-  sent only when set: an empty or unset one adds no --var, so the Worker sees it unset and uses the
-  default project.
-- `--secrets-file` for the gateway: the owner's Access emails (GitHub environment secrets), which become
-  Worker secrets shown as hidden.
+  on both Workers.
+- `--secrets-file` (Worker secrets: hidden in wrangler's output and in the Cloudflare dashboard and API,
+  unlike a plain_text var), one owner-only file per Worker written by the `secrets` mode from GitHub
+  environment secrets: the core's Todoist projects TODOIST_DEFAULT_PROJECT_ID (required) and the optional
+  TODOIST_OPS_PROJECT_ID and TODOIST_REVIEW_PROJECT_ID; the gateway's owner Access emails ACCESS_OWNER and
+  ACCESS_OWNER_ALIASES.
 
 Wrangler silently DELETES a var that a deploy does not send (no config has keep_vars), so this wrapper
-refuses to run unless every value is present and valid. Messages name the setting, never a value.
+refuses to run unless every value is present and valid, and `exec` refuses a deploy without exactly one
+valid --secrets-file for that Worker. A deploy keeps every Worker secret it does not upload, so a value
+that may be unset is always uploaded: an unset optional project or an empty alias list is uploaded as a
+single space, which both Workers read as unset (the core's runtime/config.var strips it to ""; the gateway
+trims the alias list). Leaving it out would keep the previous value working.
+
+Until 2026-10 the core's three projects were plain_text vars: the first deploy through this version replaces
+each var by a secret of the same name in the same upload (one upload carries the whole binding list with
+keep_bindings secret_text/secret_key, so the previous plain_text bindings are dropped and there is no moment
+without the values). Never move them with `wrangler secret put` or `secret bulk`: those are separate
+deployments next to the var of the same name, not this atomic switch. Messages name the setting, never a value.
 
     uv run python deploy/deploy_vars.py check
-    uv run python deploy/deploy_vars.py secrets "$RUNNER_TEMP/todofy-gateway-secrets.json"
-    uv run python deploy/deploy_vars.py exec core -- uv run pywrangler deploy [--dry-run] --config wrangler.toml
+    uv run python deploy/deploy_vars.py secrets core "$RUNNER_TEMP/todofy-core-secrets.json"
+    uv run python deploy/deploy_vars.py secrets gateway "$RUNNER_TEMP/todofy-gateway-secrets.json"
+    uv run python deploy/deploy_vars.py exec core -- uv run pywrangler deploy [--dry-run] --config wrangler.toml \\
+        --secrets-file "$RUNNER_TEMP/todofy-core-secrets.json"
     uv run python deploy/deploy_vars.py exec gateway -- npx --no-install wrangler deploy [--dry-run] \\
         --config gateway/wrangler.toml --secrets-file "$RUNNER_TEMP/todofy-gateway-secrets.json"
 """
 
 # .github/scripts/test_wrangler_configs.py reads these lines (a mode may take several): every CI step that
-# runs `exec core`, `exec gateway` or `secrets` must set each input of that mode (Actions sets GITHUB_*).
-# deploy-vars-inputs core: GITHUB_SHA TODOFY_MAINTENANCE_MODE TODOFY_TODOIST_DEFAULT_PROJECT_ID
-# deploy-vars-inputs core: TODOFY_REMINDER_ENABLED TODOFY_PROCESSING_PAUSED TODOFY_FORCE_PAUSE_TODOIST
-# deploy-vars-inputs core: TODOFY_GTD_REVIEW_ENABLED TODOFY_TODOIST_OPS_PROJECT_ID TODOFY_TODOIST_REVIEW_PROJECT_ID
+# runs `exec core`, `exec gateway`, `secrets core` or `secrets gateway` must set each input of that mode
+# (modes core, gateway, secrets_core, secrets_gateway; Actions sets GITHUB_*).
+# deploy-vars-inputs core: GITHUB_SHA TODOFY_MAINTENANCE_MODE TODOFY_REMINDER_ENABLED TODOFY_PROCESSING_PAUSED
+# deploy-vars-inputs core: TODOFY_FORCE_PAUSE_TODOIST TODOFY_GTD_REVIEW_ENABLED
 # deploy-vars-inputs gateway: GITHUB_SHA TODOFY_MAINTENANCE_MODE
-# deploy-vars-inputs secrets: TODOFY_ACCESS_OWNER TODOFY_ACCESS_OWNER_ALIASES
+# deploy-vars-inputs secrets_core: TODOFY_TODOIST_DEFAULT_PROJECT_ID TODOFY_TODOIST_OPS_PROJECT_ID
+# deploy-vars-inputs secrets_core: TODOFY_TODOIST_REVIEW_PROJECT_ID
+# deploy-vars-inputs secrets_gateway: TODOFY_ACCESS_OWNER TODOFY_ACCESS_OWNER_ALIASES
 
 import json
 import os
@@ -51,6 +64,8 @@ SHA = re.compile(r"[0-9a-f]{40}")
 PROJECT_ID = re.compile(r"[A-Za-z0-9_-]{1,64}")
 MAX_ALIASES = 8  # the gateway's Access check refuses more aliases, or more than MAX_LIST_CHARS of them
 MAX_LIST_CHARS = 2048
+# What an unset optional secret is uploaded as (see the module docstring): both Workers read it as unset.
+UNSET = " "
 
 
 class SettingError(ValueError):
@@ -61,7 +76,7 @@ class SettingError(ValueError):
 
 @dataclass(frozen=True)
 class Injected:
-    name: str  # the Worker var
+    name: str  # the Worker binding
     source: str  # the environment variable CI sets
     kind: str  # "build", "toggle", "personal" or "optional" (a personal value that may be unset)
     pattern: re.Pattern[str]
@@ -75,21 +90,32 @@ def _shared() -> tuple[Injected, ...]:
     )
 
 
+# The --var values of each Worker, in deploy order.
 INJECTED: dict[str, tuple[Injected, ...]] = {
     "core": (
         *_shared(),
-        Injected("TODOIST_DEFAULT_PROJECT_ID", "TODOFY_TODOIST_DEFAULT_PROJECT_ID", "personal", PROJECT_ID),
         Injected("REMINDER_ENABLED", "TODOFY_REMINDER_ENABLED", "toggle", FLAG),
         Injected("PROCESSING_PAUSED", "TODOFY_PROCESSING_PAUSED", "toggle", FLAG),
         Injected("FORCE_PAUSE_TODOIST", "TODOFY_FORCE_PAUSE_TODOIST", "toggle", FLAG),
         Injected("GTD_REVIEW_ENABLED", "TODOFY_GTD_REVIEW_ENABLED", "toggle", FLAG),
+    ),
+    "gateway": _shared(),
+}
+
+# The Worker secrets of each Worker (its --secrets-file). The gateway's alias list is validated as a list.
+SECRETS: dict[str, tuple[Injected, ...]] = {
+    "core": (
+        Injected("TODOIST_DEFAULT_PROJECT_ID", "TODOFY_TODOIST_DEFAULT_PROJECT_ID", "personal", PROJECT_ID),
         # docs/gtd-features.md §10: the [Todofy System] reminder's and the Sunday review's projects.
         Injected("TODOIST_OPS_PROJECT_ID", "TODOFY_TODOIST_OPS_PROJECT_ID", "optional", PROJECT_ID),
         Injected("TODOIST_REVIEW_PROJECT_ID", "TODOFY_TODOIST_REVIEW_PROJECT_ID", "optional", PROJECT_ID),
     ),
-    "gateway": _shared(),
+    "gateway": (
+        Injected("ACCESS_OWNER", "TODOFY_ACCESS_OWNER", "personal", EMAIL),
+        Injected("ACCESS_OWNER_ALIASES", "TODOFY_ACCESS_OWNER_ALIASES", "optional", EMAIL),
+    ),
 }
-SECRET_INPUTS = ("TODOFY_ACCESS_OWNER", "TODOFY_ACCESS_OWNER_ALIASES")
+SECRET_INPUTS = {worker: tuple(item.source for item in items) for worker, items in SECRETS.items()}
 
 
 def _required(env: Mapping[str, str], name: str, pattern: re.Pattern[str]) -> str:
@@ -108,26 +134,9 @@ def _optional(env: Mapping[str, str], name: str, pattern: re.Pattern[str]) -> st
     return value
 
 
-def injected_vars(worker: str, env: Mapping[str, str]) -> dict[str, str]:
-    """{NAME: value} for every var `worker` ("core" or "gateway") gets at deploy; an optional var that
-    is unset is left out, so the deploy leaves it unset on the Worker."""
-    values = {}
-    for item in INJECTED[worker]:
-        if item.kind == "optional":
-            if value := _optional(env, item.source, item.pattern):
-                values[item.name] = value
-        else:
-            values[item.name] = _required(env, item.source, item.pattern)
-    return values
-
-
-def wrangler_args(worker: str, env: Mapping[str, str]) -> list[str]:
-    """The flags appended to the deploy command (wrangler splits --var at the first colon)."""
-    return [flag for name, value in injected_vars(worker, env).items() for flag in ("--var", f"{name}:{value}")]
-
-
-def generate_secrets(env: Mapping[str, str]) -> dict[str, str]:
-    """Gateway secrets for `wrangler deploy --secrets-file`: the owner's Access identities."""
+def _aliases(env: Mapping[str, str]) -> str:
+    """The gateway's alias list, normalized ("" for none). Unlike an optional project it must be present:
+    the CI step that writes the gateway's secrets always states it."""
     name = "TODOFY_ACCESS_OWNER_ALIASES"
     if name not in env:
         raise SettingError(name)
@@ -139,28 +148,79 @@ def generate_secrets(env: Mapping[str, str]) -> dict[str, str]:
         or not all(EMAIL.fullmatch(item) for item in items)
     ):
         raise SettingError(name)
-    return {
-        "ACCESS_OWNER": _required(env, "TODOFY_ACCESS_OWNER", EMAIL),
-        # --secrets-file only adds or replaces secrets, so an emptied list is uploaded as a single
-        # space (the gateway reads it as no aliases) rather than left out, which would keep the
-        # previous aliases working.
-        "ACCESS_OWNER_ALIASES": ",".join(items) or " ",
-    }
+    return ",".join(items)
 
 
-def write_secrets(path: Path, env: Mapping[str, str]) -> None:
+def injected_vars(worker: str, env: Mapping[str, str]) -> dict[str, str]:
+    """{NAME: value} for every --var `worker` ("core" or "gateway") gets at deploy."""
+    return {item.name: _required(env, item.source, item.pattern) for item in INJECTED[worker]}
+
+
+def wrangler_args(worker: str, env: Mapping[str, str]) -> list[str]:
+    """The flags appended to the deploy command (wrangler splits --var at the first colon)."""
+    return [flag for name, value in injected_vars(worker, env).items() for flag in ("--var", f"{name}:{value}")]
+
+
+def generate_secrets(worker: str, env: Mapping[str, str]) -> dict[str, str]:
+    """{NAME: value} of `worker`'s secrets file, for `wrangler deploy --secrets-file`. Every name is always
+    present: an unset optional value is uploaded as UNSET so that it replaces a previous value."""
+    secrets = {}
+    for item in SECRETS[worker]:
+        if item.name == "ACCESS_OWNER_ALIASES":
+            value = _aliases(env)
+        elif item.kind == "optional":
+            value = _optional(env, item.source, item.pattern)
+        else:
+            value = _required(env, item.source, item.pattern)
+        secrets[item.name] = value or UNSET
+    return secrets
+
+
+def write_secrets(worker: str, path: Path, env: Mapping[str, str]) -> None:
     """Owner-only, never over an existing file (it may be someone's local file)."""
-    secrets = generate_secrets(env)
+    secrets = generate_secrets(worker, env)
     fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
     with os.fdopen(fd, "w") as file:
         file.write(json.dumps(secrets, indent=2) + "\n")
 
 
+def _valid_secret(item: Injected, value: object) -> bool:
+    if not isinstance(value, str) or not value:
+        return False
+    if item.kind == "optional" and value == UNSET:
+        return True
+    if item.name == "ACCESS_OWNER_ALIASES":
+        try:
+            return _aliases({item.source: value}) == value
+        except SettingError:
+            return False
+    return item.pattern.fullmatch(value) is not None
+
+
+def secrets_file_problem(worker: str, path: Path) -> str | None:
+    """Why the secrets file at `path` must not be deployed for `worker`, or None: it must hold exactly that
+    Worker's secrets, each valid as `secrets` writes it (never printed)."""
+    try:
+        content = json.loads(path.read_text())
+    except (OSError, UnicodeDecodeError, ValueError):
+        return "the --secrets-file is missing or not JSON"
+    names = [item.name for item in SECRETS[worker]]
+    if not isinstance(content, dict) or sorted(content) != sorted(names):
+        return f"the --secrets-file must hold exactly {', '.join(names)}"
+    for item in SECRETS[worker]:
+        if not _valid_secret(item, content[item.name]):
+            return f"{item.name} in the --secrets-file is invalid"
+    return None
+
+
 def refusal(worker: str, argv: Sequence[str], cwd: Path | None = None) -> str | None:
-    """Why `argv` must not run through this wrapper for `worker`, or None."""
+    """Why `argv` must not run through this wrapper for `worker`, or None. `cwd` resolves a relative
+    --config and --secrets-file."""
     if not argv:
         return "no command given"
+    base = Path(cwd or Path.cwd())
     config = None
+    secrets_files = []
     for index, arg in enumerate(argv):
         if arg in ("--env", "-e") or arg.startswith("--env=") or (arg.startswith("-e") and not arg.startswith("--")):
             return "--env is not allowed: the top level is production"
@@ -172,12 +232,20 @@ def refusal(worker: str, argv: Sequence[str], cwd: Path | None = None) -> str | 
             config = argv[index + 1] if index + 1 < len(argv) else ""
         elif arg.startswith("--config="):
             config = arg.removeprefix("--config=")
+        elif arg == "--secrets-file":
+            secrets_files.append(argv[index + 1] if index + 1 < len(argv) else "")
+        elif arg.startswith("--secrets-file="):
+            secrets_files.append(arg.removeprefix("--secrets-file="))
     if "deploy" not in argv:
         return "only a deploy (or a --dry-run deploy) runs through this wrapper"
     expected = CONFIGS[worker]
-    if not config or (Path(cwd or Path.cwd()) / config).resolve() != expected.resolve():
+    if not config or (base / config).resolve() != expected.resolve():
         return f"--config must name {expected}"
-    return None
+    # Without the file the deploy would drop the plain_text projects of a Worker deployed before 2026-10,
+    # and would keep a previous value of a secret this deploy means to replace.
+    if len(secrets_files) != 1 or not secrets_files[0]:
+        return f"exactly one --secrets-file (written by `secrets {worker}`) is required"
+    return secrets_file_problem(worker, base / secrets_files[0])
 
 
 def _run(argv: Sequence[str], env: Mapping[str, str], spawn: Callable[[list[str]], int]) -> int:
@@ -185,22 +253,27 @@ def _run(argv: Sequence[str], env: Mapping[str, str], spawn: Callable[[list[str]
         case ["check"]:
             for worker in INJECTED:
                 injected_vars(worker, env)
-            generate_secrets(env)
+                generate_secrets(worker, env)
             print("Deploy values are valid (not printed).")
             return 0
-        case ["secrets", path]:
-            write_secrets(Path(path), env)
-            print("Wrote the gateway secrets file: ACCESS_OWNER, ACCESS_OWNER_ALIASES (values not printed).")
+        case ["secrets", worker, path] if worker in SECRETS:
+            write_secrets(worker, Path(path), env)
+            names = ", ".join(item.name for item in SECRETS[worker])
+            print(f"Wrote the {worker} secrets file: {names} (values not printed).")
             return 0
         case ["exec", worker, "--", *command] if worker in INJECTED:
             if reason := refusal(worker, command):
                 print(f"Refused: {reason}.", file=sys.stderr)
                 return 2
             extra = wrangler_args(worker, env)
-            names = ", ".join(injected_vars(worker, env))  # an unset optional var is not sent
-            print(f"Adding --var for {names} (values not printed).", flush=True)
+            names = ", ".join(injected_vars(worker, env))
+            secrets = ", ".join(item.name for item in SECRETS[worker])
+            print(f"Adding --var for {names}; secrets from --secrets-file: {secrets} (values not printed).", flush=True)
             return spawn([*command, *extra])
-    print("Usage: deploy_vars.py check | secrets <path> | exec {core|gateway} -- <deploy command…>", file=sys.stderr)
+    print(
+        "Usage: deploy_vars.py check | secrets {core|gateway} <path> | exec {core|gateway} -- <deploy command…>",
+        file=sys.stderr,
+    )
     return 2
 
 

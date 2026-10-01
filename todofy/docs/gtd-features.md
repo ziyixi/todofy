@@ -324,16 +324,20 @@ fixture carrying the new counters.
 
 | Name | Where | Default / unset | Purpose |
 | --- | --- | --- | --- |
-| `TODOIST_OPS_PROJECT_ID` | GitHub secret `TODOFY_TODOIST_OPS_PROJECT_ID` → `deploy_vars.py` | unset = default project (today) | `[Todofy System]` reminder project |
-| `TODOIST_REVIEW_PROJECT_ID` | GitHub secret `TODOFY_TODOIST_REVIEW_PROJECT_ID` | unset = default project | Sunday review project |
+| `TODOIST_OPS_PROJECT_ID` | GitHub secret `TODOFY_TODOIST_OPS_PROJECT_ID` → `deploy_vars.py` → Worker secret | unset = default project (today) | `[Todofy System]` reminder project |
+| `TODOIST_REVIEW_PROJECT_ID` | GitHub secret `TODOFY_TODOIST_REVIEW_PROJECT_ID` → Worker secret | unset = default project | Sunday review project |
 | `GTD_REVIEW_ENABLED` | GitHub variable `TODOFY_GTD_REVIEW_ENABLED` (toggle, required like the others) | – | stops the weekly task without a code change |
 | `GTD_COLLECT_UTC` | `wrangler.toml` `[vars]` | `13:00`; `off` in `wrangler.test.toml` | snapshot time |
 | `REPORT_CARRYOVER_DAYS` | `wrangler.toml` `[vars]` | `14`; `0` turns carryover off | rollback knob by commit |
 
 `deploy_vars.py` gains an `optional` kind: the pattern allows empty, and an empty value adds no `--var`
-(so the Worker sees it unset). Update the `deploy-vars-inputs core:` lines,
-`.github/scripts/test_wrangler_configs.py`, both deploy steps in `ci.yml` (the dry-run step sets one
-optional value empty and one to a placeholder) and `docs/ci-cd.md`. Carryover itself has no toggle: its
+(so the Worker sees it unset). Since 2026-10 the projects are Worker secrets written with
+`--secrets-file` instead, and an empty value is uploaded as one space, read as unset (a deploy keeps every
+secret it does not upload; [ci-cd.md](ci-cd.md) "`Todofy deploy`"). To add or rename one, update the
+`deploy-vars-inputs secrets_core:` lines of `deploy_vars.py`, `.github/scripts/test_wrangler_configs.py`,
+the "Write the Worker secrets files" step and the PR "Dry-run the committed production configs" step in
+`ci.yml` (which sets one optional project empty and one to a placeholder), the drift desired state
+(`python3 .github/scripts/drift_desired.py`) and `docs/ci-cd.md`. Carryover itself has no toggle: its
 fallback is automatic and `REPORT_CARRYOVER_DAYS=0` is the committed kill switch.
 
 ## 11. Fallbacks and failure modes

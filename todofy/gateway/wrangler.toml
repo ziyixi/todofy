@@ -7,7 +7,8 @@
 # --config gateway/wrangler.toml, through deploy/deploy_vars.py, which appends BUILD_SHA (the commit) and
 # MAINTENANCE_MODE (a GitHub environment variable) with --var, and passes the owner's Access emails
 # (ACCESS_OWNER, ACCESS_OWNER_ALIASES; GitHub environment secrets) as Worker secrets with --secrets-file.
-# A plain `wrangler deploy` of this file DELETES BUILD_SHA and MAINTENANCE_MODE. Other Worker secrets
+# A plain `wrangler deploy` of this file DELETES BUILD_SHA and MAINTENANCE_MODE (and the wrapper refuses a
+# deploy without the secrets file). Other Worker secrets
 # (MAIL_WEBHOOK_TOKEN_SHA256[_PREVIOUS], REPORT_BASIC_AUTH_SHA256, CSRF_SIGNING_KEY) survive every deploy.
 #
 # Runtime tests use wrangler.test.toml and wrangler.test-auth.toml (next to this file). Local dev runs both

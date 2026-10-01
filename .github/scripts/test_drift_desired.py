@@ -71,13 +71,37 @@ class DesiredState(unittest.TestCase):
                     self.assertEqual(bindings[name]["source"], "manual")
 
     def test_personal_values_are_named_for_the_secret_check(self):
-        """Every personal wrapper value is listed under `personal`, whatever way the wrapper sends it today."""
+        """A personal wrapper value sent with --var would be listed under `personal`; every wrapper now writes its
+        personal values with --secrets-file, so no Worker lists one (each is a secret_text deploy binding instead)."""
         personal = {worker: set(desired["personal"]) for worker, desired in self.state["workers"].items()}
         for worker, names in personal.items():
             bindings = {b["name"] for b in self.state["workers"][worker]["bindings"]}
             with self.subTest(worker=worker):
                 self.assertLessEqual(names, bindings)
-        self.assertIn("TODOIST_DEFAULT_PROJECT_ID", personal["todofy-core"])
+                self.assertEqual(names, set())
+
+    def test_todofy_personal_values_are_deploy_secrets(self):
+        """Todofy writes the core's Todoist projects and the gateway's owner addresses with --secrets-file, one file per
+        Worker; an unset optional project is uploaded too (as unset), so every one is a required secret_text binding.
+        The vars it adds are the switches and BUILD_SHA."""
+        workers = {
+            "todofy-core": ("TODOIST_DEFAULT_PROJECT_ID", "TODOIST_OPS_PROJECT_ID", "TODOIST_REVIEW_PROJECT_ID"),
+            "todofy": ("ACCESS_OWNER", "ACCESS_OWNER_ALIASES"),
+        }
+        switches = {
+            "todofy-core": ("BUILD_SHA", "MAINTENANCE_MODE", "REMINDER_ENABLED", "PROCESSING_PAUSED", "FORCE_PAUSE_TODOIST", "GTD_REVIEW_ENABLED"),
+            "todofy": ("BUILD_SHA", "MAINTENANCE_MODE"),
+        }
+        for worker, names in workers.items():
+            bindings = {b["name"]: b for b in self.state["workers"][worker]["bindings"]}
+            for name in names:
+                with self.subTest(worker=worker, name=name):
+                    self.assertEqual(bindings[name], {"name": name, "type": "secret_text", "source": "deploy"})
+            for name in switches[worker]:
+                with self.subTest(worker=worker, name=name):
+                    self.assertEqual(bindings[name], {"name": name, "type": "plain_text", "source": "deploy"})
+            deployed = {name for name, binding in bindings.items() if binding["source"] == "deploy"}
+            self.assertEqual(deployed, set(names) | set(switches[worker]))
 
     def test_mail_hero_personal_values_are_deploy_secrets(self):
         """Mail Hero writes its receive address and owner addresses with --secrets-file (as the dashboard and Lab

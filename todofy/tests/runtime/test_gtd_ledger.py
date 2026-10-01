@@ -440,8 +440,11 @@ def test_the_review_is_one_task_per_iso_week_with_counts_only(probe):
     assert len(probe.todoist.creates()) == 1 and again["state"]["next_review"] == SUNDAY + 7 * DAY
 
 
-def test_the_review_goes_to_the_default_project_without_a_review_project(probe):
-    review(probe, SUNDAY)
+# The deploy uploads an unset optional project as a single space (the secret must be overwritten,
+# not kept), so a blank value must read as unset.
+@pytest.mark.parametrize("unset", [{}, {"TODOIST_REVIEW_PROJECT_ID": " "}])
+def test_the_review_goes_to_the_default_project_without_a_review_project(probe, unset):
+    review(probe, SUNDAY, **unset)
     [create] = probe.todoist.creates()
     assert create.json()["project_id"] == PROJECT_ID
     assert create.json()["description"].startswith("快照：本周没有可用的 Todoist 快照")

@@ -159,16 +159,16 @@ account, D1 IDs, buckets, hostnames and routes, crons, compatibility settings, D
 migrations, Access issuers and AUDs, limits and defaults. Changing one is a commit that checks and deploys
 that app. Nothing is generated. What is never committed is added at deploy by each app's wrapper
 (`mail-hero/deploy/deploy-vars.mjs`, `todofy/deploy/deploy_vars.py`, `dashboard/deploy/deploy-vars.mjs`,
-`lab/deploy/deploy-vars.mjs`) with `wrangler deploy --var NAME:value` (or as Worker secrets with `--secrets-file`): the personal values
-and owner identities from the secrets above, the operational switches from the variables above (the only
-GitHub variables CI reads, so a release restates the live switches and never overwrites them) and
-`BUILD_SHA`. A deploy without a var deletes it, so each wrapper refuses a missing or invalid value, `--env`,
+`lab/deploy/deploy-vars.mjs`): the personal values and owner identities from the secrets above as Worker
+secrets with `wrangler deploy --secrets-file` (wrangler and the Cloudflare dashboard show a plain var's
+value), and with `--var NAME:value` the operational switches from the variables above (the only GitHub
+variables CI reads, so a release restates the live switches and never overwrites them) and `BUILD_SHA`. A deploy without a var deletes it, so each wrapper refuses a missing or invalid value, `--env`,
 `--keep-vars` and any other config; never run a plain `wrangler deploy` of these configs.
 [`.github/scripts/test_wrangler_configs.py`](.github/scripts/test_wrangler_configs.py) (in `Changes`) checks
 across apps: only these configs (and the runtime-test ones next to their tests) exist, none has `[env]` or
 `keep_vars`, one account, the hosts are consistent (the dashboard's is its own; its links match the apps'),
-every step that calls a wrapper sets every input, personal values come only from secrets, and no personal
-value, switch or build is committed. [`.github/scripts/test_drift_desired.py`](.github/scripts/test_drift_desired.py)
+every step that calls a wrapper sets every input, personal values come only from secrets and reach the
+Workers only as Worker secrets, and no personal value, switch or build is committed. [`.github/scripts/test_drift_desired.py`](.github/scripts/test_drift_desired.py)
 (also in `Changes`) checks that the dashboard's bundled desired state `dashboard/worker/src/drift-desired.json`
 (names, types and flags only, for its private daily drift check, `dashboard/docs/design-v2.md` §10) equals a
 fresh `python3 .github/scripts/drift_desired.py`: a change to any config or wrapper regenerates it in the same

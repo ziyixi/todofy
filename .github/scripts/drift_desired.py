@@ -12,13 +12,15 @@ or a secret. Sources:
 
 - each Worker's committed production config (the same map as test_wrangler_configs.py PRODUCTION);
 - each app's deploy-vars wrapper (the `deploy-vars-inputs` header names its inputs; the wrapper's own
-  tables name the Worker vars it adds with --var and the Worker secrets it writes with --secrets-file):
-  the wrapper is imported, never run, and its secrets function gets synthetic placeholder inputs, so no
-  real value is ever read;
+  tables name the Worker vars it adds with --var and the Worker secrets it writes with --secrets-file, one
+  file per Worker for Todofy's two Workers): the wrapper is imported, never run, and its secrets function
+  gets synthetic placeholder inputs, so no real value is ever read;
 - MANUAL_SECRETS below: the Worker secrets set by hand (`wrangler secret put`), names only.
 
-A wrapper value of kind `personal` (or Todofy's `optional`, a personal value that may be unset) must be a
-`secret_text` binding on the live Worker: the drift check reports any other type as a finding.
+A wrapper --var of kind `personal` (or `optional`, a personal value that may be unset) is listed under
+`personal`: it must be a `secret_text` binding on the live Worker, and the drift check reports any other type
+as a finding. Every wrapper writes its personal values with --secrets-file today, so they are wanted as
+`secret_text` bindings and a live plain_text one is a `bindings` change; `personal` lists stay empty.
 
 This file reads every app's folder, which is why it lives here and not in an app (root AGENTS.md); the
 dashboard only reads its own generated copy. test_drift_desired.py fails until the committed JSON equals a
@@ -55,7 +57,7 @@ WORKERS = {
 # The zones whose zone routes are compared (every Custom Domain and route of every Worker is in one of them).
 ZONES = ("ziyixi.science",)
 
-# Each deploy-vars wrapper: language, file, and which Worker gets its vars (per mode) and its secrets.
+# Each deploy-vars wrapper: language, file, and which Worker gets its vars and its secrets (per mode for Todofy).
 WRAPPERS = {
     "mail-hero": {"language": "js", "file": "mail-hero/deploy/deploy-vars.mjs", "vars": "mail-hero", "secrets": "mail-hero"},
     "dashboard": {"language": "js", "file": "dashboard/deploy/deploy-vars.mjs", "vars": "home", "secrets": "home"},
@@ -64,7 +66,7 @@ WRAPPERS = {
         "language": "py",
         "file": "todofy/deploy/deploy_vars.py",
         "vars": {"core": "todofy-core", "gateway": "todofy"},
-        "secrets": "todofy",
+        "secrets": {"core": "todofy-core", "gateway": "todofy"},
     },
 }
 
@@ -150,6 +152,8 @@ def _placeholder(name: str) -> str:
         return ""
     if "OWNER" in name or "ADDRESS" in name:
         return "owner@example.com"
+    if name.endswith("_PROJECT_ID"):
+        return "placeholder"
     if name.endswith("_KEY"):
         return "0" * 64
     if name.endswith("_TOKEN"):
@@ -189,7 +193,7 @@ def _js_wrapper(path: str, inputs: dict[str, str]) -> dict:
     return json.loads(result.stdout)
 
 
-def _py_wrapper(path: str, inputs: dict[str, str]) -> tuple[dict[str, list[dict]], list[str]]:
+def _py_wrapper(path: str, inputs: dict[str, str]) -> tuple[dict[str, list[dict]], dict[str, list[str]]]:
     spec = importlib.util.spec_from_file_location("drift_wrapper_" + Path(path).stem, REPO / path)
     if spec is None or spec.loader is None:
         raise GeneratorError(f"could not load {path}")
@@ -201,7 +205,7 @@ def _py_wrapper(path: str, inputs: dict[str, str]) -> tuple[dict[str, list[dict]
             mode: [{"name": item.name, "kind": item.kind, "optional": item.kind == "optional"} for item in items]
             for mode, items in module.INJECTED.items()
         }
-        secrets = list(module.generate_secrets(inputs))
+        secrets = {mode: list(module.generate_secrets(mode, inputs)) for mode in module.SECRETS}
     finally:
         sys.modules.pop(spec.name, None)
     return modes, secrets
@@ -212,25 +216,31 @@ def wrapper_bindings() -> tuple[dict[str, list[dict]], dict[str, list[str]]]:
     bindings: dict[str, list[dict]] = {}
     personal: dict[str, list[str]] = {}
     for app, wrapper in WRAPPERS.items():
-        inputs = {name: _placeholder(name) for name in markers(wrapper["file"]).get("secrets", [])}
+        found = markers(wrapper["file"])
+        secret_modes = [mode for mode in found if mode == "secrets" or mode.startswith("secrets_")]
+        secret_inputs = [name for mode in secret_modes for name in found[mode]]
+        inputs = {name: _placeholder(name) for name in secret_inputs}
         if wrapper["language"] == "js":
             read = _js_wrapper(wrapper["file"], inputs)
             modes = {"": read["vars"]}
-            secrets = read["secrets"]
+            secrets = {"": read["secrets"]}
             targets = {"": wrapper["vars"]}
+            secret_targets = {"": wrapper["secrets"]}
         else:
             modes, secrets = _py_wrapper(wrapper["file"], inputs)
             targets = wrapper["vars"]
-            if set(modes) != set(targets):
-                raise GeneratorError(f"{app}: wrapper modes {sorted(modes)} != {sorted(targets)}")
+            secret_targets = wrapper["secrets"]
+            if set(modes) != set(targets) or set(secrets) != set(secret_targets):
+                raise GeneratorError(f"{app}: wrapper modes {sorted(modes)}/{sorted(secrets)} != {sorted(targets)}")
         for mode, items in modes.items():
             worker = targets[mode]
             for item in items:
                 bindings.setdefault(worker, []).append(_binding(item["name"], "plain_text", "deploy", item["optional"]))
                 if item["kind"] in PERSONAL_KINDS:
                     personal.setdefault(worker, []).append(item["name"])
-        for name in secrets:
-            bindings.setdefault(wrapper["secrets"], []).append(_binding(name, "secret_text", "deploy"))
+        for mode, names in secrets.items():
+            for name in names:
+                bindings.setdefault(secret_targets[mode], []).append(_binding(name, "secret_text", "deploy"))
     return bindings, personal
 
 

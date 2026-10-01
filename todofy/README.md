@@ -80,7 +80,8 @@ Set as GitHub variables on the `production` environment and applied by a deploy 
 
 Optional environment secrets `TODOFY_TODOIST_OPS_PROJECT_ID` and `TODOFY_TODOIST_REVIEW_PROJECT_ID` send the
 `[Todofy System]` reminder and the Sunday review to their own Todoist projects; unset, both go to the
-default project.
+default project. Like `TODOFY_TODOIST_DEFAULT_PROJECT_ID`, they reach `todofy-core` as Worker secrets
+(`--secrets-file`), never as plain vars.
 
 ## GTD ledger and the morning brief
 

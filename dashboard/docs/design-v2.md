@@ -324,8 +324,10 @@ remote text never leaves `drift.ts` (failures become `http_<n>`, `timeout`, `net
 
 A personal value is reported whatever way its wrapper sends it today; a known difference is a finding
 until the live account or the committed state changes, never a special case. A personal value a wrapper
-writes with `--secrets-file` (the owner addresses of Mail Hero, the dashboard and Lab, and Mail Hero's
-receive address) is wanted as a `secret_text` binding, so a live `plain_text` one is a `bindings` change.
+writes with `--secrets-file` (the owner addresses of Mail Hero, Todofy, the dashboard and Lab, Mail Hero's
+receive address and Todofy's Todoist projects; since 2026-10 every personal value) is wanted as a
+`secret_text` binding, so a live `plain_text` one is a `bindings` change and no Worker lists a `personal`
+value.
 
 **Storage and views.** `state` documents `drift_run` (today's run across ticks: the live names and
 types read so far; deleted when the run ends) and `drift` (the last completed check: counts per

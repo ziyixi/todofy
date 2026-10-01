@@ -141,7 +141,7 @@ tests/mail_contract.py         paths of the shared contract: ../contracts/mail-r
 web/                           owner UI (React + Vite); builds into uiassets/dist; types generated from the OpenAPI
 tools/                         legacy SQLite snapshot → D1 export/verify scripts and the webhook smoke test
                                (stdlib, Python 3.9+)
-deploy/                        deploy_vars.py (adds what is never committed: --var values, the gateway's
+deploy/                        deploy_vars.py (adds what is never committed: --var values, each Worker's
                                secrets file) and the tests of the committed production configs
 ```
 

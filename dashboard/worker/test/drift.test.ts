@@ -172,16 +172,21 @@ describe('comparison', () => {
     expect(countFindings(findings)).toEqual({ scripts: 2, custom_domains: 3, routes: 1, crons: 2, bindings: 3, workers_dev: 1, personal: 1 });
   });
 
-  it('reports personal values that are plain_text on the live Workers today, without special cases', async () => {
-    const { doc } = await fullCheck({ personalPlain: true });
-    const personal = doc.findings.filter((f) => f.category === 'personal');
-    // Mail Hero's receive address and owner addresses are written with --secrets-file (secret_text bindings,
-    // like the dashboard's and Lab's owner addresses), so only Todofy's --var personal value remains.
-    expect(personal.map((f) => `${f.script}:${f.name}`)).toEqual(['todofy-core:TODOIST_DEFAULT_PROJECT_ID']);
-    expect(personal.every((f) => f.expected === 'secret_text' && f.actual === 'plain_text')).toBe(true);
-    // Nothing else differs: the wrapper sends them as plain_text, which is what the bindings expect.
-    expect(doc.findings.filter((f) => f.category !== 'personal')).toEqual([]);
-    expect(driftView(doc, true, AT('03:00'))).toMatchObject({ status: 'drift', counts: { personal: 1 } });
+  it('wants every personal value as a deploy secret, so a live plain_text one is a bindings change', async () => {
+    // Every wrapper writes its personal values with --secrets-file (Mail Hero's receive address, the owner addresses,
+    // Todofy's Todoist projects), so no Worker lists a `personal` --var.
+    expect(Object.values(DESIRED.workers).flatMap((worker) => worker.personal)).toEqual([]);
+    const core = new Map((DESIRED.workers['todofy-core']?.bindings ?? []).map((b) => [b.name, b]));
+    for (const name of ['TODOIST_DEFAULT_PROJECT_ID', 'TODOIST_OPS_PROJECT_ID', 'TODOIST_REVIEW_PROJECT_ID']) {
+      expect(core.get(name)).toEqual({ name, type: 'secret_text', source: 'deploy' });
+    }
+    // The live state before the first deploy that moves them: the project a plain var, an optional one not set.
+    const { doc } = await fullCheck({ bindings: { 'todofy-core': { TODOIST_DEFAULT_PROJECT_ID: 'plain_text', TODOIST_OPS_PROJECT_ID: null } } });
+    expect(doc.findings).toEqual([
+      { category: 'bindings', script: 'todofy-core', name: 'TODOIST_DEFAULT_PROJECT_ID', kind: 'changed', expected: 'secret_text', actual: 'plain_text' },
+      { category: 'bindings', script: 'todofy-core', name: 'TODOIST_OPS_PROJECT_ID', kind: 'missing', expected: 'secret_text' },
+    ]);
+    expect(driftView(doc, true, AT('03:00'))).toMatchObject({ status: 'drift', counts: { bindings: 2, personal: 0 } });
   });
 
   it('detects a toml change: a Custom Domain removed from the committed state is reported as extra', async () => {
@@ -222,7 +227,7 @@ describe('reading the API', () => {
       { name: 'J', type: 'json' },
       { name: 'X', type: 'plain_text' },
     ]);
-    const { doc, run } = await fullCheck({ personalPlain: true });
+    const { doc, run } = await fullCheck({ bindings: { 'todofy-core': { TODOIST_DEFAULT_PROJECT_ID: 'plain_text' } } });
     expect(JSON.stringify(run)).not.toContain(SENTINEL_VALUE);
     expect(JSON.stringify(doc)).not.toContain(SENTINEL_VALUE);
     expect(JSON.stringify(driftView(doc, true, AT('03:00')))).not.toContain(SENTINEL_VALUE);
