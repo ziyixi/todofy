@@ -9,9 +9,13 @@
 // and in CI override_existing_origin/override_existing_dns_record; zone routes: PUT .../routes, which
 // deletes the script's other routes) and leaves an empty category alone. So, per non-empty category:
 //   - removed:  live on this Worker, not listed -> fail, unless allowed (CF_GUARD_ALLOW_REMOVE)
-//   - conflict: listed, but a Custom Domain of another Worker, a zone route of another script, or (for a
-//               hostname new to this Worker) an existing A/AAAA/CNAME record wrangler would overwrite
-//               -> fail, unless allowed (CF_GUARD_ALLOW_CONFLICT)
+//   - conflict: listed, but another Worker's Custom Domain (worker:<host>), another script's zone route
+//               (route:<pattern>), or, for a hostname new to this Worker, an existing A/AAAA/CNAME record
+//               (dns:<host>) -> fail, unless CF_GUARD_ALLOW_CONFLICT allows exactly that kind and name.
+//               When the DNS records of a new hostname cannot be read, nothing can allow it.
+// Despite override_existing_dns_record, the Custom Domain API refuses a hostname that has a DNS record it did
+// not create (error 100117; seen 2026-10-01 for a tunnel CNAME): such a record must be deleted right before the
+// deploy, and then there is no conflict to allow.
 // Read-only: only GET requests (the changeset endpoint is not used; the live state comes from the list
 // endpoints). Output: Worker names, the hostnames and route patterns of the checked config and of the allow
 // lists (both committed), counts and PASS/FAIL. A live hostname or pattern that neither lists is only counted:
@@ -184,8 +188,38 @@ export function parseAllowList(value) {
       .split(/[\s,]+/)
       .map((item) => item.trim())
       .filter(Boolean)
-      .map((item) => (item.includes("/") || item.includes("*") ? item : item.toLowerCase())),
+      .map(normalizeName),
   );
+}
+
+/** A hostname in lower case; a route pattern (it has a path or a wildcard) unchanged. */
+function normalizeName(name) {
+  return name.includes("/") || name.includes("*") ? name : name.toLowerCase();
+}
+
+/** The kinds of conflict CF_GUARD_ALLOW_CONFLICT can allow, each for one hostname or pattern. */
+export const CONFLICT_KINDS = {
+  dns: "a new Custom Domain's existing A/AAAA/CNAME record",
+  worker: "a Custom Domain of another Worker",
+  route: "a zone route of another script",
+};
+
+/**
+ * CF_GUARD_ALLOW_CONFLICT: `<kind>:<hostname or pattern>` entries (dns:, worker: or route:), so that allowing
+ * one conflict never silences another kind for the same name. A bare name is refused.
+ */
+export function parseConflictAllowList(value) {
+  const allowed = new Set();
+  for (const entry of parseAllowList(value)) {
+    const match = /^([a-z]+):(.+)$/.exec(entry);
+    if (!match || !Object.hasOwn(CONFLICT_KINDS, match[1])) {
+      throw new GuardError(
+        `CF_GUARD_ALLOW_CONFLICT entry ${entry} needs a kind: ${Object.keys(CONFLICT_KINDS).map((kind) => `${kind}:<name>`).join(", ")}.`,
+      );
+    }
+    allowed.add(`${match[1]}:${normalizeName(match[2])}`);
+  }
+  return allowed;
 }
 
 /** The zone of a hostname: the longest suffix (at least two labels) that is a zone of the account. */
@@ -278,7 +312,7 @@ export async function planWorker(client, triggers, { allowRemove = new Set(), al
         .filter((item) => isRecord(item) && typeof item.hostname === "string" && item.hostname.toLowerCase() === host);
       const elsewhere = holders.some((item) => item.service !== name);
       if (elsewhere) {
-        conflict(`Custom Domain ${host} belongs to a different Worker; the deploy would move it to ${name}.`, host);
+        conflict("worker", host, `Custom Domain ${host} belongs to a different Worker; the deploy would move it to ${name}.`);
         continue;
       }
       if (liveSet.has(host)) continue;
@@ -290,9 +324,10 @@ export async function planWorker(client, triggers, { allowRemove = new Set(), al
         if (!zone) throw new GuardError(`no zone of this account contains ${host}`);
         records = await client.list(`/zones/${zone.id}/dns_records`, { name: host, per_page: "100" }, "list DNS records");
       } catch (error) {
-        conflict(
-          `cannot check the DNS records of the new Custom Domain ${host} (${error instanceof Error ? error.message : "error"}); check by hand, then allow it with CF_GUARD_ALLOW_CONFLICT.`,
-          host,
+        // Never allowable: an allowance written for a record seen by hand must not also cover an unread zone.
+        lines.push(`  UNCHECKED ${host}`);
+        failures.push(
+          `cannot check the DNS records of the new Custom Domain ${host} (${error instanceof Error ? error.message : "error"}); give the token DNS read on its zone and run again (no allowance covers this).`,
         );
         continue;
       }
@@ -305,7 +340,11 @@ export async function planWorker(client, triggers, { allowRemove = new Set(), al
         ),
       ].sort();
       if (types.length > 0) {
-        conflict(`new Custom Domain ${host} already has a DNS ${types.join("/")} record that the deploy would overwrite.`, host);
+        conflict(
+          "dns",
+          host,
+          `new Custom Domain ${host} already has a DNS ${types.join("/")} record; the Custom Domain API refuses a record it did not create (error 100117), so delete it right before the deploy (save it first for a rollback).`,
+        );
       }
     }
   }
@@ -357,7 +396,7 @@ export async function planWorker(client, triggers, { allowRemove = new Set(), al
     for (const pattern of [...listed].sort()) {
       if (mine.has(pattern)) continue;
       if (others.has(pattern)) {
-        conflict(`zone route ${pattern} belongs to a different Worker.`, pattern);
+        conflict("route", pattern, `zone route ${pattern} belongs to a different Worker.`);
       } else {
         lines.push(`  add     ${pattern}`);
       }
@@ -365,11 +404,13 @@ export async function planWorker(client, triggers, { allowRemove = new Set(), al
   }
   return { lines, failures };
 
-  function conflict(message, key) {
-    if (allowConflict.has(key)) {
-      lines.push(`  allowed conflict (CF_GUARD_ALLOW_CONFLICT): ${message}`);
+  /** A conflict of one kind (CONFLICT_KINDS) for one hostname or pattern, allowed only as `<kind>:<name>`. */
+  function conflict(kind, key, message) {
+    const entry = `${kind}:${key}`;
+    if (allowConflict.has(entry)) {
+      lines.push(`  allowed conflict (CF_GUARD_ALLOW_CONFLICT ${entry}): ${message}`);
     } else {
-      lines.push(`  CONFLICT ${key}`);
+      lines.push(`  CONFLICT ${entry}`);
       failures.push(message);
     }
   }
@@ -416,7 +457,7 @@ export async function main(argv, env, { log = console.log, fetchImpl } = {}) {
   try {
     const configs = parseArgs(argv);
     const allowRemove = parseAllowList(env.CF_GUARD_ALLOW_REMOVE);
-    const allowConflict = parseAllowList(env.CF_GUARD_ALLOW_CONFLICT);
+    const allowConflict = parseConflictAllowList(env.CF_GUARD_ALLOW_CONFLICT);
     const workers = [];
     for (const file of configs) workers.push({ file, triggers: await readTriggers(file) });
     // No request (and no token needed) when no config lists a route of either kind.
@@ -438,7 +479,8 @@ export async function main(argv, env, { log = console.log, fetchImpl } = {}) {
     if (failed) {
       log(
         "cf-guard: FAIL. Fix wrangler.toml (it must list every live hostname), or for an intentional change set " +
-          "CF_GUARD_ALLOW_REMOVE / CF_GUARD_ALLOW_CONFLICT on this deploy step to the exact hostnames or patterns.",
+          "CF_GUARD_ALLOW_REMOVE on this deploy step to the exact hostnames or patterns, or CF_GUARD_ALLOW_CONFLICT " +
+          "to the exact entries of the CONFLICT lines (dns:, worker: or route: and the name).",
       );
       return 1;
     }

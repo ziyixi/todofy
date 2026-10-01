@@ -137,8 +137,11 @@ change: wrangler applies each non-empty category as the Worker's complete set (a
 Worker's hostname or a DNS record), so the guard fails when a live hostname would be detached or taken
 over. It only reads, and prints the config's hostnames and patterns, counts and PASS/FAIL; a live hostname
 that is not in the repository is only counted, so the public log never names it. An intentional removal sets
-`CF_GUARD_ALLOW_REMOVE` (an intentional takeover `CF_GUARD_ALLOW_CONFLICT`) on that job's guard step to the
-exact hostnames, in the same commit that edits `wrangler.toml`.
+`CF_GUARD_ALLOW_REMOVE` (an intentional takeover `CF_GUARD_ALLOW_CONFLICT`, as `worker:<host>`, `dns:<host>` or
+`route:<pattern>`) on that job's guard step to the exact hostnames, in the same commit that edits
+`wrangler.toml`. A hostname moving off a DNS record that the Workers Custom Domain API did not create (a tunnel
+CNAME) needs that record deleted right before the deploy: the API refuses it (error `100117`) even though CI's
+wrangler asks it to overwrite the record.
 
 The website jobs cache the Playwright browser download by the locked Playwright version
 (`~/.cache/ms-playwright`); the system libraries it needs are installed on every run.

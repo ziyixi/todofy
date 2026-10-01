@@ -2310,6 +2310,7 @@ class HostnameGuard(unittest.TestCase):
     STEP = "- name: Check the hostnames against production\n"
     # Intentional hostname changes, (CF_GUARD_ALLOW_REMOVE, CF_GUARD_ALLOW_CONFLICT) per job, set only in the commit
     # that makes them (FlowDay's F4 cutover set both for "flowday-deploy"; the next commit cleared them). None today.
+    # A conflict allowance names its kind: "dns:<host>", "worker:<host>" or "route:<pattern>" (tools/cf-guard).
     ALLOWED: dict[str, tuple[str, str]] = {}
 
     @staticmethod

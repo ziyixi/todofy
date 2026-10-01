@@ -14,6 +14,7 @@ import {
   apiUrlFrom,
   main,
   parseAllowList,
+  parseConflictAllowList,
   patternHost,
   readTriggers,
   triggersFromConfig,
@@ -197,10 +198,32 @@ test(
     const file = writeConfig(dir, "site", `${SITE.slice(0, -2)}\n  { pattern = "app.example.com", custom_domain = true },\n]`);
     const failed = await run(baseState(), [file]);
     assert.equal(failed.code, 1);
-    assert.match(failed.text, /CONFLICT app\.example\.com/);
+    assert.match(failed.text, /CONFLICT worker:app\.example\.com/);
     assert.match(failed.text, /belongs to a different Worker/);
-    const allowed = await run(baseState(), [file], { CF_GUARD_ALLOW_CONFLICT: "app.example.com" });
+    // Only the takeover kind allows it: a DNS allowance for the same hostname does not.
+    const dnsOnly = await run(baseState(), [file], { CF_GUARD_ALLOW_CONFLICT: "dns:app.example.com" });
+    assert.equal(dnsOnly.code, 1);
+    assert.match(dnsOnly.text, /CONFLICT worker:app\.example\.com/);
+    const allowed = await run(baseState(), [file], { CF_GUARD_ALLOW_CONFLICT: "worker:APP.example.com" });
     assert.equal(allowed.code, 0, allowed.text);
+    assert.match(allowed.text, /allowed conflict \(CF_GUARD_ALLOW_CONFLICT worker:app\.example\.com\): Custom Domain app\.example\.com belongs to a different Worker/);
+  }),
+);
+
+test(
+  "a conflict allowance without its kind is an error (exit 2), before any request",
+  withDir(async (dir) => {
+    const file = writeConfig(dir, "site", SITE);
+    for (const entry of ["app.example.com", "cname:app.example.com", "dns:"]) {
+      const output = [];
+      const code = await main(
+        ["--config", file],
+        { CLOUDFLARE_API_TOKEN: TOKEN, CF_GUARD_ALLOW_CONFLICT: entry },
+        { log: (line) => output.push(line), fetchImpl: () => assert.fail("no request") },
+      );
+      assert.equal(code, 2, entry);
+      assert.match(output.join("\n"), /CF_GUARD_ALLOW_CONFLICT entry .* needs a kind: dns:<name>, worker:<name>, route:<name>\./);
+    }
   }),
 );
 
@@ -214,7 +237,17 @@ test(
     const taken = writeConfig(dir, "site", `${SITE.slice(0, -2)}\n  { pattern = "tunnel.example.com", custom_domain = true },\n]`);
     const failed = await run(baseState(), [taken]);
     assert.equal(failed.code, 1);
-    assert.match(failed.text, /new Custom Domain tunnel\.example\.com already has a DNS CNAME record/);
+    assert.match(failed.text, /CONFLICT dns:tunnel\.example\.com/);
+    assert.match(failed.text, /new Custom Domain tunnel\.example\.com already has a DNS CNAME record; the Custom Domain API refuses a record it did not create \(error 100117\), so delete it right before the deploy/);
+    // A takeover allowance for the same hostname does not cover its DNS record.
+    const workerOnly = await run(baseState(), [taken], { CF_GUARD_ALLOW_CONFLICT: "worker:tunnel.example.com" });
+    assert.equal(workerOnly.code, 1);
+    // Deleted right before the deploy, the record is no conflict at all.
+    const deleted = baseState();
+    deleted.dns[ZONE] = deleted.dns[ZONE].filter((record) => record.name !== "tunnel.example.com");
+    const afterDelete = await run(deleted, [taken]);
+    assert.equal(afterDelete.code, 0, afterDelete.text);
+    assert.match(afterDelete.text, /add {5}tunnel\.example\.com/);
     // MX/TXT at a name are not what a Custom Domain replaces (the apex keeps its mail records).
     const apexOnly = writeConfig(dir, "mailer", 'routes = [{ pattern = "example.com", custom_domain = true }]');
     const state = baseState();
@@ -234,28 +267,39 @@ test(
     assert.equal(removeOnly.code, 1);
     assert.match(removeOnly.text, /remove {2}staging\.example\.com \(allowed by CF_GUARD_ALLOW_REMOVE\)/);
     assert.match(removeOnly.text, /new Custom Domain tunnel\.example\.com already has a DNS CNAME record/);
-    const conflictOnly = await run(state, [file], { CF_GUARD_ALLOW_CONFLICT: "tunnel.example.com" }, ["staging.example.com"]);
+    const conflictOnly = await run(state, [file], { CF_GUARD_ALLOW_CONFLICT: "dns:tunnel.example.com" }, ["staging.example.com"]);
     assert.equal(conflictOnly.code, 1);
     assert.match(conflictOnly.text, /REMOVE {2}1 live Custom Domain\(s\) not in wrangler\.toml/);
     const both = await run(state, [file], {
       CF_GUARD_ALLOW_REMOVE: "staging.example.com",
-      CF_GUARD_ALLOW_CONFLICT: "tunnel.example.com",
+      CF_GUARD_ALLOW_CONFLICT: "dns:tunnel.example.com",
     });
     assert.equal(both.code, 0, both.text);
-    assert.match(both.text, /allowed conflict \(CF_GUARD_ALLOW_CONFLICT\): new Custom Domain tunnel\.example\.com already has a DNS CNAME record/);
+    assert.match(both.text, /allowed conflict \(CF_GUARD_ALLOW_CONFLICT dns:tunnel\.example\.com\): new Custom Domain tunnel\.example\.com already has a DNS CNAME record/);
+    // In production the API still refused the CNAME (error 100117): with it deleted first, only the removal is left.
+    state.dns[ZONE] = state.dns[ZONE].filter((record) => record.name !== "tunnel.example.com");
+    const deleted = await run(state, [file], { CF_GUARD_ALLOW_REMOVE: "staging.example.com" });
+    assert.equal(deleted.code, 0, deleted.text);
   }),
 );
 
 test(
-  "an unreadable DNS zone makes a new Custom Domain a conflict, printing only status and codes",
+  "an unreadable DNS zone fails a new Custom Domain whatever is allowed, printing only status and codes",
   withDir(async (dir) => {
     const state = { ...baseState(), fail: (url) => url.pathname.endsWith("/dns_records") };
     const file = writeConfig(dir, "site", `${SITE.slice(0, -2)}\n  { pattern = "new.example.com", custom_domain = true },\n]`);
-    const failed = await run(state, [file]);
-    assert.equal(failed.code, 1);
-    assert.match(failed.text, /cannot check the DNS records of the new Custom Domain new\.example\.com \(list DNS records: HTTP 403, Cloudflare error codes \[10000\]\.\)/);
-    const allowed = await run(state, [file], { CF_GUARD_ALLOW_CONFLICT: "new.example.com" });
-    assert.equal(allowed.code, 0, allowed.text);
+    for (const allowance of ["", "dns:new.example.com", "worker:new.example.com", "dns:new.example.com worker:new.example.com"]) {
+      const failed = await run(state, [file], { CF_GUARD_ALLOW_CONFLICT: allowance });
+      assert.equal(failed.code, 1, allowance);
+      assert.match(failed.text, /UNCHECKED new\.example\.com/);
+      assert.match(failed.text, /cannot check the DNS records of the new Custom Domain new\.example\.com \(list DNS records: HTTP 403, Cloudflare error codes \[10000\]\.\); give the token DNS read on its zone and run again \(no allowance covers this\)\./);
+      assert.ok(!failed.text.includes("allowed conflict"), failed.text);
+    }
+    // The same with no zone of the account containing the hostname.
+    const elsewhere = writeConfig(dir, "site", `${SITE.slice(0, -2)}\n  { pattern = "new.example.org", custom_domain = true },\n]`);
+    const unknown = await run(baseState(), [elsewhere], { CF_GUARD_ALLOW_CONFLICT: "dns:new.example.org" });
+    assert.equal(unknown.code, 1);
+    assert.match(unknown.text, /no zone of this account contains new\.example\.org/);
   }),
 );
 
@@ -276,11 +320,16 @@ test(
     const allowed = await run(baseState(), [dropped], { CF_GUARD_ALLOW_REMOVE: "example.net/*" });
     assert.equal(allowed.code, 0, allowed.text);
     assert.match(allowed.text, /remove {2}example\.net\/\* \(allowed by CF_GUARD_ALLOW_REMOVE\)/);
-    // Another script's pattern is a conflict.
+    // Another script's pattern is a conflict, allowed only as a route conflict.
     const stolen = writeConfig(dir, "thief", 'route = "old.example.com/*"');
     const conflict = await run(baseState(), [stolen]);
     assert.equal(conflict.code, 1);
+    assert.match(conflict.text, /CONFLICT route:old\.example\.com\/\*/);
     assert.match(conflict.text, /zone route old\.example\.com\/\* belongs to a different Worker/);
+    const wrongKind = await run(baseState(), [stolen], { CF_GUARD_ALLOW_CONFLICT: "worker:old.example.com/*" });
+    assert.equal(wrongKind.code, 1);
+    const taken = await run(baseState(), [stolen], { CF_GUARD_ALLOW_CONFLICT: "route:old.example.com/*" });
+    assert.equal(taken.code, 0, taken.text);
   }),
 );
 
@@ -364,6 +413,13 @@ test("helpers", () => {
     "b.example.com/*",
     "c.example.com",
   ]);
+  assert.deepEqual([...parseConflictAllowList(" dns:A.example.com,worker:b.example.com route:B.example.com/* ")], [
+    "dns:a.example.com",
+    "worker:b.example.com",
+    "route:B.example.com/*",
+  ]);
+  assert.deepEqual([...parseConflictAllowList("")], []);
+  assert.throws(() => parseConflictAllowList("a.example.com"), /needs a kind/);
   assert.equal(patternHost("*.example.com/api/*"), "example.com");
   assert.equal(patternHost("https://x.example.com/*"), "x.example.com");
   assert.equal(patternHost("*/*"), null);

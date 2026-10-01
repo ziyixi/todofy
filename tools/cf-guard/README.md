@@ -6,7 +6,12 @@ non-empty category replaces what is live (verified in wrangler 4.142's `publish-
 - **Custom Domains** (`custom_domain = true`): `POST .../domains/changeset?replace_state=true`, then
   `PUT .../workers/scripts/<name>/domains/records` with `override_scope: true`. In CI (no TTY) wrangler also
   sets `override_existing_origin` and `override_existing_dns_record`, so a listed hostname is taken from
-  another Worker and an existing DNS record for it is overwritten without a prompt.
+  another Worker without a prompt, and wrangler asks the API to overwrite an existing DNS record for it.
+  **The API does not always do so**: on 2026-10-01 it refused FlowDay's cutover onto a hostname whose DNS
+  record was a tunnel CNAME it had not created (Cloudflare error `100117`), although CI passed
+  `override_existing_dns_record`. Moving a hostname off such a record (a tunnel CNAME, an `A` record to an old
+  server) therefore needs that record deleted by hand right before the deploy, after saving it privately for
+  the rollback; between the deletion and the deploy the hostname does not resolve.
 - **Zone routes**: `PUT .../workers/scripts/<name>/routes`, which deletes the script's other routes in every
   zone.
 - An **empty** category is left alone.
@@ -24,7 +29,8 @@ For each config and each non-empty category it reads the live state and fails (e
 | Case | Example |
 | --- | --- |
 | removed | a Custom Domain or zone route is live on this Worker but not listed |
-| conflict | a listed hostname is another Worker's Custom Domain; a listed zone route belongs to another script; a hostname new to this Worker already has an `A`/`AAAA`/`CNAME` record, or its DNS records cannot be read |
+| conflict | a listed hostname is another Worker's Custom Domain (`worker:<host>`); a listed zone route belongs to another script (`route:<pattern>`); a hostname new to this Worker already has an `A`/`AAAA`/`CNAME` record (`dns:<host>`) |
+| unchecked | the DNS records of a hostname new to this Worker cannot be read (an API error, or no zone of the account holds it): no allowance covers this |
 
 Exit 2 is a usage or API error (missing token, HTTP error). A config without routes needs no token and sends
 no request.
@@ -35,7 +41,14 @@ step, in the same commit that edits `wrangler.toml`, and clear them again afterw
 - `CF_GUARD_ALLOW_REMOVE`: removals to allow. The allow list is committed and printed, so it publishes the
   name: to drop a hostname that is not in the repository, detach it by hand in the Cloudflare dashboard
   instead (the next deploy then passes without naming it).
-- `CF_GUARD_ALLOW_CONFLICT`: takeovers to allow (after checking the record or the other Worker by hand).
+- `CF_GUARD_ALLOW_CONFLICT`: conflicts to allow (after checking the record or the other Worker by hand), each
+  as `<kind>:<name>` exactly as the `CONFLICT` line prints it: `worker:<host>` (take another Worker's Custom
+  Domain), `dns:<host>` (an existing DNS record of a new hostname) or `route:<pattern>` (another script's zone
+  route). An allowance covers only its own kind, so allowing a DNS record never also allows taking the
+  hostname from another Worker; an entry without a kind is an error (exit 2). An `unchecked` hostname cannot be
+  allowed: give the token DNS read on the zone instead. A `dns:` allowance only lets the guard pass: the API
+  may still refuse the record (`100117`, above), so for a record it did not create delete the record right
+  before the deploy instead, and then there is no conflict to allow.
 
 **Read-only, public-log safe.** Only `GET` requests: `/accounts/{A}/workers/domains` (filtered by `service`
 and by `hostname`), and only when needed `/zones` (zone lookup), `/zones/{Z}/dns_records?name=` (for a new
