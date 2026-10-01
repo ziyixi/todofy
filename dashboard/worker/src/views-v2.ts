@@ -17,6 +17,7 @@ import {
   type AttentionView,
   type Badges,
   type CloudflareResponse,
+  type DriftView,
   type FlowsResponse,
   type HomeResponse,
   type OpsResponse,
@@ -145,11 +146,13 @@ export function cloudflareResponse(
   usageDoc: UsageDoc,
   scripts: CfScriptsDoc | null,
   guard: GuardView,
+  drift: DriftView,
   registry: Registry = REGISTRY,
 ): CloudflareResponse {
   const listed = capWorkers(workerRows(scripts, now, registry));
   return {
     ...base,
+    drift,
     usage: { ...usage, rows: withBreakdownResources(usage.rows, registry) },
     workers: listed.rows,
     workers_omitted: listed.omitted,

@@ -1609,6 +1609,57 @@ main {
   overflow-x: auto;
 }
 
+/* 配置漂移: a status line, the counts per category and the findings, names only. */
+.drift {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px 14px;
+}
+
+.drift-status {
+  margin: 0;
+}
+
+.drift-counts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: var(--text-s);
+}
+
+.drift-findings {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: 13px;
+}
+
+.drift-findings li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 8px;
+  padding-top: 6px;
+  border-top: 1px solid var(--line);
+  min-width: 0;
+}
+
+.drift-findings code {
+  overflow-wrap: anywhere;
+}
+
+.drift-category {
+  color: var(--muted);
+  font-size: var(--text-xs);
+}
+
 .workers {
   width: 100%;
   border-collapse: collapse;

@@ -539,6 +539,7 @@ export function targetOf(source: string, code: string, registry: Registry = REGI
     return { view: 'ops' };
   }
   if (code === 'usage_not_configured' || code === 'usage_unavailable') return { view: 'cloudflare' };
+  if (code === 'config_drift' || code === 'drift_unavailable') return { view: 'cloudflare' };
   return { view: 'ops' };
 }
 

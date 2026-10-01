@@ -1,6 +1,6 @@
 import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { IDS, NOW, analyticsUnavailable, guardShed, healthy, quotaRows, withWorkers, type Scenario } from '../test/fixtures'
+import { IDS, NOW, analyticsUnavailable, configDrift, driftView, guardShed, healthy, quotaRows, withWorkers, type Scenario } from '../test/fixtures'
 import { freezeClock, renderApp, serve, type Call } from '../test/harness'
 
 async function showCloudflare(scenario: Scenario | ((call: Call) => Scenario), hash = '#/cloudflare') {
@@ -317,6 +317,51 @@ describe('Cloudflare 监控', () => {
     expect(within(row).getByText('自托管服务器')).toBeInTheDocument()
     expect(within(row).getByText('790 MB')).toBeInTheDocument()
     expect(within(r2).queryByText(/vultr-backup/)).toBeNull()
+  })
+
+  it('shows 配置漂移 as ok with when it was checked and what it compares', async () => {
+    await showCloudflare(healthy())
+    const drift = section('配置漂移')
+    expect(within(drift).getByText('与代码一致')).toBeInTheDocument()
+    expect(within(drift).getByText(/上次完成检查/)).toBeInTheDocument()
+    expect(within(drift).getByText(/每天 02:00 UTC 起检查一次 7 个 Worker/)).toBeInTheDocument()
+    expect(within(drift).getByText(/不读取、不显示任何值/)).toBeInTheDocument()
+    expect(within(drift).getByRole('list', { name: '各类差异' })).toHaveTextContent('个人值未设为密钥 0')
+  })
+
+  it('lists each drift finding by category, Worker and name, and the strip points here', async () => {
+    await showCloudflare(configDrift())
+    const drift = section('配置漂移')
+    expect(within(drift).getByText('与代码不一致：4 处')).toBeInTheDocument()
+    const items = within(drift).getAllByRole('listitem').filter((li) => li.closest('.drift-findings'))
+    expect(items.map((li) => li.textContent)).toEqual([
+      'Workersynthetic-orphan线上有，代码中没有',
+      '自定义域名homestray.example.com线上有，代码中没有',
+      '绑定与密钥labSYNTHETIC_KEY代码中有（secret_text），线上没有',
+      '个人值未设为密钥mail-heroSYNTHETIC_PERSONAL应为密钥（secret_text），线上为 plain_text',
+    ])
+    expect(screen.getAllByText(/线上配置与代码不一致/).length).toBeGreaterThan(0)
+  })
+
+  it('says when the drift check fails, keeps the last result, and when no token is configured', async () => {
+    const failing = healthy()
+    failing.cloudflare = {
+      ...failing.cloudflare,
+      drift: driftView({ last_error: 'http_403', last_error_step: 'script', last_error_at: '2026-09-29T03:30:00.000Z', consecutive_failed_days: 2 }),
+    }
+    await showCloudflare(failing)
+    const drift = section('配置漂移')
+    expect(within(drift).getByText(/检查失败：HTTP 403：令牌无效或权限不足（连续 2 天）/)).toBeInTheDocument()
+    expect(within(drift).getByText(/下方为上次完成的检查结果/)).toBeInTheDocument()
+  })
+
+  it('says 未配置令牌 for the drift check without the token', async () => {
+    const none = healthy()
+    none.cloudflare = { ...none.cloudflare, drift: driftView({ status: 'not_configured', checked_at: null }) }
+    await showCloudflare(none)
+    const drift = section('配置漂移')
+    expect(within(drift).getByText('未配置令牌')).toBeInTheDocument()
+    expect(within(drift).queryByRole('list', { name: '各类差异' })).toBeNull()
   })
 
   it('shows the guard read-only with a link to its actions', async () => {

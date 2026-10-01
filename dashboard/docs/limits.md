@@ -80,7 +80,7 @@ and the page says so.
 | --- | --- | --- | --- |
 | CPU per HTTP request and per Cron Trigger invocation | 10 ms | the fetch and scheduled handlers only authenticate, route and make one RPC to `HomeState` | [Workers limits](https://developers.cloudflare.com/workers/platform/limits/) |
 | CPU per Durable Object invocation | 30 s (default) | all GraphQL parsing, aggregation, guard, canary and digest work runs in `HomeState` | [DO limits](https://developers.cloudflare.com/durable-objects/platform/limits/) |
-| Subrequests | 50 per request | a tick makes at most 9 outbound calls (2 `status`, 1 website probe, ≤ 2 `setGuard`, ≤ 2 canary calls, ≤ 1 `reportOps`, 1 GraphQL; `outboundPerTick()` in the registry, tested ≤ 30) | [Workers limits](https://developers.cloudflare.com/workers/platform/limits/) |
+| Subrequests | 50 per request | a tick makes at most 23 outbound calls (3 `status`, 1 website probe, ≤ 3 `setGuard`, ≤ 2 canary calls, ≤ 1 `reportOps`, 1 GraphQL, ≤ 12 read-only drift calls; `outboundPerTick()` in the registry, tested ≤ 30) | [Workers limits](https://developers.cloudflare.com/workers/platform/limits/) |
 | Worker invocations per request | 32; each service-binding call counts, and counts as a subrequest | same bound as above | [Service bindings](https://developers.cloudflare.com/workers/runtime-apis/bindings/service-bindings/) |
 | Service-binding request fees | "do not incur additional request fees" | the `Ops` calls | [Workers pricing](https://developers.cloudflare.com/workers/platform/pricing/) |
 | Static assets | free and not counted only when served without invoking the Worker; with `run_worker_first` every asset request invokes the Worker and counts as a Worker request (above the daily limit it gets a 429, no fallback to free asset serving) | the UI (`ASSETS`): `run_worker_first = true` (Access check and private headers on every path), so each HTML, JS, CSS and icon fetch counts in `workers_requests`, and once the account reaches 100,000 requests a day the page itself is unavailable until 00:00 UTC | [Static assets billing](https://developers.cloudflare.com/workers/static-assets/billing-and-limitations/) |
@@ -88,6 +88,7 @@ and the page says so.
 | Memory | 128 MB per isolate | GraphQL answers over 1 MB are refused | [Workers limits](https://developers.cloudflare.com/workers/platform/limits/) |
 | GraphQL Analytics API | 300 queries per 5 min; account-scoped queries cover 1 account | one query per tick, owner refreshes ≤ 1 per minute | [GraphQL limits](https://developers.cloudflare.com/analytics/graphql-api/limits/) |
 | Token permission for account analytics | "Account Analytics: Read" | `CF_ANALYTICS_TOKEN` ([`setup.md`](setup.md) §4) | [API token auth](https://developers.cloudflare.com/analytics/graphql-api/getting-started/authentication/api-token-auth/) |
+| Token permissions for the drift check | "Workers Scripts: Read" (account) and "Workers Routes: Read" (zone) | `CF_ANALYTICS_TOKEN` ([`setup.md`](setup.md) §4, [`design-v2.md`](design-v2.md) §10) | [API token permissions](https://developers.cloudflare.com/fundamentals/api/reference/permissions/) |
 
 ## 3. What the dashboard itself uses per day
 

@@ -3,11 +3,14 @@ import { useEffect, useState } from 'react'
 import {
   CPU_HINT_US,
   CPU_LIMIT_US,
+  DRIFT_CATEGORIES,
+  DRIFT_UTC_HOUR,
   ERROR_RATE_CRITICAL_PERCENT,
   ERROR_RATE_MIN_REQUESTS,
   ERROR_RATE_WARN_PERCENT,
   WORKERS_QUERY_LIMIT,
   type CloudflareResponse,
+  type DriftView,
   type ResourceRow,
   type WorkerRow,
 } from '../../../worker/src/api-v2-types.ts'
@@ -27,7 +30,7 @@ import {
   formatPercent,
   formatUtcDay,
 } from '../lib/format'
-import { QUOTA, USAGE_STATUS, guardReasonLabel, usageErrorLabel } from '../lib/labels'
+import { DRIFT_CATEGORY, DRIFT_STATUS, QUOTA, USAGE_STATUS, driftErrorLabel, driftFindingText, guardReasonLabel, usageErrorLabel } from '../lib/labels'
 import { flowOf, guardedEntries, nameOf, resourceOf, unclassifiedLabel, unregisteredLabel, workerOf, type Reg } from '../lib/registry'
 import { routeHash } from '../router'
 
@@ -371,6 +374,79 @@ function WorkersTable({ reg, data, focus, now }: { reg: Reg; data: CloudflareRes
   )
 }
 
+/**
+ * 配置漂移 (design-v2.md §10): the live account against the state generated from the committed
+ * configs, once a day. Names, types and flags only; the Worker never sends a value.
+ */
+function DriftPanel({ drift, now }: { drift: DriftView; now: Date }) {
+  const status = DRIFT_STATUS[drift.status]
+  const total = DRIFT_CATEGORIES.reduce((sum, category) => sum + drift.counts[category], 0)
+  return (
+    <section className="cf-section" aria-labelledby="drift-title">
+      <h2 id="drift-title">配置漂移</h2>
+      <div className="panel drift">
+        <p className="drift-status">
+          <LevelMark level={status.level} word={drift.status === 'drift' ? `${status.label}：${total} 处` : status.label} />
+          {drift.checked_at ? (
+            <span className="small muted">
+              {' '}
+              · 上次完成检查 <Time iso={drift.checked_at} now={now} />
+            </span>
+          ) : null}
+          {drift.in_progress ? <span className="small muted"> · 今天的检查进行中</span> : null}
+        </p>
+        {drift.status === 'not_configured' ? (
+          <Notice tone="warn">未配置 Cloudflare API 令牌（CF_ANALYTICS_TOKEN），无法检查配置漂移。</Notice>
+        ) : null}
+        {drift.last_error ? (
+          <Notice tone={drift.consecutive_failed_days > 0 ? 'danger' : 'info'}>
+            {drift.consecutive_failed_days > 0 ? '检查失败：' : '今天的检查遇到错误，会在之后的定时任务中重试：'}
+            {driftErrorLabel(drift.last_error)}
+            {drift.consecutive_failed_days > 0 ? `（连续 ${drift.consecutive_failed_days} 天）` : null}
+            {drift.last_error_at ? (
+              <>
+                ，<Time iso={drift.last_error_at} now={now} />
+              </>
+            ) : null}
+            。{drift.checked_at ? '下方为上次完成的检查结果。' : ''}
+          </Notice>
+        ) : null}
+        {drift.zones_unchecked > 0 ? (
+          <Notice tone="info">有 {drift.zones_unchecked} 个区域的路由无法读取（该区域没有任何自定义域名可确定它）。</Notice>
+        ) : null}
+        {drift.truncated ? <Notice tone="info">线上列表超过检查上限，结果只覆盖了一部分。</Notice> : null}
+        {drift.checked_at ? (
+          <ul className="drift-counts" aria-label="各类差异">
+            {DRIFT_CATEGORIES.map((category) => (
+              <li key={category} className={drift.counts[category] > 0 ? 'strong' : 'muted'}>
+                {DRIFT_CATEGORY[category]} {drift.counts[category]}
+              </li>
+            ))}
+          </ul>
+        ) : null}
+        {drift.findings.length > 0 ? (
+          <ul className="drift-findings">
+            {drift.findings.map((finding) => (
+              <li key={`${finding.category}:${finding.script}:${finding.name}:${finding.kind}`}>
+                <span className="drift-category">{DRIFT_CATEGORY[finding.category]}</span>
+                {finding.category === 'scripts' ? null : <code>{finding.script}</code>}
+                <code>{finding.name}</code>
+                <span className="small">{driftFindingText(finding)}</span>
+              </li>
+            ))}
+          </ul>
+        ) : null}
+        {drift.findings_omitted > 0 ? <p className="small muted">另有 {drift.findings_omitted} 处未列出。</p> : null}
+      </div>
+      <p className="small muted">
+        每天 {String(DRIFT_UTC_HOUR).padStart(2, '0')}:00 UTC 起检查一次 {drift.desired_workers} 个 Worker：Worker
+        列表、自定义域名、区域路由、定时触发、绑定与密钥名称、workers.dev 与预览开关，以及个人值是否都是密钥。期望状态由各应用提交的
+        wrangler.toml 与部署脚本生成；只比较名称、类型与开关，不读取、不显示任何值。
+      </p>
+    </section>
+  )
+}
+
 function resourceName(reg: Reg, row: ResourceRow): { name: string; registered: boolean; script?: string } {
   const def = resourceOf(reg, row.resource)
   if (def) return { name: def.name, registered: true, script: def.script }
@@ -535,6 +611,8 @@ export function CloudflareView({ registry, cloudflare, focus, now }: { registry:
       </section>
 
       <WorkersTable reg={registry} data={cloudflare} focus={focus} now={now} />
+
+      <DriftPanel drift={cloudflare.drift} now={now} />
 
       <section className="cf-section" aria-labelledby="res-title">
         <h2 id="res-title">存储与资源</h2>

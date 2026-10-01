@@ -3,8 +3,9 @@ import designV2 from '../../docs/design-v2.md?raw';
 import apiV2Source from '../src/api-v2-types.ts?raw';
 import type { OpsReportItem, OpsSignal } from '../../../contracts/ops-v1/ops-v1.ts';
 import { CANARY_MANUAL_PER_DAY, type CanaryView, type DigestView, type GuardView } from '../src/api-types.ts';
-import { CF_SCRIPTS_MAX, CF_VIEW_WORKERS_MAX, HOME_QUOTA_IDS, V2_BODY_BUDGET, V2_BODY_MAX, V2_ROWS_READ, type ShellFields } from '../src/api-v2-types.ts';
+import { CF_SCRIPTS_MAX, CF_VIEW_WORKERS_MAX, DRIFT_VIEW_FINDINGS_MAX, HOME_QUOTA_IDS, V2_BODY_BUDGET, V2_BODY_MAX, V2_ROWS_READ, type ShellFields } from '../src/api-v2-types.ts';
 import { runView } from '../src/canary.ts';
+import { NO_DRIFT, countFindings, driftView } from '../src/drift.ts';
 import { attentionView, type EvalInput } from '../src/evaluate.ts';
 import { etagMatches } from '../src/v2-views.ts';
 import { capWorkers, cloudflareResponse, flowsResponse, fnv1a, homeResponse, nextTickAt, opsResponse, serializeView, shell } from '../src/views-v2.ts';
@@ -48,6 +49,35 @@ function digestView(items: readonly OpsReportItem[]): DigestView {
 }
 
 const bytes = (value: unknown): number => new TextEncoder().encode(JSON.stringify(value)).byteLength;
+
+/** A completed check without findings (a normal day). */
+const DRIFT_OK = driftView({ ...NO_DRIFT, checked_at: NOW - 8 * 60 * MIN, desired_workers: 7, last_run_day: '2026-09-29' }, true, NOW);
+/** A check at its finding bound with long synthetic names, and a failed attempt (a heavy day). */
+const HEAVY_FINDINGS = Array.from({ length: 50 }, (_, i) => ({
+  category: 'bindings' as const,
+  script: `a-long-synthetic-worker-name-${String(i % 7)}`,
+  name: `A_LONG_SYNTHETIC_BINDING_NAME_${String(i).padStart(3, '0')}`,
+  kind: 'changed' as const,
+  expected: 'secret_text',
+  actual: 'plain_text',
+}));
+const DRIFT_HEAVY = driftView(
+  {
+    ...NO_DRIFT,
+    checked_at: NOW - 30 * MIN,
+    desired_workers: 7,
+    counts: { ...countFindings(HEAVY_FINDINGS), scripts: 3, custom_domains: 9 },
+    findings: HEAVY_FINDINGS,
+    last_run_day: '2026-09-28',
+    running_day: '2026-09-29',
+    last_error: 'http_403',
+    last_error_step: 'script',
+    last_error_at: NOW - 30 * MIN,
+    consecutive_failed_days: 2,
+  },
+  true,
+  NOW,
+);
 
 // ---- a heavy day: everything the bounds allow that a real day could plausibly show ----------------
 
@@ -143,7 +173,7 @@ describe('the views', () => {
   it.each([0, 5, 20])('cloudflare: %i scripts in the Worker table, resources and the quota rows', (count) => {
     const usage = usageWithScripts(count);
     const doc = usageDoc(usage);
-    const view = cloudflareResponse(base(), NOW, usageView(usage), doc, count === 0 ? null : scripts(usage), GUARD);
+    const view = cloudflareResponse(base(), NOW, usageView(usage), doc, count === 0 ? null : scripts(usage), GUARD, DRIFT_OK);
     expect(view.workers).toHaveLength(count);
     expect(view.usage.rows).toHaveLength(14);
     expect(view.resources.map((r) => r.kind)).toEqual(['d1', 'd1', 'do', 'do', 'do', 'r2', 'r2']);
@@ -177,7 +207,7 @@ describe('the views', () => {
     const sizes = {
       home: bytes(homeResponse(day, ev, usageView(REALISTIC_USAGE), DESIRED)),
       flows: bytes(flowsResponse(day, ev, canaryView(ev))),
-      cloudflare: bytes(cloudflareResponse(day, NOW, usageView(REALISTIC_USAGE), usageDoc(REALISTIC_USAGE), ev.scripts, GUARD)),
+      cloudflare: bytes(cloudflareResponse(day, NOW, usageView(REALISTIC_USAGE), usageDoc(REALISTIC_USAGE), ev.scripts, GUARD, DRIFT_OK)),
       ops: bytes(opsResponse(day, GUARD, canaryView(ev), digestView([item]), ev.statuses)),
     };
     for (const view of ['home', 'flows', 'cloudflare', 'ops'] as const) expect({ view, bytes: sizes[view] }).toEqual({ view, bytes: Math.min(sizes[view], V2_BODY_BUDGET[view]) });
@@ -190,7 +220,7 @@ describe('the views', () => {
       home: bytes(homeResponse(shellHeavy, ev, usageView(usageWithScripts(20)), DESIRED)),
       flows: bytes(flowsResponse(shellHeavy, ev, canaryView(ev))),
       cloudflare: bytes(
-        cloudflareResponse(shellHeavy, NOW, usageView(usageWithScripts(20)), usageDoc(usageWithScripts(20)), ev.scripts, GUARD),
+        cloudflareResponse(shellHeavy, NOW, usageView(usageWithScripts(20)), usageDoc(usageWithScripts(20)), ev.scripts, GUARD, DRIFT_HEAVY),
       ),
       ops: bytes(opsResponse(shellHeavy, GUARD, canaryView(ev), digestView(HEAVY_ITEMS), ev.statuses)),
     };
@@ -213,7 +243,9 @@ describe('the views', () => {
       };
     };
     const doc: CfScriptsDoc = { since: NOW - 30 * DAY, observed_at: NOW, day: '2026-09-29', truncated: true, scripts: Array.from({ length: CF_SCRIPTS_MAX }, (_, i) => record(i)) };
-    const view = cloudflareResponse(base({}, HEAVY_ITEMS), NOW, usageView(usageWithScripts(20)), usageDoc(usageWithScripts(20)), doc, GUARD);
+    const view = cloudflareResponse(base({}, HEAVY_ITEMS), NOW, usageView(usageWithScripts(20)), usageDoc(usageWithScripts(20)), doc, GUARD, DRIFT_HEAVY);
+    expect(view.drift.findings).toHaveLength(DRIFT_VIEW_FINDINGS_MAX);
+    expect(view.drift.findings_omitted).toBe(50 + 12 - DRIFT_VIEW_FINDINGS_MAX);
     expect(view.workers).toHaveLength(CF_VIEW_WORKERS_MAX);
     expect(view.workers_omitted).toBe(CF_SCRIPTS_MAX - CF_VIEW_WORKERS_MAX);
     // Every script active today is listed; the omitted ones are the least recently seen.

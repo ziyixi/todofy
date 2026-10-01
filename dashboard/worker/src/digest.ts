@@ -4,7 +4,9 @@
  */
 import { OPS_APPS, OPS_LIMITS, type OpsApp, type OpsReport, type OpsReportItem, type OpsSeverity, type OpsStatus } from '../../../contracts/ops-v1/ops-v1.ts';
 import { GUARD_SHED_PERCENT, QUOTA_CRITICAL_PERCENT, type CanaryStage, type OverallLevel, type QuotaRow } from './api-types.ts';
+import { DRIFT_CATEGORIES, DRIFT_UNAVAILABLE_AFTER_DAYS } from './api-v2-types.ts';
 import { CANARY_DISABLED_CODE, type CanaryRecord } from './canary.ts';
+import { totalFindings, type DriftDoc } from './drift.ts';
 import { hoursLeft, reachesPercent, type DesiredGuard } from './guard.ts';
 import { HOUR_MS, MINUTE_MS, iso, isTimestamp, startOfUtcDay } from './time.ts';
 
@@ -59,6 +61,8 @@ export interface DigestInput {
   /** The last completed cron tick (a tick passes its own time). */
   readonly lastTickAt: number | null;
   readonly apps: Readonly<Record<OpsApp, AppHealthInput>>;
+  /** The drift check (design-v2.md §10): its last result; absent in tests that predate it. */
+  readonly drift?: { readonly configured: boolean; readonly doc: DriftDoc };
 }
 
 /** Numbers only, named by codes, at most 12 keys. */
@@ -135,6 +139,21 @@ export function candidates(input: DigestInput): Candidate[] {
 
   const stale = tickStale(input.lastTickAt, now);
   if (stale !== null) out.push(stale);
+
+  // Configuration drift: counts per category only (the names stay on the Cloudflare view). A known
+  // difference is reported like any other until the live account or the committed state changes.
+  if (input.drift?.configured === true) {
+    const doc = input.drift.doc;
+    const total = totalFindings(doc.counts);
+    if (doc.checked_at !== null && total > 0) {
+      const metrics: Record<string, number> = { total };
+      for (const category of DRIFT_CATEGORIES) if (doc.counts[category] > 0) metrics[category] = doc.counts[category];
+      out.push({ source: 'dashboard', code: 'config_drift', severity: 'warning', metrics });
+    }
+    if (doc.consecutive_failed_days >= DRIFT_UNAVAILABLE_AFTER_DAYS) {
+      out.push({ source: 'dashboard', code: 'drift_unavailable', severity: 'warning', metrics: { consecutive_failed_days: doc.consecutive_failed_days } });
+    }
+  }
 
   if (input.desired.level === 'shed') {
     out.push({

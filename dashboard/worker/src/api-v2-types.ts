@@ -112,6 +112,21 @@ export const ATTENTION_SHOWN = 3;
 /** GET /cloudflare?refresh=1 re-queries GraphQL at most this often (the v1 value). */
 export const CLOUDFLARE_REFRESH_MIN_SECONDS = 60;
 
+/**
+ * Configuration drift (docs/design-v2.md §10): once per UTC day, starting with the first tick at or after
+ * this hour, the Worker compares the live account with the desired state generated from the committed
+ * configs (src/drift-desired.json), at most DRIFT_CALLS_PER_TICK read-only API calls per tick.
+ */
+export const DRIFT_UTC_HOUR = 2;
+export const DRIFT_CALLS_PER_TICK = 12;
+/** A day's check stops after this many failed attempts (one per tick); the next day starts over. */
+export const DRIFT_MAX_ATTEMPTS = 3;
+/** Findings kept per check, and listed by the Cloudflare view (the counts stay complete). */
+export const DRIFT_FINDINGS_MAX = 50;
+export const DRIFT_VIEW_FINDINGS_MAX = 20;
+/** Failed check days in a row before the digest reports `drift_unavailable`. */
+export const DRIFT_UNAVAILABLE_AFTER_DAYS = 2;
+
 // ---------------------------------------------------------------------------------------------------
 // Levels (docs/design-v2.md §2). Status is always shape + word, never colour alone.
 
@@ -585,7 +600,62 @@ export interface GuardViewV2 extends Omit<GuardView, 'apps'> {
   readonly apps: Readonly<Record<string, GuardAppView>>;
 }
 
+/**
+ * What the drift check compares, per Worker: the Worker set, Custom Domains, zone routes, cron
+ * schedules, binding names and types (secrets by name), the workers.dev / preview URL flags, and
+ * whether each personal value is a secret.
+ */
+export const DRIFT_CATEGORIES = ['scripts', 'custom_domains', 'routes', 'crons', 'bindings', 'workers_dev', 'personal'] as const;
+export type DriftCategory = (typeof DRIFT_CATEGORIES)[number];
+
+/**
+ * One difference, names only: `missing` (in the committed state, not live), `extra` (live, not
+ * committed) or `changed` (both, but `expected` ≠ `actual`, which are only binding types or flags such
+ * as `secret_text` / `plain_text` / `true` / `false`, never a value).
+ */
+export interface DriftFinding {
+  readonly category: DriftCategory;
+  /** The Worker (script name); for `routes` a route without a Worker is `(none)`. */
+  readonly script: string;
+  /** The Worker, hostname, route pattern, cron, binding name, or `workers_dev` / `preview_urls`. */
+  readonly name: string;
+  readonly kind: 'missing' | 'extra' | 'changed';
+  readonly expected?: string;
+  readonly actual?: string;
+}
+
+export type DriftStatus = 'ok' | 'drift' | 'never_checked' | 'not_configured' | 'failing';
+
+export interface DriftView {
+  /**
+   * ok / drift from the last completed check; never_checked before the first; failing when no check
+   * has completed and the last day's attempts failed; not_configured without the token.
+   */
+  readonly status: DriftStatus;
+  /** The last completed check. */
+  readonly checked_at: Iso | null;
+  /** A check of today is running across ticks. */
+  readonly in_progress: boolean;
+  readonly desired_workers: number;
+  /** Findings per category of the last completed check (complete, even when `findings` is cut). */
+  readonly counts: Readonly<Record<DriftCategory, number>>;
+  /** At most DRIFT_VIEW_FINDINGS_MAX, category order. */
+  readonly findings: readonly DriftFinding[];
+  readonly findings_omitted: number;
+  /** Zones whose routes could not be read this check (no Custom Domain tells the zone). */
+  readonly zones_unchecked: number;
+  /** A live list passed its bound (DRIFT_*_MAX in drift.ts): the comparison saw only part of it. */
+  readonly truncated: boolean;
+  /** `http_403`, `timeout`, ... and the step (`account`, `script`) of the last failed attempt. */
+  readonly last_error: string | null;
+  readonly last_error_step: string | null;
+  readonly last_error_at: Iso | null;
+  readonly consecutive_failed_days: number;
+}
+
 export interface CloudflareResponse extends ShellFields {
+  /** Configuration drift (design-v2.md §10). */
+  readonly drift: DriftView;
   readonly usage: UsageView;
   /** Remembered scripts (≤ CF_SCRIPTS_MAX): errors first, then requests. */
   /** At most CF_VIEW_WORKERS_MAX rows, in table order (errors first, then requests). */

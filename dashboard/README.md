@@ -19,7 +19,7 @@ What exists and how it maps to Workers, resources and flows is a typed registry 
 Worker (`worker/src/registry.ts`) and served by `GET /api/v2/registry`, so no hostname is in the UI
 bundle. It reads Mail Hero and Todofy only through their `Ops` entrypoints
 ([`contracts/ops-v1`](../contracts/ops-v1/README.md)) and never imports `mail-hero/` or `todofy/` code.
-Besides the page it runs three jobs:
+Besides the page it runs four jobs:
 
 - **Canary and digest.** A daily delivery-and-processing canary (one synthetic `mail.received.v1`
   event that Mail Hero creates directly and delivers to Todofy, no Todoist side effects) and one
@@ -30,6 +30,12 @@ Besides the page it runs three jobs:
   rollback, [`docs/setup.md`](docs/setup.md) §7); a run already queued is still polled to its end.
 - **Quota guardrails.** Account-wide Workers Free usage from the GraphQL Analytics API; at ≥ 80 % of a
   daily allowance (or a monthly R2 operation class) both apps defer their non-critical jobs (`shed`).
+- **Configuration drift (配置漂移).** Once per UTC day, read-only, the live Workers (scripts, Custom
+  Domains, zone routes, crons, binding and secret names with their types, workers.dev flags, and whether
+  every personal value is a secret) are compared with the desired state generated from every committed
+  `wrangler.toml` and deploy wrapper (`worker/src/drift-desired.json`, by
+  [`.github/scripts/drift_desired.py`](../.github/scripts/drift_desired.py)). Names only; shown on the
+  Cloudflare view and counted in the digest, never published on GitHub ([`docs/design-v2.md`](docs/design-v2.md) §10).
 - **Cross-app contract tests.** The caller side of ops-v1: only declared methods, every declared error
   code, schema-valid inputs, and the real `HomeState` against stub apps that answer with the contract
   fixtures.

@@ -73,10 +73,18 @@ effect with the next deploy: run the workflow on `main` with `app: dashboard` (o
 
 ## 4. The analytics token (`CF_ANALYTICS_TOKEN`)
 
-The Worker uses this token for one purpose only: as `Authorization: Bearer` on `POST
-https://api.cloudflare.com/client/v4/graphql` (a constant in `worker/src/usage.ts`, not configuration),
-at most once per tick and once per minute on an owner refresh. It is never logged, stored, echoed to
-the page or sent anywhere else, and a unit test checks that it appears only in that one header.
+The Worker uses this token only as `Authorization: Bearer` to `https://api.cloudflare.com/client/v4`, for
+two read-only purposes (both URLs are constants, not configuration):
+
+- the usage query: `POST .../graphql` (`worker/src/usage.ts`), at most once per tick and once per
+  minute on an owner refresh;
+- the daily configuration drift check (`worker/src/drift.ts`, [`design-v2.md`](design-v2.md) §10):
+  `GET` on the account's Worker scripts and Custom Domains, the zone's Worker routes, and each Worker's
+  schedules, settings and subdomain flags, at most 12 calls per tick on about two ticks a day. Only
+  binding names and types are kept from the settings; values are dropped while parsing.
+
+It is never logged, stored, echoed to the page or sent anywhere else, and unit tests check that it
+appears only in the authorization header of those requests.
 
 **Today a broader token is reused.** A token for this secret becomes a Worker secret of an
 internet-facing Worker, so it must be able to do no more than read analytics: any future bug in the
@@ -88,20 +96,24 @@ analytics:
 
 1. Cloudflare dashboard → My Profile → API Tokens → Create Token → Custom token.
 2. Permissions: **Account → Account Analytics → Read** (the permission the GraphQL API needs for
-   account-level datasets, [docs](https://developers.cloudflare.com/analytics/graphql-api/getting-started/authentication/api-token-auth/)).
-   Nothing else.
+   account-level datasets, [docs](https://developers.cloudflare.com/analytics/graphql-api/getting-started/authentication/api-token-auth/)),
+   **Account → Workers Scripts → Read** and **Zone → Workers Routes → Read** (this zone only) for the
+   drift check. Nothing else: no Edit permission.
 3. Account resources: include only this account. Optionally restrict client IPs (not practical for
    Workers egress) and set an expiry you will remember to renew.
 4. Save the token value directly into the GitHub secret `DASHBOARD_CF_ANALYTICS_TOKEN` (production
    environment). Do not paste it anywhere else.
 5. Run the workflow on `main` with `app: dashboard`. The deploy uploads the new secret.
 6. Open the dashboard, press 刷新 (refresh, at most once a minute), and check that the quota section
-   shows fresh data (no "用量数据获取失败" item). Record the date in `verification.md`.
+   shows fresh data (no "用量数据获取失败" item). The next day after 02:00 UTC, check that 配置漂移 on
+   the Cloudflare view shows a completed check (not 检查失败 with HTTP 403). Record the dates in
+   `verification.md`.
 7. Only then stop using the broader token for this purpose. Do not revoke it if it is still used
    elsewhere (for example as a deploy token).
 
-If the token fails (revoked, expired, wrong permission), the page and the digest show
-`usage_unavailable` after 2 h; the guard then never enters `shed` on its own (no fresh usage means no
+If the token lacks a drift permission, 配置漂移 shows 检查失败 and the digest reports
+`drift_unavailable` after two failed days; usage is unaffected. If the token fails (revoked, expired,
+wrong permission), the page and the digest show `usage_unavailable` after 2 h; the guard then never enters `shed` on its own (no fresh usage means no
 automatic shed) and an automatic shed already in place lapses at its `until`. Rotation is the same
 procedure with a new token.
 

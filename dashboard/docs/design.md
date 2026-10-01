@@ -72,7 +72,7 @@ route `home.ziyixi.science` with `custom_domain = true`. One cron
 | `BUILD_SHA` | var | the deployed commit (`dev` locally) |
 | `ACCESS_OWNER`, `ACCESS_OWNER_ALIASES` | secret | printable-ASCII emails, ≤ 8 aliases, ≤ 2048 chars; empty aliases uploaded as `" "` |
 | `CSRF_SIGNING_KEY` | secret | `^[0-9a-fA-F]{64}$` |
-| `CF_ANALYTICS_TOKEN` | secret | API token used **only** as `Authorization: Bearer` on `POST https://api.cloudflare.com/client/v4/graphql` (URL is a constant, not config). Never logged, stored, echoed or sent elsewhere. Today a broader token is reused; replace it with an "Account Analytics: Read" token (setup.md) |
+| `CF_ANALYTICS_TOKEN` | secret | API token used **only** as `Authorization: Bearer` on `POST https://api.cloudflare.com/client/v4/graphql` and on the drift check's read-only `GET`s under `https://api.cloudflare.com/client/v4` (design-v2.md §10; URLs are constants, not config). Never logged, stored, echoed or sent elsewhere. Today a broader token is reused; replace it with an "Account Analytics: Read" token (setup.md) |
 | `DEV_AUTH_BYPASS` | local only | `true` enables the loopback bypass; never in the production config (tests check it) |
 
 ## 3. Durable Object storage (`HomeState`, instance `home-v1`)
@@ -329,6 +329,8 @@ present, else the first tick the key was active (`item_since`).
 | `cloudflare` | `<resource id>_high` (e.g. `d1_rows_read_high`) | warning ≥ 80 %, critical ≥ 95 % | any quota row (storage included), fresh usage | `percent`, `used`, `limit`, `projected_percent` (when known) |
 | `dashboard` | `usage_unavailable` | warning | token set and no successful fetch for ≥ 2 h (or never) | `consecutive_failures`, `http_status` (0 if none) |
 | `dashboard` | `usage_not_configured` | warning | no `CF_ANALYTICS_TOKEN` | – |
+| `dashboard` | `config_drift` | warning | the last completed configuration drift check found differences ([`design-v2.md`](design-v2.md) §10; names stay on the Cloudflare view) | `total` and each non-zero category count (`scripts`, `custom_domains`, `routes`, `crons`, `bindings`, `workers_dev`, `personal`) |
+| `dashboard` | `drift_unavailable` | warning | token set and the drift check failed on 2 UTC days in a row | `consecutive_failed_days` |
 | `dashboard` | `guard_shed` | warning | desired guard is shed | `hours_left`, `manual` (0/1) |
 | `mail-hero` / `todofy` | `guard_apply_failed` | warning | ≥ 2 consecutive `setGuard` failures | `consecutive_failures` |
 | `dashboard` | `canary_start_failed` / `canary_not_delivered` / `canary_consumer_failed` | critical | the latest finished run failed at stage start / delivery / consumer | `attempts`, `last_http_status` (if any), `timed_out` (0/1) |

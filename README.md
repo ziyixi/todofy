@@ -166,7 +166,11 @@ GitHub variables CI reads, so a release restates the live switches and never ove
 across apps: only these configs (and the runtime-test ones next to their tests) exist, none has `[env]` or
 `keep_vars`, one account, the hosts are consistent (the dashboard's is its own; its links match the apps'),
 every step that calls a wrapper sets every input, personal values come only from secrets, and no personal
-value, switch or build is committed. Local development uses local bindings only (never `--remote`, D1
+value, switch or build is committed. [`.github/scripts/test_drift_desired.py`](.github/scripts/test_drift_desired.py)
+(also in `Changes`) checks that the dashboard's bundled desired state `dashboard/worker/src/drift-desired.json`
+(names, types and flags only, for its private daily drift check, `dashboard/docs/design-v2.md` §10) equals a
+fresh `python3 .github/scripts/drift_desired.py`: a change to any config or wrapper regenerates it in the same
+commit. Local development uses local bindings only (never `--remote`, D1
 commands with `--local`) and each app's `.dev.vars` (see its `.dev.vars.example`).
 
 The repository is public, and Actions prints a step's variables in its log, so personal values (the receive

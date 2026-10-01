@@ -274,6 +274,23 @@ the breakdown value never wraps. From a clean clone of the branch, synthetic dat
 | `Changes` | from `todofy/`: `uv run python -m unittest discover -s ../.github/scripts` | 147 tests OK |
 | browser | built UI, synthetic fixture plus a 63-character unregistered bucket and dimension-less D1/R2 items, 1280 px and 375 px | every value on one line (the long name wraps instead); "未归类" and "未归类操作" with tooltip `unknown`, no raw `unknown`; table and 主要来源 both "未登记 · 8f14e45f" / "未登记 · 01234567"; no horizontal scroll at 375 px |
 
+## 1j. Local, the configuration drift check (2026-09-30)
+
+The private daily drift check (design-v2.md §10): desired state generated from every committed config and
+deploy wrapper, compared in `HomeState` with the live account read by the dashboard's token. From a clean
+clone of the branch, synthetic data only (fake Cloudflare API with synthetic ids and a sentinel value in
+every plain_text binding):
+
+| Job | Step | Result |
+| --- | --- | --- |
+| `Dashboard checks` | `node --test deploy/test/*.test.mjs` | 14 passed |
+| | worker lint, typecheck, `npm test` | ok; 14 files, 222 tests passed (comparison per category, an optional value absent, a personal value reported until it is a secret, a removed Custom Domain reported as extra, GETs to fixed paths with the token only in the authorization header, no value or id kept, failures as codes, ≤ 12 calls per tick, retries and giving up, the run-size bound, digest items and their targets, the view at its finding cap within `V2_BODY_MAX`) |
+| | worker `npm run test:runtime` (workerd) | 7 files, 69 tests passed (new `drift.test.ts`: two ticks of 12 GETs, ok / drift / failing / not_configured on the Cloudflare view, `config_drift` counts reaching Todofy's stub, `drift_unavailable` after two failed days, no value, token or id in the views or the report) |
+| | web lint, typecheck, tests, build; import guard | ok; 13 files, 116 tests passed (the 配置漂移 panel: ok, four findings, a failing check keeping the last result, no token); no cross-origin references |
+| | placeholder config dry-run (`GITHUB_SHA` set as in CI) | ok; the four secrets hidden |
+| `Changes` | `uv run --no-project --python 3.12 python -m unittest discover -s .github/scripts` | 165 tests OK (new `test_drift_desired.py`: the committed JSON equals a fresh generation, names only, every production Worker, every wrapper value and hand-set secret name) |
+| live, read-only | the check's own functions run once against the account with a read-only API call set (no write, nothing stored) | completed in two rounds of 12 calls; every answer parsed. The result is private: it is not recorded in this public file |
+
 ## 2. Production (pending)
 
 None of these has been done; each needs the first `Dashboard deploy` on `main` (after Todofy and Mail
@@ -287,6 +304,7 @@ Hero with ops-v1 are live) and, where stated, the owner in a browser.
 | The Worker runs the merged build | after the owner's first login: `/health` shows `BUILD_SHA` = the merged commit (the probe cannot see past Access) | pending |
 | Real Access login | the owner opens the page with the primary login and, where configured, an alias; one refresh and one confirmed write (解除降载 is harmless when nothing is shed) | pending |
 | Analytics token | the GraphQL query with the production token returns every dataset; then the token is replaced by an "Account Analytics: Read" token (setup.md §4) and checked again; record the replacement date here. Not done while the broad bootstrap token is still the Worker secret `CF_ANALYTICS_TOKEN` (the deploy refuses it only if it equals `CF_API_TOKEN`) | open (a broader token is still reused) |
+| Drift check | the first daily check after the deploy completes (配置漂移 shows 上次完成检查, not 检查失败); after a read-only token replaces the broad one (setup.md §4), the next day's check still completes | pending |
 | Quota numbers | spot-check the page's daily numbers against the Cloudflare dashboard's usage pages for the same UTC day | pending |
 | Workers AI neurons | once the account makes Workers AI calls, the `ai_neurons` row matches the Workers AI dashboard's Neurons for the same UTC day (only the empty `[]` answer has been seen live, 2026-09-30) | pending |
 | First scheduled canary | the day's run reaches `ok` (Mail Hero delivered, Todofy summarized it, no Todoist task, not listed as mail); this does not exercise Email Routing, raw storage or parsing | pending |

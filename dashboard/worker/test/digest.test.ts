@@ -7,6 +7,7 @@ import unavailable from '../../../contracts/ops-v1/fixtures/OpsStatus/status-una
 import { OPS_LIMITS, type OpsReportItem, type OpsStatus } from '../../../contracts/ops-v1/ops-v1.ts';
 import type { QuotaRow } from '../src/api-types.ts';
 import { finish, newRun } from '../src/canary.ts';
+import { NO_DRIFT } from '../src/drift.ts';
 import {
   buildReport,
   candidates,
@@ -104,6 +105,22 @@ describe('digest items', () => {
     expect(items({ usage: failing })).toMatchObject([{ code: 'usage_unavailable', metrics: { consecutive_failures: 5, http_status: 401 } }]);
     expect(items({ usage: { ...failing, fetched_at: NOW - 3_600_000 } })).toEqual([]);
     expect(items({ usage: { ...failing, fetched_at: null, last_http_status: null } })).toMatchObject([{ metrics: { http_status: 0 } }]);
+  });
+
+  it('reports configuration drift by category counts, and a drift check failing two days in a row', () => {
+    const counts = { ...NO_DRIFT.counts, personal: 4, bindings: 1 };
+    const drift = { ...NO_DRIFT, checked_at: NOW - 3_600_000, counts };
+    expect(candidates(input({ drift: { configured: true, doc: drift } }))).toEqual([
+      { source: 'dashboard', code: 'config_drift', severity: 'warning', metrics: { total: 5, bindings: 1, personal: 4 } },
+    ]);
+    // Nothing without findings, before the first check, or without the token (usage_not_configured covers that).
+    expect(candidates(input({ drift: { configured: true, doc: { ...drift, counts: NO_DRIFT.counts } } }))).toEqual([]);
+    expect(candidates(input({ drift: { configured: true, doc: NO_DRIFT } }))).toEqual([]);
+    expect(candidates(input({ drift: { configured: false, doc: drift } }))).toEqual([]);
+    expect(candidates(input({ drift: { configured: true, doc: { ...NO_DRIFT, consecutive_failed_days: 1 } } }))).toEqual([]);
+    expect(candidates(input({ drift: { configured: true, doc: { ...NO_DRIFT, consecutive_failed_days: 2 } } }))).toEqual([
+      { source: 'dashboard', code: 'drift_unavailable', severity: 'warning', metrics: { consecutive_failed_days: 2 } },
+    ]);
   });
 
   it('reports stopped cron ticks (none completed for 75 minutes, or none ever)', () => {

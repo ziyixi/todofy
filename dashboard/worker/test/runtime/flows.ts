@@ -8,6 +8,8 @@ import { validate } from '../../../../contracts/ops-v1/validate.mjs';
 import type { GuardState, OpsStatus } from '../../../../contracts/ops-v1/ops-v1.ts';
 import type { CanaryRun, CsrfResponse, OverallLevel, UsageView } from '../../src/api-types.ts';
 import type { AppDetail, CloudflareResponse, OpsResponse } from '../../src/api-v2-types.ts';
+import { DESIRED } from '../../src/drift.ts';
+import { fakeCloudflare, type LiveTweaks } from '../drift-fixture.ts';
 import { graphqlBody, type SyntheticUsage } from '../graphql-fixture.ts';
 import { contractSchema, fixture, startHarness, SYNTHETIC_BINDINGS, type Harness, type StubApp } from './harness.ts';
 
@@ -49,8 +51,16 @@ export interface Analytics {
   readonly requests: { authorization: string | null; variables: Record<string, string> }[];
 }
 
+/** The fake Cloudflare API of the drift check: the bundled desired state, changed by `tweaks`. */
+export interface CloudflareApi {
+  tweaks: LiveTweaks;
+  /** Every drift request's URL and Authorization header. */
+  readonly requests: { url: string; method: string; authorization: string | null }[];
+}
+
 export interface FlowHarness extends Harness {
   readonly analytics: Analytics;
+  readonly cloudflare: CloudflareApi;
   /** Extra outbound answers (e.g. the Access certs) by exact URL. */
   readonly routes: Map<string, () => Response>;
   /** The ops and cloudflare views through the loopback dev bypass (DEV_AUTH_BYPASS=true in these harnesses). */
@@ -78,6 +88,7 @@ export type StubAnswer = { value: unknown } | { throw: string } | { sequence: ({
 
 export async function startFlows(options: { bindings?: Record<string, string>; usage?: SyntheticUsage; persist?: string } = {}): Promise<FlowHarness> {
   const analytics: Analytics = { answer: options.usage ?? {}, requests: [] };
+  const cloudflare: CloudflareApi = { tweaks: {}, requests: [] };
   const routes = new Map<string, () => Response>();
   const outboundLog: string[] = [];
   const harness = await startHarness({
@@ -92,7 +103,10 @@ export async function startFlows(options: { bindings?: Record<string, string>; u
         return typeof answer === 'function' ? answer() : Response.json(graphqlBody(answer));
       }
       const route = routes.get(request.url);
-      return route ? route() : new Response('no outbound fetch expected', { status: 599 });
+      if (route) return route();
+      const fake = fakeCloudflare(request.url, cloudflare.tweaks, DESIRED);
+      if (fake !== null) cloudflare.requests.push({ url: request.url, method: request.method, authorization: request.headers.get('authorization') });
+      return fake ?? new Response('no outbound fetch expected', { status: 599 });
     },
   });
   let csrf: { token: string; cookie: string } | null = null;
@@ -105,6 +119,7 @@ export async function startFlows(options: { bindings?: Record<string, string>; u
   const flows: FlowHarness = {
     ...harness,
     analytics,
+    cloudflare,
     routes,
     outboundLog,
     async v2<T>(path: string, etag: string | null = null): Promise<V2Answer<T>> {

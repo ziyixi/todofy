@@ -210,7 +210,7 @@ Measured (unit suite for bytes, workerd suite for rows; a full 14-run canary his
 | --- | --- | --- | --- |
 | home | ≤ 10 KiB (budget) | 8.3 KB | 22 (≤ 24) |
 | flows | 16.1 KB (six flows; 17.4 KB in the workerd suite) | 22.9 KB | 22 (≤ 24) |
-| cloudflare | ≤ 16 KiB, also with 20 Workers | 17.1 KB | 22 (≤ 24) |
+| cloudflare | ≤ 16 KiB, also with 20 Workers | under `V2_BODY_MAX` with 20 listed drift findings (tested) | ≤ 24 (one more document since §10: `drift`) |
 | ops | ≤ 24 KiB | 24.1 KB | 22 (≤ 24) |
 
 `V2_BODY_BUDGET` holds for a normal day; `V2_BODY_MAX` (32 KiB) bounds the bad day. The Cloudflare view
@@ -222,9 +222,9 @@ every view shares (six documents for the attention strip and badges, plus what t
 the strip's observed items, §4) or the 14 canary rows, so the measured counts replace them; they are ~0.01 % of the DO's 5 M free rows a day at a few hundred views.
 A partial index (`canary_runs_active`) keeps the "run in progress" lookup at one row for ticks and views.
 
-Per tick: 2 `status()` + 1 probe + 1 GraphQL + ≤ 2 `setGuard` + ≤ 2 canary calls + ≤ 1 `reportOps` = 9
-outbound calls (`outboundPerTick`, tested ≤ 30 and asserted per tick in workerd; Free allows 50). The
-probe runs in parallel with the status polls. GraphQL stays one query per tick (48/day) plus refreshes
+Per tick: 3 `status()` + 1 probe + 1 GraphQL + ≤ 3 `setGuard` + ≤ 2 canary calls + ≤ 1 `reportOps` + ≤ 12
+read-only drift calls (§10) = 23 outbound calls (`outboundPerTick`, tested ≤ 30 and asserted per tick in
+workerd; Free allows 50). The probe runs in parallel with the status polls. GraphQL stays one query per tick (48/day) plus refreshes
 ≤ 1/min. DO rows written grow by ~2 per tick (`cf_scripts`, `probe:website`). Everything else as in
 [`limits.md`](limits.md).
 
@@ -272,3 +272,69 @@ Whether `durableObjectsInvocationsAdaptiveGroups.scriptName` is the defining or 
 whether `cpuTimeP99` includes DO time; the website probe from a same-zone Worker; notion-publish's
 real schedule; the TODO resource identifiers of §3. The full list of pending production checks is in
 [`verification.md`](verification.md) §2.
+
+## 10. Configuration drift (配置漂移)
+
+A private check, inside this Worker and never on GitHub, that the live Cloudflare account still matches
+what the repository commits. Nothing about it is published: the result lives in `HomeState`, is shown
+only on the Access-protected Cloudflare view, and reaches Todoist only as counts in the ops digest.
+
+**Desired state.** [`.github/scripts/drift_desired.py`](../../.github/scripts/drift_desired.py) writes
+`worker/src/drift-desired.json` from every production `wrangler.toml` (Worker names, Custom Domains,
+zone routes, cron schedules, binding names with their API types, `workers_dev` / `preview_urls`), from
+each app's deploy-vars wrapper (the vars it adds with `--var` as `plain_text`, the secrets it writes with
+`--secrets-file` as `secret_text`, and which of them are personal values; the wrapper is imported, never
+run, with placeholder inputs) and from its `MANUAL_SECRETS` list (the secrets set by hand, names only).
+The JSON holds names, types and flags only: no id, address, value or secret. The generator lives under
+`.github/scripts` because it reads every app's folder (root AGENTS.md); the dashboard bundles only its
+own copy. `test_drift_desired.py` (run by the `Changes` job on every CI run) fails until the committed
+JSON equals a fresh generation, so a config or wrapper change regenerates it in the same commit, which
+also redeploys the dashboard with the new desired state.
+
+**Live state.** Once per UTC day, starting with the first tick at or after `DRIFT_UTC_HOUR` (02:00 UTC),
+`HomeState` reads with `CF_ANALYTICS_TOKEN` (GETs only, fixed paths under
+`https://api.cloudflare.com/client/v4`):
+
+| Step | Calls |
+| --- | --- |
+| account | `GET /accounts/{a}/workers/scripts`, `GET /accounts/{a}/workers/domains` (in parallel), then `GET /zones/{z}/workers/routes` for each zone of the desired state, its id taken from a Custom Domain in that zone (never stored) |
+| each desired Worker that exists | `GET .../workers/scripts/{s}/schedules`, `.../settings`, `.../subdomain` (in parallel) |
+
+At most `DRIFT_CALLS_PER_TICK` (12) calls per tick: the account step and three Workers on the first tick,
+four Workers on the next, so a check of the 7 Workers takes two ticks (a tick then makes at most 23
+outbound calls in all, §5). A failed step is retried by the next tick; after `DRIFT_MAX_ATTEMPTS` (3)
+failed attempts the day is given up (`consecutive_failed_days` + 1), and a run left unfinished at the end
+of its UTC day counts as a failed day too, as does a `drift_run` document that would pass
+`DRIFT_RUN_MAX_BYTES` (60,000 bytes, under the 64 KiB row limit; this account's is about 6 KB). Every answer is reduced at once to names, types and flags:
+a binding keeps only `name` and `type`, so a `plain_text` value (and every id) never leaves the parser;
+remote text never leaves `drift.ts` (failures become `http_<n>`, `timeout`, `network_error`,
+`invalid_response`, `api_error`). Logs carry the outcome code and counts only.
+
+**Comparison** (pure, `compareDrift`), by category:
+
+| Category | Finding |
+| --- | --- |
+| `scripts` | a desired Worker missing live, or a live Worker no config names |
+| `custom_domains` | per Worker, a hostname missing or extra (a live domain of an unknown Worker is extra) |
+| `routes` | per Worker, a zone route pattern missing or extra (no production config has a zone route today) |
+| `crons` | per Worker, a schedule missing or extra |
+| `bindings` | per Worker, a binding or secret name missing (unless optional) or extra, or of another type |
+| `workers_dev` | `workers_dev` or `preview_urls` other than the config's |
+| `personal` | a personal value (wrapper kind `personal`/`optional`) whose live binding is not `secret_text` |
+
+A personal value is reported whatever way its wrapper sends it today; a known difference is a finding
+until the live account or the committed state changes, never a special case.
+
+**Storage and views.** `state` documents `drift_run` (today's run across ticks: the live names and
+types read so far; deleted when the run ends) and `drift` (the last completed check: counts per
+category, at most `DRIFT_FINDINGS_MAX` (50) findings, and the latest error code, step and failed-day
+count). `GET /api/v2/cloudflare` carries `drift` (`DriftView`: status `ok` / `drift` / `never_checked` /
+`not_configured` / `failing`, counts, at most `DRIFT_VIEW_FINDINGS_MAX` (20) findings) and the page shows
+it as the 配置漂移 panel. The digest adds `config_drift` (warning; metrics `total` and the non-zero
+category counts) while the last completed check has findings, and `drift_unavailable` (warning) after
+`DRIFT_UNAVAILABLE_AFTER_DAYS` (2) failed days in a row; both point at the Cloudflare view.
+
+**Token.** The same `CF_ANALYTICS_TOKEN` as the GraphQL query ([`setup.md`](setup.md) §4). A read-only
+replacement needs Account Analytics Read, Workers Scripts Read and, on the zone, Workers Routes Read;
+without them the check reports `http_403` and, after two days, `drift_unavailable`.
+

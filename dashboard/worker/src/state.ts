@@ -4,9 +4,10 @@
  * query and Worker discovery, guard, canary, digest, and the v2 views assembled from its tables. The
  * fetch and scheduled handlers only call these RPC methods.
  *
- * Bounds: every tick makes at most outboundPerTick() = 9 outbound calls (2 status, 1 probe, 1 GraphQL,
- * ≤ 2 setGuard, ≤ 2 canary calls, ≤ 1 reportOps) and writes a few dozen rows; a v2 view reads at most
- * V2_ROWS_READ[view] rows (api-v2-types.ts; tested in workerd).
+ * Bounds: every tick makes at most outboundPerTick() = 23 outbound calls (3 status, 1 probe, 1 GraphQL,
+ * ≤ 3 setGuard, ≤ 2 canary calls, ≤ 1 reportOps, ≤ DRIFT_CALLS_PER_TICK = 12 read-only drift calls) and
+ * writes a few dozen rows; a v2 view reads at most V2_ROWS_READ[view] rows (api-v2-types.ts; tested in
+ * workerd).
  */
 import { DurableObject } from 'cloudflare:workers';
 import { OPS_APPS, OPS_LIMITS, type GuardLevel, type GuardState, type OpsApp, type OpsStatus, type SetGuardInput } from '../../../contracts/ops-v1/ops-v1.ts';
@@ -63,6 +64,21 @@ import {
   type GuardOverrideDoc,
 } from './guard.ts';
 import { mergeScripts, type CfScriptsDoc } from './discovery.ts';
+import {
+  NO_DRIFT,
+  advanceRun,
+  attemptsExhausted,
+  completedDoc,
+  driftPlan,
+  driftView,
+  failedDoc,
+  newDriftRun,
+  runComplete,
+  runTooLarge,
+  totalFindings,
+  type DriftDoc,
+  type DriftRunDoc,
+} from './drift.ts';
 import { attentionView, type EvalInput } from './evaluate.ts';
 import { opsCanaryDelivery, opsCanaryResult, opsReportOps, opsSetGuard, opsStartCanary, opsStatus } from './ops-client.ts';
 import { nextProbeDoc, probeDue, probeUrl } from './probe.ts';
@@ -236,6 +252,11 @@ export class HomeState extends DurableObject<Env> {
         observed[app] = due.includes(app) ? polled[app] : doc.ok === true ? doc.status : null;
       }
       const usage = await this.pollUsage(now);
+      const drift = await this.runDrift(now).catch(() => {
+        // Never expected (every remote failure is a code); the rest of the tick must still run.
+        console.log(JSON.stringify({ event: 'drift', outcome: 'exception' }));
+        return { outcome: 'exception', calls: 0 };
+      });
       const guard = await this.runGuard(now, observed);
       const canary = await this.runCanary(now, true);
       const digest = await this.runDigest(now, guard.desired, true, now);
@@ -250,6 +271,8 @@ export class HomeState extends DurableObject<Env> {
           status: Object.fromEntries(OPS_APPS.map((app) => [app, !due.includes(app) ? 'recent' : observed[app] === null ? 'failed' : 'ok'])),
           probes,
           usage: usage ?? 'ok',
+          drift: drift.outcome,
+          drift_calls: drift.calls,
           guard: guard.desired.level,
           guard_calls: guard.calls,
           canary: canary,
@@ -386,6 +409,49 @@ export class HomeState extends DurableObject<Env> {
     return result.ok ? null : result.code;
   }
 
+  /**
+   * The day's drift check (drift.ts, design-v2.md §10): started by the first tick at or after
+   * DRIFT_UTC_HOUR, advanced by each tick (≤ DRIFT_CALLS_PER_TICK read-only GETs) until complete or
+   * DRIFT_MAX_ATTEMPTS attempts failed. Logs carry the outcome code and counts only.
+   */
+  private async runDrift(now: number): Promise<{ outcome: string; calls: number }> {
+    const configured = analyticsConfigured(this.env);
+    let doc = this.doc<DriftDoc>('drift') ?? NO_DRIFT;
+    let plan = driftPlan(now, this.doc<DriftRunDoc>('drift_run'), doc, configured);
+    if (plan.kind === 'abandon') {
+      // A run of an earlier day did not finish: that day failed.
+      doc = failedDoc(doc, plan.run, { code: 'incomplete', step: plan.run.account === null ? 'account' : 'script' }, now, true);
+      this.putDoc('drift', doc, now);
+      this.deleteDoc('drift_run');
+      plan = driftPlan(now, null, doc, configured);
+    }
+    if (plan.kind !== 'start' && plan.kind !== 'continue') return { outcome: 'idle', calls: 0 };
+    const run = plan.kind === 'start' ? newDriftRun(now) : plan.run;
+    const result = await advanceRun(run, (this.env.CF_ANALYTICS_TOKEN ?? '').trim(), this.env.ACCOUNT_ID, (url, init) => globalThis.fetch(url, init));
+    let outcome: string;
+    if (runComplete(result.run)) {
+      doc = completedDoc(doc, result.run, now);
+      this.deleteDoc('drift_run');
+      outcome = totalFindings(doc.counts) === 0 ? 'ok' : 'drift';
+    } else if (result.error !== null && attemptsExhausted(result.run)) {
+      doc = failedDoc(doc, result.run, result.error, now, true);
+      this.deleteDoc('drift_run');
+      outcome = result.error.code;
+    } else if (runTooLarge(result.run)) {
+      // More live names than one state row holds (far beyond this account): give the day up.
+      doc = failedDoc(doc, result.run, { code: 'too_large', step: 'script' }, now, true);
+      this.deleteDoc('drift_run');
+      outcome = 'too_large';
+    } else {
+      doc = result.error === null ? { ...doc, running_day: result.run.day } : failedDoc(doc, result.run, result.error, now, false);
+      this.putDoc('drift_run', result.run, now);
+      outcome = result.error === null ? 'running' : `retry:${result.error.code}`;
+    }
+    this.putDoc('drift', doc, now);
+    console.log(JSON.stringify({ event: 'drift', outcome, calls: result.calls, findings: totalFindings(doc.counts), failed_days: doc.consecutive_failed_days }));
+    return { outcome, calls: result.calls };
+  }
+
   private currentDesired(now: number): DesiredGuard {
     const override = activeOverride(this.doc<GuardOverrideDoc>('guard_override'), now);
     return desiredGuard(now, this.doc<AutoGuard>('guard'), override);
@@ -498,6 +564,7 @@ export class HomeState extends DurableObject<Env> {
       latestFinished: this.latestFinished(),
       lastTickAt,
       apps: perApp((app) => this.statusDoc(app)),
+      drift: { configured: analyticsConfigured(this.env), doc: this.doc<DriftDoc>('drift') ?? NO_DRIFT },
     });
     const firstSeen = this.syncSince(list.map(itemKey), now);
     const items = finalizeItems(list, firstSeen, now);
@@ -661,7 +728,15 @@ export class HomeState extends DurableObject<Env> {
         case 'flows':
           return flowsResponse(base, this.evalInput(now), this.canaryView(now));
         case 'cloudflare':
-          return cloudflareResponse(base, now, this.usageView(now), this.doc<UsageDoc>('usage') ?? NO_USAGE, this.doc<CfScriptsDoc>('cf_scripts'), this.guardView(now));
+          return cloudflareResponse(
+            base,
+            now,
+            this.usageView(now),
+            this.doc<UsageDoc>('usage') ?? NO_USAGE,
+            this.doc<CfScriptsDoc>('cf_scripts'),
+            this.guardView(now),
+            driftView(this.doc<DriftDoc>('drift') ?? NO_DRIFT, analyticsConfigured(this.env), now),
+          );
         case 'ops': {
           const digest = this.doc<DigestDoc>('digest') ?? NO_DIGEST;
           const todofy = this.statusDoc('todofy');

@@ -19,6 +19,7 @@ import {
   ACCENTS,
   API_V2_VERSION,
   ICON_KEYS,
+  DRIFT_CALLS_PER_TICK,
   MAX_OUTBOUND_PER_REFRESH,
   MAX_OUTBOUND_PER_TICK,
   type EntryDef,
@@ -422,13 +423,13 @@ export function resourceByMatch(kind: ResourceDef['kind'], id: string, registry:
 /**
  * Outbound calls of one tick computed from the registry (design-v2.md §5): status() per ops_v1 entry,
  * one GET per enabled public_http probe, the GraphQL query, setGuard per guarded entry, two canary
- * calls per canary and one reportOps.
+ * calls per canary, one reportOps and the drift check's read-only calls (at most DRIFT_CALLS_PER_TICK).
  */
 export function outboundPerTick(registry: Registry = REGISTRY): number {
   const ops = registry.entries.filter((entry) => entry.status.type === 'ops_v1');
   const guarded = ops.filter((entry) => entry.status.type === 'ops_v1' && entry.status.guard);
   const canaries = registry.flows.filter((flow) => flow.canary !== null).length;
-  return ops.length + probeCount(registry) + 1 + guarded.length + 2 * canaries + 1;
+  return ops.length + probeCount(registry) + 1 + guarded.length + 2 * canaries + 1 + DRIFT_CALLS_PER_TICK;
 }
 
 /** Outbound calls of one owner refresh: status() and probes of /home, or the GraphQL of /cloudflare. */

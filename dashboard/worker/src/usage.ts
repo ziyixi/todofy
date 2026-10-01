@@ -1,9 +1,10 @@
 /**
  * Account-wide Workers Free usage from the Cloudflare GraphQL Analytics API (docs/design.md §5.2, §7).
  *
- * CF_ANALYTICS_TOKEN is used only here, only as the bearer token of one POST to GRAPHQL_URL (a
- * constant, not configuration). It is never logged, stored, echoed or sent anywhere else, and remote
- * response text never leaves this module: failures become codes.
+ * CF_ANALYTICS_TOKEN is used here only as the bearer token of one POST to GRAPHQL_URL (a constant,
+ * not configuration); its only other use is the drift check's read-only GETs (drift.ts). It is never
+ * logged, stored, echoed or sent anywhere else, and remote response text never leaves this module:
+ * failures become codes.
  */
 import { BREAKDOWN_UNCLASSIFIED, type QuotaResourceId, type QuotaRow } from './api-types.ts';
 import { WORKERS_QUERY_LIMIT, type ResourceKind } from './api-v2-types.ts';

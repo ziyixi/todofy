@@ -15,6 +15,8 @@ import type { CanaryRun, CanaryView, GuardState, OpsStatus, QuotaRow, UsageView 
 import type {
   AttentionItem,
   CloudflareResponse,
+  DriftFinding,
+  DriftView,
   EntryState,
   FlowState,
   FlowsResponse,
@@ -525,6 +527,34 @@ export function manyWorkers(count: number): WorkerRow[] {
   )
 }
 
+/** The drift panel: a check this morning that found nothing (synthetic). */
+export function driftView(patch: Partial<DriftView> = {}): DriftView {
+  return {
+    status: 'ok',
+    checked_at: '2026-09-29T02:30:05.000Z',
+    in_progress: false,
+    desired_workers: 7,
+    counts: { scripts: 0, custom_domains: 0, routes: 0, crons: 0, bindings: 0, workers_dev: 0, personal: 0 },
+    findings: [],
+    findings_omitted: 0,
+    zones_unchecked: 0,
+    truncated: false,
+    last_error: null,
+    last_error_step: null,
+    last_error_at: null,
+    consecutive_failed_days: 0,
+    ...patch,
+  }
+}
+
+/** Synthetic findings of every kind (names only, as the Worker sends them). */
+export const DRIFT_FINDINGS: DriftFinding[] = [
+  { category: 'scripts', script: 'synthetic-orphan', name: 'synthetic-orphan', kind: 'extra' },
+  { category: 'custom_domains', script: 'home', name: 'stray.example.com', kind: 'extra' },
+  { category: 'bindings', script: 'lab', name: 'SYNTHETIC_KEY', kind: 'missing', expected: 'secret_text' },
+  { category: 'personal', script: 'mail-hero', name: 'SYNTHETIC_PERSONAL', kind: 'changed', expected: 'secret_text', actual: 'plain_text' },
+]
+
 function guardView(patch: Partial<GuardViewV2> = {}): GuardViewV2 {
   return {
     desired: { level: 'normal', reason: 'quota_normal', until: null, source: 'auto' },
@@ -568,6 +598,7 @@ function scenario(
     guard?: GuardViewV2
     canary?: CanaryView & { id: string }
     apps?: OpsResponse['apps']
+    drift?: DriftView
   } = {},
 ): Scenario {
   const base = shell(shellPatch)
@@ -594,6 +625,7 @@ function scenario(
     flows: { ...base, flows },
     cloudflare: {
       ...base,
+      drift: parts.drift ?? driftView(),
       usage: use,
       workers,
       workers_omitted: 0,
@@ -711,6 +743,25 @@ export function analyticsUnavailable(): Scenario {
     target: { view: 'cloudflare' },
   }
   return scenario(warned([item], { cloudflare: 1 }), { usage: UNAVAILABLE_USAGE, workers: [] })
+}
+
+/** The drift check found four differences (one of each kind) and its item is on the strip. */
+export function configDrift(): Scenario {
+  const item: AttentionItem = {
+    source: 'dashboard',
+    code: 'config_drift',
+    severity: 'warning',
+    since: '2026-09-29T02:30:05.000Z',
+    metrics: { total: 4, scripts: 1, custom_domains: 1, bindings: 1, personal: 1 },
+    target: { view: 'cloudflare' },
+  }
+  return scenario(warned([item], { cloudflare: 1 }), {
+    drift: driftView({
+      status: 'drift',
+      counts: { scripts: 1, custom_domains: 1, routes: 0, crons: 0, bindings: 1, workers_dev: 0, personal: 1 },
+      findings: DRIFT_FINDINGS,
+    }),
+  })
 }
 
 /** `count` Workers in the table (0: a new account or a quiet day). */

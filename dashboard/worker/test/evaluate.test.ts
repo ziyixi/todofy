@@ -268,6 +268,8 @@ describe('the attention strip', () => {
     expect(targetOf('todofy', 'guard_apply_failed')).toEqual({ view: 'ops', entry: 'todofy' });
     expect(targetOf('cloudflare', 'd1_rows_read_high')).toEqual({ view: 'cloudflare' });
     expect(targetOf('dashboard', 'usage_unavailable')).toEqual({ view: 'cloudflare' });
+    expect(targetOf('dashboard', 'config_drift')).toEqual({ view: 'cloudflare' });
+    expect(targetOf('dashboard', 'drift_unavailable')).toEqual({ view: 'cloudflare' });
     expect(targetOf('dashboard', 'tick_stale')).toEqual({ view: 'flows', flow: 'ops-digest', stage: 'collect' });
     expect(targetOf('dashboard', 'canary_not_delivered')).toEqual({ view: 'flows', flow: 'mail-to-task', stage: 'deliver' });
     expect(targetOf('dashboard', 'canary_consumer_failed')).toEqual({ view: 'flows', flow: 'mail-to-task', stage: 'consume' });

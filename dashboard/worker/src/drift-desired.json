@@ -1,0 +1,619 @@
+{
+  "version": 1,
+  "zones": [
+    "ziyixi.science"
+  ],
+  "workers": {
+    "home": {
+      "config": "dashboard/wrangler.toml",
+      "workers_dev": false,
+      "preview_urls": false,
+      "custom_domains": [
+        "home.ziyixi.science"
+      ],
+      "routes": [],
+      "crons": [
+        "*/30 * * * *"
+      ],
+      "bindings": [
+        {
+          "name": "ACCESS_AUDIENCE",
+          "type": "plain_text",
+          "source": "config"
+        },
+        {
+          "name": "ACCESS_ISSUER",
+          "type": "plain_text",
+          "source": "config"
+        },
+        {
+          "name": "ACCESS_OWNER",
+          "type": "secret_text",
+          "source": "deploy"
+        },
+        {
+          "name": "ACCESS_OWNER_ALIASES",
+          "type": "secret_text",
+          "source": "deploy"
+        },
+        {
+          "name": "ACCOUNT_ID",
+          "type": "plain_text",
+          "source": "config"
+        },
+        {
+          "name": "ASSETS",
+          "type": "assets",
+          "source": "config"
+        },
+        {
+          "name": "BUILD_SHA",
+          "type": "plain_text",
+          "source": "deploy"
+        },
+        {
+          "name": "CANARY_ENABLED",
+          "type": "plain_text",
+          "source": "deploy"
+        },
+        {
+          "name": "CANARY_UTC_HOUR",
+          "type": "plain_text",
+          "source": "config"
+        },
+        {
+          "name": "CF_ANALYTICS_TOKEN",
+          "type": "secret_text",
+          "source": "deploy"
+        },
+        {
+          "name": "CSRF_SIGNING_KEY",
+          "type": "secret_text",
+          "source": "deploy"
+        },
+        {
+          "name": "HOME",
+          "type": "durable_object_namespace",
+          "source": "config"
+        },
+        {
+          "name": "LAB",
+          "type": "service",
+          "source": "config"
+        },
+        {
+          "name": "MAIL_HERO",
+          "type": "service",
+          "source": "config"
+        },
+        {
+          "name": "PUBLIC_HOST",
+          "type": "plain_text",
+          "source": "config"
+        },
+        {
+          "name": "TODOFY",
+          "type": "service",
+          "source": "config"
+        }
+      ],
+      "personal": []
+    },
+    "lab": {
+      "config": "lab/wrangler.toml",
+      "workers_dev": false,
+      "preview_urls": false,
+      "custom_domains": [
+        "lab.ziyixi.science"
+      ],
+      "routes": [],
+      "crons": [],
+      "bindings": [
+        {
+          "name": "ACCESS_AUDIENCE",
+          "type": "plain_text",
+          "source": "config"
+        },
+        {
+          "name": "ACCESS_ISSUER",
+          "type": "plain_text",
+          "source": "config"
+        },
+        {
+          "name": "ACCESS_OWNER",
+          "type": "secret_text",
+          "source": "deploy"
+        },
+        {
+          "name": "ACCESS_OWNER_ALIASES",
+          "type": "secret_text",
+          "source": "deploy"
+        },
+        {
+          "name": "AI",
+          "type": "ai",
+          "source": "config"
+        },
+        {
+          "name": "ASSETS",
+          "type": "assets",
+          "source": "config"
+        },
+        {
+          "name": "BUILD_SHA",
+          "type": "plain_text",
+          "source": "deploy"
+        },
+        {
+          "name": "CSRF_SIGNING_KEY",
+          "type": "secret_text",
+          "source": "deploy"
+        },
+        {
+          "name": "DB",
+          "type": "d1",
+          "source": "config"
+        },
+        {
+          "name": "LAB",
+          "type": "durable_object_namespace",
+          "source": "config"
+        },
+        {
+          "name": "LAB_DAILY_NEURONS",
+          "type": "plain_text",
+          "source": "config"
+        },
+        {
+          "name": "LAB_FETCH_UTC_HOUR",
+          "type": "plain_text",
+          "source": "config"
+        },
+        {
+          "name": "PUBLIC_HOST",
+          "type": "plain_text",
+          "source": "config"
+        },
+        {
+          "name": "TODOFY",
+          "type": "service",
+          "source": "config"
+        }
+      ],
+      "personal": []
+    },
+    "mail-hero": {
+      "config": "mail-hero/wrangler.toml",
+      "workers_dev": false,
+      "preview_urls": false,
+      "custom_domains": [
+        "mail-hero.ziyixi.science"
+      ],
+      "routes": [],
+      "crons": [],
+      "bindings": [
+        {
+          "name": "ACCESS_AUDIENCE",
+          "type": "plain_text",
+          "source": "config"
+        },
+        {
+          "name": "ACCESS_ISSUER",
+          "type": "plain_text",
+          "source": "config"
+        },
+        {
+          "name": "ACCESS_OWNER",
+          "type": "plain_text",
+          "source": "deploy"
+        },
+        {
+          "name": "ACCESS_OWNER_ALIASES",
+          "type": "plain_text",
+          "source": "deploy",
+          "optional": true
+        },
+        {
+          "name": "ASSETS",
+          "type": "assets",
+          "source": "config"
+        },
+        {
+          "name": "BACKUP_RECEIPT_KEY",
+          "type": "secret_text",
+          "source": "manual"
+        },
+        {
+          "name": "BACKUP_STORE",
+          "type": "r2_bucket",
+          "source": "config"
+        },
+        {
+          "name": "BACKUP_TOKEN",
+          "type": "secret_text",
+          "source": "manual"
+        },
+        {
+          "name": "COORDINATOR",
+          "type": "durable_object_namespace",
+          "source": "config"
+        },
+        {
+          "name": "CREDENTIAL_KEY",
+          "type": "secret_text",
+          "source": "manual"
+        },
+        {
+          "name": "DB",
+          "type": "d1",
+          "source": "config"
+        },
+        {
+          "name": "FORCE_SEND_PAUSED",
+          "type": "plain_text",
+          "source": "deploy"
+        },
+        {
+          "name": "INGEST_DAILY_BYTE_LIMIT",
+          "type": "plain_text",
+          "source": "config"
+        },
+        {
+          "name": "INGEST_DAILY_MESSAGE_LIMIT",
+          "type": "plain_text",
+          "source": "config"
+        },
+        {
+          "name": "MAIL_STORE",
+          "type": "r2_bucket",
+          "source": "config"
+        },
+        {
+          "name": "MAINTENANCE_MODE",
+          "type": "plain_text",
+          "source": "deploy"
+        },
+        {
+          "name": "PUBLIC_HOST",
+          "type": "plain_text",
+          "source": "config"
+        },
+        {
+          "name": "RECEIVE_ADDRESS",
+          "type": "plain_text",
+          "source": "deploy"
+        },
+        {
+          "name": "WEBHOOK_ALLOWED_HOSTS",
+          "type": "plain_text",
+          "source": "config"
+        }
+      ],
+      "personal": [
+        "ACCESS_OWNER",
+        "ACCESS_OWNER_ALIASES",
+        "RECEIVE_ADDRESS"
+      ]
+    },
+    "todofy": {
+      "config": "todofy/gateway/wrangler.toml",
+      "workers_dev": false,
+      "preview_urls": false,
+      "custom_domains": [
+        "daily.ziyixi.science",
+        "todofy-hooks.ziyixi.science",
+        "todofy.ziyixi.science"
+      ],
+      "routes": [],
+      "crons": [
+        "*/10 * * * *"
+      ],
+      "bindings": [
+        {
+          "name": "ACCESS_AUDIENCE",
+          "type": "plain_text",
+          "source": "config"
+        },
+        {
+          "name": "ACCESS_ISSUER",
+          "type": "plain_text",
+          "source": "config"
+        },
+        {
+          "name": "ACCESS_OWNER",
+          "type": "secret_text",
+          "source": "deploy"
+        },
+        {
+          "name": "ACCESS_OWNER_ALIASES",
+          "type": "secret_text",
+          "source": "deploy"
+        },
+        {
+          "name": "ASSETS",
+          "type": "assets",
+          "source": "config"
+        },
+        {
+          "name": "BUILD_SHA",
+          "type": "plain_text",
+          "source": "deploy"
+        },
+        {
+          "name": "COORDINATOR",
+          "type": "durable_object_namespace",
+          "source": "config"
+        },
+        {
+          "name": "CSRF_SIGNING_KEY",
+          "type": "secret_text",
+          "source": "manual"
+        },
+        {
+          "name": "MAIL_WEBHOOK_TOKEN_SHA256",
+          "type": "secret_text",
+          "source": "manual"
+        },
+        {
+          "name": "MAINTENANCE_MODE",
+          "type": "plain_text",
+          "source": "deploy"
+        },
+        {
+          "name": "METRICS",
+          "type": "analytics_engine",
+          "source": "config"
+        },
+        {
+          "name": "REPORT_BASIC_AUTH_SHA256",
+          "type": "secret_text",
+          "source": "manual"
+        },
+        {
+          "name": "TODOFY_HOOKS_HOSTS",
+          "type": "plain_text",
+          "source": "config"
+        },
+        {
+          "name": "TODOFY_PUBLIC_HOST",
+          "type": "plain_text",
+          "source": "config"
+        }
+      ],
+      "personal": []
+    },
+    "todofy-core": {
+      "config": "todofy/wrangler.toml",
+      "workers_dev": false,
+      "preview_urls": false,
+      "custom_domains": [],
+      "routes": [],
+      "crons": [],
+      "bindings": [
+        {
+          "name": "BACKUPS",
+          "type": "r2_bucket",
+          "source": "config"
+        },
+        {
+          "name": "BUILD_SHA",
+          "type": "plain_text",
+          "source": "deploy"
+        },
+        {
+          "name": "DB",
+          "type": "d1",
+          "source": "config"
+        },
+        {
+          "name": "FORCE_PAUSE_TODOIST",
+          "type": "plain_text",
+          "source": "deploy"
+        },
+        {
+          "name": "GEMINI_API_BASE",
+          "type": "plain_text",
+          "source": "config"
+        },
+        {
+          "name": "GEMINI_API_KEY",
+          "type": "secret_text",
+          "source": "manual"
+        },
+        {
+          "name": "GEMINI_DAILY_TOKEN_BUDGET",
+          "type": "plain_text",
+          "source": "config"
+        },
+        {
+          "name": "GEMINI_MODELS",
+          "type": "plain_text",
+          "source": "config"
+        },
+        {
+          "name": "GTD_COLLECT_UTC",
+          "type": "plain_text",
+          "source": "config"
+        },
+        {
+          "name": "GTD_REVIEW_ENABLED",
+          "type": "plain_text",
+          "source": "deploy"
+        },
+        {
+          "name": "LEGACY_TEXT_RETENTION_DAYS",
+          "type": "plain_text",
+          "source": "config"
+        },
+        {
+          "name": "LOOKUP_DELAY_MS",
+          "type": "plain_text",
+          "source": "config"
+        },
+        {
+          "name": "MAIL_SOURCE_ID",
+          "type": "plain_text",
+          "source": "config"
+        },
+        {
+          "name": "MAINTENANCE_MODE",
+          "type": "plain_text",
+          "source": "deploy"
+        },
+        {
+          "name": "METRICS",
+          "type": "analytics_engine",
+          "source": "config"
+        },
+        {
+          "name": "PROCESSING_PAUSED",
+          "type": "plain_text",
+          "source": "deploy"
+        },
+        {
+          "name": "REMINDER_ENABLED",
+          "type": "plain_text",
+          "source": "deploy"
+        },
+        {
+          "name": "REPORT_CARRYOVER_DAYS",
+          "type": "plain_text",
+          "source": "config"
+        },
+        {
+          "name": "REPORT_DEFAULT_TOP",
+          "type": "plain_text",
+          "source": "config"
+        },
+        {
+          "name": "REPORT_PRECOMPUTE_UTC",
+          "type": "plain_text",
+          "source": "config"
+        },
+        {
+          "name": "TODOFY_PUBLIC_HOST",
+          "type": "plain_text",
+          "source": "config"
+        },
+        {
+          "name": "TODOIST_API_BASE",
+          "type": "plain_text",
+          "source": "config"
+        },
+        {
+          "name": "TODOIST_API_KEY",
+          "type": "secret_text",
+          "source": "manual"
+        },
+        {
+          "name": "TODOIST_DEFAULT_PROJECT_ID",
+          "type": "plain_text",
+          "source": "deploy"
+        },
+        {
+          "name": "TODOIST_OPS_PROJECT_ID",
+          "type": "plain_text",
+          "source": "deploy",
+          "optional": true
+        },
+        {
+          "name": "TODOIST_REVIEW_PROJECT_ID",
+          "type": "plain_text",
+          "source": "deploy",
+          "optional": true
+        }
+      ],
+      "personal": [
+        "TODOIST_DEFAULT_PROJECT_ID",
+        "TODOIST_OPS_PROJECT_ID",
+        "TODOIST_REVIEW_PROJECT_ID"
+      ]
+    },
+    "ziyixi-notion-publish": {
+      "config": "website/relay/wrangler.toml",
+      "workers_dev": true,
+      "preview_urls": false,
+      "custom_domains": [],
+      "routes": [],
+      "crons": [
+        "7,22,37,52 * * * *"
+      ],
+      "bindings": [
+        {
+          "name": "AUTO_PUBLISH",
+          "type": "plain_text",
+          "source": "config"
+        },
+        {
+          "name": "CANONICAL_HOST",
+          "type": "plain_text",
+          "source": "config"
+        },
+        {
+          "name": "GITHUB_DISPATCH_TOKEN",
+          "type": "secret_text",
+          "source": "manual"
+        },
+        {
+          "name": "GITHUB_REPOSITORY",
+          "type": "plain_text",
+          "source": "config"
+        },
+        {
+          "name": "MAX_AUTO_RELEASES_PER_DAY",
+          "type": "plain_text",
+          "source": "config"
+        },
+        {
+          "name": "NOTION_API_VERSION",
+          "type": "plain_text",
+          "source": "config"
+        },
+        {
+          "name": "NOTION_DATA_SOURCE_ID",
+          "type": "secret_text",
+          "source": "manual"
+        },
+        {
+          "name": "NOTION_TOKEN",
+          "type": "secret_text",
+          "source": "manual"
+        },
+        {
+          "name": "NOTION_WEBHOOK_SECRET",
+          "type": "secret_text",
+          "source": "manual"
+        },
+        {
+          "name": "QUIET_MINUTES",
+          "type": "plain_text",
+          "source": "config"
+        },
+        {
+          "name": "RECONCILE_UTC_HOUR",
+          "type": "plain_text",
+          "source": "config"
+        },
+        {
+          "name": "RELEASE_WORKFLOW",
+          "type": "plain_text",
+          "source": "config"
+        }
+      ],
+      "personal": []
+    },
+    "ziyixi-website": {
+      "config": "website/wrangler.toml",
+      "workers_dev": false,
+      "preview_urls": false,
+      "custom_domains": [
+        "www.ziyixi.science",
+        "ziyixi.science"
+      ],
+      "routes": [],
+      "crons": [],
+      "bindings": [],
+      "personal": []
+    }
+  }
+}

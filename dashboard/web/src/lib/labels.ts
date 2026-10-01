@@ -14,7 +14,7 @@ import type {
   QuotaResourceId,
   UsageStatus,
 } from '../../../worker/src/api-types.ts'
-import type { CanaryBadge, Level, StatusSourceType } from '../../../worker/src/api-v2-types.ts'
+import type { CanaryBadge, DriftCategory, DriftFinding, DriftStatus, Level, StatusSourceType } from '../../../worker/src/api-v2-types.ts'
 import { formatBytesBinary, formatDuration, formatNumber } from './format'
 
 /** Visual tone of a status; always rendered together with a text label. */
@@ -133,6 +133,8 @@ const SIGNALS: Readonly<Record<string, string>> = {
   // dashboard digest items
   usage_unavailable: '用量数据获取失败',
   usage_not_configured: '未配置用量查询令牌',
+  config_drift: '线上配置与代码不一致',
+  drift_unavailable: '配置漂移检查连续失败',
   guard_apply_failed: '降载设置下发失败',
   canary_start_failed: '金丝雀启动失败',
   canary_not_delivered: '金丝雀未投递',
@@ -212,6 +214,45 @@ export function usageErrorLabel(code: string): string {
     },
     code,
   )
+}
+
+/** The drift panel's status line (配置漂移). */
+export const DRIFT_STATUS: Readonly<Record<DriftStatus, { label: string; level: Level }>> = {
+  ok: { label: '与代码一致', level: 'ok' },
+  drift: { label: '与代码不一致', level: 'warning' },
+  never_checked: { label: '尚未检查', level: 'unknown' },
+  not_configured: { label: '未配置令牌', level: 'warning' },
+  failing: { label: '检查失败', level: 'critical' },
+}
+
+export const DRIFT_CATEGORY: Readonly<Record<DriftCategory, string>> = {
+  scripts: 'Worker',
+  custom_domains: '自定义域名',
+  routes: '区域路由',
+  crons: '定时触发',
+  bindings: '绑定与密钥',
+  workers_dev: 'workers.dev / 预览',
+  personal: '个人值未设为密钥',
+}
+
+/** What differs, in words: names and types only, never a value. */
+export function driftFindingText(finding: Pick<DriftFinding, 'category' | 'kind' | 'expected' | 'actual'>): string {
+  if (finding.category === 'personal') return `应为密钥（secret_text），线上为 ${finding.actual ?? '?'}`
+  if (finding.kind === 'missing') return finding.expected ? `代码中有（${finding.expected}），线上没有` : '代码中有，线上没有'
+  if (finding.kind === 'extra') return finding.actual ? `线上有（${finding.actual}），代码中没有` : '线上有，代码中没有'
+  return `代码为 ${finding.expected ?? '?'}，线上为 ${finding.actual ?? '?'}`
+}
+
+/** Drift check failures: the usage codes plus the drift-only ones. */
+const DRIFT_ERRORS: Readonly<Record<string, string>> = {
+  api_error: 'API 返回失败',
+  incomplete: '当天未完成',
+  bad_account: '账户 ID 无效',
+  too_large: '线上名称超过存储上限',
+}
+
+export function driftErrorLabel(code: string): string {
+  return Object.hasOwn(DRIFT_ERRORS, code) ? lookup(DRIFT_ERRORS, code) : usageErrorLabel(code)
 }
 
 export const APP_ERRORS: Readonly<Record<AppErrorCode, string>> = {
