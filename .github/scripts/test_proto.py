@@ -53,8 +53,9 @@ TS_PACKAGE = "@ziyixi/proto"
 PY_PACKAGE = "ziyixi-proto"
 ENSURE = PROTO / "tools" / "ensure.mjs"
 # Script commands that read the generated code (compile, test, type-aware lint, bundle or serve it); the script's
-# pre-script must run ensure.mjs. `vite\b` does not match vitest (the s is a word character).
-READS_GENERATED = re.compile(r"(^|[\s;&|(])(tsc|vitest|wrangler|eslint|vite)\b")
+# pre-script must run ensure.mjs. `vite\b` does not match vitest (the s is a word character). Node itself reads it
+# through type stripping: its test runner (Mail Hero's tests import the ops-v1 sources) and a TypeScript script.
+READS_GENERATED = re.compile(r"(^|[\s;&|(])(tsc|vitest|wrangler|eslint|vite|node\s+--test|node\s+\S+\.m?ts)\b")
 RELATIVE_IMPORT = re.compile(r"""(?:\bfrom|\bimport)\s*\(?\s*['"](\.\.?/[^'"]+)['"]""")
 EXACT = re.compile(r"\d+\.\d+\.\d+")
 SKIP_PARTS = {"node_modules", ".venv", ".venv-workers", "python_modules", ".wrangler"}
@@ -313,7 +314,8 @@ class Users(unittest.TestCase):
                     self.assertEqual((manifest.parent / match.group(1)).resolve(), ENSURE)
 
     def test_the_freshness_rule_names_every_tool_that_reads_the_generated_code(self):
-        """eslint reads the generated types through typescript-eslint's project service, vite compiles them."""
+        """eslint reads the generated types through typescript-eslint's project service, vite compiles them, Node's test
+        runner and a TypeScript script load them by type stripping."""
         for command in (
             "tsc --noEmit",
             "tsc --noEmit && tsc --noEmit -p test/runtime/tsconfig.json",
@@ -323,10 +325,21 @@ class Users(unittest.TestCase):
             "npm run check && eslint src",
             "vite",
             "tsc --noEmit && vite build && node scripts/check-dist.mjs",
+            "node --test test/*.test.mjs",
+            "node --test --test-concurrency=1 test/cpu/*.test.mjs",
+            "node scripts/report.ts",
+            "node tools/check.mts --write",
         ):
             with self.subTest(command=command):
                 self.assertRegex(command, READS_GENERATED)
-        for command in ("node scripts/check-dist.mjs", "prettier --check .", "node ../../proto/tools/ensure.mjs", "my-eslint-report"):
+        for command in (
+            "node scripts/check-dist.mjs",
+            "prettier --check .",
+            "node ../../proto/tools/ensure.mjs",
+            "my-eslint-report",
+            "node test/contract-fixtures.mjs --write",
+            "nodemon --test",
+        ):
             with self.subTest(command=command):
                 self.assertNotRegex(command, READS_GENERATED)
 

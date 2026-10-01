@@ -33,14 +33,16 @@ Outputs (GITHUB_OUTPUT, "true"/"false"):
 proto/ (the protobuf IDL, proto/README.md) checks every app in PROTO_USERS (an app that depends on
 @ziyixi/proto or ziyixi-proto) and deploys only the apps whose bundle the changed path reaches
 (proto_deploys): PROTO_USERS[app] names the languages whose generated code and runtime the app's
-production bundles compile in ("ts": Lab's and the links app's Workers and UIs; "python": todofy-core, through the wheel
+production bundles compile in ("ts": Lab's and the links app's Workers and UIs, Mail Hero's Worker and the dashboard's
+Worker (ops.v1 and the wire codec); "python": todofy-core, through the wheel
 pywrangler vendors; Todofy's gateway imports types only, so it is no "ts" user), PROTO_RUNTIMES maps a
 language's runtime and generator to that language's users, and PROTO_PACKAGES maps each proto package to
 the apps that import its generated code (lab/ui reaches Lab only, links/ui the links app only; prototest, the runtimes' fixtures,
 reaches no app). Tests, test data, the check scripts, the api-linter tool module, check configs and
 Markdown (PROTO_NOT_BUNDLED) deploy nothing; any other proto/ path (buf.yaml, buf.lock, the toolchain
 lockfile, ensure.mjs, a package not listed yet) deploys every user (fail safe). test_proto.py derives
-PROTO_USERS and the packages' importers from the sources. It also runs Contracts.
+PROTO_USERS and the packages' importers from the sources. It also runs Contracts. A change to a contract proto/'s
+tests read (PROTO_READS: ops-v1's and task-intent-v1's fixtures and schemas) runs Proto checks as well.
 
 push: the files changed between a cumulative base and github.sha, never only this push's own diff,
 so a change whose run was cancelled or failed is checked (and deployed) again by the next run.
@@ -181,6 +183,11 @@ PROTO_PACKAGES: dict[str, tuple[str, ...]] = {
     # The runtimes' test fixtures (never imported by an app; not in the Python wheel).
     "proto/prototest/": (),
 }
+# The contracts whose fixtures and schemas proto/'s own tests read (proto/test/ops.test.ts and test_ops.py round-trip
+# every ops-v1 fixture byte for byte through both codecs; the task-intent-v1 tests check both codecs against its
+# schema; Proto checks also compares ops-v1's JSON Schema with the one the IDL generates): a change there runs Proto
+# checks too, so a fixture neither codec writes byte for byte, or one a strict read wrongly accepts, fails its push.
+PROTO_READS = ("contracts/ops-v1/", "contracts/task-intent-v1/")
 # proto/ paths that never reach a bundle: a change there checks the users but deploys none.
 PROTO_NOT_BUNDLED = (
     "proto/test/",
@@ -190,6 +197,7 @@ PROTO_NOT_BUNDLED = (
     # The wire JSON types (types only, never in a bundle) and the contracts' JSON Schema generator.
     "proto/tools/gen_wire_ts.py",
     "proto/tools/gen_schema.py",
+    "proto/tools/schema.mjs",
     "proto/tools/api-linter/",
     "proto/tsconfig.json",
     "proto/vitest.config.ts",
@@ -329,7 +337,7 @@ def classify(paths: Iterable[str]) -> dict[str, bool]:
         packages=bool(package_names) or ci,
         relay=relay,
         infra=any(path.startswith((".github/", *INFRA)) for path in paths),
-        proto=ci or bool(proto_checked),
+        proto=ci or bool(proto_checked) or any(path.startswith(PROTO_READS) for path in paths),
     )
 
 

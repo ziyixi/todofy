@@ -7,6 +7,8 @@
     "postinstall": "node ../../proto/tools/ensure.mjs",
     "pretest": "node ../../proto/tools/ensure.mjs",
     "test": "node --test test/*.test.mjs",
+    "pretest:cpu": "node ../../proto/tools/ensure.mjs",
+    "test:cpu": "node --test --test-concurrency=1 test/cpu/*.test.mjs",
     "contract:update": "node test/contract-fixtures.mjs --write",
     "pretypecheck": "node ../../proto/tools/ensure.mjs",
     "typecheck": "tsc --noEmit",

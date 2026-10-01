@@ -458,6 +458,10 @@ jobs:
         run: |
           npm run typecheck
           npm test
+      # Alone and serially: the other workerd suites of `npm test` would share the CPU the meter calibrates.
+      - name: Hold the Ops entrypoint's CPU to its bounds (workerd)
+        working-directory: mail-hero/cloudflare
+        run: npm run test:cpu
       - name: Check, test and build the UI
         working-directory: mail-hero/web
         run: |

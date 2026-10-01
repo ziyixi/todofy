@@ -157,12 +157,18 @@ class Classify(unittest.TestCase):
                 self.assertEqual(push([path], ref=BRANCH), expect(F, F, F, F, F, **LINKS))
 
     def test_task_intent_code_deploys_lab_and_todofy(self):
-        """TASK_INTENT_LIMITS ship in Lab and in Todofy's gateway; the schema only in Lab (its types are generated)."""
-        self.assertEqual(push(["contracts/task-intent-v1/task-intent-v1.ts"]), expect(T, T, T, T, F, **ALL_CHECKED, lab_deploy=T))
+        """TASK_INTENT_LIMITS ship in Lab and in Todofy's gateway; the schema only in Lab (its types are generated).
+        proto/'s tests read the contract, so Proto checks runs too (PROTO_READS)."""
         self.assertEqual(
-            push(["contracts/task-intent-v1/task-intent-v1.schema.json"]), expect(T, T, T, F, F, **ALL_CHECKED, lab_deploy=T)
+            push(["contracts/task-intent-v1/task-intent-v1.ts"]), expect(T, T, T, T, F, **ALL_CHECKED, lab_deploy=T, proto=T)
         )
-        self.assertEqual(push(["contracts/task-intent-v1/fixtures/TaskIntent/minimal.json"]), expect(T, T, T, F, F, **ALL_CHECKED))
+        self.assertEqual(
+            push(["contracts/task-intent-v1/task-intent-v1.schema.json"]),
+            expect(T, T, T, F, F, **ALL_CHECKED, lab_deploy=T, proto=T),
+        )
+        self.assertEqual(
+            push(["contracts/task-intent-v1/fixtures/TaskIntent/minimal.json"]), expect(T, T, T, F, F, **ALL_CHECKED, proto=T)
+        )
 
     def test_contracts_recheck_every_app_but_deploy_none(self):
         paths = ["contracts/mail-received-v1/fixtures/plain_text.json"]
@@ -170,20 +176,36 @@ class Classify(unittest.TestCase):
 
     def test_ops_contract_fixtures_and_docs_recheck_every_app_but_deploy_none(self):
         paths = ["contracts/ops-v1/fixtures/OpsStatus/todofy-ok.json", "contracts/ops-v1/README.md"]
-        self.assertEqual(push(paths), expect(T, T, T, F, F, **ALL_CHECKED))
+        self.assertEqual(push(paths), expect(T, T, T, F, F, **ALL_CHECKED, proto=T))
+
+    def test_a_contract_proto_tests_read_runs_proto_checks(self):
+        """proto/'s tests round-trip every ops-v1 fixture byte for byte through both codecs (and check task-intent-v1's
+        against its schema): a change to those contracts alone runs Proto checks too; another contract does not."""
+        for path in (
+            "contracts/ops-v1/fixtures/invalid/SetGuardInput/new-case.json",
+            "contracts/ops-v1/fixtures/OpsStatus/lab-ok.json",
+            "contracts/ops-v1/ops-v1.schema.json",
+            "contracts/ops-v1/legacy/ops-v1.schema.json",
+            "contracts/task-intent-v1/fixtures/invalid/TaskIntent/new-case.json",
+        ):
+            with self.subTest(path=path):
+                self.assertTrue(push([path])["proto"])
+                self.assertTrue(push([path], ref=BRANCH)["proto"])
+        self.assertFalse(push(["contracts/mail-received-v1/fixtures/plain_text.json"])["proto"])
+        self.assertFalse(push(["contracts/README.md"])["proto"])
 
     def test_validate_mjs_deploys_lab_and_the_generated_ops_schema_deploys_nothing(self):
         """Lab bundles validate.mjs for its task intents; ops-v1's generated schema is a document no Worker bundles (the
         dashboard reads every answer with the generated code)."""
-        self.assertEqual(push(["contracts/ops-v1/ops-v1.schema.json"]), expect(T, T, T, F, F, **ALL_CHECKED))
+        self.assertEqual(push(["contracts/ops-v1/ops-v1.schema.json"]), expect(T, T, T, F, F, **ALL_CHECKED, proto=T))
         self.assertEqual(
             push(["contracts/ops-v1/validate.mjs"]),
-            expect(T, T, T, F, F, dashboard_check=T, **LAB, website_check=T, flowday_check=T, links_check=T),
+            expect(T, T, T, F, F, dashboard_check=T, **LAB, website_check=T, flowday_check=T, links_check=T, proto=T),
         )
 
     def test_contract_code_the_workers_bundle_deploys_every_app_that_bundles_it(self):
         """OPS_LIMITS and friends ship inside all three Workers, so a change must redeploy each."""
-        bundled = expect(T, T, T, T, T, **ALL, website_check=T, flowday_check=T, links_check=T)
+        bundled = expect(T, T, T, T, T, **ALL, website_check=T, flowday_check=T, links_check=T, proto=T)
         self.assertEqual(push(["contracts/ops-v1/ops-v1.ts"]), bundled)
         self.assertEqual(push(["contracts/ops-v1/ops-v1.ts", "todofy/gateway/src/ops.ts"]), bundled)
         self.assertEqual(push(["contracts/ops-v1/ops-v1.ts"], ref=BRANCH), bundled)
@@ -289,6 +311,7 @@ class Classify(unittest.TestCase):
             "proto/tools/profile_breaking.py": none,
             "proto/tools/gen_wire_ts.py": none,
             "proto/tools/gen_schema.py": none,
+            "proto/tools/schema.mjs": none,
             "proto/tools/api-linter/go.mod": none,
             "proto/tools/api-linter/go.sum": none,
             "proto/tsconfig.json": none,
@@ -810,7 +833,7 @@ class ToolsImports(unittest.TestCase):
         for name in (
             "lab/worker/test/runtime/cpu.test.ts",
             "flowday/worker/test/runtime/cpu.test.ts",
-            "mail-hero/cloudflare/test/native-ops-cpu.test.mjs",
+            "mail-hero/cloudflare/test/cpu/native-ops-cpu.test.mjs",
             "dashboard/worker/test/runtime/cpu.test.ts",
             "lab/deploy/bundle-size.mjs",
             "lab/web/scripts/js-budget.mjs",
