@@ -42,18 +42,20 @@
  *   REQUIRED field declared `optional`: "always present, may be null" (ops-v1's SetGuardInput.until), which is
  *   exactly what toWire writes for it.
  * - lenient (a consumer reading an output, e.g. Lab reading a TaskIntentResult): an unknown field is
- *   skipped and an unknown enum name reads as the zero value, so a switch takes its default branch.
+ *   skipped and an unknown enum name reads as the zero value, so a switch takes its default branch; the
+ *   name of a closed enum ((common.wire.v1.closed), ops-v1's states) is refused instead, as on a strict read.
  *   Both are reported in `unrecognized` (field paths only, never values) for logs and metrics. A wrong
  *   type or a missing REQUIRED field still throws: REQUIRED means "always written", so its absence is
  *   a broken producer, not a newer one (proto/tools/profile_breaking.py keeps it that way in CI). null
  *   reads as "no value" only where toWire writes it (a REQUIRED enum, message or scalar with explicit
- *   presence); anywhere else (`"recorded": null`, a list, a map, a field that is omitted when unset) it
- *   is a wrong type. An unrecognized map value is reported as the map's path with `{}` (`decisions{}`):
+ *   presence) and is not non_null ((common.wire.v1.field).non_null); anywhere else (`"recorded": null`, a
+ *   list, a map, a field that is omitted when unset) it is a wrong type. An unrecognized map value is reported as the map's path with `{}` (`decisions{}`):
  *   a map key is data, and paths never carry data.
  *
  * Enum names are matched exactly against a table of the wire names (no case folding: "ſubtasks" is not
- * "subtasks"). Value rules (lengths, ranges, patterns) are not part of the profile: each consumer keeps
- * the value rules of its contract (proto/README.md, Wire JSON profile).
+ * "subtasks"). Value rules (lengths, ranges, patterns) are checked where the contract states them in the IDL
+ * (wire-rules.ts); a contract that does not yet (task-intent-v1) keeps them in its own checks (proto/README.md,
+ * Value rules).
  *
  * Only the field kinds the contracts use are supported: string, bool, 32-bit integers, double, enums,
  * messages, repeated fields, maps with string keys, Timestamp and FieldMask. Anything else (64-bit integers,
@@ -75,7 +77,7 @@ import {
 } from '@bufbuild/protobuf';
 import { reflect, type ReflectMessage } from '@bufbuild/protobuf/reflect';
 import { FieldMaskSchema, timestampDate, timestampFromDate, TimestampSchema, type FieldMask } from '@bufbuild/protobuf/wkt';
-import { method as methodOption } from './common/wire/v1/wire_pb.ts';
+import { closed as closedOption, method as methodOption } from './common/wire/v1/wire_pb.ts';
 import { FieldMaskError, formatFieldMask, parseFieldMask } from './field-mask.ts';
 import { field_behavior, FieldBehavior } from './google/api/field_behavior_pb.ts';
 import { keepsOrder, ruleViolation } from './wire-rules.ts';
@@ -522,12 +524,27 @@ function readMessage(schema: DescMessage, json: unknown, path: string, state: Re
   return message;
 }
 
-/** An enum value: its number, or undefined for a name this build does not know (lenient reads only). */
+const closedEnums = new WeakMap<DescEnum, boolean>();
+
+/** Whether `desc` is closed ((common.wire.v1.closed)): every read refuses a name it does not know. */
+function isClosed(desc: DescEnum): boolean {
+  let value = closedEnums.get(desc);
+  if (value === undefined) {
+    value = getOption(desc, closedOption);
+    closedEnums.set(desc, value);
+  }
+  return value;
+}
+
+/**
+ * An enum value: its number, or undefined for a name this build does not know (lenient reads of an enum that is not
+ * closed only).
+ */
 function readEnum(desc: DescEnum | undefined, value: JsonValue, at: string, strict: boolean, unrecognized: string[]): number | undefined {
   if (typeof value !== 'string') throw new WireJsonError(`${at}: wrong type`);
   const number = enumFromWire(desc, value);
   if (number === undefined) {
-    if (strict) throw new WireJsonError(`${at}: unknown enum value`);
+    if (strict || (desc !== undefined && isClosed(desc))) throw new WireJsonError(`${at}: unknown enum value`);
     unrecognized.push(at);
   }
   return number;

@@ -1,5 +1,6 @@
 // Test fixtures of the wire profile's value rules and binding arguments (common/wire/v1/wire.proto), never used
-// by an app: every rule on one union message, and a binding service with positional and object requests.
+// by an app: every rule on one union message, non_null fields and a closed enum on another, and a binding service
+// with positional and object requests.
 // testdata/wire-profile-cases.json runs the same cases on these descriptors in TypeScript and Python, and
 // test/gen-tools.test.ts checks the generated wire types and JSON Schema of this file.
 
@@ -154,6 +155,39 @@ message Parcel {
   repeated Status next = 12 [(common.wire.v1.field).allowed = "sent"];
   // Free notes by any key, in the order they were set (array-index keys first, as JavaScript orders them).
   map<string, string> notes = 13 [(common.wire.v1.field).keep_order = true];
+}
+
+// A parcel's label: REQUIRED fields that are never null (non_null), whatever a reader knows, and a closed enum.
+message Label {
+  // How urgent (a closed enum: a lenient read refuses a name it does not know).
+  Priority priority = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).non_null = true
+  ];
+  // The parcel's status (an open enum: a newer name reads as unrecognized, a value this build cannot write).
+  Parcel.Status status = 2 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).non_null = true
+  ];
+  // The first line.
+  ParcelLine line = 3 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).non_null = true
+  ];
+  // The priority before a change: REQUIRED without non_null, so null when it has none.
+  Priority previous = 4 [(google.api.field_behavior) = REQUIRED];
+}
+
+// A parcel's priority, closed: its readers branch on every value.
+enum Priority {
+  option (common.wire.v1.closed) = true;
+
+  // Never written.
+  PRIORITY_UNSPECIFIED = 0;
+  // Whenever.
+  PRIORITY_LOW = 1;
+  // Now.
+  PRIORITY_HIGH = 2;
 }
 
 // One line of a parcel.

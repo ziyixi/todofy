@@ -25,6 +25,7 @@ MESSAGES = {
     "prototest.v1.Book": prototest_pb.Book,
     "prototest.v1.BookCard": prototest_pb.BookCard,
     "prototest.v1.Parcel": rules_pb.Parcel,
+    "prototest.v1.Label": rules_pb.Label,
     **{
         f"ops.v1.{name}": getattr(ops_pb, name)
         for name in (

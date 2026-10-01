@@ -8,7 +8,7 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, test } from 'vitest';
 import type { DescMessage } from '@bufbuild/protobuf';
 import { BookCardSchema, BookSchema } from '../ts/prototest/v1/prototest_pb.ts';
-import { ParcelSchema } from '../ts/prototest/v1/rules_pb.ts';
+import { LabelSchema, ParcelSchema } from '../ts/prototest/v1/rules_pb.ts';
 import { TaskIntentRefSchema, TaskIntentResultSchema, TaskIntentSchema } from '../ts/todofy/taskintent/v1/task_intent_pb.ts';
 import { fromWire, toWire, WireJsonError } from '../ts/wire-json.ts';
 import { CASES_FILE } from './fixtures.ts';
@@ -31,6 +31,7 @@ const SCHEMAS = {
   'prototest.v1.Book': BookSchema,
   'prototest.v1.BookCard': BookCardSchema,
   'prototest.v1.Parcel': ParcelSchema,
+  'prototest.v1.Label': LabelSchema,
 } satisfies Record<string, DescMessage>;
 const { cases } = JSON.parse(readFileSync(CASES_FILE, 'utf8')) as { cases: Case[] };
 

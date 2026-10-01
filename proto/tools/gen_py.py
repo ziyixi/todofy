@@ -113,6 +113,8 @@ def rules_literal(rules: wire_rules.FieldRules | None) -> str:
         args.append(f"cases=({''.join(c + ', ' for c in cases)})")
     if rules.otherwise:
         args.append(f"otherwise={json.dumps(rules.otherwise)}")
+    if rules.non_null:
+        args.append("non_null=True")
     return f"Rules({', '.join(args)})"
 
 
@@ -162,6 +164,7 @@ def generate_file(file: dict[str, Any], types: dict[str, tuple[str, str]], enums
     body: list[str] = []
     tables: list[str] = []
     unions: list[str] = []
+    closed: list[str] = []
     runtime = {"Field", "Format"}
 
     def ref(type_name: str, where: str) -> str:
@@ -181,6 +184,8 @@ def generate_file(file: dict[str, Any], types: dict[str, tuple[str, str]], enums
             raise GenerateError(f"{full_name}: the zero value must be *_UNSPECIFIED")
         body.extend(["", "", f"class {python_name}(enum.IntEnum):"])
         body.extend([f'    """{full_name}; wire names are lower case without {prefix}."""', ""])
+        if wire_rules.closed(enum_type):
+            closed.append(python_name)
         for value in values:
             if not value["name"].startswith(prefix):
                 raise GenerateError(f"{full_name}.{value['name']} lacks the prefix {prefix}")
@@ -313,6 +318,11 @@ def generate_file(file: dict[str, Any], types: dict[str, tuple[str, str]], enums
         "UNIONS: dict[type, str] = {",
         *unions,
         "}",
+        "",
+        "# Closed enums ((common.wire.v1.closed)): every read refuses a wire name it does not know.",
+        f"CLOSED: frozenset[type] = frozenset({{{', '.join(closed)}}})"
+        if closed
+        else "CLOSED: frozenset[type] = frozenset()",
         "",
     ]
     return "\n".join(lines)

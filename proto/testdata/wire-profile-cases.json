@@ -2386,6 +2386,214 @@
         "labels": {}
       },
       "unrecognized": []
+    },
+    {
+      "name": "rules: a list item after a dropped unknown enum name is checked at its own index (lenient)",
+      "message": "prototest.v1.Parcel",
+      "strict": false,
+      "input": {
+        "status": "waiting",
+        "code": "box_1",
+        "tracking_id": null,
+        "attempts": 0,
+        "weights": {
+          "base": 1
+        },
+        "next": [
+          "zzz_new",
+          "waiting"
+        ]
+      },
+      "error": true
+    },
+    {
+      "name": "rules: a list item after a dropped unknown enum name keeps its allowed value (lenient)",
+      "message": "prototest.v1.Parcel",
+      "strict": false,
+      "input": {
+        "status": "waiting",
+        "code": "box_1",
+        "tracking_id": null,
+        "attempts": 0,
+        "weights": {
+          "base": 1
+        },
+        "next": [
+          "zzz_new",
+          "sent"
+        ]
+      },
+      "wire": {
+        "status": "waiting",
+        "code": "box_1",
+        "tracking_id": null,
+        "attempts": 0,
+        "weights": {
+          "base": 1
+        },
+        "next": [
+          "sent"
+        ]
+      },
+      "unrecognized": [
+        "next[0]"
+      ]
+    },
+    {
+      "name": "rules: dropped unknown enum names around a kept item (lenient)",
+      "message": "prototest.v1.Parcel",
+      "strict": false,
+      "input": {
+        "status": "waiting",
+        "code": "box_1",
+        "tracking_id": null,
+        "attempts": 0,
+        "weights": {
+          "base": 1
+        },
+        "next": [
+          "sent",
+          "zzz_a",
+          "zzz_b",
+          "waiting"
+        ]
+      },
+      "error": true
+    },
+    {
+      "name": "rules: non_null fields with values, and a REQUIRED enum without non_null as null (lenient)",
+      "message": "prototest.v1.Label",
+      "strict": false,
+      "input": {
+        "priority": "high",
+        "status": "sent",
+        "line": {
+          "sku": "pen",
+          "quantity": 2
+        },
+        "previous": null
+      },
+      "wire": {
+        "priority": "high",
+        "status": "sent",
+        "line": {
+          "sku": "pen",
+          "quantity": 2
+        },
+        "previous": null
+      },
+      "unrecognized": []
+    },
+    {
+      "name": "rules: non_null refuses a null enum on a lenient read",
+      "message": "prototest.v1.Label",
+      "strict": false,
+      "input": {
+        "priority": null,
+        "status": "sent",
+        "line": {
+          "sku": "pen",
+          "quantity": 2
+        },
+        "previous": null
+      },
+      "error": true
+    },
+    {
+      "name": "rules: non_null refuses a null open enum on a lenient read",
+      "message": "prototest.v1.Label",
+      "strict": false,
+      "input": {
+        "priority": "high",
+        "status": null,
+        "line": {
+          "sku": "pen",
+          "quantity": 2
+        },
+        "previous": null
+      },
+      "error": true
+    },
+    {
+      "name": "rules: non_null refuses a null message on a lenient read",
+      "message": "prototest.v1.Label",
+      "strict": false,
+      "input": {
+        "priority": "high",
+        "status": "sent",
+        "line": null,
+        "previous": null
+      },
+      "error": true
+    },
+    {
+      "name": "rules: non_null refuses null on a strict read",
+      "message": "prototest.v1.Label",
+      "strict": true,
+      "input": {
+        "priority": null,
+        "status": "sent",
+        "line": {
+          "sku": "pen",
+          "quantity": 2
+        },
+        "previous": null
+      },
+      "error": true
+    },
+    {
+      "name": "rules: a closed enum refuses a name it does not know on a lenient read",
+      "message": "prototest.v1.Label",
+      "strict": false,
+      "input": {
+        "priority": "urgent",
+        "status": "sent",
+        "line": {
+          "sku": "pen",
+          "quantity": 2
+        },
+        "previous": null
+      },
+      "error": true
+    },
+    {
+      "name": "rules: a closed enum refuses a name it does not know where null would do (lenient)",
+      "message": "prototest.v1.Label",
+      "strict": false,
+      "input": {
+        "priority": "high",
+        "status": "sent",
+        "line": {
+          "sku": "pen",
+          "quantity": 2
+        },
+        "previous": "urgent"
+      },
+      "error": true
+    },
+    {
+      "name": "rules: a REQUIRED enum without non_null keeps its value",
+      "message": "prototest.v1.Label",
+      "strict": false,
+      "input": {
+        "priority": "high",
+        "status": "sent",
+        "line": {
+          "sku": "pen",
+          "quantity": 2
+        },
+        "previous": "low"
+      },
+      "wire": {
+        "priority": "high",
+        "status": "sent",
+        "line": {
+          "sku": "pen",
+          "quantity": 2
+        },
+        "previous": "low"
+      },
+      "unrecognized": []
     }
   ]
 }

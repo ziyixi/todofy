@@ -11,7 +11,9 @@ tables), uses only the standard library and therefore runs on Pyodide unchanged.
   ensure_ascii=False)`` gives today's compact bytes.
 - ``strict`` (inputs): unknown fields, unknown enum names, null, wrong types and missing REQUIRED fields
   raise ``WireJsonError``. Lenient (outputs): unknown fields are skipped and unknown enum names read as
-  the zero value; both are reported as field paths in ``unrecognized`` (never values). A wrong type or
+  the zero value; both are reported as field paths in ``unrecognized`` (never values). The name of a closed
+  enum (``(common.wire.v1.closed)``, the generated ``CLOSED`` table: ops-v1's states) is refused on a
+  lenient read too. A wrong type or
   a missing REQUIRED field raises in both modes (REQUIRED means "always written"). null reads as "no
   value" only where ``to_wire`` writes it (a REQUIRED enum, message or optional scalar); anywhere else
   (``"recorded": null``, a list, a field that is omitted when unset) it is a wrong type.
@@ -45,8 +47,9 @@ tables), uses only the standard library and therefore runs on Pyodide unchanged.
   every message read or written, as proto/ts/wire-rules.ts checks them: the first rule broken raises
   ``WireJsonError`` with a path and the rule's name, never the value. A union (``UNIONS``: a message's
   discriminator) checks a field's cases only when the reader knows the discriminator's value; an enum value a
-  lenient read did not know has a value but none to compare; ``open`` lets a lenient read accept a value
-  outside ``allowed``.
+  lenient read did not know has a value but none to compare (a list item dropped for that reason keeps its
+  index, so the next item is checked where it was on the wire); ``open`` lets a lenient read accept a value
+  outside ``allowed``; ``non_null`` refuses a REQUIRED enum or message field without a value, in every case.
 """
 
 import datetime
@@ -108,6 +111,7 @@ class Rules(NamedTuple):
     keep_order: bool = False
     cases: tuple[Case, ...] = ()
     otherwise: str = ""
+    non_null: bool = False
 
 
 NO_RULES = Rules()
@@ -130,6 +134,11 @@ class Field(NamedTuple):
 
 def _fields(cls: type) -> tuple[Field, ...]:
     return sys.modules[cls.__module__].FIELDS[cls]
+
+
+def _closed(cls: type) -> bool:
+    """Whether a generated enum is closed (its module's ``CLOSED`` table): a read refuses any name it does not know."""
+    return cls in sys.modules[cls.__module__].CLOSED
 
 
 def _union(cls: type) -> str | None:
@@ -404,7 +413,7 @@ def _value_in(kind: str, ref: Any, item: Any, at: str, strict: bool, unrecognize
                 raise WireJsonError(f"{at}: wrong type")
             member = _enum_in(ref, item)
             if member is None:
-                if strict:
+                if strict or _closed(ref):
                     raise WireJsonError(f"{at}: unknown enum value")
                 unrecognized.append(at)
             return member
@@ -466,6 +475,8 @@ def _field_violation(
     active = None if variant is None else next((case for case in rules.cases if variant in case.when), None)
     presence = "" if variant is None else (active.presence if active is not None else rules.otherwise)
     has = _has_value(value, field, at, unrecognized)
+    if rules.non_null and not has:
+        return f"{at}: required"
     if presence == "required" and not has:
         return f"{at}: required when the discriminator is {variant}"
     if presence == "absent" and has:
@@ -492,10 +503,16 @@ def _field_violation(
             return f"{at}: more than {rules.max_items} items"
         if rules.unique and len(set(value)) != len(value):
             return f"{at}: items are not unique"
-        for i, item in enumerate(value):
+        i = 0
+        for item in value:
+            # A lenient read drops an enum item whose name it did not know (listed as ``<path>[<index>]``): the kept
+            # items keep their own indexes, so each is checked, and reported, where it was on the wire.
+            while f"{at}[{i}]" in unrecognized:
+                i += 1
             violation = _item_violation(field.kind, item, f"{at}[{i}]", rules, extra, lenient, unrecognized)
             if violation is not None:
                 return violation
+            i += 1
         return None
     return _item_violation(field.kind, value, at, rules, extra, lenient, unrecognized)
 

@@ -6,7 +6,16 @@
  */
 import { create } from '@bufbuild/protobuf';
 import { describe, expect, test } from 'vitest';
-import { file_prototest_v1_rules, Parcel_Status, ParcelSchema, ParcelService, TrackRequestSchema } from '../ts/prototest/v1/rules_pb.ts';
+import {
+  file_prototest_v1_rules,
+  LabelSchema,
+  Parcel_Status,
+  ParcelLineSchema,
+  ParcelSchema,
+  ParcelService,
+  Priority,
+  TrackRequestSchema,
+} from '../ts/prototest/v1/rules_pb.ts';
 import { fieldRules, formatMatches, fromWire, fromWireArguments, toWire, toWireArguments, WireJsonError } from '../ts/wire-json.ts';
 
 const sent = {
@@ -55,6 +64,54 @@ describe('a write checks the rules', () => {
     expect(toWire(ParcelSchema, read.message, { lenient: true }).reason).toBe('burnt');
     expect(() => toWire(ParcelSchema, read.message)).toThrow(WireJsonError);
     expect(() => toWire(ParcelSchema, create(ParcelSchema, { ...read.message, reason: 'Burnt' }), { lenient: true })).toThrow(WireJsonError);
+  });
+});
+
+describe('non_null fields and closed enums', () => {
+  const label = { priority: Priority.HIGH, status: Parcel_Status.SENT, line: create(ParcelLineSchema, { sku: 'pen', quantity: 2 }) };
+  const waiting = { status: 'waiting', code: 'box_1', tracking_id: null, attempts: 0, weights: { base: 1 } };
+
+  test('a write refuses a non_null field without a value, a lenient one too', () => {
+    expect(toWire(LabelSchema, create(LabelSchema, label))).toEqual({ priority: 'high', status: 'sent', line: { sku: 'pen', quantity: 2 }, previous: null });
+    for (const [change, error] of [
+      [{ priority: Priority.UNSPECIFIED }, 'priority: required'],
+      [{ status: Parcel_Status.UNSPECIFIED }, 'status: required'],
+      [{ line: undefined }, 'line: required'],
+    ] as const) {
+      const message = create(LabelSchema, { ...label, ...change });
+      expect(() => toWire(LabelSchema, message), error).toThrow(new WireJsonError(error));
+      expect(() => toWire(LabelSchema, message, { lenient: true }), error).toThrow(new WireJsonError(error));
+    }
+  });
+
+  test('a lenient read refuses null where non_null, and names the path', () => {
+    const wire = toWire(LabelSchema, create(LabelSchema, label));
+    for (const name of ['priority', 'status', 'line']) {
+      expect(() => fromWire(LabelSchema, { ...wire, [name]: null }), name).toThrow(new WireJsonError(`${name}: required`));
+    }
+  });
+
+  test('a newer name of an open non_null enum is read, but cannot be passed on', () => {
+    // The value is a value (non_null holds on the read); this build cannot write it, so passing it on is refused rather
+    // than turned into null. A contract whose consumers pass messages on closes such an enum instead.
+    const read = fromWire(LabelSchema, { ...toWire(LabelSchema, create(LabelSchema, label)), status: 'returned' });
+    expect(read.unrecognized).toEqual(['status']);
+    expect(() => toWire(LabelSchema, read.message, { lenient: true })).toThrow(new WireJsonError('status: required'));
+  });
+
+  test('a closed enum refuses an unknown name on every read', () => {
+    for (const strict of [false, true]) {
+      expect(() => fromWire(LabelSchema, { ...toWire(LabelSchema, create(LabelSchema, label)), priority: 'urgent' }, { strict })).toThrow(
+        new WireJsonError('priority: unknown enum value'),
+      );
+    }
+  });
+
+  test('a list item after a dropped enum name is checked at its own index', () => {
+    expect(() => fromWire(ParcelSchema, { ...waiting, next: ['zzz_new', 'waiting'] })).toThrow(new WireJsonError('next[1]: not an allowed value'));
+    expect(() => fromWire(ParcelSchema, { ...waiting, next: ['sent', 'zzz_a', 'zzz_b', 'waiting'] })).toThrow(new WireJsonError('next[3]: not an allowed value'));
+    const read = fromWire(ParcelSchema, { ...waiting, next: ['zzz_new', 'sent'] });
+    expect([read.message.next, read.unrecognized]).toEqual([[Parcel_Status.SENT], ['next[0]']]);
   });
 });
 

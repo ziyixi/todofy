@@ -10,9 +10,9 @@ producer of the contract writes, as types (no runtime code, so importing it cost
 
 - each enum as the union of its wire names (``'info' | 'warning' | 'critical'``, the zero value never written);
 - each message as an interface of its wire fields: snake_case names in field-number order, a REQUIRED field always
-  there (``| null`` when it is declared ``optional``), any other field optional, a closed ``allowed`` list as a union
-  of literals (an ``open`` one is a string: a consumer keeps a newer code as read), maps as records (with their
-  required keys), lists as readonly arrays;
+  there (``| null`` where a producer may write null: ``wire_rules.may_be_null``), any other field optional, a closed
+  ``allowed`` list as a union of literals (an ``open`` one is a string: a consumer keeps a newer code as read), maps as
+  records (with their required keys), lists as readonly arrays;
 - each union (``(common.wire.v1.message).discriminator``) as the union of its variants, one per discriminator value
   (variants of the same shape share one member), with the fields each variant has and without the ones it never has,
   so ``if (d.state === 'delivered') d.delivered_at`` is a string;
@@ -100,10 +100,9 @@ class FileWriter:
         rules = view.rules
         open_list = bool(rules and rules.open)
         required = wire_rules.required(field)
-        # A REQUIRED field is always written, as null when it has no value. Only a field declared `optional` lacks
-        # one on purpose: these contracts' producers always set a REQUIRED message or enum, and a list or a map is
-        # never null.
-        nullable = bool(field.get("proto3Optional"))
+        # A REQUIRED field is always written, as null when it has no value: one declared `optional`, or an enum or
+        # message without non_null (the codecs refuse null for a non_null one); a list or a map is never null.
+        nullable = wire_rules.may_be_null(field, rules)
         if view.map_entry is not None:
             value = self.value_type(view.map_entry["field"][1], None, False, where)
             record = f"Readonly<Record<string, {value}>>"

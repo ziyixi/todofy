@@ -2,7 +2,8 @@
 //
 // A contract states its value rules here, next to its fields, once: which strings are codes, timestamps or
 // URLs, which values an enum-like string may take, number bounds, list and map sizes, and which fields a
-// message has for each value of its discriminator (a union such as ops.v1.CanaryDelivery). Both codecs
+// message has for each value of its discriminator (a union such as ops.v1.CanaryDelivery), which REQUIRED
+// fields are never null, and which enums are closed (their consumers branch on every value). Both codecs
 // (proto/ts/wire-json.ts and proto/python/src/ziyixi_proto/wire_json.py) check them on every read and every
 // write, so neither a producer bug nor a consumer's input reaches the other side unchecked, and
 // proto/tools/gen_schema.py turns them into the contract's JSON Schema. Two annotations are wire choices
@@ -39,6 +40,17 @@ extend google.protobuf.MessageOptions {
 extend google.protobuf.FieldOptions {
   // Every rule is optional; an unset one checks nothing.
   Field field = 51001;
+}
+
+// Whether a consumer may meet values of an enum it does not know.
+extend google.protobuf.EnumOptions {
+  // The consumers branch on every value of this enum (ops-v1's states, severities, health and levels), so the
+  // values are fixed for the contract's major version: a read refuses an unknown wire name, a lenient one too
+  // (it does not read as the zero value), and proto/tools/profile_breaking.py refuses a new value
+  // (PROFILE_ENUM_CLOSED: it is a new major version). Unset (the default), adding a value is compatible and a
+  // lenient read takes an unknown name as the zero value, listed in `unrecognized` (proto/README.md, rule 5).
+  // Not protobuf's own "closed enum" (proto2): this is about wire names, never about numbers.
+  bool closed = 51001;
 }
 
 // How a Workers service binding (not gRPC, not HTTP) carries a method's request.
@@ -101,6 +113,11 @@ message Field {
   repeated Case cases = 11;
   // The presence where no case names the discriminator's value.
   Presence otherwise = 12;
+  // A REQUIRED enum or message field always has a value: null (an enum at its zero value, an unset message)
+  // is refused on every read and write, a lenient read included. Without it the profile writes such a field
+  // as null when it has none (task-intent-v1's error_code). A field that may be null is declared `optional`
+  // or left without non_null; the JSON Schema generator reads the same rule (proto/tools/gen_schema.py).
+  bool non_null = 13;
 }
 
 // The rules of a field for some values of its message's discriminator.
@@ -109,8 +126,18 @@ message Case {
   repeated string when = 1;
   // Whether the field has a value in this case.
   Presence presence = 2;
-  // Rules that apply in this case, in addition to the field's own (only allowed, minimum and maximum).
-  Field rules = 3;
+  // Rules that apply in this case, in addition to the field's own.
+  CaseRules rules = 3;
+}
+
+// The rules a case adds to a field's own: the only ones that may differ by the discriminator's value.
+message CaseRules {
+  // The only values the field may take in this case (a string or an enum; an enum by its wire name).
+  repeated string allowed = 1;
+  // The smallest value of a number in this case, inclusive.
+  optional double minimum = 2;
+  // The largest value of a number in this case, inclusive.
+  optional double maximum = 3;
 }
 
 // How a service binding passes a method's request.
@@ -122,7 +149,8 @@ message Method {
 }
 
 // Whether a field has a value: set, for an `optional` scalar or a message; a value other than the zero
-// value, for an enum. A REQUIRED field without a value is written as null (the profile's REQUIRED).
+// value, for an enum. A REQUIRED field without a value is written as null (the profile's REQUIRED), unless
+// it is non_null (Field.non_null), in every case.
 enum Presence {
   // No presence rule.
   PRESENCE_UNSPECIFIED = 0;

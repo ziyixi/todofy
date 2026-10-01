@@ -9,7 +9,10 @@
  * - A union (Message.discriminator) checks a field's cases only when the reader knows the discriminator's
  *   value: a lenient read of a newer producer's value (read as the zero value, listed in `unrecognized`) checks
  *   the fields' own rules and no case.
- * - An enum field whose wire name the reader did not know (lenient only) has a value, but none to check.
+ * - An enum field whose wire name the reader did not know (lenient only) has a value, but none to check. A list item
+ *   the read dropped for that reason keeps its index: the next item is checked as `<path>[<its own index>]`.
+ * - Field.non_null: a REQUIRED enum or message field always has a value, whatever the discriminator (null is refused
+ *   on every read and write).
  * - Field.open lets a lenient read (a consumer) accept a value outside `allowed`: the list is what producers of
  *   this build write; writes and strict reads keep to it.
  *
@@ -19,7 +22,7 @@
  */
 import { getOption, hasOption, ScalarType, type DescEnum, type DescField, type DescFile, type DescMessage } from '@bufbuild/protobuf';
 import type { ReflectMessage } from '@bufbuild/protobuf/reflect';
-import { field as fieldOption, formats as formatsOption, message as messageOption, Presence, type Field } from './common/wire/v1/wire_pb.ts';
+import { field as fieldOption, formats as formatsOption, message as messageOption, Presence, type CaseRules, type Field } from './common/wire/v1/wire_pb.ts';
 import { field_behavior, FieldBehavior } from './google/api/field_behavior_pb.ts';
 
 /** FeatureSet.FieldPresence.IMPLICIT: a proto3 scalar without `optional` (its default value is "unset"). */
@@ -52,6 +55,7 @@ interface Compiled extends Bounds {
   readonly keepOrder: boolean;
   readonly cases: readonly CompiledCase[];
   readonly otherwise: Presence;
+  readonly nonNull: boolean;
 }
 
 const NONE: Compiled = {
@@ -67,6 +71,7 @@ const NONE: Compiled = {
   keepOrder: false,
   cases: [],
   otherwise: Presence.UNSPECIFIED,
+  nonNull: false,
 };
 
 const compiledFields = new WeakMap<DescField, Compiled>();
@@ -113,7 +118,7 @@ function formatNamed(field: DescField, name: string): Format | null {
   return format;
 }
 
-function bounds(rules: Field | undefined): Bounds {
+function bounds(rules: Field | CaseRules | undefined): Bounds {
   return {
     allowed: rules !== undefined && rules.allowed.length > 0 ? new Set(rules.allowed) : null,
     minimum: rules?.minimum,
@@ -138,6 +143,7 @@ function compiled(field: DescField): Compiled {
             keepOrder: option.keepOrder,
             cases: option.cases.map((c) => ({ ...bounds(c.rules), when: new Set(c.when), presence: c.presence })),
             otherwise: option.otherwise,
+            nonNull: option.nonNull,
           };
     compiledFields.set(field, rules);
   }
@@ -239,6 +245,7 @@ function checkField(r: ReflectMessage, field: DescField, at: string, variant: st
   const active = variant === undefined ? undefined : rules.cases.find((c) => c.when.has(variant));
   const presence = variant === undefined ? Presence.UNSPECIFIED : (active?.presence ?? rules.otherwise);
   const has = hasValue(r, field, at, context);
+  if (rules.nonNull && !has) return `${at}: required`;
   if (presence === Presence.REQUIRED && !has) return `${at}: required when the discriminator is ${variant ?? ''}`;
   if (presence === Presence.ABSENT && has) return `${at}: not allowed when the discriminator is ${variant ?? ''}`;
   if (!has) return null;
@@ -259,6 +266,9 @@ function checkField(r: ReflectMessage, field: DescField, at: string, variant: st
       const seen = new Set<unknown>();
       let i = 0;
       for (const item of list) {
+        // A lenient read drops an enum item whose name it did not know (listed as `<path>[<index>]`): the kept items
+        // keep their own indexes, so each is checked, and reported, where it was on the wire.
+        while (context.unrecognized.has(`${at}[${String(i)}]`)) i++;
         const itemAt = `${at}[${String(i++)}]`;
         if (rules.unique) {
           if (seen.has(item)) return `${at}: items are not unique`;
@@ -267,7 +277,7 @@ function checkField(r: ReflectMessage, field: DescField, at: string, variant: st
         let violation: string | null = null;
         if (field.listKind === 'message') violation = checkMessage(item as ReflectMessage, itemAt, context);
         else if (field.listKind === 'enum') {
-          const name = context.unrecognized.has(itemAt) ? undefined : wireName(field.enum, item as number);
+          const name = wireName(field.enum, item as number);
           if (name !== undefined) violation = checkAllowed(name, itemAt, rules, extra, context);
         } else violation = checkScalar(field.scalar, item, itemAt, rules, extra, context);
         if (violation !== null) return violation;

@@ -3,7 +3,9 @@
 gen_py.py (the Python field tables), gen_wire_ts.py (the TypeScript wire types) and gen_schema.py (a contract's
 JSON Schema) read the rules through this module, and ``check_image`` refuses a rule that cannot mean anything
 (an unknown format, ``allowed`` on a number, a case on a field without presence, a case value the
-discriminator does not have), so a mistake stops generation instead of reaching a codec. The codecs read the
+discriminator does not have, ``non_null`` on a field that may be null by declaration), so a mistake stops
+generation instead of reaching a codec. ``may_be_null`` is the one definition of which fields a producer may
+write as null, for the codecs' twins here (the TypeScript types, the JSON Schema). The codecs read the
 same options at run time (proto/ts/wire-rules.ts from the descriptors, wire_json.py from gen_py's tables).
 
 Standard library only; runs on Python 3.9 (a developer's system python3), like gen_py.py.
@@ -18,6 +20,7 @@ from typing import Any
 FILE_OPTION = "[common.wire.v1.formats]"
 MESSAGE_OPTION = "[common.wire.v1.message]"
 FIELD_OPTION = "[common.wire.v1.field]"
+ENUM_OPTION = "[common.wire.v1.closed]"
 METHOD_OPTION = "[common.wire.v1.method]"
 REQUIRED_OPTION = "[google.api.field_behavior]"
 PRESENCE = {
@@ -71,6 +74,7 @@ class FieldRules:
     keep_order: bool
     cases: tuple[Case, ...]
     otherwise: str
+    non_null: bool
 
 
 def enum_prefix(name: str) -> str:
@@ -154,6 +158,25 @@ def required(field: dict[str, Any]) -> bool:
     return "REQUIRED" in field.get("options", {}).get(REQUIRED_OPTION, [])
 
 
+def closed(enum: dict[str, Any]) -> bool:
+    """Whether an enum is closed (``(common.wire.v1.closed)``): a read refuses a wire name it does not know."""
+    return bool(enum.get("options", {}).get(ENUM_OPTION, False))
+
+
+def may_be_null(field: dict[str, Any], rules: FieldRules | None) -> bool:
+    """Whether a producer may write ``field`` as null: a REQUIRED singular field that can lack a value (declared
+    ``optional``, an enum or a message) and is not ``non_null``. The codecs' rule (wire-json.ts ``nullable`` and the
+    rule checkers' ``non_null``), read once here for the generators."""
+    if not required(field) or field["label"] == "LABEL_REPEATED":
+        return False
+    if field.get("proto3Optional"):
+        return True
+    return field["type"] in ("TYPE_ENUM", "TYPE_MESSAGE") and not (rules is not None and rules.non_null)
+
+
+CASE_RULES = ("allowed", "minimum", "maximum")
+
+
 def _bounds(raw: dict[str, Any]) -> Bounds:
     allowed = tuple(raw["allowed"]) if raw.get("allowed") else None
     minimum = float(raw["minimum"]) if "minimum" in raw else None
@@ -225,7 +248,13 @@ def field_rules(
             for case in raw.get("cases", [])
         ),
         otherwise=PRESENCE[raw.get("otherwise", "PRESENCE_UNSPECIFIED")],
+        non_null=bool(raw.get("nonNull", False)),
     )
+    for case in raw.get("cases", []):
+        # common.wire.v1.CaseRules has only these; an image edited by hand (or by an older wire.proto) could say more.
+        extra = set(case.get("rules", {})) - set(CASE_RULES)
+        if extra:
+            raise RuleError(f"{where}: a case's rules hold only allowed, minimum and maximum, not {sorted(extra)}")
     if rules.format is not None and (value_type != "TYPE_STRING" or shape == "map"):
         raise RuleError(f"{where}: format applies to a string field (key_format to a map's keys)")
     check_bounds(rules.bounds, "")
@@ -257,6 +286,16 @@ def field_rules(
         )
         if presences and not has_presence:
             raise RuleError(f"{where}: a presence rule needs a field that can lack a value (optional, enum, message)")
+    if rules.non_null:
+        if not (
+            required(field)
+            and shape == "single"
+            and value_type in ("TYPE_ENUM", "TYPE_MESSAGE")
+            and not field.get("proto3Optional")
+        ):
+            raise RuleError(f"{where}: non_null applies to a REQUIRED enum or message field not declared optional")
+        if "absent" in [case.presence for case in rules.cases] + [rules.otherwise]:
+            raise RuleError(f"{where}: a non_null field cannot be absent in a case")
     return rules
 
 
