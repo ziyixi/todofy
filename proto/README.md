@@ -355,20 +355,24 @@ one (a proxy page, an expired Access session).
 
 **Cost** (measured 2026-10-01 on Lab, `lab/worker/test/runtime/cpu.test.ts`: a sampled DevTools CPU profile of
 the workerd isolate around each request, LabState included; noisy at 0.1 ms resolution, medians of 10 warm
-runs, three runs each). Warm requests: a 20-card deck 0.9 → 1.1 ms, a full page of 50 likes 1.0-1.25 →
-1.4-1.6 ms, a decide plus an undo 2.6-3.0 → 2.6-3.3 ms (the transcoder's decode, the map to messages and
-`toWire` are a few tenths of a millisecond). The isolate's first API request (a deck) 1.9 → 3.9 ms, from
-running the new code paths once; the route table itself is built when the Worker's global scope constructs
-the transcoder (about 2 ms in a fresh Node process), outside any request. Bundles: Lab's Worker 329.2 →
-405.7 KiB (gzip 77.8 → 101.3 KiB, wrangler's dry run), its UI's JavaScript 327.7 → 442.6 kB (gzip
-103.6 → 139.3 kB): the protobuf-es runtime in the UI and the embedded descriptors of `lab.ui.v1` and
-`google/api`. The AIP fixes after review (update masks, page tokens, the filter subset, the shared errors;
-same method, three runs each) moved them to 419.3 KiB (gzip 105.0) and 445.5 kB (gzip 140.3), and the CPU
-not measurably: a full page of 50 likes stays at a 1.55-1.57 ms median, one filtered by three literals
-(three LIKE patterns) 1.41 ms, the next page through its token 0.8-0.95 ms, a decide plus an undo
-2.6-3.2 → 3.0-3.3 ms, the isolate's first API request 3.9-4.1 → 3.8-4.0 ms. Lab holds both bundles to a
-budget (`lab/deploy/bundle-size.mjs`: 128 KiB gzip for the Worker; `lab/web/scripts/js-budget.mjs`: 160 KiB
-gzip for the UI's JavaScript).
+runs, three runs each, on the reference machine of `tools/workerd-cpu`). Warm requests: a 20-card deck 0.9 →
+1.1 ms, a full page of 50 likes 1.0-1.25 → 1.4-1.6 ms, a decide plus an undo 2.6-3.0 → 2.6-3.3 ms (the
+transcoder's decode, the map to messages and `toWire` are a few tenths of a millisecond). The isolate's first
+API request (a deck) 1.9 → 3.9 ms, from running the new code paths once; the route table itself is built when
+the Worker's global scope constructs the transcoder (about 2 ms in a fresh Node process), outside any request.
+Bundles: Lab's Worker 329.2 → 405.7 KiB (gzip 77.8 → 101.3 KiB, wrangler's dry run), its UI's JavaScript
+327.7 → 442.6 kB (gzip 103.6 → 139.3 kB): the protobuf-es runtime in the UI and the embedded descriptors of
+`lab.ui.v1` and `google/api`. The AIP fixes after review (update masks, page tokens, the filter subset, the
+shared errors; same method, three runs each) moved them to 419.3 KiB (gzip 105.0) and 445.5 kB (gzip 140.3),
+and the CPU not measurably: a full page of 50 likes stays at a 1.55-1.57 ms median, one filtered by three
+literals (three LIKE patterns) 1.41 ms, the next page through its token 0.8-0.95 ms, a decide plus an undo
+2.6-3.2 → 3.0-3.3 ms, the isolate's first API request 3.9-4.1 → 3.8-4.0 ms. So an app that adopts the runtime
+should expect about 27 KiB more gzip in its Worker, 36 KiB more in its UI and about 2 ms more CPU on an
+isolate's first API request. Lab's CI holds these numbers: its CPU test bounds the isolate's first API request
+(and every request's first run) below 7 ms and every warm median below 3 ms, in milliseconds of the reference
+machine scaled by the measured speed of the machine running it (`tools/workerd-cpu`), and its bundles are held
+to budgets (`tools/bundle-size`: `lab/deploy/bundle-size.mjs`, 128 KiB gzip for the Worker;
+`lab/web/scripts/js-budget.mjs`, 160 KiB gzip for the UI's JavaScript).
 
 **Adding a UI API.**
 
@@ -384,6 +388,10 @@ gzip for the UI's JavaScript).
    release as `additional_bindings` (when the old request and answer shapes still decode) or answer them
    with a "reload" error in the old envelope (what Lab did, `lab/worker/src/http.ts`); remove that after
    one release.
+5. Budget what the runtime costs ([Cost](#http-apis)), as Lab does: the Worker's and the UI's bundles against
+   budgets with `tools/bundle-size` (a ratchet of about 1.2 times the measured size, raised only on purpose), and
+   the heaviest requests' CPU, the isolate's first API request included, with `tools/workerd-cpu` (bounds in
+   milliseconds of its reference machine, scaled by the calibration).
 
 Python: a Python Worker's transcoder will implement the same behaviour and run `testdata/http-cases.json`;
 the profile's Python twin already supports every kind these APIs use.

@@ -53,7 +53,7 @@ npm run dev                            # http://127.0.0.1:8789, local D1, loopba
 | Where | Command | Use |
 | --- | --- | --- |
 | `worker/` | `npm run lint`, `npm run typecheck`, `npm test` | ESLint (strict, type-checked), tsc, Node unit tests |
-| `worker/` | `npm run test:runtime` | workerd with real D1: schema, stores, API, Access/CSRF/PWA, sync, the write budget, CPU |
+| `worker/` | `npm run test:runtime` | workerd with real D1: schema, stores, API, Access/CSRF/PWA, sync, the write budget, CPU (calibrated to the machine by the shared `tools/workerd-cpu`) |
 | `web/` | `npm run lint`, `npm run typecheck`, `npm test`, `npm run test:imports` | ESLint (no `fetch` outside `lib/client/http.ts`), tsc, Vitest, the import audit |
 | `web/` | `npm run build`, `npm run check:export` | The static export, then: no test code, manifest with credentials, PWA files present |
 | `web/` | `npm run test:ui` | Playwright (`desktop` and `portrait`) against `wrangler dev` with an `E2E_TEST_MODE=1` export and a fresh local D1 (`scripts/e2e-server.mjs`) |

@@ -66,9 +66,10 @@ a skipped check job only together with checks_reused; the gate passes and prints
 the same tree and the same ci.yml, and no check job uses a secret, so the branch run's verdict holds
 (test_wrangler_configs.py: no job before the deploys reads a secret, has an environment or deploys for real).
 Anything else (no such run, a check it did not run, an API error, workflow_dispatch) runs the checks.
-tools/ (CI tooling such as the deploy hostname guard) counts as .github/: every app is re-checked, none
-deployed. The exception is tools/infra-plan-summary/, which belongs to infra/: it runs only Infra checks,
-as infra/ does (and .github/ does too); the other tools/ do not run them.
+tools/ (CI, test and build tooling: the deploy hostname guard, and the bundle budgets and CPU meter that the
+apps' build scripts and tests import, which no bundle carries: test_ci_changes.py ToolsImports) counts as
+.github/: every app is re-checked, none deployed. The exception is tools/infra-plan-summary/, which belongs to
+infra/: it runs only Infra checks, as infra/ does (and .github/ does too); the other tools/ do not run them.
 workflow_dispatch: the "app" input checks and deploys that app ("both" = Todofy and Mail Hero, as
 before; "all" = every app; or one app; "website" = the site and its relay), and the contracts and
 shared packages are checked too. The website uses no contract and no package, so a website-only
@@ -278,7 +279,8 @@ def classify(paths: Iterable[str]) -> dict[str, bool]:
     documented: set[str] = set()
     for name in package_names:
         (apps if name in compiled else documented).update(PACKAGE_USERS.get(name, APPS))
-    # tools/ is CI tooling (the deploy hostname guard tools/cf-guard): like .github/, it re-checks every app.
+    # tools/ is CI, test and build tooling (tools/cf-guard, tools/bundle-size, tools/workerd-cpu): like .github/, it
+    # re-checks every app and deploys none.
     # tools/infra-plan-summary/ belongs to infra/ and runs only Infra checks.
     ci = any(path.startswith((".github/", "tools/")) and not path.startswith(INFRA) for path in paths)
     shared = ci or any(path.startswith("contracts/") for path in paths)

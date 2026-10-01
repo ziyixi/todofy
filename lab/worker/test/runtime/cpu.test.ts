@@ -1,31 +1,45 @@
 /**
  * CPU of the heaviest owner API requests inside workerd, against Workers Free's 10 ms per request
- * (docs/design.md §1). workerd's DevTools inspector records a sampled CPU profile of the isolate around each
- * request; the CPU time is the sum of the sampled intervals that are not idle (D1 and service-binding I/O run
- * outside the isolate and are not counted, as on Cloudflare). LabState runs in the same isolate here, so a
- * mutation's number includes the object's share, which Cloudflare meters separately: an upper bound for the
- * fetch handler. This is an estimate on the test machine, not Cloudflare's meter. Each request runs several
- * times; the first includes the isolate's warm-up of that code path and is reported separately.
+ * (docs/design.md §1), measured and calibrated by the shared meter (tools/workerd-cpu/workerd-cpu.mts): a sampled CPU
+ * profile of the Worker's isolate around each request, and the machine's speed from a fixed workload run in the same
+ * isolate. LabState runs in the same isolate here, so a mutation's number includes the object's share, which
+ * Cloudflare meters separately: an upper bound for the fetch handler.
+ *
+ * The bounds are milliseconds of the reference machine (an Apple M1 Max), multiplied by the machine's speed (never
+ * below 1); a machine slower than MAX_SPEED fails the test. What they guard is the cost of lab.ui.v1's shared HTTP
+ * runtime (proto/ts: the transcoder, the wire JSON codec, the protobuf-es runtime) before other apps adopt it
+ * (proto/README.md "Cost"):
+ *
+ * - COLD_BOUND_MS: the isolate's first owner API request, the number lab.ui.v1 raised most (1.9 -> 3.8-4.0 ms: the
+ *   runtime's code paths run for the first time), and the first run of every request measured below;
+ * - WARM_BOUND_MS: every request's warm median, not its best (a 100 µs sampler that was not scheduled can read a warm
+ *   best of 0, and the best of ten finds a quiet moment), with room for the noise of ten runs.
  *
  * The data is the largest a request can see: a full deck of DECK_SIZE cards with arXiv-sized titles and
  * abstracts and a 简介 each, and a full page of LIKED_PAGE liked papers.
  */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { connectCpuMeter, FREE_CPU_MS, MAX_SPEED, scaleFor, tooSlow, type CpuMeter, type Measurement } from '../../../../tools/workerd-cpu/workerd-cpu.mts';
 import { DECK_SIZE, LIKED_PAGE } from '../../src/limits.ts';
 import { rssFeed, type SyntheticItem } from '../feeds.ts';
 import { op, startHarness, type Harness } from './harness.ts';
 
 // A port range of its own (FlowDay's CPU test uses 9000-9499), so parallel suites on one machine do not collide.
 const PORT = 9_500 + Math.floor(Math.random() * 500);
-const FREE_CPU_MS = 10;
-/** Warm runs keep a margin below the limit. */
-const WARM_BOUND_MS = 0.6 * FREE_CPU_MS;
-const SAMPLE_US = 100;
 /**
- * A sample's interval is capped at four sampling intervals: a single sample spanning several milliseconds is a gap in
- * which the sampler thread was not scheduled (the test machine runs vitest, Miniflare and workerd at once), not CPU.
+ * The bound of a request's first run, in reference milliseconds. The reference machine measures 3.8-4.0 ms for the
+ * isolate's first API request (a 20-card deck) and 2.4-2.9 ms per request for the first decide and undo. A first run
+ * is a single measurement, so the bound keeps room for its noise; it still fails at about twice today's cold request,
+ * while Free's limit is 10.
  */
-const MAX_SAMPLE_US = 4 * SAMPLE_US;
+const COLD_BOUND_MS = 0.7 * FREE_CPU_MS;
+/**
+ * The bound of a request's warm median, in reference milliseconds: the heaviest measure 1.4-1.6 ms (a full page of
+ * likes, a decide or an undo), so a regression of about 2x fails.
+ */
+const WARM_BOUND_MS = 0.3 * FREE_CPU_MS;
+/** Runs per request: the first (cold) and ten warm ones. */
+const RUNS = 11;
 const DAY = '2026-09-30';
 const T0 = Date.parse('2026-09-30T06:30:00Z');
 
@@ -43,14 +57,7 @@ const PATHS = {
 } as const;
 
 let h: Harness;
-let send: (method: string, params?: Record<string, unknown>) => Promise<{ result?: { profile?: Profile } }>;
-let socket: WebSocket;
-
-interface Profile {
-  nodes: { id: number; callFrame: { functionName: string } }[];
-  samples: number[];
-  timeDeltas: number[];
-}
+let meter: CpuMeter;
 
 /** An arXiv-sized abstract (about 1,900 characters) and title, invented. */
 function bigItem(n: number): SyntheticItem {
@@ -68,71 +75,13 @@ beforeAll(async () => {
   h = await startHarness({ inspectorPort: PORT });
   h.arxiv.feed = { status: 200, body: rssFeed(Array.from({ length: 60 }, (_, n) => bigItem(n))) };
   await h.run(T0);
-  const targets = (await (await fetch(`http://127.0.0.1:${String(PORT)}/json`)).json()) as { id: string; webSocketDebuggerUrl: string }[];
-  const target = targets.find((candidate) => candidate.id === 'core:user:lab');
-  if (target === undefined) throw new Error('no inspector target for the Worker');
-  socket = new WebSocket(target.webSocketDebuggerUrl);
-  await new Promise((resolve) => {
-    socket.addEventListener('open', resolve, { once: true });
-  });
-  let next = 0;
-  const pending = new Map<number, (message: unknown) => void>();
-  socket.addEventListener('message', (event) => {
-    const message = JSON.parse(String(event.data)) as { id?: number };
-    if (message.id !== undefined) pending.get(message.id)?.(message);
-  });
-  send = (method, params = {}) =>
-    new Promise((resolve) => {
-      next += 1;
-      pending.set(next, resolve as (message: unknown) => void);
-      socket.send(JSON.stringify({ id: next, method, params }));
-    });
-  await send('Profiler.enable');
-  await send('Profiler.setSamplingInterval', { interval: SAMPLE_US });
+  meter = await connectCpuMeter(PORT, 'lab');
 });
 
 afterAll(async () => {
-  socket.close();
+  meter.close();
   await h.dispose();
 });
-
-/** CPU milliseconds of the isolate while `run` executes. */
-async function cpu(run: () => Promise<unknown>): Promise<number> {
-  await send('Profiler.start');
-  await run();
-  const { result } = await send('Profiler.stop');
-  const profile = result?.profile;
-  if (profile === undefined) throw new Error('no profile');
-  const idle = new Set(profile.nodes.filter((node) => node.callFrame.functionName === '(idle)').map((node) => node.id));
-  let micros = 0;
-  const byFn = new Map<string, number>();
-  const names = new Map(profile.nodes.map((node) => [node.id, node.callFrame.functionName]));
-  profile.samples.forEach((sample, index) => {
-    if (idle.has(sample)) return;
-    const delta = Math.min(profile.timeDeltas[index] ?? 0, MAX_SAMPLE_US);
-    micros += delta;
-    const name = names.get(sample) ?? '?';
-    byFn.set(name, (byFn.get(name) ?? 0) + delta);
-  });
-  // CPU_DEBUG=1: the top functions of each profile.
-  if (process.env['CPU_DEBUG'] !== undefined) console.log(JSON.stringify([...byFn.entries()].sort((a, b) => b[1] - a[1]).slice(0, 10)));
-  return micros / 1000;
-}
-
-/**
- * Runs `run` several times: the first run (the isolate's warm-up of that code path, as on a cold isolate), then the
- * warm median and the warm best. Noise on a busy CI machine can only raise these numbers, never lower them.
- */
-async function measure(label: string, run: () => Promise<unknown>, times = 11): Promise<{ first: number; median: number; best: number }> {
-  const samples: number[] = [];
-  for (let index = 0; index < times; index += 1) samples.push(await cpu(run));
-  const [first = 0, ...warm] = samples;
-  const sorted = [...warm].sort((a, b) => a - b);
-  const median = sorted[Math.floor(sorted.length / 2)] ?? first;
-  const best = sorted[0] ?? first;
-  console.log(`cpu ${label}: first ${first.toFixed(2)} ms, warm median ${median.toFixed(2)} ms, warm best ${best.toFixed(2)} ms`);
-  return { first, median, best };
-}
 
 async function text(path: string): Promise<string> {
   const response = await h.fetch(path);
@@ -142,11 +91,12 @@ async function text(path: string): Promise<string> {
 }
 
 describe('CPU per request (Workers Free: 10 ms)', () => {
-  it('the heaviest owner requests stay well below the limit', async () => {
+  it('the heaviest owner requests stay well below the limit, the first API request of an isolate too', async () => {
     // The isolate's first owner API request (the pipeline already ran in this isolate, so the modules are
-    // loaded): what a cold request adds on top of a warm one, e.g. building the transcoder's route table.
-    const cold = await cpu(() => text(PATHS.deck))
-    console.log(`cpu GET deck as the isolate's first API request: ${cold.toFixed(2)} ms`)
+    // loaded): what a cold request adds on top of a warm one, the first run of the transcoder, the codec and the
+    // protobuf-es runtime (the route table was built at startup).
+    const cold = await meter.cpu(() => text(PATHS.deck));
+    console.log(`cpu GET deck as the isolate's first API request: ${cold.toFixed(2)} ms`);
     const deck = JSON.parse(await text(PATHS.deck)) as { cards: { paper: { id: string } }[]; state: { etag: string } };
     expect(deck.cards).toHaveLength(DECK_SIZE);
     // A full page of likes: every paper of the feed, liked from the library (fixed times, newest first).
@@ -158,28 +108,38 @@ describe('CPU per request (Workers Free: 10 ms)', () => {
     expect(liked.liked_papers).toHaveLength(LIKED_PAGE);
     const nextPage = `${PATHS.liked}?page_token=${encodeURIComponent(liked.next_page_token)}`;
 
-    const results = [
-      await measure('GET today', () => text(PATHS.today)),
-      await measure(`GET deck (${String(DECK_SIZE)} cards)`, () => text(PATHS.deck)),
-      await measure('GET deck summary', () => text(PATHS.summary)),
-      await measure(`GET liked (${String(LIKED_PAGE)} papers)`, () => text(PATHS.liked)),
-      await measure('GET liked, filtered by 3 literals', () => text(PATHS.likedFiltered)),
-      await measure('GET liked, the next page (page token)', () => text(nextPage)),
-      await measure('GET settings', () => text(PATHS.settings)),
+    const requests: Measurement[] = [
+      await meter.measure('GET today', () => text(PATHS.today), RUNS),
+      await meter.measure(`GET deck (${String(DECK_SIZE)} cards)`, () => text(PATHS.deck), RUNS),
+      await meter.measure('GET deck summary', () => text(PATHS.summary), RUNS),
+      await meter.measure(`GET liked (${String(LIKED_PAGE)} papers)`, () => text(PATHS.liked), RUNS),
+      await meter.measure('GET liked, filtered by 3 literals', () => text(PATHS.likedFiltered), RUNS),
+      await meter.measure('GET liked, the next page (page token)', () => text(nextPage), RUNS),
+      await meter.measure('GET settings', () => text(PATHS.settings), RUNS),
     ];
     // A decide and its undo (two requests, each a LabState RPC with D1 reads and one batch), measured together and
-    // reported per request (the harness fetched the CSRF token once, before the first run).
+    // bounded per request (the harness fetched the CSRF token once, before the first run).
     let etag = deck.state.etag;
     const card = deck.cards[0]?.paper.id ?? '';
-    const pair = await measure('POST decide + POST undo (one each)', async () => {
+    const pair = await meter.measure('POST decide + POST undo (one each)', async () => {
       const decided = await h.mutate('POST', PATHS.decide, { request_id: op(), etag, paper_id: card, decision: 'like' });
       const after = (await decided.json()) as { state: { etag: string } };
       const undone = await h.mutate('POST', PATHS.undo, { request_id: op(), etag: after.state.etag });
       if (decided.status !== 200 || undone.status !== 200) throw new Error('mutation failed');
       etag = ((await undone.json()) as { state: { etag: string } }).state.etag;
-    });
-    console.log(`cpu POST decide or undo: about ${(pair.median / 2).toFixed(2)} ms each`);
-    for (const { best } of results) expect(best).toBeLessThan(WARM_BOUND_MS);
-    expect(pair.best / 2).toBeLessThan(WARM_BOUND_MS);
+    }, RUNS);
+    requests.push({ label: 'POST decide or undo (half of the pair)', first: pair.first / 2, median: pair.median / 2, best: pair.best / 2 });
+
+    // Calibrated after the requests, so that each first run above is still the isolate's first run of its path.
+    const calibration = await meter.calibrate();
+    const coldBound = COLD_BOUND_MS * scaleFor(calibration.speed);
+    const warmBound = WARM_BOUND_MS * scaleFor(calibration.speed);
+    console.log(`cpu bounds: first < ${coldBound.toFixed(2)} ms, warm median < ${warmBound.toFixed(2)} ms`);
+    expect(calibration.speed, tooSlow(calibration)).toBeLessThanOrEqual(MAX_SPEED);
+    expect(cold, "GET deck as the isolate's first API request").toBeLessThan(coldBound);
+    for (const { label, first, median } of requests) {
+      expect(first, `${label}: first run`).toBeLessThan(coldBound);
+      expect(median, `${label}: warm median`).toBeLessThan(warmBound);
+    }
   });
 });

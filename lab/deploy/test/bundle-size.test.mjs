@@ -1,53 +1,38 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { randomBytes } from 'node:crypto'
-import { BUDGET_GZIP_BYTES, LIMIT_GZIP_BYTES, bundleSize, verdict } from '../bundle-size.mjs'
+import { FREE_LIMIT_GZIP_BYTES } from '../../../tools/bundle-size/bundle-size.mjs'
+import { BUDGET_GZIP_BYTES } from '../bundle-size.mjs'
 
 const SCRIPT = fileURLToPath(new URL('../bundle-size.mjs', import.meta.url))
 
-/** A dry-run output directory with these files (incompressible bytes, so gzip size is about the raw size). */
-function outdir(files) {
+/** Runs the script CI runs on a dry-run directory holding one module of `bytes` incompressible bytes. */
+function run(bytes) {
   const dir = mkdtempSync(join(tmpdir(), 'lab-bundle-'))
-  for (const [name, bytes] of Object.entries(files)) {
-    mkdirSync(join(dir, name, '..'), { recursive: true })
-    writeFileSync(join(dir, name), typeof bytes === 'number' ? randomBytes(bytes) : bytes)
+  try {
+    writeFileSync(join(dir, 'index.js'), randomBytes(bytes))
+    return spawnSync(process.execPath, [SCRIPT, dir], { encoding: 'utf8' })
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
   }
-  return dir
 }
 
-test('the budget is a ratchet below the Workers Free limit', () => {
-  assert.equal(LIMIT_GZIP_BYTES, 3 * 1024 * 1024)
-  assert.ok(BUDGET_GZIP_BYTES < LIMIT_GZIP_BYTES / 4)
+test("Lab's budget is a ratchet well below the Workers Free limit", () => {
+  assert.equal(BUDGET_GZIP_BYTES, 128 * 1024)
+  assert.ok(BUDGET_GZIP_BYTES < FREE_LIMIT_GZIP_BYTES / 4)
 })
 
-test('counts the modules, not source maps or other files', () => {
-  const dir = outdir({ 'index.js': 'export default {}\n'.repeat(100), 'index.js.map': 5000, 'README.md': 'x', 'chunks/a.mjs': 10 })
-  try {
-    const size = bundleSize(dir)
-    assert.deepEqual(size.files, ['a.mjs', 'index.js'])
-    assert.equal(size.raw, 'export default {}\n'.length * 100 + 10)
-    assert.ok(size.gzip < size.raw)
-    assert.equal(verdict(size), null)
-  } finally {
-    rmSync(dir, { recursive: true, force: true })
-  }
-})
-
-test('fails over the budget, over the limit and without a module', () => {
-  assert.match(verdict({ gzip: BUDGET_GZIP_BYTES + 1, files: ['index.js'] }) ?? '', /budget/)
-  assert.match(verdict({ gzip: LIMIT_GZIP_BYTES + 1, files: ['index.js'] }) ?? '', /limit/)
-  assert.match(verdict({ gzip: 0, files: [] }) ?? '', /no bundled module/)
-  const dir = outdir({ 'index.js': BUDGET_GZIP_BYTES + 4096 })
-  try {
-    const result = spawnSync(process.execPath, [SCRIPT, dir], { encoding: 'utf8' })
-    assert.equal(result.status, 1)
-    assert.match(result.stderr, /over Lab's bundle budget/)
-  } finally {
-    rmSync(dir, { recursive: true, force: true })
-  }
+test('the script passes a bundle within the budget and fails one over it', () => {
+  const fits = run(BUDGET_GZIP_BYTES / 2)
+  assert.equal(fits.status, 0, fits.stderr)
+  assert.match(fits.stdout, /^Lab's Worker bundle: 1 module\(s\), .*\(budget 128\.0 KiB, limit 3072\.0 KiB gzip\)\.$/m)
+  const over = run(BUDGET_GZIP_BYTES + 4096)
+  assert.equal(over.status, 1)
+  assert.match(over.stderr, /^Lab's Worker bundle is over its bundle budget/m)
+  assert.equal(spawnSync(process.execPath, [SCRIPT], { encoding: 'utf8' }).status, 2)
 })

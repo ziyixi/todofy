@@ -82,6 +82,11 @@ jobs:
       # The deploy hostname guard every deploy job runs (dependency-free; synthetic API, no token).
       - name: Test the deploy hostname guard
         run: node --test tools/cf-guard/test/*.test.mjs
+      # The shared test and build tools the apps' checks import by relative path (dependency-free, synthetic data):
+      # the bundle-size budgets and the CPU meter of the workerd CPU tests, whose workerd side runs in Lab's and
+      # FlowDay's runtime suites.
+      - name: Test the shared bundle-size and CPU test tools
+        run: node --test tools/bundle-size/test/*.test.mjs tools/workerd-cpu/test/*.test.mts
       # Only for a push to main. A run that failed or was cancelled (also while pending in the
       # concurrency group) is not "success", so its changes stay in this run's diff. Any error here
       # leaves the base empty, and an empty base runs everything.

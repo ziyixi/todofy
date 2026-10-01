@@ -297,6 +297,10 @@ class Classify(unittest.TestCase):
         # tools/cf-guard runs in every deploy job (and the website release): re-check everything, deploy nothing.
         self.assertEqual(push(["tools/cf-guard/cf-guard.mjs"]), expect(T, T, T, F, F, packages=T, proto=T, **ALL_CHECKED))
         self.assertEqual(push(["tools-notes.md"]), expect(F, F, F, F, F))
+        # The shared test and build tools (ToolsImports): their importers re-run, nothing deploys.
+        for path in ("tools/workerd-cpu/workerd-cpu.mts", "tools/bundle-size/bundle-size.mjs"):
+            with self.subTest(path=path):
+                self.assertEqual(push([path]), expect(T, T, T, F, F, packages=T, proto=T, **ALL_CHECKED))
 
     def test_a_shared_package_checks_and_deploys_every_app_that_compiles_it_in(self):
         for path in (
@@ -703,6 +707,78 @@ class PackageUsers(unittest.TestCase):
             if "node_modules" not in manifest.parts
         }
         self.assertEqual(tops - {"packages", "contracts", "proto"}, set(ci_changes.APPS))
+
+
+class ToolsImports(unittest.TestCase):
+    """A tools/ change deploys nothing (classify), which holds only while no Worker or UI bundle carries any of it. An
+    app imports a shared tool (tools/workerd-cpu, tools/bundle-size) by relative path from its tests and its build or
+    deploy scripts only, never from the sources it ships; and the Changes job runs every tool's own tests."""
+
+    IMPORT = re.compile(r"""(?:\bfrom|\bimport)\s*\(?\s*['"]([^'"]*/tools/[^'"]*)['"]""")
+    # Directories whose files never reach a bundle.
+    NOT_SHIPPED = {"test", "tests", "__tests__", "scripts", "deploy"}
+    SOURCES = (".ts", ".tsx", ".mts", ".cts", ".js", ".jsx", ".mjs", ".cjs")
+
+    @staticmethod
+    def tracked():
+        out = subprocess.run(
+            ["git", "-C", str(REPO), "ls-files", "-z", "--cached", "--others", "--exclude-standard"],
+            check=True,
+            capture_output=True,
+        ).stdout.decode()
+        return [Path(name) for name in out.split("\0") if name]
+
+    def importers(self):
+        """App source file (relative) -> the tools/ files it imports."""
+        found = {}
+        for name in self.tracked():
+            if name.parts[0] not in ci_changes.APPS or name.suffix not in self.SOURCES or "node_modules" in name.parts:
+                continue
+            path = REPO / name
+            if not path.is_file():
+                continue
+            for specifier in self.IMPORT.findall(path.read_text(errors="ignore")):
+                target = (path.parent / specifier).resolve()
+                if target.is_relative_to(REPO / "tools"):
+                    found.setdefault(name, []).append(str(target.relative_to(REPO)))
+        return found
+
+    def test_only_tests_and_scripts_import_a_tool(self):
+        importers = self.importers()
+        # Lab's and FlowDay's CPU tests and bundle budgets.
+        for name in (
+            "lab/worker/test/runtime/cpu.test.ts",
+            "flowday/worker/test/runtime/cpu.test.ts",
+            "lab/deploy/bundle-size.mjs",
+            "lab/web/scripts/js-budget.mjs",
+            "flowday/worker/scripts/bundle-size.mjs",
+        ):
+            self.assertIn(Path(name), importers)
+        for name, targets in importers.items():
+            with self.subTest(file=str(name)):
+                self.assertTrue(self.NOT_SHIPPED & set(name.parts[:-1]), f"{name} ships, but imports {targets}")
+                for target in targets:
+                    self.assertTrue((REPO / target).is_file(), target)
+
+    def test_the_import_pattern_finds_relative_tool_imports(self):
+        text = (
+            "import { connectCpuMeter } from '../../../../tools/workerd-cpu/workerd-cpu.mts';\n"
+            "import {\n  checkWorkerBundle,\n} from '../../tools/bundle-size/bundle-size.mjs'\n"
+            "const x = await import('../tools/x.mjs')\n"
+            "import { y } from '@ziyixi/proto/ts/y'\n"
+        )
+        self.assertEqual(
+            self.IMPORT.findall(text),
+            ["../../../../tools/workerd-cpu/workerd-cpu.mts", "../../tools/bundle-size/bundle-size.mjs", "../tools/x.mjs"],
+        )
+
+    def test_the_changes_job_runs_every_tools_own_tests(self):
+        changes = workflow_jobs()["changes"]
+        for test_dir in sorted((REPO / "tools").glob("*/test")):
+            kinds = sorted({path.name.split(".test.", 1)[1] for path in test_dir.glob("*.test.*")})
+            for kind in kinds:
+                with self.subTest(tool=test_dir.parent.name, kind=kind):
+                    self.assertRegex(changes, rf"run: node --test .*tools/{test_dir.parent.name}/test/\*\.test\.{kind}\b")
 
 
 def workflow_jobs():

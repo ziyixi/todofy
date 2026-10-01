@@ -42,10 +42,10 @@ identities as the dashboard's app.
 | Path | Contents |
 | --- | --- |
 | `wrangler.toml` | production config (real D1 id and Access AUD; `TODOFY` service binding to Todofy's `Ops`) |
-| `worker/` | TypeScript Worker, `LabState`, `Ops` entrypoint, the owner API's handlers (`src/api.ts`), tests (`test/runtime/cpu.test.ts` measures the heaviest requests' CPU) |
+| `worker/` | TypeScript Worker, `LabState`, `Ops` entrypoint, the owner API's handlers (`src/api.ts`), tests (`test/runtime/cpu.test.ts` bounds the heaviest requests' CPU, the isolate's first API request included, calibrated to the machine with `tools/workerd-cpu`) |
 | `web/` | React UI (Chinese), built into `web/dist` |
 | `migrations/` | D1 migrations |
-| `deploy/` | `deploy-vars.mjs` (BUILD_SHA and the owner secrets at deploy; refuses a placeholder D1 id or AUD) and its tests |
+| `deploy/` | `deploy-vars.mjs` (BUILD_SHA and the owner secrets at deploy; refuses a placeholder D1 id or AUD), `bundle-size.mjs` (the Worker's gzip budget, on `tools/bundle-size`) and their tests |
 | `docs/` | design, deck UX |
 
 Commands (each in its folder, after `npm ci`):

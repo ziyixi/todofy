@@ -396,9 +396,13 @@ entrypoint typed locally against `OpsCommon`, register the dashboard entry as `p
   `tests/unit/test_task_intent_contract.py` (same fixtures, same verdicts).
 - `Lab checks`: `npm ci` worker + web; `node --test deploy/test/*.test.mjs`; worker lint, typecheck,
   unit tests, runtime tests (workerd, real D1/DO; AI replaced through a wrapped binding / stub
-  service exposing `run`, arXiv answered by `outboundService`; no network); web lint, typecheck,
-  tests, build (+ `check-dist`); no imports from other apps; dry-run of the committed config through
-  the wrapper with placeholder secrets. The runtime suite binds `TODOFY` to a stub Worker exporting an
+  service exposing `run`, arXiv answered by `outboundService`; no network; `cpu.test.ts` bounds the
+  isolate's first owner API request and every request's first run below 7 ms and every warm median
+  below 3 ms, in milliseconds of the reference machine scaled by the measured speed of the machine
+  running it, `tools/workerd-cpu`); web lint, typecheck, tests, build (+ `check-dist` and the UI's
+  JavaScript budget, 160 KiB gzip); no imports from other apps; dry-run of the committed config through
+  the wrapper with placeholder secrets, its bundle held to 128 KiB gzip (`deploy/bundle-size.mjs`;
+  both budgets measured by `tools/bundle-size`). The runtime suite binds `TODOFY` to a stub Worker exporting an
   `Ops` entrypoint that answers from the contract fixtures (pending → created, paused, failed, reject).
 - `Lab deploy` (main only, after the gate and after `Todofy deploy`, environment `production`,
   concurrency `lab-production`):
