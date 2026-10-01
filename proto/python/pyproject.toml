@@ -1,5 +1,6 @@
 # The Python package of the proto/ IDL (proto/README.md). An app depends on it as a local path:
-#   [dependency-groups] (or [project] dependencies, once its Worker imports it) "ziyixi-proto"
+#   [project] dependencies "ziyixi-proto"   (a Worker that imports it; pywrangler vendors it), or
+#   [dependency-groups] "ziyixi-proto"      (an app whose tests alone use it)
 #   [tool.uv.sources] ziyixi-proto = { path = "../proto/python" }   (not editable: pywrangler needs files)
 # Its build backend (build_backend.py) runs proto/tools/ensure.mjs, which generates the modules under
 # src/ziyixi_proto/ (never committed); the metadata below is static, so resolving needs no build.
@@ -18,8 +19,12 @@ dependencies = []
 
 [tool.uv]
 # uv rebuilds the package (and so regenerates) when any of these change: the generator's inputs as
-# proto/tools/ensure.mjs hashes them. ensure.mjs itself skips the work when its stamp still matches.
+# proto/tools/ensure.mjs hashes them, and its stamp. The stamp is gitignored like the generated code: a
+# clean (`git clean -fdX`) deletes both, and uv must then rebuild instead of reinstalling a cached wheel and
+# leaving the source tree, which pywrangler vendors from, without generated code. A generation rewrites
+# the stamp, so the run after it rebuilds once more; ensure.mjs skips the work then (its stamp matches).
 cache-keys = [
+  { file = "../.generated.json" },
   { file = "pyproject.toml" },
   { file = "build_backend.py" },
   { file = "src/ziyixi_proto/*.py" },

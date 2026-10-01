@@ -44,6 +44,7 @@ from tests.fakes.server import FakeServer, Reply
 
 ROOT = Path(__file__).resolve().parents[2]
 WRANGLER = ROOT / "node_modules" / ".bin" / "wrangler"
+PROTO_ENSURE = ROOT.parent / "proto" / "tools" / "ensure.mjs"
 PYODIDE_CACHE = ROOT / ".wrangler" / "pyodide-cache"
 STARTUP_TIMEOUT_S = 120
 GATEWAY_CONFIG = "gateway/wrangler.test.toml"
@@ -139,8 +140,19 @@ def _ensure_synced() -> None:
     before every start (and rebuild ``python_modules/`` whenever pyproject.toml or pylock.toml is
     newer), then run this same `wrangler dev`. A no-op once synced, unless the vendored proto package
     is stale (then forced); the lock keeps concurrent processes from rebuilding it under each other's
-    servers."""
+    servers.
+
+    pywrangler builds ziyixi-proto inside Pyodide, which cannot run the generator, from proto/'s source
+    tree, so that tree's generated code is made current first (a no-op in ~0.1 s when it is): uv may have
+    installed the package from its wheel cache without touching the tree (proto/README.md)."""
     with _checkout_lock("pywrangler-sync"):
+        subprocess.run(
+            ["node", str(PROTO_ENSURE)],
+            env=os.environ | {"PROTO_PYTHON": sys.executable},
+            capture_output=True,
+            text=True,
+            check=True,
+        )
         force = [] if _vendored_proto_is_current() else ["--force"]
         subprocess.run(
             [sys.executable, "-m", "pywrangler", "sync", *force],

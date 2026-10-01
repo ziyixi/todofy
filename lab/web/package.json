@@ -9,9 +9,12 @@
   },
   "scripts": {
     "dev": "vite",
+    "pretypecheck": "node ../../proto/tools/ensure.mjs",
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
+    "pretest": "node ../../proto/tools/ensure.mjs",
     "test": "vitest run",
+    "prebuild": "node ../../proto/tools/ensure.mjs",
     "build": "tsc --noEmit && vite build && node scripts/check-dist.mjs",
     "check:dist": "node scripts/check-dist.mjs"
   },

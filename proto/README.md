@@ -49,30 +49,49 @@ cannot express (bounds, URL hosts).
 | `package.json`, `package-lock.json` | The toolchain pins (`dependencies`: buf, protoc-gen-es, the runtime) and this folder's test tools (`devDependencies`) |
 | `ts/` | The TypeScript package `@ziyixi/proto`. Committed: `package.json` (its exports), `wire-json.ts` (the codec), `protobuf.ts` / `protobuf-wkt.ts` (the runtime re-exports). Generated: every directory (`ts/todofy/...`, `ts/google/...`) |
 | `python/` | The Python package `ziyixi-proto`. Committed: `pyproject.toml` (static metadata, uv cache keys), `build_backend.py`, `src/ziyixi_proto/__init__.py` and `wire_json.py` (the codec). Generated: every directory under `src/ziyixi_proto/` |
-| `tools/ensure.mjs` | Generates both languages when its stamp (`.generated.json`, ignored) does not match |
+| `tools/ensure.mjs` | Installs the pinned toolchain when `node_modules/` does not match the lockfile, and generates both languages when its stamp (`.generated.json`, ignored) does not match |
 | `tools/gen_py.py` | The stdlib-only Python generator (frozen dataclasses, `IntEnum`s, field tables) |
 | `tools/profile_breaking.py` | The profile's breaking rules (rule 4) |
 | `scripts/breaking.sh`, `scripts/rules-selftest.sh` | The breaking gate against a base commit; the rules self-test |
 | `testdata/wire-profile-cases.json` | 39 edge cases (timestamps, integer spellings, enum look-alikes, missing fields, null) that both codecs must answer identically |
-| `test/*.test.ts`, `test/python/` | The codec and IDL tests, the same cases in both languages; `test/cross-language.test.ts` pipes bytes through both codecs (`test/python/roundtrip.py` in a child process) |
+| `test/*.test.ts`, `test/python/` | The codec and IDL tests, the same cases in both languages; `test/cross-language.test.ts` pipes bytes through both codecs (`test/python/roundtrip.py` in a child process); `test/ensure.test.ts` runs `tools/ensure.mjs` on a copy of this folder (a deleted toolchain, an abandoned lock, the commands Windows needs) |
 
 Every directory directly inside `ts/` and `python/src/ziyixi_proto/` is generated (`.gitignore`); every
 file there is hand-written.
 
 ## How it works
 
-`tools/ensure.mjs` hashes its inputs (every `.proto` file, `buf.yaml`, `buf.lock`, `buf.gen.yaml`,
-`package-lock.json`, itself and `gen_py.py`) and every generated file, and compares with the stamp
-`.generated.json`. When they match it exits in about 0.1 s without touching the network. Otherwise it
-installs the pinned toolchain into `node_modules/` if those versions are not there (`npm ci --omit=dev`),
-runs `buf generate` and `buf build | gen_py.py` into a temporary directory, moves the result into `ts/` and
-`python/src/ziyixi_proto/` under a lock (parallel installs wait), and writes the stamp. It strips the
-calling npm's settings from the environment, so `npm ci --prefix lab/worker` cannot redirect the nested
-install.
+`tools/ensure.mjs` checks two things: that `node_modules/` holds every package `package-lock.json` pins,
+at that version (the generated code imports the protobuf-es runtime from there, so a deleted
+`proto/node_modules` is restored even when the generated files are current), and that its inputs (every
+`.proto` file, `buf.yaml`, `buf.lock`, `buf.gen.yaml`, `package-lock.json`, itself and `gen_py.py`) and every
+generated file still match the stamp `.generated.json`. When both hold it exits in about 0.1 s without
+touching the network. Otherwise, under a lock, it installs the whole lockfile (`npm ci`: the generator, the
+runtime and this folder's test and editor types), runs `buf generate` and `buf build | gen_py.py` into a
+temporary directory, moves the result into `ts/` and `python/src/ziyixi_proto/`, and writes the stamp. It
+strips the calling npm's settings from the environment, so `npm ci --prefix lab/worker` cannot redirect the
+nested install.
+
+The lock (`.generate.lock/owner.json`) names its holder's pid and host. Parallel installs wait for it and
+say whom they wait for. A run interrupted by Ctrl-C or killed leaves the lock behind; the next run sees
+that the pid no longer runs on this host, takes the lock over at once and removes the dead run's temporary
+directories. A lock it cannot check (another host on a shared disk, or one without an owner file) is taken
+over after 10 minutes; a waiter gives up only after 15.
+
+Every tool starts without a shell, so the same steps run on Windows: buf is its JavaScript entry point run
+by the current `node`, as is npm on Windows (`npm.cmd` cannot be spawned without a shell), and
+`buf.gen.yaml` starts `protoc-gen-es` as `node <its entry point>`. `gen_py.py` runs on `PROTO_PYTHON` (the
+build backend passes its own interpreter), else `python3`, or `python` on Windows. Only the macOS and Linux
+paths are exercised (locally and in CI); the shell scripts under `scripts/` are for CI and need a POSIX
+shell.
 
 **TypeScript.** An app declares `"@ziyixi/proto": "file:../../proto/ts"` and
 `"postinstall": "node ../../proto/tools/ensure.mjs"`. npm links `node_modules/@ziyixi/proto` to `proto/ts`
-whether or not anything is generated, then the postinstall generates. Generated files import
+whether or not anything is generated, then the postinstall generates. Every npm script that compiles,
+tests or serves the generated code (`tsc`, `vitest`, `wrangler`) has a `pre<script>` that runs the same
+command, in the app and in any package that imports the app's sources (Lab's UI imports the Worker's API
+types), so `npm run typecheck`, `npm test` or `npm run dev` after a pull or a branch switch that changed a
+`.proto` file regenerates first instead of using stale types (`test_proto.py` requires those scripts). Generated files import
 `@bufbuild/protobuf`, which Node, TypeScript, vitest and wrangler's esbuild resolve from the real path,
 `proto/node_modules`: one copy for every app, no `paths`, `dedupe` or alias settings. Measured on
 2026-10-01 with Lab's production dry-run: its `index.js` grew from 166,530 to 336,996 bytes (gzip 44,365 to
@@ -97,12 +116,20 @@ message (a D1 column, an owner API), and `WireName<typeof Mode>` is the union of
 (`'subtasks' | 'separate'`): Lab's UI types derive from it, so a new enum value fails its typecheck until the
 UI handles it. Python has `wire_name(member)` and `wire_member(cls, name)`.
 
-**Python.** Todofy declares `ziyixi-proto` (today in its `dev` dependency group) with
+**Python.** Todofy declares `ziyixi-proto` in its `[project] dependencies` (todofy-core imports it) with
 `[tool.uv.sources] ziyixi-proto = { path = "../proto/python" }`. uv builds it with
 `python/build_backend.py` (standard library only, no build dependencies to download), which checks the
 stamp the way `ensure.mjs` does and runs `ensure.mjs` only when it does not match, then packages
-`src/ziyixi_proto`. uv rebuilds whenever one of the package's `cache-keys` changes (the stamp's inputs and
-the hand-written runtime), so `uv run pytest` after editing a `.proto` file regenerates by itself.
+`src/ziyixi_proto`. uv rebuilds whenever one of the package's `cache-keys` changes (the stamp's inputs, the
+hand-written runtime and the stamp itself), so `uv run pytest` after editing a `.proto` file or switching
+branches regenerates by itself. The stamp is a key because it is gitignored with the generated code: after
+`git clean -fdX` uv would otherwise reinstall its cached wheel and leave the source tree, which pywrangler
+vendors from, without generated code. A generation rewrites the stamp, so the next `uv run` rebuilds once
+more (ensure.mjs finds nothing to do). One case no key can catch: a clean when the cached wheel was built
+while the stamp was missing too (only one `uv` command since a fresh clone). So the source tree has two
+more guards: Todofy's `package.json` runs `ensure.mjs` as its postinstall (every pywrangler command needs
+that `npm ci` for wrangler, and a clean removes `node_modules/` too), and its runtime test harness runs
+`ensure.mjs` before `pywrangler sync`.
 
 ```python
 from ziyixi_proto.todofy.taskintent.v1 import task_intent_pb as pb
@@ -117,11 +144,14 @@ The source is not editable on purpose: todofy-core imports the package, so it is
 processes; the backend then only verifies the stamp (which `uv sync` on the host already made current, so
 `uv sync` runs first) and copies files. pywrangler re-syncs only when `pyproject.toml` or `pylock.toml`
 change, so Todofy's runtime test harness compares the vendored copy with the installed one and forces a
-sync when they differ; for `pywrangler dev` by hand after an IDL change, run `uv run pywrangler sync --force`.
+sync when they differ (after running `ensure.mjs`); for `pywrangler dev` by hand after an IDL
+change, run `uv run pywrangler sync --force`. If Pyodide's build still reports that the generated code is
+not current, run `npm run ensure` here and retry.
 
 **Editors.** After the app's install, VS Code resolves every import: TypeScript through the linked package
 (the generated `.ts` files are real files under `proto/ts`), Python through the installed package in
-`todofy/.venv` (select that interpreter).
+`todofy/.venv` (select that interpreter). The files of `proto/` itself resolve too, since the app's
+install put this folder's whole lockfile (vitest, Node and Workers types) in `proto/node_modules`.
 
 **Offline.** Only the first generation needs the network (npm for the toolchain, buf.build once for the
 locked googleapis module, which buf caches in `~/.cache/buf`). After that, reinstalls and regeneration
@@ -140,8 +170,9 @@ npm run check:deterministic              # generate twice more, compare with the
 npm run typecheck && npm test            # both codecs (TypeScript, then Python 3.14 through uv)
 ```
 
-After editing a `.proto` file or `wire-json.ts`/`wire_json.py`, a TypeScript app sees the change after
-`npm run generate` here (or its own `npm install`); Todofy's next `uv run` rebuilds by itself.
+After editing a `.proto` file or `wire-json.ts`/`wire_json.py`, a TypeScript app's next `npm run
+typecheck|test|dev` regenerates first (its pre-scripts); Todofy's next `uv run` rebuilds by itself.
+`wire-json.ts` itself is not generated: the apps read it in place.
 
 **Adding a contract.**
 

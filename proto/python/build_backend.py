@@ -95,7 +95,7 @@ def _ensure_generated() -> None:
     if sys.platform == "emscripten":
         raise RuntimeError(
             "ziyixi-proto: the generated code is not current and Pyodide cannot run proto/tools/ensure.mjs; "
-            "run `uv sync` (or `npm run generate` in proto/) on the host first"
+            "run `npm run ensure` in proto/ on the host, then retry"
         )
     node = shutil.which("node")
     if node is None:

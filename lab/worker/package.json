@@ -9,10 +9,14 @@
   },
   "scripts": {
     "postinstall": "node ../../proto/tools/ensure.mjs",
+    "pretypecheck": "node ../../proto/tools/ensure.mjs",
     "typecheck": "tsc --noEmit && tsc --noEmit -p test/runtime/tsconfig.json",
     "lint": "eslint .",
+    "pretest": "node ../../proto/tools/ensure.mjs",
     "test": "vitest run",
+    "pretest:runtime": "node ../../proto/tools/ensure.mjs",
     "test:runtime": "vitest run --config vitest.runtime.config.ts",
+    "predev": "node ../../proto/tools/ensure.mjs",
     "dev": "wrangler dev --config ../wrangler.toml --ip 127.0.0.1 --port 8788 --local-upstream 127.0.0.1:8788"
   },
   "dependencies": {

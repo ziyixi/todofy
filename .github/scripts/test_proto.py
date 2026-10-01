@@ -9,6 +9,10 @@ python3 -m unittest discover -s .github/scripts -p test_proto.py (the Proto chec
   every bundle holds exactly the runtime the generator targets.
 - Wiring: every TypeScript user depends on "file:<...>/proto/ts" and runs proto/tools/ensure.mjs as its
   postinstall; every Python user takes ziyixi-proto from proto/python as a non-editable path source.
+- Freshness: every npm script that compiles, tests or serves the generated code (tsc, vitest, wrangler) in
+  a TypeScript user, or in a package whose sources import a user's sources (Lab's UI imports the Worker's
+  API types), runs ensure.mjs first as its pre-script, so a pull or branch switch that changes a .proto
+  file cannot leave stale generated types behind (uv's cache keys do the same for Python).
 - ci_changes.PROTO_USERS lists exactly those users, each marked bundled only when its Worker compiles the
   package in, and a user marked test-only has no production import of it.
 - Generated code is never committed and is ignored; uv's cache keys cover every input ensure.mjs hashes.
@@ -41,6 +45,10 @@ TOOLCHAIN = ("@bufbuild/buf", "@bufbuild/protoc-gen-es", "@bufbuild/protobuf")
 RUNTIME = "@bufbuild/protobuf"
 TS_PACKAGE = "@ziyixi/proto"
 PY_PACKAGE = "ziyixi-proto"
+ENSURE = PROTO / "tools" / "ensure.mjs"
+# Script commands that read the generated code; the script's pre-script must run ensure.mjs.
+READS_GENERATED = re.compile(r"(^|[\s;&|(])(tsc|vitest|wrangler)\b")
+RELATIVE_IMPORT = re.compile(r"""(?:\bfrom|\bimport)\s*\(?\s*['"](\.\.?/[^'"]+)['"]""")
 EXACT = re.compile(r"\d+\.\d+\.\d+")
 SKIP_PARTS = {"node_modules", ".venv", ".venv-workers", "python_modules", ".wrangler"}
 
@@ -69,6 +77,24 @@ def ts_users() -> dict[Path, dict]:
         data = json.loads(manifest.read_text())
         if any(TS_PACKAGE in data.get(section, {}) for section in ("dependencies", "devDependencies")):
             found[manifest] = data
+    return found
+
+
+def importers_of(users: dict[Path, dict]) -> dict[Path, dict]:
+    """package.json -> its data, for every other package whose own sources import a user's sources by a
+    relative path (it compiles the generated code too, resolved through that user's node_modules)."""
+    roots = [manifest.parent for manifest in users]
+    found = {}
+    for manifest in tracked("*package.json"):
+        if manifest.name != "package.json" or app_of(manifest) == "proto" or manifest in users:
+            continue
+        base = manifest.parent
+        sources = [*tracked(f"{base.relative_to(REPO)}/*.ts"), *tracked(f"{base.relative_to(REPO)}/*.tsx")]
+        for source in sources:
+            targets = [(source.parent / spec).resolve() for spec in RELATIVE_IMPORT.findall(source.read_text())]
+            if any(target.is_relative_to(root) and not target.is_relative_to(base) for target in targets for root in roots):
+                found[manifest] = json.loads(manifest.read_text())
+                break
     return found
 
 
@@ -151,6 +177,20 @@ class Users(unittest.TestCase):
                     {"resolved": spec.removeprefix("file:"), "link": True},
                 )
 
+    def test_scripts_that_read_the_generated_code_regenerate_it_first(self):
+        users = ts_users()
+        importers = importers_of(users)
+        self.assertIn(REPO / "lab" / "web" / "package.json", importers, "Lab's UI imports the Worker's API types")
+        for manifest, data in {**users, **importers}.items():
+            scripts = data.get("scripts", {})
+            for name, command in scripts.items():
+                if name.startswith(("pre", "post")) or not READS_GENERATED.search(command):
+                    continue
+                with self.subTest(manifest=str(manifest.relative_to(REPO)), script=name):
+                    match = re.fullmatch(r"node (\S+/tools/ensure\.mjs)", scripts.get(f"pre{name}", ""))
+                    self.assertIsNotNone(match, f"add \"pre{name}\": \"node <...>/proto/tools/ensure.mjs\"")
+                    self.assertEqual((manifest.parent / match.group(1)).resolve(), ENSURE)
+
     def test_python_users_build_the_package_from_proto_not_editable(self):
         users = py_users()
         self.assertTrue(users, "no Python user of ziyixi-proto")
@@ -164,6 +204,19 @@ class Users(unittest.TestCase):
                 self.assertIn(
                     f'name = "{PY_PACKAGE}"\nversion = "0.0.0"\nsource = {{ directory = "{source["path"]}" }}', lock
                 )
+
+    def test_a_python_worker_regenerates_when_its_node_toolchain_installs(self):
+        """pywrangler vendors ziyixi-proto from proto/'s source tree inside Pyodide, which cannot generate,
+        and uv may install the package from its wheel cache without regenerating that tree (after `git clean
+        -fdX`, for example). The npm install every pywrangler command needs (wrangler) regenerates it."""
+        users = {path: data for path, data in py_users().items() if py_bundled(data)}
+        self.assertTrue(users, "no Python Worker bundles ziyixi-proto")
+        for pyproject in users:
+            with self.subTest(pyproject=str(pyproject.relative_to(REPO))):
+                manifest = json.loads((pyproject.parent / "package.json").read_text())
+                match = re.fullmatch(r"node (\S+/tools/ensure\.mjs)", manifest.get("scripts", {}).get("postinstall", ""))
+                self.assertIsNotNone(match, "add \"postinstall\": \"node <...>/proto/tools/ensure.mjs\"")
+                self.assertEqual((pyproject.parent / match.group(1)).resolve(), ENSURE)
 
     def test_proto_users_matches_the_manifests(self):
         derived = {}
@@ -223,6 +276,8 @@ class Generated(unittest.TestCase):
             for key in tomllib.loads((PROTO / "python" / "pyproject.toml").read_text())["tool"]["uv"]["cache-keys"]
         }
         self.assertLessEqual({f"../{name}" for name in inputs} | {"../**/*.proto"}, keys)
+        # The stamp itself: a clean deletes it with the generated code, and uv must rebuild then.
+        self.assertIn("../.generated.json", keys)
 
     def test_buf_and_ensure_exclude_the_same_directories(self):
         ensure = (PROTO / "tools" / "ensure.mjs").read_text()
