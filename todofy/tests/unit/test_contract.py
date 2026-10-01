@@ -2,12 +2,23 @@ import copy
 import json
 
 import pytest
+from ziyixi_proto.mailhero.webhook.v1 import mail_received_pb as pb
+from ziyixi_proto.wire_json import wire_name
 
 from tests import mail_contract
 from todofy.core import contract
 from todofy.core.contract import ContractError, parse_mail_event
 
 SCHEMA = json.loads(mail_contract.SCHEMA.read_text())
+
+
+def required(cls: type) -> tuple[str, ...]:
+    """The REQUIRED fields of a message of mail_received.proto, in field-number order."""
+    return tuple(field.name for field in pb.FIELDS[cls] if field.required)
+
+
+EVENT_FIELDS = required(pb.MailReceivedEvent)
+MESSAGE_FIELDS = required(pb.Mail)
 
 
 def encode(payload) -> bytes:
@@ -35,7 +46,7 @@ def test_parsed_fields(golden):
     assert (event.text_truncated, event.original_text_bytes, event.warnings) == (False, None, ())
 
 
-@pytest.mark.parametrize("field", contract.EVENT_FIELDS)
+@pytest.mark.parametrize("field", EVENT_FIELDS)
 def test_missing_event_field_is_rejected(payload, field):
     """Go: mail_inbox_test.go:282 TestMailInboxRejectsIncompleteContract."""
     del payload[field]
@@ -43,7 +54,7 @@ def test_missing_event_field_is_rejected(payload, field):
         parse_mail_event(encode(payload))
 
 
-@pytest.mark.parametrize("field", contract.MESSAGE_FIELDS)
+@pytest.mark.parametrize("field", MESSAGE_FIELDS)
 def test_missing_message_field_is_rejected(payload, field):
     """Go: mail_inbox_test.go:282, e.g. a payload without "attachments"."""
     del payload["message"][field]
@@ -211,14 +222,17 @@ def test_lone_surrogate_escape_is_rejected(payload):
 
 
 def test_limits_match_the_published_schema():
+    """The published schema is generated from the IDL the parser reads with (proto/tools/gen_schema.py; Contracts
+    checks it is fresh), so their fields, sizes and values agree."""
     message = SCHEMA["properties"]["message"]
-    assert tuple(SCHEMA["required"]) == contract.EVENT_FIELDS
-    assert tuple(message["required"]) == contract.MESSAGE_FIELDS
+    assert tuple(SCHEMA["required"]) == EVENT_FIELDS == ("type", "event_id", "received_at", "message")
+    assert tuple(message["required"]) == MESSAGE_FIELDS
     assert message["properties"]["from"]["maxItems"] == message["properties"]["to"]["maxItems"] == 50
-    assert message["properties"]["attachments"]["maxItems"] == contract.MAX_ATTACHMENTS
-    attachment = SCHEMA["$defs"]["attachment"]
-    assert tuple(attachment["required"]) == contract.ATTACHMENT_FIELDS
-    assert set(attachment["properties"]["storage_status"]["enum"]) == contract.STORAGE_STATUSES
-    assert set(attachment["properties"]["omitted_reason"]["enum"]) == contract.OMITTED_REASONS
-    assert tuple(SCHEMA["$defs"]["address"]["required"]) == contract.ADDRESS_FIELDS
+    assert message["properties"]["from"]["maxItems"] == contract.MAX_ADDRESSES
+    assert message["properties"]["attachments"]["maxItems"] == contract.MAX_ATTACHMENTS == 100
+    attachment = message["properties"]["attachments"]["items"]
+    assert tuple(attachment["required"]) == required(pb.Attachment) == ("filename", "content_type", "size")
+    assert attachment["properties"]["storage_status"]["enum"] == [wire_name(m) for m in pb.StorageStatus if m]
+    assert attachment["properties"]["omitted_reason"]["enum"] == [wire_name(m) for m in pb.OmittedReason if m]
+    assert tuple(message["properties"]["from"]["items"]["required"]) == required(pb.Address) == ("address", "name")
     assert SCHEMA["properties"]["type"]["const"] == contract.EVENT_TYPE

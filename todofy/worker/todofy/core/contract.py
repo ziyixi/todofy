@@ -1,11 +1,17 @@
-"""Strict validation of Mail Hero ``mail.received.v1`` events.
+"""Validation of Mail Hero ``mail.received.v1`` events.
 
-Rules follow the Go consumer (mail_inbox.go:67-122 @ 6c46ed4) and the published
-schema (the monorepo's contracts/mail-received-v1/mail-received-v1.schema.json).
-Where they differ the schema wins: typed optional fields must have their JSON type
-(Go silently accepted null), ``received_at`` must be UTC with ``Z`` and attachment
-enums are checked. A ``sent_at`` year Python cannot hold reads as unknown rather than
-failing. Unknown fields are ignored so Mail Hero can add optional ones.
+The event is proto/mailhero/webhook/v1/mail_received.proto (``ziyixi_proto.mailhero.webhook.v1``): every body is
+read with the wire codec, leniently, as a consumer reads a producer's output: a field Mail Hero adds later is
+skipped, and every rule of the contract is checked (types, REQUIRED fields, UUIDs, UTC times, list sizes, the
+attachments' closed enums, the canary's run ID, a subject or a text that is not blank, the size before truncation of
+a truncated text). The published schema (contracts/mail-received-v1/mail-received-v1.schema.json) is generated from
+the same IDL. What a rule cannot say stays here, as the Go consumer (mail_inbox.go:67-122 @ 6c46ed4) and this module
+always checked it: the body's 1 MiB, the subject's 4 KiB and the text's 256 KiB of UTF-8, no lone surrogate, integers
+written as JSON integers, a real calendar time (``received_at`` UTC with ``Z``, never year 1's zero time), sizes
+before truncation consistent with the text. A ``sent_at`` year Python cannot hold reads as unknown rather than
+failing. Every body the parser before the IDL accepted is accepted, as the same event, but one with an integer above
+2^31 - 1 (the profile's integers are int32; no 25 MiB message has such a size), and refused with the same log reason:
+tests/unit/test_mail_received_parser_legacy.py compares the two on every fixture and about 9,000 mutations.
 
 The optional top-level ``canary`` marks a synthetic end-to-end check (contracts/ops-v1):
 Todofy processes it through Gemini but never causes a side effect for it. A marker that is
@@ -14,26 +20,22 @@ present but unreadable is rejected (400, nothing stored) rather than guessed at.
 
 import json
 import re
-from collections.abc import Callable
+from collections.abc import Iterator
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any, NoReturn
+
+from ziyixi_proto.mailhero.webhook.v1 import mail_received_pb as pb
+from ziyixi_proto.wire_json import WireJsonError, field_rules, from_wire, wire_name
 
 EVENT_TYPE = "mail.received.v1"
 MAX_EVENT_BYTES = 1 << 20
 MAX_SUBJECT_BYTES = 4096
 MAX_TEXT_BYTES = 256 << 10
-MAX_ADDRESSES = 50
-MAX_ATTACHMENTS = 100
+# The contract's sizes, read where mail_received.proto states them.
+MAX_ADDRESSES = field_rules(pb.Mail, "from").max_items
+MAX_ATTACHMENTS = field_rules(pb.Mail, "attachments").max_items
 
-EVENT_FIELDS = ("type", "event_id", "received_at", "message")
-MESSAGE_FIELDS = ("id", "from", "to", "subject", "sent_at", "rfc_message_id", "text", "attachments")
-ADDRESS_FIELDS = ("address", "name")
-ATTACHMENT_FIELDS = ("filename", "content_type", "size")
-STORAGE_STATUSES = frozenset({"stored", "omitted"})
-OMITTED_REASONS = frozenset({"size_limit", "message_size_limit", "inline_image", "capacity"})
-
-CANARY_RUN_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}", re.ASCII)
 UUID = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}", re.IGNORECASE | re.ASCII)
 # [0-9], not \d: Python's \d also matches non-ASCII digits.
 _RFC3339 = re.compile(
@@ -43,6 +45,18 @@ _RFC3339 = re.compile(
 # 1..9999 Python cannot represent it, so the send time is unknown.
 _JS_OUT_OF_RANGE = re.compile(r"(?:[+-][0-9]{6}|0000)-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\.[0-9]{1,9})?Z")
 _ZERO_TIME = datetime(1, 1, 1, tzinfo=UTC)
+# The codec reads 1.0 as the integer 1 (JSON Schema's rule, and JavaScript's); this consumer has always refused a
+# fraction where the contract has an integer.
+_INTEGERS = ("original_text_bytes", "attachments_omitted_count")
+# A codec error is "<path>: <rule>" (never a value). The log-safe reason this module has always given for it: a
+# missing field or a wrong type is "shape", except where a field's own check came first.
+_FIELD_REASONS = {
+    "type": "type",
+    "event_id": "uuid",
+    "received_at": "timestamp",
+    "message.id": "uuid",
+    "message.sent_at": "timestamp",
+}
 
 
 class ContractError(ValueError):
@@ -111,44 +125,93 @@ def parse_mail_event(raw: bytes) -> MailEvent:
         document = json.loads(raw.decode(), parse_constant=_reject_constant)
     except (ValueError, RecursionError):  # UnicodeDecodeError is a ValueError
         raise ContractError("json") from None
-    top = _object(document, EVENT_FIELDS)
-    message = _object(top["message"], MESSAGE_FIELDS)
-    if top["type"] != EVENT_TYPE:
-        raise ContractError("type")
-    received_at = _timestamp(top["received_at"])
-    if not top["received_at"].endswith("Z") or received_at == _ZERO_TIME:
+    try:
+        read = from_wire(pb.MailReceivedEvent, document).message
+    except WireJsonError as error:
+        raise ContractError(_reason(str(error), document)) from None
+    _check_integers(document["message"])
+    message = read.message
+    for value in _strings(read):
+        utf8_len(value)
+    received_at = _timestamp(read.received_at)
+    if received_at == _ZERO_TIME:
         raise ContractError("received_at")
-
-    subject = _string(message["subject"])
-    text = _string(message["text"])
-    if not subject.strip() and not text.strip():
+    # The contract's Visible is Python's whitespace, as str.strip() reads it.
+    if not message.subject.strip() and not message.text.strip():
         raise ContractError("empty")
-    if utf8_len(subject) > MAX_SUBJECT_BYTES or utf8_len(text) > MAX_TEXT_BYTES:
+    if utf8_len(message.subject) > MAX_SUBJECT_BYTES or utf8_len(message.text) > MAX_TEXT_BYTES:
         raise ContractError("too_long")
-
-    rfc_message_id = message["rfc_message_id"]
     event = MailEvent(
-        event_id=_uuid(top["event_id"]),
+        event_id=read.event_id,
         received_at=received_at,
-        message_id=_uuid(message["id"]),
-        from_addresses=_addresses(message["from"]),
-        to_addresses=_addresses(message["to"]),
-        subject=subject,
-        sent_at=_sent_at(message["sent_at"]),
-        rfc_message_id=None if rfc_message_id is None else _string(rfc_message_id),
-        text=text,
-        attachments=_attachments(message["attachments"]),
-        text_truncated=_optional(message, "text_truncated", _boolean, False),
-        original_text_bytes=_optional(message, "original_text_bytes", _integer, None),
-        html_omitted=_optional(message, "html_omitted", _boolean, False),
-        needs_review=_optional(message, "needs_review", _boolean, False),
-        warnings=_optional(message, "warnings", _strings, ()),
-        content_policy_version=_optional(message, "content_policy_version", _string, ""),
-        attachments_omitted_count=_optional(message, "attachments_omitted_count", _integer, 0),
-        canary_run_id=_optional(top, "canary", _canary, None),
+        message_id=message.id,
+        from_addresses=tuple(Address(a.address, a.name) for a in message.from_),
+        to_addresses=tuple(Address(a.address, a.name) for a in message.to),
+        subject=message.subject,
+        sent_at=_sent_at(message.sent_at),
+        rfc_message_id=message.rfc_message_id,
+        text=message.text,
+        attachments=tuple(
+            Attachment(a.filename, a.content_type, a.size, wire_name(a.storage_status), wire_name(a.omitted_reason))
+            for a in message.attachments
+        ),
+        text_truncated=bool(message.text_truncated),
+        original_text_bytes=message.original_text_bytes,
+        html_omitted=bool(message.html_omitted),
+        needs_review=bool(message.needs_review),
+        warnings=message.warnings,
+        content_policy_version=message.content_policy_version or "",
+        attachments_omitted_count=message.attachments_omitted_count or 0,
+        canary_run_id=None if read.canary is None else read.canary.run_id,
     )
     _check_content_policy(event)
     return event
+
+
+def _reason(error: str, document: Any) -> str:
+    """The log-safe reason of a codec error ("<path>: <rule>"), the one the checks before the IDL gave."""
+    path, _, rule = error.partition(": ")
+    if path == "canary" or path.startswith("canary."):
+        return "canary"
+    if rule.startswith("no value of"):  # Mail.any_match: neither the subject nor the text is Visible
+        return "empty"
+    if rule == "missing" or path in ("$", "message"):
+        return "shape"
+    if path == "received_at" and isinstance(time := document["received_at"], str) and _RFC3339.fullmatch(time):
+        return "received_at"  # a time, but not in UTC with Z
+    if path in _FIELD_REASONS:
+        return _FIELD_REASONS[path]
+    if rule.startswith("more than"):
+        return "too_many"
+    if rule.startswith("required when"):  # original_text_bytes' present_when
+        return "policy"
+    if path.startswith("message.attachments[") and path.endswith(("storage_status", "omitted_reason")):
+        return "attachment"
+    return "shape"
+
+
+def _check_integers(message: dict[str, Any]) -> None:
+    """The contract's integers as JSON integers (the codec has already checked their range and types)."""
+    values = [message[name] for name in _INTEGERS if name in message]
+    values += [item["size"] for item in message["attachments"]]
+    if any(type(value) is not int for value in values):
+        raise ContractError("shape")
+
+
+def _strings(read: Any) -> Iterator[str]:
+    """Every string of a read event: each must be encodable (a "\\ud800" escape reads as a lone surrogate)."""
+    message = read.message
+    yield read.received_at
+    if read.canary is not None:
+        yield read.canary.run_id
+    for address in (*message.from_, *message.to):
+        yield address.address
+        yield address.name
+    yield from (message.subject, message.text, *message.warnings)
+    yield from (value for value in (message.sent_at, message.rfc_message_id, message.content_policy_version) if value)
+    for attachment in message.attachments:
+        yield attachment.filename
+        yield attachment.content_type
 
 
 def _check_content_policy(event: MailEvent) -> None:
@@ -162,38 +225,8 @@ def _check_content_policy(event: MailEvent) -> None:
         raise ContractError("policy")
 
 
-def _canary(value: Any) -> str:
-    # {"run_id": <RunId>, ...} (the schema lets Mail Hero add fields): an unreadable marker must
-    # not turn a canary into real mail.
-    if not isinstance(value, dict) or "run_id" not in value:
-        raise ContractError("canary")
-    run_id = value["run_id"]
-    if not isinstance(run_id, str) or not CANARY_RUN_ID.fullmatch(run_id):
-        raise ContractError("canary")
-    return run_id
-
-
 def _reject_constant(name: str) -> NoReturn:
     raise ValueError(name)
-
-
-def _object(value: Any, required: tuple[str, ...]) -> dict[str, Any]:
-    if not isinstance(value, dict) or any(field not in value for field in required):
-        raise ContractError("shape")
-    return value
-
-
-def _string(value: Any) -> str:
-    if not isinstance(value, str):
-        raise ContractError("shape")
-    utf8_len(value)
-    return value
-
-
-def _uuid(value: Any) -> str:
-    if not isinstance(value, str) or not UUID.fullmatch(value):
-        raise ContractError("uuid")
-    return value
 
 
 def _timestamp(value: Any) -> datetime:
@@ -209,62 +242,3 @@ def _sent_at(value: Any) -> datetime | None:
     if value is None or (isinstance(value, str) and _JS_OUT_OF_RANGE.fullmatch(value)):
         return None
     return _timestamp(value)
-
-
-def _boolean(value: Any) -> bool:
-    if type(value) is not bool:
-        raise ContractError("shape")
-    return value
-
-
-def _integer(value: Any) -> int:
-    if type(value) is not int or value < 0:
-        raise ContractError("shape")
-    return value
-
-
-def _strings(value: Any) -> tuple[str, ...]:
-    if not isinstance(value, list):
-        raise ContractError("shape")
-    return tuple(_string(item) for item in value)
-
-
-def _choice(allowed: frozenset[str]) -> Callable[[Any], str]:
-    def parse(value: Any) -> str:
-        if not isinstance(value, str) or value not in allowed:
-            raise ContractError("attachment")
-        return value
-
-    return parse
-
-
-def _optional[T](obj: dict[str, Any], field: str, parse: Callable[[Any], T], default: T) -> T:
-    return parse(obj[field]) if field in obj else default
-
-
-def _array(value: Any, limit: int) -> list[Any]:
-    if not isinstance(value, list):
-        raise ContractError("shape")
-    if len(value) > limit:
-        raise ContractError("too_many")
-    return value
-
-
-def _addresses(value: Any) -> tuple[Address, ...]:
-    return tuple(
-        Address(_string(item["address"]), _string(item["name"]))
-        for item in (_object(entry, ADDRESS_FIELDS) for entry in _array(value, MAX_ADDRESSES))
-    )
-
-
-def _attachments(value: Any) -> tuple[Attachment, ...]:
-    return tuple(
-        Attachment(
-            filename=_string(item["filename"]),
-            content_type=_string(item["content_type"]),
-            size=_integer(item["size"]),
-            storage_status=_optional(item, "storage_status", _choice(STORAGE_STATUSES), None),
-            omitted_reason=_optional(item, "omitted_reason", _choice(OMITTED_REASONS), None),
-        )
-        for item in (_object(entry, ATTACHMENT_FIELDS) for entry in _array(value, MAX_ATTACHMENTS))
-    )
