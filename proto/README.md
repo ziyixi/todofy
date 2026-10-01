@@ -342,10 +342,11 @@ costs about 7 ms more than the hand-written version did). The protobuf-es runtim
 a TypeScript Worker that bundles it.
 
 **What ops-v1 costs** (measured 2026-10-01, the production dry runs and the workerd CPU tests, before and after
-the move). Bundles, gzip as `tools/bundle-size` counts it: Mail Hero 148.6 → 189.0 KiB (its first protobuf-es
-runtime and the codec, budget 228 KiB), the dashboard 54.3 → 89.5 KiB (the runtime replaced the hand-written
-schema and `validate.mjs`, budget 108 KiB), Lab 104.5 → 109.7 KiB (the runtime was already there: ops.v1's
-descriptors and the rule checker, budget 128 KiB); todofy-core's upload 505.9 → 530.3 KiB (gzip 143.8 →
+the move). Bundles, gzip as `tools/bundle-size` counts it: Mail Hero 148.6 → 189.3 KiB (its first protobuf-es
+runtime and the codec, budget 228 KiB), the dashboard 54.3 → 89.7 KiB (the runtime replaced the hand-written
+schema and `validate.mjs`, budget 108 KiB), Lab 104.5 → 110.1 KiB (the runtime was already there: ops.v1's
+descriptors and the rule checker, budget 128 KiB), the links app 68.4 → 71.9 KiB (it imports no ops.v1, but the
+codec's rule checker and the `common/wire/v1` descriptors come with the runtime, budget 82 KiB); todofy-core's upload 505.9 → 530.3 KiB (gzip 143.8 →
 148.8 KiB: `ops_pb.py` and the rule tables); the gateway imports types only (38.8 → 38.7 KiB). CPU, in
 milliseconds of the reference machine: Mail Hero's `Ops` entrypoint (a Worker request, 10 ms on Free), the
 isolate's first `status()` 3.1-5.2 → 5.0-7.1 ms (24 serial runs; the test, run alone by `npm run test:cpu`, holds
