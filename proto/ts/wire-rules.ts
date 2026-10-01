@@ -70,6 +70,7 @@ const NONE: Compiled = {
 };
 
 const compiledFields = new WeakMap<DescField, Compiled>();
+const requiredFields = new WeakMap<DescField, boolean>();
 const fileFormats = new WeakMap<DescFile, ReadonlyMap<string, Format>>();
 const discriminators = new WeakMap<DescMessage, DescField | null>();
 
@@ -215,12 +216,22 @@ function hasValue(r: ReflectMessage, field: DescField, at: string, context: Cont
     case 'enum':
       return (r.get(field) as number) !== 0 || context.unrecognized.has(at);
     case 'scalar':
-      return r.isSet(field) || (field.presence === IMPLICIT && getOption(field, field_behavior).includes(FieldBehavior.REQUIRED));
+      return r.isSet(field) || (field.presence === IMPLICIT && isRequired(field));
     case 'message':
       return r.isSet(field);
     default:
       return true;
   }
+}
+
+/** Whether `field` is REQUIRED (google.api.field_behavior), read from its options once. */
+function isRequired(field: DescField): boolean {
+  let required = requiredFields.get(field);
+  if (required === undefined) {
+    required = getOption(field, field_behavior).includes(FieldBehavior.REQUIRED);
+    requiredFields.set(field, required);
+  }
+  return required;
 }
 
 function checkField(r: ReflectMessage, field: DescField, at: string, variant: string | undefined, context: Context): string | null {
