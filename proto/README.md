@@ -31,16 +31,23 @@ validate with (`contracts/ops-v1/legacy/`).
 
 `todofy/report/v1/report.proto` is the IDL of recommendation-v1 and summary-v1 (2026-10-01), the reports Todofy
 serves the external newsletter (`GET /api/recommendation`, `GET /api/summary`) and lists to its owner: every rule
-of the hand-written schemas is a value rule there (a union by `status`, whose cases bound counts and list sizes),
+of the hand-written schemas is a value rule there (a union by `status`, whose cases bound counts and keep the task
+list empty when the window was empty or the model's answer unusable; timestamps keep `format: date-time`),
 `todofy/api/recommendation-v1.schema.json` and `summary-v1.schema.json` are generated from it as self-contained
 schemas of one message each, todofy-core builds every report as a generated message written by the codec, and
 Todofy's UI takes the reports' types from the generated wire types. The bytes did not change (golden tests in
 Todofy pin them, and a differential test gives the generated and the frozen hand-written schemas the same verdict
-but on `stale`, which no production Todofy ever sent). The HTTP surface stays the gateway's: the newsletter's
+but on `stale`, which no production Todofy ever sent; in ECMAScript's regex dialect, which JSON Schema specifies,
+the text rules also differ on purpose on U+0085 and U+FEFF, where the hand-written `\S` disagreed with the
+newsletter: `report.proto`'s header). The HTTP surface stays the gateway's: the newsletter's
 paths and Basic authentication are not an AIP API, so the file has no service. Measured on 2026-10-01 with the
-production dry run: todofy-core's upload 531.9 → 543.1 KiB (gzip 149.1 → 151.3 KiB: `report_pb.py` and the core's
+production dry run: todofy-core's upload 531.9 → 542.7 KiB (gzip 149.1 → 151.2 KiB: `report_pb.py` and the core's
 builders); Todofy's UI bundle is byte for byte the same (types only); building and writing a report takes about
-0.03 ms on the reference machine (host CPython).
+0.03 ms on the reference machine (host CPython). It ships as two changes: first the rule vocabulary it needs
+(`common.wire.v1` `CaseRules.empty` and `Format.json_schema_format`, branch `proto-wire-rules`), which reaches
+every proto user's bundle and so redeploys Lab, Mail Hero, the dashboard, links and Todofy with no behaviour
+change ("What the case rule costs" under [Value rules](#value-rules)), then the reports themselves, which deploy Todofy only
+(`ci_changes.classify` on that diff).
 
 ## Rules
 
