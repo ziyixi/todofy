@@ -376,14 +376,19 @@ class Users(unittest.TestCase):
 
     def test_proto_users_matches_the_manifests_and_sources(self):
         """Every user is listed, with exactly the languages its production bundles take from proto/."""
+        # Todofy's gateway and UI take types only (they compile to nothing), Lab's Worker and UI take values. A value
+        # import added to either would make Todofy a "ts" user: say which file first, before the maps differ.
+        for manifest in (REPO / "todofy" / "gateway" / "package.json", REPO / "todofy" / "web" / "package.json"):
+            self.assertIn(TS_PACKAGE, json.loads(manifest.read_text())["dependencies"])
+            for source in production_sources(manifest):
+                values = [name for name, type_only in ts_proto_imports(source.read_text()) if not type_only]
+                with self.subTest(file=str(source.relative_to(REPO))):
+                    self.assertEqual(values, [], "Todofy's TypeScript imports proto/ types only (import type)")
         users = {app_of(path) for path in [*ts_users(), *py_users()]}
         imports = value_importers()
         derived = {app: {lang for lang in imports.get(app, set()) if lang in ("ts", "python")} for app in users}
         self.assertEqual(derived, {app: set(languages) for app, languages in ci_changes.PROTO_USERS.items()})
         self.assertLessEqual(set(derived), set(ci_changes.APPS))
-        # Todofy's gateway takes types only (it compiles to nothing), Lab's Worker and UI take values.
-        gateway = REPO / "todofy" / "gateway" / "package.json"
-        self.assertTrue(all(type_only for source in production_sources(gateway) for _, type_only in ts_proto_imports(source.read_text())))
 
     def test_proto_packages_name_exactly_their_importers(self):
         """ci_changes.PROTO_PACKAGES: the apps whose production code imports each package's generated code."""

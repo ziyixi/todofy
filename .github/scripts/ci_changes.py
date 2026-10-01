@@ -35,8 +35,8 @@ proto/ (the protobuf IDL, proto/README.md) checks every app in PROTO_USERS (an a
 (proto_deploys): PROTO_USERS[app] names the languages whose generated code and runtime the app's
 production bundles compile in ("ts": Lab's and the links app's Workers and UIs, Mail Hero's Worker and the dashboard's
 Worker (ops.v1 and the wire codec); "python": todofy-core, through the wheel
-pywrangler vendors; Todofy's gateway imports types only, so it is no "ts" user), PROTO_RUNTIMES maps a
-language's runtime and generator to that language's users, and PROTO_PACKAGES maps each proto package to
+pywrangler vendors; Todofy's gateway and UI import types only, so neither makes Todofy a "ts" user),
+PROTO_RUNTIMES maps a language's runtime and generator to that language's users, and PROTO_PACKAGES maps each proto package to
 the apps that import its generated code (lab/ui reaches Lab only, links/ui the links app only; prototest, the runtimes' fixtures,
 reaches no app). Tests, test data, the check scripts, the api-linter tool module, check configs and
 Markdown (PROTO_NOT_BUNDLED) deploy nothing; any other proto/ path (buf.yaml, buf.lock, the toolchain
