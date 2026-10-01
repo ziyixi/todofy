@@ -85,6 +85,16 @@ describe('list', () => {
     expect(reasonOf((await h.get('/_/api/v1/links?page_size=-1')).body)).toBe('BAD_REQUEST');
   });
 
+  it('matches each tag on its own, never the JSON text the tags are stored in', async () => {
+    await createLink(h, 'none', { target: 'https://none.example/' });
+    await createLink(h, 'two', { target: 'https://two.example/', tags: ['ab', 'cd'] });
+    const listed = async (filter: string) => keys((await h.get<ListAnswer>(`/_/api/v1/links?filter=${encodeURIComponent(filter)}`)).body);
+    expect(await listed('b')).toEqual(['links/two']);
+    expect(await listed('"cd" AB')).toEqual(['links/two']);
+    // The stored text is ["ab","cd"]: its brackets, quotes and commas, or a span across two tags, are no tag.
+    for (const filter of ['"["', '","', '"\\""', '"ab\\",\\"cd"']) expect(await listed(filter), filter).toEqual([]);
+  });
+
   it('lists deleted links only with show_deleted, and purges them once due', async () => {
     const link = await createLink(h, 'a', { target: 'https://a.example/' });
     await createLink(h, 'b', { target: 'https://b.example/' });

@@ -189,7 +189,10 @@ export async function listLinks(db: D1Database, query: ListQuery, now: number): 
   const values: unknown[] = [query.after ?? '', now];
   if (!query.showDeleted) conditions.push('delete_time IS NULL');
   for (const literal of query.literals) {
-    conditions.push('(instr(lower(key), ?) > 0 OR instr(lower(description), ?) > 0 OR instr(lower(target), ?) > 0 OR instr(lower(tags), ?) > 0)');
+    // Tags one by one (they are stored lower-cased), never the JSON text that holds them: `[` or `","` match no tag.
+    conditions.push(
+      '(instr(lower(key), ?) > 0 OR instr(lower(description), ?) > 0 OR instr(lower(target), ?) > 0 OR EXISTS (SELECT 1 FROM json_each(links.tags) WHERE instr(json_each.value, ?) > 0))',
+    );
     values.push(literal, literal, literal, literal);
   }
   const select = db.prepare(`SELECT ${LINK_COLUMNS} FROM links WHERE ${conditions.join(' AND ')} ORDER BY key LIMIT ?`).bind(...values, query.size + 1);
