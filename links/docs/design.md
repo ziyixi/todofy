@@ -172,9 +172,9 @@ first API request was measured apart, the full list page carried it (4.9-5.3 ms 
 runs on a machine loaded with nine busy processes; measured apart, eight such loaded runs passed (speed 2.4-2.8). An
 export of all 1,000 links in one answer measured about 5 ms, which is why it is paged.
 
-Bundles: the Worker 284 KiB raw, 67.5 KiB gzip (budget 82 KiB, `deploy/bundle-size.mjs`); the launcher's JavaScript
-37.5 KiB gzip (budget 45 KiB, `web/scripts/js-budget.mjs`): the protobuf-es runtime and the embedded `links.ui.v1`
-descriptors are most of both.
+Bundles: the Worker 287 KiB raw, 68.4 KiB gzip (budget 82 KiB, set at 67.5 KiB, `deploy/bundle-size.mjs`); the
+launcher's JavaScript 37.5 KiB gzip (budget 45 KiB, `web/scripts/js-budget.mjs`): the protobuf-es runtime and the
+embedded `links.ui.v1` descriptors are most of both.
 
 ## 9. Tests
 
