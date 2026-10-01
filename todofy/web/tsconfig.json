@@ -13,6 +13,7 @@
     "exactOptionalPropertyTypes": false,
     "verbatimModuleSyntax": true,
     "isolatedModules": true,
+    "allowImportingTsExtensions": true,
     "resolveJsonModule": true,
     "skipLibCheck": true,
     "noEmit": true,

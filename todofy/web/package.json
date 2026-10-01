@@ -8,15 +8,21 @@
     "node": ">=26"
   },
   "scripts": {
+    "postinstall": "node ../../proto/tools/ensure.mjs",
+    "predev": "node ../../proto/tools/ensure.mjs",
     "dev": "vite",
+    "pretypecheck": "node ../../proto/tools/ensure.mjs",
     "typecheck": "tsc --noEmit",
+    "pretest": "node ../../proto/tools/ensure.mjs",
     "test": "vitest run",
+    "prebuild": "node ../../proto/tools/ensure.mjs",
     "build": "tsc --noEmit && vite build",
     "gen:api": "node scripts/api-types.mjs",
     "check:api": "node scripts/api-types.mjs --check"
   },
   "dependencies": {
     "@tanstack/react-query": "5.104.0",
+    "@ziyixi/proto": "file:../../proto/ts",
     "lucide-react": "1.48.0",
     "react": "19.3.0",
     "react-dom": "19.3.0",
