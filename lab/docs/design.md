@@ -295,12 +295,18 @@ writer); the contract, states and Todofy's implementation plan are in
   order (none → 409 `nothing_to_send`): `mode` from the request; parent `论文雷达 <day> · N 篇`,
   description `来自 Lab 论文雷达\nhttps://lab.ziyixi.science/deck/<day>`; per paper `title` (whitespace
   collapsed, ≤ 300 code points with "…"), `url` `https://arxiv.org/abs/<id>`, `description` = the
-  简介's first sentence (≤ 120 chars; absent without 简介). The TaskIntent JSON is stored in `sends`
-  **before** the RPC (state `sending`), then sent.
+  简介's first sentence (≤ 120 chars; absent without 简介). The intent is a message of the generated
+  `TaskIntent` (`proto/todofy/taskintent/v1/task_intent.proto`); its wire JSON (`toWire`, which must also
+  pass the contract schema's value rules) is stored in `sends` **before** the RPC (state `sending`), then
+  sent. `test/intent.test.ts` pins those bytes to what the hand-written builder froze before the generated
+  types, so a frozen generation replays identically across the change.
 - **Outcome** (stored on the row, shown per `ux.md` §5): `pending` (poll), `created`, `duplicate`
   (both set `sent_generation` on its cards), `paused`, `failed`, `rejected`, or `unknown` when the RPC
   itself rejected (binding error, older Todofy, `unavailable`/`busy`). `invalid_input` is a Lab bug:
-  stored as `rejected`/`invalid_input`, logged, never retried unchanged.
+  stored as `rejected`/`invalid_input`, logged, never retried unchanged. Todofy's answer is read leniently
+  with the wire JSON codec (`asResult`): a state this build does not know is an unreadable answer (kept,
+  asked again later, as before), an error code it does not know is stored as no reason, an unknown field
+  is ignored; counts, the retry hint and the intent ID are checked (`TASK_INTENT_LIMITS`).
 - **Retry and edit rules.** Result `recorded = false` (paused, rejected, not_found) means Todofy holds
   nothing: the generation is **unfrozen** and the next send rebuilds it (same `intent_id`, current
   likes and mode). Any other state keeps it frozen: 重试 resends the identical payload (Todofy replays or

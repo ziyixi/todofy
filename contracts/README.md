@@ -4,7 +4,8 @@ The only files the apps (`mail-hero/`, `todofy/`, `dashboard/`, `lab/`) share. N
 these files.
 
 The protobuf IDL of these contracts lives in [`../proto/`](../proto/README.md) (today `task-intent-v1` only,
-used in tests). It does not change the wire: the schemas and fixtures here stay the contracts.
+whose two sides run on the generated code). It does not change the wire: the schemas and fixtures here stay
+the published wire description.
 
 | Directory | Between | Owner |
 | --- | --- | --- |
@@ -66,9 +67,12 @@ dashboard's own runtime suite (`dashboard/worker/test/runtime/`, in `Dashboard c
 
 ## `task-intent-v1/`
 
-Schema, TypeScript types and fixtures for `proposeTasks`/`taskIntentStatus` on Todofy's `Ops` entrypoint:
+Schema, the value rules the IDL cannot express (`task-intent-v1.ts`) and fixtures for
+`proposeTasks`/`taskIntentStatus` on Todofy's `Ops` entrypoint (the types are generated from
+`proto/todofy/taskintent/v1/task_intent.proto`):
 another app (Lab) proposes up to 30 Todoist tasks under its own idempotency key and Todofy, the only
 Todoist writer, creates them from its ledger. Fixtures are checked with `ops-v1/validate.mjs` by
 `lab/worker/test/task-intent-contract.test.ts` and by Todofy's `tests/unit/test_task_intent_contract.py`
-(Python `jsonschema`), both in the `Contracts` job; Lab's `intent.test.ts` checks every intent it builds and
+(Python `jsonschema`), both in the `Contracts` job, which also check that each language's generated types and
+wire JSON codec agree with the schema on every fixture; Lab's `intent.test.ts` checks every intent it builds and
 maps every result fixture, and its workerd suite sends real intents to a stub Todofy that validates them.

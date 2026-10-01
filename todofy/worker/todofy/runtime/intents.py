@@ -25,7 +25,7 @@ from typing import Any
 from todofy.core import intents as rules
 from todofy.core.backoff import LOOKUP_MAX_PAGES, TODOIST_AUTH_BLOCK, TODOIST_MAX_ATTEMPTS, TODOIST_STEP_BUDGET
 from todofy.core.classify import TaskResult
-from todofy.core.intents import IntentError, IntentState, Task, TaskState
+from todofy.core.intents import ErrorCode, IntentState, Task, TaskState, code_name
 from todofy.core.metrics import Step, StepPoint
 from todofy.core.ops import InvalidInput
 from todofy.core.sql import intents as sql
@@ -62,11 +62,11 @@ async def propose(env: Any, core: Any, text: Any, now: int) -> dict[str, Any]:
     if existing:
         return await _replay(env, core, value, existing, now)
     if value.source not in accepted_sources(env):
-        return _refused(value, IntentError.SOURCE_NOT_ALLOWED, now)
+        return _refused(value, ErrorCode.SOURCE_NOT_ALLOWED, now)
     if not rules.urls_allowed(value):
-        return _refused(value, IntentError.URL_NOT_ALLOWED, now)
+        return _refused(value, ErrorCode.URL_NOT_ALLOWED, now)
     if (held := core.intent_pause(now)) is not None:
-        _log(intent="paused", source=value.source, intent_id=value.intent_id, code=held[0])
+        _log(intent="paused", source=value.source, intent_id=value.intent_id, code=code_name(held[0]))
         return rules.paused_new(value.source, value.intent_id, held, now)
     # One frozen X-Request-Id per task, fixed here for every attempt that will ever be made.
     tasks = json.dumps([[n, str(uuid.uuid4())] for n in value.task_numbers])
@@ -97,7 +97,7 @@ async def propose(env: Any, core: Any, text: Any, now: int) -> dict[str, Any]:
     if stored.results:
         # The same intent_id was recorded between the read above and this batch.
         return await _replay(env, core, value, stored.results[0], now)
-    return _refused(value, IntentError.DAILY_LIMIT, now, rules.until_tomorrow(now))
+    return _refused(value, ErrorCode.DAILY_LIMIT, now, rules.until_tomorrow(now))
 
 
 async def status(env: Any, core: Any, text: Any, now: int) -> dict[str, Any]:
@@ -109,8 +109,8 @@ async def status(env: Any, core: Any, text: Any, now: int) -> dict[str, Any]:
     return rules.describe(rules.IntentRow.from_row(row), core.intent_pause(now), now, proposing=False)
 
 
-def _refused(value: rules.Intent, code: IntentError, now: int, retry_after: float | None = None) -> dict[str, Any]:
-    _log(intent="rejected", source=value.source, intent_id=value.intent_id, code=str(code))
+def _refused(value: rules.Intent, code: ErrorCode, now: int, retry_after: float | None = None) -> dict[str, Any]:
+    _log(intent="rejected", source=value.source, intent_id=value.intent_id, code=code_name(code))
     return rules.rejected_new(value.source, value.intent_id, code, now, retry_after)
 
 
@@ -170,7 +170,7 @@ class _Step:
                 after.attempts,
                 after.next_attempt_at,
                 after.todoist_id,
-                after.error_code,
+                code_name(after.error_code),
                 now_s(),
                 *self.key,
                 after.n,
@@ -189,9 +189,7 @@ class _Step:
         if value is None or value.sha256 != self.row.payload_sha256 or len(tasks) != self.row.tasks_total:
             # Only a damaged row gets here (a pending intent always keeps its text): hold it for the
             # proposer, whose retry brings the text back.
-            await self._finish(
-                rules.Summary(IntentState.FAILED, self.row.tasks_created, IntentError.TODOIST_REJECTED, 0)
-            )
+            await self._finish(rules.Summary(IntentState.FAILED, self.row.tasks_created, ErrorCode.TODOIST_REJECTED, 0))
             return
         for n, task in list(tasks.items()):
             if task.state == TaskState.SENDING:
@@ -234,7 +232,7 @@ class _Step:
                 parent_id=parent or "",
             )
         except RequestTooLarge:
-            after = rules.failed(task, IntentError.TODOIST_REJECTED)
+            after = rules.failed(task, ErrorCode.TODOIST_REJECTED)
             await self._write(task, after)
             return after, False
         marked = (
@@ -306,7 +304,7 @@ class _Step:
             .bind(
                 summary.state,
                 summary.tasks_created,
-                summary.error_code,
+                code_name(summary.error_code),
                 summary.next_attempt_at,
                 now_s(),
                 summary.state,
@@ -321,7 +319,7 @@ class _Step:
                 intent_id=self.row.intent_id,
                 created=summary.tasks_created,
                 total=self.row.tasks_total,
-                code=summary.error_code,
+                code=code_name(summary.error_code),
             )
 
 

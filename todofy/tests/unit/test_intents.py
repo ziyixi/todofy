@@ -18,7 +18,7 @@ from tests import mail_contract
 from todofy.core import intents
 from todofy.core.backoff import DAY
 from todofy.core.classify import TaskResult
-from todofy.core.intents import IntentState, Task, TaskState
+from todofy.core.intents import ErrorCode, IntentState, Task, TaskState
 from todofy.core.ops import InvalidInput
 from todofy.core.sql import intents as sql
 from todofy.core.sql import retention as retention_sql
@@ -54,6 +54,26 @@ def test_the_canonical_form_is_schema_order_compact_and_pinned():
     reordered["items"] = [dict(reversed(list(item.items()))) for item in reordered["items"]]
     assert intents.intent(reordered).sha256 == value.sha256
     assert parsed(mode="separate").sha256 != value.sha256
+
+
+# The hashes the hand-written canonical form gave before core/intents.py moved to the generated types and
+# the wire JSON profile (2026-10-01). Recorded intents keep these hashes in D1 for 400 days: a replay must
+# hash the same, so these never change.
+PINNED = {
+    "max-items.json": "0ad54ffb827c5300065997329b6be52cadb37f558d62e5a548930d46b8c5b504",
+    "minimal.json": "4509943790f6a041b6664cf1d98894cc867bc99f0584ab4bc8521dc9ee8ba51a",
+    "separate-2.json": "2a8910797cd8f9fb07ad4bfff08a15225c660a6eaeb36c336f7824523c3ee21d",
+    "subtasks-3.json": "316d4581f9bd95acb34ddf6ac87efd44c7fff5cc9b0108b031de94eddcf92cdb",
+}
+
+
+def test_every_intent_fixture_keeps_its_pinned_canonical_bytes_and_hash():
+    assert sorted(PINNED) == sorted(path.name for path in (FIXTURES / "TaskIntent").glob("*.json"))
+    for name, digest in PINNED.items():
+        value = parsed(name)
+        # The canonical form is the fixture's own compact JSON (fixtures are in schema order).
+        assert value.canonical == json.dumps(fixture(name), ensure_ascii=False, separators=(",", ":")), name
+        assert value.sha256 == digest, name
 
 
 def test_numbers_and_totals():
@@ -138,6 +158,7 @@ def test_footers_match_exactly_and_only_as_the_last_line():
 
 
 def task(n: int = 1, state: str = TaskState.PENDING, **fields: Any) -> Task:
+    """A task_intent_tasks row as D1 returns it (error codes by wire name), read the way the runtime reads it."""
     base = {
         "n": n,
         "request_id": f"00000000-0000-4000-8000-{n:012d}",
@@ -148,7 +169,7 @@ def task(n: int = 1, state: str = TaskState.PENDING, **fields: Any) -> Task:
         "error_code": "",
         "started_at": NOW - 60,
     }
-    return Task(**(base | fields))
+    return Task.from_row(base | fields)
 
 
 def create(t: Task, result: TaskResult, code: str | None = None, retry_after: float = 0.0, task_id: str = ""):
@@ -180,15 +201,20 @@ def test_auth_block_holds_the_task_and_ends_the_step():
 
 def test_a_4xx_refusal_fails_the_task_at_once():
     after, stop = create(task(), TaskResult.RETRY_LATER, Code.TODOIST_REJECTED)
-    assert (after.state, after.error_code, after.next_attempt_at, stop) == ("failed", "todoist_rejected", 0, False)
+    assert (after.state, after.error_code, after.next_attempt_at, stop) == (
+        "failed",
+        ErrorCode.TODOIST_REJECTED,
+        0,
+        False,
+    )
 
 
 @pytest.mark.parametrize(
     ("code", "retry_after", "wait", "error"),
     [
-        (Code.TODOIST_RATE_LIMITED, 0.0, 60 * 4, "rate_limited"),
-        (Code.TODOIST_RATE_LIMITED, 900.0, 900, "rate_limited"),
-        (Code.TODOIST_UNAVAILABLE, 0.0, 60 * 4, "retry_wait"),
+        (Code.TODOIST_RATE_LIMITED, 0.0, 60 * 4, ErrorCode.RATE_LIMITED),
+        (Code.TODOIST_RATE_LIMITED, 900.0, 900, ErrorCode.RATE_LIMITED),
+        (Code.TODOIST_UNAVAILABLE, 0.0, 60 * 4, ErrorCode.RETRY_WAIT),
     ],
 )
 def test_transient_failures_back_off_durably(code, retry_after, wait, error):
@@ -204,7 +230,7 @@ def test_transient_failures_back_off_durably(code, retry_after, wait, error):
 
 def test_automatic_attempts_stop_after_48_tries_or_7_days():
     last, _ = create(task(attempts=47), TaskResult.RETRY_LATER, Code.TODOIST_UNAVAILABLE)
-    assert (last.state, last.attempts, last.error_code) == ("failed", 48, "todoist_rejected")
+    assert (last.state, last.attempts, last.error_code) == ("failed", 48, ErrorCode.TODOIST_REJECTED)
     old, _ = create(task(attempts=1, started_at=NOW - 7 * DAY), TaskResult.RETRY_LATER, Code.TODOIST_RATE_LIMITED)
     assert old.state == "failed"
     young, _ = create(task(attempts=46, started_at=NOW - 7 * DAY + 1), TaskResult.RETRY_LATER, Code.TODOIST_UNAVAILABLE)
@@ -219,18 +245,23 @@ def test_lookup_outcomes():
     unknown, recheck = task(state=TaskState.UNKNOWN), task(state=TaskState.RECHECK)
     assert lookup(unknown, ["6X9"]).state == lookup(recheck, ["6X9"]).state == "created"
     assert lookup(unknown, ["6X9", "6X10"]).todoist_id == "6X9"  # duplicates made elsewhere: keep one
-    assert (lookup(unknown, []).state, lookup(unknown, []).error_code) == ("failed", "todoist_result_unknown")
+    assert (lookup(unknown, []).state, lookup(unknown, []).error_code) == ("failed", ErrorCode.TODOIST_RESULT_UNKNOWN)
     resend = lookup(recheck, [])
     assert (resend.state, resend.next_attempt_at, resend.attempts) == ("pending", NOW, 0)
     retry = lookup(unknown, None)
     assert (retry.state, retry.attempts, retry.next_attempt_at) == ("unknown", 1, NOW + 60)
     gave_up = lookup(task(state=TaskState.RECHECK, attempts=intents.LOOKUP_MAX_ATTEMPTS - 1), None)
-    assert (gave_up.state, gave_up.error_code) == ("failed", "todoist_result_unknown")
+    assert (gave_up.state, gave_up.error_code) == ("failed", ErrorCode.TODOIST_RESULT_UNKNOWN)
 
 
 def test_an_interrupted_call_becomes_unknown():
     after = intents.interrupted(task(state=TaskState.SENDING, attempts=5, error_code="retry_wait"), NOW + 120)
-    assert (after.state, after.attempts, after.next_attempt_at, after.error_code) == ("unknown", 0, NOW + 120, "")
+    assert (after.state, after.attempts, after.next_attempt_at, after.error_code) == (
+        "unknown",
+        0,
+        NOW + 120,
+        ErrorCode.UNSPECIFIED,
+    )
 
 
 def test_the_proposers_retry_requeues_only_unfinished_tasks():
@@ -285,22 +316,23 @@ def summary(mode: str, *tasks: Task) -> intents.Summary:
 
 def test_the_intent_summary():
     done = task(0, TaskState.CREATED, todoist_id="6X0")
-    assert summary("subtasks", done, replace(done, n=1)) == intents.Summary(IntentState.CREATED, 2, "", 0)
+    none = ErrorCode.UNSPECIFIED
+    assert summary("subtasks", done, replace(done, n=1)) == intents.Summary(IntentState.CREATED, 2, none, 0)
     waiting = summary("subtasks", done, task(1, next_attempt_at=NOW + 5, error_code="rate_limited"), task(2))
-    assert waiting == intents.Summary(IntentState.PENDING, 1, "rate_limited", NOW)
+    assert waiting == intents.Summary(IntentState.PENDING, 1, ErrorCode.RATE_LIMITED, NOW)
     # A failed parent fails the intent at once, with its code; children are never sent.
     parent_failed = summary("subtasks", task(0, TaskState.FAILED, error_code="todoist_result_unknown"), task(1))
-    assert parent_failed == intents.Summary(IntentState.FAILED, 0, "todoist_result_unknown", 0)
+    assert parent_failed == intents.Summary(IntentState.FAILED, 0, ErrorCode.TODOIST_RESULT_UNKNOWN, 0)
     # A parent still unknown: only its lookup time counts.
     unknown_parent = summary("subtasks", task(0, TaskState.UNKNOWN, next_attempt_at=NOW + 99), task(1))
-    assert unknown_parent == intents.Summary(IntentState.PENDING, 0, "", NOW + 99)
+    assert unknown_parent == intents.Summary(IntentState.PENDING, 0, none, NOW + 99)
     # Separate mode keeps going around a failed task, then ends failed.
     going = summary(
         "separate", task(1, TaskState.FAILED, error_code="todoist_rejected"), task(2, next_attempt_at=NOW + 7)
     )
-    assert going == intents.Summary(IntentState.PENDING, 0, "", NOW + 7)
+    assert going == intents.Summary(IntentState.PENDING, 0, none, NOW + 7)
     ended = summary("separate", task(1, TaskState.FAILED, error_code="todoist_rejected"), replace(done, n=2))
-    assert ended == intents.Summary(IntentState.FAILED, 1, "todoist_rejected", 0)
+    assert ended == intents.Summary(IntentState.FAILED, 1, ErrorCode.TODOIST_REJECTED, 0)
 
 
 def test_pause_precedence_and_retry_hints():
@@ -309,19 +341,19 @@ def test_pause_precedence_and_retry_hints():
         return intents.pause(**(flags | {"backup_active": False} | switches), now=NOW)
 
     assert held() is None
-    assert held(maintenance=True, force_pause=True) == ("maintenance", 3600)
-    assert held(processing_paused=True, force_pause=True) == ("processing_paused", 3600)
-    assert held(force_pause=True, blocked_until=NOW + 50) == ("todoist_paused", 3600)
-    assert held(blocked_until=NOW + 50, backup_active=True) == ("todoist_blocked", 50)
+    assert held(maintenance=True, force_pause=True) == (ErrorCode.MAINTENANCE, 3600)
+    assert held(processing_paused=True, force_pause=True) == (ErrorCode.PROCESSING_PAUSED, 3600)
+    assert held(force_pause=True, blocked_until=NOW + 50) == (ErrorCode.TODOIST_PAUSED, 3600)
+    assert held(blocked_until=NOW + 50, backup_active=True) == (ErrorCode.TODOIST_BLOCKED, 50)
     assert held(blocked_until=NOW) is None
-    assert held(backup_active=True) == ("backup_active", 120)
+    assert held(backup_active=True) == (ErrorCode.BACKUP_ACTIVE, 120)
 
 
 def test_a_failed_intent_proposed_again_during_a_pause_is_answered_paused():
     row = intents.IntentRow(
-        "lab", "deck-2026-09-30-g1", "a" * 64, "subtasks", 4, 1, "failed", "todoist_rejected", 0, NOW, NOW
+        "lab", "deck-2026-09-30-g1", "a" * 64, "subtasks", 4, 1, "failed", ErrorCode.TODOIST_REJECTED, 0, NOW, NOW
     )
-    held = ("todoist_paused", 3600)
+    held = (ErrorCode.TODOIST_PAUSED, 3600)
     replayed = intents.describe(row, held, NOW, proposing=True)
     assert (replayed["state"], replayed["recorded"], replayed["error_code"], replayed["retry_after_seconds"]) == (
         "paused",
@@ -333,6 +365,17 @@ def test_a_failed_intent_proposed_again_during_a_pause_is_answered_paused():
     # taskIntentStatus reports what the ledger holds; without a pause the replay is the failure.
     assert intents.describe(row, held, NOW, proposing=False)["state"] == "failed"
     assert intents.describe(row, None, NOW, proposing=True)["state"] == "failed"
+
+
+def test_ledger_error_codes_are_stored_by_wire_name():
+    """D1 keeps the wire name ("" for none); a name this build does not know reads as none, never a crash."""
+    for code in ErrorCode:
+        assert intents.code_of(intents.code_name(code)) == code
+    assert intents.code_name(ErrorCode.UNSPECIFIED) == ""
+    assert intents.code_name(ErrorCode.TODOIST_RESULT_UNKNOWN) == "todoist_result_unknown"
+    assert task(error_code="quota_exhausted").error_code == ErrorCode.UNSPECIFIED
+    # The SQL's own spelling (REQUEUE_TASKS) is the wire name.
+    assert f"error_code = '{intents.code_name(ErrorCode.TODOIST_RESULT_UNKNOWN)}'" in sql.REQUEUE_TASKS.sql
 
 
 def test_the_daily_limit_resets_at_utc_midnight():

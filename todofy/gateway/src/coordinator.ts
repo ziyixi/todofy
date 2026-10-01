@@ -11,7 +11,7 @@ import type {
   OpsReportReceipt,
   TodofyStatus,
 } from '../../../contracts/ops-v1/ops-v1.ts';
-import type { TaskIntentResult } from '../../../contracts/task-intent-v1/task-intent-v1.ts';
+import type { WireObject } from '@ziyixi/proto/wire-json';
 import type { Env } from './env.ts';
 import { errorEnvelope, errorResponse, jsonText, type Context } from './http.ts';
 
@@ -67,9 +67,10 @@ export interface Coordinator extends Rpc.DurableObjectBranded {
   ops_set_guard(input: string): Promise<OpsAnswer<GuardState>>;
   ops_canary_result(eventId: string): Promise<OpsAnswer<CanaryResult>>;
   ops_report(report: string): Promise<OpsAnswer<OpsReportReceipt>>;
-  // task-intent-v1 (the same Ops entrypoint): a TaskIntent / TaskIntentRef as JSON text.
-  task_intent_propose(intent: string): Promise<OpsAnswer<TaskIntentResult>>;
-  task_intent_status(ref: string): Promise<OpsAnswer<TaskIntentResult>>;
+  // task-intent-v1 (the same Ops entrypoint): a TaskIntent / TaskIntentRef as JSON text; the answer is a
+  // TaskIntentResult in wire JSON (worker/todofy/core/intents.py writes it with the wire JSON profile).
+  task_intent_propose(intent: string): Promise<OpsAnswer<WireObject>>;
+  task_intent_status(ref: string): Promise<OpsAnswer<WireObject>>;
 }
 
 export function coordinator(env: Env): DurableObjectStub<Coordinator> {

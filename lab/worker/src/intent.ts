@@ -1,24 +1,49 @@
 /**
  * Sending liked papers to Todofy (docs/design.md §9, contracts/task-intent-v1): building the frozen
- * TaskIntent of one deck generation, checking it and Todofy's answers against the contract schema, and
- * the pure state machine of a send row. LabState owns the storage and the RPC.
+ * TaskIntent of one deck generation, reading Todofy's answers, and the pure state machine of a send row.
+ * LabState owns the storage and the RPC.
+ *
+ * The messages are the types generated from proto/todofy/taskintent/v1/task_intent.proto, written and read
+ * with the wire JSON profile (proto/README.md). An intent is written with toWire: those are the bytes Lab
+ * freezes and Todofy hashes. Before it is frozen it must also pass the contract's JSON Schema, whose value
+ * rules (lengths, patterns, distinct items) the IDL cannot express. A result is an output, read leniently:
+ * a state or error code from a newer Todofy reads as *_UNSPECIFIED and takes the default branch below (an
+ * unknown state is an unreadable answer, an unknown error code no reason), and Lab applies the value rules
+ * its control flow depends on (its own intent, counts, the retry hint).
  */
 import { validate } from '../../../contracts/ops-v1/validate.mjs';
 import schema from '../../../contracts/task-intent-v1/task-intent-v1.schema.json';
+import { TASK_INTENT_LIMITS, TASK_INTENT_VERSION } from '../../../contracts/task-intent-v1/task-intent-v1.ts';
+import { create } from '@ziyixi/proto/protobuf';
 import {
-  TASK_INTENT_LIMITS,
-  TASK_INTENT_VERSION,
+  ErrorCode,
+  ErrorCodeSchema,
+  Mode,
+  ModeSchema,
+  Source,
+  State,
+  TaskIntentItemSchema,
+  TaskIntentRefSchema,
+  TaskIntentResultSchema,
+  TaskIntentSchema,
   type TaskIntent,
   type TaskIntentItem,
-  type TaskIntentMode,
   type TaskIntentResult,
-} from '../../../contracts/task-intent-v1/task-intent-v1.ts';
-import type { SendState, SendStatus } from './api-types.ts';
+} from '@ziyixi/proto/todofy/taskintent/v1/task_intent_pb';
+import { fromWire, toWire, wireEnum, WireJsonError, type WireObject } from '@ziyixi/proto/wire-json';
+import type { SendMode, SendState, SendStatus } from './api-types.ts';
 import { absUrl, bareId, clip, oneLine } from './arxiv.ts';
 import { firstSentence } from './brief.ts';
 import { iso } from './config.ts';
 
 const SCHEMA = schema as { $defs: Record<string, unknown> };
+/** The send modes (Mode) and Todofy's error codes by wire name, as D1 and the owner API carry them. */
+export const SEND_MODES = wireEnum(ModeSchema, Mode);
+const ERROR_CODES = wireEnum(ErrorCodeSchema, ErrorCode);
+
+export function isSendMode(value: unknown): value is SendMode {
+  return typeof value === 'string' && SEND_MODES.value(value) !== undefined;
+}
 
 export interface SendCard {
   readonly position: number;
@@ -36,37 +61,44 @@ export function parentTitle(deckId: string, generation: number, count: number): 
 }
 
 /** The TaskIntent for `cards` (deck order), or null when a card has no valid arXiv ID. */
-export function buildIntent(deckId: string, generation: number, mode: TaskIntentMode, cards: readonly SendCard[], host: string | null): TaskIntent | null {
+export function buildIntent(deckId: string, generation: number, mode: SendMode, cards: readonly SendCard[], host: string | null): TaskIntent | null {
   const items: TaskIntentItem[] = [];
   for (const card of [...cards].sort((a, b) => a.position - b.position).slice(0, TASK_INTENT_LIMITS.itemsMax)) {
     const id = bareId(card.paper_id);
     if (id === null) return null;
     const title = clip(oneLine(card.title), TASK_INTENT_LIMITS.itemTitleMax) || id;
     const brief = card.brief === null ? '' : firstSentence(oneLine(card.brief), 120);
-    items.push(brief === '' ? { title, url: absUrl(id) } : { title, url: absUrl(id), description: brief });
+    items.push(create(TaskIntentItemSchema, brief === '' ? { title, url: absUrl(id) } : { title, url: absUrl(id), description: brief }));
   }
-  if (items.length === 0) return null;
+  const modeValue = SEND_MODES.value(mode);
+  if (items.length === 0 || modeValue === undefined) return null;
   const description = host === null ? '来自 Lab 论文雷达' : `来自 Lab 论文雷达\nhttps://${host}/deck/${deckId}`;
-  return {
+  return create(TaskIntentSchema, {
     version: TASK_INTENT_VERSION,
-    source: 'lab',
-    intent_id: intentId(deckId, generation),
-    mode,
+    source: Source.LAB,
+    intentId: intentId(deckId, generation),
+    mode: modeValue,
     parent: { title: parentTitle(deckId, generation, items.length), description },
     items,
-  };
+  });
 }
 
-/** Schema errors of a value of `$defs[name]` (empty when valid). */
+/** Schema errors of a wire value of `$defs[name]` (empty when valid). */
 export function contractErrors(name: 'TaskIntent' | 'TaskIntentRef' | 'TaskIntentResult', value: unknown): string[] {
   return validate(SCHEMA, name, value);
 }
 
-/** The intent as compact JSON when it passes the schema and the size bound, else null. */
+/** The intent's wire JSON, compact, when it passes the schema and the size bound, else null. */
 export function freeze(intent: TaskIntent): string | null {
-  if (contractErrors('TaskIntent', intent).length > 0) return null;
-  const json = JSON.stringify(intent);
+  const wire = toWire(TaskIntentSchema, intent);
+  if (contractErrors('TaskIntent', wire).length > 0) return null;
+  const json = JSON.stringify(wire);
   return new TextEncoder().encode(json).byteLength <= TASK_INTENT_LIMITS.intentMaxBytes ? json : null;
+}
+
+/** The TaskIntentRef that asks Todofy about `intent`, in wire JSON. */
+export function statusRef(intent: string): WireObject {
+  return toWire(TaskIntentRefSchema, create(TaskIntentRefSchema, { version: TASK_INTENT_VERSION, source: Source.LAB, intentId: intent }));
 }
 
 export async function sha256Hex(text: string): Promise<string> {
@@ -74,11 +106,58 @@ export async function sha256Hex(text: string): Promise<string> {
   return Array.from(new Uint8Array(digest), (b) => b.toString(16).padStart(2, '0')).join('');
 }
 
-/** Todofy's answer when it is a valid TaskIntentResult for this intent, else null (treated as unknown). */
+/** Lab's state for a known TaskIntentResult state; null for one this build does not know (the default branch). */
+function sendState(state: State): SendState | null {
+  switch (state) {
+    case State.PENDING:
+      return 'pending';
+    case State.CREATED:
+      return 'created';
+    case State.DUPLICATE:
+      return 'duplicate';
+    case State.PAUSED:
+      return 'paused';
+    case State.FAILED:
+      return 'failed';
+    case State.REJECTED:
+      return 'rejected';
+    case State.NOT_FOUND:
+      // Todofy never recorded it: Lab does not know whether it was sent.
+      return 'unknown';
+    default:
+      return null;
+  }
+}
+
+function within(value: number, low: number, high: number): boolean {
+  return value >= low && value <= high;
+}
+
+/**
+ * Todofy's answer when it reads as a TaskIntentResult for this intent with a state Lab knows, else null
+ * (treated as unknown: Lab asks again later). Read leniently; an unknown error code reads as none.
+ */
 export function asResult(value: unknown, intent: string): TaskIntentResult | null {
-  if (contractErrors('TaskIntentResult', value).length > 0) return null;
-  const result = value as TaskIntentResult;
-  return result.intent_id === intent ? result : null;
+  let result: TaskIntentResult;
+  try {
+    result = fromWire(TaskIntentResultSchema, value).message;
+  } catch (error) {
+    if (error instanceof WireJsonError) return null;
+    throw error;
+  }
+  const { tasksMax, retryAfterMaxSeconds } = TASK_INTENT_LIMITS;
+  const retry = result.retryAfterSeconds;
+  const valid =
+    result.version === TASK_INTENT_VERSION &&
+    result.source === Source.LAB &&
+    result.intentId === intent &&
+    sendState(result.state) !== null &&
+    within(result.tasksTotal, 0, tasksMax) &&
+    within(result.tasksCreated, 0, tasksMax) &&
+    (retry === undefined || within(retry, 1, retryAfterMaxSeconds)) &&
+    // Todofy always stamps a result; a lenient read takes null for "unset".
+    result.updatedAt !== undefined;
+  return valid ? result : null;
 }
 
 // ---- the send row -------------------------------------------------------------------------------------
@@ -89,7 +168,7 @@ export interface SendRow {
   readonly deck_id: string;
   readonly generation: number;
   readonly intent_id: string;
-  readonly mode: TaskIntentMode;
+  readonly mode: SendMode;
   readonly paper_ids: readonly string[];
   readonly payload: string | null;
   readonly payload_sha256: string;
@@ -131,18 +210,19 @@ export function nextPoll(now: number, createdAt: number, retryAfterSeconds: numb
   return now + (slow ? Math.max(hinted, POLL_SLOW_MS) : hinted);
 }
 
-/** The row after a valid TaskIntentResult (from proposeTasks or taskIntentStatus). */
+/** The row after a TaskIntentResult that `asResult` accepted (from proposeTasks or taskIntentStatus). */
 export function withResult(row: SendRow, result: TaskIntentResult, now: number): SendRow {
-  const state: SendState = result.state === 'not_found' ? 'unknown' : result.state;
-  const recorded = result.state === 'not_found' ? false : result.recorded;
+  const state = sendState(result.state) ?? 'unknown';
+  const recorded = result.state === State.NOT_FOUND ? false : result.recorded;
   return {
     ...row,
     state,
     recorded,
-    tasks_total: result.tasks_total,
-    tasks_created: result.tasks_created,
-    error_code: result.error_code,
-    next_poll_at: nextPoll(now, row.created_at, result.retry_after_seconds, state, recorded),
+    tasks_total: result.tasksTotal,
+    tasks_created: result.tasksCreated,
+    // A code this build does not know reads as ERROR_CODE_UNSPECIFIED: no reason, never a guessed one.
+    error_code: ERROR_CODES.name(result.errorCode),
+    next_poll_at: nextPoll(now, row.created_at, result.retryAfterSeconds ?? null, state, recorded),
     updated_at: now,
   };
 }

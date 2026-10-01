@@ -12,7 +12,11 @@ tables), uses only the standard library and therefore runs on Pyodide unchanged.
 - ``strict`` (inputs): unknown fields, unknown enum names, null, wrong types and missing REQUIRED fields
   raise ``WireJsonError``. Lenient (outputs): unknown fields are skipped and unknown enum names read as
   the zero value; both are reported as field paths in ``unrecognized`` (never values). A wrong type or
-  a missing REQUIRED field raises in both modes (REQUIRED means "always written").
+  a missing REQUIRED field raises in both modes (REQUIRED means "always written"). null reads as "no
+  value" only where ``to_wire`` writes it (a REQUIRED enum, message or optional scalar); anywhere else
+  (``"recorded": null``, a list, a field that is omitted when unset) it is a wrong type.
+- ``wire_name`` and ``wire_member`` give one enum value's wire name and back, for code that stores or
+  shows wire names outside a message (a database column); messages go through ``to_wire``/``from_wire``.
 - Enum names are matched exactly against the wire names (no case folding: "ſubtasks" is not "subtasks").
 - A timestamp is RFC 3339 UTC with 0-3 fraction digits and a real calendar time; it is kept in one
   canonical form: no fraction for a whole second, else exactly 3 digits ("07.5Z" becomes "07.500Z").
@@ -63,6 +67,21 @@ def _wire_table(cls: type[enum.IntEnum]) -> dict[str, enum.IntEnum]:
 
 def _enum_in(cls: type[enum.IntEnum], text: Any) -> enum.IntEnum | None:
     return _wire_table(cls).get(text) if isinstance(text, str) else None
+
+
+def wire_name(member: enum.IntEnum) -> str | None:
+    """The wire name of a generated enum member (``State.NOT_FOUND`` is ``"not_found"``); None for the zero value."""
+    return _enum_out(member)
+
+
+def wire_member[E: enum.IntEnum](cls: type[E], name: Any) -> E | None:
+    """The member of ``cls`` with this wire name (exact match); None for anything else, the zero value's included."""
+    return _enum_in(cls, name)  # type: ignore[return-value]
+
+
+def _nullable(field: Field) -> bool:
+    """Whether to_wire writes null for ``field`` when it has no value."""
+    return field.required and not field.repeated and (field.optional or field.kind == "enum")
 
 
 def _timestamp_in(text: str) -> str | None:
@@ -144,8 +163,12 @@ def _read(cls: type, value: Any, path: str, strict: bool, unrecognized: list[str
             unrecognized.append(at)
             continue
         if item is None:
+            # null is how outputs write "no value"; inputs omit the field instead, so a strict (input)
+            # reader refuses it, and a lenient one takes it only where to_wire writes it.
             if strict:
                 raise WireJsonError(f"{at}: null")
+            if not _nullable(field):
+                raise WireJsonError(f"{at}: wrong type")
             continue
         if field.repeated:
             if not isinstance(item, list):

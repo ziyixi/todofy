@@ -27,7 +27,10 @@
  *   skipped and an unknown enum name reads as the zero value, so a switch takes its default branch.
  *   Both are reported in `unrecognized` (field paths only, never values) for logs and metrics. A wrong
  *   type or a missing REQUIRED field still throws: REQUIRED means "always written", so its absence is
- *   a broken producer, not a newer one (proto/tools/profile_breaking.py keeps it that way in CI).
+ *   a broken producer, not a newer one (proto/tools/profile_breaking.py keeps it that way in CI). null
+ *   reads as "no value" only where toWire writes it (a REQUIRED enum, message or scalar with explicit
+ *   presence); anywhere else (`"recorded": null`, a list, a field that is omitted when unset) it is a
+ *   wrong type.
  *
  * Enum names are matched exactly against a table of the wire names (no case folding: "ſubtasks" is not
  * "subtasks"). Value rules (lengths, ranges, patterns) are not part of the profile: each consumer keeps
@@ -43,6 +46,8 @@ import {
   type DescEnum,
   type DescField,
   type DescMessage,
+  type DescService,
+  type JsonObject,
   type JsonValue,
   type Message,
   type MessageShape,
@@ -64,13 +69,53 @@ export interface ReadResult<T> {
   readonly unrecognized: readonly string[];
 }
 
-type JsonObject = { [key: string]: JsonValue };
+/**
+ * A message in wire JSON as it crosses a Workers RPC boundary (a structured clone of the contract's JSON
+ * object): the receiver reads it with `fromWire`, and `toWire`'s `JsonObject` is one. Its values are
+ * `unknown`, not `JsonValue`: that recursive type is too deep for the RPC types of @cloudflare/workers-types.
+ */
+export type WireObject = { readonly [key: string]: unknown };
+
+/**
+ * A proto service as the methods of a Workers RPC entrypoint (a service binding, not gRPC): one method per
+ * rpc, named as protobuf-es names it (`rpc ProposeTasks` is `proposeTasks`), taking and answering wire JSON
+ * objects. The caller writes its input with `toWire` and reads the answer with `fromWire` (lenient: it is
+ * an output); the implementation reads its input with `fromWire` (strict). Both stay plain JSON values, so
+ * a structured clone carries exactly the contract's JSON.
+ *
+ *   interface TodofyIntents extends Rpc.WorkerEntrypointBranded, WireService<typeof TaskIntentService> {}
+ */
+export type WireService<S extends DescService> = {
+  [M in keyof S['method']]: (input: WireObject) => Promise<WireObject>;
+};
+
+/**
+ * The wire names of a generated enum object (`typeof State`): its member names (protobuf-es strips the
+ * prefix) without the zero value, in lower case. `WireName<typeof Mode>` is `'subtasks' | 'separate'`.
+ */
+export type WireName<E extends Readonly<Record<string, number>>> = Lowercase<Exclude<keyof E & string, 'UNSPECIFIED'>>;
+
+/** One enum's wire names and values (`wireEnum`), the same table the codec reads and writes with. */
+export interface WireEnum<E extends Readonly<Record<string, number>>> {
+  /** Every wire name, in value order. */
+  readonly names: readonly WireName<E>[];
+  /** The wire name of `value`: null for the zero value and for a number this build does not know. */
+  name(value: number): WireName<E> | null;
+  /** The value of a wire name (exact match), or undefined for a name this build does not know. */
+  value(name: string): E[keyof E] | undefined;
+}
 
 const RFC3339_UTC = /^([0-9]{4})-([0-9]{2})-([0-9]{2})T([0-9]{2}):([0-9]{2}):([0-9]{2})(?:\.([0-9]{1,3}))?Z$/;
 const requiredCache = new WeakMap<DescField, boolean>();
 const wireTables = new WeakMap<DescEnum, ReadonlyMap<string, number>>();
 /** FeatureSet.FieldPresence.IMPLICIT: a proto3 field without `optional` (unset means default). */
 const IMPLICIT = 2;
+
+/** Whether toWire writes null for `field` when it has no value: a REQUIRED enum, message or explicit-presence scalar. */
+function nullable(field: DescField): boolean {
+  const kind = field.fieldKind === 'enum' || field.fieldKind === 'message' || (field.fieldKind === 'scalar' && field.presence !== IMPLICIT);
+  return kind && required(field);
+}
 
 function required(field: DescField): boolean {
   let value = requiredCache.get(field);
@@ -110,6 +155,26 @@ function enumFromWire(field: DescField, text: string): number | undefined {
   if (field.enum === undefined) throw new WireJsonError('not an enum');
   // An exact lookup: "PENDING", "STATE_PENDING" or a Unicode look-alike such as "pendıng" is not a v1 value.
   return wireTable(field.enum).get(text);
+}
+
+/**
+ * The wire names of the enum `desc` (its `GenEnum` schema) typed by its generated object `values`, e.g.
+ * `wireEnum(ModeSchema, Mode)`. For code that stores or shows wire names outside a message (a database
+ * column, an owner API); messages go through toWire/fromWire. Throws when the object and the descriptor
+ * disagree, which only a mismatched pair of arguments can cause.
+ */
+export function wireEnum<const E extends Readonly<Record<string, number>>>(desc: DescEnum, values: E): WireEnum<E> {
+  const table = wireTable(desc);
+  const members = Object.entries(values).filter(([key]) => key !== 'UNSPECIFIED');
+  if (members.length !== table.size || members.some(([key, number]) => table.get(key.toLowerCase()) !== number)) {
+    throw new WireJsonError(`${desc.typeName}: the generated object does not match the descriptor`);
+  }
+  const names = new Map([...table].map(([name, number]) => [number, name as WireName<E>]));
+  return {
+    names: [...names.values()],
+    name: (value) => names.get(value) ?? null,
+    value: (name) => table.get(name) as E[keyof E] | undefined,
+  };
 }
 
 /** The canonical RFC 3339 form of a wire timestamp, or undefined when it is not a real UTC time. */
@@ -249,8 +314,9 @@ function readMessage(schema: DescMessage, json: unknown, path: string, strict: b
     }
     if (value === null) {
       // null is how outputs write "no value"; inputs omit the field instead (contracts' rule), so a
-      // strict (input) reader refuses null.
+      // strict (input) reader refuses null. A lenient reader takes it only where toWire can write it.
       if (strict) throw new WireJsonError(`${at}: null`);
+      if (!nullable(field)) throw new WireJsonError(`${at}: wrong type`);
       continue;
     }
     switch (field.fieldKind) {

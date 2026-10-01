@@ -5,7 +5,8 @@
  * the browser): repeating a request with the same op_id returns the first response. Errors:
  * `{error: {code, message, request_id}}`.
  */
-import type { TaskIntentErrorCode, TaskIntentMode } from '../../../contracts/task-intent-v1/task-intent-v1.ts';
+import type { ErrorCode, Mode } from '@ziyixi/proto/todofy/taskintent/v1/task_intent_pb';
+import type { WireName } from '@ziyixi/proto/wire-json';
 import type { TldrModel } from './models.ts';
 
 export const API_PREFIX = '/api';
@@ -20,7 +21,13 @@ export type Timestamp = string;
 /** UUID v4 chosen by the browser for one mutation. */
 export type OpId = string;
 export type Decision = 'like' | 'dislike';
-export type SendMode = TaskIntentMode;
+/**
+ * task-intent-v1's Mode and ErrorCode by wire name, derived from the generated enums (proto/README.md), so
+ * a new code in the IDL is a type error in the UI until it has its copy. Type-only: the UI bundles none of
+ * the generated code (its typecheck resolves `@ziyixi/proto` through ../worker/node_modules).
+ */
+export type SendMode = WireName<typeof Mode>;
+export type TodofyErrorCode = WireName<typeof ErrorCode>;
 
 /** Cards per deck (the day's top picks). */
 export const DECK_SIZE = 20;
@@ -199,7 +206,7 @@ export interface SendStatus {
   readonly tasks_total: number;
   readonly tasks_created: number;
   /** A task-intent-v1 error code, or Lab's own `invalid_input` / `unavailable` / `busy`. */
-  readonly error_code: TaskIntentErrorCode | 'invalid_input' | 'unavailable' | 'busy' | null;
+  readonly error_code: TodofyErrorCode | 'invalid_input' | 'unavailable' | 'busy' | null;
   /** The content is frozen: a retry resends it unchanged. */
   readonly frozen: boolean;
   /** When the UI may poll again; null when settled. */

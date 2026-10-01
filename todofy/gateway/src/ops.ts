@@ -14,7 +14,10 @@
  *
  * The same entrypoint carries task-intent-v1 (contracts/task-intent-v1/README.md): another app in
  * the account proposes Todoist tasks with `proposeTasks` and reads the outcome with
- * `taskIntentStatus`; Todofy stays the only Todoist writer.
+ * `taskIntentStatus`; Todofy stays the only Todoist writer. Their signatures come from the generated
+ * `TaskIntentService` (proto/todofy/taskintent/v1/task_intent.proto): wire JSON in, wire JSON out. The
+ * core reads the input strictly and writes the result with the wire JSON profile (proto/README.md); this
+ * class only passes both on, so the gateway bundles none of the generated code (types only).
  */
 import { WorkerEntrypoint } from 'cloudflare:workers';
 import { OPS_LIMITS } from '../../../contracts/ops-v1/ops-v1.ts';
@@ -30,12 +33,8 @@ import type {
   TodofyStatus,
 } from '../../../contracts/ops-v1/ops-v1.ts';
 import { TASK_INTENT_LIMITS } from '../../../contracts/task-intent-v1/task-intent-v1.ts';
-import type {
-  TaskIntent,
-  TaskIntentOps,
-  TaskIntentRef,
-  TaskIntentResult,
-} from '../../../contracts/task-intent-v1/task-intent-v1.ts';
+import type { TaskIntentService } from '@ziyixi/proto/todofy/taskintent/v1/task_intent_pb';
+import type { WireObject, WireService } from '@ziyixi/proto/wire-json';
 import { coordinator, type Coordinator, type OpsAnswer } from './coordinator.ts';
 import type { Env } from './env.ts';
 
@@ -56,7 +55,7 @@ function json(value: unknown): string {
   }
 }
 
-export class Ops extends WorkerEntrypoint<Env> implements TodofyOps, TaskIntentOps {
+export class Ops extends WorkerEntrypoint<Env> implements TodofyOps, WireService<typeof TaskIntentService> {
   private async call<T>(method: (core: DurableObjectStub<Coordinator>) => Promise<OpsAnswer<T>>): Promise<T> {
     let answer: OpsAnswer<T>;
     try {
@@ -89,14 +88,14 @@ export class Ops extends WorkerEntrypoint<Env> implements TodofyOps, TaskIntentO
     return await this.call((core) => core.ops_report(text));
   }
 
-  async proposeTasks(intent: TaskIntent): Promise<TaskIntentResult> {
+  async proposeTasks(intent: WireObject): Promise<WireObject> {
     const text = json(intent);
     // The bound of the contract, on the compact JSON the core parses; refused before waking the object.
     if (encoder.encode(text).byteLength > TASK_INTENT_LIMITS.intentMaxBytes) throw fail('invalid_input');
     return await this.call((core) => core.task_intent_propose(text));
   }
 
-  async taskIntentStatus(ref: TaskIntentRef): Promise<TaskIntentResult> {
+  async taskIntentStatus(ref: WireObject): Promise<WireObject> {
     const text = json(ref);
     if (encoder.encode(text).byteLength > TASK_INTENT_LIMITS.intentMaxBytes) throw fail('invalid_input');
     return await this.call((core) => core.task_intent_status(text));

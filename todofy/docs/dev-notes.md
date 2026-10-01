@@ -658,9 +658,18 @@ Another app in the account proposes Todoist tasks through the gateway's `Ops` en
 (`proposeTasks`, `taskIntentStatus`; contract `../contracts/task-intent-v1`). Todofy never calls Gemini
 for an intent, never fetches its URLs, and logs only the source, intent ID, task number, counts and codes.
 
-Recording (`propose`, in this order): the input is checked against every schema rule (`core/intents.py`,
-`fullmatch`, closed objects, code-point lengths, distinct items; a lone surrogate is refused) and frozen
-as its canonical JSON (schema key order, compact, absent optionals left out) with its SHA-256. (1) A row
+Recording (`propose`, in this order): the input is checked against every schema rule (`core/intents.py`:
+a strict read of the generated `TaskIntent` with the wire JSON codec for closed objects, known enum names
+and types, then `fullmatch`, code-point lengths, distinct items; a lone surrogate is refused) and frozen
+as its canonical JSON (its wire JSON: schema key order, compact, absent optionals left out) with its
+SHA-256. `tests/unit/test_intents.py` pins the canonical bytes and hash of every intent fixture.
+
+The messages and enums are generated from `proto/todofy/taskintent/v1/task_intent.proto` into the
+stdlib-only package `ziyixi_proto` (the Worker's one `[project]` dependency; `uv sync` builds it,
+`pywrangler sync` vendors it into `python_modules/`, never committed; `proto/README.md`). Results are
+generated `TaskIntentResult` messages written with `to_wire`. The ledger keeps error codes by wire name
+(`code_name`/`code_of`); a name this build does not know (a row written by a newer build) reads as
+`ErrorCode.UNSPECIFIED` and is answered as `null`, never a crash. (1) A row
 for `(source, intent_id)` answers first: another hash → `rejected`/`intent_conflict`; created →
 `duplicate`; failed → re-queued unless a pause holds (`REQUEUE` + `REQUEUE_TASKS` in one batch: refused
 tasks back to `pending`, unknown ones to `recheck`, a new 48-try/7-day window, the text restored if

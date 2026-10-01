@@ -1,11 +1,15 @@
 /**
  * Bindings, vars and secrets of the Worker "lab" (../wrangler.toml, docs/design.md §3).
  */
-import type { TaskIntentOps } from '../../../contracts/task-intent-v1/task-intent-v1.ts';
+import type { TaskIntentService } from '@ziyixi/proto/todofy/taskintent/v1/task_intent_pb';
+import type { WireService } from '@ziyixi/proto/wire-json';
 import type { LabState } from './state.ts';
 
-/** Todofy's named entrypoint "Ops" as Lab sees it: only the task-intent-v1 methods (docs/design.md §9). */
-export interface TodofyIntentEntrypoint extends Rpc.WorkerEntrypointBranded, TaskIntentOps {}
+/**
+ * Todofy's named entrypoint "Ops" as Lab sees it: only the task-intent-v1 methods (docs/design.md §9), as the
+ * generated TaskIntentService declares them (wire JSON in and out, proto/README.md).
+ */
+export interface TodofyIntentEntrypoint extends Rpc.WorkerEntrypointBranded, WireService<typeof TaskIntentService> {}
 
 export interface Env {
   readonly DB: D1Database;

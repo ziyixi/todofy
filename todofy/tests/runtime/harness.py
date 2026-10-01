@@ -36,6 +36,7 @@ from typing import Any
 
 import httpx
 import pytest
+import ziyixi_proto
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.asymmetric import padding, rsa
 
@@ -118,15 +119,31 @@ def _checkout_lock(name: str) -> Iterator[None]:
             fcntl.flock(handle, fcntl.LOCK_UN)
 
 
+def _vendored_proto_is_current() -> bool:
+    """Whether ``python_modules/ziyixi_proto`` holds the same files as the ``ziyixi_proto`` uv installed.
+
+    pywrangler re-syncs only when pyproject.toml or pylock.toml change, but the generated package changes
+    with proto/ (uv rebuilds the installed copy then: proto/python/pyproject.toml's cache keys), so a
+    stale vendored copy would test the Worker against yesterday's IDL.
+    """
+
+    def files(root: Path) -> dict[Path, bytes] | None:
+        return {path.relative_to(root): path.read_bytes() for path in root.rglob("*.py")} if root.is_dir() else None
+
+    return files(Path(ziyixi_proto.__file__).parent) == files(ROOT / "python_modules" / "ziyixi_proto")
+
+
 @functools.cache
 def _ensure_synced() -> None:
     """`pywrangler sync` once per process, before the first server; `pywrangler dev` would run it
     before every start (and rebuild ``python_modules/`` whenever pyproject.toml or pylock.toml is
-    newer), then run this same `wrangler dev`. A no-op once synced; the lock keeps concurrent
-    processes from rebuilding it under each other's servers."""
+    newer), then run this same `wrangler dev`. A no-op once synced, unless the vendored proto package
+    is stale (then forced); the lock keeps concurrent processes from rebuilding it under each other's
+    servers."""
     with _checkout_lock("pywrangler-sync"):
+        force = [] if _vendored_proto_is_current() else ["--force"]
         subprocess.run(
-            [sys.executable, "-m", "pywrangler", "sync"],
+            [sys.executable, "-m", "pywrangler", "sync", *force],
             cwd=ROOT,
             env=os.environ | {"CI": "true", "WRANGLER_SEND_METRICS": "false"},
             capture_output=True,

@@ -8,6 +8,7 @@
     "node": ">=26"
   },
   "scripts": {
+    "postinstall": "node ../../proto/tools/ensure.mjs",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "lint": "eslint ."
@@ -21,6 +22,7 @@
     "vitest": "4.1.11"
   },
   "dependencies": {
-    "@ziyixi/edge-auth": "file:../../packages/edge-auth"
+    "@ziyixi/edge-auth": "file:../../packages/edge-auth",
+    "@ziyixi/proto": "file:../../proto/ts"
   }
 }

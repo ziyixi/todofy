@@ -125,7 +125,7 @@ class Classify(unittest.TestCase):
         self.assertEqual(ci_changes.CHECK_ONLY, {"flowday"})
 
     def test_task_intent_code_deploys_lab_and_todofy(self):
-        """TASK_INTENT_LIMITS ship in Lab and in Todofy's gateway; the schema only in Lab."""
+        """TASK_INTENT_LIMITS ship in Lab and in Todofy's gateway; the schema only in Lab (its types are generated)."""
         self.assertEqual(push(["contracts/task-intent-v1/task-intent-v1.ts"]), expect(T, T, T, T, F, **ALL_CHECKED, lab_deploy=T))
         self.assertEqual(
             push(["contracts/task-intent-v1/task-intent-v1.schema.json"]), expect(T, T, T, F, F, **ALL_CHECKED, lab_deploy=T)
@@ -198,37 +198,40 @@ class Classify(unittest.TestCase):
                 self.assertFalse(push([path])["infra"])
         self.assertEqual(push(["infra/storage.tf", "lab/wrangler.toml"]), expect(F, F, T, F, F, **LAB, infra=T))
 
-    def test_proto_checks_its_users_and_deploys_none_while_they_only_test_with_it(self):
-        """proto/ re-checks every PROTO_USERS app and runs Proto checks; Lab and Todofy use it in tests only."""
-        self.assertEqual(ci_changes.PROTO_USERS, {"lab": False, "todofy": False})
+    def test_proto_checks_and_deploys_its_users_and_runs_contracts(self):
+        """proto/ re-checks every PROTO_USERS app, runs Proto checks and Contracts (the task-intent-v1 tests check
+        the codecs against the schema), and deploys Lab and Todofy, whose Workers bundle the generated code."""
+        self.assertEqual(ci_changes.PROTO_USERS, {"lab": True, "todofy": True})
         for path in (
             "proto/todofy/taskintent/v1/task_intent.proto",
             "proto/ts/wire-json.ts",
             "proto/python/src/ziyixi_proto/wire_json.py",
+            "proto/python/build_backend.py",
             "proto/package-lock.json",
-            "proto/README.md",
-            "proto/test/task-intent.test.ts",
+            "proto/buf.lock",
         ):
             with self.subTest(path=path):
-                self.assertEqual(push([path]), expect(T, F, F, F, F, proto=T, lab_check=T))
+                self.assertEqual(push([path]), expect(T, F, T, T, F, proto=T, **LAB))
+        for path in (
+            "proto/README.md",
+            "proto/test/task-intent.test.ts",
+            "proto/testdata/wire-profile-cases.json",
+            "proto/scripts/breaking.sh",
+            "proto/tools/profile_breaking.py",
+        ):
+            with self.subTest(path=path):
+                self.assertEqual(push([path]), expect(T, F, T, F, F, proto=T, lab_check=T))
         self.assertFalse(push(["protocol.md"])["proto"])
 
-    def test_proto_deploys_a_user_whose_bundle_compiles_it_in_unless_only_tests_or_docs_changed(self):
+    def test_proto_deploys_only_a_user_whose_bundle_compiles_it_in(self):
         saved = ci_changes.PROTO_USERS
         try:
             ci_changes.PROTO_USERS = {"lab": True, "todofy": False}
             for path in ("proto/todofy/taskintent/v1/task_intent.proto", "proto/ts/wire-json.ts", "proto/buf.lock"):
                 with self.subTest(path=path):
-                    self.assertEqual(push([path]), expect(T, F, F, F, F, proto=T, **LAB))
-            for path in (
-                "proto/README.md",
-                "proto/test/task-intent.test.ts",
-                "proto/testdata/wire-profile-cases.json",
-                "proto/scripts/breaking.sh",
-                "proto/tools/profile_breaking.py",
-            ):
-                with self.subTest(path=path):
-                    self.assertEqual(push([path]), expect(T, F, F, F, F, proto=T, lab_check=T))
+                    self.assertEqual(push([path]), expect(T, F, T, F, F, proto=T, **LAB))
+            ci_changes.PROTO_USERS = {"lab": False, "todofy": False}
+            self.assertEqual(push(["proto/ts/wire-json.ts"]), expect(T, F, T, F, F, proto=T, lab_check=T))
         finally:
             ci_changes.PROTO_USERS = saved
 

@@ -3,8 +3,9 @@ name = "todofy"
 version = "0.1.0"
 description = "Turns Mail Hero webhook events into Todoist tasks on Cloudflare Workers."
 requires-python = ">=3.14"
-# The Worker runs stdlib-only on Pyodide; keep this list empty.
-dependencies = []
+# The Worker runs stdlib-only on Pyodide. Its one dependency is the generated wire JSON types of the proto/
+# IDL (proto/README.md), itself stdlib only; pywrangler vendors it into python_modules/. Add nothing else.
+dependencies = ["ziyixi-proto"]
 
 [dependency-groups]
 dev = [
@@ -16,8 +17,6 @@ dev = [
     "jsonschema==4.26.0",
     "pyyaml==6.0.3",
     "ruff==0.16.9",
-    # The proto/ IDL's generated wire JSON types (proto/README.md); tests only until the Worker imports it.
-    "ziyixi-proto",
 ]
 
 [tool.uv]
@@ -26,6 +25,8 @@ package = false
 [tool.uv.sources]
 # Built by proto/python/build_backend.py, which generates the modules first (never committed). Not editable:
 # pywrangler vendors [project] dependencies from this same source, and a Worker needs the files, not a .pth.
+# `uv sync` must run before `pywrangler sync`: pywrangler builds the wheel inside Pyodide, which cannot run
+# the generator, so the build there only checks that the generated files are current.
 ziyixi-proto = { path = "../proto/python" }
 
 [tool.ruff]

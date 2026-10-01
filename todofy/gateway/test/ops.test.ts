@@ -8,7 +8,8 @@ import processing from '../../../contracts/ops-v1/fixtures/CanaryResult/processi
 import daily from '../../../contracts/ops-v1/fixtures/OpsReport/daily.json';
 import stored from '../../../contracts/ops-v1/fixtures/OpsReportReceipt/stored.json';
 import intentSchema from '../../../contracts/task-intent-v1/task-intent-v1.schema.json';
-import type { TaskIntent, TaskIntentOps, TaskIntentRef } from '../../../contracts/task-intent-v1/task-intent-v1.ts';
+import type { TaskIntentService } from '@ziyixi/proto/todofy/taskintent/v1/task_intent_pb';
+import type { WireObject, WireService } from '@ziyixi/proto/wire-json';
 import subtasks from '../../../contracts/task-intent-v1/fixtures/TaskIntent/subtasks-3.json';
 import labRef from '../../../contracts/task-intent-v1/fixtures/TaskIntentRef/lab.json';
 import pendingNew from '../../../contracts/task-intent-v1/fixtures/TaskIntentResult/pending-new.json';
@@ -106,12 +107,12 @@ describe('the Ops entrypoint (contracts/ops-v1)', () => {
 });
 
 describe('the task-intent-v1 methods of the Ops entrypoint (contracts/task-intent-v1)', () => {
-  const intent = subtasks as TaskIntent;
-  const ref = labRef as TaskIntentRef;
+  const intent: WireObject = subtasks;
+  const ref: WireObject = labRef;
 
-  it('implements TaskIntentOps', () => {
+  it('implements the generated TaskIntentService as Workers RPC methods', () => {
     const { ops } = entrypoint(() => ({ ok: created }));
-    const declared: TaskIntentOps = ops;
+    const declared: WireService<typeof TaskIntentService> = ops;
     expect(typeof declared.proposeTasks).toBe('function');
     expect(typeof declared.taskIntentStatus).toBe('function');
   });
@@ -153,7 +154,7 @@ describe('the task-intent-v1 methods of the Ops entrypoint (contracts/task-inten
     const big = { ...intent, items };
     expect(new TextEncoder().encode(JSON.stringify(big)).byteLength).toBeGreaterThan(65536);
     expect(await rejection(ops.proposeTasks(big))).toBe('invalid_input');
-    expect(await rejection(ops.proposeTasks(undefined as unknown as TaskIntent))).toBe('invalid_input');
+    expect(await rejection(ops.proposeTasks(undefined as unknown as WireObject))).toBe('invalid_input');
     const cyclic: Record<string, unknown> = {};
     cyclic['self'] = cyclic;
     expect(await rejection(ops.taskIntentStatus(cyclic as never))).toBe('invalid_input');

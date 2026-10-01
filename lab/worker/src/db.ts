@@ -27,7 +27,7 @@ import { absUrl, bareId, pdfUrl } from './arxiv.ts';
 import { firstSentence } from './brief.ts';
 import { iso } from './config.ts';
 import { deckState } from './deck.ts';
-import { sendStatus, unfrozen, type LabErrorCode, type SendRow } from './intent.ts';
+import { isSendMode, sendStatus, unfrozen, type LabErrorCode, type SendRow } from './intent.ts';
 import { DEFAULT_TLDR_MODEL, TLDR_MODELS, type TldrModel } from './models.ts';
 import type { SendState } from './api-types.ts';
 
@@ -82,7 +82,7 @@ export function settingsFrom(rows: readonly { key: string; value: string }[]): S
         if (typeof value === 'boolean') out.ingest_paused = value;
         break;
       case 'send_mode':
-        if (value === 'subtasks' || value === 'separate') out.send_mode = value;
+        if (isSendMode(value)) out.send_mode = value;
         break;
     }
   }

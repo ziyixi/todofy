@@ -5,9 +5,13 @@ change: each contract keeps its JSON bytes through a small *wire JSON profile* c
 `.proto` files give every app generated types and enum tables, and `buf lint` and `buf breaking` make
 "renamed, renumbered, retyped or removed" a CI failure.
 
-Status: the foundation. `task_intent.proto` mirrors `contracts/task-intent-v1`. Lab (TypeScript) and
-Todofy (Python) use the generated code **in tests only**: no Worker bundle contains it yet, and
-`contracts/task-intent-v1` (JSON Schema, fixtures, `task-intent-v1.ts`) is still the wire contract.
+Status: `task_intent.proto` is the IDL of `contracts/task-intent-v1`, and both sides run on the generated
+code (2026-10-01): Lab (TypeScript) builds its intents as generated messages and reads Todofy's results with
+the codec; todofy-core (Python) reads every input strictly with the codec and writes every result as a
+generated message. Todofy's gateway takes its method signatures from the generated service (types only).
+The wire bytes did not change (each side's tests pin them). `contracts/task-intent-v1` keeps the JSON
+Schema and fixtures as the published wire description, and `task-intent-v1.ts` only the value rules the IDL
+cannot express (bounds, URL hosts).
 
 ## Rules
 
@@ -49,8 +53,8 @@ Todofy (Python) use the generated code **in tests only**: no Worker bundle conta
 | `tools/gen_py.py` | The stdlib-only Python generator (frozen dataclasses, `IntEnum`s, field tables) |
 | `tools/profile_breaking.py` | The profile's breaking rules (rule 4) |
 | `scripts/breaking.sh`, `scripts/rules-selftest.sh` | The breaking gate against a base commit; the rules self-test |
-| `testdata/wire-profile-cases.json` | 34 edge cases (timestamps, integer spellings, enum look-alikes, missing fields) that both codecs must answer identically |
-| `test/*.test.ts`, `test/python/` | The codec and IDL tests, the same cases in both languages |
+| `testdata/wire-profile-cases.json` | 39 edge cases (timestamps, integer spellings, enum look-alikes, missing fields, null) that both codecs must answer identically |
+| `test/*.test.ts`, `test/python/` | The codec and IDL tests, the same cases in both languages; `test/cross-language.test.ts` pipes bytes through both codecs (`test/python/roundtrip.py` in a child process) |
 
 Every directory directly inside `ts/` and `python/src/ziyixi_proto/` is generated (`.gitignore`); every
 file there is hand-written.
@@ -70,9 +74,11 @@ install.
 `"postinstall": "node ../../proto/tools/ensure.mjs"`. npm links `node_modules/@ziyixi/proto` to `proto/ts`
 whether or not anything is generated, then the postinstall generates. Generated files import
 `@bufbuild/protobuf`, which Node, TypeScript, vitest and wrangler's esbuild resolve from the real path,
-`proto/node_modules`: one copy for every app, no `paths`, `dedupe` or alias settings. (Checked on
-2026-10-01 with a scratch import in Lab's `src/`: `wrangler deploy --dry-run` bundled the generated file,
-`wire-json.ts` and one runtime from `../proto/node_modules`, +153 KiB, +31 KiB gzip.)
+`proto/node_modules`: one copy for every app, no `paths`, `dedupe` or alias settings. Measured on
+2026-10-01 with Lab's production dry-run: its `index.js` grew from 166,530 to 336,996 bytes (gzip 44,365 to
+79,211; wrangler's upload total 162.63 to 329.10 KiB, gzip 43.45 to 77.70 KiB), of which the protobuf-es
+runtime is about 145 KB (descriptor decoding: `descriptor_pb`, the registry, the binary reader) and the
+generated code and `wire-json.ts` about 21 KB. Todofy's gateway imports types only: +0.1 KiB (a new bound).
 
 ```ts
 import { create } from '@ziyixi/proto/protobuf';
@@ -82,6 +88,14 @@ import { fromWire, toWire } from '@ziyixi/proto/wire-json';
 const { message, unrecognized } = fromWire(TaskIntentResultSchema, JSON.parse(text)); // an output: lenient
 if (message.state === State.CREATED) { /* ... */ }
 ```
+
+Across a Workers service binding (not gRPC), `WireService<typeof TaskIntentService>` turns a generated service
+into the entrypoint's methods (`proposeTasks(input: WireObject): Promise<WireObject>`): the caller declares its
+binding with it, the implementation `implements` it, and both sides keep plain JSON objects on the wire.
+`wireEnum(ModeSchema, Mode)` gives one enum's wire names and back for code that stores or shows them outside a
+message (a D1 column, an owner API), and `WireName<typeof Mode>` is the union of those names as a type
+(`'subtasks' | 'separate'`): Lab's UI types derive from it, so a new enum value fails its typecheck until the
+UI handles it. Python has `wire_name(member)` and `wire_member(cls, name)`.
 
 **Python.** Todofy declares `ziyixi-proto` (today in its `dev` dependency group) with
 `[tool.uv.sources] ziyixi-proto = { path = "../proto/python" }`. uv builds it with
@@ -97,13 +111,13 @@ from ziyixi_proto.wire_json import from_wire, to_wire
 read = from_wire(pb.TaskIntent, json.loads(text), strict=True)  # an input: strict
 ```
 
-The source is not editable on purpose: when a Python Worker imports the package, it moves to
-`[project] dependencies`, and `pywrangler sync` vendors it into `python_modules/` from this same source.
-pywrangler builds that wheel inside Pyodide, which cannot start processes; the backend then only verifies
-the stamp (which `uv sync` on the host already made current) and copies files. Verified on 2026-10-01 with
-a scratch copy of Todofy that imported the package from `worker/`: `pywrangler sync`, `pywrangler deploy
---dry-run` (the bundle lists `python_modules/ziyixi_proto/...`) and the workerd runtime tests, where the
-module loaded from `python_modules` and round-tripped a result.
+The source is not editable on purpose: todofy-core imports the package, so it is in Todofy's
+`[project] dependencies`, and `pywrangler sync` vendors it into `python_modules/` from this same source
+(`pylock.toml` lists it as a directory). pywrangler builds that wheel inside Pyodide, which cannot start
+processes; the backend then only verifies the stamp (which `uv sync` on the host already made current, so
+`uv sync` runs first) and copies files. pywrangler re-syncs only when `pyproject.toml` or `pylock.toml`
+change, so Todofy's runtime test harness compares the vendored copy with the installed one and forces a
+sync when they differ; for `pywrangler dev` by hand after an IDL change, run `uv run pywrangler sync --force`.
 
 **Editors.** After the app's install, VS Code resolves every import: TypeScript through the linked package
 (the generated `.ts` files are real files under `proto/ts`), Python through the installed package in
@@ -156,6 +170,8 @@ contracts send:
 - a `Timestamp` is RFC 3339 UTC with 0-3 fraction digits and a real calendar time, written in one canonical
   form (no fraction for a whole second, else 3 digits);
 - an integer is a JSON number with a zero fractional part (`1.0` reads as 1, as `JSON.parse` must);
+- null is "no value" only where the writer writes it (a `REQUIRED` enum, message or `optional` scalar);
+  anywhere else (`"recorded": null`, a list, a field that is omitted when unset) it is a wrong type;
 - **strict** reads (inputs) refuse unknown fields and enum names, `null`, wrong types and a missing
   `REQUIRED` field; **lenient** reads (outputs) skip unknown fields and read unknown enum names as 0, both
   listed by path in `unrecognized` (never with values); a wrong type or a missing `REQUIRED` field still
@@ -168,8 +184,10 @@ control flow depends on even on a lenient read.
 Why not ProtoJSON: it renames fields to lowerCamelCase, writes enums as `"STATE_PENDING"`, omits
 `null`s, and its "ignore unknown" mode silently turns every v1 enum value into 0. Why not the official
 Python runtime: about 1 MB more per Python Worker and 2.4-4 times the CPU of today's code, against about
-11 KB of generated standard-library code. The protobuf-es runtime adds about 32 KB gzip to a TypeScript
-Worker that bundles it.
+15 KB of generated standard-library code and codec (todofy-core's upload grew from 482.68 to 499.79 KiB,
+gzip 136.54 to 142.01 KiB; in local workerd without a memory snapshot, importing `core/intents.py` with it
+costs about 7 ms more than the hand-written version did). The protobuf-es runtime adds about 34 KB gzip to
+a TypeScript Worker that bundles it.
 
 ## CI
 
@@ -182,10 +200,10 @@ runs everything: first run, unusable base, dispatch), `breaking.sh` compares wit
 the log; a base that predates `proto/` has nothing to break. The job is in `CI gate`'s needs and in
 `CHECK_JOBS` (a push to `main` reuses a green branch run only if it passed Proto checks).
 
-A `proto/` change also re-checks every app in `PROTO_USERS` (Lab and Todofy today). It deploys a user only
-when the user's bundle can change: the user compiles the package in (`PROTO_USERS[app]` is `True`) and the
-change is outside tests, test data, the breaking scripts and Markdown. Today both users are test-only, so
-no `proto/` change deploys anything.
+A `proto/` change also re-checks every app in `PROTO_USERS` (Lab and Todofy) and runs `Contracts` (the
+task-intent-v1 tests check the codecs against the schema). It deploys a user only when the user's bundle can
+change: the user compiles the package in (`PROTO_USERS[app]` is `True`, as for both today) and the change is
+outside tests, test data, the breaking scripts and Markdown.
 
 ## Later
 
@@ -193,5 +211,6 @@ Planned, not in this foundation: `google.api.http` annotations and AIP-style res
 app's owner UI API with an in-repository transcoder, and the full replacement of `ops-v1`,
 `mail-received-v1` and `recommendation-v1` (each a package per service, e.g. `ops/status/v1`,
 `mailhero/webhook/v1`). Shared types come from the same googleapis dependency (`google.rpc.Status`) or a
-`common/<name>/v1` package. Each contract moves consumer first, keeps every frozen v1 byte (Mail Hero's
-legacy fixtures are pinned by SHA-256), and only then lets a Worker bundle the generated code.
+`common/<name>/v1` package. Each contract moves the way task-intent-v1 did: the IDL and tests first, then
+both sides on the generated code with every frozen v1 byte pinned by tests (Mail Hero's legacy fixtures are
+pinned by SHA-256; Todofy pins the canonical hashes of the task-intent fixtures, which D1 keeps for 400 days).

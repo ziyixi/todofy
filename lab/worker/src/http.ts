@@ -14,13 +14,12 @@ import {
   withPrivateHeaders,
   type AccessPolicy,
 } from '@ziyixi/edge-auth';
-import { TASK_INTENT_MODES } from '../../../contracts/task-intent-v1/task-intent-v1.ts';
 import { CATEGORIES_MAX, SEEDS_MAX, type ApiError, type CsrfResponse, type Decision, type SendMode, type Settings } from './api-types.ts';
 import { bareId } from './arxiv.ts';
 import { buildSha, isDay, publicHost } from './config.ts';
 import { CATEGORY_SETTING_RE, decodeCursor, deckView, readDeck, readLiked, readSeeds, readSettings, sendRowFrom, summaryView, type SendDbRow } from './db.ts';
 import type { Env } from './env.ts';
-import { pollable, sendStatus } from './intent.ts';
+import { isSendMode, pollable, sendStatus } from './intent.ts';
 import { TLDR_MODELS } from './models.ts';
 import { settingsResponse, type DeckMutationInput, type OwnerResult } from './owner.ts';
 import { LAB_OBJECT, type LabState } from './state.ts';
@@ -245,7 +244,7 @@ function decision(value: unknown): Decision {
 }
 
 function sendMode(value: unknown): SendMode {
-  return (TASK_INTENT_MODES as readonly unknown[]).includes(value) ? (value as SendMode) : bad();
+  return isSendMode(value) ? value : bad();
 }
 
 export function parseSettings(body: Body): Settings {

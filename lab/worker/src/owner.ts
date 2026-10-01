@@ -4,7 +4,8 @@
  * settings. Every mutation carries an op_id; a known op_id never applies twice (deck mutations return the
  * stored response, the others the current view). Results are values; the Worker maps them to HTTP.
  */
-import type { TaskIntentOps, TaskIntentRef } from '../../../contracts/task-intent-v1/task-intent-v1.ts';
+import { State, type TaskIntentService } from '@ziyixi/proto/todofy/taskintent/v1/task_intent_pb';
+import type { WireObject, WireService } from '@ziyixi/proto/wire-json';
 import {
   SEEDS_MAX,
   type Decision,
@@ -23,7 +24,22 @@ import { iso, neuronCeiling, publicHost } from './config.ts';
 import { deckState, mutate, replay, type DeckEvent, type Mutation } from './deck.ts';
 import { frozenPapers, readDeck, readSeeds, readSettings, sendRowFrom, sendableCards, stateFromRows, summaryView, type DeckBundle, type SendDbRow } from './db.ts';
 import type { Env } from './env.ts';
-import { asResult, buildIntent, completed, freeze, heldRetry, nextPoll, pollable, sendStatus, sha256Hex, unfrozen, withRejection, withResult, type SendRow } from './intent.ts';
+import {
+  asResult,
+  buildIntent,
+  completed,
+  freeze,
+  heldRetry,
+  nextPoll,
+  pollable,
+  sendStatus,
+  sha256Hex,
+  statusRef,
+  unfrozen,
+  withRejection,
+  withResult,
+  type SendRow,
+} from './intent.ts';
 import { TLDR_MODELS } from './models.ts';
 import type { Store } from './store.ts';
 
@@ -36,7 +52,7 @@ export interface OwnerDeps {
   readonly db: D1Database;
   readonly env: Env;
   /** Todofy's Ops entrypoint (task-intent-v1 methods only); undefined when the binding is absent. */
-  readonly todofy: TaskIntentOps | undefined;
+  readonly todofy: WireService<typeof TaskIntentService> | undefined;
 }
 
 export const TODOFY_TIMEOUT_MS = 10_000;
@@ -322,7 +338,8 @@ async function saveSend(deps: OwnerDeps, row: SendRow, extra: D1PreparedStatemen
 async function propose(deps: OwnerDeps, row: SendRow, now: number): Promise<SendRow> {
   const todofy = deps.todofy;
   if (row.payload === null || todofy === undefined) return withRejection(row, 'unavailable', now);
-  const payload = JSON.parse(row.payload) as Parameters<TaskIntentOps['proposeTasks']>[0];
+  // The frozen bytes, parsed: a structured clone of exactly that JSON crosses the binding.
+  const payload = JSON.parse(row.payload) as WireObject;
   const answer = await rpc(() => todofy.proposeTasks(payload));
   if (!answer.ok) return withRejection(row, answer.code, now);
   const result = asResult(answer.value, row.intent_id);
@@ -365,7 +382,7 @@ export async function send(deps: OwnerDeps, deckId: string, opId: string, mode: 
     row = {
       deck_id: deckId,
       generation,
-      intent_id: intent.intent_id,
+      intent_id: intent.intentId,
       mode,
       paper_ids: cards.map((c) => c.paper_id),
       payload,
@@ -397,14 +414,13 @@ export async function pollSend(deps: OwnerDeps, deckId: string, now: number): Pr
   if (!pollable(row) || (row.next_poll_at !== null && row.next_poll_at > now)) return done(sendStatus(row));
   const todofy = deps.todofy;
   if (todofy === undefined) return done(sendStatus(row));
-  const ref: TaskIntentRef = { version: 'task-intent-v1', source: 'lab', intent_id: row.intent_id };
-  const answer = await rpc(() => todofy.taskIntentStatus(ref));
+  const answer = await rpc(() => todofy.taskIntentStatus(statusRef(row.intent_id)));
   let after: SendRow;
   const result = answer.ok ? asResult(answer.value, row.intent_id) : null;
   if (result === null) {
     // Status unreadable: keep what we know and ask again later.
     after = { ...row, next_poll_at: nextPoll(now, row.created_at, null, row.state, row.recorded) ?? now + 60_000, updated_at: now };
-  } else if (result.state === 'not_found') {
+  } else if (result.state === State.NOT_FOUND) {
     // Todofy never recorded it (the propose was lost): send the identical payload again (a new attempt).
     after = await propose(deps, { ...row, state: 'sending', recorded: false, created_at: now }, now);
   } else {

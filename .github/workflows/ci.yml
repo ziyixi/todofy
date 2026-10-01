@@ -228,8 +228,10 @@ jobs:
           uv run python deploy/deploy_vars.py secrets gateway "$RUNNER_TEMP/todofy-gateway-secrets.json"
           uv run python deploy/deploy_vars.py exec core -- uv run pywrangler deploy --dry-run --config wrangler.toml \
             --secrets-file "$RUNNER_TEMP/todofy-core-secrets.json" --outdir "$RUNNER_TEMP/todofy-core-bundle"
-          # The workers SDK is vendored next to the core config; a bundle without it cannot start.
+          # The workers SDK and the generated task-intent-v1 package (ziyixi_proto, proto/README.md) are vendored
+          # next to the core config; a bundle without either cannot start.
           test -d "$RUNNER_TEMP/todofy-core-bundle/python_modules/workers"
+          test -f "$RUNNER_TEMP/todofy-core-bundle/python_modules/ziyixi_proto/todofy/taskintent/v1/task_intent_pb.py"
           uv run python deploy/deploy_vars.py exec gateway -- npx --no-install wrangler deploy --dry-run \
             --config gateway/wrangler.toml --secrets-file "$RUNNER_TEMP/todofy-gateway-secrets.json" \
             --outdir "$RUNNER_TEMP/todofy-gateway-bundle"
@@ -384,7 +386,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      # uv sync builds the dev dependency ziyixi-proto, whose build runs proto/tools/ensure.mjs with Node.
+      # uv sync builds the dependency ziyixi-proto, whose build runs proto/tools/ensure.mjs with Node.
       - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
         with:
           node-version-file: todofy/.nvmrc
@@ -713,7 +715,9 @@ jobs:
           node --test test/contract-fixtures.test.mjs test/ops-contract.test.mjs test/native-ops.test.mjs
       # Consumer: Todofy validates every fixture (current and legacy) against the schema and parses it;
       # ops-v1 fixtures get the reference JSON Schema validator's verdict, and every value core/ops.py
-      # derives (status, guard, canary result, report, digest items) is validated with it.
+      # derives (status, guard, canary result, report, digest items) is validated with it. task-intent-v1:
+      # the generated types and the Python wire JSON codec agree with the schema on every fixture, the core
+      # (strict read plus value rules) gives the schema's verdict, and every result it builds passes it.
       - name: Todofy accepts every fixture and checks ops-v1
         working-directory: todofy
         run: |
@@ -737,8 +741,9 @@ jobs:
           npm ci --no-audit --no-fund
           npx --no-install vitest run test/ops-client.test.ts test/guard.test.ts test/canary.test.ts test/digest.test.ts
       # task-intent-v1, the proposer: every fixture gets validate.mjs's verdict (Todofy's step above gives the same
-      # fixtures the Python jsonschema verdict), the ts constants match the schema, every intent Lab builds passes
-      # the schema and Lab maps every result fixture. Host only; Lab checks runs the workerd send flows.
+      # fixtures the Python jsonschema verdict), the generated types and the TypeScript codec agree with the schema
+      # on every fixture, the ts constants match it, every intent Lab builds passes it (and keeps the bytes Lab froze
+      # before the generated types), and Lab maps every result fixture. Host only; Lab checks runs the workerd flows.
       - name: Lab proposes task-intent-v1 as declared
         working-directory: lab/worker
         run: |

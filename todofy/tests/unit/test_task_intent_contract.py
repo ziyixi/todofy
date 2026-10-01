@@ -1,10 +1,13 @@
-"""contracts/task-intent-v1 on Todofy's side: the reference JSON Schema validator and core/intents.py.
+"""contracts/task-intent-v1 on Todofy's side: the reference JSON Schema validator, the generated types
+of proto/todofy/taskintent/v1/task_intent.proto with the wire JSON profile, and core/intents.py.
 
 Lab checks the same fixtures with ``contracts/ops-v1/validate.mjs``
 (lab/worker/test/task-intent-contract.test.ts); here the standard validator must give the same
-verdicts, Todofy's own input checks must agree with it on every fixture and on a set of edge
-cases, the constants must match task-intent-v1.ts, and every result Todofy can build must pass the
-schema.
+verdicts, the codec must agree with the schema on every fixture (it reads every valid one and keeps its
+bytes; of the invalid ones, a strict read refuses the structure and Todofy's value rules the rest),
+Todofy's own input checks (the strict read plus the value rules) must agree with the schema on every
+fixture and on a set of edge cases, the generated enums and the constants must match the schema and
+task-intent-v1.ts, and every result Todofy can build must pass the schema and read back unchanged.
 """
 
 import copy
@@ -15,10 +18,12 @@ from typing import Any
 
 import jsonschema
 import pytest
+from ziyixi_proto.todofy.taskintent.v1 import task_intent_pb as pb
+from ziyixi_proto.wire_json import WireJsonError, from_wire, to_wire, wire_name
 
 from tests import mail_contract
 from todofy.core import intents
-from todofy.core.intents import IntentError, IntentRow, IntentState, ResultState
+from todofy.core.intents import ErrorCode, IntentRow, IntentState, State
 from todofy.core.ops import InvalidInput
 
 ROOT = mail_contract.TODOFY.parent / "contracts" / "task-intent-v1"
@@ -58,6 +63,33 @@ def fixture(path: str) -> Any:
     return json.loads((ROOT / "fixtures" / path).read_text())
 
 
+def compact(value: Any) -> str:
+    """The bytes the contract sends and Todofy hashes."""
+    return json.dumps(value, ensure_ascii=False, separators=(",", ":"))
+
+
+MESSAGES = {"TaskIntent": pb.TaskIntent, "TaskIntentRef": pb.TaskIntentRef, "TaskIntentResult": pb.TaskIntentResult}
+# The invalid fixtures the wire profile reads: each breaks only a value rule (a length, a pattern, a range,
+# a count), which the schema and Todofy's own checks hold; a strict read refuses every other one.
+VALUE_RULES_ONLY = {
+    "description-too-long.json",
+    "duplicate-items.json",
+    "empty-title.json",
+    "http-url.json",
+    "intent-id-uppercase.json",
+    "newline-in-title.json",
+    "no-items.json",
+    "parent-title-too-long.json",
+    "tab-in-description.json",
+    "too-many-items.json",
+    "trailing-newline-in-title.json",
+    "url-with-query.json",
+    "wrong-version.json",
+    "too-many-tasks.json",
+    "zero-retry-after.json",
+}
+
+
 def test_the_schema_is_valid_draft_2020_12():
     jsonschema.Draft202012Validator.check_schema(SCHEMA)
 
@@ -75,6 +107,29 @@ def test_valid_fixtures_pass_the_reference_validator(name: str, path: Path):
 @pytest.mark.parametrize(("name", "path"), INVALID, ids=lambda case: getattr(case, "stem", case))
 def test_invalid_fixtures_fail_the_reference_validator(name: str, path: Path):
     assert schema_errors(name, json.loads(path.read_text())) != []
+
+
+@pytest.mark.parametrize(("name", "path"), VALID, ids=lambda case: getattr(case, "stem", case))
+def test_the_codec_reads_every_valid_fixture_and_keeps_its_bytes(name: str, path: Path):
+    """Inputs strictly, outputs leniently with nothing unrecognized: the same compact bytes come back."""
+    value = json.loads(path.read_text())
+    read = from_wire(MESSAGES[name], value, strict=name != "TaskIntentResult")
+    assert read.unrecognized == []
+    assert compact(to_wire(read.message)) == compact(value)
+
+
+@pytest.mark.parametrize(("name", "path"), INVALID, ids=lambda case: getattr(case, "stem", case))
+def test_the_codec_refuses_the_structure_of_every_invalid_fixture(name: str, path: Path):
+    """The codec sees what is wrong with every invalid fixture but those that break only a value rule: a
+    strict read (an input) refuses it, a lenient read (an output, which may carry null) refuses it or lists
+    what it skipped (an unknown field or enum name)."""
+    try:
+        read = from_wire(MESSAGES[name], json.loads(path.read_text()), strict=name != "TaskIntentResult")
+    except WireJsonError:
+        seen = True
+    else:
+        seen = read.unrecognized != []
+    assert seen == (path.name not in VALUE_RULES_ONLY)
 
 
 INPUTS = [(name, path) for name, path in VALID + INVALID if name != "TaskIntentResult"]
@@ -234,13 +289,7 @@ def test_the_url_host_allow_list_is_todofys_own_check():
     assert not intents.urls_allowed(intents.intent(subdomain))  # exact hosts only
 
 
-# ---- constants of task-intent-v1.ts --------------------------------------------------------
-
-
-def _ts_list(name: str) -> list[str]:
-    body = re.search(rf"export const {name} = \[(.*?)\] as const;", TYPES, re.DOTALL)
-    assert body, name
-    return re.findall(r"'([^']*)'", body.group(1))
+# ---- the generated enums and the constants of task-intent-v1.ts ----------------------------
 
 
 def _ts_limits() -> dict[str, int]:
@@ -249,17 +298,22 @@ def _ts_limits() -> dict[str, int]:
     return {name: int(value) for name, value in re.findall(r"(\w+): (\d+),", body.group(1))}
 
 
-def test_constants_match_the_typescript_and_the_schema():
+def _wire_names(cls: type) -> list[str]:
+    return [wire_name(member) for member in cls if member != 0]
+
+
+def test_the_generated_enums_and_the_constants_match_the_schema_and_the_typescript():
     defs = SCHEMA["$defs"]
     assert re.search(r"TASK_INTENT_VERSION = '([^']+)'", TYPES).group(1) == intents.VERSION == defs["Version"]["const"]
-    assert _ts_list("TASK_INTENT_SOURCES") == list(intents.SOURCES) == defs["Source"]["enum"]
-    assert _ts_list("TASK_INTENT_MODES") == list(intents.MODES) == defs["Mode"]["enum"]
-    assert _ts_list("TASK_INTENT_STATES") == [str(s) for s in ResultState] == defs["State"]["enum"]
-    assert _ts_list("TASK_INTENT_ERROR_CODES") == [str(c) for c in IntentError] == defs["ErrorCode"]["enum"]
+    assert _wire_names(pb.Source) == list(intents.SOURCES) == defs["Source"]["enum"]
+    assert _wire_names(pb.Mode) == list(intents.MODES) == defs["Mode"]["enum"]
+    assert _wire_names(State) == defs["State"]["enum"]
+    assert _wire_names(ErrorCode) == defs["ErrorCode"]["enum"]
     hosts = re.search(r"TASK_INTENT_URL_HOSTS[^=]*= \{(.*?)\};", TYPES, re.DOTALL).group(1)
     assert {s: tuple(re.findall(r"'([^']*)'", h)) for s, h in re.findall(r"(\w+): \[([^\]]*)\]", hosts)} == dict(
         intents.URL_HOSTS
     )
+    assert tuple(intents.URL_HOSTS) == intents.SOURCES
     assert _ts_limits() == {
         "itemsMax": intents.ITEMS_MAX,
         "tasksMax": intents.TASKS_MAX,
@@ -270,6 +324,7 @@ def test_constants_match_the_typescript_and_the_schema():
         "intentsPerSourcePerDay": intents.INTENTS_PER_SOURCE_PER_DAY,
         "intentMaxBytes": intents.INTENT_MAX_BYTES,
         "statusMinIntervalSeconds": intents.STATUS_MIN_INTERVAL,
+        "retryAfterMaxSeconds": intents.RETRY_AFTER_MAX,
     }
     assert defs["TaskIntent"]["properties"]["items"]["maxItems"] == intents.ITEMS_MAX
     assert defs["TaskIntentResult"]["properties"]["tasks_total"]["maximum"] == intents.TASKS_MAX
@@ -277,12 +332,15 @@ def test_constants_match_the_typescript_and_the_schema():
     assert defs["ItemTitle"]["maxLength"] == intents.ITEM_TITLE_MAX
     assert defs["BlockText"]["maxLength"] == intents.DESCRIPTION_MAX
     assert defs["HttpsUrl"]["maxLength"] == intents.URL_MAX
+    retry = defs["TaskIntentResult"]["properties"]["retry_after_seconds"]["anyOf"][0]
+    assert (retry["minimum"], retry["maximum"]) == (1, intents.RETRY_AFTER_MAX)
 
 
 # ---- every result Todofy builds passes the schema -----------------------------------------
 
 
 def _row(state: str, **fields: Any) -> IntentRow:
+    """A task_intents row as D1 returns it (error codes by wire name), read the way the runtime reads it."""
     base = {
         "source": "lab",
         "intent_id": "deck-2026-09-30-g1",
@@ -296,7 +354,7 @@ def _row(state: str, **fields: Any) -> IntentRow:
         "created_at": NOW - 60,
         "updated_at": NOW - 5,
     }
-    return IntentRow(**(base | fields))
+    return IntentRow.from_row(base | {"state": state} | fields)
 
 
 PAUSES = [
@@ -329,9 +387,9 @@ def _results() -> list[dict[str, Any]]:
         intents.recorded_new(value, NOW),
         intents.not_found("lab", "x", NOW),
         intents.conflict(_row(IntentState.PENDING)),
-        intents.rejected_new("lab", "x", IntentError.DAILY_LIMIT, NOW, intents.until_tomorrow(NOW)),
-        intents.rejected_new("lab", "x", IntentError.URL_NOT_ALLOWED, NOW),
-        intents.rejected_new("lab", "x", IntentError.SOURCE_NOT_ALLOWED, NOW),
+        intents.rejected_new("lab", "x", ErrorCode.DAILY_LIMIT, NOW, intents.until_tomorrow(NOW)),
+        intents.rejected_new("lab", "x", ErrorCode.URL_NOT_ALLOWED, NOW),
+        intents.rejected_new("lab", "x", ErrorCode.SOURCE_NOT_ALLOWED, NOW),
     ]
     for held in [None, *PAUSES]:
         built.append(intents.describe(_row(IntentState.PENDING), held, NOW, proposing=False))
@@ -357,6 +415,24 @@ RESULTS = _results()
 @pytest.mark.parametrize("index", range(len(RESULTS)))
 def test_every_result_todofy_builds_passes_the_schema(index: int):
     assert schema_errors("TaskIntentResult", RESULTS[index]) == [], RESULTS[index]
+
+
+@pytest.mark.parametrize("index", range(len(RESULTS)))
+def test_every_result_todofy_builds_reads_back_unchanged(index: int):
+    """What Lab reads (leniently): nothing unrecognized, the same bytes when written again."""
+    read = from_wire(pb.TaskIntentResult, RESULTS[index])
+    assert read.unrecognized == []
+    assert compact(to_wire(read.message)) == compact(RESULTS[index])
+
+
+def test_an_error_code_this_build_does_not_know_is_answered_as_none():
+    """A ledger row written by a newer build (rolled back since): the default branch, never a crash."""
+    for state in (IntentState.PENDING, IntentState.FAILED):
+        row = _row(state, error_code="quota_exhausted")
+        assert row.error_code == ErrorCode.UNSPECIFIED
+        built = intents.describe(row, None, NOW, proposing=False)
+        assert built["error_code"] is None
+        assert schema_errors("TaskIntentResult", built) == []
 
 
 def test_results_match_the_fixture_shapes():

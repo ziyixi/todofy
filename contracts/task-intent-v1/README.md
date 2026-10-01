@@ -14,9 +14,10 @@ implemented (not released): Lab in `lab/worker/src/intent.ts` and `owner.ts`; To
 
 | File | Purpose |
 | --- | --- |
-| `task-intent-v1.schema.json` | JSON Schema 2020-12: `TaskIntent`, `TaskIntentRef`, `TaskIntentResult` (inside the keyword subset of `../ops-v1/validate.mjs`) |
-| `task-intent-v1.ts` | Dependency-free TypeScript types, constants and bounds (erasable-only, imported by relative path) |
+| `task-intent-v1.schema.json` | JSON Schema 2020-12: `TaskIntent`, `TaskIntentRef`, `TaskIntentResult` (inside the keyword subset of `../ops-v1/validate.mjs`). The published wire description, value rules included |
+| `task-intent-v1.ts` | The value rules the IDL cannot express: `TASK_INTENT_VERSION`, the URL host allow-list, the bounds (dependency-free, erasable-only, imported by relative path) |
 | `fixtures/<Def>/*.json` | Valid examples (synthetic papers only); `fixtures/invalid/<Def>/*.json` must fail |
+| [`../../proto/todofy/taskintent/v1/task_intent.proto`](../../proto/todofy/taskintent/v1/task_intent.proto) | The IDL: messages, enums (`Source`, `Mode`, `State`, `ErrorCode`) and `TaskIntentService`. Both apps use the generated code and the wire JSON profile codecs ([`proto/README.md`](../../proto/README.md)); generated, never committed |
 
 ## Transport
 
@@ -34,10 +35,15 @@ entrypoint = "Ops"
 ```
 
 ```ts
-import type { TaskIntentOps } from '<relative path>/contracts/task-intent-v1/task-intent-v1.ts';
-interface TodofyIntentEntrypoint extends Rpc.WorkerEntrypointBranded, TaskIntentOps {}
+import type { TaskIntentService } from '@ziyixi/proto/todofy/taskintent/v1/task_intent_pb';
+import type { WireService } from '@ziyixi/proto/wire-json';
+interface TodofyIntentEntrypoint extends Rpc.WorkerEntrypointBranded, WireService<typeof TaskIntentService> {}
 interface Env { TODOFY: Service<TodofyIntentEntrypoint> }
 ```
+
+Each method takes and returns the message as its wire JSON object (a structured clone of exactly the JSON
+below): the proposer writes the input with `toWire` and reads the answer with `fromWire` (lenient: an
+output), Todofy reads the input strictly and writes the result with `to_wire`.
 
 The gateway forwards each call to one new `TodofyCore` RPC method (`task_intent_propose(json)`,
 `task_intent_status(json)`) that answers `{ok}` or `{error}`, exactly like the ops-v1 methods.
@@ -72,7 +78,8 @@ same `intent_id` and the same content. Every expected outcome is a value.
   `TODOIST_DEFAULT_PROJECT_ID` like mail tasks.
 
 **Freezing.** The first proposal Todofy records freezes the intent. Todofy stores the SHA-256 of its
-canonical form (the validated fields re-serialised in schema order, compact, without absent optionals).
+canonical form (the validated fields re-serialised in schema order, compact, without absent optionals: the
+message's wire JSON as the profile writes it).
 The same `(source, intent_id)` with the same hash is a replay; with another hash it is
 `rejected`/`intent_conflict` and the stored intent is untouched.
 
@@ -107,7 +114,7 @@ task text, Todoist IDs or remote response text. Todofy logs only `source`, `inte
   PK(source, intent_id, n))` (n = 0 is the parent in subtasks mode). `request_id` is a UUID frozen at
   record time and reused for every attempt of that task (`X-Request-Id`).
 - **Record** (`task_intent_propose`): validate against the schema rules (the core owns validation, like
-  ops-v1), then in this order: (1) an existing row for `(source, intent_id)` → replay, answered before
+  ops-v1: a strict wire read of the generated `TaskIntent`, then the value rules), then in this order: (1) an existing row for `(source, intent_id)` → replay, answered before
   any other check (like ops-v1's `startCanary`): another hash → `rejected`/`intent_conflict`; created →
   `duplicate`; `failed` → re-queue the unfinished tasks → `pending`, but while a pause below holds nothing
   is re-queued (no write under a pause) and the answer is `paused` (recorded, the pause's code;
@@ -146,13 +153,25 @@ task text, Todoist IDs or remote response text. Todofy logs only `source`, `inte
 ## Checks
 
 - Schema/fixtures with both validators: Lab's `lab/worker/test/task-intent-contract.test.ts`
-  (`../ops-v1/validate.mjs` over every fixture, constants of `task-intent-v1.ts` against the schema) and
-  `todofy/tests/unit/test_task_intent_contract.py` (Python `jsonschema` on the
+  (`../ops-v1/validate.mjs` over every fixture, the generated enums and the constants of `task-intent-v1.ts`
+  against the schema) and `todofy/tests/unit/test_task_intent_contract.py` (Python `jsonschema` on the
   same fixtures, same verdicts). Both run in the `Contracts` CI job.
+- The codecs against the schema, on every fixture and in both languages (the same two tests): every valid
+  fixture reads (inputs strictly, results leniently) and writes back to its exact compact bytes; of the
+  invalid ones, the codec sees every structural fault (a strict read refuses it, a lenient one refuses it or
+  lists what it skipped) and the rest break only a value rule, which the schema and each app's own checks
+  hold. `proto/test/cross-language.test.ts` pipes the same fixtures and messages built in each language
+  through both codecs and requires identical bytes.
+- Frozen bytes: Lab's `intent.test.ts` pins the bytes its builder froze before the generated types, and
+  Todofy's `test_intents.py` pins the canonical form and SHA-256 of every intent fixture (D1 keeps those
+  hashes 400 days; a replay must hash the same).
 - Todofy: unit tests of validation, canonical hash, rendering and the state machine; runtime tests over a
   real service binding (fake Todoist): replay, conflict, pause, unknown + lookup, partial failure retry,
   48-attempt cap, and that mail processing is unchanged with and without intents.
 - Lab: its client maps every state and error code, and every result it stores passes the schema.
 
-Changing the contract: additive changes (a new source, a new error code) update the schema, the TS
-constants, fixtures and both sides in one change. Anything else is `task-intent-v2`.
+Changing the contract: additive changes (a new source, a new error code) update the `.proto` file, the
+schema, fixtures and both sides in one change (`buf breaking` and the profile rules gate the rest; a new
+`ErrorCode` value fails Lab's UI typecheck until it has its copy). An older reader takes the default branch
+on a value it does not know: an unknown state is an unreadable answer (Lab asks again later), an unknown
+error code no reason. Anything else is `task-intent-v2`.

@@ -5,7 +5,8 @@ Outputs (GITHUB_OUTPUT, "true"/"false"):
   todofy_check, mail_hero_check, dashboard_check, website_check, lab_check, flowday_check
                     run that app's full checks
   contracts         run the contract tests: both sides of mail.received.v1, ops-v1 and
-                    task-intent-v1, and the dashboard's ops-v1 caller tests
+                    task-intent-v1, and the dashboard's ops-v1 caller tests (also on a proto/ change: the
+                    task-intent-v1 tests check the generated types and the codecs against the schema)
   packages          run every shared package's own checks (packages/*)
   infra             run "Infra checks" (OpenTofu fmt/validate of infra/, its guards and the plan-summary
                     tests): infra/, tools/infra-plan-summary/ or .github/ changed. Never deploys anything;
@@ -30,6 +31,8 @@ proto/ (the protobuf IDL, proto/README.md) checks every app in PROTO_USERS (an a
 compiles the package in (PROTO_USERS[app] is True: a TypeScript "dependencies" entry, a Python [project]
 dependency) and only for a change outside PROTO_NOT_BUNDLED (tests, test data, the breaking-change
 scripts and Markdown). A test-only user (devDependencies, a dependency group) is checked, never deployed.
+Lab and Todofy both bundle it (Lab's Worker the TypeScript codec, todofy-core the Python package that
+pywrangler vendors), so an IDL or codec change deploys both. It also runs Contracts.
 
 push: the files changed between a cumulative base and github.sha, never only this push's own diff,
 so a change whose run was cancelled or failed is checked (and deployed) again by the next run.
@@ -128,7 +131,7 @@ PACKAGE_USERS = {"edge-auth": ("todofy", "mail-hero", "dashboard", "lab", "flowd
 # The protobuf IDL (proto/README.md): app -> whether its production bundle includes the generated code
 # (True) or only its tests use it (False). test_proto.py derives this map from the apps' manifests.
 PROTO = "proto/"
-PROTO_USERS = {"lab": False, "todofy": False}
+PROTO_USERS = {"lab": True, "todofy": True}
 # proto/ paths that never reach a bundle: a change there checks the users but deploys none.
 PROTO_NOT_BUNDLED = ("proto/test/", "proto/testdata/", "proto/scripts/", "proto/tools/profile_breaking.py")
 
@@ -141,7 +144,8 @@ BUNDLED_BY = {
     # The dashboard validates every Ops answer; Lab validates setGuard input, its intents and Todofy's answers.
     "contracts/ops-v1/ops-v1.schema.json": ("dashboard", "lab"),
     "contracts/ops-v1/validate.mjs": ("dashboard", "lab"),
-    # task-intent-v1: Lab proposes (bounds, schema), Todofy's gateway forwards (bounds, types).
+    # task-intent-v1: Lab proposes (bounds, schema), Todofy's gateway forwards (the input bound). The types
+    # are generated from proto/ (PROTO_USERS).
     "contracts/task-intent-v1/task-intent-v1.ts": ("lab", "todofy"),
     "contracts/task-intent-v1/task-intent-v1.schema.json": ("lab",),
 }
@@ -243,7 +247,7 @@ def classify(paths: Iterable[str]) -> dict[str, bool]:
     return outputs(
         checked=APPS if shared else apps | documented | proto_checked,
         deployed=deployed,
-        contracts=bool((apps - NO_CONTRACTS) | documented) or shared,
+        contracts=bool((apps - NO_CONTRACTS) | documented | proto_checked) or shared,
         packages=bool(package_names) or ci,
         relay=relay,
         infra=any(path.startswith((".github/", *INFRA)) for path in paths),
