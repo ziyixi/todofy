@@ -27,9 +27,11 @@ const PORT = 10_500 + Math.floor(Math.random() * 500);
 const FREE_OBJECT_CPU_MS = 30_000;
 /**
  * The fetch handler, in reference milliseconds. It verifies a JWT and a CSRF token and passes the object's answer on:
- * measured (2026-10-01) about 1 ms on its isolate's first request and 0.1-0.6 ms warm, whatever the answer's size.
+ * measured (2026-10-01) 1.9-2.2 ms on its isolate's very first request (the Access keys fetched and imported, the CSRF
+ * key derived; once 4.3 ms with the whole suite running), 0.4-1 ms on every other first run and 0.4-0.95 ms warm,
+ * whatever the answer's size. The first request is a single measurement: its bound keeps room for that noise.
  */
-const WORKER_COLD_BOUND_MS = 0.4 * FREE_CPU_MS;
+const WORKER_COLD_BOUND_MS = 0.6 * FREE_CPU_MS;
 const WORKER_BOUND_MS = 0.2 * FREE_CPU_MS;
 /**
  * WatchState, in reference milliseconds (measured: ../../../docs/design.md §8): its heaviest API calls (a full page of

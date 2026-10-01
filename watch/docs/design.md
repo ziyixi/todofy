@@ -218,14 +218,14 @@ counts for the dashboard.
   and an error code. Invocation logs and traces are off: they would record URLs.
 
 Measured on 2026-10-01 (`worker/test/runtime/cpu.test.ts`, WatchState in an isolate of its own as on Cloudflare,
-the reference machine of `tools/workerd-cpu`): the fetch handler 2 ms on its very first request and 0.4 to 1 ms
-otherwise, whatever the answer's size; in WatchState a full list of 50 watches about 2 to 3 ms, a full page of 50
+the reference machine of `tools/workerd-cpu`): the fetch handler about 2 ms on its very first request and 0.4 to 1
+ms otherwise, whatever the answer's size; in WatchState a full list of 50 watches about 2 to 3 ms, a full page of 50
 changes with 200 diff lines each about 25 ms, a preview of a 200 KiB page about 40 ms and of a 2 MiB page about
 340 ms, an alarm pass over 200 KiB pages 0.6 to 1.1 s and the worst pass (pages of 2 MiB, bounded by the 24 MiB
-budget) about 4 s of the 30 s an invocation may use. The test fails beyond 4 ms (2 ms warm) for the fetch handler,
+budget) about 4 s of the 30 s an invocation may use. The test fails beyond 6 ms (2 ms warm) for the fetch handler,
 300 ms for an API call and 7.5 s for an alarm pass, in reference milliseconds scaled by the machine's speed.
-Bundles: the Worker 101.4 KiB gzip (budget 122 KiB, `deploy/bundle-size.mjs`), the UI's JavaScript 46.1 KiB gzip
-(budget 56 KiB, `web/scripts/js-budget.mjs`).
+Bundles: the Worker 105.1 KiB gzip (budget 122 KiB, `deploy/bundle-size.mjs`), the UI's JavaScript 48.8 KiB gzip
+(budget 56 KiB, `web/scripts/js-budget.mjs`), both with the wire profile's rule checker of proto/ts.
 
 ## 9. The UI
 
