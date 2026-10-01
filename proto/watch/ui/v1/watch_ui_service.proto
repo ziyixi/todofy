@@ -1,0 +1,529 @@
+// The watch app's owner API: the HTTP/JSON interface between its UI (watch/web) and the Worker "watch"
+// (watch/worker), whose Durable Object WatchState holds every watch, snapshot and change.
+//
+// Callers. Only the watch UI calls it (same origin, watch.ziyixi.science). No other app calls these routes;
+// later steps give the dashboard counts through ops-v1, never this API.
+//
+// Transport. google.api.http bindings under /api/v1, served by the shared transcoder
+// (proto/ts/http-transcoder.ts) and called through the shared client (proto/ts/http-client.ts). Bodies, query
+// parameters and responses are JSON in the wire JSON profile (proto/README.md): proto field names
+// (snake_case), enum values in lower case without their prefix (`Watch.State.STATE_BROKEN` is "broken"),
+// timestamps in RFC 3339 UTC. Inputs are read strictly (an unknown field or enum name is INVALID_ARGUMENT),
+// outputs leniently. Request bodies are at most 64 KiB. Errors: errors.proto (this app's reasons) and
+// common/errors/v1/errors.proto (the reasons every API shares).
+//
+// Authentication, in front of the transcoder (packages/edge-auth, the watch app's parameters in its SPEC
+// §5.4): the whole host is behind Cloudflare Access, and every route needs the owner's Access JWT (header
+// Cf-Access-Jwt-Assertion or cookie CF_Authorization); every method other than GET also needs the
+// same-origin Origin header and the signed double-submit CSRF token (header X-CSRF-Token, cookie
+// watch_csrf), issued by GET /api/csrf, which is transport, not part of this service. A mutation takes a
+// `request_id` (AIP-155, a UUID4 the browser makes once per user action): repeating it within 24 hours
+// answers the first response and changes nothing; reused for another rpc or resource it is INVALID_ARGUMENT
+// (BAD_REQUEST).
+//
+// Every call also re-arms WatchState's alarm when none is set (the scheduler's fallback; there is no cron).
+// Value rules the IDL cannot express (lengths, ranges, counts) are in each field's comment and enforced by
+// the Worker; the constants are in watch/worker/src/limits.ts.
+//
+// buf lint. The methods that answer a Watch, a Change, the ServiceStatus or google.protobuf.Empty carry two `buf:lint:ignore` lines:
+// RPC_RESPONSE_STANDARD_NAME and RPC_REQUEST_RESPONSE_UNIQUE, which the AIPs contradict (a standard or state
+// method answers the resource itself, so one message answers several methods; api-linter checks those names
+// instead). They are excused here, next to each method, not in buf.yaml: buf.yaml is a path every proto user's
+// deploy depends on (.github/scripts/ci_changes.py), and this package must not redeploy the other apps.
+
+syntax = "proto3";
+
+package watch.ui.v1;
+
+import "google/api/annotations.proto";
+import "google/api/client.proto";
+import "google/api/field_behavior.proto";
+import "google/api/field_info.proto";
+import "google/api/resource.proto";
+import "google/protobuf/empty.proto";
+import "google/protobuf/field_mask.proto";
+import "google/protobuf/timestamp.proto";
+import "watch/ui/v1/change.proto";
+import "watch/ui/v1/watch.proto";
+
+option java_multiple_files = true;
+option java_outer_classname = "WatchUiServiceProto";
+option java_package = "science.ziyixi.watch.ui.v1";
+
+// The owner's web watches: add one from a preview of the page, see their health, read the changes they
+// found (and the ones the rules suppressed), and acknowledge them.
+service WatchUiService {
+  option (google.api.default_host) = "watch.ziyixi.science";
+
+  // A watch (AIP-131).
+  // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
+  // buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE
+  rpc GetWatch(GetWatchRequest) returns (Watch) {
+    option (google.api.http) = {get: "/api/v1/{name=watches/*}"};
+    option (google.api.method_signature) = "name";
+  }
+
+  // The watches, newest first (AIP-132, AIP-158, AIP-160).
+  rpc ListWatches(ListWatchesRequest) returns (ListWatchesResponse) {
+    option (google.api.http) = {get: "/api/v1/watches"};
+    option (google.api.method_signature) = "";
+  }
+
+  // Creates a watch (AIP-133). Its first check runs within a minute (robots.txt and the host's spacing
+  // allowing) and sets the notified state without a change.
+  // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
+  // buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE
+  rpc CreateWatch(CreateWatchRequest) returns (Watch) {
+    option (google.api.http) = {
+      post: "/api/v1/watches"
+      body: "watch"
+    };
+    option (google.api.method_signature) = "watch,watch_id";
+  }
+
+  // Replaces the fields `update_mask` names, or every field the owner sets without one (AIP-134); with the
+  // watch's `etag`, only if it did not change since (AIP-154). A change of what is read (uri, source,
+  // normalize, fetcher, request_locale) makes the next check set a new notified state without a change.
+  // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
+  // buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE
+  rpc UpdateWatch(UpdateWatchRequest) returns (Watch) {
+    option (google.api.http) = {
+      patch: "/api/v1/{watch.name=watches/*}"
+      body: "watch"
+    };
+    option (google.api.method_signature) = "watch,update_mask";
+  }
+
+  // Deletes a watch with its snapshots and changes, for good (AIP-135).
+  // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
+  // buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE
+  rpc DeleteWatch(DeleteWatchRequest) returns (google.protobuf.Empty) {
+    option (google.api.http) = {delete: "/api/v1/{name=watches/*}"};
+    option (google.api.method_signature) = "name";
+  }
+
+  // Stops the checks (AIP-216): the watch becomes PAUSED. Pausing a paused watch answers it unchanged.
+  // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
+  // buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE
+  rpc PauseWatch(PauseWatchRequest) returns (Watch) {
+    option (google.api.http) = {
+      post: "/api/v1/{name=watches/*}:pause"
+      body: "*"
+    };
+    option (google.api.method_signature) = "name";
+  }
+
+  // Starts the checks again (AIP-216): the next check runs within a minute. Resuming a watch that is not
+  // paused answers it unchanged.
+  // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
+  // buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE
+  rpc ResumeWatch(ResumeWatchRequest) returns (Watch) {
+    option (google.api.http) = {
+      post: "/api/v1/{name=watches/*}:resume"
+      body: "*"
+    };
+    option (google.api.method_signature) = "name";
+  }
+
+  // Asks for a check as soon as the fetch rules allow: at once, or when 15 minutes have passed since the
+  // page's last fetch and its host's spacing and Retry-After allow (`health.next_check_time` says when). A
+  // paused watch is checked once and stays paused.
+  // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
+  // buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE
+  rpc CheckWatch(CheckWatchRequest) returns (Watch) {
+    option (google.api.http) = {
+      post: "/api/v1/{name=watches/*}:check"
+      body: "*"
+    };
+    option (google.api.method_signature) = "name";
+  }
+
+  // Fetches a page (or reuses its fetch of the last 15 minutes) and answers what every stage of the
+  // pipeline makes of it for the given settings, without storing anything: the fetch, the health gate, the
+  // page's blocks with a selector each (for the phone's block picker), the extracted and the normalized
+  // lines, and, for an existing watch, what the trigger says against its notified state.
+  // (-- api-linter: core::0136::http-uri-suffix=disabled
+  //     aip.dev/not-precedent: a custom method on the collection, `watches:preview`, like `links:import`;
+  //     the noun is the collection itself. --)
+  rpc PreviewWatch(PreviewWatchRequest) returns (PreviewWatchResponse) {
+    option (google.api.http) = {
+      post: "/api/v1/watches:preview"
+      body: "*"
+    };
+  }
+
+  // A change (AIP-131).
+  // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
+  // buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE
+  rpc GetChange(GetChangeRequest) returns (Change) {
+    option (google.api.http) = {get: "/api/v1/{name=watches/*/changes/*}"};
+    option (google.api.method_signature) = "name";
+  }
+
+  // The changes of a watch, or of every watch with the parent `watches/-` (AIP-159), newest first (AIP-132).
+  rpc ListChanges(ListChangesRequest) returns (ListChangesResponse) {
+    option (google.api.http) = {get: "/api/v1/{parent=watches/*}/changes"};
+    option (google.api.method_signature) = "parent";
+  }
+
+  // Marks a confirmed change as read: it leaves the inbox (AIP-216). Acknowledging an acknowledged change
+  // answers it unchanged; a pending or suppressed one is FAILED_PRECONDITION (BAD_REQUEST).
+  // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
+  // buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE
+  rpc AcknowledgeChange(AcknowledgeChangeRequest) returns (Change) {
+    option (google.api.http) = {
+      post: "/api/v1/{name=watches/*/changes/*}:acknowledge"
+      body: "*"
+    };
+    option (google.api.method_signature) = "name";
+  }
+
+  // The scheduler's and the browser ledger's state, and the counts of the health view.
+  // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
+  // buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE
+  rpc GetServiceStatus(GetServiceStatusRequest) returns (ServiceStatus) {
+    option (google.api.http) = {get: "/api/v1/{name=serviceStatus}"};
+    option (google.api.method_signature) = "name";
+  }
+}
+
+// Input of GetWatch.
+message GetWatchRequest {
+  // watches/{watch}.
+  string name = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (google.api.resource_reference).type = "watch.ziyixi.science/Watch"
+  ];
+}
+
+// Input of ListWatches.
+message ListWatchesRequest {
+  // At most this many watches (AIP-158): 0 means 50, and a larger value is read as 50.
+  int32 page_size = 1 [(google.api.field_behavior) = OPTIONAL];
+  // The previous page's `next_page_token`, with the same `filter` (others are INVALID_ARGUMENT).
+  string page_token = 2 [(google.api.field_behavior) = OPTIONAL];
+  // An AIP-160 filter in the subset proto/ts/filter.ts parses: up to 8 literals, bare words or quoted
+  // strings, separated by whitespace or AND; each must occur in the display name or the URI (ASCII letters
+  // case-insensitively). At most 200 characters. Empty lists everything.
+  string filter = 3 [(google.api.field_behavior) = OPTIONAL];
+}
+
+// Output of ListWatches.
+message ListWatchesResponse {
+  // The page, newest first.
+  repeated Watch watches = 1 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The next page's token; empty on the last page.
+  string next_page_token = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
+}
+
+// Input of CreateWatch.
+message CreateWatchRequest {
+  // The watch to create: its `name` is ignored (`watch_id` names it).
+  Watch watch = 1 [(google.api.field_behavior) = REQUIRED];
+  // The ID of the new watch (a query parameter), by Watch.name's rule; empty: the Worker makes one.
+  string watch_id = 2 [(google.api.field_behavior) = OPTIONAL];
+  // The idempotency key (AIP-155), a query parameter; see WatchUiService.
+  string request_id = 3 [
+    (google.api.field_info).format = UUID4,
+    (google.api.field_behavior) = OPTIONAL
+  ];
+}
+
+// Input of UpdateWatch.
+message UpdateWatchRequest {
+  // The new values: the fields `update_mask` names (each REQUIRED one must be present), or every field the
+  // owner sets without one; output-only fields are ignored. Its `etag`, when set, must be the watch's current
+  // one (AIP-154), whatever the mask names.
+  Watch watch = 1 [(google.api.field_behavior) = REQUIRED];
+  // AIP-134: the Watch fields to replace (a query parameter, `update_mask=display_name,trigger`). A message
+  // field is replaced as a whole (`normalize`), or one of its fields (`normalize.ignored_lines`). Absent,
+  // empty or `*` replaces every field the owner sets.
+  google.protobuf.FieldMask update_mask = 2 [(google.api.field_behavior) = OPTIONAL];
+  // The idempotency key (AIP-155), a query parameter; see WatchUiService.
+  string request_id = 3 [
+    (google.api.field_info).format = UUID4,
+    (google.api.field_behavior) = OPTIONAL
+  ];
+}
+
+// Input of DeleteWatch.
+// (-- api-linter: core::0135::force-field=disabled
+//     aip.dev/not-precedent: a watch's changes are the records of its own checks, never made by the owner;
+//     they have no meaning without the watch, so a delete always takes them along. --)
+message DeleteWatchRequest {
+  // watches/{watch}.
+  string name = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (google.api.resource_reference).type = "watch.ziyixi.science/Watch"
+  ];
+  // When set, the watch's current etag (AIP-154); a stale one is ETAG_MISMATCH. A query parameter.
+  string etag = 2 [(google.api.field_behavior) = OPTIONAL];
+  // The idempotency key (AIP-155), a query parameter; see WatchUiService.
+  string request_id = 3 [
+    (google.api.field_info).format = UUID4,
+    (google.api.field_behavior) = OPTIONAL
+  ];
+}
+
+// Input of PauseWatch.
+message PauseWatchRequest {
+  // watches/{watch}.
+  string name = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (google.api.resource_reference).type = "watch.ziyixi.science/Watch"
+  ];
+  // When set, the watch's current etag (AIP-154); a stale one is ETAG_MISMATCH.
+  string etag = 2 [(google.api.field_behavior) = OPTIONAL];
+  // The idempotency key (AIP-155); see WatchUiService.
+  string request_id = 3 [
+    (google.api.field_info).format = UUID4,
+    (google.api.field_behavior) = OPTIONAL
+  ];
+}
+
+// Input of ResumeWatch.
+message ResumeWatchRequest {
+  // watches/{watch}.
+  string name = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (google.api.resource_reference).type = "watch.ziyixi.science/Watch"
+  ];
+  // When set, the watch's current etag (AIP-154); a stale one is ETAG_MISMATCH.
+  string etag = 2 [(google.api.field_behavior) = OPTIONAL];
+  // The idempotency key (AIP-155); see WatchUiService.
+  string request_id = 3 [
+    (google.api.field_info).format = UUID4,
+    (google.api.field_behavior) = OPTIONAL
+  ];
+}
+
+// Input of CheckWatch.
+message CheckWatchRequest {
+  // watches/{watch}.
+  string name = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (google.api.resource_reference).type = "watch.ziyixi.science/Watch"
+  ];
+  // The idempotency key (AIP-155); see WatchUiService.
+  string request_id = 2 [
+    (google.api.field_info).format = UUID4,
+    (google.api.field_behavior) = OPTIONAL
+  ];
+}
+
+// Input of PreviewWatch.
+message PreviewWatchRequest {
+  // The settings to preview: `uri` and what is read (source, normalize, trigger, fetcher, request_locale,
+  // fetch_policy) by the rules of CreateWatch. When `name` names an existing watch, stages 4 and 5 compare
+  // with that watch's notified state.
+  Watch watch = 1 [(google.api.field_behavior) = REQUIRED];
+  // Fetch again even when the page was fetched in the last 15 minutes (the host's spacing still applies).
+  bool refresh = 2 [(google.api.field_behavior) = OPTIONAL];
+}
+
+// Output of PreviewWatch: each stage of the pipeline (watch/docs/design.md §5).
+message PreviewWatchResponse {
+  // Stage 0: the fetch.
+  PreviewFetch fetch = 1 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Stage 0: why the health gate failed; unset when it passed.
+  FailureReason failure = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Stage 2, HTML sources: the page's blocks in document order (at most 200), for the block picker.
+  repeated PreviewBlock blocks = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Stage 2: the extracted lines (at most 300).
+  repeated string extracted_lines = 4 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Stage 3: the lines after normalization, masks and ignored lines (at most 300).
+  repeated string normalized_lines = 5 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Stage 3: how many masks applied.
+  int32 masked_token_count = 6 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Stage 3: how many lines `normalize.ignored_lines` dropped.
+  int32 ignored_line_count = 7 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Stage 2, feeds and JSON: the items with their keys (at most 100).
+  repeated PreviewItem items = 8 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Stage 2: the number NumberTrigger would read; empty when there is none.
+  string number_value = 9 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Stage 2: the schema.org availability AvailabilityTrigger would read; empty when there is none.
+  string availability = 10 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Stages 4 and 5, for an existing watch with a notified state.
+  PreviewTrigger trigger = 11 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The lines above were cut at their maximum.
+  bool lines_truncated = 12 [(google.api.field_behavior) = OUTPUT_ONLY];
+}
+
+// What a preview's fetch got.
+message PreviewFetch {
+  // The final answer's HTTP status (0: no answer).
+  int32 http_status = 1 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Its media type (`text/html`, without parameters).
+  string mime_type = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The URL after redirects.
+  string final_uri = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Redirects followed.
+  int32 redirect_count = 4 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The body's size in bytes.
+  int32 body_bytes = 5 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The character encoding the body was decoded with.
+  string charset = 6 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The encoding is the page's `<meta charset>` (the header named none): the body was relabelled so that
+  // HTMLRewriter decodes it (a GBK page, for instance).
+  bool meta_charset = 7 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The site's robots.txt allows the page (or the watch ignores robots.txt).
+  bool robots_allowed = 8 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The site answered markdown (`Accept: text/markdown`).
+  bool markdown = 9 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // When the body was fetched.
+  google.protobuf.Timestamp fetch_time = 10 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The body is the fetch of the last 15 minutes, not a new one.
+  bool cached = 11 [(google.api.field_behavior) = OUTPUT_ONLY];
+}
+
+// A block of a previewed page: consecutive lines under one element.
+message PreviewBlock {
+  // A selector HTMLRewriter supports that matches the block's element (for include or exclude).
+  string selector = 1 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The element's tag name.
+  string tag = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The block's text, at most 300 characters.
+  string text = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // How many lines the block holds.
+  int32 line_count = 4 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The block counts for the current settings (inside an include selector or without any, outside every
+  // exclude selector and landmark).
+  bool counted = 5 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The block sits in a landmark region (excluded unless HtmlSource.keep_landmarks).
+  bool landmark = 6 [(google.api.field_behavior) = OUTPUT_ONLY];
+}
+
+// An item of a previewed feed or JSON source.
+message PreviewItem {
+  // The key NewItemTrigger compares.
+  string key = 1 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The item's line.
+  string text = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
+}
+
+// What the pipeline would decide for a previewed page against an existing watch's notified state.
+message PreviewTrigger {
+  // The trigger would fire.
+  bool fired = 1 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The trigger kind evaluated.
+  Change.TriggerKind trigger_kind = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Why it would not fire, when the text differs.
+  Change.SuppressionReason suppression_reason = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Lines added since the notified state.
+  int32 added_line_count = 4 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Lines removed since the notified state.
+  int32 removed_line_count = 5 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The changed lines (at most 200).
+  repeated DiffLine diff_lines = 6 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The notified value of a number or availability trigger.
+  string previous_value = 7 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The previewed value.
+  string current_value = 8 [(google.api.field_behavior) = OUTPUT_ONLY];
+}
+
+// Input of GetChange.
+message GetChangeRequest {
+  // watches/{watch}/changes/{change}.
+  string name = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (google.api.resource_reference).type = "watch.ziyixi.science/Change"
+  ];
+}
+
+// Input of ListChanges.
+message ListChangesRequest {
+  // watches/{watch}, or `watches/-` for every watch.
+  string parent = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (google.api.resource_reference).child_type = "watch.ziyixi.science/Change"
+  ];
+  // At most this many changes (AIP-158): 0 means 50, and a larger value is read as 50.
+  int32 page_size = 2 [(google.api.field_behavior) = OPTIONAL];
+  // The previous page's `next_page_token`, with the same parent and filter (others are INVALID_ARGUMENT).
+  string page_token = 3 [(google.api.field_behavior) = OPTIONAL];
+  // AIP-160, one restriction on the state: `state = NEW` (the inbox: confirmed, not acknowledged; the same
+  // as `state = CONFIRMED`), `state = PENDING_CONFIRMATION`, `state = SUPPRESSED` (the drawer) or
+  // `state = ACKNOWLEDGED`. Spaces around `=` are optional; names are upper case. Empty lists every state.
+  // Anything else is INVALID_ARGUMENT.
+  string filter = 4 [(google.api.field_behavior) = OPTIONAL];
+}
+
+// Output of ListChanges.
+message ListChangesResponse {
+  // The page, newest first.
+  repeated Change changes = 1 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The next page's token; empty on the last page.
+  string next_page_token = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
+}
+
+// Input of AcknowledgeChange.
+message AcknowledgeChangeRequest {
+  // watches/{watch}/changes/{change}.
+  string name = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (google.api.resource_reference).type = "watch.ziyixi.science/Change"
+  ];
+  // The idempotency key (AIP-155); see WatchUiService.
+  string request_id = 2 [
+    (google.api.field_info).format = UUID4,
+    (google.api.field_behavior) = OPTIONAL
+  ];
+}
+
+// Input of GetServiceStatus.
+message GetServiceStatusRequest {
+  // Always `serviceStatus`.
+  string name = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (google.api.resource_reference).type = "watch.ziyixi.science/ServiceStatus"
+  ];
+}
+
+// The scheduler, the browser ledger and the counts of the health view: codes, counts and times only. A
+// singleton.
+message ServiceStatus {
+  option (google.api.resource) = {
+    type: "watch.ziyixi.science/ServiceStatus"
+    pattern: "serviceStatus"
+    singular: "serviceStatus"
+    plural: "serviceStatuses"
+  };
+
+  // Always `serviceStatus`.
+  string name = 1 [(google.api.field_behavior) = IDENTIFIER];
+  // Watches, by state.
+  int32 active_watch_count = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Paused watches (by the owner or after 14 days broken).
+  int32 paused_watch_count = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Broken watches (3 or more failed checks in a row).
+  int32 broken_watch_count = 4 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Confirmed changes not acknowledged yet (the inbox).
+  int32 new_change_count = 5 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Changes waiting for their confirmation fetch.
+  int32 pending_change_count = 6 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Suppressed changes kept (the drawer).
+  int32 suppressed_change_count = 7 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The deployment has a browser binding (FETCHER_BROWSER works).
+  bool browser_enabled = 8 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Browser milliseconds used today (UTC), by the app's own ledger.
+  // (-- api-linter: core::0142::time-field-type=disabled
+  //     aip.dev/not-precedent: a duration; the wire JSON profile has no google.protobuf.Duration. --)
+  int32 browser_used_ms = 9 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The ledger's daily limit in milliseconds (480,000).
+  // (-- api-linter: core::0142::time-field-type=disabled
+  //     aip.dev/not-precedent: a duration; the wire JSON profile has no google.protobuf.Duration. --)
+  int32 browser_limit_ms = 10 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Today's browser time is used up (or Browser Run answered 429): no browser fetch before
+  // `browser_quota_reset_time`. Shown as "JS quota exhausted today", never as "no change".
+  bool browser_quota_exhausted = 11 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The next 00:00 UTC.
+  google.protobuf.Timestamp browser_quota_reset_time = 12 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // WatchState's armed alarm; unset when none is armed (the next API call arms one).
+  google.protobuf.Timestamp next_alarm_time = 13 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The last alarm that ran.
+  google.protobuf.Timestamp last_alarm_time = 14 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // External requests made today (UTC): pages, robots.txt files and redirects.
+  int32 fetch_count_today = 15 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The deployed commit.
+  string build = 16 [(google.api.field_behavior) = OUTPUT_ONLY];
+}

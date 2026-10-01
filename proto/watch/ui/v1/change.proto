@@ -1,0 +1,137 @@
+// A change of a watch: what the noise pipeline found when a check's text differed from the last notified
+// state (watch/docs/design.md §5), whether it was kept or suppressed, and why.
+
+syntax = "proto3";
+
+package watch.ui.v1;
+
+import "google/api/field_behavior.proto";
+import "google/api/resource.proto";
+import "google/protobuf/timestamp.proto";
+
+option java_multiple_files = true;
+option java_outer_classname = "ChangeProto";
+option java_package = "science.ziyixi.watch.ui.v1";
+
+// A difference the pipeline recorded. Every suppressed difference is kept with its reason (the UI's
+// suppressed drawer), so a rule that drops too much can be seen and undone. Its lines are the watched page's
+// text: personal data, kept only in the Durable Object.
+message Change {
+  option (google.api.resource) = {
+    type: "watch.ziyixi.science/Change"
+    pattern: "watches/{watch}/changes/{change}"
+    singular: "change"
+    plural: "changes"
+  };
+
+  // Where the change is (AIP-216).
+  enum State {
+    // Never written.
+    STATE_UNSPECIFIED = 0;
+    // The trigger fired on an HTML source; a second fetch about Stability.confirm_delay_minutes later decides.
+    STATE_PENDING_CONFIRMATION = 1;
+    // A change for the owner: the inbox (ListChanges `state = NEW`) until acknowledged. The notified state
+    // moved to it.
+    STATE_CONFIRMED = 2;
+    // Dropped by a rule (`suppression_reason`); the notified state did not move.
+    STATE_SUPPRESSED = 3;
+    // Confirmed, and acknowledged by the owner.
+    STATE_ACKNOWLEDGED = 4;
+  }
+
+  // Why a difference was (or, in shadow mode, would have been) dropped.
+  enum SuppressionReason {
+    // Not suppressed.
+    SUPPRESSION_REASON_UNSPECIFIED = 0;
+    // Fewer changed lines (or a smaller share) than AnyChangeTrigger asks for.
+    SUPPRESSION_REASON_BELOW_THRESHOLD = 1;
+    // The typed trigger's condition did not become true.
+    SUPPRESSION_REASON_TRIGGER_NOT_MET = 2;
+    // The confirmation fetch saw the page back at its notified state (A to B to A) within the window.
+    SUPPRESSION_REASON_FLICKER = 3;
+  }
+
+  // What decided the change.
+  enum Classifier {
+    // Not set.
+    CLASSIFIER_UNSPECIFIED = 0;
+    // The deterministic rules (every change in v1).
+    CLASSIFIER_RULE = 1;
+    // The AI judge (not in v1).
+    CLASSIFIER_AI = 2;
+  }
+
+  // The watch's trigger kind when the change was evaluated.
+  enum TriggerKind {
+    // Not set.
+    TRIGGER_KIND_UNSPECIFIED = 0;
+    // AnyChangeTrigger.
+    TRIGGER_KIND_ANY_CHANGE = 1;
+    // TextTrigger, appears.
+    TRIGGER_KIND_TEXT_APPEARS = 2;
+    // TextTrigger, disappears.
+    TRIGGER_KIND_TEXT_DISAPPEARS = 3;
+    // NewItemTrigger.
+    TRIGGER_KIND_NEW_ITEM = 4;
+    // NumberTrigger.
+    TRIGGER_KIND_NUMBER = 5;
+    // AvailabilityTrigger.
+    TRIGGER_KIND_AVAILABILITY = 6;
+  }
+
+  // watches/{watch}/changes/{change}: {change} is 16 characters of `a-z0-9`, ordered by creation.
+  string name = 1 [(google.api.field_behavior) = IDENTIFIER];
+  // Where the change is.
+  State state = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // SUPPRESSED: why. With `shadow`: why it would have been suppressed.
+  SuppressionReason suppression_reason = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Recorded during the watch's shadow mode: kept although `suppression_reason` would have dropped it.
+  bool shadow = 4 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // What decided it (RULE in v1).
+  Classifier classifier = 5 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The trigger it was evaluated with.
+  TriggerKind trigger_kind = 6 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // One line in Chinese made by the rules (counts and the trigger), never by the page.
+  string summary = 7 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Lines added since the notified state.
+  int32 added_line_count = 8 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Lines removed since the notified state.
+  int32 removed_line_count = 9 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The changed lines, at most 200 of at most 500 characters each (`diff_truncated` when cut).
+  repeated DiffLine diff_lines = 10 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // `diff_lines` is not the whole difference.
+  bool diff_truncated = 11 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // A typed trigger's change whose page went back within the confirmation window (Stability).
+  bool reverted = 12 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // NumberTrigger or AvailabilityTrigger: the value the trigger compared with, as text (the previous check's;
+  // the notified one for NumberTrigger.change_percent); empty when there was none.
+  string previous_value = 13 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // NumberTrigger or AvailabilityTrigger: the new value, as text.
+  string current_value = 14 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The check that found the difference.
+  google.protobuf.Timestamp detect_time = 15 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // When it was confirmed or suppressed; unset while pending.
+  google.protobuf.Timestamp resolve_time = 16 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // When the owner acknowledged it.
+  google.protobuf.Timestamp acknowledge_time = 17 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The watch's display name when the change was read (for a list across watches).
+  string watch_display_name = 18 [(google.api.field_behavior) = OUTPUT_ONLY];
+}
+
+// One line of a change's difference.
+message DiffLine {
+  // Added or removed.
+  enum Kind {
+    // Never written.
+    KIND_UNSPECIFIED = 0;
+    // In the new text only.
+    KIND_ADDED = 1;
+    // In the notified text only.
+    KIND_REMOVED = 2;
+  }
+
+  // Added or removed.
+  Kind kind = 1 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The normalized line (masks applied).
+  string text = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
+}

@@ -18,7 +18,8 @@ cannot express (bounds, URL hosts). `lab/ui/v1` is Lab's owner API (2026-10-01):
 through `ts/http-transcoder.ts` and Lab's UI calls it through `ts/http-client.ts`; it is the pilot of the
 HTTP APIs, which recommendation-v1, mail-received-v1 and every app's UI API follow. `links/ui/v1` is the
 links app's owner API (2026-10-01, deployed since the app's step L2): the second app on the same runtime, under the path
-prefix `/_/api/v1/` (its host's other paths are short links).
+prefix `/_/api/v1/` (its host's other paths are short links). `watch/ui/v1` is the watch app's owner API (2026-10-01,
+not deployed yet: the app is checked only until its first deploy step): the third app on the runtime, under `/api/v1/`.
 
 `ops/v1/ops.proto` is the IDL of `contracts/ops-v1` (2026-10-01) and its single source of validation: the
 value rules are options in the IDL ([Value rules](#value-rules)), the contract's JSON Schema is generated from
@@ -70,8 +71,9 @@ change ("What the case rule costs" under [Value rules](#value-rules)), then the 
 4. **Lint and breaking.** `buf lint` uses `STANDARD` (AIP-aligned: `_UNSPECIFIED` zero values, enum prefixes,
    `lower_snake_case`, versioned packages) and `COMMENTS` (every element documented); exceptions are written
    next to the element with `buf:lint:ignore` and a reason, and the AIP-shaped HTTP packages are excused only
-   from the two response-name rules the AIPs contradict: `lab/ui` in `buf.yaml`'s `ignore_only`, `links/ui` by
-   those two `buf:lint:ignore` lines on each method that answers a `Link` (with the reason in the file's header),
+   from the two response-name rules the AIPs contradict: `lab/ui` in `buf.yaml`'s `ignore_only`, `links/ui` and
+   `watch/ui` by those two `buf:lint:ignore` lines on each method that answers a resource (with the reason in the
+   file's header),
    because `buf.yaml` reaches every proto user's deploy (`proto_deploys` below) and a new package must not
    redeploy the other apps. Google's api-linter
    (`scripts/api-lint.sh`, one pinned version) checks every package but `prototest/` against the AIPs; its
@@ -111,7 +113,7 @@ change ("What the case rule costs" under [Value rules](#value-rules)), then the 
 | --- | --- |
 | `buf.yaml`, `buf.lock` | The module (`path: .`, tooling directories excluded), lint and breaking rules, the `buf.build/googleapis/googleapis` dependency pinned by commit and digest |
 | `buf.gen.yaml` | protobuf-es v2 (`target=ts`, `import_extension=ts`, `erasable_syntax=true`) into `ts/` |
-| `<package path>/*.proto` | One directory per proto package: `todofy/taskintent/v1/task_intent.proto` is `todofy.taskintent.v1`; `lab/ui/v1/*.proto` is `lab.ui.v1`, Lab's owner UI API; `links/ui/v1/*.proto` is `links.ui.v1`, the links app's owner API; `common/errors/v1/errors.proto` is `common.errors.v1`, the error reasons every HTTP API shares; `common/wire/v1/wire.proto` is `common.wire.v1`, the wire profile's own options ([Value rules](#value-rules), `non_null`, `closed`, `keep_order`, `positional`); `ops/v1/ops.proto` is `ops.v1`, the IDL of `contracts/ops-v1` (every app's `Ops` entrypoint), a contract several apps implement, so named by the contract, not an app ([Adding a contract](#common-tasks), step 1); `todofy/report/v1/report.proto` is `todofy.report.v1`, Todofy's newsletter reports (recommendation-v1, summary-v1) |
+| `<package path>/*.proto` | One directory per proto package: `todofy/taskintent/v1/task_intent.proto` is `todofy.taskintent.v1`; `lab/ui/v1/*.proto` is `lab.ui.v1`, Lab's owner UI API; `links/ui/v1/*.proto` is `links.ui.v1`, the links app's owner API; `watch/ui/v1/*.proto` is `watch.ui.v1`, the watch app's owner API; `common/errors/v1/errors.proto` is `common.errors.v1`, the error reasons every HTTP API shares; `common/wire/v1/wire.proto` is `common.wire.v1`, the wire profile's own options ([Value rules](#value-rules), `non_null`, `closed`, `keep_order`, `positional`); `ops/v1/ops.proto` is `ops.v1`, the IDL of `contracts/ops-v1` (every app's `Ops` entrypoint), a contract several apps implement, so named by the contract, not an app ([Adding a contract](#common-tasks), step 1); `todofy/report/v1/report.proto` is `todofy.report.v1`, Todofy's newsletter reports (recommendation-v1, summary-v1) |
 | `package.json`, `package-lock.json` | The toolchain pins (`dependencies`: buf, protoc-gen-es, the runtime) and this folder's test tools (`devDependencies`) |
 | `ts/` | The TypeScript package `@ziyixi/proto`. Committed: `package.json` (its exports), `wire-json.ts`, `wire-rules.ts` and `field-mask.ts` (the codec and its value rules), `http-path.ts`, `http-rule.ts`, `http-transcoder.ts`, `http-client.ts` and `rpc-status.ts` (the HTTP runtime, [HTTP APIs](#http-apis)), `page-token.ts` and `filter.ts` (AIP-158 page tokens and the AIP-160 subset for list methods), `protobuf.ts` / `protobuf-wkt.ts` (the runtime re-exports). Generated: every directory (`ts/todofy/...`, `ts/lab/...`, `ts/ops/...`, `ts/common/...`, `ts/google/...`): protobuf-es's `*_pb.ts`, and for the packages of `WIRE_PACKAGES` the wire JSON types `*_wire.ts` |
 | `python/` | The Python package `ziyixi-proto`. Committed: `pyproject.toml` (static metadata, uv cache keys), `build_backend.py`, `src/ziyixi_proto/__init__.py` and `wire_json.py` (the codec and its value rules). Generated: every directory under `src/ziyixi_proto/`, for the packages `tools/gen_py.py` lists in `PYTHON_PACKAGES` only; the wheel leaves the test-only ones out (`TEST_ONLY_PACKAGES`) |

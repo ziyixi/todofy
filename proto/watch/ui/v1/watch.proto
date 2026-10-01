@@ -1,0 +1,373 @@
+// A watch: one web page, feed or JSON API that the Worker "watch" checks on a schedule, and how it decides
+// that a difference is a change worth the owner's attention (watch/docs/design.md §3-§5).
+//
+// The wire JSON profile has no oneofs (proto/README.md), so the two "one of" choices of a watch, its source
+// and its trigger, are messages with one field per kind: the Worker refuses a request that sets more than
+// one of them (INVALID_SOURCE, INVALID_TRIGGER), and an unset one is the default kind (HTML, any change).
+
+syntax = "proto3";
+
+package watch.ui.v1;
+
+import "google/api/field_behavior.proto";
+import "google/api/resource.proto";
+import "google/protobuf/timestamp.proto";
+
+option java_multiple_files = true;
+option java_outer_classname = "WatchProto";
+option java_package = "science.ziyixi.watch.ui.v1";
+
+// A watched page. Its URL, selectors and extracted text are the owner's personal data: they live only in the
+// Worker's Durable Object, behind Access, and never reach a log.
+message Watch {
+  option (google.api.resource) = {
+    type: "watch.ziyixi.science/Watch"
+    pattern: "watches/{watch}"
+    singular: "watch"
+    plural: "watches"
+  };
+
+  // The watch's lifecycle (AIP-216).
+  enum State {
+    // Never written.
+    STATE_UNSPECIFIED = 0;
+    // Checked on its schedule.
+    STATE_ACTIVE = 1;
+    // Not checked: paused by the owner, or automatically after 14 days broken (`pause_reason`).
+    STATE_PAUSED = 2;
+    // Still checked, but the last 3 or more checks failed the health gate (`health.last_failure`). Never
+    // read as "no change".
+    STATE_BROKEN = 3;
+  }
+
+  // How the page is fetched.
+  enum Fetcher {
+    // Not set: read as HTTP on input, never written.
+    FETCHER_UNSPECIFIED = 0;
+    // A plain HTTP GET from the Durable Object (no JavaScript runs).
+    FETCHER_HTTP = 1;
+    // A headless browser (Browser Run) for pages that need JavaScript: under a daily ledger of 480 browser
+    // seconds, at most every 6 hours. Refused with BROWSER_NOT_AVAILABLE while the deployment has no browser
+    // binding.
+    FETCHER_BROWSER = 2;
+  }
+
+  // How a confirmed change reaches the owner (step W3; until then only the change inbox shows it).
+  enum NotifyPolicy {
+    // Not set: read as DIGEST on input, never written.
+    NOTIFY_POLICY_UNSPECIFIED = 0;
+    // In the daily digest.
+    NOTIFY_POLICY_DIGEST = 1;
+    // At once, on its own.
+    NOTIFY_POLICY_URGENT = 2;
+  }
+
+  // Why a watch is paused.
+  enum PauseReason {
+    // Not paused.
+    PAUSE_REASON_UNSPECIFIED = 0;
+    // PauseWatch.
+    PAUSE_REASON_OWNER = 1;
+    // Broken for 14 days in a row: paused by the Worker; ResumeWatch starts it again.
+    PAUSE_REASON_BROKEN_TOO_LONG = 2;
+  }
+
+  // watches/{watch}: 1 to 40 characters of `a-z`, `0-9` and `-`, starting with a letter (AIP-122); the
+  // CreateWatch `watch_id`, or one the Worker makes.
+  string name = 1 [(google.api.field_behavior) = IDENTIFIER];
+  // The owner's name for the watch: 1 to 80 characters. The only text of a watch that later steps may show
+  // outside this app (a digest line).
+  string display_name = 2 [(google.api.field_behavior) = REQUIRED];
+  // The page: an absolute `https:` URL (`http:` only with `fetch_policy.allow_http`) of at most 2,048
+  // characters, without user name, password or port, whose host is a name (never an IP address, `localhost`
+  // or a `*.ziyixi.science` host). The fragment is dropped.
+  string uri = 3 [(google.api.field_behavior) = REQUIRED];
+  // What to read from the response; unset: the page's visible text (an HtmlSource without selectors).
+  WatchSource source = 4 [(google.api.field_behavior) = OPTIONAL];
+  // Which differences do not count.
+  NormalizeOptions normalize = 5 [(google.api.field_behavior) = OPTIONAL];
+  // When a difference is a change; unset: any changed line.
+  Trigger trigger = 6 [(google.api.field_behavior) = OPTIONAL];
+  // The confirmation fetch of HTML sources.
+  Stability stability = 7 [(google.api.field_behavior) = OPTIONAL];
+  // Minutes between checks: 0 means the default (360, or 1,440 for FETCHER_BROWSER); otherwise 60 to 10,080
+  // (360 to 10,080 for FETCHER_BROWSER). Each check is moved by up to 10 % either way.
+  int32 check_interval_minutes = 8 [(google.api.field_behavior) = OPTIONAL];
+  // How the page is fetched (HTTP when unspecified).
+  Fetcher fetcher = 9 [(google.api.field_behavior) = OPTIONAL];
+  // How a confirmed change reaches the owner (DIGEST when unspecified).
+  NotifyPolicy notify_policy = 10 [(google.api.field_behavior) = OPTIONAL];
+  // The Accept-Language every request sends (the Durable Object runs in one place, so the page's language
+  // must not depend on it): a header value of at most 100 characters; empty: `zh-CN,zh;q=0.9,en;q=0.8`.
+  string request_locale = 11 [(google.api.field_behavior) = OPTIONAL];
+  // The AI judge of confirmed changes. Off in v1: `ai.enabled` is refused with AI_NOT_AVAILABLE.
+  AiOptions ai = 12 [(google.api.field_behavior) = OPTIONAL];
+  // The fetch rules the owner may relax for this watch.
+  FetchPolicy fetch_policy = 13 [(google.api.field_behavior) = OPTIONAL];
+  // Shadow mode: for 7 days from the write that sets it, a change that would be suppressed is recorded as
+  // CONFIRMED with the reason it would have had (Change.shadow), so the owner sees what the rules would drop.
+  // Reads answer whether the period is still running; writing false ends it.
+  bool shadow_mode = 14 [(google.api.field_behavior) = OPTIONAL];
+  // The lifecycle state.
+  State state = 15 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Why the watch is paused; unset while it is not.
+  PauseReason pause_reason = 16 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The latest checks: codes, counts and times.
+  WatchHealth health = 17 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // When shadow mode ends; unset when it is off.
+  google.protobuf.Timestamp shadow_end_time = 18 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // When the watch was created.
+  google.protobuf.Timestamp create_time = 19 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // When the owner last changed it.
+  google.protobuf.Timestamp update_time = 20 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // AIP-154: changes with every write by the owner (not with checks). UpdateWatch, DeleteWatch, PauseWatch
+  // and ResumeWatch that carry an etag are refused with ETAG_MISMATCH when the watch changed since.
+  string etag = 21 [(google.api.field_behavior) = OPTIONAL];
+  // Confirmed changes the owner has not acknowledged yet.
+  int32 new_change_count = 22 [(google.api.field_behavior) = OUTPUT_ONLY];
+}
+
+// What a watch reads from the response: exactly one field is set (none: an HtmlSource without selectors).
+message WatchSource {
+  // A web page's visible text.
+  HtmlSource html = 1 [(google.api.field_behavior) = OPTIONAL];
+  // An RSS, Atom or JSON Feed: its items.
+  FeedSource feed = 2 [(google.api.field_behavior) = OPTIONAL];
+  // A JSON API: the values at a path.
+  JsonSource json = 3 [(google.api.field_behavior) = OPTIONAL];
+  // Structured data embedded in a web page (JSON-LD, Next.js page data).
+  EmbeddedSource embedded = 4 [(google.api.field_behavior) = OPTIONAL];
+}
+
+// A web page's visible text, one line per block, without scripts, styles, `noscript`, `template`, `svg`,
+// `iframe`, attributes and the page's landmark regions (`nav`, the navigation, banner and contentinfo roles,
+// the body's own header and footer).
+message HtmlSource {
+  // Only text inside these elements counts (none: the whole page). At most 10 CSS selectors of at most 200
+  // characters each, in the subset HTMLRewriter supports (no XPath, sibling combinators or `:has`); a
+  // selector it refuses is INVALID_SELECTOR. PreviewWatch suggests them from the page's blocks.
+  repeated string include_selectors = 1 [(google.api.field_behavior) = OPTIONAL];
+  // Text inside these elements never counts. Same rules as `include_selectors`.
+  repeated string exclude_selectors = 2 [(google.api.field_behavior) = OPTIONAL];
+  // Each link's address is kept after its text (`text <https://...>`), so a changed link is a change.
+  bool keep_links = 3 [(google.api.field_behavior) = OPTIONAL];
+  // The landmark regions count too.
+  bool keep_landmarks = 4 [(google.api.field_behavior) = OPTIONAL];
+}
+
+// An RSS 2.0, Atom 1.0 or JSON Feed 1.x document: one line per item (its title and link), keyed by its
+// guid, id or link, so NewItemTrigger sees new items. Feeds are never confirmed by a second fetch.
+message FeedSource {
+  // Each item's summary is part of its line too.
+  bool include_summaries = 1 [(google.api.field_behavior) = OPTIONAL];
+}
+
+// A JSON document: the values at `path`, one line each (scalars as written, objects and arrays as compact
+// JSON with sorted keys). Never confirmed by a second fetch.
+message JsonSource {
+  // A JSONPath in a small subset: `$`, then `.name`, `['name']`, `[n]` or `[*]` steps (at most 16), e.g.
+  // `$.releases[0].version` or `$.items[*].name`. Empty: the whole document. Anything else is INVALID_SOURCE.
+  string path = 1 [(google.api.field_behavior) = OPTIONAL];
+}
+
+// Structured data inside a web page. Never confirmed by a second fetch.
+message EmbeddedSource {
+  // Which embedded data.
+  enum Kind {
+    // Not set: read as JSON_LD on input, never written.
+    KIND_UNSPECIFIED = 0;
+    // Every `<script type="application/ld+json">` block (an array of them, `@graph` flattened); without a
+    // path, one line per schema.org Product or Offer (name, price, currency, availability).
+    KIND_JSON_LD = 1;
+    // The JSON of `<script id="__NEXT_DATA__">` (a Next.js page); needs a path.
+    KIND_NEXT_DATA = 2;
+  }
+
+  // Which embedded data (JSON_LD when unspecified).
+  Kind kind = 1 [(google.api.field_behavior) = OPTIONAL];
+  // A JSONPath in JsonSource.path's subset, applied to that data.
+  string path = 2 [(google.api.field_behavior) = OPTIONAL];
+}
+
+// Which differences do not count. Every line is first normalized (NFKC, no zero-width characters, runs of
+// whitespace as one space); then, unless `disable_default_masks`, relative times (`3 minutes ago`, `3小时前`,
+// `刚刚`), times of day with seconds, the time part of ISO date-times, epoch milliseconds, long hex, base64 and
+// UUID strings, nonce and token query values, and copyright years are masked. Absolute dates and other numbers
+// are kept: a price or a version is often the point.
+message NormalizeOptions {
+  // Lines (after normalization and masking) to drop: the suppressed drawer's "ignore this line". At most
+  // 100, each at most 300 characters.
+  repeated string ignored_lines = 1 [(google.api.field_behavior) = OPTIONAL];
+  // Masks nothing but `ignored_lines`.
+  bool disable_default_masks = 2 [(google.api.field_behavior) = OPTIONAL];
+  // Also masks every number (a page whose counters are noise).
+  bool mask_numbers = 3 [(google.api.field_behavior) = OPTIONAL];
+}
+
+// When a difference from the last notified state is a change. AnyChangeTrigger and NewItemTrigger compare
+// with the notified state (small differences add up until they reach the floor). The other triggers are edges:
+// they fire when their condition becomes true between the previous check's text and this one, not on every
+// check while it stays true, so a restock after a sell-out is news again. Exactly one field is set (none:
+// AnyChangeTrigger with its defaults).
+message Trigger {
+  // Any changed line.
+  AnyChangeTrigger any_change = 1 [(google.api.field_behavior) = OPTIONAL];
+  // A text appears.
+  TextTrigger text_appears = 2 [(google.api.field_behavior) = OPTIONAL];
+  // A text disappears.
+  TextTrigger text_disappears = 3 [(google.api.field_behavior) = OPTIONAL];
+  // A new item (a feed item, a JSON value, or a line of a page).
+  NewItemTrigger new_item = 4 [(google.api.field_behavior) = OPTIONAL];
+  // A number crosses a threshold or changes by a share.
+  NumberTrigger number = 5 [(google.api.field_behavior) = OPTIONAL];
+  // A schema.org availability changes (JSON-LD offers).
+  AvailabilityTrigger availability = 6 [(google.api.field_behavior) = OPTIONAL];
+}
+
+// Any changed line, above a floor.
+message AnyChangeTrigger {
+  // At least this many added plus removed lines (0 means 1; at most 1,000).
+  int32 min_changed_lines = 1 [(google.api.field_behavior) = OPTIONAL];
+  // And at least this share of the notified state's lines, in percent (0 to 100).
+  int32 min_changed_percent = 2 [(google.api.field_behavior) = OPTIONAL];
+}
+
+// A text, matched case-insensitively against the normalized lines: 1 to 200 characters.
+message TextTrigger {
+  // The text.
+  string text = 1 [(google.api.field_behavior) = OPTIONAL];
+}
+
+// New items, by key (a feed item's guid, id or link; a JSON value's `id`, `url` or its JSON; a page's line), that
+// the notified state does not have.
+message NewItemTrigger {
+  // At least this many new items (0 means 1; at most 100).
+  int32 min_new_items = 1 [(google.api.field_behavior) = OPTIONAL];
+}
+
+// A number read from the text: the first one after `label`, or the first one at all (`1,299.00`, `¥1299`,
+// `-3.5`). At least one condition is set. No number is the health failure VALUE_MISSING.
+message NumberTrigger {
+  // Fires when the number rises to or above this value (the previous check's was below).
+  optional double upper_threshold = 1 [(google.api.field_behavior) = OPTIONAL];
+  // Fires when the number falls to or below this value (the previous check's was above).
+  optional double lower_threshold = 2 [(google.api.field_behavior) = OPTIONAL];
+  // Fires when the number moves by at least this many percent of its notified value (0: off; at most 10,000).
+  double change_percent = 3 [(google.api.field_behavior) = OPTIONAL];
+  // The text right before the number (at most 100 characters); empty: the first number of the text.
+  string label = 4 [(google.api.field_behavior) = OPTIONAL];
+}
+
+// A schema.org ItemAvailability of a JSON-LD offer (`InStock`, `OutOfStock`, `PreOrder`, ...). Needs an
+// EmbeddedSource of KIND_JSON_LD; no availability is the health failure VALUE_MISSING.
+message AvailabilityTrigger {
+  // Fires only when the availability becomes one a buyer can act on (`InStock`, `LimitedAvailability`,
+  // `OnlineOnly`, `InStoreOnly`, `PreOrder`, `PreSale`, `BackOrder`) from one they cannot; otherwise on any
+  // change since the previous check.
+  bool only_when_available = 1 [(google.api.field_behavior) = OPTIONAL];
+}
+
+// The confirmation of a change of an HTML source: a second fetch about `confirm_delay_minutes` later must see
+// the same change before it is confirmed. A page that went back (A to B to A) within the window is a flicker:
+// suppressed for AnyChangeTrigger, confirmed as `reverted` for the typed triggers (a restock that sold out
+// again in a quarter of an hour is still news). Feeds and structured sources are never confirmed.
+message Stability {
+  // Confirm at once, without the second fetch.
+  bool skip_confirmation = 1 [(google.api.field_behavior) = OPTIONAL];
+  // Minutes until the confirmation fetch: 0 means 15; otherwise 15 to 120.
+  int32 confirm_delay_minutes = 2 [(google.api.field_behavior) = OPTIONAL];
+}
+
+// The AI judge of confirmed changes (step 7 of the pipeline). Off in v1.
+message AiOptions {
+  // Ask the judge. Refused with AI_NOT_AVAILABLE in v1.
+  bool enabled = 1 [(google.api.field_behavior) = OPTIONAL];
+  // What the owner cares about on this page, for the judge: at most 200 characters. Kept, unused in v1.
+  string intent = 2 [(google.api.field_behavior) = OPTIONAL];
+}
+
+// The fetch rules the owner may relax for one watch.
+message FetchPolicy {
+  // Allow an `http:` URL (and `http:` redirects). The UI warns that the page travels unencrypted.
+  bool allow_http = 1 [(google.api.field_behavior) = OPTIONAL];
+  // Fetch even what the site's robots.txt disallows for this agent.
+  bool ignore_robots = 2 [(google.api.field_behavior) = OPTIONAL];
+}
+
+// The latest checks of a watch: codes, counts and times only.
+message WatchHealth {
+  // What the last check found.
+  enum Outcome {
+    // Never checked.
+    OUTCOME_UNSPECIFIED = 0;
+    // A difference was recorded as a change (pending, confirmed or suppressed).
+    OUTCOME_CHANGED = 1;
+    // Nothing that counts changed.
+    OUTCOME_UNCHANGED = 2;
+    // The site answered 304 Not Modified.
+    OUTCOME_NOT_MODIFIED = 3;
+    // The health gate failed (`last_failure`).
+    OUTCOME_FAILED = 4;
+  }
+
+  // The last check.
+  google.protobuf.Timestamp last_check_time = 1 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The last check that passed the health gate.
+  google.protobuf.Timestamp last_success_time = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The next scheduled check (a confirmation fetch included); unset while paused.
+  google.protobuf.Timestamp next_check_time = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // What the last check found.
+  Outcome last_outcome = 4 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Why the last check failed; unset after a success.
+  FailureReason last_failure = 5 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The HTTP status of the last answer (0: none).
+  int32 last_http_status = 6 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Failed checks in a row (3 make the watch BROKEN, 14 days of them pause it).
+  int32 consecutive_failure_count = 7 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The first failure of the current run of failures; unset after a success.
+  google.protobuf.Timestamp failure_start_time = 8 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The site's Retry-After: no request to its host before this time.
+  google.protobuf.Timestamp backoff_end_time = 9 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Checks whose raw page changed but whose normalized text did not (the masks at work), since creation.
+  int32 masked_change_count = 10 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // A change waits for its confirmation fetch.
+  bool pending_confirmation = 11 [(google.api.field_behavior) = OUTPUT_ONLY];
+}
+
+// Why a check failed the health gate (step 0): never read as "no change".
+enum FailureReason {
+  // No failure.
+  FAILURE_REASON_UNSPECIFIED = 0;
+  // The final answer was not 2xx or 304 (`last_http_status`).
+  FAILURE_REASON_HTTP_ERROR = 1;
+  // A bot challenge or block page (the UI says "blocked"): never worked around.
+  FAILURE_REASON_CHALLENGE_PAGE = 2;
+  // The content type does not fit the source (an HTML page for a feed, ...).
+  FAILURE_REASON_WRONG_CONTENT_TYPE = 3;
+  // No include selector matched.
+  FAILURE_REASON_SELECTOR_MISS = 4;
+  // The extracted text is too short to be the page (an empty single-page app shell).
+  FAILURE_REASON_TOO_SHORT = 5;
+  // Too many U+FFFD replacement characters: the page did not decode.
+  FAILURE_REASON_MOJIBAKE = 6;
+  // FETCHER_BROWSER and today's 480 browser seconds are used up (until 00:00 UTC).
+  FAILURE_REASON_JS_QUOTA_EXHAUSTED = 7;
+  // The site's robots.txt disallows the page for this agent (or could not be read: 5xx).
+  FAILURE_REASON_ROBOTS_DISALLOWED = 8;
+  // 429 or 503: the site asked to slow down; the next check waits for its Retry-After.
+  FAILURE_REASON_RATE_LIMITED = 9;
+  // No answer within 15 seconds.
+  FAILURE_REASON_TIMEOUT = 10;
+  // The connection failed.
+  FAILURE_REASON_NETWORK_ERROR = 11;
+  // The body is larger than 2 MiB.
+  FAILURE_REASON_TOO_LARGE = 12;
+  // A redirect led to a URL the watch may not fetch, or more than 5 redirects.
+  FAILURE_REASON_REDIRECT_REFUSED = 13;
+  // The feed or JSON did not parse, or the path does not apply.
+  FAILURE_REASON_PARSE_ERROR = 14;
+  // The trigger's number or availability is not there.
+  FAILURE_REASON_VALUE_MISSING = 15;
+  // FETCHER_BROWSER, and the deployment has no browser binding.
+  FAILURE_REASON_BROWSER_UNAVAILABLE = 16;
+}
