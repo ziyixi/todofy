@@ -219,7 +219,6 @@
   },
   "read/OpsReport/daily.json": {
     "generated_at": "2026-09-29T23:40:00Z",
-    "dashboard_url": "https://home.example.com/",
     "items": [
       {
         "source": "mail-hero",
@@ -266,7 +265,8 @@
         "since": "2026-09-28T22:31:40Z",
         "metrics": {}
       }
-    ]
+    ],
+    "dashboard_url": "https://home.example.com/"
   },
   "read/OpsReport/empty.json": {
     "generated_at": "2026-09-29T23:40:00Z",
