@@ -30,6 +30,7 @@ LENIENT = {
     "CanaryResult/ok-with-summary.json": ["summary"],
     "OpsReport/item-with-text.json": ["items[0].text"],
     "OpsStatus/extra-field-subject.json": ["subject"],
+    "OpsStatus/unknown-app.json": [],
     "StartCanaryInput/extra-field.json": ["to"],
     "StartCanaryResult/unknown-reason.json": [],
 }
@@ -81,6 +82,7 @@ class BoundsTest(unittest.TestCase):
         self.assertEqual(field_rules(pb.Signal, "metrics").max_items, 12)
         self.assertEqual(field_rules(pb.OpsReport, "items").max_items, 20)
         self.assertEqual(field_rules(pb.OpsStatus, "app").allowed, frozenset({"mail-hero", "todofy", "lab"}))
+        self.assertTrue(field_rules(pb.OpsStatus, "app").open)  # an app may join within ops-v1
         self.assertEqual([wire_name(code) for code in list(pb.ErrorCode)[1:]], ["invalid_input", "busy", "unavailable"])
 
     def test_a_receipt_counts_at_most_the_items_a_report_holds(self) -> None:

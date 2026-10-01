@@ -6,6 +6,7 @@
  * contract's consumer rules tolerate it.
  */
 import { describe, expect, it } from 'vitest';
+import { OpsStatusSchema } from '@ziyixi/proto/ops/v1/ops_pb';
 import type { OpsApp } from '../src/api-types.ts';
 import mailHeroOk from '../../../contracts/ops-v1/fixtures/OpsStatus/mail-hero-ok.json';
 import mailHeroDegraded from '../../../contracts/ops-v1/fixtures/OpsStatus/mail-hero-degraded.json';
@@ -44,6 +45,7 @@ import type { Env } from '../src/env.ts';
 import { contractErrors, declaredMethods } from './contract.ts';
 import {
   CALLED_METHODS,
+  OPS_APPS,
   OPS_ERROR_CODES,
   asCanaryDelivery,
   asCanaryResult,
@@ -52,6 +54,7 @@ import {
   asStartCanaryResult,
   asStatus,
   callOps,
+  conform,
   opsCanaryDelivery,
   opsCanaryResult,
   opsReportOps,
@@ -102,6 +105,17 @@ const WRAPPERS: readonly { app: OpsApp; method: string; call: Wrapper; valid: un
 ];
 
 describe('only the methods of the services each app implements', () => {
+  it('knows exactly the apps of the IDL (OpsStatus.app is open on the wire, OpsApp is this list)', () => {
+    expect(OPS_APPS).toEqual(['mail-hero', 'todofy', 'lab'] satisfies readonly OpsApp[]);
+    expect(Object.keys(CALLED_METHODS)).toEqual([...OPS_APPS]);
+  });
+
+  it('reads the status of an app that joined later, but keeps only the answer of the app it called', () => {
+    const newer = { ...(labOk as Record<string, unknown>), app: 'newer-app' };
+    expect(conform(OpsStatusSchema, newer)).toEqual(newer);
+    for (const app of OPS_APPS) expect(asStatus(app)(newer)).toBeNull();
+  });
+
   it('lists exactly the declared methods per app', () => {
     expect([...CALLED_METHODS['mail-hero']].sort()).toEqual(declaredMethods('mail-hero'));
     expect([...CALLED_METHODS.todofy].sort()).toEqual(declaredMethods('todofy'));

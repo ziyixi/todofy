@@ -16,7 +16,8 @@
 //
 // Timestamps are strings in the format `Timestamp`, not google.protobuf.Timestamp: ops-v1's producers write both
 // whole seconds (`...:00Z`) and milliseconds (`...:00.000Z`), and the profile's Timestamp would rewrite one of
-// them. The app names (`mail-hero`) are strings with an allowed list: an enum's wire name cannot hold a hyphen.
+// them. The app names (`mail-hero`) are strings with an open allowed list (an app may join within ops-v1): an enum's
+// wire name cannot hold a hyphen.
 //
 // Content rule (README "Content rule"): outputs carry codes, numbers, booleans, timestamps, event and run IDs and
 // the apps' own UI URLs only. The rules below make that a check rather than a convention: every name is a `Code`
@@ -155,7 +156,8 @@ message OpsStatus {
     (google.api.field_behavior) = REQUIRED,
     (common.wire.v1.field).allowed = "ops-v1"
   ];
-  // The app that answers.
+  // The app that answers. The list is open: it may grow within ops-v1 when an app joins (the watch app next), and a
+  // consumer reads a name it does not know yet; the dashboard keeps only the answer of the app it called.
   string app = 2 [
     (google.api.field_behavior) = REQUIRED,
     (common.wire.v1.field) = {
@@ -164,6 +166,7 @@ message OpsStatus {
         "todofy",
         "lab"
       ]
+      open: true
     }
   ];
   // When the snapshot was taken.

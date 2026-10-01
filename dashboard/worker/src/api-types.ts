@@ -25,8 +25,12 @@ import type {
 } from '@ziyixi/proto/ops/v1/ops_wire';
 
 export type { OpsStatus, GuardLevel, GuardState, OpsReportItem, OpsReportReceipt };
-/** An app of ops-v1 (its closed list in proto/ops/v1/ops.proto: mail-hero, todofy, lab). */
-export type OpsApp = OpsStatus['app'];
+/**
+ * An app of ops-v1 that this dashboard calls: OpsStatus.app's allowed list in proto/ops/v1/ops.proto (OPS_APPS reads
+ * it; ops-client.test.ts holds the two equal). The list is open on the wire (an app may join within ops-v1), so the
+ * generated type of `app` is a string; this dashboard knows exactly the apps it binds.
+ */
+export type OpsApp = 'mail-hero' | 'todofy' | 'lab';
 /** A signal's or a report item's severity. */
 export type OpsSeverity = Severity;
 /** One active condition of an app's status. */

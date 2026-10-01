@@ -14,7 +14,8 @@ import { expect, test } from 'vitest';
 import { scheduledRunId, manualRunId } from '../src/canary.ts';
 import { buildReport, finalizeItems, type Candidate } from '../src/digest.ts';
 import { guardInput } from '../src/guard.ts';
-import { asCanaryDelivery, asCanaryResult, asGuardState, asReceipt, asStartCanaryResult, asStatus, conform } from '../src/ops-client.ts';
+import type { OpsApp } from '../src/api-types.ts';
+import { asCanaryDelivery, asCanaryResult, asGuardState, asReceipt, asStartCanaryResult, asStatus, conform, OPS_APPS } from '../src/ops-client.ts';
 
 /** A file path next to this test (the Workers URL type is not Node's, so paths are strings). */
 const path = (relative: string): string => decodeURIComponent(new URL(relative, import.meta.url).pathname);
@@ -44,8 +45,12 @@ const READERS: Readonly<Record<string, ((value: unknown) => unknown) | undefined
   CanaryDelivery: asCanaryDelivery,
   CanaryResult: asCanaryResult,
   OpsReportReceipt: asReceipt,
-  // The app the dashboard called is the one the answer must name (the fixture's own, here).
-  OpsStatus: (value) => asStatus((value as { app: Parameters<typeof asStatus>[0] }).app)(value),
+  // The app the dashboard called is the one the answer must name: the fixture's own when the dashboard binds it. A
+  // name it does not bind (OpsStatus.app is open on the wire) can only come from a binding of another app: refused.
+  OpsStatus: (value) => {
+    const app = (value as { app?: unknown }).app;
+    return asStatus((OPS_APPS as readonly unknown[]).includes(app) ? (app as OpsApp) : 'mail-hero')(value);
+  },
   // Inputs the dashboard sends: the same schema check, as its own tests run on what it builds.
   SetGuardInput: (value) => conform(SetGuardInputSchema, value),
   StartCanaryInput: (value) => conform(StartCanaryInputSchema, value),

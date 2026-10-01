@@ -250,7 +250,10 @@ the next UTC day's reminder carries it.
 ## Versioning and bounds
 
 - Additive changes stay `ops-v1`: new optional output fields, new signal/counter/capability codes, new
-  codes of the open lists `reason`/`waiting_code` and new `error_code`s documented here. They land in `ops.proto`
+  codes of the open lists `reason`/`waiting_code`, new `error_code`s documented here, and a new app. `OpsStatus.app`
+  is an open list (since 2026-10-01, ahead of the watch app): a dashboard reads a status naming an app it was built
+  without, and keeps only the answer of the app whose binding it called, so the list grows with the new app's
+  `Ops` entrypoint and the dashboard's binding to it. They land in `ops.proto`
   together with the regenerated schema (`npm run schema` in `proto/`) and fixtures in one change;
   `buf breaking` and the wire profile check (`proto/tools/profile_breaking.py`) refuse a change that
   would alter the bytes of an existing field. Consumers ignore unknown fields and show unknown codes

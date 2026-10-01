@@ -31,7 +31,8 @@ const MESSAGES: Record<string, DescMessage> = {
 
 /**
  * The invalid fixtures a lenient read (a consumer) accepts, and why: ops-v1's consumers ignore fields they do not
- * know and keep a newer code of an open list as read. Every other invalid fixture breaks a rule a consumer keeps too:
+ * know and keep a newer code of an open list as read (an app's name included: OpsStatus.app is open, so a dashboard
+ * reads the status of an app that joined after it was built; it keeps only the answer of the app it called). Every other invalid fixture breaks a rule a consumer keeps too:
  * a newer value of one of ops-v1's enums (all closed, (common.wire.v1.closed)) and a null REQUIRED enum or message
  * (non_null) included.
  */
@@ -39,6 +40,7 @@ const LENIENT: Record<string, readonly string[]> = {
   'CanaryResult/ok-with-summary.json': ['summary'],
   'OpsReport/item-with-text.json': ['items[0].text'],
   'OpsStatus/extra-field-subject.json': ['subject'],
+  'OpsStatus/unknown-app.json': [],
   'StartCanaryInput/extra-field.json': ['to'],
   'StartCanaryResult/unknown-reason.json': [],
 };
@@ -178,7 +180,7 @@ describe('the generated wire types are what toWire answers', () => {
   });
 
   test('closed allowed lists are literal types, open ones strings, nullable fields null', () => {
-    expectTypeOf<wire.OpsStatus['app']>().toEqualTypeOf<'mail-hero' | 'todofy' | 'lab'>();
+    expectTypeOf<wire.OpsStatus['app']>().toEqualTypeOf<string>();
     expectTypeOf<wire.OpsStatus['version']>().toEqualTypeOf<'ops-v1'>();
     expectTypeOf<wire.OpsStatus['last_backup_at']>().toEqualTypeOf<string | null>();
     expectTypeOf<wire.OpsStatus['modes']['maintenance']>().toEqualTypeOf<boolean>();
