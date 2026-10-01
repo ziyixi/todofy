@@ -5,11 +5,15 @@ rule more strictly for `stale`, a status no production Todofy ever sent (report.
 - a stale summary is never blank (the hand-written schema allowed a blank one when task_count was 0);
 - a stale recommendation saw at least one mail (the hand-written schema allowed task_count 0 without tasks).
 
+Both are read with format assertion on (`date-time`, which both declare on every timestamp), so a timestamp of the
+right shape but an impossible date or time is refused by both.
+
 The text rules are compared character by character over all of Unicode: "not blank" is Python's whitespace (the
 hand-written \\S, read by Python's re as the newsletter's str.strip() reads it), written out as a class that
 ECMAScript reads the same way.
 """
 
+import datetime
 import itertools
 import json
 import re
@@ -34,8 +38,31 @@ EMPTY = (
 )
 
 
+# A format checker that asserts only `date-time`. jsonschema's own checks it only with the optional
+# rfc3339-validator package, and without it passes every string, which would hide a dropped or added `format`.
+FORMATS = jsonschema.FormatChecker(formats=())
+RFC3339 = re.compile(
+    r"([0-9]{4})-([0-9]{2})-([0-9]{2})[Tt]([0-9]{2}):([0-9]{2}):([0-9]{2})(\.[0-9]+)?([Zz]|[+-][0-9]{2}:[0-9]{2})"
+)
+
+
+@FORMATS.checks("date-time")
+def rfc3339(value: object) -> bool:
+    """RFC 3339's date-time: its shape, then a real date and time of day (leap seconds aside)."""
+    if not isinstance(value, str):
+        return True
+    match = RFC3339.fullmatch(value)
+    if match is None:
+        return False
+    try:
+        datetime.datetime(*(int(part) for part in match.groups()[:6]))
+    except ValueError:
+        return False
+    return True
+
+
 def validator(path: Path) -> Any:
-    return jsonschema.Draft202012Validator(json.loads(path.read_text()))
+    return jsonschema.Draft202012Validator(json.loads(path.read_text()), format_checker=FORMATS)
 
 
 GENERATED = {name: validator(API / name) for name in NAMES}
@@ -56,6 +83,8 @@ def summaries() -> list[dict[str, Any]]:
         base | {"task_count": True},
         base | {"computed_at": "2026-09-28T13:30:00+00:00"},
         base | {"computed_at": "2026-09-28T13:30:00.000Z"},
+        base | {"computed_at": "2026-13-45T25:61:61Z"},
+        base | {"window_start": "2026-02-30T13:30:00Z"},
         base | {"extra": 1},
         {key: value for key, value in base.items() if key != "model"},
         base | {"model": None},
@@ -91,6 +120,8 @@ def recommendations() -> list[dict[str, Any]]:
         base | {"top_n": 11},
         base | {"new_count": "1"},
         base | {"window_end": "2026-09-28"},
+        base | {"window_end": "2026-09-28T24:00:00Z"},
+        base | {"computed_at": "2026-13-45T25:61:61Z"},
         {key: value for key, value in base.items() if key != "tasks"},
     ]
     return out
@@ -117,6 +148,19 @@ def test_the_generated_schema_gives_the_hand_written_verdict(name, documents):
     # The tightening is real: the stale cases above are refused now and were accepted before.
     stale = [d for d in documents if tightened(name, d) and LEGACY[name].is_valid(d)]
     assert stale and not any(GENERATED[name].is_valid(d) for d in stale)
+
+
+@pytest.mark.parametrize("name", NAMES)
+def test_an_impossible_time_of_the_right_shape_is_refused_by_both(name):
+    """The schemas keep `format: date-time` next to the pattern (report.proto's Time), and it is asserted here."""
+    golden = json.loads((UNIT / "golden" / "reports-v1.json").read_text())
+    document = json.loads(next(text for key, text in golden.items() if key.startswith(name.split("-")[0])))
+    assert GENERATED[name].is_valid(document) and LEGACY[name].is_valid(document)
+    for field in STAMPS:
+        for stamp in ("2026-13-45T25:61:61Z", "2026-02-30T13:30:00Z", "2026-09-28T24:00:00Z"):
+            assert re.fullmatch(r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z", stamp)
+            assert not GENERATED[name].is_valid(document | {field: stamp}), (field, stamp)
+            assert not LEGACY[name].is_valid(document | {field: stamp}), (field, stamp)
 
 
 def test_every_golden_report_validates_against_both():

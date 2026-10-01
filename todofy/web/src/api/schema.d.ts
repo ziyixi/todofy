@@ -803,11 +803,20 @@ export interface components {
             status: "ok";
             /** @description Gemini model name; empty when no model was called. */
             model: string;
-            /** @description When the report was computed. */
+            /**
+             * Format: date-time
+             * @description When the report was computed.
+             */
             computed_at: string;
-            /** @description The window's start (exclusive): 24 hours before its end. */
+            /**
+             * Format: date-time
+             * @description The window's start (exclusive): 24 hours before its end.
+             */
             window_start: string;
-            /** @description The window's end (inclusive): computed_at. */
+            /**
+             * Format: date-time
+             * @description The window's end (inclusive): computed_at.
+             */
             window_end: string;
         } | {
             /**
@@ -832,11 +841,20 @@ export interface components {
             status: "empty_window";
             /** @description Gemini model name; empty when no model was called. */
             model: string;
-            /** @description When the report was computed. */
+            /**
+             * Format: date-time
+             * @description When the report was computed.
+             */
             computed_at: string;
-            /** @description The window's start (exclusive): 24 hours before its end. */
+            /**
+             * Format: date-time
+             * @description The window's start (exclusive): 24 hours before its end.
+             */
             window_start: string;
-            /** @description The window's end (inclusive): computed_at. */
+            /**
+             * Format: date-time
+             * @description The window's end (inclusive): computed_at.
+             */
             window_end: string;
         } | {
             /** @description Plain text from the daily-summary prompt, or the legacy English sentence when the window is empty. Not blank; no control characters other than tab, line feed and carriage return. */
@@ -855,11 +873,20 @@ export interface components {
             status: "stale";
             /** @description Gemini model name; empty when no model was called. */
             model: string;
-            /** @description When the report was computed. */
+            /**
+             * Format: date-time
+             * @description When the report was computed.
+             */
             computed_at: string;
-            /** @description The window's start (exclusive): 24 hours before its end. */
+            /**
+             * Format: date-time
+             * @description The window's start (exclusive): 24 hours before its end.
+             */
             window_start: string;
-            /** @description The window's end (inclusive): computed_at. */
+            /**
+             * Format: date-time
+             * @description The window's end (inclusive): computed_at.
+             */
             window_end: string;
         };
         /**
@@ -887,11 +914,20 @@ export interface components {
             status: "ok";
             /** @description How many tasks were asked for (the `top` query parameter, 1-10). */
             top_n: number;
-            /** @description When the report was computed. */
+            /**
+             * Format: date-time
+             * @description When the report was computed.
+             */
             computed_at: string;
-            /** @description The window's start (exclusive): 24 hours before its end. */
+            /**
+             * Format: date-time
+             * @description The window's start (exclusive): 24 hours before its end.
+             */
             window_start: string;
-            /** @description The window's end (inclusive): computed_at. */
+            /**
+             * Format: date-time
+             * @description The window's end (inclusive): computed_at.
+             */
             window_end: string;
             /** @description Summaries of mail that arrived in the 24 h window (window_start, window_end]. Added 2026-09-30; absent from reports stored before. */
             new_count?: number;
@@ -921,11 +957,20 @@ export interface components {
             status: "empty_window";
             /** @description How many tasks were asked for (the `top` query parameter, 1-10). */
             top_n: number;
-            /** @description When the report was computed. */
+            /**
+             * Format: date-time
+             * @description When the report was computed.
+             */
             computed_at: string;
-            /** @description The window's start (exclusive): 24 hours before its end. */
+            /**
+             * Format: date-time
+             * @description The window's start (exclusive): 24 hours before its end.
+             */
             window_start: string;
-            /** @description The window's end (inclusive): computed_at. */
+            /**
+             * Format: date-time
+             * @description The window's end (inclusive): computed_at.
+             */
             window_end: string;
             /** @description Summaries of mail that arrived in the 24 h window (window_start, window_end]. Added 2026-09-30; absent from reports stored before. */
             new_count?: number;
@@ -952,11 +997,20 @@ export interface components {
             status: "model_output_invalid";
             /** @description How many tasks were asked for (the `top` query parameter, 1-10). */
             top_n: number;
-            /** @description When the report was computed. */
+            /**
+             * Format: date-time
+             * @description When the report was computed.
+             */
             computed_at: string;
-            /** @description The window's start (exclusive): 24 hours before its end. */
+            /**
+             * Format: date-time
+             * @description The window's start (exclusive): 24 hours before its end.
+             */
             window_start: string;
-            /** @description The window's end (inclusive): computed_at. */
+            /**
+             * Format: date-time
+             * @description The window's end (inclusive): computed_at.
+             */
             window_end: string;
             /** @description Summaries of mail that arrived in the 24 h window (window_start, window_end]. Added 2026-09-30; absent from reports stored before. */
             new_count?: number;
@@ -983,11 +1037,20 @@ export interface components {
             status: "stale";
             /** @description How many tasks were asked for (the `top` query parameter, 1-10). */
             top_n: number;
-            /** @description When the report was computed. */
+            /**
+             * Format: date-time
+             * @description When the report was computed.
+             */
             computed_at: string;
-            /** @description The window's start (exclusive): 24 hours before its end. */
+            /**
+             * Format: date-time
+             * @description The window's start (exclusive): 24 hours before its end.
+             */
             window_start: string;
-            /** @description The window's end (inclusive): computed_at. */
+            /**
+             * Format: date-time
+             * @description The window's end (inclusive): computed_at.
+             */
             window_end: string;
             /** @description Summaries of mail that arrived in the 24 h window (window_start, window_end]. Added 2026-09-30; absent from reports stored before. */
             new_count?: number;
