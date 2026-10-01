@@ -9,7 +9,9 @@ mail tasks the day's Todoist snapshot still lists as open (docs/gtd-features.md
 §3); without that snapshot, after a failed attempt that day, or when the token
 budget cannot take the carried lines, it is exactly the 24 h report. The newsletter
 reads only the HTTP status, so an old or unusable report is never sent as a 200.
-Responses validate against api/summary-v1 and api/recommendation-v1.
+Every report is built by core/report_schema.py as a todofy.report.v1 message written with the wire codec, so
+what is stored and served keeps the contract (api/summary-v1, api/recommendation-v1, generated from
+proto/todofy/report/v1/report.proto).
 """
 
 import json
@@ -25,13 +27,16 @@ from todofy.core.metrics import Step
 from todofy.core.render import rfc3339
 from todofy.core.report_schema import (
     EMPTY_WINDOW_SUMMARY,
+    MAX_RESPONSE_BYTES,
     MAX_TOP_N,
     WINDOW_HOURS,
     ReportStatus,
     fit_summary,
-    parse_recommendations,
     parse_top_n,
+    recommendation_from_answer,
+    recommendation_report,
     recommendation_response_schema,
+    summary_report,
 )
 from todofy.core.sql import reports as sql
 from todofy.runtime import gemini, metrics
@@ -53,8 +58,6 @@ LOCKOUT_FAILURES = 20
 MAX_WINDOW_SUMMARIES = 1000
 # The same token estimate as the summary step, plus room for the answer.
 OUTPUT_TOKEN_ALLOWANCE = 4096
-# The newsletter discards larger responses (newsletter todofy.py _MAX_RESPONSE_BYTES).
-MAX_RESPONSE_BYTES = 128 * 1024
 
 
 class ReportError(Exception):
@@ -122,9 +125,9 @@ async def compute(env: Any, coordinator: Any, kind: str, top_n: int, now: int, b
 
     if text is None:
         if kind == SUMMARY:
-            payload = _summary(EMPTY_WINDOW_SUMMARY, 0, ReportStatus.EMPTY_WINDOW, model, stamps)
+            payload = summary_report(EMPTY_WINDOW_SUMMARY, 0, ReportStatus.EMPTY_WINDOW, model, stamps)
         else:
-            payload = _recommendation([], 0, ReportStatus.EMPTY_WINDOW, model, top_n, stamps | counts)
+            payload = recommendation_report([], 0, ReportStatus.EMPTY_WINDOW, model, top_n, stamps, counts)
     elif kind == SUMMARY:
         # A long day is cut to fit rather than failed: the same prompt would fail again.
         fitted = fit_summary(text)
@@ -133,9 +136,9 @@ async def compute(env: Any, coordinator: Any, kind: str, top_n: int, now: int, b
             raise ReportError(503, ApiError.UNAVAILABLE)
         if fitted != text:
             _log(kind, top_n, "summary_fitted")
-        payload = _summary(fitted, len(summaries), ReportStatus.OK, model, stamps)
+        payload = summary_report(fitted, len(summaries), ReportStatus.OK, model, stamps)
     else:
-        payload = _parsed_recommendation(text, len(summaries), model, top_n, stamps | counts)
+        payload = _parsed_recommendation(text, len(summaries), model, top_n, stamps, counts)
 
     await (
         env.DB.prepare(sql.STORE_REPORT.sql)
@@ -331,33 +334,13 @@ async def _generate(
     return result.text, result.model
 
 
-def _parsed_recommendation(text: str, count: int, model: str, top_n: int, stamps: dict[str, Any]) -> dict:
-    recommendations = parse_recommendations(text, top_n)
-    if recommendations is not None:
-        tasks = [{"rank": r.rank, "title": r.title, "reason": r.reason} for r in recommendations]
-        payload = _recommendation(tasks, count, ReportStatus.OK, model, top_n, stamps)
-        if len(json.dumps(payload, ensure_ascii=False).encode()) <= MAX_RESPONSE_BYTES:
-            return payload
-    _log(RECOMMENDATION, top_n, "model_output_invalid")
-    return _recommendation([], count, ReportStatus.MODEL_OUTPUT_INVALID, model, top_n, stamps)
-
-
-def _summary(text: str, count: int, status: ReportStatus, model: str, stamps: dict[str, str]) -> dict:
-    return {
-        "summary": text,
-        "task_count": count,
-        "time_window_hours": WINDOW_HOURS,
-        "status": status,
-        "model": model,
-        **stamps,
-    }
-
-
-def _recommendation(
-    tasks: list[dict], count: int, status: ReportStatus, model: str, top_n: int, fields: dict[str, Any]
+def _parsed_recommendation(
+    text: str, count: int, model: str, top_n: int, stamps: dict[str, str], counts: dict[str, int]
 ) -> dict:
-    """``fields``: the timestamps plus new_count and carryover_count (task_count is their sum)."""
-    return {"tasks": tasks, "model": model, "task_count": count, "status": status, "top_n": top_n, **fields}
+    payload = recommendation_from_answer(text, count, model, top_n, stamps, counts, MAX_RESPONSE_BYTES)
+    if payload["status"] == ReportStatus.MODEL_OUTPUT_INVALID:
+        _log(RECOMMENDATION, top_n, "model_output_invalid")
+    return payload
 
 
 def _precompute_offset(value: str) -> int | None:

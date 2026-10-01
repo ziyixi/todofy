@@ -268,6 +268,8 @@ class Classify(unittest.TestCase):
         cases = {
             # task-intent-v1, bundled by Lab's TypeScript and todofy-core's Python.
             "proto/todofy/taskintent/v1/task_intent.proto": {"lab", "todofy"},
+            # recommendation-v1 and summary-v1: todofy-core builds the reports (its UI and gateway take types only).
+            "proto/todofy/report/v1/report.proto": {"todofy"},
             # ops-v1: the Ops entrypoints that bundle its generated code (Todofy's gateway takes types only, its core
             # reads ops.v1 in Python).
             "proto/ops/v1/ops.proto": {"mail-hero", "lab", "todofy", "dashboard"},

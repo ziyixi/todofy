@@ -174,8 +174,8 @@ PROTO_RUNTIMES: dict[str, tuple[str, ...]] = {
 # reaches every user (fail safe; test_proto.py fails until it is listed).
 PROTO_PACKAGES: dict[str, tuple[str, ...]] = {
     "proto/todofy/taskintent/": ("lab", "todofy"),
-    # recommendation-v1 and summary-v1 (todofy/api/*.schema.json are generated from it): Todofy's own reports.
-    "proto/todofy/report/": (),
+    # recommendation-v1 and summary-v1 (todofy/api/*.schema.json are generated from it): todofy-core builds them.
+    "proto/todofy/report/": ("todofy",),
     "proto/lab/ui/": ("lab",),
     "proto/links/ui/": ("links",),
     # CommonReason: Lab reads its names as types only.
