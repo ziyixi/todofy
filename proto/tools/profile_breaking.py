@@ -19,6 +19,8 @@ whether a reader refuses a missing field; presence decides between ``null`` and 
   and frozen payloads do not write it, so a reader would refuse them).
 - ``PROFILE_FIELD_SAME_ORDER``: an existing map field gained or lost ``(common.wire.v1.field).keep_order``: every
   producer's bytes of that map change.
+- ``PROFILE_FIELD_SAME_EMPTY``: an existing list or map gained or lost ``(common.wire.v1.field).write_empty``: every
+  producer's bytes of an empty one change (frozen payloads and a consumer's payload hash compare bytes).
 - ``PROFILE_METHOD_SAME_ARGUMENTS``: an existing method gained or lost ``(common.wire.v1.method).positional``: a
   service binding's callers and receivers would pass and expect different arguments.
 
@@ -35,10 +37,12 @@ a rule is as much wire as a field's type). Older and newer builds of each side r
 - ``PROFILE_RULE_NOT_TIGHTER``: a rule of an existing field of an input (reachable only from methods' inputs, read
   strictly by the method's implementation) accepts less than it did: a changed format pattern, a lower
   ``max_length``, ``max_items``, ``maximum`` or a higher ``minimum``, a value removed from ``allowed`` (or a list
-  added), a new ``unique``, ``key_format`` or required key, ``non_null`` added, or a case presence that now
-  requires or forbids a value. Older callers' inputs would be refused. Loosening is compatible: the apps deploy
-  before the dashboard that calls them (README.md, CI).
+  added), a new ``unique``, ``key_format`` or required key, ``non_null`` or ``present_when`` added, or a case
+  presence that now requires or forbids a value. Older callers' inputs would be refused. Loosening is compatible:
+  the apps deploy before the dashboard that calls them (README.md, CI).
 - ``PROFILE_RULE_SAME_UNION``: an existing message gained, lost or changed its discriminator.
+- ``PROFILE_RULE_SAME_MATCH``: an existing message's ``any_match`` groups changed (an output's, either way), or an
+  input-only message gained one (removing one from an input loosens it).
 - ``PROFILE_ENUM_CLOSED``: a closed enum (``(common.wire.v1.closed)``) gained a value (its consumers refuse it: a new
   major version), or an existing enum gained or lost ``closed``.
 
@@ -134,6 +138,10 @@ def keeps_order(field: dict[str, Any]) -> bool:
     return bool(field.get("options", {}).get(WIRE_FIELD, {}).get("keepOrder", False))
 
 
+def writes_empty(field: dict[str, Any]) -> bool:
+    return bool(field.get("options", {}).get(WIRE_FIELD, {}).get("writeEmpty", False))
+
+
 def positional(method: dict[str, Any]) -> bool:
     return bool(method.get("options", {}).get(WIRE_METHOD, {}).get("positional", False))
 
@@ -192,6 +200,9 @@ def field_violations(name: str, message: dict[str, Any], old: dict[str, Any], is
         if keeps_order(previous) != keeps_order(field):
             change = "gained" if keeps_order(field) else "lost"
             found.append(f"PROFILE_FIELD_SAME_ORDER {path}: {change} (common.wire.v1.field).keep_order")
+        if writes_empty(previous) != writes_empty(field):
+            change = "gained" if writes_empty(field) else "lost"
+            found.append(f"PROFILE_FIELD_SAME_EMPTY {path}: {change} (common.wire.v1.field).write_empty")
     return found
 
 
@@ -268,6 +279,7 @@ class Rules:
         self.unique = bool(rules and rules.unique)
         self.required_keys = frozenset(rules.required_keys if rules else ())
         self.non_null = bool(rules and rules.non_null)
+        self.present_when = "" if rules is None else rules.present_when
         # Discriminator value -> (presence, allowed, minimum, maximum, max_items) of this field in that variant (cases
         # merged; a case's `empty` is a max_items of 0).
         self.variants: dict[str, tuple[str, Any, Any, Any, Any]] = {}
@@ -276,6 +288,11 @@ class Rules:
                 continue
             view = next(v for v in variant.fields if v.field["number"] == field["number"])
             self.variants[variant.value] = (view.presence, view.allowed, view.minimum, view.maximum, view.max_items)
+
+
+def _groups(file: dict[str, Any], message: dict[str, Any]) -> frozenset[tuple[frozenset[str], Any]]:
+    """A message's any_match groups as what they check: the fields (in any order) and the format's pattern."""
+    return frozenset((frozenset(g.fields), _format(g.format)) for g in wire_rules.any_matches(file, message))
 
 
 def _accepts_allowed(reader: Any, writer: Any) -> bool:
@@ -336,6 +353,8 @@ def accepts(reader: Rules, writer: Rules, lenient: bool) -> list[str]:
         refused.append("required_keys")
     if reader.non_null and not writer.non_null:
         refused.append("non_null")
+    if reader.present_when and reader.present_when != writer.present_when:
+        refused.append("present_when")
     for value in sorted(set(reader.variants) & set(writer.variants)):
         r_presence, r_allowed, r_min, r_max, r_size = reader.variants[value]
         w_presence, w_allowed, w_min, w_max, w_size = writer.variants[value]
@@ -366,6 +385,9 @@ def rule_violations(base: dict[str, Any], head: dict[str, Any], ignore: tuple[st
         # An input only: the implementation reads strictly what older callers write. Anything else (an output, a
         # message both ways, or one no method reaches yet) is read by older and newer builds both ways.
         input_only = name in inputs and name not in outputs
+        was_groups, now_groups = _groups(old_file, old), _groups(file, message)
+        if (now_groups - was_groups) if input_only else (now_groups != was_groups):
+            found.append(f"PROFILE_RULE_SAME_MATCH {name}: (common.wire.v1.message).any_match changed")
         previous_fields = {f["number"]: f for f in old.get("field", [])}
         for field in message.get("field", []):
             previous = previous_fields.get(field["number"])

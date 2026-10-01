@@ -31,6 +31,8 @@
  * - A map with (common.wire.v1.field).keep_order is written in the order its entries were set (a read keeps the
  *   wire's order), array-index keys first as JavaScript orders them; ops-v1's counters list their keys in the
  *   order each producer chose.
+ * - A list or map with (common.wire.v1.field).write_empty is written even when empty, as a REQUIRED one is; a read
+ *   still takes its absence (mail.received.v1's warnings, which frozen payloads of older producers lack).
  * - Value rules ((common.wire.v1.field), wire-rules.ts) are checked on every message read or written: a
  *   message that breaks one is refused like a wrong type. A lenient read accepts a value outside an `open`
  *   allowed list.
@@ -80,7 +82,7 @@ import { FieldMaskSchema, timestampDate, timestampFromDate, TimestampSchema, typ
 import { closed as closedOption, method as methodOption } from './common/wire/v1/wire_pb.ts';
 import { FieldMaskError, formatFieldMask, parseFieldMask } from './field-mask.ts';
 import { field_behavior, FieldBehavior } from './google/api/field_behavior_pb.ts';
-import { keepsOrder, ruleViolation } from './wire-rules.ts';
+import { keepsOrder, ruleViolation, writesEmpty } from './wire-rules.ts';
 
 export { fieldRules, formatMatches } from './wire-rules.ts';
 
@@ -371,7 +373,7 @@ function writeMessage(r: ReflectMessage): JsonObject {
           else if (field.listKind === 'enum') items.push(enumToWire(field, field.enum, item as number));
           else items.push(scalarToWire(field, field.scalar, item));
         }
-        if (items.length > 0 || always) out[field.name] = items;
+        if (items.length > 0 || always || writesEmpty(field)) out[field.name] = items;
         break;
       }
       case 'map': {
@@ -390,7 +392,7 @@ function writeMessage(r: ReflectMessage): JsonObject {
           entries.push([key as string, wire]);
         }
         if (!keepsOrder(field)) entries.sort(([a], [b]) => compareCodePoints(a, b));
-        if (entries.length > 0 || always) out[field.name] = Object.fromEntries(entries);
+        if (entries.length > 0 || always || writesEmpty(field)) out[field.name] = Object.fromEntries(entries);
         break;
       }
       default:

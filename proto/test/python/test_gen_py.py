@@ -1,4 +1,5 @@
-"""tools/gen_py.py and the wheel (python/build_backend.py): which packages Python gets, FieldMask fields.
+"""tools/gen_py.py and the wheel (python/build_backend.py): which packages Python gets, FieldMask fields, fields named
+like Python keywords and string literals above U+FFFF.
 
 Synthetic buf images only: no generated module is read, so these tests say what the generator does with
 a package before any .proto file uses it.
@@ -80,6 +81,30 @@ class PackagesTest(unittest.TestCase):
                 "ziyixi_proto/wire_json.py",
             ],
         )
+
+
+class NamesAndLiteralsTest(unittest.TestCase):
+    def test_a_keyword_field_is_an_attribute_with_an_underscore(self) -> None:
+        keyword_field = {**STRING, "name": "from", "jsonName": "from"}
+        source = gen_py.generate(
+            {"file": [file("t/v1/t.proto", "prototest.v1", {"name": "M", "field": [keyword_field]})]}
+        )
+        module = source["t/v1/t_pb.py"]
+        self.assertIn('    from_: str = ""', module)
+        self.assertIn(
+            'Field("from", 1, "string", None, repeated=False, optional=False, required=False, attr="from_")', module
+        )
+        clash = {**STRING, "name": "from_", "number": 2, "jsonName": "from_"}
+        with self.assertRaises(gen_py.GenerateError):
+            gen_py.generate(
+                {"file": [file("t/v1/t.proto", "prototest.v1", {"name": "M", "field": [keyword_field, clash]})]}
+            )
+
+    def test_a_literal_keeps_every_character_python_reads(self) -> None:
+        for value in ('a"b\\c', "\x00\t\n", "\u00e4\u3000", "\U0001f600\U0010ffff", "[\x00-\U0010ffff]"):
+            literal = gen_py.literal(value)
+            self.assertTrue(literal.isascii(), literal)
+            self.assertEqual(eval(literal), value)  # the generated module's own reading of it
 
 
 class FieldMaskTest(unittest.TestCase):

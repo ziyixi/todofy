@@ -1,6 +1,6 @@
 // Test fixtures of the wire profile's value rules and binding arguments (common/wire/v1/wire.proto), never used
-// by an app: every rule on one union message, non_null fields and a closed enum on another, and a binding service
-// with positional and object requests.
+// by an app: every rule on one union message, non_null fields and a closed enum on another, the relations between
+// fields and a list written even when empty on a third, and a binding service with positional and object requests.
 // testdata/wire-profile-cases.json runs the same cases on these descriptors in TypeScript and Python, and
 // test/gen-tools.test.ts checks the generated wire types and JSON Schema of this file.
 
@@ -21,6 +21,11 @@ option (common.wire.v1.formats) = {
   pattern: "[A-Z]{2}[0-9]{4,}"
   max_length: 8
   description: "Two capitals and at least four digits, at most 8 characters."
+};
+option (common.wire.v1.formats) = {
+  name: "Visible"
+  pattern: "[ ]*[^ ][\x00-\U0010FFFF]*"
+  description: "Not only spaces: at least one other character, anywhere."
 };
 
 // A parcel service reached through a Workers service binding.
@@ -226,4 +231,34 @@ message TrackRequest {
   ];
   // Attempts so far.
   int32 attempts = 2 [(common.wire.v1.field).minimum = 0];
+}
+
+// A note: the two relations between fields (Message.any_match, Field.present_when), a list written even when empty
+// (Field.write_empty) and a field whose name is a Python keyword.
+message Note {
+  option (common.wire.v1.message) = {
+    any_match: {
+      fields: [
+        "title",
+        "body"
+      ]
+      format: "Visible"
+    }
+  };
+
+  // The title (may be blank when the body is not).
+  string title = 1 [(google.api.field_behavior) = REQUIRED];
+  // The body (may be blank or absent when the title is not).
+  optional string body = 2;
+  // Whether the body was cut.
+  optional bool cut = 3;
+  // The body's length before it was cut: there whenever it was.
+  optional int32 length = 4 [(common.wire.v1.field) = {
+    minimum: 0
+    present_when: "cut"
+  }];
+  // Flags, written as [] when there are none (older notes lack the field).
+  repeated string flags = 5 [(common.wire.v1.field).write_empty = true];
+  // Who wrote it: a Python keyword, the generated attribute `from_`.
+  repeated string from = 6;
 }

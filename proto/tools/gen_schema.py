@@ -14,9 +14,13 @@ generated, never written by hand, in one of two shapes (``Target``):
   its components), with the message's and each field's leading comment as their ``description`` (the image needs its
   source info; ``(-- ... --)`` blocks and ``buf:lint`` lines are left out).
 
-Either way every message is closed (``additionalProperties: false``), a REQUIRED field required (``null`` allowed where
-a producer may write it: ``wire_rules.may_be_null``), a union (``discriminator``) a ``oneOf`` of one branch per
-discriminator value with the fields that value has and the bounds its cases add. Patterns are anchored as ECMAScript
+Either way every message is closed (``additionalProperties: false``) unless the target is a consumer's (``Target.open``:
+every message takes properties it does not know, as a lenient read skips them), a REQUIRED field required (``null``
+allowed where a producer may write it: ``wire_rules.may_be_null``), a union (``discriminator``) a ``oneOf`` of one
+branch per discriminator value with the fields that value has and the bounds its cases add. The relations between
+fields are written on the message's object: a group of ``any_match`` as ``anyOf`` (one branch per field: the field is
+there and matches the format; a second group goes into ``allOf``), a ``present_when`` as ``allOf`` of ``if`` (the bool
+is true) ``then`` (the field is there). Patterns are anchored as ECMAScript
 and Python's ``re.search`` both need (``$(?!\\n)``: Python's ``$`` also matches before a final newline). The schema is
 the producer's view: an ``open`` allowed list is closed here, as it is for a write; a consumer reads such a field more
 leniently (the codecs' lenient read). A format's ``json_schema_format`` is written as ``format`` next to its pattern
@@ -27,7 +31,8 @@ control characters and Unicode spaces) are written as ``\\u`` escapes, so the co
 SCHEMAS lists the committed schemas, each with what must be regenerated after it changes (``Target.then``: Todofy's
 reports are copied into its UI's types by openapi-typescript), which a write that changes the file and a check that
 finds it stale print. Only keywords contracts/ops-v1/validate.mjs implements are written, so a
-TypeScript test may still check a document with it.
+TypeScript test may still check a document with it, except for the relations (``allOf``, ``if``, ``then``), which
+only mail.received.v1 states and only Python's jsonschema reads in the tests.
 """
 
 from __future__ import annotations
@@ -60,6 +65,10 @@ class Target:
     # What else must be regenerated when the schema changes (a generator that copies it), as a command to run from
     # the repository root; printed by a write that changes the file and by a check that finds it stale.
     then: str = ""
+    # A consumer's schema: every message takes properties it does not know (additionalProperties: true), as a
+    # lenient read skips them. For a contract whose consumers must accept a newer producer's optional fields
+    # (mail.received.v1); a producer's schema (the default) is closed.
+    open: bool = False
 
 
 # Todofy's UI types (todofy/web/src/api/schema.d.ts, openapi-typescript) copy the reports' descriptions and formats
@@ -159,12 +168,13 @@ def printable(text: str) -> str:
 class Package:
     """The schema of one package: its $defs document, or (``inline``) one of its messages written in place."""
 
-    def __init__(self, image: dict[str, Any], package: str, inline: bool = False) -> None:
+    def __init__(self, image: dict[str, Any], package: str, inline: bool = False, open: bool = False) -> None:
         self.files = [f for f in image["file"] if f.get("package") == package]
         if not self.files:
             raise GenerateError(f"no file of package {package}")
         self.package = package
         self.inline = inline
+        self.open = open
         self.enums = wire_rules.enum_index(image)
         self.defs: dict[str, Any] = {}
         # Full type name -> $defs name: formats, enums (nested ones as Message_Enum), messages.
@@ -274,7 +284,9 @@ class Package:
             return nullable(schema)
         return schema
 
-    def object(self, name: str, fields: tuple[wire_rules.FieldView, ...]) -> dict[str, Any]:
+    def object(
+        self, name: str, fields: tuple[wire_rules.FieldView, ...], groups: tuple[wire_rules.AnyMatch, ...] = ()
+    ) -> dict[str, Any]:
         properties: dict[str, Any] = {}
         required: list[str] = []
         for view in fields:
@@ -292,7 +304,22 @@ class Package:
         if required:
             schema["required"] = required
         schema["properties"] = properties
-        schema["additionalProperties"] = False
+        schema["additionalProperties"] = self.open
+        relations: list[dict[str, Any]] = []
+        for group in groups:
+            # One branch per field: it is there and matches (every field of a group is REQUIRED or optional).
+            branches = [{"required": [f], "properties": {f: self.format_ref(group.format)}} for f in group.fields]
+            if "anyOf" in schema:
+                relations.append({"anyOf": branches})
+            else:
+                schema["anyOf"] = branches
+        for view in fields:
+            flag = view.rules.present_when if view.rules is not None else ""
+            if flag and view.presence != "absent":
+                condition = {"required": [flag], "properties": {flag: {"const": True}}}
+                relations.append({"if": condition, "then": {"required": [view.field["name"]]}})
+        if relations:
+            schema["allOf"] = relations
         return schema
 
     def described(self, message: str, field: dict[str, Any], schema: dict[str, Any]) -> dict[str, Any]:
@@ -302,9 +329,10 @@ class Package:
 
     def message(self, file: dict[str, Any], message: dict[str, Any]) -> dict[str, Any]:
         variants = wire_rules.variants(file, message, self.enums)
+        groups = wire_rules.any_matches(file, message)
         if variants[0].value is None:
-            return self.object(message["name"], variants[0].fields)
-        return {"oneOf": [self.object(message["name"], variant.fields) for variant in variants]}
+            return self.object(message["name"], variants[0].fields, groups)
+        return {"oneOf": [self.object(message["name"], variant.fields, groups) for variant in variants]}
 
     def schema(self, identity: str, title: str, description: str) -> dict[str, Any]:
         defs: dict[str, Any] = {}
@@ -381,9 +409,11 @@ def generate(image: dict[str, Any]) -> dict[str, str]:
     out = {}
     for target in SCHEMAS:
         if target.root:
-            schema = Package(image, target.package, inline=True).root(target)
+            schema = Package(image, target.package, inline=True, open=target.open).root(target)
         else:
-            schema = Package(image, target.package).schema(target.identity, target.title, target.description)
+            schema = Package(image, target.package, open=target.open).schema(
+                target.identity, target.title, target.description
+            )
         out[target.path] = printable(json.dumps(schema, indent=2, ensure_ascii=False)) + "\n"
     return out
 

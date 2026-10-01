@@ -3,7 +3,8 @@
 gen_py.py (the Python field tables), gen_wire_ts.py (the TypeScript wire types) and gen_schema.py (a contract's
 JSON Schema) read the rules through this module, and ``check_image`` refuses a rule that cannot mean anything
 (an unknown format, ``allowed`` on a number, a case on a field without presence, a case value the
-discriminator does not have, ``non_null`` on a field that may be null by declaration), so a mistake stops
+discriminator does not have, ``non_null`` on a field that may be null by declaration, a relation that names a field
+of the wrong kind), so a mistake stops
 generation instead of reaching a codec. ``may_be_null`` is the one definition of which fields a producer may
 write as null, for the codecs' twins here (the TypeScript types, the JSON Schema). The codecs read the
 same options at run time (proto/ts/wire-rules.ts from the descriptors, wire_json.py from gen_py's tables).
@@ -34,9 +35,10 @@ NUMBERS = ("TYPE_INT32", "TYPE_DOUBLE")
 # escaped outside a class; \d, \w, \b, \1 or \u mean other things, or nothing, in one of the two engines), and
 # `-` inside a class.
 PATTERN_ESCAPES = set("^$\\.*+?()[]{}|/")
-# The JSON Schema formats a Format may name (Format.json_schema_format; "" for none). Only RFC 3339's date-time,
-# which the hand-written report schemas declared; one is added here when a contract needs it, never by a .proto alone.
-JSON_SCHEMA_FORMATS = frozenset({"", "date-time"})
+# The JSON Schema formats a Format may name (Format.json_schema_format; "" for none): RFC 3339's date-time, which the
+# hand-written report and mail.received.v1 schemas declared, and RFC 9562's uuid (mail.received.v1's IDs). One is
+# added here when a contract needs it, never by a .proto alone.
+JSON_SCHEMA_FORMATS = frozenset({"", "date-time", "uuid"})
 
 
 class RuleError(Exception):
@@ -84,6 +86,18 @@ class FieldRules:
     cases: tuple[Case, ...]
     otherwise: str
     non_null: bool
+    # A list or map written even when empty (Field.write_empty).
+    write_empty: bool = False
+    # The bool field of the same message that, when true, gives this field a value (Field.present_when); "" for none.
+    present_when: str = ""
+
+
+@dataclass(frozen=True)
+class AnyMatch:
+    """One of ``fields`` (string fields of a message) has a value that matches ``format`` (Message.any_match)."""
+
+    fields: tuple[str, ...]
+    format: Format
 
 
 def enum_prefix(name: str) -> str:
@@ -159,6 +173,35 @@ def portable(pattern: str) -> bool:
 def discriminator(message: dict[str, Any]) -> str | None:
     """The name of a union message's discriminator field (common.wire.v1.Message), or None."""
     return message.get("options", {}).get(MESSAGE_OPTION, {}).get("discriminator") or None
+
+
+def any_matches(file: dict[str, Any], message: dict[str, Any]) -> tuple[AnyMatch, ...]:
+    """A message's groups of fields of which one must match a format (common.wire.v1.Message.any_match), checked: each
+    names singular string fields of the message that are REQUIRED or declared ``optional`` (so that "has a value" is
+    the same on the wire and in the message), at least one, each once, and a format of the file."""
+    where = f"{file['package']}.{message['name']}"
+    named = formats(file)
+    by_name = {f["name"]: f for f in message.get("field", [])}
+    out = []
+    for raw in message.get("options", {}).get(MESSAGE_OPTION, {}).get("anyMatch", []):
+        names = tuple(raw.get("fields", []))
+        if not names or len(set(names)) != len(names):
+            raise RuleError(f"{where}: any_match names at least one field, each once")
+        for name in names:
+            field = by_name.get(name)
+            if (
+                field is None
+                or field["type"] != "TYPE_STRING"
+                or field["label"] == "LABEL_REPEATED"
+                or not (required(field) or field.get("proto3Optional"))
+            ):
+                raise RuleError(
+                    f"{where}: any_match names {name!r}, not a singular string field that is REQUIRED or optional"
+                )
+        if raw.get("format", "") not in named:
+            raise RuleError(f"{where}: any_match needs a format of {file['name']}")
+        out.append(AnyMatch(names, named[raw["format"]]))
+    return tuple(out)
 
 
 def positional(method: dict[str, Any]) -> bool:
@@ -261,6 +304,8 @@ def field_rules(
         ),
         otherwise=PRESENCE[raw.get("otherwise", "PRESENCE_UNSPECIFIED")],
         non_null=bool(raw.get("nonNull", False)),
+        write_empty=bool(raw.get("writeEmpty", False)),
+        present_when=raw.get("presentWhen", ""),
     )
     for case in raw.get("cases", []):
         # common.wire.v1.CaseRules has only these; an image edited by hand (or by an older wire.proto) could say more.
@@ -280,6 +325,17 @@ def field_rules(
         raise RuleError(f"{where}: unique applies to a repeated scalar or enum field")
     if (rules.key_format or rules.required_keys or rules.keep_order) and shape != "map":
         raise RuleError(f"{where}: key_format, required_keys and keep_order apply to a map")
+    if rules.write_empty and (shape == "single" or required(field)):
+        raise RuleError(f"{where}: write_empty applies to a repeated field or map that is not REQUIRED")
+    if rules.present_when:
+        flag = next((f for f in message.get("field", []) if f["name"] == rules.present_when), None)
+        if flag is None or flag["type"] != "TYPE_BOOL" or flag["label"] == "LABEL_REPEATED" or flag is field:
+            raise RuleError(
+                f"{where}: present_when names {rules.present_when!r}, not another bool field of the message"
+            )
+        can_lack = value_type in ("TYPE_ENUM", "TYPE_MESSAGE") or bool(field.get("proto3Optional"))
+        if shape != "single" or not can_lack or required(field):
+            raise RuleError(f"{where}: present_when applies to a field that can lack a value and is not REQUIRED")
     union = discriminator(message)
     if (rules.cases or rules.otherwise) and union is None:
         raise RuleError(f"{where}: cases need a discriminator on {message['name']}")
@@ -321,6 +377,7 @@ def check_image(image: dict[str, Any]) -> None:
     for file in image["file"]:
         formats(file)
         for message in file.get("messageType", []):
+            any_matches(file, message)
             union = discriminator(message)
             if union is not None:
                 target = next((f for f in message.get("field", []) if f["name"] == union), None)

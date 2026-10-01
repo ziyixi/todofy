@@ -3,12 +3,13 @@
 // A contract states its value rules here, next to its fields, once: which strings are codes, timestamps or
 // URLs, which values an enum-like string may take, number bounds, list and map sizes, and which fields a
 // message has for each value of its discriminator (a union such as ops.v1.CanaryDelivery), which REQUIRED
-// fields are never null, and which enums are closed (their consumers branch on every value). Both codecs
+// fields are never null, which enums are closed (their consumers branch on every value), and the two relations
+// between fields a contract may state besides a union's (Field.present_when, Message.any_match). Both codecs
 // (proto/ts/wire-json.ts and proto/python/src/ziyixi_proto/wire_json.py) check them on every read and every
 // write, so neither a producer bug nor a consumer's input reaches the other side unchecked, and
 // proto/tools/gen_schema.py turns them into the contract's JSON Schema. Two annotations are wire choices
-// rather than rules: a map that keeps its entries' order (Field.keep_order) and a method whose request is
-// passed as positional arguments (Method.positional).
+// rather than rules: a map that keeps its entries' order (Field.keep_order), a list or map written even when
+// empty (Field.write_empty) and a method whose request is passed as positional arguments (Method.positional).
 //
 // A rule is a check, never a conversion: a value that breaks one is refused (WireJsonError), on a lenient
 // read as well, except where Field.open says a consumer accepts more than a producer writes. Rules never
@@ -80,12 +81,24 @@ message Format {
   string json_schema_format = 5;
 }
 
-// A message that is a union discriminated by one of its enum fields: its fields' cases name that field's
-// values (Field.cases). A reader that does not know the discriminator's value (a lenient read of a newer
-// producer) checks no case.
+// The rules of a message as a whole. A union is discriminated by one of its enum fields: its fields' cases name
+// that field's values (Field.cases). A reader that does not know the discriminator's value (a lenient read of a
+// newer producer) checks no case.
 message Message {
   // The name of the message's enum field whose value selects the case.
   string discriminator = 1;
+  // Groups of fields of which at least one has a value that matches the group's format (mail.received.v1: a
+  // subject or a text that is not blank). Checked after the message's fields, on every read and write.
+  repeated AnyMatch any_match = 2;
+}
+
+// At least one of some string fields of a message has a value that matches a format (Message.any_match).
+message AnyMatch {
+  // The fields: singular string fields of the message that are REQUIRED or declared `optional`, so that "has a
+  // value" means the same on the wire and in the message.
+  repeated string fields = 1;
+  // The name of a Format of the message's file.
+  string format = 2;
 }
 
 // The value rules of a field (of each item of a repeated field). A rule applies only where it fits the
@@ -123,6 +136,15 @@ message Field {
   // as null when it has none (task-intent-v1's error_code). A field that may be null is declared `optional`
   // or left without non_null; the JSON Schema generator reads the same rule (proto/tools/gen_schema.py).
   bool non_null = 13;
+  // A repeated field or map that is not REQUIRED is written even when empty ([] or {}), as a REQUIRED one always
+  // is; a read still takes its absence (as empty). For a list every producer of this build writes but frozen
+  // payloads of older producers lack (mail.received.v1's warnings). A wire choice like keep_order: it changes no
+  // rule, only the bytes a producer writes.
+  bool write_empty = 14;
+  // The name of a bool field of the same message: when that field is true, this one has a value (mail.received.v1's
+  // original_text_bytes whenever text_truncated). For a field that can lack a value and is not REQUIRED (declared
+  // `optional`, an enum or a message).
+  string present_when = 15;
 }
 
 // The rules of a field for some values of its message's discriminator.

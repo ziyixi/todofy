@@ -2724,6 +2724,234 @@
         "previous": "low"
       },
       "unrecognized": []
+    },
+    {
+      "name": "relations: a list with write_empty is written as [] when empty",
+      "message": "prototest.v1.Note",
+      "strict": false,
+      "input": {
+        "title": "t"
+      },
+      "wire": {
+        "title": "t",
+        "flags": []
+      },
+      "unrecognized": []
+    },
+    {
+      "name": "relations: a list with write_empty may be absent on a strict read too (frozen payloads lack it)",
+      "message": "prototest.v1.Note",
+      "strict": true,
+      "input": {
+        "title": "t"
+      },
+      "wire": {
+        "title": "t",
+        "flags": []
+      },
+      "unrecognized": []
+    },
+    {
+      "name": "relations: a list with write_empty keeps its items",
+      "message": "prototest.v1.Note",
+      "strict": true,
+      "input": {
+        "title": "t",
+        "flags": [
+          "a",
+          "b"
+        ]
+      },
+      "wire": {
+        "title": "t",
+        "flags": [
+          "a",
+          "b"
+        ]
+      },
+      "unrecognized": []
+    },
+    {
+      "name": "relations: a list with write_empty is still never null",
+      "message": "prototest.v1.Note",
+      "strict": false,
+      "input": {
+        "title": "t",
+        "flags": null
+      },
+      "error": true
+    },
+    {
+      "name": "relations: any_match holds when one field of the group matches (the second)",
+      "message": "prototest.v1.Note",
+      "strict": true,
+      "input": {
+        "title": "  ",
+        "body": " x "
+      },
+      "wire": {
+        "title": "  ",
+        "body": " x ",
+        "flags": []
+      },
+      "unrecognized": []
+    },
+    {
+      "name": "relations: any_match holds when one field of the group matches (the first)",
+      "message": "prototest.v1.Note",
+      "strict": false,
+      "input": {
+        "title": "x",
+        "body": ""
+      },
+      "wire": {
+        "title": "x",
+        "body": "",
+        "flags": []
+      },
+      "unrecognized": []
+    },
+    {
+      "name": "relations: any_match refuses a group where no field matches",
+      "message": "prototest.v1.Note",
+      "strict": false,
+      "input": {
+        "title": "   ",
+        "body": " "
+      },
+      "error": true
+    },
+    {
+      "name": "relations: any_match refuses a group where no field matches (lenient reads too)",
+      "message": "prototest.v1.Note",
+      "strict": false,
+      "input": {
+        "title": "",
+        "body": "  ",
+        "extra": 1
+      },
+      "error": true
+    },
+    {
+      "name": "relations: any_match counts an absent optional field as no match",
+      "message": "prototest.v1.Note",
+      "strict": false,
+      "input": {
+        "title": " "
+      },
+      "error": true
+    },
+    {
+      "name": "relations: any_match reads the whole value (a match after a line feed)",
+      "message": "prototest.v1.Note",
+      "strict": false,
+      "input": {
+        "title": "",
+        "body": " \n　"
+      },
+      "wire": {
+        "title": "",
+        "body": " \n　",
+        "flags": []
+      },
+      "unrecognized": []
+    },
+    {
+      "name": "relations: present_when requires the field when the bool is true",
+      "message": "prototest.v1.Note",
+      "strict": false,
+      "input": {
+        "title": "t",
+        "cut": true
+      },
+      "error": true
+    },
+    {
+      "name": "relations: present_when requires the field when the bool is true (strict)",
+      "message": "prototest.v1.Note",
+      "strict": true,
+      "input": {
+        "title": "t",
+        "cut": true
+      },
+      "error": true
+    },
+    {
+      "name": "relations: present_when holds when the bool is true and the field is there",
+      "message": "prototest.v1.Note",
+      "strict": false,
+      "input": {
+        "title": "t",
+        "cut": true,
+        "length": 4
+      },
+      "wire": {
+        "title": "t",
+        "cut": true,
+        "length": 4,
+        "flags": []
+      },
+      "unrecognized": []
+    },
+    {
+      "name": "relations: present_when asks nothing when the bool is false",
+      "message": "prototest.v1.Note",
+      "strict": false,
+      "input": {
+        "title": "t",
+        "cut": false
+      },
+      "wire": {
+        "title": "t",
+        "cut": false,
+        "flags": []
+      },
+      "unrecognized": []
+    },
+    {
+      "name": "relations: present_when asks nothing when the bool is absent",
+      "message": "prototest.v1.Note",
+      "strict": false,
+      "input": {
+        "title": "t",
+        "length": 0
+      },
+      "wire": {
+        "title": "t",
+        "length": 0,
+        "flags": []
+      },
+      "unrecognized": []
+    },
+    {
+      "name": "relations: the field of present_when keeps its own rules",
+      "message": "prototest.v1.Note",
+      "strict": false,
+      "input": {
+        "title": "t",
+        "cut": true,
+        "length": -1
+      },
+      "error": true
+    },
+    {
+      "name": "relations: a field named like a Python keyword keeps its wire name",
+      "message": "prototest.v1.Note",
+      "strict": true,
+      "input": {
+        "title": "t",
+        "from": [
+          "a@example.org"
+        ]
+      },
+      "wire": {
+        "title": "t",
+        "flags": [],
+        "from": [
+          "a@example.org"
+        ]
+      },
+      "unrecognized": []
     }
   ]
 }

@@ -11,7 +11,7 @@ import { join } from 'node:path';
 import { beforeAll, describe, expect, test } from 'vitest';
 import { create, type DescMessage } from '@bufbuild/protobuf';
 import { BookCardSchema, BookSchema } from '../ts/prototest/v1/prototest_pb.ts';
-import { LabelSchema, ParcelSchema } from '../ts/prototest/v1/rules_pb.ts';
+import { LabelSchema, NoteSchema, ParcelSchema } from '../ts/prototest/v1/rules_pb.ts';
 import {
   ErrorCode,
   Mode,
@@ -47,6 +47,7 @@ const SCHEMAS = {
   'prototest.v1.BookCard': BookCardSchema,
   'prototest.v1.Parcel': ParcelSchema,
   'prototest.v1.Label': LabelSchema,
+  'prototest.v1.Note': NoteSchema,
   'ops.v1.OpsStatus': ops.OpsStatusSchema,
   'ops.v1.GuardState': ops.GuardStateSchema,
   'ops.v1.SetGuardInput': ops.SetGuardInputSchema,

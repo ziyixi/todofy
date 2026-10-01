@@ -41,6 +41,10 @@ tables), uses only the standard library and therefore runs on Pyodide unchanged.
   (proto/ts/field-mask.ts).
 - A map with ``(common.wire.v1.field).keep_order`` is written in the order its entries were set (a read keeps
   the wire's order), array-index keys first, as JavaScript orders an object's keys.
+- A list or map with ``(common.wire.v1.field).write_empty`` is written even when empty, as a REQUIRED one is; a read
+  still takes its absence.
+- A field whose name is a Python keyword is the generated attribute ``<name>_`` (``from_``), its wire name unchanged
+  (``Field.attr``); paths and ``field_rules`` use wire names.
 - ``strict`` refuses null except for a REQUIRED field declared ``optional``: "always present, may be null"
   (ops-v1's SetGuardInput.until), exactly what ``to_wire`` writes for it.
 - Value rules (``(common.wire.v1.field)``; gen_py.py resolves them into the field tables, ``Rules``) are checked on
@@ -50,7 +54,10 @@ tables), uses only the standard library and therefore runs on Pyodide unchanged.
   lenient read did not know has a value but none to compare (a list item dropped for that reason keeps its
   index, so the next item is checked where it was on the wire); ``open`` lets a lenient read accept a value
   outside ``allowed``; a case's ``empty`` refuses a list or map with an item in that case; ``non_null`` refuses a
-  REQUIRED enum or message field without a value, in every case.
+  REQUIRED enum or message field without a value, in every case. Two relations between fields: ``present_when``
+  (a field has a value whenever a bool field of its message is true) and a message's ``any_match`` groups (the
+  generated ``ANY_MATCH`` table: one of the group's fields has a value that matches its format), checked after the
+  message's fields.
 """
 
 import datetime
@@ -115,9 +122,21 @@ class Rules(NamedTuple):
     cases: tuple[Case, ...] = ()
     otherwise: str = ""
     non_null: bool = False
+    # Written even when empty (a list or map that is not REQUIRED).
+    write_empty: bool = False
+    # The bool field (wire name) of the same message that, when true, gives this field a value; "" for none.
+    present_when: str = ""
 
 
 NO_RULES = Rules()
+
+
+class AnyMatch(NamedTuple):
+    """At least one of ``fields`` (wire names of string fields) has a value that matches ``format``
+    (common.wire.v1.Message.any_match)."""
+
+    fields: tuple[str, ...]
+    format: Format
 
 
 class Field(NamedTuple):
@@ -133,10 +152,29 @@ class Field(NamedTuple):
     value: str = ""  # a map's value kind (string, bool, int32, double, enum, message)
     declared_optional: bool = False  # declared `optional` in the .proto file (a strict read takes null if REQUIRED)
     rules: Rules = NO_RULES
+    attr: str = ""  # the dataclass attribute when it is not the name (a Python keyword: "from_")
 
 
 def _fields(cls: type) -> tuple[Field, ...]:
     return sys.modules[cls.__module__].FIELDS[cls]
+
+
+def _attr(field: Field) -> str:
+    """The dataclass attribute of a field (its wire name, unless that is a Python keyword)."""
+    return field.attr or field.name
+
+
+def _get(message: Any, name: str) -> Any:
+    """The value of the field ``name`` (a wire name) of a generated message."""
+    for field in _fields(type(message)):
+        if field.name == name:
+            return getattr(message, _attr(field))
+    raise KeyError(f"{type(message).__name__} has no field {name}")
+
+
+def _any_match(cls: type) -> tuple[AnyMatch, ...]:
+    """A message's groups of which one field must match a format (the generated ``ANY_MATCH`` table)."""
+    return sys.modules[cls.__module__].ANY_MATCH.get(cls, ())
 
 
 def _closed(cls: type) -> bool:
@@ -263,10 +301,10 @@ def to_wire(message: Any, *, lenient: bool = False) -> dict[str, Any]:
 def _write(message: Any) -> dict[str, Any]:
     out: dict[str, Any] = {}
     for field in _fields(type(message)):
-        value = getattr(message, field.name)
+        value = getattr(message, _attr(field))
         if field.repeated:
             items = [_value_out(field.kind, field, item) for item in value]
-            if items or field.required:
+            if items or field.required or field.rules.write_empty:
                 out[field.name] = items
             continue
         if field.kind == "map":
@@ -274,7 +312,7 @@ def _write(message: Any) -> dict[str, Any]:
             entries = {key: _value_out(field.value, field, value[key]) for key in sorted(value, key=order)}
             if None in entries.values():
                 raise WireJsonError(f"{field.name}: a map value cannot be the zero enum value")
-            if entries or field.required:
+            if entries or field.required or field.rules.write_empty:
                 out[field.name] = entries
             continue
         if field.kind == "enum":
@@ -372,7 +410,7 @@ def _read(cls: type, value: Any, path: str, strict: bool, unrecognized: list[str
                 parsed = _value_in(field.kind, field.ref, element, f"{at}[{i}]", strict, unrecognized)
                 if parsed is not None:
                     values.append(parsed)
-            kwargs[key] = tuple(values)
+            kwargs[_attr(field)] = tuple(values)
         elif field.kind == "map":
             if not isinstance(item, dict):
                 raise WireJsonError(f"{at}: not an object")
@@ -384,11 +422,11 @@ def _read(cls: type, value: Any, path: str, strict: bool, unrecognized: list[str
                 parsed = _value_in(field.value, field.ref, element, f"{at}{{}}", strict, unrecognized)
                 if parsed is not None:
                     entries[entry_key] = parsed
-            kwargs[key] = entries
+            kwargs[_attr(field)] = entries
         else:
             parsed = _value_in(field.kind, field.ref, item, at, strict, unrecognized)
             if parsed is not None:
-                kwargs[key] = parsed
+                kwargs[_attr(field)] = parsed
     for field in fields.values():
         if field.required and field.name not in value:
             raise WireJsonError(f"{field.name if path == '' else f'{path}.{field.name}'}: missing")
@@ -454,6 +492,13 @@ def _violation(message: Any, path: str, *, lenient: bool, unrecognized: frozense
         violation = _field_violation(message, field, _join(path, field.name), variant, lenient, unrecognized)
         if violation is not None:
             return violation
+    for group in _any_match(type(message)):
+        # A group names strings that are REQUIRED (always a value) or declared optional (None when they have none).
+        if not any(
+            isinstance(value := _get(message, name), str) and format_matches(group.format, value)
+            for name in group.fields
+        ):
+            return f"{path or '$'}: no value of {', '.join(group.fields)} matches {group.format.name}"
     return None
 
 
@@ -474,7 +519,7 @@ def _field_violation(
     message: Any, field: Field, at: str, variant: str | None, lenient: bool, unrecognized: frozenset[str]
 ) -> str | None:
     rules = field.rules
-    value = getattr(message, field.name)
+    value = getattr(message, _attr(field))
     active = None if variant is None else next((case for case in rules.cases if variant in case.when), None)
     presence = "" if variant is None else (active.presence if active is not None else rules.otherwise)
     has = _has_value(value, field, at, unrecognized)
@@ -484,6 +529,8 @@ def _field_violation(
         return f"{at}: required when the discriminator is {variant}"
     if presence == "absent" and has:
         return f"{at}: not allowed when the discriminator is {variant}"
+    if rules.present_when and not has and _get(message, rules.present_when) is True:
+        return f"{at}: required when {rules.present_when} is true"
     if not has:
         return None
     extra = () if active is None else (active.bounds,)

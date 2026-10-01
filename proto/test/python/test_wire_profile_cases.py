@@ -2,7 +2,7 @@
 
 Both suites run testdata/wire-profile-cases.json, so the two codecs give the same verdict and the same
 bytes on every case: timestamps, integer and double spellings, enum look-alikes, maps, missing REQUIRED fields,
-and the value rules of common/wire/v1/wire.proto (prototest/v1/rules.proto).
+and the value rules and relations of common/wire/v1/wire.proto (prototest/v1/rules.proto).
 """
 
 import json
@@ -23,6 +23,7 @@ MESSAGES = {
     "prototest.v1.BookCard": prototest_pb.BookCard,
     "prototest.v1.Parcel": rules_pb.Parcel,
     "prototest.v1.Label": rules_pb.Label,
+    "prototest.v1.Note": rules_pb.Note,
 }
 
 

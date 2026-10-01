@@ -16,6 +16,9 @@
  * - Field.open lets a lenient read (a consumer) accept a value outside `allowed`: the list is what producers of
  *   this build write; writes and strict reads keep to it.
  * - CaseRules.empty refuses a list or map with an item or entry in its case.
+ * - Two relations between fields, checked whatever the reader knows: Field.present_when (a field has a value whenever a
+ *   bool field of its message is true) and Message.any_match (one field of each group has a value that matches the
+ *   group's format), the latter after the message's fields.
  *
  * The rules are read from the descriptors (getOption) once per field and cached; a regular expression is
  * compiled once per format. Rule mistakes (an unknown format, a case on a field that has no presence) stop
@@ -59,6 +62,18 @@ interface Compiled extends Bounds {
   readonly cases: readonly CompiledCase[];
   readonly otherwise: Presence;
   readonly nonNull: boolean;
+  /** Written even when empty (a list or map that is not REQUIRED). */
+  readonly writeEmpty: boolean;
+  /** The bool field of the same message that, when true, gives this field a value (Field.present_when). */
+  readonly presentWhen: DescField | null;
+}
+
+/** One group of Message.any_match: one of `fields` has a value that matches `format`. */
+interface AnyMatch {
+  readonly fields: readonly DescField[];
+  readonly format: Format;
+  /** "<field>, <field> matches <format>", for the violation. */
+  readonly rule: string;
 }
 
 const NONE: Compiled = {
@@ -75,12 +90,20 @@ const NONE: Compiled = {
   cases: [],
   otherwise: Presence.UNSPECIFIED,
   nonNull: false,
+  writeEmpty: false,
+  presentWhen: null,
 };
 
 const compiledFields = new WeakMap<DescField, Compiled>();
 const requiredFields = new WeakMap<DescField, boolean>();
 const fileFormats = new WeakMap<DescFile, ReadonlyMap<string, Format>>();
-const discriminators = new WeakMap<DescMessage, DescField | null>();
+/** A message's own rules (common.wire.v1.Message), read from its options once. */
+interface MessageRules {
+  readonly discriminator: DescField | null;
+  readonly anyMatch: readonly AnyMatch[];
+}
+
+const messageRules = new WeakMap<DescMessage, MessageRules>();
 
 /** The rules of `field` as written in its .proto file (every rule unset when it has none). */
 export function fieldRules(field: DescField): Field {
@@ -101,6 +124,11 @@ export function formatMatches(file: DescFile, name: string, value: string): bool
 /** Whether a map field writes its entries in the order they were set (Field.keep_order). */
 export function keepsOrder(field: DescField): boolean {
   return compiled(field).keepOrder;
+}
+
+/** Whether a list or map that is not REQUIRED is written even when empty (Field.write_empty). */
+export function writesEmpty(field: DescField): boolean {
+  return compiled(field).writeEmpty;
 }
 
 function formatsOf(file: DescFile): ReadonlyMap<string, Format> {
@@ -147,20 +175,35 @@ function compiled(field: DescField): Compiled {
             cases: option.cases.map((c) => ({ ...bounds(c.rules), when: new Set(c.when), presence: c.presence, empty: c.rules?.empty ?? false })),
             otherwise: option.otherwise,
             nonNull: option.nonNull,
+            writeEmpty: option.writeEmpty,
+            presentWhen: option.presentWhen === '' ? null : fieldNamed(field.parent, option.presentWhen),
           };
     compiledFields.set(field, rules);
   }
   return rules;
 }
 
-function discriminatorOf(desc: DescMessage): DescField | null {
-  let field = discriminators.get(desc);
-  if (field === undefined) {
-    const name = getOption(desc, messageOption).discriminator;
-    field = name === '' ? null : (desc.fields.find((f) => f.name === name) ?? null);
-    discriminators.set(desc, field);
+function fieldNamed(desc: DescMessage, name: string): DescField {
+  const found = desc.fields.find((f) => f.name === name);
+  if (found === undefined) throw new Error(`${desc.typeName}: no field ${name}`);
+  return found;
+}
+
+function rulesOf(desc: DescMessage): MessageRules {
+  let rules = messageRules.get(desc);
+  if (rules === undefined) {
+    const option = getOption(desc, messageOption);
+    rules = {
+      discriminator: option.discriminator === '' ? null : (desc.fields.find((f) => f.name === option.discriminator) ?? null),
+      anyMatch: option.anyMatch.map((group) => {
+        const format = formatsOf(desc.file).get(group.format);
+        if (format === undefined) throw new Error(`${desc.typeName}: no format ${group.format} in ${desc.file.name}`);
+        return { fields: group.fields.map((name) => fieldNamed(desc, name)), format, rule: `${group.fields.join(', ')} matches ${group.format}` };
+      }),
+    };
+    messageRules.set(desc, rules);
   }
-  return field;
+  return rules;
 }
 
 /** The wire name of an enum value (the profile's rule: the name without the enum's prefix, in lower case). */
@@ -202,7 +245,7 @@ function join(path: string, name: string): string {
 }
 
 function checkMessage(r: ReflectMessage, path: string, context: Context): string | null {
-  const discriminator = discriminatorOf(r.desc);
+  const { discriminator, anyMatch } = rulesOf(r.desc);
   let variant: string | undefined;
   if (discriminator !== null && discriminator.fieldKind === 'enum') {
     const at = join(path, discriminator.name);
@@ -211,6 +254,13 @@ function checkMessage(r: ReflectMessage, path: string, context: Context): string
   for (const field of byNumber(r.desc)) {
     const violation = checkField(r, field, join(path, field.name), variant, context);
     if (violation !== null) return violation;
+  }
+  for (const group of anyMatch) {
+    // A group names strings that are REQUIRED or declared `optional` (wire_rules.py): an implicit one always has a
+    // value, an `optional` one only when set.
+    if (!group.fields.some((f) => (f.presence === IMPLICIT || r.isSet(f)) && matches(group.format, r.get(f) as string))) {
+      return `${path === '' ? '$' : path}: no value of ${group.rule}`;
+    }
   }
   return null;
 }
@@ -251,6 +301,7 @@ function checkField(r: ReflectMessage, field: DescField, at: string, variant: st
   if (rules.nonNull && !has) return `${at}: required`;
   if (presence === Presence.REQUIRED && !has) return `${at}: required when the discriminator is ${variant ?? ''}`;
   if (presence === Presence.ABSENT && has) return `${at}: not allowed when the discriminator is ${variant ?? ''}`;
+  if (rules.presentWhen !== null && !has && r.get(rules.presentWhen) === true) return `${at}: required when ${rules.presentWhen.name} is true`;
   if (!has) return null;
   const extra = active === undefined ? [] : [active];
   const caseEmpty = active?.empty ?? false;

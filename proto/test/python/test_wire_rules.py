@@ -1,7 +1,8 @@
 """The value rules beyond the shared read cases, in Python (TypeScript twin: test/wire-rules.test.ts): a write checks
 them too, a consumer passes on what it read (``to_wire(lenient=True)``), errors name a path and a rule but never the
-value, and producers read bounds from the generated tables (``field_rules``). Also what the generators refuse
-(tools/wire_rules.py): a rule that cannot mean anything where it is written stops generation.
+value, and producers read bounds from the generated tables (``field_rules``); the relations between fields and a list
+written even when empty; a field named like a Python keyword. Also what the generators refuse (tools/wire_rules.py): a
+rule that cannot mean anything where it is written stops generation.
 """
 
 import copy
@@ -129,6 +130,45 @@ class NonNullAndClosedTest(unittest.TestCase):
         self.assertEqual((read.message.next, read.unrecognized), ((pb.Parcel_Status.SENT,), ["next[0]"]))
 
 
+NOTE = pb.Note(title="t")
+
+
+class RelationsTest(unittest.TestCase):
+    def test_a_write_checks_the_relations_and_names_the_rule(self) -> None:
+        for change, error in [
+            ({"title": " ", "body": None}, "$: no value of title, body matches Visible"),
+            ({"title": "", "body": "   "}, "$: no value of title, body matches Visible"),
+            ({"cut": True}, "length: required when cut is true"),
+        ]:
+            with self.subTest(error):
+                with self.assertRaises(WireJsonError) as caught:
+                    to_wire(dataclasses.replace(NOTE, **change))
+                self.assertEqual(str(caught.exception), error)
+                with self.assertRaises(WireJsonError):
+                    to_wire(dataclasses.replace(NOTE, **change), lenient=True)
+
+    def test_a_lenient_read_checks_the_relations_too(self) -> None:
+        for wire, error in [
+            ({"title": "", "body": " ", "newer": 1}, "$: no value of title, body matches Visible"),
+            ({"title": "t", "cut": True, "newer": 1}, "length: required when cut is true"),
+        ]:
+            with self.subTest(error), self.assertRaises(WireJsonError) as caught:
+                from_wire(pb.Note, wire)
+            self.assertEqual(str(caught.exception), error)
+
+    def test_write_empty_writes_an_empty_list_and_reads_its_absence(self) -> None:
+        self.assertEqual(to_wire(NOTE), {"title": "t", "flags": []})
+        self.assertEqual(from_wire(pb.Note, {"title": "t"}, strict=True).message, NOTE)
+        self.assertTrue(field_rules(pb.Note, "flags").write_empty)
+
+    def test_a_keyword_field_is_an_attribute_with_an_underscore_and_keeps_its_wire_name(self) -> None:
+        note = dataclasses.replace(NOTE, from_=("a@example.org",))
+        self.assertEqual(to_wire(note), {"title": "t", "flags": [], "from": ["a@example.org"]})
+        self.assertEqual(from_wire(pb.Note, {"title": "t", "from": ["a@example.org"]}, strict=True).message, note)
+        self.assertEqual(field_rules(pb.Note, "from"), field_rules(pb.Note, "flags")._replace(write_empty=False))
+        self.assertFalse(hasattr(note, "from"))
+
+
 class FieldRulesTest(unittest.TestCase):
     def test_producers_read_bounds_from_the_tables(self) -> None:
         self.assertEqual(field_rules(pb.Parcel, "tags").max_items, 3)
@@ -144,6 +184,12 @@ class FieldRulesTest(unittest.TestCase):
             self.assertFalse(format_matches(pb.FORMATS["Code"], value), value)
         self.assertTrue(format_matches(pb.FORMATS["Tracking"], "AB123456"))
         self.assertFalse(format_matches(pb.FORMATS["Tracking"], "AB1234567"))
+
+    def test_a_pattern_above_u_ffff_means_the_same_in_the_generated_module(self) -> None:
+        # Visible ends in a class up to U+10FFFF: a JSON surrogate pair in the module would end it at U+DBFF.
+        for text in (" \U0010ffff", " \U0001f600", " \ud800", " \uffff\n"):
+            self.assertTrue(format_matches(pb.FORMATS["Visible"], text), ascii(text))
+        self.assertFalse(format_matches(pb.FORMATS["Visible"], "   "))
 
 
 def image(*fields: dict, message_options: dict | None = None, formats: list | None = None) -> dict:
@@ -179,6 +225,18 @@ ENUM = {"typeName": ".t.v1.M.State"}
 
 CODE = {"name": "Code", "pattern": "[a-z]+"}
 UNION = {"[common.wire.v1.message]": {"discriminator": "state"}}
+FLAG = {"name": "cut", "number": 3, "label": "LABEL_OPTIONAL", "type": "TYPE_BOOL", "proto3Optional": True}
+
+
+def text_field(name: str, number: int, **extra) -> dict:
+    return {"name": name, "number": number, "label": "LABEL_OPTIONAL", "type": "TYPE_STRING", **extra}
+
+
+def any_match(*fields: str, fmt: str = "Code") -> dict:
+    return {"[common.wire.v1.message]": {"anyMatch": [{"fields": list(fields), "format": fmt}]}}
+
+
+REQUIRED_TEXT = {"options": {"[google.api.field_behavior]": ["REQUIRED"]}}
 
 
 class GeneratorChecksTest(unittest.TestCase):
@@ -205,6 +263,16 @@ class GeneratorChecksTest(unittest.TestCase):
                     proto3Optional=True,
                 ),
                 message_options=UNION,
+            )
+        )
+        wire_rules.check_image(image(field("a", "TYPE_STRING", {"writeEmpty": True}, label="LABEL_REPEATED")))
+        wire_rules.check_image(image(field("a", "TYPE_INT32", {"presentWhen": "cut"}, proto3Optional=True), FLAG))
+        wire_rules.check_image(
+            image(
+                text_field("a", 2, **REQUIRED_TEXT),
+                text_field("b", 3, proto3Optional=True),
+                message_options=any_match("a", "b"),
+                formats=[CODE],
             )
         )
 
@@ -284,6 +352,45 @@ class GeneratorChecksTest(unittest.TestCase):
                 image(formats=[{**CODE, "jsonSchemaFormat": "email"}]),
             ),
             ("non_null on a field that is not REQUIRED", image(field("a", "TYPE_ENUM", {"nonNull": True}, **ENUM))),
+            ("write_empty on a singular field", image(field("a", "TYPE_STRING", {"writeEmpty": True}))),
+            (
+                "write_empty on a REQUIRED list (always written anyway)",
+                image(field("a", "TYPE_STRING", {"writeEmpty": True}, options_required=True, label="LABEL_REPEATED")),
+            ),
+            (
+                "present_when naming no field",
+                image(field("a", "TYPE_INT32", {"presentWhen": "nope"}, proto3Optional=True)),
+            ),
+            (
+                "present_when naming a field that is not a bool",
+                image(field("a", "TYPE_INT32", {"presentWhen": "state"}, proto3Optional=True)),
+            ),
+            ("present_when on an implicit scalar", image(field("a", "TYPE_INT32", {"presentWhen": "cut"}), FLAG)),
+            (
+                "present_when on a REQUIRED field",
+                image(
+                    field("a", "TYPE_INT32", {"presentWhen": "cut"}, options_required=True, proto3Optional=True), FLAG
+                ),
+            ),
+            (
+                "any_match naming a field that is not a string",
+                image(
+                    field("a", "TYPE_INT32", {}, proto3Optional=True), message_options=any_match("a"), formats=[CODE]
+                ),
+            ),
+            (
+                "any_match naming an implicit string that is not REQUIRED",
+                image(text_field("a", 2), message_options=any_match("a"), formats=[CODE]),
+            ),
+            (
+                "any_match naming a field twice",
+                image(text_field("a", 2, **REQUIRED_TEXT), message_options=any_match("a", "a"), formats=[CODE]),
+            ),
+            (
+                "any_match without a format of the file",
+                image(text_field("a", 2, **REQUIRED_TEXT), message_options=any_match("a", fmt="Nope"), formats=[CODE]),
+            ),
+            ("any_match naming no field", image(message_options=any_match(), formats=[CODE])),
             ("non_null on a scalar", image(field("a", "TYPE_STRING", {"nonNull": True}, options_required=True))),
             (
                 "non_null on a field declared optional",

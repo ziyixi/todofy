@@ -1,14 +1,16 @@
 /**
  * The value rules beyond the shared read cases (testdata/wire-profile-cases.json): a write checks them too, so a
  * producer bug never reaches the wire; a consumer passes on what it read (WriteOptions.lenient); errors name a path
- * and a rule, never the value; producers read bounds from the descriptors (fieldRules); and a service binding's
- * arguments follow (common.wire.v1.method).positional. test/python/test_wire_rules.py is the Python twin.
+ * and a rule, never the value; producers read bounds from the descriptors (fieldRules); the relations between fields
+ * and a list written even when empty; and a service binding's arguments follow (common.wire.v1.method).positional.
+ * test/python/test_wire_rules.py is the Python twin.
  */
 import { create } from '@bufbuild/protobuf';
 import { describe, expect, test } from 'vitest';
 import {
   file_prototest_v1_rules,
   LabelSchema,
+  NoteSchema,
   Parcel_Status,
   ParcelLineSchema,
   ParcelSchema,
@@ -117,6 +119,42 @@ describe('non_null fields and closed enums', () => {
     expect(() => fromWire(ParcelSchema, { ...waiting, next: ['sent', 'zzz_a', 'zzz_b', 'waiting'] })).toThrow(new WireJsonError('next[3]: not an allowed value'));
     const read = fromWire(ParcelSchema, { ...waiting, next: ['zzz_new', 'sent'] });
     expect([read.message.next, read.unrecognized]).toEqual([[Parcel_Status.SENT], ['next[0]']]);
+  });
+});
+
+describe('the relations between fields and write_empty', () => {
+  const note = { title: 't' };
+
+  test('a write checks the relations, a lenient one too, and names the rule', () => {
+    for (const [change, error] of [
+      [{ title: ' ', body: undefined }, '$: no value of title, body matches Visible'],
+      [{ title: '', body: '   ' }, '$: no value of title, body matches Visible'],
+      [{ cut: true }, 'length: required when cut is true'],
+    ] as const) {
+      const message = create(NoteSchema, { ...note, ...change });
+      expect(() => toWire(NoteSchema, message), error).toThrow(new WireJsonError(error));
+      expect(() => toWire(NoteSchema, message, { lenient: true }), error).toThrow(new WireJsonError(error));
+    }
+  });
+
+  test('a lenient read checks the relations too', () => {
+    expect(() => fromWire(NoteSchema, { title: '', body: ' ', newer: 1 })).toThrow(new WireJsonError('$: no value of title, body matches Visible'));
+    expect(() => fromWire(NoteSchema, { title: 't', cut: true, newer: 1 })).toThrow(new WireJsonError('length: required when cut is true'));
+  });
+
+  test('write_empty writes an empty list, and a read takes its absence', () => {
+    expect(toWire(NoteSchema, create(NoteSchema, note))).toEqual({ title: 't', flags: [] });
+    expect(fromWire(NoteSchema, { title: 't' }, { strict: true }).message.flags).toEqual([]);
+    expect(fieldRules(NoteSchema.field.flags).writeEmpty).toBe(true);
+  });
+
+  test('a field named like a Python keyword is an ordinary field here', () => {
+    expect(toWire(NoteSchema, create(NoteSchema, { ...note, from: ['a@example.org'] }))).toEqual({ title: 't', flags: [], from: ['a@example.org'] });
+  });
+
+  test('a pattern above U+FFFF matches code points, lone surrogates included', () => {
+    for (const text of [' \u{10ffff}', ' \u{1f600}', ' \ud800', ' \uffff\n']) expect(formatMatches(file_prototest_v1_rules, 'Visible', text), text).toBe(true);
+    expect(formatMatches(file_prototest_v1_rules, 'Visible', '   ')).toBe(false);
   });
 });
 

@@ -1,9 +1,9 @@
 """tools/gen_wire_ts.py and tools/gen_schema.py on synthetic buf images (JSON form): what they make of a union, a
-nullable field, a map and a positional method, a case's empty list and a self-contained schema of one message, and
-which packages they write. The real outputs are checked where they are used: test/ops.test.ts type-checks ops_wire.ts
-against toWire, the Contracts CI job compares contracts/ops-v1/ops-v1.schema.json with gen_schema.py's output and
-gives every fixture the reference validator's verdict on it, and Todofy's tests validate its reports with
-todofy/api/*.schema.json.
+nullable field, a map and a positional method, a case's empty list, a self-contained schema of one message, a
+consumer's (open) schema with the relations between fields, and which packages they write. The real outputs are
+checked where they are used: test/ops.test.ts type-checks ops_wire.ts against toWire, the Contracts CI job compares
+contracts/ops-v1/ops-v1.schema.json with gen_schema.py's output and gives every fixture the reference validator's
+verdict on it, and Todofy's tests validate its reports with todofy/api/*.schema.json.
 """
 
 import contextlib
@@ -326,6 +326,79 @@ class RootSchemaTest(unittest.TestCase):
         gen_schema.SCHEMAS = (gen_schema.Target("t.v1", "r.json", "https://x.local/r.json", "R", root="Nope"),)
         with self.assertRaises(gen_schema.GenerateError):
             gen_schema.generate({"file": [report_file()]})
+
+
+def related_file() -> dict:
+    """A file `r.v1` whose message E has a REQUIRED subject, an optional text (one of them Visible: any_match), an
+    optional bool cut, an optional int32 size present when cut, and a nested message A."""
+
+    def scalar(name: str, number: int, kind: str, **extra: object) -> dict:
+        return {"name": name, "number": number, "label": "LABEL_OPTIONAL", "type": kind, **extra}
+
+    event = {
+        "name": "E",
+        "field": [
+            scalar("subject", 1, "TYPE_STRING", options=REQUIRED),
+            scalar("text", 2, "TYPE_STRING", proto3Optional=True),
+            scalar("cut", 3, "TYPE_BOOL", proto3Optional=True),
+            scalar(
+                "size", 4, "TYPE_INT32", proto3Optional=True, options={"[common.wire.v1.field]": {"presentWhen": "cut"}}
+            ),
+            scalar("a", 5, "TYPE_MESSAGE", typeName=".r.v1.A"),
+            scalar("id", 6, "TYPE_STRING", options=REQUIRED | {"[common.wire.v1.field]": {"format": "Uuid"}}),
+        ],
+        "options": {"[common.wire.v1.message]": {"anyMatch": [{"fields": ["subject", "text"], "format": "Visible"}]}},
+    }
+    nested = {"name": "A", "field": [scalar("name", 1, "TYPE_STRING", options=REQUIRED)]}
+    formats = [
+        {"name": "Visible", "pattern": "[ ]*[^ ][\x00-\U0010ffff]*"},
+        {"name": "Uuid", "pattern": "[0-9a-f]{8}", "jsonSchemaFormat": "uuid"},
+    ]
+    return {
+        "name": "r/v1/r.proto",
+        "package": "r.v1",
+        "syntax": "proto3",
+        "messageType": [event, nested],
+        "options": {"[common.wire.v1.formats]": formats},
+    }
+
+
+class ConsumerSchemaTest(unittest.TestCase):
+    def setUp(self) -> None:
+        self.saved = gen_schema.SCHEMAS
+        gen_schema.SCHEMAS = (gen_schema.Target("r.v1", "e.json", "https://x.local/e.json", "E", root="E", open=True),)
+        self.schema = json.loads(gen_schema.generate({"file": [related_file()]})["e.json"])
+
+    def tearDown(self) -> None:
+        gen_schema.SCHEMAS = self.saved
+
+    def test_every_message_takes_properties_it_does_not_know(self) -> None:
+        self.assertIs(self.schema["additionalProperties"], True)
+        self.assertIs(self.schema["properties"]["a"]["additionalProperties"], True)
+        gen_schema.SCHEMAS = (gen_schema.Target("r.v1", "e.json", "https://x.local/e.json", "E", root="E"),)
+        closed = json.loads(gen_schema.generate({"file": [related_file()]})["e.json"])
+        self.assertIs(closed["additionalProperties"], False)
+
+    def test_any_match_is_an_any_of_one_branch_per_field(self) -> None:
+        visible = {"type": "string", "pattern": "^(?:[ ]*[^ ][\x00-\U0010ffff]*)$(?!\\n)"}
+        self.assertEqual(
+            self.schema["anyOf"],
+            [
+                {"required": ["subject"], "properties": {"subject": visible}},
+                {"required": ["text"], "properties": {"text": visible}},
+            ],
+        )
+
+    def test_present_when_is_an_if_then(self) -> None:
+        self.assertEqual(
+            self.schema["allOf"],
+            [{"if": {"required": ["cut"], "properties": {"cut": {"const": True}}}, "then": {"required": ["size"]}}],
+        )
+
+    def test_a_uuid_format_is_written_next_to_its_pattern(self) -> None:
+        self.assertEqual(
+            self.schema["properties"]["id"], {"type": "string", "format": "uuid", "pattern": "^(?:[0-9a-f]{8})$(?!\\n)"}
+        )
 
 
 if __name__ == "__main__":

@@ -1,7 +1,7 @@
 """tools/profile_breaking.py's value-rule and closed-enum checks on synthetic buf images (JSON form), next to the
 module's own self-test (scripts/rules-selftest.sh, which edits the real .proto files): an output's rules may not
-change either way (a case's `empty` included), an input's may only loosen, an open list may change, a closed enum
-may not grow.
+change either way (a case's `empty` and the relations between fields included), an input's may only loosen, an open
+list may change, a closed enum may not grow, and a list's write_empty is wire like a map's keep_order.
 """
 
 import copy
@@ -165,6 +165,69 @@ class UnionAndEnumTest(unittest.TestCase):
         )
         self.assertEqual(rules_of(image(closed=True), image()), ["PROFILE_ENUM_CLOSED t.v1.State"])
         self.assertEqual(rules_of(image(), image(closed=True)), ["PROFILE_ENUM_CLOSED t.v1.State"])
+
+
+def related(
+    out: dict | None = None, inp: dict | None = None, *, out_match: bool = False, in_match: bool = False
+) -> dict[str, Any]:
+    """image() with a REQUIRED string `title`, an optional bool `cut`, an optional int32 `size` (with `out` or `inp` as
+    its rules) and a list `flags` in Out and In, and an any_match group (title, code: Code) on each if asked."""
+    built = image(formats=[copy.deepcopy(CODE)])
+    In, Out = built["file"][0]["messageType"][:2]
+    for message, rules, match in ((Out, out, out_match), (In, inp, in_match)):
+        message["field"] += [
+            {
+                "name": "title",
+                "number": 4,
+                "label": "LABEL_OPTIONAL",
+                "type": "TYPE_STRING",
+                "options": {"[google.api.field_behavior]": ["REQUIRED"]},
+            },
+            {"name": "cut", "number": 5, "label": "LABEL_OPTIONAL", "type": "TYPE_BOOL", "proto3Optional": True},
+            {"name": "size", "number": 6, "label": "LABEL_OPTIONAL", "type": "TYPE_INT32", "proto3Optional": True},
+            {"name": "flags", "number": 7, "label": "LABEL_REPEATED", "type": "TYPE_STRING"},
+        ]
+        if rules is not None:
+            message["field"][-2]["options"] = {"[common.wire.v1.field]": rules}
+        if match:
+            group = {"fields": ["title"], "format": "Code"}
+            message["options"] = {"[common.wire.v1.message]": {"anyMatch": [group]}}
+    return built
+
+
+class RelationsTest(unittest.TestCase):
+    def test_present_when_is_a_rule_of_the_field(self) -> None:
+        when = {"presentWhen": "cut"}
+        self.assertEqual(rules_of(related(when, when), related(when, when)), [])
+        self.assertEqual(rules_of(related(when), related()), ["PROFILE_RULE_SAME t.v1.Out.size"])
+        self.assertEqual(rules_of(related(), related(when)), ["PROFILE_RULE_SAME t.v1.Out.size"])
+        # An input may drop it (older callers' inputs still read), never gain it.
+        self.assertEqual(rules_of(related(None, when), related()), [])
+        self.assertEqual(rules_of(related(), related(None, when)), ["PROFILE_RULE_NOT_TIGHTER t.v1.In.size"])
+
+    def test_any_match_is_a_rule_of_the_message(self) -> None:
+        self.assertEqual(rules_of(related(out_match=True), related(out_match=True)), [])
+        self.assertEqual(rules_of(related(out_match=True), related()), ["PROFILE_RULE_SAME_MATCH t.v1.Out"])
+        self.assertEqual(rules_of(related(), related(out_match=True)), ["PROFILE_RULE_SAME_MATCH t.v1.Out"])
+        self.assertEqual(rules_of(related(in_match=True), related()), [])
+        self.assertEqual(rules_of(related(), related(in_match=True)), ["PROFILE_RULE_SAME_MATCH t.v1.In"])
+        # The group's format compares by pattern, like a field's.
+        wider = related(out_match=True)
+        wider["file"][0]["options"]["[common.wire.v1.formats]"][0]["pattern"] = "[a-z]{1,16}"
+        self.assertEqual(rules_of(related(out_match=True), wider), ["PROFILE_RULE_SAME_MATCH t.v1.Out"])
+
+    def test_write_empty_changes_the_bytes_of_an_empty_list(self) -> None:
+        def empty_flags(on: bool) -> dict:
+            built = related()
+            if on:
+                built["file"][0]["messageType"][1]["field"][-1]["options"] = {
+                    "[common.wire.v1.field]": {"writeEmpty": True}
+                }
+            return built
+
+        self.assertEqual(rules_of(empty_flags(True), empty_flags(True)), [])
+        self.assertEqual(rules_of(empty_flags(False), empty_flags(True)), ["PROFILE_FIELD_SAME_EMPTY t.v1.Out.flags"])
+        self.assertEqual(rules_of(empty_flags(True), empty_flags(False)), ["PROFILE_FIELD_SAME_EMPTY t.v1.Out.flags"])
 
 
 if __name__ == "__main__":

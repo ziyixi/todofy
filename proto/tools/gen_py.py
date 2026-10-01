@@ -10,7 +10,9 @@ For every file of the module, ``todofy/taskintent/v1/task_intent.proto`` say, it
 one ``IntEnum`` per enum, one frozen dataclass per message and a ``FIELDS`` table that the hand-written
 runtime ``ziyixi_proto.wire_json`` reads and writes. OUT_DIR is the ``ziyixi_proto`` package directory.
 An enum nested in a message is a top-level ``IntEnum`` named ``<Message>_<Enum>``, as protobuf-es names
-it (``Send_State``); a map field is a ``dict``. Services are not generated (the profile is about messages).
+it (``Send_State``); a map field is a ``dict``; a field whose name is a Python keyword is the attribute
+``<name>_`` (PEP 8: mail.received.v1's ``from`` is ``from_``), its wire name unchanged. Services are not
+generated (the profile is about messages).
 
 Only the packages a Python user imports are generated (PYTHON_PACKAGES): a package that only TypeScript
 apps use (an app's UI API) may use what this profile lacks without stopping generation for every app.
@@ -26,6 +28,7 @@ Runs on Python 3.9 or newer (the system python3 of a developer machine); the gen
 from __future__ import annotations
 
 import json
+import keyword
 import sys
 from pathlib import Path
 from typing import Any
@@ -60,9 +63,15 @@ def floats(value: float) -> str:
     return str(int(value)) if value.is_integer() else repr(value)
 
 
+def literal(value: str) -> str:
+    """A Python string literal of ``value``, ASCII only. JSON's escapes are Python's, except above U+FFFF: JSON writes a
+    surrogate pair that a JSON reader joins but Python reads as two characters, so those are written as ``\\U``."""
+    return "".join(f"\\U{ord(c):08x}" if ord(c) > 0xFFFF else json.dumps(c)[1:-1] for c in value).join('""')
+
+
 def strings(values: Any) -> str:
     """A frozenset of strings as Python source, in sorted order (deterministic output)."""
-    return "frozenset({" + ", ".join(json.dumps(v) for v in sorted(values)) + "})"
+    return "frozenset({" + ", ".join(literal(v) for v in sorted(values)) + "})"
 
 
 def format_literal(fmt: wire_rules.Format) -> str:
@@ -100,7 +109,7 @@ def rules_literal(rules: wire_rules.FieldRules | None) -> str:
     if rules.key_format is not None:
         args.append(f"key_format={format_literal(rules.key_format)}")
     if rules.required_keys:
-        args.append(f"required_keys=({''.join(json.dumps(k) + ', ' for k in rules.required_keys)})")
+        args.append(f"required_keys=({''.join(literal(k) + ', ' for k in rules.required_keys)})")
     if rules.keep_order:
         args.append("keep_order=True")
     if rules.cases:
@@ -117,7 +126,16 @@ def rules_literal(rules: wire_rules.FieldRules | None) -> str:
         args.append(f"otherwise={json.dumps(rules.otherwise)}")
     if rules.non_null:
         args.append("non_null=True")
+    if rules.write_empty:
+        args.append("write_empty=True")
+    if rules.present_when:
+        args.append(f"present_when={json.dumps(rules.present_when)}")
     return f"Rules({', '.join(args)})"
+
+
+def attribute(name: str) -> str:
+    """A field's Python attribute: its name, or ``<name>_`` for a Python keyword (``from`` is ``from_``)."""
+    return f"{name}_" if keyword.iskeyword(name) else name
 
 
 def enum_prefix(name: str) -> str:
@@ -166,8 +184,10 @@ def generate_file(file: dict[str, Any], types: dict[str, tuple[str, str]], enums
     body: list[str] = []
     tables: list[str] = []
     unions: list[str] = []
+    matches: list[str] = []
     closed: list[str] = []
-    runtime = {"Field", "Format"}
+    # AnyMatch annotates the ANY_MATCH table of every module.
+    runtime = {"AnyMatch", "Field", "Format"}
 
     def ref(type_name: str, where: str) -> str:
         if type_name not in types:
@@ -221,6 +241,8 @@ def generate_file(file: dict[str, Any], types: dict[str, tuple[str, str]], enums
         out = ""
         if field.get("proto3Optional", False):
             out += ", declared_optional=True"
+        if attribute(field["name"]) != field["name"]:
+            out += f", attr={json.dumps(attribute(field['name']))}"
         rules = rules_literal(wire_rules.field_rules(file, message, field, enums, entry))
         if rules:
             out += f", rules={rules}"
@@ -232,6 +254,16 @@ def generate_file(file: dict[str, Any], types: dict[str, tuple[str, str]], enums
         union = wire_rules.discriminator(message)
         if union is not None:
             unions.append(f"    {name}: {json.dumps(union)},")
+        groups = wire_rules.any_matches(file, message)
+        if groups:
+            literals = "".join(
+                f"AnyMatch(({''.join(json.dumps(f) + ', ' for f in group.fields)}), {format_literal(group.format)}), "
+                for group in groups
+            )
+            matches.append(f"    {name}: ({literals}),")
+        attributes = [attribute(f["name"]) for f in message.get("field", [])]
+        if len(set(attributes)) != len(attributes):
+            raise GenerateError(f"{package}.{name}: two fields have the same Python attribute (a keyword's name_)")
         entries = map_entries(message)
         if len(entries) != len(message.get("nestedType", [])):
             raise GenerateError(f"{package}.{name}: nested messages are not in the profile (only map entries)")
@@ -248,6 +280,7 @@ def generate_file(file: dict[str, Any], types: dict[str, tuple[str, str]], enums
             required = "REQUIRED" in field.get("options", {}).get(REQUIRED_OPTION, [])
             value = ""
             entry_name = field.get("typeName", "").rsplit(".", 1)[-1]
+            attr = attribute(field["name"])
             if (
                 field["type"] == "TYPE_MESSAGE"
                 and field["typeName"] == f".{package}.{name}.{entry_name}"
@@ -259,9 +292,7 @@ def generate_file(file: dict[str, Any], types: dict[str, tuple[str, str]], enums
                 value_annotation, value, target = value_kind(value_field, where)
                 if value in ("timestamp", "fieldmask"):
                     raise GenerateError(f"{where}: Timestamp and FieldMask map values are not in the profile")
-                body.append(
-                    f"    {field['name']}: dict[str, {value_annotation}] = dataclasses.field(default_factory=dict)"
-                )
+                body.append(f"    {attr}: dict[str, {value_annotation}] = dataclasses.field(default_factory=dict)")
                 fields.append(
                     f'Field({json.dumps(field["name"])}, {field["number"]}, "map", {target}, '
                     f"repeated=False, optional=False, required={required}, value={json.dumps(value)}"
@@ -279,7 +310,7 @@ def generate_file(file: dict[str, Any], types: dict[str, tuple[str, str]], enums
                 annotation, default = f"tuple[{annotation}, ...]", "()"
             elif optional:
                 annotation, default = f"{annotation} | None", "None"
-            body.append(f"    {field['name']}: {annotation} = {default}")
+            body.append(f"    {attr}: {annotation} = {default}")
             fields.append(
                 f"Field({json.dumps(field['name'])}, {field['number']}, {json.dumps(kind)}, {target}, "
                 f"repeated={repeated}, optional={optional}, required={required}{extras(field, message, None)})"
@@ -306,7 +337,7 @@ def generate_file(file: dict[str, Any], types: dict[str, tuple[str, str]], enums
         "# The file's named string formats (common.wire.v1.formats): wire_json.format_matches(FORMATS[name], value).",
         "FORMATS: dict[str, Format] = {",
         *(
-            f"    {json.dumps(f.name)}: Format({json.dumps(f.name)}, {json.dumps(f.pattern)}, {f.max_length}),"
+            f"    {json.dumps(f.name)}: Format({json.dumps(f.name)}, {literal(f.pattern)}, {f.max_length}),"
             for f in wire_rules.formats(file).values()
         ),
         "}",
@@ -319,6 +350,11 @@ def generate_file(file: dict[str, Any], types: dict[str, tuple[str, str]], enums
         "# Union messages: the name of each one's discriminator field (common.wire.v1.Message).",
         "UNIONS: dict[type, str] = {",
         *unions,
+        "}",
+        "",
+        "# Messages with groups of fields of which one must match a format (common.wire.v1.Message.any_match).",
+        "ANY_MATCH: dict[type, tuple[AnyMatch, ...]] = {",
+        *matches,
         "}",
         "",
         "# Closed enums ((common.wire.v1.closed)): every read refuses a wire name it does not know.",
