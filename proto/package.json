@@ -11,6 +11,7 @@
     "generate": "node tools/ensure.mjs --force",
     "ensure": "node tools/ensure.mjs",
     "lint": "buf format --diff --exit-code && buf lint",
+    "api-lint": "sh scripts/api-lint.sh",
     "breaking": "sh scripts/breaking.sh",
     "typecheck": "node tools/ensure.mjs && tsc --noEmit -p tsconfig.json",
     "test": "node tools/ensure.mjs && vitest run && npm run test:python",

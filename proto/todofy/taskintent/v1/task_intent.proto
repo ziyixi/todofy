@@ -8,7 +8,21 @@
 //
 // Field behavior (AIP-203): REQUIRED on an output field means the wire profile always writes it, as
 // null when unset; a field without it is omitted when unset.
-
+//
+// Google's api-linter runs on this file (scripts/api-lint.sh). The rules it cannot meet without changing
+// task-intent-v1's frozen wire or this file's generated code are disabled where they apply, each with its
+// reason. File-wide (api-linter reads them from this header):
+//
+// (-- api-linter: core::0191::java-package=disabled
+//     aip.dev/not-precedent: nothing generates Java, and buf breaking (FILE) treats adding a Java option to
+//     a published file as breaking. --)
+// (-- api-linter: core::0191::java-multiple-files=disabled
+//     aip.dev/not-precedent: as java-package. --)
+// (-- api-linter: core::0191::java-outer-classname=disabled
+//     aip.dev/not-precedent: as java-package. --)
+// (-- api-linter: core::0191::file-layout=disabled
+//     aip.dev/not-precedent: the enums come first in the order of the contract's README; moving them would
+//     only reorder the generated code. --)
 syntax = "proto3";
 
 package todofy.taskintent.v1;
@@ -25,12 +39,24 @@ service TaskIntentService {
   // buf:lint:ignore RPC_REQUEST_STANDARD_NAME
   // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
   // buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE
+  // (-- api-linter: core::0127::http-annotation=disabled
+  //     aip.dev/not-precedent: a Workers service binding (WireService), never HTTP. --)
+  // (-- api-linter: core::0136::request-message-name=disabled
+  //     aip.dev/not-precedent: v1's message names; see the service comment. --)
+  // (-- api-linter: core::0136::response-message-name=disabled
+  //     aip.dev/not-precedent: v1's message names; see the service comment. --)
   rpc ProposeTasks(TaskIntent) returns (TaskIntentResult);
 
   // Answers the current state of a recorded intent, or STATE_NOT_FOUND.
   // buf:lint:ignore RPC_REQUEST_STANDARD_NAME
   // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
   // buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE
+  // (-- api-linter: core::0127::http-annotation=disabled
+  //     aip.dev/not-precedent: a Workers service binding (WireService), never HTTP. --)
+  // (-- api-linter: core::0136::request-message-name=disabled
+  //     aip.dev/not-precedent: v1's message names; see the service comment. --)
+  // (-- api-linter: core::0136::response-message-name=disabled
+  //     aip.dev/not-precedent: v1's message names; see the service comment. --)
   rpc TaskIntentStatus(TaskIntentRef) returns (TaskIntentResult);
 }
 
@@ -160,6 +186,9 @@ message TaskIntentResult {
   // The intent this result is about.
   string intent_id = 3 [(google.api.field_behavior) = REQUIRED];
   // The intent's state.
+  // (-- api-linter: core::0216::state-field-output-only=disabled
+  //     aip.dev/not-precedent: an output message, where the wire profile reads REQUIRED as "always
+  //     written"; OUTPUT_ONLY would let it be omitted. --)
   State state = 4 [(google.api.field_behavior) = REQUIRED];
   // Todofy holds a ledger row for this intent.
   bool recorded = 5 [(google.api.field_behavior) = REQUIRED];
@@ -170,7 +199,15 @@ message TaskIntentResult {
   // Why the state is not plain progress; ERROR_CODE_UNSPECIFIED (null on the wire) when none.
   ErrorCode error_code = 8 [(google.api.field_behavior) = REQUIRED];
   // When to ask again, 1-86400 seconds; unset (null on the wire) when there is nothing to wait for.
+  // (-- api-linter: core::0140::prepositions=disabled
+  //     aip.dev/not-precedent: v1's wire name (renaming a field changes the JSON). --)
+  // (-- api-linter: core::0142::time-field-type=disabled
+  //     aip.dev/not-precedent: a duration in whole seconds, v1's wire form; not a timestamp. --)
   optional int32 retry_after_seconds = 9 [(google.api.field_behavior) = REQUIRED];
   // When Todofy last changed this intent (RFC 3339 UTC on the wire).
+  // (-- api-linter: core::0140::prepositions=disabled
+  //     aip.dev/not-precedent: v1's wire name (renaming a field changes the JSON). --)
+  // (-- api-linter: core::0142::time-field-names=disabled
+  //     aip.dev/not-precedent: v1's wire name; AIP-142 would say update_time. --)
   google.protobuf.Timestamp updated_at = 10 [(google.api.field_behavior) = REQUIRED];
 }

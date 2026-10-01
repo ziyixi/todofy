@@ -16,6 +16,9 @@ python3 -m unittest discover -s .github/scripts -p test_proto.py (the Proto chec
 - ci_changes.PROTO_USERS lists exactly those users, each marked bundled only when its Worker compiles the
   package in, and a user marked test-only has no production import of it.
 - Generated code is never committed and is ignored; uv's cache keys cover every input ensure.mjs hashes.
+- api-linter: one exact version, in the Go tool module proto/tools/api-linter only (go.mod pins it and
+  the Go toolchain, go.sum every checksum); scripts/api-lint.sh builds it from there, and the Proto checks
+  job installs exactly that toolchain and runs the script. Nothing else installs api-linter.
 """
 
 import json
@@ -51,6 +54,9 @@ READS_GENERATED = re.compile(r"(^|[\s;&|(])(tsc|vitest|wrangler)\b")
 RELATIVE_IMPORT = re.compile(r"""(?:\bfrom|\bimport)\s*\(?\s*['"](\.\.?/[^'"]+)['"]""")
 EXACT = re.compile(r"\d+\.\d+\.\d+")
 SKIP_PARTS = {"node_modules", ".venv", ".venv-workers", "python_modules", ".wrangler"}
+API_LINTER = "github.com/googleapis/api-linter/v2"
+LINTER_MODULE = PROTO / "tools" / "api-linter"
+WORKFLOW = REPO / ".github" / "workflows" / "ci.yml"
 
 
 def tracked(pattern: str) -> list[Path]:
@@ -154,6 +160,46 @@ class OneVersion(unittest.TestCase):
                 for name in TOOLCHAIN:
                     self.assertNotIn(f'"{name}"', text, f"import it from {TS_PACKAGE}/protobuf instead")
                     self.assertNotIn(f"node_modules/{name}", text)
+
+
+class ApiLinter(unittest.TestCase):
+    def setUp(self):
+        self.go_mod = (LINTER_MODULE / "go.mod").read_text()
+
+    def test_one_exact_version_and_toolchain_in_the_tool_module(self):
+        self.assertIn(f"tool {API_LINTER}/cmd/api-linter\n", self.go_mod)
+        versions = re.findall(rf"^\s*{re.escape(API_LINTER)} (v\S+)", self.go_mod, re.MULTILINE)
+        self.assertEqual(len(versions), 1, versions)
+        self.assertRegex(versions[0], rf"^v{EXACT.pattern}$")
+        self.assertRegex(self.go_mod, r"(?m)^toolchain go\d+\.\d+\.\d+$", "pin the Go toolchain exactly")
+        go_sum = (LINTER_MODULE / "go.sum").read_text()
+        self.assertIn(f"{API_LINTER} {versions[0]} h1:", go_sum)
+        self.assertIn(f"{API_LINTER} {versions[0]}/go.mod h1:", go_sum)
+
+    def test_the_script_builds_from_the_module_without_changing_it(self):
+        script = (PROTO / "scripts" / "api-lint.sh").read_text()
+        build = f"go -C tools/api-linter build -mod=readonly -o ../../.tools/api-linter {API_LINTER}/cmd/api-linter"
+        self.assertIn(build, script)
+        scripts = json.loads((PROTO / "package.json").read_text())["scripts"]
+        self.assertEqual(scripts["api-lint"], "sh scripts/api-lint.sh")
+
+    def test_nothing_else_installs_it(self):
+        offenders = []
+        for path in tracked("*"):
+            skipped = path.is_relative_to(LINTER_MODULE) or path == Path(__file__).resolve()
+            if skipped or path.suffix in {".md", ".sum"} or not path.is_file():
+                continue
+            text = path.read_text(errors="ignore")
+            if re.search(r"api-linter(/v2)?(/cmd/api-linter)?@|go install\b[^\n]*api-linter", text):
+                offenders.append(str(path.relative_to(REPO)))
+        self.assertEqual(offenders, [])
+
+    def test_the_proto_checks_job_installs_the_modules_toolchain_and_runs_the_linter(self):
+        job = WORKFLOW.read_text().split("\n  proto-checks:\n", 1)[1].split("\n  gate:\n", 1)[0]
+        self.assertIn("go-version-file: proto/tools/api-linter/go.mod", job)
+        self.assertIn("cache-dependency-path: proto/tools/api-linter/go.sum", job)
+        self.assertNotIn("go-version:", job)
+        self.assertIn("run: npm run api-lint", job)
 
 
 class Users(unittest.TestCase):

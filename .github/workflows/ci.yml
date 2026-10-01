@@ -919,10 +919,18 @@ jobs:
         with:
           version: '0.12.10'
           working-directory: proto
+      # Go for Google's api-linter, the Go toolchain proto/tools/api-linter/go.mod names (its go.sum pins every
+      # module checksum; scripts/api-lint.sh builds the linter from it).
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: proto/tools/api-linter/go.mod
+          cache-dependency-path: proto/tools/api-linter/go.sum
       - name: Install the pinned toolchain (buf, protoc-gen-es, the protobuf-es runtime)
         run: npm ci --no-audit --no-fund
       - name: Format and lint (STANDARD and COMMENTS)
         run: npm run lint
+      - name: Google's api-linter (AIP rules) on every package but the runtimes' test fixtures
+        run: npm run api-lint
       # Against the commit the Changes job diffed from: the last successful main run on main, the merge base
       # with origin/main on a branch. Empty (Changes found no usable base and runs everything, or a dispatch):
       # breaking.sh compares with HEAD~1 and says so in the log.

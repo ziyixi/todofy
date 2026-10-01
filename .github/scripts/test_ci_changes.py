@@ -213,6 +213,7 @@ class Classify(unittest.TestCase):
         self.assertEqual(ci_changes.PROTO_USERS, {"lab": True, "todofy": True})
         for path in (
             "proto/todofy/taskintent/v1/task_intent.proto",
+            "proto/lab/ui/v1/lab_ui_service.proto",
             "proto/ts/wire-json.ts",
             "proto/python/src/ziyixi_proto/wire_json.py",
             "proto/python/build_backend.py",
@@ -226,7 +227,10 @@ class Classify(unittest.TestCase):
             "proto/test/task-intent.test.ts",
             "proto/testdata/wire-profile-cases.json",
             "proto/scripts/breaking.sh",
+            "proto/scripts/api-lint.sh",
             "proto/tools/profile_breaking.py",
+            "proto/tools/api-linter/go.mod",
+            "proto/tools/api-linter/go.sum",
         ):
             with self.subTest(path=path):
                 self.assertEqual(push([path]), expect(T, F, T, F, F, proto=T, lab_check=T))

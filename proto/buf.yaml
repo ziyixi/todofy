@@ -30,12 +30,16 @@ lint:
   service_suffix: Service
   # Exceptions are written next to the element (buf:lint:ignore <RULE>) with the reason.
   disallow_comment_ignores: false
-  # prototest mirrors the AIP-shaped HTTP APIs (AIP-131/133/134/135/136: Get, Create and Update return the
-  # resource, Delete returns google.protobuf.Empty, so one message answers several RPCs).
+  # The AIP-shaped HTTP APIs (README.md, "Adding a UI API") follow AIP-131/133/134/135/136: Get, Create and
+  # Update return the resource, Delete returns google.protobuf.Empty, so one message answers several RPCs.
+  # Google's api-linter (scripts/api-lint.sh) checks their request and response names instead. prototest
+  # mirrors those shapes for the transcoder's tests.
   ignore_only:
     RPC_RESPONSE_STANDARD_NAME:
+      - lab/ui
       - prototest
     RPC_REQUEST_RESPONSE_UNIQUE:
+      - lab/ui
       - prototest
 breaking:
   # FILE is the strictest category: it also protects generated code (names, packages, files), not only

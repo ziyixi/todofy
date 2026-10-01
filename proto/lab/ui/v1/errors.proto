@@ -1,0 +1,72 @@
+// The errors of LabUiService (AIP-193).
+//
+// Every error is a google.rpc.Status in Google's HTTP JSON form, written by the shared transcoder
+// (proto/ts/http-transcoder.ts):
+//
+//   {"error": {"code": <HTTP status>, "message": <English, for developers>, "status": <google.rpc.Code name>,
+//              "details": [
+//                {"@type": "type.googleapis.com/google.rpc.ErrorInfo", "reason": "DECK_CHANGED",
+//                 "domain": "lab.ziyixi.science"},
+//                {"@type": "type.googleapis.com/google.rpc.LocalizedMessage", "locale": "zh-CN", "message": ...},
+//                {"@type": "type.googleapis.com/google.rpc.RequestInfo", "request_id": <16 hex>},
+//                {"@type": "type.googleapis.com/lab.ui.v1.DeckState", ...}]}}
+//
+// The UI branches on ErrorInfo.reason only: an ErrorReason value name without its prefix. Before
+// lab.ui.v1, the same reasons were the lower-case `error.code` strings of Lab's own envelope
+// (`deck_changed`); the names did not change, only their case. A reason the UI does not know is shown
+// with the LocalizedMessage, never read as success.
+
+syntax = "proto3";
+
+package lab.ui.v1;
+
+option java_multiple_files = true;
+option java_outer_classname = "ErrorsProto";
+option java_package = "science.ziyixi.lab.ui.v1";
+
+// Why a request failed: ErrorInfo.reason is the value's name without `ERROR_REASON_`. The HTTP status
+// follows the google.rpc.Code listed for each value (the AIP-193 mapping), except where noted.
+enum ErrorReason {
+  // Never sent.
+  ERROR_REASON_UNSPECIFIED = 0;
+  // UNAUTHENTICATED (401): no valid Cloudflare Access login for the owner.
+  ERROR_REASON_UNAUTHORIZED = 1;
+  // UNAVAILABLE (503): the Worker's Access settings are incomplete, or a dev bypass was refused.
+  ERROR_REASON_ACCESS_NOT_CONFIGURED = 2;
+  // UNAVAILABLE (503): a required secret (the CSRF signing key) is missing.
+  ERROR_REASON_NOT_CONFIGURED = 3;
+  // PERMISSION_DENIED (403): a mutation without a valid CSRF token or same-origin Origin. The UI fetches a
+  // new token (GET /api/csrf) and repeats the request once.
+  ERROR_REASON_CSRF_FAILED = 4;
+  // INVALID_ARGUMENT (400): the request does not decode (strict wire profile: unknown field, wrong type,
+  // missing REQUIRED field, body too large) or breaks a value rule. Written by the transcoder too.
+  ERROR_REASON_BAD_REQUEST = 5;
+  // NOT_FOUND (404): no such route or resource. Written by the transcoder too.
+  ERROR_REASON_NOT_FOUND = 6;
+  // UNIMPLEMENTED, sent as HTTP 405 with an Allow header: the path exists, the method does not.
+  // Written by the transcoder.
+  ERROR_REASON_METHOD_NOT_ALLOWED = 7;
+  // UNAVAILABLE (503): LabState or D1 could not answer; repeating the request (same request_id) is safe.
+  ERROR_REASON_UNAVAILABLE = 8;
+  // NOT_FOUND (404): no ready deck for that day.
+  ERROR_REASON_DECK_NOT_FOUND = 9;
+  // ABORTED (409): `base_version` is stale (another tab or device moved the deck). The error carries the
+  // current lab.ui.v1.DeckState as a detail, which the UI adopts.
+  ERROR_REASON_DECK_CHANGED = 10;
+  // ALREADY_EXISTS (409): the card was decided already.
+  ERROR_REASON_ALREADY_DECIDED = 11;
+  // FAILED_PRECONDITION (400): nothing to undo.
+  ERROR_REASON_NOTHING_TO_UNDO = 12;
+  // FAILED_PRECONDITION (400): the deck's decision log is full (DECK_EVENTS_MAX, 400 events).
+  ERROR_REASON_DECK_LOG_FULL = 13;
+  // NOT_FOUND (404): the paper is not a card of this deck.
+  ERROR_REASON_NOT_IN_DECK = 14;
+  // FAILED_PRECONDITION (400): no liked, unexcluded, unsent paper to send.
+  ERROR_REASON_NOTHING_TO_SEND = 15;
+  // ABORTED (409): the paper is in the send in flight (it cannot be excluded now), or the send is busy.
+  ERROR_REASON_SEND_IN_PROGRESS = 16;
+  // FAILED_PRECONDITION (400): SEEDS_MAX (50) seeds already.
+  ERROR_REASON_SEEDS_FULL = 17;
+  // ALREADY_EXISTS (409): CreateLikedPaper for a paper that is liked already.
+  ERROR_REASON_ALREADY_LIKED = 18;
+}

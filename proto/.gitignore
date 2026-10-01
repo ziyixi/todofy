@@ -11,3 +11,6 @@ __pycache__/
 /.generated.json.tmp
 /.generate-*/
 /.generate.lock/
+
+# Google's api-linter, built from tools/api-linter (scripts/api-lint.sh).
+/.tools/

@@ -30,8 +30,8 @@ Outputs (GITHUB_OUTPUT, "true"/"false"):
 proto/ (the protobuf IDL, proto/README.md) checks every app in PROTO_USERS (an app that depends on
 @ziyixi/proto or ziyixi-proto) and deploys only those whose bundle can change: an app whose Worker
 compiles the package in (PROTO_USERS[app] is True: a TypeScript "dependencies" entry, a Python [project]
-dependency) and only for a change outside PROTO_NOT_BUNDLED (tests, test data, the breaking-change
-scripts and Markdown). A test-only user (devDependencies, a dependency group) is checked, never deployed.
+dependency) and only for a change outside PROTO_NOT_BUNDLED (tests, test data, the check scripts, the
+api-linter tool module and Markdown). A test-only user (devDependencies, a dependency group) is checked, never deployed.
 Lab and Todofy both bundle it (Lab's Worker the TypeScript codec, todofy-core the Python package that
 pywrangler vendors), so an IDL or codec change deploys both. It also runs Contracts.
 
@@ -136,7 +136,13 @@ PACKAGE_USERS = {"edge-auth": ("todofy", "mail-hero", "dashboard", "lab", "flowd
 PROTO = "proto/"
 PROTO_USERS = {"lab": True, "todofy": True}
 # proto/ paths that never reach a bundle: a change there checks the users but deploys none.
-PROTO_NOT_BUNDLED = ("proto/test/", "proto/testdata/", "proto/scripts/", "proto/tools/profile_breaking.py")
+PROTO_NOT_BUNDLED = (
+    "proto/test/",
+    "proto/testdata/",
+    "proto/scripts/",
+    "proto/tools/profile_breaking.py",
+    "proto/tools/api-linter/",
+)
 
 # Contract files whose code a TypeScript Worker imports at runtime (constants such as OPS_LIMITS land
 # in its bundle; the dashboard also validates every Ops answer with the schema and validate.mjs),

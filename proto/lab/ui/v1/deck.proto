@@ -1,0 +1,283 @@
+// A day's deck, its decisions, its summary and its send to Todofy (lab/docs/design.md §7-§9,
+// lab/docs/ux.md).
+
+syntax = "proto3";
+
+package lab.ui.v1;
+
+import "google/api/field_behavior.proto";
+import "google/api/resource.proto";
+import "google/protobuf/timestamp.proto";
+import "lab/ui/v1/paper.proto";
+
+option java_multiple_files = true;
+option java_outer_classname = "DeckProto";
+option java_package = "science.ziyixi.lab.ui.v1";
+
+// One day's deck (the feed's announce day): DECK_SIZE (20) cards frozen when it was made.
+message Deck {
+  option (google.api.resource) = {
+    type: "lab.ziyixi.science/Deck"
+    pattern: "decks/{deck}"
+    singular: "deck"
+    plural: "decks"
+  };
+
+  // decks/{deck}, where {deck} is the announce day `YYYY-MM-DD`.
+  string name = 1 [(google.api.field_behavior) = IDENTIFIER];
+  // How the deck was made.
+  DeckKind kind = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // When the deck was made.
+  google.protobuf.Timestamp create_time = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The cards in position order.
+  repeated Card cards = 4 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The decisions so far.
+  DeckState state = 5 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The deck's latest send (a copy of GetSend's answer); unset before the first.
+  // (-- api-linter: core::0122::embedded-resource=disabled
+  //     aip.dev/not-precedent: the deck page renders in one request; GetSend stays the source the UI
+  //     polls. --)
+  Send latest_send = 6 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // When the owner chose 暂不发送 (SnoozeDeck); unset otherwise.
+  google.protobuf.Timestamp snooze_time = 7 [(google.api.field_behavior) = OUTPUT_ONLY];
+}
+
+// One card of a deck.
+message Card {
+  // 1-based, frozen when the deck was made.
+  int32 position = 1 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The paper.
+  Paper paper = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The 简介: 2-4 Chinese sentences from the abstract (plain text, at most 400 characters); unset when
+  // missing (the neuron cap was hit, or the model's output was refused).
+  optional string brief = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The nearest liked or seed paper (为什么推荐); unset on explore decks.
+  RelatedPaper because = 4 [(google.api.field_behavior) = OUTPUT_ONLY];
+}
+
+// A paper named as the reason for a recommendation.
+message RelatedPaper {
+  // The paper's `arxiv:<id>`.
+  string paper_id = 1 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Its title.
+  string title = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
+}
+
+// The mutable part of a deck: every deck mutation answers it, and a DECK_CHANGED error carries it as a
+// detail so the UI can adopt it.
+message DeckState {
+  // The deck.
+  string deck = 1 [
+    (google.api.field_behavior) = OUTPUT_ONLY,
+    (google.api.resource_reference).type = "lab.ziyixi.science/Deck"
+  ];
+  // Bumped by every decide, undo and restart; a mutation sends it back as `base_version` (an etag in the
+  // sense of AIP-154: a stale one is refused with DECK_CHANGED).
+  int32 version = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The effective decision per paper (`arxiv:<id>`); undecided papers are absent.
+  map<string, Decision> decisions = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The counts.
+  DeckCounts counts = 4 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The position of the first undecided card; unset when every card is decided.
+  optional int32 next_position = 5 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // When the last card was decided; unset while cards remain.
+  google.protobuf.Timestamp finish_time = 6 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // What the next undo takes back; unset when there is nothing to undo.
+  UndoTarget undo = 7 [(google.api.field_behavior) = OUTPUT_ONLY];
+}
+
+// Decision counts of a deck.
+message DeckCounts {
+  // Cards in the deck.
+  int32 total = 1 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Cards decided.
+  int32 decided = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Cards liked.
+  int32 liked = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Cards disliked.
+  int32 disliked = 4 [(google.api.field_behavior) = OUTPUT_ONLY];
+}
+
+// What an undo takes back (the button label and the fly-back animation).
+message UndoTarget {
+  // A decide or a 重来.
+  UndoKind kind = 1 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // UNDO_KIND_DECIDE: the paper (`arxiv:<id>`).
+  string paper_id = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // UNDO_KIND_DECIDE: the decision taken back.
+  Decision decision = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // UNDO_KIND_RESTART: how many decisions come back.
+  int32 cleared_count = 4 [(google.api.field_behavior) = OUTPUT_ONLY];
+}
+
+// A deck's latest send to Todofy (one generation of task-intent-v1; lab/docs/design.md §9). A singleton
+// child of its deck.
+message Send {
+  option (google.api.resource) = {
+    type: "lab.ziyixi.science/Send"
+    pattern: "decks/{deck}/send"
+    singular: "send"
+    plural: "sends"
+  };
+
+  // The state of a send. SENDING and UNKNOWN are Lab's own; the others mirror task-intent-v1's states.
+  enum State {
+    // Not set: never written.
+    STATE_UNSPECIFIED = 0;
+    // Stored, the call to Todofy in flight.
+    STATE_SENDING = 1;
+    // Todofy recorded it and is creating the tasks.
+    STATE_PENDING = 2;
+    // Every task exists.
+    STATE_CREATED = 3;
+    // Todofy had created it already; nothing new was sent.
+    STATE_DUPLICATE = 4;
+    // Todofy holds or refuses intents now (see `recorded`).
+    STATE_PAUSED = 5;
+    // Todoist refused a task, or its result stayed unknown.
+    STATE_FAILED = 6;
+    // Refused; nothing recorded.
+    STATE_REJECTED = 7;
+    // The call failed: Lab does not know whether Todofy recorded it (a retry is safe).
+    STATE_UNKNOWN = 8;
+  }
+
+  // decks/{deck}/send.
+  string name = 1 [(google.api.field_behavior) = IDENTIFIER];
+  // 1 for the first send of the deck, then one more per 补发.
+  int32 generation = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The task-intent-v1 intent ID, `deck-<day>-g<generation>`.
+  string intent_id = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The mode the intent was frozen with.
+  SendMode mode = 4 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The state.
+  State state = 5 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Todofy holds it; when false (paused, rejected) the next send may change content and mode.
+  bool recorded = 6 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Papers in this send.
+  int32 item_count = 7 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Tasks the intent creates.
+  int32 tasks_total = 8 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Tasks created so far.
+  int32 tasks_created = 9 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Why the state is not plain progress; unset when there is none.
+  SendErrorCode error_code = 10 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The content is frozen: a retry resends it unchanged.
+  bool frozen = 11 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // When the UI may ask again (GetSend, at most every 3 seconds); unset when settled.
+  google.protobuf.Timestamp next_poll_time = 12 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // When Lab last changed it.
+  google.protobuf.Timestamp update_time = 13 [(google.api.field_behavior) = OUTPUT_ONLY];
+}
+
+// A deck's 总结 page: its liked cards and what 发送 would send now. A singleton child of its deck.
+message DeckSummary {
+  option (google.api.resource) = {
+    type: "lab.ziyixi.science/DeckSummary"
+    pattern: "decks/{deck}/summary"
+    singular: "deckSummary"
+    plural: "deckSummaries"
+  };
+
+  // decks/{deck}/summary.
+  string name = 1 [(google.api.field_behavior) = IDENTIFIER];
+  // The deck's decisions.
+  DeckState state = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The liked cards in deck order.
+  repeated SummaryItem liked_items = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Liked, not excluded, not yet sent: what SendDeck would send now.
+  int32 sendable_count = 4 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The deck's latest send (a copy of GetSend's answer); unset before the first.
+  // (-- api-linter: core::0122::embedded-resource=disabled
+  //     aip.dev/not-precedent: the summary page renders in one request; GetSend stays the source the UI
+  //     polls. --)
+  Send latest_send = 5 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The owner's default send mode (Settings).
+  SendMode default_mode = 6 [(google.api.field_behavior) = OUTPUT_ONLY];
+}
+
+// One liked card on the summary page.
+message SummaryItem {
+  // The card's position.
+  int32 position = 1 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The paper (`arxiv:<id>`).
+  string paper_id = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Its title.
+  string title = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The 简介's first sentence (what the Todoist subtask carries); unset without 简介.
+  optional string brief_line = 4 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // https://arxiv.org/abs/<id>.
+  string abstract_uri = 5 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Removed from the next send by the owner (the like stays).
+  bool excluded = 6 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The send generation that carried it; unset while unsent.
+  optional int32 sent_generation = 7 [(google.api.field_behavior) = OUTPUT_ONLY];
+}
+
+// How a deck was made.
+enum DeckKind {
+  // Not set: never written.
+  DECK_KIND_UNSPECIFIED = 0;
+  // Ranked against the owner's likes and seeds.
+  DECK_KIND_RANKED = 1;
+  // No likes or seeds yet (cold start): a spread across the categories.
+  DECK_KIND_EXPLORE = 2;
+}
+
+// What the next undo of a deck takes back.
+enum UndoKind {
+  // Not set: never written.
+  UNDO_KIND_UNSPECIFIED = 0;
+  // A decide (one card).
+  UNDO_KIND_DECIDE = 1;
+  // A 重来 (every decision it cleared comes back).
+  UNDO_KIND_RESTART = 2;
+}
+
+// How the liked papers become Todoist tasks (task-intent-v1's Mode).
+enum SendMode {
+  // Not set: never written; refused on input.
+  SEND_MODE_UNSPECIFIED = 0;
+  // One parent task with one subtask per paper.
+  SEND_MODE_SUBTASKS = 1;
+  // One top-level task per paper.
+  SEND_MODE_SEPARATE = 2;
+}
+
+// Why a send is not plain progress: task-intent-v1's ErrorCode, plus Lab's own three.
+enum SendErrorCode {
+  // No reason: never written.
+  SEND_ERROR_CODE_UNSPECIFIED = 0;
+  // Todofy is in maintenance mode.
+  SEND_ERROR_CODE_MAINTENANCE = 1;
+  // Todofy's processing is paused.
+  SEND_ERROR_CODE_PROCESSING_PAUSED = 2;
+  // Todoist writes are force-paused.
+  SEND_ERROR_CODE_TODOIST_PAUSED = 3;
+  // Todoist writes are blocked after an auth failure.
+  SEND_ERROR_CODE_TODOIST_BLOCKED = 4;
+  // A Todofy backup lease is active.
+  SEND_ERROR_CODE_BACKUP_ACTIVE = 5;
+  // An attempt waits for the Todoist rate window.
+  SEND_ERROR_CODE_RATE_LIMITED = 6;
+  // An attempt waits for its backoff.
+  SEND_ERROR_CODE_RETRY_WAIT = 7;
+  // Todoist refused a task.
+  SEND_ERROR_CODE_TODOIST_REJECTED = 8;
+  // A task's result stayed unknown.
+  SEND_ERROR_CODE_TODOIST_RESULT_UNKNOWN = 9;
+  // Another content already holds this intent ID.
+  SEND_ERROR_CODE_INTENT_CONFLICT = 10;
+  // Todofy's daily intent limit is reached.
+  SEND_ERROR_CODE_DAILY_LIMIT = 11;
+  // An item links outside Todofy's allow-list.
+  SEND_ERROR_CODE_URL_NOT_ALLOWED = 12;
+  // Todofy does not accept intents from Lab.
+  SEND_ERROR_CODE_SOURCE_NOT_ALLOWED = 13;
+  // Lab's own: Todofy refused the input (a Lab bug); never resent unchanged.
+  SEND_ERROR_CODE_INVALID_INPUT = 14;
+  // Lab's own: Todofy could not be reached, or answered something unreadable.
+  SEND_ERROR_CODE_UNAVAILABLE = 15;
+  // Lab's own: Todofy was busy.
+  SEND_ERROR_CODE_BUSY = 16;
+}

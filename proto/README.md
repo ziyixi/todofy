@@ -45,7 +45,7 @@ cannot express (bounds, URL hosts).
 | --- | --- |
 | `buf.yaml`, `buf.lock` | The module (`path: .`, tooling directories excluded), lint and breaking rules, the `buf.build/googleapis/googleapis` dependency pinned by commit and digest |
 | `buf.gen.yaml` | protobuf-es v2 (`target=ts`, `import_extension=ts`, `erasable_syntax=true`) into `ts/` |
-| `<package path>/*.proto` | One directory per proto package: `todofy/taskintent/v1/task_intent.proto` is `todofy.taskintent.v1` |
+| `<package path>/*.proto` | One directory per proto package: `todofy/taskintent/v1/task_intent.proto` is `todofy.taskintent.v1`; `lab/ui/v1/*.proto` is `lab.ui.v1`, Lab's owner UI API |
 | `package.json`, `package-lock.json` | The toolchain pins (`dependencies`: buf, protoc-gen-es, the runtime) and this folder's test tools (`devDependencies`) |
 | `ts/` | The TypeScript package `@ziyixi/proto`. Committed: `package.json` (its exports), `wire-json.ts` (the codec), `protobuf.ts` / `protobuf-wkt.ts` (the runtime re-exports). Generated: every directory (`ts/todofy/...`, `ts/google/...`) |
 | `python/` | The Python package `ziyixi-proto`. Committed: `pyproject.toml` (static metadata, uv cache keys), `build_backend.py`, `src/ziyixi_proto/__init__.py` and `wire_json.py` (the codec). Generated: every directory under `src/ziyixi_proto/` |
@@ -53,6 +53,7 @@ cannot express (bounds, URL hosts).
 | `tools/gen_py.py` | The stdlib-only Python generator (frozen dataclasses, `IntEnum`s, field tables) |
 | `tools/profile_breaking.py` | The profile's breaking rules (rule 4) |
 | `scripts/breaking.sh`, `scripts/rules-selftest.sh` | The breaking gate against a base commit; the rules self-test |
+| `scripts/api-lint.sh`, `tools/api-linter/` | Google's api-linter on every package but `prototest/`: a Go tool module (`go.mod` pins api-linter and the Go toolchain, `go.sum` every checksum) that the script builds into `.tools/` (ignored) |
 | `prototest/v1/prototest.proto` | Test fixtures of the runtimes, never used by an app: a message with every field kind of the profile and a service with every kind of HTTP binding |
 | `testdata/wire-profile-cases.json` | 62 edge cases (timestamps, integer and double spellings, enum look-alikes, maps, missing fields, null) that both codecs must answer identically |
 | `test/*.test.ts`, `test/python/` | The codec and IDL tests, the same cases in both languages; `test/cross-language.test.ts` pipes bytes through both codecs (`test/python/roundtrip.py` in a child process); `test/ensure.test.ts` runs `tools/ensure.mjs` on a copy of this folder (a deleted toolchain, an abandoned lock, the commands Windows needs) |
@@ -234,7 +235,8 @@ a TypeScript Worker that bundles it.
 ## CI
 
 The **Proto checks** job (`.github/workflows/ci.yml`) runs when `proto/`, `.github/` or `tools/` changed,
-or on a dispatch: `npm ci`, `npm run lint`, `scripts/breaking.sh` against the **Changes** job's `base`
+or on a dispatch: `npm ci`, `npm run lint`, `npm run api-lint` (Go from `tools/api-linter/go.mod` via
+`actions/setup-go`), `scripts/breaking.sh` against the **Changes** job's `base`
 output (the commit of the last successful `main` run on `main`, the merge base with `origin/main` on a
 branch; the checkout has `fetch-depth: 0`), the rules self-test, the determinism check,
 `test_proto.py` (one version, wiring), and both codecs' typecheck and tests. When Changes has no base (it
@@ -245,7 +247,7 @@ the log; a base that predates `proto/` has nothing to break. The job is in `CI g
 A `proto/` change also re-checks every app in `PROTO_USERS` (Lab and Todofy) and runs `Contracts` (the
 task-intent-v1 tests check the codecs against the schema). It deploys a user only when the user's bundle can
 change: the user compiles the package in (`PROTO_USERS[app]` is `True`, as for both today) and the change is
-outside tests, test data, the breaking scripts and Markdown.
+outside tests, test data, the check scripts, the api-linter tool module and Markdown.
 
 ## Later
 
