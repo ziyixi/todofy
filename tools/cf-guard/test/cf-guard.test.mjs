@@ -92,7 +92,17 @@ function writeConfig(directory, name, body) {
   return file;
 }
 
-async function run(state, files, env = {}) {
+/** Whether `text` names `host` as a whole hostname or pattern (not as the suffix of a longer name). */
+function names(text, host) {
+  const escaped = host.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&");
+  return new RegExp(`(?<![\\w.*-])${escaped}(?![\\w.-])`).test(text);
+}
+
+/**
+ * Runs the guard. `unprinted`: live hostnames or patterns that are in neither the config nor an allow list;
+ * the output (a public Actions log) must not name them.
+ */
+async function run(state, files, env = {}, unprinted = []) {
   const api = fakeCloudflare(state);
   const output = [];
   const code = await main(
@@ -105,6 +115,7 @@ async function run(state, files, env = {}) {
   for (const secret of [TOKEN, SECRET_ID, ZONE, OTHER_ZONE, "hidden-worker", "e5e5", "message"]) {
     assert.ok(!text.includes(secret), `output must not contain ${secret}:\n${text}`);
   }
+  for (const host of unprinted) assert.ok(!names(text, host), `output must not name the unlisted ${host}:\n${text}`);
   for (const request of api.requests) {
     assert.equal(request.method, "GET");
     assert.equal(request.auth, `Bearer ${TOKEN}`);
@@ -141,17 +152,42 @@ test(
 );
 
 test(
-  "fails when a live Custom Domain would be detached, unless that removal is allowed",
+  "fails when a live Custom Domain would be detached, counting it without naming it, unless allowed",
   withDir(async (dir) => {
     const file = writeConfig(dir, "site", 'routes = [{ pattern = "www.example.com", custom_domain = true }]');
-    const failed = await run(baseState(), [file]);
+    const failed = await run(baseState(), [file], {}, ["example.com"]);
     assert.equal(failed.code, 1);
-    assert.match(failed.text, /REMOVE {2}example\.com/);
-    assert.match(failed.text, /FAIL: Custom Domain example\.com is live on site but not in wrangler\.toml/);
+    assert.match(failed.text, /custom domains: 1 listed, 2 live/);
+    assert.match(failed.text, /keep {4}www\.example\.com/);
+    assert.match(failed.text, /REMOVE {2}1 live Custom Domain\(s\) not in wrangler\.toml/);
+    assert.match(failed.text, /FAIL: 1 live Custom Domain\(s\) of site are not in wrangler\.toml; the deploy would detach them \(they are not printed here/);
     assert.match(failed.text, /cf-guard: FAIL/);
+    // An allow-listed removal is named: the allow list is committed on the deploy step.
     const allowed = await run(baseState(), [file], { CF_GUARD_ALLOW_REMOVE: "other.example.com, EXAMPLE.com" });
     assert.equal(allowed.code, 0, allowed.text);
     assert.match(allowed.text, /remove {2}example\.com \(allowed by CF_GUARD_ALLOW_REMOVE\)/);
+  }),
+);
+
+test(
+  "a hostname attached by hand outside wrangler.toml never reaches the log, only its count",
+  withDir(async (dir) => {
+    const state = baseState();
+    state.domains.push(
+      { id: "a7".repeat(16), hostname: "private-admin.example.com", service: "site", zone_id: ZONE },
+      { id: "a8".repeat(16), hostname: "staging.example.net", service: "site", zone_id: OTHER_ZONE },
+    );
+    const file = writeConfig(dir, "site", SITE);
+    const hidden = ["private-admin.example.com", "staging.example.net", "private-admin", "staging"];
+    const failed = await run(state, [file], {}, hidden);
+    assert.equal(failed.code, 1);
+    assert.match(failed.text, /custom domains: 2 listed, 4 live/);
+    assert.match(failed.text, /REMOVE {2}2 live Custom Domain\(s\) not in wrangler\.toml/);
+    // Allowing one names only that one; the other stays a count and still fails.
+    const partly = await run(state, [file], { CF_GUARD_ALLOW_REMOVE: "staging.example.net" }, ["private-admin.example.com"]);
+    assert.equal(partly.code, 1);
+    assert.match(partly.text, /remove {2}staging\.example\.net \(allowed by CF_GUARD_ALLOW_REMOVE\)/);
+    assert.match(partly.text, /REMOVE {2}1 live Custom Domain\(s\) not in wrangler\.toml/);
   }),
 );
 
@@ -211,11 +247,13 @@ test(
     assert.match(passed.text, /custom domains: none listed/);
     // Dropping example.net/* would delete it (PUT replaces the script's routes in every zone).
     const dropped = writeConfig(dir, "router", 'routes = [{ pattern = "old.example.com/*", zone_name = "example.com" }]');
-    const failed = await run(baseState(), [dropped]);
+    const failed = await run(baseState(), [dropped], {}, ["example.net/*", "example.net"]);
     assert.equal(failed.code, 1);
-    assert.match(failed.text, /REMOVE {2}example\.net\/\*/);
+    assert.match(failed.text, /REMOVE {2}1 live zone route\(s\) not in wrangler\.toml/);
+    assert.match(failed.text, /FAIL: 1 live zone route\(s\) of router are not in wrangler\.toml; the deploy would delete them/);
     const allowed = await run(baseState(), [dropped], { CF_GUARD_ALLOW_REMOVE: "example.net/*" });
     assert.equal(allowed.code, 0, allowed.text);
+    assert.match(allowed.text, /remove {2}example\.net\/\* \(allowed by CF_GUARD_ALLOW_REMOVE\)/);
     // Another script's pattern is a conflict.
     const stolen = writeConfig(dir, "thief", 'route = "old.example.com/*"');
     const conflict = await run(baseState(), [stolen]);
@@ -329,7 +367,8 @@ test("the CLI end to end against a loopback server", async () => {
     };
     const failed = await promisify(execFile)(process.execPath, [CLI, "--config", file], { env }).catch((error) => error);
     assert.equal(failed.code, 1);
-    assert.match(failed.stdout, /REMOVE {2}example\.com/);
+    assert.match(failed.stdout, /REMOVE {2}1 live Custom Domain\(s\) not in wrangler\.toml/);
+    assert.ok(!names(failed.stdout, "example.com") && !names(failed.stderr, "example.com"));
     assert.ok(!failed.stdout.includes(TOKEN) && !failed.stderr.includes(TOKEN));
     const { stdout } = await promisify(execFile)(process.execPath, [CLI, "--config", file], {
       env: { ...env, CF_GUARD_ALLOW_REMOVE: "example.com" },

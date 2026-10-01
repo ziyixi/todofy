@@ -167,8 +167,9 @@ export interface HostnameGuard {
 
 /**
  * Runs `node ../tools/cf-guard/cf-guard.mjs --config wrangler.toml` from the website directory with only
- * the token and the guard's allow-lists in its environment. It prints hostnames and PASS/FAIL, never a
- * response body or id; a non-zero exit refuses the release.
+ * the token and the guard's allow-lists in its environment. It prints the config's hostnames, counts and
+ * PASS/FAIL (a live hostname not in the repository is only counted), never a response body or id; a non-zero
+ * exit refuses the release.
  */
 export class HostnameGuardCli implements HostnameGuard {
   constructor(

@@ -117,7 +117,8 @@ Every deploy that applies a config with Custom Domains or zone routes first runs
 [`tools/cf-guard`](tools/cf-guard/README.md) on that config with the job's own token, before any production
 change: wrangler applies each non-empty category as the Worker's complete set (and in CI overwrites another
 Worker's hostname or a DNS record), so the guard fails when a live hostname would be detached or taken
-over. It only reads, and prints hostnames, patterns and PASS/FAIL. An intentional removal sets
+over. It only reads, and prints the config's hostnames and patterns, counts and PASS/FAIL; a live hostname
+that is not in the repository is only counted, so the public log never names it. An intentional removal sets
 `CF_GUARD_ALLOW_REMOVE` (an intentional takeover `CF_GUARD_ALLOW_CONFLICT`) on that job's guard step to the
 exact hostnames, in the same commit that edits `wrangler.toml`.
 

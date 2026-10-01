@@ -865,7 +865,7 @@ jobs:
           uv run python deploy/deploy_vars.py exec core -- uv run pywrangler deploy --dry-run --config wrangler.toml
           uv run python deploy/deploy_vars.py exec gateway -- npx --no-install wrangler deploy --dry-run \
             --config gateway/wrangler.toml --secrets-file "$RUNNER_TEMP/todofy-gateway-secrets.json"
-      # tools/cf-guard (read-only GETs, prints hostnames and PASS/FAIL only): wrangler applies a config's Custom
+      # tools/cf-guard (read-only GETs; prints listed hostnames, counts, PASS/FAIL): wrangler applies a config's Custom
       # Domains (or zone routes) as the Worker's complete set, so stop before any production change when a live
       # hostname would be detached or another Worker's hostname or DNS record taken over. For an intentional
       # change, set the exact hostnames here (space-separated) in the same commit that changes wrangler.toml.
@@ -1009,7 +1009,7 @@ jobs:
         run: |
           node ../deploy/deploy-vars.mjs exec -- npx --no-install wrangler deploy --dry-run --config ../wrangler.toml \
             --secrets-file "$RUNNER_TEMP/mail-hero-secrets.json"
-      # tools/cf-guard (read-only GETs, prints hostnames and PASS/FAIL only): wrangler applies a config's Custom
+      # tools/cf-guard (read-only GETs; prints listed hostnames, counts, PASS/FAIL): wrangler applies a config's Custom
       # Domains (or zone routes) as the Worker's complete set, so stop before any production change when a live
       # hostname would be detached or another Worker's hostname or DNS record taken over. For an intentional
       # change, set the exact hostnames here (space-separated) in the same commit that changes wrangler.toml.
@@ -1116,7 +1116,7 @@ jobs:
         run: |
           node ../deploy/deploy-vars.mjs exec -- npx --no-install wrangler deploy --dry-run --config ../wrangler.toml \
             --secrets-file "$RUNNER_TEMP/home-secrets.json"
-      # tools/cf-guard (read-only GETs, prints hostnames and PASS/FAIL only): wrangler applies a config's Custom
+      # tools/cf-guard (read-only GETs; prints listed hostnames, counts, PASS/FAIL): wrangler applies a config's Custom
       # Domains (or zone routes) as the Worker's complete set, so stop before any production change when a live
       # hostname would be detached or another Worker's hostname or DNS record taken over. For an intentional
       # change, set the exact hostnames here (space-separated) in the same commit that changes wrangler.toml.
@@ -1258,7 +1258,7 @@ jobs:
         run: |
           node ../deploy/deploy-vars.mjs exec -- npx --no-install wrangler deploy --dry-run --config ../wrangler.toml \
             --secrets-file "$RUNNER_TEMP/lab-secrets.json"
-      # tools/cf-guard (read-only GETs, prints hostnames and PASS/FAIL only): wrangler applies a config's Custom
+      # tools/cf-guard (read-only GETs; prints listed hostnames, counts, PASS/FAIL): wrangler applies a config's Custom
       # Domains (or zone routes) as the Worker's complete set, so stop before any production change when a live
       # hostname would be detached or another Worker's hostname or DNS record taken over. For an intentional
       # change, set the exact hostnames here (space-separated) in the same commit that changes wrangler.toml.

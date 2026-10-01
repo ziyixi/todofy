@@ -32,15 +32,22 @@ no request.
 **Intentional changes.** Set the exact hostnames or patterns (space- or comma-separated) on the job's guard
 step, in the same commit that edits `wrangler.toml`, and clear them again afterwards:
 
-- `CF_GUARD_ALLOW_REMOVE`: removals to allow.
+- `CF_GUARD_ALLOW_REMOVE`: removals to allow. The allow list is committed and printed, so it publishes the
+  name: to drop a hostname that is not in the repository, detach it by hand in the Cloudflare dashboard
+  instead (the next deploy then passes without naming it).
 - `CF_GUARD_ALLOW_CONFLICT`: takeovers to allow (after checking the record or the other Worker by hand).
 
 **Read-only, public-log safe.** Only `GET` requests: `/accounts/{A}/workers/domains` (filtered by `service`
 and by `hostname`), and only when needed `/zones` (zone lookup), `/zones/{Z}/dns_records?name=` (for a new
 hostname) and `/zones/{Z}/workers/routes`. It does not call the changeset endpoint: it is a `POST` that
 Cloudflare does not document, so this guard does not assume it is side-effect free. It prints Worker names,
-hostnames, route patterns, counts and PASS/FAIL, never a response body, an id, the token or another Worker's
-name; an API error prints only the HTTP status and Cloudflare's error codes. The token is the deploy job's
+the hostnames and route patterns of the checked config and of the allow lists (both committed), counts and
+PASS/FAIL, never a response body, an id, the token or another Worker's name; an API error prints only the
+HTTP status and Cloudflare's error codes. A live hostname or route of the Worker that is in neither the config
+nor an allow list is only counted (`REMOVE  1 live Custom Domain(s) not in wrangler.toml`): the deploy logs of
+this public repository must not name a hostname attached outside the repository, or show that it drifted. To
+see which one, use the dashboard's 配置漂移 panel or the Worker's Domains & Routes in the Cloudflare
+dashboard. The token is the deploy job's
 own (`Workers Scripts` covers the domain list; the zone reads need `Zone`/`DNS`/`Workers Routes` read, which a
 config with zone routes needs for its deploy anyway).
 

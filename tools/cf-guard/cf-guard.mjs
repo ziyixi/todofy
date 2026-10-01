@@ -13,8 +13,10 @@
 //               hostname new to this Worker) an existing A/AAAA/CNAME record wrangler would overwrite
 //               -> fail, unless allowed (CF_GUARD_ALLOW_CONFLICT)
 // Read-only: only GET requests (the changeset endpoint is not used; the live state comes from the list
-// endpoints). Output: Worker names, hostnames and route patterns, counts and PASS/FAIL. Never a response
-// body, an id, a token or another Worker's name; API errors print the HTTP status and Cloudflare error codes.
+// endpoints). Output: Worker names, the hostnames and route patterns of the checked config and of the allow
+// lists (both committed), counts and PASS/FAIL. A live hostname or pattern that neither lists is only counted:
+// the log of a public repository must not publish an unlisted hostname or its drift. Never a response body,
+// an id, a token or another Worker's name; API errors print the HTTP status and Cloudflare error codes.
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
@@ -227,9 +229,15 @@ async function zoneForTarget(client, accountId, target, host, cache) {
   return host ? zoneForHost(client, accountId, host, cache) : null;
 }
 
+/** Where to look up live entries that are not printed (they are not in the repository). */
+const UNLISTED_HINT =
+  "they are not printed here (not in the repository); see the dashboard's 配置漂移 panel or the Worker's " +
+  "Domains & Routes in the Cloudflare dashboard";
+
 /**
- * What wrangler would change for one Worker. Returns { lines, failures }: lines are printable (hostnames,
- * patterns, counts), failures are the printable reasons the deploy must stop.
+ * What wrangler would change for one Worker. Returns { lines, failures }: lines are printable (listed or
+ * allow-listed hostnames and patterns, counts), failures are the printable reasons the deploy must stop.
+ * A live entry that is neither listed nor allowed is counted, never named.
  */
 export async function planWorker(client, triggers, { allowRemove = new Set(), allowConflict = new Set() } = {}) {
   const { name, accountId } = triggers;
@@ -248,15 +256,21 @@ export async function planWorker(client, triggers, { allowRemove = new Set(), al
       .map((domain) => domain.hostname.toLowerCase());
     const liveSet = new Set(live);
     lines.push(`custom domains: ${listed.size} listed, ${liveSet.size} live`);
+    let unlisted = 0;
     for (const host of [...liveSet].sort()) {
       if (listed.has(host)) {
         lines.push(`  keep    ${host}`);
       } else if (allowRemove.has(host)) {
         lines.push(`  remove  ${host} (allowed by CF_GUARD_ALLOW_REMOVE)`);
       } else {
-        lines.push(`  REMOVE  ${host}`);
-        failures.push(`Custom Domain ${host} is live on ${name} but not in wrangler.toml; the deploy would detach it.`);
+        unlisted += 1;
       }
+    }
+    if (unlisted > 0) {
+      lines.push(`  REMOVE  ${unlisted} live Custom Domain(s) not in wrangler.toml`);
+      failures.push(
+        `${unlisted} live Custom Domain(s) of ${name} are not in wrangler.toml; the deploy would detach them (${UNLISTED_HINT}).`,
+      );
     }
     for (const domain of triggers.customDomains) {
       const host = domain.hostname;
@@ -324,15 +338,21 @@ export async function planWorker(client, triggers, { allowRemove = new Set(), al
       }
     }
     lines.push(`zone routes: ${listed.size} listed, ${mine.size} live`);
+    let unlisted = 0;
     for (const pattern of [...mine].sort()) {
       if (listed.has(pattern)) {
         lines.push(`  keep    ${pattern}`);
       } else if (allowRemove.has(pattern)) {
         lines.push(`  remove  ${pattern} (allowed by CF_GUARD_ALLOW_REMOVE)`);
       } else {
-        lines.push(`  REMOVE  ${pattern}`);
-        failures.push(`zone route ${pattern} is live on ${name} but not in wrangler.toml; the deploy would delete it.`);
+        unlisted += 1;
       }
+    }
+    if (unlisted > 0) {
+      lines.push(`  REMOVE  ${unlisted} live zone route(s) not in wrangler.toml`);
+      failures.push(
+        `${unlisted} live zone route(s) of ${name} are not in wrangler.toml; the deploy would delete them (${UNLISTED_HINT}).`,
+      );
     }
     for (const pattern of [...listed].sort()) {
       if (mine.has(pattern)) continue;
