@@ -482,6 +482,10 @@ def test_every_deployment_mode_is_a_boolean_also_when_unavailable():
         ("", None),
         ("todofy.example.com:8443", None),
         ("-bad-", None),
+        (".todofy.example.com", None),
+        ("todofy.example.com/admin", None),
+        ("todofy.example.com?x=1", None),
+        ("a" * 300, None),
     ],
 )
 def test_ui_url(host, url):

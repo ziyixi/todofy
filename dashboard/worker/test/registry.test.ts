@@ -10,8 +10,8 @@ import {
   registryBody,
   registryView,
   resourceByMatch,
-  validateRegistry,
 } from '../src/registry.ts';
+import { validateRegistry } from '../src/registry-check.ts';
 import { LINK_ONLY_ENTRY, withLinkOnly } from './v2-fixtures.ts';
 
 /**

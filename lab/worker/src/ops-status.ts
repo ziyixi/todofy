@@ -9,6 +9,7 @@
  */
 import { create } from '@ziyixi/proto/protobuf';
 import {
+  file_ops_v1_ops,
   GuardLevel,
   GuardStateSchema,
   Health,
@@ -20,7 +21,7 @@ import {
   type Signal,
 } from '@ziyixi/proto/ops/v1/ops_pb';
 import type * as wire from '@ziyixi/proto/ops/v1/ops_wire';
-import { fieldRules, fromWireArguments, toWire, WireJsonError } from '@ziyixi/proto/wire-json';
+import { fieldRules, formatMatches, fromWireArguments, toWire, WireJsonError } from '@ziyixi/proto/wire-json';
 import { OPS_LIMITS } from '../../../contracts/ops-v1/ops-v1.ts';
 import { DAY, HOUR, iso, publicHost } from './config.ts';
 import type { Env } from './env.ts';
@@ -78,13 +79,20 @@ function signal(code: string, severity: Severity, metrics: Record<string, number
   return create(SignalSchema, { code, severity, metrics, ...(since === undefined ? {} : { since: iso(since) }) });
 }
 
+/** The owner UI's URL, `https://<host>/`, when it keeps the contract's `HttpsUrl` (the IDL's format); else none. */
+export function uiUrl(host: string | null): string | undefined {
+  if (host === null) return undefined;
+  const url = `https://${host}/`;
+  return formatMatches(file_ops_v1_ops, 'HttpsUrl', url) ? url : undefined;
+}
+
 export function labStatus(store: Store, env: Env, now: number): wire.OpsStatus {
-  const host = publicHost(env);
+  const url = uiUrl(publicHost(env));
   const base = {
     version: 'ops-v1',
     app: 'lab',
     generatedAt: iso(now),
-    ...(host === null ? {} : { uiUrl: `https://${host}/` }),
+    ...(url === undefined ? {} : { uiUrl: url }),
     capabilities: ['guard'],
   };
   try {

@@ -12,7 +12,7 @@ import { expect, test } from 'vitest';
 import { OpsStatusSchema } from '@ziyixi/proto/ops/v1/ops_pb';
 import { validate } from '../../../contracts/ops-v1/validate.mjs';
 import type { Env } from '../src/env.ts';
-import { guardState, labStatus, setGuard } from '../src/ops-status.ts';
+import { guardState, labStatus, setGuard, uiUrl } from '../src/ops-status.ts';
 import { Store } from '../src/store.ts';
 
 /** This test's golden file (a path: the Workers URL type is not Node's). */
@@ -122,4 +122,12 @@ test('every golden answer passes the checks of the dashboards deployed before th
     if (typeof answer === 'object' && answer !== null && 'error' in answer) continue;
     expect(validate(LEGACY, name.startsWith('status/') ? 'OpsStatus' : 'GuardState', answer), name).toEqual([]);
   }
+});
+
+// ui_url is written only when the URL keeps the contract's HttpsUrl format (read from the IDL): a PUBLIC_HOST that
+// passes Lab's own host check but would make a URL the codec refuses leaves ui_url null instead of failing status().
+test('the owner UI URL keeps the contract format, else it is left out', () => {
+  expect(uiUrl('lab.example.com')).toBe('https://lab.example.com/');
+  expect(uiUrl(null)).toBeUndefined();
+  expect(uiUrl(`${'a'.repeat(250)}.com`)).toBeUndefined();
 });

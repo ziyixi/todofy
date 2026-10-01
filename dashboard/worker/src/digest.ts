@@ -18,7 +18,7 @@ import { DRIFT_CATEGORIES, DRIFT_UNAVAILABLE_AFTER_DAYS } from './api-v2-types.t
 import { CANARY_DISABLED_CODE, type CanaryRecord } from './canary.ts';
 import { totalFindings, type DriftDoc } from './drift.ts';
 import { hoursLeft, reachesPercent, type DesiredGuard } from './guard.ts';
-import { METRICS_MAX_KEYS, OPS_APPS, REPORT_MAX_ITEMS } from './ops-client.ts';
+import { isOpsCode, isOpsSource, METRICS_MAX_KEYS, OPS_APPS, REPORT_MAX_ITEMS } from './ops-client.ts';
 import { HOUR_MS, MINUTE_MS, iso, isTimestamp, startOfUtcDay } from './time.ts';
 
 export const DIGEST_REFRESH_MS = 6 * HOUR_MS;
@@ -37,8 +37,6 @@ export const STATUS_SIGNAL_MAX_AGE_MS = HOUR_MS;
 /** No completed cron tick for this long (two and a half ticks) is `tick_stale`: guard, canary and digest have stopped. */
 export const TICK_STALE_MS = 75 * MINUTE_MS;
 
-const CODE = /^[a-z][a-z0-9_]{0,47}$/;
-const SOURCE = /^[a-z][a-z0-9-]{0,31}$/;
 
 /** An item before its `since` is resolved. */
 export interface Candidate {
@@ -82,7 +80,7 @@ export function cleanMetrics(metrics: Readonly<Record<string, unknown>>): Record
   let count = 0;
   for (const [key, value] of Object.entries(metrics)) {
     if (count >= METRICS_MAX_KEYS) break;
-    if (!CODE.test(key) || typeof value !== 'number' || !Number.isFinite(value)) continue;
+    if (!isOpsCode(key) || typeof value !== 'number' || !Number.isFinite(value)) continue;
     out[key] = value;
     count++;
   }
@@ -193,7 +191,7 @@ export function candidates(input: DigestInput): Candidate[] {
         code: 'canary_skipped',
         severity: 'warning',
         since,
-        metrics: run.code !== null && CODE.test(run.code) ? { [run.code]: 1 } : {},
+        metrics: run.code !== null && isOpsCode(run.code) ? { [run.code]: 1 } : {},
       });
     }
   }
@@ -215,7 +213,7 @@ export function candidates(input: DigestInput): Candidate[] {
     if (status === null || health.status_at === null || now - health.status_at > STATUS_SIGNAL_MAX_AGE_MS) continue;
     if (status.health === 'down') out.push({ source: app, code: 'app_down', severity: 'critical', metrics: {} });
     for (const signal of status.signals) {
-      if (signal.severity === 'info' || !CODE.test(signal.code)) continue;
+      if (signal.severity === 'info' || !isOpsCode(signal.code)) continue;
       out.push({
         source: app,
         code: signal.code,
@@ -241,7 +239,7 @@ export function itemKey(item: { readonly source: string; readonly code: string }
 export function finalizeItems(list: readonly Candidate[], firstSeen: ReadonlyMap<string, number>, now: number): OpsReportItem[] {
   const byKey = new Map<string, Candidate>();
   for (const candidate of list) {
-    if (candidate.severity === 'info' || !SOURCE.test(candidate.source) || !CODE.test(candidate.code)) continue;
+    if (candidate.severity === 'info' || !isOpsSource(candidate.source) || !isOpsCode(candidate.code)) continue;
     const key = itemKey(candidate);
     const existing = byKey.get(key);
     if (existing === undefined || RANK[candidate.severity] < RANK[existing.severity]) byKey.set(key, candidate);

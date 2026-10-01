@@ -104,7 +104,8 @@ Flows: 邮件 → 任务 (来源转发 ○ → 收件与保存 → 解析 → We
 Todoist snapshot, `review_overdue` (info) and `gtd_snapshot_stale` at 回顾; 执行 is done in Todoist, outside the dashboard (no entry since Flowday was removed);
 todofy/docs/gtd-features.md §9).
 
-`validateRegistry` (test/registry.test.ts) checks ids and references, https URLs inside
+`validateRegistry` (`src/registry-check.ts`, run by test/registry.test.ts; apart from the registry's data, which the
+UI's tests import) checks ids and references, ops-v1 codes with the contract's own `Code` format (the IDL), https URLs inside
 `ziyixi.science` (path `/`, no query/port/userinfo), one entry per script, status/kind consistency
 (no public probe of an Access host), each `(entry, code)` once per flow, that every signal code of the
 ops-v1 README table is placed (a stage, `app_only_signals`, or the platform codes `status_unavailable`

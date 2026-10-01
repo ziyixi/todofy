@@ -10,7 +10,6 @@ are plain dicts (``to_wire``), the JSON the dashboard reads; tests pin their byt
 
 import json
 import math
-import re
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -42,9 +41,6 @@ REPORT_MAX_BYTES = 8192
 REPORT_MAX_ITEMS = field_rules(pb.OpsReport, "items").max_items
 MAX_SIGNALS = field_rules(pb.OpsStatus, "signals").max_items
 MAX_METRICS = field_rules(pb.Signal, "metrics").max_items
-
-# A host name, for the owner UI's URL (ui_url then keeps the contract's HttpsUrl format).
-HOST = re.compile(r"[a-z0-9]([a-z0-9.-]{0,251}[a-z0-9])?", re.ASCII)
 
 
 def _wire_enum(name: str, cls: Any, doc: str) -> Any:
@@ -336,8 +332,11 @@ def percent(part: int, whole: int) -> float:
 
 
 def ui_url(public_host: str) -> str | None:
+    """The owner UI's URL, ``https://<host>/``, when the host is a plain name (no path) and the URL keeps the
+    contract's ``HttpsUrl`` format (the IDL's, the one definition); else None."""
     host = public_host.strip().lower()
-    return f"https://{host}/" if HOST.fullmatch(host) and not host.startswith(".") else None
+    url = f"https://{host}/"
+    return url if "/" not in host and format_matches(pb.FORMATS["HttpsUrl"], url) else None
 
 
 @dataclass(frozen=True, slots=True)

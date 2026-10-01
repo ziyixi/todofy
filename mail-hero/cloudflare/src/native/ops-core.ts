@@ -7,11 +7,11 @@
  * header, target URL or remote response. */
 import { create, type MessageInitShape } from '@ziyixi/proto/protobuf';
 import {
-  CanaryDelivery_State, CanaryDeliverySchema, CanaryProducerService, ErrorCode, ErrorCodeSchema, GuardLevel, GuardStateSchema,
+  CanaryDelivery_State, CanaryDeliverySchema, CanaryProducerService, ErrorCode, ErrorCodeSchema, file_ops_v1_ops, GuardLevel, GuardStateSchema,
   Health, OpsStatusSchema, Severity, SeveritySchema, SignalSchema, StartCanaryResult_State, StartCanaryResultSchema, type Signal,
 } from '@ziyixi/proto/ops/v1/ops_pb';
 import type * as wire from '@ziyixi/proto/ops/v1/ops_wire';
-import { fieldRules, fromWire, fromWireArguments, toWire, wireEnum, WireJsonError } from '@ziyixi/proto/wire-json';
+import { fieldRules, formatMatches, fromWire, fromWireArguments, toWire, wireEnum, WireJsonError } from '@ziyixi/proto/wire-json';
 import type { Env } from './types.ts';
 import { alertSignals, alertSnapshot } from './alerts.ts';
 import { backupStatus, withBackupWrite } from './backup.ts';
@@ -30,6 +30,7 @@ const RANK: Record<SeverityName, number> = { critical: 0, warning: 1, info: 2 };
 const MAX_SIGNALS = fieldRules(OpsStatusSchema.field.signals).maxItems;
 const MAX_METRICS = fieldRules(SignalSchema.field.metrics).maxItems;
 const MAX_COUNTERS = fieldRules(OpsStatusSchema.field.counters).maxItems;
+/** Mail Hero's own rule for PUBLIC_HOST: a lowercase DNS name (the URL it makes must still be a contract HttpsUrl). */
 const HOST = /^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/;
 /** The only D1 statement of status() beyond alertSnapshot's five (one row per alert code). */
 export const ACTIVE_ALERTS_SQL = 'SELECT code,active_since FROM alerts WHERE active=1 LIMIT 16';
@@ -37,8 +38,11 @@ export const ACTIVE_ALERTS_SQL = 'SELECT code,active_since FROM alerts WHERE act
 export const STATUS_MAX_D1_STATEMENTS = 6;
 
 const forceSendPaused = (env: Pick<Env, 'FORCE_SEND_PAUSED'>) => env.FORCE_SEND_PAUSED === 'true' || env.FORCE_SEND_PAUSED === '1';
+/** The owner UI's URL: `https://<host>/` when the host is a DNS name and the URL keeps the contract's `HttpsUrl`. */
 export function uiURL(host: unknown): string | null {
-  return typeof host === 'string' && HOST.test(host) ? `https://${host}/` : null;
+  if (typeof host !== 'string' || !HOST.test(host)) return null;
+  const url = `https://${host}/`;
+  return formatMatches(file_ops_v1_ops, 'HttpsUrl', url) ? url : null;
 }
 function limit(value: string | undefined, fallback: number): number | null {
   const number = Number(value ?? fallback);
