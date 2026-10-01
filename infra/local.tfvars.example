@@ -1,0 +1,9 @@
+# Copy OUTSIDE the repository (for example ~/.config/todofy-infra/local.tfvars, chmod 600) and fill in the
+# live values; pass it with -var-file. infra/README.md "Running a plan locally" shows how to read the values
+# from the API without printing them. Never commit the filled-in file.
+
+account_id                 = "<the Cloudflare account id: 32 lowercase hex digits>"
+access_owner_emails        = ["<email included by the policy \"Mail Hero owner\">"]
+access_github_owner_emails = ["<email included by the policy \"Mail Hero GitHub owner\">"]
+access_allowed_idp_ids     = ["<identity provider id>", "<identity provider id>"]
+access_github_idp_id       = "<the GitHub identity provider id>"

@@ -50,6 +50,7 @@ jobs:
       lab_check: ${{ steps.decide.outputs.lab_check }}
       contracts: ${{ steps.decide.outputs.contracts }}
       packages: ${{ steps.decide.outputs.packages }}
+      infra: ${{ steps.decide.outputs.infra }}
       todofy_deploy: ${{ steps.decide.outputs.todofy_deploy }}
       mail_hero_deploy: ${{ steps.decide.outputs.mail_hero_deploy }}
       dashboard_deploy: ${{ steps.decide.outputs.dashboard_deploy }}
@@ -734,9 +735,63 @@ jobs:
           if grep -rnE "(from|import)[[:space:]]*\(?[[:space:]]*['\"][^'\"]*(mail-hero|todofy|dashboard|contracts|packages)/" \
             src scripts relay/src tests; then exit 1; fi
 
+  # infra/: the plan-only OpenTofu configuration (infra/README.md). No Cloudflare token, no state and no plan
+  # here: the locked provider download, format and validation, the guards that keep infra/ free of code-running
+  # data sources, provisioners, personal values and state, and the plan-summary tests. The checks of infra/
+  # against the apps' wrangler.toml files run in Changes (.github/scripts/test_infra_config.py).
+  infra-checks:
+    name: Infra checks
+    needs: changes
+    if: needs.changes.outputs.infra == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: infra
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: opentofu/setup-opentofu@a1320f892987e89d278cc92dc5adc984fb93aca4 # v2.0.2
+        with:
+          tofu_version: 1.12.6
+          # The wrapper would copy tofu's output into step outputs; plans must never be captured.
+          tofu_wrapper: false
+          github_token: ${{ github.token }}
+      # File names only for the email check, so a committed address is not repeated in the log.
+      - name: Guards (data sources, provisioners, providers, email addresses, state and values)
+        run: |
+          failed=0
+          if grep -rnE --include='*.tf' 'data[[:space:]]+"(external|http)"' .; then
+            echo "::error::external/http data sources can run code or send data out"; failed=1
+          fi
+          if grep -rnE --include='*.tf' '^[[:space:]]*provisioner[[:space:]]+"' .; then
+            echo "::error::provisioners are not allowed in infra/"; failed=1
+          fi
+          if [ "$(grep -c '^provider ' .terraform.lock.hcl)" != 1 ] || ! grep -q '^provider "registry.opentofu.org/cloudflare/cloudflare"' .terraform.lock.hcl; then
+            echo "::error::the lock file must hold exactly the Cloudflare provider"; failed=1
+          fi
+          if grep -rlIE '[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}' .; then
+            echo "::error::email addresses come from sensitive variables, never from files in infra/"; failed=1
+          fi
+          if git ls-files -- . | grep -E '\.tfstate|\.tfplan$|(^|/)plan\.(bin|json)$|\.tfvars(\.json)?$'; then
+            echo "::error::state, plans and tfvars never enter the repository"; failed=1
+          fi
+          exit "$failed"
+      - name: Format
+        run: tofu fmt -check -recursive -diff
+      - name: Validate (downloads the locked provider only; no backend, no credentials)
+        run: |
+          tofu init -backend=false -input=false -lockfile=readonly
+          tofu validate
+      - name: Plan-summary and local-values tests
+        run: |
+          python3 -m unittest discover -s ../tools/infra-plan-summary
+          python3 -m unittest discover -s tests
+
   gate:
     name: CI gate
-    needs: [changes, shared-packages, todofy-static, todofy-runtime, todofy-checks, mail-hero-checks, dashboard-checks, website-checks, lab-checks, contracts]
+    needs: [changes, shared-packages, todofy-static, todofy-runtime, todofy-checks, mail-hero-checks, dashboard-checks, website-checks, lab-checks, contracts, infra-checks]
     if: always()
     runs-on: ubuntu-24.04
     timeout-minutes: 5
@@ -753,6 +808,7 @@ jobs:
           WEBSITE: ${{ needs.website-checks.result }}
           LAB: ${{ needs.lab-checks.result }}
           CONTRACTS: ${{ needs.contracts.result }}
+          INFRA: ${{ needs.infra-checks.result }}
           CHECKS_REUSED: ${{ needs.changes.outputs.checks_reused }}
           REUSED_RUN_URL: ${{ needs.changes.outputs.reused_run_url }}
           REUSED_JOBS: ${{ needs.changes.outputs.reused_jobs }}
@@ -766,7 +822,8 @@ jobs:
           failed=0
           for pair in "Changes=$CHANGES" "Shared packages=$PACKAGES" "Todofy static checks=$TODOFY_STATIC" \
             "Todofy runtime=$TODOFY_RUNTIME" "Todofy checks=$TODOFY" "Mail Hero checks=$MAIL_HERO" \
-            "Dashboard checks=$DASHBOARD" "Website checks=$WEBSITE" "Lab checks=$LAB" "Contracts=$CONTRACTS"; do
+            "Dashboard checks=$DASHBOARD" "Website checks=$WEBSITE" "Lab checks=$LAB" "Contracts=$CONTRACTS" \
+            "Infra checks=$INFRA"; do
             echo "$pair"
             case "${pair#*=}" in
               success|skipped) ;;

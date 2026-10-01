@@ -38,6 +38,7 @@ def expect(
     website_relay_deploy=False,
     lab_check=False,
     lab_deploy=False,
+    infra=False,
 ):
     return {
         "todofy_check": todofy_check,
@@ -47,6 +48,7 @@ def expect(
         "lab_check": lab_check,
         "contracts": contracts,
         "packages": packages,
+        "infra": infra,
         "todofy_deploy": todofy_deploy,
         "mail_hero_deploy": mail_hero_deploy,
         "dashboard_deploy": dashboard_deploy,
@@ -151,8 +153,20 @@ class Classify(unittest.TestCase):
         self.assertEqual({path: set(apps) for path, apps in ci_changes.BUNDLED_BY.items()}, importers)
 
     def test_ci_changes_recheck_everything_but_deploy_nothing(self):
-        self.assertEqual(push([".github/workflows/ci.yml"]), expect(T, T, T, F, F, packages=T, **ALL_CHECKED))
-        self.assertEqual(push([".github/scripts/ci_changes.py"]), expect(T, T, T, F, F, packages=T, **ALL_CHECKED))
+        self.assertEqual(push([".github/workflows/ci.yml"]), expect(T, T, T, F, F, packages=T, infra=T, **ALL_CHECKED))
+        self.assertEqual(push([".github/scripts/ci_changes.py"]), expect(T, T, T, F, F, packages=T, infra=T, **ALL_CHECKED))
+
+    def test_infra_runs_only_its_own_checks(self):
+        """infra/ (plan-only OpenTofu) and its plan-summary tool check nothing else and deploy nothing."""
+        for path in ("infra/access.tf", "infra/README.md", "infra/.terraform.lock.hcl", "tools/infra-plan-summary/summary.py"):
+            with self.subTest(path=path):
+                self.assertEqual(push([path]), expect(F, F, F, F, F, infra=T))
+                self.assertEqual(push([path], ref=BRANCH), expect(F, F, F, F, F, infra=T))
+        # Not a prefix match on the name alone; another tool does not run them.
+        for path in ("infrastructure.md", "tools/other/x.py", "mail-hero/infra/x.tf"):
+            with self.subTest(path=path):
+                self.assertFalse(push([path])["infra"])
+        self.assertEqual(push(["infra/storage.tf", "lab/wrangler.toml"]), expect(F, F, T, F, F, **LAB, infra=T))
 
     def test_ci_tooling_under_tools_counts_as_ci(self):
         # tools/cf-guard runs in every deploy job (and the website release): re-check everything, deploy nothing.
@@ -198,7 +212,7 @@ class Classify(unittest.TestCase):
             "packages/edge-auth/SPEC.md",
             "dashboard/worker/src/state.ts",
         ]
-        self.assertEqual(push(paths), expect(T, T, T, F, F, packages=T, **DASH, website_check=T, lab_check=T))
+        self.assertEqual(push(paths), expect(T, T, T, F, F, packages=T, infra=T, **DASH, website_check=T, lab_check=T))
 
     def test_a_package_change_with_one_app_still_deploys_every_user(self):
         paths = ["packages/edge-auth/src/csrf.ts", "todofy/gateway/src/csrf.ts"]
@@ -294,7 +308,7 @@ class Classify(unittest.TestCase):
 
     def test_the_release_workflow_rechecks_every_app_but_deploys_none(self):
         self.assertEqual(
-            push([".github/workflows/website-release.yml"]), expect(T, T, T, F, F, packages=T, **ALL_CHECKED)
+            push([".github/workflows/website-release.yml"]), expect(T, T, T, F, F, packages=T, infra=T, **ALL_CHECKED)
         )
 
 
@@ -440,7 +454,7 @@ class RealGit(unittest.TestCase):
         self.commit("todofy/worker/a.py")
         p3 = self.commit("mail-hero/docs/b.md")
         outputs = self.main_run(p3, p0)
-        expected = {**dict.fromkeys(ci_changes.KEYS, "true"), "packages": "false"}
+        expected = {**dict.fromkeys(ci_changes.KEYS, "true"), "packages": "false", "infra": "false"}
         expected.update(dashboard_check="false", dashboard_deploy="false")
         expected.update(website_check="false", website_deploy="false", website_relay_deploy="false")
         expected.update(lab_check="false", lab_deploy="false")
@@ -452,7 +466,7 @@ class RealGit(unittest.TestCase):
         after = self.commit("README.md.orig")
         outputs = self.main_run(after, green)
         website = {"website_check", "website_deploy", "website_relay_deploy"}
-        self.assertEqual({key for key in ci_changes.KEYS if outputs[key] == "false"}, website)
+        self.assertEqual({key for key in ci_changes.KEYS if outputs[key] == "false"}, website | {"infra"})
 
     def test_a_failed_run_on_main_is_repeated(self):
         # Push A changed todofy/ and its run failed (a Mail Hero flake); push B fixes only mail-hero/.
@@ -780,6 +794,42 @@ class DeployConditions(unittest.TestCase):
 
     def test_shared_packages_run_only_when_flagged(self):
         self.assertEqual(self.condition(self.jobs()["shared-packages"]), "needs.changes.outputs.packages == 'true'")
+
+
+class InfraJob(unittest.TestCase):
+    """Infra checks is plan-free and secret-free: it validates infra/ and never touches Cloudflare or state
+    (infra/README.md). A plan job with a read token is a later, separate step."""
+
+    def test_checks_only_with_no_credentials_plan_or_artifact(self):
+        block = workflow_jobs()["infra-checks"]
+        self.assertIn("    if: needs.changes.outputs.infra == 'true'\n", block)
+        for forbidden in ("secrets.", "environment:", "tofu plan", "tofu apply", "tofu import", "tofu show",
+                          "upload-artifact", "CLOUDFLARE_API_TOKEN", "AWS_"):
+            with self.subTest(forbidden=forbidden):
+                self.assertNotIn(forbidden, block)
+        for required in (
+            "tofu fmt -check -recursive",
+            "tofu init -backend=false -input=false -lockfile=readonly",
+            "tofu validate",
+            "tofu_wrapper: false",
+            "python3 -m unittest discover -s ../tools/infra-plan-summary",
+            "python3 -m unittest discover -s tests",
+            'data[[:space:]]+"(external|http)"',
+            "provisioner[[:space:]]+",
+            "grep -rlIE",
+            "git ls-files -- .",
+        ):
+            with self.subTest(required=required):
+                self.assertIn(required, block)
+
+    def test_the_installed_tofu_meets_the_required_version(self):
+        installed = re.search(r"tofu_version: (\d+)\.(\d+)\.(\d+)\n", workflow_jobs()["infra-checks"])
+        self.assertIsNotNone(installed, "pin an exact OpenTofu version")
+        required = re.search(r'required_version = ">= (\d+)\.(\d+)\.0, < (\d+)\.(\d+)\.0"', (REPO / "infra" / "versions.tf").read_text())
+        self.assertIsNotNone(required)
+        version = tuple(int(part) for part in installed.groups())
+        self.assertGreaterEqual(version[:2], (int(required.group(1)), int(required.group(2))))
+        self.assertLess(version[:2], (int(required.group(3)), int(required.group(4))))
 
 
 class WebsiteRelease(unittest.TestCase):
@@ -1366,12 +1416,24 @@ class Reuse(unittest.TestCase):
 
     def test_every_deploy_decision_survives_reuse(self):
         needed = ci_changes.everything()
-        jobs = green_jobs(*TODOFY_JOBS, "Mail Hero checks", "Dashboard checks", "Website checks", "Lab checks", "Contracts", "Shared packages")
+        jobs = green_jobs(
+            *TODOFY_JOBS, "Mail Hero checks", "Dashboard checks", "Website checks", "Lab checks", "Contracts", "Shared packages", "Infra checks"
+        )
         result, extra, _ = self.reuse(needed, [branch_run()], {800: jobs})
         self.assertEqual(extra["checks_reused"], "true")
         for key in ci_changes.KEYS:
             with self.subTest(output=key):
                 self.assertEqual(result[key], key.endswith("_deploy"))
+
+    def test_infra_checks_are_reused_only_when_the_branch_run_passed_them(self):
+        needed = expect(F, F, F, F, F, infra=T)  # infra/ changed: Infra checks only, no deploy
+        result, extra, _ = self.reuse(needed, [branch_run()], {800: green_jobs("Infra checks")})
+        self.assertEqual((result, extra["checks_reused"]), (expect(F, F, F, F, F), "true"))
+        self.assertEqual(extra["reused_jobs"], "Changes, CI gate, Infra checks")
+        for jobs in (green_jobs(), green_jobs() + [job("Infra checks", "skipped")], green_jobs() + [job("Infra checks", "failure")]):
+            with self.subTest(jobs=jobs):
+                result, extra, _ = self.reuse(needed, [branch_run()], {800: jobs})
+                self.assertEqual((result, extra["checks_reused"]), (needed, "false"))
 
     def test_a_run_that_skipped_a_needed_check_is_not_reused(self):
         # The branch diff was Todofy-only, but main also needs Mail Hero checks (a change since the last green main).

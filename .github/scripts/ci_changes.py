@@ -7,6 +7,9 @@ Outputs (GITHUB_OUTPUT, "true"/"false"):
   contracts         run the contract tests: both sides of mail.received.v1, ops-v1 and
                     task-intent-v1, and the dashboard's ops-v1 caller tests
   packages          run every shared package's own checks (packages/*)
+  infra             run "Infra checks" (OpenTofu fmt/validate of infra/, its guards and the plan-summary
+                    tests): infra/, tools/infra-plan-summary/ or .github/ changed. Never deploys anything;
+                    not set by a dispatch (no app needs it).
   todofy_deploy, mail_hero_deploy, dashboard_deploy, website_deploy, lab_deploy
                     the app, a shared package it compiles in, or a contract file it bundles changed
                     (deploy jobs also require refs/heads/main)
@@ -42,7 +45,8 @@ a skipped check job only together with checks_reused; the gate passes and prints
 the same tree and the same ci.yml, and no check job uses a secret, so the branch run's verdict holds.
 Anything else (no such run, a check it did not run, an API error, workflow_dispatch) runs the checks.
 tools/ (CI tooling such as the deploy hostname guard) counts as .github/: every app is re-checked, none
-deployed.
+deployed. The exception is tools/infra-plan-summary/, which belongs to infra/: it runs only Infra checks,
+as infra/ does (and .github/ does too); the other tools/ do not run them.
 workflow_dispatch: the "app" input checks and deploys that app ("both" = Todofy and Mail Hero, as
 before; "all" = every app; or one app; "website" = the site and its relay), and the contracts and
 shared packages are checked too. The website uses no contract and no package, so a website-only
@@ -69,6 +73,7 @@ KEYS = (
     "lab_check",
     "contracts",
     "packages",
+    "infra",
     "todofy_deploy",
     "mail_hero_deploy",
     "dashboard_deploy",
@@ -89,6 +94,8 @@ DISPATCH = {
 RELAY = "website/relay/"
 # Apps that neither provide nor consume a contract: their own changes do not run Contracts.
 NO_CONTRACTS = {"website"}
+# The plan-only OpenTofu configuration (infra/README.md) and its plan-summary tool: checked, never applied.
+INFRA = ("infra/", "tools/infra-plan-summary/")
 # packages/<name>/ -> the apps whose Workers compile it in (a "file:../../packages/<name>" dependency).
 PACKAGE_USERS = {"edge-auth": ("todofy", "mail-hero", "dashboard", "lab")}
 
@@ -119,6 +126,7 @@ CHECK_JOBS = {
     "lab_check": ("Lab checks",),
     "contracts": ("Contracts",),
     "packages": ("Shared packages",),
+    "infra": ("Infra checks",),
 }
 # Jobs every reused run must have passed, whatever this push needs.
 ALWAYS_JOBS = ("Changes", "CI gate")
@@ -136,11 +144,13 @@ def outputs(
     contracts: bool,
     packages: bool,
     relay: bool = False,
+    infra: bool = False,
 ) -> dict[str, bool]:
     checked, deployed = set(checked), set(deployed)
     result = {
         "contracts": contracts,
         "packages": packages,
+        "infra": infra,
         "website_relay_deploy": relay,
     }
     for app in APPS:
@@ -167,7 +177,8 @@ def classify(paths: Iterable[str]) -> dict[str, bool]:
     for name in package_names:
         (apps if name in compiled else documented).update(PACKAGE_USERS.get(name, APPS))
     # tools/ is CI tooling (the deploy hostname guard tools/cf-guard): like .github/, it re-checks every app.
-    ci = any(path.startswith((".github/", "tools/")) for path in paths)
+    # tools/infra-plan-summary/ belongs to infra/ and runs only Infra checks.
+    ci = any(path.startswith((".github/", "tools/")) and not path.startswith(INFRA) for path in paths)
     shared = ci or any(path.startswith("contracts/") for path in paths)
     bundled = {app for path in paths for app in BUNDLED_BY.get(path, ())}
     # website/relay/ is its own Worker: it deploys itself, not the site (unless the site's own files, or a
@@ -184,6 +195,7 @@ def classify(paths: Iterable[str]) -> dict[str, bool]:
         contracts=bool((apps - NO_CONTRACTS) | documented) or shared,
         packages=bool(package_names) or ci,
         relay=relay,
+        infra=any(path.startswith((".github/", *INFRA)) for path in paths),
     )
 
 

@@ -1,0 +1,17 @@
+# State, plans and values never enter the repository (infra/README.md "Running a plan locally").
+.terraform/
+*.tfstate
+*.tfstate.*
+.terraform.tfstate.lock.info
+*.tfplan
+plan.bin
+plan.json
+*.tfvars
+*.tfvars.json
+!local.tfvars.example
+crash.log
+crash.*.log
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
