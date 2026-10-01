@@ -73,6 +73,22 @@ OUTPUTS = {"access_aud": {"value": {"app": AUD, "app-backup": "b" * 64}},
            "r2_bucket_names": {"value": ["app-store"]}}
 
 
+# A plan that creates the Access application of an app no production config names yet (a new app before its first
+# deploy): `tofu show -json` omits the partly unknown access_aud from planned_values, and output_changes holds its
+# known entries in `after` and the new key in `after_unknown` (checked with OpenTofu 1.12.6 on 2026-10-01).
+NEW_APP = 'cloudflare_zero_trust_access_application.owner["new-app"]'
+CREATED_AUD = {
+    "access_aud": {"actions": ["update"], "before": OUTPUTS["access_aud"]["value"],
+                   "after": OUTPUTS["access_aud"]["value"], "after_unknown": {"new-app": True}},
+}
+CREATED_AUD_PLANNED = dict(OUTPUTS, access_aud={"sensitive": False})
+
+
+def creates_new_app() -> dict:
+    """A drift plan: one no-op object, the new application created, access_aud partly unknown."""
+    return plan_at([(ADDRESSES[0], ["no-op"], False), (NEW_APP, ["create"], False)], CREATED_AUD, CREATED_AUD_PLANNED)
+
+
 def resource_type(address: str) -> str:
     return address.split("[", 1)[0].rsplit(".", 1)[0]
 
@@ -512,6 +528,15 @@ class PlanCommand(unittest.TestCase):
         code, _, _, _ = self.run_plan(plan((["delete"], False), planned_outputs=changed), plan_exit=2)
         self.assertEqual(code, 3)
 
+    def test_a_new_apps_application_is_drift_with_the_expect_line_not_a_mismatch(self):
+        code, out, err, _ = self.run_plan(creates_new_app(), plan_exit=2)
+        self.assertEqual(code, 2, err)
+        self.assertIn("create: 1", out)
+        self.assertNotIn("wrangler.toml", err)
+        fingerprint = infra_state.plan_fingerprint(infra_state.summarize(creates_new_app())[0])
+        self.assertIn(f'"Infra apply" expect for this plan: create=1,outputs=1@{fingerprint}', out)
+        self.assert_clean(out + err)
+
     def test_keep_work_dir_keeps_the_log_but_never_the_values_or_the_plan(self):
         with tempfile.TemporaryDirectory() as directory:
             fake = FakeTofu(Path(directory))
@@ -584,6 +609,52 @@ class Outputs(unittest.TestCase):
                 self.assertTrue(any(needle in problem for problem in problems), problems)
                 for value in (AUD, "db-id-1", "db-id-2"):
                     self.assertNotIn(value, "\n".join(problems))
+
+    def test_a_created_application_no_config_names_yet_passes_with_the_known_entries_checked(self):
+        """A new app's Access application is created before its Worker names the AUD (README.md "Adding an app"): the
+        entries the plan knows are still compared, and the unknown one is fine while no production config names it."""
+        planned = infra_state.planned_outputs(creates_new_app())
+        self.assertIs(planned["access_aud"]["new-app"], infra_state.UNKNOWN)
+        self.assertEqual(planned["access_aud"]["app"], AUD)
+        self.assertEqual(infra_state.output_problems(planned, CONFIGS), [])
+        # A known entry that differs is still caught next to the unknown one.
+        changed = dict(CREATED_AUD, access_aud=dict(CREATED_AUD["access_aud"], after={"app": "c" * 64}))
+        problems = infra_state.output_problems(
+            infra_state.planned_outputs(plan_at([(NEW_APP, ["create"], False)], changed, CREATED_AUD_PLANNED)), CONFIGS)
+        self.assertEqual(problems, ["app/wrangler.toml: vars.ACCESS_AUDIENCE differs from access_aud for its Worker"])
+
+    def test_a_config_that_names_a_created_application_or_database_fails_with_names_only(self):
+        """Its AUD or id exists only after the apply, so the committed value cannot be the right one."""
+        names_it = dict(CONFIGS, **{"new/wrangler.toml": {"name": "new-app", "vars": {"ACCESS_AUDIENCE": "0" * 64}}})
+        problems = infra_state.output_problems(infra_state.planned_outputs(creates_new_app()), names_it)
+        self.assertEqual(problems, ["new/wrangler.toml: vars.ACCESS_AUDIENCE names an Access application this plan "
+                                    "creates (its AUD is known only after the apply)"])
+        database = {"d1_database_ids": {"actions": ["update"], "after": {"app": "db-id-1"},
+                                        "after_unknown": {"new-db": True}}}
+        planned = dict(OUTPUTS, d1_database_ids={"sensitive": False})
+        binds_it = dict(CONFIGS, **{"new/wrangler.toml": {"name": "new-app", "d1_databases": [
+            {"database_name": "new-db", "database_id": "00000000-0000-0000-0000-000000000000"}]}})
+        problems = infra_state.output_problems(infra_state.planned_outputs(plan(outputs=database, planned_outputs=planned)),
+                                               binds_it)
+        self.assertEqual(problems, ["new/wrangler.toml: a d1_databases entry names a database this plan creates "
+                                    "(its id is known only after the apply)"])
+        for value in (AUD, "db-id-1"):
+            self.assertNotIn(value, "\n".join(problems))
+
+    def test_outputs_unknown_in_any_other_way_are_not_known_before_the_apply(self):
+        cases = {
+            "wholly unknown": {"actions": ["update"], "after": None, "after_unknown": True},
+            "no change entry": None,
+            "a known key marked unknown too": dict(CREATED_AUD["access_aud"], after_unknown={"app": True}),
+            "a nested unknown": dict(CREATED_AUD["access_aud"], after_unknown={"new-app": {"x": True}}),
+            "an unknown list": {"actions": ["update"], "after": [], "after_unknown": [True]},
+        }
+        for name, change in cases.items():
+            with self.subTest(case=name):
+                outputs = {} if change is None else {"access_aud": change}
+                planned = infra_state.planned_outputs(plan(outputs=outputs, planned_outputs=CREATED_AUD_PLANNED))
+                problems = infra_state.output_problems(planned, CONFIGS)
+                self.assertEqual(problems, ["an output is not known before the apply (a replaced object?)"])
 
     def test_without_tomllib_the_check_is_skipped_locally_and_refused_on_a_runner(self):
         with mock.patch.object(infra_state, "tomllib", None):
@@ -808,6 +879,18 @@ class ApplyCommand(unittest.TestCase):
                          [("GET", "production/terraform.tfstate"), ("HEAD", backup), ("PUT", backup), ("GET", backup)])
         self.assertIn("every gate passed", out)
         self.assertIn('apply: done', out)
+        self.assert_clean(out + err)
+
+    def test_applies_a_new_apps_application_whose_aud_no_config_names_yet(self):
+        """README.md "Adding an app": the create passes the outputs check and the verify plan knows the new AUD."""
+        verify = plan(*[(["no-op"], False)] * 2)
+        verify["planned_values"]["outputs"] = dict(OUTPUTS, access_aud={"value": dict(OUTPUTS["access_aud"]["value"],
+                                                                                      **{"new-app": "d" * 64})})
+        code, out, err, calls, _, _ = self.run_apply(creates_new_app(), verify=verify)
+        self.assertEqual(code, 0, err)
+        self.assertEqual([c["args"][0] for c in calls], ["init", "plan", "show", "apply", "plan", "show"])
+        self.assertIn("apply: done", out)
+        self.assertNotIn("d" * 64, out + err)
         self.assert_clean(out + err)
 
     def test_refusals_never_apply(self):

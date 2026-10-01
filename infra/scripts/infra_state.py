@@ -17,7 +17,8 @@ bootstrap_state.py (one-time import). It:
   a 0600 log inside a private work directory outside the repository, never to the terminal;
 - reads `tofu show -json` into memory (never to disk) and prints tools/infra-plan-summary's summary only;
 - checks the planned outputs (outputs.tf) against the apps' production wrangler.toml files: every ACCESS_AUDIENCE,
-  D1 database_id and R2 bucket_name must equal what the managed objects hold (names only are printed);
+  D1 database_id and R2 bucket_name must equal what the managed objects hold (names only are printed); a map entry
+  that only the apply decides (a new Access application's AUD) passes while no production config names it;
 - `apply` (README.md "Apply"): runs only inside the "Infra apply" workflow dispatched on main (accident-proofing,
   not a security boundary). Copies the encrypted state object to a dated key in the same private bucket, plans,
   refuses before any write unless the plan passes every gate (no delete/replace/forget unless confirmed, only
@@ -537,10 +538,43 @@ def destructive(summary: dict) -> bool:
     return load_summary_module().destructive(summary)
 
 
+class _Unknown:
+    """A map entry of an output whose value only the apply decides (a created Access application's AUD)."""
+
+    def __repr__(self) -> str:
+        return "<known after apply>"
+
+
+UNKNOWN = _Unknown()
+
+
+def _partly_known(change: Any) -> Any:
+    """A map output that a create leaves partly unknown, from its output_changes entry: the known entries of `after`,
+    and UNKNOWN for each key `after_unknown` marks (`tofu show -json` omits such an output's planned value). Anything
+    else (a wholly unknown output, an unknown list or a nested unknown) is None: not known before the apply."""
+    if not isinstance(change, dict):
+        return None
+    after, unknown = change.get("after"), change.get("after_unknown")
+    if not (isinstance(unknown, dict) and unknown and all(flag is True for flag in unknown.values())):
+        return None
+    if after is None:
+        after = {}
+    if not isinstance(after, dict) or set(after) & set(unknown):
+        return None
+    return {**after, **{key: UNKNOWN for key in unknown}}
+
+
 def planned_outputs(plan_json: Any) -> dict[str, Any]:
-    """The values the outputs will have after an apply (planned_values.outputs), by output name."""
-    outputs = ((plan_json or {}).get("planned_values") or {}).get("outputs") or {}
-    return {name: entry.get("value") for name, entry in outputs.items() if isinstance(entry, dict)}
+    """The values the outputs will have after an apply (planned_values.outputs), by output name. An output a create
+    leaves partly unknown has no value there; its known entries come from output_changes (`_partly_known`)."""
+    plan_json = plan_json or {}
+    outputs = (plan_json.get("planned_values") or {}).get("outputs") or {}
+    changes = plan_json.get("output_changes") or {}
+    planned = {}
+    for name, entry in outputs.items():
+        if isinstance(entry, dict):
+            planned[name] = entry["value"] if "value" in entry else _partly_known(changes.get(name))
+    return planned
 
 
 def read_wrangler_configs(repo: Path = REPO) -> dict[str, dict]:
@@ -564,13 +598,23 @@ def output_problems(outputs: dict[str, Any], configs: dict[str, dict]) -> list[s
     aud, d1, r2 = outputs["access_aud"], outputs["d1_database_ids"], outputs["r2_bucket_names"]
     if not (isinstance(aud, dict) and isinstance(d1, dict) and isinstance(r2, list)):
         return ["an output is not known before the apply (a replaced object?)"]
+    # An entry only the apply decides (UNKNOWN: an Access application or a database this plan creates) is fine while no
+    # production config names it yet, as for an app whose first deploy waits for its new Access application's AUD
+    # (README.md "Adding an app"); a config that already names it cannot hold the right value (README.md "Outputs").
     for path, config in configs.items():
         name = config.get("name")
         audience = (config.get("vars") or {}).get("ACCESS_AUDIENCE")
-        if audience is not None and aud.get(name) != audience:
+        if audience is not None and aud.get(name) is UNKNOWN:
+            problems.append(f"{path}: vars.ACCESS_AUDIENCE names an Access application this plan creates "
+                            "(its AUD is known only after the apply)")
+        elif audience is not None and aud.get(name) != audience:
             problems.append(f"{path}: vars.ACCESS_AUDIENCE differs from access_aud for its Worker")
         for database in config.get("d1_databases") or []:
-            if d1.get(database.get("database_name")) != database.get("database_id"):
+            database_id = d1.get(database.get("database_name"))
+            if database_id is UNKNOWN:
+                problems.append(f"{path}: a d1_databases entry names a database this plan creates "
+                                "(its id is known only after the apply)")
+            elif database_id != database.get("database_id"):
                 problems.append(f"{path}: a d1_databases database_id differs from d1_database_ids")
         for bucket in config.get("r2_buckets") or []:
             if bucket.get("bucket_name") not in r2:

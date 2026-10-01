@@ -400,6 +400,14 @@ every day, not at the next deploy. A planned *create* of an application or datab
 names fails too (its AUD or id is unknown before the apply): for example the import-block removal merged
 before the first apply, which would plan `create: 5` (checked locally on 2026-10-01: exit 5).
 
+A create that **no production config names yet** is how a new app gets its Access application before its first
+deploy ([Adding an app](#adding-an-app)). `tofu show -json` then leaves `access_aud` out of `planned_values` (the
+map is partly unknown); `infra_state.py` reads its known entries from the plan's `output_changes` (`after`, with
+the new key in `after_unknown`; the format checked with OpenTofu 1.12.6 on 2026-10-01), compares every known entry
+as usual, and accepts the unknown one only while no production `wrangler.toml` names it. The drift run is then
+plain drift (exit 2, with its expect line), never a mismatch, and "Infra apply" can apply it; its verify plan
+knows the new AUD and compares the complete map again.
+
 **The first plan after adding the outputs shows `output changes: 3`** (`create`) on top of its other
 actions, and every drift plan keeps showing them, failing with exit 2, until an apply writes them to the
 state. That is expected; after the first apply they are `no-op`. Planned values are known for imported
