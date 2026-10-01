@@ -268,14 +268,20 @@ repository, the read-only token was used through the environment, and the person
    `no-op: 13`, `--fail-on-destroy` exit 0. Two addresses were "changed outside OpenTofu"
    (`cloudflare_d1_database.app["mail-hero"]` and `["todofy"]`, `file_size` only). The `--all` summary
    contained none of the values from the local values file.
+7. After the rebase onto the `main` that added `tools/cf-guard`, the green-SHA reuse and Mail Hero's
+   deploy secrets, the plan was run again against the same local state: "No changes" (exit 0),
+   summary `no-op: 13`, `--fail-on-destroy` exit 0, the same two `file_size`-only addresses "changed
+   outside OpenTofu", and none of the values from the local values file in the `--all` summary.
 
 No `tofu apply` was run, and nothing was written to Cloudflare or GitHub.
 
 ## CI: "Infra checks"
 
 The job runs when `infra/`, `tools/infra-plan-summary/` or `.github/` changes
-([`ci_changes.py`](../.github/scripts/ci_changes.py) output `infra`), and `CI gate` requires it. It
-uses no Cloudflare token, no state and no plan. Steps:
+([`ci_changes.py`](../.github/scripts/ci_changes.py) output `infra`; another `tools/` directory does not
+run it), and `CI gate` requires it. A push to `main` may reuse a green branch run of the same commit only
+if that run's `Infra checks` succeeded (`CHECK_JOBS`), as for every other check job. It uses no
+Cloudflare token, no state and no plan. Steps:
 
 - **Guards.** Fail on:
   - `external` or `http` data sources, which can run code or send data out (quoted or bare labels);
