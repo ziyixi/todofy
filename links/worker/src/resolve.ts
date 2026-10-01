@@ -9,6 +9,11 @@
  * - an unknown, deleted or expired key: a 302 to the owner's continuation /_/k/<the same path>, behind Access,
  *   where the owner is redirected (if the link is live by then) or offered to create the key. The answer depends
  *   only on the request's path, so it says nothing about whether a private key exists.
+ *
+ * Nor does the time it takes: every request that is not for a live public link asks who it is from, whether or not
+ * the key exists, so a private key costs exactly what an unknown one does (the Access check, and the issuer's keys
+ * fetched when the isolate has none). Only a request that carries an Access token is checked at all (auth.ts
+ * isOwner), so an anonymous request, and any request for a public link, never verifies anything.
  */
 import { continuationPath, type ShortPath } from './keys.ts';
 import type { Visibility } from './model.ts';
@@ -43,11 +48,14 @@ export type Resolution =
 
 /**
  * The answer to `path` for a link that `row` describes, read for a requester who is the owner or not. `owner` is a
- * function so that an anonymous request for a public link never verifies anything.
+ * function so that a request for a live public link never verifies anything; every other request calls it exactly
+ * once, whatever `row` is (no timing oracle on which private keys exist).
  */
 export async function resolve(path: ShortPath, row: Resolvable | null, now: number, owner: () => Promise<boolean>): Promise<Resolution> {
-  const allowed = isLive(row, now) && (row.visibility === 'public' || (await owner()));
-  if (!allowed) return { kind: 'redirect', location: continuationPath(path) };
+  if (isLive(row, now) && row.visibility === 'public') return answer(path, row);
+  // Asked whether or not the key exists: a private key costs what an unknown, deleted or expired one does.
+  const isOwnerRequest = await owner();
+  if (!isLive(row, now) || !isOwnerRequest) return { kind: 'redirect', location: continuationPath(path) };
   return answer(path, row);
 }
 

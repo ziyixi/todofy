@@ -2,7 +2,8 @@
  * Cloudflare Access in workerd without the dev bypass (src/auth.ts, packages/edge-auth): a synthetic issuer signs
  * RS256 tokens and serves its keys through the outbound handler. Under /_/ every request needs the owner's token. On a
  * short link the token decides only whether a private link opens: any failure there (no token, another person, a bad
- * token, keys that cannot be fetched) is anonymous, and an anonymous request never fetches the keys.
+ * token, keys that cannot be fetched) is anonymous, and an anonymous request never fetches the keys. A request that
+ * carries a token costs the same for a private key as for an unknown one (no timing oracle, src/resolve.ts).
  */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { accessClaims, testIssuer, type TestIssuer } from '../jwt.ts';
@@ -32,13 +33,17 @@ beforeAll(async () => {
       ],
     ]),
   });
+  await insertFixtures(h);
+});
+
+/** A private and a public link, straight into D1: the API itself needs a login, which the tests below check. */
+async function insertFixtures(harness: Harness): Promise<void> {
   const now = Date.now();
-  // Fixtures straight into D1: the API itself needs a login, which the tests below check.
   for (const [key, target, visibility] of [
     ['priv', 'https://private.example.org/', 'private'],
     ['pub', 'https://public.example.org/', 'public'],
   ] as const) {
-    await h.sql(
+    await harness.sql(
       `INSERT INTO links (key, target, path_mode, visibility, description, tags, expire_time, create_time, update_time, delete_time, purge_time, revision, revision_time, etag)
        VALUES (?, ?, 'exact', ?, '', '[]', NULL, ?, ?, NULL, NULL, 1, ?, 'e')`,
       key,
@@ -49,7 +54,7 @@ beforeAll(async () => {
       now,
     );
   }
-});
+}
 afterAll(async () => {
   await h.dispose();
 });
@@ -108,5 +113,45 @@ describe('short links', () => {
     for (const path of ['/priv', '/pub', '/nope', '/priv+']) await (await h.fetch(path)).text();
     expect(certsFetches).toBe(before);
   });
+});
 
+describe('a forged token on a short link', () => {
+  /** base64url of a JSON value (a JWT segment). */
+  const segment = (value: unknown) => btoa(JSON.stringify(value)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  // Well-formed enough to make the verifier look for its key: RS256 with a key ID the issuer never had.
+  const forged = `CF_Authorization=${segment({ alg: 'RS256', kid: 'attacker-kid', typ: 'JWT' })}.${segment({ a: 1 })}.AAAA`;
+
+  /** The issuer-key fetches of one request for `path` with the forged cookie, on a fresh isolate (no keys cached). */
+  async function fetchesFor(path: string): Promise<number> {
+    let fetches = 0;
+    const fresh = await startHarness({
+      bindings: { DEV_AUTH_BYPASS: 'false' },
+      routes: new Map([
+        [
+          CERTS,
+          () => {
+            fetches += 1;
+            return Response.json(issuer.jwks);
+          },
+        ],
+      ]),
+    });
+    try {
+      await insertFixtures(fresh);
+      const response = await fresh.fetch(path, { headers: { cookie: forged } });
+      await response.text();
+      expect(response.status, path).toBe(302);
+      expect(response.headers.get('location'), path).toBe(`/_/k${path}`);
+      return fetches;
+    } finally {
+      await fresh.dispose();
+    }
+  }
+
+  it('costs the same for a private key as for an unknown one (no timing oracle)', async () => {
+    const unknown = await fetchesFor('/nosuchkey');
+    expect(await fetchesFor('/priv')).toBe(unknown);
+    // The cold isolate fetched the keys once in both cases: the token was checked whether or not the key exists.
+    expect(unknown).toBe(1);
+  });
 });

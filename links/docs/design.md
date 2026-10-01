@@ -80,6 +80,12 @@ Each link is `private` (the default) or `public`. `src/resolve.ts`:
    empty body, after the same one read, so it says nothing about whether a private key exists
    (`redirect.test.ts` compares the answers byte for byte). Behind Access, `/_/k/...` redirects the owner if the link
    resolves by then, or opens the launcher on that key.
+5. Nor does its timing. Every request that is not for a live public link asks whether it is the owner's, whether or
+   not the key exists: a request with a token (even a forged one) is verified, and on an isolate without the issuer's
+   keys that includes fetching them, for an unknown key exactly as for a private one. Were the check made only for a
+   live private row, a forged well-formed cookie would make private keys measurably slower than unknown ones
+   (`resolve.test.ts` and `access.test.ts` "a forged token on a short link" hold this). A request without a token,
+   and any request for a live public link, verifies nothing.
 
 The Worker logs nothing on this path (never a key, a path or a target), and `wrangler.toml` turns invocation logs and
 traces off, since they record each request's URL. A D1 failure is a `503` with `Retry-After: 5`, the same for every

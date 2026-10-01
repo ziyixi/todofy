@@ -55,6 +55,23 @@ describe('resolve', () => {
     expect(continuationPath(path('/GH+/a%20b'))).toBe(expected.location);
   });
 
+  it('asks who the requester is once for every row but a live public one, so no key costs more than another', async () => {
+    // SEC-1: a private key must not take longer than an unknown one (the Access check, the issuer's keys fetched).
+    const rows: (Resolvable | null)[] = [
+      null,
+      link(),
+      link({ delete_time: NOW - 1 }),
+      link({ expire_time: NOW }),
+      link({ visibility: 'public', delete_time: NOW - 1 }),
+      link({ visibility: 'public', expire_time: NOW - 1 }),
+    ];
+    for (const row of rows) {
+      const owner = vi.fn(() => Promise.resolve(false));
+      expect(await resolve(path('/gh'), row, NOW, owner)).toEqual({ kind: 'redirect', location: '/_/k/gh' });
+      expect(owner, JSON.stringify(row)).toHaveBeenCalledTimes(1);
+    }
+  });
+
   it('redirects the owner to a live private link, and to the continuation for anything else', async () => {
     const owner = () => Promise.resolve(true);
     expect(await resolve(path('/gh'), link(), NOW, owner)).toEqual({ kind: 'redirect', location: 'https://example.com/' });
