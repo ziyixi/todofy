@@ -139,8 +139,7 @@ function serviceWith(rule: Rule, field: { name: string; type: 'string' | 'messag
 }
 
 function build(service: DescService): () => unknown {
-  const api = new HttpTranscoder(service as never, { call: () => Promise.resolve(undefined as never) } as never, { domain: 'a.example.com', maxBodyBytes: 64, authorize: () => undefined });
-  return () => api.routes();
+  return () => new HttpTranscoder(service as never, { call: () => Promise.resolve(undefined as never) } as never, { domain: 'a.example.com', maxBodyBytes: 64, authorize: () => undefined }).routes();
 }
 
 describe('bindings refused when the routes are built', () => {
@@ -169,20 +168,19 @@ describe('bindings refused when the routes are built', () => {
   test('refuses two bindings of one method that match the same paths, and a missing handler', () => {
     const twice = serviceWith({ pattern: { case: 'get', value: '/v1/{name=x/*}' }, additionalBindings: [create(HttpRuleSchema, { pattern: { case: 'get', value: '/v1/x/{count}' } })] });
     expect(build(twice)).toThrow(TypeError);
-    const api = new HttpTranscoder(BookService, {} as never, { domain: 'a.example.com', maxBodyBytes: 64, authorize: () => undefined });
-    expect(() => api.routes()).toThrow(TypeError);
+    expect(() => new HttpTranscoder(BookService, {} as never, { domain: 'a.example.com', maxBodyBytes: 64, authorize: () => undefined })).toThrow(TypeError);
   });
 });
 
 describe('cold cost', () => {
-  test('building the routes of a service reads its descriptors once', () => {
-    const api = new HttpTranscoder(BookService, handlers(), { domain: 'a.example.com', maxBodyBytes: 64, authorize: () => undefined });
+  test('the constructor reads the descriptors once; requests reuse the table', () => {
     const start = performance.now();
+    const api = new HttpTranscoder(BookService, handlers(), { domain: 'a.example.com', maxBodyBytes: 64, authorize: () => undefined });
+    const built = performance.now() - start;
     const routes = api.routes();
-    const first = performance.now() - start;
     expect(api.routes()).toBe(routes);
     // Printed for proto/README.md; the bound only catches a pathological regression on a slow runner.
-    console.log(`routes of ${BookService.typeName} (${String(routes.length)} bindings): ${first.toFixed(2)} ms`);
-    expect(first).toBeLessThan(50);
+    console.log(`routes of ${BookService.typeName} (${String(routes.length)} bindings): ${built.toFixed(2)} ms`);
+    expect(built).toBeLessThan(50);
   });
 });

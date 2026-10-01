@@ -267,16 +267,23 @@ export class HttpTranscoder<S extends GenServiceMethods, C> {
   readonly #options: TranscoderOptions<C>;
   #routes: readonly HttpBinding[] | undefined;
 
+  /**
+   * Builds and checks the route table at once, so a Worker that constructs its transcoder at global scope pays
+   * for reading the descriptors' options during startup (outside any request's CPU time), and a binding this
+   * transcoder does not support fails the Worker's startup (the deploy) instead of a request. Throws as
+   * routes() does.
+   */
   constructor(service: GenService<S>, handlers: ServiceHandlers<S, C>, options: TranscoderOptions<C>) {
     this.#service = service;
     this.#handlers = handlers;
     this.#options = options;
+    for (const route of this.routes()) planOf(route.method.input);
   }
 
   /**
-   * Every binding, most specific first; built (and checked) on first use. Throws HttpRuleError for a binding
-   * this transcoder does not support, and TypeError for a missing handler or two bindings of one HTTP method
-   * that match the same paths.
+   * Every binding, most specific first; built and checked once. Throws HttpRuleError for a binding this
+   * transcoder does not support, and TypeError for a missing handler or two bindings of one HTTP method that
+   * match the same paths.
    */
   routes(): readonly HttpBinding[] {
     if (this.#routes === undefined) {

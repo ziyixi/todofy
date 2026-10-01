@@ -141,6 +141,10 @@ async function text(path: string): Promise<string> {
 
 describe('CPU per request (Workers Free: 10 ms)', () => {
   it('the heaviest owner requests stay well below the limit', async () => {
+    // The isolate's first owner API request (the pipeline already ran in this isolate, so the modules are
+    // loaded): what a cold request adds on top of a warm one, e.g. building the transcoder's route table.
+    const cold = await cpu(() => text(PATHS.deck))
+    console.log(`cpu GET deck as the isolate's first API request: ${cold.toFixed(2)} ms`)
     const deck = JSON.parse(await text(PATHS.deck)) as { cards: { paper: { id: string } }[]; state: { version?: number } };
     expect(deck.cards).toHaveLength(DECK_SIZE);
     // A full page of likes: every paper of the feed, liked from the library (fixed times, newest first).
