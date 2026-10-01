@@ -40,7 +40,7 @@ describe('首页', () => {
     expect(within(apps).queryByText(/Flowday/)).toBeNull()
 
     const sites = within(launcher()).getByRole('region', { name: '站点' })
-    expect(within(sites).getByRole('link', { name: '打开 个人网站（新标签页），ziyixi.science' })).toHaveAttribute('href', 'https://ziyixi.science/')
+    expect(within(sites).getByRole('link', { name: '打开 个人网站（新标签页），www.ziyixi.science' })).toHaveAttribute('href', 'https://www.ziyixi.science/')
     expect(within(sites).getByRole('button', { name: '个人网站 状态：正常，查看详情' })).toHaveTextContent('响应 180 ms')
 
     const services = within(launcher()).getByRole('region', { name: '后台服务' })

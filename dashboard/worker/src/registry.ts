@@ -101,7 +101,10 @@ const ENTRIES: readonly EntryDef[] = [
     group: 'sites',
     icon: 'globe',
     accent: 'violet',
-    url: 'https://ziyixi.science/',
+    // www, not the apex: Chrome reuses an apex connection for other subdomains when the certificate it got
+    // covered them, and Cloudflare answers those requests 403 once the apex's certificate changes (each new
+    // Workers custom domain's certificate also lists the apex). The apex only redirects to www anyway.
+    url: 'https://www.ziyixi.science/',
     access: false,
     // Q6: one public GET per tick. The apex answers 308 to www, so the probe asks www's small JSON
     // build file directly (200 on 2026-09-29); status code and latency only, the body is never read.
