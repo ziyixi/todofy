@@ -14,7 +14,7 @@ import { ExportDialog } from "./export-dialog";
 import { useIdlePermissionStatus } from "../hooks/use-idle-permission-status";
 import { useTodoistStore } from "@/features/todoist/store";
 import { useFlowStore } from "@/features/flow/store";
-import { fetchJsonNoStore, jsonRequestInit } from "@/lib/client/http";
+import { apiGetOrNull, apiSendOk } from "@/lib/client/http";
 import { cn } from "@/lib/utils";
 import type { SettingsResponse } from "../contracts";
 
@@ -48,15 +48,13 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
     setApiKey("");
     setMessage(null);
 
-    fetchJsonNoStore<SettingsResponse>("/api/settings")
-      .then((data) => {
-        if (!data) return;
-        setHasExistingKey(data.has_api_key);
-        if (data.day_capacity_mins != null) {
-          setCapacityHours(String(data.day_capacity_mins / 60));
-        }
-      })
-      .catch(() => {});
+    void apiGetOrNull<SettingsResponse>("/api/settings").then((data) => {
+      if (!data) return;
+      setHasExistingKey(data.has_api_key);
+      if (data.day_capacity_mins != null) {
+        setCapacityHours(String(data.day_capacity_mins / 60));
+      }
+    });
   }, [open]);
 
   async function handleSave() {
@@ -68,13 +66,11 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
     setSaving(true);
     setMessage(null);
     try {
-      const response = await fetch(
-        "/api/settings",
-        jsonRequestInit("PUT", { todoist_api_key: apiKey.trim() })
-      );
-      if (response.ok) {
+      if (await apiSendOk("PUT", "/api/settings", { todoist_api_key: apiKey.trim() })) {
         setHasExistingKey(true);
         setApiKey("");
+        // The automatic sync starts now that a key is stored.
+        useTodoistStore.setState({ hasApiKey: true });
         setMessage({
           type: "success",
           text: "API key saved. Click Sync Now to fetch tasks.",
@@ -91,8 +87,11 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
 
   async function handleSync() {
     setMessage(null);
-    await sync();
-    setMessage({ type: "success", text: "Sync complete" });
+    if (await sync("manual")) {
+      setMessage({ type: "success", text: "Sync complete" });
+    } else {
+      setMessage({ type: "error", text: "Sync failed" });
+    }
   }
 
   async function handleCapacitySave() {
@@ -106,11 +105,7 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
     setMessage(null);
     try {
       const capacityMins = Math.round(hours * 60);
-      const response = await fetch(
-        "/api/settings",
-        jsonRequestInit("PUT", { day_capacity_mins: capacityMins })
-      );
-      if (response.ok) {
+      if (await apiSendOk("PUT", "/api/settings", { day_capacity_mins: capacityMins })) {
         setDayCapacityMins(capacityMins);
         setMessage({ type: "success", text: "Capacity saved" });
       } else {

@@ -5,26 +5,58 @@ import {
   parseISO,
   startOfWeek,
 } from "date-fns";
-import {
-  getAllTimeEntries,
-  getCompletedTaskIdsInDateRange,
-  getEntriesInDateRange,
-  getFlowTaskIdsInDateRange,
-  getTasksByIds,
-} from "@/lib/db/queries/analytics";
-import { getSetting } from "@/lib/db/queries/settings";
-import { serviceError, serviceOk, type ServiceResult } from "@/lib/server/service-result";
+import type { AnalyticsDataset } from "@/lib/types/worker-contract";
+import type { Task } from "@/lib/types/task";
+import { buildMiscTask, isMiscTaskId } from "@/lib/utils/misc-task";
 import {
   entryDurationSeconds,
   mapEntrySecondsByTask,
   sumEntryDurationSeconds,
 } from "@/lib/utils/time-entries";
-import { isQuickTaskPlaceholderId } from "@/lib/utils/quick-task";
+import { buildQuickTaskPlaceholder, isQuickTaskPlaceholderId } from "@/lib/utils/quick-task";
 import type {
   DailyAnalyticsData,
   WeeklyAnalyticsData,
   WorkPatternStatsData,
 } from "../contracts";
+
+/**
+ * The daily, weekly and work-pattern reviews, computed in the browser from the raw rows of GET /api/analytics
+ * (worker/src/store/analytics.ts). Workers Free gives a request 10 ms of CPU, and the minute-by-minute heatmaps took
+ * 40-63 ms per 100 hours of entries on the server; here they run in the owner's browser instead.
+ */
+
+export type AnalyticsType = "daily" | "weekly" | "stats";
+
+/** The date range whose rows a review needs; null = every time entry (the work-pattern stats). */
+export function analyticsRange(type: AnalyticsType, date: string): { start: string; end: string } | null {
+  if (type === "stats") return null;
+  if (type === "daily") return { start: date, end: date };
+  const target = parseISO(date);
+  return {
+    start: format(startOfWeek(target, { weekStartsOn: 1 }), "yyyy-MM-dd"),
+    end: format(endOfWeek(target, { weekStartsOn: 1 }), "yyyy-MM-dd"),
+  };
+}
+
+/** The dataset's tasks by id, with the synthetic misc and quick tasks the server used to add. */
+export function taskLookup(dataset: AnalyticsDataset, ids: readonly string[]): Map<string, Task> {
+  const map = new Map<string, Task>(dataset.tasks.map((task) => [task.id, task as Task]));
+  for (const id of ids) {
+    if (map.has(id)) continue;
+    if (isMiscTaskId(id)) {
+      const misc = buildMiscTask(id);
+      if (misc) map.set(id, misc);
+    } else if (isQuickTaskPlaceholderId(id)) {
+      map.set(id, buildQuickTaskPlaceholder());
+    }
+  }
+  return map;
+}
+
+function inRange(date: string, start: string, end: string): boolean {
+  return date >= start && date <= end;
+}
 
 const WEEKDAY_INDEX: Record<string, number> = {
   Mon: 0,
@@ -114,12 +146,15 @@ function forEachMinuteSlice(
   }
 }
 
-function computeDailyAnalytics(date: string, timeZone?: string): DailyAnalyticsData {
-  const flowEntries = getFlowTaskIdsInDateRange(date, date);
-  const completedEntries = getCompletedTaskIdsInDateRange(date, date);
-  const timeEntryRows = getEntriesInDateRange(date, date);
-  const capacityStr = getSetting("day_capacity_mins");
-  const dayCapacityMins = capacityStr ? parseInt(capacityStr, 10) : 360;
+export function computeDailyAnalytics(
+  dataset: AnalyticsDataset,
+  date: string,
+  timeZone?: string
+): DailyAnalyticsData {
+  const flowEntries = dataset.flows.filter((row) => row.flowDate === date);
+  const completedEntries = dataset.completed.filter((row) => row.flowDate === date);
+  const timeEntryRows = dataset.entries.filter((entry) => entry.flowDate === date);
+  const dayCapacityMins = dataset.dayCapacityMins;
   const formatters = makeTimeZoneFormatters(timeZone);
 
   const plannedTaskIds = [
@@ -135,7 +170,7 @@ function computeDailyAnalytics(date: string, timeZone?: string): DailyAnalyticsD
       )
     ),
   ];
-  const taskMap = new Map(getTasksByIds(allTaskIds).map((task) => [task.id, task]));
+  const taskMap = taskLookup(dataset, allTaskIds);
   const completedSet = new Set(
     completedEntries
       .map((row) => row.taskId)
@@ -188,7 +223,11 @@ function computeDailyAnalytics(date: string, timeZone?: string): DailyAnalyticsD
   };
 }
 
-function computeWeeklyAnalytics(date: string, timeZone?: string): WeeklyAnalyticsData {
+export function computeWeeklyAnalytics(
+  dataset: AnalyticsDataset,
+  date: string,
+  timeZone?: string
+): WeeklyAnalyticsData {
   const targetDate = parseISO(date);
   const weekStart = startOfWeek(targetDate, { weekStartsOn: 1 });
   const weekEnd = endOfWeek(targetDate, { weekStartsOn: 1 });
@@ -196,9 +235,9 @@ function computeWeeklyAnalytics(date: string, timeZone?: string): WeeklyAnalytic
   const endStr = format(weekEnd, "yyyy-MM-dd");
   const formatters = makeTimeZoneFormatters(timeZone);
 
-  const allFlowEntries = getFlowTaskIdsInDateRange(startStr, endStr);
-  const allCompletedEntries = getCompletedTaskIdsInDateRange(startStr, endStr);
-  const allTimeEntries = getEntriesInDateRange(startStr, endStr);
+  const allFlowEntries = dataset.flows.filter((row) => inRange(row.flowDate, startStr, endStr));
+  const allCompletedEntries = dataset.completed.filter((row) => inRange(row.flowDate, startStr, endStr));
+  const allTimeEntries = dataset.entries.filter((entry) => inRange(entry.flowDate, startStr, endStr));
   const allTaskIds = [
     ...new Set([
       ...allFlowEntries.map((row) => row.taskId),
@@ -206,7 +245,7 @@ function computeWeeklyAnalytics(date: string, timeZone?: string): WeeklyAnalytic
       ...allTimeEntries.map((entry) => entry.taskId),
     ].filter((taskId) => !isQuickTaskPlaceholderId(taskId))),
   ];
-  const taskMap = new Map(getTasksByIds(allTaskIds).map((task) => [task.id, task]));
+  const taskMap = taskLookup(dataset, allTaskIds);
 
   const days = eachDayOfInterval({ start: weekStart, end: weekEnd }).map((day) => {
     const dateStr = format(day, "yyyy-MM-dd");
@@ -367,8 +406,11 @@ function computeWeeklyAnalytics(date: string, timeZone?: string): WeeklyAnalytic
   };
 }
 
-function computeWorkPatternStats(timeZone?: string): WorkPatternStatsData {
-  const allEntries = getAllTimeEntries();
+export function computeWorkPatternStats(
+  dataset: AnalyticsDataset,
+  timeZone?: string
+): WorkPatternStatsData {
+  const allEntries = dataset.entries;
   const formatters = makeTimeZoneFormatters(timeZone);
   const weekSlotSets = new Map<string, Set<string>>();
   const totalMins: number[][] = Array.from({ length: 7 }, () => new Array(24).fill(0));
@@ -412,24 +454,28 @@ function computeWorkPatternStats(timeZone?: string): WorkPatternStatsData {
   };
 }
 
-export function getAnalytics(args: {
-  type: string | null;
-  date: string | null;
-  timeZone: string | null;
-}): ServiceResult<DailyAnalyticsData | WeeklyAnalyticsData | WorkPatternStatsData> {
+export type AnalyticsResult =
+  | { ok: true; data: DailyAnalyticsData | WeeklyAnalyticsData | WorkPatternStatsData }
+  | { ok: false; error: string };
+
+/** One review from the rows of its range (analyticsRange); errors as the container-era route had them. */
+export function getAnalytics(
+  args: { type: string | null; date: string | null; timeZone: string | null },
+  dataset: AnalyticsDataset
+): AnalyticsResult {
   const timeZone = normalizeTimeZone(args.timeZone);
 
   if (args.type === "stats") {
-    return serviceOk(computeWorkPatternStats(timeZone));
+    return { ok: true, data: computeWorkPatternStats(dataset, timeZone) };
   }
   if (!args.type || !args.date) {
-    return serviceError("type and date required", 400);
+    return { ok: false, error: "type and date required" };
   }
   if (args.type === "daily") {
-    return serviceOk(computeDailyAnalytics(args.date, timeZone));
+    return { ok: true, data: computeDailyAnalytics(dataset, args.date, timeZone) };
   }
   if (args.type === "weekly") {
-    return serviceOk(computeWeeklyAnalytics(args.date, timeZone));
+    return { ok: true, data: computeWeeklyAnalytics(dataset, args.date, timeZone) };
   }
-  return serviceError("Invalid type", 400);
+  return { ok: false, error: "Invalid type" };
 }

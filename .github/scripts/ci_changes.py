@@ -17,8 +17,8 @@ Outputs (GITHUB_OUTPUT, "true"/"false"):
                     website/relay/ (the Notion relay Worker, its own wrangler.toml) changed: deploy
                     the relay. A change only there checks the website but does not release the site;
                     a website change elsewhere releases the site but does not redeploy the relay.
-  FlowDay (flowday/) is checked only: it has no production config or deploy job yet (CHECK_ONLY), so
-  there is no flowday_deploy output.
+  FlowDay (flowday/) is checked only: its Worker has no deploy job yet (CHECK_ONLY, until F2), so there
+  is no flowday_deploy output. It compiles in packages/edge-auth, so a package change also checks it.
 
 push: the files changed between a cumulative base and github.sha, never only this push's own diff,
 so a change whose run was cancelled or failed is checked (and deployed) again by the next run.
@@ -112,7 +112,7 @@ NO_CONTRACTS = {"website", "flowday"}
 # .github/workflows/infra.yml plans it against Cloudflare, and nothing applies it yet.
 INFRA = ("infra/", "tools/infra-plan-summary/")
 # packages/<name>/ -> the apps whose Workers compile it in (a "file:../../packages/<name>" dependency).
-PACKAGE_USERS = {"edge-auth": ("todofy", "mail-hero", "dashboard", "lab")}
+PACKAGE_USERS = {"edge-auth": ("todofy", "mail-hero", "dashboard", "lab", "flowday")}
 
 # Contract files whose code a TypeScript Worker imports at runtime (constants such as OPS_LIMITS land
 # in its bundle; the dashboard also validates every Ops answer with the schema and validate.mjs),

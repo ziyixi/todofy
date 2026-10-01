@@ -1,0 +1,11 @@
+{
+  // The workerd suite runs in Node (it drives Miniflare), so it type-checks against Node's types, not
+  // the Workers types of ../../tsconfig.json. It imports the Worker's store modules, which name D1 types.
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    "lib": ["ES2024"],
+    "types": ["node", "@cloudflare/workers-types"]
+  },
+  "include": ["."],
+  "exclude": []
+}

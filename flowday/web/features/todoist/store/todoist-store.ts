@@ -26,6 +26,8 @@ export const useTodoistStore = create<TodoistState>()((set, get) => ({
   isLoading: false,
   isSyncing: false,
   lastSyncAt: null,
+  hasApiKey: false,
+  nextAutoSyncAt: 0,
   searchQuery: "",
 
   setSearchQuery: (query) => set({ searchQuery: query }),
@@ -54,10 +56,7 @@ export const useTodoistStore = create<TodoistState>()((set, get) => ({
     }
 
     try {
-      const response = await deleteTaskOnServer(taskId);
-      if (!response.ok) {
-        throw new Error("Failed to delete task");
-      }
+      await deleteTaskOnServer(taskId);
     } catch {
       await Promise.all([get().hydrate(), useFlowStore.getState().hydrate()]);
     }
@@ -69,13 +68,9 @@ export const useTodoistStore = create<TodoistState>()((set, get) => ({
         task.id === taskId ? { ...task, estimatedMins } : task
       ),
     }));
-    persistTaskPatch({ taskId, estimatedMins })
-      .then((response) => {
-        if (!response.ok) void get().hydrate();
-      })
-      .catch(() => {
-        void get().hydrate();
-      });
+    persistTaskPatch({ taskId, estimatedMins }).catch(() => {
+      void get().hydrate();
+    });
   },
 
   updateTitle: (taskId, title) => {
@@ -84,13 +79,9 @@ export const useTodoistStore = create<TodoistState>()((set, get) => ({
         task.id === taskId ? { ...task, title } : task
       ),
     }));
-    persistTaskPatch({ taskId, title })
-      .then((response) => {
-        if (!response.ok) void get().hydrate();
-      })
-      .catch(() => {
-        void get().hydrate();
-      });
+    persistTaskPatch({ taskId, title }).catch(() => {
+      void get().hydrate();
+    });
   },
 
   hydrate: async () => {
@@ -101,7 +92,7 @@ export const useTodoistStore = create<TodoistState>()((set, get) => ({
         set({ tasks });
       }
       if (settings) {
-        set({ lastSyncAt: settings.last_sync_at });
+        set({ lastSyncAt: settings.last_sync_at, hasApiKey: settings.has_api_key });
       }
     } catch {
       // Hydration failures leave the current cache intact until the next sync succeeds.
@@ -110,17 +101,22 @@ export const useTodoistStore = create<TodoistState>()((set, get) => ({
     }
   },
 
-  sync: async () => {
-    if (get().isSyncing) return;
+  sync: async (mode = "manual") => {
+    if (get().isSyncing) return false;
     set({ isSyncing: true });
     try {
-      const data = await syncTasksOnServer();
-      if (data) {
-        set({ lastSyncAt: data.lastSyncAt ?? null });
+      const before = get().lastSyncAt;
+      const data = await syncTasksOnServer(mode);
+      set({ lastSyncAt: data.lastSyncAt, nextAutoSyncAt: data.nextAutoSyncAt });
+      // Reload the task list only when something changed here, or another tab or device synced meanwhile.
+      if (data.changed > 0 || data.fullSync || data.lastSyncAt !== before) {
+        await get().hydrate();
       }
-      await get().hydrate();
+      return true;
     } catch {
-      // Sync is best-effort; the sidebar remains usable with the last hydrated state.
+      // A manual sync's failure is on the banner; the automatic one retries at its next turn. The task list
+      // stays usable with the last loaded state.
+      return false;
     } finally {
       set({ isSyncing: false });
     }

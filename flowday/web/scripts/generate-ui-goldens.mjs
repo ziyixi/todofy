@@ -1,11 +1,11 @@
 #!/usr/bin/env node
 
-import { spawn } from "node:child_process";
-import { cp, mkdir, readFile, rm, stat } from "node:fs/promises";
+import { mkdir, readFile, rm, stat } from "node:fs/promises";
 import { createRequire } from "node:module";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium } from "@playwright/test";
+import { prepareE2E, startE2EWorker, waitForE2E } from "./e2e-server.mjs";
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const rootDir = path.resolve(scriptDir, "..");
@@ -402,84 +402,10 @@ const payloads = {
   },
 };
 
-function runCommand(command, args, options = {}) {
-  return new Promise((resolve, reject) => {
-    log(`${command} ${args.join(" ")}`);
-    const child = spawn(command, args, {
-      cwd: rootDir,
-      stdio: "inherit",
-      env: {
-        ...process.env,
-        TZ: "UTC",
-        E2E_TEST_MODE: "1",
-        NEXT_TELEMETRY_DISABLED: "1",
-        ...options.env,
-      },
-      shell: false,
-    });
-    child.on("error", reject);
-    child.on("exit", (code, signal) => {
-      if (code === 0) {
-        resolve();
-        return;
-      }
-      reject(new Error(`${command} exited with ${code ?? signal}`));
-    });
-  });
-}
-
-async function buildStandalone() {
-  if (skipBuild) {
-    log("Skipping build because --skip-build was passed.");
-  } else {
-    await runCommand("npm", ["run", "build"]);
-  }
-
-  await mkdir(path.join(rootDir, ".next", "standalone", ".next"), { recursive: true });
-  await cp(path.join(rootDir, "public"), path.join(rootDir, ".next", "standalone", "public"), {
-    recursive: true,
-  });
-  await cp(
-    path.join(rootDir, ".next", "static"),
-    path.join(rootDir, ".next", "standalone", ".next", "static"),
-    { recursive: true }
-  );
-}
-
-function startServer() {
-  const serverPath = path.join(rootDir, ".next", "standalone", "server.js");
-  const child = spawn(process.execPath, [serverPath], {
-    cwd: rootDir,
-    stdio: ["ignore", "pipe", "pipe"],
-    env: {
-      ...process.env,
-      TZ: "UTC",
-      E2E_TEST_MODE: "1",
-      HOSTNAME: "127.0.0.1",
-      PORT: String(port),
-      NEXT_TELEMETRY_DISABLED: "1",
-    },
-  });
-
-  child.stdout.on("data", (chunk) => process.stdout.write(chunk));
-  child.stderr.on("data", (chunk) => process.stderr.write(chunk));
-  return child;
-}
-
-async function waitForHealth() {
-  const deadline = Date.now() + 60_000;
-  let lastError;
-  while (Date.now() < deadline) {
-    try {
-      const response = await fetch(`${baseURL}/api/test/health`);
-      if (response.ok) return;
-      lastError = new Error(`health returned ${response.status}`);
-    } catch (error) {
-      lastError = error;
-    }
-    await new Promise((resolve) => setTimeout(resolve, 500));
-  }
-  throw new Error(`Timed out waiting for ${baseURL}: ${lastError?.message ?? "no response"}`);
+// The E2E export under `wrangler dev` with a fresh local D1 (scripts/e2e-server.mjs).
+async function startApp() {
+  await prepareE2E({ skipBuild });
+  return startE2EWorker(port);
 }
 
 async function seed(payload) {
@@ -804,10 +730,9 @@ async function validateScreenshots() {
 }
 
 async function main() {
-  await buildStandalone();
-  const server = startServer();
+  const server = await startApp();
   try {
-    await waitForHealth();
+    await waitForE2E(baseURL);
     await captureAll();
     await validateScreenshots();
     log(checkMode ? "UI goldens match committed images." : "UI goldens are up to date.");

@@ -8,6 +8,7 @@ import { Sidebar } from "./sidebar";
 import { DayFlow } from "@/features/flow/components/day-flow";
 import { TaskCardOverlay } from "@/components/todoist/task-card-overlay";
 import { IdlePermissionPrompt } from "@/components/shared/idle-permission-prompt";
+import { ApiStatusBanner } from "@/components/shared/api-status-banner";
 import { useFlowStore } from "@/features/flow/store";
 import { useHydration } from "@/lib/hooks/use-hydration";
 import { useAutoSync } from "@/lib/hooks/use-auto-sync";
@@ -61,6 +62,7 @@ export function AppShell({ e2eEnabled = false }: { e2eEnabled?: boolean }) {
     >
       <IdlePermissionPrompt />
       <div className="flex h-screen flex-col">
+        <ApiStatusBanner />
         <TopBar />
         <div className="flex flex-1 overflow-hidden">
           <Sidebar

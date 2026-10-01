@@ -3,8 +3,7 @@
 import { addWeeks, format } from "date-fns";
 import { formatDuration, formatLocalDate } from "@/lib/utils/time";
 import { cn } from "@/lib/utils";
-import type { WeeklyAnalyticsData } from "../contracts";
-import { analyticsUrl, useAnalyticsResource } from "../hooks/use-analytics-resource";
+import { useAnalytics } from "../hooks/use-analytics-resource";
 import { DateNav, Heatmap, StatCard } from "./shared";
 
 export function WeeklyReview({
@@ -14,9 +13,7 @@ export function WeeklyReview({
   date: string;
   onDateChange: (date: string) => void;
 }) {
-  const { data, loading } = useAnalyticsResource<WeeklyAnalyticsData>(
-    analyticsUrl("weekly", date)
-  );
+  const { data, loading } = useAnalytics("weekly", date);
   const weekLabel = !data
     ? format(new Date(`${date}T00:00:00`), "MMM d, yyyy")
     : `${format(new Date(`${data.weekStart}T00:00:00`), "MMM d")} – ${format(

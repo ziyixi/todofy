@@ -16,7 +16,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
-import { jsonRequestInit } from "@/lib/client/http";
+import { apiSend } from "@/lib/client/http";
 import type { TimeEntry } from "@/features/timer/contracts";
 import { formatDurationShort } from "./manual-entry-utils";
 
@@ -174,10 +174,7 @@ export function EditEntryDialog({
 
     setSaving(true);
     try {
-      await fetch(
-        `/api/entries/${entry.id}`,
-        jsonRequestInit("PUT", { startTime: start, endTime: end })
-      );
+      await apiSend("PUT", `/api/entries/${encodeURIComponent(entry.id)}`, { startTime: start, endTime: end });
       onOpenChange(false);
       onSaved();
     } catch {
@@ -287,17 +284,14 @@ export function AddEntryDialog({
     setError("");
 
     try {
-      await fetch(
-        "/api/entries",
-        jsonRequestInit("POST", {
-          taskId,
-          flowDate,
-          startTime: start.toISOString(),
-          endTime: end.toISOString(),
-          durationS,
-          source: "manual",
-        })
-      );
+      await apiSend("POST", "/api/entries", {
+        taskId,
+        flowDate,
+        startTime: start.toISOString(),
+        endTime: end.toISOString(),
+        durationS,
+        source: "manual",
+      });
       onOpenChange(false);
       onCreated();
     } catch {

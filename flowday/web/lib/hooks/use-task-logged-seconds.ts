@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { fetchJsonNoStore } from "@/lib/client/http";
+import { apiGetOrNull } from "@/lib/client/http";
 import {
   mapEntrySecondsByTask,
   sumEntryDurationSeconds,
@@ -15,7 +15,7 @@ export function useTaskLoggedSeconds(taskId: string, revision: number): number {
   useEffect(() => {
     if (!taskId) return;
     let cancelled = false;
-    fetchJsonNoStore<DurationEntryLike[]>(
+    apiGetOrNull<DurationEntryLike[]>(
       `/api/entries?taskId=${encodeURIComponent(taskId)}`
     )
       .then((entries) => {
@@ -40,7 +40,7 @@ export function useLoggedSecondsByTaskForDate(
 
   useEffect(() => {
     let cancelled = false;
-    fetchJsonNoStore<TaskDurationEntryLike[]>(
+    apiGetOrNull<TaskDurationEntryLike[]>(
       `/api/entries?date=${encodeURIComponent(date)}`
     )
       .then((entries) => {

@@ -6,13 +6,13 @@ import {
   getQuickTasksForDate,
   isQuickTaskPlaceholderId,
 } from "@/lib/utils/quick-task";
-import { jsonRequestInit } from "@/lib/client/http";
 import type { FlowState } from "./types";
 import {
   loadFlowState,
   loadHydrationData,
   persistFlowMutation,
   persistPlanningCompleted,
+  sendFlowMutation,
   todayStr,
 } from "./persistence";
 
@@ -183,15 +183,11 @@ export const useFlowStore = create<FlowState>()((set) => ({
     }),
 
   rolloverTasks: async (fromDate, toDate) => {
-    await fetch(
-      "/api/flows",
-      jsonRequestInit("PUT", {
-        action: "rollover",
-        date: fromDate,
-        fromDate,
-        toDate,
-      })
-    );
+    try {
+      await sendFlowMutation({ action: "rollover", date: fromDate, fromDate, toDate });
+    } catch {
+      // Shown on the banner; the reload below shows what the server has.
+    }
     const flowState = await loadFlowState();
     if (flowState) {
       set({
@@ -202,16 +198,11 @@ export const useFlowStore = create<FlowState>()((set) => ({
   },
 
   rolloverSelectedTasks: async (fromDate, toDate, taskIds) => {
-    await fetch(
-      "/api/flows",
-      jsonRequestInit("PUT", {
-        action: "rolloverSelected",
-        date: fromDate,
-        fromDate,
-        toDate,
-        taskIds,
-      })
-    );
+    try {
+      await sendFlowMutation({ action: "rolloverSelected", date: fromDate, fromDate, toDate, taskIds });
+    } catch {
+      // Shown on the banner; the reload below shows what the server has.
+    }
     const flowState = await loadFlowState();
     if (flowState) {
       set({

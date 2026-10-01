@@ -4,6 +4,7 @@ import { useEffect, useRef } from "react";
 import { useFlowStore } from "@/features/flow/store";
 import { useTimerStore } from "@/features/timer/store";
 import { useTodoistStore } from "@/features/todoist/store";
+import { prefetchCsrf } from "@/lib/client/http";
 
 export function useHydration() {
   const hydrated = useRef(false);
@@ -12,6 +13,7 @@ export function useHydration() {
     if (hydrated.current) return;
     hydrated.current = true;
 
+    prefetchCsrf();
     void Promise.all([
       useTodoistStore.getState().hydrate(),
       useFlowStore.getState().hydrate(),

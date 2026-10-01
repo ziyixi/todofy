@@ -128,7 +128,7 @@ describe("todoist store", () => {
     const syncPromise = useTodoistStore.getState().sync();
     expect(useTodoistStore.getState().isSyncing).toBe(true);
 
-    syncRequest.resolve(jsonResponse({ taskCount: 1, lastSyncAt: syncedAt }));
+    syncRequest.resolve(jsonResponse({ status: "synced", changed: 1, fullSync: false, lastSyncAt: syncedAt, nextAutoSyncAt: 0 }));
     await syncPromise;
 
     const state = useTodoistStore.getState();
@@ -164,7 +164,7 @@ describe("todoist store", () => {
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
 
-    syncRequest.resolve(jsonResponse({ taskCount: 0, lastSyncAt: null }));
+    syncRequest.resolve(jsonResponse({ status: "synced", changed: 0, fullSync: false, lastSyncAt: null, nextAutoSyncAt: 0 }));
     await Promise.all([firstSync, secondSync]);
 
     expect(
@@ -174,6 +174,23 @@ describe("todoist store", () => {
           (init?.method ?? "GET") === "POST"
       )
     ).toHaveLength(1);
+  });
+
+  it("an automatic sync with nothing new does not reload the task list", async () => {
+    useTodoistStore.setState({ lastSyncAt: "2026-04-13T09:00:00.000Z" });
+    const fetchMock = vi.fn((input: string | URL | Request, init?: RequestInit) => {
+      const url = typeof input === "string" ? input : input.toString();
+      if (url === "/api/sync" && init?.method === "POST") {
+        expect(JSON.parse(String(init.body))).toEqual({ mode: "auto" });
+        return Promise.resolve(
+          jsonResponse({ status: "throttled", changed: 0, fullSync: false, lastSyncAt: "2026-04-13T09:00:00.000Z", nextAutoSyncAt: 1 })
+        );
+      }
+      throw new Error(`Unexpected fetch: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    expect(await useTodoistStore.getState().sync("auto")).toBe(true);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
   it("deletes tasks optimistically, removes them from flow state, and stops the active timer", async () => {

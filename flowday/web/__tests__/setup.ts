@@ -1,26 +1,13 @@
 import { beforeEach } from "vitest";
-import path from "path";
-import fs from "fs";
+import { setCsrfTokenForTests } from "@/lib/client/http";
+import { useApiStatus } from "@/lib/client/api-status";
+import { FAKE_CSRF_TOKEN, resetFakeWorker } from "./helpers/fake-worker";
 
-// Point the DB to an in-memory / temp path for tests
-const TEST_DB_DIR = path.join(process.cwd(), "db");
-
+// Each test starts with an empty in-memory API (helpers/fake-worker.ts), a known CSRF token (so a write does not
+// first fetch /api/csrf; http.test.ts covers that handshake) and no banner. Tests that talk to the API stub the
+// global fetch with fakeFetch (or their own fake).
 beforeEach(() => {
-  // Close the old SQLite connection before removing files
-  const g = globalThis as unknown as {
-    __flowdayDb?: unknown;
-    __flowdaySqlite?: { close(): void };
-  };
-  if (g.__flowdaySqlite) {
-    try { g.__flowdaySqlite.close(); } catch { /* already closed */ }
-    delete g.__flowdaySqlite;
-  }
-  delete g.__flowdayDb;
-
-  // Remove the test db before each test so getDb() creates a fresh one
-  const dbPath = path.join(TEST_DB_DIR, "flowday.db");
-  for (const suffix of ["", "-journal", "-wal", "-shm"]) {
-    const p = dbPath + suffix;
-    if (fs.existsSync(p)) fs.unlinkSync(p);
-  }
+  resetFakeWorker();
+  setCsrfTokenForTests(FAKE_CSRF_TOKEN);
+  useApiStatus.setState({ error: null });
 });

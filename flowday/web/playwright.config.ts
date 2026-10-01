@@ -28,14 +28,14 @@ export default defineConfig({
     trace: "retain-on-failure",
     screenshot: "only-on-failure",
     video: "retain-on-failure",
+    // Optional: an already installed Chromium build (e.g. a newer one than this Playwright pins).
+    ...(process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE
+      ? { launchOptions: { executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE } }
+      : {}),
   },
+  // The E2E static export served by the Worker under `wrangler dev` with a fresh local D1 (scripts/e2e-server.mjs).
   webServer: {
-    command: [
-      "TZ=UTC E2E_TEST_MODE=1 npm run build",
-      "cp -R public .next/standalone/",
-      "cp -R .next/static .next/standalone/.next/static",
-      `TZ=UTC E2E_TEST_MODE=1 HOSTNAME=127.0.0.1 PORT=${port} node .next/standalone/server.js`,
-    ].join(" && "),
+    command: `node scripts/e2e-server.mjs --port ${port}`,
     url: `${baseURL}/api/test/health`,
     reuseExistingServer: !process.env.CI,
     timeout: 240_000,

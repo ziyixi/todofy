@@ -42,6 +42,10 @@ PRODUCTION = {
     "ziyixi-notion-publish": "website/relay/wrangler.toml",
     "lab": "lab/wrangler.toml",
 }
+# Configs of Workers that CI checks but does not deploy yet (no deploy job, no hostname, placeholder resource ids).
+# They stay out of PRODUCTION, which the dashboard's drift check compares with the live account
+# (drift_desired.py): FlowDay's Worker does not exist there before F2.
+UNDEPLOYED = {"flowday": "flowday/wrangler.toml"}
 # Runtime-test configs stay next to their tests.
 TEST_CONFIGS = {
     "todofy/wrangler.test.toml",
@@ -240,12 +244,12 @@ class Files(unittest.TestCase):
             if re.fullmatch(r"wrangler[^/]*\.(toml|json|jsonc)", path.rsplit("/", 1)[-1])
             and "node_modules/" not in path
         }
-        self.assertEqual(configs, set(PRODUCTION.values()) | TEST_CONFIGS)
+        self.assertEqual(configs, set(PRODUCTION.values()) | set(UNDEPLOYED.values()) | TEST_CONFIGS)
         for path in PRODUCTION.values():
             self.assertEqual(path.rsplit("/", 1)[-1], "wrangler.toml", path)
 
     def test_every_config_is_top_level_only(self):
-        for path in [*PRODUCTION.values(), *sorted(TEST_CONFIGS)]:
+        for path in [*PRODUCTION.values(), *UNDEPLOYED.values(), *sorted(TEST_CONFIGS)]:
             with self.subTest(path=path):
                 config = load(path)
                 self.assertNotIn("env", config)
@@ -301,6 +305,48 @@ class Files(unittest.TestCase):
         self.assertEqual(
             [(s["binding"], s["service"]) for s in load(PRODUCTION["lab"])["services"]], [("TODOFY", "todofy")]
         )
+
+
+class Undeployed(unittest.TestCase):
+    """A config CI only checks: on the shared account, closed to the internet (no workers.dev, no preview URL, no
+    route), nothing personal committed, no deploy job, and its wrapper's inputs only ever placeholders in ci.yml."""
+
+    WRAPPER = {"flowday": "flowday/deploy/deploy-vars.mjs"}
+
+    def test_closed_and_on_the_shared_account(self):
+        accounts = {load(path)["account_id"] for path in PRODUCTION.values()}
+        for name, path in UNDEPLOYED.items():
+            with self.subTest(path=path):
+                config = load(path)
+                self.assertEqual(config["name"], name)
+                self.assertNotIn(name, PRODUCTION)
+                self.assertEqual({config["account_id"]}, accounts)
+                self.assertIs(config.get("workers_dev"), False)
+                self.assertIs(config.get("preview_urls"), False)
+                self.assertNotIn("routes", config)
+                self.assertNotIn("route", config)
+                self.assertFalse([var for var in config.get("vars", {}) if var.startswith("DEV_") or var in PERSONAL_VARS])
+                self.assertNotIn("@", uncommented(path))
+
+    def test_no_deploy_job_and_only_placeholder_inputs(self):
+        jobs = workflow_jobs()
+        for name, wrapper in self.WRAPPER.items():
+            app_jobs = {job: block for job, block in jobs.items() if job.startswith(f"{name}-")}
+            self.assertEqual(set(app_jobs), {f"{name}-checks"})
+            inputs = {input_name for names in markers(wrapper).values() for input_name in names if not input_name.startswith("GITHUB_")}
+            self.assertTrue(inputs)
+            seen = set()
+            for job_name, job in app_jobs.items():
+                self.assertNotRegex(job, r"\$\{\{\s*secrets\.")
+                for step in steps(job):
+                    for input_name in inputs & set(step["env"]):
+                        seen.add(input_name)
+                        with self.subTest(job=job_name, step=step["name"], input=input_name):
+                            self.assertRegex(step["env"][input_name], r"^(''|[a-z.-]*@([a-z-]+\.)*example\.com|'0{64}')$")
+                    for line in step["run"].replace("\\\n", " ").splitlines():
+                        if "deploy" in wrangler_commands(line):
+                            self.assertIn("--dry-run", line)
+            self.assertEqual(seen, inputs)
 
 
 class LocalDev(unittest.TestCase):

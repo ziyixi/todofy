@@ -1,4 +1,4 @@
-import { fetchJsonNoStore, jsonRequestInit } from "@/lib/client/http";
+import { apiGetOrNull, apiSendOk } from "@/lib/client/http";
 import {
   sumEntryDurationSeconds,
   type DurationEntryLike,
@@ -20,19 +20,26 @@ interface PersistedTimerSession {
 }
 
 export async function loadPersistedTimerSession(): Promise<ServerSessionPayload | null> {
-  const payload = await fetchJsonNoStore<{ session: ServerSessionPayload | null }>(
+  const payload = await apiGetOrNull<{ session: ServerSessionPayload | null }>(
     "/api/timer/session"
   );
   return payload?.session ?? null;
 }
 
+// Session writes go out one after another, so a quick start-pause-resume cannot land out of order.
+let sessionWrites: Promise<unknown> = Promise.resolve();
+
+function queueSessionWrite(write: () => Promise<boolean>) {
+  sessionWrites = sessionWrites.then(write, write);
+}
+
+/** Saves (or clears) the shared timer session in the background; a failure shows on the banner. */
 export function persistCurrentSession(session: PersistedTimerSession | null) {
   if (!session) {
-    void fetch("/api/timer/session", { method: "DELETE" }).catch(() => {});
+    queueSessionWrite(() => apiSendOk("DELETE", "/api/timer/session"));
     return;
   }
-
-  void fetch("/api/timer/session", jsonRequestInit("PUT", session)).catch(() => {});
+  queueSessionWrite(() => apiSendOk("PUT", "/api/timer/session", session));
 }
 
 export function snapshotSessionState(state: TimerState): PersistedTimerSession | null {
@@ -71,34 +78,24 @@ export async function saveTimerSegment(
   const segmentStartMs = new Date(state.segmentWallStart).getTime();
   const endTime = new Date(segmentStartMs + segmentSeconds * 1000).toISOString();
 
-  try {
-    await fetch(
-      "/api/entries",
-      jsonRequestInit("POST", {
-        taskId: state.activeTaskId,
-        flowDate: state.activeFlowDate,
-        startTime: state.segmentWallStart,
-        endTime,
-        durationS: segmentSeconds,
-        source: "timer",
-      })
-    );
-  } catch {
-    // Saving is best-effort; the user can still correct the entry manually later.
-  }
+  // A failure shows on the banner; the user can add the time as a manual entry.
+  await apiSendOk("POST", "/api/entries", {
+    taskId: state.activeTaskId,
+    flowDate: state.activeFlowDate,
+    startTime: state.segmentWallStart,
+    endTime,
+    durationS: segmentSeconds,
+    source: "timer",
+  });
 }
 
 export async function fetchPriorSeconds(taskId: string): Promise<number> {
-  try {
-    const entries = await fetchJsonNoStore<DurationEntryLike[]>(
-      `/api/entries?taskId=${encodeURIComponent(taskId)}`
-    );
-    return sumEntryDurationSeconds(entries);
-  } catch {
-    return 0;
-  }
+  const entries = await apiGetOrNull<DurationEntryLike[]>(
+    `/api/entries?taskId=${encodeURIComponent(taskId)}`
+  );
+  return sumEntryDurationSeconds(entries);
 }
 
 export function clearPersistedTimerSession() {
-  void fetch("/api/timer/session", { method: "DELETE" }).catch(() => {});
+  queueSessionWrite(() => apiSendOk("DELETE", "/api/timer/session"));
 }

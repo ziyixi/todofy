@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { createTimeEntry, getEntriesByTask } from "@/lib/db/queries/entries";
+import { createTimeEntry, fakeFetch, getEntriesByTask } from "../helpers/fake-worker";
 import { useTimerStore } from "@/features/timer/store";
 import { derivePomodoroLoggedSeconds } from "@/lib/utils/pomodoro-progress";
 import { _getChimeCount, _resetChime } from "@/lib/utils/chime";
@@ -25,55 +25,13 @@ function resetTimerStore() {
   });
 }
 
-async function dispatchFlowDayFetch(input: string | URL | Request, init?: RequestInit) {
-  const entriesRoute = await import("@/app/api/entries/route");
-  const timerSessionRoute = await import("@/app/api/timer/session/route");
-  const rawUrl = typeof input === "string" ? input : input.toString();
-  const url = rawUrl.startsWith("http")
-    ? rawUrl
-    : `http://localhost:3000${rawUrl}`;
-  const method = init?.method ?? "GET";
-  const pathname = new URL(url).pathname;
-  const request = new Request(url, {
-    method,
-    headers: init?.headers,
-    body: init?.body,
-  });
-
-  if (pathname === "/api/entries") {
-    if (method === "GET") {
-      return entriesRoute.GET(request);
-    }
-
-    if (method === "POST") {
-      return entriesRoute.POST(request);
-    }
-  }
-
-  if (pathname === "/api/timer/session") {
-    if (method === "GET") {
-      return timerSessionRoute.GET();
-    }
-
-    if (method === "PUT") {
-      return timerSessionRoute.PUT(request);
-    }
-
-    if (method === "DELETE") {
-      return timerSessionRoute.DELETE();
-    }
-  }
-
-  throw new Error(`Unsupported method for test fetch: ${method} ${pathname}`);
-}
-
 describe("timer store -> entries API integration", () => {
   beforeEach(() => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-04-13T09:00:00.000Z"));
     resetTimerStore();
     _resetChime();
-    vi.stubGlobal("fetch", dispatchFlowDayFetch as typeof fetch);
+    vi.stubGlobal("fetch", fakeFetch);
   });
 
   afterEach(() => {

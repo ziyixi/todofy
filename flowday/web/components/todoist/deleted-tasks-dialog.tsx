@@ -24,7 +24,7 @@ import { PRIORITY_CONFIG } from "@/lib/types/task";
 import { useTodoistStore } from "@/features/todoist/store";
 import type { Task } from "@/lib/types/task";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip";
-import { fetchJsonNoStore } from "@/lib/client/http";
+import { apiGetOrNull, apiSendOk } from "@/lib/client/http";
 import { cn } from "@/lib/utils";
 
 interface DeletedTasksDialogProps {
@@ -59,7 +59,7 @@ export function DeletedTasksDialog({
     if (!open) return;
 
     let cancelled = false;
-    fetchJsonNoStore<Task[]>("/api/tasks/deleted")
+    apiGetOrNull<Task[]>("/api/tasks/deleted")
       .then((tasks) => {
         if (cancelled) return;
         const nextTasks = tasks ?? [];
@@ -128,11 +128,8 @@ export function DeletedTasksDialog({
   }, [query, filteredTasks, selectedDate, grouped]);
 
   const handleRestore = async (taskId: string) => {
-    await fetch("/api/tasks/deleted", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ taskId }),
-    });
+    // A failure shows on the banner and the task stays in the list.
+    if (!(await apiSendOk("POST", "/api/tasks/deleted", { taskId }))) return;
     setAllDeleted((prev) => prev.filter((t) => t.id !== taskId));
     await hydrate();
   };

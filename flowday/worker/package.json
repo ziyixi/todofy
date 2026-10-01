@@ -1,0 +1,33 @@
+{
+  "name": "flowday-worker",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Worker \"flowday\": FlowDay's owner API (Access, CSRF, D1 via drizzle-orm/d1, read-only incremental Todoist sync) and its static UI.",
+  "engines": {
+    "node": ">=26"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit && tsc --noEmit -p test/runtime/tsconfig.json",
+    "lint": "eslint .",
+    "test": "vitest run",
+    "test:runtime": "vitest run --config vitest.runtime.config.ts",
+    "dev": "wrangler dev --config ../wrangler.toml --ip 127.0.0.1 --port 8789 --local-upstream 127.0.0.1:8789"
+  },
+  "dependencies": {
+    "@ziyixi/edge-auth": "file:../../packages/edge-auth",
+    "drizzle-orm": "0.45.3"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "5.20260929.1",
+    "@eslint/js": "10.0.1",
+    "@types/node": "26.6.3",
+    "esbuild": "0.28.1",
+    "eslint": "10.11.0",
+    "miniflare": "5.20260926.0-alpha",
+    "typescript": "5.9.3",
+    "typescript-eslint": "8.71.0",
+    "vitest": "4.1.11",
+    "wrangler": "4.142.0"
+  }
+}

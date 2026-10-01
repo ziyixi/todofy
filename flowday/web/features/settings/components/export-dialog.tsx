@@ -13,6 +13,9 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { formatLocalDate } from "@/lib/utils/time";
+import { apiGet } from "@/lib/client/http";
+import type { AnalyticsDataset } from "@/lib/types/worker-contract";
+import { exportData, exportRequestError } from "../services/export-service";
 
 interface ExportDialogProps {
   open: boolean;
@@ -43,20 +46,27 @@ export function ExportDialog({ open, onOpenChange }: ExportDialogProps) {
     onOpenChange(nextOpen);
   };
 
-  function handleDownload() {
-    const params = new URLSearchParams({
-      type: exportType,
-      format: exportFormat,
-      start: startDate,
-      end: endDate,
-    });
-    const url = `/api/export?${params.toString()}`;
+  async function handleDownload() {
+    const args = { type: exportType, format: exportFormat, startDate, endDate };
+    if (exportRequestError(args) !== null) return;
+    const params = new URLSearchParams({ start: startDate, end: endDate });
+    let dataset: AnalyticsDataset;
+    try {
+      dataset = await apiGet<AnalyticsDataset>(`/api/analytics?${params.toString()}`, { report: true });
+    } catch {
+      return;
+    }
+    const result = exportData(args, dataset);
+    if (!result.ok) return;
+    // The file is built here and saved from a blob: URL; nothing is uploaded.
+    const url = URL.createObjectURL(new Blob([result.file.body], { type: result.file.contentType }));
     const anchor = document.createElement("a");
     anchor.href = url;
-    anchor.download = `flowday-${exportType}-${startDate}-to-${endDate}.${exportFormat}`;
+    anchor.download = result.file.filename;
     document.body.appendChild(anchor);
     anchor.click();
     document.body.removeChild(anchor);
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
   }
 
   return (

@@ -8,7 +8,7 @@ import {
   PopoverTrigger,
 } from "@/components/ui/popover";
 import type { TimeEntry } from "@/features/timer/contracts";
-import { fetchJsonNoStore } from "@/lib/client/http";
+import { apiGetOrNull } from "@/lib/client/http";
 import { sumEntryDurationSeconds } from "@/lib/utils/time-entries";
 import { formatDurationShort } from "./manual-entry-utils";
 import { AddEntryDialog, EditEntryDialog } from "./manual-entry-dialogs";
@@ -34,7 +34,7 @@ export function ManualEntry({
 
   const fetchEntries = useCallback(async () => {
     try {
-      const nextEntries = await fetchJsonNoStore<TimeEntry[]>(
+      const nextEntries = await apiGetOrNull<TimeEntry[]>(
         `/api/entries?taskId=${encodeURIComponent(taskId)}`
       );
       if (nextEntries) {

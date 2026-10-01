@@ -1,4 +1,4 @@
-import { fetchJsonNoStore, jsonRequestInit } from "@/lib/client/http";
+import { apiGetOrNull, apiSend, apiSendOk } from "@/lib/client/http";
 import { formatLocalDate } from "@/lib/utils/time";
 import type { FlowMutationAction, FlowStateResponse } from "../contracts";
 import type { SettingsResponse } from "@/features/settings/contracts";
@@ -7,26 +7,24 @@ export function todayStr() {
   return formatLocalDate();
 }
 
-export function persistFlowMutation(
-  body: FlowMutationAction | { action: "addCompleted" | "removeCompleted"; date: string; taskId: string },
-  onFailure: () => void
-) {
-  fetch("/api/flows", jsonRequestInit("PUT", body))
-    .then((response) => {
-      if (!response.ok) onFailure();
-    })
-    .catch(() => onFailure());
+/** Saves a flow change in the background; on failure the banner shows it and `onFailure` reloads the flows. */
+export function persistFlowMutation(body: FlowMutationAction, onFailure: () => void) {
+  void apiSendOk("PUT", "/api/flows", body).then((saved) => {
+    if (!saved) onFailure();
+  });
+}
+
+/** Throws (after the banner shows it) when the change was not saved. */
+export async function sendFlowMutation(body: FlowMutationAction): Promise<void> {
+  await apiSend("PUT", "/api/flows", body);
 }
 
 export function persistPlanningCompleted(date: string) {
-  void fetch(
-    "/api/settings",
-    jsonRequestInit("PUT", { planning_completed_date: date })
-  ).catch(() => {});
+  void apiSendOk("PUT", "/api/settings", { planning_completed_date: date });
 }
 
 export async function loadFlowState(): Promise<FlowStateResponse | null> {
-  const data = await fetchJsonNoStore<FlowStateResponse>("/api/flows");
+  const data = await apiGetOrNull<FlowStateResponse>("/api/flows");
   if (!data) return null;
   return {
     flows: data.flows ?? {},
@@ -39,10 +37,8 @@ export async function loadHydrationData(today: string): Promise<{
   settings: SettingsResponse | null;
 }> {
   const [flowState, settings] = await Promise.all([
-    fetchJsonNoStore<FlowStateResponse>("/api/flows"),
-    fetchJsonNoStore<SettingsResponse>(
-      `/api/settings?today=${encodeURIComponent(today)}`
-    ),
+    apiGetOrNull<FlowStateResponse>("/api/flows"),
+    apiGetOrNull<SettingsResponse>(`/api/settings?today=${encodeURIComponent(today)}`),
   ]);
 
   return { flowState, settings };

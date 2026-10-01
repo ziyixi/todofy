@@ -6,10 +6,9 @@
     "node": ">=24"
   },
   "scripts": {
-    "predev": "rm -f db/flowday.db db/flowday.db-journal db/flowday.db-wal",
     "dev": "next dev",
     "build": "next build",
-    "start": "next start",
+    "check:export": "node scripts/check-export.mjs",
     "lint": "eslint",
     "typecheck": "next typegen && tsc --noEmit",
     "test": "vitest run",
@@ -22,17 +21,14 @@
     "screenshots:readme:check": "node scripts/generate-readme-screenshots.mjs --check",
     "screenshots:ui": "node scripts/generate-ui-goldens.mjs",
     "screenshots:ui:check": "node scripts/generate-ui-goldens.mjs --check",
-    "test:watch": "vitest",
-    "prune:standalone": "node scripts/prune-production-standalone.mjs"
+    "test:watch": "vitest"
   },
   "dependencies": {
     "@base-ui/react": "^1.3.0",
     "@dnd-kit/react": "^0.3.2",
-    "better-sqlite3": "^12.9.0",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "date-fns": "^4.1.0",
-    "drizzle-orm": "^0.45.2",
     "lucide-react": "^1.8.0",
     "next": "16.2.3",
     "react": "19.2.4",
@@ -46,12 +42,10 @@
   "devDependencies": {
     "@playwright/test": "^1.59.1",
     "@tailwindcss/postcss": "^4",
-    "@types/better-sqlite3": "^7.6.13",
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "@vitejs/plugin-react": "^6.0.1",
-    "drizzle-kit": "^0.31.10",
     "eslint": "^9",
     "eslint-config-next": "16.2.3",
     "tailwindcss": "^4",

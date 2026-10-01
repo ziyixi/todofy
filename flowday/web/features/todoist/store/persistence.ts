@@ -1,19 +1,21 @@
-import { fetchJson, fetchJsonNoStore, jsonRequestInit } from "@/lib/client/http";
+import { apiGetOrNull, apiSend } from "@/lib/client/http";
 import { formatLocalDate } from "@/lib/utils/time";
 import type { Task } from "@/lib/types/task";
 import type { SettingsResponse } from "@/features/settings/contracts";
-import type { SyncResponse } from "@/features/todoist/contracts";
+import type { SyncMode, SyncResponse } from "@/features/todoist/contracts";
 
-export async function deleteTaskOnServer(taskId: string) {
-  return fetch("/api/tasks", jsonRequestInit("DELETE", { taskId }));
+/** Throws (after the banner shows it) when the deletion was not saved. */
+export async function deleteTaskOnServer(taskId: string): Promise<void> {
+  await apiSend("DELETE", "/api/tasks", { taskId });
 }
 
-export function persistTaskPatch(body: {
+/** Throws (after the banner shows it) when the change was not saved. */
+export async function persistTaskPatch(body: {
   taskId: string;
   estimatedMins?: number | null;
   title?: string;
-}) {
-  return fetch("/api/tasks", jsonRequestInit("PATCH", body));
+}): Promise<void> {
+  await apiSend("PATCH", "/api/tasks", body);
 }
 
 export async function loadTasksAndSettings(): Promise<{
@@ -21,26 +23,25 @@ export async function loadTasksAndSettings(): Promise<{
   settings: SettingsResponse | null;
 }> {
   const [tasks, settings] = await Promise.all([
-    fetchJsonNoStore<Task[]>("/api/tasks"),
-    fetchJsonNoStore<SettingsResponse>("/api/settings"),
+    apiGetOrNull<Task[]>("/api/tasks"),
+    apiGetOrNull<SettingsResponse>("/api/settings"),
   ]);
 
   return { tasks, settings };
 }
 
-export async function syncTasksOnServer(): Promise<SyncResponse | null> {
-  return fetchJson<SyncResponse>("/api/sync", {
-    method: "POST",
-    cache: "no-store",
-  });
+/**
+ * Asks the Worker to bring in Todoist's changes. The automatic sync is quiet (a failure waits for the next
+ * attempt); "Sync now" shows its failure.
+ */
+export async function syncTasksOnServer(mode: SyncMode): Promise<SyncResponse> {
+  return apiSend<SyncResponse>("POST", "/api/sync", { mode }, { quiet: mode === "auto" });
 }
 
 export async function createLocalTaskOnServer(title: string): Promise<Task | null> {
-  return fetchJson<Task>(
-    "/api/tasks",
-    jsonRequestInit("POST", {
-      title,
-      dueDate: formatLocalDate(),
-    })
-  );
+  try {
+    return await apiSend<Task>("POST", "/api/tasks", { title, dueDate: formatLocalDate() });
+  } catch {
+    return null;
+  }
 }

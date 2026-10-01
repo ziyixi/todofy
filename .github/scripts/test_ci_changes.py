@@ -61,12 +61,15 @@ def expect(
 
 
 # Every app checked (a contracts/ or .github/ change, FlowDay included); the dashboard and Lab each checked and deployed;
-# the four edge-auth apps (the website compiles in no package) are todofy and mail-hero plus ALL; every
+# the edge-auth apps (the website compiles in no package) are todofy and mail-hero plus EDGE_AUTH; every
 # app with the website Worker (the relay Worker is added where a test expects it).
 ALL_CHECKED = {"dashboard_check": True, "website_check": True, "lab_check": True, "flowday_check": True}
 DASH = {"dashboard_check": True, "dashboard_deploy": True}
 LAB = {"lab_check": True, "lab_deploy": True}
 ALL = {**DASH, **LAB}
+# Every app that compiles in packages/edge-auth besides Todofy and Mail Hero: the dashboard and Lab (checked and
+# deployed) and FlowDay (checked only).
+EDGE_AUTH = {**ALL, "flowday_check": True}
 # FlowDay is checked only (ci_changes.CHECK_ONLY): it has no deploy output.
 EVERY = {**ALL, "website_check": True, "website_deploy": True, "flowday_check": True}
 
@@ -103,8 +106,16 @@ class Classify(unittest.TestCase):
                 self.assertEqual(push([path]), expect(F, F, T, F, F, **LAB))
 
     def test_flowday_is_checked_alone_and_never_deployed(self):
-        """FlowDay uses no contract and no package, and has no deploy job yet: its changes run only its checks."""
-        for path in ("flowday/web/lib/todoist/sync.ts", "flowday/web/package-lock.json", "flowday/docs/prd.md", "flowday/README.md"):
+        """FlowDay uses no contract and has no deploy job yet (until F2): its changes run only its checks."""
+        for path in (
+            "flowday/worker/src/sync.ts",
+            "flowday/web/lib/client/http.ts",
+            "flowday/migrations/0001_init.sql",
+            "flowday/wrangler.toml",
+            "flowday/web/package-lock.json",
+            "flowday/docs/design.md",
+            "flowday/README.md",
+        ):
             with self.subTest(path=path):
                 self.assertEqual(push([path]), expect(F, F, F, F, F, flowday_check=T))
                 self.assertEqual(push([path], ref=BRANCH), expect(F, F, F, F, F, flowday_check=T))
@@ -149,7 +160,7 @@ class Classify(unittest.TestCase):
             "dashboard": [REPO / "dashboard" / "worker" / "src", REPO / "dashboard" / "web" / "src"],
             "lab": [REPO / "lab" / "worker" / "src", REPO / "lab" / "web" / "src"],
             "website": [REPO / "website" / "src", REPO / "website" / "relay" / "src"],
-            "flowday": [REPO / "flowday" / "web" / name for name in ("app", "components", "features", "lib")],
+            "flowday": [REPO / "flowday" / "worker" / "src", *(REPO / "flowday" / "web" / name for name in ("app", "components", "features", "lib"))],
         }
         self.assertEqual(set(roots), set(ci_changes.APPS))
         importers = {}
@@ -193,7 +204,7 @@ class Classify(unittest.TestCase):
             "packages/edge-auth/test/helpers.ts",
         ):
             with self.subTest(path=path):
-                self.assertEqual(push([path]), expect(T, T, T, T, T, packages=T, **ALL))
+                self.assertEqual(push([path]), expect(T, T, T, T, T, packages=T, **EDGE_AUTH))
 
     def test_a_package_document_checks_every_user_but_deploys_none(self):
         """A README or SPEC is compiled into no Worker: an edit must not redeploy production."""
@@ -203,12 +214,12 @@ class Classify(unittest.TestCase):
             ["packages/edge-auth/docs/notes.md"],
         ):
             with self.subTest(paths=paths):
-                self.assertEqual(push(paths), expect(T, T, T, F, F, packages=T, dashboard_check=T, lab_check=T))
+                self.assertEqual(push(paths), expect(T, T, T, F, F, packages=T, dashboard_check=T, lab_check=T, flowday_check=T))
         # With the package's code, or with one app, the usual rules apply.
         paths = ["packages/edge-auth/SPEC.md", "packages/edge-auth/src/csrf.ts"]
-        self.assertEqual(push(paths), expect(T, T, T, T, T, packages=T, **ALL))
+        self.assertEqual(push(paths), expect(T, T, T, T, T, packages=T, **EDGE_AUTH))
         paths = ["packages/edge-auth/SPEC.md", "dashboard/docs/design.md"]
-        self.assertEqual(push(paths), expect(T, T, T, F, F, packages=T, **DASH, lab_check=T))
+        self.assertEqual(push(paths), expect(T, T, T, F, F, packages=T, **DASH, lab_check=T, flowday_check=T))
         # An unregistered package's documents are checked by every app, deployed by none.
         self.assertEqual(push(["packages/new-kit/README.md"]), expect(T, T, T, F, F, packages=T, **ALL_CHECKED))
 
@@ -229,7 +240,7 @@ class Classify(unittest.TestCase):
 
     def test_a_package_change_with_one_app_still_deploys_every_user(self):
         paths = ["packages/edge-auth/src/csrf.ts", "todofy/gateway/src/csrf.ts"]
-        self.assertEqual(push(paths), expect(T, T, T, T, T, packages=T, **ALL))
+        self.assertEqual(push(paths), expect(T, T, T, T, T, packages=T, **EDGE_AUTH))
 
     def test_an_unregistered_package_counts_as_used_by_every_app(self):
         self.assertEqual(push(["packages/dashboard-kit/src/index.ts"]), expect(T, T, T, T, T, packages=T, **EVERY))
@@ -479,7 +490,7 @@ class RealGit(unittest.TestCase):
         self.commit("packages/edge-auth/src/access.ts")
         after = self.commit("README.md.orig")
         outputs = self.main_run(after, green)
-        unaffected = {"website_check", "website_deploy", "website_relay_deploy", "flowday_check"}
+        unaffected = {"website_check", "website_deploy", "website_relay_deploy"}
         self.assertEqual({key for key in ci_changes.KEYS if outputs[key] == "false"}, unaffected | {"infra"})
 
     def test_a_failed_run_on_main_is_repeated(self):

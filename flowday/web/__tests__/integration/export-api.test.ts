@@ -1,8 +1,9 @@
-import { describe, it, expect, beforeEach } from "vitest";
-import { createTimeEntry } from "@/lib/db/queries/entries";
-import { addCompletedFlowTask, setFlowTaskIds } from "@/lib/db/queries/flows";
-import { upsertTasks } from "@/lib/db/queries/tasks";
+import { describe, it, expect, beforeEach, vi } from "vitest";
+import { exportData, exportRequestError } from "@/features/settings/services/export-service";
+import { apiGet } from "@/lib/client/http";
+import type { AnalyticsDataset } from "@/lib/types/worker-contract";
 import type { Task } from "@/lib/types/task";
+import { addCompletedFlowTask, createTimeEntry, fakeFetch, setFlowTaskIds, upsertTasks } from "../helpers/fake-worker";
 import { buildMiscTaskId } from "@/lib/utils/misc-task";
 
 function makeTask(overrides: Partial<Task> = {}): Task {
@@ -26,13 +27,27 @@ function makeTask(overrides: Partial<Task> = {}): Task {
   } as Task;
 }
 
+// The client path of the Export dialog: validate, fetch the range's rows, build the file in the browser. The file
+// is wrapped in a Response so the assertions read like the container era's /api/export tests.
 async function callExport(params: string) {
-  const mod = await import("@/app/api/export/route");
-  const url = `http://localhost:3000/api/export?${params}`;
-  return mod.GET(new Request(url));
+  vi.stubGlobal("fetch", fakeFetch);
+  const query = new URLSearchParams(params);
+  const args = { type: query.get("type"), format: query.get("format"), startDate: query.get("start"), endDate: query.get("end") };
+  if (exportRequestError(args) !== null) return new Response(null, { status: 400 });
+  const dataset = await apiGet<AnalyticsDataset>(
+    `/api/analytics?${new URLSearchParams({ start: args.startDate ?? "", end: args.endDate ?? "" }).toString()}`
+  );
+  const result = exportData(args, dataset);
+  if (!result.ok) return new Response(null, { status: 400 });
+  return new Response(result.file.body, {
+    headers: {
+      "Content-Type": result.file.contentType,
+      "Content-Disposition": `attachment; filename="${result.file.filename}"`,
+    },
+  });
 }
 
-describe("GET /api/export", () => {
+describe("export (built in the browser)", () => {
   beforeEach(() => {
     upsertTasks([makeTask({ id: "t1", title: "Design", estimatedMins: 30 })]);
     setFlowTaskIds("2026-04-13", ["t1"]);

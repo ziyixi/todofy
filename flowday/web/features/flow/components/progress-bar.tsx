@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react";
 import { AlertTriangle } from "lucide-react";
 import { useFlowTasksForDate, useCompletedTasksForDate, useFlowStore } from "@/features/flow/store";
-import { fetchJsonNoStore } from "@/lib/client/http";
+import { apiGetOrNull } from "@/lib/client/http";
 import { formatDuration, formatElapsed } from "@/lib/utils/time";
 import {
   sumEntryDurationSeconds,
@@ -33,7 +33,7 @@ export function ProgressBar({ date }: { date: string }) {
   const entryRevision = useTimerStore((s) => s.entryRevision);
   useEffect(() => {
     let cancelled = false;
-    fetchJsonNoStore<DurationEntryLike[]>(
+    apiGetOrNull<DurationEntryLike[]>(
       `/api/entries?date=${encodeURIComponent(date)}`
     )
       .then((entries) => {

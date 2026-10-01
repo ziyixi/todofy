@@ -1,0 +1,46 @@
+# Worker "flowday": FlowDay's static UI and owner API on D1 (docs/design.md). The production configuration and its
+# single source of truth: top level = production, never [env.*] or keep_vars. Every static value is committed here
+# (the repository is public: nothing personal, no secret).
+#
+# NOT DEPLOYED YET (F1). CI only checks and dry-runs this file ("FlowDay checks"); there is no deploy job, no route
+# and no hostname. The D1 id and the Access AUD below are all-zeros placeholders until F2 creates the database and
+# reuses the existing Access app "flowday" (docs/design.md "Migration plan"); deploy/deploy-vars.mjs refuses either
+# placeholder, so even a manual deploy through the wrapper cannot run before then. Do not add routes before the
+# F4 cutover commit: a CI deploy without a TTY takes over an existing DNS record for a listed hostname.
+#
+# Deployed (from F2) only through deploy/deploy-vars.mjs, which appends --var BUILD_SHA (the commit) and passes
+# ACCESS_OWNER, ACCESS_OWNER_ALIASES and CSRF_SIGNING_KEY as Worker secrets with --secrets-file (the dashboard's
+# DASHBOARD_ACCESS_OWNER(_ALIASES), the same owner, and FlowDay's own FLOWDAY_CSRF_SIGNING_KEY).
+#
+# Run wrangler from worker/ (the pinned wrangler lives in worker/node_modules) with --config ../wrangler.toml.
+# Local dev: local bindings only (D1 commands always --local, never --remote), local values in flowday/.dev.vars
+# (see .dev.vars.example). No cron trigger and no Durable Object: the sync runs when the page asks for it.
+name = "flowday"
+account_id = "f57937bd1d93bf59e737b6d8445fb7a3"
+main = "worker/src/index.ts"
+compatibility_date = "2026-09-08"
+workers_dev = false
+preview_urls = false
+
+[observability]
+enabled = true
+
+# The UI (web/, `npm run build`: a Next.js static export). Every request reaches the Worker first: it checks Access
+# (except for the exact PWA files) and adds the private headers before handing a path to ASSETS.
+[assets]
+directory = "web/out"
+binding = "ASSETS"
+run_worker_first = true
+not_found_handling = "single-page-application"
+
+# Tasks, flows, time entries, notes, settings and the active timer (migrations/).
+[[d1_databases]]
+binding = "DB"
+database_name = "flowday"
+database_id = "00000000-0000-0000-0000-000000000000"
+migrations_dir = "migrations"
+
+[vars]
+ACCESS_ISSUER = "https://ziyixi.cloudflareaccess.com"
+# AUD tag of the existing Access app "flowday" (placeholder until F2).
+ACCESS_AUDIENCE = "0000000000000000000000000000000000000000000000000000000000000000"

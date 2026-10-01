@@ -1,15 +1,23 @@
-import { describe, it, expect, beforeEach } from "vitest";
-import { createTimeEntry } from "@/lib/db/queries/entries";
-import { addCompletedFlowTask, setFlowTaskIds } from "@/lib/db/queries/flows";
-import { setSetting } from "@/lib/db/queries/settings";
-import { upsertTasks } from "@/lib/db/queries/tasks";
+import { describe, it, expect, beforeEach, vi } from "vitest";
+import { analyticsDatasetUrl } from "@/features/analytics/hooks/use-analytics-resource";
+import { getAnalytics, type AnalyticsType } from "@/features/analytics/services/analytics-service";
+import { apiGet } from "@/lib/client/http";
+import type { AnalyticsDataset } from "@/lib/types/worker-contract";
 import type { Task } from "@/lib/types/task";
+import {
+  addCompletedFlowTask,
+  createTimeEntry,
+  fakeFetch,
+  setFlowTaskIds,
+  setSetting,
+  upsertTasks,
+} from "../helpers/fake-worker";
 import { buildMiscTaskId, buildMiscTaskTitle } from "@/lib/utils/misc-task";
 
 /**
- * Integration tests for the analytics computation logic.
- * We import the route handler module and invoke it directly with mock Requests,
- * testing the full pipeline: DB queries → analytics computation → JSON response.
+ * Integration tests for the analytics computation, now in the browser: the rows come from GET /api/analytics for
+ * the review's range (here the in-memory fake of the Worker API), and getAnalytics computes the review, as the
+ * Analytics views do (features/analytics/hooks/use-analytics-resource.ts).
  */
 
 function makeTask(overrides: Partial<Task> = {}): Task {
@@ -61,13 +69,17 @@ function seedDay(date: string) {
   });
 }
 
-// We dynamically import the GET handler so each test gets the fresh DB from setup
+// The client path: fetch the rows of the review's range, then compute in the browser.
 async function callAnalytics(params: string) {
-  const mod = await import("@/app/api/analytics/route");
-  const url = `http://localhost:3000/api/analytics?${params}`;
-  const request = new Request(url);
-  const response = await mod.GET(request);
-  return response.json();
+  vi.stubGlobal("fetch", fakeFetch);
+  const query = new URLSearchParams(params);
+  const type = query.get("type");
+  const date = query.get("date");
+  const range: AnalyticsType = type === "daily" || type === "weekly" ? type : "stats";
+  const dataset = await apiGet<AnalyticsDataset>(analyticsDatasetUrl(range, date ?? ""));
+  const result = getAnalytics({ type, date, timeZone: query.get("tz") }, dataset);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- the tests read each review's fields directly
+  return (result.ok ? result.data : { error: result.error }) as any;
 }
 
 function getHourInTimeZone(iso: string, timeZone: string): number {
@@ -97,7 +109,7 @@ function getDayIndexInTimeZone(iso: string, timeZone: string): number {
   return index[weekday] ?? 0;
 }
 
-describe("GET /api/analytics — daily", () => {
+describe("analytics — daily", () => {
   beforeEach(() => {
     seedDay("2026-04-13");
   });
@@ -216,7 +228,7 @@ describe("GET /api/analytics — daily", () => {
   });
 });
 
-describe("GET /api/analytics — weekly", () => {
+describe("analytics — weekly", () => {
   beforeEach(() => {
     // 2026-04-13 is a Monday
     seedDay("2026-04-13");
@@ -321,7 +333,7 @@ describe("GET /api/analytics — weekly", () => {
   });
 });
 
-describe("GET /api/analytics — stats", () => {
+describe("analytics — stats", () => {
   beforeEach(() => {
     seedDay("2026-04-13");
   });
@@ -386,18 +398,12 @@ describe("GET /api/analytics — stats", () => {
   });
 });
 
-describe("GET /api/analytics — errors", () => {
-  it("returns 400 for missing params", async () => {
-    const mod = await import("@/app/api/analytics/route");
-    const response = await mod.GET(new Request("http://localhost:3000/api/analytics"));
-    expect(response.status).toBe(400);
+describe("analytics — errors", () => {
+  it("is an error without a type and date", async () => {
+    expect(await callAnalytics("")).toEqual({ error: "type and date required" });
   });
 
-  it("returns 400 for invalid type", async () => {
-    const mod = await import("@/app/api/analytics/route");
-    const response = await mod.GET(
-      new Request("http://localhost:3000/api/analytics?type=invalid&date=2026-04-13")
-    );
-    expect(response.status).toBe(400);
+  it("is an error for an invalid type", async () => {
+    expect(await callAnalytics("type=invalid&date=2026-04-13")).toEqual({ error: "Invalid type" });
   });
 });

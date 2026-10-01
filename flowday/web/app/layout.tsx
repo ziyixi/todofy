@@ -12,7 +12,6 @@ const inter = Inter({
 export const metadata: Metadata = {
   title: "FlowDay",
   description: "A visual daily task flow planner with Todoist integration",
-  manifest: "/pwa/manifest.webmanifest",
   appleWebApp: {
     capable: true,
     statusBarStyle: "black-translucent",
@@ -31,6 +30,8 @@ export default function RootLayout({
   return (
     <html lang="en" className={`${inter.variable} h-full antialiased`} suppressHydrationWarning>
       <head>
+        {/* With credentials, so the manifest request carries the Access cookie (docs/design.md "PWA"). */}
+        <link rel="manifest" href="/pwa/manifest.webmanifest" crossOrigin="use-credentials" />
         <link rel="apple-touch-icon" href="/pwa/apple-touch-icon.png" />
         <meta name="theme-color" content="#0a0a0a" media="(prefers-color-scheme: dark)" />
         <meta name="theme-color" content="#fafafa" media="(prefers-color-scheme: light)" />

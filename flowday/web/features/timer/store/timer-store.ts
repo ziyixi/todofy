@@ -215,8 +215,6 @@ export const useTimerStore = create<TimerState>()((set, get) => ({
   },
 
   hydrateSession: async () => {
-    if (typeof fetch === "undefined") return;
-
     const clearHydratedSession = () => {
       clearTickInterval();
       set((prev) => ({

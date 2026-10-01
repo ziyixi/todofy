@@ -1,39 +1,57 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { fetchJsonNoStore } from "@/lib/client/http";
+import { apiGetOrNull } from "@/lib/client/http";
+import type { AnalyticsDataset } from "@/lib/types/worker-contract";
+import {
+  analyticsRange,
+  getAnalytics,
+  type AnalyticsType,
+} from "../services/analytics-service";
+import type {
+  DailyAnalyticsData,
+  WeeklyAnalyticsData,
+  WorkPatternStatsData,
+} from "../contracts";
 
-export function analyticsUrl(type: "daily" | "weekly" | "stats", date?: string) {
-  const params = new URLSearchParams({ type });
-  if (date) params.set("date", date);
-  const timeZone =
-    typeof Intl !== "undefined"
-      ? Intl.DateTimeFormat().resolvedOptions().timeZone
-      : "";
-  if (timeZone) params.set("tz", timeZone);
-  return `/api/analytics?${params.toString()}`;
+/** The rows a review needs: GET /api/analytics for its range (none: every time entry). */
+export function analyticsDatasetUrl(type: AnalyticsType, date = ""): string {
+  const range = analyticsRange(type, date);
+  if (range === null) return "/api/analytics";
+  return `/api/analytics?${new URLSearchParams({ start: range.start, end: range.end }).toString()}`;
 }
 
-export function useAnalyticsResource<T>(url: string) {
-  const [data, setData] = useState<T | null>(null);
+function browserTimeZone(): string | null {
+  return typeof Intl !== "undefined" ? Intl.DateTimeFormat().resolvedOptions().timeZone : null;
+}
+
+interface AnalyticsData {
+  daily: DailyAnalyticsData;
+  weekly: WeeklyAnalyticsData;
+  stats: WorkPatternStatsData;
+}
+
+/** Fetches a review's raw rows and computes it in the browser, in the browser's time zone. */
+export function useAnalytics<K extends AnalyticsType>(type: K, date?: string) {
+  const [data, setData] = useState<AnalyticsData[K] | null>(null);
   const [loading, setLoading] = useState(true);
+  const url = analyticsDatasetUrl(type, date);
 
   useEffect(() => {
     let cancelled = false;
-
-    fetchJsonNoStore<T>(url)
-      .then((payload) => {
-        if (!cancelled) setData(payload);
-      })
-      .catch(() => {})
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
+    void apiGetOrNull<AnalyticsDataset>(url).then((dataset) => {
+      if (cancelled) return;
+      if (dataset) {
+        const result = getAnalytics({ type, date: date ?? null, timeZone: browserTimeZone() }, dataset);
+        setData(result.ok ? (result.data as AnalyticsData[K]) : null);
+      }
+      setLoading(false);
+    });
 
     return () => {
       cancelled = true;
     };
-  }, [url]);
+  }, [url, type, date]);
 
   return { data, loading };
 }

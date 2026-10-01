@@ -1,15 +1,21 @@
-import { NextResponse } from "next/server";
-import {
-  getCompletedTaskIdsInDateRange,
-  getFlowTaskIdsInDateRange,
-} from "@/lib/db/queries/flows";
-import { getEntriesInDateRange } from "@/lib/db/queries/entries";
-import {
-  getTasksByIds,
-} from "@/lib/db/queries/tasks";
-import { serviceError, serviceOk, type ServiceResult } from "@/lib/server/service-result";
+/**
+ * CSV and JSON exports, built in the browser from the raw rows of GET /api/analytics?start&end (the container era
+ * built them in an /api/export route). Fields with a comma, quote or newline are quoted, quotes doubled.
+ */
+import { taskLookup } from "@/features/analytics/services/analytics-service";
+import type { AnalyticsDataset } from "@/lib/types/worker-contract";
 import { entryDurationSeconds } from "@/lib/utils/time-entries";
 import type { ExportDataType, ExportFormat } from "../contracts";
+
+export interface ExportFile {
+  filename: string;
+  contentType: string;
+  body: string;
+}
+
+export type ExportResult = { ok: true; file: ExportFile } | { ok: false; status: 400; error: string };
+
+const DATE = /^\d{4}-\d{2}-\d{2}$/;
 
 function escapeCsvField(value: string): string {
   if (value.includes(",") || value.includes('"') || value.includes("\n")) {
@@ -18,24 +24,22 @@ function escapeCsvField(value: string): string {
   return value;
 }
 
-function buildCsvResponse(filename: string, rows: string[]) {
-  return new Response(rows.join("\n"), {
-    headers: {
-      "Content-Type": "text/csv",
-      "Content-Disposition": `attachment; filename="${filename}"`,
-    },
-  });
+function csv<K extends string>(headers: readonly K[], rows: Record<K, unknown>[]): string {
+  return [
+    headers.join(","),
+    ...rows.map((row) => headers.map((header) => escapeCsvField(String(row[header]))).join(",")),
+  ].join("\n");
 }
 
-function exportEntries(
-  startDate: string,
-  endDate: string,
-  format: ExportFormat
-): Response {
-  const entries = getEntriesInDateRange(startDate, endDate);
-  const taskIds = [...new Set(entries.map((entry) => entry.taskId))];
-  const taskMap = new Map(getTasksByIds(taskIds).map((task) => [task.id, task]));
+function file(name: string, format: ExportFormat, rows: unknown[], body: () => string): ExportFile {
+  return format === "json"
+    ? { filename: `${name}.json`, contentType: "application/json", body: JSON.stringify(rows) }
+    : { filename: `${name}.csv`, contentType: "text/csv", body: body() };
+}
 
+function exportEntries(dataset: AnalyticsDataset, startDate: string, endDate: string, format: ExportFormat): ExportFile {
+  const entries = dataset.entries.filter((entry) => entry.flowDate >= startDate && entry.flowDate <= endDate);
+  const taskMap = taskLookup(dataset, entries.map((entry) => entry.taskId));
   const rows = entries.map((entry) => ({
     date: entry.flowDate,
     taskId: entry.taskId,
@@ -46,126 +50,71 @@ function exportEntries(
     durationMins: Math.round(entryDurationSeconds(entry) / 60),
     source: entry.source,
   }));
-
-  if (format === "json") {
-    return NextResponse.json(rows);
-  }
-
-  const headers = [
-    "date",
-    "taskId",
-    "taskTitle",
-    "project",
-    "startTime",
-    "endTime",
-    "durationMins",
-    "source",
-  ] as const;
-  const csvRows = [
-    headers.join(","),
-    ...rows.map((row) => headers.map((header) => escapeCsvField(String(row[header]))).join(",")),
-  ];
-
-  return buildCsvResponse(
-    `flowday-entries-${startDate}-to-${endDate}.csv`,
-    csvRows
-  );
+  const headers = ["date", "taskId", "taskTitle", "project", "startTime", "endTime", "durationMins", "source"] as const;
+  return file(`flowday-entries-${startDate}-to-${endDate}`, format, rows, () => csv(headers, rows));
 }
 
-function exportFlows(
-  startDate: string,
-  endDate: string,
-  format: ExportFormat
-): Response {
-  const flowEntries = getFlowTaskIdsInDateRange(startDate, endDate);
-  const completedEntries = getCompletedTaskIdsInDateRange(startDate, endDate);
-  const entries = getEntriesInDateRange(startDate, endDate);
-  const allTaskIds = [
-    ...new Set([
-      ...flowEntries.map((entry) => entry.taskId),
-      ...completedEntries.map((entry) => entry.taskId),
-    ]),
-  ];
-  const taskMap = new Map(getTasksByIds(allTaskIds).map((task) => [task.id, task]));
+function exportFlows(dataset: AnalyticsDataset, startDate: string, endDate: string, format: ExportFormat): ExportFile {
+  const flowEntries = dataset.flows.filter((row) => row.flowDate >= startDate && row.flowDate <= endDate);
+  const completedEntries = dataset.completed.filter((row) => row.flowDate >= startDate && row.flowDate <= endDate);
+  const entries = dataset.entries.filter((entry) => entry.flowDate >= startDate && entry.flowDate <= endDate);
+  const taskMap = taskLookup(dataset, [...flowEntries, ...completedEntries].map((row) => row.taskId));
 
   const completedByDate = new Map<string, Set<string>>();
   for (const entry of completedEntries) {
-    if (!completedByDate.has(entry.flowDate)) {
-      completedByDate.set(entry.flowDate, new Set());
-    }
+    if (!completedByDate.has(entry.flowDate)) completedByDate.set(entry.flowDate, new Set());
     completedByDate.get(entry.flowDate)!.add(entry.taskId);
   }
-
   const timeByTaskDate = new Map<string, number>();
   for (const entry of entries) {
     const key = `${entry.flowDate}:${entry.taskId}`;
-    timeByTaskDate.set(
-      key,
-      (timeByTaskDate.get(key) ?? 0) + entryDurationSeconds(entry)
-    );
+    timeByTaskDate.set(key, (timeByTaskDate.get(key) ?? 0) + entryDurationSeconds(entry));
   }
 
   const rows = flowEntries.map((entry) => {
     const task = taskMap.get(entry.taskId);
-    const completed = completedByDate.get(entry.flowDate)?.has(entry.taskId) ?? false;
-    const loggedSecs = timeByTaskDate.get(`${entry.flowDate}:${entry.taskId}`) ?? 0;
     return {
       date: entry.flowDate,
       taskId: entry.taskId,
       taskTitle: task?.title ?? "Unknown",
       project: task?.projectName ?? "",
       estimatedMins: task?.estimatedMins ?? 0,
-      loggedMins: Math.round(loggedSecs / 60),
-      completed,
+      loggedMins: Math.round((timeByTaskDate.get(`${entry.flowDate}:${entry.taskId}`) ?? 0) / 60),
+      completed: completedByDate.get(entry.flowDate)?.has(entry.taskId) ?? false,
     };
   });
-
-  if (format === "json") {
-    return NextResponse.json(rows);
-  }
-
-  const headers = [
-    "date",
-    "taskId",
-    "taskTitle",
-    "project",
-    "estimatedMins",
-    "loggedMins",
-    "completed",
-  ] as const;
-  const csvRows = [
-    headers.join(","),
-    ...rows.map((row) => headers.map((header) => escapeCsvField(String(row[header]))).join(",")),
-  ];
-
-  return buildCsvResponse(
-    `flowday-flows-${startDate}-to-${endDate}.csv`,
-    csvRows
-  );
+  const headers = ["date", "taskId", "taskTitle", "project", "estimatedMins", "loggedMins", "completed"] as const;
+  return file(`flowday-flows-${startDate}-to-${endDate}`, format, rows, () => csv(headers, rows));
 }
 
-export function exportData(args: {
+/** Validates the export request (the container era's 400 messages); null when it is valid. */
+export function exportRequestError(args: {
   startDate: string | null;
   endDate: string | null;
   type: string | null;
   format: string | null;
-}): ServiceResult<Response> {
+}): string | null {
+  if (!args.startDate || !args.endDate || !DATE.test(args.startDate) || !DATE.test(args.endDate)) {
+    return "start and end date params required";
+  }
+  if (!["csv", "json"].includes(args.format ?? "csv")) return "format must be csv or json";
+  if (!["entries", "flows"].includes(args.type ?? "entries")) return "type must be entries or flows";
+  return null;
+}
+
+export function exportData(
+  args: { startDate: string | null; endDate: string | null; type: string | null; format: string | null },
+  dataset: AnalyticsDataset
+): ExportResult {
+  const error = exportRequestError(args);
+  if (error !== null || !args.startDate || !args.endDate) return { ok: false, status: 400, error: error ?? "" };
   const format = (args.format ?? "csv") as ExportFormat;
   const type = (args.type ?? "entries") as ExportDataType;
-
-  if (!args.startDate || !args.endDate) {
-    return serviceError("start and end date params required", 400);
-  }
-  if (!["csv", "json"].includes(format)) {
-    return serviceError("format must be csv or json", 400);
-  }
-  if (!["entries", "flows"].includes(type)) {
-    return serviceError("type must be entries or flows", 400);
-  }
-
-  const response =
-    type === "entries"
-      ? exportEntries(args.startDate, args.endDate, format)
-      : exportFlows(args.startDate, args.endDate, format);
-  return serviceOk(response);
+  return {
+    ok: true,
+    file:
+      type === "entries"
+        ? exportEntries(dataset, args.startDate, args.endDate, format)
+        : exportFlows(dataset, args.startDate, args.endDate, format),
+  };
 }

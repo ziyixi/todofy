@@ -2,18 +2,26 @@
 
 import { useEffect } from "react";
 import { useTodoistStore } from "@/features/todoist/store";
+import { startAutoSync } from "./auto-sync";
 
+/** Runs the visibility-aware automatic Todoist sync (./auto-sync.ts) while a Todoist key is stored. */
 export function useAutoSync() {
-  const lastSyncAt = useTodoistStore((s) => s.lastSyncAt);
+  const hasApiKey = useTodoistStore((s) => s.hasApiKey);
 
   useEffect(() => {
-    // Only auto-sync if we've successfully synced before (meaning API key is configured)
-    if (!lastSyncAt) return;
-
-    const interval = setInterval(() => {
-      useTodoistStore.getState().sync();
-    }, 60_000);
-
-    return () => clearInterval(interval);
-  }, [lastSyncAt]);
+    if (!hasApiKey) return;
+    const autoSync = startAutoSync({
+      now: () => Date.now(),
+      isVisible: () => document.visibilityState === "visible",
+      setTimer: (callback, ms) => window.setTimeout(callback, ms),
+      clearTimer: (handle) => window.clearTimeout(handle as number),
+      sync: () => void useTodoistStore.getState().sync("auto"),
+    });
+    const onVisibility = () => autoSync.visibilityChanged();
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => {
+      document.removeEventListener("visibilitychange", onVisibility);
+      autoSync.stop();
+    };
+  }, [hasApiKey]);
 }

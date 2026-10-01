@@ -3,8 +3,7 @@
 import { addDays, format } from "date-fns";
 import { formatDuration, formatLocalDate } from "@/lib/utils/time";
 import { cn } from "@/lib/utils";
-import type { DailyAnalyticsData } from "../contracts";
-import { analyticsUrl, useAnalyticsResource } from "../hooks/use-analytics-resource";
+import { useAnalytics } from "../hooks/use-analytics-resource";
 import {
   DateNav,
   HourlyChart,
@@ -20,9 +19,7 @@ export function DailyReview({
   date: string;
   onDateChange: (date: string) => void;
 }) {
-  const { data, loading } = useAnalyticsResource<DailyAnalyticsData>(
-    analyticsUrl("daily", date)
-  );
+  const { data, loading } = useAnalytics("daily", date);
   const dateLabel = format(new Date(`${date}T00:00:00`), "EEEE, MMM d, yyyy");
 
   if (loading) {

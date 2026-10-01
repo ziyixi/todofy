@@ -661,17 +661,16 @@ test.describe("analytics timezone", () => {
     await page.getByRole("button", { name: "Analytics" }).click();
     await expect(page.getByRole("heading", { name: "Analytics" })).toBeVisible();
 
+    // The stats read every time entry (no range) and are computed in the browser, in its time zone.
     const statsResponsePromise = page.waitForResponse(
       (response) =>
-        response.url().includes("/api/analytics?type=stats") &&
+        new URL(response.url()).pathname === "/api/analytics" &&
+        new URL(response.url()).search === "" &&
         response.request().method() === "GET"
     );
 
     await page.getByRole("button", { name: "Work Patterns" }).click();
-    const statsResponse = await statsResponsePromise;
-
-    const statsUrl = new URL(statsResponse.url());
-    expect(statsUrl.searchParams.get("tz")).toBe("America/Los_Angeles");
+    await statsResponsePromise;
 
     await expect(page.getByText("Peak Work Hours")).toBeVisible();
     await expect(page.getByText("Sun 17:00", { exact: true })).toBeVisible();

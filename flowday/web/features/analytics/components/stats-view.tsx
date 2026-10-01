@@ -2,12 +2,11 @@
 
 import { useState } from "react";
 import { cn } from "@/lib/utils";
-import type { WorkPatternStatsData } from "../contracts";
-import { analyticsUrl, useAnalyticsResource } from "../hooks/use-analytics-resource";
+import { useAnalytics } from "../hooks/use-analytics-resource";
 import { DAY_LABELS } from "./shared";
 
 export function StatsView() {
-  const { data, loading } = useAnalyticsResource<WorkPatternStatsData>(analyticsUrl("stats"));
+  const { data, loading } = useAnalytics("stats");
   const [mode, setMode] = useState<"frequency" | "duration">("frequency");
 
   if (loading) {

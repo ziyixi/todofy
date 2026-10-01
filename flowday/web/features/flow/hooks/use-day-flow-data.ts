@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useTimerStore } from "@/features/timer/store";
-import { fetchJsonNoStore } from "@/lib/client/http";
+import { apiGetOrNull } from "@/lib/client/http";
 import { useLoggedSecondsByTaskForDate } from "@/lib/hooks/use-task-logged-seconds";
 
 interface NoteRow {
@@ -15,7 +15,7 @@ export function useDayNotesMap(date: string): Record<string, string> {
 
   useEffect(() => {
     let cancelled = false;
-    fetchJsonNoStore<NoteRow[]>(`/api/notes?date=${encodeURIComponent(date)}`)
+    apiGetOrNull<NoteRow[]>(`/api/notes?date=${encodeURIComponent(date)}`)
       .then((rows) => {
         if (cancelled) return;
         const next: Record<string, string> = {};
