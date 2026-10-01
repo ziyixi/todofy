@@ -55,7 +55,8 @@ function isRecord(value: unknown): value is Record<string, unknown> {
  * True when a completed, successful "CI gate" check of GitHub Actions belongs to a ci.yml run
  * triggered by a push to main for exactly this commit. Push runs diff from the last successful main
  * run (.github/scripts/ci_changes.py), so a passed gate means every website change up to this commit
- * passed Website checks. Pull-request and branch runs do not count.
+ * passed Website checks (in that main run, or in a green branch run of the same commit that the main run
+ * reused, ci_changes.py find_reusable). Pull-request and branch runs do not count by themselves.
  */
 export async function passedGate(options: GreenCommitOptions, sha: string): Promise<boolean> {
   if (!SHA.test(sha)) throw new Error("A commit SHA must be 40 lowercase hex characters.");

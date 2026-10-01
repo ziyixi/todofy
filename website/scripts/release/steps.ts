@@ -1,6 +1,6 @@
 import { emptyContentRegistry } from "../../src/lib/content/registry";
 import type { ContentManifest, ContentRegistry } from "../../src/lib/content/schema";
-import type { WorkerState, Wrangler } from "./cloudflare";
+import type { HostnameGuard, WorkerState, Wrangler } from "./cloudflare";
 import type { DeploymentRow, DeploymentState, GitHubClient } from "./github";
 import {
   EMPTY_STATE_TEXT,
@@ -25,6 +25,8 @@ export interface ReleaseDeps {
   github: GitHub;
   worker: WorkerState;
   wrangler: Wrangler;
+  /** tools/cf-guard: refuses a routes change that detaches or takes over a live hostname. */
+  hostnames: HostnameGuard;
   config: WorkerConfig;
   log: (message: string) => void;
 }
@@ -406,8 +408,8 @@ export async function record(
 }
 
 /**
- * Makes the uploaded version serve 100 % of traffic, then applies wrangler.toml's routes (Custom
- * Domains and zone routes).
+ * Checks the hostnames (tools/cf-guard), makes the uploaded version serve 100 % of traffic, then applies
+ * wrangler.toml's routes (Custom Domains and zone routes).
  * Refuses a production that changed meanwhile. Newer website code on main is not a reason to stop:
  * this build is CI-green and newer than the baseline, and the release that newer push dispatched is
  * queued behind this one in the same concurrency group (stopping here would record a failure that
@@ -418,6 +420,10 @@ export async function deploy(
   options: { upload: UploadResult; identity: BuildIdentity },
 ): Promise<void> {
   const { upload: uploaded } = options;
+  // wrangler applies the listed Custom Domains as the Worker's complete set (and would overwrite another
+  // Worker's hostname or DNS record in CI). Checked before production changes at all, so a refusal leaves
+  // the recorded version serving. The workflow ran the same check before the upload (`hostnames`).
+  if (deps.config.hostnames.length > 0) await deps.hostnames.check();
   if (!uploaded.firstDeploy) {
     const active = await deps.worker.activeVersion();
     if (uploaded.previousVersionId && active !== uploaded.previousVersionId) {

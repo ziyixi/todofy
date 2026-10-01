@@ -154,3 +154,57 @@ export class WranglerCli implements Wrangler {
     await this.run(["triggers", "deploy"]);
   }
 }
+
+/**
+ * The monorepo's deploy-time hostname guard (tools/cf-guard): read-only, it fails when applying
+ * wrangler.toml's routes would detach a live Custom Domain or zone route of this Worker, or take over
+ * another Worker's hostname or an existing DNS record. A release runs it before anything that applies
+ * routes (`wrangler deploy` of a first upload, `wrangler triggers deploy`).
+ */
+export interface HostnameGuard {
+  check(): Promise<void>;
+}
+
+/**
+ * Runs `node ../tools/cf-guard/cf-guard.mjs --config wrangler.toml` from the website directory with only
+ * the token and the guard's allow-lists in its environment. It prints hostnames and PASS/FAIL, never a
+ * response body or id; a non-zero exit refuses the release.
+ */
+export class HostnameGuardCli implements HostnameGuard {
+  constructor(
+    private readonly options: {
+      cwd: string;
+      env: NodeJS.ProcessEnv;
+      configFile?: string;
+    },
+  ) {}
+
+  async check(): Promise<void> {
+    const { cwd, env } = this.options;
+    const script = path.resolve(cwd, "..", "tools", "cf-guard", "cf-guard.mjs");
+    const code = await new Promise<number>((resolve, reject) => {
+      const child = spawn(
+        process.execPath,
+        [script, "--config", this.options.configFile ?? "wrangler.toml"],
+        {
+          cwd,
+          env: {
+            NODE_ENV: env.NODE_ENV,
+            PATH: env.PATH ?? "",
+            CLOUDFLARE_API_TOKEN: env.CLOUDFLARE_API_TOKEN ?? "",
+            CF_GUARD_ALLOW_REMOVE: env.CF_GUARD_ALLOW_REMOVE ?? "",
+            CF_GUARD_ALLOW_CONFLICT: env.CF_GUARD_ALLOW_CONFLICT ?? "",
+          },
+          stdio: ["ignore", "inherit", "inherit"],
+        },
+      );
+      child.on("error", reject);
+      child.on("close", (status) => resolve(status ?? 1));
+    });
+    if (code !== 0) {
+      throw new Error(
+        `The hostname guard (tools/cf-guard) refused to change this Worker's hostnames (exit ${code}).`,
+      );
+    }
+  }
+}

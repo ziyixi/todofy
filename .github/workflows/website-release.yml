@@ -226,9 +226,29 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
           WEBSITE_BOOTSTRAP_APPROVAL: ${{ vars.WEBSITE_BOOTSTRAP_APPROVAL }}
         run: pnpm release gate
+      # The browser download is cached by the locked Playwright version (as in CI's Website checks); the
+      # system libraries are installed on every run, so a cache hit only skips the download.
+      - name: Read the locked Playwright version
+        id: playwright
+        if: steps.gate.outputs.bootstrap_required != 'true'
+        run: echo "version=$(pnpm exec playwright --version | awk '{print $2}')" >> "$GITHUB_OUTPUT"
+      - name: Restore the Playwright browser
+        id: playwright-cache
+        if: steps.gate.outputs.bootstrap_required != 'true'
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-chromium-${{ runner.os }}-${{ steps.playwright.outputs.version }}
       - name: Install the pinned browser
         if: steps.gate.outputs.bootstrap_required != 'true'
-        run: pnpm exec playwright install --with-deps chromium
+        env:
+          CACHE_HIT: ${{ steps.playwright-cache.outputs.cache-hit }}
+        run: |
+          if [ "$CACHE_HIT" = true ]; then
+            pnpm exec playwright install-deps chromium
+          else
+            pnpm exec playwright install --with-deps chromium
+          fi
       - name: Reconcile a blocked release with what production serves
         if: steps.gate.outputs.bootstrap_required != 'true' && inputs.operation == 'recovery'
         env:
@@ -265,6 +285,17 @@ jobs:
       - name: Verify the export under wrangler dev
         if: steps.decision.outputs.deploy_required == 'true'
         run: pnpm release verify-artifact
+      # tools/cf-guard before anything applies routes (a first upload is a `wrangler deploy`): fails when the
+      # Custom Domains in wrangler.toml would detach a live hostname or take over another Worker's hostname or a
+      # DNS record. Nothing is recorded yet, so a refusal leaves no release record to recover. `deploy` checks
+      # again. For an intentional change set the exact hostnames here and on the deploy step, in the same commit.
+      - name: Check the wrangler.toml hostnames against production
+        if: steps.decision.outputs.deploy_required == 'true'
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+          CF_GUARD_ALLOW_REMOVE: ''
+          CF_GUARD_ALLOW_CONFLICT: ''
+        run: pnpm release hostnames
       - name: Upload the verified export as a Worker version
         id: upload
         if: steps.decision.outputs.deploy_required == 'true'
@@ -283,6 +314,8 @@ jobs:
         continue-on-error: true
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+          CF_GUARD_ALLOW_REMOVE: ''
+          CF_GUARD_ALLOW_CONFLICT: ''
         run: pnpm release deploy
       - name: Verify the live hostname
         id: live

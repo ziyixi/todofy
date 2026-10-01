@@ -36,7 +36,9 @@ apex keeps its MX, SPF/`apple-domain` TXT, `_dmarc` and DKIM records; never touc
 `routes` in `wrangler.toml` is the Worker's complete set of Custom Domains: each release's
 `wrangler triggers deploy` replaces the attached set with it (a no-op while the two agree), so the file must
 always match the live state. Removing a line detaches that hostname at the next release; adding one creates
-its DNS record and certificate. The release verifies the whole route contract on `www` and the build
+its DNS record and certificate. The release's hostname guard ([`tools/cf-guard`](../../tools/cf-guard/README.md))
+refuses a removal, and an addition that would take over another Worker's hostname or an existing DNS
+record (or whose DNS records its token cannot read), unless the release step allows that exact hostname. The release verifies the whole route contract on `www` and the build
 identity on the apex ([`release.md`](release.md)).
 
 **Why both are Custom Domains (2026-10-01).** Until then `www` was a zone route (`www.ziyixi.science/*`) in

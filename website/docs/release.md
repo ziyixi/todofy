@@ -52,12 +52,16 @@ Each step is one `pnpm release <command>` ([`scripts/release/cli.ts`](../scripts
    identity and the whole route contract ([`tests/e2e/deployment.spec.ts`](../tests/e2e/deployment.spec.ts):
    every route and status, asset hashes, redirects, 404, segment payloads, a browser pass without console
    errors) must pass before anything is uploaded.
-8. `upload`: production must still serve the baseline version; `wrangler versions upload` creates a
+8. `hostnames`, then `upload`: [`tools/cf-guard`](../../tools/cf-guard/README.md) compares the routes in
+   `wrangler.toml` with the Worker's live Custom Domains (read-only) and stops the release, before anything
+   is uploaded or recorded, when a live hostname would be detached or another Worker's hostname or an
+   existing DNS record taken over (an intentional change sets `CF_GUARD_ALLOW_REMOVE` /
+   `CF_GUARD_ALLOW_CONFLICT` on this step and on `deploy`). Then production must still serve the baseline version; `wrangler versions upload` creates a
    version that serves nothing yet. (The very first release, `bootstrap`, uses `wrangler deploy` because a
    version cannot be uploaded to a Worker that does not exist.)
 9. `record`: a GitHub Deployment (payload schema 3: identity, version, previous version, live hostname,
    content registry, route contract), status `in_progress`. An interrupted run leaves this record blocking.
-10. `deploy`: refuses a production that changed meanwhile; `wrangler versions deploy <version>@100%`; confirms the active version; when `wrangler.toml` lists
+10. `deploy`: runs the hostname guard again (a refusal changes nothing), refuses a production that changed meanwhile; `wrangler versions deploy <version>@100%`; confirms the active version; when `wrangler.toml` lists
     hostnames, `wrangler triggers deploy` applies them: the Custom Domains `www.ziyixi.science` and
     `ziyixi.science`, which wrangler treats as the Worker's complete set (it replaces the attached set with
     the listed one, so with the file matching the live state nothing changes), and keeps workers.dev off.

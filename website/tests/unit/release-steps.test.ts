@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
-import type { WorkerState, Wrangler } from "../../scripts/release/cloudflare";
+import type { HostnameGuard, WorkerState, Wrangler } from "../../scripts/release/cloudflare";
 import type { DeploymentRow } from "../../scripts/release/github";
 import {
   GateStateSchema,
@@ -90,9 +90,11 @@ function fakeWorker(initial: string | null) {
     }),
     deployTriggers: vi.fn(async () => undefined),
   };
+  const hostnames: HostnameGuard = { check: vi.fn(async () => undefined) };
   return {
     worker,
     wrangler,
+    hostnames,
     setActive: (value: string | null) => {
       active = value;
     },
@@ -108,6 +110,7 @@ function deps(
     github,
     worker: cloudflare.worker,
     wrangler: cloudflare.wrangler,
+    hostnames: cloudflare.hostnames,
     config: { name: "ziyixi-website", accountId: "f".repeat(32), hostnames },
     log: () => undefined,
   };
@@ -366,6 +369,40 @@ describe("upload, deploy and rollback", () => {
     await deploy(d, { upload: uploaded, identity: NEW });
     expect(cloudflare.wrangler.deployVersion).toHaveBeenCalledWith(V2, expect.any(String));
     expect(cloudflare.wrangler.deployTriggers).toHaveBeenCalledTimes(1);
+  });
+
+  it("checks the hostnames (tools/cf-guard) before production changes, and stops on a refusal", async () => {
+    const cloudflare = fakeWorker(V1);
+    const { github } = fakeGitHub({ rows: [], states: {} });
+    const d = deps(github, cloudflare);
+    const uploaded = { versionId: V2, firstDeploy: false, previousVersionId: V1 };
+    await deploy(d, { upload: uploaded, identity: NEW });
+    const guard = vi.mocked(cloudflare.hostnames.check).mock.invocationCallOrder[0];
+    expect(guard).toBeLessThan(
+      vi.mocked(cloudflare.wrangler.deployVersion).mock.invocationCallOrder[0] ?? 0,
+    );
+    expect(guard).toBeLessThan(
+      vi.mocked(cloudflare.wrangler.deployTriggers).mock.invocationCallOrder[0] ?? 0,
+    );
+
+    const refused = fakeWorker(V1);
+    vi.mocked(refused.hostnames.check).mockRejectedValueOnce(
+      new Error(
+        "The hostname guard (tools/cf-guard) refused to change this Worker's hostnames (exit 1).",
+      ),
+    );
+    await expect(
+      deploy(deps(github, refused), { upload: uploaded, identity: NEW }),
+    ).rejects.toThrow(/hostname guard/);
+    // Production still serves the recorded version: nothing to roll back.
+    expect(refused.wrangler.deployVersion).not.toHaveBeenCalled();
+    expect(refused.wrangler.deployTriggers).not.toHaveBeenCalled();
+    await expect(refused.worker.activeVersion()).resolves.toBe(V1);
+
+    // Without a listed hostname wrangler applies none, so there is nothing to check.
+    const bare = fakeWorker(V1);
+    await deploy(deps(github, bare, []), { upload: uploaded, identity: NEW });
+    expect(bare.hostnames.check).not.toHaveBeenCalled();
   });
 
   it("refuses to upload or deploy when production changed meanwhile", async () => {

@@ -13,7 +13,7 @@ import { siteConfig } from "../../content/site.config";
 import { PublicationIdentitySchema } from "../../src/lib/content/publication-state";
 import { readContentBundle } from "../../src/lib/content/reader";
 import { ContentRegistrySchema } from "../../src/lib/content/schema";
-import { CloudflareApi, WranglerCli } from "./cloudflare";
+import { CloudflareApi, HostnameGuardCli, WranglerCli } from "./cloudflare";
 import { GitHubClient } from "./github";
 import { optionsFromEnvironment, passedGate } from "./green-commit";
 import {
@@ -127,6 +127,7 @@ async function deps(): Promise<ReleaseDeps> {
     }),
     worker: new CloudflareApi({ config, token: cloudflareToken }),
     wrangler: new WranglerCli({ cwd: root, env: process.env }),
+    hostnames: new HostnameGuardCli({ cwd: root, env: process.env }),
     log: (message) => console.error(`release: ${message}`),
   };
 }
@@ -238,6 +239,19 @@ const commands: Record<string, () => Promise<void>> = {
     await checkBaseline(d, await gateState(), (origin, identity) =>
       waitForIdentity(origin, identity, { attempts: 1 }),
     );
+  },
+
+  /**
+   * Before the upload (whose first deploy applies the routes too): tools/cf-guard compares the routes in
+   * wrangler.toml with the Worker's live Custom Domains and zone routes. `deploy` checks again.
+   */
+  async hostnames() {
+    const d = await deps();
+    if (d.config.hostnames.length === 0) {
+      console.log("No hostname in wrangler.toml: wrangler changes none.");
+      return;
+    }
+    await d.hostnames.check();
   },
 
   /** The Notion snapshot for this release (the only step with Notion credentials besides feedback). */

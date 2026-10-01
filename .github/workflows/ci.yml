@@ -4,7 +4,9 @@
 # task-intent-v1 plus the dashboard's ops-v1 caller tests, and "CI gate" is the single status check to require.
 # Deploys run only on main, only for the app that changed (itself, a shared package it compiles in, a contract
 # file it bundles, or was dispatched), after the gate passes; Lab deploys after Todofy (its TODOFY binding) and
-# the dashboard after every app whose Ops entrypoint it binds.
+# the dashboard after every app whose Ops entrypoint it binds. A push to main whose commit already passed every
+# needed check in a branch push run reuses that run: the checks are skipped, the gate and the deploys still run
+# (ci_changes.py find_reusable). Every deploy that applies routes runs tools/cf-guard first.
 # See README.md "CI".
 name: CI and deploy
 
@@ -54,6 +56,10 @@ jobs:
       website_deploy: ${{ steps.decide.outputs.website_deploy }}
       website_relay_deploy: ${{ steps.decide.outputs.website_relay_deploy }}
       lab_deploy: ${{ steps.decide.outputs.lab_deploy }}
+      # A push to main that reuses a green branch run of the same commit (all check outputs above are false).
+      checks_reused: ${{ steps.decide.outputs.checks_reused }}
+      reused_run_url: ${{ steps.decide.outputs.reused_run_url }}
+      reused_jobs: ${{ steps.decide.outputs.reused_jobs }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -63,6 +69,12 @@ jobs:
           fetch-depth: 0
       - name: Test the change detection and the Wrangler configs
         run: python3 -m unittest discover -s .github/scripts
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: '26'
+      # The deploy hostname guard every deploy job runs (dependency-free; synthetic API, no token).
+      - name: Test the deploy hostname guard
+        run: node --test tools/cf-guard/test/*.test.mjs
       # Only for a push to main. A run that failed or was cancelled (also while pending in the
       # concurrency group) is not "success", so its changes stay in this run's diff. Any error here
       # leaves the base empty, and an empty base runs everything.
@@ -86,9 +98,12 @@ jobs:
           fi
           echo "Last successful main run: ${sha:-none}"
           echo "sha=$sha" >> "$GITHUB_OUTPUT"
+      # On a push to main it also looks for a green branch push run of this exact commit to reuse (reads this
+      # workflow's runs and their jobs with the read-only token; prints only run URLs and job names).
       - name: Decide which apps to check and deploy
         id: decide
         env:
+          GH_TOKEN: ${{ github.token }}
           EVENT_NAME: ${{ github.event_name }}
           REF: ${{ github.ref }}
           AFTER: ${{ github.sha }}
@@ -667,8 +682,26 @@ jobs:
         run: |
           pnpm content:prepare:empty
           pnpm check
+      # The browser download is cached by the locked Playwright version; the system libraries it needs are
+      # installed on every run (install-deps), so a cache hit only skips the download.
+      - name: Read the locked Playwright version
+        id: playwright
+        run: echo "version=$(pnpm exec playwright --version | awk '{print $2}')" >> "$GITHUB_OUTPUT"
+      - name: Restore the Playwright browser
+        id: playwright-cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-chromium-${{ runner.os }}-${{ steps.playwright.outputs.version }}
       - name: Install the pinned Playwright browser
-        run: pnpm exec playwright install --with-deps chromium
+        run: |
+          if [ "$CACHE_HIT" = true ]; then
+            pnpm exec playwright install-deps chromium
+          else
+            pnpm exec playwright install --with-deps chromium
+          fi
+        env:
+          CACHE_HIT: ${{ steps.playwright-cache.outputs.cache-hit }}
       # Each source builds the export and runs the browser suite against it (pnpm start = wrangler dev on
       # out/). The fixture also runs the release's route contract (every route, asset hash, redirect, 404).
       - name: Build and test the static export (empty and fixture content)
@@ -720,7 +753,16 @@ jobs:
           WEBSITE: ${{ needs.website-checks.result }}
           LAB: ${{ needs.lab-checks.result }}
           CONTRACTS: ${{ needs.contracts.result }}
+          CHECKS_REUSED: ${{ needs.changes.outputs.checks_reused }}
+          REUSED_RUN_URL: ${{ needs.changes.outputs.reused_run_url }}
+          REUSED_JOBS: ${{ needs.changes.outputs.reused_jobs }}
         run: |
+          # A push to main that reused a branch run of the same commit: its checks are skipped here because that
+          # run passed them (ci_changes.py find_reusable checked each job's conclusion).
+          if [ "$CHECKS_REUSED" = true ]; then
+            echo "Checks reused from $REUSED_RUN_URL (same commit, branch push, CI gate passed): $REUSED_JOBS"
+            echo "::notice::Checks reused from $REUSED_RUN_URL"
+          fi
           failed=0
           for pair in "Changes=$CHANGES" "Shared packages=$PACKAGES" "Todofy static checks=$TODOFY_STATIC" \
             "Todofy runtime=$TODOFY_RUNTIME" "Todofy checks=$TODOFY" "Mail Hero checks=$MAIL_HERO" \
@@ -742,13 +784,14 @@ jobs:
     # Keep the status function and the results explicit. "gate" needs Mail Hero checks (and Dashboard checks),
     # which are skipped when only Todofy changed; a bare condition gets an implicit success() that looks at the whole needs
     # chain, sees that skipped job and skips this deploy too (actions/runner#491, #2205).
-    # .github/scripts/test_ci_changes.py checks this shape.
+    # .github/scripts/test_ci_changes.py checks this shape. A check job may be skipped only when this push to main
+    # reuses a green branch run of the same commit (checks_reused); the gate must still pass.
     if: >-
       ${{ !cancelled()
       && needs.changes.result == 'success'
-      && needs.todofy-static.result == 'success'
-      && needs.todofy-runtime.result == 'success'
-      && needs.todofy-checks.result == 'success'
+      && (needs.todofy-static.result == 'success' || (needs.changes.outputs.checks_reused == 'true' && needs.todofy-static.result == 'skipped'))
+      && (needs.todofy-runtime.result == 'success' || (needs.changes.outputs.checks_reused == 'true' && needs.todofy-runtime.result == 'skipped'))
+      && (needs.todofy-checks.result == 'success' || (needs.changes.outputs.checks_reused == 'true' && needs.todofy-checks.result == 'skipped'))
       && needs.gate.result == 'success'
       && github.ref == 'refs/heads/main'
       && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
@@ -822,6 +865,17 @@ jobs:
           uv run python deploy/deploy_vars.py exec core -- uv run pywrangler deploy --dry-run --config wrangler.toml
           uv run python deploy/deploy_vars.py exec gateway -- npx --no-install wrangler deploy --dry-run \
             --config gateway/wrangler.toml --secrets-file "$RUNNER_TEMP/todofy-gateway-secrets.json"
+      # tools/cf-guard (read-only GETs, prints hostnames and PASS/FAIL only): wrangler applies a config's Custom
+      # Domains (or zone routes) as the Worker's complete set, so stop before any production change when a live
+      # hostname would be detached or another Worker's hostname or DNS record taken over. For an intentional
+      # change, set the exact hostnames here (space-separated) in the same commit that changes wrangler.toml.
+      - name: Check the hostnames against production
+        working-directory: .
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+          CF_GUARD_ALLOW_REMOVE: ''
+          CF_GUARD_ALLOW_CONFLICT: ''
+        run: node tools/cf-guard/cf-guard.mjs --config todofy/wrangler.toml --config todofy/gateway/wrangler.toml
       # todofy-core first: the Durable Object class and every route a new gateway calls must exist before
       # the gateway that binds and calls them goes live.
       - name: Apply D1 migrations, then deploy todofy-core
@@ -893,7 +947,7 @@ jobs:
     if: >-
       ${{ !cancelled()
       && needs.changes.result == 'success'
-      && needs.mail-hero-checks.result == 'success'
+      && (needs.mail-hero-checks.result == 'success' || (needs.changes.outputs.checks_reused == 'true' && needs.mail-hero-checks.result == 'skipped'))
       && needs.gate.result == 'success'
       && github.ref == 'refs/heads/main'
       && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
@@ -955,6 +1009,17 @@ jobs:
         run: |
           node ../deploy/deploy-vars.mjs exec -- npx --no-install wrangler deploy --dry-run --config ../wrangler.toml \
             --secrets-file "$RUNNER_TEMP/mail-hero-secrets.json"
+      # tools/cf-guard (read-only GETs, prints hostnames and PASS/FAIL only): wrangler applies a config's Custom
+      # Domains (or zone routes) as the Worker's complete set, so stop before any production change when a live
+      # hostname would be detached or another Worker's hostname or DNS record taken over. For an intentional
+      # change, set the exact hostnames here (space-separated) in the same commit that changes wrangler.toml.
+      - name: Check the hostnames against production
+        working-directory: .
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.MAIL_HERO_CF_API_TOKEN }}
+          CF_GUARD_ALLOW_REMOVE: ''
+          CF_GUARD_ALLOW_CONFLICT: ''
+        run: node tools/cf-guard/cf-guard.mjs --config mail-hero/wrangler.toml
       # Mail Hero's own token: this environment also holds Todofy's CF_API_TOKEN.
       - name: Apply migrations, then deploy the native Worker
         working-directory: mail-hero/cloudflare
@@ -981,7 +1046,7 @@ jobs:
     if: >-
       ${{ !cancelled()
       && needs.changes.result == 'success'
-      && needs.dashboard-checks.result == 'success'
+      && (needs.dashboard-checks.result == 'success' || (needs.changes.outputs.checks_reused == 'true' && needs.dashboard-checks.result == 'skipped'))
       && needs.gate.result == 'success'
       && (needs.todofy-deploy.result == 'success' || needs.todofy-deploy.result == 'skipped')
       && (needs.mail-hero-deploy.result == 'success' || needs.mail-hero-deploy.result == 'skipped')
@@ -1051,6 +1116,17 @@ jobs:
         run: |
           node ../deploy/deploy-vars.mjs exec -- npx --no-install wrangler deploy --dry-run --config ../wrangler.toml \
             --secrets-file "$RUNNER_TEMP/home-secrets.json"
+      # tools/cf-guard (read-only GETs, prints hostnames and PASS/FAIL only): wrangler applies a config's Custom
+      # Domains (or zone routes) as the Worker's complete set, so stop before any production change when a live
+      # hostname would be detached or another Worker's hostname or DNS record taken over. For an intentional
+      # change, set the exact hostnames here (space-separated) in the same commit that changes wrangler.toml.
+      - name: Check the hostnames against production
+        working-directory: .
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+          CF_GUARD_ALLOW_REMOVE: ''
+          CF_GUARD_ALLOW_CONFLICT: ''
+        run: node tools/cf-guard/cf-guard.mjs --config dashboard/wrangler.toml
       # No D1 and no migration step: the HomeState class migration (v1, new_sqlite_classes) is in the config.
       - name: Deploy the Worker home
         working-directory: dashboard/worker
@@ -1119,7 +1195,7 @@ jobs:
     if: >-
       ${{ !cancelled()
       && needs.changes.result == 'success'
-      && needs.lab-checks.result == 'success'
+      && (needs.lab-checks.result == 'success' || (needs.changes.outputs.checks_reused == 'true' && needs.lab-checks.result == 'skipped'))
       && needs.gate.result == 'success'
       && (needs.todofy-deploy.result == 'success' || needs.todofy-deploy.result == 'skipped')
       && github.ref == 'refs/heads/main'
@@ -1182,6 +1258,17 @@ jobs:
         run: |
           node ../deploy/deploy-vars.mjs exec -- npx --no-install wrangler deploy --dry-run --config ../wrangler.toml \
             --secrets-file "$RUNNER_TEMP/lab-secrets.json"
+      # tools/cf-guard (read-only GETs, prints hostnames and PASS/FAIL only): wrangler applies a config's Custom
+      # Domains (or zone routes) as the Worker's complete set, so stop before any production change when a live
+      # hostname would be detached or another Worker's hostname or DNS record taken over. For an intentional
+      # change, set the exact hostnames here (space-separated) in the same commit that changes wrangler.toml.
+      - name: Check the hostnames against production
+        working-directory: .
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+          CF_GUARD_ALLOW_REMOVE: ''
+          CF_GUARD_ALLOW_CONFLICT: ''
+        run: node tools/cf-guard/cf-guard.mjs --config lab/wrangler.toml
       - name: Apply D1 migrations, then deploy the Worker lab
         working-directory: lab/worker
         env:
@@ -1246,7 +1333,7 @@ jobs:
     if: >-
       ${{ !cancelled()
       && needs.changes.result == 'success'
-      && needs.website-checks.result == 'success'
+      && (needs.website-checks.result == 'success' || (needs.changes.outputs.checks_reused == 'true' && needs.website-checks.result == 'skipped'))
       && needs.gate.result == 'success'
       && github.ref == 'refs/heads/main'
       && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
@@ -1275,7 +1362,7 @@ jobs:
     if: >-
       ${{ !cancelled()
       && needs.changes.result == 'success'
-      && needs.website-checks.result == 'success'
+      && (needs.website-checks.result == 'success' || (needs.changes.outputs.checks_reused == 'true' && needs.website-checks.result == 'skipped'))
       && needs.gate.result == 'success'
       && github.ref == 'refs/heads/main'
       && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')

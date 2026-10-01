@@ -1,5 +1,6 @@
 """Unit tests for ci_changes.py: python3 -m unittest discover -s .github/scripts"""
 
+import io
 import json
 import os
 import re
@@ -152,6 +153,11 @@ class Classify(unittest.TestCase):
     def test_ci_changes_recheck_everything_but_deploy_nothing(self):
         self.assertEqual(push([".github/workflows/ci.yml"]), expect(T, T, T, F, F, packages=T, **ALL_CHECKED))
         self.assertEqual(push([".github/scripts/ci_changes.py"]), expect(T, T, T, F, F, packages=T, **ALL_CHECKED))
+
+    def test_ci_tooling_under_tools_counts_as_ci(self):
+        # tools/cf-guard runs in every deploy job (and the website release): re-check everything, deploy nothing.
+        self.assertEqual(push(["tools/cf-guard/cf-guard.mjs"]), expect(T, T, T, F, F, packages=T, **ALL_CHECKED))
+        self.assertEqual(push(["tools-notes.md"]), expect(F, F, F, F, F))
 
     def test_a_shared_package_checks_and_deploys_every_app_that_compiles_it_in(self):
         for path in (
@@ -422,7 +428,10 @@ class RealGit(unittest.TestCase):
         self.temporary.cleanup()
 
     def main_run(self, after, last_success, ref=MAIN):
-        return self.run_main(EVENT_NAME="push", REF=ref, AFTER=after, DISPATCH_APP="", LAST_SUCCESS=last_success)
+        outputs = self.run_main(EVENT_NAME="push", REF=ref, AFTER=after, DISPATCH_APP="", LAST_SUCCESS=last_success)
+        # Without a token there is no run to reuse: the checks run (Reuse covers the lookup).
+        self.assertEqual(outputs["checks_reused"], "false")
+        return {key: outputs[key] for key in ci_changes.KEYS}
 
     def test_a_cancelled_pending_run_on_main_is_not_lost(self):
         # Run 1 (green) at p0; push 2 touched todofy/ and was cancelled while pending; push 3 touched
@@ -443,7 +452,7 @@ class RealGit(unittest.TestCase):
         after = self.commit("README.md.orig")
         outputs = self.main_run(after, green)
         website = {"website_check", "website_deploy", "website_relay_deploy"}
-        self.assertEqual({key for key, value in outputs.items() if value == "false"}, website)
+        self.assertEqual({key for key in ci_changes.KEYS if outputs[key] == "false"}, website)
 
     def test_a_failed_run_on_main_is_repeated(self):
         # Push A changed todofy/ and its run failed (a Mail Hero flake); push B fixes only mail-hero/.
@@ -621,6 +630,10 @@ class DeployConditions(unittest.TestCase):
         ("lab-deploy", "todofy-deploy"),
     }
 
+    # Check jobs a deploy may also find skipped, but only when this push to main reuses a green branch run of
+    # the same commit (ci_changes.py find_reusable); "changes" and "gate" must always succeed.
+    CHECK_JOBS = {"todofy-static", "todofy-runtime", "todofy-checks", "mail-hero-checks", "dashboard-checks", "website-checks", "lab-checks"}
+
     def jobs(self):
         return workflow_jobs()
 
@@ -655,6 +668,13 @@ class DeployConditions(unittest.TestCase):
                         self.assertIn(
                             f"(needs.{need}.result == 'success' || needs.{need}.result == 'skipped')", condition
                         )
+                    elif need in self.CHECK_JOBS:
+                        self.assertIn(
+                            f"(needs.{need}.result == 'success' || (needs.changes.outputs.checks_reused == 'true' "
+                            f"&& needs.{need}.result == 'skipped'))",
+                            condition,
+                        )
+                        self.assertEqual(condition.count(f"needs.{need}.result == 'skipped'"), 1)
                     else:
                         self.assertIn(f"needs.{need}.result == 'success'", condition)
                         self.assertNotIn(f"needs.{need}.result == 'skipped'", condition)
@@ -666,8 +686,10 @@ class DeployConditions(unittest.TestCase):
         self.assertLessEqual({"todofy-deploy", "mail-hero-deploy", "lab-deploy"}, set(self.needs(block)))
         self.assertIn("group: dashboard-production", block)
         # The only token: the one Todofy deploy uses; no other secret reaches wrangler's environment.
+        # (the hostname guard's step and the deploy step).
         self.assertIn("CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}", block)
-        self.assertEqual(block.count("CLOUDFLARE_API_TOKEN:"), 1)
+        self.assertEqual(block.count("CLOUDFLARE_API_TOKEN:"), 2)
+        self.assertEqual(block.count("CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}"), 2)
         # deploy-vars.mjs compares (never writes) the deploy token, to warn when it is the analytics token.
         secrets = block.split("- name: Write the Worker secrets file\n", 1)[1].split("\n      - ", 1)[0]
         self.assertIn("CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}", secrets)
@@ -729,6 +751,32 @@ class DeployConditions(unittest.TestCase):
                 self.assertIn(f"{key}: ${{{{ steps.decide.outputs.{key} }}}}", blocks["changes"])
                 users = [name for name, block in blocks.items() if f"needs.changes.outputs.{key} == 'true'" in block]
                 self.assertTrue(users, key)
+
+    def test_changes_exports_the_reuse_outputs_and_the_gate_prints_them(self):
+        blocks = self.jobs()
+        for key in ci_changes.REUSE_KEYS:
+            with self.subTest(output=key):
+                self.assertIn(f"{key}: ${{{{ steps.decide.outputs.{key} }}}}", blocks["changes"])
+                self.assertIn(f"${{{{ needs.changes.outputs.{key} }}}}", blocks["gate"])
+        decide = blocks["changes"].split("- name: Decide which apps to check and deploy\n", 1)[1]
+        self.assertIn("GH_TOKEN: ${{ github.token }}", decide)
+        # Reading this workflow's runs and jobs needs actions: read, nothing more.
+        self.assertIn("      actions: read\n", blocks["changes"])
+        self.assertNotIn("write", blocks["changes"].split("    steps:", 1)[0])
+
+    def test_check_jobs_map_names_to_the_outputs_that_run_them(self):
+        """CHECK_JOBS (what a reused run must have passed) names each job that a check output runs."""
+        blocks = self.jobs()
+        named = {}
+        for job, block in blocks.items():
+            name = re.search(r"^    name: (.+)$", block, re.MULTILINE).group(1)
+            flag = re.search(r"needs\.changes\.outputs\.(\w+) == 'true'", self.condition(block))
+            if flag and flag.group(1) in ci_changes.CHECK_JOBS and "gate" not in self.needs(block):
+                named.setdefault(flag.group(1), set()).add(re.sub(r" \(\$\{\{ matrix\.shard \}\}/\d+\)$", " (*)", name))
+        self.assertEqual(named, {key: set(names) for key, names in ci_changes.CHECK_JOBS.items()})
+        self.assertEqual(set(ci_changes.CHECK_JOBS), {key for key in ci_changes.KEYS if not key.endswith("_deploy")})
+        for always in ci_changes.ALWAYS_JOBS:
+            self.assertIn(f"    name: {always}\n", WORKFLOW.read_text())
 
     def test_shared_packages_run_only_when_flagged(self):
         self.assertEqual(self.condition(self.jobs()["shared-packages"]), "needs.changes.outputs.packages == 'true'")
@@ -826,7 +874,7 @@ class WebsiteRelease(unittest.TestCase):
         notion = [line for line in text.splitlines() if "secrets.WEBSITE_NOTION_TOKEN" in line]
         self.assertEqual(len(notion), 4)
         cloudflare = [line for line in text.splitlines() if "secrets.CF_API_TOKEN" in line]
-        self.assertEqual(len(cloudflare), 5)
+        self.assertEqual(len(cloudflare), 6)
         # GITHUB_TOKEN never in a job or workflow env (install scripts, builds and tests would see it): only
         # in the env of the steps that read the CI results or read and write the release records.
         steps = [step for job in self.release_jobs().values() for step in job.split("\n      - ")[1:]]
@@ -1240,6 +1288,279 @@ class AccessProbe(unittest.TestCase):
         code, output = self.probe("000 ")
         self.assertEqual(code, 1, output)
         self.assertIn("/ never reached Access", output)
+
+
+
+REPOSITORY = "ziyixi/todofy"
+RUN_ID = "900"
+WORKFLOW_ID = 77
+
+
+def job(name, conclusion="success", status="completed"):
+    return {"name": name, "status": status, "conclusion": conclusion}
+
+
+def green_jobs(*names):
+    return [job(name) for name in ("Changes", "CI gate", *names)]
+
+
+TODOFY_JOBS = ("Todofy static checks", "Todofy runtime (1/3)", "Todofy runtime (2/3)", "Todofy runtime (3/3)", "Todofy checks")
+
+
+def branch_run(run_id=800, **overrides):
+    run = {
+        "id": run_id,
+        "workflow_id": WORKFLOW_ID,
+        "head_sha": SHA,
+        "event": "push",
+        "head_branch": "feature",
+        "status": "completed",
+        "conclusion": "success",
+        "html_url": f"https://github.com/{REPOSITORY}/actions/runs/{run_id}",
+        "repository": {"full_name": REPOSITORY},
+        "head_repository": {"full_name": REPOSITORY},
+    }
+    run.update(overrides)
+    return run
+
+
+def fake_github(runs, jobs_by_run):
+    """A read-only fake of the three GitHub REST reads find_reusable makes."""
+    calls = []
+
+    def get(path):
+        calls.append(path)
+        if path == f"/repos/{REPOSITORY}/actions/runs/{RUN_ID}":
+            return {"id": int(RUN_ID), "workflow_id": WORKFLOW_ID}
+        if path.startswith(f"/repos/{REPOSITORY}/actions/workflows/{WORKFLOW_ID}/runs?"):
+            assert f"head_sha={SHA}" in path and "event=push" in path and "status=completed" in path, path
+            return {"workflow_runs": runs}
+        match = re.fullmatch(rf"/repos/{re.escape(REPOSITORY)}/actions/runs/(\d+)/jobs\?filter=latest&per_page=100", path)
+        if match:
+            jobs = jobs_by_run[int(match.group(1))]
+            return {"total_count": len(jobs), "jobs": jobs}
+        raise AssertionError(f"unexpected read {path}")
+
+    get.calls = calls
+    return get
+
+
+ENV = {"GITHUB_REPOSITORY": REPOSITORY, "GITHUB_RUN_ID": RUN_ID, "GH_TOKEN": "unused-by-the-fake"}
+
+
+class Reuse(unittest.TestCase):
+    """A push to main reuses a green branch push run of the same commit only when that run passed every check
+    this push needs; deploy decisions never change."""
+
+    def reuse(self, result, runs, jobs_by_run, event="push", ref=MAIN):
+        return ci_changes.try_reuse(event, ref, SHA, result, ENV, fake_github(runs, jobs_by_run))
+
+    def test_a_covering_green_branch_run_skips_the_checks_and_keeps_the_deploys(self):
+        needed = expect(T, F, T, T, F)  # Todofy changed: Todofy checks, Contracts, Todofy deploy
+        result, extra, reason = self.reuse(needed, [branch_run()], {800: green_jobs(*TODOFY_JOBS, "Contracts", "Mail Hero checks")})
+        self.assertEqual(result, expect(F, F, F, T, F))
+        self.assertEqual(extra["checks_reused"], "true")
+        self.assertEqual(extra["reused_run_url"], f"https://github.com/{REPOSITORY}/actions/runs/800")
+        self.assertEqual(extra["reused_jobs"], "Changes, CI gate, Todofy static checks, Todofy runtime (*), Todofy checks, Contracts")
+        self.assertIn("checks reused", reason)
+
+    def test_every_deploy_decision_survives_reuse(self):
+        needed = ci_changes.everything()
+        jobs = green_jobs(*TODOFY_JOBS, "Mail Hero checks", "Dashboard checks", "Website checks", "Lab checks", "Contracts", "Shared packages")
+        result, extra, _ = self.reuse(needed, [branch_run()], {800: jobs})
+        self.assertEqual(extra["checks_reused"], "true")
+        for key in ci_changes.KEYS:
+            with self.subTest(output=key):
+                self.assertEqual(result[key], key.endswith("_deploy"))
+
+    def test_a_run_that_skipped_a_needed_check_is_not_reused(self):
+        # The branch diff was Todofy-only, but main also needs Mail Hero checks (a change since the last green main).
+        needed = expect(T, T, T, T, T)
+        result, extra, reason = self.reuse(needed, [branch_run()], {800: green_jobs(*TODOFY_JOBS, "Contracts") + [job("Mail Hero checks", "skipped")]})
+        self.assertEqual((result, extra["checks_reused"]), (needed, "false"))
+        self.assertIn("ran every check this push needs", reason)
+
+    def test_a_missing_failed_or_partial_matrix_is_not_reused(self):
+        needed = expect(T, F, T, T, F)
+        for jobs in (
+            green_jobs("Todofy static checks", "Todofy checks", "Contracts"),  # no runtime shard at all
+            green_jobs(*TODOFY_JOBS[:-2], "Todofy checks", "Contracts") + [job("Todofy runtime (3/3)", "failure")],
+            green_jobs(*TODOFY_JOBS, "Contracts")[:1] + green_jobs(*TODOFY_JOBS, "Contracts")[2:],  # no CI gate
+            [job("Changes"), job("CI gate", "failure"), *[job(name) for name in (*TODOFY_JOBS, "Contracts")]],
+            green_jobs(*TODOFY_JOBS) + [job("Contracts", None, "in_progress")],
+        ):
+            with self.subTest(jobs=[(j["name"], j["conclusion"]) for j in jobs]):
+                result, extra, _ = self.reuse(needed, [branch_run()], {800: jobs})
+                self.assertEqual((result, extra["checks_reused"]), (needed, "false"))
+
+    def test_only_green_branch_push_runs_of_this_commit_and_workflow_count(self):
+        needed = expect(F, T, T, F, T)
+        jobs = green_jobs("Mail Hero checks", "Contracts")
+        for run in (
+            branch_run(head_branch="main"),
+            branch_run(head_sha="c" * 40),
+            branch_run(event="workflow_dispatch"),
+            branch_run(conclusion="failure"),
+            branch_run(conclusion="cancelled"),
+            branch_run(status="in_progress", conclusion=None),
+            branch_run(workflow_id=WORKFLOW_ID + 1),
+            branch_run(head_repository={"full_name": "someone/fork"}),
+            branch_run(run_id=int(RUN_ID)),  # this run itself
+        ):
+            with self.subTest(run={k: run[k] for k in ("head_branch", "head_sha", "event", "conclusion", "workflow_id")}):
+                result, extra, reason = self.reuse(needed, [run], {run["id"]: jobs})
+                self.assertEqual((result, extra["checks_reused"]), (needed, "false"))
+                self.assertIn("no green branch run of this commit", reason)
+
+    def test_the_newest_covering_run_is_used(self):
+        needed = expect(F, T, T, F, T)
+        runs = [branch_run(801), branch_run(805), branch_run(803)]
+        jobs = {801: green_jobs("Mail Hero checks", "Contracts"), 803: green_jobs("Mail Hero checks", "Contracts"), 805: green_jobs("Contracts")}
+        _, extra, _ = self.reuse(needed, runs, jobs)
+        self.assertTrue(extra["reused_run_url"].endswith("/runs/803"))
+
+    def test_no_lookup_off_main_for_dispatch_or_when_no_check_is_needed(self):
+        for event, ref, needed in (
+            ("push", BRANCH, expect(T, F, T, T, F)),
+            ("workflow_dispatch", MAIN, ci_changes.dispatched("both")),
+            ("push", MAIN, expect(F, F, F, F, F)),
+        ):
+            with self.subTest(event=event, ref=ref):
+                def get(path):
+                    raise AssertionError("no read expected")
+
+                result, extra, _ = ci_changes.try_reuse(event, ref, SHA, needed, ENV, get)
+                self.assertEqual((result, extra), (needed, ci_changes.NO_REUSE))
+
+    def test_any_lookup_failure_runs_the_checks(self):
+        needed = expect(T, F, T, T, F)
+
+        forbidden = ci_changes.urllib.error.HTTPError("/x", 403, "Forbidden", {}, io.BytesIO(b""))
+        self.addCleanup(forbidden.close)
+
+        def broken(path):
+            raise forbidden
+
+        result, extra, reason = ci_changes.try_reuse("push", MAIN, SHA, needed, ENV, broken)
+        self.assertEqual((result, extra["checks_reused"]), (needed, "false"))
+        self.assertIn("HTTP 403", reason)
+        result, extra, reason = ci_changes.try_reuse("push", MAIN, SHA, needed, {}, None)
+        self.assertEqual((result, extra["checks_reused"]), (needed, "false"))
+        self.assertIn("no token", reason)
+
+
+class ReuseRealGit(unittest.TestCase):
+    """main() with a fake GitHub, the way the Changes step runs it on a push to main."""
+
+    git, commit, setUp, tearDown = RealGit.git, RealGit.commit, RealGit.setUp, RealGit.tearDown
+
+    def test_main_writes_the_reuse_outputs(self):
+        green = self.commit("README.md")
+        after = self.commit("mail-hero/cloudflare/x.ts")
+        get = fake_github([branch_run(head_sha=after)], {800: green_jobs("Mail Hero checks", "Contracts")})
+        # fake_github checks head_sha=SHA in the query; give it this commit instead.
+        def get_for(path):
+            return get(path.replace(after, SHA)) if "workflows" in path else get(path)
+
+        output = Path(self.root, "output.txt")
+        cwd = os.getcwd()
+        saved = {key: os.environ.get(key) for key in ("GITHUB_OUTPUT", "GITHUB_STEP_SUMMARY", "EVENT_NAME", "REF", "AFTER", "DISPATCH_APP", "LAST_SUCCESS", *ENV)}
+        try:
+            os.chdir(self.root)
+            os.environ.update(ENV, EVENT_NAME="push", REF=MAIN, AFTER=after, DISPATCH_APP="", LAST_SUCCESS=green, GITHUB_OUTPUT=str(output))
+            os.environ.pop("GITHUB_STEP_SUMMARY", None)
+            ci_changes.main(get_for)
+        finally:
+            os.chdir(cwd)
+            for key, value in saved.items():
+                if value is None:
+                    os.environ.pop(key, None)
+                else:
+                    os.environ[key] = value
+        outputs = dict(line.split("=", 1) for line in output.read_text().splitlines())
+        self.assertEqual(outputs["checks_reused"], "true")
+        self.assertEqual(outputs["mail_hero_check"], "false")
+        self.assertEqual(outputs["contracts"], "false")
+        self.assertEqual(outputs["mail_hero_deploy"], "true")
+        self.assertEqual(outputs["reused_jobs"], "Changes, CI gate, Mail Hero checks, Contracts")
+        self.assertEqual(set(outputs), {*ci_changes.KEYS, *ci_changes.REUSE_KEYS})
+
+
+class HostnameGuard(unittest.TestCase):
+    """Every deploy that applies a wrangler.toml with Custom Domains or zone routes runs tools/cf-guard on that
+    config, with the job's own token, before the first production change (D1 migrations or wrangler deploy)."""
+
+    GUARD = "node tools/cf-guard/cf-guard.mjs"
+    STEP = "- name: Check the hostnames against production\n"
+
+    @staticmethod
+    def has_routes(config):
+        import tomllib
+
+        with open(REPO / config, "rb") as handle:
+            data = tomllib.load(handle)
+        return bool(data.get("routes") or data.get("route"))
+
+    def test_each_deploy_guards_its_configs_before_changing_production(self):
+        blocks = workflow_jobs()
+        for job, configs, token, first_change in (
+            ("todofy-deploy", ["todofy/wrangler.toml", "todofy/gateway/wrangler.toml"], "CF_API_TOKEN", "wrangler d1 migrations apply"),
+            ("mail-hero-deploy", ["mail-hero/wrangler.toml"], "MAIL_HERO_CF_API_TOKEN", "wrangler d1 migrations apply"),
+            ("dashboard-deploy", ["dashboard/wrangler.toml"], "CF_API_TOKEN", "deploy-vars.mjs exec -- npx --no-install wrangler deploy --config"),
+            ("lab-deploy", ["lab/wrangler.toml"], "CF_API_TOKEN", "wrangler d1 migrations apply"),
+        ):
+            block = blocks[job]
+            with self.subTest(job=job):
+                self.assertEqual(block.count(self.STEP), 1)
+                step = block.split(self.STEP, 1)[1].split("\n      - ", 1)[0]
+                self.assertIn("        working-directory: .\n", step)
+                self.assertIn(f"CLOUDFLARE_API_TOKEN: ${{{{ secrets.{token} }}}}", step)
+                self.assertIn("CF_GUARD_ALLOW_REMOVE: ''", step)
+                self.assertIn("CF_GUARD_ALLOW_CONFLICT: ''", step)
+                self.assertIn(self.GUARD + "".join(f" --config {config}" for config in configs) + "\n", step + "\n")
+                self.assertLess(block.index(self.STEP), block.index(first_change))
+                self.assertTrue(any(self.has_routes(config) for config in configs))
+
+    def test_every_production_config_with_routes_is_guarded(self):
+        text = WORKFLOW.read_text()
+        release = (REPO / ".github" / "workflows" / "website-release.yml").read_text()
+        for config in sorted(REPO.glob("*/**/wrangler.toml")):
+            relative = config.relative_to(REPO).as_posix()
+            if "node_modules" in relative or not self.has_routes(relative):
+                continue
+            with self.subTest(config=relative):
+                if relative == "website/wrangler.toml":
+                    # The site release runs the guard through `pnpm release hostnames` and inside `deploy`.
+                    self.assertIn("run: pnpm release hostnames", release)
+                else:
+                    self.assertIn(f"--config {relative}", text)
+
+    def test_the_website_release_guards_before_the_upload_and_the_deploy(self):
+        release = (REPO / ".github" / "workflows" / "website-release.yml").read_text()
+        guard = release.index("- name: Check the wrangler.toml hostnames against production\n")
+        self.assertLess(guard, release.index("- name: Upload the verified export as a Worker version\n"))
+        step = release[guard:].split("\n      - ", 1)[0]
+        self.assertIn("if: steps.decision.outputs.deploy_required == 'true'", step)
+        self.assertIn("CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}", step)
+        deploy = release[release.index("- name: Deploy the version and the wrangler.toml hostnames\n") :].split("\n      - ", 1)[0]
+        self.assertIn("CF_GUARD_ALLOW_REMOVE: ''", deploy)
+        steps = (REPO / "website" / "scripts" / "release" / "steps.ts").read_text()
+        self.assertLess(steps.index("await deps.hostnames.check()"), steps.index("await deps.wrangler.deployTriggers()"))
+        cloudflare = (REPO / "website" / "scripts" / "release" / "cloudflare.ts").read_text()
+        self.assertIn('path.resolve(cwd, "..", "tools", "cf-guard", "cf-guard.mjs")', cloudflare)
+
+    def test_the_changes_job_tests_the_guard(self):
+        self.assertIn("run: node --test tools/cf-guard/test/*.test.mjs\n", workflow_jobs()["changes"])
+
+    def test_website_jobs_cache_the_playwright_browser_by_its_locked_version(self):
+        release = (REPO / ".github" / "workflows" / "website-release.yml").read_text()
+        for name, text in (("ci.yml website-checks", workflow_jobs()["website-checks"]), ("website-release.yml", release)):
+            with self.subTest(workflow=name):
+                self.assertIn("uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0", text)
+                self.assertIn("path: ~/.cache/ms-playwright", text)
+                self.assertIn("key: playwright-chromium-${{ runner.os }}-${{ steps.playwright.outputs.version }}", text)
+                self.assertIn("pnpm exec playwright install-deps chromium", text)
+                self.assertIn("pnpm exec playwright install --with-deps chromium", text)
 
 
 if __name__ == "__main__":
