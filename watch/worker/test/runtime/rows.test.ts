@@ -101,6 +101,23 @@ describe('rows read and written (Workers Free: 5,000,000 read and 100,000 writte
     expect(pass.written / checks).toBeLessThan(60);
   });
 
+  it('a check that finds nothing new reads and writes fewer rows still', async () => {
+    // The rest of the watches see their change first; then every page stays as it is.
+    await h.run(clock + 1000, 60_000, 200);
+    clock += 8 * HOUR;
+    await h.sql('UPDATE watches SET next_check_at = ?', clock);
+    await h.rows();
+    const result = await h.step(clock);
+    const pass = await h.rows();
+    const checks = Object.values(result.outcomes ?? {}).reduce((a, b) => a + b, 0);
+    console.log(`rows: a pass of ${String(checks)} unchanged checks read ${String(pass.read)}, wrote ${String(pass.written)} (${(pass.written / checks).toFixed(1)} written per check)`);
+    expect(checks).toBeGreaterThan(10);
+    expect(result.outcomes?.['unchanged']).toBe(checks);
+    // Measured ~30 read and ~7 written per check (the watch, its host, the URL's fetch time, their indexes).
+    expect(pass.read / checks).toBeLessThan(100);
+    expect(pass.written / checks).toBeLessThan(20);
+  });
+
   it('the heaviest UI reads stay bounded', async () => {
     await h.rows();
     await h.api.listWatches({});

@@ -12,7 +12,7 @@
  * Each check is stamped with the time it starts (`deps.now()`), not the alarm's: a pass may last minutes, and the
  * host's spacing, the URL's 15 minutes and the confirmation fetch count from the real request. What is left stays
  * due: the next alarm runs a second later with fresh budgets. A check that throws is recorded as INTERNAL_ERROR
- * (pipeline.ts recordInternalError). Afterwards the bounds of the watches whose checks may have added rows are kept
+ * (pipeline.ts recordInternalError). Afterwards the bounds of the watches whose checks added a change are kept
  * (store.ts pruneWatches, a few hundred rows read each), and the global ones at most hourly (every watch once a day).
  */
 import { deliver, type NotificationSink } from './notify.ts';
@@ -77,14 +77,15 @@ export async function runAlarm(deps: AlarmDeps, now: number): Promise<AlarmResul
     return timeLeft() && budgetLeft();
   };
 
-  // The watches whose checks may have added a snapshot or a change: only their bounds can have grown.
+  // The watches whose checks added a change (and a snapshot): only their bounds can have grown past them. A new
+  // notified state adds one snapshot per change of what is read, which the daily sweep bounds.
   const grown = new Set<string>();
   const check = async (row: WatchRow) => {
     const at = deps.now();
     try {
       const outcome = await runCheck(deps, row.id, at, budget);
       outcomes[outcome] = (outcomes[outcome] ?? 0) + 1;
-      if (outcome === 'changed' || outcome === 'unchanged') grown.add(row.id);
+      if (outcome === 'changed') grown.add(row.id);
     } catch (error) {
       // A bug in one watch's check must not stop the others: it counts as a failure of its own and waits at least the
       // URL's 15 minutes (its request was recorded); only a code is logged.
