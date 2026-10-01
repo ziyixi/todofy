@@ -3,23 +3,22 @@
  * opens an older deck the same way.
  */
 import { useQuery } from '@tanstack/react-query'
-import type { Day } from '../../../worker/src/api-types.ts'
-import { api, errorMessage } from '../api/client'
+import { dayOf, errorMessage, lab } from '../api/client'
 import { DeckView } from './DeckView'
 import { BuildingState, EmptyState, NoticeBanner } from './States'
 
-/** While a deck is being prepared the page re-reads /api/today every 30 s (only while visible). */
+/** While a deck is being prepared the page re-reads GetToday every 30 s (only while visible). */
 const BUILDING_REFETCH_MS = 30_000
 
 export function useToday() {
   return useQuery({
     queryKey: ['today'],
-    queryFn: api.today,
+    queryFn: () => lab.getToday({ name: 'today' }),
     refetchInterval: (query) => (query.state.data?.building ? BUILDING_REFETCH_MS : false),
   })
 }
 
-export function TodayView({ day }: { day?: Day }) {
+export function TodayView({ day }: { day?: string }) {
   const today = useToday()
   if (day) {
     return (
@@ -52,7 +51,7 @@ export function TodayView({ day }: { day?: Day }) {
     <>
       <NoticeBanner notice={data.notice} />
       {data.deck ? (
-        <DeckView key={data.deck.deck_id} day={data.deck.deck_id} today={data} />
+        <DeckView key={data.deck.deck} day={dayOf(data.deck.deck)} today={data} />
       ) : data.building ? (
         <BuildingState today={data} />
       ) : (

@@ -2,10 +2,12 @@
 import { useInfiniteQuery, useMutation } from '@tanstack/react-query'
 import { ExternalLink, FileText, Search } from 'lucide-react'
 import { useEffect, useId, useState } from 'react'
-import type { LikedPaper } from '../../../worker/src/api-types.ts'
-import { api, errorMessage, withRetry } from '../api/client'
+import type { LikedPaper } from '@ziyixi/proto/lab/ui/v1/library_pb'
+import { LIKED_FILTER_MAX } from '../../../worker/src/limits.ts'
+import { errorMessage, lab, withRetry } from '../api/client'
 import { useFeedback } from '../components/Feedback'
 import { formatWhen, newOpId, safeArxivUrl, sentences } from '../lib/format'
+import { isoOf } from '../lib/messages'
 
 function useDebounced(value: string, ms: number): string {
   const [debounced, setDebounced] = useState(value)
@@ -22,11 +24,11 @@ export function LikedView() {
   const q = useDebounced(text.trim(), 300)
   const liked = useInfiniteQuery({
     queryKey: ['liked', q],
-    queryFn: ({ pageParam }) => api.liked({ cursor: pageParam, q }),
-    initialPageParam: null as string | null,
-    getNextPageParam: (last) => last.next_cursor,
+    queryFn: ({ pageParam }) => lab.listLikedPapers({ pageToken: pageParam, filter: q }),
+    initialPageParam: '',
+    getNextPageParam: (last) => (last.nextPageToken === '' ? undefined : last.nextPageToken),
   })
-  const papers = liked.data?.pages.flatMap((page) => page.papers) ?? []
+  const papers = liked.data?.pages.flatMap((page) => page.likedPapers) ?? []
 
   return (
     <section className="panel" aria-labelledby="liked-title">
@@ -37,14 +39,14 @@ export function LikedView() {
           按标题搜索
         </label>
         <Search size={18} aria-hidden="true" />
-        <input id={searchId} type="search" placeholder="按标题搜索" value={text} onChange={(event) => setText(event.target.value)} />
+        <input id={searchId} type="search" placeholder="按标题搜索" maxLength={LIKED_FILTER_MAX} value={text} onChange={(event) => setText(event.target.value)} />
       </div>
       {liked.isPending ? <p className="muted">正在加载…</p> : null}
       {liked.isError ? <p role="alert">没有加载出来：{errorMessage(liked.error)}</p> : null}
       {liked.isSuccess && papers.length === 0 ? <p className="muted">{q ? '没有找到标题匹配的论文。' : '还没有喜欢的论文。去今日划一划吧。'}</p> : null}
       <ul className="library">
         {papers.map((paper) => (
-          <LikedRow key={paper.id} paper={paper} />
+          <LikedRow key={paper.name} liked={paper} />
         ))}
       </ul>
       {liked.hasNextPage ? (
@@ -56,34 +58,40 @@ export function LikedView() {
   )
 }
 
-function LikedRow({ paper }: { paper: LikedPaper }) {
+/** 取消喜欢 deletes the like (DeleteLikedPaper); 恢复喜欢 creates it again (CreateLikedPaper). */
+function LikedRow({ liked }: { liked: LikedPaper }) {
   const { announce, snack } = useFeedback()
+  const paper = liked.paper
+  const title = paper?.title ?? ''
   const [label, setLabel] = useState<'like' | null>('like')
   const feedback = useMutation({
-    mutationFn: (next: 'like' | null) => {
-      const body = { op_id: newOpId(), paper_id: paper.id, label: next }
-      return withRetry(() => api.feedback(body))
+    mutationFn: async (next: 'like' | null) => {
+      const requestId = newOpId()
+      if (next === null) await withRetry(() => lab.deleteLikedPaper({ name: liked.name, requestId }))
+      else await withRetry(() => lab.createLikedPaper({ likedPaper: {}, likedPaperId: liked.name.slice('likedPapers/'.length), requestId }))
+      return next
     },
     onMutate: (next) => setLabel(next),
     onError: (error, next) => {
       setLabel(next === null ? 'like' : null)
       snack({ text: `没有保存：${errorMessage(error)}`, tone: 'warn' })
     },
-    onSuccess: (response) => {
-      announce(response.label === 'like' ? `已恢复喜欢：${paper.title}` : `已取消喜欢：${paper.title}`)
+    onSuccess: (next) => {
+      announce(next === 'like' ? `已恢复喜欢：${title}` : `已取消喜欢：${title}`)
     },
   })
-  const abs = safeArxivUrl(paper.abs_url)
-  const pdf = safeArxivUrl(paper.pdf_url)
-  const firstLine = paper.brief ? paper.brief.split(/(?<=[。！？])/)[0] : sentences(paper.abstract)[0]
+  const abs = safeArxivUrl(paper?.abstractUri ?? '')
+  const pdf = safeArxivUrl(paper?.pdfUri ?? '')
+  const likedAt = isoOf(liked.createTime)
+  const firstLine = liked.brief ? liked.brief.split(/(?<=[。！？])/)[0] : sentences(paper?.abstractText ?? '')[0]
   return (
     <li className={`library-row${label === null ? ' is-excluded' : ''}`}>
       <h2 className="library-title" lang="en">
-        {paper.title}
+        {title}
       </h2>
       {firstLine ? <p className="liked-brief">{firstLine}</p> : null}
       <p className="muted small">
-        {formatWhen(paper.liked_at)} 喜欢{paper.new_version ? ' · 有新版本' : ''}
+        {likedAt ? formatWhen(likedAt) : ''} 喜欢{paper?.newVersion ? ' · 有新版本' : ''}
       </p>
       <div className="button-row">
         {abs ? (
@@ -100,7 +108,7 @@ function LikedRow({ paper }: { paper: LikedPaper }) {
           type="button"
           className="btn btn-ghost btn-small"
           disabled={feedback.isPending}
-          aria-label={`${label === 'like' ? '取消喜欢' : '恢复喜欢'}：${paper.title}`}
+          aria-label={`${label === 'like' ? '取消喜欢' : '恢复喜欢'}：${title}`}
           onClick={() => feedback.mutate(label === 'like' ? null : 'like')}
         >
           {label === 'like' ? '取消喜欢' : '恢复喜欢'}

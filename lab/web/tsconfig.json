@@ -1,6 +1,6 @@
 {
-  // The dashboard UI's settings: allowImportingTsExtensions because the UI imports the owner API types from
-  // ../worker/src/api-types.ts (and its ./models.ts) by their .ts names.
+  // The dashboard UI's settings: allowImportingTsExtensions because the UI imports the owner API's value rules
+  // from ../worker/src/limits.ts, and the generated lab.ui.v1 code (@ziyixi/proto), by their .ts names.
   "compilerOptions": {
     "target": "ES2023",
     "lib": ["ES2023", "DOM", "DOM.Iterable"],

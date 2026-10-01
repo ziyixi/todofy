@@ -1,12 +1,18 @@
 /**
  * The deck session's optimistic model (docs/ux.md §4, docs/design.md §7). The UI moves on at once: every
- * swipe, undo and 重来 becomes a queued operation with its own op_id, and the screen shows the server's last
+ * swipe, undo and 重来 becomes a queued operation with its own op_id (its request_id), and the screen shows the server's last
  * confirmed DeckState with the queued operations replayed on top. The queue is sent one operation at a
  * time (each with the version the previous response returned), so the server sees exactly the order the
  * owner acted in; a response replaces the confirmed state, and a conflict adopts the server's state.
  */
-import type { Decision, DeckCard, DeckState, PaperId, UndoTarget } from '../../../worker/src/api-types.ts'
+import { UndoKind, type Card, type DeckState, type UndoTarget } from '@ziyixi/proto/lab/ui/v1/deck_pb'
+import { Decision } from '@ziyixi/proto/lab/ui/v1/paper_pb'
+import { idOf } from './messages'
 
+/** `arxiv:<id>`. */
+type PaperId = string
+
+/** The effective decision per paper (lab.ui.v1's Decision values). */
 export type Decisions = Readonly<Record<PaperId, Decision>>
 
 /** What one undo takes back. A restart's snapshot is known when this tab made it, else null (the server restores it). */
@@ -43,10 +49,11 @@ export interface Effective {
   readonly restoring: boolean
 }
 
-export function fromServerUndo(undo: UndoTarget): UndoEntry | null {
+export function fromServerUndo(undo: UndoTarget | undefined): UndoEntry | null {
   if (!undo) return null
-  if (undo.kind === 'decide') return { kind: 'decide', paper_id: undo.paper_id, decision: undo.decision }
-  return { kind: 'restart', cleared: undo.cleared, snapshot: null }
+  if (undo.kind === UndoKind.DECIDE) return { kind: 'decide', paper_id: undo.paperId, decision: undo.decision }
+  if (undo.kind === UndoKind.RESTART) return { kind: 'restart', cleared: undo.clearedCount, snapshot: null }
+  return null
 }
 
 /** Replays the queue on the confirmed state. */
@@ -119,30 +126,30 @@ export function reduceModel(model: SessionModel, action: ModelAction): SessionMo
 }
 
 /** The card to show: the first undecided one in deck order, or null when the deck is done. */
-export function currentCard(cards: readonly DeckCard[], decisions: Decisions): DeckCard | null {
-  return cards.find((card) => decisions[card.paper.id] === undefined) ?? null
+export function currentCard(cards: readonly Card[], decisions: Decisions): Card | null {
+  return cards.find((card) => decisions[idOf(card)] === undefined) ?? null
 }
 
 /** The undecided cards in deck order: the stack (top first). */
-export function undecidedCards(cards: readonly DeckCard[], decisions: Decisions): DeckCard[] {
-  return cards.filter((card) => decisions[card.paper.id] === undefined)
+export function undecidedCards(cards: readonly Card[], decisions: Decisions): Card[] {
+  return cards.filter((card) => decisions[idOf(card)] === undefined)
 }
 
-export function countDecisions(cards: readonly DeckCard[], decisions: Decisions) {
+export function countDecisions(cards: readonly Card[], decisions: Decisions) {
   let liked = 0
   let disliked = 0
   for (const card of cards) {
-    const decision = decisions[card.paper.id]
-    if (decision === 'like') liked += 1
-    else if (decision === 'dislike') disliked += 1
+    const decision = decisions[idOf(card)]
+    if (decision === Decision.LIKE) liked += 1
+    else if (decision === Decision.DISLIKE) disliked += 1
   }
   return { total: cards.length, decided: liked + disliked, liked, disliked }
 }
 
 /** Builds the next operation for a user action on the current effective state (null when not possible now). */
-export function planDecide(effective: Effective, card: DeckCard | null, decision: Decision, opId: string): LocalOp | null {
-  if (!card || effective.decisions[card.paper.id] !== undefined) return null
-  return { kind: 'decide', op_id: opId, paper_id: card.paper.id, decision }
+export function planDecide(effective: Effective, card: Card | null, decision: Decision, opId: string): LocalOp | null {
+  if (!card || effective.decisions[idOf(card)] !== undefined) return null
+  return { kind: 'decide', op_id: opId, paper_id: idOf(card), decision }
 }
 
 /** Most undos queued ahead of the server's answer (pressing 撤销 quickly rewinds several steps). */

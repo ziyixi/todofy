@@ -6,8 +6,10 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Sprout } from 'lucide-react'
 import { useId, useState, type FormEvent } from 'react'
-import { CATEGORIES_MAX, type SendMode, type Settings, type SettingsResponse } from '../../../worker/src/api-types.ts'
-import { api, errorMessage, withRetry } from '../api/client'
+import { SendMode } from '@ziyixi/proto/lab/ui/v1/deck_pb'
+import type { Settings } from '@ziyixi/proto/lab/ui/v1/home_pb'
+import { CATEGORIES_MAX } from '../../../worker/src/limits.ts'
+import { errorMessage, lab, withRetry } from '../api/client'
 import { useFeedback } from '../components/Feedback'
 import { Link } from '../components/Link'
 import { newOpId } from '../lib/format'
@@ -35,7 +37,7 @@ const MODEL_NAMES: Readonly<Record<string, string>> = {
 }
 
 export function SettingsView() {
-  const settings = useQuery({ queryKey: ['settings'], queryFn: api.settings })
+  const settings = useQuery({ queryKey: ['settings'], queryFn: () => lab.getSettings({ name: 'settings' }) })
   return (
     <section className="panel" aria-labelledby="settings-title">
       <h1 id="settings-title">设置</h1>
@@ -53,28 +55,28 @@ export function SettingsView() {
   )
 }
 
-function SettingsForm({ initial }: { initial: SettingsResponse }) {
+function SettingsForm({ initial }: { initial: Settings }) {
   const client = useQueryClient()
   const { announce } = useFeedback()
   const ids = { categories: useId(), model: useId(), cap: useId(), lambda: useId(), pause: useId() }
   const [categories, setCategories] = useState(initial.categories.join(', '))
-  const [model, setModel] = useState(initial.tldr_model)
-  const [cap, setCap] = useState(String(initial.neuron_cap))
-  const [mode, setMode] = useState<SendMode>(initial.send_mode)
-  const [paused, setPaused] = useState(initial.ingest_paused)
-  const [lambda, setLambda] = useState(initial.lambda)
+  const [model, setModel] = useState(initial.summaryModel)
+  const [cap, setCap] = useState(String(initial.neuronCap))
+  const [mode, setMode] = useState<SendMode>(initial.sendMode)
+  const [paused, setPaused] = useState(initial.ingestPaused)
+  const [lambda, setLambda] = useState(initial.dislikeWeight)
   const [message, setMessage] = useState<string | null>(null)
 
   const parsed = parseCategories(categories)
   const capValue = Number(cap)
-  const capOk = Number.isInteger(capValue) && capValue >= 0 && capValue <= initial.ceiling
+  const capOk = Number.isInteger(capValue) && capValue >= 0 && capValue <= initial.neuronCeiling
   const categoriesOk = parsed.bad.length === 0 && parsed.ok.length > 0 && parsed.ok.length <= CATEGORIES_MAX
   const valid = capOk && categoriesOk
 
   const save = useMutation({
     mutationFn: (next: Settings) => {
-      const body = { op_id: newOpId(), ...next }
-      return withRetry(() => api.saveSettings(body))
+      const request = { settings: next, requestId: newOpId() }
+      return withRetry(() => lab.updateSettings(request))
     },
     onSuccess: (next) => {
       client.setQueryData(['settings'], next)
@@ -87,7 +89,7 @@ function SettingsForm({ initial }: { initial: SettingsResponse }) {
   function onSubmit(event: FormEvent) {
     event.preventDefault()
     if (!valid) return
-    save.mutate({ categories: parsed.ok, tldr_model: model, neuron_cap: capValue, send_mode: mode, ingest_paused: paused, lambda })
+    save.mutate({ ...initial, categories: [...parsed.ok], summaryModel: model, neuronCap: capValue, sendMode: mode, ingestPaused: paused, dislikeWeight: lambda })
   }
 
   return (
@@ -102,8 +104,8 @@ function SettingsForm({ initial }: { initial: SettingsResponse }) {
 
       <div className="field">
         <label htmlFor={ids.model}>简介模型</label>
-        <select id={ids.model} value={model} onChange={(event) => setModel(event.target.value as typeof model)}>
-          {initial.tldr_models.map((id) => (
+        <select id={ids.model} value={model} onChange={(event) => setModel(event.target.value)}>
+          {initial.summaryModels.map((id) => (
             <option key={id} value={id}>
               {MODEL_NAMES[id] ?? id}
             </option>
@@ -113,18 +115,18 @@ function SettingsForm({ initial }: { initial: SettingsResponse }) {
 
       <div className="field">
         <label htmlFor={ids.cap}>每日 AI 额度上限（neurons）</label>
-        <input id={ids.cap} type="number" inputMode="numeric" min={0} max={initial.ceiling} step={100} value={cap} onChange={(event) => setCap(event.target.value)} aria-invalid={!capOk} />
-        <p className="muted small">只能调低，不能超过 {initial.ceiling}。平时一天约用 340。</p>
-        {!capOk ? <p className="field-error">请输入 0 到 {initial.ceiling} 之间的整数</p> : null}
+        <input id={ids.cap} type="number" inputMode="numeric" min={0} max={initial.neuronCeiling} step={100} value={cap} onChange={(event) => setCap(event.target.value)} aria-invalid={!capOk} />
+        <p className="muted small">只能调低，不能超过 {initial.neuronCeiling}。平时一天约用 340。</p>
+        {!capOk ? <p className="field-error">请输入 0 到 {initial.neuronCeiling} 之间的整数</p> : null}
       </div>
 
       <fieldset className="field">
         <legend>发送到 Todofy 的默认方式</legend>
         <label className="radio">
-          <input type="radio" name="send-mode" checked={mode === 'subtasks'} onChange={() => setMode('subtasks')} /> 一个父任务 + 子任务
+          <input type="radio" name="send-mode" checked={mode === SendMode.SUBTASKS} onChange={() => setMode(SendMode.SUBTASKS)} /> 一个父任务 + 子任务
         </label>
         <label className="radio">
-          <input type="radio" name="send-mode" checked={mode === 'separate'} onChange={() => setMode('separate')} /> 每篇单独一条
+          <input type="radio" name="send-mode" checked={mode === SendMode.SEPARATE} onChange={() => setMode(SendMode.SEPARATE)} /> 每篇单独一条
         </label>
       </fieldset>
 

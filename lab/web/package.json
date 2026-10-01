@@ -8,6 +8,8 @@
     "node": ">=26"
   },
   "scripts": {
+    "postinstall": "node ../../proto/tools/ensure.mjs",
+    "predev": "node ../../proto/tools/ensure.mjs",
     "dev": "vite",
     "pretypecheck": "node ../../proto/tools/ensure.mjs",
     "typecheck": "tsc --noEmit",
@@ -20,6 +22,7 @@
   },
   "dependencies": {
     "@tanstack/react-query": "5.104.0",
+    "@ziyixi/proto": "file:../../proto/ts",
     "lucide-react": "1.48.0",
     "react": "19.3.0",
     "react-dom": "19.3.0"

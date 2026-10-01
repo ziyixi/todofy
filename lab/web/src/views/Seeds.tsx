@@ -4,8 +4,10 @@
  */
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useId, useState } from 'react'
-import { SEEDS_MAX, type SeedState, type SeedsResponse } from '../../../worker/src/api-types.ts'
-import { api, errorMessage, withRetry } from '../api/client'
+import type { ListSeedsResponse } from '@ziyixi/proto/lab/ui/v1/lab_ui_service_pb'
+import { Seed_State } from '@ziyixi/proto/lab/ui/v1/library_pb'
+import { SEEDS_MAX } from '../../../worker/src/limits.ts'
+import { errorMessage, lab, withRetry } from '../api/client'
 import { useFeedback } from '../components/Feedback'
 import { parseSeedInput } from '../lib/arxiv'
 import { newOpId } from '../lib/format'
@@ -13,7 +15,12 @@ import { newOpId } from '../lib/format'
 /** Seeds + likes from which the ranking counts as personalised (docs/ux.md §1, Semantic Scholar's advice). */
 export const PERSONALISED_AT = 3
 
-const SEED_STATE: Readonly<Record<SeedState, string>> = { pending: '解析中', resolved: '已添加', not_found: '未找到' }
+const SEED_STATE: Readonly<Record<Seed_State, string>> = {
+  [Seed_State.UNSPECIFIED]: '',
+  [Seed_State.PENDING]: '解析中',
+  [Seed_State.RESOLVED]: '已添加',
+  [Seed_State.NOT_FOUND]: '未找到',
+}
 
 export function SeedsView() {
   const client = useQueryClient()
@@ -21,19 +28,20 @@ export function SeedsView() {
   const inputId = useId()
   const hintId = useId()
   const [text, setText] = useState('')
-  const seeds = useQuery({ queryKey: ['seeds'], queryFn: api.seeds })
+  const seeds = useQuery({ queryKey: ['seeds'], queryFn: () => lab.listSeeds({}) })
   const parsed = parseSeedInput(text)
   const list = seeds.data?.seeds ?? []
   const room = SEEDS_MAX - list.length
-  const fresh = parsed.ids.filter((id) => !list.some((seed) => seed.paper_id === `arxiv:${id}` || seed.paper_id === id))
+  const fresh = parsed.ids.filter((id) => !list.some((seed) => seed.paperId === `arxiv:${id}` || seed.paperId === id))
 
   const add = useMutation({
     mutationFn: (ids: readonly string[]) => {
-      const body = { op_id: newOpId(), ids }
-      return withRetry(() => api.addSeeds(body))
+      const request = { requestId: newOpId(), inputs: [...ids] }
+      return withRetry(() => lab.importSeeds(request))
     },
-    onSuccess: (next: SeedsResponse, ids) => {
-      client.setQueryData(['seeds'], next)
+    onSuccess: (next, ids) => {
+      client.setQueryData<ListSeedsResponse | undefined>(['seeds'], (current) => (current ? { ...current, seeds: next.seeds } : current))
+      void client.invalidateQueries({ queryKey: ['seeds'] })
       void client.invalidateQueries({ queryKey: ['today'] })
       setText('')
       announce(`已提交 ${ids.length} 篇种子，正在解析`)
@@ -42,18 +50,19 @@ export function SeedsView() {
   })
 
   const remove = useMutation({
-    mutationFn: (paperId: string) => {
-      const body = { op_id: newOpId(), paper_id: paperId }
-      return withRetry(() => api.removeSeed(body))
+    mutationFn: async (name: string) => {
+      const request = { name, requestId: newOpId() }
+      await withRetry(() => lab.deleteSeed(request))
+      return name
     },
-    onSuccess: (next: SeedsResponse) => {
-      client.setQueryData(['seeds'], next)
+    onSuccess: (name) => {
+      client.setQueryData<ListSeedsResponse | undefined>(['seeds'], (current) => (current ? { ...current, seeds: current.seeds.filter((seed) => seed.name !== name) } : current))
       announce('已移除种子')
     },
     onError: (error) => snack({ text: `没有移除：${errorMessage(error)}`, tone: 'warn' }),
   })
 
-  const resolved = list.filter((seed) => seed.state === 'resolved').length
+  const resolved = list.filter((seed) => seed.state === Seed_State.RESOLVED).length
   const counter =
     resolved >= PERSONALISED_AT ? `有 ${resolved} 篇种子，推荐已个性化` : `有 ${resolved} 篇种子，再添加 ${PERSONALISED_AT - resolved} 篇效果更好`
   const tooMany = fresh.length > room
@@ -98,12 +107,12 @@ export function SeedsView() {
       {list.length > 0 ? (
         <ul className="library" aria-label="种子">
           {list.map((seed) => (
-            <li key={seed.paper_id} className="library-row seed-row">
+            <li key={seed.name} className="library-row seed-row">
               <div>
                 <p className="library-title" lang="en">
-                  {seed.title ?? seed.paper_id.replace(/^arxiv:/, '')}
+                  {seed.title ?? seed.paperId.replace(/^arxiv:/, '')}
                 </p>
-                <span className={`badge badge-${seed.state === 'resolved' ? 'ok' : seed.state === 'not_found' ? 'warn' : 'info'}`}>
+                <span className={`badge badge-${seed.state === Seed_State.RESOLVED ? 'ok' : seed.state === Seed_State.NOT_FOUND ? 'warn' : 'info'}`}>
                   {SEED_STATE[seed.state]}
                 </span>
               </div>
@@ -111,8 +120,8 @@ export function SeedsView() {
                 type="button"
                 className="btn btn-ghost btn-small"
                 disabled={remove.isPending}
-                aria-label={`移除种子：${seed.title ?? seed.paper_id}`}
-                onClick={() => remove.mutate(seed.paper_id)}
+                aria-label={`移除种子：${seed.title ?? seed.paperId}`}
+                onClick={() => remove.mutate(seed.name)}
               >
                 移除
               </button>

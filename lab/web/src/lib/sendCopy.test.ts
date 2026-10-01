@@ -3,7 +3,7 @@ import { isDelivered, isLocked, sendCopy } from './sendCopy'
 
 describe('send status copy (docs/ux.md §5)', () => {
   it.each([
-    [sendStatus({ state: 'sending', poll_after: 'x' }), '正在发送…', []],
+    [sendStatus({ state: 'sending', next_poll_time: '2026-09-30T12:00:03Z' }), '正在发送…', []],
     [sendStatus({ state: 'pending', tasks_total: 6, tasks_created: 3 }), 'Todofy 正在创建：3 / 6', []],
     [sendStatus({ state: 'created', tasks_total: 6, tasks_created: 6 }), '已发送：Todoist 里新增了 6 个任务', ['done']],
     [sendStatus({ state: 'duplicate' }), '这组已经发送过，不会重复创建', ['done']],
@@ -28,6 +28,8 @@ describe('send status copy (docs/ux.md §5)', () => {
     ],
     [sendStatus({ state: 'rejected', recorded: false, frozen: false, error_code: 'daily_limit' }), '没有发送：今天发送次数已达上限', ['back']],
     [sendStatus({ state: 'unknown' }), '结果未知：重试不会重复创建', ['retry', 'later']],
+    // A state a newer Worker sends and this build does not know reads as unset: neither success nor failure.
+    [sendStatus({ state: undefined }), '状态未知，稍后刷新', ['later']],
   ] as const)('%#: %s', (status, text, actions) => {
     const copy = sendCopy(status)
     expect(copy.text).toBe(text)

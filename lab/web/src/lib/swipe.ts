@@ -2,7 +2,8 @@
  * Swipe physics of the deck card (docs/ux.md §3), as pure functions so the thresholds are unit-tested and
  * the component only wires pointer events to them.
  */
-import type { Decision } from '../../../worker/src/api-types.ts'
+/** A swipe's direction: right is 喜欢, left is 不喜欢 (lib/messages.ts maps it to the API's Decision). */
+export type Swipe = 'like' | 'dislike'
 
 /** Movement before a drag starts, and the axis must be clearly horizontal (direction lock). */
 export const DRAG_START_PX = 8
@@ -36,7 +37,7 @@ export function lockAxis(dx: number, dy: number): 'x' | 'y' | null {
   return ax > ay ? 'x' : 'y'
 }
 
-export function directionOf(dx: number): Decision {
+export function directionOf(dx: number): Swipe {
   return dx >= 0 ? 'like' : 'dislike'
 }
 
@@ -44,7 +45,7 @@ export function directionOf(dx: number): Decision {
  * Whether a released drag commits: far enough, or a flick (fast, past FLICK_MIN_PX, same direction as the
  * displacement). Null springs back.
  */
-export function releaseDecision(dx: number, velocityX: number, cardWidth: number): Decision | null {
+export function releaseDecision(dx: number, velocityX: number, cardWidth: number): Swipe | null {
   if (Math.abs(dx) >= swipeThreshold(cardWidth)) return directionOf(dx)
   const sameDirection = Math.sign(velocityX) === Math.sign(dx) && dx !== 0
   if (sameDirection && Math.abs(velocityX) >= FLICK_VELOCITY && Math.abs(dx) >= FLICK_MIN_PX) return directionOf(dx)
@@ -74,7 +75,7 @@ export function stampOpacity(dx: number, cardWidth: number): number {
 }
 
 /** Where a committed card flies to: 1.2 viewport widths out, keeping the finger's vertical drift and tilt. */
-export function exitPose(decision: Decision, from: CardPose, viewportWidth: number): CardPose {
+export function exitPose(decision: Swipe, from: CardPose, viewportWidth: number): CardPose {
   const sign = decision === 'like' ? 1 : -1
   const x = sign * Math.max(viewportWidth * 1.2, Math.abs(from.x) + 1)
   const rotate = sign * MAX_TILT_DEG * 1.5

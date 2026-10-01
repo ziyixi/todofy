@@ -1,3 +1,4 @@
+import { SendMode } from '@ziyixi/proto/lab/ui/v1/deck_pb'
 import { card } from '../test/fixtures'
 import { cardBrief, formatAuthors, formatDay, formatWhen, parentTitle, safeArxivUrl, sendPreview, shortTitle } from './format'
 
@@ -19,16 +20,16 @@ describe('format', () => {
 
   it('uses the 简介, or the first two abstract sentences when it is missing', () => {
     expect(cardBrief(card(1))).toEqual({ text: expect.stringContaining('合成论文') as string, generated: true })
-    expect(cardBrief(card(2, { brief: null }))).toEqual({
+    expect(cardBrief(card(2, { brief: undefined }))).toEqual({
       text: 'We study synthetic problem 2. Our method improves a made-up metric.',
       generated: false,
     })
   })
 
   it('previews both send modes and the 补发 title', () => {
-    expect(sendPreview('subtasks', '2026-09-30', 5)).toBe('将在 Todoist 创建「论文雷达 2026-09-30 · 5 篇」和 5 个子任务')
-    expect(sendPreview('separate', '2026-09-30', 5)).toBe('将在 Todoist 创建 5 个任务')
-    expect(sendPreview('subtasks', '2026-09-30', 0)).toBe('没有要发送的论文')
+    expect(sendPreview(SendMode.SUBTASKS, '2026-09-30', 5)).toBe('将在 Todoist 创建「论文雷达 2026-09-30 · 5 篇」和 5 个子任务')
+    expect(sendPreview(SendMode.SEPARATE, '2026-09-30', 5)).toBe('将在 Todoist 创建 5 个任务')
+    expect(sendPreview(SendMode.SUBTASKS, '2026-09-30', 0)).toBe('没有要发送的论文')
     expect(parentTitle('2026-09-30', 2, 2)).toBe('论文雷达 2026-09-30（补发）· 2 篇')
   })
 

@@ -1,28 +1,31 @@
 /** The deck's progress map, action bar, menu and shortcuts sheet (docs/ux.md §3). */
 import { MoreHorizontal, RotateCcw, ThumbsDown, ThumbsUp, Undo2, Keyboard } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
-import type { Decision, DeckCard } from '../../../worker/src/api-types.ts'
+import type { Card } from '@ziyixi/proto/lab/ui/v1/deck_pb'
+import { Decision } from '@ziyixi/proto/lab/ui/v1/paper_pb'
 import type { Decisions } from '../lib/deckModel'
+import { idOf, swipeOf } from '../lib/messages'
+import type { Swipe } from '../lib/swipe'
 import { SHORTCUTS } from '../lib/keys'
 import { Modal } from './Modal'
 
-export function DeckProgress({ cards, decisions, currentId }: { cards: readonly DeckCard[]; decisions: Decisions; currentId: string | null }) {
+export function DeckProgress({ cards, decisions, currentId }: { cards: readonly Card[]; decisions: Decisions; currentId: string | null }) {
   const total = cards.length
   let decided = 0
   let liked = 0
   for (const card of cards) {
-    const decision = decisions[card.paper.id]
+    const decision = decisions[idOf(card)]
     if (decision) decided += 1
-    if (decision === 'like') liked += 1
+    if (decision === Decision.LIKE) liked += 1
   }
   const position = Math.min(decided + 1, total)
   return (
     <div className="deck-progress">
       <ol className="progress-segments" aria-hidden="true">
         {cards.map((card) => {
-          const decision = decisions[card.paper.id]
-          const state = decision ?? (card.paper.id === currentId ? 'current' : 'open')
-          return <li key={card.paper.id} className={`segment segment-${state}`} />
+          const id = idOf(card)
+          const state = swipeOf(decisions[id]) ?? (id === currentId ? 'current' : 'open')
+          return <li key={id} className={`segment segment-${state}`} />
         })}
       </ol>
       <p className="progress-text" data-testid="progress">
@@ -35,11 +38,11 @@ export function DeckProgress({ cards, decisions, currentId }: { cards: readonly 
 }
 
 interface ActionBarProps {
-  readonly onDecide: (decision: Decision) => void
+  readonly onDecide: (decision: Swipe) => void
   readonly onUndo: () => void
   readonly canUndo: boolean
   readonly undoBusy: boolean
-  readonly lean: Decision | null
+  readonly lean: Swipe | null
   readonly disabled: boolean
 }
 

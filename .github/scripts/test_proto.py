@@ -10,8 +10,8 @@ python3 -m unittest discover -s .github/scripts -p test_proto.py (the Proto chec
 - Wiring: every TypeScript user depends on "file:<...>/proto/ts" and runs proto/tools/ensure.mjs as its
   postinstall; every Python user takes ziyixi-proto from proto/python as a non-editable path source.
 - Freshness: every npm script that compiles, tests or serves the generated code (tsc, vitest, wrangler) in
-  a TypeScript user, or in a package whose sources import a user's sources (Lab's UI imports the Worker's
-  API types), runs ensure.mjs first as its pre-script, so a pull or branch switch that changes a .proto
+  a TypeScript user, or in a package whose sources import a user's sources, runs ensure.mjs first as its
+  pre-script, so a pull or branch switch that changes a .proto
   file cannot leave stale generated types behind (uv's cache keys do the same for Python).
 - ci_changes.PROTO_USERS lists exactly those users, each marked bundled only when its Worker compiles the
   package in, and a user marked test-only has no production import of it.
@@ -226,7 +226,8 @@ class Users(unittest.TestCase):
     def test_scripts_that_read_the_generated_code_regenerate_it_first(self):
         users = ts_users()
         importers = importers_of(users)
-        self.assertIn(REPO / "lab" / "web" / "package.json", importers, "Lab's UI imports the Worker's API types")
+        # Lab's UI calls lab.ui.v1 through the generated client: a user itself (it also imports limits.ts).
+        self.assertIn(REPO / "lab" / "web" / "package.json", users, "Lab's UI depends on @ziyixi/proto")
         for manifest, data in {**users, **importers}.items():
             scripts = data.get("scripts", {})
             for name, command in scripts.items():

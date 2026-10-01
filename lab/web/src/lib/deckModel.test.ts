@@ -1,5 +1,8 @@
-import type { DeckState } from '../../../worker/src/api-types.ts'
+import { create, type MessageInitShape } from '@ziyixi/proto/protobuf'
+import { DeckStateSchema, UndoKind, type DeckState } from '@ziyixi/proto/lab/ui/v1/deck_pb'
+import { Decision } from '@ziyixi/proto/lab/ui/v1/paper_pb'
 import { cards } from '../test/fixtures'
+import { idOf } from './messages'
 import {
   UNDO_QUEUE_MAX,
   canUndo,
@@ -15,19 +18,10 @@ import {
 } from './deckModel'
 
 const deck = cards(4)
-const [a, b, c] = deck.map((item) => item.paper.id) as [string, string, string, string]
+const [a, b, c] = deck.map(idOf) as [string, string, string, string]
 
-function state(overrides: Partial<DeckState> = {}): DeckState {
-  return {
-    deck_id: '2026-09-30',
-    version: 1,
-    decisions: {},
-    counts: { total: 4, decided: 0, liked: 0, disliked: 0 },
-    next_position: 1,
-    finished_at: null,
-    undo: null,
-    ...overrides,
-  }
+function state(overrides: Omit<MessageInitShape<typeof DeckStateSchema>, '$typeName'> = {}): DeckState {
+  return create(DeckStateSchema, { deck: 'decks/2026-09-30', version: 1, counts: { total: 4 }, nextPosition: 1, ...overrides })
 }
 
 let n = 0
@@ -43,23 +37,23 @@ function act(model: SessionModel, plan: (eff: ReturnType<typeof simulate>) => Lo
 describe('deck model', () => {
   it('applies decisions optimistically and shows the first undecided card', () => {
     let model: SessionModel = { server: state(), pending: [] }
-    model = act(model, (eff) => planDecide(eff, currentCard(deck, eff.decisions), 'like', id()))
-    model = act(model, (eff) => planDecide(eff, currentCard(deck, eff.decisions), 'dislike', id()))
+    model = act(model, (eff) => planDecide(eff, currentCard(deck, eff.decisions), Decision.LIKE, id()))
+    model = act(model, (eff) => planDecide(eff, currentCard(deck, eff.decisions), Decision.DISLIKE, id()))
     const eff = simulate(model)
-    expect(eff.decisions).toEqual({ [a]: 'like', [b]: 'dislike' })
-    expect(currentCard(deck, eff.decisions)?.paper.id).toBe(c)
+    expect(eff.decisions).toEqual({ [a]: Decision.LIKE, [b]: Decision.DISLIKE })
+    expect(currentCard(deck, eff.decisions)?.paper?.id).toBe(c)
     expect(countDecisions(deck, eff.decisions)).toEqual({ total: 4, decided: 2, liked: 1, disliked: 1 })
-    expect(eff.undoTop).toEqual({ kind: 'decide', paper_id: b, decision: 'dislike' })
+    expect(eff.undoTop).toEqual({ kind: 'decide', paper_id: b, decision: Decision.DISLIKE })
   })
 
   it('undoes any number of steps back to the first card', () => {
     let model: SessionModel = { server: state(), pending: [] }
-    for (const decision of ['like', 'dislike', 'like'] as const) {
+    for (const decision of [Decision.LIKE, Decision.DISLIKE, Decision.LIKE] as const) {
       model = act(model, (eff) => planDecide(eff, currentCard(deck, eff.decisions), decision, id()))
     }
     model = act(model, (eff) => planUndo(eff, id()))
     model = act(model, (eff) => planUndo(eff, id()))
-    expect(simulate(model).decisions).toEqual({ [a]: 'like' })
+    expect(simulate(model).decisions).toEqual({ [a]: Decision.LIKE })
     model = act(model, (eff) => planUndo(eff, id()))
     const eff = simulate(model)
     expect(eff.decisions).toEqual({})
@@ -70,15 +64,15 @@ describe('deck model', () => {
 
   it('makes 重来 one undoable step that restores every cleared decision', () => {
     let model: SessionModel = { server: state(), pending: [] }
-    model = act(model, (eff) => planDecide(eff, currentCard(deck, eff.decisions), 'like', id()))
-    model = act(model, (eff) => planDecide(eff, currentCard(deck, eff.decisions), 'dislike', id()))
+    model = act(model, (eff) => planDecide(eff, currentCard(deck, eff.decisions), Decision.LIKE, id()))
+    model = act(model, (eff) => planDecide(eff, currentCard(deck, eff.decisions), Decision.DISLIKE, id()))
     model = act(model, (eff) => planRestart(eff, id()))
     expect(simulate(model).decisions).toEqual({})
     expect(simulate(model).undoTop).toMatchObject({ kind: 'restart', cleared: 2 })
     model = act(model, (eff) => planUndo(eff, id()))
-    expect(simulate(model).decisions).toEqual({ [a]: 'like', [b]: 'dislike' })
+    expect(simulate(model).decisions).toEqual({ [a]: Decision.LIKE, [b]: Decision.DISLIKE })
     // …and the decide before it is next.
-    expect(simulate(model).undoTop).toEqual({ kind: 'decide', paper_id: b, decision: 'dislike' })
+    expect(simulate(model).undoTop).toEqual({ kind: 'decide', paper_id: b, decision: Decision.DISLIKE })
   })
 
   it('refuses 重来 on an untouched deck', () => {
@@ -86,17 +80,17 @@ describe('deck model', () => {
   })
 
   it('knows only the top of the server undo stack and waits for the next one', () => {
-    const server = state({ version: 5, decisions: { [a]: 'like', [b]: 'like' }, undo: { kind: 'decide', paper_id: b, decision: 'like' } })
+    const server = state({ version: 5, decisions: { [a]: Decision.LIKE, [b]: Decision.LIKE }, undo: { kind: UndoKind.DECIDE, paperId: b, decision: Decision.LIKE } })
     let model: SessionModel = { server, pending: [] }
     model = act(model, (eff) => planUndo(eff, id()))
     const eff = simulate(model)
-    expect(eff.decisions).toEqual({ [a]: 'like' })
+    expect(eff.decisions).toEqual({ [a]: Decision.LIKE })
     expect(eff.undoTop).toBeNull()
     expect(eff.undoWaiting).toBe(true)
   })
 
   it('queues an undo pressed before the server named the next target, and resolves it with the answer', () => {
-    const server = state({ version: 5, decisions: { [a]: 'like', [b]: 'like' }, undo: { kind: 'decide', paper_id: b, decision: 'like' } })
+    const server = state({ version: 5, decisions: { [a]: Decision.LIKE, [b]: Decision.LIKE }, undo: { kind: UndoKind.DECIDE, paperId: b, decision: Decision.LIKE } })
     let model: SessionModel = { server, pending: [] }
     model = act(model, (eff) => planUndo(eff, 'u1'))
     // Pressed again while u1 is in flight: never dropped.
@@ -104,13 +98,13 @@ describe('deck model', () => {
     model = act(model, (eff) => planUndo(eff, 'u2'))
     expect(model.pending[1]).toMatchObject({ kind: 'undo', target: null })
     let eff = simulate(model)
-    expect(eff.decisions).toEqual({ [a]: 'like' })
+    expect(eff.decisions).toEqual({ [a]: Decision.LIKE })
     expect(eff.undosUnresolved).toBe(1)
     // u1's answer names the next entry (a); u2 takes it back at once.
     model = reduceModel(model, {
       type: 'confirmed',
       op_id: 'u1',
-      state: state({ version: 6, decisions: { [a]: 'like' }, undo: { kind: 'decide', paper_id: a, decision: 'like' } }),
+      state: state({ version: 6, decisions: { [a]: Decision.LIKE }, undo: { kind: UndoKind.DECIDE, paperId: a, decision: Decision.LIKE } }),
     })
     eff = simulate(model)
     expect(eff.decisions).toEqual({})
@@ -120,7 +114,7 @@ describe('deck model', () => {
   })
 
   it('bounds the undos queued ahead of the server', () => {
-    const server = state({ version: 5, decisions: { [a]: 'like' }, undo: { kind: 'decide', paper_id: a, decision: 'like' } })
+    const server = state({ version: 5, decisions: { [a]: Decision.LIKE }, undo: { kind: UndoKind.DECIDE, paperId: a, decision: Decision.LIKE } })
     let model: SessionModel = { server, pending: [] }
     for (let i = 0; i <= UNDO_QUEUE_MAX; i += 1) model = act(model, (eff) => planUndo(eff, id()))
     expect(simulate(model).undosUnresolved).toBe(UNDO_QUEUE_MAX)
@@ -129,23 +123,23 @@ describe('deck model', () => {
   })
 
   it('waits for the server to restore a restart made elsewhere', () => {
-    const server = state({ version: 3, undo: { kind: 'restart', cleared: 3 } })
+    const server = state({ version: 3, undo: { kind: UndoKind.RESTART, clearedCount: 3 } })
     const model = act({ server, pending: [] }, (eff) => planUndo(eff, id()))
     expect(simulate(model).restoring).toBe(true)
   })
 
   it('confirms in order, keeps queued work over a refetch, adopts on a forced conflict', () => {
     let model: SessionModel = { server: state(), pending: [] }
-    model = act(model, (eff) => planDecide(eff, currentCard(deck, eff.decisions), 'like', 'x1'))
-    model = act(model, (eff) => planDecide(eff, currentCard(deck, eff.decisions), 'like', 'x2'))
+    model = act(model, (eff) => planDecide(eff, currentCard(deck, eff.decisions), Decision.LIKE, 'x1'))
+    model = act(model, (eff) => planDecide(eff, currentCard(deck, eff.decisions), Decision.LIKE, 'x2'))
     // A confirmation for anything but the head is ignored.
     expect(reduceModel(model, { type: 'confirmed', op_id: 'x2', state: state({ version: 9 }) })).toBe(model)
-    model = reduceModel(model, { type: 'confirmed', op_id: 'x1', state: state({ version: 2, decisions: { [a]: 'like' } }) })
+    model = reduceModel(model, { type: 'confirmed', op_id: 'x1', state: state({ version: 2, decisions: { [a]: Decision.LIKE } }) })
     expect(model.pending.map((op) => op.op_id)).toEqual(['x2'])
-    expect(simulate(model).decisions).toEqual({ [a]: 'like', [b]: 'like' })
+    expect(simulate(model).decisions).toEqual({ [a]: Decision.LIKE, [b]: Decision.LIKE })
     // A refetch while work is queued changes nothing.
     expect(reduceModel(model, { type: 'adopt', state: state({ version: 7 }), force: false })).toBe(model)
-    const other = state({ version: 7, decisions: { [a]: 'dislike' } })
+    const other = state({ version: 7, decisions: { [a]: Decision.DISLIKE } })
     const adopted = reduceModel(model, { type: 'adopt', state: other, force: true })
     expect(adopted).toEqual({ server: other, pending: [] })
   })
@@ -158,12 +152,12 @@ describe('deck model', () => {
 
   it('rolls back a failed operation and everything queued after it', () => {
     let model: SessionModel = { server: state(), pending: [] }
-    model = act(model, (eff) => planDecide(eff, currentCard(deck, eff.decisions), 'like', 'y1'))
-    model = act(model, (eff) => planDecide(eff, currentCard(deck, eff.decisions), 'like', 'y2'))
+    model = act(model, (eff) => planDecide(eff, currentCard(deck, eff.decisions), Decision.LIKE, 'y1'))
+    model = act(model, (eff) => planDecide(eff, currentCard(deck, eff.decisions), Decision.LIKE, 'y2'))
     model = act(model, (eff) => planUndo(eff, 'y3'))
     model = reduceModel(model, { type: 'rollback', op_id: 'y2' })
     expect(model.pending.map((op) => op.op_id)).toEqual(['y1'])
-    expect(simulate(model).decisions).toEqual({ [a]: 'like' })
+    expect(simulate(model).decisions).toEqual({ [a]: Decision.LIKE })
   })
 
   it('matches a straightforward replay for random operation sequences', () => {
@@ -175,12 +169,12 @@ describe('deck model', () => {
     }
     for (let round = 0; round < 50; round += 1) {
       let model: SessionModel = { server: state(), pending: [] }
-      const events: { kind: 'decide' | 'restart'; paper?: string; decision?: 'like' | 'dislike'; cancelled: boolean }[] = []
+      const events: { kind: 'decide' | 'restart'; paper?: string; decision?: Decision; cancelled: boolean }[] = []
       for (let step = 0; step < 12; step += 1) {
         const eff = simulate(model)
         const roll = random()
         if (roll < 0.55) {
-          const op = planDecide(eff, currentCard(deck, eff.decisions), roll < 0.3 ? 'like' : 'dislike', id())
+          const op = planDecide(eff, currentCard(deck, eff.decisions), roll < 0.3 ? Decision.LIKE : Decision.DISLIKE, id())
           if (op && op.kind === 'decide') {
             model = reduceModel(model, { type: 'enqueue', op })
             events.push({ kind: 'decide', paper: op.paper_id, decision: op.decision, cancelled: false })
@@ -199,7 +193,7 @@ describe('deck model', () => {
             events.push({ kind: 'restart', cancelled: false })
           }
         }
-        let expected: Record<string, string> = {}
+        let expected: Record<string, Decision> = {}
         for (const event of events) {
           if (event.cancelled) continue
           if (event.kind === 'decide' && event.paper && event.decision) expected[event.paper] = event.decision

@@ -7,27 +7,29 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Check, RotateCcw, Send, Undo2 } from 'lucide-react'
 import { useCallback, useEffect, useId, useRef, useState } from 'react'
-import type { Day, Deck, DeckCard, DeckSummary, SendMode, SendStatus, SummaryItem } from '../../../worker/src/api-types.ts'
-import { SEND_POLL_MIN_SECONDS } from '../../../worker/src/api-types.ts'
-import { ApiError, api, errorMessage, withRetry } from '../api/client'
+import { timestampNow } from '@ziyixi/proto/protobuf/wkt'
+import { SendMode, Send_State, type Card, type Deck, type DeckSummary, type Send as SendMessage, type SummaryItem } from '@ziyixi/proto/lab/ui/v1/deck_pb'
+import { SEND_POLL_MIN_SECONDS } from '../../../worker/src/limits.ts'
+import { ApiError, deckName, errorMessage, lab, withRetry } from '../api/client'
 import { useFeedback } from '../components/Feedback'
 import { Modal } from '../components/Modal'
 import { PaperCardBody } from '../components/PaperCard'
 import { formatDay, newOpId, sendPreview } from '../lib/format'
+import { idOf, msOf } from '../lib/messages'
 import { isDelivered, isLocked, sendCopy, type SendAction } from '../lib/sendCopy'
 
 /** The newer of two views of the deck's send (a higher generation, else the later update). */
-export function newerSend(a: SendStatus | null, b: SendStatus | null): SendStatus | null {
+export function newerSend(a: SendMessage | null, b: SendMessage | null): SendMessage | null {
   if (!a) return b
   if (!b) return a
   if (a.generation !== b.generation) return a.generation > b.generation ? a : b
-  return Date.parse(b.updated_at) >= Date.parse(a.updated_at) ? b : a
+  return (msOf(b.updateTime) ?? 0) >= (msOf(a.updateTime) ?? 0) ? b : a
 }
 
-/** Follows a send while it settles: GET …/send when poll_after is due (≥ 3 s), only while the page is visible. */
-function useSendStatus(day: Day, initial: SendStatus | null) {
+/** Follows a send while it settles: GetSend when next_poll_time is due (≥ 3 s), only while the page is visible. */
+function useSendStatus(day: string, initial: SendMessage | null) {
   const client = useQueryClient()
-  const [status, setStatus] = useState<SendStatus | null>(initial)
+  const [status, setStatus] = useState<SendMessage | null>(initial)
   const [visible, setVisible] = useState(() => document.visibilityState !== 'hidden')
 
   useEffect(() => {
@@ -40,21 +42,21 @@ function useSendStatus(day: Day, initial: SendStatus | null) {
     return () => document.removeEventListener('visibilitychange', onVisibility)
   }, [])
 
-  const pollAfter = status?.poll_after ?? null
-  const updatedAt = status?.updated_at
+  const pollAfter = msOf(status?.nextPollTime)
+  const updatedAt = msOf(status?.updateTime)
   useEffect(() => {
-    if (!pollAfter || !visible) return
-    const wait = Math.max(SEND_POLL_MIN_SECONDS * 1000, Date.parse(pollAfter) - Date.now())
+    if (pollAfter === null || !visible) return
+    const wait = Math.max(SEND_POLL_MIN_SECONDS * 1000, pollAfter - Date.now())
     let live = true
     const timer = window.setTimeout(() => {
-      api
-        .sendStatus(day)
+      lab
+        .getSend({ name: `${deckName(day)}/send` })
         .then((next) => {
           if (live) setStatus((current) => newerSend(current, next))
         })
         .catch(() => {
           // Keep the last status; the next poll or a reload tries again.
-          if (live) setStatus((current) => (current ? { ...current, updated_at: new Date().toISOString() } : current))
+          if (live) setStatus((current) => (current ? { ...current, updateTime: timestampNow() } : current))
         })
     }, wait)
     return () => {
@@ -72,12 +74,12 @@ function useSendStatus(day: Day, initial: SendStatus | null) {
     void client.invalidateQueries({ queryKey: ['deck', day], refetchType: 'none' })
   }, [client, day, delivered, generation])
 
-  const adopt = useCallback((next: SendStatus) => setStatus((current) => newerSend(current, next)), [])
+  const adopt = useCallback((next: SendMessage) => setStatus((current) => newerSend(current, next)), [])
   return { status, adopt }
 }
 
 interface SummaryViewProps {
-  readonly day: Day
+  readonly day: string
   readonly deck: Deck
   readonly isToday: boolean
   /** The deck's counts from this session's decisions (the server's summary may still be catching up). */
@@ -99,7 +101,7 @@ export const SUMMARY_ARM_MS = 800
 
 export function SummaryView(props: SummaryViewProps) {
   const { day } = props
-  const summaryQuery = useQuery({ queryKey: ['summary', day], queryFn: () => api.summary(day) })
+  const summaryQuery = useQuery({ queryKey: ['summary', day], queryFn: () => lab.getDeckSummary({ name: `${deckName(day)}/summary` }) })
   if (summaryQuery.isPending) {
     return (
       <section className="panel summary" aria-busy="true">
@@ -144,19 +146,19 @@ function SummaryBody({
 }: SummaryViewProps & { summary: DeckSummary; refreshing: boolean }) {
   const client = useQueryClient()
   const { announce, snack, dismissSnack } = useFeedback()
-  const { status, adopt } = useSendStatus(day, summary.send)
-  const [mode, setMode] = useState<SendMode>(summary.send && isLocked(summary.send) ? summary.send.mode : summary.default_mode)
+  const { status, adopt } = useSendStatus(day, summary.latestSend ?? null)
+  const [mode, setMode] = useState<SendMode>(summary.latestSend && isLocked(summary.latestSend) ? summary.latestSend.mode : summary.defaultMode)
   const [dismissed, setDismissed] = useState<string | null>(null)
   const [sendError, setSendError] = useState<string | null>(null)
-  const [preview, setPreview] = useState<DeckCard | null>(null)
+  const [preview, setPreview] = useState<Card | null>(null)
   const modeName = useId()
   const heading = useRef<HTMLHeadingElement>(null)
   const armed = useArmed(SUMMARY_ARM_MS)
   // The list and the counts wait for every decision of this session: a send never freezes half of them.
   const catchingUp = saving || refreshing
 
-  const liked = summary.liked
-  const statusKey = status ? `${status.generation}:${status.updated_at}` : null
+  const liked = summary.likedItems
+  const statusKey = status ? `${status.generation}:${String(msOf(status.updateTime))}` : null
   // A rejected send the owner dismissed with 返回: back to the editable confirm step.
   const shown = status && statusKey !== dismissed ? status : null
   const locked = isLocked(shown)
@@ -164,14 +166,16 @@ function SummaryBody({
   const nextGeneration = delivered && shown ? shown.generation + 1 : (shown?.generation ?? 1)
 
   const exclude = useMutation({
-    mutationFn: (item: SummaryItem) =>
-      withRetry(() => api.exclude(day, { op_id: newOpId(), paper_id: item.paper_id, excluded: !item.excluded })),
+    mutationFn: (item: SummaryItem) => {
+      const request = { name: `${deckName(day)}/summary`, requestId: newOpId(), paperId: item.paperId, excluded: !item.excluded }
+      return withRetry(() => lab.excludePaper(request))
+    },
     onMutate: (item) => {
       const before = client.getQueryData<DeckSummary>(['summary', day])
       if (before) {
-        const listed = before.liked.map((row) => (row.paper_id === item.paper_id ? { ...row, excluded: !item.excluded } : row))
-        const sendable = listed.filter((row) => !row.excluded && row.sent_generation === null).length
-        client.setQueryData<DeckSummary>(['summary', day], { ...before, liked: listed, sendable })
+        const listed = before.likedItems.map((row) => (row.paperId === item.paperId ? { ...row, excluded: !item.excluded } : row))
+        const sendableCount = listed.filter((row) => !row.excluded && row.sentGeneration === undefined).length
+        client.setQueryData<DeckSummary>(['summary', day], { ...before, likedItems: listed, sendableCount })
       }
       announce(item.excluded ? `已恢复：${item.title}` : `已移出这次发送：${item.title}`)
       return { before }
@@ -184,9 +188,11 @@ function SummaryBody({
   })
 
   const send = useMutation({
-    mutationFn: (chosen: SendMode) => {
-      const body = { op_id: newOpId(), mode: chosen }
-      return withRetry(() => api.send(day, body))
+    mutationFn: async (chosen: SendMode) => {
+      const request = { name: deckName(day), requestId: newOpId(), mode: chosen }
+      const answer = await withRetry(() => lab.sendDeck(request))
+      if (answer.send === undefined) throw new ApiError(200, 'BAD_RESPONSE', '服务返回了无法识别的响应（HTTP 200）')
+      return answer.send
     },
     onMutate: () => setSendError(null),
     onSuccess: (next) => {
@@ -195,9 +201,9 @@ function SummaryBody({
       void client.invalidateQueries({ queryKey: ['summary', day] })
     },
     onError: async (error) => {
-      if (error instanceof ApiError && error.code === 'send_in_progress') {
+      if (error instanceof ApiError && error.reason === 'SEND_IN_PROGRESS') {
         try {
-          adopt(await api.sendStatus(day))
+          adopt(await lab.getSend({ name: `${deckName(day)}/send` }))
           return
         } catch {
           // Fall through to the error line.
@@ -210,23 +216,26 @@ function SummaryBody({
   })
 
   const later = useMutation({
-    mutationFn: () => withRetry(() => api.later(day, { op_id: newOpId() })),
+    mutationFn: () => {
+      const request = { name: deckName(day), requestId: newOpId() }
+      return withRetry(() => lab.snoozeDeck(request))
+    },
     onSettled: () => {
       void client.invalidateQueries({ queryKey: ['deck', day], refetchType: 'none' })
       onDone()
     },
   })
 
-  const sendable = summary.sendable
+  const sendable = summary.sendableCount
   const copy = shown ? sendCopy(shown) : null
   const title = isToday ? '今天' : formatDay(day)
 
-  const confirmOpen = !shown || (!locked && !delivered && (shown.state === 'paused' || shown.state === 'rejected') && !shown.recorded)
+  const confirmOpen = !shown || (!locked && !delivered && (shown.state === Send_State.PAUSED || shown.state === Send_State.REJECTED) && !shown.recorded)
   // After a delivered send the list is re-read before 补发 is offered (it would flash with the old count).
   const showConfirm = sendable > 0 && (confirmOpen || (delivered && !send.isPending && !refreshing))
   // While Todofy is still creating, the only thing to do is wait (docs/ux.md §5: no actions).
-  const settlingNow = shown !== null && (shown.state === 'sending' || shown.state === 'pending')
-  const cardFor = (paperId: string) => deck.cards.find((card) => card.paper.id === paperId) ?? null
+  const settlingNow = shown !== null && (shown.state === Send_State.SENDING || shown.state === Send_State.PENDING)
+  const cardFor = (paperId: string) => deck.cards.find((card) => idOf(card) === paperId) ?? null
 
   // Focus lands on the heading (never on a button) and the confirm step is announced. The last swipe's
   // snackbar goes: it would cover the send preview, and 撤销上一张 is on this screen.
@@ -311,15 +320,15 @@ function SummaryBody({
           <h3 className="list-title">喜欢的论文</h3>
           <ul className="liked-list" aria-label="喜欢的论文">
             {liked.map((item) => {
-              const sent = item.sent_generation !== null
+              const sent = item.sentGeneration !== undefined
               const inFlight = locked && !sent && !item.excluded
               return (
-                <li key={item.paper_id} className={`liked-row${item.excluded ? ' is-excluded' : ''}`}>
+                <li key={item.paperId} className={`liked-row${item.excluded ? ' is-excluded' : ''}`}>
                   <div className="liked-text">
-                    <button type="button" className="liked-title" lang="en" onClick={() => setPreview(cardFor(item.paper_id))}>
+                    <button type="button" className="liked-title" lang="en" onClick={() => setPreview(cardFor(item.paperId))}>
                       {item.title}
                     </button>
-                    {item.brief_line ? <p className="liked-brief">{item.brief_line}</p> : null}
+                    {item.briefLine ? <p className="liked-brief">{item.briefLine}</p> : null}
                     {sent ? <span className="badge badge-ok">已发送</span> : null}
                     {inFlight ? <span className="badge badge-info">发送中</span> : null}
                     {item.excluded ? <span className="badge">不发送</span> : null}
@@ -345,12 +354,12 @@ function SummaryBody({
               <h3 id="send-title">{delivered ? `补发新增的 ${sendable} 篇？` : '发送到 Todofy？'}</h3>
               <fieldset className="segmented">
                 <legend className="sr-only">发送方式</legend>
-                <label className={mode === 'subtasks' ? 'is-on' : ''}>
-                  <input type="radio" name={modeName} value="subtasks" checked={mode === 'subtasks'} onChange={() => setMode('subtasks')} />
+                <label className={mode === SendMode.SUBTASKS ? 'is-on' : ''}>
+                  <input type="radio" name={modeName} value="subtasks" checked={mode === SendMode.SUBTASKS} onChange={() => setMode(SendMode.SUBTASKS)} />
                   一个父任务 + 子任务
                 </label>
-                <label className={mode === 'separate' ? 'is-on' : ''}>
-                  <input type="radio" name={modeName} value="separate" checked={mode === 'separate'} onChange={() => setMode('separate')} />
+                <label className={mode === SendMode.SEPARATE ? 'is-on' : ''}>
+                  <input type="radio" name={modeName} value="separate" checked={mode === SendMode.SEPARATE} onChange={() => setMode(SendMode.SEPARATE)} />
                   每篇单独一条
                 </label>
               </fieldset>
@@ -419,7 +428,7 @@ function SummaryBody({
   )
 }
 
-function ReadOnlyCard({ card, deck }: { card: DeckCard; deck: Deck }) {
+function ReadOnlyCard({ card, deck }: { card: Card; deck: Deck }) {
   const [expanded, setExpanded] = useState(false)
   const titleId = useId()
   return (

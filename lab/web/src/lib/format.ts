@@ -2,7 +2,12 @@
  * Display helpers. Times follow the browser's own time zone (Intl without a timeZone option); deck ids
  * are calendar days and are shown as written, never shifted.
  */
-import type { BuildPhase, Day, DeckCard, SendMode } from '../../../worker/src/api-types.ts'
+import { SendMode, type Card } from '@ziyixi/proto/lab/ui/v1/deck_pb'
+import { BuildPhase, Notice } from '@ziyixi/proto/lab/ui/v1/home_pb'
+import { paperOf } from './messages'
+
+/** `YYYY-MM-DD`: a deck's day. */
+type Day = string
 
 /** "A. Author, B. Author 等 7 人" (the first two names, then the count). */
 export function formatAuthors(authors: string): string {
@@ -55,9 +60,9 @@ export function sentences(text: string): string[] {
 }
 
 /** The card's main text: the 简介, or the abstract's first two sentences when the 简介 is missing. */
-export function cardBrief(card: DeckCard): { readonly text: string; readonly generated: boolean } {
+export function cardBrief(card: Card): { readonly text: string; readonly generated: boolean } {
   if (card.brief && card.brief.trim() !== '') return { text: card.brief.trim(), generated: true }
-  return { text: sentences(card.paper.abstract).slice(0, 2).join(' '), generated: false }
+  return { text: sentences(paperOf(card).abstractText).slice(0, 2).join(' '), generated: false }
 }
 
 /** A short title for snackbars: at most `max` code points with an ellipsis. */
@@ -74,28 +79,30 @@ export function parentTitle(day: Day, count: number, generation: number): string
 /** The live preview under the mode control (docs/ux.md §5). */
 export function sendPreview(mode: SendMode, day: Day, count: number, generation = 1): string {
   if (count === 0) return '没有要发送的论文'
-  if (mode === 'subtasks') return `将在 Todoist 创建「${parentTitle(day, count, generation)}」和 ${count} 个子任务`
+  if (mode === SendMode.SUBTASKS) return `将在 Todoist 创建「${parentTitle(day, count, generation)}」和 ${count} 个子任务`
   return `将在 Todoist 创建 ${count} 个任务`
 }
 
+/** Each build phase's copy; a phase this build does not know reads as UNSPECIFIED (lenient read) and shows nothing. */
 export const PHASES: Readonly<Record<BuildPhase, string>> = {
-  waiting: '等待 arXiv 发布',
-  fetching: '抓取',
-  embedding: '计算向量',
-  ranking: '排序',
-  summarizing: '生成简介',
-  paused: '已暂停',
-  cap_hit: '今日 AI 额度已用完',
-  failed: '出错，稍后自动重试',
+  [BuildPhase.UNSPECIFIED]: '',
+  [BuildPhase.WAITING]: '等待 arXiv 发布',
+  [BuildPhase.FETCHING]: '抓取',
+  [BuildPhase.EMBEDDING]: '计算向量',
+  [BuildPhase.RANKING]: '排序',
+  [BuildPhase.SUMMARIZING]: '生成简介',
+  [BuildPhase.PAUSED]: '已暂停',
+  [BuildPhase.CAP_HIT]: '今日 AI 额度已用完',
+  [BuildPhase.FAILED]: '出错，稍后自动重试',
 }
 
-export const NOTICES = {
-  cap_hit: '今日 AI 额度已用完，缺少的简介明天补上；卡片先显示原文摘要节选。',
-  feed_stale: 'arXiv 源暂时没有更新，今天的论文可能稍晚到。',
-  paused: '论文抓取已暂停，可以在设置里恢复。',
-} as const
+export const NOTICES: Readonly<Record<Exclude<Notice, typeof Notice.UNSPECIFIED>, string>> = {
+  [Notice.CAP_HIT]: '今日 AI 额度已用完，缺少的简介明天补上；卡片先显示原文摘要节选。',
+  [Notice.FEED_STALE]: 'arXiv 源暂时没有更新，今天的论文可能稍晚到。',
+  [Notice.PAUSED]: '论文抓取已暂停，可以在设置里恢复。',
+}
 
-/** A random UUID v4 for one mutation (op_id). */
+/** A random UUID v4 for one mutation (its request_id, AIP-155). */
 export function newOpId(): string {
   if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') return crypto.randomUUID()
   const bytes = new Uint8Array(16)

@@ -5,11 +5,13 @@
  */
 import { ExternalLink, FileText } from 'lucide-react'
 import { useId } from 'react'
-import type { DeckCard, DeckKind } from '../../../worker/src/api-types.ts'
+import { DeckKind, type Card } from '@ziyixi/proto/lab/ui/v1/deck_pb'
+import { AnnounceType } from '@ziyixi/proto/lab/ui/v1/paper_pb'
 import { cardBrief, formatAuthors, safeArxivUrl } from '../lib/format'
+import { paperOf } from '../lib/messages'
 
 interface PaperCardBodyProps {
-  readonly card: DeckCard
+  readonly card: Card
   readonly kind: DeckKind
   readonly expanded: boolean
   readonly onToggle?: () => void
@@ -22,19 +24,19 @@ interface PaperCardBodyProps {
 export function PaperCardBody({ card, kind, expanded, onToggle, titleId, interactive }: PaperCardBodyProps) {
   const abstractId = useId()
   const brief = cardBrief(card)
-  const paper = card.paper
-  const abs = safeArxivUrl(paper.abs_url)
-  const pdf = safeArxivUrl(paper.pdf_url)
+  const paper = paperOf(card)
+  const abs = safeArxivUrl(paper.abstractUri)
+  const pdf = safeArxivUrl(paper.pdfUri)
   const tab = interactive ? undefined : -1
   return (
     <div className="card-scroll">
       <div className="card-meta">
         <span className="card-rank">#{card.position}</span>
         <span className="chip" lang="en">
-          {paper.primary_category}
+          {paper.primaryCategory}
         </span>
-        {paper.announce_type === 'cross' ? <span className="chip chip-muted">交叉</span> : null}
-        {kind === 'explore' ? <span className="chip chip-explore">探索</span> : null}
+        {paper.announceType === AnnounceType.CROSS ? <span className="chip chip-muted">交叉</span> : null}
+        {kind === DeckKind.EXPLORE ? <span className="chip chip-explore">探索</span> : null}
       </div>
       <h2 className="card-title" id={titleId} tabIndex={-1} lang="en">
         {paper.title}
@@ -46,7 +48,7 @@ export function PaperCardBody({ card, kind, expanded, onToggle, titleId, interac
         <p lang={brief.generated ? 'zh-CN' : 'en'}>{brief.text}</p>
         <p className="card-brief-label">{brief.generated ? 'AI 根据摘要生成' : '原文摘要节选'}</p>
       </section>
-      {card.because && kind !== 'explore' ? (
+      {card.because && kind !== DeckKind.EXPLORE ? (
         <p className="card-because">
           为什么推荐：与你喜欢的《<span lang="en">{card.because.title}</span>》相近
         </p>
@@ -62,7 +64,7 @@ export function PaperCardBody({ card, kind, expanded, onToggle, titleId, interac
         {expanded ? '收起原文摘要' : '展开原文摘要'}
       </button>
       <p className="card-abstract" id={abstractId} lang="en" hidden={!expanded}>
-        {paper.abstract}
+        {paper.abstractText}
       </p>
       <div className="card-links">
         {abs ? (

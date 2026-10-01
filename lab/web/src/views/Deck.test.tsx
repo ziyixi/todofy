@@ -1,3 +1,4 @@
+import { DeckKind } from '@ziyixi/proto/lab/ui/v1/deck_pb'
 import { act, fireEvent, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { apiError, FakeServer } from '../test/fakeServer'
@@ -33,18 +34,18 @@ describe('the daily deck', () => {
     expect(screen.getAllByRole('article')).toHaveLength(1)
   })
 
-  it('likes with the button: optimistic, one POST with op_id and base_version, focus and announcement', async () => {
+  it('likes with the button: optimistic, one POST with request_id and base_version, focus and announcement', async () => {
     const server = new FakeServer(cards(4))
     await openDeck(server)
     const user = userEvent.setup()
     await user.click(screen.getByRole('button', { name: '喜欢' }))
     expect(topCard()).toHaveAccessibleName(title(2))
     expect(screen.getByTestId('progress')).toHaveTextContent('2 / 4 篇 · 已喜欢 1')
-    await waitFor(() => expect(server.mutations('/decide')).toHaveLength(1))
-    const body = server.mutations('/decide')[0]?.body
+    await waitFor(() => expect(server.mutations('decide')).toHaveLength(1))
+    const body = server.mutations('decide')[0]?.body
     expect(body).toMatchObject({ base_version: 1, paper_id: 'arxiv:2609.10001', decision: 'like' })
-    expect(body?.op_id).toMatch(/^[0-9a-f-]{36}$/)
-    expect(server.mutations('/decide')[0]?.headers['x-csrf-token']).toBe('token-1')
+    expect(body?.request_id).toMatch(/^[0-9a-f-]{36}$/)
+    expect(server.mutations('decide')[0]?.headers['x-csrf-token']).toBe('token-1')
     await waitFor(() => expect(liveText()).toBe(`已喜欢。第 2 篇，共 4 篇：${title(2)}`))
     expect(screen.getByTestId('snackbar')).toHaveTextContent('已喜欢《Synthetic Paper 1:…》')
     // Focus stays on the button so it can be pressed again.
@@ -78,8 +79,8 @@ describe('the daily deck', () => {
     expect(screen.getByRole('dialog', { name: '键盘快捷键' })).toBeInTheDocument()
     await user.keyboard('{Escape}')
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
-    await waitFor(() => expect(server.state().decisions).toEqual({ 'arxiv:2609.10001': 'dislike' }))
-    const kinds = server.mutations().map((call) => call.path.split('/').pop())
+    await waitFor(() => expect(server.decisions()).toEqual({ 'arxiv:2609.10001': 'dislike' }))
+    const kinds = server.mutations().map((call) => call.path.split(':').pop())
     expect(kinds).toEqual(['decide', 'decide', 'undo', 'undo', 'decide'])
     // Each request carried the version the previous response returned.
     expect(server.mutations().map((call) => call.body?.base_version)).toEqual([1, 2, 3, 4, 5])
@@ -116,7 +117,7 @@ describe('the daily deck', () => {
     expect(topCard()).toHaveAccessibleName(title(2))
     // The leaving copy is on screen for the exit animation but hidden from assistive tech.
     expect(screen.getByTestId('leaving-card')).toHaveAttribute('aria-hidden', 'true')
-    await waitFor(() => expect(server.state().decisions).toEqual({ 'arxiv:2609.10001': 'dislike' }))
+    await waitFor(() => expect(server.decisions()).toEqual({ 'arxiv:2609.10001': 'dislike' }))
   })
 
   it('keeps a touch drag alive when the child the finger started on loses its implicit capture', async () => {
@@ -132,7 +133,7 @@ describe('the daily deck', () => {
     fireEvent.pointerMove(article, { pointerId: 7, clientX: 260, clientY: 306, pointerType: 'touch' })
     fireEvent.pointerUp(article, { pointerId: 7, clientX: 260, clientY: 306, pointerType: 'touch' })
     expect(topCard()).toHaveAccessibleName(title(2))
-    await waitFor(() => expect(server.state().decisions).toEqual({ 'arxiv:2609.10001': 'like' }))
+    await waitFor(() => expect(server.decisions()).toEqual({ 'arxiv:2609.10001': 'like' }))
     // The card's own capture ending (the browser took the gesture) still cancels and springs back.
     const next = topCard()
     fireEvent.pointerDown(next, { pointerId: 8, clientX: 100, clientY: 300, pointerType: 'touch' })
@@ -148,14 +149,14 @@ describe('the daily deck', () => {
     await openDeck(server)
     const user = userEvent.setup()
     for (const name of ['喜欢', '不喜欢', '喜欢'] as const) await user.click(screen.getByRole('button', { name }))
-    await waitFor(() => expect(Object.keys(server.state().decisions)).toHaveLength(3))
+    await waitFor(() => expect(Object.keys(server.decisions())).toHaveLength(3))
     server.latency = 300
     await user.keyboard('z')
     await user.keyboard('z')
     await user.keyboard('z')
     await waitFor(() => expect(topCard()).toHaveAccessibleName(title(1)), { timeout: 4000 })
-    await waitFor(() => expect(server.state().decisions).toEqual({}), { timeout: 4000 })
-    expect(server.mutations('/undo')).toHaveLength(3)
+    await waitFor(() => expect(server.decisions()).toEqual({}), { timeout: 4000 })
+    expect(server.mutations('undo')).toHaveLength(3)
     expect(screen.getByTestId('progress')).toHaveTextContent('1 / 6 篇 · 已喜欢 0')
   })
 
@@ -164,14 +165,14 @@ describe('the daily deck', () => {
     await openDeck(server)
     const user = userEvent.setup()
     await user.click(screen.getByRole('button', { name: '喜欢' }))
-    await waitFor(() => expect(server.mutations('/decide')).toHaveLength(1))
-    await waitFor(() => expect(server.state().decisions).toEqual({ 'arxiv:2609.10001': 'like' }))
+    await waitFor(() => expect(server.mutations('decide')).toHaveLength(1))
+    await waitFor(() => expect(server.decisions()).toEqual({ 'arxiv:2609.10001': 'like' }))
     server.latency = 300
     await user.keyboard('z')
     await user.keyboard('z')
     await waitFor(() => expect(screen.getByTestId('snackbar')).toHaveTextContent('没有更多可以撤销的了'), { timeout: 4000 })
     expect(topCard()).toHaveAccessibleName(title(1))
-    expect(server.state().decisions).toEqual({})
+    expect(server.decisions()).toEqual({})
   })
 
   it('ignores drags that start on a link or button', async () => {
@@ -200,7 +201,7 @@ describe('the daily deck', () => {
     await waitFor(() => expect(screen.getByRole('button', { name: '撤销' })).toBeEnabled())
     await user.click(screen.getByRole('button', { name: '撤销' }))
     await waitFor(() => expect(topCard()).toHaveAccessibleName(title(1)))
-    await waitFor(() => expect(server.state().decisions).toEqual({}))
+    await waitFor(() => expect(server.decisions()).toEqual({}))
     expect(screen.getByRole('button', { name: /撤销/ })).toBeDisabled()
   })
 
@@ -215,11 +216,11 @@ describe('the daily deck', () => {
     expect(topCard()).toHaveAccessibleName(title(1))
     expect(screen.getByTestId('progress')).toHaveTextContent('1 / 3 篇 · 已喜欢 0')
     expect(screen.getByTestId('snackbar')).toHaveTextContent('已清空 2 个选择')
-    await waitFor(() => expect(server.mutations('/restart')).toHaveLength(1))
+    await waitFor(() => expect(server.mutations('restart')).toHaveLength(1))
     // No confirmation dialog: the snackbar's 撤销 brings every choice back.
     await user.click(within(screen.getByTestId('snackbar')).getByRole('button', { name: '撤销' }))
     expect(topCard()).toHaveAccessibleName(title(3))
-    await waitFor(() => expect(server.state().decisions).toEqual({ 'arxiv:2609.10001': 'like', 'arxiv:2609.10002': 'dislike' }))
+    await waitFor(() => expect(server.decisions()).toEqual({ 'arxiv:2609.10001': 'like', 'arxiv:2609.10002': 'dislike' }))
   })
 
   it('adopts the other device’s state on a version conflict', async () => {
@@ -236,20 +237,20 @@ describe('the daily deck', () => {
   it('rolls the card back after a network failure that a retry does not fix', async () => {
     const server = new FakeServer(cards(3))
     await openDeck(server)
-    server.interceptors.push((call) => (call.path.endsWith('/decide') ? apiError(503, 'unavailable') : null))
+    server.interceptors.push((call) => (call.path.endsWith(':decide') ? apiError(503, 'UNAVAILABLE') : null))
     await userEvent.setup().click(screen.getByRole('button', { name: '喜欢' }))
     expect(topCard()).toHaveAccessibleName(title(2))
     await waitFor(() => expect(topCard()).toHaveAccessibleName(title(1)), { timeout: 3000 })
     expect(screen.getByTestId('snackbar')).toHaveTextContent('网络异常，已恢复这张卡片')
-    // The same op_id was sent twice (a lost response is harmless).
-    const ops = server.mutations('/decide').map((call) => call.body?.op_id)
+    // The same request_id was sent twice (a lost response is harmless).
+    const ops = server.mutations('decide').map((call) => call.body?.request_id)
     expect(ops).toHaveLength(2)
     expect(ops[0]).toBe(ops[1])
   })
 
   it('shows the abstract excerpt when the 简介 is missing, and no 为什么推荐 on explore decks', async () => {
-    const server = new FakeServer([card(1, { brief: null }), card(2)], undefined, 'explore')
-    server.today = { ...server.today, cold_start: true }
+    const server = new FakeServer([card(1, { brief: undefined }), card(2)], undefined, DeckKind.EXPLORE)
+    server.today = { ...server.today, coldStart: true }
     await openDeck(server)
     expect(within(topCard()).getByText('原文摘要节选')).toBeInTheDocument()
     expect(within(topCard()).getByText('探索')).toBeInTheDocument()

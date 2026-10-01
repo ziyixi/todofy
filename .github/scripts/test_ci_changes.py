@@ -1402,7 +1402,7 @@ class AccessProbe(unittest.TestCase):
         name = "- name: Check that Access answers unauthenticated requests\n"
         step = lambda job: workflow_jobs()[job].split(name, 1)[1].split("\n      - ", 1)[0]  # noqa: E731
         body = lambda job: step(job).split("        run: |\n", 1)[1]  # noqa: E731
-        self.assertEqual(body("lab-deploy").replace("/api/today", "/api/v2/home"), body("dashboard-deploy"))
+        self.assertEqual(body("lab-deploy").replace("/api/v1/today", "/api/v2/home"), body("dashboard-deploy"))
         self.assertIn("ACCESS_ISSUER: ${{ steps.config.outputs.access_issuer }}", step("lab-deploy"))
         config = workflow_jobs()["lab-deploy"].split("- name: Read the host and the Access issuer from the committed config\n", 1)[1]
         self.assertIn('open("wrangler.toml", "rb")', config.split("\n      - ", 1)[0])

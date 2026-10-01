@@ -1,17 +1,17 @@
 /**
- * One deck's live session: the frozen cards from GET /api/decks/:day, the optimistic model
+ * One deck's live session: the frozen cards from GetDeck, the optimistic model
  * (lib/deckModel.ts) and the queue runner that sends one operation at a time (docs/ux.md §4).
  *
  * - Success: the response's state becomes the confirmed state.
- * - Transient failure: the same op_id is sent once more; if that fails too the operation and everything
+ * - Transient failure: the same request_id is sent once more; if that fails too the operation and everything
  *   queued after it are rolled back ("网络异常，已恢复这张卡片") and the deck is re-read.
- * - 409 deck_changed (another tab or device): the server's state is adopted and the queue dropped
+ * - DECK_CHANGED (another tab or device): the server's state is adopted and the queue dropped
  *   ("已同步其他设备上的选择"). Any other refusal re-reads the deck and adopts it.
  */
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useCallback, useEffect, useMemo, useReducer, useRef } from 'react'
-import type { Day, Deck, DeckMutationResponse } from '../../../worker/src/api-types.ts'
-import { ApiError, api, withRetry } from '../api/client'
+import type { Deck, DeckState } from '@ziyixi/proto/lab/ui/v1/deck_pb'
+import { ApiError, deckName, lab, withRetry } from '../api/client'
 import { useFeedback } from '../components/Feedback'
 import { reduceModel, simulate, type Effective, type LocalOp, type ModelAction, type SessionModel } from '../lib/deckModel'
 
@@ -38,16 +38,23 @@ export interface DeckSession {
   readonly refetch: () => void
 }
 
-export function useDeckSession(day: Day): DeckSession {
+/** GetDeck for `day`; a deck without its state is not a deck this UI can show. */
+async function readDeck(day: string): Promise<Deck> {
+  const deck = await lab.getDeck({ name: deckName(day) })
+  if (deck.state === undefined) throw new ApiError(200, 'BAD_RESPONSE', '服务返回了无法识别的响应（HTTP 200）')
+  return deck
+}
+
+export function useDeckSession(day: string): DeckSession {
   const client = useQueryClient()
   const { announce, snack } = useFeedback()
-  const deckQuery = useQuery({ queryKey: ['deck', day], queryFn: () => api.deck(day) })
+  const deckQuery = useQuery({ queryKey: ['deck', day], queryFn: () => readDeck(day) })
   const [model, dispatch] = useReducer(reducer, null)
   const inflight = useRef<string | null>(null)
 
   const deckData = deckQuery.data
   useEffect(() => {
-    if (deckData) dispatch({ type: 'adopt', state: deckData.state, force: false })
+    if (deckData?.state) dispatch({ type: 'adopt', state: deckData.state, force: false })
   }, [deckData])
 
   const notify = useCallback(
@@ -60,9 +67,9 @@ export function useDeckSession(day: Day): DeckSession {
 
   const resync = useCallback(async () => {
     try {
-      const fresh = await client.fetchQuery({ queryKey: ['deck', day], queryFn: () => api.deck(day), staleTime: 0 })
-      // Not forced: operations queued since then are kept (a stale one is answered with deck_changed).
-      dispatch({ type: 'adopt', state: fresh.state, force: false })
+      const fresh = await client.fetchQuery({ queryKey: ['deck', day], queryFn: () => readDeck(day), staleTime: 0 })
+      // Not forced: operations queued since then are kept (a stale one is answered with DECK_CHANGED).
+      if (fresh.state) dispatch({ type: 'adopt', state: fresh.state, force: false })
     } catch {
       // The next deck read (focus, reload) catches up.
     }
@@ -74,28 +81,33 @@ export function useDeckSession(day: Day): DeckSession {
     const op = pending?.[0]
     if (!op || baseVersion === undefined || inflight.current === op.op_id) return
     inflight.current = op.op_id
-    const body = { op_id: op.op_id, base_version: baseVersion }
-    const run = (): Promise<DeckMutationResponse> => {
-      if (op.kind === 'decide') return api.decide(day, { ...body, paper_id: op.paper_id, decision: op.decision })
-      if (op.kind === 'undo') return api.undo(day, body)
-      return api.restart(day, body)
+    const request = { name: deckName(day), requestId: op.op_id, baseVersion }
+    const run = async (): Promise<DeckState> => {
+      const response =
+        op.kind === 'decide'
+          ? await lab.decideDeck({ ...request, paperId: op.paper_id, decision: op.decision })
+          : op.kind === 'undo'
+            ? await lab.undoDeck(request)
+            : await lab.restartDeck(request)
+      if (response.state === undefined) throw new ApiError(200, 'BAD_RESPONSE', '服务返回了无法识别的响应（HTTP 200）')
+      return response.state
     }
     withRetry(run)
-      .then((response) => {
+      .then((state) => {
         inflight.current = null
-        dispatch({ type: 'confirmed', op_id: op.op_id, state: response.state })
+        dispatch({ type: 'confirmed', op_id: op.op_id, state })
         void client.invalidateQueries({ queryKey: ['summary', day] })
         void client.invalidateQueries({ queryKey: ['today'], refetchType: 'none' })
       })
       .catch((error: unknown) => {
         inflight.current = null
-        if (error instanceof ApiError && error.code === 'deck_changed' && error.state) {
+        if (error instanceof ApiError && error.reason === 'DECK_CHANGED' && error.state) {
           dispatch({ type: 'adopt', state: error.state, force: true })
           notify('已同步其他设备上的选择')
         } else if (error instanceof ApiError && !error.transient) {
           dispatch({ type: 'rollback', op_id: op.op_id })
           // An undo pressed ahead of the server's answer found nothing left to take back.
-          notify(op.kind === 'undo' && error.code === 'nothing_to_undo' ? '没有更多可以撤销的了' : error.message)
+          notify(op.kind === 'undo' && error.reason === 'NOTHING_TO_UNDO' ? '没有更多可以撤销的了' : error.message)
           void resync()
         } else {
           dispatch({ type: 'rollback', op_id: op.op_id })

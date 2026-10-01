@@ -62,11 +62,11 @@ describe('end of deck', () => {
 
   it('sends explicitly and shows the created state; a later visit says it was sent', async () => {
     const { server, user } = await finished()
-    expect(server.mutations('/send')).toHaveLength(0)
+    expect(server.mutations('send')).toHaveLength(0)
     await user.click(screen.getByRole('radio', { name: '每篇单独一条' }))
     await user.click(sendButton())
     await waitFor(() => expect(status()).toHaveTextContent('已发送：Todoist 里新增了 3 个任务'))
-    expect(server.mutations('/send')[0]?.body).toMatchObject({ mode: 'separate' })
+    expect(server.mutations('send')[0]?.body).toMatchObject({ mode: 'separate' })
     // Sent papers carry a badge and can no longer be removed.
     await waitFor(() => expect(screen.getAllByText('已发送')).toHaveLength(2))
     expect(screen.queryByRole('button', { name: /^移出/ })).not.toBeInTheDocument()
@@ -78,9 +78,9 @@ describe('end of deck', () => {
     const server = new FakeServer(cards(3))
     const soon = new Date(Date.now() + 100).toISOString()
     server.sendScript = [
-      sendStatus({ state: 'pending', tasks_total: 3, tasks_created: 1, poll_after: soon, updated_at: '2026-09-30T12:00:01Z' }),
-      sendStatus({ state: 'pending', tasks_total: 3, tasks_created: 2, poll_after: soon, updated_at: '2026-09-30T12:00:04Z' }),
-      sendStatus({ state: 'created', tasks_total: 3, tasks_created: 3, updated_at: '2026-09-30T12:00:07Z' }),
+      sendStatus({ state: 'pending', tasks_total: 3, tasks_created: 1, next_poll_time: soon, update_time: '2026-09-30T12:00:01Z' }),
+      sendStatus({ state: 'pending', tasks_total: 3, tasks_created: 2, next_poll_time: soon, update_time: '2026-09-30T12:00:04Z' }),
+      sendStatus({ state: 'created', tasks_total: 3, tasks_created: 3, update_time: '2026-09-30T12:00:07Z' }),
     ]
     const { user } = await finished(server)
     await user.click(sendButton())
@@ -95,8 +95,8 @@ describe('end of deck', () => {
   it('retries a partly failed send with the frozen payload and never duplicates', async () => {
     const server = new FakeServer(cards(3))
     server.sendScript = [
-      sendStatus({ state: 'failed', tasks_total: 3, tasks_created: 2, updated_at: '2026-09-30T12:00:01Z' }),
-      sendStatus({ state: 'created', tasks_total: 3, tasks_created: 3, updated_at: '2026-09-30T12:00:05Z' }),
+      sendStatus({ state: 'failed', tasks_total: 3, tasks_created: 2, update_time: '2026-09-30T12:00:01Z' }),
+      sendStatus({ state: 'created', tasks_total: 3, tasks_created: 3, update_time: '2026-09-30T12:00:05Z' }),
     ]
     const { user } = await finished(server)
     await user.click(sendButton())
@@ -106,9 +106,9 @@ describe('end of deck', () => {
     expect(screen.queryByRole('radio')).not.toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: '重试（不会重复创建）' }))
     await waitFor(() => expect(status()).toHaveTextContent('已发送：Todoist 里新增了 3 个任务'))
-    const bodies = server.mutations('/send').map((call) => call.body)
+    const bodies = server.mutations('send').map((call) => call.body)
     expect(bodies).toHaveLength(2)
-    expect(bodies[0]?.op_id).not.toBe(bodies[1]?.op_id)
+    expect(bodies[0]?.request_id).not.toBe(bodies[1]?.request_id)
   })
 
   it('says a duplicate was already sent', async () => {
@@ -124,7 +124,7 @@ describe('end of deck', () => {
     const server = new FakeServer(cards(3))
     server.sendScript = [
       sendStatus({ state: 'paused', recorded: false, frozen: false, error_code: 'todoist_paused', tasks_created: 0 }),
-      sendStatus({ state: 'created', updated_at: '2026-09-30T12:01:00Z' }),
+      sendStatus({ state: 'created', update_time: '2026-09-30T12:01:00Z' }),
     ]
     const { user } = await finished(server)
     await user.click(sendButton())
@@ -138,7 +138,7 @@ describe('end of deck', () => {
 
   it('reports a recorded pause as handed over', async () => {
     const server = new FakeServer(cards(3))
-    server.sendScript = [sendStatus({ state: 'paused', recorded: true, error_code: 'maintenance', tasks_created: 0, poll_after: null })]
+    server.sendScript = [sendStatus({ state: 'paused', recorded: true, error_code: 'maintenance', tasks_created: 0, next_poll_time: undefined })]
     const { user } = await finished(server)
     await user.click(sendButton())
     await waitFor(() => expect(status()).toHaveTextContent('已交给 Todofy，等它恢复后会自动创建（Todofy 维护中）'))
@@ -155,7 +155,7 @@ describe('end of deck', () => {
 
   it('offers a safe retry when the outcome is unknown', async () => {
     const server = new FakeServer(cards(3))
-    server.sendScript = [sendStatus({ state: 'unknown', tasks_created: 0, poll_after: null }), sendStatus({ state: 'created', updated_at: '2026-09-30T12:02:00Z' })]
+    server.sendScript = [sendStatus({ state: 'unknown', tasks_created: 0, next_poll_time: undefined }), sendStatus({ state: 'created', update_time: '2026-09-30T12:02:00Z' })]
     const { user } = await finished(server)
     await user.click(sendButton())
     await waitFor(() => expect(status()).toHaveTextContent('结果未知：重试不会重复创建'))
@@ -166,12 +166,12 @@ describe('end of deck', () => {
   it('shows a failed request with a retry that reuses the server’s idempotency', async () => {
     const server = new FakeServer(cards(3))
     let failures = 2
-    server.interceptors.push((call) => (call.path.endsWith('/send') && call.method === 'POST' && failures-- > 0 ? apiError(502, 'unavailable') : null))
+    server.interceptors.push((call) => (call.path.endsWith(':send') && call.method === 'POST' && failures-- > 0 ? apiError(502, 'UNAVAILABLE') : null))
     const { user } = await finished(server)
     await user.click(sendButton())
     await waitFor(() => expect(status()).toHaveTextContent('发送请求没有完成'), { timeout: 3000 })
-    // The automatic repeat reused the op_id.
-    const ops = server.mutations('/send').map((call) => call.body?.op_id)
+    // The automatic repeat reused the request_id.
+    const ops = server.mutations('send').map((call) => call.body?.request_id)
     expect(ops[0]).toBe(ops[1])
     await user.click(sendButton())
     await waitFor(() => expect(status()).toHaveTextContent('已发送'))
@@ -190,7 +190,7 @@ describe('end of deck', () => {
     await user.click(screen.getByRole('button', { name: '喜欢' }))
     await screen.findByRole('heading', { name: '3 篇看完了 · 喜欢 3 · 不喜欢 0' })
     await settled()
-    server.sendScript = [sendStatus({ generation: 2, intent_id: 'deck-2026-09-30-g2', items: 1, tasks_total: 2, tasks_created: 2, updated_at: '2026-09-30T13:00:00Z' })]
+    server.sendScript = [sendStatus({ generation: 2, intent_id: 'deck-2026-09-30-g2', item_count: 1, tasks_total: 2, tasks_created: 2, update_time: '2026-09-30T13:00:00Z' })]
     const again = await screen.findByRole('button', { name: '补发新增的 1 篇' })
     expect(screen.getByTestId('send-preview')).toHaveTextContent('「论文雷达 2026-09-30（补发）· 1 篇」')
     await user.click(again)
@@ -202,7 +202,7 @@ describe('end of deck', () => {
     const { server, user } = await finished()
     await user.click(screen.getByRole('button', { name: '暂不发送' }))
     expect(await screen.findByRole('heading', { name: '今天的 3 篇都看完了' })).toBeInTheDocument()
-    expect(server.laterAt).not.toBeNull()
+    expect(server.snoozeTime).not.toBeNull()
     expect(await screen.findByText(/还有 2 篇喜欢的论文没有发送/)).toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: '去发送' }))
     expect(await screen.findByRole('heading', { name: '发送到 Todofy？' })).toBeInTheDocument()
@@ -225,9 +225,9 @@ describe('end of deck', () => {
     await user.click(screen.getByRole('button', { name: '暂不发送' }))
     await user.click(screen.getByRole('button', { name: /回到卡片重来/ }))
     await new Promise((resolve) => setTimeout(resolve, 100))
-    expect(server.mutations('/send')).toHaveLength(0)
-    expect(server.mutations('/later')).toHaveLength(0)
-    expect(server.mutations('/restart')).toHaveLength(0)
+    expect(server.mutations('send')).toHaveLength(0)
+    expect(server.mutations('snooze')).toHaveLength(0)
+    expect(server.mutations('restart')).toHaveLength(0)
     // The confirm step is announced.
     await waitFor(() => expect(screen.getByTestId('live-region')).toHaveTextContent('看完了，喜欢 2 篇。是否发送到 Todofy？'))
     // The button belongs to the send box, after the mode and its preview.
@@ -238,7 +238,7 @@ describe('end of deck', () => {
     await settled()
     await user.click(send)
     await waitFor(() => expect(status()).toHaveTextContent('已发送'))
-    expect(server.mutations('/send')).toHaveLength(1)
+    expect(server.mutations('send')).toHaveLength(1)
   })
 
   it('waits for every swipe to be saved before it lets the owner send, so one send carries every like', async () => {
@@ -290,14 +290,14 @@ describe('end of deck', () => {
 
   it('says a send created nothing without calling it partial, and 稍后再说 leaves without wiping the deck', async () => {
     const server = new FakeServer(cards(3))
-    server.sendScript = [sendStatus({ state: 'failed', tasks_total: 3, tasks_created: 0, error_code: 'todoist_rejected', updated_at: '2026-09-30T12:00:01Z' })]
+    server.sendScript = [sendStatus({ state: 'failed', tasks_total: 3, tasks_created: 0, error_code: 'todoist_rejected', update_time: '2026-09-30T12:00:01Z' })]
     const { user } = await finished(server)
     await user.click(sendButton())
     await waitFor(() => expect(status()).toHaveTextContent('发送失败：没有创建任务（Todoist 拒绝了请求）'))
     expect(status()).not.toHaveTextContent('部分失败')
     await user.click(screen.getByRole('button', { name: '稍后再说' }))
     expect(await screen.findByRole('heading', { name: '今天的 3 篇都看完了' })).toBeInTheDocument()
-    expect(server.mutations('/restart')).toHaveLength(0)
+    expect(server.mutations('restart')).toHaveLength(0)
     expect(Object.keys(server.decisions())).toHaveLength(3)
   })
 
@@ -314,7 +314,7 @@ describe('end of deck', () => {
     await settled()
     await user.click(screen.getByRole('button', { name: /回到卡片重来/ }))
     expect(await screen.findByRole('article', { name: title(1) })).toBeInTheDocument()
-    await waitFor(() => expect(server.mutations('/restart')).toHaveLength(1))
+    await waitFor(() => expect(server.mutations('restart')).toHaveLength(1))
   })
 
   it('opens a liked paper read-only from the summary', async () => {

@@ -7,8 +7,9 @@
  */
 import { Sprout } from 'lucide-react'
 import { useCallback, useEffect, useRef, useState } from 'react'
-import type { Decision, Day, DeckCard, TodayResponse } from '../../../worker/src/api-types.ts'
-import { errorMessage } from '../api/client'
+import { DeckKind, type Card } from '@ziyixi/proto/lab/ui/v1/deck_pb'
+import type { Today } from '@ziyixi/proto/lab/ui/v1/home_pb'
+import { dayOf, errorMessage } from '../api/client'
 import { ActionBar, DeckMenu, DeckProgress, ShortcutsSheet } from '../components/DeckChrome'
 import { useFeedback } from '../components/Feedback'
 import { Link } from '../components/Link'
@@ -17,6 +18,8 @@ import { useDeckSession } from '../hooks/useDeckSession'
 import { useReducedMotion } from '../hooks/useReducedMotion'
 import { canUndo, countDecisions, planDecide, planRestart, planUndo, undecidedCards } from '../lib/deckModel'
 import { formatDay, newOpId, safeArxivUrl, shortTitle } from '../lib/format'
+import { DECISION_OF, idOf, paperOf, swipeOf } from '../lib/messages'
+import type { Swipe } from '../lib/swipe'
 import { deckKeyAction } from '../lib/keys'
 import { DoneState } from './States'
 import { SummaryView } from './Summary'
@@ -26,8 +29,8 @@ type Screen = 'auto' | 'summary' | 'done'
 const FINISH_MOMENT_MS = 600
 
 interface DeckViewProps {
-  readonly day: Day
-  readonly today: TodayResponse | null
+  readonly day: string
+  readonly today: Today | null
 }
 
 export function DeckView({ day, today }: DeckViewProps) {
@@ -36,7 +39,7 @@ export function DeckView({ day, today }: DeckViewProps) {
   const reducedMotion = useReducedMotion()
   const deckRef = useRef<SwipeDeckHandle>(null)
   const [expandedId, setExpandedId] = useState<string | null>(null)
-  const [lean, setLean] = useState<Decision | null>(null)
+  const [lean, setLean] = useState<Swipe | null>(null)
   const [enter, setEnter] = useState<EnterFrom | null>(null)
   const [helpOpen, setHelpOpen] = useState(false)
   const [screen, setScreen] = useState<Screen>('auto')
@@ -51,14 +54,14 @@ export function DeckView({ day, today }: DeckViewProps) {
   const stack = undecidedCards(cards, decisions)
   const top = stack[0] ?? null
   const counts = countDecisions(cards, decisions)
-  const isToday = today?.deck?.deck_id === day
+  const isToday = dayOf(today?.deck?.deck ?? '') === day
 
   // The deck just ran out in this session: a short "看完了" moment, then the summary.
   const previousTop = useRef<string | null | undefined>(undefined)
   useEffect(() => {
     if (!deck || !effective) return
     const before = previousTop.current
-    const now = top?.paper.id ?? null
+    const now = top ? idOf(top) : null
     previousTop.current = now
     if (now !== null) {
       if (screen !== 'auto') setScreen('auto')
@@ -75,7 +78,7 @@ export function DeckView({ day, today }: DeckViewProps) {
       setScreen('summary')
     }, FINISH_MOMENT_MS)
     return () => window.clearTimeout(timer)
-  }, [top?.paper.id, deck, effective === null])
+  }, [top ? idOf(top) : null, deck, effective === null])
 
   // After a decision or undo, focus follows to the new top card's title (unless the owner is on a button).
   useEffect(() => {
@@ -88,21 +91,21 @@ export function DeckView({ day, today }: DeckViewProps) {
   const shouldMoveFocus = () => document.activeElement?.closest('.action-bar') == null
 
   const decide = useCallback(
-    (card: DeckCard, decision: Decision) => {
+    (card: Card, decision: Swipe) => {
       if (!effective) return
-      const op = planDecide(effective, card, decision, newOpId())
+      const op = planDecide(effective, card, DECISION_OF[decision], newOpId())
       if (!op) return
       session.enqueue(op)
       setExpandedId(null)
       setEnter(null)
       focusTitle.current = shouldMoveFocus()
-      const nextDecisions = { ...effective.decisions, [card.paper.id]: decision }
+      const nextDecisions = { ...effective.decisions, [idOf(card)]: DECISION_OF[decision] }
       const next = undecidedCards(cards, nextDecisions)[0]
       const word = decision === 'like' ? '已喜欢' : '不喜欢'
       const decided = countDecisions(cards, nextDecisions).decided
-      announce(next ? `${word}。第 ${decided + 1} 篇，共 ${cards.length} 篇：${next.paper.title}` : `${word}。${cards.length} 篇都看完了`)
+      announce(next ? `${word}。第 ${decided + 1} 篇，共 ${cards.length} 篇：${paperOf(next).title}` : `${word}。${cards.length} 篇都看完了`)
       snack({
-        text: `${word}《${shortTitle(card.paper.title)}》`,
+        text: `${word}《${shortTitle(paperOf(card).title)}》`,
         action: { label: '撤销', run: () => undoRef.current() },
         duration: 5000,
       })
@@ -124,12 +127,12 @@ export function DeckView({ day, today }: DeckViewProps) {
       setEnter(null)
       announce('正在撤销上一步…')
     } else if (target.kind === 'decide') {
-      const card = cards.find((item) => item.paper.id === target.paper_id)
-      setEnter({ paper_id: target.paper_id, from: target.decision, nonce: enterNonce.current })
-      announce(`已撤销：${card?.paper.title ?? ''}`)
+      const card = cards.find((item) => idOf(item) === target.paper_id)
+      setEnter({ paper_id: target.paper_id, from: swipeOf(target.decision) ?? 'fade', nonce: enterNonce.current })
+      announce(`已撤销：${card ? paperOf(card).title : ''}`)
     } else {
       const first = undecidedCards(cards, target.snapshot ?? decisions)[0]
-      setEnter(first ? { paper_id: first.paper.id, from: 'fade', nonce: enterNonce.current } : null)
+      setEnter(first ? { paper_id: idOf(first), from: 'fade', nonce: enterNonce.current } : null)
       announce(`已撤销重来，恢复了 ${target.cleared} 个选择`)
     }
     setScreen('auto')
@@ -154,7 +157,7 @@ export function DeckView({ day, today }: DeckViewProps) {
     snack({ text: `已清空 ${cleared} 个选择`, action: { label: '撤销', run: () => undoRef.current() }, duration: 8000 })
   }, [announce, effective, session, snack])
 
-  const fling = useCallback((decision: Decision) => deckRef.current?.fling(decision), [])
+  const fling = useCallback((decision: Swipe) => deckRef.current?.fling(decision), [])
 
   // Keyboard (docs/ux.md §3), only while cards are showing and no sheet is open. On the summary and done
   // screens only Z / ⌘Z / Ctrl+Z (撤销上一张) is live.
@@ -188,10 +191,10 @@ export function DeckView({ day, today }: DeckViewProps) {
           break
         case 'toggle':
           event.preventDefault()
-          if (top) setExpandedId((current) => (current === top.paper.id ? null : top.paper.id))
+          if (top) setExpandedId((current) => (current === idOf(top) ? null : idOf(top)))
           break
         case 'open': {
-          const url = top ? safeArxivUrl(top.paper.abs_url) : null
+          const url = top ? safeArxivUrl(paperOf(top).abstractUri) : null
           if (url) {
             event.preventDefault()
             window.open(url, '_blank', 'noopener,noreferrer')
@@ -234,7 +237,7 @@ export function DeckView({ day, today }: DeckViewProps) {
     )
   }
 
-  const explore = deck.kind === 'explore' || (isToday && today?.cold_start === true)
+  const explore = deck.kind === DeckKind.EXPLORE || (isToday && today?.coldStart === true)
   const heading = `${isToday ? '今日论文' : `${formatDay(day)} 的论文`}`
 
   if (top === null) {
@@ -245,7 +248,7 @@ export function DeckView({ day, today }: DeckViewProps) {
         </section>
       )
     }
-    const finishedEarlier = deck.send !== null || deck.later_at !== null || counts.liked === 0
+    const finishedEarlier = deck.latestSend !== undefined || deck.snoozeTime !== undefined || counts.liked === 0
     const view = screen === 'auto' ? (finishedEarlier ? 'done' : 'summary') : screen
     if (view === 'summary') {
       return (
@@ -282,7 +285,7 @@ export function DeckView({ day, today }: DeckViewProps) {
         <h1 className="deck-title">{heading}</h1>
         <DeckMenu onRestart={restart} canRestart={counts.decided > 0} onShortcuts={() => setHelpOpen(true)} />
       </div>
-      <DeckProgress cards={cards} decisions={decisions} currentId={top.paper.id} />
+      <DeckProgress cards={cards} decisions={decisions} currentId={idOf(top)} />
       {explore ? (
         <p className="banner banner-info">
           <Sprout size={16} aria-hidden="true" /> 还没有种子：先凭直觉划一组，你的喜欢就是推荐的起点 ·{' '}

@@ -10,7 +10,8 @@
  * - Under prefers-reduced-motion: no tilt, fly-out or spring; a static stamp and a short cross-fade.
  */
 import { useCallback, useImperativeHandle, useLayoutEffect, useRef, useState, type PointerEvent as ReactPointerEvent, type Ref } from 'react'
-import type { Decision, DeckCard, DeckKind } from '../../../worker/src/api-types.ts'
+import type { Card, DeckKind } from '@ziyixi/proto/lab/ui/v1/deck_pb'
+import { idOf } from '../lib/messages'
 import {
   SPRING_BACK_MS,
   directionOf,
@@ -24,39 +25,40 @@ import {
   stampOpacity,
   type CardPose,
   type Sample,
+  type Swipe,
 } from '../lib/swipe'
 import { PaperCardBody } from './PaperCard'
 
 export interface SwipeDeckHandle {
   /** Decides the top card with the same exit animation as a swipe (buttons, keys). */
-  fling: (decision: Decision) => void
+  fling: (decision: Swipe) => void
 }
 
 export interface EnterFrom {
   readonly paper_id: string
-  readonly from: Decision | 'fade'
+  readonly from: Swipe | 'fade'
   /** Changes on every undo so the same card can enter twice. */
   readonly nonce: number
 }
 
 interface SwipeDeckProps {
   /** Undecided cards in deck order: the first is the top card. */
-  readonly cards: readonly DeckCard[]
+  readonly cards: readonly Card[]
   readonly kind: DeckKind
   readonly reducedMotion: boolean
   readonly expandedId: string | null
   readonly onToggle: (paperId: string) => void
-  readonly onDecide: (card: DeckCard, decision: Decision) => void
+  readonly onDecide: (card: Card, decision: Swipe) => void
   /** The direction the top card leans while dragging (the matching button lights up). */
-  readonly onLean: (decision: Decision | null) => void
+  readonly onLean: (decision: Swipe | null) => void
   readonly enter: EnterFrom | null
   readonly ref?: Ref<SwipeDeckHandle>
 }
 
 interface Ghost {
   readonly key: number
-  readonly card: DeckCard
-  readonly decision: Decision
+  readonly card: Card
+  readonly decision: Swipe
   readonly from: CardPose
   readonly velocity: number
 }
@@ -65,8 +67,8 @@ const REST: CardPose = { x: 0, y: 0, rotate: 0 }
 /** Peeking cards behind the top one. */
 const VISIBLE = 3
 
-export function titleIdOf(card: DeckCard): string {
-  return `card-title-${card.paper.id.replace(/[^a-zA-Z0-9_-]/g, '-')}`
+export function titleIdOf(card: Card): string {
+  return `card-title-${idOf(card).replace(/[^a-zA-Z0-9_-]/g, '-')}`
 }
 
 function buzz(reducedMotion: boolean) {
@@ -83,7 +85,7 @@ export function SwipeDeck({ cards, kind, reducedMotion, expandedId, onToggle, on
   const counter = useRef(0)
 
   const commit = useCallback(
-    (card: DeckCard, decision: Decision, from: CardPose, velocity: number) => {
+    (card: Card, decision: Swipe, from: CardPose, velocity: number) => {
       counter.current += 1
       const ghost: Ghost = { key: counter.current, card, decision, from, velocity }
       setGhosts((current) => [...current.slice(-3), ghost])
@@ -98,7 +100,7 @@ export function SwipeDeck({ cards, kind, reducedMotion, expandedId, onToggle, on
   useImperativeHandle(
     ref,
     () => ({
-      fling: (decision: Decision) => {
+      fling: (decision: Swipe) => {
         if (top) commit(top, decision, REST, 0)
       },
     }),
@@ -111,16 +113,16 @@ export function SwipeDeck({ cards, kind, reducedMotion, expandedId, onToggle, on
     <div className="deck-stack">
       {cards.slice(0, VISIBLE).map((card, depth) => (
         <StackCard
-          key={card.paper.id}
+          key={idOf(card)}
           card={card}
           depth={depth}
           kind={kind}
           reducedMotion={reducedMotion}
-          expanded={depth === 0 && expandedId === card.paper.id}
+          expanded={depth === 0 && expandedId === idOf(card)}
           onToggle={onToggle}
           onCommit={commit}
           onLean={onLean}
-          enter={enter && enter.paper_id === card.paper.id && depth === 0 ? enter : null}
+          enter={enter && enter.paper_id === idOf(card) && depth === 0 ? enter : null}
         />
       ))}
       {ghosts.map((ghost) => (
@@ -142,14 +144,14 @@ interface DragState {
 }
 
 interface StackCardProps {
-  readonly card: DeckCard
+  readonly card: Card
   readonly depth: number
   readonly kind: DeckKind
   readonly reducedMotion: boolean
   readonly expanded: boolean
   readonly onToggle: (paperId: string) => void
-  readonly onCommit: (card: DeckCard, decision: Decision, from: CardPose, velocity: number) => void
-  readonly onLean: (decision: Decision | null) => void
+  readonly onCommit: (card: Card, decision: Swipe, from: CardPose, velocity: number) => void
+  readonly onLean: (decision: Swipe | null) => void
   readonly enter: EnterFrom | null
 }
 
@@ -162,7 +164,7 @@ function StackCard({ card, depth, kind, reducedMotion, expanded, onToggle, onCom
   const element = useRef<HTMLElement>(null)
   const drag = useRef<DragState | null>(null)
   const frame = useRef(0)
-  const leaning = useRef<Decision | null>(null)
+  const leaning = useRef<Swipe | null>(null)
   const isTop = depth === 0
 
   // Undo: the card comes back from the side it left (or fades in).
@@ -191,7 +193,7 @@ function StackCard({ card, depth, kind, reducedMotion, expanded, onToggle, onCom
   }, [enterNonce, enterFrom, reducedMotion])
 
   const lean = useCallback(
-    (next: Decision | null) => {
+    (next: Swipe | null) => {
       if (leaning.current === next) return
       leaning.current = next
       onLean(next)
@@ -329,7 +331,7 @@ function StackCard({ card, depth, kind, reducedMotion, expanded, onToggle, onCom
         card={card}
         kind={kind}
         expanded={expanded}
-        onToggle={() => onToggle(card.paper.id)}
+        onToggle={() => onToggle(idOf(card))}
         titleId={isTop ? titleId : `${titleId}-peek`}
         interactive={isTop}
       />
