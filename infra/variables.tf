@@ -36,7 +36,7 @@ variable "access_github_owner_emails" {
 # references (identity providers). Not secret; the rule (README.md "Variables"): ids of objects infra/
 # manages are committed, ids of objects outside the boundary (identity providers, the account) are not.
 variable "access_allowed_idp_ids" {
-  description = "Identity provider ids allowed on the owner-facing Access applications (Mail Hero, Todofy, Home, Lab)."
+  description = "Identity provider ids allowed on the owner-facing Access applications (Mail Hero, Todofy, Home, Lab, links)."
   type        = set(string)
 }
 

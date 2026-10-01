@@ -2,8 +2,10 @@
 """Run OpenTofu for infra/ against the encrypted remote state in R2, printing only the redacted summary.
 
     python3 infra/scripts/infra_state.py plan --environment production [--var-file F] [--work-dir D]
+    python3 infra/scripts/infra_state.py apply --environment production --expect import=5,outputs=3
 
-Used by .github/workflows/infra.yml (daily drift plan) and by bootstrap_state.py (one-time import). It:
+Used by .github/workflows/infra.yml (daily drift plan), .github/workflows/infra-apply.yml (the apply, P4) and by
+bootstrap_state.py (one-time import). It:
 - refuses to run without the state passphrase (TF_VAR_state_passphrase or INFRA_STATE_PASSPHRASE): state and
   plan encryption are enforced in versions.tf and there is no unencrypted fallback;
 - derives the R2 S3 credentials from CLOUDFLARE_API_TOKEN at runtime (access key id = the token's id from
@@ -12,15 +14,23 @@ Used by .github/workflows/infra.yml (daily drift plan) and by bootstrap_state.py
   and INFRA_R2_SECRET_ACCESS_KEY (README.md "Remote state");
 - runs `tofu init` with the S3 backend and `tofu plan -detailed-exitcode -out`, sending tofu's own output to
   a 0600 log inside a private work directory outside the repository, never to the terminal;
-- reads `tofu show -json` into memory (never to disk) and prints tools/infra-plan-summary's summary only.
+- reads `tofu show -json` into memory (never to disk) and prints tools/infra-plan-summary's summary only;
+- checks the planned outputs (outputs.tf) against the apps' production wrangler.toml files: every ACCESS_AUDIENCE,
+  D1 database_id and R2 bucket_name must equal what the managed objects hold (names only are printed);
+- `apply` (README.md "Apply"): copies the encrypted state object to a dated key in the same private bucket, plans,
+  refuses before any write unless the plan passes every gate (no delete/replace/forget unless confirmed, only
+  ALLOWED_TYPES, no change to FROZEN addresses, exactly the --expect counts, outputs equal to the wrangler
+  configs), then applies exactly that saved plan and plans again, which must be "No changes".
 
 Values come from --var-file (a tfvars file written by local_tfvars.py, or JSON) or from the INFRA_TFVARS
 environment variable (the GitHub secret, JSON). `values-json --var-file F | gh secret set INFRA_TFVARS ...`
 turns a local values file into that secret without showing it (it refuses to write to a terminal). Errors are fixed messages; a failed tofu step prints only
 its sanitised "Error:" headlines (no quoted strings, addresses, ids or long tokens).
 
-Exit codes: 0 no planned action; 1 error; 2 planned actions (drift); 3 a delete, replace or forget.
-Standard library only, Python 3.9+. Tests: python3 -m unittest discover -s infra/tests
+Exit codes: 0 no planned action (plan) or done (apply); 1 error or a refused apply; 2 planned actions (drift); 3 a
+delete, replace or forget; 5 an output differs from a wrangler.toml.
+Standard library only, Python 3.9+ (the wrangler.toml check needs tomllib, 3.11+; an older python3 skips it locally
+with a notice, and on a runner it is an error). Tests: python3 -m unittest discover -s infra/tests
 """
 
 from __future__ import annotations
@@ -43,6 +53,11 @@ import urllib.parse
 import urllib.request
 from pathlib import Path
 from typing import Any, Callable, Optional
+
+try:
+    import tomllib
+except ModuleNotFoundError:  # Python < 3.11: the wrangler.toml check is skipped locally (check_outputs)
+    tomllib = None
 
 REPO = Path(__file__).resolve().parents[2]
 INFRA = REPO / "infra"
@@ -68,7 +83,42 @@ REQUIRED_VALUES = (
 # backend elsewhere (AWS_*) or pick another workspace. The child environment never inherits them.
 STRIPPED_PREFIXES = ("TF_", "AWS_")
 KEPT = ("TF_PLUGIN_CACHE_DIR",)  # a download cache; the lock file's hashes still verify every provider
-EXIT_OK, EXIT_ERROR, EXIT_DRIFT, EXIT_DESTRUCTIVE = 0, 1, 2, 3
+EXIT_OK, EXIT_ERROR, EXIT_DRIFT, EXIT_DESTRUCTIVE, EXIT_MISMATCH = 0, 1, 2, 3, 5
+
+# --- the apply's gates (README.md "Apply") ---
+# Resource types an apply may touch: exactly the guard's boundary (.github/scripts/infra_guard.py ALLOWED_TYPES;
+# test_infra_config.py keeps the two equal). A planned change to any other type, or to a data source, refuses.
+ALLOWED_TYPES = frozenset({
+    "cloudflare_zero_trust_access_application",
+    "cloudflare_zero_trust_access_policy",
+    "cloudflare_d1_database",
+    "cloudflare_r2_bucket",
+})
+# Addresses an apply must never write to (an import, which only reads, is allowed). The backup app's only policy is
+# application-scoped; whether Cloudflare accepts an application PUT that references it by id is unproven (no dry run
+# exists), and a refused or partial PUT would cut off the backup collector. README.md "Import notes".
+FROZEN = frozenset({"cloudflare_zero_trust_access_application.mail_hero_backup"})
+# The literal a dispatch must type to let a plan delete, replace or forget (INFRA_CONFIRM_DESTRUCTIVE). prevent_destroy
+# still stops a delete or replace at plan time; removing it is a reviewed commit of its own.
+CONFIRM_PHRASE = "delete-replace-forget"
+CONFIRM_ENV, EXPECT_ENV = "INFRA_CONFIRM_DESTRUCTIVE", "INFRA_APPLY_EXPECT"
+BACKUP_PREFIX = "backups"
+
+# --- outputs against the apps' configs ---
+# The production wrangler.toml of every monorepo Worker (.github/scripts/test_wrangler_configs.py PRODUCTION;
+# test_infra_config.py keeps the two equal). The output keys are Worker names and D1 database names.
+WRANGLER_CONFIGS = (
+    "mail-hero/wrangler.toml",
+    "todofy/wrangler.toml",
+    "todofy/gateway/wrangler.toml",
+    "dashboard/wrangler.toml",
+    "website/wrangler.toml",
+    "website/relay/wrangler.toml",
+    "lab/wrangler.toml",
+    "flowday/wrangler.toml",
+    "links/wrangler.toml",
+)
+OUTPUTS = ("access_aud", "d1_database_ids", "r2_bucket_names")
 
 
 class Refused(Exception):
@@ -469,6 +519,57 @@ def destructive(summary: dict) -> bool:
     return load_summary_module().destructive(summary)
 
 
+def planned_outputs(plan_json: Any) -> dict[str, Any]:
+    """The values the outputs will have after an apply (planned_values.outputs), by output name."""
+    outputs = ((plan_json or {}).get("planned_values") or {}).get("outputs") or {}
+    return {name: entry.get("value") for name, entry in outputs.items() if isinstance(entry, dict)}
+
+
+def read_wrangler_configs(repo: Path = REPO) -> dict[str, dict]:
+    """The production wrangler.toml files, parsed, by path. tomllib is required (Python 3.11+)."""
+    configs = {}
+    for relative in WRANGLER_CONFIGS:
+        try:
+            with open(repo / relative, "rb") as handle:
+                configs[relative] = tomllib.load(handle)
+        except (OSError, ValueError):
+            raise Refused(f"cannot read {relative}") from None
+    return configs
+
+
+def output_problems(outputs: dict[str, Any], configs: dict[str, dict]) -> list[str]:
+    """Every place where a wrangler.toml and the planned outputs disagree. Paths and field names only, no value."""
+    problems = []
+    missing = [name for name in OUTPUTS if name not in outputs]
+    if missing:
+        return [f"the plan has no output {name}" for name in missing]
+    aud, d1, r2 = outputs["access_aud"], outputs["d1_database_ids"], outputs["r2_bucket_names"]
+    if not (isinstance(aud, dict) and isinstance(d1, dict) and isinstance(r2, list)):
+        return ["an output is not known before the apply (a replaced object?)"]
+    for path, config in configs.items():
+        name = config.get("name")
+        audience = (config.get("vars") or {}).get("ACCESS_AUDIENCE")
+        if audience is not None and aud.get(name) != audience:
+            problems.append(f"{path}: vars.ACCESS_AUDIENCE differs from access_aud for its Worker")
+        for database in config.get("d1_databases") or []:
+            if d1.get(database.get("database_name")) != database.get("database_id"):
+                problems.append(f"{path}: a d1_databases database_id differs from d1_database_ids")
+        for bucket in config.get("r2_buckets") or []:
+            if bucket.get("bucket_name") not in r2:
+                problems.append(f"{path}: an r2_buckets bucket_name is not in r2_bucket_names")
+    return problems
+
+
+def check_outputs(plan_json: Any, env: dict[str, str], repo: Path = REPO) -> list[str]:
+    """output_problems() for this plan, or [] with a notice when tomllib is missing outside a runner."""
+    if tomllib is None:
+        if on_actions_runner(env):
+            raise Refused("the wrangler.toml check needs Python 3.11+ (tomllib) on the runner")
+        print("infra_state: wrangler.toml check skipped: it needs Python 3.11+ (tomllib)", file=sys.stderr)
+        return []
+    return output_problems(planned_outputs(plan_json), read_wrangler_configs(repo))
+
+
 def drift_exit(summary: dict) -> int:
     """The plan's verdict for the drift check: destructive > any planned action or output change > clean."""
     if destructive(summary):
@@ -522,10 +623,17 @@ class Session:
                 pass
 
     def plan(self, name: str) -> tuple[int, dict, str]:
+        code, summary, rendered, _ = self.plan_full(name)
+        return code, summary, rendered
+
+    def plan_full(self, name: str) -> tuple[int, dict, str, Any]:
+        """(tofu exit code, summary, rendered summary, the plan's JSON). The JSON holds every value: it stays in
+        memory and only the gates below read it."""
         out = self.work / f"{name}.tfplan"
         code = self.tofu.plan(self.values_file, out)
-        summary, rendered = summarize(self.tofu.show_json(out))
-        return code, summary, rendered
+        plan_json = self.tofu.show_json(out)
+        summary, rendered = summarize(plan_json)
+        return code, summary, rendered, plan_json
 
 
 def report(text: str, env: dict[str, str]) -> None:
@@ -556,16 +664,26 @@ def command_plan(args: argparse.Namespace, env: dict[str, str]) -> int:
     try:
         session = Session(environment=args.environment, values=values, work=work, env=env)
         session.tofu.init(args.environment)
-        tofu_code, summary, rendered = session.plan("drift")
+        tofu_code, summary, rendered, plan_json = session.plan_full("drift")
         report(rendered, env)
+        problems = check_outputs(plan_json, env)
         verdict = drift_exit(summary)
         if verdict == EXIT_OK and tofu_code != 0:
             verdict = EXIT_DRIFT  # tofu saw a change the summary does not classify: never call it clean
+        for problem in problems:
+            print(f"infra_state: {problem}", file=sys.stderr)
+        if problems and verdict != EXIT_DESTRUCTIVE:
+            verdict = EXIT_MISMATCH
         if verdict == EXIT_DESTRUCTIVE:
             print("infra_state: the plan deletes, replaces or forgets a resource", file=sys.stderr)
+        elif verdict == EXIT_MISMATCH:
+            print("infra_state: the outputs and the apps' wrangler.toml files differ", file=sys.stderr)
         elif verdict == EXIT_DRIFT:
             print("infra_state: the plan has actions: Cloudflare and infra/ differ (drift)", file=sys.stderr)
-        else:
+        if verdict in (EXIT_DRIFT, EXIT_DESTRUCTIVE):
+            # Counts only: what a dispatch of "Infra apply" must state as its expect input to apply this plan.
+            print(f"infra_state: \"Infra apply\" expect for this plan: {format_expect(plan_counts(summary))}")
+        if verdict == EXIT_OK:
             print("infra_state: no changes")
         return verdict
     except Refused as error:
@@ -575,6 +693,163 @@ def command_plan(args: argparse.Namespace, env: dict[str, str]) -> int:
                 print(f"infra_state: tofu {line}", file=sys.stderr)
         return EXIT_ERROR
     finally:
+        if session is not None:
+            session.cleanup()  # the values and plan files go even with --keep-work-dir (which keeps the log)
+        if not args.keep_work_dir:
+            shutil.rmtree(work, ignore_errors=True)
+
+
+# --- apply (README.md "Apply") ---------------------------------------------------------------------------
+
+class Destructive(Refused):
+    """The plan deletes, replaces or forgets and the dispatch did not confirm it: nothing is applied."""
+
+
+_COUNT = re.compile(r"(import(?:\+[a-z-]+)?|create|update|replace|delete|forget|read|outputs)=([0-9]+)")
+
+
+def parse_expect(text: str) -> dict[str, int]:
+    """`import=5,outputs=3` (commas or spaces; `none` for nothing) -> {"import": 5, "outputs": 3}. Zeros dropped."""
+    text = text.strip()
+    if not text:
+        raise Refused(f"state the expected actions with --expect or {EXPECT_ENV} (for example import=5,outputs=3, "
+                      "or none), as the last \"Infra drift\" summary shows them")
+    if text == "none":
+        return {}
+    expected: dict[str, int] = {}
+    for item in re.split(r"[,\s]+", text):
+        match = _COUNT.fullmatch(item)
+        if not match or match.group(1) in expected:
+            raise Refused("the expected actions are not word=count pairs of plan action words (or none)")
+        if int(match.group(2)):
+            expected[match.group(1)] = int(match.group(2))
+    return expected
+
+
+def plan_counts(summary: dict) -> dict[str, int]:
+    """The plan's actions as parse_expect() spells them: every action word but no-op, and the output changes."""
+    found = {word: n for word, n in counts(summary).items() if word != "no-op"}
+    if summary["outputs"]:
+        found["outputs"] = len(summary["outputs"])
+    return found
+
+
+def format_expect(found: dict[str, int]) -> str:
+    """plan_counts() as the --expect text that "Infra apply" takes (parse_expect(format_expect(x)) == x)."""
+    return ",".join(f"{word}={n}" for word, n in sorted(found.items())) or "none"
+
+
+def _type_name(value: Any) -> str:
+    return value if isinstance(value, str) and re.fullmatch(r"[a-z0-9_]{1,80}", value) else "<unexpected type>"
+
+
+def type_violations(plan_json: Any) -> list[str]:
+    """Types (and data sources) outside ALLOWED_TYPES that the plan would act on. Type names only."""
+    found = []
+    for item in (plan_json or {}).get("resource_changes") or []:
+        change = item.get("change") or {}
+        if change.get("actions") in (["no-op"], []) and not change.get("importing"):
+            continue
+        if item.get("mode") != "managed":
+            found.append(f"a {_type_name(item.get('type'))} data source")
+        elif item.get("type") not in ALLOWED_TYPES:
+            found.append(_type_name(item.get("type")))
+    return sorted(set(found))
+
+
+def frozen_violations(summary: dict) -> list[str]:
+    """FROZEN addresses the plan would write to (anything but no-op or a plain import)."""
+    return sorted(address for word, address in summary["rows"] if address in FROZEN and word not in ("no-op", "import"))
+
+
+def apply_gate(summary: dict, plan_json: Any, expected: dict[str, int], allow_destructive: bool,
+               problems: list[str]) -> None:
+    """Refuses (fixed messages, addresses of FROZEN objects and type names only) unless the plan may be applied."""
+    if destructive(summary) and not allow_destructive:
+        raise Destructive(f"the plan deletes, replaces or forgets a resource; dispatch with {CONFIRM_ENV} = "
+                          f"{CONFIRM_PHRASE} only if that is intended")
+    types = type_violations(plan_json)
+    if types:
+        raise Refused(f"the plan acts on types outside ALLOWED_TYPES: {types}")
+    frozen = frozen_violations(summary)
+    if frozen:
+        raise Refused(f"the plan writes to a FROZEN object: {frozen}")
+    if problems:
+        raise Refused("the planned outputs and the apps' wrangler.toml files differ (see above)")
+    found = plan_counts(summary)
+    if found != expected:
+        raise Refused(f"the plan's actions {dict(sorted(found.items()))} are not the expected "
+                      f"{dict(sorted(expected.items()))}")
+
+
+def utc_now() -> datetime.datetime:
+    return datetime.datetime.now(datetime.timezone.utc)
+
+
+def backup_state(session: "Session", environment: str, env: dict[str, str]) -> str:
+    """Copy the (already OpenTofu-encrypted) state object to backups/<environment>/terraform.tfstate.<UTC time>[-run<id>]
+    in the same private bucket, read it back and compare. Refuses a missing or unencrypted state. Returns the key."""
+    status, body = session.s3("GET", state_key(environment))
+    if status != 200:
+        raise Refused(f"cannot read the remote state object (HTTP {status}); bootstrap it first")
+    if not encrypted_state(body):
+        raise Refused("the remote state object is not encrypted; refusing to copy or apply")
+    stamp = utc_now().strftime("%Y%m%dT%H%M%SZ")
+    run = env.get("GITHUB_RUN_ID", "")
+    key = f"{BACKUP_PREFIX}/{environment}/terraform.tfstate.{stamp}" + (f"-run{run}" if run.isdigit() else "")
+    # Never over an existing object. A HEAD, not If-None-Match: R2's conditional writes are unproven for this bucket
+    # (versions.tf), and the concurrency group already rules out a second writer.
+    status, _ = session.s3("HEAD", key)
+    if status != 404:
+        raise Refused(f"the state backup key is taken or unreadable (HTTP {status})")
+    status, _ = session.s3("PUT", key, body)
+    if status not in (200, 201):
+        raise Refused(f"writing the state backup failed (HTTP {status})")
+    status, copy = session.s3("GET", key)
+    if status != 200 or hashlib.sha256(copy).digest() != hashlib.sha256(body).digest():
+        raise Refused("the state backup does not read back identical")
+    return key
+
+
+def command_apply(args: argparse.Namespace, env: dict[str, str]) -> int:
+    values = read_values_argument(args.var_file, env)
+    expected = parse_expect(args.expect if args.expect is not None else env.get(EXPECT_ENV, ""))
+    confirm = env.get(CONFIRM_ENV, "")
+    if confirm not in ("", CONFIRM_PHRASE):
+        raise Refused(f"{CONFIRM_ENV} must be empty or exactly {CONFIRM_PHRASE}")
+    work = new_work_dir(args.work_dir, env)  # created here, so the finally below may remove it
+    session = None
+    try:
+        session = Session(environment=args.environment, values=values, work=work, env=env)
+        key = backup_state(session, args.environment, env)
+        print(f"apply: encrypted state copied to {BUCKET}/{key} and read back")
+        session.tofu.init(args.environment)
+        tofu_code, summary, rendered, plan_json = session.plan_full("apply")
+        report(rendered, env)
+        apply_gate(summary, plan_json, expected, confirm == CONFIRM_PHRASE, check_outputs(plan_json, env))
+        if not plan_counts(summary):
+            if tofu_code != 0:
+                raise Refused("tofu reports changes that the summary does not classify; nothing was applied")
+            print("apply: nothing to apply")
+            return EXIT_OK
+        print("apply: every gate passed; applying exactly the saved plan")
+        session.tofu.apply(work / "apply.tfplan")
+        tofu_code, summary, rendered, plan_json = session.plan_full("verify")
+        report(rendered, env)
+        problems = check_outputs(plan_json, env)
+        if tofu_code != 0 or drift_exit(summary) != EXIT_OK or problems:
+            raise Refused("applied, but the plan after the apply is not \"No changes\" with matching outputs")
+        print("apply: done. The plan after the apply is \"No changes\".")
+        return EXIT_OK
+    except Refused as error:
+        print(f"infra_state: {error}", file=sys.stderr)
+        if session is not None:
+            for line in session.tofu.headlines():
+                print(f"infra_state: tofu {line}", file=sys.stderr)
+        return EXIT_DESTRUCTIVE if isinstance(error, Destructive) else EXIT_ERROR
+    finally:
+        if session is not None:
+            session.cleanup()
         if not args.keep_work_dir:
             shutil.rmtree(work, ignore_errors=True)
 
@@ -697,6 +972,12 @@ def main(argv: Optional[list[str]] = None) -> int:
     rotate.add_argument("--keep-work-dir", action="store_true", help="keep the new work directory (its log)")
     values_json = sub.add_parser("values-json", help="print the values file as JSON into a pipe (never a terminal)")
     values_json.add_argument("--var-file", type=Path, required=True, help="values file outside the repository")
+    apply = sub.add_parser("apply", help="back up the state, plan, gate, apply the saved plan, plan again")
+    apply.add_argument("--environment", default="production", choices=ENVIRONMENTS)
+    apply.add_argument("--var-file", type=Path, help=f"values file outside the repository (default: ${VALUES_ENV})")
+    apply.add_argument("--expect", help=f"the plan's exact actions, e.g. import=5,outputs=3 or none (default: ${EXPECT_ENV})")
+    apply.add_argument("--work-dir", type=Path, help="parent outside the repository for a new private work directory")
+    apply.add_argument("--keep-work-dir", action="store_true", help="keep the new work directory (its log)")
     plan = sub.add_parser("plan", help="init + plan against the remote state; print the redacted summary only")
     plan.add_argument("--environment", default="production", choices=ENVIRONMENTS)
     plan.add_argument("--var-file", type=Path, help=f"values file outside the repository (default: ${VALUES_ENV})")
@@ -708,6 +989,8 @@ def main(argv: Optional[list[str]] = None) -> int:
     try:
         if args.command == "plan":
             return command_plan(args, env)
+        if args.command == "apply":
+            return command_apply(args, env)
         if args.command == "rotate-passphrase":
             return command_rotate(args, env)
         if args.command == "values-json":

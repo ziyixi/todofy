@@ -1,10 +1,11 @@
-# Drift plan of infra/ against the encrypted remote state in R2 (infra/README.md "Drift plan"). Plan only: there
-# is no apply job (that is P4). A separate workflow, not a job in ci.yml, because:
+# Drift plan of infra/ against the encrypted remote state in R2 (infra/README.md "Drift plan"). Plan only: the apply
+# is the separate, manually dispatched .github/workflows/infra-apply.yml (P4). A separate workflow, not a job in
+# ci.yml, because:
 # - its triggers differ (a daily schedule, and pushes to main that touch infra/ only);
 # - Cloudflare drift is not a property of the commit: a red drift run must not fail "CI gate" and hold back the
 #   app deploys, and a green branch run must never be reused for it;
 # - it holds the production environment's token, which no check job in ci.yml does;
-# - it needs its own concurrency group, infra-production, which P4's apply will share.
+# - it needs its own concurrency group, infra-production, which "Infra apply" shares.
 # The public log shows only the redacted summary (addresses and action counts) and sanitised error headlines;
 # tofu's own output goes to a private file that is deleted with the runner. Nothing is uploaded.
 name: Infra drift
@@ -24,7 +25,7 @@ permissions:
   contents: read
 
 # The S3 backend keeps no lock file until R2's conditional writes are proven (versions.tf), so this group
-# serialises every run that reads or (from P4) writes the state. Never cancel one half way.
+# serialises every run that reads the state with "Infra apply", which writes it. Never cancel one half way.
 concurrency:
   group: infra-production
   cancel-in-progress: false
@@ -47,8 +48,10 @@ jobs:
           # The wrapper would copy tofu's output into step outputs; plans must never be captured.
           tofu_wrapper: false
           github_token: ${{ github.token }}
-      # Exit 0 no planned action; 1 error; 2 planned actions (drift); 3 delete/replace/forget. Every non-zero
-      # code fails the job. "Changed outside OpenTofu" entries alone (a D1 file_size) do not.
+      # Exit 0 no planned action; 1 error; 2 planned actions (drift); 3 delete/replace/forget; 5 an output (an Access
+      # AUD, a D1 id, a bucket) differs from an app's wrangler.toml. Every non-zero code fails the job. "Changed outside
+      # OpenTofu" entries alone (a D1 file_size) do not. With planned actions the log ends with the line to pass as
+      # "Infra apply"'s expect input.
       - name: Plan against the remote state (redacted summary only)
         env:
           # The existing deploy token for now (owner decision 2026-10-01); CF_INFRA_READ_TOKEN replaces it later

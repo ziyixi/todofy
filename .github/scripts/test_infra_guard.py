@@ -112,6 +112,14 @@ class Guard(unittest.TestCase):
             with self.subTest(text=text.split("{")[0]):
                 self.assert_flags({"extra.tf": text + "\n"}, needle)
 
+    def test_outputs_never_read_a_variable(self):
+        """A personal value (the policies' emails) must never become an output, plainly or inside a template."""
+        for value in ("var.access_owner_emails", '"${var.account_id}/x"', 'join(",", var.access_owner_emails)',
+                      "<<-EOT\n    ${var.account_id}\n  EOT"):
+            with self.subTest(value=value.split("\n")[0]):
+                self.assert_flags({"outputs.tf": f'output "x" {{\n  value = {value}\n}}\n'}, "an output reads a variable")
+        self.assertEqual(run({"outputs.tf": 'output "x" {\n  value = cloudflare_r2_bucket.app.name\n}\n'}), [])
+
     def test_dynamic_provisioner(self):
         dynamic = """
             resource "cloudflare_r2_bucket" "d" {

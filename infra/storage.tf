@@ -12,6 +12,8 @@ locals {
     "mail-hero" = "mail-hero"
     "todofy"    = "todofy (todofy-core)"
     "lab"       = "lab"
+    "flowday"   = "flowday"
+    "links"     = "links"
   }
   r2_buckets = {
     "mail-hero-store"   = "mail-hero (MAIL_STORE)"

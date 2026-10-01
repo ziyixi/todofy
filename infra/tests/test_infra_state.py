@@ -7,6 +7,7 @@ values are sentinels too. The S3 calls and the Cloudflare verify endpoint are re
 """
 
 import contextlib
+import datetime
 import hashlib
 import importlib.util
 import io
@@ -59,17 +60,48 @@ def change(actions, importing=False):
     return result
 
 
-def plan(*rows, outputs=None):
-    """A `tofu show -json` plan: one (actions, importing) pair per address."""
+# Synthetic production configs and the planned outputs that match them (the outputs check reads both).
+AUD = "a" * 64
+CONFIGS = {
+    "app/wrangler.toml": {"name": "app", "vars": {"ACCESS_AUDIENCE": AUD},
+                          "d1_databases": [{"database_name": "app", "database_id": "db-id-1"}],
+                          "r2_buckets": [{"bucket_name": "app-store"}]},
+    "site/wrangler.toml": {"name": "site"},
+}
+OUTPUTS = {"access_aud": {"value": {"app": AUD, "app-backup": "b" * 64}},
+           "d1_database_ids": {"value": {"app": "db-id-1"}},
+           "r2_bucket_names": {"value": ["app-store"]}}
+
+
+def resource_type(address: str) -> str:
+    return address.split("[", 1)[0].rsplit(".", 1)[0]
+
+
+def plan_at(rows, outputs=None, planned_outputs=None):
+    """A `tofu show -json` plan from (address, actions, importing) rows."""
     return {
         "format_version": "1.2",
         "variables": {"state_passphrase": {"value": PASSPHRASE}, "account_id": {"value": ACCOUNT}},
         "resource_changes": [
-            {"address": address, "change": change(actions, importing)}
-            for address, (actions, importing) in zip(ADDRESSES * 10, rows)
+            {"address": address, "mode": "managed", "type": resource_type(address), "change": change(actions, importing)}
+            for address, actions, importing in rows
         ],
         "output_changes": outputs or {},
+        "planned_values": {"outputs": OUTPUTS if planned_outputs is None else planned_outputs},
     }
+
+
+def plan(*rows, outputs=None, planned_outputs=None):
+    """A `tofu show -json` plan: one (actions, importing) pair per address."""
+    return plan_at([(address, actions, importing) for address, (actions, importing) in zip(ADDRESSES * 10, rows)],
+                   outputs, planned_outputs)
+
+
+@contextlib.contextmanager
+def synthetic_configs():
+    with mock.patch.object(infra_state, "tomllib", object()), \
+            mock.patch.object(infra_state, "read_wrangler_configs", lambda repo=None: CONFIGS):
+        yield
 
 
 FAKE_TOFU = textwrap.dedent('''\
@@ -309,7 +341,6 @@ class Credentials(unittest.TestCase):
                                    SENTINEL_EMAIL, SENTINEL_IDP, SENTINEL_IDP])
 
     def test_sigv4_signs_path_style_requests_deterministically(self):
-        import datetime
         now = datetime.datetime(2026, 10, 1, tzinfo=datetime.timezone.utc)
         url = "https://example.invalid/infra-state/production/terraform.tfstate"
         first = infra_state.sigv4_headers("GET", url, ("key-id", "key-secret"), now=now)
@@ -383,6 +414,11 @@ class Verdicts(unittest.TestCase):
         self.assertEqual(decide(self.summary(plan(*[(["no-op"], True)] * 3)), 3), "apply")
         self.assertEqual(decide(self.summary(plan((["no-op"], True), (["no-op"], False), (["no-op"], True))), 3), "apply")
         self.assertEqual(decide(self.summary(plan(*[(["no-op"], False)] * 3)), 3), "done")
+        # A new state has no outputs yet: creating them is part of the import-only apply.
+        with_outputs = plan(*[(["no-op"], True)] * 3, outputs={"x": {"actions": ["create"]}})
+        self.assertEqual(decide(self.summary(with_outputs), 3), "apply")
+        outputs_only = plan(*[(["no-op"], False)] * 3, outputs={"x": {"actions": ["create"]}})
+        self.assertEqual(decide(self.summary(outputs_only), 3), "apply")
         refused = {
             "import+update": plan((["no-op"], True), (["update"], True), (["no-op"], True)),
             "create": plan((["no-op"], True), (["no-op"], True), (["create"], False)),
@@ -391,7 +427,8 @@ class Verdicts(unittest.TestCase):
             "delete": plan((["no-op"], True), (["no-op"], True), (["delete"], False)),
             "forget": plan((["no-op"], True), (["no-op"], True), (["forget"], False)),
             "too few": plan((["no-op"], True), (["no-op"], True)),
-            "outputs": plan(*[(["no-op"], True)] * 3, outputs={"x": {"actions": ["create"]}}),
+            "output update": plan(*[(["no-op"], True)] * 3, outputs={"x": {"actions": ["update"]}}),
+            "output delete": plan(*[(["no-op"], True)] * 3, outputs={"x": {"actions": ["delete"]}}),
         }
         for name, document in refused.items():
             with self.subTest(case=name):
@@ -420,7 +457,7 @@ class PlanCommand(unittest.TestCase):
             env.update(extra_env or {})
             parent = existing_parent(Path(directory))
             out, err = io.StringIO(), io.StringIO()
-            with mock.patch.dict(os.environ, env, clear=True), \
+            with mock.patch.dict(os.environ, env, clear=True), synthetic_configs(), \
                     mock.patch.object(infra_state, "cloudflare_get", lambda token, path: fake_fetch(path)), \
                     contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
                 code = infra_state.main(["plan", "--work-dir", str(parent)])
@@ -455,11 +492,37 @@ class PlanCommand(unittest.TestCase):
         code, out, err, _ = self.run_plan(plan((["update"], False), (["no-op"], False)), plan_exit=2)
         self.assertEqual(code, 2)
         self.assertIn("update: 1", out)
+        self.assertIn('"Infra apply" expect for this plan: update=1', out)
         self.assertIn('`cloudflare_zero_trust_access_policy.owner`', out)
         self.assert_clean(out + err)
         code, out, err, _ = self.run_plan(plan((["delete", "create"], False)), plan_exit=2)
         self.assertEqual(code, 3)
         self.assert_clean(out + err)
+
+    def test_outputs_that_differ_from_the_configs_fail_with_names_only(self):
+        changed = dict(OUTPUTS, access_aud={"value": {"app": "c" * 64}})
+        code, out, err, _ = self.run_plan(plan((["no-op"], False), planned_outputs=changed))
+        self.assertEqual(code, 5)
+        self.assertIn("app/wrangler.toml: vars.ACCESS_AUDIENCE differs from access_aud", err)
+        self.assertNotIn("c" * 64, out + err)
+        self.assertNotIn(AUD, out + err)
+        self.assert_clean(out + err)
+        # A delete or replace still wins: exit 3.
+        code, _, _, _ = self.run_plan(plan((["delete"], False), planned_outputs=changed), plan_exit=2)
+        self.assertEqual(code, 3)
+
+    def test_keep_work_dir_keeps_the_log_but_never_the_values_or_the_plan(self):
+        with tempfile.TemporaryDirectory() as directory:
+            fake = FakeTofu(Path(directory))
+            env = dict(fake.env, CLOUDFLARE_API_TOKEN=TOKEN, INFRA_STATE_PASSPHRASE=PASSPHRASE,
+                       INFRA_TFVARS=json.dumps(VALUES), FAKE_PLAN=fake.fixture("plan", plan((["no-op"], False))))
+            parent = existing_parent(Path(directory))
+            with mock.patch.dict(os.environ, env, clear=True), synthetic_configs(), \
+                    mock.patch.object(infra_state, "cloudflare_get", lambda token, path: fake_fetch(path)), \
+                    contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+                self.assertEqual(infra_state.main(["plan", "--work-dir", str(parent), "--keep-work-dir"]), 0)
+            [run] = assert_parent_untouched(self, parent, keep_work_dir=True)
+            self.assertEqual(sorted(p.name for p in run.iterdir() if p.is_file()), ["tofu.log"])
 
     def test_an_unclassified_tofu_change_is_never_clean(self):
         code, _, _, _ = self.run_plan(plan((["no-op"], False)), plan_exit=2)
@@ -496,6 +559,247 @@ class PlanCommand(unittest.TestCase):
         self.assertEqual(masks, [f"::add-mask::{value}" for value in (
             ACCOUNT, SENTINEL_EMAIL, SENTINEL_IDP, TOKEN_ID, hashlib.sha256(TOKEN.encode()).hexdigest())])
         self.assertTrue(out.startswith("\n".join(masks) + "\n"), "masks are registered before anything else is printed")
+        rest = "\n".join(line for line in out.splitlines() if not line.startswith("::add-mask::"))
+        self.assert_clean(rest + err)
+
+
+class Outputs(unittest.TestCase):
+    """The planned outputs against the apps' wrangler.toml files: field names and paths only, never a value."""
+
+    def test_matching_outputs_have_no_problem(self):
+        self.assertEqual(infra_state.output_problems(infra_state.planned_outputs(plan()), CONFIGS), [])
+
+    def test_every_kind_of_difference_is_named(self):
+        cases = {
+            "aud": (dict(OUTPUTS, access_aud={"value": {}}), "vars.ACCESS_AUDIENCE differs"),
+            "d1": (dict(OUTPUTS, d1_database_ids={"value": {"app": "db-id-2"}}), "database_id differs"),
+            "r2": (dict(OUTPUTS, r2_bucket_names={"value": []}), "bucket_name is not in r2_bucket_names"),
+            "missing": ({k: v for k, v in OUTPUTS.items() if k != "access_aud"}, "no output access_aud"),
+            "unknown": (dict(OUTPUTS, access_aud={"value": None}), "not known before the apply"),
+        }
+        for name, (outputs, needle) in cases.items():
+            with self.subTest(case=name):
+                problems = infra_state.output_problems(infra_state.planned_outputs(plan(planned_outputs=outputs)), CONFIGS)
+                self.assertTrue(any(needle in problem for problem in problems), problems)
+                for value in (AUD, "db-id-1", "db-id-2"):
+                    self.assertNotIn(value, "\n".join(problems))
+
+    def test_without_tomllib_the_check_is_skipped_locally_and_refused_on_a_runner(self):
+        with mock.patch.object(infra_state, "tomllib", None):
+            with contextlib.redirect_stderr(io.StringIO()) as err:
+                self.assertEqual(infra_state.check_outputs(plan(), {}), [])
+            self.assertIn("skipped", err.getvalue())
+            runner = {"GITHUB_ACTIONS": "true", "GITHUB_RUN_ID": "1", "RUNNER_TEMP": "/tmp"}
+            with self.assertRaisesRegex(infra_state.Refused, "3.11"):
+                infra_state.check_outputs(plan(), runner)
+
+    @unittest.skipIf(infra_state.tomllib is None, "needs Python 3.11+ (tomllib)")
+    def test_the_real_production_configs_parse(self):
+        configs = infra_state.read_wrangler_configs()
+        self.assertEqual(sorted(configs), sorted(infra_state.WRANGLER_CONFIGS))
+        self.assertTrue(all(config.get("name") for config in configs.values()))
+
+
+class ApplyGates(unittest.TestCase):
+    def summary(self, document):
+        return infra_state.summarize(document)[0]
+
+    def test_expect_is_parsed_strictly_and_round_trips(self):
+        self.assertEqual(infra_state.parse_expect("import=5,outputs=3"), {"import": 5, "outputs": 3})
+        self.assertEqual(infra_state.parse_expect(" update=1  import+update=2 create=0 "), {"update": 1, "import+update": 2})
+        self.assertEqual(infra_state.parse_expect("none"), {})
+        for text in ("", "   ", "import", "import=x", "import=1,import=2", "destroy=1", "import=5;outputs=3"):
+            with self.subTest(text=text):
+                with self.assertRaises(infra_state.Refused):
+                    infra_state.parse_expect(text)
+        for found in ({}, {"import": 5, "outputs": 3}, {"import+update": 1, "update": 2}):
+            with self.subTest(found=found):
+                self.assertEqual(infra_state.parse_expect(infra_state.format_expect(found)), found)
+
+    def test_plan_counts(self):
+        document = plan((["no-op"], True), (["update"], True), (["no-op"], False),
+                        outputs={"x": {"actions": ["create"]}, "y": {"actions": ["no-op"]}})
+        self.assertEqual(infra_state.plan_counts(self.summary(document)), {"import": 1, "import+update": 1, "outputs": 1})
+
+    def test_types_outside_the_allowlist_and_data_sources(self):
+        document = plan_at([
+            ('cloudflare_dns_record.x', ["create"], False),
+            ('cloudflare_r2_bucket.app["a"]', ["update"], False),
+            ('cloudflare_workers_script.y', ["no-op"], False),  # no action: not reported
+        ])
+        document["resource_changes"].append({"address": "data.cloudflare_zone.z", "mode": "data", "type": "cloudflare_zone",
+                                             "change": change(["read"])})
+        self.assertEqual(infra_state.type_violations(document), ["a cloudflare_zone data source", "cloudflare_dns_record"])
+        document["resource_changes"][0]["type"] = f"weird {SENTINEL_EMAIL}"
+        self.assertNotIn(SENTINEL_EMAIL, "".join(infra_state.type_violations(document)))
+
+    def test_frozen_objects_may_be_imported_but_never_written(self):
+        backup = "cloudflare_zero_trust_access_application.mail_hero_backup"
+        for actions, importing, frozen in ((["no-op"], False, []), (["no-op"], True, []), (["update"], False, [backup]),
+                                           (["update"], True, [backup]), (["delete", "create"], False, [backup])):
+            with self.subTest(actions=actions, importing=importing):
+                summary = self.summary(plan_at([(backup, actions, importing)]))
+                self.assertEqual(infra_state.frozen_violations(summary), frozen)
+
+    def gate(self, document, expected, allow=False, problems=()):
+        infra_state.apply_gate(self.summary(document), document, expected, allow, list(problems))
+
+    def test_the_gate_passes_exactly_the_expected_plan(self):
+        imports = plan(*[(["no-op"], True)] * 2, outputs={"x": {"actions": ["create"]}})
+        self.gate(imports, {"import": 2, "outputs": 1})
+        refusals = {
+            "other counts": (imports, {"import": 3, "outputs": 1}, False, (), "not the expected"),
+            "missing outputs": (imports, {"import": 2}, False, (), "not the expected"),
+            "destructive": (plan((["delete"], False)), {"delete": 1}, False, (), "deletes, replaces or forgets"),
+            "outputs differ": (imports, {"import": 2, "outputs": 1}, False, ("x",), "wrangler.toml"),
+            "type": (plan_at([("cloudflare_dns_record.x", ["create"], False)]), {"create": 1}, False, (), "ALLOWED_TYPES"),
+            "frozen": (plan_at([("cloudflare_zero_trust_access_application.mail_hero_backup", ["update"], False)]),
+                       {"update": 1}, False, (), "FROZEN"),
+        }
+        for name, (document, expected, allow, problems, needle) in refusals.items():
+            with self.subTest(case=name):
+                with self.assertRaisesRegex(infra_state.Refused, needle) as caught:
+                    self.gate(document, expected, allow, problems)
+                self.assertEqual(isinstance(caught.exception, infra_state.Destructive), name == "destructive")
+                for secret in SECRETS:
+                    self.assertNotIn(secret, str(caught.exception))
+
+    def test_a_confirmed_dispatch_lifts_only_the_destructive_gate(self):
+        replace = plan((["delete", "create"], False))
+        self.gate(replace, {"replace": 1}, allow=True)
+        with self.assertRaisesRegex(infra_state.Refused, "not the expected"):
+            self.gate(replace, {"update": 1}, allow=True)
+        with self.assertRaisesRegex(infra_state.Refused, "FROZEN"):
+            self.gate(plan_at([("cloudflare_zero_trust_access_application.mail_hero_backup", ["delete"], False)]),
+                      {"delete": 1}, allow=True)
+
+
+ENCRYPTED_STATE = json.dumps({"serial": 7, "lineage": "l", "meta": {"key_provider.pbkdf2.state": "salt"},
+                              "encrypted_data": "x", "encryption_version": "v0"}).encode()
+
+
+class ApplyCommand(unittest.TestCase):
+    """infra_state.py apply as "Infra apply" runs it, with a fake tofu and an in-memory state bucket."""
+
+    def run_apply(self, first, verify=None, expect="import=2,outputs=1", extra_env=None, bucket=None, first_exit=2):
+        bucket = {"production/terraform.tfstate": ENCRYPTED_STATE} if bucket is None else bucket
+        with tempfile.TemporaryDirectory() as directory:
+            fake = FakeTofu(Path(directory))
+            env = dict(fake.env, CLOUDFLARE_API_TOKEN=TOKEN, INFRA_STATE_PASSPHRASE=PASSPHRASE,
+                       INFRA_TFVARS=json.dumps(VALUES), INFRA_APPLY_EXPECT=expect,
+                       FAKE_PLAN_APPLY=fake.fixture("apply", first),
+                       FAKE_PLAN_VERIFY=fake.fixture("verify", verify or plan(*[(["no-op"], False)] * 2)),
+                       FAKE_PLAN_EXIT_APPLY=str(first_exit), FAKE_PLAN_EXIT_VERIFY="0")
+            env.update(extra_env or {})
+            requests = []
+
+            def s3(method, base, path, credentials, payload=b"", extra=None):
+                key = path.split("/", 1)[1]
+                requests.append((method, key, dict(extra or {})))
+                if method == "PUT":
+                    if (extra or {}).get("If-None-Match") == "*" and key in bucket:
+                        return 412, b""
+                    bucket[key] = payload
+                    return 200, b""
+                return (200, bucket[key]) if key in bucket else (404, b"")
+
+            parent = existing_parent(Path(directory))
+            out, err = io.StringIO(), io.StringIO()
+            with mock.patch.dict(os.environ, env, clear=True), synthetic_configs(), \
+                    mock.patch.object(infra_state, "cloudflare_get", lambda token, path: fake_fetch(path)), \
+                    mock.patch.object(infra_state, "s3_request", s3), \
+                    contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+                code = infra_state.main(["apply", "--work-dir", str(parent)])
+            assert_parent_untouched(self, parent)
+            return code, out.getvalue(), err.getvalue(), fake.calls(), bucket, requests
+
+    def assert_clean(self, text):
+        for secret in SECRETS + ("raw output",):
+            self.assertNotIn(secret, text)
+
+    def imports(self):
+        return plan(*[(["no-op"], True)] * 2, outputs={"x": {"actions": ["create"]}})
+
+    def test_backs_up_gates_applies_the_saved_plan_and_verifies(self):
+        code, out, err, calls, bucket, requests = self.run_apply(self.imports(), extra_env={"GITHUB_RUN_ID": "42"})
+        self.assertEqual(code, 0, err)
+        self.assertEqual([c["args"][0] for c in calls], ["init", "plan", "show", "apply", "plan", "show"])
+        self.assertEqual(calls[3]["args"][-1].rsplit("/", 1)[-1], "apply.tfplan")
+        [backup] = [key for key in bucket if key.startswith("backups/")]
+        self.assertRegex(backup, r"^backups/production/terraform\.tfstate\.\d{8}T\d{6}Z-run42$")
+        self.assertEqual(bucket[backup], ENCRYPTED_STATE)
+        # The copy is written before tofu starts, never over an existing key, and read back.
+        self.assertEqual([r[:2] for r in requests],
+                         [("GET", "production/terraform.tfstate"), ("HEAD", backup), ("PUT", backup), ("GET", backup)])
+        self.assertIn("every gate passed", out)
+        self.assertIn('apply: done', out)
+        self.assert_clean(out + err)
+
+    def test_refusals_never_apply(self):
+        cases = {
+            "other counts": dict(expect="import=3,outputs=1"),
+            "no expect": dict(expect=""),
+            "bad confirm": dict(extra_env={"INFRA_CONFIRM_DESTRUCTIVE": "yes"}),
+            "outputs differ": dict(first=plan(*[(["no-op"], True)] * 2, outputs={"x": {"actions": ["create"]}},
+                                              planned_outputs=dict(OUTPUTS, d1_database_ids={"value": {}}))),
+            "unencrypted state": dict(bucket={"production/terraform.tfstate": b'{"version": 4, "resources": []}'}),
+            "no state": dict(bucket={}),
+        }
+        taken = {"production/terraform.tfstate": ENCRYPTED_STATE,
+                 "backups/production/terraform.tfstate.20261001T120000Z-run7": b"older"}
+        cases["backup key taken"] = dict(bucket=taken, extra_env={"GITHUB_RUN_ID": "7"})
+        noon = datetime.datetime(2026, 10, 1, 12, 0, 0, tzinfo=datetime.timezone.utc)
+        with mock.patch.object(infra_state, "utc_now", lambda: noon):
+            self.check_refusals(cases)
+        self.assertEqual(taken["backups/production/terraform.tfstate.20261001T120000Z-run7"], b"older")
+
+    def check_refusals(self, cases):
+        for name, options in cases.items():
+            with self.subTest(case=name):
+                first = options.pop("first", self.imports())
+                code, out, err, calls, bucket, _ = self.run_apply(first, **options)
+                self.assertEqual(code, 1)
+                self.assertFalse([c for c in calls if c["args"][:1] == ["apply"]])
+                self.assert_clean(out + err)
+                if name in ("unencrypted state", "no state", "no expect", "bad confirm"):
+                    self.assertFalse([key for key in bucket if key.startswith("backups/")])
+                if name in ("unencrypted state", "no state", "no expect", "bad confirm", "backup key taken"):
+                    self.assertEqual(calls, [])
+
+    def test_a_destructive_plan_needs_the_confirmation(self):
+        replace = plan((["delete", "create"], False))
+        code, out, err, calls, _, _ = self.run_apply(replace, expect="replace=1")
+        self.assertEqual(code, 3)
+        self.assertIn("delete-replace-forget", err)
+        self.assertFalse([c for c in calls if c["args"][:1] == ["apply"]])
+        code, out, err, calls, _, _ = self.run_apply(replace, expect="replace=1",
+                                                     extra_env={"INFRA_CONFIRM_DESTRUCTIVE": "delete-replace-forget"})
+        self.assertEqual(code, 0, err)
+        self.assertEqual(len([c for c in calls if c["args"][:1] == ["apply"]]), 1)
+
+    def test_nothing_to_apply(self):
+        code, out, err, calls, _, _ = self.run_apply(plan(*[(["no-op"], False)] * 2), expect="none", first_exit=0)
+        self.assertEqual(code, 0, err)
+        self.assertIn("nothing to apply", out)
+        self.assertFalse([c for c in calls if c["args"][:1] == ["apply"]])
+
+    def test_an_unclassified_tofu_change_is_never_applied(self):
+        code, _, err, calls, _, _ = self.run_apply(plan(*[(["no-op"], False)] * 2), expect="none", first_exit=2)
+        self.assertEqual(code, 1)
+        self.assertIn("does not classify", err)
+        self.assertFalse([c for c in calls if c["args"][:1] == ["apply"]])
+
+    def test_a_verify_plan_with_changes_fails_after_the_apply(self):
+        code, out, err, calls, _, _ = self.run_apply(self.imports(), verify=plan((["update"], False), (["no-op"], False)))
+        self.assertEqual(code, 1)
+        self.assertIn("not \"No changes\"", err)
+        self.assertEqual(len([c for c in calls if c["args"][:1] == ["apply"]]), 1)
+
+    def test_masks_every_value_on_a_runner(self):
+        runner = {"GITHUB_ACTIONS": "true", "GITHUB_RUN_ID": "1", "RUNNER_TEMP": tempfile.gettempdir()}
+        code, out, err, _, _, _ = self.run_apply(self.imports(), extra_env=runner)
+        self.assertEqual(code, 0, err)
+        self.assertTrue(out.startswith("::add-mask::"))
         rest = "\n".join(line for line in out.splitlines() if not line.startswith("::add-mask::"))
         self.assert_clean(rest + err)
 

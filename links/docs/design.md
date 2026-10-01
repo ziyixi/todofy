@@ -216,9 +216,9 @@ of the file. The page's text is Chinese; the short-link side's own pages (previe
   without a cf-guard allowance. The commit made every edit of step 4 except the `infra/` adoption: the dashboard
   registry names the Worker and the D1 database under a hidden entry 短链接 (no tile, status `none`), and the
   `Links deploy` job also checks the Worker's own anonymous answers (`/robots.txt`, and an unknown key's 302 to
-  `/_/k/<key>`, both no-store and noindex). **Follow-up for IaC P4:** adopting the D1 database and the Access
-  application into `infra/` needs `import {}` blocks, and a plan with an import (`import: 2`) fails the daily
-  "Infra drift" run until P4 can apply it; until then they are managed by hand, like FlowDay's. The steps as planned:
+  `/_/k/<key>`, both no-store and noindex). **Adopted by IaC P4:** the D1 database and the Access application are in
+  `infra/` (`import {}` blocks, applied by "Infra apply"; `infra/README.md`); they were managed by hand until then,
+  like FlowDay's. The steps as planned:
   1. Create the D1 database `links` (`wrangler d1 create links`, Workers Free) and commit its id as `database_id` in
      `wrangler.toml`.
   2. Create the Access application for `s.ziyixi.science/_/*` with an extra destination for the exact
@@ -249,7 +249,7 @@ of the file. The page's text is Chinese; the short-link side's own pages (previe
      - The dashboard registry (`dashboard/worker/src/registry.ts` `WORKERS` and `RESOURCES`: the Worker `links` and the
        D1 database `links` by id), or an explicit exclusion with its reason, as `dashboard/worker/test/registry.test.ts`
        records for FlowDay.
-     - Adopt the D1 database and the Access application into `infra/` as for the other apps (left to IaC P4, above).
+     - Adopt the D1 database and the Access application into `infra/` as for the other apps (done by IaC P4, above).
   5. Verify with synthetic links only: a public and a private link, anonymous and logged in, the continuation, and
      that nothing is logged.
 - **L3:** the owner's own links, through 导入 or the launcher; the Chrome site search and the home-screen bookmark

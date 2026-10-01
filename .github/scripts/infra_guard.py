@@ -14,6 +14,9 @@ What it keeps true (infra/README.md "Scope" and "Next steps"):
   No data source (also not inside a check block), module, check, ephemeral or removed block.
 - No provisioner or connection block anywhere (terraform_data/null_resource are not allowed types either).
 - Every resource is one of ALLOWED_TYPES and has its own lifecycle { prevent_destroy = true }.
+- No output reads a variable (var.*): outputs are printed by `tofu output` and compared with the public
+  wrangler.toml files, so a personal value (the policies' emails) must never become one. Outputs read managed
+  objects only (outputs.tf).
 - A backend or cloud block is only allowed together with an encryption block that enforces both state
   and plan encryption, and a sensitive state_passphrase variable. That block has no fallback and no
   unencrypted method, and every key_provider's passphrase is exactly var.state_passphrase.
@@ -212,6 +215,19 @@ def parse(text: str) -> Block:
     return root
 
 
+_VAR_IN_TEMPLATE = re.compile(r"[$%]\{[^}]*\bvar\.")
+
+
+def _reads_a_variable(block: Block) -> bool:
+    """Any `var.` in the block's attributes (also in nested blocks and inside "${...}" templates)."""
+    for node in (block, *block.walk()):
+        for tokens in node.attrs.values():
+            for kind, value in tokens:
+                if (kind, value) == ("ID", "var") or (kind in ("STR", "HEREDOC") and _VAR_IN_TEMPLATE.search(value)):
+                    return True
+    return False
+
+
 def committed_files(infra: Path) -> list[str] | None:
     """Tracked plus untracked-but-not-ignored files under infra/, relative to it; None outside a git tree."""
     try:
@@ -268,6 +284,8 @@ def check(infra: Path) -> list[str]:
                 lifecycles = block.children("lifecycle")
                 if len(lifecycles) != 1 or not lifecycles[0].is_true("prevent_destroy"):
                     problems.append(f"{where}: resource without its own lifecycle {{ prevent_destroy = true }}")
+            if block.type == "output" and _reads_a_variable(block):
+                problems.append(f"{where}: an output reads a variable; outputs read managed objects only")
             for nested in block.walk():
                 kinds = {nested.type} | ({nested.labels[0]} if nested.type == "dynamic" and nested.labels else set())
                 if kinds & NEVER_NESTED:

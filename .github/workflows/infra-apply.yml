@@ -1,0 +1,68 @@
+# The apply of infra/ (IaC P4, infra/README.md "Apply"). The only job that writes Cloudflare objects or the remote state.
+# A separate workflow, not a job in infra.yml, because:
+# - its trigger differs: a manual dispatch only, while "Infra drift" runs on pushes and daily. In one workflow every
+#   push or schedule would also have to skip an apply job, and one wrong `if:` would turn a drift run into an apply;
+# - infra.yml stays plan-only, and test_infra_workflow.py pins that ("apply" never appears in it);
+# - a dispatch needs inputs (the expected actions, the destructive confirmation) that the drift plan must not have.
+# Manual only, for now: an apply should be watched, and the drift run of the merged commit has already shown its
+# summary, whose "expect" line is the input here. Switching to `push` is a later, separate decision (README.md).
+# It shares the concurrency group infra-production with "Infra drift", so a plan never reads a half-written state.
+# The public log shows only the backup's key, the redacted summaries (addresses and action counts) and fixed messages.
+name: Infra apply
+
+on:
+  workflow_dispatch:
+    inputs:
+      expect:
+        description: The plan's exact actions, as the last "Infra drift" run printed them (for example import=5,outputs=3; none for no change)
+        required: true
+        type: string
+      confirm_destructive:
+        description: Leave empty. Only the literal delete-replace-forget lets a plan delete, replace or forget a resource
+        required: false
+        default: ''
+        type: string
+
+permissions:
+  contents: read
+
+# The S3 backend keeps no lock file (versions.tf): this group, shared with infra.yml, is the lock. Never cancel an
+# apply half way.
+concurrency:
+  group: infra-production
+  cancel-in-progress: false
+
+jobs:
+  apply:
+    name: Infra apply
+    # The production environment admits main only; a dispatch from another branch is skipped here.
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    environment: production
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: opentofu/setup-opentofu@a1320f892987e89d278cc92dc5adc984fb93aca4 # v2.0.2
+        with:
+          tofu_version: 1.12.6
+          # The wrapper would copy tofu's output into step outputs; plans must never be captured.
+          tofu_wrapper: false
+          github_token: ${{ github.token }}
+      # In order, and nothing is written before the gates pass: copy the encrypted state object to
+      # backups/production/terraform.tfstate.<UTC time>-run<id> in the same private bucket and read it back; plan; refuse
+      # unless every gate passes (no delete/replace/forget unless confirmed, only ALLOWED_TYPES, no write to a FROZEN
+      # object, exactly the expected actions, outputs equal to every wrangler.toml); apply exactly the saved plan; plan
+      # again, which must be "No changes". Exit 0 done; 1 refused or failed; 3 a destructive plan without confirmation.
+      # The inputs reach the script through the environment only, never through the run line.
+      - name: Back up the state, plan, gate and apply the saved plan (redacted summary only)
+        env:
+          # The existing deploy token for now (owner decision 2026-10-01); CF_INFRA_TOKEN replaces it later
+          # (infra/README.md "Replacing the token"). The R2 S3 credentials are derived from it and masked.
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+          INFRA_STATE_PASSPHRASE: ${{ secrets.INFRA_STATE_PASSPHRASE }}
+          INFRA_TFVARS: ${{ secrets.INFRA_TFVARS }}
+          INFRA_APPLY_EXPECT: ${{ inputs.expect }}
+          INFRA_CONFIRM_DESTRUCTIVE: ${{ inputs.confirm_destructive }}
+        run: python3 infra/scripts/infra_state.py apply --environment production

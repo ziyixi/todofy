@@ -14,10 +14,15 @@ What they keep true (infra/README.md):
   no backend without enforced state and plan encryption (test_infra_guard.py tests the guard itself).
 - The state lives in the R2 bucket infra-state through a partial S3 backend (no key, endpoint or credentials
   committed), encrypted with the state_passphrase variable only, no fallback.
-- Every owner-facing Access application gates a Custom Domain its app's wrangler.toml declares.
+- Every Access application gates a Custom Domain its app's wrangler.toml declares (FlowDay's also the retiring F3
+  staging host until the follow-up removes it), and every Worker with an ACCESS_AUDIENCE has an application whose
+  key is its name, so the access_aud output covers it.
 - The D1 databases and R2 buckets are exactly those the production configs bind, and each D1 import id is
   the database_id committed there. The production configs are test_wrangler_configs.py's, minus the Workers
-  named in NOT_ADOPTED (FlowDay and the links app, until IaC P4 adopts them).
+  named in NOT_ADOPTED (none since IaC P4 adopted FlowDay and the links app).
+- infra_state.py's lists agree with the rest: WRANGLER_CONFIGS (the outputs check in "Infra drift"/"Infra apply") is
+  test_wrangler_configs.py's PRODUCTION, its ALLOWED_TYPES (the apply's allowlist) is the guard's, and its OUTPUTS are
+  the outputs outputs.tf declares.
 - No account or zone id (32 hex digits) and no email address is committed under infra/.
 """
 
@@ -42,14 +47,13 @@ import test_wrangler_configs  # noqa: E402
 
 REPO = Path(__file__).resolve().parents[2]
 INFRA = REPO / "infra"
-# Production Workers whose D1 database and Access application are not adopted into infra/ yet, both deferred to
-# IaC P4: FlowDay (D1 and Access app "flowday", deployed since F2) and the links app (D1 and Access app "links",
-# deployed since L2). The P4 change writes their import blocks and, in the same commit, moves "flowday" and "links"
-# from here into PRODUCTION below (Coverage checks that the two lists together are test_wrangler_configs.py's).
-NOT_ADOPTED = {
-    "flowday": "flowday/wrangler.toml",
-    "links": "links/wrangler.toml",
-}
+sys.path.insert(0, str(INFRA / "scripts"))
+import infra_state  # noqa: E402
+
+# Production Workers whose D1 database and Access applications are not adopted into infra/ yet. Empty since IaC P4
+# adopted FlowDay and the links app. A new app's Worker goes here until a change writes its import blocks and, in the
+# same commit, moves it into PRODUCTION below (Coverage checks that the two lists together are test_wrangler_configs.py's).
+NOT_ADOPTED: dict[str, str] = {}
 # Worker name -> production config: the list of test_wrangler_configs.py without NOT_ADOPTED.
 PRODUCTION = {
     "mail-hero": "mail-hero/wrangler.toml",
@@ -59,7 +63,13 @@ PRODUCTION = {
     "ziyixi-website": "website/wrangler.toml",
     "ziyixi-notion-publish": "website/relay/wrangler.toml",
     "lab": "lab/wrangler.toml",
+    "flowday": "flowday/wrangler.toml",
+    "links": "links/wrangler.toml",
 }
+# Hosts an Access application may still list although no wrangler.toml declares them: FlowDay's F3 staging host,
+# which both FlowDay applications keep until the F4 follow-up removes it through infra/ (README.md "FlowDay"). That
+# commit empties this set.
+RETIRING_HOSTS = {"flowday-next.ziyixi.science"}
 
 
 def uncommented(text: str) -> str:
@@ -147,6 +157,27 @@ class Boundary(unittest.TestCase):
 
 
 class Coverage(unittest.TestCase):
+    def test_the_state_driver_checks_every_production_config(self):
+        """infra_state.py compares the outputs with exactly the production configs, and its apply allowlist is the
+        guard's boundary."""
+        self.assertEqual(sorted(infra_state.WRANGLER_CONFIGS), sorted(test_wrangler_configs.PRODUCTION.values()))
+        self.assertEqual(infra_state.ALLOWED_TYPES, infra_guard.ALLOWED_TYPES)
+
+    def test_outputs_are_the_ones_the_state_driver_reads(self):
+        outputs = [
+            block.labels[0]
+            for path in sorted(INFRA.glob("*.tf"))
+            for block in infra_guard.parse(path.read_text()).blocks if block.type == "output"
+        ]
+        self.assertEqual(sorted(outputs), sorted(infra_state.OUTPUTS))
+
+    def test_frozen_addresses_are_declared(self):
+        code = "".join(path.read_text() for path in sorted(INFRA.glob("*.tf")))
+        for address in infra_state.FROZEN:
+            kind, name = address.split(".")
+            with self.subTest(address=address):
+                self.assertIn(f'resource "{kind}" "{name}" {{', code)
+
     def test_every_production_worker_is_adopted_or_listed_as_not_adopted(self):
         """A Worker added to test_wrangler_configs.PRODUCTION must be either checked here or named in NOT_ADOPTED,
         so a new app's D1 database is never skipped silently by the checks below."""
@@ -155,18 +186,46 @@ class Coverage(unittest.TestCase):
 
 
 class MatchesTheApps(unittest.TestCase):
+    def flowday_apps(self, code: str) -> dict[str, list[str]]:
+        block = re.search(r"^  flowday_apps = \{\n(.*?)^  \}\n", code, re.MULTILINE | re.DOTALL).group(1)
+        entries = re.findall(r'^    "([a-z-]+)" = \{\n(.*?)^    \}', block, re.MULTILINE | re.DOTALL)
+        return {key: re.findall(r'"([^"]+)"', re.search(r"destinations = \[(.*?)\]", body).group(1))
+                for key, body in entries}
+
     def test_access_applications_gate_the_apps_custom_domains(self):
+        """Each application's key is its Worker's name, and each destination's host is one of that Worker's Custom
+        Domains (or a retiring host)."""
         code = (INFRA / "access.tf").read_text()
-        apps = hcl_map(code, "owner_apps")
-        workers = {"mail-hero": "mail-hero", "todofy": "todofy", "home": "home", "lab": "lab"}
-        self.assertEqual(set(apps), set(workers))
-        for key, value in apps.items():
-            domain = re.search(r'domain\s*=\s*"([^"]+)"', value).group(1)
-            routes = config(workers[key]).get("routes", [])
+        owner = hcl_map(code, "owner_apps")
+        destinations = {
+            key: [re.search(r'domain\s*=\s*"([^"]+)"', value).group(1)]
+            + re.findall(r'"([^"]+)"', re.search(r"more\s*=\s*\[(.*?)\]", value).group(1))
+            for key, value in owner.items()
+        }
+        flowday = self.flowday_apps(code)
+        self.assertEqual(set(flowday), {"flowday", "flowday-bypass"})
+        destinations.update({key: value for key, value in flowday.items()})
+        self.assertEqual(set(owner), {"mail-hero", "todofy", "home", "lab", "links"})
+        for key, uris in destinations.items():
+            worker = "flowday" if key.startswith("flowday") else key
+            hosts = {route["pattern"] for route in config(worker).get("routes", []) if route.get("custom_domain")}
             with self.subTest(app=key):
-                self.assertIn({"pattern": domain, "custom_domain": True}, routes)
+                self.assertTrue(uris)
+                self.assertIn(uris[0].split("/")[0], hosts, "the first destination is the app's own host")
+                for uri in uris:
+                    self.assertIn(uri.split("/")[0], hosts | RETIRING_HOSTS)
         backup = re.search(r'resource "cloudflare_zero_trust_access_application" "mail_hero_backup" \{(.*?)^\}', code, re.DOTALL | re.MULTILINE)
         self.assertIn('domain                      = "mail-hero.ziyixi.science/api/internal/backup/*"', backup.group(1))
+
+    def test_every_worker_that_checks_access_has_an_application_of_its_name(self):
+        """The access_aud output is keyed by Worker name; a Worker whose ACCESS_AUDIENCE no application key matches
+        would fail the outputs check in "Infra drift"."""
+        code = (INFRA / "access.tf").read_text()
+        keys = set(hcl_map(code, "owner_apps")) | set(self.flowday_apps(code))
+        for worker in PRODUCTION:
+            if "ACCESS_AUDIENCE" in config(worker).get("vars", {}):
+                with self.subTest(worker=worker):
+                    self.assertIn(config(worker)["name"], keys)
 
     def test_d1_databases_and_buckets_are_the_ones_the_production_configs_bind(self):
         storage = (INFRA / "storage.tf").read_text()

@@ -308,8 +308,9 @@ first (`cd ../web && npm run build`), and apply the migrations locally:
   - Move `flowday/wrangler.toml` from `UNDEPLOYED` to `PRODUCTION` in `test_wrangler_configs.py`, add it to
     `drift_desired.py` and regenerate the dashboard's desired state.
   - The wrapper then refuses the placeholders again, as a guard against a revert.
-  - Not in F2: `infra/` (OpenTofu, plan only) does not adopt the D1 `flowday` or the Access app `flowday` yet;
-    a later `infra/` change imports both (`.github/scripts/test_infra_config.py` names the gap).
+  - Not in F2: `infra/` (OpenTofu) did not adopt the D1 `flowday` or the Access apps yet. IaC P4 imported the D1
+    database and both Access apps (`flowday`, `flowday-bypass`); the F3 staging host leaves both apps through an
+    `infra/` commit after F4 (`infra/README.md` "FlowDay").
 - **F3 (staging host).** Done in code (2026-10-01); live once its commit's `FlowDay deploy` passes on `main`.
   `wrangler.toml` lists the Custom Domain `flowday-next.ziyixi.science` and sets `PUBLIC_HOST` (the CSRF origin) to
   it, in its own commit; nothing else changes (cf-guard: a new hostname with no DNS record and no other Worker).

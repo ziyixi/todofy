@@ -14,8 +14,8 @@ Steps (each prints one fixed line; no value, token, key or id is ever printed):
    keeps no lock file until a later change enables use_lockfile.
 4. `tofu init` with the S3 backend (key <environment>/terraform.tfstate).
 5. Plan. It must hold ONLY imports: every resource is "import" (or already "no-op"), exactly --expect of them,
-   no output change. Anything else (create, update, replace, delete, forget, import+update, a wrong count)
-   refuses before any apply.
+   and outputs only created (a new state has none yet). Anything else (create, update, replace, delete, forget,
+   import+update, an output update, a wrong count) refuses before any apply.
 6. `tofu apply` of exactly that saved import-only plan. Import reads Cloudflare and writes only the state.
 7. Read the state object back: it must be OpenTofu-encrypted (no plaintext resources).
 8. Plan again: it must say "No changes" (exit 0, every resource no-op).
@@ -49,8 +49,8 @@ from infra_state import Refused  # noqa: E402
 REPO = infra_state.REPO
 ADMIN = REPO / "mail-hero" / "deploy" / "cloudflare-admin.py"
 WRANGLER = REPO / "mail-hero" / "cloudflare" / "node_modules" / ".bin" / "wrangler"
-# The objects infra/ manages (README.md "Managed here (13 objects)").
-EXPECTED_OBJECTS = 13
+# The objects infra/ manages (README.md "Managed here (18 objects)").
+EXPECTED_OBJECTS = 18
 EXIT_NOT_IMPORT_ONLY = 4
 
 
@@ -70,12 +70,12 @@ def import_decision(summary: dict, expected: int) -> str:
     other = {word: n for word, n in counts.items() if word not in ("import", "no-op")}
     if other:
         raise NotImportOnly(f"the plan holds actions other than import: {dict(sorted(other.items()))}")
-    if summary["outputs"]:
-        raise NotImportOnly("the plan changes outputs")
+    if any(word != "create" for word, _ in summary["outputs"]):
+        raise NotImportOnly("the plan changes outputs other than by creating them")
     total = len(summary["rows"])
     if total != expected:
         raise NotImportOnly(f"the plan covers {total} resources, expected exactly {expected}")
-    return "apply" if counts.get("import") else "done"
+    return "apply" if counts.get("import") or summary["outputs"] else "done"
 
 
 def final_check(tofu_code: int, summary: dict, expected: int) -> None:
@@ -227,7 +227,8 @@ def main(argv: Optional[list[str]] = None) -> int:
     parser.add_argument("--token-file", type=Path, help="the admin helper's token file (default: its DEFAULT_TOKEN)")
     parser.add_argument("--work-dir", type=Path, help="parent outside the repository for the new private work "
                         "directory (default: ~/.cache/todofy-infra)")
-    parser.add_argument("--expect", type=int, default=EXPECTED_OBJECTS, help="number of managed objects (default 13)")
+    parser.add_argument("--expect", type=int, default=EXPECTED_OBJECTS,
+                        help=f"number of managed objects (default {EXPECTED_OBJECTS})")
     parser.add_argument("--skip-lock-probe", action="store_true", help="do not probe conditional writes")
     # Tests only: an S3 stand-in instead of R2. The bucket is never created there.
     parser.add_argument("--s3-endpoint", help=argparse.SUPPRESS)
