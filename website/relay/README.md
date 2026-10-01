@@ -10,7 +10,10 @@ on `main` with fixed inputs:
   Notion changed since the last release and, if so, dispatches `operation=release` with
   `trigger=cron` (or once `trigger=pending` for a change the last release's own write-back found);
   once a day it dispatches a reconcile release (`trigger=reconcile`). The rules are
-  in [`../docs/architecture.md`](../docs/architecture.md#automatic-releases).
+  in [`../docs/architecture.md`](../docs/architecture.md#automatic-releases). The release workflow's
+  own schedule dispatches the same reconcile when the relay has not, reading Notion and holding for the
+  quiet period with this detector's code (`readNotionRows`, `decide`) and these committed settings
+  ([`../docs/release.md`](../docs/release.md#daily-schedule)).
 
 It lives in `website/relay/` (it was `integrations/notion-publish/` in the old repository) because
 it belongs to the website app: it shares the website's `package.json` (wrangler, vitest) and its

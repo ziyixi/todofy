@@ -75,8 +75,8 @@ pnpm exec wrangler deploy --dry-run --config relay/wrangler.toml
 Deploys run only from GitHub Actions on `main` (never from a laptop): a website change on `main` runs
 `Website deploy` after the CI gate, which dispatches `website-release.yml` just as the Notion buttons and
 the relay's detector do (every release builds the newest `main` commit that passed the CI gate), and a
-`website/relay/` change runs `Website relay deploy`. The release workflow also runs the daily reconcile
-release on its own schedule (10:30 UTC) when the relay has not
+`website/relay/` change runs `Website relay deploy`. The release workflow's own schedule (hourly 10:30–15:30 UTC)
+also dispatches the relay's daily reconcile release when the relay has not
 ([`docs/release.md`](docs/release.md#daily-schedule)). The GitHub `production` environment
 holds `WEBSITE_NOTION_TOKEN`, `WEBSITE_NOTION_DATA_SOURCE_ID` and the monorepo's `CF_API_TOKEN`; every
 other production value is committed (`wrangler.toml`, `relay/wrangler.toml`, the workflow's `env`).

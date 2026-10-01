@@ -788,9 +788,9 @@ class WebsiteRelease(unittest.TestCase):
 
     def test_every_release_job_shares_one_group_and_the_production_environment(self):
         jobs = self.release_jobs()
-        self.assertEqual(set(jobs), {"scheduled", "release", "status"})
+        self.assertEqual(set(jobs), {"scheduled", "scheduled-dispatch", "release", "status"})
         for name, block in jobs.items():
-            if name == "scheduled":
+            if name in ("scheduled", "scheduled-dispatch"):
                 continue
             with self.subTest(job=name):
                 self.assertIn("      group: website-production\n", block)
@@ -800,7 +800,8 @@ class WebsiteRelease(unittest.TestCase):
     def test_the_relay_and_the_workflow_agree_on_operations_and_triggers(self):
         text = self.RELEASE.read_text()
         # A dispatched run is "Website <operation> (<trigger>)", which the relay parses; a scheduled run has
-        # its own name, which the relay's parser does not match (scheduled-reconcile.ts reads both).
+        # its own name, which the relay's parser does not match: it never releases, it dispatches
+        # "Website release (reconcile)".
         self.assertIn(
             "run-name: ${{ github.event_name == 'schedule' && 'Website scheduled reconcile' || "
             "format('Website {0} ({1})', inputs.operation, inputs.trigger) }}",
@@ -823,7 +824,7 @@ class WebsiteRelease(unittest.TestCase):
         self.assertNotIn("secrets.VERCEL", text)
         # Notion credentials only for the snapshot and the feedback; the deploy token only for Cloudflare steps.
         notion = [line for line in text.splitlines() if "secrets.WEBSITE_NOTION_TOKEN" in line]
-        self.assertEqual(len(notion), 3)
+        self.assertEqual(len(notion), 4)
         cloudflare = [line for line in text.splitlines() if "secrets.CF_API_TOKEN" in line]
         self.assertEqual(len(cloudflare), 5)
         # GITHUB_TOKEN never in a job or workflow env (install scripts, builds and tests would see it): only
@@ -841,7 +842,9 @@ class WebsiteRelease(unittest.TestCase):
                     "Check out the newest main commit that passed the CI gate",
                     "Check out the newest main commit that passed the CI gate",
                     "Check out the newest main commit that passed the CI gate",
+                    "Check out the newest main commit that passed the CI gate",
                     "Decide whether today's reconcile release is due",
+                    "Dispatch the reconcile release unless the relay would hold it",
                     "Assert the trusted release context and the pinned commit",
                     "Enforce the GitHub Deployment state gate",
                     "Reconcile a blocked release with what production serves",
@@ -856,19 +859,20 @@ class WebsiteRelease(unittest.TestCase):
 
 
 class WebsiteScheduledReconcile(unittest.TestCase):
-    """The daily schedule of website-release.yml is the relay's reconcile release without the relay: a check job
-    with no environment, secret or install decides; the release job then runs an ordinary release with the fixed
-    inputs the relay sends, never recovery, and every gate of a dispatched release applies unchanged."""
+    """The daily schedule of website-release.yml stands in for the relay's reconcile dispatch: a check job with no
+    environment, secret or install decides; a dispatch job checks again, holds during the relay's quiet period and
+    dispatches exactly the relay's reconcile release ("Website release (reconcile)", which the relay sees as its
+    own). A scheduled run never runs the release or status job itself."""
 
     RELEASE = REPO / ".github" / "workflows" / "website-release.yml"
 
     def jobs(self):
         return WebsiteRelease().release_jobs()
 
-    def test_the_schedule_runs_once_a_day_after_the_relays_reconcile_hour(self):
+    def test_the_schedule_runs_hourly_after_the_relays_reconcile_hour(self):
         text = self.RELEASE.read_text()
         on = text.split("\non:\n", 1)[1].split("\npermissions:\n", 1)[0]
-        self.assertEqual(re.findall(r"^    - cron: '([^']+)'$", on, re.MULTILINE), ["30 10 * * *"])
+        self.assertEqual(re.findall(r"^    - cron: '([^']+)'$", on, re.MULTILINE), ["30 10-15 * * *"])
         relay = (REPO / "website" / "relay" / "wrangler.toml").read_text()
         self.assertIn('RECONCILE_UTC_HOUR = "10"\n', relay)
         self.assertNotIn("workflow_call:", text)
@@ -879,44 +883,69 @@ class WebsiteScheduledReconcile(unittest.TestCase):
         for absent in ("environment:", "secrets.", "concurrency:", "pnpm", "npm ", "write"):
             with self.subTest(absent=absent):
                 self.assertNotIn(absent, block)
-        self.assertIn("    permissions:\n      contents: read\n      actions: read\n      deployments: read\n", block)
+        # checks: read for green-commit.ts (the CI gate's check runs), as the workflow-level block grants it.
+        self.assertIn(
+            "    permissions:\n      contents: read\n      actions: read\n      checks: read\n      deployments: read\n",
+            block,
+        )
         pin = block.index("- name: Check out the newest main commit that passed the CI gate\n")
         decide = block.index("- name: Decide whether today's reconcile release is due\n")
         self.assertLess(pin, decide)
         self.assertIn('git -c advice.detachedHead=false checkout --detach "$sha"', block[pin:decide])
         self.assertIn("node --disable-warning=ExperimentalWarning scripts/release/scheduled-reconcile.ts", block[decide:])
-        self.assertIn("reconcile: ${{ steps.decide.outputs.reconcile }}", block)
+        self.assertIn("due: ${{ steps.decide.outputs.due }}", block)
         self.assertTrue((REPO / "website" / "scripts" / "release" / "scheduled-reconcile.ts").is_file())
 
-    def test_the_release_job_runs_for_a_dispatch_or_a_due_reconcile_only(self):
-        block = self.jobs()["release"]
+    def test_the_dispatch_job_runs_only_when_due_and_only_dispatches(self):
+        block = self.jobs()["scheduled-dispatch"]
         self.assertIn("    needs: scheduled\n", block)
         condition = " ".join(block.split("    if: >-\n", 1)[1].split("\n    runs-on:", 1)[0].split())
         self.assertEqual(
             condition,
-            "${{ !cancelled() && ((github.event_name == 'workflow_dispatch' && inputs.operation != 'status') "
-            "|| (github.event_name == 'schedule' && needs.scheduled.result == 'success' "
-            "&& needs.scheduled.outputs.reconcile == 'true')) }}",
+            "${{ !cancelled() && github.event_name == 'schedule' "
+            "&& needs.scheduled.result == 'success' && needs.scheduled.outputs.due == 'true' }}",
         )
-        self.assertIn("    if: github.event_name == 'workflow_dispatch' && inputs.operation == 'status'\n", self.jobs()["status"])
+        # Dispatch and read; no release record, no Cloudflare token, no lock of its own (the dispatched release
+        # takes the lock).
+        self.assertIn(
+            "    permissions:\n      contents: read\n      actions: write\n      checks: read\n      deployments: read\n",
+            block,
+        )
+        self.assertIn("      name: production\n", block)
+        self.assertNotIn("concurrency:", block)
+        self.assertNotIn("CF_API_TOKEN", block)
+        self.assertNotIn("wrangler", block)
+        self.assertNotIn("pnpm release", block)
+        # The Notion secrets only in the dispatch step, after the install.
+        install = block.index("- name: Install the pinned pnpm and locked dependencies\n")
+        dispatch = block.index("- name: Dispatch the reconcile release unless the relay would hold it\n")
+        self.assertLess(install, dispatch)
+        self.assertNotIn("secrets.", block[:dispatch])
+        self.assertIn("run: node --import tsx scripts/release/scheduled-dispatch.ts", block[dispatch:])
+        self.assertTrue((REPO / "website" / "scripts" / "release" / "scheduled-dispatch.ts").is_file())
 
-    def test_a_scheduled_release_has_the_relays_fixed_inputs(self):
-        block = self.jobs()["release"]
+    def test_a_scheduled_run_never_runs_the_release_or_status_job(self):
+        jobs = self.jobs()
+        self.assertIn(
+            "    if: github.event_name == 'workflow_dispatch' && inputs.operation != 'status'\n", jobs["release"]
+        )
+        self.assertIn(
+            "    if: github.event_name == 'workflow_dispatch' && inputs.operation == 'status'\n", jobs["status"]
+        )
+        self.assertNotIn("needs:", jobs["release"])
+        self.assertNotIn("schedule", jobs["release"])
+        # The release reads only the dispatch inputs; the dispatch job sends the relay's (releaseInputs).
         for line in (
-            "RELEASE_OPERATION: ${{ github.event_name == 'schedule' && 'release' || inputs.operation }}",
-            "RELEASE_CONFIRMATION: ${{ github.event_name == 'schedule' && 'release:www.ziyixi.science' || inputs.confirmation }}",
-            "ALLOW_EMPTY: ${{ github.event_name == 'schedule' && 'false' || inputs.allow_empty }}",
-            "FORCE_BUILD: ${{ github.event_name == 'schedule' && 'false' || inputs.force_build }}",
+            "RELEASE_OPERATION: ${{ inputs.operation }}",
+            "RELEASE_CONFIRMATION: ${{ inputs.confirmation }}",
+            "ALLOW_EMPTY: ${{ inputs.allow_empty }}",
+            "FORCE_BUILD: ${{ inputs.force_build }}",
         ):
             with self.subTest(line=line):
-                self.assertIn(f"      {line}\n", block)
-        # Steps choose by the resolved operation, so a scheduled run (no inputs) still checks the baseline and
-        # never runs the recovery step.
-        self.assertNotRegex(block.split("    steps:\n", 1)[1], r"\binputs\.")
-        self.assertIn("env.RELEASE_OPERATION == 'release'", block)
-        self.assertIn("env.RELEASE_OPERATION == 'recovery'", block)
-        self.assertIn("run: pnpm release gate", block)
-        self.assertIn("run: pnpm release check-baseline", block)
+                self.assertIn(f"      {line}\n", jobs["release"])
+        dispatch = (REPO / "website" / "scripts" / "release" / "scheduled-dispatch.ts").read_text()
+        self.assertIn('releaseInputs(env, "reconcile")', dispatch)
+        self.assertIn('export const RECONCILE_RUN_NAME = "Website release (reconcile)";', dispatch)
 
 
 class WebsiteChecks(unittest.TestCase):

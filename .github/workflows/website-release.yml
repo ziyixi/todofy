@@ -3,10 +3,11 @@
 #   detector (cron, reconcile) and the 刷新状态 button (operation status);
 # - dispatched by hand (manual): bootstrap once, recovery after a blocked release, force_build;
 # - dispatched by "Website deploy" in ci.yml after a website push on main passed the CI gate (push);
-# - its daily schedule (10:30 UTC): the relay's reconcile release without the relay, only when no
-#   reconcile ran today and the release gate is open (job "scheduled", scripts/release/scheduled-reconcile.ts).
-# Every release is a run of this workflow, so the relay sees all of them (running, window, failures);
-# a scheduled run is named "Website scheduled reconcile", which the relay's run-name parser ignores.
+# - dispatched by its own daily schedule (reconcile): the relay's reconcile release while the relay cannot
+#   dispatch (jobs scheduled and scheduled-dispatch below; a scheduled run never releases itself).
+# Every release is a run of this workflow named "Website <operation> (<trigger>)", so the relay sees all of
+# them (running, window, failures); a scheduled run is named "Website scheduled reconcile", which the
+# relay's run-name parser ignores, since it only checks and dispatches.
 # Every run builds the newest main commit whose push run passed the CI gate (green-commit.ts), never a
 # newer red, running or [skip ci] one. A release syncs Notion, builds the static export, verifies it under
 # wrangler dev, uploads a Worker version, deploys it only if production still serves the recorded version,
@@ -16,11 +17,13 @@ name: Website release
 run-name: ${{ github.event_name == 'schedule' && 'Website scheduled reconcile' || format('Website {0} ({1})', inputs.operation, inputs.trigger) }}
 
 on:
-  # The daily reconcile release even while the relay cannot dispatch (docs/release.md "Daily schedule").
-  # GitHub may start a scheduled run late, or drop it under load; the relay's reconcile (10:00 UTC) and
-  # this one skip each other on the same UTC day.
+  # The daily reconcile release even while the relay cannot dispatch (docs/release.md "Daily schedule"):
+  # hourly from 10:30 to 15:30 UTC, after the relay's reconcile hour (10). Each run dispatches the relay's
+  # reconcile release at most once a day: not after a reconcile run today (the relay's or one dispatched
+  # by an earlier hour), and the relay sees a dispatched one as today's reconcile. GitHub may start a
+  # scheduled run late or drop it under load; the next hour checks again.
   schedule:
-    - cron: '30 10 * * *'
+    - cron: '30 10-15 * * *'
   workflow_dispatch:
     inputs:
       operation:
@@ -70,12 +73,11 @@ env:
   WEBSITE_LEGACY_REPOSITORY: ziyixi/ziyixi.science
 
 jobs:
-  # A scheduled run only: decide whether today's reconcile release is due (scheduled-reconcile.ts): not
-  # when the latest release record blocks ordinary releases (recovery gate) or none exists (bootstrap),
-  # when a reconcile already ran today (the relay's or an earlier scheduled one), or after 3 failed
-  # releases today. Plain node on the newest CI-green main commit, no install, no environment, no secret;
-  # the token reads Actions runs and Deployments only. The variable WEBSITE_SCHEDULED_RECONCILE=false
-  # turns the schedule off.
+  # A scheduled run, step 1 (scripts/release/scheduled-reconcile.ts): is today's reconcile due? Not after
+  # a reconcile run today, while another run of this workflow is queued or running, before a bootstrap,
+  # during a recovery gate, or after 3 failed releases today. Plain node on the newest CI-green main
+  # commit: no install, no environment, no secret; the token only reads. The repository variable
+  # WEBSITE_SCHEDULED_RECONCILE=false turns the schedule off.
   scheduled:
     name: Website scheduled reconcile check
     if: github.event_name == 'schedule' && vars.WEBSITE_SCHEDULED_RECONCILE != 'false'
@@ -84,9 +86,10 @@ jobs:
     permissions:
       contents: read
       actions: read
+      checks: read
       deployments: read
     outputs:
-      reconcile: ${{ steps.decide.outputs.reconcile }}
+      due: ${{ steps.decide.outputs.due }}
     defaults:
       run:
         working-directory: website
@@ -105,29 +108,71 @@ jobs:
         run: |
           sha="$(node --disable-warning=ExperimentalWarning scripts/release/green-commit.ts)"
           git -c advice.detachedHead=false checkout --detach "$sha"
-      # A CI-green commit from before the schedule existed has no decision code: skip that day.
+      # A CI-green commit from before the schedule existed has no decision code: nothing that hour.
       - name: Decide whether today's reconcile release is due
         id: decide
         env:
           GITHUB_TOKEN: ${{ github.token }}
         run: |
-          if [ ! -f scripts/release/scheduled-reconcile.ts ]; then
-            echo 'reconcile=false' >> "$GITHUB_OUTPUT"
-            echo '::notice::The newest CI-green commit predates the scheduled reconcile; nothing was released.'
+          if [ ! -f scripts/release/scheduled-dispatch.ts ]; then
+            echo 'due=false' >> "$GITHUB_OUTPUT"
+            echo '::notice::The newest CI-green commit predates the scheduled reconcile; nothing was dispatched.'
             exit 0
           fi
           node --disable-warning=ExperimentalWarning scripts/release/scheduled-reconcile.ts
 
+  # A scheduled run, step 2 (scripts/release/scheduled-dispatch.ts), only when step 1 found it due: check
+  # again, hold during the relay's quiet period (Notion read with the production environment's Notion
+  # secrets, only in that step), then dispatch exactly the relay's reconcile release ("Website release
+  # (reconcile)", the release job below with all its gates). The token may dispatch workflows and read,
+  # nothing else (no release record); no other secret is used.
+  scheduled-dispatch:
+    name: Website scheduled reconcile dispatch
+    needs: scheduled
+    if: >-
+      ${{ !cancelled() && github.event_name == 'schedule'
+      && needs.scheduled.result == 'success' && needs.scheduled.outputs.due == 'true' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    environment:
+      name: production
+    permissions:
+      contents: read
+      actions: write
+      checks: read
+      deployments: read
+    defaults:
+      run:
+        working-directory: website
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: refs/heads/main
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version-file: website/.nvmrc
+      - name: Check out the newest main commit that passed the CI gate
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          sha="$(node --disable-warning=ExperimentalWarning scripts/release/green-commit.ts)"
+          git -c advice.detachedHead=false checkout --detach "$sha"
+      - name: Install the pinned pnpm and locked dependencies
+        run: |
+          corepack enable
+          pnpm install --frozen-lockfile
+      - name: Dispatch the reconcile release unless the relay would hold it
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          NOTION_TOKEN: ${{ secrets.WEBSITE_NOTION_TOKEN }}
+          NOTION_DATA_SOURCE_ID: ${{ secrets.WEBSITE_NOTION_DATA_SOURCE_ID }}
+        run: node --import tsx scripts/release/scheduled-dispatch.ts
+
   release:
     name: Website release
-    needs: scheduled
-    # A dispatch (scheduled is skipped: hence the explicit status function), or a scheduled run whose
-    # check found the reconcile due.
-    if: >-
-      ${{ !cancelled()
-      && ((github.event_name == 'workflow_dispatch' && inputs.operation != 'status')
-      || (github.event_name == 'schedule' && needs.scheduled.result == 'success'
-      && needs.scheduled.outputs.reconcile == 'true')) }}
+    if: github.event_name == 'workflow_dispatch' && inputs.operation != 'status'
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     environment:
@@ -141,13 +186,11 @@ jobs:
     defaults:
       run:
         working-directory: website
-    # A scheduled run has no inputs: it is the relay's reconcile release (release, the fixed confirmation,
-    # no force_build, no allow_empty).
     env:
-      RELEASE_OPERATION: ${{ github.event_name == 'schedule' && 'release' || inputs.operation }}
-      RELEASE_CONFIRMATION: ${{ github.event_name == 'schedule' && 'release:www.ziyixi.science' || inputs.confirmation }}
-      ALLOW_EMPTY: ${{ github.event_name == 'schedule' && 'false' || inputs.allow_empty }}
-      FORCE_BUILD: ${{ github.event_name == 'schedule' && 'false' || inputs.force_build }}
+      RELEASE_OPERATION: ${{ inputs.operation }}
+      RELEASE_CONFIRMATION: ${{ inputs.confirmation }}
+      ALLOW_EMPTY: ${{ inputs.allow_empty }}
+      FORCE_BUILD: ${{ inputs.force_build }}
     steps:
       # main inside the lock, whatever commit triggered this run; then the newest commit of it that
       # passed the CI gate. The code identity is the newest commit at or before it that touched website/.
@@ -187,13 +230,13 @@ jobs:
         if: steps.gate.outputs.bootstrap_required != 'true'
         run: pnpm exec playwright install --with-deps chromium
       - name: Reconcile a blocked release with what production serves
-        if: steps.gate.outputs.bootstrap_required != 'true' && env.RELEASE_OPERATION == 'recovery'
+        if: steps.gate.outputs.bootstrap_required != 'true' && inputs.operation == 'recovery'
         env:
           GITHUB_TOKEN: ${{ github.token }}
           CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
         run: pnpm release recover
       - name: Verify production still serves the recorded baseline
-        if: steps.gate.outputs.bootstrap_required != 'true' && env.RELEASE_OPERATION == 'release'
+        if: steps.gate.outputs.bootstrap_required != 'true' && inputs.operation == 'release'
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
         run: pnpm release check-baseline

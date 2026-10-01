@@ -147,29 +147,17 @@ describe("release context", () => {
     expect(() => assertReleaseContext({ ...base, eventName: "workflow_call" })).toThrow(/dispatch/);
   });
 
-  it("accepts the daily schedule only as an ordinary release with the exact confirmation", () => {
-    const scheduled = { ...base, eventName: "schedule" };
-    expect(assertReleaseContext(scheduled)).toBe("release");
-    for (const operation of ["recovery", "bootstrap"]) {
+  it("refuses a scheduled run: the schedule only dispatches the reconcile release", () => {
+    for (const operation of ["release", "recovery", "bootstrap"]) {
       expect(() =>
         assertReleaseContext({
-          ...scheduled,
+          ...base,
+          eventName: "schedule",
           operation,
           confirmation: `${operation}:www.ziyixi.science`,
         }),
-      ).toThrow(/only an ordinary release/);
+      ).toThrow(/only from a workflow dispatch/);
     }
-    expect(() =>
-      assertReleaseContext({
-        ...scheduled,
-        allowEmpty: true,
-        confirmation: "release:www.ziyixi.science:allow-empty",
-      }),
-    ).toThrow(/without allow-empty/);
-    expect(() => assertReleaseContext({ ...scheduled, confirmation: "release" })).toThrow(
-      /exactly/,
-    );
-    expect(() => assertReleaseContext({ ...scheduled, ref: "refs/heads/feature" })).toThrow(/main/);
   });
 
   it("requires the allow-empty suffix when the one-run switch is enabled", () => {

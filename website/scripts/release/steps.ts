@@ -49,22 +49,17 @@ export interface ReleaseInputs {
 
 /**
  * Only main, only from a dispatch of website-release.yml (CI's Website deploy after a push, the
- * buttons, the change detector, by hand) or its daily schedule (the reconcile release without the
- * relay, docs/release.md: always an ordinary release, never recovery, bootstrap or allow-empty), and
- * the confirmation must name the operation and the canonical host. Which commit is built is pinned
- * separately (green-commit.ts).
+ * buttons, the change detector, by hand, the daily schedule's dispatch job), and the typed confirmation
+ * must name the operation and the canonical host. A scheduled run never releases itself: it dispatches
+ * (docs/release.md, "Daily schedule"). Which commit is built is pinned separately (green-commit.ts).
  */
 export function assertReleaseContext(inputs: ReleaseInputs): Operation {
   const operation = inputs.operation;
   if (operation !== "release" && operation !== "bootstrap" && operation !== "recovery") {
     fail(`Unsupported release operation: ${operation}`);
   }
-  if (inputs.eventName === "schedule") {
-    if (operation !== "release" || inputs.allowEmpty) {
-      fail("The daily schedule runs only an ordinary release, without allow-empty.");
-    }
-  } else if (inputs.eventName !== "workflow_dispatch") {
-    fail("A production release runs only from a workflow dispatch or the daily schedule on main.");
+  if (inputs.eventName !== "workflow_dispatch") {
+    fail("A production release runs only from a workflow dispatch on main.");
   }
   if (inputs.ref !== "refs/heads/main")
     fail("A production release runs only from refs/heads/main.");

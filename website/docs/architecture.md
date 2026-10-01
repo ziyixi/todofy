@@ -14,7 +14,7 @@ Notion Blog data source ──(read: sync)────────────�
    │                                                   ▼
    │                     .github/workflows/website-release.yml (concurrency group website-production)
    │                        ◄── also dispatched by ci.yml "Website deploy" after a website push on main
-   │                        ◄── and its own daily schedule (10:30 UTC): the reconcile when the relay did not
+   │                        ◄── and by its own schedule (10:30–15:30 UTC): the relay's reconcile, when not yet run
    │                        Notion sync → next build (export) → wrangler dev verify → versions upload
    │                        → versions deploy → triggers deploy → live verify → rollback on failure
    └──(write: feedback)──── Notion status properties + database description
@@ -178,13 +178,14 @@ five) and keeps no state of its own:
    `allow_empty=false`, `trigger=cron|pending|reconcile`. The release skips the deploy when the identity did not
    change, so a reconcile on an unchanged day costs one short Actions run and refreshes the Notion feedback.
 
-**Without the relay.** `website-release.yml` also runs on a GitHub Actions schedule at 10:30 UTC (after
-`RECONCILE_UTC_HOUR`): a check job reconciles only if no reconcile run (the relay's or an earlier
-scheduled one) exists today, the latest release record is `success` (never during a recovery gate) and
-fewer than 3 releases failed today; then the same ordinary release runs. It needs no relay and no
-dispatch token, so the daily reconcile keeps happening while the relay cannot dispatch
-([`release.md`](release.md#daily-schedule)). It has no quiet period (it cannot read Notion before the
-release), and the relay ignores its runs (their name is `Website scheduled reconcile`).
+**Without the relay.** `website-release.yml` also runs on a GitHub Actions schedule, hourly from 10:30 to
+15:30 UTC (after `RECONCILE_UTC_HOUR`). Its jobs dispatch the relay's own reconcile release
+(`Website release (reconcile)`, with the run's `GITHUB_TOKEN`) only if no reconcile run exists today, no
+other release is queued or running, the latest release record is `success` (never during a recovery gate),
+fewer than 3 releases failed today and the relay's quiet period has passed (the same `decide` on the same
+Notion rows). So the daily reconcile keeps happening while the relay cannot dispatch, and a working relay
+sees it as today's reconcile ([`release.md`](release.md#daily-schedule)). The scheduled run itself
+(`Website scheduled reconcile`) never releases and the relay ignores it.
 
 `AUTO_PUBLISH = "false"` in `relay/wrangler.toml` turns the detector off (buttons keep working; the daily
 schedule is separate, see above). Known limits: a failed release does not write feedback, so edits made before it wait for the reconcile (the
@@ -195,6 +196,7 @@ failed run's GitHub notification is the alert); a dispatch PAT that expires make
 
 Page views: static assets, free and unlimited (on `www` and the apex alike: no Worker script runs). Relay: 96 scheduled invocations and normally ~290 subrequests a
 day (at most 5 per tick) plus the button clicks, each far under 10 ms CPU for a blog of this size. GitHub
-Actions: public repository, standard runners (the daily schedule adds one short check job a day).
+Actions: public repository, standard runners (the schedule adds up to six short check jobs a day, and one
+dispatch job on the day's due hour).
 The live site has no analytics beacon today (checked 2026-09-30: no `cloudflareinsights` in the HTML of any
 page); adding Cloudflare Web Analytics would be a separate owner decision, not part of the migration.

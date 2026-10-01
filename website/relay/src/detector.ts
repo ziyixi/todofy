@@ -331,6 +331,65 @@ export interface DetectorResult {
   notionStatus?: number;
 }
 
+/**
+ * The rows the rules read for one release window: up to MAX_QUERY_PAGES result pages, then, when more
+ * rows matched than were read, only the due and pending ones. Also used by the website's daily schedule
+ * (scripts/release/scheduled-dispatch.ts), so its quiet period reads exactly what the relay reads.
+ */
+export async function readNotionRows(
+  env: Pick<RelayEnv, "NOTION_TOKEN" | "NOTION_DATA_SOURCE_ID" | "NOTION_API_VERSION">,
+  window: ReleaseWindow,
+  now: number,
+  signal: AbortSignal,
+): Promise<{ rows: NotionRow[] } | { failure: DetectorResult }> {
+  const queryUrl = `https://api.notion.com/v1/data_sources/${encodeURIComponent(env.NOTION_DATA_SOURCE_ID ?? "")}/query`;
+  const notionToken = env.NOTION_TOKEN ?? "";
+  /** One result page, or the failure to report (the HTTP status only when Notion refused). */
+  const query = async (
+    body: Record<string, unknown>,
+  ): Promise<
+    { page: NonNullable<ReturnType<typeof parsePage>> } | { page: null; failure: DetectorResult }
+  > => {
+    const queried = await fetch(queryUrl, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${notionToken}`,
+        "Notion-Version": env.NOTION_API_VERSION,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(body),
+      signal,
+      redirect: "manual",
+    });
+    if (!queried.ok) {
+      return {
+        page: null,
+        failure: { code: "NOTION_UNAVAILABLE", notionStatus: queried.status },
+      };
+    }
+    const page = parsePage(await queried.json());
+    return page ? { page } : { page: null, failure: { code: "NOTION_UNAVAILABLE" } };
+  };
+
+  const rows: NotionRow[] = [];
+  let cursor: string | undefined;
+  for (let page = 0; page < MAX_QUERY_PAGES; page += 1) {
+    const result = await query(notionQuery(window, now, cursor ? { startCursor: cursor } : {}));
+    if (!result.page) return { failure: result.failure };
+    rows.push(...result.page.rows);
+    cursor = result.page.nextCursor ?? undefined;
+    if (!cursor) break;
+  }
+  if (cursor) {
+    // More rows matched than were read. The newest edits are in; due and pending rows may not be.
+    const result = await query(notionQuery(window, now, { dueOrPendingOnly: true }));
+    if (!result.page) return { failure: result.failure };
+    const seen = new Set(rows.map((row) => row.id).filter(Boolean));
+    rows.push(...result.page.rows.filter((row) => !row.id || !seen.has(row.id)));
+  }
+  return { rows };
+}
+
 /** One tick. Logs (by the caller) only the returned code and counts. */
 export async function runDetector(env: RelayEnv, now: Date): Promise<DetectorResult> {
   if (env.AUTO_PUBLISH !== "true") return { code: "AUTO_PUBLISH_OFF" };
@@ -345,54 +404,14 @@ export async function runDetector(env: RelayEnv, now: Date): Promise<DetectorRes
     if (!runs) return { code: "GITHUB_UNAVAILABLE" };
     if (runs.some((run) => ACTIVE_STATUSES.has(run.status))) return { code: "RUN_ACTIVE" };
 
-    const window = releaseWindow(runs, now.getTime());
-    const queryUrl = `https://api.notion.com/v1/data_sources/${encodeURIComponent(env.NOTION_DATA_SOURCE_ID)}/query`;
-    const notionToken = env.NOTION_TOKEN;
-    /** One result page, or the failure to report (the HTTP status only when Notion refused). */
-    const query = async (
-      body: Record<string, unknown>,
-    ): Promise<
-      { page: NonNullable<ReturnType<typeof parsePage>> } | { page: null; failure: DetectorResult }
-    > => {
-      const queried = await fetch(queryUrl, {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${notionToken}`,
-          "Notion-Version": env.NOTION_API_VERSION,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(body),
-        signal,
-        redirect: "manual",
-      });
-      if (!queried.ok) {
-        return {
-          page: null,
-          failure: { code: "NOTION_UNAVAILABLE", notionStatus: queried.status },
-        };
-      }
-      const page = parsePage(await queried.json());
-      return page ? { page } : { page: null, failure: { code: "NOTION_UNAVAILABLE" } };
-    };
-
-    const rows: NotionRow[] = [];
-    let cursor: string | undefined;
-    for (let page = 0; page < MAX_QUERY_PAGES; page += 1) {
-      const result = await query(
-        notionQuery(window, now.getTime(), cursor ? { startCursor: cursor } : {}),
-      );
-      if (!result.page) return result.failure;
-      rows.push(...result.page.rows);
-      cursor = result.page.nextCursor ?? undefined;
-      if (!cursor) break;
-    }
-    if (cursor) {
-      // More rows matched than were read. The newest edits are in; due and pending rows may not be.
-      const result = await query(notionQuery(window, now.getTime(), { dueOrPendingOnly: true }));
-      if (!result.page) return result.failure;
-      const seen = new Set(rows.map((row) => row.id).filter(Boolean));
-      rows.push(...result.page.rows.filter((row) => !row.id || !seen.has(row.id)));
-    }
+    const read = await readNotionRows(
+      env,
+      releaseWindow(runs, now.getTime()),
+      now.getTime(),
+      signal,
+    );
+    if ("failure" in read) return read.failure;
+    const rows = read.rows;
 
     const decision = decide({ now: now.getTime(), runs, rows, settings: settingsFrom(env) });
     if (decision.action === "skip") return { code: decision.code, counts: decision.counts };
