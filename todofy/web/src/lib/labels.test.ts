@@ -17,7 +17,11 @@ const API = join(__dirname, '../../../api')
 const spec = parse(readFileSync(join(API, 'owner-api-v1.openapi.yaml'), 'utf8')) as {
   components: { schemas: Record<string, { enum?: string[] }> }
 }
-const json = (name: string) => JSON.parse(readFileSync(join(API, name), 'utf8')) as { properties: { status: { enum: string[] } } }
+// A report schema (generated from proto/todofy/report/v1) is a union by status: one oneOf branch per status.
+const statuses = (name: string) =>
+  (JSON.parse(readFileSync(join(API, name), 'utf8')) as { oneOf: { properties: { status: { const: string } } }[] }).oneOf.map(
+    (branch) => branch.properties.status.const,
+  )
 
 function enumOf(...names: string[]): string[] {
   return names.flatMap((name) => {
@@ -36,8 +40,8 @@ describe('every contract enum value has exactly one Chinese label', () => {
     ['ReminderState', REMINDER_STATES, enumOf('ReminderState')],
     ['ReminderErrorCode', REMINDER_ERRORS, enumOf('CurrentReminderErrorCode', 'LegacyReminderErrorCode')],
     ['ReconcileAction', RECONCILE_ACTIONS, enumOf('ReconcileAction')],
-    ['summary-v1 status', SUMMARY_STATUS, json('summary-v1.schema.json').properties.status.enum],
-    ['recommendation-v1 status', RECOMMENDATION_STATUS, json('recommendation-v1.schema.json').properties.status.enum],
+    ['summary-v1 status', SUMMARY_STATUS, statuses('summary-v1.schema.json')],
+    ['recommendation-v1 status', RECOMMENDATION_STATUS, statuses('recommendation-v1.schema.json')],
   ])('%s', (_name, table, values) => {
     expect(sorted(Object.keys(table))).toEqual(sorted(values))
     for (const label of Object.values(table)) expect(JSON.stringify(label)).toMatch(/[一-鿿]/)

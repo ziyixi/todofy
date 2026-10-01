@@ -784,69 +784,216 @@ export interface components {
         };
         /**
          * Todofy GET /api/summary response
-         * @description The daily summary the newsletter reads. summary, task_count and time_window_hours are the Go service's fields (handle_summary.go @ 6c46ed4) and keep their meaning; the rest were added by the Worker. Fields may be added, never removed or retyped, so consumers must ignore unknown fields. The limits are the newsletter's acceptance rules (newsletter src/newsletter/todofy.py _decode), so any response that validates is one the newsletter accepts.
+         * @description Todofy GET /api/summary response: the daily summary the newsletter reads. summary, task_count and time_window_hours are the Go service's fields (handle_summary.go @ 6c46ed4) and keep their meaning; the rest were added by the Worker. Fields may be added, never removed or retyped, so consumers must ignore unknown fields. The limits are the newsletter's acceptance rules (newsletter src/newsletter/todofy.py _decode), so any response that validates is one the newsletter accepts.
          */
         "summary-v1.schema": {
-            /** @description Plain text from the daily-summary prompt, or the legacy English sentence when the window is empty. No control characters other than tab, line feed and carriage return. */
+            /** @description Plain text from the daily-summary prompt, or the legacy English sentence when the window is empty. Not blank; no control characters other than tab, line feed and carriage return. */
             summary: string;
-            /** @description Summaries in the window. */
+            /** @description Summaries in the window: at least one when ok, none when the window was empty. */
             task_count: number;
-            /** @constant */
+            /**
+             * @description The window's length: always 24.
+             * @constant
+             */
             time_window_hours: 24;
             /**
-             * @description The Worker sends only ok and empty_window. stale is kept for compatibility and is no longer sent: without a report computed since the latest precompute time, the endpoint answers 503.
-             * @enum {unknown}
+             * @description The Worker sends only ok and empty_window.
+             * @constant
              */
-            status: "ok" | "empty_window" | "stale";
+            status: "ok";
             /** @description Gemini model name; empty when no model was called. */
             model: string;
-            /**
-             * Format: date-time
-             * @description UTC RFC 3339 with whole seconds, like every timestamp here.
-             */
+            /** @description When the report was computed. */
             computed_at: string;
-            /** Format: date-time */
+            /** @description The window's start (exclusive): 24 hours before its end. */
             window_start: string;
-            /** Format: date-time */
+            /** @description The window's end (inclusive): computed_at. */
             window_end: string;
-        } & (unknown & unknown & unknown);
+        } | {
+            /**
+             * @description Plain text from the daily-summary prompt, or the legacy English sentence when the window is empty. Not blank; no control characters other than tab, line feed and carriage return.
+             * @constant
+             */
+            summary: "As there is no new task in the last 24 hours, there will have no summary. Please check your service as it's highly not possible that there is no new task in the last 24 hours.\n";
+            /**
+             * @description Summaries in the window: at least one when ok, none when the window was empty.
+             * @constant
+             */
+            task_count: 0;
+            /**
+             * @description The window's length: always 24.
+             * @constant
+             */
+            time_window_hours: 24;
+            /**
+             * @description The Worker sends only ok and empty_window.
+             * @constant
+             */
+            status: "empty_window";
+            /** @description Gemini model name; empty when no model was called. */
+            model: string;
+            /** @description When the report was computed. */
+            computed_at: string;
+            /** @description The window's start (exclusive): 24 hours before its end. */
+            window_start: string;
+            /** @description The window's end (inclusive): computed_at. */
+            window_end: string;
+        } | {
+            /** @description Plain text from the daily-summary prompt, or the legacy English sentence when the window is empty. Not blank; no control characters other than tab, line feed and carriage return. */
+            summary: string;
+            /** @description Summaries in the window: at least one when ok, none when the window was empty. */
+            task_count: number;
+            /**
+             * @description The window's length: always 24.
+             * @constant
+             */
+            time_window_hours: 24;
+            /**
+             * @description The Worker sends only ok and empty_window.
+             * @constant
+             */
+            status: "stale";
+            /** @description Gemini model name; empty when no model was called. */
+            model: string;
+            /** @description When the report was computed. */
+            computed_at: string;
+            /** @description The window's start (exclusive): 24 hours before its end. */
+            window_start: string;
+            /** @description The window's end (inclusive): computed_at. */
+            window_end: string;
+        };
         /**
          * Todofy GET /api/recommendation response
-         * @description The ranked tasks the newsletter reads (it asks for ?top=10). tasks, model and task_count are the Go service's fields (handle_recommendation.go @ 6c46ed4); model is now a model name rather than a proto enum name, and unparsable model output is reported as status model_output_invalid with no tasks instead of being passed through as a fake task. Fields may be added, never removed or retyped, so consumers must ignore unknown fields. The limits are the newsletter's acceptance rules (newsletter src/newsletter/todofy.py _decode_recommendation), so any response that validates is one the newsletter accepts. Ranks are unique, which JSON Schema cannot express.
+         * @description Todofy GET /api/recommendation response: the ranked tasks the newsletter reads (it asks for ?top=10). tasks, model and task_count are the Go service's fields (handle_recommendation.go @ 6c46ed4); model is now a model name rather than a proto enum name, and unparsable model output is reported as status model_output_invalid with no tasks instead of being passed through as a fake task. Fields may be added, never removed or retyped, so consumers must ignore unknown fields. The limits are the newsletter's acceptance rules (newsletter src/newsletter/todofy.py _decode_recommendation), so any response that validates is one the newsletter accepts. Ranks are unique and at most top_n, which JSON Schema cannot express.
          */
         "recommendation-v1.schema": {
-            /** @description Exactly what the Worker accepted from Gemini (JSON output constrained by the responseSchema from core/report_schema.py), ordered by rank. At most top_n items with ranks 1..top_n; fewer, even none, is valid and never padded. */
+            /** @description Exactly what the Worker accepted from Gemini (JSON output constrained by the responseSchema from core/report_schema.py), ordered by rank. At most top_n items with ranks 1..top_n; fewer, even none, is valid and never padded. None when the window was empty or the model's output could not be used. */
             tasks: {
+                /** @description Its rank, 1 first. */
                 rank: number;
                 /** @description Not blank; no control characters other than tab, line feed and carriage return. */
-                title: string & unknown;
-                /** @description Same rules as title. */
-                reason: string & unknown;
+                title: string;
+                /** @description Why it matters. Same rules as title. */
+                reason: string;
             }[];
             /** @description Gemini model name; empty when no model was called. */
             model: string;
-            /** @description Summaries the model saw: new_count + carryover_count (JSON Schema cannot express the sum). */
+            /** @description Summaries the model saw: new_count + carryover_count (a rule cannot express the sum). At least one when ok, none when the window was empty. */
             task_count: number;
+            /**
+             * @description The newsletter endpoint sends only ok and empty_window; model_output_invalid appears only in stored copies the owner API lists.
+             * @constant
+             */
+            status: "ok";
+            /** @description How many tasks were asked for (the `top` query parameter, 1-10). */
+            top_n: number;
+            /** @description When the report was computed. */
+            computed_at: string;
+            /** @description The window's start (exclusive): 24 hours before its end. */
+            window_start: string;
+            /** @description The window's end (inclusive): computed_at. */
+            window_end: string;
             /** @description Summaries of mail that arrived in the 24 h window (window_start, window_end]. Added 2026-09-30; absent from reports stored before. */
             new_count?: number;
             /** @description Older mail tasks (up to 14 days, at most 30) that the day's Todoist snapshot still lists as open, shown to the model as "[N 天前] summary"; 0 when no usable snapshot existed, and then the report is exactly the 24 h one. Added 2026-09-30; absent from reports stored before. */
             carryover_count?: number;
+        } | {
+            /** @description Exactly what the Worker accepted from Gemini (JSON output constrained by the responseSchema from core/report_schema.py), ordered by rank. At most top_n items with ranks 1..top_n; fewer, even none, is valid and never padded. None when the window was empty or the model's output could not be used. */
+            tasks: {
+                /** @description Its rank, 1 first. */
+                rank: number;
+                /** @description Not blank; no control characters other than tab, line feed and carriage return. */
+                title: string;
+                /** @description Why it matters. Same rules as title. */
+                reason: string;
+            }[];
+            /** @description Gemini model name; empty when no model was called. */
+            model: string;
             /**
-             * @description The newsletter endpoint sends only ok and empty_window; model_output_invalid appears only in stored copies the owner API lists. stale is kept for compatibility and is no longer sent: without a report computed since the latest precompute time, the endpoint answers 503.
-             * @enum {unknown}
+             * @description Summaries the model saw: new_count + carryover_count (a rule cannot express the sum). At least one when ok, none when the window was empty.
+             * @constant
              */
-            status: "ok" | "empty_window" | "model_output_invalid" | "stale";
+            task_count: 0;
+            /**
+             * @description The newsletter endpoint sends only ok and empty_window; model_output_invalid appears only in stored copies the owner API lists.
+             * @constant
+             */
+            status: "empty_window";
+            /** @description How many tasks were asked for (the `top` query parameter, 1-10). */
             top_n: number;
-            /**
-             * Format: date-time
-             * @description UTC RFC 3339 with whole seconds, like every timestamp here.
-             */
+            /** @description When the report was computed. */
             computed_at: string;
-            /** Format: date-time */
+            /** @description The window's start (exclusive): 24 hours before its end. */
             window_start: string;
-            /** Format: date-time */
+            /** @description The window's end (inclusive): computed_at. */
             window_end: string;
-        } & (unknown & unknown & unknown & unknown);
+            /** @description Summaries of mail that arrived in the 24 h window (window_start, window_end]. Added 2026-09-30; absent from reports stored before. */
+            new_count?: number;
+            /** @description Older mail tasks (up to 14 days, at most 30) that the day's Todoist snapshot still lists as open, shown to the model as "[N 天前] summary"; 0 when no usable snapshot existed, and then the report is exactly the 24 h one. Added 2026-09-30; absent from reports stored before. */
+            carryover_count?: number;
+        } | {
+            /** @description Exactly what the Worker accepted from Gemini (JSON output constrained by the responseSchema from core/report_schema.py), ordered by rank. At most top_n items with ranks 1..top_n; fewer, even none, is valid and never padded. None when the window was empty or the model's output could not be used. */
+            tasks: {
+                /** @description Its rank, 1 first. */
+                rank: number;
+                /** @description Not blank; no control characters other than tab, line feed and carriage return. */
+                title: string;
+                /** @description Why it matters. Same rules as title. */
+                reason: string;
+            }[];
+            /** @description Gemini model name; empty when no model was called. */
+            model: string;
+            /** @description Summaries the model saw: new_count + carryover_count (a rule cannot express the sum). At least one when ok, none when the window was empty. */
+            task_count: number;
+            /**
+             * @description The newsletter endpoint sends only ok and empty_window; model_output_invalid appears only in stored copies the owner API lists.
+             * @constant
+             */
+            status: "model_output_invalid";
+            /** @description How many tasks were asked for (the `top` query parameter, 1-10). */
+            top_n: number;
+            /** @description When the report was computed. */
+            computed_at: string;
+            /** @description The window's start (exclusive): 24 hours before its end. */
+            window_start: string;
+            /** @description The window's end (inclusive): computed_at. */
+            window_end: string;
+            /** @description Summaries of mail that arrived in the 24 h window (window_start, window_end]. Added 2026-09-30; absent from reports stored before. */
+            new_count?: number;
+            /** @description Older mail tasks (up to 14 days, at most 30) that the day's Todoist snapshot still lists as open, shown to the model as "[N 天前] summary"; 0 when no usable snapshot existed, and then the report is exactly the 24 h one. Added 2026-09-30; absent from reports stored before. */
+            carryover_count?: number;
+        } | {
+            /** @description Exactly what the Worker accepted from Gemini (JSON output constrained by the responseSchema from core/report_schema.py), ordered by rank. At most top_n items with ranks 1..top_n; fewer, even none, is valid and never padded. None when the window was empty or the model's output could not be used. */
+            tasks: {
+                /** @description Its rank, 1 first. */
+                rank: number;
+                /** @description Not blank; no control characters other than tab, line feed and carriage return. */
+                title: string;
+                /** @description Why it matters. Same rules as title. */
+                reason: string;
+            }[];
+            /** @description Gemini model name; empty when no model was called. */
+            model: string;
+            /** @description Summaries the model saw: new_count + carryover_count (a rule cannot express the sum). At least one when ok, none when the window was empty. */
+            task_count: number;
+            /**
+             * @description The newsletter endpoint sends only ok and empty_window; model_output_invalid appears only in stored copies the owner API lists.
+             * @constant
+             */
+            status: "stale";
+            /** @description How many tasks were asked for (the `top` query parameter, 1-10). */
+            top_n: number;
+            /** @description When the report was computed. */
+            computed_at: string;
+            /** @description The window's start (exclusive): 24 hours before its end. */
+            window_start: string;
+            /** @description The window's end (inclusive): computed_at. */
+            window_end: string;
+            /** @description Summaries of mail that arrived in the 24 h window (window_start, window_end]. Added 2026-09-30; absent from reports stored before. */
+            new_count?: number;
+            /** @description Older mail tasks (up to 14 days, at most 30) that the day's Todoist snapshot still lists as open, shown to the model as "[N 天前] summary"; 0 when no usable snapshot existed, and then the report is exactly the 24 h one. Added 2026-09-30; absent from reports stored before. */
+            carryover_count?: number;
+        };
         address: {
             address: string;
             name: string;

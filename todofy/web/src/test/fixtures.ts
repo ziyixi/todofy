@@ -93,8 +93,10 @@ export function reminder(patch: Partial<Reminder> = {}): Reminder {
 
 const WINDOW = { computed_at: '2026-09-28T13:30:00Z', window_start: '2026-09-27T13:30:00Z', window_end: '2026-09-28T13:30:00Z' }
 
+// A report is a union by status (each status bounds what it holds): a patch may switch the branch, so the result is
+// asserted rather than inferred.
 export function summaryReport(patch: Partial<SummaryReport> = {}): SummaryReport {
-  return { summary: '今天有 3 封账单提醒。', task_count: 3, time_window_hours: 24, status: 'ok', model: 'gemini-3.8-flash', ...WINDOW, ...patch }
+  return { summary: '今天有 3 封账单提醒。', task_count: 3, time_window_hours: 24, status: 'ok', model: 'gemini-3.8-flash', ...WINDOW, ...patch } as SummaryReport
 }
 
 export function recommendationReport(patch: Partial<RecommendationReport> = {}): RecommendationReport {
@@ -109,7 +111,7 @@ export function recommendationReport(patch: Partial<RecommendationReport> = {}):
     top_n: 10,
     ...WINDOW,
     ...patch,
-  }
+  } as RecommendationReport
 }
 
 export function setup(patch: Partial<Setup> = {}): Setup {

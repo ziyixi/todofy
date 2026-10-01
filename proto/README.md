@@ -75,7 +75,7 @@ validate with (`contracts/ops-v1/legacy/`).
    discriminator may not change, and a closed enum may not gain a value or change its `closed` (rule 5). Formats
    compare by pattern, length and JSON Schema `format`, so renaming a format is compatible. Like buf, it skips the
    directories `buf.yaml` lists under `breaking.ignore` (the runtimes' fixtures). `scripts/rules-selftest.sh`
-   proves the rules bite (45 cases, on `task_intent.proto`, `lab/ui/v1`, `ops/v1` and `prototest`), and
+   proves the rules bite (48 cases, on `task_intent.proto`, `lab/ui/v1`, `ops/v1`, `todofy/report/v1` and `prototest`), and
    `test/python/test_profile_breaking.py` checks the directions on synthetic images.
 5. **Adding a value to an open enum is compatible by design**, so neither buf nor the profile check flags it.
    What keeps consumers working is the reading rule: outputs are read leniently (an unknown enum name reads as

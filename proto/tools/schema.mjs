@@ -1,7 +1,8 @@
 /**
- * The contracts' JSON Schemas generated from the IDL (tools/gen_schema.py: `buf build | gen_schema.py`), started without
- * a shell like every tool of ensure.mjs (toolCommands: buf's entry point on this Node, Python from PROTO_PYTHON, else
- * python3, or python on Windows), so `npm run schema` and `npm run check:schema` run wherever generation does.
+ * The contracts' JSON Schemas generated from the IDL (tools/gen_schema.py: `buf build | gen_schema.py`; ops-v1's and
+ * Todofy's reports), started without a shell like every tool of ensure.mjs (toolCommands: buf's entry point on this
+ * Node, Python from PROTO_PYTHON, else python3, or python on Windows), so `npm run schema` and `npm run check:schema`
+ * run wherever generation does.
  *
  *   node tools/schema.mjs           rewrites the committed schemas (SCHEMAS in gen_schema.py)
  *   node tools/schema.mjs --check   fails when a committed schema is not the generated one (Proto checks, Contracts,
@@ -21,7 +22,8 @@ function main(args) {
   }
   const tools = toolCommands();
   const [node, bufPrefix] = tools.buf;
-  const image = spawnSync(node, [...bufPrefix, 'build', '--exclude-imports', '--exclude-source-info', '-o', '-#format=json'], {
+  // With source info: a self-contained schema describes its message and fields with their comments.
+  const image = spawnSync(node, [...bufPrefix, 'build', '--exclude-imports', '-o', '-#format=json'], {
     cwd: PROTO,
     maxBuffer: 64 << 20,
     stdio: ['ignore', 'pipe', 'inherit'],

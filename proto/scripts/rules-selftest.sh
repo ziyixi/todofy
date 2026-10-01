@@ -14,6 +14,7 @@ trap 'rm -rf "$WORK"' EXIT
 INTENT=todofy/taskintent/v1/task_intent.proto
 LAB=lab/ui/v1/lab_ui_service.proto
 OPS=ops/v1/ops.proto
+REPORT=todofy/report/v1/report.proto
 failures=0
 "$BUF" build --exclude-source-info -o "$WORK/base.json#format=json"
 
@@ -91,6 +92,11 @@ case_ "give StartCanaryInput.run_id an allowed list (an input refuses older run 
 # A closed enum's values are fixed for the major version; buf (FILE) allows the new value.
 case_ "add HEALTH_PARTIAL to the closed Health" breaking fail 's/(  HEALTH_DOWN = 3;\n)/$1  \/\/ Partly down.\n  HEALTH_PARTIAL = 4;\n/' "$OPS"
 case_ "open the closed Health (drop closed)" breaking fail 's/(enum Health \{\n)  option \(common.wire.v1.closed\) = true;\n\n/$1/' "$OPS"
+# Todofy's reports (todofy/report/v1, no service: every message is an output both ways): a case's empty list, a text
+# format and the closed status are wire like any rule of an output.
+case_ "let an empty window's recommendation carry tasks (drop its case's empty)" breaking fail 's/        rules: \{empty: true\}\n//' "$REPORT"
+case_ "widen a task's title to 300 characters (the newsletter's own limit is higher)" breaking fail 's/max_length: 200/max_length: 300/' "$REPORT"
+case_ "add REPORT_STATUS_PARTIAL to the closed ReportStatus" breaking fail 's/(  REPORT_STATUS_STALE = 4;\n)/$1  \/\/ Part of a report.\n  REPORT_STATUS_PARTIAL = 5;\n/' "$REPORT"
 case_ "change a binding of the test fixtures (prototest is ignored, as by buf)" breaking pass 's/\{get: "\/v1\/\{parent=shelves\/\*\}\/books"\}/{get: "\/v2\/{parent=shelves\/*}\/books"}/' prototest/v1/prototest.proto
 case_ "zero value without _UNSPECIFIED (MODE_UNSPECIFIED -> MODE_NONE)" lint fail 's/MODE_UNSPECIFIED = 0/MODE_NONE = 0/'
 case_ "enum value without its prefix (SOURCE_LAB -> LAB)" lint fail 's/SOURCE_LAB = 1/LAB = 1/'

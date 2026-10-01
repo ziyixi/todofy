@@ -1,74 +1,395 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://todofy.local/schema/recommendation-v1.schema.json",
-  "$comment": "Self-contained on purpose (no $defs or $ref): openapi-typescript hoists those into the owner API's component namespace.",
+  "$comment": "Generated from proto/todofy/report/v1/report.proto by proto/tools/gen_schema.py: do not edit. Self-contained on purpose (no $defs or $ref): the owner API's OpenAPI document refers to it, and openapi-typescript hoists those into its components.",
   "title": "Todofy GET /api/recommendation response",
-  "description": "The ranked tasks the newsletter reads (it asks for ?top=10). tasks, model and task_count are the Go service's fields (handle_recommendation.go @ 6c46ed4); model is now a model name rather than a proto enum name, and unparsable model output is reported as status model_output_invalid with no tasks instead of being passed through as a fake task. Fields may be added, never removed or retyped, so consumers must ignore unknown fields. The limits are the newsletter's acceptance rules (newsletter src/newsletter/todofy.py _decode_recommendation), so any response that validates is one the newsletter accepts. Ranks are unique, which JSON Schema cannot express.",
-  "type": "object",
-  "required": ["tasks", "model", "task_count", "status", "top_n", "computed_at", "window_start", "window_end"],
-  "additionalProperties": false,
-  "properties": {
-    "tasks": {
-      "description": "Exactly what the Worker accepted from Gemini (JSON output constrained by the responseSchema from core/report_schema.py), ordered by rank. At most top_n items with ranks 1..top_n; fewer, even none, is valid and never padded.",
-      "type": "array",
-      "maxItems": 10,
-      "items": {
-        "type": "object",
-        "required": ["rank", "title", "reason"],
-        "additionalProperties": false,
-        "properties": {
-          "rank": {"type": "integer", "minimum": 1, "maximum": 10},
-          "title": {
-            "description": "Not blank; no control characters other than tab, line feed and carriage return.",
-            "type": "string",
-            "maxLength": 200,
-            "pattern": "^[^\\u0000-\\u0008\\u000b\\u000c\\u000e-\\u001f\\u007f]*$",
-            "allOf": [{"pattern": "\\S"}]
-          },
-          "reason": {
-            "description": "Same rules as title.",
-            "type": "string",
-            "maxLength": 4000,
-            "pattern": "^[^\\u0000-\\u0008\\u000b\\u000c\\u000e-\\u001f\\u007f]*$",
-            "allOf": [{"pattern": "\\S"}]
+  "description": "Todofy GET /api/recommendation response: the ranked tasks the newsletter reads (it asks for ?top=10). tasks, model and task_count are the Go service's fields (handle_recommendation.go @ 6c46ed4); model is now a model name rather than a proto enum name, and unparsable model output is reported as status model_output_invalid with no tasks instead of being passed through as a fake task. Fields may be added, never removed or retyped, so consumers must ignore unknown fields. The limits are the newsletter's acceptance rules (newsletter src/newsletter/todofy.py _decode_recommendation), so any response that validates is one the newsletter accepts. Ranks are unique and at most top_n, which JSON Schema cannot express.",
+  "oneOf": [
+    {
+      "type": "object",
+      "required": [
+        "tasks",
+        "model",
+        "task_count",
+        "status",
+        "top_n",
+        "computed_at",
+        "window_start",
+        "window_end"
+      ],
+      "properties": {
+        "tasks": {
+          "description": "Exactly what the Worker accepted from Gemini (JSON output constrained by the responseSchema from core/report_schema.py), ordered by rank. At most top_n items with ranks 1..top_n; fewer, even none, is valid and never padded. None when the window was empty or the model's output could not be used.",
+          "type": "array",
+          "maxItems": 10,
+          "items": {
+            "type": "object",
+            "required": [
+              "rank",
+              "title",
+              "reason"
+            ],
+            "properties": {
+              "rank": {
+                "description": "Its rank, 1 first.",
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 10
+              },
+              "title": {
+                "description": "Not blank; no control characters other than tab, line feed and carriage return.",
+                "type": "string",
+                "maxLength": 200,
+                "pattern": "^(?:[\t\n\r \u0085\u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000]*[^\u0000-\b\u000b\f\u000e-\u001f\u007f\t\n\r \u0085\u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000][^\u0000-\b\u000b\f\u000e-\u001f\u007f]*)$(?!\\n)"
+              },
+              "reason": {
+                "description": "Why it matters. Same rules as title.",
+                "type": "string",
+                "maxLength": 4000,
+                "pattern": "^(?:[\t\n\r \u0085\u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000]*[^\u0000-\b\u000b\f\u000e-\u001f\u007f\t\n\r \u0085\u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000][^\u0000-\b\u000b\f\u000e-\u001f\u007f]*)$(?!\\n)"
+              }
+            },
+            "additionalProperties": false
           }
+        },
+        "model": {
+          "description": "Gemini model name; empty when no model was called.",
+          "type": "string"
+        },
+        "task_count": {
+          "description": "Summaries the model saw: new_count + carryover_count (a rule cannot express the sum). At least one when ok, none when the window was empty.",
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1000000
+        },
+        "status": {
+          "description": "The newsletter endpoint sends only ok and empty_window; model_output_invalid appears only in stored copies the owner API lists.",
+          "const": "ok"
+        },
+        "top_n": {
+          "description": "How many tasks were asked for (the `top` query parameter, 1-10).",
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 10
+        },
+        "computed_at": {
+          "description": "When the report was computed.",
+          "type": "string",
+          "pattern": "^(?:[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z)$(?!\\n)"
+        },
+        "window_start": {
+          "description": "The window's start (exclusive): 24 hours before its end.",
+          "type": "string",
+          "pattern": "^(?:[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z)$(?!\\n)"
+        },
+        "window_end": {
+          "description": "The window's end (inclusive): computed_at.",
+          "type": "string",
+          "pattern": "^(?:[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z)$(?!\\n)"
+        },
+        "new_count": {
+          "description": "Summaries of mail that arrived in the 24 h window (window_start, window_end]. Added 2026-09-30; absent from reports stored before.",
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1000000
+        },
+        "carryover_count": {
+          "description": "Older mail tasks (up to 14 days, at most 30) that the day's Todoist snapshot still lists as open, shown to the model as \"[N 天前] summary\"; 0 when no usable snapshot existed, and then the report is exactly the 24 h one. Added 2026-09-30; absent from reports stored before.",
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1000000
         }
-      }
-    },
-    "model": {"description": "Gemini model name; empty when no model was called.", "type": "string"},
-    "task_count": {"description": "Summaries the model saw: new_count + carryover_count (JSON Schema cannot express the sum).", "type": "integer", "minimum": 0, "maximum": 1000000},
-    "new_count": {"description": "Summaries of mail that arrived in the 24 h window (window_start, window_end]. Added 2026-09-30; absent from reports stored before.", "type": "integer", "minimum": 0, "maximum": 1000000},
-    "carryover_count": {"description": "Older mail tasks (up to 14 days, at most 30) that the day's Todoist snapshot still lists as open, shown to the model as \"[N 天前] summary\"; 0 when no usable snapshot existed, and then the report is exactly the 24 h one. Added 2026-09-30; absent from reports stored before.", "type": "integer", "minimum": 0, "maximum": 1000000},
-    "status": {
-      "description": "The newsletter endpoint sends only ok and empty_window; model_output_invalid appears only in stored copies the owner API lists. stale is kept for compatibility and is no longer sent: without a report computed since the latest precompute time, the endpoint answers 503.",
-      "enum": ["ok", "empty_window", "model_output_invalid", "stale"]
-    },
-    "top_n": {"type": "integer", "minimum": 1, "maximum": 10},
-    "computed_at": {
-      "description": "UTC RFC 3339 with whole seconds, like every timestamp here.",
-      "type": "string",
-      "format": "date-time",
-      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$"
-    },
-    "window_start": {"type": "string", "format": "date-time", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$"},
-    "window_end": {"type": "string", "format": "date-time", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$"}
-  },
-  "allOf": [
-    {
-      "if": {"properties": {"task_count": {"const": 0}}},
-      "then": {"properties": {"tasks": {"maxItems": 0}}}
+      },
+      "additionalProperties": false
     },
     {
-      "if": {"properties": {"status": {"const": "ok"}}},
-      "then": {"properties": {"task_count": {"minimum": 1}}}
+      "type": "object",
+      "required": [
+        "tasks",
+        "model",
+        "task_count",
+        "status",
+        "top_n",
+        "computed_at",
+        "window_start",
+        "window_end"
+      ],
+      "properties": {
+        "tasks": {
+          "description": "Exactly what the Worker accepted from Gemini (JSON output constrained by the responseSchema from core/report_schema.py), ordered by rank. At most top_n items with ranks 1..top_n; fewer, even none, is valid and never padded. None when the window was empty or the model's output could not be used.",
+          "type": "array",
+          "maxItems": 0,
+          "items": {
+            "type": "object",
+            "required": [
+              "rank",
+              "title",
+              "reason"
+            ],
+            "properties": {
+              "rank": {
+                "description": "Its rank, 1 first.",
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 10
+              },
+              "title": {
+                "description": "Not blank; no control characters other than tab, line feed and carriage return.",
+                "type": "string",
+                "maxLength": 200,
+                "pattern": "^(?:[\t\n\r \u0085\u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000]*[^\u0000-\b\u000b\f\u000e-\u001f\u007f\t\n\r \u0085\u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000][^\u0000-\b\u000b\f\u000e-\u001f\u007f]*)$(?!\\n)"
+              },
+              "reason": {
+                "description": "Why it matters. Same rules as title.",
+                "type": "string",
+                "maxLength": 4000,
+                "pattern": "^(?:[\t\n\r \u0085\u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000]*[^\u0000-\b\u000b\f\u000e-\u001f\u007f\t\n\r \u0085\u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000][^\u0000-\b\u000b\f\u000e-\u001f\u007f]*)$(?!\\n)"
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "model": {
+          "description": "Gemini model name; empty when no model was called.",
+          "type": "string"
+        },
+        "task_count": {
+          "description": "Summaries the model saw: new_count + carryover_count (a rule cannot express the sum). At least one when ok, none when the window was empty.",
+          "const": 0
+        },
+        "status": {
+          "description": "The newsletter endpoint sends only ok and empty_window; model_output_invalid appears only in stored copies the owner API lists.",
+          "const": "empty_window"
+        },
+        "top_n": {
+          "description": "How many tasks were asked for (the `top` query parameter, 1-10).",
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 10
+        },
+        "computed_at": {
+          "description": "When the report was computed.",
+          "type": "string",
+          "pattern": "^(?:[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z)$(?!\\n)"
+        },
+        "window_start": {
+          "description": "The window's start (exclusive): 24 hours before its end.",
+          "type": "string",
+          "pattern": "^(?:[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z)$(?!\\n)"
+        },
+        "window_end": {
+          "description": "The window's end (inclusive): computed_at.",
+          "type": "string",
+          "pattern": "^(?:[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z)$(?!\\n)"
+        },
+        "new_count": {
+          "description": "Summaries of mail that arrived in the 24 h window (window_start, window_end]. Added 2026-09-30; absent from reports stored before.",
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1000000
+        },
+        "carryover_count": {
+          "description": "Older mail tasks (up to 14 days, at most 30) that the day's Todoist snapshot still lists as open, shown to the model as \"[N 天前] summary\"; 0 when no usable snapshot existed, and then the report is exactly the 24 h one. Added 2026-09-30; absent from reports stored before.",
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1000000
+        }
+      },
+      "additionalProperties": false
     },
     {
-      "if": {"properties": {"status": {"const": "empty_window"}}},
-      "then": {"properties": {"task_count": {"const": 0}}}
+      "type": "object",
+      "required": [
+        "tasks",
+        "model",
+        "task_count",
+        "status",
+        "top_n",
+        "computed_at",
+        "window_start",
+        "window_end"
+      ],
+      "properties": {
+        "tasks": {
+          "description": "Exactly what the Worker accepted from Gemini (JSON output constrained by the responseSchema from core/report_schema.py), ordered by rank. At most top_n items with ranks 1..top_n; fewer, even none, is valid and never padded. None when the window was empty or the model's output could not be used.",
+          "type": "array",
+          "maxItems": 0,
+          "items": {
+            "type": "object",
+            "required": [
+              "rank",
+              "title",
+              "reason"
+            ],
+            "properties": {
+              "rank": {
+                "description": "Its rank, 1 first.",
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 10
+              },
+              "title": {
+                "description": "Not blank; no control characters other than tab, line feed and carriage return.",
+                "type": "string",
+                "maxLength": 200,
+                "pattern": "^(?:[\t\n\r \u0085\u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000]*[^\u0000-\b\u000b\f\u000e-\u001f\u007f\t\n\r \u0085\u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000][^\u0000-\b\u000b\f\u000e-\u001f\u007f]*)$(?!\\n)"
+              },
+              "reason": {
+                "description": "Why it matters. Same rules as title.",
+                "type": "string",
+                "maxLength": 4000,
+                "pattern": "^(?:[\t\n\r \u0085\u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000]*[^\u0000-\b\u000b\f\u000e-\u001f\u007f\t\n\r \u0085\u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000][^\u0000-\b\u000b\f\u000e-\u001f\u007f]*)$(?!\\n)"
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "model": {
+          "description": "Gemini model name; empty when no model was called.",
+          "type": "string"
+        },
+        "task_count": {
+          "description": "Summaries the model saw: new_count + carryover_count (a rule cannot express the sum). At least one when ok, none when the window was empty.",
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1000000
+        },
+        "status": {
+          "description": "The newsletter endpoint sends only ok and empty_window; model_output_invalid appears only in stored copies the owner API lists.",
+          "const": "model_output_invalid"
+        },
+        "top_n": {
+          "description": "How many tasks were asked for (the `top` query parameter, 1-10).",
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 10
+        },
+        "computed_at": {
+          "description": "When the report was computed.",
+          "type": "string",
+          "pattern": "^(?:[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z)$(?!\\n)"
+        },
+        "window_start": {
+          "description": "The window's start (exclusive): 24 hours before its end.",
+          "type": "string",
+          "pattern": "^(?:[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z)$(?!\\n)"
+        },
+        "window_end": {
+          "description": "The window's end (inclusive): computed_at.",
+          "type": "string",
+          "pattern": "^(?:[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z)$(?!\\n)"
+        },
+        "new_count": {
+          "description": "Summaries of mail that arrived in the 24 h window (window_start, window_end]. Added 2026-09-30; absent from reports stored before.",
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1000000
+        },
+        "carryover_count": {
+          "description": "Older mail tasks (up to 14 days, at most 30) that the day's Todoist snapshot still lists as open, shown to the model as \"[N 天前] summary\"; 0 when no usable snapshot existed, and then the report is exactly the 24 h one. Added 2026-09-30; absent from reports stored before.",
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1000000
+        }
+      },
+      "additionalProperties": false
     },
     {
-      "if": {"properties": {"status": {"const": "model_output_invalid"}}},
-      "then": {"properties": {"tasks": {"maxItems": 0}}}
+      "type": "object",
+      "required": [
+        "tasks",
+        "model",
+        "task_count",
+        "status",
+        "top_n",
+        "computed_at",
+        "window_start",
+        "window_end"
+      ],
+      "properties": {
+        "tasks": {
+          "description": "Exactly what the Worker accepted from Gemini (JSON output constrained by the responseSchema from core/report_schema.py), ordered by rank. At most top_n items with ranks 1..top_n; fewer, even none, is valid and never padded. None when the window was empty or the model's output could not be used.",
+          "type": "array",
+          "maxItems": 10,
+          "items": {
+            "type": "object",
+            "required": [
+              "rank",
+              "title",
+              "reason"
+            ],
+            "properties": {
+              "rank": {
+                "description": "Its rank, 1 first.",
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 10
+              },
+              "title": {
+                "description": "Not blank; no control characters other than tab, line feed and carriage return.",
+                "type": "string",
+                "maxLength": 200,
+                "pattern": "^(?:[\t\n\r \u0085\u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000]*[^\u0000-\b\u000b\f\u000e-\u001f\u007f\t\n\r \u0085\u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000][^\u0000-\b\u000b\f\u000e-\u001f\u007f]*)$(?!\\n)"
+              },
+              "reason": {
+                "description": "Why it matters. Same rules as title.",
+                "type": "string",
+                "maxLength": 4000,
+                "pattern": "^(?:[\t\n\r \u0085\u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000]*[^\u0000-\b\u000b\f\u000e-\u001f\u007f\t\n\r \u0085\u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000][^\u0000-\b\u000b\f\u000e-\u001f\u007f]*)$(?!\\n)"
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "model": {
+          "description": "Gemini model name; empty when no model was called.",
+          "type": "string"
+        },
+        "task_count": {
+          "description": "Summaries the model saw: new_count + carryover_count (a rule cannot express the sum). At least one when ok, none when the window was empty.",
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1000000
+        },
+        "status": {
+          "description": "The newsletter endpoint sends only ok and empty_window; model_output_invalid appears only in stored copies the owner API lists.",
+          "const": "stale"
+        },
+        "top_n": {
+          "description": "How many tasks were asked for (the `top` query parameter, 1-10).",
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 10
+        },
+        "computed_at": {
+          "description": "When the report was computed.",
+          "type": "string",
+          "pattern": "^(?:[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z)$(?!\\n)"
+        },
+        "window_start": {
+          "description": "The window's start (exclusive): 24 hours before its end.",
+          "type": "string",
+          "pattern": "^(?:[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z)$(?!\\n)"
+        },
+        "window_end": {
+          "description": "The window's end (inclusive): computed_at.",
+          "type": "string",
+          "pattern": "^(?:[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z)$(?!\\n)"
+        },
+        "new_count": {
+          "description": "Summaries of mail that arrived in the 24 h window (window_start, window_end]. Added 2026-09-30; absent from reports stored before.",
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1000000
+        },
+        "carryover_count": {
+          "description": "Older mail tasks (up to 14 days, at most 30) that the day's Todoist snapshot still lists as open, shown to the model as \"[N 天前] summary\"; 0 when no usable snapshot existed, and then the report is exactly the 24 h one. Added 2026-09-30; absent from reports stored before.",
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1000000
+        }
+      },
+      "additionalProperties": false
     }
   ]
 }

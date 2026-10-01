@@ -2,6 +2,10 @@
 
 Both schemas encode the newsletter's acceptance rules, so everything the Worker
 may emit must validate; they are also tied to the constants in core/report_schema.py.
+They are generated from proto/todofy/report/v1/report.proto (proto/tools/gen_schema.py):
+a union by status, one ``oneOf`` branch per status with the bounds that status adds.
+tests/unit/legacy/ keeps the hand-written schemas they replaced, and every document
+here gets the same verdict from both (test_report_schema_legacy.py).
 """
 
 import json
@@ -38,7 +42,18 @@ def load(name: str) -> dict[str, Any]:
 
 SUMMARY = load("summary-v1.schema.json")
 RECOMMENDATION = load("recommendation-v1.schema.json")
-TASKS = RECOMMENDATION["properties"]["tasks"]
+
+
+def branch(schema: dict[str, Any], status: str) -> dict[str, Any]:
+    """The ``oneOf`` branch of a report with this status."""
+    return next(b for b in schema["oneOf"] if b["properties"]["status"]["const"] == status)
+
+
+def statuses(schema: dict[str, Any]) -> list[str]:
+    return [b["properties"]["status"]["const"] for b in schema["oneOf"]]
+
+
+TASKS = branch(RECOMMENDATION, "ok")["properties"]["tasks"]
 TASK = TASKS["items"]
 # The Gemini output the Worker accepts is exactly the tasks array it serves.
 MODEL_OUTPUT = {"$schema": RECOMMENDATION["$schema"], **TASKS}
@@ -46,11 +61,6 @@ MODEL_OUTPUT = {"$schema": RECOMMENDATION["$schema"], **TASKS}
 
 def errors(schema: dict[str, Any], instance: Any) -> list[str]:
     return [error.message for error in jsonschema.Draft202012Validator(schema).iter_errors(instance)]
-
-
-def conditional(schema: dict[str, Any], field: str, value: Any) -> dict[str, Any]:
-    """The ``then`` branch of the allOf rule ``if <field> == <value>``."""
-    return next(rule["then"] for rule in schema["allOf"] if rule["if"]["properties"].get(field) == {"const": value})
 
 
 def summary(**fields: Any) -> dict[str, Any]:
@@ -84,33 +94,48 @@ def test_schema_is_valid_draft_2020_12(schema):
 
 
 def test_constants_match_core():
-    assert SUMMARY["properties"]["time_window_hours"]["const"] == WINDOW_HOURS
-    assert conditional(SUMMARY, "status", "empty_window")["properties"]["summary"]["const"] == EMPTY_WINDOW_SUMMARY
+    for summary_branch in SUMMARY["oneOf"]:
+        assert summary_branch["properties"]["time_window_hours"]["const"] == WINDOW_HOURS
+    assert branch(SUMMARY, "empty_window")["properties"]["summary"]["const"] == EMPTY_WINDOW_SUMMARY
     assert TASK["properties"]["rank"]["maximum"] == TASKS["maxItems"] == MAX_TOP_N
     assert TASK["properties"]["title"]["maxLength"] == MAX_TITLE_CHARS
     assert TASK["properties"]["reason"]["maxLength"] == MAX_REASON_CHARS
-    assert RECOMMENDATION["properties"]["top_n"]["maximum"] == MAX_TOP_N
+    assert branch(SUMMARY, "ok")["properties"]["summary"]["maxLength"] == MAX_SUMMARY_CHARS
+    for recommendation_branch in RECOMMENDATION["oneOf"]:
+        assert recommendation_branch["properties"]["top_n"]["maximum"] == MAX_TOP_N
 
 
 def test_repeated_rules_stay_identical():
     """The schemas are self-contained, so shared rules are spelled out more than once."""
     stamps = [
-        schema["properties"][field]
+        report_branch["properties"][field]
         for schema in (SUMMARY, RECOMMENDATION)
+        for report_branch in schema["oneOf"]
         for field in ("computed_at", "window_start", "window_end")
     ]
-    assert len({(stamp["type"], stamp["format"], stamp["pattern"]) for stamp in stamps}) == 1
+    assert len({(stamp["type"], stamp["pattern"]) for stamp in stamps}) == 1
     title, reason = TASK["properties"]["title"], TASK["properties"]["reason"]
-    assert title["pattern"] == reason["pattern"] == SUMMARY["properties"]["summary"]["pattern"]
-    assert title["allOf"] == reason["allOf"] == [{"pattern": r"\S"}]
+    assert title["pattern"] == reason["pattern"] == branch(SUMMARY, "ok")["properties"]["summary"]["pattern"]
+
+
+def test_each_status_bounds_what_its_report_holds():
+    """The conditional rules the hand-written schemas held as if/then, one branch per status here."""
+    assert branch(SUMMARY, "ok")["properties"]["task_count"]["minimum"] == 1
+    assert branch(SUMMARY, "empty_window")["properties"]["task_count"] == {
+        "description": branch(SUMMARY, "empty_window")["properties"]["task_count"]["description"],
+        "const": 0,
+    }
+    for status in ("empty_window", "model_output_invalid"):
+        assert branch(RECOMMENDATION, status)["properties"]["tasks"]["maxItems"] == 0
+    for status in ("ok", "stale"):
+        assert branch(RECOMMENDATION, status)["properties"]["task_count"]["minimum"] == 1
+        assert branch(RECOMMENDATION, status)["properties"]["tasks"]["maxItems"] == MAX_TOP_N
 
 
 def test_statuses_cover_the_vocabulary():
-    summary_statuses = set(SUMMARY["properties"]["status"]["enum"])
-    recommendation_statuses = set(RECOMMENDATION["properties"]["status"]["enum"])
-    assert recommendation_statuses == set(ReportStatus)
+    assert set(statuses(RECOMMENDATION)) == set(ReportStatus)
     # A free-text summary cannot be structurally invalid.
-    assert summary_statuses == set(ReportStatus) - {ReportStatus.MODEL_OUTPUT_INVALID}
+    assert set(statuses(SUMMARY)) == set(ReportStatus) - {ReportStatus.MODEL_OUTPUT_INVALID}
 
 
 def test_gemini_response_schema_describes_the_same_items():
@@ -127,8 +152,9 @@ def test_gemini_response_schema_describes_the_same_items():
         summary(summary=EMPTY_WINDOW_SUMMARY, task_count=0, status="empty_window", model=""),
         summary(status="stale"),
         summary(summary=EMPTY_WINDOW_SUMMARY, task_count=0, status="stale", model=""),
+        summary(summary="\u3000报告\u2028两行", task_count=1),
     ],
-    ids=["ok", "empty_window", "stale", "stale_empty"],
+    ids=["ok", "empty_window", "stale", "stale_empty", "unicode_space_first"],
 )
 def test_summary_accepts(response):
     assert errors(SUMMARY, response) == []
@@ -138,6 +164,7 @@ def test_summary_accepts(response):
     "response",
     [
         summary(summary="  \n"),
+        summary(summary="\u3000\u2028\xa0"),
         summary(summary="a\x07b"),
         summary(summary="x" * 12_001),
         summary(time_window_hours=23),
@@ -152,6 +179,7 @@ def test_summary_accepts(response):
     ],
     ids=[
         "blank",
+        "blank_unicode_spaces",
         "control_char",
         "too_long",
         "window",
@@ -271,7 +299,7 @@ def test_what_the_newsletter_rejects_core_rejects_too(items):
 
 def test_summary_text_rule_matches_the_schema():
     """S5 stores a daily summary only if it passes newsletter_text_ok (task_count > 0 needs non-blank)."""
-    assert SUMMARY["properties"]["summary"]["maxLength"] == MAX_SUMMARY_CHARS
+    assert branch(SUMMARY, "ok")["properties"]["summary"]["maxLength"] == MAX_SUMMARY_CHARS
     for text in ("报告\n\t- 一项", " ", "a\x07b", "x" * (MAX_SUMMARY_CHARS + 1)):
         schema_ok = errors(SUMMARY, summary(summary=text)) == []
         assert newsletter_text_ok(text, MAX_SUMMARY_CHARS) == schema_ok, repr(text)
@@ -279,5 +307,6 @@ def test_summary_text_rule_matches_the_schema():
 
 def test_the_new_counts_are_additive():
     """Reports stored before the carryover (without the counts) keep validating: never required."""
-    assert {"new_count", "carryover_count"} <= RECOMMENDATION["properties"].keys()
-    assert not {"new_count", "carryover_count"} & set(RECOMMENDATION["required"])
+    for report_branch in RECOMMENDATION["oneOf"]:
+        assert {"new_count", "carryover_count"} <= report_branch["properties"].keys()
+        assert not {"new_count", "carryover_count"} & set(report_branch["required"])
