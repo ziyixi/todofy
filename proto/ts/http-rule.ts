@@ -8,6 +8,11 @@
  * level), and variables bound to singular scalar or enum fields (nested field paths included). Not
  * supported, so a binding that needs them fails when the routes are built rather than at request time:
  * `custom` patterns, `response_body`, a scalar or repeated body field, and maps or messages in a path.
+ *
+ * AIP-134: a binding whose body is one message field (the resource) and whose input has a field
+ * `update_mask` of type google.protobuf.FieldMask is an update with a field mask (`updateMask`): the
+ * transcoder checks the resource's REQUIRED fields only where the mask names them, and the client sends only
+ * the masked fields in the body.
  */
 import { getOption, ScalarType, type DescField, type DescMessage, type DescMethod, type DescService } from '@bufbuild/protobuf';
 import { http } from './google/api/annotations_pb.ts';
@@ -25,9 +30,13 @@ export interface HttpBinding {
   readonly body: string;
   /** False for additional_bindings: the client always uses the primary one. */
   readonly primary: boolean;
+  /** AIP-134: the input's `update_mask` field when this binding is an update with a field mask. */
+  readonly updateMask: DescField | undefined;
 }
 
 export class HttpRuleError extends Error {}
+
+const FIELD_MASK = 'google.protobuf.FieldMask';
 
 /** The scalar kinds a path variable or query parameter can carry (the wire profile's scalars). */
 const TEXT_SCALARS = new Set<ScalarType>([ScalarType.STRING, ScalarType.BOOL, ScalarType.INT32, ScalarType.UINT32, ScalarType.SINT32, ScalarType.FIXED32, ScalarType.SFIXED32, ScalarType.DOUBLE]);
@@ -82,15 +91,18 @@ function binding(method: DescMethod, rule: HttpRule, primary: boolean): HttpBind
     if (!isTextField(field)) throw new HttpRuleError(`${where}: path variable ${variable.fieldPath.join('.')} must be a singular scalar or enum`);
   }
   const body = rule.body;
+  let updateMask: DescField | undefined;
   if (body !== '') {
     if (httpMethod === 'GET' || httpMethod === 'DELETE') throw new HttpRuleError(`${where}: ${httpMethod} takes no body`);
     if (body !== '*') {
       const field = method.input.fields.find((f) => f.name === body);
       if (field?.fieldKind !== 'message') throw new HttpRuleError(`${where}: body ${body} must be a top-level singular message field`);
       if (template.variables.some((v) => v.fieldPath.length === 1 && v.fieldPath[0] === body)) throw new HttpRuleError(`${where}: the body field is also a path variable`);
+      const mask = method.input.fields.find((f) => f.name === 'update_mask');
+      if (mask?.fieldKind === 'message' && mask.message.typeName === FIELD_MASK) updateMask = mask;
     }
   }
-  return { method, httpMethod, template, body, primary };
+  return { method, httpMethod, template, body, primary, updateMask };
 }
 
 /** Every binding of every rpc of `service` (an rpc without google.api.http has none). */

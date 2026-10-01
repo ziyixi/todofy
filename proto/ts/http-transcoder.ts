@@ -19,18 +19,26 @@
  *    `handle`, for every path;
  * 3. builds the request message: the body (JSON, `application/json`, at most `maxBodyBytes`, UTF-8; `*` or
  *    one field), the path variables and, unless the body is `*`, query parameters (`a.b=1`, repeated keys for
- *    repeated fields); a field set twice (path and body, or a repeated singular query parameter) is
- *    refused. The result is read with the wire profile's strict mode: an unknown field, query parameter or
- *    enum name, a wrong type or a missing REQUIRED field is INVALID_ARGUMENT;
+ *    repeated fields; form encoding, so `+` is a space; a malformed or non-UTF-8 escape is refused, as in a
+ *    path or body); a field set twice (path and body, or a repeated singular query parameter) is refused.
+ *    The result is read with the wire profile's strict mode: an unknown field, query parameter or enum
+ *    name, a wrong type or a missing REQUIRED field is INVALID_ARGUMENT. For an AIP-134 update with a field
+ *    mask (http-rule.ts `updateMask`), the resource's REQUIRED fields bind only where the mask names them
+ *    (an absent mask, an empty one or `*` names every field); a mask path that is malformed, unknown or
+ *    leads through a non-message field is INVALID_ARGUMENT, and one naming an OUTPUT_ONLY field is ignored
+ *    with that field (the handler reads the paths with field-mask.ts `updatePaths`);
  * 4. applies the field annotations every handler would otherwise repeat: a `(google.api.field_info).format =
  *    UUID4` string must be a UUID v4 (it is lower-cased), and OUTPUT_ONLY fields of the input are cleared
  *    (AIP-203: ignored on input);
  * 5. calls the handler and writes its message with the wire profile (200, `application/json`, `no-store`).
  *
- * Errors: a handler throws an RpcError; the transcoder's own are BAD_REQUEST (INVALID_ARGUMENT) and
- * METHOD_NOT_ALLOWED (UNIMPLEMENTED, sent as 405), and an app answers NOT_FOUND for a path no route has.
- * Anything else thrown goes through `onUnexpected` (default INTERNAL). Error messages are fixed English
- * text: nothing from the request (no field name, value or path) is echoed back.
+ * Errors: a handler throws an RpcError; the transcoder's own reasons (TRANSCODER_REASONS, values of
+ * common.errors.v1.CommonReason) are BAD_REQUEST (INVALID_ARGUMENT), METHOD_NOT_ALLOWED (UNIMPLEMENTED, sent
+ * as 405) and INTERNAL, and an app answers NOT_FOUND for a path no route has. Anything else thrown (a bug, an
+ * answer the wire profile refuses to write) goes through `onUnexpected`, default INTERNAL (500): an app maps
+ * only the failures it knows to be transient (a storage call) to UNAVAILABLE itself, so a deterministic bug
+ * is never answered as "repeat the request". Error messages are fixed English text: nothing from the request
+ * (no field name, value or path) is echoed back.
  */
 import {
   getOption,
@@ -45,6 +53,7 @@ import {
 } from '@bufbuild/protobuf';
 import type { GenService, GenServiceMethods } from '@bufbuild/protobuf/codegenv2';
 import { reflect, type ReflectMessage } from '@bufbuild/protobuf/reflect';
+import { FieldMaskError, parseFieldMask, updatePaths } from './field-mask.ts';
 import { field_behavior, FieldBehavior } from './google/api/field_behavior_pb.ts';
 import { field_info, FieldInfo_Format } from './google/api/field_info_pb.ts';
 import { compareSpecificity, matchTemplate, PathTemplateError, sameShape, splitPath, type Bindings } from './http-path.ts';
@@ -71,7 +80,7 @@ export interface TranscoderOptions<C> {
   readonly authorize: (request: Request, route: RouteInfo, context: C) => void | Promise<void>;
   /** The user-facing message of a reason (google.rpc.LocalizedMessage), if the API has one. */
   readonly localize?: (reason: string) => StatusOptions['localized'];
-  /** Maps anything thrown that is not an RpcError (default: INTERNAL). */
+  /** Maps anything thrown that is not an RpcError (default: INTERNAL, a bug; never a retryable reason). */
   readonly onUnexpected?: (error: unknown) => RpcError;
 }
 
@@ -93,7 +102,7 @@ export interface Transcoded {
   readonly error: RpcError | undefined;
 }
 
-/** The transcoder's own reasons (each API's ErrorReason enum lists them, with NOT_FOUND for unknown paths). */
+/** The transcoder's own reasons: values of common.errors.v1.CommonReason, as is NOT_FOUND (unknown paths). */
 export const TRANSCODER_REASONS = {
   badRequest: 'BAD_REQUEST',
   notFound: 'NOT_FOUND',
@@ -108,6 +117,7 @@ const INTEGER = /^-?(0|[1-9][0-9]*)$/;
 const DECIMAL = /^-?(0|[1-9][0-9]*)(\.[0-9]+)?([eE][+-]?[0-9]+)?$/;
 const MEDIA_TYPE = /^application\/json\s*(;\s*charset\s*=\s*"?utf-8"?\s*)?$/i;
 const TIMESTAMP = 'google.protobuf.Timestamp';
+const FIELD_MASK = 'google.protobuf.FieldMask';
 
 function badRequest(message: string): RpcError {
   return new RpcError(Code.INVALID_ARGUMENT, TRANSCODER_REASONS.badRequest, message);
@@ -142,7 +152,7 @@ function planOf(message: DescMessage): InputPlan {
         field.fieldKind === 'message' || (field.fieldKind === 'list' && field.listKind === 'message') || (field.fieldKind === 'map' && field.mapKind === 'message')
           ? field.message
           : undefined;
-      if (target !== undefined && target.typeName !== TIMESTAMP) {
+      if (target !== undefined && target.typeName !== TIMESTAMP && target.typeName !== FIELD_MASK) {
         planOf(target);
         nested.push(field);
       }
@@ -171,7 +181,13 @@ function normalizeInput(r: ReflectMessage): void {
 }
 
 /** How a field (or a repeated field's items) is written in a path or query; undefined when it cannot be. */
-type TextKind = 'enum' | 'timestamp' | ScalarType;
+type TextKind = 'enum' | 'timestamp' | 'fieldmask' | ScalarType;
+
+/** The kind of a message-typed field written as text: Timestamp and FieldMask are strings in the profile. */
+function textMessageKind(message: DescMessage): TextKind | undefined {
+  if (message.typeName === TIMESTAMP) return 'timestamp';
+  return message.typeName === FIELD_MASK ? 'fieldmask' : undefined;
+}
 
 function textKind(field: DescField): TextKind | undefined {
   switch (field.fieldKind) {
@@ -180,10 +196,10 @@ function textKind(field: DescField): TextKind | undefined {
     case 'scalar':
       return isTextField(field) ? field.scalar : undefined;
     case 'message':
-      return field.message.typeName === TIMESTAMP ? 'timestamp' : undefined;
+      return textMessageKind(field.message);
     case 'list':
       if (field.listKind === 'enum') return 'enum';
-      if (field.listKind === 'message') return field.message.typeName === TIMESTAMP ? 'timestamp' : undefined;
+      if (field.listKind === 'message') return textMessageKind(field.message);
       return isTextField({ fieldKind: 'scalar', scalar: field.scalar } as DescField) ? field.scalar : undefined;
     default:
       return undefined;
@@ -195,6 +211,7 @@ function textValue(kind: TextKind, text: string): JsonValue {
   switch (kind) {
     case 'enum':
     case 'timestamp':
+    case 'fieldmask':
     case ScalarType.STRING:
       return text;
     case ScalarType.BOOL:
@@ -232,6 +249,73 @@ function setPath(wire: JsonObject, path: readonly string[], value: JsonValue): v
   const last = path[path.length - 1] ?? '';
   if (Object.hasOwn(node, last) && node[last] !== value) throw badRequest('a field is set twice');
   node[last] = value;
+}
+
+/**
+ * The parameters of a raw query (`URL.search`), in order: `&`-separated, `+` is a space, keys and values
+ * percent-decoded as UTF-8; empty pieces are skipped. Throws BAD_REQUEST for a malformed or non-UTF-8 escape,
+ * which URLSearchParams would turn into U+FFFD (different data) instead.
+ */
+function queryParameters(search: string): [string, string][] {
+  const out: [string, string][] = [];
+  for (const piece of search.replace(/^\?/, '').split('&')) {
+    if (piece === '') continue;
+    const equals = piece.indexOf('=');
+    const [key, value] = equals === -1 ? [piece, ''] : [piece.slice(0, equals), piece.slice(equals + 1)];
+    try {
+      out.push([decodeURIComponent(key.replaceAll('+', ' ')), decodeURIComponent(value.replaceAll('+', ' '))]);
+    } catch {
+      throw badRequest('the query has malformed percent-escapes');
+    }
+  }
+  return out;
+}
+
+/**
+ * The paths of an AIP-134 update's mask (the wire value of `update_mask`) when they name some fields only;
+ * undefined for a full replacement (no mask, an empty one or `*`).
+ */
+function partialPaths(value: JsonValue | undefined): readonly string[] | undefined {
+  if (typeof value !== 'string') return undefined;
+  try {
+    const paths = updatePaths({ paths: parseFieldMask(value) });
+    return paths === '*' ? undefined : paths;
+  } catch (error) {
+    if (error instanceof FieldMaskError) throw badRequest('the update_mask is malformed');
+    throw error;
+  }
+}
+
+/** AIP-134 with a mask: every path names a field of the resource, and each REQUIRED one it names is present. */
+function checkMasked(resource: DescMessage, json: JsonValue | undefined, paths: readonly string[]): void {
+  for (const path of paths) {
+    let desc = resource;
+    let node = json;
+    const names = path.split('.');
+    for (const [i, name] of names.entries()) {
+      const field = desc.fields.find((f) => f.name === name);
+      if (field === undefined) throw badRequest('the update_mask names an unknown field');
+      const value = isObject(node) ? node[name] : undefined;
+      if (i < names.length - 1) {
+        if (field.fieldKind !== 'message') throw badRequest('the update_mask leads through a field that is not a message');
+        desc = field.message;
+        node = value;
+        continue;
+      }
+      if (value === undefined && getOption(field, field_behavior).includes(FieldBehavior.REQUIRED)) {
+        throw badRequest('a REQUIRED field the update_mask names is missing');
+      }
+      // A masked message is replaced whole, so its own REQUIRED fields bind (the first read skipped them).
+      if (value !== undefined && field.fieldKind === 'message' && textMessageKind(field.message) === undefined) {
+        try {
+          fromWire(field.message, value, { strict: true });
+        } catch (error) {
+          if (error instanceof WireJsonError) throw badRequest(`the request is not a valid ${resource.typeName}`);
+          throw error;
+        }
+      }
+    }
+  }
 }
 
 /** The request body's bytes (at most `limit`); null when it is larger. */
@@ -391,12 +475,18 @@ export class HttpTranscoder<S extends GenServiceMethods, C> {
     } else {
       this.#query(route, url, wire, bound);
     }
+    const mask = route.updateMask;
+    const partial = mask === undefined ? undefined : partialPaths(wire[mask.name]);
     let message: Message;
     try {
-      message = fromWire(input, wire, { strict: true }).message;
+      message = fromWire(input, wire, { strict: true, ...(partial === undefined ? {} : { partial: route.body }) }).message;
     } catch (error) {
       if (error instanceof WireJsonError) throw badRequest(`the request is not a valid ${input.typeName}`);
       throw error;
+    }
+    if (partial !== undefined) {
+      const resource = input.fields.find((f) => f.name === route.body);
+      if (resource?.fieldKind === 'message') checkMasked(resource.message, wire[route.body], partial);
     }
     normalizeInput(reflect(input, message as never));
     return message;
@@ -406,7 +496,7 @@ export class HttpTranscoder<S extends GenServiceMethods, C> {
   #query(route: HttpBinding, url: URL, wire: JsonObject, bound: ReadonlySet<string>): void {
     const input = route.method.input;
     const seen = new Set<string>();
-    for (const [key, text] of url.searchParams) {
+    for (const [key, text] of queryParameters(url.search)) {
       const fieldPath = key.split('.');
       let field: DescField;
       try {

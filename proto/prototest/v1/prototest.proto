@@ -3,7 +3,8 @@
 // The messages exercise every field kind of the wire JSON profile (testdata/wire-profile-cases.json) and
 // the service exercises every feature of the HTTP transcoder and client (testdata/http-cases.json): single-
 // and multi-segment variables, `**`, an unnamed wildcard, a nested field path, custom verbs, `body: "*"`
-// and a body field, query parameters of every kind, and an additional binding. Both test suites (TypeScript
+// and a body field, query parameters of every kind, an additional binding and an AIP-134 update with a
+// field mask. Both test suites (TypeScript
 // now, Python when a Python Worker needs a transcoder) run the same JSON cases against these descriptors.
 //
 // The bindings are deliberately varied rather than AIP-shaped, so api-linter does not run on this package
@@ -17,6 +18,7 @@ import "google/api/annotations.proto";
 import "google/api/field_behavior.proto";
 import "google/api/field_info.proto";
 import "google/protobuf/empty.proto";
+import "google/protobuf/field_mask.proto";
 import "google/protobuf/timestamp.proto";
 
 // A library of shelves and books, one binding per transcoder feature.
@@ -72,6 +74,14 @@ service BookService {
   // An unnamed wildcard (matched, bound to nothing) and a plain `{field}` variable.
   rpc CountBooks(CountBooksRequest) returns (CountBooksResponse) {
     option (google.api.http) = {get: "/v1/regions/*/shelves/{shelf}:count"};
+  }
+
+  // An AIP-134 update with a field mask: the resource's REQUIRED fields bind only where the mask names them.
+  rpc UpdateShelf(UpdateShelfRequest) returns (Shelf) {
+    option (google.api.http) = {
+      patch: "/v1/{shelf.name=shelves/*}"
+      body: "shelf"
+    };
   }
 }
 
@@ -141,6 +151,40 @@ message Book {
   repeated Genre genres = 16 [(google.api.field_behavior) = OPTIONAL];
   // Ratings by edition.
   repeated double edition_ratings = 17 [(google.api.field_behavior) = OPTIONAL];
+  // The fields a reader highlights (a FieldMask: one string of comma-separated paths).
+  google.protobuf.FieldMask highlights = 18 [(google.api.field_behavior) = OPTIONAL];
+}
+
+// A shelf, whose editable fields are REQUIRED (UpdateShelf).
+message Shelf {
+  // shelves/{shelf}.
+  string name = 1 [(google.api.field_behavior) = IDENTIFIER];
+  // The theme.
+  string theme = 2 [(google.api.field_behavior) = REQUIRED];
+  // How many books fit.
+  int32 capacity = 3 [(google.api.field_behavior) = REQUIRED];
+  // Who looks after it (its display_name is REQUIRED here: see Curator).
+  Curator curator = 4 [(google.api.field_behavior) = OPTIONAL];
+  // The genre.
+  Genre genre = 5 [(google.api.field_behavior) = REQUIRED];
+  // The number of books on it.
+  int32 book_count = 6 [(google.api.field_behavior) = OUTPUT_ONLY];
+}
+
+// A shelf's curator.
+message Curator {
+  // The name shown.
+  string display_name = 1 [(google.api.field_behavior) = REQUIRED];
+  // The email address.
+  string email = 2 [(google.api.field_behavior) = OPTIONAL];
+}
+
+// Input of UpdateShelf.
+message UpdateShelfRequest {
+  // The shelf (the body); its name comes from the path.
+  Shelf shelf = 1 [(google.api.field_behavior) = REQUIRED];
+  // The fields to replace (a query parameter); absent, empty or `*` replaces every field.
+  google.protobuf.FieldMask update_mask = 2 [(google.api.field_behavior) = OPTIONAL];
 }
 
 // A book whose REQUIRED fields the wire profile always writes (null when unset).

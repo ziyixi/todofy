@@ -5,7 +5,8 @@ the ``[tool.uv] cache-keys`` in pyproject.toml changes. Every build first makes 
 src/ziyixi_proto/ current, then only packages files:
 
 - ``build_wheel`` (``uv sync`` in an app, ``pywrangler sync`` vendoring it into a Python Worker): a
-  wheel with a copy of src/ziyixi_proto, generated modules included.
+  wheel with a copy of src/ziyixi_proto, generated modules included, except the packages only proto/'s own
+  tests use (TEST_ONLY_PACKAGES: the runtimes' fixtures), which never reach a Worker.
 - ``build_editable`` (only for an explicit editable install, ``uv pip install -e proto/python``): a wheel
   with one ``.pth`` file that puts src/ on sys.path.
 
@@ -37,6 +38,9 @@ STAMP = PROTO / ".generated.json"
 TARGETS = (PROTO / "ts", SRC / NAME)
 STAMP_VERSION = 1
 TAG = "py3-none-any"
+# Generated top-level packages that are test fixtures (tools/gen_py.py PYTHON_PACKAGES marks them False):
+# generated for proto/test/python, never put in the wheel.
+TEST_ONLY_PACKAGES = ("prototest",)
 # 1980-01-01, the earliest time a zip entry can carry: the same input gives the same bytes.
 EPOCH = (1980, 1, 1, 0, 0, 0)
 
@@ -122,11 +126,13 @@ def _record_line(path: str, data: bytes) -> str:
     return f"{path},sha256={digest},{len(data)}"
 
 
-def _package_files() -> list[tuple[str, bytes]]:
+def _package_files(src: Path = SRC) -> list[tuple[str, bytes]]:
+    """(wheel path, bytes) of every module the wheel ships: the package without __pycache__ and test fixtures."""
     files = []
-    for path in sorted((SRC / NAME).rglob("*.py")):
-        if "__pycache__" not in path.parts:
-            files.append((path.relative_to(SRC).as_posix(), path.read_bytes()))
+    for path in sorted((src / NAME).rglob("*.py")):
+        parts = path.relative_to(src / NAME).parts
+        if "__pycache__" not in parts and parts[0] not in TEST_ONLY_PACKAGES:
+            files.append((path.relative_to(src).as_posix(), path.read_bytes()))
     return files
 
 

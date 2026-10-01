@@ -4,7 +4,8 @@
  */
 import { describe, expect, test, vi } from 'vitest';
 import { create } from '@bufbuild/protobuf';
-import { BookSchema, BookService, Genre, ListBooksResponseSchema } from '../ts/prototest/v1/prototest_pb.ts';
+import { LabUiService } from '../ts/lab/ui/v1/lab_ui_service_pb.ts';
+import { BookSchema, BookService, Genre, ListBooksResponseSchema, ShelfSchema } from '../ts/prototest/v1/prototest_pb.ts';
 import { createHttpClient, HttpEncodeError, HttpResponseError, RpcStatusError, type HttpCall } from '../ts/http-client.ts';
 import { HttpTranscoder, type ServiceHandlers, type ShapeOf } from '../ts/http-transcoder.ts';
 import { Code, errorDetail, readDetail, RpcError } from '../ts/rpc-status.ts';
@@ -76,6 +77,41 @@ describe('the typed client', () => {
     await expect(client.getBook({ name: 'books/b1' })).rejects.toBeInstanceOf(HttpEncodeError);
     await expect(client.countBooks({ shelf: 's1' })).rejects.toBeInstanceOf(HttpEncodeError);
     expect(send).not.toHaveBeenCalled();
+  });
+
+  test('a dot segment in a resource name throws before anything is sent', async () => {
+    const send = vi.fn();
+    const lab = createHttpClient(LabUiService, send);
+    await expect(lab.getDeckSummary({ name: 'decks/../summary' })).rejects.toBeInstanceOf(HttpEncodeError);
+    await expect(lab.getDeck({ name: 'decks/..' })).rejects.toBeInstanceOf(HttpEncodeError);
+    await expect(lab.getDeck({ name: 'decks/.' })).rejects.toBeInstanceOf(HttpEncodeError);
+    await expect(lab.deleteLikedPaper({ name: 'likedPapers/..' })).rejects.toBeInstanceOf(HttpEncodeError);
+    expect(send).not.toHaveBeenCalled();
+  });
+
+  test('a value the wire profile cannot write throws HttpEncodeError before anything is sent', async () => {
+    const send = vi.fn();
+    const client = createHttpClient(BookService, send);
+    await expect(client.listBooks({ parent: 'shelves/s1', pageSize: 2 ** 31 })).rejects.toBeInstanceOf(HttpEncodeError);
+    await expect(client.updateShelf({ shelf: { name: 'shelves/s1' }, updateMask: { paths: ['Theme'] } })).rejects.toBeInstanceOf(HttpEncodeError);
+    await expect(client.updateShelf({ shelf: { name: 'shelves/s1' }, updateMask: { paths: ['*', 'theme'] } })).rejects.toBeInstanceOf(HttpEncodeError);
+    expect(send).not.toHaveBeenCalled();
+  });
+
+  test('an update with a mask sends only the masked fields, and the server reads them alone', async () => {
+    const calls: HttpCall[] = [];
+    const seen: unknown[] = [];
+    const api = server({
+      updateShelf: (request) => {
+        seen.push({ paths: request.updateMask?.paths, theme: request.shelf?.theme, capacity: request.shelf?.capacity, genre: request.shelf?.genre });
+        return Promise.resolve(request.shelf ?? create(ShelfSchema));
+      },
+    });
+    const client = createHttpClient(BookService, inProcess(api, calls));
+    // capacity and genre are set here but not masked: they are not sent, so the REQUIRED genre is not sent as null.
+    await client.updateShelf({ shelf: { name: 'shelves/s1', theme: 'T', capacity: 5 }, updateMask: { paths: ['theme'] } });
+    expect(calls.map((c) => [c.url, c.body])).toEqual([['/v1/shelves/s1?update_mask=theme', '{"theme":"T"}']]);
+    expect(seen).toEqual([{ paths: ['theme'], theme: 'T', capacity: 0, genre: Genre.UNSPECIFIED }]);
   });
 
   test('a failing transport rejects with its own error', async () => {

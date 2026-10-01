@@ -10,8 +10,10 @@
  * are expanded (http-path.ts encodes them as http.proto asks) and taken out of the message; the body is the
  * rest of the message (`body: "*"`) or one field; the remaining set fields go to the query string (GET,
  * DELETE and body-field methods), in field-number order, nested fields as `a.b`, repeated fields as repeated
- * keys. A map, or a message other than Timestamp, cannot be a query parameter: such a request throws before
- * anything is sent.
+ * keys. A map, or a message other than Timestamp and FieldMask, cannot be a query parameter: such a request
+ * throws before anything is sent. An AIP-134 update with a field mask (http-rule.ts `updateMask`) sends only
+ * the fields its mask names in the body (all of them without a mask, or with `*`), so a REQUIRED field the
+ * mask leaves out is not sent as null.
  *
  * A 2xx response is read leniently (an output: unknown fields and enum names are skipped and reported to
  * `onUnrecognized`). Any other response throws RpcStatusError with its google.rpc.Status, or HttpResponseError
@@ -20,10 +22,11 @@
  */
 import { create, type DescField, type DescMessage, type DescMethod, type JsonObject, type JsonValue, type Message, type MessageInitShape, type MessageShape } from '@bufbuild/protobuf';
 import type { GenService, GenServiceMethods } from '@bufbuild/protobuf/codegenv2';
+import { FieldMaskError, updatePaths } from './field-mask.ts';
 import { expandTemplate, PathTemplateError } from './http-path.ts';
 import { httpBindings, type HttpBinding, type HttpMethod } from './http-rule.ts';
 import { parseStatus, type Status } from './rpc-status.ts';
-import { fromWire, toWire } from './wire-json.ts';
+import { fromWire, toWire, WireJsonError } from './wire-json.ts';
 
 /** The HTTP request of one call, before transport. */
 export interface HttpRequestParts {
@@ -74,6 +77,7 @@ export class HttpResponseError extends Error {
 export class HttpEncodeError extends Error {}
 
 const TIMESTAMP = 'google.protobuf.Timestamp';
+const FIELD_MASK = 'google.protobuf.FieldMask';
 
 function isObject(value: JsonValue | undefined): value is JsonObject {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -124,18 +128,61 @@ function queryKind(field: DescField): 'text' | 'message' | undefined {
     case 'enum':
       return 'text';
     case 'message':
-      return field.message.typeName === TIMESTAMP ? 'text' : 'message';
+      return field.message.typeName === TIMESTAMP || field.message.typeName === FIELD_MASK ? 'text' : 'message';
     case 'list':
-      return field.listKind !== 'message' || field.message.typeName === TIMESTAMP ? 'text' : undefined;
+      return field.listKind !== 'message' || field.message.typeName === TIMESTAMP || field.message.typeName === FIELD_MASK ? 'text' : undefined;
     default:
       return undefined;
+  }
+}
+
+/** The masked paths of a wire object: a new object with only the values at `paths` (dotted field names). */
+function pick(wire: JsonObject, paths: readonly string[]): JsonObject {
+  const out: JsonObject = {};
+  for (const path of paths) {
+    const names = path.split('.');
+    let from: JsonValue | undefined = wire;
+    let to = out;
+    for (const [i, name] of names.entries()) {
+      if (!isObject(from)) break;
+      const value: JsonValue | undefined = from[name];
+      if (value === undefined) break;
+      if (i === names.length - 1) {
+        to[name] = value;
+        break;
+      }
+      const next = isObject(to[name]) ? to[name] : {};
+      to[name] = next;
+      to = next;
+      from = value;
+    }
+  }
+  return out;
+}
+
+/** The fields of an update's body that its mask names ('*': all of them). */
+function maskedPaths(binding: HttpBinding, message: Message): '*' | readonly string[] {
+  const field = binding.updateMask;
+  if (field === undefined) return '*';
+  try {
+    return updatePaths((message as unknown as Record<string, { paths: string[] } | undefined>)[field.localName]);
+  } catch (error) {
+    if (error instanceof FieldMaskError) throw new HttpEncodeError(`${field.name}: ${error.message}`);
+    throw error;
   }
 }
 
 /** The HTTP request of `message` by `binding` (the rpc's primary binding unless a test passes another). */
 export function encodeHttpRequest(binding: HttpBinding, message: Message): HttpRequestParts {
   const input = binding.method.input;
-  const wire = toWire(input, message as never);
+  let wire: JsonObject;
+  try {
+    wire = toWire(input, message as never);
+  } catch (error) {
+    // A value the wire profile cannot write (an int32 out of range, a malformed field mask): nothing is sent.
+    if (error instanceof WireJsonError) throw new HttpEncodeError(error.message);
+    throw error;
+  }
   const values = new Map<string, string>();
   for (const variable of binding.template.variables) {
     const path = variable.fieldPath.join('.');
@@ -153,6 +200,8 @@ export function encodeHttpRequest(binding: HttpBinding, message: Message): HttpR
     body = wire;
   } else if (binding.body !== '') {
     body = take(wire, [binding.body]) ?? {};
+    const paths = maskedPaths(binding, message);
+    if (paths !== '*' && isObject(body)) body = pick(body, paths);
   }
   const query: [string, string][] = [];
   if (binding.body !== '*') flatten(input, wire, '', query);

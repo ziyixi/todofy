@@ -12,6 +12,9 @@ runtime ``ziyixi_proto.wire_json`` reads and writes. OUT_DIR is the ``ziyixi_pro
 An enum nested in a message is a top-level ``IntEnum`` named ``<Message>_<Enum>``, as protobuf-es names
 it (``Send_State``); a map field is a ``dict``. Services are not generated (the profile is about messages).
 
+Only the packages a Python user imports are generated (PYTHON_PACKAGES): a package that only TypeScript
+apps use (an app's UI API) may use what this profile lacks without stopping generation for every app.
+
 Why not protoc's Python output: todofy-core runs stdlib-only on Pyodide, and the contracts' wire format is
 JSON, not protobuf binary. Only the field kinds the contracts use are supported; anything else stops
 generation with an error, so a new kind cannot slip through. The output depends only on the image, so
@@ -37,6 +40,12 @@ SCALARS = {
     "TYPE_DOUBLE": ("float", "0.0", "double"),
 }
 TIMESTAMP = ".google.protobuf.Timestamp"
+FIELD_MASK = ".google.protobuf.FieldMask"
+# The proto packages generated for Python: True when the package ships in the wheel (todofy-core imports
+# todofy.taskintent.v1 and pywrangler vendors the wheel), False when only proto/'s own Python tests use it
+# (python/build_backend.py leaves it out of the wheel: TEST_ONLY_PACKAGES). Every other package is TypeScript
+# only. .github/scripts/test_proto.py keeps this, the wheel and the apps' imports in step.
+PYTHON_PACKAGES = {"todofy.taskintent.v1": True, "prototest.v1": False}
 REQUIRED_OPTION = "[google.api.field_behavior]"
 
 
@@ -128,6 +137,8 @@ def generate_file(file: dict[str, Any], types: dict[str, tuple[str, str]]) -> st
             return target, "enum", target
         if field["type"] == "TYPE_MESSAGE" and field["typeName"] == TIMESTAMP:
             return "str", "timestamp", "None"
+        if field["type"] == "TYPE_MESSAGE" and field["typeName"] == FIELD_MASK:
+            return "tuple[str, ...]", "fieldmask", "None"
         if field["type"] == "TYPE_MESSAGE":
             target = ref(field["typeName"], where)
             return target, "message", target
@@ -160,8 +171,8 @@ def generate_file(file: dict[str, Any], types: dict[str, tuple[str, str]]) -> st
                 if key_field["type"] != "TYPE_STRING":
                     raise GenerateError(f"{where}: only string map keys are in the profile")
                 value_annotation, value, target = value_kind(value_field, where)
-                if value == "timestamp":
-                    raise GenerateError(f"{where}: Timestamp map values are not in the profile")
+                if value in ("timestamp", "fieldmask"):
+                    raise GenerateError(f"{where}: Timestamp and FieldMask map values are not in the profile")
                 body.append(
                     f"    {field['name']}: dict[str, {value_annotation}] = dataclasses.field(default_factory=dict)"
                 )
@@ -171,7 +182,7 @@ def generate_file(file: dict[str, Any], types: dict[str, tuple[str, str]]) -> st
                 )
                 continue
             annotation, kind, target = value_kind(field, where)
-            if kind in ("timestamp", "message"):
+            if kind in ("timestamp", "fieldmask", "message"):
                 default, optional = "None", True  # a message field has explicit presence
             elif kind == "enum":
                 default = f"{annotation}.UNSPECIFIED"
@@ -214,8 +225,14 @@ def generate_file(file: dict[str, Any], types: dict[str, tuple[str, str]]) -> st
     return "\n".join(lines)
 
 
+def python_files(image: dict[str, Any]) -> dict[str, Any]:
+    """The image restricted to the files of PYTHON_PACKAGES (a reference to another package fails later)."""
+    return {**image, "file": [file for file in image["file"] if file.get("package") in PYTHON_PACKAGES]}
+
+
 def generate(image: dict[str, Any]) -> dict[str, str]:
-    """Relative output path -> source, for every file of the image and every package directory."""
+    """Relative output path -> source, for every file of PYTHON_PACKAGES and every package directory."""
+    image = python_files(image)
     types = index_types(image)
     out: dict[str, str] = {}
     for file in sorted(image["file"], key=lambda f: f["name"]):

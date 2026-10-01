@@ -1,0 +1,49 @@
+// The error reasons every HTTP API of this repository shares (AIP-193; proto/README.md, HTTP APIs).
+//
+// An API's errors are google.rpc.Status bodies with one google.rpc.ErrorInfo, whose `reason` is a value name
+// without its enum prefix. The reasons here are written by code every app shares, not by the app's own
+// handlers alone: the HTTP transcoder (proto/ts/http-transcoder.ts), the authentication in front of it
+// (packages/edge-auth: Cloudflare Access and the CSRF check) and the failures any handler can meet (a bug, a
+// storage or Durable Object call that failed). Each API's own `ErrorReason` enum (e.g. lab.ui.v1) lists only
+// its domain reasons, and a client reads `reason` against both enums. Both share one ErrorInfo.domain, the
+// API's, so a reason name is never reused with another meaning in an app's enum.
+
+syntax = "proto3";
+
+package common.errors.v1;
+
+option java_multiple_files = true;
+option java_outer_classname = "ErrorsProto";
+option java_package = "science.ziyixi.common.errors.v1";
+
+// A reason every API may answer: ErrorInfo.reason is the value's name without `COMMON_REASON_`. The HTTP
+// status follows the google.rpc.Code listed for each value (the AIP-193 mapping), except where noted.
+enum CommonReason {
+  // Never sent.
+  COMMON_REASON_UNSPECIFIED = 0;
+  // INVALID_ARGUMENT (400): the request does not decode (strict wire profile: an unknown field, query
+  // parameter or enum name, a wrong type, a missing REQUIRED field, a body that is too large) or breaks a
+  // value rule. Written by the transcoder and by handlers.
+  COMMON_REASON_BAD_REQUEST = 1;
+  // NOT_FOUND (404): no route has this path (the app writes it when the transcoder finds no binding), or
+  // the named resource does not exist (AIP-135: also for a Delete of a resource that is gone).
+  COMMON_REASON_NOT_FOUND = 2;
+  // UNIMPLEMENTED, sent as HTTP 405 with an Allow header: the path exists, the method does not. Written by
+  // the transcoder.
+  COMMON_REASON_METHOD_NOT_ALLOWED = 3;
+  // INTERNAL (500): a bug. Anything a handler throws that is not an RpcError, and an answer the wire
+  // profile refuses to write. Repeating the request does not help; clients never retry it automatically.
+  COMMON_REASON_INTERNAL = 4;
+  // UNAVAILABLE (503): a dependency the request needs (the database, a Durable Object, the identity
+  // provider's keys) failed or did not answer. Repeating the request (with the same request_id) is safe.
+  COMMON_REASON_UNAVAILABLE = 5;
+  // UNAUTHENTICATED (401): no valid Cloudflare Access login for the owner.
+  COMMON_REASON_UNAUTHORIZED = 6;
+  // PERMISSION_DENIED (403): a mutation without a valid CSRF token or same-origin Origin. The client
+  // fetches a new token and repeats the request once.
+  COMMON_REASON_CSRF_FAILED = 7;
+  // UNAVAILABLE (503): the Worker's Access settings are incomplete, or a dev bypass was refused.
+  COMMON_REASON_ACCESS_NOT_CONFIGURED = 8;
+  // UNAVAILABLE (503): a required secret (the CSRF signing key) is missing.
+  COMMON_REASON_NOT_CONFIGURED = 9;
+}

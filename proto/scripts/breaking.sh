@@ -1,6 +1,7 @@
 #!/bin/sh
-# Breaking-change gate of proto/ (README.md, Rules): `buf breaking` (FILE) and the wire profile's own rules
-# (tools/profile_breaking.py: REQUIRED and presence) of the working tree against proto/ at BASE.
+# Breaking-change gate of proto/ (README.md, Rules): `buf breaking` (FILE) and the rules buf cannot see
+# (tools/profile_breaking.py: the wire profile's REQUIRED and presence, and the HTTP APIs' bindings, method
+# signatures, resource patterns, OUTPUT_ONLY inputs and formats) of the working tree against proto/ at BASE.
 #
 #   scripts/breaking.sh BASE      (npm run breaking -- BASE; the pinned buf from npm ci in proto/)
 #
@@ -38,8 +39,8 @@ trap 'rm -rf "$WORK"' EXIT
 git -C "$REPO" archive "$BASE" proto | tar -x -C "$WORK"
 echo "== buf breaking (FILE) against $BASE"
 "$BUF" breaking --against "$WORK/proto"
-echo "== wire profile rules against $BASE"
+echo "== wire profile and HTTP API rules against $BASE"
 "$BUF" build "$WORK/proto" --exclude-source-info -o "$WORK/base.json#format=json"
 "$BUF" build --exclude-source-info -o "$WORK/head.json#format=json"
-python3 tools/profile_breaking.py "$WORK/base.json" "$WORK/head.json"
+python3 tools/profile_breaking.py "$WORK/base.json" "$WORK/head.json" --config buf.yaml
 echo "proto/: no breaking change against $BASE"

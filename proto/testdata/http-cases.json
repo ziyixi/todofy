@@ -1,5 +1,5 @@
 {
-  "description": "HTTP transcoding cases of the google.api.http runtime (proto/README.md, HTTP APIs), against prototest.v1.BookService. transcode: an HTTP request (method, path, raw query, headers, and a body as json, raw text or base64) and what the transcoder answers: status null for no route, else the HTTP status, the rpc and its decoded input in the wire JSON profile, or the ErrorInfo reason (and the Allow header). The transcoder under test allows every request (authorize is the app's) and reads bodies of at most 1024 bytes. encode: a request message of an rpc (wire JSON) and the HTTP request the client sends, or error. Every implementation (TypeScript now, Python later) runs this file.",
+  "description": "HTTP transcoding cases of the google.api.http runtime (proto/README.md, HTTP APIs), against prototest.v1.BookService. transcode: an HTTP request (method, path, raw query, headers, and a body as json, raw text or base64) and what the transcoder answers: status null for no route, else the HTTP status, the rpc and its decoded input in the wire JSON profile, or the ErrorInfo reason (and the Allow header). The transcoder under test allows every request (authorize is the app's) and reads bodies of at most 1024 bytes. encode: a request message of an rpc (wire JSON; the resource of an update with a field mask is read without its REQUIRED check, as the transcoder reads it) and the HTTP request the client sends, or error. Every implementation (TypeScript now, Python later) runs this file.",
   "service": "prototest.v1.BookService",
   "max_body_bytes": 1024,
   "transcode": [
@@ -713,6 +713,347 @@
         "status": 400,
         "reason": "BAD_REQUEST"
       }
+    },
+    {
+      "name": "a query value with an escape that is not UTF-8 is refused",
+      "request": {
+        "method": "GET",
+        "path": "/v1/shelves/s1/books/b1",
+        "query": "view=%FF"
+      },
+      "expect": {
+        "status": 400,
+        "reason": "BAD_REQUEST"
+      }
+    },
+    {
+      "name": "a query value with a truncated UTF-8 escape is refused",
+      "request": {
+        "method": "GET",
+        "path": "/v1/shelves/s1/books/b1",
+        "query": "view=%E4%B8"
+      },
+      "expect": {
+        "status": 400,
+        "reason": "BAD_REQUEST"
+      }
+    },
+    {
+      "name": "a query value with a malformed escape is refused",
+      "request": {
+        "method": "GET",
+        "path": "/v1/shelves/s1/books/b1",
+        "query": "view=%ZZ"
+      },
+      "expect": {
+        "status": 400,
+        "reason": "BAD_REQUEST"
+      }
+    },
+    {
+      "name": "a query key with a malformed escape is refused",
+      "request": {
+        "method": "GET",
+        "path": "/v1/shelves/s1/books/b1",
+        "query": "vi%FFew=full"
+      },
+      "expect": {
+        "status": 400,
+        "reason": "BAD_REQUEST"
+      }
+    },
+    {
+      "name": "query escapes decode as UTF-8 and + is a space",
+      "request": {
+        "method": "GET",
+        "path": "/v1/shelves/s1/books/b1",
+        "query": "view=%E4%B9%A6+x%2By"
+      },
+      "expect": {
+        "status": 200,
+        "rpc": "GetBook",
+        "input": {
+          "name": "shelves/s1/books/b1",
+          "view": "书 x+y"
+        }
+      }
+    },
+    {
+      "name": "an update without a mask replaces the whole resource",
+      "request": {
+        "method": "PATCH",
+        "path": "/v1/shelves/s1",
+        "headers": {
+          "content-type": "application/json"
+        },
+        "json": {
+          "theme": "T",
+          "capacity": 5,
+          "genre": "poetry"
+        }
+      },
+      "expect": {
+        "status": 200,
+        "rpc": "UpdateShelf",
+        "input": {
+          "shelf": {
+            "name": "shelves/s1",
+            "theme": "T",
+            "capacity": 5,
+            "genre": "poetry"
+          }
+        }
+      }
+    },
+    {
+      "name": "an update without a mask needs every REQUIRED field",
+      "request": {
+        "method": "PATCH",
+        "path": "/v1/shelves/s1",
+        "headers": {
+          "content-type": "application/json"
+        },
+        "json": {
+          "theme": "T",
+          "genre": "poetry"
+        }
+      },
+      "expect": {
+        "status": 400,
+        "reason": "BAD_REQUEST"
+      }
+    },
+    {
+      "name": "an update with * needs every REQUIRED field",
+      "request": {
+        "method": "PATCH",
+        "path": "/v1/shelves/s1",
+        "headers": {
+          "content-type": "application/json"
+        },
+        "json": {
+          "theme": "T"
+        },
+        "query": "update_mask=*"
+      },
+      "expect": {
+        "status": 400,
+        "reason": "BAD_REQUEST"
+      }
+    },
+    {
+      "name": "an update with a mask needs only the REQUIRED fields it names",
+      "request": {
+        "method": "PATCH",
+        "path": "/v1/shelves/s1",
+        "headers": {
+          "content-type": "application/json"
+        },
+        "json": {
+          "theme": "T"
+        },
+        "query": "update_mask=theme"
+      },
+      "expect": {
+        "status": 200,
+        "rpc": "UpdateShelf",
+        "input": {
+          "shelf": {
+            "name": "shelves/s1",
+            "theme": "T",
+            "capacity": 0,
+            "genre": null
+          },
+          "update_mask": "theme"
+        }
+      }
+    },
+    {
+      "name": "a REQUIRED field the mask names must be present",
+      "request": {
+        "method": "PATCH",
+        "path": "/v1/shelves/s1",
+        "headers": {
+          "content-type": "application/json"
+        },
+        "json": {
+          "theme": "T"
+        },
+        "query": "update_mask=theme,capacity"
+      },
+      "expect": {
+        "status": 400,
+        "reason": "BAD_REQUEST"
+      }
+    },
+    {
+      "name": "a masked message is replaced whole, so its REQUIRED fields bind",
+      "request": {
+        "method": "PATCH",
+        "path": "/v1/shelves/s1",
+        "headers": {
+          "content-type": "application/json"
+        },
+        "json": {
+          "curator": {
+            "email": "e@example.com"
+          }
+        },
+        "query": "update_mask=curator"
+      },
+      "expect": {
+        "status": 400,
+        "reason": "BAD_REQUEST"
+      }
+    },
+    {
+      "name": "a mask path into a message binds only that field",
+      "request": {
+        "method": "PATCH",
+        "path": "/v1/shelves/s1",
+        "headers": {
+          "content-type": "application/json"
+        },
+        "json": {
+          "curator": {
+            "email": "e@example.com"
+          }
+        },
+        "query": "update_mask=curator.email"
+      },
+      "expect": {
+        "status": 200,
+        "rpc": "UpdateShelf",
+        "input": {
+          "shelf": {
+            "name": "shelves/s1",
+            "theme": "",
+            "capacity": 0,
+            "curator": {
+              "display_name": "",
+              "email": "e@example.com"
+            },
+            "genre": null
+          },
+          "update_mask": "curator.email"
+        }
+      }
+    },
+    {
+      "name": "a mask naming an unknown field is refused",
+      "request": {
+        "method": "PATCH",
+        "path": "/v1/shelves/s1",
+        "headers": {
+          "content-type": "application/json"
+        },
+        "json": {},
+        "query": "update_mask=color"
+      },
+      "expect": {
+        "status": 400,
+        "reason": "BAD_REQUEST"
+      }
+    },
+    {
+      "name": "a mask path through a non-message field is refused",
+      "request": {
+        "method": "PATCH",
+        "path": "/v1/shelves/s1",
+        "headers": {
+          "content-type": "application/json"
+        },
+        "json": {
+          "theme": "T"
+        },
+        "query": "update_mask=theme.size"
+      },
+      "expect": {
+        "status": 400,
+        "reason": "BAD_REQUEST"
+      }
+    },
+    {
+      "name": "* with other paths is refused",
+      "request": {
+        "method": "PATCH",
+        "path": "/v1/shelves/s1",
+        "headers": {
+          "content-type": "application/json"
+        },
+        "json": {
+          "theme": "T"
+        },
+        "query": "update_mask=*,theme"
+      },
+      "expect": {
+        "status": 400,
+        "reason": "BAD_REQUEST"
+      }
+    },
+    {
+      "name": "a malformed mask path is refused",
+      "request": {
+        "method": "PATCH",
+        "path": "/v1/shelves/s1",
+        "headers": {
+          "content-type": "application/json"
+        },
+        "json": {
+          "theme": "T"
+        },
+        "query": "update_mask=Theme"
+      },
+      "expect": {
+        "status": 400,
+        "reason": "BAD_REQUEST"
+      }
+    },
+    {
+      "name": "a mask naming an OUTPUT_ONLY field is accepted and the field ignored",
+      "request": {
+        "method": "PATCH",
+        "path": "/v1/shelves/s1",
+        "headers": {
+          "content-type": "application/json"
+        },
+        "json": {
+          "book_count": 7
+        },
+        "query": "update_mask=book_count"
+      },
+      "expect": {
+        "status": 200,
+        "rpc": "UpdateShelf",
+        "input": {
+          "shelf": {
+            "name": "shelves/s1",
+            "theme": "",
+            "capacity": 0,
+            "genre": null
+          },
+          "update_mask": "book_count"
+        }
+      }
+    },
+    {
+      "name": "unmasked fields are still read strictly",
+      "request": {
+        "method": "PATCH",
+        "path": "/v1/shelves/s1",
+        "headers": {
+          "content-type": "application/json"
+        },
+        "json": {
+          "theme": "T",
+          "capacity": "many"
+        },
+        "query": "update_mask=theme"
+      },
+      "expect": {
+        "status": 400,
+        "reason": "BAD_REQUEST"
+      }
     }
   ],
   "encode": [
@@ -891,6 +1232,100 @@
       },
       "expect": {
         "error": true
+      }
+    },
+    {
+      "name": "a dot segment in a multi-segment value is refused",
+      "rpc": "GetBook",
+      "input": {
+        "name": "shelves/../books/b1"
+      },
+      "expect": {
+        "error": true
+      }
+    },
+    {
+      "name": "a single-dot segment in a multi-segment value is refused",
+      "rpc": "GetBook",
+      "input": {
+        "name": "shelves/s1/books/."
+      },
+      "expect": {
+        "error": true
+      }
+    },
+    {
+      "name": "a dot segment in a parent is refused",
+      "rpc": "CreateBook",
+      "input": {
+        "parent": "shelves/..",
+        "book": {
+          "title": "T"
+        }
+      },
+      "expect": {
+        "error": true
+      }
+    },
+    {
+      "name": "a dot segment under ** is refused",
+      "rpc": "DownloadFile",
+      "input": {
+        "name": "files/a/../b"
+      },
+      "expect": {
+        "error": true
+      }
+    },
+    {
+      "name": "dots inside a segment are kept",
+      "rpc": "DownloadFile",
+      "input": {
+        "name": "files/a/..b/c."
+      },
+      "expect": {
+        "method": "GET",
+        "url": "/v1/files/a/..b/c.:download",
+        "body": null
+      }
+    },
+    {
+      "name": "an update with a mask sends the mask in the query and the masked fields in the body",
+      "rpc": "UpdateShelf",
+      "input": {
+        "shelf": {
+          "name": "shelves/s1",
+          "theme": "T"
+        },
+        "update_mask": "theme"
+      },
+      "expect": {
+        "method": "PATCH",
+        "url": "/v1/shelves/s1?update_mask=theme",
+        "body": {
+          "theme": "T"
+        }
+      }
+    },
+    {
+      "name": "an update without a mask sends the whole resource",
+      "rpc": "UpdateShelf",
+      "input": {
+        "shelf": {
+          "name": "shelves/s1",
+          "theme": "T",
+          "capacity": 5,
+          "genre": "poetry"
+        }
+      },
+      "expect": {
+        "method": "PATCH",
+        "url": "/v1/shelves/s1",
+        "body": {
+          "theme": "T",
+          "capacity": 5,
+          "genre": "poetry"
+        }
       }
     }
   ]

@@ -1,0 +1,197 @@
+{
+  "description": "The AIP-160 subset of ts/filter.ts (a conjunction of global literals), at most 3 literals here. parse: a filter and its literals in order, or error: true. quote: a search box's text and the filter that searches for it as one phrase (which parses back to that text, trimmed). Every implementation (TypeScript now, Python later) runs this file.",
+  "max_literals": 3,
+  "parse": [
+    {
+      "name": "empty",
+      "filter": "",
+      "literals": []
+    },
+    {
+      "name": "whitespace only",
+      "filter": "  \t ",
+      "literals": []
+    },
+    {
+      "name": "one bare word",
+      "filter": "graph",
+      "literals": [
+        "graph"
+      ]
+    },
+    {
+      "name": "words separated by whitespace are ANDed",
+      "filter": " graph  neural ",
+      "literals": [
+        "graph",
+        "neural"
+      ]
+    },
+    {
+      "name": "explicit AND",
+      "filter": "graph AND neural",
+      "literals": [
+        "graph",
+        "neural"
+      ]
+    },
+    {
+      "name": "a quoted phrase is one literal",
+      "filter": "\"graph neural\"",
+      "literals": [
+        "graph neural"
+      ]
+    },
+    {
+      "name": "single quotes too",
+      "filter": "'graph neural' nets",
+      "literals": [
+        "graph neural",
+        "nets"
+      ]
+    },
+    {
+      "name": "escapes inside a string",
+      "filter": "\"a \\\"b\\\" \\\\ c\"",
+      "literals": [
+        "a \"b\" \\ c"
+      ]
+    },
+    {
+      "name": "a quoted string keeps operators as text",
+      "filter": "\"C++ OR -x title:y\"",
+      "literals": [
+        "C++ OR -x title:y"
+      ]
+    },
+    {
+      "name": "hyphens inside a bare word",
+      "filter": "self-supervised",
+      "literals": [
+        "self-supervised"
+      ]
+    },
+    {
+      "name": "non-ASCII letters are bare words",
+      "filter": "图 神经网络",
+      "literals": [
+        "图",
+        "神经网络"
+      ]
+    },
+    {
+      "name": "lower-case and is a word",
+      "filter": "and",
+      "literals": [
+        "and"
+      ]
+    },
+    {
+      "name": "OR is refused",
+      "filter": "a OR b",
+      "error": true
+    },
+    {
+      "name": "NOT is refused",
+      "filter": "NOT a",
+      "error": true
+    },
+    {
+      "name": "negation is refused",
+      "filter": "-a",
+      "error": true
+    },
+    {
+      "name": "a field restriction is refused",
+      "filter": "title:graph",
+      "error": true
+    },
+    {
+      "name": "member traversal is refused",
+      "filter": "a.b",
+      "error": true
+    },
+    {
+      "name": "a comparison is refused",
+      "filter": "year>2020",
+      "error": true
+    },
+    {
+      "name": "a function call is refused",
+      "filter": "f(x)",
+      "error": true
+    },
+    {
+      "name": "parentheses are refused",
+      "filter": "(a b)",
+      "error": true
+    },
+    {
+      "name": "a wildcard is refused",
+      "filter": "gra*",
+      "error": true
+    },
+    {
+      "name": "AND at the start is refused",
+      "filter": "AND a",
+      "error": true
+    },
+    {
+      "name": "AND at the end is refused",
+      "filter": "a AND",
+      "error": true
+    },
+    {
+      "name": "AND twice is refused",
+      "filter": "a AND AND b",
+      "error": true
+    },
+    {
+      "name": "an unterminated string is refused",
+      "filter": "\"graph",
+      "error": true
+    },
+    {
+      "name": "a string that runs into a word is refused",
+      "filter": "\"a\"b",
+      "error": true
+    },
+    {
+      "name": "an empty string is refused",
+      "filter": "\"  \"",
+      "error": true
+    },
+    {
+      "name": "an unknown escape is refused",
+      "filter": "\"a\\nb\"",
+      "error": true
+    },
+    {
+      "name": "more literals than allowed is refused",
+      "filter": "a b c d",
+      "error": true
+    }
+  ],
+  "quote": [
+    {
+      "name": "blank text is no filter",
+      "text": "  ",
+      "filter": ""
+    },
+    {
+      "name": "a phrase",
+      "text": " graph  neural ",
+      "filter": "\"graph  neural\""
+    },
+    {
+      "name": "quotes and backslashes are escaped",
+      "text": "say \"hi\" \\o/",
+      "filter": "\"say \\\"hi\\\" \\\\o/\""
+    },
+    {
+      "name": "operators stay text",
+      "text": "a OR -b",
+      "filter": "\"a OR -b\""
+    }
+  ]
+}

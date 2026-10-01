@@ -69,4 +69,26 @@ describe('expand, then match', () => {
       expect(() => expandTemplate(template, new Map([['name', value]]))).toThrow(PathTemplateError);
     }
   });
+
+  test('a dot segment is refused: fetch would remove or resolve it and send another path', () => {
+    // new URL('/api/v1/decks/../summary', base) is /api/v1/summary: the request would reach another route.
+    expect(new URL('/api/v1/decks/../summary', 'https://a.example.com').pathname).toBe('/api/v1/summary');
+    const cases: [string, string][] = [
+      ['/api/v1/{name=decks/*}', 'decks/..'],
+      ['/api/v1/{name=decks/*}', 'decks/.'],
+      ['/api/v1/{name=decks/*/summary}', 'decks/../summary'],
+      ['/api/v1/{name=likedPapers/*}', 'likedPapers/..'],
+      ['/v1/{parent=shelves/*}/books', 'shelves/..'],
+      ['/v1/{name=files/**}', 'files/a/../b'],
+      ['/v1/{id}', '..'],
+      ['/v1/{id}', '.'],
+    ];
+    for (const [source, value] of cases) {
+      const variable = parseTemplate(source).variables[0]?.fieldPath.join('.') ?? '';
+      expect(() => expandTemplate(parseTemplate(source), new Map([[variable, value]])), `${source} ${value}`).toThrow(PathTemplateError);
+    }
+    // Dots inside a segment, and a single-segment value whose slash is encoded, are ordinary text.
+    expect(expandTemplate(parseTemplate('/v1/{id}'), new Map([['id', '..a']]))).toBe('/v1/..a');
+    expect(expandTemplate(parseTemplate('/v1/{id}'), new Map([['id', 'a/..']]))).toBe('/v1/a%2F..');
+  });
 });

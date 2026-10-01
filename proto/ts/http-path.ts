@@ -25,6 +25,8 @@
  * - When several templates match, the one with a literal at the first position where they differ wins
  *   over `*`, and `*` over `**` (most specific first). Two templates of one HTTP method that match exactly
  *   the same paths are an error when the routes are built.
+ * - The client refuses a variable value with a `.` or `..` segment (a whole single-segment value, or one
+ *   segment of a multi-segment one): fetch would send another path, which the server cannot detect.
  */
 
 /** One segment of a template. */
@@ -214,24 +216,33 @@ function encode(value: string, keepSlash: boolean): string {
   return keepSlash ? encoded.replace(/%2F/g, '/') : encoded;
 }
 
+/**
+ * A segment fetch() would not send as written: the WHATWG URL parser removes `.` and resolves `..` (also when
+ * spelled `%2e`), so `/v1/{parent=shelves/*}/books` with parent `shelves/..` would reach `/v1/books`.
+ */
+function dotSegment(part: string): boolean {
+  return part === '.' || part === '..';
+}
+
 /** Whether `value` fits a variable's pattern (its segments split on `/`). */
 function fits(template: PathTemplate, variable: TemplateVariable, value: string): boolean {
   const pattern = template.segments.slice(variable.start, variable.end);
-  // A single-segment variable takes any value: its `/` is encoded.
-  if (pattern.length === 1 && pattern[0]?.kind === 'wildcard') return value !== '';
+  // A single-segment variable takes any value but a dot segment: its `/` is encoded.
+  if (pattern.length === 1 && pattern[0]?.kind === 'wildcard') return value !== '' && !dotSegment(value);
   const parts = value.split('/');
   const rest = pattern[pattern.length - 1]?.kind === 'rest';
   if (rest ? parts.length < pattern.length - 1 : parts.length !== pattern.length) return false;
   return parts.every((part, i) => {
     const segment = pattern[Math.min(i, pattern.length - 1)];
-    if (part === '') return false;
+    if (part === '' || dotSegment(part)) return false;
     return segment?.kind === 'literal' ? segment.value === part : true;
   });
 }
 
 /**
  * Expands a template with the values of its variables (by dotted field path). Throws PathTemplateError when a
- * value is missing or does not fit its pattern (the request would reach another route, or none).
+ * value is missing or does not fit its pattern (the request would reach another route, or none), and for a
+ * `.` or `..` segment, which the URL parser would remove or resolve before the request is sent.
  */
 export function expandTemplate(template: PathTemplate, values: Bindings): string {
   const out: string[] = [];

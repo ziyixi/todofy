@@ -6,13 +6,14 @@
 import { describe, expect, test, vi } from 'vitest';
 import { create, createFileRegistry, setExtension, type DescService, type MessageInitShape } from '@bufbuild/protobuf';
 import { FileDescriptorProtoSchema, MethodOptionsSchema, type FileDescriptorProto } from '@bufbuild/protobuf/wkt';
+import { CommonReasonSchema } from '../ts/common/errors/v1/errors_pb.ts';
 import { file_google_api_annotations, http } from '../ts/google/api/annotations_pb.ts';
 import { HttpRuleSchema } from '../ts/google/api/http_pb.ts';
 
 type Rule = MessageInitShape<typeof HttpRuleSchema>;
 import { BookSchema, BookService, type ArchiveBookRequest } from '../ts/prototest/v1/prototest_pb.ts';
 import { HttpRuleError } from '../ts/http-rule.ts';
-import { HttpTranscoder, type ServiceHandlers, type ShapeOf } from '../ts/http-transcoder.ts';
+import { HttpTranscoder, TRANSCODER_REASONS, type ServiceHandlers, type ShapeOf } from '../ts/http-transcoder.ts';
 import { Code, errorDetail, parseStatus, readDetail, RpcError } from '../ts/rpc-status.ts';
 
 type Handlers = ServiceHandlers<ShapeOf<typeof BookService>, { readonly user: string }>;
@@ -69,6 +70,8 @@ describe('the app hooks', () => {
     const plain = new HttpTranscoder(BookService, handlers({ getBook }), { domain: 'a.example.com', maxBodyBytes: 1024, authorize: () => undefined });
     const first = await plain.handle(new Request('https://api.example.com/v1/shelves/s1/books/b1'), { user: 'u' });
     expect(first?.response.status).toBe(500);
+    expect(first?.error?.reason).toBe('INTERNAL');
+    expect(first?.error?.code).toBe(Code.INTERNAL);
     expect(await first?.response.text()).not.toContain('secret');
     const mapped = new HttpTranscoder(BookService, handlers({ getBook }), {
       domain: 'a.example.com',
@@ -77,6 +80,21 @@ describe('the app hooks', () => {
       onUnexpected: () => new RpcError(Code.UNAVAILABLE, 'UNAVAILABLE', 'try again'),
     });
     expect((await mapped.handle(new Request('https://api.example.com/v1/shelves/s1/books/b1'), { user: 'u' }))?.error?.reason).toBe('UNAVAILABLE');
+  });
+});
+
+describe('reasons', () => {
+  test("the transcoder's own reasons are values of common.errors.v1.CommonReason", () => {
+    const common = new Set(CommonReasonSchema.values.map((value) => value.name.slice('COMMON_REASON_'.length)));
+    for (const reason of Object.values(TRANSCODER_REASONS)) expect(common).toContain(reason);
+  });
+
+  test('an answer the wire profile refuses to write is INTERNAL, not a retryable reason', async () => {
+    const getBook = () => Promise.resolve(create(BookSchema, { pages: 2 ** 31 }));
+    const api = new HttpTranscoder(BookService, handlers({ getBook }), { domain: 'a.example.com', maxBodyBytes: 1024, authorize: () => undefined });
+    const result = await api.handle(new Request('https://api.example.com/v1/shelves/s1/books/b1'), { user: 'u' });
+    expect(result?.response.status).toBe(500);
+    expect(result?.error?.reason).toBe('INTERNAL');
   });
 });
 

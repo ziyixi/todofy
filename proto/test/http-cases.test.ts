@@ -73,7 +73,7 @@ function requestOf(c: TranscodeCase['request']): Request {
 describe('transcode cases shared with Python', () => {
   test('every case has its own name', () => {
     expect(new Set(cases.transcode.map((c) => c.name)).size).toBe(cases.transcode.length);
-    expect(cases.transcode.length).toBeGreaterThanOrEqual(46);
+    expect(cases.transcode.length).toBeGreaterThanOrEqual(64);
   });
 
   test.each(cases.transcode.map((c) => [c.name, c] as const))('%s', async (_name, c) => {
@@ -119,7 +119,9 @@ describe('encode cases shared with Python', () => {
   test.each(cases.encode.map((c) => [c.name, c] as const))('%s', async (_name, c) => {
     const binding = bindings.get(c.rpc);
     if (binding === undefined) throw new Error(`no binding for ${c.rpc}`);
-    const message = fromWire(binding.method.input, c.input, { strict: true }).message;
+    // The resource of an update with a field mask needs only the masked REQUIRED fields (http-transcoder.ts).
+    const partial = binding.updateMask === undefined ? {} : { partial: binding.body };
+    const message = fromWire(binding.method.input, c.input, { strict: true, ...partial }).message;
     if (c.expect.error === true) {
       expect(() => encodeHttpRequest(binding, message)).toThrow(HttpEncodeError);
       return;

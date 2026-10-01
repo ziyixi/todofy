@@ -34,6 +34,9 @@ tables), uses only the standard library and therefore runs on Pyodide unchanged.
   (``decisions{}``): a map key is data, and paths never carry data.
 - A proto3 scalar without ``optional`` (implicit presence) is omitted at its default value (``""``, 0,
   false) unless it is REQUIRED, as protobuf-es does.
+- A google.protobuf.FieldMask is a tuple of paths in Python and one string of comma-separated snake_case
+  paths on the wire (``"send_mode,author.name"``; ``""`` has none); a path is ``*`` or dotted field names
+  (proto/ts/field-mask.ts).
 """
 
 import datetime
@@ -44,6 +47,7 @@ import re
 import sys
 from typing import Any, NamedTuple
 
+FIELD_MASK_PATH = re.compile(r"[a-z_][a-z0-9_]*(?:\.[a-z_][a-z0-9_]*)*|\*")
 RFC3339_UTC = re.compile(r"([0-9]{4})-([0-9]{2})-([0-9]{2})T([0-9]{2}):([0-9]{2}):([0-9]{2})(?:\.([0-9]{1,3}))?Z")
 INT32 = range(-(2**31), 2**31)
 # Integral doubles below this are written as JSON integers, as JSON.stringify writes them.
@@ -60,7 +64,7 @@ class Field(NamedTuple):
 
     name: str
     number: int
-    kind: str  # string, bool, int32, double, enum, message, timestamp, map
+    kind: str  # string, bool, int32, double, enum, message, timestamp, fieldmask, map
     ref: Any  # the enum or message class (of a map: of its values), or None
     repeated: bool
     optional: bool  # explicit presence: unset is None
@@ -114,6 +118,14 @@ def _timestamp_in(text: str) -> str | None:
         return None
     whole = text[:19]
     return f"{whole}Z" if millis == 0 else f"{whole}.{millis:03d}Z"
+
+
+def _field_mask_in(text: str) -> tuple[str, ...] | None:
+    """The paths of a wire field mask, or None when a path is malformed."""
+    if text == "":
+        return ()
+    paths = tuple(text.split(","))
+    return paths if all(FIELD_MASK_PATH.fullmatch(path) for path in paths) else None
 
 
 def _int_in(item: Any) -> int | None:
@@ -200,6 +212,14 @@ def _value_out(kind: str, field: Field, value: Any) -> Any:
                 raise WireJsonError(f"{field.name}: not a finite number") from None
         case "int32" if isinstance(value, bool) or not isinstance(value, int) or value not in INT32:
             raise WireJsonError(f"{field.name}: not an int32")
+        case "fieldmask":
+            paths = tuple(value) if isinstance(value, (tuple, list)) else None
+            if paths is None or not all(isinstance(path, str) for path in paths):
+                raise WireJsonError(f"{field.name}: not a field mask")
+            text = ",".join(paths)
+            if any(path == "" for path in paths) or _field_mask_in(text) != paths:
+                raise WireJsonError(f"{field.name}: a field mask path is malformed")
+            return text
         case "string" if not isinstance(value, str):
             raise WireJsonError(f"{field.name}: not a string")
         case "bool" if not isinstance(value, bool):
@@ -284,6 +304,8 @@ def _value_in(kind: str, ref: Any, item: Any, at: str, strict: bool, unrecognize
             return number
         case "timestamp" if isinstance(item, str) and (canonical := _timestamp_in(item)) is not None:
             return canonical
+        case "fieldmask" if isinstance(item, str) and (paths := _field_mask_in(item)) is not None:
+            return paths
         case "message":
             return _read(ref, item, at, strict, unrecognized)
         case "enum":

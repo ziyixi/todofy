@@ -1302,6 +1302,80 @@
         "rating": null
       },
       "error": true
+    },
+    {
+      "name": "a field mask is one string of snake_case paths",
+      "message": "prototest.v1.Book",
+      "strict": true,
+      "input": {
+        "highlights": "title,author.display_name"
+      },
+      "wire": {
+        "highlights": "title,author.display_name"
+      },
+      "unrecognized": []
+    },
+    {
+      "name": "an empty field mask is set and has no paths",
+      "message": "prototest.v1.Book",
+      "strict": true,
+      "input": {
+        "highlights": ""
+      },
+      "wire": {
+        "highlights": ""
+      },
+      "unrecognized": []
+    },
+    {
+      "name": "a field mask may be *",
+      "message": "prototest.v1.Book",
+      "strict": true,
+      "input": {
+        "highlights": "*"
+      },
+      "wire": {
+        "highlights": "*"
+      },
+      "unrecognized": []
+    },
+    {
+      "name": "a field mask path is snake_case, not lowerCamelCase",
+      "message": "prototest.v1.Book",
+      "strict": false,
+      "input": {
+        "highlights": "displayName"
+      },
+      "error": true
+    },
+    {
+      "name": "a field mask has no empty path",
+      "message": "prototest.v1.Book",
+      "strict": false,
+      "input": {
+        "highlights": "title,,pages"
+      },
+      "error": true
+    },
+    {
+      "name": "a field mask is not a list",
+      "message": "prototest.v1.Book",
+      "strict": false,
+      "input": {
+        "highlights": [
+          "title"
+        ]
+      },
+      "error": true
+    },
+    {
+      "name": "a field mask path has no space",
+      "message": "prototest.v1.Book",
+      "strict": false,
+      "input": {
+        "highlights": "labels.en, title"
+      },
+      "error": true
     }
   ]
 }

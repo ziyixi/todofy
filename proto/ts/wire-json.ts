@@ -26,6 +26,8 @@
  *   in: its keys are set in code point order, and JavaScript then puts array-index keys ("10") first in
  *   numeric order (OrdinaryOwnPropertyKeys), which the Python twin reproduces, so both write the same
  *   bytes. A REQUIRED map is written as {} when empty. A map value is never null.
+ * - google.protobuf.FieldMask is one string of comma-separated snake_case paths (`"send_mode,author.name"`),
+ *   not ProtoJSON's lowerCamelCase; a path is `*` or dotted field names (field-mask.ts).
  *
  * Reading has two modes, matching the contracts' rule "inputs closed, outputs open":
  *
@@ -46,8 +48,8 @@
  * the value rules of its contract (proto/README.md, Wire JSON profile).
  *
  * Only the field kinds the contracts use are supported: string, bool, 32-bit integers, double, enums,
- * messages, repeated fields, maps with string keys and Timestamp. Anything else (64-bit integers, float,
- * bytes, oneofs, other well-known types) throws, so a new kind cannot slip through.
+ * messages, repeated fields, maps with string keys, Timestamp and FieldMask. Anything else (64-bit integers,
+ * float, bytes, oneofs, other well-known types) throws, so a new kind cannot slip through.
  */
 import {
   create,
@@ -63,7 +65,8 @@ import {
   type MessageShape,
 } from '@bufbuild/protobuf';
 import { reflect, type ReflectMessage } from '@bufbuild/protobuf/reflect';
-import { timestampDate, timestampFromDate, TimestampSchema } from '@bufbuild/protobuf/wkt';
+import { FieldMaskSchema, timestampDate, timestampFromDate, TimestampSchema, type FieldMask } from '@bufbuild/protobuf/wkt';
+import { FieldMaskError, formatFieldMask, parseFieldMask } from './field-mask.ts';
 import { field_behavior, FieldBehavior } from './google/api/field_behavior_pb.ts';
 
 export class WireJsonError extends Error {}
@@ -71,6 +74,12 @@ export class WireJsonError extends Error {}
 export interface ReadOptions {
   /** Refuse unknown fields and enum names (inputs). Default false (outputs). */
   readonly strict?: boolean;
+  /**
+   * A top-level message field whose value is read without the REQUIRED check, at any depth: the resource of
+   * an AIP-134 update with a field mask, where REQUIRED binds only the fields the mask names (the HTTP
+   * transcoder checks those). Everything else is read as usual.
+   */
+  readonly partial?: string;
 }
 
 export interface ReadResult<T> {
@@ -327,6 +336,14 @@ function messageToWire(value: ReflectMessage): JsonValue {
   if (value.desc.typeName === TimestampSchema.typeName) {
     return timestampDate(value.message as MessageShape<typeof TimestampSchema>).toISOString().replace(/\.000Z$/, 'Z');
   }
+  if (value.desc.typeName === FieldMaskSchema.typeName) {
+    try {
+      return formatFieldMask((value.message as FieldMask).paths);
+    } catch (error) {
+      if (error instanceof FieldMaskError) throw new WireJsonError(`${value.desc.typeName}: ${error.message}`);
+      throw error;
+    }
+  }
   return writeMessage(value);
 }
 
@@ -347,7 +364,7 @@ function compareCodePoints(a: string, b: string): number {
 /** Reads wire JSON (a parsed value) into a message of `schema`. */
 export function fromWire<Desc extends DescMessage>(schema: Desc, json: unknown, options: ReadOptions = {}): ReadResult<MessageShape<Desc>> {
   const unrecognized: string[] = [];
-  const message = readMessage(schema, json, '', options.strict === true, unrecognized) as MessageShape<Desc>;
+  const message = readMessage(schema, json, '', { strict: options.strict === true, unrecognized, required: true }, options.partial) as MessageShape<Desc>;
   return { message, unrecognized };
 }
 
@@ -355,7 +372,15 @@ function isObject(value: unknown): value is JsonObject {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
-function readMessage(schema: DescMessage, json: unknown, path: string, strict: boolean, unrecognized: string[]): Message {
+/** How a read goes: strict or lenient, where skipped paths go, and whether REQUIRED is checked here. */
+interface ReadState {
+  readonly strict: boolean;
+  readonly unrecognized: string[];
+  readonly required: boolean;
+}
+
+function readMessage(schema: DescMessage, json: unknown, path: string, state: ReadState, partial?: string): Message {
+  const { strict, unrecognized } = state;
   if (!isObject(json)) throw new WireJsonError(`${path || '$'}: not an object`);
   const message = create(schema);
   const r = reflect(schema, message);
@@ -385,14 +410,14 @@ function readMessage(schema: DescMessage, json: unknown, path: string, strict: b
         break;
       }
       case 'message':
-        r.set(field, readValueMessage(field.message, value, at, strict, unrecognized));
+        r.set(field, readValueMessage(field.message, value, at, field.name === partial ? { ...state, required: false } : state));
         break;
       case 'list': {
         if (!Array.isArray(value)) throw new WireJsonError(`${at}: not an array`);
         const list = r.get(field);
         value.forEach((item: JsonValue, i) => {
           const itemAt = `${at}[${String(i)}]`;
-          if (field.listKind === 'message') list.add(readValueMessage(field.message, item, itemAt, strict, unrecognized));
+          if (field.listKind === 'message') list.add(readValueMessage(field.message, item, itemAt, state));
           else if (field.listKind === 'enum') {
             const number = readEnum(field.enum, item, itemAt, strict, unrecognized);
             if (number !== undefined) list.add(number);
@@ -408,7 +433,7 @@ function readMessage(schema: DescMessage, json: unknown, path: string, strict: b
         const entryAt = `${at}{}`;
         for (const [entryKey, item] of Object.entries(value)) {
           if (item === null) throw new WireJsonError(`${entryAt}: wrong type`);
-          if (field.mapKind === 'message') map.set(entryKey, readValueMessage(field.message, item, entryAt, strict, unrecognized));
+          if (field.mapKind === 'message') map.set(entryKey, readValueMessage(field.message, item, entryAt, state));
           else if (field.mapKind === 'enum') {
             const number = readEnum(field.enum, item, entryAt, strict, unrecognized);
             if (number !== undefined) map.set(entryKey, number);
@@ -420,7 +445,7 @@ function readMessage(schema: DescMessage, json: unknown, path: string, strict: b
         throw new WireJsonError(`${at}: this field kind is not in the profile`);
     }
   }
-  for (const field of schema.fields) {
+  for (const field of state.required ? schema.fields : []) {
     if (required(field) && !Object.hasOwn(json, field.name)) {
       throw new WireJsonError(`${path === '' ? field.name : `${path}.${field.name}`}: missing`);
     }
@@ -439,12 +464,21 @@ function readEnum(desc: DescEnum | undefined, value: JsonValue, at: string, stri
   return number;
 }
 
-/** A message-typed value (a field, a list item or a map value), Timestamp included. */
-function readValueMessage(desc: DescMessage, value: JsonValue, at: string, strict: boolean, unrecognized: string[]): ReflectMessage {
+/** A message-typed value (a field, a list item or a map value), Timestamp and FieldMask included. */
+function readValueMessage(desc: DescMessage, value: JsonValue, at: string, state: ReadState): ReflectMessage {
   if (desc.typeName === TimestampSchema.typeName) {
     const date = typeof value === 'string' ? timestampFromWire(value) : undefined;
     if (date === undefined) throw new WireJsonError(`${at}: not an RFC 3339 UTC timestamp`);
     return reflect(TimestampSchema, timestampFromDate(date));
   }
-  return reflect(desc, readMessage(desc, value, at, strict, unrecognized));
+  if (desc.typeName === FieldMaskSchema.typeName) {
+    if (typeof value !== 'string') throw new WireJsonError(`${at}: not a field mask`);
+    try {
+      return reflect(FieldMaskSchema, create(FieldMaskSchema, { paths: parseFieldMask(value) }));
+    } catch (error) {
+      if (error instanceof FieldMaskError) throw new WireJsonError(`${at}: not a field mask`);
+      throw error;
+    }
+  }
+  return reflect(desc, readMessage(desc, value, at, state));
 }
