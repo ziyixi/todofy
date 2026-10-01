@@ -14,9 +14,10 @@ What they keep true (infra/README.md):
   no backend without enforced state and plan encryption (test_infra_guard.py tests the guard itself).
 - The state lives in the R2 bucket infra-state through a partial S3 backend (no key, endpoint or credentials
   committed), encrypted with the state_passphrase variable only, no fallback.
-- Every Access application gates a Custom Domain its app's wrangler.toml declares (FlowDay's also the retiring F3
-  staging host until the follow-up removes it), and every Worker with an ACCESS_AUDIENCE has an application whose
-  key is its name, so the access_aud output covers it.
+- Every Access application gates a Custom Domain its app's wrangler.toml declares (a retiring host only while
+  RETIRING_HOSTS lists it; an application created ahead of its Worker's first deploy, AHEAD_OF_DEPLOY, the host its
+  undeployed config names), and every Worker with an ACCESS_AUDIENCE has an application whose key is its name, so the
+  access_aud output covers it.
 - The D1 databases and R2 buckets are exactly those the production configs bind, and each D1 import id is
   the database_id committed there (ids.tf). The production configs are test_wrangler_configs.py's, minus the Workers
   named in NOT_ADOPTED (none since IaC P4 adopted FlowDay and the links app).
@@ -68,6 +69,11 @@ PRODUCTION = {
     "flowday": "flowday/wrangler.toml",
     "links": "links/wrangler.toml",
 }
+# Access applications created before their Worker's first deploy (infra/README.md "Adding an app"): Worker name -> the
+# whole host the application gates. The Worker's config is still test_wrangler_configs.py's UNDEPLOYED (no route, the
+# all-zeros AUD) and names that host as its PUBLIC_HOST. The commit of the first deploy (watch: W2) commits the AUD
+# and the Custom Domain, moves the Worker to PRODUCTION and empties its entry here (test_ahead_of_deploy_is_exact).
+AHEAD_OF_DEPLOY: dict[str, str] = {"watch": "watch.ziyixi.science"}
 # Hosts an Access application may still list although no wrangler.toml declares them. Empty since FlowDay's F3
 # staging host left both FlowDay applications after the F4 cutover (README.md "FlowDay"); a rollback that adds a host
 # back to an application adds it here in the same commit (test_retiring_hosts_are_exact).
@@ -216,10 +222,13 @@ class MatchesTheApps(unittest.TestCase):
         flowday = self.flowday_apps(code)
         self.assertEqual(set(flowday), {"flowday", "flowday-bypass"})
         destinations.update({key: value for key, value in flowday.items()})
-        self.assertEqual(set(owner), {"mail-hero", "todofy", "home", "lab", "links"})
+        self.assertEqual(set(owner), {"mail-hero", "todofy", "home", "lab", "links", *AHEAD_OF_DEPLOY})
         for key, uris in destinations.items():
             worker = "flowday" if key.startswith("flowday") else key
-            hosts = {route["pattern"] for route in config(worker).get("routes", []) if route.get("custom_domain")}
+            if worker in AHEAD_OF_DEPLOY:
+                hosts = {AHEAD_OF_DEPLOY[worker]}  # no Custom Domain before the first deploy
+            else:
+                hosts = {route["pattern"] for route in config(worker).get("routes", []) if route.get("custom_domain")}
             with self.subTest(app=key):
                 self.assertTrue(uris)
                 self.assertIn(uris[0].split("/")[0], hosts, "the first destination is the app's own host")
@@ -287,6 +296,26 @@ class MatchesTheApps(unittest.TestCase):
                 self.assertIn(host, flowday_hosts, "a stale allowance: empty RETIRING_HOSTS in the commit that drops it")
                 self.assertNotIn(host, other_hosts)
                 self.assertNotIn(host, code.split("# --- FlowDay")[0], "only FlowDay's applications may list it")
+
+    def test_ahead_of_deploy_is_exact(self):
+        """An application created before its Worker's first deploy gates exactly that Worker's planned whole host: the
+        config is undeployed, has no route, names the host as PUBLIC_HOST and still carries the all-zeros AUD. Once the
+        first deploy's commit moves the Worker to PRODUCTION, its entry here is stale and fails."""
+        code = (INFRA / "access.tf").read_text()
+        owner = hcl_map(code, "owner_apps")
+        production_hosts = {route["pattern"] for worker in PRODUCTION for route in config(worker).get("routes", [])}
+        for worker, host in AHEAD_OF_DEPLOY.items():
+            with self.subTest(worker=worker):
+                self.assertNotIn(worker, PRODUCTION, "a stale entry: empty it in the first deploy's commit")
+                self.assertIn(worker, test_wrangler_configs.UNDEPLOYED)
+                with open(REPO / test_wrangler_configs.UNDEPLOYED[worker], "rb") as handle:
+                    undeployed = tomllib.load(handle)
+                self.assertEqual(undeployed["name"], worker)
+                self.assertFalse(undeployed.get("routes"))
+                self.assertEqual(undeployed["vars"]["PUBLIC_HOST"], host)
+                self.assertEqual(undeployed["vars"]["ACCESS_AUDIENCE"], "0" * 64)
+                self.assertIn(f'domain = "{host}", more = []', owner[worker], "the whole host, nothing more")
+                self.assertNotIn(host, production_hosts | RETIRING_HOSTS)
 
     def test_every_worker_that_checks_access_has_an_application_of_its_name(self):
         """The access_aud output is keyed by Worker name; a Worker whose ACCESS_AUDIENCE no application key matches

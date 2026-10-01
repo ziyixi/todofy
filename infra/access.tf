@@ -36,6 +36,9 @@ resource "cloudflare_zero_trust_access_policy" "github_owner" {
 # Hostnames are the Workers Custom Domains declared in each app's wrangler.toml (wrangler owns the
 # domains and their DNS; Access only gates them). The links app gates only its launcher and owner API under /_/ on
 # its host; the rest of s.ziyixi.science (the short links) stays outside Access on purpose (links/docs/design.md).
+# The watch app's application exists before its Worker's first deploy (W2, watch/docs/design.md section 11): created
+# here first, its AUD is then committed as watch/wrangler.toml's ACCESS_AUDIENCE with the Custom Domain (README.md
+# "Adding an app"). It gates the whole host, like the other owner apps.
 
 # The key is the Worker's name, which is also the key of the access_aud output (outputs.tf). `domain` is the first
 # destination; `more` lists any further destinations (the links app also gates the exact path /_).
@@ -46,6 +49,7 @@ locals {
     "home"      = { name = "Home", domain = "home.ziyixi.science", more = [], session = "24h" }
     "lab"       = { name = "Lab", domain = "lab.ziyixi.science", more = [], session = "24h" }
     "links"     = { name = "links", domain = "s.ziyixi.science/_/*", more = ["s.ziyixi.science/_"], session = "168h" }
+    "watch"     = { name = "watch", domain = "watch.ziyixi.science", more = [], session = "24h" }
   }
 }
 

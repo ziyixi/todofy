@@ -26,7 +26,7 @@ bootstrap, which writes the state and only reads Cloudflare ([Bootstrap](#bootst
 ### Owner rule (2026-10-01)
 
 Only objects that belong to the monorepo apps go here: mail-hero, todofy and todofy-core, the dashboard
-`home`, `lab`, `flowday`, `links`, the website `ziyixi-website` and the relay `ziyixi-notion-publish`.
+`home`, `lab`, `flowday`, `links`, `watch`, the website `ziyixi-website` and the relay `ziyixi-notion-publish`.
 Nothing unrelated is imported, declared, read or modelled, not even read-only.
 [`infra_guard.py`](../.github/scripts/infra_guard.py) enforces the boundary on every push (through
 [`test_infra_config.py`](../.github/scripts/test_infra_config.py) in `Changes`, and again in
@@ -50,7 +50,7 @@ Nothing unrelated is imported, declared, read or modelled, not even read-only.
 [`test_infra_guard.py`](../.github/scripts/test_infra_guard.py) tests the guard itself against
 configurations built to slip past it.
 
-### Managed here (18 objects)
+### Managed here (19 objects)
 
 | Address | Object | Notes |
 | --- | --- | --- |
@@ -61,6 +61,7 @@ configurations built to slip past it.
 | `cloudflare_zero_trust_access_application.owner["home"]` | Access app "Home" | `home.ziyixi.science` (the dashboard) |
 | `cloudflare_zero_trust_access_application.owner["lab"]` | Access app "Lab" | `lab.ziyixi.science` |
 | `cloudflare_zero_trust_access_application.owner["links"]` | Access app "links" | `s.ziyixi.science/_/*` and the exact `s.ziyixi.science/_` (the launcher and owner API), session 168h, the two shared policies. The rest of the host (the short links) is deliberately not behind Access (links/docs/design.md) |
+| `cloudflare_zero_trust_access_application.owner["watch"]` | Access app "watch" | `watch.ziyixi.science` (the whole host), session 24h, the two shared policies. **Created** here before the watch app's first deploy, not imported ([Adding an app](#adding-an-app)) |
 | `cloudflare_zero_trust_access_application.mail_hero_backup` | Access app "Mail Hero backup API" | `mail-hero.ziyixi.science/api/internal/backup/*`. Used by the backup collector's machine identity (mail-hero/AGENTS.md §7). **Frozen**: an apply refuses any write to it ([Apply](#apply-p4)) |
 | `cloudflare_zero_trust_access_application.flowday["flowday"]` | Access app "flowday" | `flowday.ziyixi.science`, session 168h, FlowDay's own policy by id. See [FlowDay](#flowday) |
 | `cloudflare_zero_trust_access_application.flowday["flowday-bypass"]` | Access app "flowday-bypass" | `flowday.ziyixi.science/pwa/*` (and the staging host's), session 6h, FlowDay's own policy by id. See [FlowDay](#flowday) |
@@ -78,8 +79,8 @@ Every object has `prevent_destroy`, for two reasons:
 - **Storage.** A destroyed database or bucket means lost data. A recreated one gets an id that no
   `wrangler.toml` knows.
 
-**The two reusable policies are shared.** Each is attached to the five owner-facing monorepo apps
-(Mail Hero, Todofy, Home, Lab, links), plus applications of self-hosted services outside the monorepo.
+**The two reusable policies are shared.** Each is attached to the six owner-facing monorepo apps
+(Mail Hero, Todofy, Home, Lab, links, watch), plus applications of self-hosted services outside the monorepo.
 The Mail Hero backup API uses only its own application-scoped policy, and FlowDay's two apps their own
 policies ([FlowDay](#flowday)). Changing a reusable policy here therefore also changes who can reach those
 outside services. This prototype never changes a policy's identity rules,
@@ -199,7 +200,7 @@ All values come from a tfvars file **outside the repository** (locally) or from 
 | `account_id` | no | Kept out of `infra/` all the same. Several `wrangler.toml` files already contain it, but this directory adds no new copy |
 | `access_owner_emails` | **yes** | The live include list of "Mail Hero owner" |
 | `access_github_owner_emails` | **yes** | The live include list of "Mail Hero GitHub owner" |
-| `access_allowed_idp_ids` | no | Identity provider ids allowed on the five owner-facing apps (the links app has the same list as the others; FlowDay's apps allow every provider, `allowed_idps` unset) |
+| `access_allowed_idp_ids` | no | Identity provider ids allowed on the six owner-facing apps (the links and watch apps have the same list as the others; FlowDay's apps allow every provider, `allowed_idps` unset) |
 | `access_github_idp_id` | no | The GitHub identity provider that "Mail Hero GitHub owner" requires |
 | `state_passphrase` | **yes** | Not a value of the infrastructure: the state and plan encryption passphrase, `INFRA_STATE_PASSPHRASE` ([Remote state](#remote-state)). Never in a values file |
 
@@ -265,7 +266,7 @@ redacted summary may be shared ([`tools/infra-plan-summary`](../tools/infra-plan
 | Credentials | Derived from the Cloudflare API token at runtime: access key id = the token's id (`GET /accounts/<account>/tokens/verify`, or `/user/tokens/verify` for a user token), secret access key = SHA-256 of the token value. Under GitHub Actions both are masked (`::add-mask::`) before tofu starts; they are never printed, written to a file or put on a command line. Derivation verified read-only on 2026-10-01 (a wrong secret is refused) |
 | Credentials fallback | If a future token cannot be used this way (no R2 permission, or Cloudflare stops deriving), create an R2 API token for the `infra-state` bucket only (Object Read & Write) in the dashboard and store its pair as production secrets `INFRA_R2_ACCESS_KEY_ID` / `INFRA_R2_SECRET_ACCESS_KEY`, and pass them to the plan step in `infra.yml`. `infra_state.py` uses that pair instead of deriving whenever both are set (and refuses only one of them) |
 | Locking | **No lock file.** `use_lockfile` needs R2 to honour `If-None-Match: *` on this bucket, which is not proven yet. Until then the GitHub concurrency group `infra-production` serialises every run in CI. The drift plan never writes the state anyway; only the bootstrap (local, once) and P4's apply do. The bootstrap probes conditional writes and reports the result; enable `use_lockfile` in a separate change only after the probe passes on R2 |
-| Contents | The 18 objects' attributes as read from the API, including the policies' include emails and the account id, and the [outputs](#outputs): that is why the state is encrypted and never printed. It holds no credential: no service token, tunnel or secret is managed here |
+| Contents | The managed objects' attributes as read from the API, including the policies' include emails and the account id, and the [outputs](#outputs): that is why the state is encrypted and never printed. It holds no credential: no service token, tunnel or secret is managed here |
 | Rollback | R2 keeps no object versions. Every apply first copies the state object, byte for byte (it is already encrypted), to a dated key and reads the copy back; restoring one is in [Apply](#apply-p4), and `infra_state.py list-backups` prints their keys (keys only). With `imports.tf` restored from history the state is also rebuildable from the `import {}` blocks ([Bootstrap](#bootstrap-once)) |
 
 ## Running a plan locally
@@ -482,6 +483,53 @@ The script, in this order; nothing is written before every gate passes:
   plan) prints their keys only, and
   `python3 mail-hero/deploy/cloudflare-admin.py wrangler r2 object delete infra-state/<key> --remote` deletes one by
   its exact key (wrangler cannot list objects).
+
+## Adding an app
+
+A new app's Access application is **created** here, never in the dashboard, and before the app's first deploy: its
+AUD exists only once the application does, and the Worker must be deployed with it. The watch app (W2,
+`watch/docs/design.md` section 11) is the first; the order, for any app:
+
+1. **This directory** (one commit; no `wrangler.toml` change): the app's entry in `local.owner_apps`
+   ([`access.tf`](access.tf), key = the Worker's name, so `access_aud[<name>]` is its AUD) and its entry in
+   `AHEAD_OF_DEPLOY` in [`test_infra_config.py`](../.github/scripts/test_infra_config.py) (the Worker's config is
+   still undeployed: no route, the all-zeros AUD, the host as `PUBLIC_HOST`). The outputs check accepts the unknown
+   AUD because no production config names it yet ([Outputs](#outputs)).
+2. **Merge**; the push's "Infra drift" run is **red by design** (exit 2). Check it against exactly this:
+   - `create: 1`, nothing else but `no-op` (19 rows in all; with FlowDay's `update: 2` still unapplied, that too);
+   - the one row `create` `cloudflare_zero_trust_access_application.owner["<name>"]`;
+   - `output changes: 1`: `update` `access_aud`;
+   - the expect line. For the watch app, computed from the addresses of this commit (the method reproduces P4's
+     recorded `fe0e0ae1a4d6`): `create=1,outputs=1@3e485bfca3ad`, or `create=1,outputs=1,update=2@14144c392b45` if
+     FlowDay's staging-host removal (`update: 2`) has not been applied yet.
+
+   If anything differs, stop and find out why; never copy a differing line into the dispatch.
+3. **Dispatch "Infra apply"** on `main` with that `expect`. The token must be allowed to edit Access applications
+   (Access: Apps and Policies Edit; [Replacing the token](#replacing-the-token)). It ends with "apply: done" and a
+   verify plan of `no-op: 19`, `output changes: 0`; then "Infra drift" is green with `no-op: 19`.
+4. **Read the AUD and the application id, read-only.** Neither workflow prints an output value (only counts and
+   addresses), so read them from the Access API with the admin helper (a GET; the AUD is not secret, every
+   `wrangler.toml` commits its own), keeping only the new application's line:
+
+   ```sh
+   python3 mail-hero/deploy/cloudflare-admin.py inspect | python3 -c '
+   import json, sys
+   for line in sys.stdin:
+       apps = json.loads(line).get("access_apps")
+       for app in apps if isinstance(apps, list) else []:
+           if app.get("name") == "watch" and app.get("domain") == "watch.ziyixi.science":
+               print("id", app["id"], "aud", app["aud"])'
+   ```
+
+   (Or open the application in the Zero Trust dashboard and copy its "Application Audience (AUD) Tag", changing
+   nothing.) Exactly one line must print; the AUD is 64 hex digits.
+5. **The app's first-deploy commit**: the AUD as the config's `ACCESS_AUDIENCE`, the Custom Domain in its `routes`,
+   the Worker moved to `PRODUCTION` in `test_wrangler_configs.py` (and so into `infra_state.py`'s
+   `WRANGLER_CONFIGS`), its `AHEAD_OF_DEPLOY` entry removed, and the application id recorded in
+   [`ids.tf`](ids.tf) `access_app_ids` (for a rebuild by import, which then needs an import block for it too). From
+   that commit on, "Infra drift" compares the committed AUD with `access_aud` every day.
+
+Between steps 3 and 5 the application gates a host that no Worker serves yet, which is harmless.
 
 ## Removing the import blocks
 

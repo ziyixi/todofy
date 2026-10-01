@@ -372,8 +372,8 @@ All hermetic: synthetic content only, the only network is loopback, clocks are i
 - **W2** (the lead; the first deploy). Like the links app's L2 (`links/docs/design.md` §11, commit "Deploy links on
   s.ziyixi.science (L2)"), every list a production Worker is in changes in one commit:
   1. Resources: the Access application "watch" for the whole host `watch.ziyixi.science` (an `owner_apps` entry in
-     `infra/access.tf`, applied by "Infra apply"; session as for the other owner apps), its AUD committed as
-     `ACCESS_AUDIENCE`; the `production` GitHub secret `WATCH_CSRF_SIGNING_KEY` (64 hex); the owner inputs come from
+     `infra/access.tf`, session 24h as for the other owner apps, created by "Infra apply" before this commit:
+     `infra/README.md` "Adding an app"), its AUD committed as `ACCESS_AUDIENCE`; the `production` GitHub secret `WATCH_CSRF_SIGNING_KEY` (64 hex); the owner inputs come from
      the dashboard's `DASHBOARD_ACCESS_OWNER` and `DASHBOARD_ACCESS_OWNER_ALIASES`. No D1 database and no R2 bucket.
   2. `wrangler.toml`: `routes = [{ pattern = "watch.ziyixi.science", custom_domain = true }]`.
   3. `.github/scripts/test_wrangler_configs.py`: `watch` from `UNDEPLOYED` to `PRODUCTION` and `WRAPPERS`, its
