@@ -7,7 +7,7 @@
  * the copy the owner reads. Callers pass a request_id (newOpId) per user action, so a retried request is
  * answered with the first response.
  */
-import { createHttpClient, HttpEncodeError, RpcStatusError, type HttpCall } from '@ziyixi/proto/http-client'
+import { createHttpClient, HttpEncodeError, HttpResponseError, RpcStatusError, type HttpCall } from '@ziyixi/proto/http-client'
 import { DeckStateSchema, type DeckState } from '@ziyixi/proto/lab/ui/v1/deck_pb'
 import type { ErrorReason } from '@ziyixi/proto/lab/ui/v1/errors_pb'
 import { LabUiService } from '@ziyixi/proto/lab/ui/v1/lab_ui_service_pb'
@@ -84,7 +84,7 @@ export function toApiError(error: unknown): ApiError {
     return new ApiError(status.httpStatus, reason, message, status.requestId ?? null, state)
   }
   if (error instanceof HttpEncodeError) return new ApiError(0, 'BAD_REQUEST', '输入有误')
-  if (error instanceof Error && 'httpStatus' in error && typeof error.httpStatus === 'number') return unreadable(error.httpStatus)
+  if (error instanceof HttpResponseError) return unreadable(error.httpStatus)
   return unreadable(0)
 }
 
