@@ -110,9 +110,9 @@ resource "cloudflare_zero_trust_access_application" "mail_hero_backup" {
 
 # --- FlowDay -----------------------------------------------------------------------------------------
 # The two Access applications FlowDay brought with it when it moved into the monorepo (flowday/docs/design.md): the
-# host, and its exact PWA files under /pwa/* (manifest, service worker, icons), which must load without a login. Both
-# still list the F3 staging host flowday-next.ziyixi.science; after the F4 cutover is finished, a commit here removes
-# it from both (an in-place update, never a replacement: README.md "FlowDay").
+# host, and its exact PWA files under /pwa/* (manifest, service worker, icons), which must load without a login. The
+# F3 staging host flowday-next.ziyixi.science left both after the F4 cutover (an in-place update, never a replacement:
+# README.md "FlowDay").
 #
 # Each application uses its own reusable policy that FlowDay created before the move and that no other application
 # uses. Those policies are referenced by id only and their rules are not managed here (README.md "FlowDay"), like the
@@ -121,12 +121,12 @@ resource "cloudflare_zero_trust_access_application" "mail_hero_backup" {
 locals {
   flowday_apps = {
     "flowday" = {
-      destinations = ["flowday.ziyixi.science", "flowday-next.ziyixi.science"]
+      destinations = ["flowday.ziyixi.science"]
       session      = "168h"
       policy_id    = "841d2527-c836-4c76-a3dd-40e64247947d"
     }
     "flowday-bypass" = {
-      destinations = ["flowday.ziyixi.science/pwa/*", "flowday-next.ziyixi.science/pwa/*"]
+      destinations = ["flowday.ziyixi.science/pwa/*"]
       session      = "6h"
       policy_id    = "a8aa0aa2-d3dd-4d25-8b41-3b570a1ab83f"
     }

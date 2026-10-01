@@ -62,7 +62,7 @@ configurations built to slip past it.
 | `cloudflare_zero_trust_access_application.owner["lab"]` | Access app "Lab" | `lab.ziyixi.science` |
 | `cloudflare_zero_trust_access_application.owner["links"]` | Access app "links" | `s.ziyixi.science/_/*` and the exact `s.ziyixi.science/_` (the launcher and owner API), session 168h, the two shared policies. The rest of the host (the short links) is deliberately not behind Access (links/docs/design.md) |
 | `cloudflare_zero_trust_access_application.mail_hero_backup` | Access app "Mail Hero backup API" | `mail-hero.ziyixi.science/api/internal/backup/*`. Used by the backup collector's machine identity (mail-hero/AGENTS.md §7). **Frozen**: an apply refuses any write to it ([Apply](#apply-p4)) |
-| `cloudflare_zero_trust_access_application.flowday["flowday"]` | Access app "flowday" | `flowday.ziyixi.science` (and the retiring F3 staging host `flowday-next.ziyixi.science`), session 168h, FlowDay's own policy by id. See [FlowDay](#flowday) |
+| `cloudflare_zero_trust_access_application.flowday["flowday"]` | Access app "flowday" | `flowday.ziyixi.science`, session 168h, FlowDay's own policy by id. See [FlowDay](#flowday) |
 | `cloudflare_zero_trust_access_application.flowday["flowday-bypass"]` | Access app "flowday-bypass" | `flowday.ziyixi.science/pwa/*` (and the staging host's), session 6h, FlowDay's own policy by id. See [FlowDay](#flowday) |
 | `cloudflare_d1_database.app["mail-hero" \| "todofy" \| "lab" \| "flowday" \| "links"]` | D1 databases | Existence only |
 | `cloudflare_r2_bucket.app["mail-hero-store" \| "mail-hero-backups" \| "todofy-backups"]` | R2 buckets | Existence only |
@@ -128,9 +128,9 @@ login). Both are adopted unchanged (`cloudflare_zero_trust_access_application.fl
 Every change to these two applications goes through this directory, never the dashboard (FlowDay's own runbooks,
 `flowday/README.md` "Rollback and removal" and `flowday/docs/design.md` section 11, point here):
 
-- **The F3 staging host leaves through OpenTofu (after F4).** Both apps still list
+- **The F3 staging host left through OpenTofu (after F4, 2026-10-01).** Both apps listed
   `flowday-next.ziyixi.science` (and its `/pwa/*`) as a second destination. After the first P4 apply and after the
-  commit that clears F4's cf-guard allowances, **one commit** drops `flowday-next.ziyixi.science` from both entries
+  commit that cleared F4's cf-guard allowances, **one commit** dropped `flowday-next.ziyixi.science` from both entries
   of `local.flowday_apps` and empties `RETIRING_HOSTS` in
   [`test_infra_config.py`](../.github/scripts/test_infra_config.py) (`test_retiring_hosts_are_exact` fails if only
   one of the two changes). Its "Infra drift" run must show exactly `update: 2`, the addresses

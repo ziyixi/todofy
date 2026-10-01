@@ -68,11 +68,10 @@ PRODUCTION = {
     "flowday": "flowday/wrangler.toml",
     "links": "links/wrangler.toml",
 }
-# Hosts an Access application may still list although no wrangler.toml declares them: FlowDay's F3 staging host,
-# which both FlowDay applications keep until the F4 follow-up removes it through infra/ (README.md "FlowDay"). That
-# commit must empty this set (test_retiring_hosts_are_exact fails otherwise); a rollback that adds the host back adds
-# it here again.
-RETIRING_HOSTS = {"flowday-next.ziyixi.science"}
+# Hosts an Access application may still list although no wrangler.toml declares them. Empty since FlowDay's F3
+# staging host left both FlowDay applications after the F4 cutover (README.md "FlowDay"); a rollback that adds a host
+# back to an application adds it here in the same commit (test_retiring_hosts_are_exact).
+RETIRING_HOSTS: set[str] = set()
 
 
 def uncommented(text: str) -> str:
