@@ -1,5 +1,8 @@
-# The buf module of every cross-app contract IDL (README.md). Run buf from this directory with the pinned
-# binary (node_modules/.bin/buf, from package.json): npm run lint, npm run breaking.
+# The buf module of every interface we define (README.md): the cross-app contracts (todofy/taskintent/v1) and the
+# apps' UI APIs (lab/ui/v1, with the shared error reasons of common/errors/v1); prototest/ holds the runtimes' test
+# fixtures. Run from this directory with the pinned binaries (package.json, tools/api-linter/go.mod): npm run lint
+# (buf format and buf lint), npm run api-lint (Google's api-linter), npm run breaking (buf breaking and the wire
+# profile's rules), npm run selftest (those rules still bite).
 version: v2
 modules:
   - path: .
