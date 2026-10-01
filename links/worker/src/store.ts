@@ -375,6 +375,11 @@ export interface ImportResult {
  * Creates the items' links, or replaces live ones with `overwrite`, in one batch: new links as revision 1,
  * replacements as their next revision. A key a deleted link holds is never replaced; creations stop at LINKS_MAX.
  * `respond` writes the response a repeat of the request ID gets.
+ *
+ * The writes are conditional (a create on the key being free, a replacement on the etag read), so the answer counts
+ * what landed: the batch ends by reading which new etags the links carry. When all landed, the answer planned before
+ * the batch is the one logged in it; when a concurrent create or edit won a key, that line is reported (LINK_EXISTS,
+ * or LINK_DELETED when the link is deleted now) and the recounted answer is logged after the batch.
  */
 export async function importLinks(ctx: WriteContext, items: readonly ImportItem[], overwrite: boolean, respond: (result: ImportResult) => string): Promise<Outcome<ImportResult>> {
   const { db, now } = ctx;
@@ -393,6 +398,8 @@ export async function importLinks(ctx: WriteContext, items: readonly ImportItem[
   const creates: Record<string, unknown>[] = [];
   const replaces: Record<string, unknown>[] = [];
   const written: { k: string; e: string }[] = [];
+  /** Each written key's line, and whether it is a create (else a replacement). */
+  const writes = new Map<string, { readonly line: number; readonly create: boolean }>();
   const problems: { line: number; reason: ImportReason }[] = [];
   for (const { line, key, content } of items) {
     const row = existing.get(key);
@@ -419,10 +426,12 @@ export async function importLinks(ctx: WriteContext, items: readonly ImportItem[
       replaces.push({ ...values, o: row.etag, r: row.revision + 1 });
     }
     written.push({ k: key, e: etag });
+    writes.set(key, { line, create: row === undefined });
   }
   const changed = replaces.filter((item) => item['same'] !== true);
-  const result: ImportResult = { created: creates.length, replaced: replaces.length, problems };
-  if (written.length === 0) return ok(result);
+  const planned: ImportResult = { created: creates.length, replaced: replaces.length, problems };
+  if (written.length === 0) return ok(planned);
+  const writtenJson = JSON.stringify(written);
   const statements = [
     ...purgeStatements(db, now),
     db
@@ -445,18 +454,60 @@ export async function importLinks(ctx: WriteContext, items: readonly ImportItem[
          SELECT l.key, l.revision, l.revision_time, l.target, l.path_mode, l.visibility, l.description, l.tags, l.expire_time
          FROM links AS l JOIN json_each(?) AS j ON l.key = j.value->>'k' AND l.etag = j.value->>'e'`,
       )
-      .bind(JSON.stringify(written)),
+      .bind(writtenJson),
     db
       .prepare(
         `DELETE FROM link_revisions WHERE EXISTS (SELECT 1 FROM json_each(?) AS j
          WHERE j.value->>'k' = link_revisions.key AND link_revisions.revision <= (j.value->>'r') - ?)`,
       )
       .bind(JSON.stringify(changed), REVISIONS_KEPT),
+    // The planned answer, logged only if every write landed (else the recount below is logged).
     ...(ctx.requestId === ''
       ? []
-      : [ctx.db.prepare('INSERT INTO request_log (request_id, method, name, response, create_time) VALUES (?, ?, ?, ?, ?)').bind(ctx.requestId, IMPORT.method, IMPORT.name, respond(result), now)]),
+      : [
+          ctx.db
+            .prepare(
+              `INSERT INTO request_log (request_id, method, name, response, create_time) SELECT ?, ?, ?, ?, ?
+               WHERE (SELECT COUNT(*) FROM links AS l JOIN json_each(?) AS j ON l.key = j.value->>'k' AND l.etag = j.value->>'e') = ?`,
+            )
+            .bind(ctx.requestId, IMPORT.method, IMPORT.name, respond(planned), now, writtenJson, written.length),
+        ]),
+    // Which writes landed (the link carries the new etag), and whether each key whose write did not is deleted now.
+    db
+      .prepare(
+        `SELECT j.value->>'k' AS key, coalesce(l.etag = j.value->>'e', 0) AS landed, coalesce(l.delete_time IS NOT NULL, 1) AS deleted
+         FROM json_each(?) AS j LEFT JOIN links AS l ON l.key = j.value->>'k'`,
+      )
+      .bind(writtenJson),
   ];
   const outcome = await writeBatch(ctx, IMPORT, statements);
   if ('replayed' in outcome) return outcome.replayed;
+  const states = (outcome[outcome.length - 1]?.results ?? []) as { key: string; landed: number; deleted: number }[];
+  const lost = states.filter((state) => state.landed !== 1);
+  if (lost.length === 0) return ok(planned);
+  const result = recount(planned, writes, lost);
+  if (ctx.requestId === '') return ok(result);
+  try {
+    await ctx.db.prepare('INSERT INTO request_log (request_id, method, name, response, create_time) VALUES (?, ?, ?, ?, ?)').bind(ctx.requestId, IMPORT.method, IMPORT.name, respond(result), now).run();
+  } catch (error) {
+    // Another delivery of this request logged its answer meanwhile: that one is the answer.
+    const stored = await selectReplay(ctx).first<Logged>();
+    if (stored !== null) return replayOf(stored, IMPORT);
+    throw error;
+  }
   return ok(result);
+}
+
+/** The import's answer when the writes of `lost` did not land: those lines are skipped, and counted out. */
+function recount(planned: ImportResult, writes: ReadonlyMap<string, { readonly line: number; readonly create: boolean }>, lost: readonly { key: string; deleted: number }[]): ImportResult {
+  let { created, replaced } = planned;
+  const problems = [...planned.problems];
+  for (const { key, deleted } of lost) {
+    const write = writes.get(key);
+    if (write === undefined) continue;
+    if (write.create) created -= 1;
+    else replaced -= 1;
+    problems.push({ line: write.line, reason: deleted === 1 ? 'LINK_DELETED' : 'LINK_EXISTS' });
+  }
+  return { created, replaced, problems: problems.sort((a, b) => a.line - b.line) };
 }

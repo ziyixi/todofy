@@ -4,6 +4,8 @@
  * request_id replays, import and export, the store's bound, and the transport's edges (CSRF, Status errors).
  */
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import type { LinkContent } from '../../src/model.ts';
+import * as store from '../../src/store.ts';
 import { createLink, op, reasonOf, startHarness, type Harness, type WireLink } from './harness.ts';
 
 let h: Harness;
@@ -265,7 +267,67 @@ describe('request IDs (AIP-155)', () => {
   });
 });
 
+/**
+ * `db` with `race` run just before its `n`-th batch (from 1): a concurrent request that lands between a mutation's
+ * read and its write, at the one point D1 lets one in.
+ */
+function racing(db: D1Database, n: number, race: () => Promise<unknown>): D1Database {
+  let batches = 0;
+  return new Proxy(db, {
+    get(target, property) {
+      if (property === 'batch') {
+        return async (statements: D1PreparedStatement[]) => {
+          batches += 1;
+          if (batches === n) await race();
+          return target.batch(statements);
+        };
+      }
+      const value: unknown = Reflect.get(target, property);
+      return typeof value === 'function' ? (value as (...args: unknown[]) => unknown).bind(target) : value;
+    },
+  });
+}
+
 describe('import and export', () => {
+  it('counts only the writes that landed when a concurrent create or edit wins a key, and logs that answer', async () => {
+    await createLink(h, 'edited', { target: 'https://edited.example/' });
+    const content = (target: string): LinkContent => ({ target, path_mode: 'exact', visibility: 'private', description: '', tags: '[]', expire_time: null });
+    const items: store.ImportItem[] = [
+      { line: 1, key: 'fresh', content: content('https://fresh.example/') },
+      { line: 2, key: 'stolen', content: content('https://import.example/stolen') },
+      { line: 3, key: 'edited', content: content('https://import.example/edited') },
+    ];
+    // Between the import's read and its write: another tab creates `stolen` and edits `edited`.
+    const db = racing(h.db, 2, async () => {
+      await createLink(h, 'stolen', { target: 'https://other.example/' });
+      await h.mutate('PATCH', '/_/api/v1/links/edited?update_mask=description', { description: 'theirs' });
+    });
+    const requestId = op();
+    const respond = (result: store.ImportResult) => JSON.stringify(result);
+    const outcome = await store.importLinks({ db, now: Date.now(), requestId }, items, true, respond);
+    const expected: store.ImportResult = {
+      created: 1,
+      replaced: 0,
+      problems: [
+        { line: 2, reason: 'LINK_EXISTS' },
+        { line: 3, reason: 'LINK_EXISTS' },
+      ],
+    };
+    expect(outcome).toEqual({ kind: 'ok', value: expected });
+    // The other writes stand, and the request ID replays the recounted answer.
+    expect((await h.get<WireLink>('/_/api/v1/links/stolen')).body.target).toBe('https://other.example/');
+    expect((await h.get<WireLink>('/_/api/v1/links/edited')).body).toMatchObject({ target: 'https://edited.example/', description: 'theirs' });
+    expect(await h.sql('SELECT method, name, response FROM request_log WHERE request_id = ?', requestId)).toEqual([{ method: 'ImportLinks', name: '', response: respond(expected) }]);
+    expect(await store.importLinks({ db: h.db, now: Date.now(), requestId }, items, true, respond)).toEqual({ kind: 'replay', response: respond(expected) });
+  });
+
+  it('logs the planned answer within the batch when every write lands', async () => {
+    const requestId = op();
+    const imported = await h.mutate('POST', '/_/api/v1/links:import', { content: '{"name":"links/a","target":"https://a.example/"}', request_id: requestId });
+    expect(imported.body).toEqual({ created_count: 1 });
+    expect(await h.sql<{ response: string }>('SELECT response FROM request_log WHERE request_id = ?', requestId)).toEqual([{ response: '{"created_count":1}' }]);
+  });
+
   it('round-trips every live link as JSON Lines', async () => {
     await createLink(h, 'a', { target: 'https://a.example/', visibility: 'public', tags: ['x'], expire_time: '2030-01-01T00:00:00Z' });
     await createLink(h, 'b', { target: 'https://b.example/{path}', path_mode: 'template', description: 'B' });
