@@ -13,12 +13,12 @@ The root [`AGENTS.md`](../AGENTS.md) applies here too. FlowDay-specific rules:
   export` checkpoint a second copy in a private local directory (`mktemp -d`; never in the repository or a
   cloud-synced folder). Never print a row of it, and run any wrangler command that returns rows with
   `WRANGLER_WRITE_LOGS=false` (wrangler otherwise keeps all it prints in a debug log in its config directory).
-- **Status (F4 cutover).** CI deploys the Worker `flowday` (`worker/`, `migrations/`, `wrangler.toml`) with its
+- **Status (F4 done).** CI deploys the Worker `flowday` (`worker/`, `migrations/`, `wrangler.toml`) with its
   static-export UI (`web/`) and its D1 migrations ("FlowDay deploy"). Its only hostname is the production Custom
   Domain `flowday.ziyixi.science` (`PUBLIC_HOST`), covered by the Access apps "flowday" and, for `/pwa/*`,
-  "flowday-bypass"; the cutover commit's deploy detaches the staging host `flowday-next.ziyixi.science` and takes
-  over the tunnel CNAME (both cf-guard allowances are set on FlowDay's guard step for that commit only; the next
-  commit clears them). Do not add a hostname, route or Cloudflare resource before the migration step that calls for
+  "flowday-bypass"; the cutover commit's deploy detached the staging host `flowday-next.ziyixi.science` and took
+  over the tunnel CNAME (the two cf-guard allowances were set for that commit only and are cleared again). F5 (the
+  rollback window) keeps the old container stopped and untouched. Do not add a hostname, route or Cloudflare resource before the migration step that calls for
   it ([`docs/design.md`](docs/design.md) §11), and any new host only after the Access apps cover it. D1 migrations run against production on every deploy: keep each one readable
   by the container code (§11 F5).
 - **Workers Free.** A static export of the UI as Workers static assets, a plain-fetch Worker API, D1 via

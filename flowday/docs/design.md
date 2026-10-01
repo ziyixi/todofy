@@ -334,7 +334,9 @@ first (`cd ../web && npm run build`), and apply the migrations locally:
     detach the Custom Domain by hand: a deploy whose config lists no route leaves the Worker's live Custom Domains
     alone, so the revert alone does not remove it. Then remove the staging destinations from both Access apps.
     [`../README.md`](../README.md) "Rollback and removal".
-- **F4 (data cutover, owner present).** Frozen from the container stop until the cutover commit's deploy passes:
+- **F4 (data cutover, owner present).** Done in code (2026-10-01): the import tool, the cutover commit and
+  the commit that clears its cf-guard allowances; live once the cutover's `FlowDay deploy` passes on `main` and
+  the steps below are recorded. Frozen from the container stop until the cutover commit's deploy passes:
   export, import, verify and one `FlowDay deploy` job (about 5 minutes, with the checks reused). The data moves with
   `deploy/migrate/flowday_migrate.py` (standard library only; its tests in FlowDay checks use synthetic files and a
   local D1). It never prints a row: only table names, counts, byte totals and digests (prefixes at export, equal or
@@ -400,8 +402,8 @@ first (`cd ../web && npm run build`), and apply the migrations locally:
     It writes `todoist_project_id` once into every Todoist task row (about one row each, a one-off cost of roughly
     the task count), so `verify` reports that column from then on. Push the clearing commit. Delete the work
     directory, the copy and `host.sha256`.
-  - The hostname move is its own commit (done in code 2026-10-01; pushed alone by its SHA during the freeze, after
-    the import is verified, see "Landing the commits"):
+  - The hostname move is its own commit (pushed alone by its SHA during the freeze, after the import is verified, see
+    "Landing the commits"):
     `wrangler.toml` lists only `flowday.ziyixi.science` and sets `PUBLIC_HOST` to it (writes from the staging host
     stop). The Access apps already cover the host (the container used them). Before merging it, save the current
     DNS record of `flowday.ziyixi.science` (the rollback restores it: [`../README.md`](../README.md) "Rollback and
@@ -411,8 +413,8 @@ first (`cd ../web && npm run build`), and apply the migrations locally:
     cf-guard stops both unless allowed, so that commit sets both allowances on FlowDay's guard step:
     `CF_GUARD_ALLOW_REMOVE: flowday-next.ziyixi.science` and `CF_GUARD_ALLOW_CONFLICT: flowday.ziyixi.science`
     (the takeover of the tunnel CNAME is the allowed conflict), and the guard test in
-    `.github/scripts/test_ci_changes.py` expects exactly those two (`HostnameGuard.ALLOWED`). The next commit clears
-    both again. After that, remove the staging destinations from both Access apps; the deploy already detached the
+    `.github/scripts/test_ci_changes.py` expected exactly those two (`HostnameGuard.ALLOWED`). The next commit cleared
+    both again (`ALLOWED` is empty). After that, remove the staging destinations from both Access apps; the deploy already detached the
     staging Custom Domain (check Workers & Pages → `flowday` → Domains & Routes, and that no DNS record is left for
     `flowday-next.ziyixi.science`).
 - **F5 (7-day rollback window = D1 Time Travel).**

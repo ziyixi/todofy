@@ -1766,16 +1766,15 @@ jobs:
       # Domains (or zone routes) as the Worker's complete set, so stop before any production change when a live
       # hostname would be detached or another Worker's hostname or DNS record taken over. For an intentional
       # change, set the exact hostnames here (space-separated) in the same commit that changes wrangler.toml.
-      # The F4 cutover (flowday/docs/design.md section 11) moves the Worker from the staging host to
-      # flowday.ziyixi.science: wrangler detaches flowday-next.ziyixi.science (an allowed removal) and overwrites the
-      # tunnel CNAME of flowday.ziyixi.science (an allowed conflict: the old container's record, saved by hand
-      # before this commit). The next commit clears both allowances.
+      # The F4 cutover commit (flowday/docs/design.md section 11) allowed the removal of flowday-next.ziyixi.science
+      # and the takeover of the tunnel CNAME of flowday.ziyixi.science; both allowances are cleared again, so the
+      # guard now stops any change to the Worker's one Custom Domain.
       - name: Check the hostnames against production
         working-directory: .
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
-          CF_GUARD_ALLOW_REMOVE: flowday-next.ziyixi.science
-          CF_GUARD_ALLOW_CONFLICT: flowday.ziyixi.science
+          CF_GUARD_ALLOW_REMOVE: ''
+          CF_GUARD_ALLOW_CONFLICT: ''
         run: node tools/cf-guard/cf-guard.mjs --config flowday/wrangler.toml
       - name: Apply D1 migrations, then deploy the Worker flowday
         working-directory: flowday/worker

@@ -16,9 +16,9 @@
 # the CSRF origin), which the Access apps "flowday" (the host) and "flowday-bypass" (its /pwa/*) covered for the
 # container already. wrangler applies the listed Custom Domains as the Worker's complete set, so this deploy detaches
 # the F3 staging host flowday-next.ziyixi.science, and CI's non-interactive wrangler overwrites the tunnel CNAME of
-# flowday.ziyixi.science with the Worker's record; cf-guard allows exactly those two changes in the FlowDay deploy
-# job of this commit, and the next commit clears both allowances. Rollback (README.md "Rollback and removal"):
-# detach the Custom Domain by hand, restore the saved tunnel CNAME, then revert this commit.
+# flowday.ziyixi.science with the Worker's record; cf-guard allowed exactly those two changes in the FlowDay deploy
+# job of the cutover commit only (both are cleared again). Rollback (README.md "Rollback and removal"): detach the
+# Custom Domain by hand, restore the saved tunnel CNAME, then revert the cutover.
 #
 # Run wrangler from worker/ (the pinned wrangler lives in worker/node_modules) with --config ../wrangler.toml.
 # Local dev: local bindings only (D1 commands always --local, never --remote), local values in flowday/.dev.vars

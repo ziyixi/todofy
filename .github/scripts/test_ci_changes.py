@@ -2308,10 +2308,9 @@ class HostnameGuard(unittest.TestCase):
 
     GUARD = "node tools/cf-guard/cf-guard.mjs"
     STEP = "- name: Check the hostnames against production\n"
-    # Intentional hostname changes, (CF_GUARD_ALLOW_REMOVE, CF_GUARD_ALLOW_CONFLICT) per job; every other job allows
-    # none. FlowDay's F4 cutover (flowday/docs/design.md section 11) detaches the staging host and takes over the
-    # tunnel CNAME of its production host; the commit after it clears both again.
-    ALLOWED = {"flowday-deploy": ("flowday-next.ziyixi.science", "flowday.ziyixi.science")}
+    # Intentional hostname changes, (CF_GUARD_ALLOW_REMOVE, CF_GUARD_ALLOW_CONFLICT) per job, set only in the commit
+    # that makes them (FlowDay's F4 cutover set both for "flowday-deploy"; the next commit cleared them). None today.
+    ALLOWED: dict[str, tuple[str, str]] = {}
 
     @staticmethod
     def has_routes(config):
