@@ -831,14 +831,17 @@ jobs:
       # codec agrees with it), and every value core/ops.py derives (status, guard, canary result, report, digest
       # items) keeps its golden bytes, the contract's rules and the legacy schema older dashboards check. task-intent-v1:
       # the generated types and the Python wire JSON codec agree with the schema on every fixture, the core
-      # (strict read plus value rules) gives the schema's verdict, and every result it builds passes it.
+      # (strict read plus value rules) gives the schema's verdict, and every result it builds passes it. The newsletter
+      # reports (todofy.report.v1): every report keeps its golden bytes and the generated schemas give the frozen
+      # hand-written ones' verdict.
       - name: Todofy accepts every fixture and checks ops-v1
         working-directory: todofy
         run: |
           uv sync --locked
           uv run pytest tests/unit/test_mail_hero_compat.py tests/unit/test_contract.py tests/unit/test_openapi_vocab.py \
             tests/unit/test_ops_contract.py tests/unit/test_ops_core.py tests/unit/test_ops_golden.py \
-            tests/unit/test_task_intent_contract.py
+            tests/unit/test_task_intent_contract.py tests/unit/test_report_wire.py tests/unit/test_report_schemas.py \
+            tests/unit/test_report_schema_legacy.py
       # The gateway's Ops entrypoint (what the dashboard binds) forwards to todofy-core and returns values the
       # wire codec reads strictly (the generated services type it).
       - name: Todofy's Ops entrypoint returns ops-v1 values
