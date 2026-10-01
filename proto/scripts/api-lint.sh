@@ -5,8 +5,11 @@
 # One version: the linter is a Go tool of the module tools/api-linter (go.mod pins api-linter and the Go
 # toolchain, go.sum the checksum of every dependency; nothing else in the repository installs it), built
 # into .tools/ (ignored). The input is buf's image of the module with its imports and source info (the
-# comments carry the `(-- api-linter: ... --)` exceptions), so the linter reads exactly what buf compiled,
-# with the googleapis version buf.lock pins.
+# comments carry the `(-- api-linter: ... --)` exceptions), so the linter reads exactly what buf compiled
+# against the googleapis commit buf.lock pins. The linter interprets the google.api annotations with its own
+# googleapis, though: the genproto Go code compiled into it, pinned in tools/api-linter/go.mod. The two pins
+# are bumped together, and tools/api-linter/googleapis (tested and run first) fails unless every googleapis
+# file the image holds is the same in both.
 set -eu
 
 cd "$(dirname "$0")/.."
@@ -17,10 +20,13 @@ fi
 mkdir -p .tools
 # -mod=readonly: go.mod and go.sum are the pins; a build that would need to change them fails.
 go -C tools/api-linter build -mod=readonly -o ../../.tools/api-linter github.com/googleapis/api-linter/v2/cmd/api-linter
+go -C tools/api-linter test -mod=readonly ./googleapis
+go -C tools/api-linter build -mod=readonly -o ../../.tools/googleapis-check ./googleapis
 
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
 node_modules/.bin/buf build -o "$work/image.binpb"
+.tools/googleapis-check "$work/image.binpb"
 # Every module file but the fixtures, in a stable order.
 files=$(find . -name '*.proto' -not -path './node_modules/*' -not -path './prototest/*' -not -path './python/*' \
   -not -path './scripts/*' -not -path './test/*' -not -path './testdata/*' -not -path './tools/*' -not -path './ts/*' \

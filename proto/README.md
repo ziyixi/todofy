@@ -31,7 +31,11 @@ HTTP APIs, which ops-v1, recommendation-v1, mail-received-v1 and every app's UI 
    `package.json` and `package-lock.json` here. No app has its own `@bufbuild/protobuf`: an app imports the
    runtime from `@ziyixi/proto/protobuf`, which resolves this folder's copy, so every bundle holds exactly
    the runtime the generator targets. `.github/scripts/test_proto.py` enforces it (and the wiring below).
-   Generation is deterministic; CI generates twice and compares.
+   Generation is deterministic; CI generates twice and compares. googleapis has two pins, bumped together:
+   `buf.lock` (what buf compiles the module and generates the TypeScript against) and the genproto Go code compiled
+   into api-linter (`tools/api-linter/go.mod`, through which it interprets the `google.api` annotations);
+   `tools/api-linter/googleapis`, run first by `npm run api-lint`, fails unless every googleapis file the module
+   imports is the same in both.
 4. **Lint and breaking.** `buf lint` uses `STANDARD` (AIP-aligned: `_UNSPECIFIED` zero values, enum prefixes,
    `lower_snake_case`, versioned packages) and `COMMENTS` (every element documented); exceptions are written
    next to the element with `buf:lint:ignore` and a reason, and the AIP-shaped HTTP packages are excused (in
@@ -69,7 +73,7 @@ HTTP APIs, which ops-v1, recommendation-v1, mail-received-v1 and every app's UI 
 | `tools/gen_py.py` | The stdlib-only Python generator (frozen dataclasses, `IntEnum`s, field tables), for `PYTHON_PACKAGES` only: `todofy.taskintent.v1` (todofy-core imports it) and `prototest.v1` (this folder's Python tests). A package only TypeScript apps use (an app's UI API) is not generated, so it may use what the Python profile lacks |
 | `tools/profile_breaking.py` | The profile's breaking rules (rule 4) |
 | `scripts/breaking.sh`, `scripts/rules-selftest.sh` | The breaking gate against a base commit; the rules self-test |
-| `scripts/api-lint.sh`, `tools/api-linter/` | Google's api-linter on every package but `prototest/`: a Go tool module (`go.mod` pins api-linter and the Go toolchain, `go.sum` every checksum) that the script builds into `.tools/` (ignored) |
+| `scripts/api-lint.sh`, `tools/api-linter/` | Google's api-linter on every package but `prototest/`: a Go tool module (`go.mod` pins api-linter, the googleapis Go code it interprets annotations with and the Go toolchain, `go.sum` every checksum) that the script builds into `.tools/` (ignored), with `googleapis/`, the check that this googleapis equals `buf.lock`'s for every file the module imports (rule 3) |
 | `prototest/v1/prototest.proto` | Test fixtures of the runtimes, never used by an app (not in the Python wheel; a change deploys nothing): a message with every field kind of the profile and a service with every kind of HTTP binding, an AIP-134 update with a field mask among them |
 | `testdata/http-cases.json` | The HTTP runtime's cases on `prototest.v1.BookService`: 64 requests and what the transcoder answers, 19 request messages and what the client sends; every implementation (a Python transcoder later) runs them |
 | `testdata/wire-profile-cases.json` | 69 edge cases (timestamps, integer and double spellings, enum look-alikes, maps, field masks, missing fields, null) that both codecs must answer identically |
@@ -401,7 +405,7 @@ the profile's Python twin already supports every kind these APIs use.
 
 The **Proto checks** job (`.github/workflows/ci.yml`) runs when `proto/`, `.github/` or `tools/` changed,
 or on a dispatch: `npm ci`, `npm run lint`, `npm run api-lint` (Go from `tools/api-linter/go.mod` via
-`actions/setup-go`), `scripts/breaking.sh` against the **Changes** job's `base`
+`actions/setup-go`; the googleapis check of rule 3 first), `scripts/breaking.sh` against the **Changes** job's `base`
 output (the commit of the last successful `main` run on `main`, the merge base with `origin/main` on a
 branch; the checkout has `fetch-depth: 0`), the rules self-test, the determinism check,
 `test_proto.py` (one version, wiring, the deploy maps), and both codecs' typecheck and tests. When Changes has no base (it

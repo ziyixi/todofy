@@ -238,6 +238,25 @@ class ApiLinter(unittest.TestCase):
         scripts = json.loads((PROTO / "package.json").read_text())["scripts"]
         self.assertEqual(scripts["api-lint"], "sh scripts/api-lint.sh")
 
+    def test_the_linters_googleapis_is_checked_against_buf_lock_before_it_runs(self):
+        """api-linter interprets the google.api annotations with the genproto code compiled into it, buf compiles the
+        module against buf.lock's googleapis: tools/api-linter/googleapis fails unless both carry the same files."""
+        script = (PROTO / "scripts" / "api-lint.sh").read_text()
+        for line in (
+            "go -C tools/api-linter test -mod=readonly ./googleapis\n",
+            "go -C tools/api-linter build -mod=readonly -o ../../.tools/googleapis-check ./googleapis\n",
+            '.tools/googleapis-check "$work/image.binpb"\n',
+        ):
+            with self.subTest(line=line):
+                self.assertIn(line, script)
+        self.assertLess(script.index(".tools/googleapis-check \""), script.index("if .tools/api-linter "))
+        # The check compares against the packages api-linter v2 imports; genproto is a direct, exact requirement of
+        # the tool module, so a bump is a reviewed change of go.mod.
+        check = (LINTER_MODULE / "googleapis" / "main.go").read_text()
+        self.assertIn('_ "google.golang.org/genproto/googleapis/api/annotations"', check)
+        self.assertRegex(self.go_mod, r"(?m)^\tgoogle\.golang\.org/genproto/googleapis/api v0\.0\.0-\d{14}-[0-9a-f]{12}$")
+        self.assertIn("buf.lock", self.go_mod)
+
     def test_nothing_else_installs_it(self):
         offenders = []
         for path in tracked("*"):
