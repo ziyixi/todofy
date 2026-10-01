@@ -325,7 +325,7 @@ export const handlers: ServiceHandlers<ShapeOf<typeof LinksUiService>, ApiContex
     const key = keyOf(request.name);
     if (!/^[1-9][0-9]{0,8}$/.test(request.revisionId)) throw linksError('REVISION_NOT_FOUND');
     const revision = Number(request.revisionId);
-    const outcome = await dependency(() => store.rollbackLink(writeContext(env, now, request.requestId), key, revision, respondLink));
+    const outcome = await dependency(() => store.rollbackLink(writeContext(env, now, request.requestId), key, revision, request.etag, respondLink));
     return settle(LinkSchema, outcome, (row) => linkMessage(row));
   },
 

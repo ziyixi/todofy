@@ -153,6 +153,7 @@ export class FakeServer {
       },
       rollbackLink: (request) => {
         const base = this.current(request.name)
+        if (request.etag !== '' && request.etag !== base.etag) fail(Code.ABORTED, 'ETAG_MISMATCH', base)
         const kept = this.revisions.get(base.name.slice('links/'.length))?.find((revision) => revision.revisionId === request.revisionId)
         if (kept === undefined) fail(Code.NOT_FOUND, 'REVISION_NOT_FOUND')
         return Promise.resolve(this.next(base, content(kept), true))

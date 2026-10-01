@@ -296,8 +296,11 @@ export async function updateLink(ctx: WriteContext, key: string, etag: string, m
   }
 }
 
-/** Makes kept revision `revision` the link's content again, as a new revision (RollbackLink). */
-export async function rollbackLink(ctx: WriteContext, key: string, revision: number, respond: (row: LinkRow) => string): Promise<Outcome<LinkRow>> {
+/**
+ * Makes kept revision `revision` the link's content again, as a new revision (RollbackLink). With an `etag`, only if
+ * the link still has it (AIP-154): an undo never reverts a change made after the one it undoes.
+ */
+export async function rollbackLink(ctx: WriteContext, key: string, revision: number, etag: string, respond: (row: LinkRow) => string): Promise<Outcome<LinkRow>> {
   const op = onLink('RollbackLink', key);
   const read = await readForWrite(ctx, op, key, [
     ctx.db.prepare(`SELECT key, revision, create_time, ${CONTENT_COLUMNS} FROM link_revisions WHERE key = ? AND revision = ?`).bind(key, revision),
@@ -307,6 +310,7 @@ export async function rollbackLink(ctx: WriteContext, key: string, revision: num
   if (row === null) return failed('NOT_FOUND');
   const refused = liveOnly(row);
   if (refused !== null) return failed(refused, row);
+  if (etag !== '' && etag !== row.etag) return failed('ETAG_MISMATCH', row);
   const kept = read.extra[0]?.results[0] as RevisionRow | undefined;
   if (kept === undefined) return failed('REVISION_NOT_FOUND');
   const content: LinkContent = { target: kept.target, path_mode: kept.path_mode, visibility: kept.visibility, description: kept.description, tags: kept.tags, expire_time: kept.expire_time };

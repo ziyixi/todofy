@@ -259,6 +259,9 @@ message RollbackLinkRequest {
     (google.api.field_info).format = UUID4,
     (google.api.field_behavior) = OPTIONAL
   ];
+  // When set, the link's current etag (AIP-154); a stale one is ETAG_MISMATCH, with the current link. The
+  // launcher's undo sends the etag of the edit it undoes, so it never reverts a later change made elsewhere.
+  string etag = 4 [(google.api.field_behavior) = OPTIONAL];
 }
 
 // Input of ImportLinks.

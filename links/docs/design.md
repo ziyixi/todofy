@@ -129,7 +129,7 @@ edit 2, a delete 2 (the purge index), a list with nothing due 0, an import 2 per
 | DeleteLink | `DELETE /_/api/v1/{name=links/*}` | soft; answers the deleted link; `NOT_FOUND` (404, the link as a detail) when it is deleted already (AIP-164) |
 | UndeleteLink | `POST ...:undelete` | `NOT_DELETED`, `ALREADY_EXISTS` (409), for a live link (AIP-164) |
 | ListLinkRevisions | `GET ...:listRevisions` | newest first |
-| RollbackLink | `POST ...:rollback` | a kept revision's content as a new revision |
+| RollbackLink | `POST ...:rollback` | a kept revision's content as a new revision; the link's `etag` (AIP-154) as a precondition when sent |
 | ImportLinks | `POST /_/api/v1/links:import` | JSON Lines, at most 100 links and 65,536 characters; every bad line is reported, the rest is written in one batch |
 | ExportLinks | `GET /_/api/v1/links:export` | JSON Lines of the live links, 250 per page |
 
@@ -137,7 +137,8 @@ Every mutation takes an AIP-155 `request_id`; a repeat within 24 hours answers t
 and the same ID sent with another rpc or for another link is refused (`BAD_REQUEST`), never answered with another
 call's response.
 The launcher's undo is the API's own: DeleteLink after a create, RollbackLink to the previous revision after an edit,
-UndeleteLink after a delete. Value rules the IDL cannot express are in `worker/src/limits.ts` (which the launcher
+UndeleteLink after a delete, each with the etag of the change it undoes, so an undo never reverts a later change made
+in another tab or on the phone (`ETAG_MISMATCH`, and the launcher shows the current link). Value rules the IDL cannot express are in `worker/src/limits.ts` (which the launcher
 imports) and in each field's comment.
 
 ## 7. Authentication

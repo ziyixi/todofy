@@ -172,6 +172,21 @@ describe('delete, undelete, revisions and rollback (the launcher undo)', () => {
     expect(JSON.stringify(live.body)).toContain('"type.googleapis.com/links.ui.v1.Link"');
   });
 
+  it('rolls back only over the etag it was sent: an undo never reverts a later edit (AIP-154)', async () => {
+    const created = await createLink(h, 'a', { target: 'https://example.com/1' });
+    const mine = await h.mutate<WireLink>('PATCH', '/_/api/v1/links/a?update_mask=target', { target: 'https://example.com/2', etag: created.etag });
+    // Another tab edits after this one, before this one's undo.
+    const theirs = await h.mutate<WireLink>('PATCH', '/_/api/v1/links/a?update_mask=target', { target: 'https://example.com/3' });
+    const before = await h.snapshot();
+    const undo = await h.mutate('POST', '/_/api/v1/links/a:rollback', { revision_id: created.revision_id, etag: mine.body.etag, request_id: op() });
+    expect([undo.status, reasonOf(undo.body)]).toEqual([409, 'ETAG_MISMATCH']);
+    expect(JSON.stringify(undo.body)).toContain(theirs.body.etag ?? 'no etag');
+    expect(await h.snapshot()).toBe(before);
+    // With the current etag the rollback applies.
+    const applied = await h.mutate<WireLink>('POST', '/_/api/v1/links/a:rollback', { revision_id: created.revision_id, etag: theirs.body.etag });
+    expect(applied.body).toMatchObject({ target: 'https://example.com/1', revision_id: '4' });
+  });
+
   it('keeps the last 20 revisions newest first and rolls back to one as a new revision', async () => {
     await createLink(h, 'a', { target: 'https://example.com/0' });
     for (let n = 1; n <= 22; n += 1) await h.mutate('PATCH', '/_/api/v1/links/a?update_mask=target', { target: `https://example.com/${String(n)}` });

@@ -360,8 +360,15 @@ export function mountLauncher(root: HTMLElement, host: Host = browserHost): Prom
     if (updated.revisionId === link.revisionId) return showToast('没有改动')
     showToast(`已保存 s/${keyOf(link)}`, async () => {
       const undoId = newRequestId()
-      upsert(await withRetry(() => api.rollbackLink({ name: link.name, revisionId: link.revisionId, requestId: undoId })))
-      render()
+      try {
+        // With the etag of this edit: a change made since (another tab, the phone) is never reverted silently.
+        upsert(await withRetry(() => api.rollbackLink({ name: link.name, revisionId: link.revisionId, etag: updated.etag, requestId: undoId })))
+      } catch (error) {
+        if (error instanceof ApiError && error.reason === 'ETAG_MISMATCH' && error.link !== null) upsert(error.link)
+        throw error
+      } finally {
+        render()
+      }
     })
   }
 

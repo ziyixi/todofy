@@ -134,9 +134,11 @@ describe('the launcher', () => {
     const [update] = server.mutations('/_/api/v1/links/gh')
     expect(update?.method).toBe('PATCH')
     expect(update?.body).toMatchObject({ etag: 'etag-gh-1', description: 'new' })
+    const edited = server.links.get('gh')?.etag
     button(document, '撤销').click()
     await until(() => row(root, 'gh').textContent.includes('old'))
-    expect(server.mutations(':rollback')[0]?.body).toMatchObject({ revision_id: '1' })
+    // The undo carries the etag of the edit it undoes (AIP-154).
+    expect(server.mutations(':rollback')[0]?.body).toMatchObject({ revision_id: '1', etag: edited })
     // Someone else changed it: the form reloads the current link and says so.
     button(row(root, 'gh'), '编辑').click()
     server.links.set('gh', link('gh', { description: 'elsewhere', etag: 'etag-other', revisionId: '9' }))
@@ -144,6 +146,21 @@ describe('the launcher', () => {
     submit(root)
     await until(() => root.querySelector('.error')?.textContent.includes('已在别处修改') === true)
     expect(root.querySelector<HTMLInputElement>('[name="description"]')?.value).toBe('elsewhere')
+  })
+
+  it('does not undo an edit over a later change made elsewhere: it shows the current link', async () => {
+    const server = new FakeServer([link('gh', { description: 'old' })])
+    const { root } = await mount(server)
+    button(row(root, 'gh'), '编辑').click()
+    fill(root, { description: 'new' })
+    submit(root)
+    await until(() => row(root, 'gh').textContent.includes('new'))
+    // The phone edits the link after this tab's edit, before its undo.
+    server.links.set('gh', link('gh', { description: 'phone', etag: 'etag-phone', revisionId: '3' }))
+    button(document, '撤销').click()
+    await until(() => document.querySelector('.toast')?.textContent.includes('已在别处修改') === true)
+    expect(row(root, 'gh').textContent).toContain('phone')
+    expect(server.links.get('gh')?.description).toBe('phone')
   })
 
   it('deletes and restores through the toast, and lists deleted links on request', async () => {
