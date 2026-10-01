@@ -51,8 +51,11 @@ test('MIME decode, safe HTML, attachment metadata and frozen webhook contract',a
   assert.equal(parsed.mail.subject,'Hello 合成');assert.equal(parsed.mail.text,'Synthetic body');
   const html=safeHTML('<p onclick="bad()">Hello<img src="https://tracker/x"><script>bad()</script><a href="javascript:bad()">x</a><a href="https://example.org/">link</a></p>');
   assert.doesNotMatch(html.html,/onclick|img|script|javascript/);assert.match(html.html,/noopener noreferrer/);
-  const event=JSON.parse(buildPayload('event','message','2026-09-25T00:00:00.000Z',parsed.mail,'inbox@mail.example.org'));
-  assert.equal(event.type,'mail.received.v1');assert.equal(event.event_id,'event');assert.deepEqual(event.message.to,[]);
+  // The contract's IDs are UUIDs (proto/mailhero/webhook/v1/mail_received.proto): the codec refuses anything else.
+  assert.throws(()=>buildPayload('event','message','2026-09-25T00:00:00.000Z',parsed.mail,'inbox@mail.example.org'),{code:'invalid_payload'});
+  const eventID='5d0f8a64-2b7e-4c51-9a1d-0e3b6f7c8d90',messageID='5d0f8a64-2b7e-4c51-9a1d-0e3b6f7c8d91';
+  const event=JSON.parse(buildPayload(eventID,messageID,'2026-09-25T00:00:00.000Z',parsed.mail,'inbox@mail.example.org'));
+  assert.equal(event.type,'mail.received.v1');assert.equal(event.event_id,eventID);assert.deepEqual(event.message.to,[]);
   assert.equal(event.message.text,'Synthetic body');assert.equal(event.message.sent_at,null);
 });
 test('MIME budgets reject deep/too many parts without destroying original fixture',async()=>{

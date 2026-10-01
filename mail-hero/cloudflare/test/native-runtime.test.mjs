@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { setTimeout as delay } from 'node:timers/promises';
+import { createHash } from 'node:crypto';
 import { build } from 'esbuild';
 import { Miniflare, convertV4MiniflareOptions } from 'miniflare';
 import { migrationStatements } from './migrations.mjs';
@@ -219,6 +220,28 @@ test('native workerd: durable archive, protected API, stable retry identity and 
     assert.deepEqual(local.buckets.map(item => [item.start.slice(11, 13), item.retried, item.succeeded]),
       [['06', 0, 0], ['07', 0, 0], ['08', 1, 0], ['09', 0, 1], ['10', 0, 0], ['11', 0, 0]], 'the repeated 01:00 stays two buckets');
     assert.equal((await mf.dispatchFetch('http://localhost/api/v1/delivery-stats?from=2026-11-01T06%3A00%3A00.000Z&to=2026-11-01T12%3A00%3A00.000Z&tz=Not%2FAZone')).status, 400);
+
+    // Mixed versions: an event an older build froze (its R2 payload/<eventID>.json) is retried with exactly those bytes.
+    // Nothing builds an event twice, so this build's codec never rewrites one (pre_storage_v1 lacks storage-v1's fields,
+    // which the codec would add).
+    const legacyBytes = await readFile(join(root, '../../contracts/mail-received-v1/fixtures/legacy/pre_storage_v1.json'));
+    await db.prepare('UPDATE webhook_endpoints SET paused=1 WHERE id=?').bind(endpoint.id).run();
+    const latest = (await api(`/messages/${forwardedRow.id}`)).message;
+    const frozen = await api(`/deliveries/${automatic.event_id}/replay`, 'POST', { endpoint_id: endpoint.id,
+      message_version: latest.version, action_request_id: crypto.randomUUID() });
+    const { payload_key: frozenKey } = await db.prepare('SELECT payload_key FROM deliveries WHERE event_id=?').bind(frozen.event_id).first();
+    await (await mf.getR2Bucket('MAIL_STORE')).put(frozenKey, legacyBytes);
+    await db.batch([
+      db.prepare("UPDATE deliveries SET payload_sha256=?,payload_size_bytes=?,next_attempt_at='2000-01-01T00:00:00.000Z' WHERE event_id=?")
+        .bind(createHash('sha256').update(legacyBytes).digest('hex'), legacyBytes.byteLength, frozen.event_id),
+      db.prepare('UPDATE webhook_endpoints SET paused=0,next_send_at=NULL WHERE id=?').bind(endpoint.id),
+      db.prepare('UPDATE app_settings SET next_send_at=NULL'),
+    ]);
+    assert.equal((await mf.dispatchFetch('http://localhost/__test/enqueue', { method: 'POST', body: JSON.stringify({ type: 'deliver', eventID: frozen.event_id }) })).status, 204);
+    await waitFor(() => db.prepare('SELECT state FROM deliveries WHERE event_id=?').bind(frozen.event_id).first(), row => row?.state === 'delivered', 'a frozen older event is delivered');
+    assert.equal(calls.length, 5);
+    assert.equal(calls[4].body, legacyBytes.toString('utf8'), 'the frozen bytes, never rebuilt');
+    assert.equal(calls[4].key, frozen.event_id);
   } finally {
     await mf.dispose();
     await rm(temp, { recursive: true, force: true });

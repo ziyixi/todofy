@@ -1,3 +1,6 @@
+import { create } from '@ziyixi/proto/protobuf';
+import { MailReceivedEventSchema, OmittedReason, OmittedReasonSchema, StorageStatus, StorageStatusSchema } from '@ziyixi/proto/mailhero/webhook/v1/mail_received_pb';
+import { toWire, wireEnum, WireJsonError, type WireEnum } from '@ziyixi/proto/wire-json';
 import type { Env, Job } from './types.ts';
 import { HttpError, sha256, decryptCredential, validateTarget } from './security.ts';
 import { parseMail, ParseError, type ParsedMail } from './parser.ts';
@@ -50,17 +53,40 @@ export interface CreateOptions {
 }
 /** contracts/ops-v1 RunId; also mail.received.v1 `canary.run_id`. */
 export const CANARY_RUN_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
-/** `canary` marks a synthetic end-to-end canary event (contracts/ops-v1): consumers must not act on it.
- * Without it the bytes are exactly those of earlier releases. */
+const STORAGE_STATUS = wireEnum(StorageStatusSchema, StorageStatus);
+const OMITTED_REASON = wireEnum(OmittedReasonSchema, OmittedReason);
+/** An attachment enum's value by its wire name: undefined for none, a refusal for a name the contract lacks. */
+function enumValue<E extends Readonly<Record<string, number>>>(table: WireEnum<E>, name: string | undefined): E[keyof E] | undefined {
+  if (name === undefined) return undefined;
+  const value = table.value(name);
+  if (value === undefined) error(422, 'invalid_payload');
+  return value;
+}
+/** The frozen bytes of a NEW mail.received.v1 event (proto/mailhero/webhook/v1/mail_received.proto), built as a
+ * generated message and written by the wire codec, which checks every rule of the contract first. Called once per
+ * event: its bytes go to R2 (payload/<eventID>.json) and every retry resends them; nothing builds an event twice.
+ * `canary` marks a synthetic end-to-end canary event (contracts/ops-v1): consumers must not act on it. Without it the
+ * bytes are exactly those of earlier releases. What the IDL cannot say is checked here: the subject's 4 KiB and the
+ * event's 1 MiB of UTF-8, and a blank subject and text by ECMAScript's trim() as well as the contract's Visible. */
 export function buildPayload(eventID: string, messageID: string, receivedAt: string, parsed: ParsedMail, address: string, currentAddress=address, canary?: {run_id: string}): string {
   const content = webhookContent(parsed);
   if (utf8.encode(parsed.subject).length > 4096 || parsed.from.length > 50 || parsed.to.length > 50 ||
       (!parsed.subject.trim() && !content.text.trim()) || (canary && !CANARY_RUN_ID.test(canary.run_id))) error(422,'invalid_payload');
-  const payload = JSON.stringify({type:'mail.received.v1', event_id:eventID, received_at:receivedAt, ...(canary ? {canary:{run_id:canary.run_id}} : {}), message:{
-    id:messageID, from:parsed.from.map(a=>({address:a.address,name:a.name ?? ''})),
-    to:parsed.to.filter(a=>a.address.toLowerCase() !== address.toLowerCase() && a.address.toLowerCase() !== currentAddress.toLowerCase()).map(a=>({address:a.address,name:a.name ?? ''})),
-    subject:parsed.subject, sent_at:parsed.sent_at, rfc_message_id:parsed.rfc_message_id, ...content,
-  }});
+  const event = create(MailReceivedEventSchema, {
+    type:'mail.received.v1', eventId:eventID, receivedAt, canary:canary ? {runId:canary.run_id} : undefined, message:{
+      id:messageID, from:parsed.from.map(a=>({address:a.address,name:a.name ?? ''})),
+      to:parsed.to.filter(a=>a.address.toLowerCase() !== address.toLowerCase() && a.address.toLowerCase() !== currentAddress.toLowerCase()).map(a=>({address:a.address,name:a.name ?? ''})),
+      subject:parsed.subject, sentAt:parsed.sent_at ?? undefined, rfcMessageId:parsed.rfc_message_id ?? undefined,
+      text:content.text, textTruncated:content.text_truncated, originalTextBytes:content.original_text_bytes,
+      htmlOmitted:content.html_omitted, needsReview:content.needs_review, warnings:content.warnings,
+      contentPolicyVersion:content.content_policy_version, attachmentsOmittedCount:content.attachments_omitted_count,
+      attachments:content.attachments.map(a=>({filename:a.filename, contentType:a.content_type, size:a.size,
+        storageStatus:enumValue(STORAGE_STATUS, a.storage_status), omittedReason:enumValue(OMITTED_REASON, a.omitted_reason)})),
+    },
+  });
+  let payload: string;
+  try { payload = JSON.stringify(toWire(MailReceivedEventSchema, event)); }
+  catch (err) { if (err instanceof WireJsonError) error(422,'invalid_payload'); throw err; }
   if (utf8.encode(payload).length > 1024*1024) error(422,'invalid_payload');
   return payload;
 }
