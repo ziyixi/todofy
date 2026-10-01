@@ -1,0 +1,61 @@
+# Worker "watch": the owner's web watches (watch.ziyixi.science, docs/design.md): pages, feeds and JSON APIs checked
+# on a schedule by one SQLite Durable Object, with a deterministic noise pipeline and a change inbox. The production
+# configuration and its single source of truth: top level = production, never [env.*] or keep_vars. Every static
+# value is committed here (the repository is public: nothing personal, no secret).
+#
+# NOT DEPLOYED YET (docs/design.md §11, step W1): CI checks this config ("Watch checks": a --dry-run through
+# deploy/deploy-vars.mjs, which refuses a real deploy while the Access AUD below is the all-zeros placeholder) and
+# nothing deploys it. Before the first deploy (W2) the Access application "watch" (the whole host) exists, its AUD
+# replaces the placeholder, the Custom Domain watch.ziyixi.science is added as `routes`, and a "Watch deploy" job runs
+# this file through deploy/deploy-vars.mjs, which appends --var BUILD_SHA and passes ACCESS_OWNER,
+# ACCESS_OWNER_ALIASES and CSRF_SIGNING_KEY as Worker secrets with --secrets-file. A plain `wrangler deploy` of this
+# file DELETES BUILD_SHA.
+#
+# Run wrangler from worker/ (the pinned wrangler lives in worker/node_modules) with --config ../wrangler.toml.
+# Local dev: local bindings only, local values in watch/.dev.vars (see .dev.vars.example). No cron trigger, no D1, no
+# R2, no KV: WatchState schedules itself with setAlarm() and keeps everything in its own SQLite.
+name = "watch"
+account_id = "f57937bd1d93bf59e737b6d8445fb7a3"
+main = "worker/src/index.ts"
+compatibility_date = "2026-09-08"
+workers_dev = false
+preview_urls = false
+
+# The Worker's own log lines (a refusal: request ID, status, reason; an alarm: counts) are kept; the invocation logs,
+# which record every request's URL, are off, and so are traces. The Worker never logs a watched URL, page text or a
+# diff.
+[observability]
+enabled = true
+
+[observability.logs]
+enabled = true
+invocation_logs = false
+
+[observability.traces]
+enabled = false
+
+# The UI (web/, `npm run build`). Every request reaches the Worker first: it checks Access and adds the private
+# headers before handing a path to ASSETS. The single-page fallback serves the page for /new (the add-from-phone link
+# /new#u=<url>, whose fragment never reaches the server) and the UI's other paths.
+[assets]
+directory = "web/dist"
+binding = "ASSETS"
+run_worker_first = true
+not_found_handling = "single-page-application"
+
+# One SQLite-backed object ("watch-v1"): every watch, snapshot and change, the etiquette state, the browser ledger and
+# the notification outbox; it schedules itself with setAlarm.
+[[durable_objects.bindings]]
+name = "WATCH"
+class_name = "WatchState"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["WatchState"]
+
+[vars]
+# The watch host: the only origin a mutation may come from (CSRF).
+PUBLIC_HOST = "watch.ziyixi.science"
+ACCESS_ISSUER = "https://ziyixi.cloudflareaccess.com"
+# AUD tag of the Access application "watch": the all-zeros placeholder until it exists (W2).
+ACCESS_AUDIENCE = "0000000000000000000000000000000000000000000000000000000000000000"
