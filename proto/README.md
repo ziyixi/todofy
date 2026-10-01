@@ -551,15 +551,15 @@ runs everything: first run, unusable base, dispatch), `breaking.sh` compares wit
 the log; a base that predates `proto/` has nothing to break. The job is in `CI gate`'s needs and in
 `CHECK_JOBS` (a push to `main` reuses a green branch run only if it passed Proto checks).
 
-A `proto/` change also re-checks every app in `PROTO_USERS` (Lab, Todofy, Mail Hero, the dashboard and the links app) and runs
+A `proto/` change also re-checks every app in `PROTO_USERS` (Lab, Todofy, Mail Hero, the dashboard, the links app and the watch app) and runs
 `Contracts` (the contracts' tests check the codecs against the schemas and pin the wire bytes). It deploys only
 the apps whose production bundle the changed path reaches (`proto_deploys` in `.github/scripts/ci_changes.py`).
 `PROTO_USERS` names each user's bundled languages: Lab, Mail Hero and the dashboard `"ts"` (their Workers, and
-Lab's UI), the links app `"ts"` (its Worker and UI), Todofy `"python"` (todofy-core vendors the wheel; its gateway and UI import types only, which compile to
+Lab's UI), the links and watch apps `"ts"` (their Workers and UIs; watch is checked only, so it never deploys), Todofy `"python"` (todofy-core vendors the wheel; its gateway and UI import types only, which compile to
 nothing). A language's runtime and generator reach that language's users (`proto/ts/` and `buf.gen.yaml`: the
 TypeScript users; `proto/python/`, `tools/gen_py.py` and `tools/wire_rules.py`: Todofy); the wire profile's own
 options (`common/wire/`) reach both; a package reaches the apps that import it (`PROTO_PACKAGES`:
-`todofy/taskintent/` Lab and Todofy, `todofy/report/` Todofy, `lab/ui/` Lab, `links/ui/` the links app, `ops/` the four apps with an `Ops` entrypoint or caller (Lab, Mail Hero, the dashboard and Todofy), `common/errors/` and `prototest/` none);
+`todofy/taskintent/` Lab and Todofy, `todofy/report/` Todofy, `lab/ui/` Lab, `links/ui/` the links app, `watch/ui/` the watch app, `ops/` the four apps with an `Ops` entrypoint or caller (Lab, Mail Hero, the dashboard and Todofy), `common/errors/` and `prototest/` none);
 the module and toolchain files (`buf.yaml`, `buf.lock`, `package-lock.json`, `tools/ensure.mjs`) and any path
 not mapped reach every user; tests, test data, the check scripts, the wire JSON types' and JSON Schema
 generators (`tools/gen_wire_ts.py`: types only; `tools/gen_schema.py`: files under `contracts/` and `todofy/api/`,

@@ -280,7 +280,7 @@ about 340 ms and of a 2 MiB page of hostile runs (2,000 characters of each class
 pass (pages of 2 MiB, bounded by the 24 MiB budget) about 4 s of the 30 s an invocation may use. The test fails
 beyond 6 ms (2 ms warm) for the fetch handler, 300 ms for an API call and 7.5 s for an alarm pass or the largest
 preview, and the hostile preview beyond twice the plain one, in reference milliseconds scaled by the machine's speed.
-Bundles: the Worker 110.0 KiB gzip (budget 122 KiB, `deploy/bundle-size.mjs`), the UI's JavaScript 50.1 KiB gzip
+Bundles: the Worker 110.1 KiB gzip (budget 122 KiB, `deploy/bundle-size.mjs`), the UI's JavaScript 50.2 KiB gzip
 (budget 56 KiB, `web/scripts/js-budget.mjs`), both with the wire profile's rule checker of proto/ts.
 
 SQLite rows are a budget of their own: Workers Free gives the account's SQLite Durable Objects 5,000,000 rows read

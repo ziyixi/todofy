@@ -375,7 +375,6 @@ class Classify(unittest.TestCase):
         self.assertEqual(ci_changes.proto_deploys("proto/ts/http-transcoder.ts"), ts)
         self.assertEqual(ci_changes.proto_deploys("proto/links/ui/v1/link.proto"), {"links"})
         self.assertEqual(ci_changes.proto_deploys("proto/watch/ui/v1/watch.proto"), {"watch"})
-        self.assertEqual(ci_changes.proto_deploys("proto/watch/ui/v1/watch.proto"), {"watch"})
 
     def test_every_proto_package_and_runtime_is_mapped(self):
         """Each package directory under proto/ (a directory holding .proto files) is in PROTO_PACKAGES, and every

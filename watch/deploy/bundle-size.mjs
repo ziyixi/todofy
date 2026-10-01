@@ -5,7 +5,7 @@
 // BUDGET_GZIP_BYTES is the app's ratchet, well below the limit, so that growth is a decision. It was set on 2026-10-01
 // at about 1.2 times the measured bundle (101.4 KiB gzip: watch.ui.v1, the protobuf-es runtime, the HTTP runtime of
 // proto/ts, packages/edge-auth and the pipeline); the wire profile's rule checker in proto/ts then made it 105.1 KiB,
-// and the review fixes (the per-hop etiquette gate, the rows meter and bounds, the confirmation window) 110.0 KiB.
+// and the review fixes (the per-hop etiquette gate, the rows meter and bounds, the confirmation window) 110.1 KiB.
 // Raise it only in the commit that needs it, saying why there. The UI's
 // own budget is in ../web/scripts/js-budget.mjs.
 //
