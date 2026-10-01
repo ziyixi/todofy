@@ -211,8 +211,12 @@ function settle<Desc extends DescMessage, T>(schema: Desc, outcome: store.Outcom
       return build(outcome.value);
     case 'replay':
       return fromWire(schema, JSON.parse(outcome.response)).message;
-    case 'failed':
-      throw linksError(outcome.failure.reason, outcome.failure.current);
+    case 'failed': {
+      const { reason, current } = outcome.failure;
+      // AIP-155: an ID names one request; reused for another rpc or resource it is refused, never answered.
+      if (reason === 'REQUEST_ID_REUSED') throw new RpcError(REASONS.BAD_REQUEST.code, 'BAD_REQUEST', 'the request_id was used for another request (another method or resource)');
+      throw linksError(reason, current);
+    }
   }
 }
 

@@ -41,6 +41,15 @@ describe('the schema', () => {
     await expect(insert('exact', 'friends')).rejects.toThrow();
   });
 
+  it('logs a request ID with the rpc and resource it named, and only as a UUID', async () => {
+    const columns = await h.sql<{ name: string }>('PRAGMA table_info(request_log)');
+    expect(columns.map((column) => column.name)).toEqual(['request_id', 'method', 'name', 'response', 'create_time']);
+    const insert = (id: string) => h.sql("INSERT INTO request_log (request_id, method, name, response, create_time) VALUES (?, 'CreateLink', 'links/x', '{}', 0)", id);
+    await expect(insert('short')).rejects.toThrow();
+    await insert('11111111-1111-4111-8111-111111111111');
+    await h.sql('DELETE FROM request_log');
+  });
+
   it('finds what is due for purging through the partial index', async () => {
     const plan = await h.sql<{ detail: string }>('EXPLAIN QUERY PLAN DELETE FROM links WHERE purge_time <= ?', 0);
     expect(plan.map((row) => row.detail).join('\n')).toMatch(/USING (COVERING )?INDEX links_purge/);

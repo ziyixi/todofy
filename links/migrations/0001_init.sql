@@ -41,10 +41,14 @@ CREATE TABLE link_revisions (
   PRIMARY KEY (key, revision)
 ) WITHOUT ROWID;
 
--- request_log: the first response of each mutation sent with a request_id (AIP-155), answered again to a repeat
--- within 24 hours; the next write drops older rows (a scan of a table that holds a day of owner edits).
+-- request_log: the first response of each mutation sent with a request_id (AIP-155, a UUID4), answered again to a
+-- repeat within 24 hours; the next write drops older rows (a scan of a table that holds a day of owner edits). A
+-- repeat is answered only when it is the same rpc (method) on the same resource (name: links/<key>, '' for
+-- ImportLinks); the ID reused for another request is refused and applies nothing.
 CREATE TABLE request_log (
-  request_id TEXT PRIMARY KEY NOT NULL,
+  request_id TEXT PRIMARY KEY NOT NULL CHECK (length(request_id) = 36),
+  method TEXT NOT NULL,
+  name TEXT NOT NULL,
   response TEXT NOT NULL,
   create_time INTEGER NOT NULL
 ) WITHOUT ROWID;

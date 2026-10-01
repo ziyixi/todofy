@@ -98,7 +98,10 @@ key.
   etag (16 random hex digits, new on every write). The only secondary index is `links_purge (purge_time) WHERE
   purge_time IS NOT NULL`, which costs a write only for deleted rows.
 - `link_revisions` (`WITHOUT ROWID`, `(key, revision)`): the content of each change, the last 20 per link.
-- `request_log` (`WITHOUT ROWID`, request_id): the first response of each mutation sent with a request ID, for 24 hours.
+- `request_log` (`WITHOUT ROWID`, request_id, a UUID4 by a `CHECK`): the first response of each mutation sent with a
+  request ID, for 24 hours, with the rpc (`method`) and the resource it named (`name`, `links/<key>`, empty for an
+  import). A repeat is answered with that response only when both match; the ID reused for another rpc or link is
+  `INVALID_ARGUMENT` (`BAD_REQUEST`) and applies nothing.
 
 Soft delete (AIP-164): a delete sets `delete_time` and `purge_time` (30 days later). Every list and every write batch
 first purges what is due: deleted links past their purge time with their revisions, and request IDs older than a day.
@@ -130,7 +133,9 @@ edit 2, a delete 2 (the purge index), a list with nothing due 0, an import 2 per
 | ImportLinks | `POST /_/api/v1/links:import` | JSON Lines, at most 100 links and 65,536 characters; every bad line is reported, the rest is written in one batch |
 | ExportLinks | `GET /_/api/v1/links:export` | JSON Lines of the live links, 250 per page |
 
-Every mutation takes an AIP-155 `request_id`; a repeat within 24 hours answers the first response and writes nothing.
+Every mutation takes an AIP-155 `request_id`; a repeat within 24 hours answers the first response and writes nothing,
+and the same ID sent with another rpc or for another link is refused (`BAD_REQUEST`), never answered with another
+call's response.
 The launcher's undo is the API's own: DeleteLink after a create, RollbackLink to the previous revision after an edit,
 UndeleteLink after a delete. Value rules the IDL cannot express are in `worker/src/limits.ts` (which the launcher
 imports) and in each field's comment.

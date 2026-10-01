@@ -13,7 +13,7 @@ import { LINKS_MAX, PURGE_AFTER_MS, REQUEST_ID_TTL_MS, REVISIONS_KEPT } from './
 
 /** Why a mutation did not apply; `current` is the link's state when the caller should see it. */
 export interface Failure {
-  readonly reason: 'NOT_FOUND' | 'LINK_EXISTS' | 'LINK_DELETED' | 'NOT_DELETED' | 'ETAG_MISMATCH' | 'LINKS_FULL' | 'REVISION_NOT_FOUND';
+  readonly reason: 'NOT_FOUND' | 'LINK_EXISTS' | 'LINK_DELETED' | 'NOT_DELETED' | 'ETAG_MISMATCH' | 'LINKS_FULL' | 'REVISION_NOT_FOUND' | 'REQUEST_ID_REUSED';
   readonly current?: LinkRow;
 }
 
@@ -22,6 +22,31 @@ export type Outcome<T> =
   | { readonly kind: 'ok'; readonly value: T }
   | { readonly kind: 'failed'; readonly failure: Failure }
   | { readonly kind: 'replay'; readonly response: string };
+
+/**
+ * What a request ID is logged under besides its response: the rpc and the resource it named. A repeat of the ID is
+ * answered with the logged response only when both match; otherwise it is REQUEST_ID_REUSED and applies nothing.
+ */
+interface Operation {
+  readonly method: 'CreateLink' | 'UpdateLink' | 'RollbackLink' | 'DeleteLink' | 'UndeleteLink' | 'ImportLinks';
+  /** links/<key>, or '' for ImportLinks. */
+  readonly name: string;
+}
+
+const onLink = (method: Operation['method'], key: string): Operation => ({ method, name: `links/${key}` });
+const IMPORT: Operation = { method: 'ImportLinks', name: '' };
+
+/** A request_log row as a replay reads it. */
+interface Logged {
+  readonly response: string;
+  readonly method: string;
+  readonly name: string;
+}
+
+/** The answer to a request whose ID is logged: the first response, or REQUEST_ID_REUSED for another request. */
+function replayOf(logged: Logged, op: Operation): Outcome<never> {
+  return logged.method === op.method && logged.name === op.name ? { kind: 'replay', response: logged.response } : { kind: 'failed', failure: { reason: 'REQUEST_ID_REUSED' } };
+}
 
 /** What every mutation needs besides its input. */
 export interface WriteContext {
@@ -59,14 +84,14 @@ function purgeStatements(db: D1Database, now: number): D1PreparedStatement[] {
 const PURGES = 3;
 
 function selectReplay(ctx: WriteContext): D1PreparedStatement {
-  return ctx.db.prepare('SELECT response FROM request_log WHERE request_id = ? AND create_time > ?').bind(ctx.requestId, ctx.now - REQUEST_ID_TTL_MS);
+  return ctx.db.prepare('SELECT response, method, name FROM request_log WHERE request_id = ? AND create_time > ?').bind(ctx.requestId, ctx.now - REQUEST_ID_TTL_MS);
 }
 
 /** The request log row of `response`, written only where `key` now carries `etag` (the mutation applied). */
-function logStatement(ctx: WriteContext, response: string, key: string, etag: string): D1PreparedStatement {
+function logStatement(ctx: WriteContext, op: Operation, response: string, key: string, etag: string): D1PreparedStatement {
   return ctx.db
-    .prepare('INSERT INTO request_log (request_id, response, create_time) SELECT ?, ?, ? WHERE EXISTS (SELECT 1 FROM links WHERE key = ? AND etag = ?)')
-    .bind(ctx.requestId, response, ctx.now, key, etag);
+    .prepare('INSERT INTO request_log (request_id, method, name, response, create_time) SELECT ?, ?, ?, ?, ? WHERE EXISTS (SELECT 1 FROM links WHERE key = ? AND etag = ?)')
+    .bind(ctx.requestId, op.method, op.name, response, ctx.now, key, etag);
 }
 
 /** The revision row of the link's current state, written only where it carries `etag`. */
@@ -81,16 +106,16 @@ function revisionStatement(db: D1Database, key: string, etag: string): D1Prepare
 
 /**
  * Runs a write batch. When it fails and the request carries an ID that another request logged meanwhile (two
- * deliveries of one request: the request_log key collides), the first response is the answer; otherwise the
+ * deliveries of one request: the request_log key collides), that log row is the answer (replayOf); otherwise the
  * failure propagates (D1 unavailable).
  */
-async function writeBatch(ctx: WriteContext, statements: D1PreparedStatement[]): Promise<D1Result[] | { readonly replay: string }> {
+async function writeBatch(ctx: WriteContext, op: Operation, statements: D1PreparedStatement[]): Promise<D1Result[] | { readonly replayed: Outcome<never> }> {
   try {
     return await ctx.db.batch(statements);
   } catch (error) {
     if (ctx.requestId !== '') {
-      const stored = await selectReplay(ctx).first<{ response: string }>();
-      if (stored !== null) return { replay: stored.response };
+      const stored = await selectReplay(ctx).first<Logged>();
+      if (stored !== null) return { replayed: replayOf(stored, op) };
     }
     throw error;
   }
@@ -100,14 +125,22 @@ function changes(result: D1Result | undefined): number {
   return result?.meta.changes ?? 0;
 }
 
-/** Reads the request's replay (when it has an ID) and the link `key` in one round trip. */
-async function readForWrite(ctx: WriteContext, key: string, extra: D1PreparedStatement[] = []): Promise<{ replay: string | null; row: LinkRow | null; extra: D1Result[] }> {
+/**
+ * Reads the request's log row (when it has an ID) and the link `key` in one round trip: `replayed` is the answer
+ * when the ID is logged already (replayOf).
+ */
+async function readForWrite(
+  ctx: WriteContext,
+  op: Operation,
+  key: string,
+  extra: D1PreparedStatement[] = [],
+): Promise<{ replayed: Outcome<never> | null; row: LinkRow | null; extra: D1Result[] }> {
   const statements = [...(ctx.requestId === '' ? [] : [selectReplay(ctx)]), selectLink(ctx.db, key), ...extra];
   const results = await ctx.db.batch(statements);
   const offset = ctx.requestId === '' ? 0 : 1;
-  const replay = ctx.requestId === '' ? null : ((results[0]?.results[0] as { response: string } | undefined)?.response ?? null);
+  const logged = ctx.requestId === '' ? undefined : (results[0]?.results[0] as Logged | undefined);
   const row = (results[offset]?.results[0] as LinkRow | undefined) ?? null;
-  return { replay, row: present(row, ctx.now), extra: results.slice(offset + 1) };
+  return { replayed: logged === undefined ? null : replayOf(logged, op), row: present(row, ctx.now), extra: results.slice(offset + 1) };
 }
 
 /** Why a mutation cannot apply to the link in its current state, or null when it can. */
@@ -193,8 +226,9 @@ export async function listRevisions(db: D1Database, key: string, before: number 
  */
 export async function createLink(ctx: WriteContext, key: string, content: LinkContent, respond: (row: LinkRow) => string): Promise<Outcome<LinkRow>> {
   const count = ctx.db.prepare('SELECT COUNT(*) AS n FROM links WHERE purge_time IS NULL OR purge_time > ?').bind(ctx.now);
-  const read = await readForWrite(ctx, key, [count]);
-  if (read.replay !== null) return { kind: 'replay', response: read.replay };
+  const op = onLink('CreateLink', key);
+  const read = await readForWrite(ctx, op, key, [count]);
+  if (read.replayed !== null) return read.replayed;
   if (read.row !== null) return failed('LINK_EXISTS', read.row);
   if (((read.extra[0]?.results[0] as { n: number } | undefined)?.n ?? 0) >= LINKS_MAX) return failed('LINKS_FULL');
   const { now } = ctx;
@@ -205,10 +239,10 @@ export async function createLink(ctx: WriteContext, key: string, content: LinkCo
       .prepare(`INSERT INTO links (${LINK_COLUMNS}) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (key) DO NOTHING`)
       .bind(row.key, row.target, row.path_mode, row.visibility, row.description, row.tags, row.expire_time, row.create_time, row.update_time, null, null, 1, now, row.etag),
     revisionStatement(ctx.db, key, row.etag),
-    ...(ctx.requestId === '' ? [] : [logStatement(ctx, respond(row), key, row.etag)]),
+    ...(ctx.requestId === '' ? [] : [logStatement(ctx, op, respond(row), key, row.etag)]),
   ];
-  const results = await writeBatch(ctx, statements);
-  if ('replay' in results) return { kind: 'replay', response: results.replay };
+  const results = await writeBatch(ctx, op, statements);
+  if ('replayed' in results) return results.replayed;
   if (changes(results[PURGES]) === 1) return ok(row);
   const current = present(await selectLink(ctx.db, key).first<LinkRow>(), now);
   if (current === null) throw new Error('the link was neither created nor found');
@@ -216,7 +250,7 @@ export async function createLink(ctx: WriteContext, key: string, content: LinkCo
 }
 
 /** Writes `content` as the link's next revision, if the link still carries the etag of `row`. */
-async function writeRevision(ctx: WriteContext, row: LinkRow, content: LinkContent, respond: (row: LinkRow) => string): Promise<Outcome<LinkRow> | null> {
+async function writeRevision(ctx: WriteContext, op: Operation, row: LinkRow, content: LinkContent, respond: (row: LinkRow) => string): Promise<Outcome<LinkRow> | null> {
   const { now, db } = ctx;
   const next: LinkRow = { ...row, ...content, update_time: now, revision: row.revision + 1, revision_time: now, etag: newEtag() };
   const statements = [
@@ -229,10 +263,10 @@ async function writeRevision(ctx: WriteContext, row: LinkRow, content: LinkConte
       .bind(next.target, next.path_mode, next.visibility, next.description, next.tags, next.expire_time, now, next.revision, now, next.etag, row.key, row.etag),
     revisionStatement(db, row.key, next.etag),
     db.prepare('DELETE FROM link_revisions WHERE key = ? AND revision <= ?').bind(row.key, next.revision - REVISIONS_KEPT),
-    ...(ctx.requestId === '' ? [] : [logStatement(ctx, respond(next), row.key, next.etag)]),
+    ...(ctx.requestId === '' ? [] : [logStatement(ctx, op, respond(next), row.key, next.etag)]),
   ];
-  const results = await writeBatch(ctx, statements);
-  if ('replay' in results) return { kind: 'replay', response: results.replay };
+  const results = await writeBatch(ctx, op, statements);
+  if ('replayed' in results) return results.replayed;
   return changes(results[PURGES]) === 1 ? ok(next) : null;
 }
 
@@ -242,9 +276,10 @@ async function writeRevision(ctx: WriteContext, row: LinkRow, content: LinkConte
  * content writes nothing and answers the link as it is.
  */
 export async function updateLink(ctx: WriteContext, key: string, etag: string, merge: (row: LinkRow) => LinkContent, respond: (row: LinkRow) => string): Promise<Outcome<LinkRow>> {
+  const op = onLink('UpdateLink', key);
   for (let attempt = 0; ; attempt += 1) {
-    const read = await readForWrite(ctx, key);
-    if (read.replay !== null) return { kind: 'replay', response: read.replay };
+    const read = await readForWrite(ctx, op, key);
+    if (read.replayed !== null) return read.replayed;
     const row = read.row;
     if (row === null) return failed('NOT_FOUND');
     const refused = liveOnly(row);
@@ -252,7 +287,7 @@ export async function updateLink(ctx: WriteContext, key: string, etag: string, m
     if (etag !== '' && etag !== row.etag) return failed('ETAG_MISMATCH', row);
     const content = merge(row);
     if (sameContent(content, row)) return ok(row);
-    const written = await writeRevision(ctx, row, content, respond);
+    const written = await writeRevision(ctx, op, row, content, respond);
     if (written !== null) return written;
     if (etag !== '' || attempt > 0) return lostRace(ctx, key, liveOnly);
   }
@@ -260,10 +295,11 @@ export async function updateLink(ctx: WriteContext, key: string, etag: string, m
 
 /** Makes kept revision `revision` the link's content again, as a new revision (RollbackLink). */
 export async function rollbackLink(ctx: WriteContext, key: string, revision: number, respond: (row: LinkRow) => string): Promise<Outcome<LinkRow>> {
-  const read = await readForWrite(ctx, key, [
+  const op = onLink('RollbackLink', key);
+  const read = await readForWrite(ctx, op, key, [
     ctx.db.prepare(`SELECT key, revision, create_time, ${CONTENT_COLUMNS} FROM link_revisions WHERE key = ? AND revision = ?`).bind(key, revision),
   ]);
-  if (read.replay !== null) return { kind: 'replay', response: read.replay };
+  if (read.replayed !== null) return read.replayed;
   const row = read.row;
   if (row === null) return failed('NOT_FOUND');
   const refused = liveOnly(row);
@@ -272,7 +308,7 @@ export async function rollbackLink(ctx: WriteContext, key: string, revision: num
   if (kept === undefined) return failed('REVISION_NOT_FOUND');
   const content: LinkContent = { target: kept.target, path_mode: kept.path_mode, visibility: kept.visibility, description: kept.description, tags: kept.tags, expire_time: kept.expire_time };
   if (sameContent(content, row)) return ok(row);
-  return (await writeRevision(ctx, row, content, respond)) ?? lostRace(ctx, key, liveOnly);
+  return (await writeRevision(ctx, op, row, content, respond)) ?? lostRace(ctx, key, liveOnly);
 }
 
 /**
@@ -289,8 +325,9 @@ export async function undeleteLink(ctx: WriteContext, key: string, etag: string,
 }
 
 async function setDeleted(ctx: WriteContext, key: string, etag: string, deleted: boolean, respond: (row: LinkRow) => string): Promise<Outcome<LinkRow>> {
-  const read = await readForWrite(ctx, key);
-  if (read.replay !== null) return { kind: 'replay', response: read.replay };
+  const op = onLink(deleted ? 'DeleteLink' : 'UndeleteLink', key);
+  const read = await readForWrite(ctx, op, key);
+  if (read.replayed !== null) return read.replayed;
   const row = read.row;
   if (row === null) return failed('NOT_FOUND');
   const refused = toggles(deleted)(row);
@@ -303,10 +340,10 @@ async function setDeleted(ctx: WriteContext, key: string, etag: string, deleted:
     db
       .prepare('UPDATE links SET delete_time = ?, purge_time = ?, update_time = ?, etag = ? WHERE key = ? AND etag = ?')
       .bind(next.delete_time, next.purge_time, now, next.etag, key, row.etag),
-    ...(ctx.requestId === '' ? [] : [logStatement(ctx, respond(next), key, next.etag)]),
+    ...(ctx.requestId === '' ? [] : [logStatement(ctx, op, respond(next), key, next.etag)]),
   ];
-  const results = await writeBatch(ctx, statements);
-  if ('replay' in results) return { kind: 'replay', response: results.replay };
+  const results = await writeBatch(ctx, op, statements);
+  if ('replayed' in results) return results.replayed;
   return changes(results[PURGES]) === 1 ? ok(next) : lostRace(ctx, key, toggles(deleted));
 }
 
@@ -342,8 +379,8 @@ export async function importLinks(ctx: WriteContext, items: readonly ImportItem[
   ];
   const results = await db.batch(reads);
   const offset = ctx.requestId === '' ? 0 : 1;
-  const replay = ctx.requestId === '' ? undefined : (results[0]?.results[0] as { response: string } | undefined)?.response;
-  if (replay !== undefined) return { kind: 'replay', response: replay };
+  const logged = ctx.requestId === '' ? undefined : (results[0]?.results[0] as Logged | undefined);
+  if (logged !== undefined) return replayOf(logged, IMPORT);
   const existing = new Map(((results[offset]?.results ?? []) as LinkRow[]).flatMap((row) => (present(row, now) === null ? [] : [[row.key, row] as const])));
   let room = LINKS_MAX - ((results[offset + 1]?.results[0] as { n: number } | undefined)?.n ?? 0);
   const creates: Record<string, unknown>[] = [];
@@ -408,9 +445,11 @@ export async function importLinks(ctx: WriteContext, items: readonly ImportItem[
          WHERE j.value->>'k' = link_revisions.key AND link_revisions.revision <= (j.value->>'r') - ?)`,
       )
       .bind(JSON.stringify(changed), REVISIONS_KEPT),
-    ...(ctx.requestId === '' ? [] : [ctx.db.prepare('INSERT INTO request_log (request_id, response, create_time) VALUES (?, ?, ?)').bind(ctx.requestId, respond(result), now)]),
+    ...(ctx.requestId === ''
+      ? []
+      : [ctx.db.prepare('INSERT INTO request_log (request_id, method, name, response, create_time) VALUES (?, ?, ?, ?, ?)').bind(ctx.requestId, IMPORT.method, IMPORT.name, respond(result), now)]),
   ];
-  const outcome = await writeBatch(ctx, statements);
-  if ('replay' in outcome) return { kind: 'replay', response: outcome.replay };
+  const outcome = await writeBatch(ctx, IMPORT, statements);
+  if ('replayed' in outcome) return outcome.replayed;
   return ok(result);
 }

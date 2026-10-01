@@ -200,6 +200,37 @@ describe('request IDs (AIP-155)', () => {
     expect(reasonOf((await h.mutate('POST', '/_/api/v1/links?link_id=b&request_id=not-a-uuid', { target: 'https://a.example/' })).body)).toBe('BAD_REQUEST');
   });
 
+  it('refuse an ID reused for another rpc or another link, and apply nothing', async () => {
+    const id = op();
+    const created = await h.mutate<WireLink>('POST', `/_/api/v1/links?link_id=aa&request_id=${id}`, { target: 'https://a.example/' });
+    expect(created.status).toBe(200);
+    const other = await createLink(h, 'bb', { target: 'https://b.example/' });
+    const before = await h.snapshot();
+    const reused = [
+      // Another resource with the same rpc, the same resource with another rpc, and an rpc without a resource.
+      await h.mutate('POST', `/_/api/v1/links?link_id=cc&request_id=${id}`, { target: 'https://c.example/' }),
+      await h.mutate('DELETE', `/_/api/v1/links/bb?request_id=${id}`),
+      await h.mutate('DELETE', `/_/api/v1/links/aa?request_id=${id}`),
+      await h.mutate('PATCH', `/_/api/v1/links/aa?request_id=${id}`, { target: 'https://z.example/' }),
+      await h.mutate('POST', '/_/api/v1/links/aa:rollback', { revision_id: '1', request_id: id }),
+      await h.mutate('POST', '/_/api/v1/links:import', { content: '{"name":"links/dd","target":"https://d.example/"}', request_id: id }),
+    ];
+    for (const answer of reused) expect([answer.status, reasonOf(answer.body)]).toEqual([400, 'BAD_REQUEST']);
+    expect(JSON.stringify(reused[1]?.body)).toContain('request_id was used for another request');
+    expect(await h.snapshot()).toBe(before);
+    expect((await h.get<WireLink>('/_/api/v1/links/bb')).body).toEqual(other);
+    // The same request again is still answered with its first response.
+    const again = await h.mutate<WireLink>('POST', `/_/api/v1/links?link_id=aa&request_id=${id}`, { target: 'https://a.example/' });
+    expect(again.body).toEqual(created.body);
+    // An import's ID likewise names only that import.
+    const importId = op();
+    const imported = await h.mutate('POST', '/_/api/v1/links:import', { content: '{"name":"links/ee","target":"https://e.example/"}', request_id: importId });
+    expect(imported.body).toEqual({ created_count: 1 });
+    const misused = await h.mutate('POST', `/_/api/v1/links?link_id=ff&request_id=${importId}`, { target: 'https://f.example/' });
+    expect([misused.status, reasonOf(misused.body)]).toEqual([400, 'BAD_REQUEST']);
+    expect((await h.get('/_/api/v1/links/ff')).status).toBe(404);
+  });
+
   it('are forgotten after a day, by the next write', async () => {
     const id = op();
     await h.mutate('POST', `/_/api/v1/links?link_id=a&request_id=${id}`, { target: 'https://a.example/' });

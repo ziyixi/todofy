@@ -18,7 +18,8 @@
 // double-submit CSRF token (header X-CSRF-Token, cookie links_csrf), issued by GET /_/api/csrf, which is
 // transport, not part of this service. Every mutation takes a `request_id` (AIP-155, a UUID4 the browser makes
 // once per user action): repeating a request with the same ID within 24 hours answers the first response and
-// changes nothing. Without one the Worker makes one up, so nothing is deduplicated.
+// changes nothing. The ID names one request, the rpc and the link it names: reused for another rpc or another link,
+// it is INVALID_ARGUMENT (BAD_REQUEST) and changes nothing. Without one nothing is deduplicated.
 //
 // Value rules the IDL cannot express (lengths, patterns, counts) are in each field's comment and enforced by
 // the Worker; the constants are in links/worker/src/limits.ts.
