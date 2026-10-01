@@ -306,13 +306,18 @@ describe('each check is stamped with its own time', () => {
   it('a check that starts minutes into a pass records that time for its host and its URL', async () => {
     await at(clock + DAY);
     const start = clock;
-    // The first host's request takes "five minutes" (the test moves the clock while it is out); two other lanes are
-    // slow in real time, so the fourth host is checked by the first lane, after it.
+    // The first host's request takes "five minutes" (the test moves the clock while it is out); the two other lanes
+    // answer only once the fourth host was asked (at most 400 ms of real time), so the fourth host is checked by the
+    // first lane, after it.
     h.sites.set('https://lane1.example.net/p', async () => {
       await h.clock(start + 5 * MINUTE);
       return { headers: { 'content-type': 'text/html' }, body };
     });
-    for (const n of [2, 3]) h.sites.set(`https://lane${String(n)}.example.net/p`, { headers: { 'content-type': 'text/html' }, body, delayMs: 300 });
+    const afterLane4 = async () => {
+      for (let waited = 0; waited < 400 && h.sites.requestsTo('https://lane4.example.net/p').length === 0; waited += 5) await new Promise((resolve) => setTimeout(resolve, 5));
+      return { headers: { 'content-type': 'text/html' }, body };
+    };
+    for (const n of [2, 3]) h.sites.set(`https://lane${String(n)}.example.net/p`, afterLane4);
     h.sites.html('https://lane4.example.net/p', body);
     for (const n of [1, 2, 3, 4]) await create(`lane${String(n)}`, { uri: `https://lane${String(n)}.example.net/p`, fetchPolicy: { ignoreRobots: true } });
     await h.step(start);
