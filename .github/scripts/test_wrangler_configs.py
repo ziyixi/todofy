@@ -754,7 +754,7 @@ class Workflow(unittest.TestCase):
     def test_flowday_deploy_applies_migrations_before_the_worker_and_then_checks_production(self):
         """F2: `wrangler d1 migrations apply DB --remote`, then the real deploy through the wrapper, in one step after
         the hostname guard; then a check of the live version and the migrations through the API (the host's /health
-        needs an owner login), before the probes of the staging host (F3)."""
+        needs an owner login), before the probes of its host (PUBLIC_HOST, since F3)."""
         flowday = steps(self.jobs["flowday-deploy"])
         names = [step["name"] for step in flowday]
         guard = names.index("Check the hostnames against production")

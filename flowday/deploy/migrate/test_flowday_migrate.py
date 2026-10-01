@@ -4,13 +4,15 @@
 
 The round trip runs the pinned wrangler against a local D1 (flowday/worker/node_modules; `npm ci` there first).
 Without it those tests skip, unless FLOWDAY_MIGRATE_REQUIRE_WRANGLER=1 (CI) makes a missing wrangler a failure.
-A fake wrangler backed by a plain SQLite file stands in for the remote D1 (its JSON shapes, Time Travel).
+A fake wrangler backed by a plain SQLite file stands in for the remote D1 (its output shapes, Time Travel), and a
+loopback server for the GraphQL Analytics API (the account's D1 rows written today). No test reaches Cloudflare.
 """
 
 from __future__ import annotations
 
 import contextlib
 import hashlib
+import http.server
 import io
 import json
 import os
@@ -21,6 +23,7 @@ import subprocess
 import sys
 import tempfile
 import textwrap
+import threading
 import unittest
 import unittest.mock
 from pathlib import Path
@@ -31,6 +34,17 @@ import flowday_migrate as tool
 
 WRANGLER = tool.WORKER / "node_modules" / ".bin" / "wrangler"
 REQUIRE_WRANGLER = os.environ.get("FLOWDAY_MIGRATE_REQUIRE_WRANGLER") == "1"
+# The account of the committed config: what the usage query must ask for.
+ACCOUNT = re.search(r'^account_id = "([0-9a-f]{32})"$', tool.CONFIG.read_text(), re.MULTILINE).group(1)
+FAKE_API_TOKEN = "SENTINEL-api-token-never-printed-0123456789"
+
+
+def setUpModule() -> None:
+    """No test may reach the real GraphQL Analytics API: tests that need it patch in their loopback server."""
+    patcher = unittest.mock.patch.object(tool, "GRAPHQL_URL", "http://127.0.0.1:9/unreachable")
+    patcher.start()
+    unittest.addModuleCleanup(patcher.stop)
+
 
 # Markers that must never appear in the tool's output: every synthetic row carries one.
 MARKER = "SYNTH-ROW"
@@ -526,42 +540,186 @@ def split_statements(sql: str) -> list[str]:
     return statements
 
 
+# What wrangler 4.142's non-interactive spinner writes to stdout before the JSON of `d1 execute --remote --file
+# --json` (src/d1/execute.ts: spinnerWhile around the upload; --json silences only wrangler's logger, not these).
+WRANGLER_FILE_PROGRESS = (
+    "├ Checking if file needs uploading\n│\n├ 🌀 Uploading 0123abcd.sql\n│ 🌀 Uploading complete.\n│\n"
+)
+
 FAKE_WRANGLER = textwrap.dedent(
     '''\
-    #!{python}
-    """A remote D1 stand-in: a SQLite file at $FAKE_D1, answering in the shapes of wrangler's --remote --json."""
-    import json, os, sqlite3, sys
+    #!@PYTHON@
+    """A remote D1 stand-in: a SQLite file at $FAKE_D1, answering as wrangler 4.142 does with --remote --json.
 
+    Every answer is pretty-printed JSON (JSON.stringify(result, null, 2)); `d1 execute --file` prints the spinner's
+    progress lines first, as the real one does. Time Travel keeps a copy of the file per bookmark it hands out.
+    $FAKE_FILE_ANSWER=progress-only applies a file but prints the progress lines alone (an unreadable answer).
+    """
+    import hashlib, json, os, shutil, sqlite3, sys
+
+    sys.stdout.reconfigure(encoding="utf-8")
     args = sys.argv[1:]
     with open(os.environ["FAKE_D1_CALLS"], "a") as calls:
         calls.write(json.dumps(args) + "\\n")
-    assert "--config" in args and ("--remote" in args or args[:3] == ["d1", "time-travel", "restore"]), args
+    assert "--config" in args and "--json" in args, args
+    assert "--remote" in args or args[:2] == ["d1", "time-travel"], args
     assert "--local" not in args and "--persist-to" not in args, args
-    db = sqlite3.connect(os.environ["FAKE_D1"])
-    db.row_factory = sqlite3.Row
-    if args[:2] == ["d1", "time-travel"]:
-        tables = db.execute("SELECT name FROM sqlite_master WHERE type = 'table' AND name != 'd1_migrations'")
-        for (name,) in tables.fetchall():
-            db.execute(f'DELETE FROM "{{name}}"')
+    path = os.environ["FAKE_D1"]
+
+
+    def empty_tables():
+        db = sqlite3.connect(path)
+        names = db.execute("SELECT name FROM sqlite_master WHERE type = 'table' AND name != 'd1_migrations'")
+        for (name,) in names.fetchall():
+            db.execute(f'DELETE FROM "{name}"')
         db.commit()
-        print(json.dumps({{"bookmark": "restored"}}))
+        db.close()
+
+
+    if args[:3] == ["d1", "time-travel", "info"]:
+        with open(path, "rb") as handle:
+            bookmark = "0000002a-00000001-00004ff0-" + hashlib.sha256(handle.read()).hexdigest()[:32]
+        shutil.copyfile(path, f"{path}.{bookmark}")
+        print(json.dumps({"bookmark": bookmark, "timestamp": "2026-10-01T12:00:00.000Z"}, indent=2))
+    elif args[:3] == ["d1", "time-travel", "restore"]:
+        bookmark = args[args.index("--bookmark") + 1]
+        if os.path.exists(f"{path}.{bookmark}"):
+            shutil.copyfile(f"{path}.{bookmark}", path)
+        else:  # a bookmark from before this fake's first info: D1 as the migrations left it
+            empty_tables()
+        print(json.dumps({"success": True, "bookmark": bookmark}, indent=2))
     elif "--command" in args:
+        db = sqlite3.connect(path)
+        db.row_factory = sqlite3.Row
         results = []
         for statement in args[args.index("--command") + 1].split("; "):
-            results.append({{"results": [dict(r) for r in db.execute(statement)], "success": True, "meta": {{}}}})
-        print(json.dumps(results))
+            results.append({"results": [dict(r) for r in db.execute(statement)], "success": True, "meta": {}})
+        print(json.dumps(results, indent=2))
     else:
+        db = sqlite3.connect(path)
         sql = open(args[args.index("--file") + 1]).read()
         before = db.total_changes
         db.executescript(sql)
-        counts = {{"Total queries executed": sql.count(";\\n"), "Rows written": db.total_changes - before}}
-        print(json.dumps([{{"results": [counts], "success": True}}]))
+        written = db.total_changes - before
+        db.close()
+        sys.stdout.write(os.environ["FAKE_FILE_PROGRESS"])
+        if os.environ.get("FAKE_FILE_ANSWER") != "progress-only":
+            counts = {
+                "Total queries executed": sql.count(";\\n"),
+                "Rows read": 0,
+                "Rows written": written,
+                "Database size (MB)": "0.10",
+            }
+            meta = {"rows_read": 0, "rows_written": written, "duration": 1.5}
+            answer = [{"results": [counts], "success": True, "finalBookmark": "0000002a-00000002", "meta": meta}]
+            print(json.dumps(answer, indent=2))
     '''
 )
 
 
+class FakeGraphQL:
+    """A loopback GraphQL Analytics API answering the D1 usage query with `rows_written`, one group per database."""
+
+    def __init__(self) -> None:
+        self.rows_written = [0]
+        self.status = 200
+        self.errors: list | None = None
+        self.requests: list[dict] = []
+        fake = self
+
+        class Handler(http.server.BaseHTTPRequestHandler):
+            def do_POST(self) -> None:
+                body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+                fake.requests.append({"auth": self.headers.get("Authorization"), "body": body})
+                groups = [
+                    {"sum": {"rowsWritten": n}, "dimensions": {"databaseId": f"database-{i}"}}
+                    for i, n in enumerate(fake.rows_written)
+                ]
+                answer = {"data": {"viewer": {"accounts": [{"d1AnalyticsAdaptiveGroups": groups}]}}}
+                if fake.errors is not None:
+                    answer = {"data": None, "errors": fake.errors}
+                data = json.dumps(answer).encode()
+                self.send_response(fake.status)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(data)))
+                self.end_headers()
+                self.wfile.write(data)
+
+            def log_message(self, *args: object) -> None:
+                pass
+
+        self.server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        threading.Thread(target=self.server.serve_forever, daemon=True).start()
+        self.url = f"http://127.0.0.1:{self.server.server_address[1]}/client/v4/graphql"
+
+    def close(self) -> None:
+        self.server.shutdown()
+        self.server.server_close()
+
+
+class JsonAnswerTest(unittest.TestCase):
+    def test_reads_the_document_after_wranglers_progress_lines(self) -> None:
+        document = [{"results": [{"Total queries executed": 3, "Rows written": 9}], "success": True}]
+        for name, output in (
+            ("plain", json.dumps(document)),
+            ("pretty", json.dumps(document, indent=2) + "\n"),
+            ("progress", WRANGLER_FILE_PROGRESS + json.dumps(document, indent=2) + "\n"),
+            ("coloured", "\x1b[90m│\x1b[39m\n\x1b[90m├\x1b[39m Uploading\n" + json.dumps(document, indent=2)),
+            ("object", "warning text\n" + json.dumps({"bookmark": "00000085-0000024c"}, indent=2)),
+        ):
+            with self.subTest(case=name):
+                expected = document if name != "object" else {"bookmark": "00000085-0000024c"}
+                self.assertEqual(tool.json_answer(output), expected)
+
+    def test_anything_else_is_unreadable(self) -> None:
+        for output in (
+            "",
+            WRANGLER_FILE_PROGRESS,
+            "🚣 Executed 3 queries",
+            json.dumps([{"a": 1}]) + "\ntrailing text",
+            '[{"truncated": ',
+        ):
+            with self.subTest(output=output[:20]):
+                self.assertIsNone(tool.json_answer(output))
+
+
+class KeysetTest(unittest.TestCase):
+    def test_pages_are_primary_key_range_searches_without_offset(self) -> None:
+        """WHERE pk > :last ORDER BY pk LIMIT n: SQLite searches the key's index; no scan, sort or OFFSET."""
+        db = sqlite3.connect(":memory:")
+        for path in tool.migration_files():
+            db.executescript(path.read_text())
+        for table in tool.source_schema().values():
+            with self.subTest(table=table.name):
+                first = tool.keyset_select(table, None)
+                # A key holding a quote, a statement end and a comment marker: the literal holds none of them.
+                row = {f"t{i}": "text" for i in range(len(table.columns))}
+                row.update({f"v{i}": "k'; --" for i in range(len(table.columns))})
+                after = tool.key_after(table, row)
+                self.assertNotIn(";", after)
+                self.assertNotIn("'; --", after)
+                page = tool.keyset_select(table, after)
+                for statement in (first, page):
+                    self.assertNotIn("OFFSET", statement.upper())
+                    self.assertTrue(statement.endswith(f" LIMIT {tool.PAGE_ROWS}"))
+                    self.assertRegex(statement, tool.READ_ONLY)
+                plan = " ".join(str(step[-1]) for step in db.execute("EXPLAIN QUERY PLAN " + page))
+                pattern = rf"SEARCH (TABLE )?{table.name} USING (COVERING )?INDEX \S+ \({table.primary_key}>\?\)"
+                self.assertRegex(plan, pattern)
+                self.assertNotIn("TEMP B-TREE", plan)
+                self.assertEqual(db.execute(page).fetchall(), [])
+
+    def test_a_key_of_another_type_continues_exactly_after_it(self) -> None:
+        table = tool.source_schema()["settings"]
+        self.assertEqual(tool.key_after(table, {"t0": "blob", "v0": "00FF", "t1": "null", "v1": None}), "X'00FF'")
+        self.assertEqual(tool.key_after(table, {"t0": "integer", "v0": "-12", "t1": "null", "v1": None}), "-12")
+        with self.assertRaises(tool.ToolError):
+            tool.key_after(table, {"t0": "null", "v0": None, "t1": "null", "v1": None})
+
+
 class FakeRemoteTest(Scratch):
-    """The --remote code paths against a fake wrangler: answer shapes, Time Travel, no bookmark or row printed."""
+    """The --remote code paths against a fake wrangler and a fake GraphQL API: answer shapes, Time Travel, the
+    account's daily budget, and that no bookmark, token, row or wrangler text is printed."""
 
     def setUp(self) -> None:
         super().setUp()
@@ -576,17 +734,25 @@ class FakeRemoteTest(Scratch):
         db.commit()
         db.close()
         fake = self.tmp / "wrangler"
-        fake.write_text(FAKE_WRANGLER.format(python=sys.executable))
+        fake.write_text(FAKE_WRANGLER.replace("@PYTHON@", sys.executable))
         fake.chmod(0o700)
         self.calls = self.tmp / "calls.jsonl"
+        self.graphql = FakeGraphQL()
+        self.addCleanup(self.graphql.close)
         env = {
             "FLOWDAY_WRANGLER": str(fake),
             "FAKE_D1": str(self.d1),
             "FAKE_D1_CALLS": str(self.calls),
+            "FAKE_FILE_PROGRESS": WRANGLER_FILE_PROGRESS,
             "FLOWDAY_D1_BOOKMARK": "00000085-0000024c-00004ff0-ba0fc8aa8fd4d6b2a68d1a2f6b8e0a7c",
+            "CLOUDFLARE_API_TOKEN": FAKE_API_TOKEN,
+            "CLOUDFLARE_ACCOUNT_ID": ACCOUNT,
+            "NO_PROXY": "127.0.0.1,localhost",
+            "no_proxy": "127.0.0.1,localhost",
         }
         for patcher in (
             unittest.mock.patch.dict(os.environ, env),
+            unittest.mock.patch.object(tool, "GRAPHQL_URL", self.graphql.url),
             # Small pages, so that verify reads several pages per table and several calls per run.
             unittest.mock.patch.object(tool, "PAGE_ROWS", 2),
             unittest.mock.patch.object(tool, "PAGES_PER_CALL", 3),
@@ -596,23 +762,51 @@ class FakeRemoteTest(Scratch):
         self.source = build_container_db(self.tmp, rows=6, wal_rows=3)
         self.workdir = self.tmp / "work"
         self.assertEqual(run("export", "--source", str(self.source), "--workdir", str(self.workdir))[0], 0)
-        self.estimate = json.loads((self.workdir / "manifest.json").read_text())["estimated_rows_written"]
+        self.manifest = json.loads((self.workdir / "manifest.json").read_text())
+        self.estimate = self.manifest["estimated_rows_written"]
+        # What deleting the imported rows costs: each row and its index entries.
+        target = tool.target_schema()
+        self.reset_estimate = sum(
+            entry["rows"] * (1 + target[name].indexes) for name, entry in self.manifest["tables"].items()
+        )
+
+    def assertQuiet(self, output: str) -> None:
+        """Nothing printed is a row, a bookmark, the token or wrangler's own text."""
+        self.assertNoContent(output)
+        self.assertNotIn(FAKE_API_TOKEN, output)
+        self.assertNotIn(os.environ["FLOWDAY_D1_BOOKMARK"], output)
+        self.assertNotRegex(output, r"0000002a-0000000[12]")
+        for text in ("Uploading", "Checking if file", "├", "│", "finalBookmark"):
+            self.assertNotIn(text, output)
+
+    def wrangler_calls(self) -> list[list[str]]:
+        if not self.calls.exists():
+            return []
+        return [json.loads(line) for line in self.calls.read_text().splitlines()]
+
+    def count(self, table: str) -> int:
+        db = sqlite3.connect(self.d1)
+        try:
+            return db.execute(f'SELECT count(*) FROM "{table}"').fetchone()[0]
+        finally:
+            db.close()
 
     def test_import_verify_and_both_resets(self) -> None:
         status, output = run("import", "--workdir", str(self.workdir), "--remote")
         self.assertEqual(status, 0, output)
         self.assertRegex(output, r"Imported: \d+ statement\(s\) executed, \d+ rows written")
+        self.assertQuiet(output)
         status, output = run("verify", "--workdir", str(self.workdir), "--remote")
         self.assertEqual(status, 0, output)
-        self.assertNoContent(output)
+        self.assertQuiet(output)
         status, output = run("import", "--workdir", str(self.workdir), "--remote")
         self.assertEqual(status, 1, output)
         self.assertIn("D1 is not empty", output)
 
         status, output = run("reset", "--remote", "--bookmark-env", "FLOWDAY_D1_BOOKMARK")
         self.assertEqual(status, 0, output)
-        self.assertNotIn(os.environ["FLOWDAY_D1_BOOKMARK"], output)
-        restore = [json.loads(line) for line in self.calls.read_text().splitlines() if "time-travel" in line]
+        self.assertQuiet(output)
+        restore = [call for call in self.wrangler_calls() if call[:3] == ["d1", "time-travel", "restore"]]
         self.assertEqual(len(restore), 1)
         self.assertEqual(restore[0][:5], ["d1", "time-travel", "restore", "DB", "--bookmark"])
         self.assertEqual(restore[0][5], os.environ["FLOWDAY_D1_BOOKMARK"])
@@ -620,13 +814,58 @@ class FakeRemoteTest(Scratch):
 
         self.assertEqual(run("import", "--workdir", str(self.workdir), "--remote")[0], 0)
         status, output = run("reset", "--remote", "--delete-all-rows")
-        self.assertEqual(status, 2, output)  # its write ledger lives in the work directory
+        self.assertEqual(status, 2, output)  # its manifest, write ledger and bookmark live in the work directory
         status, output = run("reset", "--remote", "--delete-all-rows", "--workdir", str(self.workdir))
         self.assertEqual(status, 0, output)
         self.assertIn("D1 is empty", output)
+        self.assertQuiet(output)
         ledger = json.loads((self.workdir / tool.LEDGER).read_text())
         self.assertEqual(list(ledger), [tool.utc_day()])
-        self.assertGreater(ledger[tool.utc_day()], 2 * self.estimate)  # two imports and a reset
+        self.assertEqual(ledger[tool.utc_day()], 2 * self.estimate + self.reset_estimate)  # two imports, a reset
+
+    def test_import_reads_wranglers_answer_behind_its_progress_lines(self) -> None:
+        """The production bug: `d1 execute --remote --file --json` prints spinner lines before the JSON."""
+        status, output = run("import", "--workdir", str(self.workdir), "--remote")
+        self.assertEqual(status, 0, output)
+        self.assertNotIn("did not answer", output)
+        counts = re.search(r"Imported: (\d+) statement\(s\) executed, (\d+) rows written", output)
+        statements, written = map(int, counts.groups())
+        self.assertEqual(statements, self.manifest["statements"])
+        self.assertGreater(written, 0)
+        self.assertQuiet(output)
+        # wrangler's own text stays in the private log.
+        log = self.workdir / "wrangler-import.log"
+        self.assertIn("Uploading complete", log.read_text())
+        self.assertEqual(log.stat().st_mode & 0o077, 0)
+        # The empty D1's bookmark was saved before the import; only the file's path is printed.
+        [saved] = sorted(self.workdir.glob("d1-bookmark-import-*.json"))
+        self.assertIn(str(saved), output)
+        self.assertEqual(saved.stat().st_mode & 0o077, 0)
+        self.assertNotIn(json.loads(saved.read_text())["bookmark"], output)
+        calls = self.wrangler_calls()
+        info = calls.index(next(call for call in calls if call[:3] == ["d1", "time-travel", "info"]))
+        self.assertLess(info, calls.index(next(call for call in calls if "--file" in call)))
+        # Restoring that bookmark empties D1 again, and verify after a second import still passes.
+        status, output = run("reset", "--remote", "--bookmark-file", str(saved))
+        self.assertEqual(status, 0, output)
+        self.assertIn("D1 is empty", output)
+        self.assertQuiet(output)
+
+    def test_an_unreadable_answer_asks_for_verify_not_a_second_import(self) -> None:
+        with unittest.mock.patch.dict(os.environ, {"FAKE_FILE_ANSWER": "progress-only"}):
+            status, output = run("import", "--workdir", str(self.workdir), "--remote")
+        self.assertEqual(status, 3, output)
+        self.assertIn("UNCONFIRMED: wrangler exited 0 after the import, but its answer could not be read", output)
+        self.assertIn("run verify next, not import", output)
+        self.assertQuiet(output)
+        status, output = run("verify", "--workdir", str(self.workdir), "--remote")
+        self.assertEqual(status, 0, output)  # it had imported
+        # Unreadable after a reset by deletion: check-empty next.
+        with unittest.mock.patch.dict(os.environ, {"FAKE_FILE_ANSWER": "progress-only"}):
+            status, output = run("reset", "--remote", "--delete-all-rows", "--workdir", str(self.workdir))
+        self.assertEqual(status, 3, output)
+        self.assertIn("run check-empty next", output)
+        self.assertEqual(run("check-empty", "--remote")[0], 0)
 
     def test_the_daily_write_budget_spans_imports_and_resets(self) -> None:
         """An import at the cap, then a reset by deletion and a retry, would pass the account's daily allowance."""
@@ -636,7 +875,7 @@ class FakeRemoteTest(Scratch):
         self.assertIn(f"about 0 + {self.estimate} of {self.estimate + 10}", output)
         status, output = run("reset", "--remote", "--delete-all-rows", "--workdir", str(self.workdir), *cap)
         self.assertEqual(status, 2, output)
-        self.assertIn("wait for the next UTC day", output)
+        self.assertIn("retry after 00:00 UTC", output)
         self.assertEqual(run("check-empty", "--remote")[0], 1)  # nothing was deleted
         # A Time Travel restore writes no rows through SQL: allowed, and not counted.
         self.assertEqual(run("reset", "--remote", "--bookmark-env", "FLOWDAY_D1_BOOKMARK")[0], 0)
@@ -646,6 +885,89 @@ class FakeRemoteTest(Scratch):
         with unittest.mock.patch.object(tool, "utc_day", return_value="2999-01-01"):
             status, output = run("import", "--workdir", str(self.workdir), "--remote", *cap)
         self.assertEqual(status, 0, output)
+
+    def test_the_accounts_rows_written_today_count_against_the_budget(self) -> None:
+        """Other apps' writes today (and those of another work directory) count: the import refuses above 80k."""
+        limit = tool.DEFAULT_MAX_ACCOUNT_ROWS_WRITTEN
+        self.graphql.rows_written = [70_000, limit - 70_000 - self.estimate + 1]
+        status, output = run("import", "--workdir", str(self.workdir), "--remote")
+        self.assertEqual(status, 2, output)
+        self.assertIn(f"the account wrote about {limit - self.estimate + 1} today (UTC)", output)
+        self.assertIn("retry after 00:00 UTC", output)
+        self.assertQuiet(output)
+        self.assertEqual(run("check-empty", "--remote")[0], 0)  # refused before any write
+        self.assertFalse((self.workdir / tool.LEDGER).exists())
+        self.assertFalse(list(self.workdir.glob("d1-bookmark-*")))
+        # The request: the token as a bearer only, the committed account, today (UTC), D1's rows written.
+        request = self.graphql.requests[-1]
+        self.assertEqual(request["auth"], f"Bearer {FAKE_API_TOKEN}")
+        self.assertEqual(request["body"]["variables"], {"a": ACCOUNT, "day": tool.utc_day()})
+        self.assertIn("d1AnalyticsAdaptiveGroups", request["body"]["query"])
+        self.assertIn("rowsWritten", request["body"]["query"])
+        # At exactly the cap it passes.
+        self.graphql.rows_written = [70_000, limit - 70_000 - self.estimate]
+        status, output = run("import", "--workdir", str(self.workdir), "--remote")
+        self.assertEqual(status, 0, output)
+        self.assertIn(f"by the account: about {limit - self.estimate} + {self.estimate} of {limit}", output)
+        # Without CLOUDFLARE_ACCOUNT_ID the config's account is asked for.
+        os.environ.pop("CLOUDFLARE_ACCOUNT_ID")
+        self.assertEqual(tool.account_id(), ACCOUNT)
+
+    def test_a_reset_by_deletion_has_its_own_estimate(self) -> None:
+        """Deleting costs each row and its index entries, from D1's counts (not the import file's estimate)."""
+        self.assertEqual(run("import", "--workdir", str(self.workdir), "--remote")[0], 0)
+        self.assertNotEqual(self.reset_estimate, self.estimate)  # the import also appends long texts
+        limit = tool.DEFAULT_MAX_ACCOUNT_ROWS_WRITTEN
+        self.graphql.rows_written = [limit - self.reset_estimate + 1]
+        status, output = run("reset", "--remote", "--delete-all-rows", "--workdir", str(self.workdir))
+        self.assertEqual(status, 2, output)
+        self.assertIn(f"the reset would write about {self.reset_estimate} D1 rows", output)
+        self.assertEqual(self.count("tasks"), 9)
+        self.graphql.rows_written = [limit - self.reset_estimate]
+        status, output = run("reset", "--remote", "--delete-all-rows", "--workdir", str(self.workdir))
+        self.assertEqual(status, 0, output)
+        self.assertIn(f"+ {self.reset_estimate} of {limit}", output)
+
+    def test_the_budget_check_needs_the_analytics_api_and_fails_closed(self) -> None:
+        for name, change, message in (
+            ("no token", {"CLOUDFLARE_API_TOKEN": ""}, "CLOUDFLARE_API_TOKEN is unset"),
+            ("other account", {"CLOUDFLARE_ACCOUNT_ID": "f" * 32}, "not the account of flowday/wrangler.toml"),
+            ("bad account", {"CLOUDFLARE_ACCOUNT_ID": "x"}, "not a 32-character account id"),
+            ("http", {}, "the GraphQL Analytics API answered HTTP 403"),
+            ("graphql", {}, "does the token have Account Analytics Read?"),
+            ("truncated", {}, "does the token have Account Analytics Read?"),
+        ):
+            with self.subTest(case=name):
+                self.graphql.status = 403 if name == "http" else 200
+                self.graphql.errors = [{"message": "SENTINEL error body"}] if name == "graphql" else None
+                self.graphql.rows_written = [1] * (tool.GRAPHQL_GROUPS if name == "truncated" else 1)
+                with unittest.mock.patch.dict(os.environ, change):
+                    status, output = run("import", "--workdir", str(self.workdir), "--remote")
+                self.assertEqual(status, 2, output)
+                self.assertIn(message, output)
+                self.assertNotIn("SENTINEL error body", output)
+                self.assertQuiet(output)
+                self.assertEqual(self.count("tasks"), 0)
+
+    def test_verify_pages_each_table_by_its_primary_key(self) -> None:
+        """Keyset pages: no OFFSET, and every page after a table's first continues after the last key read."""
+        self.assertEqual(run("import", "--workdir", str(self.workdir), "--remote")[0], 0)
+        self.calls.unlink()
+        status, output = run("verify", "--workdir", str(self.workdir), "--remote")
+        self.assertEqual(status, 0, output)
+        statements = [
+            statement for call in self.wrangler_calls() for statement in call[call.index("--command") + 1].split("; ")
+        ]
+        self.assertFalse([s for s in statements if "OFFSET" in s.upper()])
+        for table in tool.source_schema().values():
+            with self.subTest(table=table.name):
+                pages = [s for s in statements if s.startswith("SELECT typeof(") and f'FROM "{table.name}"' in s]
+                rows = self.manifest["tables"][table.name]["rows"]
+                self.assertEqual(len(pages), rows // 2 + 1 if rows else 0)  # each row once, then a short page
+                for page in pages[1:]:
+                    self.assertRegex(page, rf'WHERE "{table.primary_key}" > CAST\(X\'[0-9A-F]+\' AS TEXT\) ORDER BY')
+                for page in pages:
+                    self.assertTrue(page.endswith(" LIMIT 2"))
 
     def test_verify_reports_a_changed_row_without_printing_it(self) -> None:
         self.assertEqual(run("import", "--workdir", str(self.workdir), "--remote")[0], 0)
@@ -675,6 +997,60 @@ class FakeRemoteTest(Scratch):
         self.assertIn("a todoist_api_key row exists in D1", output)
         self.assertNoContent(output)
 
+    def test_a_reset_by_deletion_never_deletes_what_was_written_after_the_import(self) -> None:
+        """After the cutover D1 is production: more rows than imported, or rows only the Worker writes, refuse."""
+        self.assertEqual(run("import", "--workdir", str(self.workdir), "--remote")[0], 0)
+        reset = ("reset", "--remote", "--delete-all-rows", "--workdir", str(self.workdir))
+        for name, statement in (
+            ("a new row", "INSERT INTO flow_tasks (id, flow_date, task_id, sort_order) VALUES ('new', 'd', 't', 0)"),
+            ("a sync setting", "UPDATE settings SET key = 'todoist_sync_token' WHERE key = 'day_capacity_mins'"),
+            ("a synced task", "UPDATE tasks SET todoist_project_id = 'p' WHERE id = 'task-1'"),
+        ):
+            with self.subTest(case=name):
+                snapshot = self.tmp / "before.sqlite"
+                shutil.copyfile(self.d1, snapshot)
+                db = sqlite3.connect(self.d1)
+                db.execute(statement)
+                db.commit()
+                db.close()
+                status, output = run(*reset)
+                self.assertEqual(status, 1, output)
+                self.assertIn("--confirm-database flowday", output)
+                self.assertEqual(self.count("tasks"), 9)  # nothing deleted
+                self.assertFalse(list(self.workdir.glob("d1-bookmark-reset-*")))
+                self.assertQuiet(output)
+                shutil.copyfile(snapshot, self.d1)
+        # A work directory without a manifest has nothing to compare with.
+        bare = self.tmp / "bare"
+        bare.mkdir(mode=0o700)
+        status, output = run("reset", "--remote", "--delete-all-rows", "--workdir", str(bare))
+        self.assertEqual(status, 1, output)
+        self.assertIn("no manifest.json", output)
+        # Only the database's exact name overrides the check.
+        db = sqlite3.connect(self.d1)
+        db.execute("INSERT INTO settings (key, value) VALUES ('todoist_sync_token', 'x')")
+        db.commit()
+        db.close()
+        for wrong in ("yes", "DB", "flowday-next"):
+            status, output = run(*reset, "--confirm-database", wrong)
+            self.assertEqual(status, 2, output)
+        restore = ("reset", "--remote", "--bookmark-env", "FLOWDAY_D1_BOOKMARK", "--confirm-database", "flowday")
+        self.assertEqual(run(*restore)[0], 2)
+        status, output = run(*reset, "--confirm-database", "flowday")
+        self.assertEqual(status, 0, output)
+        self.assertIn("deleting although", output)
+        self.assertIn("D1 is empty", output)
+        # The bookmark from before the deletion was saved first; restoring it brings the rows back.
+        [saved] = sorted(self.workdir.glob("d1-bookmark-reset-*.json"))
+        self.assertIn(str(saved), output)
+        status, output = run("reset", "--remote", "--bookmark-file", str(saved))
+        self.assertEqual(status, 0, output)
+        self.assertIn("table tasks: 9 row(s)", output)
+        self.assertNotIn("D1 is empty", output)
+        self.assertQuiet(output)
+        self.assertEqual(self.count("tasks"), 9)
+        self.assertEqual(self.count("settings"), self.manifest["tables"]["settings"]["rows"] + 1)
+
     def test_check_empty_refuses_pending_migrations(self) -> None:
         db = sqlite3.connect(self.d1)
         db.execute("DELETE FROM d1_migrations WHERE name = ?", (tool.migration_files()[-1].name,))
@@ -689,6 +1065,12 @@ class FakeRemoteTest(Scratch):
             status, output = run("reset", "--remote", "--bookmark-env", "FLOWDAY_D1_BOOKMARK")
         self.assertEqual(status, 2, output)
         self.assertNotIn("not a bookmark", output)
+        bad = self.workdir / "d1-bookmark-bad.json"
+        bad.write_text('{"bookmark": "not a bookmark"}')
+        status, output = run("reset", "--remote", "--bookmark-file", str(bad))
+        self.assertEqual(status, 2, output)
+        self.assertNotIn("not a bookmark", output)
+        self.assertFalse([call for call in self.wrangler_calls() if call[:3] == ["d1", "time-travel", "restore"]])
 
 
 @unittest.skipUnless(WRANGLER.exists() or REQUIRE_WRANGLER, "wrangler is not installed in flowday/worker")

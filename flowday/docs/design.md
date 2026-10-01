@@ -2,10 +2,10 @@
 
 FlowDay runs as one Worker, `flowday`, on the account's Workers Free plan. The Worker serves the UI as static
 assets and a small owner API backed by D1. This document covers the F1 port (the code, the tests and the
-measurements) and the steps after it (section 11). Since **F2** CI deploys the Worker and its D1 schema; since
-**F3** its only hostname is the staging Custom Domain `flowday-next.ziyixi.science`, behind Cloudflare Access.
-`flowday.ziyixi.science` stays on the old container until the data cutover (F4); the retirement of the container
-is F6.
+measurements) and the steps after it (section 11). Since **F2** CI deploys the Worker and its D1 schema; in **F3**
+it served the staging Custom Domain `flowday-next.ziyixi.science`. Since the data cutover (**F4**) its only hostname
+is the Custom Domain `flowday.ziyixi.science`, behind Cloudflare Access, in place of the old container's tunnel
+CNAME; the container stays stopped for the rollback window (F5), and its retirement is F6.
 
 Owner decisions (2026-10-01) this design follows:
 
@@ -225,17 +225,18 @@ The reviews moved to the browser because they ran per minute of logged time. On 
 - **Loopback dev bypass.** Only on http://127.0.0.1 or localhost, and never for a request carrying `cf-ray`. Used
   only by `wrangler dev` and the tests.
 - **CSRF.** Signed double-submit, bound to the owner, with `Origin` restricted to `https://$PUBLIC_HOST`, plus the
-  loopback origin under the bypass. `PUBLIC_HOST` is the staging host `flowday-next.ziyixi.science` since F3 and
-  becomes `flowday.ziyixi.science` in the F4 cutover commit: one host at a time can make writes.
+  loopback origin under the bypass. `PUBLIC_HOST` is `flowday.ziyixi.science` since the F4 cutover (the F3 staging
+  host `flowday-next.ziyixi.science` before it): one host at a time can make writes.
 - **Private headers on everything.** `no-store`, `nosniff`, `no-referrer`, `DENY` and a strict CSP. The HTML's CSP
   adds the SHA-256 of each inline script in the served page (Next.js inlines its boot and RSC payload). No other
   inline script may run. `/_next/static/*` is cached as immutable.
 - **PWA exceptions.** These exact paths are served without a JWT: `/pwa/manifest.webmanifest`, `/pwa/sw` (the
   service worker, from `sw.js`, with `Service-Worker-Allowed: /`), `/pwa/icon-192x192.png`, `icon-512x512.png`,
   `icon-maskable-512x512.png`, `icon.svg` and `apple-touch-icon.png`. While the Access app `flowday-bypass` covers
-  `/pwa/*` (F2–F6: `flowday.ziyixi.science/pwa/*`, and since F3 also `flowday-next.ziyixi.science/pwa/*`), those
-  requests arrive without a JWT. Everything else under `/pwa/` needs one, and so does all of `/api`.
-  `edge.test.ts` covers both directions, and "FlowDay deploy" checks them on the live host (section 11, F3).
+  `/pwa/*` (F2–F6: `flowday.ziyixi.science/pwa/*`; from F3 until the cutover also
+  `flowday-next.ziyixi.science/pwa/*`), those requests arrive without a JWT. Everything else under `/pwa/` needs
+  one, and so does all of `/api`. `edge.test.ts` covers both directions, and "FlowDay deploy" checks them on the
+  live host, `PUBLIC_HOST` (section 11, F3).
 - **Manifest with credentials.** The manifest link has `crossorigin="use-credentials"` (checked in the built HTML),
   so the bypass can be removed later.
 - **Service worker `flowday-v2`.** It drops older caches, never caches `/api`, caches only plain same-origin `200`
@@ -352,24 +353,42 @@ first (`cd ../web && npm run build`), and apply the migrations locally:
     directory and checkpoints that copy (`file:<copy>?immutable=1` alone would ignore the WAL and lose its last
     commits), checks it (`integrity_check`), proves the source files byte-identical afterwards, and refuses a table
     or column that is not migration 0001's, invalid UTF-8, a settings key only the Worker writes, a row with a NULL
-    primary key, a `-wal` none of whose frames apply, and more than `--max-rows-written` (50,000) estimated D1 rows
+    primary key, a `-wal` none of whose frames apply, and more than `--max-rows-written` (30,000) estimated D1 rows
     written (index entries included). It writes `import.sql`: one INSERT per row with named columns and one operand
     per value (no `unistr(`; a text with a control character such as CR, or with "BEGIN TRANSACTION"/"COMMIT;"
     that wrangler's trimmer would rewrite, as `CAST(X'<utf-8>' AS TEXT)`; a real as its exact mantissa times powers
     of two), `settings` **without** the `todoist_api_key` row (the Worker uses only a key sealed under its own
     secret), and every statement under D1's 100,000 bytes (a longer text is inserted empty, then appended in
-    chunks). One file, because wrangler imports a `--remote` file atomically. `import` runs `check-empty` and then
-    `wrangler d1 execute DB --remote --file import.sql --yes` (wrangler's own output goes only to the work
-    directory). `verify` compares per table `count(*)`, the total length of each column's text and BLOBs, and the
-    SHA-256 of the sorted canonical rows (reals exactly, ±Inf included), from read-only SELECTs, and checks that D1
-    holds no `todoist_api_key` row and no `todoist_project_id` yet. `reset` empties D1 again: `--bookmark-env NAME`
-    restores a Time Travel bookmark (writes no rows through SQL), `--delete-all-rows --workdir <private>` deletes
-    every row in one atomic file.
+    chunks). One file, because wrangler imports a `--remote` file atomically. `import` runs `check-empty`, checks the
+    write budget (below), saves the empty D1's Time Travel bookmark to `<private>/d1-bookmark-import-<time>.json`
+    (only the path is printed) and then runs `wrangler d1 execute DB --remote --file import.sql --yes --json`
+    (wrangler's own output goes only to the work directory). Its answer is the JSON after the progress lines that
+    wrangler's spinner prints to stdout even with `--json` ("Checking if file needs uploading", "Uploading ..."):
+    the first production import exited 2 with "wrangler did not answer with JSON" although `verify` then found D1
+    equal to the snapshot. When wrangler exits 0 and its answer still cannot be read, `import` exits 3
+    (unconfirmed) and asks for `verify`, never for a second import. `verify` compares per table `count(*)`, the
+    total length of each column's text and BLOBs, and the SHA-256 of the sorted canonical rows (reals exactly, ±Inf
+    included), from read-only SELECTs paged by primary key (`WHERE pk > :last ORDER BY pk LIMIT 1000`: each row is
+    read once, where LIMIT/OFFSET would read the skipped rows again on every page), and checks that D1 holds no
+    `todoist_api_key` row and no `todoist_project_id` yet. `reset` empties D1 again: `--bookmark-env NAME` or
+    `--bookmark-file <saved file>` restores a Time Travel bookmark (writes no rows through SQL; the bookmark saved
+    by a reset undoes that reset), and `--delete-all-rows --workdir <private>` saves the current bookmark in the
+    work directory and deletes every row in one atomic file. It deletes only what is that work directory's own
+    import: no table may hold more rows than its manifest, and no row that only the Worker writes (its sync
+    settings, `tasks.todoist_project_id`) may exist. After the cutover D1 is production data, which only an
+    explicit `--confirm-database flowday` deletes.
   - **The daily write budget.** The account's 100,000 rows written per UTC day are shared by every app, and a
-    deletion costs about as many rows as the import did. `import` and `reset --delete-all-rows` record their
-    estimates per UTC day in `<private>/d1-writes.json` and refuse above `--max-rows-written-per-day` (50,000): an
-    import at the cap, a reset by deletion and a retry cannot pass the allowance. After a failed verify, reset with
-    the bookmark; a retry that would pass the day's budget waits for the next UTC day (00:00 UTC).
+    deletion costs about as many rows as the import did. `import` and `reset --delete-all-rows` each estimate their
+    own rows written (the import from its file, the reset from D1's row counts, index entries included) and refuse
+    when the work directory's ledger (`<private>/d1-writes.json`) would pass `--max-rows-written-per-day` (30,000)
+    for the UTC day, or when the account's D1 rows written today plus the estimate would pass
+    `--max-account-rows-written-per-day` (80,000). The account's figure comes from the GraphQL Analytics API
+    (`d1AnalyticsAdaptiveGroups`, every database summed), so `CLOUDFLARE_API_TOKEN` needs Account Analytics Read
+    besides D1 Edit, and the account is `CLOUDFLARE_ACCOUNT_ID` or the config's `account_id`; analytics lag a few
+    minutes, so the ledger counts when it is larger. Without the token, or on an API error, the write is refused.
+    **Make at most one import attempt per UTC day**: on a failed verify, restore the bookmark
+    (`reset --remote --bookmark-file <private>/d1-bookmark-import-<time>.json`, which writes no rows through SQL)
+    and retry after 00:00 UTC.
   - **Landing the commits.** Three commits on top of each other: the import tool (no host change; it can land any
     time), the cutover commit (the hostname move below) and the commit that clears its cf-guard allowances. Never
     push or merge them in one go: CI deploys only the last commit of a push, and the clearing commit deployed while
@@ -393,10 +412,15 @@ first (`cd ../web && npm run build`), and apply the migrations locally:
     after the stop, record `sha256sum flowday.db*` into `host.sha256`; copy it, `flowday.db` and, if present,
     `flowday.db-wal` into a local directory that is not cloud-synced. Never open the live file. (4) `export` (with
     `--expect-sha256`). (5) `check-empty --remote`; if staging left rows, first `reset --remote --bookmark-env
-    NAME`. (6) `import`, then
-    `verify`; on DIFFERENT or any error stop here: reset with the bookmark and start the container again (nothing
-    else changed). (7) `verify` once more, then push the cutover commit's SHA to `main`. (8) When its
-    `FlowDay deploy` passed, `verify` again before the owner first signs in on `flowday.ziyixi.science`.
+    NAME`. (6) `import`, then `verify` (after exit 3, unconfirmed, only `verify`); on DIFFERENT or any error stop
+    here: reset with the bookmark and start the container again (nothing else changed). (7) `verify` once more;
+    then delete the tunnel CNAME of `flowday.ziyixi.science` (saved before the freeze) and right after it push the
+    cutover commit's SHA to `main`. The Workers Custom Domain API refuses a hostname with a DNS record it did not
+    create (Cloudflare error `100117`), even though CI's wrangler passes `override_existing_dns_record` and
+    cf-guard allowed the conflict, so with the CNAME still in place the deploy fails (this happened in
+    production). Until the deploy attaches the Custom Domain the hostname does not resolve; the container is
+    stopped anyway. (8) When its `FlowDay deploy` passed, `verify` again before the owner first signs in on
+    `flowday.ziyixi.science`.
   - **After the cutover deploy.** The owner signs in on `flowday.ziyixi.science` and checks the data, then enters
     the Todoist key once in Settings (stored sealed). The first sync is then a full sync, in chunks of 200 tasks.
     It writes `todoist_project_id` once into every Todoist task row (about one row each, a one-off cost of roughly
@@ -408,12 +432,14 @@ first (`cd ../web && npm run build`), and apply the migrations locally:
     stop). The Access apps already cover the host (the container used them). Before merging it, save the current
     DNS record of `flowday.ziyixi.science` (the rollback restores it: [`../README.md`](../README.md) "Rollback and
     removal"). wrangler applies the listed Custom Domains as the Worker's complete
-    set, so the deploy detaches `flowday-next.ziyixi.science`; and CI's non-interactive wrangler overwrites an
-    existing DNS record of a new Custom Domain, so it takes over the tunnel CNAME of `flowday.ziyixi.science`.
-    cf-guard stops both unless allowed, so that commit sets both allowances on FlowDay's guard step:
+    set, so the deploy detaches `flowday-next.ziyixi.science`; and CI's non-interactive wrangler asks the API to
+    overwrite an existing DNS record of a new Custom Domain, which the API refused for the tunnel CNAME of
+    `flowday.ziyixi.science` (error `100117`): the CNAME is deleted by hand right before the deploy (the freeze's
+    step 7). cf-guard stops both unless allowed, so that commit sets both allowances on FlowDay's guard step:
     `CF_GUARD_ALLOW_REMOVE: flowday-next.ziyixi.science` and `CF_GUARD_ALLOW_CONFLICT: flowday.ziyixi.science`
-    (the takeover of the tunnel CNAME is the allowed conflict), and the guard test in
-    `.github/scripts/test_ci_changes.py` expected exactly those two (`HostnameGuard.ALLOWED`). The next commit cleared
+    (the tunnel CNAME is the allowed conflict; cf-guard now takes the kind with the name, which would be
+    `dns:flowday.ziyixi.science`, and with the CNAME deleted first there is no conflict to allow), and the guard
+    test in `.github/scripts/test_ci_changes.py` expected exactly those two (`HostnameGuard.ALLOWED`). The next commit cleared
     both again (`ALLOWED` is empty). After that, remove the staging destinations from both Access apps; the deploy already detached the
     staging Custom Domain (check Workers & Pages → `flowday` → Domains & Routes, and that no DNS record is left for
     `flowday-next.ziyixi.science`).

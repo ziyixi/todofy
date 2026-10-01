@@ -11,12 +11,14 @@ any cloud-synced folder (`mktemp -d` gives one).
     python3 flowday/deploy/migrate/flowday_migrate.py import --workdir PRIVATE_DIR --remote
     python3 flowday/deploy/migrate/flowday_migrate.py verify --workdir PRIVATE_DIR --remote
     python3 flowday/deploy/migrate/flowday_migrate.py reset --remote --bookmark-env FLOWDAY_D1_BOOKMARK
+    python3 flowday/deploy/migrate/flowday_migrate.py reset --remote --bookmark-file PRIVATE_DIR/d1-bookmark-....json
     python3 flowday/deploy/migrate/flowday_migrate.py reset --remote --delete-all-rows --workdir PRIVATE_DIR
 
 Each D1 command takes --remote (the production D1, with wrangler's own auth: CLOUDFLARE_API_TOKEN or a wrangler
 login) or --local --persist-to DIR (a local D1 with the migrations applied; the tests use it). Every wrangler call
 runs with WRANGLER_WRITE_LOGS=false and a throwaway WRANGLER_LOG_PATH: wrangler otherwise appends everything it
 prints, query results included, to a debug log under its global config directory and keeps it for 30 days.
+wrangler's answers are read with --json; its own text never reaches this tool's output.
 
 export
     SOURCE is a local copy of the container's flowday.db, taken while the container was stopped; SOURCE-wal, when
@@ -36,26 +38,43 @@ export
 check-empty
     The 7 tables exist with the committed schema, every committed migration is applied, and no table has a row.
 import
-    The daily write budget (below), check-empty, then `wrangler d1 execute DB --file WORKDIR/import.sql --yes`.
-    wrangler's output stays in WORKDIR/wrangler-import.log (an error message may quote the SQL); only counts are
-    printed.
+    check-empty, the daily write budget (below), then (--remote) the current Time Travel bookmark of the empty D1
+    saved to WORKDIR/d1-bookmark-import-<UTC time>.json (only its path is printed), then
+    `wrangler d1 execute DB --file WORKDIR/import.sql --yes --json`. wrangler's output stays in
+    WORKDIR/wrangler-import.log (an error message may quote the SQL); only counts are printed. If wrangler exits 0
+    but its answer cannot be read, the import may well have completed: the tool exits 3 and asks for `verify`,
+    never for a second import.
 verify
     Per table: count(*), total(length(col)) per text or BLOB column and the SHA-256 of the sorted canonical row
-    dump, from D1 (read-only SELECTs) against the manifest and against WORKDIR/snapshot.db again. Also: no
-    todoist_api_key row in D1, and the D1-only columns (tasks.todoist_project_id) all NULL. Prints only counts and
-    equal/DIFFERENT.
+    dump, from D1 (read-only SELECTs, paged by primary key: WHERE pk > last ORDER BY pk LIMIT n, so every row is
+    read once) against the manifest and against WORKDIR/snapshot.db again. Also: no todoist_api_key row in D1,
+    and the D1-only columns (tasks.todoist_project_id) all NULL. Prints only counts and equal/DIFFERENT.
 reset
-    --bookmark-env NAME restores the D1 Time Travel bookmark held in that environment variable (never printed), or
-    --delete-all-rows --workdir WORKDIR deletes every row of the 7 tables (one atomic file; d1_migrations stays),
-    within the daily write budget. Then check-empty.
+    --bookmark-env NAME restores the D1 Time Travel bookmark held in that environment variable, or
+    --bookmark-file FILE the one import or reset saved (never printed; a reset's bookmark undoes that reset, and
+    only the row counts are printed instead of check-empty); or --delete-all-rows --workdir WORKDIR
+    deletes every row of the 7 tables (one atomic file; d1_migrations stays), within the daily write budget, after
+    saving the current bookmark to WORKDIR/d1-bookmark-reset-<UTC time>.json. It deletes only what looks like this
+    work directory's own import: no table may hold more rows than the manifest says, and no row only the Worker
+    writes (its sync settings, tasks.todoist_project_id) may exist; otherwise only --confirm-database flowday
+    deletes the rows anyway. Then check-empty.
 
-Daily write budget: the account's Free allowance is 100,000 D1 rows written per UTC day, shared by every app.
-import and reset --delete-all-rows record their estimated rows written (index entries included) per UTC day in
-WORKDIR/d1-writes.json and refuse to go above --max-rows-written-per-day (50,000) for the day. A Time Travel restore
-writes no rows through SQL and is not counted.
+Daily write budget: the account's Free allowance is 100,000 D1 rows written per UTC day, shared by every app, and
+a deletion costs about as many rows as the import did. import and reset --delete-all-rows each estimate their own
+rows written (index entries included: the import from the manifest, the reset from D1's row counts) and refuse
+  - when this work directory's ledger (WORKDIR/d1-writes.json) would pass --max-rows-written-per-day (30,000) for
+    the UTC day, and
+  - (--remote) when the account's D1 rows written today, read from the GraphQL Analytics API
+    (d1AnalyticsAdaptiveGroups; CLOUDFLARE_API_TOKEN with Account Analytics Read, CLOUDFLARE_ACCOUNT_ID or the
+    config's account_id), plus the estimate would pass --max-account-rows-written-per-day (80,000). Analytics lag
+    a few minutes, so the larger of the account's figure and the ledger counts.
+A Time Travel restore writes no rows through SQL and is not counted. So make at most one import attempt per UTC
+day: on a failed verify, restore the bookmark (reset --bookmark-file) and retry after 00:00 UTC.
 
 Nothing prints a row's content: only table names, counts, byte totals, digest prefixes (export) or digest
-equality (verify). Exit status: 0 done, 1 a check failed, 2 a usage, environment or tool error.
+equality (verify). Exit status: 0 done, 1 a check failed, 2 a usage, environment or tool error, 3 the outcome of a
+write is unknown (wrangler exited 0 but its answer could not be read): run verify (after import) or check-empty
+(after a reset) before anything else.
 """
 
 from __future__ import annotations
@@ -73,6 +92,8 @@ import struct
 import subprocess
 import sys
 import tempfile
+import urllib.error
+import urllib.request
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -84,6 +105,7 @@ MIGRATIONS = APP / "migrations"
 WORKER = APP / "worker"
 CONFIG = APP / "wrangler.toml"
 BINDING = "DB"
+DATABASE_NAME = "flowday"  # the D1 database's name in wrangler.toml; what --confirm-database must say
 
 # D1 limits (https://developers.cloudflare.com/d1/platform/limits/): a statement is at most 100,000 bytes, and a
 # string, BLOB or row at most 2,000,000 bytes. Statements are kept under STATEMENT_BUDGET for headroom.
@@ -91,14 +113,29 @@ D1_MAX_STATEMENT_BYTES = 100_000
 STATEMENT_BUDGET = 90_000
 D1_MAX_VALUE_BYTES = 2_000_000
 # The account's Free allowance is 100,000 rows written per UTC day, shared by every app (index entries count as
-# rows). One import file, and everything this tool writes from one work directory in one UTC day, stay under half.
-DEFAULT_MAX_ROWS_WRITTEN = 50_000
+# rows). One import file, and everything this tool writes from one work directory in one UTC day, stay under a
+# third of it; and nothing it writes may take the account's day past 80% (the other apps keep the rest).
+DEFAULT_MAX_ROWS_WRITTEN = 30_000
+DEFAULT_MAX_ACCOUNT_ROWS_WRITTEN = 80_000
 LEDGER = "d1-writes.json"
+# The account's D1 rows written per database on one UTC day, as the dashboard reads them (dashboard/worker/src/
+# usage.ts, verified against the live account). A token needs Account Analytics Read.
+GRAPHQL_URL = "https://api.cloudflare.com/client/v4/graphql"
+GRAPHQL_GROUPS = 100
+D1_WRITES_QUERY = (
+    "query($a: string!, $day: Date!) { viewer { accounts(filter: {accountTag: $a}) {"
+    f" d1AnalyticsAdaptiveGroups(limit: {GRAPHQL_GROUPS}, filter: {{date: $day}})"
+    " { sum { rowsWritten } dimensions { databaseId } } } } }"
+)
+ACCOUNT_ID = re.compile(r"[0-9a-f]{32}")
+BOOKMARK = re.compile(r"[0-9a-f-]{16,}")
 # 2: lengths cover only text and BLOBs, reals compare by digest (+-Inf included).
 MANIFEST_FORMAT = 2
-# Rows per SELECT page and SELECT pages per wrangler call when reading D1.
+# Rows per SELECT page, and SELECT statements per wrangler call (each a page of a different table), when reading D1.
 PAGE_ROWS = 1_000
 PAGES_PER_CALL = 10
+# Terminal escape sequences (colours, cursor moves) that a wrangler version might still print despite NO_COLOR.
+ANSI = re.compile(r"\x1b\[[0-9;?]*[ -/]*[@-~]")
 
 # The Todoist key is never exported: the Worker reads only a key sealed under its own secret (docs/design.md 3).
 EXCLUDED_SETTINGS = ("todoist_api_key",)
@@ -134,6 +171,10 @@ class Failure(Exception):
 
 class ToolError(Exception):
     """A usage, environment or tool error (exit 2). The message never holds row content."""
+
+
+class Unconfirmed(Exception):
+    """A write whose outcome is unknown (exit 3): wrangler exited 0, but its answer could not be read."""
 
 
 # --- Schemas, from the committed migrations ---------------------------------------------------------------------
@@ -685,6 +726,29 @@ def wrangler_env(scratch: Path) -> dict[str, str]:
     )
 
 
+def json_answer(output: str) -> object | None:
+    """The one JSON document that ends wrangler's stdout, or None.
+
+    `--json` silences wrangler's logger but not the progress lines of its non-interactive spinner, which go to
+    stdout too: `d1 execute --remote --file` (wrangler 4.142, src/d1/execute.ts) prints
+    "├ Checking if file needs uploading", "├ 🌀 Uploading <name>", "│ 🌀 Uploading complete." and blank "│"
+    lines before the pretty-printed JSON. The document is read from the first line that starts with `[` or `{`
+    and holds exactly one JSON value up to the end of the output.
+    """
+    text = ANSI.sub("", output)
+    decoder = json.JSONDecoder()
+    for start in [0, *(match.end() for match in re.finditer("\n", text))]:
+        if not text.startswith(("[", "{"), start):
+            continue
+        try:
+            value, end = decoder.raw_decode(text, start)
+        except ValueError:
+            continue
+        if not text[end:].strip():
+            return value
+    return None
+
+
 class D1:
     """The D1 database "flowday" through the pinned wrangler: --remote, or --local with its own persistence dir."""
 
@@ -711,7 +775,14 @@ class D1:
         location = ["--remote"] if self.remote else ["--local", "--persist-to", str(self.persist_to)]
         return [self.binary(), "d1", "execute", BINDING, *location, "--config", str(CONFIG), *args]
 
+    def time_travel(self, *args: str) -> list[str]:
+        """`wrangler d1 time-travel <args> DB --json` (Time Travel exists only for the remote D1)."""
+        if not self.remote:
+            raise ToolError("Time Travel exists only for the remote D1")
+        return [self.binary(), "d1", "time-travel", args[0], BINDING, *args[1:], "--json", "--config", str(CONFIG)]
+
     def run(self, argv: list[str], what: str) -> str:
+        """wrangler's stdout. Its output goes only to the private log (when there is one), never to ours."""
         with tempfile.TemporaryDirectory(prefix="flowday-wrangler-") as scratch:
             done = subprocess.run(
                 argv,
@@ -719,11 +790,14 @@ class D1:
                 env=wrangler_env(Path(scratch)),
                 stdin=subprocess.DEVNULL,
                 capture_output=True,
-                text=True,
+                # wrangler writes UTF-8 (its progress lines, the rows' text) whatever the locale says. A byte that
+                # is not UTF-8 becomes U+FFFD, so a row would compare DIFFERENT rather than crash the tool.
+                encoding="utf-8",
+                errors="replace",
             )
         if self.log_path is not None:
             descriptor = os.open(self.log_path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
-            with os.fdopen(descriptor, "a") as out:
+            with os.fdopen(descriptor, "a", encoding="utf-8") as out:
                 out.write(f"$ wrangler {what} (exit {done.returncode})\n{done.stdout}\n{done.stderr}\n")
         if done.returncode != 0:
             raise ToolError(
@@ -738,48 +812,48 @@ class D1:
             if not READ_ONLY.match(statement) or ";" in statement:
                 raise ToolError("D1 reads are SELECT or PRAGMA table_info statements only")
         output = self.run(self.execute("--json", "--command", "; ".join(statements)), "d1 execute --command")
-        try:
-            results = json.loads(output)
-        except ValueError:
-            raise ToolError("wrangler did not answer with JSON") from None
+        results = json_answer(output)
         if (
             not isinstance(results, list)
             or len(results) != len(statements)
-            or not all(r.get("success") for r in results)
+            or not all(isinstance(r, dict) and r.get("success") is True for r in results)
         ):
-            raise ToolError("wrangler's answer does not match the statements")
+            raise ToolError("wrangler's answer to a read does not match the statements")
         return [list(result.get("results") or []) for result in results]
 
-    def execute_file(self, path: Path) -> dict:
-        """Run a SQL file; wrangler applies a --remote file atomically. Returns its counts (no content)."""
+    def execute_file(self, path: Path, what: str) -> dict:
+        """Run a SQL file; wrangler applies a --remote file atomically. Returns its counts (no content).
+
+        Raises Unconfirmed when wrangler exited 0 but its answer cannot be read: the file may have been applied.
+        """
         output = self.run(self.execute("--json", "--yes", "--file", str(path)), "d1 execute --file")
-        try:
-            results = json.loads(output)
-        except ValueError:
-            raise ToolError("wrangler did not answer with JSON") from None
-        if not isinstance(results, list) or not all(r.get("success") for r in results):
-            raise ToolError("wrangler reported a failed statement")
-        if self.remote:
-            counts = results[0]["results"][0]
-            return {"queries": counts.get("Total queries executed"), "rows_written": counts.get("Rows written")}
-        return {"queries": len(results), "rows_written": None}
+        results = json_answer(output)
+        if isinstance(results, list) and results and all(isinstance(r, dict) for r in results):
+            if not all(r.get("success") is True for r in results):
+                raise ToolError("wrangler reported a failed statement")
+            if not self.remote:  # local: one result per statement
+                return {"queries": len(results), "rows_written": None}
+            # --remote: one summary, [{"results": [{"Total queries executed": n, "Rows written": n, ...}], ...}]
+            counts = results[0].get("results")
+            if isinstance(counts, list) and len(counts) == 1 and isinstance(counts[0], dict):
+                queries, written = counts[0].get("Total queries executed"), counts[0].get("Rows written")
+                if isinstance(queries, int) and isinstance(written, int):
+                    return {"queries": queries, "rows_written": written}
+        raise Unconfirmed(
+            f"wrangler exited 0 after the {what}, but its answer could not be read"
+            + (f" (it is in {self.log_path}, not printed here)" if self.log_path else "")
+        )
+
+    def bookmark(self) -> str:
+        """The current Time Travel bookmark (`wrangler d1 time-travel info DB --json`)."""
+        answer = json_answer(self.run(self.time_travel("info"), "d1 time-travel info"))
+        bookmark = answer.get("bookmark") if isinstance(answer, dict) else None
+        if not isinstance(bookmark, str) or not BOOKMARK.fullmatch(bookmark):
+            raise ToolError("wrangler d1 time-travel info gave no bookmark")
+        return bookmark
 
     def restore(self, bookmark: str) -> None:
-        if not self.remote:
-            raise ToolError("Time Travel exists only for the remote D1")
-        argv = [
-            self.binary(),
-            "d1",
-            "time-travel",
-            "restore",
-            BINDING,
-            "--bookmark",
-            bookmark,
-            "--json",
-            "--config",
-            str(CONFIG),
-        ]
-        self.run(argv, "d1 time-travel restore")
+        self.run(self.time_travel("restore", "--bookmark", bookmark), "d1 time-travel restore")
 
 
 def d1_from(args: argparse.Namespace, log_path: Path | None = None) -> D1:
@@ -824,55 +898,189 @@ def utc_day() -> str:
     return datetime.datetime.now(datetime.timezone.utc).date().isoformat()
 
 
-def reserve_writes(workdir: Path, rows: int, cap: int, what: str, log: Callable[[str], None]) -> None:
-    """Record `rows` estimated D1 rows written for today (UTC) in WORKDIR's ledger, or refuse above `cap`.
+@dataclass(frozen=True)
+class Budget:
+    """The caps on estimated D1 rows written: per work directory and UTC day, and the account's whole UTC day."""
+
+    per_workdir: int = DEFAULT_MAX_ROWS_WRITTEN
+    account: int = DEFAULT_MAX_ACCOUNT_ROWS_WRITTEN
+
+
+class NoRedirect(urllib.request.HTTPRedirectHandler):
+    """Never follow a redirect: it would carry the bearer token to another URL."""
+
+    def redirect_request(self, *args, **kwargs):
+        return None
+
+
+def account_id() -> str:
+    """CLOUDFLARE_ACCOUNT_ID, or the account_id of wrangler.toml; both must agree when both are set."""
+    match = re.search(r'^account_id\s*=\s*"([0-9a-f]{32})"\s*$', CONFIG.read_text(), re.MULTILINE)
+    configured = match.group(1) if match else None
+    given = os.environ.get("CLOUDFLARE_ACCOUNT_ID", "").strip()
+    if given and not ACCOUNT_ID.fullmatch(given):
+        raise ToolError("CLOUDFLARE_ACCOUNT_ID is not a 32-character account id")
+    if given and configured and given != configured:
+        raise ToolError("CLOUDFLARE_ACCOUNT_ID is not the account of flowday/wrangler.toml")
+    if not (given or configured):
+        raise ToolError("set CLOUDFLARE_ACCOUNT_ID (flowday/wrangler.toml names no account)")
+    return given or configured
+
+
+def account_rows_written(day: str) -> int:
+    """The account's D1 rows written on `day` (UTC), every database summed, from the GraphQL Analytics API.
+
+    The token (CLOUDFLARE_API_TOKEN, with Account Analytics Read) is sent only to GRAPHQL_URL, never printed; an
+    error names only the HTTP status or that GraphQL refused, never a response body.
+    """
+    token = os.environ.get("CLOUDFLARE_API_TOKEN", "").strip()
+    if not token:
+        raise ToolError(
+            "CLOUDFLARE_API_TOKEN is unset: the daily write budget reads the account's D1 rows written today from the"
+            " GraphQL Analytics API (a token with Account Analytics Read; a wrangler login is not enough)"
+        )
+    body = json.dumps({"query": D1_WRITES_QUERY, "variables": {"a": account_id(), "day": day}}).encode()
+    request = urllib.request.Request(
+        GRAPHQL_URL,
+        data=body,
+        method="POST",
+        headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json", "Accept": "application/json"},
+    )
+    try:
+        with urllib.request.build_opener(NoRedirect).open(request, timeout=30) as response:
+            answer = json.loads(response.read(1_000_000))
+    except urllib.error.HTTPError as error:
+        raise ToolError(f"the GraphQL Analytics API answered HTTP {error.code}") from None
+    except (urllib.error.URLError, OSError, ValueError):
+        raise ToolError("could not read the account's D1 usage from the GraphQL Analytics API") from None
+    try:
+        if answer.get("errors"):
+            raise ValueError
+        [account] = answer["data"]["viewer"]["accounts"]
+        groups = account["d1AnalyticsAdaptiveGroups"]
+        written = [group["sum"]["rowsWritten"] for group in groups]
+        if len(groups) >= GRAPHQL_GROUPS or not all(isinstance(n, int) and n >= 0 for n in written):
+            raise ValueError
+    except (AttributeError, KeyError, TypeError, ValueError):
+        raise ToolError(
+            "the GraphQL Analytics API gave no D1 usage for the account (does the token have Account Analytics Read?)"
+        ) from None
+    return sum(written)
+
+
+def reserve_writes(d1: D1, workdir: Path, rows: int, budget: Budget, what: str, log: Callable[[str], None]) -> None:
+    """Refuse `rows` estimated D1 rows written above either cap of `budget`, or record them in WORKDIR's ledger.
 
     Recorded before the write and never taken back: a failed (atomic) import may still have cost writes. The ledger
-    knows only this work directory; other apps share the account's 100,000 rows per day too.
+    knows only this work directory, so for the remote D1 the account's own figure for today (UTC) counts too; it
+    lags a few minutes, so the larger of the two is today's usage.
     """
     path = workdir / LEDGER
     ledger = json.loads(path.read_text()) if path.is_file() else {}
     day = utc_day()
     spent = int(ledger.get(day, 0))
-    if spent + rows > cap:
+    if spent + rows > budget.per_workdir:
         raise ToolError(
             f"{what} would write about {rows} D1 rows; this work directory already wrote about {spent} today (UTC),"
-            f" above --max-rows-written-per-day {cap}: wait for the next UTC day (or restore a Time Travel bookmark,"
-            " which this tool does not count)"
+            f" above --max-rows-written-per-day {budget.per_workdir}: retry after 00:00 UTC (or restore a Time"
+            " Travel bookmark, which this tool does not count)"
         )
+    if d1.remote:
+        account = account_rows_written(day)
+        if max(account, spent) + rows > budget.account:
+            raise ToolError(
+                f"{what} would write about {rows} D1 rows; the account wrote about {max(account, spent)} today (UTC),"
+                f" above --max-account-rows-written-per-day {budget.account}: retry after 00:00 UTC"
+            )
+        log(f"D1 rows written today (UTC) by the account: about {account} + {rows} of {budget.account}.")
     ledger[day] = spent + rows
     write_private_json(path, ledger)
-    log(f"D1 rows written today (UTC) by this work directory: about {spent} + {rows} of {cap}.")
+    log(f"D1 rows written today (UTC) by this work directory: about {spent} + {rows} of {budget.per_workdir}.")
 
 
-def import_file(workdir: Path, d1: D1, max_per_day: int, log: Callable[[str], None]) -> None:
+def save_bookmark(d1: D1, workdir: Path, before: str, log: Callable[[str], None]) -> Path | None:
+    """Save the remote D1's current Time Travel bookmark in WORKDIR (mode 0600) and print only the file's path."""
+    if not d1.remote:
+        return None
+    taken = datetime.datetime.now(datetime.timezone.utc)
+    path = workdir / f"d1-bookmark-{before}-{taken.strftime('%Y%m%dT%H%M%SZ')}.json"
+    write_private_json(path, {"bookmark": d1.bookmark(), "before": before, "taken_at": taken.isoformat()})
+    log(f"Time Travel bookmark before the {before} saved: {path} (reset --remote --bookmark-file restores it)")
+    return path
+
+
+def import_file(workdir: Path, d1: D1, budget: Budget, log: Callable[[str], None]) -> None:
     manifest = read_manifest(workdir)
     sql_path = workdir / "import.sql"
     if sha256_file(sql_path) != manifest["import_sql_sha256"]:
         raise ToolError("import.sql differs from the one export wrote")
     check_empty(d1, log)
-    reserve_writes(workdir, int(manifest["estimated_rows_written"]), max_per_day, "the import", log)
-    counts = d1.execute_file(sql_path)
+    reserve_writes(d1, workdir, int(manifest["estimated_rows_written"]), budget, "the import", log)
+    save_bookmark(d1, workdir, "import", log)
+    try:
+        counts = d1.execute_file(sql_path, "import")
+    except Unconfirmed as unknown:
+        raise Unconfirmed(f"{unknown}. The import may well have completed: run verify next, not import") from None
+    except ToolError as error:
+        raise ToolError(
+            f"{error}. wrangler applies a --remote file atomically, so D1 should be unchanged: check-empty tells;"
+            " a retry counts against the day's write budget again"
+        ) from None
     log(
         f"Imported: {counts['queries']} statement(s) executed"
         + (f", {counts['rows_written']} rows written" if counts["rows_written"] is not None else "")
     )
 
 
+def keyset_select(table: Table, after: str | None) -> str:
+    """One page of the table's canonical rows in primary-key order, after the key `after` (an SQL literal).
+
+    WHERE pk > :last ORDER BY pk LIMIT n is a range search on the primary key's index, so a table is read once
+    however many pages it has (LIMIT/OFFSET would read every skipped row again, quadratic in the table's size).
+    """
+    where = "" if after is None else f" WHERE {ident(table.primary_key)} > {after}"
+    return f"{canonical_select(table, table.columns, where)} LIMIT {PAGE_ROWS}"
+
+
+def key_after(table: Table, row: dict) -> str:
+    """The SQL literal of a canonical row's primary key, to continue after it; text as hex (no quote or ';')."""
+    index = table.columns.index(table.primary_key)
+    kind, value = row[f"t{index}"], row[f"v{index}"]
+    if kind == "text":
+        return "CAST(X'" + str(value).encode("utf-8", "surrogatepass").hex().upper() + "' AS TEXT)"
+    if kind == "blob" and re.fullmatch(r"[0-9A-Fa-f]*", str(value)):
+        return f"X'{value}'"
+    if kind == "integer" and re.fullmatch(r"-?[0-9]+", str(value)):
+        return str(value)
+    raise ToolError(f"table {table.name}: a page ends on a primary key of type {kind}, which cannot be paged after")
+
+
+def d1_rows(d1: D1, tables: dict[str, Table], counts: dict[str, int]) -> dict[str, list[dict]]:
+    """Every row of every table in canonical form, by keyset pages: one page of each unfinished table per call."""
+    rows: dict[str, list[dict]] = {name: [] for name in tables}
+    after: dict[str, str | None] = {name: None for name in tables if counts[name] > 0}
+    while after:
+        batch = list(after.items())[:PAGES_PER_CALL]
+        for (name, _), page in zip(batch, d1.query([keyset_select(tables[name], key) for name, key in batch])):
+            rows[name].extend(page)
+            if len(page) < PAGE_ROWS:
+                del after[name]
+            else:
+                after[name] = key_after(tables[name], page[-1])
+    return rows
+
+
 def d1_summaries(d1: D1, tables: dict[str, Table], checks: Sequence[str]) -> tuple[dict[str, dict], list[list[dict]]]:
     """Every table's summary read from D1, plus the answers to `checks` (read with the statistics)."""
     answers = d1.query([stats_select(table, table.columns) for table in tables.values()] + list(checks))
     stats = {name: rows[0] for name, rows in zip(tables, answers)}
-    pages = [
-        (table.name, f"{canonical_select(table, table.columns)} LIMIT {PAGE_ROWS} OFFSET {first}")
-        for table in tables.values()
-        for first in range(0, int(stats[table.name]["n"]), PAGE_ROWS)
-    ]
-    rows: dict[str, list[dict]] = {name: [] for name in tables}
-    for start in range(0, len(pages), PAGES_PER_CALL):
-        batch = pages[start : start + PAGES_PER_CALL]
-        for (name, _), page in zip(batch, d1.query([statement for _, statement in batch])):
-            rows[name].extend(page)
+    rows = d1_rows(d1, tables, {name: int(stats[name]["n"]) for name in tables})
+    for name in tables:
+        if len(rows[name]) != int(stats[name]["n"]):
+            raise Failure(
+                f"table {name}: {stats[name]['n']} row(s) counted, {len(rows[name])} read in key order"
+                " (D1 changed during verify, or a primary key repeats or is NULL)"
+            )
     summaries = {
         table.name: summary(table, table.columns, stats[table.name], rows[table.name]) for table in tables.values()
     }
@@ -919,38 +1127,107 @@ def verify(workdir: Path, d1: D1, log: Callable[[str], None]) -> None:
     log(f"D1 equals the snapshot: {len(tables)} tables, no todoist_api_key row, D1-only columns empty.")
 
 
+def bookmark_from(bookmark_env: str | None, bookmark_file: Path | None) -> tuple[str, str | None]:
+    """The bookmark held in the environment variable `bookmark_env`, or saved in a JSON file by import or reset,
+    and what it was taken before ("import", "reset"; None for the environment variable)."""
+    before = None
+    if bookmark_env is not None:
+        bookmark, where = os.environ.get(bookmark_env, ""), bookmark_env
+    else:
+        try:
+            saved = json.loads(bookmark_file.read_text())
+            bookmark, before = saved.get("bookmark"), saved.get("before")
+        except (OSError, ValueError, AttributeError):
+            bookmark = None
+        where = "--bookmark-file"
+    if not isinstance(bookmark, str) or not BOOKMARK.fullmatch(bookmark):
+        raise ToolError(f"{where} does not hold a D1 bookmark")
+    return bookmark, before
+
+
+def check_own_import(d1: D1, workdir: Path, confirm_database: str | None, log: Callable[[str], None]) -> list[int]:
+    """D1's row count per table (target schema order), refusing a D1 that holds more than WORKDIR's own import.
+
+    The rows may be deleted when no table holds more rows than the manifest of WORKDIR, and no row exists that
+    only the Worker writes (its Todoist sync settings, tasks.todoist_project_id): then D1 holds nothing written
+    after the import. Otherwise, after the cutover, they are production data, and only `--confirm-database
+    flowday` deletes them.
+    """
+    target = target_schema()
+    worker_only = ", ".join(text_literal(key) for key in WORKER_ONLY_SETTINGS)
+    answers = d1.query(
+        [f"SELECT count(*) AS n FROM {ident(name)}" for name in target]
+        + [
+            f"SELECT count(*) AS n FROM settings WHERE key IN ({worker_only})",
+            "SELECT count(*) AS n FROM tasks WHERE todoist_project_id IS NOT NULL",
+        ]
+    )
+    counts = [int(rows[0]["n"]) for rows in answers[: len(target)]]
+    worker_rows = sum(int(rows[0]["n"]) for rows in answers[len(target) :])
+    manifest = read_manifest(workdir)["tables"] if (workdir / "manifest.json").is_file() else None
+    reasons = []
+    if manifest is None:
+        reasons.append("the work directory has no manifest.json to compare with")
+    else:
+        for name, count in zip(target, counts):
+            log(f"table {name}: {count} row(s) in D1, {manifest.get(name, {}).get('rows', 0)} imported")
+            if count > int(manifest.get(name, {}).get("rows", 0)):
+                reasons.append(f"table {name} holds more rows than this work directory imported")
+    if worker_rows:
+        reasons.append(f"{worker_rows} row(s) exist that only the Worker writes (it has been used since the import)")
+    if reasons and confirm_database != DATABASE_NAME:
+        raise Failure(
+            "; ".join(reasons) + ": D1 holds more than this work directory's import, so the rows may be production"
+            " data. Restore a Time Travel bookmark instead (reset --bookmark-file/--bookmark-env), or, to delete"
+            f" every row anyway, add --confirm-database {DATABASE_NAME}"
+        )
+    if reasons:
+        log(f"--confirm-database {DATABASE_NAME}: deleting although " + "; ".join(reasons) + ".")
+    return counts
+
+
 def reset(
     d1: D1,
     delete_all_rows: bool,
     bookmark_env: str | None,
+    bookmark_file: Path | None,
     workdir: Path | None,
-    max_per_day: int,
+    confirm_database: str | None,
+    budget: Budget,
     log: Callable[[str], None],
 ) -> None:
-    if delete_all_rows == (bookmark_env is not None):
-        raise ToolError("use exactly one of --delete-all-rows and --bookmark-env NAME")
-    if bookmark_env is not None:
-        bookmark = os.environ.get(bookmark_env, "")
-        if not re.fullmatch(r"[0-9a-f-]{16,}", bookmark):
-            raise ToolError(f"{bookmark_env} does not hold a D1 bookmark")
+    if sum((delete_all_rows, bookmark_env is not None, bookmark_file is not None)) != 1:
+        raise ToolError("use exactly one of --delete-all-rows, --bookmark-env NAME and --bookmark-file FILE")
+    if confirm_database is not None and (not delete_all_rows or confirm_database != DATABASE_NAME):
+        raise ToolError(f"--confirm-database goes only with --delete-all-rows and must say {DATABASE_NAME}")
+    if not delete_all_rows:
+        bookmark, before = bookmark_from(bookmark_env, bookmark_file)
         d1.restore(bookmark)
         log("Restored the Time Travel bookmark.")
+        if before == "reset":
+            # It undid a reset by deletion: D1 holds those rows again instead of being empty.
+            target = target_schema()
+            for name, [row] in zip(target, d1.query([f"SELECT count(*) AS n FROM {ident(name)}" for name in target])):
+                log(f"table {name}: {row['n']} row(s)")
+            return
     else:
         if workdir is None:
-            raise ToolError("--delete-all-rows needs --workdir (its ledger of today's D1 rows written)")
+            raise ToolError("--delete-all-rows needs --workdir (its manifest, its write ledger and the bookmark)")
         if not workdir.is_dir():
             raise ToolError("--workdir is not a directory")
         target = target_schema()
-        counts = d1.query([f"SELECT count(*) AS n FROM {ident(name)}" for name in target])
-        rows = 0
-        for table, [row] in zip(target.values(), counts):
-            log(f"table {table.name}: {row['n']} row(s) before the reset")
-            rows += int(row["n"]) * (1 + table.indexes)  # a deleted row also deletes its index entries
-        reserve_writes(workdir, rows, max_per_day, "the reset", log)
+        counts = check_own_import(d1, workdir, confirm_database, log)
+        # The reset's own estimate: a deleted row also deletes its index entries.
+        rows = sum(count * (1 + table.indexes) for table, count in zip(target.values(), counts))
+        reserve_writes(d1, workdir, rows, budget, "the reset", log)
+        save_bookmark(d1, workdir, "reset", log)
         with tempfile.TemporaryDirectory() as scratch:
             path = Path(scratch) / "reset.sql"
             path.write_text("".join(f"DELETE FROM {ident(name)};\n" for name in target))
-            d1.execute_file(path)
+            try:
+                d1.execute_file(path, "reset")
+            except Unconfirmed as unknown:
+                raise Unconfirmed(f"{unknown}. The rows may well be deleted: run check-empty next") from None
         log("Deleted every row of the FlowDay tables (d1_migrations kept).")
     check_empty(d1, log)
 
@@ -975,6 +1252,12 @@ def parser() -> argparse.ArgumentParser:
             default=DEFAULT_MAX_ROWS_WRITTEN,
             help="estimated D1 rows this work directory may write per UTC day (import and --delete-all-rows)",
         )
+        command.add_argument(
+            "--max-account-rows-written-per-day",
+            type=int,
+            default=DEFAULT_MAX_ACCOUNT_ROWS_WRITTEN,
+            help="--remote: the account's D1 rows written today (UTC) plus this write may not pass this",
+        )
 
     command = commands.add_parser("export", help="snapshot the local copy and write import.sql and manifest.json")
     command.add_argument("--source", required=True, help="the local copy of flowday.db (its -wal next to it)")
@@ -993,8 +1276,15 @@ def parser() -> argparse.ArgumentParser:
     command = commands.add_parser("reset", help="empty D1 again: restore a Time Travel bookmark, or delete every row")
     d1_options(command)
     command.add_argument("--bookmark-env", help="the environment variable that holds the bookmark")
+    command.add_argument("--bookmark-file", help="a d1-bookmark-*.json that import or reset saved")
     command.add_argument("--delete-all-rows", action="store_true")
-    command.add_argument("--workdir", help="for --delete-all-rows: the work directory whose write ledger it uses")
+    command.add_argument(
+        "--workdir", help="for --delete-all-rows: the work directory of the import (manifest, write ledger, bookmark)"
+    )
+    command.add_argument(
+        "--confirm-database",
+        help=f"for --delete-all-rows: '{DATABASE_NAME}' deletes even rows that are not this work directory's import",
+    )
     budget(command)
     return root
 
@@ -1003,6 +1293,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = parser().parse_args(argv)
     log = lambda line: print(line, flush=True)  # noqa: E731
     try:
+        budget = (
+            Budget(args.max_rows_written_per_day, args.max_account_rows_written_per_day)
+            if hasattr(args, "max_rows_written_per_day")
+            else Budget()
+        )
         if args.command == "export":
             expect = Path(args.expect_sha256) if args.expect_sha256 else None
             export(Path(args.source), Path(args.workdir), args.max_rows_written, log, expect)
@@ -1012,18 +1307,32 @@ def main(argv: Sequence[str] | None = None) -> int:
         elif args.command == "import":
             workdir = private_path(Path(args.workdir), "--workdir")
             d1 = d1_from(args, workdir / "wrangler-import.log")
-            import_file(workdir, d1, args.max_rows_written_per_day, log)
+            import_file(workdir, d1, budget, log)
         elif args.command == "verify":
             verify(private_path(Path(args.workdir), "--workdir"), d1_from(args), log)
         elif args.command == "reset":
             workdir = private_path(Path(args.workdir), "--workdir") if args.workdir else None
-            reset(d1_from(args), args.delete_all_rows, args.bookmark_env, workdir, args.max_rows_written_per_day, log)
+            bookmark_file = private_path(Path(args.bookmark_file), "--bookmark-file") if args.bookmark_file else None
+            d1 = d1_from(args, workdir / "wrangler-reset.log" if workdir and workdir.is_dir() else None)
+            reset(
+                d1,
+                args.delete_all_rows,
+                args.bookmark_env,
+                bookmark_file,
+                workdir,
+                args.confirm_database,
+                budget,
+                log,
+            )
     except Failure as failure:
         print(f"FAIL: {failure}", file=sys.stderr)
         return 1
     except ToolError as error:
         print(f"ERROR: {error}", file=sys.stderr)
         return 2
+    except Unconfirmed as unknown:
+        print(f"UNCONFIRMED: {unknown}.", file=sys.stderr)
+        return 3
     except (sqlite3.Error, OSError) as error:
         # Neither names a row's content: SQLite errors name objects, OS errors name paths.
         print(f"ERROR: {type(error).__name__}: {error}", file=sys.stderr)

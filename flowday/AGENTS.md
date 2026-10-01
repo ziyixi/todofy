@@ -16,9 +16,10 @@ The root [`AGENTS.md`](../AGENTS.md) applies here too. FlowDay-specific rules:
 - **Status (F4 done).** CI deploys the Worker `flowday` (`worker/`, `migrations/`, `wrangler.toml`) with its
   static-export UI (`web/`) and its D1 migrations ("FlowDay deploy"). Its only hostname is the production Custom
   Domain `flowday.ziyixi.science` (`PUBLIC_HOST`), covered by the Access apps "flowday" and, for `/pwa/*`,
-  "flowday-bypass"; the cutover commit's deploy detached the staging host `flowday-next.ziyixi.science` and took
-  over the tunnel CNAME (the two cf-guard allowances were set for that commit only and are cleared again). F5 (the
-  rollback window) keeps the old container stopped and untouched. Do not add a hostname, route or Cloudflare resource before the migration step that calls for
+  "flowday-bypass"; the cutover commit's deploy detached the staging host `flowday-next.ziyixi.science` and
+  replaced the tunnel CNAME, which had to be deleted by hand right before it (the Custom Domain API refuses an
+  existing DNS record it did not create, error 100117; the two cf-guard allowances were set for that commit only
+  and are cleared again). F5 (the rollback window) keeps the old container stopped and untouched. Do not add a hostname, route or Cloudflare resource before the migration step that calls for
   it ([`docs/design.md`](docs/design.md) §11), and any new host only after the Access apps cover it. D1 migrations run against production on every deploy: keep each one readable
   by the container code (§11 F5).
 - **Workers Free.** A static export of the UI as Workers static assets, a plain-fetch Worker API, D1 via
