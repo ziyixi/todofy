@@ -16,7 +16,7 @@ Outputs (GITHUB_OUTPUT, "true"/"false"):
                     tools/ changed, or a dispatch.
   base              not a flag: the commit the diff started from (empty when everything runs), which
                     "Proto checks" compares the IDL with.
-  todofy_deploy, mail_hero_deploy, dashboard_deploy, website_deploy, lab_deploy, flowday_deploy
+  todofy_deploy, mail_hero_deploy, dashboard_deploy, website_deploy, lab_deploy, flowday_deploy, links_deploy
                     the app, a shared package it compiles in, or a contract file it bundles changed
                     (deploy jobs also require refs/heads/main)
   website_relay_deploy
@@ -25,10 +25,10 @@ Outputs (GITHUB_OUTPUT, "true"/"false"):
                     a website change elsewhere releases the site but does not redeploy the relay.
   FlowDay (flowday/) is checked and deployed like the other apps since F2 (flowday/docs/design.md section 11).
   It uses no contract (NO_CONTRACTS) and compiles in packages/edge-auth, so a package change checks and
-  deploys it too. CHECK_ONLY (apps checked but never deployed, with no "<prefix>_deploy" output) holds the links app
-  (links/, the short links on s.ziyixi.science: links/docs/design.md section 11) until its first deploy job (L2): it
-  has no links_deploy output. It uses no contract and compiles in packages/edge-auth and the TypeScript proto runtime
-  with proto/links/ui/, so a change to those checks it too.
+  deploys it too. The links app (links/, the short links on s.ziyixi.science) is checked and deployed since L2
+  (links/docs/design.md section 11). It uses no contract and compiles in packages/edge-auth and the TypeScript proto
+  runtime with proto/links/ui/, so a change to those checks and deploys it too. CHECK_ONLY (apps checked but never
+  deployed, with no "<prefix>_deploy" output) is where a new app starts, until its first deploy job; it is empty.
 
 proto/ (the protobuf IDL, proto/README.md) checks every app in PROTO_USERS (an app that depends on
 @ziyixi/proto or ziyixi-proto) and deploys only the apps whose bundle the changed path reaches
@@ -100,8 +100,9 @@ PREFIX = {
     "links": "links",
 }
 # Apps that are checked but never deployed by CI (no "<prefix>_deploy" output): a new app until its Worker has its
-# Cloudflare resources and a deploy job. The links app until L2 (links/docs/design.md section 11).
-CHECK_ONLY: set[str] = {"links"}
+# Cloudflare resources and a deploy job. None today: the links app left at L2 (links/docs/design.md section 11), as
+# FlowDay did at F2.
+CHECK_ONLY: set[str] = set()
 KEYS = (
     "todofy_check",
     "mail_hero_check",
@@ -121,6 +122,7 @@ KEYS = (
     "website_relay_deploy",
     "lab_deploy",
     "flowday_deploy",
+    "links_deploy",
 )
 DISPATCH = {
     "both": ("todofy", "mail-hero"),

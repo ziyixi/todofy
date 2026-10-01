@@ -49,6 +49,7 @@ describe('操作与记录', () => {
       'Newsletter',
       '个人控制台',
       '自托管服务器',
+      '短链接',
     ])
     expect(rows[2]).toHaveTextContent('ops-v1 状态接口')
     expect(rows[3]).toHaveTextContent('公开地址探测')
@@ -56,6 +57,8 @@ describe('操作与记录', () => {
     // Hidden, with no Worker: it only names the self-hosted servers' backup bucket.
     expect(rows[7]).toHaveTextContent('未接入监控')
     expect(within(rows[7] as HTMLElement).getAllByRole('cell').at(-1)).toHaveTextContent('—')
+    // Hidden, with the Worker links and its D1 database (L2): no probe and no Ops entrypoint.
+    expect(rows[8]).toHaveTextContent('未接入监控')
   })
 
   it('names a link-only entry of the registry as such', async () => {

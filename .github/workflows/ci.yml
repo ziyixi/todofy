@@ -1,9 +1,8 @@
-# One workflow for the apps (Todofy, Mail Hero, the home dashboard, the website, Lab, FlowDay and the links app, which
-# is checked but not deployed yet). "changes" decides
-# what changed since a cumulative base (.github/scripts/ci_changes.py), each app's checks run from its own directory, "Shared packages"
-# checks packages/* (compiled into the apps), "Contracts" runs both sides of mail.received.v1, ops-v1 and
-# task-intent-v1 plus the dashboard's ops-v1 caller tests, "Proto checks" gates the protobuf IDL in proto/, and
-# "CI gate" is the single status check to require.
+# One workflow for the apps (Todofy, Mail Hero, the home dashboard, the website, Lab, FlowDay and the links app).
+# "changes" decides what changed since a cumulative base (.github/scripts/ci_changes.py), each app's checks run
+# from its own directory, "Shared packages" checks packages/* (compiled into the apps), "Contracts" runs both
+# sides of mail.received.v1, ops-v1 and task-intent-v1 plus the dashboard's ops-v1 caller tests, "Proto checks"
+# gates the protobuf IDL in proto/, and "CI gate" is the single status check to require.
 # Deploys run only on main, only for the app that changed (itself, a shared package it compiles in, a contract
 # file it bundles, or was dispatched), after the gate passes; Lab deploys after Todofy (its TODOFY binding) and
 # the dashboard after every app whose Ops entrypoint it binds. A push to main whose commit already passed every
@@ -63,6 +62,7 @@ jobs:
       website_relay_deploy: ${{ steps.decide.outputs.website_relay_deploy }}
       lab_deploy: ${{ steps.decide.outputs.lab_deploy }}
       flowday_deploy: ${{ steps.decide.outputs.flowday_deploy }}
+      links_deploy: ${{ steps.decide.outputs.links_deploy }}
       # A push to main that reuses a green branch run of the same commit (all check outputs above are false).
       checks_reused: ${{ steps.decide.outputs.checks_reused }}
       reused_run_url: ${{ steps.decide.outputs.reused_run_url }}
@@ -698,10 +698,9 @@ jobs:
         if: always()
         run: rm -f "$RUNNER_TEMP/flowday-secrets.json"
 
-  # The links app (links/: the Worker "links", its D1 schema and the launcher it serves under /_/) is checked but not
-  # deployed until L2 (links/docs/design.md section 11): no hostname, route or Cloudflare resource yet, and its wrapper
-  # refuses a real deploy while the committed D1 id and Access AUD are placeholders. It compiles in packages/edge-auth
-  # and the TypeScript proto runtime with proto/links/ui/; no contract.
+  # The links app (links/: the Worker "links", its D1 schema and the launcher it serves under /_/), deployed by "Links
+  # deploy" since L2 (links/docs/design.md section 11). It compiles in packages/edge-auth and the TypeScript proto
+  # runtime with proto/links/ui/; no contract.
   links-checks:
     name: Links checks
     needs: changes
@@ -756,9 +755,9 @@ jobs:
         run: |
           if grep -rnE "(from|import)[[:space:]]*\(?[[:space:]]*['\"][^'\"]*(mail-hero|todofy|dashboard|website|lab|flowday)/" worker/src web/src \
             | grep -v "['\"]@ziyixi/proto/"; then exit 1; fi
-      # The committed config, run as a deploy would run it but with --dry-run (the wrapper refuses anything else before
-      # L2) and placeholder values for what the deploy adds. No token is needed. The bundle it writes is held to the
-      # app's budget and the Workers Free limit (deploy/bundle-size.mjs).
+      # The committed config, run exactly as the deploy runs it but with --dry-run and placeholder values for what the
+      # deploy adds (deploy/deploy-vars.mjs). No token is needed. The bundle it writes is held to the app's budget and
+      # the Workers Free limit (deploy/bundle-size.mjs).
       - name: Dry-run the committed config and check the bundle size
         working-directory: links/worker
         env:
@@ -1913,6 +1912,243 @@ jobs:
       - name: Remove the secrets file
         if: always()
         run: rm -f "$RUNNER_TEMP/flowday-secrets.json"
+
+  # The links app (links/docs/design.md section 11, L2): the Worker "links" on its one Custom Domain s.ziyixi.science.
+  # Only /_ and /_/* sit behind the path-scoped Access application "links"; every other path (the short links) reaches
+  # the Worker anonymously, which the last two checks hold to exactly that split.
+  links-deploy:
+    name: Links deploy
+    needs: [changes, links-checks, gate]
+    # Explicit status function and results, as for Todofy deploy (implicit success() and skipped ancestors).
+    if: >-
+      ${{ !cancelled()
+      && needs.changes.result == 'success'
+      && (needs.links-checks.result == 'success' || (needs.changes.outputs.checks_reused == 'true' && needs.links-checks.result == 'skipped'))
+      && needs.gate.result == 'success'
+      && github.ref == 'refs/heads/main'
+      && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+      && needs.changes.outputs.links_deploy == 'true' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    environment:
+      name: production
+      url: ${{ steps.config.outputs.url }}
+    concurrency:
+      group: links-production
+      cancel-in-progress: false
+    defaults:
+      run:
+        working-directory: links
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: '26'
+          cache: npm
+          cache-dependency-path: |
+            links/worker/package-lock.json
+            links/web/package-lock.json
+            proto/package-lock.json
+      # Every static production value (account, D1, host, Access) is committed in links/wrangler.toml; the environment
+      # URL and the host probes read it there.
+      - name: Read the host and the Access issuer from the committed config
+        id: config
+        run: |
+          python3 - >> "$GITHUB_OUTPUT" <<'EOF'
+          import tomllib
+          with open("wrangler.toml", "rb") as file:
+              variables = tomllib.load(file)["vars"]
+          print("url=https://" + variables["PUBLIC_HOST"])
+          print("host=" + variables["PUBLIC_HOST"])
+          print("access_issuer=" + variables["ACCESS_ISSUER"])
+          EOF
+      # The launcher's build (web/dist) is the one that ships; its JavaScript budget is checked by the build.
+      - name: Build the verified revision
+        run: |
+          npm ci --prefix worker --no-audit --no-fund
+          npm ci --prefix web --no-audit --no-fund
+          npm run build --prefix web
+      # The owner's addresses and the CSRF key are environment secrets (masked in this public log) and reach the Worker
+      # as secrets through --secrets-file; wrangler prints plain vars. The links app's owner is the dashboard's owner
+      # (one person, the same Access identities), so the addresses come from the dashboard's secrets, as for Lab and
+      # FlowDay; the CSRF key is the links app's own. links/README.md "Deploy".
+      - name: Write the Worker secrets file
+        working-directory: links/worker
+        env:
+          LINKS_ACCESS_OWNER: ${{ secrets.DASHBOARD_ACCESS_OWNER }}
+          LINKS_ACCESS_OWNER_ALIASES: ${{ secrets.DASHBOARD_ACCESS_OWNER_ALIASES }}
+          LINKS_CSRF_SIGNING_KEY: ${{ secrets.LINKS_CSRF_SIGNING_KEY }}
+        run: node ../deploy/deploy-vars.mjs secrets "$RUNNER_TEMP/links-secrets.json"
+      # deploy-vars.mjs adds BUILD_SHA as --var and refuses the all-zeros D1 id or Access AUD; the bundle that ships is
+      # held to the app's budget and the Workers Free limit (deploy/bundle-size.mjs).
+      - name: Validate the bundle before changing D1
+        working-directory: links/worker
+        run: |
+          node ../deploy/deploy-vars.mjs exec -- npx --no-install wrangler deploy --dry-run --config ../wrangler.toml \
+            --secrets-file "$RUNNER_TEMP/links-secrets.json" --outdir "$RUNNER_TEMP/links-bundle"
+          node ../deploy/bundle-size.mjs "$RUNNER_TEMP/links-bundle"
+      # tools/cf-guard (read-only GETs; prints listed hostnames, counts, PASS/FAIL): wrangler applies a config's Custom
+      # Domains (or zone routes) as the Worker's complete set, so stop before any production change when a live
+      # hostname would be detached or another Worker's hostname or DNS record taken over. For an intentional
+      # change, set the exact hostnames here (space-separated) in the same commit that changes wrangler.toml.
+      # s.ziyixi.science had no DNS record before L2, so its first deploy attaches the Custom Domain without either.
+      - name: Check the hostnames against production
+        working-directory: .
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+          CF_GUARD_ALLOW_REMOVE: ''
+          CF_GUARD_ALLOW_CONFLICT: ''
+        run: node tools/cf-guard/cf-guard.mjs --config links/wrangler.toml
+      - name: Apply D1 migrations, then deploy the Worker links
+        working-directory: links/worker
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+        run: |
+          test -n "$CLOUDFLARE_API_TOKEN"
+          npx --no-install wrangler d1 migrations apply DB --remote --config ../wrangler.toml
+          node ../deploy/deploy-vars.mjs exec -- npx --no-install wrangler deploy --config ../wrangler.toml \
+            --secrets-file "$RUNNER_TEMP/links-secrets.json"
+      # Nothing anonymous on the host shows BUILD_SHA (the owner's half is behind Access), so production is read through
+      # the API with the deploy token (GETs and one D1 read of the migrations table): the Worker serves exactly one
+      # version at 100%, that version's BUILD_SHA is this commit, and no D1 migration is pending. wrangler's JSON answers
+      # are parsed, never printed (they name the token's account email); only the version id and the results are.
+      - name: Check that production runs this commit
+        working-directory: links/worker
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+        run: |
+          test -n "$CLOUDFLARE_API_TOKEN"
+          deployment=$(npx --no-install wrangler deployments status --json --config ../wrangler.toml) || {
+            echo "Could not read the deployment of the Worker links." >&2
+            exit 1
+          }
+          version=$(jq -er '.versions | select(length == 1 and .[0].percentage == 100) | .[0].version_id' \
+            <<<"$deployment" 2>/dev/null) || {
+            echo "The deployment does not serve exactly one version at 100%." >&2
+            exit 1
+          }
+          details=$(npx --no-install wrangler versions view "$version" --json --config ../wrangler.toml) || {
+            echo "Could not read the deployed version." >&2
+            exit 1
+          }
+          build=$(jq -er '[.resources.bindings[] | select(.name == "BUILD_SHA" and .type == "plain_text") | .text]
+            | select(length == 1) | .[0]' <<<"$details" 2>/dev/null) || build=''
+          if [ "$build" != "$GITHUB_SHA" ]; then
+            echo "The deployed version $version was not built from $GITHUB_SHA." >&2
+            exit 1
+          fi
+          echo "The Worker links serves version $version at 100%, built from $GITHUB_SHA."
+          pending=$(npx --no-install wrangler d1 migrations list DB --remote --config ../wrangler.toml) || {
+            echo "Could not list the D1 migrations." >&2
+            exit 1
+          }
+          if ! grep -q 'No migrations to apply' <<<"$pending"; then
+            echo "D1 migrations are still pending." >&2
+            exit 1
+          fi
+          echo "No D1 migration is pending."
+      # Cloudflare Access ("links", path-scoped) must answer every unauthenticated request for the owner's half with a
+      # 302 to its login page for this host: its exact destination /_, the launcher /_/ and the owner API, exactly as
+      # the dashboard's probe checks (same script; test_ci_changes.py runs it).
+      - name: Check that Access answers unauthenticated requests
+        env:
+          ACCESS_ISSUER: ${{ steps.config.outputs.access_issuer }}
+          PUBLIC_HOST: ${{ steps.config.outputs.host }}
+        run: |
+          issuer=$ACCESS_ISSUER
+          host=$PUBLIC_HOST
+          test -n "$issuer" && test -n "$host"
+          for path in /_ /_/ /_/api/v1/links; do
+            for attempt in $(seq 1 10); do
+              answer=$(curl -sS -o /dev/null --max-time 15 --proto '=https' -w '%{http_code} %{redirect_url}' \
+                "https://$host$path" 2>/dev/null) || true
+              code=${answer%% *}
+              location=${answer#* }
+              case "$code" in
+                302)
+                  login="$issuer/cdn-cgi/access/login/$host"
+                  case "$location" in
+                    "$login"|"$login?"*|"$login/"*)
+                      echo "Access answered $path with 302 to its login page for this host (attempt $attempt)."
+                      continue 2
+                      ;;
+                  esac
+                  echo "$path: 302 to somewhere other than the Access login page for this host." >&2
+                  exit 1
+                  ;;
+                ''|000|5??) sleep 15 ;;
+                *)
+                  echo "$path was answered with $code without Access." >&2
+                  exit 1
+                  ;;
+              esac
+            done
+            echo "$path never reached Access (last status ${code:-none})." >&2
+            exit 1
+          done
+      # The rest of the host is outside Access and the Worker answers it itself, anonymously (docs/design.md §2, §4):
+      # /robots.txt with its own text (200, text/plain, "Disallow: /" for every agent), and a key no link uses with the
+      # 302 to /_/k/<key> on this host that a private, deleted or expired key gets too (the enumeration rule), both with
+      # Cache-Control no-store and X-Robots-Tag noindex. A 302 to the Access login page means that the Access
+      # application covers more than /_/*. Only "no connection" and 5xx are retried (10 x 15 s); nothing is followed,
+      # and only the path, the status and the media type are printed.
+      - name: Check that the Worker answers short links without Access
+        env:
+          ACCESS_ISSUER: ${{ steps.config.outputs.access_issuer }}
+          PUBLIC_HOST: ${{ steps.config.outputs.host }}
+        run: |
+          issuer=$ACCESS_ISSUER
+          host=$PUBLIC_HOST
+          test -n "$issuer" && test -n "$host"
+          body="$RUNNER_TEMP/links-probe-body"
+          for check in '/robots.txt 200' '/some-unknown-key 302'; do
+            read -r path want <<<"$check"
+            for attempt in $(seq 1 10); do
+              rm -f "$body"
+              answer=$(curl -sS -o "$body" --max-time 15 --proto '=https' \
+                -w '%{http_code}|%{content_type}|%{redirect_url}|%header{cache-control}|%header{x-robots-tag}' \
+                "https://$host$path" 2>/dev/null) || true
+              IFS='|' read -r code media location cache robots <<<"$answer"
+              media=${media%%;*}
+              case "$code" in
+                ''|000|5??)
+                  sleep 15
+                  continue
+                  ;;
+              esac
+              if [ "$code" = 302 ] && [[ "$location" == "$issuer/cdn-cgi/access/login/"* ]]; then
+                echo "$path: Access answered instead of the Worker: the Access app links covers more than /_/*." >&2
+                exit 1
+              fi
+              if [ "$code" != "$want" ]; then
+                echo "$path was answered with $code ${media:-(no media type)}, not $want." >&2
+                exit 1
+              fi
+              if [[ "$cache" != *no-store* ]] || [[ "$robots" != *noindex* ]]; then
+                echo "$path: $code without Cache-Control no-store and X-Robots-Tag noindex." >&2
+                exit 1
+              fi
+              if [ "$want" = 200 ]; then
+                if [ "$media" != text/plain ] || ! printf 'User-agent: *\nDisallow: /\n' | cmp -s - "$body"; then
+                  echo "$path: 200 ${media:-(no media type)} is not the Worker's robots.txt." >&2
+                  exit 1
+                fi
+              elif [ "$location" != "https://$host/_/k${path}" ]; then
+                echo "$path: 302 to somewhere other than this host's /_/k${path}." >&2
+                exit 1
+              fi
+              echo "$path: $code ${media:-(no body)} from the Worker without an Access login (attempt $attempt)."
+              continue 2
+            done
+            echo "$path never reached the Worker (last status ${code:-none})." >&2
+            exit 1
+          done
+          rm -f "$body"
+      - name: Remove the secrets file
+        if: always()
+        run: rm -f "$RUNNER_TEMP/links-secrets.json"
 
   # The site release: dispatches website-release.yml (docs in website/docs/release.md), the same workflow the
   # Notion buttons and the relay's detector dispatch, and returns at once. The release's job holds the one

@@ -95,6 +95,7 @@ Three lists joined by id, compiled into the Worker; the UI gets the public view 
 | Newsletter | 后台服务 | `none` → 未接入 | — |
 | 个人控制台 (`home`) | hidden | `self` (`tick_stale`) | no tile; Cloudflare row only |
 | 自托管服务器 (`self-hosted`, no Worker) | hidden | `none` | no tile; exists only to name the R2 bucket `vultr-backup` (VPS 备份: the self-hosted VPS and home server's backups, not a monorepo app), since a resource must belong to an entry |
+| 短链接 (`links`) | hidden | `none` | no tile; names the Worker `links` and its D1 database `links` (L2 of `links/docs/design.md`) in the Cloudflare table. No Ops entrypoint, its owner half is behind Access and a short link may go unused for days, so neither a probe nor an idle rule would tell anything |
 
 Flows: 邮件 → 任务 (来源转发 ○ → 收件与保存 → 解析 → Webhook 投递 → Todofy 摘要 → Todoist 与提醒; canary
 `mail-todofy` verifies 投递 and 摘要 only), 网站发布 (Notion ○ → 发布 → 网站可用), 每日 Newsletter
@@ -301,8 +302,8 @@ also redeploys the dashboard with the new desired state.
 | each desired Worker that exists | `GET .../workers/scripts/{s}/schedules`, `.../settings`, `.../subdomain` (in parallel) |
 
 At most `DRIFT_CALLS_PER_TICK` (12) calls per tick: the account step and three Workers on the first tick,
-four Workers on the next, then the rest, so a check of the 8 Workers takes three ticks (a tick then makes at most 23
-outbound calls in all, §5). A failed step is retried by the next tick; after `DRIFT_MAX_ATTEMPTS` (3)
+four Workers on the next, then the rest, so a check of the 9 Workers takes three ticks, 3 + 4 + 2 (a tick then
+makes at most 23 outbound calls in all, §5). A failed step is retried by the next tick; after `DRIFT_MAX_ATTEMPTS` (3)
 failed attempts the day is given up (`consecutive_failed_days` + 1), and a run left unfinished at the end
 of its UTC day counts as a failed day too, as does a `drift_run` document that would pass
 `DRIFT_RUN_MAX_BYTES` (60,000 bytes, under the 64 KiB row limit; this account's is about 6 KB). Every answer is reduced at once to names, types and flags:

@@ -1,6 +1,7 @@
 // The deploy wrapper (../deploy-vars.mjs): Lab's and FlowDay's rules with the links app's inputs, and no real deploy
-// before L2. Synthetic values only; the wrapper runs a stub instead of wrangler. (The owner rules are compared with the
-// dashboard's, Lab's and FlowDay's wrappers in .github/scripts/test_wrangler_configs.py: an app reads no other app.)
+// with a placeholder. Synthetic values only; the wrapper runs a stub instead of wrangler. (The owner rules are compared
+// with the dashboard's, Lab's and FlowDay's wrappers in .github/scripts/test_wrangler_configs.py: an app reads no other
+// app.)
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
@@ -61,23 +62,38 @@ test('the secrets file holds the owner, aliases and CSRF key; invalid values are
   }
 })
 
-test('before L2 the committed config holds both placeholders: only a --dry-run deploy may run', () => {
-  assert.equal(placeholderIn(readFileSync(CONFIG, 'utf8')), 'database_id')
-  assert.equal(placeholderIn(readFileSync(CONFIG, 'utf8').replace(/database_id = "0{8}-0{4}-0{4}-0{4}-0{12}"/, 'database_id = "x"')), 'ACCESS_AUDIENCE')
-  assert.match(readFileSync(CONFIG, 'utf8'), new RegExp(`^ACCESS_AUDIENCE = "${'0'.repeat(64)}"$`, 'm'))
+test('since L2 the committed config holds the real D1 id and Access AUD; a placeholder still refuses a real deploy', () => {
+  const committed = readFileSync(CONFIG, 'utf8')
+  assert.equal(placeholderIn(committed), null)
+  assert.equal(placeholderIn('database_id = "00000000-0000-0000-0000-000000000000"\n'), 'database_id')
+  assert.equal(placeholderIn(`ACCESS_AUDIENCE = "${'0'.repeat(64)}"\n`), 'ACCESS_AUDIENCE')
+  assert.equal(placeholderIn('# database_id = "00000000-0000-0000-0000-000000000000"\n'), null)
+
   const deploy = ['npx', '--no-install', 'wrangler', 'deploy']
-  assert.equal(refusal([...deploy, '--dry-run', '--config', '../wrangler.toml', '--outdir', '/tmp/x'], WORKER), null)
-  assert.match(refusal([...deploy, '--config', '../wrangler.toml', '--secrets-file', '/tmp/s.json'], WORKER), /placeholder/)
+  const real = [...deploy, '--config', '../wrangler.toml', '--secrets-file', '/tmp/s.json']
+  const dryRun = [...deploy, '--dry-run', '--config', '../wrangler.toml', '--outdir', '/tmp/x']
+  assert.equal(refusal(real, WORKER), null)
+  assert.equal(refusal(dryRun, WORKER), null)
+  // A revert to the L1 config (either placeholder back) refuses a real deploy again; the dry-run stays allowed.
+  for (const [name, text] of [
+    ['database_id', committed.replace(/^database_id = "[^"]+"$/m, 'database_id = "00000000-0000-0000-0000-000000000000"')],
+    ['ACCESS_AUDIENCE', committed.replace(/^ACCESS_AUDIENCE = "[^"]+"$/m, `ACCESS_AUDIENCE = "${'0'.repeat(64)}"`)],
+  ]) {
+    assert.notEqual(text, committed, name)
+    assert.match(refusal(real, WORKER, () => text), new RegExp(`^${name} .*placeholder`), name)
+    assert.equal(refusal(dryRun, WORKER, () => text), null, name)
+  }
+
   for (const argv of [
     [], deploy, [...deploy, '--dry-run', '--config', 'wrangler.toml'], [...deploy, '--dry-run', '--config', '../../lab/wrangler.toml'],
-    [...deploy, '--dry-run', '--config', '../wrangler.toml', '--env', 'production'],
-    [...deploy, '--dry-run', '--config', '../wrangler.toml', '--keep-vars'],
-    [...deploy, '--dry-run', '--config', '../wrangler.toml', '--var', 'BUILD_SHA:x'],
+    [...deploy, '--config', '../wrangler.toml', '--env', 'production'],
+    [...deploy, '--config', '../wrangler.toml', '--keep-vars'],
+    [...deploy, '--config', '../wrangler.toml', '--var', 'BUILD_SHA:x'],
     ['npx', 'wrangler', 'd1', 'migrations', 'apply', 'DB', '--config', '../wrangler.toml'],
   ]) assert.notEqual(refusal(argv, WORKER), null, argv.join(' '))
 })
 
-test('exec runs the dry-run unchanged plus the --var flag; secrets writes 0600 and never overwrites; nothing is printed', () => {
+test('exec runs the deploy (or dry-run) unchanged plus the --var flag; secrets writes 0600 and never overwrites; nothing is printed', () => {
   const dir = mkdtempSync(join(tmpdir(), 'links-deploy-vars-'))
   try {
     const out = join(dir, 'argv.json')
@@ -88,9 +104,12 @@ test('exec runs the dry-run unchanged plus the --var flag; secrets writes 0600 a
     const result = spawnSync(process.execPath, [WRAPPER, 'exec', '--', process.execPath, stub, 'deploy', '--dry-run', '--config', config], { cwd: WORKER, env, encoding: 'utf8' })
     assert.equal(result.status, 0, result.stderr)
     assert.deepEqual(JSON.parse(readFileSync(out, 'utf8')), ['deploy', '--dry-run', '--config', config, ...wranglerArgs(environment())])
-    // A real deploy is refused before the stub (in place of wrangler) would run.
+    const deployed = spawnSync(process.execPath, [WRAPPER, 'exec', '--', process.execPath, stub, 'deploy', '--config', config], { cwd: WORKER, env, encoding: 'utf8' })
+    assert.equal(deployed.status, 0, deployed.stderr)
+    assert.deepEqual(JSON.parse(readFileSync(out, 'utf8')), ['deploy', '--config', config, ...wranglerArgs(environment())])
+    // A refused command never reaches the stub (in place of wrangler).
     rmSync(out)
-    const refused = spawnSync(process.execPath, [WRAPPER, 'exec', '--', process.execPath, stub, 'deploy', '--config', config], { cwd: WORKER, env, encoding: 'utf8' })
+    const refused = spawnSync(process.execPath, [WRAPPER, 'exec', '--', process.execPath, stub, 'deploy', '--config', config, '--keep-vars'], { cwd: WORKER, env, encoding: 'utf8' })
     assert.equal(refused.status, 2)
     assert.ok(!existsSync(out))
 
@@ -105,7 +124,7 @@ test('exec runs the dry-run unchanged plus the --var flag; secrets writes 0600 a
     assert.equal(invalid.stderr.trim(), 'Invalid or missing deploy setting: LINKS_CSRF_SIGNING_KEY')
     assert.ok(!existsSync(bad))
 
-    const printed = [result, refused, written, again, invalid].map(({ stdout, stderr }) => stdout + stderr).join('\n')
+    const printed = [result, deployed, refused, written, again, invalid].map(({ stdout, stderr }) => stdout + stderr).join('\n')
     for (const value of Object.values(environment())) assert.ok(!printed.includes(value), 'printed a value')
     assert.ok(!printed.includes('secret-looking-value'))
   } finally {

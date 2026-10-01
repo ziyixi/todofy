@@ -17,7 +17,7 @@ Schema and fixtures as the published wire description, and `task-intent-v1.ts` o
 cannot express (bounds, URL hosts). `lab/ui/v1` is Lab's owner API (2026-10-01): Lab's Worker serves it
 through `ts/http-transcoder.ts` and Lab's UI calls it through `ts/http-client.ts`; it is the pilot of the
 HTTP APIs, which ops-v1, recommendation-v1, mail-received-v1 and every app's UI API follow. `links/ui/v1` is the
-links app's owner API (2026-10-01, checked but not deployed yet): the second app on the same runtime, under the path
+links app's owner API (2026-10-01, deployed since the app's step L2): the second app on the same runtime, under the path
 prefix `/_/api/v1/` (its host's other paths are short links).
 
 ## Rules
@@ -424,9 +424,8 @@ the log; a base that predates `proto/` has nothing to break. The job is in `CI g
 A `proto/` change also re-checks every app in `PROTO_USERS` (Lab, Todofy and the links app) and runs `Contracts` (the
 task-intent-v1 tests check the codecs against the schema). It deploys only the apps whose production bundle
 the changed path reaches (`proto_deploys` in `.github/scripts/ci_changes.py`). `PROTO_USERS` names each
-user's bundled languages: Lab `"ts"` (its Worker and UI), the links app `"ts"` (its Worker and UI; checked only,
-`CHECK_ONLY`, so nothing deploys it yet), Todofy `"python"` (todofy-core vendors the wheel; its gateway imports
-types only, which compile to nothing). A language's runtime and generator reach that language's users (`proto/ts/`
+user's bundled languages: Lab `"ts"` (its Worker and UI), the links app `"ts"` (its Worker and UI), Todofy
+`"python"` (todofy-core vendors the wheel; its gateway imports types only, which compile to nothing). A language's runtime and generator reach that language's users (`proto/ts/`
 and `buf.gen.yaml`: Lab and the links app; `proto/python/` and `tools/gen_py.py`: Todofy); a package reaches the apps
 that import it (`PROTO_PACKAGES`: `todofy/taskintent/` Lab and Todofy, `lab/ui/` Lab, `links/ui/` the links app,
 `common/errors/` and `prototest/` none); the module and toolchain files (`buf.yaml`, `buf.lock`,

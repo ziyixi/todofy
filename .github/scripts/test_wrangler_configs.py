@@ -45,12 +45,13 @@ PRODUCTION = {
     "ziyixi-notion-publish": "website/relay/wrangler.toml",
     "lab": "lab/wrangler.toml",
     "flowday": "flowday/wrangler.toml",
+    "links": "links/wrangler.toml",
 }
 # Configs of Workers that CI checks but does not deploy yet (no deploy job, no hostname, placeholder resource ids).
 # They stay out of PRODUCTION, which the dashboard's drift check compares with the live account
-# (drift_desired.py). FlowDay moved to PRODUCTION at F2 (flowday/docs/design.md section 11); the links app is here until
-# its first deploy (L2, links/docs/design.md section 11).
-UNDEPLOYED: dict[str, str] = {"links": "links/wrangler.toml"}
+# (drift_desired.py). None today: FlowDay moved to PRODUCTION at F2 (flowday/docs/design.md section 11) and the links
+# app at L2 (links/docs/design.md section 11).
+UNDEPLOYED: dict[str, str] = {}
 # Runtime-test configs stay next to their tests.
 TEST_CONFIGS = {
     "todofy/wrangler.test.toml",
@@ -69,6 +70,7 @@ WRAPPERS = {
     "dashboard": ("dashboard/deploy/deploy-vars.mjs", r"deploy-vars\.mjs (exec|secrets)\b", ["home"]),
     "lab": ("lab/deploy/deploy-vars.mjs", r"deploy-vars\.mjs (exec|secrets)\b", ["lab"]),
     "flowday": ("flowday/deploy/deploy-vars.mjs", r"deploy-vars\.mjs (exec|secrets)\b", ["flowday"]),
+    "links": ("links/deploy/deploy-vars.mjs", r"deploy-vars\.mjs (exec|secrets)\b", ["links"]),
 }
 # Worker vars that must never be committed: personal values (GitHub environment secrets) ...
 PERSONAL_VARS = {
@@ -95,15 +97,19 @@ PERSONAL_INPUTS = {
     "LAB_ACCESS_OWNER_ALIASES",
     "FLOWDAY_ACCESS_OWNER",
     "FLOWDAY_ACCESS_OWNER_ALIASES",
+    "LINKS_ACCESS_OWNER",
+    "LINKS_ACCESS_OWNER_ALIASES",
 }
-# Personal inputs a deploy job reads from another app's secret: Lab's and FlowDay's owner is the dashboard's owner
-# (one person, the same Access identities), so their deploys read the dashboard's secrets (lab/README.md "Deploy
-# secrets", flowday/README.md "Deploy").
+# Personal inputs a deploy job reads from another app's secret: the owner of Lab, FlowDay and the links app is the
+# dashboard's owner (one person, the same Access identities), so their deploys read the dashboard's secrets
+# (lab/README.md "Deploy secrets", flowday/README.md "Deploy", links/README.md "Deploy").
 SHARED_SECRETS = {
     "LAB_ACCESS_OWNER": "DASHBOARD_ACCESS_OWNER",
     "LAB_ACCESS_OWNER_ALIASES": "DASHBOARD_ACCESS_OWNER_ALIASES",
     "FLOWDAY_ACCESS_OWNER": "DASHBOARD_ACCESS_OWNER",
     "FLOWDAY_ACCESS_OWNER_ALIASES": "DASHBOARD_ACCESS_OWNER_ALIASES",
+    "LINKS_ACCESS_OWNER": "DASHBOARD_ACCESS_OWNER",
+    "LINKS_ACCESS_OWNER_ALIASES": "DASHBOARD_ACCESS_OWNER_ALIASES",
 }
 # The only GitHub variables CI reads: the operational switches, stated at every deploy (mail-hero AGENTS.md §8).
 TOGGLES = {
@@ -116,7 +122,7 @@ TOGGLES = {
     "TODOFY_GTD_REVIEW_ENABLED",
     "DASHBOARD_CANARY_ENABLED",
 }
-DEPLOY_JOBS = ("todofy-deploy", "mail-hero-deploy", "dashboard-deploy", "lab-deploy", "flowday-deploy")
+DEPLOY_JOBS = ("todofy-deploy", "mail-hero-deploy", "dashboard-deploy", "lab-deploy", "flowday-deploy", "links-deploy")
 # The retired generators' required GitHub variables, still set in production: a revert of the committed-config
 # layout needs them (README "Rolling back the committed-config layout"), and nothing may read them now.
 LEGACY_VARIABLES = {
@@ -360,10 +366,10 @@ class Files(unittest.TestCase):
 class Undeployed(unittest.TestCase):
     """A config CI only checks: on the shared account, closed to the internet (no workers.dev, no preview URL, no
     route), nothing personal committed, no deploy job, and its wrapper's inputs only ever placeholders in ci.yml.
-    A new app starts here, as FlowDay did until F2; the links app is here until L2."""
+    No app is undeployed today; the next imported app starts here, as FlowDay did until F2 and the links app until L2."""
 
     # Worker name -> its deploy wrapper, for every UNDEPLOYED config.
-    WRAPPER: dict[str, str] = {"links": "links/deploy/deploy-vars.mjs"}
+    WRAPPER: dict[str, str] = {}
 
     def test_every_undeployed_config_names_its_wrapper(self):
         self.assertEqual(set(self.WRAPPER), set(UNDEPLOYED))
@@ -436,7 +442,7 @@ class LocalDev(unittest.TestCase):
         return found
 
     def test_the_production_configs_with_routes_are_the_ones_dev_runs(self):
-        for worker in ("mail-hero", "todofy", "home", "lab", "flowday"):
+        for worker in ("mail-hero", "todofy", "home", "lab", "flowday", "links"):
             with self.subTest(worker=worker):
                 self.assertTrue(load(PRODUCTION[worker]).get("routes"))
 
@@ -514,6 +520,13 @@ class Hosts(unittest.TestCase):
         hosts = [route["pattern"] for path in PRODUCTION.values() for route in load(path).get("routes", [])]
         self.assertEqual(hosts.count(host), 1)
         self.assertNotIn("flowday-next.ziyixi.science", hosts)
+
+    def test_links_is_on_its_one_host(self):
+        """L2: the links app's one Custom Domain is its PUBLIC_HOST (the CSRF origin), s.ziyixi.science."""
+        links = load(PRODUCTION["links"])
+        host = links["vars"]["PUBLIC_HOST"]
+        self.assertEqual(host, "s.ziyixi.science")
+        self.assertEqual(links["routes"], [{"pattern": host, "custom_domain": True}])
 
     def test_the_core_links_to_the_gateway_host(self):
         self.assertEqual(load(PRODUCTION["todofy-core"])["vars"]["TODOFY_PUBLIC_HOST"], self.todofy)
@@ -780,9 +793,62 @@ class Workflow(unittest.TestCase):
         self.assertEqual(check["run"].replace("Worker lab", "Worker flowday"), same["run"])
         self.assertFalse({"deploy", "versions upload", "versions deploy", "rollback", "secret"} & set(wrangler_commands(check["run"])))
 
+    def test_links_deploy_reads_the_dashboard_owner_and_its_own_csrf_key(self):
+        """The links app's owner addresses come from the dashboard's secrets (no LINKS_ACCESS_OWNER* secret exists); its
+        CSRF key is its own, never another app's. The secrets are read only where the secrets file is written."""
+        read = {}
+        for step in steps(self.jobs["links-deploy"]):
+            for name, value in step["env"].items():
+                if match := re.fullmatch(r"\$\{\{ secrets\.([A-Z0-9_]+) \}\}", value):
+                    read.setdefault(name, set()).add(match.group(1))
+        self.assertEqual(read["LINKS_ACCESS_OWNER"], {"DASHBOARD_ACCESS_OWNER"})
+        self.assertEqual(read["LINKS_ACCESS_OWNER_ALIASES"], {"DASHBOARD_ACCESS_OWNER_ALIASES"})
+        self.assertEqual(read["LINKS_CSRF_SIGNING_KEY"], {"LINKS_CSRF_SIGNING_KEY"})
+        self.assertEqual(read["CLOUDFLARE_API_TOKEN"], {"CF_API_TOKEN"})
+        self.assertEqual(set(read), {*markers(WRAPPERS["links"][0])["secrets"], "CLOUDFLARE_API_TOKEN"})
+        self.assertNotRegex(WORKFLOW.read_text(), r"secrets\.LINKS_ACCESS_OWNER")
+        writers = [step["name"] for step in steps(self.jobs["links-deploy"]) if "LINKS_CSRF_SIGNING_KEY" in step["env"]]
+        self.assertEqual(writers, ["Write the Worker secrets file"])
+
+    def test_links_deploy_applies_migrations_before_the_worker_and_then_checks_production_and_the_host(self):
+        """L2: after the hostname guard, `wrangler d1 migrations apply DB --remote` and then the real deploy through the
+        wrapper in one step; then FlowDay's check of the live version and the migrations (reads only), the Access probe
+        of the owner's half and the probe of the Worker's own anonymous answers."""
+        links = steps(self.jobs["links-deploy"])
+        names = [step["name"] for step in links]
+        guard = names.index("Check the hostnames against production")
+        [deploy] = [i for i, s in enumerate(links) if "deploy" in wrangler_commands(s["run"]) and "--dry-run" not in s["run"]]
+        self.assertLess(guard, deploy)
+        script = links[deploy]["run"]
+        self.assertLess(script.index("wrangler d1 migrations apply DB --remote --config ../wrangler.toml"), script.index("deploy-vars.mjs exec"))
+        check = links[deploy + 1]
+        self.assertEqual(check["name"], "Check that production runs this commit")
+        [same] = [s for s in steps(self.jobs["flowday-deploy"]) if s["name"] == check["name"]]
+        self.assertEqual(check["run"].replace("Worker links", "Worker flowday"), same["run"])
+        self.assertEqual(
+            names[deploy + 2 :],
+            [
+                "Check that Access answers unauthenticated requests",
+                "Check that the Worker answers short links without Access",
+                "Remove the secrets file",
+            ],
+        )
+        for step in links[deploy + 1 :]:
+            with self.subTest(step=step["name"]):
+                self.assertFalse({"deploy", "versions upload", "versions deploy", "rollback", "secret"} & set(wrangler_commands(step["run"])))
+
+    def test_links_holds_the_bundle_it_dry_runs_to_its_budget(self):
+        """Links checks and Links deploy measure the dry run's bundle (deploy/bundle-size.mjs) in the step that writes it."""
+        for job in ("links-checks", "links-deploy"):
+            [dry] = [s for s in steps(self.jobs[job]) if "--dry-run" in s["run"] and "deploy-vars.mjs exec" in s["run"]]
+            with self.subTest(job=job):
+                self.assertIn('--outdir "$RUNNER_TEMP/links-bundle"', dry["run"])
+                self.assertIn('node ../deploy/bundle-size.mjs "$RUNNER_TEMP/links-bundle"', dry["run"])
+                self.assertLess(dry["run"].index("--outdir"), dry["run"].index("bundle-size.mjs"))
+
     def test_lab_flowday_and_links_accept_exactly_the_owner_values_the_dashboard_accepts(self):
         """The same secrets feed these wrappers: their owner and alias rules must be the same lines, or a valid
-        dashboard value could stop Lab deploy or FlowDay deploy (or the links app's, from L2), or the reverse. Here, in
+        dashboard value could stop Lab deploy, FlowDay deploy or Links deploy, or the reverse. Here, in
         Changes, a change to any one wrapper runs this comparison, whichever app's checks it runs."""
         rules = r"^(?:const ACCESS_EMAIL|const MAX_ALIASES|const MAX_LIST_CHARS) = .+$"
         lab, dashboard, flowday, links = (

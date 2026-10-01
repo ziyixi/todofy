@@ -6,20 +6,20 @@
 //   The links app has no GitHub-variable switches;
 // - with `--secrets-file` (Worker secrets, hidden in wrangler's output): the owner's addresses and the CSRF key
 //   (inputs LINKS_ACCESS_OWNER, LINKS_ACCESS_OWNER_ALIASES, LINKS_CSRF_SIGNING_KEY, masked in the public Actions log).
-//   The deploy job (from L2, ../docs/design.md §11) fills the first two from the dashboard's environment secrets
+//   The deploy job ("Links deploy") fills the first two from the dashboard's environment secrets
 //   DASHBOARD_ACCESS_OWNER and DASHBOARD_ACCESS_OWNER_ALIASES (the same owner, like Lab and FlowDay) and the key from
-//   the links app's own LINKS_CSRF_SIGNING_KEY.
+//   the links app's own LINKS_CSRF_SIGNING_KEY (../README.md "Deploy").
 //
-// NOT DEPLOYED YET: ../wrangler.toml still has the all-zeros D1 id and Access AUD (L2 replaces them). A real deploy is
-// refused while either placeholder is committed (now, and later as a guard against a revert); a `wrangler deploy
-// --dry-run` (CI's bundle check) needs no real resource and is allowed.
+// Since L2 (../docs/design.md §11) ../wrangler.toml holds the real D1 id and Access AUD. A real deploy is still refused
+// while either is the all-zeros placeholder (a guard against a revert to the L1 config); a `wrangler deploy --dry-run`
+// (CI's bundle check) needs no real resource and is always allowed.
 //
 // Wrangler silently DELETES a var that a deploy does not send (the config has no keep_vars), so this wrapper refuses
 // to run unless every value is present and valid. Messages name the setting, never a value.
 //
 //   node deploy/deploy-vars.mjs check
 //   node ../deploy/deploy-vars.mjs secrets "$RUNNER_TEMP/links-secrets.json"         (from worker/)
-//   node ../deploy/deploy-vars.mjs exec -- npx --no-install wrangler deploy --dry-run \
+//   node ../deploy/deploy-vars.mjs exec -- npx --no-install wrangler deploy [--dry-run] \
 //     --config ../wrangler.toml --secrets-file "$RUNNER_TEMP/links-secrets.json"     (from worker/)
 //
 // .github/scripts/test_wrangler_configs.py reads the next lines: every CI step that runs `exec` or `secrets` must set
@@ -102,8 +102,11 @@ export function writeSecrets(path, env) {
   writeFileSync(path, JSON.stringify(generateSecrets(env), null, 2) + '\n', { mode: 0o600, flag: 'wx' })
 }
 
-/** Why `argv` must not run through this wrapper, or null. `cwd` resolves a relative --config. */
-export function refusal(argv, cwd = process.cwd()) {
+/**
+ * Why `argv` must not run through this wrapper, or null. `cwd` resolves a relative --config; `readConfig` returns the
+ * committed config's text (the tests pass an L1-style text to prove the placeholder guard).
+ */
+export function refusal(argv, cwd = process.cwd(), readConfig = () => readFileSync(CONFIG, 'utf8')) {
   if (argv.length === 0) return 'no command given'
   let config = null
   for (let index = 0; index < argv.length; index += 1) {
@@ -119,8 +122,8 @@ export function refusal(argv, cwd = process.cwd()) {
   let target
   try { target = realpathSync(resolve(cwd, config)) } catch { return `--config must name ${CONFIG}` }
   if (target !== realpathSync(CONFIG)) return `--config must name ${CONFIG}`
-  const placeholder = placeholderIn(readFileSync(CONFIG, 'utf8'))
-  if (placeholder && !argv.includes('--dry-run')) return `${placeholder} in the committed config is the all-zeros placeholder (the links app is not deployed before L2)`
+  const placeholder = placeholderIn(readConfig())
+  if (placeholder && !argv.includes('--dry-run')) return `${placeholder} in the committed config is the all-zeros placeholder (a real deploy needs the real resource)`
   return null
 }
 

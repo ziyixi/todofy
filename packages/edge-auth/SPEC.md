@@ -261,7 +261,7 @@ ignores a pair without `=`.
 Each app's adapter is the only place these values live: Mail Hero
 `mail-hero/cloudflare/src/native/security.ts`, Todofy `todofy/gateway/src/access.ts` and `csrf.ts`
 (`http.ts` for headers), the dashboard `dashboard/worker/src/http.ts`, Lab `lab/worker/src/http.ts`, FlowDay
-`flowday/worker/src/http.ts`, the links app `links/worker/src/auth.ts` (checked only, not deployed yet). On a short link
+`flowday/worker/src/http.ts`, the links app `links/worker/src/auth.ts` (deployed since its step L2). On a short link
 (outside its path-scoped Access application) the links app verifies only a request that carries a token, and reads
 every failure there as anonymous; under `/_/` it maps the failures as the table below says.
 

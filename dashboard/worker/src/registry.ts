@@ -179,6 +179,23 @@ const ENTRIES: readonly EntryDef[] = [
     app_only_signals: [],
     order: 2,
   },
+  {
+    // The short links (links/, s.ziyixi.science, deployed by "Links deploy" from L2). No tile: it names the Worker's
+    // row and its D1 database in the Cloudflare table. Its owner half is behind Access and it has no Ops entrypoint, and a
+    // short link may go unused for days, so neither a probe nor an idle rule would say anything: 未接入监控.
+    id: 'links',
+    name: '短链接',
+    description: 's.ziyixi.science 短链接与启动器；无磁贴',
+    group: 'hidden',
+    icon: 'link',
+    accent: 'slate',
+    url: null,
+    access: true,
+    status: { type: 'none' },
+    tile_metric: null,
+    app_only_signals: [],
+    order: 3,
+  },
 ];
 
 const WORKERS: readonly WorkerDef[] = [
@@ -187,6 +204,7 @@ const WORKERS: readonly WorkerDef[] = [
   { script: 'todofy-core', entry: 'todofy', role: '处理核心（TodofyCore）' },
   { script: 'home', entry: 'home', role: '本面板' },
   { script: 'lab', entry: 'lab', role: '论文雷达与 UI' },
+  { script: 'links', entry: 'links', role: '短链接跳转与启动器' },
   { script: 'ziyixi-notion-publish', entry: 'notion-publish', role: '发布 Worker' },
   // website/wrangler.toml: static assets only, so it shows up in the table only if it ever runs code.
   { script: 'ziyixi-website', entry: 'website', role: '静态网站（仅静态资源）' },
@@ -202,6 +220,8 @@ const RESOURCES: readonly ResourceDef[] = [
   { id: 'lab-db', kind: 'd1', name: 'lab 论文库', entry: 'lab', match: 'f20238dc-93a4-4d1a-91c4-c013f01cbdc9' },
   // Created by Lab's first deploy (2026-09-30).
   { id: 'lab-state', kind: 'do', name: 'LabState', entry: 'lab', script: 'lab', match: 'd8b315160669429781ba6229123cb33c' },
+  // Created for the links app's first deploy (L2, 2026-10-01).
+  { id: 'links-db', kind: 'd1', name: 'links 短链接库', entry: 'links', match: '2f8c5331-06ce-4347-8c0a-90fe51c82260' },
   // IDs read from the account's D1, Durable Object namespace and R2 bucket lists (2026-09-30).
   { id: 'mail-hero-store', kind: 'r2', name: 'mail-hero 邮件存储', entry: 'mail-hero', match: 'mail-hero-store' },
   { id: 'mail-hero-backup', kind: 'r2', name: 'mail-hero 备份', entry: 'mail-hero', match: 'mail-hero-backups' },

@@ -2,10 +2,13 @@
 
 The root [`AGENTS.md`](../AGENTS.md) applies here too. Rules of the links app:
 
-- **Not deployed (L1).** Do not add a hostname, route, Cloudflare resource or deploy job before the step of
-  [`docs/design.md`](docs/design.md) §11 that calls for it, and never a host that the path-scoped Access application
-  does not cover first. The committed D1 id and Access AUD are all-zeros placeholders; `deploy/deploy-vars.mjs`
-  refuses any deploy but `--dry-run` while they are.
+- **Deployed by CI only (L2).** `Links deploy` (`.github/workflows/ci.yml`) is the only way to production: never a
+  plain `wrangler deploy` (it deletes `BUILD_SHA`) and never a D1 command with `--remote` by hand. The one hostname is
+  the Custom Domain `s.ziyixi.science`; only `/_` and `/_/*` are behind the path-scoped Access application `links`.
+  Never add a hostname that this Access application does not cover in the same way, and never widen the application
+  past `/_/*`: the deploy's probe fails when `/robots.txt` or a short link meets an Access login. A new hostname needs
+  the cf-guard allowance rules of FlowDay's F3/F4 steps. `deploy/deploy-vars.mjs` still refuses a real deploy with an
+  all-zeros D1 id or AUD.
 - **The redirect path is the product.** `GET /<key>` is one D1 read by primary key (`src/resolve.ts`), no write of any
   kind (no click count, no last-used time, no purge), no log line, and an Access verification only when the request
   carries a token. Keep it that way: `test/runtime/redirect.test.ts` checks that the tables are unchanged and nothing

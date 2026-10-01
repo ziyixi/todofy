@@ -2,13 +2,17 @@
 # (docs/design.md). The production configuration and its single source of truth: top level = production, never
 # [env.*] or keep_vars. Every static value is committed here (the repository is public: nothing personal, no secret).
 #
-# NOT DEPLOYED YET (docs/design.md §11, step L1): CI checks this config ("Links checks": a --dry-run through
-# deploy/deploy-vars.mjs, which refuses a real deploy while the placeholders below are committed) and nothing deploys
-# it. Before the first deploy (L2) the D1 database "links" and the path-scoped Access application exist, their id and
-# AUD replace the all-zeros placeholders, the Custom Domain s.ziyixi.science is added as `routes`, and a "Links
-# deploy" job runs this file through deploy/deploy-vars.mjs, which appends --var BUILD_SHA and passes ACCESS_OWNER,
-# ACCESS_OWNER_ALIASES and CSRF_SIGNING_KEY as Worker secrets with --secrets-file. A plain `wrangler deploy` of this
-# file DELETES BUILD_SHA.
+# Deployed only by CI ("Links deploy" in .github/workflows/ci.yml) through deploy/deploy-vars.mjs, which appends
+# --var BUILD_SHA (the commit) and passes ACCESS_OWNER, ACCESS_OWNER_ALIASES and CSRF_SIGNING_KEY as Worker secrets
+# with --secrets-file (the dashboard's DASHBOARD_ACCESS_OWNER(_ALIASES), the same owner, and the links app's own
+# LINKS_CSRF_SIGNING_KEY; README.md "Deploy"). A plain `wrangler deploy` of this file DELETES BUILD_SHA.
+#
+# L2 (docs/design.md §11): the D1 database "links" and the path-scoped Access application "links" (destinations
+# s.ziyixi.science/_/* and the exact s.ziyixi.science/_) exist; their id and AUD are committed below, and
+# deploy/deploy-vars.mjs still refuses an all-zeros id or AUD (a guard against a revert). The Worker's only hostname
+# is the Custom Domain s.ziyixi.science (PUBLIC_HOST, the CSRF origin). The rest of the host stays outside Access, so
+# a short link reaches the Worker anonymously. No workers.dev and no preview URL. Rollback (README.md "Deploy"):
+# detach the Custom Domain by hand (a deploy without routes leaves it attached), then revert.
 #
 # Run wrangler from worker/ (the pinned wrangler lives in worker/node_modules) with --config ../wrangler.toml.
 # Local dev: local bindings only (D1 commands always --local, never --remote), local values in links/.dev.vars (see
@@ -19,6 +23,9 @@ main = "worker/src/index.ts"
 compatibility_date = "2026-09-08"
 workers_dev = false
 preview_urls = false
+# The one hostname, a Custom Domain (wrangler applies the list as the Worker's complete set; tools/cf-guard checks
+# it before every deploy). vars.PUBLIC_HOST names the same host.
+routes = [{ pattern = "s.ziyixi.science", custom_domain = true }]
 
 # The Worker's own log lines (an owner API refusal: request ID, status, reason) are kept; the invocation logs, which
 # record every request's URL and so every key and path, are off, and so are traces. The Worker never logs a key, a
@@ -43,16 +50,17 @@ directory = "web/dist"
 binding = "ASSETS"
 run_worker_first = ["/*", "!/_/assets/*"]
 
-# links, link_revisions and request_log (migrations/). The all-zeros id is a placeholder until the database exists.
+# links, link_revisions and request_log (migrations/), applied by CI with `wrangler d1 migrations apply DB --remote`
+# before each deploy.
 [[d1_databases]]
 binding = "DB"
 database_name = "links"
-database_id = "00000000-0000-0000-0000-000000000000"
+database_id = "2f8c5331-06ce-4347-8c0a-90fe51c82260"
 migrations_dir = "migrations"
 
 [vars]
 # The links host: the only origin a mutation may come from (CSRF), and the one host no target may name.
 PUBLIC_HOST = "s.ziyixi.science"
 ACCESS_ISSUER = "https://ziyixi.cloudflareaccess.com"
-# AUD tag of the path-scoped Access application for s.ziyixi.science/_/* (all zeros until it exists).
-ACCESS_AUDIENCE = "0000000000000000000000000000000000000000000000000000000000000000"
+# AUD tag of the path-scoped Access application "links" (s.ziyixi.science/_/* and the exact s.ziyixi.science/_).
+ACCESS_AUDIENCE = "cc7072526c75d5250e9e0ba274d795c632dee4554a707c41ce8fae26ebf5b0d1"

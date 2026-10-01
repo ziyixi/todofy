@@ -4,17 +4,19 @@
 repository, `s/q/some words` to a search. A launcher under `s.ziyixi.science/_/` lists, searches, creates, edits,
 deletes and restores them, on a phone as well as a desktop.
 
-Status (2026-10-01, step **L1**): the Worker, its D1 schema, the launcher and the owner API `links.ui.v1` are built and
-checked in CI (`Links checks`), and **nothing is deployed**: there is no hostname, no D1 database, no Access application
-and no deploy job yet. [`docs/design.md`](docs/design.md) §11 lists what step L2 creates.
+Status (2026-10-01, step **L2**): the D1 database `links` and the path-scoped Access application `links`
+(`s.ziyixi.science/_/*` and the exact `s.ziyixi.science/_`, the owner's identities, a 7-day session) exist, and CI's
+`Links deploy` deploys the Worker on its one Custom Domain `s.ziyixi.science` ([Deploy](#deploy)). The rest of the host
+stays outside Access: short links reach the Worker anonymously. Next is L3, the owner's own links
+([`docs/design.md`](docs/design.md) §11).
 
 | Path | What |
 | --- | --- |
-| `wrangler.toml` | The Worker `links`: no route yet, D1 `links` (placeholder id), static assets `web/dist` with `run_worker_first = ["/*", "!/_/assets/*"]`, invocation logs and traces off |
+| `wrangler.toml` | The Worker `links`: the Custom Domain `s.ziyixi.science`, D1 `links`, the Access issuer and AUD, static assets `web/dist` with `run_worker_first = ["/*", "!/_/assets/*"]`, invocation logs and traces off |
 | `worker/` | The Worker (TypeScript): the redirect path (`src/resolve.ts`, `targets.ts`, `keys.ts`), the owner half under `/_/` (`src/http.ts`, `auth.ts`, the transcoder handlers in `api.ts`, D1 in `store.ts`) |
 | `web/` | The launcher (TypeScript, no framework, Vite): built into `web/dist/_/` |
 | `migrations/` | D1: `links`, `link_revisions`, `request_log` |
-| `deploy/` | `deploy-vars.mjs` (the deploy wrapper; refuses a real deploy while the placeholders are committed), `bundle-size.mjs` (the Worker's gzip budget) |
+| `deploy/` | `deploy-vars.mjs` (the deploy wrapper: `BUILD_SHA` as a var, the owner and CSRF key as Worker secrets; refuses a real deploy with an all-zeros D1 id or AUD), `bundle-size.mjs` (the Worker's gzip budget) |
 | `../proto/links/ui/v1/` | The owner API's IDL (`links.ui.v1`, AIP-style, served by the shared transcoder) |
 
 ## What it does
@@ -40,12 +42,16 @@ and no deploy job yet. [`docs/design.md`](docs/design.md) §11 lists what step L
 
 ## Using it
 
-Desktop Chrome: Settings → Search engine → Manage search engines and site search → Site search → Add: name `Short
-links`, shortcut `s`, URL `https://s.ziyixi.science/%s`. Then type `s` and a space in the address bar, and `gh`,
+Desktop Chrome (from L2, once per Chrome profile; the setting syncs with the profile): open
+`chrome://settings/searchEngines` (Settings → Search engine → Manage search engines and site search), then Site
+search → Add: name `Short links`, shortcut `s`, URL `https://s.ziyixi.science/%s`, and Add. Then type `s` and a space
+(or Tab) in the address bar, and `gh`,
 `gh/ziyixi/todofy`, `gh ziyixi/todofy` or `q some words`. Chrome puts the text into the path with `/` kept and a
 space as `%20`, and the key ends at the first `/` or space, so both spellings pass `ziyixi/todofy` on (an `append` or
 `template` link; an `exact` one refuses a path). The launcher itself is `https://s.ziyixi.science/_/` (`/` redirects
-there).
+there). A private link needs the Access cookie of this host in that profile: open the launcher once and log in, then
+private links redirect without a login page for the 7 days of the session (after it, a private key goes through the
+login and then on to its target).
 
 Phone: open `https://s.ziyixi.science/_/` once, log in through Access (the session lasts 7 days), then Share → Add to
 Home Screen (iOS) or ⋮ → Add to home screen (Android). The launcher opens with the search box focused; type a key and
@@ -76,5 +82,57 @@ Before committing, in `worker/`: `npm run lint`, `npm run typecheck`, `npm test`
 or `.github/` change (the last three re-check every app and deploy none): the config and wrapper tests, the Worker's
 lint, typecheck, unit and workerd runtime tests (real D1, a synthetic Access issuer, the CPU test of
 `tools/workerd-cpu`), the launcher's checks and build (its JavaScript budget, `web/scripts/js-budget.mjs`), an import
-guard, and a `--dry-run` of the committed config through the wrapper with placeholder values plus the bundle budget. The app is `CHECK_ONLY` in `.github/scripts/ci_changes.py`: there is no
-`links_deploy` output and no deploy job until L2.
+guard, and a `--dry-run` of the committed config through the wrapper with placeholder values plus the bundle budget.
+
+## Deploy
+
+Only from GitHub Actions: `Links deploy` (`.github/workflows/ci.yml`) runs on `main` after `CI gate` when `links/`,
+`packages/edge-auth/` or a `proto/` path the app bundles (the TypeScript runtime, `proto/links/ui/`, the module and
+toolchain files) changed, or on a dispatch with `links` or `all`, in the `production` environment and the group
+`links-production`. It builds the launcher, writes the secrets file, dry-runs (the bundle held to its budget), runs the
+hostname guard (`tools/cf-guard`, no allowance: `s.ziyixi.science` had no DNS record before L2), applies the D1
+migrations (`wrangler d1 migrations apply DB --remote`), deploys through `deploy/deploy-vars.mjs`, and then checks
+production:
+
+- through the API with the deploy token (nothing anonymous shows the build): the Worker serves exactly one version at
+  100%, its `BUILD_SHA` is the commit, and no migration is pending;
+- the owner's half, anonymously: `GET /_` (the Access application's exact destination), `/_/` and `/_/api/v1/links`
+  are answered by Access with a 302 to its login page for this host (the dashboard's probe);
+- the rest of the host, anonymously: `/robots.txt` is the Worker's own 200 `text/plain` "Disallow: /", and
+  `/some-unknown-key` the Worker's 302 to `https://s.ziyixi.science/_/k/some-unknown-key` (what a private, deleted or
+  expired key gets too), both `Cache-Control: private, no-store` and `X-Robots-Tag: noindex`. A 302 to the Access
+  login page there means the Access application covers more than `/_/*`. Never make a public link with that key.
+
+The deploy token is `CF_API_TOKEN`, as for Lab and FlowDay. The wrapper writes three Worker secrets:
+
+| Worker secret | From the `production` environment secret | Why |
+| --- | --- | --- |
+| `ACCESS_OWNER` | `DASHBOARD_ACCESS_OWNER` | the links app's owner is the dashboard's owner: one person with the same Access identities, so it reuses the dashboard's secret (as Lab and FlowDay do) instead of a copy that could drift |
+| `ACCESS_OWNER_ALIASES` | `DASHBOARD_ACCESS_OWNER_ALIASES` | as above |
+| `CSRF_SIGNING_KEY` | `LINKS_CSRF_SIGNING_KEY` (the links app's own) | a separate key per app: a token of one app never verifies at another |
+
+Inside the job the inputs keep their `LINKS_*` names; only the job's `env:` maps the owner's two to the dashboard's
+secrets, and `.github/scripts/test_wrangler_configs.py` checks that mapping (and that the dashboard's, Lab's, FlowDay's
+and this wrapper accept the same owner values). A change to either owner secret reaches the links app only with its
+own deploy: after changing one, dispatch `all` (or `dashboard`, `lab`, `flowday` and `links`), as
+[`../dashboard/docs/setup.md`](../dashboard/docs/setup.md) §3 says. The CSRF key is 64 hex characters, made where `gh`
+is logged in and never pasted anywhere; rotating it is the same command followed by a links deploy (an open launcher
+then fetches a new token):
+
+```sh
+openssl rand -hex 32 | gh secret set LINKS_CSRF_SIGNING_KEY -R ziyixi/todofy --env production
+```
+
+The dashboard's daily drift check compares the live Worker with `dashboard/worker/src/drift-desired.json`
+(generated by `.github/scripts/drift_desired.py`: these three secrets, `BUILD_SHA`, the config's bindings and the
+Custom Domain), and its registry names the Worker and the D1 database under the hidden entry 短链接 (no tile). The D1
+database and the Access application are not in `infra/` yet: an `import` block would make the daily "Infra drift"
+plan report `import: 2` and fail until IaC P4 can apply; their adoption is left to P4 (`docs/design.md` §11).
+
+### Rollback
+
+A deploy without `routes` leaves an attached Custom Domain in place, so: detach `s.ziyixi.science` from the Worker
+`links` by hand in the Cloudflare dashboard (Workers & Pages → links → Settings → Domains & Routes), then revert the
+L2 commit. The D1 database and the Access application can stay, or be deleted by hand after an export through the
+launcher (导出). To roll back the code only, revert the commit that broke it: the next `Links deploy` ships the revert
+and keeps the host.

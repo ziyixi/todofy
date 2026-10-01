@@ -347,6 +347,8 @@ test("the committed production configs: the hostnames each deploy guards", async
     "website/relay/wrangler.toml": ["ziyixi-notion-publish", []],
     // The production host since the F4 cutover (flowday/docs/design.md section 11); the F3 staging host is gone.
     "flowday/wrangler.toml": ["flowday", ["flowday.ziyixi.science"]],
+    // The links app's one Custom Domain since L2 (links/docs/design.md section 11).
+    "links/wrangler.toml": ["links", ["s.ziyixi.science"]],
   };
   for (const [file, [name, hosts]] of Object.entries(expected)) {
     const triggers = await readTriggers(path.join(REPO, file));

@@ -26,7 +26,7 @@ import { isoOrNull, utcDay } from './time.ts';
 export const CF_API_BASE = 'https://api.cloudflare.com/client/v4';
 export const DRIFT_TIMEOUT_MS = 15_000;
 export const DRIFT_MAX_BYTES = 1_000_000;
-/** Bounds of what one check keeps (the account has 8 Workers). */
+/** Bounds of what one check keeps (the account has 9 Workers). */
 export const DRIFT_SCRIPTS_MAX = 100;
 export const DRIFT_DOMAINS_MAX = 100;
 export const DRIFT_ROUTES_MAX = 100;

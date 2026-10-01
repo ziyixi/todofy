@@ -187,7 +187,10 @@ embedded `links.ui.v1` descriptors are most of both.
   per action) and `cpu`.
 - `web/src/*.test.ts` (jsdom): the launcher's logic, the transport (CSRF renewal, retries), the page against a fake API
   served by the same shared transcoder, and the no-external-request rules.
-- `deploy/test/*.test.mjs`: the committed config (assets, observability, placeholders) and the deploy wrapper.
+- `deploy/test/*.test.mjs`: the committed config (assets, observability, the one Custom Domain, the real D1 id and
+  AUD) and the deploy wrapper (it still refuses a real deploy with an all-zeros id or AUD).
+- `.github/scripts/test_ci_changes.py` runs the `Links deploy` checks of production against a stubbed `npx` and
+  `curl` (`LinksProductionCheck`, `AccessProbe`, `LinksWorkerProbe`).
 
 All data is synthetic.
 
@@ -203,10 +206,19 @@ of the file. The page's text is Chinese; the short-link side's own pages (previe
 
 ## 11. Steps
 
-- **L1 (this change, not deployed):** the Worker, D1 schema, launcher, `links.ui.v1`, tests, `Links checks` in CI
-  (`CHECK_ONLY`: no deploy output), the deploy wrapper refusing anything but `--dry-run` while the D1 id and Access AUD
-  are all-zeros placeholders. No hostname, route, D1 database, Access application or secret exists.
-- **L2 (first deploy), by the lead:**
+- **L1 (done):** the Worker, D1 schema, launcher, `links.ui.v1`, tests, `Links checks` in CI (`CHECK_ONLY`: no deploy
+  output), the deploy wrapper refusing anything but `--dry-run` while the D1 id and Access AUD were all-zeros
+  placeholders.
+- **L2 (first deploy; steps 1-4 done in the commit "Deploy links on s.ziyixi.science (L2)", step 5 after its first
+  `Links deploy`):** the lead created the D1 database `links` (WNAM), the Access application `links` (self-hosted,
+  `s.ziyixi.science/_/*` and the exact `s.ziyixi.science/_`, the two owner policies of Lab and Home, session 168 h) and
+  the `production` secret `LINKS_CSRF_SIGNING_KEY`; `s.ziyixi.science` had no DNS record, so the Custom Domain attaches
+  without a cf-guard allowance. The commit made every edit of step 4 except the `infra/` adoption: the dashboard
+  registry names the Worker and the D1 database under a hidden entry 短链接 (no tile, status `none`), and the
+  `Links deploy` job also checks the Worker's own anonymous answers (`/robots.txt`, and an unknown key's 302 to
+  `/_/k/<key>`, both no-store and noindex). **Follow-up for IaC P4:** adopting the D1 database and the Access
+  application into `infra/` needs `import {}` blocks, and a plan with an import (`import: 2`) fails the daily
+  "Infra drift" run until P4 can apply it; until then they are managed by hand, like FlowDay's. The steps as planned:
   1. Create the D1 database `links` (`wrangler d1 create links`, Workers Free) and commit its id as `database_id` in
      `wrangler.toml`.
   2. Create the Access application for `s.ziyixi.science/_/*` with an extra destination for the exact
@@ -229,20 +241,20 @@ of the file. The page's text is Chinese; the short-link side's own pages (previe
        committed configs' expected hosts.
      - The drift check's desired state: `links` in `.github/scripts/drift_desired.py` `WORKERS` (test_drift_desired
        holds it equal to `PRODUCTION`) and in `WRAPPERS` as `{"language": "js", "file": "links/deploy/deploy-vars.mjs",
-       "vars": "links", "secrets": "links"}` (nothing enforces this one: without it `BUILD_SHA`, `ACCESS_OWNER`,
-       `ACCESS_OWNER_ALIASES` and `CSRF_SIGNING_KEY` are missing from the desired state and the daily check reports
-       them); regenerate `dashboard/worker/src/drift-desired.json` (`python3 .github/scripts/drift_desired.py`); the
+       "vars": "links", "secrets": "links"}` (without it `BUILD_SHA`, `ACCESS_OWNER`, `ACCESS_OWNER_ALIASES` and
+       `CSRF_SIGNING_KEY` would be missing from the desired state and the daily check would report them;
+       `test_drift_desired.py` now checks all four); regenerate `dashboard/worker/src/drift-desired.json` (`python3 .github/scripts/drift_desired.py`); the
        9 Workers in `dashboard/worker/test/drift.test.ts` ("names every production Worker") and in
        `dashboard/docs/design-v2.md` (the drift check's "8 Workers ... three ticks": 9 still take three ticks, 3 + 4 + 2).
      - The dashboard registry (`dashboard/worker/src/registry.ts` `WORKERS` and `RESOURCES`: the Worker `links` and the
        D1 database `links` by id), or an explicit exclusion with its reason, as `dashboard/worker/test/registry.test.ts`
        records for FlowDay.
-     - Adopt the D1 database and the Access application into `infra/` as for the other apps.
+     - Adopt the D1 database and the Access application into `infra/` as for the other apps (left to IaC P4, above).
   5. Verify with synthetic links only: a public and a private link, anonymous and logged in, the continuation, and
      that nothing is logged.
 - **L3:** the owner's own links, through 导入 or the launcher; the Chrome site search and the home-screen bookmark
   (README "Using it").
 
-Rollback: before L2 nothing is live. After it, detach the Custom Domain by hand (a deploy without `routes` leaves an
-existing one attached), then revert the L2 commit; the D1 database and the Access application can stay or be deleted by
-hand.
+Rollback: detach the Custom Domain by hand (a deploy without `routes` leaves an existing one attached), then revert the
+L2 commit (its wrapper then refuses a real deploy again: the placeholders are back); the D1 database and the Access
+application can stay or be deleted by hand (README.md "Rollback").

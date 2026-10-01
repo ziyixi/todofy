@@ -83,7 +83,7 @@ describe('GET /api/v2/registry', () => {
     const first = await h.v2<RegistryResponse>('registry');
     expect(first).toMatchObject({ status: 200, etag: '"test"' });
     expect(first.bytes).toBeLessThanOrEqual(V2_BODY_BUDGET.registry);
-    expect(first.body?.entries.map((e) => e.id)).toEqual(['mail-hero', 'todofy', 'lab', 'website', 'notion-publish', 'newsletter', 'home', 'self-hosted']);
+    expect(first.body?.entries.map((e) => e.id)).toEqual(['mail-hero', 'todofy', 'lab', 'website', 'notion-publish', 'newsletter', 'home', 'self-hosted', 'links']);
     const text = JSON.stringify(first.body);
     expect(text).not.toContain('build-info');
     expect(text).not.toContain('MAIL_HERO');

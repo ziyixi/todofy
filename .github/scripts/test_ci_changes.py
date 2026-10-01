@@ -43,6 +43,7 @@ def expect(
     proto=False,
     flowday_deploy=False,
     links_check=False,
+    links_deploy=False,
 ):
     return {
         "todofy_check": todofy_check,
@@ -63,22 +64,23 @@ def expect(
         "website_relay_deploy": website_relay_deploy,
         "lab_deploy": lab_deploy,
         "flowday_deploy": flowday_deploy,
+        "links_deploy": links_deploy,
     }
 
 
 # Every app checked (a contracts/ or .github/ change, FlowDay and the links app included); the dashboard and Lab each
 # checked and deployed; the edge-auth apps (the website compiles in no package) are todofy and mail-hero plus EDGE_AUTH;
-# every app with the website Worker (the relay Worker is added where a test expects it). The links app is checked only
-# (ci_changes.CHECK_ONLY until L2): it has no deploy output.
+# every app with the website Worker (the relay Worker is added where a test expects it).
 ALL_CHECKED = {"dashboard_check": True, "website_check": True, "lab_check": True, "flowday_check": True, "links_check": True}
 DASH = {"dashboard_check": True, "dashboard_deploy": True}
 LAB = {"lab_check": True, "lab_deploy": True}
 FLOWDAY = {"flowday_check": True, "flowday_deploy": True}
+LINKS = {"links_check": True, "links_deploy": True}
 ALL = {**DASH, **LAB}
-# Every app that compiles in packages/edge-auth besides Todofy and Mail Hero: the dashboard, Lab and FlowDay (each
-# checked and deployed) and the links app (checked only).
-EDGE_AUTH = {**ALL, **FLOWDAY, "links_check": True}
-EVERY = {**ALL, "website_check": True, "website_deploy": True, **FLOWDAY, "links_check": True}
+# Every app that compiles in packages/edge-auth besides Todofy and Mail Hero: the dashboard, Lab, FlowDay and the links
+# app, each checked and deployed.
+EDGE_AUTH = {**ALL, **FLOWDAY, **LINKS}
+EVERY = {**ALL, "website_check": True, "website_deploy": True, **FLOWDAY, **LINKS}
 
 
 def push(paths, ref=MAIN, last_success=BASE, ancestor=True, merge_base=BASE):
@@ -129,16 +131,17 @@ class Classify(unittest.TestCase):
                 self.assertEqual(push([path], ref=BRANCH), expect(F, F, F, F, F, **FLOWDAY))
 
     def test_every_app_but_the_check_only_ones_has_a_deploy_output(self):
-        """Each app has a checks output; each but the CHECK_ONLY ones (the links app until L2) a deploy output."""
-        self.assertEqual(ci_changes.CHECK_ONLY, {"links"})
+        """Each app has a checks output; each but the CHECK_ONLY ones a deploy output. None is check-only today: the
+        links app left CHECK_ONLY at L2 (links/docs/design.md section 11), as FlowDay did at F2."""
+        self.assertEqual(ci_changes.CHECK_ONLY, set())
         for app in ci_changes.APPS:
             with self.subTest(app=app):
                 self.assertIn(f"{ci_changes.PREFIX[app]}_check", ci_changes.KEYS)
                 self.assertEqual(f"{ci_changes.PREFIX[app]}_deploy" in ci_changes.KEYS, app not in ci_changes.CHECK_ONLY)
 
-    def test_links_is_checked_alone_and_never_deployed(self):
-        """The links app uses no contract (NO_CONTRACTS) and has no deploy job yet (until L2): its changes run only its
-        checks, on main too."""
+    def test_links_checks_and_deploys_only_itself(self):
+        """The links app uses no contract (NO_CONTRACTS): its changes run only its checks and, on main, its deploy
+        (L2)."""
         for path in (
             "links/worker/src/resolve.ts",
             "links/web/src/view.ts",
@@ -150,9 +153,8 @@ class Classify(unittest.TestCase):
             "links/README.md",
         ):
             with self.subTest(path=path):
-                self.assertEqual(push([path]), expect(F, F, F, F, F, links_check=T))
-                self.assertEqual(push([path], ref=BRANCH), expect(F, F, F, F, F, links_check=T))
-        self.assertNotIn("links_deploy", ci_changes.KEYS)
+                self.assertEqual(push([path]), expect(F, F, F, F, F, **LINKS))
+                self.assertEqual(push([path], ref=BRANCH), expect(F, F, F, F, F, **LINKS))
 
     def test_task_intent_code_deploys_lab_and_todofy(self):
         """TASK_INTENT_LIMITS ship in Lab and in Todofy's gateway; the schema only in Lab (its types are generated)."""
@@ -233,37 +235,41 @@ class Classify(unittest.TestCase):
         """proto/ re-checks every PROTO_USERS app and runs Proto checks and Contracts (the task-intent-v1 tests check
         the codecs against the schema); it deploys an app only when the changed path reaches that app's bundle."""
         self.assertEqual(ci_changes.PROTO_USERS, {"lab": ("ts",), "todofy": ("python",), "links": ("ts",)})
-        both = {"todofy_deploy": T, "lab_deploy": T}
-        lab_only = {"todofy_deploy": F, "lab_deploy": T}
-        none = {"todofy_deploy": F, "lab_deploy": F}
+        every = {"todofy_deploy": T, "lab_deploy": T, "links_deploy": T}
+        both = {"todofy_deploy": T, "lab_deploy": T, "links_deploy": F}
+        ts = {"todofy_deploy": F, "lab_deploy": T, "links_deploy": T}
+        lab_only = {"todofy_deploy": F, "lab_deploy": T, "links_deploy": F}
+        links_only = {"todofy_deploy": F, "lab_deploy": F, "links_deploy": T}
+        python = {"todofy_deploy": T, "lab_deploy": F, "links_deploy": F}
+        none = {"todofy_deploy": F, "lab_deploy": F, "links_deploy": F}
         cases = {
             # The contract both apps bundle: Lab's TypeScript and todofy-core's Python.
             "proto/todofy/taskintent/v1/task_intent.proto": both,
             # Lab's UI API: only Lab imports it (Python does not even generate it).
             "proto/lab/ui/v1/lab_ui_service.proto": lab_only,
             "proto/lab/ui/v1/deck.proto": lab_only,
-            # The links app's UI API reaches only the links app, which is checked only (no deploy output yet).
-            "proto/links/ui/v1/links_ui_service.proto": none,
-            # The TypeScript runtime and generator: Todofy's gateway imports types only.
-            "proto/ts/wire-json.ts": lab_only,
-            "proto/ts/http-transcoder.ts": lab_only,
-            "proto/ts/rpc-status.ts": lab_only,
-            "proto/ts/package.json": lab_only,
-            "proto/buf.gen.yaml": lab_only,
+            # The links app's UI API reaches only the links app.
+            "proto/links/ui/v1/links_ui_service.proto": links_only,
+            # The TypeScript runtime and generator: Lab and the links app (Todofy's gateway imports types only).
+            "proto/ts/wire-json.ts": ts,
+            "proto/ts/http-transcoder.ts": ts,
+            "proto/ts/rpc-status.ts": ts,
+            "proto/ts/package.json": ts,
+            "proto/buf.gen.yaml": ts,
             # The Python runtime and generator: only todofy-core vendors the wheel.
-            "proto/python/src/ziyixi_proto/wire_json.py": {"todofy_deploy": T, "lab_deploy": F},
-            "proto/python/build_backend.py": {"todofy_deploy": T, "lab_deploy": F},
-            "proto/python/pyproject.toml": {"todofy_deploy": T, "lab_deploy": F},
-            "proto/tools/gen_py.py": {"todofy_deploy": T, "lab_deploy": F},
+            "proto/python/src/ziyixi_proto/wire_json.py": python,
+            "proto/python/build_backend.py": python,
+            "proto/python/pyproject.toml": python,
+            "proto/tools/gen_py.py": python,
             # The runtimes' fixtures and a package imported as types only reach no bundle.
             "proto/prototest/v1/prototest.proto": none,
             "proto/common/errors/v1/errors.proto": none,
             # What every generation depends on: every bundled user (fail safe).
-            "proto/buf.yaml": both,
-            "proto/buf.lock": both,
-            "proto/package-lock.json": both,
-            "proto/tools/ensure.mjs": both,
-            "proto/newapp/ui/v1/newapp_ui_service.proto": both,
+            "proto/buf.yaml": every,
+            "proto/buf.lock": every,
+            "proto/package-lock.json": every,
+            "proto/tools/ensure.mjs": every,
+            "proto/newapp/ui/v1/newapp_ui_service.proto": every,
             # Checks, tests, test data and documents: nothing.
             "proto/README.md": none,
             "proto/test/task-intent.test.ts": none,
@@ -284,7 +290,18 @@ class Classify(unittest.TestCase):
                 # Every proto/ change checks every PROTO_USERS app, the links app included.
                 self.assertEqual(
                     push([path]),
-                    expect(T, F, T, deploys["todofy_deploy"], F, proto=T, lab_check=T, lab_deploy=deploys["lab_deploy"], links_check=T),
+                    expect(
+                        T,
+                        F,
+                        T,
+                        deploys["todofy_deploy"],
+                        F,
+                        proto=T,
+                        lab_check=T,
+                        lab_deploy=deploys["lab_deploy"],
+                        links_check=T,
+                        links_deploy=deploys["links_deploy"],
+                    ),
                 )
         self.assertFalse(push(["protocol.md"])["proto"])
         # Paths add up: a Python runtime change with a UI API change deploys both.
@@ -292,7 +309,6 @@ class Classify(unittest.TestCase):
             push(["proto/python/src/ziyixi_proto/wire_json.py", "proto/lab/ui/v1/home.proto"]),
             expect(T, F, T, T, F, proto=T, **LAB, links_check=T),
         )
-        # The TypeScript runtime reaches the links app's bundle too; only CHECK_ONLY keeps it from a deploy output.
         self.assertEqual(ci_changes.proto_deploys("proto/ts/http-transcoder.ts"), {"lab", "links"})
         self.assertEqual(ci_changes.proto_deploys("proto/links/ui/v1/link.proto"), {"links"})
 
@@ -547,8 +563,7 @@ class Dispatch(unittest.TestCase):
         self.assertEqual(self.dispatch("dashboard"), expect(F, F, T, F, F, packages=T, proto=T, **DASH))
         self.assertEqual(self.dispatch("lab"), expect(F, F, T, F, F, packages=T, proto=T, **LAB))
         self.assertEqual(self.dispatch("flowday"), expect(F, F, T, F, F, packages=T, proto=T, **FLOWDAY))
-        # The links app is checked only (CHECK_ONLY): a dispatch runs its checks and deploys nothing.
-        self.assertEqual(self.dispatch("links"), expect(F, F, T, F, F, packages=T, proto=T, links_check=T))
+        self.assertEqual(self.dispatch("links"), expect(F, F, T, F, F, packages=T, proto=T, **LINKS))
         self.assertEqual(
             self.dispatch("website"),
             expect(
@@ -635,7 +650,7 @@ class RealGit(unittest.TestCase):
         expected = {**dict.fromkeys(ci_changes.KEYS, "true"), "packages": "false", "infra": "false", "proto": "false"}
         expected.update(dashboard_check="false", dashboard_deploy="false")
         expected.update(website_check="false", website_deploy="false", website_relay_deploy="false")
-        expected.update(lab_check="false", lab_deploy="false", flowday_check="false", flowday_deploy="false", links_check="false")
+        expected.update(lab_check="false", lab_deploy="false", flowday_check="false", flowday_deploy="false", links_check="false", links_deploy="false")
         self.assertEqual(outputs, expected)
 
     def test_a_failed_package_run_on_main_deploys_both_apps_next_time(self):
@@ -932,6 +947,7 @@ class DeployConditions(unittest.TestCase):
                 "website-relay-deploy",
                 "lab-deploy",
                 "flowday-deploy",
+                "links-deploy",
             },
         )
         for name, block in after_gate.items():
@@ -986,6 +1002,7 @@ class DeployConditions(unittest.TestCase):
                 "website-relay-deploy": "website-relay-production",
                 "lab-deploy": "lab-production",
                 "flowday-deploy": "flowday-production",
+                "links-deploy": "links-production",
             },
         )
 
@@ -999,6 +1016,7 @@ class DeployConditions(unittest.TestCase):
             ("website-relay-deploy", "website-checks", "website_relay_deploy"),
             ("lab-deploy", "lab-checks", "lab_deploy"),
             ("flowday-deploy", "flowday-checks", "flowday_deploy"),
+            ("links-deploy", "links-checks", "links_deploy"),
         ):
             condition = self.condition(blocks[job])
             with self.subTest(job=job):
@@ -1579,6 +1597,27 @@ class AccessProbe(unittest.TestCase):
         # After the deploy and the API check: the host serves the version just checked.
         self.assertLess(block.index("- name: Check that production runs this commit\n"), block.index(name))
 
+    def test_links_deploy_runs_the_same_probe_on_the_owners_half(self):
+        """The links deploy's probe is this very script too, fed from links/wrangler.toml, on the paths the path-scoped
+        Access app covers: its exact destination /_, the launcher /_/ and the owner API."""
+        name = "- name: Check that Access answers unauthenticated requests\n"
+        step = lambda job: workflow_jobs()[job].split(name, 1)[1].split("\n      - ", 1)[0]  # noqa: E731
+
+        def body(job):
+            """The step's `run: |` lines only (the next step's leading comments are not part of it)."""
+            lines = step(job).split("        run: |\n", 1)[1].splitlines()
+            return "\n".join(line for line in lines if not line.strip() or line.startswith("          ")).rstrip()
+
+        links = body("links-deploy")
+        self.assertIn("for path in /_ /_/ /_/api/v1/links; do", links)
+        self.assertEqual(links.replace("for path in /_ /_/ /_/api/v1/links;", "for path in / /api/v2/home;"), body("dashboard-deploy"))
+        self.assertIn("ACCESS_ISSUER: ${{ steps.config.outputs.access_issuer }}", step("links-deploy"))
+        self.assertIn("PUBLIC_HOST: ${{ steps.config.outputs.host }}", step("links-deploy"))
+        block = workflow_jobs()["links-deploy"]
+        config = block.split("- name: Read the host and the Access issuer from the committed config\n", 1)[1]
+        self.assertIn('open("wrangler.toml", "rb")', config.split("\n      - ", 1)[0])
+        self.assertLess(block.index("- name: Check that production runs this commit\n"), block.index(name))
+
     def test_the_issuer_and_host_come_from_the_committed_config(self):
         block = workflow_jobs()["dashboard-deploy"]
         name = "- name: Check that Access answers unauthenticated requests\n"
@@ -1743,6 +1782,166 @@ class FlowDayPwaBypass(unittest.TestCase):
         self.assertNotEqual(code, 0)
 
 
+class LinksWorkerProbe(unittest.TestCase):
+    """Links deploy's check of the host's anonymous half, run as the workflow runs it against a stubbed curl.
+
+    Only /_ and /_/* are behind the path-scoped Access app "links"; /robots.txt and every short link reach the Worker
+    anonymously. The step passes only when the Worker itself answers: its robots.txt (200, text/plain, its exact text)
+    and, for a key no link uses, the 302 to this host's /_/k/<key>, both no-store and noindex."""
+
+    STEP = "- name: Check that the Worker answers short links without Access\n"
+    ISSUER = "https://example.cloudflareaccess.com"
+    HOST = "s.example.org"
+    ROBOTS = "User-agent: *\nDisallow: /\n"
+    KEY = "/some-unknown-key"
+
+    def good(self):
+        """The Worker's answers (code, media type, redirect URL, Cache-Control, X-Robots-Tag, body) by path."""
+        return {
+            "/robots.txt": ["200", "text/plain; charset=utf-8", "", "private, no-store", "noindex", self.ROBOTS],
+            self.KEY: ["302", "", f"https://{self.HOST}/_/k{self.KEY}", "private, no-store", "noindex", ""],
+        }
+
+    def script(self):
+        block = workflow_jobs()["links-deploy"]
+        body = block.split(self.STEP, 1)[1].split("        run: |\n", 1)[1]
+        lines = []
+        for line in body.splitlines():
+            if line.strip() and not line.startswith("          "):
+                break
+            lines.append(line[10:])
+        return "\n".join(lines) + "\n"
+
+    def check(self, answers, host=HOST):
+        """Runs the step; curl answers each URL with answers[path] (one answer, or a list whose last item repeats),
+        writes the body to its -o file and prints the -w fields joined by "|". Returns (exit code, output, URLs)."""
+        with tempfile.TemporaryDirectory() as root:
+            bin_dir = Path(root, "bin")
+            bin_dir.mkdir()
+            queues = {path: (answer if isinstance(answer[0], list) else [answer]) for path, answer in answers.items()}
+            Path(root, "answers.json").write_text(json.dumps({f"https://{host}{path}": queue for path, queue in queues.items()}))
+            curl = bin_dir / "curl"
+            curl.write_text(
+                f"#!{sys.executable}\n"
+                "import json, sys\n"
+                f"root = {root!r}\n"
+                "args = sys.argv[1:]\n"
+                "url = args[-1]\n"
+                "open(root + '/urls', 'a').write(url + '\\n')\n"
+                "table = json.load(open(root + '/answers.json'))\n"
+                "queue = table.get(url, [['404', 'text/plain', '', 'private, no-store', 'noindex', 'Not found.']])\n"
+                "answer = queue.pop(0) if len(queue) > 1 else queue[0]\n"
+                "json.dump(table, open(root + '/answers.json', 'w'))\n"
+                "open(args[args.index('-o') + 1], 'w').write(answer[5])\n"
+                "sys.stdout.write('|'.join(answer[:5]))\n"
+            )
+            (bin_dir / "sleep").write_text("#!/usr/bin/env bash\nexit 0\n")
+            for tool in (curl, bin_dir / "sleep"):
+                tool.chmod(0o755)
+            env = {
+                **os.environ,
+                "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}",
+                "ACCESS_ISSUER": self.ISSUER,
+                "PUBLIC_HOST": host,
+                "RUNNER_TEMP": root,
+            }
+            result = subprocess.run(
+                ["bash", "-e", "-c", self.script()], cwd=root, env=env, capture_output=True, text=True, check=False
+            )
+            urls = Path(root, "urls").read_text().splitlines() if Path(root, "urls").exists() else []
+            return result.returncode, result.stdout + result.stderr, urls
+
+    def test_the_workers_own_answers_pass(self):
+        code, output, urls = self.check(self.good())
+        self.assertEqual(code, 0, output)
+        self.assertEqual(urls, [f"https://{self.HOST}/robots.txt", f"https://{self.HOST}{self.KEY}"])
+        self.assertIn("/robots.txt: 200 text/plain from the Worker", output)
+        self.assertIn(f"{self.KEY}: 302 (no body) from the Worker", output)
+
+    def test_the_probe_asks_curl_for_exactly_the_fields_it_reads(self):
+        script = self.script()
+        self.assertIn("-w '%{http_code}|%{content_type}|%{redirect_url}|%header{cache-control}|%header{x-robots-tag}'", script)
+        self.assertIn("--proto '=https'", script)
+        self.assertNotRegex(script, r"(?<!\S)(-L|--location)(?!\S)")
+
+    def test_the_probed_answers_are_the_workers(self):
+        """The robots text is the Worker's ROBOTS_TXT, and the probed key is a valid key that is not reserved, so the
+        Worker answers it on the short-link path (an unknown key: the enumeration answer)."""
+        pages = (REPO / "links" / "worker" / "src" / "pages.ts").read_text()
+        self.assertIn("export const ROBOTS_TXT = 'User-agent: *\\nDisallow: /\\n'", pages)
+        self.assertIn("printf 'User-agent: *\\nDisallow: /\\n'", self.script())
+        key = self.KEY[1:]
+        self.assertRegex(key, r"^[a-z0-9][a-z0-9-]{0,62}$")
+        limits = (REPO / "links" / "worker" / "src" / "limits.ts").read_text()
+        self.assertNotIn(f"'{key}'", limits.split("RESERVED_KEYS", 1)[1].split("\n", 1)[0])
+        self.assertIn(f"'{self.KEY} 302'", self.script())
+
+    def test_an_access_login_instead_of_the_worker_fails(self):
+        login = ["302", "", f"{self.ISSUER}/cdn-cgi/access/login/{self.HOST}?kid=abc", "", "", ""]
+        for path in ("/robots.txt", self.KEY):
+            with self.subTest(path=path):
+                code, output, _ = self.check({**self.good(), path: login})
+                self.assertEqual(code, 1, output)
+                self.assertIn("the Access app links covers more than /_/*", output)
+
+    def test_another_robots_text_or_media_type_fails(self):
+        for change in ({5: "User-agent: *\nAllow: /\n"}, {5: ""}, {1: "text/html; charset=utf-8"}, {1: ""}):
+            answer = self.good()["/robots.txt"]
+            for index, value in change.items():
+                answer[index] = value
+            with self.subTest(change=change):
+                code, output, _ = self.check({**self.good(), "/robots.txt": answer})
+                self.assertEqual(code, 1, output)
+                self.assertIn("is not the Worker's robots.txt", output)
+
+    def test_a_cacheable_or_indexable_answer_fails(self):
+        for path in ("/robots.txt", self.KEY):
+            for index, value in ((3, "public, max-age=60"), (3, ""), (4, ""), (4, "all")):
+                answer = self.good()[path]
+                answer[index] = value
+                with self.subTest(path=path, index=index, value=value):
+                    code, output, _ = self.check({**self.good(), path: answer})
+                    self.assertEqual(code, 1, output)
+                    self.assertIn("without Cache-Control no-store and X-Robots-Tag noindex", output)
+
+    def test_another_status_or_redirect_fails(self):
+        for path, index, value, message in (
+            ("/robots.txt", 0, "404", "was answered with 404"),
+            (self.KEY, 0, "404", "was answered with 404"),
+            (self.KEY, 0, "301", "was answered with 301"),
+            (self.KEY, 2, f"https://{self.HOST}/_/", "302 to somewhere other than"),
+            (self.KEY, 2, f"https://other.example.org/_/k{self.KEY}", "302 to somewhere other than"),
+            (self.KEY, 2, "https://example.com/", "302 to somewhere other than"),
+        ):
+            answer = self.good()[path]
+            answer[index] = value
+            with self.subTest(path=path, value=value):
+                code, output, _ = self.check({**self.good(), path: answer})
+                self.assertEqual(code, 1, output)
+                self.assertIn(message, output)
+
+    def test_no_connection_or_5xx_is_retried_then_fails(self):
+        gone = ["000", "", "", "", "", ""]
+        busy = ["503", "text/html", "", "", "", "busy"]
+        code, output, _ = self.check({**self.good(), "/robots.txt": [gone, busy, self.good()["/robots.txt"]]})
+        self.assertEqual(code, 0, output)
+        self.assertIn("(attempt 3)", output)
+        code, output, urls = self.check({**self.good(), self.KEY: gone})
+        self.assertEqual(code, 1, output)
+        self.assertIn(f"{self.KEY} never reached the Worker", output)
+        self.assertEqual(len(urls), 11)
+
+    def test_the_host_and_issuer_come_from_the_committed_config_after_the_access_probe(self):
+        block = workflow_jobs()["links-deploy"]
+        step = block.split(self.STEP, 1)[1].split("\n      - ", 1)[0]
+        self.assertIn("PUBLIC_HOST: ${{ steps.config.outputs.host }}", step)
+        self.assertIn("ACCESS_ISSUER: ${{ steps.config.outputs.access_issuer }}", step)
+        self.assertLess(block.index("- name: Check that Access answers unauthenticated requests\n"), block.index(self.STEP))
+        code, _, urls = self.check(self.good(), host="")
+        self.assertNotEqual(code, 0)
+        self.assertEqual(urls, [])
+
+
 class FlowDayProductionCheck(unittest.TestCase):
     """FlowDay deploy's hostname-free check, run as the workflow runs it against a stubbed npx (wrangler).
 
@@ -1875,6 +2074,14 @@ class LabProductionCheck(FlowDayProductionCheck):
 
     JOB = "lab-deploy"
     WORKER = "lab"
+
+
+class LinksProductionCheck(FlowDayProductionCheck):
+    """Links deploy's check, the same step: nothing anonymous on the host shows the build, so the deployed version's
+    BUILD_SHA tells whether this commit serves."""
+
+    JOB = "links-deploy"
+    WORKER = "links"
 
 
 REPOSITORY = "ziyixi/todofy"
@@ -2122,6 +2329,7 @@ class HostnameGuard(unittest.TestCase):
             ("dashboard-deploy", ["dashboard/wrangler.toml"], "CF_API_TOKEN", "deploy-vars.mjs exec -- npx --no-install wrangler deploy --config"),
             ("lab-deploy", ["lab/wrangler.toml"], "CF_API_TOKEN", "wrangler d1 migrations apply"),
             ("flowday-deploy", ["flowday/wrangler.toml"], "CF_API_TOKEN", "wrangler d1 migrations apply"),
+            ("links-deploy", ["links/wrangler.toml"], "CF_API_TOKEN", "wrangler d1 migrations apply"),
         ):
             block = blocks[job]
             with self.subTest(job=job):

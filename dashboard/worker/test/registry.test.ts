@@ -63,7 +63,7 @@ describe('the registry', () => {
     expect(byGroup('apps')).toEqual(['mail-hero', 'todofy', 'lab']);
     expect(byGroup('sites')).toEqual(['website']);
     expect(byGroup('services')).toEqual(['notion-publish', 'newsletter']);
-    expect(byGroup('hidden')).toEqual(['home', 'self-hosted']);
+    expect(byGroup('hidden')).toEqual(['home', 'self-hosted', 'links']);
     const status = Object.fromEntries(REGISTRY.entries.map((e) => [e.id, e.status.type]));
     expect(status).toEqual({
       'mail-hero': 'ops_v1',
@@ -74,6 +74,7 @@ describe('the registry', () => {
       newsletter: 'none',
       home: 'self',
       'self-hosted': 'none',
+      links: 'none',
     });
   });
 
@@ -101,6 +102,11 @@ describe('the registry', () => {
     expect(resourceByMatch('do', 'a013ef9fa45048d4b4f7bfcc641b57ea')?.id).toBe('todofy-core-do');
     expect(resourceByMatch('do', 'acddddf88d624194a68af430fd1a90ff')?.id).toBe('home-state');
     expect(resourceByMatch('do', 'd8b315160669429781ba6229123cb33c')?.id).toBe('lab-state');
+    // The links app (L2): its Worker and D1 database, named under a hidden entry without a tile.
+    expect(resourceByMatch('d1', '2f8c5331-06ce-4347-8c0a-90fe51c82260')).toMatchObject({ id: 'links-db', entry: 'links' });
+    expect(entryOfScript('links')).toBe('links');
+    expect(flowsOfScript('links')).toEqual([]);
+    expect(REGISTRY.entries.find((e) => e.id === 'links')).toMatchObject({ group: 'hidden', url: null, status: { type: 'none' } });
     expect(resourceByMatch('r2', 'someone-elses-bucket')).toBeUndefined();
     // Not an app of the monorepo: the self-hosted servers' backups, named under a hidden entry.
     expect(resourceByMatch('r2', 'vultr-backup')).toMatchObject({ id: 'vps-backup', name: 'VPS 备份', entry: 'self-hosted' });

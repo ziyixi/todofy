@@ -16,7 +16,8 @@ What they keep true (infra/README.md):
   committed), encrypted with the state_passphrase variable only, no fallback.
 - Every owner-facing Access application gates a Custom Domain its app's wrangler.toml declares.
 - The D1 databases and R2 buckets are exactly those the production configs bind, and each D1 import id is
-  the database_id committed there.
+  the database_id committed there. The production configs are test_wrangler_configs.py's, minus the Workers
+  named in NOT_ADOPTED (FlowDay and the links app, until IaC P4 adopts them).
 - No account or zone id (32 hex digits) and no email address is committed under infra/.
 """
 
@@ -37,12 +38,19 @@ except ModuleNotFoundError:
     ) from None
 
 import infra_guard  # noqa: E402  (same directory; unittest discover puts it on sys.path)
+import test_wrangler_configs  # noqa: E402
 
 REPO = Path(__file__).resolve().parents[2]
 INFRA = REPO / "infra"
-# Worker name -> production config: the list of test_wrangler_configs.py without FlowDay, whose D1 database and
-# Access app "flowday" (deployed since F2) are not adopted into infra/ yet. A later infra/ change imports them and
-# adds "flowday" here in the same commit.
+# Production Workers whose D1 database and Access application are not adopted into infra/ yet, both deferred to
+# IaC P4: FlowDay (D1 and Access app "flowday", deployed since F2) and the links app (D1 and Access app "links",
+# deployed since L2). The P4 change writes their import blocks and, in the same commit, moves "flowday" and "links"
+# from here into PRODUCTION below (Coverage checks that the two lists together are test_wrangler_configs.py's).
+NOT_ADOPTED = {
+    "flowday": "flowday/wrangler.toml",
+    "links": "links/wrangler.toml",
+}
+# Worker name -> production config: the list of test_wrangler_configs.py without NOT_ADOPTED.
 PRODUCTION = {
     "mail-hero": "mail-hero/wrangler.toml",
     "todofy-core": "todofy/wrangler.toml",
@@ -136,6 +144,14 @@ class Boundary(unittest.TestCase):
                 self.assertNotRegex(text, r"(?<![0-9a-f-])[0-9a-f]{32}(?![0-9a-f-])")
                 self.assertNotRegex(text, r"[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}")
         # State, plan and values files of any name: infra_guard.ALLOWED_FILES (test_the_guard_finds_nothing).
+
+
+class Coverage(unittest.TestCase):
+    def test_every_production_worker_is_adopted_or_listed_as_not_adopted(self):
+        """A Worker added to test_wrangler_configs.PRODUCTION must be either checked here or named in NOT_ADOPTED,
+        so a new app's D1 database is never skipped silently by the checks below."""
+        self.assertEqual(set(PRODUCTION) & set(NOT_ADOPTED), set())
+        self.assertEqual({**PRODUCTION, **NOT_ADOPTED}, test_wrangler_configs.PRODUCTION)
 
 
 class MatchesTheApps(unittest.TestCase):

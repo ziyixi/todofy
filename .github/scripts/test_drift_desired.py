@@ -144,6 +144,34 @@ class DesiredState(unittest.TestCase):
         self.assertEqual(worker["custom_domains"], ["flowday.ziyixi.science"])
         self.assertEqual((worker["routes"], worker["personal"]), ([], []))
 
+    def test_links_secrets_all_come_from_its_deploy(self):
+        """The links app's wrapper writes the owner addresses and the CSRF key with --secrets-file and adds BUILD_SHA as
+        a var; no secret is set by hand. Without its WRAPPERS entry these four would be missing from the desired state
+        and the daily check would report them. Its one hostname is the Custom Domain s.ziyixi.science (L2)."""
+        worker = self.state["workers"]["links"]
+        bindings = {b["name"]: b for b in worker["bindings"]}
+        secrets = ("ACCESS_OWNER", "ACCESS_OWNER_ALIASES", "CSRF_SIGNING_KEY")
+        for name in secrets:
+            with self.subTest(name=name):
+                self.assertEqual(bindings[name], {"name": name, "type": "secret_text", "source": "deploy"})
+        self.assertEqual(bindings["BUILD_SHA"], {"name": "BUILD_SHA", "type": "plain_text", "source": "deploy"})
+        self.assertEqual({name for name, b in bindings.items() if b["source"] == "deploy"}, {*secrets, "BUILD_SHA"})
+        self.assertEqual({name for name, b in bindings.items() if b["source"] == "manual"}, set())
+        self.assertEqual(
+            {(name, b["type"]) for name, b in bindings.items() if b["source"] == "config"},
+            {
+                ("ACCESS_AUDIENCE", "plain_text"),
+                ("ACCESS_ISSUER", "plain_text"),
+                ("ASSETS", "assets"),
+                ("DB", "d1"),
+                ("PUBLIC_HOST", "plain_text"),
+            },
+        )
+        self.assertNotIn("links", drift_desired.MANUAL_SECRETS)
+        self.assertEqual((worker["workers_dev"], worker["preview_urls"], worker["crons"]), (False, False, []))
+        self.assertEqual(worker["custom_domains"], ["s.ziyixi.science"])
+        self.assertEqual((worker["routes"], worker["personal"]), ([], []))
+
     def test_the_generator_refuses_an_unknown_binding_section(self):
         with self.assertRaises(drift_desired.GeneratorError):
             drift_desired.config_bindings("x", {"name": "x", "kv_namespaces": [{"binding": "KV"}]})
