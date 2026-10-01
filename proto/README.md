@@ -40,8 +40,11 @@ prefix `/_/api/v1/` (its host's other paths are short links).
    imports is the same in both.
 4. **Lint and breaking.** `buf lint` uses `STANDARD` (AIP-aligned: `_UNSPECIFIED` zero values, enum prefixes,
    `lower_snake_case`, versioned packages) and `COMMENTS` (every element documented); exceptions are written
-   next to the element with `buf:lint:ignore` and a reason, and the AIP-shaped HTTP packages are excused (in
-   `buf.yaml`) only from the two response-name rules the AIPs contradict. Google's api-linter
+   next to the element with `buf:lint:ignore` and a reason, and the AIP-shaped HTTP packages are excused only
+   from the two response-name rules the AIPs contradict: `lab/ui` in `buf.yaml`'s `ignore_only`, `links/ui` by
+   those two `buf:lint:ignore` lines on each method that answers a `Link` (with the reason in the file's header),
+   because `buf.yaml` reaches every proto user's deploy (`proto_deploys` below) and a new package must not
+   redeploy the other apps. Google's api-linter
    (`scripts/api-lint.sh`, one pinned version) checks every package but `prototest/` against the AIPs; its
    exceptions are `(-- api-linter: ... --)` comments with a reason, next to the element. `buf breaking` uses
    `FILE`, the strictest category: names, numbers, types, removals. buf compares no custom option, so

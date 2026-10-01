@@ -24,6 +24,13 @@
 // Value rules the IDL cannot express (lengths, patterns, counts) are in each field's comment and enforced by
 // the Worker; the constants are in links/worker/src/limits.ts.
 //
+// buf lint. The methods that answer a Link (Get, Create, Update, Delete, Undelete, Rollback) carry two
+// `buf:lint:ignore` lines: RPC_RESPONSE_STANDARD_NAME and RPC_REQUEST_RESPONSE_UNIQUE, which the AIPs contradict
+// (a standard method answers the resource itself, so one message answers several methods; api-linter checks those
+// names instead). They are excused here, next to each method, not in buf.yaml's ignore_only as lab/ui is: buf.yaml
+// is a path every proto user's deploy depends on (.github/scripts/ci_changes.py), and this package must not
+// redeploy the other apps.
+//
 // (-- api-linter: core::0122::camel-case-uris=disabled
 //     aip.dev/not-precedent: every path starts with the literal segment `_`, the one prefix no key can take
 //     (keys start with a letter or digit), which keeps the owner's API and UI apart from the short links on
@@ -51,6 +58,8 @@ service LinksUiService {
   option (google.api.default_host) = "s.ziyixi.science";
 
   // A link, deleted or not (AIP-131, AIP-164); NOT_FOUND once purged or never made.
+  // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
+  // buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE
   rpc GetLink(GetLinkRequest) returns (Link) {
     option (google.api.http) = {get: "/_/api/v1/{name=links/*}"};
     option (google.api.method_signature) = "name";
@@ -63,6 +72,8 @@ service LinksUiService {
   }
 
   // Creates a link under the key `link_id` (AIP-133); LINK_EXISTS when a live or deleted link holds the key.
+  // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
+  // buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE
   rpc CreateLink(CreateLinkRequest) returns (Link) {
     option (google.api.http) = {
       post: "/_/api/v1/links"
@@ -73,6 +84,8 @@ service LinksUiService {
 
   // Replaces the fields `update_mask` names, or every field the owner sets without one (AIP-134), as a new
   // revision; with the link's `etag`, only if the link did not change since (AIP-154).
+  // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
+  // buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE
   rpc UpdateLink(UpdateLinkRequest) returns (Link) {
     option (google.api.http) = {
       patch: "/_/api/v1/{link.name=links/*}"
@@ -84,6 +97,8 @@ service LinksUiService {
   // Soft-deletes a link (AIP-135, AIP-164): it stops resolving at once and is purged 30 days later. Answers the
   // deleted link; NOT_FOUND when there is no link, and when it is deleted already (AIP-164: then the error carries
   // the deleted link as a detail).
+  // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
+  // buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE
   rpc DeleteLink(DeleteLinkRequest) returns (Link) {
     option (google.api.http) = {delete: "/_/api/v1/{name=links/*}"};
     option (google.api.method_signature) = "name";
@@ -91,6 +106,8 @@ service LinksUiService {
 
   // Restores a deleted link before its purge (AIP-164) as it was; NOT_DELETED (ALREADY_EXISTS) when it is not
   // deleted.
+  // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
+  // buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE
   rpc UndeleteLink(UndeleteLinkRequest) returns (Link) {
     option (google.api.http) = {
       post: "/_/api/v1/{name=links/*}:undelete"
@@ -105,6 +122,8 @@ service LinksUiService {
   }
 
   // Makes a kept revision the link's state again, as a new revision (AIP-162): the launcher's undo of an edit.
+  // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
+  // buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE
   rpc RollbackLink(RollbackLinkRequest) returns (Link) {
     option (google.api.http) = {
       post: "/_/api/v1/{name=links/*}:rollback"
