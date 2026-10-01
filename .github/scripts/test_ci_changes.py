@@ -806,13 +806,17 @@ class ToolsImports(unittest.TestCase):
 
     def test_only_tests_and_scripts_import_a_tool(self):
         importers = self.importers()
-        # Lab's and FlowDay's CPU tests and bundle budgets.
+        # The apps' CPU tests and bundle budgets.
         for name in (
             "lab/worker/test/runtime/cpu.test.ts",
             "flowday/worker/test/runtime/cpu.test.ts",
+            "mail-hero/cloudflare/test/native-ops-cpu.test.mjs",
+            "dashboard/worker/test/runtime/cpu.test.ts",
             "lab/deploy/bundle-size.mjs",
             "lab/web/scripts/js-budget.mjs",
             "flowday/worker/scripts/bundle-size.mjs",
+            "mail-hero/deploy/bundle-size.mjs",
+            "dashboard/deploy/bundle-size.mjs",
         ):
             self.assertIn(Path(name), importers)
         for name, targets in importers.items():
@@ -895,9 +899,13 @@ class ContractsJob(unittest.TestCase):
                 "mail-hero/cloudflare/test/native-ops.test.mjs",
                 "todofy/tests/unit/test_ops_contract.py",
                 "todofy/tests/unit/test_ops_core.py",
+                "todofy/tests/unit/test_ops_golden.py",
                 "todofy/gateway/test/ops.test.ts",
-                # ops-v1 caller: the dashboard calls only declared methods and handles every error code.
+                "lab/worker/test/ops-golden.test.ts",
+                # ops-v1 caller: the dashboard calls only declared methods, handles every error code and keeps the
+                # bytes it read and sent before the move onto proto/.
                 "dashboard/worker/test/ops-client.test.ts",
+                "dashboard/worker/test/ops-golden.test.ts",
                 # task-intent-v1: both validators give every fixture the same verdict; Lab's intents and
                 # its reading of every result state; Todofy's gateway forwards the two methods.
                 "lab/worker/test/task-intent-contract.test.ts",

@@ -52,8 +52,8 @@ so a change whose run was cancelled or failed is checked (and deployed) again by
   No usable base (no successful main run yet, API failure, base not an ancestor, no origin/main)
   runs everything. An app's own directory checks and deploys it; contracts/ and .github/ re-check
   every app but deploy none, except the contract files the TypeScript Workers bundle (BUNDLED_BY,
-  e.g. OPS_LIMITS in contracts/ops-v1/ops-v1.ts, or the schema and validate.mjs the dashboard checks
-  answers with), which also deploy every app listed for them. A
+  e.g. OPS_LIMITS in contracts/ops-v1/ops-v1.ts, or the schema and validate.mjs Lab checks task
+  intents with), which also deploy every app listed for them. A
   shared package packages/<name>/ is compiled into the apps listed in PACKAGE_USERS, so any change
   inside it runs the package checks and checks AND deploys each of those apps. Its Markdown documents
   (packages/<name>/**/*.md: README, SPEC) are compiled into nothing: they run the package checks and
@@ -198,8 +198,10 @@ PROTO_NOT_BUNDLED = (
 )
 
 # Contract files whose code a TypeScript Worker imports at runtime (constants such as OPS_LIMITS land
-# in its bundle; the dashboard also validates every Ops answer with the schema and validate.mjs),
-# mapped to the apps that bundle them: a change ships only with a deploy of each.
+# in its bundle; Lab validates task intents with their schema and validate.mjs), mapped to the apps
+# that bundle them: a change ships only with a deploy of each. ops-v1's schema is generated from
+# proto/ops/ and bundled by nobody: every app reads and writes ops-v1 with the generated code
+# (PROTO_PACKAGES).
 # test_ci_changes.py checks this map against the Workers' imports.
 BUNDLED_BY = {
     "contracts/ops-v1/ops-v1.ts": ("todofy", "mail-hero", "dashboard", "lab"),
