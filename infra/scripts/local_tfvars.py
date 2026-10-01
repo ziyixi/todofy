@@ -22,7 +22,7 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[2]
 API = "https://api.cloudflare.com/client/v4"
-# The objects infra/ manages (imports.tf); only their identity rules are read.
+# The objects infra/ manages (ids.tf); only their identity rules are read.
 OWNER_POLICY = "018f1a13-1a1b-4cf6-a470-c865c4577851"
 GITHUB_OWNER_POLICY = "eea00ced-7de7-4094-a705-c9741d835b7c"
 MAIL_HERO_APP = "ebd92116-4d51-4d90-923a-068b05b7e05a"

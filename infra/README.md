@@ -147,7 +147,7 @@ Every change to these two applications goes through this directory, never the da
   that address: OpenTofu deletes the application (a `delete` in the plan), or a `removed` block with
   `destroy = false` forgets it (`forget`) and it is deleted by hand afterwards. Both are destructive, so the
   dispatch needs `confirm_destructive` = `delete-replace-forget` and the reviewed counts and fingerprint; the same
-  commit drops its key from `local.flowday_apps` and its id from `imports.tf`/`ids.tf`. Deleting it in the
+  commit drops its key from `local.flowday_apps` and its id from `ids.tf`. Deleting it in the
   dashboard first would turn into a `create` in the next plan.
 - **Removing FlowDay altogether** (`flowday/README.md` "Remove FlowDay's Worker") takes its D1 database and both
   applications out of this directory in a reviewed change of the same kind, never by hand.
@@ -239,7 +239,7 @@ python3 infra/scripts/infra_state.py values-json --var-file ~/.config/todofy-inf
 **Which ids are committed (one rule).** Ids of the objects this directory manages are committed:
 the Access application ids, the two shared reusable policy ids, the backup app's application-scoped policy
 id, FlowDay's two reusable policy ids (referenced by id only in [`access.tf`](access.tf)) and the D1 ids (in
-[`imports.tf`](imports.tf), [`access.tf`](access.tf), [`scripts/local_tfvars.py`](scripts/local_tfvars.py) and,
+[`ids.tf`](ids.tf), [`access.tf`](access.tf), [`scripts/local_tfvars.py`](scripts/local_tfvars.py) and,
 as the backup app's `FROZEN` id, [`scripts/infra_state.py`](scripts/infra_state.py)). They are opaque object handles,
 not credentials: no API call can use them without a token for the account. Import needs them, and a
 reviewer has to be able to see which object each address adopts. The D1 ids, the Mail Hero app id and the
@@ -266,7 +266,7 @@ redacted summary may be shared ([`tools/infra-plan-summary`](../tools/infra-plan
 | Credentials fallback | If a future token cannot be used this way (no R2 permission, or Cloudflare stops deriving), create an R2 API token for the `infra-state` bucket only (Object Read & Write) in the dashboard and store its pair as production secrets `INFRA_R2_ACCESS_KEY_ID` / `INFRA_R2_SECRET_ACCESS_KEY`, and pass them to the plan step in `infra.yml`. `infra_state.py` uses that pair instead of deriving whenever both are set (and refuses only one of them) |
 | Locking | **No lock file.** `use_lockfile` needs R2 to honour `If-None-Match: *` on this bucket, which is not proven yet. Until then the GitHub concurrency group `infra-production` serialises every run in CI. The drift plan never writes the state anyway; only the bootstrap (local, once) and P4's apply do. The bootstrap probes conditional writes and reports the result; enable `use_lockfile` in a separate change only after the probe passes on R2 |
 | Contents | The 18 objects' attributes as read from the API, including the policies' include emails and the account id, and the [outputs](#outputs): that is why the state is encrypted and never printed. It holds no credential: no service token, tunnel or secret is managed here |
-| Rollback | R2 keeps no object versions. Every apply first copies the state object, byte for byte (it is already encrypted), to a dated key and reads the copy back; restoring one is in [Apply](#apply-p4), and `infra_state.py list-backups` prints their keys (keys only). While `imports.tf` exists the state is also rebuildable from the `import {}` blocks ([Rotating the passphrase](#rotating-the-passphrase), first way) |
+| Rollback | R2 keeps no object versions. Every apply first copies the state object, byte for byte (it is already encrypted), to a dated key and reads the copy back; restoring one is in [Apply](#apply-p4), and `infra_state.py list-backups` prints their keys (keys only). With `imports.tf` restored from history the state is also rebuildable from the `import {}` blocks ([Bootstrap](#bootstrap-once)) |
 
 ## Running a plan locally
 
@@ -324,7 +324,7 @@ or an empty state). It prints one fixed line per step and the redacted summaries
 8. Plans again: it must be "No changes" (exit 0, 18 no-op, no output change), or the script fails.
 
 A second run on an existing state only verifies it: "No changes" passes, anything else refuses. The bootstrap
-needs the `import {}` blocks: after [their removal](#removing-the-import-blocks) restore `imports.tf` from git
+needs the `import {}` blocks, which were [removed](#removing-the-import-blocks): restore `imports.tf` from git
 history on a branch first. Rebuilding by import (a lost passphrase, or the first way of
 [Rotating the passphrase](#rotating-the-passphrase)) therefore means: copy the state object to a backup key
 (as in [Apply](#apply-p4) "Restoring a state backup", in reverse), delete the state object, then run the bootstrap.
@@ -477,18 +477,23 @@ The script, in this order; nothing is written before every gate passes:
 
 ## Removing the import blocks
 
-After the first green "Infra apply" (every object is then in the state and the plan is "No changes"), the
-`import {}` blocks do nothing. They go in **one follow-up commit**:
+Done in the commit after the first green "Infra apply" (every object was then in the state and the plan
+"No changes"), as planned in P4:
 
-1. Delete the `import {}` blocks of [`imports.tf`](imports.tf). Keep its `locals` (the committed ids), renamed
-   to `ids.tf`: `test_infra_config.py` still compares the D1 ids with the `wrangler.toml` files and
-   [`scripts/local_tfvars.py`](scripts/local_tfvars.py) still reads the objects by id.
-2. Update this README ("Import notes" keeps the import ids as a record) and the bootstrap's docstring: the
-   bootstrap and "rebuild by import" then need `imports.tf` restored from git history on a branch
-   (`git show <commit>~1:infra/imports.tf`).
-3. Checks: "Infra checks" green; a local plan and the push's "Infra drift" run must be "No changes",
-   `no-op: 18`, `output changes: 0`. A plan without import blocks never imports, so nothing else changes.
-4. Passphrase rotation then uses the **second way** below (re-encrypt in place), which needs no import blocks.
+1. The `import {}` blocks were deleted. `imports.tf` became [`ids.tf`](ids.tf): the committed ids only, as the
+   record of what each address adopted and for `test_infra_config.py`, which compares the D1 ids with the
+   `wrangler.toml` files on every push.
+2. The bootstrap and "rebuild by import" need the blocks again: restore them on a branch with
+   `git show <that commit>~1:infra/imports.tf > infra/imports.tf` (and delete `ids.tf` there, whose locals it
+   repeats).
+3. A plan without import blocks never imports: the drift run stays `no-op: 18`, `output changes: 0`. Had this
+   commit reached `main` before the apply, the plan would have shown `create: 5`; the new AUDs and D1 ids are
+   unknown before an apply, so the outputs check fails it (exit 5, checked locally on 2026-10-01) and "Infra
+   apply" refuses it.
+4. Passphrase rotation uses the **second way** below (re-encrypt in place).
+
+To adopt a new object later, add its `import {}` block again (a new `imports.tf`), apply, and remove the
+block in the next commit the same way.
 
 ## Rotating the passphrase
 
@@ -504,7 +509,7 @@ one for a rollback instead, restore it over the state and rotate again: the rota
 state object holds. That is rarely worth it.) For a routine rotation without a leak, keeping them only means
 keeping the old passphrase as long as they exist. `rotate-passphrase` ends by printing how many backups exist.
 
-**First way, while the `import {}` blocks exist (until [their removal](#removing-the-import-blocks)):
+**First way, only with the `import {}` blocks restored ([Removing the import blocks](#removing-the-import-blocks)):
 rebuild by import.** The state holds nothing that cannot be read again.
 
 1. `openssl rand -base64 32 > ~/.config/todofy-infra/state-passphrase.new` (chmod 600).
@@ -516,7 +521,7 @@ rebuild by import.** The state holds nothing that cannot be read again.
    update the password manager, dispatch "Infra drift".
 5. After a suspected leak: delete the old backups (above).
 
-**Second way, after the import blocks are removed (it also works before): re-encrypt in place.** OpenTofu
+**Second way (the normal one since the import blocks were removed): re-encrypt in place.** OpenTofu
 decrypts with a key provider found by the name the state was written with, so the committed provider gets a
 new name. The apply's state backups stay encrypted with the old passphrase (see above: after a leak, delete them).
 
@@ -556,7 +561,7 @@ needs. When the owner creates dedicated tokens ([Next steps](#next-steps)):
 
 ## Import notes
 
-Each object was adopted with an `import {}` block in [`imports.tf`](imports.tf), written by hand from
+Each object was adopted with an `import {}` block in `imports.tf` (removed after the first P4 apply; the ids are in [`ids.tf`](ids.tf)), written by hand from
 the read-only API inventory (13 at the bootstrap, FlowDay's and the links app's 5 in P4). With 18 objects,
 cf-terraforming was not needed. Once an apply has recorded the objects in the remote state, these blocks
 do nothing; they are removed after the first P4 apply ([Removing the import blocks](#removing-the-import-blocks)).
@@ -770,7 +775,7 @@ the merge:
 2. Dispatch "Infra apply" on `main` with `expect` = `import=5,outputs=3@fe0e0ae1a4d6` (literally). It must end
    with "apply: done" and a verify plan of `no-op: 18`, `output changes: 0`.
 3. Dispatch "Infra drift": green, `no-op: 18`.
-4. The follow-up commit [Removing the import blocks](#removing-the-import-blocks).
+4. The follow-up commit [Removing the import blocks](#removing-the-import-blocks) (done).
 5. FlowDay, in this order: the commit that clears F4's cf-guard allowances (`flowday/docs/design.md` F4), then the
    staging-host removal through this directory ([FlowDay](#flowday)): its drift run shows `update: 2` (the two
    FlowDay applications only), dispatch with `update=2@<that run's fingerprint>`.

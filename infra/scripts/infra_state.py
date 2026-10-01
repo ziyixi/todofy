@@ -103,7 +103,7 @@ ALLOWED_TYPES = frozenset({
 # id is unproven (no dry run exists), and a refused or partial PUT would cut off the backup collector. README.md
 # "Import notes". The gate matches the address, the previous address (a `moved` rename) and the object id, so a
 # refactor cannot slip a write past it; infra_guard.py FROZEN is the same set (test_infra_config.py) and rejects a
-# `moved` block that names one, and test_infra_config.py holds the id equal to the committed import id.
+# `moved` block that names one, and test_infra_config.py holds the id equal to the one ids.tf records.
 FROZEN_OBJECTS = {
     "cloudflare_zero_trust_access_application.mail_hero_backup": "dafc6e08-7b1b-461f-8735-2cfa668a0ce0",
 }

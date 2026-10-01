@@ -18,11 +18,11 @@ What they keep true (infra/README.md):
   staging host until the follow-up removes it), and every Worker with an ACCESS_AUDIENCE has an application whose
   key is its name, so the access_aud output covers it.
 - The D1 databases and R2 buckets are exactly those the production configs bind, and each D1 import id is
-  the database_id committed there. The production configs are test_wrangler_configs.py's, minus the Workers
+  the database_id committed there (ids.tf). The production configs are test_wrangler_configs.py's, minus the Workers
   named in NOT_ADOPTED (none since IaC P4 adopted FlowDay and the links app).
 - infra_state.py's lists agree with the rest: WRANGLER_CONFIGS (the outputs check in "Infra drift"/"Infra apply") is
   test_wrangler_configs.py's PRODUCTION, its ALLOWED_TYPES (the apply's allowlist) and FROZEN are the guard's, each
-  FROZEN object's id is the id its import block adopts, and its OUTPUTS are the outputs outputs.tf declares.
+  FROZEN object's id is the id ids.tf records, and its OUTPUTS are the outputs outputs.tf declares.
 - RETIRING_HOSTS is exact: each retiring host is still a FlowDay destination and no other application uses one, so the
   commit that drops a host from FlowDay's applications must empty its allowance in the same change.
 - No account or zone id (32 hex digits) and no email address is committed under infra/.
@@ -183,13 +183,12 @@ class Coverage(unittest.TestCase):
                 self.assertIn(f'resource "{kind}" "{name}" {{', code)
 
     def test_frozen_ids_are_the_adopted_objects(self):
-        """The apply's gate also matches a FROZEN object by id: that id must be the one its import block adopts."""
-        imports = (INFRA / "imports.tf").read_text()
-        for address, object_id in infra_state.FROZEN_OBJECTS.items():
-            block = re.search(rf"import \{{\n\s*to\s*=\s*{re.escape(address)}\n\s*id\s*=\s*\"([^\"]+)\"", imports)
-            with self.subTest(address=address):
-                self.assertIsNotNone(block, "a FROZEN address has no import block")
-                self.assertEqual(block.group(1).rsplit("/", 1)[-1], object_id)
+        """The apply's gate also matches a FROZEN object by id: that id must be the one ids.tf records as adopted (the
+        import blocks are gone since the first P4 apply)."""
+        ids = (INFRA / "ids.tf").read_text()
+        recorded = {"cloudflare_zero_trust_access_application.mail_hero_backup":
+                    re.search(r'^\s*mail_hero_backup_app_id\s*=\s*"([^"]+)"', ids, re.MULTILINE).group(1)}
+        self.assertEqual(infra_state.FROZEN_OBJECTS, recorded)
 
     def test_every_production_worker_is_adopted_or_listed_as_not_adopted(self):
         """A Worker added to test_wrangler_configs.PRODUCTION must be either checked here or named in NOT_ADOPTED,
@@ -256,7 +255,7 @@ class MatchesTheApps(unittest.TestCase):
 
     def test_d1_databases_and_buckets_are_the_ones_the_production_configs_bind(self):
         storage = (INFRA / "storage.tf").read_text()
-        imports = (INFRA / "imports.tf").read_text()
+        imports = (INFRA / "ids.tf").read_text()
         d1_names = set(hcl_map(storage, "d1_databases"))
         buckets = set(hcl_map(storage, "r2_buckets"))
         ids = {name: value.strip('"') for name, value in hcl_map(imports, "d1_database_ids").items()}

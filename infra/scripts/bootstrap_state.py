@@ -23,6 +23,8 @@ Steps (each prints one fixed line; no value, token, key or id is ever printed):
 7. Read the state object back: it must be OpenTofu-encrypted (no plaintext resources).
 8. Plan again: it must say "No changes" (exit 0, every resource no-op).
 
+It needs the import {} blocks, which were removed after the first P4 apply: restore infra/imports.tf from git
+history on a branch first (README.md "Removing the import blocks").
 Re-running on an existing state only verifies it (step 6 is skipped, or the run refuses). tofu's own output goes
 to a 0600 log in a new private work directory under ~/.cache/todofy-infra (outside the repository, kept for local
 debugging; plan files are deleted; an existing directory is never reused, chmodded or removed).
