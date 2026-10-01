@@ -72,9 +72,9 @@ Before committing, in `worker/`: `npm run lint`, `npm run typecheck`, `npm test`
 
 ## CI
 
-`Links checks` (`.github/workflows/ci.yml`) runs when `links/`, `packages/edge-auth/`, `proto/` or `.github/` change:
-the config and wrapper tests, the Worker's lint, typecheck, unit and workerd runtime tests (real D1, a synthetic Access
-issuer, the CPU test of `tools/workerd-cpu`), the launcher's checks and build (its JavaScript budget,
-`web/scripts/js-budget.mjs`), an import guard, and a `--dry-run` of the committed config through the wrapper with
-placeholder values plus the bundle budget. The app is `CHECK_ONLY` in `.github/scripts/ci_changes.py`: there is no
+`Links checks` (`.github/workflows/ci.yml`) runs when `links/`, `packages/edge-auth/`, `proto/`, `contracts/`, `tools/`
+or `.github/` change (the last three re-check every app and deploy none): the config and wrapper tests, the Worker's
+lint, typecheck, unit and workerd runtime tests (real D1, a synthetic Access issuer, the CPU test of
+`tools/workerd-cpu`), the launcher's checks and build (its JavaScript budget, `web/scripts/js-budget.mjs`), an import
+guard, and a `--dry-run` of the committed config through the wrapper with placeholder values plus the bundle budget. The app is `CHECK_ONLY` in `.github/scripts/ci_changes.py`: there is no
 `links_deploy` output and no deploy job until L2.

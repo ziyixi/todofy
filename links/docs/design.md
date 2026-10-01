@@ -214,15 +214,30 @@ of the file. The page's text is Chinese; the short-link side's own pages (previe
      commit its AUD as `ACCESS_AUDIENCE`. The rest of the host stays outside Access.
   3. Add the GitHub `production` secret `LINKS_CSRF_SIGNING_KEY` (64 hex, `openssl rand -hex 32`); the owner values
      come from the dashboard's `DASHBOARD_ACCESS_OWNER` and `DASHBOARD_ACCESS_OWNER_ALIASES`, as for Lab and FlowDay.
-  4. In one commit: `routes = [{ pattern = "s.ziyixi.science", custom_domain = true }]` in `wrangler.toml`; move `links`
-     from `UNDEPLOYED` to `PRODUCTION` and `WRAPPERS` in `.github/scripts/test_wrangler_configs.py` (with
-     `LINKS_ACCESS_OWNER*` in `PERSONAL_INPUTS` and `SHARED_SECRETS`); drop `links` from `CHECK_ONLY` and add the
-     `links_deploy` output; add a `Links deploy` job shaped like `FlowDay deploy` (secrets file, dry-run with the bundle
-     budget, `tools/cf-guard` on the config, `wrangler d1 migrations apply DB --remote`, the wrapper's deploy, the
-     production check of the live version and the migrations, then an Access probe that `GET /_/` and
-     `/_/api/v1/links` answer with Access's login redirect while `GET /robots.txt` answers the Worker's own text);
-     regenerate `dashboard/worker/src/drift-desired.json` (`python3 .github/scripts/drift_desired.py`), and adopt the D1
-     database and Access application into `infra/` as for the other apps.
+  4. In one commit (FlowDay's F2 and F3 commits needed the same edits):
+     - `routes = [{ pattern = "s.ziyixi.science", custom_domain = true }]` in `wrangler.toml`.
+     - `.github/scripts/test_wrangler_configs.py`: move `links` from `UNDEPLOYED` to `PRODUCTION` and `WRAPPERS` (with
+       `LINKS_ACCESS_OWNER*` in `PERSONAL_INPUTS` and `SHARED_SECRETS`), and add `links` to the routed Workers of
+       `LocalDev.test_the_production_configs_with_routes_are_the_ones_dev_runs`.
+     - `.github/scripts/ci_changes.py`: drop `links` from `CHECK_ONLY` and add the `links_deploy` output.
+     - `.github/workflows/ci.yml`: a `Links deploy` job shaped like `FlowDay deploy` (secrets file, dry-run with the
+       bundle budget, `tools/cf-guard` on the config, `wrangler d1 migrations apply DB --remote`, the wrapper's deploy,
+       the production check of the live version and the migrations, then an Access probe that `GET /_` (the exact
+       destination), `GET /_/` and `GET /_/api/v1/links` each answer with Access's login redirect while
+       `GET /robots.txt` answers the Worker's own text).
+     - `tools/cf-guard/test/cf-guard.test.mjs`: `"links/wrangler.toml": ["links", ["s.ziyixi.science"]]` in the
+       committed configs' expected hosts.
+     - The drift check's desired state: `links` in `.github/scripts/drift_desired.py` `WORKERS` (test_drift_desired
+       holds it equal to `PRODUCTION`) and in `WRAPPERS` as `{"language": "js", "file": "links/deploy/deploy-vars.mjs",
+       "vars": "links", "secrets": "links"}` (nothing enforces this one: without it `BUILD_SHA`, `ACCESS_OWNER`,
+       `ACCESS_OWNER_ALIASES` and `CSRF_SIGNING_KEY` are missing from the desired state and the daily check reports
+       them); regenerate `dashboard/worker/src/drift-desired.json` (`python3 .github/scripts/drift_desired.py`); the
+       9 Workers in `dashboard/worker/test/drift.test.ts` ("names every production Worker") and in
+       `dashboard/docs/design-v2.md` (the drift check's "8 Workers ... three ticks": 9 still take three ticks, 3 + 4 + 2).
+     - The dashboard registry (`dashboard/worker/src/registry.ts` `WORKERS` and `RESOURCES`: the Worker `links` and the
+       D1 database `links` by id), or an explicit exclusion with its reason, as `dashboard/worker/test/registry.test.ts`
+       records for FlowDay.
+     - Adopt the D1 database and the Access application into `infra/` as for the other apps.
   5. Verify with synthetic links only: a public and a private link, anonymous and logged in, the continuation, and
      that nothing is logged.
 - **L3:** the owner's own links, through 导入 or the launcher; the Chrome site search and the home-screen bookmark

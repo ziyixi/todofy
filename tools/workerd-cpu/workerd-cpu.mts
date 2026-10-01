@@ -1,6 +1,7 @@
 /**
  * CPU of a Worker's requests inside workerd, calibrated to the machine running the test: the shared part of the
- * apps' CPU tests (lab/worker and flowday/worker test/runtime/cpu.test.ts) against Workers Free's 10 ms per request.
+ * apps' CPU tests (lab/worker, flowday/worker and links/worker test/runtime/cpu.test.ts) against Workers Free's 10 ms
+ * per request.
  *
  * Test tooling only. A test imports this file by relative path; no production source may (a bundle would carry it,
  * and a tools/ change deploys nothing: .github/scripts/ci_changes.py, test_ci_changes.py ToolsImports). It imports
