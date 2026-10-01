@@ -4,8 +4,7 @@
  * here calls out or writes. Flows reorganize what the ticks already know; they never add alarm items,
  * so the digest sent to Todofy is unchanged.
  */
-import type { OpsSignal, OpsStatus } from '../../../contracts/ops-v1/ops-v1.ts';
-import { CANARY_DISABLED_ITEM, type OverallLevel } from './api-types.ts';
+import { CANARY_DISABLED_ITEM, type OpsSignal, type OpsStatus, type OverallLevel } from './api-types.ts';
 import {
   LEVEL_RANK,
   attentionLevel,

@@ -10,7 +10,8 @@
  * workerd).
  */
 import { DurableObject } from 'cloudflare:workers';
-import { OPS_APPS, OPS_LIMITS, type GuardLevel, type GuardState, type OpsApp, type OpsStatus, type SetGuardInput } from '../../../contracts/ops-v1/ops-v1.ts';
+import type { GuardLevel, GuardState, OpsStatus, SetGuardInput } from '@ziyixi/proto/ops/v1/ops_wire';
+import { OPS_LIMITS } from '../../../contracts/ops-v1/ops-v1.ts';
 import {
   CANARY_MANUAL_PER_DAY,
   CANARY_RECENT_RUNS,
@@ -19,6 +20,7 @@ import {
   REFRESH_MIN_INTERVAL_SECONDS,
   type AppErrorCode,
   type CanaryRun,
+  type OpsApp,
   type CanaryView,
   type DigestView,
   type GuardAppView,
@@ -80,7 +82,7 @@ import {
   type DriftRunDoc,
 } from './drift.ts';
 import { attentionView, type EvalInput } from './evaluate.ts';
-import { opsCanaryDelivery, opsCanaryResult, opsReportOps, opsSetGuard, opsStartCanary, opsStatus } from './ops-client.ts';
+import { OPS_APPS, opsCanaryDelivery, opsCanaryResult, opsReportOps, opsSetGuard, opsStartCanary, opsStatus } from './ops-client.ts';
 import { nextProbeDoc, probeDue, probeUrl } from './probe.ts';
 import { REGISTRY } from './registry.ts';
 import { MINUTE_MS, iso, isoOrNull, utcDay, utcMonthStart } from './time.ts';

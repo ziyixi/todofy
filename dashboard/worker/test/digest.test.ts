@@ -1,10 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import schema from '../../../contracts/ops-v1/ops-v1.schema.json';
-import { validate } from '../../../contracts/ops-v1/validate.mjs';
+import { contractErrors } from './contract.ts';
 import mailHeroDegraded from '../../../contracts/ops-v1/fixtures/OpsStatus/mail-hero-degraded.json';
 import todofyOk from '../../../contracts/ops-v1/fixtures/OpsStatus/todofy-ok.json';
 import unavailable from '../../../contracts/ops-v1/fixtures/OpsStatus/status-unavailable.json';
-import { OPS_LIMITS, type OpsReportItem, type OpsStatus } from '../../../contracts/ops-v1/ops-v1.ts';
+import type { OpsReportItem, OpsStatus } from '@ziyixi/proto/ops/v1/ops_wire';
+import { OPS_LIMITS } from '../../../contracts/ops-v1/ops-v1.ts';
+import { METRICS_MAX_KEYS, REPORT_MAX_ITEMS } from '../src/ops-client.ts';
 import type { QuotaRow } from '../src/api-types.ts';
 import { finish, newRun } from '../src/canary.ts';
 import { NO_DRIFT } from '../src/drift.ts';
@@ -22,7 +23,6 @@ import {
   type DigestInput,
 } from '../src/digest.ts';
 
-const SCHEMA = schema as { $defs: Record<string, unknown> };
 const NOW = Date.parse('2026-09-29T14:00:00Z');
 const URL_ = 'https://home.example.com/';
 
@@ -205,7 +205,7 @@ describe('digest items', () => {
       new Map([['b:x', NOW - 1000]]),
       NOW,
     );
-    expect(list).toHaveLength(OPS_LIMITS.reportMaxItems);
+    expect(list).toHaveLength(REPORT_MAX_ITEMS);
     expect(list.slice(0, 3).map((i) => `${itemKey(i)}:${i.severity}`)).toEqual(['a:y:critical', 'b:x:critical', 'c:c00:warning']);
     expect(list[1]?.since).toBe(new Date(NOW - 1000).toISOString());
     expect(list[0]?.since).toBe(new Date(NOW).toISOString());
@@ -214,7 +214,7 @@ describe('digest items', () => {
   it('keeps metrics numeric and named by codes', () => {
     expect(cleanMetrics({ ok: 1, 'Bad-Key': 2, nan: Number.NaN, text: 'x' })).toEqual({ ok: 1 });
     const many = Object.fromEntries(Array.from({ length: 20 }, (_, i) => [`m${String(i)}`, i]));
-    expect(Object.keys(cleanMetrics(many))).toHaveLength(OPS_LIMITS.metricsMaxKeys);
+    expect(Object.keys(cleanMetrics(many))).toHaveLength(METRICS_MAX_KEYS);
   });
 });
 
@@ -222,7 +222,7 @@ describe('reports', () => {
   it('validates as OpsReport, empty included', () => {
     const list = items({ usage: { ...input().usage, rows: [quota('d1_rows_read', 81.5)] }, desired: { level: 'shed', reason: 'quota_d1_rows_read', until: NOW + 3_600_000, source: 'auto' } });
     for (const report of [buildReport(list, NOW, URL_), buildReport([], NOW, URL_), buildReport(list, NOW, null)]) {
-      expect(validate(SCHEMA, 'OpsReport', report)).toEqual([]);
+      expect(contractErrors('OpsReport', report)).toEqual([]);
     }
   });
 
@@ -238,7 +238,7 @@ describe('reports', () => {
     expect(reportBytes(report)).toBeLessThanOrEqual(OPS_LIMITS.reportMaxBytes);
     expect(report.items.length).toBeLessThan(20);
     expect(report.items).toEqual(big.slice(0, report.items.length));
-    expect(validate(SCHEMA, 'OpsReport', report)).toEqual([]);
+    expect(contractErrors('OpsReport', report)).toEqual([]);
   });
 });
 

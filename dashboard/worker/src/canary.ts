@@ -2,7 +2,7 @@
  * The daily end-to-end canary (docs/design.md §5.4): pure transitions of one run, `now` passed in.
  * HomeState makes the calls (at most one per phase per tick) and persists the record.
  */
-import type { CanaryDelivery, CanaryResult, OpsStatus, StartCanaryResult } from '../../../contracts/ops-v1/ops-v1.ts';
+import type { CanaryDelivery, CanaryResult, OpsStatus, StartCanaryResult } from '@ziyixi/proto/ops/v1/ops_wire';
 import type { AppErrorCode, CanaryKind, CanaryOutcome, CanaryPhase, CanaryRun, CanaryStage } from './api-types.ts';
 import type { OpsCall } from './ops-client.ts';
 import { HOUR_MS, iso, isoOrNull, parseTimestamp, utcDay } from './time.ts';

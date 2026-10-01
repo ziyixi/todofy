@@ -8,14 +8,21 @@
     "node": ">=26"
   },
   "scripts": {
+    "postinstall": "node ../../proto/tools/ensure.mjs",
+    "pretypecheck": "node ../../proto/tools/ensure.mjs",
     "typecheck": "tsc --noEmit && tsc --noEmit -p test/runtime/tsconfig.json",
+    "prelint": "node ../../proto/tools/ensure.mjs",
     "lint": "eslint .",
+    "pretest": "node ../../proto/tools/ensure.mjs",
     "test": "vitest run",
+    "pretest:runtime": "node ../../proto/tools/ensure.mjs",
     "test:runtime": "vitest run --config vitest.runtime.config.ts",
+    "predev": "node ../../proto/tools/ensure.mjs",
     "dev": "wrangler dev --config ../wrangler.toml --ip 127.0.0.1 --port 8787 --local-upstream 127.0.0.1:8787"
   },
   "dependencies": {
-    "@ziyixi/edge-auth": "file:../../packages/edge-auth"
+    "@ziyixi/edge-auth": "file:../../packages/edge-auth",
+    "@ziyixi/proto": "file:../../proto/ts"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "5.20260929.1",

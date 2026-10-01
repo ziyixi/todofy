@@ -16,14 +16,21 @@ import type {
   CanaryResult,
   GuardLevel,
   GuardState,
-  OpsApp,
   OpsReportItem,
   OpsReportReceipt,
-  OpsSeverity,
+  ErrorCode,
   OpsStatus,
-} from '../../../contracts/ops-v1/ops-v1.ts';
+  Severity,
+  Signal,
+} from '@ziyixi/proto/ops/v1/ops_wire';
 
-export type { OpsApp, OpsSeverity, OpsStatus, GuardLevel, GuardState, OpsReportItem, OpsReportReceipt };
+export type { OpsStatus, GuardLevel, GuardState, OpsReportItem, OpsReportReceipt };
+/** An app of ops-v1 (its closed list in proto/ops/v1/ops.proto: mail-hero, todofy, lab). */
+export type OpsApp = OpsStatus['app'];
+/** A signal's or a report item's severity. */
+export type OpsSeverity = Severity;
+/** One active condition of an app's status. */
+export type OpsSignal = Signal;
 
 /** RFC 3339 UTC. */
 export type Iso = string;
@@ -85,7 +92,8 @@ export interface CsrfResponse {
 /** Worst of the attention items (ok, warning, critical), `unknown` before anything ran. */
 export type OverallLevel = 'ok' | 'warning' | 'critical' | 'unknown';
 
-export type AppErrorCode = 'unavailable' | 'busy' | 'invalid_input' | 'timeout' | 'invalid_output' | 'not_configured';
+/** An ops-v1 rejection code (invalid_input, busy, unavailable), or what the dashboard observed itself. */
+export type AppErrorCode = ErrorCode | 'timeout' | 'invalid_output' | 'not_configured';
 
 /** The last ops-v1 status() attempt of an app and its last successful answer (ops view). */
 export interface AppStatusView {

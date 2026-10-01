@@ -2,12 +2,23 @@
  * The unified ops digest (docs/design.md §5.5): pure functions building the OpsReport items (codes,
  * severities, times and numbers only) and deciding when to send them to Todofy's `reportOps`.
  */
-import { OPS_APPS, OPS_LIMITS, type OpsApp, type OpsReport, type OpsReportItem, type OpsSeverity, type OpsStatus } from '../../../contracts/ops-v1/ops-v1.ts';
-import { GUARD_SHED_PERCENT, QUOTA_CRITICAL_PERCENT, type CanaryStage, type OverallLevel, type QuotaRow } from './api-types.ts';
+import type { OpsReport, OpsReportItem } from '@ziyixi/proto/ops/v1/ops_wire';
+import { OPS_LIMITS } from '../../../contracts/ops-v1/ops-v1.ts';
+import {
+  GUARD_SHED_PERCENT,
+  QUOTA_CRITICAL_PERCENT,
+  type CanaryStage,
+  type OpsApp,
+  type OpsSeverity,
+  type OpsStatus,
+  type OverallLevel,
+  type QuotaRow,
+} from './api-types.ts';
 import { DRIFT_CATEGORIES, DRIFT_UNAVAILABLE_AFTER_DAYS } from './api-v2-types.ts';
 import { CANARY_DISABLED_CODE, type CanaryRecord } from './canary.ts';
 import { totalFindings, type DriftDoc } from './drift.ts';
 import { hoursLeft, reachesPercent, type DesiredGuard } from './guard.ts';
+import { METRICS_MAX_KEYS, OPS_APPS, REPORT_MAX_ITEMS } from './ops-client.ts';
 import { HOUR_MS, MINUTE_MS, iso, isTimestamp, startOfUtcDay } from './time.ts';
 
 export const DIGEST_REFRESH_MS = 6 * HOUR_MS;
@@ -70,7 +81,7 @@ export function cleanMetrics(metrics: Readonly<Record<string, unknown>>): Record
   const out: Record<string, number> = {};
   let count = 0;
   for (const [key, value] of Object.entries(metrics)) {
-    if (count >= OPS_LIMITS.metricsMaxKeys) break;
+    if (count >= METRICS_MAX_KEYS) break;
     if (!CODE.test(key) || typeof value !== 'number' || !Number.isFinite(value)) continue;
     out[key] = value;
     count++;
@@ -237,7 +248,7 @@ export function finalizeItems(list: readonly Candidate[], firstSeen: ReadonlyMap
   }
   return [...byKey.values()]
     .sort((a, b) => RANK[a.severity] - RANK[b.severity] || a.source.localeCompare(b.source) || a.code.localeCompare(b.code))
-    .slice(0, OPS_LIMITS.reportMaxItems)
+    .slice(0, REPORT_MAX_ITEMS)
     .map((c) => ({
       source: c.source,
       code: c.code,
@@ -255,7 +266,7 @@ export function reportBytes(report: OpsReport): number {
 
 /** The report, trimmed from the end until its compact JSON is at most 8192 bytes. */
 export function buildReport(items: readonly OpsReportItem[], now: number, dashboardUrl: string | null): OpsReport {
-  const kept = items.slice(0, OPS_LIMITS.reportMaxItems);
+  const kept = items.slice(0, REPORT_MAX_ITEMS);
   const make = (list: readonly OpsReportItem[]): OpsReport => ({
     generated_at: iso(now),
     items: list,

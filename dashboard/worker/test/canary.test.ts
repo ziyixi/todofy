@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import schema from '../../../contracts/ops-v1/ops-v1.schema.json';
-import { validate } from '../../../contracts/ops-v1/validate.mjs';
+import { contractErrors } from './contract.ts';
 import mailHeroOk from '../../../contracts/ops-v1/fixtures/OpsStatus/mail-hero-ok.json';
 import todofyOk from '../../../contracts/ops-v1/fixtures/OpsStatus/todofy-ok.json';
 import queued from '../../../contracts/ops-v1/fixtures/StartCanaryResult/queued.json';
@@ -16,7 +15,7 @@ import resultFailed from '../../../contracts/ops-v1/fixtures/CanaryResult/failed
 import notSeen from '../../../contracts/ops-v1/fixtures/CanaryResult/not-seen.json';
 import processing from '../../../contracts/ops-v1/fixtures/CanaryResult/processing.json';
 import processingPaused from '../../../contracts/ops-v1/fixtures/CanaryResult/processing-paused.json';
-import type { CanaryDelivery, CanaryResult, OpsStatus, StartCanaryResult } from '../../../contracts/ops-v1/ops-v1.ts';
+import type { CanaryDelivery, CanaryResult, OpsStatus, StartCanaryResult } from '@ziyixi/proto/ops/v1/ops_wire';
 import {
   CANARY_DEADLINE_MS,
   applyDeadline,
@@ -36,7 +35,6 @@ import {
 } from '../src/canary.ts';
 import type { OpsCall } from '../src/ops-client.ts';
 
-const SCHEMA = schema as { $defs: Record<string, unknown> };
 const NOW = Date.parse('2026-09-29T16:00:00Z');
 const ok = <T>(value: unknown): OpsCall<T> => ({ ok: true, value: value as T });
 const err = <T>(code: 'unavailable' | 'busy' | 'invalid_input' | 'timeout'): OpsCall<T> => ({ ok: false, code });
@@ -54,7 +52,7 @@ describe('run IDs', () => {
     expect(manualRunId(Date.parse('2026-09-29T16:05:09.123Z'))).toBe('canary-manual-20260929T160509Z');
     for (const id of [scheduledRunId(NOW), manualRunId(NOW)]) {
       expect(isRunId(id)).toBe(true);
-      expect(validate(SCHEMA, 'StartCanaryInput', { run_id: id })).toEqual([]);
+      expect(contractErrors('StartCanaryInput', { run_id: id })).toEqual([]);
     }
   });
 });

@@ -5,7 +5,8 @@
  * do not reset at midnight, so a snapshot from the end of the previous day of the same month still
  * counts for them (daily resources never carry over).
  */
-import { OPS_LIMITS, type GuardLevel, type GuardState, type SetGuardInput } from '../../../contracts/ops-v1/ops-v1.ts';
+import type { GuardLevel, GuardState, SetGuardInput } from '@ziyixi/proto/ops/v1/ops_wire';
+import { OPS_LIMITS } from '../../../contracts/ops-v1/ops-v1.ts';
 import { GUARD_CLEAR_PERCENT, GUARD_SHED_PERCENT, type AppErrorCode, type GuardSource, type QuotaRow } from './api-types.ts';
 import { DAY_MS, HOUR_MS, MINUTE_MS, iso, nextUtcMidnight, utcDay, utcMonthStart } from './time.ts';
 

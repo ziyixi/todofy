@@ -14,7 +14,8 @@ import {
   withPrivateHeaders,
   type AccessPolicy,
 } from '@ziyixi/edge-auth';
-import { GUARD_LEVELS, type GuardLevel } from '../../../contracts/ops-v1/ops-v1.ts';
+import type { GuardLevel } from './api-types.ts';
+import { GUARD_LEVELS } from './ops-client.ts';
 import type { ApiError, ApiErrorCode, CsrfResponse, GuardRequest, HealthResponse } from './api-types.ts';
 import type { CanaryStartRequestV2, GuardResponseV2 } from './api-v2-types.ts';
 import { buildSha, publicHost } from './config.ts';

@@ -1,14 +1,12 @@
 /**
- * The cross-app contract from the dashboard's side: it calls only the methods ops-v1.ts declares for
- * each app, handles every declared error code (plus timeouts, foreign rejections and bad outputs) for
- * every method, and reads answers exactly as the contract schema allows: every valid fixture passes,
- * every invalid output fixture is refused, except where the contract's consumer rules tolerate it.
+ * The cross-app contract from the dashboard's side: it calls only the methods of the generated services each app
+ * implements (proto/ops/v1/ops.proto), sends only inputs the contract's rules accept, handles every declared error code
+ * (plus timeouts, foreign rejections and bad outputs) for every method, and reads answers exactly as the contract's
+ * rules allow a consumer: every valid fixture passes, every invalid output fixture is refused, except where the
+ * contract's consumer rules tolerate it.
  */
 import { describe, expect, it } from 'vitest';
-import opsSource from '../../../contracts/ops-v1/ops-v1.ts?raw';
-import schema from '../../../contracts/ops-v1/ops-v1.schema.json';
-import { validate } from '../../../contracts/ops-v1/validate.mjs';
-import { OPS_ERROR_CODES, type OpsApp } from '../../../contracts/ops-v1/ops-v1.ts';
+import type { OpsApp } from '../src/api-types.ts';
 import mailHeroOk from '../../../contracts/ops-v1/fixtures/OpsStatus/mail-hero-ok.json';
 import mailHeroDegraded from '../../../contracts/ops-v1/fixtures/OpsStatus/mail-hero-degraded.json';
 import mailHeroMaintenance from '../../../contracts/ops-v1/fixtures/OpsStatus/mail-hero-maintenance.json';
@@ -43,10 +41,10 @@ import receiptKept from '../../../contracts/ops-v1/fixtures/OpsReportReceipt/kep
 import receiptStored from '../../../contracts/ops-v1/fixtures/OpsReportReceipt/stored.json';
 import reportDaily from '../../../contracts/ops-v1/fixtures/OpsReport/daily.json';
 import type { Env } from '../src/env.ts';
-import { declaredMethods as parseDeclared } from './declared-methods.ts';
+import { contractErrors, declaredMethods } from './contract.ts';
 import {
   CALLED_METHODS,
-  CONSUMER_SCHEMA,
+  OPS_ERROR_CODES,
   asCanaryDelivery,
   asCanaryResult,
   asGuardState,
@@ -63,12 +61,7 @@ import {
   type OpsCall,
 } from '../src/ops-client.ts';
 
-const SCHEMA = schema as { $defs: Record<string, unknown> };
 const EVENT_ID = '6d3b2f0e-4c1a-4b7e-8a52-0c9e7f1d2a31';
-
-function declaredMethods(name: 'MailHeroOps' | 'TodofyOps' | 'LabOps'): string[] {
-  return parseDeclared(opsSource, name);
-}
 
 type Calls = { app: OpsApp; method: string; args: unknown[] }[];
 
@@ -108,11 +101,11 @@ const WRAPPERS: readonly { app: OpsApp; method: string; call: Wrapper; valid: un
   { app: 'lab', method: 'setGuard', call: (env) => opsSetGuard(env, 'lab', guardInput), valid: guardShedLab },
 ];
 
-describe('only methods ops-v1.ts declares', () => {
+describe('only the methods of the services each app implements', () => {
   it('lists exactly the declared methods per app', () => {
-    expect([...CALLED_METHODS['mail-hero']].sort()).toEqual(declaredMethods('MailHeroOps'));
-    expect([...CALLED_METHODS.todofy].sort()).toEqual(declaredMethods('TodofyOps'));
-    expect([...CALLED_METHODS.lab].sort()).toEqual(declaredMethods('LabOps'));
+    expect([...CALLED_METHODS['mail-hero']].sort()).toEqual(declaredMethods('mail-hero'));
+    expect([...CALLED_METHODS.todofy].sort()).toEqual(declaredMethods('todofy'));
+    expect([...CALLED_METHODS.lab].sort()).toEqual(declaredMethods('lab'));
   });
 
   it('calls each wrapper\'s declared method on the right app, with contract-valid input', async () => {
@@ -123,15 +116,26 @@ describe('only methods ops-v1.ts declares', () => {
       expect(calls.map((c) => [c.app, c.method])).toEqual([[wrapper.app, wrapper.method]]);
       expect((CALLED_METHODS[wrapper.app] as readonly string[]).includes(wrapper.method)).toBe(true);
       const [arg] = calls[0]?.args ?? [];
-      if (wrapper.method === 'setGuard') expect(validate(SCHEMA, 'SetGuardInput', arg)).toEqual([]);
-      if (wrapper.method === 'startCanary') expect(validate(SCHEMA, 'StartCanaryInput', arg)).toEqual([]);
-      if (wrapper.method === 'canaryDelivery' || wrapper.method === 'canaryResult') expect(validate(SCHEMA, 'EventId', arg)).toEqual([]);
-      if (wrapper.method === 'reportOps') expect(validate(SCHEMA, 'OpsReport', arg)).toEqual([]);
+      if (wrapper.method === 'setGuard') expect(contractErrors('SetGuardInput', arg)).toEqual([]);
+      if (wrapper.method === 'startCanary') expect(contractErrors('StartCanaryInput', arg)).toEqual([]);
+      if (wrapper.method === 'canaryDelivery' || wrapper.method === 'canaryResult') expect(contractErrors('EventId', arg)).toEqual([]);
+      if (wrapper.method === 'reportOps') expect(contractErrors('OpsReport', arg)).toEqual([]);
     }
     // Every declared method is covered.
-    expect(WRAPPERS.filter((w) => w.app === 'mail-hero').map((w) => w.method).sort()).toEqual(declaredMethods('MailHeroOps'));
-    expect(WRAPPERS.filter((w) => w.app === 'todofy').map((w) => w.method).sort()).toEqual(declaredMethods('TodofyOps'));
-    expect(WRAPPERS.filter((w) => w.app === 'lab').map((w) => w.method).sort()).toEqual(declaredMethods('LabOps'));
+    expect(WRAPPERS.filter((w) => w.app === 'mail-hero').map((w) => w.method).sort()).toEqual(declaredMethods('mail-hero'));
+    expect(WRAPPERS.filter((w) => w.app === 'todofy').map((w) => w.method).sort()).toEqual(declaredMethods('todofy'));
+    expect(WRAPPERS.filter((w) => w.app === 'lab').map((w) => w.method).sort()).toEqual(declaredMethods('lab'));
+  });
+
+  it('never sends an input the contract refuses: the call answers invalid_input, as the app would', async () => {
+    const { env, calls } = recordingEnv({});
+    expect(await opsSetGuard(env, 'mail-hero', { level: 'shed', reason: 'Free text', until: '2026-09-30T00:00:00Z' })).toEqual({ ok: false, code: 'invalid_input' });
+    expect(await opsSetGuard(env, 'todofy', { level: 'normal', reason: 'ok', until: '2026-09-30T00:00:00Z' } as never)).toEqual({ ok: false, code: 'invalid_input' });
+    expect(await opsStartCanary(env, { run_id: 'canary 1' })).toEqual({ ok: false, code: 'invalid_input' });
+    expect(await opsCanaryDelivery(env, 'not-an-event')).toEqual({ ok: false, code: 'invalid_input' });
+    expect(await opsCanaryResult(env, EVENT_ID.toUpperCase())).toEqual({ ok: false, code: 'invalid_input' });
+    expect(await opsReportOps(env, { generated_at: '2026-09-29T23:40:00Z', items: [], dashboard_url: 'http://home.example.com/' })).toEqual({ ok: false, code: 'invalid_input' });
+    expect(calls).toEqual([]);
   });
 });
 
@@ -163,7 +167,7 @@ describe('error handling for every method', () => {
   });
 });
 
-describe('answers are validated against the contract schema', () => {
+describe('answers are read with the contract\'s rules', () => {
   it('accepts every valid fixture unchanged', () => {
     for (const status of [mailHeroOk, mailHeroDegraded, mailHeroMaintenance]) expect(asStatus('mail-hero')(status)).toEqual(status);
     for (const status of [todofyOk, todofyDegraded, statusUnavailable]) expect(asStatus('todofy')(status)).toEqual(status);
@@ -239,9 +243,12 @@ describe('answers are validated against the contract schema', () => {
     expect(asCanaryResult({ state: 'processing', waiting_code: 'Waiting for Gemini' })).toBeNull();
     expect(asStartCanaryResult({ event_id: null, state: 'paused', reason: 'new_pause' })).toEqual({ event_id: null, state: 'paused', reason: 'new_pause' });
     expect(asStartCanaryResult({ event_id: null, state: 'paused', reason: 'owner@example.com' })).toBeNull();
-    // The widening is limited to those enums: the reference schema itself is unchanged.
-    expect(validate(SCHEMA, 'CanaryResult', { state: 'processing', waiting_code: 'gemini_cooldown' })).not.toEqual([]);
-    expect(validate(CONSUMER_SCHEMA, 'OpsStatus', { ...mailHeroOk, health: 'fine' })).not.toEqual([]);
+    // Open only for a consumer: a producer (a strict read, the generated JSON Schema) keeps to the list.
+    expect(contractErrors('CanaryResult', { state: 'processing', waiting_code: 'gemini_cooldown' })).not.toEqual([]);
+    // A new value of a closed enum (a state, a severity, a health) is refused: the flows branch on it.
+    expect(asStatus('mail-hero')({ ...mailHeroOk, health: 'fine' })).toBeNull();
+    expect(asCanaryDelivery({ state: 'retrying', attempts: 1 })).toBeNull();
+    expect(asStatus('mail-hero')({ ...mailHeroOk, signals: [{ code: 'x', severity: 'urgent', metrics: {} }] })).toBeNull();
   });
 });
 

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import designV2 from '../../docs/design-v2.md?raw';
 import apiV2Source from '../src/api-v2-types.ts?raw';
-import type { OpsReportItem, OpsSignal } from '../../../contracts/ops-v1/ops-v1.ts';
+import type { OpsReportItem, OpsSignal } from '../src/api-types.ts';
 import { CANARY_MANUAL_PER_DAY, type CanaryView, type DigestView, type GuardView } from '../src/api-types.ts';
 import { CF_SCRIPTS_MAX, CF_VIEW_WORKERS_MAX, DRIFT_VIEW_FINDINGS_MAX, HOME_QUOTA_IDS, V2_BODY_BUDGET, V2_BODY_MAX, V2_ROWS_READ, type ShellFields } from '../src/api-v2-types.ts';
 import { runView } from '../src/canary.ts';

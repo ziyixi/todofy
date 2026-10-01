@@ -4,7 +4,7 @@
  * are limited. Every stub answer is a contracts/ops-v1 fixture.
  */
 import { afterEach, describe, expect, it } from 'vitest';
-import type { OpsReport } from '../../../../contracts/ops-v1/ops-v1.ts';
+import type { OpsReport } from '@ziyixi/proto/ops/v1/ops_wire';
 import type { CanaryStartResponse } from '../../src/api-types.ts';
 import { expectValid, latest, startFlows, status, type FlowHarness } from './flows.ts';
 import { fixture } from './harness.ts';
@@ -31,7 +31,7 @@ describe('the scheduled canary', () => {
     await h.tick('2026-09-29T16:00:00Z');
     const starts = await h.callsOf('mail-hero', 'startCanary');
     expect(starts).toEqual([[{ run_id: 'canary-2026-09-29' }]]);
-    await expectValid('StartCanaryInput', starts[0]?.[0]);
+    expectValid('StartCanaryInput', starts[0]?.[0]);
 
     await h.tick('2026-09-29T16:30:00Z');
     expect(await canaryCalls(h)).toEqual(['mail-hero.canaryDelivery', 'todofy.canaryResult']);
@@ -92,7 +92,7 @@ describe('the scheduled canary', () => {
     expect(run.delivery).toMatchObject({ state: 'pending', attempts: 2, last_http_status: 503, error_code: 'http_503' });
     const reports = (await h.callsOf('todofy', 'reportOps')).map((args) => args[0] as OpsReport);
     expect(reports).toHaveLength(1);
-    await expectValid('OpsReport', reports[0]);
+    expectValid('OpsReport', reports[0]);
     expect(reports[0]?.items).toContainEqual({
       source: 'dashboard',
       code: 'canary_not_delivered',
@@ -209,7 +209,7 @@ describe('the canary switch (CANARY_ENABLED)', () => {
     const reports = (await h.callsOf('todofy', 'reportOps')).map((args) => args[0] as OpsReport);
     expect(reports.length).toBeGreaterThan(0);
     for (const report of reports) {
-      await expectValid('OpsReport', report);
+      expectValid('OpsReport', report);
       expect(report.items.filter((item) => item.code.startsWith('canary_'))).toEqual([]);
     }
     expect(await canaryCalls(h)).toEqual([]);

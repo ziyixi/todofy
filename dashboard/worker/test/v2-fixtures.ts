@@ -5,7 +5,7 @@
 import mailHeroOk from '../../../contracts/ops-v1/fixtures/OpsStatus/mail-hero-ok.json';
 import todofyOk from '../../../contracts/ops-v1/fixtures/OpsStatus/todofy-ok.json';
 import labOk from '../../../contracts/ops-v1/fixtures/OpsStatus/lab-ok.json';
-import type { OpsApp, OpsSignal, OpsStatus } from '../../../contracts/ops-v1/ops-v1.ts';
+import type { OpsApp, OpsSignal, OpsStatus } from '../src/api-types.ts';
 import type { UsageView } from '../src/api-types.ts';
 import type { EntryDef, Registry } from '../src/api-v2-types.ts';
 import { finish, newRun, type CanaryRecord } from '../src/canary.ts';

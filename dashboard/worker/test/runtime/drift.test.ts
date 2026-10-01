@@ -5,7 +5,7 @@
  * Todofy's stub receives. Names only: no value, id or token reaches a view or the report.
  */
 import { afterEach, describe, expect, it } from 'vitest';
-import type { OpsReport } from '../../../../contracts/ops-v1/ops-v1.ts';
+import type { OpsReport } from '@ziyixi/proto/ops/v1/ops_wire';
 import { DRIFT_CALLS_PER_TICK, DRIFT_UTC_HOUR, type CloudflareResponse, type OpsResponse } from '../../src/api-v2-types.ts';
 import { outboundPerTick } from '../../src/registry.ts';
 import { CF_API, SENTINEL_VALUE } from '../drift-fixture.ts';

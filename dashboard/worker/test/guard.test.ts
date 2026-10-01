@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import schema from '../../../contracts/ops-v1/ops-v1.schema.json';
-import { validate } from '../../../contracts/ops-v1/validate.mjs';
+import { contractErrors } from './contract.ts';
 import shedFixture from '../../../contracts/ops-v1/fixtures/GuardState/shed-mail-hero.json';
 import normalFixture from '../../../contracts/ops-v1/fixtures/GuardState/normal.json';
-import { OPS_LIMITS, type GuardState } from '../../../contracts/ops-v1/ops-v1.ts';
+import type { GuardState } from '@ziyixi/proto/ops/v1/ops_wire';
+import { OPS_LIMITS } from '../../../contracts/ops-v1/ops-v1.ts';
 import type { QuotaRow } from '../src/api-types.ts';
 import { parseUsage } from '../src/usage.ts';
 import { aiNeurons, graphqlBody } from './graphql-fixture.ts';
@@ -25,7 +25,6 @@ import {
   type UsageSnapshot,
 } from '../src/guard.ts';
 
-const SCHEMA = schema as { $defs: Record<string, unknown> };
 const T = (s: string): number => Date.parse(s);
 
 function quota(id: QuotaRow['id'], percent: number | null, trigger = true): QuotaRow {
@@ -217,7 +216,7 @@ describe('desired guard and overrides', () => {
   it('produces SetGuardInput values the contract accepts, at most 36 h ahead', () => {
     for (const desired of [desiredGuard(now, shed, null), desiredGuard(now, null, ownerOverride('shed', now)), desiredGuard(now, null, null)]) {
       const input = guardInput(desired, now);
-      expect(validate(SCHEMA, 'SetGuardInput', input)).toEqual([]);
+      expect(contractErrors('SetGuardInput', input)).toEqual([]);
       if (input.until !== null) expect(Date.parse(input.until) - now).toBeLessThanOrEqual(OPS_LIMITS.guardMaxAheadSeconds * 1000);
     }
     const far = guardInput({ level: 'shed', reason: 'owner_shed', until: now + 40 * 3_600_000, source: 'owner' }, now);

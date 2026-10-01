@@ -172,16 +172,13 @@ class Classify(unittest.TestCase):
         paths = ["contracts/ops-v1/fixtures/OpsStatus/todofy-ok.json", "contracts/ops-v1/README.md"]
         self.assertEqual(push(paths), expect(T, T, T, F, F, **ALL_CHECKED))
 
-    def test_ops_schema_and_validator_also_deploy_the_dashboard(self):
-        """The dashboard validates every Ops answer at runtime with the bundled schema and validate.mjs; Lab bundles
-        validate.mjs for its task intents."""
-        self.assertEqual(
-            push(["contracts/ops-v1/ops-v1.schema.json"]),
-            expect(T, T, T, F, F, **DASH, lab_check=T, website_check=T, flowday_check=T, links_check=T),
-        )
+    def test_validate_mjs_deploys_lab_and_the_generated_ops_schema_deploys_nothing(self):
+        """Lab bundles validate.mjs for its task intents; ops-v1's generated schema is a document no Worker bundles (the
+        dashboard reads every answer with the generated code)."""
+        self.assertEqual(push(["contracts/ops-v1/ops-v1.schema.json"]), expect(T, T, T, F, F, **ALL_CHECKED))
         self.assertEqual(
             push(["contracts/ops-v1/validate.mjs"]),
-            expect(T, T, T, F, F, **ALL, website_check=T, flowday_check=T, links_check=T),
+            expect(T, T, T, F, F, dashboard_check=T, **LAB, website_check=T, flowday_check=T, links_check=T),
         )
 
     def test_contract_code_the_workers_bundle_deploys_every_app_that_bundles_it(self):
@@ -241,16 +238,17 @@ class Classify(unittest.TestCase):
         """proto/ re-checks every PROTO_USERS app and runs Proto checks and Contracts (the contracts' tests check the
         codecs and the generated schemas); it deploys an app only when the changed path reaches that app's bundle."""
         self.assertEqual(
-            ci_changes.PROTO_USERS, {"lab": ("ts",), "todofy": ("python",), "links": ("ts",), "mail-hero": ("ts",)}
+            ci_changes.PROTO_USERS,
+            {"lab": ("ts",), "todofy": ("python",), "links": ("ts",), "mail-hero": ("ts",), "dashboard": ("ts",)},
         )
-        ts, python = {"lab", "mail-hero", "links"}, {"todofy"}
+        ts, python = {"lab", "mail-hero", "dashboard", "links"}, {"todofy"}
         every, none = ts | python, set()
         cases = {
             # task-intent-v1, bundled by Lab's TypeScript and todofy-core's Python.
             "proto/todofy/taskintent/v1/task_intent.proto": {"lab", "todofy"},
             # ops-v1: the Ops entrypoints that bundle its generated code (Todofy's gateway takes types only, its core
             # reads ops.v1 in Python).
-            "proto/ops/v1/ops.proto": {"mail-hero", "lab", "todofy"},
+            "proto/ops/v1/ops.proto": {"mail-hero", "lab", "todofy", "dashboard"},
             # Lab's UI API: only Lab imports it (Python does not even generate it).
             "proto/lab/ui/v1/lab_ui_service.proto": {"lab"},
             "proto/lab/ui/v1/deck.proto": {"lab"},
@@ -309,6 +307,8 @@ class Classify(unittest.TestCase):
                 proto=T,
                 lab_check=T,
                 lab_deploy="lab" in deployed,
+                dashboard_check=T,
+                dashboard_deploy="dashboard" in deployed,
                 links_check=T,
                 links_deploy="links" in deployed,
             )

@@ -3,7 +3,7 @@
  * with their empty values. One writer per key (HomeState); the pure view builders (views-v2.ts,
  * evaluate.ts) read them through a Snapshot. Times are epoch milliseconds.
  */
-import type { OpsReportItem, OpsReportReceipt, OpsStatus } from '../../../contracts/ops-v1/ops-v1.ts';
+import type { OpsReportItem, OpsReportReceipt, OpsStatus } from '@ziyixi/proto/ops/v1/ops_wire';
 import type { AppErrorCode, QuotaRow } from './api-types.ts';
 import type { ResourceUsage, UsageErrorCode } from './usage.ts';
 

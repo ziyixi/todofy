@@ -504,6 +504,7 @@ jobs:
           cache-dependency-path: |
             dashboard/worker/package-lock.json
             dashboard/web/package-lock.json
+            proto/package-lock.json
       - name: Install locked dependencies
         run: |
           npm ci --prefix worker --no-audit --no-fund
@@ -533,7 +534,8 @@ jobs:
         run: |
           if grep -rnE "(from|import)[[:space:]]*\(?[[:space:]]*['\"][^'\"]*(mail-hero|todofy)/" worker/src web/src; then exit 1; fi
       # The committed production config (dashboard/wrangler.toml), run exactly as the deploy runs it, with
-      # placeholder values for what the deploy adds (deploy/deploy-vars.mjs). No token is needed for --dry-run.
+      # placeholder values for what the deploy adds (deploy/deploy-vars.mjs). No token is needed for --dry-run. The
+      # bundle it writes is held to the dashboard's budget and the Workers Free limit (deploy/bundle-size.mjs).
       - name: Dry-run the committed production config
         working-directory: dashboard/worker
         env:
@@ -546,6 +548,7 @@ jobs:
           node ../deploy/deploy-vars.mjs secrets "$RUNNER_TEMP/home-secrets.json"
           node ../deploy/deploy-vars.mjs exec -- npx --no-install wrangler deploy --dry-run --config ../wrangler.toml \
             --secrets-file "$RUNNER_TEMP/home-secrets.json" --outdir "$RUNNER_TEMP/home-bundle"
+          node ../deploy/bundle-size.mjs "$RUNNER_TEMP/home-bundle"
       - name: Remove the placeholder secrets file
         if: always()
         run: rm -f "$RUNNER_TEMP/home-secrets.json"
@@ -843,7 +846,7 @@ jobs:
         working-directory: dashboard/worker
         run: |
           npm ci --no-audit --no-fund
-          npx --no-install vitest run test/ops-client.test.ts test/guard.test.ts test/canary.test.ts test/digest.test.ts
+          npx --no-install vitest run test/ops-client.test.ts test/ops-golden.test.ts test/guard.test.ts test/canary.test.ts test/digest.test.ts
       # task-intent-v1, the proposer: every fixture gets validate.mjs's verdict (Todofy's step above gives the same
       # fixtures the Python jsonschema verdict), the generated types and the TypeScript codec agree with the schema
       # on every fixture, the ts constants match it, every intent Lab builds passes it (and keeps the bytes Lab froze
@@ -1413,6 +1416,7 @@ jobs:
           cache-dependency-path: |
             dashboard/worker/package-lock.json
             dashboard/web/package-lock.json
+            proto/package-lock.json
       # Every static production value (account, host, Access, canary hour) is committed in
       # dashboard/wrangler.toml; the environment URL and the Access probe read it there.
       - name: Read the host and the Access issuer from the committed config
@@ -1452,7 +1456,8 @@ jobs:
           DASHBOARD_CANARY_ENABLED: ${{ vars.DASHBOARD_CANARY_ENABLED }}
         run: |
           node ../deploy/deploy-vars.mjs exec -- npx --no-install wrangler deploy --dry-run --config ../wrangler.toml \
-            --secrets-file "$RUNNER_TEMP/home-secrets.json"
+            --secrets-file "$RUNNER_TEMP/home-secrets.json" --outdir "$RUNNER_TEMP/home-bundle"
+          node ../deploy/bundle-size.mjs "$RUNNER_TEMP/home-bundle"
       # tools/cf-guard (read-only GETs; prints listed hostnames, counts, PASS/FAIL): wrangler applies a config's Custom
       # Domains (or zone routes) as the Worker's complete set, so stop before any production change when a live
       # hostname would be detached or another Worker's hostname or DNS record taken over. For an intentional

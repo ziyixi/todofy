@@ -9,6 +9,7 @@
  * contract, never to make a refactor pass.
  */
 import { readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { OpsReportSchema, OpsStatusSchema, SetGuardInputSchema, StartCanaryInputSchema } from '@ziyixi/proto/ops/v1/ops_pb';
 import { expect, test } from 'vitest';
 import { scheduledRunId, manualRunId } from '../src/canary.ts';
 import { buildReport, finalizeItems, type Candidate } from '../src/digest.ts';
@@ -46,9 +47,9 @@ const READERS: Readonly<Record<string, ((value: unknown) => unknown) | undefined
   // The app the dashboard called is the one the answer must name (the fixture's own, here).
   OpsStatus: (value) => asStatus((value as { app: Parameters<typeof asStatus>[0] }).app)(value),
   // Inputs the dashboard sends: the same schema check, as its own tests run on what it builds.
-  SetGuardInput: (value) => conform('SetGuardInput', value),
-  StartCanaryInput: (value) => conform('StartCanaryInput', value),
-  OpsReport: (value) => conform('OpsReport', value),
+  SetGuardInput: (value) => conform(SetGuardInputSchema, value),
+  StartCanaryInput: (value) => conform(StartCanaryInputSchema, value),
+  OpsReport: (value) => conform(OpsReportSchema, value),
 };
 
 const statusOk = JSON.parse(readFileSync(`${FIXTURES}OpsStatus/mail-hero-ok.json`, 'utf8')) as Record<string, unknown>;
@@ -88,10 +89,26 @@ function cases(): Record<string, unknown> {
   return out;
 }
 
+/**
+ * The one difference the move onto proto/ made, and on purpose: the reader keeps an answer in the contract's field
+ * order (it writes what it read with the codec), where it used to keep the producer's key order. Only Lab's status
+ * before its own move had another order (`read/newer/lab-key-order`, Lab's real answer then); it is compared with the
+ * golden one in field order: same keys, same values. Every fixture and every other answer keeps its bytes.
+ */
+const STATUS_FIELDS = [...OpsStatusSchema.fields].sort((a, b) => a.number - b.number).map((field) => field.name);
+function inFieldOrder(value: unknown): unknown {
+  const status = value as Record<string, unknown>;
+  expect(Object.keys(status).sort()).toEqual(STATUS_FIELDS.filter((name) => name in status).sort());
+  return Object.fromEntries(STATUS_FIELDS.filter((name) => name in status).map((name) => [name, status[name]]));
+}
+
 test('every input and every answer kept is byte for byte the golden one', () => {
   const actual = cases();
   if (process.env.UPDATE_GOLDEN === '1') writeFileSync(GOLDEN, `${JSON.stringify(actual, null, 2)}\n`);
   const golden = JSON.parse(readFileSync(GOLDEN, 'utf8')) as Record<string, unknown>;
   expect(Object.keys(actual)).toEqual(Object.keys(golden));
-  for (const [name, value] of Object.entries(actual)) expect(JSON.stringify(value), name).toBe(JSON.stringify(golden[name]));
+  for (const [name, value] of Object.entries(actual)) {
+    const expected = name === 'read/newer/lab-key-order' ? inFieldOrder(golden[name]) : golden[name];
+    expect(JSON.stringify(value), name).toBe(JSON.stringify(expected));
+  }
 });

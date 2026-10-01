@@ -5,7 +5,7 @@
  * becomes an item while the other app is still handled.
  */
 import { afterEach, describe, expect, it } from 'vitest';
-import type { OpsReport } from '../../../../contracts/ops-v1/ops-v1.ts';
+import type { OpsReport } from '@ziyixi/proto/ops/v1/ops_wire';
 import { d1Reads, expectValid, startFlows, status, type FlowHarness } from './flows.ts';
 import { fixture } from './harness.ts';
 
@@ -17,7 +17,7 @@ afterEach(async () => {
 
 async function reports(harness: FlowHarness): Promise<OpsReport[]> {
   const list = (await harness.callsOf('todofy', 'reportOps')).map((args) => args[0] as OpsReport);
-  for (const report of list) await expectValid('OpsReport', report);
+  for (const report of list) expectValid('OpsReport', report);
   return list;
 }
 

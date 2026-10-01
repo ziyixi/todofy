@@ -1,30 +1,49 @@
 /**
- * The only code that calls the apps (docs/design.md §5.1): one wrapper per method of `MailHeroOps` /
- * `TodofyOps` / `LabOps` in contracts/ops-v1/ops-v1.ts, each with a timeout, the contract's error codes and
- * validation of the answer against the contract schema. Results are values, never exceptions.
+ * The only code that calls the apps (docs/design.md §5.1): one wrapper per method of the generated ops-v1 services
+ * (proto/ops/v1/ops.proto: OpsService on every app, CanaryProducerService on Mail Hero, CanaryConsumerService and
+ * OpsDigestService on Todofy), each with a timeout, the contract's error codes and the wire codec on both sides: what
+ * the dashboard sends is checked with the contract's rules first, every answer is read with them. Results are values,
+ * never exceptions.
  */
-import contractSchema from '../../../contracts/ops-v1/ops-v1.schema.json';
-import { validate } from '../../../contracts/ops-v1/validate.mjs';
+import type { DescField, DescMessage, DescMethod } from '@ziyixi/proto/protobuf';
 import {
-  OPS_ERROR_CODES,
-  type CanaryDelivery,
-  type CanaryResult,
-  type GuardState,
-  type OpsApp,
-  type OpsErrorCode,
-  type OpsReport,
-  type OpsReportReceipt,
-  type OpsStatus,
-  type SetGuardInput,
-  type StartCanaryInput,
-  type StartCanaryResult,
-} from '../../../contracts/ops-v1/ops-v1.ts';
-import type { AppErrorCode } from './api-types.ts';
+  CanaryConsumerService,
+  CanaryDeliverySchema,
+  CanaryProducerService,
+  CanaryResultSchema,
+  ErrorCode,
+  ErrorCodeSchema,
+  GuardLevel,
+  GuardLevelSchema,
+  GuardStateSchema,
+  OpsDigestService,
+  OpsReportReceiptSchema,
+  OpsReportSchema,
+  OpsService,
+  OpsStatusSchema,
+  SignalSchema,
+  StartCanaryResultSchema,
+} from '@ziyixi/proto/ops/v1/ops_pb';
+import type * as ops from '@ziyixi/proto/ops/v1/ops_wire';
+import { fieldRules, fromWire, fromWireArguments, toWire, toWireArguments, wireEnum, WireJsonError, type WireOf } from '@ziyixi/proto/wire-json';
+import type { AppErrorCode, OpsApp } from './api-types.ts';
 import type { Env } from './env.ts';
 
 export const OPS_TIMEOUT_MS = 10_000;
 /** An answer larger than this (as JSON) is `invalid_output`; the contract's bounds keep real ones far smaller. */
 export const OPS_MAX_JSON_CHARS = 32_768;
+
+// ---- the contract's values, read from the IDL ------------------------------------------------------
+
+/** Every ops-v1 app, in the contract's order (OpsStatus.app's allowed list). */
+export const OPS_APPS = fieldRules(OpsStatusSchema.field.app).allowed as readonly OpsApp[];
+/** The guard's levels by wire name. */
+export const GUARD_LEVELS: readonly ops.GuardLevel[] = wireEnum(GuardLevelSchema, GuardLevel).names;
+/** The codes an Ops method rejects with (`new Error(code)`). */
+export const OPS_ERROR_CODES: readonly ops.ErrorCode[] = wireEnum(ErrorCodeSchema, ErrorCode).names;
+/** At most this many items in an OpsReport, and metrics per item. */
+export const REPORT_MAX_ITEMS = fieldRules(OpsReportSchema.field.items).maxItems;
+export const METRICS_MAX_KEYS = fieldRules(SignalSchema.field.metrics).maxItems;
 
 export type OpsCall<T> = { readonly ok: true; readonly value: T } | { readonly ok: false; readonly code: AppErrorCode };
 
@@ -59,129 +78,93 @@ export async function callOps<T>(
   } catch (error) {
     if (error instanceof MissingBinding) return { ok: false, code: 'not_configured' };
     const message = error instanceof Error ? error.message : '';
-    return { ok: false, code: (OPS_ERROR_CODES as readonly string[]).includes(message) ? (message as OpsErrorCode) : 'unavailable' };
+    return { ok: false, code: (OPS_ERROR_CODES as readonly string[]).includes(message) ? (message as ops.ErrorCode) : 'unavailable' };
   } finally {
     if (timer !== undefined) clearTimeout(timer);
   }
 }
 
-// ---- contract validation ----------------------------------------------------------------------------
+// ---- reading answers ---------------------------------------------------------------------------------
 //
-// Every answer is checked against contracts/ops-v1/ops-v1.schema.json with the contract's own validator
-// (validate.mjs), so a buggy release cannot put free text, an address or an extra field into this
-// object's storage or onto the page. Two consumer rules of the contract (README "Versioning") are
-// applied first, because an app may ship an additive change before this Worker is redeployed:
-//   - unknown fields are ignored: they are removed before validation and never stored;
-//   - new values of the enums `reason`, `waiting_code` and `error_code` are allowed when they are codes
-//     (`^[a-z][a-z0-9_]{0,47}$`); the UI shows unknown codes generically.
+// Every answer is read with the contract's rules (the wire codec, a lenient read: the dashboard is a consumer), so a
+// buggy release cannot put free text, an address or an extra field into this object's storage or onto the page. The
+// consumer rules of the contract (README "Versioning") hold because an app may ship an additive change before this
+// Worker is redeployed:
+//   - unknown fields are ignored: the reader skips them and the kept value (`toWire` of what was read) has none;
+//   - new codes of an open list (`reason`, `waiting_code`) and any `error_code` are kept as they are, if they are
+//     codes; the UI shows unknown codes generically;
+//   - a new value of a closed enum (a state, a severity, a health, a level) is refused as invalid_output: the
+//     dashboard's flows branch on those, so it does not guess.
 
-type Schema = Record<string, unknown>;
-interface Root {
-  readonly $defs: Record<string, unknown>;
-}
-
-const isObject = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null && !Array.isArray(value);
-
-/** Output fields whose enum may grow within ops-v1. */
-export const ADDITIVE_ENUM_FIELDS: readonly string[] = ['reason', 'waiting_code', 'error_code'];
-const CODE_REF = { $ref: '#/$defs/Code' };
-
-/** A copy of `node` where every additive enum property is widened to `Code`. */
-function widen(node: unknown): unknown {
-  if (Array.isArray(node)) return node.map(widen);
-  if (!isObject(node)) return node;
-  const out: Schema = {};
-  for (const [key, value] of Object.entries(node)) {
-    if (key === 'properties' && isObject(value)) {
-      out[key] = Object.fromEntries(
-        Object.entries(value).map(([name, property]) => [
-          name,
-          ADDITIVE_ENUM_FIELDS.includes(name) && isObject(property) && Array.isArray(property.enum) ? CODE_REF : widen(property),
-        ]),
-      );
-    } else {
-      out[key] = widen(value);
-    }
+/** Whether `path` (a path the reader reported unrecognized) names a field of `desc`: a value it did not know. */
+function isUnknownValue(desc: DescMessage, path: string): boolean {
+  let message: DescMessage | undefined = desc;
+  const names = path.replace(/\[\d+\]/g, '').replace(/\{\}$/, '').split('.');
+  for (const [index, name] of names.entries()) {
+    const field: DescField | undefined = message?.fields.find((f) => f.name === name);
+    if (field === undefined) return false;
+    if (index === names.length - 1) return true;
+    message = field.message;
   }
-  return out;
+  return false;
 }
 
-/** The schema this consumer validates with (inputs keep their closed enums; only outputs are read here). */
-export const CONSUMER_SCHEMA: Root = widen(contractSchema) as Root;
-
-function resolve(schema: unknown): Schema | null {
-  if (!isObject(schema)) return null;
-  const ref = schema.$ref;
-  if (typeof ref === 'string') {
-    const name = /^#\/\$defs\/([A-Za-z0-9_]+)$/.exec(ref)?.[1];
-    return name === undefined ? null : resolve(CONSUMER_SCHEMA.$defs[name]);
+/** The answer as the contract allows this consumer to keep it (wire JSON, in field order), or null. */
+export function conform<D extends DescMessage>(schema: D, value: unknown): WireOf<D> | null {
+  try {
+    const { message, unrecognized } = fromWire(schema, value);
+    if (unrecognized.some((path) => isUnknownValue(schema, path))) return null;
+    return toWire(schema, message, { lenient: true });
+  } catch (error) {
+    if (error instanceof WireJsonError) return null;
+    throw error;
   }
-  return schema;
-}
-
-/** The schemas of `key` in `schema` (a closed object, or a oneOf/anyOf of them); null when any branch is open. */
-function declared(schema: Schema): Map<string, unknown> | null {
-  const branches = [...((schema.oneOf as unknown[] | undefined) ?? []), ...((schema.anyOf as unknown[] | undefined) ?? [])];
-  const out = new Map<string, unknown>();
-  for (const branch of branches.length > 0 ? branches : [schema]) {
-    const resolved = resolve(branch);
-    if (resolved === null) continue;
-    if (resolved.additionalProperties !== false || !isObject(resolved.properties)) {
-      // A map (Metrics, Modes, Counters) or a union with a non-object branch: keep every key.
-      if (resolved.type === 'object' || resolved.properties !== undefined) return null;
-      continue;
-    }
-    for (const [name, property] of Object.entries(resolved.properties)) if (!out.has(name)) out.set(name, property);
-  }
-  return out;
-}
-
-/** `value` without the object fields the schema does not declare (recursively). */
-export function withoutUnknownFields(schema: unknown, value: unknown): unknown {
-  const resolved = resolve(schema);
-  if (resolved === null) return value;
-  if (Array.isArray(value)) return resolved.items === undefined ? value : value.map((item) => withoutUnknownFields(resolved.items, item));
-  if (!isObject(value)) return value;
-  const keys = declared(resolved);
-  if (keys === null) return value;
-  const out: Record<string, unknown> = {};
-  for (const [name, field] of Object.entries(value)) {
-    if (keys.has(name)) out[name] = withoutUnknownFields(keys.get(name), field);
-  }
-  return out;
-}
-
-/** The value as the contract allows this consumer to read it, or null when it is not a valid `name`. */
-export function conform(name: string, value: unknown): unknown {
-  const cleaned = withoutUnknownFields(CONSUMER_SCHEMA.$defs[name], value);
-  return validate(CONSUMER_SCHEMA, name, cleaned).length === 0 ? cleaned : null;
 }
 
 /** A guard for callOps: the conformed value, or null. */
 export type Conformer<T> = (value: unknown) => T | null;
 
 const conformer =
-  <T>(name: string): Conformer<T> =>
+  <D extends DescMessage>(schema: D): Conformer<WireOf<D>> =>
   (value) =>
-    conform(name, value) as T | null;
+    conform(schema, value);
 
-export const asGuardState: Conformer<GuardState> = conformer('GuardState');
-export const asStartCanaryResult: Conformer<StartCanaryResult> = conformer('StartCanaryResult');
-export const asCanaryDelivery: Conformer<CanaryDelivery> = conformer('CanaryDelivery');
-export const asCanaryResult: Conformer<CanaryResult> = conformer('CanaryResult');
-export const asReceipt: Conformer<OpsReportReceipt> = conformer('OpsReportReceipt');
+export const asGuardState: Conformer<ops.GuardState> = conformer(GuardStateSchema);
+export const asStartCanaryResult: Conformer<ops.StartCanaryResult> = conformer(StartCanaryResultSchema);
+export const asCanaryDelivery: Conformer<ops.CanaryDelivery> = conformer(CanaryDeliverySchema);
+export const asCanaryResult: Conformer<ops.CanaryResult> = conformer(CanaryResultSchema);
+export const asReceipt: Conformer<ops.OpsReportReceipt> = conformer(OpsReportReceiptSchema);
 
-/** An OpsStatus of `app` (the schema allows either app). */
-export function asStatus(app: OpsApp): Conformer<OpsStatus> {
+/** An OpsStatus of `app` (the contract allows every app). */
+export function asStatus(app: OpsApp): Conformer<ops.OpsStatus> {
   return (value) => {
-    const status = conform('OpsStatus', value) as OpsStatus | null;
+    const status = conform(OpsStatusSchema, value);
     return status !== null && status.app === app ? status : null;
   };
 }
 
+// ---- sending inputs ------------------------------------------------------------------------------------
+
+/**
+ * The arguments for `method` from what the dashboard built, after a strict read with the contract's rules (the
+ * dashboard is the producer of an input: what it sends is checked as the app will check it), or null when the
+ * contract refuses them. A request is sent in its canonical wire form (field order; a positional method's fields).
+ */
+function encode(method: DescMethod, args: readonly unknown[]): unknown[] | null {
+  try {
+    return toWireArguments(method, fromWireArguments(method, args));
+  } catch (error) {
+    if (error instanceof WireJsonError) return null;
+    throw error;
+  }
+}
+
+/** The input the contract refuses is never sent: the call answers invalid_input, as the app would. */
+const refused: OpsCall<never> = { ok: false, code: 'invalid_input' };
+
 // ---- one wrapper per declared method ---------------------------------------------------------------
 
-/** The declared methods, by app (ops-v1.ts `MailHeroOps` / `TodofyOps`); a test compares them with the file. */
+/** The methods each app's entrypoint has (the generated services it implements); a test compares them with the IDL. */
 export const CALLED_METHODS = {
   'mail-hero': ['status', 'setGuard', 'startCanary', 'canaryDelivery'],
   todofy: ['status', 'setGuard', 'canaryResult', 'reportOps'],
@@ -194,7 +177,7 @@ function missing(): Promise<never> {
   return Promise.reject(new MissingBinding('not_configured'));
 }
 
-export function opsStatus(env: Bindings, app: OpsApp): Promise<OpsCall<OpsStatus>> {
+export function opsStatus(env: Bindings, app: OpsApp): Promise<OpsCall<ops.OpsStatus>> {
   return callOps(() => {
     if (app === 'mail-hero') return (env.MAIL_HERO as Bindings['MAIL_HERO'] | undefined)?.status() ?? missing();
     if (app === 'lab') return (env.LAB as Bindings['LAB'] | undefined)?.status() ?? missing();
@@ -202,26 +185,41 @@ export function opsStatus(env: Bindings, app: OpsApp): Promise<OpsCall<OpsStatus
   }, asStatus(app));
 }
 
-export function opsSetGuard(env: Bindings, app: OpsApp, input: SetGuardInput): Promise<OpsCall<GuardState>> {
+export async function opsSetGuard(env: Bindings, app: OpsApp, input: ops.SetGuardInput): Promise<OpsCall<ops.GuardState>> {
+  const args = encode(OpsService.method.setGuard, [input]);
+  if (args === null) return refused;
+  const sent = args[0] as ops.SetGuardInput;
   return callOps(() => {
-    if (app === 'mail-hero') return (env.MAIL_HERO as Bindings['MAIL_HERO'] | undefined)?.setGuard(input) ?? missing();
-    if (app === 'lab') return (env.LAB as Bindings['LAB'] | undefined)?.setGuard(input) ?? missing();
-    return (env.TODOFY as Bindings['TODOFY'] | undefined)?.setGuard(input) ?? missing();
+    if (app === 'mail-hero') return (env.MAIL_HERO as Bindings['MAIL_HERO'] | undefined)?.setGuard(sent) ?? missing();
+    if (app === 'lab') return (env.LAB as Bindings['LAB'] | undefined)?.setGuard(sent) ?? missing();
+    return (env.TODOFY as Bindings['TODOFY'] | undefined)?.setGuard(sent) ?? missing();
   }, asGuardState);
 }
 
-export function opsStartCanary(env: Bindings, input: StartCanaryInput): Promise<OpsCall<StartCanaryResult>> {
-  return callOps(() => (env.MAIL_HERO as Bindings['MAIL_HERO'] | undefined)?.startCanary(input) ?? missing(), asStartCanaryResult);
+export async function opsStartCanary(env: Bindings, input: ops.StartCanaryInput): Promise<OpsCall<ops.StartCanaryResult>> {
+  const args = encode(CanaryProducerService.method.startCanary, [input]);
+  if (args === null) return refused;
+  const sent = args[0] as ops.StartCanaryInput;
+  return callOps(() => (env.MAIL_HERO as Bindings['MAIL_HERO'] | undefined)?.startCanary(sent) ?? missing(), asStartCanaryResult);
 }
 
-export function opsCanaryDelivery(env: Bindings, eventId: string): Promise<OpsCall<CanaryDelivery>> {
-  return callOps(() => (env.MAIL_HERO as Bindings['MAIL_HERO'] | undefined)?.canaryDelivery(eventId) ?? missing(), asCanaryDelivery);
+export async function opsCanaryDelivery(env: Bindings, eventId: string): Promise<OpsCall<ops.CanaryDelivery>> {
+  const args = encode(CanaryProducerService.method.canaryDelivery, [eventId]);
+  if (args === null) return refused;
+  const sent = args[0] as string;
+  return callOps(() => (env.MAIL_HERO as Bindings['MAIL_HERO'] | undefined)?.canaryDelivery(sent) ?? missing(), asCanaryDelivery);
 }
 
-export function opsCanaryResult(env: Bindings, eventId: string): Promise<OpsCall<CanaryResult>> {
-  return callOps(() => (env.TODOFY as Bindings['TODOFY'] | undefined)?.canaryResult(eventId) ?? missing(), asCanaryResult);
+export async function opsCanaryResult(env: Bindings, eventId: string): Promise<OpsCall<ops.CanaryResult>> {
+  const args = encode(CanaryConsumerService.method.canaryResult, [eventId]);
+  if (args === null) return refused;
+  const sent = args[0] as string;
+  return callOps(() => (env.TODOFY as Bindings['TODOFY'] | undefined)?.canaryResult(sent) ?? missing(), asCanaryResult);
 }
 
-export function opsReportOps(env: Bindings, report: OpsReport): Promise<OpsCall<OpsReportReceipt>> {
-  return callOps(() => (env.TODOFY as Bindings['TODOFY'] | undefined)?.reportOps(report) ?? missing(), asReceipt);
+export async function opsReportOps(env: Bindings, report: ops.OpsReport): Promise<OpsCall<ops.OpsReportReceipt>> {
+  const args = encode(OpsDigestService.method.reportOps, [report]);
+  if (args === null) return refused;
+  const sent = args[0] as ops.OpsReport;
+  return callOps(() => (env.TODOFY as Bindings['TODOFY'] | undefined)?.reportOps(sent) ?? missing(), asReceipt);
 }

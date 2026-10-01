@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import unavailable from '../../../contracts/ops-v1/fixtures/OpsStatus/status-unavailable.json';
-import type { OpsReportItem, OpsStatus } from '../../../contracts/ops-v1/ops-v1.ts';
+import type { OpsReportItem, OpsStatus } from '@ziyixi/proto/ops/v1/ops_wire';
 import type { EntryDef, FlowState, Registry } from '../src/api-v2-types.ts';
 import { mergeScripts } from '../src/discovery.ts';
 import { attentionView, entryState, flowStates, flowSummaries, holdCodes, rollup, targetOf, type AttentionInput, type EvalInput } from '../src/evaluate.ts';

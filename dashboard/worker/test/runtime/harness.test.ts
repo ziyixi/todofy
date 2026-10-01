@@ -5,8 +5,8 @@
  * other runtime test files.
  */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { validate } from '../../../../contracts/ops-v1/validate.mjs';
-import { contractSchema, declaredMethodsOf, startHarness, type Harness } from './harness.ts';
+import { contractErrors } from '../contract.ts';
+import { declaredMethodsOf, startHarness, type Harness } from './harness.ts';
 
 let harness: Harness;
 beforeAll(async () => {
@@ -28,11 +28,10 @@ describe('workerd harness', () => {
   });
 
   it('serves schema-valid fixtures over RPC and records the calls', async () => {
-    const schema = await contractSchema();
     const status = await harness.rpc('mail-hero', 'status');
-    expect(validate(schema, 'OpsStatus', status.ok)).toEqual([]);
+    expect(contractErrors('OpsStatus', status.ok)).toEqual([]);
     const result = await harness.rpc('todofy', 'canaryResult', 'f8c1e9a0-1a98-4fb8-8ca1-4c0a3e710016');
-    expect(validate(schema, 'CanaryResult', result.ok)).toEqual([]);
+    expect(contractErrors('CanaryResult', result.ok)).toEqual([]);
     expect((await harness.calls('mail-hero')).map((call) => call.method)).toEqual(['status']);
     expect(await harness.calls('todofy')).toEqual([
       { app: 'todofy', method: 'canaryResult', args: ['f8c1e9a0-1a98-4fb8-8ca1-4c0a3e710016'] },
@@ -54,7 +53,7 @@ describe('workerd harness', () => {
   // the dashboard's CALLED_METHODS against the same parse, so stubs and client cannot drift apart.
   it('exposes every method ops-v1.ts declares for the app', async () => {
     for (const app of ['mail-hero', 'todofy', 'lab'] as const) {
-      const declared = await declaredMethodsOf(app);
+      const declared = declaredMethodsOf(app);
       expect(declared.length).toBeGreaterThanOrEqual(app === 'lab' ? 2 : 4);
       for (const method of declared) expect((await harness.rpc(app, method)).error ?? '').not.toMatch(/does not implement|not a function/);
     }

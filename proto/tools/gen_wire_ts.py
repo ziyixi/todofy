@@ -187,6 +187,7 @@ class FileWriter:
         return lines
 
     def write(self) -> str:
+        depth = self.file["name"].count("/")
         body: list[str] = []
         for enum in self.file.get("enumType", []):
             body += ["", *self.enum(enum, enum["name"], f"{self.package}.{enum['name']}")]
@@ -205,7 +206,6 @@ class FileWriter:
             body += ["", *self.message(message)]
         for service in self.file.get("service", []):
             body += ["", *self.service(service, messages)]
-        depth = self.file["name"].count("/")
         registry = []
         for message in self.file.get("messageType", []):
             full = f"{self.package}.{message['name']}"
@@ -214,6 +214,9 @@ class FileWriter:
             [
                 HEADER.format(source=self.file["name"]).rstrip("\n"),
                 f"/** The wire JSON of {self.package} ({self.file['name']}): types only (tools/gen_wire_ts.py). */",
+                "// The module the WireTypes entries below merge into, imported so that a program reaching this file",
+                "// only through a package import (an app's UI, through its Worker's types) loads it too.",
+                f"import type {{}} from '{'../' * depth}wire-json.ts';",
                 *body,
                 "",
                 "// toWire(<Message>Schema, m) answers these types where this module is imported (ts/wire-json.ts).",

@@ -1,13 +1,14 @@
 /**
  * Bindings, vars and secrets of the Worker "home" (../wrangler.toml, docs/design.md §2). The apps are
- * reached only through their `Ops` entrypoints (contracts/ops-v1); nothing here imports app code.
+ * reached only through their `Ops` entrypoints (contracts/ops-v1), typed by the generated services of
+ * proto/ops/v1 that each one implements; nothing here imports app code.
  */
-import type { LabOps, MailHeroOps, TodofyOps } from '../../../contracts/ops-v1/ops-v1.ts';
+import type * as ops from '@ziyixi/proto/ops/v1/ops_wire';
 import type { HomeState } from './state.ts';
 
-export interface MailHeroOpsEntrypoint extends Rpc.WorkerEntrypointBranded, MailHeroOps {}
-export interface TodofyOpsEntrypoint extends Rpc.WorkerEntrypointBranded, TodofyOps {}
-export interface LabOpsEntrypoint extends Rpc.WorkerEntrypointBranded, LabOps {}
+export interface MailHeroOpsEntrypoint extends Rpc.WorkerEntrypointBranded, ops.OpsService, ops.CanaryProducerService {}
+export interface TodofyOpsEntrypoint extends Rpc.WorkerEntrypointBranded, ops.OpsService, ops.CanaryConsumerService, ops.OpsDigestService {}
+export interface LabOpsEntrypoint extends Rpc.WorkerEntrypointBranded, ops.OpsService {}
 
 export interface Env {
   readonly MAIL_HERO: Service<MailHeroOpsEntrypoint>;

@@ -4,14 +4,14 @@
  * loopback dev bypass, and stub answers built from contract fixtures and validated against the schema.
  */
 import { expect } from 'vitest';
-import { validate } from '../../../../contracts/ops-v1/validate.mjs';
-import type { GuardState, OpsStatus } from '../../../../contracts/ops-v1/ops-v1.ts';
+import type { GuardState, OpsStatus } from '@ziyixi/proto/ops/v1/ops_wire';
 import type { CanaryRun, CsrfResponse, OverallLevel, UsageView } from '../../src/api-types.ts';
 import type { AppDetail, CloudflareResponse, OpsResponse } from '../../src/api-v2-types.ts';
 import { DESIRED } from '../../src/drift.ts';
 import { fakeCloudflare, type LiveTweaks } from '../drift-fixture.ts';
 import { graphqlBody, type SyntheticUsage } from '../graphql-fixture.ts';
-import { contractSchema, fixture, startHarness, SYNTHETIC_BINDINGS, type Harness, type StubApp } from './harness.ts';
+import { contractErrors, type ContractName } from '../contract.ts';
+import { fixture, startHarness, SYNTHETIC_BINDINGS, type Harness, type StubApp } from './harness.ts';
 
 export const GRAPHQL = 'https://api.cloudflare.com/client/v4/graphql';
 /** The website probe of the registry (the only public GET the Worker makes). */
@@ -213,27 +213,27 @@ export async function startFlows(options: { bindings?: Record<string, string>; u
   return flows;
 }
 
-/** A status built from the app's `-ok` fixture with `patch`, validated as OpsStatus before use. */
+/** A status built from the app's `-ok` fixture with `patch`, checked with the contract's rules before use. */
 export async function status(app: StubApp, patch: Partial<OpsStatus> = {}): Promise<OpsStatus> {
   const base = (await fixture(`OpsStatus/${app}-ok.json`)) as OpsStatus;
   const value = { ...base, ...patch };
-  expect(validate(await contractSchema(), 'OpsStatus', value)).toEqual([]);
+  expect(contractErrors('OpsStatus', value)).toEqual([]);
   return value;
 }
 
-/** A GuardState validated against the schema. */
-export async function guardState(value: GuardState): Promise<GuardState> {
-  expect(validate(await contractSchema(), 'GuardState', value)).toEqual([]);
+/** A GuardState checked with the contract's rules. */
+export function guardState(value: GuardState): GuardState {
+  expect(contractErrors('GuardState', value)).toEqual([]);
   return value;
 }
 
 /** The shed GuardState an app returns for `input`. */
-export async function shedState(until: string, reason: string, setAt: string): Promise<GuardState> {
+export function shedState(until: string, reason: string, setAt: string): GuardState {
   return guardState({ level: 'shed', reason, until, set_at: setAt, deferred: ['raw_reconcile'] });
 }
 
-export async function expectValid(name: string, value: unknown): Promise<void> {
-  expect(validate(await contractSchema(), name, value)).toEqual([]);
+export function expectValid(name: ContractName, value: unknown): void {
+  expect(contractErrors(name, value)).toEqual([]);
 }
 
 export function latest(snapshot: Snapshot): CanaryRun {

@@ -4,7 +4,7 @@
  * clear below, renew R2 monthly sheds on a new UTC day, owner force/clear with CSRF.
  */
 import { afterEach, describe, expect, it } from 'vitest';
-import type { SetGuardInput } from '../../../../contracts/ops-v1/ops-v1.ts';
+import type { SetGuardInput } from '@ziyixi/proto/ops/v1/ops_wire';
 import type { GuardResponseV2 } from '../../src/api-v2-types.ts';
 import { aiNeurons, graphqlBodyWithAiError } from '../graphql-fixture.ts';
 import { d1Reads, expectValid, shedState, startFlows, status, type FlowHarness } from './flows.ts';
@@ -19,7 +19,7 @@ async function guardCalls(harness: FlowHarness): Promise<Record<string, SetGuard
   const out: Record<string, SetGuardInput[]> = {};
   for (const app of ['mail-hero', 'todofy', 'lab'] as const) {
     const calls = (await harness.callsOf(app, 'setGuard')).map((args) => args[0] as SetGuardInput);
-    for (const input of calls) await expectValid('SetGuardInput', input);
+    for (const input of calls) expectValid('SetGuardInput', input);
     out[app] = calls;
   }
   return out;
@@ -28,7 +28,7 @@ async function guardCalls(harness: FlowHarness): Promise<Record<string, SetGuard
 /** Both stubs now report `input` as their effective guard (as the real apps would after setGuard). */
 async function appsReport(harness: FlowHarness, input: SetGuardInput, setAt: string): Promise<void> {
   for (const app of ['mail-hero', 'todofy', 'lab'] as const) {
-    const guard = input.level === 'shed' ? await shedState(input.until, input.reason, setAt) : undefined;
+    const guard = input.level === 'shed' ? shedState(input.until, input.reason, setAt) : undefined;
     await harness.answer(app, 'setGuard', guard ? { value: guard } : undefined);
     await harness.answer(app, 'status', guard ? { value: await status(app, { guard }) } : undefined);
   }
@@ -143,7 +143,7 @@ describe('automatic guard', () => {
     expect(ai?.breakdown.map((b) => b.name)).toEqual(['@cf/meta/llama-3.1-8b-instruct', '@cf/baai/bge-m3']);
     const item = snap.digest.items.find((i) => i.code === 'ai_neurons_high');
     expect(item).toMatchObject({ source: 'cloudflare', severity: 'critical', metrics: { percent: 97, used: 9700, limit: 10_000 } });
-    await expectValid('OpsReportItem', item);
+    expectValid('OpsReportItem', item);
     expect(snap.digest.items.map((i) => i.code)).not.toContain('guard_shed');
 
     // 85 %: still reported (warning), still no guard call.

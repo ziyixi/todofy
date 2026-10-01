@@ -10,26 +10,21 @@ import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { build } from 'esbuild';
 import { Miniflare, convertV4MiniflareOptions } from 'miniflare';
-import type { OpsApp } from '../../../../contracts/ops-v1/ops-v1.ts';
-import { declaredMethods } from '../declared-methods.ts';
+import type { OpsApp } from '../../src/api-types.ts';
+import { declaredMethods } from '../contract.ts';
 
 const ROOT = resolve(fileURLToPath(new URL('../..', import.meta.url)));
 const CONTRACT = resolve(ROOT, '../../contracts/ops-v1');
 
 export type StubApp = OpsApp;
 
-/** The methods ops-v1.ts declares for `app`, parsed from the contract file itself: the stubs expose exactly these. */
-export async function declaredMethodsOf(app: StubApp): Promise<string[]> {
-  const source = await readFile(join(CONTRACT, 'ops-v1.ts'), 'utf8');
-  return declaredMethods(source, app === 'mail-hero' ? 'MailHeroOps' : app === 'todofy' ? 'TodofyOps' : 'LabOps');
+/** The methods of `app`'s Ops entrypoint (the generated services it implements): the stubs expose exactly these. */
+export function declaredMethodsOf(app: StubApp): string[] {
+  return declaredMethods(app);
 }
 
 export async function fixture(path: string): Promise<unknown> {
   return JSON.parse(await readFile(join(CONTRACT, 'fixtures', path), 'utf8')) as unknown;
-}
-
-export async function contractSchema(): Promise<{ $defs: Record<string, unknown> }> {
-  return JSON.parse(await readFile(join(CONTRACT, 'ops-v1.schema.json'), 'utf8')) as { $defs: Record<string, unknown> };
 }
 
 /** Default answers of each stub: healthy apps, a queued/delivered/ok canary, a stored report. */
@@ -57,7 +52,7 @@ async function stubScript(app: StubApp): Promise<string> {
   const template = await readFile(join(ROOT, 'test/stubs/ops-stub.js'), 'utf8');
   return template
     .replace('const APP = __APP__', `const APP = ${JSON.stringify(app)}`)
-    .replace('const METHODS = __METHODS__', `const METHODS = ${JSON.stringify(await declaredMethodsOf(app))}`)
+    .replace('const METHODS = __METHODS__', `const METHODS = ${JSON.stringify(declaredMethodsOf(app))}`)
     .replace('const DEFAULTS = __DEFAULTS__', `const DEFAULTS = ${JSON.stringify(await defaults(app))}`);
 }
 

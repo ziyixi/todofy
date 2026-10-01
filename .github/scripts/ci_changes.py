@@ -148,7 +148,13 @@ PACKAGE_USERS = {"edge-auth": ("todofy", "mail-hero", "dashboard", "lab", "flowd
 # its production bundles compile in; () for a user whose bundles take nothing from it (types only, tests
 # only). test_proto.py derives this map from the apps' manifests and sources.
 PROTO = "proto/"
-PROTO_USERS: dict[str, tuple[str, ...]] = {"lab": ("ts",), "todofy": ("python",), "links": ("ts",), "mail-hero": ("ts",)}
+PROTO_USERS: dict[str, tuple[str, ...]] = {
+    "lab": ("ts",),
+    "todofy": ("python",),
+    "links": ("ts",),
+    "mail-hero": ("ts",),
+    "dashboard": ("ts",),
+}
 # The hand-written runtimes and generators: a change reaches every user of each language listed. The wire
 # profile's own options (common/wire/v1: value rules, map order, binding arguments) are part of both runtimes:
 # the TypeScript codec bundles their generated descriptors, gen_py.py writes their rules into the Python tables
@@ -171,7 +177,7 @@ PROTO_PACKAGES: dict[str, tuple[str, ...]] = {
     # CommonReason: Lab reads its names as types only.
     "proto/common/errors/": (),
     # ops-v1 (contracts/ops-v1): every app's Ops entrypoint and the dashboard that calls them.
-    "proto/ops/": ("mail-hero", "lab", "todofy"),
+    "proto/ops/": ("mail-hero", "lab", "todofy", "dashboard"),
     # The runtimes' test fixtures (never imported by an app; not in the Python wheel).
     "proto/prototest/": (),
 }
@@ -197,9 +203,9 @@ PROTO_NOT_BUNDLED = (
 # test_ci_changes.py checks this map against the Workers' imports.
 BUNDLED_BY = {
     "contracts/ops-v1/ops-v1.ts": ("todofy", "mail-hero", "dashboard", "lab"),
-    # The dashboard validates every Ops answer; Lab validates its task intents and Todofy's answers with validate.mjs.
-    "contracts/ops-v1/ops-v1.schema.json": ("dashboard",),
-    "contracts/ops-v1/validate.mjs": ("dashboard", "lab"),
+    # Lab validates its task intents and Todofy's answers with validate.mjs (ops-v1 answers are read with the
+    # generated code: proto/ops/).
+    "contracts/ops-v1/validate.mjs": ("lab",),
     # task-intent-v1: Lab proposes (bounds, schema), Todofy's gateway forwards (the input bound). The types
     # are generated from proto/ (PROTO_USERS).
     "contracts/task-intent-v1/task-intent-v1.ts": ("lab", "todofy"),

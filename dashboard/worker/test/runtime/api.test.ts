@@ -93,12 +93,12 @@ describe('the ops and cloudflare views', () => {
     // The fake GraphQL answers `ai: []` like the live account: no AI calls today reads 0, not 无数据.
     expect(after.usage.rows.find((row) => row.id === 'ai_neurons')).toMatchObject({ used: 0, percent: 0, limit: 10_000, breakdown: [] });
     for (const row of after.usage.rows) expect(row.source).toMatch(/^https:\/\/developers\.cloudflare\.com\//);
-    await expectValid('OpsStatus', after.apps['mail-hero'].status);
-    await expectValid('OpsStatus', after.apps.todofy.status);
+    expectValid('OpsStatus', after.apps['mail-hero'].status);
+    expectValid('OpsStatus', after.apps.todofy.status);
     expect(after.guard).toMatchObject({ thresholds: { shed_percent: 80, clear_percent: 70 }, override: null });
     expect(after.digest).toMatchObject({ enabled: true, items: [] });
     expect(after.refresh.last_tick_at).toBe(new Date(now - 60_000).toISOString());
-    for (const item of after.digest.items) await expectValid('OpsReportItem', item);
+    for (const item of after.digest.items) expectValid('OpsReportItem', item);
     // No token, owner or remote text anywhere in the answers.
     const text = JSON.stringify(after);
     expect(text).not.toContain('synthetic-analytics-token');
