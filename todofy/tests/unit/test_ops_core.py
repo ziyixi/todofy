@@ -3,7 +3,6 @@ against the shared schema by the reference validator."""
 
 import ast
 import json
-import re
 from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
@@ -39,18 +38,17 @@ def stamp(seconds: int) -> str:
 
 
 def test_limits_equal_the_contract_constants():
+    """The rules the IDL cannot hold are ops-v1.ts's OPS_LIMITS; the bounds it states come from the generated tables."""
     source = (CONTRACT / "ops-v1.ts").read_text()
     for name, value in {
         "guardMaxAheadSeconds: 36 * 3600": ops.GUARD_MAX_AHEAD,
         "digestWindowSeconds: 36 * 3600": ops.DIGEST_WINDOW,
         "reportFutureSkewSeconds: 300": ops.REPORT_FUTURE_SKEW,
-        "reportMaxItems: 20": ops.REPORT_MAX_ITEMS,
         "reportMaxBytes: 8192": ops.REPORT_MAX_BYTES,
-        "statusMaxSignals: 16": ops.MAX_SIGNALS,
-        "metricsMaxKeys: 12": ops.MAX_METRICS,
     }.items():
         assert name in source
         assert eval(name.split(": ")[1]) == value
+    assert (ops.REPORT_MAX_ITEMS, ops.MAX_SIGNALS, ops.MAX_METRICS) == (20, 16, 12)
 
 
 @pytest.mark.parametrize(
@@ -457,25 +455,23 @@ def test_unavailable_status_matches_the_contract_fixture():
     assert status == fixture("OpsStatus/status-unavailable.json") | {"generated_at": "2026-09-29T15:00:00Z"}
 
 
-def required_keys(interface: str) -> list[str]:
-    """Keys an ops-v1.ts interface declares without ``?``: what a dashboard compiled against it relies on."""
-    source = (CONTRACT / "ops-v1.ts").read_text()
-    body = re.search(rf"export interface {interface} \{{([^}}]*)\}}", source)
-    assert body is not None
-    return [name for name, optional in re.findall(r"readonly (\w+)(\??):", body.group(1)) if not optional]
+# The modes each app writes even on a status_unavailable status: its deployment variables (contracts/ops-v1 README
+# "modes"); a mode read from storage is left out then, never guessed.
+DEPLOYMENT_MODES = {
+    "mail-hero": ["maintenance", "force_send_paused"],
+    "todofy": ["maintenance", "processing_paused", "force_pause_todoist", "reminder_enabled"],
+    "lab": ["maintenance"],
+}
 
 
-def test_every_mode_todofy_modes_requires_is_a_boolean_also_when_unavailable():
-    required = required_keys("TodofyModes")
-    assert required == ["maintenance", "processing_paused", "force_pause_todoist", "reminder_enabled"]
+def test_every_deployment_mode_is_a_boolean_also_when_unavailable():
+    required = DEPLOYMENT_MODES["todofy"]
     switches = ops.Switches(True, True, False, True)
     for status in (ops.status(FACTS), ops.unavailable_status(NOW, switches, ops.NORMAL, "todofy.example.com")):
         assert all(isinstance(status["modes"][key], bool) for key in required), status["modes"]
     for path in sorted((CONTRACT / "fixtures" / "OpsStatus").glob("*.json")):
         doc = json.loads(path.read_text())
-        # Each app's own modes interface: mail-hero -> MailHeroModes, todofy -> TodofyModes, and so on.
-        keys = required_keys("".join(part.capitalize() for part in doc["app"].split("-")) + "Modes")
-        assert all(isinstance(doc["modes"].get(key), bool) for key in keys), path.name
+        assert all(isinstance(doc["modes"].get(key), bool) for key in DEPLOYMENT_MODES[doc["app"]]), path.name
 
 
 @pytest.mark.parametrize(

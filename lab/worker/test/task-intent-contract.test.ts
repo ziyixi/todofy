@@ -66,6 +66,14 @@ type Json = Record<string, unknown>;
 const defs = (schema as { $defs: Record<string, Json> }).$defs;
 const props = (name: string) => (defs[name]?.['properties'] ?? {}) as Record<string, Json>;
 
+describe('the dependency-free validator (contracts/ops-v1/validate.mjs)', () => {
+  it('refuses keywords and references it does not implement, so a schema edit cannot be skipped silently', () => {
+    expect(() => validate({ $defs: { X: { if: { type: 'string' } } } }, 'X', 'a')).toThrow(/does not implement the keyword "if"/);
+    expect(() => validate({ $defs: { X: { $ref: 'other.json#/$defs/Y' } } }, 'X', 'a')).toThrow(/unsupported \$ref/);
+    expect(() => validate({ $defs: {} }, 'Missing', 'a')).toThrow(/no \$defs entry Missing/);
+  });
+});
+
 describe('task-intent-v1 fixtures', () => {
   it('has fixtures for every definition, valid and invalid', () => {
     for (const def of DEFS) {

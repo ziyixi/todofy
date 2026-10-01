@@ -1,18 +1,23 @@
-// A dependency-free validator for the subset of JSON Schema 2020-12 that ops-v1.schema.json uses.
+// A dependency-free validator for the subset of JSON Schema 2020-12 that the contracts' hand-written schemas use.
 //
-// Mail Hero and the future dashboard are TypeScript Workers without a JSON Schema library, and the
-// ops surface is small enough not to justify one. Todofy's tests validate the same fixtures with the
-// reference implementation (Python jsonschema, Draft202012Validator); both sides assert the same
-// verdict for every file under fixtures/, so this subset cannot silently drift from the standard.
+// Its users now: task-intent-v1 (contracts/task-intent-v1/task-intent-v1.schema.json, whose value rules are not in
+// the IDL yet: Lab checks its intents and Todofy's answers with it at run time, and the tests check the fixtures), and
+// the rollout checks of ops-v1, whose answers each app's golden test still runs through the hand-written schema the
+// dashboards deployed before ops-v1 moved onto proto/ validate with (legacy/ops-v1.schema.json). ops-v1 itself is read
+// and written with the generated code of proto/ops/v1 (the wire codec checks its rules); ops-v1.schema.json is
+// generated from the IDL and stays inside this subset. Retire this file with task-intent-v1's move onto proto/.
 //
-// Supported: $ref (local "#/$defs/<name>" only), type, enum, const, required, properties,
-// additionalProperties, propertyNames, minProperties, maxProperties, items, minItems, maxItems,
-// uniqueItems, pattern, minLength, maxLength, minimum, maximum, oneOf, anyOf. Annotations are
-// ignored ($schema, $id, $defs, title, description, format, examples, $comment). Any other keyword
-// throws, so a schema edit that needs more support fails the tests instead of being skipped.
+// Todofy's tests validate the same fixtures with the reference implementation (Python jsonschema,
+// Draft202012Validator); both sides assert the same verdict for every fixture, so this subset cannot silently drift
+// from the standard.
+//
+// Supported: $ref (local "#/$defs/<name>" only), type, enum, const, required, properties, additionalProperties,
+// propertyNames, minProperties, maxProperties, items, minItems, maxItems, uniqueItems, pattern, minLength, maxLength,
+// minimum, maximum, oneOf, anyOf. Annotations are ignored ($schema, $id, $defs, title, description, format, examples,
+// $comment). Any other keyword throws, so a schema edit that needs more support fails the tests instead of being skipped.
 //
 //   import { validate } from '<relative path>/contracts/ops-v1/validate.mjs'
-//   const errors = validate(schema, 'OpsStatus', value)   // [] when valid
+//   const errors = validate(schema, 'TaskIntent', value)   // [] when valid
 
 const ANNOTATIONS = new Set(['$schema', '$id', '$defs', 'title', 'description', 'format', 'examples', '$comment'])
 const KEYWORDS = new Set(['$ref', 'type', 'enum', 'const', 'required', 'properties', 'additionalProperties',
