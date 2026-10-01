@@ -133,6 +133,26 @@ class FakeTofu:
         return [json.loads(line) for line in self.record.read_text().splitlines()]
 
 
+def existing_parent(root: Path) -> Path:
+    """A pre-existing --work-dir with a file of its own and a non-private mode: a run must leave both alone."""
+    parent = root / "work"
+    parent.mkdir()
+    (parent / "keep.txt").write_text("not ours")
+    parent.chmod(0o755)
+    return parent
+
+
+def assert_parent_untouched(test: unittest.TestCase, parent: Path, keep_work_dir: bool = False) -> list:
+    """The parent survived with its file and mode; returns the run's own directories left in it."""
+    test.assertTrue(parent.is_dir(), "the --work-dir parent must never be removed")
+    test.assertEqual((parent / "keep.txt").read_text(), "not ours")
+    test.assertEqual(stat.S_IMODE(parent.stat().st_mode), 0o755, "the --work-dir parent must never be chmodded")
+    children = sorted(p for p in parent.iterdir() if p.name != "keep.txt")
+    if not keep_work_dir:
+        test.assertEqual(children, [], "the run's own work directory is removed")
+    return children
+
+
 def fake_fetch(path):
     if path == f"/accounts/{ACCOUNT}/tokens/verify":
         return {"id": TOKEN_ID, "status": "active"}
@@ -194,6 +214,50 @@ class Inputs(unittest.TestCase):
     def test_paths_inside_the_repository_are_refused(self):
         with self.assertRaisesRegex(infra_state.Refused, "inside the repository"):
             infra_state.outside_repo(infra_state.REPO / "infra" / "values.json")
+        with self.assertRaisesRegex(infra_state.Refused, "inside the repository"):
+            infra_state.new_work_dir(infra_state.REPO / "infra", {})
+
+
+class WorkDirectory(unittest.TestCase):
+    """--work-dir is only ever a parent: the run creates, and may remove, only its own new directory."""
+
+    def test_a_new_private_directory_inside_an_existing_parent(self):
+        with tempfile.TemporaryDirectory() as directory:
+            parent = existing_parent(Path(directory))
+            work = infra_state.new_work_dir(parent, {})
+            self.assertEqual(work.parent, parent.resolve())
+            self.assertEqual(stat.S_IMODE(work.stat().st_mode), 0o700)
+            infra_state.require_fresh_private_dir(work)
+            self.assertNotEqual(infra_state.new_work_dir(parent, {}), work)
+            work.rmdir()
+            assert_parent_untouched(self, parent, keep_work_dir=True)
+
+    def test_a_missing_parent_is_created_private(self):
+        with tempfile.TemporaryDirectory() as directory:
+            parent = Path(directory) / "a" / "b"
+            work = infra_state.new_work_dir(parent, {})
+            self.assertEqual(work.parent, parent.resolve())
+            self.assertEqual(stat.S_IMODE(parent.stat().st_mode) & 0o077, 0)
+
+    def test_the_runner_temp_is_the_default_parent(self):
+        with tempfile.TemporaryDirectory() as directory:
+            work = infra_state.new_work_dir(None, {"RUNNER_TEMP": directory})
+            self.assertEqual(work.parent.resolve(), Path(directory).resolve())
+
+    def test_session_refuses_a_directory_it_did_not_create(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            parent = existing_parent(root)
+            for path in (parent, root / "missing"):  # not empty and not private; missing
+                with self.subTest(path=path.name):
+                    with self.assertRaisesRegex(infra_state.Refused, "work directory"):
+                        infra_state.require_fresh_private_dir(path)
+            loose = root / "loose"
+            loose.mkdir(mode=0o755)
+            loose.chmod(0o755)
+            with self.assertRaisesRegex(infra_state.Refused, "new private directory"):
+                infra_state.require_fresh_private_dir(loose)
+            self.assertEqual(stat.S_IMODE(loose.stat().st_mode), 0o755, "never chmodded")
 
 
 class Credentials(unittest.TestCase):
@@ -229,8 +293,20 @@ class Credentials(unittest.TestCase):
         infra_state.mask(["value-1"], {"GITHUB_ACTIONS": "true"}, out)  # not a real runner: nothing printed
         self.assertEqual(out.getvalue(), "")
         runner = {"GITHUB_ACTIONS": "true", "GITHUB_RUN_ID": "1", "RUNNER_TEMP": "/tmp"}
-        infra_state.mask(["value-1", "", "value-2"], runner, out)
+        infra_state.mask(["value-1", "", "value-2", "value-1"], runner, out)
         self.assertEqual(out.getvalue(), "::add-mask::value-1\n::add-mask::value-2\n")
+
+    def test_mask_escapes_command_data(self):
+        out = io.StringIO()
+        runner = {"GITHUB_ACTIONS": "true", "GITHUB_RUN_ID": "1", "RUNNER_TEMP": "/tmp"}
+        infra_state.mask(["a%b\nc\rd"], runner, out)
+        self.assertEqual(out.getvalue(), "::add-mask::a%25b%0Ac%0Dd\n")
+
+    def test_value_scalars_cover_every_value(self):
+        values = dict(VALUES, access_owner_emails=["one" + AT + "example.invalid", "two" + AT + "example.invalid"])
+        scalars = infra_state.value_scalars(values)
+        self.assertEqual(scalars, [ACCOUNT, "one" + AT + "example.invalid", "two" + AT + "example.invalid",
+                                   SENTINEL_EMAIL, SENTINEL_IDP, SENTINEL_IDP])
 
     def test_sigv4_signs_path_style_requests_deterministically(self):
         import datetime
@@ -342,13 +418,14 @@ class PlanCommand(unittest.TestCase):
                        INFRA_TFVARS=json.dumps(VALUES), FAKE_PLAN=fake.fixture("plan", document),
                        FAKE_PLAN_EXIT=str(plan_exit), TF_LOG="TRACE", TF_ENCRYPTION="x")
             env.update(extra_env or {})
-            work = Path(directory) / "work"
+            parent = existing_parent(Path(directory))
             out, err = io.StringIO(), io.StringIO()
             with mock.patch.dict(os.environ, env, clear=True), \
                     mock.patch.object(infra_state, "cloudflare_get", lambda token, path: fake_fetch(path)), \
                     contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
-                code = infra_state.main(["plan", "--work-dir", str(work)])
-            self.assertFalse(work.exists(), "the work directory (values, plan, log) is removed")
+                code = infra_state.main(["plan", "--work-dir", str(parent)])
+            # The run's own directory (values, plan, log) is removed; the given parent and its file are not.
+            assert_parent_untouched(self, parent)
             return code, out.getvalue(), err.getvalue(), fake.calls()
 
     def assert_clean(self, text):
@@ -402,12 +479,23 @@ class PlanCommand(unittest.TestCase):
         self.assertIn("no unencrypted fallback", err)
         self.assertEqual(calls, [])
 
-    def test_masks_the_derived_credentials_on_a_runner(self):
+    def test_a_refused_run_leaves_an_existing_work_dir_parent_alone(self):
+        # The review's reproduction: no passphrase, --work-dir an existing directory. run_plan asserts that the
+        # directory, its file and its mode survive; here also with tofu failing after the work dir exists.
+        for extra in ({"INFRA_STATE_PASSPHRASE": ""}, {"FAKE_INIT_EXIT": "1"}, {"CLOUDFLARE_API_TOKEN": ""}):
+            with self.subTest(case=sorted(extra)):
+                code, _, _, _ = self.run_plan(plan((["no-op"], False)), extra_env=extra)
+                self.assertEqual(code, 1)
+
+    def test_masks_every_value_and_the_derived_credentials_on_a_runner(self):
         runner = {"GITHUB_ACTIONS": "true", "GITHUB_RUN_ID": "1", "RUNNER_TEMP": tempfile.gettempdir()}
         code, out, err, _ = self.run_plan(plan((["no-op"], False)), extra_env=runner)
         self.assertEqual(code, 0)
         masks = [line for line in out.splitlines() if line.startswith("::add-mask::")]
-        self.assertEqual(masks, [f"::add-mask::{TOKEN_ID}", f"::add-mask::{hashlib.sha256(TOKEN.encode()).hexdigest()}"])
+        # Every scalar inside INFRA_TFVARS (GitHub masks only the whole JSON string), then the derived pair.
+        self.assertEqual(masks, [f"::add-mask::{value}" for value in (
+            ACCOUNT, SENTINEL_EMAIL, SENTINEL_IDP, TOKEN_ID, hashlib.sha256(TOKEN.encode()).hexdigest())])
+        self.assertTrue(out.startswith("\n".join(masks) + "\n"), "masks are registered before anything else is printed")
         rest = "\n".join(line for line in out.splitlines() if not line.startswith("::add-mask::"))
         self.assert_clean(rest + err)
 
@@ -447,6 +535,7 @@ class Rotation(unittest.TestCase):
                 name = after if refreshed else written_with
                 return 200, json.dumps({"meta": {f"key_provider.pbkdf2.{name}": "s"}, "encrypted_data": "x"}).encode()
 
+            parent = existing_parent(root)
             out, err = io.StringIO(), io.StringIO()
             with mock.patch.dict(os.environ, env, clear=True), \
                     mock.patch.object(infra_state, "cloudflare_get", lambda token, path: fake_fetch(path)), \
@@ -454,7 +543,8 @@ class Rotation(unittest.TestCase):
                     mock.patch.object(infra_state, "committed_key_provider", lambda: "state_2"), \
                     contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
                 code = infra_state.main(["rotate-passphrase", "--var-file", str(values), "--old-passphrase-file", str(old),
-                                         "--work-dir", str(root / "work")])
+                                         "--work-dir", str(parent)])
+            assert_parent_untouched(self, parent)
             return code, out.getvalue(), err.getvalue(), fake.calls()
 
     def test_rotation_reencrypts_then_plans_with_the_new_passphrase_alone(self):
@@ -498,6 +588,7 @@ class Bootstrap(unittest.TestCase):
             env.update(env_extra or {})
             values = root / "values.json"
             values.write_text(json.dumps(VALUES))
+            parent = existing_parent(root)
             created = []
 
             def s3(method, base, path, credentials, payload=b"", extra=None):
@@ -538,8 +629,14 @@ class Bootstrap(unittest.TestCase):
                     mock.patch.object(bootstrap_state, "load_admin", lambda: Admin), \
                     mock.patch.object(bootstrap_state, "run_admin_wrangler", create), \
                     contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
-                code = bootstrap_state.main(["--var-file", str(values), "--expect", "3", "--work-dir", str(root / "work")])
-            leftovers = sorted(p.name for p in (root / "work").glob("*")) if (root / "work").exists() else []
+                code = bootstrap_state.main(["--var-file", str(values), "--expect", "3", "--work-dir", str(parent)])
+            # The bootstrap keeps its own new directory (the log) inside the parent and nothing else changes.
+            runs = assert_parent_untouched(self, parent, keep_work_dir=True)
+            self.assertLessEqual(len(runs), 1)
+            for run in runs:
+                self.assertTrue(run.name.startswith("bootstrap-"))
+                self.assertEqual(stat.S_IMODE(run.stat().st_mode), 0o700)
+            leftovers = sorted(p.name for run in runs for p in run.glob("*"))
             return code, out.getvalue(), err.getvalue(), fake.calls(), created, leftovers
 
     def assert_clean(self, text):

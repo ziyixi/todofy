@@ -132,6 +132,37 @@ def outside_repo(path: Path) -> Path:
     return resolved
 
 
+def new_work_dir(parent: Optional[Path], env: dict[str, str], prefix: str = "infra-") -> Path:
+    """A fresh private (0700) directory that this run creates and therefore alone may delete.
+
+    --work-dir names its PARENT, never the work directory itself: an existing parent is not chmodded,
+    emptied or removed (only a missing one is created), so `--work-dir ~` cannot cost the home directory.
+    Without --work-dir the parent is $RUNNER_TEMP on a runner, else the system temp directory."""
+    if parent is None:
+        base = env.get("RUNNER_TEMP") or None
+    else:
+        base = outside_repo(parent)
+        try:
+            base.mkdir(mode=0o700, parents=True, exist_ok=True)
+        except OSError:
+            raise Refused("cannot create the work directory's parent") from None
+    try:
+        return Path(tempfile.mkdtemp(prefix=prefix, dir=base))
+    except OSError:
+        raise Refused("cannot create a work directory in the given parent") from None
+
+
+def require_fresh_private_dir(path: Path) -> None:
+    """Session works only in a directory from new_work_dir(): owner-only, owned by us, still empty."""
+    try:
+        info = path.lstat()
+        empty = not any(path.iterdir())
+    except OSError:
+        raise Refused("the work directory is missing") from None
+    if not stat.S_ISDIR(info.st_mode) or info.st_uid != os.getuid() or info.st_mode & 0o077 or not empty:
+        raise Refused("the work directory must be a new private directory created by this run")
+
+
 def write_private(path: Path, text: str) -> None:
     descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
     with os.fdopen(descriptor, "w") as handle:
@@ -195,18 +226,35 @@ def on_actions_runner(env: dict[str, str]) -> bool:
     return env.get("GITHUB_ACTIONS") == "true" and bool(env.get("GITHUB_RUN_ID")) and bool(env.get("RUNNER_TEMP"))
 
 
+def _command_data(value: str) -> str:
+    """A workflow-command argument escaped like @actions/core's escapeData (a newline cannot end the command)."""
+    return value.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+
+
 def mask(values: list[str], env: dict[str, str], out=None) -> None:
     """Ask the GitHub Actions runner to mask each value in every later log line (no-op anywhere else).
 
-    Only for values the runner does not know: the token and the passphrase come from `secrets.*`, which GitHub
-    masks already; the derived access key id and secret access key are new strings."""
+    Only for values the runner does not know as a whole: the token and the passphrase come from `secrets.*`,
+    which GitHub masks already; the derived access key id and secret access key are new strings; and GitHub
+    masks the INFRA_TFVARS secret only as its whole JSON string, never the values inside it."""
     if not on_actions_runner(env):
         return
     out = out or sys.stdout
+    seen: set[str] = set()
     for value in values:
-        if value:
-            out.write(f"::add-mask::{value}\n")
+        if value and value not in seen:
+            seen.add(value)
+            out.write(f"::add-mask::{_command_data(value)}\n")
     out.flush()
+
+
+def value_scalars(values: dict[str, Any]) -> list[str]:
+    """Every string inside the values (account id, identity provider ids, both email lists), in a fixed order."""
+    found: list[str] = []
+    for name in REQUIRED_VALUES:
+        value = values[name]
+        found.extend(value if isinstance(value, list) else [value])
+    return found
 
 
 def endpoint(account_id: str) -> str:
@@ -445,12 +493,13 @@ class Session:
         if not token:
             raise Refused("set CLOUDFLARE_API_TOKEN in the environment")
         self.values = values
+        # Before anything can print: every value inside INFRA_TFVARS, then the derived credentials.
+        mask(value_scalars(values), env)
         fetch = fetch or (lambda path: cloudflare_get(token, path))
         self.credentials = s3_credentials(env, values["account_id"], fetch)
         mask([self.credentials[0], self.credentials[1]], env)
         self.endpoint = s3_endpoint or endpoint(values["account_id"])
-        self.work.mkdir(mode=0o700, parents=True, exist_ok=True)
-        os.chmod(self.work, 0o700)
+        require_fresh_private_dir(self.work)  # never chmods or reuses a directory this run did not create
         self.values_file = self.work / "values.tfvars.json"
         write_private(self.values_file, json.dumps(values))
         self.log = self.work / "tofu.log"
@@ -479,11 +528,6 @@ class Session:
         return code, summary, rendered
 
 
-def default_work_dir(env: dict[str, str]) -> Path:
-    base = env.get("RUNNER_TEMP") or None
-    return Path(tempfile.mkdtemp(prefix="infra-", dir=base))
-
-
 def report(text: str, env: dict[str, str]) -> None:
     sys.stdout.write(text)
     sys.stdout.flush()
@@ -507,7 +551,7 @@ def read_values_argument(path: Optional[Path], env: dict[str, str]) -> dict[str,
 
 def command_plan(args: argparse.Namespace, env: dict[str, str]) -> int:
     values = read_values_argument(args.var_file, env)
-    work = outside_repo(args.work_dir) if args.work_dir else default_work_dir(env)
+    work = new_work_dir(args.work_dir, env)  # created here, so the finally below may remove it
     session = None
     try:
         session = Session(environment=args.environment, values=values, work=work, env=env)
@@ -581,7 +625,7 @@ def command_rotate(args: argparse.Namespace, env: dict[str, str]) -> int:
     if len(old) < MIN_PASSPHRASE:
         raise Refused(f"the old passphrase must have at least {MIN_PASSPHRASE} characters")
     new_name = committed_key_provider()
-    work = outside_repo(args.work_dir) if args.work_dir else default_work_dir(env)
+    work = new_work_dir(args.work_dir, env)  # created here, so the finally below may remove it
     session = None
     try:
         session = Session(environment=args.environment, values=values, work=work, env=env)
@@ -649,15 +693,16 @@ def main(argv: Optional[list[str]] = None) -> int:
     rotate.add_argument("--environment", default="production", choices=ENVIRONMENTS)
     rotate.add_argument("--var-file", type=Path, required=True, help="values file outside the repository")
     rotate.add_argument("--old-passphrase-file", type=Path, required=True, help="owner-only file with the old passphrase")
-    rotate.add_argument("--work-dir", type=Path, help="private work directory outside the repository")
-    rotate.add_argument("--keep-work-dir", action="store_true", help="keep the work directory (its log)")
+    rotate.add_argument("--work-dir", type=Path, help="parent outside the repository for a new private work directory")
+    rotate.add_argument("--keep-work-dir", action="store_true", help="keep the new work directory (its log)")
     values_json = sub.add_parser("values-json", help="print the values file as JSON into a pipe (never a terminal)")
     values_json.add_argument("--var-file", type=Path, required=True, help="values file outside the repository")
     plan = sub.add_parser("plan", help="init + plan against the remote state; print the redacted summary only")
     plan.add_argument("--environment", default="production", choices=ENVIRONMENTS)
     plan.add_argument("--var-file", type=Path, help=f"values file outside the repository (default: ${VALUES_ENV})")
-    plan.add_argument("--work-dir", type=Path, help="private work directory outside the repository (default: a new temp dir)")
-    plan.add_argument("--keep-work-dir", action="store_true", help="keep the work directory (its log) for local debugging")
+    plan.add_argument("--work-dir", type=Path, help="parent outside the repository for a new private work directory "
+                      "(default: the temp directory); only that new directory is ever removed")
+    plan.add_argument("--keep-work-dir", action="store_true", help="keep the new work directory (its log) for local debugging")
     args = parser.parse_args(argv)
     env = dict(os.environ)
     try:

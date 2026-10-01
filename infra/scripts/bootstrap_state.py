@@ -21,7 +21,8 @@ Steps (each prints one fixed line; no value, token, key or id is ever printed):
 8. Plan again: it must say "No changes" (exit 0, every resource no-op).
 
 Re-running is safe: when the remote state already holds every object, step 6 is skipped. tofu's own output goes
-to a 0600 log in the work directory (outside the repository, kept for local debugging; plan files are deleted).
+to a 0600 log in a new private work directory under ~/.cache/todofy-infra (outside the repository, kept for local
+debugging; plan files are deleted; an existing directory is never reused, chmodded or removed).
 Exit codes: 0 done; 1 error; 4 the plan held something other than imports (nothing was applied).
 """
 
@@ -163,7 +164,9 @@ def bootstrap(args: argparse.Namespace, env: dict[str, str], admin=None) -> int:
     except (OSError, ValueError):
         raise Refused("the admin helper's token file is unavailable (owner-only file, chmod 600)") from None
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-    work = infra_state.outside_repo(args.work_dir or Path.home() / ".cache" / "todofy-infra" / f"bootstrap-{stamp}")
+    # A new private directory under the parent (never an existing one): it keeps only tofu's log afterwards.
+    work = infra_state.new_work_dir(args.work_dir or Path.home() / ".cache" / "todofy-infra", env,
+                                    prefix=f"bootstrap-{stamp}-")
     session = infra_state.Session(environment=args.environment, values=values, work=work, env=env,
                                   s3_endpoint=args.s3_endpoint)
     print(f"work directory (log only, outside the repository): {work}")
@@ -222,7 +225,8 @@ def main(argv: Optional[list[str]] = None) -> int:
     parser.add_argument("--passphrase-file", type=Path, help="owner-only file holding the passphrase "
                         f"(default: ${infra_state.PASSPHRASE_ENV} or ${infra_state.PASSPHRASE_VAR})")
     parser.add_argument("--token-file", type=Path, help="the admin helper's token file (default: its DEFAULT_TOKEN)")
-    parser.add_argument("--work-dir", type=Path, help="private work directory outside the repository")
+    parser.add_argument("--work-dir", type=Path, help="parent outside the repository for the new private work "
+                        "directory (default: ~/.cache/todofy-infra)")
     parser.add_argument("--expect", type=int, default=EXPECTED_OBJECTS, help="number of managed objects (default 13)")
     parser.add_argument("--skip-lock-probe", action="store_true", help="do not probe conditional writes")
     # Tests only: an S3 stand-in instead of R2. The bucket is never created there.

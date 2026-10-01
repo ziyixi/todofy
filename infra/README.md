@@ -153,8 +153,10 @@ All values come from a tfvars file **outside the repository** (locally) or from 
 
 In CI the five values above come from **one** production-environment secret, `INFRA_TFVARS`: the JSON
 object that [`scripts/infra_state.py`](scripts/infra_state.py) `values-json` makes from the local values
-file. The email lists therefore reach OpenTofu only as the sensitive variables, and the identity provider
-ids and the account id are masked in the log like any secret.
+file. The email lists therefore reach OpenTofu only as the sensitive variables. GitHub masks a secret
+only as its whole string, never the values inside a JSON secret, so on a runner `infra_state.py`
+registers **every value inside it** (account id, identity provider ids, both email lists) with
+`::add-mask::` before anything else runs; any later log line that held one would show `***`.
 
 The existing secrets `DASHBOARD_ACCESS_OWNER` / `DASHBOARD_ACCESS_OWNER_ALIASES` were considered and
 **not** used, because they cannot reproduce the policies and would couple two different things:
@@ -205,7 +207,7 @@ redacted summary may be shared ([`tools/infra-plan-summary`](../tools/infra-plan
 | Backend | `backend "s3"` in [`versions.tf`](versions.tf) with a **partial** configuration. Committed: bucket, `region = "auto"`, `use_path_style`, the `skip_*` checks R2 needs. Passed at runtime by `infra_state.py` and never committed: the key (`-backend-config=key=...`), the endpoint (`AWS_ENDPOINT_URL_S3=https://<account id>.r2.cloudflarestorage.com`, it contains the account id) and the credentials (`AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY`) |
 | Encryption | OpenTofu client-side encryption of **state and plans**: `key_provider "pbkdf2"` from `var.state_passphrase` (at least 16 characters, no default) and `method "aes_gcm"`, both `enforced = true`, **no `fallback`**. Every command that reads or writes state or a plan fails without the passphrase; nothing is ever read or written unencrypted. R2 sees only `meta` (key provider name and salt) and `encrypted_data`. `infra_state.py` refuses to start without the passphrase and strips `TF_ENCRYPTION` (which could add a fallback behind the committed file), `TF_LOG*`, `TF_CLI_ARGS*`, other `TF_VAR_*` and every `AWS_*` from tofu's environment |
 | Passphrase | GitHub production secret **`INFRA_STATE_PASSPHRASE`**; tofu gets it as `TF_VAR_state_passphrase`. Generated locally by whoever runs the bootstrap, who keeps a copy in the owner's password manager. GitHub cannot show it again: without that copy the state can be decrypted only inside CI, and a lost passphrase means rebuilding the state by import ([Rotating the passphrase](#rotating-the-passphrase)) |
-| Credentials | Derived from the Cloudflare API token at runtime: access key id = the token's id (`GET /accounts/<account>/tokens/verify`, or `/user/tokens/verify` for a user token), secret access key = SHA-256 of the token value. Under GitHub Actions both are masked (`::add-mask::`) before tofu starts; they are never printed, written to a file or put on a command line. Verified on 2026-10-01 read-only with the current token: the account verify endpoint returns the id, and the derived pair gets HTTP 200 for `HEAD` of an existing monorepo bucket and 403 with a wrong secret |
+| Credentials | Derived from the Cloudflare API token at runtime: access key id = the token's id (`GET /accounts/<account>/tokens/verify`, or `/user/tokens/verify` for a user token), secret access key = SHA-256 of the token value. Under GitHub Actions both are masked (`::add-mask::`) before tofu starts; they are never printed, written to a file or put on a command line. Derivation verified read-only on 2026-10-01 (a wrong secret is refused) |
 | Credentials fallback | If a future token cannot be used this way (no R2 permission, or Cloudflare stops deriving), create an R2 API token for the `infra-state` bucket only (Object Read & Write) in the dashboard and store its pair as production secrets `INFRA_R2_ACCESS_KEY_ID` / `INFRA_R2_SECRET_ACCESS_KEY`, and pass them to the plan step in `infra.yml`. `infra_state.py` uses that pair instead of deriving whenever both are set (and refuses only one of them) |
 | Locking | **No lock file.** `use_lockfile` needs R2 to honour `If-None-Match: *` on this bucket, which is not proven yet. Until then the GitHub concurrency group `infra-production` serialises every run in CI. The drift plan never writes the state anyway; only the bootstrap (local, once) and P4's apply do. The bootstrap probes conditional writes and reports the result; enable `use_lockfile` in a separate change only after the probe passes on R2 |
 | Contents | The 13 objects' attributes as read from the API, including the policies' include emails and the account id: that is why the state is encrypted and never printed. It holds no credential: no service token, tunnel or secret is managed here |
@@ -226,8 +228,10 @@ python3 infra/scripts/infra_state.py plan --var-file ~/.config/todofy-infra/loca
 ```
 
 It prints the redacted summary and exits 0 (no changes), 2 (drift), 3 (a delete, replace or forget) or 1
-(an error, with sanitised `Error:` headlines only). `--keep-work-dir --work-dir <dir outside the repo>`
-keeps tofu's raw log (0600) for debugging; the values file and the plan in it are deleted either way.
+(an error, with sanitised `Error:` headlines only). Every run works in a **new** private (0700) directory
+that it creates itself; `--work-dir <dir outside the repo>` only chooses that directory's parent, which is
+never chmodded, emptied or removed. `--keep-work-dir` keeps the run's own directory (tofu's raw 0600 log)
+for debugging; the values file and the plan in it are deleted either way.
 `--keys-from` handling, the `for_each` key placeholders and the summary format are those of
 [`tools/infra-plan-summary`](../tools/infra-plan-summary/summary.py).
 
@@ -273,8 +277,10 @@ python3 infra/scripts/infra_state.py values-json --var-file ~/.config/todofy-inf
   | gh secret set INFRA_TFVARS --env production -R ziyixi/todofy
 ```
 
-The admin helper's token file holds the same token as the GitHub secret `CF_API_TOKEN`. The work directory (`~/.cache/todofy-infra/bootstrap-<time>`) keeps
-only tofu's raw log; delete it when done.
+The admin helper's token file holds the same token as the GitHub secret `CF_API_TOKEN`. The bootstrap
+creates a new private work directory `~/.cache/todofy-infra/bootstrap-<time>-<random>` (`--work-dir`
+picks another parent; an existing directory is never reused, chmodded or removed). It keeps only tofu's
+raw log; delete it when done.
 
 ## Drift plan (CI)
 
@@ -429,9 +435,8 @@ never printed) and the same `0600` values file. R2 itself was only read; the buc
 exist yet, so the backend ran against a local S3 stand-in (an in-memory HTTP server for one bucket). The
 Cloudflare side was real throughout, and the import apply wrote only to the stand-in.
 
-1. Credential derivation, read-only on R2: the account verify endpoint returned the token's id (the user
-   endpoint answers 401 for this account-owned token); the derived pair got HTTP 200 for `HEAD` of
-   `mail-hero-backups`, 404 for `infra-state` (missing) and 403 with a wrong secret.
+1. Credential derivation, read-only on R2: the verify endpoint returned the token's id, the derived pair
+   was accepted, `infra-state` was reported missing, and a wrong secret was refused.
 2. `bootstrap_state.py` against the stand-in: import plan `import: 13` and nothing else, apply, the state
    object encrypted (`meta` + `encrypted_data`, none of the values file's values or the account id in
    it), final plan "No changes" (`no-op: 13`). The conditional-write probe passed **on the stand-in
@@ -475,9 +480,10 @@ Cloudflare token, no state and no plan. Steps:
   ([`tests/test_infra_state.py`](tests/test_infra_state.py)): a fake `tofu` on `PATH` prints sentinel
   values and serves plan fixtures, and the tests prove that only counts and addresses reach the output,
   that the passphrase is required before anything runs (no unencrypted fallback), that the bootstrap
-  refuses every plan but an import-only one before any apply, that the derived credentials are masked on
-  a runner and never printed, that `TF_ENCRYPTION`, `TF_LOG*` and the other overrides never reach tofu,
-  and that the rotation uses the old key only as a decrypt fallback.
+  refuses every plan but an import-only one before any apply, that the derived credentials and every value
+  inside `INFRA_TFVARS` are masked on a runner and never printed, that `TF_ENCRYPTION`, `TF_LOG*` and the
+  other overrides never reach tofu, that the rotation uses the old key only as a decrypt fallback, and
+  that a `--work-dir` parent (its files and mode) survives every run, refused or not.
 
 The drift plan itself is a separate workflow ([Drift plan](#drift-plan-ci)); `Infra checks` still uses no
 token and no state.
