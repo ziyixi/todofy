@@ -12,7 +12,10 @@ const generated = header + astToString(await openapiTS(source))
 if (process.argv.includes('--check')) {
   const committed = await readFile(target, 'utf8').catch(() => '')
   if (committed !== generated) {
-    console.error('src/api/schema.d.ts is out of date with api/owner-api-v1.openapi.yaml; run `npm run gen:api`.')
+    console.error(
+      'src/api/schema.d.ts is out of date with api/owner-api-v1.openapi.yaml or a schema it $refs ' +
+        '(api/*-v1.schema.json, generated from proto/todofy/report/v1); run `npm run gen:api`.',
+    )
     process.exit(1)
   }
   console.log('src/api/schema.d.ts matches the OpenAPI contract.')

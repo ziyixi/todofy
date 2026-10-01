@@ -305,7 +305,8 @@ Local runtime quirks (not production behaviour)
   `ok`/`empty_window`; otherwise the coordinator computes one within 40 s, and anything but a usable
   report is 503 (the newsletter reads only the HTTP status, so an old or empty-by-failure report is never
   a 200). Responses must validate against `api/summary-v1` / `recommendation-v1`, which are generated from
-  `proto/todofy/report/v1/report.proto` (`cd proto && npm run schema`; never edited by hand):
+  `proto/todofy/report/v1/report.proto` (`cd proto && npm run schema`, then `cd todofy/web && npm run gen:api`,
+  because the UI's `src/api/schema.d.ts` copies the schemas' descriptions; never edited by hand):
   `core/report_schema.py` builds every report as a generated message written by the wire codec, which refuses one
   that breaks a rule, and `tests/unit/test_report_wire.py` pins the bytes of synthetic reports
   (`golden/reports-v1.json`, written before the move onto the IDL).

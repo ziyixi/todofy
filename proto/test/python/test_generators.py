@@ -6,9 +6,14 @@ gives every fixture the reference validator's verdict on it, and Todofy's tests 
 todofy/api/*.schema.json.
 """
 
+import contextlib
+import io
 import json
 import sys
+import tempfile
 import unittest
+import unittest.mock
+from pathlib import Path
 
 from proto_test_support import PROTO
 
@@ -160,6 +165,29 @@ class SchemaTest(unittest.TestCase):
 
     def tearDown(self) -> None:
         gen_schema.SCHEMAS, gen_schema.ALIASES = self.saved
+
+    def test_a_changed_schema_names_what_must_be_regenerated_after_it(self) -> None:
+        image = json.dumps({"file": [union_file()]})
+
+        def run(*args: str) -> tuple[int, str]:
+            err = io.StringIO()
+            with contextlib.redirect_stderr(err), unittest.mock.patch.object(sys, "stdin", io.StringIO(image)):
+                code = gen_schema.main(["gen_schema.py", *args])
+            return code, err.getvalue()
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = str(Path(tmp) / "x.json")
+            gen_schema.SCHEMAS = (
+                gen_schema.Target("ops.v1", path, "https://contracts.local/x.json", "T", "D", then="cd ui && make"),
+            )
+            gen_schema.ALIASES = {}
+            code, err = run("--check")
+            self.assertEqual(code, 1)
+            self.assertIn("then regenerate what copies the changed schemas: cd ui && make", err)
+            self.assertEqual(run(), (0, "gen_schema: then regenerate what copies the changed schemas: cd ui && make\n"))
+            # Nothing changed: nothing to say, and the file is not rewritten.
+            self.assertEqual(run(), (0, ""))
+            self.assertEqual(run("--check"), (0, ""))
 
     def test_an_earlier_defs_name_is_an_alias_of_what_the_idl_generates(self) -> None:
         old = self.schema["$defs"]["Old"]

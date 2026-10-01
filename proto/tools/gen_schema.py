@@ -24,7 +24,9 @@ leniently (the codecs' lenient read). A format's ``json_schema_format`` is writt
 bound, a whole message's size) are in the contract's README, not here. Characters Python does not print (a pattern's
 control characters and Unicode spaces) are written as ``\\u`` escapes, so the committed file shows them.
 
-SCHEMAS lists the committed schemas. Only keywords contracts/ops-v1/validate.mjs implements are written, so a
+SCHEMAS lists the committed schemas, each with what must be regenerated after it changes (``Target.then``: Todofy's
+reports are copied into its UI's types by openapi-typescript), which a write that changes the file and a check that
+finds it stale print. Only keywords contracts/ops-v1/validate.mjs implements are written, so a
 TypeScript test may still check a document with it.
 """
 
@@ -55,8 +57,14 @@ class Target:
     description: str = ""
     # A message of the package: the schema is that message, self-contained. Empty: the package's $defs document.
     root: str = ""
+    # What else must be regenerated when the schema changes (a generator that copies it), as a command to run from
+    # the repository root; printed by a write that changes the file and by a check that finds it stale.
+    then: str = ""
 
 
+# Todofy's UI types (todofy/web/src/api/schema.d.ts, openapi-typescript) copy the reports' descriptions and formats
+# through the owner API's OpenAPI document.
+TODOFY_UI_TYPES = "cd todofy/web && npm run gen:api"
 SCHEMAS = (
     Target(
         "ops.v1",
@@ -75,6 +83,7 @@ SCHEMAS = (
         "https://todofy.local/schema/summary-v1.schema.json",
         "Todofy GET /api/summary response",
         root="SummaryReport",
+        then=TODOFY_UI_TYPES,
     ),
     Target(
         "todofy.report.v1",
@@ -82,6 +91,7 @@ SCHEMAS = (
         "https://todofy.local/schema/recommendation-v1.schema.json",
         "Todofy GET /api/recommendation response",
         root="RecommendationReport",
+        then=TODOFY_UI_TYPES,
     ),
 )
 SELF_CONTAINED = (
@@ -388,15 +398,22 @@ def main(argv: list[str]) -> int:
     except (GenerateError, wire_rules.RuleError) as error:
         print(f"gen_schema: {error}", file=sys.stderr)
         return 1
-    stale = []
-    for path, text in schemas.items():
+    stale, then = [], []
+    for target_schema in SCHEMAS:
+        path, text = target_schema.path, schemas[target_schema.path]
         target = (PROTO / path).resolve()
+        changed = not target.exists() or target.read_text(encoding="utf-8") != text
+        if changed and target_schema.then and target_schema.then not in then:
+            then.append(target_schema.then)
         if check:
-            if not target.exists() or target.read_text(encoding="utf-8") != text:
+            if changed:
                 stale.append(path)
             continue
-        with open(target, "w", encoding="utf-8", newline="\n") as handle:
-            handle.write(text)
+        if changed:
+            with open(target, "w", encoding="utf-8", newline="\n") as handle:
+                handle.write(text)
+    if then:
+        print(f"gen_schema: then regenerate what copies the changed schemas: {'; '.join(then)}", file=sys.stderr)
     if stale:
         print(
             f"gen_schema: not generated from the IDL (run npm run schema in proto/): {', '.join(stale)}",
