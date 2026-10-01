@@ -1,8 +1,10 @@
 /**
  * The noise pipeline in workerd (../../../docs/design.md §5), stage by stage, against synthetic sites: every fetch tier
  * that v1 has, the short-circuits, the health gate (BROKEN after 3, the digest event once, the auto-pause after 14
- * days), GBK pages that name their charset only in a meta tag, the masks (relative times in English and Chinese),
- * every typed trigger, the confirmation fetch, flicker, a third version, and shadow mode.
+ * days), GBK pages that name their charset only in a meta tag, UTF-16 pages, an omitted </head>, the masks (relative
+ * times in English and Chinese), ignored lines (and a change pending meanwhile), every typed trigger, the confirmation
+ * fetch, flicker, a third version, the confirmation window, a check that throws, the bounds of the changes table, and
+ * shadow mode.
  */
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { Change_State, Change_SuppressionReason, Change_TriggerKind, DiffLine_Kind } from '@ziyixi/proto/watch/ui/v1/change_pb';
@@ -259,7 +261,7 @@ describe('stage 3: masks', () => {
     expect((await changes('masks'))[0]?.diffLines.map((line) => line.text)).toEqual(['Price ¥1,299 on 2026-10-01', 'Price ¥1,199 on 2026-10-01']);
   });
 
-  it('ignored lines are dropped (the drawer\'s "ignore this line"), and the undo brings them back', async () => {
+  it('ignored lines are dropped from both sides of every comparison (the drawer\'s "ignore this line"); the undo brings them back', async () => {
     const url = 'https://ignore.example.com/p';
     h.sites.html(url, page('P', '<p>Visitors today: 120</p><p>The article text stays the same.</p>'));
     await watchOf('ignore', { uri: url, stability: { skipConfirmation: true } });
@@ -267,15 +269,167 @@ describe('stage 3: masks', () => {
     await later();
     const [first] = await changes('ignore');
     expect(first?.state).toBe(Change_State.CONFIRMED);
+    const notified = (await watchRow(h, 'ignore'))['baseline_id'];
     const watch = await h.api.getWatch({ name: 'watches/ignore' });
-    await h.api.updateWatch({ watch: { name: watch.name, etag: watch.etag, normalize: { ignoredLines: ['Visitors today: 122'] } }, updateMask: { paths: ['normalize.ignored_lines'] }, requestId: op() });
+    const ignoredLines = ['Visitors today: 121', 'Visitors today: 122'];
+    await h.api.updateWatch({ watch: { name: watch.name, etag: watch.etag, normalize: { ignoredLines } }, updateMask: { paths: ['normalize.ignored_lines'] }, requestId: op() });
     h.sites.html(url, page('P', '<p>Visitors today: 122</p><p>The article text stays the same.</p>'));
     await later();
-    // Changing what is read sets a new notified state; the ignored line is gone from it.
+    // Ignoring is not a change of what is read: the notified state stays, and 121 -> 122 is no change.
     expect(await changes('ignore')).toHaveLength(1);
+    expect((await watchRow(h, 'ignore'))['baseline_id']).toBe(notified);
+    await h.clock(clock + 15 * MINUTE);
     const preview = await h.api.previewWatch({ watch: { ...(await h.api.getWatch({ name: 'watches/ignore' })) } });
     expect(preview.ignoredLineCount).toBe(1);
     expect(preview.normalizedLines).not.toContain('Visitors today: 122');
+    // The undo: the line counts again, against the same notified state (121), and never as a change of its own.
+    const ignoring = await h.api.getWatch({ name: 'watches/ignore' });
+    await h.api.updateWatch({ watch: { name: ignoring.name, etag: ignoring.etag, normalize: { ignoredLines: [] } }, updateMask: { paths: ['normalize.ignored_lines'] }, requestId: op() });
+    await later();
+    const [undone] = await changes('ignore');
+    expect(undone?.diffLines.map((line) => line.text)).toEqual(['Visitors today: 121', 'Visitors today: 122']);
+  });
+});
+
+describe('ignoring a line while a real change is pending', () => {
+  const body = (price: string, visitors: string) =>
+    page('P', `<p>The price of the synthetic item is ${price} yuan.</p><p>Visitors ${visitors}</p><p>Another stable line of synthetic text.</p>`);
+
+  /** A watch whose visitor counter changed alone (suppressed), then whose price changed too (pending). */
+  async function pendingWithNoise(id: string, url: string): Promise<void> {
+    h.sites.html(url, body('100', '1'));
+    await watchOf(id, { uri: url, trigger: { anyChange: { minChangedLines: 3 } } });
+    h.sites.html(url, body('100', '2'));
+    await later();
+    h.sites.html(url, body('80', '3'));
+    await later();
+    expect(await changes(id, 'state = PENDING_CONFIRMATION')).toHaveLength(1);
+  }
+
+  async function setIgnored(id: string, lines: string[]): Promise<void> {
+    const watch = await h.api.getWatch({ name: `watches/${id}` });
+    await h.api.updateWatch({ watch: { name: watch.name, etag: watch.etag, normalize: { ignoredLines: lines } }, updateMask: { paths: ['normalize.ignored_lines', 'etag'] }, requestId: op() });
+  }
+
+  it('keeps the pending change and confirms it at the confirmation fetch', async () => {
+    const url = 'https://ignore2.example.com/p';
+    await pendingWithNoise('ign', url);
+    // Before the confirmation fetch, the owner ignores the counter line from the drawer (the UI's own call).
+    await setIgnored('ign', ['Visitors 2']);
+    expect(await changes('ign', 'state = PENDING_CONFIRMATION')).toHaveLength(1);
+    clock += 20 * MINUTE;
+    await h.clock(clock);
+    await h.run(clock);
+    const [confirmed] = await changes('ign', 'state = NEW');
+    expect(confirmed?.diffLines.map((line) => line.text)).toEqual(expect.arrayContaining(['The price of the synthetic item is 100 yuan.', 'The price of the synthetic item is 80 yuan.']));
+  });
+
+  it('taking the ignore back keeps it too', async () => {
+    const url = 'https://ignore3.example.com/p';
+    h.sites.html(url, body('100', '1'));
+    await watchOf('undo', { uri: url, trigger: { anyChange: { minChangedLines: 3 } }, normalize: { ignoredLines: ['Visitors 9'] } });
+    h.sites.html(url, body('80', '3'));
+    await later();
+    expect(await changes('undo', 'state = PENDING_CONFIRMATION')).toHaveLength(1);
+    await setIgnored('undo', []);
+    clock += 20 * MINUTE;
+    await h.clock(clock);
+    await h.run(clock);
+    expect(await changes('undo', 'state = NEW')).toHaveLength(1);
+  });
+
+  it('ignoring the very line that made the change re-evaluates it: what no longer fires is suppressed with its reason, never lost silently', async () => {
+    const url = 'https://ignore4.example.com/p';
+    h.sites.html(url, page('P', '<p>Visitors 1</p><p>The article text stays the same, a long synthetic line.</p>'));
+    await watchOf('only', { uri: url });
+    h.sites.html(url, page('P', '<p>Visitors 2</p><p>The article text stays the same, a long synthetic line.</p>'));
+    await later();
+    expect(await changes('only', 'state = PENDING_CONFIRMATION')).toHaveLength(1);
+    await setIgnored('only', ['Visitors 1', 'Visitors 2']);
+    clock += 20 * MINUTE;
+    await h.clock(clock);
+    await h.run(clock);
+    const [resolved] = await changes('only');
+    expect(resolved?.state).toBe(Change_State.SUPPRESSED);
+    expect(resolved?.suppressionReason).toBe(Change_SuppressionReason.BELOW_THRESHOLD);
+  });
+
+  it('a change of what is read confirms the pending change as it was seen, with a note, before the new notified state', async () => {
+    const url = 'https://ignore5.example.com/p';
+    await pendingWithNoise('reread', url);
+    const watch = await h.api.getWatch({ name: 'watches/reread' });
+    await h.api.updateWatch({ watch: { name: watch.name, etag: watch.etag, normalize: { maskNumbers: true } }, updateMask: { paths: ['normalize.mask_numbers', 'etag'] }, requestId: op() });
+    clock += 20 * MINUTE;
+    await h.clock(clock);
+    await h.run(clock);
+    const [confirmed] = await changes('reread', 'state = NEW');
+    expect(confirmed?.summary).toContain('设置已更改');
+    expect((await watchRow(h, 'reread'))['pending_change']).toBeNull();
+  });
+});
+
+describe('pages that are hard to read', () => {
+  it('a UTF-16 page (with a BOM, or named by the header) decodes; a meta that says utf-16 is read as UTF-8', async () => {
+    const utf16 = (text: string, bom: boolean) => {
+      const units = Array.from(`${bom ? '﻿' : ''}${text}`, (char) => char.charCodeAt(0));
+      return new Uint8Array(units.flatMap((unit) => [unit & 0xff, unit >> 8]));
+    };
+    const html = '<!doctype html><html><body><p>公告：本店营业时间为每天上午九点到下午六点，周末与节假日休息。</p></body></html>';
+    h.sites.set('https://utf16.example.com/bom', { headers: { 'content-type': 'text/html' }, body: utf16(html, true) });
+    h.sites.set('https://utf16.example.com/header', { headers: { 'content-type': 'text/html; charset=utf-16le' }, body: utf16(html, false) });
+    h.sites.html('https://utf16.example.com/meta', '<!doctype html><html><head><meta charset="utf-16"></head><body><p>公告：本店营业时间为每天上午九点到下午六点，周末与节假日休息。</p></body></html>');
+    clock += DAY;
+    await h.clock(clock);
+    for (const path of ['bom', 'header', 'meta']) await h.api.createWatch({ watchId: `u16-${path}`, requestId: op(), watch: { displayName: path, uri: `https://utf16.example.com/${path}` } });
+    await h.run(clock);
+    for (const path of ['bom', 'header', 'meta']) {
+      expect((await health(`u16-${path}`)).health?.lastFailure, path).toBe(FailureReason.UNSPECIFIED);
+    }
+    await h.clock(clock + 15 * MINUTE);
+    const preview = await h.api.previewWatch({ watch: { displayName: 'p', uri: 'https://utf16.example.com/bom' } });
+    expect(preview.normalizedLines).toEqual(['公告:本店营业时间为每天上午九点到下午六点,周末与节假日休息。']);
+  });
+
+  it('an omitted </head> (valid HTML; minifiers drop it) still reads the body, with or without <body>', async () => {
+    h.sites.html('https://nohead.example.com/a', '<!doctype html><html><head><meta charset="utf-8"><title>T</title><body><p>The opening hours are nine to six on weekdays.</p></body></html>');
+    h.sites.html('https://nohead.example.com/b', '<!doctype html><html><head><meta charset="utf-8"><title>T</title><script>var x = 1;</script><p>The opening hours are nine to six on weekdays.</p></html>');
+    clock += DAY;
+    await h.clock(clock);
+    for (const path of ['a', 'b']) await h.api.createWatch({ watchId: `nohead-${path}`, requestId: op(), watch: { displayName: path, uri: `https://nohead.example.com/${path}` } });
+    await h.run(clock);
+    // The second page was checked 30 s after the first (one host): previews wait for both URLs' 15 minutes.
+    await h.clock(clock + 16 * MINUTE);
+    for (const path of ['a', 'b']) {
+      expect((await health(`nohead-${path}`)).health?.lastFailure, path).toBe(FailureReason.UNSPECIFIED);
+      const preview = await h.api.previewWatch({ watch: { displayName: 'p', uri: `https://nohead.example.com/${path}` } });
+      expect(preview.normalizedLines, path).toEqual(['The opening hours are nine to six on weekdays.']);
+    }
+  });
+});
+
+describe('a check that throws after its fetch', () => {
+  it('is a failure of its own (INTERNAL_ERROR): it counts toward BROKEN and waits at least 15 minutes, with a growing delay', async () => {
+    const url = 'https://throws.example.com/p';
+    h.sites.html(url, page('P', '<p>The first synthetic text of a page that will break.</p>'));
+    await watchOf('throws', { uri: url });
+    // A state the code never leaves (its notified snapshot gone) makes every check throw after the fetch.
+    await h.sql('DELETE FROM snapshots WHERE watch_id = ?', 'throws');
+    h.sites.html(url, page('P', '<p>The second synthetic text of a page that will break.</p>'));
+    h.sites.clearRequests();
+    const start = clock + 8 * HOUR;
+    for (let t = start; t <= start + HOUR; t += MINUTE) await h.step(t);
+    expect(h.sites.requestsTo(url).length).toBeLessThanOrEqual(4);
+    const row = await watchRow(h, 'throws');
+    expect(row['last_failure']).toBe('INTERNAL_ERROR');
+    expect(Number(row['failures'])).toBeGreaterThanOrEqual(3);
+    expect(row['state']).toBe('broken');
+    expect(h.logs.some((line) => line.includes('"check_failed"') && line.includes('"baseline_missing"'))).toBe(true);
+    // The delay grows: the next day sees far fewer requests than one every 15 minutes.
+    h.sites.clearRequests();
+    for (let t = start + HOUR; t <= start + DAY; t += 10 * MINUTE) await h.step(t);
+    expect(h.sites.requestsTo(url).length).toBeLessThanOrEqual(8);
+    expect((await health('throws')).health?.lastFailure).toBe(FailureReason.INTERNAL_ERROR);
+    clock = start + DAY;
   });
 });
 
@@ -361,6 +515,8 @@ describe('stage 0: the health gate', () => {
     await later();
     // NFKC (stage 3) turns the full-width colon into ':'.
     expect((await changes('gbk'))[0]?.diffLines.map((line) => line.text)).toEqual(['公告:本店营业时间为九点到六点', '公告:本店营业时间为十点到六点']);
+    // The check fetched the page just now: the preview may fetch it again only 15 minutes later.
+    await h.clock(clock + 15 * MINUTE);
     const preview = await h.api.previewWatch({ watch: { displayName: 'gbk', uri: url } });
     expect(preview.fetch?.charset).toBe('gbk');
     expect(preview.fetch?.metaCharset).toBe(true);
@@ -466,6 +622,74 @@ describe('stage 6: the confirmation fetch', () => {
     }
     const [confirmed] = await changes('third', 'state = NEW');
     expect(confirmed?.diffLines.map((line) => line.text)).toEqual(['Draft revision number 1 of the synthetic notice.', 'Draft revision number 5 of the synthetic notice.']);
+  });
+});
+
+describe('the confirmation window', () => {
+  const A = page('P', '<p>The price of the synthetic item is 100 yuan today.</p>');
+  const B = page('P', '<p>The price of the synthetic item is 80 yuan today.</p>');
+
+  it('a confirmation that keeps failing returns to the regular pace after the window and confirms the change as it was seen', async () => {
+    const url = 'https://pend.example.com/p';
+    h.sites.html(url, A);
+    await watchOf('pend', { uri: url });
+    h.sites.html(url, B);
+    await later();
+    expect((await changes('pend'))[0]?.state).toBe(Change_State.PENDING_CONFIRMATION);
+    // The site errors for two days.
+    h.sites.set(url, { status: 500, body: 'oops' });
+    h.sites.clearRequests();
+    const start = clock;
+    for (let t = start + 10 * MINUTE; t <= start + 2 * DAY; t += 10 * MINUTE) {
+      clock = t;
+      await h.clock(t);
+      await h.run(t);
+    }
+    // A few confirmation tries within the window, then the 6-hour pace: about 8 a day, never one every 15 minutes.
+    expect(h.sites.requestsTo(url).length).toBeLessThanOrEqual(4 + 2 * 5);
+    const [decided] = await changes('pend');
+    expect(decided?.state).toBe(Change_State.CONFIRMED);
+    expect(decided?.summary).toContain('按所见确认');
+    // The page back at A days later is a change of its own against B (now the notified state), never a flicker.
+    h.sites.html(url, A);
+    await later(24);
+    const all = await changes('pend');
+    expect(all.some((change) => change.suppressionReason === Change_SuppressionReason.FLICKER)).toBe(false);
+  });
+
+  it('A -> B -> A after the window (the confirmation was held back) is a confirmed, reverted change, never a flicker', async () => {
+    const url = 'https://late.example.com/p';
+    h.sites.html(url, A);
+    await watchOf('late', { uri: url });
+    h.sites.html(url, B);
+    await later();
+    // The host backs off for a day (a 429 elsewhere on it): the confirmation fetch waits, the check does not fail.
+    const [host] = await h.sql<{ host: string }>('SELECT host FROM hosts WHERE host = ?', 'late.example.com');
+    expect(host).toBeDefined();
+    await h.sql('UPDATE hosts SET backoff_until = ? WHERE host = ?', clock + DAY, 'late.example.com');
+    h.sites.html(url, A);
+    await later(25);
+    const [change] = await changes('late');
+    expect(change?.state).toBe(Change_State.CONFIRMED);
+    expect(change?.reverted).toBe(true);
+    expect(change?.suppressionReason).not.toBe(Change_SuppressionReason.FLICKER);
+  });
+});
+
+describe('the bounds of the changes table', () => {
+  it('confirmed changes that are never acknowledged stay bounded (the oldest go, the newest 50 stay)', async () => {
+    const url = 'https://bound.example.org/feed.xml';
+    const items = (n: number) => Array.from({ length: 3 }, (_, i) => ({ guid: `urn:x:${String(n - i)}`, title: `Synthetic headline ${String(n - i)}`, link: `https://bound.example.org/${String(n - i)}` }));
+    h.sites.set(url, { headers: { 'content-type': 'application/rss+xml' }, body: rss(items(3)) });
+    await watchOf('bound', { uri: url, source: { feed: {} }, trigger: { newItem: {} }, checkIntervalMinutes: 60 });
+    for (let n = 4; n < 4 + 215; n++) {
+      h.sites.set(url, { headers: { 'content-type': 'application/rss+xml' }, body: rss(items(n)) });
+      await later(2);
+    }
+    const [count] = await h.sql<{ n: number }>('SELECT count(*) AS n FROM changes WHERE watch_id = ?', 'bound');
+    expect(count?.n).toBe(200);
+    const [newest] = await changes('bound');
+    expect(newest?.diffLines.some((line) => line.text.includes('Synthetic headline 218'))).toBe(true);
   });
 });
 

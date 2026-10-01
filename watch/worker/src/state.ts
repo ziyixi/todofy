@@ -9,7 +9,9 @@
  * one), and writes that need a check soon bring it forward.
  *
  * Tests and local development: with DEV_MANUAL_ALARMS=true the object never arms an alarm and reads a clock the tests
- * set (`setClock`); the workerd suite calls `step(now)` through the binding (never reachable over HTTP).
+ * set (`setClock`). A pass of `step(now)` reads its own clock, starting at `now`; a `setClock` during the pass moves
+ * it too (a test's fake site may, while a request is out). The workerd suite calls `step(now)`, `sqlForTests` and
+ * `takeRowMeter` through the binding (never reachable over HTTP).
  */
 import { DurableObject } from 'cloudflare:workers';
 import { HttpTranscoder } from '@ziyixi/proto/http-transcoder';
@@ -24,7 +26,8 @@ import { ALARM_ERROR_RETRY_MS, FETCH_MAX_BYTES, FETCH_TIMEOUT_MS, MAX_BODY_BYTES
 import { PreviewCache, preview } from './preview.ts';
 import { API_DOMAIN, localize, REASONS } from './reasons.ts';
 import { errorCode, runAlarm, type AlarmResult } from './scheduler.ts';
-import { Store } from './store.ts';
+import { HostLocks } from './host-locks.ts';
+import { Store, type RowMeter } from './store.ts';
 import { RpcError } from '@ziyixi/proto/rpc-status';
 
 
@@ -47,8 +50,12 @@ const api = new HttpTranscoder(WatchUiService, handlers, {
 export class WatchState extends DurableObject<Env> {
   private readonly store: Store;
   private readonly cache: PreviewCache;
+  /** One request at a time per host, for the alarm and the owner API alike. */
+  private readonly hosts = new HostLocks();
   private chain: Promise<unknown> = Promise.resolve();
   private testClock: number | null = null;
+  /** The clock of the scheduler pass in progress under DEV_MANUAL_ALARMS (null between passes). */
+  private passClock: number | null = null;
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
@@ -107,6 +114,7 @@ export class WatchState extends DurableObject<Env> {
   async step(now: number): Promise<AlarmResult | { next: number; error: string }> {
     const run = this.chain.then(async () => {
       let result: AlarmResult | { next: number; error: string };
+      if (this.manual()) this.passClock = now;
       try {
         result = await runAlarm(
           {
@@ -114,6 +122,8 @@ export class WatchState extends DurableObject<Env> {
             fetch: this.fetchFn(),
             browser: this.browser(),
             timeoutMs: this.timeoutMs(),
+            now: () => (this.manual() ? (this.passClock ?? now) : Date.now()),
+            hosts: this.hosts,
             transact: this.transact,
             judge: NO_JUDGE,
             sink: null,
@@ -131,6 +141,7 @@ export class WatchState extends DurableObject<Env> {
         console.log(JSON.stringify({ event: 'alarm_failed', code }));
         result = { next: now + ALARM_ERROR_RETRY_MS, error: code };
       }
+      this.passClock = null;
       if (!this.manual()) await this.ctx.storage.setAlarm(Math.max(result.next, Date.now() + WAKE_MS));
       return result;
     });
@@ -140,7 +151,9 @@ export class WatchState extends DurableObject<Env> {
 
   /** Test hook: the clock API calls read (DEV_MANUAL_ALARMS only). */
   setClock(now: number): void {
-    if (this.manual()) this.testClock = now;
+    if (!this.manual()) return;
+    this.testClock = now;
+    if (this.passClock !== null) this.passClock = now;
   }
 
   /** The armed alarm's time, or null (tests and the status view). */
@@ -148,10 +161,20 @@ export class WatchState extends DurableObject<Env> {
     return this.ctx.storage.getAlarm();
   }
 
-  /** Test hook: one SQL query's rows (DEV_MANUAL_ALARMS only; never reachable over HTTP). */
+  /** Test hook: one SQL query's rows (DEV_MANUAL_ALARMS only; never reachable over HTTP). Not metered. */
   sqlForTests(query: string, ...params: (string | number | null)[]): Record<string, SqlStorageValue>[] {
     if (!this.manual()) throw new Error('not_available');
-    return this.store.all(query, ...params);
+    const meter = this.store.takeMeter();
+    const rows = this.store.all(query, ...params);
+    this.store.takeMeter();
+    this.store.addMeter(meter);
+    return rows;
+  }
+
+  /** Test hook: the rows read and written since the last call (DEV_MANUAL_ALARMS only). */
+  takeRowMeter(): RowMeter {
+    if (!this.manual()) throw new Error('not_available');
+    return this.store.takeMeter();
   }
 
   // ---- the owner API ------------------------------------------------------------------------------------------------
@@ -176,6 +199,7 @@ export class WatchState extends DurableObject<Env> {
             browser: this.browser(),
             timeoutMs: this.timeoutMs(),
             now: () => this.now(),
+            hosts: this.hosts,
             sleep: (ms) => this.sleep(ms),
           },
           this.cache,

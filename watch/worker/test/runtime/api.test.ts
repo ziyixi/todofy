@@ -116,6 +116,19 @@ describe('watches', () => {
     expect(error instanceof RpcStatusError && readDetail(error.status, WatchSchema)?.name).toBe('watches/alpha');
   });
 
+  it('CreateWatch without watch_id, repeated with the same request_id (a retry after a lost response), answers the first watch', async () => {
+    const requestId = op();
+    const watch = { displayName: 'Retry', uri: 'https://retry.example.com/p' };
+    const first = await h.api.createWatch({ watch, requestId });
+    const replay = await h.api.createWatch({ watch, requestId });
+    expect(replay.name).toBe(first.name);
+    expect(replay.etag).toBe(first.etag);
+    expect((await h.api.listWatches({})).watches.map((w) => w.name)).toEqual([first.name]);
+    // The same request_id for an explicit watch_id is another request: BAD_REQUEST, nothing created.
+    expect(await reason(h.api.createWatch({ watchId: 'other', watch, requestId }))).toBe('BAD_REQUEST');
+    expect((await h.api.listWatches({})).watches).toHaveLength(1);
+  });
+
   it('CreateWatch: every value rule has its reason', async () => {
     const cases: [Record<string, unknown>, string, string?][] = [
       [{ displayName: '', uri: URL_A }, 'BAD_REQUEST'],

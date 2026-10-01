@@ -1,7 +1,8 @@
 /**
  * The fetch etiquette in workerd (../../../docs/design.md §4), observed from the synthetic sites' side: what each request
- * says about itself, robots.txt and its cache, the host's spacing and backoff, the page's own 15 minutes, redirects
- * checked hop by hop, the size and time limits, and an alarm's request budget.
+ * says about itself, robots.txt and its cache, the host's spacing and backoff, the page's own 15 minutes (previews
+ * included), one request at a time per host, redirects checked hop by hop with the target host's own robots.txt and
+ * backoff, the size and time limits, the time each check is stamped with, and an alarm's request budget.
  */
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { FailureReason, Watch_State } from '@ziyixi/proto/watch/ui/v1/watch_pb';
@@ -112,6 +113,214 @@ describe('robots.txt', () => {
   });
 });
 
+describe('robots.txt that is hard to read', () => {
+  it('behind a redirect to http it is still read (it is public), and its Disallow holds', async () => {
+    await at(clock + DAY);
+    h.sites.robots('https://legacy.example.net', { status: 301, headers: { location: 'http://legacy.example.net/robots.txt' } });
+    h.sites.set('http://legacy.example.net/robots.txt', { headers: { 'content-type': 'text/plain' }, body: 'User-agent: *\nDisallow: /\n' });
+    h.sites.html('https://legacy.example.net/p', body);
+    await create('legacy', { uri: 'https://legacy.example.net/p' });
+    await h.run(clock);
+    expect(h.sites.requestsTo('https://legacy.example.net/p')).toEqual([]);
+    expect(await failureOf('legacy')).toBe(FailureReason.ROBOTS_DISALLOWED);
+  });
+
+  it('behind a redirect our policy refuses (an IP literal) it reads as unreachable: everything disallowed, never "no robots.txt"', async () => {
+    await at(clock + DAY);
+    h.sites.robots('https://hidden.example.net', { status: 302, headers: { location: 'https://127.0.0.1/robots.txt' } });
+    h.sites.html('https://hidden.example.net/p', body);
+    await create('hidden', { uri: 'https://hidden.example.net/p' });
+    await h.run(clock);
+    expect(h.sites.requestsTo('https://hidden.example.net/p')).toEqual([]);
+    expect(h.sites.requests.filter((request) => request.url.includes('127.0.0.1'))).toEqual([]);
+    expect(await failureOf('hidden')).toBe(FailureReason.ROBOTS_DISALLOWED);
+  });
+
+  it('over 512 KiB it is read up to that size (RFC 9309 §2.5), not ignored', async () => {
+    await at(clock + DAY);
+    h.sites.robots('https://bigrobots.example.net', { headers: { 'content-type': 'text/plain' }, body: `User-agent: *\nDisallow: /p\n${'# padding\n'.repeat(60_000)}` });
+    h.sites.html('https://bigrobots.example.net/p', body);
+    await create('bigrobots', { uri: 'https://bigrobots.example.net/p' });
+    await h.run(clock);
+    expect(h.sites.requestsTo('https://bigrobots.example.net/p')).toEqual([]);
+    expect(await failureOf('bigrobots')).toBe(FailureReason.ROBOTS_DISALLOWED);
+  });
+});
+
+describe('redirect targets get the etiquette of the watched host', () => {
+  it('a cross-host redirect never fetches a path the target host disallows in robots.txt', async () => {
+    await at(clock + DAY);
+    h.sites.robots('https://target.example.net', { headers: { 'content-type': 'text/plain' }, body: 'User-agent: *\nDisallow: /\n' });
+    h.sites.html('https://target.example.net/private', body);
+    h.sites.set('https://short.example.com/x', { status: 302, headers: { location: 'https://target.example.net/private' } });
+    await create('via', { uri: 'https://short.example.com/x' });
+    await h.run(clock);
+    expect(h.sites.requestsTo('https://target.example.net/private')).toEqual([]);
+    expect(h.sites.requestsTo('https://target.example.net/robots.txt')).toHaveLength(1);
+    expect(await failureOf('via')).toBe(FailureReason.ROBOTS_DISALLOWED);
+  });
+
+  it('a same-host redirect never fetches a path robots.txt disallows', async () => {
+    await at(clock + DAY);
+    h.sites.robots('https://same.example.net', { headers: { 'content-type': 'text/plain' }, body: 'User-agent: *\nDisallow: /private\n' });
+    h.sites.set('https://same.example.net/open', { status: 302, headers: { location: '/private/page' } });
+    h.sites.html('https://same.example.net/private/page', body);
+    await create('same', { uri: 'https://same.example.net/open' });
+    await h.run(clock);
+    expect(h.sites.requestsTo('https://same.example.net/private/page')).toEqual([]);
+    expect(await failureOf('same')).toBe(FailureReason.ROBOTS_DISALLOWED);
+  });
+
+  it("a redirect does not reach a host that is backing off (its 429's Retry-After): the check waits, it does not fail", async () => {
+    await at(clock + DAY);
+    h.sites.set('https://busy.example.net/p', { status: 429, headers: { 'retry-after': '86400', 'content-type': 'text/plain' }, body: 'slow down' });
+    h.sites.set('https://hop.example.com/x', { status: 302, headers: { location: 'https://busy.example.net/p' } });
+    await create('busy', { uri: 'https://busy.example.net/p' });
+    await h.run(clock);
+    expect(h.sites.requestsTo('https://busy.example.net/p')).toHaveLength(1);
+    // A day of backoff was asked for; another watch reaches the same host through a redirect an hour later.
+    await at(clock + HOUR);
+    await create('hop', { uri: 'https://hop.example.com/x' });
+    await h.run(clock);
+    expect(h.sites.requestsTo('https://busy.example.net/p')).toHaveLength(1);
+    const hop = await watchRow(h, 'hop');
+    expect(hop['failures']).toBe(0);
+    expect(hop['next_check_at']).toBe(clock - HOUR + DAY);
+  });
+
+  it('a hop to the same host follows at once; a hop to a host within its spacing waits for it', async () => {
+    await at(clock + DAY);
+    h.sites.html('https://spaced.example.net/p', body);
+    h.sites.set('https://jump.example.com/x', { status: 302, headers: { location: 'https://spaced.example.net/p' } });
+    await create('spaced', { uri: 'https://spaced.example.net/p' });
+    await h.step(clock);
+    await create('jump', { uri: 'https://jump.example.com/x' });
+    await h.step(clock + 5_000);
+    // spaced.example.net was asked 5 s ago: the hop waits for its 30 s, and the check comes back after the URL's 15 minutes.
+    expect(h.sites.requestsTo('https://spaced.example.net/p')).toHaveLength(1);
+    const jump = await watchRow(h, 'jump');
+    expect(jump['failures']).toBe(0);
+    expect(jump['next_check_at']).toBe(clock + 5_000 + 15 * MINUTE);
+    await h.run(clock + 5_000 + 15 * MINUTE);
+    expect(h.sites.requestsTo('https://spaced.example.net/p')).toHaveLength(2);
+    expect(await failureOf('jump')).toBe(FailureReason.UNSPECIFIED);
+  });
+});
+
+describe('one request at a time per host', () => {
+  it('two previews of the same host never overlap', async () => {
+    await at(clock + DAY);
+    let inFlight = 0;
+    let most = 0;
+    for (const path of ['/a', '/b']) {
+      h.sites.set(`https://overlap.example.net${path}`, async () => {
+        inFlight += 1;
+        most = Math.max(most, inFlight);
+        await new Promise((resolve) => setTimeout(resolve, 200));
+        inFlight -= 1;
+        return { headers: { 'content-type': 'text/html' }, body };
+      });
+    }
+    await Promise.all(['/a', '/b'].map((path) => h.api.previewWatch({ watch: { displayName: 'p', uri: `https://overlap.example.net${path}`, fetchPolicy: { ignoreRobots: true } } })));
+    expect(h.sites.requestsTo('https://overlap.example.net/', true)).toHaveLength(2);
+    expect(most).toBe(1);
+  });
+
+  it("a preview never overlaps an alarm's request to the same host", async () => {
+    await at(clock + DAY);
+    let inFlight = 0;
+    let most = 0;
+    const slow = async () => {
+      inFlight += 1;
+      most = Math.max(most, inFlight);
+      await new Promise((resolve) => setTimeout(resolve, 200));
+      inFlight -= 1;
+      return { headers: { 'content-type': 'text/html' }, body };
+    };
+    h.sites.set('https://shared.example.net/watched', slow);
+    h.sites.set('https://shared.example.net/other', slow);
+    await create('shared', { uri: 'https://shared.example.net/watched', fetchPolicy: { ignoreRobots: true } });
+    await Promise.all([h.step(clock), h.api.previewWatch({ watch: { displayName: 'p', uri: 'https://shared.example.net/other', fetchPolicy: { ignoreRobots: true } } })]);
+    expect(most).toBe(1);
+  });
+});
+
+describe('the 15 minutes per URL count previews too', () => {
+  it('a preview refresh does not fetch the same URL again within 15 minutes', async () => {
+    await at(clock + DAY);
+    h.sites.html('https://again.example.net/p', body);
+    const watch = { displayName: 'p', uri: 'https://again.example.net/p', fetchPolicy: { ignoreRobots: true } };
+    await h.api.previewWatch({ watch, refresh: true });
+    for (let n = 0; n < 2; n++) {
+      await at(clock + 31_000);
+      expect((await h.api.previewWatch({ watch, refresh: true })).fetch?.cached).toBe(true);
+    }
+    expect(h.sites.requestsTo('https://again.example.net/p')).toHaveLength(1);
+  });
+
+  it("a watch saved right after its preview is first checked 15 minutes after the preview's fetch", async () => {
+    await at(clock + DAY);
+    h.sites.html('https://saved.example.net/p', body);
+    const watch = { displayName: 'p', uri: 'https://saved.example.net/p', fetchPolicy: { ignoreRobots: true } };
+    await h.api.previewWatch({ watch });
+    const previewed = clock;
+    await at(clock + MINUTE);
+    const created = await h.api.createWatch({ watchId: 'saved', requestId: op(), watch });
+    expect(Number(created.health?.nextCheckTime?.seconds) * 1000).toBe(previewed + 15 * MINUTE);
+    await h.run(clock);
+    expect(h.sites.requestsTo('https://saved.example.net/p')).toHaveLength(1);
+    await h.run(previewed + 15 * MINUTE);
+    expect(h.sites.requestsTo('https://saved.example.net/p')).toHaveLength(2);
+  });
+
+  it('a page fetched while the owner edits the watch still counts for the 15 minutes', async () => {
+    await at(clock + DAY);
+    const url = 'https://race.example.com/p';
+    h.sites.html(url, body);
+    await create('race', { uri: url });
+    await h.run(clock);
+    let edited = false;
+    h.sites.set(url, async () => {
+      if (!edited) {
+        edited = true;
+        const watch = await h.api.getWatch({ name: 'watches/race' });
+        await h.api.updateWatch({ watch: { name: watch.name, etag: watch.etag, trigger: { textAppears: { text: 'SOLD' } } }, updateMask: { paths: ['trigger', 'etag'] }, requestId: op() });
+      }
+      return { headers: { 'content-type': 'text/html; charset=utf-8' }, body };
+    });
+    h.sites.clearRequests();
+    const start = clock + 8 * HOUR;
+    await at(start);
+    for (let t = start; t <= start + 14 * MINUTE; t += MINUTE) await h.step(t);
+    expect(h.sites.requestsTo(url)).toHaveLength(1);
+    expect((await watchRow(h, 'race'))['last_fetch_at']).toBe(start);
+    await h.run(start + 15 * MINUTE);
+    expect(h.sites.requestsTo(url)).toHaveLength(2);
+  });
+});
+
+describe('each check is stamped with its own time', () => {
+  it('a check that starts minutes into a pass records that time for its host and its URL', async () => {
+    await at(clock + DAY);
+    const start = clock;
+    // The first host's request takes "five minutes" (the test moves the clock while it is out); two other lanes are
+    // slow in real time, so the fourth host is checked by the first lane, after it.
+    h.sites.set('https://lane1.example.net/p', async () => {
+      await h.clock(start + 5 * MINUTE);
+      return { headers: { 'content-type': 'text/html' }, body };
+    });
+    for (const n of [2, 3]) h.sites.set(`https://lane${String(n)}.example.net/p`, { headers: { 'content-type': 'text/html' }, body, delayMs: 300 });
+    h.sites.html('https://lane4.example.net/p', body);
+    for (const n of [1, 2, 3, 4]) await create(`lane${String(n)}`, { uri: `https://lane${String(n)}.example.net/p`, fetchPolicy: { ignoreRobots: true } });
+    await h.step(start);
+    expect((await watchRow(h, 'lane1'))['last_fetch_at']).toBe(start);
+    expect((await watchRow(h, 'lane4'))['last_fetch_at']).toBe(start + 5 * MINUTE);
+    const [host] = await h.sql<{ next_at: number }>('SELECT next_at FROM hosts WHERE host = ?', 'lane4.example.net');
+    expect(host?.next_at).toBe(start + 5 * MINUTE + 30_000);
+    await at(start + 5 * MINUTE);
+  });
+});
+
 describe('spacing and backoff', () => {
   it('one host: the second page waits 30 seconds after the first started', async () => {
     await at(clock + DAY);
@@ -170,7 +379,7 @@ describe('redirects, size and time', () => {
     await at(clock + DAY);
     h.sites.set('https://moved.example.com/old', { status: 301, headers: { location: '/new' } });
     h.sites.html('https://moved.example.com/new', body);
-    const targets = ['http://127.0.0.1/admin', 'https://home.ziyixi.science/', 'http://plain.example.com/', 'https://[::1]/'];
+    const targets = ['http://127.0.0.1/admin', 'https://home.ziyixi.science/', 'https://app.cloudflare-579.workers.dev/', 'http://plain.example.com/', 'https://[::1]/'];
     targets.forEach((target, n) => h.sites.set(`https://evil${String(n)}.example.com/p`, { status: 302, headers: { location: target } }));
     for (let hop = 0; hop < 7; hop++) h.sites.set(`https://loop.example.com/${String(hop)}`, { status: 302, headers: { location: `/${String(hop + 1)}` } });
     await create('moved', { uri: 'https://moved.example.com/old' });
@@ -181,7 +390,7 @@ describe('redirects, size and time', () => {
     for (const n of targets.keys()) expect(await failureOf(`evil${String(n)}`), targets[n]).toBe(FailureReason.REDIRECT_REFUSED);
     expect(await failureOf('loop')).toBe(FailureReason.REDIRECT_REFUSED);
     // The refused targets were never requested.
-    expect(h.sites.requests.filter((request) => request.url.includes('127.0.0.1') || request.url.includes('ziyixi.science') || request.url.startsWith('http:'))).toEqual([]);
+    expect(h.sites.requests.filter((request) => request.url.includes('127.0.0.1') || request.url.includes('ziyixi.science') || request.url.includes('workers.dev') || request.url.startsWith('http:'))).toEqual([]);
     expect(h.sites.requestsTo('https://loop.example.com/', true).filter((request) => !request.url.endsWith('robots.txt'))).toHaveLength(6);
   });
 

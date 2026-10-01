@@ -1,12 +1,13 @@
 /**
  * PreviewWatch in workerd (../../../docs/design.md §5, §9): every stage's output for the phone's block picker, the
- * selectors of its blocks working as include and exclude selectors (HTMLRewriter's own matching), the fetch cache,
- * a refresh within the host's spacing, and stages 4 and 5 against an existing watch.
+ * selectors of its blocks working as include and exclude selectors (HTMLRewriter's own matching), a landmark block the
+ * owner picks, blocks on a site that serves markdown to agents, the fetch cache and the URL's 15 minutes, and stages 4
+ * and 5 against an existing watch.
  */
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { FailureReason } from '@ziyixi/proto/watch/ui/v1/watch_pb';
 import { page, rss } from '../fake-sites.ts';
-import { HOUR, op, resetWatches, startHarness, T0, type Harness } from './harness.ts';
+import { HOUR, MINUTE, op, resetWatches, startHarness, T0, type Harness } from './harness.ts';
 
 let h: Harness;
 
@@ -66,14 +67,52 @@ describe('PreviewWatch', () => {
     expect(h.sites.requestsTo(url)).toHaveLength(1);
   });
 
-  it('refresh fetches again after the host\'s spacing; a feed preview lists items with their keys', async () => {
+  it('a landmark block the owner taps in include mode counts (an explicit opt-in); an include around a landmark does not count it', async () => {
+    const url = 'https://landmark.example.com/p';
+    h.sites.html(url, page('L', '<p>Main text of the synthetic page, long enough to pass the gate.</p>'));
+    const first = await h.api.previewWatch({ watch: { displayName: 'l', uri: url } });
+    const menu = first.blocks.find((block) => block.text.includes('Menu A'));
+    expect(menu).toMatchObject({ landmark: true, counted: false });
+    const include = await h.api.previewWatch({ watch: { displayName: 'l', uri: url, source: { html: { includeSelectors: [menu?.selector ?? ''] } } } });
+    expect(include.failure).toBe(FailureReason.UNSPECIFIED);
+    expect(include.blocks.find((block) => block.selector === menu?.selector)).toMatchObject({ landmark: true, counted: true });
+    expect(include.normalizedLines).toEqual(['Menu A']);
+    // `body` holds the nav: including it does not opt the landmark in.
+    const around = await h.api.previewWatch({ watch: { displayName: 'l', uri: url, source: { html: { includeSelectors: ['body'] } } } });
+    expect(around.normalizedLines.some((line) => line.includes('Menu'))).toBe(false);
+  });
+
+  it('a site that answers markdown to Accept: text/markdown still gives the phone blocks to pick: a preview asks for HTML', async () => {
+    const url = 'https://md.example.com/p';
+    const html = page('M', '<p>Price: 100 for the synthetic item today.</p><aside id="ads">Advertisement 7</aside>');
+    // Like a zone with Markdown for Agents: markdown when asked for it, HTML otherwise.
+    h.sites.set(url, (request) =>
+      (request.headers.get('accept') ?? '').startsWith('text/markdown')
+        ? { headers: { 'content-type': 'text/markdown; charset=utf-8' }, body: '# M\n\nPrice: 100 for the synthetic item today.\n\nAdvertisement 7\n' }
+        : { headers: { 'content-type': 'text/html; charset=utf-8' }, body: html },
+    );
+    const first = await h.api.previewWatch({ watch: { displayName: 'm', uri: url } });
+    expect(first.fetch?.markdown).toBe(false);
+    expect(first.blocks.find((block) => block.text.includes('Advertisement'))?.selector).toBe('aside#ads');
+    expect(h.sites.requestsTo(url)[0]?.headers['accept']).toMatch(/^text\/html/);
+  });
+
+  it('refresh answers the stored fetch within 15 minutes of it and fetches again after; a feed preview lists items with their keys', async () => {
     const url = 'https://refresh.example.com/item';
     h.sites.html(url, SHOP);
     await h.api.previewWatch({ watch: { displayName: 'p', uri: url } });
+    for (const minutes of [1, 14]) {
+      await h.clock(T0 + minutes * MINUTE);
+      const soon = await h.api.previewWatch({ watch: { displayName: 'p', uri: url }, refresh: true });
+      expect(soon.fetch?.cached).toBe(true);
+      expect(Number(soon.fetch?.nextFetchTime?.seconds) * 1000).toBe(T0 + 15 * MINUTE);
+    }
+    expect(h.sites.requestsTo(url)).toHaveLength(1);
+    await h.clock(T0 + 15 * MINUTE);
     const again = await h.api.previewWatch({ watch: { displayName: 'p', uri: url }, refresh: true });
     expect(again.fetch?.cached).toBe(false);
-    // The test clock moved by the spacing the preview waited for.
-    expect(Number(again.fetch?.fetchTime?.seconds) * 1000).toBeGreaterThanOrEqual(T0 + 30_000);
+    expect(Number(again.fetch?.fetchTime?.seconds) * 1000).toBe(T0 + 15 * MINUTE);
+    expect(Number(again.fetch?.nextFetchTime?.seconds) * 1000).toBe(T0 + 30 * MINUTE);
     expect(h.sites.requestsTo(url)).toHaveLength(2);
     await h.clock(T0);
 

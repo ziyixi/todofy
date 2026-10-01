@@ -68,9 +68,11 @@ function workerBundle(): Promise<string> {
   return bundle;
 }
 
-/** What the fake browser answers: the HTML of a URL, the milliseconds it reports, or a 429. */
+/** What the fake browser answers: the HTML of a URL, the milliseconds it reports, where it ended up, or a 429. */
 export interface FakeBrowser {
   pages: Map<string, string>;
+  /** The URL the render ended on (`x-final-url`), when it is not the one asked for. */
+  finalUrls: Map<string, string>;
   msUsed: number;
   quota: boolean;
   calls: string[];
@@ -111,6 +113,8 @@ export interface Harness {
   run(now: number, horizon?: number, max?: number): Promise<number>;
   alarmAt(): Promise<number | null>;
   sql<T = Record<string, unknown>>(query: string, ...params: (string | number | null)[]): Promise<T[]>;
+  /** The SQLite rows WatchState read and wrote since the last call (`sql` itself not counted). */
+  rows(): Promise<{ read: number; written: number }>;
   dispose(): Promise<void>;
 }
 
@@ -118,7 +122,7 @@ export async function startHarness(options: HarnessOptions = {}): Promise<Harnes
   const temp = await mkdtemp(join(tmpdir(), 'watch-runtime-'));
   const script = await workerBundle();
   const sites = new FakeSites();
-  const browser: FakeBrowser = { pages: new Map(), msUsed: 20_000, quota: false, calls: [] };
+  const browser: FakeBrowser = { pages: new Map(), finalUrls: new Map(), msUsed: 20_000, quota: false, calls: [] };
   const logs: string[] = [];
   const outbound = async (request: Request): Promise<Response> => options.routes?.get(request.url)?.() ?? sites.handle(request);
   const fakeBrowser = async (request: Request): Promise<Response> => {
@@ -127,7 +131,10 @@ export async function startHarness(options: HarnessOptions = {}): Promise<Harnes
     if (browser.quota) return new Response('rate limited', { status: 429 });
     const html = browser.pages.get(url);
     if (html === undefined) return new Response('', { status: 200, headers: { 'x-page-status': '404', 'x-browser-ms-used': String(browser.msUsed) } });
-    return new Response(html, { headers: { 'content-type': 'text/html; charset=utf-8', 'x-page-status': '200', 'x-browser-ms-used': String(browser.msUsed) } });
+    const finalUrl = browser.finalUrls.get(url);
+    return new Response(html, {
+      headers: { 'content-type': 'text/html; charset=utf-8', 'x-page-status': '200', 'x-browser-ms-used': String(browser.msUsed), ...(finalUrl === undefined ? {} : { 'x-final-url': finalUrl }) },
+    });
   };
   const bindings = { ...SYNTHETIC_BINDINGS, ...options.bindings };
   const mf = new Miniflare(
@@ -181,6 +188,7 @@ export async function startHarness(options: HarnessOptions = {}): Promise<Harnes
               if (op === 'clock') return Response.json({ ok: await stub.setClock(args[0]) ?? null })
               if (op === 'alarm') return Response.json({ ok: await stub.alarmAt() })
               if (op === 'sql') return Response.json({ ok: await stub.sqlForTests(...args) })
+              if (op === 'meter') return Response.json({ ok: await stub.takeRowMeter() })
               return Response.json({ error: 'unknown op' })
             } catch (error) { return Response.json({ error: error instanceof Error ? error.message : 'not_an_error' }) }
           } }`,
@@ -248,6 +256,9 @@ export async function startHarness(options: HarnessOptions = {}): Promise<Harnes
     },
     async sql<T>(query: string, ...params: (string | number | null)[]) {
       return (await probe('sql', [query, ...params])) as T[];
+    },
+    async rows() {
+      return (await probe('meter', [])) as { read: number; written: number };
     },
     async dispose() {
       await mf.dispose();

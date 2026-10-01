@@ -4,6 +4,10 @@
  * as U+FFFD. So the first 2 KiB are sniffed for a BOM, a `<meta charset>` or `<meta http-equiv="Content-Type">`, or an
  * XML declaration, and the response is relabelled with that charset before HTMLRewriter (or TextDecoder) sees it. A
  * charset in the header wins (the HTML rule), unless it is one TextDecoder does not know.
+ *
+ * UTF-16 (a BOM, or a header that names it) is not ASCII-compatible, and HTMLRewriter decodes only ASCII-compatible
+ * encodings: such a body is decoded here and handed on as UTF-8 (`asUtf8`). A `<meta charset="utf-16">` is read as
+ * UTF-8, as the HTML standard says (a document that could declare it in ASCII is not UTF-16).
  */
 
 /** How far into the body the sniffer looks (the HTML standard's prescan reads 1,024 bytes; pages pad more). */
@@ -66,8 +70,22 @@ export function detectCharset(contentType: string | null, bytes: Uint8Array): Ch
   const bom = bomCharset(bytes);
   if (bom !== null) return { label: bom, source: 'bom' };
   const sniffed = sniffCharset(bytes);
-  if (sniffed !== null && knownCharset(sniffed.label)) return { label: normalizeLabel(sniffed.label), source: sniffed.source };
+  if (sniffed !== null && knownCharset(sniffed.label)) {
+    const label = normalizeLabel(sniffed.label);
+    return { label: isUtf16(label) ? 'utf-8' : label, source: sniffed.source };
+  }
   return { label: 'utf-8', source: 'default' };
+}
+
+/** Whether a label (as the decoder names it) is UTF-16, which HTMLRewriter cannot decode. */
+export function isUtf16(label: string): boolean {
+  return label === 'utf-16le' || label === 'utf-16be';
+}
+
+/** The body and its charset ready for HTMLRewriter: a UTF-16 body decoded and encoded again as UTF-8. */
+export function asUtf8(bytes: Uint8Array, charset: string): { readonly bytes: Uint8Array; readonly label: string } {
+  if (!isUtf16(charset)) return { bytes, label: charset };
+  return { bytes: new TextEncoder().encode(decodeBody(bytes, charset)), label: 'utf-8' };
 }
 
 /** A label as the decoder names its encoding (`GB2312` decodes as `gbk`; `utf8` as `utf-8`). */

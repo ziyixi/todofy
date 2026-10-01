@@ -24,7 +24,8 @@ export type FailureCode =
   | 'REDIRECT_REFUSED'
   | 'PARSE_ERROR'
   | 'VALUE_MISSING'
-  | 'BROWSER_UNAVAILABLE';
+  | 'BROWSER_UNAVAILABLE'
+  | 'INTERNAL_ERROR';
 
 /**
  * Text that only bot challenges and block pages carry (Cloudflare, Akamai, Imperva, PerimeterX, DataDome, AWS WAF, a

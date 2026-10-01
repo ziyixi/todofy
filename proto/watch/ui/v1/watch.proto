@@ -145,13 +145,14 @@ message WatchSource {
 message HtmlSource {
   // Only text inside these elements counts (none: the whole page). At most 10 CSS selectors of at most 200
   // characters each, in the subset HTMLRewriter supports (no XPath, sibling combinators or `:has`); a
-  // selector it refuses is INVALID_SELECTOR. PreviewWatch suggests them from the page's blocks.
+  // selector it refuses is INVALID_SELECTOR. PreviewWatch suggests them from the page's blocks. One that
+  // matches inside a landmark region (or the landmark itself) counts that text: the owner picked it.
   repeated string include_selectors = 1 [(google.api.field_behavior) = OPTIONAL];
   // Text inside these elements never counts. Same rules as `include_selectors`.
   repeated string exclude_selectors = 2 [(google.api.field_behavior) = OPTIONAL];
   // Each link's address is kept after its text (`text <https://...>`), so a changed link is a change.
   bool keep_links = 3 [(google.api.field_behavior) = OPTIONAL];
-  // The landmark regions count too.
+  // The landmark regions (nav, the body's header and footer, navigation/banner/contentinfo roles) count too.
   bool keep_landmarks = 4 [(google.api.field_behavior) = OPTIONAL];
 }
 
@@ -195,8 +196,9 @@ message EmbeddedSource {
 // UUID strings, nonce and token query values, and copyright years are masked. Absolute dates and other numbers
 // are kept: a price or a version is often the point.
 message NormalizeOptions {
-  // Lines (after normalization and masking) to drop: the suppressed drawer's "ignore this line". At most
-  // 100, each at most 300 characters.
+  // Lines (after normalization and masking) to drop from both sides of every comparison: the suppressed
+  // drawer's "ignore this line". Snapshots keep them, so an ignore and its undo never move the notified
+  // state. At most 100, each at most 300 characters.
   repeated string ignored_lines = 1 [(google.api.field_behavior) = OPTIONAL];
   // Masks nothing but `ignored_lines`.
   bool disable_default_masks = 2 [(google.api.field_behavior) = OPTIONAL];
@@ -370,4 +372,7 @@ enum FailureReason {
   FAILURE_REASON_VALUE_MISSING = 15;
   // FETCHER_BROWSER, and the deployment has no browser binding.
   FAILURE_REASON_BROWSER_UNAVAILABLE = 16;
+  // The check stopped on an unexpected error after its fetch (a bug, or a storage error): it counts toward BROKEN
+  // like any failure and is retried with a growing delay, never sooner than 15 minutes after the fetch.
+  FAILURE_REASON_INTERNAL_ERROR = 17;
 }

@@ -11,7 +11,9 @@
  *   and the answer passed through, for the heaviest answers the API has (a full list of WATCHES_MAX watches, a full page
  *   of CHANGE_PAGE changes with DIFF_LINES_KEPT lines of DIFF_LINE_MAX characters each, a 2 MiB page's preview);
  * - WatchState (30 s per invocation): those API calls, and the alarm path: a pass over every watch with a large page
- *   (the first notified states, then a change on every page), and the preview of a page of FETCH_MAX_BYTES.
+ *   (the first notified states, then a change on every page), and the preview of a page of FETCH_MAX_BYTES, plain and
+ *   hostile (2,000-character runs of each character class a default mask consumes: page text is untrusted, and a
+ *   mask that is not linear costs seconds on such a page).
  *
  * No dev bypass: Access is verified as in production.
  */
@@ -70,6 +72,24 @@ function hugePage(n: number): string {
   return `<!doctype html><html><body><main>${paragraph.repeat(Math.floor((FETCH_MAX_BYTES - 200) / paragraph.length))}</main></body></html>`;
 }
 
+/**
+ * A page just under FETCH_MAX_BYTES of hostile text: paragraphs of 2,000-character runs of what the masks match
+ * (Chinese numerals and units, digits and digit groups, times, hex, base64, English relative times, copyright signs,
+ * query values), the inputs on which an unbounded or unanchored pattern turns quadratic.
+ */
+function hostilePage(): string {
+  const units = ['一', '一天', '7', '1,', '1:', '1-', 'a1', 'aB3', '1 ago ', 'in ', '© ', '?v=', '三年', '前'];
+  const paragraphs: string[] = [];
+  let size = 0;
+  for (let i = 0; size < FETCH_MAX_BYTES - 8 * 1024; i++) {
+    const unit = units[i % units.length] ?? 'x';
+    const paragraph = `<p>${unit.repeat(Math.ceil(2000 / unit.length)).slice(0, 2000)}</p>\n`;
+    paragraphs.push(paragraph);
+    size += new TextEncoder().encode(paragraph).byteLength;
+  }
+  return `<!doctype html><html><body><main>${paragraphs.join('')}</main></body></html>`;
+}
+
 function setPages(variant: number): void {
   for (let n = 0; n < WATCHES_MAX; n++) h.sites.html(`https://cpu${String(n)}.example.com/p`, bigPage(n, 200, variant));
 }
@@ -95,6 +115,9 @@ beforeAll(async () => {
   mutationHeaders = { ...headers, 'content-type': 'application/json', origin: `https://${PUBLIC_HOST}`, 'x-csrf-token': csrfToken, cookie: (csrf.headers.get('set-cookie') ?? '').split(';')[0] ?? '' };
   setPages(0);
   h.sites.html('https://huge.example.com/p', hugePage(-1));
+  h.sites.html('https://hostile.example.com/p', hostilePage());
+  // Previewed only (no watch fetches it: a URL a check fetched is not fetched again by a preview within 15 minutes).
+  h.sites.html('https://medium.example.com/p', bigPage(-2, 200, 0));
   for (let n = 0; n < WATCHES_MAX; n++) {
     const response = await h.fetch(`/api/v1/watches?watch_id=cpu-${String(n)}&request_id=${op()}`, {
       method: 'POST',
@@ -184,13 +207,18 @@ describe('CPU (Workers Free: 10 ms per request, 30 s per Durable Object invocati
         expectOk(`/api/v1/watches/cpu-1?update_mask=display_name&request_id=${op()}`, { method: 'PATCH', headers: mutationHeaders, body: JSON.stringify({ display_name: 'Renamed' }) }),
       ),
       await both('POST watches:preview (a 200 KiB page, cached)', () =>
-        expectOk('/api/v1/watches:preview', { method: 'POST', headers: mutationHeaders, body: JSON.stringify({ watch: { display_name: 'p', uri: 'https://cpu3.example.com/p' } }) }),
+        expectOk('/api/v1/watches:preview', { method: 'POST', headers: mutationHeaders, body: JSON.stringify({ watch: { display_name: 'p', uri: 'https://medium.example.com/p' } }) }),
       ),
     ];
     const largest = await h.fetch('/api/v1/watches:preview', { method: 'POST', headers: mutationHeaders, body: JSON.stringify({ watch: { display_name: 'p', uri: 'https://huge.example.com/p' } }) });
     expect((await largest.json<{ fetch?: { body_bytes?: number } }>()).fetch?.body_bytes).toBeGreaterThan(FETCH_MAX_BYTES - 1024);
     const huge = await both(`POST watches:preview (a page of ${String(FETCH_MAX_BYTES / 1024 / 1024)} MiB, cached)`, () =>
       expectOk('/api/v1/watches:preview', { method: 'POST', headers: mutationHeaders, body: JSON.stringify({ watch: { display_name: 'p', uri: 'https://huge.example.com/p' } }) }),
+    );
+    const hostileFirst = await h.fetch('/api/v1/watches:preview', { method: 'POST', headers: mutationHeaders, body: JSON.stringify({ watch: { display_name: 'p', uri: 'https://hostile.example.com/p' } }) });
+    expect((await hostileFirst.json<{ fetch?: { body_bytes?: number } }>()).fetch?.body_bytes).toBeGreaterThan(FETCH_MAX_BYTES - 16 * 1024);
+    const hostile = await both(`POST watches:preview (a hostile page of ${String(FETCH_MAX_BYTES / 1024 / 1024)} MiB, cached)`, () =>
+      expectOk('/api/v1/watches:preview', { method: 'POST', headers: mutationHeaders, body: JSON.stringify({ watch: { display_name: 'p', uri: 'https://hostile.example.com/p' } }) }),
     );
 
     // The worst pass: every page just under FETCH_MAX_BYTES, as many as the request budget allows.
@@ -212,12 +240,15 @@ describe('CPU (Workers Free: 10 ms per request, 30 s per Durable Object invocati
     );
     expect(calibration.speed, tooSlow(calibration)).toBeLessThanOrEqual(MAX_SPEED);
     expect(coldWorker, "the fetch handler's very first request").toBeLessThan(WORKER_COLD_BOUND_MS * scale);
-    for (const measured of [...api, huge]) {
+    for (const measured of [...api, huge, hostile]) {
       expect(measured.worker.first, `${measured.worker.label}: fetch handler, first run`).toBeLessThan(WORKER_COLD_BOUND_MS * scale);
       expect(measured.worker.median, `${measured.worker.label}: fetch handler, warm median`).toBeLessThan(WORKER_BOUND_MS * scale);
     }
     for (const measured of api) expect(measured.object.first, `${measured.object.label}: WatchState`).toBeLessThan(OBJECT_API_BOUND_MS * scale);
     expect(huge.object.first, 'the largest preview: WatchState').toBeLessThan(OBJECT_ALARM_BOUND_MS * scale);
+    // Hostile text costs about what plain text of the same size does (measured: about the largest page's), so an alarm's
+    // 24 MiB of bodies stays seconds: never more than twice the plain page, and far below the alarm bound.
+    expect(hostile.object.first, 'the hostile preview: WatchState').toBeLessThan(Math.max(2 * huge.object.first, 0.05 * FREE_OBJECT_CPU_MS * scale));
     for (const measured of alarms) expect(measured.first, measured.label).toBeLessThan(OBJECT_ALARM_BOUND_MS * scale);
   });
 });

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { buildContent, type Content } from '../src/content.ts';
 import type { TriggerConfig } from '../src/config.ts';
+import { DIFF_JSON_MAX } from '../src/limits.ts';
 import { evaluate, keptDiff } from '../src/triggers.ts';
 
 const text = (...lines: string[]): Content => ({ lines, keys: lines, number: null, availability: null });
@@ -61,12 +62,19 @@ describe('NewItemTrigger (against the notified keys)', () => {
 });
 
 describe('the kept diff and stage 3 for triggers', () => {
-  it('keeps at most 200 lines of at most 500 characters', () => {
-    const many = Array.from({ length: 300 }, (_, i) => `${'x'.repeat(600)}${String(i)}`);
-    const kept = keptDiff(evaluate({ kind: 'any_change', minLines: 1, minPercent: 0 }, text(), text(), text(...many)).diff);
-    expect(kept.lines).toHaveLength(200);
-    expect(kept.lines[0]?.text.length).toBe(500);
-    expect(kept.truncated).toBe(true);
+  it('keeps at most 200 lines of at most 500 characters, and at most 32 KiB of them as stored', () => {
+    const any = { kind: 'any_change', minLines: 1, minPercent: 0 } as const;
+    const short = keptDiff(evaluate(any, text(), text(), text(...Array.from({ length: 300 }, (_, i) => `line ${String(i)}`))).diff);
+    expect(short.lines).toHaveLength(200);
+    expect(short.truncated).toBe(true);
+    const long = keptDiff(evaluate(any, text(), text(), text(...Array.from({ length: 300 }, (_, i) => `${'x'.repeat(600)}${String(i)}`))).diff);
+    expect(long.lines[0]?.text.length).toBe(500);
+    expect(long.truncated).toBe(true);
+    // Chinese text is three bytes a character: a row's diff stays within DIFF_JSON_MAX whatever the lines hold.
+    const cjk = keptDiff(evaluate(any, text(), text(), text(...Array.from({ length: 300 }, (_, i) => `${'汉'.repeat(600)}${String(i)}`))).diff);
+    expect(new TextEncoder().encode(JSON.stringify(cjk.lines)).byteLength).toBeLessThanOrEqual(DIFF_JSON_MAX);
+    expect(cjk.lines.length).toBeGreaterThan(0);
+    expect(cjk.truncated).toBe(true);
   });
 
   it('reads the number from unmasked lines, and a missing value is VALUE_MISSING', () => {

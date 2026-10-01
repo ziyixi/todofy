@@ -82,8 +82,11 @@ service WatchUiService {
   }
 
   // Replaces the fields `update_mask` names, or every field the owner sets without one (AIP-134); with the
-  // watch's `etag`, only if it did not change since (AIP-154). A change of what is read (uri, source,
-  // normalize, fetcher, request_locale) makes the next check set a new notified state without a change.
+  // watch's `etag`, only if it did not change since (AIP-154). A change of what is read (uri, source, the
+  // masks of normalize, fetcher, request_locale, fetch_policy) makes the next check set a new notified state
+  // without a change, and confirms a change still pending as it was seen (with a note). Ignored lines are not
+  // what is read: they are dropped from both sides of every comparison, so an ignore keeps the notified state
+  // and a pending change.
   // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
   // buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE
   rpc UpdateWatch(UpdateWatchRequest) returns (Watch) {
@@ -138,8 +141,9 @@ service WatchUiService {
     option (google.api.method_signature) = "name";
   }
 
-  // Fetches a page (or reuses its fetch of the last 15 minutes) and answers what every stage of the
-  // pipeline makes of it for the given settings, without storing anything: the fetch, the health gate, the
+  // Fetches a page as HTML (or reuses its fetch of the last 15 minutes) and answers what every stage of the
+  // pipeline makes of it for the given settings, without storing anything but the fetch's etiquette (the host's
+  // spacing, the URL's fetch time, robots.txt) and the fetch itself for 15 minutes: the fetch, the health gate, the
   // page's blocks with a selector each (for the phone's block picker), the extracted and the normalized
   // lines, and, for an existing watch, what the trigger says against its notified state.
   // (-- api-linter: core::0136::http-uri-suffix=disabled
@@ -317,7 +321,8 @@ message PreviewWatchRequest {
   // fetch_policy) by the rules of CreateWatch. When `name` names an existing watch, stages 4 and 5 compare
   // with that watch's notified state.
   Watch watch = 1 [(google.api.field_behavior) = REQUIRED];
-  // Fetch again even when the page was fetched in the last 15 minutes (the host's spacing still applies).
+  // Fetch again rather than reuse the stored fetch, once the URL may be fetched again: never within 15 minutes of
+  // its last fetch by a preview or a check (PreviewFetch.next_fetch_time), and the host's spacing applies.
   bool refresh = 2 [(google.api.field_behavior) = OPTIONAL];
 }
 
@@ -368,12 +373,15 @@ message PreviewFetch {
   bool meta_charset = 7 [(google.api.field_behavior) = OUTPUT_ONLY];
   // The site's robots.txt allows the page (or the watch ignores robots.txt).
   bool robots_allowed = 8 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // The site answered markdown (`Accept: text/markdown`).
+  // The site answered markdown although a preview asks for HTML only (`Accept: text/html`): it has no blocks.
   bool markdown = 9 [(google.api.field_behavior) = OUTPUT_ONLY];
   // When the body was fetched.
   google.protobuf.Timestamp fetch_time = 10 [(google.api.field_behavior) = OUTPUT_ONLY];
   // The body is the fetch of the last 15 minutes, not a new one.
   bool cached = 11 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The earliest time `refresh` fetches the page again: the same URL is never fetched twice within 15 minutes,
+  // by a preview or a check.
+  google.protobuf.Timestamp next_fetch_time = 12 [(google.api.field_behavior) = OUTPUT_ONLY];
 }
 
 // A block of a previewed page: consecutive lines under one element.
@@ -389,7 +397,8 @@ message PreviewBlock {
   // The block counts for the current settings (inside an include selector or without any, outside every
   // exclude selector and landmark).
   bool counted = 5 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // The block sits in a landmark region (excluded unless HtmlSource.keep_landmarks).
+  // The block sits in a landmark region (excluded unless HtmlSource.keep_landmarks, or an include selector
+  // picks it).
   bool landmark = 6 [(google.api.field_behavior) = OUTPUT_ONLY];
 }
 

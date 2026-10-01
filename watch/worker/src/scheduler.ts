@@ -7,14 +7,19 @@
  * - at most ALARM_FETCH_BUDGET external requests; a check starts only with REQUESTS_PER_CHECK left;
  * - at most ALARM_BYTES_BUDGET body bytes (the parse is the CPU); a check starts only with FETCH_MAX_BYTES left;
  * - at most ALARM_WALL_BUDGET_MS of wall time; a check starts only ALARM_START_MARGIN_MS before it;
- * - ALARM_CONCURRENCY hosts at a time, one request at a time per host (a lane per host; the browser is one lane).
- * What is left stays due: the next alarm runs a second later with fresh budgets.
+ * - ALARM_CONCURRENCY hosts at a time, one request at a time per host (a lane per host; the browser is one lane; a
+ *   redirect to another lane's host waits for that host's lock and spacing, obtain.ts).
+ * Each check is stamped with the time it starts (`deps.now()`), not the alarm's: a pass may last minutes, and the
+ * host's spacing, the URL's 15 minutes and the confirmation fetch count from the real request. What is left stays
+ * due: the next alarm runs a second later with fresh budgets. A check that throws is recorded as INTERNAL_ERROR
+ * (pipeline.ts recordInternalError). Afterwards the bounds of the watches whose checks may have added rows are kept
+ * (store.ts pruneWatches, a few hundred rows read each), and the global ones at most hourly (every watch once a day).
  */
 import { deliver, type NotificationSink } from './notify.ts';
 import { utcDay } from './etiquette.ts';
-import { ALARM_BYTES_BUDGET, ALARM_CONCURRENCY, ALARM_ERROR_RETRY_MS, FETCH_MAX_BYTES, ALARM_DUE_MAX, ALARM_FETCH_BUDGET, ALARM_IDLE_MS, ALARM_START_MARGIN_MS, ALARM_WALL_BUDGET_MS, WAKE_MS } from './limits.ts';
+import { ALARM_BYTES_BUDGET, ALARM_CONCURRENCY, FETCH_MAX_BYTES, ALARM_DUE_MAX, ALARM_FETCH_BUDGET, ALARM_IDLE_MS, ALARM_START_MARGIN_MS, ALARM_WALL_BUDGET_MS, WAKE_MS } from './limits.ts';
 import { REQUESTS_PER_CHECK, type Budget } from './obtain.ts';
-import { runCheck, storedConfig, type CheckDeps, type CheckOutcome } from './pipeline.ts';
+import { recordInternalError, runCheck, storedConfig, type CheckDeps, type CheckOutcome } from './pipeline.ts';
 import type { WatchRow } from './store.ts';
 
 export interface AlarmDeps extends CheckDeps {
@@ -72,15 +77,20 @@ export async function runAlarm(deps: AlarmDeps, now: number): Promise<AlarmResul
     return timeLeft() && budgetLeft();
   };
 
+  // The watches whose checks may have added a snapshot or a change: only their bounds can have grown.
+  const grown = new Set<string>();
   const check = async (row: WatchRow) => {
+    const at = deps.now();
     try {
-      const outcome = await runCheck(deps, row.id, now, budget);
+      const outcome = await runCheck(deps, row.id, at, budget);
       outcomes[outcome] = (outcomes[outcome] ?? 0) + 1;
+      if (outcome === 'changed' || outcome === 'unchanged') grown.add(row.id);
     } catch (error) {
-      // A bug in one watch's check must not stop the others: it is tried again later, and only a code is logged.
+      // A bug in one watch's check must not stop the others: it counts as a failure of its own and waits at least the
+      // URL's 15 minutes (its request was recorded); only a code is logged.
       outcomes.error = (outcomes.error ?? 0) + 1;
       console.log(JSON.stringify({ event: 'check_failed', watch: row.id, code: errorCode(error) }));
-      deps.store.updateWatch(row.id, { next_check_at: now + ALARM_ERROR_RETRY_MS, check_requested: 0 });
+      recordInternalError(deps, row.id, deps.now());
     }
   };
   const worker = async () => {
@@ -104,7 +114,8 @@ export async function runAlarm(deps: AlarmDeps, now: number): Promise<AlarmResul
 
   deps.store.addLedger(utcDay(now), budget.used);
   await deliver(deps.store, deps.sink, now);
-  deps.store.prune(now);
+  deps.store.pruneWatches(grown);
+  deps.store.pruneGlobal(now);
   deps.store.setMeta('last_alarm_at', String(now));
 
   const nextDue = deps.store.nextDue();

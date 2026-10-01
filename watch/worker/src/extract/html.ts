@@ -9,11 +9,15 @@
  *   parent's end tag comes, so the next `<p>` is its child. Its own selector matching uses that same tree, and so do
  *   the frames here (one per start tag, popped in `onEndTag`), so a selector made from them matches what they saw;
  * - `onEndTag` on a void element (`<br>`, `<img>`, a self-closed SVG child) throws: such elements are never pushed.
+ * - `</head>` is optional in HTML (minifiers drop it): a start tag that cannot be in `head` (`body`, `p`, ...) while
+ *   the head's frame is open closes that frame here, as a parser would; its end tag, if one comes later, is ignored.
  *
  * Dropped: `head`, `script`, `style`, `noscript`, `template`, `svg`, `iframe`, `textarea` and every attribute; the
  * landmark regions (`nav`, `role` navigation, banner or contentinfo, and the body's own `header` and `footer`) unless
- * HtmlSource.keep_landmarks. With include selectors only text inside one of them counts; text inside an exclude
- * selector never does. A line ends at the start or end of a block element and at `<br>`/`<hr>`.
+ * HtmlSource.keep_landmarks, or unless an include selector matched inside the landmark (the owner picked that block:
+ * an explicit opt-in; an include around a landmark does not count it). With include selectors only text inside one
+ * of them counts; text inside an exclude selector never does. A line ends at the start or end of a block element and
+ * at `<br>`/`<hr>`.
  */
 import { LINE_MAX, LINES_MAX, PREVIEW_BLOCKS_MAX, PREVIEW_TEXT_MAX } from '../limits.ts';
 import { decodeEntities } from './entities.ts';
@@ -59,6 +63,8 @@ const BLOCK = new Set([
   'option', 'p', 'pre', 'section', 'summary', 'table', 'tbody', 'td', 'tfoot', 'th', 'thead', 'tr', 'ul', 'html', 'legend',
 ]);
 const LANDMARK_ROLES = new Set(['navigation', 'banner', 'contentinfo']);
+/** What may stand inside `head`; any other start tag closes an open head (its end tag is optional). */
+const HEAD_CONTENT = new Set(['base', 'link', 'meta', 'noscript', 'script', 'style', 'template', 'title']);
 /** An id that looks generated (a long number, a hash, a CSS-module or BEM name) makes a poor selector; `reviews` does not. */
 const UNSTABLE_NAME = /\d{3,}|(?=[a-z0-9]*\d)(?=[a-z0-9]*[a-z])[a-z0-9]{8,}|^[a-z]{1,4}-(?=[a-z0-9]*\d)[a-z0-9]{4,}$|__|--/i;
 const SELECTOR_MAX_CHARS = 200;
@@ -75,7 +81,11 @@ interface Frame {
   skip: boolean;
   landmark: boolean;
   include: boolean;
+  /** An include that matched inside a landmark: the landmark's text under it counts. */
+  optIn: boolean;
   exclude: boolean;
+  /** Closed before its end tag (a head closed by a body element). */
+  closed: boolean;
   href: string | null;
   selector: string | null;
 }
@@ -127,13 +137,25 @@ export async function extractHtml(response: Response, options: HtmlOptions): Pro
   let includeDepth = 0;
   let excludeDepth = 0;
   let landmarkDepth = 0;
+  let optInDepth = 0;
   // The line being collected: raw source text, and the block frame it belongs to.
   let raw = '';
   let lineFrame: Frame | null = null;
   let lineCounted = false;
   let lineLandmark = false;
 
-  const counted = () => skipDepth === 0 && (options.include.length === 0 || includeDepth > 0) && excludeDepth === 0 && (options.keepLandmarks || landmarkDepth === 0);
+  const counted = () => skipDepth === 0 && (options.include.length === 0 || includeDepth > 0) && excludeDepth === 0 && (options.keepLandmarks || landmarkDepth === 0 || optInDepth > 0);
+  /** Pops `frame` (its end tag, or its implicit close). */
+  const close = (frame: Frame) => {
+    if (frame.closed) return;
+    frame.closed = true;
+    if (frame.skip) skipDepth -= 1;
+    if (frame.include) includeDepth -= 1;
+    if (frame.optIn) optInDepth -= 1;
+    if (frame.exclude) excludeDepth -= 1;
+    if (frame.landmark) landmarkDepth -= 1;
+    top = frame.parent;
+  };
   const blockFrame = (): Frame | null => {
     let node = top;
     while (node !== null && !node.block) node = node.parent;
@@ -165,6 +187,8 @@ export async function extractHtml(response: Response, options: HtmlOptions): Pro
     .on('*', {
       element(element) {
         const tag = element.tagName.toLowerCase();
+        // An omitted </head>: the first element that cannot be in head closes it.
+        if (top?.tag === 'head' && !HEAD_CONTENT.has(tag)) close(top);
         if (tag === 'br' || tag === 'hr' || BLOCK.has(tag)) endLine();
         current = null;
         if (VOID.has(tag)) return;
@@ -183,21 +207,20 @@ export async function extractHtml(response: Response, options: HtmlOptions): Pro
           skip: SKIP.has(tag),
           landmark: tag === 'nav' || LANDMARK_ROLES.has(role) || ((tag === 'header' || tag === 'footer') && parent?.tag === 'body'),
           include: false,
+          optIn: false,
           exclude: false,
+          closed: false,
           href: options.keepLinks && tag === 'a' ? element.getAttribute('href') : null,
           selector: null,
         };
         try {
           element.onEndTag(() => {
+            if (frame.closed) return;
             if (frame.block || frame.href !== null) {
               if (frame.href !== null && counted()) raw += ` <${resolveHref(frame.href, options.baseUrl)}>`;
               if (frame.block) endLine();
             }
-            if (frame.skip) skipDepth -= 1;
-            if (frame.include) includeDepth -= 1;
-            if (frame.exclude) excludeDepth -= 1;
-            if (frame.landmark) landmarkDepth -= 1;
-            top = frame.parent;
+            close(frame);
           });
         } catch {
           // A self-closed foreign element (`<path/>` in SVG): no end tag, so it is not a frame.
@@ -233,6 +256,11 @@ export async function extractHtml(response: Response, options: HtmlOptions): Pro
       if (key === 'include') {
         includeDepth += 1;
         includeMatched = true;
+        // Picked inside a landmark (or the landmark itself): the owner asked for it.
+        if (landmarkDepth > 0) {
+          frame.optIn = true;
+          optInDepth += 1;
+        }
       } else {
         excludeDepth += 1;
       }

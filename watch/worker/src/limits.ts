@@ -47,6 +47,12 @@ export const CHANGE_PERCENT_MAX = 10_000;
 export const CONFIRM_DELAY = { defaultMinutes: 15, min: 15, max: 120 } as const;
 /** A pending change seen as a third version this many times is decided against its latest version. */
 export const CONFIRM_ATTEMPTS_MAX = 3;
+/**
+ * The confirmation window of a pending change, in confirmation delays from its detection (plus the URL's spacing):
+ * within it a failed confirmation fetch is retried at the confirmation pace and A -> B -> A is a flicker; past it the
+ * watch returns to its regular interval and the change is decided as it was seen.
+ */
+export const CONFIRM_WINDOW_DELAYS = CONFIRM_ATTEMPTS_MAX + 1;
 
 /** Shadow mode runs this long from the write that sets it. */
 export const SHADOW_PERIOD_MS = 7 * DAY;
@@ -117,12 +123,20 @@ export const SNAPSHOTS_KEPT = 20;
 export const ITEMS_MAX = 500;
 /** The diff: its edit search stops beyond this many edits (the result is then a plain set difference). */
 export const DIFF_MAX_EDITS = 1000;
-/** A change keeps at most this many diff lines of at most this many characters. */
+/**
+ * A change keeps at most this many diff lines of at most this many characters, and at most DIFF_JSON_MAX bytes of them
+ * as stored (UTF-8 JSON): 200 lines of 500 CJK characters would be ~300 KB a row.
+ */
 export const DIFF_LINES_KEPT = 200;
 export const DIFF_LINE_MAX = 500;
-/** Changes kept per watch: suppressed ones, and all of them (the oldest resolved ones go first). */
+export const DIFF_JSON_MAX = 32 * 1024;
+/**
+ * Changes kept per watch: suppressed ones, and all of them. Over CHANGES_KEPT the oldest acknowledged ones go first,
+ * then suppressed ones, then confirmed ones beyond the CONFIRMED_KEPT newest (never a pending one).
+ */
 export const SUPPRESSED_KEPT = 50;
 export const CHANGES_KEPT = 200;
+export const CONFIRMED_KEPT = 50;
 
 // ---- the browser (Browser Run, docs/design.md §4) -----------------------------------------------------------------
 

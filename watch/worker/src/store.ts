@@ -3,17 +3,37 @@
  * the daily ledger, the AIP-155 request log, the notification outbox and PreviewWatch's recent fetches, in the Durable Object's own database. No D1,
  * no R2. Synchronous (the Durable Object's SQL API), so a group of writes in one `transactionSync` is atomic.
  *
- * Every table is bounded: WATCHES_MAX watches; per watch SNAPSHOTS_KEPT snapshots (plus the notified and the pending
- * pending ones, and the previous check's), SUPPRESSED_KEPT suppressed and CHANGES_KEPT changes in all; one row per host and per day; request IDs for a
- * day; notifications for NOTIFICATIONS_KEPT_MS and at most NOTIFICATIONS_MAX. `prune` runs after every alarm.
+ * Every table is bounded: WATCHES_MAX watches; per watch SNAPSHOTS_KEPT snapshots (plus the notified, the pending and
+ * the previous check's), SUPPRESSED_KEPT suppressed and CHANGES_KEPT changes in all (the oldest acknowledged, then
+ * suppressed, then confirmed ones go first; never a pending one or the CONFIRMED_KEPT newest confirmed ones); one row
+ * per host and per day; request IDs for a day; URL fetch times for URL_MIN_SPACING_MS; notifications for
+ * NOTIFICATIONS_KEPT_MS and at most NOTIFICATIONS_MAX.
+ *
+ * Rows read are a budget too (Workers Free: 5,000,000 rows read and 100,000 written a day for the whole account's
+ * SQLite Durable Objects, Mail Hero's included; docs/design.md §8). So the bounds are kept where they grow: after an
+ * alarm, `pruneWatches` for the watches it checked, every query on an index that bounds what it visits (changes by
+ * (watch_id, state, id)); the global tables at most once an hour and every watch once a UTC day (`pruneGlobal`). The
+ * store counts what it reads and writes (`meter`): the workerd tests hold each path to a row budget.
  *
  * Nothing here logs. Rows hold the owner's personal data (URLs, page text); they leave the object only through the
  * owner API behind Access.
  */
-import { CHANGES_KEPT, DAY, NOTIFICATIONS_KEPT_MS, NOTIFICATIONS_MAX, PREVIEW_CACHE_MS, REQUEST_ID_TTL_MS, SNAPSHOTS_KEPT, SUPPRESSED_KEPT } from './limits.ts';
+import {
+  CHANGES_KEPT,
+  CONFIRMED_KEPT,
+  DAY,
+  HOUR,
+  NOTIFICATIONS_KEPT_MS,
+  NOTIFICATIONS_MAX,
+  PREVIEW_CACHE_MS,
+  REQUEST_ID_TTL_MS,
+  SNAPSHOTS_KEPT,
+  SUPPRESSED_KEPT,
+  URL_MIN_SPACING_MS,
+} from './limits.ts';
 
 /** Bump with every schema change; `migrate` runs the steps above the stored version. */
-export const SCHEMA_VERSION = 1;
+export const SCHEMA_VERSION = 2;
 
 const SCHEMA_V1 = [
   `CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)`,
@@ -108,6 +128,18 @@ const SCHEMA_V1 = [
   )`,
 ];
 
+const SCHEMA_V2 = [
+  // Every per-watch query on changes filters by state: without this index SQLite picks changes_state and visits the
+  // rows of every watch (a prune of all watches read ~318,000 rows).
+  `CREATE INDEX IF NOT EXISTS changes_watch_state ON changes (watch_id, state, id)`,
+  // When each URL was last requested (a check or a preview): the same URL is never fetched again within
+  // URL_MIN_SPACING_MS, whoever asks.
+  `CREATE TABLE IF NOT EXISTS url_fetches (url TEXT PRIMARY KEY, at INTEGER NOT NULL)`,
+];
+
+/** The global tables are pruned at most this often (meta `pruned_at`). */
+export const PRUNE_GLOBAL_EVERY_MS = HOUR;
+
 export type WatchStateName = 'active' | 'paused' | 'broken';
 export type ChangeStateName = 'pending' | 'confirmed' | 'suppressed' | 'acknowledged';
 
@@ -197,8 +229,15 @@ export interface LedgerRow {
 
 type Value = string | number | null | ArrayBuffer;
 
+/** Rows read and written since the meter was last taken (cursor.rowsRead and rowsWritten, summed). */
+export interface RowMeter {
+  read: number;
+  written: number;
+}
+
 export class Store {
   private readonly sql: SqlStorage;
+  private meter: RowMeter = { read: 0, written: 0 };
 
   constructor(sql: SqlStorage) {
     this.sql = sql;
@@ -208,7 +247,32 @@ export class Store {
   migrate(): void {
     const version = this.version();
     if (version < 1) for (const statement of SCHEMA_V1) this.sql.exec(statement);
+    if (version < 2) for (const statement of SCHEMA_V2) this.sql.exec(statement);
     if (version !== SCHEMA_VERSION) this.sql.exec(`INSERT OR REPLACE INTO meta (key, value) VALUES ('schema_version', ?)`, String(SCHEMA_VERSION));
+  }
+
+  /** The rows read and written since the last call (the workerd tests' row budgets), and a fresh count. */
+  takeMeter(): RowMeter {
+    const taken = this.meter;
+    this.meter = { read: 0, written: 0 };
+    return taken;
+  }
+
+  /** Adds to the meter (a test hook puts back what its own query read). */
+  addMeter(meter: RowMeter): void {
+    this.meter.read += meter.read;
+    this.meter.written += meter.written;
+  }
+
+  /** Runs a statement to its end and counts its rows. */
+  // The row type is the caller's statement of the query's columns, as in `all`.
+  // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-parameters
+  private exec<T extends Record<string, SqlStorageValue>>(query: string, params: Value[]): { rows: T[]; written: number } {
+    const cursor = this.sql.exec<T>(query, ...params);
+    const rows = cursor.toArray();
+    this.meter.read += cursor.rowsRead;
+    this.meter.written += cursor.rowsWritten;
+    return { rows, written: cursor.rowsWritten };
   }
 
   private version(): number {
@@ -219,7 +283,7 @@ export class Store {
   }
 
   all<T extends Record<string, SqlStorageValue>>(query: string, ...params: Value[]): T[] {
-    return this.sql.exec<T>(query, ...params).toArray();
+    return this.exec<T>(query, params).rows;
   }
 
   // The row type is the caller's statement of the query's columns, as in `all`.
@@ -229,7 +293,7 @@ export class Store {
   }
 
   run(query: string, ...params: Value[]): number {
-    return this.sql.exec(query, ...params).rowsWritten;
+    return this.exec(query, params).written;
   }
 
   // ---- meta ----------------------------------------------------------------------------------------------------------
@@ -337,14 +401,13 @@ export class Store {
     return this.all<ChangeRow & Record<string, SqlStorageValue>>(`SELECT * FROM changes ${clause} ORDER BY id DESC LIMIT ?`, ...params, limit);
   }
 
-  /** Counts of changes by state, of one watch or of all. */
-  changeCounts(watchId: string | null = null): Record<ChangeStateName, number> {
-    const rows =
-      watchId === null
-        ? this.all<{ state: ChangeStateName; n: number }>(`SELECT state, count(*) AS n FROM changes GROUP BY state`)
-        : this.all<{ state: ChangeStateName; n: number }>(`SELECT state, count(*) AS n FROM changes WHERE watch_id = ? GROUP BY state`, watchId);
-    const out: Record<ChangeStateName, number> = { pending: 0, confirmed: 0, suppressed: 0, acknowledged: 0 };
-    for (const row of rows) out[row.state] = row.n;
+  /**
+   * Counts of the open changes by state (pending, confirmed, suppressed) over every watch. Acknowledged ones, the
+   * largest group, are not counted: nothing shows that count, and an index count still reads each row it counts.
+   */
+  openCounts(): Record<Exclude<ChangeStateName, 'acknowledged'>, number> {
+    const out = { pending: 0, confirmed: 0, suppressed: 0 };
+    for (const state of ['pending', 'confirmed', 'suppressed'] as const) out[state] = this.one<{ n: number }>(`SELECT count(*) AS n FROM changes WHERE state = ?`, state)?.n ?? 0;
     return out;
   }
 
@@ -376,6 +439,17 @@ export class Store {
 
   putRobots(host: string, verdict: string, expiresAt: number): void {
     this.run(`INSERT INTO robots (host, verdict, expires_at) VALUES (?, ?, ?) ON CONFLICT (host) DO UPDATE SET verdict = excluded.verdict, expires_at = excluded.expires_at`, host, verdict, expiresAt);
+  }
+
+  // ---- URL fetch times ---------------------------------------------------------------------------------------------
+
+  /** When `url` was last requested (a check or a preview), if within URL_MIN_SPACING_MS of `now`. */
+  urlFetchedAt(url: string, now: number): number | null {
+    return this.one<{ at: number }>(`SELECT at FROM url_fetches WHERE url = ? AND at > ?`, url, now - URL_MIN_SPACING_MS)?.at ?? null;
+  }
+
+  putUrlFetch(url: string, at: number): void {
+    this.run(`INSERT INTO url_fetches (url, at) VALUES (?, ?) ON CONFLICT (url) DO UPDATE SET at = max(at, excluded.at)`, url, at);
   }
 
   // ---- the ledger ----------------------------------------------------------------------------------------------------
@@ -415,48 +489,75 @@ export class Store {
 
   // ---- bounds --------------------------------------------------------------------------------------------------------
 
-  /** Drops what is past its bound (after every alarm). Returns rows deleted. */
-  prune(now: number): number {
+  /**
+   * The global tables within their bounds, at most once per PRUNE_GLOBAL_EVERY_MS, and every watch's bounds once per
+   * UTC day (a watch's rows grow only when it is checked, and `pruneWatches` follows every check). Returns rows deleted.
+   */
+  pruneGlobal(now: number): number {
+    const last = Number(this.getMeta('pruned_at') ?? '0');
+    if (now - last < PRUNE_GLOBAL_EVERY_MS && now >= last) return 0;
     let deleted = 0;
     deleted += this.run(`DELETE FROM requests WHERE at <= ?`, now - REQUEST_ID_TTL_MS);
     deleted += this.run(`DELETE FROM robots WHERE expires_at <= ?`, now);
     deleted += this.run(`DELETE FROM previews WHERE at <= ?`, now - PREVIEW_CACHE_MS);
+    deleted += this.run(`DELETE FROM url_fetches WHERE at <= ?`, now - URL_MIN_SPACING_MS);
     deleted += this.run(`DELETE FROM ledger WHERE day < ?`, new Date(now - 8 * DAY).toISOString().slice(0, 10));
     deleted += this.run(`DELETE FROM notifications WHERE created_at <= ?`, now - NOTIFICATIONS_KEPT_MS);
-    deleted += this.run(`DELETE FROM notifications WHERE id NOT IN (SELECT id FROM notifications ORDER BY id DESC LIMIT ?)`, NOTIFICATIONS_MAX);
+    const cut = this.one<{ id: number }>(`SELECT id FROM notifications ORDER BY id DESC LIMIT 1 OFFSET ?`, NOTIFICATIONS_MAX);
+    if (cut !== undefined) deleted += this.run(`DELETE FROM notifications WHERE id <= ?`, cut.id);
     deleted += this.run(`DELETE FROM hosts WHERE host NOT IN (SELECT host FROM watches) AND next_at <= ? AND coalesce(backoff_until, 0) <= ?`, now, now);
-    for (const { id } of this.all<{ id: string }>(`SELECT id FROM watches`)) deleted += this.pruneWatch(id);
+    const day = new Date(now).toISOString().slice(0, 10);
+    if (this.getMeta('swept_day') !== day) {
+      deleted += this.pruneWatches(this.all<{ id: string }>(`SELECT id FROM watches`).map((row) => row.id));
+      this.setMeta('swept_day', day);
+    }
+    this.setMeta('pruned_at', String(now));
     return deleted;
   }
 
-  /** A watch's snapshots and changes within their bounds; the notified and pending snapshots are always kept. */
+  /** The bounds of the given watches (those an alarm checked). Returns rows deleted. */
+  pruneWatches(ids: Iterable<string>): number {
+    let deleted = 0;
+    for (const id of new Set(ids)) deleted += this.pruneWatch(id);
+    return deleted;
+  }
+
+  /**
+   * A watch's snapshots and changes within their bounds; the notified, pending and previous snapshots are always kept.
+   * Every query reads one watch's rows through an index (changes_watch_state, snapshots_watch).
+   */
   pruneWatch(id: string): number {
     let deleted = 0;
-    deleted += this.run(
-      `DELETE FROM changes WHERE watch_id = ? AND state = 'suppressed' AND id NOT IN (SELECT id FROM changes WHERE watch_id = ? AND state = 'suppressed' ORDER BY id DESC LIMIT ?)`,
-      id,
-      id,
-      SUPPRESSED_KEPT,
-    );
-    // Over CHANGES_KEPT: the oldest resolved ones go first (acknowledged, then suppressed); never a pending or new one.
-    const total = this.one<{ n: number }>(`SELECT count(*) AS n FROM changes WHERE watch_id = ?`, id)?.n ?? 0;
-    if (total > CHANGES_KEPT) {
+    // The suppressed ones beyond the SUPPRESSED_KEPT newest.
+    const suppressedCut = this.one<{ id: string }>(`SELECT id FROM changes WHERE watch_id = ? AND state = 'suppressed' ORDER BY id DESC LIMIT 1 OFFSET ?`, id, SUPPRESSED_KEPT);
+    if (suppressedCut !== undefined) deleted += this.run(`DELETE FROM changes WHERE watch_id = ? AND state = 'suppressed' AND id <= ?`, id, suppressedCut.id);
+    // Over CHANGES_KEPT in all: the oldest acknowledged ones go first, then suppressed, then confirmed ones beyond the
+    // CONFIRMED_KEPT newest (a change the owner never read is dropped only when it is that old); never a pending one.
+    let excess = (this.one<{ n: number }>(`SELECT count(*) AS n FROM changes WHERE watch_id = ?`, id)?.n ?? 0) - CHANGES_KEPT;
+    for (const state of ['acknowledged', 'suppressed'] as const) {
+      if (excess <= 0) break;
+      const removed = this.run(`DELETE FROM changes WHERE id IN (SELECT id FROM changes WHERE watch_id = ? AND state = ? ORDER BY id LIMIT ?)`, id, state, excess);
+      deleted += removed;
+      excess -= removed;
+    }
+    if (excess > 0) {
+      const keptFrom = this.one<{ id: string }>(`SELECT id FROM changes WHERE watch_id = ? AND state = 'confirmed' ORDER BY id DESC LIMIT 1 OFFSET ?`, id, CONFIRMED_KEPT - 1);
+      if (keptFrom !== undefined) {
+        deleted += this.run(`DELETE FROM changes WHERE id IN (SELECT id FROM changes WHERE watch_id = ? AND state = 'confirmed' AND id < ? ORDER BY id LIMIT ?)`, id, keptFrom.id, excess);
+      }
+    }
+    const snapshotCut = this.one<{ id: number }>(`SELECT id FROM snapshots WHERE watch_id = ? ORDER BY id DESC LIMIT 1 OFFSET ?`, id, SNAPSHOTS_KEPT - 1);
+    if (snapshotCut !== undefined) {
       deleted += this.run(
-        `DELETE FROM changes WHERE id IN (SELECT id FROM changes WHERE watch_id = ? AND state IN ('acknowledged', 'suppressed') ORDER BY state = 'suppressed', id LIMIT ?)`,
+        `DELETE FROM snapshots WHERE watch_id = ?1 AND id < ?2
+           AND id NOT IN (SELECT coalesce(baseline_id, 0) FROM watches WHERE id = ?1)
+           AND id NOT IN (SELECT coalesce(seen_snapshot_id, 0) FROM watches WHERE id = ?1)
+           AND id NOT IN (SELECT coalesce(snapshot_id, 0) FROM changes WHERE watch_id = ?1 AND state = 'pending')
+           AND id NOT IN (SELECT coalesce(before_snapshot_id, 0) FROM changes WHERE watch_id = ?1 AND state = 'pending')`,
         id,
-        total - CHANGES_KEPT,
+        snapshotCut.id,
       );
     }
-    deleted += this.run(
-      `DELETE FROM snapshots WHERE watch_id = ?1
-         AND id NOT IN (SELECT id FROM snapshots WHERE watch_id = ?1 ORDER BY id DESC LIMIT ?2)
-         AND id NOT IN (SELECT coalesce(baseline_id, 0) FROM watches WHERE id = ?1)
-         AND id NOT IN (SELECT coalesce(seen_snapshot_id, 0) FROM watches WHERE id = ?1)
-         AND id NOT IN (SELECT coalesce(snapshot_id, 0) FROM changes WHERE watch_id = ?1 AND state = 'pending')
-         AND id NOT IN (SELECT coalesce(before_snapshot_id, 0) FROM changes WHERE watch_id = ?1 AND state = 'pending')`,
-      id,
-      SNAPSHOTS_KEPT,
-    );
     return deleted;
   }
 }

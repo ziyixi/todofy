@@ -28,7 +28,7 @@ import { browserAllowed } from './browser.ts';
 import { checkHash, readConfig, readHash, SETTINGS_FIELDS, settingsWire, type ConfigEnv, type WatchConfig } from './config.ts';
 import { earliestFetch, nextCheckAt, nextUtcMidnight, utcDay } from './etiquette.ts';
 import { newEtag, watchId as makeWatchId } from './ids.ts';
-import { BROWSER_DAILY_MS, CHANGE_ID_PATTERN, CHANGE_PAGE, FILTER_LITERALS_MAX, FILTER_MAX, SHADOW_PERIOD_MS, WATCH_ID_PATTERN, WATCH_PAGE, WATCHES_MAX } from './limits.ts';
+import { BROWSER_DAILY_MS, CHANGE_ID_PATTERN, CHANGE_PAGE, FILTER_LITERALS_MAX, FILTER_MAX, SHADOW_PERIOD_MS, URL_MIN_SPACING_MS, WATCH_ID_PATTERN, WATCH_PAGE, WATCHES_MAX } from './limits.ts';
 import { changeMessage, watchMessage, withBackoff } from './model.ts';
 import type { Comparison } from './preview.ts';
 import { REASONS, watchError } from './reasons.ts';
@@ -216,6 +216,11 @@ export const handlers: ServiceHandlers<ShapeOf<typeof WatchUiService>, ApiContex
     );
   },
 
+  /**
+   * AIP-133 with AIP-155. Without a watch_id the Worker names the watch, so a repeat of the request_id is logged under
+   * the collection (`watches`): a retry after a lost response answers the watch the first request made, never a new
+   * one and never BAD_REQUEST.
+   */
   async createWatch(request, ctx) {
     const watch = request.watch ?? bad();
     const id = request.watchId === '' ? makeWatchId() : request.watchId;
@@ -224,10 +229,13 @@ export const handlers: ServiceHandlers<ShapeOf<typeof WatchUiService>, ApiContex
     watch.uri = config.uri;
     const settings = JSON.stringify(settingsWire(watch));
     const hashes = { read_hash: await readHash(config), check_hash: await checkHash(config) };
-    const answer = once(ctx, request.requestId, 'CreateWatch', `watches/${id}`, WatchSchema, () => {
+    const resource = request.watchId === '' ? 'watches' : `watches/${id}`;
+    const answer = once(ctx, request.requestId, 'CreateWatch', resource, WatchSchema, () => {
       const found = ctx.store.watch(id);
       if (found !== undefined) throw watchError('WATCH_EXISTS', message(ctx, found));
       if (ctx.store.watchCount() >= WATCHES_MAX) throw watchError('WATCHES_FULL');
+      // A preview just fetched the URL: that fetch counts for its 15 minutes, so the first check comes after them.
+      const fetchedAt = ctx.store.urlFetchedAt(config.uri, ctx.now);
       ctx.store.insertWatch({
         id,
         settings,
@@ -239,9 +247,9 @@ export const handlers: ServiceHandlers<ShapeOf<typeof WatchUiService>, ApiContex
         create_time: ctx.now,
         update_time: ctx.now,
         shadow_end: shadowEnd(null, watch.shadowMode, ctx.now),
-        next_check_at: ctx.now,
+        next_check_at: fetchedAt === null ? ctx.now : Math.max(ctx.now, fetchedAt + URL_MIN_SPACING_MS),
         check_requested: 0,
-        last_fetch_at: null,
+        last_fetch_at: fetchedAt,
         last_check_at: null,
         last_success_at: null,
         last_outcome: null,
@@ -299,8 +307,8 @@ export const handlers: ServiceHandlers<ShapeOf<typeof WatchUiService>, ApiContex
       let nextCheck = current.next_check_at;
       if (current.state !== 'paused' && checkChanged) nextCheck = ctx.now;
       else if (current.state !== 'paused' && intervalChanged) nextCheck = nextCheckAt(id, ctx.now, config.intervalMinutes, current.last_fetch_at);
-      // A pending change was found with the old settings: it is dropped (the next check evaluates again).
-      if (checkChanged && current.pending_change !== null) ctx.store.run(`DELETE FROM changes WHERE id = ?`, current.pending_change);
+      // A pending change stays: its confirmation fetch evaluates it under the new settings, or, when what is read
+      // changed, confirms it as it was seen with a note (pipeline.ts). It is never dropped unseen.
       ctx.store.updateWatch(id, {
         settings: stored,
         host: config.host,
@@ -309,7 +317,6 @@ export const handlers: ServiceHandlers<ShapeOf<typeof WatchUiService>, ApiContex
         update_time: ctx.now,
         shadow_end: shadowEnd(current, shadow, ctx.now),
         next_check_at: nextCheck,
-        ...(checkChanged ? { pending_change: null } : {}),
       });
       return message(ctx, existing(ctx, id));
     });
@@ -426,7 +433,7 @@ export const handlers: ServiceHandlers<ShapeOf<typeof WatchUiService>, ApiContex
   async getServiceStatus(request, ctx) {
     if (request.name !== 'serviceStatus') notFound();
     const rows = ctx.store.watches();
-    const counts = ctx.store.changeCounts();
+    const counts = ctx.store.openCounts();
     const ledger = ctx.store.ledger(utcDay(ctx.now));
     const alarm = await ctx.alarmAt();
     const lastAlarm = ctx.store.getMeta('last_alarm_at');

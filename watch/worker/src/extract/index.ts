@@ -9,7 +9,7 @@
  */
 import type { SourceConfig } from '../config.ts';
 import { contentTypeFits, isMojibake, isTooShort, type FailureCode } from '../health.ts';
-import { detectCharset, decodeBody, mediaType, relabelled, type Charset } from './charset.ts';
+import { asUtf8, detectCharset, decodeBody, mediaType, relabelled, type Charset } from './charset.ts';
 import { parseFeed } from './feed.ts';
 import { extractHtml, scriptTexts, type HtmlBlock } from './html.ts';
 import { markdownLines } from './markdown.ts';
@@ -55,12 +55,26 @@ function markdownAllowed(source: SourceConfig): boolean {
   return source.kind === 'html' && source.include.length === 0 && source.exclude.length === 0;
 }
 
-/** Stage 2 with its health checks. */
+/**
+ * Stage 2 with its health checks. A body no parser can read is PARSE_ERROR (a health failure with its code), never an
+ * exception: the page decides what reaches here.
+ */
 export async function extract(options: ExtractOptions): Promise<Extraction> {
-  const { source, body } = options;
   const type = mediaType(options.contentType);
-  const charset = detectCharset(options.contentType, body);
+  const charset = detectCharset(options.contentType, options.body);
   const info: { charset: Charset; mediaType: string; markdown: boolean; blocks: HtmlBlock[] } = { charset, mediaType: type, markdown: false, blocks: [] };
+  try {
+    return await extractAs(options, type, info);
+  } catch {
+    return { ok: false, failure: 'PARSE_ERROR', info };
+  }
+}
+
+async function extractAs(options: ExtractOptions, type: string, info: { charset: Charset; mediaType: string; markdown: boolean; blocks: HtmlBlock[] }): Promise<Extraction> {
+  const { source } = options;
+  const { charset } = info;
+  // HTMLRewriter reads ASCII-compatible encodings only: a UTF-16 body is handed on as UTF-8.
+  const { bytes: body, label } = asUtf8(options.body, charset.label);
   const fail = (failure: FailureCode): Extraction => ({ ok: false, failure, info });
   const done = (page: RawPage): Extraction => ({ ok: true, page, info });
   if (!contentTypeFits(source, type, markdownAllowed(source))) return fail('WRONG_CONTENT_TYPE');
@@ -69,13 +83,13 @@ export async function extract(options: ExtractOptions): Promise<Extraction> {
     case 'html': {
       if (type === 'text/markdown') {
         info.markdown = true;
-        const text = decodeBody(body, charset.label);
+        const text = decodeBody(body, label);
         if (isMojibake(text)) return fail('MOJIBAKE');
         const { lines, truncated } = markdownLines(text, source.keepLinks, options.url);
         if (isTooShort(lines)) return fail('TOO_SHORT');
         return done({ lines, items: null, availability: null, truncated });
       }
-      const result = await extractHtml(relabelled(body, charset.label), {
+      const result = await extractHtml(relabelled(body, label), {
         include: source.include,
         exclude: source.exclude,
         keepLinks: source.keepLinks,
@@ -92,21 +106,21 @@ export async function extract(options: ExtractOptions): Promise<Extraction> {
     }
     case 'embedded': {
       const selector = source.embedded === 'json_ld' ? 'script[type="application/ld+json"]' : 'script#__NEXT_DATA__';
-      const texts = await scriptTexts(relabelled(body, charset.label), selector, 50);
+      const texts = await scriptTexts(relabelled(body, label), selector, 50);
       if (texts.some(isMojibake)) return fail('MOJIBAKE');
       const structured = source.embedded === 'json_ld' ? readJsonLd(texts, source.path) : texts[0] === undefined ? null : jsonValuesOf(parseJson(texts[0]), source.path);
       if (structured === null || structured.lines.length === 0) return fail('PARSE_ERROR');
       return done({ lines: structured.lines, items: structured.items, availability: structured.availability, truncated: false });
     }
     case 'feed': {
-      const text = decodeBody(body, charset.label);
+      const text = decodeBody(body, label);
       if (isMojibake(text)) return fail('MOJIBAKE');
       const feed = parseFeed(text, source.includeSummaries);
       if (!feed.ok) return fail('PARSE_ERROR');
       return done({ lines: feed.items.map((item) => item.text), items: feed.items, availability: null, truncated: false });
     }
     case 'json': {
-      const text = decodeBody(body, charset.label);
+      const text = decodeBody(body, label);
       const values = jsonValuesOf(parseJson(text), source.path);
       if (values === null || values.lines.length === 0) return fail('PARSE_ERROR');
       if (isMojibake(values.lines.join('\n'))) return fail('MOJIBAKE');

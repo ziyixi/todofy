@@ -15,7 +15,7 @@ import type { TriggerConfig, TriggerKind } from './config.ts';
 import type { Content } from './content.ts';
 import { diffLines, type DiffResult } from './diff.ts';
 import { AVAILABLE } from './extract/structured.ts';
-import { DIFF_LINE_MAX, DIFF_LINES_KEPT } from './limits.ts';
+import { DIFF_JSON_MAX, DIFF_LINE_MAX, DIFF_LINES_KEPT } from './limits.ts';
 
 export type SuppressionCode = 'BELOW_THRESHOLD' | 'TRIGGER_NOT_MET' | 'FLICKER';
 
@@ -38,10 +38,26 @@ export interface KeptDiff {
   readonly truncated: boolean;
 }
 
-/** The diff lines a change keeps: at most DIFF_LINES_KEPT of at most DIFF_LINE_MAX characters. */
+/**
+ * The diff lines a change keeps: at most DIFF_LINES_KEPT of at most DIFF_LINE_MAX characters, and no more lines than
+ * fit DIFF_JSON_MAX bytes of stored JSON.
+ */
 export function keptDiff(diff: DiffResult): KeptDiff {
-  const lines = diff.ops.slice(0, DIFF_LINES_KEPT).map((op) => ({ kind: op.kind, text: op.text.length > DIFF_LINE_MAX ? `${op.text.slice(0, DIFF_LINE_MAX - 1)}…` : op.text }));
-  const cut = diff.ops.length > DIFF_LINES_KEPT || diff.ops.some((op) => op.text.length > DIFF_LINE_MAX);
+  const encoder = new TextEncoder();
+  const lines: { kind: 'added' | 'removed'; text: string }[] = [];
+  let bytes = 2;
+  let cut = diff.ops.length > DIFF_LINES_KEPT;
+  for (const op of diff.ops.slice(0, DIFF_LINES_KEPT)) {
+    const line = { kind: op.kind, text: op.text.length > DIFF_LINE_MAX ? `${op.text.slice(0, DIFF_LINE_MAX - 1)}…` : op.text };
+    if (line.text !== op.text) cut = true;
+    const size = encoder.encode(JSON.stringify(line)).byteLength + 1;
+    if (bytes + size > DIFF_JSON_MAX) {
+      cut = true;
+      break;
+    }
+    bytes += size;
+    lines.push(line);
+  }
   return { lines, truncated: cut };
 }
 
@@ -116,3 +132,9 @@ export function evaluate(trigger: TriggerConfig, baseline: Content, previous: Co
 
 /** The summary of a flicker or a revert (the page went back to the notified state within the window). */
 export const REVERTED_SUMMARY = '变化在确认前又恢复了原样';
+/** The summary of a change whose confirmation could not be fetched within its window, seen back at the notified state later. */
+export const LATE_REVERT_SUMMARY = '变化未能及时确认，之后又恢复了原样';
+/** Added to the summary of a change confirmed as it was seen: its confirmation fetch kept failing past the window. */
+export const NOTE_UNCONFIRMED = '（二次确认未能抓取，按所见确认）';
+/** Added to the summary of a change confirmed as it was seen: the owner changed what is read before its confirmation. */
+export const NOTE_SETTINGS_CHANGED = '（设置已更改，未经二次确认）';

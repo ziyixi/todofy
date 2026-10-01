@@ -8,10 +8,12 @@
  * is passed in (Node has no HTMLRewriter, the unit tests pass a stand-in).
  *
  * Two hashes of a config decide what a check may reuse (pipeline.ts):
- * - `readHash`: what is read (uri, source, normalize, fetcher, request_locale, fetch_policy). When it changes, the next
- *   check sets a new notified state without a change;
- * - `checkHash`: everything the pipeline uses (also the trigger and the confirmation). When it changes, the next check
- *   evaluates its page even if the bytes did not change.
+ * - `readHash`: what is read (uri, source, the masks of normalize, fetcher, request_locale, fetch_policy). When it
+ *   changes, the next check sets a new notified state without a change. normalize.ignored_lines is not part of it:
+ *   ignored lines are dropped from both sides of every comparison (content.ts viewOf), so an ignore keeps the notified
+ *   state and any difference building up against it;
+ * - `checkHash`: everything the pipeline uses (also the ignored lines, the trigger and the confirmation). When it
+ *   changes, the next check evaluates its page even if the bytes did not change.
  */
 import {
   EmbeddedSource_Kind,
@@ -281,9 +283,8 @@ export async function sha256Hex(data: string | Uint8Array): Promise<string> {
 
 /** What is read: when it changes, the notified state is set again without a change. */
 export function readHash(config: WatchConfig): Promise<string> {
-  return sha256Hex(
-    canonical({ uri: config.uri, source: config.source, normalize: config.normalize, fetcher: config.fetcher, locale: config.locale, allowHttp: config.allowHttp, ignoreRobots: config.ignoreRobots }),
-  );
+  const masks = { defaultMasks: config.normalize.defaultMasks, maskNumbers: config.normalize.maskNumbers };
+  return sha256Hex(canonical({ uri: config.uri, source: config.source, normalize: masks, fetcher: config.fetcher, locale: config.locale, allowHttp: config.allowHttp, ignoreRobots: config.ignoreRobots }));
 }
 
 /** Everything a check's decision depends on: when it changes, an unchanged page is evaluated again. */
@@ -291,8 +292,11 @@ export function checkHash(config: WatchConfig): Promise<string> {
   return sha256Hex(canonical({ read: { uri: config.uri, source: config.source, normalize: config.normalize, fetcher: config.fetcher, locale: config.locale }, trigger: config.trigger, confirm: config.confirmDelayMinutes }));
 }
 
-/** The Accept header of a check (docs/design.md §4): what the source can read, best first. */
-export function acceptFor(source: SourceConfig): string {
+/**
+ * The Accept header of a fetch (docs/design.md §4): what the source can read, best first. A preview of a page asks for
+ * HTML only: the phone's block picker needs elements, and its selectors come from them.
+ */
+export function acceptFor(source: SourceConfig, preview = false): string {
   switch (source.kind) {
     case 'feed':
       return 'application/feed+json, application/atom+xml, application/rss+xml, application/xml;q=0.9, text/xml;q=0.9, application/json;q=0.8';
@@ -301,7 +305,7 @@ export function acceptFor(source: SourceConfig): string {
     case 'embedded':
       return 'text/html, application/xhtml+xml;q=0.9';
     case 'html':
-      // Markdown (a site's own rendering for agents) only when nothing selects elements: selectors need HTML.
-      return source.include.length === 0 && source.exclude.length === 0 ? 'text/markdown, text/html;q=0.9, application/xhtml+xml;q=0.8' : 'text/html, application/xhtml+xml;q=0.9';
+      // Markdown (a site's own rendering for agents) only for a check that selects no elements: selectors need HTML.
+      return !preview && source.include.length === 0 && source.exclude.length === 0 ? 'text/markdown, text/html;q=0.9, application/xhtml+xml;q=0.8' : 'text/html, application/xhtml+xml;q=0.9';
   }
 }
