@@ -56,7 +56,10 @@ prefix `/_/api/v1/` (its host's other paths are short links).
    an `additional_binding`, or demoting the old primary binding to one, is compatible), a lost
    `method_signature`, a `google.api.resource` whose type changed or that lost a pattern, an existing input
    field that gains `OUTPUT_ONLY` or `IDENTIFIER` (the transcoder would drop what clients send), and a
-   `(google.api.field_info).format` added to or changed on an existing field. Like buf, it skips the
+   `(google.api.field_info).format` added to or changed on an existing field. For the wire options of
+   `common/wire/v1`: an existing map that gains or loses `keep_order` (every producer's bytes change) and an
+   existing method that gains or loses `positional` (callers and receivers would disagree on the arguments);
+   value rules are reviewed with the contract's fixtures, like a JSON Schema's. Like buf, it skips the
    directories `buf.yaml` lists under `breaking.ignore` (the runtimes' fixtures). `scripts/rules-selftest.sh`
    proves the rules bite (30 cases, on `task_intent.proto`, `lab/ui/v1` and `prototest`).
 5. **Adding an enum value is compatible by design**, so neither buf nor the profile check flags it. What
@@ -70,18 +73,19 @@ prefix `/_/api/v1/` (its host's other paths are short links).
 | --- | --- |
 | `buf.yaml`, `buf.lock` | The module (`path: .`, tooling directories excluded), lint and breaking rules, the `buf.build/googleapis/googleapis` dependency pinned by commit and digest |
 | `buf.gen.yaml` | protobuf-es v2 (`target=ts`, `import_extension=ts`, `erasable_syntax=true`) into `ts/` |
-| `<package path>/*.proto` | One directory per proto package: `todofy/taskintent/v1/task_intent.proto` is `todofy.taskintent.v1`; `lab/ui/v1/*.proto` is `lab.ui.v1`, Lab's owner UI API; `links/ui/v1/*.proto` is `links.ui.v1`, the links app's owner API; `common/errors/v1/errors.proto` is `common.errors.v1`, the error reasons every HTTP API shares |
+| `<package path>/*.proto` | One directory per proto package: `todofy/taskintent/v1/task_intent.proto` is `todofy.taskintent.v1`; `lab/ui/v1/*.proto` is `lab.ui.v1`, Lab's owner UI API; `links/ui/v1/*.proto` is `links.ui.v1`, the links app's owner API; `common/errors/v1/errors.proto` is `common.errors.v1`, the error reasons every HTTP API shares; `common/wire/v1/wire.proto` is `common.wire.v1`, the wire profile's own options ([Value rules](#value-rules), `keep_order`, `positional`) |
 | `package.json`, `package-lock.json` | The toolchain pins (`dependencies`: buf, protoc-gen-es, the runtime) and this folder's test tools (`devDependencies`) |
-| `ts/` | The TypeScript package `@ziyixi/proto`. Committed: `package.json` (its exports), `wire-json.ts` and `field-mask.ts` (the codec), `http-path.ts`, `http-rule.ts`, `http-transcoder.ts`, `http-client.ts` and `rpc-status.ts` (the HTTP runtime, [HTTP APIs](#http-apis)), `page-token.ts` and `filter.ts` (AIP-158 page tokens and the AIP-160 subset for list methods), `protobuf.ts` / `protobuf-wkt.ts` (the runtime re-exports). Generated: every directory (`ts/todofy/...`, `ts/lab/...`, `ts/common/...`, `ts/google/...`) |
-| `python/` | The Python package `ziyixi-proto`. Committed: `pyproject.toml` (static metadata, uv cache keys), `build_backend.py`, `src/ziyixi_proto/__init__.py` and `wire_json.py` (the codec). Generated: every directory under `src/ziyixi_proto/`, for the packages `tools/gen_py.py` lists in `PYTHON_PACKAGES` only; the wheel leaves the test-only ones out (`TEST_ONLY_PACKAGES`) |
+| `ts/` | The TypeScript package `@ziyixi/proto`. Committed: `package.json` (its exports), `wire-json.ts`, `wire-rules.ts` and `field-mask.ts` (the codec and its value rules), `http-path.ts`, `http-rule.ts`, `http-transcoder.ts`, `http-client.ts` and `rpc-status.ts` (the HTTP runtime, [HTTP APIs](#http-apis)), `page-token.ts` and `filter.ts` (AIP-158 page tokens and the AIP-160 subset for list methods), `protobuf.ts` / `protobuf-wkt.ts` (the runtime re-exports). Generated: every directory (`ts/todofy/...`, `ts/lab/...`, `ts/common/...`, `ts/google/...`) |
+| `python/` | The Python package `ziyixi-proto`. Committed: `pyproject.toml` (static metadata, uv cache keys), `build_backend.py`, `src/ziyixi_proto/__init__.py` and `wire_json.py` (the codec and its value rules). Generated: every directory under `src/ziyixi_proto/`, for the packages `tools/gen_py.py` lists in `PYTHON_PACKAGES` only; the wheel leaves the test-only ones out (`TEST_ONLY_PACKAGES`) |
 | `tools/ensure.mjs` | Installs the pinned toolchain when `node_modules/` does not match the lockfile, and generates both languages when its stamp (`.generated.json`, ignored) does not match |
 | `tools/gen_py.py` | The stdlib-only Python generator (frozen dataclasses, `IntEnum`s, field tables), for `PYTHON_PACKAGES` only: `todofy.taskintent.v1` (todofy-core imports it) and `prototest.v1` (this folder's Python tests). A package only TypeScript apps use (an app's UI API) is not generated, so it may use what the Python profile lacks |
+| `tools/wire_rules.py` | The value rules of `common/wire/v1` as the generators read them from a buf image, and the check that refuses a rule that cannot apply where it is written (every package) |
 | `tools/profile_breaking.py` | The profile's breaking rules (rule 4) |
 | `scripts/breaking.sh`, `scripts/rules-selftest.sh` | The breaking gate against a base commit; the rules self-test |
 | `scripts/api-lint.sh`, `tools/api-linter/` | Google's api-linter on every package but `prototest/`: a Go tool module (`go.mod` pins api-linter, the googleapis Go code it interprets annotations with and the Go toolchain, `go.sum` every checksum) that the script builds into `.tools/` (ignored), with `googleapis/`, the check that this googleapis equals `buf.lock`'s for every file the module imports (rule 3) |
-| `prototest/v1/prototest.proto` | Test fixtures of the runtimes, never used by an app (not in the Python wheel; a change deploys nothing): a message with every field kind of the profile and a service with every kind of HTTP binding, an AIP-134 update with a field mask among them |
+| `prototest/v1/prototest.proto` | Test fixtures of the runtimes, never used by an app (not in the Python wheel; a change deploys nothing): a message with every field kind of the profile and a service with every kind of HTTP binding, an AIP-134 update with a field mask among them; `prototest/v1/rules.proto`, a union with every value rule and a binding service with positional and object requests |
 | `testdata/http-cases.json` | The HTTP runtime's cases on `prototest.v1.BookService`: 64 requests and what the transcoder answers, 19 request messages and what the client sends; every implementation (a Python transcoder later) runs them |
-| `testdata/wire-profile-cases.json` | 69 edge cases (timestamps, integer and double spellings, enum look-alikes, maps, field masks, missing fields, null) that both codecs must answer identically |
+| `testdata/wire-profile-cases.json` | 105 edge cases (timestamps, integer and double spellings, enum look-alikes, maps, field masks, missing fields, null, every value rule and `keep_order`) that both codecs must answer identically |
 | `testdata/filter-cases.json` | The AIP-160 subset of `ts/filter.ts`: 29 filters and their literals or refusal, 4 search-box texts and their quoted filter |
 | `test/*.test.ts`, `test/python/` | The codec and IDL tests, the same cases in both languages; `test/cross-language.test.ts` pipes bytes through both codecs (`test/python/roundtrip.py` in a child process); `test/ensure.test.ts` runs `tools/ensure.mjs` on a copy of this folder (a deleted toolchain, an abandoned lock, the commands Windows needs) |
 
@@ -93,7 +97,7 @@ file there is hand-written.
 `tools/ensure.mjs` checks two things: that `node_modules/` holds every package `package-lock.json` pins,
 at that version (the generated code imports the protobuf-es runtime from there, so a deleted
 `proto/node_modules` is restored even when the generated files are current), and that its inputs (every
-`.proto` file, `buf.yaml`, `buf.lock`, `buf.gen.yaml`, `package-lock.json`, itself and `gen_py.py`) and every
+`.proto` file, `buf.yaml`, `buf.lock`, `buf.gen.yaml`, `package-lock.json`, itself, `gen_py.py` and `wire_rules.py`) and every
 generated file still match the stamp `.generated.json`. When both hold it exits in about 0.1 s without
 touching the network. Otherwise, under a lock, it installs the whole lockfile (`npm ci`: the generator, the
 runtime and this folder's test and editor types), runs `buf generate` and `buf build | gen_py.py` into a
@@ -254,11 +258,42 @@ contracts send:
 - **strict** reads (inputs) refuse unknown fields and enum names, `null`, wrong types and a missing
   `REQUIRED` field; **lenient** reads (outputs) skip unknown fields and read unknown enum names as 0, both
   listed by path in `unrecognized` (never with values); a wrong type or a missing `REQUIRED` field still
-  fails.
+  fails. The one `null` a strict read takes is that of a `REQUIRED` field declared `optional`: "always present,
+  may be null" (ops-v1's `SetGuardInput.until` for a normal guard), exactly what `toWire` writes for it;
+- a map with `(common.wire.v1.field).keep_order` is written in the order its entries were set, and a read keeps
+  the wire's order (array-index keys first, as JavaScript orders an object): ops-v1's counters and metrics list
+  their names in the order each producer chose;
+- a method with `(common.wire.v1.method).positional` is called over a service binding with its request's fields as
+  arguments, in field-number order (`status()`, `canaryDelivery(eventId)`), instead of the request as one wire
+  object (`toWireArguments`, `fromWireArguments` in TypeScript).
 
-Value rules (lengths, patterns, ranges, allow-lists) are not part of the IDL or the profile. They stay
-with each contract (its JSON Schema and each app's own checks), and a consumer applies the value rules its
-control flow depends on even on a lenient read.
+### Value rules
+
+A contract states its value rules in the IDL, next to its fields, with the options of
+[`common/wire/v1/wire.proto`](common/wire/v1/wire.proto): a file's named string formats (`Code`, `Timestamp`: an
+anchored regular expression in the subset ECMAScript and Python read alike, and a length), and per field a format,
+an `allowed` list (an enum-like string, or a subset of an enum), number bounds, list and map sizes, unique items,
+map key formats and required keys, and, in a union (a message with a `discriminator`), the presence and extra
+bounds of each field per discriminator value. That is the one source of a contract's validation:
+
+- both codecs check every rule on every read and every write (`ts/wire-rules.ts`; the rule part of
+  `wire_json.py`, from the tables `tools/gen_py.py` writes): a message that breaks one is refused like a wrong
+  type, with a path and the rule's name, never the value, so neither a producer bug nor a bad input crosses the
+  wire. A lenient read checks the same rules, with two consumer allowances: a field's cases are skipped when
+  the reader does not know the discriminator's value, and an `open` allowed list (codes that may grow within the
+  major version, ops-v1's `reason` and `waiting_code`) accepts any value of the field's format. A consumer that
+  passes on what it read writes with `toWire(..., { lenient: true })` (`to_wire(..., lenient=True)`);
+- producers read bounds from the descriptors instead of copying them (`fieldRules(field).maxItems`,
+  `field_rules(cls, name).max_items`);
+- `tools/wire_rules.py` refuses at generation a rule that cannot mean anything where it is written (an unknown
+  format, `allowed` on a number, a presence case on a field that always has a value, a case value the
+  discriminator lacks, a pattern the two engines read differently), for every package;
+- `testdata/wire-profile-cases.json` runs every rule in both languages on `prototest/v1/rules.proto`.
+
+What a rule cannot say stays with the contract's code: rules relative to a clock (ops-v1's guard `until` at most
+36 h ahead), sizes of a whole message (an 8 KiB report) and allow-lists that depend on another service (a URL host).
+A contract without rules in the IDL yet (task-intent-v1) keeps them in its JSON Schema and each app's checks, and a
+consumer applies the value rules its control flow depends on even on a lenient read.
 
 Why not ProtoJSON: it renames fields to lowerCamelCase, writes enums as `"STATE_PENDING"`, omits
 `null`s, and its "ignore unknown" mode silently turns every v1 enum value into 0. Why not the official

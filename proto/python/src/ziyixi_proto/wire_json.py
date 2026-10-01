@@ -37,6 +37,16 @@ tables), uses only the standard library and therefore runs on Pyodide unchanged.
 - A google.protobuf.FieldMask is a tuple of paths in Python and one string of comma-separated snake_case
   paths on the wire (``"send_mode,author.name"``; ``""`` has none); a path is ``*`` or dotted field names
   (proto/ts/field-mask.ts).
+- A map with ``(common.wire.v1.field).keep_order`` is written in the order its entries were set (a read keeps
+  the wire's order), array-index keys first, as JavaScript orders an object's keys.
+- ``strict`` refuses null except for a REQUIRED field declared ``optional``: "always present, may be null"
+  (ops-v1's SetGuardInput.until), exactly what ``to_wire`` writes for it.
+- Value rules (``(common.wire.v1.field)``; gen_py.py resolves them into the field tables, ``Rules``) are checked on
+  every message read or written, as proto/ts/wire-rules.ts checks them: the first rule broken raises
+  ``WireJsonError`` with a path and the rule's name, never the value. A union (``UNIONS``: a message's
+  discriminator) checks a field's cases only when the reader knows the discriminator's value; an enum value a
+  lenient read did not know has a value but none to compare; ``open`` lets a lenient read accept a value
+  outside ``allowed``.
 """
 
 import datetime
@@ -59,6 +69,50 @@ class WireJsonError(ValueError):
     """The JSON is not a valid message of the requested type in this mode."""
 
 
+class Format(NamedTuple):
+    """A named string format of a .proto file (common.wire.v1.Format)."""
+
+    name: str
+    pattern: str
+    max_length: int = 0
+
+
+class Bounds(NamedTuple):
+    """The rules a case adds to a field's own (common.wire.v1.Case.rules)."""
+
+    allowed: frozenset[str] | None = None
+    minimum: float | None = None
+    maximum: float | None = None
+
+
+class Case(NamedTuple):
+    """A field's rules for some values of its message's discriminator (common.wire.v1.Case)."""
+
+    when: frozenset[str]
+    presence: str = ""  # "", "required", "absent", "optional"
+    bounds: Bounds = Bounds()
+
+
+class Rules(NamedTuple):
+    """A field's value rules (common.wire.v1.Field), its formats resolved by gen_py.py."""
+
+    format: Format | None = None
+    allowed: frozenset[str] | None = None
+    open: bool = False
+    minimum: float | None = None
+    maximum: float | None = None
+    max_items: int = 0
+    unique: bool = False
+    key_format: Format | None = None
+    required_keys: tuple[str, ...] = ()
+    keep_order: bool = False
+    cases: tuple[Case, ...] = ()
+    otherwise: str = ""
+
+
+NO_RULES = Rules()
+
+
 class Field(NamedTuple):
     """One row of a generated module's ``FIELDS`` table."""
 
@@ -70,10 +124,25 @@ class Field(NamedTuple):
     optional: bool  # explicit presence: unset is None
     required: bool  # google.api.field_behavior = REQUIRED
     value: str = ""  # a map's value kind (string, bool, int32, double, enum, message)
+    declared_optional: bool = False  # declared `optional` in the .proto file (a strict read takes null if REQUIRED)
+    rules: Rules = NO_RULES
 
 
 def _fields(cls: type) -> tuple[Field, ...]:
     return sys.modules[cls.__module__].FIELDS[cls]
+
+
+def _union(cls: type) -> str | None:
+    """The name of a union message's discriminator field (the generated ``UNIONS`` table)."""
+    return sys.modules[cls.__module__].UNIONS.get(cls)
+
+
+def field_rules(cls: type, name: str) -> Rules:
+    """The value rules of the field ``name`` of the generated message ``cls`` (e.g. a list's ``max_items``)."""
+    for field in _fields(cls):
+        if field.name == name:
+            return field.rules
+    raise KeyError(f"{cls.__name__} has no field {name}")
 
 
 def _enum_out(value: enum.IntEnum) -> str | None:
@@ -162,8 +231,24 @@ def _map_key_order(key: str) -> tuple[int, int, list[int]]:
     return (1, 0, [ord(char) for char in key])
 
 
-def to_wire(message: Any) -> dict[str, Any]:
-    """The wire JSON object of ``message`` (pass it to json.dumps)."""
+def _insertion_order(key: str) -> tuple[int, int]:
+    """The order JavaScript gives an object's keys set in this order: array-index keys first, numerically, then
+    the others as they were set (Python's sort is stable)."""
+    if key.isascii() and key.isdigit() and str(int(key)) == key and int(key) < ARRAY_INDEX_LIMIT:
+        return (0, int(key))
+    return (1, 0)
+
+
+def to_wire(message: Any, *, lenient: bool = False) -> dict[str, Any]:
+    """The wire JSON object of ``message`` (pass it to json.dumps). Checks its value rules first. ``lenient``: the
+    message was read leniently and is passed on, so a value outside an ``open`` allowed list is written as read."""
+    violation = _violation(message, "", lenient=lenient, unrecognized=frozenset())
+    if violation is not None:
+        raise WireJsonError(violation)
+    return _write(message)
+
+
+def _write(message: Any) -> dict[str, Any]:
     out: dict[str, Any] = {}
     for field in _fields(type(message)):
         value = getattr(message, field.name)
@@ -173,7 +258,8 @@ def to_wire(message: Any) -> dict[str, Any]:
                 out[field.name] = items
             continue
         if field.kind == "map":
-            entries = {key: _value_out(field.value, field, value[key]) for key in sorted(value, key=_map_key_order)}
+            order = _insertion_order if field.rules.keep_order else _map_key_order
+            entries = {key: _value_out(field.value, field, value[key]) for key in sorted(value, key=order)}
             if None in entries.values():
                 raise WireJsonError(f"{field.name}: a map value cannot be the zero enum value")
             if entries or field.required:
@@ -200,7 +286,7 @@ def _value_out(kind: str, field: Field, value: Any) -> Any:
     # producer bug never reaches the wire.
     match kind:
         case "message":
-            return to_wire(value)
+            return _write(value)
         case "enum":
             return _enum_out(value)
         case "double":
@@ -235,9 +321,13 @@ class ReadResult(NamedTuple):
 
 
 def from_wire(cls: type, value: Any, *, strict: bool = False) -> ReadResult:
-    """Reads a parsed wire JSON value into a ``cls`` instance."""
+    """Reads a parsed wire JSON value into a ``cls`` instance and checks its value rules."""
     unrecognized: list[str] = []
-    return ReadResult(_read(cls, value, "", strict, unrecognized), unrecognized)
+    message = _read(cls, value, "", strict, unrecognized)
+    violation = _violation(message, "", lenient=not strict, unrecognized=frozenset(unrecognized))
+    if violation is not None:
+        raise WireJsonError(violation)
+    return ReadResult(message, unrecognized)
 
 
 def _read(cls: type, value: Any, path: str, strict: bool, unrecognized: list[str]) -> Any:
@@ -255,8 +345,9 @@ def _read(cls: type, value: Any, path: str, strict: bool, unrecognized: list[str
             continue
         if item is None:
             # null is how outputs write "no value"; inputs omit the field instead, so a strict (input)
-            # reader refuses it, and a lenient one takes it only where to_wire writes it.
-            if strict:
+            # reader refuses it, except for a REQUIRED field declared `optional`, whose null is the value "none"
+            # (to_wire writes it so); a lenient one takes it only where to_wire writes it.
+            if strict and not (field.required and field.declared_optional):
                 raise WireJsonError(f"{at}: null")
             if not _nullable(field):
                 raise WireJsonError(f"{at}: wrong type")
@@ -318,3 +409,123 @@ def _value_in(kind: str, ref: Any, item: Any, at: str, strict: bool, unrecognize
                 unrecognized.append(at)
             return member
     raise WireJsonError(f"{at}: wrong type")
+
+
+# ---- value rules (proto/ts/wire-rules.ts is the twin) ----------------------------------------------------
+
+
+@functools.cache
+def _regex(pattern: str) -> re.Pattern[str]:
+    return re.compile(pattern)
+
+
+def _matches(format: Format, value: str) -> bool:
+    return _regex(format.pattern).fullmatch(value) is not None and (
+        format.max_length == 0 or len(value) <= format.max_length
+    )
+
+
+def _join(path: str, name: str) -> str:
+    return name if path == "" else f"{path}.{name}"
+
+
+def _violation(message: Any, path: str, *, lenient: bool, unrecognized: frozenset[str]) -> str | None:
+    """The first rule ``message`` (at ``path``) breaks, as ``<path>: <rule>``, or None."""
+    variant = None
+    union = _union(type(message))
+    if union is not None and _join(path, union) not in unrecognized:
+        variant = _enum_out(getattr(message, union))
+    for field in _fields(type(message)):
+        violation = _field_violation(message, field, _join(path, field.name), variant, lenient, unrecognized)
+        if violation is not None:
+            return violation
+    return None
+
+
+def _has_value(value: Any, field: Field, at: str, unrecognized: frozenset[str]) -> bool:
+    """An enum other than its zero value (or one the read did not know), a set message or ``optional`` scalar, an
+    implicit scalar other than its default unless it is REQUIRED (always written, so ``"version": ""`` is a value to
+    check), and always a list or a map."""
+    if field.repeated or field.kind == "map":
+        return True
+    if field.kind == "enum":
+        return value != 0 or at in unrecognized
+    if field.optional:
+        return value is not None
+    return field.required or value != DEFAULTS.get(field.kind)
+
+
+def _field_violation(
+    message: Any, field: Field, at: str, variant: str | None, lenient: bool, unrecognized: frozenset[str]
+) -> str | None:
+    rules = field.rules
+    value = getattr(message, field.name)
+    active = None if variant is None else next((case for case in rules.cases if variant in case.when), None)
+    presence = "" if variant is None else (active.presence if active is not None else rules.otherwise)
+    has = _has_value(value, field, at, unrecognized)
+    if presence == "required" and not has:
+        return f"{at}: required when the discriminator is {variant}"
+    if presence == "absent" and has:
+        return f"{at}: not allowed when the discriminator is {variant}"
+    if not has:
+        return None
+    extra = () if active is None else (active.bounds,)
+    if field.kind == "map":
+        if rules.max_items and len(value) > rules.max_items:
+            return f"{at}: more than {rules.max_items} entries"
+        if any(key not in value for key in rules.required_keys):
+            return f"{at}: lacks a required key"
+        for key, item in value.items():
+            if rules.key_format is not None and not _matches(rules.key_format, key):
+                return f"{at}{{}}: a key does not match {rules.key_format.name}"
+            violation = _item_violation(
+                field.value, item, f"{at}{{}}", rules._replace(format=None, allowed=None), extra, lenient, unrecognized
+            )
+            if violation is not None:
+                return violation
+        return None
+    if field.repeated:
+        if rules.max_items and len(value) > rules.max_items:
+            return f"{at}: more than {rules.max_items} items"
+        if rules.unique and len(set(value)) != len(value):
+            return f"{at}: items are not unique"
+        for i, item in enumerate(value):
+            violation = _item_violation(field.kind, item, f"{at}[{i}]", rules, extra, lenient, unrecognized)
+            if violation is not None:
+                return violation
+        return None
+    return _item_violation(field.kind, value, at, rules, extra, lenient, unrecognized)
+
+
+def _item_violation(
+    kind: str, value: Any, at: str, rules: Rules, extra: tuple[Bounds, ...], lenient: bool, unrecognized: frozenset[str]
+) -> str | None:
+    """The rules of one value: a singular field's, a list item's or a map value's."""
+    match kind:
+        case "message":
+            return _violation(value, at, lenient=lenient, unrecognized=unrecognized)
+        case "enum":
+            if at in unrecognized:
+                return None  # a value this build does not know: nothing to compare
+            name = _enum_out(value)
+            return None if name is None else _allowed_violation(name, at, rules, extra, lenient)
+        case "string":
+            if rules.format is not None and not _matches(rules.format, value):
+                return f"{at}: does not match {rules.format.name}"
+            return _allowed_violation(value, at, rules, extra, lenient)
+        case "int32" | "double":
+            for bounds in (rules, *extra):
+                if bounds.minimum is not None and value < bounds.minimum:
+                    return f"{at}: below the minimum"
+                if bounds.maximum is not None and value > bounds.maximum:
+                    return f"{at}: above the maximum"
+    return None
+
+
+def _allowed_violation(value: str, at: str, rules: Rules, extra: tuple[Bounds, ...], lenient: bool) -> str | None:
+    if lenient and rules.open:
+        return None
+    for bounds in (rules, *extra):
+        if bounds.allowed is not None and value not in bounds.allowed:
+            return f"{at}: not an allowed value"
+    return None

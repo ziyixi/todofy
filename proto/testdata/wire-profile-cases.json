@@ -1376,6 +1376,1016 @@
         "highlights": "labels.en, title"
       },
       "error": true
+    },
+    {
+      "name": "rules: a sent parcel keeps every rule (strict)",
+      "message": "prototest.v1.Parcel",
+      "strict": true,
+      "input": {
+        "status": "sent",
+        "code": "box_1",
+        "tracking_id": "AB1234",
+        "attempts": 1,
+        "tags": [
+          "fragile",
+          "light"
+        ],
+        "weights": {
+          "base": 1.5,
+          "extra": 0.25
+        },
+        "kind": "box",
+        "lines": [
+          {
+            "sku": "pen",
+            "quantity": 2
+          }
+        ]
+      },
+      "wire": {
+        "status": "sent",
+        "code": "box_1",
+        "tracking_id": "AB1234",
+        "attempts": 1,
+        "tags": [
+          "fragile",
+          "light"
+        ],
+        "weights": {
+          "base": 1.5,
+          "extra": 0.25
+        },
+        "kind": "box",
+        "lines": [
+          {
+            "sku": "pen",
+            "quantity": 2
+          }
+        ]
+      },
+      "unrecognized": []
+    },
+    {
+      "name": "rules: a lenient read checks the same rules and passes them",
+      "message": "prototest.v1.Parcel",
+      "strict": false,
+      "input": {
+        "status": "sent",
+        "code": "box_1",
+        "tracking_id": "AB1234",
+        "attempts": 1,
+        "tags": [
+          "fragile",
+          "light"
+        ],
+        "weights": {
+          "base": 1.5,
+          "extra": 0.25
+        },
+        "kind": "box",
+        "lines": [
+          {
+            "sku": "pen",
+            "quantity": 2
+          }
+        ]
+      },
+      "wire": {
+        "status": "sent",
+        "code": "box_1",
+        "tracking_id": "AB1234",
+        "attempts": 1,
+        "tags": [
+          "fragile",
+          "light"
+        ],
+        "weights": {
+          "base": 1.5,
+          "extra": 0.25
+        },
+        "kind": "box",
+        "lines": [
+          {
+            "sku": "pen",
+            "quantity": 2
+          }
+        ]
+      },
+      "unrecognized": []
+    },
+    {
+      "name": "rules: a REQUIRED optional field's null is a value on a strict read too",
+      "message": "prototest.v1.Parcel",
+      "strict": true,
+      "input": {
+        "status": "waiting",
+        "code": "box_1",
+        "tracking_id": null,
+        "attempts": 0,
+        "weights": {
+          "base": 1
+        }
+      },
+      "wire": {
+        "status": "waiting",
+        "code": "box_1",
+        "tracking_id": null,
+        "attempts": 0,
+        "weights": {
+          "base": 1
+        }
+      },
+      "unrecognized": []
+    },
+    {
+      "name": "rules: keep_order writes a map's entries as they were set, a plain map in key order",
+      "message": "prototest.v1.Parcel",
+      "strict": true,
+      "input": {
+        "status": "waiting",
+        "code": "box_1",
+        "tracking_id": null,
+        "attempts": 0,
+        "weights": {
+          "base": 1,
+          "zeta": 2,
+          "alpha": 3
+        },
+        "counts": {
+          "b": 1,
+          "a": 2
+        }
+      },
+      "wire": {
+        "status": "waiting",
+        "code": "box_1",
+        "tracking_id": null,
+        "attempts": 0,
+        "weights": {
+          "base": 1,
+          "zeta": 2,
+          "alpha": 3
+        },
+        "counts": {
+          "a": 2,
+          "b": 1
+        }
+      },
+      "unrecognized": []
+    },
+    {
+      "name": "rules: keep_order still puts array-index keys first, as JavaScript does",
+      "message": "prototest.v1.Parcel",
+      "strict": true,
+      "input": {
+        "status": "waiting",
+        "code": "box_1",
+        "tracking_id": null,
+        "attempts": 0,
+        "weights": {
+          "base": 1
+        },
+        "notes": {
+          "b": "x",
+          "10": "y",
+          "a": "z",
+          "2": "w"
+        }
+      },
+      "wire": {
+        "status": "waiting",
+        "code": "box_1",
+        "tracking_id": null,
+        "attempts": 0,
+        "weights": {
+          "base": 1
+        },
+        "notes": {
+          "2": "w",
+          "10": "y",
+          "b": "x",
+          "a": "z"
+        }
+      },
+      "unrecognized": []
+    },
+    {
+      "name": "rules: a case's REQUIRED field is missing (a sent parcel without tracking)",
+      "message": "prototest.v1.Parcel",
+      "strict": false,
+      "input": {
+        "status": "sent",
+        "code": "box_1",
+        "tracking_id": null,
+        "attempts": 1,
+        "tags": [
+          "fragile",
+          "light"
+        ],
+        "weights": {
+          "base": 1.5,
+          "extra": 0.25
+        },
+        "kind": "box",
+        "lines": [
+          {
+            "sku": "pen",
+            "quantity": 2
+          }
+        ]
+      },
+      "error": true
+    },
+    {
+      "name": "rules: a case's ABSENT field is present (a waiting parcel with tracking)",
+      "message": "prototest.v1.Parcel",
+      "strict": false,
+      "input": {
+        "status": "waiting",
+        "code": "box_1",
+        "tracking_id": "AB1234",
+        "attempts": 0,
+        "weights": {
+          "base": 1
+        }
+      },
+      "error": true
+    },
+    {
+      "name": "rules: otherwise ABSENT (reason on a sent parcel)",
+      "message": "prototest.v1.Parcel",
+      "strict": false,
+      "input": {
+        "status": "sent",
+        "code": "box_1",
+        "tracking_id": "AB1234",
+        "attempts": 1,
+        "tags": [
+          "fragile",
+          "light"
+        ],
+        "weights": {
+          "base": 1.5,
+          "extra": 0.25
+        },
+        "kind": "box",
+        "lines": [
+          {
+            "sku": "pen",
+            "quantity": 2
+          }
+        ],
+        "reason": "damaged"
+      },
+      "error": true
+    },
+    {
+      "name": "rules: a case's REQUIRED field is missing (a lost parcel without reason)",
+      "message": "prototest.v1.Parcel",
+      "strict": false,
+      "input": {
+        "status": "lost",
+        "code": "box_1",
+        "tracking_id": null,
+        "attempts": 3,
+        "weights": {
+          "base": 1
+        }
+      },
+      "error": true
+    },
+    {
+      "name": "rules: a newer discriminator value checks no case on a lenient read",
+      "message": "prototest.v1.Parcel",
+      "strict": false,
+      "input": {
+        "status": "returned",
+        "code": "box_1",
+        "tracking_id": "AB1234",
+        "attempts": 1,
+        "tags": [
+          "fragile",
+          "light"
+        ],
+        "weights": {
+          "base": 1.5,
+          "extra": 0.25
+        },
+        "kind": "box",
+        "lines": [
+          {
+            "sku": "pen",
+            "quantity": 2
+          }
+        ],
+        "reason": "damaged"
+      },
+      "wire": {
+        "status": null,
+        "code": "box_1",
+        "tracking_id": "AB1234",
+        "attempts": 1,
+        "reason": "damaged",
+        "tags": [
+          "fragile",
+          "light"
+        ],
+        "weights": {
+          "base": 1.5,
+          "extra": 0.25
+        },
+        "kind": "box",
+        "lines": [
+          {
+            "sku": "pen",
+            "quantity": 2
+          }
+        ]
+      },
+      "unrecognized": [
+        "status"
+      ]
+    },
+    {
+      "name": "rules: a newer discriminator value is refused by a strict read",
+      "message": "prototest.v1.Parcel",
+      "strict": true,
+      "input": {
+        "status": "returned",
+        "code": "box_1",
+        "tracking_id": "AB1234",
+        "attempts": 1,
+        "tags": [
+          "fragile",
+          "light"
+        ],
+        "weights": {
+          "base": 1.5,
+          "extra": 0.25
+        },
+        "kind": "box",
+        "lines": [
+          {
+            "sku": "pen",
+            "quantity": 2
+          }
+        ]
+      },
+      "error": true
+    },
+    {
+      "name": "rules: a case's minimum (a sent parcel with no attempt)",
+      "message": "prototest.v1.Parcel",
+      "strict": false,
+      "input": {
+        "status": "sent",
+        "code": "box_1",
+        "tracking_id": "AB1234",
+        "attempts": 0,
+        "tags": [
+          "fragile",
+          "light"
+        ],
+        "weights": {
+          "base": 1.5,
+          "extra": 0.25
+        },
+        "kind": "box",
+        "lines": [
+          {
+            "sku": "pen",
+            "quantity": 2
+          }
+        ]
+      },
+      "error": true
+    },
+    {
+      "name": "rules: a case's maximum (a waiting parcel with an attempt)",
+      "message": "prototest.v1.Parcel",
+      "strict": false,
+      "input": {
+        "status": "waiting",
+        "code": "box_1",
+        "tracking_id": null,
+        "attempts": 1,
+        "weights": {
+          "base": 1
+        }
+      },
+      "error": true
+    },
+    {
+      "name": "rules: the field's own maximum",
+      "message": "prototest.v1.Parcel",
+      "strict": false,
+      "input": {
+        "status": "sent",
+        "code": "box_1",
+        "tracking_id": "AB1234",
+        "attempts": 10,
+        "tags": [
+          "fragile",
+          "light"
+        ],
+        "weights": {
+          "base": 1.5,
+          "extra": 0.25
+        },
+        "kind": "box",
+        "lines": [
+          {
+            "sku": "pen",
+            "quantity": 2
+          }
+        ]
+      },
+      "error": true
+    },
+    {
+      "name": "rules: a format (an upper-case code)",
+      "message": "prototest.v1.Parcel",
+      "strict": false,
+      "input": {
+        "status": "sent",
+        "code": "Box",
+        "tracking_id": "AB1234",
+        "attempts": 1,
+        "tags": [
+          "fragile",
+          "light"
+        ],
+        "weights": {
+          "base": 1.5,
+          "extra": 0.25
+        },
+        "kind": "box",
+        "lines": [
+          {
+            "sku": "pen",
+            "quantity": 2
+          }
+        ]
+      },
+      "error": true
+    },
+    {
+      "name": "rules: a format is anchored at both ends (a trailing newline)",
+      "message": "prototest.v1.Parcel",
+      "strict": false,
+      "input": {
+        "status": "sent",
+        "code": "box\n",
+        "tracking_id": "AB1234",
+        "attempts": 1,
+        "tags": [
+          "fragile",
+          "light"
+        ],
+        "weights": {
+          "base": 1.5,
+          "extra": 0.25
+        },
+        "kind": "box",
+        "lines": [
+          {
+            "sku": "pen",
+            "quantity": 2
+          }
+        ]
+      },
+      "error": true
+    },
+    {
+      "name": "rules: a format's max_length counts characters",
+      "message": "prototest.v1.Parcel",
+      "strict": false,
+      "input": {
+        "status": "sent",
+        "code": "box_1",
+        "tracking_id": "AB123456789",
+        "attempts": 1,
+        "tags": [
+          "fragile",
+          "light"
+        ],
+        "weights": {
+          "base": 1.5,
+          "extra": 0.25
+        },
+        "kind": "box",
+        "lines": [
+          {
+            "sku": "pen",
+            "quantity": 2
+          }
+        ]
+      },
+      "error": true
+    },
+    {
+      "name": "rules: an open allowed list is closed on a strict read",
+      "message": "prototest.v1.Parcel",
+      "strict": true,
+      "input": {
+        "status": "lost",
+        "code": "box_1",
+        "tracking_id": null,
+        "attempts": 3,
+        "reason": "burnt",
+        "weights": {
+          "base": 1
+        }
+      },
+      "error": true
+    },
+    {
+      "name": "rules: an open allowed list accepts a newer value on a lenient read",
+      "message": "prototest.v1.Parcel",
+      "strict": false,
+      "input": {
+        "status": "lost",
+        "code": "box_1",
+        "tracking_id": null,
+        "attempts": 3,
+        "reason": "burnt",
+        "weights": {
+          "base": 1
+        }
+      },
+      "wire": {
+        "status": "lost",
+        "code": "box_1",
+        "tracking_id": null,
+        "attempts": 3,
+        "reason": "burnt",
+        "weights": {
+          "base": 1
+        }
+      },
+      "unrecognized": []
+    },
+    {
+      "name": "rules: an open list's case-level allowed list is open on a lenient read too",
+      "message": "prototest.v1.Parcel",
+      "strict": false,
+      "input": {
+        "status": "lost",
+        "code": "box_1",
+        "tracking_id": null,
+        "attempts": 3,
+        "reason": "misrouted",
+        "weights": {
+          "base": 1
+        }
+      },
+      "wire": {
+        "status": "lost",
+        "code": "box_1",
+        "tracking_id": null,
+        "attempts": 3,
+        "reason": "misrouted",
+        "weights": {
+          "base": 1
+        }
+      },
+      "unrecognized": []
+    },
+    {
+      "name": "rules: a case-level allowed list on a strict read",
+      "message": "prototest.v1.Parcel",
+      "strict": true,
+      "input": {
+        "status": "lost",
+        "code": "box_1",
+        "tracking_id": null,
+        "attempts": 3,
+        "reason": "misrouted",
+        "weights": {
+          "base": 1
+        }
+      },
+      "error": true
+    },
+    {
+      "name": "rules: an open value still keeps its format on a lenient read",
+      "message": "prototest.v1.Parcel",
+      "strict": false,
+      "input": {
+        "status": "lost",
+        "code": "box_1",
+        "tracking_id": null,
+        "attempts": 3,
+        "reason": "Burnt",
+        "weights": {
+          "base": 1
+        }
+      },
+      "error": true
+    },
+    {
+      "name": "rules: a closed allowed list on a lenient read",
+      "message": "prototest.v1.Parcel",
+      "strict": false,
+      "input": {
+        "status": "sent",
+        "code": "box_1",
+        "tracking_id": "AB1234",
+        "attempts": 1,
+        "tags": [
+          "fragile",
+          "light"
+        ],
+        "weights": {
+          "base": 1.5,
+          "extra": 0.25
+        },
+        "kind": "bag",
+        "lines": [
+          {
+            "sku": "pen",
+            "quantity": 2
+          }
+        ]
+      },
+      "error": true
+    },
+    {
+      "name": "rules: too many items",
+      "message": "prototest.v1.Parcel",
+      "strict": false,
+      "input": {
+        "status": "sent",
+        "code": "box_1",
+        "tracking_id": "AB1234",
+        "attempts": 1,
+        "tags": [
+          "a",
+          "b",
+          "c",
+          "d"
+        ],
+        "weights": {
+          "base": 1.5,
+          "extra": 0.25
+        },
+        "kind": "box",
+        "lines": [
+          {
+            "sku": "pen",
+            "quantity": 2
+          }
+        ]
+      },
+      "error": true
+    },
+    {
+      "name": "rules: items are not unique",
+      "message": "prototest.v1.Parcel",
+      "strict": false,
+      "input": {
+        "status": "sent",
+        "code": "box_1",
+        "tracking_id": "AB1234",
+        "attempts": 1,
+        "tags": [
+          "a",
+          "a"
+        ],
+        "weights": {
+          "base": 1.5,
+          "extra": 0.25
+        },
+        "kind": "box",
+        "lines": [
+          {
+            "sku": "pen",
+            "quantity": 2
+          }
+        ]
+      },
+      "error": true
+    },
+    {
+      "name": "rules: a list item's format",
+      "message": "prototest.v1.Parcel",
+      "strict": false,
+      "input": {
+        "status": "sent",
+        "code": "box_1",
+        "tracking_id": "AB1234",
+        "attempts": 1,
+        "tags": [
+          "a",
+          "B"
+        ],
+        "weights": {
+          "base": 1.5,
+          "extra": 0.25
+        },
+        "kind": "box",
+        "lines": [
+          {
+            "sku": "pen",
+            "quantity": 2
+          }
+        ]
+      },
+      "error": true
+    },
+    {
+      "name": "rules: a map's required key",
+      "message": "prototest.v1.Parcel",
+      "strict": false,
+      "input": {
+        "status": "sent",
+        "code": "box_1",
+        "tracking_id": "AB1234",
+        "attempts": 1,
+        "tags": [
+          "fragile",
+          "light"
+        ],
+        "weights": {
+          "extra": 1
+        },
+        "kind": "box",
+        "lines": [
+          {
+            "sku": "pen",
+            "quantity": 2
+          }
+        ]
+      },
+      "error": true
+    },
+    {
+      "name": "rules: too many map entries",
+      "message": "prototest.v1.Parcel",
+      "strict": false,
+      "input": {
+        "status": "sent",
+        "code": "box_1",
+        "tracking_id": "AB1234",
+        "attempts": 1,
+        "tags": [
+          "fragile",
+          "light"
+        ],
+        "weights": {
+          "base": 1,
+          "a": 1,
+          "b": 1,
+          "c": 1,
+          "d": 1
+        },
+        "kind": "box",
+        "lines": [
+          {
+            "sku": "pen",
+            "quantity": 2
+          }
+        ]
+      },
+      "error": true
+    },
+    {
+      "name": "rules: a map key's format",
+      "message": "prototest.v1.Parcel",
+      "strict": false,
+      "input": {
+        "status": "sent",
+        "code": "box_1",
+        "tracking_id": "AB1234",
+        "attempts": 1,
+        "tags": [
+          "fragile",
+          "light"
+        ],
+        "weights": {
+          "base": 1,
+          "Extra": 1
+        },
+        "kind": "box",
+        "lines": [
+          {
+            "sku": "pen",
+            "quantity": 2
+          }
+        ]
+      },
+      "error": true
+    },
+    {
+      "name": "rules: a map value's minimum",
+      "message": "prototest.v1.Parcel",
+      "strict": false,
+      "input": {
+        "status": "sent",
+        "code": "box_1",
+        "tracking_id": "AB1234",
+        "attempts": 1,
+        "tags": [
+          "fragile",
+          "light"
+        ],
+        "weights": {
+          "base": -1
+        },
+        "kind": "box",
+        "lines": [
+          {
+            "sku": "pen",
+            "quantity": 2
+          }
+        ]
+      },
+      "error": true
+    },
+    {
+      "name": "rules: a double's maximum",
+      "message": "prototest.v1.Parcel",
+      "strict": false,
+      "input": {
+        "status": "sent",
+        "code": "box_1",
+        "tracking_id": "AB1234",
+        "attempts": 1,
+        "tags": [
+          "fragile",
+          "light"
+        ],
+        "weights": {
+          "base": 1.5,
+          "extra": 0.25
+        },
+        "kind": "box",
+        "lines": [
+          {
+            "sku": "pen",
+            "quantity": 2
+          }
+        ],
+        "score": 1.5
+      },
+      "error": true
+    },
+    {
+      "name": "rules: a nested message's rules (a line's quantity)",
+      "message": "prototest.v1.Parcel",
+      "strict": false,
+      "input": {
+        "status": "sent",
+        "code": "box_1",
+        "tracking_id": "AB1234",
+        "attempts": 1,
+        "tags": [
+          "fragile",
+          "light"
+        ],
+        "weights": {
+          "base": 1.5,
+          "extra": 0.25
+        },
+        "kind": "box",
+        "lines": [
+          {
+            "sku": "pen",
+            "quantity": 100
+          }
+        ]
+      },
+      "error": true
+    },
+    {
+      "name": "rules: a nested message's format (a line's sku)",
+      "message": "prototest.v1.Parcel",
+      "strict": false,
+      "input": {
+        "status": "sent",
+        "code": "box_1",
+        "tracking_id": "AB1234",
+        "attempts": 1,
+        "tags": [
+          "fragile",
+          "light"
+        ],
+        "weights": {
+          "base": 1.5,
+          "extra": 0.25
+        },
+        "kind": "box",
+        "lines": [
+          {
+            "sku": "Pen",
+            "quantity": 1
+          }
+        ]
+      },
+      "error": true
+    },
+    {
+      "name": "rules: an enum list's allowed values",
+      "message": "prototest.v1.Parcel",
+      "strict": false,
+      "input": {
+        "status": "sent",
+        "code": "box_1",
+        "tracking_id": "AB1234",
+        "attempts": 1,
+        "tags": [
+          "fragile",
+          "light"
+        ],
+        "weights": {
+          "base": 1.5,
+          "extra": 0.25
+        },
+        "kind": "box",
+        "lines": [
+          {
+            "sku": "pen",
+            "quantity": 2
+          }
+        ],
+        "next": [
+          "lost"
+        ]
+      },
+      "error": true
+    },
+    {
+      "name": "rules: an enum value a lenient read does not know has nothing to compare",
+      "message": "prototest.v1.Parcel",
+      "strict": false,
+      "input": {
+        "status": "sent",
+        "code": "box_1",
+        "tracking_id": "AB1234",
+        "attempts": 1,
+        "tags": [
+          "fragile",
+          "light"
+        ],
+        "weights": {
+          "base": 1.5,
+          "extra": 0.25
+        },
+        "kind": "box",
+        "lines": [
+          {
+            "sku": "pen",
+            "quantity": 2
+          }
+        ],
+        "next": [
+          "teleported",
+          "sent"
+        ]
+      },
+      "wire": {
+        "status": "sent",
+        "code": "box_1",
+        "tracking_id": "AB1234",
+        "attempts": 1,
+        "tags": [
+          "fragile",
+          "light"
+        ],
+        "weights": {
+          "base": 1.5,
+          "extra": 0.25
+        },
+        "kind": "box",
+        "lines": [
+          {
+            "sku": "pen",
+            "quantity": 2
+          }
+        ],
+        "next": [
+          "sent"
+        ]
+      },
+      "unrecognized": [
+        "next[0]"
+      ]
+    },
+    {
+      "name": "a REQUIRED optional double may be null on a strict read",
+      "message": "prototest.v1.BookCard",
+      "strict": true,
+      "input": {
+        "title": "t",
+        "rating": null,
+        "labels": {}
+      },
+      "wire": {
+        "title": "t",
+        "rating": null,
+        "labels": {}
+      },
+      "unrecognized": []
     }
   ]
 }

@@ -1,0 +1,185 @@
+// Test fixtures of the wire profile's value rules and binding arguments (common/wire/v1/wire.proto), never used
+// by an app: every rule on one union message, and a binding service with positional and object requests.
+// testdata/wire-profile-cases.json runs the same cases on these descriptors in TypeScript and Python, and
+// test/gen-tools.test.ts checks the generated wire types and JSON Schema of this file.
+
+syntax = "proto3";
+
+package prototest.v1;
+
+import "common/wire/v1/wire.proto";
+import "google/api/field_behavior.proto";
+
+option (common.wire.v1.formats) = {
+  name: "Code"
+  pattern: "[a-z][a-z0-9_]{0,15}"
+  description: "A short lower-case code."
+};
+option (common.wire.v1.formats) = {
+  name: "Tracking"
+  pattern: "[A-Z]{2}[0-9]{4,}"
+  max_length: 8
+  description: "Two capitals and at least four digits, at most 8 characters."
+};
+
+// A parcel service reached through a Workers service binding.
+service ParcelService {
+  // `ping()`: an empty request passed as no argument at all.
+  // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
+  // buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE
+  rpc Ping(PingRequest) returns (Parcel) {
+    option (common.wire.v1.method).positional = true;
+  }
+
+  // `track(trackingId, attempts)`: the request's fields as arguments.
+  // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
+  // buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE
+  rpc Track(TrackRequest) returns (Parcel) {
+    option (common.wire.v1.method).positional = true;
+  }
+
+  // `send(parcel)`: the request message as one argument.
+  // buf:lint:ignore RPC_REQUEST_STANDARD_NAME
+  // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
+  // buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE
+  rpc Send(Parcel) returns (Parcel);
+}
+
+// A parcel: a union by `status`, with one field per rule.
+message Parcel {
+  option (common.wire.v1.message).discriminator = "status";
+
+  // The parcel's status (the discriminator).
+  enum Status {
+    // Never written.
+    STATUS_UNSPECIFIED = 0;
+    // Waiting to be sent.
+    STATUS_WAITING = 1;
+    // On its way.
+    STATUS_SENT = 2;
+    // Lost.
+    STATUS_LOST = 3;
+  }
+
+  // The status.
+  Status status = 1 [(google.api.field_behavior) = REQUIRED];
+  // A code (a format).
+  string code = 2 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).format = "Code"
+  ];
+  // Only a sent parcel has a tracking ID (REQUIRED: null when absent).
+  optional string tracking_id = 3 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field) = {
+      format: "Tracking"
+      cases: {
+        when: "sent"
+        presence: PRESENCE_REQUIRED
+      }
+      otherwise: PRESENCE_ABSENT
+    }
+  ];
+  // Delivery attempts, 0-9; at least one once sent, none while waiting.
+  int32 attempts = 4 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field) = {
+      minimum: 0
+      maximum: 9
+      cases: {
+        when: "sent"
+        rules: {minimum: 1}
+      }
+      cases: {
+        when: "waiting"
+        rules: {maximum: 0}
+      }
+    }
+  ];
+  // Why it is lost (an open list: a consumer accepts a newer code); only a lost parcel has one.
+  optional string reason = 5 [(common.wire.v1.field) = {
+    format: "Code"
+    allowed: [
+      "damaged",
+      "stolen",
+      "misrouted"
+    ]
+    open: true
+    cases: {
+      when: "lost"
+      presence: PRESENCE_REQUIRED
+      rules: {
+        allowed: [
+          "damaged",
+          "stolen"
+        ]
+      }
+    }
+    otherwise: PRESENCE_ABSENT
+  }];
+  // Up to three distinct codes.
+  repeated string tags = 6 [(common.wire.v1.field) = {
+    format: "Code"
+    max_items: 3
+    unique: true
+  }];
+  // Weights by code, in the order they were set; `base` is always there.
+  map<string, double> weights = 7 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field) = {
+      key_format: "Code"
+      max_items: 4
+      required_keys: "base"
+      keep_order: true
+      minimum: 0
+    }
+  ];
+  // A score between 0 and 1.
+  optional double score = 8 [(common.wire.v1.field) = {
+    minimum: 0
+    maximum: 1
+  }];
+  // The packaging: a closed list of strings.
+  string kind = 9 [(common.wire.v1.field) = {
+    allowed: [
+      "box",
+      "tube"
+    ]
+  }];
+  // The lines, each checked by its own rules.
+  repeated ParcelLine lines = 10;
+  // Counts by code, in the canonical order (no keep_order).
+  map<string, int32> counts = 11;
+  // Where it may be sent: a closed list of enum values.
+  repeated Status next = 12 [(common.wire.v1.field).allowed = "sent"];
+  // Free notes by any key, in the order they were set (array-index keys first, as JavaScript orders them).
+  map<string, string> notes = 13 [(common.wire.v1.field).keep_order = true];
+}
+
+// One line of a parcel.
+message ParcelLine {
+  // The article code.
+  string sku = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).format = "Code"
+  ];
+  // How many, 1-99.
+  int32 quantity = 2 [(common.wire.v1.field) = {
+    minimum: 1
+    maximum: 99
+  }];
+}
+
+// Input of Ping: nothing.
+message PingRequest {}
+
+// Input of Track.
+message TrackRequest {
+  // The tracking ID.
+  string tracking_id = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).format = "Tracking"
+  ];
+  // Attempts so far.
+  int32 attempts = 2 [(common.wire.v1.field).minimum = 0];
+}

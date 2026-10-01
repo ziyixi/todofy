@@ -2,12 +2,13 @@
  * The shared edge cases of the wire JSON profile (testdata/wire-profile-cases.json). The Python twin,
  * test/python/test_wire_profile_cases.py, runs the same file, so the two codecs give the same verdict and
  * the same bytes on every case: timestamps, integer and double spellings, enum look-alikes, maps, missing
- * REQUIRED fields.
+ * REQUIRED fields, and the value rules of common/wire/v1/wire.proto (prototest/v1/rules.proto).
  */
 import { readFileSync } from 'node:fs';
 import { describe, expect, test } from 'vitest';
 import type { DescMessage } from '@bufbuild/protobuf';
 import { BookCardSchema, BookSchema } from '../ts/prototest/v1/prototest_pb.ts';
+import { ParcelSchema } from '../ts/prototest/v1/rules_pb.ts';
 import { TaskIntentRefSchema, TaskIntentResultSchema, TaskIntentSchema } from '../ts/todofy/taskintent/v1/task_intent_pb.ts';
 import { fromWire, toWire, WireJsonError } from '../ts/wire-json.ts';
 import { CASES_FILE } from './fixtures.ts';
@@ -29,6 +30,7 @@ const SCHEMAS = {
   TaskIntentResult: TaskIntentResultSchema,
   'prototest.v1.Book': BookSchema,
   'prototest.v1.BookCard': BookCardSchema,
+  'prototest.v1.Parcel': ParcelSchema,
 } satisfies Record<string, DescMessage>;
 const { cases } = JSON.parse(readFileSync(CASES_FILE, 'utf8')) as { cases: Case[] };
 
@@ -47,6 +49,7 @@ describe('wire profile edge cases shared with Python', () => {
     }
     const read = fromWire(schema, c.input, { strict: c.strict });
     expect(read.unrecognized).toEqual(c.unrecognized);
-    expect(JSON.stringify(toWire(schema, read.message))).toBe(JSON.stringify(c.wire));
+    // A lenient read is passed on as read (WriteOptions.lenient).
+    expect(JSON.stringify(toWire(schema, read.message, { lenient: !c.strict }))).toBe(JSON.stringify(c.wire));
   });
 });

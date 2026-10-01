@@ -12,8 +12,8 @@
  *   proto/ts/<package path>/*_pb.ts                         protobuf-es (buf.gen.yaml)
  *   proto/python/src/ziyixi_proto/<package path>/*_pb.py    tools/gen_py.py
  * and a stamp, proto/.generated.json: a hash of every input (the .proto files, buf.yaml, buf.lock,
- * buf.gen.yaml, package-lock.json, which pins buf, protoc-gen-es and the runtime, this script and
- * gen_py.py) and of every output file (proto/python/build_backend.py checks it the same way).
+ * buf.gen.yaml, package-lock.json, which pins buf, protoc-gen-es and the runtime, this script,
+ * gen_py.py and wire_rules.py) and of every output file (proto/python/build_backend.py checks it the same way).
  *
  * It first checks that proto/node_modules holds every package package-lock.json pins at that version: the
  * generated code imports the protobuf-es runtime from there, the only copy in the repository, so a deleted
@@ -72,7 +72,7 @@ const TEMP_PREFIX = '.generate-';
 const TARGETS = { ts: join(PROTO, 'ts'), py: join(PROTO, 'python', 'src', 'ziyixi_proto') };
 /** Not part of the buf module (keep equal to buf.yaml `excludes`; --check-deterministic compares). */
 const EXCLUDED = new Set(['node_modules', 'python', 'scripts', 'test', 'testdata', 'tools', 'ts']);
-const INPUT_FILES = ['buf.yaml', 'buf.lock', 'buf.gen.yaml', 'package-lock.json', 'tools/ensure.mjs', 'tools/gen_py.py'];
+const INPUT_FILES = ['buf.yaml', 'buf.lock', 'buf.gen.yaml', 'package-lock.json', 'tools/ensure.mjs', 'tools/gen_py.py', 'tools/wire_rules.py'];
 const STAMP_VERSION = 1;
 /** A lock whose holder cannot be checked (another host, no owner file yet) is abandoned at this age. */
 const LOCK_STALE_MS = 600_000;

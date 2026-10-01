@@ -17,6 +17,13 @@ whether a reader refuses a missing field; presence decides between ``null`` and 
 - ``PROFILE_FIELD_SAME_PRESENCE``: an existing field gained or lost explicit presence.
 - ``PROFILE_FIELD_NEW_NOT_REQUIRED``: a new field of an existing message is REQUIRED (older producers
   and frozen payloads do not write it, so a reader would refuse them).
+- ``PROFILE_FIELD_SAME_ORDER``: an existing map field gained or lost ``(common.wire.v1.field).keep_order``: every
+  producer's bytes of that map change.
+- ``PROFILE_METHOD_SAME_ARGUMENTS``: an existing method gained or lost ``(common.wire.v1.method).positional``: a
+  service binding's callers and receivers would pass and expect different arguments.
+
+Value rules (``(common.wire.v1.field)``'s formats, allowed lists, bounds and cases) are not compared: like a JSON
+Schema's, a change is reviewed with the contract's fixtures, which both codecs check.
 
 The HTTP APIs (the URL is the wire: an open tab of an older UI, and every other client, keeps calling the
 paths it was built with; the transcoder clears OUTPUT_ONLY input fields and checks formats):
@@ -52,6 +59,8 @@ FIELD_INFO = "[google.api.field_info]"
 HTTP = "[google.api.http]"
 SIGNATURE = "[google.api.method_signature]"
 RESOURCE = "[google.api.resource]"
+WIRE_FIELD = "[common.wire.v1.field]"
+WIRE_METHOD = "[common.wire.v1.method]"
 VERBS = ("get", "put", "post", "delete", "patch", "custom")
 
 
@@ -97,6 +106,14 @@ def explicit_presence(field: dict[str, Any]) -> bool:
 
 def field_format(field: dict[str, Any]) -> str | None:
     return field.get("options", {}).get(FIELD_INFO, {}).get("format")
+
+
+def keeps_order(field: dict[str, Any]) -> bool:
+    return bool(field.get("options", {}).get(WIRE_FIELD, {}).get("keepOrder", False))
+
+
+def positional(method: dict[str, Any]) -> bool:
+    return bool(method.get("options", {}).get(WIRE_METHOD, {}).get("positional", False))
 
 
 def bindings(method: dict[str, Any]) -> set[tuple[str, str, str, str]]:
@@ -150,6 +167,9 @@ def field_violations(name: str, message: dict[str, Any], old: dict[str, Any], is
             found.append(f"PROFILE_INPUT_NOT_OUTPUT_ONLY {path}: an input field gained {', '.join(sorted(gained))}")
         if field_format(field) is not None and field_format(field) != field_format(previous):
             found.append(f"PROFILE_FIELD_SAME_FORMAT {path}: (google.api.field_info).format was added or changed")
+        if keeps_order(previous) != keeps_order(field):
+            change = "gained" if keeps_order(field) else "lost"
+            found.append(f"PROFILE_FIELD_SAME_ORDER {path}: {change} (common.wire.v1.field).keep_order")
     return found
 
 
@@ -177,6 +197,9 @@ def method_violations(name: str, method: dict[str, Any], old: dict[str, Any]) ->
             + (f" response_body {response_body!r}" if response_body else "")
         )
         found.append(f"PROFILE_HTTP_BINDING_KEPT {name}: the binding {detail} is gone")
+    if positional(old) != positional(method):
+        change = "gained" if positional(method) else "lost"
+        found.append(f"PROFILE_METHOD_SAME_ARGUMENTS {name}: {change} (common.wire.v1.method).positional")
     lost = set(old.get("options", {}).get(SIGNATURE, [])) - set(method.get("options", {}).get(SIGNATURE, []))
     for signature in sorted(lost):
         found.append(f"PROFILE_METHOD_SIGNATURE_KEPT {name}: the method_signature {signature!r} is gone")

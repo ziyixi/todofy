@@ -252,6 +252,7 @@ class Classify(unittest.TestCase):
             "proto/links/ui/v1/links_ui_service.proto": links_only,
             # The TypeScript runtime and generator: Lab and the links app (Todofy's gateway imports types only).
             "proto/ts/wire-json.ts": ts,
+            "proto/ts/wire-rules.ts": ts,
             "proto/ts/http-transcoder.ts": ts,
             "proto/ts/rpc-status.ts": ts,
             "proto/ts/package.json": ts,
@@ -261,8 +262,12 @@ class Classify(unittest.TestCase):
             "proto/python/build_backend.py": python,
             "proto/python/pyproject.toml": python,
             "proto/tools/gen_py.py": python,
+            "proto/tools/wire_rules.py": python,
+            # The wire profile's own options: both runtimes.
+            "proto/common/wire/v1/wire.proto": every,
             # The runtimes' fixtures and a package imported as types only reach no bundle.
             "proto/prototest/v1/prototest.proto": none,
+            "proto/prototest/v1/rules.proto": none,
             "proto/common/errors/v1/errors.proto": none,
             # What every generation depends on: every bundled user (fail safe).
             "proto/buf.yaml": every,
@@ -320,9 +325,12 @@ class Classify(unittest.TestCase):
             for path in (REPO / "proto").rglob("*.proto")
             if "node_modules" not in path.parts and path.parent.name.startswith("v")
         }
-        self.assertEqual(packages, set(ci_changes.PROTO_PACKAGES))
+        # A package that is part of the runtimes (common/wire: the codecs' own options) is mapped there instead.
+        runtime_packages = {prefix for prefix in ci_changes.PROTO_RUNTIMES if prefix in packages}
+        self.assertEqual(runtime_packages, {"proto/common/wire/"})
+        self.assertEqual(packages - runtime_packages, set(ci_changes.PROTO_PACKAGES))
         languages = {language for languages in ci_changes.PROTO_USERS.values() for language in languages}
-        self.assertLessEqual(languages, set(ci_changes.PROTO_RUNTIMES.values()))
+        self.assertLessEqual(languages, {language for languages in ci_changes.PROTO_RUNTIMES.values() for language in languages})
 
     def test_proto_deploys_only_a_user_whose_bundle_compiles_it_in(self):
         saved = ci_changes.PROTO_USERS

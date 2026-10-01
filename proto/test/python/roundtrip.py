@@ -13,7 +13,7 @@ import json
 import sys
 
 from proto_test_support import compact
-from ziyixi_proto.prototest.v1 import prototest_pb
+from ziyixi_proto.prototest.v1 import prototest_pb, rules_pb
 from ziyixi_proto.todofy.taskintent.v1 import task_intent_pb as pb
 from ziyixi_proto.wire_json import WireJsonError, from_wire, to_wire
 
@@ -23,6 +23,7 @@ MESSAGES = {
     "TaskIntentResult": pb.TaskIntentResult,
     "prototest.v1.Book": prototest_pb.Book,
     "prototest.v1.BookCard": prototest_pb.BookCard,
+    "prototest.v1.Parcel": rules_pb.Parcel,
 }
 
 
@@ -31,7 +32,10 @@ def read(request: dict) -> dict:
         result = from_wire(MESSAGES[request["message"]], json.loads(request["text"]), strict=request["strict"])
     except WireJsonError as error:
         return {"error": str(error)}
-    return {"text": compact(to_wire(result.message)), "unrecognized": result.unrecognized}
+    return {
+        "text": compact(to_wire(result.message, lenient=not request["strict"])),
+        "unrecognized": result.unrecognized,
+    }
 
 
 def built() -> list[dict]:

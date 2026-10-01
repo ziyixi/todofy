@@ -11,6 +11,7 @@ import { join } from 'node:path';
 import { beforeAll, describe, expect, test } from 'vitest';
 import { create, type DescMessage } from '@bufbuild/protobuf';
 import { BookCardSchema, BookSchema } from '../ts/prototest/v1/prototest_pb.ts';
+import { ParcelSchema } from '../ts/prototest/v1/rules_pb.ts';
 import {
   ErrorCode,
   Mode,
@@ -43,6 +44,7 @@ const SCHEMAS = {
   TaskIntentResult: TaskIntentResultSchema,
   'prototest.v1.Book': BookSchema,
   'prototest.v1.BookCard': BookCardSchema,
+  'prototest.v1.Parcel': ParcelSchema,
 } satisfies Record<string, DescMessage>;
 // npm run test:python uses the same interpreter (todofy-core's Python); PROTO_TEST_PYTHON overrides it.
 const PYTHON = (process.env['PROTO_TEST_PYTHON'] ?? 'uv run --no-project --python 3.14 python').split(' ');
@@ -51,7 +53,7 @@ const PYTHON = (process.env['PROTO_TEST_PYTHON'] ?? 'uv run --no-project --pytho
 function viaTypeScript(message: Name, text: string, strict: boolean): string | null {
   try {
     const schema: DescMessage = SCHEMAS[message];
-    return JSON.stringify(toWire(schema, fromWire(schema, JSON.parse(text), { strict }).message));
+    return JSON.stringify(toWire(schema, fromWire(schema, JSON.parse(text), { strict }).message, { lenient: !strict }));
   } catch (error) {
     if (error instanceof WireJsonError) return null;
     throw error;

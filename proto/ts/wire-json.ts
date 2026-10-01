@@ -28,11 +28,19 @@
  *   bytes. A REQUIRED map is written as {} when empty. A map value is never null.
  * - google.protobuf.FieldMask is one string of comma-separated snake_case paths (`"send_mode,author.name"`),
  *   not ProtoJSON's lowerCamelCase; a path is `*` or dotted field names (field-mask.ts).
+ * - A map with (common.wire.v1.field).keep_order is written in the order its entries were set (a read keeps the
+ *   wire's order), array-index keys first as JavaScript orders them; ops-v1's counters list their keys in the
+ *   order each producer chose.
+ * - Value rules ((common.wire.v1.field), wire-rules.ts) are checked on every message read or written: a
+ *   message that breaks one is refused like a wrong type. A lenient read accepts a value outside an `open`
+ *   allowed list.
  *
  * Reading has two modes, matching the contracts' rule "inputs closed, outputs open":
  *
  * - `strict` (a producer's input, e.g. Todofy reading a TaskIntent): an unknown field, an unknown
- *   enum name, a wrong type, null or a missing REQUIRED field throws WireJsonError.
+ *   enum name, a wrong type, null or a missing REQUIRED field throws WireJsonError. null is a value only for a
+ *   REQUIRED field declared `optional`: "always present, may be null" (ops-v1's SetGuardInput.until), which is
+ *   exactly what toWire writes for it.
  * - lenient (a consumer reading an output, e.g. Lab reading a TaskIntentResult): an unknown field is
  *   skipped and an unknown enum name reads as the zero value, so a switch takes its default branch.
  *   Both are reported in `unrecognized` (field paths only, never values) for logs and metrics. A wrong
@@ -58,6 +66,7 @@ import {
   type DescEnum,
   type DescField,
   type DescMessage,
+  type DescMethod,
   type DescService,
   type JsonObject,
   type JsonValue,
@@ -66,8 +75,12 @@ import {
 } from '@bufbuild/protobuf';
 import { reflect, type ReflectMessage } from '@bufbuild/protobuf/reflect';
 import { FieldMaskSchema, timestampDate, timestampFromDate, TimestampSchema, type FieldMask } from '@bufbuild/protobuf/wkt';
+import { method as methodOption } from './common/wire/v1/wire_pb.ts';
 import { FieldMaskError, formatFieldMask, parseFieldMask } from './field-mask.ts';
 import { field_behavior, FieldBehavior } from './google/api/field_behavior_pb.ts';
+import { keepsOrder, ruleViolation } from './wire-rules.ts';
+
+export { fieldRules } from './wire-rules.ts';
 
 export class WireJsonError extends Error {}
 
@@ -113,6 +126,36 @@ export type WireService<S extends DescService> = {
  * prefix) without the zero value, in lower case. `WireName<typeof Mode>` is `'subtasks' | 'separate'`.
  */
 export type WireName<E extends Readonly<Record<string, number>>> = Lowercase<Exclude<keyof E & string, 'UNSPECIFIED'>>;
+
+/**
+ * The arguments a Workers service binding passes for `method`'s request: the request's wire JSON as one
+ * argument, or, for a method with (common.wire.v1.method).positional, its fields' wire values in field-number
+ * order (`status()`, `canaryDelivery(eventId)`). The request's value rules are checked (toWire).
+ */
+export function toWireArguments<Desc extends DescMessage>(method: DescMethod & { readonly input: Desc }, request: MessageShape<Desc>): unknown[] {
+  const wire = toWire(method.input, request) as JsonObject;
+  if (!getOption(method, methodOption).positional) return [wire];
+  return [...method.input.fields].sort((a, b) => a.number - b.number).map((field) => wire[field.name]);
+}
+
+/**
+ * The request of `method` from the arguments a service binding call received (toWireArguments' layout), read
+ * strictly with its value rules: it is an input. A positional method refuses more arguments than it has
+ * fields; a missing argument is an absent field.
+ */
+export function fromWireArguments<Desc extends DescMessage>(method: DescMethod & { readonly input: Desc }, args: readonly unknown[]): MessageShape<Desc> {
+  if (!getOption(method, methodOption).positional) {
+    if (args.length !== 1) throw new WireJsonError(`${method.name}: expected one argument`);
+    return fromWire(method.input, args[0], { strict: true }).message;
+  }
+  const fields = [...method.input.fields].sort((a, b) => a.number - b.number);
+  if (args.length > fields.length) throw new WireJsonError(`${method.name}: too many arguments`);
+  const wire: Record<string, unknown> = {};
+  fields.forEach((field, i) => {
+    if (args[i] !== undefined) wire[field.name] = args[i];
+  });
+  return fromWire(method.input, wire, { strict: true }).message;
+}
 
 /** One enum's wire names and values (`wireEnum`), the same table the codec reads and writes with. */
 export interface WireEnum<E extends Readonly<Record<string, number>>> {
@@ -269,9 +312,31 @@ function scalarFromWire(scalar: ScalarType | undefined, value: JsonValue, path: 
   throw new WireJsonError(`${path}: wrong type`);
 }
 
-/** The wire JSON object of `message` (a plain object; JSON.stringify gives the wire bytes). */
-export function toWire<Desc extends DescMessage>(schema: Desc, message: MessageShape<Desc>): JsonObject {
-  return writeMessage(reflect(schema, message));
+/**
+ * The wire JSON type of a message, by its full type name: each generated `*_wire.ts` (proto/tools/gen_wire_ts.py)
+ * adds its messages here (declaration merging), so `toWire` answers that type wherever the app imports the
+ * package's wire types, and `JsonObject` elsewhere.
+ */
+// eslint-disable-next-line @typescript-eslint/no-empty-object-type -- filled by the generated *_wire.ts modules
+export interface WireTypes {}
+
+/** The wire JSON type of the message `Desc` describes (`JsonObject` when no wire types are generated for it). */
+export type WireOf<Desc extends DescMessage> = MessageShape<Desc>['$typeName'] extends keyof WireTypes ? WireTypes[MessageShape<Desc>['$typeName']] : JsonObject;
+
+export interface WriteOptions {
+  /**
+   * The message was read leniently and is passed on (a consumer keeping what it read): a value outside an `open`
+   * allowed list is written as read. Every other rule is checked as always. Default false (a producer).
+   */
+  readonly lenient?: boolean;
+}
+
+/** The wire JSON object of `message` (a plain object; JSON.stringify gives the wire bytes). Checks its value rules first. */
+export function toWire<Desc extends DescMessage>(schema: Desc, message: MessageShape<Desc>, options: WriteOptions = {}): WireOf<Desc> {
+  const r = reflect(schema, message);
+  const violation = ruleViolation(r, options.lenient === true);
+  if (violation !== null) throw new WireJsonError(violation);
+  return writeMessage(r) as WireOf<Desc>;
 }
 
 function writeMessage(r: ReflectMessage): JsonObject {
@@ -322,7 +387,8 @@ function writeMessage(r: ReflectMessage): JsonObject {
           if (wire === null) throw new WireJsonError(`${field.name}: a map value cannot be the zero enum value`);
           entries.push([key as string, wire]);
         }
-        if (entries.length > 0 || always) out[field.name] = Object.fromEntries(entries.sort(([a], [b]) => compareCodePoints(a, b)));
+        if (!keepsOrder(field)) entries.sort(([a], [b]) => compareCodePoints(a, b));
+        if (entries.length > 0 || always) out[field.name] = Object.fromEntries(entries);
         break;
       }
       default:
@@ -365,6 +431,8 @@ function compareCodePoints(a: string, b: string): number {
 export function fromWire<Desc extends DescMessage>(schema: Desc, json: unknown, options: ReadOptions = {}): ReadResult<MessageShape<Desc>> {
   const unrecognized: string[] = [];
   const message = readMessage(schema, json, '', { strict: options.strict === true, unrecognized, required: true }, options.partial) as MessageShape<Desc>;
+  const violation = ruleViolation(reflect(schema, message), options.strict !== true, unrecognized);
+  if (violation !== null) throw new WireJsonError(violation);
   return { message, unrecognized };
 }
 
@@ -395,8 +463,9 @@ function readMessage(schema: DescMessage, json: unknown, path: string, state: Re
     }
     if (value === null) {
       // null is how outputs write "no value"; inputs omit the field instead (contracts' rule), so a
-      // strict (input) reader refuses null. A lenient reader takes it only where toWire can write it.
-      if (strict) throw new WireJsonError(`${at}: null`);
+      // strict (input) reader refuses null, except for a REQUIRED field declared `optional`, whose null is
+      // the value "none" (toWire writes it so). A lenient reader takes it only where toWire can write it.
+      if (strict && !(required(field) && field.proto.proto3Optional)) throw new WireJsonError(`${at}: null`);
       if (!nullable(field)) throw new WireJsonError(`${at}: wrong type`);
       continue;
     }

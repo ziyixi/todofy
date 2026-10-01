@@ -1,0 +1,135 @@
+// The wire JSON profile's own annotations (proto/README.md, Wire JSON profile and Value rules).
+//
+// A contract states its value rules here, next to its fields, once: which strings are codes, timestamps or
+// URLs, which values an enum-like string may take, number bounds, list and map sizes, and which fields a
+// message has for each value of its discriminator (a union such as ops.v1.CanaryDelivery). Both codecs
+// (proto/ts/wire-json.ts and proto/python/src/ziyixi_proto/wire_json.py) check them on every read and every
+// write, so neither a producer bug nor a consumer's input reaches the other side unchecked, and
+// proto/tools/gen_schema.py turns them into the contract's JSON Schema. Two annotations are wire choices
+// rather than rules: a map that keeps its entries' order (Field.keep_order) and a method whose request is
+// passed as positional arguments (Method.positional).
+//
+// A rule is a check, never a conversion: a value that breaks one is refused (WireJsonError), on a lenient
+// read as well, except where Field.open says a consumer accepts more than a producer writes. Rules never
+// echo values in their errors (a path and the rule's name only).
+
+syntax = "proto3";
+
+package common.wire.v1;
+
+import "google/protobuf/descriptor.proto";
+
+option java_multiple_files = true;
+option java_outer_classname = "WireProto";
+option java_package = "science.ziyixi.common.wire.v1";
+
+// The named string formats a file's fields refer to (Field.format, Field.key_format), in that file.
+extend google.protobuf.FileOptions {
+  // One entry per format; names are unique within the file.
+  repeated Format formats = 51001;
+}
+
+// Rules of a message as a whole.
+extend google.protobuf.MessageOptions {
+  // The message's discriminator, if it is a union.
+  Message message = 51001;
+}
+
+// A field's value rules, and how the profile writes a map field.
+extend google.protobuf.FieldOptions {
+  // Every rule is optional; an unset one checks nothing.
+  Field field = 51001;
+}
+
+// How a Workers service binding (not gRPC, not HTTP) carries a method's request.
+extend google.protobuf.MethodOptions {
+  // Unset: the request message is the one argument, as wire JSON.
+  Method method = 51001;
+}
+
+// A named string format: a regular expression that the whole value matches, and a length bound.
+// (-- api-linter: core::0123::resource-annotation=disabled
+//     aip.dev/not-precedent: `name` is the format's label inside a file option, not a resource name. --)
+message Format {
+  // The name fields refer to; the JSON Schema generator uses it as the $defs name (Code, Timestamp).
+  string name = 1;
+  // The whole value matches this (no ^ or $: the match is always anchored). Only what ECMAScript (with the
+  // u flag) and Python's re read alike: literal characters, character classes of literals and ranges,
+  // groups, alternation and the quantifiers ? * + {m,n}; no shorthand class (\d, \w, \s), no `.`.
+  string pattern = 2;
+  // At most this many characters (Unicode code points, as JSON Schema counts them); 0 means no bound.
+  int32 max_length = 3;
+  // One line for the generated JSON Schema.
+  string description = 4;
+}
+
+// A message that is a union discriminated by one of its enum fields: its fields' cases name that field's
+// values (Field.cases). A reader that does not know the discriminator's value (a lenient read of a newer
+// producer) checks no case.
+message Message {
+  // The name of the message's enum field whose value selects the case.
+  string discriminator = 1;
+}
+
+// The value rules of a field (of each item of a repeated field). A rule applies only where it fits the
+// field's type; anything else stops generation (proto/tools/wire_rules.py).
+message Field {
+  // A string's format: the name of a Format of this file. On a map, see key_format.
+  string format = 1;
+  // The only values a string or an enum may take (an enum by its wire name).
+  repeated string allowed = 2;
+  // A lenient read (a consumer) accepts a value outside `allowed` that keeps the other rules: the list is
+  // what this build's producers write, and may grow within the contract's major version. Writes and strict
+  // reads keep to it.
+  bool open = 3;
+  // The smallest value of a number (int32 or double), inclusive.
+  optional double minimum = 4;
+  // The largest value of a number (int32 or double), inclusive.
+  optional double maximum = 5;
+  // A repeated field or a map holds at most this many items or entries; 0 means no bound.
+  int32 max_items = 6;
+  // A repeated field's items are distinct.
+  bool unique = 7;
+  // A map's keys' format: the name of a Format of this file.
+  string key_format = 8;
+  // A map has these keys.
+  repeated string required_keys = 9;
+  // A map's entries are written in the order they were set (a read keeps the wire's order), not in the
+  // profile's canonical order. As in JavaScript, array-index keys ("10") still come first.
+  bool keep_order = 10;
+  // The field's presence and extra rules by the value of its message's discriminator (Message).
+  repeated Case cases = 11;
+  // The presence where no case names the discriminator's value.
+  Presence otherwise = 12;
+}
+
+// The rules of a field for some values of its message's discriminator.
+message Case {
+  // The discriminator's values (wire names) this case covers.
+  repeated string when = 1;
+  // Whether the field has a value in this case.
+  Presence presence = 2;
+  // Rules that apply in this case, in addition to the field's own (only allowed, minimum and maximum).
+  Field rules = 3;
+}
+
+// How a service binding passes a method's request.
+message Method {
+  // The binding passes the request message's fields as arguments, in field-number order, each as its wire
+  // JSON value (`status()` for an empty message, `canaryDelivery(eventId)` for one string field), instead of
+  // the request message as one argument.
+  bool positional = 1;
+}
+
+// Whether a field has a value: set, for an `optional` scalar or a message; a value other than the zero
+// value, for an enum. A REQUIRED field without a value is written as null (the profile's REQUIRED).
+enum Presence {
+  // No presence rule.
+  PRESENCE_UNSPECIFIED = 0;
+  // The field has a value.
+  PRESENCE_REQUIRED = 1;
+  // The field has no value.
+  PRESENCE_ABSENT = 2;
+  // Either; states that a case allows the field where `otherwise` would not.
+  PRESENCE_OPTIONAL = 3;
+}

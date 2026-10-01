@@ -149,12 +149,17 @@ PACKAGE_USERS = {"edge-auth": ("todofy", "mail-hero", "dashboard", "lab", "flowd
 # only). test_proto.py derives this map from the apps' manifests and sources.
 PROTO = "proto/"
 PROTO_USERS: dict[str, tuple[str, ...]] = {"lab": ("ts",), "todofy": ("python",), "links": ("ts",)}
-# A language's hand-written runtime and generator: a change reaches every user of that language.
-PROTO_RUNTIMES = {
-    "proto/ts/": "ts",
-    "proto/buf.gen.yaml": "ts",
-    "proto/python/": "python",
-    "proto/tools/gen_py.py": "python",
+# The hand-written runtimes and generators: a change reaches every user of each language listed. The wire
+# profile's own options (common/wire/v1: value rules, map order, binding arguments) are part of both runtimes:
+# the TypeScript codec bundles their generated descriptors, gen_py.py writes their rules into the Python tables
+# (through wire_rules.py).
+PROTO_RUNTIMES: dict[str, tuple[str, ...]] = {
+    "proto/ts/": ("ts",),
+    "proto/buf.gen.yaml": ("ts",),
+    "proto/common/wire/": ("ts", "python"),
+    "proto/python/": ("python",),
+    "proto/tools/gen_py.py": ("python",),
+    "proto/tools/wire_rules.py": ("python",),
 }
 # A proto package (its directory) -> the apps whose production code imports its generated code (TypeScript
 # value imports, Python imports; test_proto.py checks this against the sources). A package missing here
@@ -260,9 +265,9 @@ def proto_deploys(path: str) -> set[str]:
     if path.startswith(PROTO_NOT_BUNDLED) or path.endswith(".md"):
         return set()
     bundling = {app for app, languages in PROTO_USERS.items() if languages}
-    for prefix, language in PROTO_RUNTIMES.items():
+    for prefix, languages in PROTO_RUNTIMES.items():
         if path.startswith(prefix):
-            return {app for app in bundling if language in PROTO_USERS[app]}
+            return {app for app in bundling if set(languages) & set(PROTO_USERS[app])}
     for prefix, importers in PROTO_PACKAGES.items():
         if path.startswith(prefix):
             return set(importers) & bundling

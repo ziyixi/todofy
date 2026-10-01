@@ -1,14 +1,15 @@
 """The shared edge cases of the wire JSON profile in Python (TypeScript twin: test/wire-profile-cases.test.ts).
 
 Both suites run testdata/wire-profile-cases.json, so the two codecs give the same verdict and the same
-bytes on every case: timestamps, integer and double spellings, enum look-alikes, maps, missing REQUIRED fields.
+bytes on every case: timestamps, integer and double spellings, enum look-alikes, maps, missing REQUIRED fields,
+and the value rules of common/wire/v1/wire.proto (prototest/v1/rules.proto).
 """
 
 import json
 import unittest
 
 from proto_test_support import CASES_FILE, compact
-from ziyixi_proto.prototest.v1 import prototest_pb
+from ziyixi_proto.prototest.v1 import prototest_pb, rules_pb
 from ziyixi_proto.todofy.taskintent.v1 import task_intent_pb as pb
 from ziyixi_proto.wire_json import WireJsonError, from_wire, to_wire
 
@@ -20,6 +21,7 @@ MESSAGES = {
     "TaskIntentResult": pb.TaskIntentResult,
     "prototest.v1.Book": prototest_pb.Book,
     "prototest.v1.BookCard": prototest_pb.BookCard,
+    "prototest.v1.Parcel": rules_pb.Parcel,
 }
 
 
@@ -39,7 +41,8 @@ class WireProfileCasesTest(unittest.TestCase):
                     continue
                 read = from_wire(cls, case["input"], strict=case["strict"])
                 self.assertEqual(read.unrecognized, case["unrecognized"])
-                self.assertEqual(compact(to_wire(read.message)), compact(case["wire"]))
+                # A lenient read is passed on as read (to_wire's lenient).
+                self.assertEqual(compact(to_wire(read.message, lenient=not case["strict"])), compact(case["wire"]))
 
 
 if __name__ == "__main__":
