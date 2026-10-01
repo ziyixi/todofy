@@ -3,18 +3,21 @@
 # nothing personal and no secret belongs in this file).
 #
 # Deployed only by CI ("Mail Hero deploy" in .github/workflows/ci.yml) through deploy/deploy-vars.mjs, which
-# validates and appends the values that are never committed, with --var:
-#   RECEIVE_ADDRESS, ACCESS_OWNER, ACCESS_OWNER_ALIASES   personal: GitHub environment secrets
-#   FORCE_SEND_PAUSED, MAINTENANCE_MODE                   operational state: GitHub environment variables
-# A plain `wrangler deploy` of this file DELETES those five vars (mail to the unknown address is rejected and
-# the pauses lift). An emergency manual deploy uses the same wrapper, from cloudflare/:
-#   node ../deploy/deploy-vars.mjs exec -- npx --no-install wrangler deploy --config ../wrangler.toml
-# Worker secrets (CREDENTIAL_KEY, BACKUP_TOKEN, BACKUP_RECEIPT_KEY, ALERT_WEBHOOK_TOKEN, ACCESS_CLIENT_ID,
+# validates and appends the values that are never committed:
+#   RECEIVE_ADDRESS, ACCESS_OWNER, ACCESS_OWNER_ALIASES   personal (GitHub environment secrets): Worker secrets,
+#                                                         through --secrets-file in the same deploy
+#   FORCE_SEND_PAUSED, MAINTENANCE_MODE                   operational state (GitHub environment variables): --var
+#   BUILD_SHA                                             the commit: --var
+# A plain `wrangler deploy` of this file DELETES the three --var values (the pauses lift). The wrapper refuses a
+# deploy without the secrets file. An emergency manual deploy uses the same wrapper, from cloudflare/:
+#   node ../deploy/deploy-vars.mjs secrets <file> && node ../deploy/deploy-vars.mjs exec -- \
+#     npx --no-install wrangler deploy --config ../wrangler.toml --secrets-file <file>
+# The other Worker secrets (CREDENTIAL_KEY, BACKUP_TOKEN, BACKUP_RECEIPT_KEY, ALERT_WEBHOOK_TOKEN, ACCESS_CLIENT_ID,
 # ACCESS_CLIENT_SECRET) are set with `wrangler secret put --config ../wrangler.toml` and survive every deploy.
 #
 # Run wrangler from cloudflare/ (the pinned wrangler lives in cloudflare/node_modules) with
 # --config ../wrangler.toml. Local dev: `npm --prefix cloudflare run dev` with local bindings only and the
-# five injected values in mail-hero/.dev.vars (see .dev.vars.example); D1 commands always pass --local.
+# injected values in mail-hero/.dev.vars (see .dev.vars.example); D1 commands always pass --local.
 name = "mail-hero"
 account_id = "f57937bd1d93bf59e737b6d8445fb7a3"
 main = "cloudflare/src/native/index.ts"

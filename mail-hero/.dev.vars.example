@@ -4,7 +4,7 @@
 # D1 commands always pass --local, e.g. from cloudflare/:
 #   npx wrangler d1 migrations apply DB --local --config ../wrangler.toml
 #
-# The values CI adds with --var at deploy (deploy/deploy-vars.mjs):
+# The values CI adds at deploy (deploy/deploy-vars.mjs; in production the first three are Worker secrets):
 RECEIVE_ADDRESS=inbox@example.com
 ACCESS_OWNER=owner@example.com
 ACCESS_OWNER_ALIASES=

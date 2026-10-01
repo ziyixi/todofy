@@ -4,7 +4,7 @@ Mail Hero 使用 **Workers Free + D1 + 私有 R2 Standard + SQLite Durable Objec
 
 当前已部署：唯一地址为 `inbox` 子域上的专用地址（GitHub secret `MAIL_HERO_RECEIVE_ADDRESS`，公开仓库不写明），UI **[mail-hero.ziyixi.science](https://mail-hero.ziyixi.science)**，唯一 owner 为 canonical owner 邮箱（GitHub secret `MAIL_HERO_ACCESS_OWNER`），数据库 `mail-hero`，私有桶 `mail-hero-store`。GitHub 登录和一封真实纯文本邮件的入站、持久保存、解析及 UI 展示已验收；来源自动转发、HTML/附件、大邮件、OTP 备用登录及生产收信额度仍需分别验证。Todofy消费者已具备持久接管接口，完整邮件到任务链路仍待用户测试信验收，见 [消费者接入说明](todofy-integration.md)。
 
-生产配置是提交的 [`mail-hero/wrangler.toml`](../wrangler.toml)（顶层即生产，不含个人值、运维开关与密钥）；[GitHub Actions](ci-cd.md) 部署它，并由 `deploy/deploy-vars.mjs` 以 `--var` 加入收件地址、owner 邮箱（production secrets）与运维开关（production variables）。本地开发只用本地绑定和 `mail-hero/.dev.vars`（见 `.dev.vars.example`），D1 命令一律 `--local`。以下资源创建和初始化步骤供新环境参考，**现有部署不需要重建资源或重新生成密钥**。完整证据和待验收项见 [验收记录](verification-native.md)。
+生产配置是提交的 [`mail-hero/wrangler.toml`](../wrangler.toml)（顶层即生产，不含个人值、运维开关与密钥）；[GitHub Actions](ci-cd.md) 部署它，并由 `deploy/deploy-vars.mjs` 在同一次发布中把收件地址、owner 邮箱（production secrets）作为 Worker secret（`--secrets-file`）加入，把运维开关（production variables）与 `BUILD_SHA` 以 `--var` 加入。本地开发只用本地绑定和 `mail-hero/.dev.vars`（见 `.dev.vars.example`），D1 命令一律 `--local`。以下资源创建和初始化步骤供新环境参考，**现有部署不需要重建资源或重新生成密钥**。完整证据和待验收项见 [验收记录](verification-native.md)。
 
 UI 的投递 Dashboard 可按浏览器时区的本地小时或日期查看成功、进入重试、终止失败及结果未确认的 webhook 尝试，并进入对应投递记录。统计单位、时间边界和历史数据的限制见 [投递 Dashboard 统计口径](delivery-dashboard.md)。
 
@@ -110,7 +110,7 @@ npx wrangler r2 bucket create mail-hero-store
 
 - `DB`对应D1，`MAIL_STORE`对应私有Standard桶。
 - `COORDINATOR`对应 `MailCoordinator`，migration使用 `new_sqlite_classes`；应用固定实例名 `inbox-v1`。
-- `RECEIVE_ADDRESS`为最终唯一地址（GitHub secret `MAIL_HERO_RECEIVE_ADDRESS`，部署时注入，不写进配置）；改地址必须同步路由和来源转发。
+- `RECEIVE_ADDRESS`为最终唯一地址（GitHub secret `MAIL_HERO_RECEIVE_ADDRESS`，部署时作为 Worker secret 注入，不写进配置）；改地址必须同步路由和来源转发。
 - 首次部署时 GitHub variables `MAIL_HERO_FORCE_SEND_PAUSED=true`、`MAIL_HERO_MAINTENANCE_MODE=false`，默认archive。
 - `INGEST_DAILY_MESSAGE_LIMIT="300"`、`INGEST_DAILY_BYTE_LIMIT="268435456"`，按UTC日计量。
 - `WEBHOOK_ALLOWED_HOSTS`为允许的消费者精确域名；没有消费者可留空。
@@ -142,13 +142,16 @@ routes = [{ pattern = "mail-hero.ziyixi.science", custom_domain = true }]
 
 应用独立校验JWT的签名（仅RS256）、issuer、audience、过期和owner；浏览器写操作校验Origin/CSRF。两者由共享包 `packages/edge-auth` 实现，配置项不变。附件只能通过鉴权后路由访问，不要为下载而公开R2。[Custom Domains](https://developers.cloudflare.com/workers/configuration/routing/custom-domains/)、[Access JWT](https://developers.cloudflare.com/cloudflare-one/access-controls/applications/http-apps/authorization-cookie/validating-json/)
 
-当前 Custom Domain 已绑定，`workers_dev=false`、`preview_urls=false`。日常代码更新和运维开关变更通过 [GitHub Actions](ci-cd.md) 发布（改 GitHub variable 后手工运行 workflow）。确需人工部署时，在完成构建与验证后，从 `mail-hero/cloudflare` 经包装器发布，环境中给出与 CI 相同的五个值（`MAIL_HERO_RECEIVE_ADDRESS` 等，只在本机 shell，不进聊天或文件）：
+当前 Custom Domain 已绑定，`workers_dev=false`、`preview_urls=false`。日常代码更新和运维开关变更通过 [GitHub Actions](ci-cd.md) 发布（改 GitHub variable 后手工运行 workflow）。确需人工部署时，在完成构建与验证后，从 `mail-hero/cloudflare` 经包装器发布，环境中给出与 CI 相同的值（`MAIL_HERO_RECEIVE_ADDRESS` 等与两个开关，`GITHUB_SHA` 为所发布的提交；只在本机 shell，不进聊天）。secrets 文件放在仓库外，发布后删除：
 
 ```sh
-node ../deploy/deploy-vars.mjs exec -- npx --no-install wrangler deploy --config ../wrangler.toml
+node ../deploy/deploy-vars.mjs secrets "$TMPDIR/mail-hero-secrets.json"
+node ../deploy/deploy-vars.mjs exec -- npx --no-install wrangler deploy --config ../wrangler.toml \
+  --secrets-file "$TMPDIR/mail-hero-secrets.json"
+rm -f "$TMPDIR/mail-hero-secrets.json"
 ```
 
-普通 `wrangler deploy` 会删除这五个 var（收件被拒、暂停解除），不要使用。
+普通 `wrangler deploy` 会删除注入的 var（暂停解除），包装器也拒绝没有 secrets 文件的发布；不要绕过。
 
 打开 [UI](https://mail-hero.ziyixi.science)，点击 **GitHub** 即可登录。已使用本人 GitHub 会话成功进入 `/setup`，受保护的配置、D1 状态、调度状态与固定收件地址均正常显示；没有读取私人邮件。之前的拒绝来自 GitHub 返回邮箱与原 Gmail 白名单不一致，现已通过本人 alias 解决。邮件验证码仍可用 canonical owner 邮箱作为备用；验证码只填在正规登录网页，本轮未单独重测 OTP 流程。
 

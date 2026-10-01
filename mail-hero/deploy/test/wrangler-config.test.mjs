@@ -5,7 +5,7 @@ import assert from 'node:assert/strict'
 import { existsSync, readdirSync, readFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { fileURLToPath, pathToFileURL } from 'node:url'
-import { CONFIG, INJECTED } from '../deploy-vars.mjs'
+import { CONFIG, INJECTED, SECRETS } from '../deploy-vars.mjs'
 
 const APP = new URL('../../', import.meta.url)
 const CLOUDFLARE = new URL('cloudflare/', APP)
@@ -39,8 +39,8 @@ test('entry, migrations and assets resolve from the app root', () => {
   assert.deepEqual(config.assets, { directory: 'uiassets/dist', binding: 'ASSETS', not_found_handling: 'single-page-application', run_worker_first: true })
 })
 
-test('personal values and operational switches are never committed', () => {
-  const injected = INJECTED.map(({ name }) => name)
+test('personal values, operational switches and the build are never committed', () => {
+  const injected = [...INJECTED, ...SECRETS].map(({ name }) => name)
   assert.deepEqual(Object.keys(config.vars).filter((name) => injected.includes(name)), [])
   for (const name of ['RECEIVE_ADDRESS', 'ACCESS_OWNER', 'ACCESS_OWNER_ALIASES', 'CREDENTIAL_KEY', 'ALERT_WEBHOOK_TOKEN', 'BACKUP_TOKEN']) {
     assert.equal(name in config.vars, false, name)

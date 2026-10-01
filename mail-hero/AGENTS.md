@@ -48,7 +48,8 @@ R2、D1和DO之间没有跨存储事务。每一步必须可恢复、可去重�
 ## 2. 配置及平台限制
 
 - bindings：`DB`、`MAIL_STORE`、`COORDINATOR`、`ASSETS`。
-- vars：`RECEIVE_ADDRESS`、`ACCESS_ISSUER`、`ACCESS_AUDIENCE`、`ACCESS_OWNER`、可选 `ACCESS_OWNER_ALIASES`、`WEBHOOK_ALLOWED_HOSTS`、`FORCE_SEND_PAUSED`、`MAINTENANCE_MODE`、`INGEST_DAILY_MESSAGE_LIMIT`、`INGEST_DAILY_BYTE_LIMIT`、`PUBLIC_HOST`。`RECEIVE_ADDRESS`、`ACCESS_OWNER`、`ACCESS_OWNER_ALIASES` 由 GitHub environment secrets、`FORCE_SEND_PAUSED`、`MAINTENANCE_MODE` 由 GitHub variables 在部署时经 `deploy/deploy-vars.mjs` 校验后以 `--var` 注入（缺失或非法即拒绝发布，因为未注入的var会被删除）；其余vars与绑定提交在 `mail-hero/wrangler.toml`。
+- vars：`ACCESS_ISSUER`、`ACCESS_AUDIENCE`、`WEBHOOK_ALLOWED_HOSTS`、`FORCE_SEND_PAUSED`、`MAINTENANCE_MODE`、`INGEST_DAILY_MESSAGE_LIMIT`、`INGEST_DAILY_BYTE_LIMIT`、`PUBLIC_HOST`、`BUILD_SHA`。`FORCE_SEND_PAUSED`、`MAINTENANCE_MODE` 由 GitHub variables、`BUILD_SHA` 取发布的提交，在部署时经 `deploy/deploy-vars.mjs` 校验后以 `--var` 注入（缺失或非法即拒绝发布，因为未注入的var会被删除）；其余vars与绑定提交在 `mail-hero/wrangler.toml`。
+- 个人值secret：`RECEIVE_ADDRESS`、`ACCESS_OWNER`、可选 `ACCESS_OWNER_ALIASES` 由 GitHub environment secrets 经同一包装器校验，在同一次 `wrangler deploy` 中以 `--secrets-file` 作为 Worker secret 注入（缺失或非法即拒绝发布），不作为var部署；代码照常读取 `env.X`。
 - secret：`CREDENTIAL_KEY`为64位hex，独立备份；消费者需Access时可配精确`ACCESS_SERVICE_ORIGIN`及秘密`ACCESS_CLIENT_ID`/`ACCESS_CLIENT_SECRET`。
 - `FORCE_SEND_PAUSED=true`阻止消费者投递，继续归档；`MAINTENANCE_MODE=true`用于维护，停止新入站、管理写入及Alarm工作。两者不能混用。维护退出后核对唤醒与pending恢复。
 - `DEV_AUTH_BYPASS`只能本机loopback模拟，不能生产部署。`workers_dev`/预览URL默认关闭，UI只经Access自定义域名。

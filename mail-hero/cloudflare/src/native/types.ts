@@ -4,6 +4,8 @@ export interface Env {
   BACKUP_STORE?: R2Bucket;
   COORDINATOR: DurableObjectNamespace;
   ASSETS: Fetcher;
+  // RECEIVE_ADDRESS, ACCESS_OWNER and ACCESS_OWNER_ALIASES are Worker secrets in production (deploy/deploy-vars.mjs
+  // --secrets-file) and .dev.vars entries locally; the Worker reads them like any var.
   RECEIVE_ADDRESS: string;
   ACCESS_ISSUER: string;
   ACCESS_AUDIENCE: string;
@@ -26,6 +28,8 @@ export interface Env {
   ACCESS_CLIENT_SECRET?: string;
   /** The owner UI's host name (the custom domain); ops-v1 status() links it as ui_url. */
   PUBLIC_HOST?: string;
+  /** The deployed commit (deploy/deploy-vars.mjs adds it with --var; unset locally). */
+  BUILD_SHA?: string;
 }
 
 export type Job = { type: 'parse'; key: string } | { type: 'deliver'; eventID: string };

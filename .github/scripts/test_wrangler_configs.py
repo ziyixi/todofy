@@ -453,6 +453,33 @@ class Workflow(unittest.TestCase):
             with self.subTest(line=line):
                 self.assertFalse({"deploy", "versions upload"} & set(wrangler_commands(line)))
 
+    def test_receive_address_and_owner_identities_are_worker_secrets(self):
+        """The receive address and the owners' Access identities reach every Worker as Worker secrets (the wrapper's
+        `secrets` mode, deployed with --secrets-file), never as a --var: Wrangler and the Cloudflare dashboard show a
+        plain var's value. Every deploy that runs `exec` of such a wrapper passes the file the `secrets` step wrote."""
+        identities = {name for name in PERSONAL_INPUTS if re.search(r"_(RECEIVE_ADDRESS|ACCESS_OWNER|ACCESS_OWNER_ALIASES)$", name)}
+        self.assertEqual(len(identities), 9)
+        found = set()
+        for app, (wrapper, _, _) in WRAPPERS.items():
+            inputs = markers(wrapper)
+            with self.subTest(app=app):
+                for mode, names in inputs.items():
+                    if mode != "secrets":
+                        self.assertFalse(identities & set(names), mode)
+                found |= identities & set(inputs.get("secrets", []))
+                if not identities & set(inputs.get("secrets", [])):
+                    continue
+                calls = 0
+                for job_name, job in self.app_jobs(app).items():
+                    for step in steps(job):
+                        for line in step["run"].replace("\\\n", " ").splitlines():
+                            if re.search(r"deploy[-_]vars\.(mjs|py) exec( gateway)? -- .*\bwrangler deploy\b", line):
+                                calls += 1
+                                with self.subTest(job=job_name, step=step["name"]):
+                                    self.assertRegex(line, r"--secrets-file[ =]\S+")
+                self.assertGreaterEqual(calls, 2)
+        self.assertEqual(found, identities)
+
     def test_deploy_jobs_restate_every_switch_from_its_variable(self):
         """A deploy step that set a switch to a literal would overwrite the live pause or maintenance state:
         in the deploy jobs each switch a step sets comes exactly from its GitHub variable."""
