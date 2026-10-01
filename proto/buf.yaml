@@ -1,0 +1,35 @@
+# The buf module of every cross-app contract IDL (README.md). Run buf from this directory with the pinned
+# binary (node_modules/.bin/buf, from package.json): npm run lint, npm run breaking.
+version: v2
+modules:
+  - path: .
+    # Only <package path>/*.proto files are the module: tooling, generated output and test data are not.
+    excludes:
+      - node_modules
+      - python
+      - scripts
+      - test
+      - testdata
+      - tools
+      - ts
+deps:
+  # google/api/field_behavior.proto (AIP-203) now; google/api/http.proto and google/rpc/status.proto later.
+  # buf.lock pins the commit and digest; buf caches it (~/.cache/buf), so only the first run needs network.
+  - buf.build/googleapis/googleapis
+lint:
+  # STANDARD is buf's AIP-aligned set: PACKAGE_VERSION_SUFFIX, PACKAGE_DIRECTORY_MATCH,
+  # FIELD_LOWER_SNAKE_CASE, ENUM_VALUE_PREFIX, ENUM_ZERO_VALUE_SUFFIX (_UNSPECIFIED), SERVICE_SUFFIX, ...
+  # COMMENTS adds the Google style rule that every element is documented.
+  use:
+    - STANDARD
+    - COMMENTS
+  enum_zero_value_suffix: _UNSPECIFIED
+  service_suffix: Service
+  # Exceptions are written next to the element (buf:lint:ignore <RULE>) with the reason.
+  disallow_comment_ignores: false
+breaking:
+  # FILE is the strictest category: it also protects generated code (names, packages, files), not only
+  # the binary and JSON wire formats. scripts/breaking.sh adds the wire profile's own rules
+  # (tools/profile_breaking.py).
+  use:
+    - FILE

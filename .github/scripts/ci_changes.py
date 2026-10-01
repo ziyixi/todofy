@@ -10,6 +10,11 @@ Outputs (GITHUB_OUTPUT, "true"/"false"):
   infra             run "Infra checks" (OpenTofu fmt/validate of infra/, its guards and the plan-summary
                     tests): infra/, tools/infra-plan-summary/ or .github/ changed. Never deploys anything;
                     not set by a dispatch (no app needs it).
+  proto             run "Proto checks" (buf lint, buf breaking and the wire profile rules against "base",
+                    deterministic generation, the one-version rule, both codecs' tests): proto/, .github/ or
+                    tools/ changed, or a dispatch.
+  base              not a flag: the commit the diff started from (empty when everything runs), which
+                    "Proto checks" compares the IDL with.
   todofy_deploy, mail_hero_deploy, dashboard_deploy, website_deploy, lab_deploy
                     the app, a shared package it compiles in, or a contract file it bundles changed
                     (deploy jobs also require refs/heads/main)
@@ -19,6 +24,12 @@ Outputs (GITHUB_OUTPUT, "true"/"false"):
                     a website change elsewhere releases the site but does not redeploy the relay.
   FlowDay (flowday/) is checked only: its Worker has no deploy job yet (CHECK_ONLY, until F2), so there
   is no flowday_deploy output. It compiles in packages/edge-auth, so a package change also checks it.
+
+proto/ (the protobuf IDL, proto/README.md) checks every app in PROTO_USERS (an app that depends on
+@ziyixi/proto or ziyixi-proto) and deploys only those whose bundle can change: an app whose Worker
+compiles the package in (PROTO_USERS[app] is True: a TypeScript "dependencies" entry, a Python [project]
+dependency) and only for a change outside PROTO_NOT_BUNDLED (tests, test data, the breaking-change
+scripts and Markdown). A test-only user (devDependencies, a dependency group) is checked, never deployed.
 
 push: the files changed between a cumulative base and github.sha, never only this push's own diff,
 so a change whose run was cancelled or failed is checked (and deployed) again by the next run.
@@ -87,6 +98,7 @@ KEYS = (
     "contracts",
     "packages",
     "infra",
+    "proto",
     "todofy_deploy",
     "mail_hero_deploy",
     "dashboard_deploy",
@@ -113,6 +125,12 @@ NO_CONTRACTS = {"website", "flowday"}
 INFRA = ("infra/", "tools/infra-plan-summary/")
 # packages/<name>/ -> the apps whose Workers compile it in (a "file:../../packages/<name>" dependency).
 PACKAGE_USERS = {"edge-auth": ("todofy", "mail-hero", "dashboard", "lab", "flowday")}
+# The protobuf IDL (proto/README.md): app -> whether its production bundle includes the generated code
+# (True) or only its tests use it (False). test_proto.py derives this map from the apps' manifests.
+PROTO = "proto/"
+PROTO_USERS = {"lab": False, "todofy": False}
+# proto/ paths that never reach a bundle: a change there checks the users but deploys none.
+PROTO_NOT_BUNDLED = ("proto/test/", "proto/testdata/", "proto/scripts/", "proto/tools/profile_breaking.py")
 
 # Contract files whose code a TypeScript Worker imports at runtime (constants such as OPS_LIMITS land
 # in its bundle; the dashboard also validates every Ops answer with the schema and validate.mjs),
@@ -130,6 +148,8 @@ BUNDLED_BY = {
 
 # Outputs that describe a reused branch run (strings, one line each).
 REUSE_KEYS = ("checks_reused", "reused_run_url", "reused_jobs")
+# The diff base (a commit, or empty when everything runs): the base "Proto checks" compares the IDL with.
+BASE_KEY = "base"
 # The check outputs, and the jobs (by their names in ci.yml) that must have succeeded in a reused run when
 # this push needs that output. "<name> (*)" stands for every job of a matrix ("Todofy runtime (1/3)", ...):
 # at least one, and all of them. test_ci_changes.py checks these names against ci.yml.
@@ -143,6 +163,7 @@ CHECK_JOBS = {
     "contracts": ("Contracts",),
     "packages": ("Shared packages",),
     "infra": ("Infra checks",),
+    "proto": ("Proto checks",),
 }
 # Jobs every reused run must have passed, whatever this push needs.
 ALWAYS_JOBS = ("Changes", "CI gate")
@@ -161,12 +182,14 @@ def outputs(
     packages: bool,
     relay: bool = False,
     infra: bool = False,
+    proto: bool = False,
 ) -> dict[str, bool]:
     checked, deployed = set(checked), set(deployed)
     result = {
         "contracts": contracts,
         "packages": packages,
         "infra": infra,
+        "proto": proto,
         "website_relay_deploy": relay,
     }
     for app in APPS:
@@ -179,6 +202,16 @@ def outputs(
 def is_package_document(path: str) -> bool:
     """A Markdown file inside a package (packages/<name>/**/*.md): documentation, never compiled in."""
     return path.startswith("packages/") and path.count("/") >= 2 and path.endswith(".md")
+
+
+def proto_users(paths: list[str]) -> tuple[set[str], set[str]]:
+    """(apps to check, apps to deploy) for the proto/ paths among ``paths``."""
+    changed = [path for path in paths if path.startswith(PROTO)]
+    if not changed:
+        return set(), set()
+    bundled = any(not path.startswith(PROTO_NOT_BUNDLED) and not path.endswith(".md") for path in changed)
+    deployed = {app for app, in_bundle in PROTO_USERS.items() if in_bundle and bundled}
+    return set(PROTO_USERS), deployed
 
 
 def classify(paths: Iterable[str]) -> dict[str, bool]:
@@ -203,16 +236,18 @@ def classify(paths: Iterable[str]) -> dict[str, bool]:
     relay = any(path.startswith(RELAY) for path in paths)
     site = any(path.startswith("website/") and not path.startswith(RELAY) for path in paths)
     site |= any("website" in PACKAGE_USERS.get(name, APPS) for name in compiled)
-    deployed = apps | bundled
+    proto_checked, proto_deployed = proto_users(paths)
+    deployed = apps | bundled | proto_deployed
     if not site:
         deployed -= {"website"}
     return outputs(
-        checked=APPS if shared else apps | documented,
+        checked=APPS if shared else apps | documented | proto_checked,
         deployed=deployed,
         contracts=bool((apps - NO_CONTRACTS) | documented) or shared,
         packages=bool(package_names) or ci,
         relay=relay,
         infra=any(path.startswith((".github/", *INFRA)) for path in paths),
+        proto=ci or bool(proto_checked),
     )
 
 
@@ -221,7 +256,7 @@ def dispatched(app: str) -> dict[str, bool]:
         raise ValueError(f"unknown app input {app!r}; expected one of {sorted(DISPATCH)}")
     apps = DISPATCH[app]
     website = "website" in apps
-    return outputs(checked=apps, deployed=apps, contracts=True, packages=True, relay=website)
+    return outputs(checked=apps, deployed=apps, contracts=True, packages=True, relay=website, proto=True)
 
 
 MAIN = "refs/heads/main"
@@ -236,24 +271,26 @@ def decide(
     diff: Callable[[str, str], list[str]],
     is_ancestor: Callable[[str, str], bool],
     merge_base: Callable[[str], str],
-) -> tuple[dict[str, bool], str]:
+) -> tuple[dict[str, bool], str, str]:
+    """(outputs, reason, diff base); the base is empty when there is no diff (everything runs)."""
     if event == "workflow_dispatch":
-        return dispatched(app or "both"), f"dispatched for {app or 'both'}"
+        return dispatched(app or "both"), f"dispatched for {app or 'both'}", ""
     if event != "push":
-        return everything(), f"event {event!r}: running everything"
+        return everything(), f"event {event!r}: running everything", ""
     if ref == MAIN:
         if not last_success or set(last_success) == {"0"}:
-            return everything(), "no successful push run of this workflow on main yet: running everything"
+            return everything(), "no successful push run of this workflow on main yet: running everything", ""
         if not is_ancestor(last_success, after):
-            return everything(), f"last successful main run {last_success[:12]} is not an ancestor: running everything"
+            reason = f"last successful main run {last_success[:12]} is not an ancestor: running everything"
+            return everything(), reason, ""
         base, why = last_success, "the last successful main run"
     else:
         base = merge_base(after)
         if not base:
-            return everything(), "no merge base with origin/main: running everything"
+            return everything(), "no merge base with origin/main: running everything", ""
         why = "the merge base with origin/main"
     paths = diff(base, after)
-    return classify(paths), f"{len(paths)} file(s) changed since {base[:12]} ({why})"
+    return classify(paths), f"{len(paths)} file(s) changed since {base[:12]} ({why})", base
 
 
 def required_jobs(result: dict[str, bool]) -> list[str]:
@@ -388,7 +425,7 @@ def git_merge_base(after: str) -> str:
 def main(get: Callable[[str], dict] | None = None) -> int:
     event, ref = os.environ.get("EVENT_NAME", ""), os.environ.get("REF", "")
     after = os.environ.get("AFTER", "HEAD")
-    result, reason = decide(
+    result, reason, base = decide(
         event,
         ref,
         after,
@@ -403,6 +440,7 @@ def main(get: Callable[[str], dict] | None = None) -> int:
         reason = f"{reason}; {reuse_reason}"
     lines = [f"{key}={str(result[key]).lower()}" for key in KEYS]
     lines += [f"{key}={' '.join(extra[key].split())}" for key in REUSE_KEYS]
+    lines.append(f"{BASE_KEY}={base if all(c in '0123456789abcdef' for c in base) else ''}")
     print(reason)
     print("\n".join(lines))
     for name, text in (("GITHUB_OUTPUT", "\n".join(lines)), ("GITHUB_STEP_SUMMARY", summary(result, reason))):

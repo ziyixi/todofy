@@ -40,6 +40,7 @@ def expect(
     lab_deploy=False,
     infra=False,
     flowday_check=False,
+    proto=False,
 ):
     return {
         "todofy_check": todofy_check,
@@ -51,6 +52,7 @@ def expect(
         "contracts": contracts,
         "packages": packages,
         "infra": infra,
+        "proto": proto,
         "todofy_deploy": todofy_deploy,
         "mail_hero_deploy": mail_hero_deploy,
         "dashboard_deploy": dashboard_deploy,
@@ -177,8 +179,12 @@ class Classify(unittest.TestCase):
         self.assertEqual({path: set(apps) for path, apps in ci_changes.BUNDLED_BY.items()}, importers)
 
     def test_ci_changes_recheck_everything_but_deploy_nothing(self):
-        self.assertEqual(push([".github/workflows/ci.yml"]), expect(T, T, T, F, F, packages=T, infra=T, **ALL_CHECKED))
-        self.assertEqual(push([".github/scripts/ci_changes.py"]), expect(T, T, T, F, F, packages=T, infra=T, **ALL_CHECKED))
+        self.assertEqual(
+            push([".github/workflows/ci.yml"]), expect(T, T, T, F, F, packages=T, infra=T, proto=T, **ALL_CHECKED)
+        )
+        self.assertEqual(
+            push([".github/scripts/ci_changes.py"]), expect(T, T, T, F, F, packages=T, infra=T, proto=T, **ALL_CHECKED)
+        )
 
     def test_infra_runs_only_its_own_checks(self):
         """infra/ (plan-only OpenTofu) and its plan-summary tool check nothing else and deploy nothing."""
@@ -192,9 +198,43 @@ class Classify(unittest.TestCase):
                 self.assertFalse(push([path])["infra"])
         self.assertEqual(push(["infra/storage.tf", "lab/wrangler.toml"]), expect(F, F, T, F, F, **LAB, infra=T))
 
+    def test_proto_checks_its_users_and_deploys_none_while_they_only_test_with_it(self):
+        """proto/ re-checks every PROTO_USERS app and runs Proto checks; Lab and Todofy use it in tests only."""
+        self.assertEqual(ci_changes.PROTO_USERS, {"lab": False, "todofy": False})
+        for path in (
+            "proto/todofy/taskintent/v1/task_intent.proto",
+            "proto/ts/wire-json.ts",
+            "proto/python/src/ziyixi_proto/wire_json.py",
+            "proto/package-lock.json",
+            "proto/README.md",
+            "proto/test/task-intent.test.ts",
+        ):
+            with self.subTest(path=path):
+                self.assertEqual(push([path]), expect(T, F, F, F, F, proto=T, lab_check=T))
+        self.assertFalse(push(["protocol.md"])["proto"])
+
+    def test_proto_deploys_a_user_whose_bundle_compiles_it_in_unless_only_tests_or_docs_changed(self):
+        saved = ci_changes.PROTO_USERS
+        try:
+            ci_changes.PROTO_USERS = {"lab": True, "todofy": False}
+            for path in ("proto/todofy/taskintent/v1/task_intent.proto", "proto/ts/wire-json.ts", "proto/buf.lock"):
+                with self.subTest(path=path):
+                    self.assertEqual(push([path]), expect(T, F, F, F, F, proto=T, **LAB))
+            for path in (
+                "proto/README.md",
+                "proto/test/task-intent.test.ts",
+                "proto/testdata/wire-profile-cases.json",
+                "proto/scripts/breaking.sh",
+                "proto/tools/profile_breaking.py",
+            ):
+                with self.subTest(path=path):
+                    self.assertEqual(push([path]), expect(T, F, F, F, F, proto=T, lab_check=T))
+        finally:
+            ci_changes.PROTO_USERS = saved
+
     def test_ci_tooling_under_tools_counts_as_ci(self):
         # tools/cf-guard runs in every deploy job (and the website release): re-check everything, deploy nothing.
-        self.assertEqual(push(["tools/cf-guard/cf-guard.mjs"]), expect(T, T, T, F, F, packages=T, **ALL_CHECKED))
+        self.assertEqual(push(["tools/cf-guard/cf-guard.mjs"]), expect(T, T, T, F, F, packages=T, proto=T, **ALL_CHECKED))
         self.assertEqual(push(["tools-notes.md"]), expect(F, F, F, F, F))
 
     def test_a_shared_package_checks_and_deploys_every_app_that_compiles_it_in(self):
@@ -236,7 +276,10 @@ class Classify(unittest.TestCase):
             "packages/edge-auth/SPEC.md",
             "dashboard/worker/src/state.ts",
         ]
-        self.assertEqual(push(paths), expect(T, T, T, F, F, packages=T, infra=T, **DASH, website_check=T, lab_check=T, flowday_check=T))
+        self.assertEqual(
+            push(paths),
+            expect(T, T, T, F, F, packages=T, infra=T, proto=T, **DASH, website_check=T, lab_check=T, flowday_check=T),
+        )
 
     def test_a_package_change_with_one_app_still_deploys_every_user(self):
         paths = ["packages/edge-auth/src/csrf.ts", "todofy/gateway/src/csrf.ts"]
@@ -332,7 +375,8 @@ class Classify(unittest.TestCase):
 
     def test_the_release_workflow_rechecks_every_app_but_deploys_none(self):
         self.assertEqual(
-            push([".github/workflows/website-release.yml"]), expect(T, T, T, F, F, packages=T, infra=T, **ALL_CHECKED)
+            push([".github/workflows/website-release.yml"]),
+            expect(T, T, T, F, F, packages=T, infra=T, proto=T, **ALL_CHECKED),
         )
 
 
@@ -348,10 +392,11 @@ class Unknown(unittest.TestCase):
         self.assertEqual(push(["README.md"], ref=BRANCH, merge_base=""), ci_changes.everything())
 
     def test_other_events_run_everything(self):
-        result, _ = ci_changes.decide(
+        result, _, base = ci_changes.decide(
             "schedule", MAIN, SHA, "", BASE, lambda b, a: [], lambda b, a: True, lambda a: BASE
         )
         self.assertEqual(result, ci_changes.everything())
+        self.assertEqual(base, "")
 
 
 class Base(unittest.TestCase):
@@ -372,6 +417,19 @@ class Base(unittest.TestCase):
     def test_main_diffs_from_the_last_successful_run(self):
         self.assertEqual(self.bases(MAIN), [(BASE, SHA)])
 
+    def test_the_diff_base_is_an_output(self):
+        def base(ref, **kwargs):
+            return ci_changes.decide(
+                "push", ref, SHA, "", kwargs.get("last_success", BASE), lambda b, a: [], lambda b, a: True,
+                lambda a: kwargs.get("merge_base", "c" * 40),
+            )[2]
+
+        self.assertEqual(base(MAIN), BASE)
+        self.assertEqual(base(BRANCH), "c" * 40)
+        # Everything runs without a base: Proto checks then falls back to HEAD~1 (proto/scripts/breaking.sh).
+        self.assertEqual(base(MAIN, last_success=""), "")
+        self.assertEqual(base(BRANCH, merge_base=""), "")
+
     def test_other_branches_diff_from_the_merge_base_with_main(self):
         self.assertEqual(self.bases(BRANCH), [("c" * 40, SHA)])
         self.assertEqual(self.bases(BRANCH, last_success=""), [("c" * 40, SHA)])
@@ -385,17 +443,17 @@ class Dispatch(unittest.TestCase):
 
     def test_inputs_force_one_two_or_all_apps(self):
         # "both" (also the default) keeps meaning Todofy and Mail Hero.
-        self.assertEqual(self.dispatch("both"), expect(T, T, T, T, T, packages=T))
-        self.assertEqual(self.dispatch(""), expect(T, T, T, T, T, packages=T))
+        self.assertEqual(self.dispatch("both"), expect(T, T, T, T, T, packages=T, proto=T))
+        self.assertEqual(self.dispatch(""), expect(T, T, T, T, T, packages=T, proto=T))
         self.assertEqual(
             self.dispatch("all"),
-            expect(T, T, T, T, T, packages=T, **EVERY, website_relay_deploy=T),
+            expect(T, T, T, T, T, packages=T, proto=T, **EVERY, website_relay_deploy=T),
         )
-        self.assertEqual(self.dispatch("todofy"), expect(T, F, T, T, F, packages=T))
-        self.assertEqual(self.dispatch("mail-hero"), expect(F, T, T, F, T, packages=T))
-        self.assertEqual(self.dispatch("dashboard"), expect(F, F, T, F, F, packages=T, **DASH))
-        self.assertEqual(self.dispatch("lab"), expect(F, F, T, F, F, packages=T, **LAB))
-        self.assertEqual(self.dispatch("flowday"), expect(F, F, T, F, F, packages=T, flowday_check=T))
+        self.assertEqual(self.dispatch("todofy"), expect(T, F, T, T, F, packages=T, proto=T))
+        self.assertEqual(self.dispatch("mail-hero"), expect(F, T, T, F, T, packages=T, proto=T))
+        self.assertEqual(self.dispatch("dashboard"), expect(F, F, T, F, F, packages=T, proto=T, **DASH))
+        self.assertEqual(self.dispatch("lab"), expect(F, F, T, F, F, packages=T, proto=T, **LAB))
+        self.assertEqual(self.dispatch("flowday"), expect(F, F, T, F, F, packages=T, proto=T, flowday_check=T))
         self.assertEqual(
             self.dispatch("website"),
             expect(
@@ -404,7 +462,7 @@ class Dispatch(unittest.TestCase):
                 T,
                 F,
                 F,
-                packages=T,
+                packages=T, proto=T,
                 website_check=T,
                 website_deploy=T,
                 website_relay_deploy=T,
@@ -479,7 +537,7 @@ class RealGit(unittest.TestCase):
         self.commit("todofy/worker/a.py")
         p3 = self.commit("mail-hero/docs/b.md")
         outputs = self.main_run(p3, p0)
-        expected = {**dict.fromkeys(ci_changes.KEYS, "true"), "packages": "false", "infra": "false"}
+        expected = {**dict.fromkeys(ci_changes.KEYS, "true"), "packages": "false", "infra": "false", "proto": "false"}
         expected.update(dashboard_check="false", dashboard_deploy="false")
         expected.update(website_check="false", website_deploy="false", website_relay_deploy="false")
         expected.update(lab_check="false", lab_deploy="false", flowday_check="false")
@@ -491,7 +549,7 @@ class RealGit(unittest.TestCase):
         after = self.commit("README.md.orig")
         outputs = self.main_run(after, green)
         unaffected = {"website_check", "website_deploy", "website_relay_deploy"}
-        self.assertEqual({key for key in ci_changes.KEYS if outputs[key] == "false"}, unaffected | {"infra"})
+        self.assertEqual({key for key in ci_changes.KEYS if outputs[key] == "false"}, unaffected | {"infra", "proto"})
 
     def test_a_failed_run_on_main_is_repeated(self):
         # Push A changed todofy/ and its run failed (a Mail Hero flake); push B fixes only mail-hero/.
@@ -583,7 +641,7 @@ class PackageUsers(unittest.TestCase):
             for manifest in REPO.glob("*/**/package.json")
             if "node_modules" not in manifest.parts
         }
-        self.assertEqual(tops - {"packages", "contracts"}, set(ci_changes.APPS))
+        self.assertEqual(tops - {"packages", "contracts", "proto"}, set(ci_changes.APPS))
 
 
 def workflow_jobs():
@@ -1454,6 +1512,7 @@ class Reuse(unittest.TestCase):
             "Contracts",
             "Shared packages",
             "Infra checks",
+            "Proto checks",
         )
         result, extra, _ = self.reuse(needed, [branch_run()], {800: jobs})
         self.assertEqual(extra["checks_reused"], "true")
@@ -1581,7 +1640,8 @@ class ReuseRealGit(unittest.TestCase):
         self.assertEqual(outputs["contracts"], "false")
         self.assertEqual(outputs["mail_hero_deploy"], "true")
         self.assertEqual(outputs["reused_jobs"], "Changes, CI gate, Mail Hero checks, Contracts")
-        self.assertEqual(set(outputs), {*ci_changes.KEYS, *ci_changes.REUSE_KEYS})
+        self.assertEqual(set(outputs), {*ci_changes.KEYS, *ci_changes.REUSE_KEYS, ci_changes.BASE_KEY})
+        self.assertEqual(outputs["base"], green)
 
 
 class HostnameGuard(unittest.TestCase):

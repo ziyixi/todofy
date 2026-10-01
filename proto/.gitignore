@@ -1,0 +1,13 @@
+# The pinned toolchain (package.json, package-lock.json).
+node_modules/
+__pycache__/
+
+# Generated code is never committed (README.md, Rules). tools/ensure.mjs writes every directory inside the
+# two package roots below; the files directly in them (package.json, wire-json.ts, ...) are hand-written.
+/ts/*/
+/python/src/ziyixi_proto/*/
+# The generation stamp, its temporary files and the lock.
+/.generated.json
+/.generated.json.tmp
+/.generate-*/
+/.generate.lock/

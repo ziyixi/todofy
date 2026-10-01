@@ -1,0 +1,176 @@
+// task-intent-v1 as a protobuf IDL (proto/README.md).
+//
+// This file mirrors contracts/task-intent-v1 field for field: same field names, same enum values (with
+// the AIP-126 prefix and an _UNSPECIFIED zero value), same optionality. It does not change the wire:
+// task-intent-v1 stays the JSON that task-intent-v1.schema.json describes, and the value rules that
+// protobuf cannot express (lengths, patterns, 1-30 distinct items, the URL host allow-list) stay there.
+// The wire JSON profile (proto/README.md) maps a message of this file to exactly that JSON.
+//
+// Field behavior (AIP-203): REQUIRED on an output field means the wire profile always writes it, as
+// null when unset; a field without it is omitted when unset.
+
+syntax = "proto3";
+
+package todofy.taskintent.v1;
+
+import "google/api/field_behavior.proto";
+import "google/protobuf/timestamp.proto";
+
+// Todofy's task-intent methods on its "Ops" entrypoint (a Workers service binding, not gRPC).
+//
+// The method and message names mirror task-intent-v1; a v2 would follow AIP-133/131
+// (CreateTaskIntent, GetTaskIntent) with request and response messages of their own.
+service TaskIntentService {
+  // Records an intent (idempotent per source and intent_id) and answers its state.
+  // buf:lint:ignore RPC_REQUEST_STANDARD_NAME
+  // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
+  // buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE
+  rpc ProposeTasks(TaskIntent) returns (TaskIntentResult);
+
+  // Answers the current state of a recorded intent, or STATE_NOT_FOUND.
+  // buf:lint:ignore RPC_REQUEST_STANDARD_NAME
+  // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
+  // buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE
+  rpc TaskIntentStatus(TaskIntentRef) returns (TaskIntentResult);
+}
+
+// The proposing app. A closed list on input: Todofy refuses a source it does not know.
+enum Source {
+  // Never sent; a reader that sees it treats the message as invalid input.
+  SOURCE_UNSPECIFIED = 0;
+  // Lab, the paper radar. URL host allow-list: arxiv.org.
+  SOURCE_LAB = 1;
+}
+
+// How the items become Todoist tasks.
+enum Mode {
+  // Never sent.
+  MODE_UNSPECIFIED = 0;
+  // One parent task with one subtask per item.
+  MODE_SUBTASKS = 1;
+  // One top-level task per item, no parent task.
+  MODE_SEPARATE = 2;
+}
+
+// The state of an intent (task-intent-v1 README, States). An open list on output: a reader that does
+// not know a value treats the intent as unknown and asks again later.
+enum State {
+  // Not a state Todofy sends. A value this build does not know reads as this from JSON; from binary
+  // it keeps its number. Either way it is not a known case, so a reader takes its default branch.
+  STATE_UNSPECIFIED = 0;
+  // Recorded; Todofy's alarm is creating the tasks.
+  STATE_PENDING = 1;
+  // Every task exists.
+  STATE_CREATED = 2;
+  // proposeTasks for an intent that was already fully created; nothing new was sent.
+  STATE_DUPLICATE = 3;
+  // Todofy does not accept or holds intents now (see recorded).
+  STATE_PAUSED = 4;
+  // Todoist refused a task, or its result stayed unknown.
+  STATE_FAILED = 5;
+  // Refused; nothing recorded or sent unless error_code is ERROR_CODE_INTENT_CONFLICT.
+  STATE_REJECTED = 6;
+  // taskIntentStatus for an intent Todofy never recorded.
+  STATE_NOT_FOUND = 7;
+}
+
+// Why the state is not plain progress (AIP-193 ErrorInfo.reason style). An open list on output: a
+// reader keeps an unrecognized value as "some other reason" and never reads it as success.
+enum ErrorCode {
+  // No code: the wire profile writes null.
+  ERROR_CODE_UNSPECIFIED = 0;
+  // Todofy is in maintenance mode.
+  ERROR_CODE_MAINTENANCE = 1;
+  // Todofy's processing is paused.
+  ERROR_CODE_PROCESSING_PAUSED = 2;
+  // Todoist writes are force-paused.
+  ERROR_CODE_TODOIST_PAUSED = 3;
+  // Todoist writes are blocked after an auth failure.
+  ERROR_CODE_TODOIST_BLOCKED = 4;
+  // A backup lease is active.
+  ERROR_CODE_BACKUP_ACTIVE = 5;
+  // An attempt waits for the Todoist rate window.
+  ERROR_CODE_RATE_LIMITED = 6;
+  // An attempt waits for its backoff.
+  ERROR_CODE_RETRY_WAIT = 7;
+  // Todoist refused a task.
+  ERROR_CODE_TODOIST_REJECTED = 8;
+  // A task's result stayed unknown after the footer lookup.
+  ERROR_CODE_TODOIST_RESULT_UNKNOWN = 9;
+  // Another content already holds this intent_id.
+  ERROR_CODE_INTENT_CONFLICT = 10;
+  // The source's daily intent limit is reached.
+  ERROR_CODE_DAILY_LIMIT = 11;
+  // An item links to a host outside the source's allow-list.
+  ERROR_CODE_URL_NOT_ALLOWED = 12;
+  // Todofy does not accept intents from this source.
+  ERROR_CODE_SOURCE_NOT_ALLOWED = 13;
+}
+
+// The parent task (subtasks mode) or the context line of every task (separate mode).
+message TaskIntentParent {
+  // One line, 1-200 characters.
+  string title = 1 [(google.api.field_behavior) = REQUIRED];
+  // Plain text, newlines allowed, at most 1000 characters. Absent and empty are different values.
+  optional string description = 2;
+}
+
+// One task to create.
+message TaskIntentItem {
+  // One line, 1-300 characters: the task's content.
+  string title = 1 [(google.api.field_behavior) = REQUIRED];
+  // https, host on the source's allow-list, no query or fragment.
+  optional string url = 2;
+  // Plain text, newlines allowed, at most 1000 characters.
+  optional string description = 3;
+}
+
+// Input of ProposeTasks. Todofy freezes it on first record.
+message TaskIntent {
+  // Always "task-intent-v1" (the package carries the major version; this field mirrors v1's wire).
+  string version = 1 [(google.api.field_behavior) = REQUIRED];
+  // The proposing app.
+  Source source = 2 [(google.api.field_behavior) = REQUIRED];
+  // The proposer's idempotency key (AIP-155), unique per source for ever.
+  string intent_id = 3 [(google.api.field_behavior) = REQUIRED];
+  // How the items become tasks.
+  Mode mode = 4 [(google.api.field_behavior) = REQUIRED];
+  // The parent task or context line.
+  TaskIntentParent parent = 5 [(google.api.field_behavior) = REQUIRED];
+  // 1-30 distinct items, created in this order.
+  repeated TaskIntentItem items = 6 [(google.api.field_behavior) = REQUIRED];
+}
+
+// Input of TaskIntentStatus.
+message TaskIntentRef {
+  // Always "task-intent-v1".
+  string version = 1 [(google.api.field_behavior) = REQUIRED];
+  // The proposing app.
+  Source source = 2 [(google.api.field_behavior) = REQUIRED];
+  // The intent to look up.
+  string intent_id = 3 [(google.api.field_behavior) = REQUIRED];
+}
+
+// Output of both methods: codes, counts and the caller's own identifiers only, never task text.
+message TaskIntentResult {
+  // Always "task-intent-v1".
+  string version = 1 [(google.api.field_behavior) = REQUIRED];
+  // The proposing app.
+  Source source = 2 [(google.api.field_behavior) = REQUIRED];
+  // The intent this result is about.
+  string intent_id = 3 [(google.api.field_behavior) = REQUIRED];
+  // The intent's state.
+  State state = 4 [(google.api.field_behavior) = REQUIRED];
+  // Todofy holds a ledger row for this intent.
+  bool recorded = 5 [(google.api.field_behavior) = REQUIRED];
+  // Tasks this intent creates (items, plus the parent in subtasks mode); 0 when not recorded.
+  int32 tasks_total = 6 [(google.api.field_behavior) = REQUIRED];
+  // Tasks created so far.
+  int32 tasks_created = 7 [(google.api.field_behavior) = REQUIRED];
+  // Why the state is not plain progress; ERROR_CODE_UNSPECIFIED (null on the wire) when none.
+  ErrorCode error_code = 8 [(google.api.field_behavior) = REQUIRED];
+  // When to ask again, 1-86400 seconds; unset (null on the wire) when there is nothing to wait for.
+  optional int32 retry_after_seconds = 9 [(google.api.field_behavior) = REQUIRED];
+  // When Todofy last changed this intent (RFC 3339 UTC on the wire).
+  google.protobuf.Timestamp updated_at = 10 [(google.api.field_behavior) = REQUIRED];
+}

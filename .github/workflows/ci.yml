@@ -2,7 +2,8 @@
 # but not deployed yet). "changes" decides what changed since a
 # cumulative base (.github/scripts/ci_changes.py), each app's checks run from its own directory, "Shared packages"
 # checks packages/* (compiled into the apps), "Contracts" runs both sides of mail.received.v1, ops-v1 and
-# task-intent-v1 plus the dashboard's ops-v1 caller tests, and "CI gate" is the single status check to require.
+# task-intent-v1 plus the dashboard's ops-v1 caller tests, "Proto checks" gates the protobuf IDL in proto/, and
+# "CI gate" is the single status check to require.
 # Deploys run only on main, only for the app that changed (itself, a shared package it compiles in, a contract
 # file it bundles, or was dispatched), after the gate passes; Lab deploys after Todofy (its TODOFY binding) and
 # the dashboard after every app whose Ops entrypoint it binds. A push to main whose commit already passed every
@@ -53,6 +54,7 @@ jobs:
       contracts: ${{ steps.decide.outputs.contracts }}
       packages: ${{ steps.decide.outputs.packages }}
       infra: ${{ steps.decide.outputs.infra }}
+      proto: ${{ steps.decide.outputs.proto }}
       todofy_deploy: ${{ steps.decide.outputs.todofy_deploy }}
       mail_hero_deploy: ${{ steps.decide.outputs.mail_hero_deploy }}
       dashboard_deploy: ${{ steps.decide.outputs.dashboard_deploy }}
@@ -63,6 +65,8 @@ jobs:
       checks_reused: ${{ steps.decide.outputs.checks_reused }}
       reused_run_url: ${{ steps.decide.outputs.reused_run_url }}
       reused_jobs: ${{ steps.decide.outputs.reused_jobs }}
+      # The commit the diff started from (empty when everything runs): Proto checks compares the IDL with it.
+      base: ${{ steps.decide.outputs.base }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -168,6 +172,7 @@ jobs:
             todofy/package-lock.json
             todofy/gateway/package-lock.json
             todofy/web/package-lock.json
+            proto/package-lock.json
       - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
         with:
           version: '0.12.10'
@@ -266,6 +271,7 @@ jobs:
             todofy/package-lock.json
             todofy/gateway/package-lock.json
             todofy/web/package-lock.json
+            proto/package-lock.json
       - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
         with:
           version: '0.12.10'
@@ -378,6 +384,12 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      # uv sync builds the dev dependency ziyixi-proto, whose build runs proto/tools/ensure.mjs with Node.
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version-file: todofy/.nvmrc
+          cache: npm
+          cache-dependency-path: proto/package-lock.json
       - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
         with:
           version: '0.12.10'
@@ -545,6 +557,7 @@ jobs:
           cache-dependency-path: |
             lab/worker/package-lock.json
             lab/web/package-lock.json
+            proto/package-lock.json
       - name: Install locked dependencies
         run: |
           npm ci --prefix worker --no-audit --no-fund
@@ -570,10 +583,12 @@ jobs:
           npm test
           npm run build
       # Lab reaches Todofy only through its Ops entrypoint and the dashboard only through its own; it never
-      # imports another app's code.
+      # imports another app's code. The generated proto/ IDL package is shared code: its paths name the proto
+      # package (@ziyixi/proto/todofy/taskintent/v1/...), not an app directory.
       - name: No imports from other apps
         run: |
-          if grep -rnE "(from|import)[[:space:]]*\(?[[:space:]]*['\"][^'\"]*(mail-hero|todofy|dashboard|website)/" worker/src web/src; then exit 1; fi
+          if grep -rnE "(from|import)[[:space:]]*\(?[[:space:]]*['\"][^'\"]*(mail-hero|todofy|dashboard|website)/" worker/src web/src \
+            | grep -v "['\"]@ziyixi/proto/"; then exit 1; fi
       # The committed production config (lab/wrangler.toml), run exactly as the deploy runs it, with placeholder
       # values for what the deploy adds (deploy/deploy-vars.mjs). No token is needed for --dry-run.
       - name: Dry-run the committed production config
@@ -682,6 +697,7 @@ jobs:
             todofy/gateway/package-lock.json
             dashboard/worker/package-lock.json
             lab/worker/package-lock.json
+            proto/package-lock.json
       - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
         with:
           version: '0.12.10'
@@ -871,9 +887,61 @@ jobs:
           python3 -m unittest discover -s ../tools/infra-plan-summary
           python3 -m unittest discover -s tests
 
+  # The protobuf IDL of the cross-app contracts (proto/README.md). No secret; buf fetches the googleapis module
+  # pinned in proto/buf.lock from buf.build. The apps that use the generated code (ci_changes.py PROTO_USERS)
+  # are checked by their own jobs, whose installs generate it (an npm postinstall, uv's build of ziyixi-proto).
+  proto-checks:
+    name: Proto checks
+    needs: changes
+    if: needs.changes.outputs.proto == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: proto
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          # The breaking-change base (the Changes job's diff base) must be in the clone.
+          fetch-depth: 0
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: '26'
+          cache: npm
+          cache-dependency-path: proto/package-lock.json
+      # Python 3.14 (todofy-core's) for the Python codec's tests.
+      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          version: '0.12.10'
+          working-directory: proto
+      - name: Install the pinned toolchain (buf, protoc-gen-es, the protobuf-es runtime)
+        run: npm ci --no-audit --no-fund
+      - name: Format and lint (STANDARD and COMMENTS)
+        run: npm run lint
+      # Against the commit the Changes job diffed from: the last successful main run on main, the merge base
+      # with origin/main on a branch. Empty (Changes found no usable base and runs everything, or a dispatch):
+      # breaking.sh compares with HEAD~1 and says so in the log.
+      - name: No breaking change (buf FILE rules and the wire profile rules) against the diff base
+        env:
+          BASE: ${{ needs.changes.outputs.base }}
+        run: sh scripts/breaking.sh "$BASE"
+      - name: The lint and breaking rules still bite
+        run: sh scripts/rules-selftest.sh
+      - name: Generation is deterministic
+        run: node tools/ensure.mjs --check-deterministic
+      - name: One protobuf-es runtime at the generator's version, every user wired the same way
+        working-directory: .
+        run: python3 -m unittest discover -s .github/scripts -p test_proto.py
+      - name: Typecheck and test both codecs (the shared edge cases in TypeScript and Python)
+        run: |
+          npm run typecheck
+          npx --no-install vitest run
+          npm run test:python
+
   gate:
     name: CI gate
-    needs: [changes, shared-packages, todofy-static, todofy-runtime, todofy-checks, mail-hero-checks, dashboard-checks, website-checks, lab-checks, flowday-checks, contracts, infra-checks]
+    needs: [changes, shared-packages, todofy-static, todofy-runtime, todofy-checks, mail-hero-checks, dashboard-checks, website-checks, lab-checks, flowday-checks, contracts, infra-checks, proto-checks]
     if: always()
     runs-on: ubuntu-24.04
     timeout-minutes: 5
@@ -892,6 +960,7 @@ jobs:
           FLOWDAY: ${{ needs.flowday-checks.result }}
           CONTRACTS: ${{ needs.contracts.result }}
           INFRA: ${{ needs.infra-checks.result }}
+          PROTO: ${{ needs.proto-checks.result }}
           CHECKS_REUSED: ${{ needs.changes.outputs.checks_reused }}
           REUSED_RUN_URL: ${{ needs.changes.outputs.reused_run_url }}
           REUSED_JOBS: ${{ needs.changes.outputs.reused_jobs }}
@@ -906,7 +975,7 @@ jobs:
           for pair in "Changes=$CHANGES" "Shared packages=$PACKAGES" "Todofy static checks=$TODOFY_STATIC" \
             "Todofy runtime=$TODOFY_RUNTIME" "Todofy checks=$TODOFY" "Mail Hero checks=$MAIL_HERO" \
             "Dashboard checks=$DASHBOARD" "Website checks=$WEBSITE" "Lab checks=$LAB" "FlowDay checks=$FLOWDAY" \
-            "Contracts=$CONTRACTS" "Infra checks=$INFRA"; do
+            "Contracts=$CONTRACTS" "Infra checks=$INFRA" "Proto checks=$PROTO"; do
             echo "$pair"
             case "${pair#*=}" in
               success|skipped) ;;
@@ -959,6 +1028,7 @@ jobs:
             todofy/package-lock.json
             todofy/gateway/package-lock.json
             todofy/web/package-lock.json
+            proto/package-lock.json
       - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
         with:
           version: '0.12.10'
@@ -1367,6 +1437,7 @@ jobs:
           cache-dependency-path: |
             lab/worker/package-lock.json
             lab/web/package-lock.json
+            proto/package-lock.json
       # Every static production value (account, D1, host, Access, neuron ceiling, fetch hour) is committed in
       # lab/wrangler.toml; the environment URL and the Access probe read it there.
       - name: Read the host and the Access issuer from the committed config

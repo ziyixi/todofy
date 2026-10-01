@@ -1,0 +1,33 @@
+# The Python package of the proto/ IDL (proto/README.md). An app depends on it as a local path:
+#   [dependency-groups] (or [project] dependencies, once its Worker imports it) "ziyixi-proto"
+#   [tool.uv.sources] ziyixi-proto = { path = "../proto/python" }   (not editable: pywrangler needs files)
+# Its build backend (build_backend.py) runs proto/tools/ensure.mjs, which generates the modules under
+# src/ziyixi_proto/ (never committed); the metadata below is static, so resolving needs no build.
+[build-system]
+requires = []
+build-backend = "build_backend"
+backend-path = ["."]
+
+[project]
+name = "ziyixi-proto"
+version = "0.0.0"
+description = "Generated wire JSON types of the proto/ IDL and their stdlib-only codec"
+requires-python = ">=3.12"
+# Stdlib only: it runs on Pyodide inside Python Workers. Keep this list empty.
+dependencies = []
+
+[tool.uv]
+# uv rebuilds the package (and so regenerates) when any of these change: the generator's inputs as
+# proto/tools/ensure.mjs hashes them. ensure.mjs itself skips the work when its stamp still matches.
+cache-keys = [
+  { file = "pyproject.toml" },
+  { file = "build_backend.py" },
+  { file = "src/ziyixi_proto/*.py" },
+  { file = "../**/*.proto" },
+  { file = "../buf.yaml" },
+  { file = "../buf.lock" },
+  { file = "../buf.gen.yaml" },
+  { file = "../package-lock.json" },
+  { file = "../tools/ensure.mjs" },
+  { file = "../tools/gen_py.py" },
+]

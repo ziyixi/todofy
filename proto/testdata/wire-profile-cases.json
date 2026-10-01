@@ -1,0 +1,798 @@
+{
+  "description": "Wire JSON profile edge cases (README.md, Risks): the TypeScript and Python codecs must give the same verdict and the same bytes on every case. A case has either wire (the expected output, plus the unrecognized paths of a lenient read) or error: true.",
+  "cases": [
+    {
+      "name": "result as Todofy writes it",
+      "message": "TaskIntentResult",
+      "strict": false,
+      "input": {
+        "version": "task-intent-v1",
+        "source": "lab",
+        "intent_id": "deck-2026-09-30-g1",
+        "state": "pending",
+        "recorded": true,
+        "tasks_total": 4,
+        "tasks_created": 1,
+        "error_code": "retry_wait",
+        "retry_after_seconds": 30,
+        "updated_at": "2026-09-30T14:03:07Z"
+      },
+      "wire": {
+        "version": "task-intent-v1",
+        "source": "lab",
+        "intent_id": "deck-2026-09-30-g1",
+        "state": "pending",
+        "recorded": true,
+        "tasks_total": 4,
+        "tasks_created": 1,
+        "error_code": "retry_wait",
+        "retry_after_seconds": 30,
+        "updated_at": "2026-09-30T14:03:07Z"
+      },
+      "unrecognized": []
+    },
+    {
+      "name": "one fraction digit is written as three",
+      "message": "TaskIntentResult",
+      "strict": false,
+      "input": {
+        "version": "task-intent-v1",
+        "source": "lab",
+        "intent_id": "deck-2026-09-30-g1",
+        "state": "pending",
+        "recorded": true,
+        "tasks_total": 4,
+        "tasks_created": 1,
+        "error_code": "retry_wait",
+        "retry_after_seconds": 30,
+        "updated_at": "2026-09-30T14:03:07.5Z"
+      },
+      "wire": {
+        "version": "task-intent-v1",
+        "source": "lab",
+        "intent_id": "deck-2026-09-30-g1",
+        "state": "pending",
+        "recorded": true,
+        "tasks_total": 4,
+        "tasks_created": 1,
+        "error_code": "retry_wait",
+        "retry_after_seconds": 30,
+        "updated_at": "2026-09-30T14:03:07.500Z"
+      },
+      "unrecognized": []
+    },
+    {
+      "name": "three fraction digits are kept",
+      "message": "TaskIntentResult",
+      "strict": false,
+      "input": {
+        "version": "task-intent-v1",
+        "source": "lab",
+        "intent_id": "deck-2026-09-30-g1",
+        "state": "pending",
+        "recorded": true,
+        "tasks_total": 4,
+        "tasks_created": 1,
+        "error_code": "retry_wait",
+        "retry_after_seconds": 30,
+        "updated_at": "2026-09-30T14:03:07.123Z"
+      },
+      "wire": {
+        "version": "task-intent-v1",
+        "source": "lab",
+        "intent_id": "deck-2026-09-30-g1",
+        "state": "pending",
+        "recorded": true,
+        "tasks_total": 4,
+        "tasks_created": 1,
+        "error_code": "retry_wait",
+        "retry_after_seconds": 30,
+        "updated_at": "2026-09-30T14:03:07.123Z"
+      },
+      "unrecognized": []
+    },
+    {
+      "name": "a zero fraction is dropped",
+      "message": "TaskIntentResult",
+      "strict": false,
+      "input": {
+        "version": "task-intent-v1",
+        "source": "lab",
+        "intent_id": "deck-2026-09-30-g1",
+        "state": "pending",
+        "recorded": true,
+        "tasks_total": 4,
+        "tasks_created": 1,
+        "error_code": "retry_wait",
+        "retry_after_seconds": 30,
+        "updated_at": "2026-09-30T14:03:07.000Z"
+      },
+      "wire": {
+        "version": "task-intent-v1",
+        "source": "lab",
+        "intent_id": "deck-2026-09-30-g1",
+        "state": "pending",
+        "recorded": true,
+        "tasks_total": 4,
+        "tasks_created": 1,
+        "error_code": "retry_wait",
+        "retry_after_seconds": 30,
+        "updated_at": "2026-09-30T14:03:07Z"
+      },
+      "unrecognized": []
+    },
+    {
+      "name": "29 February of a leap year",
+      "message": "TaskIntentResult",
+      "strict": false,
+      "input": {
+        "version": "task-intent-v1",
+        "source": "lab",
+        "intent_id": "deck-2026-09-30-g1",
+        "state": "pending",
+        "recorded": true,
+        "tasks_total": 4,
+        "tasks_created": 1,
+        "error_code": "retry_wait",
+        "retry_after_seconds": 30,
+        "updated_at": "2024-02-29T23:59:59Z"
+      },
+      "wire": {
+        "version": "task-intent-v1",
+        "source": "lab",
+        "intent_id": "deck-2026-09-30-g1",
+        "state": "pending",
+        "recorded": true,
+        "tasks_total": 4,
+        "tasks_created": 1,
+        "error_code": "retry_wait",
+        "retry_after_seconds": 30,
+        "updated_at": "2024-02-29T23:59:59Z"
+      },
+      "unrecognized": []
+    },
+    {
+      "name": "timestamp: more than three fraction digits",
+      "message": "TaskIntentResult",
+      "strict": false,
+      "input": {
+        "version": "task-intent-v1",
+        "source": "lab",
+        "intent_id": "deck-2026-09-30-g1",
+        "state": "pending",
+        "recorded": true,
+        "tasks_total": 4,
+        "tasks_created": 1,
+        "error_code": "retry_wait",
+        "retry_after_seconds": 30,
+        "updated_at": "2026-09-30T14:03:07.123456Z"
+      },
+      "error": true
+    },
+    {
+      "name": "timestamp: 30 February",
+      "message": "TaskIntentResult",
+      "strict": false,
+      "input": {
+        "version": "task-intent-v1",
+        "source": "lab",
+        "intent_id": "deck-2026-09-30-g1",
+        "state": "pending",
+        "recorded": true,
+        "tasks_total": 4,
+        "tasks_created": 1,
+        "error_code": "retry_wait",
+        "retry_after_seconds": 30,
+        "updated_at": "2026-02-30T00:00:00Z"
+      },
+      "error": true
+    },
+    {
+      "name": "timestamp: 29 February of a common year",
+      "message": "TaskIntentResult",
+      "strict": false,
+      "input": {
+        "version": "task-intent-v1",
+        "source": "lab",
+        "intent_id": "deck-2026-09-30-g1",
+        "state": "pending",
+        "recorded": true,
+        "tasks_total": 4,
+        "tasks_created": 1,
+        "error_code": "retry_wait",
+        "retry_after_seconds": 30,
+        "updated_at": "2026-02-29T00:00:00Z"
+      },
+      "error": true
+    },
+    {
+      "name": "timestamp: hour 24",
+      "message": "TaskIntentResult",
+      "strict": false,
+      "input": {
+        "version": "task-intent-v1",
+        "source": "lab",
+        "intent_id": "deck-2026-09-30-g1",
+        "state": "pending",
+        "recorded": true,
+        "tasks_total": 4,
+        "tasks_created": 1,
+        "error_code": "retry_wait",
+        "retry_after_seconds": 30,
+        "updated_at": "2026-09-30T24:00:00Z"
+      },
+      "error": true
+    },
+    {
+      "name": "timestamp: leap second",
+      "message": "TaskIntentResult",
+      "strict": false,
+      "input": {
+        "version": "task-intent-v1",
+        "source": "lab",
+        "intent_id": "deck-2026-09-30-g1",
+        "state": "pending",
+        "recorded": true,
+        "tasks_total": 4,
+        "tasks_created": 1,
+        "error_code": "retry_wait",
+        "retry_after_seconds": 30,
+        "updated_at": "2026-09-30T14:03:60Z"
+      },
+      "error": true
+    },
+    {
+      "name": "timestamp: month 13",
+      "message": "TaskIntentResult",
+      "strict": false,
+      "input": {
+        "version": "task-intent-v1",
+        "source": "lab",
+        "intent_id": "deck-2026-09-30-g1",
+        "state": "pending",
+        "recorded": true,
+        "tasks_total": 4,
+        "tasks_created": 1,
+        "error_code": "retry_wait",
+        "retry_after_seconds": 30,
+        "updated_at": "2026-13-01T00:00:00Z"
+      },
+      "error": true
+    },
+    {
+      "name": "timestamp: year 0",
+      "message": "TaskIntentResult",
+      "strict": false,
+      "input": {
+        "version": "task-intent-v1",
+        "source": "lab",
+        "intent_id": "deck-2026-09-30-g1",
+        "state": "pending",
+        "recorded": true,
+        "tasks_total": 4,
+        "tasks_created": 1,
+        "error_code": "retry_wait",
+        "retry_after_seconds": 30,
+        "updated_at": "0000-01-01T00:00:00Z"
+      },
+      "error": true
+    },
+    {
+      "name": "timestamp: lower-case t and z",
+      "message": "TaskIntentResult",
+      "strict": false,
+      "input": {
+        "version": "task-intent-v1",
+        "source": "lab",
+        "intent_id": "deck-2026-09-30-g1",
+        "state": "pending",
+        "recorded": true,
+        "tasks_total": 4,
+        "tasks_created": 1,
+        "error_code": "retry_wait",
+        "retry_after_seconds": 30,
+        "updated_at": "2026-09-30t14:03:07z"
+      },
+      "error": true
+    },
+    {
+      "name": "timestamp: an offset instead of Z",
+      "message": "TaskIntentResult",
+      "strict": false,
+      "input": {
+        "version": "task-intent-v1",
+        "source": "lab",
+        "intent_id": "deck-2026-09-30-g1",
+        "state": "pending",
+        "recorded": true,
+        "tasks_total": 4,
+        "tasks_created": 1,
+        "error_code": "retry_wait",
+        "retry_after_seconds": 30,
+        "updated_at": "2026-09-30T14:03:07+00:00"
+      },
+      "error": true
+    },
+    {
+      "name": "timestamp: no seconds",
+      "message": "TaskIntentResult",
+      "strict": false,
+      "input": {
+        "version": "task-intent-v1",
+        "source": "lab",
+        "intent_id": "deck-2026-09-30-g1",
+        "state": "pending",
+        "recorded": true,
+        "tasks_total": 4,
+        "tasks_created": 1,
+        "error_code": "retry_wait",
+        "retry_after_seconds": 30,
+        "updated_at": "2026-09-30T14:03Z"
+      },
+      "error": true
+    },
+    {
+      "name": "dotless i in a state reads as unknown",
+      "message": "TaskIntentResult",
+      "strict": false,
+      "input": {
+        "version": "task-intent-v1",
+        "source": "lab",
+        "intent_id": "deck-2026-09-30-g1",
+        "state": "pend\u0131ng",
+        "recorded": true,
+        "tasks_total": 4,
+        "tasks_created": 1,
+        "error_code": "retry_wait",
+        "retry_after_seconds": 30,
+        "updated_at": "2026-09-30T14:03:07Z"
+      },
+      "wire": {
+        "version": "task-intent-v1",
+        "source": "lab",
+        "intent_id": "deck-2026-09-30-g1",
+        "state": null,
+        "recorded": true,
+        "tasks_total": 4,
+        "tasks_created": 1,
+        "error_code": "retry_wait",
+        "retry_after_seconds": 30,
+        "updated_at": "2026-09-30T14:03:07Z"
+      },
+      "unrecognized": [
+        "state"
+      ]
+    },
+    {
+      "name": "upper-case state reads as unknown",
+      "message": "TaskIntentResult",
+      "strict": false,
+      "input": {
+        "version": "task-intent-v1",
+        "source": "lab",
+        "intent_id": "deck-2026-09-30-g1",
+        "state": "PENDING",
+        "recorded": true,
+        "tasks_total": 4,
+        "tasks_created": 1,
+        "error_code": "retry_wait",
+        "retry_after_seconds": 30,
+        "updated_at": "2026-09-30T14:03:07Z"
+      },
+      "wire": {
+        "version": "task-intent-v1",
+        "source": "lab",
+        "intent_id": "deck-2026-09-30-g1",
+        "state": null,
+        "recorded": true,
+        "tasks_total": 4,
+        "tasks_created": 1,
+        "error_code": "retry_wait",
+        "retry_after_seconds": 30,
+        "updated_at": "2026-09-30T14:03:07Z"
+      },
+      "unrecognized": [
+        "state"
+      ]
+    },
+    {
+      "name": "prefixed error code reads as unknown",
+      "message": "TaskIntentResult",
+      "strict": false,
+      "input": {
+        "version": "task-intent-v1",
+        "source": "lab",
+        "intent_id": "deck-2026-09-30-g1",
+        "state": "pending",
+        "recorded": true,
+        "tasks_total": 4,
+        "tasks_created": 1,
+        "error_code": "error_code_retry_wait",
+        "retry_after_seconds": 30,
+        "updated_at": "2026-09-30T14:03:07Z"
+      },
+      "wire": {
+        "version": "task-intent-v1",
+        "source": "lab",
+        "intent_id": "deck-2026-09-30-g1",
+        "state": "pending",
+        "recorded": true,
+        "tasks_total": 4,
+        "tasks_created": 1,
+        "error_code": null,
+        "retry_after_seconds": 30,
+        "updated_at": "2026-09-30T14:03:07Z"
+      },
+      "unrecognized": [
+        "error_code"
+      ]
+    },
+    {
+      "name": "dotless i in an error code reads as unknown",
+      "message": "TaskIntentResult",
+      "strict": false,
+      "input": {
+        "version": "task-intent-v1",
+        "source": "lab",
+        "intent_id": "deck-2026-09-30-g1",
+        "state": "pending",
+        "recorded": true,
+        "tasks_total": 4,
+        "tasks_created": 1,
+        "error_code": "rate_l\u0131m\u0131ted",
+        "retry_after_seconds": 30,
+        "updated_at": "2026-09-30T14:03:07Z"
+      },
+      "wire": {
+        "version": "task-intent-v1",
+        "source": "lab",
+        "intent_id": "deck-2026-09-30-g1",
+        "state": "pending",
+        "recorded": true,
+        "tasks_total": 4,
+        "tasks_created": 1,
+        "error_code": null,
+        "retry_after_seconds": 30,
+        "updated_at": "2026-09-30T14:03:07Z"
+      },
+      "unrecognized": [
+        "error_code"
+      ]
+    },
+    {
+      "name": "unknown field is skipped",
+      "message": "TaskIntentResult",
+      "strict": false,
+      "input": {
+        "version": "task-intent-v1",
+        "source": "lab",
+        "intent_id": "deck-2026-09-30-g1",
+        "state": "pending",
+        "recorded": true,
+        "tasks_total": 4,
+        "tasks_created": 1,
+        "error_code": "retry_wait",
+        "retry_after_seconds": 30,
+        "updated_at": "2026-09-30T14:03:07Z",
+        "hint_code": "x"
+      },
+      "wire": {
+        "version": "task-intent-v1",
+        "source": "lab",
+        "intent_id": "deck-2026-09-30-g1",
+        "state": "pending",
+        "recorded": true,
+        "tasks_total": 4,
+        "tasks_created": 1,
+        "error_code": "retry_wait",
+        "retry_after_seconds": 30,
+        "updated_at": "2026-09-30T14:03:07Z"
+      },
+      "unrecognized": [
+        "hint_code"
+      ]
+    },
+    {
+      "name": "null error code and retry",
+      "message": "TaskIntentResult",
+      "strict": false,
+      "input": {
+        "version": "task-intent-v1",
+        "source": "lab",
+        "intent_id": "deck-2026-09-30-g1",
+        "state": "pending",
+        "recorded": true,
+        "tasks_total": 4,
+        "tasks_created": 1,
+        "error_code": null,
+        "retry_after_seconds": null,
+        "updated_at": "2026-09-30T14:03:07Z"
+      },
+      "wire": {
+        "version": "task-intent-v1",
+        "source": "lab",
+        "intent_id": "deck-2026-09-30-g1",
+        "state": "pending",
+        "recorded": true,
+        "tasks_total": 4,
+        "tasks_created": 1,
+        "error_code": null,
+        "retry_after_seconds": null,
+        "updated_at": "2026-09-30T14:03:07Z"
+      },
+      "unrecognized": []
+    },
+    {
+      "name": "missing REQUIRED field (lenient)",
+      "message": "TaskIntentResult",
+      "strict": false,
+      "input": {
+        "version": "task-intent-v1",
+        "source": "lab",
+        "intent_id": "deck-2026-09-30-g1",
+        "state": "pending",
+        "recorded": true,
+        "tasks_created": 1,
+        "error_code": "retry_wait",
+        "retry_after_seconds": 30,
+        "updated_at": "2026-09-30T14:03:07Z"
+      },
+      "error": true
+    },
+    {
+      "name": "missing REQUIRED field (strict)",
+      "message": "TaskIntentResult",
+      "strict": true,
+      "input": {
+        "version": "task-intent-v1",
+        "source": "lab",
+        "intent_id": "deck-2026-09-30-g1",
+        "state": "pending",
+        "recorded": true,
+        "tasks_total": 4,
+        "tasks_created": 1,
+        "error_code": "retry_wait",
+        "updated_at": "2026-09-30T14:03:07Z"
+      },
+      "error": true
+    },
+    {
+      "name": "count as a string",
+      "message": "TaskIntentResult",
+      "strict": false,
+      "input": {
+        "version": "task-intent-v1",
+        "source": "lab",
+        "intent_id": "deck-2026-09-30-g1",
+        "state": "pending",
+        "recorded": true,
+        "tasks_total": "4",
+        "tasks_created": 1,
+        "error_code": "retry_wait",
+        "retry_after_seconds": 30,
+        "updated_at": "2026-09-30T14:03:07Z"
+      },
+      "error": true
+    },
+    {
+      "name": "count as a boolean",
+      "message": "TaskIntentResult",
+      "strict": false,
+      "input": {
+        "version": "task-intent-v1",
+        "source": "lab",
+        "intent_id": "deck-2026-09-30-g1",
+        "state": "pending",
+        "recorded": true,
+        "tasks_total": true,
+        "tasks_created": 1,
+        "error_code": "retry_wait",
+        "retry_after_seconds": 30,
+        "updated_at": "2026-09-30T14:03:07Z"
+      },
+      "error": true
+    },
+    {
+      "name": "count with a fraction",
+      "message": "TaskIntentResult",
+      "strict": false,
+      "input": {
+        "version": "task-intent-v1",
+        "source": "lab",
+        "intent_id": "deck-2026-09-30-g1",
+        "state": "pending",
+        "recorded": true,
+        "tasks_total": 4.5,
+        "tasks_created": 1,
+        "error_code": "retry_wait",
+        "retry_after_seconds": 30,
+        "updated_at": "2026-09-30T14:03:07Z"
+      },
+      "error": true
+    },
+    {
+      "name": "count beyond int32",
+      "message": "TaskIntentResult",
+      "strict": false,
+      "input": {
+        "version": "task-intent-v1",
+        "source": "lab",
+        "intent_id": "deck-2026-09-30-g1",
+        "state": "pending",
+        "recorded": true,
+        "tasks_total": 1e10,
+        "tasks_created": 1,
+        "error_code": "retry_wait",
+        "retry_after_seconds": 30,
+        "updated_at": "2026-09-30T14:03:07Z"
+      },
+      "error": true
+    },
+    {
+      "name": "integral numbers in other spellings",
+      "message": "TaskIntentResult",
+      "strict": false,
+      "input": {
+        "version": "task-intent-v1",
+        "source": "lab",
+        "intent_id": "deck-2026-09-30-g1",
+        "state": "pending",
+        "recorded": true,
+        "tasks_total": 4.0,
+        "tasks_created": 1e0,
+        "error_code": "retry_wait",
+        "retry_after_seconds": 30,
+        "updated_at": "2026-09-30T14:03:07Z"
+      },
+      "wire": {
+        "version": "task-intent-v1",
+        "source": "lab",
+        "intent_id": "deck-2026-09-30-g1",
+        "state": "pending",
+        "recorded": true,
+        "tasks_total": 4,
+        "tasks_created": 1,
+        "error_code": "retry_wait",
+        "retry_after_seconds": 30,
+        "updated_at": "2026-09-30T14:03:07Z"
+      },
+      "unrecognized": []
+    },
+    {
+      "name": "unknown field (strict)",
+      "message": "TaskIntentResult",
+      "strict": true,
+      "input": {
+        "version": "task-intent-v1",
+        "source": "lab",
+        "intent_id": "deck-2026-09-30-g1",
+        "state": "pending",
+        "recorded": true,
+        "tasks_total": 4,
+        "tasks_created": 1,
+        "error_code": "retry_wait",
+        "retry_after_seconds": 30,
+        "updated_at": "2026-09-30T14:03:07Z",
+        "hint_code": "x"
+      },
+      "error": true
+    },
+    {
+      "name": "null (strict)",
+      "message": "TaskIntentResult",
+      "strict": true,
+      "input": {
+        "version": "task-intent-v1",
+        "source": "lab",
+        "intent_id": "deck-2026-09-30-g1",
+        "state": "pending",
+        "recorded": true,
+        "tasks_total": 4,
+        "tasks_created": 1,
+        "error_code": null,
+        "retry_after_seconds": 30,
+        "updated_at": "2026-09-30T14:03:07Z"
+      },
+      "error": true
+    },
+    {
+      "name": "intent as Lab freezes it",
+      "message": "TaskIntent",
+      "strict": true,
+      "input": {
+        "version": "task-intent-v1",
+        "source": "lab",
+        "intent_id": "deck-2026-09-30-g1",
+        "mode": "subtasks",
+        "parent": {
+          "title": "Papers"
+        },
+        "items": [
+          {
+            "title": "A paper",
+            "url": "https://arxiv.org/abs/2609.00001"
+          }
+        ]
+      },
+      "wire": {
+        "version": "task-intent-v1",
+        "source": "lab",
+        "intent_id": "deck-2026-09-30-g1",
+        "mode": "subtasks",
+        "parent": {
+          "title": "Papers"
+        },
+        "items": [
+          {
+            "title": "A paper",
+            "url": "https://arxiv.org/abs/2609.00001"
+          }
+        ]
+      },
+      "unrecognized": []
+    },
+    {
+      "name": "long s in a mode (strict)",
+      "message": "TaskIntent",
+      "strict": true,
+      "input": {
+        "version": "task-intent-v1",
+        "source": "lab",
+        "intent_id": "deck-2026-09-30-g1",
+        "mode": "\u017fubtasks",
+        "parent": {
+          "title": "Papers"
+        },
+        "items": [
+          {
+            "title": "A paper",
+            "url": "https://arxiv.org/abs/2609.00001"
+          }
+        ]
+      },
+      "error": true
+    },
+    {
+      "name": "long s in another mode (strict)",
+      "message": "TaskIntent",
+      "strict": true,
+      "input": {
+        "version": "task-intent-v1",
+        "source": "lab",
+        "intent_id": "deck-2026-09-30-g1",
+        "mode": "\u017feparate",
+        "parent": {
+          "title": "Papers"
+        },
+        "items": [
+          {
+            "title": "A paper",
+            "url": "https://arxiv.org/abs/2609.00001"
+          }
+        ]
+      },
+      "error": true
+    },
+    {
+      "name": "upper-case mode (strict)",
+      "message": "TaskIntent",
+      "strict": true,
+      "input": {
+        "version": "task-intent-v1",
+        "source": "lab",
+        "intent_id": "deck-2026-09-30-g1",
+        "mode": "SUBTASKS",
+        "parent": {
+          "title": "Papers"
+        },
+        "items": [
+          {
+            "title": "A paper",
+            "url": "https://arxiv.org/abs/2609.00001"
+          }
+        ]
+      },
+      "error": true
+    }
+  ]
+}

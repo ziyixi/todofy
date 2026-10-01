@@ -3,6 +3,9 @@
 The only files the apps (`mail-hero/`, `todofy/`, `dashboard/`, `lab/`) share. No app imports another; each reads
 these files.
 
+The protobuf IDL of these contracts lives in [`../proto/`](../proto/README.md) (today `task-intent-v1` only,
+used in tests). It does not change the wire: the schemas and fixtures here stay the contracts.
+
 | Directory | Between | Owner |
 | --- | --- | --- |
 | `mail-received-v1/` | Mail Hero → its webhook consumer (Todofy) | Mail Hero |

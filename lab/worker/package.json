@@ -8,6 +8,7 @@
     "node": ">=26"
   },
   "scripts": {
+    "postinstall": "node ../../proto/tools/ensure.mjs",
     "typecheck": "tsc --noEmit && tsc --noEmit -p test/runtime/tsconfig.json",
     "lint": "eslint .",
     "test": "vitest run",
@@ -21,6 +22,7 @@
     "@cloudflare/workers-types": "5.20260929.1",
     "@eslint/js": "10.0.1",
     "@types/node": "26.6.3",
+    "@ziyixi/proto": "file:../../proto/ts",
     "esbuild": "0.28.1",
     "eslint": "10.11.0",
     "miniflare": "5.20260926.0-alpha",

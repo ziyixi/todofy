@@ -1,0 +1,14 @@
+# Code generation (README.md). tools/ensure.mjs runs `buf generate --output <temporary directory>` from this
+# directory with the pinned toolchain and moves the result into ts/; never commit the output.
+version: v2
+plugins:
+  # TypeScript, protobuf-es v2 (the @bufbuild/protobuf runtime pinned in package.json). Imports end in .ts
+  # like the rest of the repository (allowImportingTsExtensions); enums are `as const` objects because
+  # the Workers compile with erasableSyntaxOnly.
+  - local: node_modules/.bin/protoc-gen-es
+    out: ts
+    include_imports: true
+    opt:
+      - target=ts
+      - import_extension=ts
+      - erasable_syntax=true

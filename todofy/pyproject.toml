@@ -16,10 +16,17 @@ dev = [
     "jsonschema==4.26.0",
     "pyyaml==6.0.3",
     "ruff==0.16.9",
+    # The proto/ IDL's generated wire JSON types (proto/README.md); tests only until the Worker imports it.
+    "ziyixi-proto",
 ]
 
 [tool.uv]
 package = false
+
+[tool.uv.sources]
+# Built by proto/python/build_backend.py, which generates the modules first (never committed). Not editable:
+# pywrangler vendors [project] dependencies from this same source, and a Worker needs the files, not a .pth.
+ziyixi-proto = { path = "../proto/python" }
 
 [tool.ruff]
 line-length = 120

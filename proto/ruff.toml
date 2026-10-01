@@ -1,0 +1,8 @@
+# Python style of proto/ (the generator, the codec, the build backend and their tests): todofy's settings.
+line-length = 120
+target-version = "py312"
+
+[lint]
+select = ["E", "F", "W", "I", "UP", "B", "SIM", "RUF"]
+# The codec's docs and tests use Unicode look-alikes ("ſubtasks") on purpose.
+ignore = ["RUF001", "RUF002", "RUF003"]

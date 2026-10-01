@@ -565,6 +565,7 @@ dev = [
     { name = "pyyaml" },
     { name = "ruff" },
     { name = "workers-py" },
+    { name = "ziyixi-proto" },
 ]
 
 [package.metadata]
@@ -579,6 +580,7 @@ dev = [
     { name = "pyyaml", specifier = "==6.0.3" },
     { name = "ruff", specifier = "==0.16.9" },
     { name = "workers-py", specifier = "==1.17.4" },
+    { name = "ziyixi-proto", directory = "../proto/python" },
 ]
 
 [[package]]
@@ -615,3 +617,8 @@ sdist = { url = "https://files.pythonhosted.org/packages/3d/be/6a9677e293b632d2a
 wheels = [
     { url = "https://files.pythonhosted.org/packages/94/3d/053deb135d4db2ef6f6c3ccdeb86d7829de3c271f7ae02cec73da8f65891/workers_runtime_sdk-1.9.0-py3-none-any.whl", hash = "sha256:36209f94984686264db4e1fd410d51ac3460f2a2ab3cc29869699b975e1e1331", size = 38585, upload-time = "2026-09-18T21:08:37.773Z" },
 ]
+
+[[package]]
+name = "ziyixi-proto"
+version = "0.0.0"
+source = { directory = "../proto/python" }
