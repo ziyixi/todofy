@@ -1,5 +1,15 @@
 # Cutover runbook: Vercel → Cloudflare
 
+> **2026-10-01: historical.** This runbook records the cutover as it was done on 2026-09-29/30; do not
+> repeat its steps. Since 2026-10-01 `www.ziyixi.science` and the apex `ziyixi.science` are both Workers
+> Custom Domains of `ziyixi-website` (sharing one dedicated certificate), and both serve the site. The Vercel-era
+> DNS records (apex A `76.76.21.21`, `www` CNAME `cname.vercel-dns.com`), the zone routes
+> `www.ziyixi.science/*` and `ziyixi.science/*`, the preview Custom Domain `website-preview.ziyixi.science`
+> and the Worker `ziyixi-apex-redirect` (`website/apex-redirect/`, deleted from the repository) are gone,
+> so the routes, the apex redirect and the "back to Vercel" rollbacks below no longer apply. Why, and the
+> current rule that `wrangler.toml` lists the complete set of Custom Domains:
+> [`architecture.md`](architecture.md#hostnames).
+
 For the lead. Every step keeps `www.ziyixi.science` answering; each has a rollback. Vercel is not touched
 until the cleanup at the end, so it stays the fallback (frozen at its last release: after step 1 new Notion
 content goes only to the Worker). Steps 3 and 4 use zone Workers Routes on the existing proxied records, so

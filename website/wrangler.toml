@@ -11,12 +11,15 @@ compatibility_date = "2026-09-25"
 # with `wrangler dev` before upload and on the live hostname after deploy.
 workers_dev = false
 preview_urls = false
-# Top-level key: keep it above [assets], or TOML reads it as assets.routes. The preview host is a Custom
-# Domain; www is a zone route on its existing proxied record (docs/cutover.md step 3): a route changes no
-# DNS, and the deploy token may create routes but not replace the www CNAME that a Custom Domain needs.
+# Top-level key: keep it above [assets], or TOML reads it as assets.routes. Both hostnames are Workers
+# Custom Domains of this Worker (since 2026-10-01; docs/architecture.md "Hostnames"): www is canonical
+# (every page carries <link rel=canonical> to https://www.ziyixi.science) and the apex serves the same
+# static site. The two share one dedicated certificate (ziyixi.science, www.ziyixi.science,
+# *.www.ziyixi.science) that covers no app host, so browsers never reuse a site connection for
+# mail-hero/lab/home/todofy.
 routes = [
-  { pattern = "website-preview.ziyixi.science", custom_domain = true },
-  { pattern = "www.ziyixi.science/*", zone_name = "ziyixi.science" },
+  { pattern = "www.ziyixi.science", custom_domain = true },
+  { pattern = "ziyixi.science", custom_domain = true },
 ]
 
 [assets]
@@ -26,9 +29,10 @@ html_handling = "auto-trailing-slash"
 # Unknown paths get out/404.html with status 404.
 not_found_handling = "404-page"
 
-# Hostnames (docs/cutover.md): `routes` above is their complete list. Every release applies it with
-# `wrangler triggers deploy` and verifies the live site on www once www is listed (otherwise on the first
-# hostname). It only adds: removing a line does not detach that hostname (with none of its kind left
-# listed, wrangler sends no change), so also delete it in the dashboard (docs/cutover.md step 3). The apex
-# ziyixi.science is not this Worker: its 308 to www is the Worker ziyixi-apex-redirect
-# (apex-redirect/wrangler.toml).
+# Hostnames: `routes` above is the Worker's complete set of Custom Domains and must match the live state
+# exactly. Every release applies it with `wrangler triggers deploy`, which PUTs the listed Custom Domains
+# with override_scope (a replace): with the list equal to what is attached, that is a no-op. Removing a
+# line detaches that hostname at the next release (while at least one Custom Domain stays listed; with
+# none listed wrangler sends no change at all), and adding one creates its DNS record and certificate.
+# There are no zone routes. The release verifies the whole route contract on www and the build identity
+# on every other listed hostname (docs/release.md).

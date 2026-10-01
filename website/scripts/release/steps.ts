@@ -49,16 +49,22 @@ export interface ReleaseInputs {
 
 /**
  * Only main, only from a dispatch of website-release.yml (CI's Website deploy after a push, the
- * buttons, the change detector, by hand), and the typed confirmation must name the operation and the
- * canonical host. Which commit is built is pinned separately (green-commit.ts).
+ * buttons, the change detector, by hand) or its daily schedule (the reconcile release without the
+ * relay, docs/release.md: always an ordinary release, never recovery, bootstrap or allow-empty), and
+ * the confirmation must name the operation and the canonical host. Which commit is built is pinned
+ * separately (green-commit.ts).
  */
 export function assertReleaseContext(inputs: ReleaseInputs): Operation {
   const operation = inputs.operation;
   if (operation !== "release" && operation !== "bootstrap" && operation !== "recovery") {
     fail(`Unsupported release operation: ${operation}`);
   }
-  if (inputs.eventName !== "workflow_dispatch") {
-    fail("A production release runs only from a workflow dispatch on main.");
+  if (inputs.eventName === "schedule") {
+    if (operation !== "release" || inputs.allowEmpty) {
+      fail("The daily schedule runs only an ordinary release, without allow-empty.");
+    }
+  } else if (inputs.eventName !== "workflow_dispatch") {
+    fail("A production release runs only from a workflow dispatch or the daily schedule on main.");
   }
   if (inputs.ref !== "refs/heads/main")
     fail("A production release runs only from refs/heads/main.");
@@ -428,9 +434,10 @@ export async function deploy(
   if (serving !== uploaded.versionId) {
     fail(`After the deploy, production serves ${serving ?? "none"}, not ${uploaded.versionId}.`);
   }
-  // Custom Domains and zone routes from wrangler.toml. With none listed there is nothing to apply
-  // (wrangler would not detach a hostname attached elsewhere either), and workers.dev stays off since
-  // the first deploy.
+  // Custom Domains (and zone routes, if any) from wrangler.toml. wrangler replaces the Worker's Custom
+  // Domains with the listed set, so a list equal to the live state changes nothing. With none listed
+  // there is nothing to apply (wrangler sends no change then), and workers.dev stays off since the
+  // first deploy.
   if (deps.config.hostnames.length > 0) await deps.wrangler.deployTriggers();
 }
 
@@ -438,8 +445,8 @@ export async function deploy(
  * Restores the recorded previous version, only if production serves this release's version, then
  * verifies it where the baseline was last verified (`baseline.liveOrigin`), never at a hostname this
  * failed release was adding: when `wrangler triggers deploy` failed, that hostname (www on its first
- * attach) still serves whatever answered before, and checking it would turn a clean rollback into an
- * unverified one (`error`).
+ * attach, run 36703886018) still serves whatever answered before, and checking it would turn a clean
+ * rollback into an unverified one (`error`).
  */
 export async function rollback(
   deps: ReleaseDeps,

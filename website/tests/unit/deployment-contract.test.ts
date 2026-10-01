@@ -22,10 +22,7 @@ describe("fixture deployment-test boundary", () => {
     expect(() => assertFixtureDeploymentPolicy({ ...localFixture, allowFixture: false })).toThrow(
       /explicit local-test opt-in/,
     );
-    for (const baseUrl of [
-      "https://www.ziyixi.science",
-      "https://website-preview.ziyixi.science",
-    ]) {
+    for (const baseUrl of ["https://www.ziyixi.science", "https://ziyixi.science"]) {
       expect(() => assertFixtureDeploymentPolicy({ ...localFixture, baseUrl })).toThrow(
         /only for a local server/,
       );

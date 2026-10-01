@@ -83,10 +83,20 @@ export async function readWorkerConfig(filename = "wrangler.toml"): Promise<Work
 
 /**
  * Where a release verifies the live site: the canonical host once it is attached (as a Custom Domain
- * or a zone route), otherwise the first attached hostname (the preview host), otherwise nowhere.
+ * or a zone route), otherwise the first attached hostname, otherwise nowhere.
  */
 export function liveOrigin(config: WorkerConfig, canonicalOrigin: string): string | null {
   const canonicalHost = new URL(canonicalOrigin).hostname;
   const host = config.hostnames.includes(canonicalHost) ? canonicalHost : config.hostnames[0];
   return host ? `https://${host}` : null;
+}
+
+/**
+ * Every other hostname wrangler.toml attaches (today the apex next to www), in file order: after the
+ * live hostname passed the whole route contract, each must serve the same build identity too, so a
+ * release never leaves one of the Worker's hostnames on something else.
+ */
+export function otherOrigins(config: WorkerConfig, canonicalOrigin: string): string[] {
+  const live = liveOrigin(config, canonicalOrigin);
+  return config.hostnames.map((host) => `https://${host}`).filter((origin) => origin !== live);
 }

@@ -102,7 +102,7 @@ function fakeWorker(initial: string | null) {
 function deps(
   github: GitHub,
   cloudflare: ReturnType<typeof fakeWorker>,
-  hostnames: string[] = ["website-preview.ziyixi.science"],
+  hostnames: string[] = ["www.ziyixi.science", "ziyixi.science"],
 ): ReleaseDeps {
   return {
     github,
@@ -145,6 +145,31 @@ describe("release context", () => {
     // CI's Website deploy dispatches the workflow too; nothing calls it inline any more.
     expect(() => assertReleaseContext({ ...base, eventName: "push" })).toThrow(/dispatch/);
     expect(() => assertReleaseContext({ ...base, eventName: "workflow_call" })).toThrow(/dispatch/);
+  });
+
+  it("accepts the daily schedule only as an ordinary release with the exact confirmation", () => {
+    const scheduled = { ...base, eventName: "schedule" };
+    expect(assertReleaseContext(scheduled)).toBe("release");
+    for (const operation of ["recovery", "bootstrap"]) {
+      expect(() =>
+        assertReleaseContext({
+          ...scheduled,
+          operation,
+          confirmation: `${operation}:www.ziyixi.science`,
+        }),
+      ).toThrow(/only an ordinary release/);
+    }
+    expect(() =>
+      assertReleaseContext({
+        ...scheduled,
+        allowEmpty: true,
+        confirmation: "release:www.ziyixi.science:allow-empty",
+      }),
+    ).toThrow(/without allow-empty/);
+    expect(() => assertReleaseContext({ ...scheduled, confirmation: "release" })).toThrow(
+      /exactly/,
+    );
+    expect(() => assertReleaseContext({ ...scheduled, ref: "refs/heads/feature" })).toThrow(/main/);
   });
 
   it("requires the allow-empty suffix when the one-run switch is enabled", () => {
@@ -453,11 +478,13 @@ describe("upload, deploy and rollback", () => {
 });
 
 // Run 36703886018: the release that first listed www failed at `wrangler triggers deploy` (www kept
-// serving Vercel), restored the baseline, then checked it on www and recorded `error`.
-describe("attaching www after the preview host", () => {
-  const PREVIEW = "https://website-preview.ziyixi.science";
-  const HOSTS = ["website-preview.ziyixi.science", "www.ziyixi.science"];
-  const baselinePayload = payload({ liveOrigin: PREVIEW });
+// serving Vercel), restored the baseline, then checked it on www and recorded `error`. Its baseline was
+// verified on the then preview host (website-preview.ziyixi.science, removed 2026-10-01); EARLIER stands
+// for such a hostname that the baseline was recorded on before the canonical host was attached.
+describe("attaching www after another hostname", () => {
+  const EARLIER = "https://ziyixi.science";
+  const HOSTS = ["ziyixi.science", "www.ziyixi.science"];
+  const baselinePayload = payload({ liveOrigin: EARLIER });
   const failedPayload = payload({
     identity: NEW,
     workerVersionId: V2,
@@ -472,7 +499,7 @@ describe("attaching www after the preview host", () => {
       new Error("already has externally managed DNS records"),
     );
     const d = deps(github, cloudflare, HOSTS);
-    const state = releaseState({ liveOrigin: PREVIEW });
+    const state = releaseState({ liveOrigin: EARLIER });
     const uploaded = await upload(d, { state, identity: NEW });
     await expect(deploy(d, { upload: uploaded, identity: NEW })).rejects.toThrow(/externally/);
     // www serves Vercel: only a check there would fail.
@@ -482,13 +509,13 @@ describe("attaching www after the preview host", () => {
     await expect(
       rollback(d, { upload: uploaded, message: "m", baseline: state.baseline, verifyIdentity }),
     ).resolves.toBe(V1);
-    expect(verifyIdentity.mock.calls).toEqual([[PREVIEW, OLD]]);
+    expect(verifyIdentity.mock.calls).toEqual([[EARLIER, OLD]]);
   });
 
   it("still verifies when production already serves the baseline, and reports a failed check", async () => {
     const { github } = fakeGitHub({ rows: [], states: {} });
     const uploaded = { versionId: V2, firstDeploy: false, previousVersionId: V1 };
-    const baseline = releaseState({ liveOrigin: PREVIEW }).baseline;
+    const baseline = releaseState({ liveOrigin: EARLIER }).baseline;
     const verifyIdentity = vi.fn(async () => undefined);
     await rollback(deps(github, fakeWorker(V1), HOSTS), {
       upload: uploaded,
@@ -496,7 +523,7 @@ describe("attaching www after the preview host", () => {
       baseline,
       verifyIdentity,
     });
-    expect(verifyIdentity).toHaveBeenCalledWith(PREVIEW, OLD);
+    expect(verifyIdentity).toHaveBeenCalledWith(EARLIER, OLD);
     await expect(
       rollback(deps(github, fakeWorker(V2), HOSTS), {
         upload: uploaded,
@@ -509,7 +536,7 @@ describe("attaching www after the preview host", () => {
     ).rejects.toThrow(/expected build identity/);
   });
 
-  it("needs recovery after the errored record, which re-verifies the preview baseline and attaches www", async () => {
+  it("needs recovery after the errored record, which re-verifies the earlier baseline and attaches www", async () => {
     const records = {
       rows: [row(11, failedPayload, 2), row(10, baselinePayload, 1)],
       states: { 11: "error", 10: "success" } as Record<number, string>,
@@ -526,7 +553,7 @@ describe("attaching www after the preview host", () => {
     const verifyRecorded = vi.fn(async () => undefined);
     const state = await recover(d, result.state, { verifyRecorded, logUrl: "u" });
     expect(verifyRecorded).toHaveBeenCalledWith(
-      expect.objectContaining({ liveOrigin: PREVIEW, identity: OLD }),
+      expect.objectContaining({ liveOrigin: EARLIER, identity: OLD }),
     );
     expect(setState).not.toHaveBeenCalled();
     const uploaded = await upload(d, { state, identity: NEW });
@@ -536,7 +563,7 @@ describe("attaching www after the preview host", () => {
   });
 
   it("refuses releases and recovery once www stops serving the Worker after it was recorded", async () => {
-    // Back to Vercel by deleting the www route: the recorded live hostname is www, never the preview.
+    // www detached by hand: the recorded live hostname is www, never the earlier hostname.
     const attached = payload({
       workerVersionId: V2,
       previousWorkerVersionId: V1,
@@ -546,7 +573,7 @@ describe("attaching www after the preview host", () => {
       rows: [row(12, attached, 3), row(10, baselinePayload, 1)],
       states: { 12: "success", 10: "success" },
     });
-    const d = deps(github, fakeWorker(V2), ["website-preview.ziyixi.science"]);
+    const d = deps(github, fakeWorker(V2), ["ziyixi.science"]);
     const verify = vi.fn(async (origin: string) => {
       if (origin === SITE) throw new Error("identity mismatch");
     });
@@ -561,7 +588,7 @@ describe("attaching www after the preview host", () => {
         logUrl: "u",
       }),
     ).rejects.toThrow(/mismatch/);
-    expect(verify).not.toHaveBeenCalledWith(PREVIEW, expect.anything());
+    expect(verify).not.toHaveBeenCalledWith(EARLIER, expect.anything());
   });
 });
 
@@ -611,7 +638,7 @@ describe("release record payload", () => {
       identity: NEW,
       upload: { versionId: V2, firstDeploy: false, previousVersionId: V1 },
       config: { name: "ziyixi-website", accountId: "f".repeat(32), hostnames: [] },
-      liveOrigin: "https://website-preview.ziyixi.science",
+      liveOrigin: "https://www.ziyixi.science",
       workflowUrl: "https://github.com/ziyixi/todofy/actions/runs/2",
       registry: emptyContentRegistry(),
       manifest,
@@ -621,7 +648,7 @@ describe("release record payload", () => {
       schemaVersion: 3,
       workerVersionId: V2,
       previousWorkerVersionId: V1,
-      liveOrigin: "https://website-preview.ziyixi.science",
+      liveOrigin: "https://www.ziyixi.science",
       verificationContract: { canonicalOrigin: SITE, sourceMode: "notion" },
     });
   });

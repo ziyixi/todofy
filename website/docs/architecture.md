@@ -1,6 +1,6 @@
 # Architecture
 
-Three Cloudflare Workers on Workers Free, all deployed only from GitHub Actions, plus the build and the
+Two Cloudflare Workers on Workers Free, both deployed only from GitHub Actions, plus the build and the
 Notion write-back in GitHub Actions. No Worker ever renders a page or reads Notion content at request
 time.
 
@@ -14,16 +14,47 @@ Notion Blog data source ──(read: sync)────────────�
    │                                                   ▼
    │                     .github/workflows/website-release.yml (concurrency group website-production)
    │                        ◄── also dispatched by ci.yml "Website deploy" after a website push on main
+   │                        ◄── and its own daily schedule (10:30 UTC): the reconcile when the relay did not
    │                        Notion sync → next build (export) → wrangler dev verify → versions upload
    │                        → versions deploy → triggers deploy → live verify → rollback on failure
    └──(write: feedback)──── Notion status properties + database description
                                                        ▼
                                Worker ziyixi-website (assets only, wrangler.toml)
-                               website-preview.ziyixi.science (Custom Domain)
-                               www.ziyixi.science/* (zone route on the proxied www record)
-                               ziyixi.science/* ─ Worker ziyixi-apex-redirect (apex-redirect/):
-                                                  308 → https://www.ziyixi.science + path + query
+                               Custom Domains www.ziyixi.science (canonical) and ziyixi.science
+                               (one dedicated certificate for both; see Hostnames)
 ```
+
+## Hostnames
+
+Current state (since 2026-10-01): `www.ziyixi.science` and the apex `ziyixi.science` are the two Workers
+Custom Domains of `ziyixi-website`, listed in [`wrangler.toml`](../wrangler.toml), and both serve the same
+static site. `www` is canonical: every page carries `<link rel="canonical">` to `https://www.ziyixi.science`,
+and the feed, sitemap and Open Graph URLs use it. The apex answers with the same pages (status 200, no
+redirect). Nothing else is attached to the Worker: no zone route, no preview host, no `*.workers.dev`. The
+apex keeps its MX, SPF/`apple-domain` TXT, `_dmarc` and DKIM records; never touch them.
+
+`routes` in `wrangler.toml` is the Worker's complete set of Custom Domains: each release's
+`wrangler triggers deploy` replaces the attached set with it (a no-op while the two agree), so the file must
+always match the live state. Removing a line detaches that hostname at the next release; adding one creates
+its DNS record and certificate. The release verifies the whole route contract on `www` and the build
+identity on the apex ([`release.md`](release.md)).
+
+**Why both are Custom Domains (2026-10-01).** Until then `www` was a zone route (`www.ziyixi.science/*`) in
+front of the old Vercel CNAME and the apex a zone route (`ziyixi.science/*`) to the separate Worker
+`ziyixi-apex-redirect`, which answered a 308 to `www`. The apex had no certificate of its own: Cloudflare
+served it whichever certificate listed the apex, and every Workers Custom Domain's certificate
+(`mail-hero`, `lab`, `home`, `todofy`, …) lists the zone apex, so that choice changed whenever a Custom
+Domain was added. Chrome reuses (coalesces) an HTTP/2 or HTTP/3 connection for another hostname that
+resolves to the same IPs when the certificate it saw on that connection covers the new hostname. Cloudflare's
+edge rejects a request whose `Host` is not covered by the certificate it currently maps to the connection's
+SNI (over HTTP/3: an empty `403` with `cache-control: private, no-store`). So a desktop Chrome that had
+opened the apex got empty 403s on `mail-hero`, `lab` and `www` until its sockets were flushed. Now the apex
+and `www` share one dedicated certificate (SANs `ziyixi.science`, `www.ziyixi.science`,
+`*.www.ziyixi.science`) that covers none of the app hosts, so an app request is never coalesced onto a site
+connection. The old Vercel-era records (apex A `76.76.21.21`, `www` CNAME `cname.vercel-dns.com`), both
+zone routes and the preview Custom Domain `website-preview.ziyixi.science` were deleted, and
+`ziyixi-apex-redirect` (formerly `website/apex-redirect/`) was retired. The dashboard links and probes
+`www` (canonical) for the same reason.
 
 ## The site: static export on Workers Static Assets
 
@@ -58,8 +89,8 @@ Notion Blog data source ──(read: sync)────────────�
   slash 308), plus `<path>/ → <path>` 308 for every canonical page, post and feed path (validated again: no
   placeholders or splats, internal targets, at most 2,000 lines). Redirects run before assets and
   html_handling. A lowercase percent-encoded old URL first gets the platform's 307 to the uppercase form,
-  then the 308. The apex → www redirect cannot live here (no host rules); it is the Worker `ziyixi-apex-redirect`
-  ([`apex-redirect/`](../apex-redirect/README.md)) on the zone route `ziyixi.science/*`.
+  then the 308. Rules here cannot match a host, so the apex is not redirected: it serves the same pages,
+  whose canonical links name `www` (see Hostnames).
 - **Limits** checked by `scripts/export/finalize.ts`: at most 20,000 files per version and every file
   under 25 MiB (Workers Free static assets). The Notion media downloader caps video and attachments at
   24 MiB (images 20 MiB) to stay below it.
@@ -147,15 +178,23 @@ five) and keeps no state of its own:
    `allow_empty=false`, `trigger=cron|pending|reconcile`. The release skips the deploy when the identity did not
    change, so a reconcile on an unchanged day costs one short Actions run and refreshes the Notion feedback.
 
-`AUTO_PUBLISH = "false"` in `relay/wrangler.toml` turns the detector off (buttons keep working). Known
-limits: a failed release does not write feedback, so edits made before it wait for the reconcile (the
+**Without the relay.** `website-release.yml` also runs on a GitHub Actions schedule at 10:30 UTC (after
+`RECONCILE_UTC_HOUR`): a check job reconciles only if no reconcile run (the relay's or an earlier
+scheduled one) exists today, the latest release record is `success` (never during a recovery gate) and
+fewer than 3 releases failed today; then the same ordinary release runs. It needs no relay and no
+dispatch token, so the daily reconcile keeps happening while the relay cannot dispatch
+([`release.md`](release.md#daily-schedule)). It has no quiet period (it cannot read Notion before the
+release), and the relay ignores its runs (their name is `Website scheduled reconcile`).
+
+`AUTO_PUBLISH = "false"` in `relay/wrangler.toml` turns the detector off (buttons keep working; the daily
+schedule is separate, see above). Known limits: a failed release does not write feedback, so edits made before it wait for the reconcile (the
 failed run's GitHub notification is the alert); a dispatch PAT that expires makes every tick log
 `GITHUB_UNAVAILABLE`/`DISPATCH_FAILED` (Workers Logs) and the buttons answer 502.
 
 ## Costs (Workers Free)
 
-Page views: static assets, free and unlimited (also through the `www` route). Apex redirect: one Worker
-request per apex hit (links point at www, so few), well under 1 ms CPU, no subrequest. Relay: 96 scheduled invocations and normally ~290 subrequests a
-day (at most 5 per tick) plus the button clicks, each far under 10 ms CPU for a blog of this size. GitHub Actions: public repository, standard runners.
+Page views: static assets, free and unlimited (on `www` and the apex alike: no Worker script runs). Relay: 96 scheduled invocations and normally ~290 subrequests a
+day (at most 5 per tick) plus the button clicks, each far under 10 ms CPU for a blog of this size. GitHub
+Actions: public repository, standard runners (the daily schedule adds one short check job a day).
 The live site has no analytics beacon today (checked 2026-09-30: no `cloudflareinsights` in the HTML of any
 page); adding Cloudflare Web Analytics would be a separate owner decision, not part of the migration.

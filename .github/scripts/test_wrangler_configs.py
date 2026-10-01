@@ -40,7 +40,6 @@ PRODUCTION = {
     "home": "dashboard/wrangler.toml",
     "ziyixi-website": "website/wrangler.toml",
     "ziyixi-notion-publish": "website/relay/wrangler.toml",
-    "ziyixi-apex-redirect": "website/apex-redirect/wrangler.toml",
     "lab": "lab/wrangler.toml",
 }
 # Runtime-test configs stay next to their tests.
@@ -362,6 +361,26 @@ class Hosts(unittest.TestCase):
                 with self.subTest(host=route["pattern"]):
                     self.assertNotIn(route["pattern"], owners)
                     owners[route["pattern"]] = name
+
+    def test_the_website_is_exactly_www_and_the_apex(self):
+        """The site Worker's Custom Domains are its complete set (every release's `wrangler triggers deploy` replaces
+        them), so the list must equal the live state: www (canonical) and the apex, nothing else. No production
+        config uses a zone route since the apex redirect Worker and its `ziyixi.science/*` route were retired
+        (2026-10-01): every hostname of every Worker is a Custom Domain."""
+        self.assertEqual(
+            load(PRODUCTION["ziyixi-website"])["routes"],
+            [
+                {"pattern": "www.ziyixi.science", "custom_domain": True},
+                {"pattern": "ziyixi.science", "custom_domain": True},
+            ],
+        )
+        for name, path in PRODUCTION.items():
+            for route in load(path).get("routes", []):
+                with self.subTest(worker=name, route=route["pattern"]):
+                    self.assertEqual(set(route), {"pattern", "custom_domain"})
+                    self.assertIs(route["custom_domain"], True)
+                    self.assertRegex(route["pattern"], r"^[a-z0-9-]+(\.[a-z0-9-]+)+$")
+        self.assertNotIn("ziyixi-apex-redirect", PRODUCTION)
 
     def test_the_dashboard_host_is_its_own(self):
         host = self.home["vars"]["PUBLIC_HOST"]

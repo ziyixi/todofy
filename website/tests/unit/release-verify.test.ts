@@ -5,7 +5,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import { CloudflareApi } from "../../scripts/release/cloudflare";
 import { waitForIdentity } from "../../scripts/release/verify";
-import { liveOrigin, parseWorkerConfig } from "../../scripts/release/worker-config";
+import { liveOrigin, otherOrigins, parseWorkerConfig } from "../../scripts/release/worker-config";
 
 const expected = {
   codeSha: "a".repeat(40),
@@ -96,60 +96,69 @@ describe("live identity verification", () => {
 });
 
 describe("website wrangler.toml", () => {
-  it("is an assets-only Worker without workers.dev or previews, on the preview domain and the www route", async () => {
+  it("is an assets-only Worker without workers.dev or previews, on the Custom Domains www and the apex", async () => {
     const text = await readFile("wrangler.toml", "utf8");
     const config = parseWorkerConfig(text);
     expect(config.name).toBe("ziyixi-website");
     expect(config.accountId).toBe("f57937bd1d93bf59e737b6d8445fb7a3");
-    // docs/cutover.md: exactly the preview Custom Domain and the www zone route; the apex is the
-    // separate Worker ziyixi-apex-redirect, and nothing else is ever attached here.
-    expect(config.hostnames).toEqual(["website-preview.ziyixi.science", "www.ziyixi.science"]);
+    // Exactly the live state (docs/architecture.md "Hostnames"): wrangler replaces the Worker's Custom
+    // Domains with this list at every release, so anything else would attach or detach a hostname.
+    // No zone route and no preview host.
+    expect(config.hostnames).toEqual(["www.ziyixi.science", "ziyixi.science"]);
     expect((parse(text) as { routes: unknown }).routes).toEqual([
-      { pattern: "website-preview.ziyixi.science", custom_domain: true },
-      { pattern: "www.ziyixi.science/*", zone_name: "ziyixi.science" },
+      { pattern: "www.ziyixi.science", custom_domain: true },
+      { pattern: "ziyixi.science", custom_domain: true },
     ]);
+    expect(text).not.toMatch(/zone_name|website-preview/);
+    // The full route contract runs on www; the apex must serve the same identity.
     expect(liveOrigin(config, "https://www.ziyixi.science")).toBe("https://www.ziyixi.science");
+    expect(otherOrigins(config, "https://www.ziyixi.science")).toEqual(["https://ziyixi.science"]);
     expect(text).toContain('html_handling = "auto-trailing-slash"');
     expect(text).toContain('not_found_handling = "404-page"');
   });
 
   const base = `name = "ziyixi-website"\naccount_id = "${"f".repeat(32)}"\nworkers_dev = false\npreview_urls = false\n`;
 
-  it("relies on wrangler leaving hostnames of a kind it no longer lists (docs/cutover.md step 3)", async () => {
-    // The runbook says removing a line detaches nothing: `wrangler triggers deploy` sends the replacing
-    // route PUT and the replace_state Custom Domain changeset only when at least one of that kind is
-    // listed. After a wrangler upgrade, re-read triggersDeploy and update the runbook if this changed.
+  it("relies on wrangler replacing the Worker's Custom Domains with the listed set (docs: wrangler.toml)", async () => {
+    // wrangler.toml says its Custom Domains are the complete set: `wrangler triggers deploy` sends the
+    // replace_state changeset and then PUTs the listed domains with override_scope, but only when at
+    // least one Custom Domain is listed (and the route PUT only when a zone route is). After a wrangler
+    // upgrade, re-read publishCustomDomains and triggersDeploy and update the comment if this changed.
     const cli = await readFile("node_modules/wrangler/wrangler-dist/cli.js", "utf8");
-    expect(cli).toContain("if (routesOnly.length > 0) {");
     expect(cli).toContain("if (customDomainsOnly.length > 0) {");
+    expect(cli).toContain("if (routesOnly.length > 0) {");
     expect(cli).toContain("/domains/changeset?replace_state=true");
-    const docs = await readFile("docs/cutover.md", "utf8");
-    expect(docs).not.toMatch(/detaches the hostname|complete set/);
-    expect(await readFile("wrangler.toml", "utf8")).not.toMatch(/Removing a line detaches/);
+    expect(cli).toMatch(/override_scope: true,[\s\S]{0,8000}?\$\{workerUrl\}\/domains\/records`/);
+    const config = await readFile("wrangler.toml", "utf8");
+    expect(config).toContain("complete set of Custom Domains");
+    expect(config).toMatch(/Removing a\s+(#\s+)?line detaches that hostname/);
   });
 
   it("verifies the canonical host once attached, otherwise the first hostname", () => {
     const none = parseWorkerConfig(base);
     expect(none.hostnames).toEqual([]);
     expect(liveOrigin(none, "https://www.ziyixi.science")).toBeNull();
-    const preview = parseWorkerConfig(
-      `${base}routes = [{ pattern = "website-preview.ziyixi.science", custom_domain = true }]\n`,
+    expect(otherOrigins(none, "https://www.ziyixi.science")).toEqual([]);
+    const apex = parseWorkerConfig(
+      `${base}routes = [{ pattern = "ziyixi.science", custom_domain = true }]\n`,
     );
-    expect(liveOrigin(preview, "https://www.ziyixi.science")).toBe(
-      "https://website-preview.ziyixi.science",
-    );
+    expect(liveOrigin(apex, "https://www.ziyixi.science")).toBe("https://ziyixi.science");
+    expect(otherOrigins(apex, "https://www.ziyixi.science")).toEqual([]);
+    // The file order does not matter: www is the live hostname whenever it is listed.
     const both = parseWorkerConfig(
-      `${base}routes = [{ pattern = "website-preview.ziyixi.science", custom_domain = true }, { pattern = "www.ziyixi.science", custom_domain = true }]\n`,
+      `${base}routes = [{ pattern = "ziyixi.science", custom_domain = true }, { pattern = "www.ziyixi.science", custom_domain = true }]\n`,
     );
     expect(liveOrigin(both, "https://www.ziyixi.science")).toBe("https://www.ziyixi.science");
+    expect(otherOrigins(both, "https://www.ziyixi.science")).toEqual(["https://ziyixi.science"]);
   });
 
   it("reads a whole-host zone route as its hostname", () => {
     const route = parseWorkerConfig(
-      `${base}routes = [{ pattern = "website-preview.ziyixi.science", custom_domain = true }, { pattern = "www.ziyixi.science/*", zone_name = "ziyixi.science" }]\n`,
+      `${base}routes = [{ pattern = "ziyixi.science", custom_domain = true }, { pattern = "www.ziyixi.science/*", zone_name = "ziyixi.science" }]\n`,
     );
-    expect(route.hostnames).toEqual(["website-preview.ziyixi.science", "www.ziyixi.science"]);
+    expect(route.hostnames).toEqual(["ziyixi.science", "www.ziyixi.science"]);
     expect(liveOrigin(route, "https://www.ziyixi.science")).toBe("https://www.ziyixi.science");
+    expect(otherOrigins(route, "https://www.ziyixi.science")).toEqual(["https://ziyixi.science"]);
     const onlyRoute = parseWorkerConfig(
       `${base}routes = [{ pattern = "www.ziyixi.science/*", zone_name = "ziyixi.science" }]\n`,
     );

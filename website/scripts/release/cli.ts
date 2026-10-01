@@ -40,7 +40,7 @@ import {
   type UploadResult,
 } from "./steps";
 import { run, runDeploymentTests, startLocalServer, waitForIdentity } from "./verify";
-import { liveOrigin, readWorkerConfig } from "./worker-config";
+import { liveOrigin, otherOrigins, readWorkerConfig } from "./worker-config";
 
 const execFileAsync = promisify(execFile);
 const root = process.cwd();
@@ -373,6 +373,11 @@ const commands: Record<string, () => Promise<void>> = {
       expectedBuildInfoPath: files.buildInfo,
       contractPath: files.contract,
     });
+    // The other listed hostnames (the apex) serve the same version: the identity, 3 times in a row.
+    const config = await readWorkerConfig(path.join(root, "wrangler.toml"));
+    for (const origin of otherOrigins(config, siteUrl())) {
+      await verifyLiveIdentity(origin, payload.identity);
+    }
     await output("live_verified", "true");
   },
 

@@ -35,7 +35,6 @@ def expect(
     website_check=False,
     website_deploy=False,
     website_relay_deploy=False,
-    website_apex_deploy=False,
     lab_check=False,
     lab_deploy=False,
 ):
@@ -52,14 +51,13 @@ def expect(
         "dashboard_deploy": dashboard_deploy,
         "website_deploy": website_deploy,
         "website_relay_deploy": website_relay_deploy,
-        "website_apex_deploy": website_apex_deploy,
         "lab_deploy": lab_deploy,
     }
 
 
 # Every app checked (a contracts/ or .github/ change); the dashboard and Lab each checked and deployed;
 # the four edge-auth apps (the website compiles in no package) are todofy and mail-hero plus ALL; every
-# app with the website Worker (the relay and apex Workers are added where a test expects them).
+# app with the website Worker (the relay Worker is added where a test expects it).
 ALL_CHECKED = {"dashboard_check": True, "website_check": True, "lab_check": True}
 DASH = {"dashboard_check": True, "dashboard_deploy": True}
 LAB = {"lab_check": True, "lab_deploy": True}
@@ -135,11 +133,7 @@ class Classify(unittest.TestCase):
             "todofy": [REPO / "todofy" / "gateway" / "src", REPO / "todofy" / "web" / "src"],
             "dashboard": [REPO / "dashboard" / "worker" / "src", REPO / "dashboard" / "web" / "src"],
             "lab": [REPO / "lab" / "worker" / "src", REPO / "lab" / "web" / "src"],
-            "website": [
-                REPO / "website" / "src",
-                REPO / "website" / "relay" / "src",
-                REPO / "website" / "apex-redirect" / "src",
-            ],
+            "website": [REPO / "website" / "src", REPO / "website" / "relay" / "src"],
         }
         self.assertEqual(set(roots), set(ci_changes.APPS))
         importers = {}
@@ -268,33 +262,29 @@ class Classify(unittest.TestCase):
         )
         both = expect(F, F, F, F, F, website_check=T, website_deploy=T, website_relay_deploy=T)
         self.assertEqual(push(["website/relay/wrangler.toml", "website/package.json"]), both)
+        # Not a prefix match on the folder name alone; a site change alone never redeploys the relay.
+        self.assertEqual(push(["website/relay.md"]), expect(F, F, F, F, F, website_check=T, website_deploy=T))
+        self.assertEqual(push(["website/src/app/page.tsx"])["website_relay_deploy"], False)
+        self.assertEqual(
+            push(["website/relay/src/index.ts"], ref=BRANCH),
+            expect(F, F, F, F, F, website_check=T, website_relay_deploy=T),
+        )
 
-    def test_the_apex_redirect_deploys_without_releasing_the_site_or_the_relay(self):
-        """website/apex-redirect/ is the apex -> www Worker: its change (code, tests, config, docs) deploys it only."""
-        for path in (
-            "website/apex-redirect/src/redirect.ts",
-            "website/apex-redirect/test/redirect.test.ts",
-            "website/apex-redirect/wrangler.toml",
-            "website/apex-redirect/README.md",
-        ):
+    def test_the_retired_apex_worker_left_no_deploy_path(self):
+        """website/apex-redirect/ (the apex -> www 308 Worker) was retired on 2026-10-01: the apex is a Custom
+        Domain of the site Worker now. No output or job is left for it, and a path there (its deletion) is an
+        ordinary site change that releases the site."""
+        self.assertNotIn("website_apex_deploy", ci_changes.KEYS)
+        self.assertFalse((REPO / "website" / "apex-redirect").exists())
+        for path in ("website/apex-redirect/src/index.ts", "website/apex-redirect/wrangler.toml"):
             with self.subTest(path=path):
-                self.assertEqual(push([path]), expect(F, F, F, F, F, website_check=T, website_apex_deploy=T))
-        # Not a prefix match on the folder name alone.
-        self.assertEqual(push(["website/apex-redirect.md"]), expect(F, F, F, F, F, website_check=T, website_deploy=T))
+                self.assertEqual(push([path]), expect(F, F, F, F, F, website_check=T, website_deploy=T))
         self.assertEqual(
             push(["website/apex-redirect/src/index.ts", "website/relay/src/github.ts"]),
-            expect(F, F, F, F, F, website_check=T, website_relay_deploy=T, website_apex_deploy=T),
+            expect(F, F, F, F, F, website_check=T, website_deploy=T, website_relay_deploy=T),
         )
-        self.assertEqual(
-            push(["website/apex-redirect/wrangler.toml", "website/wrangler.toml"]),
-            expect(F, F, F, F, F, website_check=T, website_deploy=T, website_apex_deploy=T),
-        )
-        # A site change alone never redeploys the apex Worker; a branch push computes the same outputs.
-        self.assertEqual(push(["website/src/app/page.tsx"])["website_apex_deploy"], False)
-        self.assertEqual(
-            push(["website/apex-redirect/src/index.ts"], ref=BRANCH),
-            expect(F, F, F, F, F, website_check=T, website_apex_deploy=T),
-        )
+        self.assertNotIn("website-apex-deploy", workflow_jobs())
+        self.assertNotIn("apex-redirect", WORKFLOW.read_text())
 
     def test_the_release_workflow_rechecks_every_app_but_deploys_none(self):
         self.assertEqual(
@@ -355,7 +345,7 @@ class Dispatch(unittest.TestCase):
         self.assertEqual(self.dispatch(""), expect(T, T, T, T, T, packages=T))
         self.assertEqual(
             self.dispatch("all"),
-            expect(T, T, T, T, T, packages=T, **EVERY, website_relay_deploy=T, website_apex_deploy=T),
+            expect(T, T, T, T, T, packages=T, **EVERY, website_relay_deploy=T),
         )
         self.assertEqual(self.dispatch("todofy"), expect(T, F, T, T, F, packages=T))
         self.assertEqual(self.dispatch("mail-hero"), expect(F, T, T, F, T, packages=T))
@@ -373,7 +363,6 @@ class Dispatch(unittest.TestCase):
                 website_check=T,
                 website_deploy=T,
                 website_relay_deploy=T,
-                website_apex_deploy=T,
             ),
         )
 
@@ -445,7 +434,7 @@ class RealGit(unittest.TestCase):
         expected = {**dict.fromkeys(ci_changes.KEYS, "true"), "packages": "false"}
         expected.update(dashboard_check="false", dashboard_deploy="false")
         expected.update(website_check="false", website_deploy="false", website_relay_deploy="false")
-        expected.update(website_apex_deploy="false", lab_check="false", lab_deploy="false")
+        expected.update(lab_check="false", lab_deploy="false")
         self.assertEqual(outputs, expected)
 
     def test_a_failed_package_run_on_main_deploys_both_apps_next_time(self):
@@ -453,7 +442,7 @@ class RealGit(unittest.TestCase):
         self.commit("packages/edge-auth/src/access.ts")
         after = self.commit("README.md.orig")
         outputs = self.main_run(after, green)
-        website = {"website_check", "website_deploy", "website_relay_deploy", "website_apex_deploy"}
+        website = {"website_check", "website_deploy", "website_relay_deploy"}
         self.assertEqual({key for key, value in outputs.items() if value == "false"}, website)
 
     def test_a_failed_run_on_main_is_repeated(self):
@@ -654,7 +643,6 @@ class DeployConditions(unittest.TestCase):
                 "dashboard-deploy",
                 "website-deploy",
                 "website-relay-deploy",
-                "website-apex-deploy",
                 "lab-deploy",
             },
         )
@@ -699,7 +687,6 @@ class DeployConditions(unittest.TestCase):
                 "mail-hero-deploy": "mail-hero-production",
                 "dashboard-deploy": "dashboard-production",
                 "website-relay-deploy": "website-relay-production",
-                "website-apex-deploy": "website-apex-production",
                 "lab-deploy": "lab-production",
             },
         )
@@ -712,7 +699,6 @@ class DeployConditions(unittest.TestCase):
             ("dashboard-deploy", "dashboard-checks", "dashboard_deploy"),
             ("website-deploy", "website-checks", "website_deploy"),
             ("website-relay-deploy", "website-checks", "website_relay_deploy"),
-            ("website-apex-deploy", "website-checks", "website_apex_deploy"),
             ("lab-deploy", "lab-checks", "lab_deploy"),
         ):
             condition = self.condition(blocks[job])
@@ -789,6 +775,8 @@ class WebsiteRelease(unittest.TestCase):
     def test_every_release_builds_a_commit_that_passed_the_ci_gate(self):
         jobs = self.release_jobs()
         for name, block in jobs.items():
+            if name == "scheduled":
+                continue
             with self.subTest(job=name):
                 pin = block.index("- name: Check out the newest main commit that passed the CI gate\n")
                 install = block.index("- name: Install the pinned pnpm and locked dependencies\n")
@@ -800,8 +788,10 @@ class WebsiteRelease(unittest.TestCase):
 
     def test_every_release_job_shares_one_group_and_the_production_environment(self):
         jobs = self.release_jobs()
-        self.assertEqual(set(jobs), {"release", "status"})
+        self.assertEqual(set(jobs), {"scheduled", "release", "status"})
         for name, block in jobs.items():
+            if name == "scheduled":
+                continue
             with self.subTest(job=name):
                 self.assertIn("      group: website-production\n", block)
                 self.assertIn("      cancel-in-progress: false\n", block)
@@ -809,11 +799,21 @@ class WebsiteRelease(unittest.TestCase):
 
     def test_the_relay_and_the_workflow_agree_on_operations_and_triggers(self):
         text = self.RELEASE.read_text()
-        self.assertIn("run-name: Website ${{ inputs.operation }} (${{ inputs.trigger }})", text)
+        # A dispatched run is "Website <operation> (<trigger>)", which the relay parses; a scheduled run has
+        # its own name, which the relay's parser does not match (scheduled-reconcile.ts reads both).
+        self.assertIn(
+            "run-name: ${{ github.event_name == 'schedule' && 'Website scheduled reconcile' || "
+            "format('Website {0} ({1})', inputs.operation, inputs.trigger) }}",
+            text,
+        )
         self.assertIn("        options: [release, status, bootstrap, recovery]", text)
         self.assertIn("        options: [manual, button, cron, reconcile, pending, push]", text)
         relay = (REPO / "website" / "relay" / "src" / "github.ts").read_text()
         self.assertIn("(release|status|bootstrap|recovery) \\((manual|button|cron|reconcile|pending|push)\\)", relay)
+        # The scheduled check reads dispatched run names exactly as the relay does.
+        scheduled = (REPO / "website" / "scripts" / "release" / "scheduled-reconcile.ts").read_text()
+        self.assertIn("(release|status|bootstrap|recovery) \\((manual|button|cron|reconcile|pending|push)\\)", scheduled)
+        self.assertIn('export const SCHEDULED_RUN_NAME = "Website scheduled reconcile";', scheduled)
         config = (REPO / "website" / "relay" / "wrangler.toml").read_text()
         self.assertIn('RELEASE_WORKFLOW = "website-release.yml"', config)
         self.assertIn('GITHUB_REPOSITORY = "ziyixi/todofy"', config)
@@ -840,6 +840,8 @@ class WebsiteRelease(unittest.TestCase):
                 [
                     "Check out the newest main commit that passed the CI gate",
                     "Check out the newest main commit that passed the CI gate",
+                    "Check out the newest main commit that passed the CI gate",
+                    "Decide whether today's reconcile release is due",
                     "Assert the trusted release context and the pinned commit",
                     "Enforce the GitHub Deployment state gate",
                     "Reconcile a blocked release with what production serves",
@@ -853,45 +855,83 @@ class WebsiteRelease(unittest.TestCase):
         self.assertNotIn("GH_TOKEN", text)
 
 
-class WebsiteApexDeploy(unittest.TestCase):
-    """The apex redirect Worker is checked with the website and deployed by its own job, from its own config."""
+class WebsiteScheduledReconcile(unittest.TestCase):
+    """The daily schedule of website-release.yml is the relay's reconcile release without the relay: a check job
+    with no environment, secret or install decides; the release job then runs an ordinary release with the fixed
+    inputs the relay sends, never recovery, and every gate of a dispatched release applies unchanged."""
 
-    CONFIG = REPO / "website" / "apex-redirect" / "wrangler.toml"
+    RELEASE = REPO / ".github" / "workflows" / "website-release.yml"
 
-    def test_the_job_dry_runs_deploys_and_probes_the_apex(self):
-        block = workflow_jobs()["website-apex-deploy"]
-        dry = block.index("pnpm exec wrangler deploy --dry-run --config apex-redirect/wrangler.toml")
-        deploy = block.index("pnpm exec wrangler deploy --config apex-redirect/wrangler.toml")
-        probe = block.index("- name: Check the apex answers with the Worker's redirect")
-        self.assertLess(dry, deploy)
-        self.assertLess(deploy, probe)
-        # The deploy token, once, only in the deploy step; no other secret.
-        self.assertEqual(block.count("secrets."), 1)
-        self.assertIn("CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}", block[:probe])
-        self.assertIn("      name: production\n", block)
-        # The probe asks the apex and accepts only the Worker's answer.
-        self.assertIn("PROBE: https://ziyixi.science/", block)
-        self.assertIn("WANT: https://www.ziyixi.science/", block)
-        self.assertIn("strict-transport-security: max-age=63072000", block)
-        self.assertIn("x-vercel-", block)
+    def jobs(self):
+        return WebsiteRelease().release_jobs()
 
-    def test_website_checks_test_and_dry_run_it(self):
+    def test_the_schedule_runs_once_a_day_after_the_relays_reconcile_hour(self):
+        text = self.RELEASE.read_text()
+        on = text.split("\non:\n", 1)[1].split("\npermissions:\n", 1)[0]
+        self.assertEqual(re.findall(r"^    - cron: '([^']+)'$", on, re.MULTILINE), ["30 10 * * *"])
+        relay = (REPO / "website" / "relay" / "wrangler.toml").read_text()
+        self.assertIn('RECONCILE_UTC_HOUR = "10"\n', relay)
+        self.assertNotIn("workflow_call:", text)
+
+    def test_the_check_job_has_no_environment_secret_or_install_and_reads_only(self):
+        block = self.jobs()["scheduled"]
+        self.assertIn("    if: github.event_name == 'schedule' && vars.WEBSITE_SCHEDULED_RECONCILE != 'false'\n", block)
+        for absent in ("environment:", "secrets.", "concurrency:", "pnpm", "npm ", "write"):
+            with self.subTest(absent=absent):
+                self.assertNotIn(absent, block)
+        self.assertIn("    permissions:\n      contents: read\n      actions: read\n      deployments: read\n", block)
+        pin = block.index("- name: Check out the newest main commit that passed the CI gate\n")
+        decide = block.index("- name: Decide whether today's reconcile release is due\n")
+        self.assertLess(pin, decide)
+        self.assertIn('git -c advice.detachedHead=false checkout --detach "$sha"', block[pin:decide])
+        self.assertIn("node --disable-warning=ExperimentalWarning scripts/release/scheduled-reconcile.ts", block[decide:])
+        self.assertIn("reconcile: ${{ steps.decide.outputs.reconcile }}", block)
+        self.assertTrue((REPO / "website" / "scripts" / "release" / "scheduled-reconcile.ts").is_file())
+
+    def test_the_release_job_runs_for_a_dispatch_or_a_due_reconcile_only(self):
+        block = self.jobs()["release"]
+        self.assertIn("    needs: scheduled\n", block)
+        condition = " ".join(block.split("    if: >-\n", 1)[1].split("\n    runs-on:", 1)[0].split())
+        self.assertEqual(
+            condition,
+            "${{ !cancelled() && ((github.event_name == 'workflow_dispatch' && inputs.operation != 'status') "
+            "|| (github.event_name == 'schedule' && needs.scheduled.result == 'success' "
+            "&& needs.scheduled.outputs.reconcile == 'true')) }}",
+        )
+        self.assertIn("    if: github.event_name == 'workflow_dispatch' && inputs.operation == 'status'\n", self.jobs()["status"])
+
+    def test_a_scheduled_release_has_the_relays_fixed_inputs(self):
+        block = self.jobs()["release"]
+        for line in (
+            "RELEASE_OPERATION: ${{ github.event_name == 'schedule' && 'release' || inputs.operation }}",
+            "RELEASE_CONFIRMATION: ${{ github.event_name == 'schedule' && 'release:www.ziyixi.science' || inputs.confirmation }}",
+            "ALLOW_EMPTY: ${{ github.event_name == 'schedule' && 'false' || inputs.allow_empty }}",
+            "FORCE_BUILD: ${{ github.event_name == 'schedule' && 'false' || inputs.force_build }}",
+        ):
+            with self.subTest(line=line):
+                self.assertIn(f"      {line}\n", block)
+        # Steps choose by the resolved operation, so a scheduled run (no inputs) still checks the baseline and
+        # never runs the recovery step.
+        self.assertNotRegex(block.split("    steps:\n", 1)[1], r"\binputs\.")
+        self.assertIn("env.RELEASE_OPERATION == 'release'", block)
+        self.assertIn("env.RELEASE_OPERATION == 'recovery'", block)
+        self.assertIn("run: pnpm release gate", block)
+        self.assertIn("run: pnpm release check-baseline", block)
+
+
+class WebsiteChecks(unittest.TestCase):
+    """Website checks test and dry-run exactly the website's two Workers (the site and the Notion relay)."""
+
+    def test_website_checks_test_and_dry_run_both_workers(self):
         block = workflow_jobs()["website-checks"]
         self.assertIn("pnpm check", block)
-        self.assertIn("pnpm exec wrangler deploy --dry-run --config apex-redirect/wrangler.toml", block)
-        self.assertIn("apex-redirect/src apex-redirect/test", block)
+        self.assertIn("pnpm exec wrangler deploy --dry-run --config wrangler.toml\n", block)
+        self.assertIn("pnpm exec wrangler deploy --dry-run --config relay/wrangler.toml", block)
+        self.assertEqual(block.count("wrangler deploy --dry-run"), 2)
+        # The import guard covers every source directory of both Workers and the tests.
+        self.assertIn("src scripts relay/src tests; then exit 1; fi", block)
         vitest = (REPO / "website" / "vitest.config.ts").read_text()
-        self.assertIn('"apex-redirect/test/**/*.test.ts"', vitest)
-
-    def test_the_config_is_one_apex_route_and_nothing_else(self):
-        text = self.CONFIG.read_text()
-        self.assertIn('name = "ziyixi-apex-redirect"\n', text)
-        self.assertIn('routes = [{ pattern = "ziyixi.science/*", zone_name = "ziyixi.science" }]\n', text)
-        self.assertIn("workers_dev = false\n", text)
-        self.assertIn("preview_urls = false\n", text)
-        # Routes only: the apex's DNS records (A, MX, TXT, DKIM) are never managed from here.
-        self.assertNotIn("custom_domain", text)
-        self.assertEqual(text.count("pattern ="), 1)
+        self.assertIn('include: ["tests/unit/**/*.test.ts"],', vitest)
 
 
 class TodofyJobs(unittest.TestCase):

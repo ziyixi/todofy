@@ -11,7 +11,7 @@ export default defineConfig({
   },
   test: {
     environment: "node",
-    include: ["tests/unit/**/*.test.ts", "apex-redirect/test/**/*.test.ts"],
+    include: ["tests/unit/**/*.test.ts"],
     coverage: {
       reporter: ["text", "html"],
     },

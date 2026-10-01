@@ -14,11 +14,6 @@ Outputs (GITHUB_OUTPUT, "true"/"false"):
                     website/relay/ (the Notion relay Worker, its own wrangler.toml) changed: deploy
                     the relay. A change only there checks the website but does not release the site;
                     a website change elsewhere releases the site but does not redeploy the relay.
-  website_apex_deploy
-                    website/apex-redirect/ (the apex -> www redirect Worker, its own wrangler.toml)
-                    changed: deploy it. Like the relay, a change only there checks the website but
-                    neither releases the site nor redeploys the relay, and a site change elsewhere
-                    does not redeploy it.
 
 push: the files changed between a cumulative base and github.sha, never only this push's own diff,
 so a change whose run was cancelled or failed is checked (and deployed) again by the next run.
@@ -40,7 +35,7 @@ so a change whose run was cancelled or failed is checked (and deployed) again by
   run by the Changes job also fail until PACKAGE_USERS matches the file: dependencies). A file
   directly under packages/ (a README) is root documentation: gate only.
 workflow_dispatch: the "app" input checks and deploys that app ("both" = Todofy and Mail Hero, as
-before; "all" = every app; or one app; "website" = the site, its relay and the apex redirect), and the contracts and
+before; "all" = every app; or one app; "website" = the site and its relay), and the contracts and
 shared packages are checked too. The website uses no contract and no package, so a website-only
 change does not run Contracts.
 """
@@ -66,7 +61,6 @@ KEYS = (
     "dashboard_deploy",
     "website_deploy",
     "website_relay_deploy",
-    "website_apex_deploy",
     "lab_deploy",
 )
 DISPATCH = {
@@ -78,10 +72,8 @@ DISPATCH = {
     "website": ("website",),
     "lab": ("lab",),
 }
-# The website's two small Workers deploy on their own: the Notion relay (website_relay_deploy) and the
-# apex -> www redirect (website_apex_deploy).
+# The website's Notion relay Worker deploys on its own (website_relay_deploy).
 RELAY = "website/relay/"
-APEX = "website/apex-redirect/"
 # Apps that neither provide nor consume a contract: their own changes do not run Contracts.
 NO_CONTRACTS = {"website"}
 # packages/<name>/ -> the apps whose Workers compile it in (a "file:../../packages/<name>" dependency).
@@ -112,14 +104,12 @@ def outputs(
     contracts: bool,
     packages: bool,
     relay: bool = False,
-    apex: bool = False,
 ) -> dict[str, bool]:
     checked, deployed = set(checked), set(deployed)
     result = {
         "contracts": contracts,
         "packages": packages,
         "website_relay_deploy": relay,
-        "website_apex_deploy": apex,
     }
     for app in APPS:
         result[f"{PREFIX[app]}_check"] = app in checked
@@ -147,11 +137,10 @@ def classify(paths: Iterable[str]) -> dict[str, bool]:
     ci = any(path.startswith(".github/") for path in paths)
     shared = ci or any(path.startswith("contracts/") for path in paths)
     bundled = {app for path in paths for app in BUNDLED_BY.get(path, ())}
-    # website/relay/ and website/apex-redirect/ are their own Workers: each deploys itself, not the site
-    # (unless the site's own files, or a package counted as used by it, changed too).
+    # website/relay/ is its own Worker: it deploys itself, not the site (unless the site's own files, or a
+    # package counted as used by it, changed too).
     relay = any(path.startswith(RELAY) for path in paths)
-    apex = any(path.startswith(APEX) for path in paths)
-    site = any(path.startswith("website/") and not path.startswith((RELAY, APEX)) for path in paths)
+    site = any(path.startswith("website/") and not path.startswith(RELAY) for path in paths)
     site |= any("website" in PACKAGE_USERS.get(name, APPS) for name in compiled)
     deployed = apps | bundled
     if not site:
@@ -162,7 +151,6 @@ def classify(paths: Iterable[str]) -> dict[str, bool]:
         contracts=bool((apps - NO_CONTRACTS) | documented) or shared,
         packages=bool(package_names) or ci,
         relay=relay,
-        apex=apex,
     )
 
 
@@ -171,7 +159,7 @@ def dispatched(app: str) -> dict[str, bool]:
         raise ValueError(f"unknown app input {app!r}; expected one of {sorted(DISPATCH)}")
     apps = DISPATCH[app]
     website = "website" in apps
-    return outputs(checked=apps, deployed=apps, contracts=True, packages=True, relay=website, apex=website)
+    return outputs(checked=apps, deployed=apps, contracts=True, packages=True, relay=website)
 
 
 MAIN = "refs/heads/main"

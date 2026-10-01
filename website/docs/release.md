@@ -1,9 +1,10 @@
 # Release
 
 One workflow, [`.github/workflows/website-release.yml`](../../.github/workflows/website-release.yml), does
-every production change of the site. Its two jobs share the concurrency group `website-production`
-(`queue: max`, never cancelled) and the GitHub `production` environment, so releases, status refreshes and
-Notion writes never overlap, whoever started them.
+every production change of the site. Its two production jobs (release and status) share the concurrency
+group `website-production` (`queue: max`, never cancelled) and the GitHub `production` environment, so
+releases, status refreshes and Notion writes never overlap, whoever started them. A third, read-only job
+only decides whether a scheduled run releases ([Daily schedule](#daily-schedule)).
 
 | Started by               | How                                                                                | Inputs                                              |
 | ------------------------ | ---------------------------------------------------------------------------------- | --------------------------------------------------- |
@@ -11,11 +12,12 @@ Notion writes never overlap, whoever started them.
 | 发布网站 button          | relay `/publish`                                                                   | `release`, trigger `button`                         |
 | Change detector          | relay `scheduled()` ([`architecture.md`](architecture.md#automatic-releases))      | `release`, trigger `cron`, `pending` or `reconcile` |
 | 刷新状态 button          | relay `/refresh-status`                                                            | `status`, trigger `button`                          |
+| Daily schedule           | `schedule` 10:30 UTC, only when due ([below](#daily-schedule))                     | none: always `release`, fixed like the relay's      |
 | You                      | Actions → Website release → Run workflow                                           | any operation, trigger `manual`                     |
 
 The confirmation input must be `<operation>:www.ziyixi.science` (plus `:allow-empty` when `allow_empty` is
-set). The relay and `Website deploy` send fixed inputs; no request can choose a ref, recovery or
-`allow_empty`. `Website deploy` only dispatches (`gh workflow run` with its `actions: write` token) and
+set). The relay and `Website deploy` send fixed inputs, and a scheduled run has the same ones built in; no
+request can choose a ref, recovery or `allow_empty`. `Website deploy` only dispatches (`gh workflow run` with its `actions: write` token) and
 returns: a main CI run never waits for a queued release, and every release is a run of this workflow, which
 is what the relay lists (running release, release window, failures).
 
@@ -32,8 +34,8 @@ the gate step, without a record. `context` checks the pinned commit again with t
 Each step is one `pnpm release <command>` ([`scripts/release/cli.ts`](../scripts/release/cli.ts)), run from
 `website/` on the pinned CI-green commit:
 
-1. `context`: only `main`, only a workflow dispatch, the exact confirmation, and the checked-out commit
-   passed the CI gate.
+1. `context`: only `main`, only a workflow dispatch (or the daily schedule, which may only run an ordinary
+   `release` without `allow_empty`), the exact confirmation, and the checked-out commit passed the CI gate.
 2. `code-sha`: the code identity is the newest commit at or before it that touched `website/` (so a
    Todofy commit does not redeploy the site).
 3. `gate`: reads the `website-release` GitHub Deployment records of this repository. A `release` needs the
@@ -55,15 +57,17 @@ Each step is one `pnpm release <command>` ([`scripts/release/cli.ts`](../scripts
 9. `record`: a GitHub Deployment (payload schema 3: identity, version, previous version, live hostname,
    content registry, route contract), status `in_progress`. An interrupted run leaves this record blocking.
 10. `deploy`: refuses a production that changed meanwhile; `wrangler versions deploy <version>@100%`; confirms the active version; when `wrangler.toml` lists
-    hostnames, `wrangler triggers deploy` applies them: Custom Domains (the preview host) and whole-host
-    zone routes (`www.ziyixi.science/*`, which changes no DNS), and keeps workers.dev off.
+    hostnames, `wrangler triggers deploy` applies them: the Custom Domains `www.ziyixi.science` and
+    `ziyixi.science`, which wrangler treats as the Worker's complete set (it replaces the attached set with
+    the listed one, so with the file matching the live state nothing changes), and keeps workers.dev off.
     Newer website code landing on `main` meanwhile is not a reason to stop: this build passed CI and the
     release that push dispatched is queued behind this one and builds the newer code (refusing here would
     record a failure that blocks the gate for that release too).
-11. `verify-live`: the live hostname (the canonical host once attached as a Custom Domain or a zone
-    route, otherwise the preview host) must become reachable (a new hostname: up to 20 × 15 s), serve the identity 3 times in a row
-    (12 × 5 s) and pass the route contract. With no hostname yet this step is skipped: the version was
-    verified locally.
+11. `verify-live`: the live hostname (the canonical host `www` once attached, otherwise the first listed
+    hostname) must become reachable (a new hostname: up to 20 × 15 s), serve the identity 3 times in a row
+    (12 × 5 s) and pass the route contract; then every other listed hostname (the apex) must serve the
+    same identity the same way. With no hostname yet this step is skipped: the version was verified
+    locally.
 12. `mark-success`, then the **Notion feedback**: `sync-status.ts` compares every row with the live
     `publication-state.json` (on the hostname above, `WEBSITE_LIVE_ORIGIN`) and writes `网站状态`,
     `线上版本时间`, `检查时间` (the instant of that row's write), `网站链接`, `已上线指纹`; after a deploy `update-site-summary.ts` updates the
@@ -93,6 +97,37 @@ Each step is one `pnpm release <command>` ([`scripts/release/cli.ts`](../scripts
   [`cutover.md`](cutover.md#rollback)).
 - **allow_empty**: one run may publish an empty collection after a non-empty one.
 
+## Daily schedule
+
+The relay's change detector dispatches one reconcile release a day ([`architecture.md`](architecture.md#automatic-releases)),
+but only while its dispatch token (a fine-grained PAT that only the owner can grant access to
+`ziyixi/todofy`) works. So the workflow also has its own `schedule` (`30 10 * * *`, after the relay's
+`RECONCILE_UTC_HOUR` of 10), needing no token beyond the run's `GITHUB_TOKEN` and no new secret:
+
+1. The job **Website scheduled reconcile check** (no environment, no secret, no install; `contents`,
+   `actions` and `deployments` read only) pins the newest CI-green `main` commit like a release and runs
+   [`scripts/release/scheduled-reconcile.ts`](../scripts/release/scheduled-reconcile.ts) with plain `node`.
+   It skips (`reconcile=false`, a notice with the code, nothing released) when the latest `website-release`
+   record is not `success` (`RECOVERY_GATE`: only `recovery` may cross the gate, so no failing run is
+   started) or there is none (`NO_RELEASE_RECORD`), when a reconcile run was created today (UTC) by the relay
+   (`Website release (reconcile)`) or by an earlier schedule (`RECONCILED_TODAY`), or after 3 failed
+   releases today (`FAILURES_TODAY`, the relay's failure stop).
+2. Otherwise the **Website release** job runs exactly what the relay's reconcile dispatches: `release`,
+   confirmation `release:www.ziyixi.science`, no `force_build`, no `allow_empty`, in the same concurrency
+   group and with every gate above (it still stops at `gate` if a record turned blocking meanwhile, without
+   writing anything). An unchanged identity deploys nothing and only refreshes the Notion feedback.
+
+The run is named `Website scheduled reconcile`, which the relay's run-name parser does not match: the relay
+neither counts it as a release (its edit window and caps stay its own) nor as today's reconcile. With a
+working relay its reconcile comes first (the first tick after 10:00 UTC) and the schedule skips; if the
+relay's reconcile is held back past 10:30 (quiet period, a running release), both may run that day, which
+costs one more identity-unchanged run. Unlike the relay, the schedule has no quiet period (it cannot read
+Notion before the release), like a push release or the 发布网站 button. GitHub may start a scheduled run
+late or drop it under load, and disables schedules in a public repository after 60 days without activity.
+To turn it off, set the repository variable `WEBSITE_SCHEDULED_RECONCILE` to `false` (Settings → Secrets and
+variables → Actions → Variables; a repository variable, not a `production` one: the check job has no
+environment).
+
 ## Rollback by hand
 
 - A failed release rolls back by itself (step 13). To go back to an older version on purpose, prefer a
@@ -109,15 +144,16 @@ Each step is one `pnpm release <command>` ([`scripts/release/cli.ts`](../scripts
 Committed: `SITE_URL`, `NOTION_API_VERSION` and `WEBSITE_LEGACY_REPOSITORY` in the workflow's `env`; the
 Worker, account and hostnames in [`wrangler.toml`](../wrangler.toml). GitHub `production` environment:
 
-| Name                            | Kind                                          | Used by                                                                                                                                                    |
-| ------------------------------- | --------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `WEBSITE_NOTION_TOKEN`          | secret                                        | the Notion sync and the feedback (needs Read and Update content)                                                                                           |
-| `WEBSITE_NOTION_DATA_SOURCE_ID` | secret                                        | same                                                                                                                                                       |
-| `CF_API_TOKEN`                  | secret (shared with Todofy and the dashboard) | Cloudflare reads, `versions upload/deploy`, `triggers deploy` (Custom Domains, Workers Routes), the relay and apex deploys; it cannot edit DNS or rulesets |
-| `WEBSITE_BOOTSTRAP_APPROVAL`    | variable, optional                            | only an empty-registry bootstrap                                                                                                                           |
+| Name                            | Kind                                          | Used by                                                                                                                          |
+| ------------------------------- | --------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| `WEBSITE_NOTION_TOKEN`          | secret                                        | the Notion sync and the feedback (needs Read and Update content)                                                                 |
+| `WEBSITE_NOTION_DATA_SOURCE_ID` | secret                                        | same                                                                                                                             |
+| `CF_API_TOKEN`                  | secret (shared with Todofy and the dashboard) | Cloudflare reads, `versions upload/deploy`, `triggers deploy` (Custom Domains), the relay deploy; it cannot edit DNS or rulesets |
+| `WEBSITE_BOOTSTRAP_APPROVAL`    | variable, optional                            | only an empty-registry bootstrap                                                                                                 |
+| `WEBSITE_SCHEDULED_RECONCILE`   | repository variable, optional                 | `false` turns the [daily schedule](#daily-schedule) off; unset or anything else keeps it on                                      |
 
 The job's `GITHUB_TOKEN` (`contents: read`, `deployments: write`, `checks: read`, `actions: read`) reads the
 CI results and writes the records. It is in the `env` of only the steps that need it (pin the commit,
-`context`, `gate`, `recover`, `record`, `mark-success`, `mark-failure`), never of the install, build or test
-steps, so a dependency's install script cannot forge a release record. Logs print commit
+`context`, `gate`, `recover`, `record`, `mark-success`, `mark-failure`, and the scheduled check's pin and
+decision, whose job may only read), never of the install, build or test steps, so a dependency's install script cannot forge a release record. Logs print commit
 IDs, version IDs, status codes and counts only; never a token, a response body or Notion content.

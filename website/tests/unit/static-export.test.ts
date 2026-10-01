@@ -189,9 +189,7 @@ describe("build-time image variants", () => {
 describe("Notion feedback origin", () => {
   it("reads the canonical origin unless the release names the live hostname", () => {
     expect(productionOrigin(undefined)).toBe("https://www.ziyixi.science");
-    expect(productionOrigin("https://website-preview.ziyixi.science")).toBe(
-      "https://website-preview.ziyixi.science",
-    );
+    expect(productionOrigin("https://ziyixi.science")).toBe("https://ziyixi.science");
     expect(() => productionOrigin("https://example.com/path")).toThrow();
     expect(() => productionOrigin("http://example.com")).toThrow();
   });
