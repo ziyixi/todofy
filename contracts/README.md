@@ -3,11 +3,11 @@
 The only files the apps (`mail-hero/`, `todofy/`, `dashboard/`, `lab/`) share. No app imports another; each reads
 these files.
 
-The protobuf IDL of these contracts lives in [`../proto/`](../proto/README.md): `ops-v1` and `task-intent-v1`,
-whose sides all run on the generated code (`mail-received-v1` is not in it yet). It does not change the wire: the
-fixtures here stay the published wire description, and their bytes round-trip through the generated codecs.
-`ops-v1`'s JSON Schema is generated from its IDL; `task-intent-v1`'s is still hand-written, checked against the
-codec on every fixture.
+The protobuf IDL of these contracts lives in [`../proto/`](../proto/README.md): `ops-v1`, `task-intent-v1` and
+`mail-received-v1` (`proto/mailhero/webhook/v1`), whose sides all run on the generated code. It does not change the
+wire: the fixtures here stay the published wire description, and their bytes round-trip through the generated codecs.
+`ops-v1`'s and `mail-received-v1`'s JSON Schemas are generated from their IDL; `task-intent-v1`'s is still
+hand-written, checked against the codec on every fixture.
 
 | Directory | Between | Owner |
 | --- | --- | --- |
@@ -22,14 +22,16 @@ The webhook Mail Hero POSTs to its consumer. Mail Hero owns it.
 | File | Purpose |
 | --- | --- |
 | `mail-received-v1.md` | Semantics: identity, retries, delivery status, content limits (Chinese) |
-| `mail-received-v1.schema.json` | The single JSON Schema. Todofy's OpenAPI (`todofy/api/owner-api-v1.openapi.yaml`) and tests reference it by relative path; there is no copy |
+| `mail-received-v1.schema.json` | The single JSON Schema, generated from [`proto/mailhero/webhook/v1/mail_received.proto`](../proto/mailhero/webhook/v1/mail_received.proto) (`npm run schema` in `proto/`; `npm run check:schema` fails when it is stale): a consumer's schema, self-contained, every object open. Todofy's OpenAPI (`todofy/api/owner-api-v1.openapi.yaml`) and tests reference it by relative path; there is no copy |
+| `legacy/mail-received-v1.schema.json` | The hand-written schema it replaced, frozen: Todofy's `test_mail_received_schema_legacy.py` gives it and the generated one the same verdict on every fixture and about 9,000 mutations (formats asserted), Mail Hero's `contract-schema-dialect.test.mjs` pins the one ECMAScript difference the IDL states |
 | `fixtures/*.json` | Golden webhook bodies, exact bytes, written by Mail Hero's real `parseMail` + `buildPayload` from synthetic mail (`mail-hero/cloudflare/test/contract-fixtures.mjs`) |
 | `fixtures/legacy/*.json` | Frozen bodies from older builders. Retries resend frozen bytes, so consumers keep accepting them; nothing regenerates them. Each file's SHA-256 is pinned in both apps' contract tests, so any byte change fails CI; adding a legacy file means adding its hash on both sides |
 
 Checks, all run by the `Contracts` CI job (and by each app's own tests):
 
-- Mail Hero, `mail-hero/cloudflare`: `node --test test/contract-fixtures.test.mjs` rebuilds every case and fails if a fixture differs by one byte, or if a fixture has no case.
-- Todofy, `todofy`: `uv run pytest tests/unit/test_mail_hero_compat.py` validates every fixture (current and legacy) against the schema and parses and renders it with `todofy.core.contract.parse_mail_event`; `tests/runtime/test_scenarios_webhook.py` posts each one to a real workerd gateway.
+- Mail Hero, `mail-hero/cloudflare`: `node --test test/contract-fixtures.test.mjs` rebuilds every case (a generated message written by the wire codec) and fails if a fixture differs by one byte, or if a fixture has no case; `test/native-runtime.test.mjs` retries an event frozen by an older builder with its exact bytes.
+- Todofy, `todofy`: `uv run pytest tests/unit/test_mail_hero_compat.py` validates every fixture (current and legacy) against the schema and parses and renders it with `todofy.core.contract.parse_mail_event` (the generated Python codec); `test_mail_received_parser_legacy.py` gives every fixture and mutation the verdict of the parser before the IDL; `tests/runtime/test_scenarios_webhook.py` posts each one to a real workerd gateway.
+- `proto/`: `test/mail-received.test.ts` and `test/python/test_mail_received.py` read every fixture with each codec and write the current ones back byte for byte; `test/cross-language.test.ts` pipes them through both.
 
 Changing the builder on purpose: in `mail-hero/cloudflare` run `npm run contract:update`, review the fixture diff, run Todofy's tests, and commit both in the same change. An incompatible change then fails `Contracts` before it can merge. The fixture files have no trailing newline; `.gitattributes` keeps git from rewriting them.
 

@@ -72,7 +72,7 @@ MIME原文、HTML、附件均不可信。HTML经清理后在禁脚本/禁网sand
 
 解析任务连续三次运行中断后停止自动重试，保留原件并让owner明确重解析。维护独占一次Alarm调用以遵守Free D1每次最多50条查询；每批至多处理一封安全终态过期邮件和一个待完成内容删除。保留清理必须先由owner确认启用。有积压时约10分钟继续；原件恢复扫描每页最多100个key，未扫描完也约10分钟续页，完成且空闲后恢复每日唤醒，不能循环耗尽免费额度。
 
-通用消费者合同仍为 `mail.received.v1`，见 `../contracts/mail-received-v1/mail-received-v1.md`；其golden payload由 `cloudflare/test/contract-fixtures.mjs` 用真实 `buildPayload` 生成，修改构建器须运行 `npm run contract:update` 并让Todofy合同测试通过。冻结event_id、确切JSON bytes和目标revision；普通retry复用全部身份。2xx表示消费者先持久接管，不代表后续任务完成。消费者至少保留90天去重；同ID不同payload冲突。
+通用消费者合同仍为 `mail.received.v1`，见 `../contracts/mail-received-v1/mail-received-v1.md`；其结构与取值规则的唯一描述是IDL `../proto/mailhero/webhook/v1/mail_received.proto`，`buildPayload` 用生成的消息和wire编解码器写出事件字节（先检查合同的每条规则）；golden payload由 `cloudflare/test/contract-fixtures.mjs` 用真实 `buildPayload` 生成，修改构建器须运行 `npm run contract:update` 并让Todofy合同测试通过。冻结event_id、确切JSON bytes和目标revision；普通retry复用全部身份。2xx表示消费者先持久接管，不代表后续任务完成。消费者至少保留90天去重；同ID不同payload冲突。
 
 网络错误、408/429/5xx按持久退避，尊重Retry-After；404/405/重定向先按30分钟宽限重试，仍失败则阻断revision并6小时后自动复查，成功即解除；每个revision最多自动复查8次（约2天），之后保持阻断直到owner解除；401/403和策略错误阻断revision，直到轮换凭据或owner明确解除阻断。自动最多48次或7天，普通手动retry保留30天窗口；“新事件重发”明确可能再次触发业务。目标默认约2次/分钟，全局最多10次/分钟，HTTP有超时。
 
@@ -88,7 +88,7 @@ React页面保持收件箱、邮件详情、交付/尝试、目标、设置和�
 
 UI与API验证Access JWT的签名、issuer、audience、过期和唯一owner。JWT、CSRF和私有响应头由单仓库共享的 `packages/edge-auth` 实现（编译进本Worker，不是独立Worker，无运行时依赖），`cloudflare/src/native/security.ts` 只传入Mail Hero的参数（精确邮箱匹配、nbf 0秒、首个 `CF_Authorization` cookie、仅loopback http的开发绕过、本应用CSP）并保留自己的状态码、错误码和文案；只接受RS256且必须有kid，JWKS拒绝重定向并要求≥2048位RSA。CSRF cookie `mail_hero_csrf`、token格式及由 `CREDENTIAL_KEY` HKDF（salt `mail-hero`、info `tokens-v1`）派生的密钥保持不变，已签发的token继续有效。改变这些参数即改变Mail Hero行为，需先按 `packages/edge-auth/SPEC.md` §4 核对；不要在本应用内重新实现或复制鉴权。不同登录提供商可通过 `ACCESS_OWNER_ALIASES` 明确列出同一人的已核实邮箱，均映射到 `ACCESS_OWNER`，不增加其他管理员；Cloudflare 策略也必须按精确邮箱和相应提供商限制。浏览器mutation还需Origin+CSRF。邮件下载no-store、nosniff；R2保持私有。任何替代域名/预览路径不得绕过鉴权。
 
-管理API保持现有前端所需合同，以 `cloudflare/src/native/api.ts`、共享类型及测试为准；通用事件以 `../contracts/mail-received-v1/` 的说明和JSON Schema为准。
+管理API保持现有前端所需合同，以 `cloudflare/src/native/api.ts`、共享类型及测试为准；通用事件以 `../contracts/mail-received-v1/` 的说明、IDL `../proto/mailhero/webhook/v1/` 及由它生成的JSON Schema为准。
 
 ## 5. 验证与上线记录
 

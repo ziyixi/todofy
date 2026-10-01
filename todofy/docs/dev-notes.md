@@ -126,7 +126,9 @@ migrations/0001_init.sql       the D1 schema; 0002_daily_metrics.sql adds the ow
                                gtd_reviews) and mail_reminders.project_id (gtd-features.md);
                                0005_task_intents.sql adds task_intents and task_intent_tasks (§5, task-intent-v1)
 api/                           owner-api-v1.openapi.yaml (source of truth for the UI), newsletter report
-                               schemas; the webhook body references ../contracts/mail-received-v1 (shared)
+                               schemas; the webhook body references ../contracts/mail-received-v1 (shared,
+                               generated from proto/mailhero/webhook/v1; core/contract.py reads every body
+                               with its generated Python codec)
 worker/todofy/core/            pure stdlib Python, host-testable, no `js`/`workers` imports
   vocab.py api_errors.py contract.py render.py prompts.py reminder_text.py request_id.py
   backoff.py classify.py todoist_request.py report_schema.py gemini_wire.py gtd.py ops.py intents.py
@@ -137,7 +139,9 @@ tests/fakes/                   in-process loopback HTTP fake (+ its own tests)
 tests/runtime/                 black-box tests against `wrangler dev` (gateway + core) with real
                                D1/DO/alarms/cron/assets (harness.py; run serially or in parallel, §1)
 tests/mail_contract.py         paths of the shared contract: ../contracts/mail-received-v1 holds the schema and
-                               the exact webhook bytes Mail Hero's builder emits (compat fixtures, synthetic mail)
+                               the exact webhook bytes Mail Hero's builder emits (compat fixtures, synthetic mail);
+                               tests/unit/mail_cases.py mutates them for the differential tests against the frozen
+                               hand-written schema and parser (tests/unit/legacy/)
 web/                           owner UI (React + Vite); builds into uiassets/dist; types generated from the OpenAPI
 tools/                         legacy SQLite snapshot → D1 export/verify scripts and the webhook smoke test
                                (stdlib, Python 3.9+)

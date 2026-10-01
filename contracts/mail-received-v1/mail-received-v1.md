@@ -1,6 +1,8 @@
 # `mail.received.v1` webhook
 
-Mail Hero 向一个配置好的消费者 URL 发送通用邮件事件。它不依赖 Todofy 的包、数据库或任务状态。接口是 Mail Hero 自己定义的，不兼容 CloudMailin 的请求格式。机器可读结构见 [JSON Schema](mail-received-v1.schema.json)。
+Mail Hero 向一个配置好的消费者 URL 发送通用邮件事件。它不依赖 Todofy 的包、数据库或任务状态。接口是 Mail Hero 自己定义的，不兼容 CloudMailin 的请求格式。
+
+机器可读结构的唯一描述是 IDL [`proto/mailhero/webhook/v1/mail_received.proto`](../../proto/mailhero/webhook/v1/mail_received.proto)：字段、字段顺序和每条取值规则（UUID、UTC 时间、列表上限、附件枚举、`subject` 与 `text` 至少一个非空白、截断时必有 `original_text_bytes` 等）。发布的 [JSON Schema](mail-received-v1.schema.json) 由它生成（`proto/tools/gen_schema.py`，不得手改）；含义与迁移前的手写 Schema（冻结于 [`legacy/`](legacy/mail-received-v1.schema.json)）相同，两侧测试逐一比较判定。本文描述的语义不变：Mail Hero 用生成的消息和 wire 编解码器构建事件，字节与以前完全相同；Todofy 用生成的 Python 编解码器宽松读取（忽略未知字段，检查每条规则）。下文的字节、长度和一致性规则中 IDL 无法表达的部分（UTF-8 字节上限、截断前大小与正文一致等）仍由双方代码检查。
 
 ## 请求
 
@@ -31,7 +33,7 @@ Idempotency-Key: f8c1e9a0-1a98-4fb8-8ca1-4c0a3e710001
 }
 ```
 
-上例的基础字段都出现；`from`、`to`、`attachments` 可以为空数组，`sent_at`、`rfc_message_id` 可以为 `null`。下文的内容策略字段为可选扩展，旧冻结事件可以不包含它们。`subject` 与 `text` 至少一个含非空白字符。时间是 UTC RFC3339。`message.id` 标识本地原件；`event_id` 标识一次交付意图。用户明确“重新发送为新事件”时会生成新的 `event_id`，但沿用同一个 `message.id`。
+上例的基础字段都出现（字段按 IDL 的字段编号顺序写出）；`from`、`to`、`attachments` 可以为空数组，`sent_at`、`rfc_message_id` 可以为 `null`。下文的内容策略字段为可选扩展，旧冻结事件可以不包含它们。`subject` 与 `text` 至少一个含非空白字符。时间是 UTC RFC3339。`message.id` 标识本地原件；`event_id` 标识一次交付意图。用户明确“重新发送为新事件”时会生成新的 `event_id`，但沿用同一个 `message.id`。
 
 正文最多 256 KiB UTF-8，主题最多 4 KiB，from/to 各最多 50 个，附件元信息最多 100 个，整个 JSON 最多 1 MiB。新内容策略会按 Unicode 字符边界截断超长正文，并明确携带以下字段；主题、地址数量或 JSON 总预算仍不满足时保留邮件并显示错误。默认不传原始 MIME、HTML、附件字节、SMTP envelope 或唯一入口地址；`to` 中的入口地址会过滤。邮件头、From、链接、正文都只是外部内容，不能作为认证身份或系统指令。
 

@@ -237,7 +237,7 @@ jobs:
           uv run python deploy/deploy_vars.py secrets gateway "$RUNNER_TEMP/todofy-gateway-secrets.json"
           uv run python deploy/deploy_vars.py exec core -- uv run pywrangler deploy --dry-run --config wrangler.toml \
             --secrets-file "$RUNNER_TEMP/todofy-core-secrets.json" --outdir "$RUNNER_TEMP/todofy-core-bundle"
-          # The workers SDK and the generated task-intent-v1, report (todofy.report.v1) and ops-v1 packages
+          # The workers SDK and the generated task-intent-v1, report (todofy.report.v1), ops-v1 and mail.received.v1 packages
           # (ziyixi_proto, proto/README.md) are vendored next to the core config; a bundle without them cannot start.
           # Only the packages a Python Worker imports are generated, and the runtimes' fixtures stay out of the wheel
           # (proto/tools/gen_py.py).
@@ -245,6 +245,7 @@ jobs:
           test -f "$RUNNER_TEMP/todofy-core-bundle/python_modules/ziyixi_proto/todofy/taskintent/v1/task_intent_pb.py"
           test -f "$RUNNER_TEMP/todofy-core-bundle/python_modules/ziyixi_proto/ops/v1/ops_pb.py"
           test -f "$RUNNER_TEMP/todofy-core-bundle/python_modules/ziyixi_proto/todofy/report/v1/report_pb.py"
+          test -f "$RUNNER_TEMP/todofy-core-bundle/python_modules/ziyixi_proto/mailhero/webhook/v1/mail_received_pb.py"
           test ! -e "$RUNNER_TEMP/todofy-core-bundle/python_modules/ziyixi_proto/prototest"
           test ! -e "$RUNNER_TEMP/todofy-core-bundle/python_modules/ziyixi_proto/lab"
           uv run python deploy/deploy_vars.py exec gateway -- npx --no-install wrangler deploy --dry-run \
@@ -462,8 +463,9 @@ jobs:
         run: |
           npm run typecheck
           npm test
-      # Alone and serially: the other workerd suites of `npm test` would share the CPU the meter calibrates.
-      - name: Hold the Ops entrypoint's CPU to its bounds (workerd)
+      # Alone and serially: the other workerd suites of `npm test` would share the CPU the meter calibrates. The Ops
+      # calls and building a mail.received.v1 event (the generated message and the wire codec).
+      - name: Hold the Ops entrypoint's and the event builder's CPU to their bounds (workerd)
         working-directory: mail-hero/cloudflare
         run: npm run test:cpu
       - name: Check, test and build the UI
@@ -897,15 +899,19 @@ jobs:
         run: |
           npm ci --no-audit --no-fund
           npm run check:schema
-      # Producer: Mail Hero's parser and payload builder must still emit every golden fixture byte for byte.
+      # Producer: Mail Hero's parser and payload builder (the generated mail.received.v1 message, written by the wire
+      # codec) must still emit every golden fixture byte for byte; the generated schema's "not blank" differs from the
+      # hand-written one in ECMAScript only where the IDL says (contract-schema-dialect).
       # ops-v1: every answer Mail Hero's Ops code derives (status, guard, canary) keeps its golden bytes, passes the
       # contract's rules (the wire codec) and the legacy schema older dashboards check. Host only, no workerd.
       - name: Mail Hero builds the golden mail.received.v1 fixtures and checks ops-v1
         working-directory: mail-hero/cloudflare
         run: |
           npm ci
-          node --test test/contract-fixtures.test.mjs test/ops-golden.test.mjs test/native-ops.test.mjs
-      # Consumer: Todofy validates every fixture (current and legacy) against the schema and parses it;
+          node --test test/contract-fixtures.test.mjs test/contract-schema-dialect.test.mjs test/ops-golden.test.mjs test/native-ops.test.mjs
+      # Consumer: Todofy validates every fixture (current and legacy) against the schema and parses it with the generated
+      # codec; the generated mail.received.v1 schema gives the frozen hand-written one's verdict, and the parser the frozen
+      # parser's, on every fixture and ~9,000 mutations (test_mail_received_*_legacy);
       # ops-v1 fixtures get the reference JSON Schema validator's verdict on the generated schema (the Python wire
       # codec agrees with it), and every value core/ops.py derives (status, guard, canary result, report, digest
       # items) keeps its golden bytes, the contract's rules and the legacy schema older dashboards check. task-intent-v1:
@@ -918,6 +924,7 @@ jobs:
         run: |
           uv sync --locked
           uv run pytest tests/unit/test_mail_hero_compat.py tests/unit/test_contract.py tests/unit/test_openapi_vocab.py \
+            tests/unit/test_mail_received_schema_legacy.py tests/unit/test_mail_received_parser_legacy.py \
             tests/unit/test_ops_contract.py tests/unit/test_ops_core.py tests/unit/test_ops_golden.py \
             tests/unit/test_task_intent_contract.py tests/unit/test_report_wire.py tests/unit/test_report_schemas.py \
             tests/unit/test_report_schema_legacy.py
