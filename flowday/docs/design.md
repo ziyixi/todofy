@@ -26,7 +26,7 @@ browser ── Cloudflare Access ── Worker "flowday" ──┬── ASSETS:
 
 | Path | What it is |
 | --- | --- |
-| `wrangler.toml` | The production config: top level only, `workers_dev = false`, `preview_urls = false`; the real D1 id and Access AUD since F2; one Custom Domain, the staging host `flowday-next.ziyixi.science`, and `PUBLIC_HOST` naming it since F3 |
+| `wrangler.toml` | The production config: top level only, `workers_dev = false`, `preview_urls = false`; the real D1 id and Access AUD since F2; one Custom Domain and `PUBLIC_HOST` naming it: the staging host `flowday-next.ziyixi.science` in F3, the production host `flowday.ziyixi.science` since F4 |
 | `worker/src/` | `index.ts` (handler) → `router.ts` (Access, PWA exceptions, logging) → `api.ts` (routes) → `store/*` (D1), `sync.ts` + `todoist.ts` (Todoist), `credentials.ts` (the sealed Todoist key), `assets.ts` (static files, CSP), `e2e.ts` (test routes) |
 | `migrations/` | `0001_init.sql`: the container-era SQLite schema, unchanged. `0002_incremental_sync.sql`: `tasks.todoist_project_id`. `0003_fewer_task_indexes.sql`: drops four indexes no query needs |
 | `web/` | The Next.js UI as a static export (`output: "export"`). It has no server code; `lib/client/http.ts` is its only `fetch` |
@@ -400,15 +400,21 @@ first (`cd ../web && npm run build`), and apply the migrations locally:
     It writes `todoist_project_id` once into every Todoist task row (about one row each, a one-off cost of roughly
     the task count), so `verify` reports that column from then on. Push the clearing commit. Delete the work
     directory, the copy and `host.sha256`.
-  - The hostname move is its own commit: `wrangler.toml` lists only `flowday.ziyixi.science` and sets `PUBLIC_HOST`
-    to it (writes from the staging host stop). wrangler applies the listed Custom Domains as the Worker's complete
+  - The hostname move is its own commit (done in code 2026-10-01; pushed alone by its SHA during the freeze, after
+    the import is verified, see "Landing the commits"):
+    `wrangler.toml` lists only `flowday.ziyixi.science` and sets `PUBLIC_HOST` to it (writes from the staging host
+    stop). The Access apps already cover the host (the container used them). Before merging it, save the current
+    DNS record of `flowday.ziyixi.science` (the rollback restores it: [`../README.md`](../README.md) "Rollback and
+    removal"). wrangler applies the listed Custom Domains as the Worker's complete
     set, so the deploy detaches `flowday-next.ziyixi.science`; and CI's non-interactive wrangler overwrites an
     existing DNS record of a new Custom Domain, so it takes over the tunnel CNAME of `flowday.ziyixi.science`.
     cf-guard stops both unless allowed, so that commit sets both allowances on FlowDay's guard step:
     `CF_GUARD_ALLOW_REMOVE: flowday-next.ziyixi.science` and `CF_GUARD_ALLOW_CONFLICT: flowday.ziyixi.science`
-    (the takeover of the tunnel CNAME is the allowed conflict), and updates the guard test in
-    `.github/scripts/test_ci_changes.py`, which expects both empty. The next commit clears both again. The staging
-    Access destinations can go after that deploy.
+    (the takeover of the tunnel CNAME is the allowed conflict), and the guard test in
+    `.github/scripts/test_ci_changes.py` expects exactly those two (`HostnameGuard.ALLOWED`). The next commit clears
+    both again. After that, remove the staging destinations from both Access apps; the deploy already detached the
+    staging Custom Domain (check Workers & Pages → `flowday` → Domains & Routes, and that no DNS record is left for
+    `flowday-next.ziyixi.science`).
 - **F5 (7-day rollback window = D1 Time Travel).**
   - Keep the container stopped and its data directory untouched.
   - Every change in the window must stay readable by the container code. `0002` only adds a nullable column,

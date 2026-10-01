@@ -9,7 +9,7 @@
       "workers_dev": false,
       "preview_urls": false,
       "custom_domains": [
-        "flowday-next.ziyixi.science"
+        "flowday.ziyixi.science"
       ],
       "routes": [],
       "crons": [],

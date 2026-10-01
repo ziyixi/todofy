@@ -17,11 +17,12 @@ on D1, behind Cloudflare Access. See [`docs/design.md`](docs/design.md) for the 
 measurements.
 
 Since **F2** CI deploys it ("FlowDay deploy"): the Worker `flowday` and its D1 database `flowday` exist, behind the
-existing Access app "flowday" (its AUD is committed). Since **F3** its only hostname is the staging host
-**`flowday-next.ziyixi.science`** (a Custom Domain; the Access apps "flowday" and, for `/pwa/*`, "flowday-bypass"
-cover it). The old container keeps serving `flowday.ziyixi.science` until the F4 cutover
-([`docs/design.md`](docs/design.md) section 11). The staging host writes to the one production D1; F4 empties it
-again before it imports the container's data.
+existing Access app "flowday" (its AUD is committed). In **F3** it served the staging host
+`flowday-next.ziyixi.science`. Since the **F4** cutover its only hostname is **`flowday.ziyixi.science`** (a Custom
+Domain that replaced the old container's tunnel CNAME; the Access apps "flowday" and, for `/pwa/*`, "flowday-bypass"
+cover it), with the container's data imported into D1 by `deploy/migrate/flowday_migrate.py`
+([`docs/design.md`](docs/design.md) section 11). The old container stays in place, untouched, for the F5 rollback
+window.
 
 ## Layout
 
@@ -78,7 +79,7 @@ dry-runs, runs the hostname guard (`tools/cf-guard`), applies the D1 migrations
 
 - through the API (`/health` needs an owner login): the Worker serves exactly one version at 100%, its
   `BUILD_SHA` is the commit, and no migration is pending;
-- on the staging host, anonymously: `GET /` and `/api/tasks` are answered by Access with a 302 to its login page
+- on its host (`PUBLIC_HOST`), anonymously: `GET /` and `/api/tasks` are answered by Access with a 302 to its login page
   for this host (the dashboard's probe), the manifest, two icons and `/pwa/sw` by the Worker with 200 and their
   media types (through "flowday-bypass"), and `/pwa/sw.js`, which is not a public file, by the Worker's 401.
 
@@ -122,6 +123,26 @@ staging Custom Domain).
   dashboard → Workers & Pages → `flowday` → Settings → Domains & Routes (this also removes its DNS record), and
   take the host out of the Access apps "flowday" and "flowday-bypass". In the other order the next FlowDay deploy
   would attach it again.
+- **The cutover (F4).** Before pushing the cutover commit, save the current DNS record of `flowday.ziyixi.science`
+  (the tunnel CNAME: its target, proxied flag and TTL) somewhere private. Do not re-run or dispatch `FlowDay deploy`
+  until step 6 has landed: while the cutover commit is the last FlowDay deploy, its allowed conflict would take the
+  restored CNAME back. To go back to the container:
+  1. Cloudflare dashboard → Workers & Pages → `flowday` → Settings → Domains & Routes: remove
+     `flowday.ziyixi.science` (this deletes the Worker's DNS record).
+  2. DNS → add the saved CNAME again, proxied.
+  3. Only if the writes made in D1 since the cutover must be kept: apply the reverse D1 → SQLite export to the
+     stopped container's data (`docs/design.md` section 11 F5) before it starts; otherwise its data directory is
+     unchanged and those writes stay only in D1.
+  4. Start the container (F4 stopped it).
+  5. Check that the container itself answers, anonymously (through "flowday-bypass"):
+     `curl -s -o /dev/null -w '%{http_code} %{content_type}\n' https://flowday.ziyixi.science/pwa/sw.js` must print
+     `200` and a JavaScript type (the container's `public/pwa/sw.js`). The Worker answers this path with
+     `401 application/json`, and a dead origin with a 5xx; Access's 302 for `/` comes from the edge whatever the
+     origin is, so it proves nothing. Then the owner signs in.
+  6. Revert the cutover commit (and the commit that cleared its allowances, if pushed) in one commit on `main`,
+     after adding `flowday-next.ziyixi.science` (and its `/pwa/*`) back to the Access apps "flowday" and
+     "flowday-bypass" if they were removed: its deploy attaches the staging host again (its allowances are empty,
+     and `flowday.ziyixi.science` is no longer the Worker's) and leaves the restored CNAME alone.
 - **Worker code** (after the first release). Revert the commit on `main` and push: CI redeploys the previous code.
   For an immediate rollback, Cloudflare dashboard → Workers → `flowday` → Deployments → roll back to the previous
   version, and revert the commit too. D1 migrations are additive or drop only unread indexes (`docs/design.md`

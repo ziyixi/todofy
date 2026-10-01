@@ -12,12 +12,13 @@
 # reused; their id and AUD are committed below, and deploy/deploy-vars.mjs still refuses an all-zeros id or AUD (a
 # guard against a revert). No workers.dev and no preview URL.
 #
-# F3: the Worker's only hostname is the staging Custom Domain flowday-next.ziyixi.science (PUBLIC_HOST, the CSRF
-# origin). The Access app "flowday" lists that host too (same AUD) and "flowday-bypass" its /pwa/* (the exact PWA
-# files the Worker serves without a JWT), both set before this host first deployed. flowday.ziyixi.science stays on
-# the old container until the F4 cutover commit: a CI deploy without a TTY takes over an existing DNS record for a
-# listed hostname. Rollback of F3 (README.md "Rollback and removal"): delete the routes line and PUBLIC_HOST in one
-# commit, then detach the Custom Domain by hand: a deploy with no route leaves the live Custom Domains alone.
+# F4 (the cutover): the Worker's only hostname is the production Custom Domain flowday.ziyixi.science (PUBLIC_HOST,
+# the CSRF origin), which the Access apps "flowday" (the host) and "flowday-bypass" (its /pwa/*) covered for the
+# container already. wrangler applies the listed Custom Domains as the Worker's complete set, so this deploy detaches
+# the F3 staging host flowday-next.ziyixi.science, and CI's non-interactive wrangler overwrites the tunnel CNAME of
+# flowday.ziyixi.science with the Worker's record; cf-guard allows exactly those two changes in the FlowDay deploy
+# job of this commit, and the next commit clears both allowances. Rollback (README.md "Rollback and removal"):
+# detach the Custom Domain by hand, restore the saved tunnel CNAME, then revert this commit.
 #
 # Run wrangler from worker/ (the pinned wrangler lives in worker/node_modules) with --config ../wrangler.toml.
 # Local dev: local bindings only (D1 commands always --local, never --remote), local values in flowday/.dev.vars
@@ -28,8 +29,8 @@ main = "worker/src/index.ts"
 compatibility_date = "2026-09-08"
 workers_dev = false
 preview_urls = false
-# The staging Custom Domain (F3), behind the Access app "flowday"; vars.PUBLIC_HOST names the same host.
-routes = [{ pattern = "flowday-next.ziyixi.science", custom_domain = true }]
+# The production Custom Domain (F4), behind the Access app "flowday"; vars.PUBLIC_HOST names the same host.
+routes = [{ pattern = "flowday.ziyixi.science", custom_domain = true }]
 
 [observability]
 enabled = true
@@ -50,8 +51,8 @@ database_id = "df104e83-7183-47e3-b2f9-638dc7502c13"
 migrations_dir = "migrations"
 
 [vars]
-# The only origin a mutation may come from (CSRF): the staging host until the F4 cutover.
-PUBLIC_HOST = "flowday-next.ziyixi.science"
+# The only origin a mutation may come from (CSRF): the production host since the F4 cutover.
+PUBLIC_HOST = "flowday.ziyixi.science"
 ACCESS_ISSUER = "https://ziyixi.cloudflareaccess.com"
 # AUD tag of the existing Access app "flowday".
 ACCESS_AUDIENCE = "075c90c5544f87d71cfaec475fad0302d6b726156ff93f5c3a4a89f4ead7b22f"

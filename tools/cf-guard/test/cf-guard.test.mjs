@@ -345,8 +345,8 @@ test("the committed production configs: the hostnames each deploy guards", async
     "lab/wrangler.toml": ["lab", ["lab.ziyixi.science"]],
     "website/wrangler.toml": ["ziyixi-website", ["www.ziyixi.science", "ziyixi.science"]],
     "website/relay/wrangler.toml": ["ziyixi-notion-publish", []],
-    // The staging host only (flowday/docs/design.md section 11, F3); flowday.ziyixi.science is the F4 cutover's.
-    "flowday/wrangler.toml": ["flowday", ["flowday-next.ziyixi.science"]],
+    // The production host since the F4 cutover (flowday/docs/design.md section 11); the F3 staging host is gone.
+    "flowday/wrangler.toml": ["flowday", ["flowday.ziyixi.science"]],
   };
   for (const [file, [name, hosts]] of Object.entries(expected)) {
     const triggers = await readTriggers(path.join(REPO, file));

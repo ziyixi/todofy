@@ -1529,7 +1529,8 @@ class AccessProbe(unittest.TestCase):
         self.assertIn('open("wrangler.toml", "rb")', config.split("\n      - ", 1)[0])
 
     def test_flowday_deploy_runs_the_same_probe_from_its_own_config(self):
-        """The FlowDay deploy's probe of its staging host (F3) is this very script too, fed from flowday/wrangler.toml."""
+        """The FlowDay deploy's probe of its host (F3 staging, F4 production) is this very script too, fed from
+        flowday/wrangler.toml."""
         name = "- name: Check that Access answers unauthenticated requests\n"
         step = lambda job: workflow_jobs()[job].split(name, 1)[1].split("\n      - ", 1)[0]  # noqa: E731
 
@@ -1596,7 +1597,7 @@ class AccessProbe(unittest.TestCase):
 
 
 class FlowDayPwaBypass(unittest.TestCase):
-    """FlowDay deploy's check of its staging host's PWA files, run as the workflow runs it against a stubbed curl.
+    """FlowDay deploy's check of its host's PWA files, run as the workflow runs it against a stubbed curl.
 
     Only the listed PWA files may answer an anonymous request (through the Access app flowday-bypass), each with its
     own media type; an unlisted /pwa/ file must get the Worker's 401. A 302 means the bypass is missing."""
@@ -2068,6 +2069,10 @@ class HostnameGuard(unittest.TestCase):
 
     GUARD = "node tools/cf-guard/cf-guard.mjs"
     STEP = "- name: Check the hostnames against production\n"
+    # Intentional hostname changes, (CF_GUARD_ALLOW_REMOVE, CF_GUARD_ALLOW_CONFLICT) per job; every other job allows
+    # none. FlowDay's F4 cutover (flowday/docs/design.md section 11) detaches the staging host and takes over the
+    # tunnel CNAME of its production host; the commit after it clears both again.
+    ALLOWED = {"flowday-deploy": ("flowday-next.ziyixi.science", "flowday.ziyixi.science")}
 
     @staticmethod
     def has_routes(config):
@@ -2092,8 +2097,9 @@ class HostnameGuard(unittest.TestCase):
                 step = block.split(self.STEP, 1)[1].split("\n      - ", 1)[0]
                 self.assertIn("        working-directory: .\n", step)
                 self.assertIn(f"CLOUDFLARE_API_TOKEN: ${{{{ secrets.{token} }}}}", step)
-                self.assertIn("CF_GUARD_ALLOW_REMOVE: ''", step)
-                self.assertIn("CF_GUARD_ALLOW_CONFLICT: ''", step)
+                remove, conflict = (value or "''" for value in self.ALLOWED.get(job, ("", "")))
+                self.assertIn(f"CF_GUARD_ALLOW_REMOVE: {remove}\n", step)
+                self.assertIn(f"CF_GUARD_ALLOW_CONFLICT: {conflict}\n", step)
                 self.assertIn(self.GUARD + "".join(f" --config {config}" for config in configs) + "\n", step + "\n")
                 self.assertLess(block.index(self.STEP), block.index(first_change))
                 self.assertTrue(any(self.has_routes(config) for config in configs))

@@ -1607,10 +1607,10 @@ jobs:
         run: rm -f "$RUNNER_TEMP/lab-secrets.json"
 
   # FlowDay (Worker "flowday", flowday/docs/design.md section 11). Migrations first (additive), then the Worker through
-  # deploy-vars.mjs, then a read of production through the API (version and migrations), then the staging host
-  # flowday-next.ziyixi.science (F3): Access answers everything anonymous except the exact PWA files, which the
-  # Access app "flowday-bypass" lets through to the Worker. The deploy token is Todofy's CF_API_TOKEN (D1 and
-  # Workers), as for Lab. flowday.ziyixi.science stays on the old container until the F4 cutover commit.
+  # deploy-vars.mjs, then a read of production through the API (version and migrations), then the production host
+  # flowday.ziyixi.science (since the F4 cutover; the staging host flowday-next.ziyixi.science before): Access answers
+  # everything anonymous except the exact PWA files, which the Access app "flowday-bypass" lets through to the Worker.
+  # The deploy token is Todofy's CF_API_TOKEN (D1 and Workers), as for Lab.
   flowday-deploy:
     name: FlowDay deploy
     needs: [changes, flowday-checks, gate]
@@ -1688,16 +1688,16 @@ jobs:
       # Domains (or zone routes) as the Worker's complete set, so stop before any production change when a live
       # hostname would be detached or another Worker's hostname or DNS record taken over. For an intentional
       # change, set the exact hostnames here (space-separated) in the same commit that changes wrangler.toml.
-      # F3 adds flowday-next.ziyixi.science, a hostname with no DNS record and no other Worker: nothing to allow.
-      # The F4 cutover commit (flowday/docs/design.md section 11) sets CF_GUARD_ALLOW_REMOVE to
-      # flowday-next.ziyixi.science and CF_GUARD_ALLOW_CONFLICT to flowday.ziyixi.science (the takeover of its
-      # tunnel CNAME); the next commit clears both.
+      # The F4 cutover (flowday/docs/design.md section 11) moves the Worker from the staging host to
+      # flowday.ziyixi.science: wrangler detaches flowday-next.ziyixi.science (an allowed removal) and overwrites the
+      # tunnel CNAME of flowday.ziyixi.science (an allowed conflict: the old container's record, saved by hand
+      # before this commit). The next commit clears both allowances.
       - name: Check the hostnames against production
         working-directory: .
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
-          CF_GUARD_ALLOW_REMOVE: ''
-          CF_GUARD_ALLOW_CONFLICT: ''
+          CF_GUARD_ALLOW_REMOVE: flowday-next.ziyixi.science
+          CF_GUARD_ALLOW_CONFLICT: flowday.ziyixi.science
         run: node tools/cf-guard/cf-guard.mjs --config flowday/wrangler.toml
       - name: Apply D1 migrations, then deploy the Worker flowday
         working-directory: flowday/worker
@@ -1747,7 +1747,7 @@ jobs:
             exit 1
           fi
           echo "No D1 migration is pending."
-      # Cloudflare Access ("flowday", which lists the staging host since F3) must answer every unauthenticated request
+      # Cloudflare Access ("flowday", which covers the host) must answer every unauthenticated request
       # with a 302 to its login page for this host, exactly as the dashboard's probe checks (same script;
       # test_ci_changes.py runs it).
       - name: Check that Access answers unauthenticated requests

@@ -141,7 +141,7 @@ class DesiredState(unittest.TestCase):
         )
         self.assertNotIn("flowday", drift_desired.MANUAL_SECRETS)
         self.assertEqual((worker["workers_dev"], worker["preview_urls"], worker["crons"]), (False, False, []))
-        self.assertEqual(worker["custom_domains"], ["flowday-next.ziyixi.science"])
+        self.assertEqual(worker["custom_domains"], ["flowday.ziyixi.science"])
         self.assertEqual((worker["routes"], worker["personal"]), ([], []))
 
     def test_the_generator_refuses_an_unknown_binding_section(self):

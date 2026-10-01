@@ -1,6 +1,6 @@
 // The committed production config ../../wrangler.toml, read with the pinned wrangler's own raw-config reader
 // (worker/node_modules): the shape the Worker "flowday" needs, nothing personal or injected, the real D1 id and
-// Access AUD (F2), and exactly one hostname, the staging Custom Domain (F3), until the F4 cutover commit.
+// Access AUD (F2), and exactly one hostname, the production Custom Domain (since the F4 cutover).
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { existsSync, readFileSync } from 'node:fs'
@@ -15,8 +15,8 @@ const config = JSON.parse(JSON.stringify(wrangler.experimental_readRawConfig({ c
 
 // Every key the Worker "flowday" uses; a new one must be added here on purpose (and checked below).
 const KEYS = ['name', 'account_id', 'main', 'compatibility_date', 'workers_dev', 'preview_urls', 'routes', 'observability', 'assets', 'd1_databases', 'vars']
-// The staging host (F3). The production hostname, flowday.ziyixi.science, is the old container's until F4.
-const STAGING_HOST = 'flowday-next.ziyixi.science'
+// The production host (F4), taken over from the old container; the F3 staging host is gone.
+const HOST = 'flowday.ziyixi.science'
 
 test('the top level is the production Worker: known keys only, no cron, no workers.dev or preview URL', () => {
   assert.deepEqual(Object.keys(config).sort(), [...KEYS].sort())
@@ -30,14 +30,14 @@ test('the top level is the production Worker: known keys only, no cron, no worke
   assert.equal(config.account_id, wrangler.experimental_readRawConfig({ config: new URL('../lab/wrangler.toml', APP).pathname }).rawConfig.account_id)
 })
 
-test('exactly one hostname, the staging Custom Domain (F3), and PUBLIC_HOST names it; nothing else before F4', () => {
-  assert.deepEqual(config.routes, [{ pattern: STAGING_HOST, custom_domain: true }])
+test('exactly one hostname, the production Custom Domain (F4), and PUBLIC_HOST names it', () => {
+  assert.deepEqual(config.routes, [{ pattern: HOST, custom_domain: true }])
   assert.equal(config.route, undefined)
-  assert.equal(config.vars.PUBLIC_HOST, STAGING_HOST)
-  // No other hostname anywhere in the config's values (comments may name the F4 host).
+  assert.equal(config.vars.PUBLIC_HOST, HOST)
+  // No other hostname anywhere in the config's values (comments may name the staging host).
   const values = readFileSync(CONFIG, 'utf8').split('\n').filter((line) => !line.trimStart().startsWith('#')).join('\n')
   const hosts = new Set(values.match(/[a-z0-9.-]*ziyixi\.science/g))
-  assert.deepEqual([...hosts], [STAGING_HOST])
+  assert.deepEqual([...hosts], [HOST])
 })
 
 test('entry, static assets (the Next.js export) and the D1 binding with the real database id (F2)', () => {
@@ -52,7 +52,7 @@ test('entry, static assets (the Next.js export) and the D1 binding with the real
   assert.ok(existsSync(new URL('migrations/0001_init.sql', APP)))
 })
 
-test('vars: the staging host, the public Access issuer and the real AUD; nothing injected, secret or for development', () => {
+test('vars: the production host, the public Access issuer and the real AUD; nothing injected, secret or for development', () => {
   assert.deepEqual(Object.keys(config.vars).sort(), ['ACCESS_AUDIENCE', 'ACCESS_ISSUER', 'PUBLIC_HOST'])
   assert.match(config.vars.ACCESS_ISSUER, /^https:\/\/[a-z0-9-]+\.cloudflareaccess\.com$/)
   assert.match(config.vars.ACCESS_AUDIENCE, /^[0-9a-f]{64}$/)

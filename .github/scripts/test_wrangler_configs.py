@@ -502,15 +502,16 @@ class Hosts(unittest.TestCase):
         self.assertEqual(self.home["routes"], [{"pattern": host, "custom_domain": True}])
         self.assertNotIn(host, {self.mail_hero, self.todofy, *self.hooks})
 
-    def test_flowday_is_on_its_staging_host_only(self):
-        """F3: FlowDay's one Custom Domain is its PUBLIC_HOST (the CSRF origin), the staging host. The production
-        hostname flowday.ziyixi.science belongs to the old container until the F4 cutover commit lists it."""
+    def test_flowday_is_on_its_production_host_only(self):
+        """F4: FlowDay's one Custom Domain is its PUBLIC_HOST (the CSRF origin), the production host it took over
+        from the old container. The F3 staging host flowday-next.ziyixi.science is in no config any more."""
         flowday = load(PRODUCTION["flowday"])
         host = flowday["vars"]["PUBLIC_HOST"]
-        self.assertEqual(host, "flowday-next.ziyixi.science")
+        self.assertEqual(host, "flowday.ziyixi.science")
         self.assertEqual(flowday["routes"], [{"pattern": host, "custom_domain": True}])
-        hosts = {route["pattern"] for path in PRODUCTION.values() for route in load(path).get("routes", [])}
-        self.assertNotIn("flowday.ziyixi.science", hosts)
+        hosts = [route["pattern"] for path in PRODUCTION.values() for route in load(path).get("routes", [])]
+        self.assertEqual(hosts.count(host), 1)
+        self.assertNotIn("flowday-next.ziyixi.science", hosts)
 
     def test_the_core_links_to_the_gateway_host(self):
         self.assertEqual(load(PRODUCTION["todofy-core"])["vars"]["TODOFY_PUBLIC_HOST"], self.todofy)
