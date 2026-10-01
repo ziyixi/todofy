@@ -177,7 +177,8 @@ worker/todofy/runtime/  todofy-core: Durable Object, D1 ledger, Gemini/Todoist c
 gateway/                the gateway Worker todofy (TypeScript): routing, Access, CSRF, webhook, assets
                         (Access, CSRF and private headers from ../packages/edge-auth, compiled in)
 migrations/             D1 schema
-api/                    owner OpenAPI contract, newsletter report schemas (the Mail Hero event schema is
+api/                    owner OpenAPI contract, newsletter report schemas (generated from
+                        ../proto/todofy/report/v1; the Mail Hero event schema is
                         ../contracts/mail-received-v1, shared with Mail Hero)
 web/                    owner UI (React + Vite), built into uiassets/dist
 tests/                  unit, fakes and runtime (workerd) tests

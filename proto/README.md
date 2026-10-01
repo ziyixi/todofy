@@ -29,6 +29,19 @@ every answer and checks every input it sends with the same rules. The wire bytes
 in each app pin them, and every answer still passes the hand-written schema the dashboards deployed before
 validate with (`contracts/ops-v1/legacy/`).
 
+`todofy/report/v1/report.proto` is the IDL of recommendation-v1 and summary-v1 (2026-10-01), the reports Todofy
+serves the external newsletter (`GET /api/recommendation`, `GET /api/summary`) and lists to its owner: every rule
+of the hand-written schemas is a value rule there (a union by `status`, whose cases bound counts and list sizes),
+`todofy/api/recommendation-v1.schema.json` and `summary-v1.schema.json` are generated from it as self-contained
+schemas of one message each, todofy-core builds every report as a generated message written by the codec, and
+Todofy's UI takes the reports' types from the generated wire types. The bytes did not change (golden tests in
+Todofy pin them, and a differential test gives the generated and the frozen hand-written schemas the same verdict
+but on `stale`, which no production Todofy ever sent). The HTTP surface stays the gateway's: the newsletter's
+paths and Basic authentication are not an AIP API, so the file has no service. Measured on 2026-10-01 with the
+production dry run: todofy-core's upload 531.9 → 543.1 KiB (gzip 149.1 → 151.3 KiB: `report_pb.py` and the core's
+builders); Todofy's UI bundle is byte for byte the same (types only); building and writing a report takes about
+0.03 ms on the reference machine (host CPython).
+
 ## Rules
 
 1. **One folder.** `proto/` holds the buf module (`buf.yaml`, `buf.lock`, `buf.gen.yaml`, the `.proto`
@@ -91,14 +104,14 @@ validate with (`contracts/ops-v1/legacy/`).
 | --- | --- |
 | `buf.yaml`, `buf.lock` | The module (`path: .`, tooling directories excluded), lint and breaking rules, the `buf.build/googleapis/googleapis` dependency pinned by commit and digest |
 | `buf.gen.yaml` | protobuf-es v2 (`target=ts`, `import_extension=ts`, `erasable_syntax=true`) into `ts/` |
-| `<package path>/*.proto` | One directory per proto package: `todofy/taskintent/v1/task_intent.proto` is `todofy.taskintent.v1`; `lab/ui/v1/*.proto` is `lab.ui.v1`, Lab's owner UI API; `links/ui/v1/*.proto` is `links.ui.v1`, the links app's owner API; `common/errors/v1/errors.proto` is `common.errors.v1`, the error reasons every HTTP API shares; `common/wire/v1/wire.proto` is `common.wire.v1`, the wire profile's own options ([Value rules](#value-rules), `non_null`, `closed`, `keep_order`, `positional`); `ops/v1/ops.proto` is `ops.v1`, the IDL of `contracts/ops-v1` (every app's `Ops` entrypoint), a contract several apps implement, so named by the contract, not an app ([Adding a contract](#common-tasks), step 1) |
+| `<package path>/*.proto` | One directory per proto package: `todofy/taskintent/v1/task_intent.proto` is `todofy.taskintent.v1`; `lab/ui/v1/*.proto` is `lab.ui.v1`, Lab's owner UI API; `links/ui/v1/*.proto` is `links.ui.v1`, the links app's owner API; `common/errors/v1/errors.proto` is `common.errors.v1`, the error reasons every HTTP API shares; `common/wire/v1/wire.proto` is `common.wire.v1`, the wire profile's own options ([Value rules](#value-rules), `non_null`, `closed`, `keep_order`, `positional`); `ops/v1/ops.proto` is `ops.v1`, the IDL of `contracts/ops-v1` (every app's `Ops` entrypoint), a contract several apps implement, so named by the contract, not an app ([Adding a contract](#common-tasks), step 1); `todofy/report/v1/report.proto` is `todofy.report.v1`, Todofy's newsletter reports (recommendation-v1, summary-v1) |
 | `package.json`, `package-lock.json` | The toolchain pins (`dependencies`: buf, protoc-gen-es, the runtime) and this folder's test tools (`devDependencies`) |
-| `ts/` | The TypeScript package `@ziyixi/proto`. Committed: `package.json` (its exports), `wire-json.ts`, `wire-rules.ts` and `field-mask.ts` (the codec and its value rules), `http-path.ts`, `http-rule.ts`, `http-transcoder.ts`, `http-client.ts` and `rpc-status.ts` (the HTTP runtime, [HTTP APIs](#http-apis)), `page-token.ts` and `filter.ts` (AIP-158 page tokens and the AIP-160 subset for list methods), `protobuf.ts` / `protobuf-wkt.ts` (the runtime re-exports). Generated: every directory (`ts/todofy/...`, `ts/lab/...`, `ts/ops/...`, `ts/common/...`, `ts/google/...`): protobuf-es's `*_pb.ts`, and for the binding contracts the wire JSON types `*_wire.ts` |
+| `ts/` | The TypeScript package `@ziyixi/proto`. Committed: `package.json` (its exports), `wire-json.ts`, `wire-rules.ts` and `field-mask.ts` (the codec and its value rules), `http-path.ts`, `http-rule.ts`, `http-transcoder.ts`, `http-client.ts` and `rpc-status.ts` (the HTTP runtime, [HTTP APIs](#http-apis)), `page-token.ts` and `filter.ts` (AIP-158 page tokens and the AIP-160 subset for list methods), `protobuf.ts` / `protobuf-wkt.ts` (the runtime re-exports). Generated: every directory (`ts/todofy/...`, `ts/lab/...`, `ts/ops/...`, `ts/common/...`, `ts/google/...`): protobuf-es's `*_pb.ts`, and for the packages of `WIRE_PACKAGES` the wire JSON types `*_wire.ts` |
 | `python/` | The Python package `ziyixi-proto`. Committed: `pyproject.toml` (static metadata, uv cache keys), `build_backend.py`, `src/ziyixi_proto/__init__.py` and `wire_json.py` (the codec and its value rules). Generated: every directory under `src/ziyixi_proto/`, for the packages `tools/gen_py.py` lists in `PYTHON_PACKAGES` only; the wheel leaves the test-only ones out (`TEST_ONLY_PACKAGES`) |
 | `tools/ensure.mjs` | Installs the pinned toolchain when `node_modules/` does not match the lockfile, and generates both languages when its stamp (`.generated.json`, ignored) does not match |
-| `tools/gen_py.py` | The stdlib-only Python generator (frozen dataclasses, `IntEnum`s, field tables), for `PYTHON_PACKAGES` only: `todofy.taskintent.v1` and `ops.v1` (todofy-core imports both) and `prototest.v1` (this folder's Python tests). A package only TypeScript apps use (an app's UI API) is not generated, so it may use what the Python profile lacks |
-| `tools/gen_wire_ts.py` | The TypeScript wire JSON types (`ts/<package>/<file>_wire.ts`, types only) of the packages in `WIRE_PACKAGES` (`ops.v1`): each message's JSON as a producer writes it, a union narrowed by its discriminator, each service as a binding's methods, and the `WireTypes` entries that type `toWire`'s answer |
-| `tools/gen_schema.py`, `tools/schema.mjs` | A contract's JSON Schema from its IDL (`SCHEMAS`: `ops.v1` writes `contracts/ops-v1/ops-v1.schema.json`, with `ALIASES` keeping the `$defs` names it had before), run by `tools/schema.mjs` (no shell, the tools of `ensure.mjs`); `npm run schema` rewrites it, `npm run check:schema` (Proto checks, Contracts and this folder's `npm test`) fails when it differs |
+| `tools/gen_py.py` | The stdlib-only Python generator (frozen dataclasses, `IntEnum`s, field tables), for `PYTHON_PACKAGES` only: `todofy.taskintent.v1`, `todofy.report.v1` and `ops.v1` (todofy-core imports all three) and `prototest.v1` (this folder's Python tests). A package only TypeScript apps use (an app's UI API) is not generated, so it may use what the Python profile lacks |
+| `tools/gen_wire_ts.py` | The TypeScript wire JSON types (`ts/<package>/<file>_wire.ts`, types only) of the packages in `WIRE_PACKAGES` (`ops.v1`, and `todofy.report.v1` for Todofy's UI): each message's JSON as a producer writes it, a union narrowed by its discriminator, each service as a binding's methods, and the `WireTypes` entries that type `toWire`'s answer |
+| `tools/gen_schema.py`, `tools/schema.mjs` | A contract's JSON Schema from its IDL (`SCHEMAS`: `ops.v1` writes the `$defs` document `contracts/ops-v1/ops-v1.schema.json`, with `ALIASES` keeping the `$defs` names it had before; `todofy.report.v1` writes `todofy/api/summary-v1.schema.json` and `recommendation-v1.schema.json`, each the self-contained schema of one message, `Target.root`, described by the IDL's comments), run by `tools/schema.mjs` (no shell, the tools of `ensure.mjs`; the image keeps its source info for those comments); `npm run schema` rewrites them, `npm run check:schema` (Proto checks, Contracts and this folder's `npm test`) fails when one differs |
 | `tools/wire_rules.py` | The value rules of `common/wire/v1` as the generators read them from a buf image, and the check that refuses a rule that cannot apply where it is written (every package) |
 | `tools/profile_breaking.py` | The profile's breaking rules (rule 4) |
 | `scripts/breaking.sh`, `scripts/rules-selftest.sh` | The breaking gate against a base commit; the rules self-test |
@@ -248,7 +261,8 @@ typecheck|test|dev` regenerates first (its pre-scripts); Todofy's next `uv run` 
    a union's cases, `non_null` on every REQUIRED enum or message a producer never writes as null, and `closed` on
    every enum its consumers branch on without a default. A contract other apps call over a service binding gets wire JSON types: add its package to
    `WIRE_PACKAGES` in `tools/gen_wire_ts.py` (and `positional` on a method that takes plain arguments). A contract
-   with a published JSON Schema generates it: add it to `SCHEMAS` in `tools/gen_schema.py` and run `npm run schema`.
+   with a published JSON Schema generates it: add a `Target` to `SCHEMAS` in `tools/gen_schema.py` (with `root` for
+   the self-contained schema of one message) and run `npm run schema`.
 3. `npm run lint && npm run api-lint` until clean, then `npm run generate`.
 4. Add the contract's fixtures to `test/` and `test/python/` (round trip byte for byte, a strict read refusing every
    invalid fixture, a lenient read tolerating what its consumers do), and a new kind of field or rule to
@@ -332,7 +346,8 @@ size, so it cannot be confused with the field's `max_items` of 0) of each field 
 - `testdata/wire-profile-cases.json` runs every rule in both languages on `prototest/v1/rules.proto`.
 
 What a rule cannot say stays with the contract's code: rules relative to a clock (ops-v1's guard `until` at most
-36 h ahead), sizes of a whole message (an 8 KiB report) and allow-lists that depend on another service (a URL host).
+36 h ahead), sizes of a whole message (an 8 KiB report), allow-lists that depend on another service (a URL host) and
+relations between fields other than a union's (a recommendation's ranks unique and at most its `top_n`).
 A contract without rules in the IDL yet (task-intent-v1) keeps them in its JSON Schema and each app's checks, and a
 consumer applies the value rules its control flow depends on even on a lenient read.
 
@@ -529,22 +544,23 @@ A `proto/` change also re-checks every app in `PROTO_USERS` (Lab, Todofy, Mail H
 `Contracts` (the contracts' tests check the codecs against the schemas and pin the wire bytes). It deploys only
 the apps whose production bundle the changed path reaches (`proto_deploys` in `.github/scripts/ci_changes.py`).
 `PROTO_USERS` names each user's bundled languages: Lab, Mail Hero and the dashboard `"ts"` (their Workers, and
-Lab's UI), the links app `"ts"` (its Worker and UI), Todofy `"python"` (todofy-core vendors the wheel; its gateway imports types only, which compile to
+Lab's UI), the links app `"ts"` (its Worker and UI), Todofy `"python"` (todofy-core vendors the wheel; its gateway and UI import types only, which compile to
 nothing). A language's runtime and generator reach that language's users (`proto/ts/` and `buf.gen.yaml`: the
 TypeScript users; `proto/python/`, `tools/gen_py.py` and `tools/wire_rules.py`: Todofy); the wire profile's own
 options (`common/wire/`) reach both; a package reaches the apps that import it (`PROTO_PACKAGES`:
-`todofy/taskintent/` Lab and Todofy, `lab/ui/` Lab, `links/ui/` the links app, `ops/` the four apps with an `Ops` entrypoint or caller (Lab, Mail Hero, the dashboard and Todofy), `common/errors/` and `prototest/` none);
+`todofy/taskintent/` Lab and Todofy, `todofy/report/` Todofy, `lab/ui/` Lab, `links/ui/` the links app, `ops/` the four apps with an `Ops` entrypoint or caller (Lab, Mail Hero, the dashboard and Todofy), `common/errors/` and `prototest/` none);
 the module and toolchain files (`buf.yaml`, `buf.lock`, `package-lock.json`, `tools/ensure.mjs`) and any path
 not mapped reach every user; tests, test data, the check scripts, the wire JSON types' and JSON Schema
-generators (`tools/gen_wire_ts.py`: types only; `tools/gen_schema.py`: a file under `contracts/`, which its own
-rules map), the api-linter tool module, check configs and Markdown reach none. `test_proto.py` derives
+generators (`tools/gen_wire_ts.py`: types only; `tools/gen_schema.py`: files under `contracts/` and `todofy/api/`,
+which their own rules map), the api-linter tool module, check configs and Markdown reach none. `test_proto.py` derives
 the users' languages and each package's importers from the sources, so the maps cannot drift.
 
 ## Later
 
 Planned: every other app's UI API on the [HTTP APIs](#http-apis) pattern, and the full replacement of
-`mail-received-v1` and `recommendation-v1` (each a package per service, e.g. `mailhero/webhook/v1`); ops-v1 moved
-on 2026-10-01 as one package, `ops/v1`, because its four services share every message. task-intent-v1's value
+`mail-received-v1` (a package per service, e.g. `mailhero/webhook/v1`); ops-v1 moved on 2026-10-01 as one package,
+`ops/v1`, because its four services share every message, and recommendation-v1 and summary-v1 as `todofy/report/v1`
+(messages only; Todofy's owner API, which lists them, moves with the Todofy UI API). task-intent-v1's value
 rules can move into its IDL the same way, generating its schema too. Shared types come from the same googleapis dependency (`google.rpc.Status`) or a
 `common/<name>/v1` package. Each contract moves the way task-intent-v1 did: the IDL and tests first, then
 both sides on the generated code with every frozen v1 byte pinned by tests (Mail Hero's legacy fixtures are
