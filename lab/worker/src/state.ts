@@ -6,8 +6,8 @@
  */
 import { DurableObject } from 'cloudflare:workers';
 import type { GuardState, LabStatus } from '../../../contracts/ops-v1/ops-v1.ts';
+import { DECK_OFFER_DAYS } from './limits.ts';
 import {
-  DECK_OFFER_DAYS,
   type BuildPhase,
   type Decision,
   type DeckMutationResponse,
@@ -21,7 +21,7 @@ import {
   type SettingsResponse,
   type StatusResponse,
   type TodayResponse,
-} from './api-types.ts';
+} from './model.ts';
 import { MINUTE, addDays, buildSha, iso, utcDay } from './config.ts';
 import type { Env } from './env.ts';
 import { labStatus, guardState, setGuard, FEED_STALE_MS } from './ops-status.ts';
@@ -214,7 +214,7 @@ export class LabState extends DurableObject<Env> {
     return this.serial('owner', () => owner.exclude(this.ownerDeps(), deckId, opId, paperId, excluded, Date.now()));
   }
 
-  later(deckId: string, opId: string): Promise<OwnerResult<DeckSummary>> {
+  later(deckId: string, opId: string): Promise<OwnerResult<{ readonly later_at: string }>> {
     return this.serial('owner', () => owner.later(this.ownerDeps(), deckId, opId, Date.now()));
   }
 
@@ -226,8 +226,8 @@ export class LabState extends DurableObject<Env> {
     return this.serial('owner', () => owner.pollSend(this.ownerDeps(), deckId, Date.now()));
   }
 
-  feedback(opId: string, paperId: string, label: Decision | null): Promise<OwnerResult<FeedbackResponse>> {
-    return this.serial('owner', () => owner.feedback(this.ownerDeps(), opId, paperId, label, Date.now()));
+  feedback(opId: string, paperId: string, label: Decision | null, create = false): Promise<OwnerResult<FeedbackResponse>> {
+    return this.serial('owner', () => owner.feedback(this.ownerDeps(), opId, paperId, label, Date.now(), create));
   }
 
   async addSeeds(opId: string, ids: readonly string[]): Promise<OwnerResult<SeedsResponse>> {

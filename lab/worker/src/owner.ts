@@ -6,8 +6,8 @@
  */
 import { State, type TaskIntentService } from '@ziyixi/proto/todofy/taskintent/v1/task_intent_pb';
 import type { WireObject, WireService } from '@ziyixi/proto/wire-json';
+import { SEEDS_MAX } from './limits.ts';
 import {
-  SEEDS_MAX,
   type Decision,
   type DeckMutationResponse,
   type DeckState,
@@ -18,7 +18,7 @@ import {
   type SendStatus,
   type Settings,
   type SettingsResponse,
-} from './api-types.ts';
+} from './model.ts';
 import { parseSeedInput, paperKey } from './arxiv.ts';
 import { iso, neuronCeiling, publicHost } from './config.ts';
 import { deckState, mutate, replay, type DeckEvent, type Mutation } from './deck.ts';
@@ -253,14 +253,16 @@ export async function exclude(deps: OwnerDeps, deckId: string, opId: string, pap
   return summary(deps, deckId);
 }
 
-export async function later(deps: OwnerDeps, deckId: string, opId: string, now: number): Promise<OwnerResult<DeckSummary>> {
+/** 暂不发送: stamps the deck's later_at (once per op) and answers it. */
+export async function later(deps: OwnerDeps, deckId: string, opId: string, now: number): Promise<OwnerResult<{ readonly later_at: string }>> {
   const { db } = deps;
   if ((await storedOp(db, opId)) === null) {
     const deck = await db.prepare('SELECT ready_at FROM decks WHERE deck_id = ?').bind(deckId).first<{ ready_at: number | null }>();
     if (deck === null || deck.ready_at === null) return fail(404, 'deck_not_found');
     await db.batch([db.prepare('UPDATE decks SET later_at = ? WHERE deck_id = ?').bind(now, deckId), opStatement(db, opId, 'deck.later', deckId, 200, {}, now)]);
   }
-  return summary(deps, deckId);
+  const row = await db.prepare('SELECT later_at FROM decks WHERE deck_id = ? AND ready_at IS NOT NULL').bind(deckId).first<{ later_at: number | null }>();
+  return row === null || row.later_at === null ? fail(404, 'deck_not_found') : done({ later_at: iso(row.later_at) });
 }
 
 // ---- sending to Todofy -------------------------------------------------------------------------------------------
@@ -432,11 +434,27 @@ export async function pollSend(deps: OwnerDeps, deckId: string, now: number): Pr
 
 // ---- library feedback, seeds, settings ----------------------------------------------------------------------------
 
-export async function feedback(deps: OwnerDeps, opId: string, paperId: string, label: Decision | null, now: number): Promise<OwnerResult<FeedbackResponse>> {
+/**
+ * Library feedback: `label` null removes the paper's label, a decision sets it. With `create`, liking a paper
+ * that is liked already is refused (`already_liked`, CreateLikedPaper's ALREADY_EXISTS); a replay of the same
+ * op is not.
+ */
+export async function feedback(
+  deps: OwnerDeps,
+  opId: string,
+  paperId: string,
+  label: Decision | null,
+  now: number,
+  create = false,
+): Promise<OwnerResult<FeedbackResponse>> {
   const { db, store } = deps;
   if ((await storedOp(db, opId)) === null) {
-    const paper = await db.prepare('SELECT id FROM papers WHERE id = ?').bind(paperId).first<{ id: string }>();
+    const paper = await db
+      .prepare('SELECT p.id, f.label FROM papers p LEFT JOIN feedback f ON f.paper_id = p.id WHERE p.id = ?')
+      .bind(paperId)
+      .first<{ id: string; label: Decision | null }>();
     if (paper === null) return fail(404, 'not_found');
+    if (create && label === 'like' && paper.label === 'like') return fail(409, 'already_liked');
     const write =
       label === null
         ? db.prepare('DELETE FROM feedback WHERE paper_id = ?').bind(paperId)

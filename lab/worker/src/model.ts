@@ -1,16 +1,12 @@
 /**
- * Owner API of the Worker "lab" (docs/design.md §7–§9, docs/ux.md), shared with the UI (web/ imports this
- * file by relative path). Change it only together with the UI. Every route needs the Access owner;
- * mutations also need Origin + CSRF (header X-CSRF-Token, cookie lab_csrf) and carry an `op_id` (UUID v4 from
- * the browser): repeating a request with the same op_id returns the first response. Errors:
- * `{error: {code, message, request_id}}`.
+ * Lab's internal records (docs/design.md §7-§9): the views D1 and LabState produce and the owner op log stores,
+ * in Lab's own snake_case shapes with the wire names D1 keeps (`'like'`, `'subtasks'`). They are not the owner
+ * API: src/api.ts maps them to lab.ui.v1 messages (proto/lab/ui/v1), the one description of what the UI sees.
+ * The value rules of that API (sizes, counts) are in limits.ts, which the UI imports too.
  */
 import type { ErrorCode, Mode } from '@ziyixi/proto/todofy/taskintent/v1/task_intent_pb';
 import type { WireName } from '@ziyixi/proto/wire-json';
 import type { TldrModel } from './models.ts';
-
-export const API_PREFIX = '/api';
-export const CSRF_HEADER = 'X-CSRF-Token';
 
 /** `arxiv:<id>` without version, e.g. `arxiv:2609.35773`. */
 export type PaperId = string;
@@ -22,26 +18,11 @@ export type Timestamp = string;
 export type OpId = string;
 export type Decision = 'like' | 'dislike';
 /**
- * task-intent-v1's Mode and ErrorCode by wire name, derived from the generated enums (proto/README.md), so
- * a new code in the IDL is a type error in the UI until it has its copy. Type-only: the UI bundles none of
- * the generated code (its typecheck resolves `@ziyixi/proto` through ../worker/node_modules).
+ * task-intent-v1's Mode and ErrorCode by wire name, derived from the generated enums (proto/README.md), so a
+ * new code in the IDL is a type error in src/api.ts until it maps to lab.ui.v1's SendErrorCode.
  */
 export type SendMode = WireName<typeof Mode>;
 export type TodofyErrorCode = WireName<typeof ErrorCode>;
-
-/** Cards per deck (the day's top picks). */
-export const DECK_SIZE = 20;
-/** Decks older than this are no longer offered (their decisions stay). */
-export const DECK_OFFER_DAYS = 7;
-/** Decision events per deck; more are refused with `deck_log_full`. */
-export const DECK_EVENTS_MAX = 400;
-/** Characters of one 简介 (2–4 Chinese sentences). */
-export const BRIEF_MAX_CHARS = 400;
-export const LIKED_PAGE = 50;
-export const SEEDS_MAX = 50;
-export const CATEGORIES_MAX = 6;
-/** The UI polls GET …/send no more often than this while a send is pending. */
-export const SEND_POLL_MIN_SECONDS = 3;
 
 export interface Paper {
   readonly id: PaperId;
@@ -128,19 +109,6 @@ export interface TodayResponse {
   readonly notice: 'cap_hit' | 'feed_stale' | 'paused' | null;
 }
 
-interface Mutation {
-  readonly op_id: OpId;
-}
-interface DeckMutation extends Mutation {
-  readonly base_version: number;
-}
-export interface DecideRequest extends DeckMutation {
-  readonly paper_id: PaperId;
-  readonly decision: Decision;
-}
-export type UndoRequest = DeckMutation;
-export type RestartRequest = DeckMutation;
-
 export interface DeckMutationResponse {
   readonly state: DeckState;
   /** What this call changed (decide: the card; undo: what was taken back; restart: how many were cleared). */
@@ -174,18 +142,6 @@ export interface DeckSummary {
   /** The owner's default mode (settings). */
   readonly default_mode: SendMode;
 }
-
-/** Setting a flag is idempotent, so no base_version: it never conflicts with decisions. */
-export interface ExcludeRequest extends Mutation {
-  readonly paper_id: PaperId;
-  readonly excluded: boolean;
-}
-
-export interface SendRequest extends Mutation {
-  /** Ignored when the open generation is frozen (a retry resends the frozen payload). */
-  readonly mode: SendMode;
-}
-export type LaterRequest = Mutation;
 
 /**
  * Lab's view of one send generation (docs/design.md §9). `sending`: stored, RPC in flight; `unknown`: the RPC
@@ -224,11 +180,6 @@ export interface LikedResponse {
   readonly next_cursor: string | null;
 }
 
-/** 已喜欢 list: unlike (null) or re-label a paper outside a deck. */
-export interface FeedbackRequest extends Mutation {
-  readonly paper_id: PaperId;
-  readonly label: Decision | null;
-}
 export interface FeedbackResponse {
   readonly paper_id: PaperId;
   readonly label: Decision | null;
@@ -244,15 +195,6 @@ export interface Seed {
 export interface SeedsResponse {
   readonly seeds: readonly Seed[];
 }
-/** POST /api/seeds: bare arXiv IDs or abs URLs; the Worker keeps only the validated IDs. */
-export interface AddSeedsRequest extends Mutation {
-  readonly ids: readonly string[];
-}
-/** DELETE /api/seeds (JSON body): removes one seed; likes and dislikes stay. */
-export interface RemoveSeedRequest extends Mutation {
-  readonly paper_id: PaperId;
-}
-
 export interface Settings {
   /** e.g. ['cs.IR', 'cs.CL', 'cs.LG'], at most CATEGORIES_MAX. */
   readonly categories: readonly string[];
@@ -265,8 +207,6 @@ export interface Settings {
   readonly ingest_paused: boolean;
   readonly send_mode: SendMode;
 }
-/** PUT /api/settings: the whole editable set (the Worker refuses a cap above the ceiling). */
-export interface SettingsUpdateRequest extends Mutation, Settings {}
 export interface SettingsResponse extends Settings {
   /** LAB_DAILY_NEURONS (read-only). */
   readonly ceiling: number;
@@ -286,28 +226,4 @@ export interface StatusResponse {
   readonly last_fetch_error: string | null;
   readonly guard: { readonly level: 'normal' | 'shed'; readonly until: Timestamp | null };
   readonly build: string | null;
-}
-
-export interface CsrfResponse {
-  readonly token: string;
-}
-
-/** Codes the deck routes add to the usual auth/validation ones. */
-export type DeckErrorCode =
-  | 'deck_not_found'
-  | 'deck_changed'
-  | 'already_decided'
-  | 'nothing_to_undo'
-  | 'deck_log_full'
-  | 'not_in_deck'
-  | 'nothing_to_send'
-  | 'send_in_progress';
-
-export interface ApiError {
-  readonly error: { readonly code: string; readonly message: string; readonly request_id: string };
-}
-
-/** 409 `deck_changed` (another tab or device moved the deck): the current state, which the UI adopts. */
-export interface DeckConflict extends ApiError {
-  readonly state: DeckState;
 }

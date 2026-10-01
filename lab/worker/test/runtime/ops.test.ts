@@ -26,7 +26,7 @@ describe('Ops', () => {
     // The 24 h and 7 d counters are windows over the real clock.
     await h.run(Date.now());
     const card = (await h.sql<{ paper_id: string }>('SELECT paper_id FROM deck_cards ORDER BY position LIMIT 1'))[0];
-    await h.mutate('POST', '/api/decks/2026-09-30/decide', { op_id: op(), base_version: 0, paper_id: card?.paper_id, decision: 'like' });
+    expect((await h.mutate('POST', '/api/v1/decks/2026-09-30:decide', { request_id: op(), base_version: 0, paper_id: card?.paper_id, decision: 'like' })).status).toBe(200);
     const after = await h.ops('status');
     expect(validate(schema, 'OpsStatus', after.ok)).toEqual([]);
     const counters = (after.ok as { counters: Record<string, number> }).counters;
@@ -93,7 +93,7 @@ describe('Access and CSRF', () => {
       bindings: { DEV_AUTH_BYPASS: 'false', ACCESS_OWNER_ALIASES: 'second@example.org' },
       routes: new Map([[`${ISSUER}/cdn-cgi/access/certs`, () => Response.json(issuer.jwks)]]),
     });
-    const as = async (email: string | null, path = '/api/today', init: RequestInit = {}) =>
+    const as = async (email: string | null, path = '/api/v1/today', init: RequestInit = {}) =>
       h?.fetch(path, email === null ? init : { ...init, headers: { ...(init.headers as Record<string, string> | undefined), 'cf-access-jwt-assertion': await issuer.sign(accessClaims(ISSUER, AUDIENCE, email)) } });
     expect((await as(null))?.status).toBe(401);
     expect((await as('someone@example.com'))?.status).toBe(401);
@@ -114,10 +114,10 @@ describe('Access and CSRF', () => {
     const { token } = (await csrf.json()) as { token: string };
     const cookie = (csrf.headers.get('set-cookie') ?? '').split(';')[0] ?? '';
     const post = (origin: string) =>
-      h?.fetch('/api/seeds', {
+      h?.fetch('/api/v1/seeds:import', {
         method: 'POST',
         headers: { 'cf-access-jwt-assertion': jwt, origin, 'x-csrf-token': token, cookie, 'content-type': 'application/json' },
-        body: JSON.stringify({ op_id: op(), ids: ['2601.00042'] }),
+        body: JSON.stringify({ request_id: op(), inputs: ['2601.00042'] }),
       });
     expect((await post('http://127.0.0.1'))?.status).toBe(403);
     const accepted = await post('https://lab.example.com');

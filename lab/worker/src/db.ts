@@ -3,10 +3,8 @@
  * and LabState both use these; only LabState writes D1. Every query is bounded (a deck has ≤ 20 cards, the
  * liked list pages by 50) and uses bound parameters.
  */
+import { CATEGORIES_MAX, DECK_SIZE, LIKED_PAGE } from './limits.ts';
 import {
-  CATEGORIES_MAX,
-  DECK_SIZE,
-  LIKED_PAGE,
   type Deck,
   type DeckCard,
   type DeckKind,
@@ -22,14 +20,14 @@ import {
   type Settings,
   type SummaryItem,
   type UndoTarget,
-} from './api-types.ts';
+} from './model.ts';
 import { absUrl, bareId, pdfUrl } from './arxiv.ts';
 import { firstSentence } from './brief.ts';
 import { iso } from './config.ts';
 import { deckState } from './deck.ts';
 import { isSendMode, sendStatus, unfrozen, type LabErrorCode, type SendRow } from './intent.ts';
 import { DEFAULT_TLDR_MODEL, TLDR_MODELS, type TldrModel } from './models.ts';
-import type { SendState } from './api-types.ts';
+import type { SendState } from './model.ts';
 
 // ---- settings -----------------------------------------------------------------------------------------
 
@@ -340,25 +338,38 @@ interface LikedRow extends PaperRow {
   brief: string | null;
 }
 
-export async function readLiked(db: D1Database, cursor: LikedCursor | null, q: string | null): Promise<LikedResponse> {
+const LIKED_SQL = `SELECT f.paper_id, f.at, f.deck_id, p.id, p.version, p.title, p.authors, p.categories, p.primary_category, p.announce_type,
+    p.announced_on, p.abstract, p.new_version,
+    (SELECT k.brief FROM picks k WHERE k.paper_id = f.paper_id AND k.brief IS NOT NULL ORDER BY k.day DESC LIMIT 1) AS brief
+  FROM feedback f JOIN papers p ON p.id = f.paper_id
+  WHERE f.label = 'like'`;
+
+function likedFrom(row: LikedRow): LikedPaper {
+  return { ...paperFrom(row), liked_at: iso(row.at), deck_id: row.deck_id, brief: row.brief };
+}
+
+/** A page of at most `pageSize` (1-LIKED_PAGE) liked papers, newest first, after `cursor`, whose title matches `q`. */
+export async function readLiked(db: D1Database, cursor: LikedCursor | null, q: string | null, pageSize = LIKED_PAGE): Promise<LikedResponse> {
+  const size = Math.max(1, Math.min(LIKED_PAGE, Math.trunc(pageSize)));
   const pattern = q === null ? null : likePattern(q);
   const { results } = await db
     .prepare(
-      `SELECT f.paper_id, f.at, f.deck_id, p.id, p.version, p.title, p.authors, p.categories, p.primary_category, p.announce_type,
-          p.announced_on, p.abstract, p.new_version,
-          (SELECT k.brief FROM picks k WHERE k.paper_id = f.paper_id AND k.brief IS NOT NULL ORDER BY k.day DESC LIMIT 1) AS brief
-        FROM feedback f JOIN papers p ON p.id = f.paper_id
-        WHERE f.label = 'like'
+      `${LIKED_SQL}
           AND (?1 IS NULL OR f.at < ?1 OR (f.at = ?1 AND f.paper_id < ?2))
           AND (?3 IS NULL OR p.title LIKE ?3 ESCAPE '\\')
-        ORDER BY f.at DESC, f.paper_id DESC LIMIT ${String(LIKED_PAGE + 1)}`,
+        ORDER BY f.at DESC, f.paper_id DESC LIMIT ?4`,
     )
-    .bind(cursor?.at ?? null, cursor?.id ?? '', pattern)
+    .bind(cursor?.at ?? null, cursor?.id ?? '', pattern, size + 1)
     .all<LikedRow>();
-  const page = results.slice(0, LIKED_PAGE);
+  const page = results.slice(0, size);
   const last = page[page.length - 1];
-  const papers: LikedPaper[] = page.map((row) => ({ ...paperFrom(row), liked_at: iso(row.at), deck_id: row.deck_id, brief: row.brief }));
-  return { papers, next_cursor: results.length > LIKED_PAGE && last !== undefined ? encodeCursor({ at: last.at, id: last.paper_id }) : null };
+  return { papers: page.map(likedFrom), next_cursor: results.length > size && last !== undefined ? encodeCursor({ at: last.at, id: last.paper_id }) : null };
+}
+
+/** One liked paper, or null when the paper is not liked. */
+export async function readLikedPaper(db: D1Database, paperId: string): Promise<LikedPaper | null> {
+  const row = await db.prepare(`${LIKED_SQL} AND f.paper_id = ?1`).bind(paperId).first<LikedRow>();
+  return row === null ? null : likedFrom(row);
 }
 
 export async function readSeeds(db: D1Database): Promise<Seed[]> {

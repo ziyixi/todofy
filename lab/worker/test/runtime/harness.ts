@@ -14,6 +14,9 @@ import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { build } from 'esbuild';
 import { Miniflare, convertV4MiniflareOptions } from 'miniflare';
+import { createHttpClient, type HttpCall, type HttpClient } from '@ziyixi/proto/http-client';
+import type { ShapeOf } from '@ziyixi/proto/http-transcoder';
+import { LabUiService } from '@ziyixi/proto/lab/ui/v1/lab_ui_service_pb';
 
 const ROOT = resolve(fileURLToPath(new URL('../..', import.meta.url)));
 const LAB = resolve(ROOT, '..');
@@ -103,11 +106,13 @@ export interface Harness {
   readonly requests: ArxivRequest[];
   /** A request to "lab" over loopback http (the dev bypass signs in the owner). */
   fetch(path: string, init?: RequestInit): Promise<Response>;
-  /** JSON of a GET, asserting 200. */
-  get<T>(path: string): Promise<T>;
-  /** A mutation with a fresh CSRF token and the loopback Origin; returns status and JSON. */
-  // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-parameters -- the caller names the answer's shape
-  mutate<T>(method: 'POST' | 'PUT' | 'DELETE', path: string, body: unknown): Promise<{ status: number; body: T }>;
+  /**
+   * LabUiService through the shared typed client (proto/ts/http-client.ts), exactly as the UI calls it:
+   * mutations carry a CSRF token (fetched once) and the loopback Origin.
+   */
+  readonly api: HttpClient<ShapeOf<typeof LabUiService>>;
+  /** A request with a fresh CSRF token and the loopback Origin (raw HTTP, for the transport's own tests). */
+  mutate(method: 'POST' | 'PUT' | 'PATCH' | 'DELETE', path: string, body?: unknown): Promise<Response>;
   /** One LabState pipeline slice at `now`. */
   step(now: number): Promise<{ next: number }>;
   /** The time of LabState's armed alarm, or null when none is set. */
@@ -207,27 +212,35 @@ export async function startHarness(options: HarnessOptions = {}): Promise<Harnes
     const response = await worker.fetch('http://probe/', { method: 'POST', body: JSON.stringify({ op, args }) });
     return (await response.json()) as { ok?: unknown; error?: string };
   };
+  let csrf: { token: string; cookie: string } | undefined;
+  const csrfToken = async () => {
+    if (csrf === undefined) {
+      const response = await fetchLab('/api/csrf');
+      const { token } = (await response.json()) as { token: string };
+      csrf = { token, cookie: (response.headers.get('set-cookie') ?? '').split(';')[0] ?? '' };
+    }
+    return csrf;
+  };
+  const send = async (call: HttpCall) => {
+    const headers: Record<string, string> = {};
+    if (call.httpMethod !== 'GET') {
+      const { token, cookie } = await csrfToken();
+      Object.assign(headers, { origin: 'http://127.0.0.1', 'x-csrf-token': token, cookie });
+    }
+    if (call.body !== undefined) headers['content-type'] = 'application/json';
+    return fetchLab(call.url, { method: call.httpMethod, headers, ...(call.body === undefined ? {} : { body: call.body }) });
+  };
   const harness: Harness = {
     mf,
     arxiv,
     requests,
     fetch: fetchLab,
-    async get<T>(path: string) {
-      const response = await fetchLab(path);
-      if (response.status !== 200) throw new Error(`GET ${path}: ${String(response.status)} ${await response.text()}`);
-      return (await response.json()) as T;
-    },
-    // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-parameters -- the caller names the answer's shape
-    async mutate<T>(method: 'POST' | 'PUT' | 'DELETE', path: string, body: unknown) {
-      const csrf = await fetchLab('/api/csrf');
-      const { token } = (await csrf.json()) as { token: string };
-      const cookie = (csrf.headers.get('set-cookie') ?? '').split(';')[0] ?? '';
-      const response = await fetchLab(path, {
-        method,
-        headers: { 'content-type': 'application/json', origin: 'http://127.0.0.1', 'x-csrf-token': token, cookie },
-        body: JSON.stringify(body),
-      });
-      return { status: response.status, body: (await response.json()) as T };
+    api: createHttpClient(LabUiService, send),
+    async mutate(method: 'POST' | 'PUT' | 'PATCH' | 'DELETE', path: string, body?: unknown) {
+      const { token, cookie } = await csrfToken();
+      const headers: Record<string, string> = { origin: 'http://127.0.0.1', 'x-csrf-token': token, cookie };
+      if (body !== undefined) headers['content-type'] = 'application/json';
+      return fetchLab(path, { method, headers, ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
     },
     async step(now: number) {
       const result = await probe('step', [now]);

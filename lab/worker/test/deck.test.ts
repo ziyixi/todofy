@@ -1,6 +1,7 @@
 /** The deck's decision log (docs/design.md §7): replay, undo, 重来 and the materialised state. */
 import { describe, expect, it } from 'vitest';
-import { DECK_EVENTS_MAX, type Decision } from '../src/api-types.ts';
+import { DECK_EVENTS_MAX } from '../src/limits.ts';
+import type { Decision } from '../src/model.ts';
 import { deckState, mutate, replay, type DeckEvent, type Mutation } from '../src/deck.ts';
 
 const PAPERS = ['arxiv:p1', 'arxiv:p2', 'arxiv:p3', 'arxiv:p4'];

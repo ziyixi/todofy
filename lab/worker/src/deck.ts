@@ -4,7 +4,8 @@
  * restart (any number of times, back to the first card); `restart` (重来) clears every decision and is
  * itself undoable. LabState materialises the replay into D1 in the same batch as the event.
  */
-import { DECK_EVENTS_MAX, type Decision, type DeckMutationResponse, type DeckState, type PaperId, type UndoTarget } from './api-types.ts';
+import { DECK_EVENTS_MAX } from './limits.ts';
+import type { Decision, DeckMutationResponse, DeckState, PaperId, UndoTarget } from './model.ts';
 
 export type EventKind = 'decide' | 'undo' | 'restart';
 

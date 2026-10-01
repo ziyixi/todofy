@@ -3,7 +3,10 @@ import { describe, expect, it } from 'vitest';
 import { addDays, fetchHour, isDay, iso, neuronCeiling, nextFetchSlot, publicHost } from '../src/config.ts';
 import { decodeCursor, encodeCursor, likePattern, settingsFrom } from '../src/db.ts';
 import type { Env } from '../src/env.ts';
-import { HttpError, parseSettings } from '../src/http.ts';
+import { SettingsSchema } from '@ziyixi/proto/lab/ui/v1/home_pb';
+import { RpcError } from '@ziyixi/proto/rpc-status';
+import { fromWire, WireJsonError } from '@ziyixi/proto/wire-json';
+import { settingsOf } from '../src/api.ts';
 
 const env = (vars: Partial<Record<keyof Env, string>>) => vars as unknown as Env;
 
@@ -54,29 +57,33 @@ describe('settings', () => {
     expect(read).toMatchObject({ categories: ['cs.AI'], lambda: 0.3, neuron_cap: 1500, tldr_model: '@cf/ibm-granite/granite-4.0-h-micro', ingest_paused: true, send_mode: 'separate' });
   });
 
-  it('validates a PUT body strictly', () => {
+  it('validates UpdateSettings strictly: the wire profile, then the value rules', () => {
     const good = {
-      op_id: '0b8a1c9e-6d2f-4a5b-9c3d-1e2f3a4b5c6d',
+      name: 'settings',
       categories: ['cs.IR', 'cs.CL'],
-      lambda: 0.5,
+      dislike_weight: 0.5,
       neuron_cap: 1200,
-      tldr_model: '@cf/qwen/qwen3-30b-a3b-fp8',
+      summary_model: '@cf/qwen/qwen3-30b-a3b-fp8',
       ingest_paused: false,
       send_mode: 'separate',
     };
-    expect(parseSettings(good)).toEqual({ categories: ['cs.IR', 'cs.CL'], lambda: 0.5, neuron_cap: 1200, tldr_model: '@cf/qwen/qwen3-30b-a3b-fp8', ingest_paused: false, send_mode: 'separate' });
+    const read = (wire: unknown) => fromWire(SettingsSchema, wire, { strict: true }).message;
+    expect(settingsOf(read(good))).toEqual({ categories: ['cs.IR', 'cs.CL'], lambda: 0.5, neuron_cap: 1200, tldr_model: '@cf/qwen/qwen3-30b-a3b-fp8', ingest_paused: false, send_mode: 'separate' });
+    // What the transcoder's strict read refuses (BAD_REQUEST before any handler runs).
+    for (const bad of [{ ...good, extra: 1 }, { ...good, neuron_cap: 1.5 }, { ...good, ingest_paused: 'no' }, { ...good, send_mode: 'bulk' }, { ...good, categories: undefined }]) {
+      expect(() => read(JSON.parse(JSON.stringify(bad))), JSON.stringify(bad)).toThrow(WireJsonError);
+    }
+    // What the value rules refuse.
     for (const bad of [
-      { ...good, extra: 1 },
       { ...good, categories: [] },
       { ...good, categories: ['cs.IR', 'cs.IR'] },
       { ...good, categories: ['../x'] },
-      { ...good, lambda: 1.5 },
-      { ...good, neuron_cap: 1.5 },
-      { ...good, tldr_model: '@cf/meta/llama-3.1-70b-instruct' },
-      { ...good, ingest_paused: 'no' },
-      { ...good, send_mode: 'bulk' },
+      { ...good, categories: ['cs.A', 'cs.B', 'cs.C', 'cs.D', 'cs.E', 'cs.F', 'cs.G'] },
+      { ...good, dislike_weight: 1.5 },
+      { ...good, neuron_cap: -1 },
+      { ...good, summary_model: '@cf/meta/llama-3.1-70b-instruct' },
     ]) {
-      expect(() => parseSettings(bad), JSON.stringify(bad)).toThrow(HttpError);
+      expect(() => settingsOf(read(bad)), JSON.stringify(bad)).toThrow(RpcError);
     }
   });
 });

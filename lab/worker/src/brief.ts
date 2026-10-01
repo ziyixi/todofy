@@ -3,7 +3,7 @@
  * model's answer, which is untrusted text. A refused answer is stored as null and the UI falls back to
  * the abstract's first sentences.
  */
-import { BRIEF_MAX_CHARS } from './api-types.ts';
+import { BRIEF_MAX_CHARS } from './limits.ts';
 import { clip, codePoints } from './arxiv.ts';
 
 export const BRIEF_MAX_TOKENS = 300;

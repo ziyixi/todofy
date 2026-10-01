@@ -31,7 +31,7 @@ import {
   type TaskIntentResult,
 } from '@ziyixi/proto/todofy/taskintent/v1/task_intent_pb';
 import { fromWire, toWire, wireEnum, WireJsonError, type WireObject } from '@ziyixi/proto/wire-json';
-import type { SendMode, SendState, SendStatus } from './api-types.ts';
+import type { SendMode, SendState, SendStatus } from './model.ts';
 import { absUrl, bareId, clip, oneLine } from './arxiv.ts';
 import { firstSentence } from './brief.ts';
 import { iso } from './config.ts';

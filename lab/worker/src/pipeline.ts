@@ -4,7 +4,7 @@
  * calls per slice) → deck ready; when idle, seed resolve and retention. Every step is idempotent and
  * keyed by the announce day; every AI call passes the neuron ledger first (§5).
  */
-import { DECK_SIZE } from './api-types.ts';
+import { DECK_SIZE } from './limits.ts';
 import { ABSTRACT_MAX, bareId, codePoints, parseAtom, parseFeed, paperKey, type FeedItem } from './arxiv.ts';
 import { BRIEF_MAX_TOKENS, BRIEF_TEMPERATURE, briefPrompt, checkBrief, generatedText, promptText } from './brief.ts';
 import { DAY, HOUR, MINUTE, addDays, fetchHour, neuronCeiling, nextFetchSlot, utcDay } from './config.ts';

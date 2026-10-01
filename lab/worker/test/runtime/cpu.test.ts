@@ -11,7 +11,7 @@
  * abstracts and a 简介 each, and a full page of LIKED_PAGE liked papers.
  */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { DECK_SIZE, LIKED_PAGE } from '../../src/api-types.ts';
+import { DECK_SIZE, LIKED_PAGE } from '../../src/limits.ts';
 import { rssFeed, type SyntheticItem } from '../feeds.ts';
 import { op, startHarness, type Harness } from './harness.ts';
 
@@ -31,13 +31,13 @@ const T0 = Date.parse('2026-09-30T06:30:00Z');
 
 /** The owner API paths measured below (one place, so a route change touches only this table). */
 const PATHS = {
-  today: '/api/today',
-  deck: `/api/decks/${DAY}`,
-  summary: `/api/decks/${DAY}/summary`,
-  decide: `/api/decks/${DAY}/decide`,
-  undo: `/api/decks/${DAY}/undo`,
-  liked: '/api/liked',
-  settings: '/api/settings',
+  today: '/api/v1/today',
+  deck: `/api/v1/decks/${DAY}`,
+  summary: `/api/v1/decks/${DAY}/summary`,
+  decide: `/api/v1/decks/${DAY}:decide`,
+  undo: `/api/v1/decks/${DAY}:undo`,
+  liked: '/api/v1/likedPapers',
+  settings: '/api/v1/settings',
 } as const;
 
 let h: Harness;
@@ -141,15 +141,15 @@ async function text(path: string): Promise<string> {
 
 describe('CPU per request (Workers Free: 10 ms)', () => {
   it('the heaviest owner requests stay well below the limit', async () => {
-    const deck = JSON.parse(await text(PATHS.deck)) as { cards: { paper: { id: string } }[]; state: { version: number } };
+    const deck = JSON.parse(await text(PATHS.deck)) as { cards: { paper: { id: string } }[]; state: { version?: number } };
     expect(deck.cards).toHaveLength(DECK_SIZE);
     // A full page of likes: every paper of the feed, liked from the library (fixed times, newest first).
     const papers = await h.sql<{ id: string }>('SELECT id FROM papers ORDER BY id LIMIT ?', LIKED_PAGE + 5);
     for (const [index, paper] of papers.entries()) {
       await h.sql("INSERT INTO feedback (paper_id, label, source, deck_id, at) VALUES (?, 'like', 'library', NULL, ?)", paper.id, T0 + index);
     }
-    const liked = JSON.parse(await text(PATHS.liked)) as { papers: unknown[] };
-    expect(liked.papers).toHaveLength(LIKED_PAGE);
+    const liked = JSON.parse(await text(PATHS.liked)) as { liked_papers: unknown[] };
+    expect(liked.liked_papers).toHaveLength(LIKED_PAGE);
 
     const results = [
       await measure('GET today', () => text(PATHS.today)),
@@ -159,17 +159,17 @@ describe('CPU per request (Workers Free: 10 ms)', () => {
       await measure('GET settings', () => text(PATHS.settings)),
     ];
     // A decide and its undo (two requests, each a LabState RPC with D1 reads and one batch), measured together and
-    // reported per request. The CSRF token is fetched inside h.mutate, outside the measured pair's share.
-    let version = deck.state.version;
+    // reported per request (the harness fetched the CSRF token once, before the first run).
+    let version = deck.state.version ?? 0;
     const card = deck.cards[0]?.paper.id ?? '';
     const pair = await measure('POST decide + POST undo (one each)', async () => {
-      const decided = await h.mutate<{ state: { version: number } }>('POST', PATHS.decide, { op_id: op(), base_version: version, paper_id: card, decision: 'like' });
-      const undone = await h.mutate<{ state: { version: number } }>('POST', PATHS.undo, { op_id: op(), base_version: decided.body.state.version });
+      const decided = await h.mutate('POST', PATHS.decide, { request_id: op(), base_version: version, paper_id: card, decision: 'like' });
+      const after = (await decided.json()) as { state: { version: number } };
+      const undone = await h.mutate('POST', PATHS.undo, { request_id: op(), base_version: after.state.version });
       if (decided.status !== 200 || undone.status !== 200) throw new Error('mutation failed');
-      version = undone.body.state.version;
+      version = ((await undone.json()) as { state: { version: number } }).state.version;
     });
-    // Two mutations plus two CSRF GETs per run: a quarter is a fair per-request figure for the mutation, half an upper bound.
-    console.log(`cpu POST decide or undo: about ${(pair.median / 2).toFixed(2)} ms each (upper bound, incl. its CSRF GET)`);
+    console.log(`cpu POST decide or undo: about ${(pair.median / 2).toFixed(2)} ms each`);
     for (const { best } of results) expect(best).toBeLessThan(WARM_BOUND_MS);
     expect(pair.best / 2).toBeLessThan(WARM_BOUND_MS);
   });

@@ -1,8 +1,18 @@
 /**
- * The owner surface (docs/design.md §8): Access (edge-auth) on every path except /health, signed
- * double-submit CSRF plus Origin on mutations, private headers on every response, error envelopes. The
- * Worker validates input, reads D1 for the deck GETs and hands every mutation to LabState in one RPC.
- * Workers Free gives this handler 10 ms of CPU: bodies are at most 16 KiB, answers are bounded.
+ * The Worker's HTTP surface (docs/design.md §8): Access (edge-auth) on every path except /health, then
+ *
+ * - /api/v1/*: the owner API, LabUiService (proto/lab/ui/v1), served by the shared transcoder with the
+ *   handlers of api.ts; every method but GET also needs the same-origin Origin and the signed double-submit
+ *   CSRF token (the transcoder's `authorize` hook runs before the body is read);
+ * - GET /api/csrf: the CSRF token and its cookie (transport, not part of the service);
+ * - the routes of Lab's UI before lab.ui.v1 (/api/today, /api/decks/...): 410 `reload_required` in their old
+ *   error envelope, so a tab still running the old UI tells the owner to reload (until 2026-11-01, then
+ *   NOT_FOUND like any other path);
+ * - everything else: the UI's static assets (GET and HEAD).
+ *
+ * Errors are google.rpc.Status bodies (proto/lab/ui/v1/errors.proto), logged as one line with the request
+ * ID, status and reason only. Private headers on every response. Workers Free gives this handler 10 ms of CPU:
+ * bodies are at most MAX_BODY_BYTES, answers are bounded.
  */
 import {
   STRICT_CSP,
@@ -14,102 +24,34 @@ import {
   withPrivateHeaders,
   type AccessPolicy,
 } from '@ziyixi/edge-auth';
-import { CATEGORIES_MAX, SEEDS_MAX, type ApiError, type CsrfResponse, type Decision, type SendMode, type Settings } from './api-types.ts';
-import { bareId } from './arxiv.ts';
-import { buildSha, isDay, publicHost } from './config.ts';
-import { CATEGORY_SETTING_RE, decodeCursor, deckView, readDeck, readLiked, readSeeds, readSettings, sendRowFrom, summaryView, type SendDbRow } from './db.ts';
+import { HttpTranscoder, type RouteInfo } from '@ziyixi/proto/http-transcoder';
+import { LabUiService } from '@ziyixi/proto/lab/ui/v1/lab_ui_service_pb';
+import { RpcError } from '@ziyixi/proto/rpc-status';
+import { handlers, isReason, labError, REASONS, type ApiContext } from './api.ts';
+import { buildSha, publicHost } from './config.ts';
 import type { Env } from './env.ts';
-import { isSendMode, pollable, sendStatus } from './intent.ts';
-import { TLDR_MODELS } from './models.ts';
-import { settingsResponse, type DeckMutationInput, type OwnerResult } from './owner.ts';
-import { LAB_OBJECT, type LabState } from './state.ts';
+import { MAX_BODY_BYTES } from './limits.ts';
 
 export const CSRF_COOKIE = 'lab_csrf';
-export const MAX_BODY_BYTES = 16 * 1024;
 export const JWKS_TTL_MS = 600_000;
 export const JWKS_REFRESH_COOLDOWN_MS = 60_000;
 export const NBF_LEEWAY_SECONDS = 60;
+/** ErrorInfo.domain: the API's name (LabUiService's default_host), whatever host serves it. */
+export const API_DOMAIN = 'lab.ziyixi.science';
+export const API_PREFIX = '/api/v1/';
 const IMMUTABLE = 'private, max-age=31536000, immutable';
 
-export type ApiErrorCode =
-  | 'unauthorized'
-  | 'access_not_configured'
-  | 'not_configured'
-  | 'csrf_failed'
-  | 'bad_request'
-  | 'not_found'
-  | 'method_not_allowed'
-  | 'unavailable'
-  | 'deck_not_found'
-  | 'deck_changed'
-  | 'already_decided'
-  | 'nothing_to_undo'
-  | 'deck_log_full'
-  | 'not_in_deck'
-  | 'nothing_to_send'
-  | 'send_in_progress'
-  | 'seeds_full';
-
-export const MESSAGES: Readonly<Record<ApiErrorCode, string>> = {
-  unauthorized: '未登录或凭据无效',
-  access_not_configured: 'Cloudflare Access 配置不完整',
-  not_configured: '服务缺少必需的密钥配置',
-  csrf_failed: '页面安全令牌已失效，请刷新后重试',
-  bad_request: '请求格式不正确',
-  not_found: '找不到该资源',
-  method_not_allowed: '不支持该请求方法',
-  unavailable: '服务暂时不可用，请稍后再试',
-  deck_not_found: '找不到这组卡片',
-  deck_changed: '这组卡片已在其他设备上改动',
-  already_decided: '这张卡片已经选过了',
-  nothing_to_undo: '没有可以撤销的操作',
-  deck_log_full: '这组卡片的操作次数已达上限',
-  not_in_deck: '这篇论文不在这组卡片里',
-  nothing_to_send: '没有需要发送的论文',
-  send_in_progress: '这些论文正在发送中',
-  seeds_full: `种子最多 ${String(SEEDS_MAX)} 篇`,
-};
-
-export class HttpError extends Error {
-  readonly status: number;
-  readonly code: ApiErrorCode;
-  readonly headers: Readonly<Record<string, string>>;
-  readonly extra: Readonly<Record<string, unknown>>;
-
-  constructor(status: number, code: ApiErrorCode, headers: Readonly<Record<string, string>> = {}, extra: Readonly<Record<string, unknown>> = {}) {
-    super(code);
-    this.status = status;
-    this.code = code;
-    this.headers = headers;
-    this.extra = extra;
-  }
-}
-
-interface Context {
+interface Context extends ApiContext {
   readonly request: Request;
-  readonly env: Env;
   readonly url: URL;
   readonly requestId: string;
+  /** Set once Access let the owner in. */
+  readonly owner?: string;
+  readonly bypassed?: boolean;
 }
 
 export function newRequestId(): string {
   return Array.from(crypto.getRandomValues(new Uint8Array(8)), (byte) => byte.toString(16).padStart(2, '0')).join('');
-}
-
-export function jsonResponse(data: unknown, status = 200): Response {
-  return new Response(JSON.stringify(data), {
-    status,
-    headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' },
-  });
-}
-
-/** The error envelope; one log line with the request ID, status and code only. */
-export function errorResponse(requestId: string, error: HttpError): Response {
-  console.log(JSON.stringify({ request_id: requestId, status: error.status, code: error.code }));
-  const body: ApiError & Record<string, unknown> = { ...error.extra, error: { code: error.code, message: MESSAGES[error.code], request_id: requestId } };
-  const response = jsonResponse(body, error.status);
-  for (const [name, value] of Object.entries(error.headers)) response.headers.set(name, value);
-  return response;
 }
 
 // ---- Access and CSRF (packages/edge-auth SPEC §5.4, the dashboard's policy) ------------------------------
@@ -141,331 +83,112 @@ async function authenticate(ctx: Context): Promise<{ owner: string; bypassed: bo
   switch (result.failure) {
     case 'not_configured':
     case 'dev_bypass_refused':
-      throw new HttpError(503, 'access_not_configured');
+      throw labError('ACCESS_NOT_CONFIGURED');
     case 'keys_unavailable':
-      throw new HttpError(503, 'unavailable');
+      throw labError('UNAVAILABLE');
     case 'missing_token':
     case 'invalid_token':
-      throw new HttpError(401, 'unauthorized');
+      throw labError('UNAUTHORIZED');
   }
 }
 
 async function csrfKey(env: Env): Promise<CryptoKey> {
   const key = await importHmacKeyHex((env.CSRF_SIGNING_KEY ?? '').trim());
-  if (key === null) throw new HttpError(503, 'not_configured');
+  if (key === null) throw labError('NOT_CONFIGURED');
   return key;
 }
 
-function allowedOrigins(ctx: Context, bypassed: boolean): string[] {
+function allowedOrigins(ctx: Context): string[] {
   const host = publicHost(ctx.env);
   const origins = host === null ? [] : [`https://${host}`];
-  if (bypassed) origins.push(ctx.url.origin.toLowerCase());
+  if (ctx.bypassed === true) origins.push(ctx.url.origin.toLowerCase());
   return origins;
 }
 
-async function checkCsrf(ctx: Context, owner: string, bypassed: boolean): Promise<void> {
+/** The transcoder's authorize hook: a mutation needs Origin and the CSRF token of this owner. */
+async function authorize(request: Request, route: RouteInfo, ctx: Context): Promise<void> {
+  if (route.safe) return;
   const key = await csrfKey(ctx.env);
-  const result = await verifyCsrf(ctx.request, owner, { cookieName: CSRF_COOKIE, key, allowedOrigins: allowedOrigins(ctx, bypassed) });
-  if (!result.ok) throw new HttpError(403, 'csrf_failed');
-}
-
-/** The body's bytes, at most `limit` (a larger declared or streamed body is refused). */
-export async function readLimited(request: Request, limit: number): Promise<Uint8Array | null> {
-  const header = request.headers.get('content-length');
-  if (header !== null && !(/^[0-9]{1,10}$/.test(header.trim()) && Number(header.trim()) <= limit)) return null;
-  if (request.body === null) return new Uint8Array(0);
-  const reader = (request.body as ReadableStream<Uint8Array>).getReader();
-  const chunks: Uint8Array[] = [];
-  let size = 0;
-  for (;;) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    size += value.byteLength;
-    if (size > limit) {
-      await reader.cancel();
-      return null;
-    }
-    chunks.push(value);
-  }
-  const out = new Uint8Array(size);
-  let offset = 0;
-  for (const chunk of chunks) {
-    out.set(chunk, offset);
-    offset += chunk.byteLength;
-  }
-  return out;
-}
-
-type Body = Record<string, unknown>;
-
-async function readBody(request: Request): Promise<Body> {
-  const bytes = await readLimited(request, MAX_BODY_BYTES);
-  if (bytes === null) throw new HttpError(400, 'bad_request');
-  let value: unknown;
-  try {
-    value = JSON.parse(new TextDecoder('utf-8', { fatal: true, ignoreBOM: false }).decode(bytes));
-  } catch {
-    throw new HttpError(400, 'bad_request');
-  }
-  if (typeof value !== 'object' || value === null || Array.isArray(value)) throw new HttpError(400, 'bad_request');
-  return value as Body;
-}
-
-// ---- input validation --------------------------------------------------------------------------------------
-
-const OP_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
-
-function bad(): never {
-  throw new HttpError(400, 'bad_request');
-}
-
-/** The body has exactly these keys (op_id always). */
-function keys(body: Body, allowed: readonly string[]): void {
-  const names = Object.keys(body);
-  if (names.length !== allowed.length || !names.every((name) => allowed.includes(name))) bad();
-}
-
-function opId(body: Body): string {
-  const value = body['op_id'];
-  return typeof value === 'string' && OP_ID.test(value.toLowerCase()) ? value.toLowerCase() : bad();
-}
-
-function version(body: Body): number {
-  const value = body['base_version'];
-  return typeof value === 'number' && Number.isInteger(value) && value >= 0 && value <= 1_000_000 ? value : bad();
-}
-
-function paperId(value: unknown): string {
-  return typeof value === 'string' && bareId(value) !== null ? value : bad();
-}
-
-function decision(value: unknown): Decision {
-  return value === 'like' || value === 'dislike' ? value : bad();
-}
-
-function sendMode(value: unknown): SendMode {
-  return isSendMode(value) ? value : bad();
-}
-
-export function parseSettings(body: Body): Settings {
-  keys(body, ['op_id', 'categories', 'lambda', 'neuron_cap', 'tldr_model', 'ingest_paused', 'send_mode']);
-  const categories = body['categories'];
-  if (
-    !Array.isArray(categories) ||
-    categories.length < 1 ||
-    categories.length > CATEGORIES_MAX ||
-    !categories.every((c) => typeof c === 'string' && CATEGORY_SETTING_RE.test(c)) ||
-    new Set(categories).size !== categories.length
-  ) {
-    bad();
-  }
-  const lambda = body['lambda'];
-  const cap = body['neuron_cap'];
-  const model = body['tldr_model'];
-  const paused = body['ingest_paused'];
-  if (typeof lambda !== 'number' || !(lambda >= 0 && lambda <= 1)) bad();
-  if (typeof cap !== 'number' || !Number.isInteger(cap) || cap < 0) bad();
-  if (!(TLDR_MODELS as readonly unknown[]).includes(model)) bad();
-  if (typeof paused !== 'boolean') bad();
-  return {
-    categories: categories as string[],
-    lambda,
-    neuron_cap: cap,
-    tldr_model: model as Settings['tldr_model'],
-    ingest_paused: paused,
-    send_mode: sendMode(body['send_mode']),
-  };
+  const result = await verifyCsrf(request, ctx.owner ?? '', { cookieName: CSRF_COOKIE, key, allowedOrigins: allowedOrigins(ctx) });
+  if (!result.ok) throw labError('CSRF_FAILED');
 }
 
 // ---- routes ----------------------------------------------------------------------------------------------------
 
-function lab(env: Env): DurableObjectStub<LabState> {
-  return env.LAB.get(env.LAB.idFromName(LAB_OBJECT));
+const api = new HttpTranscoder(LabUiService, handlers, {
+  domain: API_DOMAIN,
+  maxBodyBytes: MAX_BODY_BYTES,
+  authorize,
+  localize: (reason) => (isReason(reason) ? { locale: 'zh-CN', message: REASONS[reason].zh } : undefined),
+  // A failed LabState or D1 call: the request may be repeated with its request_id.
+  onUnexpected: () => labError('UNAVAILABLE'),
+});
+
+function methodNotAllowed(allow: string): RpcError {
+  const { code, message } = REASONS.METHOD_NOT_ALLOWED;
+  return new RpcError(code, 'METHOD_NOT_ALLOWED', message, { httpStatus: 405, headers: { allow } });
 }
 
-/** Any failure of the Durable Object call is 503 `unavailable`. */
-async function callLab<T>(fn: () => Promise<T>): Promise<T> {
-  try {
-    return await fn();
-  } catch (error) {
-    if (error instanceof HttpError) throw error;
-    throw new HttpError(503, 'unavailable');
-  }
+/** A path of Lab's UI API before lab.ui.v1 (not /api/v1/*, not /api/csrf). */
+function legacyApi(pathname: string): boolean {
+  return pathname === '/api' || (pathname.startsWith('/api/') && !pathname.startsWith(API_PREFIX) && pathname !== '/api/v1' && pathname !== '/api/csrf');
 }
 
-/** An OwnerResult as a response (409 deck_changed carries the current state). */
-async function owned(fn: () => Promise<unknown>): Promise<Response> {
-  const result = (await callLab(fn)) as OwnerResult<unknown>;
-  if (result.ok) return jsonResponse(result.body, result.status);
-  const code = (result.code in MESSAGES ? result.code : 'unavailable') as ApiErrorCode;
-  throw new HttpError(result.status, code, {}, result.state === undefined ? {} : { state: result.state });
+/** The old UI's error envelope, {error: {code, message, request_id}}, for the paths it still calls. */
+function legacyError(ctx: Context, status: number, code: string, message: string): Response {
+  return Response.json({ error: { code, message, request_id: ctx.requestId } }, { status, headers: { 'cache-control': 'no-store' } });
 }
 
-function methodNotAllowed(allow: string): HttpError {
-  return new HttpError(405, 'method_not_allowed', { allow });
-}
-
-async function csrfResponse(ctx: Context, owner: string): Promise<Response> {
+async function csrfResponse(ctx: Context): Promise<Response> {
   const key = await csrfKey(ctx.env);
-  const issued = await issueCsrf(ctx.request, owner, { cookieName: CSRF_COOKIE, key });
-  const body: CsrfResponse = { token: issued.token };
-  const response = jsonResponse(body);
+  const issued = await issueCsrf(ctx.request, ctx.owner ?? '', { cookieName: CSRF_COOKIE, key });
+  const response = Response.json({ token: issued.token }, { headers: { 'cache-control': 'no-store' } });
   response.headers.set('set-cookie', issued.setCookie);
   return response;
 }
 
-const DECK_ROUTE = /^\/api\/decks\/([0-9]{4}-[0-9]{2}-[0-9]{2})(?:\/(decide|undo|restart|summary|exclude|send|later))?$/;
-
-async function deckRoute(ctx: Context, day: string, action: string | undefined, mutate: () => Promise<Body>): Promise<Response> {
-  const { env, request } = ctx;
-  if (!isDay(day)) throw new HttpError(404, 'deck_not_found');
-  const stub = () => lab(env);
-  switch (action) {
-    case undefined: {
-      if (request.method !== 'GET') throw methodNotAllowed('GET');
-      const bundle = await readDeck(env.DB, day);
-      if (bundle === null || bundle.deck.ready_at === null) throw new HttpError(404, 'deck_not_found');
-      return jsonResponse(deckView(bundle));
-    }
-    case 'summary': {
-      if (request.method !== 'GET') throw methodNotAllowed('GET');
-      const [bundle, settings] = await Promise.all([readDeck(env.DB, day), readSettings(env.DB)]);
-      if (bundle === null || bundle.deck.ready_at === null) throw new HttpError(404, 'deck_not_found');
-      return jsonResponse(summaryView(bundle, settings.send_mode));
-    }
-    case 'decide':
-    case 'undo':
-    case 'restart': {
-      if (request.method !== 'POST') throw methodNotAllowed('POST');
-      const body = await mutate();
-      let input: DeckMutationInput;
-      if (action === 'decide') {
-        keys(body, ['op_id', 'base_version', 'paper_id', 'decision']);
-        input = { kind: 'decide', op_id: opId(body), base_version: version(body), paper_id: paperId(body['paper_id']), decision: decision(body['decision']) };
-      } else {
-        keys(body, ['op_id', 'base_version']);
-        input = { kind: action, op_id: opId(body), base_version: version(body) };
-      }
-      return owned(() => stub().mutateDeck(day, input));
-    }
-    case 'exclude': {
-      if (request.method !== 'POST') throw methodNotAllowed('POST');
-      const body = await mutate();
-      keys(body, ['op_id', 'paper_id', 'excluded']);
-      const excluded = body['excluded'];
-      if (typeof excluded !== 'boolean') bad();
-      const op = opId(body);
-      const paper = paperId(body['paper_id']);
-      return owned(() => stub().exclude(day, op, paper, excluded));
-    }
-    case 'later': {
-      if (request.method !== 'POST') throw methodNotAllowed('POST');
-      const body = await mutate();
-      keys(body, ['op_id']);
-      const op = opId(body);
-      return owned(() => stub().later(day, op));
-    }
-    case 'send': {
-      if (request.method === 'POST') {
-        const body = await mutate();
-        keys(body, ['op_id', 'mode']);
-        const op = opId(body);
-        const mode = sendMode(body['mode']);
-        return owned(() => stub().send(day, op, mode));
-      }
-      if (request.method !== 'GET') throw methodNotAllowed('GET, POST');
-      const row = await env.DB.prepare('SELECT * FROM sends WHERE deck_id = ? ORDER BY generation DESC LIMIT 1').bind(day).first<SendDbRow>();
-      if (row === null) throw new HttpError(404, 'not_found');
-      const send = sendRowFrom(row);
-      if (pollable(send) && (send.next_poll_at === null || send.next_poll_at <= Date.now())) {
-        const result = await callLab(() => stub().pollSend(day) as unknown as Promise<OwnerResult<unknown>>);
-        if (result.ok && result.body !== null) return jsonResponse(result.body);
-      }
-      return jsonResponse(sendStatus(send));
-    }
-    default:
-      throw new HttpError(404, 'not_found');
-  }
+interface Routed {
+  readonly response: Response;
+  readonly asset: boolean;
+  readonly reason?: string | undefined;
 }
 
-async function api(ctx: Context, owner: string, bypassed: boolean): Promise<Response> {
-  const { request, url, env } = ctx;
-  const mutate = async (): Promise<Body> => {
-    await checkCsrf(ctx, owner, bypassed);
-    return readBody(request);
-  };
-  const deck = DECK_ROUTE.exec(url.pathname);
-  if (deck) return deckRoute(ctx, deck[1] ?? '', deck[2], mutate);
-  switch (url.pathname) {
-    case '/api/csrf':
-      if (request.method !== 'GET') throw methodNotAllowed('GET');
-      return csrfResponse(ctx, owner);
-    case '/api/today':
-      if (request.method !== 'GET') throw methodNotAllowed('GET');
-      return jsonResponse(await callLab(() => lab(env).today()));
-    case '/api/status':
-      if (request.method !== 'GET') throw methodNotAllowed('GET');
-      return jsonResponse(await callLab(() => lab(env).statusView()));
-    case '/api/liked': {
-      if (request.method !== 'GET') throw methodNotAllowed('GET');
-      const cursorText = url.searchParams.get('cursor');
-      const cursor = decodeCursor(cursorText);
-      if (cursorText !== null && cursorText !== '' && cursor === null) bad();
-      const q = url.searchParams.get('q');
-      return jsonResponse(await readLiked(env.DB, cursor, q === null || q.length > 200 ? null : q));
-    }
-    case '/api/feedback': {
-      if (request.method !== 'POST') throw methodNotAllowed('POST');
-      const body = await mutate();
-      keys(body, ['op_id', 'paper_id', 'label']);
-      const op = opId(body);
-      const paper = paperId(body['paper_id']);
-      const label = body['label'] === null ? null : decision(body['label']);
-      return owned(() => lab(env).feedback(op, paper, label));
-    }
-    case '/api/seeds': {
-      if (request.method === 'GET') return jsonResponse({ seeds: await readSeeds(env.DB) });
-      if (request.method === 'POST') {
-        const body = await mutate();
-        keys(body, ['op_id', 'ids']);
-        const op = opId(body);
-        const ids = body['ids'];
-        if (!Array.isArray(ids) || ids.length === 0 || ids.length > SEEDS_MAX || !ids.every((id) => typeof id === 'string' && id.length <= 200)) bad();
-        return owned(() => lab(env).addSeeds(op, ids as string[]));
-      }
-      if (request.method === 'DELETE') {
-        const body = await mutate();
-        keys(body, ['op_id', 'paper_id']);
-        const op = opId(body);
-        const paper = paperId(body['paper_id']);
-        return owned(() => lab(env).removeSeed(op, paper));
-      }
-      throw methodNotAllowed('GET, POST, DELETE');
-    }
-    case '/api/settings': {
-      if (request.method === 'GET') return jsonResponse(await settingsResponse({ db: env.DB, env }));
-      if (request.method === 'PUT') {
-        const body = await mutate();
-        const settings = parseSettings(body);
-        const op = opId(body);
-        return owned(() => lab(env).putSettings(op, settings));
-      }
-      throw methodNotAllowed('GET, PUT');
-    }
-    default:
-      throw new HttpError(404, 'not_found');
-  }
-}
-
-async function route(ctx: Context): Promise<{ response: Response; asset: boolean }> {
-  const { request, url, env } = ctx;
+async function route(base: Context): Promise<Routed> {
+  const { request, url, env } = base;
+  const head = request.method === 'HEAD';
+  const fail = (error: RpcError): Routed => ({ response: api.errorResponse(error, base.requestId, head), asset: false, reason: error.reason });
   if (url.pathname === '/health') {
-    if (request.method !== 'GET' && request.method !== 'HEAD') throw methodNotAllowed('GET, HEAD');
-    return { response: jsonResponse({ service: 'lab', status: 'ok', build: buildSha(env) }), asset: false };
+    if (request.method !== 'GET' && !head) return fail(methodNotAllowed('GET, HEAD'));
+    return { response: Response.json({ service: 'lab', status: 'ok', build: buildSha(env) }, { headers: { 'cache-control': 'no-store' } }), asset: false };
   }
-  const { owner, bypassed } = await authenticate(ctx);
-  if (url.pathname === '/api' || url.pathname.startsWith('/api/')) return { response: await api(ctx, owner, bypassed), asset: false };
-  if (request.method !== 'GET' && request.method !== 'HEAD') throw methodNotAllowed('GET, HEAD');
+  let ctx: Context;
+  try {
+    ctx = { ...base, ...(await authenticate(base)) };
+  } catch (error) {
+    const rpc = error instanceof RpcError ? error : labError('UNAVAILABLE');
+    if (legacyApi(url.pathname)) {
+      const message = isReason(rpc.reason) ? REASONS[rpc.reason].zh : REASONS.UNAVAILABLE.zh;
+      return { response: legacyError(base, rpc.httpStatus, rpc.reason.toLowerCase(), message), asset: false, reason: rpc.reason };
+    }
+    return fail(rpc);
+  }
+  if (legacyApi(url.pathname)) {
+    return { response: legacyError(ctx, 410, 'reload_required', 'Lab 已更新，请刷新页面'), asset: false, reason: 'RELOAD_REQUIRED' };
+  }
+  if (url.pathname === '/api/csrf') {
+    if (request.method !== 'GET') return fail(methodNotAllowed('GET'));
+    try {
+      return { response: await csrfResponse(ctx), asset: false };
+    } catch (error) {
+      return fail(error instanceof RpcError ? error : labError('UNAVAILABLE'));
+    }
+  }
+  if (url.pathname === '/api/v1' || url.pathname.startsWith(API_PREFIX)) {
+    const result = await api.handle(request, ctx, ctx.requestId);
+    if (result === null) return fail(labError('NOT_FOUND'));
+    return { response: result.response, asset: false, reason: result.error?.reason };
+  }
+  if (request.method !== 'GET' && !head) return fail(methodNotAllowed('GET, HEAD'));
   return { response: await env.ASSETS.fetch(request), asset: url.pathname.startsWith('/assets/') };
 }
 
@@ -477,12 +200,17 @@ function finalize(response: Response, asset: boolean): Response {
 
 export async function handleRequest(request: Request, env: Env): Promise<Response> {
   const ctx: Context = { request, env, url: new URL(request.url), requestId: newRequestId() };
-  let result: { response: Response; asset: boolean };
+  let result: Routed;
   try {
     result = await route(ctx);
-  } catch (error) {
-    const httpError = error instanceof HttpError ? error : new HttpError(503, 'unavailable');
-    result = { response: errorResponse(ctx.requestId, httpError), asset: false };
+  } catch {
+    // Anything that escaped the routes (an asset fetch that threw): unavailable, as before.
+    const error = labError('UNAVAILABLE');
+    result = { response: api.errorResponse(error, ctx.requestId, request.method === 'HEAD'), asset: false, reason: error.reason };
+  }
+  if (result.reason !== undefined) {
+    // One line per refused request: the request ID, status and reason only (never a path, query or body).
+    console.log(JSON.stringify({ request_id: ctx.requestId, status: result.response.status, reason: result.reason }));
   }
   if (request.body !== null && !request.body.locked) await request.body.cancel();
   return finalize(result.response, result.asset);
