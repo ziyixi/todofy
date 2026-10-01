@@ -35,5 +35,6 @@ cache-keys = [
   { file = "../package-lock.json" },
   { file = "../tools/ensure.mjs" },
   { file = "../tools/gen_py.py" },
+  { file = "../tools/gen_wire_ts.py" },
   { file = "../tools/wire_rules.py" },
 ]

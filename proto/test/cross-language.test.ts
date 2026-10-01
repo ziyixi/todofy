@@ -21,8 +21,9 @@ import {
   TaskIntentResultSchema,
   TaskIntentSchema,
 } from '../ts/todofy/taskintent/v1/task_intent_pb.ts';
+import * as ops from '../ts/ops/v1/ops_pb.ts';
 import { fromWire, toWire, WireJsonError } from '../ts/wire-json.ts';
-import { CASES_FILE, fixtures } from './fixtures.ts';
+import { CASES_FILE, fixtures, OPS_CONTRACT } from './fixtures.ts';
 
 /** A task-intent-v1 message by its short name, or a fixture of prototest/v1 (doubles, maps) by its full name. */
 type Name = keyof typeof SCHEMAS;
@@ -45,7 +46,18 @@ const SCHEMAS = {
   'prototest.v1.Book': BookSchema,
   'prototest.v1.BookCard': BookCardSchema,
   'prototest.v1.Parcel': ParcelSchema,
+  'ops.v1.OpsStatus': ops.OpsStatusSchema,
+  'ops.v1.GuardState': ops.GuardStateSchema,
+  'ops.v1.SetGuardInput': ops.SetGuardInputSchema,
+  'ops.v1.StartCanaryInput': ops.StartCanaryInputSchema,
+  'ops.v1.StartCanaryResult': ops.StartCanaryResultSchema,
+  'ops.v1.CanaryDelivery': ops.CanaryDeliverySchema,
+  'ops.v1.CanaryResult': ops.CanaryResultSchema,
+  'ops.v1.OpsReport': ops.OpsReportSchema,
+  'ops.v1.OpsReportReceipt': ops.OpsReportReceiptSchema,
 } satisfies Record<string, DescMessage>;
+/** ops-v1's inputs, read strictly; its outputs are read leniently. */
+const OPS_INPUTS = new Set(['SetGuardInput', 'StartCanaryInput', 'OpsReport']);
 // npm run test:python uses the same interpreter (todofy-core's Python); PROTO_TEST_PYTHON overrides it.
 const PYTHON = (process.env['PROTO_TEST_PYTHON'] ?? 'uv run --no-project --python 3.14 python').split(' ');
 
@@ -100,6 +112,19 @@ function builtInTypeScript(): ReadRequest[] {
     strict: true,
     text: JSON.stringify(toWire(TaskIntentRefSchema, create(TaskIntentRefSchema, { version: 'task-intent-v1', source: Source.LAB, intentId: 'x' }))),
   });
+  // An ops-v1 status as a producer builds it: counters and metrics in the producer's own order (keep_order), doubles.
+  const status = create(ops.OpsStatusSchema, {
+    version: 'ops-v1',
+    app: 'todofy',
+    generatedAt: '2026-09-29T15:00:00Z',
+    health: ops.Health.DEGRADED,
+    modes: { maintenance: false, processing_paused: true, backup_active: false },
+    guard: { level: ops.GuardLevel.NORMAL },
+    signals: [{ code: 'gemini_budget_80', severity: ops.Severity.WARNING, metrics: { percent: 82.4, used_tokens: 2_460_000, zeta: 0.0001 } }],
+    counters: { zeta: 1, alpha: 2.5, middle: 3_865_470_566 },
+    capabilities: ['canary_consumer', 'guard'],
+  });
+  out.push({ message: 'ops.v1.OpsStatus', strict: false, text: JSON.stringify(toWire(ops.OpsStatusSchema, status)) });
   return out;
 }
 
@@ -114,6 +139,15 @@ function corpus(): ReadRequest[] {
     for (const { text } of fixtures(message)) {
       const written = viaTypeScript(message, text, strict);
       if (written === null) throw new Error(`a valid ${message} fixture does not read`);
+      out.push({ message, strict, text: written });
+    }
+  }
+  for (const def of ['OpsStatus', 'GuardState', 'SetGuardInput', 'StartCanaryInput', 'StartCanaryResult', 'CanaryDelivery', 'CanaryResult', 'OpsReport', 'OpsReportReceipt'] as const) {
+    const message = `ops.v1.${def}` as const;
+    const strict = OPS_INPUTS.has(def);
+    for (const { text } of fixtures(def, false, OPS_CONTRACT)) {
+      const written = viaTypeScript(message, text, strict);
+      if (written === null) throw new Error(`a valid ${def} fixture does not read`);
       out.push({ message, strict, text: written });
     }
   }
@@ -145,8 +179,8 @@ beforeAll(() => {
 
 describe('TypeScript writes, Python reads and writes the same bytes', () => {
   test('every corpus entry', () => {
-    // 18 fixtures, the reading shared cases, 7 x 14 results, 2 intents, 1 ref.
-    expect(requests.length).toBeGreaterThan(18 + 98 + 3);
+    // 18 task-intent fixtures, 37 ops-v1 fixtures, the reading shared cases, 7 x 14 results, 2 intents, 1 ref, 1 status.
+    expect(requests.length).toBeGreaterThan(18 + 37 + 98 + 4);
     expect(python.read).toHaveLength(requests.length);
     requests.forEach((request, i) => {
       expect(python.read[i], `${request.message} ${request.text}`).toEqual({ text: request.text, unrecognized: [] });
@@ -166,10 +200,10 @@ describe('TypeScript writes, Python reads and writes the same bytes', () => {
 
 describe('Python writes, TypeScript reads and writes the same bytes', () => {
   test('every message built in Python', () => {
-    // 7 states x 14 codes, 2 intents, 1 ref.
-    expect(python.built).toHaveLength(7 * 14 + 2 + 1);
+    // 7 states x 14 codes, 2 intents, 1 ref, 1 ops status.
+    expect(python.built).toHaveLength(7 * 14 + 2 + 1 + 1);
     for (const { message, text } of python.built) {
-      const strict = message !== 'TaskIntentResult';
+      const strict = message !== 'TaskIntentResult' && message !== 'ops.v1.OpsStatus';
       const read = fromWire(SCHEMAS[message], JSON.parse(text), { strict });
       expect(read.unrecognized).toEqual([]);
       expect(JSON.stringify(toWire(SCHEMAS[message], read.message)), text).toBe(text);

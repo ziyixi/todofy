@@ -1,0 +1,640 @@
+// ops-v1 as a protobuf IDL (proto/README.md; contracts/ops-v1/README.md is the contract's text): the operations
+// surface every app's Workers entrypoint "Ops" offers the dashboard Worker "home" over a service binding.
+//
+// This file is the one description of the contract: its methods, messages, enums and value rules
+// (common.wire.v1). The wire stays the JSON ops-v1 has always sent, byte for byte: field names, field-number
+// order (each message's fields are numbered in the order its producers write them), enums as their lower-case
+// names, null for a REQUIRED field without a value, ordered maps for the open sets of names (modes, counters,
+// metrics). contracts/ops-v1/ops-v1.schema.json is generated from it (proto/tools/gen_schema.py), the generated
+// TypeScript wire types (ops_wire.ts) type the bindings, and both codecs check the rules below on every read and
+// write.
+//
+// Timestamps are strings in the format `Timestamp`, not google.protobuf.Timestamp: ops-v1's producers write both
+// whole seconds (`...:00Z`) and milliseconds (`...:00.000Z`), and the profile's Timestamp would rewrite one of
+// them. The app names (`mail-hero`) are strings with an allowed list: an enum's wire name cannot hold a hyphen.
+//
+// Content rule (README "Content rule"): outputs carry codes, numbers, booleans, timestamps, event and run IDs and
+// the apps' own UI URLs only. The rules below make that a check rather than a convention: every name is a `Code`
+// (never free text, an address or a subject), metrics, modes and counters are numbers or booleans, and the only
+// URLs are `HttpsUrl`s without a query.
+//
+// Google's api-linter runs on this file (scripts/api-lint.sh). The rules it cannot meet without changing ops-v1's
+// frozen wire are disabled where they apply, each with its reason. File-wide (api-linter reads them from this
+// header):
+//
+// (-- api-linter: core::0191::file-layout=disabled
+//     aip.dev/not-precedent: the services come first, then each method's messages in the contract's order;
+//     moving the enums would only reorder the generated code. --)
+// (-- api-linter: core::0127::http-annotation=disabled
+//     aip.dev/not-precedent: a Workers service binding, never HTTP. --)
+// (-- api-linter: core::0136::request-message-name=disabled
+//     aip.dev/not-precedent: ops-v1's message names (SetGuardInput, OpsReport). --)
+// (-- api-linter: core::0136::response-message-name=disabled
+//     aip.dev/not-precedent: ops-v1's message names (OpsStatus, GuardState). --)
+// (-- api-linter: core::0142::time-field-type=disabled
+//     aip.dev/not-precedent: ops-v1's timestamps are strings (see above). --)
+// (-- api-linter: core::0142::time-field-names=disabled
+//     aip.dev/not-precedent: ops-v1's wire names (generated_at, set_at); AIP-142 would say generate_time. --)
+// (-- api-linter: core::0140::prepositions=disabled
+//     aip.dev/not-precedent: ops-v1's wire names (last_backup_at). --)
+// (-- api-linter: core::0216::state-field-output-only=disabled
+//     aip.dev/not-precedent: output messages, where REQUIRED means "always written"; OUTPUT_ONLY would let the
+//     wire profile omit them. --)
+
+syntax = "proto3";
+
+package ops.v1;
+
+import "common/wire/v1/wire.proto";
+import "google/api/field_behavior.proto";
+
+option java_multiple_files = true;
+option java_outer_classname = "OpsProto";
+option java_package = "science.ziyixi.ops.v1";
+option (common.wire.v1.formats) = {
+  name: "Timestamp"
+  pattern: "[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]{1,3})?Z"
+  description: "RFC 3339 UTC with Z, optional milliseconds."
+};
+option (common.wire.v1.formats) = {
+  name: "Code"
+  pattern: "[a-z][a-z0-9_]{0,47}"
+  description: "A closed-vocabulary identifier: signal codes, counter and metric names, reasons. Never free text."
+};
+option (common.wire.v1.formats) = {
+  name: "EventId"
+  pattern: "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+  description: "A mail.received.v1 event_id as Mail Hero writes it (lowercase UUID)."
+};
+option (common.wire.v1.formats) = {
+  name: "RunId"
+  pattern: "[A-Za-z0-9][A-Za-z0-9._-]{0,63}"
+  description: "The dashboard's name for one canary run, e.g. canary-2026-09-29. Also the mail.received.v1 canary.run_id."
+};
+option (common.wire.v1.formats) = {
+  name: "HttpsUrl"
+  pattern: "https://[a-z0-9]([a-z0-9.-]{0,251}[a-z0-9])?/[A-Za-z0-9._~/-]{0,200}"
+  max_length: 300
+  description: "An https URL with a lowercase host and a plain path; no query, fragment, credentials or port."
+};
+option (common.wire.v1.formats) = {
+  name: "Source"
+  pattern: "[a-z][a-z0-9-]{0,31}"
+  description: "Where a report item comes from: an app (mail-hero, todofy, lab), dashboard, cloudflare."
+};
+
+// What every app's "Ops" entrypoint answers (Mail Hero, Todofy, Lab).
+service OpsService {
+  // `status()`: a snapshot built only from bounded, indexed reads; it never writes. Poll it at most every 10
+  // minutes.
+  // (-- api-linter: core::0136::verb-noun=disabled
+  //     aip.dev/not-precedent: ops-v1's method name (`status()` on every app's binding). --)
+  // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
+  // buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE
+  rpc Status(StatusRequest) returns (OpsStatus) {
+    option (common.wire.v1.method).positional = true;
+  }
+
+  // `setGuard(input)`: shed (defer deferrable background work) until a time, or back to normal.
+  // (-- api-linter: core::0134::synonyms=disabled
+  //     aip.dev/not-precedent: ops-v1's method name (`setGuard()`); it is not an AIP-134 update. --)
+  // buf:lint:ignore RPC_REQUEST_STANDARD_NAME
+  // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
+  // buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE
+  rpc SetGuard(SetGuardInput) returns (GuardState);
+}
+
+// The end-to-end canary's producer side: Mail Hero (capability `canary_producer`).
+service CanaryProducerService {
+  // `startCanary(input)`: one synthetic canary mail and its delivery, idempotent per run_id.
+  // buf:lint:ignore RPC_REQUEST_STANDARD_NAME
+  // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
+  // buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE
+  rpc StartCanary(StartCanaryInput) returns (StartCanaryResult);
+
+  // `canaryDelivery(eventId)`: the delivery state of a canary event. (The answer's type is written in full: inside
+  // the service, `CanaryDelivery` names this method.)
+  // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
+  // buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE
+  rpc CanaryDelivery(CanaryDeliveryRequest) returns (.ops.v1.CanaryDelivery) {
+    option (common.wire.v1.method).positional = true;
+  }
+}
+
+// The end-to-end canary's consumer side: Todofy (capability `canary_consumer`).
+service CanaryConsumerService {
+  // `canaryResult(eventId)`: what the consumer did with a canary event (its type written in full, as above).
+  // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
+  // buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE
+  rpc CanaryResult(CanaryResultRequest) returns (.ops.v1.CanaryResult) {
+    option (common.wire.v1.method).positional = true;
+  }
+}
+
+// The ops digest: Todofy (capability `ops_digest`) stores the dashboard's latest report for its daily reminder.
+service OpsDigestService {
+  // `reportOps(report)`: replaces the stored report unless the stored one is newer.
+  // buf:lint:ignore RPC_REQUEST_STANDARD_NAME
+  // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
+  // buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE
+  rpc ReportOps(OpsReport) returns (OpsReportReceipt);
+}
+
+// Input of Status: nothing (`status()`).
+message StatusRequest {}
+
+// Output of Status (every app).
+message OpsStatus {
+  // Always "ops-v1" (the package carries the major version; this field mirrors v1's wire).
+  string version = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).allowed = "ops-v1"
+  ];
+  // The app that answers.
+  string app = 2 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field) = {
+      allowed: [
+        "mail-hero",
+        "todofy",
+        "lab"
+      ]
+    }
+  ];
+  // When the snapshot was taken.
+  string generated_at = 3 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).format = "Timestamp"
+  ];
+  // down: maintenance, or the snapshot could not be read; degraded: a warning or critical signal; else ok.
+  Health health = 4 [(google.api.field_behavior) = REQUIRED];
+  // Operating switches by name, booleans only. Every app has `maintenance`; contracts/ops-v1/README.md lists each
+  // app's others. The deployment variables are always there; a switch read from storage is left out of a
+  // `status_unavailable` status, never guessed.
+  map<string, bool> modes = 5 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field) = {
+      key_format: "Code"
+      max_items: 12
+      required_keys: "maintenance"
+      keep_order: true
+    }
+  ];
+  // The effective guard.
+  GuardState guard = 6 [(google.api.field_behavior) = REQUIRED];
+  // Active conditions only, critical first, then by code.
+  repeated Signal signals = 7 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).max_items = 16
+  ];
+  // Numbers only, named by codes; a counter the app could not read is left out (IMPLEMENTATION.md lists each
+  // app's names).
+  map<string, double> counters = 8 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field) = {
+      key_format: "Code"
+      max_items: 32
+      keep_order: true
+    }
+  ];
+  // The app's last complete backup; null when there is none.
+  optional string last_backup_at = 9 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).format = "Timestamp"
+  ];
+  // The app's owner UI, `https://<host>/`; null when the app does not know its host.
+  optional string ui_url = 10 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).format = "HttpsUrl"
+  ];
+  // What this release supports (canary_producer, canary_consumer, guard, ops_digest); the dashboard checks
+  // them before using a feature.
+  repeated string capabilities = 11 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field) = {
+      format: "Code"
+      max_items: 16
+      unique: true
+    }
+  ];
+}
+
+// An app's health.
+enum Health {
+  // Never sent.
+  HEALTH_UNSPECIFIED = 0;
+  // Nothing worse than an info signal.
+  HEALTH_OK = 1;
+  // A warning or critical signal is active.
+  HEALTH_DEGRADED = 2;
+  // Maintenance mode, or the snapshot could not be read.
+  HEALTH_DOWN = 3;
+}
+
+// One active condition.
+message Signal {
+  // What the condition is (README "Signal codes").
+  string code = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).format = "Code"
+  ];
+  // How bad it is.
+  Severity severity = 2 [(google.api.field_behavior) = REQUIRED];
+  // Numbers only, named by codes.
+  map<string, double> metrics = 3 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field) = {
+      key_format: "Code"
+      max_items: 12
+      keep_order: true
+    }
+  ];
+  // When the condition was first seen, if the app tracks it.
+  optional string since = 4 [(common.wire.v1.field).format = "Timestamp"];
+}
+
+// A signal's or a report item's severity.
+enum Severity {
+  // Never sent.
+  SEVERITY_UNSPECIFIED = 0;
+  // Informational; never makes an app degraded or reaches the digest.
+  SEVERITY_INFO = 1;
+  // Needs attention.
+  SEVERITY_WARNING = 2;
+  // Needs attention now.
+  SEVERITY_CRITICAL = 3;
+}
+
+// The effective guard of an app (output of SetGuard, and OpsStatus.guard). An expired or normal guard reads as
+// normal with reason, until and set_at null and nothing deferred.
+message GuardState {
+  // normal or shed.
+  GuardLevel level = 1 [(google.api.field_behavior) = REQUIRED];
+  // The caller's reason for a shed.
+  optional string reason = 2 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).format = "Code"
+  ];
+  // The end of a shed.
+  optional string until = 3 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).format = "Timestamp"
+  ];
+  // When the current shed was set.
+  optional string set_at = 4 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).format = "Timestamp"
+  ];
+  // The jobs this app defers while the guard is shed (empty when normal).
+  repeated string deferred = 5 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field) = {
+      format: "Code"
+      max_items: 16
+      unique: true
+    }
+  ];
+}
+
+// The guard's level.
+enum GuardLevel {
+  // Never sent.
+  GUARD_LEVEL_UNSPECIFIED = 0;
+  // Every job runs on its normal cadence.
+  GUARD_LEVEL_NORMAL = 1;
+  // Deferrable background work waits (each job still runs when its own bound is reached).
+  GUARD_LEVEL_SHED = 2;
+}
+
+// Input of SetGuard. `until` must be in the future and at most 36 hours ahead of the app's clock
+// (contracts/ops-v1/ops-v1.ts OPS_LIMITS.guardMaxAheadSeconds: a rule relative to a clock, which the app checks).
+message SetGuardInput {
+  option (common.wire.v1.message).discriminator = "level";
+
+  // The level asked for.
+  GuardLevel level = 1 [(google.api.field_behavior) = REQUIRED];
+  // A code chosen by the caller, e.g. d1_reads_high.
+  string reason = 2 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).format = "Code"
+  ];
+  // The end of a shed; null for normal.
+  optional string until = 3 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field) = {
+      format: "Timestamp"
+      cases: {
+        when: "shed"
+        presence: PRESENCE_REQUIRED
+      }
+      otherwise: PRESENCE_ABSENT
+    }
+  ];
+}
+
+// Input of StartCanary.
+message StartCanaryInput {
+  // The run's name, e.g. canary-2026-09-29; Mail Hero is idempotent per run_id.
+  string run_id = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).format = "RunId"
+  ];
+}
+
+// Output of StartCanary. Only `queued` created anything; `paused` and `unavailable` wrote nothing and may be
+// retried with the same run_id.
+message StartCanaryResult {
+  option (common.wire.v1.message).discriminator = "state";
+
+  // What happened.
+  enum State {
+    // Never sent.
+    STATE_UNSPECIFIED = 0;
+    // The canary mail and its delivery exist (now, or from an earlier call with this run_id).
+    STATE_QUEUED = 1;
+    // Sending is held; nothing was created.
+    STATE_PAUSED = 2;
+    // The canary cannot run now; nothing was created.
+    STATE_UNAVAILABLE = 3;
+  }
+
+  // The canary's mail.received.v1 event_id; null unless queued.
+  optional string event_id = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field) = {
+      format: "EventId"
+      cases: {
+        when: "queued"
+        presence: PRESENCE_REQUIRED
+      }
+      otherwise: PRESENCE_ABSENT
+    }
+  ];
+  // What happened.
+  State state = 2 [(google.api.field_behavior) = REQUIRED];
+  // Why it is paused (send_paused, settings_paused, endpoint_paused, endpoint_blocked) or unavailable
+  // (maintenance, backup_active, no_endpoint, capacity). Codes may be added within ops-v1: the dashboard shows an
+  // unknown one as it is.
+  optional string reason = 3 [(common.wire.v1.field) = {
+    format: "Code"
+    open: true
+    cases: {
+      when: "paused"
+      presence: PRESENCE_REQUIRED
+      rules: {
+        allowed: [
+          "send_paused",
+          "settings_paused",
+          "endpoint_paused",
+          "endpoint_blocked"
+        ]
+      }
+    }
+    cases: {
+      when: "unavailable"
+      presence: PRESENCE_REQUIRED
+      rules: {
+        allowed: [
+          "maintenance",
+          "backup_active",
+          "no_endpoint",
+          "capacity"
+        ]
+      }
+    }
+    otherwise: PRESENCE_ABSENT
+  }];
+}
+
+// Input of CanaryDelivery (`canaryDelivery(eventId)`).
+message CanaryDeliveryRequest {
+  // The canary's event_id (a real mail's event ID reads `unknown`).
+  string event_id = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).format = "EventId"
+  ];
+}
+
+// Output of CanaryDelivery: the delivery state of a canary event at Mail Hero.
+message CanaryDelivery {
+  option (common.wire.v1.message).discriminator = "state";
+
+  // The delivery's state.
+  enum State {
+    // Never sent.
+    STATE_UNSPECIFIED = 0;
+    // The consumer durably took it over.
+    STATE_DELIVERED = 1;
+    // Waiting or retrying.
+    STATE_PENDING = 2;
+    // Held by a pause, maintenance or a block of the endpoint revision not yet due for a recheck.
+    STATE_PAUSED = 3;
+    // Given up (error_code says why).
+    STATE_FAILED = 4;
+    // No canary delivery has this event ID.
+    STATE_UNKNOWN = 5;
+  }
+
+  // The delivery's state.
+  State state = 1 [(google.api.field_behavior) = REQUIRED];
+  // HTTP attempts so far: at least one once delivered, none for an unknown event.
+  int32 attempts = 2 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field) = {
+      minimum: 0
+      cases: {
+        when: "delivered"
+        rules: {minimum: 1}
+      }
+      cases: {
+        when: "unknown"
+        rules: {maximum: 0}
+      }
+    }
+  ];
+  // The latest attempt's HTTP status, when there was a response.
+  optional int32 last_http_status = 3 [(common.wire.v1.field) = {
+    minimum: 100
+    maximum: 599
+    cases: {
+      when: "unknown"
+      presence: PRESENCE_ABSENT
+    }
+  }];
+  // When the consumer took it over.
+  optional string delivered_at = 4 [(common.wire.v1.field) = {
+    format: "Timestamp"
+    cases: {
+      when: "delivered"
+      presence: PRESENCE_REQUIRED
+    }
+    otherwise: PRESENCE_ABSENT
+  }];
+  // Mail Hero's last delivery error (http_503, network_error), or the block's code while paused by one.
+  optional string error_code = 5 [(common.wire.v1.field) = {
+    format: "Code"
+    cases: {
+      when: "failed"
+      presence: PRESENCE_REQUIRED
+    }
+    cases: {
+      when: [
+        "pending",
+        "paused"
+      ]
+      presence: PRESENCE_OPTIONAL
+    }
+    otherwise: PRESENCE_ABSENT
+  }];
+}
+
+// Input of CanaryResult (`canaryResult(eventId)`).
+message CanaryResultRequest {
+  // The canary's event_id (a real mail's event ID reads `not_seen`).
+  string event_id = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).format = "EventId"
+  ];
+}
+
+// Output of CanaryResult: what Todofy did with a canary event. A canary never reaches Todoist, reports, the
+// attention list or the reminder.
+message CanaryResult {
+  option (common.wire.v1.message).discriminator = "state";
+
+  // The consumer's state.
+  enum State {
+    // Never sent.
+    STATE_UNSPECIFIED = 0;
+    // No canary event with this ID.
+    STATE_NOT_SEEN = 1;
+    // Taken over, not finished.
+    STATE_PROCESSING = 2;
+    // The summary call answered and passed Todofy's validation.
+    STATE_OK = 3;
+    // Finished with an error (error_code says which).
+    STATE_FAILED = 4;
+  }
+
+  // The consumer's state.
+  State state = 1 [(google.api.field_behavior) = REQUIRED];
+  // What holds a processing canary (maintenance, processing_paused, backup_active, retry_wait): a held run, never
+  // a failure. Codes may be added within ops-v1: the dashboard keeps an unknown one as it is.
+  optional string waiting_code = 2 [(common.wire.v1.field) = {
+    format: "Code"
+    allowed: [
+      "maintenance",
+      "processing_paused",
+      "backup_active",
+      "retry_wait"
+    ]
+    open: true
+    cases: {
+      when: "processing"
+      presence: PRESENCE_OPTIONAL
+    }
+    otherwise: PRESENCE_ABSENT
+  }];
+  // When it finished.
+  optional string completed_at = 3 [(common.wire.v1.field) = {
+    format: "Timestamp"
+    cases: {
+      when: [
+        "ok",
+        "failed"
+      ]
+      presence: PRESENCE_REQUIRED
+    }
+    otherwise: PRESENCE_ABSENT
+  }];
+  // Why it failed, from Todofy's vocabulary (llm_quota, llm_budget_exhausted).
+  optional string error_code = 4 [(common.wire.v1.field) = {
+    format: "Code"
+    cases: {
+      when: "failed"
+      presence: PRESENCE_REQUIRED
+    }
+    otherwise: PRESENCE_ABSENT
+  }];
+}
+
+// Input of ReportOps: the dashboard's latest report, at most 8 KiB as compact JSON (OPS_LIMITS.reportMaxBytes, a
+// rule about the whole message, which Todofy checks).
+message OpsReport {
+  // When the dashboard built it; at most 5 minutes ahead of Todofy's clock.
+  string generated_at = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).format = "Timestamp"
+  ];
+  // The items; only warning and critical ones reach the digest.
+  repeated OpsReportItem items = 2 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).max_items = 20
+  ];
+  // Linked from the digest when present.
+  optional string dashboard_url = 3 [(common.wire.v1.field).format = "HttpsUrl"];
+}
+
+// One item of a report.
+message OpsReportItem {
+  // Where it comes from.
+  string source = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).format = "Source"
+  ];
+  // What the condition is.
+  string code = 2 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).format = "Code"
+  ];
+  // How bad it is.
+  Severity severity = 3 [(google.api.field_behavior) = REQUIRED];
+  // When it was first seen.
+  string since = 4 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).format = "Timestamp"
+  ];
+  // Numbers only, named by codes.
+  map<string, double> metrics = 5 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field) = {
+      key_format: "Code"
+      max_items: 12
+      keep_order: true
+    }
+  ];
+}
+
+// Output of ReportOps. When a report with a later generated_at is already stored, `stored` is false and the
+// receipt describes that stored report.
+message OpsReportReceipt {
+  // Whether this report replaced the stored one.
+  bool stored = 1 [(google.api.field_behavior) = REQUIRED];
+  // The stored report's generated_at.
+  string generated_at = 2 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).format = "Timestamp"
+  ];
+  // The stored report's number of items.
+  int32 item_count = 3 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field) = {
+      minimum: 0
+      maximum: 20
+    }
+  ];
+}
+
+// The message of the Error an Ops method rejects with (`new Error("invalid_input")`); nothing else is thrown on
+// purpose. Every expected outcome (paused, unavailable, not_seen) is a value. A caller treats any other rejection
+// (a binding error, a deploy in progress, an unknown method of an older release) like `unavailable`.
+enum ErrorCode {
+  // Never thrown.
+  ERROR_CODE_UNSPECIFIED = 0;
+  // The input breaks the contract's rules or a rule the app checks; do not retry it unchanged.
+  ERROR_CODE_INVALID_INPUT = 1;
+  // Try again in a minute.
+  ERROR_CODE_BUSY = 2;
+  // Storage or an internal call failed; try again later.
+  ERROR_CODE_UNAVAILABLE = 3;
+}

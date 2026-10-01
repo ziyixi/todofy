@@ -12,6 +12,7 @@ WORK=$(mktemp -d "${TMPDIR:-/tmp}/proto-selftest.XXXXXX")
 trap 'rm -rf "$WORK"' EXIT
 INTENT=todofy/taskintent/v1/task_intent.proto
 LAB=lab/ui/v1/lab_ui_service.proto
+OPS=ops/v1/ops.proto
 failures=0
 "$BUF" build --exclude-source-info -o "$WORK/base.json#format=json"
 
@@ -69,6 +70,10 @@ case_ "change a resource pattern (decks/{deck} -> days/{deck})" breaking fail 's
 case_ "change a resource type (Deck -> DailyDeck)" breaking fail 's/type: "lab.ziyixi.science\/Deck"/type: "lab.ziyixi.science\/DailyDeck"/' lab/ui/v1/deck.proto
 case_ "make an input field OUTPUT_ONLY (SnoozeDeckRequest.request_id)" breaking fail 's/(string request_id = 2 \[\n    \(google.api.field_info\).format = UUID4,\n    \(google.api.field_behavior\) = )OPTIONAL(\n  \];\n\}\n\n\/\/ Output of SnoozeDeck)/$1OUTPUT_ONLY$2/' "$LAB"
 case_ "add a format to an existing field (ExcludePaperRequest.paper_id UUID4)" breaking fail 's/string paper_id = 2 \[\(google.api.field_behavior\) = REQUIRED\];/string paper_id = 2 [\n    (google.api.field_info).format = UUID4,\n    (google.api.field_behavior) = REQUIRED\n  ];/' "$LAB"
+# The wire options of common/wire/v1 (tools/profile_breaking.py): buf passes both, though the bytes or the calls change.
+case_ "drop keep_order from OpsStatus.counters (every producer's counters would be reordered)" breaking fail 's/(key_format: "Code"\n      max_items: 32\n)      keep_order: true\n/$1/' "$OPS"
+case_ "take canaryDelivery's request as one object (drop positional)" breaking fail 's/(rpc CanaryDelivery\(CanaryDeliveryRequest\) returns \(.ops.v1.CanaryDelivery\) \{\n)    option \(common.wire.v1.method\).positional = true;\n  \}/$1  }/' "$OPS"
+case_ "widen a value rule (Code up to 64 characters): reviewed with the fixtures, not a breaking rule" breaking pass 's/\[a-z\]\[a-z0-9_\]\{0,47\}/[a-z][a-z0-9_]{0,63}/' "$OPS"
 case_ "change a binding of the test fixtures (prototest is ignored, as by buf)" breaking pass 's/\{get: "\/v1\/\{parent=shelves\/\*\}\/books"\}/{get: "\/v2\/{parent=shelves\/*}\/books"}/' prototest/v1/prototest.proto
 case_ "zero value without _UNSPECIFIED (MODE_UNSPECIFIED -> MODE_NONE)" lint fail 's/MODE_UNSPECIFIED = 0/MODE_NONE = 0/'
 case_ "enum value without its prefix (SOURCE_LAB -> LAB)" lint fail 's/SOURCE_LAB = 1/LAB = 1/'

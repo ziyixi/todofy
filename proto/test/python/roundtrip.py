@@ -13,6 +13,7 @@ import json
 import sys
 
 from proto_test_support import compact
+from ziyixi_proto.ops.v1 import ops_pb
 from ziyixi_proto.prototest.v1 import prototest_pb, rules_pb
 from ziyixi_proto.todofy.taskintent.v1 import task_intent_pb as pb
 from ziyixi_proto.wire_json import WireJsonError, from_wire, to_wire
@@ -24,6 +25,20 @@ MESSAGES = {
     "prototest.v1.Book": prototest_pb.Book,
     "prototest.v1.BookCard": prototest_pb.BookCard,
     "prototest.v1.Parcel": rules_pb.Parcel,
+    **{
+        f"ops.v1.{name}": getattr(ops_pb, name)
+        for name in (
+            "OpsStatus",
+            "GuardState",
+            "SetGuardInput",
+            "StartCanaryInput",
+            "StartCanaryResult",
+            "CanaryDelivery",
+            "CanaryResult",
+            "OpsReport",
+            "OpsReportReceipt",
+        )
+    },
 }
 
 
@@ -74,6 +89,25 @@ def built() -> list[dict]:
             "text": compact(to_wire(pb.TaskIntentRef(version="task-intent-v1", source=pb.Source.LAB, intent_id="x"))),
         }
     )
+    # The ops-v1 status TypeScript builds too: counters and metrics in the producer's own order (keep_order).
+    status = ops_pb.OpsStatus(
+        version="ops-v1",
+        app="todofy",
+        generated_at="2026-09-29T15:00:00Z",
+        health=ops_pb.Health.DEGRADED,
+        modes={"maintenance": False, "processing_paused": True, "backup_active": False},
+        guard=ops_pb.GuardState(level=ops_pb.GuardLevel.NORMAL),
+        signals=(
+            ops_pb.Signal(
+                code="gemini_budget_80",
+                severity=ops_pb.Severity.WARNING,
+                metrics={"percent": 82.4, "used_tokens": 2460000, "zeta": 0.0001},
+            ),
+        ),
+        counters={"zeta": 1, "alpha": 2.5, "middle": 3865470566},
+        capabilities=("canary_consumer", "guard"),
+    )
+    out.append({"message": "ops.v1.OpsStatus", "text": compact(to_wire(status))})
     return out
 
 

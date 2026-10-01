@@ -285,3 +285,91 @@ def check_image(image: dict[str, Any]) -> None:
                     else None
                 )
                 field_rules(file, message, field, enums, entry)
+
+
+# ---- the shape of a message for the generators of types and schemas ------------------------------------------
+
+
+@dataclass(frozen=True)
+class FieldView:
+    """One field of a message as a reader sees it in one variant (or in a message that is not a union)."""
+
+    field: dict[str, Any]
+    map_entry: dict[str, Any] | None
+    rules: FieldRules | None
+    # "required": has a value; "absent": has none; "": as declared (REQUIRED or not, explicit presence or not).
+    presence: str
+    # The values a producer may write (the field's and the case's lists both apply), None for no list.
+    allowed: tuple[str, ...] | None
+    minimum: float | None
+    maximum: float | None
+
+
+@dataclass(frozen=True)
+class Variant:
+    """A message's fields for one value of its discriminator (``value``), or all of a plain message (None)."""
+
+    value: str | None
+    fields: tuple[FieldView, ...]
+
+
+def map_entries(message: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    """The map entry types nested in ``message`` (protoc's synthetic ``<Field>Entry``), by full type name suffix."""
+    return {
+        nested["name"]: nested for nested in message.get("nestedType", []) if nested.get("options", {}).get("mapEntry")
+    }
+
+
+def entry_of(message: dict[str, Any], field: dict[str, Any]) -> dict[str, Any] | None:
+    if field["type"] != "TYPE_MESSAGE":
+        return None
+    return map_entries(message).get(field.get("typeName", "").rsplit(".", 1)[-1])
+
+
+def _merge(case: Case | None, rules: FieldRules | None) -> tuple[tuple[str, ...] | None, float | None, float | None]:
+    lists = [b.allowed for b in (rules.bounds if rules else None, case.bounds if case else None) if b and b.allowed]
+    allowed = None
+    for values in lists:
+        allowed = values if allowed is None else tuple(v for v in allowed if v in values)
+    mins = [
+        b.minimum
+        for b in (rules.bounds if rules else None, case.bounds if case else None)
+        if b and b.minimum is not None
+    ]
+    maxs = [
+        b.maximum
+        for b in (rules.bounds if rules else None, case.bounds if case else None)
+        if b and b.maximum is not None
+    ]
+    return allowed, (max(mins) if mins else None), (min(maxs) if maxs else None)
+
+
+def variants(file: dict[str, Any], message: dict[str, Any], enums: dict[str, dict[str, Any]]) -> list[Variant]:
+    """The message's variants: one per value of its discriminator (in value order), or one for a plain message."""
+    fields = sorted(message.get("field", []), key=lambda f: f["number"])
+    rules = {f["name"]: field_rules(file, message, f, enums, entry_of(message, f)) for f in fields}
+    union = discriminator(message)
+    if union is None:
+        return [
+            Variant(
+                None,
+                tuple(
+                    FieldView(f, entry_of(message, f), rules[f["name"]], "", *_merge(None, rules[f["name"]]))
+                    for f in fields
+                ),
+            )
+        ]
+    target = next(f for f in fields if f["name"] == union)
+    out = []
+    for value in wire_names(enums[target["typeName"]]):
+        views = []
+        for f in fields:
+            r = rules[f["name"]]
+            case = next((c for c in r.cases if value in c.when), None) if r else None
+            presence = (case.presence if case else r.otherwise) if r else ""
+            allowed, minimum, maximum = _merge(case, r)
+            if f is target:
+                presence, allowed = "required", (value,)
+            views.append(FieldView(f, entry_of(message, f), r, presence, allowed, minimum, maximum))
+        out.append(Variant(value, tuple(views)))
+    return out

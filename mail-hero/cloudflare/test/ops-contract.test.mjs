@@ -45,11 +45,11 @@ test('validate.mjs refuses keywords and references it does not implement', () =>
 
 test('the constants of ops-v1.ts are the schema values', () => {
   assert.equal(ops.OPS_VERSION, defs.OpsStatus.properties.version.const)
-  assert.deepEqual([...ops.OPS_APPS], defs.App.enum)
+  assert.deepEqual([...ops.OPS_APPS], defs.OpsStatus.properties.app.enum)
   assert.deepEqual([...ops.OPS_SEVERITIES], defs.Severity.enum)
   assert.deepEqual([...ops.OPS_HEALTH], defs.Health.enum)
   assert.deepEqual([...ops.GUARD_LEVELS], defs.GuardLevel.enum)
-  assert.deepEqual([...ops.OPS_ERROR_CODES], defs.OpsErrorCode.enum)
+  assert.deepEqual([...ops.OPS_ERROR_CODES], defs.ErrorCode.enum)
   const [, paused, unavailable] = defs.StartCanaryResult.oneOf
   assert.deepEqual([...ops.CANARY_PAUSED_REASONS], paused.properties.reason.enum)
   assert.deepEqual([...ops.CANARY_UNAVAILABLE_REASONS], unavailable.properties.reason.enum)
@@ -58,9 +58,9 @@ test('the constants of ops-v1.ts are the schema values', () => {
   assert.equal(limits.reportMaxItems, defs.OpsReport.properties.items.maxItems)
   assert.equal(limits.reportMaxItems, defs.OpsReportReceipt.properties.item_count.maximum)
   assert.equal(limits.statusMaxSignals, defs.OpsStatus.properties.signals.maxItems)
-  assert.equal(limits.metricsMaxKeys, defs.Metrics.maxProperties)
-  assert.equal(limits.modesMaxKeys, defs.Modes.maxProperties)
-  assert.equal(limits.countersMaxKeys, defs.Counters.maxProperties)
+  assert.equal(limits.metricsMaxKeys, defs.Signal.properties.metrics.maxProperties)
+  assert.equal(limits.modesMaxKeys, defs.OpsStatus.properties.modes.maxProperties)
+  assert.equal(limits.countersMaxKeys, defs.OpsStatus.properties.counters.maxProperties)
   assert.equal(limits.capabilitiesMax, defs.OpsStatus.properties.capabilities.maxItems)
   assert.equal(limits.deferredMax, defs.GuardState.properties.deferred.maxItems)
 })

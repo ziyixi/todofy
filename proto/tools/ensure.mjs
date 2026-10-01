@@ -10,10 +10,11 @@
  *
  * It writes:
  *   proto/ts/<package path>/*_pb.ts                         protobuf-es (buf.gen.yaml)
+ *   proto/ts/<package path>/*_wire.ts                       tools/gen_wire_ts.py (the binding contracts' JSON types)
  *   proto/python/src/ziyixi_proto/<package path>/*_pb.py    tools/gen_py.py
  * and a stamp, proto/.generated.json: a hash of every input (the .proto files, buf.yaml, buf.lock,
- * buf.gen.yaml, package-lock.json, which pins buf, protoc-gen-es and the runtime, this script,
- * gen_py.py and wire_rules.py) and of every output file (proto/python/build_backend.py checks it the same way).
+ * buf.gen.yaml, package-lock.json, which pins buf, protoc-gen-es and the runtime, this script and the
+ * Python generators gen_py.py, gen_wire_ts.py and wire_rules.py) and of every output file (proto/python/build_backend.py checks it the same way).
  *
  * It first checks that proto/node_modules holds every package package-lock.json pins at that version: the
  * generated code imports the protobuf-es runtime from there, the only copy in the repository, so a deleted
@@ -39,7 +40,7 @@
  *                                                 directories: all three must be byte-identical, and the
  *                                                 stamp's .proto files must be exactly buf's module files
  *
- * Environment: PROTO_PYTHON selects the Python that runs gen_py.py (default python3, python on Windows; the
+ * Environment: PROTO_PYTHON selects the Python that runs the generators (default python3, python on Windows; the
  * build backend passes its own interpreter).
  *
  * Every tool starts without a shell, so the same code runs on Windows (toolCommands): buf is its JavaScript
@@ -72,7 +73,7 @@ const TEMP_PREFIX = '.generate-';
 const TARGETS = { ts: join(PROTO, 'ts'), py: join(PROTO, 'python', 'src', 'ziyixi_proto') };
 /** Not part of the buf module (keep equal to buf.yaml `excludes`; --check-deterministic compares). */
 const EXCLUDED = new Set(['node_modules', 'python', 'scripts', 'test', 'testdata', 'tools', 'ts']);
-const INPUT_FILES = ['buf.yaml', 'buf.lock', 'buf.gen.yaml', 'package-lock.json', 'tools/ensure.mjs', 'tools/gen_py.py', 'tools/wire_rules.py'];
+const INPUT_FILES = ['buf.yaml', 'buf.lock', 'buf.gen.yaml', 'package-lock.json', 'tools/ensure.mjs', 'tools/gen_py.py', 'tools/gen_wire_ts.py', 'tools/wire_rules.py'];
 const STAMP_VERSION = 1;
 /** A lock whose holder cannot be checked (another host, no owner file yet) is abandoned at this age. */
 const LOCK_STALE_MS = 600_000;
@@ -224,10 +225,13 @@ function generateInto(dir) {
   buf(['generate', '--output', dir]);
   const image = buf(['build', '--exclude-imports', '--exclude-source-info', '-o', '-#format=json'], { maxBuffer: 64 << 20 });
   const [python, prefix] = toolCommands().python;
-  run(python, [...prefix, join(PROTO, 'tools', 'gen_py.py'), join(dir, 'py')], {
-    input: image,
-    stdio: ['pipe', 'pipe', 'pipe'],
-  });
+  // The Python modules, and the TypeScript wire JSON types next to protobuf-es's output (same image).
+  for (const [generator, out] of [
+    ['gen_py.py', 'py'],
+    ['gen_wire_ts.py', 'ts'],
+  ]) {
+    run(python, [...prefix, join(PROTO, 'tools', generator), join(dir, out)], { input: image, stdio: ['pipe', 'pipe', 'pipe'] });
+  }
   for (const lang of ['ts', 'py']) {
     const root = join(dir, lang);
     mkdirSync(root, { recursive: true });

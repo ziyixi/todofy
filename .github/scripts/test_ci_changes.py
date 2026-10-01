@@ -283,6 +283,8 @@ class Classify(unittest.TestCase):
             "proto/scripts/breaking.sh": none,
             "proto/scripts/api-lint.sh": none,
             "proto/tools/profile_breaking.py": none,
+            "proto/tools/gen_wire_ts.py": none,
+            "proto/tools/gen_schema.py": none,
             "proto/tools/api-linter/go.mod": none,
             "proto/tools/api-linter/go.sum": none,
             "proto/tsconfig.json": none,

@@ -170,6 +170,8 @@ PROTO_PACKAGES: dict[str, tuple[str, ...]] = {
     "proto/links/ui/": ("links",),
     # CommonReason: Lab reads its names as types only.
     "proto/common/errors/": (),
+    # ops-v1 (contracts/ops-v1): no app's code imports it yet.
+    "proto/ops/": (),
     # The runtimes' test fixtures (never imported by an app; not in the Python wheel).
     "proto/prototest/": (),
 }
@@ -179,6 +181,9 @@ PROTO_NOT_BUNDLED = (
     "proto/testdata/",
     "proto/scripts/",
     "proto/tools/profile_breaking.py",
+    # The wire JSON types (types only, never in a bundle) and the contracts' JSON Schema generator.
+    "proto/tools/gen_wire_ts.py",
+    "proto/tools/gen_schema.py",
     "proto/tools/api-linter/",
     "proto/tsconfig.json",
     "proto/vitest.config.ts",

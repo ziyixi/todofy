@@ -1,9 +1,10 @@
-/** The task-intent-v1 JSON Schema and fixtures (contracts/task-intent-v1) and the shared edge cases. */
+/** The task-intent-v1 JSON Schema and fixtures (contracts/task-intent-v1), ops-v1's fixtures and the shared edge cases. */
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 const REPO = join(import.meta.dirname, '..', '..');
 export const CONTRACT = join(REPO, 'contracts', 'task-intent-v1');
+export const OPS_CONTRACT = join(REPO, 'contracts', 'ops-v1');
 /** Shared with test/python: both codecs must give the same verdict and bytes on every case. */
 export const CASES_FILE = join(REPO, 'proto', 'testdata', 'wire-profile-cases.json');
 
@@ -13,8 +14,8 @@ export interface Fixture {
   readonly value: Record<string, unknown>;
 }
 
-export function fixtures(def: string, invalid = false): Fixture[] {
-  const dir = invalid ? join(CONTRACT, 'fixtures', 'invalid', def) : join(CONTRACT, 'fixtures', def);
+export function fixtures(def: string, invalid = false, contract = CONTRACT): Fixture[] {
+  const dir = invalid ? join(contract, 'fixtures', 'invalid', def) : join(contract, 'fixtures', def);
   return readdirSync(dir)
     .filter((name) => name.endsWith('.json'))
     .sort()

@@ -798,6 +798,13 @@ jobs:
           version: '0.12.10'
           working-directory: todofy
           enable-cache: true
+      # ops-v1's JSON Schema is generated from proto/ops/v1/ops.proto: a hand edit, or an IDL change without
+      # `npm run schema`, fails here (the Python steps below give every fixture the reference validator's verdict on it).
+      - name: The contracts' JSON Schemas are generated from the IDL
+        working-directory: proto
+        run: |
+          npm ci --no-audit --no-fund
+          npm run check:schema
       # Producer: Mail Hero's parser and payload builder must still emit every golden fixture byte for byte.
       # ops-v1: validate.mjs, the ops-v1.ts constants and the fixtures agree with the schema, and every
       # value Mail Hero's Ops code derives (status, guard, canary) passes the schema. Host only, no workerd.
@@ -1037,6 +1044,8 @@ jobs:
         run: sh scripts/rules-selftest.sh
       - name: Generation is deterministic
         run: node tools/ensure.mjs --check-deterministic
+      - name: The contracts' JSON Schemas are generated from the IDL (tools/gen_schema.py)
+        run: npm run check:schema
       - name: One protobuf-es runtime at the generator's version, every user wired the same way
         working-directory: .
         run: python3 -m unittest discover -s .github/scripts -p test_proto.py

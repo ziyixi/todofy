@@ -61,7 +61,7 @@ prefix `/_/api/v1/` (its host's other paths are short links).
    existing method that gains or loses `positional` (callers and receivers would disagree on the arguments);
    value rules are reviewed with the contract's fixtures, like a JSON Schema's. Like buf, it skips the
    directories `buf.yaml` lists under `breaking.ignore` (the runtimes' fixtures). `scripts/rules-selftest.sh`
-   proves the rules bite (30 cases, on `task_intent.proto`, `lab/ui/v1` and `prototest`).
+   proves the rules bite (33 cases, on `task_intent.proto`, `lab/ui/v1`, `ops/v1` and `prototest`).
 5. **Adding an enum value is compatible by design**, so neither buf nor the profile check flags it. What
    keeps consumers working is the reading rule: outputs are read leniently (an unknown enum name reads as
    `*_UNSPECIFIED`, an unknown field is skipped, both listed in `unrecognized`), and a consumer branches on
@@ -73,12 +73,14 @@ prefix `/_/api/v1/` (its host's other paths are short links).
 | --- | --- |
 | `buf.yaml`, `buf.lock` | The module (`path: .`, tooling directories excluded), lint and breaking rules, the `buf.build/googleapis/googleapis` dependency pinned by commit and digest |
 | `buf.gen.yaml` | protobuf-es v2 (`target=ts`, `import_extension=ts`, `erasable_syntax=true`) into `ts/` |
-| `<package path>/*.proto` | One directory per proto package: `todofy/taskintent/v1/task_intent.proto` is `todofy.taskintent.v1`; `lab/ui/v1/*.proto` is `lab.ui.v1`, Lab's owner UI API; `links/ui/v1/*.proto` is `links.ui.v1`, the links app's owner API; `common/errors/v1/errors.proto` is `common.errors.v1`, the error reasons every HTTP API shares; `common/wire/v1/wire.proto` is `common.wire.v1`, the wire profile's own options ([Value rules](#value-rules), `keep_order`, `positional`) |
+| `<package path>/*.proto` | One directory per proto package: `todofy/taskintent/v1/task_intent.proto` is `todofy.taskintent.v1`; `lab/ui/v1/*.proto` is `lab.ui.v1`, Lab's owner UI API; `links/ui/v1/*.proto` is `links.ui.v1`, the links app's owner API; `common/errors/v1/errors.proto` is `common.errors.v1`, the error reasons every HTTP API shares; `common/wire/v1/wire.proto` is `common.wire.v1`, the wire profile's own options ([Value rules](#value-rules), `keep_order`, `positional`); `ops/v1/ops.proto` is `ops.v1`, the IDL of `contracts/ops-v1` (every app's `Ops` entrypoint), a contract several apps implement, so named by the contract, not an app |
 | `package.json`, `package-lock.json` | The toolchain pins (`dependencies`: buf, protoc-gen-es, the runtime) and this folder's test tools (`devDependencies`) |
-| `ts/` | The TypeScript package `@ziyixi/proto`. Committed: `package.json` (its exports), `wire-json.ts`, `wire-rules.ts` and `field-mask.ts` (the codec and its value rules), `http-path.ts`, `http-rule.ts`, `http-transcoder.ts`, `http-client.ts` and `rpc-status.ts` (the HTTP runtime, [HTTP APIs](#http-apis)), `page-token.ts` and `filter.ts` (AIP-158 page tokens and the AIP-160 subset for list methods), `protobuf.ts` / `protobuf-wkt.ts` (the runtime re-exports). Generated: every directory (`ts/todofy/...`, `ts/lab/...`, `ts/common/...`, `ts/google/...`) |
+| `ts/` | The TypeScript package `@ziyixi/proto`. Committed: `package.json` (its exports), `wire-json.ts`, `wire-rules.ts` and `field-mask.ts` (the codec and its value rules), `http-path.ts`, `http-rule.ts`, `http-transcoder.ts`, `http-client.ts` and `rpc-status.ts` (the HTTP runtime, [HTTP APIs](#http-apis)), `page-token.ts` and `filter.ts` (AIP-158 page tokens and the AIP-160 subset for list methods), `protobuf.ts` / `protobuf-wkt.ts` (the runtime re-exports). Generated: every directory (`ts/todofy/...`, `ts/lab/...`, `ts/ops/...`, `ts/common/...`, `ts/google/...`): protobuf-es's `*_pb.ts`, and for the binding contracts the wire JSON types `*_wire.ts` |
 | `python/` | The Python package `ziyixi-proto`. Committed: `pyproject.toml` (static metadata, uv cache keys), `build_backend.py`, `src/ziyixi_proto/__init__.py` and `wire_json.py` (the codec and its value rules). Generated: every directory under `src/ziyixi_proto/`, for the packages `tools/gen_py.py` lists in `PYTHON_PACKAGES` only; the wheel leaves the test-only ones out (`TEST_ONLY_PACKAGES`) |
 | `tools/ensure.mjs` | Installs the pinned toolchain when `node_modules/` does not match the lockfile, and generates both languages when its stamp (`.generated.json`, ignored) does not match |
 | `tools/gen_py.py` | The stdlib-only Python generator (frozen dataclasses, `IntEnum`s, field tables), for `PYTHON_PACKAGES` only: `todofy.taskintent.v1` (todofy-core imports it) and `prototest.v1` (this folder's Python tests). A package only TypeScript apps use (an app's UI API) is not generated, so it may use what the Python profile lacks |
+| `tools/gen_wire_ts.py` | The TypeScript wire JSON types (`ts/<package>/<file>_wire.ts`, types only) of the packages in `WIRE_PACKAGES` (`ops.v1`): each message's JSON as a producer writes it, a union narrowed by its discriminator, each service as a binding's methods, and the `WireTypes` entries that type `toWire`'s answer |
+| `tools/gen_schema.py` | A contract's JSON Schema from its IDL (`SCHEMAS`: `ops.v1` writes `contracts/ops-v1/ops-v1.schema.json`); `npm run schema` rewrites it, `npm run check:schema` (Proto checks and Contracts) fails when it differs |
 | `tools/wire_rules.py` | The value rules of `common/wire/v1` as the generators read them from a buf image, and the check that refuses a rule that cannot apply where it is written (every package) |
 | `tools/profile_breaking.py` | The profile's breaking rules (rule 4) |
 | `scripts/breaking.sh`, `scripts/rules-selftest.sh` | The breaking gate against a base commit; the rules self-test |
@@ -202,6 +204,7 @@ npm run api-lint                         # Google's api-linter (needs Go; tools/
 npm run breaking -- "$(git merge-base HEAD origin/main)"   # buf breaking + the profile rules
 npm run selftest                         # the rules still bite
 npm run check:deterministic              # generate twice more, compare with the installed output
+npm run schema                           # rewrite the contracts' generated JSON Schemas (check:schema compares)
 npm run typecheck && npm test            # both codecs (TypeScript, then Python 3.14 through uv)
 ```
 
@@ -220,10 +223,15 @@ typecheck|test|dev` regenerates first (its pre-scripts); Todofy's next `uv run` 
    `google.protobuf.Timestamp` and `google.protobuf.FieldMask`; anything else (64-bit integers, `float`,
    `bytes`, oneofs, nested messages, other well-known types as fields) stops generation with an error (for
    Python, only in the packages of `PYTHON_PACKAGES`; add the package there when a Python app imports it).
-2. `npm run lint` until clean, then `npm run generate`.
-3. Add the contract's fixtures to `test/` and `test/python/` (round trip byte for byte, enum and field sets
-   equal to the JSON Schema), and a new kind of field to `testdata/wire-profile-cases.json` first.
-4. In each app that uses it: the TypeScript dependency and postinstall above, or the Python source above;
+2. State its value rules next to its fields ([Value rules](#value-rules)): formats, allowed lists, bounds, sizes,
+   and a union's cases. A contract other apps call over a service binding gets wire JSON types: add its package to
+   `WIRE_PACKAGES` in `tools/gen_wire_ts.py` (and `positional` on a method that takes plain arguments). A contract
+   with a published JSON Schema generates it: add it to `SCHEMAS` in `tools/gen_schema.py` and run `npm run schema`.
+3. `npm run lint && npm run api-lint` until clean, then `npm run generate`.
+4. Add the contract's fixtures to `test/` and `test/python/` (round trip byte for byte, a strict read refusing every
+   invalid fixture, a lenient read tolerating what its consumers do), and a new kind of field or rule to
+   `testdata/wire-profile-cases.json` first.
+5. In each app that uses it: the TypeScript dependency and postinstall above, or the Python source above;
    then, in `.github/scripts/ci_changes.py`, add the app to `PROTO_USERS` with the languages its production
    bundles compile in (`"ts"` once it imports a value, not only types; `"python"` once a Worker imports the
    package) and the package directory to `PROTO_PACKAGES` with the apps that import it: a `proto/` change
@@ -450,7 +458,8 @@ The **Proto checks** job (`.github/workflows/ci.yml`) runs when `proto/`, `.gith
 or on a dispatch: `npm ci`, `npm run lint`, `npm run api-lint` (Go from `tools/api-linter/go.mod` via
 `actions/setup-go`; the googleapis check of rule 3 first), `scripts/breaking.sh` against the **Changes** job's `base`
 output (the commit of the last successful `main` run on `main`, the merge base with `origin/main` on a
-branch; the checkout has `fetch-depth: 0`), the rules self-test, the determinism check,
+branch; the checkout has `fetch-depth: 0`), the rules self-test, the determinism check, the generated JSON Schemas
+(`npm run check:schema`, also in `Contracts`, which a hand edit of a schema under `contracts/` triggers),
 `test_proto.py` (one version, wiring, the deploy maps), and both codecs' typecheck and tests. When Changes has no base (it
 runs everything: first run, unusable base, dispatch), `breaking.sh` compares with `HEAD~1` and says so in
 the log; a base that predates `proto/` has nothing to break. The job is in `CI gate`'s needs and in
