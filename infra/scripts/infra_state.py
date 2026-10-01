@@ -2,7 +2,8 @@
 """Run OpenTofu for infra/ against the encrypted remote state in R2, printing only the redacted summary.
 
     python3 infra/scripts/infra_state.py plan --environment production [--var-file F] [--work-dir D]
-    python3 infra/scripts/infra_state.py apply --environment production --expect import=5,outputs=3
+    python3 infra/scripts/infra_state.py apply --environment production   # only inside "Infra apply" on main
+    python3 infra/scripts/infra_state.py list-backups --environment production [--var-file F]
 
 Used by .github/workflows/infra.yml (daily drift plan), .github/workflows/infra-apply.yml (the apply, P4) and by
 bootstrap_state.py (one-time import). It:
@@ -17,10 +18,13 @@ bootstrap_state.py (one-time import). It:
 - reads `tofu show -json` into memory (never to disk) and prints tools/infra-plan-summary's summary only;
 - checks the planned outputs (outputs.tf) against the apps' production wrangler.toml files: every ACCESS_AUDIENCE,
   D1 database_id and R2 bucket_name must equal what the managed objects hold (names only are printed);
-- `apply` (README.md "Apply"): copies the encrypted state object to a dated key in the same private bucket, plans,
+- `apply` (README.md "Apply"): runs only inside the "Infra apply" workflow dispatched on main (accident-proofing,
+  not a security boundary). Copies the encrypted state object to a dated key in the same private bucket, plans,
   refuses before any write unless the plan passes every gate (no delete/replace/forget unless confirmed, only
-  ALLOWED_TYPES, no change to FROZEN addresses, exactly the --expect counts, outputs equal to the wrangler
-  configs), then applies exactly that saved plan and plans again, which must be "No changes".
+  ALLOWED_TYPES, no write to a FROZEN object by address, previous address or id, exactly the expected counts and
+  plan fingerprint, outputs equal to the wrangler configs), then applies exactly that saved plan and plans again,
+  which must be "No changes";
+- `list-backups`: the keys of the apply's state backups (keys only; README.md "Rotating the passphrase").
 
 Values come from --var-file (a tfvars file written by local_tfvars.py, or JSON) or from the INFRA_TFVARS
 environment variable (the GitHub secret, JSON). `values-json --var-file F | gh secret set INFRA_TFVARS ...`
@@ -94,15 +98,27 @@ ALLOWED_TYPES = frozenset({
     "cloudflare_d1_database",
     "cloudflare_r2_bucket",
 })
-# Addresses an apply must never write to (an import, which only reads, is allowed). The backup app's only policy is
-# application-scoped; whether Cloudflare accepts an application PUT that references it by id is unproven (no dry run
-# exists), and a refused or partial PUT would cut off the backup collector. README.md "Import notes".
-FROZEN = frozenset({"cloudflare_zero_trust_access_application.mail_hero_backup"})
+# Objects an apply must never write to (an import, which only reads, is allowed): address -> the object's id. The
+# backup app's only policy is application-scoped; whether Cloudflare accepts an application PUT that references it by
+# id is unproven (no dry run exists), and a refused or partial PUT would cut off the backup collector. README.md
+# "Import notes". The gate matches the address, the previous address (a `moved` rename) and the object id, so a
+# refactor cannot slip a write past it; infra_guard.py FROZEN is the same set (test_infra_config.py) and rejects a
+# `moved` block that names one, and test_infra_config.py holds the id equal to the committed import id.
+FROZEN_OBJECTS = {
+    "cloudflare_zero_trust_access_application.mail_hero_backup": "dafc6e08-7b1b-461f-8735-2cfa668a0ce0",
+}
+FROZEN = frozenset(FROZEN_OBJECTS)
 # The literal a dispatch must type to let a plan delete, replace or forget (INFRA_CONFIRM_DESTRUCTIVE). prevent_destroy
 # still stops a delete or replace at plan time; removing it is a reviewed commit of its own.
 CONFIRM_PHRASE = "delete-replace-forget"
 CONFIRM_ENV, EXPECT_ENV = "INFRA_CONFIRM_DESTRUCTIVE", "INFRA_APPLY_EXPECT"
 BACKUP_PREFIX = "backups"
+# Where `apply` may run: the workflow .github/workflows/infra-apply.yml (its `name:`), dispatched on main. Locally the
+# token, the passphrase and the values are all at hand for `plan`; this turns a one-word slip (apply for plan) into a
+# refusal. It is accident-proofing, not a security boundary: anyone who can edit this file can remove it.
+APPLY_WORKFLOW, APPLY_REF, APPLY_EVENT = "Infra apply", "refs/heads/main", "workflow_dispatch"
+# Hex digits of the plan fingerprint (plan_fingerprint): what binds a dispatch to the plan the reviewer saw.
+FINGERPRINT_DIGITS = 12
 
 # --- outputs against the apps' configs ---
 # The production wrangler.toml of every monorepo Worker (.github/scripts/test_wrangler_configs.py PRODUCTION;
@@ -357,9 +373,11 @@ def sigv4_headers(method: str, url: str, credentials: tuple[str, str], payload: 
 
 
 def s3_request(method: str, base: str, path: str, credentials: tuple[str, str], payload: bytes = b"",
-               extra: Optional[dict[str, str]] = None) -> tuple[int, bytes]:
+               extra: Optional[dict[str, str]] = None, query: Optional[dict[str, str]] = None) -> tuple[int, bytes]:
     """(HTTP status, body). Never raises on an HTTP status; the body is returned to the caller, not printed."""
     url = base.rstrip("/") + "/" + urllib.parse.quote(path.lstrip("/"), safe="/-_.~")
+    if query:
+        url += "?" + urllib.parse.urlencode(sorted(query.items()), quote_via=urllib.parse.quote, safe="-_.~")
     headers = sigv4_headers(method, url, credentials, payload, extra)
     request = urllib.request.Request(url, data=payload if method in ("PUT", "POST") else None, method=method,
                                      headers=headers)
@@ -609,10 +627,11 @@ class Session:
                                    credentials=self.credentials, s3_endpoint=self.endpoint,
                                    data_dir=self.work / "tfdata"), self.log)
 
-    def s3(self, method: str, key: str, payload: bytes = b"", extra: Optional[dict[str, str]] = None):
+    def s3(self, method: str, key: str, payload: bytes = b"", extra: Optional[dict[str, str]] = None,
+           query: Optional[dict[str, str]] = None):
         """One request to the state bucket (key "" is the bucket itself)."""
         path = f"{BUCKET}/{key}" if key else BUCKET
-        return s3_request(method, self.endpoint, path, self.credentials, payload, extra)
+        return s3_request(method, self.endpoint, path, self.credentials, payload, extra, query=query)
 
     def cleanup(self) -> None:
         """Remove the values and plan files (plans are encrypted, but they hold every value once decrypted)."""
@@ -681,8 +700,10 @@ def command_plan(args: argparse.Namespace, env: dict[str, str]) -> int:
         elif verdict == EXIT_DRIFT:
             print("infra_state: the plan has actions: Cloudflare and infra/ differ (drift)", file=sys.stderr)
         if verdict in (EXIT_DRIFT, EXIT_DESTRUCTIVE):
-            # Counts only: what a dispatch of "Infra apply" must state as its expect input to apply this plan.
-            print(f"infra_state: \"Infra apply\" expect for this plan: {format_expect(plan_counts(summary))}")
+            # Counts and the plan fingerprint (addresses only): the expect input that applies exactly this plan. A
+            # reviewer compares it with the line they expected from the address table; never copy a differing line.
+            print(f"infra_state: \"Infra apply\" expect for this plan: "
+                  f"{format_expect(plan_counts(summary), plan_fingerprint(summary))}")
         if verdict == EXIT_OK:
             print("infra_state: no changes")
         return verdict
@@ -706,24 +727,35 @@ class Destructive(Refused):
 
 
 _COUNT = re.compile(r"(import(?:\+[a-z-]+)?|create|update|replace|delete|forget|read|outputs)=([0-9]+)")
+_FINGERPRINT = re.compile(rf"[0-9a-f]{{{FINGERPRINT_DIGITS}}}")
 
 
-def parse_expect(text: str) -> dict[str, int]:
-    """`import=5,outputs=3` (commas or spaces; `none` for nothing) -> {"import": 5, "outputs": 3}. Zeros dropped."""
+def parse_expect(text: str) -> tuple[dict[str, int], Optional[str]]:
+    """`import=5,outputs=3@<fingerprint>` -> ({"import": 5, "outputs": 3}, "<fingerprint>"); `none` -> ({}, None).
+
+    Counts are separated by commas or spaces, zeros dropped. Any action needs the plan fingerprint that the reviewed
+    "Infra drift" run printed after `@`: it binds the dispatch to that exact list of addresses and actions."""
     text = text.strip()
     if not text:
-        raise Refused(f"state the expected actions with --expect or {EXPECT_ENV} (for example import=5,outputs=3, "
-                      "or none), as the last \"Infra drift\" summary shows them")
+        raise Refused(f"state the expected actions with --expect or {EXPECT_ENV} (for example "
+                      "import=5,outputs=3@<fingerprint>, or none), as reviewed in an \"Infra drift\" run")
     if text == "none":
-        return {}
+        return {}, None
+    counts_text, _, fingerprint = text.partition("@")
     expected: dict[str, int] = {}
-    for item in re.split(r"[,\s]+", text):
+    for item in re.split(r"[,\s]+", counts_text.strip()):
         match = _COUNT.fullmatch(item)
         if not match or match.group(1) in expected:
             raise Refused("the expected actions are not word=count pairs of plan action words (or none)")
         if int(match.group(2)):
             expected[match.group(1)] = int(match.group(2))
-    return expected
+    fingerprint = fingerprint.strip()
+    if not expected:
+        raise Refused("the expected actions are all zero; dispatch with none instead")
+    if not _FINGERPRINT.fullmatch(fingerprint):
+        raise Refused(f"the expected actions need the plan fingerprint after @ ({FINGERPRINT_DIGITS} hex digits), as "
+                      "the reviewed \"Infra drift\" run printed it")
+    return expected, fingerprint
 
 
 def plan_counts(summary: dict) -> dict[str, int]:
@@ -734,9 +766,22 @@ def plan_counts(summary: dict) -> dict[str, int]:
     return found
 
 
-def format_expect(found: dict[str, int]) -> str:
-    """plan_counts() as the --expect text that "Infra apply" takes (parse_expect(format_expect(x)) == x)."""
-    return ",".join(f"{word}={n}" for word, n in sorted(found.items())) or "none"
+def plan_fingerprint(summary: dict) -> str:
+    """The first FINGERPRINT_DIGITS hex digits of SHA-256 over the plan's sorted (action, address) rows, no-op rows
+    included, and its output changes. Built from the redacted summary only (addresses and action words, already
+    public), never from a value; the "changed outside OpenTofu" section is left out because it moves by itself."""
+    document = {"resources": sorted([word, address] for word, address in summary["rows"]),
+                "outputs": sorted([word, name] for word, name in summary["outputs"])}
+    digest = hashlib.sha256(json.dumps(document, separators=(",", ":"), sort_keys=True).encode()).hexdigest()
+    return digest[:FINGERPRINT_DIGITS]
+
+
+def format_expect(found: dict[str, int], fingerprint: Optional[str] = None) -> str:
+    """plan_counts() and plan_fingerprint() as the expect text "Infra apply" takes (parse_expect round-trips it)."""
+    if not found:
+        return "none"
+    text = ",".join(f"{word}={n}" for word, n in sorted(found.items()))
+    return f"{text}@{fingerprint}" if fingerprint else text
 
 
 def _type_name(value: Any) -> str:
@@ -757,21 +802,52 @@ def type_violations(plan_json: Any) -> list[str]:
     return sorted(set(found))
 
 
-def frozen_violations(summary: dict) -> list[str]:
-    """FROZEN addresses the plan would write to (anything but no-op or a plain import)."""
-    return sorted(address for word, address in summary["rows"] if address in FROZEN and word not in ("no-op", "import"))
+def _base_address(value: Any) -> str:
+    """A resource address without its instance key (`a.b["k"]` -> `a.b`)."""
+    return value.split("[", 1)[0] if isinstance(value, str) else ""
 
 
-def apply_gate(summary: dict, plan_json: Any, expected: dict[str, int], allow_destructive: bool,
-               problems: list[str]) -> None:
-    """Refuses (fixed messages, addresses of FROZEN objects and type names only) unless the plan may be applied."""
+def _object_ids(change: dict) -> set[str]:
+    """The object ids a change names: before.id, after.id and the import id's last segment."""
+    found = set()
+    for side in ("before", "after"):
+        value = change.get(side)
+        if isinstance(value, dict) and isinstance(value.get("id"), str):
+            found.add(value["id"])
+    importing = change.get("importing")
+    if isinstance(importing, dict) and isinstance(importing.get("id"), str):
+        found.add(importing["id"].rsplit("/", 1)[-1])
+    return found
+
+
+def frozen_violations(plan_json: Any) -> list[str]:
+    """FROZEN objects the plan would write to: any change with an action (anything but a no-op, a plain import or a
+    pure move) whose address or previous address is a FROZEN address (instance keys ignored) or whose object id is a
+    FROZEN id. Returns the FROZEN addresses only (public), never the planned address or an id."""
+    by_id = {object_id: address for address, object_id in FROZEN_OBJECTS.items()}
+    found = set()
+    for item in (plan_json or {}).get("resource_changes") or []:
+        change = item.get("change") or {}
+        if change.get("actions") in (["no-op"], []):
+            continue
+        for address in (item.get("address"), item.get("previous_address")):
+            if _base_address(address) in FROZEN:
+                found.add(_base_address(address))
+        found.update(by_id[object_id] for object_id in _object_ids(change) if object_id in by_id)
+    return sorted(found)
+
+
+def apply_gate(summary: dict, plan_json: Any, expected: dict[str, int], fingerprint: Optional[str],
+               allow_destructive: bool, problems: list[str]) -> None:
+    """Refuses (fixed messages, FROZEN addresses, type names, counts and fingerprints only) unless the plan may be
+    applied: exactly the reviewed plan, and nothing a gate forbids."""
     if destructive(summary) and not allow_destructive:
         raise Destructive(f"the plan deletes, replaces or forgets a resource; dispatch with {CONFIRM_ENV} = "
                           f"{CONFIRM_PHRASE} only if that is intended")
     types = type_violations(plan_json)
     if types:
         raise Refused(f"the plan acts on types outside ALLOWED_TYPES: {types}")
-    frozen = frozen_violations(summary)
+    frozen = frozen_violations(plan_json)
     if frozen:
         raise Refused(f"the plan writes to a FROZEN object: {frozen}")
     if problems:
@@ -780,6 +856,9 @@ def apply_gate(summary: dict, plan_json: Any, expected: dict[str, int], allow_de
     if found != expected:
         raise Refused(f"the plan's actions {dict(sorted(found.items()))} are not the expected "
                       f"{dict(sorted(expected.items()))}")
+    if found and plan_fingerprint(summary) != fingerprint:
+        raise Refused(f"the plan's fingerprint {plan_fingerprint(summary)} is not the reviewed {fingerprint}: main or "
+                      "Cloudflare changed since that \"Infra drift\" run; review a new run before dispatching again")
 
 
 def utc_now() -> datetime.datetime:
@@ -811,9 +890,73 @@ def backup_state(session: "Session", environment: str, env: dict[str, str]) -> s
     return key
 
 
-def command_apply(args: argparse.Namespace, env: dict[str, str]) -> int:
+_BACKUP_NAME = re.compile(r"terraform\.tfstate\.[0-9]{8}T[0-9]{6}Z(?:-run[0-9]+)?")
+_LIST_KEY = re.compile(rb"<Key>([^<]*)</Key>")
+_LIST_TOKEN = re.compile(rb"<NextContinuationToken>([^<]*)</NextContinuationToken>")
+MAX_LIST_PAGES = 20  # 20 x 1000 keys; the backups grow by one per apply
+
+
+def list_backups(session: "Session", environment: str) -> list[str]:
+    """The keys under backups/<environment>/ (ListObjectsV2, keys only). A key that is not a backup name is counted
+    by the caller but never printed."""
+    prefix = f"{BACKUP_PREFIX}/{state_key(environment).split('/', 1)[0]}/"
+    keys: list[str] = []
+    token = None
+    for _ in range(MAX_LIST_PAGES):
+        query = {"list-type": "2", "prefix": prefix}
+        if token:
+            query["continuation-token"] = token
+        status, body = session.s3("GET", "", query=query)
+        if status != 200:
+            raise Refused(f"listing the state backups failed (HTTP {status})")
+        keys += [key.decode("utf-8", "replace") for key in _LIST_KEY.findall(body)]
+        more = _LIST_TOKEN.search(body)
+        if not more:
+            return sorted(keys)
+        token = more.group(1).decode()
+    raise Refused("too many state backup keys to list; delete old ones first")
+
+
+def backup_names(keys: list[str], environment: str) -> tuple[list[str], int]:
+    """(the keys that are backup names, the number of other keys under the prefix)."""
+    prefix = f"{BACKUP_PREFIX}/{environment}/"
+    names = [key for key in keys if key.startswith(prefix) and _BACKUP_NAME.fullmatch(key[len(prefix):])]
+    return names, len(keys) - len(names)
+
+
+def command_list_backups(args: argparse.Namespace, env: dict[str, str]) -> int:
+    """Print the state backups' keys (names hold a UTC time and a run id only) and their count."""
     values = read_values_argument(args.var_file, env)
-    expected = parse_expect(args.expect if args.expect is not None else env.get(EXPECT_ENV, ""))
+    work = new_work_dir(None, env)
+    session = None
+    try:
+        session = Session(environment=args.environment, values=values, work=work, env=env)
+        names, other = backup_names(list_backups(session, args.environment), args.environment)
+        for name in names:
+            print(f"{BUCKET}/{name}")
+        print(f"backups: {len(names)}" + (f" (and {other} other keys under the prefix, not shown)" if other else ""))
+        return EXIT_OK
+    except Refused as error:
+        print(f"infra_state: {error}", file=sys.stderr)
+        return EXIT_ERROR
+    finally:
+        if session is not None:
+            session.cleanup()
+        shutil.rmtree(work, ignore_errors=True)
+
+
+def require_apply_context(env: dict[str, str]) -> None:
+    """Refuses unless this is the "Infra apply" workflow, dispatched on main, on a GitHub Actions runner."""
+    if not (on_actions_runner(env) and env.get("GITHUB_REF") == APPLY_REF
+            and env.get("GITHUB_EVENT_NAME") == APPLY_EVENT and env.get("GITHUB_WORKFLOW") == APPLY_WORKFLOW):
+        raise Refused(f"apply runs only in the \"{APPLY_WORKFLOW}\" workflow dispatched on main "
+                      "(infra/README.md \"Apply\"); locally, run `plan`")
+
+
+def command_apply(args: argparse.Namespace, env: dict[str, str]) -> int:
+    require_apply_context(env)  # before the values, the token or a request: a local slip does nothing at all
+    values = read_values_argument(args.var_file, env)
+    expected, fingerprint = parse_expect(args.expect if args.expect is not None else env.get(EXPECT_ENV, ""))
     confirm = env.get(CONFIRM_ENV, "")
     if confirm not in ("", CONFIRM_PHRASE):
         raise Refused(f"{CONFIRM_ENV} must be empty or exactly {CONFIRM_PHRASE}")
@@ -826,7 +969,7 @@ def command_apply(args: argparse.Namespace, env: dict[str, str]) -> int:
         session.tofu.init(args.environment)
         tofu_code, summary, rendered, plan_json = session.plan_full("apply")
         report(rendered, env)
-        apply_gate(summary, plan_json, expected, confirm == CONFIRM_PHRASE, check_outputs(plan_json, env))
+        apply_gate(summary, plan_json, expected, fingerprint, confirm == CONFIRM_PHRASE, check_outputs(plan_json, env))
         if not plan_counts(summary):
             if tofu_code != 0:
                 raise Refused("tofu reports changes that the summary does not classify; nothing was applied")
@@ -927,6 +1070,12 @@ def command_rotate(args: argparse.Namespace, env: dict[str, str]) -> int:
         if tofu_code != 0 or drift_exit(summary) != EXIT_OK:
             raise Refused("the plan with the new passphrase alone is not \"No changes\"")
         print("rotate: done. Store the new passphrase as INFRA_STATE_PASSPHRASE now.")
+        try:  # a reminder only: the rotation itself is complete
+            names, _ = backup_names(list_backups(session, args.environment), args.environment)
+            print(f"rotate: {len(names)} state backups are still encrypted with the old passphrase; after a suspected "
+                  "leak delete them (infra/README.md \"Rotating the passphrase\").")
+        except Refused:
+            print("rotate: could not list the state backups; run `list-backups` and delete them after a suspected leak")
         return EXIT_OK
     except Refused as error:
         print(f"infra_state: {error}", file=sys.stderr)
@@ -975,9 +1124,13 @@ def main(argv: Optional[list[str]] = None) -> int:
     apply = sub.add_parser("apply", help="back up the state, plan, gate, apply the saved plan, plan again")
     apply.add_argument("--environment", default="production", choices=ENVIRONMENTS)
     apply.add_argument("--var-file", type=Path, help=f"values file outside the repository (default: ${VALUES_ENV})")
-    apply.add_argument("--expect", help=f"the plan's exact actions, e.g. import=5,outputs=3 or none (default: ${EXPECT_ENV})")
+    apply.add_argument("--expect", help="the reviewed plan's exact actions and fingerprint, e.g. "
+                       f"import=5,outputs=3@<fingerprint>, or none (default: ${EXPECT_ENV})")
     apply.add_argument("--work-dir", type=Path, help="parent outside the repository for a new private work directory")
     apply.add_argument("--keep-work-dir", action="store_true", help="keep the new work directory (its log)")
+    backups = sub.add_parser("list-backups", help="print the keys of the apply's state backups (keys only)")
+    backups.add_argument("--environment", default="production", choices=ENVIRONMENTS)
+    backups.add_argument("--var-file", type=Path, help=f"values file outside the repository (default: ${VALUES_ENV})")
     plan = sub.add_parser("plan", help="init + plan against the remote state; print the redacted summary only")
     plan.add_argument("--environment", default="production", choices=ENVIRONMENTS)
     plan.add_argument("--var-file", type=Path, help=f"values file outside the repository (default: ${VALUES_ENV})")
@@ -993,6 +1146,8 @@ def main(argv: Optional[list[str]] = None) -> int:
             return command_apply(args, env)
         if args.command == "rotate-passphrase":
             return command_rotate(args, env)
+        if args.command == "list-backups":
+            return command_list_backups(args, env)
         if args.command == "values-json":
             return command_values_json(args)
     except Refused as error:

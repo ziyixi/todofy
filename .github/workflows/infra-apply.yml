@@ -5,7 +5,10 @@
 # - infra.yml stays plan-only, and test_infra_workflow.py pins that ("apply" never appears in it);
 # - a dispatch needs inputs (the expected actions, the destructive confirmation) that the drift plan must not have.
 # Manual only, for now: an apply should be watched, and the drift run of the merged commit has already shown its
-# summary, whose "expect" line is the input here. Switching to `push` is a later, separate decision (README.md).
+# address table. The "expect" input is what the reviewer expected from that table (counts and the plan fingerprint,
+# which binds the dispatch to that exact list of addresses and actions), never a copy of a line that differs from it.
+# Switching to `push` is a later, separate decision (README.md). infra_state.py refuses `apply` anywhere but in this
+# workflow (its name), dispatched on main.
 # It shares the concurrency group infra-production with "Infra drift", so a plan never reads a half-written state.
 # The public log shows only the backup's key, the redacted summaries (addresses and action counts) and fixed messages.
 name: Infra apply
@@ -14,7 +17,7 @@ on:
   workflow_dispatch:
     inputs:
       expect:
-        description: The plan's exact actions, as the last "Infra drift" run printed them (for example import=5,outputs=3; none for no change)
+        description: The counts and fingerprint you expected and checked against the "Infra drift" address table (for example import=5,outputs=3@<12 hex>; none for no change). Never a copy of a line that differs from what you expected
         required: true
         type: string
       confirm_destructive:
@@ -53,7 +56,8 @@ jobs:
       # In order, and nothing is written before the gates pass: copy the encrypted state object to
       # backups/production/terraform.tfstate.<UTC time>-run<id> in the same private bucket and read it back; plan; refuse
       # unless every gate passes (no delete/replace/forget unless confirmed, only ALLOWED_TYPES, no write to a FROZEN
-      # object, exactly the expected actions, outputs equal to every wrangler.toml); apply exactly the saved plan; plan
+      # object, exactly the expected actions and plan fingerprint, outputs equal to every wrangler.toml); apply exactly
+      # the saved plan; plan
       # again, which must be "No changes". Exit 0 done; 1 refused or failed; 3 a destructive plan without confirmation.
       # The inputs reach the script through the environment only, never through the run line.
       - name: Back up the state, plan, gate and apply the saved plan (redacted summary only)

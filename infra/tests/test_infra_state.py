@@ -492,7 +492,8 @@ class PlanCommand(unittest.TestCase):
         code, out, err, _ = self.run_plan(plan((["update"], False), (["no-op"], False)), plan_exit=2)
         self.assertEqual(code, 2)
         self.assertIn("update: 1", out)
-        self.assertIn('"Infra apply" expect for this plan: update=1', out)
+        fingerprint = infra_state.plan_fingerprint(infra_state.summarize(plan((["update"], False), (["no-op"], False)))[0])
+        self.assertIn(f'"Infra apply" expect for this plan: update=1@{fingerprint}', out)
         self.assertIn('`cloudflare_zero_trust_access_policy.owner`', out)
         self.assert_clean(out + err)
         code, out, err, _ = self.run_plan(plan((["delete", "create"], False)), plan_exit=2)
@@ -600,26 +601,62 @@ class Outputs(unittest.TestCase):
         self.assertTrue(all(config.get("name") for config in configs.values()))
 
 
+BACKUP = "cloudflare_zero_trust_access_application.mail_hero_backup"
+BACKUP_ID = infra_state.FROZEN_OBJECTS[BACKUP]
+
+
+def fingerprint_of(document):
+    return infra_state.plan_fingerprint(infra_state.summarize(document)[0])
+
+
+def expect_for(document):
+    """The expect text a reviewer who checked this plan's address table would dispatch with."""
+    summary = infra_state.summarize(document)[0]
+    return infra_state.format_expect(infra_state.plan_counts(summary), infra_state.plan_fingerprint(summary))
+
+
 class ApplyGates(unittest.TestCase):
     def summary(self, document):
         return infra_state.summarize(document)[0]
 
     def test_expect_is_parsed_strictly_and_round_trips(self):
-        self.assertEqual(infra_state.parse_expect("import=5,outputs=3"), {"import": 5, "outputs": 3})
-        self.assertEqual(infra_state.parse_expect(" update=1  import+update=2 create=0 "), {"update": 1, "import+update": 2})
-        self.assertEqual(infra_state.parse_expect("none"), {})
-        for text in ("", "   ", "import", "import=x", "import=1,import=2", "destroy=1", "import=5;outputs=3"):
+        fp = "0123456789ab"
+        self.assertEqual(infra_state.parse_expect(f"import=5,outputs=3@{fp}"), ({"import": 5, "outputs": 3}, fp))
+        self.assertEqual(infra_state.parse_expect(f" update=1  import+update=2 create=0 @{fp} "),
+                         ({"update": 1, "import+update": 2}, fp))
+        self.assertEqual(infra_state.parse_expect("none"), ({}, None))
+        for text in ("", "   ", "import", "import=x", "import=1,import=2", "destroy=1", "import=5;outputs=3",
+                     "import=5,outputs=3", "import=5@", "import=5@0123", "import=5@0123456789AB", "create=0@" + fp,
+                     "none@" + fp):
             with self.subTest(text=text):
                 with self.assertRaises(infra_state.Refused):
                     infra_state.parse_expect(text)
         for found in ({}, {"import": 5, "outputs": 3}, {"import+update": 1, "update": 2}):
             with self.subTest(found=found):
-                self.assertEqual(infra_state.parse_expect(infra_state.format_expect(found)), found)
+                parsed = infra_state.parse_expect(infra_state.format_expect(found, fp))
+                self.assertEqual(parsed, (found, fp if found else None))
 
     def test_plan_counts(self):
         document = plan((["no-op"], True), (["update"], True), (["no-op"], False),
                         outputs={"x": {"actions": ["create"]}, "y": {"actions": ["no-op"]}})
         self.assertEqual(infra_state.plan_counts(self.summary(document)), {"import": 1, "import+update": 1, "outputs": 1})
+
+    def test_the_fingerprint_binds_addresses_and_actions_not_values_or_order(self):
+        base = plan_at([(ADDRESSES[0], ["no-op"], True), (ADDRESSES[1], ["update"], False), (ADDRESSES[2], ["no-op"], False)])
+        fp = fingerprint_of(base)
+        self.assertRegex(fp, r"^[0-9a-f]{12}$")
+        reordered = dict(base, resource_changes=list(reversed(base["resource_changes"])))
+        self.assertEqual(fingerprint_of(reordered), fp)
+        drifted = dict(base, resource_drift=[{"address": ADDRESSES[2], "change": change(["update"])}])
+        self.assertEqual(fingerprint_of(drifted), fp, "the changed-outside section moves by itself")
+        other_values = json.loads(json.dumps(base).replace(SENTINEL_EMAIL, "x" + SENTINEL_EMAIL))
+        self.assertEqual(fingerprint_of(other_values), fp, "values never enter the fingerprint")
+        # Same counts (update=1), another object: a different fingerprint.
+        same_counts = plan_at([(ADDRESSES[0], ["no-op"], True), (ADDRESSES[1], ["no-op"], False),
+                               (ADDRESSES[2], ["update"], False)])
+        self.assertEqual(infra_state.plan_counts(self.summary(same_counts)), infra_state.plan_counts(self.summary(base)))
+        self.assertNotEqual(fingerprint_of(same_counts), fp)
+        self.assertNotEqual(fingerprint_of(dict(base, output_changes={"x": {"actions": ["create"]}})), fp)
 
     def test_types_outside_the_allowlist_and_data_sources(self):
         document = plan_at([
@@ -634,32 +671,65 @@ class ApplyGates(unittest.TestCase):
         self.assertNotIn(SENTINEL_EMAIL, "".join(infra_state.type_violations(document)))
 
     def test_frozen_objects_may_be_imported_but_never_written(self):
-        backup = "cloudflare_zero_trust_access_application.mail_hero_backup"
-        for actions, importing, frozen in ((["no-op"], False, []), (["no-op"], True, []), (["update"], False, [backup]),
-                                           (["update"], True, [backup]), (["delete", "create"], False, [backup])):
+        for actions, importing, frozen in ((["no-op"], False, []), (["no-op"], True, []), (["update"], False, [BACKUP]),
+                                           (["update"], True, [BACKUP]), (["delete", "create"], False, [BACKUP])):
             with self.subTest(actions=actions, importing=importing):
-                summary = self.summary(plan_at([(backup, actions, importing)]))
-                self.assertEqual(infra_state.frozen_violations(summary), frozen)
+                self.assertEqual(infra_state.frozen_violations(plan_at([(BACKUP, actions, importing)])), frozen)
 
-    def gate(self, document, expected, allow=False, problems=()):
-        infra_state.apply_gate(self.summary(document), document, expected, allow, list(problems))
+    def frozen_by(self, address, actions, previous=None, before_id=None, import_id=None):
+        document = plan_at([(address, actions, import_id is not None)])
+        item = document["resource_changes"][0]
+        if previous:
+            item["previous_address"] = previous
+        if before_id:
+            item["change"]["before"]["id"] = before_id
+        if import_id:
+            item["change"]["importing"] = {"id": f"accounts/{ACCOUNT}/{import_id}"}
+        return infra_state.frozen_violations(document)
+
+    def test_frozen_objects_are_matched_by_previous_address_and_id(self):
+        """A `moved` rename (or a for_each refactor) plus a change must not write to the backup app under a new name."""
+        renamed = "cloudflare_zero_trust_access_application.backup"
+        self.assertEqual(self.frozen_by(renamed, ["update"], previous=BACKUP), [BACKUP])
+        self.assertEqual(self.frozen_by('cloudflare_zero_trust_access_application.owner["backup"]', ["update"],
+                                        previous=BACKUP), [BACKUP])
+        self.assertEqual(self.frozen_by(renamed, ["update"], before_id=BACKUP_ID), [BACKUP])
+        self.assertEqual(self.frozen_by(renamed, ["update"], import_id=BACKUP_ID), [BACKUP])  # import+update
+        self.assertEqual(self.frozen_by(f'{BACKUP}["k"]', ["update"]), [BACKUP])
+        # Moves and imports without a change only touch the state; other objects are not frozen.
+        self.assertEqual(self.frozen_by(renamed, ["no-op"], previous=BACKUP), [])
+        self.assertEqual(self.frozen_by(renamed, ["no-op"], import_id=BACKUP_ID), [])
+        self.assertEqual(self.frozen_by(renamed, ["update"], previous="cloudflare_zero_trust_access_application.x",
+                                        before_id="0000"), [])
+        # The gate refuses the moved+update plan from the review (S3), whatever the expected counts say.
+        moved = plan_at([(renamed, ["update"], False)])
+        moved["resource_changes"][0]["previous_address"] = BACKUP
+        with self.assertRaisesRegex(infra_state.Refused, "FROZEN") as caught:
+            self.gate(moved, {"update": 1}, fingerprint_of(moved))
+        self.assertNotIn(renamed, str(caught.exception))
+
+    def gate(self, document, expected, fingerprint=None, allow=False, problems=()):
+        infra_state.apply_gate(self.summary(document), document, expected,
+                               fingerprint if fingerprint is not None else fingerprint_of(document), allow, list(problems))
 
     def test_the_gate_passes_exactly_the_expected_plan(self):
         imports = plan(*[(["no-op"], True)] * 2, outputs={"x": {"actions": ["create"]}})
         self.gate(imports, {"import": 2, "outputs": 1})
         refusals = {
-            "other counts": (imports, {"import": 3, "outputs": 1}, False, (), "not the expected"),
-            "missing outputs": (imports, {"import": 2}, False, (), "not the expected"),
-            "destructive": (plan((["delete"], False)), {"delete": 1}, False, (), "deletes, replaces or forgets"),
-            "outputs differ": (imports, {"import": 2, "outputs": 1}, False, ("x",), "wrangler.toml"),
-            "type": (plan_at([("cloudflare_dns_record.x", ["create"], False)]), {"create": 1}, False, (), "ALLOWED_TYPES"),
-            "frozen": (plan_at([("cloudflare_zero_trust_access_application.mail_hero_backup", ["update"], False)]),
-                       {"update": 1}, False, (), "FROZEN"),
+            "other counts": (imports, {"import": 3, "outputs": 1}, None, False, (), "not the expected"),
+            "missing outputs": (imports, {"import": 2}, None, False, (), "not the expected"),
+            "other fingerprint": (imports, {"import": 2, "outputs": 1}, "0" * 12, False, (), "fingerprint"),
+            "no fingerprint": (imports, {"import": 2, "outputs": 1}, "", False, (), "fingerprint"),
+            "destructive": (plan((["delete"], False)), {"delete": 1}, None, False, (), "deletes, replaces or forgets"),
+            "outputs differ": (imports, {"import": 2, "outputs": 1}, None, False, ("x",), "wrangler.toml"),
+            "type": (plan_at([("cloudflare_dns_record.x", ["create"], False)]), {"create": 1}, None, False, (),
+                     "ALLOWED_TYPES"),
+            "frozen": (plan_at([(BACKUP, ["update"], False)]), {"update": 1}, None, False, (), "FROZEN"),
         }
-        for name, (document, expected, allow, problems, needle) in refusals.items():
+        for name, (document, expected, fingerprint, allow, problems, needle) in refusals.items():
             with self.subTest(case=name):
                 with self.assertRaisesRegex(infra_state.Refused, needle) as caught:
-                    self.gate(document, expected, allow, problems)
+                    self.gate(document, expected, fingerprint, allow, problems)
                 self.assertEqual(isinstance(caught.exception, infra_state.Destructive), name == "destructive")
                 for secret in SECRETS:
                     self.assertNotIn(secret, str(caught.exception))
@@ -670,10 +740,12 @@ class ApplyGates(unittest.TestCase):
         with self.assertRaisesRegex(infra_state.Refused, "not the expected"):
             self.gate(replace, {"update": 1}, allow=True)
         with self.assertRaisesRegex(infra_state.Refused, "FROZEN"):
-            self.gate(plan_at([("cloudflare_zero_trust_access_application.mail_hero_backup", ["delete"], False)]),
-                      {"delete": 1}, allow=True)
+            self.gate(plan_at([(BACKUP, ["delete"], False)]), {"delete": 1}, allow=True)
 
 
+# What "Infra apply" runs in: a GitHub Actions runner, the workflow of that name, dispatched on main.
+APPLY_CONTEXT = {"GITHUB_ACTIONS": "true", "GITHUB_RUN_ID": "1", "RUNNER_TEMP": tempfile.gettempdir(),
+                 "GITHUB_REF": "refs/heads/main", "GITHUB_EVENT_NAME": "workflow_dispatch", "GITHUB_WORKFLOW": "Infra apply"}
 ENCRYPTED_STATE = json.dumps({"serial": 7, "lineage": "l", "meta": {"key_provider.pbkdf2.state": "salt"},
                               "encrypted_data": "x", "encryption_version": "v0"}).encode()
 
@@ -681,19 +753,20 @@ ENCRYPTED_STATE = json.dumps({"serial": 7, "lineage": "l", "meta": {"key_provide
 class ApplyCommand(unittest.TestCase):
     """infra_state.py apply as "Infra apply" runs it, with a fake tofu and an in-memory state bucket."""
 
-    def run_apply(self, first, verify=None, expect="import=2,outputs=1", extra_env=None, bucket=None, first_exit=2):
+    def run_apply(self, first, verify=None, expect=None, extra_env=None, bucket=None, first_exit=2, context=None):
         bucket = {"production/terraform.tfstate": ENCRYPTED_STATE} if bucket is None else bucket
         with tempfile.TemporaryDirectory() as directory:
             fake = FakeTofu(Path(directory))
-            env = dict(fake.env, CLOUDFLARE_API_TOKEN=TOKEN, INFRA_STATE_PASSPHRASE=PASSPHRASE,
-                       INFRA_TFVARS=json.dumps(VALUES), INFRA_APPLY_EXPECT=expect,
+            env = dict(fake.env, **(APPLY_CONTEXT if context is None else context), CLOUDFLARE_API_TOKEN=TOKEN,
+                       INFRA_STATE_PASSPHRASE=PASSPHRASE, INFRA_TFVARS=json.dumps(VALUES),
+                       INFRA_APPLY_EXPECT=expect_for(first) if expect is None else expect,
                        FAKE_PLAN_APPLY=fake.fixture("apply", first),
                        FAKE_PLAN_VERIFY=fake.fixture("verify", verify or plan(*[(["no-op"], False)] * 2)),
                        FAKE_PLAN_EXIT_APPLY=str(first_exit), FAKE_PLAN_EXIT_VERIFY="0")
             env.update(extra_env or {})
             requests = []
 
-            def s3(method, base, path, credentials, payload=b"", extra=None):
+            def s3(method, base, path, credentials, payload=b"", extra=None, query=None):
                 key = path.split("/", 1)[1]
                 requests.append((method, key, dict(extra or {})))
                 if method == "PUT":
@@ -714,6 +787,8 @@ class ApplyCommand(unittest.TestCase):
             return code, out.getvalue(), err.getvalue(), fake.calls(), bucket, requests
 
     def assert_clean(self, text):
+        """Nothing but the runner's own mask commands may hold a value."""
+        text = "\n".join(line for line in text.splitlines() if not line.startswith("::add-mask::"))
         for secret in SECRETS + ("raw output",):
             self.assertNotIn(secret, text)
 
@@ -737,7 +812,9 @@ class ApplyCommand(unittest.TestCase):
 
     def test_refusals_never_apply(self):
         cases = {
-            "other counts": dict(expect="import=3,outputs=1"),
+            "other counts": dict(expect="import=3,outputs=1@" + "0" * 12),
+            "other fingerprint": dict(expect="import=2,outputs=1@" + "0" * 12),
+            "counts without a fingerprint": dict(expect="import=2,outputs=1"),
             "no expect": dict(expect=""),
             "bad confirm": dict(extra_env={"INFRA_CONFIRM_DESTRUCTIVE": "yes"}),
             "outputs differ": dict(first=plan(*[(["no-op"], True)] * 2, outputs={"x": {"actions": ["create"]}},
@@ -761,18 +838,19 @@ class ApplyCommand(unittest.TestCase):
                 self.assertEqual(code, 1)
                 self.assertFalse([c for c in calls if c["args"][:1] == ["apply"]])
                 self.assert_clean(out + err)
-                if name in ("unencrypted state", "no state", "no expect", "bad confirm"):
+                early = ("unencrypted state", "no state", "no expect", "bad confirm", "counts without a fingerprint")
+                if name in early:
                     self.assertFalse([key for key in bucket if key.startswith("backups/")])
-                if name in ("unencrypted state", "no state", "no expect", "bad confirm", "backup key taken"):
+                if name in early + ("backup key taken",):
                     self.assertEqual(calls, [])
 
     def test_a_destructive_plan_needs_the_confirmation(self):
         replace = plan((["delete", "create"], False))
-        code, out, err, calls, _, _ = self.run_apply(replace, expect="replace=1")
+        code, out, err, calls, _, _ = self.run_apply(replace)
         self.assertEqual(code, 3)
         self.assertIn("delete-replace-forget", err)
         self.assertFalse([c for c in calls if c["args"][:1] == ["apply"]])
-        code, out, err, calls, _, _ = self.run_apply(replace, expect="replace=1",
+        code, out, err, calls, _, _ = self.run_apply(replace,
                                                      extra_env={"INFRA_CONFIRM_DESTRUCTIVE": "delete-replace-forget"})
         self.assertEqual(code, 0, err)
         self.assertEqual(len([c for c in calls if c["args"][:1] == ["apply"]]), 1)
@@ -795,13 +873,93 @@ class ApplyCommand(unittest.TestCase):
         self.assertIn("not \"No changes\"", err)
         self.assertEqual(len([c for c in calls if c["args"][:1] == ["apply"]]), 1)
 
+    def test_runs_only_in_the_apply_workflow_dispatched_on_main(self):
+        """A local run (the one-word slip apply-for-plan) or any other ref, event or workflow refuses before the values,
+        the token, a request or tofu; accident-proofing, not a security boundary (README.md "Apply")."""
+        contexts = {
+            "local": {},
+            "branch": dict(APPLY_CONTEXT, GITHUB_REF="refs/heads/iac-p4"),
+            "push": dict(APPLY_CONTEXT, GITHUB_EVENT_NAME="push"),
+            "drift workflow": dict(APPLY_CONTEXT, GITHUB_WORKFLOW="Infra drift"),
+            "not a runner": {k: v for k, v in APPLY_CONTEXT.items() if k != "GITHUB_ACTIONS"},
+        }
+        for name, context in contexts.items():
+            with self.subTest(context=name), \
+                    mock.patch.object(infra_state, "Session", side_effect=AssertionError("no Session")):
+                code, out, err, calls, bucket, requests = self.run_apply(self.imports(), context=context)
+                self.assertEqual(code, 1)
+                self.assertIn('runs only in the "Infra apply" workflow dispatched on main', err)
+                self.assertEqual((calls, requests), ([], []))
+                self.assertEqual(list(bucket), ["production/terraform.tfstate"])
+                self.assertNotIn("::add-mask::", out)
+
     def test_masks_every_value_on_a_runner(self):
-        runner = {"GITHUB_ACTIONS": "true", "GITHUB_RUN_ID": "1", "RUNNER_TEMP": tempfile.gettempdir()}
-        code, out, err, _, _, _ = self.run_apply(self.imports(), extra_env=runner)
+        code, out, err, _, _, _ = self.run_apply(self.imports())
         self.assertEqual(code, 0, err)
         self.assertTrue(out.startswith("::add-mask::"))
         rest = "\n".join(line for line in out.splitlines() if not line.startswith("::add-mask::"))
         self.assert_clean(rest + err)
+
+
+# A ListObjectsV2 answer: two backups and one key that is not a backup name (counted, never printed).
+LISTING = (b'<?xml version="1.0" encoding="UTF-8"?><ListBucketResult><Name>infra-state</Name>'
+           b"<Contents><Key>backups/production/terraform.tfstate.20261001T120000Z-run7</Key></Contents>"
+           b"<Contents><Key>backups/production/terraform.tfstate.20261002T120000Z</Key></Contents>"
+           b"<Contents><Key>backups/production/" + SENTINEL_EMAIL.encode() + b"</Key></Contents>"
+           b"<IsTruncated>false</IsTruncated></ListBucketResult>")
+
+
+class Backups(unittest.TestCase):
+    """list-backups: keys only, every page, a key that is not a backup name never printed."""
+
+    def run_list(self, pages):
+        requests = []
+
+        def s3(method, base, path, credentials, payload=b"", extra=None, query=None):
+            requests.append((method, path, dict(query or {})))
+            return pages[len(requests) - 1]
+
+        with tempfile.TemporaryDirectory() as directory:
+            fake = FakeTofu(Path(directory))
+            env = dict(fake.env, CLOUDFLARE_API_TOKEN=TOKEN, INFRA_STATE_PASSPHRASE=PASSPHRASE,
+                       INFRA_TFVARS=json.dumps(VALUES))
+            out, err = io.StringIO(), io.StringIO()
+            with mock.patch.dict(os.environ, env, clear=True), \
+                    mock.patch.object(infra_state, "cloudflare_get", lambda token, path: fake_fetch(path)), \
+                    mock.patch.object(infra_state, "s3_request", s3), \
+                    contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+                code = infra_state.main(["list-backups"])
+            self.assertEqual(fake.calls(), [], "listing never runs tofu")
+            return code, out.getvalue(), err.getvalue(), requests
+
+    def test_lists_every_page_and_prints_backup_keys_only(self):
+        first = (200, b"<ListBucketResult><Contents><Key>backups/production/terraform.tfstate.20260930T010203Z-run3"
+                      b"</Key></Contents><IsTruncated>true</IsTruncated>"
+                      b"<NextContinuationToken>page-2</NextContinuationToken></ListBucketResult>")
+        code, out, err, requests = self.run_list([first, (200, LISTING)])
+        self.assertEqual(code, 0, err)
+        self.assertEqual(out.splitlines(), [
+            "infra-state/backups/production/terraform.tfstate.20260930T010203Z-run3",
+            "infra-state/backups/production/terraform.tfstate.20261001T120000Z-run7",
+            "infra-state/backups/production/terraform.tfstate.20261002T120000Z",
+            "backups: 3 (and 1 other keys under the prefix, not shown)",
+        ])
+        self.assertEqual([r[2].get("continuation-token") for r in requests], [None, "page-2"])
+        self.assertEqual({(r[0], r[1]) for r in requests}, {("GET", "infra-state")})
+        for secret in SECRETS:
+            self.assertNotIn(secret, out + err)
+
+    def test_a_failed_listing_is_an_error(self):
+        code, out, err, _ = self.run_list([(403, b"<Error/>")])
+        self.assertEqual(code, 1)
+        self.assertIn("HTTP 403", err)
+
+    def test_the_query_is_signed(self):
+        headers = infra_state.sigv4_headers("GET", "https://r2.invalid/infra-state?list-type=2&prefix=backups%2Fproduction%2F",
+                                            ("id", "secret"), now=datetime.datetime(2026, 10, 1, tzinfo=datetime.timezone.utc))
+        other = infra_state.sigv4_headers("GET", "https://r2.invalid/infra-state?list-type=2&prefix=backups%2F",
+                                          ("id", "secret"), now=datetime.datetime(2026, 10, 1, tzinfo=datetime.timezone.utc))
+        self.assertNotEqual(headers["authorization"], other["authorization"])
 
 
 class Rotation(unittest.TestCase):
@@ -823,6 +981,7 @@ class Rotation(unittest.TestCase):
         self.assertEqual(text.count("method   = method.aes_gcm.state"), 2)  # writes use the committed method only
 
     def run_rotate(self, written_with, after):
+        listed = []
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             fake = FakeTofu(root)
@@ -834,7 +993,10 @@ class Rotation(unittest.TestCase):
             env = dict(fake.env, CLOUDFLARE_API_TOKEN=TOKEN, INFRA_STATE_PASSPHRASE=PASSPHRASE,
                        FAKE_PLAN=fake.fixture("plan", plan(*[(["no-op"], False)] * 3)))
 
-            def s3(method, base, path, credentials, payload=b"", extra=None):
+            def s3(method, base, path, credentials, payload=b"", extra=None, query=None):
+                if query:  # the backup listing after the rotation
+                    listed.append(dict(query))
+                    return 200, LISTING
                 refreshed = any("-refresh-only" in call["args"] for call in fake.calls())
                 name = after if refreshed else written_with
                 return 200, json.dumps({"meta": {f"key_provider.pbkdf2.{name}": "s"}, "encrypted_data": "x"}).encode()
@@ -849,11 +1011,15 @@ class Rotation(unittest.TestCase):
                 code = infra_state.main(["rotate-passphrase", "--var-file", str(values), "--old-passphrase-file", str(old),
                                          "--work-dir", str(parent)])
             assert_parent_untouched(self, parent)
+            self.listed = listed
             return code, out.getvalue(), err.getvalue(), fake.calls()
 
     def test_rotation_reencrypts_then_plans_with_the_new_passphrase_alone(self):
         code, out, err, calls = self.run_rotate("state", "state_2")
         self.assertEqual(code, 0, err)
+        # The reminder counts the backups still encrypted with the old passphrase (S5); keys are never needed for it.
+        self.assertIn("rotate: 2 state backups are still encrypted with the old passphrase", out)
+        self.assertEqual(self.listed, [{"list-type": "2", "prefix": "backups/production/"}])
         self.assertEqual([c["args"][0] for c in calls], ["init", "apply", "init", "plan", "show"])
         rotating, final = calls[:2], calls[2:]
         for call in rotating:
@@ -895,7 +1061,7 @@ class Bootstrap(unittest.TestCase):
             parent = existing_parent(root)
             created = []
 
-            def s3(method, base, path, credentials, payload=b"", extra=None):
+            def s3(method, base, path, credentials, payload=b"", extra=None, query=None):
                 key = path.split("/", 1)[1] if "/" in path else ""
                 if not key:
                     return (200, b"") if bucket.get("exists") else (404, b"")
@@ -956,6 +1122,7 @@ class Bootstrap(unittest.TestCase):
         self.assertEqual(len(applies), 1)
         self.assertTrue(applies[0][-1].endswith("import.tfplan"))
         self.assertIn("done", out)
+        self.assertIn("state object: missing", out)
         self.assert_clean(out + err)
         self.assertNotIn("values.tfvars.json", leftovers)
         self.assertFalse([name for name in leftovers if name.endswith(".tfplan")])
@@ -982,6 +1149,24 @@ class Bootstrap(unittest.TestCase):
         self.assertEqual(created, [])
         self.assertFalse([call for call in calls if call["args"][:1] == ["apply"]])
         self.assertIn("skipped: the remote state already holds every object", out)
+        self.assertIn("state object: exists", out)
+
+    def test_an_existing_state_is_only_verified_never_written(self):
+        """S1: with the state object present, a plan that imports (or only creates outputs) is "Infra apply"'s job: the
+        bootstrap refuses before any apply, from any branch, with nothing written."""
+        for name, first in {
+            "imports into a populated state": plan((["no-op"], False), (["no-op"], True), (["no-op"], True),
+                                                   outputs={"x": {"actions": ["create"]}}),
+            "outputs only": plan(*[(["no-op"], False)] * 3, outputs={"x": {"actions": ["create"]}}),
+        }.items():
+            with self.subTest(case=name):
+                code, out, err, calls, created, _ = self.run_bootstrap(first, bucket={"exists": True, "state": True})
+                self.assertEqual(code, bootstrap_state.EXIT_NOT_IMPORT_ONLY)
+                self.assertIn('changes to it go through "Infra apply"', err)
+                self.assertIn("state object: exists", out)
+                self.assertFalse([call for call in calls if call["args"][:1] == ["apply"]])
+                self.assertEqual(created, [])
+                self.assert_clean(out + err)
 
     def test_final_plan_must_be_no_changes(self):
         code, out, err, _, _, _ = self.run_bootstrap(

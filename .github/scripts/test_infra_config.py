@@ -21,8 +21,10 @@ What they keep true (infra/README.md):
   the database_id committed there. The production configs are test_wrangler_configs.py's, minus the Workers
   named in NOT_ADOPTED (none since IaC P4 adopted FlowDay and the links app).
 - infra_state.py's lists agree with the rest: WRANGLER_CONFIGS (the outputs check in "Infra drift"/"Infra apply") is
-  test_wrangler_configs.py's PRODUCTION, its ALLOWED_TYPES (the apply's allowlist) is the guard's, and its OUTPUTS are
-  the outputs outputs.tf declares.
+  test_wrangler_configs.py's PRODUCTION, its ALLOWED_TYPES (the apply's allowlist) and FROZEN are the guard's, each
+  FROZEN object's id is the id its import block adopts, and its OUTPUTS are the outputs outputs.tf declares.
+- RETIRING_HOSTS is exact: each retiring host is still a FlowDay destination and no other application uses one, so the
+  commit that drops a host from FlowDay's applications must empty its allowance in the same change.
 - No account or zone id (32 hex digits) and no email address is committed under infra/.
 """
 
@@ -68,7 +70,8 @@ PRODUCTION = {
 }
 # Hosts an Access application may still list although no wrangler.toml declares them: FlowDay's F3 staging host,
 # which both FlowDay applications keep until the F4 follow-up removes it through infra/ (README.md "FlowDay"). That
-# commit empties this set.
+# commit must empty this set (test_retiring_hosts_are_exact fails otherwise); a rollback that adds the host back adds
+# it here again.
 RETIRING_HOSTS = {"flowday-next.ziyixi.science"}
 
 
@@ -162,6 +165,7 @@ class Coverage(unittest.TestCase):
         guard's boundary."""
         self.assertEqual(sorted(infra_state.WRANGLER_CONFIGS), sorted(test_wrangler_configs.PRODUCTION.values()))
         self.assertEqual(infra_state.ALLOWED_TYPES, infra_guard.ALLOWED_TYPES)
+        self.assertEqual(infra_state.FROZEN, infra_guard.FROZEN)
 
     def test_outputs_are_the_ones_the_state_driver_reads(self):
         outputs = [
@@ -177,6 +181,15 @@ class Coverage(unittest.TestCase):
             kind, name = address.split(".")
             with self.subTest(address=address):
                 self.assertIn(f'resource "{kind}" "{name}" {{', code)
+
+    def test_frozen_ids_are_the_adopted_objects(self):
+        """The apply's gate also matches a FROZEN object by id: that id must be the one its import block adopts."""
+        imports = (INFRA / "imports.tf").read_text()
+        for address, object_id in infra_state.FROZEN_OBJECTS.items():
+            block = re.search(rf"import \{{\n\s*to\s*=\s*{re.escape(address)}\n\s*id\s*=\s*\"([^\"]+)\"", imports)
+            with self.subTest(address=address):
+                self.assertIsNotNone(block, "a FROZEN address has no import block")
+                self.assertEqual(block.group(1).rsplit("/", 1)[-1], object_id)
 
     def test_every_production_worker_is_adopted_or_listed_as_not_adopted(self):
         """A Worker added to test_wrangler_configs.PRODUCTION must be either checked here or named in NOT_ADOPTED,
@@ -216,6 +229,20 @@ class MatchesTheApps(unittest.TestCase):
                     self.assertIn(uri.split("/")[0], hosts | RETIRING_HOSTS)
         backup = re.search(r'resource "cloudflare_zero_trust_access_application" "mail_hero_backup" \{(.*?)^\}', code, re.DOTALL | re.MULTILINE)
         self.assertIn('domain                      = "mail-hero.ziyixi.science/api/internal/backup/*"', backup.group(1))
+
+    def test_retiring_hosts_are_exact(self):
+        """An allowance in RETIRING_HOSTS exists only while a FlowDay application still lists the host, and no other
+        application may use it: dropping the host from local.flowday_apps without emptying the set fails here."""
+        code = (INFRA / "access.tf").read_text()
+        flowday_hosts = {uri.split("/")[0] for uris in self.flowday_apps(code).values() for uri in uris}
+        other_hosts = {re.search(r'domain\s*=\s*"([^"/]+)', value).group(1) for value in hcl_map(code, "owner_apps").values()}
+        other_hosts |= {uri.split("/")[0] for value in hcl_map(code, "owner_apps").values()
+                        for uri in re.findall(r'"([^"]+)"', re.search(r"more\s*=\s*\[(.*?)\]", value).group(1))}
+        for host in sorted(RETIRING_HOSTS):
+            with self.subTest(host=host):
+                self.assertIn(host, flowday_hosts, "a stale allowance: empty RETIRING_HOSTS in the commit that drops it")
+                self.assertNotIn(host, other_hosts)
+                self.assertNotIn(host, code.split("# --- FlowDay")[0], "only FlowDay's applications may list it")
 
     def test_every_worker_that_checks_access_has_an_application_of_its_name(self):
         """The access_aud output is keyed by Worker name; a Worker whose ACCESS_AUDIENCE no application key matches

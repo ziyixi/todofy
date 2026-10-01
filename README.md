@@ -77,7 +77,8 @@ planned action or on an output (Access AUD, D1 id, bucket) that differs from an 
 only the redacted summary; it applies nothing and is not part of `CI gate` ([`infra/README.md`](infra/README.md)
 "Drift plan"). [`.github/workflows/infra-apply.yml`](.github/workflows/infra-apply.yml) ("Infra apply") is the only
 writer: a manual dispatch on `main`, same environment and concurrency group, which copies the encrypted state, plans,
-refuses unless the plan passes its gates (including the exact expected actions) and applies exactly that saved plan
+refuses unless the plan passes its gates (including the exact reviewed actions and plan fingerprint) and applies
+exactly that saved plan
 ([`infra/README.md`](infra/README.md) "Apply").
 
 | Job | Runs when | Does |

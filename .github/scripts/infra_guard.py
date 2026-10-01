@@ -14,6 +14,8 @@ What it keeps true (infra/README.md "Scope" and "Next steps"):
   No data source (also not inside a check block), module, check, ephemeral or removed block.
 - No provisioner or connection block anywhere (terraform_data/null_resource are not allowed types either).
 - Every resource is one of ALLOWED_TYPES and has its own lifecycle { prevent_destroy = true }.
+- No `moved` block names a FROZEN address (from or to, any instance key): a rename must not carry a write to a frozen
+  object past the apply's gate (infra_state.py FROZEN_OBJECTS, which also matches by object id).
 - No output reads a variable (var.*): outputs are printed by `tofu output` and compared with the public
   wrangler.toml files, so a personal value (the policies' emails) must never become one. Outputs read managed
   objects only (outputs.tf).
@@ -37,6 +39,8 @@ ALLOWED_TYPES = frozenset({
     "cloudflare_d1_database",
     "cloudflare_r2_bucket",
 })
+# Addresses an apply never writes to (infra_state.py FROZEN; test_infra_config.py keeps the two equal).
+FROZEN = frozenset({"cloudflare_zero_trust_access_application.mail_hero_backup"})
 TOP_LEVEL = frozenset({"terraform", "provider", "variable", "locals", "resource", "import", "output", "moved"})
 NEVER_NESTED = frozenset({"provisioner", "connection", "data", "module", "resource"})
 # Committed files under infra/, relative to it. Anything else (a plan named tfplan or plan.out, a .tofu
@@ -228,6 +232,16 @@ def _reads_a_variable(block: Block) -> bool:
     return False
 
 
+def _reference(tokens: list[tuple[str, str]]) -> str:
+    """The resource address an attribute names, without its instance key: `a.b["k"]` -> `a.b`."""
+    text = ""
+    for kind, value in tokens:
+        if (kind, value) == ("P", "["):
+            break
+        text += value
+    return text
+
+
 def committed_files(infra: Path) -> list[str] | None:
     """Tracked plus untracked-but-not-ignored files under infra/, relative to it; None outside a git tree."""
     try:
@@ -284,6 +298,8 @@ def check(infra: Path) -> list[str]:
                 lifecycles = block.children("lifecycle")
                 if len(lifecycles) != 1 or not lifecycles[0].is_true("prevent_destroy"):
                     problems.append(f"{where}: resource without its own lifecycle {{ prevent_destroy = true }}")
+            if block.type == "moved" and any(_reference(block.attrs.get(side, [])) in FROZEN for side in ("from", "to")):
+                problems.append(f"{where}: a moved block names a FROZEN address; it must never be renamed")
             if block.type == "output" and _reads_a_variable(block):
                 problems.append(f"{where}: an output reads a variable; outputs read managed objects only")
             for nested in block.walk():

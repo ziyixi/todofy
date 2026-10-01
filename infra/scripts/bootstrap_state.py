@@ -12,18 +12,22 @@ Steps (each prints one fixed line; no value, token, key or id is ever printed):
    which reads the token itself. Wrangler runs in the private work directory, so it finds no wrangler.toml to edit.
 3. Probe whether R2 honours conditional writes (If-None-Match: *) on a throwaway key. Report only: the backend
    keeps no lock file until a later change enables use_lockfile.
-4. `tofu init` with the S3 backend (key <environment>/terraform.tfstate).
+4. Note whether the state object exists, then `tofu init` with the S3 backend (key <environment>/terraform.tfstate).
 5. Plan. It must hold ONLY imports: every resource is "import" (or already "no-op"), exactly --expect of them,
    and outputs only created (a new state has none yet). Anything else (create, update, replace, delete, forget,
-   import+update, an output update, a wrong count) refuses before any apply.
-6. `tofu apply` of exactly that saved import-only plan. Import reads Cloudflare and writes only the state.
+   import+update, an output update, a wrong count) refuses before any apply. An EXISTING state object may only be
+   verified: a plan that would import into it (or create outputs in it) refuses too, because every change to the
+   populated state goes through "Infra apply" on main (backup, gates, concurrency group; README.md "Apply").
+6. `tofu apply` of exactly that saved import-only plan, only when the state object did not exist. Import reads
+   Cloudflare and writes only the state.
 7. Read the state object back: it must be OpenTofu-encrypted (no plaintext resources).
 8. Plan again: it must say "No changes" (exit 0, every resource no-op).
 
-Re-running is safe: when the remote state already holds every object, step 6 is skipped. tofu's own output goes
+Re-running on an existing state only verifies it (step 6 is skipped, or the run refuses). tofu's own output goes
 to a 0600 log in a new private work directory under ~/.cache/todofy-infra (outside the repository, kept for local
 debugging; plan files are deleted; an existing directory is never reused, chmodded or removed).
-Exit codes: 0 done; 1 error; 4 the plan held something other than imports (nothing was applied).
+Exit codes: 0 done; 1 error; 4 the plan held something other than imports, or would change an existing state
+(nothing was applied).
 """
 
 from __future__ import annotations
@@ -58,6 +62,10 @@ class NotImportOnly(Refused):
     """The first plan holds something other than imports: nothing is applied."""
 
 
+class StateExists(Refused):
+    """The plan would write to a state object that already exists: nothing is applied ("Infra apply" does that)."""
+
+
 def step(number: int, text: str) -> None:
     print(f"[{number}/8] {text}", flush=True)
 
@@ -76,6 +84,14 @@ def import_decision(summary: dict, expected: int) -> str:
     if total != expected:
         raise NotImportOnly(f"the plan covers {total} resources, expected exactly {expected}")
     return "apply" if counts.get("import") or summary["outputs"] else "done"
+
+
+def state_exists(session: infra_state.Session, environment: str) -> bool:
+    """Whether the remote state object exists (HEAD: 200 yes, 404 no; anything else refuses)."""
+    status, _ = session.s3("HEAD", infra_state.state_key(environment))
+    if status not in (200, 404):
+        raise Refused(f"cannot tell whether the remote state object exists (HTTP {status})")
+    return status == 200
 
 
 def final_check(tofu_code: int, summary: dict, expected: int) -> None:
@@ -184,12 +200,17 @@ def bootstrap(args: argparse.Namespace, env: dict[str, str], admin=None) -> int:
         print("  " + (probe_conditional_writes(session) if not args.skip_lock_probe else "skipped"))
 
         step(4, "tofu init with the S3 backend")
+        existed = state_exists(session, args.environment)
+        print("  state object: " + ("exists (this run may only verify it)" if existed else "missing (a new state)"))
         session.tofu.init(args.environment)
 
         step(5, f"plan: must hold only imports ({expected})")
         _, summary, rendered = session.plan("import")
         print(rendered)
         decision = import_decision(summary, expected)
+        if decision == "apply" and existed:
+            raise StateExists("the remote state already exists: changes to it go through \"Infra apply\" "
+                              "(infra/README.md \"Apply\"); nothing was applied")
 
         if decision == "apply":
             step(6, "apply the import-only plan (writes the encrypted state; Cloudflare is only read)")
@@ -213,7 +234,7 @@ def bootstrap(args: argparse.Namespace, env: dict[str, str], admin=None) -> int:
         print(f"bootstrap_state: {error}", file=sys.stderr)
         for line in session.tofu.headlines():
             print(f"bootstrap_state: tofu {line}", file=sys.stderr)
-        return EXIT_NOT_IMPORT_ONLY if isinstance(error, NotImportOnly) else 1
+        return EXIT_NOT_IMPORT_ONLY if isinstance(error, (NotImportOnly, StateExists)) else 1
     finally:
         session.cleanup()
 

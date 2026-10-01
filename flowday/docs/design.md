@@ -334,8 +334,9 @@ first (`cd ../web && npm run build`), and apply the migrations locally:
     days on Free) or delete the staging rows, so that the import starts from empty tables.
   - **Rollback.** Revert the commit (the routes line and `PUBLIC_HOST`, and the regenerated drift state), then
     detach the Custom Domain by hand: a deploy whose config lists no route leaves the Worker's live Custom Domains
-    alone, so the revert alone does not remove it. Then remove the staging destinations from both Access apps.
-    [`../README.md`](../README.md) "Rollback and removal".
+    alone, so the revert alone does not remove it. Then remove the staging destinations from both Access apps
+    through `infra/` (one commit, "Infra apply" with `update=2@<fingerprint>`; `infra/README.md` "FlowDay"), never in
+    the dashboard. [`../README.md`](../README.md) "Rollback and removal".
 - **F4 (data cutover, owner present).** Done in code (2026-10-01): the import tool, the cutover commit and
   the commit that clears its cf-guard allowances; live once the cutover's `FlowDay deploy` passes on `main` and
   the steps below are recorded. Frozen from the container stop until the cutover commit's deploy passes:
@@ -441,7 +442,7 @@ first (`cd ../web && npm run build`), and apply the migrations locally:
     (the tunnel CNAME is the allowed conflict; cf-guard now takes the kind with the name, which would be
     `dns:flowday.ziyixi.science`, and with the CNAME deleted first there is no conflict to allow), and the guard
     test in `.github/scripts/test_ci_changes.py` expected exactly those two (`HostnameGuard.ALLOWED`). The next commit cleared
-    both again (`ALLOWED` is empty). After that, remove the staging destinations from both Access apps; the deploy already detached the
+    both again (`ALLOWED` is empty). After that, and after IaC P4's first "Infra apply" (the import of both apps), remove the staging destinations from both Access apps through `infra/`, never the dashboard: one commit drops it from both entries of `local.flowday_apps` and empties `RETIRING_HOSTS`, and "Infra apply" applies the reviewed `update: 2` (`infra/README.md` "FlowDay"); the deploy already detached the
     staging Custom Domain (check Workers & Pages → `flowday` → Domains & Routes, and that no DNS record is left for
     `flowday-next.ziyixi.science`).
 - **F5 (7-day rollback window = D1 Time Travel).**
@@ -455,5 +456,7 @@ first (`cd ../web && npm run build`), and apply the migrations locally:
     after a rollback.
   - Never replace only `flowday.db` next to the old WAL.
 - **F6 (retire).**
-  - Remove the container, its tunnel hostname and, after the device check, the `flowday-bypass` Access app.
-    Keep the Worker's PWA exceptions only if the narrow bypass is kept.
+  - Remove the container, its tunnel hostname and, after the device check, the `flowday-bypass` Access app. That
+    application is managed by `infra/` (with `prevent_destroy`): it leaves through its own reviewed `infra/` change
+    and a confirmed "Infra apply" (`infra/README.md` "FlowDay", F6), never by a dashboard delete, which the next
+    plan would turn into a `create`. Keep the Worker's PWA exceptions only if the narrow bypass is kept.

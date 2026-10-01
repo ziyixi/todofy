@@ -120,6 +120,16 @@ class Guard(unittest.TestCase):
                 self.assert_flags({"outputs.tf": f'output "x" {{\n  value = {value}\n}}\n'}, "an output reads a variable")
         self.assertEqual(run({"outputs.tf": 'output "x" {\n  value = cloudflare_r2_bucket.app.name\n}\n'}), [])
 
+    def test_a_moved_block_never_renames_a_frozen_address(self):
+        """A rename plus an attribute change would write to the frozen backup app under another address."""
+        frozen = "cloudflare_zero_trust_access_application.mail_hero_backup"
+        for text in (f"moved {{\n  from = {frozen}\n  to   = cloudflare_zero_trust_access_application.backup\n}}\n",
+                     f'moved {{\n  from = cloudflare_zero_trust_access_application.x\n  to   = {frozen}["k"]\n}}\n'):
+            with self.subTest(text=text.split("\n")[1]):
+                self.assert_flags({"moved.tf": text}, "a moved block names a FROZEN address")
+        ordinary = "moved {\n  from = cloudflare_r2_bucket.old\n  to   = cloudflare_r2_bucket.app\n}\n"
+        self.assertEqual(run({"moved.tf": ordinary}), [])
+
     def test_dynamic_provisioner(self):
         dynamic = """
             resource "cloudflare_r2_bucket" "d" {

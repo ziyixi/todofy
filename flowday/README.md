@@ -119,7 +119,7 @@ one Custom Domain, `flowday.ziyixi.science`).
   **Reverting the F2 commit does not undo the deploy**: the revert also removes the `FlowDay deploy` job.
 - **The staging host (F3).** Gone since the cutover: its deploy detached `flowday-next.ziyixi.science` (and with it
   the host's DNS record), and the host's destinations in the Access apps "flowday" and "flowday-bypass" are
-  removed afterwards. (Before F4 its rollback was a revert of its commit followed by detaching the Custom Domain by
+  removed afterwards through `infra/`, never the dashboard: one commit drops it from both entries of `local.flowday_apps` and empties `RETIRING_HOSTS`, and "Infra apply" applies the reviewed `update: 2` (`infra/README.md` "FlowDay"). (Before F4 its rollback was a revert of its commit followed by detaching the Custom Domain by
   hand: a deploy whose config lists no Custom Domain leaves the live ones alone.)
 - **The cutover (F4).** The cutover replaced the tunnel CNAME of `flowday.ziyixi.science` (saved privately before:
   its target, proxied flag and TTL) with the Worker's Custom Domain. The Workers Custom Domain API refuses a
@@ -143,7 +143,7 @@ one Custom Domain, `flowday.ziyixi.science`).
      origin is, so it proves nothing. Then the owner signs in.
   6. Revert the cutover commit and the commit that cleared its allowances in one commit on `main`, after adding
      `flowday-next.ziyixi.science` (and its `/pwa/*`) back to the Access apps "flowday" and "flowday-bypass" if
-     they were removed: its deploy attaches the staging host again (its allowances are empty,
+     they were removed (through `infra/`: revert the commit that dropped the host from `local.flowday_apps` and `RETIRING_HOSTS`, check its "Infra drift" run shows exactly `update: 2`, and dispatch "Infra apply" with `update=2@<that run's fingerprint>`): its deploy attaches the staging host again (its allowances are empty,
      and `flowday.ziyixi.science` is no longer the Worker's) and leaves the restored CNAME alone.
 - **Worker code** (after the first release). Revert the commit on `main` and push: CI redeploys the previous code.
   For an immediate rollback, Cloudflare dashboard → Workers → `flowday` → Deployments → roll back to the previous
@@ -154,9 +154,10 @@ one Custom Domain, `flowday.ziyixi.science`).
   `flowday` in the Cloudflare dashboard. Delete the D1 `flowday` only on purpose (export it first with
   `wrangler d1 export`), and the secrets `FLOWDAY_CSRF_SIGNING_KEY` and `FLOWDAY_CREDENTIAL_KEY`
   (`gh secret delete <name> -R ziyixi/todofy --env production`). The `DASHBOARD_ACCESS_OWNER*` secrets stay (the
-  dashboard and Lab use them), and so do the Access apps `flowday` and `flowday-bypass` (they cover
-  `flowday.ziyixi.science` whatever serves it, until F6). Detach the Custom Domain `flowday.ziyixi.science` first
-  (the cutover rollback's step 1 above), and decide what serves the hostname afterwards.
+  dashboard and Lab use them), and so do the Access apps `flowday` and `flowday-bypass` (the container's hostname
+  uses them until F6). The D1 `flowday` and both Access apps are managed by `infra/` (IaC P4): never delete or edit
+  them in the dashboard; they leave through a reviewed `infra/` change and a confirmed "Infra apply"
+  (`infra/README.md` "FlowDay"). Detach the Custom Domain `flowday.ziyixi.science` first (the cutover rollback's step 1 above), and decide what serves the hostname afterwards.
 
 ## Feature tour
 

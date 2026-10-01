@@ -11,10 +11,14 @@ YAML library on the runner's python3). Standard library only, Python 3.9+.
 """
 
 import re
+import sys
 import unittest
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(REPO / "infra" / "scripts"))
+import infra_state  # noqa: E402  (standard library only)
+
 WORKFLOW = REPO / ".github" / "workflows" / "infra.yml"
 APPLY = REPO / ".github" / "workflows" / "infra-apply.yml"
 
@@ -129,6 +133,13 @@ class InfraApplyWorkflow(unittest.TestCase):
             with self.subTest(action=action):
                 self.assertRegex(action, r"^[\w.-]+/[\w.-]+@[0-9a-f]{40}$")
         self.assertIn("persist-credentials: false", self.code)
+
+    def test_the_script_recognises_this_workflow_by_its_name(self):
+        """infra_state.py apply refuses unless GITHUB_WORKFLOW is this workflow's name (and main, workflow_dispatch)."""
+        self.assertEqual(re.findall(r"(?m)^name: (.+)$", self.code), [infra_state.APPLY_WORKFLOW])
+        self.assertEqual(infra_state.APPLY_EVENT, "workflow_dispatch")
+        self.assertEqual(infra_state.APPLY_REF, "refs/heads/main")
+        self.assertNotRegex(self.code, r"GITHUB_(REF|EVENT_NAME|WORKFLOW):")  # the runner's own values, never overridden
 
     def test_the_drift_workflow_never_applies(self):
         drift = code(WORKFLOW.read_text())
