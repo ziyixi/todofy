@@ -367,7 +367,9 @@ export const handlers: ServiceHandlers<ShapeOf<typeof WatchUiService>, ApiContex
     const id = watchIdOf(request.name);
     const answer = once(ctx, request.requestId, 'CheckWatch', `watches/${id}`, WatchSchema, () => {
       const row = existing(ctx, id);
-      const at = earliestFetch(ctx.now, ctx.store.host(row.host) ?? null, row.last_fetch_at);
+      // The host's spacing and backoff, and the URL's 15 minutes since its last fetch (a preview's included).
+      const fetchedAt = ctx.store.urlFetchedAt((JSON.parse(row.settings) as { uri?: string }).uri ?? '', ctx.now);
+      const at = Math.max(earliestFetch(ctx.now, ctx.store.host(row.host) ?? null, row.last_fetch_at), fetchedAt === null ? 0 : fetchedAt + URL_MIN_SPACING_MS);
       ctx.store.updateWatch(id, { check_requested: 1, next_check_at: Math.min(row.next_check_at ?? at, at) });
       return message(ctx, existing(ctx, id));
     });

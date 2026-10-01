@@ -185,30 +185,39 @@ function pageGate(deps: ObtainDeps, config: WatchConfig, budget: Budget, state: 
         }
       }
       const held = await deps.hosts.acquire(host);
-      const now = deps.now();
-      if (!follows) {
-        // Asked again under the lock: a request that just finished reserved the host for its spacing.
-        const busy = hostRefusal(deps.store.host(host), now);
-        if (busy !== null) {
-          held();
-          return busy;
+      try {
+        const now = deps.now();
+        if (!follows) {
+          // Asked again under the lock: a request that just finished reserved the host for its spacing.
+          const busy = hostRefusal(deps.store.host(host), now);
+          if (busy !== null) {
+            held();
+            return busy;
+          }
         }
+        reserveHost(deps.store, host, now);
+        if (hop === 0) {
+          state.firstAt = now;
+          deps.store.putUrlFetch(config.uri, now);
+        }
+        state.starts.set(host, now);
+      } catch (error) {
+        // A storage error must not leave the host locked for the object's lifetime.
+        held();
+        throw error;
       }
-      reserveHost(deps.store, host, now);
-      if (hop === 0) {
-        state.firstAt = now;
-        deps.store.putUrlFetch(config.uri, now);
-      }
-      state.starts.set(host, now);
       release = held;
       return null;
     },
     leave(url, status, headers) {
-      const host = url.hostname.toLowerCase();
-      const start = state.starts.get(host) ?? deps.now();
-      recordAnswer(deps.store, host, start, status, retryAfterMs(headers?.get('retry-after') ?? null, start));
-      release?.();
-      release = null;
+      try {
+        const host = url.hostname.toLowerCase();
+        const start = state.starts.get(host) ?? deps.now();
+        recordAnswer(deps.store, host, start, status, retryAfterMs(headers?.get('retry-after') ?? null, start));
+      } finally {
+        release?.();
+        release = null;
+      }
     },
   };
 }

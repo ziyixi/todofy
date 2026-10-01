@@ -267,6 +267,9 @@ describe('the 15 minutes per URL count previews too', () => {
     await at(clock + MINUTE);
     const created = await h.api.createWatch({ watchId: 'saved', requestId: op(), watch });
     expect(Number(created.health?.nextCheckTime?.seconds) * 1000).toBe(previewed + 15 * MINUTE);
+    // An owner's check now says the same time.
+    const checked = await h.api.checkWatch({ name: 'watches/saved', requestId: op() });
+    expect(Number(checked.health?.nextCheckTime?.seconds) * 1000).toBe(previewed + 15 * MINUTE);
     await h.run(clock);
     expect(h.sites.requestsTo('https://saved.example.net/p')).toHaveLength(1);
     await h.run(previewed + 15 * MINUTE);

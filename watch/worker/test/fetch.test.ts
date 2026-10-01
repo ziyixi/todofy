@@ -6,6 +6,7 @@
 import { describe, expect, it } from 'vitest';
 import { browserAllowed, quickActionRenderer } from '../src/browser.ts';
 import { fetchPage, readCapped, type HopGate } from '../src/fetcher.ts';
+import { HostLocks } from '../src/host-locks.ts';
 import { BROWSER_DAILY_MS, BROWSER_RESERVE_MS } from '../src/limits.ts';
 
 /** A stream of `chunk` repeated up to `total` bytes, counting what was pulled. */
@@ -72,6 +73,30 @@ describe('fetchPage and its gate', () => {
     const answer = await fetchPage(never, { url: 'https://slow.example.com/', accept: 'text/html', locale: 'en', allowHttp: false, conditional: null, timeoutMs: 20, gate });
     expect(answer).toMatchObject({ kind: 'failed', failure: 'TIMEOUT' });
     expect(statuses).toEqual([0]);
+  });
+});
+
+describe('HostLocks', () => {
+  it('holds one request per host at a time, in order; other hosts run alongside; freeing twice is harmless', async () => {
+    const locks = new HostLocks();
+    const order: string[] = [];
+    const first = await locks.acquire('a.example.com');
+    const other = await locks.acquire('b.example.com');
+    const waiting = locks.acquire('a.example.com').then((free) => {
+      order.push('second');
+      return free;
+    });
+    await Promise.resolve();
+    expect(locks.busy('a.example.com')).toBe(true);
+    order.push('first done');
+    first();
+    first();
+    const second = await waiting;
+    expect(order).toEqual(['first done', 'second']);
+    second();
+    other();
+    expect(locks.busy('a.example.com')).toBe(false);
+    expect(locks.busy('b.example.com')).toBe(false);
   });
 });
 
