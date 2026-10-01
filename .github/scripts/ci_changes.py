@@ -2,7 +2,7 @@
 """Decide which apps a CI run checks and deploys. Standard library only (the runner's python3).
 
 Outputs (GITHUB_OUTPUT, "true"/"false"):
-  todofy_check, mail_hero_check, dashboard_check, website_check, lab_check
+  todofy_check, mail_hero_check, dashboard_check, website_check, lab_check, flowday_check
                     run that app's full checks
   contracts         run the contract tests: both sides of mail.received.v1, ops-v1 and
                     task-intent-v1, and the dashboard's ops-v1 caller tests
@@ -17,6 +17,8 @@ Outputs (GITHUB_OUTPUT, "true"/"false"):
                     website/relay/ (the Notion relay Worker, its own wrangler.toml) changed: deploy
                     the relay. A change only there checks the website but does not release the site;
                     a website change elsewhere releases the site but does not redeploy the relay.
+  FlowDay (flowday/) is checked only: it has no production config or deploy job yet (CHECK_ONLY), so
+  there is no flowday_deploy output.
 
 push: the files changed between a cumulative base and github.sha, never only this push's own diff,
 so a change whose run was cancelled or failed is checked (and deployed) again by the next run.
@@ -62,15 +64,26 @@ import urllib.parse
 import urllib.request
 from collections.abc import Callable, Iterable
 
-APPS = ("todofy", "mail-hero", "dashboard", "website", "lab")
+APPS = ("todofy", "mail-hero", "dashboard", "website", "lab", "flowday")
 # The output key prefix of each app ("<prefix>_check", "<prefix>_deploy").
-PREFIX = {"todofy": "todofy", "mail-hero": "mail_hero", "dashboard": "dashboard", "website": "website", "lab": "lab"}
+PREFIX = {
+    "todofy": "todofy",
+    "mail-hero": "mail_hero",
+    "dashboard": "dashboard",
+    "website": "website",
+    "lab": "lab",
+    "flowday": "flowday",
+}
+# Apps that are checked but never deployed by CI (no "<prefix>_deploy" output): FlowDay until its Worker
+# has a production config and a deploy job.
+CHECK_ONLY = {"flowday"}
 KEYS = (
     "todofy_check",
     "mail_hero_check",
     "dashboard_check",
     "website_check",
     "lab_check",
+    "flowday_check",
     "contracts",
     "packages",
     "infra",
@@ -89,11 +102,12 @@ DISPATCH = {
     "dashboard": ("dashboard",),
     "website": ("website",),
     "lab": ("lab",),
+    "flowday": ("flowday",),
 }
 # The website's Notion relay Worker deploys on its own (website_relay_deploy).
 RELAY = "website/relay/"
 # Apps that neither provide nor consume a contract: their own changes do not run Contracts.
-NO_CONTRACTS = {"website"}
+NO_CONTRACTS = {"website", "flowday"}
 # The OpenTofu configuration (infra/README.md) and its plan-summary tool: checked here without a token; only
 # .github/workflows/infra.yml plans it against Cloudflare, and nothing applies it yet.
 INFRA = ("infra/", "tools/infra-plan-summary/")
@@ -125,6 +139,7 @@ CHECK_JOBS = {
     "dashboard_check": ("Dashboard checks",),
     "website_check": ("Website checks",),
     "lab_check": ("Lab checks",),
+    "flowday_check": ("FlowDay checks",),
     "contracts": ("Contracts",),
     "packages": ("Shared packages",),
     "infra": ("Infra checks",),
@@ -156,7 +171,8 @@ def outputs(
     }
     for app in APPS:
         result[f"{PREFIX[app]}_check"] = app in checked
-        result[f"{PREFIX[app]}_deploy"] = app in deployed
+        if app not in CHECK_ONLY:
+            result[f"{PREFIX[app]}_deploy"] = app in deployed
     return {key: result[key] for key in KEYS}
 
 

@@ -1,0 +1,28 @@
+# Node toolchain
+node_modules/
+
+# Next.js build output and generated types
+web/.next/
+web/out/
+web/next-env.d.ts
+*.tsbuildinfo
+
+# Test, screenshot and Playwright output
+web/output/
+web/coverage/
+
+# Local SQLite databases (tests and `npm run dev` create web/db/flowday.db); never commit one, it can
+# hold the owner's tasks and the Todoist token
+web/db/
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+*.sqlite
+
+# Local secrets and dev values
+.env
+.env.*
+.dev.vars*
+!.dev.vars.example
+.wrangler/

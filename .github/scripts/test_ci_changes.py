@@ -39,6 +39,7 @@ def expect(
     lab_check=False,
     lab_deploy=False,
     infra=False,
+    flowday_check=False,
 ):
     return {
         "todofy_check": todofy_check,
@@ -46,6 +47,7 @@ def expect(
         "dashboard_check": dashboard_check,
         "website_check": website_check,
         "lab_check": lab_check,
+        "flowday_check": flowday_check,
         "contracts": contracts,
         "packages": packages,
         "infra": infra,
@@ -58,14 +60,15 @@ def expect(
     }
 
 
-# Every app checked (a contracts/ or .github/ change); the dashboard and Lab each checked and deployed;
+# Every app checked (a contracts/ or .github/ change, FlowDay included); the dashboard and Lab each checked and deployed;
 # the four edge-auth apps (the website compiles in no package) are todofy and mail-hero plus ALL; every
 # app with the website Worker (the relay Worker is added where a test expects it).
-ALL_CHECKED = {"dashboard_check": True, "website_check": True, "lab_check": True}
+ALL_CHECKED = {"dashboard_check": True, "website_check": True, "lab_check": True, "flowday_check": True}
 DASH = {"dashboard_check": True, "dashboard_deploy": True}
 LAB = {"lab_check": True, "lab_deploy": True}
 ALL = {**DASH, **LAB}
-EVERY = {**ALL, "website_check": True, "website_deploy": True}
+# FlowDay is checked only (ci_changes.CHECK_ONLY): it has no deploy output.
+EVERY = {**ALL, "website_check": True, "website_deploy": True, "flowday_check": True}
 
 
 def push(paths, ref=MAIN, last_success=BASE, ancestor=True, merge_base=BASE):
@@ -99,6 +102,15 @@ class Classify(unittest.TestCase):
             with self.subTest(path=path):
                 self.assertEqual(push([path]), expect(F, F, T, F, F, **LAB))
 
+    def test_flowday_is_checked_alone_and_never_deployed(self):
+        """FlowDay uses no contract and no package, and has no deploy job yet: its changes run only its checks."""
+        for path in ("flowday/web/lib/todoist/sync.ts", "flowday/web/package-lock.json", "flowday/docs/prd.md", "flowday/README.md"):
+            with self.subTest(path=path):
+                self.assertEqual(push([path]), expect(F, F, F, F, F, flowday_check=T))
+                self.assertEqual(push([path], ref=BRANCH), expect(F, F, F, F, F, flowday_check=T))
+        self.assertNotIn("flowday_deploy", ci_changes.KEYS)
+        self.assertEqual(ci_changes.CHECK_ONLY, {"flowday"})
+
     def test_task_intent_code_deploys_lab_and_todofy(self):
         """TASK_INTENT_LIMITS ship in Lab and in Todofy's gateway; the schema only in Lab."""
         self.assertEqual(push(["contracts/task-intent-v1/task-intent-v1.ts"]), expect(T, T, T, T, F, **ALL_CHECKED, lab_deploy=T))
@@ -119,11 +131,11 @@ class Classify(unittest.TestCase):
         """The dashboard validates every Ops answer at runtime with the bundled schema and validate.mjs."""
         for path in ("contracts/ops-v1/ops-v1.schema.json", "contracts/ops-v1/validate.mjs"):
             with self.subTest(path=path):
-                self.assertEqual(push([path]), expect(T, T, T, F, F, **ALL, website_check=T))
+                self.assertEqual(push([path]), expect(T, T, T, F, F, **ALL, website_check=T, flowday_check=T))
 
     def test_contract_code_the_workers_bundle_deploys_every_app_that_bundles_it(self):
         """OPS_LIMITS and friends ship inside all three Workers, so a change must redeploy each."""
-        bundled = expect(T, T, T, T, T, **ALL, website_check=T)
+        bundled = expect(T, T, T, T, T, **ALL, website_check=T, flowday_check=T)
         self.assertEqual(push(["contracts/ops-v1/ops-v1.ts"]), bundled)
         self.assertEqual(push(["contracts/ops-v1/ops-v1.ts", "todofy/gateway/src/ops.ts"]), bundled)
         self.assertEqual(push(["contracts/ops-v1/ops-v1.ts"], ref=BRANCH), bundled)
@@ -137,6 +149,7 @@ class Classify(unittest.TestCase):
             "dashboard": [REPO / "dashboard" / "worker" / "src", REPO / "dashboard" / "web" / "src"],
             "lab": [REPO / "lab" / "worker" / "src", REPO / "lab" / "web" / "src"],
             "website": [REPO / "website" / "src", REPO / "website" / "relay" / "src"],
+            "flowday": [REPO / "flowday" / "web" / name for name in ("app", "components", "features", "lib")],
         }
         self.assertEqual(set(roots), set(ci_changes.APPS))
         importers = {}
@@ -212,7 +225,7 @@ class Classify(unittest.TestCase):
             "packages/edge-auth/SPEC.md",
             "dashboard/worker/src/state.ts",
         ]
-        self.assertEqual(push(paths), expect(T, T, T, F, F, packages=T, infra=T, **DASH, website_check=T, lab_check=T))
+        self.assertEqual(push(paths), expect(T, T, T, F, F, packages=T, infra=T, **DASH, website_check=T, lab_check=T, flowday_check=T))
 
     def test_a_package_change_with_one_app_still_deploys_every_user(self):
         paths = ["packages/edge-auth/src/csrf.ts", "todofy/gateway/src/csrf.ts"]
@@ -371,6 +384,7 @@ class Dispatch(unittest.TestCase):
         self.assertEqual(self.dispatch("mail-hero"), expect(F, T, T, F, T, packages=T))
         self.assertEqual(self.dispatch("dashboard"), expect(F, F, T, F, F, packages=T, **DASH))
         self.assertEqual(self.dispatch("lab"), expect(F, F, T, F, F, packages=T, **LAB))
+        self.assertEqual(self.dispatch("flowday"), expect(F, F, T, F, F, packages=T, flowday_check=T))
         self.assertEqual(
             self.dispatch("website"),
             expect(
@@ -457,7 +471,7 @@ class RealGit(unittest.TestCase):
         expected = {**dict.fromkeys(ci_changes.KEYS, "true"), "packages": "false", "infra": "false"}
         expected.update(dashboard_check="false", dashboard_deploy="false")
         expected.update(website_check="false", website_deploy="false", website_relay_deploy="false")
-        expected.update(lab_check="false", lab_deploy="false")
+        expected.update(lab_check="false", lab_deploy="false", flowday_check="false")
         self.assertEqual(outputs, expected)
 
     def test_a_failed_package_run_on_main_deploys_both_apps_next_time(self):
@@ -465,8 +479,8 @@ class RealGit(unittest.TestCase):
         self.commit("packages/edge-auth/src/access.ts")
         after = self.commit("README.md.orig")
         outputs = self.main_run(after, green)
-        website = {"website_check", "website_deploy", "website_relay_deploy"}
-        self.assertEqual({key for key in ci_changes.KEYS if outputs[key] == "false"}, website | {"infra"})
+        unaffected = {"website_check", "website_deploy", "website_relay_deploy", "flowday_check"}
+        self.assertEqual({key for key in ci_changes.KEYS if outputs[key] == "false"}, unaffected | {"infra"})
 
     def test_a_failed_run_on_main_is_repeated(self):
         # Push A changed todofy/ and its run failed (a Mail Hero flake); push B fixes only mail-hero/.
@@ -1420,7 +1434,15 @@ class Reuse(unittest.TestCase):
     def test_every_deploy_decision_survives_reuse(self):
         needed = ci_changes.everything()
         jobs = green_jobs(
-            *TODOFY_JOBS, "Mail Hero checks", "Dashboard checks", "Website checks", "Lab checks", "Contracts", "Shared packages", "Infra checks"
+            *TODOFY_JOBS,
+            "Mail Hero checks",
+            "Dashboard checks",
+            "Website checks",
+            "Lab checks",
+            "FlowDay checks",
+            "Contracts",
+            "Shared packages",
+            "Infra checks",
         )
         result, extra, _ = self.reuse(needed, [branch_run()], {800: jobs})
         self.assertEqual(extra["checks_reused"], "true")
