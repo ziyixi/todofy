@@ -28,12 +28,16 @@ Outputs (GITHUB_OUTPUT, "true"/"false"):
   deploys it too. CHECK_ONLY (apps checked but never deployed, with no "<prefix>_deploy" output) is empty.
 
 proto/ (the protobuf IDL, proto/README.md) checks every app in PROTO_USERS (an app that depends on
-@ziyixi/proto or ziyixi-proto) and deploys only those whose bundle can change: an app whose Worker
-compiles the package in (PROTO_USERS[app] is True: a TypeScript "dependencies" entry, a Python [project]
-dependency) and only for a change outside PROTO_NOT_BUNDLED (tests, test data, the check scripts, the
-api-linter tool module and Markdown). A test-only user (devDependencies, a dependency group) is checked, never deployed.
-Lab and Todofy both bundle it (Lab's Worker the TypeScript codec, todofy-core the Python package that
-pywrangler vendors), so an IDL or codec change deploys both. It also runs Contracts.
+@ziyixi/proto or ziyixi-proto) and deploys only the apps whose bundle the changed path reaches
+(proto_deploys): PROTO_USERS[app] names the languages whose generated code and runtime the app's
+production bundles compile in ("ts": Lab's Worker and UI; "python": todofy-core, through the wheel
+pywrangler vendors; Todofy's gateway imports types only, so it is no "ts" user), PROTO_RUNTIMES maps a
+language's runtime and generator to that language's users, and PROTO_PACKAGES maps each proto package to
+the apps that import its generated code (lab/ui reaches Lab only; prototest, the runtimes' fixtures,
+reaches no app). Tests, test data, the check scripts, the api-linter tool module, check configs and
+Markdown (PROTO_NOT_BUNDLED) deploy nothing; any other proto/ path (buf.yaml, buf.lock, the toolchain
+lockfile, ensure.mjs, a package not listed yet) deploys every user (fail safe). test_proto.py derives
+PROTO_USERS and the packages' importers from the sources. It also runs Contracts.
 
 push: the files changed between a cumulative base and github.sha, never only this push's own diff,
 so a change whose run was cancelled or failed is checked (and deployed) again by the next run.
@@ -131,10 +135,29 @@ NO_CONTRACTS = {"website", "flowday"}
 INFRA = ("infra/", "tools/infra-plan-summary/")
 # packages/<name>/ -> the apps whose Workers compile it in (a "file:../../packages/<name>" dependency).
 PACKAGE_USERS = {"edge-auth": ("todofy", "mail-hero", "dashboard", "lab", "flowday")}
-# The protobuf IDL (proto/README.md): app -> whether its production bundle includes the generated code
-# (True) or only its tests use it (False). test_proto.py derives this map from the apps' manifests.
+# The protobuf IDL (proto/README.md): app -> the languages ("ts", "python") whose generated code and runtime
+# its production bundles compile in; () for a user whose bundles take nothing from it (types only, tests
+# only). test_proto.py derives this map from the apps' manifests and sources.
 PROTO = "proto/"
-PROTO_USERS = {"lab": True, "todofy": True}
+PROTO_USERS: dict[str, tuple[str, ...]] = {"lab": ("ts",), "todofy": ("python",)}
+# A language's hand-written runtime and generator: a change reaches every user of that language.
+PROTO_RUNTIMES = {
+    "proto/ts/": "ts",
+    "proto/buf.gen.yaml": "ts",
+    "proto/python/": "python",
+    "proto/tools/gen_py.py": "python",
+}
+# A proto package (its directory) -> the apps whose production code imports its generated code (TypeScript
+# value imports, Python imports; test_proto.py checks this against the sources). A package missing here
+# reaches every user (fail safe; test_proto.py fails until it is listed).
+PROTO_PACKAGES: dict[str, tuple[str, ...]] = {
+    "proto/todofy/taskintent/": ("lab", "todofy"),
+    "proto/lab/ui/": ("lab",),
+    # CommonReason: Lab reads its names as types only.
+    "proto/common/errors/": (),
+    # The runtimes' test fixtures (never imported by an app; not in the Python wheel).
+    "proto/prototest/": (),
+}
 # proto/ paths that never reach a bundle: a change there checks the users but deploys none.
 PROTO_NOT_BUNDLED = (
     "proto/test/",
@@ -142,6 +165,10 @@ PROTO_NOT_BUNDLED = (
     "proto/scripts/",
     "proto/tools/profile_breaking.py",
     "proto/tools/api-linter/",
+    "proto/tsconfig.json",
+    "proto/vitest.config.ts",
+    "proto/ruff.toml",
+    "proto/.gitignore",
 )
 
 # Contract files whose code a TypeScript Worker imports at runtime (constants such as OPS_LIMITS land
@@ -217,14 +244,26 @@ def is_package_document(path: str) -> bool:
     return path.startswith("packages/") and path.count("/") >= 2 and path.endswith(".md")
 
 
+def proto_deploys(path: str) -> set[str]:
+    """The apps whose production bundle a change of one proto/ path can reach."""
+    if path.startswith(PROTO_NOT_BUNDLED) or path.endswith(".md"):
+        return set()
+    bundling = {app for app, languages in PROTO_USERS.items() if languages}
+    for prefix, language in PROTO_RUNTIMES.items():
+        if path.startswith(prefix):
+            return {app for app in bundling if language in PROTO_USERS[app]}
+    for prefix, importers in PROTO_PACKAGES.items():
+        if path.startswith(prefix):
+            return set(importers) & bundling
+    return bundling
+
+
 def proto_users(paths: list[str]) -> tuple[set[str], set[str]]:
     """(apps to check, apps to deploy) for the proto/ paths among ``paths``."""
     changed = [path for path in paths if path.startswith(PROTO)]
     if not changed:
         return set(), set()
-    bundled = any(not path.startswith(PROTO_NOT_BUNDLED) and not path.endswith(".md") for path in changed)
-    deployed = {app for app, in_bundle in PROTO_USERS.items() if in_bundle and bundled}
-    return set(PROTO_USERS), deployed
+    return set(PROTO_USERS), {app for path in changed for app in proto_deploys(path)}
 
 
 def classify(paths: Iterable[str]) -> dict[str, bool]:

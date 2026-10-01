@@ -229,9 +229,12 @@ jobs:
           uv run python deploy/deploy_vars.py exec core -- uv run pywrangler deploy --dry-run --config wrangler.toml \
             --secrets-file "$RUNNER_TEMP/todofy-core-secrets.json" --outdir "$RUNNER_TEMP/todofy-core-bundle"
           # The workers SDK and the generated task-intent-v1 package (ziyixi_proto, proto/README.md) are vendored
-          # next to the core config; a bundle without either cannot start.
+          # next to the core config; a bundle without either cannot start. Only the packages a Python Worker
+          # imports are generated, and the runtimes' fixtures stay out of the wheel (proto/tools/gen_py.py).
           test -d "$RUNNER_TEMP/todofy-core-bundle/python_modules/workers"
           test -f "$RUNNER_TEMP/todofy-core-bundle/python_modules/ziyixi_proto/todofy/taskintent/v1/task_intent_pb.py"
+          test ! -e "$RUNNER_TEMP/todofy-core-bundle/python_modules/ziyixi_proto/prototest"
+          test ! -e "$RUNNER_TEMP/todofy-core-bundle/python_modules/ziyixi_proto/lab"
           uv run python deploy/deploy_vars.py exec gateway -- npx --no-install wrangler deploy --dry-run \
             --config gateway/wrangler.toml --secrets-file "$RUNNER_TEMP/todofy-gateway-secrets.json" \
             --outdir "$RUNNER_TEMP/todofy-gateway-bundle"
@@ -592,7 +595,8 @@ jobs:
           if grep -rnE "(from|import)[[:space:]]*\(?[[:space:]]*['\"][^'\"]*(mail-hero|todofy|dashboard|website)/" worker/src web/src \
             | grep -v "['\"]@ziyixi/proto/"; then exit 1; fi
       # The committed production config (lab/wrangler.toml), run exactly as the deploy runs it, with placeholder
-      # values for what the deploy adds (deploy/deploy-vars.mjs). No token is needed for --dry-run.
+      # values for what the deploy adds (deploy/deploy-vars.mjs). No token is needed for --dry-run. The bundle it
+      # writes is held to Lab's budget and the Workers Free limit (deploy/bundle-size.mjs).
       - name: Dry-run the committed production config
         working-directory: lab/worker
         env:
@@ -603,6 +607,7 @@ jobs:
           node ../deploy/deploy-vars.mjs secrets "$RUNNER_TEMP/lab-secrets.json"
           node ../deploy/deploy-vars.mjs exec -- npx --no-install wrangler deploy --dry-run --config ../wrangler.toml \
             --secrets-file "$RUNNER_TEMP/lab-secrets.json" --outdir "$RUNNER_TEMP/lab-bundle"
+          node ../deploy/bundle-size.mjs "$RUNNER_TEMP/lab-bundle"
       - name: Remove the placeholder secrets file
         if: always()
         run: rm -f "$RUNNER_TEMP/lab-secrets.json"
@@ -1479,12 +1484,14 @@ jobs:
           LAB_ACCESS_OWNER_ALIASES: ${{ secrets.DASHBOARD_ACCESS_OWNER_ALIASES }}
           LAB_CSRF_SIGNING_KEY: ${{ secrets.LAB_CSRF_SIGNING_KEY }}
         run: node ../deploy/deploy-vars.mjs secrets "$RUNNER_TEMP/lab-secrets.json"
-      # deploy-vars.mjs adds BUILD_SHA as --var and refuses the all-zeros D1 id or Access AUD.
+      # deploy-vars.mjs adds BUILD_SHA as --var and refuses the all-zeros D1 id or Access AUD; the bundle that ships
+      # is held to Lab's budget and the Workers Free limit (deploy/bundle-size.mjs).
       - name: Validate the bundle before changing D1
         working-directory: lab/worker
         run: |
           node ../deploy/deploy-vars.mjs exec -- npx --no-install wrangler deploy --dry-run --config ../wrangler.toml \
-            --secrets-file "$RUNNER_TEMP/lab-secrets.json"
+            --secrets-file "$RUNNER_TEMP/lab-secrets.json" --outdir "$RUNNER_TEMP/lab-bundle"
+          node ../deploy/bundle-size.mjs "$RUNNER_TEMP/lab-bundle"
       # tools/cf-guard (read-only GETs; prints listed hostnames, counts, PASS/FAIL): wrangler applies a config's Custom
       # Domains (or zone routes) as the Worker's complete set, so stop before any production change when a live
       # hostname would be detached or another Worker's hostname or DNS record taken over. For an intentional
@@ -1505,6 +1512,46 @@ jobs:
           npx --no-install wrangler d1 migrations apply DB --remote --config ../wrangler.toml
           node ../deploy/deploy-vars.mjs exec -- npx --no-install wrangler deploy --config ../wrangler.toml \
             --secrets-file "$RUNNER_TEMP/lab-secrets.json"
+      # Access answers every request before the Worker runs (the probe below), so production is read through the API
+      # with the deploy token, as FlowDay deploy does (GETs and one D1 read of the migrations table): the Worker serves
+      # exactly one version at 100%, that version's BUILD_SHA is this commit (so this commit's routes, lab.ui.v1 among
+      # them, are what answers), and no D1 migration is pending. wrangler's JSON answers are parsed, never printed (they
+      # name the token's account email); only the version id and the results are.
+      - name: Check that production runs this commit
+        working-directory: lab/worker
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+        run: |
+          test -n "$CLOUDFLARE_API_TOKEN"
+          deployment=$(npx --no-install wrangler deployments status --json --config ../wrangler.toml) || {
+            echo "Could not read the deployment of the Worker lab." >&2
+            exit 1
+          }
+          version=$(jq -er '.versions | select(length == 1 and .[0].percentage == 100) | .[0].version_id' \
+            <<<"$deployment" 2>/dev/null) || {
+            echo "The deployment does not serve exactly one version at 100%." >&2
+            exit 1
+          }
+          details=$(npx --no-install wrangler versions view "$version" --json --config ../wrangler.toml) || {
+            echo "Could not read the deployed version." >&2
+            exit 1
+          }
+          build=$(jq -er '[.resources.bindings[] | select(.name == "BUILD_SHA" and .type == "plain_text") | .text]
+            | select(length == 1) | .[0]' <<<"$details" 2>/dev/null) || build=''
+          if [ "$build" != "$GITHUB_SHA" ]; then
+            echo "The deployed version $version was not built from $GITHUB_SHA." >&2
+            exit 1
+          fi
+          echo "The Worker lab serves version $version at 100%, built from $GITHUB_SHA."
+          pending=$(npx --no-install wrangler d1 migrations list DB --remote --config ../wrangler.toml) || {
+            echo "Could not list the D1 migrations." >&2
+            exit 1
+          }
+          if ! grep -q 'No migrations to apply' <<<"$pending"; then
+            echo "D1 migrations are still pending." >&2
+            exit 1
+          fi
+          echo "No D1 migration is pending."
       # Cloudflare Access ("Lab") must answer every unauthenticated request with a 302 to its login page for this
       # host, exactly as the dashboard's probe checks (same script; test_ci_changes.py runs it).
       - name: Check that Access answers unauthenticated requests

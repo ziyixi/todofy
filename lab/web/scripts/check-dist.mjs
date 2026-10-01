@@ -1,7 +1,9 @@
 // Checks the built UI (dist/) against the same-origin page rules (docs/design.md §7) and the Worker's CSP
-// (script-src 'self'): no absolute URL except inert identifiers, no inline script, no data: modules.
+// (script-src 'self'): no absolute URL except inert identifiers, no inline script, no data: modules; and the
+// JavaScript against its size budget (js-budget.mjs).
 import { readFileSync, readdirSync, statSync } from 'node:fs'
 import { join, relative } from 'node:path'
+import { jsBudgetProblem, jsSize } from './js-budget.mjs'
 
 const dist = new URL('../dist/', import.meta.url).pathname
 
@@ -32,8 +34,12 @@ for (const path of files(dist)) {
   if (/data:(?:text|application)\/javascript/i.test(text)) problems.push(`${relative(dist, path)}: data: script`)
 }
 
+const js = jsSize(join(dist, 'assets'))
+const budget = jsBudgetProblem(js)
+if (budget !== null) problems.push(budget)
+
 if (problems.length) {
   console.error(`dist/ breaks the same-origin page rules:\n${problems.join('\n')}`)
   process.exit(1)
 }
-console.log('dist/ makes no cross-origin references.')
+console.log(`dist/ makes no cross-origin references; its JavaScript is ${(js.gzip / 1024).toFixed(1)} KiB gzip (budget in js-budget.mjs).`)

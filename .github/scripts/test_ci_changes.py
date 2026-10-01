@@ -207,43 +207,88 @@ class Classify(unittest.TestCase):
                 self.assertFalse(push([path])["infra"])
         self.assertEqual(push(["infra/storage.tf", "lab/wrangler.toml"]), expect(F, F, T, F, F, **LAB, infra=T))
 
-    def test_proto_checks_and_deploys_its_users_and_runs_contracts(self):
-        """proto/ re-checks every PROTO_USERS app, runs Proto checks and Contracts (the task-intent-v1 tests check
-        the codecs against the schema), and deploys Lab and Todofy, whose Workers bundle the generated code."""
-        self.assertEqual(ci_changes.PROTO_USERS, {"lab": True, "todofy": True})
-        for path in (
-            "proto/todofy/taskintent/v1/task_intent.proto",
-            "proto/lab/ui/v1/lab_ui_service.proto",
-            "proto/ts/wire-json.ts",
-            "proto/python/src/ziyixi_proto/wire_json.py",
-            "proto/python/build_backend.py",
-            "proto/package-lock.json",
-            "proto/buf.lock",
-        ):
+    def test_proto_checks_its_users_runs_contracts_and_deploys_only_the_bundles_a_path_reaches(self):
+        """proto/ re-checks every PROTO_USERS app and runs Proto checks and Contracts (the task-intent-v1 tests check
+        the codecs against the schema); it deploys an app only when the changed path reaches that app's bundle."""
+        self.assertEqual(ci_changes.PROTO_USERS, {"lab": ("ts",), "todofy": ("python",)})
+        both = {"todofy_deploy": T, "lab_deploy": T}
+        lab_only = {"todofy_deploy": F, "lab_deploy": T}
+        none = {"todofy_deploy": F, "lab_deploy": F}
+        cases = {
+            # The contract both apps bundle: Lab's TypeScript and todofy-core's Python.
+            "proto/todofy/taskintent/v1/task_intent.proto": both,
+            # Lab's UI API: only Lab imports it (Python does not even generate it).
+            "proto/lab/ui/v1/lab_ui_service.proto": lab_only,
+            "proto/lab/ui/v1/deck.proto": lab_only,
+            # The TypeScript runtime and generator: Todofy's gateway imports types only.
+            "proto/ts/wire-json.ts": lab_only,
+            "proto/ts/http-transcoder.ts": lab_only,
+            "proto/ts/rpc-status.ts": lab_only,
+            "proto/ts/package.json": lab_only,
+            "proto/buf.gen.yaml": lab_only,
+            # The Python runtime and generator: only todofy-core vendors the wheel.
+            "proto/python/src/ziyixi_proto/wire_json.py": {"todofy_deploy": T, "lab_deploy": F},
+            "proto/python/build_backend.py": {"todofy_deploy": T, "lab_deploy": F},
+            "proto/python/pyproject.toml": {"todofy_deploy": T, "lab_deploy": F},
+            "proto/tools/gen_py.py": {"todofy_deploy": T, "lab_deploy": F},
+            # The runtimes' fixtures and a package imported as types only reach no bundle.
+            "proto/prototest/v1/prototest.proto": none,
+            "proto/common/errors/v1/errors.proto": none,
+            # What every generation depends on: every bundled user (fail safe).
+            "proto/buf.yaml": both,
+            "proto/buf.lock": both,
+            "proto/package-lock.json": both,
+            "proto/tools/ensure.mjs": both,
+            "proto/newapp/ui/v1/newapp_ui_service.proto": both,
+            # Checks, tests, test data and documents: nothing.
+            "proto/README.md": none,
+            "proto/test/task-intent.test.ts": none,
+            "proto/test/python/test_gen_py.py": none,
+            "proto/testdata/wire-profile-cases.json": none,
+            "proto/scripts/breaking.sh": none,
+            "proto/scripts/api-lint.sh": none,
+            "proto/tools/profile_breaking.py": none,
+            "proto/tools/api-linter/go.mod": none,
+            "proto/tools/api-linter/go.sum": none,
+            "proto/tsconfig.json": none,
+            "proto/vitest.config.ts": none,
+            "proto/ruff.toml": none,
+            "proto/.gitignore": none,
+        }
+        for path, deploys in cases.items():
             with self.subTest(path=path):
-                self.assertEqual(push([path]), expect(T, F, T, T, F, proto=T, **LAB))
-        for path in (
-            "proto/README.md",
-            "proto/test/task-intent.test.ts",
-            "proto/testdata/wire-profile-cases.json",
-            "proto/scripts/breaking.sh",
-            "proto/scripts/api-lint.sh",
-            "proto/tools/profile_breaking.py",
-            "proto/tools/api-linter/go.mod",
-            "proto/tools/api-linter/go.sum",
-        ):
-            with self.subTest(path=path):
-                self.assertEqual(push([path]), expect(T, F, T, F, F, proto=T, lab_check=T))
+                self.assertEqual(
+                    push([path]),
+                    expect(T, F, T, deploys["todofy_deploy"], F, proto=T, lab_check=T, lab_deploy=deploys["lab_deploy"]),
+                )
         self.assertFalse(push(["protocol.md"])["proto"])
+        # Paths add up: a Python runtime change with a UI API change deploys both.
+        self.assertEqual(
+            push(["proto/python/src/ziyixi_proto/wire_json.py", "proto/lab/ui/v1/home.proto"]),
+            expect(T, F, T, T, F, proto=T, **LAB),
+        )
+
+    def test_every_proto_package_and_runtime_is_mapped(self):
+        """Each package directory under proto/ (a directory holding .proto files) is in PROTO_PACKAGES, and every
+        language a user bundles has a runtime path, so no proto/ path falls back to "every user" by omission."""
+        packages = {
+            "proto/" + str(path.parent.relative_to(REPO / "proto").parent) + "/"
+            for path in (REPO / "proto").rglob("*.proto")
+            if "node_modules" not in path.parts and path.parent.name.startswith("v")
+        }
+        self.assertEqual(packages, set(ci_changes.PROTO_PACKAGES))
+        languages = {language for languages in ci_changes.PROTO_USERS.values() for language in languages}
+        self.assertLessEqual(languages, set(ci_changes.PROTO_RUNTIMES.values()))
 
     def test_proto_deploys_only_a_user_whose_bundle_compiles_it_in(self):
         saved = ci_changes.PROTO_USERS
         try:
-            ci_changes.PROTO_USERS = {"lab": True, "todofy": False}
+            ci_changes.PROTO_USERS = {"lab": ("ts",), "todofy": ()}
             for path in ("proto/todofy/taskintent/v1/task_intent.proto", "proto/ts/wire-json.ts", "proto/buf.lock"):
                 with self.subTest(path=path):
                     self.assertEqual(push([path]), expect(T, F, T, F, F, proto=T, **LAB))
-            ci_changes.PROTO_USERS = {"lab": False, "todofy": False}
+            self.assertEqual(push(["proto/python/build_backend.py"]), expect(T, F, T, F, F, proto=T, lab_check=T))
+            ci_changes.PROTO_USERS = {"lab": (), "todofy": ()}
             self.assertEqual(push(["proto/ts/wire-json.ts"]), expect(T, F, T, F, F, proto=T, lab_check=T))
         finally:
             ci_changes.PROTO_USERS = saved
@@ -1596,12 +1641,14 @@ class FlowDayProductionCheck(unittest.TestCase):
     It passes only when the live deployment serves one version at 100% whose BUILD_SHA is this commit and no D1
     migration is pending, and it never prints wrangler's JSON (it names the token's account email)."""
 
+    JOB = "flowday-deploy"
+    WORKER = "flowday"
     STEP = "- name: Check that production runs this commit\n"
     VERSION = "0b9c1d2e-3f40-4a5b-8c6d-7e8f90a1b2c3"
     EMAIL = "deployer@example.org"
 
     def script(self):
-        block = workflow_jobs()["flowday-deploy"]
+        block = workflow_jobs()[self.JOB]
         body = block.split(self.STEP, 1)[1].split("        run: |\n", 1)[1]
         lines = []
         for line in body.splitlines():
@@ -1665,7 +1712,7 @@ class FlowDayProductionCheck(unittest.TestCase):
     def test_this_commit_at_100_percent_with_no_pending_migration_passes(self):
         code, output, calls = self.check(self.deployment((self.VERSION, 100)), self.version(SHA))
         self.assertEqual(code, 0, output)
-        self.assertIn(f"serves version {self.VERSION} at 100%, built from {SHA}", output)
+        self.assertIn(f"The Worker {self.WORKER} serves version {self.VERSION} at 100%, built from {SHA}", output)
         self.assertIn("No D1 migration is pending.", output)
         self.assertEqual(
             calls,
@@ -1712,6 +1759,14 @@ class FlowDayProductionCheck(unittest.TestCase):
         code, output, calls = self.check(self.deployment((self.VERSION, 100)), self.version(SHA), token="")
         self.assertNotEqual(code, 0, output)
         self.assertEqual(calls, [])
+
+
+class LabProductionCheck(FlowDayProductionCheck):
+    """Lab deploy's check, the same step: Access answers every request before the Worker, so the probe alone cannot
+    tell whether this commit (its lab.ui.v1 routes) is what serves; the deployed version's BUILD_SHA can."""
+
+    JOB = "lab-deploy"
+    WORKER = "lab"
 
 
 REPOSITORY = "ziyixi/todofy"

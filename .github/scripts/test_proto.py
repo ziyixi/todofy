@@ -13,8 +13,11 @@ python3 -m unittest discover -s .github/scripts -p test_proto.py (the Proto chec
   a TypeScript user, or in a package whose sources import a user's sources, runs ensure.mjs first as its
   pre-script, so a pull or branch switch that changes a .proto
   file cannot leave stale generated types behind (uv's cache keys do the same for Python).
-- ci_changes.PROTO_USERS lists exactly those users, each marked bundled only when its Worker compiles the
-  package in, and a user marked test-only has no production import of it.
+- ci_changes.PROTO_USERS lists exactly those users, each with the languages its production bundles compile
+  in (a TypeScript "dependencies" entry with a value import in production code, a Python [project]
+  dependency); a user marked test-only has no production import of it; ci_changes.PROTO_PACKAGES names
+  exactly the apps whose production code imports each package's generated code (type-only imports compile to
+  nothing), so a proto/ change deploys only the bundles it reaches.
 - Generated code is never committed and is ignored; uv's cache keys cover every input ensure.mjs hashes.
 - api-linter: one exact version, in the Go tool module proto/tools/api-linter only (go.mod pins it and
   the Go toolchain, go.sum every checksum); scripts/api-lint.sh builds it from there, and the Proto checks
@@ -116,6 +119,57 @@ def py_users() -> dict[Path, dict]:
             names += [item for item in group if isinstance(item, str)]
         if any(re.split(r"[\s<>=!~;\[]", name, maxsplit=1)[0] == PY_PACKAGE for name in names):
             found[pyproject] = data
+    return found
+
+
+# A specifier of @ziyixi/proto in an import or export statement (the statement's start decides type-only).
+TS_FROM = re.compile(r"""\bfrom\s*['"](@ziyixi/proto(?:/[^'"]*)?)['"]|^\s*import\s*['"](@ziyixi/proto(?:/[^'"]*)?)['"]""", re.MULTILINE)
+
+
+def ts_proto_imports(text: str) -> list[tuple[str, bool]]:
+    """(specifier, type only) of every static import or re-export from @ziyixi/proto in a source file."""
+    found = []
+    for match in TS_FROM.finditer(text):
+        if match.group(2) is not None:
+            found.append((match.group(2), False))  # `import '...'`: run for its effects
+            continue
+        start = max(text.rfind("\nimport", 0, match.start()), text.rfind("\nexport", 0, match.start())) + 1
+        statement = text[start : match.start()]
+        found.append((match.group(1), re.match(r"\s*(import|export)\s+type\b", statement) is not None))
+    return found
+
+
+def production_sources(manifest: Path) -> list[Path]:
+    """The TypeScript a package ships: src/**, without tests (*.test.*) and test helpers (a test/ directory)."""
+    return [
+        path
+        for path in sorted((manifest.parent / "src").rglob("*.ts*"))
+        if ".test." not in path.name and "test" not in path.relative_to(manifest.parent).parts
+    ]
+
+
+def py_production_sources(pyproject: Path) -> list[Path]:
+    """The Python a Worker ships: its wrangler.toml base_dir."""
+    config = tomllib.loads((pyproject.parent / "wrangler.toml").read_text())
+    return sorted((pyproject.parent / config.get("base_dir", ".")).rglob("*.py"))
+
+
+def value_importers() -> dict[str, set[str]]:
+    """App -> the proto/ paths (a package directory, or a language: "ts", "python") its production bundles import."""
+    found: dict[str, set[str]] = {}
+    for manifest, data in ts_users().items():
+        if TS_PACKAGE not in data.get("dependencies", {}):
+            continue
+        for source in production_sources(manifest):
+            for specifier, type_only in ts_proto_imports(source.read_text()):
+                if not type_only:
+                    found.setdefault(app_of(manifest), set()).update({"ts", f"proto/{specifier.removeprefix(TS_PACKAGE + '/')}"})
+    for pyproject, data in py_users().items():
+        if not py_bundled(data):
+            continue
+        for source in py_production_sources(pyproject):
+            for module in re.findall(r"^\s*(?:from|import)\s+(ziyixi_proto(?:\.\w+)*)", source.read_text(), re.MULTILINE):
+                found.setdefault(app_of(pyproject), set()).update({"python", "proto/" + "/".join(module.split(".")[1:])})
     return found
 
 
@@ -265,16 +319,37 @@ class Users(unittest.TestCase):
                 self.assertIsNotNone(match, "add \"postinstall\": \"node <...>/proto/tools/ensure.mjs\"")
                 self.assertEqual((pyproject.parent / match.group(1)).resolve(), ENSURE)
 
-    def test_proto_users_matches_the_manifests(self):
-        derived = {}
-        for manifest, data in ts_users().items():
-            derived[app_of(manifest)] = derived.get(app_of(manifest), False) or TS_PACKAGE in data.get(
-                "dependencies", {}
-            )
-        for pyproject, data in py_users().items():
-            derived[app_of(pyproject)] = derived.get(app_of(pyproject), False) or py_bundled(data)
-        self.assertEqual(derived, ci_changes.PROTO_USERS)
+    def test_proto_users_matches_the_manifests_and_sources(self):
+        """Every user is listed, with exactly the languages its production bundles take from proto/."""
+        users = {app_of(path) for path in [*ts_users(), *py_users()]}
+        imports = value_importers()
+        derived = {app: {lang for lang in imports.get(app, set()) if lang in ("ts", "python")} for app in users}
+        self.assertEqual(derived, {app: set(languages) for app, languages in ci_changes.PROTO_USERS.items()})
         self.assertLessEqual(set(derived), set(ci_changes.APPS))
+        # Todofy's gateway takes types only (it compiles to nothing), Lab's Worker and UI take values.
+        gateway = REPO / "todofy" / "gateway" / "package.json"
+        self.assertTrue(all(type_only for source in production_sources(gateway) for _, type_only in ts_proto_imports(source.read_text())))
+
+    def test_proto_packages_name_exactly_their_importers(self):
+        """ci_changes.PROTO_PACKAGES: the apps whose production code imports each package's generated code."""
+        imports = value_importers()
+        for package, importers in ci_changes.PROTO_PACKAGES.items():
+            with self.subTest(package=package):
+                actual = {app for app, paths in imports.items() if any(path.startswith(package) for path in paths)}
+                self.assertEqual(actual, set(importers))
+
+    def test_type_only_imports_are_told_apart(self):
+        text = (
+            "import type { A } from '@ziyixi/proto/a/v1/a_pb'\n"
+            "import { b } from '@ziyixi/proto/b/v1/b_pb'\n"
+            "import {\n  type C,\n  d,\n} from '@ziyixi/proto/c'\n"
+            "export type { E } from '@ziyixi/proto/e'\n"
+            "import '@ziyixi/proto/f'\n"
+        )
+        self.assertEqual(
+            ts_proto_imports(text),
+            [("@ziyixi/proto/a/v1/a_pb", True), ("@ziyixi/proto/b/v1/b_pb", False), ("@ziyixi/proto/c", False), ("@ziyixi/proto/e", True), ("@ziyixi/proto/f", False)],
+        )
 
     def test_a_test_only_user_has_no_production_import(self):
         """PROTO_USERS[app] False means no deploy on a proto/ change: nothing that ships may import it."""

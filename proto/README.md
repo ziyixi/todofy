@@ -4,9 +4,9 @@ Protobuf is the interface definition language (IDL) of every interface the repos
 cross-app contracts and each app's UI API (the HTTP/JSON between its UI and its Worker, [HTTP
 APIs](#http-apis)). The wire stays JSON: each contract keeps its JSON bytes, and every API speaks the same
 snake_case form, through a small *wire JSON profile* codec per language. The `.proto` files give every app
-generated types and enum tables, `buf lint`, `buf breaking` and Google's api-linter make "renamed,
-renumbered, retyped, removed or not AIP-shaped" a CI failure, and a shared transcoder and client route and
-call the HTTP APIs from the same descriptors.
+generated types and enum tables, `buf lint`, `buf breaking`, the profile's own breaking rules and Google's
+api-linter make "renamed, renumbered, retyped, removed, re-routed or not AIP-shaped" a CI failure, and a
+shared transcoder and client route and call the HTTP APIs from the same descriptors.
 
 Status: `task_intent.proto` is the IDL of `contracts/task-intent-v1`, and both sides run on the generated
 code (2026-10-01): Lab (TypeScript) builds its intents as generated messages and reads Todofy's results with
@@ -38,10 +38,18 @@ HTTP APIs, which ops-v1, recommendation-v1, mail-received-v1 and every app's UI 
    `buf.yaml`) only from the two response-name rules the AIPs contradict. Google's api-linter
    (`scripts/api-lint.sh`, one pinned version) checks every package but `prototest/` against the AIPs; its
    exceptions are `(-- api-linter: ... --)` comments with a reason, next to the element. `buf breaking` uses
-   `FILE`, the strictest category. `tools/profile_breaking.py` adds what buf cannot see but the profile treats
-   as wire: an existing field gaining or losing `(google.api.field_behavior) = REQUIRED` or explicit presence
-   (`optional`), and a new `REQUIRED` field in an existing message. `scripts/rules-selftest.sh` proves the
-   rules bite (17 cases).
+   `FILE`, the strictest category: names, numbers, types, removals. buf compares no custom option, so
+   `tools/profile_breaking.py` adds what it cannot see but is wire here. For the wire profile: an existing
+   field gaining or losing `(google.api.field_behavior) = REQUIRED` or explicit presence (`optional`), and a
+   new `REQUIRED` field in an existing message. For the HTTP APIs, where the URL is the wire (an open tab of
+   an older UI and every other client keep calling the paths they were built with): a binding of an
+   existing method (verb, path template, body, response_body) that is no longer among its bindings (adding
+   an `additional_binding`, or demoting the old primary binding to one, is compatible), a lost
+   `method_signature`, a `google.api.resource` whose type changed or that lost a pattern, an existing input
+   field that gains `OUTPUT_ONLY` or `IDENTIFIER` (the transcoder would drop what clients send), and a
+   `(google.api.field_info).format` added to or changed on an existing field. Like buf, it skips the
+   directories `buf.yaml` lists under `breaking.ignore` (the runtimes' fixtures). `scripts/rules-selftest.sh`
+   proves the rules bite (30 cases, on `task_intent.proto`, `lab/ui/v1` and `prototest`).
 5. **Adding an enum value is compatible by design**, so neither buf nor the profile check flags it. What
    keeps consumers working is the reading rule: outputs are read leniently (an unknown enum name reads as
    `*_UNSPECIFIED`, an unknown field is skipped, both listed in `unrecognized`), and a consumer branches on
@@ -53,18 +61,19 @@ HTTP APIs, which ops-v1, recommendation-v1, mail-received-v1 and every app's UI 
 | --- | --- |
 | `buf.yaml`, `buf.lock` | The module (`path: .`, tooling directories excluded), lint and breaking rules, the `buf.build/googleapis/googleapis` dependency pinned by commit and digest |
 | `buf.gen.yaml` | protobuf-es v2 (`target=ts`, `import_extension=ts`, `erasable_syntax=true`) into `ts/` |
-| `<package path>/*.proto` | One directory per proto package: `todofy/taskintent/v1/task_intent.proto` is `todofy.taskintent.v1`; `lab/ui/v1/*.proto` is `lab.ui.v1`, Lab's owner UI API |
+| `<package path>/*.proto` | One directory per proto package: `todofy/taskintent/v1/task_intent.proto` is `todofy.taskintent.v1`; `lab/ui/v1/*.proto` is `lab.ui.v1`, Lab's owner UI API; `common/errors/v1/errors.proto` is `common.errors.v1`, the error reasons every HTTP API shares |
 | `package.json`, `package-lock.json` | The toolchain pins (`dependencies`: buf, protoc-gen-es, the runtime) and this folder's test tools (`devDependencies`) |
-| `ts/` | The TypeScript package `@ziyixi/proto`. Committed: `package.json` (its exports), `wire-json.ts` (the codec), `http-path.ts`, `http-rule.ts`, `http-transcoder.ts`, `http-client.ts` and `rpc-status.ts` (the HTTP runtime, [HTTP APIs](#http-apis)), `protobuf.ts` / `protobuf-wkt.ts` (the runtime re-exports). Generated: every directory (`ts/todofy/...`, `ts/lab/...`, `ts/google/...`) |
-| `python/` | The Python package `ziyixi-proto`. Committed: `pyproject.toml` (static metadata, uv cache keys), `build_backend.py`, `src/ziyixi_proto/__init__.py` and `wire_json.py` (the codec). Generated: every directory under `src/ziyixi_proto/` |
+| `ts/` | The TypeScript package `@ziyixi/proto`. Committed: `package.json` (its exports), `wire-json.ts` and `field-mask.ts` (the codec), `http-path.ts`, `http-rule.ts`, `http-transcoder.ts`, `http-client.ts` and `rpc-status.ts` (the HTTP runtime, [HTTP APIs](#http-apis)), `page-token.ts` and `filter.ts` (AIP-158 page tokens and the AIP-160 subset for list methods), `protobuf.ts` / `protobuf-wkt.ts` (the runtime re-exports). Generated: every directory (`ts/todofy/...`, `ts/lab/...`, `ts/common/...`, `ts/google/...`) |
+| `python/` | The Python package `ziyixi-proto`. Committed: `pyproject.toml` (static metadata, uv cache keys), `build_backend.py`, `src/ziyixi_proto/__init__.py` and `wire_json.py` (the codec). Generated: every directory under `src/ziyixi_proto/`, for the packages `tools/gen_py.py` lists in `PYTHON_PACKAGES` only; the wheel leaves the test-only ones out (`TEST_ONLY_PACKAGES`) |
 | `tools/ensure.mjs` | Installs the pinned toolchain when `node_modules/` does not match the lockfile, and generates both languages when its stamp (`.generated.json`, ignored) does not match |
-| `tools/gen_py.py` | The stdlib-only Python generator (frozen dataclasses, `IntEnum`s, field tables) |
+| `tools/gen_py.py` | The stdlib-only Python generator (frozen dataclasses, `IntEnum`s, field tables), for `PYTHON_PACKAGES` only: `todofy.taskintent.v1` (todofy-core imports it) and `prototest.v1` (this folder's Python tests). A package only TypeScript apps use (an app's UI API) is not generated, so it may use what the Python profile lacks |
 | `tools/profile_breaking.py` | The profile's breaking rules (rule 4) |
 | `scripts/breaking.sh`, `scripts/rules-selftest.sh` | The breaking gate against a base commit; the rules self-test |
 | `scripts/api-lint.sh`, `tools/api-linter/` | Google's api-linter on every package but `prototest/`: a Go tool module (`go.mod` pins api-linter and the Go toolchain, `go.sum` every checksum) that the script builds into `.tools/` (ignored) |
-| `prototest/v1/prototest.proto` | Test fixtures of the runtimes, never used by an app: a message with every field kind of the profile and a service with every kind of HTTP binding |
-| `testdata/http-cases.json` | The HTTP runtime's cases on `prototest.v1.BookService`: 46 requests and what the transcoder answers, 12 request messages and what the client sends; every implementation (a Python transcoder later) runs them |
-| `testdata/wire-profile-cases.json` | 62 edge cases (timestamps, integer and double spellings, enum look-alikes, maps, missing fields, null) that both codecs must answer identically |
+| `prototest/v1/prototest.proto` | Test fixtures of the runtimes, never used by an app (not in the Python wheel; a change deploys nothing): a message with every field kind of the profile and a service with every kind of HTTP binding, an AIP-134 update with a field mask among them |
+| `testdata/http-cases.json` | The HTTP runtime's cases on `prototest.v1.BookService`: 64 requests and what the transcoder answers, 19 request messages and what the client sends; every implementation (a Python transcoder later) runs them |
+| `testdata/wire-profile-cases.json` | 69 edge cases (timestamps, integer and double spellings, enum look-alikes, maps, field masks, missing fields, null) that both codecs must answer identically |
+| `testdata/filter-cases.json` | The AIP-160 subset of `ts/filter.ts`: 29 filters and their literals or refusal, 4 search-box texts and their quoted filter |
 | `test/*.test.ts`, `test/python/` | The codec and IDL tests, the same cases in both languages; `test/cross-language.test.ts` pipes bytes through both codecs (`test/python/roundtrip.py` in a child process); `test/ensure.test.ts` runs `tools/ensure.mjs` on a copy of this folder (a deleted toolchain, an abandoned lock, the commands Windows needs) |
 
 Every directory directly inside `ts/` and `python/src/ziyixi_proto/` is generated (`.gitignore`); every
@@ -193,15 +202,19 @@ typecheck|test|dev` regenerates first (its pre-scripts); Todofy's next `uv run` 
    JSON Schema's property order (so field-number order reproduces today's key order), the v1 field names,
    every enum with its AIP-126 prefix and an `_UNSPECIFIED` zero value, `REQUIRED` where the schema
    requires a field. Only the kinds the profile supports: `string`, `bool`, 32-bit integers, `double`, enums
-   (top-level or nested in a message), messages, `repeated` fields, maps with `string` keys and
-   `google.protobuf.Timestamp`; anything else (64-bit integers, `float`, `bytes`, oneofs, nested messages,
-   other well-known types as fields) stops generation with an error.
+   (top-level or nested in a message), messages, `repeated` fields, maps with `string` keys,
+   `google.protobuf.Timestamp` and `google.protobuf.FieldMask`; anything else (64-bit integers, `float`,
+   `bytes`, oneofs, nested messages, other well-known types as fields) stops generation with an error (for
+   Python, only in the packages of `PYTHON_PACKAGES`; add the package there when a Python app imports it).
 2. `npm run lint` until clean, then `npm run generate`.
 3. Add the contract's fixtures to `test/` and `test/python/` (round trip byte for byte, enum and field sets
    equal to the JSON Schema), and a new kind of field to `testdata/wire-profile-cases.json` first.
 4. In each app that uses it: the TypeScript dependency and postinstall above, or the Python source above;
-   then add the app to `PROTO_USERS` in `.github/scripts/ci_changes.py` (`True` once its Worker bundles the
-   generated code, which also makes a `proto/` change deploy it). `test_proto.py` fails until both agree.
+   then, in `.github/scripts/ci_changes.py`, add the app to `PROTO_USERS` with the languages its production
+   bundles compile in (`"ts"` once it imports a value, not only types; `"python"` once a Worker imports the
+   package) and the package directory to `PROTO_PACKAGES` with the apps that import it: a `proto/` change
+   deploys exactly the bundles it reaches. `test_proto.py` derives both from the sources and fails until they
+   agree.
 
 ## Wire JSON profile
 
@@ -218,6 +231,9 @@ contracts send:
 - a double is a finite JSON number (no NaN or infinity); both codecs write the same value, and the same
   bytes for integral values (written as integers) and for 1e-4 <= |x| < 1e16, where Python's `repr` and
   `JSON.stringify` agree;
+- a `google.protobuf.FieldMask` is one string of comma-separated snake_case paths (`"send_mode,author.name"`;
+  `""` has none), not ProtoJSON's lowerCamelCase: a path is `*` or field names joined by dots
+  (`ts/field-mask.ts`, the same rule in Python);
 - a map has `string` keys and is a JSON object in one canonical order: the order `JSON.stringify` gives an
   object whose keys were set in code point order (array-index keys such as `"10"` come first, numerically),
   which Python reproduces; a map value is never null, and an unrecognized map value is reported as
@@ -254,18 +270,46 @@ UI API follow the same pattern.
 **Conventions** (what api-linter does not already enforce):
 
 - Package `<app>.ui.v1` in `<app>/ui/v1/`, one service `<App>UiService`, resources in their own files and the
-  service with its request and response messages in `<app>_ui_service.proto`; `errors.proto` holds the
-  `ErrorReason` enum (each value's name without `ERROR_REASON_` is an `ErrorInfo.reason`, and the enum lists
-  the transcoder's `BAD_REQUEST`, `NOT_FOUND` and `METHOD_NOT_ALLOWED`). Java options as AIP-191 asks.
+  service with its request and response messages in `<app>_ui_service.proto`. Java options as AIP-191 asks.
+- Errors (AIP-193): an `ErrorInfo.reason` is a value name without its prefix, of
+  `common.errors.v1.CommonReason` (`common/errors/v1/errors.proto`: what the shared transcoder, `edge-auth` and
+  any handler answer, `BAD_REQUEST`, `NOT_FOUND`, `METHOD_NOT_ALLOWED`, `INTERNAL`, `UNAVAILABLE`,
+  `UNAUTHORIZED`, `CSRF_FAILED`, `ACCESS_NOT_CONFIGURED`, `NOT_CONFIGURED`) or of the app's own `ErrorReason`
+  in its `errors.proto`, which lists only its domain reasons and never reuses a common name. Only a failed
+  dependency (D1, a Durable Object, the identity provider's keys) is `UNAVAILABLE`, which a client may repeat
+  with the same `request_id`: the app wraps exactly those calls. Anything else unexpected is a bug,
+  `INTERNAL` (the transcoder's default), which a client never repeats by itself.
 - Paths under `/api/v1/` (`/api/v1/{name=decks/*}:decide`): `/api` stays the prefix that separates an app's
   API from its static UI on the one host, and the version is in the path. An app's other HTTP surface (the
   CSRF token at `GET /api/csrf`, `/health`) is transport and stays outside the service.
 - Resource-oriented design (AIP-121/122/123): `google.api.resource` with a pattern on every resource,
   `resource_reference` on every field that names one, singletons for per-owner state (`settings`); standard
-  methods where they fit (AIP-131/132/133/134/135, with AIP-158 page tokens on lists) and custom methods
-  (AIP-136, `:verb`) for actions. `(google.api.field_behavior)` on every field: `REQUIRED`/`OPTIONAL` on
-  inputs, `OUTPUT_ONLY` on what the server computes, `IDENTIFIER` on `name`. A mutation takes an AIP-155
-  `request_id` with `(google.api.field_info).format = UUID4`.
+  methods where they fit (AIP-131/132/133/134/135) and custom methods (AIP-136, `:verb`) for actions.
+  `(google.api.field_behavior)` on every field: `REQUIRED`/`OPTIONAL` on inputs, `OUTPUT_ONLY` on what the
+  server computes, `IDENTIFIER` on `name`. A mutation takes an AIP-155 `request_id` with
+  `(google.api.field_info).format = UUID4`.
+- Resource IDs have no `/` (AIP-122). An ID whose natural key has one (an old-style arXiv ID,
+  `hep-th/9901001`) writes it as `~` (`likedPapers/hep-th~9901001`), and a Create's `<resource>_id` takes
+  exactly that form (AIP-133: the answer's name is `<collection>/<the given id>`); an ID with `/` (also sent
+  as `%2F`) is `INVALID_ARGUMENT`.
+- Create answers the resource; a Delete of a resource that does not exist is `NOT_FOUND` (AIP-135), whatever
+  else exists under the same key, except the replay of a `request_id` whose first request deleted it.
+- Update (AIP-134) is `PATCH` with the resource as the body and an optional `google.protobuf.FieldMask
+  update_mask` (a query parameter): the fields it names are replaced, and an absent, empty or `*` mask
+  replaces every field the client may set. The transcoder enforces the resource's `REQUIRED` fields only
+  where the mask names them, refuses unknown paths and ignores `OUTPUT_ONLY` ones; the client sends only the
+  masked fields. `method_signature = "<resource>,update_mask"`. Store each field so that an update writes
+  only its masked fields (two tabs changing different fields both keep their change).
+- Concurrency (AIP-154): a resource whose mutations must not cross carries `string etag` (`OUTPUT_ONLY`,
+  opaque), and those mutations take `string etag` (`REQUIRED`); a stale one is `ABORTED` with the current
+  state as a detail. An ordered `version` may sit next to it when clients must order two states; it is
+  never a precondition.
+- Lists (AIP-158): `page_size` (0 is the default; larger values are read as the maximum), `page_token` and
+  `next_page_token` from `ts/page-token.ts` (opaque, bound to every list parameter but `page_size`: a token of
+  another filter is `INVALID_ARGUMENT`). A `filter` is AIP-160 in the subset `ts/filter.ts` parses
+  (literals, quoted strings, `AND`; anything else is `INVALID_ARGUMENT`, never read with another meaning);
+  a search box sends its text as one quoted literal (`quoteLiteral`).
+- Counts end in `_count` (AIP-141: `card_count`, `created_task_count`, `liked_last_week_count`).
 - An api-linter exception is written next to the element with its reason, `(-- api-linter: <rule>=disabled
   aip.dev/not-precedent: <why> --)`; file-wide ones go in the file's header comment. Never in a config file.
 
@@ -282,8 +326,11 @@ authentication (Cloudflare Access through `packages/edge-auth`) runs first for e
 `transcoder.handle(request, context, requestId)` routes by the bindings, calls the app's `authorize` hook with
 the matched route before reading the body (CSRF and Origin for every method but GET), builds the request
 message from the path variables, the body (`*` or one field, `application/json`, at most `maxBodyBytes`) and
-the query (`a.b=1`, repeated keys; form encoding, so `+` is a space), checks UUID4 fields and clears
-`OUTPUT_ONLY` input fields (AIP-203), calls the typed handler and writes the answer (`no-store`, `nosniff`). A
+the query (`a.b=1`, repeated keys; form encoding, so `+` is a space; a malformed or non-UTF-8 escape is
+`INVALID_ARGUMENT`, as in a path or a body, never read as U+FFFD), applies an AIP-134 `update_mask` (above),
+checks UUID4 fields and clears `OUTPUT_ONLY` input fields (AIP-203), calls the typed handler and writes the
+answer (`no-store`, `nosniff`). Anything a handler throws that is not an `RpcError`, and an answer the
+profile refuses to write, is `INTERNAL` unless the app's `onUnexpected` says otherwise. A
 path no binding has returns null, for the app's other routes; another method on a known path is 405 with
 `Allow`; `OPTIONS` is 204 with `Allow` and no CORS headers (same-origin only); `HEAD` is `GET` without the
 body. Handlers throw `RpcError(code, reason, message, {details})`; the body is a google.rpc.Status in Google's
@@ -298,9 +345,13 @@ Worker's startup, which is its deploy, instead of a request.
 
 **The client** (`ts/http-client.ts`, `createHttpClient(Service, send)`): one typed method per rpc
 (`client.getDeck({ name: 'decks/2026-09-30' })` resolves to a `Deck`), laid out by the rpc's primary binding;
-`send` is the app's transport (credentials, CSRF header, retries). A non-2xx answer throws `RpcStatusError`
-with the parsed Status (`reason`, `localizedMessage`, `requestId`, `readDetail(status, Schema)`), or
-`HttpResponseError` when the body is not one (a proxy page, an expired Access session).
+`send` is the app's transport (credentials, CSRF header, retries). A request it cannot lay out throws
+`HttpEncodeError` before anything is sent: a path value that does not fit its template, or that has a `.` or
+`..` segment (fetch would resolve it to another path, which the server cannot see), and a value the profile
+cannot write; the same input fails the same way, so a transport never retries it. An update with a mask
+sends only the masked fields. A non-2xx answer throws `RpcStatusError` with the parsed Status (`reason`,
+`localizedMessage`, `requestId`, `readDetail(status, Schema)`), or `HttpResponseError` when the body is not
+one (a proxy page, an expired Access session).
 
 **Cost** (measured 2026-10-01 on Lab, `lab/worker/test/runtime/cpu.test.ts`: a sampled DevTools CPU profile of
 the workerd isolate around each request, LabState included; noisy at 0.1 ms resolution, medians of 10 warm
@@ -311,16 +362,24 @@ running the new code paths once; the route table itself is built when the Worker
 the transcoder (about 2 ms in a fresh Node process), outside any request. Bundles: Lab's Worker 329.2 →
 405.7 KiB (gzip 77.8 → 101.3 KiB, wrangler's dry run), its UI's JavaScript 327.7 → 442.6 kB (gzip
 103.6 → 139.3 kB): the protobuf-es runtime in the UI and the embedded descriptors of `lab.ui.v1` and
-`google/api`.
+`google/api`. The AIP fixes after review (update masks, page tokens, the filter subset, the shared errors;
+same method, three runs each) moved them to 419.3 KiB (gzip 105.0) and 445.5 kB (gzip 140.3), and the CPU
+not measurably: a full page of 50 likes stays at a 1.55-1.57 ms median, one filtered by three literals
+(three LIKE patterns) 1.41 ms, the next page through its token 0.8-0.95 ms, a decide plus an undo
+2.6-3.2 → 3.0-3.3 ms, the isolate's first API request 3.9-4.1 → 3.8-4.0 ms. Lab holds both bundles to a
+budget (`lab/deploy/bundle-size.mjs`: 128 KiB gzip for the Worker; `lab/web/scripts/js-budget.mjs`: 160 KiB
+gzip for the UI's JavaScript).
 
 **Adding a UI API.**
 
 1. Write `<app>/ui/v1/*.proto` by the conventions above; `npm run lint && npm run api-lint` until clean.
 2. Add the app's UI package (its `web/`) as a TypeScript user: `"@ziyixi/proto": "file:../../proto/ts"` in
    `dependencies`, the `postinstall` and the pre-scripts (Rules); the Worker is one already if it uses proto.
-3. Worker: `new HttpTranscoder(<App>UiService, handlers, { domain, maxBodyBytes, authorize, localize,
-   onUnexpected })` after authentication; keep the app's error copy as `localize`. UI: `createHttpClient`
-   with a transport that adds credentials and the CSRF header, and read errors by `status.reason`.
+3. Worker: `new HttpTranscoder(<App>UiService, handlers, { domain, maxBodyBytes, authorize, localize })` after
+   authentication; keep the app's error copy as `localize` (for its own reasons and `CommonReason`), wrap each
+   call to a dependency so that its failure is `UNAVAILABLE`, and leave everything else to the default
+   `INTERNAL`. UI: `createHttpClient` with a transport that adds credentials and the CSRF header; read errors
+   by `status.reason`, and retry only network failures and `UNAVAILABLE`.
 4. Move the old routes off: an old UI tab calls the old paths until it reloads, so either keep them for one
    release as `additional_bindings` (when the old request and answer shapes still decode) or answer them
    with a "reload" error in the old envelope (what Lab did, `lab/worker/src/http.ts`); remove that after
@@ -336,15 +395,22 @@ or on a dispatch: `npm ci`, `npm run lint`, `npm run api-lint` (Go from `tools/a
 `actions/setup-go`), `scripts/breaking.sh` against the **Changes** job's `base`
 output (the commit of the last successful `main` run on `main`, the merge base with `origin/main` on a
 branch; the checkout has `fetch-depth: 0`), the rules self-test, the determinism check,
-`test_proto.py` (one version, wiring), and both codecs' typecheck and tests. When Changes has no base (it
+`test_proto.py` (one version, wiring, the deploy maps), and both codecs' typecheck and tests. When Changes has no base (it
 runs everything: first run, unusable base, dispatch), `breaking.sh` compares with `HEAD~1` and says so in
 the log; a base that predates `proto/` has nothing to break. The job is in `CI gate`'s needs and in
 `CHECK_JOBS` (a push to `main` reuses a green branch run only if it passed Proto checks).
 
 A `proto/` change also re-checks every app in `PROTO_USERS` (Lab and Todofy) and runs `Contracts` (the
-task-intent-v1 tests check the codecs against the schema). It deploys a user only when the user's bundle can
-change: the user compiles the package in (`PROTO_USERS[app]` is `True`, as for both today) and the change is
-outside tests, test data, the check scripts, the api-linter tool module and Markdown.
+task-intent-v1 tests check the codecs against the schema). It deploys only the apps whose production bundle
+the changed path reaches (`proto_deploys` in `.github/scripts/ci_changes.py`). `PROTO_USERS` names each
+user's bundled languages: Lab `"ts"` (its Worker and UI), Todofy `"python"` (todofy-core vendors the wheel;
+its gateway imports types only, which compile to nothing). A language's runtime and generator reach that
+language's users (`proto/ts/` and `buf.gen.yaml`: Lab; `proto/python/` and `tools/gen_py.py`: Todofy); a
+package reaches the apps that import it (`PROTO_PACKAGES`: `todofy/taskintent/` both, `lab/ui/` Lab,
+`common/errors/` and `prototest/` none); the module and toolchain files (`buf.yaml`, `buf.lock`,
+`package-lock.json`, `tools/ensure.mjs`) and any path not mapped reach every user; tests, test data, the
+check scripts, the api-linter tool module, check configs and Markdown reach none. `test_proto.py` derives
+the users' languages and each package's importers from the sources, so the maps cannot drift.
 
 ## Later
 

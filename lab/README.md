@@ -71,10 +71,11 @@ GitHub Actions.
 ### Rollback and removal
 
 - **The first release is different.** `wrangler deploy` makes the Worker `lab`, its Custom Domain
-  `lab.ziyixi.science` and the `LabState` namespace live as soon as it uploads, before "Check that Access
-  answers unauthenticated requests", and the D1 `lab` already has migration 0001. So if `Lab deploy` fails
-  at or after "Apply D1 migrations, then deploy the Worker lab" (the probe, a Custom Domain or certificate
-  timeout), everything stays live and there is no earlier version to roll back to. The dashboard's next
+  `lab.ziyixi.science` and the `LabState` namespace live as soon as it uploads, before "Check that production
+  runs this commit" (the live version's `BUILD_SHA`, read through the API) and "Check that Access answers
+  unauthenticated requests", and the D1 `lab` already has migration 0001. So if `Lab deploy` fails at or after
+  "Apply D1 migrations, then deploy the Worker lab" (either check, a Custom Domain or certificate timeout),
+  everything stays live and there is no earlier version to roll back to. The dashboard's next
   30-minute `status()` call arms the pipeline alarm (`docs/design.md` §4), which then re-arms itself: a daily
   arXiv fetch and up to `LAB_DAILY_NEURONS` (5000) neurons a day. **Reverting the merge commit does not
   undo the deploy**: the revert also removes the `Lab deploy` job, so CI never touches the live Worker

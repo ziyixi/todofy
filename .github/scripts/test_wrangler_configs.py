@@ -754,6 +754,29 @@ class Workflow(unittest.TestCase):
         self.assertFalse({"deploy", "versions upload", "versions deploy", "rollback", "secret"} & set(wrangler_commands(check["run"])))
         self.assertNotIn("execute", check["run"])
 
+    def test_lab_holds_the_bundle_it_dry_runs_to_its_budget(self):
+        """Lab checks and Lab deploy measure the dry run's bundle (deploy/bundle-size.mjs: Lab's budget and the Workers
+        Free limit) in the same step that writes it, so the bundle that ships is the one measured."""
+        for job in ("lab-checks", "lab-deploy"):
+            [dry] = [s for s in steps(self.jobs[job]) if "--dry-run" in s["run"] and "deploy-vars.mjs exec" in s["run"]]
+            with self.subTest(job=job):
+                self.assertIn('--outdir "$RUNNER_TEMP/lab-bundle"', dry["run"])
+                self.assertIn('node ../deploy/bundle-size.mjs "$RUNNER_TEMP/lab-bundle"', dry["run"])
+                self.assertLess(dry["run"].index("--outdir"), dry["run"].index("bundle-size.mjs"))
+
+    def test_lab_deploy_checks_production_runs_this_commit_before_probing_access(self):
+        """Access answers before the Worker runs, so Lab deploy reads the live version as FlowDay deploy does: right
+        after the real deploy, the same step (reads only), then the Access probe."""
+        lab = steps(self.jobs["lab-deploy"])
+        flowday = steps(self.jobs["flowday-deploy"])
+        [deploy] = [i for i, s in enumerate(lab) if "deploy" in wrangler_commands(s["run"]) and "--dry-run" not in s["run"]]
+        check = lab[deploy + 1]
+        self.assertEqual(check["name"], "Check that production runs this commit")
+        self.assertEqual(lab[deploy + 2]["name"], "Check that Access answers unauthenticated requests")
+        [same] = [s for s in flowday if s["name"] == check["name"]]
+        self.assertEqual(check["run"].replace("Worker lab", "Worker flowday"), same["run"])
+        self.assertFalse({"deploy", "versions upload", "versions deploy", "rollback", "secret"} & set(wrangler_commands(check["run"])))
+
     def test_lab_and_flowday_accept_exactly_the_owner_values_the_dashboard_accepts(self):
         """The same secrets feed the three wrappers: their owner and alias rules must be the same lines, or a valid
         dashboard value could stop Lab deploy or FlowDay deploy (or the reverse). Here, in Changes, a change to
@@ -786,15 +809,17 @@ class Workflow(unittest.TestCase):
             with self.subTest(name=name):
                 self.assertRegex(section, rf"`{re.escape(name)}(`| = )")
         lab_steps = steps(self.jobs["lab-deploy"])
-        # The live deploy step and the Access probe right after it, quoted by name (line breaks aside).
+        # The live deploy step and the two checks right after it (the live version, the Access probe), quoted by
+        # name (line breaks aside).
         [index] = [
             i for i, s in enumerate(lab_steps) if "deploy" in wrangler_commands(s["run"]) and "--dry-run" not in s["run"]
         ]
         flat = " ".join(section.split())
-        for step in lab_steps[index : index + 2]:
+        for step in lab_steps[index : index + 3]:
             with self.subTest(step=step["name"]):
                 self.assertIn(f'"{step["name"]}"', flat)
-        self.assertIn("curl", lab_steps[index + 1]["run"])
+        self.assertIn("wrangler versions view", lab_steps[index + 1]["run"])
+        self.assertIn("curl", lab_steps[index + 2]["run"])
         # The stop switch as the settings page labels it.
         label = "暂停抓取新论文"
         self.assertIn(label, (REPO / "lab/web/src/views/Settings.tsx").read_text())
