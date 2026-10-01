@@ -3,10 +3,11 @@
  * (docs/design.md §8, §10). The status carries counts and codes only, never a title or the owner.
  */
 import { afterEach, beforeAll, describe, expect, it } from 'vitest';
-import { validate } from '../../../../contracts/ops-v1/validate.mjs';
+import { GuardStateSchema, OpsStatusSchema } from '@ziyixi/proto/ops/v1/ops_pb';
+import { fromWire } from '@ziyixi/proto/wire-json';
 import { rssFeed, dayItems } from '../feeds.ts';
 import { accessClaims, testIssuer, type TestIssuer } from '../jwt.ts';
-import { contractSchema, op, startHarness, SYNTHETIC_BINDINGS, type Harness } from './harness.ts';
+import { op, startHarness, SYNTHETIC_BINDINGS, type Harness } from './harness.ts';
 
 let h: Harness | undefined;
 afterEach(async () => {
@@ -17,9 +18,9 @@ afterEach(async () => {
 describe('Ops', () => {
   it('answers status() and setGuard() as ops-v1 declares', async () => {
     h = await startHarness();
-    const schema = await contractSchema('ops-v1');
     const first = await h.ops('status');
-    expect(validate(schema, 'OpsStatus', first.ok)).toEqual([]);
+    // The contract's rules, strictly (the producer's view): fromWire throws on anything ops-v1 refuses.
+    expect(fromWire(OpsStatusSchema, first.ok, { strict: true }).unrecognized).toEqual([]);
     expect(first.ok).toMatchObject({ app: 'lab', health: 'ok', modes: { maintenance: false, ingest_paused: false }, capabilities: ['guard'], ui_url: 'https://lab.example.com/' });
 
     h.arxiv.feed = { status: 200, body: rssFeed(dayItems('2609')) };
@@ -28,7 +29,7 @@ describe('Ops', () => {
     const card = (await h.sql<{ paper_id: string }>('SELECT paper_id FROM deck_cards ORDER BY position LIMIT 1'))[0];
     expect((await h.mutate('POST', '/api/v1/decks/2026-09-30:decide', { request_id: op(), etag: '0', paper_id: card?.paper_id, decision: 'like' })).status).toBe(200);
     const after = await h.ops('status');
-    expect(validate(schema, 'OpsStatus', after.ok)).toEqual([]);
+    expect(fromWire(OpsStatusSchema, after.ok, { strict: true }).unrecognized).toEqual([]);
     const counters = (after.ok as { counters: Record<string, number> }).counters;
     expect(counters).toMatchObject({ ingested_24h: 40, ranked_24h: 20, liked_7d: 1, decided_7d: 1, neuron_cap: 5000 });
     // Nothing but codes and numbers: no paper title, no owner address.
@@ -38,7 +39,7 @@ describe('Ops', () => {
 
     const until = new Date(Date.now() + 3_600_000).toISOString().replace(/\.\d{3}Z$/, 'Z');
     const shed = await h.ops('setGuard', { level: 'shed', reason: 'd1_reads_high', until });
-    expect(validate(schema, 'GuardState', shed.ok)).toEqual([]);
+    expect(fromWire(GuardStateSchema, shed.ok, { strict: true }).unrecognized).toEqual([]);
     // Idempotent: the same input keeps set_at.
     expect((await h.ops('setGuard', { level: 'shed', reason: 'd1_reads_high', until })).ok).toEqual(shed.ok);
     const held = await h.ops('status');

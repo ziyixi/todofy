@@ -20,7 +20,6 @@ import { LabUiService } from '@ziyixi/proto/lab/ui/v1/lab_ui_service_pb';
 
 const ROOT = resolve(fileURLToPath(new URL('../..', import.meta.url)));
 const LAB = resolve(ROOT, '..');
-const CONTRACTS = resolve(LAB, '../contracts');
 
 export const LAB_TEST_HOST = 'lab.example.com';
 
@@ -73,10 +72,6 @@ export async function migrationStatements(): Promise<string[]> {
     for (const statement of text.split(/;\s*(?:\n|$)/)) if (statement.trim() !== '') out.push(statement.trim());
   }
   return out;
-}
-
-export async function contractSchema(name: 'ops-v1' | 'task-intent-v1'): Promise<{ $defs: Record<string, unknown> }> {
-  return JSON.parse(await readFile(join(CONTRACTS, name, `${name}.schema.json`), 'utf8')) as { $defs: Record<string, unknown> };
 }
 
 /** What the fake arXiv answers; tests change it between steps. */

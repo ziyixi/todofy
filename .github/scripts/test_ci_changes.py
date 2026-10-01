@@ -173,10 +173,16 @@ class Classify(unittest.TestCase):
         self.assertEqual(push(paths), expect(T, T, T, F, F, **ALL_CHECKED))
 
     def test_ops_schema_and_validator_also_deploy_the_dashboard(self):
-        """The dashboard validates every Ops answer at runtime with the bundled schema and validate.mjs."""
-        for path in ("contracts/ops-v1/ops-v1.schema.json", "contracts/ops-v1/validate.mjs"):
-            with self.subTest(path=path):
-                self.assertEqual(push([path]), expect(T, T, T, F, F, **ALL, website_check=T, flowday_check=T, links_check=T))
+        """The dashboard validates every Ops answer at runtime with the bundled schema and validate.mjs; Lab bundles
+        validate.mjs for its task intents."""
+        self.assertEqual(
+            push(["contracts/ops-v1/ops-v1.schema.json"]),
+            expect(T, T, T, F, F, **DASH, lab_check=T, website_check=T, flowday_check=T, links_check=T),
+        )
+        self.assertEqual(
+            push(["contracts/ops-v1/validate.mjs"]),
+            expect(T, T, T, F, F, **ALL, website_check=T, flowday_check=T, links_check=T),
+        )
 
     def test_contract_code_the_workers_bundle_deploys_every_app_that_bundles_it(self):
         """OPS_LIMITS and friends ship inside all three Workers, so a change must redeploy each."""
@@ -244,7 +250,7 @@ class Classify(unittest.TestCase):
             "proto/todofy/taskintent/v1/task_intent.proto": {"lab", "todofy"},
             # ops-v1: the Ops entrypoints that bundle its generated code (Todofy's gateway takes types only, its core
             # reads ops.v1 in Python).
-            "proto/ops/v1/ops.proto": {"mail-hero"},
+            "proto/ops/v1/ops.proto": {"mail-hero", "lab"},
             # Lab's UI API: only Lab imports it (Python does not even generate it).
             "proto/lab/ui/v1/lab_ui_service.proto": {"lab"},
             "proto/lab/ui/v1/deck.proto": {"lab"},

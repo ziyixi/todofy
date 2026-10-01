@@ -5,7 +5,7 @@
  * do pipeline slices. Every method returns plain values; the Worker maps them to HTTP.
  */
 import { DurableObject } from 'cloudflare:workers';
-import type { GuardState, LabStatus } from '../../../contracts/ops-v1/ops-v1.ts';
+import type * as wire from '@ziyixi/proto/ops/v1/ops_wire';
 import { DECK_OFFER_DAYS } from './limits.ts';
 import {
   type BuildPhase,
@@ -188,7 +188,7 @@ export class LabState extends DurableObject<Env> {
 
   // ---- ops-v1 -------------------------------------------------------------------------------------------
 
-  async opsStatus(): Promise<LabStatus> {
+  async opsStatus(): Promise<wire.OpsStatus> {
     await this.ensureAlarm();
     return labStatus(this.store, this.env, Date.now());
   }
@@ -198,7 +198,7 @@ export class LabState extends DurableObject<Env> {
     return this.ctx.storage.getAlarm();
   }
 
-  async opsSetGuard(input: unknown): Promise<{ ok: GuardState } | { error: 'invalid_input' }> {
+  async opsSetGuard(input: unknown): Promise<{ ok: wire.GuardState } | { error: 'invalid_input' }> {
     const result = setGuard(this.store, input, Date.now());
     if ('ok' in result && result.ok.level === 'normal') await this.wake();
     return result;

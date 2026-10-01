@@ -9,12 +9,18 @@
 import { readFileSync, writeFileSync } from 'node:fs';
 import { DatabaseSync, type SQLInputValue } from 'node:sqlite';
 import { expect, test } from 'vitest';
+import { OpsStatusSchema } from '@ziyixi/proto/ops/v1/ops_pb';
+import { validate } from '../../../contracts/ops-v1/validate.mjs';
 import type { Env } from '../src/env.ts';
 import { guardState, labStatus, setGuard } from '../src/ops-status.ts';
 import { Store } from '../src/store.ts';
 
 /** This test's golden file (a path: the Workers URL type is not Node's). */
 const GOLDEN = decodeURIComponent(new URL('golden/ops-v1.json', import.meta.url).pathname);
+/** The hand-written schema the dashboards deployed before ops-v1 moved onto proto/ validate every answer with. */
+const LEGACY = JSON.parse(readFileSync(decodeURIComponent(new URL('../../../contracts/ops-v1/legacy/ops-v1.schema.json', import.meta.url).pathname), 'utf8')) as {
+  $defs: Record<string, unknown>;
+};
 const NOW = Date.parse('2026-09-30T08:00:00.000Z');
 const HOUR = 3_600_000;
 const DAY = 24 * HOUR;
@@ -81,10 +87,39 @@ function cases(): Record<string, unknown> {
   };
 }
 
-test('every Ops answer for the synthetic states is byte for byte the golden one', () => {
+/**
+ * The one difference the move onto proto/ made, and on purpose: Lab's status listed version, app, generated_at,
+ * last_backup_at, ui_url and capabilities first (an object spread), while the codec writes every message in the
+ * contract's field order, the order of contracts/ops-v1/fixtures/OpsStatus/lab-*.json and of every other app. A
+ * JSON object's key order carries no meaning and every reader looks fields up by name (the dashboard's reader writes
+ * what it keeps in field order too), so a status is compared with the golden one in field order: same keys, same
+ * values, same bytes once ordered. The golden file keeps the old bytes.
+ */
+const STATUS_FIELDS = [...OpsStatusSchema.fields].sort((a, b) => a.number - b.number).map((field) => field.name);
+function inFieldOrder(value: unknown): unknown {
+  const status = value as Record<string, unknown>;
+  expect(Object.keys(status).sort()).toEqual(STATUS_FIELDS.filter((name) => name in status).sort());
+  return Object.fromEntries(STATUS_FIELDS.filter((name) => name in status).map((name) => [name, status[name]]));
+}
+
+test('every Ops answer for the synthetic states is byte for byte the golden one (a status in field order)', () => {
   const actual = cases();
   if (process.env.UPDATE_GOLDEN === '1') writeFileSync(GOLDEN, `${JSON.stringify(actual, null, 2)}\n`);
   const golden = JSON.parse(readFileSync(GOLDEN, 'utf8')) as Record<string, unknown>;
   expect(Object.keys(actual)).toEqual(Object.keys(golden));
-  for (const [name, value] of Object.entries(actual)) expect(JSON.stringify(value), name).toBe(JSON.stringify(golden[name]));
+  for (const [name, value] of Object.entries(actual)) {
+    const expected = name.startsWith('status/') ? inFieldOrder(golden[name]) : golden[name];
+    expect(JSON.stringify(value), name).toBe(JSON.stringify(expected));
+  }
+});
+
+// Rollout (the apps and the dashboard deploy separately): the dashboards deployed before the move validate every
+// answer against the hand-written schema. Every answer above passes it, so this Lab and such a dashboard work
+// together; the earlier Lab's answers are the same values, which a new dashboard reads (its own tests).
+test('every golden answer passes the checks of the dashboards deployed before the move', () => {
+  for (const [name, value] of Object.entries(cases())) {
+    const answer = name.startsWith('guard/') && typeof value === 'object' && value !== null && 'ok' in value ? value.ok : value;
+    if (typeof answer === 'object' && answer !== null && 'error' in answer) continue;
+    expect(validate(LEGACY, name.startsWith('status/') ? 'OpsStatus' : 'GuardState', answer), name).toEqual([]);
+  }
 });

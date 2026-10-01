@@ -171,7 +171,7 @@ PROTO_PACKAGES: dict[str, tuple[str, ...]] = {
     # CommonReason: Lab reads its names as types only.
     "proto/common/errors/": (),
     # ops-v1 (contracts/ops-v1): every app's Ops entrypoint and the dashboard that calls them.
-    "proto/ops/": ("mail-hero",),
+    "proto/ops/": ("mail-hero", "lab"),
     # The runtimes' test fixtures (never imported by an app; not in the Python wheel).
     "proto/prototest/": (),
 }
@@ -197,8 +197,8 @@ PROTO_NOT_BUNDLED = (
 # test_ci_changes.py checks this map against the Workers' imports.
 BUNDLED_BY = {
     "contracts/ops-v1/ops-v1.ts": ("todofy", "mail-hero", "dashboard", "lab"),
-    # The dashboard validates every Ops answer; Lab validates setGuard input, its intents and Todofy's answers.
-    "contracts/ops-v1/ops-v1.schema.json": ("dashboard", "lab"),
+    # The dashboard validates every Ops answer; Lab validates its task intents and Todofy's answers with validate.mjs.
+    "contracts/ops-v1/ops-v1.schema.json": ("dashboard",),
     "contracts/ops-v1/validate.mjs": ("dashboard", "lab"),
     # task-intent-v1: Lab proposes (bounds, schema), Todofy's gateway forwards (the input bound). The types
     # are generated from proto/ (PROTO_USERS).
