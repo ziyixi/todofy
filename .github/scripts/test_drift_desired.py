@@ -118,7 +118,8 @@ class DesiredState(unittest.TestCase):
 
     def test_flowday_secrets_all_come_from_its_deploy(self):
         """FlowDay's wrapper writes the owner addresses, the CSRF key and the credential key (it seals the Todoist key in
-        D1) with --secrets-file and adds BUILD_SHA as a var; no secret is set by hand, and it has no route before F3."""
+        D1) with --secrets-file and adds BUILD_SHA as a var; no secret is set by hand. Its one hostname is the staging
+        Custom Domain (F3) until the F4 cutover."""
         worker = self.state["workers"]["flowday"]
         bindings = {b["name"]: b for b in worker["bindings"]}
         secrets = ("ACCESS_OWNER", "ACCESS_OWNER_ALIASES", "CSRF_SIGNING_KEY", "CREDENTIAL_KEY")
@@ -130,11 +131,18 @@ class DesiredState(unittest.TestCase):
         self.assertEqual({name for name, b in bindings.items() if b["source"] == "manual"}, set())
         self.assertEqual(
             {(name, b["type"]) for name, b in bindings.items() if b["source"] == "config"},
-            {("ACCESS_AUDIENCE", "plain_text"), ("ACCESS_ISSUER", "plain_text"), ("ASSETS", "assets"), ("DB", "d1")},
+            {
+                ("ACCESS_AUDIENCE", "plain_text"),
+                ("ACCESS_ISSUER", "plain_text"),
+                ("ASSETS", "assets"),
+                ("DB", "d1"),
+                ("PUBLIC_HOST", "plain_text"),
+            },
         )
         self.assertNotIn("flowday", drift_desired.MANUAL_SECRETS)
         self.assertEqual((worker["workers_dev"], worker["preview_urls"], worker["crons"]), (False, False, []))
-        self.assertEqual((worker["custom_domains"], worker["routes"], worker["personal"]), ([], [], []))
+        self.assertEqual(worker["custom_domains"], ["flowday-next.ziyixi.science"])
+        self.assertEqual((worker["routes"], worker["personal"]), ([], []))
 
     def test_the_generator_refuses_an_unknown_binding_section(self):
         with self.assertRaises(drift_desired.GeneratorError):

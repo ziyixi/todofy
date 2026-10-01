@@ -2,9 +2,10 @@
 
 FlowDay runs as one Worker, `flowday`, on the account's Workers Free plan. The Worker serves the UI as static
 assets and a small owner API backed by D1. This document covers the F1 port (the code, the tests and the
-measurements) and the steps after it (section 11). Since **F2** CI deploys the Worker and its D1 schema, but with
-**no route and no hostname**: it is live and unreachable. The staging host, the data cutover and the retirement
-of the container are the later steps F3–F6.
+measurements) and the steps after it (section 11). Since **F2** CI deploys the Worker and its D1 schema; since
+**F3** its only hostname is the staging Custom Domain `flowday-next.ziyixi.science`, behind Cloudflare Access.
+`flowday.ziyixi.science` stays on the old container until the data cutover (F4); the retirement of the container
+is F6.
 
 Owner decisions (2026-10-01) this design follows:
 
@@ -25,7 +26,7 @@ browser ── Cloudflare Access ── Worker "flowday" ──┬── ASSETS:
 
 | Path | What it is |
 | --- | --- |
-| `wrangler.toml` | The production config: top level only, `workers_dev = false`, `preview_urls = false`, no route; the real D1 id and Access AUD since F2 |
+| `wrangler.toml` | The production config: top level only, `workers_dev = false`, `preview_urls = false`; the real D1 id and Access AUD since F2; one Custom Domain, the staging host `flowday-next.ziyixi.science`, and `PUBLIC_HOST` naming it since F3 |
 | `worker/src/` | `index.ts` (handler) → `router.ts` (Access, PWA exceptions, logging) → `api.ts` (routes) → `store/*` (D1), `sync.ts` + `todoist.ts` (Todoist), `credentials.ts` (the sealed Todoist key), `assets.ts` (static files, CSP), `e2e.ts` (test routes) |
 | `migrations/` | `0001_init.sql`: the container-era SQLite schema, unchanged. `0002_incremental_sync.sql`: `tasks.todoist_project_id`. `0003_fewer_task_indexes.sql`: drops four indexes no query needs |
 | `web/` | The Next.js UI as a static export (`output: "export"`). It has no server code; `lib/client/http.ts` is its only `fetch` |
@@ -224,16 +225,17 @@ The reviews moved to the browser because they ran per minute of logged time. On 
 - **Loopback dev bypass.** Only on http://127.0.0.1 or localhost, and never for a request carrying `cf-ray`. Used
   only by `wrangler dev` and the tests.
 - **CSRF.** Signed double-submit, bound to the owner, with `Origin` restricted to `https://$PUBLIC_HOST`, plus the
-  loopback origin under the bypass. `PUBLIC_HOST` is not set before FlowDay has a host (F3), so before then only
-  the loopback bypass can make writes.
+  loopback origin under the bypass. `PUBLIC_HOST` is the staging host `flowday-next.ziyixi.science` since F3 and
+  becomes `flowday.ziyixi.science` in the F4 cutover commit: one host at a time can make writes.
 - **Private headers on everything.** `no-store`, `nosniff`, `no-referrer`, `DENY` and a strict CSP. The HTML's CSP
   adds the SHA-256 of each inline script in the served page (Next.js inlines its boot and RSC payload). No other
   inline script may run. `/_next/static/*` is cached as immutable.
 - **PWA exceptions.** These exact paths are served without a JWT: `/pwa/manifest.webmanifest`, `/pwa/sw` (the
   service worker, from `sw.js`, with `Service-Worker-Allowed: /`), `/pwa/icon-192x192.png`, `icon-512x512.png`,
   `icon-maskable-512x512.png`, `icon.svg` and `apple-touch-icon.png`. While the Access app `flowday-bypass` covers
-  `/pwa/*` (F2–F6), those requests arrive without a JWT. Everything else under `/pwa/` needs one, and so does all
-  of `/api`. `edge.test.ts` covers both directions.
+  `/pwa/*` (F2–F6: `flowday.ziyixi.science/pwa/*`, and since F3 also `flowday-next.ziyixi.science/pwa/*`), those
+  requests arrive without a JWT. Everything else under `/pwa/` needs one, and so does all of `/api`.
+  `edge.test.ts` covers both directions, and "FlowDay deploy" checks them on the live host (section 11, F3).
 - **Manifest with credentials.** The manifest link has `crossorigin="use-credentials"` (checked in the built HTML),
   so the bypass can be removed later.
 - **Service worker `flowday-v2`.** It drops older caches, never caches `/api`, caches only plain same-origin `200`
@@ -306,9 +308,31 @@ first (`cd ../web && npm run build`), and apply the migrations locally:
   - The wrapper then refuses the placeholders again, as a guard against a revert.
   - Not in F2: `infra/` (OpenTofu, plan only) does not adopt the D1 `flowday` or the Access app `flowday` yet;
     a later `infra/` change imports both (`.github/scripts/test_infra_config.py` names the gap).
-- **F3 (staging host).** Set `PUBLIC_HOST` (the CSRF origin) and add a staging Custom Domain in its own commit
-  (cf-guard). Owner checks on a real device: install, real icons (the manifest with credentials), cold start,
-  re-login after the Access session expires. Rehearse the DNS rollback path before F4.
+- **F3 (staging host).** Done in code (2026-10-01); live once its commit's `FlowDay deploy` passes on `main`.
+  `wrangler.toml` lists the Custom Domain `flowday-next.ziyixi.science` and sets `PUBLIC_HOST` (the CSRF origin) to
+  it, in its own commit; nothing else changes (cf-guard: a new hostname with no DNS record and no other Worker).
+  - **Access first.** The Worker verifies the Access JWT itself, but the edge must cover the host before it serves
+    anything: before that commit is merged, `flowday-next.ziyixi.science` is added to the existing Access app
+    `flowday` (a second destination of the same app, so the AUD and the policy stay the same), and
+    `flowday-next.ziyixi.science/pwa/*` to the app `flowday-bypass`.
+  - **PWA files: the bypass, as in production.** The staging host gets the same `/pwa/*` bypass as
+    `flowday.ziyixi.science` (F2–F6), so it rehearses exactly what F4 puts in production. Without it Access would
+    answer every anonymous `/pwa/` request itself and the Worker's exceptions could not be checked at all; whether
+    the bypass can go (the manifest with credentials) is F6's own device check, which can first drop only the
+    staging destination.
+  - **CI checks the live host** after the deploy and the API check: an unauthenticated `GET /` and `/api/tasks` are
+    answered by Access with a 302 to its login page for this host (the dashboard's probe); the manifest, two icons
+    and `/pwa/sw` answer 200 with their media types from the Worker, and `/pwa/sw.js` (in the export, not on the
+    list) the Worker's 401.
+  - **Owner checks on a real device:** sign-in, install, real icons (the manifest with credentials), cold start,
+    re-login after the Access session expires. Rehearse the DNS rollback path before F4.
+  - **Staging writes go to the production D1** (there is only one). Before the first one, note a D1 Time Travel
+    bookmark (`wrangler d1 time-travel info flowday`); before the F4 import, restore it (within Time Travel's 7
+    days on Free) or delete the staging rows, so that the import starts from empty tables.
+  - **Rollback.** Revert the commit (the routes line and `PUBLIC_HOST`, and the regenerated drift state), then
+    detach the Custom Domain by hand: a deploy whose config lists no route leaves the Worker's live Custom Domains
+    alone, so the revert alone does not remove it. Then remove the staging destinations from both Access apps.
+    [`../README.md`](../README.md) "Rollback and removal".
 - **F4 (data cutover, owner present, about 15 minutes frozen).**
   - Stop the container.
   - Copy the db and wal off the host. Never open the live file; open the copy with `file:<copy>?immutable=1`.
@@ -322,8 +346,15 @@ first (`cd ../web && npm run build`), and apply the migrations locally:
   - The owner enters the Todoist key once in Settings (stored sealed). The first sync is then a full sync, in
     chunks of 200 tasks. It writes `todoist_project_id` once into every Todoist task row: about one row each, a
     one-off cost of roughly the task count.
-  - The hostname move is its own commit with `adopt = "cname"`, because CI's non-interactive wrangler takes over
-    the tunnel CNAME.
+  - The hostname move is its own commit: `wrangler.toml` lists only `flowday.ziyixi.science` and sets `PUBLIC_HOST`
+    to it (writes from the staging host stop). wrangler applies the listed Custom Domains as the Worker's complete
+    set, so the deploy detaches `flowday-next.ziyixi.science`; and CI's non-interactive wrangler overwrites an
+    existing DNS record of a new Custom Domain, so it takes over the tunnel CNAME of `flowday.ziyixi.science`.
+    cf-guard stops both unless allowed, so that commit sets both allowances on FlowDay's guard step:
+    `CF_GUARD_ALLOW_REMOVE: flowday-next.ziyixi.science` and `CF_GUARD_ALLOW_CONFLICT: flowday.ziyixi.science`
+    (the takeover of the tunnel CNAME is the allowed conflict), and updates the guard test in
+    `.github/scripts/test_ci_changes.py`, which expects both empty. The next commit clears both again. The staging
+    Access destinations can go after that deploy.
 - **F5 (7-day rollback window = D1 Time Travel).**
   - Keep the container stopped and its data directory untouched.
   - Every change in the window must stay readable by the container code. `0002` only adds a nullable column,

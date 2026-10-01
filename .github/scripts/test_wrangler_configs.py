@@ -116,8 +116,6 @@ TOGGLES = {
     "DASHBOARD_CANARY_ENABLED",
 }
 DEPLOY_JOBS = ("todofy-deploy", "mail-hero-deploy", "dashboard-deploy", "lab-deploy", "flowday-deploy")
-# Deploy jobs of Workers without a hostname yet: their environment has no URL (FlowDay before F3).
-HOSTLESS_DEPLOY_JOBS = {"flowday-deploy"}
 # The retired generators' required GitHub variables, still set in production: a revert of the committed-config
 # layout needs them (README "Rolling back the committed-config layout"), and nothing may read them now.
 LEGACY_VARIABLES = {
@@ -437,7 +435,7 @@ class LocalDev(unittest.TestCase):
         return found
 
     def test_the_production_configs_with_routes_are_the_ones_dev_runs(self):
-        for worker in ("mail-hero", "todofy", "home", "lab"):
+        for worker in ("mail-hero", "todofy", "home", "lab", "flowday"):
             with self.subTest(worker=worker):
                 self.assertTrue(load(PRODUCTION[worker]).get("routes"))
 
@@ -446,7 +444,14 @@ class LocalDev(unittest.TestCase):
         paths = {path for path, _ in commands}
         # The scripted and documented entry points of each app are all found (the scan still sees them).
         self.assertLessEqual(
-            {"mail-hero/cloudflare/package.json", "dashboard/worker/package.json", "lab/worker/package.json", "todofy/docs/dev-notes.md"}, paths
+            {
+                "mail-hero/cloudflare/package.json",
+                "dashboard/worker/package.json",
+                "lab/worker/package.json",
+                "flowday/worker/package.json",
+                "todofy/docs/dev-notes.md",
+            },
+            paths,
         )
         for path, command in commands:
             with self.subTest(path=path, command=command):
@@ -496,6 +501,16 @@ class Hosts(unittest.TestCase):
         host = self.home["vars"]["PUBLIC_HOST"]
         self.assertEqual(self.home["routes"], [{"pattern": host, "custom_domain": True}])
         self.assertNotIn(host, {self.mail_hero, self.todofy, *self.hooks})
+
+    def test_flowday_is_on_its_staging_host_only(self):
+        """F3: FlowDay's one Custom Domain is its PUBLIC_HOST (the CSRF origin), the staging host. The production
+        hostname flowday.ziyixi.science belongs to the old container until the F4 cutover commit lists it."""
+        flowday = load(PRODUCTION["flowday"])
+        host = flowday["vars"]["PUBLIC_HOST"]
+        self.assertEqual(host, "flowday-next.ziyixi.science")
+        self.assertEqual(flowday["routes"], [{"pattern": host, "custom_domain": True}])
+        hosts = {route["pattern"] for path in PRODUCTION.values() for route in load(path).get("routes", [])}
+        self.assertNotIn("flowday.ziyixi.science", hosts)
 
     def test_the_core_links_to_the_gateway_host(self):
         self.assertEqual(load(PRODUCTION["todofy-core"])["vars"]["TODOFY_PUBLIC_HOST"], self.todofy)
@@ -722,7 +737,8 @@ class Workflow(unittest.TestCase):
 
     def test_flowday_deploy_applies_migrations_before_the_worker_and_then_checks_production(self):
         """F2: `wrangler d1 migrations apply DB --remote`, then the real deploy through the wrapper, in one step after
-        the hostname guard; then a hostname-free check of the live version and the migrations (no host to probe)."""
+        the hostname guard; then a check of the live version and the migrations through the API (the host's /health
+        needs an owner login), before the probes of the staging host (F3)."""
         flowday = steps(self.jobs["flowday-deploy"])
         names = [step["name"] for step in flowday]
         guard = names.index("Check the hostnames against production")
@@ -790,10 +806,7 @@ class Workflow(unittest.TestCase):
         for job_name in DEPLOY_JOBS:
             job = self.jobs[job_name]
             self.assertNotIn("CLOUDFLARE_ACCOUNT_ID", job)
-            if job_name in HOSTLESS_DEPLOY_JOBS:
-                self.assertNotIn("url:", job)
-            else:
-                self.assertIn("url: ${{ steps.config.outputs.url }}", job)
+            self.assertIn("url: ${{ steps.config.outputs.url }}", job)
             for step in steps(job):
                 with self.subTest(job=job_name, step=step["name"]):
                     self.assertNotIn("${{", step["run"])

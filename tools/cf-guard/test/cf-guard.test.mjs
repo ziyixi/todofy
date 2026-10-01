@@ -225,6 +225,28 @@ test(
 );
 
 test(
+  "moving a Worker from its staging host onto a tunnel's CNAME needs both allowances (FlowDay's F4 cutover)",
+  withDir(async (dir) => {
+    const state = baseState();
+    state.domains.push({ id: "a9".repeat(16), hostname: "staging.example.com", service: "app", zone_id: ZONE });
+    const file = writeConfig(dir, "app", 'routes = [{ pattern = "tunnel.example.com", custom_domain = true }]');
+    const removeOnly = await run(state, [file], { CF_GUARD_ALLOW_REMOVE: "staging.example.com" });
+    assert.equal(removeOnly.code, 1);
+    assert.match(removeOnly.text, /remove {2}staging\.example\.com \(allowed by CF_GUARD_ALLOW_REMOVE\)/);
+    assert.match(removeOnly.text, /new Custom Domain tunnel\.example\.com already has a DNS CNAME record/);
+    const conflictOnly = await run(state, [file], { CF_GUARD_ALLOW_CONFLICT: "tunnel.example.com" }, ["staging.example.com"]);
+    assert.equal(conflictOnly.code, 1);
+    assert.match(conflictOnly.text, /REMOVE {2}1 live Custom Domain\(s\) not in wrangler\.toml/);
+    const both = await run(state, [file], {
+      CF_GUARD_ALLOW_REMOVE: "staging.example.com",
+      CF_GUARD_ALLOW_CONFLICT: "tunnel.example.com",
+    });
+    assert.equal(both.code, 0, both.text);
+    assert.match(both.text, /allowed conflict \(CF_GUARD_ALLOW_CONFLICT\): new Custom Domain tunnel\.example\.com already has a DNS CNAME record/);
+  }),
+);
+
+test(
   "an unreadable DNS zone makes a new Custom Domain a conflict, printing only status and codes",
   withDir(async (dir) => {
     const state = { ...baseState(), fail: (url) => url.pathname.endsWith("/dns_records") };
@@ -323,8 +345,8 @@ test("the committed production configs: the hostnames each deploy guards", async
     "lab/wrangler.toml": ["lab", ["lab.ziyixi.science"]],
     "website/wrangler.toml": ["ziyixi-website", ["www.ziyixi.science", "ziyixi.science"]],
     "website/relay/wrangler.toml": ["ziyixi-notion-publish", []],
-    // No route before the staging host (flowday/docs/design.md section 11, F3).
-    "flowday/wrangler.toml": ["flowday", []],
+    // The staging host only (flowday/docs/design.md section 11, F3); flowday.ziyixi.science is the F4 cutover's.
+    "flowday/wrangler.toml": ["flowday", ["flowday-next.ziyixi.science"]],
   };
   for (const [file, [name, hosts]] of Object.entries(expected)) {
     const triggers = await readTriggers(path.join(REPO, file));

@@ -10,11 +10,14 @@ The root [`AGENTS.md`](../AGENTS.md) applies here too. FlowDay-specific rules:
   never store, export or log it in plain text.
   Never open the live FlowDay database; when a real copy is needed, copy it first and open the copy
   read-only (`file:<copy>?immutable=1`).
-- **Status (F2).** CI deploys the Worker `flowday` (`worker/`, `migrations/`, `wrangler.toml`) with its static-export
-  UI (`web/`) and its D1 migrations ("FlowDay deploy"), but with no route and no hostname. Do not add a hostname,
-  route or Cloudflare resource before the migration step that calls for it ([`docs/design.md`](docs/design.md) §11):
-  the staging host in its own commit (F3), `flowday.ziyixi.science` only in the F4 cutover commit. D1 migrations
-  run against production on every deploy: keep each one readable by the container code (§11 F5).
+- **Status (F3).** CI deploys the Worker `flowday` (`worker/`, `migrations/`, `wrangler.toml`) with its static-export
+  UI (`web/`) and its D1 migrations ("FlowDay deploy"). Its only hostname is the staging Custom Domain
+  `flowday-next.ziyixi.science` (`PUBLIC_HOST`), covered by the Access apps "flowday" and, for `/pwa/*`,
+  "flowday-bypass". Do not add a hostname, route or Cloudflare resource before the migration step that calls for it
+  ([`docs/design.md`](docs/design.md) §11): `flowday.ziyixi.science` only in the F4 cutover commit (it sets both
+  cf-guard allowances: the staging host's removal and the tunnel CNAME's takeover), and any new host only after the
+  Access apps cover it. D1 migrations run against production on every deploy: keep each one readable
+  by the container code (§11 F5).
 - **Workers Free.** A static export of the UI as Workers static assets, a plain-fetch Worker API, D1 via
   `drizzle-orm/d1`, `packages/edge-auth` for the Access JWT plus Origin and CSRF checks on every
   mutation, and reviews and exports computed in the browser. Respect the Free limits: 10 ms CPU per

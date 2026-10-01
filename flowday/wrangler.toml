@@ -10,9 +10,14 @@
 #
 # F2 (docs/design.md "Migration plan"): the D1 database "flowday" exists and the existing Access app "flowday" is
 # reused; their id and AUD are committed below, and deploy/deploy-vars.mjs still refuses an all-zeros id or AUD (a
-# guard against a revert). There is NO route and NO hostname yet: the Worker is deployed but unreachable (no
-# workers.dev, no preview URL). Add the staging host only in its own commit (F3) and the production hostname only in
-# the F4 cutover commit: a CI deploy without a TTY takes over an existing DNS record for a listed hostname.
+# guard against a revert). No workers.dev and no preview URL.
+#
+# F3: the Worker's only hostname is the staging Custom Domain flowday-next.ziyixi.science (PUBLIC_HOST, the CSRF
+# origin). The Access app "flowday" lists that host too (same AUD) and "flowday-bypass" its /pwa/* (the exact PWA
+# files the Worker serves without a JWT), both set before this host first deployed. flowday.ziyixi.science stays on
+# the old container until the F4 cutover commit: a CI deploy without a TTY takes over an existing DNS record for a
+# listed hostname. Rollback of F3 (README.md "Rollback and removal"): delete the routes line and PUBLIC_HOST in one
+# commit, then detach the Custom Domain by hand: a deploy with no route leaves the live Custom Domains alone.
 #
 # Run wrangler from worker/ (the pinned wrangler lives in worker/node_modules) with --config ../wrangler.toml.
 # Local dev: local bindings only (D1 commands always --local, never --remote), local values in flowday/.dev.vars
@@ -23,6 +28,8 @@ main = "worker/src/index.ts"
 compatibility_date = "2026-09-08"
 workers_dev = false
 preview_urls = false
+# The staging Custom Domain (F3), behind the Access app "flowday"; vars.PUBLIC_HOST names the same host.
+routes = [{ pattern = "flowday-next.ziyixi.science", custom_domain = true }]
 
 [observability]
 enabled = true
@@ -43,6 +50,8 @@ database_id = "df104e83-7183-47e3-b2f9-638dc7502c13"
 migrations_dir = "migrations"
 
 [vars]
+# The only origin a mutation may come from (CSRF): the staging host until the F4 cutover.
+PUBLIC_HOST = "flowday-next.ziyixi.science"
 ACCESS_ISSUER = "https://ziyixi.cloudflareaccess.com"
 # AUD tag of the existing Access app "flowday".
 ACCESS_AUDIENCE = "075c90c5544f87d71cfaec475fad0302d6b726156ff93f5c3a4a89f4ead7b22f"

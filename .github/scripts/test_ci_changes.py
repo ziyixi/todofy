@@ -1403,6 +1403,25 @@ class AccessProbe(unittest.TestCase):
         config = workflow_jobs()["lab-deploy"].split("- name: Read the host and the Access issuer from the committed config\n", 1)[1]
         self.assertIn('open("wrangler.toml", "rb")', config.split("\n      - ", 1)[0])
 
+    def test_flowday_deploy_runs_the_same_probe_from_its_own_config(self):
+        """The FlowDay deploy's probe of its staging host (F3) is this very script too, fed from flowday/wrangler.toml."""
+        name = "- name: Check that Access answers unauthenticated requests\n"
+        step = lambda job: workflow_jobs()[job].split(name, 1)[1].split("\n      - ", 1)[0]  # noqa: E731
+
+        def body(job):
+            """The step's `run: |` lines only (the next step's leading comments are not part of it)."""
+            lines = step(job).split("        run: |\n", 1)[1].splitlines()
+            return "\n".join(line for line in lines if not line.strip() or line.startswith("          ")).rstrip()
+
+        self.assertEqual(body("flowday-deploy").replace("/api/tasks", "/api/v2/home"), body("dashboard-deploy"))
+        self.assertIn("ACCESS_ISSUER: ${{ steps.config.outputs.access_issuer }}", step("flowday-deploy"))
+        self.assertIn("PUBLIC_HOST: ${{ steps.config.outputs.host }}", step("flowday-deploy"))
+        block = workflow_jobs()["flowday-deploy"]
+        config = block.split("- name: Read the host and the Access issuer from the committed config\n", 1)[1]
+        self.assertIn('open("wrangler.toml", "rb")', config.split("\n      - ", 1)[0])
+        # After the deploy and the API check: the host serves the version just checked.
+        self.assertLess(block.index("- name: Check that production runs this commit\n"), block.index(name))
+
     def test_the_issuer_and_host_come_from_the_committed_config(self):
         block = workflow_jobs()["dashboard-deploy"]
         name = "- name: Check that Access answers unauthenticated requests\n"
@@ -1449,6 +1468,122 @@ class AccessProbe(unittest.TestCase):
         self.assertEqual(code, 1, output)
         self.assertIn("/ never reached Access", output)
 
+
+
+class FlowDayPwaBypass(unittest.TestCase):
+    """FlowDay deploy's check of its staging host's PWA files, run as the workflow runs it against a stubbed curl.
+
+    Only the listed PWA files may answer an anonymous request (through the Access app flowday-bypass), each with its
+    own media type; an unlisted /pwa/ file must get the Worker's 401. A 302 means the bypass is missing."""
+
+    STEP = "- name: Check that only the PWA files bypass Access\n"
+    HOST = "flowday.example.org"
+    GOOD = {
+        "/pwa/manifest.webmanifest": "200 application/manifest+json",
+        "/pwa/icon-192x192.png": "200 image/png",
+        "/pwa/apple-touch-icon.png": "200 image/png",
+        "/pwa/sw": "200 application/javascript; charset=utf-8",
+        "/pwa/sw.js": "401 application/json; charset=utf-8",
+    }
+
+    def script(self):
+        block = workflow_jobs()["flowday-deploy"]
+        body = block.split(self.STEP, 1)[1].split("        run: |\n", 1)[1]
+        lines = []
+        for line in body.splitlines():
+            if line.strip() and not line.startswith("          "):
+                break
+            lines.append(line[10:])
+        return "\n".join(lines) + "\n"
+
+    def check(self, answers, host=HOST):
+        """Runs the step; curl answers each URL with answers[path] ("<code> <media type>"), or, for a list, with the
+        next item of that list (the last one repeating). Returns (exit code, output, the URLs requested)."""
+        with tempfile.TemporaryDirectory() as root:
+            bin_dir = Path(root, "bin")
+            bin_dir.mkdir()
+            table = Path(root, "answers")
+            table.mkdir()
+            for index, (path, answer) in enumerate(answers.items()):
+                queue = answer if isinstance(answer, list) else [answer]
+                Path(table, str(index)).write_text("\n".join(queue) + "\n")
+                Path(table, f"{index}.path").write_text(path)
+            curl = bin_dir / "curl"
+            curl.write_text(
+                "#!/usr/bin/env bash\n"
+                'url="${@: -1}"\n'
+                f'echo "$url" >> "{root}/urls"\n'
+                f'for name in "{table}"/*.path; do\n'
+                '  index=${name%.path}\n'
+                f'  if [ "$url" = "https://{host}$(cat "$name")" ]; then\n'
+                '    line=$(head -n 1 "$index")\n'
+                '    if [ "$(wc -l < "$index")" -gt 1 ]; then tail -n +2 "$index" > "$index.next"; mv "$index.next" "$index"; fi\n'
+                '    printf "%s" "$line"\n'
+                "    exit 0\n"
+                "  fi\n"
+                "done\n"
+                'printf "404 text/plain"\n'
+            )
+            (bin_dir / "sleep").write_text("#!/usr/bin/env bash\nexit 0\n")
+            for tool in (curl, bin_dir / "sleep"):
+                tool.chmod(0o755)
+            env = {**os.environ, "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}", "PUBLIC_HOST": host}
+            result = subprocess.run(
+                ["bash", "-e", "-c", self.script()], cwd=root, env=env, capture_output=True, text=True, check=False
+            )
+            urls = Path(root, "urls").read_text().splitlines() if Path(root, "urls").exists() else []
+            return result.returncode, result.stdout + result.stderr, urls
+
+    def test_the_listed_files_pass_and_the_unlisted_one_is_refused_by_the_worker(self):
+        code, output, urls = self.check(self.GOOD)
+        self.assertEqual(code, 0, output)
+        self.assertEqual(urls, [f"https://{self.HOST}{path}" for path in self.GOOD])
+        self.assertIn("/pwa/sw.js: 401 application/json from the Worker", output)
+
+    def test_the_checked_files_are_the_workers_public_pwa_paths(self):
+        """Every checked 200 is on the Worker's list, and the 401 one exists in the export but is not on it."""
+        assets = (REPO / "flowday" / "worker" / "src" / "assets.ts").read_text()
+        listed = set(re.findall(r"'(/pwa/[^']+)'", assets.split("PWA_PUBLIC_PATHS", 1)[1].split("])", 1)[0]))
+        for path, answer in self.GOOD.items():
+            with self.subTest(path=path):
+                self.assertIn(path, self.script())
+                self.assertEqual(path in listed, answer.startswith("200 "))
+        self.assertTrue((REPO / "flowday" / "web" / "public" / "pwa" / "sw.js").is_file())
+
+    def test_a_missing_bypass_fails_with_its_name(self):
+        code, output, urls = self.check({**self.GOOD, "/pwa/manifest.webmanifest": "302 text/html"})
+        self.assertEqual(code, 1, output)
+        self.assertIn("the Access app flowday-bypass does not cover", output)
+        self.assertEqual(len(urls), 1)
+
+    def test_a_public_unlisted_file_or_a_wrong_media_type_fails(self):
+        for path, answer in (
+            ("/pwa/sw.js", "200 application/javascript"),
+            ("/pwa/manifest.webmanifest", "200 text/html; charset=utf-8"),
+            ("/pwa/icon-192x192.png", "401 application/json"),
+            ("/pwa/sw", "200 "),
+        ):
+            with self.subTest(path=path, answer=answer):
+                code, output, _ = self.check({**self.GOOD, path: answer})
+                self.assertEqual(code, 1, output)
+                self.assertIn(f"{path} was answered with", output)
+
+    def test_no_connection_or_5xx_is_retried_then_fails(self):
+        code, output, _ = self.check({**self.GOOD, "/pwa/manifest.webmanifest": ["000 ", "503 text/html", "200 application/manifest+json"]})
+        self.assertEqual(code, 0, output)
+        self.assertIn("(attempt 3)", output)
+        code, output, urls = self.check({**self.GOOD, "/pwa/manifest.webmanifest": "000 "})
+        self.assertEqual(code, 1, output)
+        self.assertIn("/pwa/manifest.webmanifest never reached the Worker", output)
+        self.assertEqual(len(urls), 10)
+
+    def test_the_host_comes_from_the_committed_config(self):
+        block = workflow_jobs()["flowday-deploy"]
+        step = block.split(self.STEP, 1)[1].split("\n      - ", 1)[0]
+        self.assertIn("PUBLIC_HOST: ${{ steps.config.outputs.host }}", step)
+        self.assertLess(block.index("- name: Check that Access answers unauthenticated requests\n"), block.index(self.STEP))
+        code, _, _ = self.check(self.GOOD, host="")
+        self.assertNotEqual(code, 0)
 
 
 class FlowDayProductionCheck(unittest.TestCase):
@@ -1814,6 +1949,7 @@ class HostnameGuard(unittest.TestCase):
             ("mail-hero-deploy", ["mail-hero/wrangler.toml"], "MAIL_HERO_CF_API_TOKEN", "wrangler d1 migrations apply"),
             ("dashboard-deploy", ["dashboard/wrangler.toml"], "CF_API_TOKEN", "deploy-vars.mjs exec -- npx --no-install wrangler deploy --config"),
             ("lab-deploy", ["lab/wrangler.toml"], "CF_API_TOKEN", "wrangler d1 migrations apply"),
+            ("flowday-deploy", ["flowday/wrangler.toml"], "CF_API_TOKEN", "wrangler d1 migrations apply"),
         ):
             block = blocks[job]
             with self.subTest(job=job):
@@ -1826,20 +1962,6 @@ class HostnameGuard(unittest.TestCase):
                 self.assertIn(self.GUARD + "".join(f" --config {config}" for config in configs) + "\n", step + "\n")
                 self.assertLess(block.index(self.STEP), block.index(first_change))
                 self.assertTrue(any(self.has_routes(config) for config in configs))
-
-    def test_flowday_deploy_guards_its_config_before_its_first_hostname(self):
-        """F2 lists no route, so the guard sends no request and passes; the step is in place, with the job's token,
-        before the D1 migrations, so the commit that adds the staging host (F3) is already guarded."""
-        block = workflow_jobs()["flowday-deploy"]
-        self.assertEqual(block.count(self.STEP), 1)
-        step = block.split(self.STEP, 1)[1].split("\n      - ", 1)[0]
-        self.assertIn("        working-directory: .\n", step)
-        self.assertIn("CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}", step)
-        self.assertIn("CF_GUARD_ALLOW_REMOVE: ''", step)
-        self.assertIn("CF_GUARD_ALLOW_CONFLICT: ''", step)
-        self.assertIn(self.GUARD + " --config flowday/wrangler.toml\n", step + "\n")
-        self.assertLess(block.index(self.STEP), block.index("wrangler d1 migrations apply"))
-        self.assertFalse(self.has_routes("flowday/wrangler.toml"))
 
     def test_every_production_config_with_routes_is_guarded(self):
         text = WORKFLOW.read_text()

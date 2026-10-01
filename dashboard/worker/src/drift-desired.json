@@ -8,7 +8,9 @@
       "config": "flowday/wrangler.toml",
       "workers_dev": false,
       "preview_urls": false,
-      "custom_domains": [],
+      "custom_domains": [
+        "flowday-next.ziyixi.science"
+      ],
       "routes": [],
       "crons": [],
       "bindings": [
@@ -55,6 +57,11 @@
         {
           "name": "DB",
           "type": "d1",
+          "source": "config"
+        },
+        {
+          "name": "PUBLIC_HOST",
+          "type": "plain_text",
           "source": "config"
         }
       ],
