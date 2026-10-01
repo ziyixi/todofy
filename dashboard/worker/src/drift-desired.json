@@ -4,6 +4,62 @@
     "ziyixi.science"
   ],
   "workers": {
+    "flowday": {
+      "config": "flowday/wrangler.toml",
+      "workers_dev": false,
+      "preview_urls": false,
+      "custom_domains": [],
+      "routes": [],
+      "crons": [],
+      "bindings": [
+        {
+          "name": "ACCESS_AUDIENCE",
+          "type": "plain_text",
+          "source": "config"
+        },
+        {
+          "name": "ACCESS_ISSUER",
+          "type": "plain_text",
+          "source": "config"
+        },
+        {
+          "name": "ACCESS_OWNER",
+          "type": "secret_text",
+          "source": "deploy"
+        },
+        {
+          "name": "ACCESS_OWNER_ALIASES",
+          "type": "secret_text",
+          "source": "deploy"
+        },
+        {
+          "name": "ASSETS",
+          "type": "assets",
+          "source": "config"
+        },
+        {
+          "name": "BUILD_SHA",
+          "type": "plain_text",
+          "source": "deploy"
+        },
+        {
+          "name": "CREDENTIAL_KEY",
+          "type": "secret_text",
+          "source": "deploy"
+        },
+        {
+          "name": "CSRF_SIGNING_KEY",
+          "type": "secret_text",
+          "source": "deploy"
+        },
+        {
+          "name": "DB",
+          "type": "d1",
+          "source": "config"
+        }
+      ],
+      "personal": []
+    },
     "home": {
       "config": "dashboard/wrangler.toml",
       "workers_dev": false,

@@ -40,7 +40,9 @@ import infra_guard  # noqa: E402  (same directory; unittest discover puts it on 
 
 REPO = Path(__file__).resolve().parents[2]
 INFRA = REPO / "infra"
-# Worker name -> production config (the same list as test_wrangler_configs.py).
+# Worker name -> production config: the list of test_wrangler_configs.py without FlowDay, whose D1 database and
+# Access app "flowday" (deployed since F2) are not adopted into infra/ yet. A later infra/ change imports them and
+# adds "flowday" here in the same commit.
 PRODUCTION = {
     "mail-hero": "mail-hero/wrangler.toml",
     "todofy-core": "todofy/wrangler.toml",

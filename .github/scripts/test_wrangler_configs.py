@@ -29,6 +29,9 @@ except ModuleNotFoundError:
         "uv run --no-project --python 3.12 python -m unittest discover -s .github/scripts"
     ) from None
 
+sys.path.insert(0, str(Path(__file__).parent))
+import ci_changes  # noqa: E402
+
 REPO = Path(__file__).resolve().parents[2]
 WORKFLOW = REPO / ".github" / "workflows" / "ci.yml"
 
@@ -41,11 +44,12 @@ PRODUCTION = {
     "ziyixi-website": "website/wrangler.toml",
     "ziyixi-notion-publish": "website/relay/wrangler.toml",
     "lab": "lab/wrangler.toml",
+    "flowday": "flowday/wrangler.toml",
 }
 # Configs of Workers that CI checks but does not deploy yet (no deploy job, no hostname, placeholder resource ids).
 # They stay out of PRODUCTION, which the dashboard's drift check compares with the live account
-# (drift_desired.py): FlowDay's Worker does not exist there before F2.
-UNDEPLOYED = {"flowday": "flowday/wrangler.toml"}
+# (drift_desired.py). None today: FlowDay moved to PRODUCTION at F2 (flowday/docs/design.md section 11).
+UNDEPLOYED: dict[str, str] = {}
 # Runtime-test configs stay next to their tests.
 TEST_CONFIGS = {
     "todofy/wrangler.test.toml",
@@ -63,6 +67,7 @@ WRAPPERS = {
     ),
     "dashboard": ("dashboard/deploy/deploy-vars.mjs", r"deploy-vars\.mjs (exec|secrets)\b", ["home"]),
     "lab": ("lab/deploy/deploy-vars.mjs", r"deploy-vars\.mjs (exec|secrets)\b", ["lab"]),
+    "flowday": ("flowday/deploy/deploy-vars.mjs", r"deploy-vars\.mjs (exec|secrets)\b", ["flowday"]),
 }
 # Worker vars that must never be committed: personal values (GitHub environment secrets) ...
 PERSONAL_VARS = {
@@ -87,12 +92,17 @@ PERSONAL_INPUTS = {
     "DASHBOARD_ACCESS_OWNER_ALIASES",
     "LAB_ACCESS_OWNER",
     "LAB_ACCESS_OWNER_ALIASES",
+    "FLOWDAY_ACCESS_OWNER",
+    "FLOWDAY_ACCESS_OWNER_ALIASES",
 }
-# Personal inputs a deploy job reads from another app's secret: Lab's owner is the dashboard's owner (one person,
-# the same Access identities), so Lab deploy reads the dashboard's secrets (lab/README.md "Deploy secrets").
+# Personal inputs a deploy job reads from another app's secret: Lab's and FlowDay's owner is the dashboard's owner
+# (one person, the same Access identities), so their deploys read the dashboard's secrets (lab/README.md "Deploy
+# secrets", flowday/README.md "Deploy").
 SHARED_SECRETS = {
     "LAB_ACCESS_OWNER": "DASHBOARD_ACCESS_OWNER",
     "LAB_ACCESS_OWNER_ALIASES": "DASHBOARD_ACCESS_OWNER_ALIASES",
+    "FLOWDAY_ACCESS_OWNER": "DASHBOARD_ACCESS_OWNER",
+    "FLOWDAY_ACCESS_OWNER_ALIASES": "DASHBOARD_ACCESS_OWNER_ALIASES",
 }
 # The only GitHub variables CI reads: the operational switches, stated at every deploy (mail-hero AGENTS.md §8).
 TOGGLES = {
@@ -105,7 +115,9 @@ TOGGLES = {
     "TODOFY_GTD_REVIEW_ENABLED",
     "DASHBOARD_CANARY_ENABLED",
 }
-DEPLOY_JOBS = ("todofy-deploy", "mail-hero-deploy", "dashboard-deploy", "lab-deploy")
+DEPLOY_JOBS = ("todofy-deploy", "mail-hero-deploy", "dashboard-deploy", "lab-deploy", "flowday-deploy")
+# Deploy jobs of Workers without a hostname yet: their environment has no URL (FlowDay before F3).
+HOSTLESS_DEPLOY_JOBS = {"flowday-deploy"}
 # The retired generators' required GitHub variables, still set in production: a revert of the committed-config
 # layout needs them (README "Rolling back the committed-config layout"), and nothing may read them now.
 LEGACY_VARIABLES = {
@@ -234,6 +246,45 @@ def steps(job: str) -> list[dict]:
     return found
 
 
+def needs(job: str) -> list[str]:
+    """The jobs a job block needs (`needs: x` or `needs: [x, y]`)."""
+    match = re.search(r"^    needs: (?:\[(.*)\]|(\S+))$", job, re.M)
+    if not match:
+        return []
+    return [name.strip() for name in (match.group(1) or match.group(2)).split(",")]
+
+
+# The wrangler commands a check job may run: each works without a Cloudflare account (`deploy` only with --dry-run,
+# which bundles without a request; `dev` and `types` stay local). Anything else (a real deploy, `versions upload`,
+# `secret`, `d1`, `r2` or `kv` against the account) belongs in a deploy job.
+CHECK_JOB_WRANGLER = {"deploy", "dev", "types"}
+
+
+def production_reach(block: str) -> list[str]:
+    """How a job block (or the workflow's top level) could reach production; empty when it cannot. A `${{ }}`
+    expression that names the secrets context, `secrets:` passed to a called workflow, a deployment environment
+    (whose secrets the job would get), a wrangler command outside CHECK_JOB_WRANGLER, a `wrangler deploy` without
+    --dry-run, or a wrangler call with --remote."""
+    found = []
+    if any(re.search(r"\bsecrets\b", expression) for expression in re.findall(r"\$\{\{(.*?)\}\}", block)):
+        found.append("reads a secret")
+    if re.search(r"^ +secrets:", block, re.M):
+        found.append("passes secrets to a called workflow")
+    if re.search(r"^ +environment:", block, re.M):
+        found.append("runs in a deployment environment")
+    for step in steps(block):
+        for line in step["run"].replace("\\\n", " ").splitlines():
+            commands = wrangler_commands(line)
+            for command in commands:
+                if command not in CHECK_JOB_WRANGLER:
+                    found.append(f"runs `wrangler {command}`")
+                elif command == "deploy" and not re.search(r"(?<!\S)--dry-run(?:=true)?(?!\S)", line):
+                    found.append("runs `wrangler deploy` without --dry-run")
+            if commands and re.search(r"(?<!\S)--remote(?:=|(?!\S))", line):
+                found.append("runs wrangler with --remote")
+    return found
+
+
 class Files(unittest.TestCase):
     def test_only_the_known_wrangler_configs_exist(self):
         """One wrangler.toml per Worker, in the folder that names it, plus the runtime-test configs. A stray
@@ -309,9 +360,15 @@ class Files(unittest.TestCase):
 
 class Undeployed(unittest.TestCase):
     """A config CI only checks: on the shared account, closed to the internet (no workers.dev, no preview URL, no
-    route), nothing personal committed, no deploy job, and its wrapper's inputs only ever placeholders in ci.yml."""
+    route), nothing personal committed, no deploy job, and its wrapper's inputs only ever placeholders in ci.yml.
+    No app is undeployed today; the next imported app starts here, as FlowDay did until F2."""
 
-    WRAPPER = {"flowday": "flowday/deploy/deploy-vars.mjs"}
+    # Worker name -> its deploy wrapper, for every UNDEPLOYED config.
+    WRAPPER: dict[str, str] = {}
+
+    def test_every_undeployed_config_names_its_wrapper(self):
+        self.assertEqual(set(self.WRAPPER), set(UNDEPLOYED))
+        self.assertFalse(set(UNDEPLOYED) & set(PRODUCTION))
 
     def test_closed_and_on_the_shared_account(self):
         accounts = {load(path)["account_id"] for path in PRODUCTION.values()}
@@ -505,6 +562,61 @@ class Workflow(unittest.TestCase):
             with self.subTest(line=line):
                 self.assertFalse({"deploy", "versions upload"} & set(wrangler_commands(line)))
 
+    def test_no_job_before_the_deploys_can_reach_production(self):
+        """Every branch push runs "Changes", the check jobs and "CI gate" with no environment, and a push to main
+        takes their verdict from a green branch run of the same commit (ci_changes.find_reusable: "no check job
+        uses a secret"). So none of them, nor the workflow's top level, may read a secret, run in an environment,
+        deploy for real or touch the account with wrangler."""
+        self.assertEqual(production_reach(WORKFLOW.read_text().split("\njobs:\n", 1)[0]), [])
+        before = {name: block for name, block in self.jobs.items() if name == "gate" or "gate" not in needs(block)}
+        # They include every job whose result a reused run vouches for (ci.yml names; a matrix is "<name> (*)").
+        names = {
+            re.sub(r" \(\$\{\{ matrix\.shard \}\}/\d+\)$", " (*)", re.search(r"^    name: (.+)$", block, re.M).group(1))
+            for block in before.values()
+        }
+        reused = {name for jobs in ci_changes.CHECK_JOBS.values() for name in jobs}
+        self.assertLessEqual({*ci_changes.ALWAYS_JOBS, *reused}, names)
+        for name, block in before.items():
+            with self.subTest(job=name):
+                self.assertEqual(production_reach(block), [])
+
+    def test_the_production_reach_detector(self):
+        """production_reach sees each way into production, and not the checks' dry-run with a secrets *file*."""
+        dry_run = (
+            "        run: |\n"
+            "          node ../deploy/deploy-vars.mjs exec -- npx --no-install wrangler deploy --dry-run \\\n"
+            '            --config ../wrangler.toml --secrets-file "$RUNNER_TEMP/app-secrets.json"\n'
+        )
+        job = (
+            "    name: App checks\n    needs: changes\n    runs-on: ubuntu-24.04\n    steps:\n"
+            "      - name: Dry-run the committed config\n        working-directory: app/worker\n"
+            "        env:\n          APP_ACCESS_OWNER: owner@example.com\n" + dry_run
+        )
+        self.assertEqual(production_reach(job), [])
+        self.assertEqual(needs(job), ["changes"])
+
+        def step(command: str) -> str:
+            return f"      - name: Step\n        run: |\n          npx --no-install wrangler {command} -c ../wrangler.toml\n"
+
+        token = "owner@example.com\n          CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}"
+        environment = "    environment:\n      name: production\n    steps:\n"
+        for mutated, expected in (
+            (job.replace("owner@example.com", token), "reads a secret"),
+            (job.replace("owner@example.com", "${{secrets['APP_ACCESS_OWNER']}}"), "reads a secret"),
+            (job.replace("owner@example.com", "${{ toJSON(secrets) }}"), "reads a secret"),
+            (job.replace("    steps:\n", environment), "runs in a deployment environment"),
+            (job.replace("    steps:\n", "    secrets: inherit\n    steps:\n"), "passes secrets to a called workflow"),
+            (job.replace(" --dry-run", ""), "runs `wrangler deploy` without --dry-run"),
+            (job.replace(" --dry-run", " --dry-run=false"), "runs `wrangler deploy` without --dry-run"),
+            (job + step("versions upload"), "runs `wrangler versions upload`"),
+            (job + step("secret put KEY"), "runs `wrangler secret`"),
+            (job + step("d1 migrations apply DB --remote"), "runs wrangler with --remote"),
+            (job + step("dev --remote"), "runs wrangler with --remote"),
+        ):
+            with self.subTest(expected=expected, mutated=mutated[-120:]):
+                self.assertIn(expected, production_reach(mutated))
+        self.assertEqual(needs("    needs: [changes, gate]\n"), ["changes", "gate"])
+
     def test_personal_values_are_worker_secrets(self):
         """Every personal value (the receive address, the owners' Access identities, Todofy's Todoist projects) reaches
         its Worker as a Worker secret (a wrapper's `secrets` mode, deployed with --secrets-file), never as a --var:
@@ -589,14 +701,55 @@ class Workflow(unittest.TestCase):
         self.assertNotIn("DASHBOARD_CSRF_SIGNING_KEY", {secret for names in read.values() for secret in names})
         self.assertNotRegex(WORKFLOW.read_text(), r"secrets\.LAB_ACCESS_OWNER")
 
-    def test_lab_accepts_exactly_the_owner_values_the_dashboard_accepts(self):
-        """The same secrets feed both wrappers: their owner and alias rules must be the same lines, or a valid
-        dashboard value could stop Lab deploy (or the reverse)."""
+    def test_flowday_deploy_reads_the_dashboard_owner_and_its_own_keys(self):
+        """FlowDay's owner addresses come from the dashboard's secrets (no FLOWDAY_ACCESS_OWNER* secret exists); its
+        CSRF key and credential key are its own, never another app's."""
+        read = {}
+        for step in steps(self.jobs["flowday-deploy"]):
+            for name, value in step["env"].items():
+                if match := re.fullmatch(r"\$\{\{ secrets\.([A-Z0-9_]+) \}\}", value):
+                    read.setdefault(name, set()).add(match.group(1))
+        self.assertEqual(read["FLOWDAY_ACCESS_OWNER"], {"DASHBOARD_ACCESS_OWNER"})
+        self.assertEqual(read["FLOWDAY_ACCESS_OWNER_ALIASES"], {"DASHBOARD_ACCESS_OWNER_ALIASES"})
+        self.assertEqual(read["FLOWDAY_CSRF_SIGNING_KEY"], {"FLOWDAY_CSRF_SIGNING_KEY"})
+        self.assertEqual(read["FLOWDAY_CREDENTIAL_KEY"], {"FLOWDAY_CREDENTIAL_KEY"})
+        self.assertEqual(read["CLOUDFLARE_API_TOKEN"], {"CF_API_TOKEN"})
+        self.assertEqual(set(read), {*markers(WRAPPERS["flowday"][0])["secrets"], "CLOUDFLARE_API_TOKEN"})
+        self.assertNotRegex(WORKFLOW.read_text(), r"secrets\.FLOWDAY_ACCESS_OWNER")
+        # The secrets are read only where the secrets file is written (and the token where Cloudflare is called).
+        writers = [step["name"] for step in steps(self.jobs["flowday-deploy"]) if "FLOWDAY_CSRF_SIGNING_KEY" in step["env"]]
+        self.assertEqual(writers, ["Write the Worker secrets file"])
+
+    def test_flowday_deploy_applies_migrations_before_the_worker_and_then_checks_production(self):
+        """F2: `wrangler d1 migrations apply DB --remote`, then the real deploy through the wrapper, in one step after
+        the hostname guard; then a hostname-free check of the live version and the migrations (no host to probe)."""
+        flowday = steps(self.jobs["flowday-deploy"])
+        names = [step["name"] for step in flowday]
+        guard = names.index("Check the hostnames against production")
+        [deploy] = [i for i, s in enumerate(flowday) if "deploy" in wrangler_commands(s["run"]) and "--dry-run" not in s["run"]]
+        self.assertLess(guard, deploy)
+        script = flowday[deploy]["run"]
+        self.assertLess(script.index("wrangler d1 migrations apply DB --remote --config ../wrangler.toml"), script.index("deploy-vars.mjs exec"))
+        check = flowday[deploy + 1]
+        self.assertEqual(check["name"], "Check that production runs this commit")
+        for command in ("deployments status", "versions view", "d1 migrations list DB --remote"):
+            self.assertIn(f"wrangler {command}", check["run"])
+        # Reads only: no deploy, upload, rollback, secret or SQL in the check.
+        self.assertFalse({"deploy", "versions upload", "versions deploy", "rollback", "secret"} & set(wrangler_commands(check["run"])))
+        self.assertNotIn("execute", check["run"])
+
+    def test_lab_and_flowday_accept_exactly_the_owner_values_the_dashboard_accepts(self):
+        """The same secrets feed the three wrappers: their owner and alias rules must be the same lines, or a valid
+        dashboard value could stop Lab deploy or FlowDay deploy (or the reverse). Here, in Changes, a change to
+        any one wrapper runs this comparison, whichever app's checks it runs."""
         rules = r"^(?:const ACCESS_EMAIL|const MAX_ALIASES|const MAX_LIST_CHARS) = .+$"
-        lab = re.findall(rules, (REPO / "lab/deploy/deploy-vars.mjs").read_text(), re.M)
-        dashboard = re.findall(rules, (REPO / "dashboard/deploy/deploy-vars.mjs").read_text(), re.M)
-        self.assertEqual(len(lab), 3)
+        lab, dashboard, flowday = (
+            re.findall(rules, (REPO / app / "deploy" / "deploy-vars.mjs").read_text(), re.M)
+            for app in ("lab", "dashboard", "flowday")
+        )
+        self.assertEqual(len(dashboard), 3)
         self.assertEqual(lab, dashboard)
+        self.assertEqual(flowday, dashboard)
 
     def test_the_lab_rollback_note_covers_what_its_first_release_leaves_live(self):
         """Lab's first release has no earlier version: its README must name what `Lab deploy` makes live (Worker,
@@ -637,7 +790,10 @@ class Workflow(unittest.TestCase):
         for job_name in DEPLOY_JOBS:
             job = self.jobs[job_name]
             self.assertNotIn("CLOUDFLARE_ACCOUNT_ID", job)
-            self.assertIn("url: ${{ steps.config.outputs.url }}", job)
+            if job_name in HOSTLESS_DEPLOY_JOBS:
+                self.assertNotIn("url:", job)
+            else:
+                self.assertIn("url: ${{ steps.config.outputs.url }}", job)
             for step in steps(job):
                 with self.subTest(job=job_name, step=step["name"]):
                     self.assertNotIn("${{", step["run"])

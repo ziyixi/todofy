@@ -52,6 +52,7 @@ WORKERS = {
     "ziyixi-website": "website/wrangler.toml",
     "ziyixi-notion-publish": "website/relay/wrangler.toml",
     "lab": "lab/wrangler.toml",
+    "flowday": "flowday/wrangler.toml",
 }
 
 # The zones whose zone routes are compared (every Custom Domain and route of every Worker is in one of them).
@@ -62,6 +63,7 @@ WRAPPERS = {
     "mail-hero": {"language": "js", "file": "mail-hero/deploy/deploy-vars.mjs", "vars": "mail-hero", "secrets": "mail-hero"},
     "dashboard": {"language": "js", "file": "dashboard/deploy/deploy-vars.mjs", "vars": "home", "secrets": "home"},
     "lab": {"language": "js", "file": "lab/deploy/deploy-vars.mjs", "vars": "lab", "secrets": "lab"},
+    "flowday": {"language": "js", "file": "flowday/deploy/deploy-vars.mjs", "vars": "flowday", "secrets": "flowday"},
     "todofy": {
         "language": "py",
         "file": "todofy/deploy/deploy_vars.py",

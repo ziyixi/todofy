@@ -1,9 +1,10 @@
 # FlowDay on Workers Free: design
 
 FlowDay runs as one Worker, `flowday`, on the account's Workers Free plan. The Worker serves the UI as static
-assets and a small owner API backed by D1. This document covers the F1 port: the code, the tests and the
-measurements. It is **not deployed yet**. The resources, the hostname and the data cutover are the later steps
-F2–F6 (section 11).
+assets and a small owner API backed by D1. This document covers the F1 port (the code, the tests and the
+measurements) and the steps after it (section 11). Since **F2** CI deploys the Worker and its D1 schema, but with
+**no route and no hostname**: it is live and unreachable. The staging host, the data cutover and the retirement
+of the container are the later steps F3–F6.
 
 Owner decisions (2026-10-01) this design follows:
 
@@ -24,11 +25,11 @@ browser ── Cloudflare Access ── Worker "flowday" ──┬── ASSETS:
 
 | Path | What it is |
 | --- | --- |
-| `wrangler.toml` | The production config: top level only, `workers_dev = false`, `preview_urls = false`, no route, placeholder D1 id and Access AUD (F2 fills them in) |
+| `wrangler.toml` | The production config: top level only, `workers_dev = false`, `preview_urls = false`, no route; the real D1 id and Access AUD since F2 |
 | `worker/src/` | `index.ts` (handler) → `router.ts` (Access, PWA exceptions, logging) → `api.ts` (routes) → `store/*` (D1), `sync.ts` + `todoist.ts` (Todoist), `credentials.ts` (the sealed Todoist key), `assets.ts` (static files, CSP), `e2e.ts` (test routes) |
 | `migrations/` | `0001_init.sql`: the container-era SQLite schema, unchanged. `0002_incremental_sync.sql`: `tasks.todoist_project_id`. `0003_fewer_task_indexes.sql`: drops four indexes no query needs |
 | `web/` | The Next.js UI as a static export (`output: "export"`). It has no server code; `lib/client/http.ts` is its only `fetch` |
-| `deploy/deploy-vars.mjs` | The deploy wrapper, Lab's shape. Before F2 it allows only `wrangler deploy --dry-run` |
+| `deploy/deploy-vars.mjs` | The deploy wrapper, Lab's shape: `BUILD_SHA` as a var, the owner and both keys as Worker secrets. It refuses a real deploy while the D1 id or the Access AUD is the all-zeros placeholder (a guard against a revert to the F1 config) |
 
 There is no cron, no Durable Object and no Queue. The sync runs when a page asks for it (section 4).
 
@@ -271,7 +272,7 @@ The reviews moved to the browser because they ran per minute of logged time. On 
 | Worker runtime | `worker/test/runtime/*.test.ts` (Miniflare/workerd, real D1, a fake Todoist Sync API with full item shapes) | Schema and query plans; every store module (the container's query tests, async), including more than 100 ids and row counts; the API over HTTP with CSRF; Access with real RS256 JWTs; CSRF and Origin; PWA exceptions; CSP; E2E gating; the sync rules, throttle, concurrency, backoff, chunked passes, archived projects and the sealed key; the write budget; CPU |
 | UI unit and integration | `web/__tests__` (Vitest, an in-memory fake of the API) | Stores, the request wrapper (CSRF retry, session expiry, banner), the auto-sync scheduler, reviews and exports from rows |
 | Playwright | `web/__tests__/ui` against `wrangler dev` (`web/scripts/e2e-server.mjs`: E2E export, local D1, bypass) | The 52 UI scenarios. All passed locally (Chromium headless shell). CI does not run them yet, as before F1 |
-| Config and wrapper | `deploy/test/*.test.mjs`, `.github/scripts/test_wrangler_configs.py` | No route, no hostname, placeholders, no personal value, dry-run only, CI inputs are placeholders |
+| Config and wrapper | `deploy/test/*.test.mjs`, `.github/scripts/test_wrangler_configs.py`, `test_ci_changes.py`, `test_drift_desired.py` | No route and no hostname (F2), the real D1 id and AUD, no personal value, the placeholder guard; the deploy job's secrets (the dashboard's owner, FlowDay's own keys), migrations before the Worker, the hostname guard, and its production check against a stubbed wrangler; the dashboard's desired state for drift |
 
 The README figures and the UI goldens (`docs/readme`, `docs/ui-goldens`) are compared pixel by pixel on Ubuntu
 24.04. Their scripts now start the app through `e2e-server.mjs`. They were not regenerated in F1: the UI is
@@ -286,7 +287,12 @@ first (`cd ../web && npm run build`), and apply the migrations locally:
 
 ## 11. Migration plan after F1
 
-- **F2 (resources, no route).**
+- **F2 (resources, no route).** Done in code (2026-10-01); live once its commit's `FlowDay deploy` passes on
+  `main`. The job ("FlowDay deploy" in `.github/workflows/ci.yml`) builds the export, writes the secrets file,
+  dry-runs, runs the hostname guard (no route: it passes without a request), applies the D1 migrations, deploys
+  through the wrapper and then, with no host to probe, reads production through the API: exactly one version at
+  100% whose `BUILD_SHA` is the commit, and no pending migration. The Worker has no route, no `workers.dev` and no
+  preview URL, so nothing can reach it yet. Rollback: [`../README.md`](../README.md) "Rollback and removal".
   - Create the D1 database `flowday` and commit its id.
   - Reuse the existing Access app `flowday`: commit its AUD as `ACCESS_AUDIENCE`, unchanged.
   - Add the GitHub secrets `FLOWDAY_CSRF_SIGNING_KEY` and `FLOWDAY_CREDENTIAL_KEY` (each `openssl rand -hex 32`;
@@ -298,6 +304,8 @@ first (`cd ../web && npm run build`), and apply the migrations locally:
   - Move `flowday/wrangler.toml` from `UNDEPLOYED` to `PRODUCTION` in `test_wrangler_configs.py`, add it to
     `drift_desired.py` and regenerate the dashboard's desired state.
   - The wrapper then refuses the placeholders again, as a guard against a revert.
+  - Not in F2: `infra/` (OpenTofu, plan only) does not adopt the D1 `flowday` or the Access app `flowday` yet;
+    a later `infra/` change imports both (`.github/scripts/test_infra_config.py` names the gap).
 - **F3 (staging host).** Set `PUBLIC_HOST` (the CSRF origin) and add a staging Custom Domain in its own commit
   (cf-guard). Owner checks on a real device: install, real icons (the manifest with credentials), cold start,
   re-login after the Access session expires. Rehearse the DNS rollback path before F4.

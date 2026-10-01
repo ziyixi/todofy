@@ -2,16 +2,17 @@
 # single source of truth: top level = production, never [env.*] or keep_vars. Every static value is committed here
 # (the repository is public: nothing personal, no secret).
 #
-# NOT DEPLOYED YET (F1). CI only checks and dry-runs this file ("FlowDay checks"); there is no deploy job, no route
-# and no hostname. The D1 id and the Access AUD below are all-zeros placeholders until F2 creates the database and
-# reuses the existing Access app "flowday" (docs/design.md "Migration plan"); deploy/deploy-vars.mjs refuses either
-# placeholder, so even a manual deploy through the wrapper cannot run before then. Do not add routes before the
-# F4 cutover commit: a CI deploy without a TTY takes over an existing DNS record for a listed hostname.
+# Deployed only by CI ("FlowDay deploy" in .github/workflows/ci.yml) through deploy/deploy-vars.mjs, which appends
+# --var BUILD_SHA (the commit) and passes ACCESS_OWNER, ACCESS_OWNER_ALIASES, CSRF_SIGNING_KEY and CREDENTIAL_KEY as
+# Worker secrets with --secrets-file (the dashboard's DASHBOARD_ACCESS_OWNER(_ALIASES), the same owner, and FlowDay's
+# own FLOWDAY_CSRF_SIGNING_KEY and FLOWDAY_CREDENTIAL_KEY; README.md "Deploy"). A plain `wrangler deploy` of this
+# file DELETES BUILD_SHA.
 #
-# Deployed (from F2) only through deploy/deploy-vars.mjs, which appends --var BUILD_SHA (the commit) and passes
-# ACCESS_OWNER, ACCESS_OWNER_ALIASES, CSRF_SIGNING_KEY and CREDENTIAL_KEY as Worker secrets with --secrets-file (the
-# dashboard's DASHBOARD_ACCESS_OWNER(_ALIASES), the same owner, and FlowDay's own FLOWDAY_CSRF_SIGNING_KEY and
-# FLOWDAY_CREDENTIAL_KEY).
+# F2 (docs/design.md "Migration plan"): the D1 database "flowday" exists and the existing Access app "flowday" is
+# reused; their id and AUD are committed below, and deploy/deploy-vars.mjs still refuses an all-zeros id or AUD (a
+# guard against a revert). There is NO route and NO hostname yet: the Worker is deployed but unreachable (no
+# workers.dev, no preview URL). Add the staging host only in its own commit (F3) and the production hostname only in
+# the F4 cutover commit: a CI deploy without a TTY takes over an existing DNS record for a listed hostname.
 #
 # Run wrangler from worker/ (the pinned wrangler lives in worker/node_modules) with --config ../wrangler.toml.
 # Local dev: local bindings only (D1 commands always --local, never --remote), local values in flowday/.dev.vars
@@ -38,10 +39,10 @@ not_found_handling = "single-page-application"
 [[d1_databases]]
 binding = "DB"
 database_name = "flowday"
-database_id = "00000000-0000-0000-0000-000000000000"
+database_id = "df104e83-7183-47e3-b2f9-638dc7502c13"
 migrations_dir = "migrations"
 
 [vars]
 ACCESS_ISSUER = "https://ziyixi.cloudflareaccess.com"
-# AUD tag of the existing Access app "flowday" (placeholder until F2).
-ACCESS_AUDIENCE = "0000000000000000000000000000000000000000000000000000000000000000"
+# AUD tag of the existing Access app "flowday".
+ACCESS_AUDIENCE = "075c90c5544f87d71cfaec475fad0302d6b726156ff93f5c3a4a89f4ead7b22f"

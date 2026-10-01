@@ -1,6 +1,5 @@
-# One workflow for the apps (Todofy, Mail Hero, the home dashboard, the website, Lab, and FlowDay, which is checked
-# but not deployed yet). "changes" decides what changed since a
-# cumulative base (.github/scripts/ci_changes.py), each app's checks run from its own directory, "Shared packages"
+# One workflow for the apps (Todofy, Mail Hero, the home dashboard, the website, Lab and FlowDay). "changes" decides
+# what changed since a cumulative base (.github/scripts/ci_changes.py), each app's checks run from its own directory, "Shared packages"
 # checks packages/* (compiled into the apps), "Contracts" runs both sides of mail.received.v1, ops-v1 and
 # task-intent-v1 plus the dashboard's ops-v1 caller tests, "Proto checks" gates the protobuf IDL in proto/, and
 # "CI gate" is the single status check to require.
@@ -61,6 +60,7 @@ jobs:
       website_deploy: ${{ steps.decide.outputs.website_deploy }}
       website_relay_deploy: ${{ steps.decide.outputs.website_relay_deploy }}
       lab_deploy: ${{ steps.decide.outputs.lab_deploy }}
+      flowday_deploy: ${{ steps.decide.outputs.flowday_deploy }}
       # A push to main that reuses a green branch run of the same commit (all check outputs above are false).
       checks_reused: ${{ steps.decide.outputs.checks_reused }}
       reused_run_url: ${{ steps.decide.outputs.reused_run_url }}
@@ -607,9 +607,8 @@ jobs:
         if: always()
         run: rm -f "$RUNNER_TEMP/lab-secrets.json"
 
-  # FlowDay (flowday/: the Worker "flowday", its D1 schema and the Next.js static export it serves) is checked but
-  # not deployed until F2: no hostname, route or Cloudflare resource yet, and its wrapper refuses a real deploy
-  # while the committed D1 id and Access AUD are placeholders. It compiles in packages/edge-auth; no contract.
+  # FlowDay (flowday/: the Worker "flowday", its D1 schema and the Next.js static export it serves). "FlowDay deploy"
+  # needs this job. It compiles in packages/edge-auth; no contract.
   flowday-checks:
     name: FlowDay checks
     needs: changes
@@ -662,8 +661,8 @@ jobs:
         run: |
           if grep -rnE "(from|import)[[:space:]]*\(?[[:space:]]*['\"][^'\"]*(mail-hero|todofy|dashboard|website|lab)/" \
             worker/src web/app web/components web/features web/lib web/scripts web/__tests__; then exit 1; fi
-      # The committed config, run as a deploy would run it but with --dry-run (the wrapper refuses anything else
-      # before F2) and placeholder values for what the deploy adds. No token is needed. Then the bundle's size.
+      # The committed config, run exactly as the deploy runs it but with --dry-run and placeholder values for what
+      # the deploy adds (deploy/deploy-vars.mjs). No token is needed. Then the bundle's size.
       - name: Dry-run the committed config and check the bundle size
         working-directory: flowday/worker
         env:
@@ -1539,6 +1538,134 @@ jobs:
       - name: Remove the secrets file
         if: always()
         run: rm -f "$RUNNER_TEMP/lab-secrets.json"
+
+  # FlowDay (Worker "flowday", flowday/docs/design.md section 11). F2 deploys it with no route and no hostname:
+  # migrations first (additive), then the Worker through deploy-vars.mjs, then a read of production through the API
+  # (there is no host to probe yet). The deploy token is Todofy's CF_API_TOKEN (D1 and Workers), as for Lab.
+  flowday-deploy:
+    name: FlowDay deploy
+    needs: [changes, flowday-checks, gate]
+    # Explicit status function and results, as for Todofy deploy (implicit success() and skipped ancestors).
+    if: >-
+      ${{ !cancelled()
+      && needs.changes.result == 'success'
+      && (needs.flowday-checks.result == 'success' || (needs.changes.outputs.checks_reused == 'true' && needs.flowday-checks.result == 'skipped'))
+      && needs.gate.result == 'success'
+      && github.ref == 'refs/heads/main'
+      && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+      && needs.changes.outputs.flowday_deploy == 'true' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    # No environment URL: the Worker has no hostname before F3.
+    environment:
+      name: production
+    concurrency:
+      group: flowday-production
+      cancel-in-progress: false
+    defaults:
+      run:
+        working-directory: flowday
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: '26'
+          cache: npm
+          cache-dependency-path: |
+            flowday/worker/package-lock.json
+            flowday/web/package-lock.json
+      # Every static production value (account, D1, Access) is committed in flowday/wrangler.toml. The export is
+      # checked again (no test code, PWA files present): this build is the one that ships.
+      - name: Build the verified revision
+        run: |
+          npm ci --prefix worker --no-audit --no-fund
+          npm ci --prefix web --no-audit --no-fund
+          npm run build --prefix web
+          npm run check:export --prefix web
+      # The owner's addresses and the two keys are environment secrets (masked in this public log) and reach the
+      # Worker as secrets through --secrets-file; wrangler prints plain vars. FlowDay's owner is the dashboard's owner
+      # (one person, the same Access identities), so the addresses come from the dashboard's secrets, as for Lab; the
+      # CSRF key and the credential key (it seals the Todoist key in D1) are FlowDay's own. flowday/README.md "Deploy".
+      - name: Write the Worker secrets file
+        working-directory: flowday/worker
+        env:
+          FLOWDAY_ACCESS_OWNER: ${{ secrets.DASHBOARD_ACCESS_OWNER }}
+          FLOWDAY_ACCESS_OWNER_ALIASES: ${{ secrets.DASHBOARD_ACCESS_OWNER_ALIASES }}
+          FLOWDAY_CSRF_SIGNING_KEY: ${{ secrets.FLOWDAY_CSRF_SIGNING_KEY }}
+          FLOWDAY_CREDENTIAL_KEY: ${{ secrets.FLOWDAY_CREDENTIAL_KEY }}
+        run: node ../deploy/deploy-vars.mjs secrets "$RUNNER_TEMP/flowday-secrets.json"
+      # deploy-vars.mjs adds BUILD_SHA as --var and refuses a real deploy with the all-zeros D1 id or Access AUD.
+      - name: Validate the bundle before changing D1
+        working-directory: flowday/worker
+        run: |
+          node ../deploy/deploy-vars.mjs exec -- npx --no-install wrangler deploy --dry-run --config ../wrangler.toml \
+            --secrets-file "$RUNNER_TEMP/flowday-secrets.json" --outdir "$RUNNER_TEMP/flowday-bundle"
+          node scripts/bundle-size.mjs "$RUNNER_TEMP/flowday-bundle"
+      # tools/cf-guard (read-only GETs; prints listed hostnames, counts, PASS/FAIL): wrangler applies a config's Custom
+      # Domains (or zone routes) as the Worker's complete set, so stop before any production change when a live
+      # hostname would be detached or another Worker's hostname or DNS record taken over. For an intentional
+      # change, set the exact hostnames here (space-separated) in the same commit that changes wrangler.toml.
+      # With no route listed (F2) it sends no request and passes; it is here before the first hostname is.
+      - name: Check the hostnames against production
+        working-directory: .
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+          CF_GUARD_ALLOW_REMOVE: ''
+          CF_GUARD_ALLOW_CONFLICT: ''
+        run: node tools/cf-guard/cf-guard.mjs --config flowday/wrangler.toml
+      - name: Apply D1 migrations, then deploy the Worker flowday
+        working-directory: flowday/worker
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+        run: |
+          test -n "$CLOUDFLARE_API_TOKEN"
+          npx --no-install wrangler d1 migrations apply DB --remote --config ../wrangler.toml
+          node ../deploy/deploy-vars.mjs exec -- npx --no-install wrangler deploy --config ../wrangler.toml \
+            --secrets-file "$RUNNER_TEMP/flowday-secrets.json"
+      # No hostname to probe yet (F2), so production is read through the API with the deploy token (GETs and one D1
+      # read of the migrations table): the Worker serves exactly one version at 100%, that version's BUILD_SHA is this
+      # commit, and no D1 migration is pending. wrangler's JSON answers are parsed, never printed (they name the
+      # token's account email); only the version id and the results are.
+      - name: Check that production runs this commit
+        working-directory: flowday/worker
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+        run: |
+          test -n "$CLOUDFLARE_API_TOKEN"
+          deployment=$(npx --no-install wrangler deployments status --json --config ../wrangler.toml) || {
+            echo "Could not read the deployment of the Worker flowday." >&2
+            exit 1
+          }
+          version=$(jq -er '.versions | select(length == 1 and .[0].percentage == 100) | .[0].version_id' \
+            <<<"$deployment" 2>/dev/null) || {
+            echo "The deployment does not serve exactly one version at 100%." >&2
+            exit 1
+          }
+          details=$(npx --no-install wrangler versions view "$version" --json --config ../wrangler.toml) || {
+            echo "Could not read the deployed version." >&2
+            exit 1
+          }
+          build=$(jq -er '[.resources.bindings[] | select(.name == "BUILD_SHA" and .type == "plain_text") | .text]
+            | select(length == 1) | .[0]' <<<"$details" 2>/dev/null) || build=''
+          if [ "$build" != "$GITHUB_SHA" ]; then
+            echo "The deployed version $version was not built from $GITHUB_SHA." >&2
+            exit 1
+          fi
+          echo "The Worker flowday serves version $version at 100%, built from $GITHUB_SHA."
+          pending=$(npx --no-install wrangler d1 migrations list DB --remote --config ../wrangler.toml) || {
+            echo "Could not list the D1 migrations." >&2
+            exit 1
+          }
+          if ! grep -q 'No migrations to apply' <<<"$pending"; then
+            echo "D1 migrations are still pending." >&2
+            exit 1
+          fi
+          echo "No D1 migration is pending."
+      - name: Remove the secrets file
+        if: always()
+        run: rm -f "$RUNNER_TEMP/flowday-secrets.json"
 
   # The site release: dispatches website-release.yml (docs in website/docs/release.md), the same workflow the
   # Notion buttons and the relay's detector dispatch, and returns at once. The release's job holds the one

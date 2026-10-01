@@ -323,6 +323,8 @@ test("the committed production configs: the hostnames each deploy guards", async
     "lab/wrangler.toml": ["lab", ["lab.ziyixi.science"]],
     "website/wrangler.toml": ["ziyixi-website", ["www.ziyixi.science", "ziyixi.science"]],
     "website/relay/wrangler.toml": ["ziyixi-notion-publish", []],
+    // No route before the staging host (flowday/docs/design.md section 11, F3).
+    "flowday/wrangler.toml": ["flowday", []],
   };
   for (const [file, [name, hosts]] of Object.entries(expected)) {
     const triggers = await readTriggers(path.join(REPO, file));

@@ -6,14 +6,14 @@
 //   commit). FlowDay has no GitHub-variable switches;
 // - with `--secrets-file` (Worker secrets, hidden in wrangler's output): the owner's addresses, the CSRF key and
 //   the credential key that seals the Todoist key in D1 (inputs FLOWDAY_ACCESS_OWNER, FLOWDAY_ACCESS_OWNER_ALIASES,
-//   FLOWDAY_CSRF_SIGNING_KEY, FLOWDAY_CREDENTIAL_KEY, masked in the public Actions log). The deploy job (from F2)
-//   fills the first two from the dashboard's environment secrets DASHBOARD_ACCESS_OWNER and
+//   FLOWDAY_CSRF_SIGNING_KEY, FLOWDAY_CREDENTIAL_KEY, masked in the public Actions log). The deploy job ("FlowDay
+//   deploy") fills the first two from the dashboard's environment secrets DASHBOARD_ACCESS_OWNER and
 //   DASHBOARD_ACCESS_OWNER_ALIASES (the same owner, like Lab) and the keys from FlowDay's own
 //   FLOWDAY_CSRF_SIGNING_KEY and FLOWDAY_CREDENTIAL_KEY (../README.md "Deploy").
 //
-// NOT DEPLOYED YET: ../wrangler.toml still has the all-zeros D1 id and Access AUD (F2 replaces them). A real
-// deploy is refused while either placeholder is committed (now, and later as a guard against a revert); a
-// `wrangler deploy --dry-run` (CI's bundle check) needs no real resource and is allowed.
+// Since F2 ../wrangler.toml holds the real D1 id and Access AUD. A real deploy is still refused while either is the
+// all-zeros placeholder (a guard against a revert to the F1 config); a `wrangler deploy --dry-run` (CI's bundle
+// check) needs no real resource and is always allowed.
 //
 // Wrangler silently DELETES a var that a deploy does not send (the config has no keep_vars), so this
 // wrapper refuses to run unless every value is present and valid. Messages name the setting, never a value.
@@ -106,8 +106,11 @@ export function writeSecrets(path, env) {
   writeFileSync(path, JSON.stringify(generateSecrets(env), null, 2) + '\n', { mode: 0o600, flag: 'wx' })
 }
 
-/** Why `argv` must not run through this wrapper, or null. `cwd` resolves a relative --config. */
-export function refusal(argv, cwd = process.cwd()) {
+/**
+ * Why `argv` must not run through this wrapper, or null. `cwd` resolves a relative --config; `readConfig` returns the
+ * committed config's text (the tests pass an F1-style text to prove the placeholder guard).
+ */
+export function refusal(argv, cwd = process.cwd(), readConfig = () => readFileSync(CONFIG, 'utf8')) {
   if (argv.length === 0) return 'no command given'
   let config = null
   for (let index = 0; index < argv.length; index += 1) {
@@ -123,8 +126,8 @@ export function refusal(argv, cwd = process.cwd()) {
   let target
   try { target = realpathSync(resolve(cwd, config)) } catch { return `--config must name ${CONFIG}` }
   if (target !== realpathSync(CONFIG)) return `--config must name ${CONFIG}`
-  const placeholder = placeholderIn(readFileSync(CONFIG, 'utf8'))
-  if (placeholder && !argv.includes('--dry-run')) return `${placeholder} in the committed config is the all-zeros placeholder (FlowDay is not deployed before F2)`
+  const placeholder = placeholderIn(readConfig())
+  if (placeholder && !argv.includes('--dry-run')) return `${placeholder} in the committed config is the all-zeros placeholder (a real deploy needs the real resource)`
   return null
 }
 

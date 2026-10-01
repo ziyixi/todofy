@@ -16,15 +16,16 @@ Outputs (GITHUB_OUTPUT, "true"/"false"):
                     tools/ changed, or a dispatch.
   base              not a flag: the commit the diff started from (empty when everything runs), which
                     "Proto checks" compares the IDL with.
-  todofy_deploy, mail_hero_deploy, dashboard_deploy, website_deploy, lab_deploy
+  todofy_deploy, mail_hero_deploy, dashboard_deploy, website_deploy, lab_deploy, flowday_deploy
                     the app, a shared package it compiles in, or a contract file it bundles changed
                     (deploy jobs also require refs/heads/main)
   website_relay_deploy
                     website/relay/ (the Notion relay Worker, its own wrangler.toml) changed: deploy
                     the relay. A change only there checks the website but does not release the site;
                     a website change elsewhere releases the site but does not redeploy the relay.
-  FlowDay (flowday/) is checked only: its Worker has no deploy job yet (CHECK_ONLY, until F2), so there
-  is no flowday_deploy output. It compiles in packages/edge-auth, so a package change also checks it.
+  FlowDay (flowday/) is checked and deployed like the other apps since F2 (flowday/docs/design.md section 11).
+  It uses no contract (NO_CONTRACTS) and compiles in packages/edge-auth, so a package change checks and
+  deploys it too. CHECK_ONLY (apps checked but never deployed, with no "<prefix>_deploy" output) is empty.
 
 proto/ (the protobuf IDL, proto/README.md) checks every app in PROTO_USERS (an app that depends on
 @ziyixi/proto or ziyixi-proto) and deploys only those whose bundle can change: an app whose Worker
@@ -58,7 +59,8 @@ this workflow on another branch has the same head SHA, concluded success, and it
 every check job this push needs (CHECK_JOBS) succeeded, the check outputs are all false (those jobs are
 skipped), checks_reused=true names that run, and the deploy outputs are unchanged. The deploy jobs accept
 a skipped check job only together with checks_reused; the gate passes and prints the run. The same SHA is
-the same tree and the same ci.yml, and no check job uses a secret, so the branch run's verdict holds.
+the same tree and the same ci.yml, and no check job uses a secret, so the branch run's verdict holds
+(test_wrangler_configs.py: no job before the deploys reads a secret, has an environment or deploys for real).
 Anything else (no such run, a check it did not run, an API error, workflow_dispatch) runs the checks.
 tools/ (CI tooling such as the deploy hostname guard) counts as .github/: every app is re-checked, none
 deployed. The exception is tools/infra-plan-summary/, which belongs to infra/: it runs only Infra checks,
@@ -88,9 +90,9 @@ PREFIX = {
     "lab": "lab",
     "flowday": "flowday",
 }
-# Apps that are checked but never deployed by CI (no "<prefix>_deploy" output): FlowDay until its Worker
-# has a production config and a deploy job.
-CHECK_ONLY = {"flowday"}
+# Apps that are checked but never deployed by CI (no "<prefix>_deploy" output): an imported app until its Worker
+# has a production config and a deploy job. None today (FlowDay left it at F2).
+CHECK_ONLY: set[str] = set()
 KEYS = (
     "todofy_check",
     "mail_hero_check",
@@ -108,6 +110,7 @@ KEYS = (
     "website_deploy",
     "website_relay_deploy",
     "lab_deploy",
+    "flowday_deploy",
 )
 DISPATCH = {
     "both": ("todofy", "mail-hero"),

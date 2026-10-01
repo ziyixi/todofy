@@ -33,7 +33,7 @@ npm test            # vitest
 
 CI runs the same three commands in the `Shared packages` job. Any change in this directory also checks
 **and deploys** every app that compiles it in (`PACKAGE_USERS` in `.github/scripts/ci_changes.py`:
-Todofy, Mail Hero, the dashboard, Lab, and FlowDay, which is checked but not deployed yet); a new app that depends on this package must be added there, and
+Todofy, Mail Hero, the dashboard, Lab and FlowDay); a new app that depends on this package must be added there, and
 `test_ci_changes.py` fails until it is.
 
 Source rules (every app's toolchain compiles it, SPEC §6): relative imports end in `.ts`; erasable

@@ -38,7 +38,7 @@ function driftRequests(harness: FlowHarness): number {
 }
 
 describe('the daily drift check', () => {
-  it('runs across two ticks within DRIFT_CALLS_PER_TICK calls each, with GETs only, and shows ok', async () => {
+  it('runs across three ticks within DRIFT_CALLS_PER_TICK calls each, with GETs only, and shows ok', async () => {
     h = await startFlows();
     const start = driftHour(1);
     await h.tick(start - 30 * MIN);
@@ -56,15 +56,19 @@ describe('the daily drift check', () => {
     expect(tick.length).toBeLessThanOrEqual(outboundPerTick());
     expect((await view<CloudflareResponse>(h, 'cloudflare')).drift).toMatchObject({ status: 'never_checked', checked_at: null });
 
+    // Four Workers, then the eighth (three calls each).
     await h.tick(start + 30 * MIN);
     expect(driftRequests(h)).toBe(12);
+    expect((await view<CloudflareResponse>(h, 'cloudflare')).drift).toMatchObject({ status: 'never_checked', checked_at: null });
+    await h.tick(start + 60 * MIN);
+    expect(driftRequests(h)).toBe(3);
     const cloudflare = await view<CloudflareResponse>(h, 'cloudflare');
-    expect(cloudflare.drift).toMatchObject({ status: 'ok', in_progress: false, desired_workers: 7, findings: [], findings_omitted: 0, last_error: null });
-    expect(cloudflare.drift.checked_at).toBe(new Date(start + 30 * MIN).toISOString());
+    expect(cloudflare.drift).toMatchObject({ status: 'ok', in_progress: false, desired_workers: 8, findings: [], findings_omitted: 0, last_error: null });
+    expect(cloudflare.drift.checked_at).toBe(new Date(start + 60 * MIN).toISOString());
     const ops = await view<OpsResponse>(h, 'ops');
     expect(ops.digest.items.filter((item) => item.code === 'config_drift')).toEqual([]);
     // Once a day: later ticks of the same day make no drift call.
-    await h.tick(start + 60 * MIN);
+    await h.tick(start + 90 * MIN);
     expect(driftRequests(h)).toBe(0);
     // The GraphQL query still carries the same token; nothing else got it.
     expect(h.analytics.requests.every((r) => r.authorization === `Bearer ${TOKEN}`)).toBe(true);
@@ -79,8 +83,7 @@ describe('the daily drift check', () => {
       extraDomains: [{ hostname: 'stray.ziyixi.science', service: 'home' }],
     };
     const start = driftHour(1);
-    await h.tick(start);
-    await h.tick(start + 30 * MIN);
+    for (let k = 0; k < 3; k++) await h.tick(start + k * 30 * MIN);
     const cloudflare = await view<CloudflareResponse>(h, 'cloudflare');
     expect(cloudflare.drift.status).toBe('drift');
     expect(cloudflare.drift.counts).toEqual({ scripts: 1, custom_domains: 1, routes: 0, crons: 0, bindings: 1, workers_dev: 0, personal: 0 });
@@ -126,9 +129,8 @@ describe('the daily drift check', () => {
     // The API answers again: the next day's check succeeds and both items clear.
     h.cloudflare.tweaks = {};
     const today = driftHour(0);
-    if (today + 30 * MIN < Date.now()) {
-      await h.tick(today);
-      await h.tick(today + 30 * MIN);
+    if (today + 60 * MIN < Date.now()) {
+      for (let k = 0; k < 3; k++) await h.tick(today + k * 30 * MIN);
       const after = await view<OpsResponse>(h, 'ops');
       expect(after.digest.items.filter((item) => item.code === 'drift_unavailable' || item.code === 'config_drift')).toEqual([]);
       expect((await view<CloudflareResponse>(h, 'cloudflare')).drift).toMatchObject({ status: 'ok', consecutive_failed_days: 0 });

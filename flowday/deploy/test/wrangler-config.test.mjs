@@ -1,6 +1,6 @@
 // The committed production config ../../wrangler.toml, read with the pinned wrangler's own raw-config reader
-// (worker/node_modules): the shape the Worker "flowday" needs, nothing personal or injected, and, before F2, no
-// route, no hostname and the all-zeros placeholders.
+// (worker/node_modules): the shape the Worker "flowday" needs, nothing personal or injected, the real D1 id and
+// Access AUD (F2), and still no route and no hostname.
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { existsSync, readFileSync } from 'node:fs'
@@ -28,24 +28,31 @@ test('the top level is the production Worker: known keys only, no cron, no worke
   assert.equal(config.account_id, wrangler.experimental_readRawConfig({ config: new URL('../lab/wrangler.toml', APP).pathname }).rawConfig.account_id)
 })
 
-test('no route and no hostname before the F4 cutover commit', () => {
+test('no route and no hostname before the staging host (F3) and the F4 cutover commit', () => {
   assert.equal(config.routes, undefined)
   assert.equal(config.route, undefined)
   assert.ok(!/ziyixi\.science/.test(readFileSync(CONFIG, 'utf8').split('\n').filter((line) => !line.startsWith('#')).join('\n')))
 })
 
-test('entry, static assets (the Next.js export) and the D1 binding with the placeholder id until F2', () => {
+test('entry, static assets (the Next.js export) and the D1 binding with the real database id (F2)', () => {
   assert.equal(config.main, 'worker/src/index.ts')
   assert.ok(existsSync(new URL(config.main, APP)))
   assert.deepEqual(config.assets, { directory: 'web/out', binding: 'ASSETS', run_worker_first: true, not_found_handling: 'single-page-application' })
-  assert.deepEqual(config.d1_databases, [{ binding: 'DB', database_name: 'flowday', database_id: '00000000-0000-0000-0000-000000000000', migrations_dir: 'migrations' }])
+  assert.equal(config.d1_databases.length, 1)
+  const { database_id: id, ...database } = config.d1_databases[0]
+  assert.deepEqual(database, { binding: 'DB', database_name: 'flowday', migrations_dir: 'migrations' })
+  assert.match(id, /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/)
+  assert.notEqual(id, '00000000-0000-0000-0000-000000000000')
   assert.ok(existsSync(new URL('migrations/0001_init.sql', APP)))
 })
 
-test('vars: the public Access issuer and the AUD placeholder; nothing injected, secret or for development', () => {
+test('vars: the public Access issuer and the real AUD (F2); nothing injected, secret or for development', () => {
   assert.deepEqual(Object.keys(config.vars).sort(), ['ACCESS_AUDIENCE', 'ACCESS_ISSUER'])
   assert.match(config.vars.ACCESS_ISSUER, /^https:\/\/[a-z0-9-]+\.cloudflareaccess\.com$/)
-  assert.equal(config.vars.ACCESS_AUDIENCE, '0'.repeat(64))
+  assert.match(config.vars.ACCESS_AUDIENCE, /^[0-9a-f]{64}$/)
+  assert.notEqual(config.vars.ACCESS_AUDIENCE, '0'.repeat(64))
+  // The same Access team (issuer) as the other Workers.
+  assert.equal(config.vars.ACCESS_ISSUER, wrangler.experimental_readRawConfig({ config: new URL('../lab/wrangler.toml', APP).pathname }).rawConfig.vars.ACCESS_ISSUER)
   const names = Object.keys(config.vars)
   for (const { name } of INJECTED) assert.ok(!names.includes(name), name)
   for (const name of ['ACCESS_OWNER', 'ACCESS_OWNER_ALIASES', 'CSRF_SIGNING_KEY', 'CREDENTIAL_KEY', 'DEV_AUTH_BYPASS', 'E2E_TEST_ROUTES']) assert.ok(!names.includes(name), name)

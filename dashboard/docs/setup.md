@@ -61,15 +61,18 @@ setting without printing its value (a deploy without a var deletes it, so a miss
 | Name | Kind | Rule | Becomes |
 | --- | --- | --- | --- |
 | `DASHBOARD_CANARY_ENABLED` | variable | exactly `true` or `false`; unset, empty or any other value (`False`, `0`, `no`, a stray space) fails the deploy, so a deleted variable never turns stopped canaries back on | `--var CANARY_ENABLED` (§6, §7) |
-| `DASHBOARD_ACCESS_OWNER` | secret | printable-ASCII e-mail | Worker secret `ACCESS_OWNER`; `Lab deploy` reads it too (same owner, `lab/README.md` "Deploy secrets") |
-| `DASHBOARD_ACCESS_OWNER_ALIASES` | secret, may be empty | ≤ 8 unique printable-ASCII e-mails, ≤ 2048 chars | Worker secret `ACCESS_OWNER_ALIASES` (a single space when empty, so an emptied list replaces the old one); `Lab deploy` reads it too |
+| `DASHBOARD_ACCESS_OWNER` | secret | printable-ASCII e-mail | Worker secret `ACCESS_OWNER`; `Lab deploy` and `FlowDay deploy` read it too (same owner, `lab/README.md` "Deploy secrets", `flowday/README.md` "Deploy") |
+| `DASHBOARD_ACCESS_OWNER_ALIASES` | secret, may be empty | ≤ 8 unique printable-ASCII e-mails, ≤ 2048 chars | Worker secret `ACCESS_OWNER_ALIASES` (a single space when empty, so an emptied list replaces the old one); `Lab deploy` and `FlowDay deploy` read it too |
 | `DASHBOARD_CSRF_SIGNING_KEY` | secret | 64 hex (for example `openssl rand -hex 32`, run locally) | Worker secret `CSRF_SIGNING_KEY` |
 | `DASHBOARD_CF_ANALYTICS_TOKEN` | secret | `[A-Za-z0-9_-]{20,200}` | Worker secret `CF_ANALYTICS_TOKEN` (§4) |
 | `CF_API_TOKEN` | secret (existing, Todofy's deploy token) | – | `CLOUDFLARE_API_TOKEN` for `wrangler deploy` only; the secrets step also receives it, only to warn when `DASHBOARD_CF_ANALYTICS_TOKEN` equals it (never written anywhere) |
 
 The secrets go to `$RUNNER_TEMP` (mode 0600) for `wrangler deploy --secrets-file` and are removed at the
 end. `GITHUB_SHA` becomes `--var BUILD_SHA` (shown by `/health`). Changing a variable or secret takes
-effect with the next deploy: run the workflow on `main` with `app: dashboard` (or `all`).
+effect with the next deploy: run the workflow on `main` with `app: dashboard` (or `all`). The two owner
+secrets also feed Lab and FlowDay, and each Worker takes a change only with its own deploy: after changing
+`DASHBOARD_ACCESS_OWNER` or `DASHBOARD_ACCESS_OWNER_ALIASES` (for example removing an alias), run `app: all`,
+or `dashboard`, `lab` and `flowday`; until then the others keep accepting the old addresses.
 
 ## 4. The analytics token (`CF_ANALYTICS_TOKEN`)
 
@@ -80,7 +83,7 @@ two read-only purposes (both URLs are constants, not configuration):
   minute on an owner refresh;
 - the daily configuration drift check (`worker/src/drift.ts`, [`design-v2.md`](design-v2.md) §10):
   `GET` on the account's Worker scripts and Custom Domains, the zone's Worker routes, and each Worker's
-  schedules, settings and subdomain flags, at most 12 calls per tick on about two ticks a day. Only
+  schedules, settings and subdomain flags, at most 12 calls per tick on about three ticks a day. Only
   binding names and types are kept from the settings; values are dropped while parsing.
 
 It is never logged, stored, echoed to the page or sent anywhere else, and unit tests check that it

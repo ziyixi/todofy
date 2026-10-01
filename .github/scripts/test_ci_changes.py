@@ -41,6 +41,7 @@ def expect(
     infra=False,
     flowday_check=False,
     proto=False,
+    flowday_deploy=False,
 ):
     return {
         "todofy_check": todofy_check,
@@ -59,6 +60,7 @@ def expect(
         "website_deploy": website_deploy,
         "website_relay_deploy": website_relay_deploy,
         "lab_deploy": lab_deploy,
+        "flowday_deploy": flowday_deploy,
     }
 
 
@@ -68,12 +70,12 @@ def expect(
 ALL_CHECKED = {"dashboard_check": True, "website_check": True, "lab_check": True, "flowday_check": True}
 DASH = {"dashboard_check": True, "dashboard_deploy": True}
 LAB = {"lab_check": True, "lab_deploy": True}
+FLOWDAY = {"flowday_check": True, "flowday_deploy": True}
 ALL = {**DASH, **LAB}
-# Every app that compiles in packages/edge-auth besides Todofy and Mail Hero: the dashboard and Lab (checked and
-# deployed) and FlowDay (checked only).
-EDGE_AUTH = {**ALL, "flowday_check": True}
-# FlowDay is checked only (ci_changes.CHECK_ONLY): it has no deploy output.
-EVERY = {**ALL, "website_check": True, "website_deploy": True, "flowday_check": True}
+# Every app that compiles in packages/edge-auth besides Todofy and Mail Hero: the dashboard, Lab and FlowDay (each
+# checked and deployed).
+EDGE_AUTH = {**ALL, **FLOWDAY}
+EVERY = {**ALL, "website_check": True, "website_deploy": True, **FLOWDAY}
 
 
 def push(paths, ref=MAIN, last_success=BASE, ancestor=True, merge_base=BASE):
@@ -107,22 +109,29 @@ class Classify(unittest.TestCase):
             with self.subTest(path=path):
                 self.assertEqual(push([path]), expect(F, F, T, F, F, **LAB))
 
-    def test_flowday_is_checked_alone_and_never_deployed(self):
-        """FlowDay uses no contract and has no deploy job yet (until F2): its changes run only its checks."""
+    def test_flowday_checks_and_deploys_only_itself(self):
+        """FlowDay uses no contract (NO_CONTRACTS): its changes run only its checks and, on main, its deploy (F2)."""
         for path in (
             "flowday/worker/src/sync.ts",
             "flowday/web/lib/client/http.ts",
             "flowday/migrations/0001_init.sql",
             "flowday/wrangler.toml",
+            "flowday/deploy/deploy-vars.mjs",
             "flowday/web/package-lock.json",
             "flowday/docs/design.md",
             "flowday/README.md",
         ):
             with self.subTest(path=path):
-                self.assertEqual(push([path]), expect(F, F, F, F, F, flowday_check=T))
-                self.assertEqual(push([path], ref=BRANCH), expect(F, F, F, F, F, flowday_check=T))
-        self.assertNotIn("flowday_deploy", ci_changes.KEYS)
-        self.assertEqual(ci_changes.CHECK_ONLY, {"flowday"})
+                self.assertEqual(push([path]), expect(F, F, F, F, F, **FLOWDAY))
+                self.assertEqual(push([path], ref=BRANCH), expect(F, F, F, F, F, **FLOWDAY))
+
+    def test_every_app_has_a_deploy_output(self):
+        """No app is check-only any more: each app's checks and deploy outputs both exist (CHECK_ONLY is empty)."""
+        self.assertEqual(ci_changes.CHECK_ONLY, set())
+        for app in ci_changes.APPS:
+            with self.subTest(app=app):
+                self.assertIn(f"{ci_changes.PREFIX[app]}_check", ci_changes.KEYS)
+                self.assertIn(f"{ci_changes.PREFIX[app]}_deploy", ci_changes.KEYS)
 
     def test_task_intent_code_deploys_lab_and_todofy(self):
         """TASK_INTENT_LIMITS ship in Lab and in Todofy's gateway; the schema only in Lab (its types are generated)."""
@@ -456,7 +465,7 @@ class Dispatch(unittest.TestCase):
         self.assertEqual(self.dispatch("mail-hero"), expect(F, T, T, F, T, packages=T, proto=T))
         self.assertEqual(self.dispatch("dashboard"), expect(F, F, T, F, F, packages=T, proto=T, **DASH))
         self.assertEqual(self.dispatch("lab"), expect(F, F, T, F, F, packages=T, proto=T, **LAB))
-        self.assertEqual(self.dispatch("flowday"), expect(F, F, T, F, F, packages=T, proto=T, flowday_check=T))
+        self.assertEqual(self.dispatch("flowday"), expect(F, F, T, F, F, packages=T, proto=T, **FLOWDAY))
         self.assertEqual(
             self.dispatch("website"),
             expect(
@@ -543,7 +552,7 @@ class RealGit(unittest.TestCase):
         expected = {**dict.fromkeys(ci_changes.KEYS, "true"), "packages": "false", "infra": "false", "proto": "false"}
         expected.update(dashboard_check="false", dashboard_deploy="false")
         expected.update(website_check="false", website_deploy="false", website_relay_deploy="false")
-        expected.update(lab_check="false", lab_deploy="false", flowday_check="false")
+        expected.update(lab_check="false", lab_deploy="false", flowday_check="false", flowday_deploy="false")
         self.assertEqual(outputs, expected)
 
     def test_a_failed_package_run_on_main_deploys_both_apps_next_time(self):
@@ -732,7 +741,16 @@ class DeployConditions(unittest.TestCase):
 
     # Check jobs a deploy may also find skipped, but only when this push to main reuses a green branch run of
     # the same commit (ci_changes.py find_reusable); "changes" and "gate" must always succeed.
-    CHECK_JOBS = {"todofy-static", "todofy-runtime", "todofy-checks", "mail-hero-checks", "dashboard-checks", "website-checks", "lab-checks"}
+    CHECK_JOBS = {
+        "todofy-static",
+        "todofy-runtime",
+        "todofy-checks",
+        "mail-hero-checks",
+        "dashboard-checks",
+        "website-checks",
+        "lab-checks",
+        "flowday-checks",
+    }
 
     def jobs(self):
         return workflow_jobs()
@@ -757,6 +775,7 @@ class DeployConditions(unittest.TestCase):
                 "website-deploy",
                 "website-relay-deploy",
                 "lab-deploy",
+                "flowday-deploy",
             },
         )
         for name, block in after_gate.items():
@@ -810,6 +829,7 @@ class DeployConditions(unittest.TestCase):
                 "dashboard-deploy": "dashboard-production",
                 "website-relay-deploy": "website-relay-production",
                 "lab-deploy": "lab-production",
+                "flowday-deploy": "flowday-production",
             },
         )
 
@@ -822,6 +842,7 @@ class DeployConditions(unittest.TestCase):
             ("website-deploy", "website-checks", "website_deploy"),
             ("website-relay-deploy", "website-checks", "website_relay_deploy"),
             ("lab-deploy", "lab-checks", "lab_deploy"),
+            ("flowday-deploy", "flowday-checks", "flowday_deploy"),
         ):
             condition = self.condition(blocks[job])
             with self.subTest(job=job):
@@ -1430,6 +1451,130 @@ class AccessProbe(unittest.TestCase):
 
 
 
+class FlowDayProductionCheck(unittest.TestCase):
+    """FlowDay deploy's hostname-free check, run as the workflow runs it against a stubbed npx (wrangler).
+
+    It passes only when the live deployment serves one version at 100% whose BUILD_SHA is this commit and no D1
+    migration is pending, and it never prints wrangler's JSON (it names the token's account email)."""
+
+    STEP = "- name: Check that production runs this commit\n"
+    VERSION = "0b9c1d2e-3f40-4a5b-8c6d-7e8f90a1b2c3"
+    EMAIL = "deployer@example.org"
+
+    def script(self):
+        block = workflow_jobs()["flowday-deploy"]
+        body = block.split(self.STEP, 1)[1].split("        run: |\n", 1)[1]
+        lines = []
+        for line in body.splitlines():
+            if line.strip() and not line.startswith("          "):
+                break
+            lines.append(line[10:])
+        return "\n".join(lines) + "\n"
+
+    def deployment(self, *versions):
+        return {
+            "id": "synthetic",
+            "author_email": self.EMAIL,
+            "versions": [{"version_id": v, "percentage": share} for v, share in versions] or [],
+        }
+
+    def version(self, build):
+        bindings = [{"name": "DB", "type": "d1", "id": "synthetic"}, {"name": "ACCESS_OWNER", "type": "secret_text"}]
+        if build is not None:
+            bindings.append({"name": "BUILD_SHA", "type": "plain_text", "text": build})
+        return {"id": self.VERSION, "metadata": {"author_email": self.EMAIL}, "resources": {"bindings": bindings}}
+
+    def check(self, deployment, version, migrations="\u2705 No migrations to apply!", token="synthetic-token", fail=""):
+        """Runs the step; the stub answers `deployments status`, `versions view` and `d1 migrations list`, or exits 1
+        for the command named in `fail`. Returns (exit code, output, the commands npx was asked to run)."""
+        if shutil.which("jq") is None and os.environ.get("GITHUB_ACTIONS") != "true":
+            self.skipTest("needs jq (the runner has it)")
+        with tempfile.TemporaryDirectory() as root:
+            bin_dir = Path(root, "bin")
+            bin_dir.mkdir()
+            Path(root, "deployment.json").write_text(json.dumps(deployment))
+            Path(root, "version.json").write_text(json.dumps(version))
+            Path(root, "migrations.txt").write_text(migrations + "\n")
+            npx = bin_dir / "npx"
+            npx.write_text(
+                "#!/usr/bin/env bash\n"
+                f'echo "$*" >> "{root}/calls"\n'
+                'args=" $* "\n'
+                + (f'case "$args" in *" {fail} "*) exit 1 ;; esac\n' if fail else "")
+                + 'case "$args" in\n'
+                f'  *" deployments status "*) cat "{root}/deployment.json" ;;\n'
+                f'  *" versions view {self.VERSION} "*) cat "{root}/version.json" ;;\n'
+                f'  *" d1 migrations list DB --remote "*) cat "{root}/migrations.txt" ;;\n'
+                '  *) echo "unexpected npx call" >&2; exit 3 ;;\n'
+                "esac\n"
+            )
+            npx.chmod(0o755)
+            env = {
+                **os.environ,
+                "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}",
+                "CLOUDFLARE_API_TOKEN": token,
+                "GITHUB_SHA": SHA,
+            }
+            result = subprocess.run(
+                ["bash", "-e", "-c", self.script()], cwd=root, env=env, capture_output=True, text=True, check=False
+            )
+            calls = Path(root, "calls").read_text().splitlines() if Path(root, "calls").exists() else []
+            output = result.stdout + result.stderr
+            self.assertNotIn(self.EMAIL, output)
+            return result.returncode, output, calls
+
+    def test_this_commit_at_100_percent_with_no_pending_migration_passes(self):
+        code, output, calls = self.check(self.deployment((self.VERSION, 100)), self.version(SHA))
+        self.assertEqual(code, 0, output)
+        self.assertIn(f"serves version {self.VERSION} at 100%, built from {SHA}", output)
+        self.assertIn("No D1 migration is pending.", output)
+        self.assertEqual(
+            calls,
+            [
+                "--no-install wrangler deployments status --json --config ../wrangler.toml",
+                f"--no-install wrangler versions view {self.VERSION} --json --config ../wrangler.toml",
+                "--no-install wrangler d1 migrations list DB --remote --config ../wrangler.toml",
+            ],
+        )
+
+    def test_another_build_or_none_fails(self):
+        for build in ("c" * 40, "", None):
+            with self.subTest(build=build):
+                code, output, _ = self.check(self.deployment((self.VERSION, 100)), self.version(build))
+                self.assertEqual(code, 1, output)
+                self.assertIn(f"was not built from {SHA}", output)
+                if build:
+                    self.assertNotIn(build, output)
+
+    def test_a_split_or_empty_deployment_fails(self):
+        for versions in (((self.VERSION, 50), ("1" * 8 + "-0000-4000-8000-" + "1" * 12, 50)), ((self.VERSION, 90),), ()):
+            with self.subTest(versions=versions):
+                code, output, calls = self.check(self.deployment(*versions), self.version(SHA))
+                self.assertEqual(code, 1, output)
+                self.assertIn("does not serve exactly one version at 100%", output)
+                self.assertEqual(len(calls), 1)
+
+    def test_a_pending_migration_fails(self):
+        pending = "Migrations to be applied:\n| Name |\n| 0004_next.sql |"
+        code, output, _ = self.check(self.deployment((self.VERSION, 100)), self.version(SHA), migrations=pending)
+        self.assertEqual(code, 1, output)
+        self.assertIn("D1 migrations are still pending.", output)
+
+    def test_a_failed_read_or_a_missing_token_fails(self):
+        for fail, message in (
+            ("deployments", "Could not read the deployment"),
+            ("view", "Could not read the deployed version"),
+            ("list", "Could not list the D1 migrations"),
+        ):
+            with self.subTest(fail=fail):
+                code, output, _ = self.check(self.deployment((self.VERSION, 100)), self.version(SHA), fail=fail)
+                self.assertEqual(code, 1, output)
+                self.assertIn(message, output)
+        code, output, calls = self.check(self.deployment((self.VERSION, 100)), self.version(SHA), token="")
+        self.assertNotEqual(code, 0, output)
+        self.assertEqual(calls, [])
+
+
 REPOSITORY = "ziyixi/todofy"
 RUN_ID = "900"
 WORKFLOW_ID = 77
@@ -1681,6 +1826,20 @@ class HostnameGuard(unittest.TestCase):
                 self.assertIn(self.GUARD + "".join(f" --config {config}" for config in configs) + "\n", step + "\n")
                 self.assertLess(block.index(self.STEP), block.index(first_change))
                 self.assertTrue(any(self.has_routes(config) for config in configs))
+
+    def test_flowday_deploy_guards_its_config_before_its_first_hostname(self):
+        """F2 lists no route, so the guard sends no request and passes; the step is in place, with the job's token,
+        before the D1 migrations, so the commit that adds the staging host (F3) is already guarded."""
+        block = workflow_jobs()["flowday-deploy"]
+        self.assertEqual(block.count(self.STEP), 1)
+        step = block.split(self.STEP, 1)[1].split("\n      - ", 1)[0]
+        self.assertIn("        working-directory: .\n", step)
+        self.assertIn("CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}", step)
+        self.assertIn("CF_GUARD_ALLOW_REMOVE: ''", step)
+        self.assertIn("CF_GUARD_ALLOW_CONFLICT: ''", step)
+        self.assertIn(self.GUARD + " --config flowday/wrangler.toml\n", step + "\n")
+        self.assertLess(block.index(self.STEP), block.index("wrangler d1 migrations apply"))
+        self.assertFalse(self.has_routes("flowday/wrangler.toml"))
 
     def test_every_production_config_with_routes_is_guarded(self):
         text = WORKFLOW.read_text()

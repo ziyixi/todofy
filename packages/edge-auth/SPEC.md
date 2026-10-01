@@ -261,7 +261,7 @@ ignores a pair without `=`.
 Each app's adapter is the only place these values live: Mail Hero
 `mail-hero/cloudflare/src/native/security.ts`, Todofy `todofy/gateway/src/access.ts` and `csrf.ts`
 (`http.ts` for headers), the dashboard `dashboard/worker/src/http.ts`, Lab `lab/worker/src/http.ts`, FlowDay
-`flowday/worker/src/http.ts` (not deployed yet).
+`flowday/worker/src/http.ts`.
 
 | Parameter | Mail Hero | Todofy gateway | Dashboard `home` | Lab `lab` | FlowDay `flowday` |
 | --- | --- | --- | --- | --- | --- |
@@ -335,8 +335,7 @@ Its dev dependencies are pinned to the Todofy gateway's versions (TypeScript 5.9
 ## 7. CI
 
 `.github/scripts/ci_changes.py` maps each package to the apps that compile it in
-(`PACKAGE_USERS = {"edge-auth": ("todofy", "mail-hero", "dashboard", "lab", "flowday")}`; FlowDay is
-checked but not deployed yet). Any change inside
+(`PACKAGE_USERS = {"edge-auth": ("todofy", "mail-hero", "dashboard", "lab", "flowday")}`). Any change inside
 `packages/edge-auth/` (this file included) runs the `Shared packages` job (`npm ci`, `npm run
 typecheck`, `npm test` in every `packages/*/`) and **checks and deploys** every user; an unmapped
 package counts as used by every app. `test_ci_changes.py` fails until `PACKAGE_USERS` matches every
