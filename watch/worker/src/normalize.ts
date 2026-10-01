@@ -6,7 +6,8 @@
  * meaning anything with a fixed token:
  *
  * - relative times: `3 minutes ago`, `an hour ago`, `just now`, `in 5 min`, `5m ago`, `3小时前`, `5 分钟前`, `刚刚`,
- *   `半小时前`, `昨天 12:30`, `前天`;
+ *   `半小时前`, `三年前`, `昨天 12:30`, `前天`. Not a date followed by 前 ("before": `10月15日前`, `2026年前`) and not a
+ *   future duration beyond minutes (`Ships in 3 days`): those are content;
  * - times of day with seconds (`12:34:56`), and the time part of an ISO date-time (`2026-10-01T12:34:56Z` keeps its
  *   date): the date stays, a time of day without seconds (`09:00`, an opening hour) stays;
  * - epoch milliseconds (13 digits from 2001 to 2286);
@@ -50,14 +51,31 @@ export function cleanLine(line: string): string {
 }
 
 const EN_UNITS = '(?:s|sec|secs|seconds?|m|min|mins|minutes?|h|hr|hrs|hours?|d|days?|w|wk|wks|weeks?|mo|mos|months?|y|yr|yrs|years?)';
-const ZH_UNITS = '(?:秒钟?|分钟|小时|个?钟头|天|日|周|星期|个月|月|年)';
+/** "in N ..." is a countdown only in seconds and minutes ("refreshes in 5 min"); "in 3 days" is a promise (content). */
+const EN_SOON_UNITS = '(?:s|sec|secs|seconds?|min|mins|minutes?)';
+/**
+ * Chinese units of a relative time. `日` and a bare `月` are left out: `10月15日前` and `3月前` read as dates ("before
+ * 15 October"), and a year only with at most two digits (`3年前`; `2026年前` is "before 2026").
+ */
+const ZH_UNITS = '(?:秒钟?|分钟|小时|个?钟头|天|周|星期|个月)';
+/** Chinese numerals (a run of at most four: `十二`, `二十五`, `几`, `半`). */
+const ZH_DIGITS = '一二两三四五六七八九十几半〇零';
 
 /** The default masks, in order (earlier ones protect their text from later ones). */
 const MASKS: readonly { readonly pattern: RegExp; readonly token: string }[] = [
   // Relative times, English: "3 minutes ago", "an hour ago", "in 5 min", "5m ago", "just now", "a few seconds ago".
-  { pattern: new RegExp(`\\b(?:(?:\\d+|an?|a few|several)\\s*${EN_UNITS}\\.?\\s+ago|in\\s+(?:\\d+|an?)\\s*${EN_UNITS}\\b|just now|moments? ago)\\b`, 'gi'), token: MASK.relativeTime },
-  // Relative times, Chinese: "3小时前", "5 分钟前", "半小时前", "刚刚", "昨天", "前天", "今天" with an optional time.
-  { pattern: new RegExp(`(?:\\d+|[一二两三四五六七八九十几半]+)\\s*${ZH_UNITS}(?:以|之)?前|刚刚|刚才|(?:今天|昨天|前天)(?:\\s*\\d{1,2}:\\d{2}(?::\\d{2})?)?`, 'g'), token: MASK.relativeTime },
+  // Every repetition is bounded and starts at a word boundary, so a hostile run of digits costs linear time.
+  { pattern: new RegExp(`\\b(?:(?:\\d{1,4}|an?|a few|several)\\s{0,3}${EN_UNITS}\\.?\\s{1,3}ago|in\\s{1,3}(?:\\d{1,4}|an?)\\s{0,3}${EN_SOON_UNITS}\\b|just now|moments? ago)\\b`, 'gi'), token: MASK.relativeTime },
+  // Relative times, Chinese: "3小时前", "5 分钟前", "半小时前", "三年前", "刚刚", "昨天", "前天", "今天" with an optional
+  // time. The numeral run is anchored (no digit or numeral before it, no 月 or 年 of a date) and bounded (at most four),
+  // so a page of 2,000 numerals in a row is linear, and a date stays: `10月15日前`, `2026年前`.
+  {
+    pattern: new RegExp(
+      `(?<![\\d${ZH_DIGITS}月年])(?:(?:\\d{1,4}|[${ZH_DIGITS}]{1,4})\\s{0,3}${ZH_UNITS}|(?:\\d{1,2}|[${ZH_DIGITS}]{1,3})\\s{0,3}年)(?:以|之)?前|刚刚|刚才|(?:今天|昨天|前天)(?:\\s{0,3}\\d{1,2}:\\d{2}(?::\\d{2})?)?`,
+      'g',
+    ),
+    token: MASK.relativeTime,
+  },
   // The time part of an ISO date-time: the date stays.
   { pattern: /(?<=\d{4}-\d{2}-\d{2})[T ]\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:?\d{2})?/g, token: ` ${MASK.time}` },
   // A time of day with seconds.

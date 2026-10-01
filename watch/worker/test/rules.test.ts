@@ -133,6 +133,8 @@ describe('the URL policy', () => {
     'https://router.home.arpa/',
     'https://ziyixi.science/',
     'https://home.ziyixi.science/',
+    'https://cloudflare-579.workers.dev/',
+    'https://ziyixi-notion-publish.cloudflare-579.workers.dev/health',
     'https://user@example.com/',
     'https://example.com:8443/',
     'https://intranet/',
@@ -149,6 +151,10 @@ describe('the URL policy', () => {
     expect(checkRedirect('../c', from, { allowHttp: false })?.href).toBe('https://example.com/c');
     expect(checkRedirect('http://example.com/', from, { allowHttp: false })).toBeNull();
     expect(checkRedirect('https://10.0.0.1/', from, { allowHttp: false })).toBeNull();
+    // A hostile page's redirect never reaches the owner's own Workers either.
+    expect(checkRedirect('https://ziyixi-notion-publish.cloudflare-579.workers.dev/health', from, { allowHttp: false })).toBeNull();
+    // Another account's workers.dev site is an ordinary public site.
+    expect(checkRedirect('https://someone.other-account.workers.dev/', from, { allowHttp: false })?.href).toBe('https://someone.other-account.workers.dev/');
   });
 });
 

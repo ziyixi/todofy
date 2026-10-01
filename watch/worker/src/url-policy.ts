@@ -6,14 +6,18 @@
  * - no user name or password, no explicit port (only the scheme's default), at most URI_MAX characters;
  * - the host is a DNS name with at least one dot: never an IP literal (the URL parser already turns `0x7f.1`,
  *   `2130706433` and friends into dotted IPv4, and IPv6 is bracketed), never `localhost` or a name under a
- *   special-use or local suffix, and never this owner's own zone (`ziyixi.science` and every `*.ziyixi.science`:
- *   the owner's apps sit behind Access and a watch must not poke at them);
+ *   special-use or local suffix, and never a name of this owner's own (OWN_SUFFIXES: the zone `ziyixi.science` and
+ *   the account's `workers.dev` subdomain, each with every name under it: the owner's apps and Workers must not be
+ *   poked at by a watch, or by a hostile page's redirect);
  * - the fragment is dropped (it never reaches a server).
  */
 import { URI_MAX } from './limits.ts';
 
-/** The owner's zone: no watch may fetch it or any host under it. */
-export const OWN_ZONE = 'ziyixi.science';
+/**
+ * The owner's own names: no watch may fetch one of them or any host under it. The zone, and the account's workers.dev
+ * subdomain (already public in .github/workflows/ci.yml); one list, so a new one is added here only.
+ */
+export const OWN_SUFFIXES: readonly string[] = ['ziyixi.science', 'cloudflare-579.workers.dev'];
 
 /** Suffixes that never name a public site (RFC 6761, RFC 6762, RFC 8375 and common private ones). */
 const LOCAL_SUFFIXES = ['localhost', 'local', 'internal', 'intranet', 'lan', 'home', 'corp', 'home.arpa', 'invalid', 'onion'];
@@ -31,9 +35,9 @@ export function isIpLiteral(hostname: string): boolean {
   return /^\d{1,3}(\.\d{1,3}){3}$/.test(hostname) || /^[0-9.]+$/.test(hostname) || /^0x/i.test(hostname);
 }
 
-/** Whether a host is the owner's zone or under it. */
+/** Whether a host is one of the owner's own names or under one. */
 export function isOwnZone(hostname: string): boolean {
-  return hostname === OWN_ZONE || hostname.endsWith(`.${OWN_ZONE}`);
+  return OWN_SUFFIXES.some((suffix) => hostname === suffix || hostname.endsWith(`.${suffix}`));
 }
 
 /** Whether `text` holds an ASCII control character. */

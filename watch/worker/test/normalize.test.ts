@@ -22,6 +22,10 @@ describe('the default masks', () => {
     ['5 分钟前 更新', `${MASK.relativeTime} 更新`],
     ['半小时前', MASK.relativeTime],
     ['三天前', MASK.relativeTime],
+    ['五 分钟前', MASK.relativeTime],
+    ['十二天前', MASK.relativeTime],
+    ['3年前', MASK.relativeTime],
+    ['三个月以前', MASK.relativeTime],
     ['刚刚 有人购买', `${MASK.relativeTime} 有人购买`],
     ['昨天 12:30 发布', `${MASK.relativeTime} 发布`],
   ])('masks the relative time in %j', (line, expected) => {
@@ -50,6 +54,45 @@ describe('the default masks', () => {
 
   it('keeps absolute dates, prices, versions and times of day without seconds', () => {
     for (const line of ['Price ¥1,299.00', 'Version 1.2.3', 'Open 09:00-18:00', 'Due 2026-10-15', '库存 42 件', 'abcdefabcdefabcd']) expect(masked(line)).toBe(cleanLine(line));
+  });
+
+  // A date followed by 前 ("before") and a promised duration are what an owner watches: a changed deadline must diff.
+  it.each([
+    ['报名截止：10月15日前', '报名截止：10月20日前'],
+    ['请在2026年前完成', '请在2027年前完成'],
+    ['优惠券 3月1日前有效', '优惠券 3月8日前有效'],
+    ['Ships in 3 days', 'Ships in 10 days'],
+    ['二〇二六年前', '二〇二七年前'],
+  ])('keeps the deadline in %j and %j apart', (a, b) => {
+    expect(masked(a)).toBe(cleanLine(a));
+    expect(masked(a)).not.toBe(masked(b));
+  });
+});
+
+describe('the masks on hostile text', () => {
+  // Page text is untrusted: a mask whose repetition is unbounded or unanchored rescans a run from every start, and a
+  // 2 MiB page of 2,000-character runs then costs seconds of the Durable Object's 30 s. Each class below is a run of
+  // characters one of the masks consumes; 60 lines of 2,000 characters take a few milliseconds when every mask is
+  // linear (measured 1-7 ms) and about 900 ms for the old quadratic Chinese pattern alone.
+  it.each([
+    ['Chinese numerals', '一'],
+    ['Chinese numerals and units', '一天'],
+    ['digits', '7'],
+    ['digit groups', '1,'],
+    ['times', '1:'],
+    ['dates', '1-'],
+    ['hex', 'a1'],
+    ['base64', 'aB3'],
+    ['words and spaces', 'a '],
+    ['English relative times', '1 ago '],
+    ['English countdowns', 'in '],
+    ['copyright signs', '© '],
+    ['query values', '?v='],
+  ])('stay linear on a run of %s', (_name, unit) => {
+    const line = unit.repeat(Math.ceil(2000 / unit.length)).slice(0, 2000);
+    const start = performance.now();
+    for (let i = 0; i < 60; i++) maskLine(line, true, true);
+    expect(performance.now() - start).toBeLessThan(150);
   });
 
   it('mask_numbers masks every remaining number', () => {
