@@ -50,9 +50,11 @@ wire JSON codec, which checks the rules on every read and write. Here: the JSON 
 rules relative to a clock or a whole message), the frozen pre-IDL schema (`legacy/`), fixtures, the contract
 text (`README.md`) and the per-app plan (`IMPLEMENTATION.md`). Checks:
 
-- `Proto checks`: every valid fixture round-trips byte for byte through the TypeScript and Python codecs, every
-  invalid one is refused by a strict read, both languages agree (`proto/test/ops.test.ts`,
-  `test/python/test_ops.py`, `test/cross-language.test.ts`); the generated schema is fresh.
+- `Proto checks` (also on a change here alone: `PROTO_READS`): every valid fixture round-trips byte for byte
+  through the TypeScript and Python codecs, every invalid one is refused by a strict read, both languages agree
+  (`proto/test/ops.test.ts`, `test/python/test_ops.py`, `test/cross-language.test.ts`); the generated schema is
+  fresh; `profile_breaking.py` refuses a changed rule of an output, a tightened rule of an input and a new value of
+  a closed enum (every enum ops-v1 writes).
 - `Contracts`: the generated schema is fresh; `todofy` `tests/unit/test_ops_contract.py` gives every fixture the
   verdict of the reference validator (Python `jsonschema` Draft 2020-12) and the codec's, and the generated
   and legacy schemas the same verdict on about 22,000 mutations of the valid fixtures. Golden tests pin the

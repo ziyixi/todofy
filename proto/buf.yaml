@@ -1,6 +1,7 @@
-# The buf module of every interface we define (README.md): the cross-app contracts (todofy/taskintent/v1) and the
-# apps' UI APIs (lab/ui/v1, with the shared error reasons of common/errors/v1); prototest/ holds the runtimes' test
-# fixtures. Run from this directory with the pinned binaries (package.json, tools/api-linter/go.mod): npm run lint
+# The buf module of every interface we define (README.md): the cross-app contracts (todofy/taskintent/v1, and
+# ops/v1, the operations binding every app implements), the apps' UI APIs (lab/ui/v1, links/ui/v1, with the shared
+# error reasons of common/errors/v1), and common/wire/v1, the wire profile's own options; prototest/ holds the
+# runtimes' test fixtures. Run from this directory with the pinned binaries (package.json, tools/api-linter/go.mod): npm run lint
 # (buf format and buf lint), npm run api-lint (Google's api-linter), npm run breaking (buf breaking and the wire
 # profile's rules), npm run selftest (those rules still bite).
 version: v2

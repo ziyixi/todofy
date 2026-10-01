@@ -67,14 +67,23 @@ validate with (`contracts/ops-v1/legacy/`).
    field that gains `OUTPUT_ONLY` or `IDENTIFIER` (the transcoder would drop what clients send), and a
    `(google.api.field_info).format` added to or changed on an existing field. For the wire options of
    `common/wire/v1`: an existing map that gains or loses `keep_order` (every producer's bytes change) and an
-   existing method that gains or loses `positional` (callers and receivers would disagree on the arguments);
-   value rules are reviewed with the contract's fixtures, like a JSON Schema's. Like buf, it skips the
+   existing method that gains or loses `positional` (callers and receivers would disagree on the arguments).
+   The value rules are wire too, since both codecs check them on every read, a consumer's lenient read included:
+   a rule of an existing field of an output may not change either way (older and newer readers check older and
+   newer writers; only an `open` list may change, and a list may become `open`), a rule of a field only inputs
+   reach may loosen but never tighten (the apps deploy before the dashboard that calls them), a union's
+   discriminator may not change, and a closed enum may not gain a value or change its `closed` (rule 5). Formats
+   compare by pattern and length, so renaming a format is compatible. Like buf, it skips the
    directories `buf.yaml` lists under `breaking.ignore` (the runtimes' fixtures). `scripts/rules-selftest.sh`
-   proves the rules bite (33 cases, on `task_intent.proto`, `lab/ui/v1`, `ops/v1` and `prototest`).
-5. **Adding an enum value is compatible by design**, so neither buf nor the profile check flags it. What
-   keeps consumers working is the reading rule: outputs are read leniently (an unknown enum name reads as
+   proves the rules bite (45 cases, on `task_intent.proto`, `lab/ui/v1`, `ops/v1` and `prototest`), and
+   `test/python/test_profile_breaking.py` checks the directions on synthetic images.
+5. **Adding a value to an open enum is compatible by design**, so neither buf nor the profile check flags it.
+   What keeps consumers working is the reading rule: outputs are read leniently (an unknown enum name reads as
    `*_UNSPECIFIED`, an unknown field is skipped, both listed in `unrecognized`), and a consumer branches on
-   known values with a default, never inferring success from an error code. Inputs are read strictly.
+   known values with a default, never inferring success from an error code. Inputs are read strictly. A contract
+   whose consumers branch on every value of an enum, with no default to fall back to, marks it
+   `option (common.wire.v1.closed) = true` (every enum ops-v1 writes): every read refuses an unknown name, a
+   lenient one too, and a new value is a new major version (`PROFILE_ENUM_CLOSED`).
 
 ## Layout
 
@@ -82,21 +91,21 @@ validate with (`contracts/ops-v1/legacy/`).
 | --- | --- |
 | `buf.yaml`, `buf.lock` | The module (`path: .`, tooling directories excluded), lint and breaking rules, the `buf.build/googleapis/googleapis` dependency pinned by commit and digest |
 | `buf.gen.yaml` | protobuf-es v2 (`target=ts`, `import_extension=ts`, `erasable_syntax=true`) into `ts/` |
-| `<package path>/*.proto` | One directory per proto package: `todofy/taskintent/v1/task_intent.proto` is `todofy.taskintent.v1`; `lab/ui/v1/*.proto` is `lab.ui.v1`, Lab's owner UI API; `links/ui/v1/*.proto` is `links.ui.v1`, the links app's owner API; `common/errors/v1/errors.proto` is `common.errors.v1`, the error reasons every HTTP API shares; `common/wire/v1/wire.proto` is `common.wire.v1`, the wire profile's own options ([Value rules](#value-rules), `keep_order`, `positional`); `ops/v1/ops.proto` is `ops.v1`, the IDL of `contracts/ops-v1` (every app's `Ops` entrypoint), a contract several apps implement, so named by the contract, not an app |
+| `<package path>/*.proto` | One directory per proto package: `todofy/taskintent/v1/task_intent.proto` is `todofy.taskintent.v1`; `lab/ui/v1/*.proto` is `lab.ui.v1`, Lab's owner UI API; `links/ui/v1/*.proto` is `links.ui.v1`, the links app's owner API; `common/errors/v1/errors.proto` is `common.errors.v1`, the error reasons every HTTP API shares; `common/wire/v1/wire.proto` is `common.wire.v1`, the wire profile's own options ([Value rules](#value-rules), `non_null`, `closed`, `keep_order`, `positional`); `ops/v1/ops.proto` is `ops.v1`, the IDL of `contracts/ops-v1` (every app's `Ops` entrypoint), a contract several apps implement, so named by the contract, not an app ([Adding a contract](#common-tasks), step 1) |
 | `package.json`, `package-lock.json` | The toolchain pins (`dependencies`: buf, protoc-gen-es, the runtime) and this folder's test tools (`devDependencies`) |
 | `ts/` | The TypeScript package `@ziyixi/proto`. Committed: `package.json` (its exports), `wire-json.ts`, `wire-rules.ts` and `field-mask.ts` (the codec and its value rules), `http-path.ts`, `http-rule.ts`, `http-transcoder.ts`, `http-client.ts` and `rpc-status.ts` (the HTTP runtime, [HTTP APIs](#http-apis)), `page-token.ts` and `filter.ts` (AIP-158 page tokens and the AIP-160 subset for list methods), `protobuf.ts` / `protobuf-wkt.ts` (the runtime re-exports). Generated: every directory (`ts/todofy/...`, `ts/lab/...`, `ts/ops/...`, `ts/common/...`, `ts/google/...`): protobuf-es's `*_pb.ts`, and for the binding contracts the wire JSON types `*_wire.ts` |
 | `python/` | The Python package `ziyixi-proto`. Committed: `pyproject.toml` (static metadata, uv cache keys), `build_backend.py`, `src/ziyixi_proto/__init__.py` and `wire_json.py` (the codec and its value rules). Generated: every directory under `src/ziyixi_proto/`, for the packages `tools/gen_py.py` lists in `PYTHON_PACKAGES` only; the wheel leaves the test-only ones out (`TEST_ONLY_PACKAGES`) |
 | `tools/ensure.mjs` | Installs the pinned toolchain when `node_modules/` does not match the lockfile, and generates both languages when its stamp (`.generated.json`, ignored) does not match |
-| `tools/gen_py.py` | The stdlib-only Python generator (frozen dataclasses, `IntEnum`s, field tables), for `PYTHON_PACKAGES` only: `todofy.taskintent.v1` (todofy-core imports it) and `prototest.v1` (this folder's Python tests). A package only TypeScript apps use (an app's UI API) is not generated, so it may use what the Python profile lacks |
+| `tools/gen_py.py` | The stdlib-only Python generator (frozen dataclasses, `IntEnum`s, field tables), for `PYTHON_PACKAGES` only: `todofy.taskintent.v1` and `ops.v1` (todofy-core imports both) and `prototest.v1` (this folder's Python tests). A package only TypeScript apps use (an app's UI API) is not generated, so it may use what the Python profile lacks |
 | `tools/gen_wire_ts.py` | The TypeScript wire JSON types (`ts/<package>/<file>_wire.ts`, types only) of the packages in `WIRE_PACKAGES` (`ops.v1`): each message's JSON as a producer writes it, a union narrowed by its discriminator, each service as a binding's methods, and the `WireTypes` entries that type `toWire`'s answer |
-| `tools/gen_schema.py` | A contract's JSON Schema from its IDL (`SCHEMAS`: `ops.v1` writes `contracts/ops-v1/ops-v1.schema.json`); `npm run schema` rewrites it, `npm run check:schema` (Proto checks and Contracts) fails when it differs |
+| `tools/gen_schema.py`, `tools/schema.mjs` | A contract's JSON Schema from its IDL (`SCHEMAS`: `ops.v1` writes `contracts/ops-v1/ops-v1.schema.json`, with `ALIASES` keeping the `$defs` names it had before), run by `tools/schema.mjs` (no shell, the tools of `ensure.mjs`); `npm run schema` rewrites it, `npm run check:schema` (Proto checks, Contracts and this folder's `npm test`) fails when it differs |
 | `tools/wire_rules.py` | The value rules of `common/wire/v1` as the generators read them from a buf image, and the check that refuses a rule that cannot apply where it is written (every package) |
 | `tools/profile_breaking.py` | The profile's breaking rules (rule 4) |
 | `scripts/breaking.sh`, `scripts/rules-selftest.sh` | The breaking gate against a base commit; the rules self-test |
 | `scripts/api-lint.sh`, `tools/api-linter/` | Google's api-linter on every package but `prototest/`: a Go tool module (`go.mod` pins api-linter, the googleapis Go code it interprets annotations with and the Go toolchain, `go.sum` every checksum) that the script builds into `.tools/` (ignored), with `googleapis/`, the check that this googleapis equals `buf.lock`'s for every file the module imports (rule 3) |
 | `prototest/v1/prototest.proto` | Test fixtures of the runtimes, never used by an app (not in the Python wheel; a change deploys nothing): a message with every field kind of the profile and a service with every kind of HTTP binding, an AIP-134 update with a field mask among them; `prototest/v1/rules.proto`, a union with every value rule and a binding service with positional and object requests |
 | `testdata/http-cases.json` | The HTTP runtime's cases on `prototest.v1.BookService`: 64 requests and what the transcoder answers, 19 request messages and what the client sends; every implementation (a Python transcoder later) runs them |
-| `testdata/wire-profile-cases.json` | 105 edge cases (timestamps, integer and double spellings, enum look-alikes, maps, field masks, missing fields, null, every value rule and `keep_order`) that both codecs must answer identically |
+| `testdata/wire-profile-cases.json` | 116 edge cases (timestamps, integer and double spellings, enum look-alikes, maps, field masks, missing fields, null, every value rule, `non_null`, closed enums and `keep_order`) that both codecs must answer identically |
 | `testdata/filter-cases.json` | The AIP-160 subset of `ts/filter.ts`: 29 filters and their literals or refusal, 4 search-box texts and their quoted filter |
 | `test/*.test.ts`, `test/python/` | The codec and IDL tests, the same cases in both languages; `test/cross-language.test.ts` pipes bytes through both codecs (`test/python/roundtrip.py` in a child process); `test/ensure.test.ts` runs `tools/ensure.mjs` on a copy of this folder (a deleted toolchain, an abandoned lock, the commands Windows needs) |
 
@@ -108,10 +117,11 @@ file there is hand-written.
 `tools/ensure.mjs` checks two things: that `node_modules/` holds every package `package-lock.json` pins,
 at that version (the generated code imports the protobuf-es runtime from there, so a deleted
 `proto/node_modules` is restored even when the generated files are current), and that its inputs (every
-`.proto` file, `buf.yaml`, `buf.lock`, `buf.gen.yaml`, `package-lock.json`, itself, `gen_py.py` and `wire_rules.py`) and every
+`.proto` file, `buf.yaml`, `buf.lock`, `buf.gen.yaml`, `package-lock.json`, itself, `gen_py.py`, `gen_wire_ts.py` and `wire_rules.py`) and every
 generated file still match the stamp `.generated.json`. When both hold it exits in about 0.1 s without
 touching the network. Otherwise, under a lock, it installs the whole lockfile (`npm ci`: the generator, the
-runtime and this folder's test and editor types), runs `buf generate` and `buf build | gen_py.py` into a
+runtime and this folder's test and editor types), runs `buf generate`, then `buf build` piped into `gen_py.py`
+(the Python modules) and `gen_wire_ts.py` (the binding contracts' wire JSON types next to protobuf-es's output) into a
 temporary directory, moves the result into `ts/` and `python/src/ziyixi_proto/`, and writes the stamp. It
 strips the calling npm's settings from the environment, so `npm ci --prefix lab/worker` cannot redirect the
 nested install.
@@ -223,8 +233,10 @@ typecheck|test|dev` regenerates first (its pre-scripts); Todofy's next `uv run` 
 
 **Adding a contract.**
 
-1. Create `<app>/<service>/v1/<name>.proto` with `package <app>.<service>.v1;` (one directory per service;
-   the directory must match the package). Mirror the JSON contract field for field: field numbers in the
+1. Create `<app>/<service>/v1/<name>.proto` with `package <app>.<service>.v1;` for a contract one app owns
+   (`todofy.taskintent.v1`, `lab.ui.v1`), or `<contract>/v1/<name>.proto` with `package <contract>.v1;` for a
+   contract several apps implement (`ops.v1`: every app's `Ops`), top-level and never under `common/` (which holds
+   what contracts share, not contracts). One directory per package; the directory must match the package. Mirror the JSON contract field for field: field numbers in the
    JSON Schema's property order (so field-number order reproduces today's key order), the v1 field names,
    every enum with its AIP-126 prefix and an `_UNSPECIFIED` zero value, `REQUIRED` where the schema
    requires a field. Only the kinds the profile supports: `string`, `bool`, 32-bit integers, `double`, enums
@@ -233,7 +245,8 @@ typecheck|test|dev` regenerates first (its pre-scripts); Todofy's next `uv run` 
    `bytes`, oneofs, nested messages, other well-known types as fields) stops generation with an error (for
    Python, only in the packages of `PYTHON_PACKAGES`; add the package there when a Python app imports it).
 2. State its value rules next to its fields ([Value rules](#value-rules)): formats, allowed lists, bounds, sizes,
-   and a union's cases. A contract other apps call over a service binding gets wire JSON types: add its package to
+   a union's cases, `non_null` on every REQUIRED enum or message a producer never writes as null, and `closed` on
+   every enum its consumers branch on without a default. A contract other apps call over a service binding gets wire JSON types: add its package to
    `WIRE_PACKAGES` in `tools/gen_wire_ts.py` (and `positional` on a method that takes plain arguments). A contract
    with a published JSON Schema generates it: add it to `SCHEMAS` in `tools/gen_schema.py` and run `npm run schema`.
 3. `npm run lint && npm run api-lint` until clean, then `npm run generate`.
@@ -290,21 +303,29 @@ A contract states its value rules in the IDL, next to its fields, with the optio
 [`common/wire/v1/wire.proto`](common/wire/v1/wire.proto): a file's named string formats (`Code`, `Timestamp`: an
 anchored regular expression in the subset ECMAScript and Python read alike, and a length), and per field a format,
 an `allowed` list (an enum-like string, or a subset of an enum), number bounds, list and map sizes, unique items,
-map key formats and required keys, and, in a union (a message with a `discriminator`), the presence and extra
-bounds of each field per discriminator value. That is the one source of a contract's validation:
+map key formats and required keys, `non_null` (a REQUIRED enum or message that is never null: without it the
+profile writes such a field as null when it has no value), and, in a union (a message with a `discriminator`), the
+presence and extra bounds (`CaseRules`: allowed, minimum, maximum) of each field per discriminator value; per enum,
+`closed` (rule 5). That is the one source of a contract's validation:
 
 - both codecs check every rule on every read and every write (`ts/wire-rules.ts`; the rule part of
   `wire_json.py`, from the tables `tools/gen_py.py` writes): a message that breaks one is refused like a wrong
   type, with a path and the rule's name, never the value, so neither a producer bug nor a bad input crosses the
   wire. A lenient read checks the same rules, with two consumer allowances: a field's cases are skipped when
   the reader does not know the discriminator's value, and an `open` allowed list (codes that may grow within the
-  major version, ops-v1's `reason` and `waiting_code`) accepts any value of the field's format. A consumer that
-  passes on what it read writes with `toWire(..., { lenient: true })` (`to_wire(..., lenient=True)`);
+  major version, ops-v1's `reason` and `waiting_code`) accepts any value of the field's format. A closed enum and
+  `non_null` hold on a lenient read too. A consumer that passes on what it read writes with
+  `toWire(..., { lenient: true })` (`to_wire(..., lenient=True)`); it cannot pass on a `non_null` enum whose newer
+  value it did not know (that value has no wire name in its build), which is why a contract whose consumers pass
+  messages on closes such an enum;
 - producers read bounds from the descriptors instead of copying them (`fieldRules(field).maxItems`,
   `field_rules(cls, name).max_items`);
 - `tools/wire_rules.py` refuses at generation a rule that cannot mean anything where it is written (an unknown
   format, `allowed` on a number, a presence case on a field that always has a value, a case value the
-  discriminator lacks, a pattern the two engines read differently), for every package;
+  discriminator lacks, `non_null` on a field declared `optional` or one a case makes absent, a pattern the two
+  engines read differently), for every package; it is also the one definition of which fields a producer may write
+  as null (`may_be_null`) for the wire types and the JSON Schema;
+- `tools/profile_breaking.py` keeps rules compatible across releases (rule 4);
 - `testdata/wire-profile-cases.json` runs every rule in both languages on `prototest/v1/rules.proto`.
 
 What a rule cannot say stays with the contract's code: rules relative to a clock (ops-v1's guard `until` at most
@@ -327,8 +348,9 @@ schema and `validate.mjs`, budget 108 KiB), Lab 104.5 → 109.7 KiB (the runtime
 descriptors and the rule checker, budget 128 KiB); todofy-core's upload 505.9 → 530.3 KiB (gzip 143.8 →
 148.8 KiB: `ops_pb.py` and the rule tables); the gateway imports types only (38.8 → 38.7 KiB). CPU, in
 milliseconds of the reference machine: Mail Hero's `Ops` entrypoint (a Worker request, 10 ms on Free), the
-isolate's first `status()` 3.1-5.2 → 4.5-5.5 ms, warm medians at most 1.7 ms
-(`mail-hero/cloudflare/test/native-ops-cpu.test.mjs`); the dashboard's cron tick, which reads every answer
+isolate's first `status()` 3.1-5.2 → 5.0-7.1 ms (24 serial runs; the test, run alone by `npm run test:cpu`, holds
+the median of three fresh isolates, 5.4-6.6 ms, under 8 ms: about a quarter of Free's 10 ms is left, about half
+before), warm medians at most 2.2 ms (`mail-hero/cloudflare/test/cpu/native-ops-cpu.test.mjs`); the dashboard's cron tick, which reads every answer
 inside HomeState (a Durable Object invocation, 30 s on Free), the isolate's first tick 6.2-7.3 → 9.4-11.5 ms
 (the codec's code paths and the rules read from the descriptors running for the first time), warm medians
 about 2 ms either way (`dashboard/worker/test/runtime/cpu.test.ts`). Lab's and Todofy's `Ops` answers are
@@ -340,8 +362,8 @@ Each app's UI API (the HTTP/JSON interface between its UI and its Worker) is a p
 Google's style: resources and methods by the AIPs, `google.api.http` bindings, google.rpc.Status errors. The
 Worker serves it through the shared transcoder and the UI calls it through the shared client, both driven by
 the generated descriptors, so the `.proto` file is the one description of routes, shapes and errors. Lab's
-owner API is the first (`lab/ui/v1`, 2026-10-01); ops-v1, recommendation-v1, mail-received-v1 and every app's
-UI API follow the same pattern.
+owner API is the first (`lab/ui/v1`, 2026-10-01); recommendation-v1, mail-received-v1 and every app's UI API
+follow the same pattern (ops-v1 is a service-binding contract, not an HTTP API: `ops/v1`).
 
 **Conventions** (what api-linter does not already enforce):
 
@@ -477,8 +499,9 @@ the profile's Python twin already supports every kind these APIs use.
 
 ## CI
 
-The **Proto checks** job (`.github/workflows/ci.yml`) runs when `proto/`, `.github/` or `tools/` changed,
-or on a dispatch: `npm ci`, `npm run lint`, `npm run api-lint` (Go from `tools/api-linter/go.mod` via
+The **Proto checks** job (`.github/workflows/ci.yml`) runs when `proto/`, `.github/` or `tools/` changed, when a
+contract this folder's tests read changed (`PROTO_READS`: `contracts/ops-v1/` and `contracts/task-intent-v1/`, whose
+fixtures both codecs round-trip and check), or on a dispatch: `npm ci`, `npm run lint`, `npm run api-lint` (Go from `tools/api-linter/go.mod` via
 `actions/setup-go`; the googleapis check of rule 3 first), `scripts/breaking.sh` against the **Changes** job's `base`
 output (the commit of the last successful `main` run on `main`, the merge base with `origin/main` on a
 branch; the checkout has `fetch-depth: 0`), the rules self-test, the determinism check, the generated JSON Schemas
