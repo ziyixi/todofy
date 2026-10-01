@@ -1,0 +1,8 @@
+# Headers of the UI's hashed files (/assets/*) when the asset layer serves them (the Worker answers every request first,
+# ../wrangler.toml run_worker_first, and sets its own private headers; this file is the fallback). scripts/finish-dist.mjs
+# copies it to dist/_headers. The files hold no data.
+/assets/*
+  Cache-Control: private, max-age=31536000, immutable
+  X-Content-Type-Options: nosniff
+  X-Robots-Tag: noindex
+  Referrer-Policy: no-referrer

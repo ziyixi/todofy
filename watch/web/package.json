@@ -1,0 +1,37 @@
+{
+  "name": "watch-web",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "The UI of the owner's web watches (Chinese, mobile first, no framework), built into ../web/dist and served by the Worker \"watch\".",
+  "engines": {
+    "node": ">=26"
+  },
+  "scripts": {
+    "postinstall": "node ../../proto/tools/ensure.mjs",
+    "predev": "node ../../proto/tools/ensure.mjs",
+    "dev": "vite",
+    "pretypecheck": "node ../../proto/tools/ensure.mjs",
+    "typecheck": "tsc --noEmit",
+    "prelint": "node ../../proto/tools/ensure.mjs",
+    "lint": "eslint .",
+    "pretest": "node ../../proto/tools/ensure.mjs",
+    "test": "vitest run",
+    "prebuild": "node ../../proto/tools/ensure.mjs",
+    "build": "tsc --noEmit && vite build && node scripts/finish-dist.mjs",
+    "check:dist": "node scripts/finish-dist.mjs"
+  },
+  "dependencies": {
+    "@ziyixi/proto": "file:../../proto/ts"
+  },
+  "devDependencies": {
+    "@eslint/js": "10.0.1",
+    "@types/node": "26.6.3",
+    "eslint": "10.11.0",
+    "jsdom": "27.4.0",
+    "typescript": "5.9.3",
+    "typescript-eslint": "8.71.0",
+    "vite": "7.3.6",
+    "vitest": "4.1.11"
+  }
+}
