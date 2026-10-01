@@ -5,10 +5,9 @@
  */
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { Meter } from '../../src/db.ts';
-import { AUTO_SYNC_MIN_INTERVAL_MS, MANUAL_SYNC_MIN_INTERVAL_MS, runSync, type SyncMode } from '../../src/sync.ts';
+import { AUTO_SYNC_MIN_INTERVAL_MS, MANUAL_SYNC_MIN_INTERVAL_MS, SYNC_CHUNK, autoInterval, runSync, type SyncMode } from '../../src/sync.ts';
 import { getAllTasks, getDeletedTasks, softDeleteTask, updateTaskEstimate } from '../../src/store/tasks.ts';
-import { setSetting } from '../../src/store/settings.ts';
-import { startHarness, type FakeItem, type Harness } from './harness.ts';
+import { SYNTHETIC_BINDINGS, startHarness, storeTodoistKey, type FakeItem, type Harness } from './harness.ts';
 
 let h: Harness;
 beforeAll(async () => {
@@ -19,8 +18,10 @@ afterAll(async () => {
 });
 beforeEach(async () => {
   await h.reset();
-  await setSetting(h.db(), 'todoist_api_key', 'synthetic-token');
+  await storeTodoistKey(h.db(), 'synthetic-token');
 });
+
+const CREDENTIAL_KEY = SYNTHETIC_BINDINGS['CREDENTIAL_KEY'];
 
 const T0 = Date.parse('2026-04-13T07:00:00.000Z');
 
@@ -42,11 +43,25 @@ function seedTodoist(count: number): void {
   h.todoist.setItems(Array.from({ length: count }, (_, index) => item(index)));
 }
 
+function attempt(at: number, mode: SyncMode = 'auto', meter = new Meter()) {
+  return runSync({ db: h.db(meter), mode, credentialKey: CREDENTIAL_KEY, now: new Date(at), fetcher: h.todoist.fetcher });
+}
+
 async function sync(at: number, mode: SyncMode = 'auto') {
   const meter = new Meter();
-  const outcome = await runSync(h.db(meter), mode, new Date(at), h.todoist.fetcher);
+  const outcome = await attempt(at, mode, meter);
   if (outcome.kind !== 'ok') throw new Error(`sync failed: ${outcome.kind}`);
   return { ...outcome.response, rowsWritten: meter.rowsWritten };
+}
+
+/** Syncs like the page does: asks again right away while the answer is `partial` (a second apart here). */
+async function syncFully(at: number, mode: SyncMode = 'auto') {
+  const requests = [await sync(at, mode)];
+  while (requests.at(-1)?.status === 'partial') {
+    if (requests.length > 50) throw new Error('the sync did not finish');
+    requests.push(await sync(at + requests.length * 1000, mode));
+  }
+  return requests;
 }
 
 describe('incremental sync', () => {
@@ -215,14 +230,126 @@ describe('incremental sync', () => {
     await sync(T0);
     h.todoist.status = 503;
     const meter = new Meter();
-    const outcome = await runSync(h.db(meter), 'manual', new Date(T0 + AUTO_SYNC_MIN_INTERVAL_MS), h.todoist.fetcher);
+    const outcome = await attempt(T0 + AUTO_SYNC_MIN_INTERVAL_MS, 'manual', meter);
     expect(outcome).toEqual({ kind: 'todoist', failure: 'unavailable' });
     expect(meter.rowsWritten).toBe(1);
     h.todoist.status = 401;
-    const denied = await runSync(h.db(), 'manual', new Date(T0 + 2 * AUTO_SYNC_MIN_INTERVAL_MS), h.todoist.fetcher);
+    const denied = await attempt(T0 + 2 * AUTO_SYNC_MIN_INTERVAL_MS, 'manual');
     expect(denied).toEqual({ kind: 'todoist', failure: 'unauthorized' });
     const [stamp] = await h.sql<{ value: string }>("SELECT value FROM settings WHERE key = 'last_sync_at'");
     expect(stamp?.value).toBe('2026-04-13T07:00:00.000Z');
+  });
+
+  it('failed syncs back off: the automatic interval doubles per failure (up to 32x) and resets after a success', async () => {
+    seedTodoist(3);
+    await sync(T0);
+    h.todoist.status = 503;
+    let at = T0;
+    const intervals: number[] = [];
+    for (let failures = 1; failures <= 7; failures += 1) {
+      const wait = autoInterval(failures - 1);
+      // One millisecond early: throttled, nothing read, nothing written.
+      const early = await sync(at + wait - 1);
+      expect(early).toMatchObject({ status: 'throttled', rowsWritten: 0, nextAutoSyncAt: at + wait });
+      expect(await attempt(at + wait)).toMatchObject({ kind: 'todoist', failure: 'unavailable' });
+      at += wait;
+      intervals.push(wait / AUTO_SYNC_MIN_INTERVAL_MS);
+    }
+    expect(intervals).toEqual([1, 2, 4, 8, 16, 32, 32]);
+    // "Sync now" is not backed off; its success resets the interval.
+    h.todoist.status = 200;
+    expect((await sync(at + MANUAL_SYNC_MIN_INTERVAL_MS, 'manual')).status).toBe('synced');
+    expect((await sync(at + MANUAL_SYNC_MIN_INTERVAL_MS + AUTO_SYNC_MIN_INTERVAL_MS)).status).toBe('synced');
+  });
+
+  it('a request stopped after its claim (e.g. out of CPU) counts as a failure, so it is not retried every 5 minutes', async () => {
+    seedTodoist(3);
+    await sync(T0);
+    // The claim of a request that never finished: newer than last_sync_at, nothing else written.
+    await h.sql("UPDATE settings SET value = ? WHERE key = 'sync_claimed_at'", String(T0 + AUTO_SYNC_MIN_INTERVAL_MS));
+    expect((await sync(T0 + 2 * AUTO_SYNC_MIN_INTERVAL_MS)).status).toBe('throttled');
+    expect((await sync(T0 + 3 * AUTO_SYNC_MIN_INTERVAL_MS)).status).toBe('synced');
+  });
+
+  it('a stored key that cannot be opened (another CREDENTIAL_KEY, or plaintext) syncs nothing and writes nothing', async () => {
+    seedTodoist(3);
+    const meter = new Meter();
+    expect(await runSync({ db: h.db(meter), mode: 'manual', credentialKey: '01'.repeat(32), now: new Date(T0), fetcher: h.todoist.fetcher })).toEqual({ kind: 'key_unreadable' });
+    expect(await runSync({ db: h.db(meter), mode: 'manual', credentialKey: undefined, now: new Date(T0), fetcher: h.todoist.fetcher })).toEqual({ kind: 'not_configured' });
+    await h.sql("UPDATE settings SET value = 'plain-token' WHERE key = 'todoist_api_key'");
+    expect(await attempt(T0, 'manual', meter)).toEqual({ kind: 'key_unreadable' });
+    expect(meter.rowsWritten).toBe(0);
+    expect(h.todoist.requests).toHaveLength(0);
+  });
+});
+
+describe('large answers and archived projects', () => {
+  it(`applies a full sync in chunks of ${String(SYNC_CHUNK)} items, one request each, and stores the token at the end`, async () => {
+    seedTodoist(2 * SYNC_CHUNK + 50);
+    const requests = await syncFully(T0);
+    expect(requests.map((request) => request.status)).toEqual(['partial', 'partial', 'synced']);
+    expect(requests.map((request) => request.changed)).toEqual([SYNC_CHUNK, SYNC_CHUNK, 50]);
+    expect(h.todoist.requests.map((request) => request.form['sync_token'])).toEqual(['*', '*', '*']);
+    expect(await getAllTasks(h.db())).toHaveLength(2 * SYNC_CHUNK + 50);
+    const [pending] = await h.sql<{ n: number }>("SELECT count(*) AS n FROM settings WHERE key = 'todoist_sync_pending'");
+    expect(pending?.n).toBe(0);
+    // The next sync, 5 minutes after the last chunk, is incremental and reads nothing new.
+    const quiet = await sync(T0 + 2000 + AUTO_SYNC_MIN_INTERVAL_MS);
+    expect(quiet).toMatchObject({ status: 'synced', fullSync: false, changed: 0, rowsWritten: 2 });
+  });
+
+  it('a change made during a chunked pass, before the cursor, arrives with the next incremental sync', async () => {
+    seedTodoist(2 * SYNC_CHUNK + 10);
+    const first = await sync(T0);
+    expect(first.status).toBe('partial');
+    // td-0 sorts before the cursor: the rest of this pass will not apply it.
+    h.todoist.update('td-0', { content: 'Changed mid-pass' });
+    h.todoist.setItems([item(0, { id: 'td-00', content: 'Added mid-pass' })]);
+    let at = T0 + 1000;
+    while ((await sync(at)).status === 'partial') at += 1000;
+    await sync(at + AUTO_SYNC_MIN_INTERVAL_MS);
+    const tasks = await getAllTasks(h.db());
+    expect(tasks.find((task) => task.id === 'td-0')?.title).toBe('Changed mid-pass');
+    expect(tasks.find((task) => task.id === 'td-00')?.title).toBe('Added mid-pass');
+  });
+
+  it('an interrupted pass resumes where it stopped, after the failure backoff', async () => {
+    seedTodoist(2 * SYNC_CHUNK + 10);
+    expect((await sync(T0)).status).toBe('partial');
+    h.todoist.status = 503;
+    expect(await attempt(T0 + 1000)).toMatchObject({ kind: 'todoist' });
+    h.todoist.status = 200;
+    expect((await sync(T0 + 2000)).status).toBe('throttled');
+    const resumed = await syncFully(T0 + 1000 + autoInterval(1));
+    expect(resumed.map((request) => request.changed)).toEqual([SYNC_CHUNK, 10]);
+    expect(await getAllTasks(h.db())).toHaveLength(2 * SYNC_CHUNK + 10);
+  });
+
+  it('archiving a project hides its tasks; unarchiving brings them back through a full pass', async () => {
+    seedTodoist(20);
+    await sync(T0);
+    h.todoist.archiveProject('p-2');
+    const archived = await syncFully(T0 + AUTO_SYNC_MIN_INTERVAL_MS);
+    expect(archived.map((request) => request.status)).toEqual(['synced']);
+    const visible = (await getAllTasks(h.db())).map((task) => task.id);
+    expect(visible).toHaveLength(16);
+    expect(visible).not.toContain('td-2');
+    expect(await getDeletedTasks(h.db())).toEqual([]);
+
+    h.todoist.archiveProject('p-2', false);
+    const unarchived = await syncFully(T0 + 2 * AUTO_SYNC_MIN_INTERVAL_MS);
+    expect(unarchived.map((request) => [request.status, request.fullSync])).toEqual([['partial', false], ['synced', true]]);
+    expect(await getAllTasks(h.db())).toHaveLength(20);
+    // The full pass wrote only the 4 restored tasks.
+    expect(unarchived[1]?.changed).toBe(4);
+  });
+
+  it('a deleted project hides its tasks', async () => {
+    seedTodoist(10);
+    await sync(T0);
+    h.todoist.setProjects([{ id: 'p-1', name: 'Project 1', color: 'blue', is_deleted: true }]);
+    await sync(T0 + AUTO_SYNC_MIN_INTERVAL_MS);
+    expect((await getAllTasks(h.db())).map((task) => task.id).sort()).toEqual(['td-0', 'td-2', 'td-3', 'td-4', 'td-5', 'td-7', 'td-8', 'td-9']);
   });
 });
 
@@ -266,7 +393,8 @@ describe('write budget', () => {
     expect(day.throttled).toBe(96);
     expect(day.todoistReads).toBe(96);
     // 96 syncs x 2 rows (claim, last_sync_at) + the new sync tokens + the changed task rows and their indexes.
-    expect(day.rowsWritten).toBeLessThan(400);
-    expect(first.rowsWritten).toBeLessThan(1_200);
+    expect(day.rowsWritten).toBeLessThan(320);
+    // 3 rows per new task (row, key, deleted_at index) + the settings rows.
+    expect(first.rowsWritten).toBeLessThan(620);
   });
 });

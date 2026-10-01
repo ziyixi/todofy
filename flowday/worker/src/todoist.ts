@@ -14,10 +14,15 @@ import type { TaskUpsertRow } from './store/tasks.ts';
 export const TODOIST_SYNC_URL = 'https://api.todoist.com/api/v1/sync';
 export const FULL_SYNC_TOKEN = '*';
 export const RESOURCE_TYPES = ['items', 'projects'] as const;
-/** Upper bound on items in one answer (the upsert batch stays within D1's 50 queries per invocation). */
-export const MAX_SYNC_ITEMS = 5000;
-/** Upper bound on the answer body: a larger one is refused rather than parsed within 10 ms of CPU. */
-export const MAX_SYNC_BYTES = 8 * 1024 * 1024;
+/**
+ * Upper bounds on one answer. Todoist sends a full sync in one piece, so parsing it is the one cost that grows with
+ * the account inside a single request; the sync applies it in chunks over several requests (../sync.ts), but every
+ * request still parses the whole answer. These bounds keep that parse, on an isolate's cold first request, well
+ * inside Workers Free's 10 ms of CPU (worker/test/runtime/cpu.test.ts measures it with full Todoist item shapes).
+ * A larger answer is refused as `too_large` before it is parsed, and the body is counted in bytes as it streams in.
+ */
+export const MAX_SYNC_ITEMS = 1000;
+export const MAX_SYNC_BYTES = 1024 * 1024;
 /** One day of work time, as the container era converted day durations. */
 export const MINUTES_PER_DAY = 480;
 
@@ -123,8 +128,7 @@ export async function fetchSync(apiKey: string, syncToken: string, fetcher: type
     await response.body?.cancel();
     throw new TodoistError('too_large');
   }
-  const text = await response.text();
-  if (text.length > MAX_SYNC_BYTES) throw new TodoistError('too_large');
+  const text = await readCapped(response, MAX_SYNC_BYTES);
   let value: unknown;
   try {
     value = JSON.parse(text);
@@ -132,6 +136,22 @@ export async function fetchSync(apiKey: string, syncToken: string, fetcher: type
     throw new TodoistError('invalid_answer');
   }
   return parseSyncAnswer(value);
+}
+
+/**
+ * The body as text, refused as `too_large` when it has more than `maxBytes` (decoded) bytes, before any of it is
+ * decoded or parsed. The body is read whole by the runtime (no JavaScript per network chunk: a read loop cost about
+ * 2 ms of CPU for a 1 MiB answer); Todoist is the only origin, so its size cannot exhaust memory.
+ */
+export async function readCapped(response: Response, maxBytes: number): Promise<string> {
+  let bytes: ArrayBuffer;
+  try {
+    bytes = await response.arrayBuffer();
+  } catch {
+    throw new TodoistError('unavailable');
+  }
+  if (bytes.byteLength > maxBytes) throw new TodoistError('too_large');
+  return new TextDecoder().decode(bytes);
 }
 
 function record(value: unknown): Record<string, unknown> | null {

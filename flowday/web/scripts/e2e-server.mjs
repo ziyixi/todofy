@@ -20,6 +20,7 @@ const TEST_VARS = {
   E2E_TEST_ROUTES: "true",
   ACCESS_OWNER: "owner@example.com",
   CSRF_SIGNING_KEY: "e2e0".repeat(16),
+  CREDENTIAL_KEY: "e2e1".repeat(16),
   BUILD_SHA: "dev",
 };
 

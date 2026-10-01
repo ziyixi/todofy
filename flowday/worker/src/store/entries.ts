@@ -1,6 +1,7 @@
 /**
- * Time entries (time_entries: one row per timer segment or manual entry). Indexed by task_id and flow_date, so
- * an insert costs three D1 row writes and an update of the times one.
+ * Time entries (time_entries: one row per timer segment or manual entry). Besides the row, an insert writes the
+ * entries of the primary-key index (TEXT key) and of the task_id and flow_date indexes: four D1 row writes. An
+ * update of the times (unindexed) costs one.
  */
 import { and, asc, eq, gte, lte } from 'drizzle-orm';
 import type { TimeEntry } from '../api-types.ts';

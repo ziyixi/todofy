@@ -121,6 +121,13 @@ describe('with the loopback dev bypass', () => {
     expect(await (await h.fetch('/api/tasks')).json()).toEqual([]);
   });
 
+  it('a seeded Todoist key is sealed like one saved in Settings', async () => {
+    await h.fetch('/api/test/seed', { method: 'POST', body: JSON.stringify({ settings: { todoist_api_key: 'saved-secret-key' } }) });
+    const [row] = await h.sql<{ value: string }>("SELECT value FROM settings WHERE key = 'todoist_api_key'");
+    expect(row?.value).toMatch(/^v1\./);
+    expect((await (await h.fetch('/api/settings')).json<{ has_api_key: boolean }>()).has_api_key).toBe(true);
+  });
+
   it('a request that came through Cloudflare (cf-ray) never gets the bypass or the E2E routes', async () => {
     const response = await h.fetch('/api/test/health', { headers: { 'cf-ray': 'synthetic' } });
     expect(response.status).toBe(503);
@@ -150,10 +157,10 @@ describe('with the loopback dev bypass', () => {
   });
 });
 
-describe('without E2E_TEST_ROUTES', () => {
+describe('without E2E_TEST_ROUTES or CREDENTIAL_KEY', () => {
   let h: Harness;
   beforeAll(async () => {
-    h = await startHarness();
+    h = await startHarness({ bindings: { CREDENTIAL_KEY: '' } });
   });
   afterAll(async () => {
     await h.dispose();
@@ -162,5 +169,12 @@ describe('without E2E_TEST_ROUTES', () => {
   it('the E2E routes do not exist even over loopback', async () => {
     expect((await h.fetch('/api/test/health')).status).toBe(404);
     expect((await h.fetch('/api/test/reset', { method: 'POST' })).status).toBe(404);
+  });
+
+  it('without the credential key a Todoist key is refused (503), never stored in plain text', async () => {
+    const result = await h.mutate('PUT', '/api/settings', { todoist_api_key: 'synthetic-secret-key' });
+    expect(result.status).toBe(503);
+    expect(result.rowsWritten).toBe(0);
+    expect(await h.sql("SELECT * FROM settings WHERE key = 'todoist_api_key'")).toEqual([]);
   });
 });

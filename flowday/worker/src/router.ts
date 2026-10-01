@@ -34,7 +34,7 @@ async function route(request: Request, env: Env, url: URL, meter: Meter, fetcher
   const principal = await authenticate(request, env);
   if (pathname === '/api' || pathname.startsWith('/api/')) {
     const db = openDb(env.DB, meter);
-    if (pathname.startsWith('/api/test/') && e2eEnabled(env, principal)) return e2eRoute(request, db, pathname);
+    if (pathname.startsWith('/api/test/') && e2eEnabled(env, principal)) return e2eRoute(request, env, db, pathname);
     return api({
       request,
       env,

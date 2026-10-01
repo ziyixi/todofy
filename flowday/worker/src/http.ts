@@ -23,6 +23,7 @@ export type ApiErrorCode =
   | 'method_not_allowed'
   | 'unavailable'
   | 'no_todoist_key'
+  | 'todoist_key_unreadable'
   | 'todoist_unauthorized'
   | 'todoist_unavailable';
 
@@ -36,6 +37,7 @@ export const MESSAGES: Readonly<Record<ApiErrorCode, string>> = {
   method_not_allowed: 'Method not allowed.',
   unavailable: 'The service is temporarily unavailable. Try again shortly.',
   no_todoist_key: 'No Todoist API key configured. Add one in Settings.',
+  todoist_key_unreadable: 'The stored Todoist API key cannot be read. Enter it again in Settings.',
   todoist_unauthorized: 'Todoist rejected the API key. Check it in Settings.',
   todoist_unavailable: 'Todoist could not be reached. FlowDay will try again later.',
 };

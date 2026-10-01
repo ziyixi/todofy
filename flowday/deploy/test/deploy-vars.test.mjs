@@ -18,6 +18,7 @@ function environment() {
     FLOWDAY_ACCESS_OWNER: 'owner@example.org',
     FLOWDAY_ACCESS_OWNER_ALIASES: 'alias@example.org, second@example.net',
     FLOWDAY_CSRF_SIGNING_KEY: 'd'.repeat(64),
+    FLOWDAY_CREDENTIAL_KEY: 'e'.repeat(64),
   }
 }
 
@@ -28,7 +29,7 @@ test('the marker lists every input of each mode', () => {
   }
   assert.deepEqual(marked, {
     exec: INJECTED.map(({ from }) => from),
-    secrets: ['FLOWDAY_ACCESS_OWNER', 'FLOWDAY_ACCESS_OWNER_ALIASES', 'FLOWDAY_CSRF_SIGNING_KEY'],
+    secrets: ['FLOWDAY_ACCESS_OWNER', 'FLOWDAY_ACCESS_OWNER_ALIASES', 'FLOWDAY_CSRF_SIGNING_KEY', 'FLOWDAY_CREDENTIAL_KEY'],
   })
 })
 
@@ -42,17 +43,19 @@ test('the build becomes a --var flag and must be the 40-hex commit', () => {
   }
 })
 
-test('the secrets file holds the owner, aliases and CSRF key; invalid values are refused by name', () => {
+test('the secrets file holds the owner, aliases, CSRF key and credential key; invalid values are refused by name', () => {
   assert.deepEqual(generateSecrets(environment()), {
     ACCESS_OWNER: 'owner@example.org',
     ACCESS_OWNER_ALIASES: 'alias@example.org,second@example.net',
     CSRF_SIGNING_KEY: 'd'.repeat(64),
+    CREDENTIAL_KEY: 'e'.repeat(64),
   })
   assert.equal(generateSecrets({ ...environment(), FLOWDAY_ACCESS_OWNER_ALIASES: '' }).ACCESS_OWNER_ALIASES, ' ')
   for (const [name, value] of [
     ['FLOWDAY_ACCESS_OWNER', undefined], ['FLOWDAY_ACCESS_OWNER', 'not-an-email'],
     ['FLOWDAY_ACCESS_OWNER_ALIASES', 'a@example.org,a@example.org'],
     ['FLOWDAY_CSRF_SIGNING_KEY', 'd'.repeat(63)], ['FLOWDAY_CSRF_SIGNING_KEY', undefined],
+    ['FLOWDAY_CREDENTIAL_KEY', 'e'.repeat(63)], ['FLOWDAY_CREDENTIAL_KEY', 'not hex'], ['FLOWDAY_CREDENTIAL_KEY', undefined],
   ]) {
     const env = { ...environment(), [name]: value }
     if (value === undefined) delete env[name]

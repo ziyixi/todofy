@@ -20,6 +20,11 @@ import {
 } from "./persistence";
 
 const EMPTY_IDS: string[] = [];
+/**
+ * A `partial` answer means the Worker applied one chunk of a large Todoist answer (or must follow up with a full
+ * pass): ask again right away, up to this many requests per sync (1,000 tasks take 5 chunks).
+ */
+export const MAX_SYNC_REQUESTS = 12;
 
 export const useTodoistStore = create<TodoistState>()((set, get) => ({
   tasks: [],
@@ -106,10 +111,15 @@ export const useTodoistStore = create<TodoistState>()((set, get) => ({
     set({ isSyncing: true });
     try {
       const before = get().lastSyncAt;
-      const data = await syncTasksOnServer(mode);
-      set({ lastSyncAt: data.lastSyncAt, nextAutoSyncAt: data.nextAutoSyncAt });
+      let changed = false;
+      for (let request = 0; request < MAX_SYNC_REQUESTS; request += 1) {
+        const data = await syncTasksOnServer(mode);
+        set({ lastSyncAt: data.lastSyncAt, nextAutoSyncAt: data.nextAutoSyncAt });
+        changed ||= data.changed > 0 || data.fullSync;
+        if (data.status !== "partial") break;
+      }
       // Reload the task list only when something changed here, or another tab or device synced meanwhile.
-      if (data.changed > 0 || data.fullSync || data.lastSyncAt !== before) {
+      if (changed || get().lastSyncAt !== before) {
         await get().hydrate();
       }
       return true;

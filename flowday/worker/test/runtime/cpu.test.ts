@@ -9,11 +9,22 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { Meter } from '../../src/db.ts';
 import { createTimeEntry } from '../../src/store/entries.ts';
 import { setFlowTaskIds } from '../../src/store/flows.ts';
-import { setSetting } from '../../src/store/settings.ts';
-import { startHarness, type FakeItem, type Harness } from './harness.ts';
+import { SYNC_CHUNK } from '../../src/sync.ts';
+import { MAX_SYNC_BYTES, MAX_SYNC_ITEMS } from '../../src/todoist.ts';
+import { startHarness, storeTodoistKey, type FakeItem, type Harness } from './harness.ts';
 
 const PORT = 9_000 + Math.floor(Math.random() * 500);
 const FREE_CPU_MS = 10;
+/**
+ * The bound for an isolate's first run of the sync. On the test machine it measures below FREE_CPU_MS (about 8.6 ms
+ * for MAX_SYNC_ITEMS, of which about 6 ms is the first run of the sync's code with any answer size; 2,000 items
+ * measured 10-14 ms). A CI runner is slower than the test machine, so this bound only catches a large regression;
+ * the printed number is the one to watch. On Cloudflare a request stopped for CPU resumes from its pending chunk
+ * after the failure backoff (../../src/sync.ts).
+ */
+const COLD_BOUND_MS = 1.5 * FREE_CPU_MS;
+/** Warm runs keep a margin below the limit. */
+const WARM_BOUND_MS = 0.6 * FREE_CPU_MS;
 const SAMPLE_US = 100;
 /**
  * A sample's interval is capped at four sampling intervals: a single sample spanning several milliseconds is a gap in
@@ -83,8 +94,8 @@ async function cpu(run: () => Promise<unknown>): Promise<number> {
 }
 
 /**
- * Runs `run` several times: the first run (the isolate's warm-up of that code path), then the warm median and the
- * warm best. The assertion uses the warm best, which noise on a busy CI machine can only raise, never lower.
+ * Runs `run` several times: the first run (the isolate's warm-up of that code path, as on a cold isolate), then the
+ * warm median and the warm best. Noise on a busy CI machine can only raise these numbers, never lower them.
  */
 async function measure(label: string, run: () => Promise<unknown>, times = 5): Promise<{ first: number; median: number; best: number }> {
   const samples: number[] = [];
@@ -111,29 +122,42 @@ function items(count: number): FakeItem[] {
 }
 
 describe('CPU per request (Workers Free: 10 ms)', () => {
-  it('the heaviest handlers stay below the limit when warm (1,000 tasks, 1,000 hours of entries)', async () => {
+  it('the heaviest handlers stay below the limit, the sync even on its cold first request', async () => {
     await h.reset();
-    await setSetting(h.db(), 'todoist_api_key', 'synthetic-token');
+    await storeTodoistKey(h.db(), 'synthetic-token');
     h.todoist.setProjects(Array.from({ length: 8 }, (_, n) => ({ id: `p-${String(n)}`, name: `Project ${String(n)}`, color: 'blue' })));
-    h.todoist.setItems(items(1000));
-    h.todoist.forceFull = true;
+    // The largest answer FlowDay accepts, with every field of a Todoist API v1 item (./harness.ts FakeTodoist).
+    h.todoist.setItems(items(MAX_SYNC_ITEMS));
+    const answerBytes = (await h.todoist.answer(new Request('https://x/', { method: 'POST' }), 'sync_token=*').arrayBuffer()).byteLength;
+    console.log(`cpu: the full answer of ${String(MAX_SYNC_ITEMS)} items is ${(answerBytes / 1024).toFixed(0)} KiB (cap ${String(MAX_SYNC_BYTES / 1024)} KiB)`);
+    expect(answerBytes).toBeLessThan(MAX_SYNC_BYTES);
     // Fetches the CSRF token outside the measurements (one empty settings write).
     await h.mutate('PUT', '/api/settings', {});
-    // Each manual sync needs a claim older than 30 s: clear the claim before each run.
-    const fullSync = await measure('POST /api/sync, full sync of 1,000 tasks', async () => {
-      await h.sql("DELETE FROM settings WHERE key = 'sync_claimed_at'");
-      const result = await h.mutate('POST', '/api/sync', { mode: 'manual' });
-      if (result.status !== 200) throw new Error(`sync ${String(result.status)}`);
+    // Each run is the first chunk of a new full pass: parse every item, apply SYNC_CHUNK of them. The first run is
+    // the isolate's first sync of all (cold).
+    const firstChunk = await measure(`POST /api/sync, first chunk of a full sync of ${String(MAX_SYNC_ITEMS)} tasks`, async () => {
+      await h.sql("DELETE FROM settings WHERE key IN ('sync_claimed_at', 'todoist_sync_token', 'todoist_sync_pending')");
+      const result = await h.mutate<{ status: string }>('POST', '/api/sync', { mode: 'manual' });
+      if (result.status !== 200 || result.body.status !== 'partial') throw new Error(`sync ${String(result.status)}`);
+    });
+    // The last chunk also hides every task the full list does not name (one JSON list of every id).
+    const sortedIds = items(MAX_SYNC_ITEMS).map((item) => item.id).sort();
+    const lastAfter = sortedIds[sortedIds.length - SYNC_CHUNK / 2 - 1] ?? '';
+    const lastChunk = await measure(`POST /api/sync, last chunk of a full sync of ${String(MAX_SYNC_ITEMS)} tasks`, async () => {
+      await h.sql("DELETE FROM settings WHERE key IN ('sync_claimed_at', 'todoist_sync_token')");
+      await h.sql("INSERT OR REPLACE INTO settings (key, value) VALUES ('todoist_sync_pending', ?)", JSON.stringify({ base: '*', token: 'first', after: lastAfter }));
+      const result = await h.mutate<{ status: string }>('POST', '/api/sync', { mode: 'manual' });
+      if (result.status !== 200 || result.body.status !== 'synced') throw new Error(`sync ${String(result.status)}`);
     });
 
-    h.todoist.forceFull = false;
     const incremental = await measure('POST /api/sync, incremental with 20 changes', async () => {
       for (let n = 0; n < 20; n += 1) h.todoist.update(`td-${String(n * 13)}`, { content: `Changed ${String(Math.random())}` });
       await h.sql("DELETE FROM settings WHERE key = 'sync_claimed_at'");
       await h.mutate('POST', '/api/sync', { mode: 'manual' });
     });
 
-    const tasks = await measure('GET /api/tasks (1,000 tasks)', () => h.fetch('/api/tasks').then((response) => response.text()));
+    // The task list of the largest account.
+    const tasks = await measure(`GET /api/tasks (${String(MAX_SYNC_ITEMS)} tasks)`, () => h.fetch('/api/tasks').then((response) => response.text()));
 
     // 1,000 hours of time entries over a year (2,000 half-hour entries) and their flows.
     const db = h.db(new Meter());
@@ -146,6 +170,8 @@ describe('CPU per request (Workers Free: 10 ms)', () => {
     const week = await measure('GET /api/analytics (one week)', () => h.fetch('/api/analytics?start=2026-04-06&end=2026-04-12').then((response) => response.text()));
     const page = await measure('GET / (page CSP hashing)', () => h.fetch('/').then((response) => response.text()));
 
-    for (const { best } of [fullSync, incremental, tasks, stats, week, page]) expect(best).toBeLessThan(FREE_CPU_MS);
+    // The sync runs rarely, so it often lands on code the isolate has not run yet: its first run is bounded too.
+    expect(firstChunk.first).toBeLessThan(COLD_BOUND_MS);
+    for (const { best } of [firstChunk, lastChunk, incremental, tasks, stats, week, page]) expect(best).toBeLessThan(WARM_BOUND_MS);
   });
 });

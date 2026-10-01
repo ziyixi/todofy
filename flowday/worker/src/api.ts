@@ -7,6 +7,7 @@
  */
 import { sql } from 'drizzle-orm';
 import type { ActiveTimerSession, SettingsResponse, TimerSessionMode, TimerSessionStatus } from './api-types.ts';
+import { importCredentialKey, isSealed, openCredential, sealCredential } from './credentials.ts';
 import type { Db } from './db.ts';
 import { HttpError, bad, csrfResponse, jsonResponse, methodNotAllowed, type Body, type Principal } from './http.ts';
 import type { Env } from './env.ts';
@@ -34,7 +35,7 @@ import {
   updateTaskTitle,
 } from './store/tasks.ts';
 import { clearActiveTimerSession, getActiveTimerSession, saveActiveTimerSession } from './store/timer-session.ts';
-import { KEY_API_KEY, KEY_CLAIMED_AT, KEY_LAST_SYNC_AT, KEY_PROJECTS, KEY_SYNC_TOKEN, runSync } from './sync.ts';
+import { KEY_API_KEY, KEY_CLAIMED_AT, KEY_LAST_SYNC_AT, KEY_PENDING, KEY_PROJECTS, KEY_SYNC_TOKEN, runSync } from './sync.ts';
 
 export interface ApiContext {
   readonly request: Request;
@@ -300,7 +301,8 @@ async function settingsRoute(ctx: ApiContext): Promise<Response> {
     const planningKey = isDate(today) ? `planning_completed:${today}` : null;
     const keys = [KEY_API_KEY, KEY_LAST_SYNC_AT, 'day_capacity_mins', ...(planningKey === null ? [] : [planningKey])];
     const values = await getSettings(db, keys);
-    const hasKey = (values.get(KEY_API_KEY) ?? '') !== '';
+    // Only a sealed key counts (a plaintext one from an older copy is never used).
+    const hasKey = isSealed(values.get(KEY_API_KEY));
     const body: SettingsResponse = {
       todoist_api_key: hasKey ? '••••••••' : null,
       has_api_key: hasKey,
@@ -315,11 +317,14 @@ async function settingsRoute(ctx: ApiContext): Promise<Response> {
   if ('todoist_api_key' in body) {
     const key = body['todoist_api_key'];
     if (typeof key !== 'string' || key.trim() === '' || key.trim().length > 200) bad('API key is required');
-    if ((await getSetting(db, KEY_API_KEY)) !== key.trim()) {
+    // The key is stored only sealed under CREDENTIAL_KEY (./credentials.ts); saving the same key writes nothing.
+    const credentialKey = await importCredentialKey(ctx.env.CREDENTIAL_KEY);
+    if (credentialKey === null) throw new HttpError(503, 'not_configured');
+    if ((await openCredential(credentialKey, KEY_API_KEY, await getSetting(db, KEY_API_KEY))) !== key.trim()) {
       // A new key may be another account: the next sync starts over with a full sync, right away.
       writes.push(
-        setSettingQuery(db, KEY_API_KEY, key.trim()),
-        db.delete(settings).where(sql`${settings.key} IN (${KEY_SYNC_TOKEN}, ${KEY_PROJECTS}, ${KEY_CLAIMED_AT})`),
+        setSettingQuery(db, KEY_API_KEY, await sealCredential(credentialKey, KEY_API_KEY, key.trim())),
+        db.delete(settings).where(sql`${settings.key} IN (${KEY_SYNC_TOKEN}, ${KEY_PROJECTS}, ${KEY_CLAIMED_AT}, ${KEY_PENDING})`),
       );
     }
   }
@@ -340,12 +345,16 @@ async function syncRoute(ctx: ApiContext): Promise<Response> {
   only(ctx.request.method, 'POST');
   const body = await ctx.mutate();
   const mode = body['mode'] === 'manual' ? 'manual' : 'auto';
-  const outcome = await runSync(ctx.db, mode, new Date(), ctx.fetcher);
+  const outcome = await runSync({ db: ctx.db, mode, credentialKey: ctx.env.CREDENTIAL_KEY, fetcher: ctx.fetcher });
   switch (outcome.kind) {
     case 'ok':
       return jsonResponse(outcome.response);
     case 'no_key':
       throw new HttpError(400, 'no_todoist_key');
+    case 'key_unreadable':
+      throw new HttpError(400, 'todoist_key_unreadable');
+    case 'not_configured':
+      throw new HttpError(503, 'not_configured');
     case 'todoist':
       throw outcome.failure === 'unauthorized' ? new HttpError(502, 'todoist_unauthorized') : new HttpError(502, 'todoist_unavailable');
   }

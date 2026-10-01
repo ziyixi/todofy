@@ -6,6 +6,7 @@
  */
 import { sql } from 'drizzle-orm';
 import type { Task, TaskPriority } from './api-types.ts';
+import { importCredentialKey, sealCredential } from './credentials.ts';
 import type { Db } from './db.ts';
 import type { Env } from './env.ts';
 import { HttpError, jsonResponse, readBody, type Principal } from './http.ts';
@@ -79,7 +80,8 @@ function toTask(seed: TaskSeed): Task {
   };
 }
 
-export async function seed(db: Db, payload: SeedPayload): Promise<void> {
+/** Seeds synthetic data. A seeded Todoist key is sealed like one saved in Settings (`credentialKey`: the secret). */
+export async function seed(db: Db, payload: SeedPayload, credentialKey?: string): Promise<void> {
   if (payload.tasks !== undefined && payload.tasks.length > 0) {
     await upsertTasks(db, payload.tasks.map(toTask));
     for (const task of payload.tasks) {
@@ -109,10 +111,14 @@ export async function seed(db: Db, payload: SeedPayload): Promise<void> {
       source: entry.source ?? 'timer',
     });
   }
-  for (const [key, value] of Object.entries(payload.settings ?? {})) await setSetting(db, key, String(value));
+  const sealing = await importCredentialKey(credentialKey);
+  for (const [key, value] of Object.entries(payload.settings ?? {})) {
+    const stored = key === 'todoist_api_key' && sealing !== null ? await sealCredential(sealing, key, String(value)) : String(value);
+    await setSetting(db, key, stored);
+  }
 }
 
-export async function e2eRoute(request: Request, db: Db, pathname: string): Promise<Response> {
+export async function e2eRoute(request: Request, env: Env, db: Db, pathname: string): Promise<Response> {
   switch (`${request.method} ${pathname}`) {
     case 'GET /api/test/health':
       return jsonResponse({ ok: true });
@@ -122,7 +128,7 @@ export async function e2eRoute(request: Request, db: Db, pathname: string): Prom
     case 'POST /api/test/seed': {
       const payload = (await readBody(request)) as SeedPayload;
       if (payload.resetFirst !== false) await clearAll(db);
-      await seed(db, payload);
+      await seed(db, payload, env.CREDENTIAL_KEY);
       return jsonResponse({ ok: true });
     }
     case 'POST /api/test/sync-orphans': {

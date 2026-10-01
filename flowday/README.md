@@ -26,7 +26,7 @@ anything but a `--dry-run` until F2. The container deployment is retired.
 | --- | --- |
 | `wrangler.toml` | The Worker's production config (static assets from `web/out`, D1 `DB`, no route yet) |
 | `worker/` | The Worker: `src/` (router, Access and CSRF, API, D1 stores, the read-only Todoist sync), `test/` (Node unit tests; `test/runtime/` on workerd with real D1) |
-| `migrations/` | D1 schema: `0001` is the container-era SQLite schema, unchanged; `0002` adds `tasks.todoist_project_id` |
+| `migrations/` | D1 schema: `0001` is the container-era SQLite schema, unchanged; `0002` adds `tasks.todoist_project_id`; `0003` drops four indexes no query needs |
 | `web/` | The UI (`app/`, `components/`, `features/`, `lib/`), its tests (`web/__tests__/`) and scripts |
 | `deploy/` | `deploy-vars.mjs` (the deploy wrapper, Lab's shape) and its tests |
 | `docs/design.md` | The Workers Free design: sync, write budget, limits, security, migration plan |
@@ -67,9 +67,9 @@ data or a Todoist token.
 ## Deploy
 
 Not yet (F2). The deploy job will run `deploy/deploy-vars.mjs` like Lab's: the owner's addresses come from the
-dashboard's GitHub secrets `DASHBOARD_ACCESS_OWNER(_ALIASES)`, and the CSRF key from FlowDay's own
-`FLOWDAY_CSRF_SIGNING_KEY`. Until then CI dry-runs the committed config with placeholder values and checks the
-bundle size.
+dashboard's GitHub secrets `DASHBOARD_ACCESS_OWNER(_ALIASES)`, and the CSRF key and the credential key (it seals
+the Todoist key stored in D1) from FlowDay's own `FLOWDAY_CSRF_SIGNING_KEY` and `FLOWDAY_CREDENTIAL_KEY`. Until then
+CI dry-runs the committed config with placeholder values and checks the bundle size.
 
 ## Feature tour
 

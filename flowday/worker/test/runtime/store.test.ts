@@ -190,15 +190,18 @@ describe('tasks', () => {
     expect((await getAllTasks(db))[0]).toMatchObject({ isCompleted: true, completedAt: '2026-04-13T10:00:00Z' });
   });
 
-  it('row counts: a new task costs 5 rows (row, key, 3 indexes); an unchanged upsert 0; a title change 1', async () => {
+  it('row counts: a new task costs 3 rows (row, key, deleted_at index); an unchanged upsert 0; a title or due change 1', async () => {
     let meter = new Meter();
     await upsertTasks(h.db(meter), [makeTask({ id: 't1', todoistId: 'td-1', dueDate: '2026-04-13' })]);
-    expect(meter.rowsWritten).toBe(5);
+    expect(meter.rowsWritten).toBe(3);
     meter = new Meter();
     await upsertTasks(h.db(meter), [makeTask({ id: 't1', todoistId: 'td-1', dueDate: '2026-04-13' })]);
     expect(meter.rowsWritten).toBe(0);
     meter = new Meter();
     await upsertTasks(h.db(meter), [makeTask({ id: 't1', todoistId: 'td-1', dueDate: '2026-04-13', title: 'New title' })]);
+    expect(meter.rowsWritten).toBe(1);
+    meter = new Meter();
+    await upsertTasks(h.db(meter), [makeTask({ id: 't1', todoistId: 'td-1', dueDate: '2026-04-20', title: 'New title' })]);
     expect(meter.rowsWritten).toBe(1);
   });
 });
@@ -252,6 +255,15 @@ describe('time entries', () => {
     endTime: null,
     durationS,
     source: 'timer' as const,
+  });
+
+  it('row counts: an insert costs 4 rows (row, TEXT key index, task_id and flow_date indexes); a time update 1', async () => {
+    let meter = new Meter();
+    await createTimeEntry(h.db(meter), entry('e1', 't1', '2026-04-13'));
+    expect(meter.rowsWritten).toBe(4);
+    meter = new Meter();
+    await updateTimeEntry(h.db(meter), 'e1', { startTime: '2026-04-13T09:05:00Z', endTime: '2026-04-13T09:30:00Z', durationS: 1500 });
+    expect(meter.rowsWritten).toBe(1);
   });
 
   it('creates and reads by task, by date, by both, and by range', async () => {

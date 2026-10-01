@@ -4,11 +4,12 @@
 //
 // - with `wrangler deploy --var NAME:value` (a plain_text var, exactly like a [vars] entry): BUILD_SHA (the
 //   commit). FlowDay has no GitHub-variable switches;
-// - with `--secrets-file` (Worker secrets, hidden in wrangler's output): the owner's addresses and the CSRF key
-//   (inputs FLOWDAY_ACCESS_OWNER, FLOWDAY_ACCESS_OWNER_ALIASES, FLOWDAY_CSRF_SIGNING_KEY, masked in the public
-//   Actions log). The deploy job (from F2) fills the first two from the dashboard's environment secrets
-//   DASHBOARD_ACCESS_OWNER and DASHBOARD_ACCESS_OWNER_ALIASES (the same owner, like Lab) and the key from FlowDay's
-//   own FLOWDAY_CSRF_SIGNING_KEY (../README.md "Deploy").
+// - with `--secrets-file` (Worker secrets, hidden in wrangler's output): the owner's addresses, the CSRF key and
+//   the credential key that seals the Todoist key in D1 (inputs FLOWDAY_ACCESS_OWNER, FLOWDAY_ACCESS_OWNER_ALIASES,
+//   FLOWDAY_CSRF_SIGNING_KEY, FLOWDAY_CREDENTIAL_KEY, masked in the public Actions log). The deploy job (from F2)
+//   fills the first two from the dashboard's environment secrets DASHBOARD_ACCESS_OWNER and
+//   DASHBOARD_ACCESS_OWNER_ALIASES (the same owner, like Lab) and the keys from FlowDay's own
+//   FLOWDAY_CSRF_SIGNING_KEY and FLOWDAY_CREDENTIAL_KEY (../README.md "Deploy").
 //
 // NOT DEPLOYED YET: ../wrangler.toml still has the all-zeros D1 id and Access AUD (F2 replaces them). A real
 // deploy is refused while either placeholder is committed (now, and later as a guard against a revert); a
@@ -25,7 +26,7 @@
 // .github/scripts/test_wrangler_configs.py reads the next lines: every CI step that runs `exec` or `secrets`
 // must set each input of that mode (Actions sets GITHUB_* itself).
 // deploy-vars-inputs exec: GITHUB_SHA
-// deploy-vars-inputs secrets: FLOWDAY_ACCESS_OWNER FLOWDAY_ACCESS_OWNER_ALIASES FLOWDAY_CSRF_SIGNING_KEY
+// deploy-vars-inputs secrets: FLOWDAY_ACCESS_OWNER FLOWDAY_ACCESS_OWNER_ALIASES FLOWDAY_CSRF_SIGNING_KEY FLOWDAY_CREDENTIAL_KEY
 import { spawnSync } from 'node:child_process'
 import { readFileSync, realpathSync, writeFileSync } from 'node:fs'
 import { resolve } from 'node:path'
@@ -86,6 +87,9 @@ export function generateSecrets(env) {
     // aliases) rather than left out, which would keep the previous aliases working.
     ACCESS_OWNER_ALIASES: list.join(',') || ' ',
     CSRF_SIGNING_KEY: checked(env, 'FLOWDAY_CSRF_SIGNING_KEY', /^[0-9a-fA-F]{64}$/),
+    // AES-256-GCM key of the Todoist key at rest (worker/src/credentials.ts). Losing or changing it only means
+    // entering the Todoist key again in Settings.
+    CREDENTIAL_KEY: checked(env, 'FLOWDAY_CREDENTIAL_KEY', /^[0-9a-fA-F]{64}$/),
   }
 }
 
@@ -134,7 +138,7 @@ export function run(argv, env = process.env) {
   }
   if (command === 'secrets' && rest.length === 1) {
     writeSecrets(rest[0], env)
-    console.log('Wrote the secrets file: ACCESS_OWNER, ACCESS_OWNER_ALIASES, CSRF_SIGNING_KEY (values not printed).')
+    console.log('Wrote the secrets file: ACCESS_OWNER, ACCESS_OWNER_ALIASES, CSRF_SIGNING_KEY, CREDENTIAL_KEY (values not printed).')
     return 0
   }
   if (command === 'exec' && rest[0] === '--') {

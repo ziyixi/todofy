@@ -1,10 +1,10 @@
 /**
  * Day flows (flow_tasks: the ordered task ids of a day) and the tasks done on a day (completed_flow_tasks).
  *
- * flow_tasks has three indexes besides its key (unique (flow_date, task_id), flow_date, task_id), so rewriting a
- * whole day costs about five D1 row writes per task. setFlow writes the difference instead: it deletes the tasks
- * that left the day, inserts the new ones and moves only the rows whose position changed (sort_order is not
- * indexed: one row write each).
+ * flow_tasks has two indexes besides its key (unique (flow_date, task_id) and task_id; migration 0003 dropped the
+ * redundant flow_date one), so rewriting a whole day costs about four D1 row writes per task. setFlow writes the
+ * difference instead: it deletes the tasks that left the day, inserts the new ones and moves only the rows whose
+ * position changed (sort_order is not indexed: one row write each).
  */
 import { and, asc, eq, gte, lte, sql, type SQL } from 'drizzle-orm';
 import type { Db } from '../db.ts';

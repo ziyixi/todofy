@@ -6,6 +6,8 @@ The root [`AGENTS.md`](../AGENTS.md) applies here too. FlowDay-specific rules:
   Todofy is the only Todoist writer in this repository.
 - **Public repository.** Never commit a database file, a Todoist token, an owner email, a real task
   title or a screenshot of real data. Tests, seeds, README figures and goldens use synthetic data only.
+  The Todoist key is stored only sealed (AES-GCM under the `CREDENTIAL_KEY` secret, `worker/src/credentials.ts`);
+  never store, export or log it in plain text.
   Never open the live FlowDay database; when a real copy is needed, copy it first and open the copy
   read-only (`file:<copy>?immutable=1`).
 - **Status (F1).** The Worker `flowday` (`worker/`, `migrations/`, `wrangler.toml`) and the static-export UI
@@ -24,7 +26,10 @@ The root [`AGENTS.md`](../AGENTS.md) applies here too. FlowDay-specific rules:
   Todoist, writes only rows whose values changed, runs on page open, slow polling while the page is
   visible and a manual refresh, stops while hidden, and is throttled atomically on the server. Keep a
   typical day well under 1,000 rows written: `worker/test/runtime/sync.test.ts` and `budget.test.ts`
-  prove it. Remember that SQLite rewrites an index entry whenever its column is in an UPDATE's SET list.
+  prove it. Remember that SQLite rewrites an index entry whenever its column is in an UPDATE's SET list, and
+  add an index only for a query that needs it (each one costs a row on every insert).
+- **Bounded sync work.** One request applies at most `SYNC_CHUNK` Todoist items and parses at most
+  `MAX_SYNC_ITEMS`/`MAX_SYNC_BYTES`; check a cap change against the cold first run in `cpu.test.ts`.
 - **Next.js.** This Next.js version has breaking changes from older ones: read the relevant guide in
   `web/node_modules/next/dist/docs/` before changing framework code, and heed deprecation notices.
 - **Style.** English code comments; small, tidy modules. Before committing run, in `worker/`, `npm run

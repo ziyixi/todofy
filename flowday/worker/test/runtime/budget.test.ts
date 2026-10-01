@@ -39,7 +39,7 @@ function task(n: number): Task {
 }
 
 describe('write budget of a day of use', () => {
-  it('planning, a dozen timer segments, notes, estimates and the review stay below 300 rows', async () => {
+  it('planning, a dozen timer segments, notes, estimates and the review stay below 250 rows', async () => {
     await h.reset();
     await upsertTasks(h.db(), Array.from({ length: 200 }, (_, n) => task(n)));
     const rows: Record<string, number> = {};
@@ -80,6 +80,6 @@ describe('write budget of a day of use', () => {
 
     const total = Object.values(rows).reduce((sum, value) => sum + value, 0);
     console.log(`write budget of a day of use: ${String(total)} rows ${JSON.stringify(rows)}`);
-    expect(total).toBeLessThan(300);
+    expect(total).toBeLessThan(250);
   });
 });

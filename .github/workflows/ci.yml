@@ -653,6 +653,7 @@ jobs:
           FLOWDAY_ACCESS_OWNER: owner@example.com
           FLOWDAY_ACCESS_OWNER_ALIASES: ''
           FLOWDAY_CSRF_SIGNING_KEY: '0000000000000000000000000000000000000000000000000000000000000000'
+          FLOWDAY_CREDENTIAL_KEY: '0000000000000000000000000000000000000000000000000000000000000000'
         run: |
           node ../deploy/deploy-vars.mjs secrets "$RUNNER_TEMP/flowday-secrets.json"
           node ../deploy/deploy-vars.mjs exec -- npx --no-install wrangler deploy --dry-run --config ../wrangler.toml \

@@ -72,18 +72,19 @@ export interface ActiveTimerSession {
 }
 
 /**
- * POST /api/sync. `synced`: Todoist was read and `changed` task rows were written. `throttled`: another tab or
- * device synced within the minimum interval; nothing was read or written. Without a stored Todoist key the answer
- * is the error 400 no_todoist_key.
+ * POST /api/sync. `synced`: Todoist was read and its answer applied; `changed` task rows were written. `partial`:
+ * part of a large answer was applied (or a full pass must follow); the page asks again right away. `throttled`:
+ * another tab or device synced within the minimum interval; nothing was read or written. Without a stored Todoist
+ * key the answer is the error 400 no_todoist_key.
  */
 export interface SyncResponse {
-  status: 'synced' | 'throttled';
+  status: 'synced' | 'partial' | 'throttled';
   /** Task rows this sync inserted, updated, hid or restored (0 when nothing changed). */
   changed: number;
   /** Whether Todoist answered with a full sync (first sync, new token, or Todoist reset the sync token). */
   fullSync: boolean;
   lastSyncAt: string | null;
-  /** Earliest time (epoch ms) at which an automatic sync may run again. */
+  /** Earliest time (epoch ms) at which an automatic sync may run again (later after failed syncs). */
   nextAutoSyncAt: number;
 }
 

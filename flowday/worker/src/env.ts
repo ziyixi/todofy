@@ -17,6 +17,8 @@ export interface Env {
   readonly ACCESS_OWNER_ALIASES?: string;
   /** 64 hex characters: HMAC key of the flowday_csrf tokens. */
   readonly CSRF_SIGNING_KEY?: string;
+  /** 64 hex characters: AES-256-GCM key that seals the Todoist API key in D1 (./credentials.ts). */
+  readonly CREDENTIAL_KEY?: string;
 
   // local development and tests only (.dev.vars, `wrangler dev --var`, the workerd harness); never committed
   readonly DEV_AUTH_BYPASS?: string;

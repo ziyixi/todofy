@@ -2,8 +2,8 @@
  * The tasks table: Todoist tasks (id = Todoist id) and FlowDay's own local tasks (id "local-<uuid>").
  *
  * Every write here changes only rows whose values differ, because D1 counts each written row plus one per index
- * the write touches (tasks has three: due_date, deleted_at, todoist_id). Lists of ids travel as one JSON
- * parameter read with json_each(), never as one bound parameter per id (D1 allows 100 per statement).
+ * entry the write touches (tasks keeps one secondary index, deleted_at, since migration 0003). Lists of ids travel
+ * as one JSON parameter read with json_each(), never as one bound parameter per id (D1 allows 100 per statement).
  */
 import { and, eq, isNotNull, isNull, ne, or, sql, type SQL } from 'drizzle-orm';
 import type { Task, TaskPriority } from '../api-types.ts';
@@ -13,8 +13,8 @@ import { completedFlowTasks, flowTasks, tasks } from '../schema.ts';
 type TaskRow = typeof tasks.$inferSelect;
 
 /**
- * Rows per upsert statement: keeps each JSON parameter well below D1's limits and, with MAX_SYNC_ITEMS (5,000), a
- * full sync within D1's 50 queries per Worker invocation (25 upserts + 4 other task statements + 3 settings + 2).
+ * Rows per upsert statement: keeps each JSON parameter well below D1's limits. The sync applies at most this many
+ * Todoist items per request (../sync.ts SYNC_CHUNK), so one sync request runs one upsert statement.
  */
 export const UPSERT_CHUNK = 200;
 
@@ -196,8 +196,9 @@ export function taskToUpsertRow(task: Task, todoistProjectId: string | null = nu
   };
 }
 
-/** Columns without an index: changing one costs one D1 row write. */
+/** Columns the upsert compares and sets. None is indexed, so changing any of them costs one D1 row write. */
 const PLAIN_COLUMNS = [
+  'todoist_id',
   'title',
   'description',
   'project_name',
@@ -206,19 +207,19 @@ const PLAIN_COLUMNS = [
   'labels',
   'is_completed',
   'completed_at',
+  'due_date',
   'todoist_project_id',
 ] as const;
 
 /**
- * The upsert of `rows` as statements for one batch. Only rows (and, for indexed columns, only columns) whose values
- * differ are written: SQLite rewrites an index entry whenever its column appears in an UPDATE's SET list, even with
- * the same value, and D1 counts each index entry written as one more row. So:
- * 1. INSERT … SELECT FROM json_each(rows) ON CONFLICT DO UPDATE SET <unindexed columns> WHERE <one of them differs>
+ * The upsert of `rows` as statements for one batch. Only rows whose values differ are written, and the only
+ * indexed column, deleted_at, is never in the upsert's SET list: SQLite rewrites an index entry whenever its column
+ * is assigned, even to the same value, and D1 counts each index entry written as one more row. So:
+ * 1. INSERT … SELECT FROM json_each(rows) ON CONFLICT DO UPDATE SET <the plain columns> WHERE <one of them differs>
  *    (chunks of UPSERT_CHUNK rows). New rows are inserted whole.
- * 2. One UPDATE per indexed column (due_date, todoist_id) for exactly the rows where it differs.
- * 3. Restores the rows a sync had hidden (deleted_source 'sync'); a task deleted in FlowDay ('local') stays deleted.
- * A row with no difference is not written at all (0 rows). A Todoist task without a duration (estimated_mins null)
- * keeps the estimate set in FlowDay. synced_at records when statement 1 last changed the row.
+ * 2. Restores the rows a sync had hidden (deleted_source 'sync'); a task deleted in FlowDay ('local') stays deleted.
+ * A row with no difference is not written at all (0 rows); a changed row costs 1. A Todoist task without a duration
+ * (estimated_mins null) keeps the estimate set in FlowDay. synced_at records when statement 1 last changed the row.
  */
 export function upsertStatements(rows: readonly TaskUpsertRow[], syncedAt: string): SQL[] {
   if (rows.length === 0) return [];
@@ -229,6 +230,7 @@ export function upsertStatements(rows: readonly TaskUpsertRow[], syncedAt: strin
       '(excluded.estimated_mins IS NOT NULL AND tasks.estimated_mins IS NOT excluded.estimated_mins)',
     ].join(' OR '),
   );
+  const assign = sql.raw(PLAIN_COLUMNS.map((column) => `${column} = excluded.${column}`).join(', '));
   const out: SQL[] = [];
   for (let start = 0; start < rows.length; start += UPSERT_CHUNK) {
     const json = JSON.stringify(rows.slice(start, start + UPSERT_CHUNK));
@@ -239,30 +241,23 @@ export function upsertStatements(rows: readonly TaskUpsertRow[], syncedAt: strin
         ${pick('is_completed')}, ${pick('completed_at')}, ${pick('due_date')}, ${pick('created_at')}, ${syncedAt},
         ${pick('todoist_project_id')}
       FROM json_each(${json}) WHERE true
-      ON CONFLICT(id) DO UPDATE SET
-        title = excluded.title, description = excluded.description, project_name = excluded.project_name,
-        project_color = excluded.project_color, priority = excluded.priority, labels = excluded.labels,
-        estimated_mins = COALESCE(excluded.estimated_mins, tasks.estimated_mins), is_completed = excluded.is_completed,
-        completed_at = excluded.completed_at, todoist_project_id = excluded.todoist_project_id,
-        synced_at = excluded.synced_at
+      ON CONFLICT(id) DO UPDATE SET ${assign},
+        estimated_mins = COALESCE(excluded.estimated_mins, tasks.estimated_mins), synced_at = excluded.synced_at
       WHERE ${differs}`);
-  }
-  const pairs = (column: 'due_date' | 'todoist_id') => JSON.stringify(rows.map((row) => [row.id, row[column]]));
-  for (const column of ['due_date', 'todoist_id'] as const) {
-    out.push(sql`UPDATE tasks SET ${sql.raw(column)} = j.v
-      FROM (SELECT json_extract(value, '$[0]') AS id, json_extract(value, '$[1]') AS v FROM json_each(${pairs(column)})) AS j
-      WHERE tasks.id = j.id AND tasks.${sql.raw(column)} IS NOT j.v`);
   }
   out.push(sql`UPDATE tasks SET deleted_at = NULL, deleted_source = NULL
     WHERE deleted_source = 'sync' AND id IN (SELECT value FROM json_each(${JSON.stringify(rows.map((row) => row.id))}))`);
   return out;
 }
 
-/** Hides (deleted_source 'sync') the visible Todoist tasks with these ids: completed or deleted in Todoist. */
+/**
+ * Hides (deleted_source 'sync') the visible Todoist tasks with these ids: completed or deleted in Todoist. A
+ * Todoist task's id is its Todoist id, so the primary key finds it.
+ */
 export function hideStatement(ids: readonly string[], now: string): SQL {
   return sql`UPDATE tasks SET deleted_at = ${now}, deleted_source = 'sync'
-    WHERE deleted_at IS NULL AND todoist_id IS NOT NULL
-      AND todoist_id IN (SELECT value FROM json_each(${JSON.stringify(ids)}))`;
+    WHERE id IN (SELECT value FROM json_each(${JSON.stringify(ids)}))
+      AND deleted_at IS NULL AND todoist_id IS NOT NULL`;
 }
 
 /**
@@ -271,8 +266,15 @@ export function hideStatement(ids: readonly string[], now: string): SQL {
  */
 export function orphanStatement(activeIds: readonly string[], now: string): SQL {
   return sql`UPDATE tasks SET deleted_at = ${now}, deleted_source = 'sync'
-    WHERE todoist_id IS NOT NULL AND deleted_at IS NULL
-      AND todoist_id NOT IN (SELECT value FROM json_each(${JSON.stringify(activeIds)}))`;
+    WHERE deleted_at IS NULL AND todoist_id IS NOT NULL
+      AND id NOT IN (SELECT value FROM json_each(${JSON.stringify(activeIds)}))`;
+}
+
+/** Hides the visible tasks of Todoist projects that were archived or deleted. */
+export function hideProjectsStatement(projectIds: readonly string[], now: string): SQL {
+  return sql`UPDATE tasks SET deleted_at = ${now}, deleted_source = 'sync'
+    WHERE deleted_at IS NULL AND todoist_id IS NOT NULL
+      AND todoist_project_id IN (SELECT value FROM json_each(${JSON.stringify(projectIds)}))`;
 }
 
 /** Renames or recolours the tasks of changed projects (only the rows whose name or colour differ). */

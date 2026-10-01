@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useFlowStore } from "@/features/flow/store";
 import { useTodoistStore } from "@/features/todoist/store";
+import { MAX_SYNC_REQUESTS } from "@/features/todoist/store/todoist-store";
 import { useTimerStore } from "@/features/timer/store";
 import type { Task } from "@/lib/types/task";
 
@@ -191,6 +192,41 @@ describe("todoist store", () => {
     vi.stubGlobal("fetch", fetchMock);
     expect(await useTodoistStore.getState().sync("auto")).toBe(true);
     expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("asks again right away while the Worker answers partial, then reloads the task list once", async () => {
+    const statuses = ["partial", "partial", "synced"];
+    const calls: string[] = [];
+    const fetchMock = vi.fn((input: string | URL | Request, init?: RequestInit) => {
+      const url = typeof input === "string" ? input : input.toString();
+      calls.push(`${init?.method ?? "GET"} ${url}`);
+      if (url === "/api/sync" && init?.method === "POST") {
+        const status = statuses.shift() ?? "synced";
+        return Promise.resolve(
+          jsonResponse({ status, changed: 200, fullSync: true, lastSyncAt: "2026-04-13T09:00:00.000Z", nextAutoSyncAt: 1 })
+        );
+      }
+      if (url === "/api/tasks") return Promise.resolve(jsonResponse([makeTask()]));
+      if (url.startsWith("/api/settings")) return Promise.resolve(jsonResponse({ last_sync_at: "2026-04-13T09:00:00.000Z", has_api_key: true }));
+      throw new Error(`Unexpected fetch: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    expect(await useTodoistStore.getState().sync("auto")).toBe(true);
+    expect(calls.filter((call) => call === "POST /api/sync")).toHaveLength(3);
+    expect(calls.filter((call) => call === "GET /api/tasks")).toHaveLength(1);
+  });
+
+  it("stops after MAX_SYNC_REQUESTS partial answers", async () => {
+    const fetchMock = vi.fn((input: string | URL | Request, init?: RequestInit) => {
+      const url = typeof input === "string" ? input : input.toString();
+      if (url === "/api/sync" && init?.method === "POST") {
+        return Promise.resolve(jsonResponse({ status: "partial", changed: 0, fullSync: false, lastSyncAt: null, nextAutoSyncAt: 1 }));
+      }
+      throw new Error(`Unexpected fetch: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    expect(await useTodoistStore.getState().sync("auto")).toBe(true);
+    expect(fetchMock).toHaveBeenCalledTimes(MAX_SYNC_REQUESTS);
   });
 
   it("deletes tasks optimistically, removes them from flow state, and stops the active timer", async () => {

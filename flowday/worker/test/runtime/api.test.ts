@@ -9,7 +9,7 @@ import { addCompletedFlowTask, getAllFlows, setFlowTaskIds } from '../../src/sto
 import { createTimeEntry, getEntriesByTask } from '../../src/store/entries.ts';
 import { getSetting, setSetting } from '../../src/store/settings.ts';
 import { upsertTasks } from '../../src/store/tasks.ts';
-import { startHarness, type Harness } from './harness.ts';
+import { startHarness, storeTodoistKey, type Harness } from './harness.ts';
 
 let h: Harness;
 beforeAll(async () => {
@@ -239,16 +239,32 @@ describe('/api/settings', () => {
     expect((await h.get<SettingsResponse>('/api/settings')).last_sync_at).toBe('2026-04-13T12:00:00.000Z');
   });
 
-  it('PUT stores the key (GET masks it), rejects an empty key, and a new key restarts the sync from scratch', async () => {
+  it('PUT stores the key sealed (GET masks it), rejects an empty key, and a new key restarts the sync from scratch', async () => {
     await setSetting(h.db(), 'todoist_sync_token', 'old-token');
     await setSetting(h.db(), 'sync_claimed_at', String(Date.now()));
+    await setSetting(h.db(), 'todoist_sync_pending', '{"base":"*","token":"t","after":"x"}');
     expect((await h.mutate('PUT', '/api/settings', { todoist_api_key: 'my-secret-key-12345' })).body).toEqual({ success: true });
     expect(await h.get<SettingsResponse>('/api/settings')).toMatchObject({ todoist_api_key: '••••••••', has_api_key: true });
+    // Only ciphertext is stored: D1, its Time Travel history and any export never hold the key.
+    const stored = await getSetting(h.db(), 'todoist_api_key');
+    expect(stored).toMatch(/^v1\./);
+    expect(stored).not.toContain('my-secret-key');
     expect(await getSetting(h.db(), 'todoist_sync_token')).toBeNull();
     expect(await getSetting(h.db(), 'sync_claimed_at')).toBeNull();
+    expect(await getSetting(h.db(), 'todoist_sync_pending')).toBeNull();
     const same = await h.mutate('PUT', '/api/settings', { todoist_api_key: 'my-secret-key-12345' });
     expect(same.rowsWritten).toBe(0);
+    expect(await getSetting(h.db(), 'todoist_api_key')).toBe(stored);
     expect((await h.mutate('PUT', '/api/settings', { todoist_api_key: '' })).status).toBe(400);
+  });
+
+  it('a plaintext key from an older copy counts as no key', async () => {
+    await setSetting(h.db(), 'todoist_api_key', 'plain-token');
+    expect(await h.get<SettingsResponse>('/api/settings')).toMatchObject({ todoist_api_key: null, has_api_key: false });
+    const result = await h.mutate('POST', '/api/sync', { mode: 'manual' });
+    expect(result.status).toBe(400);
+    expect(errorOf(result.body).code).toBe('todoist_key_unreadable');
+    expect(h.todoist.requests).toHaveLength(0);
   });
 
   it('PUT capacity, planning day, combined updates; ignores an invalid planning date; rejects a negative capacity', async () => {
@@ -295,7 +311,7 @@ describe('/api/sync', () => {
   });
 
   it('syncs through the Worker, then throttles the next automatic sync', async () => {
-    await setSetting(h.db(), 'todoist_api_key', 'synthetic-token');
+    await storeTodoistKey(h.db(), 'synthetic-token');
     h.todoist.setProjects([{ id: 'p1', name: 'Inbox', color: 'blue' }]);
     h.todoist.setItems([{ id: 'td-1', content: 'From Todoist', project_id: 'p1' }]);
     const first = await h.mutate('POST', '/api/sync', { mode: 'auto' });
@@ -306,8 +322,14 @@ describe('/api/sync', () => {
     expect(second.rowsWritten).toBe(0);
   });
 
+  it('sends the opened key to Todoist only', async () => {
+    expect((await h.mutate('PUT', '/api/settings', { todoist_api_key: 'saved-through-settings' })).status).toBe(200);
+    await h.mutate('POST', '/api/sync', { mode: 'manual' });
+    expect(h.todoist.requests.map((request) => request.authorization)).toEqual(['Bearer saved-through-settings']);
+  });
+
   it('502 todoist_unauthorized when Todoist rejects the key', async () => {
-    await setSetting(h.db(), 'todoist_api_key', 'synthetic-token');
+    await storeTodoistKey(h.db(), 'synthetic-token');
     h.todoist.status = 401;
     const result = await h.mutate('POST', '/api/sync', { mode: 'manual' });
     expect(result.status).toBe(502);
