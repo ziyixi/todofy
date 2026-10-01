@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://contracts.local/ops-v1/ops-v1.schema.json",
   "title": "ops-v1: the typed operations surface of Mail Hero, Todofy and Lab",
-  "description": "Every input and output of the named WorkerEntrypoint \"Ops\" of each app, one $defs entry each (README.md maps methods to entries). Generated from proto/ops/v1/ops.proto by proto/tools/gen_schema.py: do not edit. Outputs are closed so that nothing but codes, numbers, booleans and timestamps can leave an app; consumers still ignore fields they do not know.",
+  "description": "The name this schema used for ErrorCode before it was generated from the IDL; kept for readers.",
   "$defs": {
     "Timestamp": {
       "description": "RFC 3339 UTC with Z, optional milliseconds.",
@@ -694,6 +694,54 @@
         }
       },
       "additionalProperties": false
+    },
+    "App": {
+      "description": "The name this schema used for OpsStatus.app before it was generated from the IDL; kept for readers.",
+      "enum": [
+        "mail-hero",
+        "todofy",
+        "lab"
+      ]
+    },
+    "Counters": {
+      "description": "The name this schema used for OpsStatus.counters before it was generated from the IDL; kept for readers.",
+      "type": "object",
+      "maxProperties": 32,
+      "propertyNames": {
+        "$ref": "#/$defs/Code"
+      },
+      "additionalProperties": {
+        "type": "number"
+      }
+    },
+    "Metrics": {
+      "description": "The name this schema used for Signal.metrics before it was generated from the IDL; kept for readers.",
+      "type": "object",
+      "maxProperties": 12,
+      "propertyNames": {
+        "$ref": "#/$defs/Code"
+      },
+      "additionalProperties": {
+        "type": "number"
+      }
+    },
+    "Modes": {
+      "description": "The name this schema used for OpsStatus.modes before it was generated from the IDL; kept for readers.",
+      "type": "object",
+      "required": [
+        "maintenance"
+      ],
+      "maxProperties": 12,
+      "propertyNames": {
+        "$ref": "#/$defs/Code"
+      },
+      "additionalProperties": {
+        "type": "boolean"
+      }
+    },
+    "OpsErrorCode": {
+      "description": "The name this schema used for ErrorCode before it was generated from the IDL; kept for readers.",
+      "$ref": "#/$defs/ErrorCode"
     }
   }
 }

@@ -6,12 +6,13 @@ Usage (npm run schema rewrites the committed schemas, npm run check:schema fails
 
 A contract's published wire description is its JSON Schema, readable without this repository's codecs. It is
 generated, never written by hand: one ``$defs`` entry per format, enum and message of the package (``OpsStatus``,
-``Code``), every message closed (``additionalProperties: false``), a REQUIRED field required (``null`` allowed when it
-is declared ``optional``), a union (``discriminator``) a ``oneOf`` of one branch per discriminator value with the
-fields that value has. Patterns are anchored as ECMAScript and Python's ``re.search`` both need (``$(?!\\n)``: Python's
-``$`` also matches before a final newline). The schema is the producer's view: an ``open`` allowed list is closed
-here, as it is for a write; a consumer reads such a field more leniently (the codecs' lenient read). Rules the IDL
-cannot hold (a clock bound, a whole message's size) are in the contract's README, not here.
+``Code``), every message closed (``additionalProperties: false``), a REQUIRED field required (``null`` allowed where a
+producer may write it: ``wire_rules.may_be_null``), a union (``discriminator``) a ``oneOf`` of one branch per
+discriminator value with the fields that value has. Patterns are anchored as ECMAScript and Python's ``re.search``
+both need (``$(?!\\n)``: Python's ``$`` also matches before a final newline). The schema is the producer's view: an
+``open`` allowed list is closed here, as it is for a write; a consumer reads such a field more leniently (the codecs'
+lenient read). Rules the IDL cannot hold (a clock bound, a whole message's size) are in the contract's README, not
+here.
 
 SCHEMAS maps a package to its committed schema and the schema's identity. Only keywords
 contracts/task-intent-v1/validate.mjs implements are written, so a TypeScript test may still check a fixture with it.
@@ -38,6 +39,18 @@ SCHEMAS = {
         "are closed so that nothing but codes, numbers, booleans and timestamps can leave an app; consumers still "
         "ignore fields they do not know.",
     ),
+}
+# package -> {$defs name a published schema had before it was generated: what it names now}. A message's field
+# ("OpsStatus.counters") is that field's schema; anything else is a $defs entry. An outside reader that resolves
+# "#/$defs/OpsErrorCode" keeps working, and the generated document stays the one description.
+ALIASES = {
+    "ops.v1": {
+        "App": "OpsStatus.app",
+        "Counters": "OpsStatus.counters",
+        "Metrics": "Signal.metrics",
+        "Modes": "OpsStatus.modes",
+        "OpsErrorCode": "ErrorCode",
+    },
 }
 SCALARS = {"TYPE_STRING": "string", "TYPE_BOOL": "boolean", "TYPE_INT32": "integer", "TYPE_DOUBLE": "number"}
 STRING_WKT = (".google.protobuf.Timestamp", ".google.protobuf.FieldMask")
@@ -137,7 +150,7 @@ class Package:
             schema["items"] = self.value(field, view, where)
             return schema
         schema = self.value(field, view, where)
-        if wire_rules.required(field) and field.get("proto3Optional") and view.presence != "required":
+        if wire_rules.may_be_null(field, rules) and view.presence != "required":
             return nullable(schema)
         return schema
 
@@ -189,6 +202,22 @@ class Package:
                 if message["name"] in defs:
                     raise GenerateError(f"{self.package}.{message['name']}: its $defs name is taken")
                 defs[message["name"]] = self.message(file, message)
+        for alias, target in sorted(ALIASES.get(self.package, {}).items()):
+            if alias in defs:
+                raise GenerateError(f"{self.package}: the alias {alias} is a generated $defs name")
+            description = (
+                f"The name this schema used for {target} before it was generated from the IDL; kept for readers."
+            )
+            if "." in target:
+                message, field = target.split(".", 1)
+                found = defs.get(message, {}).get("properties", {}).get(field)
+                if found is None:
+                    raise GenerateError(f"{self.package}: the alias {alias} names no field {target}")
+                defs[alias] = {"description": description, **found}
+            elif target in defs:
+                defs[alias] = {"description": description, "$ref": f"#/$defs/{target}"}
+            else:
+                raise GenerateError(f"{self.package}: the alias {alias} names no $defs entry {target}")
         return {
             "$schema": "https://json-schema.org/draft/2020-12/schema",
             "$id": identity,

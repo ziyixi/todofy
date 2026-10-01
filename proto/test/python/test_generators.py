@@ -148,12 +148,26 @@ class WireTypesTest(unittest.TestCase):
 
 class SchemaTest(unittest.TestCase):
     def setUp(self) -> None:
-        self.saved = gen_schema.SCHEMAS
+        self.saved = gen_schema.SCHEMAS, gen_schema.ALIASES
         gen_schema.SCHEMAS = {"ops.v1": ("x.json", "https://contracts.local/x.json", "T", "D")}
+        gen_schema.ALIASES = {"ops.v1": {"Old": "M_State", "OldId": "GetRequest.event_id"}}
         self.schema = json.loads(gen_schema.generate({"file": [union_file()]})["x.json"])
 
     def tearDown(self) -> None:
-        gen_schema.SCHEMAS = self.saved
+        gen_schema.SCHEMAS, gen_schema.ALIASES = self.saved
+
+    def test_an_earlier_defs_name_is_an_alias_of_what_the_idl_generates(self) -> None:
+        old = self.schema["$defs"]["Old"]
+        self.assertEqual({k: v for k, v in old.items() if k != "description"}, {"$ref": "#/$defs/M_State"})
+        old_id = self.schema["$defs"]["OldId"]
+        self.assertEqual(
+            {k: v for k, v in old_id.items() if k != "description"},
+            self.schema["$defs"]["GetRequest"]["properties"]["event_id"],
+        )
+        for aliases in ({"Gone": "Nope"}, {"Gone": "M.nope"}, {"M": "M_State"}):
+            gen_schema.ALIASES = {"ops.v1": aliases}
+            with self.subTest(aliases=aliases), self.assertRaises(gen_schema.GenerateError):
+                gen_schema.generate({"file": [union_file()]})
 
     def test_a_union_is_a_one_of_with_a_branch_per_value(self) -> None:
         branches = self.schema["$defs"]["M"]["oneOf"]
