@@ -93,6 +93,8 @@ export interface HarnessOptions {
   readonly bindings?: Record<string, string>;
   /** Extra outbound routes (e.g. the Access certs endpoint), by URL. */
   readonly routes?: Map<string, () => Response>;
+  /** Opens workerd's DevTools inspector on this port (the CPU profile of ./cpu.test.ts). */
+  readonly inspectorPort?: number;
 }
 
 export interface Harness {
@@ -158,6 +160,7 @@ export async function startHarness(options: HarnessOptions = {}): Promise<Harnes
       host: '127.0.0.1',
       port: 0,
       resourcePersistencePath: temp,
+      ...(options.inspectorPort === undefined ? {} : { inspectorPort: options.inspectorPort }),
       workers: [
         {
           name: 'lab',
