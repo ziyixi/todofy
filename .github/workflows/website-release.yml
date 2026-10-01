@@ -289,13 +289,23 @@ jobs:
       # Custom Domains in wrangler.toml would detach a live hostname or take over another Worker's hostname or a
       # DNS record. Nothing is recorded yet, so a refusal leaves no release record to recover. `deploy` checks
       # again. For an intentional change set the exact hostnames here and on the deploy step, in the same commit.
+      # This file comes from main, the code from the green commit, which can predate the guard (a release
+      # dispatched between the merge of the guard and its first green CI gate): that commit has no
+      # `hostnames` command and deploys as before, so it is skipped. Only a commit whose history never had
+      # tools/cf-guard is skipped; a commit that deleted it runs the command and fails.
       - name: Check the wrangler.toml hostnames against production
         if: steps.decision.outputs.deploy_required == 'true'
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
           CF_GUARD_ALLOW_REMOVE: ''
           CF_GUARD_ALLOW_CONFLICT: ''
-        run: pnpm release hostnames
+        run: |
+          guarded="$(git rev-list -1 HEAD -- ':(top)tools/cf-guard')"
+          if [ -n "$guarded" ]; then
+            pnpm release hostnames
+          else
+            echo "cf-guard: skipped: the checked-out commit predates tools/cf-guard and deploys as before"
+          fi
       - name: Upload the verified export as a Worker version
         id: upload
         if: steps.decision.outputs.deploy_required == 'true'

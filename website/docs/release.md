@@ -56,7 +56,10 @@ Each step is one `pnpm release <command>` ([`scripts/release/cli.ts`](../scripts
    `wrangler.toml` with the Worker's live Custom Domains (read-only) and stops the release, before anything
    is uploaded or recorded, when a live hostname would be detached or another Worker's hostname or an
    existing DNS record taken over (an intentional change sets `CF_GUARD_ALLOW_REMOVE` /
-   `CF_GUARD_ALLOW_CONFLICT` on this step and on `deploy`). Then production must still serve the baseline version; `wrangler versions upload` creates a
+   `CF_GUARD_ALLOW_CONFLICT` on this step and on `deploy`). The workflow comes from `main` and the code from
+   the green commit, so a release dispatched before the first green CI gate after the guard merged builds a
+   commit without it: the step skips only a commit whose history never had `tools/cf-guard` (it deploys as
+   before), and runs the guard for every later commit, including one that deleted it. Then production must still serve the baseline version; `wrangler versions upload` creates a
    version that serves nothing yet. (The very first release, `bootstrap`, uses `wrangler deploy` because a
    version cannot be uploaded to a Worker that does not exist.)
 9. `record`: a GitHub Deployment (payload schema 3: identity, version, previous version, live hostname,
