@@ -32,6 +32,12 @@ const nextFetchSlot = (at: number, hour: number): number => {
   return slot > at ? slot : slot + DAY;
 };
 const nextUtcDay = (at: number, minutes = 5): number => Date.parse(`${utcDay(at + DAY)}T00:00:00Z`) + minutes * 60_000;
+/**
+ * `at`, or later the same UTC day once today's fetch slot (06:30) has passed: a test that then jumps to
+ * nextUtcDay() must not cross a slot, whatever time of day the suite runs (it failed between 00:00 and 06:30).
+ */
+const afterTodaysSlot = (at: number, hour = 6): number =>
+  Math.max(at, Date.parse(`${utcDay(at)}T00:00:00Z`) + hour * 3_600_000 + 31 * 60_000);
 
 describe('a day at cold start', () => {
   it('fetches once, embeds, builds an explore deck with 简介 and stays idle until the next slot', async () => {
@@ -116,7 +122,7 @@ describe('the neuron cap', () => {
     // 40 texts ≈ 40 × 30 tokens × 1075 / 1e6 ≈ 1.3 neurons per embed batch; a 20-card 简介 set ≈ 20 × 3.7.
     h = await startHarness({ bindings: { LAB_DAILY_NEURONS: '20' } });
     h.arxiv.feed = { status: 200, body: rssFeed(dayItems('2609')) };
-    const start = now();
+    const start = afterTodaysSlot(now());
     await h.run(start);
     const today = await h.get<TodayResponse>('/api/today');
     // The deck is shown with the 简介 written so far; the rest fall back to the abstract.
