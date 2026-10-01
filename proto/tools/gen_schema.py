@@ -8,11 +8,12 @@ A contract's published wire description is its JSON Schema, readable without thi
 generated, never written by hand: one ``$defs`` entry per format, enum and message of the package (``OpsStatus``,
 ``Code``), every message closed (``additionalProperties: false``), a REQUIRED field required (``null`` allowed where a
 producer may write it: ``wire_rules.may_be_null``), a union (``discriminator``) a ``oneOf`` of one branch per
-discriminator value with the fields that value has. Patterns are anchored as ECMAScript and Python's ``re.search``
-both need (``$(?!\\n)``: Python's ``$`` also matches before a final newline). The schema is the producer's view: an
-``open`` allowed list is closed here, as it is for a write; a consumer reads such a field more leniently (the codecs'
-lenient read). Rules the IDL cannot hold (a clock bound, a whole message's size) are in the contract's README, not
-here.
+discriminator value with the fields that value has and the bounds its cases add. Patterns are anchored as ECMAScript
+and Python's ``re.search`` both need (``$(?!\\n)``: Python's ``$`` also matches before a final newline). The schema is
+the producer's view: an ``open`` allowed list is closed here, as it is for a write; a consumer reads such a field more
+leniently (the codecs' lenient read). A format's ``json_schema_format`` is written as ``format`` next to its pattern
+(an annotation the codecs do not check; a validator that asserts formats does). Rules the IDL cannot hold (a clock
+bound, a whole message's size) are in the contract's README, not here.
 
 SCHEMAS maps a package to its committed schema and the schema's identity. Only keywords
 contracts/task-intent-v1/validate.mjs implements are written, so a TypeScript test may still check a fixture with it.
@@ -134,8 +135,8 @@ class Package:
             schema: dict[str, Any] = {"type": "object"}
             if rules is not None and rules.required_keys:
                 schema["required"] = list(rules.required_keys)
-            if rules is not None and rules.max_items:
-                schema["maxProperties"] = rules.max_items
+            if view.max_items is not None:
+                schema["maxProperties"] = view.max_items
             if rules is not None and rules.key_format is not None:
                 schema["propertyNames"] = self.format_ref(rules.key_format)
             plain = wire_rules.FieldView(value, None, None, "", None, view.minimum, view.maximum)
@@ -143,8 +144,8 @@ class Package:
             return schema
         if field["label"] == "LABEL_REPEATED":
             schema = {"type": "array"}
-            if rules is not None and rules.max_items:
-                schema["maxItems"] = rules.max_items
+            if view.max_items is not None:
+                schema["maxItems"] = view.max_items
             if rules is not None and rules.unique:
                 schema["uniqueItems"] = True
             schema["items"] = self.value(field, view, where)
@@ -188,6 +189,8 @@ class Package:
                 if fmt.name in defs:
                     raise GenerateError(f"{self.package}: the format {fmt.name} is defined in two files")
                 entry: dict[str, Any] = {"description": fmt.description, "type": "string"}
+                if fmt.json_schema_format:
+                    entry["format"] = fmt.json_schema_format
                 if fmt.max_length:
                     entry["maxLength"] = fmt.max_length
                 entry["pattern"] = anchored(fmt.pattern)

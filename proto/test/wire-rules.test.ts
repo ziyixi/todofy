@@ -44,6 +44,11 @@ describe('a write checks the rules', () => {
     ['an open list (a producer keeps to it)', { status: Parcel_Status.LOST, trackingId: undefined, reason: 'burnt' }, 'reason: not an allowed value'],
     ['a map key', { weights: { base: 1, 'owner@example.com': 2 } }, 'weights{}: a key does not match Code'],
     ['a nested message', { lines: [{ sku: 'pen', quantity: 100 }] }, 'lines[0].quantity: above the maximum'],
+    [
+      "a case's empty list",
+      { status: Parcel_Status.WAITING, trackingId: undefined, attempts: 0, lines: [{ sku: 'pen', quantity: 1 }] },
+      'lines: not empty when the discriminator is waiting',
+    ],
   ])('%s', (_name, change, error) => {
     const message = create(ParcelSchema, { ...sent, ...change });
     expect(() => toWire(ParcelSchema, message)).toThrow(new WireJsonError(error));

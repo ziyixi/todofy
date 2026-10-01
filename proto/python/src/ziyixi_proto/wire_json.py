@@ -49,7 +49,8 @@ tables), uses only the standard library and therefore runs on Pyodide unchanged.
   discriminator) checks a field's cases only when the reader knows the discriminator's value; an enum value a
   lenient read did not know has a value but none to compare (a list item dropped for that reason keeps its
   index, so the next item is checked where it was on the wire); ``open`` lets a lenient read accept a value
-  outside ``allowed``; ``non_null`` refuses a REQUIRED enum or message field without a value, in every case.
+  outside ``allowed``; a case's ``empty`` refuses a list or map with an item in that case; ``non_null`` refuses a
+  REQUIRED enum or message field without a value, in every case.
 """
 
 import datetime
@@ -86,6 +87,8 @@ class Bounds(NamedTuple):
     allowed: frozenset[str] | None = None
     minimum: float | None = None
     maximum: float | None = None
+    # A list or map has no items or entries in this case (CaseRules.empty).
+    empty: bool = False
 
 
 class Case(NamedTuple):
@@ -487,6 +490,8 @@ def _field_violation(
     if field.kind == "map":
         if rules.max_items and len(value) > rules.max_items:
             return f"{at}: more than {rules.max_items} entries"
+        if value and _case_empty(extra):
+            return f"{at}: not empty when the discriminator is {variant}"
         if any(key not in value for key in rules.required_keys):
             return f"{at}: lacks a required key"
         for key, item in value.items():
@@ -501,6 +506,8 @@ def _field_violation(
     if field.repeated:
         if rules.max_items and len(value) > rules.max_items:
             return f"{at}: more than {rules.max_items} items"
+        if value and _case_empty(extra):
+            return f"{at}: not empty when the discriminator is {variant}"
         if rules.unique and len(set(value)) != len(value):
             return f"{at}: items are not unique"
         i = 0
@@ -515,6 +522,11 @@ def _field_violation(
             i += 1
         return None
     return _item_violation(field.kind, value, at, rules, extra, lenient, unrecognized)
+
+
+def _case_empty(extra: tuple[Bounds, ...]) -> bool:
+    """Whether the active case says a list or map is empty (``CaseRules.empty``)."""
+    return bool(extra) and extra[0].empty
 
 
 def _item_violation(

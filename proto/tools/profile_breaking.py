@@ -258,12 +258,8 @@ class Rules:
 
     def __init__(self, file: dict[str, Any], message: dict[str, Any], field: dict[str, Any], enums: dict) -> None:
         rules = wire_rules.field_rules(file, message, field, enums, wire_rules.entry_of(message, field))
-        self.format = None if rules is None or rules.format is None else (rules.format.pattern, rules.format.max_length)
-        self.key_format = (
-            None
-            if rules is None or rules.key_format is None
-            else (rules.key_format.pattern, rules.key_format.max_length)
-        )
+        self.format = _format(rules.format if rules else None)
+        self.key_format = _format(rules.key_format if rules else None)
         self.allowed = None if rules is None else rules.bounds.allowed
         self.open = bool(rules and rules.open)
         self.minimum = None if rules is None else rules.bounds.minimum
@@ -272,13 +268,14 @@ class Rules:
         self.unique = bool(rules and rules.unique)
         self.required_keys = frozenset(rules.required_keys if rules else ())
         self.non_null = bool(rules and rules.non_null)
-        # Discriminator value -> (presence, allowed, minimum, maximum) of this field in that variant (cases merged).
-        self.variants: dict[str, tuple[str, Any, Any, Any]] = {}
+        # Discriminator value -> (presence, allowed, minimum, maximum, max_items) of this field in that variant (cases
+        # merged; a case's `empty` is a max_items of 0).
+        self.variants: dict[str, tuple[str, Any, Any, Any, Any]] = {}
         for variant in wire_rules.variants(file, message, enums):
             if variant.value is None:
                 continue
             view = next(v for v in variant.fields if v.field["number"] == field["number"])
-            self.variants[variant.value] = (view.presence, view.allowed, view.minimum, view.maximum)
+            self.variants[variant.value] = (view.presence, view.allowed, view.minimum, view.maximum, view.max_items)
 
 
 def _accepts_allowed(reader: Any, writer: Any) -> bool:
@@ -300,11 +297,22 @@ def _accepts_size(reader: int, writer: int) -> bool:
     return reader == 0 or (writer != 0 and writer <= reader)
 
 
+def _accepts_bound(reader: int | None, writer: int | None) -> bool:
+    """Whether a reader's size bound in a variant (None: no bound; 0: empty) accepts every list a writer's allows."""
+    return reader is None or (writer is not None and writer <= reader)
+
+
+def _format(fmt: wire_rules.Format | None) -> tuple[str, int, str] | None:
+    """A format as what it checks: (pattern, max_length, json_schema_format); its name does not matter."""
+    return None if fmt is None else (fmt.pattern, fmt.max_length, fmt.json_schema_format)
+
+
 def _accepts_format(reader: Any, writer: Any) -> bool:
-    """Whether a reader's format accepts every value a writer's allows (patterns compare only as equal)."""
+    """Whether a reader's format accepts every value a writer's allows (patterns and JSON Schema formats compare
+    only as equal: a validator that asserts formats reads a new or dropped one as a new rule)."""
     if reader is None:
         return True
-    if writer is None or writer[0] != reader[0]:
+    if writer is None or writer[0] != reader[0] or writer[2] != reader[2]:
         return False
     return _accepts_size(reader[1], writer[1])
 
@@ -329,14 +337,16 @@ def accepts(reader: Rules, writer: Rules, lenient: bool) -> list[str]:
     if reader.non_null and not writer.non_null:
         refused.append("non_null")
     for value in sorted(set(reader.variants) & set(writer.variants)):
-        r_presence, r_allowed, r_min, r_max = reader.variants[value]
-        w_presence, w_allowed, w_min, w_max = writer.variants[value]
+        r_presence, r_allowed, r_min, r_max, r_size = reader.variants[value]
+        w_presence, w_allowed, w_min, w_max, w_size = writer.variants[value]
         if r_presence in ("required", "absent") and w_presence != r_presence:
             refused.append(f"presence when {value}")
         if not (lenient and reader.open) and not _accepts_allowed(r_allowed, w_allowed):
             refused.append(f"allowed when {value}")
         if not _accepts_bounds((r_min, r_max), (w_min, w_max)):
             refused.append(f"minimum/maximum when {value}")
+        if not _accepts_bound(r_size, w_size):
+            refused.append(f"max_items when {value}")
     return refused
 
 

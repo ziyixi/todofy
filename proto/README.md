@@ -73,7 +73,7 @@ validate with (`contracts/ops-v1/legacy/`).
    newer writers; only an `open` list may change, and a list may become `open`), a rule of a field only inputs
    reach may loosen but never tighten (the apps deploy before the dashboard that calls them), a union's
    discriminator may not change, and a closed enum may not gain a value or change its `closed` (rule 5). Formats
-   compare by pattern and length, so renaming a format is compatible. Like buf, it skips the
+   compare by pattern, length and JSON Schema `format`, so renaming a format is compatible. Like buf, it skips the
    directories `buf.yaml` lists under `breaking.ignore` (the runtimes' fixtures). `scripts/rules-selftest.sh`
    proves the rules bite (45 cases, on `task_intent.proto`, `lab/ui/v1`, `ops/v1` and `prototest`), and
    `test/python/test_profile_breaking.py` checks the directions on synthetic images.
@@ -105,7 +105,7 @@ validate with (`contracts/ops-v1/legacy/`).
 | `scripts/api-lint.sh`, `tools/api-linter/` | Google's api-linter on every package but `prototest/`: a Go tool module (`go.mod` pins api-linter, the googleapis Go code it interprets annotations with and the Go toolchain, `go.sum` every checksum) that the script builds into `.tools/` (ignored), with `googleapis/`, the check that this googleapis equals `buf.lock`'s for every file the module imports (rule 3) |
 | `prototest/v1/prototest.proto` | Test fixtures of the runtimes, never used by an app (not in the Python wheel; a change deploys nothing): a message with every field kind of the profile and a service with every kind of HTTP binding, an AIP-134 update with a field mask among them; `prototest/v1/rules.proto`, a union with every value rule and a binding service with positional and object requests |
 | `testdata/http-cases.json` | The HTTP runtime's cases on `prototest.v1.BookService`: 64 requests and what the transcoder answers, 19 request messages and what the client sends; every implementation (a Python transcoder later) runs them |
-| `testdata/wire-profile-cases.json` | 116 edge cases (timestamps, integer and double spellings, enum look-alikes, maps, field masks, missing fields, null, every value rule, `non_null`, closed enums and `keep_order`) that both codecs must answer identically |
+| `testdata/wire-profile-cases.json` | 121 edge cases (timestamps, integer and double spellings, enum look-alikes, maps, field masks, missing fields, null, every value rule, `non_null`, closed enums and `keep_order`) that both codecs must answer identically |
 | `testdata/filter-cases.json` | The AIP-160 subset of `ts/filter.ts`: 29 filters and their literals or refusal, 4 search-box texts and their quoted filter |
 | `test/*.test.ts`, `test/python/` | The codec and IDL tests, the same cases in both languages; `test/cross-language.test.ts` pipes bytes through both codecs (`test/python/roundtrip.py` in a child process); `test/ensure.test.ts` runs `tools/ensure.mjs` on a copy of this folder (a deleted toolchain, an abandoned lock, the commands Windows needs) |
 
@@ -301,11 +301,14 @@ contracts send:
 
 A contract states its value rules in the IDL, next to its fields, with the options of
 [`common/wire/v1/wire.proto`](common/wire/v1/wire.proto): a file's named string formats (`Code`, `Timestamp`: an
-anchored regular expression in the subset ECMAScript and Python read alike, and a length), and per field a format,
-an `allowed` list (an enum-like string, or a subset of an enum), number bounds, list and map sizes, unique items,
-map key formats and required keys, `non_null` (a REQUIRED enum or message that is never null: without it the
-profile writes such a field as null when it has no value), and, in a union (a message with a `discriminator`), the
-presence and extra bounds (`CaseRules`: allowed, minimum, maximum) of each field per discriminator value; per enum,
+anchored regular expression in the subset ECMAScript and Python read alike, a length, and optionally the JSON Schema
+`format` the generated schema states next to the pattern, `json_schema_format`: only `date-time`, an annotation the
+codecs do not check), and per field a format, an `allowed` list (an enum-like string, or a subset of an enum), number
+bounds, list and map sizes (`max_items`; 0, the default, is no bound), unique items, map key formats and required
+keys, `non_null` (a REQUIRED enum or message that is never null: without it the profile writes such a field as null
+when it has no value), and, in a union (a message with a `discriminator`), the presence and extra rules
+(`CaseRules`: allowed, minimum, maximum, and `empty`, a list or map without items in that case; a flag rather than a
+size, so it cannot be confused with the field's `max_items` of 0) of each field per discriminator value; per enum,
 `closed` (rule 5). That is the one source of a contract's validation:
 
 - both codecs check every rule on every read and every write (`ts/wire-rules.ts`; the rule part of
@@ -356,6 +359,16 @@ inside HomeState (a Durable Object invocation, 30 s on Free), the isolate's firs
 (the codec's code paths and the rules read from the descriptors running for the first time), warm medians
 about 2 ms either way (`dashboard/worker/test/runtime/cpu.test.ts`). Lab's and Todofy's `Ops` answers are
 built inside their Durable Objects.
+
+**What the case rule costs** (`CaseRules.empty` and `Format.json_schema_format`, measured 2026-10-01 like ops-v1's,
+before and after on the same machine). It is a change to `common/wire/v1` and `ts/wire-rules.ts`, so it redeploys
+every proto user although none of their contracts uses it: Lab, Mail Hero, the dashboard and links (the new
+descriptors and one check per union case) and Todofy (the Python tables). It therefore lands on its own, before the
+first contract that needs it (todofy.report.v1), whose own change then deploys Todofy only. Bundles, gzip:
+Mail Hero 189.3 → 189.4 KiB, the dashboard 90.1 → 90.1 KiB, Lab 110.1 → 110.1 KiB, links 71.9 → 72.0 KiB (348
+bytes more each before compression, 74-83 after). CPU, within the runs' noise: Mail Hero's first `status()`, median
+of three isolates, 6.05 → 6.15 reference ms (bound 8); the dashboard's first tick 9.96 → 9.23 ms; Lab's first API
+request 5.41 → 4.53 ms; links' first API request 4.63 → 4.78 ms; warm medians unchanged.
 
 ## HTTP APIs
 

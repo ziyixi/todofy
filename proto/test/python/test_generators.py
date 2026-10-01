@@ -184,6 +184,21 @@ class SchemaTest(unittest.TestCase):
         self.assertEqual(off["properties"]["kind"], {"enum": ["a", "b"]})
         self.assertEqual(off["properties"]["counts"], {"type": "object", "additionalProperties": {"type": "number"}})
 
+    def test_a_formats_json_schema_format_is_written_next_to_its_pattern(self) -> None:
+        file = union_file()
+        file["options"] = {
+            "[common.wire.v1.formats]": [
+                {"name": "Time", "pattern": "[0-9]{4}", "description": "d", "jsonSchemaFormat": "date-time"},
+                {"name": "Code", "pattern": "[a-z]+", "description": "c"},
+            ]
+        }
+        defs = json.loads(gen_schema.generate({"file": [file]})["x.json"])["$defs"]
+        self.assertEqual(
+            defs["Time"],
+            {"description": "d", "type": "string", "format": "date-time", "pattern": "^(?:[0-9]{4})$(?!\\n)"},
+        )
+        self.assertNotIn("format", defs["Code"])
+
     def test_enums_and_identity(self) -> None:
         self.assertEqual(self.schema["$defs"]["M_State"], {"enum": ["on", "off", "idle"]})
         self.assertEqual(self.schema["$id"], "https://contracts.local/x.json")

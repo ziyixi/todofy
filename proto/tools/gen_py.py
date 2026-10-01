@@ -78,6 +78,8 @@ def bounds_args(bounds: wire_rules.Bounds) -> list[str]:
         out.append(f"minimum={floats(bounds.minimum)}")
     if bounds.maximum is not None:
         out.append(f"maximum={floats(bounds.maximum)}")
+    if bounds.empty:
+        out.append("empty=True")
     return out
 
 

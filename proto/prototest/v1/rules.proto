@@ -147,10 +147,20 @@ message Parcel {
       "tube"
     ]
   }];
-  // The lines, each checked by its own rules.
-  repeated ParcelLine lines = 10;
-  // Counts by code, in the canonical order (no keep_order).
-  map<string, int32> counts = 11;
+  // The lines, each checked by its own rules; a waiting parcel has none yet (a case's `empty`).
+  repeated ParcelLine lines = 10 [(common.wire.v1.field) = {
+    cases: {
+      when: "waiting"
+      rules: {empty: true}
+    }
+  }];
+  // Counts by code, in the canonical order (no keep_order); a lost parcel has none (`empty` on a map).
+  map<string, int32> counts = 11 [(common.wire.v1.field) = {
+    cases: {
+      when: "lost"
+      rules: {empty: true}
+    }
+  }];
   // Where it may be sent: a closed list of enum values.
   repeated Status next = 12 [(common.wire.v1.field).allowed = "sent"];
   // Free notes by any key, in the order they were set (array-index keys first, as JavaScript orders them).

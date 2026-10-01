@@ -34,6 +34,9 @@ NUMBERS = ("TYPE_INT32", "TYPE_DOUBLE")
 # escaped outside a class; \d, \w, \b, \1 or \u mean other things, or nothing, in one of the two engines), and
 # `-` inside a class.
 PATTERN_ESCAPES = set("^$\\.*+?()[]{}|/")
+# The JSON Schema formats a Format may name (Format.json_schema_format; "" for none). Only RFC 3339's date-time,
+# which the hand-written report schemas declared; one is added here when a contract needs it, never by a .proto alone.
+JSON_SCHEMA_FORMATS = frozenset({"", "date-time"})
 
 
 class RuleError(Exception):
@@ -46,6 +49,9 @@ class Format:
     pattern: str
     max_length: int
     description: str
+    # The JSON Schema `format` written next to the pattern (Format.json_schema_format), "" for none. An annotation:
+    # the codecs check only the pattern and max_length.
+    json_schema_format: str = ""
 
 
 @dataclass(frozen=True)
@@ -53,6 +59,9 @@ class Bounds:
     allowed: tuple[str, ...] | None
     minimum: float | None
     maximum: float | None
+    # A case's list or map is empty (CaseRules.empty); always False for a field's own rules, whose size is
+    # FieldRules.max_items (0 there is "no bound").
+    empty: bool = False
 
 
 @dataclass(frozen=True)
@@ -116,7 +125,10 @@ def formats(file: dict[str, Any]) -> dict[str, Format]:
         re.compile(pattern)
         if int(item.get("maxLength", 0)) < 0:
             raise RuleError(f"{where}: max_length is negative")
-        out[name] = Format(name, pattern, int(item.get("maxLength", 0)), item.get("description", ""))
+        schema_format = item.get("jsonSchemaFormat", "")
+        if schema_format not in JSON_SCHEMA_FORMATS:
+            raise RuleError(f"{where}: json_schema_format is one of {sorted(JSON_SCHEMA_FORMATS - {''})}")
+        out[name] = Format(name, pattern, int(item.get("maxLength", 0)), item.get("description", ""), schema_format)
     return out
 
 
@@ -174,14 +186,14 @@ def may_be_null(field: dict[str, Any], rules: FieldRules | None) -> bool:
     return field["type"] in ("TYPE_ENUM", "TYPE_MESSAGE") and not (rules is not None and rules.non_null)
 
 
-CASE_RULES = ("allowed", "minimum", "maximum")
+CASE_RULES = ("allowed", "minimum", "maximum", "empty")
 
 
-def _bounds(raw: dict[str, Any]) -> Bounds:
+def _bounds(raw: dict[str, Any], case: bool = False) -> Bounds:
     allowed = tuple(raw["allowed"]) if raw.get("allowed") else None
     minimum = float(raw["minimum"]) if "minimum" in raw else None
     maximum = float(raw["maximum"]) if "maximum" in raw else None
-    return Bounds(allowed, minimum, maximum)
+    return Bounds(allowed, minimum, maximum, bool(case and raw.get("empty", False)))
 
 
 def _kind(field: dict[str, Any], map_entry: dict[str, Any] | None) -> str:
@@ -243,7 +255,7 @@ def field_rules(
             Case(
                 tuple(case.get("when", [])),
                 PRESENCE[case.get("presence", "PRESENCE_UNSPECIFIED")],
-                _bounds(case.get("rules", {})),
+                _bounds(case.get("rules", {}), case=True),
             )
             for case in raw.get("cases", [])
         ),
@@ -254,7 +266,9 @@ def field_rules(
         # common.wire.v1.CaseRules has only these; an image edited by hand (or by an older wire.proto) could say more.
         extra = set(case.get("rules", {})) - set(CASE_RULES)
         if extra:
-            raise RuleError(f"{where}: a case's rules hold only allowed, minimum and maximum, not {sorted(extra)}")
+            raise RuleError(
+                f"{where}: a case's rules hold only allowed, minimum, maximum and empty, not {sorted(extra)}"
+            )
     if rules.format is not None and (value_type != "TYPE_STRING" or shape == "map"):
         raise RuleError(f"{where}: format applies to a string field (key_format to a map's keys)")
     check_bounds(rules.bounds, "")
@@ -278,6 +292,8 @@ def field_rules(
                 raise RuleError(f"{where}: a case names a value {union} does not have, or one another case names")
             seen |= set(case.when)
             check_bounds(case.bounds, "a case's ")
+            if case.bounds.empty and shape == "single":
+                raise RuleError(f"{where}: a case's empty applies to a repeated field or a map")
         presences = [case.presence for case in rules.cases if case.presence] + (
             [rules.otherwise] if rules.otherwise else []
         )
@@ -342,6 +358,8 @@ class FieldView:
     allowed: tuple[str, ...] | None
     minimum: float | None
     maximum: float | None
+    # The most items or entries of a list or map (the field's and the case's bounds both apply), None for no bound.
+    max_items: int | None = None
 
 
 @dataclass(frozen=True)
@@ -365,7 +383,9 @@ def entry_of(message: dict[str, Any], field: dict[str, Any]) -> dict[str, Any] |
     return map_entries(message).get(field.get("typeName", "").rsplit(".", 1)[-1])
 
 
-def _merge(case: Case | None, rules: FieldRules | None) -> tuple[tuple[str, ...] | None, float | None, float | None]:
+def _merge(
+    case: Case | None, rules: FieldRules | None
+) -> tuple[tuple[str, ...] | None, float | None, float | None, int | None]:
     lists = [b.allowed for b in (rules.bounds if rules else None, case.bounds if case else None) if b and b.allowed]
     allowed = None
     for values in lists:
@@ -380,11 +400,15 @@ def _merge(case: Case | None, rules: FieldRules | None) -> tuple[tuple[str, ...]
         for b in (rules.bounds if rules else None, case.bounds if case else None)
         if b and b.maximum is not None
     ]
-    return allowed, (max(mins) if mins else None), (min(maxs) if maxs else None)
+    # A field's max_items of 0 is no bound; a case's `empty` is a bound of 0.
+    own_size = rules.max_items if rules is not None and rules.max_items else None
+    sizes = [n for n in (own_size, 0 if case and case.bounds.empty else None) if n is not None]
+    return allowed, (max(mins) if mins else None), (min(maxs) if maxs else None), (min(sizes) if sizes else None)
 
 
 def variants(file: dict[str, Any], message: dict[str, Any], enums: dict[str, dict[str, Any]]) -> list[Variant]:
-    """The message's variants: one per value of its discriminator (in value order), or one for a plain message."""
+    """The message's variants: one per value of its discriminator (in value order) that the discriminator's own
+    ``allowed`` list keeps (a report's status may be a subset of a shared enum), or one for a plain message."""
     fields = sorted(message.get("field", []), key=lambda f: f["number"])
     rules = {f["name"]: field_rules(file, message, f, enums, entry_of(message, f)) for f in fields}
     union = discriminator(message)
@@ -399,16 +423,19 @@ def variants(file: dict[str, Any], message: dict[str, Any], enums: dict[str, dic
             )
         ]
     target = next(f for f in fields if f["name"] == union)
+    own = rules[union].bounds.allowed if rules[union] is not None else None
     out = []
     for value in wire_names(enums[target["typeName"]]):
+        if own is not None and value not in own:
+            continue
         views = []
         for f in fields:
             r = rules[f["name"]]
             case = next((c for c in r.cases if value in c.when), None) if r else None
             presence = (case.presence if case else r.otherwise) if r else ""
-            allowed, minimum, maximum = _merge(case, r)
+            allowed, minimum, maximum, max_items = _merge(case, r)
             if f is target:
                 presence, allowed = "required", (value,)
-            views.append(FieldView(f, entry_of(message, f), r, presence, allowed, minimum, maximum))
+            views.append(FieldView(f, entry_of(message, f), r, presence, allowed, minimum, maximum, max_items))
         out.append(Variant(value, tuple(views)))
     return out

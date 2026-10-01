@@ -2150,6 +2150,136 @@
       "error": true
     },
     {
+      "name": "rules: a case's empty (a waiting parcel with a line)",
+      "message": "prototest.v1.Parcel",
+      "strict": false,
+      "input": {
+        "status": "waiting",
+        "code": "box_1",
+        "tracking_id": null,
+        "attempts": 0,
+        "weights": {
+          "base": 1
+        },
+        "lines": [
+          {
+            "sku": "pen",
+            "quantity": 1
+          }
+        ]
+      },
+      "error": true
+    },
+    {
+      "name": "rules: a case's empty holds for an empty list (a waiting parcel without lines)",
+      "message": "prototest.v1.Parcel",
+      "strict": true,
+      "input": {
+        "status": "waiting",
+        "code": "box_1",
+        "tracking_id": null,
+        "attempts": 0,
+        "weights": {
+          "base": 1
+        },
+        "lines": []
+      },
+      "wire": {
+        "status": "waiting",
+        "code": "box_1",
+        "tracking_id": null,
+        "attempts": 0,
+        "weights": {
+          "base": 1
+        }
+      },
+      "unrecognized": []
+    },
+    {
+      "name": "rules: a case's empty on a map (a lost parcel with a count)",
+      "message": "prototest.v1.Parcel",
+      "strict": false,
+      "input": {
+        "status": "lost",
+        "code": "box_1",
+        "tracking_id": null,
+        "attempts": 3,
+        "reason": "stolen",
+        "weights": {
+          "base": 1
+        },
+        "counts": {
+          "a": 1
+        }
+      },
+      "error": true
+    },
+    {
+      "name": "rules: a case's empty on a map holds (a lost parcel without counts)",
+      "message": "prototest.v1.Parcel",
+      "strict": true,
+      "input": {
+        "status": "lost",
+        "code": "box_1",
+        "tracking_id": null,
+        "attempts": 3,
+        "reason": "stolen",
+        "weights": {
+          "base": 1
+        },
+        "counts": {}
+      },
+      "wire": {
+        "status": "lost",
+        "code": "box_1",
+        "tracking_id": null,
+        "attempts": 3,
+        "reason": "stolen",
+        "weights": {
+          "base": 1
+        }
+      },
+      "unrecognized": []
+    },
+    {
+      "name": "rules: a newer discriminator value checks no case's empty on a lenient read",
+      "message": "prototest.v1.Parcel",
+      "strict": false,
+      "input": {
+        "status": "returned",
+        "code": "box_1",
+        "tracking_id": null,
+        "attempts": 0,
+        "weights": {
+          "base": 1
+        },
+        "lines": [
+          {
+            "sku": "pen",
+            "quantity": 1
+          }
+        ]
+      },
+      "wire": {
+        "status": null,
+        "code": "box_1",
+        "tracking_id": null,
+        "attempts": 0,
+        "weights": {
+          "base": 1
+        },
+        "lines": [
+          {
+            "sku": "pen",
+            "quantity": 1
+          }
+        ]
+      },
+      "unrecognized": [
+        "status"
+      ]
+    },
+    {
       "name": "rules: a map key's format",
       "message": "prototest.v1.Parcel",
       "strict": false,

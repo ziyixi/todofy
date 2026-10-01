@@ -37,6 +37,15 @@ class WriteTest(unittest.TestCase):
             ),
             ({"weights": {"base": 1.0, "owner@example.com": 2.0}}, "weights{}: a key does not match Code"),
             ({"lines": (pb.ParcelLine(sku="pen", quantity=100),)}, "lines[0].quantity: above the maximum"),
+            (
+                {
+                    "status": pb.Parcel_Status.WAITING,
+                    "tracking_id": None,
+                    "attempts": 0,
+                    "lines": (pb.ParcelLine(sku="pen", quantity=1),),
+                },
+                "lines: not empty when the discriminator is waiting",
+            ),
         ]:
             with self.subTest(error):
                 with self.assertRaises(WireJsonError) as caught:
@@ -175,6 +184,14 @@ UNION = {"[common.wire.v1.message]": {"discriminator": "state"}}
 class GeneratorChecksTest(unittest.TestCase):
     def test_well_placed_rules_pass(self) -> None:
         wire_rules.check_image(image(field("a", "TYPE_STRING", {"format": "Code", "allowed": ["x"]}), formats=[CODE]))
+        wire_rules.check_image(
+            image(
+                field(
+                    "a", "TYPE_STRING", {"cases": [{"when": ["on"], "rules": {"empty": True}}]}, label="LABEL_REPEATED"
+                ),
+                message_options=UNION,
+            )
+        )
         wire_rules.check_image(image(field("a", "TYPE_ENUM", {"nonNull": True}, options_required=True, **ENUM)))
         wire_rules.check_image(
             image(field("a", "TYPE_MESSAGE", {"nonNull": True}, options_required=True, typeName=".t.v1.M"))
@@ -232,16 +249,39 @@ class GeneratorChecksTest(unittest.TestCase):
             ("a format defined twice", image(formats=[CODE, copy.deepcopy(CODE)])),
             ("a format name that is not PascalCase", image(formats=[{"name": "code", "pattern": "[a-z]+"}])),
             (
-                "a case rule other than allowed, minimum and maximum (an image edited by hand)",
+                "a case rule other than allowed, minimum, maximum and empty (an image edited by hand)",
                 image(
                     field(
                         "a",
                         "TYPE_STRING",
-                        {"cases": [{"when": ["on"], "rules": {"format": "Nope", "maxItems": 3}}]},
+                        {"cases": [{"when": ["on"], "rules": {"format": "Nope", "maxItems": 0}}]},
                         proto3Optional=True,
                     ),
                     message_options=UNION,
                 ),
+            ),
+            (
+                "a case's empty on a singular field",
+                image(
+                    field("a", "TYPE_STRING", {"cases": [{"when": ["on"], "rules": {"empty": True}}]}),
+                    message_options=UNION,
+                ),
+            ),
+            (
+                "a case's size bound (CaseRules has `empty`, never a max_items whose 0 would mean the opposite)",
+                image(
+                    field(
+                        "a",
+                        "TYPE_STRING",
+                        {"cases": [{"when": ["on"], "rules": {"maxItems": 0}}]},
+                        label="LABEL_REPEATED",
+                    ),
+                    message_options=UNION,
+                ),
+            ),
+            (
+                "a JSON Schema format the generator does not know",
+                image(formats=[{**CODE, "jsonSchemaFormat": "email"}]),
             ),
             ("non_null on a field that is not REQUIRED", image(field("a", "TYPE_ENUM", {"nonNull": True}, **ENUM))),
             ("non_null on a scalar", image(field("a", "TYPE_STRING", {"nonNull": True}, options_required=True))),

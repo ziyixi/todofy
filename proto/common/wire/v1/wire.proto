@@ -73,6 +73,11 @@ message Format {
   int32 max_length = 3;
   // One line for the generated JSON Schema.
   string description = 4;
+  // A JSON Schema `format` the generator writes next to the pattern, for a value the pattern alone cannot pin
+  // (only "date-time": a validator that asserts formats then also refuses an impossible date such as month 13).
+  // An annotation for the schema's readers: the codecs check the pattern and max_length only, so every value a
+  // producer writes must already keep it (a timestamp formatted from a real time does).
+  string json_schema_format = 5;
 }
 
 // A message that is a union discriminated by one of its enum fields: its fields' cases name that field's
@@ -138,6 +143,10 @@ message CaseRules {
   optional double minimum = 2;
   // The largest value of a number in this case, inclusive.
   optional double maximum = 3;
+  // A repeated field or a map has no items or entries in this case (a recommendation without tasks when its
+  // window was empty). A flag, not a size: Field.max_items of 0 means "no bound", so a case's bound of 0 would
+  // read as the opposite of the field's.
+  bool empty = 4;
 }
 
 // How a service binding passes a method's request.

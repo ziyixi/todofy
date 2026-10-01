@@ -15,6 +15,7 @@
  *   on every read and write).
  * - Field.open lets a lenient read (a consumer) accept a value outside `allowed`: the list is what producers of
  *   this build write; writes and strict reads keep to it.
+ * - CaseRules.empty refuses a list or map with an item or entry in its case.
  *
  * The rules are read from the descriptors (getOption) once per field and cached; a regular expression is
  * compiled once per format. Rule mistakes (an unknown format, a case on a field that has no presence) stop
@@ -43,6 +44,8 @@ interface Bounds {
 interface CompiledCase extends Bounds {
   readonly when: ReadonlySet<string>;
   readonly presence: Presence;
+  /** A list or map has no items or entries in this case (CaseRules.empty). */
+  readonly empty: boolean;
 }
 
 interface Compiled extends Bounds {
@@ -141,7 +144,7 @@ function compiled(field: DescField): Compiled {
             keyFormat: formatNamed(field, option.keyFormat),
             requiredKeys: option.requiredKeys,
             keepOrder: option.keepOrder,
-            cases: option.cases.map((c) => ({ ...bounds(c.rules), when: new Set(c.when), presence: c.presence })),
+            cases: option.cases.map((c) => ({ ...bounds(c.rules), when: new Set(c.when), presence: c.presence, empty: c.rules?.empty ?? false })),
             otherwise: option.otherwise,
             nonNull: option.nonNull,
           };
@@ -250,6 +253,7 @@ function checkField(r: ReflectMessage, field: DescField, at: string, variant: st
   if (presence === Presence.ABSENT && has) return `${at}: not allowed when the discriminator is ${variant ?? ''}`;
   if (!has) return null;
   const extra = active === undefined ? [] : [active];
+  const caseEmpty = active?.empty ?? false;
   switch (field.fieldKind) {
     case 'scalar':
       return checkScalar(field.scalar, r.get(field), at, rules, extra, context);
@@ -263,6 +267,7 @@ function checkField(r: ReflectMessage, field: DescField, at: string, variant: st
     case 'list': {
       const list = r.get(field);
       if (rules.maxItems > 0 && list.size > rules.maxItems) return `${at}: more than ${String(rules.maxItems)} items`;
+      if (caseEmpty && list.size > 0) return `${at}: not empty when the discriminator is ${variant ?? ''}`;
       const seen = new Set<unknown>();
       let i = 0;
       for (const item of list) {
@@ -287,6 +292,7 @@ function checkField(r: ReflectMessage, field: DescField, at: string, variant: st
     case 'map': {
       const map = r.get(field);
       if (rules.maxItems > 0 && map.size > rules.maxItems) return `${at}: more than ${String(rules.maxItems)} entries`;
+      if (caseEmpty && map.size > 0) return `${at}: not empty when the discriminator is ${variant ?? ''}`;
       for (const key of rules.requiredKeys) if (!map.has(key)) return `${at}: lacks a required key`;
       const entryAt = `${at}{}`;
       for (const [key, value] of map) {

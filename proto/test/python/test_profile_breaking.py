@@ -1,6 +1,7 @@
 """tools/profile_breaking.py's value-rule and closed-enum checks on synthetic buf images (JSON form), next to the
 module's own self-test (scripts/rules-selftest.sh, which edits the real .proto files): an output's rules may not
-change either way, an input's may only loosen, an open list may change, a closed enum may not grow.
+change either way (a case's `empty` included), an input's may only loosen, an open list may change, a closed enum
+may not grow.
 """
 
 import copy
@@ -87,6 +88,11 @@ class OutputRulesTest(unittest.TestCase):
         wide = image({"format": "Code"}, formats=[{**CODE, "pattern": "[a-z]{1,16}"}])
         narrow = image({"format": "Code"}, formats=[CODE])
         self.assertIn("PROFILE_RULE_SAME t.v1.Out.code", rules_of(narrow, wide))
+        # A JSON Schema format is a rule too for a validator that asserts formats: adding or dropping one is refused.
+        dated = image({"format": "Code"}, formats=[{**CODE, "jsonSchemaFormat": "date-time"}])
+        self.assertIn("PROFILE_RULE_SAME t.v1.Out.code", rules_of(narrow, dated))
+        self.assertIn("PROFILE_RULE_SAME t.v1.Out.code", rules_of(dated, narrow))
+        self.assertEqual(rules_of(dated, copy.deepcopy(dated)), [])
         self.assertIn("PROFILE_RULE_SAME t.v1.Out.code", rules_of(wide, narrow))
 
     def test_an_open_list_may_change_and_a_list_may_open(self) -> None:
@@ -133,6 +139,24 @@ class UnionAndEnumTest(unittest.TestCase):
             rules_of(image(union="state", case_rules=case), image(union="state", case_rules=changed)),
             ["PROFILE_RULE_SAME t.v1.Out.note"],
         )
+
+    def test_a_cases_list_size_may_not_change_on_an_output(self) -> None:
+        def sized(rules: dict) -> dict:
+            built = image(union="state", case_rules=rules)
+            note = built["file"][0]["messageType"][1]["field"][-1]
+            note["label"] = "LABEL_REPEATED"
+            del note["proto3Optional"]
+            return built
+
+        empty = {"cases": [{"when": ["v1"], "rules": {"empty": True}}]}
+        self.assertEqual(rules_of(sized(empty), sized(empty)), [])
+        for name, rules in [
+            ("the case's empty dropped", {"cases": [{"when": ["v1"], "rules": {}}]}),
+            ("no case at all", {}),
+        ]:
+            with self.subTest(name):
+                self.assertEqual(rules_of(sized(empty), sized(rules)), ["PROFILE_RULE_SAME t.v1.Out.note"])
+                self.assertEqual(rules_of(sized(rules), sized(empty)), ["PROFILE_RULE_SAME t.v1.Out.note"])
 
     def test_a_closed_enum_may_not_grow_or_change_its_closedness(self) -> None:
         self.assertEqual(rules_of(image(states=2), image(states=3)), [])
