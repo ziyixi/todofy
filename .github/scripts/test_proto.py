@@ -19,6 +19,9 @@ python3 -m unittest discover -s .github/scripts -p test_proto.py (the Proto chec
   exactly the apps whose production code imports each package's generated code (type-only imports compile to
   nothing), so a proto/ change deploys only the bundles it reaches.
 - Generated code is never committed and is ignored; uv's cache keys cover every input ensure.mjs hashes.
+- Sources: a .proto file holds no invisible character but the space and the line feed (no other Unicode space,
+  line or paragraph separator, control or format character): a pattern writes one as a \\u escape, so a reviewer
+  sees it and every tool counts the same lines.
 - api-linter: one exact version, in the Go tool module proto/tools/api-linter only (go.mod pins it and
   the Go toolchain, go.sum every checksum); scripts/api-lint.sh builds it from there, and the Proto checks
   job installs exactly that toolchain and runs the script. Nothing else installs api-linter.
@@ -29,6 +32,7 @@ import os
 import re
 import subprocess
 import sys
+import unicodedata
 import unittest
 from pathlib import Path
 
@@ -418,6 +422,37 @@ class Users(unittest.TestCase):
             for source in sorted((pyproject.parent / config.get("base_dir", ".")).rglob("*.py")):
                 with self.subTest(file=str(source.relative_to(REPO))):
                     self.assertNotRegex(source.read_text(), r"^\s*(from|import)\s+ziyixi_proto\b", re.MULTILINE)
+
+
+# Unicode categories a .proto source may not hold literally (besides the space and the line feed): spaces, line and
+# paragraph separators (U+2028 and U+2029 end a line for Python's splitlines and for JavaScript), controls (a tab
+# too: buf format writes spaces), format characters (U+FEFF, zero-width joiners), private-use and unassigned code
+# points.
+INVISIBLE = frozenset({"Zs", "Zl", "Zp", "Cc", "Cf", "Co", "Cn"})
+
+
+def invisible_characters(text: str) -> list[tuple[int, str]]:
+    """(line, U+XXXX) of every character of ``text`` that a .proto source may not hold literally."""
+    return [
+        (text.count("\n", 0, i) + 1, f"U+{ord(char):04X}")
+        for i, char in enumerate(text)
+        if char not in " \n" and unicodedata.category(char) in INVISIBLE
+    ]
+
+
+class Sources(unittest.TestCase):
+    def test_no_proto_source_holds_an_invisible_character(self):
+        sources = tracked("*.proto")
+        self.assertTrue(any(path.parts[-4:] == ("todofy", "report", "v1", "report.proto") for path in sources))
+        for path in sources:
+            with self.subTest(file=str(path.relative_to(REPO))):
+                self.assertEqual(
+                    invisible_characters(path.read_text(encoding="utf-8")), [], "write it as a \\u escape"
+                )
+
+    def test_the_check_sees_what_a_reviewer_cannot(self):
+        text = 'pattern: "[ \\u00A0\u00a0\u2028\t]" // 报税\n\ufeffx'
+        self.assertEqual(invisible_characters(text), [(1, "U+00A0"), (1, "U+2028"), (1, "U+0009"), (2, "U+FEFF")])
 
 
 class Generated(unittest.TestCase):

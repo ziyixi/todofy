@@ -1,6 +1,6 @@
 """The generated report schemas (api/*-v1.schema.json, from proto/todofy/report/v1) against the hand-written ones
-they replaced (tests/unit/legacy/, frozen): the same verdict on every document, except where the IDL states one
-rule more strictly for `stale`, a status no production Todofy ever sent (report.proto's header):
+they replaced (tests/unit/legacy/, frozen), read with Python's re: the same verdict on every document, except where
+the IDL states one rule more strictly for `stale`, a status no production Todofy ever sent (report.proto's header):
 
 - a stale summary is never blank (the hand-written schema allowed a blank one when task_count was 0);
 - a stale recommendation saw at least one mail (the hand-written schema allowed task_count 0 without tasks).
@@ -10,7 +10,10 @@ right shape but an impossible date or time is refused by both.
 
 The text rules are compared character by character over all of Unicode: "not blank" is Python's whitespace (the
 hand-written \\S, read by Python's re as the newsletter's str.strip() reads it), written out as a class that
-ECMAScript reads the same way.
+ECMAScript reads the same way. In Python's dialect the verdicts agree on every character. In ECMAScript's, the one
+JSON Schema specifies, the hand-written \\S disagreed with the newsletter on U+0085 and U+FEFF, so the generated
+schemas' verdict differs there on purpose (report.proto's header); todofy/web/src/api/report-schema-dialect.test.ts
+holds that comparison and fails on any other difference.
 """
 
 import datetime

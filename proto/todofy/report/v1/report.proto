@@ -18,6 +18,15 @@
 // saw no mail, a summary of the window whenever it saw some. What a rule cannot say stays with todofy-core:
 // ranks are unique and at most top_n (core/report_schema.py parse_recommendations).
 //
+// One verdict changed on purpose. The hand-written schemas wrote "not blank" as \S, which Python's re reads as the
+// newsletter does but ECMAScript (the regular expressions JSON Schema specifies, and ajv's) reads differently on two
+// characters: it took U+0085 (next line, whitespace to str.strip()) for a visible character and U+FEFF (zero width
+// no-break space, which str.strip() keeps) for whitespace. The patterns below follow the newsletter, so for an
+// ECMAScript validator a text made only of U+0085 is now refused and one made only of U+FEFF is now valid; no other
+// text's verdict changed in either dialect (todofy/web/src/api/report-schema-dialect.test.ts and
+// todofy/tests/unit/test_report_schema_legacy.py), and no byte Todofy sends changed. The whitespace is written as
+// \u escapes so that a reviewer sees each character.
+//
 // `stale` is kept for compatibility and is never written: no production Todofy ever sent it (the Go service had
 // no status; the Worker dropped it before its cutover on 2026-09-29). It stood for an older report served late,
 // so its rules are those of a report: a summary that is not blank, and a recommendation with at least one mail
@@ -53,19 +62,19 @@ option (common.wire.v1.formats) = {
 };
 option (common.wire.v1.formats) = {
   name: "Title"
-  pattern: "[\t\n\r \u0085   -     　]*[^\x00-\x08\x0b\x0c\x0e-\x1f\x7f\t\n\r \u0085   -     　][^\x00-\x08\x0b\x0c\x0e-\x1f\x7f]*"
+  pattern: "[\t\n\r \u0085\u00A0\u1680\u2000-\u200A\u2028\u2029\u202F\u205F\u3000]*[^\x00-\x08\x0b\x0c\x0e-\x1f\x7f\t\n\r \u0085\u00A0\u1680\u2000-\u200A\u2028\u2029\u202F\u205F\u3000][^\x00-\x08\x0b\x0c\x0e-\x1f\x7f]*"
   max_length: 200
   description: "A task's title: not blank (Python's whitespace), no control characters but tab, line feed and carriage return."
 };
 option (common.wire.v1.formats) = {
   name: "Reason"
-  pattern: "[\t\n\r \u0085   -     　]*[^\x00-\x08\x0b\x0c\x0e-\x1f\x7f\t\n\r \u0085   -     　][^\x00-\x08\x0b\x0c\x0e-\x1f\x7f]*"
+  pattern: "[\t\n\r \u0085\u00A0\u1680\u2000-\u200A\u2028\u2029\u202F\u205F\u3000]*[^\x00-\x08\x0b\x0c\x0e-\x1f\x7f\t\n\r \u0085\u00A0\u1680\u2000-\u200A\u2028\u2029\u202F\u205F\u3000][^\x00-\x08\x0b\x0c\x0e-\x1f\x7f]*"
   max_length: 4000
   description: "Why a task matters: the same rules as a title, longer."
 };
 option (common.wire.v1.formats) = {
   name: "SummaryText"
-  pattern: "[\t\n\r \u0085   -     　]*[^\x00-\x08\x0b\x0c\x0e-\x1f\x7f\t\n\r \u0085   -     　][^\x00-\x08\x0b\x0c\x0e-\x1f\x7f]*"
+  pattern: "[\t\n\r \u0085\u00A0\u1680\u2000-\u200A\u2028\u2029\u202F\u205F\u3000]*[^\x00-\x08\x0b\x0c\x0e-\x1f\x7f\t\n\r \u0085\u00A0\u1680\u2000-\u200A\u2028\u2029\u202F\u205F\u3000][^\x00-\x08\x0b\x0c\x0e-\x1f\x7f]*"
   max_length: 12000
   description: "The daily summary: the same rules as a title, longer."
 };
