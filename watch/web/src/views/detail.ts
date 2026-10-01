@@ -1,17 +1,18 @@
 /**
  * One watch (`/watches/<id>`): its health (the last and next check, what failed, the failures in a row, the masked
  * changes, a pending confirmation, the site's backoff, shadow mode), its actions (check now, pause or resume, delete),
- * its settings (saved with the etag: an edit made elsewhere meanwhile is refused and the latest is loaded), and its
- * changes, with the suppressed ones and their "忽略这一行".
+ * its settings (saved with SAVE_MASK and the etag: only what the form edits is written, and an edit made elsewhere
+ * meanwhile is refused and the latest is loaded), its ignored lines with 取消忽略, and its changes, with the
+ * suppressed ones and their "忽略这一行" (or 取消忽略 for a line already ignored).
  */
 import { Change_State } from '@ziyixi/proto/watch/ui/v1/change_pb'
 import { Watch_State, type Watch } from '@ziyixi/proto/watch/ui/v1/watch_pb'
 import { api, ApiError, errorMessage, newRequestId, withRetry } from '../api.ts'
 import { button, el, fill, toast } from '../dom.ts'
 import { failureText, relative, watchState, when } from '../format.ts'
-import { draftOf, settingsForm, watchOf } from '../settings.ts'
+import { draftOf, SAVE_MASK, settingsForm, watchOf } from '../settings.ts'
 import type { ViewContext } from '../app.ts'
-import { changeCard } from './changes.ts'
+import { changeCard, setIgnored } from './changes.ts'
 import { lastCheck } from './watches.ts'
 
 const FILTERS: readonly (readonly [string, string])[] = [
@@ -30,6 +31,7 @@ export async function renderDetail(ctx: ViewContext, id = ''): Promise<void> {
   const settings = el('details', { class: 'more-settings' }, el('summary', {}, '设置'))
   ctx.main.replaceChildren(head, settings, el('h2', {}, '变化'), tabs, changes)
 
+  let ignoredLines: readonly string[] = []
   const loadChanges = async () => {
     tabs.replaceChildren(...FILTERS.map(([value, label]) => button(label, () => {
       filter = value
@@ -38,7 +40,7 @@ export async function renderDetail(ctx: ViewContext, id = ''): Promise<void> {
     try {
       const page = await api.listChanges({ parent: name, filter, pageSize: 50 })
       changes.replaceChildren(
-        ...page.changes.map((change) => changeCard(ctx, change, { showWatch: false, ignorable: change.state === Change_State.SUPPRESSED || change.shadow, onChange: () => void load() })),
+        ...page.changes.map((change) => changeCard(ctx, change, { showWatch: false, ignorable: change.state === Change_State.SUPPRESSED || change.shadow, ignoredLines, onChange: () => void load() })),
       )
       if (page.changes.length === 0) changes.append(el('p', { class: 'empty' }, '没有变化。'))
     } catch (error) {
@@ -99,7 +101,16 @@ export async function renderDetail(ctx: ViewContext, id = ''): Promise<void> {
 
   const renderSettings = (watch: Watch) => {
     const draft = draftOf(watch)
-    const form = settingsForm(draft, () => undefined)
+    const unignore = async (line: string) => {
+      try {
+        await setIgnored(name, line, false)
+        toast('已取消忽略这一行')
+        await load()
+      } catch (error) {
+        toast(errorMessage(error))
+      }
+    }
+    const form = settingsForm(draft, () => undefined, { onUnignore: unignore })
     const uri = el('input', { type: 'url', 'aria-label': '网址', autocapitalize: 'none', spellcheck: 'false' })
     uri.value = draft.uri
     uri.addEventListener('input', () => {
@@ -107,7 +118,8 @@ export async function renderDetail(ctx: ViewContext, id = ''): Promise<void> {
     })
     const requestId = newRequestId()
     const save = button('保存设置', () => {
-      void withRetry(() => api.updateWatch({ watch: watchOf(draft), requestId })).then(
+      // Only what the form edits (SAVE_MASK): a field it does not show, and the ignored lines, stay as stored.
+      void withRetry(() => api.updateWatch({ watch: watchOf(draft), updateMask: { paths: [...SAVE_MASK] }, requestId })).then(
         () => {
           toast('已保存')
           void load()
@@ -124,6 +136,7 @@ export async function renderDetail(ctx: ViewContext, id = ''): Promise<void> {
   const load = async () => {
     try {
       const watch = await api.getWatch({ name })
+      ignoredLines = watch.normalize?.ignoredLines ?? []
       renderHead(watch)
       renderSettings(watch)
       await loadChanges()

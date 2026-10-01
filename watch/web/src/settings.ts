@@ -1,13 +1,57 @@
 /**
  * A watch's settings as a form (adding and editing): a plain Draft the inputs edit, read from a Watch and written back
  * as one. The form offers what v1 supports: the source kinds, the include and exclude selectors (filled by the block
- * picker of views/add.ts), the triggers, the confirmation, the interval, the notify policy, shadow mode, and the two
- * fetch rules the owner may relax (http with a warning, robots.txt).
+ * picker of views/add.ts), whether landmarks count, the masks (numbers too, or none of the defaults), the triggers, the
+ * confirmation, the interval, the notify policy, shadow mode, the two fetch rules the owner may relax (http with a
+ * warning, robots.txt), and the ignored lines, each with its 取消忽略.
+ *
+ * A Draft keeps the Watch it was read from (`base`): `watchOf` writes the edits over a copy of it, so a field the form
+ * does not show (stability.confirm_delay_minutes, AnyChangeTrigger.min_changed_percent, ai.intent, ...) survives a
+ * save. The watch page saves with SAVE_MASK, the fields the form edits, and never the ignored lines (the drawer and
+ * 取消忽略 write those on their own).
  */
-import type { MessageInitShape } from '@ziyixi/proto/protobuf'
-import { EmbeddedSource_Kind, Watch_NotifyPolicy, type Watch, type WatchSchema } from '@ziyixi/proto/watch/ui/v1/watch_pb'
-import { el, fill, type Child } from './dom.ts'
+import { clone, create } from '@ziyixi/proto/protobuf'
+import {
+  AnyChangeTriggerSchema,
+  AvailabilityTriggerSchema,
+  EmbeddedSource_Kind,
+  EmbeddedSourceSchema,
+  FeedSourceSchema,
+  FetchPolicySchema,
+  HtmlSourceSchema,
+  JsonSourceSchema,
+  NewItemTriggerSchema,
+  NormalizeOptionsSchema,
+  NumberTriggerSchema,
+  StabilitySchema,
+  TextTriggerSchema,
+  TriggerSchema,
+  Watch_NotifyPolicy,
+  Watch_PauseReason,
+  Watch_State,
+  WatchSchema,
+  WatchSourceSchema,
+  type Watch,
+} from '@ziyixi/proto/watch/ui/v1/watch_pb'
+import { button, el, fill, type Child } from './dom.ts'
 import { INTERVALS } from './format.ts'
+
+/** The update_mask of the settings form's save (AIP-134): what it edits, and the etag (AIP-154). */
+export const SAVE_MASK: readonly string[] = [
+  'display_name',
+  'uri',
+  'source',
+  'trigger',
+  'normalize.mask_numbers',
+  'normalize.disable_default_masks',
+  'stability.skip_confirmation',
+  'check_interval_minutes',
+  'notify_policy',
+  'request_locale',
+  'fetch_policy',
+  'shadow_mode',
+  'etag',
+]
 
 export type SourceKind = 'html' | 'feed' | 'json' | 'embedded'
 export type TriggerKind = 'any_change' | 'text_appears' | 'text_disappears' | 'new_item' | 'number' | 'availability'
@@ -21,6 +65,9 @@ export interface Draft {
   include: string[]
   exclude: string[]
   keepLinks: boolean
+  keepLandmarks: boolean
+  maskNumbers: boolean
+  disableDefaultMasks: boolean
   jsonPath: string
   embedded: 'json_ld' | 'next_data'
   trigger: TriggerKind
@@ -40,6 +87,8 @@ export interface Draft {
   ignoreRobots: boolean
   ignoredLines: string[]
   locale: string
+  /** The stored watch the draft was read from (null for a new one): what the form does not show is kept from it. */
+  base: Watch | null
 }
 
 export function emptyDraft(uri = ''): Draft {
@@ -52,6 +101,9 @@ export function emptyDraft(uri = ''): Draft {
     include: [],
     exclude: [],
     keepLinks: false,
+    keepLandmarks: false,
+    maskNumbers: false,
+    disableDefaultMasks: false,
     jsonPath: '',
     embedded: 'json_ld',
     trigger: 'any_change',
@@ -71,6 +123,7 @@ export function emptyDraft(uri = ''): Draft {
     ignoreRobots: false,
     ignoredLines: [],
     locale: '',
+    base: null,
   }
 }
 
@@ -88,6 +141,9 @@ export function draftOf(watch: Watch): Draft {
     include: [...(source?.html?.includeSelectors ?? [])],
     exclude: [...(source?.html?.excludeSelectors ?? [])],
     keepLinks: source?.html?.keepLinks ?? false,
+    keepLandmarks: source?.html?.keepLandmarks ?? false,
+    maskNumbers: watch.normalize?.maskNumbers ?? false,
+    disableDefaultMasks: watch.normalize?.disableDefaultMasks ?? false,
     jsonPath: source?.json?.path ?? source?.embedded?.path ?? '',
     embedded: source?.embedded?.kind === EmbeddedSource_Kind.NEXT_DATA ? 'next_data' : 'json_ld',
     trigger:
@@ -118,48 +174,60 @@ export function draftOf(watch: Watch): Draft {
     ignoreRobots: watch.fetchPolicy?.ignoreRobots ?? false,
     ignoredLines: [...(watch.normalize?.ignoredLines ?? [])],
     locale: watch.requestLocale,
+    base: clone(WatchSchema, watch),
   }
 }
 
 const number = (text: string): number | undefined => (text.trim() === '' || !Number.isFinite(Number(text)) ? undefined : Number(text))
 
-/** The Watch a Draft writes (every field the owner sets). */
-export function watchOf(draft: Draft): MessageInitShape<typeof WatchSchema> {
-  const source =
-    draft.source === 'feed'
-      ? { feed: {} }
-      : draft.source === 'json'
-        ? { json: { path: draft.jsonPath.trim() } }
-        : draft.source === 'embedded'
-          ? { embedded: { kind: draft.embedded === 'next_data' ? EmbeddedSource_Kind.NEXT_DATA : EmbeddedSource_Kind.JSON_LD, path: draft.jsonPath.trim() } }
-          : { html: { includeSelectors: draft.include, excludeSelectors: draft.exclude, keepLinks: draft.keepLinks } }
-  const trigger =
-    draft.trigger === 'text_appears'
-      ? { textAppears: { text: draft.text.trim() } }
-      : draft.trigger === 'text_disappears'
-        ? { textDisappears: { text: draft.text.trim() } }
-        : draft.trigger === 'new_item'
-          ? { newItem: { minNewItems: draft.minItems } }
-          : draft.trigger === 'number'
-            ? { number: { upperThreshold: number(draft.upper), lowerThreshold: number(draft.lower), changePercent: draft.changePercent, label: draft.label.trim() } }
-            : draft.trigger === 'availability'
-              ? { availability: { onlyWhenAvailable: draft.onlyWhenAvailable } }
-              : { anyChange: { minChangedLines: draft.minLines } }
-  return {
-    name: draft.name,
-    etag: draft.etag,
-    displayName: draft.displayName.trim(),
-    uri: draft.uri.trim(),
-    source,
-    trigger,
-    normalize: { ignoredLines: draft.ignoredLines },
-    stability: { skipConfirmation: draft.skipConfirmation },
-    checkIntervalMinutes: draft.interval,
-    notifyPolicy: draft.urgent ? Watch_NotifyPolicy.URGENT : Watch_NotifyPolicy.DIGEST,
-    requestLocale: draft.locale.trim(),
-    fetchPolicy: { allowHttp: draft.allowHttp, ignoreRobots: draft.ignoreRobots },
-    shadowMode: draft.shadow,
+/**
+ * The Watch a Draft writes: every field the owner sets, over a copy of the stored watch (`base`), so what the form
+ * does not show keeps its stored value. A source or trigger of the stored kind keeps its other fields too.
+ */
+export function watchOf(draft: Draft): Watch {
+  const out = draft.base === null ? create(WatchSchema) : clone(WatchSchema, draft.base)
+  const source = out.source ?? create(WatchSourceSchema)
+  const kept = { html: source.html, feed: source.feed, json: source.json, embedded: source.embedded }
+  out.source = create(WatchSourceSchema)
+  if (draft.source === 'feed') out.source.feed = kept.feed ?? create(FeedSourceSchema)
+  else if (draft.source === 'json') out.source.json = Object.assign(kept.json ?? create(JsonSourceSchema), { path: draft.jsonPath.trim() })
+  else if (draft.source === 'embedded') {
+    out.source.embedded = Object.assign(kept.embedded ?? create(EmbeddedSourceSchema), { kind: draft.embedded === 'next_data' ? EmbeddedSource_Kind.NEXT_DATA : EmbeddedSource_Kind.JSON_LD, path: draft.jsonPath.trim() })
+  } else {
+    out.source.html = Object.assign(kept.html ?? create(HtmlSourceSchema), { includeSelectors: [...draft.include], excludeSelectors: [...draft.exclude], keepLinks: draft.keepLinks, keepLandmarks: draft.keepLandmarks })
   }
+  const trigger = out.trigger ?? create(TriggerSchema)
+  out.trigger = create(TriggerSchema)
+  if (draft.trigger === 'text_appears') out.trigger.textAppears = Object.assign(trigger.textAppears ?? create(TextTriggerSchema), { text: draft.text.trim() })
+  else if (draft.trigger === 'text_disappears') out.trigger.textDisappears = Object.assign(trigger.textDisappears ?? create(TextTriggerSchema), { text: draft.text.trim() })
+  else if (draft.trigger === 'new_item') out.trigger.newItem = Object.assign(trigger.newItem ?? create(NewItemTriggerSchema), { minNewItems: draft.minItems })
+  else if (draft.trigger === 'number') {
+    const value = Object.assign(trigger.number ?? create(NumberTriggerSchema), { changePercent: draft.changePercent, label: draft.label.trim() })
+    value.upperThreshold = number(draft.upper)
+    value.lowerThreshold = number(draft.lower)
+    out.trigger.number = value
+  } else if (draft.trigger === 'availability') out.trigger.availability = Object.assign(trigger.availability ?? create(AvailabilityTriggerSchema), { onlyWhenAvailable: draft.onlyWhenAvailable })
+  else out.trigger.anyChange = Object.assign(trigger.anyChange ?? create(AnyChangeTriggerSchema), { minChangedLines: draft.minLines })
+  out.name = draft.name
+  out.etag = draft.etag
+  out.displayName = draft.displayName.trim()
+  out.uri = draft.uri.trim()
+  out.normalize = Object.assign(out.normalize ?? create(NormalizeOptionsSchema), { ignoredLines: [...draft.ignoredLines], maskNumbers: draft.maskNumbers, disableDefaultMasks: draft.disableDefaultMasks })
+  out.stability = Object.assign(out.stability ?? create(StabilitySchema), { skipConfirmation: draft.skipConfirmation })
+  out.checkIntervalMinutes = draft.interval
+  out.notifyPolicy = draft.urgent ? Watch_NotifyPolicy.URGENT : Watch_NotifyPolicy.DIGEST
+  out.requestLocale = draft.locale.trim()
+  out.fetchPolicy = Object.assign(out.fetchPolicy ?? create(FetchPolicySchema), { allowHttp: draft.allowHttp, ignoreRobots: draft.ignoreRobots })
+  out.shadowMode = draft.shadow
+  // What the Worker sets is not sent back (the transcoder would clear it anyway).
+  out.state = Watch_State.UNSPECIFIED
+  out.pauseReason = Watch_PauseReason.UNSPECIFIED
+  out.health = undefined
+  out.shadowEndTime = undefined
+  out.createTime = undefined
+  out.updateTime = undefined
+  out.newChangeCount = 0
+  return out
 }
 
 type Field = keyof Draft
@@ -197,8 +265,13 @@ export interface SettingsForm {
   readonly sync: () => void
 }
 
+export interface FormOptions {
+  /** Takes an ignored line back (the watch page: an update of normalize.ignored_lines with the etag). */
+  readonly onUnignore?: (line: string) => Promise<void>
+}
+
 /** The settings form (without the URL, which the views place themselves). `onInput` runs after every edit. */
-export function settingsForm(draft: Draft, onInput: () => void): SettingsForm {
+export function settingsForm(draft: Draft, onInput: () => void, options: FormOptions = {}): SettingsForm {
   const form = el('div', { class: 'settings' })
   const render = () => {
     const changed = () => {
@@ -230,7 +303,25 @@ export function settingsForm(draft: Draft, onInput: () => void): SettingsForm {
     const sourceFields: HTMLElement[] = []
     if (draft.source === 'json' || draft.source === 'embedded') sourceFields.push(labelled('JSONPath', input('jsonPath', { placeholder: '$.items[*].name', spellcheck: 'false', autocapitalize: 'none' }), '只支持 $、.名称、[序号]、[*]'))
     if (draft.source === 'embedded') sourceFields.push(labelled('内嵌数据', bind(draft, 'embedded', select([['json_ld', 'JSON-LD（schema.org）'], ['next_data', 'Next.js 页面数据']]), changed)))
-    if (draft.source === 'html') sourceFields.push(check('链接地址变化也算变化', box('keepLinks')))
+    if (draft.source === 'html') {
+      sourceFields.push(
+        check('链接地址变化也算变化', box('keepLinks')),
+        check('导航、页眉和页脚也算', box('keepLandmarks'), '默认不计入这些区域；在区块里点选的会计入'),
+      )
+    }
+    const ignored = draft.ignoredLines.map((line) =>
+      el(
+        'li',
+        {},
+        el('span', { class: 'text' }, line),
+        options.onUnignore === undefined
+          ? null
+          : button('取消忽略', () => {
+              const take = options.onUnignore
+              if (take !== undefined) void take(line)
+            }, { class: 'link small', 'aria-label': `取消忽略：${line.slice(0, 40)}` }),
+      ),
+    )
     fill(
       form,
       labelled('名称', input('displayName', { maxlength: '80', placeholder: '例如 水壶价格' })),
@@ -242,9 +333,12 @@ export function settingsForm(draft: Draft, onInput: () => void): SettingsForm {
       draft.source === 'html' ? check('不等待二次确认', box('skipConfirmation'), '默认约 15 分钟后再抓一次，确认变化不是一闪而过') : null,
       check('紧急提醒（不进每日摘要）', box('urgent')),
       check('影子模式（7 天）', box('shadow'), '把会被过滤的变化也显示出来，方便调整规则'),
+      check('数字也遮盖', box('maskNumbers'), '计数器、浏览量等数字只是噪声时'),
+      check('关闭默认遮盖', box('disableDefaultMasks'), '相对时间、时间戳、随机串也算变化'),
       check('允许 http（不加密）', box('allowHttp'), draft.allowHttp ? '页面内容将以明文传输' : undefined),
       check('忽略 robots.txt', box('ignoreRobots'), draft.ignoreRobots ? '只用于你有权抓取的页面' : undefined),
-      draft.ignoredLines.length > 0 ? el('p', { class: 'hint' }, `已忽略 ${String(draft.ignoredLines.length)} 行`) : null,
+      ignored.length > 0 ? el('h3', {}, `已忽略的行（${String(ignored.length)}）`) : null,
+      ignored.length > 0 ? el('ul', { class: 'ignored' }, ...ignored) : null,
     )
   }
   render()

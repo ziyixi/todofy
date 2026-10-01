@@ -1,8 +1,10 @@
 /**
  * An in-memory stand-in for the Worker's owner API (proto/watch/ui/v1), served by the same shared transcoder the Worker
  * uses, so every request is routed, decoded strictly and answered in the wire JSON profile as in production. Faithful
- * where the UI depends on it: etags (ETAG_MISMATCH with the watch), update masks, CSRF on mutations, the inbox and
- * drawer filters, acknowledge, and a scripted preview. Every request must be a same-origin /api path.
+ * where the UI depends on it: etags (ETAG_MISMATCH with the watch), update masks, CSRF on mutations, AIP-155 replays of
+ * CreateWatch (logged under the collection without a watch_id, as the Worker does), the inbox and drawer filters,
+ * acknowledge, and a scripted preview. Every request must be a same-origin /api path. `loseNextResponse` commits the
+ * next matching request and then fails its fetch, as a dropped connection would.
  */
 import { vi } from 'vitest'
 import { updatePaths } from '@ziyixi/proto/field-mask'
@@ -76,6 +78,9 @@ export class FakeServer {
   readonly changes: Change[] = []
   /** What PreviewWatch answers (a function of the request's watch). */
   preview: (watch: Watch) => PreviewWatchResponse = () => create(PreviewWatchResponseSchema, {})
+  /** The next request whose path (before the query) ends with this is handled, and its response lost. */
+  loseNextResponse: string | null = null
+  private readonly created = new Map<string, Watch>()
   private etags = 1
   private readonly api: HttpTranscoder<ShapeOf<typeof WatchUiService>, undefined>
 
@@ -112,11 +117,16 @@ export class FakeServer {
       getWatch: (request) => Promise.resolve(clone(WatchSchema, server.existing(request.name))),
       listWatches: () => Promise.resolve(create(ListWatchesResponseSchema, { watches: [...server.watches.values()] })),
       createWatch: (request) => {
+        const replay = request.requestId === '' ? undefined : server.created.get(request.requestId)
+        if (replay !== undefined) return Promise.resolve(clone(WatchSchema, replay))
         const id = request.watchId === '' ? `w${String(server.watches.size + 100)}` : request.watchId
+        if (server.watches.has(`watches/${id}`)) fail(Code.ALREADY_EXISTS, 'WATCH_EXISTS', server.existing(`watches/${id}`))
         const created = create(WatchSchema, request.watch)
         created.name = `watches/${id}`
         created.state = Watch_State.ACTIVE
-        return Promise.resolve(server.write(created))
+        const written = server.write(created)
+        if (request.requestId !== '') server.created.set(request.requestId, written)
+        return Promise.resolve(written)
       },
       updateWatch: (request) => {
         const incoming = request.watch ?? fail(Code.INVALID_ARGUMENT, 'BAD_REQUEST')
@@ -192,6 +202,10 @@ export class FakeServer {
         this.calls.push({ method: init.method ?? 'GET', path: url, headers, body })
         if (url === '/api/csrf') return Response.json({ token: 'synthetic-token' })
         const result = await this.api.handle(new Request(`https://watch.example.com${url}`, { method: init.method ?? 'GET', headers: init.headers ?? {}, ...(typeof init.body === 'string' ? { body: init.body } : {}) }), undefined)
+        if (this.loseNextResponse !== null && (url.split('?')[0] ?? '').endsWith(this.loseNextResponse)) {
+          this.loseNextResponse = null
+          throw new TypeError('the connection dropped after the request was handled')
+        }
         return result?.response ?? new Response('{}', { status: 404 })
       }),
     )

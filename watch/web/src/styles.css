@@ -439,3 +439,42 @@ button:disabled {
   font-weight: 700;
   text-decoration: underline;
 }
+
+/* Text for screen readers only (the diff's 新增/删除, the preview's status line). */
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+.block .note {
+  font-size: 0.75rem;
+  color: var(--muted);
+  flex: none;
+}
+
+.shared strong {
+  overflow-wrap: anywhere;
+}
+
+ul.ignored {
+  padding-left: 1.25rem;
+  font-size: 0.9rem;
+}
+
+ul.ignored li {
+  display: flex;
+  gap: 0.5rem;
+  align-items: baseline;
+  justify-content: space-between;
+}
+
+ul.ignored .text {
+  overflow-wrap: anywhere;
+}

@@ -80,8 +80,11 @@ describe('adding a watch', () => {
         normalizedLines: (draft.source?.html?.excludeSelectors ?? []).includes('aside#ads') ? ['Price 100'] : ['Price 100', 'Advertisement'],
       })
     const root = await mount(server, `/new#u=${encodeURIComponent('https://shop.example.com/item?x=1')}`)
-    await until(() => text(root).includes('gbk（来自 meta）'))
     expect(root.querySelector<HTMLInputElement>('input[type="url"]')?.value).toBe('https://shop.example.com/item?x=1')
+    // Nothing is fetched until the owner taps 预览 (the link alone must not make the Worker request the URL).
+    expect(server.mutations(':preview')).toEqual([])
+    button(root, '预览').click()
+    await until(() => text(root).includes('gbk（来自 meta）'))
     // The fragment never reached the server: the preview carries the URL in its body.
     expect(server.calls.every((call) => !call.path.includes('shop.example.com'))).toBe(true)
     expect(server.mutations(':preview')[0]?.body).toMatchObject({ watch: { uri: 'https://shop.example.com/item?x=1', display_name: 'shop.example.com' } })
@@ -101,6 +104,7 @@ describe('adding a watch', () => {
     const server = new FakeServer()
     server.preview = () => create(PreviewWatchResponseSchema, { fetch: { httpStatus: 403, robotsAllowed: true }, failure: FailureReason.CHALLENGE_PAGE })
     const root = await mount(server, `/new#u=${encodeURIComponent('https://blocked.example.com/')}`)
+    button(root, '预览').click()
     await until(() => text(root).includes('被拦截（人机验证页面）'))
   })
 })

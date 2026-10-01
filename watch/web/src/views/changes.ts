@@ -1,8 +1,11 @@
 /**
  * A change as a card (the inbox, the suppressed drawer and a watch's own list): what the rules said, the changed lines,
  * and its actions. "已读" acknowledges a new change. In the drawer each line can be ignored ("忽略这一行": the line goes
- * into the watch's normalize.ignored_lines), undoable from the toast; ignoring changes what is read, so the watch's next
- * check sets a new notified state.
+ * into the watch's normalize.ignored_lines, and is dropped from both sides of every comparison from the next check on;
+ * the notified state stays). The toast offers 撤销 at once; any ignored line can be taken back later on the watch's
+ * page (its settings list them, each with 取消忽略; its own suppressed changes offer 取消忽略 on such a line).
+ *
+ * For a screen reader each line says 新增 or 删除 in words (the +/− glyph is hidden), and each line's button names it.
  */
 import { Change_State, DiffLine_Kind, type Change } from '@ziyixi/proto/watch/ui/v1/change_pb'
 import { api, errorMessage, newRequestId, withRetry } from '../api.ts'
@@ -31,6 +34,8 @@ export interface CardOptions {
   readonly showWatch: boolean
   /** Offer "忽略这一行" on each line (the drawer). */
   readonly ignorable: boolean
+  /** The watch's ignored lines, when known (its own page): such a line offers 取消忽略 instead. */
+  readonly ignoredLines?: readonly string[]
   /** Called after an action changed the change (the list re-renders). */
   readonly onChange: () => void
 }
@@ -57,12 +62,25 @@ export function changeCard(ctx: ViewContext, change: Change, options: CardOption
     lines.replaceChildren(
       ...shown.map((line) => {
         const added = line.kind === DiffLine_Kind.ADDED
-        const row = el('li', { class: added ? 'added' : 'removed' }, el('span', { class: 'sign', 'aria-label': added ? '新增' : '删除' }, added ? '+' : '−'), el('span', { class: 'text' }, line.text))
-        if (options.ignorable) {
+        const row = el(
+          'li',
+          { class: added ? 'added' : 'removed' },
+          el('span', { class: 'sign', 'aria-hidden': 'true' }, added ? '+' : '−'),
+          el('span', { class: 'visually-hidden' }, added ? '新增：' : '删除：'),
+          el('span', { class: 'text' }, line.text),
+        )
+        const short = line.text.slice(0, 40)
+        if (options.ignorable && (options.ignoredLines ?? []).includes(line.text)) {
+          row.append(
+            button('取消忽略', () => {
+              void unignore(line.text)
+            }, { class: 'link small', 'aria-label': `取消忽略：${short}` }),
+          )
+        } else if (options.ignorable) {
           row.append(
             button('忽略这一行', () => {
               void ignore(line.text)
-            }, { class: 'link small' }),
+            }, { class: 'link small', 'aria-label': `忽略这一行：${short}` }),
           )
         }
         return row
@@ -73,7 +91,7 @@ export function changeCard(ctx: ViewContext, change: Change, options: CardOption
   const ignore = async (line: string) => {
     try {
       await setIgnored(watchName, line, true)
-      toast('已忽略这一行（下次检查会重新记录基准）', {
+      toast('已忽略这一行（比较时两边都不再计入；可在监视的设置里取消）', {
         label: '撤销',
         run: () => {
           void setIgnored(watchName, line, false).then(
@@ -82,6 +100,15 @@ export function changeCard(ctx: ViewContext, change: Change, options: CardOption
           )
         },
       })
+      options.onChange()
+    } catch (error) {
+      toast(errorMessage(error))
+    }
+  }
+  const unignore = async (line: string) => {
+    try {
+      await setIgnored(watchName, line, false)
+      toast('已取消忽略这一行')
       options.onChange()
     } catch (error) {
       toast(errorMessage(error))

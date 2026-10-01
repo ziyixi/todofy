@@ -25,6 +25,7 @@ const FAILURES: Readonly<Record<number, string>> = {
   [FailureReason.PARSE_ERROR]: '无法解析内容',
   [FailureReason.VALUE_MISSING]: '找不到要监视的数值',
   [FailureReason.BROWSER_UNAVAILABLE]: '浏览器抓取尚未开放',
+  [FailureReason.INTERNAL_ERROR]: '检查出错（会逐渐拉长间隔重试）',
 }
 
 /** What a failed check says. */
