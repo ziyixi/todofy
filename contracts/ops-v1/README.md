@@ -5,20 +5,41 @@ A small, typed RPC surface on each app so that one dashboard Worker (`home`, in
 single ops digest to Todofy's daily reminder. It is a contract between each app and that dashboard;
 the two apps still never call or import each other.
 
+The source of truth is the IDL [`proto/ops/v1/ops.proto`](../../proto/ops/v1/ops.proto): its services
+are the methods, its messages and enums the values, and its `common.wire.v1` options every value rule
+(formats, allowed codes, sizes, bounds, which fields a state requires or forbids; [proto/README.md "Value
+rules"](../../proto/README.md#value-rules)). Every producer and the dashboard read and write ops-v1 with
+the code generated from it and the wire JSON codec (`proto/ts/wire-json.ts`,
+`ziyixi_proto.wire_json`), which checks those rules on every read and every write, so a value that
+breaks the contract never leaves an app. The bytes on the wire are the ones of the hand-written
+contract this replaced (each app's golden test, below).
+
 | File | Purpose |
 | --- | --- |
-| `ops-v1.schema.json` | JSON Schema 2020-12, one `$defs` entry per input and output (table below) |
-| `ops-v1.ts` | Dependency-free TypeScript types and bounds; the TS Workers import it by relative path |
-| `validate.mjs` | Dependency-free validator for exactly the schema keywords used here (TS Workers' tests, the dashboard) |
+| [`proto/ops/v1/ops.proto`](../../proto/ops/v1/ops.proto) | The contract: services, messages, enums and value rules |
+| `ops-v1.schema.json` | JSON Schema 2020-12 **generated** from the IDL (`proto/tools/gen_schema.py`), one `$defs` entry per input and output (table below); never edited by hand, `npm run check:schema` in `proto/` fails when stale. Kept for readers outside the monorepo and as the oracle the tests check the codec against |
+| `ops-v1.ts` | `OPS_LIMITS`: the rules no codec can check (relative to a clock or to a whole message); the TS Workers import it by relative path, `todofy-core` keeps the same numbers |
+| `legacy/ops-v1.schema.json` | The hand-written schema the dashboards deployed before the move validate answers with, frozen: the golden tests prove every answer still passes it (rollout) |
+| `validate.mjs` | Dependency-free validator for the JSON Schema keywords the contracts use; Lab checks `task-intent-v1` with it at runtime, the golden tests check answers against the legacy schema with it |
 | `fixtures/<Def>/*.json` | Valid examples of each input/output; `fixtures/invalid/<Def>/*.json` must fail |
 | `IMPLEMENTATION.md` | Per app: files, migrations, guard keep/defer table, canary state machine, digest, query budgets, tests |
 
-Checks (the `Contracts` CI job, and each app's own tests): `mail-hero/cloudflare/test/ops-contract.test.mjs`
-runs `validate.mjs` over every fixture and compares the constants of `ops-v1.ts` with the schema;
-`todofy/tests/unit/test_ops_contract.py` gives every fixture the verdict of the reference validator
-(Python `jsonschema`) and keeps the schema inside the keyword subset `validate.mjs` implements;
-`dashboard/worker/test/ops-client.test.ts` checks the caller: only declared methods, every declared
-error code.
+Checks (the `Contracts` CI job, `Proto checks`, and each app's own tests):
+
+- `proto/test/ops.test.ts` and `proto/test/python/test_ops.py`: every valid fixture round-trips byte for
+  byte through both codecs (strict and lenient reads), every invalid one is refused by a strict read,
+  and a lenient read tolerates exactly what the consumer rules allow (an unknown field, a new code of
+  an open list); `proto/test/cross-language.test.ts` compares the two languages on the same bytes.
+- `todofy/tests/unit/test_ops_contract.py`: the generated schema gives every fixture the verdict of the
+  reference validator (Python `jsonschema`) and the codec agrees with it; about 22,000 mutations of the
+  valid fixtures get the same verdict from the generated and the legacy schema; the generated schema
+  stays inside the keyword subset `validate.mjs` implements.
+- Golden tests (`mail-hero/cloudflare/test/ops-golden.test.mjs`, `lab/worker/test/ops-golden.test.ts`,
+  `todofy/tests/unit/test_ops_golden.py`, `dashboard/worker/test/ops-golden.test.ts`): the exact bytes
+  each app answers (or the dashboard sends and keeps) for fixed synthetic state, written by the code
+  before the move, and every one valid under the legacy schema.
+- `dashboard/worker/test/ops-client.test.ts` checks the caller: only the methods of the generated
+  services, every declared error code.
 
 ## Transport
 
@@ -50,12 +71,21 @@ service = "lab"
 entrypoint = "Ops"
 ```
 
+The method signatures are the generated services' wire types (`@ziyixi/proto/ops/v1/ops_wire`, types
+only): `OpsService` on every app, `CanaryProducerService` on Mail Hero, `CanaryConsumerService` and
+`OpsDigestService` on Todofy. An app's `Ops` class `implements` them; the dashboard types its bindings
+with them:
+
 ```ts
-import type { MailHeroOps, TodofyOps } from '<relative path>/contracts/ops-v1/ops-v1.ts';
-interface MailHeroOpsEntrypoint extends Rpc.WorkerEntrypointBranded, MailHeroOps {}
-interface TodofyOpsEntrypoint extends Rpc.WorkerEntrypointBranded, TodofyOps {}
+import type * as ops from '@ziyixi/proto/ops/v1/ops_wire';
+interface MailHeroOpsEntrypoint extends Rpc.WorkerEntrypointBranded, ops.OpsService, ops.CanaryProducerService {}
+interface TodofyOpsEntrypoint extends Rpc.WorkerEntrypointBranded, ops.OpsService, ops.CanaryConsumerService, ops.OpsDigestService {}
 interface Env { MAIL_HERO: Service<MailHeroOpsEntrypoint>; TODOFY: Service<TodofyOpsEntrypoint> }
 ```
+
+`status()`, `canaryDelivery(eventId)` and `canaryResult(eventId)` take their request's fields as
+positional arguments (`common.wire.v1.method.positional`), so the RPC calls are exactly the ones before
+the IDL; `toWireArguments`/`fromWireArguments` convert them.
 
 There is no new public HTTP route and no Access policy for this surface: a service binding can only be
 created by a Worker deployed in the same Cloudflare account, which is the trust boundary (whoever can
@@ -75,7 +105,7 @@ only JSON values.
 | `reportOps(report)` | Todofy | `OpsReport` | `OpsReportReceipt` | Todofy's Durable Object storage |
 
 **Errors.** A method rejects only with `new Error(code)` where `code` is an `OpsErrorCode`
-(the message crosses RPC intact): `invalid_input` (the input fails the schema or a rule below; do not
+(the message crosses RPC intact): `invalid_input` (the input fails the contract's rules or a rule below; do not
 retry unchanged), `busy` (try again in a minute), `unavailable` (storage or an internal call failed; try
 again later). Every expected outcome is a value (`paused`, `unavailable`, `not_seen`, ...). A caller
 treats any other rejection (binding error, deploy in progress, an unknown method on an older release)
@@ -83,9 +113,9 @@ like `unavailable`.
 
 **Content rule.** Outputs carry only codes, numbers, booleans, timestamps, event IDs, run IDs and the
 apps' own UI URLs: never subjects, addresses, bodies, headers, attachment names, URLs of webhook
-targets, tokens or remote response text. The output schemas are closed (`additionalProperties: false`,
-numeric-only metrics and counters, `Code` pattern for every name) so that a test validating an output
-catches a leak; each app's implementation tests seed mail and assert that none of its text appears.
+targets, tokens or remote response text. The outputs are closed (only the IDL's fields, numeric-only
+metrics and counters, the `Code` format for every name and code), and the codec checks that on every
+answer an app writes, so a leak fails before it leaves the app and a test catches it; each app's implementation tests seed mail and assert that none of its text appears.
 
 ### `status()`
 
@@ -104,7 +134,7 @@ writes and never aggregates a whole table. Poll it no more often than every 10 m
   `status_unavailable` status has only the deployment variables (Mail Hero `maintenance`,
   `force_send_paused`; Todofy `maintenance`, `processing_paused`, `force_pause_todoist`,
   `reminder_enabled`); the keys read from storage (Mail Hero `send_paused`, `forwarding`,
-  `backup_active`; Todofy `backup_active`) are left out, so they are optional in `ops-v1.ts`.
+  `backup_active`; Todofy `backup_active`) are left out, so they are optional (`optional` in the IDL).
 - `guard`: the effective `GuardState` (below).
 - `signals`: active conditions only, at most 16, sorted by severity (critical first) then code. `metrics`
   are numbers only; `since` when the app tracks the start of the episode.
@@ -218,8 +248,10 @@ the next UTC day's reminder carries it.
 ## Versioning and bounds
 
 - Additive changes stay `ops-v1`: new optional output fields, new signal/counter/capability codes, new
-  enum values of `reason`/`waiting_code`/`error_code` documented here. They land together with the
-  schema, `ops-v1.ts` and fixtures in one change. Consumers ignore unknown fields and show unknown codes
+  enum values of `reason`/`waiting_code`/`error_code` documented here. They land in `ops.proto`
+  together with the regenerated schema (`npm run schema` in `proto/`) and fixtures in one change;
+  `buf breaking` and the wire profile check (`proto/tools/profile_breaking.py`) refuse a change that
+  would alter the bytes of an existing field. Consumers ignore unknown fields and show unknown codes
   generically.
 - Anything else (a removed or retyped field, a changed meaning, a new required input) is `ops-v2`: a new
   entrypoint class `OpsV2` and a new directory, served next to `Ops` until the dashboard moved.

@@ -8,7 +8,7 @@
  * that binding. Each method forwards to one TodofyCore RPC method, which answers `{ok}` or
  * `{error}`; this class turns an error into `new Error(code)` (the message crosses RPC intact).
  * A failed core call (object down, deploy in progress, Python exception) rejects `unavailable`.
- * The core validates every input against the schema's rules; the gateway only refuses what it
+ * The core reads every input with the contract's rules (the wire codec); the gateway only refuses what it
  * cannot even pass on (a non-string ID, input that is not JSON, a report over 8 KiB, a task
  * intent over 64 KiB).
  *

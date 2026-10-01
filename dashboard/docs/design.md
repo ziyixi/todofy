@@ -36,8 +36,9 @@ Toolchain versions are Todofy's: Node 26, TypeScript 5.9.3, vitest 4.1.11, eslin
 typescript-eslint 8.71.0, `@cloudflare/workers-types` 5.20260929.1, wrangler 4.142.0 (its own
 miniflare 5.20260926.0-alpha and esbuild 0.28.1 are pinned as direct dev dependencies for the harness),
 React 19.3.0, Vite 7.3.6, `@tanstack/react-query` 5.104.0, `lucide-react` 1.48.0. `@ziyixi/edge-auth`
-is `file:../../packages/edge-auth`. `contracts/ops-v1/ops-v1.ts` is imported by relative path
-(`../../../contracts/ops-v1/ops-v1.ts` from `worker/src`), `validate.mjs` only in tests.
+is `file:../../packages/edge-auth`, `@ziyixi/proto` is `file:../../proto/ts` (ops-v1's generated messages,
+services and wire types, and the wire JSON codec; since 2026-10-01). `contracts/ops-v1/ops-v1.ts` (`OPS_LIMITS`)
+is imported by relative path (`../../../contracts/ops-v1/ops-v1.ts` from `worker/src`).
 
 Worker modules (the worker builder may merge or split, keeping pure logic separate from I/O):
 
@@ -166,17 +167,20 @@ subrequests and 32 Worker invocations per request.
 
 ### 5.1 Calling the apps (`ops-client.ts`)
 
-- Only the methods of `MailHeroOps`/`TodofyOps` in `ops-v1.ts` are called (tested, §9).
+- Only the methods of each app's generated ops-v1 services (`proto/ops/v1/ops.proto`: `OpsService`,
+  `CanaryProducerService`, `CanaryConsumerService`, `OpsDigestService`) are called (tested, §9).
 - Result: `{ok: true, value}` or `{ok: false, code}`. A rejection whose `Error.message` is an
-  `OpsErrorCode` (`invalid_input`, `busy`, `unavailable`) keeps that code; the timeout gives `timeout`;
+  `ErrorCode` (`invalid_input`, `busy`, `unavailable`) keeps that code; the timeout gives `timeout`;
   any other rejection (binding error, deploy in progress, unknown method) gives `unavailable`; a value
-  over 32 KiB of JSON or one that `contracts/ops-v1/validate.mjs` rejects against the method's `$defs`
-  entry gives `invalid_output`. Before validating, the two consumer rules of the contract's
-  "Versioning" section are applied, because an app can ship an additive change before this Worker is
-  redeployed: fields the schema does not declare are removed (never stored or shown), and new values
-  of the enums `reason`, `waiting_code` and `error_code` are accepted when they are codes. Anything
-  else outside the closed schema (an address as a counter name, free text in a code, an http URL, an
-  offset timestamp) is refused, so it never reaches DO storage or the page. All of these are
+  over 32 KiB of JSON or one the contract's rules refuse gives `invalid_output`. Every answer is read
+  with the wire codec (a lenient read: the contract's rules, with its consumer allowances) and kept as
+  the codec writes it back, because an app can ship an additive change before this Worker is
+  redeployed: fields the IDL does not declare are dropped (never stored or shown), and new codes of the
+  open lists `reason` and `waiting_code` (and any `error_code` code) are kept; a new value of a closed
+  enum (a state, a severity, a level) is refused. Anything else outside the closed contract (an address
+  as a counter name, free text in a code, an http URL, an offset timestamp) is refused, so it never
+  reaches DO storage or the page. Every input the dashboard sends goes through a strict read with the
+  same rules first; one they refuse is not sent (`invalid_input`). All of these are
   "unavailable" for decisions; `invalid_input` is logged as a dashboard bug and never retried in a
   tight loop (at most once per tick).
 - `status()` of each app at most every 10 min (`OPS_LIMITS.statusMinIntervalSeconds`), counting every
@@ -540,10 +544,10 @@ Unit (`worker`, vitest in Node, `cloudflare:workers` aliased to `test/cloudflare
 - `canary`: every transition of §5.4 including all deadlines, idempotent start, limits of manual runs,
   run-ID format against `RunId`.
 - `digest`: item table, ordering, 20 items, 8192 bytes, `since`, change key, 6 h and 23:30 rules, the
-  hold at the start of a UTC day (23:30 breach, 00:00 cleared: no send until 00:30), empty report; every report validated with `validate.mjs` as `OpsReport`.
-- `ops-client`: **only declared methods** (a recording proxy env; the called names equal the method
-  names parsed from `ops-v1.ts` interfaces `MailHeroOps`/`TodofyOps` by `test/declared-methods.ts`,
-  the same parse the runtime stubs use) and **every `OPS_ERROR_CODES` value** plus timeout, foreign
+  hold at the start of a UTC day (23:30 breach, 00:00 cleared: no send until 00:30), empty report; every report passes the contract's rules as `OpsReport`.
+- `ops-client`: **only declared methods** (a recording proxy env; the called names equal the methods of
+  each app's generated services, `test/contract.ts`, the list the runtime stubs use) and **every
+  `ErrorCode` value** plus timeout, foreign
   rejection and invalid output, for every method; every invalid output fixture of
   `contracts/ops-v1/fixtures/invalid/` is refused except the ones the consumer rules tolerate (an
   extra field is dropped, a new additive enum code is read).
@@ -556,7 +560,7 @@ Runtime (`npm run test:runtime`, Miniflare; `test/runtime/harness.ts`): the bund
 real SQLite `HomeState`; stub `mail-hero` and `todofy` Workers exporting `Ops` with only their declared
 methods, defaulting to `contracts/ops-v1` fixtures and scripted per test (`/__scenario`, `/__calls`);
 an outbound handler playing GraphQL and the Access certs endpoint. Every value a stub returns is a
-fixture or validated with `validate.mjs`. Flows, driven by `scheduled()` with chosen times:
+fixture or passes the contract's rules (`test/contract.ts`). Flows, driven by `scheduled()` with chosen times:
 
 - guard: 81 % → shed on both apps with the expected input; same state → no call; renew on a new day
   (R2), also when GraphQL fails at midnight (no normal in between); < 70 % → normal; the app reporting
@@ -618,7 +622,8 @@ CI (`.github/workflows/ci.yml`, pinned action SHAs as today):
   `BUNDLED_BY = {"contracts/ops-v1/ops-v1.ts": ("todofy", "mail-hero", "dashboard"),
   "contracts/ops-v1/ops-v1.schema.json": ("dashboard",), "contracts/ops-v1/validate.mjs": ("dashboard",)}`
   (the dashboard validates every `Ops` answer with them; its test also scans `dashboard/worker/src`
-  and `dashboard/web/src`); `contracts/` and `.github/` re-check the
+  and `dashboard/web/src`; since 2026-10-01 the dashboard reads them with the generated code instead,
+  `proto/ops/` in `PROTO_PACKAGES`, and bundles only `ops-v1.ts`); `contracts/` and `.github/` re-check the
   dashboard; dispatch input gains `dashboard` and `all` (`both` keeps meaning Todofy + Mail Hero,
   and stays the default). A dashboard change also runs `Contracts`, which gained a host-only step in
   `dashboard/worker` (`test/ops-client.test.ts`, `guard`, `canary`, `digest`): the caller side of ops-v1

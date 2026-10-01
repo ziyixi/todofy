@@ -601,12 +601,15 @@ pauses for a backup). `tools/backup_restore.py` downloads, checks, and turns a b
 ### ops-v1 (lead; `core/ops.py`, `runtime/ops.py`, `gateway/src/ops.ts`)
 The operations surface a dashboard Worker in the same account reaches through a service binding to the
 gateway's named entrypoint `Ops` (`[[services]] service = "todofy" entrypoint = "Ops"`); no public route,
-no Access policy. The contract is `../contracts/ops-v1` (README, schema, fixtures, `ops-v1.ts` types the
-gateway imports). `Ops` forwards each method to one `ops_*` RPC method and turns `{"error": code}` into
-`new Error(code)`; a failed call is `unavailable`. `core/ops.py` holds every rule (input checks with
-`fullmatch`, guard expiry, signals and health, canary result, digest items) and builds outputs only from
+no Access policy. The contract is `../contracts/ops-v1` (README, generated schema, fixtures) with its IDL
+`../proto/ops/v1/ops.proto`: the gateway implements the generated services (`ops_wire.ts`, types only) and the
+core reads every input strictly and writes every output as a generated message (`ziyixi_proto.ops.v1`) with
+the wire codec, which checks the contract's value rules. `Ops` forwards each method to one `ops_*` RPC method and turns `{"error": code}` into
+`new Error(code)`; a failed call is `unavailable`. `core/ops.py` holds every rule the IDL cannot (guard expiry
+against the clock, signals and health, canary result, digest items, the report's byte size) and builds outputs only from
 numbers, booleans, timestamps and closed codes; `tests/unit/test_ops_core.py` validates them against the
-schema. CI: the root `Contracts` job runs `test_ops_contract.py`, `test_ops_core.py` and the gateway's
+schema and `test_ops_golden.py` pins their bytes. CI: the root `Contracts` job runs `test_ops_contract.py`,
+`test_ops_core.py`, `test_ops_golden.py` and the gateway's
 `test/ops.test.ts` (with Mail Hero's side of ops-v1); `tests/runtime/test_ops.py` (real bindings, a probe
 Worker bound with `entrypoint = "Ops"`, like the dashboard) runs in `Todofy checks`. The golden canary is
 `contracts/mail-received-v1/fixtures/canary_event.json`; its `event_id` differs from every other fixture's

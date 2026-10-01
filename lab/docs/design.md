@@ -354,6 +354,11 @@ created.
 
 `status()`/`setGuard()` only. Change to `contracts/ops-v1` (additive, one commit with its tests):
 
+> Since 2026-10-01 ops-v1 is generated from `proto/ops/v1/ops.proto`: Lab's entrypoint implements the
+> generated `OpsService` and builds its answers as generated messages written by the wire codec; the
+> hand-written types named below (`LabOps`, `OpsCommon`, `LabModes`) were retired
+> (`contracts/ops-v1/IMPLEMENTATION.md` §3b).
+
 - `OPS_APPS = ['mail-hero', 'todofy', 'lab']`, schema `App` enum + `lab`; `LabModes {maintenance:
   boolean (always false: Lab has no maintenance switch), ingest_paused?: boolean}`;
   `LabStatus = OpsStatus<'lab', LabModes>`; `interface LabOps extends OpsCommon<LabStatus> {}`.

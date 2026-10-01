@@ -3,9 +3,11 @@
 The only files the apps (`mail-hero/`, `todofy/`, `dashboard/`, `lab/`) share. No app imports another; each reads
 these files.
 
-The protobuf IDL of these contracts lives in [`../proto/`](../proto/README.md) (today `task-intent-v1` only,
-whose two sides run on the generated code). It does not change the wire: the schemas and fixtures here stay
-the published wire description.
+The protobuf IDL of these contracts lives in [`../proto/`](../proto/README.md): `ops-v1` and `task-intent-v1`,
+whose sides all run on the generated code (`mail-received-v1` is not in it yet). It does not change the wire: the
+fixtures here stay the published wire description, and their bytes round-trip through the generated codecs.
+`ops-v1`'s JSON Schema is generated from its IDL; `task-intent-v1`'s is still hand-written, checked against the
+codec on every fixture.
 
 | Directory | Between | Owner |
 | --- | --- | --- |
@@ -41,29 +43,37 @@ Worker, so a reused ID would be answered 409 `event_conflict`. The generator's c
 
 ## `ops-v1/`
 
-Schema (`ops-v1.schema.json`), TypeScript types (`ops-v1.ts`, imported by relative path), a
-dependency-free validator for the TypeScript side (`validate.mjs`), fixtures, the contract text
-(`README.md`) and the per-app plan (`IMPLEMENTATION.md`). Checks, all in the `Contracts` CI job:
+The IDL is [`proto/ops/v1/ops.proto`](../proto/ops/v1/ops.proto): services, messages, enums and every value
+rule (`common.wire.v1` options). Every app and the dashboard read and write ops-v1 with the generated code and the
+wire JSON codec, which checks the rules on every read and write. Here: the JSON Schema generated from the IDL
+(`ops-v1.schema.json`, `npm run check:schema` in `proto/` fails when stale), `OPS_LIMITS` (`ops-v1.ts`: the
+rules relative to a clock or a whole message), the frozen pre-IDL schema (`legacy/`), fixtures, the contract
+text (`README.md`) and the per-app plan (`IMPLEMENTATION.md`). Checks:
 
-- Fixtures against the schema, with both validators so their verdicts cannot drift: `node --test
-  test/ops-contract.test.mjs` in `mail-hero/cloudflare` (`validate.mjs`, every valid and invalid fixture,
-  the `ops-v1.ts` constants) and `uv run pytest tests/unit/test_ops_contract.py` in `todofy` (Python
-  `jsonschema` Draft 2020-12 on the same fixtures; the schema stays inside the keyword subset
-  `validate.mjs` implements).
-- Each app's own `Ops` code, on the host: `test/native-ops.test.mjs` (Mail Hero: guard, status, canary
-  delivery, input checks), `tests/unit/test_ops_core.py` (Todofy core rules) and `gateway/test/ops.test.ts`
-  (Todofy's entrypoint forwarding); every value they produce is validated against the schema.
-- The caller, on the host: `dashboard/worker` `test/ops-client.test.ts` (the dashboard calls only the
-  methods `MailHeroOps`/`TodofyOps` declare and handles every `OPS_ERROR_CODES` value, timeouts and
-  invalid output) and `test/guard.test.ts`, `canary.test.ts`, `digest.test.ts` (every `SetGuardInput`,
-  `StartCanaryInput` and `OpsReport` it builds passes `validate.mjs`).
+- `Proto checks`: every valid fixture round-trips byte for byte through the TypeScript and Python codecs, every
+  invalid one is refused by a strict read, both languages agree (`proto/test/ops.test.ts`,
+  `test/python/test_ops.py`, `test/cross-language.test.ts`); the generated schema is fresh.
+- `Contracts`: the generated schema is fresh; `todofy` `tests/unit/test_ops_contract.py` gives every fixture the
+  verdict of the reference validator (Python `jsonschema` Draft 2020-12) and the codec's, and the generated
+  and legacy schemas the same verdict on about 22,000 mutations of the valid fixtures. Golden tests pin the
+  exact bytes each side answers, sends and keeps for fixed synthetic state, written before the move onto the
+  IDL, and check every answer against the legacy schema the dashboards deployed before it validate with:
+  `mail-hero/cloudflare/test/ops-golden.test.mjs`, `lab/worker/test/ops-golden.test.ts`,
+  `todofy/tests/unit/test_ops_golden.py`, `dashboard/worker/test/ops-golden.test.ts`.
+- Each app's own `Ops` code, on the host (also in `Contracts`): `test/native-ops.test.mjs` (Mail Hero: guard,
+  status, canary delivery, input checks), `tests/unit/test_ops_core.py` (Todofy core rules) and
+  `gateway/test/ops.test.ts` (Todofy's entrypoint forwarding); every value they produce is read back strictly.
+- The caller, on the host: `dashboard/worker` `test/ops-client.test.ts` (the dashboard calls only the methods of
+  each app's generated services and handles every `ErrorCode`, timeouts and invalid output) and
+  `test/guard.test.ts`, `canary.test.ts`, `digest.test.ts` (every `SetGuardInput`, `StartCanaryInput` and
+  `OpsReport` it builds passes the contract's rules).
 
 The real-binding tests (`mail-hero/cloudflare/test/native-ops-runtime.test.mjs`,
 `todofy/tests/runtime/test_ops.py`) call each app's `Ops` over a service binding in workerd, the way the
-dashboard does; they run in each app's check job, which `contracts/` changes also trigger. The
+dashboard does; they run in each app's check job, which `contracts/` and `proto/ops/` changes also trigger. The
 dashboard's own runtime suite (`dashboard/worker/test/runtime/`, in `Dashboard checks`) runs its real
 `HomeState` against stub apps that answer with these fixtures. Lab's `Ops` is checked in workerd by
-`lab/worker/test/runtime/ops.test.ts` (in `Lab checks`): every status and guard state passes the schema.
+`lab/worker/test/runtime/ops.test.ts` (in `Lab checks`): every status and guard state is read back strictly.
 
 ## `task-intent-v1/`
 

@@ -387,7 +387,7 @@ backups copy the D1 tables the sweep checks). The probe Worker's Durable Object 
 must be placed by the shard plan (`pytest_shards.py`), or "Todofy checks" fails the completeness check.
 
 **Dashboard / contracts**: `registry.test.ts` (flow valid, known signals placed), labels, ops-v1
-fixtures and `validate.mjs`/`jsonschema` verdicts.
+fixtures and the codec's/`jsonschema` verdicts.
 
 ## 13. Delivery order
 

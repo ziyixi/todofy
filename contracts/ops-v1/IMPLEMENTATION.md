@@ -13,6 +13,11 @@ optional `canary` marker of `mail.received.v1` (schema, text, `fixtures/canary_e
 `buildPayload(..., canary?)` and `syntheticCanaryMail()` in Mail Hero's `pipeline.ts` with the golden
 case in `test/contract-fixtures.mjs`; both sides' contract tests and the `Contracts` CI job.
 
+> **Since 2026-10-01 the contract is generated from [`proto/ops/v1/ops.proto`](../../proto/ops/v1/ops.proto)**
+> (§3b). The hand-written types and the validators of §1.1–§1.2 were replaced by the generated code and
+> the wire JSON codec in every app; those sections record how the surface was first built, and the
+> file and test names below that changed are listed in §3b.
+
 ## 0. Rollout order
 
 1. Todofy release with `canary_consumer` (migration `0003`, canary handling, `Ops`). Until it is live a
@@ -29,7 +34,7 @@ without canary handling treats any canary it touches as real mail (Todoist task,
 
 ## 1. Shared pieces
 
-### 1.1 Importing the types (tried)
+### 1.1 Importing the types (tried; replaced by the generated services, §3b)
 
 | App | File | Import |
 | --- | --- | --- |
@@ -64,7 +69,7 @@ implements <App>Ops` plus one `export { Ops } from ...` line in the entry file:
 `ops-v1.ts` uses only erasable syntax (no enums or namespaces), so Node's type stripping imports it too
 (`test/ops-contract.test.mjs` does).
 
-### 1.2 Validating outputs against the schema
+### 1.2 Validating outputs against the schema (replaced by the wire codec, §3b)
 
 Validator choice: the repositories have exactly one JSON Schema implementation, Todofy's dev
 dependency `jsonschema==4.26.0` (Draft 2020-12), already used by `test_mail_hero_compat.py`. Mail Hero
@@ -253,9 +258,11 @@ forever (owner connection tests keep today's behaviour).
 
 ### 2.7 Tests (Mail Hero)
 
-- `test/ops-contract.test.mjs` (exists): fixtures, validator, constants.
+- `test/ops-golden.test.mjs`: the exact bytes of every answer for fixed synthetic state (§3b).
 - `test/native-ops.test.mjs` (Node): signal/health derivation, input validation, `GuardState` expiry
-  arithmetic, run-id rules; every produced object validated with `validate.mjs`.
+  arithmetic, run-id rules; every produced object read back strictly with the wire codec.
+- `test/native-ops-cpu.test.mjs` (workerd): CPU of every `Ops` call against the Free limit, the
+  isolate's first `status()` included.
 - `test/native-ops-runtime.test.mjs` (miniflare, two Workers as in 1.1: the bundle and a caller with an
   `Ops` service binding): status in normal/maintenance/paused/shed states validates against `OpsStatus`
   and contains none of the seeded synthetic subjects/addresses; D1 statements of `status()` ≤ 6 with the
@@ -549,6 +556,34 @@ changed; the dashboard binds `LAB` next to the two others.
   (`feed_fetch`, `embed`, `rank`, `brief`, `seed_resolve`, `retention`); the owner's deck decisions and
   sends to Todofy are never deferred. Bound: when the last successful fetch is more than 48 h old, the
   whole day's pipeline runs to its end despite the shed (then defers again).
+
+## 3b. The move onto proto/ (2026-10-01, no wire change)
+
+The contract's source of truth became the IDL [`proto/ops/v1/ops.proto`](../../proto/ops/v1/ops.proto)
+(package `ops.v1`; services `OpsService`, `CanaryProducerService`, `CanaryConsumerService`,
+`OpsDigestService`), with the value rules as `common.wire.v1` options ([proto/README.md "Value
+rules"](../../proto/README.md#value-rules)). `ops-v1.schema.json` is generated from it; the hand-written
+schema is frozen in `legacy/` for the rollout checks.
+
+| App | Before | After |
+| --- | --- | --- |
+| Mail Hero | `ops.ts` `implements MailHeroOps`; answers built as objects, checked by `validate.mjs` in tests | `implements ops.OpsService, ops.CanaryProducerService` (`ops_wire.ts`); `ops-core.ts` builds generated messages and writes them with `toWire`; `ops-guard.ts` reads `setGuard` input with `fromWireArguments` |
+| Todofy core | `core/ops.py` hand-written rules, `jsonschema` in tests | `ops_pb` messages written with `to_wire`, inputs read strictly; the enums of `OpsError`/`Severity` derived from the generated ones |
+| Todofy gateway | `implements TodofyOps` | `implements` the generated services (types only, no runtime code added) |
+| Lab | `LabOps`, objects | `ops-status.ts` builds messages, `toWire`; `setGuard` via `fromWireArguments` |
+| Dashboard | `validate.mjs` + schema on every answer, `declared-methods.ts` parsed `ops-v1.ts` | `ops-client.ts` reads every answer with a lenient codec read and refuses a new value of a closed enum; inputs go out through a strict read; methods and code lists from the generated services and enums |
+
+Wire bytes: the golden tests (`mail-hero/cloudflare/test/ops-golden.test.mjs`,
+`lab/worker/test/ops-golden.test.ts`, `todofy/tests/unit/test_ops_golden.py`,
+`dashboard/worker/test/ops-golden.test.ts`) were written by the code before the move and pass unchanged
+after it. The one difference is the key order of Lab's `status()` (its earlier object spread put
+`version`, `app`, `generated_at`, `ui_url` and `capabilities` first; now every app writes field order);
+JSON readers do not depend on key order, and Lab's golden compares in field order.
+
+Rollout: no order is required. Every answer of a new app passes the legacy schema (the golden tests
+check it), so a dashboard deployed before the move keeps working; and a new dashboard reads the answers
+of an app deployed before the move (the same bytes, and the dashboard's golden reads every fixture and
+the newer variants). A rollback of any one Worker is safe in both directions for the same reasons.
 
 ## 4. Risks and open points
 

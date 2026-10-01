@@ -1,7 +1,7 @@
 /**
  * The harness itself: the bundle starts in workerd and its cron handler runs; the stubs answer
  * ops-v1 fixtures over a real service binding with `entrypoint = "Ops"`, follow scenarios, record calls
- * and reject methods ops-v1.ts does not declare for that app. The dashboard's own flows live in the
+ * and reject methods the app's generated ops-v1 services (proto/ops/v1/ops.proto) do not declare. The dashboard's own flows live in the
  * other runtime test files.
  */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -49,9 +49,9 @@ describe('workerd harness', () => {
     await harness.scenario('mail-hero', {});
   });
 
-  // The stubs' list is parsed from ops-v1.ts (test/declared-methods.ts); test/ops-client.test.ts checks
-  // the dashboard's CALLED_METHODS against the same parse, so stubs and client cannot drift apart.
-  it('exposes every method ops-v1.ts declares for the app', async () => {
+  // The stubs' list is the methods of the app's generated services (test/contract.ts); test/ops-client.test.ts
+  // checks the dashboard's CALLED_METHODS against the same list, so stubs and client cannot drift apart.
+  it('exposes every method the contract declares for the app', async () => {
     for (const app of ['mail-hero', 'todofy', 'lab'] as const) {
       const declared = declaredMethodsOf(app);
       expect(declared.length).toBeGreaterThanOrEqual(app === 'lab' ? 2 : 4);

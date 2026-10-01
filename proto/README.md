@@ -16,9 +16,18 @@ The wire bytes did not change (each side's tests pin them). `contracts/task-inte
 Schema and fixtures as the published wire description, and `task-intent-v1.ts` only the value rules the IDL
 cannot express (bounds, URL hosts). `lab/ui/v1` is Lab's owner API (2026-10-01): Lab's Worker serves it
 through `ts/http-transcoder.ts` and Lab's UI calls it through `ts/http-client.ts`; it is the pilot of the
-HTTP APIs, which ops-v1, recommendation-v1, mail-received-v1 and every app's UI API follow. `links/ui/v1` is the
+HTTP APIs, which recommendation-v1, mail-received-v1 and every app's UI API follow. `links/ui/v1` is the
 links app's owner API (2026-10-01, deployed since the app's step L2): the second app on the same runtime, under the path
 prefix `/_/api/v1/` (its host's other paths are short links).
+
+`ops/v1/ops.proto` is the IDL of `contracts/ops-v1` (2026-10-01) and its single source of validation: the
+value rules are options in the IDL ([Value rules](#value-rules)), the contract's JSON Schema is generated from
+it (`tools/gen_schema.py`), and every side runs on the generated code: Mail Hero, Lab and Todofy's gateway
+implement the generated services (`ops_wire.ts`), Mail Hero, Lab and todofy-core build every answer as a
+generated message written by the codec, which checks the rules before a byte leaves, and the dashboard reads
+every answer and checks every input it sends with the same rules. The wire bytes did not change: golden tests
+in each app pin them, and every answer still passes the hand-written schema the dashboards deployed before
+validate with (`contracts/ops-v1/legacy/`).
 
 ## Rules
 
@@ -311,6 +320,20 @@ gzip 136.54 to 142.01 KiB; in local workerd without a memory snapshot, importing
 costs about 7 ms more than the hand-written version did). The protobuf-es runtime adds about 34 KB gzip to
 a TypeScript Worker that bundles it.
 
+**What ops-v1 costs** (measured 2026-10-01, the production dry runs and the workerd CPU tests, before and after
+the move). Bundles, gzip as `tools/bundle-size` counts it: Mail Hero 148.6 → 189.0 KiB (its first protobuf-es
+runtime and the codec, budget 228 KiB), the dashboard 54.3 → 89.5 KiB (the runtime replaced the hand-written
+schema and `validate.mjs`, budget 108 KiB), Lab 104.5 → 109.7 KiB (the runtime was already there: ops.v1's
+descriptors and the rule checker, budget 128 KiB); todofy-core's upload 505.9 → 530.3 KiB (gzip 143.8 →
+148.8 KiB: `ops_pb.py` and the rule tables); the gateway imports types only (38.8 → 38.7 KiB). CPU, in
+milliseconds of the reference machine: Mail Hero's `Ops` entrypoint (a Worker request, 10 ms on Free), the
+isolate's first `status()` 3.1-5.2 → 4.5-5.5 ms, warm medians at most 1.7 ms
+(`mail-hero/cloudflare/test/native-ops-cpu.test.mjs`); the dashboard's cron tick, which reads every answer
+inside HomeState (a Durable Object invocation, 30 s on Free), the isolate's first tick 6.2-7.3 → 9.4-11.5 ms
+(the codec's code paths and the rules read from the descriptors running for the first time), warm medians
+about 2 ms either way (`dashboard/worker/test/runtime/cpu.test.ts`). Lab's and Todofy's `Ops` answers are
+built inside their Durable Objects.
+
 ## HTTP APIs
 
 Each app's UI API (the HTTP/JSON interface between its UI and its Worker) is a proto service here too, in
@@ -465,23 +488,27 @@ runs everything: first run, unusable base, dispatch), `breaking.sh` compares wit
 the log; a base that predates `proto/` has nothing to break. The job is in `CI gate`'s needs and in
 `CHECK_JOBS` (a push to `main` reuses a green branch run only if it passed Proto checks).
 
-A `proto/` change also re-checks every app in `PROTO_USERS` (Lab, Todofy and the links app) and runs `Contracts` (the
-task-intent-v1 tests check the codecs against the schema). It deploys only the apps whose production bundle
-the changed path reaches (`proto_deploys` in `.github/scripts/ci_changes.py`). `PROTO_USERS` names each
-user's bundled languages: Lab `"ts"` (its Worker and UI), the links app `"ts"` (its Worker and UI), Todofy
-`"python"` (todofy-core vendors the wheel; its gateway imports types only, which compile to nothing). A language's runtime and generator reach that language's users (`proto/ts/`
-and `buf.gen.yaml`: Lab and the links app; `proto/python/` and `tools/gen_py.py`: Todofy); a package reaches the apps
-that import it (`PROTO_PACKAGES`: `todofy/taskintent/` Lab and Todofy, `lab/ui/` Lab, `links/ui/` the links app,
-`common/errors/` and `prototest/` none); the module and toolchain files (`buf.yaml`, `buf.lock`,
-`package-lock.json`, `tools/ensure.mjs`) and any path not mapped reach every user; tests, test data, the
-check scripts, the api-linter tool module, check configs and Markdown reach none. `test_proto.py` derives
+A `proto/` change also re-checks every app in `PROTO_USERS` (Lab, Todofy, Mail Hero, the dashboard and the links app) and runs
+`Contracts` (the contracts' tests check the codecs against the schemas and pin the wire bytes). It deploys only
+the apps whose production bundle the changed path reaches (`proto_deploys` in `.github/scripts/ci_changes.py`).
+`PROTO_USERS` names each user's bundled languages: Lab, Mail Hero and the dashboard `"ts"` (their Workers, and
+Lab's UI), the links app `"ts"` (its Worker and UI), Todofy `"python"` (todofy-core vendors the wheel; its gateway imports types only, which compile to
+nothing). A language's runtime and generator reach that language's users (`proto/ts/` and `buf.gen.yaml`: the
+TypeScript users; `proto/python/`, `tools/gen_py.py` and `tools/wire_rules.py`: Todofy); the wire profile's own
+options (`common/wire/`) reach both; a package reaches the apps that import it (`PROTO_PACKAGES`:
+`todofy/taskintent/` Lab and Todofy, `lab/ui/` Lab, `links/ui/` the links app, `ops/` the four apps with an `Ops` entrypoint or caller (Lab, Mail Hero, the dashboard and Todofy), `common/errors/` and `prototest/` none);
+the module and toolchain files (`buf.yaml`, `buf.lock`, `package-lock.json`, `tools/ensure.mjs`) and any path
+not mapped reach every user; tests, test data, the check scripts, the wire JSON types' and JSON Schema
+generators (`tools/gen_wire_ts.py`: types only; `tools/gen_schema.py`: a file under `contracts/`, which its own
+rules map), the api-linter tool module, check configs and Markdown reach none. `test_proto.py` derives
 the users' languages and each package's importers from the sources, so the maps cannot drift.
 
 ## Later
 
-Planned: every other app's UI API on the [HTTP APIs](#http-apis) pattern, and the full replacement of `ops-v1`,
-`mail-received-v1` and `recommendation-v1` (each a package per service, e.g. `ops/status/v1`,
-`mailhero/webhook/v1`). Shared types come from the same googleapis dependency (`google.rpc.Status`) or a
+Planned: every other app's UI API on the [HTTP APIs](#http-apis) pattern, and the full replacement of
+`mail-received-v1` and `recommendation-v1` (each a package per service, e.g. `mailhero/webhook/v1`); ops-v1 moved
+on 2026-10-01 as one package, `ops/v1`, because its four services share every message. task-intent-v1's value
+rules can move into its IDL the same way, generating its schema too. Shared types come from the same googleapis dependency (`google.rpc.Status`) or a
 `common/<name>/v1` package. Each contract moves the way task-intent-v1 did: the IDL and tests first, then
 both sides on the generated code with every frozen v1 byte pinned by tests (Mail Hero's legacy fixtures are
 pinned by SHA-256; Todofy pins the canonical hashes of the task-intent fixtures, which D1 keeps for 400 days).

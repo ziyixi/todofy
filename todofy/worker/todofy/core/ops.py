@@ -61,7 +61,7 @@ OpsError = _wire_enum(
 
 
 class InvalidInput(ValueError):
-    """An input the schema or a bound rejects: the caller must not retry it unchanged."""
+    """An input the contract's rules or a bound reject: the caller must not retry it unchanged."""
 
 
 # A signal's or report item's severity by wire name (ops.v1.Severity): info, warning, critical.

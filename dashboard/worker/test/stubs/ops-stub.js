@@ -1,6 +1,6 @@
 // Stub of one app's `Ops` entrypoint for the workerd suite (test/runtime/harness.ts). The harness
 // fills in the three constants below (app name, declared methods, contracts/ops-v1 fixtures) first.
-// Only the methods ops-v1.ts declares for this app exist, so a call to anything else rejects in RPC.
+// Only the methods of the app's ops-v1 services (proto/ops/v1/ops.proto) exist, so a call to anything else rejects in RPC.
 // A scenario (POST /__scenario) sets per-method answers: {value} or {throw: code} or a {sequence} of
 // them; every call is recorded (GET /__calls drains the log).
 import { WorkerEntrypoint } from 'cloudflare:workers'

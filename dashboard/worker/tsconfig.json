@@ -1,6 +1,6 @@
 {
   // The Todofy gateway's flag set (lib ES2024, no DOM, Workers types) plus erasableSyntaxOnly, so the
-  // same sources also load under Node's type stripping and contracts/ops-v1/ops-v1.ts stays importable.
+  // same sources also load under Node's type stripping and the contracts' .ts files stay importable.
   "compilerOptions": {
     "target": "ES2024",
     "lib": ["ES2024"],
