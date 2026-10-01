@@ -22,17 +22,33 @@ tables), uses only the standard library and therefore runs on Pyodide unchanged.
   canonical form: no fraction for a whole second, else exactly 3 digits ("07.5Z" becomes "07.500Z").
 - An integer is a JSON number with a zero fractional part (JSON Schema's rule): 1.0 and 1e0 read as 1,
   as they must in TypeScript, where JSON.parse cannot tell them apart.
+- A double is a finite JSON number (NaN and the infinities are refused, though ``json.loads`` accepts
+  them). An integral double below 2^53 is written as an integer (``1.0`` as ``1``, ``-0.0`` as ``0``) and
+  any other with ``repr``: the same value as JSON.stringify writes, and the same bytes for
+  1e-4 <= |x| < 1e16; outside that range the exponent may be spelled differently (``1e-05`` against
+  ``0.00001``).
+- A map (string keys only) is a JSON object written in one canonical order, the one JSON.stringify gives
+  a JavaScript object (array-index keys such as ``"10"`` first in numeric order, then the others in code
+  point order), so both languages write the same bytes; a REQUIRED map is written as ``{}`` when empty,
+  and a map value is never null. An unrecognized map value is reported as the map's path with ``{}``
+  (``decisions{}``): a map key is data, and paths never carry data.
+- A proto3 scalar without ``optional`` (implicit presence) is omitted at its default value (``""``, 0,
+  false) unless it is REQUIRED, as protobuf-es does.
 """
 
 import datetime
 import enum
 import functools
+import math
 import re
 import sys
 from typing import Any, NamedTuple
 
 RFC3339_UTC = re.compile(r"([0-9]{4})-([0-9]{2})-([0-9]{2})T([0-9]{2}):([0-9]{2}):([0-9]{2})(?:\.([0-9]{1,3}))?Z")
 INT32 = range(-(2**31), 2**31)
+# Integral doubles below this are written as JSON integers, as JSON.stringify writes them.
+EXACT_INTEGER = 2**53
+DEFAULTS = {"string": "", "bool": False, "int32": 0, "double": 0.0}
 
 
 class WireJsonError(ValueError):
@@ -44,11 +60,12 @@ class Field(NamedTuple):
 
     name: str
     number: int
-    kind: str  # string, bool, int32, enum, message, timestamp
-    ref: Any  # the enum or message class, or None
+    kind: str  # string, bool, int32, double, enum, message, timestamp, map
+    ref: Any  # the enum or message class (of a map: of its values), or None
     repeated: bool
     optional: bool  # explicit presence: unset is None
     required: bool  # google.api.field_behavior = REQUIRED
+    value: str = ""  # a map's value kind (string, bool, int32, double, enum, message)
 
 
 def _fields(cls: type) -> tuple[Field, ...]:
@@ -81,7 +98,7 @@ def wire_member[E: enum.IntEnum](cls: type[E], name: Any) -> E | None:
 
 def _nullable(field: Field) -> bool:
     """Whether to_wire writes null for ``field`` when it has no value."""
-    return field.required and not field.repeated and (field.optional or field.kind == "enum")
+    return field.required and not field.repeated and field.kind != "map" and (field.optional or field.kind == "enum")
 
 
 def _timestamp_in(text: str) -> str | None:
@@ -107,32 +124,75 @@ def _int_in(item: Any) -> int | None:
     return item if isinstance(item, int) and item in INT32 else None
 
 
+def _double_in(item: Any) -> float | None:
+    if isinstance(item, bool) or not isinstance(item, (int, float)):
+        return None
+    value = float(item)
+    return value if math.isfinite(value) else None
+
+
+def _double_out(value: float) -> int | float:
+    if not math.isfinite(value):
+        raise WireJsonError("not a finite number")
+    # JSON.stringify writes 1.0 as 1 and -0.0 as 0.
+    return int(value) if value.is_integer() and abs(value) < EXACT_INTEGER else value
+
+
+ARRAY_INDEX_LIMIT = 2**32 - 1
+
+
+def _map_key_order(key: str) -> tuple[int, int, list[int]]:
+    """The order JSON.stringify gives a JavaScript object whose entries were set in code point order:
+    array-index keys ("0", "7", "10"; canonical, below 2^32 - 1) first in numeric order, then the others in
+    code point order (ECMAScript's OrdinaryOwnPropertyKeys)."""
+    if key.isascii() and key.isdigit() and str(int(key)) == key and int(key) < ARRAY_INDEX_LIMIT:
+        return (0, int(key), [])
+    return (1, 0, [ord(char) for char in key])
+
+
 def to_wire(message: Any) -> dict[str, Any]:
     """The wire JSON object of ``message`` (pass it to json.dumps)."""
     out: dict[str, Any] = {}
     for field in _fields(type(message)):
         value = getattr(message, field.name)
         if field.repeated:
-            items = [_value_out(field, item) for item in value]
+            items = [_value_out(field.kind, field, item) for item in value]
             if items or field.required:
                 out[field.name] = items
             continue
+        if field.kind == "map":
+            entries = {key: _value_out(field.value, field, value[key]) for key in sorted(value, key=_map_key_order)}
+            if None in entries.values():
+                raise WireJsonError(f"{field.name}: a map value cannot be the zero enum value")
+            if entries or field.required:
+                out[field.name] = entries
+            continue
         if field.kind == "enum":
             value = _enum_out(value)
+        elif value is not None and not field.optional and not field.required and value == DEFAULTS.get(field.kind):
+            # An implicit-presence scalar at its default is unset.
+            value = None
         elif value is not None:
-            value = _value_out(field, value)
+            value = _value_out(field.kind, field, value)
         if value is not None:
             out[field.name] = value
         elif field.required:
+            # Only an unset optional scalar, enum, message or timestamp gets here: a REQUIRED implicit
+            # scalar always has a value and was written above.
             out[field.name] = None
     return out
 
 
-def _value_out(field: Field, value: Any) -> Any:
-    if field.kind == "message":
+def _value_out(kind: str, field: Field, value: Any) -> Any:
+    if kind == "message":
         return to_wire(value)
-    if field.kind == "enum":
+    if kind == "enum":
         return _enum_out(value)
+    if kind == "double":
+        try:
+            return _double_out(value)
+        except WireJsonError:
+            raise WireJsonError(f"{field.name}: not a finite number") from None
     return value
 
 
@@ -175,12 +235,24 @@ def _read(cls: type, value: Any, path: str, strict: bool, unrecognized: list[str
                 raise WireJsonError(f"{at}: not an array")
             values = []
             for i, element in enumerate(item):
-                parsed = _value_in(field, element, f"{at}[{i}]", strict, unrecognized)
+                parsed = _value_in(field.kind, field.ref, element, f"{at}[{i}]", strict, unrecognized)
                 if parsed is not None:
                     values.append(parsed)
             kwargs[key] = tuple(values)
+        elif field.kind == "map":
+            if not isinstance(item, dict):
+                raise WireJsonError(f"{at}: not an object")
+            # Paths never carry data, and a map key is data: an entry's path is the map's, with {}.
+            entries = {}
+            for entry_key, element in item.items():
+                if element is None:
+                    raise WireJsonError(f"{at}{{}}: wrong type")
+                parsed = _value_in(field.value, field.ref, element, f"{at}{{}}", strict, unrecognized)
+                if parsed is not None:
+                    entries[entry_key] = parsed
+            kwargs[key] = entries
         else:
-            parsed = _value_in(field, item, at, strict, unrecognized)
+            parsed = _value_in(field.kind, field.ref, item, at, strict, unrecognized)
             if parsed is not None:
                 kwargs[key] = parsed
     for field in fields.values():
@@ -189,22 +261,26 @@ def _read(cls: type, value: Any, path: str, strict: bool, unrecognized: list[str
     return cls(**kwargs)
 
 
-def _value_in(field: Field, item: Any, at: str, strict: bool, unrecognized: list[str]) -> Any:
-    match field.kind:
+def _value_in(kind: str, ref: Any, item: Any, at: str, strict: bool, unrecognized: list[str]) -> Any:
+    match kind:
         case "string" if isinstance(item, str):
             return item
         case "bool" if isinstance(item, bool):
             return item
         case "int32" if (number := _int_in(item)) is not None:
             return number
+        case "double" if (number := _double_in(item)) is not None:
+            return number
         case "timestamp" if isinstance(item, str) and (canonical := _timestamp_in(item)) is not None:
             return canonical
         case "message":
-            return _read(field.ref, item, at, strict, unrecognized)
+            return _read(ref, item, at, strict, unrecognized)
         case "enum":
-            member = _enum_in(field.ref, item)
+            if not isinstance(item, str):
+                raise WireJsonError(f"{at}: wrong type")
+            member = _enum_in(ref, item)
             if member is None:
-                if strict or not isinstance(item, str):
+                if strict:
                     raise WireJsonError(f"{at}: unknown enum value")
                 unrecognized.append(at)
             return member

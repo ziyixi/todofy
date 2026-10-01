@@ -16,7 +16,11 @@ failures=0
 # case <name> <lint|breaking> <pass|fail> <perl substitution applied to the proto>
 case_() {
   name=$1 kind=$2 want=$3 edit=$4
-  rm -rf "$WORK/m" && mkdir -p "$WORK/m" && cp -R buf.yaml buf.lock todofy "$WORK/m/"
+  rm -rf "$WORK/m" && mkdir -p "$WORK/m" && cp buf.yaml buf.lock "$WORK/m/"
+  # Every package directory of the module (buf.yaml `excludes` are tooling, not module files).
+  for dir in */; do
+    case ${dir%/} in node_modules | python | scripts | test | testdata | tools | ts) ;; *) cp -R "${dir%/}" "$WORK/m/" ;; esac
+  done
   perl -0pi -e "$edit" "$WORK/m/$FILE"
   if cmp -s "$FILE" "$WORK/m/$FILE"; then echo "SETUP ERROR  $name: the edit changed nothing"; failures=$((failures + 1)); return; fi
   if [ "$kind" = lint ]; then

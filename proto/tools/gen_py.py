@@ -9,6 +9,8 @@ For every file of the module, ``todofy/taskintent/v1/task_intent.proto`` say, it
 ``OUT_DIR/todofy/taskintent/v1/task_intent_pb.py`` (plus an empty ``__init__.py`` in every directory):
 one ``IntEnum`` per enum, one frozen dataclass per message and a ``FIELDS`` table that the hand-written
 runtime ``ziyixi_proto.wire_json`` reads and writes. OUT_DIR is the ``ziyixi_proto`` package directory.
+An enum nested in a message is a top-level ``IntEnum`` named ``<Message>_<Enum>``, as protobuf-es names
+it (``Send_State``); a map field is a ``dict``. Services are not generated (the profile is about messages).
 
 Why not protoc's Python output: todofy-core runs stdlib-only on Pyodide, and the contracts' wire format is
 JSON, not protobuf binary. Only the field kinds the contracts use are supported; anything else stops
@@ -32,6 +34,7 @@ SCALARS = {
     "TYPE_STRING": ("str", '""', "string"),
     "TYPE_BOOL": ("bool", "False", "bool"),
     "TYPE_INT32": ("int", "0", "int32"),
+    "TYPE_DOUBLE": ("float", "0.0", "double"),
 }
 TIMESTAMP = ".google.protobuf.Timestamp"
 REQUIRED_OPTION = "[google.api.field_behavior]"
@@ -55,14 +58,28 @@ def module_of(proto_path: str) -> str:
 
 
 def index_types(image: dict[str, Any]) -> dict[str, tuple[str, str]]:
-    """Full type name (".pkg.Name") -> (module, class name) for every top-level type of the image."""
+    """Full type name (".pkg.Name") -> (module, class name) for every top-level type of the image and every
+    enum nested in a top-level message (".pkg.Message.Enum" -> "Message_Enum")."""
     types: dict[str, tuple[str, str]] = {}
     for file in image["file"]:
         module = module_of(file["name"])
         for kind in ("enumType", "messageType"):
             for desc in file.get(kind, []):
                 types[f".{file['package']}.{desc['name']}"] = (module, desc["name"])
+        for message in file.get("messageType", []):
+            for nested in message.get("enumType", []):
+                types[f".{file['package']}.{message['name']}.{nested['name']}"] = (
+                    module,
+                    f"{message['name']}_{nested['name']}",
+                )
     return types
+
+
+def map_entries(message: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    """The map entry types nested in ``message`` (protoc's synthetic ``<Field>Entry``), by local name."""
+    return {
+        nested["name"]: nested for nested in message.get("nestedType", []) if nested.get("options", {}).get("mapEntry")
+    }
 
 
 def generate_file(file: dict[str, Any], types: dict[str, tuple[str, str]]) -> str:
@@ -83,22 +100,44 @@ def generate_file(file: dict[str, Any], types: dict[str, tuple[str, str]]) -> st
         imports.add(f"import {PACKAGE}.{owner} as {alias}")
         return f"{alias}.{name}"
 
-    for enum_type in file.get("enumType", []):
-        name, prefix = enum_type["name"], enum_prefix(enum_type["name"])
+    def add_enum(enum_type: dict[str, Any], python_name: str, full_name: str) -> None:
+        prefix = enum_prefix(enum_type["name"])
         values = enum_type["value"]
         if not values or values[0]["number"] != 0 or not values[0]["name"].endswith("_UNSPECIFIED"):
-            raise GenerateError(f"{package}.{name}: the zero value must be *_UNSPECIFIED")
-        body += ["", "", f"class {name}(enum.IntEnum):"]
-        body += [f'    """{package}.{name}; wire names are lower case without {prefix}."""', ""]
+            raise GenerateError(f"{full_name}: the zero value must be *_UNSPECIFIED")
+        body.extend(["", "", f"class {python_name}(enum.IntEnum):"])
+        body.extend([f'    """{full_name}; wire names are lower case without {prefix}."""', ""])
         for value in values:
             if not value["name"].startswith(prefix):
-                raise GenerateError(f"{package}.{name}.{value['name']} lacks the prefix {prefix}")
+                raise GenerateError(f"{full_name}.{value['name']} lacks the prefix {prefix}")
             body.append(f"    {value['name'][len(prefix) :]} = {value['number']}")
+
+    for enum_type in file.get("enumType", []):
+        add_enum(enum_type, enum_type["name"], f"{package}.{enum_type['name']}")
+    for message in file.get("messageType", []):
+        for nested in message.get("enumType", []):
+            add_enum(nested, f"{message['name']}_{nested['name']}", f"{package}.{message['name']}.{nested['name']}")
+
+    def value_kind(field: dict[str, Any], where: str) -> tuple[str, str, str]:
+        """(annotation, wire_json kind, ref) of a singular value: a field, a list item or a map value."""
+        if field["type"] in SCALARS:
+            annotation, _, kind = SCALARS[field["type"]]
+            return annotation, kind, "None"
+        if field["type"] == "TYPE_ENUM":
+            target = ref(field["typeName"], where)
+            return target, "enum", target
+        if field["type"] == "TYPE_MESSAGE" and field["typeName"] == TIMESTAMP:
+            return "str", "timestamp", "None"
+        if field["type"] == "TYPE_MESSAGE":
+            target = ref(field["typeName"], where)
+            return target, "message", target
+        raise GenerateError(f"{where}: {field['type']} is not in the profile")
 
     for message in file.get("messageType", []):
         name = message["name"]
-        if message.get("nestedType") or message.get("enumType"):
-            raise GenerateError(f"{package}.{name}: nested types are not in the profile")
+        entries = map_entries(message)
+        if len(entries) != len(message.get("nestedType", [])):
+            raise GenerateError(f"{package}.{name}: nested messages are not in the profile (only map entries)")
         # proto3 `optional` declares a synthetic oneof per field; a real oneof is not in the profile.
         if any("oneofIndex" in f and not f.get("proto3Optional") for f in message.get("field", [])):
             raise GenerateError(f"{package}.{name}: oneofs are not in the profile")
@@ -110,21 +149,34 @@ def generate_file(file: dict[str, Any], types: dict[str, tuple[str, str]]) -> st
             repeated = field["label"] == "LABEL_REPEATED"
             optional = bool(field.get("proto3Optional", False))
             required = "REQUIRED" in field.get("options", {}).get(REQUIRED_OPTION, [])
-            target = "None"
-            if field["type"] in SCALARS:
-                annotation, default, kind = SCALARS[field["type"]]
-            elif field["type"] == "TYPE_ENUM":
-                annotation = target = ref(field["typeName"], where)
-                default, kind = f"{annotation}.UNSPECIFIED", "enum"
-            elif field["type"] == "TYPE_MESSAGE" and field["typeName"] == TIMESTAMP:
-                annotation, default, kind = "str", "None", "timestamp"
-                optional = True  # a message field has explicit presence
-            elif field["type"] == "TYPE_MESSAGE":
-                annotation = target = ref(field["typeName"], where)
-                default, kind = "None", "message"
-                optional = True
+            value = ""
+            entry_name = field.get("typeName", "").rsplit(".", 1)[-1]
+            if (
+                field["type"] == "TYPE_MESSAGE"
+                and field["typeName"] == f".{package}.{name}.{entry_name}"
+                and entry_name in entries
+            ):
+                key_field, value_field = sorted(entries[entry_name]["field"], key=lambda f: f["number"])
+                if key_field["type"] != "TYPE_STRING":
+                    raise GenerateError(f"{where}: only string map keys are in the profile")
+                value_annotation, value, target = value_kind(value_field, where)
+                if value == "timestamp":
+                    raise GenerateError(f"{where}: Timestamp map values are not in the profile")
+                body.append(
+                    f"    {field['name']}: dict[str, {value_annotation}] = dataclasses.field(default_factory=dict)"
+                )
+                fields.append(
+                    f'Field({json.dumps(field["name"])}, {field["number"]}, "map", {target}, '
+                    f"repeated=False, optional=False, required={required}, value={json.dumps(value)})"
+                )
+                continue
+            annotation, kind, target = value_kind(field, where)
+            if kind in ("timestamp", "message"):
+                default, optional = "None", True  # a message field has explicit presence
+            elif kind == "enum":
+                default = f"{annotation}.UNSPECIFIED"
             else:
-                raise GenerateError(f"{where}: {field['type']} is not in the profile")
+                default = SCALARS[field["type"]][1]
             if repeated:
                 annotation, default = f"tuple[{annotation}, ...]", "()"
             elif optional:
@@ -141,6 +193,9 @@ def generate_file(file: dict[str, Any], types: dict[str, tuple[str, str]]) -> st
     lines = [
         HEADER.format(source=file["name"]).rstrip("\n"),
         f'"""{package} ({file["name"]}) in the wire JSON profile; read and write with {PACKAGE}.wire_json."""',
+        "",
+        "# Annotations may name a message defined further down (or in a module imported below).",
+        "from __future__ import annotations",
         "",
         "import dataclasses",
         "import enum",

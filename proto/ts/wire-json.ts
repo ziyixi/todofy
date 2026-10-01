@@ -18,6 +18,14 @@
  *   as 1: JSON.parse cannot tell them apart, and the Python twin follows the same rule.
  * - Fields are written in field-number order, which the IDL keeps equal to the JSON Schema order, so
  *   `JSON.stringify` gives the same bytes as today's producers.
+ * - A double is a finite JSON number (NaN and the infinities are refused: JSON has no spelling for them).
+ *   JSON.stringify writes it in its shortest form. The Python twin writes the same value, and the same
+ *   bytes for an integral value below 2^53 (as an integer) and for 1e-4 <= |x| < 1e16; outside that
+ *   range the spelling of the exponent may differ (1e-05 against 0.00001).
+ * - A map (string keys only) is a JSON object in one canonical order, whatever order its entries were set
+ *   in: its keys are set in code point order, and JavaScript then puts array-index keys ("10") first in
+ *   numeric order (OrdinaryOwnPropertyKeys), which the Python twin reproduces, so both write the same
+ *   bytes. A REQUIRED map is written as {} when empty. A map value is never null.
  *
  * Reading has two modes, matching the contracts' rule "inputs closed, outputs open":
  *
@@ -29,15 +37,17 @@
  *   type or a missing REQUIRED field still throws: REQUIRED means "always written", so its absence is
  *   a broken producer, not a newer one (proto/tools/profile_breaking.py keeps it that way in CI). null
  *   reads as "no value" only where toWire writes it (a REQUIRED enum, message or scalar with explicit
- *   presence); anywhere else (`"recorded": null`, a list, a field that is omitted when unset) it is a
- *   wrong type.
+ *   presence); anywhere else (`"recorded": null`, a list, a map, a field that is omitted when unset) it
+ *   is a wrong type. An unrecognized map value is reported as the map's path with `{}` (`decisions{}`):
+ *   a map key is data, and paths never carry data.
  *
  * Enum names are matched exactly against a table of the wire names (no case folding: "ſubtasks" is not
  * "subtasks"). Value rules (lengths, ranges, patterns) are not part of the profile: each consumer keeps
  * the value rules of its contract (proto/README.md, Wire JSON profile).
  *
- * Only the field kinds the contracts use are supported: scalars except 64-bit and bytes, enums,
- * messages, repeated fields and Timestamp. Anything else throws, so a new kind cannot slip through.
+ * Only the field kinds the contracts use are supported: string, bool, 32-bit integers, double, enums,
+ * messages, repeated fields, maps with string keys and Timestamp. Anything else (64-bit integers, float,
+ * bytes, oneofs, other well-known types) throws, so a new kind cannot slip through.
  */
 import {
   create,
@@ -126,18 +136,14 @@ function required(field: DescField): boolean {
   return value;
 }
 
-function prefixOf(field: DescField & { enum: { sharedPrefix?: string | undefined } }): string {
-  return (field.enum.sharedPrefix ?? '').toUpperCase();
-}
-
-function enumToWire(field: DescField, number: number): string | null {
-  if (field.enum === undefined) throw new WireJsonError('not an enum');
+function enumToWire(field: DescField, desc: DescEnum | undefined, number: number): string | null {
+  if (desc === undefined) throw new WireJsonError('not an enum');
   if (number === 0) return null;
-  const value = field.enum.value[number];
+  const value = desc.value[number];
   // An open enum may hold a number this build does not know (binary input from a newer producer):
   // there is no wire name for it, so writing it is a bug in the caller.
   if (value === undefined) throw new WireJsonError(`${field.name}: no wire name for enum number ${String(number)}`);
-  return value.name.slice(prefixOf(field as never).length).toLowerCase();
+  return value.name.slice((desc.sharedPrefix ?? '').length).toLowerCase();
 }
 
 /** Wire name -> number for every value but the zero value (names are ASCII: buf lint enforces it). */
@@ -151,10 +157,10 @@ function wireTable(desc: DescEnum): ReadonlyMap<string, number> {
   return table;
 }
 
-function enumFromWire(field: DescField, text: string): number | undefined {
-  if (field.enum === undefined) throw new WireJsonError('not an enum');
+function enumFromWire(desc: DescEnum | undefined, text: string): number | undefined {
+  if (desc === undefined) throw new WireJsonError('not an enum');
   // An exact lookup: "PENDING", "STATE_PENDING" or a Unicode look-alike such as "pendıng" is not a v1 value.
-  return wireTable(field.enum).get(text);
+  return wireTable(desc).get(text);
 }
 
 /**
@@ -198,8 +204,8 @@ function timestampFromWire(text: string): Date | undefined {
   return exact ? date : undefined;
 }
 
-function scalarToWire(field: DescField, value: unknown): JsonValue {
-  switch (field.scalar) {
+function scalarToWire(field: DescField, scalar: ScalarType | undefined, value: unknown): JsonValue {
+  switch (scalar) {
     case ScalarType.STRING:
     case ScalarType.BOOL:
     case ScalarType.INT32:
@@ -208,13 +214,18 @@ function scalarToWire(field: DescField, value: unknown): JsonValue {
     case ScalarType.FIXED32:
     case ScalarType.SFIXED32:
       return value as JsonValue;
+    case ScalarType.DOUBLE:
+      // JSON.stringify would write null for these; refusing keeps a typo from turning into "no value".
+      if (!Number.isFinite(value)) throw new WireJsonError(`${field.name}: not a finite number`);
+      // -0 is written as 0 by JSON.stringify; Python writes the same bytes.
+      return value as number;
     default:
-      throw new WireJsonError(`${field.name}: scalar type ${String(field.scalar)} is not in the profile`);
+      throw new WireJsonError(`${field.name}: scalar type ${String(scalar)} is not in the profile`);
   }
 }
 
-function scalarFromWire(field: DescField, value: JsonValue, path: string): string | boolean | number {
-  switch (field.scalar) {
+function scalarFromWire(scalar: ScalarType | undefined, value: JsonValue, path: string): string | boolean | number {
+  switch (scalar) {
     case ScalarType.STRING:
       if (typeof value === 'string') return value;
       break;
@@ -230,8 +241,12 @@ function scalarFromWire(field: DescField, value: JsonValue, path: string): strin
     case ScalarType.FIXED32:
       if (typeof value === 'number' && Number.isInteger(value) && value >= 0 && value <= 0xffffffff) return value;
       break;
+    case ScalarType.DOUBLE:
+      // JSON.parse never yields NaN or an infinity; the check keeps a hand-built input to the same rule.
+      if (typeof value === 'number' && Number.isFinite(value)) return value;
+      break;
     default:
-      throw new WireJsonError(`${path}: scalar type ${String(field.scalar)} is not in the profile`);
+      throw new WireJsonError(`${path}: scalar type ${String(scalar)} is not in the profile`);
   }
   throw new WireJsonError(`${path}: wrong type`);
 }
@@ -248,44 +263,76 @@ function writeMessage(r: ReflectMessage): JsonObject {
     const always = required(field);
     switch (field.fieldKind) {
       case 'scalar': {
-        if (set) out[field.name] = scalarToWire(field, r.get(field));
-        else if (always) out[field.name] = field.presence === IMPLICIT ? scalarToWire(field, r.get(field)) : null;
+        if (set) out[field.name] = scalarToWire(field, field.scalar, r.get(field));
+        else if (always) out[field.name] = field.presence === IMPLICIT ? scalarToWire(field, field.scalar, r.get(field)) : null;
         break;
       }
       case 'enum': {
-        const wire = set ? enumToWire(field, r.get(field) as number) : null;
+        const wire = set ? enumToWire(field, field.enum, r.get(field) as number) : null;
         if (wire !== null) out[field.name] = wire;
         else if (always) out[field.name] = null;
         break;
       }
       case 'message': {
-        if (set) {
-          const value = r.get(field) as ReflectMessage;
-          out[field.name] =
-            field.message.typeName === TimestampSchema.typeName
-              ? timestampDate(value.message as MessageShape<typeof TimestampSchema>).toISOString().replace(/\.000Z$/, 'Z')
-              : writeMessage(value);
-        } else if (always) {
-          out[field.name] = null;
-        }
+        if (set) out[field.name] = messageToWire(r.get(field) as ReflectMessage);
+        else if (always) out[field.name] = null;
         break;
       }
       case 'list': {
         const list = r.get(field);
         const items: JsonValue[] = [];
         for (const item of list) {
-          if (field.listKind === 'message') items.push(writeMessage(item as ReflectMessage));
-          else if (field.listKind === 'enum') items.push(enumToWire(field, item as number));
-          else items.push(scalarToWire(field, item));
+          if (field.listKind === 'message') items.push(messageToWire(item as ReflectMessage));
+          else if (field.listKind === 'enum') items.push(enumToWire(field, field.enum, item as number));
+          else items.push(scalarToWire(field, field.scalar, item));
         }
         if (items.length > 0 || always) out[field.name] = items;
         break;
       }
+      case 'map': {
+        if (field.mapKey !== ScalarType.STRING) throw new WireJsonError(`${field.name}: only string map keys are in the profile`);
+        const map = r.get(field);
+        const entries: [string, JsonValue][] = [];
+        for (const [key, value] of map) {
+          const wire =
+            field.mapKind === 'message'
+              ? messageToWire(value as ReflectMessage)
+              : field.mapKind === 'enum'
+                ? enumToWire(field, field.enum, value as number)
+                : scalarToWire(field, field.scalar, value);
+          // A map entry always has a value: the zero enum value has no wire name, so it cannot be written.
+          if (wire === null) throw new WireJsonError(`${field.name}: a map value cannot be the zero enum value`);
+          entries.push([key as string, wire]);
+        }
+        if (entries.length > 0 || always) out[field.name] = Object.fromEntries(entries.sort(([a], [b]) => compareCodePoints(a, b)));
+        break;
+      }
       default:
-        throw new WireJsonError(`${field.name}: ${field.fieldKind} fields are not in the profile`);
+        throw new WireJsonError(`${(field as DescField).name}: this field kind is not in the profile`);
     }
   }
   return out;
+}
+
+function messageToWire(value: ReflectMessage): JsonValue {
+  if (value.desc.typeName === TimestampSchema.typeName) {
+    return timestampDate(value.message as MessageShape<typeof TimestampSchema>).toISOString().replace(/\.000Z$/, 'Z');
+  }
+  return writeMessage(value);
+}
+
+/**
+ * Orders strings by Unicode code point, as Python's sorted() does (UTF-16 order differs above U+FFFF). The object
+ * built from the sorted entries still lists array-index keys first (see the module comment).
+ */
+function compareCodePoints(a: string, b: string): number {
+  const left = [...a];
+  const right = [...b];
+  for (let i = 0; i < Math.min(left.length, right.length); i++) {
+    const diff = (left[i]?.codePointAt(0) ?? 0) - (right[i]?.codePointAt(0) ?? 0);
+    if (diff !== 0) return diff;
+  }
+  return left.length - right.length;
 }
 
 /** Reads wire JSON (a parsed value) into a message of `schema`. */
@@ -321,46 +368,47 @@ function readMessage(schema: DescMessage, json: unknown, path: string, strict: b
     }
     switch (field.fieldKind) {
       case 'scalar':
-        r.set(field, scalarFromWire(field, value, at));
+        r.set(field, scalarFromWire(field.scalar, value, at));
         break;
       case 'enum': {
-        if (typeof value !== 'string') throw new WireJsonError(`${at}: wrong type`);
-        const number = enumFromWire(field, value);
-        if (number === undefined) {
-          if (strict) throw new WireJsonError(`${at}: unknown enum value`);
-          unrecognized.push(at);
-        } else {
-          r.set(field, number);
-        }
+        const number = readEnum(field.enum, value, at, strict, unrecognized);
+        if (number !== undefined) r.set(field, number);
         break;
       }
       case 'message':
-        if (field.message.typeName === TimestampSchema.typeName) {
-          const date = typeof value === 'string' ? timestampFromWire(value) : undefined;
-          if (date === undefined) throw new WireJsonError(`${at}: not an RFC 3339 UTC timestamp`);
-          r.set(field, reflect(TimestampSchema, timestampFromDate(date)));
-        } else {
-          r.set(field, reflect(field.message, readMessage(field.message, value, at, strict, unrecognized)));
-        }
+        r.set(field, readValueMessage(field.message, value, at, strict, unrecognized));
         break;
       case 'list': {
         if (!Array.isArray(value)) throw new WireJsonError(`${at}: not an array`);
         const list = r.get(field);
-        value.forEach((item, i) => {
+        value.forEach((item: JsonValue, i) => {
           const itemAt = `${at}[${String(i)}]`;
-          if (field.listKind === 'message') list.add(reflect(field.message, readMessage(field.message, item, itemAt, strict, unrecognized)));
+          if (field.listKind === 'message') list.add(readValueMessage(field.message, item, itemAt, strict, unrecognized));
           else if (field.listKind === 'enum') {
-            const number = typeof item === 'string' ? enumFromWire(field, item) : undefined;
-            if (number === undefined) {
-              if (strict) throw new WireJsonError(`${itemAt}: unknown enum value`);
-              unrecognized.push(itemAt);
-            } else list.add(number);
-          } else list.add(scalarFromWire(field, item, itemAt));
+            const number = readEnum(field.enum, item, itemAt, strict, unrecognized);
+            if (number !== undefined) list.add(number);
+          } else list.add(scalarFromWire(field.scalar, item, itemAt));
         });
         break;
       }
+      case 'map': {
+        if (field.mapKey !== ScalarType.STRING) throw new WireJsonError(`${at}: only string map keys are in the profile`);
+        if (!isObject(value)) throw new WireJsonError(`${at}: not an object`);
+        const map = r.get(field);
+        // Paths never carry data, and a map key is data: an entry's path is the map's, with `{}`.
+        const entryAt = `${at}{}`;
+        for (const [entryKey, item] of Object.entries(value)) {
+          if (item === null) throw new WireJsonError(`${entryAt}: wrong type`);
+          if (field.mapKind === 'message') map.set(entryKey, readValueMessage(field.message, item, entryAt, strict, unrecognized));
+          else if (field.mapKind === 'enum') {
+            const number = readEnum(field.enum, item, entryAt, strict, unrecognized);
+            if (number !== undefined) map.set(entryKey, number);
+          } else map.set(entryKey, scalarFromWire(field.scalar, item, entryAt));
+        }
+        break;
+      }
       default:
-        throw new WireJsonError(`${at}: ${field.fieldKind} fields are not in the profile`);
+        throw new WireJsonError(`${at}: this field kind is not in the profile`);
     }
   }
   for (const field of schema.fields) {
@@ -369,4 +417,25 @@ function readMessage(schema: DescMessage, json: unknown, path: string, strict: b
     }
   }
   return message;
+}
+
+/** An enum value: its number, or undefined for a name this build does not know (lenient reads only). */
+function readEnum(desc: DescEnum | undefined, value: JsonValue, at: string, strict: boolean, unrecognized: string[]): number | undefined {
+  if (typeof value !== 'string') throw new WireJsonError(`${at}: wrong type`);
+  const number = enumFromWire(desc, value);
+  if (number === undefined) {
+    if (strict) throw new WireJsonError(`${at}: unknown enum value`);
+    unrecognized.push(at);
+  }
+  return number;
+}
+
+/** A message-typed value (a field, a list item or a map value), Timestamp included. */
+function readValueMessage(desc: DescMessage, value: JsonValue, at: string, strict: boolean, unrecognized: string[]): ReflectMessage {
+  if (desc.typeName === TimestampSchema.typeName) {
+    const date = typeof value === 'string' ? timestampFromWire(value) : undefined;
+    if (date === undefined) throw new WireJsonError(`${at}: not an RFC 3339 UTC timestamp`);
+    return reflect(TimestampSchema, timestampFromDate(date));
+  }
+  return reflect(desc, readMessage(desc, value, at, strict, unrecognized));
 }

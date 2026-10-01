@@ -2,14 +2,15 @@
  * Cross-language round trips of the wire JSON profile: bytes the TypeScript codec writes, read and written
  * again by the Python codec (test/python/roundtrip.py, in a child process), must come back identical, and
  * so must messages built in Python and read here. The corpus is every valid task-intent-v1 fixture, every
- * shared edge case that reads, and messages built in each language (every state with every error code, both
- * modes). This is what lets Lab (TypeScript) and Todofy (Python) hash, freeze and compare each other's bytes.
+ * shared edge case that reads (doubles and maps among them), and messages built in each language (every
+ * state with every error code, both modes). This is what lets Lab (TypeScript) and Todofy (Python) hash, freeze and compare each other's bytes.
  */
 import { spawnSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { beforeAll, describe, expect, test } from 'vitest';
 import { create, type DescMessage } from '@bufbuild/protobuf';
+import { BookCardSchema, BookSchema } from '../ts/prototest/v1/prototest_pb.ts';
 import {
   ErrorCode,
   Mode,
@@ -22,7 +23,8 @@ import {
 import { fromWire, toWire, WireJsonError } from '../ts/wire-json.ts';
 import { CASES_FILE, fixtures } from './fixtures.ts';
 
-type Name = 'TaskIntent' | 'TaskIntentRef' | 'TaskIntentResult';
+/** A task-intent-v1 message by its short name, or a fixture of prototest/v1 (doubles, maps) by its full name. */
+type Name = keyof typeof SCHEMAS;
 
 interface ReadRequest {
   readonly message: Name;
@@ -35,18 +37,21 @@ interface PythonAnswer {
   readonly built: readonly { message: Name; text: string }[];
 }
 
-const SCHEMAS: Record<Name, DescMessage> = {
+const SCHEMAS = {
   TaskIntent: TaskIntentSchema,
   TaskIntentRef: TaskIntentRefSchema,
   TaskIntentResult: TaskIntentResultSchema,
-};
+  'prototest.v1.Book': BookSchema,
+  'prototest.v1.BookCard': BookCardSchema,
+} satisfies Record<string, DescMessage>;
 // npm run test:python uses the same interpreter (todofy-core's Python); PROTO_TEST_PYTHON overrides it.
 const PYTHON = (process.env['PROTO_TEST_PYTHON'] ?? 'uv run --no-project --python 3.14 python').split(' ');
 
 /** TypeScript's read and write of `text`: the compact bytes, or null when the read throws. */
 function viaTypeScript(message: Name, text: string, strict: boolean): string | null {
   try {
-    return JSON.stringify(toWire(SCHEMAS[message], fromWire(SCHEMAS[message], JSON.parse(text), { strict }).message));
+    const schema: DescMessage = SCHEMAS[message];
+    return JSON.stringify(toWire(schema, fromWire(schema, JSON.parse(text), { strict }).message));
   } catch (error) {
     if (error instanceof WireJsonError) return null;
     throw error;

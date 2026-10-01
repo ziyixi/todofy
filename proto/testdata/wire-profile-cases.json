@@ -899,6 +899,409 @@
         ]
       },
       "unrecognized": []
+    },
+    {
+      "name": "a message with every kind of field (maps written in key order)",
+      "message": "prototest.v1.Book",
+      "strict": true,
+      "input": {
+        "name": "shelves/s1/books/b1",
+        "title": "Dune",
+        "pages": 412,
+        "hardcover": true,
+        "rating": 4.25,
+        "genre": "fiction",
+        "tags": [
+          "classic",
+          "desert"
+        ],
+        "author": {
+          "display_name": "Frank",
+          "birth_year": 1920
+        },
+        "labels": {
+          "lang": "en",
+          "ed": "first"
+        },
+        "copies": {
+          "s2": 1,
+          "s1": 3
+        },
+        "contributors": {
+          "editor": {
+            "display_name": "Ada"
+          }
+        },
+        "regional_genres": {
+          "us": "fiction",
+          "eu": "science"
+        },
+        "publish_time": "1965-08-01T00:00:00Z",
+        "subtitle": "",
+        "state": "archived",
+        "genres": [
+          "fiction",
+          "science"
+        ],
+        "edition_ratings": [
+          4,
+          4.5
+        ]
+      },
+      "wire": {
+        "name": "shelves/s1/books/b1",
+        "title": "Dune",
+        "pages": 412,
+        "hardcover": true,
+        "rating": 4.25,
+        "genre": "fiction",
+        "tags": [
+          "classic",
+          "desert"
+        ],
+        "author": {
+          "display_name": "Frank",
+          "birth_year": 1920
+        },
+        "labels": {
+          "ed": "first",
+          "lang": "en"
+        },
+        "copies": {
+          "s1": 3,
+          "s2": 1
+        },
+        "contributors": {
+          "editor": {
+            "display_name": "Ada"
+          }
+        },
+        "regional_genres": {
+          "eu": "science",
+          "us": "fiction"
+        },
+        "publish_time": "1965-08-01T00:00:00Z",
+        "subtitle": "",
+        "state": "archived",
+        "genres": [
+          "fiction",
+          "science"
+        ],
+        "edition_ratings": [
+          4,
+          4.5
+        ]
+      },
+      "unrecognized": []
+    },
+    {
+      "name": "an integral double is written as an integer",
+      "message": "prototest.v1.Book",
+      "strict": true,
+      "input": {
+        "rating": 4.0,
+        "edition_ratings": [
+          1.0,
+          2.5
+        ]
+      },
+      "wire": {
+        "rating": 4,
+        "edition_ratings": [
+          1,
+          2.5
+        ]
+      },
+      "unrecognized": []
+    },
+    {
+      "name": "a double may be written as an integer",
+      "message": "prototest.v1.Book",
+      "strict": true,
+      "input": {
+        "rating": 3
+      },
+      "wire": {
+        "rating": 3
+      },
+      "unrecognized": []
+    },
+    {
+      "name": "a fractional double keeps its shortest form",
+      "message": "prototest.v1.Book",
+      "strict": true,
+      "input": {
+        "rating": 0.1,
+        "edition_ratings": [
+          0.0001,
+          123456.789
+        ]
+      },
+      "wire": {
+        "rating": 0.1,
+        "edition_ratings": [
+          0.0001,
+          123456.789
+        ]
+      },
+      "unrecognized": []
+    },
+    {
+      "name": "negative zero is written as 0",
+      "message": "prototest.v1.BookCard",
+      "strict": false,
+      "input": {
+        "title": "t",
+        "rating": -0.0,
+        "labels": {}
+      },
+      "wire": {
+        "title": "t",
+        "rating": 0,
+        "labels": {}
+      },
+      "unrecognized": []
+    },
+    {
+      "name": "a double as a string is a wrong type",
+      "message": "prototest.v1.Book",
+      "strict": false,
+      "input": {
+        "rating": "4.5"
+      },
+      "error": true
+    },
+    {
+      "name": "a boolean is not a double",
+      "message": "prototest.v1.Book",
+      "strict": false,
+      "input": {
+        "rating": true
+      },
+      "error": true
+    },
+    {
+      "name": "implicit fields at their defaults are not written",
+      "message": "prototest.v1.Book",
+      "strict": true,
+      "input": {
+        "title": "",
+        "pages": 0,
+        "hardcover": false,
+        "rating": 0,
+        "tags": [],
+        "labels": {}
+      },
+      "wire": {},
+      "unrecognized": []
+    },
+    {
+      "name": "an explicitly present empty string is written",
+      "message": "prototest.v1.Book",
+      "strict": true,
+      "input": {
+        "subtitle": ""
+      },
+      "wire": {
+        "subtitle": ""
+      },
+      "unrecognized": []
+    },
+    {
+      "name": "map keys are written in one order: array indices numerically, then code points (not UTF-16 units)",
+      "message": "prototest.v1.Book",
+      "strict": true,
+      "input": {
+        "labels": {
+          "b": "1",
+          "a": "2",
+          "10": "x",
+          "2": "y",
+          "\uffff": "bmp",
+          "\ud83d\ude00": "astral"
+        }
+      },
+      "wire": {
+        "labels": {
+          "2": "y",
+          "10": "x",
+          "a": "2",
+          "b": "1",
+          "\uffff": "bmp",
+          "\ud83d\ude00": "astral"
+        }
+      },
+      "unrecognized": []
+    },
+    {
+      "name": "a null map value is a wrong type",
+      "message": "prototest.v1.Book",
+      "strict": false,
+      "input": {
+        "labels": {
+          "a": null
+        }
+      },
+      "error": true
+    },
+    {
+      "name": "a map that is not an object is a wrong type",
+      "message": "prototest.v1.Book",
+      "strict": false,
+      "input": {
+        "labels": [
+          [
+            "a",
+            "b"
+          ]
+        ]
+      },
+      "error": true
+    },
+    {
+      "name": "a map value of the wrong type",
+      "message": "prototest.v1.Book",
+      "strict": false,
+      "input": {
+        "copies": {
+          "s1": "3"
+        }
+      },
+      "error": true
+    },
+    {
+      "name": "an int32 map value out of range",
+      "message": "prototest.v1.Book",
+      "strict": false,
+      "input": {
+        "copies": {
+          "s1": 2147483648
+        }
+      },
+      "error": true
+    },
+    {
+      "name": "an unknown enum map value is skipped by a lenient read, its path without the key",
+      "message": "prototest.v1.Book",
+      "strict": false,
+      "input": {
+        "regional_genres": {
+          "eu": "poetry",
+          "us": "opera"
+        }
+      },
+      "wire": {
+        "regional_genres": {
+          "eu": "poetry"
+        }
+      },
+      "unrecognized": [
+        "regional_genres{}"
+      ]
+    },
+    {
+      "name": "an unknown enum map value is refused by a strict read",
+      "message": "prototest.v1.Book",
+      "strict": true,
+      "input": {
+        "regional_genres": {
+          "eu": "opera"
+        }
+      },
+      "error": true
+    },
+    {
+      "name": "an unknown field inside a map's message value is reported by its path without the key",
+      "message": "prototest.v1.Book",
+      "strict": false,
+      "input": {
+        "contributors": {
+          "editor": {
+            "display_name": "Ada",
+            "email": "x"
+          }
+        }
+      },
+      "wire": {
+        "contributors": {
+          "editor": {
+            "display_name": "Ada"
+          }
+        }
+      },
+      "unrecognized": [
+        "contributors{}.email"
+      ]
+    },
+    {
+      "name": "a nested enum is written without its prefix",
+      "message": "prototest.v1.Book",
+      "strict": true,
+      "input": {
+        "state": "active"
+      },
+      "wire": {
+        "state": "active"
+      },
+      "unrecognized": []
+    },
+    {
+      "name": "a nested enum's prefixed name is not a wire name",
+      "message": "prototest.v1.Book",
+      "strict": true,
+      "input": {
+        "state": "STATE_ACTIVE"
+      },
+      "error": true
+    },
+    {
+      "name": "a number in an enum list is a wrong type in a lenient read too",
+      "message": "prototest.v1.Book",
+      "strict": false,
+      "input": {
+        "genres": [
+          "poetry",
+          3
+        ]
+      },
+      "error": true
+    },
+    {
+      "name": "a REQUIRED map is written as {} when empty, a REQUIRED optional double as null",
+      "message": "prototest.v1.BookCard",
+      "strict": false,
+      "input": {
+        "title": "t",
+        "rating": null,
+        "labels": {}
+      },
+      "wire": {
+        "title": "t",
+        "rating": null,
+        "labels": {}
+      },
+      "unrecognized": []
+    },
+    {
+      "name": "a REQUIRED map may not be null",
+      "message": "prototest.v1.BookCard",
+      "strict": false,
+      "input": {
+        "title": "t",
+        "rating": null,
+        "labels": null
+      },
+      "error": true
+    },
+    {
+      "name": "a REQUIRED map may not be missing",
+      "message": "prototest.v1.BookCard",
+      "strict": false,
+      "input": {
+        "title": "t",
+        "rating": null
+      },
+      "error": true
     }
   ]
 }

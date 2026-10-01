@@ -1,0 +1,257 @@
+// Test fixtures of proto/'s hand-written runtimes (proto/README.md), never used by an app.
+//
+// The messages exercise every field kind of the wire JSON profile (testdata/wire-profile-cases.json) and
+// the service exercises every feature of the HTTP transcoder and client (testdata/http-cases.json): single-
+// and multi-segment variables, `**`, an unnamed wildcard, a nested field path, custom verbs, `body: "*"`
+// and a body field, query parameters of every kind, and an additional binding. Both test suites (TypeScript
+// now, Python when a Python Worker needs a transcoder) run the same JSON cases against these descriptors.
+//
+// The bindings are deliberately varied rather than AIP-shaped, so api-linter does not run on this package
+// (scripts/api-lint.sh); buf lint does.
+
+syntax = "proto3";
+
+package prototest.v1;
+
+import "google/api/annotations.proto";
+import "google/api/field_behavior.proto";
+import "google/protobuf/empty.proto";
+import "google/protobuf/timestamp.proto";
+
+// A library of shelves and books, one binding per transcoder feature.
+service BookService {
+  // A multi-segment variable holding single-segment wildcards; other fields come from the query. The
+  // additional binding takes the rest of the path (`**`) as the name.
+  rpc GetBook(GetBookRequest) returns (Book) {
+    option (google.api.http) = {
+      get: "/v1/{name=shelves/*/books/*}"
+      additional_bindings: {get: "/v1/legacy/{name=**}"}
+    };
+  }
+
+  // A parent variable followed by a literal, and one body field.
+  rpc CreateBook(CreateBookRequest) returns (Book) {
+    option (google.api.http) = {
+      post: "/v1/{parent=shelves/*}/books"
+      body: "book"
+    };
+  }
+
+  // A variable bound to a field of the body field (`book.name`).
+  rpc UpdateBook(UpdateBookRequest) returns (Book) {
+    option (google.api.http) = {
+      patch: "/v1/{book.name=shelves/*/books/*}"
+      body: "book"
+    };
+  }
+
+  // A custom verb with the whole request as the body (`body: "*"`).
+  rpc ArchiveBook(ArchiveBookRequest) returns (Book) {
+    option (google.api.http) = {
+      post: "/v1/{name=shelves/*/books/*}:archive"
+      body: "*"
+    };
+  }
+
+  // DELETE: no body, everything else from the query.
+  rpc DeleteBook(DeleteBookRequest) returns (google.protobuf.Empty) {
+    option (google.api.http) = {delete: "/v1/{name=shelves/*/books/*}"};
+  }
+
+  // Query parameters of every kind: integers, strings, booleans, doubles, enums, repeated and nested.
+  rpc ListBooks(ListBooksRequest) returns (ListBooksResponse) {
+    option (google.api.http) = {get: "/v1/{parent=shelves/*}/books"};
+  }
+
+  // `**` (the rest of the path, slashes included) followed by a custom verb.
+  rpc DownloadFile(DownloadFileRequest) returns (DownloadFileResponse) {
+    option (google.api.http) = {get: "/v1/{name=files/**}:download"};
+  }
+
+  // An unnamed wildcard (matched, bound to nothing) and a plain `{field}` variable.
+  rpc CountBooks(CountBooksRequest) returns (CountBooksResponse) {
+    option (google.api.http) = {get: "/v1/regions/*/shelves/{shelf}:count"};
+  }
+}
+
+// A genre.
+enum Genre {
+  // No genre: never written.
+  GENRE_UNSPECIFIED = 0;
+  // Fiction.
+  GENRE_FICTION = 1;
+  // Poetry.
+  GENRE_POETRY = 2;
+  // Science.
+  GENRE_SCIENCE = 3;
+}
+
+// An author.
+message Author {
+  // The author's display name.
+  string display_name = 1 [(google.api.field_behavior) = OPTIONAL];
+  // The year of birth.
+  int32 birth_year = 2 [(google.api.field_behavior) = OPTIONAL];
+}
+
+// A book: one field of every kind the wire JSON profile supports.
+message Book {
+  // The book's state.
+  enum State {
+    // Not set: never written.
+    STATE_UNSPECIFIED = 0;
+    // On the shelf.
+    STATE_ACTIVE = 1;
+    // Archived.
+    STATE_ARCHIVED = 2;
+  }
+
+  // shelves/{shelf}/books/{book}.
+  string name = 1 [(google.api.field_behavior) = IDENTIFIER];
+  // The title.
+  string title = 2 [(google.api.field_behavior) = OPTIONAL];
+  // The number of pages.
+  int32 pages = 3 [(google.api.field_behavior) = OPTIONAL];
+  // Whether it is a hardcover.
+  bool hardcover = 4 [(google.api.field_behavior) = OPTIONAL];
+  // The average rating, 0-5.
+  double rating = 5 [(google.api.field_behavior) = OPTIONAL];
+  // The genre.
+  Genre genre = 6 [(google.api.field_behavior) = OPTIONAL];
+  // Free-form tags.
+  repeated string tags = 7 [(google.api.field_behavior) = OPTIONAL];
+  // The author.
+  Author author = 8 [(google.api.field_behavior) = OPTIONAL];
+  // Labels by key.
+  map<string, string> labels = 9 [(google.api.field_behavior) = OPTIONAL];
+  // Copies by shelf.
+  map<string, int32> copies = 10 [(google.api.field_behavior) = OPTIONAL];
+  // Authors by role.
+  map<string, Author> contributors = 11 [(google.api.field_behavior) = OPTIONAL];
+  // Genres by region.
+  map<string, Genre> regional_genres = 12 [(google.api.field_behavior) = OPTIONAL];
+  // When it was published.
+  google.protobuf.Timestamp publish_time = 13 [(google.api.field_behavior) = OPTIONAL];
+  // The subtitle; absent and empty are different values.
+  optional string subtitle = 14 [(google.api.field_behavior) = OPTIONAL];
+  // The state (a nested enum).
+  State state = 15 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Every genre that applies.
+  repeated Genre genres = 16 [(google.api.field_behavior) = OPTIONAL];
+  // Ratings by edition.
+  repeated double edition_ratings = 17 [(google.api.field_behavior) = OPTIONAL];
+}
+
+// A book whose REQUIRED fields the wire profile always writes (null when unset).
+message BookCard {
+  // The title.
+  string title = 1 [(google.api.field_behavior) = REQUIRED];
+  // The rating, written as null when unset.
+  optional double rating = 2 [(google.api.field_behavior) = REQUIRED];
+  // Labels by key, written as {} when empty.
+  map<string, string> labels = 3 [(google.api.field_behavior) = REQUIRED];
+}
+
+// Input of GetBook.
+message GetBookRequest {
+  // The book.
+  string name = 1 [(google.api.field_behavior) = REQUIRED];
+  // A view name (a query parameter).
+  string view = 2 [(google.api.field_behavior) = OPTIONAL];
+  // Whether to include labels (a query parameter).
+  bool include_labels = 3 [(google.api.field_behavior) = OPTIONAL];
+}
+
+// Input of CreateBook.
+message CreateBookRequest {
+  // The shelf.
+  string parent = 1 [(google.api.field_behavior) = REQUIRED];
+  // The new book's ID (a query parameter).
+  string book_id = 2 [(google.api.field_behavior) = OPTIONAL];
+  // The book (the body).
+  Book book = 3 [(google.api.field_behavior) = REQUIRED];
+}
+
+// Input of UpdateBook.
+message UpdateBookRequest {
+  // The book (the body); its name comes from the path.
+  Book book = 1 [(google.api.field_behavior) = REQUIRED];
+  // An idempotency key (a query parameter).
+  string request_id = 2 [(google.api.field_behavior) = OPTIONAL];
+}
+
+// Input of ArchiveBook.
+message ArchiveBookRequest {
+  // The book.
+  string name = 1 [(google.api.field_behavior) = REQUIRED];
+  // Archive even when lent out.
+  bool force = 2 [(google.api.field_behavior) = OPTIONAL];
+  // An idempotency key.
+  string request_id = 3 [(google.api.field_behavior) = REQUIRED];
+}
+
+// Input of DeleteBook.
+message DeleteBookRequest {
+  // The book.
+  string name = 1 [(google.api.field_behavior) = REQUIRED];
+  // Succeed when the book does not exist.
+  bool allow_missing = 2 [(google.api.field_behavior) = OPTIONAL];
+}
+
+// Input of ListBooks.
+message ListBooksRequest {
+  // The shelf.
+  string parent = 1 [(google.api.field_behavior) = REQUIRED];
+  // The page size.
+  int32 page_size = 2 [(google.api.field_behavior) = OPTIONAL];
+  // The page token.
+  string page_token = 3 [(google.api.field_behavior) = OPTIONAL];
+  // Only books with every one of these tags.
+  repeated string tags = 4 [(google.api.field_behavior) = OPTIONAL];
+  // Only books of this genre.
+  Genre genre = 5 [(google.api.field_behavior) = OPTIONAL];
+  // Only books of one of these genres.
+  repeated Genre genres = 6 [(google.api.field_behavior) = OPTIONAL];
+  // Only books by this author (nested query parameters: author.display_name, author.birth_year).
+  Author author = 7 [(google.api.field_behavior) = OPTIONAL];
+  // Only books rated at least this.
+  double min_rating = 8 [(google.api.field_behavior) = OPTIONAL];
+  // Only hardcovers.
+  bool hardcover = 9 [(google.api.field_behavior) = OPTIONAL];
+  // A subtitle to match; absent and empty are different values.
+  optional string subtitle = 10 [(google.api.field_behavior) = OPTIONAL];
+}
+
+// Output of ListBooks.
+message ListBooksResponse {
+  // The page.
+  repeated Book books = 1 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The next page's token; empty on the last page.
+  string next_page_token = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
+}
+
+// Input of DownloadFile.
+message DownloadFileRequest {
+  // files/{path...}: the rest of the path, slashes included.
+  string name = 1 [(google.api.field_behavior) = REQUIRED];
+}
+
+// Output of DownloadFile.
+message DownloadFileResponse {
+  // The file.
+  string name = 1 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Its size in bytes.
+  int32 size = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
+}
+
+// Input of CountBooks.
+message CountBooksRequest {
+  // The shelf ID (one path segment).
+  string shelf = 1 [(google.api.field_behavior) = REQUIRED];
+}
+
+// Output of CountBooks.
+message CountBooksResponse {
+  // The number of books.
+  int32 count = 1 [(google.api.field_behavior) = OUTPUT_ONLY];
+}

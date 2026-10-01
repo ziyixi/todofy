@@ -13,8 +13,11 @@ modules:
       - tools
       - ts
 deps:
-  # google/api/field_behavior.proto (AIP-203) now; google/api/http.proto and google/rpc/status.proto later.
-  # buf.lock pins the commit and digest; buf caches it (~/.cache/buf), so only the first run needs network.
+  # googleapis, one version for every package: google/api/field_behavior.proto (AIP-203), annotations.proto
+  # and http.proto (google.api.http), resource.proto (AIP-122/123), field_info.proto (AIP-155's UUID4),
+  # client.proto, and google/rpc/status.proto, code.proto and error_details.proto (AIP-193 errors, which the
+  # HTTP transcoder writes). buf.lock pins the commit and digest; buf caches it (~/.cache/buf), so only the
+  # first run needs network.
   - buf.build/googleapis/googleapis
 lint:
   # STANDARD is buf's AIP-aligned set: PACKAGE_VERSION_SUFFIX, PACKAGE_DIRECTORY_MATCH,
@@ -27,9 +30,19 @@ lint:
   service_suffix: Service
   # Exceptions are written next to the element (buf:lint:ignore <RULE>) with the reason.
   disallow_comment_ignores: false
+  # prototest mirrors the AIP-shaped HTTP APIs (AIP-131/133/134/135/136: Get, Create and Update return the
+  # resource, Delete returns google.protobuf.Empty, so one message answers several RPCs).
+  ignore_only:
+    RPC_RESPONSE_STANDARD_NAME:
+      - prototest
+    RPC_REQUEST_RESPONSE_UNIQUE:
+      - prototest
 breaking:
   # FILE is the strictest category: it also protects generated code (names, packages, files), not only
   # the binary and JSON wire formats. scripts/breaking.sh adds the wire profile's own rules
   # (tools/profile_breaking.py).
   use:
     - FILE
+  # Test fixtures of the runtimes (prototest/v1/prototest.proto): no consumer, free to change.
+  ignore:
+    - prototest

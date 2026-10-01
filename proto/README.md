@@ -53,7 +53,8 @@ cannot express (bounds, URL hosts).
 | `tools/gen_py.py` | The stdlib-only Python generator (frozen dataclasses, `IntEnum`s, field tables) |
 | `tools/profile_breaking.py` | The profile's breaking rules (rule 4) |
 | `scripts/breaking.sh`, `scripts/rules-selftest.sh` | The breaking gate against a base commit; the rules self-test |
-| `testdata/wire-profile-cases.json` | 39 edge cases (timestamps, integer spellings, enum look-alikes, missing fields, null) that both codecs must answer identically |
+| `prototest/v1/prototest.proto` | Test fixtures of the runtimes, never used by an app: a message with every field kind of the profile and a service with every kind of HTTP binding |
+| `testdata/wire-profile-cases.json` | 62 edge cases (timestamps, integer and double spellings, enum look-alikes, maps, missing fields, null) that both codecs must answer identically |
 | `test/*.test.ts`, `test/python/` | The codec and IDL tests, the same cases in both languages; `test/cross-language.test.ts` pipes bytes through both codecs (`test/python/roundtrip.py` in a child process); `test/ensure.test.ts` runs `tools/ensure.mjs` on a copy of this folder (a deleted toolchain, an abandoned lock, the commands Windows needs) |
 
 Every directory directly inside `ts/` and `python/src/ziyixi_proto/` is generated (`.gitignore`); every
@@ -180,8 +181,10 @@ typecheck|test|dev` regenerates first (its pre-scripts); Todofy's next `uv run` 
    the directory must match the package). Mirror the JSON contract field for field: field numbers in the
    JSON Schema's property order (so field-number order reproduces today's key order), the v1 field names,
    every enum with its AIP-126 prefix and an `_UNSPECIFIED` zero value, `REQUIRED` where the schema
-   requires a field. Only the kinds the profile supports: `string`, `bool`, 32-bit integers, enums, messages,
-   `repeated` fields and `google.protobuf.Timestamp`; anything else stops generation with an error.
+   requires a field. Only the kinds the profile supports: `string`, `bool`, 32-bit integers, `double`, enums
+   (top-level or nested in a message), messages, `repeated` fields, maps with `string` keys and
+   `google.protobuf.Timestamp`; anything else (64-bit integers, `float`, `bytes`, oneofs, nested messages,
+   other well-known types as fields) stops generation with an error.
 2. `npm run lint` until clean, then `npm run generate`.
 3. Add the contract's fixtures to `test/` and `test/python/` (round trip byte for byte, enum and field sets
    equal to the JSON Schema), and a new kind of field to `testdata/wire-profile-cases.json` first.
@@ -201,6 +204,14 @@ contracts send:
 - a `Timestamp` is RFC 3339 UTC with 0-3 fraction digits and a real calendar time, written in one canonical
   form (no fraction for a whole second, else 3 digits);
 - an integer is a JSON number with a zero fractional part (`1.0` reads as 1, as `JSON.parse` must);
+- a double is a finite JSON number (no NaN or infinity); both codecs write the same value, and the same
+  bytes for integral values (written as integers) and for 1e-4 <= |x| < 1e16, where Python's `repr` and
+  `JSON.stringify` agree;
+- a map has `string` keys and is a JSON object in one canonical order: the order `JSON.stringify` gives an
+  object whose keys were set in code point order (array-index keys such as `"10"` come first, numerically),
+  which Python reproduces; a map value is never null, and an unrecognized map value is reported as
+  `field{}` (a key is data, and paths never carry data);
+- a proto3 scalar without `optional` is omitted at its default (`""`, 0, false) unless it is `REQUIRED`;
 - null is "no value" only where the writer writes it (a `REQUIRED` enum, message or `optional` scalar);
   anywhere else (`"recorded": null`, a list, a field that is omitted when unset) it is a wrong type;
 - **strict** reads (inputs) refuse unknown fields and enum names, `null`, wrong types and a missing
