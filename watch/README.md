@@ -16,12 +16,17 @@ change inbox. Chinese, mobile first. Design: [`docs/design.md`](docs/design.md).
 
 - **Add a watch**: 添加, paste the URL, 预览. Tap blocks to keep only them (只看这些) or to drop them (排除这些) and
   watch "将比较的内容" change; pick the trigger (任何变化, 出现/消失某段文字, 新条目, 数值, 供货状态) and the interval,
-  then 保存. The first check runs within a minute and sets the notified state; it never reports a change.
+  then 保存. The first check runs within a minute (15 minutes after the preview's fetch: the same URL is never fetched
+  twice within 15 minutes) and sets the notified state; it never reports a change. 设置 also offers the masks (数字也
+  遮盖, 关闭默认遮盖) and whether a page's navigation, header and footer count.
 - **From the phone**: share a page to `https://watch.ziyixi.science/new#u=<the URL, encoded>`. A bookmarklet does
   it from any page: `javascript:location.href='https://watch.ziyixi.science/new#u='+encodeURIComponent(location.href)`.
-  The URL travels in the fragment, which the browser never sends to a server.
+  The URL travels in the fragment, which the browser never sends to a server. Opening such a link only fills the box
+  and shows the host; nothing is fetched until you tap 预览.
 - **Changes**: 变化 lists the new ones; 已读 acknowledges. 被过滤的变化 shows what the rules dropped and why; "忽略这一行"
-  drops that line from now on (undo from the toast). Turn on 影子模式 for a week to see what a rule would drop.
+  leaves that exact line out of every comparison from now on (the notified state stays). The toast offers 撤销 at
+  once; the watch's page lists every ignored line with 取消忽略. Turn on 影子模式 for a week to see what a rule would
+  drop.
 - **Health**: 健康 groups the watches that are not well: 失效 (3 failed checks in a row; 14 days of it pauses the
   watch), 被拦截 (a bot challenge, never worked around), robots.txt, 网站要求放慢, 今日 JS 配额已用完. A failure is never
   reported as "no change".
