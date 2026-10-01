@@ -48,8 +48,9 @@ PRODUCTION = {
 }
 # Configs of Workers that CI checks but does not deploy yet (no deploy job, no hostname, placeholder resource ids).
 # They stay out of PRODUCTION, which the dashboard's drift check compares with the live account
-# (drift_desired.py). None today: FlowDay moved to PRODUCTION at F2 (flowday/docs/design.md section 11).
-UNDEPLOYED: dict[str, str] = {}
+# (drift_desired.py). FlowDay moved to PRODUCTION at F2 (flowday/docs/design.md section 11); the links app is here until
+# its first deploy (L2, links/docs/design.md section 11).
+UNDEPLOYED: dict[str, str] = {"links": "links/wrangler.toml"}
 # Runtime-test configs stay next to their tests.
 TEST_CONFIGS = {
     "todofy/wrangler.test.toml",
@@ -359,10 +360,10 @@ class Files(unittest.TestCase):
 class Undeployed(unittest.TestCase):
     """A config CI only checks: on the shared account, closed to the internet (no workers.dev, no preview URL, no
     route), nothing personal committed, no deploy job, and its wrapper's inputs only ever placeholders in ci.yml.
-    No app is undeployed today; the next imported app starts here, as FlowDay did until F2."""
+    A new app starts here, as FlowDay did until F2; the links app is here until L2."""
 
     # Worker name -> its deploy wrapper, for every UNDEPLOYED config.
-    WRAPPER: dict[str, str] = {}
+    WRAPPER: dict[str, str] = {"links": "links/deploy/deploy-vars.mjs"}
 
     def test_every_undeployed_config_names_its_wrapper(self):
         self.assertEqual(set(self.WRAPPER), set(UNDEPLOYED))
@@ -449,6 +450,7 @@ class LocalDev(unittest.TestCase):
                 "dashboard/worker/package.json",
                 "lab/worker/package.json",
                 "flowday/worker/package.json",
+                "links/worker/package.json",
                 "todofy/docs/dev-notes.md",
             },
             paths,
@@ -778,18 +780,19 @@ class Workflow(unittest.TestCase):
         self.assertEqual(check["run"].replace("Worker lab", "Worker flowday"), same["run"])
         self.assertFalse({"deploy", "versions upload", "versions deploy", "rollback", "secret"} & set(wrangler_commands(check["run"])))
 
-    def test_lab_and_flowday_accept_exactly_the_owner_values_the_dashboard_accepts(self):
-        """The same secrets feed the three wrappers: their owner and alias rules must be the same lines, or a valid
-        dashboard value could stop Lab deploy or FlowDay deploy (or the reverse). Here, in Changes, a change to
-        any one wrapper runs this comparison, whichever app's checks it runs."""
+    def test_lab_flowday_and_links_accept_exactly_the_owner_values_the_dashboard_accepts(self):
+        """The same secrets feed these wrappers: their owner and alias rules must be the same lines, or a valid
+        dashboard value could stop Lab deploy or FlowDay deploy (or the links app's, from L2), or the reverse. Here, in
+        Changes, a change to any one wrapper runs this comparison, whichever app's checks it runs."""
         rules = r"^(?:const ACCESS_EMAIL|const MAX_ALIASES|const MAX_LIST_CHARS) = .+$"
-        lab, dashboard, flowday = (
+        lab, dashboard, flowday, links = (
             re.findall(rules, (REPO / app / "deploy" / "deploy-vars.mjs").read_text(), re.M)
-            for app in ("lab", "dashboard", "flowday")
+            for app in ("lab", "dashboard", "flowday", "links")
         )
         self.assertEqual(len(dashboard), 3)
         self.assertEqual(lab, dashboard)
         self.assertEqual(flowday, dashboard)
+        self.assertEqual(links, dashboard)
 
     def test_the_lab_rollback_note_covers_what_its_first_release_leaves_live(self):
         """Lab's first release has no earlier version: its README must name what `Lab deploy` makes live (Worker,

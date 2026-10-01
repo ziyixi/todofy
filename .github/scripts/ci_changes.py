@@ -2,7 +2,7 @@
 """Decide which apps a CI run checks and deploys. Standard library only (the runner's python3).
 
 Outputs (GITHUB_OUTPUT, "true"/"false"):
-  todofy_check, mail_hero_check, dashboard_check, website_check, lab_check, flowday_check
+  todofy_check, mail_hero_check, dashboard_check, website_check, lab_check, flowday_check, links_check
                     run that app's full checks
   contracts         run the contract tests: both sides of mail.received.v1, ops-v1 and
                     task-intent-v1, and the dashboard's ops-v1 caller tests (also on a proto/ change: the
@@ -25,15 +25,18 @@ Outputs (GITHUB_OUTPUT, "true"/"false"):
                     a website change elsewhere releases the site but does not redeploy the relay.
   FlowDay (flowday/) is checked and deployed like the other apps since F2 (flowday/docs/design.md section 11).
   It uses no contract (NO_CONTRACTS) and compiles in packages/edge-auth, so a package change checks and
-  deploys it too. CHECK_ONLY (apps checked but never deployed, with no "<prefix>_deploy" output) is empty.
+  deploys it too. CHECK_ONLY (apps checked but never deployed, with no "<prefix>_deploy" output) holds the links app
+  (links/, the short links on s.ziyixi.science: links/docs/design.md section 11) until its first deploy job (L2): it
+  has no links_deploy output. It uses no contract and compiles in packages/edge-auth and the TypeScript proto runtime
+  with proto/links/ui/, so a change to those checks it too.
 
 proto/ (the protobuf IDL, proto/README.md) checks every app in PROTO_USERS (an app that depends on
 @ziyixi/proto or ziyixi-proto) and deploys only the apps whose bundle the changed path reaches
 (proto_deploys): PROTO_USERS[app] names the languages whose generated code and runtime the app's
-production bundles compile in ("ts": Lab's Worker and UI; "python": todofy-core, through the wheel
+production bundles compile in ("ts": Lab's and the links app's Workers and UIs; "python": todofy-core, through the wheel
 pywrangler vendors; Todofy's gateway imports types only, so it is no "ts" user), PROTO_RUNTIMES maps a
 language's runtime and generator to that language's users, and PROTO_PACKAGES maps each proto package to
-the apps that import its generated code (lab/ui reaches Lab only; prototest, the runtimes' fixtures,
+the apps that import its generated code (lab/ui reaches Lab only, links/ui the links app only; prototest, the runtimes' fixtures,
 reaches no app). Tests, test data, the check scripts, the api-linter tool module, check configs and
 Markdown (PROTO_NOT_BUNDLED) deploy nothing; any other proto/ path (buf.yaml, buf.lock, the toolchain
 lockfile, ensure.mjs, a package not listed yet) deploys every user (fail safe). test_proto.py derives
@@ -85,7 +88,7 @@ import urllib.parse
 import urllib.request
 from collections.abc import Callable, Iterable
 
-APPS = ("todofy", "mail-hero", "dashboard", "website", "lab", "flowday")
+APPS = ("todofy", "mail-hero", "dashboard", "website", "lab", "flowday", "links")
 # The output key prefix of each app ("<prefix>_check", "<prefix>_deploy").
 PREFIX = {
     "todofy": "todofy",
@@ -94,10 +97,11 @@ PREFIX = {
     "website": "website",
     "lab": "lab",
     "flowday": "flowday",
+    "links": "links",
 }
-# Apps that are checked but never deployed by CI (no "<prefix>_deploy" output): an imported app until its Worker
-# has a production config and a deploy job. None today (FlowDay left it at F2).
-CHECK_ONLY: set[str] = set()
+# Apps that are checked but never deployed by CI (no "<prefix>_deploy" output): a new app until its Worker has its
+# Cloudflare resources and a deploy job. The links app until L2 (links/docs/design.md section 11).
+CHECK_ONLY: set[str] = {"links"}
 KEYS = (
     "todofy_check",
     "mail_hero_check",
@@ -105,6 +109,7 @@ KEYS = (
     "website_check",
     "lab_check",
     "flowday_check",
+    "links_check",
     "contracts",
     "packages",
     "infra",
@@ -126,21 +131,22 @@ DISPATCH = {
     "website": ("website",),
     "lab": ("lab",),
     "flowday": ("flowday",),
+    "links": ("links",),
 }
 # The website's Notion relay Worker deploys on its own (website_relay_deploy).
 RELAY = "website/relay/"
 # Apps that neither provide nor consume a contract: their own changes do not run Contracts.
-NO_CONTRACTS = {"website", "flowday"}
+NO_CONTRACTS = {"website", "flowday", "links"}
 # The OpenTofu configuration (infra/README.md) and its plan-summary tool: checked here without a token; only
 # .github/workflows/infra.yml plans it against Cloudflare, and nothing applies it yet.
 INFRA = ("infra/", "tools/infra-plan-summary/")
 # packages/<name>/ -> the apps whose Workers compile it in (a "file:../../packages/<name>" dependency).
-PACKAGE_USERS = {"edge-auth": ("todofy", "mail-hero", "dashboard", "lab", "flowday")}
+PACKAGE_USERS = {"edge-auth": ("todofy", "mail-hero", "dashboard", "lab", "flowday", "links")}
 # The protobuf IDL (proto/README.md): app -> the languages ("ts", "python") whose generated code and runtime
 # its production bundles compile in; () for a user whose bundles take nothing from it (types only, tests
 # only). test_proto.py derives this map from the apps' manifests and sources.
 PROTO = "proto/"
-PROTO_USERS: dict[str, tuple[str, ...]] = {"lab": ("ts",), "todofy": ("python",)}
+PROTO_USERS: dict[str, tuple[str, ...]] = {"lab": ("ts",), "todofy": ("python",), "links": ("ts",)}
 # A language's hand-written runtime and generator: a change reaches every user of that language.
 PROTO_RUNTIMES = {
     "proto/ts/": "ts",
@@ -154,6 +160,7 @@ PROTO_RUNTIMES = {
 PROTO_PACKAGES: dict[str, tuple[str, ...]] = {
     "proto/todofy/taskintent/": ("lab", "todofy"),
     "proto/lab/ui/": ("lab",),
+    "proto/links/ui/": ("links",),
     # CommonReason: Lab reads its names as types only.
     "proto/common/errors/": (),
     # The runtimes' test fixtures (never imported by an app; not in the Python wheel).
@@ -201,6 +208,7 @@ CHECK_JOBS = {
     "website_check": ("Website checks",),
     "lab_check": ("Lab checks",),
     "flowday_check": ("FlowDay checks",),
+    "links_check": ("Links checks",),
     "contracts": ("Contracts",),
     "packages": ("Shared packages",),
     "infra": ("Infra checks",),

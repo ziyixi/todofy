@@ -42,6 +42,7 @@ def expect(
     flowday_check=False,
     proto=False,
     flowday_deploy=False,
+    links_check=False,
 ):
     return {
         "todofy_check": todofy_check,
@@ -50,6 +51,7 @@ def expect(
         "website_check": website_check,
         "lab_check": lab_check,
         "flowday_check": flowday_check,
+        "links_check": links_check,
         "contracts": contracts,
         "packages": packages,
         "infra": infra,
@@ -64,18 +66,19 @@ def expect(
     }
 
 
-# Every app checked (a contracts/ or .github/ change, FlowDay included); the dashboard and Lab each checked and deployed;
-# the edge-auth apps (the website compiles in no package) are todofy and mail-hero plus EDGE_AUTH; every
-# app with the website Worker (the relay Worker is added where a test expects it).
-ALL_CHECKED = {"dashboard_check": True, "website_check": True, "lab_check": True, "flowday_check": True}
+# Every app checked (a contracts/ or .github/ change, FlowDay and the links app included); the dashboard and Lab each
+# checked and deployed; the edge-auth apps (the website compiles in no package) are todofy and mail-hero plus EDGE_AUTH;
+# every app with the website Worker (the relay Worker is added where a test expects it). The links app is checked only
+# (ci_changes.CHECK_ONLY until L2): it has no deploy output.
+ALL_CHECKED = {"dashboard_check": True, "website_check": True, "lab_check": True, "flowday_check": True, "links_check": True}
 DASH = {"dashboard_check": True, "dashboard_deploy": True}
 LAB = {"lab_check": True, "lab_deploy": True}
 FLOWDAY = {"flowday_check": True, "flowday_deploy": True}
 ALL = {**DASH, **LAB}
 # Every app that compiles in packages/edge-auth besides Todofy and Mail Hero: the dashboard, Lab and FlowDay (each
-# checked and deployed).
-EDGE_AUTH = {**ALL, **FLOWDAY}
-EVERY = {**ALL, "website_check": True, "website_deploy": True, **FLOWDAY}
+# checked and deployed) and the links app (checked only).
+EDGE_AUTH = {**ALL, **FLOWDAY, "links_check": True}
+EVERY = {**ALL, "website_check": True, "website_deploy": True, **FLOWDAY, "links_check": True}
 
 
 def push(paths, ref=MAIN, last_success=BASE, ancestor=True, merge_base=BASE):
@@ -125,13 +128,31 @@ class Classify(unittest.TestCase):
                 self.assertEqual(push([path]), expect(F, F, F, F, F, **FLOWDAY))
                 self.assertEqual(push([path], ref=BRANCH), expect(F, F, F, F, F, **FLOWDAY))
 
-    def test_every_app_has_a_deploy_output(self):
-        """No app is check-only any more: each app's checks and deploy outputs both exist (CHECK_ONLY is empty)."""
-        self.assertEqual(ci_changes.CHECK_ONLY, set())
+    def test_every_app_but_the_check_only_ones_has_a_deploy_output(self):
+        """Each app has a checks output; each but the CHECK_ONLY ones (the links app until L2) a deploy output."""
+        self.assertEqual(ci_changes.CHECK_ONLY, {"links"})
         for app in ci_changes.APPS:
             with self.subTest(app=app):
                 self.assertIn(f"{ci_changes.PREFIX[app]}_check", ci_changes.KEYS)
-                self.assertIn(f"{ci_changes.PREFIX[app]}_deploy", ci_changes.KEYS)
+                self.assertEqual(f"{ci_changes.PREFIX[app]}_deploy" in ci_changes.KEYS, app not in ci_changes.CHECK_ONLY)
+
+    def test_links_is_checked_alone_and_never_deployed(self):
+        """The links app uses no contract (NO_CONTRACTS) and has no deploy job yet (until L2): its changes run only its
+        checks, on main too."""
+        for path in (
+            "links/worker/src/resolve.ts",
+            "links/web/src/view.ts",
+            "links/migrations/0001_init.sql",
+            "links/wrangler.toml",
+            "links/deploy/deploy-vars.mjs",
+            "links/web/package-lock.json",
+            "links/docs/design.md",
+            "links/README.md",
+        ):
+            with self.subTest(path=path):
+                self.assertEqual(push([path]), expect(F, F, F, F, F, links_check=T))
+                self.assertEqual(push([path], ref=BRANCH), expect(F, F, F, F, F, links_check=T))
+        self.assertNotIn("links_deploy", ci_changes.KEYS)
 
     def test_task_intent_code_deploys_lab_and_todofy(self):
         """TASK_INTENT_LIMITS ship in Lab and in Todofy's gateway; the schema only in Lab (its types are generated)."""
@@ -153,11 +174,11 @@ class Classify(unittest.TestCase):
         """The dashboard validates every Ops answer at runtime with the bundled schema and validate.mjs."""
         for path in ("contracts/ops-v1/ops-v1.schema.json", "contracts/ops-v1/validate.mjs"):
             with self.subTest(path=path):
-                self.assertEqual(push([path]), expect(T, T, T, F, F, **ALL, website_check=T, flowday_check=T))
+                self.assertEqual(push([path]), expect(T, T, T, F, F, **ALL, website_check=T, flowday_check=T, links_check=T))
 
     def test_contract_code_the_workers_bundle_deploys_every_app_that_bundles_it(self):
         """OPS_LIMITS and friends ship inside all three Workers, so a change must redeploy each."""
-        bundled = expect(T, T, T, T, T, **ALL, website_check=T, flowday_check=T)
+        bundled = expect(T, T, T, T, T, **ALL, website_check=T, flowday_check=T, links_check=T)
         self.assertEqual(push(["contracts/ops-v1/ops-v1.ts"]), bundled)
         self.assertEqual(push(["contracts/ops-v1/ops-v1.ts", "todofy/gateway/src/ops.ts"]), bundled)
         self.assertEqual(push(["contracts/ops-v1/ops-v1.ts"], ref=BRANCH), bundled)
@@ -172,6 +193,7 @@ class Classify(unittest.TestCase):
             "lab": [REPO / "lab" / "worker" / "src", REPO / "lab" / "web" / "src"],
             "website": [REPO / "website" / "src", REPO / "website" / "relay" / "src"],
             "flowday": [REPO / "flowday" / "worker" / "src", *(REPO / "flowday" / "web" / name for name in ("app", "components", "features", "lib"))],
+            "links": [REPO / "links" / "worker" / "src", REPO / "links" / "web" / "src"],
         }
         self.assertEqual(set(roots), set(ci_changes.APPS))
         importers = {}
@@ -210,7 +232,7 @@ class Classify(unittest.TestCase):
     def test_proto_checks_its_users_runs_contracts_and_deploys_only_the_bundles_a_path_reaches(self):
         """proto/ re-checks every PROTO_USERS app and runs Proto checks and Contracts (the task-intent-v1 tests check
         the codecs against the schema); it deploys an app only when the changed path reaches that app's bundle."""
-        self.assertEqual(ci_changes.PROTO_USERS, {"lab": ("ts",), "todofy": ("python",)})
+        self.assertEqual(ci_changes.PROTO_USERS, {"lab": ("ts",), "todofy": ("python",), "links": ("ts",)})
         both = {"todofy_deploy": T, "lab_deploy": T}
         lab_only = {"todofy_deploy": F, "lab_deploy": T}
         none = {"todofy_deploy": F, "lab_deploy": F}
@@ -220,6 +242,8 @@ class Classify(unittest.TestCase):
             # Lab's UI API: only Lab imports it (Python does not even generate it).
             "proto/lab/ui/v1/lab_ui_service.proto": lab_only,
             "proto/lab/ui/v1/deck.proto": lab_only,
+            # The links app's UI API reaches only the links app, which is checked only (no deploy output yet).
+            "proto/links/ui/v1/links_ui_service.proto": none,
             # The TypeScript runtime and generator: Todofy's gateway imports types only.
             "proto/ts/wire-json.ts": lab_only,
             "proto/ts/http-transcoder.ts": lab_only,
@@ -257,16 +281,20 @@ class Classify(unittest.TestCase):
         }
         for path, deploys in cases.items():
             with self.subTest(path=path):
+                # Every proto/ change checks every PROTO_USERS app, the links app included.
                 self.assertEqual(
                     push([path]),
-                    expect(T, F, T, deploys["todofy_deploy"], F, proto=T, lab_check=T, lab_deploy=deploys["lab_deploy"]),
+                    expect(T, F, T, deploys["todofy_deploy"], F, proto=T, lab_check=T, lab_deploy=deploys["lab_deploy"], links_check=T),
                 )
         self.assertFalse(push(["protocol.md"])["proto"])
         # Paths add up: a Python runtime change with a UI API change deploys both.
         self.assertEqual(
             push(["proto/python/src/ziyixi_proto/wire_json.py", "proto/lab/ui/v1/home.proto"]),
-            expect(T, F, T, T, F, proto=T, **LAB),
+            expect(T, F, T, T, F, proto=T, **LAB, links_check=T),
         )
+        # The TypeScript runtime reaches the links app's bundle too; only CHECK_ONLY keeps it from a deploy output.
+        self.assertEqual(ci_changes.proto_deploys("proto/ts/http-transcoder.ts"), {"lab", "links"})
+        self.assertEqual(ci_changes.proto_deploys("proto/links/ui/v1/link.proto"), {"links"})
 
     def test_every_proto_package_and_runtime_is_mapped(self):
         """Each package directory under proto/ (a directory holding .proto files) is in PROTO_PACKAGES, and every
@@ -319,12 +347,12 @@ class Classify(unittest.TestCase):
             ["packages/edge-auth/docs/notes.md"],
         ):
             with self.subTest(paths=paths):
-                self.assertEqual(push(paths), expect(T, T, T, F, F, packages=T, dashboard_check=T, lab_check=T, flowday_check=T))
+                self.assertEqual(push(paths), expect(T, T, T, F, F, packages=T, dashboard_check=T, lab_check=T, flowday_check=T, links_check=T))
         # With the package's code, or with one app, the usual rules apply.
         paths = ["packages/edge-auth/SPEC.md", "packages/edge-auth/src/csrf.ts"]
         self.assertEqual(push(paths), expect(T, T, T, T, T, packages=T, **EDGE_AUTH))
         paths = ["packages/edge-auth/SPEC.md", "dashboard/docs/design.md"]
-        self.assertEqual(push(paths), expect(T, T, T, F, F, packages=T, **DASH, lab_check=T, flowday_check=T))
+        self.assertEqual(push(paths), expect(T, T, T, F, F, packages=T, **DASH, lab_check=T, flowday_check=T, links_check=T))
         # An unregistered package's documents are checked by every app, deployed by none.
         self.assertEqual(push(["packages/new-kit/README.md"]), expect(T, T, T, F, F, packages=T, **ALL_CHECKED))
 
@@ -343,7 +371,7 @@ class Classify(unittest.TestCase):
         ]
         self.assertEqual(
             push(paths),
-            expect(T, T, T, F, F, packages=T, infra=T, proto=T, **DASH, website_check=T, lab_check=T, flowday_check=T),
+            expect(T, T, T, F, F, packages=T, infra=T, proto=T, **DASH, website_check=T, lab_check=T, flowday_check=T, links_check=T),
         )
 
     def test_a_package_change_with_one_app_still_deploys_every_user(self):
@@ -519,6 +547,8 @@ class Dispatch(unittest.TestCase):
         self.assertEqual(self.dispatch("dashboard"), expect(F, F, T, F, F, packages=T, proto=T, **DASH))
         self.assertEqual(self.dispatch("lab"), expect(F, F, T, F, F, packages=T, proto=T, **LAB))
         self.assertEqual(self.dispatch("flowday"), expect(F, F, T, F, F, packages=T, proto=T, **FLOWDAY))
+        # The links app is checked only (CHECK_ONLY): a dispatch runs its checks and deploys nothing.
+        self.assertEqual(self.dispatch("links"), expect(F, F, T, F, F, packages=T, proto=T, links_check=T))
         self.assertEqual(
             self.dispatch("website"),
             expect(
@@ -605,7 +635,7 @@ class RealGit(unittest.TestCase):
         expected = {**dict.fromkeys(ci_changes.KEYS, "true"), "packages": "false", "infra": "false", "proto": "false"}
         expected.update(dashboard_check="false", dashboard_deploy="false")
         expected.update(website_check="false", website_deploy="false", website_relay_deploy="false")
-        expected.update(lab_check="false", lab_deploy="false", flowday_check="false", flowday_deploy="false")
+        expected.update(lab_check="false", lab_deploy="false", flowday_check="false", flowday_deploy="false", links_check="false")
         self.assertEqual(outputs, expected)
 
     def test_a_failed_package_run_on_main_deploys_both_apps_next_time(self):
@@ -875,6 +905,7 @@ class DeployConditions(unittest.TestCase):
         "website-checks",
         "lab-checks",
         "flowday-checks",
+        "links-checks",
     }
 
     def jobs(self):
@@ -1928,6 +1959,7 @@ class Reuse(unittest.TestCase):
             "Website checks",
             "Lab checks",
             "FlowDay checks",
+            "Links checks",
             "Contracts",
             "Shared packages",
             "Infra checks",
