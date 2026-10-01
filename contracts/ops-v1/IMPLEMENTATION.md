@@ -261,8 +261,9 @@ forever (owner connection tests keep today's behaviour).
 - `test/ops-golden.test.mjs`: the exact bytes of every answer for fixed synthetic state (§3b).
 - `test/native-ops.test.mjs` (Node): signal/health derivation, input validation, `GuardState` expiry
   arithmetic, run-id rules; every produced object read back strictly with the wire codec.
-- `test/native-ops-cpu.test.mjs` (workerd): CPU of every `Ops` call against the Free limit, the
-  isolate's first `status()` included.
+- `test/cpu/native-ops-cpu.test.mjs` (workerd, `npm run test:cpu`, alone and serially): CPU of every
+  `Ops` call against the Free limit, the isolate's first `status()` included (the median of three fresh
+  isolates).
 - `test/native-ops-runtime.test.mjs` (miniflare, two Workers as in 1.1: the bundle and a caller with an
   `Ops` service binding): status in normal/maintenance/paused/shed states validates against `OpsStatus`
   and contains none of the seeded synthetic subjects/addresses; D1 statements of `status()` ≤ 6 with the
@@ -283,7 +284,7 @@ forever (owner connection tests keep today's behaviour).
 | --- | --- |
 | `gateway/src/ops.ts` (new) | `export class Ops extends WorkerEntrypoint<Env> implements TodofyOps`: each method calls one core method on `coordinator(this.env)` and unwraps `{ok}` / `{error}` (throws `new Error(code)`); a thrown call → `unavailable`. `reportOps` refuses a report over 8 KiB of compact JSON before calling the core |
 | `gateway/src/index.ts` | one line: `export { Ops } from './ops.ts';` |
-| `gateway/src/coordinator.ts` | `Coordinator` interface gains `ops_status()`, `ops_set_guard(inputJson)`, `ops_canary_result(eventId)`, `ops_report(reportJson)`, each `Promise<{ok: T} \| {error: OpsErrorCode}>` |
+| `gateway/src/coordinator.ts` | `Coordinator` interface gains `ops_status()`, `ops_set_guard(inputJson)`, `ops_canary_result(eventId)`, `ops_report(reportJson)`, each `Promise<{ok: T} \| {error: ErrorCode}>` (`ops.v1.ErrorCode`) |
 | `gateway/vitest.config.ts`, `gateway/test/cloudflare-workers.ts` (new) | the alias and stand-in from 1.1 |
 | `worker/todofy/runtime/coordinator.py` | the four RPC methods (they return plain dicts and never raise; `JsException` → `{"error": "unavailable"}`); canary branches in `_summarize`, `_create_task`, `_lookup`, `_complete`; deferral in `_run`, `_ticks`, `_metrics_tick`, `_next_alarm_ms` |
 | `worker/todofy/runtime/ops.py` (new) | DO tables, guard read/write, `defer_until(job, now)`, `ran(job)`, report store, status assembly |
@@ -571,7 +572,7 @@ schema is frozen in `legacy/` for the rollout checks.
 | Todofy core | `core/ops.py` hand-written rules, `jsonschema` in tests | `ops_pb` messages written with `to_wire`, inputs read strictly; the enums of `OpsError`/`Severity` derived from the generated ones |
 | Todofy gateway | `implements TodofyOps` | `implements` the generated services (types only, no runtime code added) |
 | Lab | `LabOps`, objects | `ops-status.ts` builds messages, `toWire`; `setGuard` via `fromWireArguments` |
-| Dashboard | `validate.mjs` + schema on every answer, `declared-methods.ts` parsed `ops-v1.ts` | `ops-client.ts` reads every answer with a lenient codec read and refuses a new value of a closed enum; inputs go out through a strict read; methods and code lists from the generated services and enums |
+| Dashboard | `validate.mjs` + schema on every answer, `declared-methods.ts` parsed `ops-v1.ts` | `ops-client.ts` reads every answer with a lenient codec read, which refuses a new value of a closed enum and a null REQUIRED enum or message (both stated in the IDL); inputs go out through a strict read; methods and code lists from the generated services and enums |
 
 Wire bytes: the golden tests (`mail-hero/cloudflare/test/ops-golden.test.mjs`,
 `lab/worker/test/ops-golden.test.ts`, `todofy/tests/unit/test_ops_golden.py`,

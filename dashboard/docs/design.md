@@ -177,7 +177,8 @@ subrequests and 32 Worker invocations per request.
   the codec writes it back, because an app can ship an additive change before this Worker is
   redeployed: fields the IDL does not declare are dropped (never stored or shown), and new codes of the
   open lists `reason` and `waiting_code` (and any `error_code` code) are kept; a new value of a closed
-  enum (a state, a severity, a level) is refused. Anything else outside the closed contract (an address
+  enum (a state, a severity, a level: `(common.wire.v1.closed)` in the IDL) and a null REQUIRED enum or
+  message (`non_null`) are refused by the codec itself. Anything else outside the closed contract (an address
   as a counter name, free text in a code, an http URL, an offset timestamp) is refused, so it never
   reaches DO storage or the page. Every input the dashboard sends goes through a strict read with the
   same rules first; one they refuse is not sent (`invalid_input`). All of these are

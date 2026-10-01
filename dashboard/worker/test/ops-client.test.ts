@@ -250,6 +250,21 @@ describe('answers are read with the contract\'s rules', () => {
     expect(asCanaryDelivery({ state: 'retrying', attempts: 1 })).toBeNull();
     expect(asStatus('mail-hero')({ ...mailHeroOk, signals: [{ code: 'x', severity: 'urgent', metrics: {} }] })).toBeNull();
   });
+
+  it('refuses null for every REQUIRED enum and message (non_null), so no flow meets a state it cannot branch on', async () => {
+    // Every null the codec used to let through on a lenient read (the pre-move dashboard refused each one).
+    expect(asCanaryDelivery({ state: null, attempts: 0 })).toBeNull();
+    expect(asCanaryDelivery({ state: null, attempts: 3, error_code: 'x', delivered_at: '2026-09-29T22:30:04Z' })).toBeNull();
+    expect(asCanaryResult({ state: null })).toBeNull();
+    expect(asStartCanaryResult({ event_id: null, state: null })).toBeNull();
+    expect(asGuardState({ ...guardNormal, level: null })).toBeNull();
+    expect(asStatus('mail-hero')({ ...mailHeroOk, health: null })).toBeNull();
+    expect(asStatus('mail-hero')({ ...mailHeroOk, guard: null })).toBeNull();
+    expect(asStatus('mail-hero')({ ...mailHeroOk, signals: [{ code: 'x', severity: null, metrics: {} }] })).toBeNull();
+    // So the canary's tick never reads a delivery or a result without a state (applyDelivery's switch has no default).
+    expect(await callOps(() => Promise.resolve({ state: null, attempts: 0 }), asCanaryDelivery)).toEqual({ ok: false, code: 'invalid_output' });
+    expect(await callOps(() => Promise.resolve({ state: null }), asCanaryResult)).toEqual({ ok: false, code: 'invalid_output' });
+  });
 });
 
 describe('where the bindings are used', () => {

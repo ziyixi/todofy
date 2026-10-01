@@ -5,7 +5,7 @@
  * the dashboard sends is checked with the contract's rules first, every answer is read with them. Results are values,
  * never exceptions.
  */
-import type { DescField, DescMessage, DescMethod } from '@ziyixi/proto/protobuf';
+import type { DescMessage, DescMethod } from '@ziyixi/proto/protobuf';
 import {
   CanaryConsumerService,
   CanaryDeliverySchema,
@@ -13,19 +13,20 @@ import {
   CanaryResultSchema,
   ErrorCode,
   ErrorCodeSchema,
+  file_ops_v1_ops,
   GuardLevel,
   GuardLevelSchema,
   GuardStateSchema,
   OpsDigestService,
+  OpsReportItemSchema,
   OpsReportReceiptSchema,
   OpsReportSchema,
   OpsService,
   OpsStatusSchema,
-  SignalSchema,
   StartCanaryResultSchema,
 } from '@ziyixi/proto/ops/v1/ops_pb';
 import type * as ops from '@ziyixi/proto/ops/v1/ops_wire';
-import { fieldRules, fromWire, fromWireArguments, toWire, toWireArguments, wireEnum, WireJsonError, type WireOf } from '@ziyixi/proto/wire-json';
+import { fieldRules, formatMatches, fromWire, fromWireArguments, toWire, toWireArguments, wireEnum, WireJsonError, type WireOf } from '@ziyixi/proto/wire-json';
 import type { AppErrorCode, OpsApp } from './api-types.ts';
 import type { Env } from './env.ts';
 
@@ -43,7 +44,15 @@ export const GUARD_LEVELS: readonly ops.GuardLevel[] = wireEnum(GuardLevelSchema
 export const OPS_ERROR_CODES: readonly ops.ErrorCode[] = wireEnum(ErrorCodeSchema, ErrorCode).names;
 /** At most this many items in an OpsReport, and metrics per item. */
 export const REPORT_MAX_ITEMS = fieldRules(OpsReportSchema.field.items).maxItems;
-export const METRICS_MAX_KEYS = fieldRules(SignalSchema.field.metrics).maxItems;
+export const METRICS_MAX_KEYS = fieldRules(OpsReportItemSchema.field.metrics).maxItems;
+/** Whether a name is an ops-v1 `Code` (a signal code, a counter or metric name): the IDL's format, the one definition. */
+export function isOpsCode(value: string): boolean {
+  return formatMatches(file_ops_v1_ops, 'Code', value);
+}
+/** Whether a report item's source is an ops-v1 `Source`. */
+export function isOpsSource(value: string): boolean {
+  return formatMatches(file_ops_v1_ops, 'Source', value);
+}
 
 export type OpsCall<T> = { readonly ok: true; readonly value: T } | { readonly ok: false; readonly code: AppErrorCode };
 
@@ -93,28 +102,14 @@ export async function callOps<T>(
 //   - unknown fields are ignored: the reader skips them and the kept value (`toWire` of what was read) has none;
 //   - new codes of an open list (`reason`, `waiting_code`) and any `error_code` are kept as they are, if they are
 //     codes; the UI shows unknown codes generically;
-//   - a new value of a closed enum (a state, a severity, a health, a level) is refused as invalid_output: the
-//     dashboard's flows branch on those, so it does not guess.
-
-/** Whether `path` (a path the reader reported unrecognized) names a field of `desc`: a value it did not know. */
-function isUnknownValue(desc: DescMessage, path: string): boolean {
-  let message: DescMessage | undefined = desc;
-  const names = path.replace(/\[\d+\]/g, '').replace(/\{\}$/, '').split('.');
-  for (const [index, name] of names.entries()) {
-    const field: DescField | undefined = message?.fields.find((f) => f.name === name);
-    if (field === undefined) return false;
-    if (index === names.length - 1) return true;
-    message = field.message;
-  }
-  return false;
-}
+//   - a new value of an ops-v1 enum (a state, a severity, a health, a level) is refused as invalid_output: the
+//     dashboard's flows branch on those, so it does not guess. The IDL says so ((common.wire.v1.closed) on each), and
+//     the codec refuses it, as it refuses null for a REQUIRED enum or message ((common.wire.v1.field).non_null).
 
 /** The answer as the contract allows this consumer to keep it (wire JSON, in field order), or null. */
 export function conform<D extends DescMessage>(schema: D, value: unknown): WireOf<D> | null {
   try {
-    const { message, unrecognized } = fromWire(schema, value);
-    if (unrecognized.some((path) => isUnknownValue(schema, path))) return null;
-    return toWire(schema, message, { lenient: true });
+    return toWire(schema, fromWire(schema, value).message, { lenient: true });
   } catch (error) {
     if (error instanceof WireJsonError) return null;
     throw error;

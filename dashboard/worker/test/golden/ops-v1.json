@@ -742,13 +742,18 @@
   },
   "read/invalid/CanaryDelivery/delivered-without-time.json": null,
   "read/invalid/CanaryDelivery/failed-without-code.json": null,
+  "read/invalid/CanaryDelivery/state-null-with-delivery.json": null,
+  "read/invalid/CanaryDelivery/state-null.json": null,
   "read/invalid/CanaryDelivery/unknown-with-attempts.json": null,
   "read/invalid/CanaryResult/failed-without-code.json": null,
   "read/invalid/CanaryResult/ok-with-summary.json": {
     "state": "ok",
     "completed_at": "2026-09-29T22:31:40Z"
   },
+  "read/invalid/CanaryResult/state-null.json": null,
+  "read/invalid/GuardState/level-null.json": null,
   "read/invalid/GuardState/unknown-level.json": null,
+  "read/invalid/OpsReport/item-severity-null.json": null,
   "read/invalid/OpsReport/item-with-text.json": {
     "generated_at": "2026-09-29T23:40:00Z",
     "items": [
@@ -815,13 +820,17 @@
     ]
   },
   "read/invalid/OpsStatus/free-text-code.json": null,
+  "read/invalid/OpsStatus/guard-null.json": null,
+  "read/invalid/OpsStatus/health-null.json": null,
   "read/invalid/OpsStatus/http-ui-url.json": null,
   "read/invalid/OpsStatus/mail-content-in-metric.json": null,
   "read/invalid/OpsStatus/missing-guard.json": null,
   "read/invalid/OpsStatus/offset-timestamp.json": null,
+  "read/invalid/OpsStatus/signal-severity-null.json": null,
   "read/invalid/OpsStatus/string-mode.json": null,
   "read/invalid/OpsStatus/unknown-app.json": null,
   "read/invalid/SetGuardInput/free-text-reason.json": null,
+  "read/invalid/SetGuardInput/level-null.json": null,
   "read/invalid/SetGuardInput/normal-with-until.json": null,
   "read/invalid/SetGuardInput/shed-without-until.json": null,
   "read/invalid/StartCanaryInput/extra-field.json": {
@@ -830,6 +839,7 @@
   "read/invalid/StartCanaryInput/run-id-with-space.json": null,
   "read/invalid/StartCanaryResult/paused-with-event.json": null,
   "read/invalid/StartCanaryResult/queued-without-event.json": null,
+  "read/invalid/StartCanaryResult/state-null.json": null,
   "read/invalid/StartCanaryResult/unknown-reason.json": {
     "event_id": null,
     "state": "unavailable",

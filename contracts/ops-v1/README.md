@@ -17,7 +17,7 @@ contract this replaced (each app's golden test, below).
 | File | Purpose |
 | --- | --- |
 | [`proto/ops/v1/ops.proto`](../../proto/ops/v1/ops.proto) | The contract: services, messages, enums and value rules |
-| `ops-v1.schema.json` | JSON Schema 2020-12 **generated** from the IDL (`proto/tools/gen_schema.py`), one `$defs` entry per input and output (table below); never edited by hand, `npm run check:schema` in `proto/` fails when stale. Kept for readers outside the monorepo and as the oracle the tests check the codec against |
+| `ops-v1.schema.json` | JSON Schema 2020-12 **generated** from the IDL (`proto/tools/gen_schema.py`), one `$defs` entry per input and output (table below), per format and per enum; never edited by hand, `npm run check:schema` in `proto/` fails when stale. Kept for readers outside the monorepo and as the oracle the tests check the codec against. The names the hand-written schema had (`App`, `Counters`, `Metrics`, `Modes`, `OpsErrorCode`) still resolve, as aliases of what the IDL generates (`ALIASES` in `gen_schema.py`) |
 | `ops-v1.ts` | `OPS_LIMITS`: the rules no codec can check (relative to a clock or to a whole message); the TS Workers import it by relative path, `todofy-core` keeps the same numbers |
 | `legacy/ops-v1.schema.json` | The hand-written schema the dashboards deployed before the move validate answers with, frozen: the golden tests prove every answer still passes it (rollout) |
 | `validate.mjs` | Dependency-free validator for the JSON Schema keywords the contracts use; Lab checks `task-intent-v1` with it at runtime, the golden tests check answers against the legacy schema with it |
@@ -104,7 +104,8 @@ only JSON values.
 | `canaryResult(eventId)` | Todofy | `EventId` | `CanaryResult` | none |
 | `reportOps(report)` | Todofy | `OpsReport` | `OpsReportReceipt` | Todofy's Durable Object storage |
 
-**Errors.** A method rejects only with `new Error(code)` where `code` is an `OpsErrorCode`
+**Errors.** A method rejects only with `new Error(code)` where `code` is an `ErrorCode` (`ops.v1.ErrorCode`; the
+schema's `OpsErrorCode` is the same list under its earlier name)
 (the message crosses RPC intact): `invalid_input` (the input fails the contract's rules or a rule below; do not
 retry unchanged), `busy` (try again in a minute), `unavailable` (storage or an internal call failed; try
 again later). Every expected outcome is a value (`paused`, `unavailable`, `not_seen`, ...). A caller
@@ -134,7 +135,8 @@ writes and never aggregates a whole table. Poll it no more often than every 10 m
   `status_unavailable` status has only the deployment variables (Mail Hero `maintenance`,
   `force_send_paused`; Todofy `maintenance`, `processing_paused`, `force_pause_todoist`,
   `reminder_enabled`); the keys read from storage (Mail Hero `send_paused`, `forwarding`,
-  `backup_active`; Todofy `backup_active`) are left out, so they are optional (`optional` in the IDL).
+  `backup_active`; Todofy `backup_active`) are then simply absent from the map: `modes` is a
+  `map<string, bool>` whose only required key is `maintenance` (`required_keys` in the IDL).
 - `guard`: the effective `GuardState` (below).
 - `signals`: active conditions only, at most 16, sorted by severity (critical first) then code. `metrics`
   are numbers only; `since` when the app tracks the start of the episode.
@@ -248,13 +250,19 @@ the next UTC day's reminder carries it.
 ## Versioning and bounds
 
 - Additive changes stay `ops-v1`: new optional output fields, new signal/counter/capability codes, new
-  enum values of `reason`/`waiting_code`/`error_code` documented here. They land in `ops.proto`
+  codes of the open lists `reason`/`waiting_code` and new `error_code`s documented here. They land in `ops.proto`
   together with the regenerated schema (`npm run schema` in `proto/`) and fixtures in one change;
   `buf breaking` and the wire profile check (`proto/tools/profile_breaking.py`) refuse a change that
   would alter the bytes of an existing field. Consumers ignore unknown fields and show unknown codes
   generically.
 - Anything else (a removed or retyped field, a changed meaning, a new required input) is `ops-v2`: a new
-  entrypoint class `OpsV2` and a new directory, served next to `Ops` until the dashboard moved.
+  entrypoint class `OpsV2` and a new directory, served next to `Ops` until the dashboard moved. That includes
+  a new value of any enum ops-v1 writes (`Health`, `Severity`, `GuardLevel`, each `State`): they are closed
+  (`(common.wire.v1.closed)`), because the dashboard branches on every value, so every reader refuses an
+  unknown one and `profile_breaking.py` refuses the change (`PROFILE_ENUM_CLOSED`). A changed value rule of an
+  output (a format, a bound, a closed list) is refused too (`PROFILE_RULE_SAME`): older dashboards read newer
+  apps' answers with the older rules and the other way round. Every REQUIRED enum and message is `non_null`:
+  never null on the wire, on any read or write.
 - `mail.received.v1`'s optional `canary` marker is part of that contract (`contracts/mail-received-v1`).
 
 | Bound | Value |

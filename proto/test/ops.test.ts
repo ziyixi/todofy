@@ -5,7 +5,9 @@
  * tolerates exactly what ops-v1's consumer rules allow; the services declare each app's entrypoint methods and
  * how they take their arguments; and the generated wire types are what toWire answers.
  */
-import { create, type DescMessage } from '@bufbuild/protobuf';
+import { create, getOption, type DescMessage } from '@bufbuild/protobuf';
+import { closed } from '../ts/common/wire/v1/wire_pb.ts';
+import { field_behavior, FieldBehavior } from '../ts/google/api/field_behavior_pb.ts';
 import { readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, expectTypeOf, test } from 'vitest';
@@ -29,12 +31,12 @@ const MESSAGES: Record<string, DescMessage> = {
 
 /**
  * The invalid fixtures a lenient read (a consumer) accepts, and why: ops-v1's consumers ignore fields they do not
- * know, keep a newer code of an open list as read, and read a newer enum value as unrecognized (the dashboard then
- * refuses that answer by its own rule). Every other invalid fixture breaks a rule a consumer keeps too.
+ * know and keep a newer code of an open list as read. Every other invalid fixture breaks a rule a consumer keeps too:
+ * a newer value of one of ops-v1's enums (all closed, (common.wire.v1.closed)) and a null REQUIRED enum or message
+ * (non_null) included.
  */
 const LENIENT: Record<string, readonly string[]> = {
   'CanaryResult/ok-with-summary.json': ['summary'],
-  'GuardState/unknown-level.json': ['level'],
   'OpsReport/item-with-text.json': ['items[0].text'],
   'OpsStatus/extra-field-subject.json': ['subject'],
   'StartCanaryInput/extra-field.json': ['to'],
@@ -127,6 +129,38 @@ describe('the services are each app’s entrypoint', () => {
     expect(fieldRules(ops.OpsStatusSchema.field.app).allowed).toEqual(['mail-hero', 'todofy', 'lab']);
     expect(wireEnum(ops.ErrorCodeSchema, ops.ErrorCode).names).toEqual(['invalid_input', 'busy', 'unavailable']);
     expect(wireEnum(ops.GuardLevelSchema, ops.GuardLevel).names).toEqual(['normal', 'shed']);
+  });
+
+  test('a receipt counts at most the items a report holds (one bound, read from the report)', () => {
+    // A stored report of N items answers item_count N: the receipt's bound must follow the report's.
+    expect(fieldRules(ops.OpsReportReceiptSchema.field.itemCount).maximum).toBe(fieldRules(ops.OpsReportSchema.field.items).maxItems);
+  });
+
+  test('every REQUIRED enum and message is non_null and every enum on the wire is closed', () => {
+    // ops-v1 never wrote null for one (the hand-written schema refused it), and the dashboard branches on every value.
+    const checked: string[] = [];
+    for (const message of ops.file_ops_v1_ops.messages) {
+      for (const field of message.fields) {
+        if (field.fieldKind === 'enum') expect(getOption(field.enum, closed), field.enum.typeName).toBe(true);
+        const required = getOption(field, field_behavior).includes(FieldBehavior.REQUIRED);
+        if ((field.fieldKind === 'enum' || field.fieldKind === 'message') && required && !field.proto.proto3Optional) {
+          expect(fieldRules(field).nonNull, `${message.typeName}.${field.name}`).toBe(true);
+          checked.push(`${message.name}.${field.name}`);
+        }
+      }
+    }
+    expect(checked).toHaveLength(9);
+  });
+
+  test('a producer cannot write null for a REQUIRED enum or message', () => {
+    expect(() => toWire(ops.CanaryDeliverySchema, create(ops.CanaryDeliverySchema, { attempts: 0 }))).toThrow(new WireJsonError('state: required'));
+    expect(() => toWire(ops.CanaryResultSchema, create(ops.CanaryResultSchema, {}))).toThrow(new WireJsonError('state: required'));
+    expect(() => toWire(ops.StartCanaryResultSchema, create(ops.StartCanaryResultSchema, {}))).toThrow(new WireJsonError('state: required'));
+    const status = fromWire(ops.OpsStatusSchema, fixtures('OpsStatus', false, OPS_CONTRACT)[0]?.value).message;
+    expect(() => toWire(ops.OpsStatusSchema, create(ops.OpsStatusSchema, { ...status, health: ops.Health.UNSPECIFIED }))).toThrow(new WireJsonError('health: required'));
+    expect(() => toWire(ops.OpsStatusSchema, create(ops.OpsStatusSchema, { ...status, guard: undefined }))).toThrow(new WireJsonError('guard: required'));
+    const guard = create(ops.GuardStateSchema, { level: ops.GuardLevel.UNSPECIFIED });
+    expect(() => toWire(ops.GuardStateSchema, guard)).toThrow(new WireJsonError('level: required'));
   });
 });
 

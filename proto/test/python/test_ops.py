@@ -5,6 +5,7 @@ lenient); a strict read refuses every invalid fixture, as the generated JSON Sch
 exactly what ops-v1's consumer rules allow; and producers read the contract's bounds from the generated tables.
 """
 
+import dataclasses
 import json
 import unittest
 
@@ -27,7 +28,6 @@ MESSAGES = {
 # The invalid fixtures a lenient read accepts, with what it skipped (test/ops.test.ts LENIENT says why).
 LENIENT = {
     "CanaryResult/ok-with-summary.json": ["summary"],
-    "GuardState/unknown-level.json": ["level"],
     "OpsReport/item-with-text.json": ["items[0].text"],
     "OpsStatus/extra-field-subject.json": ["subject"],
     "StartCanaryInput/extra-field.json": ["to"],
@@ -82,6 +82,60 @@ class BoundsTest(unittest.TestCase):
         self.assertEqual(field_rules(pb.OpsReport, "items").max_items, 20)
         self.assertEqual(field_rules(pb.OpsStatus, "app").allowed, frozenset({"mail-hero", "todofy", "lab"}))
         self.assertEqual([wire_name(code) for code in list(pb.ErrorCode)[1:]], ["invalid_input", "busy", "unavailable"])
+
+    def test_a_receipt_counts_at_most_the_items_a_report_holds(self) -> None:
+        self.assertEqual(
+            field_rules(pb.OpsReportReceipt, "item_count").maximum, field_rules(pb.OpsReport, "items").max_items
+        )
+
+
+class SchemaTest(unittest.TestCase):
+    def test_every_defs_name_of_the_hand_written_schema_still_resolves(self) -> None:
+        """Readers outside the monorepo may resolve "#/$defs/<name>" by the names the schema had before it was
+        generated: each one is still there and says the same (descriptions aside)."""
+        root = REPO / "contracts" / "ops-v1"
+        legacy = json.loads((root / "legacy" / "ops-v1.schema.json").read_text(encoding="utf-8"))["$defs"]
+        generated = json.loads((root / "ops-v1.schema.json").read_text(encoding="utf-8"))["$defs"]
+
+        def resolved(entry: dict) -> dict:
+            while "$ref" in entry:
+                entry = generated[entry["$ref"].removeprefix("#/$defs/")]
+            return {key: value for key, value in entry.items() if key != "description"}
+
+        self.assertLessEqual(set(legacy), set(generated))
+        for name in ("App", "Counters", "Metrics", "Modes", "OpsErrorCode"):
+            with self.subTest(name):
+                self.assertEqual(
+                    resolved(generated[name]), {k: v for k, v in legacy[name].items() if k != "description"}
+                )
+
+
+class NonNullTest(unittest.TestCase):
+    def test_every_required_enum_and_message_is_non_null_and_every_enum_on_the_wire_closed(self) -> None:
+        checked = []
+        for cls, fields in pb.FIELDS.items():
+            for field in fields:
+                if field.kind == "enum":
+                    self.assertIn(field.ref, pb.CLOSED, field.ref.__name__)
+                singular = not field.repeated and field.kind in ("enum", "message")
+                if singular and field.required and not field.declared_optional:
+                    self.assertTrue(field.rules.non_null, f"{cls.__name__}.{field.name}")
+                    checked.append(f"{cls.__name__}.{field.name}")
+        self.assertEqual(len(checked), 9)
+
+    def test_a_producer_cannot_write_null_for_a_required_enum_or_message(self) -> None:
+        status = from_wire(pb.OpsStatus, json.loads((OPS / "OpsStatus" / "lab-ok.json").read_text(encoding="utf-8")))
+        for message, error in [
+            (pb.CanaryDelivery(attempts=0), "state: required"),
+            (pb.CanaryResult(), "state: required"),
+            (pb.StartCanaryResult(), "state: required"),
+            (dataclasses.replace(status.message, health=pb.Health.UNSPECIFIED), "health: required"),
+            (dataclasses.replace(status.message, guard=None), "guard: required"),
+            (pb.GuardState(), "level: required"),
+        ]:
+            with self.subTest(error), self.assertRaises(WireJsonError) as caught:
+                to_wire(message)
+            self.assertEqual(str(caught.exception), error)
 
 
 if __name__ == "__main__":

@@ -9,6 +9,11 @@
 // TypeScript wire types (ops_wire.ts) type the bindings, and both codecs check the rules below on every read and
 // write.
 //
+// The dashboard branches on every value of ops-v1's enums (states, severities, health, guard levels), so each is
+// closed ((common.wire.v1.closed)): a reader refuses a value it does not know, and a new value is a new major
+// version (contracts/ops-v1/README.md "Versioning"; proto/tools/profile_breaking.py refuses it). Every REQUIRED enum
+// and message is non_null: ops-v1 never writes null for one (only fields declared `optional` may be null).
+//
 // Timestamps are strings in the format `Timestamp`, not google.protobuf.Timestamp: ops-v1's producers write both
 // whole seconds (`...:00Z`) and milliseconds (`...:00.000Z`), and the profile's Timestamp would rewrite one of
 // them. The app names (`mail-hero`) are strings with an allowed list: an enum's wire name cannot hold a hyphen.
@@ -167,7 +172,10 @@ message OpsStatus {
     (common.wire.v1.field).format = "Timestamp"
   ];
   // down: maintenance, or the snapshot could not be read; degraded: a warning or critical signal; else ok.
-  Health health = 4 [(google.api.field_behavior) = REQUIRED];
+  Health health = 4 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).non_null = true
+  ];
   // Operating switches by name, booleans only. Every app has `maintenance`; contracts/ops-v1/README.md lists each
   // app's others. The deployment variables are always there; a switch read from storage is left out of a
   // `status_unavailable` status, never guessed.
@@ -181,7 +189,10 @@ message OpsStatus {
     }
   ];
   // The effective guard.
-  GuardState guard = 6 [(google.api.field_behavior) = REQUIRED];
+  GuardState guard = 6 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).non_null = true
+  ];
   // Active conditions only, critical first, then by code.
   repeated Signal signals = 7 [
     (google.api.field_behavior) = REQUIRED,
@@ -221,6 +232,8 @@ message OpsStatus {
 
 // An app's health.
 enum Health {
+  option (common.wire.v1.closed) = true;
+
   // Never sent.
   HEALTH_UNSPECIFIED = 0;
   // Nothing worse than an info signal.
@@ -239,7 +252,10 @@ message Signal {
     (common.wire.v1.field).format = "Code"
   ];
   // How bad it is.
-  Severity severity = 2 [(google.api.field_behavior) = REQUIRED];
+  Severity severity = 2 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).non_null = true
+  ];
   // Numbers only, named by codes.
   map<string, double> metrics = 3 [
     (google.api.field_behavior) = REQUIRED,
@@ -255,6 +271,8 @@ message Signal {
 
 // A signal's or a report item's severity.
 enum Severity {
+  option (common.wire.v1.closed) = true;
+
   // Never sent.
   SEVERITY_UNSPECIFIED = 0;
   // Informational; never makes an app degraded or reaches the digest.
@@ -269,7 +287,10 @@ enum Severity {
 // normal with reason, until and set_at null and nothing deferred.
 message GuardState {
   // normal or shed.
-  GuardLevel level = 1 [(google.api.field_behavior) = REQUIRED];
+  GuardLevel level = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).non_null = true
+  ];
   // The caller's reason for a shed.
   optional string reason = 2 [
     (google.api.field_behavior) = REQUIRED,
@@ -298,6 +319,8 @@ message GuardState {
 
 // The guard's level.
 enum GuardLevel {
+  option (common.wire.v1.closed) = true;
+
   // Never sent.
   GUARD_LEVEL_UNSPECIFIED = 0;
   // Every job runs on its normal cadence.
@@ -312,7 +335,10 @@ message SetGuardInput {
   option (common.wire.v1.message).discriminator = "level";
 
   // The level asked for.
-  GuardLevel level = 1 [(google.api.field_behavior) = REQUIRED];
+  GuardLevel level = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).non_null = true
+  ];
   // A code chosen by the caller, e.g. d1_reads_high.
   string reason = 2 [
     (google.api.field_behavior) = REQUIRED,
@@ -348,6 +374,8 @@ message StartCanaryResult {
 
   // What happened.
   enum State {
+    option (common.wire.v1.closed) = true;
+
     // Never sent.
     STATE_UNSPECIFIED = 0;
     // The canary mail and its delivery exist (now, or from an earlier call with this run_id).
@@ -371,7 +399,10 @@ message StartCanaryResult {
     }
   ];
   // What happened.
-  State state = 2 [(google.api.field_behavior) = REQUIRED];
+  State state = 2 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).non_null = true
+  ];
   // Why it is paused (send_paused, settings_paused, endpoint_paused, endpoint_blocked) or unavailable
   // (maintenance, backup_active, no_endpoint, capacity). Codes may be added within ops-v1: the dashboard shows an
   // unknown one as it is.
@@ -421,6 +452,8 @@ message CanaryDelivery {
 
   // The delivery's state.
   enum State {
+    option (common.wire.v1.closed) = true;
+
     // Never sent.
     STATE_UNSPECIFIED = 0;
     // The consumer durably took it over.
@@ -436,7 +469,10 @@ message CanaryDelivery {
   }
 
   // The delivery's state.
-  State state = 1 [(google.api.field_behavior) = REQUIRED];
+  State state = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).non_null = true
+  ];
   // HTTP attempts so far: at least one once delivered, none for an unknown event.
   int32 attempts = 2 [
     (google.api.field_behavior) = REQUIRED,
@@ -504,6 +540,8 @@ message CanaryResult {
 
   // The consumer's state.
   enum State {
+    option (common.wire.v1.closed) = true;
+
     // Never sent.
     STATE_UNSPECIFIED = 0;
     // No canary event with this ID.
@@ -517,7 +555,10 @@ message CanaryResult {
   }
 
   // The consumer's state.
-  State state = 1 [(google.api.field_behavior) = REQUIRED];
+  State state = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).non_null = true
+  ];
   // What holds a processing canary (maintenance, processing_paused, backup_active, retry_wait): a held run, never
   // a failure. Codes may be added within ops-v1: the dashboard keeps an unknown one as it is.
   optional string waiting_code = 2 [(common.wire.v1.field) = {
@@ -588,7 +629,10 @@ message OpsReportItem {
     (common.wire.v1.field).format = "Code"
   ];
   // How bad it is.
-  Severity severity = 3 [(google.api.field_behavior) = REQUIRED];
+  Severity severity = 3 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).non_null = true
+  ];
   // When it was first seen.
   string since = 4 [
     (google.api.field_behavior) = REQUIRED,
