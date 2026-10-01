@@ -26,8 +26,16 @@ const PORT = 10_000 + Math.floor(Math.random() * 500);
 const REDIRECT_COLD_BOUND_MS = 0.3 * FREE_CPU_MS;
 const REDIRECT_BOUND_MS = 0.15 * FREE_CPU_MS;
 /**
- * The owner API's heaviest requests, in reference milliseconds. Measured: first runs 2.3-4.9 ms (4.9: the isolate's
- * first API request, the transcoder's and the codec's first run), warm medians 1.4-2.2 ms.
+ * The isolate's first owner API request (a one-link list page), in reference milliseconds: the first run of the
+ * transcoder, the codec and the handlers' modules, measured on its own so that this one-off cost does not eat the
+ * headroom of the heaviest request that happens to come first (a full list page measured 4.9-5.3 ms with it, and
+ * 16.3 ms against a bound of 14.7 once on a loaded machine). Its own single measurement, so its bound keeps room for
+ * that noise, still below Free's 10 ms on the reference machine.
+ */
+const API_INIT_BOUND_MS = 0.9 * FREE_CPU_MS;
+/**
+ * The owner API's heaviest requests, in reference milliseconds, each path's first run after the isolate's first API
+ * request. Measured: see ../../../docs/design.md section 8.
  */
 const API_COLD_BOUND_MS = 0.7 * FREE_CPU_MS;
 const API_BOUND_MS = 0.5 * FREE_CPU_MS;
@@ -108,6 +116,9 @@ describe('CPU per request (Workers Free: 10 ms)', () => {
       await h.sql("DELETE FROM links WHERE key LIKE 'new-%'");
       await h.sql("DELETE FROM link_revisions WHERE key LIKE 'new-%'");
     };
+    // The isolate's first API request, alone: what every later API request no longer pays.
+    const apiInit = await meter.cpu(() => expectStatus('/_/api/v1/links?page_size=1', 200, { headers: owner }));
+    console.log(`cpu GET /_/api/v1/links?page_size=1 as the isolate's first API request: ${apiInit.toFixed(2)} ms`);
     const api: Measurement[] = [
       await meter.measure(`GET /_/api/v1/links (a full page of ${String(LIST_PAGE)})`, () => expectStatus('/_/api/v1/links', 200, { headers: owner }), RUNS),
       await meter.measure('GET /_/api/v1/links, filtered (2 literals over every link)', () => expectStatus(`/_/api/v1/links?filter=${encodeURIComponent('tag-two t3')}`, 200, { headers: owner }), RUNS),
@@ -127,7 +138,7 @@ describe('CPU per request (Workers Free: 10 ms)', () => {
     const scale = scaleFor(calibration.speed);
     console.log(
       `cpu bounds: redirect first < ${(REDIRECT_COLD_BOUND_MS * scale).toFixed(2)} ms, median < ${(REDIRECT_BOUND_MS * scale).toFixed(2)} ms; ` +
-        `API first < ${(API_COLD_BOUND_MS * scale).toFixed(2)} ms, median < ${(API_BOUND_MS * scale).toFixed(2)} ms`,
+        `API's first request < ${(API_INIT_BOUND_MS * scale).toFixed(2)} ms, API first < ${(API_COLD_BOUND_MS * scale).toFixed(2)} ms, median < ${(API_BOUND_MS * scale).toFixed(2)} ms`,
     );
     expect(calibration.speed, tooSlow(calibration)).toBeLessThanOrEqual(MAX_SPEED);
     expect(cold, "GET /<key> as the isolate's first request").toBeLessThan(REDIRECT_COLD_BOUND_MS * scale);
@@ -135,6 +146,7 @@ describe('CPU per request (Workers Free: 10 ms)', () => {
       expect(first, `${label}: first run`).toBeLessThan(REDIRECT_COLD_BOUND_MS * scale);
       expect(median, `${label}: warm median`).toBeLessThan(REDIRECT_BOUND_MS * scale);
     }
+    expect(apiInit, "GET /_/api/v1/links?page_size=1 as the isolate's first API request").toBeLessThan(API_INIT_BOUND_MS * scale);
     for (const { label, first, median } of api) {
       expect(first, `${label}: first run`).toBeLessThan(API_COLD_BOUND_MS * scale);
       expect(median, `${label}: warm median`).toBeLessThan(API_BOUND_MS * scale);

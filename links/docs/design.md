@@ -161,10 +161,15 @@ on a short link only a request that carries a token is checked, so `curl` withou
 
 Measured in workerd with `tools/workerd-cpu` (reference machine, 2026-10-01, `test/runtime/cpu.test.ts`, no dev
 bypass): the isolate's first request (a redirect) 1.25-1.56 ms, a warm redirect 0-0.4 ms (the sampler's resolution),
-the owner's private redirect with the cookie verified 0.4 ms warm (1.95 ms for its first RS256 verification), a full
-list page of 100 links 1.6 ms warm (4.9 ms as the isolate's first API request), a filter over 1,000 links 1.4-1.6 ms,
-an export page of 250 links 2.0-2.2 ms, an import of 100 lines 1.9-2.0 ms. The test holds redirects to 3 ms first and
-1.5 ms warm, the owner API to 7 ms first and 5 ms warm (reference milliseconds, scaled by the machine's speed). An
+the owner's private redirect with the cookie verified 0.4 ms warm (1.95 ms for its first RS256 verification). The
+isolate's first owner API request (a one-link list page, the transcoder's, codec's and handlers' first run) is measured
+on its own: 3.3-4.5 ms (five runs, 2026-10-01). After it, first runs and warm medians: a full list page of 100 links
+2.5-3.0 / 1.4-1.9 ms, a filter over 1,000 links 1.6-2.5 / 1.4-1.6 ms, an export page of 250 links 2.2-2.8 / 2.0-2.2 ms,
+an import of 100 lines 3.7-4.4 / 1.7-2.0 ms (its first run is also the isolate's first mutation: the CSRF check and the
+first request body). The test holds redirects to 3 ms first and 1.5 ms warm, the isolate's first API request to 9 ms,
+every other API path to 7 ms first and 5 ms warm (reference milliseconds, scaled by the machine's speed). Before the
+first API request was measured apart, the full list page carried it (4.9-5.3 ms against 7 ms) and failed once of ten
+runs on a machine loaded with nine busy processes; measured apart, eight such loaded runs passed (speed 2.4-2.8). An
 export of all 1,000 links in one answer measured about 5 ms, which is why it is paged.
 
 Bundles: the Worker 284 KiB raw, 67.5 KiB gzip (budget 82 KiB, `deploy/bundle-size.mjs`); the launcher's JavaScript
