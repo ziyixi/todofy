@@ -23,7 +23,7 @@ import { connectCpuMeter, FREE_CPU_MS, MAX_SPEED, scaleFor, tooSlow } from '../.
 import { migrationStatements } from './migrations.mjs'
 
 const root = resolve(fileURLToPath(new URL('..', import.meta.url)))
-// A port range of its own (FlowDay's CPU test uses 9000-9499, Lab's 9500-9999, the dashboard's 10500-10999).
+// A port range of its own (FlowDay's CPU test uses 9000-9499, Lab's 9500-9999).
 const PORT = 10_000 + Math.floor(Math.random() * 500)
 /** The bound of a call's first run in the isolate, in reference milliseconds (today 4.5-5.5 for status()). */
 const COLD_BOUND_MS = 0.7 * FREE_CPU_MS

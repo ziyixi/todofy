@@ -85,6 +85,8 @@ export interface HarnessOptions {
   readonly outbound?: Outbound;
   /** Directory of the Durable Object storage, kept after dispose (a later harness reopens it); default: a temp dir removed on dispose. */
   readonly persist?: string;
+  /** workerd's DevTools inspector on this port (the CPU test, tools/workerd-cpu); default: none. */
+  readonly inspectorPort?: number;
 }
 
 export const SYNTHETIC_BINDINGS: Readonly<Record<string, string>> = {
@@ -129,6 +131,7 @@ export async function startHarness(options: HarnessOptions = {}): Promise<Harnes
     convertV4MiniflareOptions({
       host: '127.0.0.1',
       port: 0,
+      ...(options.inspectorPort === undefined ? {} : { inspectorPort: options.inspectorPort }),
       // Durable Object storage (SQLite files) under temp/do/, kept across rebind() and, with `persist`, across harnesses.
       resourcePersistencePath: temp,
       workers: [
