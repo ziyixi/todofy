@@ -1,0 +1,620 @@
+{
+  "status/ok": {
+    "version": "ops-v1",
+    "app": "mail-hero",
+    "generated_at": "2026-09-29T12:00:00.000Z",
+    "health": "ok",
+    "modes": {
+      "maintenance": false,
+      "force_send_paused": false,
+      "send_paused": false,
+      "forwarding": true,
+      "backup_active": false
+    },
+    "guard": {
+      "level": "normal",
+      "reason": null,
+      "until": null,
+      "set_at": null,
+      "deferred": []
+    },
+    "signals": [],
+    "counters": {
+      "jobs_pending": 2,
+      "jobs_failed": 0,
+      "parse_failed": 0,
+      "delivery_failed": 0,
+      "policy_error": 0,
+      "blocked_waiting": 0,
+      "paused_waiting": 0,
+      "oldest_pending_age_seconds": 0,
+      "capacity_used_bytes": 1000,
+      "capacity_limit_bytes": 5368709120,
+      "logical_bytes": 900,
+      "ingest_today_messages": 4,
+      "ingest_today_bytes": 4096,
+      "ingest_limit_messages": 300,
+      "ingest_limit_bytes": 268435456
+    },
+    "last_backup_at": "2026-09-29T11:00:00.000Z",
+    "ui_url": "https://mail.example.org/",
+    "capabilities": [
+      "canary_producer",
+      "guard"
+    ]
+  },
+  "status/degraded": {
+    "version": "ops-v1",
+    "app": "mail-hero",
+    "generated_at": "2026-09-29T12:00:00.000Z",
+    "health": "degraded",
+    "modes": {
+      "maintenance": false,
+      "force_send_paused": true,
+      "send_paused": true,
+      "forwarding": false,
+      "backup_active": true
+    },
+    "guard": {
+      "level": "shed",
+      "reason": "d1_reads_high",
+      "until": "2026-09-29T13:00:00.000Z",
+      "set_at": "2026-09-29T12:00:00.000Z",
+      "deferred": [
+        "raw_reconcile",
+        "lifecycle_retention",
+        "canary_cleanup",
+        "alert_history_purge"
+      ]
+    },
+    "signals": [
+      {
+        "code": "backup_stale",
+        "severity": "critical",
+        "metrics": {
+          "age_seconds": 144000,
+          "has_backup": 1
+        }
+      },
+      {
+        "code": "endpoint_blocked",
+        "severity": "critical",
+        "metrics": {
+          "waiting_deliveries": 3,
+          "current_blocked": 1,
+          "auto_recheck": 1
+        },
+        "since": "2026-09-29T10:02:11.000Z"
+      },
+      {
+        "code": "force_send_paused",
+        "severity": "warning",
+        "metrics": {}
+      },
+      {
+        "code": "ingest_quota_80",
+        "severity": "warning",
+        "metrics": {
+          "messages": 250,
+          "bytes": 1,
+          "message_limit": 300,
+          "byte_limit": 268435456,
+          "percent": 83.3
+        }
+      },
+      {
+        "code": "parse_failed",
+        "severity": "warning",
+        "metrics": {
+          "count": 2
+        }
+      },
+      {
+        "code": "pending_stale",
+        "severity": "warning",
+        "metrics": {
+          "oldest_age_seconds": 7200
+        }
+      },
+      {
+        "code": "send_paused",
+        "severity": "warning",
+        "metrics": {}
+      },
+      {
+        "code": "backup_active",
+        "severity": "info",
+        "metrics": {}
+      },
+      {
+        "code": "forwarding_off",
+        "severity": "info",
+        "metrics": {}
+      },
+      {
+        "code": "guard_shed",
+        "severity": "info",
+        "metrics": {
+          "seconds_left": 3600
+        }
+      }
+    ],
+    "counters": {
+      "jobs_pending": 2,
+      "jobs_failed": 0,
+      "parse_failed": 2,
+      "delivery_failed": 0,
+      "policy_error": 0,
+      "blocked_waiting": 3,
+      "paused_waiting": 0,
+      "oldest_pending_age_seconds": 7200,
+      "capacity_used_bytes": 1000,
+      "capacity_limit_bytes": 5368709120,
+      "logical_bytes": 900,
+      "ingest_today_messages": 250,
+      "ingest_today_bytes": 1,
+      "ingest_limit_messages": 300,
+      "ingest_limit_bytes": 268435456
+    },
+    "last_backup_at": "2026-09-27T20:00:00.000Z",
+    "ui_url": "https://mail.example.org/",
+    "capabilities": [
+      "canary_producer",
+      "guard"
+    ]
+  },
+  "status/every-signal": {
+    "version": "ops-v1",
+    "app": "mail-hero",
+    "generated_at": "2026-09-29T12:00:00.000Z",
+    "health": "down",
+    "modes": {
+      "maintenance": true,
+      "force_send_paused": true,
+      "send_paused": true,
+      "forwarding": false,
+      "backup_active": true
+    },
+    "guard": {
+      "level": "shed",
+      "reason": "d1_reads_high",
+      "until": "2026-09-29T13:00:00.000Z",
+      "set_at": "2026-09-29T12:00:00.000Z",
+      "deferred": []
+    },
+    "signals": [
+      {
+        "code": "backup_stale",
+        "severity": "critical",
+        "metrics": {
+          "age_seconds": 360000,
+          "has_backup": 0
+        }
+      },
+      {
+        "code": "capacity_95",
+        "severity": "critical",
+        "metrics": {
+          "used_bytes": 5368709120,
+          "logical_bytes": 5368709120,
+          "limit_bytes": 5368709120,
+          "percent": 100,
+          "capacity_accounting_available": 1
+        }
+      },
+      {
+        "code": "endpoint_blocked",
+        "severity": "critical",
+        "metrics": {
+          "waiting_deliveries": 0,
+          "current_blocked": 1,
+          "auto_recheck": 0
+        }
+      },
+      {
+        "code": "maintenance_mode",
+        "severity": "critical",
+        "metrics": {}
+      },
+      {
+        "code": "delivery_failed",
+        "severity": "warning",
+        "metrics": {
+          "count": 1
+        }
+      },
+      {
+        "code": "endpoint_paused",
+        "severity": "warning",
+        "metrics": {
+          "waiting_deliveries": 1
+        }
+      },
+      {
+        "code": "force_send_paused",
+        "severity": "warning",
+        "metrics": {}
+      },
+      {
+        "code": "ingest_quota_80",
+        "severity": "warning",
+        "metrics": {
+          "messages": 300,
+          "bytes": 268435456,
+          "message_limit": 300,
+          "byte_limit": 268435456,
+          "percent": 100
+        }
+      },
+      {
+        "code": "parse_failed",
+        "severity": "warning",
+        "metrics": {
+          "count": 1
+        }
+      },
+      {
+        "code": "pending_stale",
+        "severity": "warning",
+        "metrics": {
+          "oldest_age_seconds": 10800
+        }
+      },
+      {
+        "code": "policy_error",
+        "severity": "warning",
+        "metrics": {
+          "count": 1
+        }
+      },
+      {
+        "code": "send_paused",
+        "severity": "warning",
+        "metrics": {}
+      },
+      {
+        "code": "backup_active",
+        "severity": "info",
+        "metrics": {}
+      },
+      {
+        "code": "forwarding_off",
+        "severity": "info",
+        "metrics": {}
+      },
+      {
+        "code": "guard_shed",
+        "severity": "info",
+        "metrics": {
+          "seconds_left": 3600
+        }
+      }
+    ],
+    "counters": {
+      "jobs_pending": 2,
+      "jobs_failed": 0,
+      "parse_failed": 1,
+      "delivery_failed": 1,
+      "policy_error": 1,
+      "blocked_waiting": 0,
+      "paused_waiting": 1,
+      "oldest_pending_age_seconds": 10800,
+      "capacity_used_bytes": 1000,
+      "capacity_limit_bytes": 5368709120,
+      "logical_bytes": 5368709120,
+      "ingest_today_messages": 300,
+      "ingest_today_bytes": 268435456,
+      "ingest_limit_messages": 300,
+      "ingest_limit_bytes": 268435456
+    },
+    "last_backup_at": null,
+    "ui_url": "https://mail.example.org/",
+    "capabilities": [
+      "canary_producer",
+      "guard"
+    ]
+  },
+  "status/maintenance": {
+    "version": "ops-v1",
+    "app": "mail-hero",
+    "generated_at": "2026-09-29T12:00:00.000Z",
+    "health": "down",
+    "modes": {
+      "maintenance": true,
+      "force_send_paused": false,
+      "send_paused": false,
+      "forwarding": true,
+      "backup_active": false
+    },
+    "guard": {
+      "level": "normal",
+      "reason": null,
+      "until": null,
+      "set_at": null,
+      "deferred": []
+    },
+    "signals": [
+      {
+        "code": "maintenance_mode",
+        "severity": "critical",
+        "metrics": {}
+      }
+    ],
+    "counters": {
+      "jobs_pending": 2,
+      "jobs_failed": 0,
+      "parse_failed": 0,
+      "delivery_failed": 0,
+      "policy_error": 0,
+      "blocked_waiting": 0,
+      "paused_waiting": 0,
+      "oldest_pending_age_seconds": 0,
+      "capacity_used_bytes": 1000,
+      "capacity_limit_bytes": 5368709120,
+      "logical_bytes": 900,
+      "ingest_today_messages": 4,
+      "ingest_today_bytes": 4096,
+      "ingest_limit_messages": 300,
+      "ingest_limit_bytes": 268435456
+    },
+    "last_backup_at": "2026-09-29T11:00:00.000Z",
+    "ui_url": "https://mail.example.org/",
+    "capabilities": [
+      "canary_producer",
+      "guard"
+    ]
+  },
+  "status/unavailable": {
+    "version": "ops-v1",
+    "app": "mail-hero",
+    "generated_at": "2026-09-29T12:00:00.000Z",
+    "health": "down",
+    "modes": {
+      "maintenance": false,
+      "force_send_paused": false
+    },
+    "guard": {
+      "level": "normal",
+      "reason": null,
+      "until": null,
+      "set_at": null,
+      "deferred": []
+    },
+    "signals": [
+      {
+        "code": "status_unavailable",
+        "severity": "critical",
+        "metrics": {}
+      }
+    ],
+    "counters": {},
+    "last_backup_at": null,
+    "ui_url": "https://mail.example.org/",
+    "capabilities": [
+      "canary_producer",
+      "guard"
+    ]
+  },
+  "status/unavailable-shed": {
+    "version": "ops-v1",
+    "app": "mail-hero",
+    "generated_at": "2026-09-29T12:00:00.000Z",
+    "health": "down",
+    "modes": {
+      "maintenance": false,
+      "force_send_paused": false
+    },
+    "guard": {
+      "level": "shed",
+      "reason": "d1_reads_high",
+      "until": "2026-09-29T13:00:00.000Z",
+      "set_at": "2026-09-29T12:00:00.000Z",
+      "deferred": [
+        "raw_reconcile",
+        "lifecycle_retention",
+        "canary_cleanup",
+        "alert_history_purge"
+      ]
+    },
+    "signals": [
+      {
+        "code": "status_unavailable",
+        "severity": "critical",
+        "metrics": {}
+      }
+    ],
+    "counters": {},
+    "last_backup_at": null,
+    "ui_url": "https://mail.example.org/",
+    "capabilities": [
+      "canary_producer",
+      "guard"
+    ]
+  },
+  "status/no-capacity-no-host": {
+    "version": "ops-v1",
+    "app": "mail-hero",
+    "generated_at": "2026-09-29T12:00:00.000Z",
+    "health": "ok",
+    "modes": {
+      "maintenance": false,
+      "force_send_paused": false,
+      "send_paused": false,
+      "forwarding": true,
+      "backup_active": false
+    },
+    "guard": {
+      "level": "normal",
+      "reason": null,
+      "until": null,
+      "set_at": null,
+      "deferred": []
+    },
+    "signals": [],
+    "counters": {
+      "jobs_pending": 2,
+      "jobs_failed": 0,
+      "parse_failed": 0,
+      "delivery_failed": 0,
+      "policy_error": 0,
+      "blocked_waiting": 0,
+      "paused_waiting": 0,
+      "oldest_pending_age_seconds": 0,
+      "logical_bytes": 900,
+      "ingest_today_messages": 4,
+      "ingest_today_bytes": 4096,
+      "ingest_limit_messages": 300
+    },
+    "last_backup_at": "2026-09-29T11:00:00.000Z",
+    "ui_url": null,
+    "capabilities": [
+      "canary_producer",
+      "guard"
+    ]
+  },
+  "guard/normal": {
+    "level": "normal",
+    "reason": null,
+    "until": null,
+    "set_at": null,
+    "deferred": []
+  },
+  "guard/shed": {
+    "level": "shed",
+    "reason": "d1_reads_high",
+    "until": "2026-09-29T18:00:00.000Z",
+    "set_at": "2026-09-29T12:00:00.000Z",
+    "deferred": [
+      "raw_reconcile",
+      "lifecycle_retention",
+      "canary_cleanup",
+      "alert_history_purge"
+    ]
+  },
+  "guard/shed-again": {
+    "level": "shed",
+    "reason": "d1_reads_high",
+    "until": "2026-09-29T18:00:00.000Z",
+    "set_at": "2026-09-29T12:00:00.000Z",
+    "deferred": [
+      "raw_reconcile",
+      "lifecycle_retention",
+      "canary_cleanup",
+      "alert_history_purge"
+    ]
+  },
+  "guard/renewed": {
+    "level": "shed",
+    "reason": "d1_reads_high",
+    "until": "2026-09-29T20:00:00.000Z",
+    "set_at": "2026-09-29T12:01:00.000Z",
+    "deferred": [
+      "raw_reconcile",
+      "lifecycle_retention",
+      "canary_cleanup",
+      "alert_history_purge"
+    ]
+  },
+  "guard/cleared": {
+    "level": "normal",
+    "reason": null,
+    "until": null,
+    "set_at": null,
+    "deferred": []
+  },
+  "delivery/unknown": {
+    "state": "unknown",
+    "attempts": 0
+  },
+  "delivery/pending-first": {
+    "state": "pending",
+    "attempts": 0
+  },
+  "delivery/pending-retrying": {
+    "state": "pending",
+    "attempts": 1,
+    "last_http_status": 503,
+    "error_code": "http_503"
+  },
+  "delivery/delivered": {
+    "state": "delivered",
+    "attempts": 2,
+    "last_http_status": 204,
+    "delivered_at": "2026-09-29T22:30:04.512Z"
+  },
+  "delivery/delivered-no-time": {
+    "state": "delivered",
+    "attempts": 1,
+    "delivered_at": "2026-09-29T11:00:00.000Z"
+  },
+  "delivery/failed-window": {
+    "state": "failed",
+    "attempts": 48,
+    "last_http_status": 503,
+    "error_code": "retry_window_expired"
+  },
+  "delivery/cancelled": {
+    "state": "failed",
+    "attempts": 1,
+    "error_code": "canary_cancelled"
+  },
+  "delivery/failed-free-text": {
+    "state": "failed",
+    "attempts": 0,
+    "error_code": "delivery_failed"
+  },
+  "delivery/paused-send": {
+    "state": "paused",
+    "attempts": 0
+  },
+  "delivery/paused-forced": {
+    "state": "paused",
+    "attempts": 0
+  },
+  "delivery/paused-blocked": {
+    "state": "paused",
+    "attempts": 1,
+    "last_http_status": 401,
+    "error_code": "http_404"
+  },
+  "delivery/recheck-due": {
+    "state": "pending",
+    "attempts": 1,
+    "last_http_status": 401,
+    "error_code": "http_401"
+  },
+  "start/queued-again": {
+    "event_id": "6f1f4c1e-3b9a-4f55-9d0e-0a1b2c3d4e5f",
+    "state": "queued"
+  },
+  "start/maintenance": {
+    "event_id": null,
+    "state": "unavailable",
+    "reason": "maintenance"
+  },
+  "start/send-paused": {
+    "event_id": null,
+    "state": "paused",
+    "reason": "send_paused"
+  },
+  "start/settings-paused": {
+    "event_id": null,
+    "state": "paused",
+    "reason": "settings_paused"
+  },
+  "start/no-endpoint": {
+    "event_id": null,
+    "state": "unavailable",
+    "reason": "no_endpoint"
+  },
+  "start/endpoint-paused": {
+    "event_id": null,
+    "state": "paused",
+    "reason": "endpoint_paused"
+  },
+  "start/endpoint-blocked": {
+    "event_id": null,
+    "state": "paused",
+    "reason": "endpoint_blocked"
+  }
+}

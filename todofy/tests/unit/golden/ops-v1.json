@@ -1,0 +1,494 @@
+{
+  "status/ok": {
+    "version": "ops-v1",
+    "app": "todofy",
+    "generated_at": "2026-09-29T15:00:00Z",
+    "health": "ok",
+    "modes": {
+      "maintenance": false,
+      "processing_paused": false,
+      "force_pause_todoist": false,
+      "reminder_enabled": true,
+      "backup_active": false
+    },
+    "guard": {
+      "level": "normal",
+      "reason": null,
+      "until": null,
+      "set_at": null,
+      "deferred": []
+    },
+    "signals": [],
+    "counters": {
+      "active_events": 2,
+      "attention_events": 0,
+      "received_24h": 63,
+      "oldest_due_age_seconds": 0,
+      "gemini_used_tokens": 412880,
+      "gemini_reserved_tokens": 0,
+      "gemini_token_budget": 3000000,
+      "gemini_calls": 64,
+      "todoist_window_calls": 3,
+      "todoist_window_limit": 1000,
+      "intents_pending": 0,
+      "intents_failed_7d": 0,
+      "backup_age_seconds": 363600,
+      "inbox_open": 23,
+      "inbox_oldest_days": 41,
+      "overdue": 3,
+      "carryover_open": 9,
+      "completed_7d": 42,
+      "review_age_days": 2
+    },
+    "last_backup_at": "2026-09-25T10:00:00Z",
+    "ui_url": "https://todofy.example.com/",
+    "capabilities": [
+      "canary_consumer",
+      "guard",
+      "ops_digest"
+    ]
+  },
+  "status/degraded": {
+    "version": "ops-v1",
+    "app": "todofy",
+    "generated_at": "2026-09-29T15:00:00Z",
+    "health": "degraded",
+    "modes": {
+      "maintenance": false,
+      "processing_paused": false,
+      "force_pause_todoist": false,
+      "reminder_enabled": true,
+      "backup_active": true
+    },
+    "guard": {
+      "level": "shed",
+      "reason": "d1_reads_high",
+      "until": "2026-09-30T00:00:00Z",
+      "set_at": "2026-09-29T14:05:00Z",
+      "deferred": [
+        "weekly_backup",
+        "retention",
+        "metrics_rollup",
+        "gtd_snapshot"
+      ]
+    },
+    "signals": [
+      {
+        "code": "backup_stale",
+        "severity": "critical",
+        "metrics": {
+          "age_seconds": 792000,
+          "has_backup": 1
+        }
+      },
+      {
+        "code": "attention",
+        "severity": "warning",
+        "metrics": {
+          "count": 2
+        }
+      },
+      {
+        "code": "backup_failed",
+        "severity": "warning",
+        "metrics": {}
+      },
+      {
+        "code": "due_backlog",
+        "severity": "warning",
+        "metrics": {
+          "oldest_age_seconds": 7200
+        }
+      },
+      {
+        "code": "gemini_budget_80",
+        "severity": "warning",
+        "metrics": {
+          "percent": 82.4,
+          "used_tokens": 2460000,
+          "reserved_tokens": 12000,
+          "budget_tokens": 3000000
+        }
+      },
+      {
+        "code": "gtd_snapshot_stale",
+        "severity": "warning",
+        "metrics": {
+          "age_hours": 50
+        }
+      },
+      {
+        "code": "reminder_failed",
+        "severity": "warning",
+        "metrics": {
+          "attempts": 4
+        }
+      },
+      {
+        "code": "backup_active",
+        "severity": "info",
+        "metrics": {}
+      },
+      {
+        "code": "guard_shed",
+        "severity": "info",
+        "metrics": {
+          "seconds_left": 32400
+        }
+      },
+      {
+        "code": "review_overdue",
+        "severity": "info",
+        "metrics": {
+          "days": 12
+        }
+      }
+    ],
+    "counters": {
+      "active_events": 2,
+      "attention_events": 2,
+      "received_24h": 63,
+      "oldest_due_age_seconds": 7200,
+      "gemini_used_tokens": 2460000,
+      "gemini_reserved_tokens": 12000,
+      "gemini_token_budget": 3000000,
+      "gemini_calls": 64,
+      "todoist_window_calls": 3,
+      "todoist_window_limit": 1000,
+      "intents_pending": 1,
+      "intents_failed_7d": 2,
+      "backup_age_seconds": 792000,
+      "inbox_open": 23,
+      "inbox_oldest_days": 41,
+      "overdue": 3,
+      "carryover_open": 9,
+      "completed_7d": 42,
+      "review_age_days": 12
+    },
+    "last_backup_at": "2026-09-20T11:00:00Z",
+    "ui_url": "https://todofy.example.com/",
+    "capabilities": [
+      "canary_consumer",
+      "guard",
+      "ops_digest"
+    ]
+  },
+  "status/every-switch": {
+    "version": "ops-v1",
+    "app": "todofy",
+    "generated_at": "2026-09-29T15:00:00Z",
+    "health": "down",
+    "modes": {
+      "maintenance": true,
+      "processing_paused": true,
+      "force_pause_todoist": true,
+      "reminder_enabled": false,
+      "backup_active": false
+    },
+    "guard": {
+      "level": "normal",
+      "reason": null,
+      "until": null,
+      "set_at": null,
+      "deferred": []
+    },
+    "signals": [
+      {
+        "code": "gemini_budget_95",
+        "severity": "critical",
+        "metrics": {
+          "percent": 99.7,
+          "used_tokens": 2990000,
+          "reserved_tokens": 0,
+          "budget_tokens": 3000000
+        }
+      },
+      {
+        "code": "maintenance_mode",
+        "severity": "critical",
+        "metrics": {}
+      },
+      {
+        "code": "todoist_blocked",
+        "severity": "critical",
+        "metrics": {
+          "seconds_left": 600
+        }
+      },
+      {
+        "code": "processing_paused",
+        "severity": "warning",
+        "metrics": {}
+      },
+      {
+        "code": "todoist_paused",
+        "severity": "warning",
+        "metrics": {}
+      },
+      {
+        "code": "backup_disabled",
+        "severity": "info",
+        "metrics": {}
+      },
+      {
+        "code": "reminder_disabled",
+        "severity": "info",
+        "metrics": {}
+      }
+    ],
+    "counters": {
+      "active_events": 2,
+      "attention_events": 0,
+      "received_24h": 63,
+      "oldest_due_age_seconds": 0,
+      "gemini_used_tokens": 2990000,
+      "gemini_reserved_tokens": 0,
+      "gemini_token_budget": 3000000,
+      "gemini_calls": 64,
+      "todoist_window_calls": 3,
+      "todoist_window_limit": 1000,
+      "intents_pending": 0,
+      "intents_failed_7d": 0
+    },
+    "last_backup_at": null,
+    "ui_url": null,
+    "capabilities": [
+      "canary_consumer",
+      "guard",
+      "ops_digest"
+    ]
+  },
+  "status/no-backup-yet": {
+    "version": "ops-v1",
+    "app": "todofy",
+    "generated_at": "2026-09-29T15:00:00Z",
+    "health": "degraded",
+    "modes": {
+      "maintenance": false,
+      "processing_paused": false,
+      "force_pause_todoist": false,
+      "reminder_enabled": true,
+      "backup_active": false
+    },
+    "guard": {
+      "level": "normal",
+      "reason": null,
+      "until": null,
+      "set_at": null,
+      "deferred": []
+    },
+    "signals": [
+      {
+        "code": "backup_stale",
+        "severity": "critical",
+        "metrics": {
+          "has_backup": 0
+        }
+      },
+      {
+        "code": "gemini_budget_95",
+        "severity": "critical",
+        "metrics": {
+          "percent": 100,
+          "used_tokens": 412880,
+          "reserved_tokens": 0,
+          "budget_tokens": 0
+        }
+      }
+    ],
+    "counters": {
+      "active_events": 2,
+      "attention_events": 0,
+      "received_24h": 63,
+      "oldest_due_age_seconds": 0,
+      "gemini_used_tokens": 412880,
+      "gemini_reserved_tokens": 0,
+      "gemini_token_budget": 0,
+      "gemini_calls": 64,
+      "todoist_window_calls": 3,
+      "todoist_window_limit": 1000,
+      "intents_pending": 0,
+      "intents_failed_7d": 0,
+      "inbox_open": 23,
+      "inbox_oldest_days": 41,
+      "overdue": 3,
+      "carryover_open": 9,
+      "completed_7d": 42,
+      "review_age_days": 2
+    },
+    "last_backup_at": null,
+    "ui_url": "https://todofy.example.com/",
+    "capabilities": [
+      "canary_consumer",
+      "guard",
+      "ops_digest"
+    ]
+  },
+  "status/unavailable": {
+    "version": "ops-v1",
+    "app": "todofy",
+    "generated_at": "2026-09-29T15:00:00Z",
+    "health": "down",
+    "modes": {
+      "maintenance": false,
+      "processing_paused": true,
+      "force_pause_todoist": false,
+      "reminder_enabled": true
+    },
+    "guard": {
+      "level": "normal",
+      "reason": null,
+      "until": null,
+      "set_at": null,
+      "deferred": []
+    },
+    "signals": [
+      {
+        "code": "status_unavailable",
+        "severity": "critical",
+        "metrics": {}
+      }
+    ],
+    "counters": {},
+    "last_backup_at": null,
+    "ui_url": "https://todofy.example.com/",
+    "capabilities": [
+      "canary_consumer",
+      "guard",
+      "ops_digest"
+    ]
+  },
+  "status/unavailable-shed": {
+    "version": "ops-v1",
+    "app": "todofy",
+    "generated_at": "2026-09-29T15:00:00Z",
+    "health": "down",
+    "modes": {
+      "maintenance": false,
+      "processing_paused": true,
+      "force_pause_todoist": false,
+      "reminder_enabled": true
+    },
+    "guard": {
+      "level": "shed",
+      "reason": "d1_reads_high",
+      "until": "2026-09-30T00:00:00Z",
+      "set_at": "2026-09-29T14:05:00Z",
+      "deferred": [
+        "weekly_backup",
+        "retention",
+        "metrics_rollup",
+        "gtd_snapshot"
+      ]
+    },
+    "signals": [
+      {
+        "code": "status_unavailable",
+        "severity": "critical",
+        "metrics": {}
+      }
+    ],
+    "counters": {},
+    "last_backup_at": null,
+    "ui_url": null,
+    "capabilities": [
+      "canary_consumer",
+      "guard",
+      "ops_digest"
+    ]
+  },
+  "guard/normal": {
+    "level": "normal",
+    "reason": null,
+    "until": null,
+    "set_at": null,
+    "deferred": []
+  },
+  "guard/shed": {
+    "level": "shed",
+    "reason": "d1_reads_high",
+    "until": "2026-09-30T00:00:00Z",
+    "set_at": "2026-09-29T14:05:00Z",
+    "deferred": [
+      "weekly_backup",
+      "retention",
+      "metrics_rollup",
+      "gtd_snapshot"
+    ]
+  },
+  "guard/shed-millis": {
+    "level": "shed",
+    "reason": "r",
+    "until": "2026-09-29T15:00:01.001Z",
+    "set_at": "2026-09-29T15:00:00.250Z",
+    "deferred": [
+      "weekly_backup",
+      "retention",
+      "metrics_rollup",
+      "gtd_snapshot"
+    ]
+  },
+  "guard/expired": {
+    "level": "normal",
+    "reason": null,
+    "until": null,
+    "set_at": null,
+    "deferred": []
+  },
+  "canary/not-seen": {
+    "state": "not_seen"
+  },
+  "canary/real-mail": {
+    "state": "not_seen"
+  },
+  "canary/processing": {
+    "state": "processing"
+  },
+  "canary/processing-maintenance": {
+    "state": "processing",
+    "waiting_code": "maintenance"
+  },
+  "canary/processing-paused": {
+    "state": "processing",
+    "waiting_code": "processing_paused"
+  },
+  "canary/processing-backup": {
+    "state": "processing",
+    "waiting_code": "backup_active"
+  },
+  "canary/processing-retry": {
+    "state": "processing",
+    "waiting_code": "retry_wait"
+  },
+  "canary/ok": {
+    "state": "ok",
+    "completed_at": "2026-09-29T14:59:00Z"
+  },
+  "canary/failed": {
+    "state": "failed",
+    "completed_at": "2026-09-29T14:59:00Z",
+    "error_code": "llm_quota"
+  },
+  "canary/side-effect": {
+    "state": "failed",
+    "completed_at": "2026-09-29T14:59:00Z",
+    "error_code": "canary_side_effect_blocked"
+  },
+  "receipt/stored": {
+    "stored": true,
+    "generated_at": "2026-09-29T23:40:00Z",
+    "item_count": 5
+  },
+  "receipt/kept-newer": {
+    "stored": false,
+    "generated_at": "2026-09-29T14:59:00Z",
+    "item_count": 0
+  },
+  "receipt/millis": {
+    "stored": true,
+    "generated_at": "2026-09-29T14:59:00.250Z",
+    "item_count": 0
+  },
+  "report/doc-daily": "{\"generated_at\":\"2026-09-29T23:40:00Z\",\"items\":[{\"source\":\"mail-hero\",\"code\":\"endpoint_blocked\",\"severity\":\"critical\",\"since\":\"2026-09-29T10:02:11Z\",\"metrics\":{\"waiting_deliveries\":3,\"current_blocked\":1}},{\"source\":\"todofy\",\"code\":\"backup_stale\",\"severity\":\"critical\",\"since\":\"2026-09-28T10:00:00Z\",\"metrics\":{\"age_seconds\":792000}},{\"source\":\"dashboard\",\"code\":\"canary_not_delivered\",\"severity\":\"warning\",\"since\":\"2026-09-29T22:30:00Z\",\"metrics\":{\"attempts\":3,\"last_http_status\":503}},{\"source\":\"cloudflare\",\"code\":\"d1_rows_read_high\",\"severity\":\"warning\",\"since\":\"2026-09-29T14:00:00Z\",\"metrics\":{\"percent\":81.5}},{\"source\":\"dashboard\",\"code\":\"canary_ok\",\"severity\":\"info\",\"since\":\"2026-09-28T22:31:40Z\",\"metrics\":{}}],\"dashboard_url\":\"https://home.example.com/\"}",
+  "report/doc-empty": "{\"generated_at\":\"2026-09-29T14:59:00Z\",\"items\":[]}"
+}

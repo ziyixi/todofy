@@ -1,0 +1,967 @@
+{
+  "input/guard-shed": {
+    "level": "shed",
+    "reason": "quota_d1_rows_read",
+    "until": "2026-09-30T01:30:00.000Z"
+  },
+  "input/guard-shed-capped": {
+    "level": "shed",
+    "reason": "owner_shed",
+    "until": "2026-10-01T10:30:00.000Z"
+  },
+  "input/guard-normal": {
+    "level": "normal",
+    "reason": "quota_normal",
+    "until": null
+  },
+  "input/start-scheduled": {
+    "run_id": "canary-2026-09-29"
+  },
+  "input/start-manual": {
+    "run_id": "canary-manual-20260929T233000Z"
+  },
+  "input/report": {
+    "generated_at": "2026-09-29T23:30:00.000Z",
+    "items": [
+      {
+        "source": "mail-hero",
+        "code": "endpoint_blocked",
+        "severity": "critical",
+        "since": "2026-09-29T10:02:11.000Z",
+        "metrics": {
+          "waiting_deliveries": 3,
+          "current_blocked": 1
+        }
+      },
+      {
+        "source": "cloudflare",
+        "code": "d1_rows_read_high",
+        "severity": "warning",
+        "since": "2026-09-29T23:30:00.000Z",
+        "metrics": {
+          "percent": 81.5,
+          "used": 4075000,
+          "limit": 5000000,
+          "projected_percent": 97.25
+        }
+      },
+      {
+        "source": "dashboard",
+        "code": "canary_skipped",
+        "severity": "warning",
+        "since": "2026-09-29T22:31:40.000Z",
+        "metrics": {
+          "no_endpoint": 1
+        }
+      },
+      {
+        "source": "lab",
+        "code": "neuron_cap_hit",
+        "severity": "warning",
+        "since": "2026-09-29T23:30:00.000Z",
+        "metrics": {
+          "used": 4996.2,
+          "cap": 5000
+        }
+      },
+      {
+        "source": "todofy",
+        "code": "gemini_budget_80",
+        "severity": "warning",
+        "since": "2026-09-29T18:30:00.000Z",
+        "metrics": {
+          "percent": 82.4,
+          "used_tokens": 2460000,
+          "reserved_tokens": 12000,
+          "budget_tokens": 3000000
+        }
+      }
+    ],
+    "dashboard_url": "https://home.example.com/"
+  },
+  "input/report-no-url": {
+    "generated_at": "2026-09-29T23:30:00.000Z",
+    "items": [
+      {
+        "source": "mail-hero",
+        "code": "endpoint_blocked",
+        "severity": "critical",
+        "since": "2026-09-29T10:02:11.000Z",
+        "metrics": {
+          "waiting_deliveries": 3,
+          "current_blocked": 1
+        }
+      },
+      {
+        "source": "cloudflare",
+        "code": "d1_rows_read_high",
+        "severity": "warning",
+        "since": "2026-09-29T23:30:00.000Z",
+        "metrics": {
+          "percent": 81.5,
+          "used": 4075000,
+          "limit": 5000000,
+          "projected_percent": 97.25
+        }
+      }
+    ]
+  },
+  "input/report-empty": {
+    "generated_at": "2026-09-29T23:30:00.000Z",
+    "items": [],
+    "dashboard_url": "https://home.example.com/"
+  },
+  "read/CanaryDelivery/delivered.json": {
+    "state": "delivered",
+    "attempts": 1,
+    "last_http_status": 204,
+    "delivered_at": "2026-09-29T22:30:04.512Z"
+  },
+  "read/CanaryDelivery/failed-window.json": {
+    "state": "failed",
+    "attempts": 48,
+    "last_http_status": 503,
+    "error_code": "retry_window_expired"
+  },
+  "read/CanaryDelivery/failed.json": {
+    "state": "failed",
+    "attempts": 1,
+    "last_http_status": 400,
+    "error_code": "http_400"
+  },
+  "read/CanaryDelivery/paused-endpoint-blocked.json": {
+    "state": "paused",
+    "attempts": 1,
+    "last_http_status": 401,
+    "error_code": "http_401"
+  },
+  "read/CanaryDelivery/paused.json": {
+    "state": "paused",
+    "attempts": 0
+  },
+  "read/CanaryDelivery/pending-first-attempt.json": {
+    "state": "pending",
+    "attempts": 0
+  },
+  "read/CanaryDelivery/pending-retrying.json": {
+    "state": "pending",
+    "attempts": 2,
+    "last_http_status": 503,
+    "error_code": "http_503"
+  },
+  "read/CanaryDelivery/unknown.json": {
+    "state": "unknown",
+    "attempts": 0
+  },
+  "read/CanaryResult/failed.json": {
+    "state": "failed",
+    "completed_at": "2026-09-29T22:34:02Z",
+    "error_code": "llm_quota"
+  },
+  "read/CanaryResult/not-seen.json": {
+    "state": "not_seen"
+  },
+  "read/CanaryResult/ok.json": {
+    "state": "ok",
+    "completed_at": "2026-09-29T22:31:40Z"
+  },
+  "read/CanaryResult/processing-paused.json": {
+    "state": "processing",
+    "waiting_code": "processing_paused"
+  },
+  "read/CanaryResult/processing.json": {
+    "state": "processing"
+  },
+  "read/GuardState/normal.json": {
+    "level": "normal",
+    "reason": null,
+    "until": null,
+    "set_at": null,
+    "deferred": []
+  },
+  "read/GuardState/shed-lab.json": {
+    "level": "shed",
+    "reason": "d1_reads_high",
+    "until": "2026-09-30T20:00:00Z",
+    "set_at": "2026-09-30T07:30:00Z",
+    "deferred": [
+      "feed_fetch",
+      "embed",
+      "rank",
+      "brief",
+      "seed_resolve",
+      "retention"
+    ]
+  },
+  "read/GuardState/shed-mail-hero.json": {
+    "level": "shed",
+    "reason": "d1_reads_high",
+    "until": "2026-09-30T00:00:00.000Z",
+    "set_at": "2026-09-29T14:05:00.000Z",
+    "deferred": [
+      "raw_reconcile",
+      "lifecycle_retention",
+      "canary_cleanup",
+      "alert_history_purge"
+    ]
+  },
+  "read/GuardState/shed-todofy.json": {
+    "level": "shed",
+    "reason": "d1_reads_high",
+    "until": "2026-09-30T00:00:00Z",
+    "set_at": "2026-09-29T14:05:00Z",
+    "deferred": [
+      "weekly_backup",
+      "retention",
+      "metrics_rollup",
+      "gtd_snapshot"
+    ]
+  },
+  "read/OpsReport/daily.json": {
+    "generated_at": "2026-09-29T23:40:00Z",
+    "dashboard_url": "https://home.example.com/",
+    "items": [
+      {
+        "source": "mail-hero",
+        "code": "endpoint_blocked",
+        "severity": "critical",
+        "since": "2026-09-29T10:02:11Z",
+        "metrics": {
+          "waiting_deliveries": 3,
+          "current_blocked": 1
+        }
+      },
+      {
+        "source": "todofy",
+        "code": "backup_stale",
+        "severity": "critical",
+        "since": "2026-09-28T10:00:00Z",
+        "metrics": {
+          "age_seconds": 792000
+        }
+      },
+      {
+        "source": "dashboard",
+        "code": "canary_not_delivered",
+        "severity": "warning",
+        "since": "2026-09-29T22:30:00Z",
+        "metrics": {
+          "attempts": 3,
+          "last_http_status": 503
+        }
+      },
+      {
+        "source": "cloudflare",
+        "code": "d1_rows_read_high",
+        "severity": "warning",
+        "since": "2026-09-29T14:00:00Z",
+        "metrics": {
+          "percent": 81.5
+        }
+      },
+      {
+        "source": "dashboard",
+        "code": "canary_ok",
+        "severity": "info",
+        "since": "2026-09-28T22:31:40Z",
+        "metrics": {}
+      }
+    ]
+  },
+  "read/OpsReport/empty.json": {
+    "generated_at": "2026-09-29T23:40:00Z",
+    "items": []
+  },
+  "read/OpsReportReceipt/kept-newer.json": {
+    "stored": false,
+    "generated_at": "2026-09-29T23:50:00Z",
+    "item_count": 0
+  },
+  "read/OpsReportReceipt/stored.json": {
+    "stored": true,
+    "generated_at": "2026-09-29T23:40:00Z",
+    "item_count": 5
+  },
+  "read/OpsStatus/lab-degraded.json": {
+    "version": "ops-v1",
+    "app": "lab",
+    "generated_at": "2026-09-30T08:00:00Z",
+    "health": "degraded",
+    "modes": {
+      "maintenance": false,
+      "ingest_paused": false
+    },
+    "guard": {
+      "level": "shed",
+      "reason": "d1_reads_high",
+      "until": "2026-09-30T20:00:00Z",
+      "set_at": "2026-09-30T07:30:00Z",
+      "deferred": [
+        "feed_fetch",
+        "embed",
+        "rank",
+        "brief",
+        "seed_resolve",
+        "retention"
+      ]
+    },
+    "signals": [
+      {
+        "code": "feed_stale",
+        "severity": "warning",
+        "metrics": {
+          "hours": 80
+        },
+        "since": "2026-09-27T00:00:00Z"
+      },
+      {
+        "code": "neuron_cap_hit",
+        "severity": "warning",
+        "metrics": {
+          "used": 4996.2,
+          "cap": 5000
+        },
+        "since": "2026-09-30T06:41:10Z"
+      },
+      {
+        "code": "send_unsettled",
+        "severity": "warning",
+        "metrics": {
+          "count": 1
+        }
+      },
+      {
+        "code": "guard_shed",
+        "severity": "info",
+        "metrics": {
+          "seconds_left": 43200
+        }
+      }
+    ],
+    "counters": {
+      "ingested_24h": 0,
+      "ranked_24h": 0,
+      "liked_7d": 3,
+      "decided_7d": 20,
+      "neurons_today": 4996.2,
+      "neuron_cap": 5000
+    },
+    "last_backup_at": null,
+    "ui_url": "https://lab.example.com/",
+    "capabilities": [
+      "guard"
+    ]
+  },
+  "read/OpsStatus/lab-ok.json": {
+    "version": "ops-v1",
+    "app": "lab",
+    "generated_at": "2026-09-30T08:00:00Z",
+    "health": "ok",
+    "modes": {
+      "maintenance": false,
+      "ingest_paused": false
+    },
+    "guard": {
+      "level": "normal",
+      "reason": null,
+      "until": null,
+      "set_at": null,
+      "deferred": []
+    },
+    "signals": [],
+    "counters": {
+      "ingested_24h": 612,
+      "ranked_24h": 20,
+      "liked_7d": 9,
+      "decided_7d": 60,
+      "neurons_today": 341.5,
+      "neuron_cap": 5000
+    },
+    "last_backup_at": null,
+    "ui_url": "https://lab.example.com/",
+    "capabilities": [
+      "guard"
+    ]
+  },
+  "read/OpsStatus/mail-hero-degraded.json": {
+    "version": "ops-v1",
+    "app": "mail-hero",
+    "generated_at": "2026-09-29T15:00:00.000Z",
+    "health": "degraded",
+    "modes": {
+      "maintenance": false,
+      "force_send_paused": false,
+      "send_paused": false,
+      "forwarding": true,
+      "backup_active": false
+    },
+    "guard": {
+      "level": "shed",
+      "reason": "d1_reads_high",
+      "until": "2026-09-30T00:00:00.000Z",
+      "set_at": "2026-09-29T14:05:00.000Z",
+      "deferred": [
+        "raw_reconcile",
+        "lifecycle_retention",
+        "canary_cleanup",
+        "alert_history_purge"
+      ]
+    },
+    "signals": [
+      {
+        "code": "endpoint_blocked",
+        "severity": "critical",
+        "metrics": {
+          "waiting_deliveries": 3,
+          "current_blocked": 1,
+          "auto_recheck": 1
+        },
+        "since": "2026-09-29T10:02:11.000Z"
+      },
+      {
+        "code": "capacity_70",
+        "severity": "warning",
+        "metrics": {
+          "used_bytes": 3865470566,
+          "logical_bytes": 3758096384,
+          "limit_bytes": 5368709120,
+          "percent": 72,
+          "capacity_accounting_available": 1
+        },
+        "since": "2026-09-28T22:40:00.000Z"
+      },
+      {
+        "code": "guard_shed",
+        "severity": "info",
+        "metrics": {
+          "seconds_left": 32100
+        }
+      }
+    ],
+    "counters": {
+      "jobs_pending": 0,
+      "jobs_failed": 0,
+      "parse_failed": 0,
+      "delivery_failed": 0,
+      "policy_error": 0,
+      "blocked_waiting": 3,
+      "paused_waiting": 0,
+      "oldest_pending_age_seconds": 17929,
+      "capacity_used_bytes": 3865470566,
+      "capacity_limit_bytes": 5368709120,
+      "logical_bytes": 3758096384,
+      "ingest_today_messages": 41,
+      "ingest_today_bytes": 9437184,
+      "ingest_limit_messages": 300,
+      "ingest_limit_bytes": 268435456
+    },
+    "last_backup_at": "2026-09-29T03:10:00.000Z",
+    "ui_url": "https://mail.example.com/",
+    "capabilities": [
+      "canary_producer",
+      "guard"
+    ]
+  },
+  "read/OpsStatus/mail-hero-maintenance.json": {
+    "version": "ops-v1",
+    "app": "mail-hero",
+    "generated_at": "2026-09-29T08:00:00.000Z",
+    "health": "down",
+    "modes": {
+      "maintenance": true,
+      "force_send_paused": false,
+      "send_paused": false,
+      "forwarding": true,
+      "backup_active": false
+    },
+    "guard": {
+      "level": "normal",
+      "reason": null,
+      "until": null,
+      "set_at": null,
+      "deferred": []
+    },
+    "signals": [
+      {
+        "code": "maintenance_mode",
+        "severity": "critical",
+        "metrics": {}
+      }
+    ],
+    "counters": {
+      "jobs_pending": 4,
+      "jobs_failed": 0
+    },
+    "last_backup_at": null,
+    "ui_url": null,
+    "capabilities": [
+      "canary_producer",
+      "guard"
+    ]
+  },
+  "read/OpsStatus/mail-hero-ok.json": {
+    "version": "ops-v1",
+    "app": "mail-hero",
+    "generated_at": "2026-09-29T08:00:00.000Z",
+    "health": "ok",
+    "modes": {
+      "maintenance": false,
+      "force_send_paused": false,
+      "send_paused": false,
+      "forwarding": true,
+      "backup_active": false
+    },
+    "guard": {
+      "level": "normal",
+      "reason": null,
+      "until": null,
+      "set_at": null,
+      "deferred": []
+    },
+    "signals": [],
+    "counters": {
+      "jobs_pending": 0,
+      "jobs_failed": 0,
+      "parse_failed": 0,
+      "delivery_failed": 0,
+      "policy_error": 0,
+      "blocked_waiting": 0,
+      "paused_waiting": 0,
+      "oldest_pending_age_seconds": 0,
+      "capacity_used_bytes": 1288490188,
+      "capacity_limit_bytes": 5368709120,
+      "logical_bytes": 1181116006,
+      "ingest_today_messages": 41,
+      "ingest_today_bytes": 9437184,
+      "ingest_limit_messages": 300,
+      "ingest_limit_bytes": 268435456
+    },
+    "last_backup_at": "2026-09-29T03:10:00.000Z",
+    "ui_url": "https://mail.example.com/",
+    "capabilities": [
+      "canary_producer",
+      "guard"
+    ]
+  },
+  "read/OpsStatus/status-unavailable.json": {
+    "version": "ops-v1",
+    "app": "todofy",
+    "generated_at": "2026-09-29T08:00:00Z",
+    "health": "down",
+    "modes": {
+      "maintenance": false,
+      "processing_paused": false,
+      "force_pause_todoist": false,
+      "reminder_enabled": true
+    },
+    "guard": {
+      "level": "normal",
+      "reason": null,
+      "until": null,
+      "set_at": null,
+      "deferred": []
+    },
+    "signals": [
+      {
+        "code": "status_unavailable",
+        "severity": "critical",
+        "metrics": {}
+      }
+    ],
+    "counters": {},
+    "last_backup_at": null,
+    "ui_url": "https://todofy.example.com/",
+    "capabilities": [
+      "canary_consumer",
+      "guard",
+      "ops_digest"
+    ]
+  },
+  "read/OpsStatus/todofy-degraded.json": {
+    "version": "ops-v1",
+    "app": "todofy",
+    "generated_at": "2026-09-29T15:00:00Z",
+    "health": "degraded",
+    "modes": {
+      "maintenance": false,
+      "processing_paused": false,
+      "force_pause_todoist": false,
+      "reminder_enabled": true,
+      "backup_active": false
+    },
+    "guard": {
+      "level": "shed",
+      "reason": "d1_reads_high",
+      "until": "2026-09-30T00:00:00Z",
+      "set_at": "2026-09-29T14:05:00Z",
+      "deferred": [
+        "weekly_backup",
+        "retention",
+        "metrics_rollup",
+        "gtd_snapshot"
+      ]
+    },
+    "signals": [
+      {
+        "code": "attention",
+        "severity": "warning",
+        "metrics": {
+          "count": 2
+        }
+      },
+      {
+        "code": "backup_stale",
+        "severity": "critical",
+        "metrics": {
+          "age_seconds": 792000,
+          "has_backup": 1
+        }
+      },
+      {
+        "code": "gemini_budget_80",
+        "severity": "warning",
+        "metrics": {
+          "used_tokens": 2460000,
+          "reserved_tokens": 12000,
+          "budget_tokens": 3000000,
+          "percent": 82.4
+        }
+      },
+      {
+        "code": "guard_shed",
+        "severity": "info",
+        "metrics": {
+          "seconds_left": 32400
+        }
+      }
+    ],
+    "counters": {
+      "active_events": 2,
+      "attention_events": 2,
+      "received_24h": 63,
+      "oldest_due_age_seconds": 0,
+      "gemini_used_tokens": 2460000,
+      "gemini_reserved_tokens": 12000,
+      "gemini_token_budget": 3000000,
+      "gemini_calls": 64,
+      "todoist_window_calls": 3,
+      "todoist_window_limit": 1000,
+      "backup_age_seconds": 792000
+    },
+    "last_backup_at": "2026-09-20T10:00:04Z",
+    "ui_url": "https://todofy.example.com/",
+    "capabilities": [
+      "canary_consumer",
+      "guard",
+      "ops_digest"
+    ]
+  },
+  "read/OpsStatus/todofy-ok.json": {
+    "version": "ops-v1",
+    "app": "todofy",
+    "generated_at": "2026-09-29T08:00:00Z",
+    "health": "ok",
+    "modes": {
+      "maintenance": false,
+      "processing_paused": false,
+      "force_pause_todoist": false,
+      "reminder_enabled": true,
+      "backup_active": false
+    },
+    "guard": {
+      "level": "normal",
+      "reason": null,
+      "until": null,
+      "set_at": null,
+      "deferred": []
+    },
+    "signals": [],
+    "counters": {
+      "active_events": 2,
+      "attention_events": 0,
+      "received_24h": 63,
+      "oldest_due_age_seconds": 0,
+      "gemini_used_tokens": 412880,
+      "gemini_reserved_tokens": 0,
+      "gemini_token_budget": 3000000,
+      "gemini_calls": 64,
+      "todoist_window_calls": 3,
+      "todoist_window_limit": 1000,
+      "backup_age_seconds": 363600,
+      "inbox_open": 23,
+      "inbox_oldest_days": 41,
+      "overdue": 3,
+      "carryover_open": 9,
+      "completed_7d": 42,
+      "review_age_days": 2
+    },
+    "last_backup_at": "2026-09-27T10:00:02Z",
+    "ui_url": "https://todofy.example.com/",
+    "capabilities": [
+      "canary_consumer",
+      "guard",
+      "ops_digest"
+    ]
+  },
+  "read/SetGuardInput/normal.json": {
+    "level": "normal",
+    "reason": "quota_recovered",
+    "until": null
+  },
+  "read/SetGuardInput/shed.json": {
+    "level": "shed",
+    "reason": "d1_reads_high",
+    "until": "2026-09-30T00:00:00Z"
+  },
+  "read/StartCanaryInput/daily.json": {
+    "run_id": "canary-2026-09-29"
+  },
+  "read/StartCanaryResult/paused-endpoint-blocked.json": {
+    "event_id": null,
+    "state": "paused",
+    "reason": "endpoint_blocked"
+  },
+  "read/StartCanaryResult/paused-send-paused.json": {
+    "event_id": null,
+    "state": "paused",
+    "reason": "send_paused"
+  },
+  "read/StartCanaryResult/queued.json": {
+    "event_id": "6d3b2f0e-4c1a-4b7e-8a52-0c9e7f1d2a31",
+    "state": "queued"
+  },
+  "read/StartCanaryResult/unavailable-maintenance.json": {
+    "event_id": null,
+    "state": "unavailable",
+    "reason": "maintenance"
+  },
+  "read/StartCanaryResult/unavailable-no-endpoint.json": {
+    "event_id": null,
+    "state": "unavailable",
+    "reason": "no_endpoint"
+  },
+  "read/invalid/CanaryDelivery/delivered-without-time.json": null,
+  "read/invalid/CanaryDelivery/failed-without-code.json": null,
+  "read/invalid/CanaryDelivery/unknown-with-attempts.json": null,
+  "read/invalid/CanaryResult/failed-without-code.json": null,
+  "read/invalid/CanaryResult/ok-with-summary.json": {
+    "state": "ok",
+    "completed_at": "2026-09-29T22:31:40Z"
+  },
+  "read/invalid/GuardState/unknown-level.json": null,
+  "read/invalid/OpsReport/item-with-text.json": {
+    "generated_at": "2026-09-29T23:40:00Z",
+    "items": [
+      {
+        "source": "mail-hero",
+        "code": "endpoint_blocked",
+        "severity": "critical",
+        "since": "2026-09-29T10:02:11Z",
+        "metrics": {
+          "waiting_deliveries": 3,
+          "current_blocked": 1
+        }
+      }
+    ]
+  },
+  "read/invalid/OpsReport/string-metric.json": null,
+  "read/invalid/OpsReport/too-many-items.json": null,
+  "read/invalid/OpsReport/url-with-query.json": null,
+  "read/invalid/OpsReportReceipt/too-many.json": null,
+  "read/invalid/OpsStatus/address-as-counter-name.json": null,
+  "read/invalid/OpsStatus/code-trailing-newline.json": null,
+  "read/invalid/OpsStatus/extra-field-subject.json": {
+    "version": "ops-v1",
+    "app": "mail-hero",
+    "generated_at": "2026-09-29T08:00:00.000Z",
+    "health": "ok",
+    "modes": {
+      "maintenance": false,
+      "force_send_paused": false,
+      "send_paused": false,
+      "forwarding": true,
+      "backup_active": false
+    },
+    "guard": {
+      "level": "normal",
+      "reason": null,
+      "until": null,
+      "set_at": null,
+      "deferred": []
+    },
+    "signals": [],
+    "counters": {
+      "jobs_pending": 0,
+      "jobs_failed": 0,
+      "parse_failed": 0,
+      "delivery_failed": 0,
+      "policy_error": 0,
+      "blocked_waiting": 0,
+      "paused_waiting": 0,
+      "oldest_pending_age_seconds": 0,
+      "capacity_used_bytes": 1288490188,
+      "capacity_limit_bytes": 5368709120,
+      "logical_bytes": 1181116006,
+      "ingest_today_messages": 41,
+      "ingest_today_bytes": 9437184,
+      "ingest_limit_messages": 300,
+      "ingest_limit_bytes": 268435456
+    },
+    "last_backup_at": "2026-09-29T03:10:00.000Z",
+    "ui_url": "https://mail.example.com/",
+    "capabilities": [
+      "canary_producer",
+      "guard"
+    ]
+  },
+  "read/invalid/OpsStatus/free-text-code.json": null,
+  "read/invalid/OpsStatus/http-ui-url.json": null,
+  "read/invalid/OpsStatus/mail-content-in-metric.json": null,
+  "read/invalid/OpsStatus/missing-guard.json": null,
+  "read/invalid/OpsStatus/offset-timestamp.json": null,
+  "read/invalid/OpsStatus/string-mode.json": null,
+  "read/invalid/OpsStatus/unknown-app.json": null,
+  "read/invalid/SetGuardInput/free-text-reason.json": null,
+  "read/invalid/SetGuardInput/normal-with-until.json": null,
+  "read/invalid/SetGuardInput/shed-without-until.json": null,
+  "read/invalid/StartCanaryInput/extra-field.json": {
+    "run_id": "canary-2026-09-29"
+  },
+  "read/invalid/StartCanaryInput/run-id-with-space.json": null,
+  "read/invalid/StartCanaryResult/paused-with-event.json": null,
+  "read/invalid/StartCanaryResult/queued-without-event.json": null,
+  "read/invalid/StartCanaryResult/unknown-reason.json": {
+    "event_id": null,
+    "state": "unavailable",
+    "reason": "consumer_down"
+  },
+  "read/newer/status-extra-fields": {
+    "version": "ops-v1",
+    "app": "mail-hero",
+    "generated_at": "2026-09-29T08:00:00.000Z",
+    "health": "ok",
+    "modes": {
+      "maintenance": false,
+      "force_send_paused": false,
+      "send_paused": false,
+      "forwarding": true,
+      "backup_active": false
+    },
+    "guard": {
+      "level": "normal",
+      "reason": null,
+      "until": null,
+      "set_at": null,
+      "deferred": []
+    },
+    "signals": [],
+    "counters": {
+      "jobs_pending": 0,
+      "jobs_failed": 0,
+      "parse_failed": 0,
+      "delivery_failed": 0,
+      "policy_error": 0,
+      "blocked_waiting": 0,
+      "paused_waiting": 0,
+      "oldest_pending_age_seconds": 0,
+      "capacity_used_bytes": 1288490188,
+      "capacity_limit_bytes": 5368709120,
+      "logical_bytes": 1181116006,
+      "ingest_today_messages": 41,
+      "ingest_today_bytes": 9437184,
+      "ingest_limit_messages": 300,
+      "ingest_limit_bytes": 268435456
+    },
+    "last_backup_at": "2026-09-29T03:10:00.000Z",
+    "ui_url": "https://mail.example.com/",
+    "capabilities": [
+      "canary_producer",
+      "guard"
+    ]
+  },
+  "read/newer/start-new-reason": {
+    "event_id": null,
+    "state": "unavailable",
+    "reason": "consumer_down"
+  },
+  "read/newer/result-new-waiting-code": {
+    "state": "processing",
+    "waiting_code": "gemini_paused"
+  },
+  "read/newer/delivery-new-error-code": {
+    "state": "failed",
+    "attempts": 2,
+    "error_code": "tls_handshake"
+  },
+  "read/newer/delivery-new-state": null,
+  "read/newer/lab-key-order": {
+    "version": "ops-v1",
+    "app": "lab",
+    "generated_at": "2026-09-30T08:00:00Z",
+    "last_backup_at": null,
+    "ui_url": "https://lab.example.com/",
+    "capabilities": [
+      "guard"
+    ],
+    "health": "degraded",
+    "modes": {
+      "maintenance": false,
+      "ingest_paused": false
+    },
+    "guard": {
+      "level": "shed",
+      "reason": "d1_reads_high",
+      "until": "2026-09-30T20:00:00Z",
+      "set_at": "2026-09-30T07:30:00Z",
+      "deferred": [
+        "feed_fetch",
+        "embed",
+        "rank",
+        "brief",
+        "seed_resolve",
+        "retention"
+      ]
+    },
+    "signals": [
+      {
+        "code": "feed_stale",
+        "severity": "warning",
+        "metrics": {
+          "hours": 80
+        },
+        "since": "2026-09-27T00:00:00Z"
+      },
+      {
+        "code": "neuron_cap_hit",
+        "severity": "warning",
+        "metrics": {
+          "used": 4996.2,
+          "cap": 5000
+        },
+        "since": "2026-09-30T06:41:10Z"
+      },
+      {
+        "code": "send_unsettled",
+        "severity": "warning",
+        "metrics": {
+          "count": 1
+        }
+      },
+      {
+        "code": "guard_shed",
+        "severity": "info",
+        "metrics": {
+          "seconds_left": 43200
+        }
+      }
+    ],
+    "counters": {
+      "ingested_24h": 0,
+      "ranked_24h": 0,
+      "liked_7d": 3,
+      "decided_7d": 20,
+      "neurons_today": 4996.2,
+      "neuron_cap": 5000
+    }
+  }
+}
