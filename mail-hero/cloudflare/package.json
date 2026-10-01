@@ -4,9 +4,13 @@
   "version": "0.1.0",
   "type": "module",
   "scripts": {
+    "postinstall": "node ../../proto/tools/ensure.mjs",
+    "pretest": "node ../../proto/tools/ensure.mjs",
     "test": "node --test test/*.test.mjs",
     "contract:update": "node test/contract-fixtures.mjs --write",
+    "pretypecheck": "node ../../proto/tools/ensure.mjs",
     "typecheck": "tsc --noEmit",
+    "predev": "node ../../proto/tools/ensure.mjs",
     "dev": "wrangler dev --config ../wrangler.toml --ip 127.0.0.1 --port 8787 --local-upstream 127.0.0.1:8787"
   },
   "devDependencies": {
@@ -19,6 +23,7 @@
   },
   "dependencies": {
     "@ziyixi/edge-auth": "file:../../packages/edge-auth",
+    "@ziyixi/proto": "file:../../proto/ts",
     "parse5": "8.0.1",
     "postal-mime": "3.0.1"
   }

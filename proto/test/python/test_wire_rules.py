@@ -11,7 +11,7 @@ import unittest
 
 from proto_test_support import PROTO
 from ziyixi_proto.prototest.v1 import rules_pb as pb
-from ziyixi_proto.wire_json import WireJsonError, field_rules, from_wire, to_wire
+from ziyixi_proto.wire_json import WireJsonError, field_rules, format_matches, from_wire, to_wire
 
 sys.path.insert(0, str(PROTO / "tools"))
 import wire_rules
@@ -73,6 +73,13 @@ class FieldRulesTest(unittest.TestCase):
         self.assertEqual(field_rules(pb.Parcel, "counts").max_items, 0)
         with self.assertRaises(KeyError):
             field_rules(pb.Parcel, "missing")
+
+    def test_format_matches_checks_a_value_against_a_format_anchored_with_its_length(self) -> None:
+        self.assertTrue(format_matches(pb.FORMATS["Code"], "box_1"))
+        for value in ("Box", "box\n", "", "a" * 17):
+            self.assertFalse(format_matches(pb.FORMATS["Code"], value), value)
+        self.assertTrue(format_matches(pb.FORMATS["Tracking"], "AB123456"))
+        self.assertFalse(format_matches(pb.FORMATS["Tracking"], "AB1234567"))
 
 
 def image(*fields: dict, message_options: dict | None = None, formats: list | None = None) -> dict:

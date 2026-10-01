@@ -8,10 +8,15 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync, writeFileSync } from 'node:fs'
 import { DatabaseSync } from 'node:sqlite'
+import { validate } from '../../../contracts/ops-v1/validate.mjs'
 import { OpsGuardStore } from '../src/native/ops-guard.ts'
 import { buildStatus, canaryDeliveryState, startCanary } from '../src/native/ops-core.ts'
 
 const GOLDEN = new URL('golden/ops-v1.json', import.meta.url)
+/** The hand-written schema the dashboards deployed before ops-v1 moved onto proto/ validate every answer with. */
+const LEGACY = JSON.parse(readFileSync(new URL('../../../contracts/ops-v1/legacy/ops-v1.schema.json', import.meta.url), 'utf8'))
+/** The contract message of each kind of case. */
+const DEFS = { status: 'OpsStatus', guard: 'GuardState', delivery: 'CanaryDelivery', start: 'StartCanaryResult' }
 const NOW = Date.parse('2026-09-29T12:00:00.000Z')
 const HOUR = 3600_000
 const iso = offset => new Date(NOW + offset).toISOString()
@@ -95,4 +100,14 @@ test('every Ops answer for the synthetic states is byte for byte the golden one'
   const golden = JSON.parse(readFileSync(GOLDEN, 'utf8'))
   assert.deepEqual(Object.keys(actual), Object.keys(golden))
   for (const [name, value] of Object.entries(actual)) assert.equal(JSON.stringify(value), JSON.stringify(golden[name]), name)
+})
+
+// Rollout (the apps and the dashboard deploy separately): the dashboards deployed before the move validate every
+// answer against the hand-written schema with validate.mjs. Every answer above passes it, so this Mail Hero and such a
+// dashboard work together; and the answers are the earlier Mail Hero's bytes, so that Mail Hero and a new dashboard do
+// too (the dashboard's tests read every fixture and each app's real answers back).
+test('every golden answer passes the checks of the dashboards deployed before the move', async () => {
+  for (const [name, value] of Object.entries(await cases())) {
+    assert.deepEqual(validate(LEGACY, DEFS[name.split('/')[0]], value), [], name)
+  }
 })

@@ -232,25 +232,25 @@ class Classify(unittest.TestCase):
         self.assertEqual(push(["infra/storage.tf", "lab/wrangler.toml"]), expect(F, F, T, F, F, **LAB, infra=T))
 
     def test_proto_checks_its_users_runs_contracts_and_deploys_only_the_bundles_a_path_reaches(self):
-        """proto/ re-checks every PROTO_USERS app and runs Proto checks and Contracts (the task-intent-v1 tests check
-        the codecs against the schema); it deploys an app only when the changed path reaches that app's bundle."""
-        self.assertEqual(ci_changes.PROTO_USERS, {"lab": ("ts",), "todofy": ("python",), "links": ("ts",)})
-        every = {"todofy_deploy": T, "lab_deploy": T, "links_deploy": T}
-        both = {"todofy_deploy": T, "lab_deploy": T, "links_deploy": F}
-        ts = {"todofy_deploy": F, "lab_deploy": T, "links_deploy": T}
-        lab_only = {"todofy_deploy": F, "lab_deploy": T, "links_deploy": F}
-        links_only = {"todofy_deploy": F, "lab_deploy": F, "links_deploy": T}
-        python = {"todofy_deploy": T, "lab_deploy": F, "links_deploy": F}
-        none = {"todofy_deploy": F, "lab_deploy": F, "links_deploy": F}
+        """proto/ re-checks every PROTO_USERS app and runs Proto checks and Contracts (the contracts' tests check the
+        codecs and the generated schemas); it deploys an app only when the changed path reaches that app's bundle."""
+        self.assertEqual(
+            ci_changes.PROTO_USERS, {"lab": ("ts",), "todofy": ("python",), "links": ("ts",), "mail-hero": ("ts",)}
+        )
+        ts, python = {"lab", "mail-hero", "links"}, {"todofy"}
+        every, none = ts | python, set()
         cases = {
-            # The contract both apps bundle: Lab's TypeScript and todofy-core's Python.
-            "proto/todofy/taskintent/v1/task_intent.proto": both,
+            # task-intent-v1, bundled by Lab's TypeScript and todofy-core's Python.
+            "proto/todofy/taskintent/v1/task_intent.proto": {"lab", "todofy"},
+            # ops-v1: the Ops entrypoints that bundle its generated code (Todofy's gateway takes types only, its core
+            # reads ops.v1 in Python).
+            "proto/ops/v1/ops.proto": {"mail-hero"},
             # Lab's UI API: only Lab imports it (Python does not even generate it).
-            "proto/lab/ui/v1/lab_ui_service.proto": lab_only,
-            "proto/lab/ui/v1/deck.proto": lab_only,
+            "proto/lab/ui/v1/lab_ui_service.proto": {"lab"},
+            "proto/lab/ui/v1/deck.proto": {"lab"},
             # The links app's UI API reaches only the links app.
-            "proto/links/ui/v1/links_ui_service.proto": links_only,
-            # The TypeScript runtime and generator: Lab and the links app (Todofy's gateway imports types only).
+            "proto/links/ui/v1/links_ui_service.proto": {"links"},
+            # The TypeScript runtime and generator: every TypeScript user.
             "proto/ts/wire-json.ts": ts,
             "proto/ts/wire-rules.ts": ts,
             "proto/ts/http-transcoder.ts": ts,
@@ -275,7 +275,7 @@ class Classify(unittest.TestCase):
             "proto/package-lock.json": every,
             "proto/tools/ensure.mjs": every,
             "proto/newapp/ui/v1/newapp_ui_service.proto": every,
-            # Checks, tests, test data and documents: nothing.
+            # Checks, tests, test data, types-only output and documents: nothing.
             "proto/README.md": none,
             "proto/test/task-intent.test.ts": none,
             "proto/test/python/test_gen_py.py": none,
@@ -292,31 +292,31 @@ class Classify(unittest.TestCase):
             "proto/ruff.toml": none,
             "proto/.gitignore": none,
         }
-        for path, deploys in cases.items():
+
+        def checked_and(deployed: set[str]) -> dict[str, bool]:
+            return expect(
+                T,
+                T,
+                T,
+                "todofy" in deployed,
+                "mail-hero" in deployed,
+                proto=T,
+                lab_check=T,
+                lab_deploy="lab" in deployed,
+                links_check=T,
+                links_deploy="links" in deployed,
+            )
+
+        for path, deployed in cases.items():
             with self.subTest(path=path):
-                # Every proto/ change checks every PROTO_USERS app, the links app included.
-                self.assertEqual(
-                    push([path]),
-                    expect(
-                        T,
-                        F,
-                        T,
-                        deploys["todofy_deploy"],
-                        F,
-                        proto=T,
-                        lab_check=T,
-                        lab_deploy=deploys["lab_deploy"],
-                        links_check=T,
-                        links_deploy=deploys["links_deploy"],
-                    ),
-                )
+                self.assertEqual(push([path]), checked_and(deployed))
         self.assertFalse(push(["protocol.md"])["proto"])
         # Paths add up: a Python runtime change with a UI API change deploys both.
         self.assertEqual(
             push(["proto/python/src/ziyixi_proto/wire_json.py", "proto/lab/ui/v1/home.proto"]),
-            expect(T, F, T, T, F, proto=T, **LAB, links_check=T),
+            checked_and({"todofy", "lab"}),
         )
-        self.assertEqual(ci_changes.proto_deploys("proto/ts/http-transcoder.ts"), {"lab", "links"})
+        self.assertEqual(ci_changes.proto_deploys("proto/ts/http-transcoder.ts"), ts)
         self.assertEqual(ci_changes.proto_deploys("proto/links/ui/v1/link.proto"), {"links"})
 
     def test_every_proto_package_and_runtime_is_mapped(self):
@@ -883,8 +883,9 @@ class ContractsJob(unittest.TestCase):
                 # mail.received.v1: producer rebuilds the golden bytes, consumer parses every fixture.
                 "mail-hero/cloudflare/test/contract-fixtures.test.mjs",
                 "todofy/tests/unit/test_mail_hero_compat.py",
-                # ops-v1: fixtures against the schema with both validators, and each app's derived values.
-                "mail-hero/cloudflare/test/ops-contract.test.mjs",
+                # ops-v1: each app's answers keep their golden bytes and the contract's rules (the wire codec and the
+                # legacy schema older dashboards check), and the reference validator's verdict on the generated schema.
+                "mail-hero/cloudflare/test/ops-golden.test.mjs",
                 "mail-hero/cloudflare/test/native-ops.test.mjs",
                 "todofy/tests/unit/test_ops_contract.py",
                 "todofy/tests/unit/test_ops_core.py",

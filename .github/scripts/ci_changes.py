@@ -148,7 +148,7 @@ PACKAGE_USERS = {"edge-auth": ("todofy", "mail-hero", "dashboard", "lab", "flowd
 # its production bundles compile in; () for a user whose bundles take nothing from it (types only, tests
 # only). test_proto.py derives this map from the apps' manifests and sources.
 PROTO = "proto/"
-PROTO_USERS: dict[str, tuple[str, ...]] = {"lab": ("ts",), "todofy": ("python",), "links": ("ts",)}
+PROTO_USERS: dict[str, tuple[str, ...]] = {"lab": ("ts",), "todofy": ("python",), "links": ("ts",), "mail-hero": ("ts",)}
 # The hand-written runtimes and generators: a change reaches every user of each language listed. The wire
 # profile's own options (common/wire/v1: value rules, map order, binding arguments) are part of both runtimes:
 # the TypeScript codec bundles their generated descriptors, gen_py.py writes their rules into the Python tables
@@ -170,8 +170,8 @@ PROTO_PACKAGES: dict[str, tuple[str, ...]] = {
     "proto/links/ui/": ("links",),
     # CommonReason: Lab reads its names as types only.
     "proto/common/errors/": (),
-    # ops-v1 (contracts/ops-v1): no app's code imports it yet.
-    "proto/ops/": (),
+    # ops-v1 (contracts/ops-v1): every app's Ops entrypoint and the dashboard that calls them.
+    "proto/ops/": ("mail-hero",),
     # The runtimes' test fixtures (never imported by an app; not in the Python wheel).
     "proto/prototest/": (),
 }

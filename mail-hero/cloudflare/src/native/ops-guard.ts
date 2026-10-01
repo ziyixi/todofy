@@ -1,6 +1,12 @@
-/** contracts/ops-v1 guard: input rules, effective state and the Durable Object store behind it.
- * No Worker bindings here: MailCoordinator owns the storage, ops-core.ts and tests use the pure parts. */
-import type { GuardState, OpsErrorCode } from '../../../../contracts/ops-v1/ops-v1.ts';
+/** contracts/ops-v1 guard (proto/ops/v1/ops.proto): input rules, effective state and the Durable Object store behind it.
+ * No Worker bindings here: MailCoordinator owns the storage, ops-core.ts and tests use the pure parts.
+ *
+ * The contract's rules (codes, timestamps, the shape of SetGuardInput) are the IDL's, checked by the wire codec; this
+ * file adds only what the IDL cannot say: `until` in (now, now + 36 h] by the coordinator's clock. */
+import { create } from '@ziyixi/proto/protobuf';
+import { file_ops_v1_ops, GuardLevel, GuardStateSchema, OpsService, type SetGuardInput } from '@ziyixi/proto/ops/v1/ops_pb';
+import type * as wire from '@ziyixi/proto/ops/v1/ops_wire';
+import { formatMatches, fromWireArguments, toWire, WireJsonError } from '@ziyixi/proto/wire-json';
 import { OPS_LIMITS } from '../../../../contracts/ops-v1/ops-v1.ts';
 
 /** Background jobs that a shed guard defers (contracts/ops-v1/IMPLEMENTATION.md 2.5). Everything else
@@ -16,17 +22,18 @@ export interface OpsDeferral {
   ran(job: DeferrableJob): void;
 }
 
-export const CODE = /^[a-z][a-z0-9_]{0,47}$/;
-export const TIMESTAMP = /^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\.[0-9]{1,3})?Z$/;
-/** Lowercase UUID, as Mail Hero writes event IDs (ops-v1 EventId). */
-export const EVENT_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+/** Whether `value` is an ops-v1 `Code` (the contract's format): a name this app writes without having chosen it. */
+export function isCode(value: unknown): value is string {
+  return typeof value === 'string' && formatMatches(file_ops_v1_ops, 'Code', value);
+}
 
 /** The only errors a method rejects with; the message crosses RPC intact. */
-export function opsError(code: OpsErrorCode): never { throw new Error(code); }
+export function opsError(code: wire.ErrorCode): never { throw new Error(code); }
 
-/** A well-formed RFC 3339 UTC instant that names a real calendar time, as epoch ms; otherwise null. */
+/** A well-formed RFC 3339 UTC instant (the contract's `Timestamp`) that names a real calendar time, as epoch ms;
+ * otherwise null. */
 export function parseTimestamp(value: unknown): number | null {
-  if (typeof value !== 'string' || !TIMESTAMP.test(value)) return null;
+  if (typeof value !== 'string' || !formatMatches(file_ops_v1_ops, 'Timestamp', value)) return null;
   const time = Date.parse(value);
   // Date.parse rolls 2026-02-30 over into March; the round trip refuses it.
   return Number.isFinite(time) && new Date(time).toISOString().slice(0, 19) === value.slice(0, 19) ? time : null;
@@ -38,32 +45,30 @@ export function timestamp(value: unknown): string | null {
 }
 
 export type GuardInput = { level: 'shed'; reason: string; until: number } | { level: 'normal'; reason: string; until: null };
-/** SetGuardInput plus the rules the schema cannot express: `until` in (now, now + 36 h]. */
+/** SetGuardInput read strictly with the contract's rules, plus the one rule the IDL cannot hold: `until` in (now, now + 36 h]. */
 export function parseGuardInput(input: unknown, now: number): GuardInput {
-  if (!input || typeof input !== 'object' || Array.isArray(input)) opsError('invalid_input');
-  const value = input as Record<string, unknown>;
-  const keys = Object.keys(value).sort();
-  if (keys.length !== 3 || keys[0] !== 'level' || keys[1] !== 'reason' || keys[2] !== 'until') opsError('invalid_input');
-  if (typeof value.reason !== 'string' || !CODE.test(value.reason)) opsError('invalid_input');
-  if (value.level === 'normal') {
-    if (value.until !== null) opsError('invalid_input');
-    return { level: 'normal', reason: value.reason as string, until: null };
+  let request: SetGuardInput;
+  try {
+    request = fromWireArguments(OpsService.method.setGuard, [input]);
+  } catch (error) {
+    if (error instanceof WireJsonError) opsError('invalid_input');
+    throw error;
   }
-  if (value.level !== 'shed') opsError('invalid_input');
-  const until = parseTimestamp(value.until);
+  if (request.level === GuardLevel.NORMAL) return { level: 'normal', reason: request.reason, until: null };
+  const until = parseTimestamp(request.until);
   if (until === null || until <= now || until > now + OPS_LIMITS.guardMaxAheadSeconds * 1000) opsError('invalid_input');
-  return { level: 'shed', reason: value.reason as string, until: until as number };
+  return { level: 'shed', reason: request.reason, until: until as number };
 }
 
 export interface GuardRow { level: string; reason: string | null; until: number | null; set_at: number | null }
-const NORMAL: GuardState = { level: 'normal', reason: null, until: null, set_at: null, deferred: [] };
+const NORMAL: wire.GuardState = toWire(GuardStateSchema, create(GuardStateSchema, { level: GuardLevel.NORMAL }));
 /** Effective guard: shed only while now < until; anything else (absent, expired, damaged) reads as normal. */
-export function guardState(row: GuardRow | null | undefined, now: number): GuardState {
-  if (!row || row.level !== 'shed' || typeof row.until !== 'number' || row.until <= now ||
-      typeof row.reason !== 'string' || !CODE.test(row.reason)) return NORMAL;
+export function guardState(row: GuardRow | null | undefined, now: number): wire.GuardState {
+  if (!row || row.level !== 'shed' || typeof row.until !== 'number' || row.until <= now || !isCode(row.reason)) return NORMAL;
   const until = timestamp(row.until), setAt = timestamp(row.set_at ?? now);
   if (!until) return NORMAL;
-  return { level: 'shed', reason: row.reason, until, set_at: setAt, deferred: [...DEFERRABLE_JOBS] };
+  return toWire(GuardStateSchema, create(GuardStateSchema, {
+    level: GuardLevel.SHED, reason: row.reason, until, setAt: setAt ?? undefined, deferred: [...DEFERRABLE_JOBS] }));
 }
 
 type Sql = DurableObjectStorage['sql'];
@@ -79,9 +84,9 @@ export class OpsGuardStore {
   private row(): GuardRow | undefined {
     return this.sql.exec<GuardRow & Record<string, SqlStorageValue>>('SELECT level,reason,until,set_at FROM ops_guard WHERE id=1').toArray()[0];
   }
-  read(now: number): GuardState { return guardState(this.row(), now); }
+  read(now: number): wire.GuardState { return guardState(this.row(), now); }
   /** Idempotent: the same shed level, reason and until keeps the stored set_at. Throws invalid_input. */
-  set(input: unknown, now: number): GuardState {
+  set(input: unknown, now: number): wire.GuardState {
     const value = parseGuardInput(input, now);
     if (value.level === 'normal') {
       this.sql.exec('DELETE FROM ops_guard WHERE id=1');

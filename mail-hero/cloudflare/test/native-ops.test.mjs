@@ -1,19 +1,20 @@
 // contracts/ops-v1, Mail Hero side, without workerd: guard rules and storage, status derivation, canary
-// delivery mapping and input validation. Every produced output is validated against the schema with the
-// dependency-free validator the dashboard will use. native-ops-runtime.test.mjs covers the real bindings.
+// delivery mapping and input validation. Every produced output is read back strictly with the contract's rules
+// (proto/ops/v1/ops.proto, the wire codec): the producer's view of the generated JSON Schema.
+// native-ops-runtime.test.mjs covers the real bindings, ops-golden.test.mjs the exact bytes.
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync, readdirSync } from 'node:fs'
 import { DatabaseSync } from 'node:sqlite'
-import { validate } from '../../../contracts/ops-v1/validate.mjs'
-import { OPS_LIMITS } from '../../../contracts/ops-v1/ops-v1.ts'
+import * as ops from '@ziyixi/proto/ops/v1/ops_pb'
+import { fieldRules, fromWire } from '@ziyixi/proto/wire-json'
 import { DEFER_BOUND_MS, DEFERRABLE_JOBS, OpsGuardStore, guardState, parseGuardInput, parseTimestamp } from '../src/native/ops-guard.ts'
 import { evaluateAlerts } from '../src/native/alerts.ts'
 import { buildStatus, canaryDelivery, canaryDeliveryState, opsCall, opsSetGuard, startCanary, uiURL } from '../src/native/ops-core.ts'
 
-const schema = JSON.parse(readFileSync(new URL('../../../contracts/ops-v1/ops-v1.schema.json', import.meta.url), 'utf8'))
+/** `value` after a strict read with the contract's rules (it throws on anything the contract refuses). */
 function valid(def, value) {
-  assert.deepEqual(validate(schema, def, value), [], `${def}: ${JSON.stringify(value)}`)
+  fromWire(ops[`${def}Schema`], value, { strict: true })
   return value
 }
 const NOW = Date.parse('2026-09-29T12:00:00.000Z')
@@ -150,23 +151,17 @@ test('status: maintenance is down; an unreadable source is down with only status
   assert.equal('capacity_used_bytes' in noCapacity.counters, false, 'a counter that was not read is left out')
 })
 
-/** Keys an ops-v1.ts interface declares without `?`: what a dashboard compiled against it relies on. */
-function requiredKeys(name) {
-  const source = readFileSync(new URL('../../../contracts/ops-v1/ops-v1.ts', import.meta.url), 'utf8')
-  const body = source.match(new RegExp(`export interface ${name} \\{([^}]*)\\}`))[1]
-  return [...body.matchAll(/readonly (\w+)(\??):/g)].filter(match => !match[2]).map(match => match[1])
-}
+/** The modes each app writes even on a `status_unavailable` status (its deployment variables, contracts/ops-v1
+ * README "modes"); a key read from storage is left out then, never guessed. */
+const DEPLOYMENT_MODES = { 'mail-hero': ['maintenance', 'force_send_paused'], todofy: ['maintenance', 'processing_paused', 'force_pause_todoist', 'reminder_enabled'], lab: ['maintenance'] }
 
-test('status: every mode MailHeroModes requires is a boolean, also on status_unavailable', () => {
-  const required = requiredKeys('MailHeroModes')
-  assert.deepEqual(required, ['maintenance', 'force_send_paused'], 'only deployment variables are required')
+test('status: every deployment-variable mode is a boolean, also on status_unavailable', () => {
   for (const value of [status(), status({ env: { ...env, MAINTENANCE_MODE: 'true' } }), status({ coordinator: null }), status({ snapshot: null })]) {
-    for (const key of required) assert.equal(typeof value.modes[key], 'boolean', `${key} in ${JSON.stringify(value.modes)}`)
+    for (const key of DEPLOYMENT_MODES['mail-hero']) assert.equal(typeof value.modes[key], 'boolean', `${key} in ${JSON.stringify(value.modes)}`)
   }
   for (const file of readdirSync(new URL('../../../contracts/ops-v1/fixtures/OpsStatus/', import.meta.url))) {
     const fixture = JSON.parse(readFileSync(new URL(`../../../contracts/ops-v1/fixtures/OpsStatus/${file}`, import.meta.url), 'utf8'))
-    const keys = requiredKeys({ 'mail-hero': 'MailHeroModes', todofy: 'TodofyModes', lab: 'LabModes' }[fixture.app])
-    for (const key of keys) assert.equal(typeof fixture.modes[key], 'boolean', `${file}: ${key}`)
+    for (const key of DEPLOYMENT_MODES[fixture.app]) assert.equal(typeof fixture.modes[key], 'boolean', `${file}: ${key}`)
   }
 })
 
@@ -175,7 +170,7 @@ test('status: signals, metrics and counters stay within the contract bounds', ()
     current_blocked: 1, oldest_pending_at: iso(-3 * HOUR), last_backup_at: null, send_paused: 1, forwarding: 0 },
     env: { ...env, MAINTENANCE_MODE: 'true', FORCE_SEND_PAUSED: '1' },
     coordinator: { ...coordinator, backup_active: true, ingest_today: { messages: 300, bytes: 268435456 }, guard: { level: 'shed', reason: 'x', until: iso(HOUR), set_at: iso(0), deferred: [] } } })
-  assert.ok(value.signals.length <= OPS_LIMITS.statusMaxSignals)
+  assert.ok(value.signals.length <= fieldRules(ops.OpsStatusSchema.field.signals).maxItems)
   assert.equal(value.signals.length, 15, 'every Mail Hero signal at once still fits')
 })
 

@@ -78,6 +78,17 @@ export function fieldRules(field: DescField): Field {
   return getOption(field, fieldOption);
 }
 
+/**
+ * Whether `value` matches the format `name` of `file` ((common.wire.v1.formats)). A producer checks a name it did not
+ * choose before writing it (a metric key, a stored error code) with this, so the contract's pattern stays the one
+ * definition. Throws for a format the file does not define.
+ */
+export function formatMatches(file: DescFile, name: string, value: string): boolean {
+  const format = formatsOf(file).get(name);
+  if (format === undefined) throw new Error(`no format ${name} in ${file.name}`);
+  return matches(format, value);
+}
+
 /** Whether a map field writes its entries in the order they were set (Field.keep_order). */
 export function keepsOrder(field: DescField): boolean {
   return compiled(field).keepOrder;

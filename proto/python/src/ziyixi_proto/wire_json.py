@@ -419,7 +419,10 @@ def _regex(pattern: str) -> re.Pattern[str]:
     return re.compile(pattern)
 
 
-def _matches(format: Format, value: str) -> bool:
+def format_matches(format: Format, value: str) -> bool:
+    """Whether ``value`` matches a format of a generated module (its ``FORMATS``). A producer checks a name it did not
+    choose before writing it (a metric key, a stored error code) with this, so the contract's pattern stays the one
+    definition."""
     return _regex(format.pattern).fullmatch(value) is not None and (
         format.max_length == 0 or len(value) <= format.max_length
     )
@@ -476,7 +479,7 @@ def _field_violation(
         if any(key not in value for key in rules.required_keys):
             return f"{at}: lacks a required key"
         for key, item in value.items():
-            if rules.key_format is not None and not _matches(rules.key_format, key):
+            if rules.key_format is not None and not format_matches(rules.key_format, key):
                 return f"{at}{{}}: a key does not match {rules.key_format.name}"
             violation = _item_violation(
                 field.value, item, f"{at}{{}}", rules._replace(format=None, allowed=None), extra, lenient, unrecognized
@@ -510,7 +513,7 @@ def _item_violation(
             name = _enum_out(value)
             return None if name is None else _allowed_violation(name, at, rules, extra, lenient)
         case "string":
-            if rules.format is not None and not _matches(rules.format, value):
+            if rules.format is not None and not format_matches(rules.format, value):
                 return f"{at}: does not match {rules.format.name}"
             return _allowed_violation(value, at, rules, extra, lenient)
         case "int32" | "double":

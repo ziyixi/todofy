@@ -66,7 +66,8 @@ def strings(values: Any) -> str:
 
 
 def format_literal(fmt: wire_rules.Format) -> str:
-    return f"Format({json.dumps(fmt.name)}, {json.dumps(fmt.pattern)}, {fmt.max_length})"
+    """A field's reference to its file's format (the module's FORMATS table)."""
+    return f"FORMATS[{json.dumps(fmt.name)}]"
 
 
 def bounds_args(bounds: wire_rules.Bounds) -> list[str]:
@@ -161,7 +162,7 @@ def generate_file(file: dict[str, Any], types: dict[str, tuple[str, str]], enums
     body: list[str] = []
     tables: list[str] = []
     unions: list[str] = []
-    runtime = {"Field"}
+    runtime = {"Field", "Format"}
 
     def ref(type_name: str, where: str) -> str:
         if type_name not in types:
@@ -216,7 +217,7 @@ def generate_file(file: dict[str, Any], types: dict[str, tuple[str, str]], enums
         rules = rules_literal(wire_rules.field_rules(file, message, field, enums, entry))
         if rules:
             out += f", rules={rules}"
-            runtime.update(name for name in ("Rules", "Format", "Case", "Bounds") if f"{name}(" in rules)
+            runtime.update(name for name in ("Rules", "Case", "Bounds") if f"{name}(" in rules)
         return out
 
     for message in file.get("messageType", []):
@@ -294,6 +295,14 @@ def generate_file(file: dict[str, Any], types: dict[str, tuple[str, str]], enums
         f"from {PACKAGE}.wire_json import {', '.join(sorted(runtime))}",
         *body,
         "",
+        "",
+        "# The file's named string formats (common.wire.v1.formats): wire_json.format_matches(FORMATS[name], value).",
+        "FORMATS: dict[str, Format] = {",
+        *(
+            f"    {json.dumps(f.name)}: Format({json.dumps(f.name)}, {json.dumps(f.pattern)}, {f.max_length}),"
+            for f in wire_rules.formats(file).values()
+        ),
+        "}",
         "",
         "# Field tables of the wire JSON profile, in field-number order, with their value rules.",
         "FIELDS: dict[type, tuple[Field, ...]] = {",

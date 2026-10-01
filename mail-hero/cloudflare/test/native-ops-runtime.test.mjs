@@ -1,7 +1,7 @@
 // contracts/ops-v1 in workerd with real D1, R2 and the SQLite Durable Object. A second Worker plays the
 // future dashboard: it reaches Mail Hero only through a service binding with `entrypoint = "Ops"`, exactly
-// as README.md prescribes, so every result below crossed real RPC. Every result is validated against
-// ops-v1.schema.json. All mail, addresses and credentials are synthetic.
+// as README.md prescribes, so every result below crossed real RPC. Every result is read back strictly with the
+// contract's rules (proto/ops/v1/ops.proto). All mail, addresses and credentials are synthetic.
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFile, readdir, mkdtemp, rm } from 'node:fs/promises'
@@ -12,13 +12,13 @@ import { setTimeout as delay } from 'node:timers/promises'
 import { build } from 'esbuild'
 import { Miniflare, convertV4MiniflareOptions } from 'miniflare'
 import { migrationStatements } from './migrations.mjs'
-import { validate } from '../../../contracts/ops-v1/validate.mjs'
+import * as opsProto from '@ziyixi/proto/ops/v1/ops_pb'
+import { fromWire } from '@ziyixi/proto/wire-json'
 import { buildPayload, syntheticCanaryMail } from '../src/native/pipeline.ts'
 import { STATUS_MAX_D1_STATEMENTS } from '../src/native/ops-core.ts'
 import { DEFERRABLE_JOBS } from '../src/native/ops-guard.ts'
 
 const root = resolve(fileURLToPath(new URL('..', import.meta.url)))
-const schema = JSON.parse(await readFile(new URL('../../../contracts/ops-v1/ops-v1.schema.json', import.meta.url), 'utf8'))
 const INBOX = 'inbox@mail.example.org'
 const BACKUP_TOKEN = 'synthetic-backup-machine-token-32-characters'
 // Distinctive synthetic mail content that must never appear in an ops output.
@@ -156,7 +156,8 @@ async function runtime(t, bindings = {}) {
     const result = await response.json()
     const statements = await request('/__test/ops-log')
     if (result.error) return { error: result.error, statements }
-    assert.deepEqual(validate(schema, def, result.ok), [], `${method} output: ${JSON.stringify(result.ok)}`)
+    // The contract's rules, strictly (the producer's view): it throws on anything ops-v1 refuses.
+    fromWire(opsProto[`${def}Schema`], result.ok, { strict: true })
     const text = JSON.stringify(result.ok)
     for (const secret of SECRETS) assert.ok(!text.includes(secret), `${method} output leaks ${secret}: ${text}`)
     return { value: result.ok, statements }

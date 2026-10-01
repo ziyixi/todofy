@@ -6,8 +6,8 @@
  */
 import { create } from '@bufbuild/protobuf';
 import { describe, expect, test } from 'vitest';
-import { Parcel_Status, ParcelSchema, ParcelService, TrackRequestSchema } from '../ts/prototest/v1/rules_pb.ts';
-import { fieldRules, fromWire, fromWireArguments, toWire, toWireArguments, WireJsonError } from '../ts/wire-json.ts';
+import { file_prototest_v1_rules, Parcel_Status, ParcelSchema, ParcelService, TrackRequestSchema } from '../ts/prototest/v1/rules_pb.ts';
+import { fieldRules, formatMatches, fromWire, fromWireArguments, toWire, toWireArguments, WireJsonError } from '../ts/wire-json.ts';
 
 const sent = {
   status: Parcel_Status.SENT,
@@ -65,6 +65,14 @@ describe('producers read bounds from the descriptors', () => {
     expect(fieldRules(ParcelSchema.field.score).maximum).toBe(1);
     // A field without rules answers the defaults.
     expect(fieldRules(ParcelSchema.field.counts).maxItems).toBe(0);
+  });
+
+  test('formatMatches checks a value against a file\'s format, anchored, with its length', () => {
+    expect(formatMatches(file_prototest_v1_rules, 'Code', 'box_1')).toBe(true);
+    for (const value of ['Box', 'box\n', '', 'a'.repeat(17)]) expect(formatMatches(file_prototest_v1_rules, 'Code', value), value).toBe(false);
+    expect(formatMatches(file_prototest_v1_rules, 'Tracking', 'AB123456')).toBe(true);
+    expect(formatMatches(file_prototest_v1_rules, 'Tracking', 'AB1234567')).toBe(false);
+    expect(() => formatMatches(file_prototest_v1_rules, 'Nope', 'x')).toThrow(/no format Nope/);
   });
 });
 

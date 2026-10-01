@@ -442,6 +442,7 @@ jobs:
           cache-dependency-path: |
             mail-hero/cloudflare/package-lock.json
             mail-hero/web/package-lock.json
+            proto/package-lock.json
       - name: Install locked dependencies
         run: |
           npm ci --prefix cloudflare
@@ -463,7 +464,8 @@ jobs:
           npm test
           npm run build
       # The committed production config (mail-hero/wrangler.toml), run exactly as the deploy runs it, with
-      # placeholder values for what the deploy adds (deploy/deploy-vars.mjs). No token is needed for --dry-run.
+      # placeholder values for what the deploy adds (deploy/deploy-vars.mjs). No token is needed for --dry-run. The
+      # bundle it writes is held to Mail Hero's budget and the Workers Free limit (deploy/bundle-size.mjs).
       - name: Dry-run the committed production config
         working-directory: mail-hero/cloudflare
         env:
@@ -476,6 +478,7 @@ jobs:
           node ../deploy/deploy-vars.mjs secrets "$RUNNER_TEMP/mail-hero-secrets.json"
           node ../deploy/deploy-vars.mjs exec -- npx --no-install wrangler deploy --dry-run --config ../wrangler.toml \
             --secrets-file "$RUNNER_TEMP/mail-hero-secrets.json" --outdir "$RUNNER_TEMP/mail-hero-bundle"
+          node ../deploy/bundle-size.mjs "$RUNNER_TEMP/mail-hero-bundle"
 
   # The home dashboard (Worker "home", docs in dashboard/docs). Everything runs from dashboard/ with synthetic data;
   # the runtime suite runs the real HomeState in workerd next to stub "mail-hero"/"todofy" Workers that serve
@@ -806,13 +809,13 @@ jobs:
           npm ci --no-audit --no-fund
           npm run check:schema
       # Producer: Mail Hero's parser and payload builder must still emit every golden fixture byte for byte.
-      # ops-v1: validate.mjs, the ops-v1.ts constants and the fixtures agree with the schema, and every
-      # value Mail Hero's Ops code derives (status, guard, canary) passes the schema. Host only, no workerd.
+      # ops-v1: every answer Mail Hero's Ops code derives (status, guard, canary) keeps its golden bytes, passes the
+      # contract's rules (the wire codec) and the legacy schema older dashboards check. Host only, no workerd.
       - name: Mail Hero builds the golden mail.received.v1 fixtures and checks ops-v1
         working-directory: mail-hero/cloudflare
         run: |
           npm ci
-          node --test test/contract-fixtures.test.mjs test/ops-contract.test.mjs test/native-ops.test.mjs
+          node --test test/contract-fixtures.test.mjs test/ops-golden.test.mjs test/native-ops.test.mjs
       # Consumer: Todofy validates every fixture (current and legacy) against the schema and parses it;
       # ops-v1 fixtures get the reference JSON Schema validator's verdict, and every value core/ops.py
       # derives (status, guard, canary result, report, digest items) is validated with it. task-intent-v1:
@@ -1305,6 +1308,7 @@ jobs:
           cache-dependency-path: |
             mail-hero/cloudflare/package-lock.json
             mail-hero/web/package-lock.json
+            proto/package-lock.json
       # Every static production value (account, D1, buckets, host, Access, limits) is committed in
       # mail-hero/wrangler.toml; the environment URL reads the host there.
       - name: Read the host from the committed config
@@ -1339,7 +1343,8 @@ jobs:
           MAIL_HERO_MAINTENANCE_MODE: ${{ vars.MAIL_HERO_MAINTENANCE_MODE }}
         run: |
           node ../deploy/deploy-vars.mjs exec -- npx --no-install wrangler deploy --dry-run --config ../wrangler.toml \
-            --secrets-file "$RUNNER_TEMP/mail-hero-secrets.json"
+            --secrets-file "$RUNNER_TEMP/mail-hero-secrets.json" --outdir "$RUNNER_TEMP/mail-hero-bundle"
+          node ../deploy/bundle-size.mjs "$RUNNER_TEMP/mail-hero-bundle"
       # tools/cf-guard (read-only GETs; prints listed hostnames, counts, PASS/FAIL): wrangler applies a config's Custom
       # Domains (or zone routes) as the Worker's complete set, so stop before any production change when a live
       # hostname would be detached or another Worker's hostname or DNS record taken over. For an intentional

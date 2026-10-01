@@ -1,0 +1,290 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://contracts.local/ops-v1/ops-v1.schema.json",
+  "title": "ops-v1: the typed operations surface of Mail Hero, Todofy and Lab",
+  "description": "Every input and output of the named WorkerEntrypoint \"Ops\" of both apps, one $defs entry each (README.md maps methods to entries). Outputs are closed (additionalProperties false) so that nothing but codes, numbers, booleans and timestamps can leave an app; consumers still ignore fields they do not know. Only the keywords that validate.mjs implements may be used here. Patterns end with $(?!\\n): Python's re.search also matches $ before a final newline, ECMAScript does not.",
+  "$defs": {
+    "Timestamp": {
+      "description": "RFC 3339 UTC with Z, optional milliseconds.",
+      "type": "string",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]{1,3})?Z$(?!\\n)"
+    },
+    "Code": {
+      "description": "A closed-vocabulary identifier: signal codes, counter and metric names, reasons. Never free text.",
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_]{0,47}$(?!\\n)"
+    },
+    "EventId": {
+      "description": "A mail.received.v1 event_id as Mail Hero writes it (lowercase UUID).",
+      "type": "string",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$(?!\\n)"
+    },
+    "RunId": {
+      "description": "The dashboard's name for one canary run, e.g. canary-2026-09-29. Also the mail.received.v1 canary.run_id.",
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$(?!\\n)"
+    },
+    "HttpsUrl": {
+      "description": "An https URL with a lowercase host and a plain path; no query, fragment, credentials or port.",
+      "type": "string",
+      "maxLength": 300,
+      "pattern": "^https://[a-z0-9]([a-z0-9.-]{0,251}[a-z0-9])?/[A-Za-z0-9._~/-]{0,200}$(?!\\n)"
+    },
+    "App": {"enum": ["mail-hero", "todofy", "lab"]},
+    "Severity": {"enum": ["info", "warning", "critical"]},
+    "Health": {"enum": ["ok", "degraded", "down"]},
+    "GuardLevel": {"enum": ["normal", "shed"]},
+    "Metrics": {
+      "description": "Numbers only, named by codes.",
+      "type": "object",
+      "maxProperties": 12,
+      "propertyNames": {"$ref": "#/$defs/Code"},
+      "additionalProperties": {"type": "number"}
+    },
+    "Signal": {
+      "type": "object",
+      "required": ["code", "severity", "metrics"],
+      "properties": {
+        "code": {"$ref": "#/$defs/Code"},
+        "severity": {"$ref": "#/$defs/Severity"},
+        "metrics": {"$ref": "#/$defs/Metrics"},
+        "since": {"$ref": "#/$defs/Timestamp"}
+      },
+      "additionalProperties": false
+    },
+    "Modes": {
+      "description": "Operating switches, booleans only. maintenance is always present; README.md lists each app's other keys.",
+      "type": "object",
+      "required": ["maintenance"],
+      "maxProperties": 12,
+      "propertyNames": {"$ref": "#/$defs/Code"},
+      "additionalProperties": {"type": "boolean"}
+    },
+    "Counters": {
+      "description": "Numbers only, named by codes. A counter the app could not read is left out, never guessed.",
+      "type": "object",
+      "maxProperties": 32,
+      "propertyNames": {"$ref": "#/$defs/Code"},
+      "additionalProperties": {"type": "number"}
+    },
+    "GuardState": {
+      "description": "The effective guard. An expired shed reads as normal with reason, until and set_at null.",
+      "type": "object",
+      "required": ["level", "reason", "until", "set_at", "deferred"],
+      "properties": {
+        "level": {"$ref": "#/$defs/GuardLevel"},
+        "reason": {"oneOf": [{"$ref": "#/$defs/Code"}, {"type": "null"}]},
+        "until": {"oneOf": [{"$ref": "#/$defs/Timestamp"}, {"type": "null"}]},
+        "set_at": {"oneOf": [{"$ref": "#/$defs/Timestamp"}, {"type": "null"}]},
+        "deferred": {
+          "description": "Jobs this app defers while the guard is shed (empty when normal).",
+          "type": "array",
+          "maxItems": 16,
+          "uniqueItems": true,
+          "items": {"$ref": "#/$defs/Code"}
+        }
+      },
+      "additionalProperties": false
+    },
+    "OpsStatus": {
+      "description": "Output of status().",
+      "type": "object",
+      "required": ["version", "app", "generated_at", "health", "modes", "guard", "signals", "counters", "last_backup_at", "ui_url", "capabilities"],
+      "properties": {
+        "version": {"const": "ops-v1"},
+        "app": {"$ref": "#/$defs/App"},
+        "generated_at": {"$ref": "#/$defs/Timestamp"},
+        "health": {"$ref": "#/$defs/Health"},
+        "modes": {"$ref": "#/$defs/Modes"},
+        "guard": {"$ref": "#/$defs/GuardState"},
+        "signals": {"type": "array", "maxItems": 16, "items": {"$ref": "#/$defs/Signal"}},
+        "counters": {"$ref": "#/$defs/Counters"},
+        "last_backup_at": {"oneOf": [{"$ref": "#/$defs/Timestamp"}, {"type": "null"}]},
+        "ui_url": {"oneOf": [{"$ref": "#/$defs/HttpsUrl"}, {"type": "null"}]},
+        "capabilities": {"type": "array", "maxItems": 16, "uniqueItems": true, "items": {"$ref": "#/$defs/Code"}}
+      },
+      "additionalProperties": false
+    },
+    "SetGuardInput": {
+      "description": "Input of setGuard(). until is required for shed (at most 36 h ahead, in the future) and must be null for normal.",
+      "oneOf": [
+        {
+          "type": "object",
+          "required": ["level", "reason", "until"],
+          "properties": {
+            "level": {"const": "shed"},
+            "reason": {"$ref": "#/$defs/Code"},
+            "until": {"$ref": "#/$defs/Timestamp"}
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": ["level", "reason", "until"],
+          "properties": {
+            "level": {"const": "normal"},
+            "reason": {"$ref": "#/$defs/Code"},
+            "until": {"type": "null"}
+          },
+          "additionalProperties": false
+        }
+      ]
+    },
+    "StartCanaryInput": {
+      "description": "Input of Mail Hero's startCanary().",
+      "type": "object",
+      "required": ["run_id"],
+      "properties": {"run_id": {"$ref": "#/$defs/RunId"}},
+      "additionalProperties": false
+    },
+    "StartCanaryResult": {
+      "description": "Output of Mail Hero's startCanary(). Only queued created anything; paused and unavailable wrote nothing.",
+      "oneOf": [
+        {
+          "type": "object",
+          "required": ["event_id", "state"],
+          "properties": {"event_id": {"$ref": "#/$defs/EventId"}, "state": {"const": "queued"}},
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": ["event_id", "state", "reason"],
+          "properties": {
+            "event_id": {"type": "null"},
+            "state": {"const": "paused"},
+            "reason": {"enum": ["send_paused", "settings_paused", "endpoint_paused", "endpoint_blocked"]}
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": ["event_id", "state", "reason"],
+          "properties": {
+            "event_id": {"type": "null"},
+            "state": {"const": "unavailable"},
+            "reason": {"enum": ["maintenance", "backup_active", "no_endpoint", "capacity"]}
+          },
+          "additionalProperties": false
+        }
+      ]
+    },
+    "CanaryDelivery": {
+      "description": "Output of Mail Hero's canaryDelivery(event_id).",
+      "oneOf": [
+        {
+          "type": "object",
+          "required": ["state", "attempts", "delivered_at"],
+          "properties": {
+            "state": {"const": "delivered"},
+            "attempts": {"type": "integer", "minimum": 1},
+            "last_http_status": {"type": "integer", "minimum": 100, "maximum": 599},
+            "delivered_at": {"$ref": "#/$defs/Timestamp"}
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": ["state", "attempts"],
+          "properties": {
+            "state": {"enum": ["pending", "paused"]},
+            "attempts": {"type": "integer", "minimum": 0},
+            "last_http_status": {"type": "integer", "minimum": 100, "maximum": 599},
+            "error_code": {"$ref": "#/$defs/Code"}
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": ["state", "attempts", "error_code"],
+          "properties": {
+            "state": {"const": "failed"},
+            "attempts": {"type": "integer", "minimum": 0},
+            "last_http_status": {"type": "integer", "minimum": 100, "maximum": 599},
+            "error_code": {"$ref": "#/$defs/Code"}
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": ["state", "attempts"],
+          "properties": {"state": {"const": "unknown"}, "attempts": {"const": 0}},
+          "additionalProperties": false
+        }
+      ]
+    },
+    "CanaryResult": {
+      "description": "Output of Todofy's canaryResult(event_id).",
+      "oneOf": [
+        {
+          "type": "object",
+          "required": ["state"],
+          "properties": {"state": {"const": "not_seen"}},
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": ["state"],
+          "properties": {
+            "state": {"const": "processing"},
+            "waiting_code": {"enum": ["maintenance", "processing_paused", "backup_active", "retry_wait"]}
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": ["state", "completed_at"],
+          "properties": {"state": {"const": "ok"}, "completed_at": {"$ref": "#/$defs/Timestamp"}},
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": ["state", "completed_at", "error_code"],
+          "properties": {
+            "state": {"const": "failed"},
+            "completed_at": {"$ref": "#/$defs/Timestamp"},
+            "error_code": {"$ref": "#/$defs/Code"}
+          },
+          "additionalProperties": false
+        }
+      ]
+    },
+    "OpsReportItem": {
+      "type": "object",
+      "required": ["source", "code", "severity", "since", "metrics"],
+      "properties": {
+        "source": {"type": "string", "pattern": "^[a-z][a-z0-9-]{0,31}$(?!\\n)"},
+        "code": {"$ref": "#/$defs/Code"},
+        "severity": {"$ref": "#/$defs/Severity"},
+        "since": {"$ref": "#/$defs/Timestamp"},
+        "metrics": {"$ref": "#/$defs/Metrics"}
+      },
+      "additionalProperties": false
+    },
+    "OpsReport": {
+      "description": "Input of Todofy's reportOps(): replaces the stored latest report (older generated_at is ignored). At most 8 KiB as compact JSON.",
+      "type": "object",
+      "required": ["generated_at", "items"],
+      "properties": {
+        "generated_at": {"$ref": "#/$defs/Timestamp"},
+        "items": {"type": "array", "maxItems": 20, "items": {"$ref": "#/$defs/OpsReportItem"}},
+        "dashboard_url": {"$ref": "#/$defs/HttpsUrl"}
+      },
+      "additionalProperties": false
+    },
+    "OpsReportReceipt": {
+      "description": "Output of Todofy's reportOps(). stored is false when a report with a later generated_at is already stored; generated_at and item_count then describe that stored report.",
+      "type": "object",
+      "required": ["stored", "generated_at", "item_count"],
+      "properties": {
+        "stored": {"type": "boolean"},
+        "generated_at": {"$ref": "#/$defs/Timestamp"},
+        "item_count": {"type": "integer", "minimum": 0, "maximum": 20}
+      },
+      "additionalProperties": false
+    },
+    "OpsErrorCode": {
+      "description": "The message of an Error a method rejects with. Nothing else is ever thrown on purpose.",
+      "enum": ["invalid_input", "busy", "unavailable"]
+    }
+  }
+}

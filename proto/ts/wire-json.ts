@@ -80,7 +80,7 @@ import { FieldMaskError, formatFieldMask, parseFieldMask } from './field-mask.ts
 import { field_behavior, FieldBehavior } from './google/api/field_behavior_pb.ts';
 import { keepsOrder, ruleViolation } from './wire-rules.ts';
 
-export { fieldRules } from './wire-rules.ts';
+export { fieldRules, formatMatches } from './wire-rules.ts';
 
 export class WireJsonError extends Error {}
 
