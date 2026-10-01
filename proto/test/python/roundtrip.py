@@ -13,6 +13,7 @@ import json
 import sys
 
 from proto_test_support import compact
+from ziyixi_proto.mailhero.webhook.v1 import mail_received_pb
 from ziyixi_proto.ops.v1 import ops_pb
 from ziyixi_proto.prototest.v1 import prototest_pb, rules_pb
 from ziyixi_proto.todofy.taskintent.v1 import task_intent_pb as pb
@@ -27,6 +28,7 @@ MESSAGES = {
     "prototest.v1.Parcel": rules_pb.Parcel,
     "prototest.v1.Label": rules_pb.Label,
     "prototest.v1.Note": rules_pb.Note,
+    "mailhero.webhook.v1.MailReceivedEvent": mail_received_pb.MailReceivedEvent,
     **{
         f"ops.v1.{name}": getattr(ops_pb, name)
         for name in (

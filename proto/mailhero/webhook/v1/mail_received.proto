@@ -1,0 +1,248 @@
+// mail.received.v1 as a protobuf IDL (proto/README.md; contracts/mail-received-v1/mail-received-v1.md is the
+// contract's text): the event Mail Hero POSTs to its webhook consumer (Todofy) for each delivery of a message.
+//
+// This file is the one description of the event: its fields and every rule of the hand-written schema it replaces
+// (common.wire.v1), and contracts/mail-received-v1/mail-received-v1.schema.json is generated from it
+// (proto/tools/gen_schema.py: a consumer's schema, self-contained, every object open). The wire stays the JSON Mail
+// Hero has always sent, byte for byte: field names, field-number order (the order Mail Hero writes them), null for
+// sent_at and rfc_message_id without a value, `"warnings": []` on every storage-v1 event. Mail Hero builds each event
+// as a generated message written by the codec, which checks these rules before a byte is frozen; a delivery's retries
+// resend the frozen bytes and never build the event again (contracts/mail-received-v1/mail-received-v1.md). Todofy
+// reads every event leniently with the codec: unknown fields are skipped (the contract adds optional fields within
+// v1), every rule below is checked.
+//
+// What the event used to say only in the hand-written schema is here as rules: the type's constant, UUIDs (with JSON
+// Schema's `uuid` format), UTC times (`date-time`), the canary's run ID, list sizes, sizes that are not negative,
+// the attachments' closed enums, a subject or a text that is not blank (Message.any_match) and the size before
+// truncation of a truncated text (Field.present_when). The content-policy fields of storage-v1 are optional: frozen
+// payloads of older builders lack them (contracts/mail-received-v1/fixtures/legacy/). What a rule cannot say stays
+// with each side's code: the 4 KiB subject, 256 KiB text and 1 MiB event (UTF-8 bytes), a size before truncation
+// consistent with the text, a real calendar time (Todofy).
+//
+// One verdict differs on purpose. The hand-written schema wrote "not blank" as \S, which Python's re (Todofy's and
+// the tests' jsonschema) reads as Todofy does (str.strip()) but ECMAScript reads differently on six characters: it
+// took U+001C-U+001F and U+0085 for visible characters and U+FEFF for whitespace. `Visible` below is Python's
+// whitespace written out, so a validator in ECMAScript's dialect now refuses a subject and a text made only of the
+// former and accepts one made only of U+FEFF; in Python's dialect no verdict changed
+// (todofy/tests/unit/test_mail_received_schema_legacy.py). Mail Hero still refuses blank subjects and texts by
+// ECMAScript's trim() too, so it sends no event with a U+FEFF-only subject and text, as before; one made only of
+// U+001C-U+001F or U+0085, which Todofy has always refused (400), is now refused before it is frozen.
+//
+// Google's api-linter runs on this file (scripts/api-lint.sh). The rules it cannot meet without changing the event's
+// frozen wire are disabled where they apply, each with its reason. File-wide (api-linter reads them from this
+// header):
+//
+// (-- api-linter: core::0142::time-field-type=disabled
+//     aip.dev/not-precedent: the event's times are strings Mail Hero writes as JavaScript's toISOString() gives them
+//     (always three fraction digits, and a six-digit year outside 0-9999); the profile's google.protobuf.Timestamp
+//     would rewrite both. --)
+// (-- api-linter: core::0142::time-field-names=disabled
+//     aip.dev/not-precedent: the event's wire names (received_at, sent_at). --)
+// (-- api-linter: core::0140::prepositions=disabled
+//     aip.dev/not-precedent: the event's wire names (received_at, sent_at, from, to). --)
+
+syntax = "proto3";
+
+package mailhero.webhook.v1;
+
+import "common/wire/v1/wire.proto";
+import "google/api/field_behavior.proto";
+
+option java_multiple_files = true;
+option java_outer_classname = "MailReceivedProto";
+option java_package = "science.ziyixi.mailhero.webhook.v1";
+option (common.wire.v1.formats) = {
+  name: "Uuid"
+  pattern: "[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}"
+  description: "A UUID in RFC 9562's text form; Mail Hero writes lower case."
+  json_schema_format: "uuid"
+};
+option (common.wire.v1.formats) = {
+  name: "ReceivedAt"
+  pattern: "[0-9]{4}-[0-9]{2}-[0-9]{2}[Tt][0-9]{2}:[0-9]{2}:[0-9]{2}([.][0-9]+)?Z"
+  description: "An RFC 3339 time in UTC ending in Z; Mail Hero writes toISOString() (three fraction digits)."
+  json_schema_format: "date-time"
+};
+option (common.wire.v1.formats) = {
+  name: "SentAt"
+  pattern: "[0-9]{4}-[0-9]{2}-[0-9]{2}[Tt][0-9]{2}:[0-9]{2}:[0-9]{2}([.][0-9]+)?([Zz]|[+-][0-9]{2}:[0-9]{2})|[+-][0-9]{6}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}([.][0-9]+)?Z"
+  description: "An RFC 3339 time, or JavaScript's six-digit year for a Date header outside 0-9999 (which an RFC 3339 validator refuses)."
+  json_schema_format: "date-time"
+};
+option (common.wire.v1.formats) = {
+  name: "RunId"
+  pattern: "[A-Za-z0-9][A-Za-z0-9._-]{0,63}"
+  description: "The dashboard's name for one canary run (ops-v1's RunId)."
+};
+option (common.wire.v1.formats) = {
+  name: "Visible"
+  pattern: "[\t\n\x0b\x0c\r\x1c-\x1f \u0085\u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000]*[^\t\n\x0b\x0c\r\x1c-\x1f \u0085\u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000][\\s\\S]*"
+  description: "Not blank: a character other than Python's whitespace (str.strip(), Todofy's test), anywhere."
+};
+
+// Mail Hero mail.received.v1 event: one delivery of one message to the webhook consumer, POSTed with the
+// Idempotency-Key header equal to event_id. Consumers must ignore fields they do not know: optional fields may be
+// added within v1, and a breaking change is a new `type`.
+message MailReceivedEvent {
+  // Always mail.received.v1.
+  string type = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).allowed = "mail.received.v1"
+  ];
+  // One delivery intent: retries keep it, an owner's resend as a new event gets a new one. Consumers deduplicate by it.
+  string event_id = 2 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).format = "Uuid"
+  ];
+  // When Mail Hero received the message (UTC).
+  string received_at = 3 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).format = "ReceivedAt"
+  ];
+  // Present only on synthetic end-to-end canary events (contracts/ops-v1). Consumers MUST NOT cause external side
+  // effects (tasks, messages, reports) for an event that carries it. An event whose canary is present but unreadable
+  // must not cause side effects either: reject it (4xx) or handle it as a canary.
+  Canary canary = 4;
+  // The message, normalized: never raw MIME, HTML, attachment bytes or the SMTP envelope.
+  Mail message = 5 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).non_null = true
+  ];
+}
+
+// The canary marker.
+message Canary {
+  // The dashboard's run. Not an identity or an instruction: consumers record canary results by event_id.
+  string run_id = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).format = "RunId"
+  ];
+}
+
+// The message of an event. The fields after text are storage-v1's content policy: every event Mail Hero builds today
+// has them, frozen events of older builders may lack them.
+message Mail {
+  option (common.wire.v1.message) = {
+    any_match: {
+      fields: [
+        "subject",
+        "text"
+      ]
+      format: "Visible"
+    }
+  };
+
+  // The local message (the raw .eml Mail Hero keeps); every event of the message has the same one.
+  string id = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).format = "Uuid"
+  ];
+  // The From addresses. External content, never an authenticated identity.
+  // (-- api-linter: core::0140::reserved-words=disabled
+  //     aip.dev/not-precedent: the event's wire name; Python's generated attribute is from_. --)
+  repeated Address from = 2 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).max_items = 50
+  ];
+  // The To addresses, without Mail Hero's own inbox address.
+  repeated Address to = 3 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).max_items = 50
+  ];
+  // The subject (at most 4 KiB of UTF-8); it or the text is not blank.
+  string subject = 4 [(google.api.field_behavior) = REQUIRED];
+  // The Date header, null when the message has none that parses.
+  optional string sent_at = 5 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).format = "SentAt"
+  ];
+  // The Message-ID header, null when the message has none.
+  optional string rfc_message_id = 6 [(google.api.field_behavior) = REQUIRED];
+  // The normalized plain text (at most 256 KiB of UTF-8, cut at a character boundary when longer).
+  string text = 7 [(google.api.field_behavior) = REQUIRED];
+  // Whether text was cut by the UI's 1 MiB or the webhook's 256 KiB budget: the text is then not the whole source.
+  optional bool text_truncated = 8;
+  // UTF-8 size of normalized plaintext before UI/webhook truncation; not raw MIME size. Present whenever
+  // text_truncated, and then larger than the text's size; otherwise, when present, equal to it.
+  optional int32 original_text_bytes = 9 [(common.wire.v1.field) = {
+    minimum: 0
+    present_when: "text_truncated"
+  }];
+  // HTML over the safe processing budget was left out; usable plain text may still be there.
+  optional bool html_omitted = 10;
+  // Unreadable text or unexpanded MIME: a person must look. Consumers must not guess a body for it.
+  optional bool needs_review = 11;
+  // Safe reason codes for the flags above; [] on every storage-v1 event, absent on older frozen ones.
+  repeated string warnings = 12 [(common.wire.v1.field).write_empty = true];
+  // The content policy the event was built with: storage-v1 today.
+  optional string content_policy_version = 13;
+  // Attachment records omitted beyond the 100-record metadata cap. Excludes listed records whose byte copies were
+  // omitted.
+  optional int32 attachments_omitted_count = 14 [(common.wire.v1.field).minimum = 0];
+  // The first 100 attachments' metadata; bytes never travel in the event.
+  repeated Attachment attachments = 15 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).max_items = 100
+  ];
+}
+
+// An address of the From or To header.
+// (-- api-linter: core::0123::resource-annotation=disabled
+//     aip.dev/not-precedent: `name` is a display name, not a resource name. --)
+message Address {
+  // The address as the header gives it.
+  string address = 1 [(google.api.field_behavior) = REQUIRED];
+  // The display name, empty when there is none.
+  string name = 2 [(google.api.field_behavior) = REQUIRED];
+}
+
+// One attachment's metadata.
+message Attachment {
+  // The file name the message gives.
+  string filename = 1 [(google.api.field_behavior) = REQUIRED];
+  // The MIME type the message gives.
+  // (-- api-linter: core::0143::standardized-codes=disabled
+  //     aip.dev/not-precedent: the event's wire name. --)
+  string content_type = 2 [(google.api.field_behavior) = REQUIRED];
+  // The decoded size in bytes.
+  int32 size = 3 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).minimum = 0
+  ];
+  // Copy status at event creation, not a promise of perpetual availability.
+  StorageStatus storage_status = 4;
+  // Why the copy was omitted (with storage_status omitted).
+  OmittedReason omitted_reason = 5;
+}
+
+// Whether Mail Hero kept a copy of an attachment when it built the event. Closed: Todofy refuses a value it does not
+// know (a new value is a new `type`).
+// (-- api-linter: core::0216::synonyms=disabled
+//     aip.dev/not-precedent: a copy's status at the event's creation, not a lifecycle state; the field's wire name
+//     is `storage_status`. --)
+enum StorageStatus {
+  option (common.wire.v1.closed) = true;
+
+  // Never written: older events have no status.
+  STORAGE_STATUS_UNSPECIFIED = 0;
+  // A copy was kept.
+  STORAGE_STATUS_STORED = 1;
+  // No copy was kept (omitted_reason says why); the attachment may still be in the raw message.
+  STORAGE_STATUS_OMITTED = 2;
+}
+
+// Why an attachment's copy was omitted. Closed, like StorageStatus.
+enum OmittedReason {
+  option (common.wire.v1.closed) = true;
+
+  // Never written.
+  OMITTED_REASON_UNSPECIFIED = 0;
+  // The attachment is over 2 MiB.
+  OMITTED_REASON_SIZE_LIMIT = 1;
+  // The copies kept already reach 5 MiB for the message.
+  OMITTED_REASON_MESSAGE_SIZE_LIMIT = 2;
+  // An inline image: its metadata is kept, not a copy.
+  OMITTED_REASON_INLINE_IMAGE = 3;
+  // Capacity protection.
+  OMITTED_REASON_CAPACITY = 4;
+}

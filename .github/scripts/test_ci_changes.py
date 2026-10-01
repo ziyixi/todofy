@@ -192,26 +192,30 @@ class Classify(unittest.TestCase):
 
     def test_contracts_recheck_every_app_but_deploy_none(self):
         paths = ["contracts/mail-received-v1/fixtures/plain_text.json"]
-        self.assertEqual(push(paths), expect(T, T, T, F, F, **ALL_CHECKED))
+        self.assertEqual(push(paths), expect(T, T, T, F, F, **ALL_CHECKED, proto=T))
+        self.assertEqual(push(["contracts/README.md"]), expect(T, T, T, F, F, **ALL_CHECKED))
 
     def test_ops_contract_fixtures_and_docs_recheck_every_app_but_deploy_none(self):
         paths = ["contracts/ops-v1/fixtures/OpsStatus/todofy-ok.json", "contracts/ops-v1/README.md"]
         self.assertEqual(push(paths), expect(T, T, T, F, F, **ALL_CHECKED, proto=T))
 
     def test_a_contract_proto_tests_read_runs_proto_checks(self):
-        """proto/'s tests round-trip every ops-v1 fixture byte for byte through both codecs (and check task-intent-v1's
-        against its schema): a change to those contracts alone runs Proto checks too; another contract does not."""
+        """proto/'s tests round-trip every ops-v1 fixture and mail-received-v1 event byte for byte through both codecs
+        (and check task-intent-v1's against its schema): a change to those contracts alone runs Proto checks too; a
+        document about the contracts does not."""
         for path in (
             "contracts/ops-v1/fixtures/invalid/SetGuardInput/new-case.json",
             "contracts/ops-v1/fixtures/OpsStatus/lab-ok.json",
             "contracts/ops-v1/ops-v1.schema.json",
             "contracts/ops-v1/legacy/ops-v1.schema.json",
             "contracts/task-intent-v1/fixtures/invalid/TaskIntent/new-case.json",
+            "contracts/mail-received-v1/fixtures/plain_text.json",
+            "contracts/mail-received-v1/mail-received-v1.schema.json",
+            "contracts/mail-received-v1/legacy/mail-received-v1.schema.json",
         ):
             with self.subTest(path=path):
                 self.assertTrue(push([path])["proto"])
                 self.assertTrue(push([path], ref=BRANCH)["proto"])
-        self.assertFalse(push(["contracts/mail-received-v1/fixtures/plain_text.json"])["proto"])
         self.assertFalse(push(["contracts/README.md"])["proto"])
 
     def test_validate_mjs_deploys_lab_and_the_generated_ops_schema_deploys_nothing(self):
@@ -295,6 +299,8 @@ class Classify(unittest.TestCase):
             # ops-v1: the Ops entrypoints that bundle its generated code (Todofy's gateway takes types only, its core
             # reads ops.v1 in Python).
             "proto/ops/v1/ops.proto": {"mail-hero", "lab", "todofy", "dashboard"},
+            # mail.received.v1: Mail Hero builds every event, todofy-core reads every body.
+            "proto/mailhero/webhook/v1/mail_received.proto": {"mail-hero", "todofy"},
             # Lab's UI API: only Lab imports it (Python does not even generate it).
             "proto/lab/ui/v1/lab_ui_service.proto": {"lab"},
             "proto/lab/ui/v1/deck.proto": {"lab"},
@@ -510,7 +516,7 @@ class Classify(unittest.TestCase):
 
     def test_a_rename_between_apps_touches_both(self):
         paths = ["todofy/api/mail-received-v1.schema.json", "contracts/mail-received-v1/mail-received-v1.schema.json"]
-        self.assertEqual(push(paths), expect(T, T, T, T, F, **ALL_CHECKED))
+        self.assertEqual(push(paths), expect(T, T, T, T, F, **ALL_CHECKED, proto=T))
 
     def test_the_website_checks_and_releases_only_itself(self):
         """No contract and no package: a site change runs neither Contracts nor another app."""

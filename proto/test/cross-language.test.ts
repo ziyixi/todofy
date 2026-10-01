@@ -1,8 +1,9 @@
 /**
  * Cross-language round trips of the wire JSON profile: bytes the TypeScript codec writes, read and written
  * again by the Python codec (test/python/roundtrip.py, in a child process), must come back identical, and
- * so must messages built in Python and read here. The corpus is every valid task-intent-v1 fixture, every
- * shared edge case that reads (doubles and maps among them), and messages built in each language (every
+ * so must messages built in Python and read here. The corpus is every valid task-intent-v1 and ops-v1 fixture, every
+ * mail-received-v1 event (current and legacy), every shared edge case that reads (doubles and maps among them), and
+ * messages built in each language (every
  * state with every error code, both modes). This is what lets Lab (TypeScript) and Todofy (Python) hash, freeze and compare each other's bytes.
  */
 import { spawnSync } from 'node:child_process';
@@ -21,9 +22,10 @@ import {
   TaskIntentResultSchema,
   TaskIntentSchema,
 } from '../ts/todofy/taskintent/v1/task_intent_pb.ts';
+import { MailReceivedEventSchema } from '../ts/mailhero/webhook/v1/mail_received_pb.ts';
 import * as ops from '../ts/ops/v1/ops_pb.ts';
 import { fromWire, toWire, WireJsonError } from '../ts/wire-json.ts';
-import { CASES_FILE, fixtures, OPS_CONTRACT } from './fixtures.ts';
+import { CASES_FILE, fixtures, mailFixtures, OPS_CONTRACT } from './fixtures.ts';
 
 /** A task-intent-v1 message by its short name, or a fixture of prototest/v1 (doubles, maps) by its full name. */
 type Name = keyof typeof SCHEMAS;
@@ -57,6 +59,7 @@ const SCHEMAS = {
   'ops.v1.CanaryResult': ops.CanaryResultSchema,
   'ops.v1.OpsReport': ops.OpsReportSchema,
   'ops.v1.OpsReportReceipt': ops.OpsReportReceiptSchema,
+  'mailhero.webhook.v1.MailReceivedEvent': MailReceivedEventSchema,
 } satisfies Record<string, DescMessage>;
 /** ops-v1's inputs, read strictly; its outputs are read leniently. */
 const OPS_INPUTS = new Set(['SetGuardInput', 'StartCanaryInput', 'OpsReport']);
@@ -152,6 +155,12 @@ function corpus(): ReadRequest[] {
       if (written === null) throw new Error(`a valid ${def} fixture does not read`);
       out.push({ message, strict, text: written });
     }
+  }
+  // mail-received-v1: every golden event, current and frozen, as a consumer reads it (leniently).
+  for (const { text } of [...mailFixtures(), ...mailFixtures(true)]) {
+    const written = viaTypeScript('mailhero.webhook.v1.MailReceivedEvent', text, false);
+    if (written === null) throw new Error('a mail-received-v1 fixture does not read');
+    out.push({ message: 'mailhero.webhook.v1.MailReceivedEvent', strict: false, text: written });
   }
   const { cases } = JSON.parse(readFileSync(CASES_FILE, 'utf8')) as { cases: { message: Name; strict: boolean; input: unknown; error?: true }[] };
   for (const c of cases) {

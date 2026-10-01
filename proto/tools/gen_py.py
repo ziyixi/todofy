@@ -47,10 +47,17 @@ SCALARS = {
 TIMESTAMP = ".google.protobuf.Timestamp"
 FIELD_MASK = ".google.protobuf.FieldMask"
 # The proto packages generated for Python: True when the package ships in the wheel (todofy-core imports
-# todofy.taskintent.v1, todofy.report.v1 and ops.v1, and pywrangler vendors the wheel), False when only proto/'s own
-# Python tests use it (python/build_backend.py leaves it out of the wheel: TEST_ONLY_PACKAGES). Every other package
-# is TypeScript only. .github/scripts/test_proto.py keeps this, the wheel and the apps' imports in step.
-PYTHON_PACKAGES = {"todofy.taskintent.v1": True, "todofy.report.v1": True, "ops.v1": True, "prototest.v1": False}
+# todofy.taskintent.v1, todofy.report.v1, ops.v1 and mailhero.webhook.v1, and pywrangler vendors the wheel), False
+# when only proto/'s own Python tests use it (python/build_backend.py leaves it out of the wheel: TEST_ONLY_PACKAGES).
+# Every other package is TypeScript only. .github/scripts/test_proto.py keeps this, the wheel and the apps' imports in
+# step.
+PYTHON_PACKAGES = {
+    "todofy.taskintent.v1": True,
+    "todofy.report.v1": True,
+    "ops.v1": True,
+    "mailhero.webhook.v1": True,
+    "prototest.v1": False,
+}
 REQUIRED_OPTION = "[google.api.field_behavior]"
 
 

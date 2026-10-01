@@ -1057,88 +1057,107 @@ export interface components {
             /** @description Older mail tasks (up to 14 days, at most 30) that the day's Todoist snapshot still lists as open, shown to the model as "[N 天前] summary"; 0 when no usable snapshot existed, and then the report is exactly the 24 h one. Added 2026-09-30; absent from reports stored before. */
             carryover_count?: number;
         };
-        address: {
-            address: string;
-            name: string;
-        } & {
-            [key: string]: unknown;
-        };
-        attachment: {
-            filename: string;
-            content_type: string;
-            size: number;
-            /**
-             * @description Copy status at event creation, not a promise of perpetual availability.
-             * @enum {unknown}
-             */
-            storage_status?: "stored" | "omitted";
-            /** @enum {unknown} */
-            omitted_reason?: "size_limit" | "message_size_limit" | "inline_image" | "capacity";
-        } & {
-            [key: string]: unknown;
-        };
-        /** Mail Hero mail.received.v1 event */
+        /**
+         * Mail Hero mail.received.v1 event
+         * @description Mail Hero mail.received.v1 event: one delivery of one message to the webhook consumer, POSTed with the Idempotency-Key header equal to event_id. Consumers must ignore fields they do not know: optional fields may be added within v1, and a breaking change is a new `type`.
+         */
         "mail-received-v1.schema": {
-            /** @constant */
+            /**
+             * @description Always mail.received.v1.
+             * @constant
+             */
             type: "mail.received.v1";
-            /** Format: uuid */
+            /**
+             * Format: uuid
+             * @description One delivery intent: retries keep it, an owner's resend as a new event gets a new one. Consumers deduplicate by it.
+             */
             event_id: string;
-            /** Format: date-time */
+            /**
+             * Format: date-time
+             * @description When Mail Hero received the message (UTC).
+             */
             received_at: string;
             /** @description Present only on synthetic end-to-end canary events (contracts/ops-v1). Consumers MUST NOT cause external side effects (tasks, messages, reports) for an event that carries it. An event whose canary is present but unreadable must not cause side effects either: reject it (4xx) or handle it as a canary. */
             canary?: {
+                /** @description The dashboard's run. Not an identity or an instruction: consumers record canary results by event_id. */
                 run_id: string;
             } & {
                 [key: string]: unknown;
             };
+            /** @description The message, normalized: never raw MIME, HTML, attachment bytes or the SMTP envelope. */
             message: (({
-                /** Format: uuid */
+                /**
+                 * Format: uuid
+                 * @description The local message (the raw .eml Mail Hero keeps); every event of the message has the same one.
+                 */
                 id: string;
-                from: components["schemas"]["address"][];
-                to: components["schemas"]["address"][];
-                subject: string;
-                /** Format: date-time */
-                sent_at: string | null;
-                rfc_message_id: string | null;
-                text: string;
-                text_truncated?: boolean;
-                /** @description UTF-8 size of normalized plaintext before UI/webhook truncation; not raw MIME size. */
-                original_text_bytes?: number;
-                html_omitted?: boolean;
-                needs_review?: boolean;
-                warnings?: string[];
-                content_policy_version?: string;
-                /** @description Attachment records omitted beyond the 100-record metadata cap. Excludes listed records whose byte copies were omitted. */
-                attachments_omitted_count?: number;
-                attachments: components["schemas"]["attachment"][];
-            } & {
-                [key: string]: unknown;
-            }) & unknown) | {
-                subject?: unknown;
-            } | {
-                text?: unknown;
-            };
-            $defs: {
-                address: {
+                /** @description The From addresses. External content, never an authenticated identity. */
+                from: ({
+                    /** @description The address as the header gives it. */
                     address: string;
+                    /** @description The display name, empty when there is none. */
                     name: string;
                 } & {
                     [key: string]: unknown;
-                };
-                attachment: {
+                })[];
+                /** @description The To addresses, without Mail Hero's own inbox address. */
+                to: ({
+                    /** @description The address as the header gives it. */
+                    address: string;
+                    /** @description The display name, empty when there is none. */
+                    name: string;
+                } & {
+                    [key: string]: unknown;
+                })[];
+                /** @description The subject (at most 4 KiB of UTF-8); it or the text is not blank. */
+                subject: string;
+                /** @description The Date header, null when the message has none that parses. */
+                sent_at: string | null;
+                /** @description The Message-ID header, null when the message has none. */
+                rfc_message_id: string | null;
+                /** @description The normalized plain text (at most 256 KiB of UTF-8, cut at a character boundary when longer). */
+                text: string;
+                /** @description Whether text was cut by the UI's 1 MiB or the webhook's 256 KiB budget: the text is then not the whole source. */
+                text_truncated?: boolean;
+                /** @description UTF-8 size of normalized plaintext before UI/webhook truncation; not raw MIME size. Present whenever text_truncated, and then larger than the text's size; otherwise, when present, equal to it. */
+                original_text_bytes?: number;
+                /** @description HTML over the safe processing budget was left out; usable plain text may still be there. */
+                html_omitted?: boolean;
+                /** @description Unreadable text or unexpanded MIME: a person must look. Consumers must not guess a body for it. */
+                needs_review?: boolean;
+                /** @description Safe reason codes for the flags above; [] on every storage-v1 event, absent on older frozen ones. */
+                warnings?: string[];
+                /** @description The content policy the event was built with: storage-v1 today. */
+                content_policy_version?: string;
+                /** @description Attachment records omitted beyond the 100-record metadata cap. Excludes listed records whose byte copies were omitted. */
+                attachments_omitted_count?: number;
+                /** @description The first 100 attachments' metadata; bytes never travel in the event. */
+                attachments: ({
+                    /** @description The file name the message gives. */
                     filename: string;
+                    /** @description The MIME type the message gives. */
                     content_type: string;
+                    /** @description The decoded size in bytes. */
                     size: number;
                     /**
                      * @description Copy status at event creation, not a promise of perpetual availability.
                      * @enum {unknown}
                      */
                     storage_status?: "stored" | "omitted";
-                    /** @enum {unknown} */
+                    /**
+                     * @description Why the copy was omitted (with storage_status omitted).
+                     * @enum {unknown}
+                     */
                     omitted_reason?: "size_limit" | "message_size_limit" | "inline_image" | "capacity";
                 } & {
                     [key: string]: unknown;
-                };
+                })[];
+            } & {
+                [key: string]: unknown;
+            }) & unknown) | {
+                subject: string;
+            } | {
+                text: string;
             };
         } & {
             [key: string]: unknown;

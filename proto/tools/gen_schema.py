@@ -102,6 +102,17 @@ SCHEMAS = (
         root="RecommendationReport",
         then=TODOFY_UI_TYPES,
     ),
+    # Mail Hero's webhook event: what its consumers accept (open: they skip fields they do not know), self-contained
+    # because Todofy's OpenAPI document refers to it for the webhook's request body.
+    Target(
+        "mailhero.webhook.v1",
+        "../contracts/mail-received-v1/mail-received-v1.schema.json",
+        "https://mail-hero.local/schema/mail-received-v1.schema.json",
+        "Mail Hero mail.received.v1 event",
+        root="MailReceivedEvent",
+        then=TODOFY_UI_TYPES,
+        open=True,
+    ),
 )
 SELF_CONTAINED = (
     "Self-contained on purpose (no $defs or $ref): the owner API's OpenAPI document refers to it, and "

@@ -15,6 +15,7 @@ INTENT=todofy/taskintent/v1/task_intent.proto
 LAB=lab/ui/v1/lab_ui_service.proto
 OPS=ops/v1/ops.proto
 REPORT=todofy/report/v1/report.proto
+MAIL=mailhero/webhook/v1/mail_received.proto
 failures=0
 "$BUF" build --exclude-source-info -o "$WORK/base.json#format=json"
 
@@ -99,6 +100,13 @@ case_ "open the closed Health (drop closed)" breaking fail 's/(enum Health \{\n)
 case_ "let an empty window's recommendation carry tasks (drop its case's empty)" breaking fail 's/        rules: \{empty: true\}\n//' "$REPORT"
 case_ "widen a task's title to 300 characters (the newsletter's own limit is higher)" breaking fail 's/max_length: 200/max_length: 300/' "$REPORT"
 case_ "add REPORT_STATUS_PARTIAL to the closed ReportStatus" breaking fail 's/(  REPORT_STATUS_STALE = 4;\n)/$1  \/\/ Part of a report.\n  REPORT_STATUS_PARTIAL = 5;\n/' "$REPORT"
+# mail.received.v1 (no service: every message is an output both ways): the relations between fields and a list written
+# when empty are wire like any rule; a consumer's new optional field is not.
+case_ "stop writing an empty warnings list (frozen bytes and payload hashes change)" breaking fail 's/repeated string warnings = 12 \[\(common.wire.v1.field\).write_empty = true\];/repeated string warnings = 12;/' "$MAIL"
+case_ "drop original_text_bytes' present_when (a consumer would take a truncated text without its size)" breaking fail 's/    minimum: 0\n    present_when: "text_truncated"\n/    minimum: 0\n/' "$MAIL"
+case_ "drop Mail's any_match (a blank subject and text would pass)" breaking fail 's/  option \(common.wire.v1.message\) = \{\n    any_match: \{\n      fields: \[\n        "subject",\n        "text"\n      \]\n      format: "Visible"\n    \}\n  \};\n\n//' "$MAIL"
+case_ "add STORAGE_STATUS_EXPIRED to the closed StorageStatus (Todofy refuses it)" breaking fail 's/(  STORAGE_STATUS_OMITTED = 2;\n)/$1  \/\/ Expired.\n  STORAGE_STATUS_EXPIRED = 3;\n/' "$MAIL"
+case_ "add an optional field to Mail (consumers skip what they do not know)" breaking pass 's/(  repeated Attachment attachments = 15 \[)/  \/\/ A newer flag.\n  optional bool newer_flag = 16;\n$1/' "$MAIL"
 case_ "change a binding of the test fixtures (prototest is ignored, as by buf)" breaking pass 's/\{get: "\/v1\/\{parent=shelves\/\*\}\/books"\}/{get: "\/v2\/{parent=shelves\/*}\/books"}/' prototest/v1/prototest.proto
 case_ "zero value without _UNSPECIFIED (MODE_UNSPECIFIED -> MODE_NONE)" lint fail 's/MODE_UNSPECIFIED = 0/MODE_NONE = 0/'
 case_ "enum value without its prefix (SOURCE_LAB -> LAB)" lint fail 's/SOURCE_LAB = 1/LAB = 1/'

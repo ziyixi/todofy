@@ -45,7 +45,8 @@ runtimes' fixtures, reaches no app). Tests, test data, the check scripts, the ap
 Markdown (PROTO_NOT_BUNDLED) deploy nothing; any other proto/ path (buf.yaml, buf.lock, the toolchain
 lockfile, ensure.mjs, a package not listed yet) deploys every user (fail safe). test_proto.py derives
 PROTO_USERS and the packages' importers from the sources. It also runs Contracts. A change to a contract proto/'s
-tests read (PROTO_READS: ops-v1's and task-intent-v1's fixtures and schemas) runs Proto checks as well.
+tests read (PROTO_READS: ops-v1's, task-intent-v1's and mail-received-v1's fixtures and schemas) runs Proto checks as
+well.
 
 push: the files changed between a cumulative base and github.sha, never only this push's own diff,
 so a change whose run was cancelled or failed is checked (and deployed) again by the next run.
@@ -190,14 +191,18 @@ PROTO_PACKAGES: dict[str, tuple[str, ...]] = {
     "proto/common/errors/": (),
     # ops-v1 (contracts/ops-v1): every app's Ops entrypoint and the dashboard that calls them.
     "proto/ops/": ("mail-hero", "lab", "todofy", "dashboard"),
+    # mail.received.v1 (contracts/mail-received-v1's schema is generated from it): Mail Hero builds every event,
+    # todofy-core reads every webhook body.
+    "proto/mailhero/webhook/": ("mail-hero", "todofy"),
     # The runtimes' test fixtures (never imported by an app; not in the Python wheel).
     "proto/prototest/": (),
 }
 # The contracts whose fixtures and schemas proto/'s own tests read (proto/test/ops.test.ts and test_ops.py round-trip
-# every ops-v1 fixture byte for byte through both codecs; the task-intent-v1 tests check both codecs against its
-# schema; Proto checks also compares ops-v1's JSON Schema with the one the IDL generates): a change there runs Proto
-# checks too, so a fixture neither codec writes byte for byte, or one a strict read wrongly accepts, fails its push.
-PROTO_READS = ("contracts/ops-v1/", "contracts/task-intent-v1/")
+# every ops-v1 fixture byte for byte through both codecs, mail-received.test.ts and test_mail_received.py every
+# mail-received-v1 event; the task-intent-v1 tests check both codecs against its schema; Proto checks also compares
+# ops-v1's and mail-received-v1's JSON Schemas with the ones the IDL generates): a change there runs Proto checks too,
+# so a fixture neither codec writes byte for byte, or one a strict read wrongly accepts, fails its push.
+PROTO_READS = ("contracts/ops-v1/", "contracts/task-intent-v1/", "contracts/mail-received-v1/")
 # proto/ paths that never reach a bundle: a change there checks the users but deploys none.
 PROTO_NOT_BUNDLED = (
     "proto/test/",

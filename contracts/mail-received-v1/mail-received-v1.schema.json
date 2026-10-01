@@ -1,71 +1,269 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://mail-hero.local/schema/mail-received-v1.schema.json",
+  "$comment": "Generated from proto/mailhero/webhook/v1/mail_received.proto by proto/tools/gen_schema.py: do not edit. Self-contained on purpose (no $defs or $ref): the owner API's OpenAPI document refers to it, and openapi-typescript hoists those into its components.",
   "title": "Mail Hero mail.received.v1 event",
+  "description": "Mail Hero mail.received.v1 event: one delivery of one message to the webhook consumer, POSTed with the Idempotency-Key header equal to event_id. Consumers must ignore fields they do not know: optional fields may be added within v1, and a breaking change is a new `type`.",
   "type": "object",
-  "required": ["type", "event_id", "received_at", "message"],
+  "required": [
+    "type",
+    "event_id",
+    "received_at",
+    "message"
+  ],
   "properties": {
-    "type": {"const": "mail.received.v1"},
-    "event_id": {"type": "string", "format": "uuid"},
-    "received_at": {"type": "string", "format": "date-time", "pattern": "Z$"},
+    "type": {
+      "description": "Always mail.received.v1.",
+      "const": "mail.received.v1"
+    },
+    "event_id": {
+      "description": "One delivery intent: retries keep it, an owner's resend as a new event gets a new one. Consumers deduplicate by it.",
+      "type": "string",
+      "format": "uuid",
+      "pattern": "^(?:[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12})$(?!\\n)"
+    },
+    "received_at": {
+      "description": "When Mail Hero received the message (UTC).",
+      "type": "string",
+      "format": "date-time",
+      "pattern": "^(?:[0-9]{4}-[0-9]{2}-[0-9]{2}[Tt][0-9]{2}:[0-9]{2}:[0-9]{2}([.][0-9]+)?Z)$(?!\\n)"
+    },
     "canary": {
       "description": "Present only on synthetic end-to-end canary events (contracts/ops-v1). Consumers MUST NOT cause external side effects (tasks, messages, reports) for an event that carries it. An event whose canary is present but unreadable must not cause side effects either: reject it (4xx) or handle it as a canary.",
       "type": "object",
-      "required": ["run_id"],
+      "required": [
+        "run_id"
+      ],
       "properties": {
-        "run_id": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$(?!\\n)"}
+        "run_id": {
+          "description": "The dashboard's run. Not an identity or an instruction: consumers record canary results by event_id.",
+          "type": "string",
+          "pattern": "^(?:[A-Za-z0-9][A-Za-z0-9._-]{0,63})$(?!\\n)"
+        }
       },
       "additionalProperties": true
     },
     "message": {
+      "description": "The message, normalized: never raw MIME, HTML, attachment bytes or the SMTP envelope.",
       "type": "object",
-      "required": ["id", "from", "to", "subject", "sent_at", "rfc_message_id", "text", "attachments"],
-      "properties": {
-        "id": {"type": "string", "format": "uuid"},
-        "from": {"type": "array", "maxItems": 50, "items": {"$ref": "#/$defs/address"}},
-        "to": {"type": "array", "maxItems": 50, "items": {"$ref": "#/$defs/address"}},
-        "subject": {"type": "string"},
-        "sent_at": {"type": ["string", "null"], "format": "date-time"},
-        "rfc_message_id": {"type": ["string", "null"]},
-        "text": {"type": "string"},
-        "text_truncated": {"type": "boolean"},
-        "original_text_bytes": {"type": "integer", "minimum": 0, "description": "UTF-8 size of normalized plaintext before UI/webhook truncation; not raw MIME size."},
-        "html_omitted": {"type": "boolean"},
-        "needs_review": {"type": "boolean"},
-        "warnings": {"type": "array", "items": {"type": "string"}},
-        "content_policy_version": {"type": "string"},
-        "attachments_omitted_count": {"type": "integer", "minimum": 0, "description": "Attachment records omitted beyond the 100-record metadata cap. Excludes listed records whose byte copies were omitted."},
-        "attachments": {"type": "array", "maxItems": 100, "items": {"$ref": "#/$defs/attachment"}}
-      },
-      "anyOf": [
-        {"properties": {"subject": {"pattern": "\\S"}}},
-        {"properties": {"text": {"pattern": "\\S"}}}
+      "required": [
+        "id",
+        "from",
+        "to",
+        "subject",
+        "sent_at",
+        "rfc_message_id",
+        "text",
+        "attachments"
       ],
-      "allOf": [{"if": {"required": ["text_truncated"], "properties": {"text_truncated": {"const": true}}}, "then": {"required": ["original_text_bytes"]}}],
-      "additionalProperties": true
-    }
-  },
-  "$defs": {
-    "address": {
-      "type": "object",
-      "required": ["address", "name"],
       "properties": {
-        "address": {"type": "string"},
-        "name": {"type": "string"}
+        "id": {
+          "description": "The local message (the raw .eml Mail Hero keeps); every event of the message has the same one.",
+          "type": "string",
+          "format": "uuid",
+          "pattern": "^(?:[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12})$(?!\\n)"
+        },
+        "from": {
+          "description": "The From addresses. External content, never an authenticated identity.",
+          "type": "array",
+          "maxItems": 50,
+          "items": {
+            "type": "object",
+            "required": [
+              "address",
+              "name"
+            ],
+            "properties": {
+              "address": {
+                "description": "The address as the header gives it.",
+                "type": "string"
+              },
+              "name": {
+                "description": "The display name, empty when there is none.",
+                "type": "string"
+              }
+            },
+            "additionalProperties": true
+          }
+        },
+        "to": {
+          "description": "The To addresses, without Mail Hero's own inbox address.",
+          "type": "array",
+          "maxItems": 50,
+          "items": {
+            "type": "object",
+            "required": [
+              "address",
+              "name"
+            ],
+            "properties": {
+              "address": {
+                "description": "The address as the header gives it.",
+                "type": "string"
+              },
+              "name": {
+                "description": "The display name, empty when there is none.",
+                "type": "string"
+              }
+            },
+            "additionalProperties": true
+          }
+        },
+        "subject": {
+          "description": "The subject (at most 4 KiB of UTF-8); it or the text is not blank.",
+          "type": "string"
+        },
+        "sent_at": {
+          "description": "The Date header, null when the message has none that parses.",
+          "oneOf": [
+            {
+              "type": "string",
+              "format": "date-time",
+              "pattern": "^(?:[0-9]{4}-[0-9]{2}-[0-9]{2}[Tt][0-9]{2}:[0-9]{2}:[0-9]{2}([.][0-9]+)?([Zz]|[+-][0-9]{2}:[0-9]{2})|[+-][0-9]{6}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}([.][0-9]+)?Z)$(?!\\n)"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "rfc_message_id": {
+          "description": "The Message-ID header, null when the message has none.",
+          "oneOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "text": {
+          "description": "The normalized plain text (at most 256 KiB of UTF-8, cut at a character boundary when longer).",
+          "type": "string"
+        },
+        "text_truncated": {
+          "description": "Whether text was cut by the UI's 1 MiB or the webhook's 256 KiB budget: the text is then not the whole source.",
+          "type": "boolean"
+        },
+        "original_text_bytes": {
+          "description": "UTF-8 size of normalized plaintext before UI/webhook truncation; not raw MIME size. Present whenever text_truncated, and then larger than the text's size; otherwise, when present, equal to it.",
+          "type": "integer",
+          "minimum": 0
+        },
+        "html_omitted": {
+          "description": "HTML over the safe processing budget was left out; usable plain text may still be there.",
+          "type": "boolean"
+        },
+        "needs_review": {
+          "description": "Unreadable text or unexpanded MIME: a person must look. Consumers must not guess a body for it.",
+          "type": "boolean"
+        },
+        "warnings": {
+          "description": "Safe reason codes for the flags above; [] on every storage-v1 event, absent on older frozen ones.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "content_policy_version": {
+          "description": "The content policy the event was built with: storage-v1 today.",
+          "type": "string"
+        },
+        "attachments_omitted_count": {
+          "description": "Attachment records omitted beyond the 100-record metadata cap. Excludes listed records whose byte copies were omitted.",
+          "type": "integer",
+          "minimum": 0
+        },
+        "attachments": {
+          "description": "The first 100 attachments' metadata; bytes never travel in the event.",
+          "type": "array",
+          "maxItems": 100,
+          "items": {
+            "type": "object",
+            "required": [
+              "filename",
+              "content_type",
+              "size"
+            ],
+            "properties": {
+              "filename": {
+                "description": "The file name the message gives.",
+                "type": "string"
+              },
+              "content_type": {
+                "description": "The MIME type the message gives.",
+                "type": "string"
+              },
+              "size": {
+                "description": "The decoded size in bytes.",
+                "type": "integer",
+                "minimum": 0
+              },
+              "storage_status": {
+                "description": "Copy status at event creation, not a promise of perpetual availability.",
+                "enum": [
+                  "stored",
+                  "omitted"
+                ]
+              },
+              "omitted_reason": {
+                "description": "Why the copy was omitted (with storage_status omitted).",
+                "enum": [
+                  "size_limit",
+                  "message_size_limit",
+                  "inline_image",
+                  "capacity"
+                ]
+              }
+            },
+            "additionalProperties": true
+          }
+        }
       },
-      "additionalProperties": true
-    },
-    "attachment": {
-      "type": "object",
-      "required": ["filename", "content_type", "size"],
-      "properties": {
-        "filename": {"type": "string"},
-        "content_type": {"type": "string"},
-        "size": {"type": "integer", "minimum": 0},
-        "storage_status": {"enum": ["stored", "omitted"], "description": "Copy status at event creation, not a promise of perpetual availability."},
-        "omitted_reason": {"enum": ["size_limit", "message_size_limit", "inline_image", "capacity"]}
-      },
-      "additionalProperties": true
+      "additionalProperties": true,
+      "anyOf": [
+        {
+          "required": [
+            "subject"
+          ],
+          "properties": {
+            "subject": {
+              "type": "string",
+              "pattern": "^(?:[\t\n\u000b\f\r\u001c-\u001f \u0085\u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000]*[^\t\n\u000b\f\r\u001c-\u001f \u0085\u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000][\\s\\S]*)$(?!\\n)"
+            }
+          }
+        },
+        {
+          "required": [
+            "text"
+          ],
+          "properties": {
+            "text": {
+              "type": "string",
+              "pattern": "^(?:[\t\n\u000b\f\r\u001c-\u001f \u0085\u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000]*[^\t\n\u000b\f\r\u001c-\u001f \u0085\u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000][\\s\\S]*)$(?!\\n)"
+            }
+          }
+        }
+      ],
+      "allOf": [
+        {
+          "if": {
+            "required": [
+              "text_truncated"
+            ],
+            "properties": {
+              "text_truncated": {
+                "const": true
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "original_text_bytes"
+            ]
+          }
+        }
+      ]
     }
   },
   "additionalProperties": true
