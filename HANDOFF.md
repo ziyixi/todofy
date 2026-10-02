@@ -16,8 +16,9 @@ Rules for this file:
   what is done, what is left, how to verify it and what to check after its deploy. Link to the app docs for
   design detail instead of copying it.
 
-Last updated: 2026-10-02 ~18:30 UTC. `main` is `ca63675`: `dashboard.ui.v1` landed and is verified (below). Three
-proto UI branches (FlowDay, Mail Hero, Todofy) are pushed and still being finished.
+Last updated: 2026-10-02 ~20:30 UTC. Every app's owner API is on proto once this change lands: the dashboard
+(`ca63675`) and FlowDay (`8d9100e`) are live and verified, Mail Hero (`d1bde0e`) lands just before this change, and
+Todofy lands with it (both below; their post-deploy checks are pending until "Waiting to be verified" says otherwise).
 
 ## What is live
 
@@ -88,44 +89,15 @@ Proto checks (lint, api-lint, breaking vs `origin/main`, rules self-test, determ
 UI tests and build, bundle budgets, dry run), and a scripted smoke of every UI call against `wrangler dev`
 with synthetic data.
 
-### `proto-flowday-ui` — FlowDay owner API as `flowday.ui.v1`
-
-- State: LANDING on `main` (2026-10-02, second after the dashboard; rebased on `a956440`, conflicts in the shared
-  CI comments and docs resolved by keeping both apps). Post-deploy checks below are pending until this line says
-  otherwise. Built, reviewed and fixed: the build commits, then the
-  review fixes `584486c` (IDL), `6ce005f` (Worker), `455eae7` (UI), `dbac97a` (CI) and a docs commit; every
-  check passed again from a clean clone of the head. Every finding of the design and the compatibility/security
-  reviews was fixed, none refuted.
-- What it does: `FlowDayUiService` under `/api/v1` (Task, Flow per day, Note, TimeEntry, singletons
-  TimerSession and Settings, `QueryAnalytics`, `SyncTasks`). Lists page at 200 (notes 100); a negative
-  `page_size` is `INVALID_ARGUMENT`. Every page seeks to its cursor through an index and reads about its own D1
-  rows (`worker/test/runtime/reads.test.ts`). `QueryAnalytics` pages rows (planned tasks, done tasks, time
-  entries, in that order) with at most one task per row. `RolloverFlow` moves every unfinished task only with
-  `all_unfinished`. Updates refuse a changed `IMMUTABLE` field (AIP-203). The Worker warms each list's drizzle
-  query and answer at startup (`worker/src/warmup.ts`). Creates use the `request_id` as the new resource id
-  (no request log, so no extra D1 writes). Old `/api/*` routes answer 410 until 2026-11-02.
-- Measured: Worker 56.1 → 116.6 KiB gzip (budget 140); UI JS 362.8 → 398.9 KiB gzip (budget 480); every list
-  as an isolate's first API request 3.7–6.7 ms reference (bound 10; before the fixes 6.0–25.6, a year's
-  analytics page the 25.6); the warm-up adds about 80 ms to an isolate's startup (limit 1 s); rows read per
-  row answered 1.03–1.31 (the review's probe read 4–15 times a single read before); D1 writes unchanged (221
-  rows per simulated day, sync 608 first / 280 per day).
-- Deploys: FlowDay only (FlowDay becomes a "ts" proto user, so later shared-runtime changes redeploy it too).
-  The deploy probe asks `/api/v1/tasks`.
-- After deploy: reload flowday.ziyixi.science; tasks, today's flow, notes, time entries, timer, settings,
-  the daily, weekly and work-pattern reviews and an export of the whole history load; one small edit persists;
-  rolling over a day still moves its unfinished tasks; an old tab shows the reload banner; Observability shows
-  no `INTERNAL` and no exceeded-CPU error; the dashboard's D1 reads stay as before; sync still answers
-  synced/partial/throttled. Remove the 410 routes after 2026-11-02.
-- Known, not caused by it: Playwright UI-005 is flaky on `main` too (CI does not run Playwright);
-  `DEV_TODOIST_ORIGIN` is declared but unused, so the smoke cannot cover sync with a key.
-
 ### `proto-mail-hero-ui` — Mail Hero owner API as `mailhero.ui.v2`
 
-- State: LANDING on `main` (2026-10-02, third, right after FlowDay; rebased on FlowDay's landing `8d9100e`, the
-  shared CI comments and docs merged to name all three apps). Post-deploy checks below are pending until this line
-  says otherwise. Before that rebase it sat on `9e38624`: four build commits (IDL,
-  Worker, UI, docs), then one commit per review finding (MH-CS-1, D4, D7, D6, D1+D3, D5, D2, D8) and this row. Every
-  check of the verification list passed from a clean clone of the head (below); next: push, CI, land.
+- State: LANDED on `main` as `d1bde0e` (2026-10-02, third, right after FlowDay; rebased on `8d9100e`). Its first
+  CI run failed one CPU bound: SendMessage's first run read 6.01 reference ms against 6 (the codec's first use inside
+  the request). The fix runs the owner API's codec path at startup (`mail-hero/cloudflare/src/native/warmup.ts`,
+  about 10 ms of a 1 s startup budget), as FlowDay and Todofy do: SendMessage's first run 4.15-4.60 → 3.38-3.98
+  reference ms locally. CI margin is still thin (projected 3.7-6.0 on runners); if it flakes, take a cheaper send
+  path rather than a looser bound. Post-deploy checks below are pending. Build and review history: four build
+  commits (IDL, Worker, UI, docs), one commit per review finding (MH-CS-1, D4, D7, D6, D1+D3, D5, D2, D8).
 - Review fixes: the dashboard's buckets are the IDL's `AttemptResult` (SUCCEEDED, RETRIED, FAILED, UNKNOWN, each mapped
   to its attempt outcomes) and the drill-down filter is `attempt_result = <AttemptResult>` (was `attempt_outcome`; the
   UI's drill-down URL parameter too); the dashboard page reads the generated response types; an unmapped module error
@@ -162,15 +134,11 @@ with synthetic data.
 
 ### `proto-todofy-ui` — Todofy owner API as `todofy.ui.v1`
 
-- State: READY to land fourth, right after Mail Hero: rebased on `18e8e92` (`proto-mail-hero-ui`'s head, which
-  contains FlowDay's `8d9100e`), the shared CI comments and docs merged to name every proto user (Lab, links,
-  watch, the dashboard, FlowDay, Mail Hero and Todofy) once. If Mail Hero lands with a different head, rebase
-  again onto it. All 11 review findings fixed, with tests. Verified again from a clean clone after that rebase:
-  every check in the list above (breaking vs `18e8e92`), the runtime suite, the gateway's workerd CPU test, both
-  dry runs, and lint and typecheck of every other TypeScript proto user (Lab, links, watch, the dashboard,
-  FlowDay, Mail Hero). The smoke (every rpc through the UI's own client; the machine routes byte-identical to
-  `main` apart from timestamps and request IDs) ran before the rebase, which changed no Todofy file. Commits:
-  `todofy.ui.v1` IDL, core RPC, gateway, tests, UI, docs, then one per review fix.
+- State: LANDING on `main` (2026-10-02, fourth and last, right after Mail Hero; rebased on `d1bde0e` without
+  conflicts, the four doc findings of the rebase audit fixed). All 11 review findings fixed, with tests. Verified
+  from a clean clone on the previous base `18e8e92` (every check in the list above, the runtime suite, the
+  gateway's workerd CPU test, both dry runs, and lint and typecheck of every other TypeScript proto user); the move
+  to `d1bde0e` changed no Todofy file. Post-deploy checks below are pending.
 - Review fixes: RecomputeReport stores only a computed report, so the same `request_id` computes again after
   RATE_LIMITED or UNAVAILABLE (a stale unfinished claim is taken over after 120 s); a bug in TodofyCore is
   INTERNAL, not UNAVAILABLE, and the UI retries only UNAVAILABLE and missing answers; ListMailEvents takes one
@@ -200,15 +168,18 @@ with synthetic data.
 
 ### Landing order
 
-Land them one at a time, each rebased on the newest `main` and re-verified, in the order they finish their
-fix stage. The dashboard went first (ready first; its `proto/ts` change redeploys every TypeScript user, so it
-lands alone). Then, as they finish: FlowDay, Mail Hero, Todofy. Each of those must rebase onto the dashboard's
-landing (shared files: `proto/ts/http-transcoder.ts` gained `PreEncoded`, `README.md`, `AGENTS.md`,
-`proto/README.md`, `ci_changes.py`, this file) and re-run its checks. Update this file in each landing commit:
-move the row to "Waiting to be verified" with its post-deploy checks, then delete it once checked.
+Done in this order on 2026-10-02: the dashboard (alone: its `proto/ts` change redeployed every TypeScript user),
+FlowDay, Mail Hero, Todofy, each rebased on the previous landing and re-verified. When an entry's post-deploy
+checks pass, move it to "Waiting to be verified" as verified, then delete it once nothing is left for it.
 
 ## Waiting to be verified
 
+- `flowday.ui.v1` (landed `8d9100e`, 2026-10-02 18:50 UTC): verified. FlowDay's deploy succeeded; the UI's calls
+  (tasks, flows, notes, time entries by day and task, settings, timer, analytics) answer 200 and page; old `/api/*`
+  answers 410 with the reload message; the dashboard's tiles are all ok. Left: remove the 410 routes after
+  2026-11-02 (`LEGACY_PATHS` in `flowday/worker/src/router.ts`). Its landing needed two CI fixes: a FlowDay test
+  narrows each handler's answer (the transcoder's handler type admits `PreEncoded` since the dashboard landed), and
+  `proto/test/ensure.test.ts`'s lock tests allow two whole generations (`TWO_GENERATIONS_MS`).
 - `dashboard.ui.v1` (landed `ca63675`, 2026-10-02 18:20 UTC): verified. Every deploy of the run succeeded (Lab,
   links, watch, Mail Hero and the dashboard, because of the shared `PreEncoded` transcoder change); the registry
   and the four views answer 200 with ETag and 304 on a repeat (flows and ops included, the bug fixed on the
@@ -228,9 +199,9 @@ move the row to "Waiting to be verified" with its post-deploy checks, then delet
   `infra/` for the Access app (`flowday/docs/design.md` section 11).
 - Watch (live since 2026-10-02, `76b376c`): the scheduler is armed and the dashboard tile is ok. The first daily
   digest task in Todoist after 14:00 UTC can only appear once a watch exists and changes; none exist yet.
-- Legacy 410 answers to remove after one release: Lab after 2026-11-01; Mail Hero `/api/v1` after 2026-11-01
-  and FlowDay's old `/api` and the dashboard's `/api/v2` after 2026-11-02 once their branches land; Todofy's date
-  is set when it lands.
+- Legacy 410 answers to remove after one release: Lab's after 2026-11-01, Mail Hero's `/api/v1` after 2026-11-01,
+  the dashboard's `/api/v2` and FlowDay's old `/api` after 2026-11-02, Todofy's old owner paths (`todofy/gateway/src/owner.ts`)
+  and `todofy-core`'s `owner_api` RPC after 2026-11-02.
 - Todofy's old host snapshot can be deleted after 2026-10-29 (`todofy/docs/verification.md`).
 
 ## Waiting for the owner
