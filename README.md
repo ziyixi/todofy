@@ -4,6 +4,8 @@ Five independent Cloudflare apps in one repository (plus FlowDay, which is being
 app, the owner's short links, and the watch app, web watches not deployed yet), the contracts between them, and the
 shared code compiled into each.
 
+Work in flight, its merge order, what still needs checking after a deploy and what waits for the owner: [`HANDOFF.md`](HANDOFF.md).
+
 | Directory | What it is | Start here |
 | --- | --- | --- |
 | [`mail-hero/`](mail-hero/) | Personal inbox on Workers Free + D1 + R2 + a SQLite Durable Object: receives mail through Email Routing and POSTs a `mail.received.v1` webhook | [`mail-hero/README.md`](mail-hero/README.md), [`mail-hero/AGENTS.md`](mail-hero/AGENTS.md) |
