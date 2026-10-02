@@ -126,6 +126,12 @@ describe('the toolchain', () => {
   );
 });
 
+/**
+ * A lock test runs a whole generation twice (one to start current, one under the lock). Each grows with the packages:
+ * about 3 s on a GitHub runner once every app's UI API is generated, so vitest's 5 s default no longer holds two.
+ */
+const TWO_GENERATIONS_MS = 120_000;
+
 describe('the lock', () => {
   test('held by a pid that no longer runs here is taken over at once, with the dead run\'s temporary files', () => {
     const copy = copyProto();
@@ -141,7 +147,7 @@ describe('the lock', () => {
     expect(result.stderr).toContain('generated code is current');
     expect(existsSync(join(copy, '.generate.lock'))).toBe(false);
     expect(existsSync(join(copy, '.generate-abandoned'))).toBe(false);
-  });
+  }, TWO_GENERATIONS_MS);
 
   test('that cannot be checked is waited for, naming its holder', async () => {
     const copy = copyProto();
@@ -159,7 +165,7 @@ describe('the lock', () => {
     await exited;
     expect(stderr).toContain('held by pid 1 on another-host');
     expect(stderr).not.toContain('generated code is current');
-  });
+  }, TWO_GENERATIONS_MS);
 
   test('that cannot be checked is taken over once it is old enough', () => {
     const copy = copyProto();
@@ -169,7 +175,7 @@ describe('the lock', () => {
     const result = ensure(copy);
     expectOk(result);
     expect(result.stderr).toMatch(/taking over .*s old/);
-  });
+  }, TWO_GENERATIONS_MS);
 
   test('is released when generation fails, and a later run succeeds', () => {
     const copy = copyProto();
@@ -181,7 +187,7 @@ describe('the lock', () => {
     expect(existsSync(join(copy, '.generate.lock'))).toBe(false);
     writeFileSync(proto, good);
     expectOk(ensure(copy));
-  });
+  }, TWO_GENERATIONS_MS);
 });
 
 describe('tool commands', () => {
