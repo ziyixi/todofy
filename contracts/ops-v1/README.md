@@ -105,7 +105,7 @@ only JSON values.
 
 | Method | App | Input (`$defs`) | Output (`$defs`) | Writes |
 | --- | --- | --- | --- | --- |
-| `status()` | every app | – | `OpsStatus` | none |
+| `status()` | every app | – | `OpsStatus` | none (an app may re-arm its own missing scheduler alarm, below) |
 | `setGuard(input)` | every app | `SetGuardInput` | `GuardState` | the app's Durable Object storage |
 | `startCanary(input)` | Mail Hero | `StartCanaryInput` | `StartCanaryResult` | one synthetic message and delivery (D1, R2) when queued |
 | `canaryDelivery(eventId)` | Mail Hero | `EventId` | `CanaryDelivery` | none |
@@ -128,8 +128,10 @@ answer an app writes, so a leak fails before it leaves the app and a test catche
 
 ### `status()`
 
-A snapshot built only from bounded, indexed reads (per-app budget in `IMPLEMENTATION.md`); it never
-writes and never aggregates a whole table. Poll it no more often than every 10 minutes
+A snapshot built only from bounded, indexed reads (per-app budget in `IMPLEMENTATION.md`); it writes no
+data and never aggregates an unbounded table. The one write allowed: an app that schedules itself may re-arm
+its own scheduler alarm when none is set (the watch app's `WatchState` does, so the dashboard's tick revives a
+lost alarm; `IMPLEMENTATION.md` §3c). Poll it no more often than every 10 minutes
 (`OPS_LIMITS.statusMinIntervalSeconds`).
 
 - `health`: `down` when maintenance mode is on or the snapshot could not be read (signal
