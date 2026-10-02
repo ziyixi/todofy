@@ -35,6 +35,10 @@ NUMBERS = ("TYPE_INT32", "TYPE_DOUBLE")
 # escaped outside a class; \d, \w, \b, \1 or \u mean other things, or nothing, in one of the two engines), and
 # `-` inside a class.
 PATTERN_ESCAPES = set("^$\\.*+?()[]{}|/")
+# Any character, in every dialect: whatever each engine counts as \s, the class holds it and the rest. ECMAScript
+# without the u flag reads it as any UTF-16 code unit, so a character above U+FFFF still matches (two of them). The one
+# class a pattern may write with shorthand escapes.
+ANY_CHARACTER = "[\\s\\S]"
 # The JSON Schema formats a Format may name (Format.json_schema_format; "" for none): RFC 3339's date-time, which the
 # hand-written report and mail.received.v1 schemas declared, and RFC 9562's uuid (mail.received.v1's IDs). One is
 # added here when a contract needs it, never by a .proto alone.
@@ -147,13 +151,21 @@ def formats(file: dict[str, Any]) -> dict[str, Format]:
 
 
 def portable(pattern: str) -> bool:
-    """Whether ECMAScript (u flag) and Python's re read ``pattern`` alike: literals, character classes, groups,
-    alternation and quantifiers. Outside a class no anchor (the match is always whole), no `.` and no (?...)
-    construct; anywhere, only punctuation is escaped."""
+    """Whether ECMAScript (with or without the u flag) and Python's re read ``pattern`` alike: literals, character
+    classes, groups, alternation and quantifiers. Outside a class no anchor (the match is always whole), no `.` and no
+    (?...) construct; anywhere, only punctuation is escaped, and no character above U+FFFF. ECMAScript without the u
+    flag reads such a character as two UTF-16 code units: a class holding one would hold its two halves instead (a
+    range up to U+10FFFF would end at U+DBFF), and a quantifier after one would repeat its second half only. A JSON
+    Schema reader may compile patterns either way. ANY_CHARACTER stands for any character."""
     in_class = False
     i = 0
     while i < len(pattern):
         char = pattern[i]
+        if ord(char) > 0xFFFF:
+            return False
+        if not in_class and pattern.startswith(ANY_CHARACTER, i):
+            i += len(ANY_CHARACTER)
+            continue
         if char == "\\":
             escaped = pattern[i + 1] if i + 1 < len(pattern) else ""
             if not escaped or not (escaped in PATTERN_ESCAPES or (in_class and escaped == "-")):

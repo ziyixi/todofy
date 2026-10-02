@@ -351,7 +351,7 @@ def related_file() -> dict:
     }
     nested = {"name": "A", "field": [scalar("name", 1, "TYPE_STRING", options=REQUIRED)]}
     formats = [
-        {"name": "Visible", "pattern": "[ ]*[^ ][\x00-\U0010ffff]*"},
+        {"name": "Visible", "pattern": "[ ]*[^ ][\\s\\S]*"},
         {"name": "Uuid", "pattern": "[0-9a-f]{8}", "jsonSchemaFormat": "uuid"},
     ]
     return {
@@ -380,7 +380,7 @@ class ConsumerSchemaTest(unittest.TestCase):
         self.assertIs(closed["additionalProperties"], False)
 
     def test_any_match_is_an_any_of_one_branch_per_field(self) -> None:
-        visible = {"type": "string", "pattern": "^(?:[ ]*[^ ][\x00-\U0010ffff]*)$(?!\\n)"}
+        visible = {"type": "string", "pattern": "^(?:[ ]*[^ ][\\s\\S]*)$(?!\\n)"}
         self.assertEqual(
             self.schema["anyOf"],
             [

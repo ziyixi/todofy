@@ -185,9 +185,9 @@ class FieldRulesTest(unittest.TestCase):
         self.assertTrue(format_matches(pb.FORMATS["Tracking"], "AB123456"))
         self.assertFalse(format_matches(pb.FORMATS["Tracking"], "AB1234567"))
 
-    def test_a_pattern_above_u_ffff_means_the_same_in_the_generated_module(self) -> None:
-        # Visible ends in a class up to U+10FFFF: a JSON surrogate pair in the module would end it at U+DBFF.
-        for text in (" \U0010ffff", " \U0001f600", " \ud800", " \uffff\n"):
+    def test_any_character_matches_every_character_after_the_first_visible_one(self) -> None:
+        # Visible ends in [\s\S]*: characters above U+FFFF, lone surrogates and line ends included.
+        for text in (" \U0010ffff", " \U0001f600", " \ud800", " \uffff\n", "\U0001f600", "a\U0001f600b\u2028"):
             self.assertTrue(format_matches(pb.FORMATS["Visible"], text), ascii(text))
         self.assertFalse(format_matches(pb.FORMATS["Visible"], "   "))
 
@@ -240,6 +240,13 @@ REQUIRED_TEXT = {"options": {"[google.api.field_behavior]": ["REQUIRED"]}}
 
 
 class GeneratorChecksTest(unittest.TestCase):
+    def test_any_character_is_the_one_shorthand_class(self) -> None:
+        # Its union is every character in Python's re and in ECMAScript, with or without the u flag.
+        for pattern in ("[\\s\\S]", "[ ]*[^ ][\\s\\S]*", "([\\s\\S]|a)+"):
+            self.assertTrue(wire_rules.portable(pattern), pattern)
+        for pattern in ("\\s\\S", "[\\S\\s]", "[\\s\\S", "[a[\\s\\S]]"):
+            self.assertFalse(wire_rules.portable(pattern), pattern)
+
     def test_well_placed_rules_pass(self) -> None:
         wire_rules.check_image(image(field("a", "TYPE_STRING", {"format": "Code", "allowed": ["x"]}), formats=[CODE]))
         wire_rules.check_image(
@@ -313,6 +320,11 @@ class GeneratorChecksTest(unittest.TestCase):
                 ),
             ),
             ("a pattern ECMAScript reads differently", image(formats=[{"name": "Digits", "pattern": "\\d+"}])),
+            ("a shorthand class other than [\\s\\S]", image(formats=[{"name": "Gap", "pattern": "a[\\s]b"}])),
+            ("a negated shorthand outside a class", image(formats=[{"name": "Gap", "pattern": "a\\S+"}])),
+            # ECMAScript without the u flag reads U+10FFFF as two code units: the range would end at U+DBFF.
+            ("a character above U+FFFF in a class", image(formats=[{"name": "Any", "pattern": "[\x00-\U0010ffff]*"}])),
+            ("a character above U+FFFF outside a class", image(formats=[{"name": "Smile", "pattern": "\U0001f600+"}])),
             ("an anchored pattern", image(formats=[{"name": "Code", "pattern": "^[a-z]+$"}])),
             ("a format defined twice", image(formats=[CODE, copy.deepcopy(CODE)])),
             ("a format name that is not PascalCase", image(formats=[{"name": "code", "pattern": "[a-z]+"}])),

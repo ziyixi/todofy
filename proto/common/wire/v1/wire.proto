@@ -66,9 +66,10 @@ extend google.protobuf.MethodOptions {
 message Format {
   // The name fields refer to; the JSON Schema generator uses it as the $defs name (Code, Timestamp).
   string name = 1;
-  // The whole value matches this (no ^ or $: the match is always anchored). Only what ECMAScript (with the
-  // u flag) and Python's re read alike: literal characters, character classes of literals and ranges,
-  // groups, alternation and the quantifiers ? * + {m,n}; no shorthand class (\d, \w, \s), no `.`.
+  // The whole value matches this (no ^ or $: the match is always anchored). Only what ECMAScript (with or
+  // without the u flag) and Python's re read alike: literal characters up to U+FFFF, character classes of
+  // literals and ranges, groups, alternation and the quantifiers ? * + {m,n}; no shorthand class (\d, \w, \s)
+  // but the class [\s\S] (any character), no `.`.
   string pattern = 2;
   // At most this many characters (Unicode code points, as JSON Schema counts them); 0 means no bound.
   int32 max_length = 3;

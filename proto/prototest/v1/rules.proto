@@ -24,7 +24,7 @@ option (common.wire.v1.formats) = {
 };
 option (common.wire.v1.formats) = {
   name: "Visible"
-  pattern: "[ ]*[^ ][\x00-\U0010FFFF]*"
+  pattern: "[ ]*[^ ][\\s\\S]*"
   description: "Not only spaces: at least one other character, anywhere."
 };
 

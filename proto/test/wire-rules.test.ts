@@ -152,8 +152,8 @@ describe('the relations between fields and write_empty', () => {
     expect(toWire(NoteSchema, create(NoteSchema, { ...note, from: ['a@example.org'] }))).toEqual({ title: 't', flags: [], from: ['a@example.org'] });
   });
 
-  test('a pattern above U+FFFF matches code points, lone surrogates included', () => {
-    for (const text of [' \u{10ffff}', ' \u{1f600}', ' \ud800', ' \uffff\n']) expect(formatMatches(file_prototest_v1_rules, 'Visible', text), text).toBe(true);
+  test('[\\s\\S] matches every character after the first visible one, above U+FFFF and lone surrogates included', () => {
+    for (const text of [' \u{10ffff}', ' \u{1f600}', ' \ud800', ' \uffff\n', '\u{1f600}', 'a\u{1f600}b\u2028']) expect(formatMatches(file_prototest_v1_rules, 'Visible', text), text).toBe(true);
     expect(formatMatches(file_prototest_v1_rules, 'Visible', '   ')).toBe(false);
   });
 });

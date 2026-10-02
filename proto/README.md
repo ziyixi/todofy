@@ -336,7 +336,9 @@ contracts send:
 
 A contract states its value rules in the IDL, next to its fields, with the options of
 [`common/wire/v1/wire.proto`](common/wire/v1/wire.proto): a file's named string formats (`Code`, `Timestamp`: an
-anchored regular expression in the subset ECMAScript and Python read alike, a length, and optionally the JSON Schema
+anchored regular expression in the subset ECMAScript, with or without the u flag, and Python read alike: no `.`, no
+shorthand class but `[\s\S]` for any character, no character above U+FFFF, which ECMAScript without u reads as two
+code units; a length, and optionally the JSON Schema
 `format` the generated schema states next to the pattern, `json_schema_format`: only `date-time`, an annotation the
 codecs do not check), and per field a format, an `allowed` list (an enum-like string, or a subset of an enum), number
 bounds, list and map sizes (`max_items`; 0, the default, is no bound), unique items, map key formats and required
