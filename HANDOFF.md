@@ -16,8 +16,8 @@ Rules for this file:
   what is done, what is left, how to verify it and what to check after its deploy. Link to the app docs for
   design detail instead of copying it.
 
-Last updated: 2026-10-02 ~17:30 UTC. `main` is `327ad52` (watch live, WatchState in the dashboard
-registry). Four proto UI branches are pushed and still being finished (below).
+Last updated: 2026-10-02 ~18:30 UTC. `main` is `ca63675`: `dashboard.ui.v1` landed and is verified (below). Three
+proto UI branches (FlowDay, Mail Hero, Todofy) are pushed and still being finished.
 
 ## What is live
 
@@ -29,7 +29,7 @@ registry). Four proto UI branches are pushed and still being finished (below).
 | Links | `links` | `s.ziyixi.science` | `Links deploy` | Yes (`links.ui.v1`) |
 | Watch | `watch` (+ `WatchState` DO) | `watch.ziyixi.science` | `Watch deploy` | Yes (`watch.ui.v1`) |
 | FlowDay | `flowday` | `flowday.ziyixi.science` | `FlowDay deploy` | Branch `proto-flowday-ui` |
-| Dashboard | `home` (+ `HomeState` DO) | `home.ziyixi.science` | `Dashboard deploy` | `ops-v1` client yes; owner API: branch `proto-dashboard-ui` |
+| Dashboard | `home` (+ `HomeState` DO) | `home.ziyixi.science` | `Dashboard deploy` | Yes (`dashboard.ui.v1`, since `ca63675`) |
 | Website | `ziyixi-website` (+ `ziyixi-notion-publish` relay) | `ziyixi.science`, `www.ziyixi.science` | `Website release` | n/a (static) |
 
 Outside this repository (do not move them in without the owner): the newsletter (its own repository, runs
@@ -65,7 +65,7 @@ Practical notes learned the hard way:
 
 ## In flight
 
-All four branches below are pushed (CI only, nothing deploys from a branch). They were built in local
+The three branches below are pushed (CI only, nothing deploys from a branch). They were built in local
 scratch clones by agents that are still finishing them; their latest commits are pushed again when they
 finish. If the session that runs them is gone, continue from the pushed branch: re-run the verification
 list, do the reviews, fix, rebase, land.
@@ -150,32 +150,6 @@ with synthetic data.
   status) load; the newsletter's next run at 13:30 UTC still gets `/api/summary` and `/api/recommendation`
   (same bytes); the canary (mail → Todofy) passes on the dashboard.
 
-### `proto-dashboard-ui` — dashboard owner API as `dashboard.ui.v1`
-
-- State: LANDING on `main` (2026-10-02, first of the four: it was ready first, so it lands alone now instead of
-  last; the other three rebase onto it). Post-deploy checks below are pending until this line says otherwise.
-  Thirteen commits on `9e38624`: `ba3c27d` transcoder `PreEncoded`, `a54e961` wire
-  types, `0df8395` Worker, `c38519a` UI, `1202e6e` docs, `d8a0889` CSRF route, `7a7acfa` ETag fix, `b0a7020`
-  verification record, then the review fixes `71eaeeb` (CS1, D1), `3bca46b` (D2), `dcabee3` (D3), `55be11f` (D4),
-  `637abbd` (CS2) and this record. Both reviews are done and all findings fixed; verified from a clean clone
-  of `637abbd` (`dashboard/docs/verification.md` §1m).
-- What it does: registry and four views as AIP-156 singletons (`GET /api/v1/{registry,homeView,flowsView,
-  cloudflareView,opsView}`); refreshes become custom POST methods (`homeView:refresh`, `cloudflareView:refresh`,
-  now with CSRF and Origin); `guard:override` and `canaries/mail-todofy:run` with a `request_id` HomeState
-  remembers for 24 h. HomeState still serializes each view once; the Worker passes the bytes through as a
-  `PreEncoded` answer with the ETag or 304 (no codec CPU per request), and HomeState cuts every list at the IDL's
-  `max_items` (`worker/src/idl.ts`). Old `/api/v2/*` answer 410 with the reload message under the code `not_found`
-  until 2026-11-02 (the old UI shows messages only for its own codes; a smoke of `main`'s client shows the reload
-  message on all 9 of its calls). The deploy probe path changes from `/api/v2/home` to `/api/v1/homeView` (`ci.yml`
-  and `test_ci_changes.py` together).
-- Shared runtime change: `ba3c27d` touches `proto/ts`, so landing it re-checks and redeploys every "ts" proto
-  user (Lab, links, watch, Mail Hero, the dashboard, and FlowDay once its branch lands). Land it on its own and
-  watch all those deploys. Everything else deploys the dashboard only.
-- Measured: UI JS 112.7 → 157.9 KiB gzip (budget 192); Worker 92.2 → 117.1 KiB gzip (budget 108 → 140);
-  the isolate's first API request 4.4–4.7 → 5.0 reference ms (bound 9), warm medians ≤ 1.4; cron tick unchanged.
-- After deploy: home.ziyixi.science loads every view, refresh works, attention empty, the canary can be run,
-  an old open tab shows 个人控制台已更新，请刷新页面 as its error text. Remove the 410 routes after 2026-11-02.
-
 ### Landing order
 
 Land them one at a time, each rebased on the newest `main` and re-verified, in the order they finish their
@@ -186,6 +160,14 @@ landing (shared files: `proto/ts/http-transcoder.ts` gained `PreEncoded`, `READM
 move the row to "Waiting to be verified" with its post-deploy checks, then delete it once checked.
 
 ## Waiting to be verified
+
+- `dashboard.ui.v1` (landed `ca63675`, 2026-10-02 18:20 UTC): verified. Every deploy of the run succeeded (Lab,
+  links, watch, Mail Hero and the dashboard, because of the shared `PreEncoded` transcoder change); the registry
+  and the four views answer 200 with ETag and 304 on a repeat (flows and ops included, the bug fixed on the
+  branch); 刷新 is `POST /api/v1/homeView:refresh` with CSRF and answers 200; attention is ok; old `/api/v2/*`
+  answers 410 with 个人控制台已更新，请刷新页面; a GET with `refresh=1` answers 400. Lab, links, watch and Mail Hero
+  load their data after the redeploy. Left: remove the 410 routes after 2026-11-02 (`legacyApi` in
+  `dashboard/worker/src/http.ts`).
 
 - Newsletter with `todofy.report.v1` (2026-10-02 13:30 UTC): Cloudflare side checked, Todofy's gateway
   answered 42 requests after 13:25 UTC, all successful, CPU p50 0.7 ms / p99 4.1 ms. The VPS side (the
@@ -217,7 +199,7 @@ move the row to "Waiting to be verified" with its post-deploy checks, then delet
 
 ## Next, in order
 
-1. Finish and land the four proto branches above, then verify each deploy.
+1. Finish and land the three remaining proto branches above (FlowDay, Mail Hero, Todofy), then verify each deploy.
 2. After them, proto is the single IDL for every interface the monorepo defines. Follow-ups: remove the 410
    routes on their dates; remove `owner_api` from `todofy-core` in the release after `proto-todofy-ui`.
 3. Watch W4: a shadow-mode week (watches report, no Todoist tasks), then the owner's watches.
