@@ -11,7 +11,8 @@
  * are minute-rounded, so an unchanged state keeps its ETag for at least a minute.
  */
 import type { CanaryState, Digest, GuardView, QuotaRow, Usage } from './api-types.ts';
-import { CF_VIEW_WORKERS_MAX, HOME_QUOTA_IDS, type AppDetail, type Attention, type Badges, type CloudflareView, type Drift, type FlowsView, type HomeView, type OpsView, type Refresh, type ShellFields, type WorkerRow } from './api-types.ts';
+import { HOME_QUOTA_IDS, type AppDetail, type Attention, type Badges, type CloudflareView, type Drift, type FlowsView, type HomeView, type OpsView, type Refresh, type ShellFields, type WorkerRow } from './api-types.ts';
+import { CF_VIEW_WORKERS_MAX } from './idl.ts';
 import type { RegistryDef } from './registry-types.ts';
 import { resourceRows, withBreakdownResources, workerRows, type CfScriptsDoc } from './discovery.ts';
 import type { StatusDoc, UsageDoc } from './docs.ts';

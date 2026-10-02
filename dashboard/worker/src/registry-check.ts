@@ -5,7 +5,7 @@
  */
 import { MAX_OUTBOUND_PER_REFRESH, MAX_OUTBOUND_PER_TICK } from './api-types.ts';
 import type { RegistryDef } from './registry-types.ts';
-import { ACCENTS, ICON_KEYS } from './idl.ts';
+import { ACCENTS, FLOW_STAGES_MAX, ICON_KEYS } from './idl.ts';
 import { isOpsCode } from './ops-client.ts';
 import { OWNER_ZONE, PLATFORM_SIGNALS, outboundPerRefresh, outboundPerTick, stageScripts } from './registry.ts';
 
@@ -208,7 +208,7 @@ export function validateRegistry(registry: RegistryDef, options: ValidationOptio
     add(ENTRY_ID.test(flow.id), `${where}: id pattern`);
     add(flowGroups.has(flow.group), `${where}: unknown group ${flow.group}`);
     add(flow.name.length >= 1 && flow.name.length <= 16, `${where}: name length`);
-    add(flow.stages.length >= 2 && flow.stages.length <= 8, `${where}: 2 to 8 stages`);
+    add(flow.stages.length >= 2 && flow.stages.length <= FLOW_STAGES_MAX, `${where}: 2 to ${String(FLOW_STAGES_MAX)} stages`);
     for (const id of duplicates(flow.stages.map((s) => s.id))) problems.push(`${where}: duplicate stage ${id}`);
     const inFlow = new Set<string>();
     for (const stage of flow.stages) {

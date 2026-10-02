@@ -9,8 +9,8 @@
  * keeps only its name and type, so a plain_text value (or any other field) never leaves the parser, and
  * remote text never leaves this module (failures become codes). Findings are names only.
  */
-import { DRIFT_CALLS_PER_TICK, DRIFT_FINDINGS_MAX, DRIFT_MAX_ATTEMPTS, DRIFT_UTC_HOUR, DRIFT_VIEW_FINDINGS_MAX, type DriftCategory, type DriftFinding, type Drift } from './api-types.ts';
-import { DRIFT_CATEGORIES } from './idl.ts';
+import { DRIFT_CALLS_PER_TICK, DRIFT_FINDINGS_MAX, DRIFT_MAX_ATTEMPTS, DRIFT_UTC_HOUR, type DriftCategory, type DriftFinding, type Drift } from './api-types.ts';
+import { DRIFT_CATEGORIES, DRIFT_VIEW_FINDINGS_MAX } from './idl.ts';
 import desiredJson from './drift-desired.json';
 import { isoOrNull, utcDay } from './time.ts';
 

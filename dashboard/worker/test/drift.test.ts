@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { DRIFT_CALLS_PER_TICK, DRIFT_MAX_ATTEMPTS, DRIFT_UTC_HOUR, DRIFT_VIEW_FINDINGS_MAX } from '../src/api-types.ts';
-import { DRIFT_CATEGORIES } from '../src/idl.ts';
+import { DRIFT_CALLS_PER_TICK, DRIFT_MAX_ATTEMPTS, DRIFT_UTC_HOUR } from '../src/api-types.ts';
+import { DRIFT_CATEGORIES, DRIFT_VIEW_FINDINGS_MAX } from '../src/idl.ts';
 import {
   CF_API_BASE,
   DESIRED,

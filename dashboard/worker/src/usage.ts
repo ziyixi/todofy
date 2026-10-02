@@ -8,6 +8,7 @@
  */
 import { BREAKDOWN_UNCLASSIFIED, type QuotaResource, type QuotaRow } from './api-types.ts';
 import { WORKERS_QUERY_LIMIT, type StorageKind } from './api-types.ts';
+import { QUOTA_BREAKDOWN_MAX } from './idl.ts';
 import { ALLOWANCES, DO_DURATION_GB } from './limits.ts';
 import { DAY_MS, HOUR_MS, daysInUtcMonth, isoSeconds, round1, startOfUtcDay, startOfUtcMonth, utcDay, utcMonthStart } from './time.ts';
 
@@ -288,7 +289,7 @@ function quotaRow(id: QuotaResource, measured: Measured, now: number): QuotaRow 
     truncated: measured.truncated,
     breakdown: [...measured.breakdown]
       .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
-      .slice(0, 5)
+      .slice(0, QUOTA_BREAKDOWN_MAX)
       .map(([name, value]) => ({ name, value: round1(value) })),
     source: allowance.source,
   };

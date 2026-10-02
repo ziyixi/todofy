@@ -12,8 +12,9 @@
 import { DurableObject } from 'cloudflare:workers';
 import type { GuardLevel, GuardState, OpsStatus, SetGuardInput } from '@ziyixi/proto/ops/v1/ops_wire';
 import { OPS_LIMITS } from '../../../contracts/ops-v1/ops-v1.ts';
-import { CANARY_MANUAL_PER_DAY, CANARY_RECENT_RUNS, GUARD_CLEAR_PERCENT, GUARD_SHED_PERCENT, REFRESH_MIN_INTERVAL_SECONDS, type AppErrorCode, type CanaryRun, type OpsApp, type CanaryState, type Digest, type GuardAppView, type GuardView, type Usage } from './api-types.ts';
+import { CANARY_MANUAL_PER_DAY, GUARD_CLEAR_PERCENT, GUARD_SHED_PERCENT, REFRESH_MIN_INTERVAL_SECONDS, type AppErrorCode, type CanaryRun, type OpsApp, type CanaryState, type Digest, type GuardAppView, type GuardView, type Usage } from './api-types.ts';
 import { CLOUDFLARE_REFRESH_MIN_SECONDS, PROBE_MIN_INTERVAL_SECONDS, VIEW_BODY_BUDGET, type ShellFields, type ViewId } from './api-types.ts';
+import { CANARY_RECENT_RUNS } from './idl.ts';
 import {
   CANARY_RETENTION_MS,
   applyDeadline,

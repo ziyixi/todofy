@@ -247,7 +247,11 @@ names them) and serializes it once; the Worker hands those bytes to the transcod
 (or 304), never decoding them, so a view costs the handler no codec CPU. The proof that the bytes are what the wire
 profile writes is in the tests: `worker/test/wire-conformance.ts` reads every view the unit suite builds and every answer
 of the real Worker in workerd as the client does, refusing anything unrecognized, and requires the message read back to
-serialize to the same bytes (fields in numbered order, nulls and omissions where the profile puts them).
+serialize to the same bytes (fields in numbered order, nulls and omissions where the profile puts them). Since the
+Worker never reads a view, HomeState cuts each list at the IDL's own bound: `worker/src/idl.ts` reads every `max_items`
+the views use from the descriptors (`CANARY_RECENT_RUNS`, `CF_VIEW_WORKERS_MAX`, `DRIFT_VIEW_FINDINGS_MAX`, the top
+signals, quota breakdown, flow stages and digest items), and `worker/test/idl.test.ts` holds them at the values the body
+budgets were measured with and `HOME_QUOTA_IDS` (which the UI imports, so it stays a plain list) at its bound.
 
 **Cost of the move** (measured 2026-10-02 on the reference machine of `tools/workerd-cpu`, three runs each, before on
 the hand-written `/api/v2` routes and after). Bundles, gzip as `tools/bundle-size` counts them: the Worker 92.2 →

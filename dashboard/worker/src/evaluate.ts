@@ -6,6 +6,7 @@
  */
 import { CANARY_DISABLED_ITEM, type OpsSignal, type OpsStatus, type OverallLevel } from './api-types.ts';
 import { LEVEL_RANK, attentionLevel, type AttentionItem, type Attention, type Badges, type CanaryBadge, type EntryState, type FlowState, type FlowSummary, type Freshness, type HeldItem, type Level, type RollupLevel, type StageState, type Target, type TileMetric, type ViewId } from './api-types.ts';
+import { TOP_SIGNALS_MAX } from './idl.ts';
 import type { EntryDef, FlowDef, RegistryDef, StageDef } from './registry-types.ts';
 import type { CanaryRecord } from './canary.ts';
 import { TICK_STALE_MS, overallLevel } from './digest.ts';
@@ -261,7 +262,7 @@ export function entryState(entry: EntryDef, input: EvalInput, registry: Registry
       topSignals = (freshStatus(doc, input.now)?.signals ?? [])
         .filter((signal) => signal.severity !== 'info' || holds.has(signal.code))
         .sort((a, b) => SEVERITY_RANK[a.severity] - SEVERITY_RANK[b.severity])
-        .slice(0, 3)
+        .slice(0, TOP_SIGNALS_MAX)
         .map((signal) => ({ code: signal.code, severity: signal.severity, since: signal.since ?? null }));
       break;
     }

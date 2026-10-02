@@ -272,8 +272,6 @@ export const GUARD_CLEAR_PERCENT = 70;
 export const QUOTA_CRITICAL_PERCENT = 95;
 /** Manual canary runs per UTC day. */
 export const CANARY_MANUAL_PER_DAY = 3;
-/** Canary runs shown in the flows and ops views (newest first): CanaryView.recent's max_items. */
-export const CANARY_RECENT_RUNS = 14;
 /**
  * The info item the attention strip shows while CANARY_ENABLED=false. Page only: the digest carries warning and
  * critical items, so it never reaches Todofy's reportOps.
@@ -300,7 +298,7 @@ export const BREAKDOWN_UNCLASSIFIED = 'unknown';
  * Response size budgets (bytes of the JSON body) of a normal day (test/views.test.ts: the mockup day, and the
  * Cloudflare view with 20 Workers). A bad day may exceed them: the attention strip repeats up to 20 items in every
  * view and the canary strip can hold 14 failed runs; VIEW_BODY_MAX bounds that case (20 alarms, 16 signals per app,
- * 14 failed runs, and the Cloudflare view at its row cap of CF_VIEW_WORKERS_MAX Workers out of CF_SCRIPTS_MAX
+ * 14 failed runs, and the Cloudflare view at its row cap of idl.ts CF_VIEW_WORKERS_MAX Workers out of CF_SCRIPTS_MAX
  * remembered; all tested). HomeState logs `over_budget` when a body passes its budget.
  */
 export const VIEW_BODY_MAX = 32 * 1024;
@@ -345,12 +343,6 @@ export const WORKERS_QUERY_LIMIT = 50;
 /** Scripts not seen for this many UTC days leave the remembered `cf_scripts` set; at most this many kept. */
 export const CF_SCRIPTS_RETENTION_DAYS = 30;
 export const CF_SCRIPTS_MAX = 100;
-/**
- * Rows the Cloudflare view lists at most (≈ 300 B each): CloudflareView.workers' max_items. Scripts active today come
- * first, then the most recently seen; the rest is counted in `workers_omitted`, so the body stays under VIEW_BODY_MAX
- * even with CF_SCRIPTS_MAX remembered scripts.
- */
-export const CF_VIEW_WORKERS_MAX = 50;
 
 /** A public_http probe runs at most once per tick, and an owner refresh re-probes only after this. */
 export const PROBE_MIN_INTERVAL_SECONDS = 600;
@@ -370,9 +362,8 @@ export const DRIFT_UTC_HOUR = 2;
 export const DRIFT_CALLS_PER_TICK = 12;
 /** A day's check stops after this many failed attempts (one per tick); the next day starts over. */
 export const DRIFT_MAX_ATTEMPTS = 3;
-/** Findings kept per check, and listed by the Cloudflare view (the counts stay complete). */
+/** Findings kept per check (the Cloudflare view lists idl.ts DRIFT_VIEW_FINDINGS_MAX of them; the counts stay complete). */
 export const DRIFT_FINDINGS_MAX = 50;
-export const DRIFT_VIEW_FINDINGS_MAX = 20;
 /** Failed check days in a row before the digest reports `drift_unavailable`. */
 export const DRIFT_UNAVAILABLE_AFTER_DAYS = 2;
 
@@ -386,6 +377,7 @@ export const LEVEL_RANK: Readonly<Record<RollupLevel, number>> = { ok: 0, held: 
  * only on the Cloudflare view, where DO requests stay.
  */
 export const HOME_QUOTA_IDS: readonly QuotaResource[] = ['workers_requests', 'd1_rows_read', 'ai_neurons', 'r2_storage'];
+// HOME_QUOTA_IDS.length is CloudflareSummary.quota's max_items (idl.ts HOME_QUOTA_MAX; test/idl.test.ts).
 
 /** The strip level of an item: the observed level, else the digest severity. */
 export function attentionLevel(item: Pick<AttentionItem, 'severity' | 'observed'>): 'info' | 'warning' | 'critical' | 'unknown' {
