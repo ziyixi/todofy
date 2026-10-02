@@ -3,7 +3,7 @@
  * and never buffered whole, robots.txt keeps its first bytes, every hop passes the gate and reports back to it, and a
  * render that failed still says what it cost. Synthetic inputs only; nothing leaves the process.
  */
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { browserAllowed, quickActionRenderer } from '../src/browser.ts';
 import { fetchPage, readCapped, type HopGate } from '../src/fetcher.ts';
 import { HostLocks } from '../src/host-locks.ts';
@@ -62,17 +62,42 @@ describe('fetchPage and its gate', () => {
   });
 
   it('gives every request its own timer, always cleared, and reports a timeout to the gate as no answer', async () => {
-    const statuses: number[] = [];
-    const gate: HopGate = { enter: () => Promise.resolve(null), leave: (_url, status) => statuses.push(status) };
-    const never = (request: Request) =>
-      new Promise<Response>((_resolve, reject) => {
-        request.signal.addEventListener('abort', () => {
-          reject(new Error('aborted'));
+    vi.useFakeTimers();
+    try {
+      const statuses: number[] = [];
+      const gate: HopGate = { enter: () => Promise.resolve(null), leave: (_url, status) => statuses.push(status) };
+      // Like a real fetch, retain active requests: Node links Request.signal weakly to its supplied signal.
+      const requests: Request[] = [];
+      let redirect: ((response: Response) => void) | undefined;
+      const fetchFn = (request: Request) => {
+        requests.push(request);
+        return new Promise<Response>((resolve, reject) => {
+          if (requests.length === 1) redirect = resolve;
+          request.signal.addEventListener('abort', () => {
+            reject(new Error('aborted'));
+          });
         });
-      });
-    const answer = await fetchPage(never, { url: 'https://slow.example.com/', accept: 'text/html', locale: 'en', allowHttp: false, conditional: null, timeoutMs: 20, gate });
-    expect(answer).toMatchObject({ kind: 'failed', failure: 'TIMEOUT' });
-    expect(statuses).toEqual([0]);
+      };
+      const answer = fetchPage(fetchFn, { url: 'https://start.example.com/', accept: 'text/html', locale: 'en', allowHttp: false, conditional: null, timeoutMs: 20, gate });
+      await vi.advanceTimersByTimeAsync(19);
+      expect(requests).toHaveLength(1);
+      expect(vi.getTimerCount()).toBe(1);
+      expect(redirect).toBeDefined();
+      redirect?.(new Response(null, { status: 302, headers: { location: 'https://slow.example.com/' } }));
+      await vi.advanceTimersByTimeAsync(0);
+      expect(requests).toHaveLength(2);
+      expect(vi.getTimerCount()).toBe(1);
+      await vi.advanceTimersByTimeAsync(19);
+      expect(requests.map((request) => request.signal.aborted)).toEqual([false, false]);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(await answer).toMatchObject({ kind: 'failed', failure: 'TIMEOUT', redirects: 1, requests: 2 });
+      expect(statuses).toEqual([302, 0]);
+      expect(requests.map((request) => request.signal.aborted)).toEqual([false, true]);
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.clearAllTimers();
+      vi.useRealTimers();
+    }
   });
 });
 
