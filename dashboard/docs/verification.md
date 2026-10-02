@@ -291,6 +291,22 @@ every plain_text binding):
 | `Changes` | `uv run --no-project --python 3.12 python -m unittest discover -s .github/scripts` | 165 tests OK (new `test_drift_desired.py`: the committed JSON equals a fresh generation, names only, every production Worker, every wrapper value and hand-set secret name) |
 | live, read-only | the check's own functions run once against the account with a read-only API call set (no write, nothing stored) | completed in two rounds of 12 calls; every answer parsed. The result is private: it is not recorded in this public file |
 
+## 1k. Local, the FlowDay and links tiles (2026-10-02)
+
+FlowDay and the links app as 应用 tiles with `public_http` probes outside Access (design-v2.md §3). From a
+clean clone of the branch at `a2ddcb3`, macOS, Node 26.9.0, synthetic data only, no token, no Cloudflare or
+GitHub call:
+
+| Job | Step | Result |
+| --- | --- | --- |
+| `Dashboard checks` | `node --test deploy/test/*.test.mjs` | 17 passed |
+| | worker lint, typecheck, `npm test` | ok; 15 files, 235 tests passed (the media-type check, a probe outside Access only on the entry's own host with `content_type` and 2xx, directory links, the error rate folded into the tile once, both tiles on the mockup day) |
+| | worker `npm run test:runtime` (workerd, clock pinned with `DEV_NOW`) | 8 files, 72 tests passed (Access's 302 on FlowDay's manifest and an HTML 200 on links: critical tiles, one observed item each, flows and digest unchanged; 25 outbound calls per tick; rows read 25 / 25 / 26 / 25 within 28; the cron tick's CPU within its bounds) |
+| | web lint, typecheck, tests, build; import guard | ok; 13 files, 117 tests passed; no cross-origin references |
+| | placeholder config dry-run (`GITHUB_SHA` set as in CI) | ok; bindings unchanged, the four secrets hidden; 389.5 KiB raw, 91.0 KiB gzip (budget 108 KiB) |
+| `Changes` | `uv run --no-project --python 3.12 python -m unittest discover -s .github/scripts`; `drift_desired.py --check` | 316 tests OK (every production Worker and D1 registered, tile links = PUBLIC_HOST, every probe path outside Access per `infra/access.tf`); the desired state is current |
+| browser | the real Worker in Miniflare with `web/dist`, stub Ops apps, synthetic GraphQL and probe answers, the loopback bypass; 1280 px and 390 px, light and dark | healthy: 应用 holds Mail Hero, Todofy, 论文雷达, FlowDay, 短链接 in one desktop row next to 站点; on a phone 应用与站点 fills two rows of three; FlowDay and 短链接 read "● 正常 · 响应 N ms" with the Access lock; no horizontal scroll at 390 px. Failing (FlowDay's manifest redirected, links at 8 % errors): strip "1 项故障 · 1 项需关注" (FlowDay：HTTP 状态异常, 短链接：错误率偏高), tiles ■ 故障 / ▲ 需关注, badge 2; FlowDay's sheet shows 连续失败 2 次 and links to its Worker and the app |
+
 ## 2. Production (pending)
 
 None of these has been done; each needs the first `Dashboard deploy` on `main` (after Todofy and Mail
