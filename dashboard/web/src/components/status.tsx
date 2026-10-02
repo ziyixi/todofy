@@ -16,7 +16,7 @@ import {
   type LucideIcon,
 } from 'lucide-react'
 import type { ReactNode } from 'react'
-import type { Accent, IconKey, Level } from '../../../worker/src/api-v2-types.ts'
+import type { Accent, IconKey, Level } from '../../../worker/src/api-types.ts'
 import { LEVEL, type Tone } from '../lib/labels'
 
 /** The closed icon set of the registry (bundled lucide strokes, never fetched). */

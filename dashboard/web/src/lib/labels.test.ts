@@ -1,4 +1,5 @@
-import { QUOTA_RESOURCES } from '../../../worker/src/api-types.ts'
+import { QuotaResource, QuotaResourceSchema } from '@ziyixi/proto/dashboard/ui/v1/usage_pb'
+import { wireEnum } from '@ziyixi/proto/wire-json'
 import {
   QUOTA,
   canaryCodeLabel,
@@ -21,6 +22,9 @@ import watchDegraded from '../../../../contracts/ops-v1/fixtures/OpsStatus/watch
 import watchOk from '../../../../contracts/ops-v1/fixtures/OpsStatus/watch-ok.json'
 import shedWatch from '../../../../contracts/ops-v1/fixtures/GuardState/shed-watch.json'
 import report from '../../../../contracts/ops-v1/fixtures/OpsReport/daily.json'
+
+/** Every quota of the IDL (Usage.rows), read from the descriptors. */
+const QUOTA_RESOURCES = wireEnum(QuotaResourceSchema, QuotaResource).names
 
 describe('labels', () => {
   it('names every quota resource', () => {

@@ -23,14 +23,14 @@ function run(bytes) {
 }
 
 test("The dashboard's budget is a ratchet well below the Workers Free limit", () => {
-  assert.equal(BUDGET_GZIP_BYTES, 108 * 1024)
+  assert.equal(BUDGET_GZIP_BYTES, 140 * 1024)
   assert.ok(BUDGET_GZIP_BYTES < FREE_LIMIT_GZIP_BYTES / 4)
 })
 
 test('the script passes a bundle within the budget and fails one over it', () => {
   const fits = run(BUDGET_GZIP_BYTES / 2)
   assert.equal(fits.status, 0, fits.stderr)
-  assert.match(fits.stdout, /^The dashboard's Worker bundle: 1 module\(s\), .*\(budget 108\.0 KiB, limit 3072\.0 KiB gzip\)\.$/m)
+  assert.match(fits.stdout, /^The dashboard's Worker bundle: 1 module\(s\), .*\(budget 140\.0 KiB, limit 3072\.0 KiB gzip\)\.$/m)
   const over = run(BUDGET_GZIP_BYTES + 4096)
   assert.equal(over.status, 1)
   assert.match(over.stderr, /^The dashboard's Worker bundle is over its bundle budget/m)

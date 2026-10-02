@@ -1,5 +1,5 @@
 /**
- * Synthetic owner-API v2 responses for the UI tests. The registry is the Worker's own public view
+ * Synthetic owner-API responses (dashboard.ui.v1) for the UI tests. The registry is the Worker's own public view
  * (worker/src/registry.ts), so the page is tested against the entries, flows and Workers it really
  * serves; app statuses and guard states are the contracts/ops-v1 fixtures. No real account data:
  * resource IDs, numbers and times are made up (magnitudes follow the mockup: ~700 requests a day).
@@ -11,24 +11,24 @@ import todofyOk from '../../../../contracts/ops-v1/fixtures/OpsStatus/todofy-ok.
 import shedMailHero from '../../../../contracts/ops-v1/fixtures/GuardState/shed-mail-hero.json'
 import shedTodofy from '../../../../contracts/ops-v1/fixtures/GuardState/shed-todofy.json'
 import guardNormal from '../../../../contracts/ops-v1/fixtures/GuardState/normal.json'
-import type { CanaryRun, CanaryView, GuardState, OpsStatus, QuotaRow, UsageView } from '../../../worker/src/api-types.ts'
+import type { CanaryRun, CanaryView, GuardState, OpsStatus, QuotaRow, Usage } from '../../../worker/src/api-types.ts'
 import type {
   AttentionItem,
-  CloudflareResponse,
+  CloudflareView,
   DriftFinding,
-  DriftView,
+  Drift,
   EntryState,
   FlowState,
-  FlowsResponse,
-  GuardViewV2,
-  HomeResponse,
-  OpsResponse,
-  RegistryResponse,
+  FlowsView,
+  GuardView,
+  HomeView,
+  OpsView,
+  Registry,
   ShellFields,
   StageState,
   WorkerRow,
-} from '../../../worker/src/api-v2-types.ts'
-import { HOME_QUOTA_IDS } from '../../../worker/src/api-v2-types.ts'
+} from '../../../worker/src/api-types.ts'
+import { HOME_QUOTA_IDS } from '../../../worker/src/api-types.ts'
 import { REGISTRY, registryView } from '../../../worker/src/registry.ts'
 
 /** The fixed "now" of every test: 2026-09-29 17:00 UTC (01:00 on 9-30 in Asia/Shanghai). */
@@ -49,7 +49,7 @@ export const guards = {
   shedTodofy: shedTodofy as unknown as GuardState,
 }
 
-export function registry(): RegistryResponse {
+export function registry(): Registry {
   return registryView(BUILD)
 }
 
@@ -57,7 +57,6 @@ export function registry(): RegistryResponse {
 
 export function shell(patch: Partial<ShellFields> = {}): ShellFields {
   return {
-    version: 'home-v2',
     generated_at: TICK,
     rev: 7,
     build: BUILD,
@@ -159,7 +158,7 @@ export function quotaRows(overrides: Partial<Record<QuotaRow['id'], Partial<Quot
       used: 7_142,
       breakdown: [
         { name: IDS.mailHeroDb, value: 5_210, kind: 'd1', resource: 'mail-hero-db' },
-        { name: IDS.unknownDb, value: 1_932, kind: 'd1', resource: null },
+        { name: IDS.unknownDb, value: 1_932, kind: 'd1' },
       ],
     }),
     row({ id: 'd1_rows_written', period: 'daily', unit: 'rows', limit: 100_000, used: 486 }),
@@ -186,7 +185,7 @@ export function quotaRows(overrides: Partial<Record<QuotaRow['id'], Partial<Quot
         { name: IDS.mailCoordinator, value: 1_020, kind: 'do', resource: 'mail-coordinator' },
         { name: IDS.todofyCore, value: 610, kind: 'do', resource: 'todofy-core-do' },
         { name: IDS.homeState, value: 240, kind: 'do', resource: 'home-state' },
-        { name: IDS.unknownNs, value: 50, kind: 'do', resource: null },
+        { name: IDS.unknownNs, value: 50, kind: 'do' },
       ],
     }),
     // Workers AI: daily but never a guard trigger; synthetic public model IDs.
@@ -219,7 +218,7 @@ export function quotaRows(overrides: Partial<Record<QuotaRow['id'], Partial<Quot
       breakdown: [
         { name: 'mail-hero-store', value: 781_000_000, kind: 'r2', resource: 'mail-hero-store' },
         { name: 'todofy-backups', value: 52_000_000, kind: 'r2', resource: 'todofy-backups' },
-        { name: 'scratch-bucket', value: 4_000_000, kind: 'r2', resource: null },
+        { name: 'scratch-bucket', value: 4_000_000, kind: 'r2' },
       ],
     }),
   ]
@@ -233,7 +232,7 @@ export function quotaRows(overrides: Partial<Record<QuotaRow['id'], Partial<Quot
 }
 
 
-function usage(patch: Partial<UsageView> = {}): UsageView {
+function usage(patch: Partial<Usage> = {}): Usage {
   return {
     status: 'ok',
     fetched_at: '2026-09-29T16:30:02.000Z',
@@ -248,7 +247,7 @@ function usage(patch: Partial<UsageView> = {}): UsageView {
   }
 }
 
-export const UNAVAILABLE_USAGE: UsageView = {
+export const UNAVAILABLE_USAGE: Usage = {
   status: 'unavailable',
   fetched_at: null,
   day: null,
@@ -376,7 +375,7 @@ function recentRuns(today: CanaryRun = RUN_OK_TODAY): CanaryRun[] {
   return runs
 }
 
-export function canaryView(patch: Partial<CanaryView> = {}): CanaryView & { id: string } {
+export function canaryView(patch: Partial<CanaryView> = {}): CanaryView {
   return {
     id: 'mail-todofy',
     enabled: true,
@@ -462,7 +461,7 @@ function flowStates(options: { geminiWarning?: boolean; todofyDown?: boolean } =
       partial: true,
       coverage: { monitored: 1, total: 3 },
       first_issue: null,
-      freshness: { kind: 'none' },
+      freshness: { kind: 'none', at: null },
       stages: [stage('report'), stage('fetch', { level: 'unmonitored' }), stage('write', { level: 'unmonitored' })],
       unclassified: [],
       canary: null,
@@ -530,7 +529,7 @@ export function manyWorkers(count: number): WorkerRow[] {
 }
 
 /** The drift panel: a check this morning that found nothing (synthetic). */
-export function driftView(patch: Partial<DriftView> = {}): DriftView {
+export function driftView(patch: Partial<Drift> = {}): Drift {
   return {
     status: 'ok',
     checked_at: '2026-09-29T02:30:05.000Z',
@@ -557,7 +556,7 @@ export const DRIFT_FINDINGS: DriftFinding[] = [
   { category: 'personal', script: 'mail-hero', name: 'SYNTHETIC_PERSONAL', kind: 'changed', expected: 'secret_text', actual: 'plain_text' },
 ]
 
-function guardView(patch: Partial<GuardViewV2> = {}): GuardViewV2 {
+function guardView(patch: Partial<GuardView> = {}): GuardView {
   return {
     desired: { level: 'normal', reason: 'quota_normal', until: null, source: 'auto' },
     override: null,
@@ -570,7 +569,7 @@ function guardView(patch: Partial<GuardViewV2> = {}): GuardViewV2 {
   }
 }
 
-export function guardActive(): GuardViewV2 {
+export function guardActive(): GuardView {
   return guardView({
     desired: { level: 'shed', reason: 'quota_d1_rows_read', until: '2026-09-30T00:10:00.000Z', source: 'auto' },
     apps: {
@@ -583,11 +582,11 @@ export function guardActive(): GuardViewV2 {
 // ---- scenarios ------------------------------------------------------------------------------------
 
 export interface Scenario {
-  registry: RegistryResponse
-  home: HomeResponse
-  flows: FlowsResponse
-  cloudflare: CloudflareResponse
-  ops: OpsResponse
+  registry: Registry
+  home: HomeView
+  flows: FlowsView
+  cloudflare: CloudflareView
+  ops: OpsView
 }
 
 function scenario(
@@ -595,12 +594,12 @@ function scenario(
   parts: {
     entries?: EntryState[]
     flows?: FlowState[]
-    usage?: UsageView
+    usage?: Usage
     workers?: WorkerRow[]
-    guard?: GuardViewV2
-    canary?: CanaryView & { id: string }
-    apps?: OpsResponse['apps']
-    drift?: DriftView
+    guard?: GuardView
+    canary?: CanaryView
+    apps?: OpsView['apps']
+    drift?: Drift
   } = {},
 ): Scenario {
   const base = shell(shellPatch)
@@ -611,6 +610,7 @@ function scenario(
   return {
     registry: registry(),
     home: {
+      name: 'homeView',
       ...base,
       entries: parts.entries ?? entries(),
       flows: flows.map(({ id, level, partial, coverage, first_issue, freshness }) => ({ id, level, partial, coverage, first_issue, freshness })),
@@ -624,8 +624,9 @@ function scenario(
       },
       digest: { last_sent_at: '2026-09-29T15:00:03.000Z', accepted: true },
     },
-    flows: { ...base, flows },
+    flows: { name: 'flowsView', ...base, flows },
     cloudflare: {
+      name: 'cloudflareView',
       ...base,
       drift: parts.drift ?? driftView(),
       usage: use,
@@ -633,16 +634,17 @@ function scenario(
       workers_omitted: 0,
       workers_truncated: false,
       resources: [
-        { kind: 'd1', id: IDS.unknownDb, resource: null, entry: null, size_bytes: 38_900_000, rows_read: 5_210, rows_written: 318 },
-        { kind: 'd1', id: IDS.otherDb, resource: null, entry: null, size_bytes: 7_300_000, rows_read: 1_932, rows_written: 168 },
-        { kind: 'do', id: IDS.unknownNs, resource: null, entry: null, requests: null, rows_read: 4_100, rows_written: 1_020 },
-        { kind: 'r2', id: 'mail-hero-store', resource: 'mail-hero-store', entry: 'mail-hero', size_bytes: 781_000_000, class_a: 15_900, class_b: 52_800 },
-        { kind: 'r2', id: 'unclassified', resource: null, entry: null, size_bytes: null, class_a: 1_340, class_b: 5_300 },
+        { kind: 'd1', id: IDS.unknownDb, resource: null, entry: null, size_bytes: 38_900_000, requests: null, rows_read: 5_210, rows_written: 318 },
+        { kind: 'd1', id: IDS.otherDb, resource: null, entry: null, size_bytes: 7_300_000, requests: null, rows_read: 1_932, rows_written: 168 },
+        { kind: 'do', id: IDS.unknownNs, resource: null, entry: null, size_bytes: null, requests: null, rows_read: 4_100, rows_written: 1_020 },
+        { kind: 'r2', id: 'mail-hero-store', resource: 'mail-hero-store', entry: 'mail-hero', size_bytes: 781_000_000, requests: null, class_a: 15_900, class_b: 52_800 },
+        { kind: 'r2', id: 'unclassified', resource: null, entry: null, size_bytes: null, requests: null, class_a: 1_340, class_b: 5_300 },
       ],
       do_storage_bytes: 12_400_000,
       guard,
     },
     ops: {
+      name: 'opsView',
       ...base,
       guard,
       canary: parts.canary ?? canaryView(),

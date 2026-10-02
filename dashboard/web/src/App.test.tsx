@@ -1,9 +1,9 @@
 import { act, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { analyticsUnavailable, healthy, oneWarning } from './test/fixtures'
-import { apiError, freezeClock, installFetch, json, renderApp, serve } from './test/harness'
+import { apiError, freezeClock, installFetch, json, renderApp, serve, PATHS } from './test/harness'
 
-const views = (paths: string[]) => paths.filter((path) => !path.startsWith('/api/v2/registry'))
+const views = (paths: string[]) => paths.filter((path) => !path.startsWith(PATHS.registry))
 
 describe('page shell', () => {
   it('starts on 首页 with four tabs, the registry and only the visible view', async () => {
@@ -19,7 +19,7 @@ describe('page shell', () => {
     expect(within(nav).getByRole('link', { name: '首页' })).toHaveAttribute('aria-current', 'page')
     expect(within(nav).getByRole('link', { name: '业务流程' })).not.toHaveAttribute('aria-current')
 
-    expect(calls.map((call) => call.path).sort()).toEqual(['/api/v2/home', '/api/v2/registry'])
+    expect(calls.map((call) => call.path).sort()).toEqual([PATHS.home, PATHS.registry])
     for (const call of calls) expect(call.init).toMatchObject({ credentials: 'same-origin', redirect: 'error', cache: 'no-store' })
     expect(document.title).toBe('个人控制台')
     expect(screen.getByText('时区：浏览器本地（Asia/Shanghai）')).toBeInTheDocument()
@@ -46,8 +46,8 @@ describe('page shell', () => {
     await user.click(screen.getByRole('link', { name: '操作与记录' }))
     expect(await screen.findByRole('region', { name: '降载与操作' })).toBeInTheDocument()
 
-    expect(calls.filter((call) => call.path === '/api/v2/registry')).toHaveLength(1)
-    expect(views(calls.map((call) => call.path))).toEqual(['/api/v2/home', '/api/v2/flows', '/api/v2/cloudflare', '/api/v2/ops'])
+    expect(calls.filter((call) => call.path === PATHS.registry)).toHaveLength(1)
+    expect(views(calls.map((call) => call.path))).toEqual([PATHS.home, PATHS.flows, PATHS.cloudflare, PATHS.ops])
   })
 
   it('maps the v1 section anchors to their views', async () => {
@@ -84,7 +84,7 @@ describe('page shell', () => {
     let fail = true
     const scenario = healthy()
     const calls = installFetch((call) => {
-      if (call.path === '/api/v2/registry') {
+      if (call.path === PATHS.registry) {
         return fail ? apiError(503, 'unavailable', '服务暂时不可用', 'aaaaaaaaaaaaaaaa') : json(scenario.registry)
       }
       return json(scenario.home)
@@ -94,7 +94,7 @@ describe('page shell', () => {
     fail = false
     await userEvent.click(screen.getByRole('button', { name: '重试' }))
     await screen.findByRole('link', { name: /打开 Mail Hero/ })
-    expect(calls.filter((call) => call.path === '/api/v2/registry')).toHaveLength(2)
+    expect(calls.filter((call) => call.path === PATHS.registry)).toHaveLength(2)
   })
 
   it('reports a view failure without hiding the other views', async () => {
@@ -103,8 +103,8 @@ describe('page shell', () => {
     let fail = true
     serve(scenario, () => apiError(404, 'not_found'))
     installFetch((call) => {
-      if (call.path === '/api/v2/registry') return json(scenario.registry)
-      if (call.path === '/api/v2/flows') return fail ? apiError(503, 'unavailable', '服务暂时不可用', 'bbbbbbbbbbbbbbbb') : json(scenario.flows)
+      if (call.path === PATHS.registry) return json(scenario.registry)
+      if (call.path === PATHS.flows) return fail ? apiError(503, 'unavailable', '服务暂时不可用', 'bbbbbbbbbbbbbbbb') : json(scenario.flows)
       return json(scenario.home)
     })
     renderApp('#/flows')

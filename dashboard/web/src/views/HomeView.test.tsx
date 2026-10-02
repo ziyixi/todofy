@@ -1,6 +1,6 @@
 import { screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { apiError, freezeClock, installFetch, json, renderApp, serve } from '../test/harness'
+import { apiError, freezeClock, installFetch, json, renderApp, serve, PATHS } from '../test/harness'
 import { analyticsUnavailable, healthy, observedOnly, oneWarning, shell, todofyUnreachable, withLinkOnly, type Scenario } from '../test/fixtures'
 
 async function showHome(scenario: Scenario) {
@@ -246,7 +246,7 @@ describe('首页', () => {
   it('keeps the tiles as links while loading, with same-size skeletons', async () => {
     freezeClock()
     const scenario = healthy()
-    installFetch((call) => (call.path === '/api/v2/registry' ? json(scenario.registry) : new Promise<Response>(() => undefined)))
+    installFetch((call) => (call.path === PATHS.registry ? json(scenario.registry) : new Promise<Response>(() => undefined)))
     renderApp()
     await screen.findByRole('link', { name: /打开 Mail Hero/ })
     expect(launcher()).toHaveAttribute('aria-busy', 'true')
@@ -257,7 +257,7 @@ describe('首页', () => {
   it('marks every status unknown when the view fails, keeping the links', async () => {
     freezeClock()
     const scenario = healthy()
-    installFetch((call) => (call.path === '/api/v2/registry' ? json(scenario.registry) : apiError(503, 'unavailable', '服务暂时不可用')))
+    installFetch((call) => (call.path === PATHS.registry ? json(scenario.registry) : apiError(503, 'unavailable', '服务暂时不可用')))
     renderApp()
     expect(await screen.findByRole('alert')).toHaveTextContent('无法加载首页数据：服务暂时不可用')
     const mail = await within(launcher()).findByRole('button', { name: 'Mail Hero 状态：未知，查看详情' })

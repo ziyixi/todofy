@@ -1,14 +1,14 @@
 /**
- * Lookups over the public registry (`GET /api/v2/registry`). The UI never hard-codes an entry, a
+ * Lookups over the public registry (GetRegistry, `GET /api/v1/registry`). The UI never hard-codes an entry, a
  * Worker or a flow: names, order, groups and links all come from the registry the Worker serves.
  */
-import type { FlowDef, GuardViewV2, RegistryEntryView, RegistryResponse, ResourceKind, StageDef, Target } from '../../../worker/src/api-v2-types.ts'
+import type { Flow as FlowDef, GuardView, RegistryEntry, Registry, StorageKind, Stage as StageDef, Target } from '../../../worker/src/api-types.ts'
 import { routeHash } from '../router'
 import { PLATFORM_SOURCES } from './labels'
 
-export type Reg = RegistryResponse
+export type Reg = Registry
 
-export function entryOf(reg: Reg, id: string | null | undefined): RegistryEntryView | undefined {
+export function entryOf(reg: Reg, id: string | null | undefined): RegistryEntry | undefined {
   return id ? reg.entries.find((entry) => entry.id === id) : undefined
 }
 
@@ -33,17 +33,17 @@ export function resourceOf(reg: Reg, id: string | null | undefined) {
  * How an unregistered resource is shown after 未登记: an opaque D1/DO ID by its first 8 characters, an
  * R2 bucket by its (non-secret) name in full, so buckets sharing a prefix stay distinguishable.
  */
-export function unregisteredId(kind: ResourceKind, id: string): string {
+export function unregisteredId(kind: StorageKind, id: string): string {
   return kind === 'r2' ? id : id.slice(0, 8)
 }
 
 /** The one wording of an unregistered resource, in the resource table and the quota breakdowns alike. */
-export function unregisteredLabel(kind: ResourceKind, id: string): string {
+export function unregisteredLabel(kind: StorageKind, id: string): string {
   return `未登记 · ${unregisteredId(kind, id)}`
 }
 
 /** Usage measured without its resource dimension (R2 operations without a bucket, like the table). */
-export function unclassifiedLabel(kind: ResourceKind): string {
+export function unclassifiedLabel(kind: StorageKind): string {
   return kind === 'r2' ? '未归类操作' : '未归类'
 }
 
@@ -101,7 +101,7 @@ export function targetLabel(reg: Reg, target: Target, source: string): string {
  * Where a background service's row leads inside this page: its Worker (it has one), else the first
  * flow it takes part in, else 操作与记录.
  */
-export function entryPageHash(reg: Reg, entry: RegistryEntryView): { hash: string; what: string } {
+export function entryPageHash(reg: Reg, entry: RegistryEntry): { hash: string; what: string } {
   const script = entry.scripts[0]
   if (script !== undefined) return { hash: routeHash({ view: 'cloudflare', script }), what: '查看 Cloudflare 中的 Worker' }
   const flow = flowsOfEntry(reg, entry.id)[0]
@@ -110,7 +110,7 @@ export function entryPageHash(reg: Reg, entry: RegistryEntryView): { hash: strin
 }
 
 /** The guarded entries in registry order (the keys of guard.apps), then any the registry lacks. */
-export function guardedEntries(reg: Reg, guard: GuardViewV2): string[] {
+export function guardedEntries(reg: Reg, guard: GuardView): string[] {
   const ids = Object.keys(guard.apps)
   const known = sortedByOrder(reg.entries.filter((entry) => ids.includes(entry.id))).map((entry) => entry.id)
   return [...known, ...ids.filter((id) => !known.includes(id))]

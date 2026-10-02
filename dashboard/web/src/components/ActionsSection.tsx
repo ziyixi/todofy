@@ -1,7 +1,7 @@
 import { Play, ShieldAlert, ShieldCheck } from 'lucide-react'
 import { useState, type ReactNode } from 'react'
 import type { CanaryRun, GuardLevel } from '../../../worker/src/api-types.ts'
-import type { GuardViewV2, OpsResponse } from '../../../worker/src/api-v2-types.ts'
+import type { GuardView, OpsView } from '../../../worker/src/api-types.ts'
 import { ApiError } from '../api/client'
 import { useSetGuard, useStartCanary } from '../api/queries'
 import { formatClock, formatFullTime, formatTime } from '../lib/format'
@@ -57,7 +57,7 @@ function canaryResultText(run: CanaryRun): string {
   return `已启动金丝雀 ${run.run_id}（${CANARY_PHASE[run.phase]}），之后每 30 分钟检查一次进度。`
 }
 
-function guardResultText(reg: Reg, level: GuardLevel, guard: GuardViewV2): string {
+function guardResultText(reg: Reg, level: GuardLevel, guard: GuardView): string {
   const failed = guardedEntries(reg, guard)
     .filter((app) => guard.apps[app]?.last_error)
     .map((app) => `${nameOf(reg, app)} 调用失败（${appErrorLabel(guard.apps[app]?.last_error ?? 'unavailable')}），下次定时检查会重试`)
@@ -68,7 +68,7 @@ function guardResultText(reg: Reg, level: GuardLevel, guard: GuardViewV2): strin
   return failed.length ? `${head}${failed.join('；')}。` : head
 }
 
-const SOURCE_LABEL: Readonly<Record<GuardViewV2['desired']['source'], string>> = {
+const SOURCE_LABEL: Readonly<Record<GuardView['desired']['source'], string>> = {
   auto: '自动（按配额）',
   owner: '手动',
   none: '—',
@@ -79,7 +79,7 @@ const SOURCE_LABEL: Readonly<Record<GuardViewV2['desired']['source'], string>> =
  * manual run of the canary bound to the mail flow. Every mutation is confirmed first and sent with the
  * CSRF token.
  */
-export function ActionsSection({ reg, ops, now }: { reg: Reg; ops: OpsResponse; now: Date }) {
+export function ActionsSection({ reg, ops, now }: { reg: Reg; ops: OpsView; now: Date }) {
   const [dialog, setDialog] = useState<Dialog>(null)
   const [result, setResult] = useState<Result | null>(null)
   const canary = useStartCanary()

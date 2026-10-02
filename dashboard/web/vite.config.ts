@@ -11,6 +11,9 @@ export default defineConfig({
     // The Worker's CSP allows only same-origin scripts, so nothing may be inlined as a data: module.
     assetsInlineLimit: 0,
     sourcemap: false,
+    // One chunk of about 510 KiB since the typed client (dashboard.ui.v1); its gzip size is held by
+    // scripts/js-budget.mjs, so Vite's generic 500 kB warning would only repeat that gate in every log.
+    chunkSizeWarningLimit: 640,
   },
   server: {
     // Local loop: `npm run dev` in ../worker (wrangler dev on http://127.0.0.1:8787 with DEV_AUTH_BYPASS

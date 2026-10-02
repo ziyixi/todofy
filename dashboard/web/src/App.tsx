@@ -1,6 +1,6 @@
 import { Cloud, Gauge, House, RefreshCw, Settings2, Workflow, type LucideIcon } from 'lucide-react'
 import { useEffect, useRef, useState, type MouseEvent } from 'react'
-import type { HomeResponse, ShellFields, ViewId } from '../../worker/src/api-v2-types.ts'
+import type { HomeView as HomeViewData, ShellFields, ViewId } from '../../worker/src/api-types.ts'
 import { ApiError } from './api/client'
 import { useRefreshHome, useRegistry, useView } from './api/queries'
 import { AttentionStrip } from './components/AttentionStrip'
@@ -177,10 +177,10 @@ function ViewLoading() {
 }
 
 /**
- * 刷新: re-reads the app statuses and probes now (`/home?refresh=1`, which the Worker answers with fresh
+ * 刷新: re-reads the app statuses and probes now (RefreshHomeView, which the Worker answers with fresh
  * data at most once a minute), then the visible view. Disabled until the Worker's window opens.
  */
-function TopRefresh({ shell, home, now }: { shell: ShellFields | undefined; home: HomeResponse | undefined; now: Date }) {
+function TopRefresh({ shell, home, now }: { shell: ShellFields | undefined; home: HomeViewData | undefined; now: Date }) {
   const refresh = useRefreshHome()
   const [message, setMessage] = useState<string | null>(null)
   const [clock, setClock] = useState(() => Date.now())

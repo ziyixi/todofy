@@ -1,4 +1,4 @@
-import type { OpsResponse } from '../../../worker/src/api-v2-types.ts'
+import type { OpsView as OpsViewData } from '../../../worker/src/api-types.ts'
 import { ActionsSection } from '../components/ActionsSection'
 import { AppDetails } from '../components/AppDetails'
 import { DigestSection } from '../components/DigestSection'
@@ -11,7 +11,7 @@ import { entryOf, sortedByOrder, type Reg } from '../lib/registry'
  * 操作与记录 `#/ops`: the guard and canary actions (confirmation texts and the CSRF flow unchanged),
  * the digest, the full ops-v1 status of every app, and what this build knows (build, zone, registry).
  */
-export function OpsView({ registry, ops, now }: { registry: Reg; ops: OpsResponse; now: Date }) {
+export function OpsView({ registry, ops, now }: { registry: Reg; ops: OpsViewData; now: Date }) {
   const groups = sortedByOrder(registry.entry_groups)
   const entries = groups.flatMap((group) => sortedByOrder(registry.entries.filter((entry) => entry.group === group.id)))
   return (

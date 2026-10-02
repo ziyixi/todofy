@@ -1,6 +1,6 @@
 import { ChevronDown, ExternalLink } from 'lucide-react'
 import { useEffect, useId, useRef, useState } from 'react'
-import type { FlowDef, FlowState, FlowsResponse, StageDef, StageState } from '../../../worker/src/api-v2-types.ts'
+import type { Flow as FlowDef, FlowState, FlowsView as FlowsViewData, Stage as StageDef, StageState } from '../../../worker/src/api-types.ts'
 import { CanaryDays, CanaryFacts, CanaryHistory, CanaryToday } from '../components/Canary'
 import { LevelMark, LevelShape } from '../components/status'
 import { Metrics, Pill, Time } from '../components/ui'
@@ -320,7 +320,7 @@ export function FlowsView({
   now,
 }: {
   registry: Reg
-  flows: FlowsResponse
+  flows: FlowsViewData
   focus?: string
   focusStage?: string
   now: Date

@@ -1,5 +1,5 @@
 import { ChevronRight } from 'lucide-react'
-import type { FlowSummary, HomeResponse } from '../../../worker/src/api-v2-types.ts'
+import type { FlowSummary, HomeView as HomeViewData } from '../../../worker/src/api-types.ts'
 import { Launcher } from '../components/Launcher'
 import { MiniQuota } from '../components/QuotaBars'
 import { LevelMark, LevelShape } from '../components/status'
@@ -52,7 +52,7 @@ function FlowRows({ reg, flows, now }: { reg: Reg; flows: readonly FlowSummary[]
   )
 }
 
-function CloudflareToday({ home }: { home: HomeResponse }) {
+function CloudflareToday({ home }: { home: HomeViewData }) {
   const summary = home.cloudflare
   const usage = USAGE_STATUS[summary.usage_status]
   const shed = summary.guard_level === 'shed'
@@ -98,7 +98,7 @@ function CloudflareToday({ home }: { home: HomeResponse }) {
  * While loading the tiles keep their size with skeleton status lines; if the view failed, every tile
  * still links to its app and says 未知.
  */
-export function HomeView({ registry, home, failed = false, now }: { registry: Reg; home: HomeResponse | undefined; failed?: boolean; now: Date }) {
+export function HomeView({ registry, home, failed = false, now }: { registry: Reg; home: HomeViewData | undefined; failed?: boolean; now: Date }) {
   return (
     <div className="view view-home">
       <h1 className="visually-hidden">首页</h1>

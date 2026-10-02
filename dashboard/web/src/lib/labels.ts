@@ -2,8 +2,8 @@
  * Chinese labels for every machine code the page shows (docs/design.md §8). Codes are open-ended in
  * ops-v1 (new signals, counters, reasons may appear), so every lookup falls back to the raw code.
  */
+import type { ApiErrorCode } from '../api/client'
 import type {
-  ApiErrorCode,
   AppErrorCode,
   CanaryKind,
   CanaryOutcome,
@@ -11,10 +11,10 @@ import type {
   CanaryStage,
   OpsSeverity,
   QuotaPeriod,
-  QuotaResourceId,
-  UsageStatus,
+  QuotaResource,
+  UsageState,
 } from '../../../worker/src/api-types.ts'
-import type { CanaryBadge, DriftCategory, DriftFinding, DriftStatus, Level, StatusSourceType } from '../../../worker/src/api-v2-types.ts'
+import type { CanaryBadge, DriftCategory, DriftFinding, DriftState, Level, StatusSourceType } from '../../../worker/src/api-types.ts'
 import { formatBytesBinary, formatDuration, formatNumber } from './format'
 
 /** Visual tone of a status; always rendered together with a text label. */
@@ -161,14 +161,14 @@ export function signalLabel(code: string): string {
   if (Object.hasOwn(SIGNALS, code)) return SIGNALS[code] as string
   const quota = /^(.+)_high$/.exec(code)
   if (quota && isQuotaId(quota[1] as string)) {
-    const name = QUOTA[quota[1] as QuotaResourceId]
+    const name = QUOTA[quota[1] as QuotaResource]
     // A name ending in Latin letters ("Workers AI neurons") keeps a space before the Chinese.
     return `${name}${/[A-Za-z]$/.test(name) ? ' ' : ''}用量高`
   }
   return code
 }
 
-export const QUOTA: Readonly<Record<QuotaResourceId, string>> = {
+export const QUOTA: Readonly<Record<QuotaResource, string>> = {
   workers_requests: 'Workers 请求',
   d1_rows_read: 'D1 读取行数',
   d1_rows_written: 'D1 写入行数',
@@ -185,7 +185,7 @@ export const QUOTA: Readonly<Record<QuotaResourceId, string>> = {
   r2_storage: 'R2 存储',
 }
 
-export function isQuotaId(value: string): value is QuotaResourceId {
+export function isQuotaId(value: string): value is QuotaResource {
   return Object.hasOwn(QUOTA, value)
 }
 
@@ -195,7 +195,7 @@ export const PERIODS: Readonly<Record<QuotaPeriod, { title: string; note: string
   storage: { title: '存储', note: '当前占用，不随日期重置' },
 }
 
-export const USAGE_STATUS: Readonly<Record<UsageStatus, { label: string; tone: Tone }>> = {
+export const USAGE_STATUS: Readonly<Record<UsageState, { label: string; tone: Tone }>> = {
   ok: { label: '最新', tone: 'ok' },
   stale: { label: '数据过期', tone: 'warn' },
   unavailable: { label: '无法获取', tone: 'danger' },
@@ -223,7 +223,7 @@ export function usageErrorLabel(code: string): string {
 }
 
 /** The drift panel's status line (配置漂移). */
-export const DRIFT_STATUS: Readonly<Record<DriftStatus, { label: string; level: Level }>> = {
+export const DRIFT_STATUS: Readonly<Record<DriftState, { label: string; level: Level }>> = {
   ok: { label: '与代码一致', level: 'ok' },
   drift: { label: '与代码不一致', level: 'warning' },
   never_checked: { label: '尚未检查', level: 'unknown' },
@@ -384,7 +384,7 @@ const GUARD_REASONS: Readonly<Record<string, string>> = {
 export function guardReasonLabel(reason: string): string {
   if (Object.hasOwn(GUARD_REASONS, reason)) return GUARD_REASONS[reason] as string
   const quota = /^quota_(.+)$/.exec(reason)
-  if (quota && isQuotaId(quota[1] as string)) return `配额：${QUOTA[quota[1] as QuotaResourceId]}`
+  if (quota && isQuotaId(quota[1] as string)) return `配额：${QUOTA[quota[1] as QuotaResource]}`
   return reason
 }
 
@@ -487,4 +487,5 @@ export const API_ERRORS: Readonly<Record<ApiErrorCode, string>> = {
   canary_disabled: CANARY_DISABLED_TEXT,
   canary_limit: '今天的手动运行次数已用完',
   unavailable: '服务暂时不可用',
+  internal: '服务出错了，请稍后刷新页面',
 }

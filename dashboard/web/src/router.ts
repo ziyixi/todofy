@@ -3,7 +3,7 @@
  * Access, and the old section anchors of v1 keep working through LEGACY_ANCHORS.
  */
 import { useEffect, useSyncExternalStore } from 'react'
-import type { ViewId } from '../../worker/src/api-v2-types.ts'
+import type { ViewId } from '../../worker/src/api-types.ts'
 
 export type Route =
   | { readonly view: 'home' }

@@ -1,9 +1,9 @@
 import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import type { CanaryRun } from '../../../worker/src/api-types.ts'
-import type { GuardViewV2 } from '../../../worker/src/api-v2-types.ts'
+import type { GuardView } from '../../../worker/src/api-types.ts'
 import { canaryActive, canaryDisabled, guardShed, healthy, type Scenario } from '../test/fixtures'
-import { apiError, freezeClock, json, renderApp, serve, type Call, type Handler } from '../test/harness'
+import { apiError, freezeClock, json, renderApp, serve, type Call, type Handler, PATHS } from '../test/harness'
 import { SHED_CONFIRM_TEXT, canaryConfirmText, clearConfirmText } from './ActionsSection'
 
 const STARTED: CanaryRun = {
@@ -26,7 +26,7 @@ const posts = (calls: Call[]) => calls.filter((call) => call.method === 'POST')
 
 describe('actions', () => {
   it('confirms a canary run with the exact text and sends it with the CSRF token', async () => {
-    const { calls, actions, user } = await open(healthy(), () => json({ run: STARTED }, 202))
+    const { calls, actions, user } = await open(healthy(), () => json({ run: STARTED }))
     const button = within(actions).getByRole('button', { name: '立即运行金丝雀' })
     await user.click(button)
 
@@ -44,7 +44,9 @@ describe('actions', () => {
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
 
     const [post] = posts(calls)
-    expect(post).toMatchObject({ path: '/api/v2/canary', body: '{"canary_id":"mail-todofy"}' })
+    expect(post).toMatchObject({ path: PATHS.canary })
+    // One AIP-155 request_id for the owner's action.
+    expect(post?.body).toMatch(/^\{"request_id":"[0-9a-f-]{36}"\}$/)
     expect(post?.headers['x-csrf-token']).toBe('token-1')
     expect(post?.headers['content-type']).toBe('application/json')
     expect(post?.init).toMatchObject({ credentials: 'same-origin', redirect: 'error' })
@@ -58,14 +60,16 @@ describe('actions', () => {
     let attempts = 0
     const { calls, actions, user } = await open(healthy(), () => {
       attempts += 1
-      return attempts === 1 ? apiError(403, 'csrf_failed') : json({ run: STARTED }, 202)
+      return attempts === 1 ? apiError(403, 'csrf_failed') : json({ run: STARTED })
     })
     await user.click(within(actions).getByRole('button', { name: '立即运行金丝雀' }))
     await user.click(screen.getByRole('button', { name: '确认运行' }))
 
     await waitFor(() => expect(within(actions).getByRole('status')).toHaveTextContent('已启动金丝雀'))
     expect(posts(calls).map((call) => call.headers['x-csrf-token'])).toEqual(['token-1', 'token-2'])
-    expect(calls.filter((call) => call.path === '/api/v2/csrf')).toHaveLength(2)
+    // The repeat is the same request (the same request_id).
+    expect(posts(calls)[1]?.body).toBe(posts(calls)[0]?.body)
+    expect(calls.filter((call) => call.path === PATHS.csrf)).toHaveLength(2)
   })
 
   it('does not retry a second csrf_failed and shows the error', async () => {
@@ -94,14 +98,15 @@ describe('actions', () => {
     const { actions, user } = await open(
       () => current,
       () => {
-        const canary = { ...current.ops.canary, active: waiting, today: waiting, recent: [waiting, ...current.ops.canary.recent], manual_today: 1 }
+        // The Worker keeps the 14 newest runs (CanaryView.recent's max_items).
+        const canary = { ...current.ops.canary, active: waiting, today: waiting, recent: [waiting, ...current.ops.canary.recent].slice(0, 14), manual_today: 1 }
         const mail = current.flows.flows[0]!
         current = {
           ...current,
           ops: { ...current.ops, canary },
           flows: { ...current.flows, flows: [{ ...mail, canary: { ...canary, last_ok_at: null } }, ...current.flows.flows.slice(1)] },
         }
-        return json({ run: waiting }, 202)
+        return json({ run: waiting })
       },
     )
     await user.click(within(actions).getByRole('button', { name: '立即运行金丝雀' }))
@@ -144,7 +149,7 @@ describe('actions', () => {
 
   it('shows the Worker\'s canary_disabled refusal (switched off since the page loaded)', async () => {
     const { calls, actions, user } = await open(healthy(), () =>
-      apiError(409, 'canary_disabled', '金丝雀已关闭（DASHBOARD_CANARY_ENABLED=false）', 'dddddddddddddddd'),
+      apiError(400, 'canary_disabled', '金丝雀已关闭（DASHBOARD_CANARY_ENABLED=false）', 'dddddddddddddddd'),
     )
     await user.click(within(actions).getByRole('button', { name: '立即运行金丝雀' }))
     await user.click(screen.getByRole('button', { name: '确认运行' }))
@@ -164,8 +169,8 @@ describe('actions', () => {
   })
 
   it('forces shed after confirmation and reports per-app failures', async () => {
-    const guard: GuardViewV2 = guardShed().ops.guard
-    const shed: GuardViewV2 = {
+    const guard: GuardView = guardShed().ops.guard
+    const shed: GuardView = {
       ...guard,
       desired: { level: 'shed', reason: 'owner_shed', until: '2026-09-30T17:00:00.000Z', source: 'owner' },
       override: { level: 'shed', until: '2026-09-30T17:00:00.000Z', set_at: '2026-09-29T17:00:00.000Z' },
@@ -192,7 +197,10 @@ describe('actions', () => {
       '已要求两个应用降载，直到 10月1日 01:00。Todofy 调用失败（超时），下次定时检查会重试。',
     )
     const [post] = posts(calls)
-    expect(post).toMatchObject({ path: '/api/v2/guard', body: '{"level":"shed"}' })
+    expect(post).toMatchObject({ path: PATHS.guard })
+    const sent = JSON.parse(post?.body ?? '{}') as { level?: string; request_id?: string }
+    expect(sent.level).toBe('shed')
+    expect(sent.request_id).toMatch(/^[0-9a-f-]{36}$/)
     expect(post?.headers['x-csrf-token']).toBe('token-1')
     expect(within(actions).getByText('手动')).toBeInTheDocument()
     expect(within(actions).getByText(/强制降载，至/)).toBeInTheDocument()
@@ -201,7 +209,7 @@ describe('actions', () => {
   it('clears the guard after confirmation', async () => {
     const scenario = guardShed()
     const guard = scenario.ops.guard
-    const cleared: GuardViewV2 = {
+    const cleared: GuardView = {
       ...guard,
       desired: { level: 'normal', reason: 'owner_clear', until: null, source: 'owner' },
       override: { level: 'normal', until: '2026-09-30T00:00:00.000Z', set_at: '2026-09-29T17:00:00.000Z' },
@@ -224,7 +232,8 @@ describe('actions', () => {
     await waitFor(() =>
       expect(within(actions).getByRole('status')).toHaveTextContent('已解除降载，本 UTC 日剩余时间内不会自动降载。'),
     )
-    expect(posts(calls)[0]).toMatchObject({ path: '/api/v2/guard', body: '{"level":"normal"}' })
+    expect(posts(calls)[0]).toMatchObject({ path: PATHS.guard })
+    expect(JSON.parse(posts(calls)[0]?.body ?? '{}')).toMatchObject({ level: 'normal' })
   })
 
   it('closes on Escape without sending and returns focus; Tab stays inside the dialog', async () => {

@@ -1,6 +1,6 @@
 import { Info } from 'lucide-react'
 import { useState } from 'react'
-import { ATTENTION_SHOWN, attentionLevel, type AttentionItem, type ShellFields } from '../../../worker/src/api-v2-types.ts'
+import { ATTENTION_SHOWN, attentionLevel, type AttentionItem, type ShellFields } from '../../../worker/src/api-types.ts'
 import { formatClock, formatDayTime, formatDuration, formatFullTime } from '../lib/format'
 import { reasonLabel, signalLabel } from '../lib/labels'
 import { flowOf, nameOf, stageOf, targetHash, targetLabel, type Reg } from '../lib/registry'

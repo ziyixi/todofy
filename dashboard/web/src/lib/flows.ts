@@ -1,5 +1,5 @@
 /** How flows are phrased in one line (首页 rows, 业务流程 cards). */
-import type { Freshness, FlowSummary, Level } from '../../../worker/src/api-v2-types.ts'
+import type { Freshness, FlowSummary, Level } from '../../../worker/src/api-types.ts'
 import { formatDayHour, formatDayTime } from './format'
 import { LEVEL, reasonLabel } from './labels'
 import { flowOf, stageOf, type Reg } from './registry'

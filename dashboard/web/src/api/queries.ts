@@ -1,14 +1,6 @@
 import { QueryClient, useMutation, useQuery, useQueryClient, type Query } from '@tanstack/react-query'
-import type { GuardLevel } from '../../../worker/src/api-types.ts'
-import type {
-  CanaryStartRequestV2,
-  CloudflareResponse,
-  FlowsResponse,
-  HomeResponse,
-  OpsResponse,
-  ViewId,
-} from '../../../worker/src/api-v2-types.ts'
-import { ApiError, apiV2 } from './client'
+import type { CloudflareView, FlowsView, GuardLevel, HomeView, OpsView, ViewId } from '../../../worker/src/api-types.ts'
+import { ApiError, api } from './client'
 
 /**
  * Only the visible view is read, every 5 minutes while the page is visible (the cron updates the data
@@ -19,17 +11,17 @@ export const REGISTRY_KEY = ['v2', 'registry'] as const
 export const viewKey = (view: ViewId) => ['v2', view] as const
 
 export interface ViewData {
-  home: HomeResponse
-  flows: FlowsResponse
-  cloudflare: CloudflareResponse
-  ops: OpsResponse
+  home: HomeView
+  flows: FlowsView
+  cloudflare: CloudflareView
+  ops: OpsView
 }
 
 const FETCH: { readonly [V in ViewId]: () => Promise<ViewData[V]> } = {
-  home: () => apiV2.home(),
-  flows: () => apiV2.flows(),
-  cloudflare: () => apiV2.cloudflare(),
-  ops: () => apiV2.ops(),
+  home: () => api.home(),
+  flows: () => api.flows(),
+  cloudflare: () => api.cloudflare(),
+  ops: () => api.ops(),
 }
 
 /** Retry only failures that can heal by themselves; a 4xx will not change on a second try. */
@@ -49,7 +41,7 @@ export function createQueryClient(): QueryClient {
 
 /** The registry is static per build: fetched once per page load. */
 export function useRegistry() {
-  return useQuery({ queryKey: REGISTRY_KEY, queryFn: () => apiV2.registry(), staleTime: Infinity, gcTime: Infinity })
+  return useQuery({ queryKey: REGISTRY_KEY, queryFn: () => api.registry(), staleTime: Infinity, gcTime: Infinity })
 }
 
 export function useView<V extends ViewId>(view: V, enabled: boolean) {
@@ -68,14 +60,14 @@ function otherViews(except: ViewId | null) {
 }
 
 /**
- * Owner refresh of the app statuses and probes (`/home?refresh=1`; the Worker polls each app at most
- * every 10 minutes and answers at most once a minute with fresh data). Afterwards the visible view is
+ * Owner refresh of the app statuses and probes (RefreshHomeView; the Worker polls each app at most every
+ * 10 minutes and answers at most once a minute with fresh data). Afterwards the visible view is
  * read again, so 业务流程 and 操作与记录 show the new statuses too.
  */
 export function useRefreshHome() {
   const client = useQueryClient()
   return useMutation({
-    mutationFn: () => apiV2.home(true),
+    mutationFn: () => api.refreshHome(),
     onSuccess: (home) => {
       client.setQueryData(viewKey('home'), home)
       void client.invalidateQueries({ predicate: otherViews('home') })
@@ -83,11 +75,11 @@ export function useRefreshHome() {
   })
 }
 
-/** Owner refresh of the Cloudflare usage (`/cloudflare?refresh=1`, GraphQL at most once a minute). */
+/** Owner refresh of the Cloudflare usage (RefreshCloudflareView, GraphQL at most once a minute). */
 export function useRefreshCloudflare() {
   const client = useQueryClient()
   return useMutation({
-    mutationFn: () => apiV2.cloudflare(true),
+    mutationFn: () => api.refreshCloudflare(),
     onSuccess: (cloudflare) => {
       client.setQueryData(viewKey('cloudflare'), cloudflare)
       void client.invalidateQueries({ predicate: otherViews('cloudflare') })
@@ -98,7 +90,8 @@ export function useRefreshCloudflare() {
 export function useStartCanary() {
   const client = useQueryClient()
   return useMutation({
-    mutationFn: (canaryId: CanaryStartRequestV2['canary_id']) => apiV2.startCanary(canaryId),
+    // One request_id per owner action (made in the client): the CSRF retry repeats the same request.
+    mutationFn: (canaryId: string) => api.startCanary(canaryId),
     onSettled: () => client.invalidateQueries({ predicate: otherViews(null) }),
   })
 }
@@ -106,10 +99,10 @@ export function useStartCanary() {
 export function useSetGuard() {
   const client = useQueryClient()
   return useMutation({
-    mutationFn: (level: GuardLevel) => apiV2.setGuard(level),
+    mutationFn: (level: GuardLevel) => api.setGuard(level),
     onSuccess: ({ guard }) => {
-      client.setQueryData<OpsResponse>(viewKey('ops'), (old) => (old ? { ...old, guard } : old))
-      client.setQueryData<CloudflareResponse>(viewKey('cloudflare'), (old) => (old ? { ...old, guard } : old))
+      client.setQueryData<OpsView>(viewKey('ops'), (old) => (old ? { ...old, guard } : old))
+      client.setQueryData<CloudflareView>(viewKey('cloudflare'), (old) => (old ? { ...old, guard } : old))
     },
     onSettled: () => client.invalidateQueries({ predicate: otherViews(null) }),
   })

@@ -1,9 +1,9 @@
-import type { DigestView } from '../../../worker/src/api-types.ts'
+import type { Digest } from '../../../worker/src/api-types.ts'
 import { SEVERITY, appErrorLabel, signalLabel } from '../lib/labels'
 import { nameOf, type Reg } from '../lib/registry'
 import { Card, Fact, Facts, Metrics, Notice, Pill, Time } from './ui'
 
-export function DigestSection({ reg, digest, now }: { reg: Reg; digest: DigestView; now: Date }) {
+export function DigestSection({ reg, digest, now }: { reg: Reg; digest: Digest; now: Date }) {
   return (
     <Card id="digest" title="运维摘要" level={2}>
       <p className="small muted">

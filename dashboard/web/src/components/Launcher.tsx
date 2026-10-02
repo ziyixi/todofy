@@ -1,6 +1,6 @@
 import { ChevronRight, ExternalLink } from 'lucide-react'
 import { useState } from 'react'
-import type { EntryState, Level, RegistryEntryView, TileMetric } from '../../../worker/src/api-v2-types.ts'
+import type { EntryState, Level, RegistryEntry, TileMetric } from '../../../worker/src/api-types.ts'
 import { formatDayHour, formatNumber } from '../lib/format'
 import { LEVEL, SEVERITY, counterShort, reasonLabel, signalLabel } from '../lib/labels'
 import { entryPageHash, flowsOfEntry, sortedByOrder, type Reg } from '../lib/registry'
@@ -30,7 +30,7 @@ interface StatusLine {
 }
 
 /** What a tile says about its entry; never a made-up green for link-only or unmonitored entries. */
-export function statusLine(entry: RegistryEntryView, state: EntryState | undefined, now: Date): StatusLine | null {
+export function statusLine(entry: RegistryEntry, state: EntryState | undefined, now: Date): StatusLine | null {
   if (entry.status_type === 'link_only' || state?.level === 'link') return null
   if (!state) return { level: 'unknown', word: '未知', detail: '无法获取这一项的数据' }
   if (state.level === 'unmonitored') return { level: 'unmonitored', word: '未接入监控', detail: null }
@@ -44,7 +44,7 @@ export function statusLine(entry: RegistryEntryView, state: EntryState | undefin
   return { level: state.level, word: LEVEL[state.level].word, detail: metric ?? reason }
 }
 
-function linkLabel(entry: RegistryEntryView): string {
+function linkLabel(entry: RegistryEntry): string {
   const host = entry.host ? `，${entry.host}` : ''
   const unmonitored = entry.status_type === 'link_only' ? '，未接入监控（仅链接）' : ''
   return `打开 ${entry.name}（新标签页）${host}${unmonitored}`
@@ -61,11 +61,11 @@ function Tile({
   now,
   onDetails,
 }: {
-  entry: RegistryEntryView
+  entry: RegistryEntry
   state: EntryState | undefined
   loading: boolean
   now: Date
-  onDetails: (entry: RegistryEntryView) => void
+  onDetails: (entry: RegistryEntry) => void
 }) {
   const url = httpsUrl(entry.url)
   const line = loading ? null : statusLine(entry, state, now)
@@ -115,7 +115,7 @@ function Tile({
 }
 
 /** A background service without its own page: one row that opens its Worker or flow on this page. */
-function ServiceRow({ reg, entry, state, loading, now }: { reg: Reg; entry: RegistryEntryView; state: EntryState | undefined; loading: boolean; now: Date }) {
+function ServiceRow({ reg, entry, state, loading, now }: { reg: Reg; entry: RegistryEntry; state: EntryState | undefined; loading: boolean; now: Date }) {
   const target = entryPageHash(reg, entry)
   const line = loading ? null : statusLine(entry, state, now)
   const detail = line ? (line.level === 'ok' ? (line.detail ?? line.word) : line.detail ? `${line.word} · ${line.detail}` : line.word) : null
@@ -139,7 +139,7 @@ function ServiceRow({ reg, entry, state, loading, now }: { reg: Reg; entry: Regi
 }
 
 /** The detail sheet of a tile: level and reason, up to 3 signals, and where to look next. */
-function EntrySheet({ reg, entry, state, now, onClose }: { reg: Reg; entry: RegistryEntryView; state: EntryState | undefined; now: Date; onClose: () => void }) {
+function EntrySheet({ reg, entry, state, now, onClose }: { reg: Reg; entry: RegistryEntry; state: EntryState | undefined; now: Date; onClose: () => void }) {
   const line = statusLine(entry, state, now)
   const flows = flowsOfEntry(reg, entry.id)
   const url = httpsUrl(entry.url)
@@ -225,7 +225,7 @@ function EntrySheet({ reg, entry, state, now, onClose }: { reg: Reg; entry: Regi
  * 站点 are tiles (one grid on a phone); 后台服务 are rows. The dashboard itself (group hidden) has no tile.
  */
 export function Launcher({ reg, entries, now }: { reg: Reg; entries: readonly EntryState[] | undefined; now: Date }) {
-  const [open, setOpen] = useState<RegistryEntryView | null>(null)
+  const [open, setOpen] = useState<RegistryEntry | null>(null)
   const loading = entries === undefined
   const stateOf = (id: string) => entries?.find((state) => state.id === id)
   const groups = sortedByOrder(reg.entry_groups)

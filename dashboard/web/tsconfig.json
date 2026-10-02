@@ -1,7 +1,8 @@
 {
   // Todofy web's settings plus allowImportingTsExtensions: the UI imports the owner API types from
-  // ../worker/src/api-types.ts, which imports ops-v1's generated wire types (@ziyixi/proto, resolved from
-  // ../worker/node_modules) and other files by their .ts names.
+  // ../worker/src/api-types.ts, which names dashboard.ui.v1's and ops-v1's generated wire types (@ziyixi/proto,
+  // resolved from ../worker/node_modules there) and other files by their .ts names; the UI's own runtime imports of
+  // @ziyixi/proto (the typed client) resolve from its own node_modules, the same proto/ts.
   "compilerOptions": {
     "target": "ES2023",
     "lib": ["ES2023", "DOM", "DOM.Iterable"],

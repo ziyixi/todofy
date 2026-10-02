@@ -3,17 +3,18 @@ import { useEffect, useState } from 'react'
 import {
   CPU_HINT_US,
   CPU_LIMIT_US,
-  DRIFT_CATEGORIES,
   DRIFT_UTC_HOUR,
   ERROR_RATE_CRITICAL_PERCENT,
   ERROR_RATE_MIN_REQUESTS,
   ERROR_RATE_WARN_PERCENT,
   WORKERS_QUERY_LIMIT,
-  type CloudflareResponse,
-  type DriftView,
+  type CloudflareView as CloudflareViewData,
+  type Drift,
   type ResourceRow,
   type WorkerRow,
-} from '../../../worker/src/api-v2-types.ts'
+} from '../../../worker/src/api-types.ts'
+import { DriftCategory, DriftCategorySchema } from '@ziyixi/proto/dashboard/ui/v1/cloudflare_view_pb'
+import { wireEnum } from '@ziyixi/proto/wire-json'
 import { ApiError } from '../api/client'
 import { useRefreshCloudflare } from '../api/queries'
 import { QuotaGroups } from '../components/QuotaBars'
@@ -34,13 +35,16 @@ import { DRIFT_CATEGORY, DRIFT_STATUS, QUOTA, USAGE_STATUS, driftErrorLabel, dri
 import { flowOf, guardedEntries, nameOf, resourceOf, unclassifiedLabel, unregisteredLabel, workerOf, type Reg } from '../lib/registry'
 import { routeHash } from '../router'
 
+/** What the drift check compares, in the IDL's order (read from the descriptors, never copied). */
+const DRIFT_CATEGORIES = wireEnum(DriftCategorySchema, DriftCategory).names
+
 function errorText(error: unknown): string {
   if (error instanceof ApiError) return error.requestId ? `${error.message}（请求 ${error.requestId}）` : error.message
   return '刷新失败，请稍后重试'
 }
 
 /** "刷新用量": GraphQL again, at most once a minute (the Worker enforces it too). */
-function RefreshUsage({ data, now }: { data: CloudflareResponse; now: Date }) {
+function RefreshUsage({ data, now }: { data: CloudflareViewData; now: Date }) {
   const refresh = useRefreshCloudflare()
   const [message, setMessage] = useState<string | null>(null)
   const [clock, setClock] = useState(() => Date.now())
@@ -78,7 +82,7 @@ function RefreshUsage({ data, now }: { data: CloudflareResponse; now: Date }) {
   )
 }
 
-function UsageNotices({ data, now }: { data: CloudflareResponse; now: Date }) {
+function UsageNotices({ data, now }: { data: CloudflareViewData; now: Date }) {
   const usage = data.usage
   return (
     <>
@@ -192,7 +196,7 @@ function SortHeader({
   )
 }
 
-function WorkersTable({ reg, data, focus, now }: { reg: Reg; data: CloudflareResponse; focus?: string; now: Date }) {
+function WorkersTable({ reg, data, focus, now }: { reg: Reg; data: CloudflareViewData; focus?: string; now: Date }) {
   const [sort, setSort] = useState<{ key: SortKey; descending: boolean }>({ key: 'errors', descending: true })
   const onSort = (key: SortKey) => setSort((current) => (current.key === key ? { key, descending: !current.descending } : { key, descending: true }))
   const rows = sortWorkers(data.workers, sort.key, sort.descending)
@@ -378,7 +382,7 @@ function WorkersTable({ reg, data, focus, now }: { reg: Reg; data: CloudflareRes
  * 配置漂移 (design-v2.md §10): the live account against the state generated from the committed
  * configs, once a day. Names, types and flags only; the Worker never sends a value.
  */
-function DriftPanel({ drift, now }: { drift: DriftView; now: Date }) {
+function DriftPanel({ drift, now }: { drift: Drift; now: Date }) {
   const status = DRIFT_STATUS[drift.status]
   const total = DRIFT_CATEGORIES.reduce((sum, category) => sum + drift.counts[category], 0)
   return (
@@ -536,7 +540,7 @@ function ResourceTable({ reg, kind, rows, doStorage }: { reg: Reg; kind: Resourc
   )
 }
 
-function GuardLine({ reg, data }: { reg: Reg; data: CloudflareResponse }) {
+function GuardLine({ reg, data }: { reg: Reg; data: CloudflareViewData }) {
   const { desired, thresholds } = data.guard
   const top = data.usage.rows
     .filter((row) => row.guard_trigger && row.percent !== null)
@@ -572,7 +576,7 @@ function GuardLine({ reg, data }: { reg: Reg; data: CloudflareResponse }) {
 }
 
 /** Cloudflare 监控 `#/cloudflare[/worker/<script>]`: allowances, Workers, resources, the guard. */
-export function CloudflareView({ registry, cloudflare, focus, now }: { registry: Reg; cloudflare: CloudflareResponse; focus?: string; now: Date }) {
+export function CloudflareView({ registry, cloudflare, focus, now }: { registry: Reg; cloudflare: CloudflareViewData; focus?: string; now: Date }) {
   const usage = cloudflare.usage
   const status = USAGE_STATUS[usage.status]
   const statusLevel = usage.status === 'ok' ? 'ok' : usage.status === 'stale' || usage.status === 'not_configured' ? 'warning' : 'critical'

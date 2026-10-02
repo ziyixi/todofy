@@ -6,7 +6,15 @@
  *
  * The data is the largest a view sees on a bad day's scale: 16 days of canary runs (the 14 recent kept), 20 Workers
  * with requests today, every app's status and every probe. Requests go through the loopback dev bypass at DEV_NOW
- * (flows.ts), so every run reads the same pinned instant.
+ * (flows.ts), so every run reads the same pinned instant (Access's JWT check is edge-auth's, unchanged by the API).
+ *
+ * What the bounds guard is the cost of dashboard.ui.v1 (proto/README.md "Cost"): the shared transcoder routes and
+ * decodes every request, while the views still pass through as HomeState serialized them (PreEncoded). Measured on the
+ * reference machine on 2026-10-02, medians of three isolates, three runs each, before (the hand-written /api/v2
+ * routes) and after: the isolate's first API request (the ops view) 4.43-4.73 → 5.12-5.19 ms; the views' first runs
+ * 0.8-1.6 → 1.0-2.5 ms and warm medians 1.0-1.3 → 1.26-1.34 ms (a 304 1.0-1.13 → 1.16-1.22); the registry 0.38 warm
+ * either way; a guard override first 1.9-2.3 → 3.1-3.8 ms and warm 0.73-0.83 → 1.15-1.19 ms (the transcoder's strict
+ * read of the body, the AIP-155 request log and the answer written by the profile).
  */
 import { describe, expect, it } from 'vitest';
 import { COLD_ISOLATES, connectCpuMeter, CPU_TEST_TIMEOUT_MS, FREE_CPU_MS, measureInIsolates, type Isolate, type Measurement } from '../../../../tools/workerd-cpu/workerd-cpu.mts';
@@ -14,12 +22,16 @@ import { usageWithScripts } from '../graphql-fixture.ts';
 import { answerProbes, NOW, PATHS, startFlows, type FlowHarness } from './flows.ts';
 
 const COLD_LABEL = "GET ops as the isolate's first API request";
-/** The bound of the isolate's first API request, in reference milliseconds. */
+/**
+ * The bound of the isolate's first API request, in reference milliseconds: 5.1-5.2 on the reference machine, so about
+ * 4 ms of headroom for the runners' slower cold runs (about 1.2 times, tools/workerd-cpu/README.md) while a 5 ms
+ * regression fails, and below Free's 10.
+ */
 const COLD_BOUND_MS = 0.9 * FREE_CPU_MS;
-/** The bound of every other request's first run, in reference milliseconds. */
+/** The bound of every other request's first run, in reference milliseconds (at most 3.8 today). */
 const FIRST_BOUND_MS = 0.7 * FREE_CPU_MS;
-/** The bound of a request's warm median, in reference milliseconds. */
-const WARM_BOUND_MS = 0.4 * FREE_CPU_MS;
+/** The bound of a request's warm median, in reference milliseconds (at most 1.34 today: about 2x fails). */
+const WARM_BOUND_MS = 0.3 * FREE_CPU_MS;
 const RUNS = 11;
 const MIN = 60_000;
 
@@ -98,7 +110,6 @@ describe('CPU per owner API request (Workers Free: 10 ms)', () => {
         `other first runs < ${FIRST_BOUND_MS.toFixed(2)}, warm medians < ${WARM_BOUND_MS.toFixed(2)}`,
     );
     for (const { label, first, median } of reference.values()) {
-      console.log(`${label}: first ${first.toFixed(2)}, median ${median.toFixed(2)}`);
       if (label === COLD_LABEL) {
         expect(first, label).toBeLessThan(COLD_BOUND_MS);
         continue;

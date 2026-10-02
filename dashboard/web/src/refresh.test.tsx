@@ -3,7 +3,7 @@ import userEvent from '@testing-library/user-event'
 import { vi } from 'vitest'
 import { VIEW_INTERVAL_MS } from './api/queries'
 import { NOW, healthy } from './test/fixtures'
-import { freezeClock, installFetch, json, renderApp, serve } from './test/harness'
+import { freezeClock, installFetch, json, renderApp, serve, PATHS } from './test/harness'
 
 describe('refresh', () => {
   it('keeps the data age in the top bar and says, relatively, when 刷新 works again (F4)', async () => {
@@ -21,7 +21,7 @@ describe('refresh', () => {
     expect(screen.getByText('29分钟前')).toBeInTheDocument()
     await userEvent.setup().click(button)
     expect(screen.getByText('8 分钟后可再次刷新。')).toHaveAttribute('role', 'status')
-    expect(calls.map((call) => call.path)).not.toContain('/api/v2/home?refresh=1')
+    expect(calls.map((call) => call.path)).not.toContain(PATHS.refreshHome)
   })
 
   it('re-reads the statuses with /home?refresh=1, then the visible view', async () => {
@@ -32,7 +32,7 @@ describe('refresh', () => {
     const calls = serve((call) => ({
       ...base,
       // The page's own GET keeps the button usable; only the declined refresh answers a later window.
-      home: { ...base.home, refresh: { ...base.home.refresh, refreshed, last_refresh_at: NOW.toISOString(), next_refresh_at: call.path.includes('refresh=1') ? next : NOW.toISOString() } },
+      home: { ...base.home, refresh: { ...base.home.refresh, refreshed, last_refresh_at: NOW.toISOString(), next_refresh_at: call.path.endsWith(':refresh') ? next : NOW.toISOString() } },
     }))
     renderApp('#/flows')
     const user = userEvent.setup()
@@ -43,8 +43,8 @@ describe('refresh', () => {
 
     await user.click(button)
     await waitFor(() => expect(screen.getByText('已刷新。')).toHaveAttribute('role', 'status'))
-    await waitFor(() => expect(calls.filter((call) => call.path === '/api/v2/flows')).toHaveLength(2))
-    expect(calls.map((call) => call.path)).toContain('/api/v2/home?refresh=1')
+    await waitFor(() => expect(calls.filter((call) => call.path === PATHS.flows)).toHaveLength(2))
+    expect(calls.map((call) => call.path)).toContain(PATHS.refreshHome)
 
     // Declined: the note says when the Worker fetches again (next_refresh_at), not a fixed minute.
     refreshed = false
@@ -59,13 +59,13 @@ describe('refresh', () => {
     const calls = serve(healthy())
     renderApp('#/cloudflare')
     await screen.findByRole('heading', { name: '账户额度' })
-    const views = () => calls.filter((call) => call.path !== '/api/v2/registry').map((call) => call.path)
-    expect(views()).toEqual(['/api/v2/cloudflare'])
+    const views = () => calls.filter((call) => call.path !== PATHS.registry).map((call) => call.path)
+    expect(views()).toEqual([PATHS.cloudflare])
 
     await act(() => vi.advanceTimersByTimeAsync(VIEW_INTERVAL_MS - 1_000))
     expect(views()).toHaveLength(1)
     await act(() => vi.advanceTimersByTimeAsync(2_000))
-    await waitFor(() => expect(views()).toEqual(['/api/v2/cloudflare', '/api/v2/cloudflare']))
+    await waitFor(() => expect(views()).toEqual([PATHS.cloudflare, PATHS.cloudflare]))
   })
 
   it('keeps showing the last data when a background update fails', async () => {
@@ -74,7 +74,7 @@ describe('refresh', () => {
     const scenario = healthy()
     let fail = false
     installFetch((call) => {
-      if (call.path === '/api/v2/registry') return json(scenario.registry)
+      if (call.path === PATHS.registry) return json(scenario.registry)
       if (fail) throw new TypeError('redirect')
       return json(scenario.home)
     })

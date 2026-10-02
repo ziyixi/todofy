@@ -1,7 +1,7 @@
 import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { IDS, NOW, analyticsUnavailable, configDrift, driftView, guardShed, healthy, quotaRows, withWorkers, type Scenario } from '../test/fixtures'
-import { freezeClock, renderApp, serve, type Call } from '../test/harness'
+import { freezeClock, renderApp, serve, type Call, PATHS } from '../test/harness'
 
 async function showCloudflare(scenario: Scenario | ((call: Call) => Scenario), hash = '#/cloudflare') {
   freezeClock()
@@ -83,7 +83,7 @@ describe('Cloudflare 监控', () => {
 
   it('reads a D1, DO or R2 contributor measured without its identifier as 未归类, never as unknown (UX-2)', async () => {
     const base = healthy()
-    const unclassified = (kind: 'd1' | 'do' | 'r2', value: number) => ({ name: 'unknown', value, kind, resource: null })
+    const unclassified = (kind: 'd1' | 'do' | 'r2', value: number) => ({ name: 'unknown', value, kind })
     const rows = quotaRows({
       d1_rows_written: { breakdown: [{ name: IDS.mailHeroDb, value: 300, kind: 'd1', resource: 'mail-hero-db' }, unclassified('d1', 18)] },
       do_rows_read: { breakdown: [unclassified('do', 40)] },
@@ -295,8 +295,8 @@ describe('Cloudflare 监控', () => {
     const base = healthy()
     const resources = [
       ...base.cloudflare.resources,
-      { kind: 'r2' as const, id: 'mail-hero-backup', resource: null, entry: null, size_bytes: 1_000, class_a: 1, class_b: 1 },
-      { kind: 'r2' as const, id: 'mail-hero-backup-old', resource: null, entry: null, size_bytes: 1_000, class_a: 1, class_b: 1 },
+      { kind: 'r2' as const, id: 'mail-hero-backup', resource: null, entry: null, size_bytes: 1_000, requests: null, class_a: 1, class_b: 1 },
+      { kind: 'r2' as const, id: 'mail-hero-backup-old', resource: null, entry: null, size_bytes: 1_000, requests: null, class_a: 1, class_b: 1 },
     ]
     await showCloudflare({ ...base, cloudflare: { ...base.cloudflare, resources } })
     const r2 = within(section('存储与资源')).getByRole('region', { name: 'R2 存储桶' })
@@ -308,7 +308,7 @@ describe('Cloudflare 监控', () => {
     const base = healthy()
     const resources = [
       ...base.cloudflare.resources,
-      { kind: 'r2' as const, id: 'vultr-backup', resource: 'vps-backup', entry: 'self-hosted', size_bytes: 790_000_000, class_a: 12, class_b: 3 },
+      { kind: 'r2' as const, id: 'vultr-backup', resource: 'vps-backup', entry: 'self-hosted', size_bytes: 790_000_000, requests: null, class_a: 12, class_b: 3 },
     ]
     await showCloudflare({ ...base, cloudflare: { ...base.cloudflare, resources } })
     const r2 = within(section('存储与资源')).getByRole('region', { name: 'R2 存储桶' })
@@ -385,7 +385,7 @@ describe('Cloudflare 监控', () => {
         ...base.cloudflare,
         usage: { ...base.cloudflare.usage, rows: quotaRows({ workers_requests: { used: 800 } }) },
         // A declined refresh answers with the Worker's next window (60 s here).
-        refresh: { ...base.cloudflare.refresh, refreshed, next_refresh_at: !refreshed && call.path.includes('refresh=1') ? new Date(NOW.getTime() + 60_000).toISOString() : NOW.toISOString() },
+        refresh: { ...base.cloudflare.refresh, refreshed, next_refresh_at: !refreshed && call.path.endsWith(':refresh') ? new Date(NOW.getTime() + 60_000).toISOString() : NOW.toISOString() },
       },
     }))
     const user = userEvent.setup()
@@ -393,7 +393,7 @@ describe('Cloudflare 监控', () => {
     expect(button).toHaveAccessibleDescription('至少间隔 60 秒')
     await user.click(button)
     await waitFor(() => expect(screen.getByText('用量已刷新。')).toHaveAttribute('role', 'status'))
-    expect(calls.map((call) => call.path)).toContain('/api/v2/cloudflare?refresh=1')
+    expect(calls.map((call) => call.path)).toContain(PATHS.refreshCloudflare)
     expect(within(section('账户额度')).getByRole('meter', { name: 'Workers 请求' })).toHaveAttribute('aria-valuetext', '已用 800 次，上限 100,000 次，0.8%')
 
     refreshed = false

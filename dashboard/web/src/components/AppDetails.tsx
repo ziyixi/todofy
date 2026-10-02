@@ -1,6 +1,6 @@
 import { ExternalLink } from 'lucide-react'
 import type { GuardAppView, OpsStatus } from '../../../worker/src/api-types.ts'
-import type { AppDetail, RegistryEntryView } from '../../../worker/src/api-v2-types.ts'
+import type { AppDetail, RegistryEntry } from '../../../worker/src/api-types.ts'
 import { formatRelative, formatTime } from '../lib/format'
 import {
   HEALTH,
@@ -37,7 +37,7 @@ export function AppDetails({
   now,
 }: {
   card: AppDetail
-  entry: RegistryEntryView | undefined
+  entry: RegistryEntry | undefined
   guard: GuardAppView | undefined
   now: Date
 }) {
