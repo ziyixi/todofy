@@ -16,7 +16,7 @@ application "Home". Four hash-routed views ([`docs/design-v2.md`](docs/design-v2
 - **操作与记录 `#/ops`**: guard and canary actions, the digest and each app's full ops-v1 details.
 
 What exists and how it maps to Workers, resources and flows is a typed registry compiled into the
-Worker (`worker/src/registry.ts`) and served by `GET /api/v2/registry`, so no hostname is in the UI
+Worker (`worker/src/registry.ts`) and served by GetRegistry (`GET /api/v1/registry`), so no hostname is in the UI
 bundle. It reads Mail Hero and Todofy only through their `Ops` entrypoints
 ([`contracts/ops-v1`](../contracts/ops-v1/README.md)) and never imports `mail-hero/` or `todofy/` code.
 Besides the page it runs four jobs:
@@ -48,7 +48,7 @@ nothing holds mail content.
 | Path | What |
 | --- | --- |
 | `wrangler.toml` | the production config of the Worker `home` (committed, top level = production; run wrangler from `worker/` with `--config ../wrangler.toml`; local values in `.dev.vars`, see `.dev.vars.example`) |
-| `worker/` | TypeScript Worker `home` + Durable Object `HomeState`; `src/registry.ts` is the registry, `src/api-v2-types.ts` the API types the UI imports |
+| `worker/` | TypeScript Worker `home` + Durable Object `HomeState`; `src/http.ts` and `src/api.ts` serve the owner API [`dashboard.ui.v1`](../proto/dashboard/ui/v1) through the shared transcoder, `src/api-types.ts` names its generated wire types for the Worker and the UI, `src/registry.ts` is the registry |
 | `web/` | React + Vite UI (Chinese, mobile-first, light/dark, browser time zone), built to `web/dist` and served by the Worker |
 | `deploy/` | `deploy-vars.mjs` (what the deploy adds: `--var` values and the secrets file) and the tests of it and of `wrangler.toml` |
 | [`docs/design.md`](docs/design.md) | storage, the tick (status, usage, guard, canary, digest), Access/CSRF, the usage query, tests, CI (its v1 API and one-page UI sections are superseded by design-v2) |

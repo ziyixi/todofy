@@ -13,11 +13,12 @@ and pass locally with synthetic data. Nothing is deployed; [`verification.md`](v
 what was checked and what is still open in production. Setup: [`setup.md`](setup.md); limits with
 sources: [`limits.md`](limits.md).
 
-**Superseded parts (v2):** the one-page UI, `GET /api/v1/overview` and the other `/api/v1/*` routes
-below were replaced by the four v2 views and `/api/v2/*` ([`design-v2.md`](design-v2.md) §5); the v1
-paths now answer 404. The guard, canary and digest logic, the owner checks, CSRF and the limits in
-this document are unchanged and still apply to the v2 routes (`POST /api/v2/guard`, `POST
-/api/v2/canary {canary_id}`, `GET /api/v2/csrf`).
+**Superseded parts (v2, then dashboard.ui.v1):** the one-page UI, `GET /api/v1/overview` and the other
+hand-written routes below were replaced by the four v2 views (`/api/v2/*`), and those on 2026-10-02 by the proto
+API `dashboard.ui.v1` ([`proto/dashboard/ui/v1`](../../proto/dashboard/ui/v1), [`design-v2.md`](design-v2.md) §5);
+the `/api/v2` paths answer 410 `reload_required` for one release. The guard, canary and digest logic, the owner
+checks, CSRF and the limits in this document are unchanged and apply to its methods (OverrideGuard
+`POST /api/v1/guard:override`, RunCanary `POST /api/v1/canaries/mail-todofy:run`, and `GET /api/csrf`).
 
 ## 1. Layout and ownership
 
@@ -139,9 +140,9 @@ RPC results are values, never thrown errors:
 ```ts
 class HomeState extends DurableObject<Env> {
   tick(scheduledTime: number): Promise<{ ran: boolean }>;                      // cron
-  v2View(view: V2View, refresh: boolean, ifNoneMatch: string | null): Promise<V2Body>; // GET /api/v2/<view> (design-v2.md §5)
-  startCanary(): Promise<{ ok: true; run: CanaryRun } | { ok: false; code: 'canary_disabled' | 'canary_active' | 'canary_limit' }>;
-  setGuardOverride(level: GuardLevel): Promise<{ guard: GuardView }>;
+  view(view: ViewId, refresh: boolean, ifNoneMatch: string | null, at: number | null): Promise<ViewBody>; // the views (design-v2.md §5)
+  startCanary(at: number | null, requestId: string | null): Promise<{ ok: true; run: CanaryRun } | { ok: false; code: 'canary_disabled' | 'canary_active' | 'canary_limit' | 'request_id_reused' }>;
+  setGuardOverride(level: GuardLevel, at: number | null, requestId: string | null): Promise<{ ok: true; guard: GuardView } | { ok: false; code: 'request_id_reused' }>;
 }
 ```
 
@@ -374,9 +375,11 @@ labels each as "<app>：<label>" and links it to the card that explains it.
 
 ## 6. Owner API
 
-All paths except `/health` go through Access (edge-auth) first; then `/api/v2/*` or assets. The v1
-routes of this table are retired (404); their v2 successors and the view endpoints are in
-[`design-v2.md`](design-v2.md) §5, with the same auth, CSRF and body rules.
+All paths except `/health` go through Access (edge-auth) first; then the owner API `dashboard.ui.v1` under
+`/api/v1/`, `GET /api/csrf`, or assets. The v1 routes of this table are retired; the API that replaced them is in
+[`design-v2.md`](design-v2.md) §5, with the same auth, CSRF and body rules (errors are now google.rpc.Status
+bodies with the reasons of `proto/dashboard/ui/v1/errors.proto` and `common/errors/v1`, e.g. `CSRF_FAILED`,
+`CANARY_ACTIVE`).
 
 | Route | Auth | Result |
 | --- | --- | --- |
@@ -650,7 +653,7 @@ CI (`.github/workflows/ci.yml`, pinned action SHAs as today):
   these two); `environment: production`, `concurrency: dashboard-production`; read the host and issuer from the
   committed config, build, write the secrets file, dry-run, `deploy-vars.mjs exec -- wrangler deploy` with
   `CLOUDFLARE_API_TOKEN: secrets.CF_API_TOKEN`; no D1. Probe: an unauthenticated
-  `GET https://<host>/` (and `/api/v2/home`) must be a 302 whose `Location` starts with
+  `GET https://<host>/` (and `/api/v1/homeView`) must be a 302 whose `Location` starts with
   `ACCESS_ISSUER + '/'`; retry 10 × 15 s only while the answer is 5xx or no connection (certificate/DNS);
   any 2xx/4xx means the app answered without Access and fails the job at once.
 

@@ -174,8 +174,8 @@ browser. [`verification.md`](verification.md) §1d records such a run.
   digest as `canary_skipped` with its reason.
 - **Canary switch** (`DASHBOARD_CANARY_ENABLED`, `true` or `false`; required). With `false` the dashboard starts no
   canary: the scheduled run is not created, 立即运行金丝雀 is disabled with
-  "金丝雀已关闭（DASHBOARD_CANARY_ENABLED=false）", and `POST /api/v2/canary` answers 409
-  `canary_disabled` with the same message. A run already queued is still polled every 30 minutes until
+  "金丝雀已关闭（DASHBOARD_CANARY_ENABLED=false）", and RunCanary (`POST /api/v1/canaries/mail-todofy:run`)
+  answers FAILED_PRECONDITION `CANARY_DISABLED` with the same message. A run already queued is still polled every 30 minutes until
   it ends (at most 2 h after queuing), so its verdict is recorded; a run not yet queued (Mail Hero
   answered paused/unavailable, or the call failed) gets no further start attempt and ends at the next
   tick as skipped at the start stage with code `canary_disabled` (no digest item for it). While off, the page shows

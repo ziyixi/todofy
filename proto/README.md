@@ -19,7 +19,11 @@ through `ts/http-transcoder.ts` and Lab's UI calls it through `ts/http-client.ts
 HTTP APIs, which recommendation-v1, mail-received-v1 and every app's UI API follow. `links/ui/v1` is the
 links app's owner API (2026-10-01, deployed since the app's step L2): the second app on the same runtime, under the path
 prefix `/_/api/v1/` (its host's other paths are short links). `watch/ui/v1` is the watch app's owner API (2026-10-01,
-deployed since the app's step W2): the third app on the runtime, under `/api/v1/`.
+deployed since the app's step W2): the third app on the runtime, under `/api/v1/`. `dashboard/ui/v1` is the dashboard's
+owner API (2026-10-02, branch `proto-dashboard-ui`): the registry and the four views are AIP-156 singletons read with
+standard Gets, the refreshes and the guard and canary actions are custom methods; HomeState still serializes each view
+once and the Worker answers those bytes through the transcoder as `PreEncoded` (with the ETag, or 304), so its views
+keep their JSON (string timestamps: they embed ops-v1's answers) and the dashboard's tests prove it byte for byte.
 
 `ops/v1/ops.proto` is the IDL of `contracts/ops-v1` (2026-10-01) and its single source of validation: the
 value rules are options in the IDL ([Value rules](#value-rules)), the contract's JSON Schema is generated from
@@ -100,9 +104,9 @@ bundle is unchanged (its types come from the OpenAPI document).
 4. **Lint and breaking.** `buf lint` uses `STANDARD` (AIP-aligned: `_UNSPECIFIED` zero values, enum prefixes,
    `lower_snake_case`, versioned packages) and `COMMENTS` (every element documented); exceptions are written
    next to the element with `buf:lint:ignore` and a reason, and the AIP-shaped HTTP packages are excused only
-   from the two response-name rules the AIPs contradict: `lab/ui` in `buf.yaml`'s `ignore_only`, `links/ui` and
-   `watch/ui` by those two `buf:lint:ignore` lines on each method that answers a resource (with the reason in the
-   file's header),
+   from the two response-name rules the AIPs contradict: `lab/ui` in `buf.yaml`'s `ignore_only`, `links/ui`,
+   `watch/ui` and `dashboard/ui` by those two `buf:lint:ignore` lines on each method that answers a resource (with the
+   reason in the file's header),
    because `buf.yaml` reaches every proto user's deploy (`proto_deploys` below) and a new package must not
    redeploy the other apps. Google's api-linter
    (`scripts/api-lint.sh`, one pinned version) checks every package but `prototest/` against the AIPs; its
@@ -145,13 +149,13 @@ bundle is unchanged (its types come from the OpenAPI document).
 | --- | --- |
 | `buf.yaml`, `buf.lock` | The module (`path: .`, tooling directories excluded), lint and breaking rules, the `buf.build/googleapis/googleapis` dependency pinned by commit and digest |
 | `buf.gen.yaml` | protobuf-es v2 (`target=ts`, `import_extension=ts`, `erasable_syntax=true`) into `ts/` |
-| `<package path>/*.proto` | One directory per proto package: `todofy/taskintent/v1/task_intent.proto` is `todofy.taskintent.v1`; `lab/ui/v1/*.proto` is `lab.ui.v1`, Lab's owner UI API; `links/ui/v1/*.proto` is `links.ui.v1`, the links app's owner API; `watch/ui/v1/*.proto` is `watch.ui.v1`, the watch app's owner API; `common/errors/v1/errors.proto` is `common.errors.v1`, the error reasons every HTTP API shares; `common/wire/v1/wire.proto` is `common.wire.v1`, the wire profile's own options ([Value rules](#value-rules), `non_null`, `closed`, `keep_order`, `positional`); `ops/v1/ops.proto` is `ops.v1`, the IDL of `contracts/ops-v1` (every app's `Ops` entrypoint), a contract several apps implement, so named by the contract, not an app ([Adding a contract](#common-tasks), step 1); `todofy/report/v1/report.proto` is `todofy.report.v1`, Todofy's newsletter reports (recommendation-v1, summary-v1); `mailhero/webhook/v1/mail_received.proto` is `mailhero.webhook.v1`, Mail Hero's webhook event (mail.received.v1) |
+| `<package path>/*.proto` | One directory per proto package: `todofy/taskintent/v1/task_intent.proto` is `todofy.taskintent.v1`; `lab/ui/v1/*.proto` is `lab.ui.v1`, Lab's owner UI API; `links/ui/v1/*.proto` is `links.ui.v1`, the links app's owner API; `watch/ui/v1/*.proto` is `watch.ui.v1`, the watch app's owner API; `dashboard/ui/v1/*.proto` is `dashboard.ui.v1`, the dashboard's owner API; `common/errors/v1/errors.proto` is `common.errors.v1`, the error reasons every HTTP API shares; `common/wire/v1/wire.proto` is `common.wire.v1`, the wire profile's own options ([Value rules](#value-rules), `non_null`, `closed`, `keep_order`, `positional`); `ops/v1/ops.proto` is `ops.v1`, the IDL of `contracts/ops-v1` (every app's `Ops` entrypoint), a contract several apps implement, so named by the contract, not an app ([Adding a contract](#common-tasks), step 1); `todofy/report/v1/report.proto` is `todofy.report.v1`, Todofy's newsletter reports (recommendation-v1, summary-v1); `mailhero/webhook/v1/mail_received.proto` is `mailhero.webhook.v1`, Mail Hero's webhook event (mail.received.v1) |
 | `package.json`, `package-lock.json` | The toolchain pins (`dependencies`: buf, protoc-gen-es, the runtime) and this folder's test tools (`devDependencies`) |
 | `ts/` | The TypeScript package `@ziyixi/proto`. Committed: `package.json` (its exports), `wire-json.ts`, `wire-rules.ts` and `field-mask.ts` (the codec and its value rules), `http-path.ts`, `http-rule.ts`, `http-transcoder.ts`, `http-client.ts` and `rpc-status.ts` (the HTTP runtime, [HTTP APIs](#http-apis)), `page-token.ts` and `filter.ts` (AIP-158 page tokens and the AIP-160 subset for list methods), `protobuf.ts` / `protobuf-wkt.ts` (the runtime re-exports). Generated: every directory (`ts/todofy/...`, `ts/lab/...`, `ts/ops/...`, `ts/common/...`, `ts/google/...`): protobuf-es's `*_pb.ts`, and for the packages of `WIRE_PACKAGES` the wire JSON types `*_wire.ts` |
 | `python/` | The Python package `ziyixi-proto`. Committed: `pyproject.toml` (static metadata, uv cache keys), `build_backend.py`, `src/ziyixi_proto/__init__.py` and `wire_json.py` (the codec and its value rules). Generated: every directory under `src/ziyixi_proto/`, for the packages `tools/gen_py.py` lists in `PYTHON_PACKAGES` only; the wheel leaves the test-only ones out (`TEST_ONLY_PACKAGES`) |
 | `tools/ensure.mjs` | Installs the pinned toolchain when `node_modules/` does not match the lockfile, and generates both languages when its stamp (`.generated.json`, ignored) does not match |
 | `tools/gen_py.py` | The stdlib-only Python generator (frozen dataclasses, `IntEnum`s, field tables; a field named like a Python keyword is the attribute `<name>_`, `from_`), for `PYTHON_PACKAGES` only: `todofy.taskintent.v1`, `todofy.report.v1`, `ops.v1` and `mailhero.webhook.v1` (todofy-core imports all four) and `prototest.v1` (this folder's Python tests). A package only TypeScript apps use (an app's UI API) is not generated, so it may use what the Python profile lacks |
-| `tools/gen_wire_ts.py` | The TypeScript wire JSON types (`ts/<package>/<file>_wire.ts`, types only) of the packages in `WIRE_PACKAGES` (`ops.v1`, and `todofy.report.v1` for Todofy's UI): each message's JSON as a producer writes it, a union narrowed by its discriminator, each service as a binding's methods, and the `WireTypes` entries that type `toWire`'s answer |
+| `tools/gen_wire_ts.py` | The TypeScript wire JSON types (`ts/<package>/<file>_wire.ts`, types only) of the packages in `WIRE_PACKAGES` (`ops.v1`, `todofy.report.v1` for Todofy's UI, and `dashboard.ui.v1`, whose views the dashboard's Worker builds and its UI renders as wire JSON): each message's JSON as a producer writes it, a union narrowed by its discriminator, a type of another file of these packages as a type-only import of that file's module, each service as a binding's methods (none for a service with `google.api.http` bindings: an HTTP API is called through the client), and the `WireTypes` entries that type `toWire`'s answer |
 | `tools/gen_schema.py`, `tools/schema.mjs` | A contract's JSON Schema from its IDL (`SCHEMAS`: `ops.v1` writes the `$defs` document `contracts/ops-v1/ops-v1.schema.json`, with `ALIASES` keeping the `$defs` names it had before; `todofy.report.v1` writes `todofy/api/summary-v1.schema.json` and `recommendation-v1.schema.json`, each the self-contained schema of one message, `Target.root`, described by the IDL's comments; a target marked
 `Target.open` is a consumer's schema, every object open to unknown properties as a lenient read is, and the relations
 `any_match` and `present_when` are written as `anyOf` and `allOf`/`if`/`then`), run by `tools/schema.mjs` (no shell, the tools of `ensure.mjs`; the image keeps its source info for those comments); `npm run schema` rewrites them, `npm run check:schema` (Proto checks, Contracts and this folder's `npm test`) fails when one differs; both name what must be regenerated after a changed schema (`Target.then`: Todofy's reports are copied, comments included, into its UI's `src/api/schema.d.ts`, so a `report.proto` change is followed by `cd todofy/web && npm run gen:api`, which Todofy static checks hold with `npm run check:api`) |
@@ -618,11 +622,11 @@ A `proto/` change also re-checks every app in `PROTO_USERS` (Lab, Todofy, Mail H
 `Contracts` (the contracts' tests check the codecs against the schemas and pin the wire bytes). It deploys only
 the apps whose production bundle the changed path reaches (`proto_deploys` in `.github/scripts/ci_changes.py`).
 `PROTO_USERS` names each user's bundled languages: Lab, Mail Hero and the dashboard `"ts"` (their Workers, and
-Lab's UI), the links and watch apps `"ts"` (their Workers and UIs), Todofy `"python"` (todofy-core vendors the wheel; its gateway and UI import types only, which compile to
+Lab's and the dashboard's UIs), the links and watch apps `"ts"` (their Workers and UIs), Todofy `"python"` (todofy-core vendors the wheel; its gateway and UI import types only, which compile to
 nothing). A language's runtime and generator reach that language's users (`proto/ts/` and `buf.gen.yaml`: the
 TypeScript users; `proto/python/`, `tools/gen_py.py` and `tools/wire_rules.py`: Todofy); the wire profile's own
 options (`common/wire/`) reach both; a package reaches the apps that import it (`PROTO_PACKAGES`:
-`todofy/taskintent/` Lab, Todofy and the watch app, `todofy/report/` Todofy, `mailhero/webhook/` Mail Hero and Todofy, `lab/ui/` Lab, `links/ui/` the links app, `watch/ui/` the watch app, `ops/` the five apps with an `Ops` entrypoint or caller (Lab, Mail Hero, the dashboard, Todofy and the watch app), `common/errors/` and `prototest/` none);
+`todofy/taskintent/` Lab, Todofy and the watch app, `todofy/report/` Todofy, `mailhero/webhook/` Mail Hero and Todofy, `lab/ui/` Lab, `links/ui/` the links app, `watch/ui/` the watch app, `dashboard/ui/` the dashboard, `ops/` the five apps with an `Ops` entrypoint or caller (Lab, Mail Hero, the dashboard, Todofy and the watch app), `common/errors/` and `prototest/` none);
 the module and toolchain files (`buf.yaml`, `buf.lock`, `package-lock.json`, `tools/ensure.mjs`) and any path
 not mapped reach every user; tests, test data, the check scripts, the wire JSON types' and JSON Schema
 generators (`tools/gen_wire_ts.py`: types only; `tools/gen_schema.py`: files under `contracts/` and `todofy/api/`,
@@ -631,7 +635,7 @@ the users' languages and each package's importers from the sources, so the maps 
 
 ## Later
 
-Planned: every other app's UI API on the [HTTP APIs](#http-apis) pattern. ops-v1 moved on 2026-10-01 as one package,
+Planned: every other app's UI API on the [HTTP APIs](#http-apis) pattern (the dashboard's moved on 2026-10-02). ops-v1 moved on 2026-10-01 as one package,
 `ops/v1`, because its four services share every message, recommendation-v1 and summary-v1 as `todofy/report/v1`
 (messages only; Todofy's owner API, which lists them, moves with the Todofy UI API), and mail-received-v1 as
 `mailhero/webhook/v1` (messages only: the webhook's path, authentication and Idempotency-Key header stay the HTTP

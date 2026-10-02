@@ -245,6 +245,16 @@ profile writes is in the tests: `worker/test/wire-conformance.ts` reads every vi
 of the real Worker in workerd as the client does, refusing anything unrecognized, and requires the message read back to
 serialize to the same bytes (fields in numbered order, nulls and omissions where the profile puts them).
 
+**Cost of the move** (measured 2026-10-02 on the reference machine of `tools/workerd-cpu`, three runs each, before on
+the hand-written `/api/v2` routes and after). Bundles, gzip as `tools/bundle-size` counts them: the Worker 92.2 →
+116.7 KiB (the transcoder and the descriptors its routes are read from; budget 108 → 140 KiB in
+`deploy/bundle-size.mjs`), the UI's JavaScript 112.7 → 157.9 KiB (the protobuf-es runtime, the codec, the client and
+the descriptors; a new budget of 192 KiB in `web/scripts/js-budget.mjs`). CPU (`worker/test/runtime/api-cpu.test.ts`,
+medians of three isolates, HomeState's share included): the isolate's first API request (the ops view) 4.4-4.7 →
+5.1-5.2 ms, the views' warm medians 1.0-1.3 → 1.3 ms, a 304 1.0-1.1 → 1.2 ms, a guard override warm 0.8 → 1.2 ms;
+the cron tick unchanged (first 8.9, warm 2.5). The test holds the first API request below 9 ms, every other first run
+below 7 and every warm median below 3, against Free's 10.
+
 Every dynamic response shares the shell (attention, badges, refresh/tick times, `rev`) and carries
 `ETag: "<rev>-<hash>"`: `rev` is bumped by each tick, refresh that fetched, guard override and manual
 canary start, and the hash (FNV-1a) covers the body without `generated_at` — levels also change with
