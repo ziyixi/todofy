@@ -10,9 +10,9 @@ import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { QUOTA_RESOURCES } from '../../src/api-types.ts';
-import { API_V2_VERSION, type HomeResponse } from '../../src/api-v2-types.ts';
+import { API_V2_VERSION, type HomeResponse, type OpsResponse } from '../../src/api-v2-types.ts';
 import { accessClaims, testIssuer, type TestIssuer } from '../jwt.ts';
-import { d1Reads, expectValid, latest, startFlows, SYNTHETIC_BINDINGS, type FlowHarness } from './flows.ts';
+import { d1Reads, expectValid, latest, NOW, startFlows, SYNTHETIC_BINDINGS, type FlowHarness } from './flows.ts';
 
 const ISSUER = SYNTHETIC_BINDINGS.ACCESS_ISSUER ?? '';
 const AUDIENCE = SYNTHETIC_BINDINGS.ACCESS_AUDIENCE ?? '';
@@ -45,6 +45,9 @@ describe('Access end to end', () => {
       expect(response?.status).toBe(200);
       await response?.arrayBuffer();
     }
+    // The harness's DEV_NOW pins only requests the loopback bypass signed in: one Access verified reads the clock.
+    const verified = (await (await as('owner@example.com'))?.json()) as OpsResponse;
+    expect(verified.generated_at).not.toBe(new Date(NOW).toISOString());
     const page = await as('owner@example.com', '/');
     expect(page?.status).toBe(200);
     expect(page?.headers.get('content-security-policy')).toContain("default-src 'self'");
@@ -82,10 +85,10 @@ describe('the ops and cloudflare views', () => {
     expect(before.canary).toMatchObject({ id: 'mail-todofy', hour_utc: 16, today: null, active: null, recent: [], manual_today: 0, manual_limit: 3 });
     expect(before.refresh).toMatchObject({ last_tick_at: null, refreshed: false });
 
-    const now = Date.now();
-    await h.tick(now - 60_000);
+    await h.tick(NOW - 60_000);
     const after = await h.snapshot();
     expect(after.ops.version).toBe(API_V2_VERSION);
+    expect(after.ops.generated_at).toBe(new Date(NOW).toISOString());
     expect(after.ops.build).toBe('test');
     expect(after.overall.level).toBe('ok');
     expect(after.usage.status).toBe('ok');
@@ -97,7 +100,7 @@ describe('the ops and cloudflare views', () => {
     expectValid('OpsStatus', after.apps.todofy.status);
     expect(after.guard).toMatchObject({ thresholds: { shed_percent: 80, clear_percent: 70 }, override: null });
     expect(after.digest).toMatchObject({ enabled: true, items: [] });
-    expect(after.refresh.last_tick_at).toBe(new Date(now - 60_000).toISOString());
+    expect(after.refresh.last_tick_at).toBe(new Date(NOW - 60_000).toISOString());
     for (const item of after.digest.items) expectValid('OpsReportItem', item);
     // No token, owner or remote text anywhere in the answers.
     const text = JSON.stringify(after);
@@ -107,11 +110,10 @@ describe('the ops and cloudflare views', () => {
 
   it('turns the strip to a warning when the cron ticks stopped, however clean the last items were', async () => {
     h = await startFlows({ bindings: { CANARY_UTC_HOUR: '23' } });
-    const now = Date.now();
-    await h.tick(now - 60_000);
+    await h.tick(NOW - 60_000);
     expect((await h.snapshot()).overall).toEqual({ level: 'ok', items: [] });
     // Three hours without a tick (cron removed or every tick failing): the stored items are still clean.
-    await h.tick(now - 4 * 3_600_000);
+    await h.tick(NOW - 4 * 3_600_000);
     const stale = await h.snapshot();
     expect(stale.digest.items).toEqual([]);
     expect(stale.overall).toEqual({ level: 'warning', items: [{ source: 'dashboard', code: 'tick_stale', severity: 'warning' }] });

@@ -1,5 +1,6 @@
 /** Reading the Worker's vars (docs/design.md §2); invalid values fall back to safe defaults. */
 import type { Env } from './env.ts';
+import { parseTimestamp } from './time.ts';
 
 export const DEFAULT_CANARY_UTC_HOUR = 16;
 
@@ -42,4 +43,15 @@ export function buildSha(env: Pick<Env, 'BUILD_SHA'>): string {
 
 export function analyticsConfigured(env: Pick<Env, 'CF_ANALYTICS_TOKEN'>): boolean {
   return (env.CF_ANALYTICS_TOKEN ?? '').trim() !== '';
+}
+
+/**
+ * DEV_NOW as epoch milliseconds: the instant that a request signed in by the loopback dev bypass takes
+ * as now (http.ts passes it to HomeState), so local development and the workerd tests choose the time
+ * instead of reading the wall clock. Null (the object's own clock) when unset or not an RFC 3339 UTC
+ * timestamp. Production never holds it (deploy/test/wrangler-config.test.mjs) and never bypasses Access,
+ * so there the API paths always read Date.now().
+ */
+export function devNow(env: Pick<Env, 'DEV_NOW'>): number | null {
+  return parseTimestamp((env.DEV_NOW ?? '').trim());
 }

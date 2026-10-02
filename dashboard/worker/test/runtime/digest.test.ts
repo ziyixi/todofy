@@ -6,7 +6,7 @@
  */
 import { afterEach, describe, expect, it } from 'vitest';
 import type { OpsReport } from '@ziyixi/proto/ops/v1/ops_wire';
-import { d1Reads, expectValid, startFlows, status, type FlowHarness } from './flows.ts';
+import { d1Reads, expectValid, NOW, startFlows, status, type FlowHarness } from './flows.ts';
 import { fixture } from './harness.ts';
 
 let h: FlowHarness | undefined;
@@ -139,9 +139,8 @@ describe('app health', () => {
     h = await startFlows({ bindings: { CANARY_UTC_HOUR: '23' } });
     await h.answer('mail-hero', 'status', { throw: 'unavailable' });
     await h.answer('todofy', 'status', { throw: 'busy' });
-    const now = Date.now();
-    await h.tick(now - 40 * 60_000);
-    await h.tick(now - 5 * 60_000);
+    await h.tick(NOW - 40 * 60_000);
+    await h.tick(NOW - 5 * 60_000);
     const snap = await h.snapshot();
     expect(snap.overall).toEqual({
       level: 'critical',

@@ -18,7 +18,7 @@ import type { GuardLevel } from './api-types.ts';
 import { GUARD_LEVELS } from './ops-client.ts';
 import type { ApiError, ApiErrorCode, CsrfResponse, GuardRequest, HealthResponse } from './api-types.ts';
 import type { CanaryStartRequestV2, GuardResponseV2 } from './api-v2-types.ts';
-import { buildSha, publicHost } from './config.ts';
+import { buildSha, devNow, publicHost } from './config.ts';
 import type { Env } from './env.ts';
 import { registryBody } from './registry.ts';
 import { HOME_OBJECT, type GuardOverrideOutcome, type HomeState, type StartCanaryOutcome } from './state.ts';
@@ -93,6 +93,16 @@ const verifier = createAccessVerifier();
 
 function localBypass(env: Env): boolean {
   return env.DEV_AUTH_BYPASS === 'true';
+}
+
+/**
+ * The instant HomeState takes as now for this request: DEV_NOW when the loopback dev bypass signed the
+ * request in (local development and the workerd tests pin the clock with it), else null, the object's
+ * own Date.now(). A request Access verified never reads DEV_NOW, and an enabled bypass refuses every
+ * non-loopback request, so a stray DEV_NOW cannot move a production request's clock.
+ */
+function requestTime(env: Env, bypassed: boolean): number | null {
+  return bypassed ? devNow(env) : null;
 }
 
 export function accessPolicy(env: Env): AccessPolicy {
@@ -262,29 +272,29 @@ function registryResponse(ctx: Context): Response {
 }
 
 /** GET /api/v2/{home,flows,cloudflare,ops}: one RPC; the Worker passes the DO's string through. */
-async function viewResponse(ctx: Context, view: V2View): Promise<Response> {
+async function viewResponse(ctx: Context, view: V2View, at: number | null): Promise<Response> {
   const refresh = V2_REFRESHABLE.has(view) && ctx.url.searchParams.get('refresh') === '1';
   const ifNoneMatch = ctx.request.headers.get('if-none-match');
-  const result = await callHome(() => home(ctx.env).v2View(view, refresh, ifNoneMatch) as unknown as Promise<V2Body>);
+  const result = await callHome(() => home(ctx.env).v2View(view, refresh, ifNoneMatch, at) as unknown as Promise<V2Body>);
   return etagResponse(result.etag, result.body);
 }
 
-async function startCanaryResponse(ctx: Context): Promise<Response> {
-  const result = await callHome(() => home(ctx.env).startCanary() as unknown as Promise<StartCanaryOutcome>);
+async function startCanaryResponse(ctx: Context, at: number | null): Promise<Response> {
+  const result = await callHome(() => home(ctx.env).startCanary(at) as unknown as Promise<StartCanaryOutcome>);
   if (result.ok) return jsonResponse({ run: result.run }, 202);
   if (result.code === 'canary_disabled') throw new HttpError(409, 'canary_disabled');
   if (result.code === 'canary_active') throw new HttpError(409, 'canary_active');
   throw new HttpError(429, 'canary_limit');
 }
 
-async function guardResponse(ctx: Context): Promise<GuardOverrideOutcome> {
+async function guardResponse(ctx: Context, at: number | null): Promise<GuardOverrideOutcome> {
   const body = await readBody(ctx.request);
   const level = body.level;
   if (Object.keys(body).length !== 1 || !(GUARD_LEVELS as readonly unknown[]).includes(level)) {
     throw new HttpError(400, 'bad_request');
   }
   const input: GuardRequest = { level: level as GuardLevel };
-  return callHome(() => home(ctx.env).setGuardOverride(input.level) as unknown as Promise<GuardOverrideOutcome>);
+  return callHome(() => home(ctx.env).setGuardOverride(input.level, at) as unknown as Promise<GuardOverrideOutcome>);
 }
 
 async function api(ctx: Context, owner: string, bypassed: boolean): Promise<Response> {
@@ -292,6 +302,7 @@ async function api(ctx: Context, owner: string, bypassed: boolean): Promise<Resp
   const method = API_ROUTES[url.pathname];
   if (method === undefined) throw new HttpError(404, 'not_found');
   if (request.method !== method) throw methodNotAllowed(method);
+  const at = requestTime(ctx.env, bypassed);
 
   switch (url.pathname) {
     case '/api/v2/csrf':
@@ -299,24 +310,24 @@ async function api(ctx: Context, owner: string, bypassed: boolean): Promise<Resp
     case '/api/v2/registry':
       return registryResponse(ctx);
     case '/api/v2/home':
-      return viewResponse(ctx, 'home');
+      return viewResponse(ctx, 'home', at);
     case '/api/v2/flows':
-      return viewResponse(ctx, 'flows');
+      return viewResponse(ctx, 'flows', at);
     case '/api/v2/cloudflare':
-      return viewResponse(ctx, 'cloudflare');
+      return viewResponse(ctx, 'cloudflare', at);
     case '/api/v2/ops':
-      return viewResponse(ctx, 'ops');
+      return viewResponse(ctx, 'ops', at);
     case '/api/v2/canary': {
       await checkCsrf(ctx, owner, bypassed);
       const body = await readBody(request);
       const input = body as Partial<CanaryStartRequestV2>;
       if (Object.keys(body).length !== 1 || input.canary_id !== 'mail-todofy') throw new HttpError(400, 'bad_request');
-      return startCanaryResponse(ctx);
+      return startCanaryResponse(ctx, at);
     }
     case '/api/v2/guard': {
       await checkCsrf(ctx, owner, bypassed);
       // GuardView.apps (keyed by the two ops_v1 entry ids) is already a GuardViewV2.
-      const result: GuardResponseV2 = { guard: (await guardResponse(ctx)).guard };
+      const result: GuardResponseV2 = { guard: (await guardResponse(ctx, at)).guard };
       return jsonResponse(result);
     }
     default:

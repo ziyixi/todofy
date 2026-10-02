@@ -6,7 +6,7 @@ import assert from 'node:assert/strict'
 import { existsSync, readFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { pathToFileURL } from 'node:url'
-import { CONFIG, INJECTED } from '../deploy-vars.mjs'
+import { CONFIG, INJECTED, generateSecrets } from '../deploy-vars.mjs'
 
 const APP = new URL('../../', import.meta.url)
 const require = createRequire(new URL('worker/package.json', APP))
@@ -62,6 +62,22 @@ test('injected values, secrets and dev switches are never committed', () => {
   for (const name of ['ACCESS_OWNER', 'ACCESS_OWNER_ALIASES', 'CSRF_SIGNING_KEY', 'CF_ANALYTICS_TOKEN']) assert.ok(!names.includes(name), name)
   assert.deepEqual(names.filter((name) => name.startsWith('DEV_')), [])
   assert.ok(!readFileSync(CONFIG, 'utf8').split('\n').filter((line) => !line.startsWith('#')).join('\n').includes('@'))
+})
+
+test('the dev-only settings (the loopback login bypass, the pinned request clock) can never be deployed', () => {
+  // Every DEV_* setting the Worker reads (worker/src/env.ts): the runtime tests pin time with DEV_NOW.
+  const declared = [...readFileSync(new URL('worker/src/env.ts', APP), 'utf8').matchAll(/readonly (DEV_[A-Z0-9_]+)\?:/g)].map(([, name]) => name)
+  assert.deepEqual(declared.sort(), ['DEV_AUTH_BYPASS', 'DEV_NOW'])
+  // Not committed, not added with --var, not uploaded as a secret by deploy/deploy-vars.mjs.
+  const secrets = generateSecrets({
+    DASHBOARD_ACCESS_OWNER: 'owner@example.com',
+    DASHBOARD_ACCESS_OWNER_ALIASES: '',
+    DASHBOARD_CSRF_SIGNING_KEY: '0'.repeat(64),
+    DASHBOARD_CF_ANALYTICS_TOKEN: 'placeholder-analytics-token-0000000000',
+  })
+  const deployed = [...Object.keys(config.vars), ...INJECTED.map(({ name }) => name), ...Object.keys(secrets)]
+  for (const name of declared) assert.ok(!deployed.includes(name), name)
+  assert.ok(!/\bDEV_[A-Z0-9_]+/.test(readFileSync(CONFIG, 'utf8').split('\n').filter((line) => !line.startsWith('#')).join('\n')))
 })
 
 test('the workerd runtime tests run the committed compatibility date', () => {

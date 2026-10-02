@@ -291,10 +291,13 @@ export class HomeState extends DurableObject<Env> {
    * ETag `"<rev>-<hash>"` (views-v2.ts); `body: null` when `ifNoneMatch` names it (the Worker answers
    * 304). `refresh` only for home (due statuses and probes) and cloudflare (GraphQL), each scope at most
    * once per minute; statuses keep their 10 minutes, probes PROBE_MIN_INTERVAL_SECONDS.
+   *
+   * `at`, here and on the other API methods: the request's instant when the Worker pins one (DEV_NOW
+   * under the loopback dev bypass, http.ts requestTime); null, always in production, reads Date.now().
    */
-  async v2View(view: V2View, refresh: boolean, ifNoneMatch: string | null): Promise<V2Body> {
-    const refreshed = refresh && (view === 'home' || view === 'cloudflare') ? await this.serialize(() => this.refreshScope(view, Date.now())) : false;
-    const now = Date.now();
+  async v2View(view: V2View, refresh: boolean, ifNoneMatch: string | null, at: number | null = null): Promise<V2Body> {
+    const refreshed = refresh && (view === 'home' || view === 'cloudflare') ? await this.serialize(() => this.refreshScope(view, at ?? Date.now())) : false;
+    const now = at ?? Date.now();
     this.rowsRead = 0;
     const result = serializeView(this.buildView(view, now, refreshed), ifNoneMatch);
     console.log(
@@ -320,9 +323,9 @@ export class HomeState extends DurableObject<Env> {
   }
 
   /** POST /api/v2/canary: a manual run with its first start attempt; later steps happen on ticks. */
-  startCanary(): Promise<StartCanaryOutcome> {
+  startCanary(at: number | null = null): Promise<StartCanaryOutcome> {
     return this.serialize(async (): Promise<StartCanaryOutcome> => {
-      const now = Date.now();
+      const now = at ?? Date.now();
       // Switched off: refused before anything is read or called.
       if (!canaryEnabled(this.env)) return { ok: false, code: 'canary_disabled' };
       if (this.activeRun() !== null) return { ok: false, code: 'canary_active' };
@@ -341,9 +344,9 @@ export class HomeState extends DurableObject<Env> {
   }
 
   /** POST /api/v2/guard: force shed for 24 h, or clear and suppress the automatic shed until 00:00 UTC. */
-  setGuardOverride(level: GuardLevel): Promise<GuardOverrideOutcome> {
+  setGuardOverride(level: GuardLevel, at: number | null = null): Promise<GuardOverrideOutcome> {
     return this.serialize(async (): Promise<GuardOverrideOutcome> => {
-      const now = Date.now();
+      const now = at ?? Date.now();
       this.putDoc('guard_override', ownerOverride(level, now), now);
       // A cleared episode must not come back when the override ends (the auto shed's own until).
       if (level === 'normal') this.putDoc('guard', AUTO_NORMAL, now);

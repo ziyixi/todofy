@@ -139,7 +139,7 @@ answers 503. `npm run dev` (`worker/package.json`) pins the local origin with `-
 --local-upstream 127.0.0.1:8787`: wrangler dev otherwise takes the config's first route as every local
 request's URL, so the Worker would see `https://home.ziyixi.science` and refuse the bypass (503
 `access_not_configured`). Change `--port` and `--local-upstream` together, and never run a bare
-`wrangler dev` of this config; `web/`'s Vite proxy sends that origin as `Origin`. The production config never holds `DEV_AUTH_BYPASS` (tests check it). Without the two app Workers running locally, their tiles show ◆ 未知 · 无法连接
+`wrangler dev` of this config; `web/`'s Vite proxy sends that origin as `Origin`. The production config never holds `DEV_AUTH_BYPASS` (tests check it). An optional `DEV_NOW` (an RFC 3339 UTC instant, e.g. `2026-10-01T16:30:00Z`) makes the bypassed requests show the views as of that instant, to match ticks run locally at chosen times; the deploy never sets it either. Without the two app Workers running locally, their tiles show ◆ 未知 · 无法连接
 after the first poll and ■ 故障 from the second, and without a `CF_ANALYTICS_TOKEN` the Cloudflare view
 has no usage and no Worker rows; both are the expected state. The registry's website probe is the only
 public request a tick makes (one `GET https://www.ziyixi.science/build-info.json`, status and latency

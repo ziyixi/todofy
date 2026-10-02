@@ -1,7 +1,12 @@
 /**
  * Helpers of the workerd flow tests: a Miniflare harness whose outbound fetch plays the GraphQL API
  * (with scriptable usage or failures) and the Access certs endpoint, owner API calls through the
- * loopback dev bypass, and stub answers built from contract fixtures and validated against the schema.
+ * loopback dev bypass at a pinned instant (DEV_NOW), and stub answers built from contract fixtures and
+ * validated against the schema.
+ *
+ * Time never comes from the wall clock: cron ticks run at the instants a test passes to tick(), and owner
+ * requests (views, refreshes, manual canary, guard override) at DEV_NOW, which is NOW unless a test's
+ * bindings set another. The eslint config keeps Date.now() and an argument-less new Date() out of test/runtime.
  */
 import { expect } from 'vitest';
 import type { GuardState, OpsStatus } from '@ziyixi/proto/ops/v1/ops_wire';
@@ -14,6 +19,12 @@ import { contractErrors, type ContractName } from '../contract.ts';
 import { fixture, startHarness, SYNTHETIC_BINDINGS, type Harness, type StubApp } from './harness.ts';
 
 export const GRAPHQL = 'https://api.cloudflare.com/client/v4/graphql';
+/**
+ * The owner requests' instant (DEV_NOW) unless a test binds another: noon UTC, hours away from midnight and
+ * from the canary hours most tests configure (16, the default, and 23), so a tick a few hours before it is on
+ * the same UTC day and starts no scheduled canary.
+ */
+export const NOW = Date.parse('2026-10-01T12:00:00Z');
 /** The website probe of the registry (the only public GET the Worker makes). */
 export const WEBSITE_PROBE = 'https://www.ziyixi.science/build-info.json';
 
@@ -92,7 +103,7 @@ export async function startFlows(options: { bindings?: Record<string, string>; u
   const routes = new Map<string, () => Response>();
   const outboundLog: string[] = [];
   const harness = await startHarness({
-    bindings: { DEV_AUTH_BYPASS: 'true', ...options.bindings },
+    bindings: { DEV_AUTH_BYPASS: 'true', DEV_NOW: new Date(NOW).toISOString(), ...options.bindings },
     ...(options.persist === undefined ? {} : { persist: options.persist }),
     async outbound(request) {
       outboundLog.push(request.url);

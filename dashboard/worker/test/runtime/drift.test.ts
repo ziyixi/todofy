@@ -9,7 +9,7 @@ import type { OpsReport } from '@ziyixi/proto/ops/v1/ops_wire';
 import { DRIFT_CALLS_PER_TICK, DRIFT_UTC_HOUR, type CloudflareResponse, type OpsResponse } from '../../src/api-v2-types.ts';
 import { outboundPerTick } from '../../src/registry.ts';
 import { CF_API, SENTINEL_VALUE } from '../drift-fixture.ts';
-import { GRAPHQL, SYNTHETIC_BINDINGS, startFlows, type FlowHarness } from './flows.ts';
+import { GRAPHQL, NOW, SYNTHETIC_BINDINGS, startFlows, type FlowHarness } from './flows.ts';
 
 let h: FlowHarness | undefined;
 afterEach(async () => {
@@ -21,9 +21,9 @@ const MIN = 60_000;
 const DAY_MS = 86_400_000;
 const TOKEN = SYNTHETIC_BINDINGS.CF_ANALYTICS_TOKEN ?? '';
 
-/** DRIFT_UTC_HOUR:00 UTC `daysAgo` days before today (always in the past). */
+/** DRIFT_UTC_HOUR:00 UTC `daysAgo` days before NOW's day (hours before NOW, noon, even for 0). */
 function driftHour(daysAgo: number): number {
-  return Math.floor(Date.now() / DAY_MS) * DAY_MS - daysAgo * DAY_MS + DRIFT_UTC_HOUR * 60 * MIN;
+  return Math.floor(NOW / DAY_MS) * DAY_MS - daysAgo * DAY_MS + DRIFT_UTC_HOUR * 60 * MIN;
 }
 
 async function view<T>(harness: FlowHarness, path: string): Promise<T> {
@@ -129,12 +129,10 @@ describe('the daily drift check', () => {
     // The API answers again: the next day's check succeeds and both items clear.
     h.cloudflare.tweaks = {};
     const today = driftHour(0);
-    if (today + 60 * MIN < Date.now()) {
-      for (let k = 0; k < 3; k++) await h.tick(today + k * 30 * MIN);
-      const after = await view<OpsResponse>(h, 'ops');
-      expect(after.digest.items.filter((item) => item.code === 'drift_unavailable' || item.code === 'config_drift')).toEqual([]);
-      expect((await view<CloudflareResponse>(h, 'cloudflare')).drift).toMatchObject({ status: 'ok', consecutive_failed_days: 0 });
-    }
+    for (let k = 0; k < 3; k++) await h.tick(today + k * 30 * MIN);
+    const after = await view<OpsResponse>(h, 'ops');
+    expect(after.digest.items.filter((item) => item.code === 'drift_unavailable' || item.code === 'config_drift')).toEqual([]);
+    expect((await view<CloudflareResponse>(h, 'cloudflare')).drift).toMatchObject({ status: 'ok', consecutive_failed_days: 0 });
   });
 
   it('makes no call without the token and says not_configured', async () => {

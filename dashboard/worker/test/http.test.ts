@@ -37,22 +37,27 @@ interface HomeCalls {
   views: string[];
   startCanary: number;
   guard: string[];
+  /** The request time (`at`) of every v2View, startCanary and setGuardOverride call, in order. */
+  at: (number | null)[];
 }
 
 function makeEnv(overrides: Partial<Env> = {}, answers: { startCanary?: unknown; guard?: unknown; view?: () => unknown } = {}) {
-  const calls: HomeCalls = { views: [], startCanary: 0, guard: [] };
+  const calls: HomeCalls = { views: [], startCanary: 0, guard: [], at: [] };
   const stub = {
-    startCanary() {
+    startCanary(at: number | null) {
       calls.startCanary++;
+      calls.at.push(at);
       return Promise.resolve(answers.startCanary ?? { ok: true, run: { run_id: 'canary-manual-20260929T160000Z' } });
     },
-    setGuardOverride(level: string) {
+    setGuardOverride(level: string, at: number | null) {
       calls.guard.push(level);
+      calls.at.push(at);
       return Promise.resolve(answers.guard ?? { guard: { desired: { level } } });
     },
     tick: vi.fn(() => Promise.resolve({ ran: true })),
-    v2View: vi.fn((view: string, refresh: boolean, ifNoneMatch: string | null) => {
+    v2View: vi.fn((view: string, refresh: boolean, ifNoneMatch: string | null, at: number | null) => {
       calls.views.push(`${view}:${String(refresh)}`);
+      calls.at.push(at);
       if (answers.view) return Promise.resolve(answers.view());
       return Promise.resolve(ifNoneMatch === '"7"' ? { etag: '"7"', body: null } : { etag: '"7"', body: JSON.stringify({ view, refresh }) });
     }),
@@ -216,6 +221,44 @@ describe('Access', () => {
     const production = await call(env, '/api/v2/home');
     expect(production.status).toBe(503);
     expect(await errorCode(production)).toBe('access_not_configured');
+  });
+
+  it('pins the request time to DEV_NOW only for requests the loopback dev bypass signed in', async () => {
+    const NOW = '2026-10-01T12:00:00Z';
+    const local = async (env: Env, path: string, body?: unknown): Promise<Response> => {
+      const url = `http://127.0.0.1:8787${path}`;
+      if (body === undefined) return worker.fetch(incoming(url), env);
+      const issued = await worker.fetch(incoming('http://127.0.0.1:8787/api/v2/csrf'), env);
+      const { token: csrfToken } = await issued.json<CsrfResponse>();
+      const cookie = (issued.headers.get('set-cookie') ?? '').split(';')[0] ?? '';
+      const headers = { origin: 'http://127.0.0.1:8787', 'x-csrf-token': csrfToken, cookie, 'content-type': 'application/json' };
+      return worker.fetch(incoming(url, { method: 'POST', headers, body: JSON.stringify(body) }), env);
+    };
+
+    // Bypassed: every request-driven call of the object takes DEV_NOW as now.
+    const pinned = makeEnv({ DEV_AUTH_BYPASS: 'true', DEV_NOW: NOW });
+    expect((await local(pinned.env, '/api/v2/home?refresh=1')).status).toBe(200);
+    expect((await local(pinned.env, '/api/v2/canary', { canary_id: 'mail-todofy' })).status).toBe(202);
+    expect((await local(pinned.env, '/api/v2/guard', { level: 'shed' })).status).toBe(200);
+    expect(pinned.calls.at).toEqual([Date.parse(NOW), Date.parse(NOW), Date.parse(NOW)]);
+
+    // Unset or not an RFC 3339 UTC instant: the object's own clock.
+    for (const value of ['', ' ', '2026-10-01 12:00:00', '2026-10-01T12:00:00+02:00', '1759320000000', 'now']) {
+      const { env, calls } = makeEnv({ DEV_AUTH_BYPASS: 'true', DEV_NOW: value });
+      expect((await local(env, '/api/v2/ops')).status).toBe(200);
+      expect(calls.at, value).toEqual([null]);
+    }
+
+    // A request Access verified never reads it, even where the Worker holds a DEV_NOW.
+    const verified = makeEnv({ DEV_NOW: NOW });
+    expect((await call(verified.env, '/api/v2/home')).status).toBe(200);
+    expect((await mutate(verified.env, '/api/v2/canary', { canary_id: 'mail-todofy' })).status).toBe(202);
+    expect((await mutate(verified.env, '/api/v2/guard', { level: 'normal' })).status).toBe(200);
+    expect(verified.calls.at).toEqual([null, null, null]);
+    // And with the bypass switched on as well, the edge's requests are refused before the object is called.
+    const both = makeEnv({ DEV_AUTH_BYPASS: 'true', DEV_NOW: NOW });
+    expect((await call(both.env, '/api/v2/home')).status).toBe(503);
+    expect(both.calls.at).toEqual([]);
   });
 });
 

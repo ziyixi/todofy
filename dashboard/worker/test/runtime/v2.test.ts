@@ -19,7 +19,7 @@ import {
 import { REGISTRY, outboundPerTick } from '../../src/registry.ts';
 import { REALISTIC_USAGE, SYNTHETIC_D1, SYNTHETIC_NS, usageWithScripts } from '../graphql-fixture.ts';
 import { accessClaims, testIssuer, type TestIssuer } from '../jwt.ts';
-import { GRAPHQL, SYNTHETIC_BINDINGS, WEBSITE_PROBE, startFlows, status, type FlowHarness } from './flows.ts';
+import { GRAPHQL, NOW, SYNTHETIC_BINDINGS, WEBSITE_PROBE, startFlows, status, type FlowHarness } from './flows.ts';
 
 let h: FlowHarness | undefined;
 let issuer: TestIssuer;
@@ -33,7 +33,11 @@ afterEach(async () => {
 
 const MIN = 60_000;
 
-/** A harness on the mockup's account (REALISTIC_USAGE) whose website answers 200. */
+/**
+ * A harness on the mockup's account (REALISTIC_USAGE) whose website answers 200. Its canary hour, 23, is
+ * later than every tick of these tests (around NOW, noon): no scheduled canary starts unless a test sets
+ * the hour of its own ticks.
+ */
 async function mockupDay(bindings: Record<string, string> = {}): Promise<FlowHarness> {
   const harness = await startFlows({ usage: REALISTIC_USAGE, bindings: { CANARY_UTC_HOUR: '23', ...bindings } });
   harness.routes.set(WEBSITE_PROBE, () => Response.json({ build: 'synthetic' }, { headers: { 'cache-control': 'no-store' } }));
@@ -113,7 +117,7 @@ describe('GET /api/v2/home', () => {
 
   it('shows the mockup day after a tick, and answers 304 until something changes', async () => {
     h = await mockupDay();
-    await h.tick(Date.now() - MIN);
+    await h.tick(NOW - MIN);
     const first = await h.v2<HomeResponse>('home');
     const home = first.body;
     if (home === null) throw new Error('no body');
@@ -143,7 +147,7 @@ describe('GET /api/v2/home', () => {
 
     const again = await h.v2('home', first.etag);
     expect(again).toMatchObject({ status: 304, body: null });
-    await h.tick(Date.now() + 29 * MIN);
+    await h.tick(NOW + 29 * MIN);
     const after = await h.v2<HomeResponse>('home', first.etag);
     expect(after.status).toBe(200);
     expect(after.etag).toMatch(/^"2-/);
@@ -169,8 +173,8 @@ describe('GET /api/v2/home', () => {
   it('shows a failing website on its tile, its flow and (as one observed item) the strip; the digest is unchanged', async () => {
     h = await mockupDay();
     h.routes.set(WEBSITE_PROBE, () => new Response('bad gateway', { status: 502 }));
-    await h.tick(Date.now() - 31 * MIN);
-    await h.tick(Date.now() - MIN);
+    await h.tick(NOW - 31 * MIN);
+    await h.tick(NOW - MIN);
     const home = await view<HomeResponse>(h, 'home');
     expect(home.entries.find((e) => e.id === 'website')).toMatchObject({ level: 'critical', reason: 'http_status', consecutive_failures: 2, metric: null });
     expect(home.flows.find((f) => f.id === 'site-publish')).toMatchObject({ level: 'critical', first_issue: { stage: 'serve', code: 'http_status' } });
@@ -190,7 +194,7 @@ describe('GET /api/v2/home', () => {
 describe('GET /api/v2/cloudflare', () => {
   it.each([0, 5, 20])('lists %i discovered Workers, their resources and the 14 quota rows', async (count) => {
     h = await startFlows({ usage: usageWithScripts(count), bindings: { CANARY_UTC_HOUR: '23' } });
-    await h.tick(Date.now() - MIN);
+    await h.tick(NOW - MIN);
     const answer = await h.v2<CloudflareResponse>('cloudflare');
     const cf = answer.body;
     if (cf === null) throw new Error('no body');
@@ -231,7 +235,7 @@ describe('GET /api/v2/cloudflare', () => {
       },
       bindings: { CANARY_UTC_HOUR: '23' },
     });
-    await h.tick(Date.now() - MIN);
+    await h.tick(NOW - MIN);
     const cf = await view<CloudflareResponse>(h, 'cloudflare');
     const items = (id: string) => (cf.usage.rows.find((r) => r.id === id)?.breakdown ?? []).map((item) => [item.kind, item.resource]);
     expect(items('d1_rows_read')).toEqual([
@@ -261,7 +265,7 @@ describe('GET /api/v2/cloudflare', () => {
 
   it('remembers a Worker that had no request today, and re-queries GraphQL at most once a minute', async () => {
     h = await startFlows({ usage: REALISTIC_USAGE, bindings: { CANARY_UTC_HOUR: '23' } });
-    await h.tick(Date.now() - 31 * MIN);
+    await h.tick(NOW - 31 * MIN);
     // The next answer lacks notion-publish (as after 00:00 UTC for an idle cron Worker).
     h.analytics.answer = { ...REALISTIC_USAGE, scripts: (REALISTIC_USAGE.scripts ?? []).filter((s) => s.script !== 'ziyixi-notion-publish') };
     const refreshed = await view<CloudflareResponse>(h, 'cloudflare?refresh=1');
@@ -279,7 +283,7 @@ describe('GET /api/v2/cloudflare', () => {
 
 describe('GET /api/v2/flows and /api/v2/ops', () => {
   it('verifies delivery and the digest with the canary, and shows a hold on its stage', async () => {
-    const start = Date.now() - 70 * MIN;
+    const start = NOW - 70 * MIN;
     h = await mockupDay({ CANARY_UTC_HOUR: String(new Date(start).getUTCHours()) });
     await h.tick(start);
     await h.tick(start + 35 * MIN);
@@ -302,7 +306,7 @@ describe('GET /api/v2/flows and /api/v2/ops', () => {
 
     // Mail Hero's delivery force-paused: 已暂停 on 投递, a held tag, no alarm.
     await h.answer('mail-hero', 'status', { value: await status('mail-hero', { health: 'degraded', signals: [{ code: 'force_send_paused', severity: 'warning', metrics: {} }] }) });
-    await h.tick(Date.now() - 2 * MIN);
+    await h.tick(NOW - 2 * MIN);
     const held = await view<FlowsResponse>(h, 'flows');
     expect(held.flows[0]?.stages.find((s) => s.id === 'deliver')).toMatchObject({ level: 'held', held: true, reason: 'force_send_paused' });
     expect(held.attention.held).toEqual([{ entry: 'mail-hero', code: 'force_send_paused', target: { view: 'flows', flow: 'mail-to-task', stage: 'deliver', entry: 'mail-hero' } }]);
@@ -310,11 +314,11 @@ describe('GET /api/v2/flows and /api/v2/ops', () => {
   });
 
   it('marks the delivery stage failed when the canary fails there, and targets the item at it', async () => {
-    const start = Date.now() - 40 * MIN;
+    const start = NOW - 40 * MIN;
     h = await mockupDay({ CANARY_UTC_HOUR: String(new Date(start).getUTCHours()) });
     await h.answer('mail-hero', 'canaryDelivery', { value: { state: 'failed', attempts: 3, last_http_status: 400, error_code: 'http_400' } });
     await h.tick(start);
-    await h.tick(Date.now() - 5 * MIN);
+    await h.tick(NOW - 5 * MIN);
     const flows = await view<FlowsResponse>(h, 'flows');
     const deliver = flows.flows[0]?.stages.find((s) => s.id === 'deliver');
     expect(deliver).toMatchObject({ level: 'critical', reason: 'canary_failed', canary: 'failed' });
@@ -325,7 +329,7 @@ describe('GET /api/v2/flows and /api/v2/ops', () => {
 
   it('serves the ops view and keeps the v1 mutation flows under v2', async () => {
     h = await mockupDay();
-    await h.tick(Date.now() - MIN);
+    await h.tick(NOW - MIN);
     const before = await h.v2<OpsResponse>('ops');
     const ops = before.body;
     if (ops === null) throw new Error('no body');
@@ -361,12 +365,12 @@ describe('GET /api/v2/flows and /api/v2/ops', () => {
 describe('budgets of a view', () => {
   it('reads a bounded number of rows with a full canary history and 20 Workers', async () => {
     h = await startFlows({ usage: usageWithScripts(20) });
-    const day = (offset: number): string => new Date(Date.now() - (16 - offset) * 86_400_000).toISOString().slice(0, 10);
+    const day = (offset: number): string => new Date(NOW - (16 - offset) * 86_400_000).toISOString().slice(0, 10);
     for (let i = 0; i < 16; i++) {
       await h.tick(`${day(i)}T16:00:00Z`);
       await h.tick(`${day(i)}T16:30:00Z`);
     }
-    await h.tick(Date.now() - MIN);
+    await h.tick(NOW - MIN);
     const rows: Record<string, number> = {};
     for (const name of ['home', 'flows', 'cloudflare', 'ops'] as const) {
       const answer = await h.v2(name);
@@ -380,7 +384,7 @@ describe('budgets of a view', () => {
 
 describe('budgets of a tick', () => {
   it(`makes at most outboundPerTick() = ${String(outboundPerTick())} outbound calls`, async () => {
-    const start = Date.now() - 40 * MIN;
+    const start = NOW - 40 * MIN;
     h = await mockupDay({ CANARY_UTC_HOUR: String(new Date(start).getUTCHours()) });
     await h.tick(start);
     const first = [...(await h.called()), ...h.outboundLog.splice(0)];
@@ -388,7 +392,7 @@ describe('budgets of a tick', () => {
     expect(first.length).toBeLessThanOrEqual(outboundPerTick());
     expect(first).toContain(WEBSITE_PROBE);
     expect(first).toContain(GRAPHQL);
-    await h.tick(Date.now() - 5 * MIN);
+    await h.tick(NOW - 5 * MIN);
     const second = [...(await h.called()), ...h.outboundLog.splice(0)];
     expect(second.length).toBeLessThanOrEqual(outboundPerTick());
     expect(second.filter((call) => call === WEBSITE_PROBE)).toHaveLength(1);

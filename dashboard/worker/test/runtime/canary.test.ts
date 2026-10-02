@@ -6,7 +6,7 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import type { OpsReport } from '@ziyixi/proto/ops/v1/ops_wire';
 import type { CanaryStartResponse } from '../../src/api-types.ts';
-import { expectValid, latest, startFlows, status, type FlowHarness } from './flows.ts';
+import { expectValid, latest, NOW, startFlows, status, type FlowHarness } from './flows.ts';
 import { fixture } from './harness.ts';
 
 const EVENT_ID = '6d3b2f0e-4c1a-4b7e-8a52-0c9e7f1d2a31';
@@ -171,8 +171,8 @@ describe('manual canary runs', () => {
     expect(second.status).toBe(409);
     expect(await second.json()).toMatchObject({ error: { code: 'canary_active' } });
 
-    // The next tick advances the manual run and does not start the scheduled one alongside it.
-    await h.tick(Date.now() + 60_000);
+    // The next tick, past the canary hour, advances the manual run and does not start the scheduled one alongside it.
+    await h.tick(NOW + 60_000);
     const snap = await h.snapshot();
     expect(snap.canary.active).toBeNull();
     expect(snap.canary.recent.map((r) => [r.kind, r.outcome])).toEqual([['manual', 'ok']]);
@@ -201,10 +201,9 @@ describe('manual canary runs', () => {
 
 describe('the canary switch (CANARY_ENABLED)', () => {
   it('starts nothing while false, refuses manual runs, and never reports a missing run', async () => {
-    // Hour 0: every tick is past the canary hour. Ticks up to a minute ago keep the views current.
+    // Hour 0: every tick is past the canary hour. Ticks up to a minute before NOW keep the views current.
     h = await startFlows({ bindings: { CANARY_ENABLED: 'false', CANARY_UTC_HOUR: '0' } });
-    const now = Date.now();
-    for (const minutes of [150, 120, 90, 60, 30, 1]) await h.tick(now - minutes * 60_000);
+    for (const minutes of [150, 120, 90, 60, 30, 1]) await h.tick(NOW - minutes * 60_000);
     // The digest went out, without any canary item (none for "not run today" either).
     const reports = (await h.callsOf('todofy', 'reportOps')).map((args) => args[0] as OpsReport);
     expect(reports.length).toBeGreaterThan(0);

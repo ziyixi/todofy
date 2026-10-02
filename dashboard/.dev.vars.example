@@ -10,6 +10,9 @@ BUILD_SHA=dev
 CANARY_ENABLED=true
 # Loopback-only login bypass (http://localhost, 127.0.0.1 or [::1] without cf-ray; 503 anywhere else):
 DEV_AUTH_BYPASS=true
+# Optional: the instant the bypassed requests take as now (views, refreshes, manual canary, guard override),
+# e.g. to look at ticks run at chosen times; unset, they read the clock.
+# DEV_NOW=2026-10-01T16:30:00Z
 ACCESS_OWNER=owner@example.com
 # A locally generated 64-hex key, e.g. `openssl rand -hex 32`:
 CSRF_SIGNING_KEY=0000000000000000000000000000000000000000000000000000000000000000

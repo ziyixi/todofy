@@ -44,6 +44,11 @@ export interface Env {
    */
   readonly CF_ANALYTICS_TOKEN?: string;
 
-  // local development only (.dev.vars); never in the production config
+  // local development and the workerd tests only (.dev.vars, test/runtime); never in the production config
   readonly DEV_AUTH_BYPASS?: string;
+  /**
+   * An RFC 3339 UTC instant (`2026-10-01T12:00:00Z`) that a request signed in by the loopback dev bypass
+   * takes as now (config.ts devNow). Requests Access verified, and cron ticks, never read it.
+   */
+  readonly DEV_NOW?: string;
 }

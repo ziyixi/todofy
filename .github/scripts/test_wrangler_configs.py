@@ -347,6 +347,22 @@ class Files(unittest.TestCase):
                     )
                     self.assertNotIn("@", uncommented(path))
 
+    def test_dev_only_settings_never_reach_a_deploy(self):
+        """DEV_* settings are local development and test switches (the loopback login bypass DEV_AUTH_BYPASS, the
+        dashboard's pinned request clock DEV_NOW): no production config commits one, no deploy job sets or passes one,
+        and no deploy-vars wrapper injects or uploads one, so no deploy can switch one on."""
+        dev = re.compile(r"\bDEV_[A-Z0-9_]+")
+        for path in PRODUCTION.values():
+            with self.subTest(path=path):
+                self.assertEqual(dev.findall(uncommented(path)), [])
+        jobs = workflow_jobs()
+        for job in DEPLOY_JOBS:
+            with self.subTest(job=job):
+                self.assertEqual(dev.findall(jobs[job]), [])
+        for wrapper, _, _ in WRAPPERS.values():
+            with self.subTest(wrapper=wrapper):
+                self.assertEqual(dev.findall((REPO / wrapper).read_text()), [])
+
     def test_cross_worker_bindings_name_existing_workers(self):
         gateway = load(PRODUCTION["todofy"])
         [binding] = gateway["durable_objects"]["bindings"]

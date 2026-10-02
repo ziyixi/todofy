@@ -75,6 +75,7 @@ route `home.ziyixi.science` with `custom_domain = true`. One cron
 | `CSRF_SIGNING_KEY` | secret | `^[0-9a-fA-F]{64}$` |
 | `CF_ANALYTICS_TOKEN` | secret | API token used **only** as `Authorization: Bearer` on `POST https://api.cloudflare.com/client/v4/graphql` and on the drift check's read-only `GET`s under `https://api.cloudflare.com/client/v4` (design-v2.md §10; URLs are constants, not config). Never logged, stored, echoed or sent elsewhere. Today a broader token is reused; replace it with an "Account Analytics: Read" token (setup.md) |
 | `DEV_AUTH_BYPASS` | local only | `true` enables the loopback bypass; never in the production config (tests check it) |
+| `DEV_NOW` | local only | an RFC 3339 UTC instant that a request the loopback bypass signed in takes as now (views, refreshes, manual canary, guard override); unset or anything else → the object's clock. Requests Access verified and cron ticks never read it; never in the production config, the deploy's `--var`s or its secrets (tests check it) |
 
 ## 3. Durable Object storage (`HomeState`, instance `home-v1`)
 
@@ -154,7 +155,9 @@ A failure of the object itself (reset, storage error) is an exception, which the
   in-memory promise chain (service calls await, so input gates alone would interleave them). A view
   without refresh is built from the tables in the same chain.
 - Every decision function takes `now` explicitly: the tick passes `scheduledTime`, the API paths
-  `Date.now()`. The runtime tests drive time through `scheduledTime`.
+  `Date.now()`, or `DEV_NOW` for a request the loopback bypass signed in (the Worker passes it to the
+  object's RPC; production never has it). The runtime tests drive time through `scheduledTime` and
+  `DEV_NOW` only, never the wall clock.
 - Log one JSON line per tick and per API error: codes, counts and durations only (never the token,
   owner, JWTs or app response text).
 
@@ -561,7 +564,10 @@ Runtime (`npm run test:runtime`, Miniflare; `test/runtime/harness.ts`): the bund
 real SQLite `HomeState`; stub `mail-hero` and `todofy` Workers exporting `Ops` with only their declared
 methods, defaulting to `contracts/ops-v1` fixtures and scripted per test (`/__scenario`, `/__calls`);
 an outbound handler playing GraphQL and the Access certs endpoint. Every value a stub returns is a
-fixture or passes the contract's rules (`test/contract.ts`). Flows, driven by `scheduled()` with chosen times:
+fixture or passes the contract's rules (`test/contract.ts`). Time is chosen, never read: `scheduled()`
+runs at fixed instants and the owner requests at `DEV_NOW` (`NOW`, 2026-10-01 12:00 UTC, unless a test
+sets another; `test/runtime/flows.ts`), and the eslint config refuses `Date.now()` and an argument-less
+`new Date()` in `test/runtime/`, so the suite gives the same result at any hour. Flows:
 
 - guard: 81 % → shed on both apps with the expected input; same state → no call; renew on a new day
   (R2), also when GraphQL fails at midnight (no normal in between); < 70 % → normal; the app reporting
