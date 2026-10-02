@@ -162,9 +162,8 @@ with synthetic data.
 
 ### `proto-todofy-ui` — Todofy owner API as `todofy.ui.v1`
 
-- State: rebased on `ca63675` (after the dashboard's landing); all 11 review findings fixed, with tests. Verified
-  from a clean clone of its head:
-  every check in the list above, the runtime suite, the gateway's workerd CPU test, the dry runs and the smoke
+- State: rebased on `a956440` (after the dashboard's landing); all 11 review findings fixed, with tests.
+  Verified from a clean clone of its head: every check in the list above, the runtime suite, the gateway's workerd CPU test, the dry runs and the smoke
   (every rpc through the UI's own client; the machine routes byte-identical to `main` apart from timestamps
   and request IDs). Commits: `todofy.ui.v1` IDL, core RPC, gateway, tests, UI, docs, then one per review fix.
   Ready to land.
@@ -184,9 +183,9 @@ with synthetic data.
   for one release; `owner_api` in core keeps serving the old gateway during the deploy. The next Todofy
   release removes both (`todofy/docs/gateway-contract.md` §6.4).
 - Measured: gateway 11.8 → 72.0 KiB gzip (budget 86); UI JS 131.9 → 172.4 KiB gzip (budget 208); todofy-core
-  153.6 → 168.4 KiB gzip; gateway CPU per owner request at most 6.4 reference ms (a 1.9 MB ASCII legacy text heavy in escapes; the
-  reports at their limits 5.2),
-  the isolate's first API request 4.2-5.2 (bound 8; details in `todofy/docs/gateway-contract.md` §8).
+  153.6 → 168.4 KiB gzip; gateway CPU per owner request at most 6.4
+  reference ms (a 1.9 MB ASCII legacy text heavy in escapes; the reports at their limits 5.2), the isolate's
+  first API request 4.2-5.2 (bound 8; details in `todofy/docs/gateway-contract.md` §8).
 - Deploys: Todofy (core first, then the gateway; no D1 or Durable Object migration) only. Core must answer
   `owner_ui` before the new gateway serves.
 - After deploy: walk every Todofy page (首页, 需关注, 事件 and one event's detail, 提醒, 日报 with one recompute,
