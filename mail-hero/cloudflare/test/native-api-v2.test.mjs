@@ -3,10 +3,13 @@
 // the typed client the UI uses. (The maintenance check in front of authentication is index.ts's: native-runtime.test.mjs.) Real SQLite with the production migrations (test/native-env.mjs); synthetic data only.
 import test from 'node:test'
 import assert from 'node:assert/strict'
+import { readdirSync, readFileSync } from 'node:fs'
 import { createHttpClient, RpcStatusError } from '@ziyixi/proto/http-client'
 import { MailHeroUiService } from '@ziyixi/proto/mailhero/ui/v2/mail_hero_ui_service_pb'
 import { Delivery_State, DeliveryAttempt_Outcome } from '@ziyixi/proto/mailhero/ui/v2/delivery_pb'
 import { handleAPI, handleDelegated } from '../src/native/api.ts'
+import { codeReason, fromHttpError } from '../src/native/api-v2.ts'
+import { HttpError } from '../src/native/security.ts'
 import { idOf, query, quote, reasonOf, sendMessage } from './owner-api.mjs'
 import { endpoint, environment, message, session } from './native-env.mjs'
 
@@ -63,6 +66,43 @@ test('the transcoder behind Access: Status errors, 405 with Allow, OPTIONS, HEAD
   assert.equal(missing.data.error.details[0].domain, 'mail-hero.ziyixi.science')
   assert.equal(missing.data.error.details[1].message, '记录不存在')
   assert.match(missing.data.error.details[2].request_id, /^[0-9a-f]{16}$/)
+})
+
+/** Every code src/native throws as an HttpError: its own calls, the pipeline's error(), api-common's bad() and the policy rules. */
+function thrownCodes() {
+  const codes = new Set(['invalid_request']) // bad(message) without a code
+  const dir = new URL('../src/native/', import.meta.url)
+  for (const file of readdirSync(dir).filter(name => name.endsWith('.ts'))) {
+    const source = readFileSync(new URL(file, dir), 'utf8')
+    for (const pattern of [/new HttpError\(\s*\d+\s*,\s*'([a-z0-9_]+)'/g, /\berror\(\s*\d+\s*,\s*'([a-z0-9_]+)'\s*\)/g, /\bbad\([^()]*,\s*'([a-z0-9_]+)'\s*\)/g]) {
+      for (const match of source.matchAll(pattern)) codes.add(match[1])
+    }
+    for (const match of source.matchAll(/\bpolicyError\([^()]*,\s*'([a-z_]+)'\s*\)/g)) codes.add(`retention_${match[1]}`)
+  }
+  return codes
+}
+
+test('every code the modules and the pipeline throw maps to its own reason; an unmapped code is INTERNAL, never guessed', () => {
+  // The backup machine API's own authentication (backup.ts): never reaches the owner API, whose errors it does not use.
+  const machine = new Set(['backup_unauthorized', 'backup_unconfigured'])
+  const codes = thrownCodes()
+  assert.ok(codes.size >= 45, `found ${codes.size} codes: the scan lost its patterns`)
+  for (const code of ['etag_mismatch', 'version_conflict', 'message_not_ready', 'retention_days_range', 'invalid_time_range', 'unauthorized']) assert.ok(codes.has(code), code)
+  for (const code of codes) {
+    if (machine.has(code)) continue
+    assert.notEqual(codeReason(code), null, `${code} has no reason: name it in api-v2.ts ALIASES or errors.proto`)
+  }
+  // An unknown code is INTERNAL whatever its status: a new 409 is not a stale etag, a new 400 not the caller's fault.
+  for (const status of [400, 404, 409, 422, 503]) {
+    const error = fromHttpError(new HttpError(status, 'some_new_code', 'x'))
+    assert.deepEqual([error.reason, error.httpStatus], ['INTERNAL', 500], String(status))
+  }
+  for (const code of ['constructor', 'toString', '__proto__', 'INTERNAL', 'internal', 'Etag_mismatch', 'retention_other']) assert.equal(codeReason(code), null, code)
+  assert.deepEqual([codeReason('version_conflict'), codeReason('etag_mismatch'), codeReason('retention_ledger_minimum')], ['ETAG_MISMATCH', 'ETAG_MISMATCH', 'INVALID_RETENTION_POLICY'])
+  const gone = fromHttpError(new HttpError(410, 'raw_expired', 'x'), true)
+  assert.deepEqual([gone.reason, gone.httpStatus], ['RAW_EXPIRED', 410])
+  const rule = fromHttpError(new HttpError(400, 'retention_raw_after_content', 'x'))
+  assert.deepEqual([rule.reason, rule.metadata], ['INVALID_RETENTION_POLICY', { rule: 'raw_after_content' }])
 })
 
 test('a refused request logs one line of its request ID, status and reason, nothing of the request', async t => {

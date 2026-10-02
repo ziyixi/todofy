@@ -126,30 +126,37 @@ function bad(): never {
   throw mhError('BAD_REQUEST')
 }
 
-/** The codes the modules (and the pipeline they call) throw that are not a reason's name in lower case. */
+/**
+ * The codes the modules (and the pipeline they call) throw that are not a reason's name in lower case. Every code they
+ * throw is listed here or is a reason's name (test/native-api-v2.test.mjs scans the sources): a code nobody mapped is
+ * INTERNAL, never a reason guessed from its HTTP status, which could tell the owner something untrue.
+ */
 const ALIASES: Readonly<Record<string, Reason>> = {
-  not_found: 'NOT_FOUND', message_not_found: 'NOT_FOUND',
-  invalid_request: 'BAD_REQUEST', invalid_path: 'BAD_REQUEST', request_too_large: 'BAD_REQUEST',
+  not_found: 'NOT_FOUND', message_not_found: 'NOT_FOUND', invalid_request: 'BAD_REQUEST',
   version_conflict: 'ETAG_MISMATCH', action_conflict: 'REQUEST_ID_REUSED',
   parsed_content_unavailable: 'CONTENT_UNAVAILABLE', invalid_replay: 'INVALID_RESEND',
-  backup_unavailable: 'UNAVAILABLE', unauthorized: 'UNAUTHORIZED', csrf_failed: 'CSRF_FAILED',
-  access_not_configured: 'ACCESS_NOT_CONFIGURED', invalid_auth_configuration: 'ACCESS_NOT_CONFIGURED',
+  backup_unavailable: 'UNAVAILABLE', invalid_auth_configuration: 'ACCESS_NOT_CONFIGURED',
 }
 /** The `rule` of each retention policy code (errors.proto INVALID_RETENTION_POLICY). */
 const RETENTION_RULES = new Set(['days_range', 'ledger_minimum', 'raw_after_content', 'resolved_before_content'])
 /** Reasons a download answers with 410 Gone, as before. */
 const GONE: ReadonlySet<Reason> = new Set(['CONTENT_DELETED', 'RAW_EXPIRED', 'ATTACHMENT_OMITTED'])
 
-/** The RpcError of a module's HttpError: by its code, else by its HTTP status. */
-export function fromHttpError(error: HttpError, download = false): RpcError {
-  const code = error.code
-  if (code.startsWith('retention_') && RETENTION_RULES.has(code.slice('retention_'.length))) {
-    return mhError('INVALID_RETENTION_POLICY', { metadata: { rule: code.slice('retention_'.length) } })
-  }
+/**
+ * The reason of a module's code: `retention_<rule>` for a rule of RETENTION_RULES, a reason's name in lower case, or
+ * an alias. Null for any other code (fromHttpError answers INTERNAL).
+ */
+export function codeReason(code: string): Reason | null {
+  if (code.startsWith('retention_') && RETENTION_RULES.has(code.slice('retention_'.length))) return 'INVALID_RETENTION_POLICY'
   const upper = code.toUpperCase()
-  const reason: Reason = isReason(upper) && upper !== 'INTERNAL' ? upper : ALIASES[code] ??
-    (error.status === 404 ? 'NOT_FOUND' : error.status === 409 ? 'ETAG_MISMATCH' : error.status >= 400 && error.status < 500 ? 'BAD_REQUEST'
-      : error.status === 503 ? 'UNAVAILABLE' : 'INTERNAL')
+  if (code === upper.toLowerCase() && isReason(upper) && upper !== 'INTERNAL') return upper
+  return Object.hasOwn(ALIASES, code) ? ALIASES[code]! : null
+}
+
+/** The RpcError of a module's HttpError, by its code only (codeReason); an unmapped code is INTERNAL. */
+export function fromHttpError(error: HttpError, download = false): RpcError {
+  const reason = codeReason(error.code) ?? 'INTERNAL'
+  if (reason === 'INVALID_RETENTION_POLICY') return mhError(reason, { metadata: { rule: error.code.slice('retention_'.length) } })
   return mhError(reason, download && GONE.has(reason) ? { httpStatus: 410 } : {})
 }
 
