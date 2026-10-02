@@ -240,6 +240,11 @@ move the row to "Waiting to be verified" with its post-deploy checks, then delet
 1. Finish and land the three remaining proto branches above (FlowDay, Mail Hero, Todofy), then verify each deploy.
 2. After them, proto is the single IDL for every interface the monorepo defines. Follow-ups: remove the 410
    routes on their dates; remove `owner_api` from `todofy-core` in the release after `proto-todofy-ui`.
+   With the next Mail Hero change (a `mail-hero/docs` edit deploys Mail Hero, so `proto-todofy-ui` leaves it):
+   in `mail-hero/docs/todofy-integration.md` point line 13 at `todofy/api/machine-api-v1.openapi.yaml` (the
+   `/hooks/mail` route Mail Hero calls) and `proto/todofy/ui/v1` instead of the removed
+   `owner-api-v1.openapi.yaml`, and drop line 55's `npm run gen:api` (Todofy's UI no longer generates types
+   from the schema).
 3. Watch W4: a shadow-mode week (watches report, no Todoist tasks), then the owner's watches.
 4. FlowDay F6 after 2026-10-08 with the owner's OK.
 5. Service catalog (IaC P5): one `app.toml` per app generating hostnames, Access apps, dashboard links and

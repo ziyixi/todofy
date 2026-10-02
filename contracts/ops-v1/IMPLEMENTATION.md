@@ -300,7 +300,7 @@ forever (owner connection tests keep today's behaviour).
 | `worker/todofy/runtime/api.py` | canary-free counts; `EventDetail.canary`; reconcile passes `canary` to `allowed_actions`; `Reminder.ops_count` |
 | `worker/todofy/core/sql/backup.py` | `MAIL_EVENTS` columns + `canary_run_id`, `MAIL_REMINDERS` + `ops_count`, `ops_generated_at` (restore names its columns, so older backups still load) |
 | `migrations/0003_ops.sql` (new) | 3.2 |
-| `api/owner-api-v1.openapi.yaml`, `web/src/lib/labels.ts`, `web/` | optional `EventDetail.canary`, `Reminder.ops_count`, the new code's label, a 金丝雀 badge on the event page |
+| `api/owner-api-v1.openapi.yaml` (since 2026-10-02 the IDL `proto/todofy/ui/v1`: `MailEvent.canary`), `web/src/lib/labels.ts`, `web/` | optional `EventDetail.canary`, `Reminder.ops_count`, the new code's label, a 金丝雀 badge on the event page |
 | docs | `docs/gateway-contract.md` §3 (four RPC methods, the `Ops` entrypoint), `docs/dev-notes.md` §5–§6 (module contracts, canary exclusions, AE step `canary`), `docs/cloudflare-setup.md` (what shed defers) |
 
 ### 3.2 D1 migration `0003_ops.sql` (additive)

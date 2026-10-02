@@ -1,10 +1,11 @@
-"""Owner API routes under /api/v1 (api/owner-api-v1.openapi.yaml), served inside the coordinator.
+"""The ledger's readers behind the owner API, and the previous owner API's routes, inside the coordinator.
 
-The gateway has already checked Access, CSRF and MAINTENANCE_MODE and passes the
-canonical owner with the request (coordinator.owner_api); it answers /api/v1/csrf
-itself and composes /api/v1/setup from its own facts and :func:`setup`.
-Everything else runs here, in the Durable Object (30 s of CPU), which is also
-the single writer of the ledger.
+The readers (``overview_data``, ``event_page``, ``event_summary``, ``legacy_text_data``, ``setup``) build the
+dicts that ``runtime/owner_ui.py`` maps to todofy.ui.v1's messages (proto/todofy/ui/v1, the owner API since
+2026-10-02). The rest serves the owner API before todofy.ui.v1 (its routes under /api/v1, the RPC
+``coordinator.owner_api``) for one release only, so that the previous gateway keeps working while CI deploys
+this core before the new gateway (docs/gateway-contract.md §3.5.1 and §6.4); the next Todofy release removes
+it. Everything runs in the Durable Object (30 s of CPU), the single writer of the ledger.
 """
 
 import base64
