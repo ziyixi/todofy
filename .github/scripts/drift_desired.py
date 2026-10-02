@@ -54,6 +54,7 @@ WORKERS = {
     "lab": "lab/wrangler.toml",
     "flowday": "flowday/wrangler.toml",
     "links": "links/wrangler.toml",
+    "watch": "watch/wrangler.toml",
 }
 
 # The zones whose zone routes are compared (every Custom Domain and route of every Worker is in one of them).
@@ -66,6 +67,7 @@ WRAPPERS = {
     "lab": {"language": "js", "file": "lab/deploy/deploy-vars.mjs", "vars": "lab", "secrets": "lab"},
     "flowday": {"language": "js", "file": "flowday/deploy/deploy-vars.mjs", "vars": "flowday", "secrets": "flowday"},
     "links": {"language": "js", "file": "links/deploy/deploy-vars.mjs", "vars": "links", "secrets": "links"},
+    "watch": {"language": "js", "file": "watch/deploy/deploy-vars.mjs", "vars": "watch", "secrets": "watch"},
     "todofy": {
         "language": "py",
         "file": "todofy/deploy/deploy_vars.py",

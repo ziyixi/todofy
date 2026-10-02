@@ -112,7 +112,7 @@ const SCRIPT_OK: Record<string, LiveScript> = {
 
 describe('the bundled desired state', () => {
   it('names every production Worker, and the fake API built from it shows no drift', async () => {
-    expect(Object.keys(DESIRED.workers).sort()).toEqual(['flowday', 'home', 'lab', 'links', 'mail-hero', 'todofy', 'todofy-core', 'ziyixi-notion-publish', 'ziyixi-website']);
+    expect(Object.keys(DESIRED.workers).sort()).toEqual(['flowday', 'home', 'lab', 'links', 'mail-hero', 'todofy', 'todofy-core', 'watch', 'ziyixi-notion-publish', 'ziyixi-website']);
     expect(DESIRED.workers.home?.crons).toEqual(['*/30 * * * *']);
     const { doc } = await fullCheck();
     expect(doc.findings).toEqual([]);
@@ -260,7 +260,7 @@ describe('a run across ticks', () => {
   it(`never makes more than DRIFT_CALLS_PER_TICK = ${String(DRIFT_CALLS_PER_TICK)} calls in one tick`, async () => {
     const { perTick } = await fullCheck();
     // The account step and three Workers, four Workers, then the last two of the nine.
-    expect(perTick).toEqual([12, 12, 6]);
+    expect(perTick).toEqual([12, 12, 9]);
     expect(Math.max(...perTick)).toBeLessThanOrEqual(DRIFT_CALLS_PER_TICK);
     // The account step always leaves room for at least one Worker, so every tick makes progress.
     expect(accountStepCalls() + SCRIPT_STEP_CALLS).toBeLessThanOrEqual(DRIFT_CALLS_PER_TICK);
@@ -312,7 +312,7 @@ describe('storage bound', () => {
 describe('the view', () => {
   it('says not_configured without the token, never_checked before the first check, and lists at most DRIFT_VIEW_FINDINGS_MAX', () => {
     expect(driftView(NO_DRIFT, false, AT('03:00')).status).toBe('not_configured');
-    expect(driftView(NO_DRIFT, true, AT('03:00'))).toMatchObject({ status: 'never_checked', in_progress: false, desired_workers: 9 });
+    expect(driftView(NO_DRIFT, true, AT('03:00'))).toMatchObject({ status: 'never_checked', in_progress: false, desired_workers: 10 });
     expect(driftView({ ...NO_DRIFT, running_day: DAY }, true, AT('03:00')).in_progress).toBe(true);
     const many = Array.from({ length: 40 }, (_, i) => ({ category: 'bindings' as const, script: 'alpha', name: `B_${String(i)}`, kind: 'extra' as const, actual: 'plain_text' }));
     const view = driftView({ ...NO_DRIFT, checked_at: AT('02:30'), counts: countFindings(many), findings: many }, true, AT('03:00'));

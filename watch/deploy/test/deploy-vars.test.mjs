@@ -1,5 +1,5 @@
 // The deploy wrapper (../deploy-vars.mjs): Lab's, FlowDay's and the links app's rules with the watch app's inputs, and
-// no real deploy before W2. Synthetic values only; the wrapper runs a stub instead of wrangler. (The owner rules are
+// no real deploy with the AUD placeholder. Synthetic values only; the wrapper runs a stub instead of wrangler. (The owner rules are
 // compared with the dashboard's wrapper in .github/scripts/test_wrangler_configs.py: an app reads no other app.)
 import test from 'node:test'
 import assert from 'node:assert/strict'
@@ -61,23 +61,35 @@ test('the secrets file holds the owner, aliases and CSRF key; invalid values are
   }
 })
 
-test('before W2 the committed config holds the AUD placeholder: only a --dry-run deploy may run', () => {
-  assert.equal(placeholderIn(readFileSync(CONFIG, 'utf8')), 'ACCESS_AUDIENCE')
-  assert.match(readFileSync(CONFIG, 'utf8'), new RegExp(`^ACCESS_AUDIENCE = "${'0'.repeat(64)}"$`, 'm'))
-  assert.equal(placeholderIn(readFileSync(CONFIG, 'utf8').replace(/ACCESS_AUDIENCE = "0{64}"/, `ACCESS_AUDIENCE = "${'a'.repeat(64)}"`)), null)
+test('since W2 a real deploy needs the real Access AUD; the placeholder refuses it, a dry-run always runs', () => {
+  const committed = readFileSync(CONFIG, 'utf8')
+  const W1_AUD = `ACCESS_AUDIENCE = "${'0'.repeat(64)}"`
+  // The committed config with a real-looking AUD, and with the W1 placeholder (a revert, or the W2 fill-in not done).
+  const real = committed.replace(/^ACCESS_AUDIENCE = "[^"]+"$/m, `ACCESS_AUDIENCE = "${'a'.repeat(64)}"`)
+  const placeholder = committed.replace(/^ACCESS_AUDIENCE = "[^"]+"$/m, W1_AUD)
+  assert.notEqual(real, placeholder)
+  assert.equal(placeholderIn(real), null)
+  assert.equal(placeholderIn(placeholder), 'ACCESS_AUDIENCE')
+  assert.equal(placeholderIn(`# ${W1_AUD}\n`), null)
+
   const deploy = ['npx', '--no-install', 'wrangler', 'deploy']
-  assert.equal(refusal([...deploy, '--dry-run', '--config', '../wrangler.toml', '--outdir', '/tmp/x'], WORKER), null)
-  assert.match(refusal([...deploy, '--config', '../wrangler.toml', '--secrets-file', '/tmp/s.json'], WORKER), /placeholder/)
+  const realDeploy = [...deploy, '--config', '../wrangler.toml', '--secrets-file', '/tmp/s.json']
+  const dryRun = [...deploy, '--dry-run', '--config', '../wrangler.toml', '--outdir', '/tmp/x']
+  assert.equal(refusal(realDeploy, WORKER, () => real), null)
+  assert.equal(refusal(dryRun, WORKER, () => real), null)
+  assert.match(refusal(realDeploy, WORKER, () => placeholder), /^ACCESS_AUDIENCE .*placeholder/)
+  assert.equal(refusal(dryRun, WORKER, () => placeholder), null)
+
   for (const argv of [
     [], deploy, [...deploy, '--dry-run', '--config', 'wrangler.toml'], [...deploy, '--dry-run', '--config', '../../lab/wrangler.toml'],
-    [...deploy, '--dry-run', '--config', '../wrangler.toml', '--env', 'production'],
-    [...deploy, '--dry-run', '--config', '../wrangler.toml', '--keep-vars'],
-    [...deploy, '--dry-run', '--config', '../wrangler.toml', '--var', 'BUILD_SHA:x'],
+    [...deploy, '--config', '../wrangler.toml', '--env', 'production'],
+    [...deploy, '--config', '../wrangler.toml', '--keep-vars'],
+    [...deploy, '--config', '../wrangler.toml', '--var', 'BUILD_SHA:x'],
     ['npx', 'wrangler', 'secret', 'put', 'X', '--config', '../wrangler.toml'],
-  ]) assert.notEqual(refusal(argv, WORKER), null, argv.join(' '))
+  ]) assert.notEqual(refusal(argv, WORKER, () => real), null, argv.join(' '))
 })
 
-test('exec runs the dry-run unchanged plus the --var flag; secrets writes 0600 and never overwrites; nothing is printed', () => {
+test('exec runs the deploy (or dry-run) unchanged plus the --var flag; secrets writes 0600 and never overwrites; nothing is printed', () => {
   const dir = mkdtempSync(join(tmpdir(), 'watch-deploy-vars-'))
   try {
     const out = join(dir, 'argv.json')
@@ -88,11 +100,17 @@ test('exec runs the dry-run unchanged plus the --var flag; secrets writes 0600 a
     const result = spawnSync(process.execPath, [WRAPPER, 'exec', '--', process.execPath, stub, 'deploy', '--dry-run', '--config', config], { cwd: WORKER, env, encoding: 'utf8' })
     assert.equal(result.status, 0, result.stderr)
     assert.deepEqual(JSON.parse(readFileSync(out, 'utf8')), ['deploy', '--dry-run', '--config', config, ...wranglerArgs(environment())])
-    // A real deploy is refused before the stub (in place of wrangler) would run.
+    // A real deploy runs the stub (in place of wrangler) with the committed AUD, and is refused before it would run
+    // while the AUD is the placeholder (wrangler-config.test.mjs requires the real one since W2).
     rmSync(out)
     const refused = spawnSync(process.execPath, [WRAPPER, 'exec', '--', process.execPath, stub, 'deploy', '--config', config], { cwd: WORKER, env, encoding: 'utf8' })
-    assert.equal(refused.status, 2)
-    assert.ok(!existsSync(out))
+    if (placeholderIn(readFileSync(CONFIG, 'utf8')) === null) {
+      assert.equal(refused.status, 0, refused.stderr)
+      assert.deepEqual(JSON.parse(readFileSync(out, 'utf8')), ['deploy', '--config', config, ...wranglerArgs(environment())])
+    } else {
+      assert.equal(refused.status, 2)
+      assert.ok(!existsSync(out))
+    }
 
     const secrets = join(dir, 'secrets.json')
     const written = spawnSync(process.execPath, [WRAPPER, 'secrets', secrets], { env, encoding: 'utf8' })

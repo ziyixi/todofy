@@ -3,13 +3,16 @@
 # configuration and its single source of truth: top level = production, never [env.*] or keep_vars. Every static
 # value is committed here (the repository is public: nothing personal, no secret).
 #
-# NOT DEPLOYED YET (docs/design.md §11, step W1): CI checks this config ("Watch checks": a --dry-run through
-# deploy/deploy-vars.mjs, which refuses a real deploy while the Access AUD below is the all-zeros placeholder) and
-# nothing deploys it. Before the first deploy (W2) the Access application "watch" (the whole host) exists, its AUD
-# replaces the placeholder, the Custom Domain watch.ziyixi.science is added as `routes`, and a "Watch deploy" job runs
-# this file through deploy/deploy-vars.mjs, which appends --var BUILD_SHA and passes ACCESS_OWNER,
-# ACCESS_OWNER_ALIASES and CSRF_SIGNING_KEY as Worker secrets with --secrets-file. A plain `wrangler deploy` of this
-# file DELETES BUILD_SHA.
+# Deployed only by CI ("Watch deploy" in .github/workflows/ci.yml) through deploy/deploy-vars.mjs, which appends
+# --var BUILD_SHA (the commit) and passes ACCESS_OWNER, ACCESS_OWNER_ALIASES and CSRF_SIGNING_KEY as Worker secrets
+# with --secrets-file (the dashboard's DASHBOARD_ACCESS_OWNER(_ALIASES), the same owner, and the watch app's own
+# WATCH_CSRF_SIGNING_KEY; README.md "Deploy"). A plain `wrangler deploy` of this file DELETES BUILD_SHA.
+#
+# W2 (docs/design.md §11): the Access application "watch" (the whole host) was created by infra/ and "Infra apply"
+# (infra/README.md "Adding an app"); its AUD is committed below, and deploy/deploy-vars.mjs still refuses the
+# all-zeros AUD (a guard against a revert). The Worker's only hostname is the Custom Domain watch.ziyixi.science
+# (PUBLIC_HOST, the CSRF origin), entirely behind Access. No workers.dev and no preview URL. Rollback (README.md
+# "Deploy"): detach the Custom Domain by hand (a deploy without routes leaves it attached), then revert.
 #
 # Run wrangler from worker/ (the pinned wrangler lives in worker/node_modules) with --config ../wrangler.toml.
 # Local dev: local bindings only, local values in watch/.dev.vars (see .dev.vars.example). No cron trigger, no D1, no
@@ -21,6 +24,9 @@ main = "worker/src/index.ts"
 compatibility_date = "2026-09-08"
 workers_dev = false
 preview_urls = false
+# The one hostname, a Custom Domain (wrangler applies the list as the Worker's complete set; tools/cf-guard checks
+# it before every deploy). vars.PUBLIC_HOST names the same host.
+routes = [{ pattern = "watch.ziyixi.science", custom_domain = true }]
 
 # The Worker's own log lines (a refusal: request ID, status, reason; an alarm: counts) are kept; the invocation logs,
 # which record every request's URL, are off, and so are traces. The Worker never logs a watched URL, page text or a
@@ -65,5 +71,8 @@ entrypoint = "Ops"
 # The watch host: the only origin a mutation may come from (CSRF).
 PUBLIC_HOST = "watch.ziyixi.science"
 ACCESS_ISSUER = "https://ziyixi.cloudflareaccess.com"
-# AUD tag of the Access application "watch": the all-zeros placeholder until it exists (W2).
+# AUD tag of the Access application "watch" (the whole host; infra/access.tf owner_apps["watch"]).
+# W2 FILL-IN: replace the 64 zeros with the AUD read in infra/README.md "Adding an app" step 4 (the admin helper's
+# GET of the Access applications). deploy/test/wrangler-config.test.mjs fails, and the wrapper refuses a real deploy,
+# while it is the placeholder.
 ACCESS_AUDIENCE = "0000000000000000000000000000000000000000000000000000000000000000"

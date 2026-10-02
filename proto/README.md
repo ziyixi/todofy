@@ -19,7 +19,7 @@ through `ts/http-transcoder.ts` and Lab's UI calls it through `ts/http-client.ts
 HTTP APIs, which recommendation-v1, mail-received-v1 and every app's UI API follow. `links/ui/v1` is the
 links app's owner API (2026-10-01, deployed since the app's step L2): the second app on the same runtime, under the path
 prefix `/_/api/v1/` (its host's other paths are short links). `watch/ui/v1` is the watch app's owner API (2026-10-01,
-not deployed yet: the app is checked only until its first deploy step): the third app on the runtime, under `/api/v1/`.
+deployed since the app's step W2): the third app on the runtime, under `/api/v1/`.
 
 `ops/v1/ops.proto` is the IDL of `contracts/ops-v1` (2026-10-01) and its single source of validation: the
 value rules are options in the IDL ([Value rules](#value-rules)), the contract's JSON Schema is generated from
@@ -614,11 +614,11 @@ A `proto/` change also re-checks every app in `PROTO_USERS` (Lab, Todofy, Mail H
 `Contracts` (the contracts' tests check the codecs against the schemas and pin the wire bytes). It deploys only
 the apps whose production bundle the changed path reaches (`proto_deploys` in `.github/scripts/ci_changes.py`).
 `PROTO_USERS` names each user's bundled languages: Lab, Mail Hero and the dashboard `"ts"` (their Workers, and
-Lab's UI), the links and watch apps `"ts"` (their Workers and UIs; watch is checked only, so it never deploys), Todofy `"python"` (todofy-core vendors the wheel; its gateway and UI import types only, which compile to
+Lab's UI), the links and watch apps `"ts"` (their Workers and UIs), Todofy `"python"` (todofy-core vendors the wheel; its gateway and UI import types only, which compile to
 nothing). A language's runtime and generator reach that language's users (`proto/ts/` and `buf.gen.yaml`: the
 TypeScript users; `proto/python/`, `tools/gen_py.py` and `tools/wire_rules.py`: Todofy); the wire profile's own
 options (`common/wire/`) reach both; a package reaches the apps that import it (`PROTO_PACKAGES`:
-`todofy/taskintent/` Lab and Todofy, `todofy/report/` Todofy, `mailhero/webhook/` Mail Hero and Todofy, `lab/ui/` Lab, `links/ui/` the links app, `watch/ui/` the watch app, `ops/` the four apps with an `Ops` entrypoint or caller (Lab, Mail Hero, the dashboard and Todofy), `common/errors/` and `prototest/` none);
+`todofy/taskintent/` Lab, Todofy and the watch app, `todofy/report/` Todofy, `mailhero/webhook/` Mail Hero and Todofy, `lab/ui/` Lab, `links/ui/` the links app, `watch/ui/` the watch app, `ops/` the five apps with an `Ops` entrypoint or caller (Lab, Mail Hero, the dashboard, Todofy and the watch app), `common/errors/` and `prototest/` none);
 the module and toolchain files (`buf.yaml`, `buf.lock`, `package-lock.json`, `tools/ensure.mjs`) and any path
 not mapped reach every user; tests, test data, the check scripts, the wire JSON types' and JSON Schema
 generators (`tools/gen_wire_ts.py`: types only; `tools/gen_schema.py`: files under `contracts/` and `todofy/api/`,

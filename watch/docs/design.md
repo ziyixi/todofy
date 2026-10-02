@@ -5,15 +5,15 @@ whether a difference is a change worth the owner's attention, and an inbox of th
 SQLite Durable Object `WatchState`, a Chinese mobile-first UI, on Workers Free at $0. The owner approved this design
 on 2026-10-01 with every recommended default (the research report the lead keeps); this document is how it is built.
 
-Step W1 (this one) builds and checks it; nothing is deployed (§11).
+W1 built and checked it; W2 deploys it on `watch.ziyixi.science` and W3 adds the notifications and ops-v1 (§11).
 
 ## 1. Scope
 
 - One owner, at most 50 watches (`WATCHES_MAX`), checked every 6 hours by default (1 hour to 7 days).
 - Pages that render on the server, RSS/Atom/JSON feeds, JSON APIs and data embedded in pages (JSON-LD, Next.js).
   Pages that need JavaScript use a browser renderer that v1 keeps behind a flag (§4).
-- Not in v1: deployment and Access (W2), the AI judge. Notifications (W3, §7) are one daily Todoist digest task and
-  urgent changes, as task intents of source `SOURCE_WATCH` to Todofy, and ops-v1 counts for the dashboard.
+- Not in v1: the AI judge. Deployment and Access came with W2; notifications (W3, §7) are one daily Todoist digest
+  task and urgent changes, as task intents of source `SOURCE_WATCH` to Todofy, and ops-v1 counts for the dashboard.
 - Never: logging a watched URL, page text or a diff; fetching a site faster than the etiquette allows (a redirect's
   target included); working around a bot challenge; fetching the owner's own hosts or Workers.
 
@@ -413,7 +413,12 @@ All hermetic: synthetic content only, the only network is loopback, clocks are i
   `test_wrangler_configs.py`'s `UNDEPLOYED` with no route and the all-zeros Access AUD, and
   `deploy/deploy-vars.mjs` refuses anything but `--dry-run`.
 - **W2** (the lead; the first deploy). Like the links app's L2 (`links/docs/design.md` §11, commit "Deploy links on
-  s.ziyixi.science (L2)"), every list a production Worker is in changes in one commit:
+  s.ziyixi.science (L2)"), every list a production Worker is in changes in one commit, "Deploy the watch app on
+  watch.ziyixi.science (W2)". As built: the Access probe covers `/`, `/api/v1/watches` and `/new` (the whole host is
+  behind Access, `/health` too, so no anonymous request reaches the Worker); the dashboard's `WATCH` binding, its
+  registry entry and the `WatchState` row (id after the deploy) arrived with W3's Ops entrypoint and this commit; the
+  alarm is checked by hand after the deploy (README "Deploy"). The AUD is the lead's fill-in in `wrangler.toml`
+  (`deploy/test/wrangler-config.test.mjs` fails while it is the placeholder):
   1. Resources: the Access application "watch" for the whole host `watch.ziyixi.science` (an `owner_apps` entry in
      `infra/access.tf`, session 24h as for the other owner apps, created by "Infra apply" before this commit:
      `infra/README.md` "Adding an app"), its AUD committed as `ACCESS_AUDIENCE`; the `production` GitHub secret `WATCH_CSRF_SIGNING_KEY` (64 hex); the owner inputs come from

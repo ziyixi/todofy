@@ -1,6 +1,6 @@
 // The committed production config ../../wrangler.toml, read with the pinned wrangler's own raw-config reader
-// (worker/node_modules): the shape the Worker "watch" needs, nothing personal or injected, and, until W2 (the first
-// deploy), no route, no hostname and the all-zeros Access AUD. One SQLite Durable Object and no cron, D1, R2 or KV.
+// (worker/node_modules): the shape the Worker "watch" needs, nothing personal or injected, since W2 (the first deploy)
+// its one Custom Domain and the Access application's AUD. One SQLite Durable Object and no cron, D1, R2 or KV.
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { existsSync, readFileSync } from 'node:fs'
@@ -15,15 +15,16 @@ const config = JSON.parse(JSON.stringify(wrangler.experimental_readRawConfig({ c
 const values = readFileSync(CONFIG, 'utf8').split('\n').filter((line) => !line.trimStart().startsWith('#')).join('\n')
 
 // Every key the Worker "watch" uses; a new one must be added here on purpose (and checked below).
-const KEYS = ['name', 'account_id', 'main', 'compatibility_date', 'workers_dev', 'preview_urls', 'observability', 'assets', 'durable_objects', 'migrations', 'services', 'vars']
+const KEYS = ['name', 'account_id', 'main', 'compatibility_date', 'workers_dev', 'preview_urls', 'routes', 'observability', 'assets', 'durable_objects', 'migrations', 'services', 'vars']
 
-test('the top level is the production Worker: known keys only, no cron, no workers.dev or preview URL, no route yet', () => {
+test('the top level is the production Worker: known keys only, no cron, no workers.dev or preview URL, one Custom Domain', () => {
   assert.deepEqual(Object.keys(config).sort(), [...KEYS].sort())
   assert.equal(config.name, 'watch')
   assert.equal(config.workers_dev, false)
   assert.equal(config.preview_urls, false)
   assert.equal(config.triggers, undefined)
-  assert.equal(config.routes, undefined)
+  // The whole host, behind the Access application "watch"; wrangler applies the list as the complete set.
+  assert.deepEqual(config.routes, [{ pattern: 'watch.ziyixi.science', custom_domain: true }])
   assert.equal(config.route, undefined)
   assert.match(config.account_id, /^[a-f0-9]{32}$/)
 })
@@ -48,11 +49,13 @@ test("one service binding: Todofy's Ops entrypoint, the notification sink (task-
   assert.deepEqual(config.services, [{ binding: 'TODOFY', service: 'todofy', entrypoint: 'Ops' }])
 })
 
-test('vars: the public host, the Access issuer and the AUD placeholder; nothing injected, secret or for development', () => {
+test('vars: the public host, the Access issuer and the AUD; nothing injected, secret or for development', () => {
   assert.deepEqual(Object.keys(config.vars).sort(), ['ACCESS_AUDIENCE', 'ACCESS_ISSUER', 'PUBLIC_HOST'])
   assert.equal(config.vars.PUBLIC_HOST, 'watch.ziyixi.science')
   assert.match(config.vars.ACCESS_ISSUER, /^https:\/\/[a-z0-9-]+\.cloudflareaccess\.com$/)
-  assert.equal(config.vars.ACCESS_AUDIENCE, '0'.repeat(64))
+  assert.match(config.vars.ACCESS_AUDIENCE, /^[0-9a-f]{64}$/)
+  // W2: the AUD of the Access application "watch" (infra/README.md "Adding an app" step 4), never the placeholder.
+  assert.notEqual(config.vars.ACCESS_AUDIENCE, '0'.repeat(64), 'fill in the Access AUD of "watch" in watch/wrangler.toml (W2)')
   const names = Object.keys(config.vars)
   for (const { name } of INJECTED) assert.ok(!names.includes(name), name)
   for (const name of names) assert.ok(!name.startsWith('DEV_'), name)

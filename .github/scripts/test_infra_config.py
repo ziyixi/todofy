@@ -73,12 +73,14 @@ PRODUCTION = {
     "lab": "lab/wrangler.toml",
     "flowday": "flowday/wrangler.toml",
     "links": "links/wrangler.toml",
+    "watch": "watch/wrangler.toml",
 }
 # Access applications created before their Worker's first deploy (infra/README.md "Adding an app"): Worker name -> the
 # whole host the application gates. The Worker's config is still test_wrangler_configs.py's UNDEPLOYED (no route, the
-# all-zeros AUD) and names that host as its PUBLIC_HOST. The commit of the first deploy (watch: W2) commits the AUD
-# and the Custom Domain, moves the Worker to PRODUCTION and empties its entry here (test_ahead_of_deploy_is_exact).
-AHEAD_OF_DEPLOY: dict[str, str] = {"watch": "watch.ziyixi.science"}
+# all-zeros AUD) and names that host as its PUBLIC_HOST. The commit of the first deploy commits the AUD and the Custom
+# Domain, moves the Worker to PRODUCTION and empties its entry here (test_ahead_of_deploy_is_exact). Empty since the
+# watch app's first deploy (W2).
+AHEAD_OF_DEPLOY: dict[str, str] = {}
 # Hosts an Access application may still list although no wrangler.toml declares them. Empty since FlowDay's F3
 # staging host left both FlowDay applications after the F4 cutover (README.md "FlowDay"); a rollback that adds a host
 # back to an application adds it here in the same commit (test_retiring_hosts_are_exact).
@@ -264,7 +266,7 @@ class MatchesTheApps(unittest.TestCase):
         flowday = self.flowday_apps(code)
         self.assertEqual(set(flowday), {"flowday", "flowday-bypass"})
         destinations.update({key: value for key, value in flowday.items()})
-        self.assertEqual(set(owner), {"mail-hero", "todofy", "home", "lab", "links", *AHEAD_OF_DEPLOY})
+        self.assertEqual(set(owner), {"mail-hero", "todofy", "home", "lab", "links", "watch", *AHEAD_OF_DEPLOY})
         for key, uris in destinations.items():
             worker = "flowday" if key.startswith("flowday") else key
             if worker in AHEAD_OF_DEPLOY:

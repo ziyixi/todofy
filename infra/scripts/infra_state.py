@@ -134,6 +134,7 @@ WRANGLER_CONFIGS = (
     "lab/wrangler.toml",
     "flowday/wrangler.toml",
     "links/wrangler.toml",
+    "watch/wrangler.toml",
 )
 OUTPUTS = ("access_aud", "d1_database_ids", "r2_bucket_names")
 

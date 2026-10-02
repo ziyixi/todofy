@@ -262,7 +262,7 @@ Each app's adapter is the only place these values live: Mail Hero
 `mail-hero/cloudflare/src/native/security.ts`, Todofy `todofy/gateway/src/access.ts` and `csrf.ts`
 (`http.ts` for headers), the dashboard `dashboard/worker/src/http.ts`, Lab `lab/worker/src/http.ts`, FlowDay
 `flowday/worker/src/http.ts`, the links app `links/worker/src/auth.ts` (deployed since its step L2), the watch app
-`watch/worker/src/auth.ts` (checked, not deployed before its step W2). On a short link (outside its path-scoped Access
+`watch/worker/src/auth.ts` (deployed since its step W2). On a short link (outside its path-scoped Access
 application) the links app verifies only a request that carries a token, and reads every failure there as anonymous;
 under `/_/` it maps the failures as the table below says. The watch app verifies every path but `/health` (its whole
 host is behind Access), checks CSRF in its fetch handler and forwards the owner API to its Durable Object.
@@ -341,8 +341,8 @@ Its dev dependencies are pinned to the Todofy gateway's versions (TypeScript 5.9
 ## 7. CI
 
 `.github/scripts/ci_changes.py` maps each package to the apps that compile it in
-(`PACKAGE_USERS = {"edge-auth": ("todofy", "mail-hero", "dashboard", "lab", "flowday", "links", "watch")}`; the watch
-app is checked only until its first deploy job, `CHECK_ONLY`). Any change inside
+(`PACKAGE_USERS = {"edge-auth": ("todofy", "mail-hero", "dashboard", "lab", "flowday", "links", "watch")}`).
+Any change inside
 `packages/edge-auth/` (this file included) runs the `Shared packages` job (`npm ci`, `npm run
 typecheck`, `npm test` in every `packages/*/`) and **checks and deploys** every user; an unmapped
 package counts as used by every app. `test_ci_changes.py` fails until `PACKAGE_USERS` matches every

@@ -398,6 +398,8 @@ test("the committed production configs: the hostnames each deploy guards", async
     "flowday/wrangler.toml": ["flowday", ["flowday.ziyixi.science"]],
     // The links app's one Custom Domain since L2 (links/docs/design.md section 11).
     "links/wrangler.toml": ["links", ["s.ziyixi.science"]],
+    // The watch app's one Custom Domain since W2 (watch/docs/design.md section 11), the whole host behind Access.
+    "watch/wrangler.toml": ["watch", ["watch.ziyixi.science"]],
   };
   for (const [file, [name, hosts]] of Object.entries(expected)) {
     const triggers = await readTriggers(path.join(REPO, file));

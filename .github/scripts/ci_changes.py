@@ -16,8 +16,8 @@ Outputs (GITHUB_OUTPUT, "true"/"false"):
                     tools/ changed, or a dispatch.
   base              not a flag: the commit the diff started from (empty when everything runs), which
                     "Proto checks" compares the IDL with.
-  todofy_deploy, mail_hero_deploy, dashboard_deploy, website_deploy, lab_deploy, flowday_deploy, links_deploy
-                    the app, a shared package it compiles in, or a contract file it bundles changed
+  todofy_deploy, mail_hero_deploy, dashboard_deploy, website_deploy, lab_deploy, flowday_deploy, links_deploy,
+  watch_deploy      the app, a shared package it compiles in, or a contract file it bundles changed
                     (deploy jobs also require refs/heads/main)
   website_relay_deploy
                     website/relay/ (the Notion relay Worker, its own wrangler.toml) changed: deploy
@@ -27,12 +27,12 @@ Outputs (GITHUB_OUTPUT, "true"/"false"):
   It uses no contract (NO_CONTRACTS) and compiles in packages/edge-auth, so a package change checks and
   deploys it too. The links app (links/, the short links on s.ziyixi.science) is checked and deployed since L2
   (links/docs/design.md section 11). It uses no contract and compiles in packages/edge-auth and the TypeScript proto
-  runtime with proto/links/ui/, so a change to those checks and deploys it too. CHECK_ONLY (apps checked but never
-  deployed, with no "<prefix>_deploy" output) is where a new app starts, until its first deploy job: it holds the
-  watch app (watch/, the web watches on watch.ziyixi.science: watch/docs/design.md section 11) until its first deploy
-  job (W2): it has no watch_deploy output. It proposes task-intent-v1 (its notification sink, W3) and answers ops-v1
-  (its Ops entrypoint; Contracts runs both tests) and compiles in packages/edge-auth and the TypeScript proto runtime
-  with proto/watch/ui/, proto/todofy/taskintent/ and proto/ops/, so a change to those checks it too.
+  runtime with proto/links/ui/, so a change to those checks and deploys it too. The watch app (watch/, the web watches
+  on watch.ziyixi.science) is checked and deployed since W2 (watch/docs/design.md section 11). It proposes
+  task-intent-v1 (its notification sink) and answers ops-v1 (its Ops entrypoint; Contracts runs both tests) and
+  compiles in packages/edge-auth and the TypeScript proto runtime with proto/watch/ui/, proto/todofy/taskintent/ and
+  proto/ops/, so a change to those checks and deploys it too. CHECK_ONLY (apps checked but never deployed, with no
+  "<prefix>_deploy" output) is where a new app starts, until its first deploy job; it is empty since W2.
 
 proto/ (the protobuf IDL, proto/README.md) checks every app in PROTO_USERS (an app that depends on
 @ziyixi/proto or ziyixi-proto) and deploys only the apps whose bundle the changed path reaches
@@ -108,9 +108,9 @@ PREFIX = {
     "watch": "watch",
 }
 # Apps that are checked but never deployed by CI (no "<prefix>_deploy" output): a new app until its Worker has its
-# Cloudflare resources and a deploy job. The watch app until W2 (watch/docs/design.md section 11), as the links app was
-# until L2 and FlowDay until F2.
-CHECK_ONLY: set[str] = {"watch"}
+# Cloudflare resources and a deploy job, as the watch app was until W2 (watch/docs/design.md section 11), the links app
+# until L2 and FlowDay until F2. Empty since W2.
+CHECK_ONLY: set[str] = set()
 KEYS = (
     "todofy_check",
     "mail_hero_check",
@@ -132,6 +132,7 @@ KEYS = (
     "lab_deploy",
     "flowday_deploy",
     "links_deploy",
+    "watch_deploy",
 )
 DISPATCH = {
     "both": ("todofy", "mail-hero"),

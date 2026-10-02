@@ -329,7 +329,7 @@ also redeploys the dashboard with the new desired state.
 | each desired Worker that exists | `GET .../workers/scripts/{s}/schedules`, `.../settings`, `.../subdomain` (in parallel) |
 
 At most `DRIFT_CALLS_PER_TICK` (12) calls per tick: the account step and three Workers on the first tick,
-four Workers on the next, then the rest, so a check of the 9 Workers takes three ticks, 3 + 4 + 2 (a tick then
+four Workers on the next, then the rest, so a check of the 10 Workers takes three ticks, 3 + 4 + 3 (a tick then
 makes at most 27 outbound calls in all, §5). A failed step is retried by the next tick; after `DRIFT_MAX_ATTEMPTS` (3)
 failed attempts the day is given up (`consecutive_failed_days` + 1), and a run left unfinished at the end
 of its UTC day counts as a failed day too, as does a `drift_run` document that would pass

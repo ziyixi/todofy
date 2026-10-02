@@ -46,12 +46,13 @@ PRODUCTION = {
     "lab": "lab/wrangler.toml",
     "flowday": "flowday/wrangler.toml",
     "links": "links/wrangler.toml",
+    "watch": "watch/wrangler.toml",
 }
 # Configs of Workers that CI checks but does not deploy yet (no deploy job, no hostname, placeholder resource ids).
 # They stay out of PRODUCTION, which the dashboard's drift check compares with the live account
-# (drift_desired.py). FlowDay moved to PRODUCTION at F2 (flowday/docs/design.md section 11) and the links app at L2
-# (links/docs/design.md section 11); the watch app is here until its first deploy (W2, watch/docs/design.md section 11).
-UNDEPLOYED: dict[str, str] = {"watch": "watch/wrangler.toml"}
+# (drift_desired.py). FlowDay moved to PRODUCTION at F2 (flowday/docs/design.md section 11), the links app at L2
+# (links/docs/design.md section 11) and the watch app at W2 (watch/docs/design.md section 11): empty.
+UNDEPLOYED: dict[str, str] = {}
 # Runtime-test configs stay next to their tests.
 TEST_CONFIGS = {
     "todofy/wrangler.test.toml",
@@ -71,6 +72,7 @@ WRAPPERS = {
     "lab": ("lab/deploy/deploy-vars.mjs", r"deploy-vars\.mjs (exec|secrets)\b", ["lab"]),
     "flowday": ("flowday/deploy/deploy-vars.mjs", r"deploy-vars\.mjs (exec|secrets)\b", ["flowday"]),
     "links": ("links/deploy/deploy-vars.mjs", r"deploy-vars\.mjs (exec|secrets)\b", ["links"]),
+    "watch": ("watch/deploy/deploy-vars.mjs", r"deploy-vars\.mjs (exec|secrets)\b", ["watch"]),
 }
 # Worker vars that must never be committed: personal values (GitHub environment secrets) ...
 PERSONAL_VARS = {
@@ -99,10 +101,12 @@ PERSONAL_INPUTS = {
     "FLOWDAY_ACCESS_OWNER_ALIASES",
     "LINKS_ACCESS_OWNER",
     "LINKS_ACCESS_OWNER_ALIASES",
+    "WATCH_ACCESS_OWNER",
+    "WATCH_ACCESS_OWNER_ALIASES",
 }
-# Personal inputs a deploy job reads from another app's secret: the owner of Lab, FlowDay and the links app is the
-# dashboard's owner (one person, the same Access identities), so their deploys read the dashboard's secrets
-# (lab/README.md "Deploy secrets", flowday/README.md "Deploy", links/README.md "Deploy").
+# Personal inputs a deploy job reads from another app's secret: the owner of Lab, FlowDay, the links app and the watch
+# app is the dashboard's owner (one person, the same Access identities), so their deploys read the dashboard's secrets
+# (lab/README.md "Deploy secrets", flowday/README.md "Deploy", links/README.md "Deploy", watch/README.md "Deploy").
 SHARED_SECRETS = {
     "LAB_ACCESS_OWNER": "DASHBOARD_ACCESS_OWNER",
     "LAB_ACCESS_OWNER_ALIASES": "DASHBOARD_ACCESS_OWNER_ALIASES",
@@ -110,6 +114,8 @@ SHARED_SECRETS = {
     "FLOWDAY_ACCESS_OWNER_ALIASES": "DASHBOARD_ACCESS_OWNER_ALIASES",
     "LINKS_ACCESS_OWNER": "DASHBOARD_ACCESS_OWNER",
     "LINKS_ACCESS_OWNER_ALIASES": "DASHBOARD_ACCESS_OWNER_ALIASES",
+    "WATCH_ACCESS_OWNER": "DASHBOARD_ACCESS_OWNER",
+    "WATCH_ACCESS_OWNER_ALIASES": "DASHBOARD_ACCESS_OWNER_ALIASES",
 }
 # The only GitHub variables CI reads: the operational switches, stated at every deploy (mail-hero AGENTS.md §8).
 TOGGLES = {
@@ -122,7 +128,7 @@ TOGGLES = {
     "TODOFY_GTD_REVIEW_ENABLED",
     "DASHBOARD_CANARY_ENABLED",
 }
-DEPLOY_JOBS = ("todofy-deploy", "mail-hero-deploy", "dashboard-deploy", "lab-deploy", "flowday-deploy", "links-deploy")
+DEPLOY_JOBS = ("todofy-deploy", "mail-hero-deploy", "dashboard-deploy", "lab-deploy", "flowday-deploy", "links-deploy", "watch-deploy")
 # The retired generators' required GitHub variables, still set in production: a revert of the committed-config
 # layout needs them (README "Rolling back the committed-config layout"), and nothing may read them now.
 LEGACY_VARIABLES = {
@@ -405,10 +411,10 @@ class Files(unittest.TestCase):
 class Undeployed(unittest.TestCase):
     """A config CI only checks: on the shared account, closed to the internet (no workers.dev, no preview URL, no
     route), nothing personal committed, no deploy job, and its wrapper's inputs only ever placeholders in ci.yml.
-    A new app starts here, as FlowDay did until F2 and the links app until L2; the watch app is here until W2."""
+    A new app starts here, as FlowDay did until F2, the links app until L2 and the watch app until W2."""
 
-    # Worker name -> its deploy wrapper, for every UNDEPLOYED config.
-    WRAPPER: dict[str, str] = {"watch": "watch/deploy/deploy-vars.mjs"}
+    # Worker name -> its deploy wrapper, for every UNDEPLOYED config (none since W2).
+    WRAPPER: dict[str, str] = {}
 
     def test_every_undeployed_config_names_its_wrapper(self):
         self.assertEqual(set(self.WRAPPER), set(UNDEPLOYED))
@@ -481,7 +487,7 @@ class LocalDev(unittest.TestCase):
         return found
 
     def test_the_production_configs_with_routes_are_the_ones_dev_runs(self):
-        for worker in ("mail-hero", "todofy", "home", "lab", "flowday", "links"):
+        for worker in ("mail-hero", "todofy", "home", "lab", "flowday", "links", "watch"):
             with self.subTest(worker=worker):
                 self.assertTrue(load(PRODUCTION[worker]).get("routes"))
 
@@ -567,6 +573,13 @@ class Hosts(unittest.TestCase):
         host = links["vars"]["PUBLIC_HOST"]
         self.assertEqual(host, "s.ziyixi.science")
         self.assertEqual(links["routes"], [{"pattern": host, "custom_domain": True}])
+
+    def test_watch_is_on_its_one_host(self):
+        """W2: the watch app's one Custom Domain is its PUBLIC_HOST (the CSRF origin), watch.ziyixi.science."""
+        watch = load(PRODUCTION["watch"])
+        host = watch["vars"]["PUBLIC_HOST"]
+        self.assertEqual(host, "watch.ziyixi.science")
+        self.assertEqual(watch["routes"], [{"pattern": host, "custom_domain": True}])
 
     def test_the_core_links_to_the_gateway_host(self):
         self.assertEqual(load(PRODUCTION["todofy-core"])["vars"]["TODOFY_PUBLIC_HOST"], self.todofy)
@@ -957,6 +970,51 @@ class Workflow(unittest.TestCase):
             with self.subTest(job=job):
                 self.assertIn('--outdir "$RUNNER_TEMP/links-bundle"', dry["run"])
                 self.assertIn('node ../deploy/bundle-size.mjs "$RUNNER_TEMP/links-bundle"', dry["run"])
+                self.assertLess(dry["run"].index("--outdir"), dry["run"].index("bundle-size.mjs"))
+
+    def test_watch_deploy_reads_the_dashboard_owner_and_its_own_csrf_key(self):
+        """The watch app's owner addresses come from the dashboard's secrets (no WATCH_ACCESS_OWNER* secret exists); its
+        CSRF key is its own (WATCH_CSRF_SIGNING_KEY), never another app's. The secrets are read only where the secrets
+        file is written."""
+        read = {}
+        for step in steps(self.jobs["watch-deploy"]):
+            for name, value in step["env"].items():
+                if match := re.fullmatch(r"\$\{\{ secrets\.([A-Z0-9_]+) \}\}", value):
+                    read.setdefault(name, set()).add(match.group(1))
+        self.assertEqual(read["WATCH_ACCESS_OWNER"], {"DASHBOARD_ACCESS_OWNER"})
+        self.assertEqual(read["WATCH_ACCESS_OWNER_ALIASES"], {"DASHBOARD_ACCESS_OWNER_ALIASES"})
+        self.assertEqual(read["WATCH_CSRF_SIGNING_KEY"], {"WATCH_CSRF_SIGNING_KEY"})
+        self.assertEqual(read["CLOUDFLARE_API_TOKEN"], {"CF_API_TOKEN"})
+        self.assertEqual(set(read), {*markers(WRAPPERS["watch"][0])["secrets"], "CLOUDFLARE_API_TOKEN"})
+        self.assertNotRegex(WORKFLOW.read_text(), r"secrets\.WATCH_ACCESS_OWNER")
+        writers = [step["name"] for step in steps(self.jobs["watch-deploy"]) if "WATCH_CSRF_SIGNING_KEY" in step["env"]]
+        self.assertEqual(writers, ["Write the Worker secrets file"])
+
+    def test_watch_deploy_guards_the_host_then_deploys_and_checks_production_and_access(self):
+        """W2: after the dry run and the hostname guard, the real deploy through the wrapper (no D1); then the links
+        app's check of the live version without its D1 part (reads only) and the Access probe of the whole host."""
+        watch = steps(self.jobs["watch-deploy"])
+        names = [step["name"] for step in watch]
+        guard = names.index("Check the hostnames against production")
+        [dry] = [i for i, s in enumerate(watch) if "--dry-run" in s["run"] and "deploy-vars.mjs exec" in s["run"]]
+        [deploy] = [i for i, s in enumerate(watch) if "deploy" in wrangler_commands(s["run"]) and "--dry-run" not in s["run"]]
+        self.assertLess(dry, guard)
+        self.assertLess(guard, deploy)
+        self.assertNotIn("d1", watch[deploy]["run"])
+        check = watch[deploy + 1]
+        self.assertEqual(check["name"], "Check that production runs this commit")
+        self.assertEqual(names[deploy + 2 :], ["Check that Access answers unauthenticated requests", "Remove the secrets file"])
+        for step in watch[deploy + 1 :]:
+            with self.subTest(step=step["name"]):
+                self.assertFalse({"deploy", "versions upload", "versions deploy", "rollback", "secret"} & set(wrangler_commands(step["run"])))
+
+    def test_watch_holds_the_bundle_it_dry_runs_to_its_budget(self):
+        """Watch checks and Watch deploy measure the dry run's bundle (deploy/bundle-size.mjs) in the step that writes it."""
+        for job in ("watch-checks", "watch-deploy"):
+            [dry] = [s for s in steps(self.jobs[job]) if "--dry-run" in s["run"] and "deploy-vars.mjs exec" in s["run"]]
+            with self.subTest(job=job):
+                self.assertIn('--outdir "$RUNNER_TEMP/watch-bundle"', dry["run"])
+                self.assertIn('node ../deploy/bundle-size.mjs "$RUNNER_TEMP/watch-bundle"', dry["run"])
                 self.assertLess(dry["run"].index("--outdir"), dry["run"].index("bundle-size.mjs"))
 
     def test_lab_flowday_links_and_watch_accept_exactly_the_owner_values_the_dashboard_accepts(self):

@@ -5,8 +5,8 @@
 # sides of mail.received.v1, ops-v1 and task-intent-v1 plus the dashboard's ops-v1 caller tests, "Proto checks"
 # gates the protobuf IDL in proto/, and "CI gate" is the single status check to require.
 # Deploys run only on main, only for the app that changed (itself, a shared package it compiles in, a contract
-# file it bundles, or was dispatched), after the gate passes; Lab deploys after Todofy (its TODOFY binding) and
-# the dashboard after every app whose Ops entrypoint it binds. A push to main whose commit already passed every
+# file it bundles, or was dispatched), after the gate passes; Lab and the watch app deploy after Todofy (their TODOFY
+# bindings) and the dashboard after every app whose Ops entrypoint it binds. A push to main whose commit already passed every
 # needed check in a branch push run reuses that run: the checks are skipped, the gate and the deploys still run
 # (ci_changes.py find_reusable). Every deploy that applies routes runs tools/cf-guard first.
 # See README.md "CI".
@@ -65,6 +65,7 @@ jobs:
       lab_deploy: ${{ steps.decide.outputs.lab_deploy }}
       flowday_deploy: ${{ steps.decide.outputs.flowday_deploy }}
       links_deploy: ${{ steps.decide.outputs.links_deploy }}
+      watch_deploy: ${{ steps.decide.outputs.watch_deploy }}
       # A push to main that reuses a green branch run of the same commit (all check outputs above are false).
       checks_reused: ${{ steps.decide.outputs.checks_reused }}
       reused_run_url: ${{ steps.decide.outputs.reused_run_url }}
@@ -790,9 +791,10 @@ jobs:
         if: always()
         run: rm -f "$RUNNER_TEMP/links-secrets.json"
 
-  # The watch app (watch/: the Worker "watch", its Durable Object WatchState and the UI it serves), checked only until
-  # its first deploy job (W2, watch/docs/design.md section 11): there is no "Watch deploy" and no watch_deploy output.
-  # It compiles in packages/edge-auth and the TypeScript proto runtime with proto/watch/ui/; no contract.
+  # The watch app (watch/: the Worker "watch", its Durable Object WatchState and the UI it serves), deployed by "Watch
+  # deploy" since W2 (watch/docs/design.md section 11). It compiles in packages/edge-auth and the TypeScript proto
+  # runtime with proto/watch/ui/, proto/todofy/taskintent/ and proto/ops/; Contracts runs its task-intent-v1 and ops-v1
+  # tests.
   watch-checks:
     name: Watch checks
     needs: changes
@@ -829,8 +831,9 @@ jobs:
           npm test
       # A real SQLite WatchState and synthetic sites behind Miniflare's outbound service (no network): every fetch
       # tier, the etiquette, every stage of the noise pipeline, the triggers, confirmation and flicker, BROKEN and the
-      # auto-pause, GBK pages, masks, shadow mode, the owner API, real alarms, and the CPU of the fetch handler and
-      # of WatchState (its alarm path too) against bounds scaled by the machine's measured speed (tools/workerd-cpu).
+      # auto-pause, GBK pages, masks, shadow mode, the owner API, real alarms, the Todofy sink against a stub of
+      # Todofy's Ops entrypoint, the app's own Ops entrypoint over a service binding, and the CPU of the fetch handler
+      # and of WatchState (its alarm path too) against bounds scaled by the machine's measured speed (tools/workerd-cpu).
       - name: Runtime tests (workerd with a real Durable Object)
         working-directory: watch/worker
         run: npm run test:runtime
@@ -848,10 +851,9 @@ jobs:
         run: |
           if grep -rnE "(from|import)[[:space:]]*\(?[[:space:]]*['\"][^'\"]*(mail-hero|todofy|dashboard|website|lab|flowday|links)/" worker/src web/src \
             | grep -v "['\"]@ziyixi/proto/"; then exit 1; fi
-      # The committed config, run exactly as a deploy would run it but with --dry-run and placeholder values for what
-      # the deploy adds (deploy/deploy-vars.mjs, which refuses anything but --dry-run while the AUD is the placeholder).
-      # No token is needed. The bundle it writes is held to the app's budget and the Workers Free limit
-      # (deploy/bundle-size.mjs).
+      # The committed config, run exactly as the deploy runs it but with --dry-run and placeholder values for what the
+      # deploy adds (deploy/deploy-vars.mjs). No token is needed. The bundle it writes is held to the app's budget and
+      # the Workers Free limit (deploy/bundle-size.mjs).
       - name: Dry-run the committed config and check the bundle size
         working-directory: watch/worker
         env:
@@ -1490,10 +1492,10 @@ jobs:
 
   dashboard-deploy:
     name: Dashboard deploy
-    # After the app deploys: the service bindings MAIL_HERO, TODOFY and LAB name their "Ops" entrypoints, which
+    # After the app deploys: the service bindings MAIL_HERO, TODOFY, LAB and WATCH name their "Ops" entrypoints, which
     # must be live first. An app deploy that did not run (nothing of that app changed) is fine; one that
     # failed or was cancelled stops this job.
-    needs: [changes, dashboard-checks, gate, todofy-deploy, mail-hero-deploy, lab-deploy]
+    needs: [changes, dashboard-checks, gate, todofy-deploy, mail-hero-deploy, lab-deploy, watch-deploy]
     # Explicit status function and results, as for Todofy deploy (implicit success() and skipped ancestors).
     if: >-
       ${{ !cancelled()
@@ -1503,6 +1505,7 @@ jobs:
       && (needs.todofy-deploy.result == 'success' || needs.todofy-deploy.result == 'skipped')
       && (needs.mail-hero-deploy.result == 'success' || needs.mail-hero-deploy.result == 'skipped')
       && (needs.lab-deploy.result == 'success' || needs.lab-deploy.result == 'skipped')
+      && (needs.watch-deploy.result == 'success' || needs.watch-deploy.result == 'skipped')
       && github.ref == 'refs/heads/main'
       && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
       && needs.changes.outputs.dashboard_deploy == 'true' }}
@@ -2281,6 +2284,180 @@ jobs:
       - name: Remove the secrets file
         if: always()
         run: rm -f "$RUNNER_TEMP/links-secrets.json"
+
+  # The watch app (watch/, docs in watch/docs/design.md): the Worker "watch" on the Custom Domain watch.ziyixi.science,
+  # the whole host behind the Access application "watch" (infra/). After Todofy's deploy: its TODOFY binding names
+  # Todofy's Ops entrypoint, which must accept task-intent-v1's SOURCE_WATCH before the first digest. No D1, no R2:
+  # everything lives in the SQLite Durable Object WatchState, which arms its own alarm on the first owner API call or
+  # the dashboard's next status() (never on this job's anonymous probes, which Access answers).
+  watch-deploy:
+    name: Watch deploy
+    needs: [changes, watch-checks, gate, todofy-deploy]
+    # Explicit status function and results, as for Todofy deploy (implicit success() and skipped ancestors).
+    if: >-
+      ${{ !cancelled()
+      && needs.changes.result == 'success'
+      && (needs.watch-checks.result == 'success' || (needs.changes.outputs.checks_reused == 'true' && needs.watch-checks.result == 'skipped'))
+      && needs.gate.result == 'success'
+      && (needs.todofy-deploy.result == 'success' || needs.todofy-deploy.result == 'skipped')
+      && github.ref == 'refs/heads/main'
+      && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+      && needs.changes.outputs.watch_deploy == 'true' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    environment:
+      name: production
+      url: ${{ steps.config.outputs.url }}
+    concurrency:
+      group: watch-production
+      cancel-in-progress: false
+    defaults:
+      run:
+        working-directory: watch
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: '26'
+          cache: npm
+          cache-dependency-path: |
+            watch/worker/package-lock.json
+            watch/web/package-lock.json
+            proto/package-lock.json
+      # Every static production value (account, host, Access) is committed in watch/wrangler.toml; the environment URL
+      # and the Access probe read it there.
+      - name: Read the host and the Access issuer from the committed config
+        id: config
+        run: |
+          python3 - >> "$GITHUB_OUTPUT" <<'EOF'
+          import tomllib
+          with open("wrangler.toml", "rb") as file:
+              variables = tomllib.load(file)["vars"]
+          print("url=https://" + variables["PUBLIC_HOST"])
+          print("host=" + variables["PUBLIC_HOST"])
+          print("access_issuer=" + variables["ACCESS_ISSUER"])
+          EOF
+      # The UI's build (web/dist) is the one that ships; its JavaScript budget is checked by the build.
+      - name: Build the verified revision
+        run: |
+          npm ci --prefix worker --no-audit --no-fund
+          npm ci --prefix web --no-audit --no-fund
+          npm run build --prefix web
+      # The owner's addresses and the CSRF key are environment secrets (masked in this public log) and reach the Worker
+      # as secrets through --secrets-file; wrangler prints plain vars. The watch app's owner is the dashboard's owner
+      # (one person, the same Access identities), so the addresses come from the dashboard's secrets, as for Lab,
+      # FlowDay and the links app; the CSRF key is the watch app's own. watch/README.md "Deploy".
+      - name: Write the Worker secrets file
+        working-directory: watch/worker
+        env:
+          WATCH_ACCESS_OWNER: ${{ secrets.DASHBOARD_ACCESS_OWNER }}
+          WATCH_ACCESS_OWNER_ALIASES: ${{ secrets.DASHBOARD_ACCESS_OWNER_ALIASES }}
+          WATCH_CSRF_SIGNING_KEY: ${{ secrets.WATCH_CSRF_SIGNING_KEY }}
+        run: node ../deploy/deploy-vars.mjs secrets "$RUNNER_TEMP/watch-secrets.json"
+      # deploy-vars.mjs adds BUILD_SHA as --var and refuses the all-zeros Access AUD; the bundle that ships is held to
+      # the app's budget and the Workers Free limit (deploy/bundle-size.mjs).
+      - name: Validate the bundle before changing production
+        working-directory: watch/worker
+        run: |
+          node ../deploy/deploy-vars.mjs exec -- npx --no-install wrangler deploy --dry-run --config ../wrangler.toml \
+            --secrets-file "$RUNNER_TEMP/watch-secrets.json" --outdir "$RUNNER_TEMP/watch-bundle"
+          node ../deploy/bundle-size.mjs "$RUNNER_TEMP/watch-bundle"
+      # tools/cf-guard (read-only GETs; prints listed hostnames, counts, PASS/FAIL): wrangler applies a config's Custom
+      # Domains (or zone routes) as the Worker's complete set, so stop before any production change when a live
+      # hostname would be detached or another Worker's hostname or DNS record taken over. For an intentional
+      # change, set the exact hostnames here (space-separated) in the same commit that changes wrangler.toml.
+      # watch.ziyixi.science had no DNS record before W2, so its first deploy attaches the Custom Domain without either.
+      - name: Check the hostnames against production
+        working-directory: .
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+          CF_GUARD_ALLOW_REMOVE: ''
+          CF_GUARD_ALLOW_CONFLICT: ''
+        run: node tools/cf-guard/cf-guard.mjs --config watch/wrangler.toml
+      - name: Deploy the Worker watch
+        working-directory: watch/worker
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+        run: |
+          test -n "$CLOUDFLARE_API_TOKEN"
+          node ../deploy/deploy-vars.mjs exec -- npx --no-install wrangler deploy --config ../wrangler.toml \
+            --secrets-file "$RUNNER_TEMP/watch-secrets.json"
+      # Nothing anonymous on the host shows BUILD_SHA (all of it is behind Access), so production is read through the
+      # API with the deploy token (GETs only): the Worker serves exactly one version at 100% and that version's
+      # BUILD_SHA is this commit. wrangler's JSON answers are parsed, never printed (they name the token's account
+      # email); only the version id and the result are. (FlowDay's and the links app's check without their D1 part.)
+      - name: Check that production runs this commit
+        working-directory: watch/worker
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+        run: |
+          test -n "$CLOUDFLARE_API_TOKEN"
+          deployment=$(npx --no-install wrangler deployments status --json --config ../wrangler.toml) || {
+            echo "Could not read the deployment of the Worker watch." >&2
+            exit 1
+          }
+          version=$(jq -er '.versions | select(length == 1 and .[0].percentage == 100) | .[0].version_id' \
+            <<<"$deployment" 2>/dev/null) || {
+            echo "The deployment does not serve exactly one version at 100%." >&2
+            exit 1
+          }
+          details=$(npx --no-install wrangler versions view "$version" --json --config ../wrangler.toml) || {
+            echo "Could not read the deployed version." >&2
+            exit 1
+          }
+          build=$(jq -er '[.resources.bindings[] | select(.name == "BUILD_SHA" and .type == "plain_text") | .text]
+            | select(length == 1) | .[0]' <<<"$details" 2>/dev/null) || build=''
+          if [ "$build" != "$GITHUB_SHA" ]; then
+            echo "The deployed version $version was not built from $GITHUB_SHA." >&2
+            exit 1
+          fi
+          echo "The Worker watch serves version $version at 100%, built from $GITHUB_SHA."
+      # Cloudflare Access ("watch", the whole host) must answer every unauthenticated request with a 302 to its login
+      # page for this host: the inbox /, the owner API and the add-from-phone page /new, exactly as the dashboard's
+      # probe checks (same script; test_ci_changes.py runs it). /health is behind Access too (no bypass application),
+      # so no anonymous request reaches the Worker. Whether WatchState's alarm is armed cannot be seen from here: the
+      # first owner API call and the dashboard's status() arm it (watch/README.md "Deploy", the post-deploy check).
+      - name: Check that Access answers unauthenticated requests
+        env:
+          ACCESS_ISSUER: ${{ steps.config.outputs.access_issuer }}
+          PUBLIC_HOST: ${{ steps.config.outputs.host }}
+        run: |
+          issuer=$ACCESS_ISSUER
+          host=$PUBLIC_HOST
+          test -n "$issuer" && test -n "$host"
+          for path in / /api/v1/watches /new; do
+            for attempt in $(seq 1 10); do
+              answer=$(curl -sS -o /dev/null --max-time 15 --proto '=https' -w '%{http_code} %{redirect_url}' \
+                "https://$host$path" 2>/dev/null) || true
+              code=${answer%% *}
+              location=${answer#* }
+              case "$code" in
+                302)
+                  login="$issuer/cdn-cgi/access/login/$host"
+                  case "$location" in
+                    "$login"|"$login?"*|"$login/"*)
+                      echo "Access answered $path with 302 to its login page for this host (attempt $attempt)."
+                      continue 2
+                      ;;
+                  esac
+                  echo "$path: 302 to somewhere other than the Access login page for this host." >&2
+                  exit 1
+                  ;;
+                ''|000|5??) sleep 15 ;;
+                *)
+                  echo "$path was answered with $code without Access." >&2
+                  exit 1
+                  ;;
+              esac
+            done
+            echo "$path never reached Access (last status ${code:-none})." >&2
+            exit 1
+          done
+      - name: Remove the secrets file
+        if: always()
+        run: rm -f "$RUNNER_TEMP/watch-secrets.json"
 
   # The site release: dispatches website-release.yml (docs in website/docs/release.md), the same workflow the
   # Notion buttons and the relay's detector dispatch, and returns at once. The release's job holds the one

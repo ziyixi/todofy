@@ -40,6 +40,7 @@ test('the Durable Object, the Ops service bindings and the one cron', () => {
     { binding: 'MAIL_HERO', service: 'mail-hero', entrypoint: 'Ops' },
     { binding: 'TODOFY', service: 'todofy', entrypoint: 'Ops' },
     { binding: 'LAB', service: 'lab', entrypoint: 'Ops' },
+    { binding: 'WATCH', service: 'watch', entrypoint: 'Ops' },
   ])
   assert.deepEqual(config.triggers, { crons: ['*/30 * * * *'] })
 })

@@ -1,6 +1,6 @@
 # watch
 
-The owner's web watches on `watch.ziyixi.science` (not deployed yet): pages, RSS/Atom/JSON feeds, JSON APIs and data
+The owner's web watches on `watch.ziyixi.science`: pages, RSS/Atom/JSON feeds, JSON APIs and data
 embedded in pages, checked on a schedule by one SQLite Durable Object, with a deterministic noise pipeline and a
 change inbox. Chinese, mobile first. Design: [`docs/design.md`](docs/design.md). Rules: [`AGENTS.md`](AGENTS.md).
 
@@ -8,8 +8,8 @@ change inbox. Chinese, mobile first. Design: [`docs/design.md`](docs/design.md).
 | --- | --- |
 | `worker/` | The Worker `watch`: the fetch handler (Access, CSRF), `WatchState` (storage, scheduler, pipeline, owner API) |
 | `web/` | The UI, built into `web/dist` and served by the Worker |
-| `wrangler.toml` | The production config (top level = production; not deployed before step W2) |
-| `deploy/` | The deploy wrapper `deploy-vars.mjs` (only `--dry-run` before W2) and the bundle budget |
+| `wrangler.toml` | The production config (top level = production), deployed by CI's `Watch deploy` |
+| `deploy/` | The deploy wrapper `deploy-vars.mjs` and the bundle budget |
 | `../proto/watch/ui/v1/` | The owner API `watch.ui.v1` |
 
 ## Use
@@ -63,7 +63,53 @@ its next version. Local state is in `watch/.wrangler/` (delete it after a schema
 
 ## Deploy
 
-Not before step W2 ([`docs/design.md`](docs/design.md) §11). CI's `Watch checks` runs everything above and a
-`wrangler deploy --dry-run` of the committed config through `deploy/deploy-vars.mjs` with placeholder values; the
-wrapper refuses a real deploy while `ACCESS_AUDIENCE` is the all-zeros placeholder. Never run a plain
-`wrangler deploy`.
+Only from GitHub Actions: `Watch deploy` (`.github/workflows/ci.yml`) runs on `main` after `CI gate` and `Todofy deploy`
+(its `TODOFY` binding names Todofy's `Ops`, which must accept `SOURCE_WATCH`) when `watch/`, `packages/edge-auth/`,
+`contracts/ops-v1/ops-v1.ts`, `contracts/task-intent-v1/task-intent-v1.ts` or a `proto/` path the app bundles changed,
+or on a dispatch with `watch` or `all`, in the `production` environment and the group `watch-production`. It builds the
+UI, writes the secrets file, dry-runs (the bundle held to its budget), runs the hostname guard (`tools/cf-guard`, no
+allowance: `watch.ziyixi.science` had no DNS record before W2), deploys through `deploy/deploy-vars.mjs` (no D1), and
+then checks production:
+
+- through the API with the deploy token (nothing anonymous shows the build): the Worker serves exactly one version at
+  100% and its `BUILD_SHA` is the commit;
+- anonymously: `GET /`, `/api/v1/watches` and `/new` are answered by Access with a 302 to its login page for this host
+  (the dashboard's probe). The whole host is behind the Access application "watch" (`infra/access.tf`), `/health`
+  included.
+
+The deploy token is `CF_API_TOKEN`, as for Lab, FlowDay and the links app. The wrapper writes three Worker secrets:
+
+| Worker secret | From the `production` environment secret | Why |
+| --- | --- | --- |
+| `ACCESS_OWNER` | `DASHBOARD_ACCESS_OWNER` | the watch app's owner is the dashboard's owner: one person with the same Access identities, so it reuses the dashboard's secret (as Lab, FlowDay and the links app do) |
+| `ACCESS_OWNER_ALIASES` | `DASHBOARD_ACCESS_OWNER_ALIASES` | as above |
+| `CSRF_SIGNING_KEY` | `WATCH_CSRF_SIGNING_KEY` (the watch app's own) | a separate key per app: a token of one app never verifies at another |
+
+The CSRF key is 64 hex characters, made where `gh` is logged in and never pasted anywhere; rotating it is the same
+command followed by a watch deploy (an open tab then fetches a new token):
+
+```sh
+openssl rand -hex 32 | gh secret set WATCH_CSRF_SIGNING_KEY -R ziyixi/todofy --env production
+```
+
+**After the first deploy** (and after any deploy that changed the scheduler), check by hand that `WatchState`
+schedules itself: CI cannot, since every anonymous request stops at Access and the alarm is armed by the object
+itself. Open `https://watch.ziyixi.science/status` signed in (the page calls `serviceStatus`, and every API call arms
+an alarm when none is set): it must show a 下次调度 time (never 未设定) within six hours, and after a minute a 上次调度 time. The
+dashboard's next tick (every 30 minutes) calls `status()`, which arms a missing alarm too, and shows `scheduler_stale`
+if passes stop. Then add a watch of a page the owner controls (W2 step 8 in `docs/design.md` §11) and see its first
+check within a minute.
+
+The dashboard's daily drift check compares the live Worker with `dashboard/worker/src/drift-desired.json` (these three
+secrets, `BUILD_SHA`, the bindings and the Custom Domain); its registry shows the 网页监视 tile (ops-v1 through the
+`WATCH` binding) and the Worker. The Access application "watch" is managed by `infra/` (`infra/README.md` "Adding an
+app"): change it there, not by hand, and "Infra drift" checks every day that `ACCESS_AUDIENCE` here equals its AUD.
+Notifications go to Todoist through Todofy (`docs/design.md` §7); Todofy's own switches (`TODOFY_*`) pause them.
+
+### Rollback
+
+A deploy without `routes` leaves an attached Custom Domain in place, so: detach `watch.ziyixi.science` from the Worker
+`watch` by hand in the Cloudflare dashboard (Workers & Pages → watch → Settings → Domains & Routes), then revert the W2
+commit (and the dashboard's `WATCH` binding with it). The Access application can stay. To roll back the code only,
+revert the commit that broke it: the next `Watch deploy` ships the revert and keeps the host and the object's data.
+Never run a plain `wrangler deploy`.

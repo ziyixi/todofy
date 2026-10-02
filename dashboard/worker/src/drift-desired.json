@@ -158,6 +158,11 @@
           "name": "TODOFY",
           "type": "service",
           "source": "config"
+        },
+        {
+          "name": "WATCH",
+          "type": "service",
+          "source": "config"
         }
       ],
       "personal": []
@@ -640,6 +645,69 @@
           "name": "TODOIST_REVIEW_PROJECT_ID",
           "type": "secret_text",
           "source": "deploy"
+        }
+      ],
+      "personal": []
+    },
+    "watch": {
+      "config": "watch/wrangler.toml",
+      "workers_dev": false,
+      "preview_urls": false,
+      "custom_domains": [
+        "watch.ziyixi.science"
+      ],
+      "routes": [],
+      "crons": [],
+      "bindings": [
+        {
+          "name": "ACCESS_AUDIENCE",
+          "type": "plain_text",
+          "source": "config"
+        },
+        {
+          "name": "ACCESS_ISSUER",
+          "type": "plain_text",
+          "source": "config"
+        },
+        {
+          "name": "ACCESS_OWNER",
+          "type": "secret_text",
+          "source": "deploy"
+        },
+        {
+          "name": "ACCESS_OWNER_ALIASES",
+          "type": "secret_text",
+          "source": "deploy"
+        },
+        {
+          "name": "ASSETS",
+          "type": "assets",
+          "source": "config"
+        },
+        {
+          "name": "BUILD_SHA",
+          "type": "plain_text",
+          "source": "deploy"
+        },
+        {
+          "name": "CSRF_SIGNING_KEY",
+          "type": "secret_text",
+          "source": "deploy"
+        },
+        {
+          "name": "PUBLIC_HOST",
+          "type": "plain_text",
+          "source": "config"
+        },
+        {
+          "name": "TODOFY",
+          "type": "service",
+          "source": "config"
+        },
+        {
+          "name": "WATCH",
+          "type": "durable_object_namespace",
+          "source": "config"
         }
       ],
       "personal": []

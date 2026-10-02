@@ -57,6 +57,11 @@ binding = "LAB"
 service = "lab"
 entrypoint = "Ops"
 
+[[services]]
+binding = "WATCH"
+service = "watch"
+entrypoint = "Ops"
+
 # One trigger (the account's Free plan allows 5 in total): status, usage, guard, canary, digest.
 [triggers]
 crons = ["*/30 * * * *"]
