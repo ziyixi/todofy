@@ -60,6 +60,8 @@ const at = (iso: string | null) => (iso === null ? undefined : timestampFromDate
 const iso = (timestamp: Timestamp | undefined) => (timestamp === undefined ? null : timestampDate(timestamp).toISOString());
 const notFound = () => new RpcError(Code.NOT_FOUND, "NOT_FOUND", "no such resource");
 const idOf = (name: string) => name.slice(name.lastIndexOf("/") + 1);
+/** QueryAnalytics rows per page here (the Worker's is 200): small, so every multi-page path of the client runs. */
+const ANALYTICS_PAGE = 3;
 
 function taskMessage(task: Task): TaskMessage {
   return create(TaskSchema, {
@@ -221,12 +223,14 @@ const handlers: ServiceHandlers<ShapeOf<typeof FlowDayUiService>, Context> = {
     fake.completed.set(date, (fake.completed.get(date) ?? []).filter((id) => id !== taskId));
     return fake.flowMessage(date);
   },
-  async rolloverFlow({ name, destination, taskIds }, { fake }) {
+  async rolloverFlow({ name, destination, taskIds, allUnfinished }, { fake }) {
     const from = idOf(name);
     const to = idOf(destination);
     const done = new Set(fake.completed.get(from) ?? []);
     const source = fake.flows.get(from) ?? [];
-    const moving = taskIds.length === 0 ? source.filter((id) => !done.has(id)) : source.filter((id) => taskIds.includes(id));
+    if (allUnfinished && taskIds.length > 0) throw new RpcError(Code.INVALID_ARGUMENT, "BAD_REQUEST", "both");
+    // As the Worker: an empty list without all_unfinished moves nothing.
+    const moving = allUnfinished ? source.filter((id) => !done.has(id)) : source.filter((id) => taskIds.includes(id));
     const existing = fake.flows.get(to) ?? [];
     setFlowTaskIds(to, [...moving.filter((id) => !existing.includes(id)), ...existing]);
     setFlowTaskIds(from, source.filter((id) => !moving.includes(id)));
@@ -308,16 +312,27 @@ const handlers: ServiceHandlers<ShapeOf<typeof FlowDayUiService>, Context> = {
     if (paths.includes("day_capacity_minutes")) fake.settings.set("day_capacity_mins", String(settings?.dayCapacityMinutes ?? 0));
     return handlers.getSettings({ $typeName: "flowday.ui.v1.GetSettingsRequest", name: "settings" }, { fake });
   },
-  async queryAnalytics({ startDate, endDate }, { fake }) {
+  // As the Worker: one order of rows across the pages (planned, done, time entries), at most ANALYTICS_PAGE rows a
+  // page (small here, so the client's reading of every page is exercised), with the tasks each page names.
+  async queryAnalytics({ startDate, endDate, pageToken }, { fake }) {
     const ranged = startDate !== "" && endDate !== "";
     const within = (date: string) => !ranged || (date >= startDate && date <= endDate);
-    const dates = ranged ? [...new Set([...fake.flows.keys(), ...fake.completed.keys()])].filter(within).sort() : [];
-    const flows = dates.map((date) => create(FlowSchema, { name: `flows/${date}`, taskIds: fake.flows.get(date) ?? [], completedTaskIds: fake.completed.get(date) ?? [] }));
-    const entries = fake.entries.filter((entry) => within(entry.flowDate));
-    const ids = new Set([...flows.flatMap((flow) => [...flow.taskIds, ...flow.completedTaskIds]), ...entries.map((entry) => entry.taskId)]);
+    const rowsOf = (map: Map<string, string[]>) =>
+      [...map.entries()].filter(([date]) => ranged && within(date)).sort(([a], [b]) => a.localeCompare(b)).flatMap(([flowDate, ids]) => ids.map((taskId) => ({ flowDate, taskId })));
+    const entries = fake.entries.filter((entry) => within(entry.flowDate)).sort((a, b) => a.flowDate.localeCompare(b.flowDate) || a.startTime.localeCompare(b.startTime));
+    const rows = [
+      ...rowsOf(fake.flows).map((row) => ({ kind: "planned" as const, row })),
+      ...rowsOf(fake.completed).map((row) => ({ kind: "completed" as const, row })),
+      ...entries.map((entry) => ({ kind: "entry" as const, entry })),
+    ];
+    const offset = pageToken === "" ? 0 : Number(pageToken);
+    const page = rows.slice(offset, offset + ANALYTICS_PAGE);
+    const ids = new Set(page.map((item) => (item.kind === "entry" ? item.entry.taskId : item.row.taskId)));
     return create(QueryAnalyticsResponseSchema, {
-      timeEntries: entries.map(entryMessage),
-      flows,
+      plannedTasks: page.flatMap((item) => (item.kind === "planned" ? [item.row] : [])),
+      completedTasks: page.flatMap((item) => (item.kind === "completed" ? [item.row] : [])),
+      timeEntries: page.flatMap((item) => (item.kind === "entry" ? [entryMessage(item.entry)] : [])),
+      nextPageToken: offset + ANALYTICS_PAGE < rows.length ? String(offset + ANALYTICS_PAGE) : "",
       tasks: [...fake.tasks.values()].filter((task) => ids.has(task.id)).map(taskMessage),
       dayCapacityMinutes: Number(fake.settings.get("day_capacity_mins") ?? "360"),
     });

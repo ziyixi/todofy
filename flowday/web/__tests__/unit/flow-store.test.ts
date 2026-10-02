@@ -73,15 +73,29 @@ describe("flow store", () => {
     expect(fakeWorker.flows.get("2026-04-13")).toEqual(["task-1"]);
   });
 
-  it("rolls over selected tasks, and asks nothing for an empty selection", async () => {
+  it("rolls over selected tasks; an empty selection moves nothing (it never means every task)", async () => {
     vi.stubGlobal("fetch", fakeFetch);
     setFlowTaskIds("2026-04-13", ["a", "b", "c"]);
     await useFlowStore.getState().rolloverSelectedTasks("2026-04-13", "2026-04-14", ["a", "c"]);
     expect(useFlowStore.getState().flows).toEqual({ "2026-04-13": ["b"], "2026-04-14": ["a", "c"] });
     fakeWorker.requests = [];
     await useFlowStore.getState().rolloverSelectedTasks("2026-04-13", "2026-04-15", []);
-    expect(fakeWorker.requests.map((request) => request.method)).toEqual(["GET"]);
+    expect(fakeWorker.requests.map((request) => [request.method, request.body])).toEqual([
+      ["POST", { destination: "flows/2026-04-15" }],
+      ["GET", undefined],
+    ]);
     expect(useFlowStore.getState().flows["2026-04-13"]).toEqual(["b"]);
+    expect(fakeWorker.flows.get("2026-04-15")).toBeUndefined();
+  });
+
+  it("rolls over every unfinished task only by asking for all_unfinished", async () => {
+    vi.stubGlobal("fetch", fakeFetch);
+    setFlowTaskIds("2026-04-13", ["a", "b", "c"]);
+    addCompletedFlowTask("2026-04-13", "b");
+    fakeWorker.requests = [];
+    await useFlowStore.getState().rolloverTasks("2026-04-13", "2026-04-14");
+    expect(fakeWorker.requests[0]).toMatchObject({ method: "POST", path: "/api/v1/flows/2026-04-13:rollover", body: { destination: "flows/2026-04-14", all_unfinished: true } });
+    expect(useFlowStore.getState().flows).toEqual({ "2026-04-13": ["b"], "2026-04-14": ["a", "c"] });
   });
 
   it("rehydrates from the server when a flow persistence write fails", async () => {

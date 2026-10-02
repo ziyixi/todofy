@@ -259,12 +259,12 @@ export function persistPlanningCompleted(date: string): void {
 }
 
 /**
- * Moves tasks of `fromDate` to the top of `toDate`: the listed ones, or with `taskIds` undefined every task not done.
- * An empty list moves nothing (and asks nothing). Throws (after the banner shows it) when it was not saved.
+ * Moves tasks of `fromDate` to the top of `toDate`: the listed ones (an empty list moves nothing), or with `taskIds`
+ * undefined every task not done (`all_unfinished`). Throws (after the banner shows it) when it was not saved.
  */
 export async function rolloverFlow(fromDate: string, toDate: string, taskIds?: string[]): Promise<void> {
-  if (taskIds !== undefined && taskIds.length === 0) return;
-  await write(() => flowday.rolloverFlow({ name: `flows/${fromDate}`, destination: `flows/${toDate}`, taskIds: taskIds ?? [] }));
+  const selection = taskIds === undefined ? { allUnfinished: true } : { taskIds };
+  await write(() => flowday.rolloverFlow({ name: `flows/${fromDate}`, destination: `flows/${toDate}`, ...selection }));
 }
 
 // ---- notes --------------------------------------------------------------------------------------------------------
@@ -437,11 +437,8 @@ export async function queryAnalytics(range: { start: string; end: string } | nul
     let pageToken = "";
     do {
       const page = await flowday.queryAnalytics({ startDate: range?.start ?? "", endDate: range?.end ?? "", pageToken });
-      for (const flow of page.flows) {
-        const flowDate = flowDateOf(flow);
-        dataset.flows.push(...flow.taskIds.map((taskId) => ({ flowDate, taskId })));
-        dataset.completed.push(...flow.completedTaskIds.map((taskId) => ({ flowDate, taskId })));
-      }
+      dataset.flows.push(...page.plannedTasks.map(({ flowDate, taskId }) => ({ flowDate, taskId })));
+      dataset.completed.push(...page.completedTasks.map(({ flowDate, taskId }) => ({ flowDate, taskId })));
       dataset.entries.push(...page.timeEntries.map(timeEntryFromMessage));
       for (const task of page.tasks) tasks.set(idOf(task.name, "tasks"), taskFromMessage(task));
       dataset.dayCapacityMins = page.dayCapacityMinutes;
