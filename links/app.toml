@@ -1,0 +1,44 @@
+# Public metadata only. Hosts/resources remain in this app's committed Wrangler configs.
+version = 1
+id = "links"
+target = "cloudflare"
+
+[[workers]]
+config = "links/wrangler.toml"
+entry = "links"
+role = "短链接跳转与启动器"
+position = 7
+
+[[entries]]
+id = "links"
+name = "短链接"
+description = "s.ziyixi.science 短链接与启动器"
+group = "apps"
+icon = "link"
+# Rose is also the danger color; slate keeps a healthy tile unambiguous.
+accent = "slate"
+access = true
+app_only_signals = []
+order = 6
+worker = "links"
+url_path = "/_/"
+position = 5
+[entries.status]
+# Constant public text before any D1 read; unused links do not imply idle failure.
+type = "public_http"
+expect = [200]
+content_type = "text/plain"
+outside_access = true
+error_rate = true
+enabled = true
+path = "/robots.txt"
+[entries.tile_metric]
+kind = "latency"
+
+[[access]]
+key = "links"
+kind = "owner"
+worker = "links"
+name = "links"
+paths = ["/_/*", "/_"]
+session = "168h"

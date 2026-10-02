@@ -1,0 +1,45 @@
+# Public metadata only. Hosts/resources remain in this app's committed Wrangler configs.
+version = 1
+id = "todofy"
+target = "cloudflare"
+
+[[workers]]
+config = "todofy/gateway/wrangler.toml"
+entry = "todofy"
+role = "网关与 UI"
+position = 2
+
+[[workers]]
+config = "todofy/wrangler.toml"
+entry = "todofy"
+role = "处理核心（TodofyCore）"
+position = 3
+
+[[entries]]
+id = "todofy"
+name = "Todofy"
+description = "邮件摘要、Todoist 任务与每日提醒"
+group = "apps"
+icon = "list-checks"
+accent = "green"
+access = true
+app_only_signals = ["backup_stale", "backup_failed", "backup_disabled", "backup_active"]
+order = 2
+worker = "todofy"
+url_path = "/"
+position = 2
+[entries.status]
+type = "ops_v1"
+binding = "TODOFY"
+guard = true
+[entries.tile_metric]
+kind = "counter"
+name = "received_24h"
+
+[[access]]
+key = "todofy"
+kind = "owner"
+worker = "todofy"
+name = "Todofy"
+paths = [""]
+session = "24h"

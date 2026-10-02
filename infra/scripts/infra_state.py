@@ -122,20 +122,12 @@ APPLY_WORKFLOW, APPLY_REF, APPLY_EVENT = "Infra apply", "refs/heads/main", "work
 FINGERPRINT_DIGITS = 12
 
 # --- outputs against the apps' configs ---
-# The production wrangler.toml of every monorepo Worker (.github/scripts/test_wrangler_configs.py PRODUCTION;
-# test_infra_config.py keeps the two equal). The output keys are Worker names and D1 database names.
-WRANGLER_CONFIGS = (
-    "mail-hero/wrangler.toml",
-    "todofy/wrangler.toml",
-    "todofy/gateway/wrangler.toml",
-    "dashboard/wrangler.toml",
-    "website/wrangler.toml",
-    "website/relay/wrangler.toml",
-    "lab/wrangler.toml",
-    "flowday/wrangler.toml",
-    "links/wrangler.toml",
-    "watch/wrangler.toml",
-)
+# The catalog supplies only public config paths, never credentials or state.
+sys.path.insert(0, str(REPO / "tools" / "service-catalog"))
+from catalog import load_catalog  # noqa: E402
+
+# Preserve the existing older-Python local output-check behaviour; CI requires 3.11+.
+WRANGLER_CONFIGS = tuple(load_catalog(REPO).worker_configs().values()) if tomllib is not None else ()
 OUTPUTS = ("access_aud", "d1_database_ids", "r2_bucket_names")
 
 

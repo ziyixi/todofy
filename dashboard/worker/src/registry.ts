@@ -43,6 +43,7 @@ const FLOW_GROUPS: readonly FlowGroup[] = [
 ];
 
 const ENTRIES: readonly EntryDef[] = [
+  // BEGIN service-catalog entries
   {
     id: 'mail-hero',
     name: 'Mail Hero',
@@ -82,18 +83,10 @@ const ENTRIES: readonly EntryDef[] = [
     access: true,
     status: { type: 'ops_v1', binding: 'LAB', guard: true },
     tile_metric: { kind: 'counter', name: 'liked_7d' },
-    // Lab has no maintenance switch; the code is listed for every app in ops-v1 and never raised by Lab.
     app_only_signals: ['maintenance_mode'],
-    // After the synthetic link-only test entry's order 3 (test/v2-fixtures.ts).
     order: 4,
   },
   {
-    // FlowDay (flowday/, the Worker `flowday` and its D1 database since the F4 cutover). The whole host is behind the
-    // Access app "flowday" except its exact PWA files: the app "flowday-bypass" covers /pwa/* and the Worker serves the
-    // manifest itself, as application/manifest+json (flowday/worker/src/assets.ts). So one anonymous GET of the manifest
-    // per tick reaches the Worker and its static assets with no D1 read; Access's login redirect can never pass (2xx and
-    // the media type are required). F6 may remove "flowday-bypass" (flowday/docs/design.md §11): that change must move
-    // this probe first, which test_infra_config.py enforces.
     id: 'flowday',
     name: 'FlowDay',
     description: 'Todoist 时间块、计时与回顾',
@@ -104,59 +97,50 @@ const ENTRIES: readonly EntryDef[] = [
     access: true,
     status: {
       type: 'public_http',
-      url: 'https://flowday.ziyixi.science/pwa/manifest.webmanifest',
       expect: [200],
       content_type: 'application/manifest+json',
       outside_access: true,
       error_rate: true,
       enabled: true,
+      url: 'https://flowday.ziyixi.science/pwa/manifest.webmanifest',
     },
     tile_metric: { kind: 'latency' },
     app_only_signals: [],
     order: 5,
   },
   {
-    // The short links (links/, s.ziyixi.science, deployed by "Links deploy" since L2). The tile opens the launcher
-    // /_/, behind the path-scoped Access app "links"; the rest of the host is public. /robots.txt is the Worker's own
-    // constant text/plain answer before any D1 read (links/worker/src/http.ts), so the probe says the Worker is up
-    // without touching the database or a key. A short link may go unused for days, so no idle rule.
     id: 'links',
     name: '短链接',
     description: 's.ziyixi.science 短链接与启动器',
     group: 'apps',
     icon: 'link',
-    // Not rose: its light and dark tokens sit next to the danger colour, so a healthy tile would read as a failure.
     accent: 'slate',
     url: 'https://s.ziyixi.science/_/',
     access: true,
     status: {
       type: 'public_http',
-      url: 'https://s.ziyixi.science/robots.txt',
       expect: [200],
       content_type: 'text/plain',
       outside_access: true,
       error_rate: true,
       enabled: true,
+      url: 'https://s.ziyixi.science/robots.txt',
     },
     tile_metric: { kind: 'latency' },
     app_only_signals: [],
     order: 6,
   },
   {
-    // The web watches (watch/, watch.ziyixi.science, W2/W3): its Ops entrypoint answers counts only, never a
-    // watch's name, URL or page text, so the tile and its flow read ops-v1 like Mail Hero's, Todofy's and Lab's.
     id: 'watch',
     name: '网页监视',
     description: '网页、订阅与接口的变化收件箱',
     group: 'apps',
     icon: 'eye',
-    // Not rose (it reads as the danger colour), and not its neighbours' violet or slate in the 3-column grid.
     accent: 'blue',
     url: 'https://watch.ziyixi.science/',
     access: true,
     status: { type: 'ops_v1', binding: 'WATCH', guard: true },
     tile_metric: { kind: 'counter', name: 'changes_new' },
-    // The watch app has no maintenance switch; the code is listed for every app in ops-v1 and never raised by it.
     app_only_signals: ['maintenance_mode'],
     order: 7,
   },
@@ -167,17 +151,14 @@ const ENTRIES: readonly EntryDef[] = [
     group: 'sites',
     icon: 'globe',
     accent: 'violet',
-    // www, the canonical host. Both www and the apex are Custom Domains of the site Worker since 2026-10-01
-    // and share one certificate that covers no app host (website/docs/architecture.md "Hostnames"); before
-    // that Chrome could reuse an apex connection for app subdomains and get Cloudflare's empty 403s.
     url: 'https://www.ziyixi.science/',
     access: false,
-    // Q6: one public GET per tick to www's small JSON build file (the apex serves the same file;
-    // 200 on 2026-09-29); status code and latency only, the body is never read.
-    // Set enabled: false to show 未接入 instead. The site's own Worker (website/, `ziyixi-website`) is
-    // assets-only: asset requests are not Worker invocations, so analytics cannot judge it and the
-    // probe stays its status source (build-info.json is in the static export too, website/docs).
-    status: { type: 'public_http', url: 'https://www.ziyixi.science/build-info.json', expect: [200], enabled: true },
+    status: {
+      type: 'public_http',
+      expect: [200],
+      enabled: true,
+      url: 'https://www.ziyixi.science/build-info.json',
+    },
     tile_metric: { kind: 'latency' },
     app_only_signals: [],
     order: 1,
@@ -191,7 +172,6 @@ const ENTRIES: readonly EntryDef[] = [
     accent: 'slate',
     url: null,
     access: false,
-    // Q13 default: no request for 26 h → 需关注 (its real schedule is still to be confirmed).
     status: { type: 'analytics', max_idle_hours: 26 },
     tile_metric: { kind: 'last_active' },
     app_only_signals: [],
@@ -206,7 +186,6 @@ const ENTRIES: readonly EntryDef[] = [
     accent: 'amber',
     url: null,
     access: false,
-    // Q7: 未接入 until Todofy offers a "last fetched" counter (a later, separate change).
     status: { type: 'none' },
     tile_metric: null,
     app_only_signals: [],
@@ -219,7 +198,6 @@ const ENTRIES: readonly EntryDef[] = [
     group: 'hidden',
     icon: 'gauge',
     accent: 'slate',
-    // Q11: no tile; it has a row in the Cloudflare table and tick_stale still reaches the strip.
     url: null,
     access: true,
     status: { type: 'self' },
@@ -227,6 +205,7 @@ const ENTRIES: readonly EntryDef[] = [
     app_only_signals: [],
     order: 1,
   },
+  // END service-catalog entries
   {
     // Not a monorepo app: the self-hosted VPS and home server keep their backups in the account's R2
     // (bucket vultr-backup). A resource needs an entry, so this hidden one exists only to name that
@@ -247,6 +226,7 @@ const ENTRIES: readonly EntryDef[] = [
 ];
 
 const WORKERS: readonly WorkerDef[] = [
+  // BEGIN service-catalog workers
   { script: 'mail-hero', entry: 'mail-hero', role: '收件、投递与 UI' },
   { script: 'todofy', entry: 'todofy', role: '网关与 UI' },
   { script: 'todofy-core', entry: 'todofy', role: '处理核心（TodofyCore）' },
@@ -256,8 +236,8 @@ const WORKERS: readonly WorkerDef[] = [
   { script: 'links', entry: 'links', role: '短链接跳转与启动器' },
   { script: 'watch', entry: 'watch', role: '网页监视与 UI' },
   { script: 'ziyixi-notion-publish', entry: 'notion-publish', role: '发布 Worker' },
-  // website/wrangler.toml: static assets only, so it shows up in the table only if it ever runs code.
   { script: 'ziyixi-website', entry: 'website', role: '静态网站（仅静态资源）' },
+  // END service-catalog workers
 ];
 
 const RESOURCES: readonly ResourceDef[] = [

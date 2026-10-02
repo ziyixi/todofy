@@ -1,5 +1,10 @@
 # `proto/`: protobuf as the IDL of the cross-app contracts and the apps' UI APIs
 
+
+Newsletter retains its locked external `ziyixi-protos` dependency during its VPS engine import; its internal
+versioned JSON deployment control is documented in `newsletter/docs/deployment-drain.md`. The rules below apply
+to interfaces owned by this root IDL, including the Cloudflare owner APIs.
+
 Protobuf is the interface definition language (IDL) of every interface the repository defines: the
 cross-app contracts and each app's UI API (the HTTP/JSON between its UI and its Worker, [HTTP
 APIs](#http-apis)). The wire stays JSON: each contract keeps its JSON bytes, and every API speaks the same

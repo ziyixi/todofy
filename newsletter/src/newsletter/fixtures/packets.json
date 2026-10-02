@@ -1,0 +1,32 @@
+[
+  {
+    "request_key": "demo-materials-v1",
+    "workflow_id": "demo-daily-research",
+    "content": {
+      "title": "一张图：为什么材料数量不等于信息质量",
+      "body": "这是虚构的流程示例（A=12；B=8；C=missing）：材料 A 有 12 条可核对记录，材料 B 有 8 条，材料 C 的数据尚未拿到。缺失值不能当成零；材料数量也不能用来直接衡量文章质量。正式版本的图表需要真实数据、时间范围、单位和出处，否则总编应当不画图。",
+      "sources": [{"id": "demo", "title": "离线虚构数据：A=12，B=8，C 缺失", "url": "https://example.org/demo-materials", "excerpt": "MOCK 数据：A=12；B=8；C=missing。非真实世界统计。", "access_scope": "dataset"}],
+      "tags": ["demo-chart", "fixture"]
+    }
+  },
+  {
+    "request_key": "demo-paper-v1",
+    "workflow_id": "demo-paper-watch",
+    "content": {
+      "title": "读论文：先问证据改变了什么",
+      "body": "这是一条演示用论文材料，不对应真实论文。未来的提炼会解释问题、方法、主要发现、证据边界，以及它为什么可能改变现有理解；只有摘要时明确说明，不把作者的结论冒充独立验证。优先高质量研究，但不把期刊名气当成真实性证明。",
+      "sources": [{"id": "demo", "title": "虚构论文占位来源", "url": "https://example.org/demo-paper", "excerpt": "演示摘要，无真实研究结果。", "access_scope": "abstract"}],
+      "tags": ["paper", "fixture"]
+    }
+  },
+  {
+    "request_key": "demo-world-v1",
+    "workflow_id": "demo-world-watch",
+    "content": {
+      "title": "兴趣以外：保留一个世界窗口",
+      "body": "这条演示材料检验跨领域版面。正式编稿不能只从已经投来的科技题材里排序：总编还要检查是否漏掉影响广泛的公共事件，补充可靠报道，并分清事实、推断与争议。没有足够新证据时宁可少写，不用栏目配额填充内容。",
+      "sources": [{"id": "demo", "title": "跨领域占位来源", "url": "https://example.org/demo-world", "excerpt": "仅为离线布局测试。", "access_scope": "metadata"}],
+      "tags": ["world", "fixture"]
+    }
+  }
+]

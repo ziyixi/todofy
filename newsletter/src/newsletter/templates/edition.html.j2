@@ -1,0 +1,177 @@
+{% set sans = "-apple-system,BlinkMacSystemFont,'PingFang SC','Microsoft YaHei','Noto Sans CJK SC',Arial,sans-serif" %}
+{% set serif = "Georgia,'Songti SC','Noto Serif CJK SC',STSong,serif" %}
+{% macro lines(value) %}{% for line in value.split('\n') %}{{ line }}{% if not loop.last %}<br>{% endif %}{% endfor %}{% endmacro %}
+<!doctype html>
+<html lang="zh-CN" xmlns="http://www.w3.org/1999/xhtml" xmlns:o="urn:schemas-microsoft-com:office:office">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <meta name="supported-color-schemes" content="light dark">
+  <title>{{ draft.subject }}</title>
+  <!--[if mso]><xml><o:OfficeDocumentSettings><o:PixelsPerInch>96</o:PixelsPerInch></o:OfficeDocumentSettings></xml><![endif]-->
+  <style>
+    table,td { mso-table-lspace:0pt; mso-table-rspace:0pt; }
+    body { margin:0; padding:0; -webkit-text-size-adjust:100%; -ms-text-size-adjust:100%; }
+    @media only screen and (max-width:600px) {
+      .outer-pad { padding:12px 0 !important; }
+      .inset { padding-left:22px !important; padding-right:22px !important; }
+      .masthead { font-size:38px !important; }
+      .headline { font-size:27px !important; line-height:1.45 !important; }
+      .feature-title { font-size:24px !important; }
+      .body-copy { font-size:16px !important; line-height:1.85 !important; }
+      .card-pad { padding:20px 18px !important; }
+    }
+    @media (prefers-color-scheme:dark) {
+      body,.outer { background-color:#171d1a !important; }
+      .paper { background-color:#212923 !important; }
+      .ink { color:#eef0e9 !important; }
+      .muted { color:#bac4b9 !important; }
+      .accent { color:#b8d8bc !important; }
+      .personal-panel,.reading-panel { background-color:#2b382d !important; }
+      .story-note { background-color:#29332b !important; }
+      .fixture { background-color:#3b3428 !important; color:#ecd4a1 !important; }
+      a { color:#b8d8bc !important; }
+    }
+  </style>
+</head>
+<body style="margin:0;padding:0;background-color:#f0f0eb;color:#202d25;font-family:{{ sans }};">
+<div style="display:none;font-size:1px;line-height:1px;max-height:0;max-width:0;opacity:0;overflow:hidden;mso-hide:all;">{% if is_fixture %}试刊样张 · 模拟材料，非真实新闻。{% endif %}{{ draft.introduction }}</div>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="#f0f0eb" class="outer" style="width:100%;background-color:#f0f0eb;">
+ <tr><td align="center" class="outer-pad" style="padding:32px 12px;">
+ <!--[if mso]><table role="presentation" width="660" cellpadding="0" cellspacing="0" border="0"><tr><td><![endif]-->
+ <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="#ffffff" class="paper" style="width:100%;max-width:660px;table-layout:fixed;background-color:#ffffff;">
+  <tr><td class="inset" style="padding:32px 40px 0;border-top:5px solid #244c38;">
+   <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="width:100%;border-bottom:1px solid #dce2d9;">
+    <tr><td valign="bottom" style="padding:0 0 22px;">
+     <p class="masthead ink" style="font-family:{{ serif }};font-size:43px;line-height:1.2;font-weight:700;letter-spacing:3px;color:#203628;margin:0 0 8px;">视野</p>
+     <p class="muted" style="font-family:{{ sans }};font-size:11px;line-height:1.5;letter-spacing:2px;color:#697669;margin:0;">THE DAILY BRIEF</p>
+    </td><td align="right" valign="bottom" style="padding:0 0 22px;">
+     <p class="ink" style="font-family:{{ sans }};font-size:13px;line-height:1.6;color:#334739;margin:0 0 5px;">{{ date_label }}</p>
+     <p class="muted" style="font-family:{{ sans }};font-size:12px;line-height:1.6;color:#697669;margin:0;">{{ weekday_label }} · 私人晨报</p>
+    </td></tr>
+   </table>
+  </td></tr>
+{% if is_fixture %}
+  <tr><td class="inset" style="padding:18px 40px 0;">
+   <p class="fixture" style="font-family:{{ sans }};font-size:12px;line-height:1.8;color:#7e572b;background-color:#f8f2e6;padding:9px 12px;margin:0;">试刊样张 · 模拟材料，非真实新闻 · 不代表真实账户事件</p>
+  </td></tr>
+{% endif %}
+  <tr><td class="inset" style="padding:28px 40px 30px;">
+   <p class="accent" style="font-family:{{ sans }};font-size:12px;line-height:1.6;letter-spacing:1px;color:#426449;font-weight:700;margin:0 0 12px;">今日导读</p>
+   <h1 class="headline ink" style="font-family:{{ serif }};font-size:32px;line-height:1.4;color:#202d25;font-weight:700;margin:0 0 16px;word-wrap:break-word;overflow-wrap:anywhere;">{{ draft.title }}</h1>
+   <p class="body-copy muted" style="font-family:{{ sans }};font-size:16px;line-height:1.9;color:#596858;margin:0;word-wrap:break-word;overflow-wrap:anywhere;">{{ lines(draft.introduction) }}</p>
+  </td></tr>
+{% for section in sections %}
+  <tr><td class="inset" style="padding:0 40px 30px;">
+   <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" class="story-panel" style="width:100%;table-layout:fixed;border-top:1px solid #dce2d9;">
+    <tr><td style="padding:23px 0 0;">
+   <p class="accent" style="font-family:{{ sans }};margin:0 0 11px;font-size:11px;line-height:1.7;font-weight:700;letter-spacing:1.3px;color:#426449;">{{ '%02d'|format(loop.index) }} &nbsp;/&nbsp; {{ section.label }}</p>
+   <h2 class="{% if section.kind == 'feature' %}feature-title {% endif %}ink" style="font-family:{{ serif }};font-size:{{ 27 if section.kind == 'feature' else 24 }}px;line-height:1.5;font-weight:700;color:#202d25;margin:0 0 17px;word-wrap:break-word;overflow-wrap:anywhere;">{{ section.heading }}</h2>
+{% for paragraph in section.paragraphs %}
+   <p class="body-copy ink" style="font-family:{{ sans }};font-size:16px;line-height:1.9;margin:0 0 15px;color:#334037;word-wrap:break-word;overflow-wrap:anywhere;">{{ lines(paragraph.text) }}{% for ref in paragraph.references %}<sup class="muted" style="font-family:{{ sans }};font-size:11px;line-height:0;color:#697669;margin-left:3px;">[{{ ref.number }}]</sup>{% endfor %}</p>
+{% endfor %}
+{% if section.limitations %}
+   <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="#f5f7f2" class="story-note" style="width:100%;table-layout:fixed;background-color:#f5f7f2;border-left:2px solid #c5d0bd;">
+    <tr><td style="padding:11px 14px;">
+     <p class="muted" style="font-family:{{ sans }};font-size:11px;line-height:1.7;font-weight:700;color:#61705d;letter-spacing:0.5px;margin:0 0 4px;">阅读边界</p>
+{% for limitation in section.limitations %}
+     <p class="muted" style="font-family:{{ sans }};font-size:12px;line-height:1.8;color:#61705d;margin:0;word-wrap:break-word;overflow-wrap:anywhere;">{{ lines(limitation) }}</p>
+{% endfor %}
+    </td></tr>
+   </table>
+{% endif %}
+    </td></tr>
+   </table>
+  </td></tr>
+{% endfor %}
+{% if chart %}
+  <tr><td class="inset" style="padding:0 40px 28px;">
+   <p class="accent" style="font-family:{{ sans }};border-top:2px solid #244c38;padding-top:22px;margin:0 0 11px;font-size:12px;line-height:1.7;font-weight:700;letter-spacing:1px;color:#426449;">一图看懂 / 数据视角</p>
+   <h2 class="ink" style="font-family:{{ serif }};font-size:25px;line-height:1.5;color:#202d25;margin:0 0 14px;word-wrap:break-word;overflow-wrap:anywhere;">{{ chart.question }}</h2>
+   <p class="body-copy ink" style="font-family:{{ sans }};font-size:16px;line-height:1.85;color:#334037;margin:0 0 16px;word-wrap:break-word;overflow-wrap:anywhere;">{{ chart.caption }}</p>
+   <img src="{{ chart_cid }}" alt="{{ chart.alt_text }}" width="580" border="0" style="display:block;width:100%;max-width:580px;height:auto;border:0;font-family:{{ sans }};font-size:14px;color:#596858;">
+   <p class="muted" style="font-family:{{ sans }};font-size:12px;line-height:1.8;margin:10px 0 13px;color:#697669;word-wrap:break-word;overflow-wrap:anywhere;">{{ chart.metadata }}<br>{% if chart.kind == 'line' %}缺失值断线，不作零值处理。{% else %}条形以零为基线；缺失不代表零。{% endif %}</p>
+   <p class="muted" style="font-family:{{ sans }};font-size:12px;line-height:1.8;margin:0 0 13px;color:#697669;word-wrap:break-word;overflow-wrap:anywhere;">{{ chart.source_note }}</p>
+   <table aria-label="图表原始数据" width="100%" cellpadding="0" cellspacing="0" border="0" style="width:100%;table-layout:fixed;border-collapse:collapse;">
+    <tr><th scope="col" align="left" class="muted" style="font-family:{{ sans }};font-size:12px;line-height:1.7;color:#697669;padding:8px 0;border-bottom:1px solid #dce2d9;font-weight:400;">观察项</th><th scope="col" align="right" class="muted" style="font-family:{{ sans }};font-size:12px;line-height:1.7;color:#697669;padding:8px 0;border-bottom:1px solid #dce2d9;font-weight:400;word-wrap:break-word;overflow-wrap:anywhere;">{{ chart.unit }}</th></tr>
+{% for row in chart.rows %}
+    <tr><th scope="row" align="left" class="ink" style="font-family:{{ sans }};font-size:13px;line-height:1.8;color:#334037;padding:7px 8px 7px 0;border-bottom:1px solid #edf0e9;font-weight:400;word-wrap:break-word;overflow-wrap:anywhere;">{{ row.label }}</th><td align="right" class="ink" style="font-family:{{ sans }};font-size:13px;line-height:1.8;color:#334037;padding:7px 0;border-bottom:1px solid #edf0e9;word-wrap:break-word;overflow-wrap:anywhere;">{% if row.value is not none %}{{ row.value }}{% else %}缺失（{{ row.missing_reason }}）{% endif %}{% for ref in row.references %}<sup style="font-family:{{ sans }};font-size:11px;line-height:0;color:#697669;">[{{ ref.number }}]</sup>{% endfor %}</td></tr>
+{% endfor %}
+   </table>
+{% for limitation in chart.limitations %}
+   <p class="muted" style="font-family:{{ sans }};font-size:12px;line-height:1.8;color:#697669;margin:12px 0 0;">阅读边界：{{ limitation }}</p>
+{% endfor %}
+  </td></tr>
+{% endif %}
+{% if reading %}
+  <tr><td class="inset" style="padding:0 40px 28px;">
+   <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="#f6f3eb" class="reading-panel" style="width:100%;table-layout:fixed;background-color:#f6f3eb;">
+    <tr><td class="card-pad" style="padding:23px 24px;">
+     <p class="muted" style="font-family:{{ sans }};font-size:12px;line-height:1.7;color:#76694e;letter-spacing:1px;margin:0 0 10px;">研究介绍</p>
+     <h2 class="ink" style="font-family:{{ serif }};font-size:21px;line-height:1.5;color:#243c2b;margin:0 0 14px;word-wrap:break-word;overflow-wrap:anywhere;">{{ reading.reference.title }}</h2>
+{% for paragraph in reading.paragraphs %}
+     <p class="body-copy ink" style="font-family:{{ sans }};font-size:15px;line-height:1.9;color:#334739;margin:0 0 12px;word-wrap:break-word;overflow-wrap:anywhere;">{{ lines(paragraph) }}</p>
+{% endfor %}
+{% if reading.supporting_references %}
+     <p class="muted" style="font-family:{{ sans }};font-size:12px;line-height:1.8;color:#76694e;margin:0 0 12px;">补充证据：{% for ref in reading.supporting_references %}[{{ ref.number }}]{% endfor %}（见文末来源）</p>
+{% endif %}
+     <p class="muted" style="font-family:{{ sans }};font-size:12px;line-height:1.8;color:#76694e;border-top:1px solid #e1dccf;padding-top:12px;margin:4px 0 0;word-wrap:break-word;overflow-wrap:anywhere;"><a href="{{ reading.reference.url }}" rel="noopener noreferrer" style="font-family:{{ sans }};font-size:12px;line-height:1.8;color:#596858;text-decoration:underline;word-wrap:break-word;overflow-wrap:anywhere;">原文与方法 [{{ reading.reference.number }}]</a> · {{ reading.reference.access_scope }}{% if reading.reference.published_at %} · {{ reading.reference.published_at }}{% endif %}</p>
+    </td></tr>
+   </table>
+  </td></tr>
+{% endif %}
+  <tr><td class="inset" style="padding:0 40px 28px;">
+   <p class="muted" style="font-family:{{ sans }};border-top:1px solid #dce2d9;padding-top:20px;font-size:12px;line-height:1.7;color:#697669;margin:0 0 12px;font-weight:600;">来源与核对</p>
+{% for ref in references %}
+   <p class="muted" style="font-family:{{ sans }};font-size:12px;line-height:1.85;color:#697669;margin:0 0 7px;word-wrap:break-word;overflow-wrap:anywhere;">[{{ ref.number }}] <a href="{{ ref.url }}" rel="noopener noreferrer" style="font-family:{{ sans }};font-size:12px;line-height:1.85;color:#596858;text-decoration:underline;word-wrap:break-word;overflow-wrap:anywhere;">{{ ref.title }}</a> · {{ ref.access_scope }}{% if ref.published_at %} · {{ ref.published_at }}{% endif %}</p>
+{% endfor %}
+{% for limitation in draft.limitations %}
+   <p class="muted" style="font-family:{{ sans }};font-size:12px;line-height:1.8;color:#697669;margin:15px 0 0;word-wrap:break-word;overflow-wrap:anywhere;">本期说明：{{ limitation }}</p>
+{% endfor %}
+  </td></tr>
+{% if personal %}
+  <tr><td class="inset" style="padding:0 40px 30px;">
+   <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="#f2f5ee" class="personal-panel" style="width:100%;table-layout:fixed;background-color:#f2f5ee;border-top:2px solid #7b946b;">
+    <tr><td class="card-pad" style="padding:24px;">
+     <p class="accent" style="font-family:{{ sans }};font-size:11px;line-height:1.7;letter-spacing:1.5px;color:#426449;font-weight:700;margin:0 0 8px;">TODOFY / 与你有关</p>
+     <h2 class="ink" style="font-family:{{ serif }};font-size:23px;line-height:1.5;color:#243c2b;margin:0 0 10px;">{{ personal.title }}</h2>
+{% if personal.meta %}
+     <p class="muted" style="font-family:{{ sans }};font-size:12px;line-height:1.8;color:#61705d;margin:0 0 14px;">{{ personal.meta }}</p>
+{% endif %}
+{% if personal.summary %}
+     <p class="body-copy ink" style="font-family:{{ sans }};font-size:15px;line-height:1.9;color:#334739;margin:0 0 14px;word-wrap:break-word;overflow-wrap:anywhere;">{{ lines(personal.summary) }}</p>
+{% endif %}
+{% for item in personal['items'] %}
+     <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="width:100%;table-layout:fixed;">
+      <tr><td width="30" valign="top" style="width:30px;padding:15px 0;{% if not loop.first %}border-top:1px solid #dce3d5;{% endif %}">
+       <p class="accent" style="font-family:{{ serif }};font-size:19px;line-height:1.5;color:#617c53;margin:0;">{{ '%02d'|format(item.rank) }}</p>
+      </td><td valign="top" style="padding:15px 0;{% if not loop.first %}border-top:1px solid #dce3d5;{% endif %}">
+       <h3 class="ink" style="font-family:{{ sans }};font-size:16px;line-height:1.6;color:#243c2b;font-weight:600;margin:0 0 6px;word-wrap:break-word;overflow-wrap:anywhere;">{{ item.title }}</h3>
+       <p class="muted" style="font-family:{{ sans }};font-size:14px;line-height:1.85;color:#596858;margin:0;word-wrap:break-word;overflow-wrap:anywhere;">{{ lines(item.detail) }}</p>
+      </td></tr>
+     </table>
+{% endfor %}
+{% if personal.limitations %}
+     <p class="muted" style="font-family:{{ sans }};font-size:12px;line-height:1.8;color:#61705d;margin:12px 0 0;word-wrap:break-word;overflow-wrap:anywhere;">{{ personal.limitations }}</p>
+{% endif %}
+{% if personal.provenance %}
+     <p class="muted" style="font-family:{{ sans }};font-size:11px;line-height:1.8;color:#61705d;margin:8px 0 0;word-wrap:break-word;overflow-wrap:anywhere;">{{ personal.provenance }}</p>
+{% endif %}
+    </td></tr>
+   </table>
+  </td></tr>
+{% endif %}
+  <tr><td class="inset" style="padding:22px 40px 27px;border-top:1px solid #dce2d9;">
+   <p class="ink" style="font-family:{{ serif }};font-size:17px;line-height:1.6;color:#334739;margin:0 0 5px;">少一点信息，多一点理解。</p>
+   <p class="muted" style="font-family:{{ sans }};font-size:11px;line-height:1.8;letter-spacing:1px;color:#697669;margin:0;">视野 · THE DAILY BRIEF{% if is_fixture %} · MOCK 试刊{% endif %}</p>
+{% if usage_footer %}
+   <p class="muted" style="font-family:{{ sans }};font-size:10px;line-height:1.7;color:#697669;text-align:right;margin:12px 0 0;word-wrap:break-word;overflow-wrap:anywhere;">{{ usage_footer }}</p>
+{% endif %}
+  </td></tr>
+ </table>
+ <!--[if mso]></td></tr></table><![endif]-->
+ </td></tr>
+</table>
+</body>
+</html>

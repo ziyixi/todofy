@@ -1,7 +1,8 @@
 # Cross-app contracts
 
-The only files the apps (`mail-hero/`, `todofy/`, `dashboard/`, `lab/`) share. No app imports another; each reads
-these files.
+Cross-app semantics, schemas, fixtures and dependency-free value rules used by Mail Hero, Todofy, Home, Lab
+and Watch. No app imports another. The IDL and shared authentication runtime live separately in `proto/`
+and `packages/`; the [architecture guide](../docs/architecture.md) explains those boundaries.
 
 The protobuf IDL of these contracts lives in [`../proto/`](../proto/README.md): `ops-v1`, `task-intent-v1` and
 `mail-received-v1` (`proto/mailhero/webhook/v1`), whose sides all run on the generated code. It does not change the
@@ -12,7 +13,7 @@ hand-written, checked against the codec on every fixture.
 | Directory | Between | Owner |
 | --- | --- | --- |
 | `mail-received-v1/` | Mail Hero → its webhook consumer (Todofy) | Mail Hero |
-| `ops-v1/` | each app ↔ the ops dashboard `home` in [`dashboard/`](../dashboard/) (`Ops` entrypoints, canary, guard, digest) | Mail Hero, Todofy and Lab (`status()`/`setGuard()` only); see [`ops-v1/README.md`](ops-v1/README.md) |
+| `ops-v1/` | Mail Hero, Todofy, Lab and Watch ↔ the ops dashboard `home` in [`dashboard/`](../dashboard/) (`Ops` entrypoints, canary, guard, digest) | Each service owns its answers; Lab and Watch expose `status()`/`setGuard()` only; see [`ops-v1/README.md`](ops-v1/README.md) |
 | `task-intent-v1/` | a proposing app (Lab, the watch app) → Todofy's `Ops` entrypoint: "create these Todoist tasks", idempotent per intent | Todofy; see [`task-intent-v1/README.md`](task-intent-v1/README.md) |
 
 ## `mail-received-v1/`
@@ -84,9 +85,12 @@ dashboard's own runtime suite (`dashboard/worker/test/runtime/`, in `Dashboard c
 Schema, the value rules the IDL cannot express (`task-intent-v1.ts`) and fixtures for
 `proposeTasks`/`taskIntentStatus` on Todofy's `Ops` entrypoint (the types are generated from
 `proto/todofy/taskintent/v1/task_intent.proto`):
-another app (Lab) proposes up to 30 Todoist tasks under its own idempotency key and Todofy, the only
+another app (Lab or Watch) proposes up to 30 Todoist tasks under its own idempotency key and Todofy, the only
 Todoist writer, creates them from its ledger. Fixtures are checked with `ops-v1/validate.mjs` by
 `lab/worker/test/task-intent-contract.test.ts` and by Todofy's `tests/unit/test_task_intent_contract.py`
 (Python `jsonschema`), both in the `Contracts` job, which also check that each language's generated types and
 wire JSON codec agree with the schema on every fixture; Lab's `intent.test.ts` checks every intent it builds and
 maps every result fixture, and its workerd suite sends real intents to a stub Todofy that validates them.
+Watch's `watch/worker/test/todofy.test.ts` pins the digest and urgent intents against the watch fixtures,
+and `ops-golden.test.ts` pins its status/guard answers. These checks also run in `Contracts`; the app's
+runtime suite checks its binding and durable notification state with synthetic sites and a stub consumer.

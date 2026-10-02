@@ -1,0 +1,42 @@
+# Public metadata only. Hosts/resources remain in this app's committed Wrangler configs.
+version = 1
+id = "watch"
+target = "cloudflare"
+
+[[workers]]
+config = "watch/wrangler.toml"
+entry = "watch"
+role = "网页监视与 UI"
+position = 8
+
+[[entries]]
+id = "watch"
+name = "网页监视"
+description = "网页、订阅与接口的变化收件箱"
+group = "apps"
+icon = "eye"
+# Avoid the danger color and the adjacent violet/slate tiles.
+accent = "blue"
+access = true
+# The shared code exists in ops-v1 but this app never raises it.
+app_only_signals = ["maintenance_mode"]
+order = 7
+worker = "watch"
+url_path = "/"
+position = 6
+[entries.status]
+# Counts only: no watch title, URL or page content leaves the Ops entrypoint.
+type = "ops_v1"
+binding = "WATCH"
+guard = true
+[entries.tile_metric]
+kind = "counter"
+name = "changes_new"
+
+[[access]]
+key = "watch"
+kind = "owner"
+worker = "watch"
+name = "watch"
+paths = [""]
+session = "24h"

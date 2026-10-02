@@ -1,0 +1,43 @@
+# Topic publication recipe. Delivery, audience, privacy and idempotency stay in code.
+version: 1
+id: daily-topics
+nodes:
+  - id: history
+    type: history
+  - id: feeds
+    type: api_feed
+    on_error: continue
+    params: {timeout_seconds: 45}
+  - id: discovery
+    type: discovery
+    on_error: continue
+    needs: [history, feeds]
+    map: {from: run.instructions, max_items: 8}
+    params: {timeout_seconds: 150}
+  - id: candidates
+    type: deduplicate
+    needs: [history, feeds, discovery]
+    params: {max_candidates: 30}
+  - id: selection
+    type: selection
+    needs: [history, candidates]
+    params: {max_tasks: 8, timeout_seconds: 150}
+  - id: story_plan
+    type: story_plan
+    needs: [history, candidates, selection]
+    params: {max_deep: 4}
+  - id: briefs
+    type: story_brief
+    on_error: continue
+    needs: [history, candidates, story_plan]
+    map: {from: story_plan.brief_tasks, max_items: 12}
+    params: {timeout_seconds: 300}
+  - id: deep
+    type: story_deep
+    on_error: continue
+    needs: [history, candidates, story_plan, briefs]
+    map: {from: story_plan.deep_tasks, max_items: 4}
+    params: {timeout_seconds: 420}
+  - id: publish
+    type: publish
+    needs: [story_plan, briefs, deep]

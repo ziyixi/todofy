@@ -1,0 +1,59 @@
+# Public metadata only. Hosts/resources remain in this app's committed Wrangler configs.
+version = 1
+id = "website"
+target = "cloudflare"
+
+[[workers]]
+config = "website/relay/wrangler.toml"
+entry = "notion-publish"
+role = "发布 Worker"
+position = 9
+
+[[workers]]
+# Assets-only requests are not Worker invocations; status comes from a public probe.
+config = "website/wrangler.toml"
+entry = "website"
+role = "静态网站（仅静态资源）"
+position = 10
+
+[[entries]]
+id = "website"
+name = "个人网站"
+description = "ziyixi.science，内容来自 Notion"
+group = "sites"
+icon = "globe"
+accent = "violet"
+access = false
+app_only_signals = []
+order = 1
+worker = "ziyixi-website"
+# Wrangler's first Custom Domain is www, the canonical certificate boundary.
+url_path = "/"
+position = 7
+[entries.status]
+# One small public JSON GET; Home records code/latency without reading its body.
+type = "public_http"
+expect = [200]
+enabled = true
+path = "/build-info.json"
+[entries.tile_metric]
+kind = "latency"
+
+[[entries]]
+id = "notion-publish"
+name = "Notion 发布"
+description = "把 Notion 内容发布到网站"
+group = "services"
+icon = "upload-cloud"
+accent = "slate"
+access = false
+app_only_signals = []
+order = 1
+worker = "ziyixi-notion-publish"
+position = 8
+[entries.status]
+# Existing Q13 rule: no request for 26 hours means attention, not a failed publish.
+type = "analytics"
+max_idle_hours = 26
+[entries.tile_metric]
+kind = "last_active"

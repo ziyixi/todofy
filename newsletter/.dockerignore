@@ -1,0 +1,28 @@
+# Allowlist: no local keys, auth, database, old build artifacts, or research in images.
+**
+!pyproject.toml
+!uv.lock
+!.python-version
+!MANIFEST.in
+!src/
+!src/newsletter/
+!src/newsletter/**
+**/__pycache__/
+**/*.pyc
+# Reapply exclusions after the source allowlist, even if a secret is misplaced there.
+**/.env*
+**/.codex-auth/
+**/codex-auth/
+**/auth.json*
+**/credentials*.json
+**/*.pem
+**/*.key
+**/*.p12
+**/*.pfx
+**/id_rsa
+**/id_ed25519
+**/*.sqlite*
+**/*.db
+**/*.db-shm
+**/*.db-wal
+**/*.eml

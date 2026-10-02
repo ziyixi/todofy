@@ -1,6 +1,6 @@
 # Home dashboard: design
 
-The Worker `home` on `home.ziyixi.science` is the owner's single ops view for Mail Hero and Todofy,
+The Worker `home` on `home.ziyixi.science` is the owner's operations view and launcher, with Ops bindings to Mail Hero, Todofy, Lab and Watch,
 and it runs three jobs: a daily delivery-and-processing canary (scope in §5.4) with a unified ops
 digest, quota guardrails, and the
 cross-app contract tests of `contracts/ops-v1`. It talks to the apps only through their `Ops`
@@ -9,8 +9,9 @@ entrypoints (service bindings) and never imports `mail-hero/` or `todofy/` code.
 synthetic test data only, no secrets in logs.
 
 Status: the Worker, the UI, their tests, the committed production config and the CI jobs (§10) are implemented
-and pass locally with synthetic data. Nothing is deployed; [`verification.md`](verification.md) records
-what was checked and what is still open in production. Setup: [`setup.md`](setup.md); limits with
+and have recorded local checks with synthetic data. The service has since been deployed; [`verification.md`](verification.md)
+and the root [`HANDOFF.md`](../../HANDOFF.md) record dated checks and outstanding production verification.
+This design page is not a fresh production check. Setup: [`setup.md`](setup.md); limits with
 sources: [`limits.md`](limits.md).
 
 **Superseded parts (v2, then dashboard.ui.v1):** the one-page UI, `GET /api/v1/overview` and the other
@@ -26,7 +27,8 @@ unchanged and apply to its methods (OverrideGuard `POST /api/v1/guard:override`,
 | Path | Owner (build step) | Contents |
 | --- | --- | --- |
 | `worker/` | worker | TypeScript Worker + SQLite Durable Object; `package.json`/lockfile, `tsconfig.json` (Todofy gateway flags + `erasableSyntaxOnly`), `eslint.config.js` (strictTypeChecked), `vitest.config.ts` (Node unit tests), `vitest.runtime.config.ts` (workerd suite) |
-| `worker/src/api-types.ts` | worker (shared) | Owner API types and constants; the UI imports it by relative path. Change it only together with the UI |
+| `proto/dashboard/ui/v1/` | interface | Owner API IDL; Worker/UI use generated types and the shared HTTP runtime |
+| `worker/src/api-types.ts` | worker | Internal view/tick types plus the small transport and legacy envelopes; not a duplicate owner API description |
 | `worker/test/runtime/` | worker | Miniflare harness (`harness.ts`, own `tsconfig.json` with Node types), stub apps from `test/stubs/ops-stub.js`; `cpu.test.ts` holds the cron tick's CPU in milliseconds of `tools/workerd-cpu`'s reference machine, the medians of three fresh isolates (the isolate's first tick below 16, 8.4-10.3 on the reference machine and 11.1-12.4 on GitHub runners; a warm tick below 4) |
 | `wrangler.toml` | worker | the production config (top level = production; run wrangler from `worker/` with `--config ../wrangler.toml`) |
 | `deploy/` | worker | `deploy-vars.mjs` (what the deploy adds) and `test/*.test.mjs` (`node --test`) |
@@ -371,7 +373,7 @@ last of the 20 places): it never changes the level and is not a digest item, so 
 Todofy (ops-v1 reports carry warning and critical items only). The stored items are as old as the last tick or
 refresh, so the overview judges the ticks at read time: `tick_stale` is added when no tick completed
 for 75 min (cron removed, or every tick failing), which turns a clean banner into a warning. `items`
-lists `{source, code, severity}` (≤ 20), so the same code from both apps stays two entries; the UI
+lists `{source, code, severity}` (≤ 20), so the same code from different apps stays distinct entries; the UI
 labels each as "<app>：<label>" and links it to the card that explains it.
 
 ## 6. Owner API
@@ -608,7 +610,7 @@ entry `worker/src/index.ts`, assets `web/dist`, the Durable Object, its migratio
 the cron. `deploy/test/wrangler-config.test.mjs` reads it with the pinned wrangler's own
 `experimental_readRawConfig` (from `worker/node_modules`, so `npm ci` in `worker/` comes first) and checks
 the known keys, formats and bounds; `.github/scripts/test_wrangler_configs.py` checks that its host differs
-from both apps' hosts and that the registry's app links match them. What is never committed is added at
+from the registered apps' hosts and that the registry's app links match them. What is never committed is added at
 deploy by `deploy/deploy-vars.mjs` (Mail Hero's style; messages name settings, never print values):
 
 | Input | Rule | Output |
@@ -625,7 +627,10 @@ into `$RUNNER_TEMP`); `exec -- <wrangler deploy …>` validates, then runs the c
 appended, and refuses `--env`, `--keep-vars`, the caller's own `--var` and any other config. A missing
 value fails the deploy, because a deploy without a var deletes it.
 
-CI (`.github/workflows/ci.yml`, pinned action SHAs as today):
+Current CI is specified by the root [release reference](../../docs/ci-cd.md),
+`.github/workflows/ci.yml` and its reusable workflows. The following bullets record the original dashboard
+integration, including the superseded three-app maps; they are history, not the current dependency graph.
+Action SHAs and job names must be read from the current workflow.
 
 - `ci_changes.py`: keys `dashboard_check`, `dashboard_deploy`; `dashboard/` checks and deploys the
   dashboard; `PACKAGE_USERS["edge-auth"]` gains `dashboard` (the `file:` consistency test also scans

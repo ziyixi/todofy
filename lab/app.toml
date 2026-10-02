@@ -1,0 +1,41 @@
+# Public metadata only. Hosts/resources remain in this app's committed Wrangler configs.
+version = 1
+id = "lab"
+target = "cloudflare"
+
+[[workers]]
+config = "lab/wrangler.toml"
+entry = "lab"
+role = "论文雷达与 UI"
+position = 5
+
+[[entries]]
+id = "lab"
+name = "论文雷达"
+description = "arXiv 每日推荐，划卡片挑论文"
+group = "apps"
+icon = "flask-conical"
+accent = "violet"
+access = true
+# Lab never raises maintenance_mode; keep the shared ops-v1 code off its tile.
+app_only_signals = ["maintenance_mode"]
+# Order 3 belongs to the synthetic link-only test entry in Home's v2 fixture.
+order = 4
+worker = "lab"
+url_path = "/"
+position = 3
+[entries.status]
+type = "ops_v1"
+binding = "LAB"
+guard = true
+[entries.tile_metric]
+kind = "counter"
+name = "liked_7d"
+
+[[access]]
+key = "lab"
+kind = "owner"
+worker = "lab"
+name = "Lab"
+paths = [""]
+session = "24h"

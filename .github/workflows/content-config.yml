@@ -1,0 +1,108 @@
+name: Newsletter Content Config
+
+on:
+  push:
+    branches: [main]
+    paths: ['newsletter/content-config/**']
+  pull_request:
+    branches: [main]
+    paths:
+      - 'newsletter/content-config/**'
+      - '.github/workflows/content-config.yml'
+      - 'newsletter/scripts/publish_content_config.py'
+  workflow_run:
+    workflows: [CI and deploy]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Publication is serialized. An old run also checks the current main SHA before
+# updating published; a late engine build must never roll configuration back.
+concurrency:
+  group: newsletter-content-config-${{ github.event_name == 'pull_request' && github.event.pull_request.number || 'publish' }}
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    if: github.event_name != 'workflow_run' || (github.event.workflow_run.event == 'push' && github.event.workflow_run.head_branch == 'main' && github.event.workflow_run.conclusion == 'success')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      validated: ${{ steps.validate.outputs.validated }}
+      revision: ${{ steps.plan.outputs.revision }}
+    steps:
+      # Only the default branch's tooling executes on the runner. Candidate PR
+      # files are mounted as read-only data into an already-tested service image.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+          path: tools
+          persist-credentials: false
+      - name: Select an already-tested compatible engine
+        id: plan
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: python3 tools/newsletter/scripts/publish_content_config.py plan
+      - name: Defer mixed engine/config changes to Service CI
+        if: steps.plan.outputs.ready != 'true'
+        run: |
+          echo '::notice::No compatible released engine yet, or this run is stale. Mixed changes are validated in the candidate image by CI and deploy; successful main CI retries publication automatically.'
+          echo 'No configuration published. See CI and deploy for candidate-engine validation.' >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: steps.plan.outputs.ready == 'true'
+        with:
+          ref: ${{ steps.plan.outputs.revision }}
+          path: candidate
+          persist-credentials: false
+          sparse-checkout: newsletter/content-config
+      - name: Build and validate only inside the tested image
+        if: steps.plan.outputs.ready == 'true'
+        id: validate
+        env:
+          ENGINE_SHA: ${{ steps.plan.outputs.engine_sha }}
+          REVISION: ${{ steps.plan.outputs.revision }}
+        run: |
+          python3 tools/newsletter/scripts/publish_content_config.py validate \
+            --image "ghcr.io/ziyixi/todofy-newsletter:service-${ENGINE_SHA}" \
+            --engine-sha "$ENGINE_SHA" --revision "$REVISION" \
+            --source "$GITHUB_WORKSPACE/candidate/newsletter/content-config" \
+            --output "$RUNNER_TEMP/validated-content-config" --pull
+          echo 'validated=true' >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: steps.validate.outputs.validated == 'true'
+        with:
+          name: content-config-${{ github.run_id }}
+          path: ${{ runner.temp }}/validated-content-config/
+          retention-days: 1
+          if-no-files-found: error
+
+  publish:
+    needs: validate
+    if: github.event_name != 'pull_request' && needs.validate.outputs.validated == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+          path: tools
+          persist-credentials: false
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: content-config-${{ github.run_id }}
+          path: ${{ runner.temp }}/validated-content-config
+      - name: Publish one immutable bundle without deploying or sending
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          REVISION: ${{ needs.validate.outputs.revision }}
+        run: |
+          python3 tools/newsletter/scripts/publish_content_config.py publish \
+            --revision "$REVISION" --directory "$RUNNER_TEMP/validated-content-config"

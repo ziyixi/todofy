@@ -1,0 +1,31 @@
+name: Trigger Newsletter Service
+
+# No schedule or send job: the external server scheduler owns the cadence.
+# It may call POST /v1/runs directly or dispatch this preparation-only workflow.
+on:
+  workflow_dispatch:
+    inputs:
+      issue_date:
+        description: "Optional YYYY-MM-DD (default: today's America/Los_Angeles date)"
+        required: false
+        type: string
+  repository_dispatch:
+    types: [newsletter-prepare]
+
+permissions:
+  contents: read
+
+jobs:
+  prepare:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 2
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Trigger collection and preview only
+        env:
+          NEWSLETTER_SERVICE_URL: ${{ vars.NEWSLETTER_SERVICE_URL }}
+          NEWSLETTER_EDITOR_TOKEN: ${{ secrets.NEWSLETTER_EDITOR_TOKEN }}
+          NEWSLETTER_ISSUE_DATE: ${{ inputs.issue_date || github.event.client_payload.issue_date }}
+          # Retries of this workflow run keep the same key.
+          NEWSLETTER_REQUEST_KEY: gh-${{ github.run_id }}
+        run: python3 newsletter/scripts/trigger_run.py

@@ -1,0 +1,52 @@
+# Public metadata only. Hosts/resources remain in this app's committed Wrangler configs.
+version = 1
+id = "flowday"
+target = "cloudflare"
+
+[[workers]]
+config = "flowday/wrangler.toml"
+entry = "flowday"
+role = "页面、API 与 PWA 文件"
+position = 6
+
+[[entries]]
+id = "flowday"
+name = "FlowDay"
+description = "Todoist 时间块、计时与回顾"
+group = "apps"
+icon = "calendar-clock"
+accent = "teal"
+access = true
+app_only_signals = []
+order = 5
+worker = "flowday"
+url_path = "/"
+position = 4
+[entries.status]
+# F6 must move this probe before retiring flowday-bypass. Require 2xx + manifest media type.
+# The owner host is behind Access; exact /pwa/* assets are intentionally anonymous.
+type = "public_http"
+expect = [200]
+content_type = "application/manifest+json"
+outside_access = true
+error_rate = true
+enabled = true
+path = "/pwa/manifest.webmanifest"
+[entries.tile_metric]
+kind = "latency"
+
+[[access]]
+key = "flowday"
+kind = "flowday"
+worker = "flowday"
+name = "flowday"
+paths = [""]
+session = "168h"
+
+[[access]]
+key = "flowday-bypass"
+kind = "flowday"
+worker = "flowday"
+name = "flowday-bypass"
+paths = ["/pwa/*"]
+session = "6h"

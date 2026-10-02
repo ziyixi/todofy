@@ -1,0 +1,34 @@
+# Public metadata only. Hosts/resources remain in this app's committed Wrangler configs.
+version = 1
+id = "dashboard"
+target = "cloudflare"
+
+[[workers]]
+config = "dashboard/wrangler.toml"
+entry = "home"
+role = "本面板"
+position = 4
+
+[[entries]]
+# No Home tile for Home itself; its Cloudflare row and tick_stale signal remain visible.
+id = "home"
+name = "个人控制台"
+description = "本页面：巡检、用量、金丝雀与摘要"
+group = "hidden"
+icon = "gauge"
+accent = "slate"
+access = true
+app_only_signals = []
+order = 1
+worker = "home"
+position = 10
+[entries.status]
+type = "self"
+
+[[access]]
+key = "home"
+kind = "owner"
+worker = "home"
+name = "Home"
+paths = [""]
+session = "24h"

@@ -17,7 +17,8 @@ Outputs (GITHUB_OUTPUT, "true"/"false"):
   base              not a flag: the commit the diff started from (empty when everything runs), which
                     "Proto checks" compares the IDL with.
   todofy_deploy, mail_hero_deploy, dashboard_deploy, website_deploy, lab_deploy, flowday_deploy, links_deploy,
-  watch_deploy      the app, a shared package it compiles in, or a contract file it bundles changed
+  watch_deploy, newsletter_deploy
+                    the app, a shared package it compiles in, or a contract file it bundles changed
                     (deploy jobs also require refs/heads/main)
   website_relay_deploy
                     website/relay/ (the Notion relay Worker, its own wrangler.toml) changed: deploy
@@ -68,6 +69,8 @@ so a change whose run was cancelled or failed is checked (and deployed) again by
   production. A package missing from PACKAGE_USERS counts as used by every app (fail safe; the tests
   run by the Changes job also fail until PACKAGE_USERS matches the file: dependencies). A file
   directly under packages/ (a README) is root documentation: gate only.
+Newsletter remains an independent VPS image. newsletter_deploy publishes its tested image to GHCR; it does
+not upgrade the server. It still uses its locked external ziyixi-protos dependency, not the root proto runtime.
 A push to main reuses a green branch run of the same commit (find_reusable): when a completed push run of
 this workflow on another branch has the same head SHA, concluded success, and its Changes, CI gate and
 every check job this push needs (CHECK_JOBS) succeeded, the check outputs are all false (those jobs are
@@ -94,19 +97,14 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from collections.abc import Callable, Iterable
+from pathlib import Path
 
-APPS = ("todofy", "mail-hero", "dashboard", "website", "lab", "flowday", "links", "watch")
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "tools" / "service-catalog"))
+from catalog import load_catalog  # noqa: E402
+
+APPS = tuple(load_catalog(Path(__file__).resolve().parents[2]).apps)
 # The output key prefix of each app ("<prefix>_check", "<prefix>_deploy").
-PREFIX = {
-    "todofy": "todofy",
-    "mail-hero": "mail_hero",
-    "dashboard": "dashboard",
-    "website": "website",
-    "lab": "lab",
-    "flowday": "flowday",
-    "links": "links",
-    "watch": "watch",
-}
+PREFIX = {app: app.replace("-", "_") for app in APPS}
 # Apps that are checked but never deployed by CI (no "<prefix>_deploy" output): a new app until its Worker has its
 # Cloudflare resources and a deploy job, as the watch app was until W2 (watch/docs/design.md section 11), the links app
 # until L2 and FlowDay until F2. Empty since W2.
@@ -120,6 +118,7 @@ KEYS = (
     "flowday_check",
     "links_check",
     "watch_check",
+    "newsletter_check",
     "contracts",
     "packages",
     "infra",
@@ -133,6 +132,7 @@ KEYS = (
     "flowday_deploy",
     "links_deploy",
     "watch_deploy",
+    "newsletter_deploy",
 )
 DISPATCH = {
     "both": ("todofy", "mail-hero"),
@@ -145,11 +145,12 @@ DISPATCH = {
     "flowday": ("flowday",),
     "links": ("links",),
     "watch": ("watch",),
+    "newsletter": ("newsletter",),
 }
 # The website's Notion relay Worker deploys on its own (website_relay_deploy).
 RELAY = "website/relay/"
 # Apps that neither provide nor consume a contract: their own changes do not run Contracts.
-NO_CONTRACTS = {"website", "flowday", "links"}
+NO_CONTRACTS = {"website", "flowday", "links", "newsletter"}
 # The OpenTofu configuration (infra/README.md) and its plan-summary tool: checked here without a token; only
 # .github/workflows/infra.yml plans it against Cloudflare, and only the manually dispatched infra-apply.yml applies it.
 INFRA = ("infra/", "tools/infra-plan-summary/")
@@ -249,7 +250,7 @@ BUNDLED_BY = {
 }
 
 # Outputs that describe a reused branch run (strings, one line each).
-REUSE_KEYS = ("checks_reused", "reused_run_url", "reused_jobs")
+REUSE_KEYS = ("checks_reused", "reused_run_url", "reused_jobs", "reused_run_id")
 # The diff base (a commit, or empty when everything runs): the base "Proto checks" compares the IDL with.
 BASE_KEY = "base"
 # The check outputs, and the jobs (by their names in ci.yml) that must have succeeded in a reused run when
@@ -264,6 +265,7 @@ CHECK_JOBS = {
     "flowday_check": ("FlowDay checks",),
     "links_check": ("Links checks",),
     "watch_check": ("Watch checks",),
+    "newsletter_check": ("Newsletter checks", "Newsletter image checks"),
     "contracts": ("Contracts",),
     "packages": ("Shared packages",),
     "infra": ("Infra checks",),
@@ -333,6 +335,8 @@ def proto_users(paths: list[str]) -> tuple[set[str], set[str]]:
 def classify(paths: Iterable[str]) -> dict[str, bool]:
     paths = [path for path in paths if path]
     apps = {app for app in APPS if any(path.startswith(f"{app}/") for path in paths)}
+    # Catalog metadata is verified/generated before the gate; an app.toml itself is not bundled.
+    direct_deploys = {app for app in apps if any(path.startswith(f"{app}/") and path != f"{app}/app.toml" for path in paths)}
     # packages/<name>/<file>: at least three components; packages/README.md is documentation.
     package_paths = [path for path in paths if path.startswith("packages/") and path.count("/") >= 2]
     package_names = {path.split("/")[1] for path in package_paths}
@@ -354,7 +358,8 @@ def classify(paths: Iterable[str]) -> dict[str, bool]:
     site = any(path.startswith("website/") and not path.startswith(RELAY) for path in paths)
     site |= any("website" in PACKAGE_USERS.get(name, APPS) for name in compiled)
     proto_checked, proto_deployed = proto_users(paths)
-    deployed = apps | bundled | proto_deployed
+    package_deploys = {app for name in compiled for app in PACKAGE_USERS.get(name, APPS)}
+    deployed = direct_deploys | package_deploys | bundled | proto_deployed
     if not site:
         deployed -= {"website"}
     return outputs(
@@ -464,6 +469,13 @@ def find_reusable(
         if int(jobs.get("total_count", 0)) > 100:
             continue
         if jobs_cover(jobs.get("jobs", []), names):
+            if result["newsletter_deploy"]:
+                # Publishing must load the exact image this branch tested. An expired or missing
+                # artifact falls back to this main run's checks/build, never an untested rebuild.
+                artifacts = get(f"/repos/{repository}/actions/runs/{run['id']}/artifacts?per_page=100")
+                if not any(a.get("name") == f"newsletter-image-{sha}" and a.get("expired") is False
+                           for a in artifacts.get("artifacts", []) if isinstance(a, dict)):
+                    continue
             return run, names, f"reusing the green branch run {run.get('html_url', run['id'])} of this commit"
     if not candidates:
         return None, names, "no green branch run of this commit"
@@ -473,11 +485,11 @@ def find_reusable(
 def reuse(result: dict[str, bool], run: dict, names: list[str]) -> tuple[dict[str, bool], dict[str, str]]:
     """Skip every check (the reused run passed them); keep every deploy decision."""
     reused = {key: (False if key in CHECK_JOBS else value) for key, value in result.items()}
-    extra = {"checks_reused": "true", "reused_run_url": str(run.get("html_url", "")), "reused_jobs": ", ".join(names)}
+    extra = {"checks_reused": "true", "reused_run_url": str(run.get("html_url", "")), "reused_jobs": ", ".join(names), "reused_run_id": str(run["id"])}
     return reused, extra
 
 
-NO_REUSE = {"checks_reused": "false", "reused_run_url": "", "reused_jobs": ""}
+NO_REUSE = {"checks_reused": "false", "reused_run_url": "", "reused_jobs": "", "reused_run_id": ""}
 
 
 def github_get(token: str, api_url: str) -> Callable[[str], dict]:

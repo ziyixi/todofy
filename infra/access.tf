@@ -44,12 +44,14 @@ resource "cloudflare_zero_trust_access_policy" "github_owner" {
 # destination; `more` lists any further destinations (the links app also gates the exact path /_).
 locals {
   owner_apps = {
-    "mail-hero" = { name = "Mail Hero", domain = "mail-hero.ziyixi.science", more = [], session = "24h" }
-    "todofy"    = { name = "Todofy", domain = "todofy.ziyixi.science", more = [], session = "24h" }
+    # BEGIN service-catalog owner
     "home"      = { name = "Home", domain = "home.ziyixi.science", more = [], session = "24h" }
     "lab"       = { name = "Lab", domain = "lab.ziyixi.science", more = [], session = "24h" }
     "links"     = { name = "links", domain = "s.ziyixi.science/_/*", more = ["s.ziyixi.science/_"], session = "168h" }
+    "mail-hero" = { name = "Mail Hero", domain = "mail-hero.ziyixi.science", more = [], session = "24h" }
+    "todofy"    = { name = "Todofy", domain = "todofy.ziyixi.science", more = [], session = "24h" }
     "watch"     = { name = "watch", domain = "watch.ziyixi.science", more = [], session = "24h" }
+    # END service-catalog owner
   }
 }
 
@@ -125,14 +127,18 @@ resource "cloudflare_zero_trust_access_application" "mail_hero_backup" {
 locals {
   flowday_apps = {
     "flowday" = {
+      # BEGIN service-catalog flowday
       destinations = ["flowday.ziyixi.science"]
       session      = "168h"
-      policy_id    = "841d2527-c836-4c76-a3dd-40e64247947d"
+      # END service-catalog flowday
+      policy_id = "841d2527-c836-4c76-a3dd-40e64247947d"
     }
     "flowday-bypass" = {
+      # BEGIN service-catalog flowday-bypass
       destinations = ["flowday.ziyixi.science/pwa/*"]
       session      = "6h"
-      policy_id    = "a8aa0aa2-d3dd-4d25-8b41-3b570a1ab83f"
+      # END service-catalog flowday-bypass
+      policy_id = "a8aa0aa2-d3dd-4d25-8b41-3b570a1ab83f"
     }
   }
 }

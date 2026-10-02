@@ -16,7 +16,7 @@ Rules for this file:
   what is done, what is left, how to verify it and what to check after its deploy. Link to the app docs for
   design detail instead of copying it.
 
-Last updated: 2026-10-02 ~20:40 UTC. The code on `main` is `b70856f` (later commits are docs only). Every app's owner API is on proto now (the dashboard
+Last updated: 2026-10-02 ~23:10 UTC. The code on `main` is `b70856f` (later commits are docs only). Every app's owner API is on proto now (the dashboard
 `ca63675`, FlowDay `8d9100e`, Mail Hero `d1bde0e`, Todofy `b70856f`, all landed and verified on 2026-10-02). Nothing
 was in flight at that landing. The owner has since authorised the foundation work below.
 
@@ -33,10 +33,13 @@ was in flight at that landing. The owner has since authorised the foundation wor
 | Dashboard | `home` (+ `HomeState` DO) | `home.ziyixi.science` | `Dashboard deploy` | Yes (`dashboard.ui.v1`, since `ca63675`) |
 | Website | `ziyixi-website` (+ `ziyixi-notion-publish` relay) | `ziyixi.science`, `www.ziyixi.science` | `Website release` | n/a (static) |
 
-Outside this repository (do not move them in without the owner): the newsletter (its own repository, runs
-on the owner's VPS in Docker because it calls the Codex CLI; it reads Todofy's `/api/summary` and
-`/api/recommendation` with Basic auth), the self-hosted Slash and changedetection containers (to be retired,
-see "Waiting for the owner"), and FlowDay's old container (rollback until 2026-10-08).
+Newsletter source is now imported on `codex/personal-cloud-foundation` from its deployed engine commit
+`c3d622d4771b1ca63ee4e3f785b79032cffc30e1`. Its new independent image is `ghcr.io/ziyixi/todofy-newsletter`. The existing VPS still runs
+`ghcr.io/ziyixi/newsletter`; image publication here does not update that server. It still reads Todofy's
+`/api/summary` and `/api/recommendation` using its existing machine contract. See
+`newsletter/docs/import-source.md` and `newsletter/docs/deployment-drain.md` for the import and release boundaries.
+The self-hosted Slash and changedetection containers (to be retired, see "Waiting for the owner") and
+FlowDay's old container (rollback until 2026-10-08) remain outside this repository.
 
 ## How work lands
 
@@ -68,7 +71,7 @@ Practical notes learned the hard way:
 
 | Branch | Scope | Remaining and verification |
 | --- | --- | --- |
-| `codex/personal-cloud-foundation` | Owner-authorised: concise bilingual README and documentation navigation; P5 per-app catalog using committed Wrangler configs; extract repeated CI deployment probes; import Newsletter while retaining its independent image and add a durable publishing drain. | Preserve current HTTP bytes, identities and Cloudflare resources. Run Changes/catalog/probe tests and affected app checks; run Newsletter unit/runtime and credential-free image checks. Branch CI first, then the same green source SHA to main. No K3s installation or real newsletter send in this phase. Inspect obsolete Todofy image references before narrowly removing only confirmed retired images; retain active images and documented rollback resources. |
+| `codex/personal-cloud-foundation` | Owner-authorised: concise bilingual README and documentation navigation; P5 per-app catalog using committed Wrangler configs; extract repeated CI deployment probes; import Newsletter while retaining its independent image and add a durable publishing drain. | Preserve current HTTP bytes, identities and Cloudflare resources. Run Changes/catalog/probe tests and affected app checks; run Newsletter unit/runtime and credential-free image checks. Branch CI first, then the same green source SHA to main. No K3s installation or real newsletter send in this phase. Local evidence: Changes 358 tests (one intentional Watch/no-D1 skip), catalog 18, infra driver 75, Home unit 249 and workerd 73 passed; secretless OpenTofu fmt/validate and cross-config guards passed. Newsletter 2476 tests, locked lint/type/structure checks, mock HTTP smoke, no-login Codex startup, build and isolated wheel smoke passed. Codex cleanup failures retain an uncertain activity and prevent freeze; timeout/cancel/restart tests cover it. Linux CI and actual Docker image smoke are pending. Four retired GHCR packages (`todofy`, `todofy-llm`, `todofy-todo`, `todofy-database`; 302 versions) were deleted after exact owner confirmation and verified absent. The current public server deployment config has no references; the older local deployment checkout is stale. Migration snapshot and unrelated images retained. The owner requested the new independent package name `todofy-newsletter`; its creation/public visibility and main publication remain to be verified, without changing the older Newsletter package permissions. |
 
 The pattern every owner API followed (owner-approved, Google style, from Lab), for any new app or API: describe every route the app's UI
 calls in `proto/<app>/ui/vN` as AIP resources with `google.api.http`, serve them through
@@ -142,22 +145,20 @@ with synthetic data.
 - OK to retire the self-hosted Slash and changedetection containers (no data import is wanted).
 - OK for F6 after 2026-10-08 (above).
 - The pages to watch for W4 (added by the owner at watch.ziyixi.science/new, or named to an agent privately).
-- Optional: a newsletter run receipt so the dashboard can show the newsletter's health (changes the newsletter
-  repository and the VPS, so it needs the owner's OK).
+- Optional: a Newsletter run receipt so the dashboard can show its health. Its source is now here;
+  the existing VPS runtime is unchanged and receipt deployment is a later phase.
 
 ## Next, in order
 
-1. proto is the single IDL for every interface the monorepo defines (done 2026-10-02). Follow-ups: remove the 410
+1. Root proto is the single IDL for the Cloudflare owner interfaces (done 2026-10-02); imported
+   Newsletter retains its external protobuf dependency and its separately versioned internal deployment JSON. Follow-ups: remove the 410
    routes on their dates; remove `owner_api` from `todofy-core` in the release after `proto-todofy-ui`.
-   With the next Mail Hero change (a `mail-hero/docs` edit deploys Mail Hero, so `proto-todofy-ui` leaves it):
-   in `mail-hero/docs/todofy-integration.md` point line 13 at `todofy/api/machine-api-v1.openapi.yaml` (the
-   `/hooks/mail` route Mail Hero calls) and `proto/todofy/ui/v1` instead of the removed
-   `owner-api-v1.openapi.yaml`, and drop line 55's `npm run gen:api` (Todofy's UI no longer generates types
-   from the schema).
+   The Mail Hero integration document now names the machine OpenAPI and root owner proto; its stale
+   owner OpenAPI and removed UI generator references were corrected by the foundation branch.
 2. Watch W4: a shadow-mode week (watches report, no Todoist tasks), then the owner's watches.
 3. FlowDay F6 after 2026-10-08 with the owner's OK.
 4. Service catalog (IaC P5): one `app.toml` per app generating hostnames, Access apps, dashboard links and
-   probes, validated against each `wrangler.toml`; then P6 (rollback drill for `infra/`).
+   probes, validated against each `wrangler.toml`; P5 is implemented on the foundation branch above; P6 (rollback drill for `infra/`) remains later.
 5. Code quality phases Q0–Q7: English comments everywhere, coverage and lint ratchets, clock injection in every
    app's tests.
 

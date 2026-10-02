@@ -1,0 +1,39 @@
+# Public metadata only. Hosts/resources remain in this app's committed Wrangler configs.
+version = 1
+id = "mail-hero"
+target = "cloudflare"
+
+[[workers]]
+config = "mail-hero/wrangler.toml"
+entry = "mail-hero"
+role = "收件、投递与 UI"
+position = 1
+
+[[entries]]
+id = "mail-hero"
+name = "Mail Hero"
+description = "固定地址收件、归档与 webhook 投递"
+group = "apps"
+icon = "mail"
+accent = "blue"
+access = true
+app_only_signals = ["backup_stale", "backup_active"]
+order = 1
+worker = "mail-hero"
+url_path = "/"
+position = 1
+[entries.status]
+type = "ops_v1"
+binding = "MAIL_HERO"
+guard = true
+[entries.tile_metric]
+kind = "counter"
+name = "ingest_today_messages"
+
+[[access]]
+key = "mail-hero"
+kind = "owner"
+worker = "mail-hero"
+name = "Mail Hero"
+paths = [""]
+session = "24h"

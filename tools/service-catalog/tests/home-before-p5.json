@@ -1,0 +1,294 @@
+{
+  "entries": [
+    {
+      "id": "mail-hero",
+      "name": "Mail Hero",
+      "description": "固定地址收件、归档与 webhook 投递",
+      "group": "apps",
+      "icon": "mail",
+      "accent": "blue",
+      "url": "https://mail-hero.ziyixi.science/",
+      "access": true,
+      "status": {
+        "type": "ops_v1",
+        "binding": "MAIL_HERO",
+        "guard": true
+      },
+      "tile_metric": {
+        "kind": "counter",
+        "name": "ingest_today_messages"
+      },
+      "app_only_signals": [
+        "backup_stale",
+        "backup_active"
+      ],
+      "order": 1
+    },
+    {
+      "id": "todofy",
+      "name": "Todofy",
+      "description": "邮件摘要、Todoist 任务与每日提醒",
+      "group": "apps",
+      "icon": "list-checks",
+      "accent": "green",
+      "url": "https://todofy.ziyixi.science/",
+      "access": true,
+      "status": {
+        "type": "ops_v1",
+        "binding": "TODOFY",
+        "guard": true
+      },
+      "tile_metric": {
+        "kind": "counter",
+        "name": "received_24h"
+      },
+      "app_only_signals": [
+        "backup_stale",
+        "backup_failed",
+        "backup_disabled",
+        "backup_active"
+      ],
+      "order": 2
+    },
+    {
+      "id": "lab",
+      "name": "论文雷达",
+      "description": "arXiv 每日推荐，划卡片挑论文",
+      "group": "apps",
+      "icon": "flask-conical",
+      "accent": "violet",
+      "url": "https://lab.ziyixi.science/",
+      "access": true,
+      "status": {
+        "type": "ops_v1",
+        "binding": "LAB",
+        "guard": true
+      },
+      "tile_metric": {
+        "kind": "counter",
+        "name": "liked_7d"
+      },
+      "app_only_signals": [
+        "maintenance_mode"
+      ],
+      "order": 4
+    },
+    {
+      "id": "flowday",
+      "name": "FlowDay",
+      "description": "Todoist 时间块、计时与回顾",
+      "group": "apps",
+      "icon": "calendar-clock",
+      "accent": "teal",
+      "url": "https://flowday.ziyixi.science/",
+      "access": true,
+      "status": {
+        "type": "public_http",
+        "url": "https://flowday.ziyixi.science/pwa/manifest.webmanifest",
+        "expect": [
+          200
+        ],
+        "content_type": "application/manifest+json",
+        "outside_access": true,
+        "error_rate": true,
+        "enabled": true
+      },
+      "tile_metric": {
+        "kind": "latency"
+      },
+      "app_only_signals": [],
+      "order": 5
+    },
+    {
+      "id": "links",
+      "name": "短链接",
+      "description": "s.ziyixi.science 短链接与启动器",
+      "group": "apps",
+      "icon": "link",
+      "accent": "slate",
+      "url": "https://s.ziyixi.science/_/",
+      "access": true,
+      "status": {
+        "type": "public_http",
+        "url": "https://s.ziyixi.science/robots.txt",
+        "expect": [
+          200
+        ],
+        "content_type": "text/plain",
+        "outside_access": true,
+        "error_rate": true,
+        "enabled": true
+      },
+      "tile_metric": {
+        "kind": "latency"
+      },
+      "app_only_signals": [],
+      "order": 6
+    },
+    {
+      "id": "watch",
+      "name": "网页监视",
+      "description": "网页、订阅与接口的变化收件箱",
+      "group": "apps",
+      "icon": "eye",
+      "accent": "blue",
+      "url": "https://watch.ziyixi.science/",
+      "access": true,
+      "status": {
+        "type": "ops_v1",
+        "binding": "WATCH",
+        "guard": true
+      },
+      "tile_metric": {
+        "kind": "counter",
+        "name": "changes_new"
+      },
+      "app_only_signals": [
+        "maintenance_mode"
+      ],
+      "order": 7
+    },
+    {
+      "id": "website",
+      "name": "个人网站",
+      "description": "ziyixi.science，内容来自 Notion",
+      "group": "sites",
+      "icon": "globe",
+      "accent": "violet",
+      "url": "https://www.ziyixi.science/",
+      "access": false,
+      "status": {
+        "type": "public_http",
+        "url": "https://www.ziyixi.science/build-info.json",
+        "expect": [
+          200
+        ],
+        "enabled": true
+      },
+      "tile_metric": {
+        "kind": "latency"
+      },
+      "app_only_signals": [],
+      "order": 1
+    },
+    {
+      "id": "notion-publish",
+      "name": "Notion 发布",
+      "description": "把 Notion 内容发布到网站",
+      "group": "services",
+      "icon": "upload-cloud",
+      "accent": "slate",
+      "url": null,
+      "access": false,
+      "status": {
+        "type": "analytics",
+        "max_idle_hours": 26
+      },
+      "tile_metric": {
+        "kind": "last_active"
+      },
+      "app_only_signals": [],
+      "order": 1
+    },
+    {
+      "id": "newsletter",
+      "name": "Newsletter",
+      "description": "家中服务器；每日读取 Todofy 报告写入 Notion",
+      "group": "services",
+      "icon": "newspaper",
+      "accent": "amber",
+      "url": null,
+      "access": false,
+      "status": {
+        "type": "none"
+      },
+      "tile_metric": null,
+      "app_only_signals": [],
+      "order": 2
+    },
+    {
+      "id": "home",
+      "name": "个人控制台",
+      "description": "本页面：巡检、用量、金丝雀与摘要",
+      "group": "hidden",
+      "icon": "gauge",
+      "accent": "slate",
+      "url": null,
+      "access": true,
+      "status": {
+        "type": "self"
+      },
+      "tile_metric": null,
+      "app_only_signals": [],
+      "order": 1
+    },
+    {
+      "id": "self-hosted",
+      "name": "自托管服务器",
+      "description": "VPS 与家中服务器；只登记其 R2 备份桶，无磁贴",
+      "group": "hidden",
+      "icon": "server",
+      "accent": "slate",
+      "url": null,
+      "access": false,
+      "status": {
+        "type": "none"
+      },
+      "tile_metric": null,
+      "app_only_signals": [],
+      "order": 2
+    }
+  ],
+  "workers": [
+    {
+      "script": "mail-hero",
+      "entry": "mail-hero",
+      "role": "收件、投递与 UI"
+    },
+    {
+      "script": "todofy",
+      "entry": "todofy",
+      "role": "网关与 UI"
+    },
+    {
+      "script": "todofy-core",
+      "entry": "todofy",
+      "role": "处理核心（TodofyCore）"
+    },
+    {
+      "script": "home",
+      "entry": "home",
+      "role": "本面板"
+    },
+    {
+      "script": "lab",
+      "entry": "lab",
+      "role": "论文雷达与 UI"
+    },
+    {
+      "script": "flowday",
+      "entry": "flowday",
+      "role": "页面、API 与 PWA 文件"
+    },
+    {
+      "script": "links",
+      "entry": "links",
+      "role": "短链接跳转与启动器"
+    },
+    {
+      "script": "watch",
+      "entry": "watch",
+      "role": "网页监视与 UI"
+    },
+    {
+      "script": "ziyixi-notion-publish",
+      "entry": "notion-publish",
+      "role": "发布 Worker"
+    },
+    {
+      "script": "ziyixi-website",
+      "entry": "website",
+      "role": "静态网站（仅静态资源）"
+    }
+  ]
+}

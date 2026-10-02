@@ -1,0 +1,31 @@
+services:
+  newsletter:
+    build: .
+    image: personal-newsletter:service
+    restart: unless-stopped
+    init: true
+    read_only: true
+    tmpfs:
+      - /tmp:size=128m,mode=1777
+    ports:
+      - "127.0.0.1:8080:8080"
+    environment:
+      NEWSLETTER_MODE: mock
+      NEWSLETTER_EDITOR: mock
+      NEWSLETTER_MAIL: fake
+      NEWSLETTER_NOTION: fake
+      NEWSLETTER_TODOFY: fake
+      NEWSLETTER_EDITOR_TOKEN: ${NEWSLETTER_EDITOR_TOKEN:?Set an editor token}
+      NEWSLETTER_SEND_TOKEN: ${NEWSLETTER_SEND_TOKEN:?Set a send token}
+    volumes:
+      - newsletter-data:/var/lib/newsletter
+    security_opt:
+      - no-new-privileges:true
+    cap_drop: [ALL]
+    pids_limit: 128
+    mem_limit: 1g
+    cpus: 2
+    stop_grace_period: 45s
+
+volumes:
+  newsletter-data:

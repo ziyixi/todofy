@@ -9,7 +9,7 @@
 # bindings) and the dashboard after every app whose Ops entrypoint it binds. A push to main whose commit already passed every
 # needed check in a branch push run reuses that run: the checks are skipped, the gate and the deploys still run
 # (ci_changes.py find_reusable). Every deploy that applies routes runs tools/cf-guard first.
-# See README.md "CI".
+# See docs/ci-cd.md.
 name: CI and deploy
 
 on:
@@ -21,7 +21,7 @@ on:
         description: App to check and (on main) deploy
         type: choice
         # both = Todofy and Mail Hero (as before the dashboard existed); all = every app.
-        options: [both, all, todofy, mail-hero, dashboard, website, lab, flowday, links, watch]
+        options: [both, all, todofy, mail-hero, dashboard, website, lab, flowday, links, watch, newsletter]
         default: both
 
 permissions:
@@ -53,6 +53,7 @@ jobs:
       flowday_check: ${{ steps.decide.outputs.flowday_check }}
       links_check: ${{ steps.decide.outputs.links_check }}
       watch_check: ${{ steps.decide.outputs.watch_check }}
+      newsletter_check: ${{ steps.decide.outputs.newsletter_check }}
       contracts: ${{ steps.decide.outputs.contracts }}
       packages: ${{ steps.decide.outputs.packages }}
       infra: ${{ steps.decide.outputs.infra }}
@@ -66,10 +67,12 @@ jobs:
       flowday_deploy: ${{ steps.decide.outputs.flowday_deploy }}
       links_deploy: ${{ steps.decide.outputs.links_deploy }}
       watch_deploy: ${{ steps.decide.outputs.watch_deploy }}
+      newsletter_deploy: ${{ steps.decide.outputs.newsletter_deploy }}
       # A push to main that reuses a green branch run of the same commit (all check outputs above are false).
       checks_reused: ${{ steps.decide.outputs.checks_reused }}
       reused_run_url: ${{ steps.decide.outputs.reused_run_url }}
       reused_jobs: ${{ steps.decide.outputs.reused_jobs }}
+      reused_run_id: ${{ steps.decide.outputs.reused_run_id }}
       # The commit the diff started from (empty when everything runs): Proto checks compares the IDL with it.
       base: ${{ steps.decide.outputs.base }}
     steps:
@@ -1187,9 +1190,71 @@ jobs:
           npx --no-install vitest run
           npm run test:python
 
+  # Newsletter is a separate VPS engine and GHCR image. No production credentials or real model calls here.
+  newsletter-checks:
+    name: Newsletter checks
+    needs: changes
+    if: needs.changes.outputs.newsletter_check == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: newsletter
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          version: '0.12.10'
+          working-directory: newsletter
+          enable-cache: true
+      - name: Install deterministic CJK test fonts
+        run: sudo apt-get update && sudo apt-get install -y fonts-noto-cjk
+      - name: Check the locked engine
+        run: |
+          make setup
+          make check
+          make smoke-codex
+          make smoke
+          make build
+          uv run --locked --extra codex python scripts/smoke_wheel.py
+
+  newsletter-image:
+    name: Newsletter image checks
+    needs: [changes, newsletter-checks]
+    if: needs.changes.outputs.newsletter_check == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    defaults:
+      run:
+        working-directory: newsletter
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Test the independent image without credentials or external calls
+        run: |
+          python3 scripts/smoke_image.py --audit-source
+          docker build --platform linux/amd64 --tag "newsletter-ci:$GITHUB_SHA" .
+          tested_image=$(docker image inspect --format '{{.Id}}' "newsletter-ci:$GITHUB_SHA")
+          python3 scripts/smoke_image.py --image "$tested_image" --platform linux/amd64
+          python3 scripts/publish_content_config.py validate \
+            --image "$tested_image" --engine-sha "$GITHUB_SHA" --revision "$GITHUB_SHA" \
+            --source "$GITHUB_WORKSPACE/newsletter/content-config" --output "$RUNNER_TEMP/validated-content-config"
+          python3 ../tools/newsletter-release/image.py save --image "$tested_image" --sha "$GITHUB_SHA" \
+            --directory "$RUNNER_TEMP/newsletter-image"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: newsletter-image-${{ github.sha }}
+          path: ${{ runner.temp }}/newsletter-image/
+          if-no-files-found: error
+          retention-days: 1
+          compression-level: 6
+
   gate:
     name: CI gate
-    needs: [changes, shared-packages, todofy-static, todofy-runtime, todofy-checks, mail-hero-checks, dashboard-checks, website-checks, lab-checks, flowday-checks, links-checks, watch-checks, contracts, infra-checks, proto-checks]
+    needs: [changes, shared-packages, todofy-static, todofy-runtime, todofy-checks, mail-hero-checks, dashboard-checks, website-checks, lab-checks, flowday-checks, links-checks, watch-checks, newsletter-checks, newsletter-image, contracts, infra-checks, proto-checks]
     if: always()
     runs-on: ubuntu-24.04
     timeout-minutes: 5
@@ -1208,12 +1273,15 @@ jobs:
           FLOWDAY: ${{ needs.flowday-checks.result }}
           LINKS: ${{ needs.links-checks.result }}
           WATCH: ${{ needs.watch-checks.result }}
+          NEWSLETTER: ${{ needs.newsletter-checks.result }}
+          NEWSLETTER_IMAGE: ${{ needs.newsletter-image.result }}
           CONTRACTS: ${{ needs.contracts.result }}
           INFRA: ${{ needs.infra-checks.result }}
           PROTO: ${{ needs.proto-checks.result }}
           CHECKS_REUSED: ${{ needs.changes.outputs.checks_reused }}
           REUSED_RUN_URL: ${{ needs.changes.outputs.reused_run_url }}
           REUSED_JOBS: ${{ needs.changes.outputs.reused_jobs }}
+          REUSED_RUN_ID: ${{ needs.changes.outputs.reused_run_id }}
         run: |
           # A push to main that reused a branch run of the same commit: its checks are skipped here because that
           # run passed them (ci_changes.py find_reusable checked each job's conclusion).
@@ -1225,6 +1293,7 @@ jobs:
           for pair in "Changes=$CHANGES" "Shared packages=$PACKAGES" "Todofy static checks=$TODOFY_STATIC" \
             "Todofy runtime=$TODOFY_RUNTIME" "Todofy checks=$TODOFY" "Mail Hero checks=$MAIL_HERO" \
             "Dashboard checks=$DASHBOARD" "Website checks=$WEBSITE" "Lab checks=$LAB" "FlowDay checks=$FLOWDAY" "Links checks=$LINKS" "Watch checks=$WATCH" \
+            "Newsletter checks=$NEWSLETTER" "Newsletter image checks=$NEWSLETTER_IMAGE" \
             "Contracts=$CONTRACTS" "Infra checks=$INFRA" "Proto checks=$PROTO"; do
             echo "$pair"
             case "${pair#*=}" in
@@ -1235,6 +1304,49 @@ jobs:
           # "changes" must itself succeed: without it every other job is skipped.
           [ "$CHANGES" = success ] || failed=1
           exit "$failed"
+
+  # Publish the same checked artifact, including when main reuses a same-SHA branch run. This does not update VPS.
+  newsletter-deploy:
+    name: Newsletter image publish
+    needs: [changes, newsletter-checks, newsletter-image, gate]
+    if: >-
+      ${{ !cancelled()
+      && needs.changes.result == 'success'
+      && (needs.newsletter-checks.result == 'success' || (needs.changes.outputs.checks_reused == 'true' && needs.newsletter-checks.result == 'skipped'))
+      && (needs.newsletter-image.result == 'success' || (needs.changes.outputs.checks_reused == 'true' && needs.newsletter-image.result == 'skipped'))
+      && needs.gate.result == 'success'
+      && github.ref == 'refs/heads/main'
+      && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+      && needs.changes.outputs.newsletter_deploy == 'true' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      actions: read
+      packages: write
+    environment: production
+    concurrency:
+      group: newsletter-production
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: newsletter-image-${{ github.sha }}
+          path: ${{ runner.temp }}/newsletter-image
+          github-token: ${{ github.token }}
+          run-id: ${{ needs.changes.outputs.reused_run_id || github.run_id }}
+      - name: Log in for image publication
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: printf '%s' "$GH_TOKEN" | docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
+      - name: Verify and publish the tested image
+        run: python3 tools/newsletter-release/image.py publish --sha "$GITHUB_SHA" --directory "$RUNNER_TEMP/newsletter-image"
+      - name: Log out
+        if: always()
+        run: docker logout ghcr.io
 
   todofy-deploy:
     name: Todofy deploy
@@ -1619,37 +1731,7 @@ jobs:
           ACCESS_ISSUER: ${{ steps.config.outputs.access_issuer }}
           PUBLIC_HOST: ${{ steps.config.outputs.host }}
         run: |
-          issuer=$ACCESS_ISSUER
-          host=$PUBLIC_HOST
-          test -n "$issuer" && test -n "$host"
-          for path in / /api/v1/homeView; do
-            for attempt in $(seq 1 10); do
-              answer=$(curl -sS -o /dev/null --max-time 15 --proto '=https' -w '%{http_code} %{redirect_url}' \
-                "https://$host$path" 2>/dev/null) || true
-              code=${answer%% *}
-              location=${answer#* }
-              case "$code" in
-                302)
-                  login="$issuer/cdn-cgi/access/login/$host"
-                  case "$location" in
-                    "$login"|"$login?"*|"$login/"*)
-                      echo "Access answered $path with 302 to its login page for this host (attempt $attempt)."
-                      continue 2
-                      ;;
-                  esac
-                  echo "$path: 302 to somewhere other than the Access login page for this host." >&2
-                  exit 1
-                  ;;
-                ''|000|5??) sleep 15 ;;
-                *)
-                  echo "$path was answered with $code without Access." >&2
-                  exit 1
-                  ;;
-              esac
-            done
-            echo "$path never reached Access (last status ${code:-none})." >&2
-            exit 1
-          done
+          bash tools/deploy-probes/access.sh / /api/v1/homeView
       - name: Remove the secrets file
         if: always()
         run: rm -f "$RUNNER_TEMP/home-secrets.json"
@@ -1760,36 +1842,7 @@ jobs:
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
         run: |
-          test -n "$CLOUDFLARE_API_TOKEN"
-          deployment=$(npx --no-install wrangler deployments status --json --config ../wrangler.toml) || {
-            echo "Could not read the deployment of the Worker lab." >&2
-            exit 1
-          }
-          version=$(jq -er '.versions | select(length == 1 and .[0].percentage == 100) | .[0].version_id' \
-            <<<"$deployment" 2>/dev/null) || {
-            echo "The deployment does not serve exactly one version at 100%." >&2
-            exit 1
-          }
-          details=$(npx --no-install wrangler versions view "$version" --json --config ../wrangler.toml) || {
-            echo "Could not read the deployed version." >&2
-            exit 1
-          }
-          build=$(jq -er '[.resources.bindings[] | select(.name == "BUILD_SHA" and .type == "plain_text") | .text]
-            | select(length == 1) | .[0]' <<<"$details" 2>/dev/null) || build=''
-          if [ "$build" != "$GITHUB_SHA" ]; then
-            echo "The deployed version $version was not built from $GITHUB_SHA." >&2
-            exit 1
-          fi
-          echo "The Worker lab serves version $version at 100%, built from $GITHUB_SHA."
-          pending=$(npx --no-install wrangler d1 migrations list DB --remote --config ../wrangler.toml) || {
-            echo "Could not list the D1 migrations." >&2
-            exit 1
-          }
-          if ! grep -q 'No migrations to apply' <<<"$pending"; then
-            echo "D1 migrations are still pending." >&2
-            exit 1
-          fi
-          echo "No D1 migration is pending."
+          bash ../../tools/deploy-probes/production.sh lab ../wrangler.toml DB
       # Cloudflare Access ("Lab") must answer every unauthenticated request with a 302 to its login page for this
       # host, exactly as the dashboard's probe checks (same script; test_ci_changes.py runs it).
       - name: Check that Access answers unauthenticated requests
@@ -1797,37 +1850,7 @@ jobs:
           ACCESS_ISSUER: ${{ steps.config.outputs.access_issuer }}
           PUBLIC_HOST: ${{ steps.config.outputs.host }}
         run: |
-          issuer=$ACCESS_ISSUER
-          host=$PUBLIC_HOST
-          test -n "$issuer" && test -n "$host"
-          for path in / /api/v1/today; do
-            for attempt in $(seq 1 10); do
-              answer=$(curl -sS -o /dev/null --max-time 15 --proto '=https' -w '%{http_code} %{redirect_url}' \
-                "https://$host$path" 2>/dev/null) || true
-              code=${answer%% *}
-              location=${answer#* }
-              case "$code" in
-                302)
-                  login="$issuer/cdn-cgi/access/login/$host"
-                  case "$location" in
-                    "$login"|"$login?"*|"$login/"*)
-                      echo "Access answered $path with 302 to its login page for this host (attempt $attempt)."
-                      continue 2
-                      ;;
-                  esac
-                  echo "$path: 302 to somewhere other than the Access login page for this host." >&2
-                  exit 1
-                  ;;
-                ''|000|5??) sleep 15 ;;
-                *)
-                  echo "$path was answered with $code without Access." >&2
-                  exit 1
-                  ;;
-              esac
-            done
-            echo "$path never reached Access (last status ${code:-none})." >&2
-            exit 1
-          done
+          bash tools/deploy-probes/access.sh / /api/v1/today
       - name: Remove the secrets file
         if: always()
         run: rm -f "$RUNNER_TEMP/lab-secrets.json"
@@ -1943,36 +1966,7 @@ jobs:
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
         run: |
-          test -n "$CLOUDFLARE_API_TOKEN"
-          deployment=$(npx --no-install wrangler deployments status --json --config ../wrangler.toml) || {
-            echo "Could not read the deployment of the Worker flowday." >&2
-            exit 1
-          }
-          version=$(jq -er '.versions | select(length == 1 and .[0].percentage == 100) | .[0].version_id' \
-            <<<"$deployment" 2>/dev/null) || {
-            echo "The deployment does not serve exactly one version at 100%." >&2
-            exit 1
-          }
-          details=$(npx --no-install wrangler versions view "$version" --json --config ../wrangler.toml) || {
-            echo "Could not read the deployed version." >&2
-            exit 1
-          }
-          build=$(jq -er '[.resources.bindings[] | select(.name == "BUILD_SHA" and .type == "plain_text") | .text]
-            | select(length == 1) | .[0]' <<<"$details" 2>/dev/null) || build=''
-          if [ "$build" != "$GITHUB_SHA" ]; then
-            echo "The deployed version $version was not built from $GITHUB_SHA." >&2
-            exit 1
-          fi
-          echo "The Worker flowday serves version $version at 100%, built from $GITHUB_SHA."
-          pending=$(npx --no-install wrangler d1 migrations list DB --remote --config ../wrangler.toml) || {
-            echo "Could not list the D1 migrations." >&2
-            exit 1
-          }
-          if ! grep -q 'No migrations to apply' <<<"$pending"; then
-            echo "D1 migrations are still pending." >&2
-            exit 1
-          fi
-          echo "No D1 migration is pending."
+          bash ../../tools/deploy-probes/production.sh flowday ../wrangler.toml DB
       # Cloudflare Access ("flowday", which covers the host) must answer every unauthenticated request
       # with a 302 to its login page for this host, exactly as the dashboard's probe checks (same script;
       # test_ci_changes.py runs it).
@@ -1981,37 +1975,7 @@ jobs:
           ACCESS_ISSUER: ${{ steps.config.outputs.access_issuer }}
           PUBLIC_HOST: ${{ steps.config.outputs.host }}
         run: |
-          issuer=$ACCESS_ISSUER
-          host=$PUBLIC_HOST
-          test -n "$issuer" && test -n "$host"
-          for path in / /api/v1/tasks; do
-            for attempt in $(seq 1 10); do
-              answer=$(curl -sS -o /dev/null --max-time 15 --proto '=https' -w '%{http_code} %{redirect_url}' \
-                "https://$host$path" 2>/dev/null) || true
-              code=${answer%% *}
-              location=${answer#* }
-              case "$code" in
-                302)
-                  login="$issuer/cdn-cgi/access/login/$host"
-                  case "$location" in
-                    "$login"|"$login?"*|"$login/"*)
-                      echo "Access answered $path with 302 to its login page for this host (attempt $attempt)."
-                      continue 2
-                      ;;
-                  esac
-                  echo "$path: 302 to somewhere other than the Access login page for this host." >&2
-                  exit 1
-                  ;;
-                ''|000|5??) sleep 15 ;;
-                *)
-                  echo "$path was answered with $code without Access." >&2
-                  exit 1
-                  ;;
-              esac
-            done
-            echo "$path never reached Access (last status ${code:-none})." >&2
-            exit 1
-          done
+          bash tools/deploy-probes/access.sh / /api/v1/tasks
       # The PWA files the Worker serves without a JWT (worker/src/assets.ts PWA_PUBLIC_PATHS) reach it anonymously
       # only through the Access app "flowday-bypass" (its destination <host>/pwa/*, as on the container's host until
       # F6): each answers 200 with its own media type, and a file under /pwa/ that is not on the list (the service
@@ -2167,36 +2131,7 @@ jobs:
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
         run: |
-          test -n "$CLOUDFLARE_API_TOKEN"
-          deployment=$(npx --no-install wrangler deployments status --json --config ../wrangler.toml) || {
-            echo "Could not read the deployment of the Worker links." >&2
-            exit 1
-          }
-          version=$(jq -er '.versions | select(length == 1 and .[0].percentage == 100) | .[0].version_id' \
-            <<<"$deployment" 2>/dev/null) || {
-            echo "The deployment does not serve exactly one version at 100%." >&2
-            exit 1
-          }
-          details=$(npx --no-install wrangler versions view "$version" --json --config ../wrangler.toml) || {
-            echo "Could not read the deployed version." >&2
-            exit 1
-          }
-          build=$(jq -er '[.resources.bindings[] | select(.name == "BUILD_SHA" and .type == "plain_text") | .text]
-            | select(length == 1) | .[0]' <<<"$details" 2>/dev/null) || build=''
-          if [ "$build" != "$GITHUB_SHA" ]; then
-            echo "The deployed version $version was not built from $GITHUB_SHA." >&2
-            exit 1
-          fi
-          echo "The Worker links serves version $version at 100%, built from $GITHUB_SHA."
-          pending=$(npx --no-install wrangler d1 migrations list DB --remote --config ../wrangler.toml) || {
-            echo "Could not list the D1 migrations." >&2
-            exit 1
-          }
-          if ! grep -q 'No migrations to apply' <<<"$pending"; then
-            echo "D1 migrations are still pending." >&2
-            exit 1
-          fi
-          echo "No D1 migration is pending."
+          bash ../../tools/deploy-probes/production.sh links ../wrangler.toml DB
       # Cloudflare Access ("links", path-scoped) must answer every unauthenticated request for the owner's half with a
       # 302 to its login page for this host: its exact destination /_, the launcher /_/ and the owner API, exactly as
       # the dashboard's probe checks (same script; test_ci_changes.py runs it).
@@ -2205,37 +2140,7 @@ jobs:
           ACCESS_ISSUER: ${{ steps.config.outputs.access_issuer }}
           PUBLIC_HOST: ${{ steps.config.outputs.host }}
         run: |
-          issuer=$ACCESS_ISSUER
-          host=$PUBLIC_HOST
-          test -n "$issuer" && test -n "$host"
-          for path in /_ /_/ /_/api/v1/links; do
-            for attempt in $(seq 1 10); do
-              answer=$(curl -sS -o /dev/null --max-time 15 --proto '=https' -w '%{http_code} %{redirect_url}' \
-                "https://$host$path" 2>/dev/null) || true
-              code=${answer%% *}
-              location=${answer#* }
-              case "$code" in
-                302)
-                  login="$issuer/cdn-cgi/access/login/$host"
-                  case "$location" in
-                    "$login"|"$login?"*|"$login/"*)
-                      echo "Access answered $path with 302 to its login page for this host (attempt $attempt)."
-                      continue 2
-                      ;;
-                  esac
-                  echo "$path: 302 to somewhere other than the Access login page for this host." >&2
-                  exit 1
-                  ;;
-                ''|000|5??) sleep 15 ;;
-                *)
-                  echo "$path was answered with $code without Access." >&2
-                  exit 1
-                  ;;
-              esac
-            done
-            echo "$path never reached Access (last status ${code:-none})." >&2
-            exit 1
-          done
+          bash tools/deploy-probes/access.sh /_ /_/ /_/api/v1/links
       # The rest of the host is outside Access and the Worker answers it itself, anonymously (docs/design.md §2, §4):
       # /robots.txt with its own text (200, text/plain, "Disallow: /" for every agent), and a key no link uses with the
       # 302 to /_/k/<key> on this host that a private, deleted or expired key gets too (the enumeration rule), both with
@@ -2406,27 +2311,7 @@ jobs:
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
         run: |
-          test -n "$CLOUDFLARE_API_TOKEN"
-          deployment=$(npx --no-install wrangler deployments status --json --config ../wrangler.toml) || {
-            echo "Could not read the deployment of the Worker watch." >&2
-            exit 1
-          }
-          version=$(jq -er '.versions | select(length == 1 and .[0].percentage == 100) | .[0].version_id' \
-            <<<"$deployment" 2>/dev/null) || {
-            echo "The deployment does not serve exactly one version at 100%." >&2
-            exit 1
-          }
-          details=$(npx --no-install wrangler versions view "$version" --json --config ../wrangler.toml) || {
-            echo "Could not read the deployed version." >&2
-            exit 1
-          }
-          build=$(jq -er '[.resources.bindings[] | select(.name == "BUILD_SHA" and .type == "plain_text") | .text]
-            | select(length == 1) | .[0]' <<<"$details" 2>/dev/null) || build=''
-          if [ "$build" != "$GITHUB_SHA" ]; then
-            echo "The deployed version $version was not built from $GITHUB_SHA." >&2
-            exit 1
-          fi
-          echo "The Worker watch serves version $version at 100%, built from $GITHUB_SHA."
+          bash ../../tools/deploy-probes/production.sh watch ../wrangler.toml
       # Cloudflare Access ("watch", the whole host) must answer every unauthenticated request with a 302 to its login
       # page for this host: the inbox /, the owner API and the add-from-phone page /new, exactly as the dashboard's
       # probe checks (same script; test_ci_changes.py runs it). /health is behind Access too (no bypass application),
@@ -2437,37 +2322,7 @@ jobs:
           ACCESS_ISSUER: ${{ steps.config.outputs.access_issuer }}
           PUBLIC_HOST: ${{ steps.config.outputs.host }}
         run: |
-          issuer=$ACCESS_ISSUER
-          host=$PUBLIC_HOST
-          test -n "$issuer" && test -n "$host"
-          for path in / /api/v1/watches /new; do
-            for attempt in $(seq 1 10); do
-              answer=$(curl -sS -o /dev/null --max-time 15 --proto '=https' -w '%{http_code} %{redirect_url}' \
-                "https://$host$path" 2>/dev/null) || true
-              code=${answer%% *}
-              location=${answer#* }
-              case "$code" in
-                302)
-                  login="$issuer/cdn-cgi/access/login/$host"
-                  case "$location" in
-                    "$login"|"$login?"*|"$login/"*)
-                      echo "Access answered $path with 302 to its login page for this host (attempt $attempt)."
-                      continue 2
-                      ;;
-                  esac
-                  echo "$path: 302 to somewhere other than the Access login page for this host." >&2
-                  exit 1
-                  ;;
-                ''|000|5??) sleep 15 ;;
-                *)
-                  echo "$path was answered with $code without Access." >&2
-                  exit 1
-                  ;;
-              esac
-            done
-            echo "$path never reached Access (last status ${code:-none})." >&2
-            exit 1
-          done
+          bash tools/deploy-probes/access.sh / /api/v1/watches /new
       - name: Remove the secrets file
         if: always()
         run: rm -f "$RUNNER_TEMP/watch-secrets.json"

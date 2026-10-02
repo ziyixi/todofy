@@ -35,19 +35,11 @@ import ci_changes  # noqa: E402
 REPO = Path(__file__).resolve().parents[2]
 WORKFLOW = REPO / ".github" / "workflows" / "ci.yml"
 
-# Worker name -> its production config.
-PRODUCTION = {
-    "mail-hero": "mail-hero/wrangler.toml",
-    "todofy-core": "todofy/wrangler.toml",
-    "todofy": "todofy/gateway/wrangler.toml",
-    "home": "dashboard/wrangler.toml",
-    "ziyixi-website": "website/wrangler.toml",
-    "ziyixi-notion-publish": "website/relay/wrangler.toml",
-    "lab": "lab/wrangler.toml",
-    "flowday": "flowday/wrangler.toml",
-    "links": "links/wrangler.toml",
-    "watch": "watch/wrangler.toml",
-}
+# Worker/config identity comes from the per-app catalog; hosts remain Wrangler-owned.
+sys.path.insert(0, str(REPO / "tools" / "service-catalog"))
+from catalog import load_catalog  # noqa: E402
+
+PRODUCTION = load_catalog(REPO).worker_configs()
 # Configs of Workers that CI checks but does not deploy yet (no deploy job, no hostname, placeholder resource ids).
 # They stay out of PRODUCTION, which the dashboard's drift check compares with the live account
 # (drift_desired.py). FlowDay moved to PRODUCTION at F2 (flowday/docs/design.md section 11), the links app at L2
@@ -829,8 +821,8 @@ class Workflow(unittest.TestCase):
         self.assertEqual(seen, TOGGLES)
 
     def test_the_rollback_note_names_every_legacy_variable_and_ci_reads_none(self):
-        readme = (REPO / "README.md").read_text()
-        section = readme.split("#### Rolling back the committed-config layout", 1)[1].split("\n#", 1)[0]
+        history = (REPO / "docs/history.md").read_text()
+        section = history.split("## Committed-config rollback", 1)[1].split("\n#", 1)[0]
         self.assertEqual(set(re.findall(r"`([A-Z][A-Z0-9_]+)`", section)) & LEGACY_VARIABLES, LEGACY_VARIABLES)
         self.assertFalse(LEGACY_VARIABLES & set(re.findall(r"\b(?:vars|env)\.([A-Z0-9_]+)", WORKFLOW.read_text())))
         self.assertFalse(LEGACY_VARIABLES & TOGGLES)
@@ -898,11 +890,13 @@ class Workflow(unittest.TestCase):
         self.assertLess(script.index("wrangler d1 migrations apply DB --remote --config ../wrangler.toml"), script.index("deploy-vars.mjs exec"))
         check = flowday[deploy + 1]
         self.assertEqual(check["name"], "Check that production runs this commit")
-        for command in ("deployments status", "versions view", "d1 migrations list DB --remote"):
-            self.assertIn(f"wrangler {command}", check["run"])
+        self.assertEqual(check["run"], "bash ../../tools/deploy-probes/production.sh flowday ../wrangler.toml DB")
+        probe = (REPO / "tools/deploy-probes/production.sh").read_text()
+        for command in ("deployments status", "versions view", 'd1 migrations list "$d1" --remote'):
+            self.assertIn(f"wrangler {command}", probe)
         # Reads only: no deploy, upload, rollback, secret or SQL in the check.
-        self.assertFalse({"deploy", "versions upload", "versions deploy", "rollback", "secret"} & set(wrangler_commands(check["run"])))
-        self.assertNotIn("execute", check["run"])
+        self.assertFalse({"deploy", "versions upload", "versions deploy", "rollback", "secret"} & set(wrangler_commands(probe)))
+        self.assertNotIn("execute", probe)
 
     def test_lab_holds_the_bundle_it_dry_runs_to_its_budget(self):
         """Lab checks and Lab deploy measure the dry run's bundle (deploy/bundle-size.mjs: Lab's budget and the Workers
@@ -924,7 +918,7 @@ class Workflow(unittest.TestCase):
         self.assertEqual(check["name"], "Check that production runs this commit")
         self.assertEqual(lab[deploy + 2]["name"], "Check that Access answers unauthenticated requests")
         [same] = [s for s in flowday if s["name"] == check["name"]]
-        self.assertEqual(check["run"].replace("Worker lab", "Worker flowday"), same["run"])
+        self.assertEqual(check["run"].replace("production.sh lab", "production.sh flowday"), same["run"])
         self.assertFalse({"deploy", "versions upload", "versions deploy", "rollback", "secret"} & set(wrangler_commands(check["run"])))
 
     def test_links_deploy_reads_the_dashboard_owner_and_its_own_csrf_key(self):
@@ -958,7 +952,7 @@ class Workflow(unittest.TestCase):
         check = links[deploy + 1]
         self.assertEqual(check["name"], "Check that production runs this commit")
         [same] = [s for s in steps(self.jobs["flowday-deploy"]) if s["name"] == check["name"]]
-        self.assertEqual(check["run"].replace("Worker links", "Worker flowday"), same["run"])
+        self.assertEqual(check["run"].replace("production.sh links", "production.sh flowday"), same["run"])
         self.assertEqual(
             names[deploy + 2 :],
             [
@@ -1068,8 +1062,10 @@ class Workflow(unittest.TestCase):
         for step in lab_steps[index : index + 3]:
             with self.subTest(step=step["name"]):
                 self.assertIn(f'"{step["name"]}"', flat)
-        self.assertIn("wrangler versions view", lab_steps[index + 1]["run"])
-        self.assertIn("curl", lab_steps[index + 2]["run"])
+        self.assertIn("production.sh lab ../wrangler.toml DB", lab_steps[index + 1]["run"])
+        self.assertIn("wrangler versions view", (REPO / "tools/deploy-probes/production.sh").read_text())
+        self.assertIn("tools/deploy-probes/access.sh", lab_steps[index + 2]["run"])
+        self.assertIn("curl", (REPO / "tools/deploy-probes/access.sh").read_text())
         # The stop switch as the settings page labels it.
         label = "暂停抓取新论文"
         self.assertIn(label, (REPO / "lab/web/src/views/Settings.tsx").read_text())

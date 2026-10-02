@@ -43,19 +43,11 @@ REPO = Path(__file__).resolve().parents[2]
 OUTPUT = REPO / "dashboard" / "worker" / "src" / "drift-desired.json"
 VERSION = 1
 
-# Worker name -> its committed production config (test_drift_desired.py checks it equals test_wrangler_configs.PRODUCTION).
-WORKERS = {
-    "mail-hero": "mail-hero/wrangler.toml",
-    "todofy-core": "todofy/wrangler.toml",
-    "todofy": "todofy/gateway/wrangler.toml",
-    "home": "dashboard/wrangler.toml",
-    "ziyixi-website": "website/wrangler.toml",
-    "ziyixi-notion-publish": "website/relay/wrangler.toml",
-    "lab": "lab/wrangler.toml",
-    "flowday": "flowday/wrangler.toml",
-    "links": "links/wrangler.toml",
-    "watch": "watch/wrangler.toml",
-}
+# Shared public inventory, validated by the catalog and independent Wrangler tests.
+sys.path.insert(0, str(REPO / "tools" / "service-catalog"))
+from catalog import load_catalog  # noqa: E402
+
+WORKERS = load_catalog(REPO).worker_configs()
 
 # The zones whose zone routes are compared (every Custom Domain and route of every Worker is in one of them).
 ZONES = ("ziyixi.science",)

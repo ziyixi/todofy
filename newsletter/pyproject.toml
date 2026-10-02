@@ -1,0 +1,96 @@
+[build-system]
+requires = ["setuptools==84.0.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "personal-newsletter"
+version = "0.1.0"
+description = "One private service for research intake, editorial work, and reviewed newsletters"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+  "fastapi==0.141.1", "uvicorn==0.52.4", "httpx==0.28.1",
+  "protobuf==7.36.1", "jinja2==3.1.6", "pillow==12.3.0", "PyYAML==6.0.3",
+  "ziyixi-protos==0.1.0.dev7",
+]
+
+[project.optional-dependencies]
+codex = ["openai-codex==0.156.1"]
+
+[dependency-groups]
+dev = [
+  "pytest==9.1.1", "pytest-asyncio==1.4.0", "ruff==0.16.6",
+  "mypy==2.3.1", "types-protobuf==7.35.1.20260827",
+  "types-PyYAML==6.0.12.20260906",
+]
+
+[tool.uv]
+required-version = "==0.12.10"
+
+[tool.uv.sources]
+ziyixi-protos = {url = "https://github.com/ziyixi/protos/releases/download/python-v0.1.0.dev7/ziyixi_protos-0.1.0.dev7-py3-none-any.whl"}
+
+[project.scripts]
+newsletter = "newsletter.cli:main"
+newsletter-trigger = "newsletter.trigger:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+newsletter = ["templates/*", "policy/*", "instructions/*.md", "instructions/discovery/*.md", "instructions/discovery/_sources/*.md", "workflows/*.yaml", "fixtures/*.json"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+asyncio_mode = "auto"
+cache_dir = ".artifacts/cache/pytest"
+
+[tool.ruff]
+target-version = "py312"
+line-length = 80
+cache-dir = ".artifacts/cache/ruff"
+exclude = [".venv"]
+
+[tool.ruff.lint]
+select = [
+  "E4", "E7", "E9", "E501", "F", "I", "N", "D", "B", "C4", "UP",
+  "PIE", "RET", "SIM", "C90", "BLE001", "PLC0415", "TID252", "SLF001",
+  "RUF021", "RUF043", "RUF100", "PT011", "PT012", "PT014",
+]
+ignore = ["D105", "D107", "SIM105", "SIM108", "SIM905"]
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
+
+[tool.ruff.lint.mccabe]
+max-complexity = 15
+
+[tool.ruff.lint.flake8-tidy-imports]
+ban-relative-imports = "all"
+
+[tool.ruff.lint.isort]
+force-single-line = true
+single-line-exclusions = ["typing", "collections.abc"]
+force-sort-within-sections = true
+order-by-type = false
+known-first-party = ["newsletter", "tests"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/test_*.py" = ["D1", "C901", "SLF001"]
+"tests/conftest.py" = ["D1"]
+
+[tool.mypy]
+python_version = "3.12"
+cache_dir = ".artifacts/cache/mypy"
+files = ["src/newsletter", "scripts", "tests/support"]
+check_untyped_defs = true
+disallow_untyped_defs = true
+no_implicit_optional = true
+warn_unused_ignores = true
+warn_redundant_casts = true
+show_error_codes = true
+warn_return_any = true
+disallow_any_generics = true
+disallow_untyped_calls = true
+warn_unreachable = true
+strict_equality = true

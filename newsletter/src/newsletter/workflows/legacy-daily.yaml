@@ -1,0 +1,60 @@
+# Content recipe only. Private events, rendering and delivery guards are code-owned.
+version: 1
+id: daily-newsletter
+nodes:
+  - id: history
+    type: history
+  - id: feeds
+    type: api_feed
+    on_error: continue
+    params: {timeout_seconds: 45}
+  - id: discovery
+    type: discovery
+    on_error: continue
+    needs: [history, feeds]
+    map: {from: run.instructions, max_items: 8}
+    params: {timeout_seconds: 180}
+  - id: candidates
+    type: deduplicate
+    needs: [history, feeds, discovery]
+    params: {max_candidates: 30}
+  - id: selection
+    type: selection
+    needs: [history, candidates]
+    params: {max_tasks: 8, timeout_seconds: 180}
+  - id: research
+    type: research
+    on_error: continue
+    needs: [candidates, selection]
+    map: {from: selection.research_tasks, max_items: 12}
+    params: {timeout_seconds: 360}
+  - id: composition
+    type: composition
+    needs: [history, candidates, selection, research]
+    params: {timeout_seconds: 600}
+  - id: gaps
+    type: gap_plan
+    needs: [composition]
+    params: {max_tasks: 3, timeout_seconds: 180}
+  - id: followup
+    type: research
+    on_error: continue
+    needs: [candidates, gaps]
+    map: {from: gaps.research_tasks, max_items: 3}
+    params: {timeout_seconds: 300}
+  - id: finalization
+    type: finalization
+    needs: [history, composition, gaps, followup]
+    params: {timeout_seconds: 600}
+  - id: review
+    type: review
+    needs: [finalization]
+    params: {timeout_seconds: 360}
+  - id: revision
+    type: revision
+    needs: [review]
+    params: {timeout_seconds: 600}
+  - id: final_review
+    type: final_review
+    needs: [revision]
+    params: {timeout_seconds: 360}

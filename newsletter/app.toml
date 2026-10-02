@@ -1,0 +1,19 @@
+# Public metadata only. Hosts/resources remain in this app's committed Wrangler configs.
+version = 1
+id = "newsletter"
+target = "vps"
+image = "ghcr.io/ziyixi/todofy-newsletter"
+
+[[entries]]
+id = "newsletter"
+name = "Newsletter"
+description = "家中服务器；每日读取 Todofy 报告写入 Notion"
+group = "services"
+icon = "newspaper"
+accent = "amber"
+access = false
+app_only_signals = []
+order = 2
+position = 9
+[entries.status]
+type = "none"
