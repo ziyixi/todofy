@@ -19,7 +19,8 @@
  * Its status source is `ops_v1` when the app has an Ops entrypoint the dashboard binds (a binding in env.ts and
  * wrangler.toml), else a `public_http` probe of a path its own Worker answers outside Access (`outside_access`,
  * `content_type`). `.github/scripts/test_wrangler_configs.py` fails until every production Worker and D1 database
- * is registered here, so a newly deployed app cannot stay off the dashboard.
+ * is registered here, and until every production Worker with a Custom Domain maps to an `apps` or `sites` entry
+ * whose url is on one of its hosts (only `home` is exempt), so a newly deployed app cannot stay off the dashboard.
  */
 import {
   API_V2_VERSION,
@@ -135,7 +136,8 @@ const ENTRIES: readonly EntryDef[] = [
     description: 's.ziyixi.science 短链接与启动器',
     group: 'apps',
     icon: 'link',
-    accent: 'rose',
+    // Not rose: its light and dark tokens sit next to the danger colour, so a healthy tile would read as a failure.
+    accent: 'slate',
     url: 'https://s.ziyixi.science/_/',
     access: true,
     status: {

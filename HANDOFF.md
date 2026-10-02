@@ -13,7 +13,7 @@ Rules for this file:
   security-posture details. Those stay with the owner.
 - Keep it short. The details live in each app's docs; link to them.
 
-Last updated: 2026-10-02 (the watch runtime suite's transport fix is ready on `watch-hang-fix`).
+Last updated: 2026-10-02 (the FlowDay and links dashboard tiles are ready on `dashboard-new-tiles`).
 
 ## How work lands
 
@@ -38,7 +38,7 @@ Last updated: 2026-10-02 (the watch runtime suite's transport fix is ready on `w
 | `mail.received.v1` onto proto, the contract (`proto/mailhero/webhook/v1`) | `proto-mail` @ `a45b9be` (on `proto-mail-rules`) | Done | Third; deploys Mail Hero and Todofy. Mail Hero's owner sends, resends, connection tests and canaries now build their event in the coordinator DO |
 | Watch go-live: Access app through `infra/`, deploy job, `watch.ziyixi.science` | `watch-infra` (local) | In progress | `watch-infra` first, then "Infra apply" (create 1), then the AUD goes into `watch/wrangler.toml` |
 | Watch W3: daily Todoist digest via task-intent `SOURCE_WATCH`, Ops status for the dashboard | `watch-l2` (local) | In progress | After `watch-infra`; deploys watch, Todofy, Lab, dashboard |
-| Home dashboard tiles for FlowDay and links | `dashboard-new-tiles` (local) | In progress | Dashboard only; watch's tile comes with `watch-l2` |
+| Home dashboard tiles for FlowDay and links | `dashboard-new-tiles` (local) | Done and reviewed; push, then land | Dashboard only (deploys `home`). Watch's tile comes with `watch-l2`: an `apps` entry with its `ops_v1` status, which `test_wrangler_configs.py` requires once watch is in `PRODUCTION` (`dashboard/docs/design-v2.md` §3) |
 
 ## Waiting to be verified
 
@@ -51,6 +51,8 @@ Last updated: 2026-10-02 (the watch runtime suite's transport fix is ready on `w
   container, its tunnel ingress and the `flowday-bypass` Access app) needs the owner's OK and goes through
   `infra/` for the Access app (`flowday/docs/design.md` section 11).
 - Infra drift must stay `no-op` on its daily run (13:23 UTC).
+- After `dashboard-new-tiles` deploys: 首页 shows FlowDay and 短链接 as ● 正常 with a latency
+  (`dashboard/docs/verification.md` §2).
 
 ## Waiting for the owner
 

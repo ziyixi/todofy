@@ -84,6 +84,14 @@ describe('the registry', () => {
     });
   });
 
+  it('gives no tile with a health level an accent that reads as a status colour', () => {
+    // design-v2 §7: status colours only inside shape + word marks. Rose's chip next to ● 正常 reads as ■ 故障.
+    const judged = REGISTRY.entries.filter((e) => e.group !== 'hidden' && e.status.type !== 'none' && e.status.type !== 'link_only');
+    expect(judged.map((e) => e.id)).toContain('links');
+    for (const e of judged) expect(e.accent, e.id).not.toBe('rose');
+    expect(REGISTRY.entries.find((e) => e.id === 'links')?.accent).toBe('slate');
+  });
+
   it('maps scripts to entries and to the flows they take part in (many-to-many)', () => {
     expect(entryOfScript('todofy-core')).toBe('todofy');
     expect(entryOfScript('ziyixi-notion-publish')).toBe('notion-publish');

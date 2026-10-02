@@ -163,7 +163,10 @@ export const ICON_KEYS = [
 ] as const;
 export type IconKey = (typeof ICON_KEYS)[number];
 
-/** Tile accents; each has light and dark tokens in web/src/styles (≥ 3:1 non-text contrast). */
+/**
+ * Tile accents; each has light and dark tokens in web/src/styles (≥ 3:1 non-text contrast). Rose sits next to the
+ * danger colour (--danger-*), so no tile with a health level uses it (test/registry.test.ts).
+ */
 export const ACCENTS = ['blue', 'green', 'teal', 'rose', 'violet', 'amber', 'slate'] as const;
 export type Accent = (typeof ACCENTS)[number];
 

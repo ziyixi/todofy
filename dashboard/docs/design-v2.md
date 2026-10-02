@@ -121,7 +121,11 @@ words or account-like IDs, except a D1/DO `match`).
 it: add a `WORKERS` row (and an `ENTRIES` row if it is a new tile), optionally a flow stage and its
 resources, run `npm test`, merge. No UI or API type change. A deployed app cannot be forgotten:
 `.github/scripts/test_wrangler_configs.py` fails until every Worker of a production `wrangler.toml` has a
-`WORKERS` row and each of its D1 databases a resource whose `match` is the `database_id`.
+`WORKERS` row and each of its D1 databases a resource whose `match` is the `database_id`, and until every
+production Worker with a Custom Domain maps through its `WORKERS` row to a visible `ENTRIES` row (group
+`apps` or `sites`) whose `url` is on one of that Worker's Custom Domains. The only exemption is `home`, this
+dashboard (Q11); Workers without a route (`todofy-core`, `ziyixi-notion-publish`) need no tile. A hidden entry,
+as the links app had until 2026-10-02, therefore fails CI.
 
 **Adding an app's tile** (as FlowDay and the links app were on 2026-10-02): an `ENTRIES` row in `apps` with its
 URL and Access lock, plus its Workers and resources. The status source is `ops_v1` when the app has an Ops
@@ -148,8 +152,10 @@ time (a stale status, stopped ticks) is right at every read.
     when the status was right but the media type was not the registry's `content_type` (another answerer
     than the app's Worker); `enabled: false` → unmonitored. With `error_rate`, the entry's Workers' error
     rate today (the rule of the Worker table, fresh GraphQL only; stale analytics never make the tile
-    unknown) adds `error_rate`, and the strip then lists it once, on the tile. Metric: latency of the last
-    ok probe while the tile is ok.
+    unknown) adds `error_rate`. While the error rate decides the tile, the strip lists it once, on the tile;
+    when the probe failure is at least as severe (a tie keeps the probe's reason), the tile keeps the probe's
+    reason and the Worker row on the Cloudflare view lists the error rate, two causes and two items as for
+    any other entry. Metric: latency of the last ok probe while the tile is ok.
   - analytics: no GraphQL data → unknown `never_checked`; data older than 90 min or of another day →
     unknown `stale`; the error-rate rule over the entry's scripts → `error_rate`; the last active hour
     more than `max_idle_hours` ago → warning `idle`; never seen → unknown `never_seen` until discovery
@@ -282,7 +288,7 @@ while loading; one failing source greys only its own tile. Times in the browser 
 ## 8. Decisions taken (owner-approved defaults)
 
 Q1 title 个人控制台 · Q2 tile = entry's own health · Q3 home keeps one line per flow and 4 mini bars ·
-Q4 home grouped by kind, flows by business · Q5 Flowday link-only (思源笔记 was too until the owner retired it on 2026-09-30; the owner removed Flowday's entry from the dashboard the same day, so the registry has no link-only entry now and the kind stays supported; on 2026-10-02 the owner asked for the new services on 首页, and FlowDay, now a Workers app, came back as a probed tile next to the links app) · Q6 probe the website every tick
+Q4 home grouped by kind, flows by business · Q5 Flowday link-only (思源笔记 was too until the owner retired it on 2026-09-30; the owner removed Flowday's entry from the dashboard the same day, so the registry has no link-only entry now and the kind stays supported; on 2026-10-02 the owner asked for the new services on 首页, and FlowDay, now a Workers app, came back as a probed tile next to the links app; `test/registry.test.ts` no longer records a FlowDay exclusion, so the pointer to it in `links/docs/design.md` §11 (L2, the registry step) is stale until the next links change rewords that step to the rule of §3: a `WORKERS` row plus a visible entry, enforced by `test_wrangler_configs.py`; it is not edited here because any change under `links/` redeploys the links app) · Q6 probe the website every tick
 · Q7 Newsletter 未接入 for now · Q8 24 h sparkline later (step 3, not in scope) · Q9 registry in repo TS
 · Q10 four tabs · Q11 no tile for this dashboard · Q12 unregistered Workers never alarm · Q13
 notion-publish idle limit 26 h.

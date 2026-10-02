@@ -152,6 +152,29 @@ def load(path: str) -> dict:
     return tomllib.loads((REPO / path).read_text())
 
 
+# Production Workers with a Custom Domain but no tile on 首页, and why.
+NO_TILE = {"home": "the dashboard itself (dashboard/docs/design-v2.md Q11)"}
+
+
+def registry_workers(registry: str) -> dict[str, str]:
+    """The dashboard registry's WORKERS rows: script name -> entry id."""
+    return dict(re.findall(r"\{ script: '([a-z0-9_-]+)', entry: '([a-z0-9_-]+)'", registry))
+
+
+def registry_entries(registry: str) -> dict[str, dict]:
+    """The dashboard registry's ENTRIES rows (id -> group and url), read from the object literals' own fields: one
+    object per `  {` line, fields at four spaces, so comments and nested objects are never read as fields."""
+    block = registry.split("const ENTRIES", 1)[1].split("\n];", 1)[0]
+    entries = {}
+    for row in re.split(r"^  \{$", block, flags=re.M)[1:]:
+        fields = dict(re.findall(r"^    (id|group|url): (null|'[^']*')", row, re.M))
+        entries[fields["id"].strip("'")] = {
+            "group": fields["group"].strip("'"),
+            "url": None if fields["url"] == "null" else fields["url"].strip("'"),
+        }
+    return entries
+
+
 def uncommented(path: str) -> str:
     return "\n".join(line for line in (REPO / path).read_text().splitlines() if not line.lstrip().startswith("#"))
 
@@ -566,17 +589,68 @@ class Hosts(unittest.TestCase):
 
     def test_the_dashboard_registers_every_production_worker_and_d1_database(self):
         """Every deployed Worker has a WORKERS row in dashboard/worker/src/registry.ts and every D1 database a resource
-        whose match is its database_id, so a new app (FlowDay at F4, links at L2, watch at W2) cannot stay off the home
-        dashboard or show up there as 未登记. An app moves into PRODUCTION when it deploys, and this then fails until the
-        registry names it."""
+        whose match is its database_id, so a new app (FlowDay at F4, links at L2, watch at W2) cannot show up on the
+        dashboard as 未登记. An app moves into PRODUCTION when it deploys, and this then fails until the registry names
+        it. That it also has a tile is the next test."""
         registry = (REPO / "dashboard" / "worker" / "src" / "registry.ts").read_text()
-        scripts = set(re.findall(r"\{ script: '([a-z0-9_-]+)', entry: '", registry))
+        scripts = registry_workers(registry)
         d1 = set(re.findall(r"kind: 'd1',[^}]*?match: '([0-9a-f-]{36})'", registry))
         for worker, path in PRODUCTION.items():
             with self.subTest(worker=worker):
                 self.assertIn(worker, scripts)
                 for database in load(path).get("d1_databases", []):
                     self.assertIn(database["database_id"], d1, f"D1 {database['database_name']} is not a registry resource")
+
+    def test_every_production_worker_with_a_host_has_a_visible_tile(self):
+        """A registered Worker can still be off 首页: the links app was, from L2 until 2026-10-02, under a hidden entry
+        with no URL. So every production Worker with a Custom Domain must map, through its WORKERS row, to an ENTRIES
+        row in a visible group (apps or sites) whose url is on one of that Worker's Custom Domains. A Worker without a
+        route (todofy-core, ziyixi-notion-publish) is reached through another and needs no tile of its own."""
+        registry = (REPO / "dashboard" / "worker" / "src" / "registry.ts").read_text()
+        entries = registry_entries(registry)
+        workers = registry_workers(registry)
+        for worker, path in PRODUCTION.items():
+            hosts = {route["pattern"] for route in load(path).get("routes", [])}
+            with self.subTest(worker=worker):
+                self.assertIn(worker, workers, f"{worker} has no WORKERS row")
+                if worker in NO_TILE:
+                    self.assertTrue(hosts, f"{worker} has no Custom Domain, drop its NO_TILE exemption")
+                    self.assertEqual(entries[workers[worker]]["group"], "hidden")
+                    continue
+                if not hosts:
+                    continue
+                entry = entries[workers[worker]]
+                self.assertIn(entry["group"], {"apps", "sites"}, f"{worker} is registered under a hidden entry")
+                self.assertIsNotNone(entry["url"], f"{worker}'s entry has no link")
+                self.assertIn(re.match(r"https://([^/]+)/", entry["url"]).group(1), hosts)
+
+    def test_the_registry_parser_sees_a_hidden_entry(self):
+        """The two tests above read registry.ts with regular expressions; a hidden, link-less entry must parse as such,
+        or the tile rule would pass on the very state it exists to catch."""
+        sample = """const ENTRIES: readonly EntryDef[] = [
+  {
+    // A comment with id: 'not-this' and url: 'https://x.ziyixi.science/' inside.
+    id: 'links',
+    group: 'hidden',
+    url: null,
+    status: { type: 'none' },
+  },
+  {
+    id: 'lab',
+    group: 'apps',
+    url: 'https://lab.ziyixi.science/',
+  },
+];
+
+const WORKERS: readonly WorkerDef[] = [
+  { script: 'links', entry: 'links', role: 'x' },
+];
+"""
+        self.assertEqual(
+            registry_entries(sample),
+            {"links": {"group": "hidden", "url": None}, "lab": {"group": "apps", "url": "https://lab.ziyixi.science/"}},
+        )
+        self.assertEqual(registry_workers(sample), {"links": "links"})
 
 
 class Workflow(unittest.TestCase):

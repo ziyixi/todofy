@@ -368,6 +368,18 @@ describe('the attention strip', () => {
     const failing = mergeScripts(scripts(), [{ script: 'flowday', requests: 100, errors: 30, subrequests: 0, cpu_p50_us: 1, cpu_p99_us: 2, do_requests: null, do_errors: null }], false, NOW);
     const errors = attentionView(base({ evaluation: input({ scripts: failing }) })).attention;
     expect(errors.items.map((i) => [i.source, i.code, i.observed, i.target])).toEqual([['flowday', 'error_rate', 'critical', { view: 'home', entry: 'flowday' }]]);
+    // Two causes, two items: when the probe failure is at least as severe it keeps the tile (a tie keeps the probe's
+    // reason), and the Worker row on the Cloudflare view lists the error rate, as it does for any other entry.
+    for (const errorCount of [30, 6]) {
+      const both = mergeScripts(scripts(), [{ script: 'flowday', requests: 100, errors: errorCount, subrequests: 0, cpu_p50_us: 1, cpu_p99_us: 2, do_requests: null, do_errors: null }], false, NOW);
+      const down = probe({ ok: false, http_status: 503, error: 'http_status', consecutive_failures: 2 });
+      const tie = attentionView(base({ evaluation: input({ probes: { ...input().probes, flowday: down }, scripts: both }) }));
+      expect(tie.attention.items.map((i) => [i.source, i.code, i.observed, i.target])).toEqual([
+        ['flowday', 'http_status', 'critical', { view: 'home', entry: 'flowday' }],
+        ['flowday', 'error_rate', errorCount === 30 ? 'critical' : 'warning', { view: 'cloudflare', script: 'flowday' }],
+      ]);
+      expect(tie.badges).toEqual({ home: 1, flows: 0, cloudflare: 1, ops: 0 });
+    }
   });
 
   it('shows an app that failed once as ◆ 未知 above the warnings, and counts it in the badges (F1)', () => {

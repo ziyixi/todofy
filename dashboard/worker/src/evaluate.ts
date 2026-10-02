@@ -588,7 +588,8 @@ function observedItem(source: string, code: string, level: ObservedLevel, target
  * 2. a flow stage at those levels whose cause is not already listed (same entry and code, or an item
  *    targeting that stage, such as a canary failure); target: the stage;
  * 3. a Worker whose error rate is warning/critical, unless its entry already has an error_rate item;
- *    target: its row on the Cloudflare view.
+ *    target: its row on the Cloudflare view. A public_http tile with `error_rate` owns that item only while
+ *    the error rate decides it; a probe failure at least as severe keeps the tile, and the row lists the rate.
  * This dashboard's own entry is left out: `tick_stale` (digest) already says the ticks stopped.
  */
 function observedItems(existing: readonly AttentionItem[], evaluation: EvalInput, registry: Registry): AttentionItem[] {
