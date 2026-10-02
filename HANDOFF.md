@@ -13,7 +13,7 @@ Rules for this file:
   security-posture details. Those stay with the owner.
 - Keep it short. The details live in each app's docs; link to them.
 
-Last updated: 2026-10-02 (watch-l2 lands with this change; `mail.received.v1` on proto and watch-infra have landed, and "Infra apply" created the Access application "watch").
+Last updated: 2026-10-02 (watch is live; the canary after the mail.received.v1 move passed; the dashboard tiles show FlowDay and links ok).
 
 ## How work lands
 
@@ -33,30 +33,19 @@ Last updated: 2026-10-02 (watch-l2 lands with this change; `mail.received.v1` on
 
 | Work | Branch (pushed unless noted) | State | Lands as |
 | --- | --- | --- | --- |
-| Watch W2 + W3: `watch.ziyixi.science`, daily Todoist digest via task-intent `SOURCE_WATCH` (Todofy's least-privilege `Intents` entrypoint), Ops status and the 网页监视 tile for the dashboard | `watch-l2` | Lands with this change (the AUD and the application id of the Access application "watch" filled in) | Needs the `production` secret `WATCH_CSRF_SIGNING_KEY` before the push; deploys Todofy before watch, then the dashboard, Lab and Mail Hero, and runs "Infra drift" (`infra/` changed) |
+| Owner/UI APIs onto proto (google.api.http, the shared transcoder and client), like Lab's | `proto-todofy-ui`, `proto-mail-hero-ui`, `proto-flowday-ui` (local) | In progress (build, two reviews, fix per app) | One app at a time; each deploys only its app. External routes (Todofy's newsletter endpoints, the mail webhook, backup APIs) keep their paths and bytes. The dashboard's API follows |
 
 ## Waiting to be verified
 
-- After `proto-mail` deploys: one manual canary from the dashboard (Ops `startCanary`); it must be queued,
-  delivered with the canary marker, and recorded by Todofy. Do not test with real archived mail: a real send
-  creates real Todoist tasks.
 - 2026-10-02 13:30 UTC: the first newsletter reports built by `todofy.report.v1` (Todofy precompute), then
   the newsletter run that reads them.
 - FlowDay rollback window (F5) ends 2026-10-08: the old container stays untouched until then. F6 (retire the
   container, its tunnel ingress and the `flowday-bypass` Access app) needs the owner's OK and goes through
   `infra/` for the Access app (`flowday/docs/design.md` section 11).
 - Infra drift must stay `no-op` on its daily run (13:23 UTC).
-- After `dashboard-new-tiles` deploys: 首页 shows FlowDay and 短链接 as ● 正常 with a latency
-  (`dashboard/docs/verification.md` §2).
-- After `watch-l2` deploys (`watch/README.md` "Deploy"):
-  - its push's "Infra drift" is green with `no-op: 19`, `output changes: 0` and no outputs problem: the only check of
-    the committed AUD (Access answers the deploy's probes before the Worker runs);
-  - signed in, `https://watch.ziyixi.science/status` shows a next scheduler time (the alarm is armed);
-  - the dashboard's 网页监视 tile (首页, 应用) is ● 正常 with its 新变化 count on its next tick, and the 网页监视 flow shows;
-  - the first daily digest task in Todoist after 14:00 UTC on a day a watch has changed (Todofy's `Intents`, source
-    watch);
-  - a follow-up commit records the `WatchState` Durable Object namespace id in the dashboard registry
-    (`dashboard/worker/src/registry.ts` RESOURCES `watch-state`, read-only from the account's namespace list).
+- Watch (live since 2026-10-02): the first daily digest task in Todoist after 14:00 UTC on a day a watch has
+  changed (Todofy's `Intents`, source watch). No watches exist yet; W4 (a shadow-mode week, then the owner's watches)
+  is next for this app.
 
 ## Waiting for the owner
 

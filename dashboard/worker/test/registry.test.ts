@@ -136,8 +136,9 @@ describe('the registry', () => {
     expect(resourceByMatch('r2', 'vultr-backup')).toMatchObject({ id: 'vps-backup', name: 'VPS 备份', entry: 'self-hosted' });
     expect(REGISTRY.entries.find((e) => e.id === 'self-hosted')).toMatchObject({ group: 'hidden', url: null, status: { type: 'none' } });
     expect(REGISTRY.workers.filter((w) => w.entry === 'self-hosted')).toEqual([]);
-    // WatchState's namespace exists only after the watch app's first deploy (W2): a follow-up commit records its id.
-    expect(REGISTRY.resources.filter((r) => r.match === null).map((r) => r.id)).toEqual(['watch-state']);
+    // Every resource is matched by its id; none waits for a first deploy.
+    expect(REGISTRY.resources.filter((r) => r.match === null).map((r) => r.id)).toEqual([]);
+    expect(resourceByMatch('do', 'd58e1bdabacb4d14bbba1887f169c8b4')).toMatchObject({ id: 'watch-state', entry: 'watch' });
   });
 
   it('keeps the tick within the Workers Free subrequest budget', () => {

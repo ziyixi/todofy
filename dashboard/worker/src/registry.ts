@@ -285,16 +285,8 @@ const RESOURCES: readonly ResourceDef[] = [
   { id: 'links-db', kind: 'd1', name: 'links 短链接库', entry: 'links', match: '2f8c5331-06ce-4347-8c0a-90fe51c82260' },
   // FlowDay's database (flowday/wrangler.toml, managed by infra/ since IaC P4).
   { id: 'flowday-db', kind: 'd1', name: 'flowday 主库', entry: 'flowday', match: 'df104e83-7183-47e3-b2f9-638dc7502c13' },
-  // Created by the watch app's first deploy (W2); a follow-up commit records its namespace id.
-  {
-    id: 'watch-state',
-    kind: 'do',
-    name: 'WatchState',
-    entry: 'watch',
-    script: 'watch',
-    match: null,
-    todo: "the namespace id of WatchState from the account's Durable Object namespace list after the watch app's first deploy",
-  },
+  // Created by the watch app's first deploy (W2, 2026-10-02); id read from the account's Durable Object namespace list.
+  { id: 'watch-state', kind: 'do', name: 'WatchState', entry: 'watch', script: 'watch', match: 'd58e1bdabacb4d14bbba1887f169c8b4' },
   // IDs read from the account's D1, Durable Object namespace and R2 bucket lists (2026-09-30).
   { id: 'mail-hero-store', kind: 'r2', name: 'mail-hero 邮件存储', entry: 'mail-hero', match: 'mail-hero-store' },
   { id: 'mail-hero-backup', kind: 'r2', name: 'mail-hero 备份', entry: 'mail-hero', match: 'mail-hero-backups' },
