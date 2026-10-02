@@ -24,7 +24,7 @@ describe('refresh', () => {
     expect(calls.map((call) => call.path)).not.toContain(PATHS.refreshHome)
   })
 
-  it('re-reads the statuses with /home?refresh=1, then the visible view', async () => {
+  it('re-reads the statuses through RefreshHomeView (POST /api/v1/homeView:refresh), then the visible view', async () => {
     freezeClock()
     const base = healthy()
     let refreshed = true

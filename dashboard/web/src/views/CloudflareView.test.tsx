@@ -376,7 +376,7 @@ describe('Cloudflare 监控', () => {
     expect(within(guard).queryByRole('button')).toBeNull()
   })
 
-  it('refreshes the usage with refresh=1 and says when it was too soon', async () => {
+  it('refreshes the usage through RefreshCloudflareView and says when it was too soon', async () => {
     let refreshed = true
     const base = healthy()
     const calls = await showCloudflare((call) => ({

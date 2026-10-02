@@ -2,12 +2,12 @@
  * The registry (docs/design-v2.md §3): what the dashboard shows, compiled into the Worker. Three
  * independent lists joined by id — entries (tiles), workers and resources (what Cloudflare measures),
  * flows (ordered stages across entries) — so one Worker can serve several flows and one flow can span
- * several Workers. The UI never imports this file: it receives the public view from
- * `GET /api/v2/registry`, so no hostname enters the UI bundle.
+ * several Workers. The UI never imports this file: it receives the public view from GetRegistry
+ * (`GET /api/v1/registry`), so no hostname enters the UI bundle.
  *
  * Only public DNS names of the owner's zone may appear here; no address, email, token or account
  * identifier (test/registry.test.ts enforces it). The one exception is a D1 database UUID or DO
- * namespace ID in a resource's `match` (format-checked, never served by /api/v2/registry), which may be
+ * namespace ID in a resource's `match` (format-checked, never served by GetRegistry, `GET /api/v1/registry`), which may be
  * filled in to name that row. Until then they stay `match: null` TODO placeholders: they match nothing,
  * and the account's row stays 未登记 with its raw ID.
  *
