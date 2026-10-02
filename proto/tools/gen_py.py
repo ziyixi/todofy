@@ -56,6 +56,7 @@ PYTHON_PACKAGES = {
     "todofy.report.v1": True,
     "ops.v1": True,
     "mailhero.webhook.v1": True,
+    "todofy.ui.v1": True,
     "prototest.v1": False,
 }
 REQUIRED_OPTION = "[google.api.field_behavior]"

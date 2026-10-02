@@ -1,0 +1,220 @@
+// A mail event of Todofy's ledger: one mail.received.v1 event Mail Hero delivered, and what Todofy did with it
+// (summary, Todoist task, the owner's reconcile actions). See todofy_ui_service.proto for the API.
+
+syntax = "proto3";
+
+package todofy.ui.v1;
+
+import "google/api/field_behavior.proto";
+import "google/api/resource.proto";
+import "google/protobuf/timestamp.proto";
+
+option java_multiple_files = true;
+option java_outer_classname = "MailEventProto";
+option java_package = "science.ziyixi.todofy.ui.v1";
+
+// One mail event. ListMailEvents answers the list fields only (name to imported); GetMailEvent and
+// ReconcileMailEvent answer every field. Never the mail's body: only the summary, the frozen Todoist
+// description and the first sender address while the event's body is still stored.
+message MailEvent {
+  option (google.api.resource) = {
+    type: "todofy.ziyixi.science/MailEvent"
+    pattern: "mailEvents/{mail_event}"
+    singular: "mailEvent"
+    plural: "mailEvents"
+  };
+
+  // Where the event is in the ledger (todofy/worker/todofy/core/vocab.py EventState).
+  enum State {
+    // Never sent.
+    STATE_UNSPECIFIED = 0;
+    // Stored, waiting for its summary.
+    STATE_PENDING = 1;
+    // A summary call is in flight.
+    STATE_SUMMARIZING = 2;
+    // Summarized; the Todoist task is next.
+    STATE_SUMMARIZED = 3;
+    // A Todoist create call is in flight.
+    STATE_TODO_SENDING = 4;
+    // Todoist's answer was lost: a footer lookup, or the owner, decides whether the task exists.
+    STATE_TODO_UNKNOWN = 5;
+    // The task exists; the event completes next.
+    STATE_TODO_CREATED = 6;
+    // Done; the mail's body is gone, only the deduplication record stays.
+    STATE_COMPLETE = 7;
+    // Given up (by the owner, or a canary that ended); the body is gone.
+    STATE_IGNORED = 8;
+    // The summary failed for good; the owner retries or dismisses it.
+    STATE_FAILED_SUMMARY = 9;
+  }
+
+  // mailEvents/{mail_event}: the Mail Hero event ID (a UUID, lower case).
+  string name = 1 [(google.api.field_behavior) = IDENTIFIER];
+  // The event's state.
+  State state = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Why the event stopped or was retried last; unset when nothing went wrong.
+  EventErrorCode error_code = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Attempts of the current step (summary, task creation or lookup).
+  int32 attempt_count = 4 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The Todoist task's ID once known (link it as https://app.todoist.com/app/task/<id>); empty before.
+  string task_id = 5 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // When Todofy stored the event.
+  google.protobuf.Timestamp receive_time = 6 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // When the event last changed.
+  google.protobuf.Timestamp update_time = 7 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // When the Worker acts on the event next; unset when nothing is scheduled.
+  google.protobuf.Timestamp next_attempt_time = 8 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // It needs the owner: failed_summary or todo_unknown, or not finished and received at least 6 hours ago.
+  bool attention = 9 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Imported from the retired Go service's ledger.
+  bool imported = 10 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // An ordered version, raised by every change: for display and for telling two answers apart. Never a
+  // precondition (that is `etag`).
+  int32 version = 11 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // AIP-154: send it back with ReconcileMailEvent, which refuses a stale one (ETAG_MISMATCH). Opaque.
+  string etag = 12 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Summary runs interrupted mid-call; three stop the automatic retries.
+  int32 crash_count = 13 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The mail's subject, from the stored event or, once complete, from the report cache; empty for imported
+  // rows without either.
+  string subject = 14 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The first From address while the event's body is still stored; empty after.
+  string sender = 15 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The model's summary (plain text); empty before it exists and after retention cleared it.
+  string summary = 16 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The Gemini model that wrote `summary`.
+  string summary_model = 17 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The frozen Todoist description, footer included (plain text).
+  string todo_body = 18 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The X-Request-Id of the frozen Todoist request.
+  string todoist_request_id = 19 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The reconcile actions the event takes now, most likely first; empty when it needs nothing.
+  repeated ReconcileAction allowed_actions = 20 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The event's state changes, oldest first: the first 100.
+  repeated Transition transitions = 21 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The full mail text imported from the retired Go cache (GetLegacyText), when it has one and it has
+  // not expired: legacyTexts/{the event's ID}.
+  string legacy_text = 22 [
+    (google.api.field_behavior) = OUTPUT_ONLY,
+    (google.api.resource_reference).type = "todofy.ziyixi.science/LegacyText"
+  ];
+  // A synthetic canary event of the dashboard's end-to-end check (contracts/ops-v1): summarized but never
+  // sent to Todoist, and never listed, counted or reminded of.
+  bool canary = 23 [(google.api.field_behavior) = OUTPUT_ONLY];
+}
+
+// One state change of a mail event.
+message Transition {
+  // Who moved the event.
+  enum Actor {
+    // Never sent.
+    ACTOR_UNSPECIFIED = 0;
+    // The Worker (webhook, alarm, retention).
+    ACTOR_WORKER = 1;
+    // The owner (ReconcileMailEvent).
+    ACTOR_OWNER = 2;
+  }
+
+  // When it changed.
+  google.protobuf.Timestamp transition_time = 1 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The state before; unset for the event's arrival.
+  MailEvent.State prior_state = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The state after.
+  MailEvent.State state = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The code the change recorded; unset for none.
+  EventErrorCode error_code = 4 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Who changed it.
+  Actor actor = 5 [(google.api.field_behavior) = OUTPUT_ONLY];
+}
+
+// The full mail text the retired Go service cached, imported into D1. Kept until `expire_time`.
+message LegacyText {
+  option (google.api.resource) = {
+    type: "todofy.ziyixi.science/LegacyText"
+    pattern: "legacyTexts/{legacy_text}"
+    singular: "legacyText"
+    plural: "legacyTexts"
+  };
+
+  // legacyTexts/{legacy_text}: a mail event's ID, or `legacy:<hash>` / `legacy:row-<id>` for an imported cache row
+  // with no ledger event (an archive no method lists; its IDs come from D1). In a URL the `:` is `%3A`.
+  string name = 1 [(google.api.field_behavior) = IDENTIFIER];
+  // When it was imported.
+  google.protobuf.Timestamp create_time = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // When retention removes it; unset keeps it forever.
+  google.protobuf.Timestamp expire_time = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The text (up to about 1.9 MB).
+  string text = 4 [(google.api.field_behavior) = OUTPUT_ONLY];
+}
+
+// An owner action on a mail event that needs one (MailEvent.allowed_actions).
+enum ReconcileAction {
+  // Never sent.
+  RECONCILE_ACTION_UNSPECIFIED = 0;
+  // The owner found the Todoist task (`task_id` required); the event completes with it.
+  RECONCILE_ACTION_TASK_CREATED = 1;
+  // The owner found no task. A footer lookup runs first, then the frozen request is sent again, which can
+  // duplicate a task.
+  RECONCILE_ACTION_TASK_NOT_CREATED = 2;
+  // Summarize again; not offered for mail_needs_review.
+  RECONCILE_ACTION_RETRY_SUMMARY = 3;
+  // Give up without checking Todoist; the event becomes ignored. Offered for failed_summary, todo_unknown, and
+  // summarized events whose last Todoist request was refused (todoist_rejected).
+  RECONCILE_ACTION_DISMISS = 4;
+}
+
+// Why a mail event stopped or was retried (todofy/worker/todofy/core/vocab.py EVENT_ERROR_CODES). The values
+// after EVENT_ERROR_CODE_CANARY_SIDE_EFFECT_BLOCKED were written only by the retired Go service and appear only
+// on imported rows.
+enum EventErrorCode {
+  // No code.
+  EVENT_ERROR_CODE_UNSPECIFIED = 0;
+  // Mail Hero flagged the mail for review; it is not summarized.
+  EVENT_ERROR_CODE_MAIL_NEEDS_REVIEW = 1;
+  // The model's summary call failed.
+  EVENT_ERROR_CODE_SUMMARY_FAILED = 2;
+  // Gemini answered with a quota error.
+  EVENT_ERROR_CODE_LLM_QUOTA = 3;
+  // The day's Gemini token budget is spent.
+  EVENT_ERROR_CODE_LLM_BUDGET_EXHAUSTED = 4;
+  // Gemini refused the request.
+  EVENT_ERROR_CODE_LLM_REQUEST_REJECTED = 5;
+  // Three summary runs were interrupted mid-call.
+  EVENT_ERROR_CODE_PROCESSING_INTERRUPTED_LIMIT = 6;
+  // Todoist refused the task request.
+  EVENT_ERROR_CODE_TODOIST_REJECTED = 7;
+  // Todoist refused the key (401/403); task creation is paused.
+  EVENT_ERROR_CODE_TODOIST_AUTH_BLOCKED = 8;
+  // Todoist answered 429.
+  EVENT_ERROR_CODE_TODOIST_RATE_LIMITED = 9;
+  // Todoist did not answer usably.
+  EVENT_ERROR_CODE_TODOIST_UNAVAILABLE = 10;
+  // The create call's answer was lost.
+  EVENT_ERROR_CODE_TODO_RESULT_UNKNOWN = 11;
+  // A create call was interrupted.
+  EVENT_ERROR_CODE_INTERRUPTED_TODO_CALL = 12;
+  // The footer lookup found no task.
+  EVENT_ERROR_CODE_LOOKUP_NOT_FOUND = 13;
+  // The footer lookup failed.
+  EVENT_ERROR_CODE_LOOKUP_FAILED = 14;
+  // The footer lookup found several tasks.
+  EVENT_ERROR_CODE_LOOKUP_AMBIGUOUS = 15;
+  // The owner dismissed the event.
+  EVENT_ERROR_CODE_DISMISSED_BY_OWNER = 16;
+  // A canary event reached a step that would call Todoist; it ended there.
+  EVENT_ERROR_CODE_CANARY_SIDE_EFFECT_BLOCKED = 17;
+  // Go service only: a saved event the contract refuses.
+  EVENT_ERROR_CODE_INVALID_SAVED_EVENT = 18;
+  // Go service only.
+  EVENT_ERROR_CODE_LLM_CLIENT_UNAVAILABLE = 19;
+  // Go service only.
+  EVENT_ERROR_CODE_SUMMARY_RENDER_FAILED = 20;
+  // Go service only.
+  EVENT_ERROR_CODE_TODO_CLIENT_UNAVAILABLE = 21;
+  // Go service only.
+  EVENT_ERROR_CODE_DATABASE_CLIENT_UNAVAILABLE = 22;
+  // Go service only.
+  EVENT_ERROR_CODE_CACHE_WRITE_FAILED = 23;
+  // Go service only.
+  EVENT_ERROR_CODE_CHECKPOINT_FAILED = 24;
+}

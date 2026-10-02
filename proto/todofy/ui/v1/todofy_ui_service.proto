@@ -1,0 +1,359 @@
+// Todofy's owner API: the HTTP/JSON interface between Todofy's UI (todofy/web) and its Workers.
+//
+// Callers. Only Todofy's own UI calls it (same origin, the owner host TODOFY_PUBLIC_HOST). The dashboard links to
+// Todofy's pages and reads Todofy only through the ops-v1 service binding; no other app calls these routes.
+//
+// Transport. google.api.http bindings under the prefix /api/v1, served by the shared transcoder
+// (proto/ts/http-transcoder.ts) in the gateway Worker "todofy" (todofy/gateway), and called through the shared
+// client (proto/ts/http-client.ts). The gateway decodes and checks every request, then hands it to the Python
+// Durable Object TodofyCore in todofy-core over its existing COORDINATOR binding (one RPC per request, the request
+// as wire JSON); TodofyCore reads it again with the generated Python code, does the work (D1, its storage, Gemini
+// for a recompute) and answers the response message in wire JSON, which the gateway reads leniently and writes
+// with the transcoder. Bodies, query parameters and responses are JSON in the wire JSON profile
+// (proto/README.md): proto field names (snake_case), enum values in lower case without their prefix
+// (`MailEvent.State.STATE_TODO_UNKNOWN` is "todo_unknown"), timestamps in RFC 3339 UTC. Inputs are read strictly
+// (an unknown field, query parameter or enum name is INVALID_ARGUMENT), outputs leniently. Request bodies are at
+// most 16 KiB. Errors: errors.proto (Todofy's reasons) and common/errors/v1/errors.proto (the reasons every API
+// shares).
+//
+// Authentication, in front of the transcoder (packages/edge-auth, Todofy's parameters in its SPEC §5.4): every
+// route needs the Cloudflare Access JWT of the owner (header Cf-Access-Jwt-Assertion or cookie CF_Authorization);
+// every method other than GET also needs the same-origin Origin header and the signed double-submit CSRF token
+// (header X-CSRF-Token, cookie todofy_csrf), issued by GET /api/csrf, which is transport, not part of this
+// service. With MAINTENANCE_MODE on, every method other than GET is MAINTENANCE.
+//
+// Every mutation takes a `request_id` (AIP-155, a UUID4 the browser makes once per distinct request): repeating a
+// request with the same ID applies it once (ReconcileMailEvent answers the event as it is now, RecomputeReport the
+// stored outcome of the first request). Reused for another request it is REQUEST_ID_REUSED and changes nothing.
+// Without one the gateway makes one up, so nothing is deduplicated.
+//
+// Not in this service: the machine routes on the hooks hosts (TODOFY_HOOKS_HOSTS, outside Access), whose callers
+// are other systems that keep their exact paths, methods, authentication and bytes: POST /hooks/mail (Mail Hero's
+// mail.received.v1 webhook: Bearer, Idempotency-Key; its body is proto/mailhero/webhook/v1), GET /api/summary and
+// GET /api/recommendation (the newsletter: Basic authentication, a 401 with WWW-Authenticate, the old error
+// envelope, and a `top` that takes a sign and leading zeros; their bodies are proto/todofy/report/v1) and GET
+// /health (the newsletter's preflight). The transcoder would answer their errors as google.rpc.Status and read
+// `top` as a strict integer, which changes their wire, so they stay hand-written in todofy/gateway/src/hooks.ts and
+// todofy/api/machine-api-v1.openapi.yaml describes them.
+//
+// Before todofy.ui.v1 (until 2026-10-02) the same operations were the hand-written routes of
+// todofy/api/owner-api-v1.openapi.yaml under /api/v1; each rpc below names the route it replaces. Those paths now
+// answer 410 with Todofy's old error envelope and the code `reload_required` (todofy/gateway/src/owner.ts), so a
+// tab still running the old UI tells the owner to reload.
+//
+// buf lint. The methods that answer a resource (the Gets and ReconcileMailEvent) carry two `buf:lint:ignore`
+// lines: RPC_RESPONSE_STANDARD_NAME and RPC_REQUEST_RESPONSE_UNIQUE, which the AIPs contradict (a standard method
+// answers the resource itself); api-linter checks those names instead. They are excused here, next to each
+// method, not in buf.yaml, which reaches every proto user's deploy (.github/scripts/ci_changes.py).
+
+syntax = "proto3";
+
+package todofy.ui.v1;
+
+import "google/api/annotations.proto";
+import "google/api/client.proto";
+import "google/api/field_behavior.proto";
+import "google/api/field_info.proto";
+import "google/api/resource.proto";
+import "todofy/report/v1/report.proto";
+import "todofy/ui/v1/history.proto";
+import "todofy/ui/v1/mail_event.proto";
+import "todofy/ui/v1/reports.proto";
+import "todofy/ui/v1/status.proto";
+
+option java_multiple_files = true;
+option java_outer_classname = "TodofyUiServiceProto";
+option java_package = "science.ziyixi.todofy.ui.v1";
+
+// The owner's Todofy: the ledger of mail events and its reconcile actions, the daily reminders, the newsletter's
+// reports, the daily history and the setup facts.
+// (-- api-linter: core::0121::resource-must-support-list=disabled
+//     aip.dev/not-precedent: a legacy text is reached from its event (MailEvent.legacy_text), or by an ID read from
+//     D1 for the archive no page shows; a list of the archive would have no caller. --)
+// (-- api-linter: core::0121::resource-must-support-get=disabled
+//     aip.dev/not-precedent: daily reminders, metric days, GTD days and reviews are only ever shown as their
+//     lists (a day's row is one line of a table or a chart); a Get of one would have no caller. --)
+service TodofyUiService {
+  option (google.api.default_host) = "todofy.ziyixi.science";
+
+  // Counters, switches and budgets for the shell and the status banner. Replaces GET /api/v1/overview.
+  // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
+  // buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE
+  rpc GetServiceStatus(GetServiceStatusRequest) returns (ServiceStatus) {
+    option (google.api.http) = {get: "/api/v1/{name=serviceStatus}"};
+    option (google.api.method_signature) = "name";
+  }
+
+  // The ledger's events: newest first, or the ones that need the owner, oldest first (AIP-132, AIP-158).
+  // Replaces GET /api/v1/events.
+  rpc ListMailEvents(ListMailEventsRequest) returns (ListMailEventsResponse) {
+    option (google.api.http) = {get: "/api/v1/mailEvents"};
+    option (google.api.method_signature) = "";
+  }
+
+  // One event with its content preview, allowed actions and timeline. Replaces GET /api/v1/events/{event_id}.
+  // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
+  // buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE
+  rpc GetMailEvent(GetMailEventRequest) returns (MailEvent) {
+    option (google.api.http) = {get: "/api/v1/{name=mailEvents/*}"};
+    option (google.api.method_signature) = "name";
+  }
+
+  // Applies an owner reconcile action (AIP-136) and answers the event after the transition; any follow-up work
+  // (lookup, summary, task creation) runs later in TodofyCore's alarm. The action must be among the event's
+  // `allowed_actions` and `etag` its current one. Replaces POST /api/v1/events/{event_id}/reconcile.
+  // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
+  // buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE
+  rpc ReconcileMailEvent(ReconcileMailEventRequest) returns (MailEvent) {
+    option (google.api.http) = {
+      post: "/api/v1/{name=mailEvents/*}:reconcile"
+      body: "*"
+    };
+  }
+
+  // The daily reminders, newest day first. Replaces GET /api/v1/reminders.
+  rpc ListDailyReminders(ListDailyRemindersRequest) returns (ListDailyRemindersResponse) {
+    option (google.api.http) = {get: "/api/v1/dailyReminders"};
+    option (google.api.method_signature) = "";
+  }
+
+  // The stored reports exactly as the newsletter endpoints return them. Replaces GET /api/v1/reports/latest.
+  // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
+  // buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE
+  rpc GetLatestReports(GetLatestReportsRequest) returns (LatestReports) {
+    option (google.api.http) = {get: "/api/v1/{name=latestReports}"};
+    option (google.api.method_signature) = "name";
+  }
+
+  // Recomputes one report now (calls Gemini unless the window is empty) and stores it for the newsletter. Shares
+  // the hourly report-computation cap with the newsletter endpoints (RATE_LIMITED). Replaces POST
+  // /api/v1/reports/recompute.
+  rpc RecomputeReport(RecomputeReportRequest) returns (RecomputeReportResponse) {
+    option (google.api.http) = {
+      post: "/api/v1/{name=latestReports}:recompute"
+      body: "*"
+    };
+  }
+
+  // The mail pipeline's finished UTC days, newest first. Replaces GET /api/v1/metrics/daily.
+  rpc ListMetricDays(ListMetricDaysRequest) returns (ListMetricDaysResponse) {
+    option (google.api.http) = {get: "/api/v1/metricDays"};
+    option (google.api.method_signature) = "";
+  }
+
+  // The GTD ledger's UTC days up to today, newest first. Replaces the days of GET /api/v1/gtd/daily.
+  rpc ListGtdDays(ListGtdDaysRequest) returns (ListGtdDaysResponse) {
+    option (google.api.http) = {get: "/api/v1/gtdDays"};
+    option (google.api.method_signature) = "";
+  }
+
+  // The weekly reviews of the last 12 weeks, newest first. Replaces the latest_review of GET /api/v1/gtd/daily.
+  rpc ListGtdReviews(ListGtdReviewsRequest) returns (ListGtdReviewsResponse) {
+    option (google.api.http) = {get: "/api/v1/gtdReviews"};
+    option (google.api.method_signature) = "";
+  }
+
+  // The full mail text imported from the retired Go cache. Replaces GET /api/v1/legacy_text/{event_id}.
+  // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
+  // buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE
+  rpc GetLegacyText(GetLegacyTextRequest) returns (LegacyText) {
+    option (google.api.http) = {get: "/api/v1/{name=legacyTexts/*}"};
+    option (google.api.method_signature) = "name";
+  }
+
+  // The setup page's integration facts; never a secret's value. Replaces GET /api/v1/setup.
+  // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
+  // buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE
+  rpc GetIntegration(GetIntegrationRequest) returns (Integration) {
+    option (google.api.http) = {get: "/api/v1/{name=integration}"};
+    option (google.api.method_signature) = "name";
+  }
+}
+
+// Input of GetServiceStatus.
+message GetServiceStatusRequest {
+  // Always `serviceStatus`.
+  string name = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (google.api.resource_reference).type = "todofy.ziyixi.science/ServiceStatus"
+  ];
+}
+
+// Input of ListMailEvents.
+// (-- api-linter: core::0132::request-unknown-fields=disabled
+//     aip.dev/not-precedent: `state` and `attention` pick one of the ledger's two indexed lists (by state, newest
+//     first; the attention list, oldest first, as the owner works through it); the literal filter subset of
+//     proto/ts/filter.ts has no field comparisons to say that with. --)
+message ListMailEventsRequest {
+  // At most this many events (AIP-158): 0 means 50, and a larger value is read as 100.
+  int32 page_size = 1 [(google.api.field_behavior) = OPTIONAL];
+  // The previous page's `next_page_token`, with the same `state` and `attention` (others are INVALID_ARGUMENT).
+  string page_token = 2 [(google.api.field_behavior) = OPTIONAL];
+  // Only events in this state, newest first. Canary events are never listed.
+  // (-- api-linter: core::0216::state-field-output-only=disabled
+  //     aip.dev/not-precedent: an input that picks which events to list, not a resource's state. --)
+  MailEvent.State state = 3 [(google.api.field_behavior) = OPTIONAL];
+  // Only the events that need the owner (MailEvent.attention), oldest first; with `state` it is
+  // INVALID_ARGUMENT.
+  bool attention = 4 [(google.api.field_behavior) = OPTIONAL];
+}
+
+// Output of ListMailEvents.
+message ListMailEventsResponse {
+  // The page: list fields only (MailEvent).
+  repeated MailEvent mail_events = 1 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The next page's token; empty on the last page.
+  string next_page_token = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
+}
+
+// Input of GetMailEvent.
+message GetMailEventRequest {
+  // mailEvents/{mail_event}.
+  string name = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (google.api.resource_reference).type = "todofy.ziyixi.science/MailEvent"
+  ];
+}
+
+// Input of ReconcileMailEvent.
+message ReconcileMailEventRequest {
+  // mailEvents/{mail_event}.
+  string name = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (google.api.resource_reference).type = "todofy.ziyixi.science/MailEvent"
+  ];
+  // The action, one of the event's `allowed_actions` (ACTION_NOT_ALLOWED otherwise).
+  ReconcileAction action = 2 [(google.api.field_behavior) = REQUIRED];
+  // The event's current etag (AIP-154; ETAG_MISMATCH otherwise).
+  string etag = 3 [(google.api.field_behavior) = REQUIRED];
+  // With TASK_CREATED only, and then required: the Todoist task's ID, 1-64 characters of `0-9A-Za-z_-`.
+  string task_id = 4 [(google.api.field_behavior) = OPTIONAL];
+  // The idempotency key (AIP-155); see TodofyUiService.
+  string request_id = 5 [
+    (google.api.field_info).format = UUID4,
+    (google.api.field_behavior) = OPTIONAL
+  ];
+}
+
+// Input of ListDailyReminders.
+message ListDailyRemindersRequest {
+  // At most this many reminders (AIP-158): 0 means 50, and a larger value is read as 100.
+  int32 page_size = 1 [(google.api.field_behavior) = OPTIONAL];
+  // The previous page's `next_page_token`.
+  string page_token = 2 [(google.api.field_behavior) = OPTIONAL];
+}
+
+// Output of ListDailyReminders.
+message ListDailyRemindersResponse {
+  // The page, newest day first.
+  repeated DailyReminder daily_reminders = 1 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The next page's token; empty on the last page.
+  string next_page_token = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
+}
+
+// Input of GetLatestReports.
+message GetLatestReportsRequest {
+  // Always `latestReports`.
+  string name = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (google.api.resource_reference).type = "todofy.ziyixi.science/LatestReports"
+  ];
+}
+
+// Input of RecomputeReport.
+message RecomputeReportRequest {
+  // Always `latestReports`.
+  string name = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (google.api.resource_reference).type = "todofy.ziyixi.science/LatestReports"
+  ];
+  // Which report.
+  ReportKind kind = 2 [(google.api.field_behavior) = REQUIRED];
+  // A recommendation's number of tasks, 1-10; 0 (or absent) means REPORT_DEFAULT_TOP. Set with a summary, it is
+  // INVALID_ARGUMENT.
+  int32 top_n = 3 [(google.api.field_behavior) = OPTIONAL];
+  // The idempotency key (AIP-155); see TodofyUiService. A failure TodofyCore answered (RATE_LIMITED,
+  // UNAVAILABLE) is stored too and replayed for the same ID: a new attempt needs a new ID.
+  string request_id = 4 [
+    (google.api.field_info).format = UUID4,
+    (google.api.field_behavior) = OPTIONAL
+  ];
+}
+
+// Output of RecomputeReport: the stored report, one of the two.
+message RecomputeReportResponse {
+  // Set for REPORT_KIND_SUMMARY.
+  // (-- api-linter: core::0215::foreign-type-reference=disabled
+  //     aip.dev/not-precedent: the newsletter's own report (todofy.report.v1), as it was stored. --)
+  todofy.report.v1.SummaryReport summary = 1 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Set for REPORT_KIND_RECOMMENDATION.
+  // (-- api-linter: core::0215::foreign-type-reference=disabled
+  //     aip.dev/not-precedent: the newsletter's own report (todofy.report.v1), as it was stored. --)
+  todofy.report.v1.RecommendationReport recommendation = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
+}
+
+// Input of ListMetricDays.
+message ListMetricDaysRequest {
+  // At most this many days (AIP-158): 0 means 30, and a larger value is read as 90.
+  int32 page_size = 1 [(google.api.field_behavior) = OPTIONAL];
+  // The previous page's `next_page_token`.
+  string page_token = 2 [(google.api.field_behavior) = OPTIONAL];
+}
+
+// Output of ListMetricDays.
+message ListMetricDaysResponse {
+  // Every finished UTC day of the page, newest first (yesterday first on the first page), counted or not.
+  repeated MetricDay metric_days = 1 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The next page's token (older days, back to the 400 days kept); empty on the last page.
+  string next_page_token = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
+}
+
+// Input of ListGtdDays.
+message ListGtdDaysRequest {
+  // At most this many days (AIP-158): 0 means 30, and a larger value is read as 120.
+  int32 page_size = 1 [(google.api.field_behavior) = OPTIONAL];
+  // The previous page's `next_page_token`.
+  string page_token = 2 [(google.api.field_behavior) = OPTIONAL];
+}
+
+// Output of ListGtdDays.
+message ListGtdDaysResponse {
+  // Every UTC day of the page, newest first (today first on the first page), recorded or not.
+  repeated GtdDay gtd_days = 1 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The next page's token (older days, back to the 120 days kept); empty on the last page.
+  string next_page_token = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
+}
+
+// Input of ListGtdReviews.
+message ListGtdReviewsRequest {
+  // At most this many reviews (AIP-158): 0 means 12, and a larger value is read as 12.
+  int32 page_size = 1 [(google.api.field_behavior) = OPTIONAL];
+  // The previous page's `next_page_token`.
+  string page_token = 2 [(google.api.field_behavior) = OPTIONAL];
+}
+
+// Output of ListGtdReviews.
+message ListGtdReviewsResponse {
+  // The page, newest week first; only weeks of the last 12.
+  repeated GtdReview gtd_reviews = 1 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The next page's token; empty on the last page.
+  string next_page_token = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
+}
+
+// Input of GetLegacyText.
+message GetLegacyTextRequest {
+  // legacyTexts/{legacy_text}.
+  string name = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (google.api.resource_reference).type = "todofy.ziyixi.science/LegacyText"
+  ];
+}
+
+// Input of GetIntegration.
+message GetIntegrationRequest {
+  // Always `integration`.
+  string name = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (google.api.resource_reference).type = "todofy.ziyixi.science/Integration"
+  ];
+}

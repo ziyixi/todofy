@@ -1,0 +1,46 @@
+// The newsletter's reports as the owner sees them: the stored reports (todofy.report.v1) and their recompute.
+// See todofy_ui_service.proto for the API.
+
+syntax = "proto3";
+
+package todofy.ui.v1;
+
+import "google/api/field_behavior.proto";
+import "google/api/resource.proto";
+import "todofy/report/v1/report.proto";
+
+option java_multiple_files = true;
+option java_outer_classname = "ReportsProto";
+option java_package = "science.ziyixi.todofy.ui.v1";
+
+// The latest stored reports, exactly the reports the newsletter endpoints (GET /api/summary, GET
+// /api/recommendation on a hooks host) serve, written in the same wire JSON.
+message LatestReports {
+  option (google.api.resource) = {
+    type: "todofy.ziyixi.science/LatestReports"
+    pattern: "latestReports"
+    singular: "latestReports"
+    plural: "latestReports"
+  };
+
+  // Always `latestReports`.
+  string name = 1 [(google.api.field_behavior) = IDENTIFIER];
+  // The latest daily summary; unset before the first.
+  // (-- api-linter: core::0215::foreign-type-reference=disabled
+  //     aip.dev/not-precedent: the newsletter's own report (todofy.report.v1), shown as the newsletter gets it. --)
+  todofy.report.v1.SummaryReport summary = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The latest recommendation of each `top_n` (at most 10), ordered by `top_n`.
+  // (-- api-linter: core::0215::foreign-type-reference=disabled
+  //     aip.dev/not-precedent: the newsletter's own report (todofy.report.v1), shown as the newsletter gets it. --)
+  repeated todofy.report.v1.RecommendationReport recommendations = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
+}
+
+// Which report to recompute.
+enum ReportKind {
+  // Never sent.
+  REPORT_KIND_UNSPECIFIED = 0;
+  // The daily summary (summary-v1).
+  REPORT_KIND_SUMMARY = 1;
+  // The ranked tasks (recommendation-v1).
+  REPORT_KIND_RECOMMENDATION = 2;
+}

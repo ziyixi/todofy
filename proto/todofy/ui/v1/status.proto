@@ -1,0 +1,269 @@
+// The service's state at a glance (the shell and the status banner), the daily reminders and the setup page's
+// integration facts. See todofy_ui_service.proto for the API.
+//
+// (-- api-linter: core::0142::time-field-type=disabled
+//     aip.dev/not-precedent: durations in whole seconds (`window_seconds`); the wire JSON profile has no
+//     google.protobuf.Duration. --)
+
+syntax = "proto3";
+
+package todofy.ui.v1;
+
+import "google/api/field_behavior.proto";
+import "google/api/resource.proto";
+import "google/protobuf/timestamp.proto";
+
+option java_multiple_files = true;
+option java_outer_classname = "StatusProto";
+option java_package = "science.ziyixi.todofy.ui.v1";
+
+// Counters, switches and budgets. Only active ledger rows are counted, so its cost does not grow with the
+// ledger; the UI reads it every five minutes.
+message ServiceStatus {
+  option (google.api.resource) = {
+    type: "todofy.ziyixi.science/ServiceStatus"
+    pattern: "serviceStatus"
+    singular: "serviceStatus"
+    plural: "serviceStatuses"
+  };
+
+  // Always `serviceStatus`.
+  string name = 1 [(google.api.field_behavior) = IDENTIFIER];
+  // The deployed commit of todofy-core.
+  string build = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // When the status was read.
+  google.protobuf.Timestamp read_time = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The operating switches (GitHub variables, set at deploy).
+  Switches switches = 4 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Events per active (not finished) state.
+  ActiveCounts active_counts = 5 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Events that need the owner (MailEvent.attention).
+  int32 attention_count = 6 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Events stored in the last 24 hours.
+  int32 received_last_day_count = 7 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The newest daily reminder; unset before the first.
+  // (-- api-linter: core::0122::embedded-resource=disabled
+  //     aip.dev/not-precedent: the banner shows the newest reminder's state as read in the same request; a name
+  //     would cost the UI a second request every five minutes for one line. --)
+  DailyReminder latest_reminder = 8 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // When TodofyCore's alarm runs next; unset when none is armed.
+  google.protobuf.Timestamp next_alarm_time = 9 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // `next_attempt_time` of the longest-waiting due event; unset when nothing is due.
+  google.protobuf.Timestamp oldest_due_time = 10 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Today's Gemini budget.
+  GeminiBudget gemini = 11 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Todoist's rate window and auth block.
+  TodoistBudget todoist = 12 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The weekly D1 backup.
+  BackupStatus backup = 13 [(google.api.field_behavior) = OUTPUT_ONLY];
+}
+
+// The operating switches.
+message Switches {
+  // MAINTENANCE_MODE: no new mail, no owner writes, no alarm work.
+  bool maintenance_mode = 1 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // PROCESSING_PAUSED: mail is stored but not processed.
+  bool processing_paused = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // FORCE_PAUSE_TODOIST: no Todoist call.
+  bool force_pause_todoist = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // REMINDER_ENABLED: the daily reminder task.
+  bool reminder_enabled = 4 [(google.api.field_behavior) = OUTPUT_ONLY];
+}
+
+// Events per active state (MailEvent.State).
+message ActiveCounts {
+  // pending.
+  int32 pending_count = 1 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // summarizing.
+  int32 summarizing_count = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // summarized.
+  int32 summarized_count = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // todo_sending.
+  int32 todo_sending_count = 4 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // todo_unknown.
+  int32 todo_unknown_count = 5 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // todo_created.
+  int32 todo_created_count = 6 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // failed_summary.
+  int32 failed_summary_count = 7 [(google.api.field_behavior) = OUTPUT_ONLY];
+}
+
+// The UTC day's Gemini budget (TodofyCore's storage).
+message GeminiBudget {
+  // The UTC day, YYYY-MM-DD.
+  string day = 1 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // GEMINI_DAILY_TOKEN_BUDGET.
+  int32 token_budget = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Tokens reserved by calls in flight.
+  int32 reserved_tokens = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Tokens used today.
+  int32 used_tokens = 4 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Calls made today.
+  int32 call_count = 5 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The models in fallback order.
+  repeated string models = 6 [(google.api.field_behavior) = OUTPUT_ONLY];
+}
+
+// Todoist's rate window and auth block.
+message TodoistBudget {
+  // Task creation is paused until then after a 401/403; unset when it is not.
+  google.protobuf.Timestamp block_expire_time = 1 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The rate window's length (900).
+  int32 window_seconds = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Calls counted in the current window.
+  int32 window_call_count = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The calls a window allows (1,000).
+  int32 window_call_limit = 4 [(google.api.field_behavior) = OUTPUT_ONLY];
+}
+
+// The weekly D1 backup to the private R2 bucket (Sunday 10:00 UTC), every table in each one. While a backup
+// runs (a few minutes, never over 30) the ledger waits and owner writes are UNAVAILABLE.
+message BackupStatus {
+  // The running job or the last outcome.
+  enum State {
+    // Never sent.
+    STATE_UNSPECIFIED = 0;
+    // The Worker has no BACKUPS bucket binding.
+    STATE_DISABLED = 1;
+    // No backup finished or failed yet.
+    STATE_NEVER = 2;
+    // A backup is running.
+    STATE_RUNNING = 3;
+    // The last backup finished.
+    STATE_OK = 4;
+    // The last backup failed (`last_error_code`).
+    STATE_FAILED = 5;
+  }
+
+  // Why the last failed job stopped.
+  enum ErrorCode {
+    // No failure.
+    ERROR_CODE_UNSPECIFIED = 0;
+    // R2 or D1 failed.
+    ERROR_CODE_STORAGE_ERROR = 1;
+    // The job outlived its lease.
+    ERROR_CODE_LEASE_EXPIRED = 2;
+  }
+
+  // The state.
+  State state = 1 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // When the newest complete backup finished.
+  google.protobuf.Timestamp last_backup_time = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Its R2 prefix, named after the second its job started, e.g. `backups/2026-09-27T100002Z/`
+  // (tools/backup_restore.py reads it).
+  string last_backup_key = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The compressed size of its parts and manifest.
+  int32 last_backup_size_bytes = 4 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Rows in it.
+  int32 last_backup_row_count = 5 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // When the last job failed.
+  google.protobuf.Timestamp last_failure_time = 6 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Why the last failed job stopped.
+  ErrorCode last_error_code = 7 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // When the next backup is due; unset while disabled or running.
+  google.protobuf.Timestamp next_backup_time = 8 [(google.api.field_behavior) = OUTPUT_ONLY];
+}
+
+// The daily reminder of one UTC day: one Todoist task listing what needs the owner. IDs, states and codes
+// only, never the frozen text.
+message DailyReminder {
+  option (google.api.resource) = {
+    type: "todofy.ziyixi.science/DailyReminder"
+    pattern: "dailyReminders/{daily_reminder}"
+    singular: "dailyReminder"
+    plural: "dailyReminders"
+  };
+
+  // The reminder's Todoist call.
+  enum State {
+    // Never sent.
+    STATE_UNSPECIFIED = 0;
+    // The create call is in flight.
+    STATE_SENDING = 1;
+    // The task exists.
+    STATE_CREATED = 2;
+    // The call's answer was lost.
+    STATE_UNKNOWN = 3;
+    // The call failed (retried while attempts remain).
+    STATE_FAILED = 4;
+  }
+
+  // dailyReminders/{daily_reminder}: the UTC day, YYYY-MM-DD.
+  string name = 1 [(google.api.field_behavior) = IDENTIFIER];
+  // The state.
+  State state = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The Todoist task's ID once created; empty before.
+  string task_id = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Events that needed the owner when the day was claimed.
+  int32 attention_count = 4 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Create calls made.
+  int32 attempt_count = 5 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Why the last call failed; unset when none did.
+  ReminderErrorCode error_code = 6 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // When the call is retried; unset when it is not.
+  google.protobuf.Timestamp next_attempt_time = 7 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // When the day was claimed.
+  google.protobuf.Timestamp create_time = 8 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // When it last changed.
+  google.protobuf.Timestamp update_time = 9 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Imported from the retired Go service.
+  bool imported = 10 [(google.api.field_behavior) = OUTPUT_ONLY];
+}
+
+// The setup page's integration facts: hosts, paths and whether each secret is set, never a secret's value.
+message Integration {
+  option (google.api.resource) = {
+    type: "todofy.ziyixi.science/Integration"
+    pattern: "integration"
+    singular: "integration"
+    plural: "integrations"
+  };
+
+  // Always `integration`.
+  string name = 1 [(google.api.field_behavior) = IDENTIFIER];
+  // The deployed commit of the gateway.
+  string build = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // TODOFY_PUBLIC_HOST, lower case: the owner UI's host.
+  string public_host = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // TODOFY_HOOKS_HOSTS, lower case: the machine hosts (webhook, newsletter, health).
+  repeated string hooks_hosts = 4 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The webhook's path on a hooks host (`/hooks/mail`).
+  string webhook_path = 5 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // MAIL_SOURCE_ID: the ledger's source of Mail Hero events.
+  string mail_source_id = 6 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The signed-in owner (ACCESS_OWNER, lower case).
+  string access_owner = 7 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Which secrets and settings are present.
+  ConfiguredSecrets configured = 8 [(google.api.field_behavior) = OUTPUT_ONLY];
+}
+
+// Whether each secret or setting is present; a value is never returned.
+message ConfiguredSecrets {
+  // MAIL_WEBHOOK_TOKEN_SHA256 (the gateway).
+  bool mail_webhook_token = 1 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // REPORT_BASIC_AUTH_SHA256 (the gateway).
+  bool report_basic_auth = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // GEMINI_API_KEY (todofy-core).
+  bool gemini_api_key = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // TODOIST_API_KEY (todofy-core).
+  bool todoist_api_key = 4 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // TODOIST_DEFAULT_PROJECT_ID (todofy-core).
+  bool todoist_project = 5 [(google.api.field_behavior) = OUTPUT_ONLY];
+}
+
+// Why a daily reminder's call failed (vocab.py REMINDER_ERROR_CODES). The last two were written only by the
+// retired Go service.
+enum ReminderErrorCode {
+  // No code.
+  REMINDER_ERROR_CODE_UNSPECIFIED = 0;
+  // Todoist refused the task.
+  REMINDER_ERROR_CODE_REMINDER_CREATE_FAILED = 1;
+  // The call's answer was lost.
+  REMINDER_ERROR_CODE_REMINDER_RESULT_UNKNOWN = 2;
+  // The call was interrupted.
+  REMINDER_ERROR_CODE_INTERRUPTED_REMINDER_CALL = 3;
+  // Go service only.
+  REMINDER_ERROR_CODE_EMPTY_TASK_ID = 4;
+  // Go service only.
+  REMINDER_ERROR_CODE_TODO_CLIENT_UNAVAILABLE = 5;
+}
