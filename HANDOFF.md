@@ -152,7 +152,9 @@ with synthetic data.
 
 ### `proto-dashboard-ui` — dashboard owner API as `dashboard.ui.v1`
 
-- State: local only, not pushed. Thirteen commits on `9e38624`: `ba3c27d` transcoder `PreEncoded`, `a54e961` wire
+- State: LANDING on `main` (2026-10-02, first of the four: it was ready first, so it lands alone now instead of
+  last; the other three rebase onto it). Post-deploy checks below are pending until this line says otherwise.
+  Thirteen commits on `9e38624`: `ba3c27d` transcoder `PreEncoded`, `a54e961` wire
   types, `0df8395` Worker, `c38519a` UI, `1202e6e` docs, `d8a0889` CSRF route, `7a7acfa` ETag fix, `b0a7020`
   verification record, then the review fixes `71eaeeb` (CS1, D1), `3bca46b` (D2), `dcabee3` (D3), `55be11f` (D4),
   `637abbd` (CS2) and this record. Both reviews are done and all findings fixed; verified from a clean clone
@@ -177,9 +179,11 @@ with synthetic data.
 ### Landing order
 
 Land them one at a time, each rebased on the newest `main` and re-verified, in the order they finish their
-fix stage. Suggested: FlowDay, Mail Hero, Todofy, then the dashboard (its `proto/ts` change redeploys every
-TypeScript user, so it goes alone and last). Update this file in each landing commit: move the row to "Waiting
-to be verified" with its post-deploy checks, then delete it once checked.
+fix stage. The dashboard went first (ready first; its `proto/ts` change redeploys every TypeScript user, so it
+lands alone). Then, as they finish: FlowDay, Mail Hero, Todofy. Each of those must rebase onto the dashboard's
+landing (shared files: `proto/ts/http-transcoder.ts` gained `PreEncoded`, `README.md`, `AGENTS.md`,
+`proto/README.md`, `ci_changes.py`, this file) and re-run its checks. Update this file in each landing commit:
+move the row to "Waiting to be verified" with its post-deploy checks, then delete it once checked.
 
 ## Waiting to be verified
 
