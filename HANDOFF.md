@@ -76,7 +76,10 @@ calls in `proto/<app>/ui/vN` as AIP resources with `google.api.http`, serve them
 is read), call them from the UI through `proto/ts/http-client.ts`, delete the hand-written duplicate types,
 errors as `google.rpc.Status` with `ErrorInfo` reasons, AIP-155 `request_id`, AIP-154 etags where they pay.
 Routes used by other systems keep their exact paths, auth and bytes. Old owner paths answer
-`410 reload_required` in the old envelope for one release so open tabs ask for a reload.
+`410 reload_required` in the old envelope for one release so open tabs ask for a reload. Check that the deployed
+old client shows that message: Lab's, Mail Hero's, Todofy's and FlowDay's show any code's message, but the
+dashboard's shows it only for its own eleven codes, so the dashboard sends `not_found` with the reload message
+(`dashboard/worker/test/http.test.ts` runs main's error handling on every legacy answer).
 
 Verification list for every branch (from a clean clone of the head): Changes unittests
 (`uv run --no-project --python 3.12 python -m unittest discover -s .github/scripts`), cf-guard and tools tests,
@@ -149,22 +152,27 @@ with synthetic data.
 
 ### `proto-dashboard-ui` — dashboard owner API as `dashboard.ui.v1`
 
-- State: six commits on `327ad52` (`e4a612f` transcoder `PreEncoded`, `d2d889f` wire types, `097428f` Worker,
-  `008bf1c` UI, `e473678` docs, `87b8ba6` CSRF route); the builder is finishing; then reviews and fixes.
+- State: local only, not pushed. Thirteen commits on `9e38624`: `ba3c27d` transcoder `PreEncoded`, `a54e961` wire
+  types, `0df8395` Worker, `c38519a` UI, `1202e6e` docs, `d8a0889` CSRF route, `7a7acfa` ETag fix, `b0a7020`
+  verification record, then the review fixes `71eaeeb` (CS1, D1), `3bca46b` (D2), `dcabee3` (D3), `55be11f` (D4),
+  `637abbd` (CS2) and this record. Both reviews are done and all findings fixed; verified from a clean clone
+  of `637abbd` (`dashboard/docs/verification.md` §1m).
 - What it does: registry and four views as AIP-156 singletons (`GET /api/v1/{registry,homeView,flowsView,
   cloudflareView,opsView}`); refreshes become custom POST methods (`homeView:refresh`, `cloudflareView:refresh`,
   now with CSRF and Origin); `guard:override` and `canaries/mail-todofy:run` with a `request_id` HomeState
   remembers for 24 h. HomeState still serializes each view once; the Worker passes the bytes through as a
-  `PreEncoded` answer with the ETag or 304 (no codec CPU per request). Old `/api/v2/*` answer 410 for one
-  release. The deploy probe path changes from `/api/v2/home` (update `ci.yml` and `test_ci_changes.py`
-  together).
-- Shared runtime change: `e4a612f` touches `proto/ts`, so landing it re-checks and redeploys every "ts" proto
+  `PreEncoded` answer with the ETag or 304 (no codec CPU per request), and HomeState cuts every list at the IDL's
+  `max_items` (`worker/src/idl.ts`). Old `/api/v2/*` answer 410 with the reload message under the code `not_found`
+  until 2026-11-02 (the old UI shows messages only for its own codes; a smoke of `main`'s client shows the reload
+  message on all 9 of its calls). The deploy probe path changes from `/api/v2/home` to `/api/v1/homeView` (`ci.yml`
+  and `test_ci_changes.py` together).
+- Shared runtime change: `ba3c27d` touches `proto/ts`, so landing it re-checks and redeploys every "ts" proto
   user (Lab, links, watch, Mail Hero, the dashboard, and FlowDay once its branch lands). Land it on its own and
-  watch all those deploys.
-- Measured: UI JS 112.7 → 157.9 KiB gzip (budget 192); Worker 92.2 → 116.7 KiB gzip (budget 108 → 140);
-  first API request 4.4–4.7 → 5.1–5.2 ms.
+  watch all those deploys. Everything else deploys the dashboard only.
+- Measured: UI JS 112.7 → 157.9 KiB gzip (budget 192); Worker 92.2 → 117.1 KiB gzip (budget 108 → 140);
+  the isolate's first API request 4.4–4.7 → 5.0 reference ms (bound 9), warm medians ≤ 1.4; cron tick unchanged.
 - After deploy: home.ziyixi.science loads every view, refresh works, attention empty, the canary can be run,
-  an old tab asks for a reload.
+  an old open tab shows 个人控制台已更新，请刷新页面 as its error text. Remove the 410 routes after 2026-11-02.
 
 ### Landing order
 
@@ -187,8 +195,8 @@ to be verified" with its post-deploy checks, then delete it once checked.
 - Watch (live since 2026-10-02, `76b376c`): the scheduler is armed and the dashboard tile is ok. The first daily
   digest task in Todoist after 14:00 UTC can only appear once a watch exists and changes; none exist yet.
 - Legacy 410 answers to remove after one release: Lab after 2026-11-01; Mail Hero `/api/v1` after 2026-11-01
-  and FlowDay's old `/api` after 2026-11-02 once their branches land; Todofy's and the dashboard's dates are set
-  when they land.
+  and FlowDay's old `/api` and the dashboard's `/api/v2` after 2026-11-02 once their branches land; Todofy's date
+  is set when it lands.
 - Todofy's old host snapshot can be deleted after 2026-10-29 (`todofy/docs/verification.md`).
 
 ## Waiting for the owner

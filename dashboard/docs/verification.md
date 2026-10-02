@@ -320,8 +320,8 @@ and `https://s.ziyixi.science/_/` in a new tab; no horizontal scroll at 375 px.
 ## 1l. Local, the owner API on proto (`dashboard.ui.v1`, 2026-10-02)
 
 The owner API served from `proto/dashboard/ui/v1` by the shared transcoder, the UI on the generated client
-(design-v2.md §5). From a clean clone of the branch at `c286fd1` (base `327ad52`), macOS, Node 26.9.0, synthetic
-data only, no token, no Cloudflare or GitHub call:
+(design-v2.md §5). From a clean clone of the branch at `c286fd1` (base `327ad52`; `7a7acfa` after the rebase on
+`9e38624`), macOS, Node 26.9.0, synthetic data only, no token, no Cloudflare or GitHub call:
 
 | Job | Step | Result |
 | --- | --- | --- |
@@ -337,10 +337,36 @@ data only, no token, no Cloudflare or GitHub call:
 
 The smoke found that the flows and ops views never answered 304 outside the pinned clock: their
 `next_refresh_at` was written to the millisecond, so their ETag changed on every request (also on `main`); fixed in
-`c286fd1` (a time at or before now is the current minute). It also showed a local-only effect: after a request whose
+`7a7acfa` (a time at or before now is the current minute). It also showed a local-only effect: after a request whose
 body the Worker cancels unread (a refused POST), `wrangler dev`'s proxy answers the next POST 500 "Network
 connection lost" (the same `body.cancel()` is on `main` and in Lab, links and watch; the workerd suites do not go
 through that proxy). The smoke sends such a request once more and counts it (1 in the final run).
+
+The smoke above checked only the bytes of the retired paths' 410, not what the old UI shows: see 1m, which
+changed that answer.
+
+## 1m. Local, after the review of dashboard.ui.v1 (2026-10-02)
+
+The branch rebased on `9e38624`, plus the review fixes: the retired `/api/v2` paths answer 410 with the reload
+message under the code `not_found` (the old UI shows the message only for its eleven codes, so `reload_required`
+reached an open tab as its generic "unrecognized response (HTTP 410)" error), an authentication failure there maps
+INTERNAL to `unavailable`; the views' list bounds are read from the IDL's `max_items` (`worker/src/idl.ts`,
+`test/idl.test.ts`); every field of `dashboard.ui.v1` has a behaviour (the ones written only when set are
+`OUTPUT_ONLY`, which changes no bytes). From a clean clone of `637abbd`, macOS, Node 26.9.0, synthetic data only,
+no token, no Cloudflare or GitHub call:
+
+| Job | Step | Result |
+| --- | --- | --- |
+| `Changes` | unittests; cf-guard and tools tests | 332 tests OK (1 skipped); both `node --test` suites passed |
+| `Proto checks` | lint, api-lint, breaking against `9e38624`, the rules self-test, determinism, `check:schema`, `test_proto.py`, typecheck, vitest, `test:python` | all ok; api-linter: no problems in 30 files; no breaking change |
+| `Dashboard checks` | `node --test deploy/test/*.test.mjs` | 17 passed |
+| | worker lint, typecheck, `npm test` | ok; 17 files, 249 tests passed (new: the old UI's error handling run on every legacy answer, failing with `reload_required`; the IDL bounds) |
+| | worker `npm run test:runtime` (workerd, `DEV_NOW`) | 9 files, 73 tests passed; CPU in reference ms, medians of 3 isolates: the isolate's first API request 4.99 (bound 9), other first runs at most 3.29 (bound 7), warm medians at most 1.40 (bound 3); the cron tick first 8.79, warm 2.56 (bounds 16 and 4) |
+| | web lint, typecheck, tests, build; import guard | ok; 16 files, 136 tests passed; JavaScript 157.9 KiB gzip (budget 192 KiB); no cross-origin references |
+| | placeholder config dry-run | ok; 480.4 KiB raw, 117.1 KiB gzip (budget 140 KiB) |
+| `Contracts` | schema, Mail Hero, Todofy, gateway, dashboard, Lab, watch | all ok |
+| smoke | as in 1l, on its own ports, one cron tick, every call of `web/src/api/client.ts` | 28 of 28 (every retired path now 410 `not_found` with 个人控制台已更新，请刷新页面); the dev proxy's dropped POST once more (1) |
+| old UI | `main`'s own client (`web/src/api/client.ts` and `lib/labels.ts` from `git archive origin/main`, unchanged) calling each route it knows against the same `wrangler dev` | 9 of 9 (`registry`, `home`, `home(true)`, `flows`, `cloudflare`, `cloudflare(true)`, `ops`, `setGuard`, `startCanary`) fail with HTTP 410 and the message 个人控制台已更新，请刷新页面, which the old page shows as its error text |
 
 ## 2. Production (pending)
 
