@@ -1862,6 +1862,7 @@ jobs:
           cache-dependency-path: |
             flowday/worker/package-lock.json
             flowday/web/package-lock.json
+            proto/package-lock.json
       # Every static production value (account, D1, host, Access) is committed in flowday/wrangler.toml; the
       # environment URL and the host probes read it there.
       - name: Read the host and the Access issuer from the committed config

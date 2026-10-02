@@ -310,6 +310,33 @@ class Users(unittest.TestCase):
                     {"resolved": spec.removeprefix("file:"), "link": True},
                 )
 
+    def test_jobs_that_install_a_user_key_their_npm_cache_on_the_proto_lockfile(self):
+        """Installing a TypeScript user runs proto/tools/ensure.mjs, which installs proto/'s own packages: a job whose npm
+        cache is keyed on a user's lockfile must also key it on proto/package-lock.json, or a proto lockfile change
+        restores a stale cache and downloads proto's packages on every run."""
+        user_locks = {str((manifest.parent / "package-lock.json").relative_to(REPO)) for manifest in ts_users()}
+        lines = WORKFLOW.read_text().splitlines()
+        blocks = []
+        for index, line in enumerate(lines):
+            key, _, value = line.strip().partition("cache-dependency-path:")
+            if key != "" or not _:
+                continue
+            if value.strip() not in ("|", ""):
+                blocks.append((index + 1, {value.strip()}))
+                continue
+            indent = len(line) - len(line.lstrip())
+            paths = set()
+            for follow in lines[index + 1 :]:
+                if not follow.strip() or len(follow) - len(follow.lstrip()) <= indent:
+                    break
+                paths.add(follow.strip())
+            blocks.append((index + 1, paths))
+        self.assertTrue(blocks, "no cache-dependency-path in ci.yml")
+        for line_number, paths in blocks:
+            if paths & user_locks:
+                with self.subTest(line=line_number):
+                    self.assertIn("proto/package-lock.json", paths, sorted(paths))
+
     def test_scripts_that_read_the_generated_code_regenerate_it_first(self):
         users = ts_users()
         importers = importers_of(users)
