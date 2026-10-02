@@ -28,6 +28,7 @@ import { API_PREFIX, fromHttpError, handlers, isReason, mhError, REASONS, unexpe
 import { downloadMessage } from './api-messages.ts'
 import { withDependencies } from './dependencies.ts'
 import { authenticate, csrfResponse, HttpError, json, privateResponse, requireCSRF } from './security.ts'
+import { warmUp } from './warmup.ts'
 import { parseStatus } from '@ziyixi/proto/rpc-status'
 
 /** ErrorInfo.domain: the API's name (MailHeroUiService's default_host), whatever host serves it. */
@@ -71,6 +72,14 @@ const api = new HttpTranscoder(MailHeroUiService, handlers, {
   localize: reason => (isReason(reason) ? { locale: 'zh-CN', message: REASONS[reason].zh } : undefined),
   onUnexpected: unexpected,
 })
+
+/** The transcoder's routes, most specific first (for test/warmup.test.mjs). */
+export function ownerApiRoutes(): ReturnType<typeof api.routes> {
+  return api.routes()
+}
+
+// The owner API's codec path, compiled during startup rather than in an isolate's first owner-API request (warmup.ts).
+warmUp(api.routes())
 
 /** The old API's error envelope, {error: {code, message, request_id}}, for the paths an old tab still calls. */
 function legacyError(status: number, code: string, message: string, requestId: string): Response {
