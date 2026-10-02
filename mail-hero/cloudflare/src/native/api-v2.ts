@@ -325,7 +325,7 @@ export function toSettings(row: Row): Settings {
     currentEndpoint: row.current_endpoint_id ? `endpoints/${text(row.current_endpoint_id)}` : '', sendPaused: !!row.send_paused,
     effectiveSendPaused: !!row.effective_send_paused, maintenanceMode: !!row.maintenance_mode,
     rawRetentionDays: days(row.raw_retention_days), contentRetentionDays: days(row.content_retention_days),
-    ledgerRetentionDays: days(row.ledger_retention_days), resolvedRetentionDays: days(row.resolved_retention_days),
+    ledgerRetentionDays: int(row.ledger_retention_days), resolvedRetentionDays: days(row.resolved_retention_days),
     lifecyclePolicyVersion: int(row.lifecycle_policy_version), logicalBytes: bytes(row.logical_bytes), logicalLimitBytes: bytes(row.logical_limit_bytes),
     databaseBytes: row.database_bytes === null || row.database_bytes === undefined ? undefined : bytes(row.database_bytes),
     lastBackupTime: ts(row.last_backup_at), etag: etagOf(int(row.version)),
@@ -482,7 +482,7 @@ export const handlers: ServiceHandlers<ShapeOf<typeof MailHeroUiService>, ApiCon
         case 'send_paused': input.send_paused = settings.sendPaused; break
         case 'raw_retention_days': input.raw_retention_days = settings.rawRetentionDays ?? null; break
         case 'content_retention_days': input.content_retention_days = settings.contentRetentionDays ?? null; break
-        case 'ledger_retention_days': input.ledger_retention_days = settings.ledgerRetentionDays ?? null; break
+        case 'ledger_retention_days': input.ledger_retention_days = settings.ledgerRetentionDays; break // 0: days_range
         case 'resolved_retention_days': input.resolved_retention_days = settings.resolvedRetentionDays ?? null; break
         default: break // output-only fields (the transcoder refused unknown ones): ignored, AIP-203
       }

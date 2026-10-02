@@ -389,7 +389,8 @@ message UpdateSettingsRequest {
   // AIP-134: the Settings fields to replace (a query parameter, `update_mask=mode,current_endpoint`). Required here: an
   // update without a mask, an empty one or `*` is BAD_REQUEST, so a client that leaves a field out never resumes
   // sending or switches a retention period off by accident. A named field without a value is cleared (a retention
-  // period kept forever, no current target, not paused).
+  // period kept forever, no current target, not paused), except `ledger_retention_days`, which is never cleared
+  // (INVALID_RETENTION_POLICY, rule `days_range`).
   google.protobuf.FieldMask update_mask = 2 [(google.api.field_behavior) = OPTIONAL];
   // The `confirmation_token` of a PreviewRetentionPolicy of exactly the policy this update saves (all four periods and
   // `apply_existing`), made for the settings' current etag, within 10 minutes. Needed when the update enables or shortens

@@ -58,8 +58,10 @@ message Settings {
   // Days the content (parsed content, attachments, frozen requests) of new mail is kept after its safe terminal state,
   // 1-3650; unset: kept forever.
   optional int32 content_retention_days = 9 [(google.api.field_behavior) = OPTIONAL];
-  // Days the content-free ledger (IDs, states, hashes) of new mail is kept, 90-3650 (no ledger is deleted yet).
-  optional int32 ledger_retention_days = 10 [(google.api.field_behavior) = OPTIONAL];
+  // Days the content-free ledger (IDs, states, hashes) of new mail is kept, 90-3650 (no ledger is deleted yet). Always
+  // set: unlike the other periods it cannot be cleared (kept forever), so an update that names it without a value, or
+  // with 0, is INVALID_RETENTION_POLICY with the rule `days_range`.
+  int32 ledger_retention_days = 10 [(google.api.field_behavior) = OPTIONAL];
   // Days an owner-resolved exception is kept after its last handling, 1-3650, at least `content_retention_days`;
   // unset: kept forever (and it must be unset while the content is kept forever).
   optional int32 resolved_retention_days = 11 [(google.api.field_behavior) = OPTIONAL];

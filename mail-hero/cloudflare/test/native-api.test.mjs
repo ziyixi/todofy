@@ -673,6 +673,12 @@ test('retention shortening requires an owner/etag/policy-bound preview and never
   const rule = await api('PATCH', '/settings?update_mask=raw_retention_days,content_retention_days', { etag: '3', raw_retention_days: 40, content_retention_days: 30 })
   assert.deepEqual([rule.status, reasonOf(rule.data), rule.data.error.details[0].metadata], [400, 'INVALID_RETENTION_POLICY', { rule: 'raw_after_content' }])
   for (const mask of ['', '*']) assert.equal((await api('PATCH', `/settings?update_mask=${mask}`, { etag: '3', send_paused: true })).status, 400, mask)
+  // The ledger period is never cleared (Settings.ledger_retention_days): no value, or 0, breaks its days rule.
+  for (const body of [{ etag: '3' }, { etag: '3', ledger_retention_days: 0 }]) {
+    const ledger = await api('PATCH', '/settings?update_mask=ledger_retention_days', body)
+    assert.deepEqual([ledger.status, reasonOf(ledger.data), ledger.data.error.details[0].metadata], [400, 'INVALID_RETENTION_POLICY', { rule: 'days_range' }])
+  }
+  assert.equal((await api('GET', '/settings')).data.ledger_retention_days, 180)
   assert.equal((await api('GET', '/settings:previewRetentionPolicy?ledger_retention_days=30')).status, 400)
 })
 
