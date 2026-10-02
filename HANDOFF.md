@@ -13,7 +13,7 @@ Rules for this file:
   security-posture details. Those stay with the owner.
 - Keep it short. The details live in each app's docs; link to them.
 
-Last updated: 2026-10-02 (main at `2e29cce`).
+Last updated: 2026-10-02 (the cold-start CPU and watch CPU test fixes land with this change).
 
 ## How work lands
 
@@ -33,9 +33,7 @@ Last updated: 2026-10-02 (main at `2e29cce`).
 
 | Work | Branch (pushed unless noted) | State | Lands as |
 | --- | --- | --- | --- |
-| Cold-start CPU assertions: median of three fresh isolates (`tools/workerd-cpu`) | `cpu-cold-robust` @ `8f1d38c` | Done, waiting for the next row | Together with the next row; redeploys dashboard, FlowDay, Lab, links and Mail Hero with identical bundles (test and doc changes only) |
-| Watch CPU test precondition flake (`last_failure` on the 2 MiB pass on slow runners) | stacked on `cpu-cold-robust` (not pushed yet) | In progress | Merge both once green |
-| `mail.received.v1` onto proto, rule vocabulary (`Field.write_empty`, `present_when`, `Message.any_match`) | `proto-mail-rules` @ `1e60681` | Done, branch CI blocked only by the watch flake above | First; redeploys every proto user, no behaviour change |
+| `mail.received.v1` onto proto, rule vocabulary (`Field.write_empty`, `present_when`, `Message.any_match`) | `proto-mail-rules` @ `1e60681` | Done; rebase onto `main` (the CPU-test fixes have landed) | First; redeploys every proto user, no behaviour change |
 | `mail.received.v1` onto proto, the contract (`proto/mailhero/webhook/v1`) | `proto-mail` @ `a45b9be` (on `proto-mail-rules`) | Done | Second; deploys Mail Hero and Todofy. Mail Hero's owner sends, resends, connection tests and canaries now build their event in the coordinator DO |
 | Watch go-live: Access app through `infra/`, deploy job, `watch.ziyixi.science` | `watch-infra` (local) | In progress | `watch-infra` first, then "Infra apply" (create 1), then the AUD goes into `watch/wrangler.toml` |
 | Watch W3: daily Todoist digest via task-intent `SOURCE_WATCH`, Ops status for the dashboard | `watch-l2` (local) | In progress | After `watch-infra`; deploys watch, Todofy, Lab, dashboard |
