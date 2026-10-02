@@ -151,6 +151,68 @@ class WireTypesTest(unittest.TestCase):
     def test_only_the_listed_packages_get_wire_types(self) -> None:
         self.assertEqual(gen_wire_ts.generate({"file": [union_file("other.v1")]}), {})
 
+    def test_a_type_of_another_file_is_imported(self) -> None:
+        # dashboard/ui/v1/v.proto: a message V embedding ops.v1's M and its nested enum, and a sibling file's P.
+        def field(name: str, number: int, type_name: str, kind: str = "TYPE_MESSAGE") -> dict:
+            return {"name": name, "number": number, "label": "LABEL_OPTIONAL", "type": kind, "typeName": type_name}
+
+        sibling = {
+            "name": "dashboard/ui/v1/p.proto",
+            "package": "dashboard.ui.v1",
+            "syntax": "proto3",
+            "messageType": [{"name": "P", "field": []}],
+        }
+        view = {
+            "name": "dashboard/ui/v1/v.proto",
+            "package": "dashboard.ui.v1",
+            "syntax": "proto3",
+            "messageType": [
+                {
+                    "name": "V",
+                    "field": [
+                        field("m", 1, ".ops.v1.M"),
+                        field("state", 2, ".ops.v1.M.State", "TYPE_ENUM"),
+                        field("p", 3, ".dashboard.ui.v1.P"),
+                    ],
+                }
+            ],
+        }
+        out = gen_wire_ts.generate({"file": [union_file(), sibling, view]})
+        source = out["dashboard/ui/v1/v_wire.ts"]
+        self.assertIn("import type { P } from './p_wire.ts';", source)
+        self.assertIn("import type { M, M_State } from '../../../ops/v1/m_wire.ts';", source)
+        self.assertIn("readonly m?: M;\n  readonly state?: M_State;\n  readonly p?: P;", source)
+
+    def test_a_type_outside_the_wire_packages_is_refused(self) -> None:
+        view = {
+            "name": "dashboard/ui/v1/v.proto",
+            "package": "dashboard.ui.v1",
+            "syntax": "proto3",
+            "messageType": [
+                {
+                    "name": "V",
+                    "field": [
+                        {
+                            "name": "x",
+                            "number": 1,
+                            "label": "LABEL_OPTIONAL",
+                            "type": "TYPE_MESSAGE",
+                            "typeName": ".other.v1.X",
+                        }
+                    ],
+                }
+            ],
+        }
+        with self.assertRaises(gen_wire_ts.GenerateError):
+            gen_wire_ts.generate({"file": [view]})
+
+    def test_an_http_service_is_not_a_binding(self) -> None:
+        file = union_file("dashboard.ui.v1")
+        file["service"][0]["method"][1]["options"] = {"[google.api.http]": {"post": "/v1/m"}}
+        source = gen_wire_ts.generate({"file": [file]})["dashboard/ui/v1/m_wire.ts"]
+        self.assertNotIn("export interface S", source)
+        self.assertIn("export type M =", source)
+
     def test_a_string_literal_is_escaped(self) -> None:
         self.assertEqual(gen_wire_ts.string_literal("ops-v1"), "'ops-v1'")
         self.assertEqual(gen_wire_ts.string_literal('it\'s "x"\\\n'), "'it\\'s \"x\"\\\\\\n'")
