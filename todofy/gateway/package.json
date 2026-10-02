@@ -10,16 +10,21 @@
   "scripts": {
     "postinstall": "node ../../proto/tools/ensure.mjs",
     "pretypecheck": "node ../../proto/tools/ensure.mjs",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "tsc --noEmit && tsc --noEmit -p test/runtime/tsconfig.json",
     "pretest": "node ../../proto/tools/ensure.mjs",
     "test": "vitest run",
+    "pretest:runtime": "node ../../proto/tools/ensure.mjs",
+    "test:runtime": "vitest run --config vitest.runtime.config.ts",
     "prelint": "node ../../proto/tools/ensure.mjs",
     "lint": "eslint ."
   },
   "devDependencies": {
     "@cloudflare/workers-types": "5.20260929.1",
     "@eslint/js": "10.0.1",
+    "@types/node": "26.6.3",
+    "esbuild": "0.28.1",
     "eslint": "10.11.0",
+    "miniflare": "5.20260926.0-alpha",
     "typescript": "5.9.3",
     "typescript-eslint": "8.71.0",
     "vitest": "4.1.11"

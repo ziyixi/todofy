@@ -20,12 +20,18 @@ function withMetrics(env: Env, fail = false): { env: Env; points: AnalyticsEngin
 
 describe('route labels', () => {
   it.each([
+    ['owner', '/api/csrf', '/api/csrf'],
+    ['owner', '/api/v1/mailEvents', '/api/v1/mailEvents'],
+    ['owner', `/api/v1/mailEvents/${EVENT_ID}`, '/api/v1/mailEvents/{id}'],
+    ['owner', `/api/v1/mailEvents/${EVENT_ID}:reconcile`, '/api/v1/mailEvents/{id}:reconcile'],
+    ['owner', '/api/v1/legacyTexts/legacy%3Aabc', '/api/v1/legacyTexts/{id}'],
+    ['owner', '/api/v1/latestReports:recompute', '/api/v1/latestReports:recompute'],
+    ['owner', '/api/v1/metricDays', '/api/v1/metricDays'],
+    ['owner', '/api/v1/gtdReviews', '/api/v1/gtdReviews'],
+    // The owner API before todofy.ui.v1 (410 for one release).
     ['owner', '/api/v1/events', '/api/v1/events'],
-    ['owner', `/api/v1/events/${EVENT_ID}`, '/api/v1/events/{id}'],
     ['owner', `/api/v1/events/${EVENT_ID}/reconcile`, '/api/v1/events/{id}/reconcile'],
     ['owner', '/api/v1/legacy_text/legacy:abc', '/api/v1/legacy_text/{id}'],
-    ['owner', '/api/v1/metrics/daily', '/api/v1/metrics/daily'],
-    ['owner', '/api/v1/gtd/daily', '/api/v1/gtd/daily'],
     ['owner', '/api/v1/anything/else', '/api/other'],
     ['owner', '/assets/app-1a2b3c.js', 'asset'],
     ['owner', `/events/${EVENT_ID}`, 'page'],
@@ -41,11 +47,11 @@ describe('route labels', () => {
 describe('request data points', () => {
   it('writes one point per request with the route template, never the path or query', async () => {
     const { env, points } = withMetrics(fakes().env);
-    const response = await owner(env, `/api/v1/events/${EVENT_ID}?secret=1`);
+    const response = await owner(env, `/api/v1/mailEvents/${EVENT_ID}?secret=1`);
     expect(points).toEqual([
       {
-        indexes: ['/api/v1/events/{id}'],
-        blobs: ['owner', 'GET', '/api/v1/events/{id}', `${String(Math.floor(response.status / 100))}xx`],
+        indexes: ['/api/v1/mailEvents/{id}'],
+        blobs: ['owner', 'GET', '/api/v1/mailEvents/{id}', `${String(Math.floor(response.status / 100))}xx`],
         doubles: [expect.any(Number), 0, 0],
       },
     ]);

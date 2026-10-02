@@ -25,6 +25,17 @@ export interface RequestMetric {
 const METHODS: ReadonlySet<string> = new Set(['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS']);
 const HOOKS_ROUTES: ReadonlySet<string> = new Set(['/hooks/mail', '/api/summary', '/api/recommendation', '/health']);
 const OWNER_API_ROUTES: ReadonlySet<string> = new Set([
+  '/api/csrf',
+  '/api/v1/serviceStatus',
+  '/api/v1/mailEvents',
+  '/api/v1/dailyReminders',
+  '/api/v1/latestReports',
+  '/api/v1/latestReports:recompute',
+  '/api/v1/metricDays',
+  '/api/v1/gtdDays',
+  '/api/v1/gtdReviews',
+  '/api/v1/integration',
+  // The owner API before todofy.ui.v1: 410 reload_required for one release (owner.ts).
   '/api/v1/csrf',
   '/api/v1/setup',
   '/api/v1/overview',
@@ -36,6 +47,9 @@ const OWNER_API_ROUTES: ReadonlySet<string> = new Set([
   '/api/v1/gtd/daily',
 ]);
 const OWNER_API_TEMPLATES: readonly (readonly [RegExp, string])[] = [
+  [/^\/api\/v1\/mailEvents\/[^/:]+$/, '/api/v1/mailEvents/{id}'],
+  [/^\/api\/v1\/mailEvents\/[^/:]+:reconcile$/, '/api/v1/mailEvents/{id}:reconcile'],
+  [/^\/api\/v1\/legacyTexts\/[^/]+$/, '/api/v1/legacyTexts/{id}'],
   [/^\/api\/v1\/events\/[^/]+$/, '/api/v1/events/{id}'],
   [/^\/api\/v1\/events\/[^/]+\/reconcile$/, '/api/v1/events/{id}/reconcile'],
   [/^\/api\/v1\/legacy_text\/[^/]+$/, '/api/v1/legacy_text/{id}'],

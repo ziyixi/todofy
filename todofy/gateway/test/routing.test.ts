@@ -78,7 +78,7 @@ describe('unread uploads', () => {
     const answers: [string, number][] = [
       ['http://todofy-hooks.localhost/hooks/mail', 401],
       ['http://elsewhere.example/', 404],
-      ['http://todofy.localhost/api/v1/x', 403],
+      ['http://todofy.localhost/api/v1/mailEvents/x:reconcile', 403],
     ];
     for (const [url, status] of answers) {
       const body = upload();

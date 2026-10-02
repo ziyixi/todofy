@@ -1,5 +1,5 @@
 import { expect, vi } from 'vitest';
-import type { CoreResult } from '../src/coordinator.ts';
+import type { CoreResult, UiOk, UiRefusal } from '../src/coordinator.ts';
 import type { Env } from '../src/env.ts';
 import worker from '../src/index.ts';
 
@@ -13,7 +13,7 @@ const CORE_METHODS = [
   'wake',
   'newsletter',
   'newsletter_auth_failure',
-  'owner_api',
+  'owner_ui',
   'setup',
   'ops_status',
   'ops_set_guard',
@@ -38,6 +38,16 @@ export const NO_CONTENT: CoreResult = { status: 204, body: null, error: null, re
 /** A 200 whose JSON text is `text` (the core serialises with Python's separators). */
 export function ok(data: unknown, text = JSON.stringify(data)): CoreResult {
   return { status: 200, body: text, error: null, retry_after: null };
+}
+
+/** TodofyCore's owner_ui answer of a message (its wire JSON) and the next page's cursor. */
+export function uiOk(message: unknown, nextCursor: unknown = null): UiOk {
+  return { ok: JSON.stringify(message), next_cursor: nextCursor === null ? null : JSON.stringify(nextCursor) };
+}
+
+/** TodofyCore's owner_ui refusal: a reason, an optional MailEvent detail (wire JSON) and Retry-After seconds. */
+export function uiRefusal(reason: string, detail: unknown = null, retryAfter: number | null = null): UiRefusal {
+  return { error: reason, detail: detail === null ? null : JSON.stringify(detail), retry_after: retryAfter };
 }
 
 export function failure(status: number, code: string, retryAfter: number | null = null): CoreResult {
@@ -133,6 +143,29 @@ export async function errorCode(response: Response): Promise<string> {
   expect(body.error.request_id).toMatch(/^[0-9a-f]{16}$/);
   expect(body.error.message).not.toBe('');
   return body.error.code;
+}
+
+/** A google.rpc.Status body (the owner API's errors). */
+export interface StatusBody {
+  readonly error: {
+    readonly code: number;
+    readonly message: string;
+    readonly status: string;
+    readonly details: readonly ({ readonly '@type': string } & Record<string, unknown>)[];
+  };
+}
+
+/** Assert a google.rpc.Status body with the JSON headers and the request ID; returns its ErrorInfo reason. */
+export async function statusReason(response: Response): Promise<string> {
+  expect(response.headers.get('content-type')).toBe('application/json; charset=utf-8');
+  expect(response.headers.get('x-content-type-options')).toBe('nosniff');
+  const body = await response.json<StatusBody>();
+  expect(body.error.code).toBe(response.status);
+  const info = body.error.details.find((detail) => detail['@type'] === 'type.googleapis.com/google.rpc.ErrorInfo');
+  const request = body.error.details.find((detail) => detail['@type'] === 'type.googleapis.com/google.rpc.RequestInfo');
+  expect(info?.['domain']).toBe('todofy.ziyixi.science');
+  expect(request?.['request_id']).toMatch(/^[0-9a-f]{16}$/);
+  return String(info?.['reason']);
 }
 
 /** The JSON lines the gateway logged. */

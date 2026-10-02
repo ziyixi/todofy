@@ -25,7 +25,23 @@ export interface CoreResult {
   readonly retry_after: number | null;
 }
 
-/** The core's facts for GET /api/v1/setup: whether each core secret is set, never its value. */
+/**
+ * How TodofyCore answers one todofy.ui.v1 rpc (worker/todofy/runtime/owner_ui.py): the response message as wire
+ * JSON text and the next page's cursor (JSON text), or an ErrorInfo reason with an optional MailEvent detail (wire
+ * JSON text) and the seconds of a Retry-After.
+ */
+export type UiAnswer = UiOk | UiRefusal;
+export interface UiOk {
+  readonly ok: string;
+  readonly next_cursor: string | null;
+}
+export interface UiRefusal {
+  readonly error: string;
+  readonly detail: string | null;
+  readonly retry_after: number | null;
+}
+
+/** The core's facts for GetIntegration: whether each core secret is set, never its value. */
 export interface CoreSetup {
   readonly mail_source_id: string;
   readonly configured: Readonly<Record<string, boolean>>;
@@ -46,15 +62,11 @@ export interface Coordinator extends Rpc.DurableObjectBranded {
   newsletter(kind: ReportKind, query: string): Promise<CoreResult>;
   /** Count a failed Basic credential: 401, or 429 once the hour's failures are used up. */
   newsletter_auth_failure(): Promise<CoreResult>;
-  /** One /api/v1 request for the canonical Access owner; the core checks the declared length. */
-  owner_api(
-    owner: string,
-    method: string,
-    path: string,
-    query: string,
-    contentLength: string | null,
-    body: ReadableStream | null,
-  ): Promise<CoreResult>;
+  /**
+   * One todofy.ui.v1 rpc (ui.ts) for the canonical Access owner: the rpc's name, its decoded request as wire JSON
+   * and, for a list, the cursor of its page token as JSON (null for the first page).
+   */
+  owner_ui(owner: string, method: string, request: string, cursor: string | null): Promise<UiAnswer>;
   setup(): Promise<CoreSetup>;
   // ops-v1 (the Ops entrypoint, src/ops.ts). Structured inputs travel as JSON text; the core reads them strictly and
   // writes every answer with the wire JSON profile (worker/todofy/core/ops.py).

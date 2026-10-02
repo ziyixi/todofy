@@ -18,5 +18,7 @@
     "skipLibCheck": true,
     "noEmit": true
   },
-  "include": ["src", "test", "vitest.config.ts"]
+  "include": ["src", "test", "vitest.config.ts", "vitest.runtime.config.ts"],
+  // test/runtime runs in Node against Miniflare: its own tsconfig with Node types.
+  "exclude": ["test/runtime"]
 }

@@ -1,6 +1,6 @@
 import { afterEach, beforeAll, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import type { Env } from '../src/env.ts';
-import { errorCode, fakes, ok, type Vars } from './helpers.ts';
+import { fakes, statusReason, uiOk, type Vars } from './helpers.ts';
 
 const ISSUER = 'https://team-name.cloudflareaccess.com';
 const AUDIENCE = 'aud-1';
@@ -91,8 +91,8 @@ describe('Access JWT', () => {
   });
 
   it('maps an alias login to the canonical owner', async () => {
-    const { env, core } = fakes(accessVars(), () => ok({}));
-    const response = await send(env, { 'cf-access-jwt-assertion': await token({ claims: { email: ALIAS } }) }, '/api/v1/overview');
+    const { env, core } = fakes(accessVars(), () => uiOk({ name: 'serviceStatus' }));
+    const response = await send(env, { 'cf-access-jwt-assertion': await token({ claims: { email: ALIAS } }) }, '/api/v1/serviceStatus');
     expect(response.status).toBe(200);
     expect(core[0]?.args[0]).toBe('owner@example.com');
   });
@@ -138,7 +138,7 @@ describe('Access JWT', () => {
     for (const [name, jwt] of Object.entries(rejected)) {
       const response = await send(env, jwt === null ? {} : { 'cf-access-jwt-assertion': jwt });
       expect(response.status, name).toBe(401);
-      expect(await errorCode(response), name).toBe('unauthorized');
+      expect(await statusReason(response), name).toBe('UNAUTHORIZED');
       expect(response.headers.get('x-frame-options'), name).toBe('DENY');
     }
     expect(core).toHaveLength(0);
@@ -162,7 +162,7 @@ describe('Access JWT', () => {
       const { env } = fakes(accessVars(vars));
       const response = await send(env, { 'cf-access-jwt-assertion': await token() });
       expect(response.status, name).toBe(503);
-      expect(await errorCode(response), name).toBe('access_not_configured');
+      expect(await statusReason(response), name).toBe('ACCESS_NOT_CONFIGURED');
     }
     expect(certs).not.toHaveBeenCalled();
   });
@@ -181,34 +181,34 @@ describe('Access JWT', () => {
 
   it('matches the owner case-insensitively for ASCII only: a Kelvin-sign login is not the owner', async () => {
     // U+212A KELVIN SIGN lowercases to ASCII 'k' with String.prototype.toLowerCase.
-    const { env, core } = fakes(accessVars({ ACCESS_OWNER: ' Kate@Example.com ', ACCESS_OWNER_ALIASES: 'kim@example.net' }), () => ok({}));
+    const { env, core } = fakes(accessVars({ ACCESS_OWNER: ' Kate@Example.com ', ACCESS_OWNER_ALIASES: 'kim@example.net' }), () => uiOk({ name: 'serviceStatus' }));
     for (const email of ['\u212Aate@example.com', '\u212AATE@EXAMPLE.COM', '\u212Aim@example.net']) {
       const response = await send(env, { 'cf-access-jwt-assertion': await token({ claims: { email } }) });
       expect(response.status, email).toBe(401);
-      expect(await errorCode(response), email).toBe('unauthorized');
+      expect(await statusReason(response), email).toBe('UNAUTHORIZED');
     }
     expect(core).toHaveLength(0);
     for (const email of ['KATE@example.com', 'Kim@Example.NET']) {
-      const response = await send(env, { 'cf-access-jwt-assertion': await token({ claims: { email } }) }, '/api/v1/overview');
+      const response = await send(env, { 'cf-access-jwt-assertion': await token({ claims: { email } }) }, '/api/v1/serviceStatus');
       expect(response.status, email).toBe(200);
     }
     expect(core.map((call) => call.args[0])).toEqual(['kate@example.com', 'kate@example.com']);
   });
 
   it('bypasses Access only in local dev and never for a request that came through the edge', async () => {
-    const local = fakes({ DEV_AUTH_BYPASS: 'true', ACCESS_OWNER: 'Owner@Example.com' }, () => ok({}));
-    const response = await send(local.env, {}, '/api/v1/overview', 'todofy.localhost');
+    const local = fakes({ DEV_AUTH_BYPASS: 'true', ACCESS_OWNER: 'Owner@Example.com' }, () => uiOk({ name: 'serviceStatus' }));
+    const response = await send(local.env, {}, '/api/v1/serviceStatus', 'todofy.localhost');
     expect(response.status).toBe(200);
     expect(local.core[0]?.args[0]).toBe('owner@example.com');
 
     // The bypass principal uses the verifier's ASCII-only fold: a Kelvin sign is not turned into 'k'.
-    const kelvin = fakes({ DEV_AUTH_BYPASS: 'true', ACCESS_OWNER: '\u212AATE@Example.com' }, () => ok({}));
-    expect((await send(kelvin.env, {}, '/api/v1/overview', 'todofy.localhost')).status).toBe(200);
+    const kelvin = fakes({ DEV_AUTH_BYPASS: 'true', ACCESS_OWNER: '\u212AATE@Example.com' }, () => uiOk({ name: 'serviceStatus' }));
+    expect((await send(kelvin.env, {}, '/api/v1/serviceStatus', 'todofy.localhost')).status).toBe(200);
     expect(kelvin.core[0]?.args[0]).toBe('\u212Aate@example.com');
 
     const edge = await send(local.env, { 'cf-ray': '8f1c2d3e4f5a6b7c-SJC' }, '/', 'todofy.localhost');
     expect(edge.status).toBe(503);
-    expect(await errorCode(edge)).toBe('access_not_configured');
+    expect(await statusReason(edge)).toBe('ACCESS_NOT_CONFIGURED');
 
     const production = fakes(accessVars({ DEV_AUTH_BYPASS: 'true' }));
     expect(await status(production.env, null)).toBe(401);
@@ -225,7 +225,7 @@ describe('Access JWT', () => {
       certs.mockImplementationOnce(failure);
       const response = await send(env, { 'cf-access-jwt-assertion': await token() });
       expect(response.status).toBe(503);
-      expect(await errorCode(response)).toBe('unavailable');
+      expect(await statusReason(response)).toBe('UNAVAILABLE');
     }
   });
 
@@ -234,7 +234,7 @@ describe('Access JWT', () => {
     certs.mockImplementationOnce(() => Promise.resolve(new Response(null, { status: 302, headers: { location: 'https://evil.example/certs' } })));
     const response = await send(env, { 'cf-access-jwt-assertion': await token() });
     expect(response.status).toBe(503);
-    expect(await errorCode(response)).toBe('unavailable');
+    expect(await statusReason(response)).toBe('UNAVAILABLE');
     expect(certs).toHaveBeenCalledTimes(1);
     expect(certs.mock.calls[0]?.[1]).toMatchObject({ redirect: 'manual' });
   });
@@ -264,7 +264,7 @@ describe('Access JWT', () => {
     for (const [name, jwt] of Object.entries(rejected)) {
       const response = await send(env, { 'cf-access-jwt-assertion': jwt });
       expect(response.status, name).toBe(401);
-      expect(await errorCode(response), name).toBe('unauthorized');
+      expect(await statusReason(response), name).toBe('UNAUTHORIZED');
     }
   });
 

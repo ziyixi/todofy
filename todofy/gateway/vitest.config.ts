@@ -7,6 +7,8 @@ export default defineConfig({
   resolve: { alias: { 'cloudflare:workers': '/test/cloudflare-workers.ts' } },
   test: {
     include: ['test/**/*.test.ts'],
+    // The workerd suite has its own config: vitest.runtime.config.ts.
+    exclude: ['test/runtime/**', 'node_modules/**'],
     setupFiles: ['test/setup.ts'],
     restoreMocks: true,
     unstubGlobals: true,
