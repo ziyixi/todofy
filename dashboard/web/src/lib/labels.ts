@@ -132,6 +132,10 @@ const SIGNALS: Readonly<Record<string, string>> = {
   feed_stale: 'arXiv 抓取过旧',
   neuron_cap_hit: '今日 AI 额度已用完',
   send_unsettled: '交给 Todofy 未完成',
+  // the watch app
+  watches_broken: '有监视已失效',
+  scheduler_stale: '监视调度已停止',
+  notify_unsettled: '提醒交给 Todofy 未完成',
   // dashboard digest items
   usage_unavailable: '用量数据获取失败',
   usage_not_configured: '未配置用量查询令牌',
@@ -280,6 +284,8 @@ const MODES: Readonly<Record<string, { label: string; normal: boolean }>> = {
   force_pause_todoist: { label: '强制暂停 Todoist', normal: false },
   reminder_enabled: { label: '每日提醒', normal: true },
   ingest_paused: { label: '暂停抓取', normal: false },
+  // the watch app: its reminders go to Todofy (the TODOFY binding)
+  notifications: { label: '通知 Todofy', normal: true },
 }
 
 /** A mode's label and whether its current value is the usual one. */
@@ -335,6 +341,16 @@ const COUNTERS: Readonly<Record<string, { label: string; kind: CounterKind }>> =
   decided_7d: { label: '近 7 天已划', kind: 'count' },
   neurons_today: { label: '今日 AI neurons', kind: 'count' },
   neuron_cap: { label: '每日 AI neurons 上限', kind: 'count' },
+  // the watch app
+  watches_active: { label: '正常监视', kind: 'count' },
+  watches_paused: { label: '已暂停监视', kind: 'count' },
+  watches_broken: { label: '失效监视', kind: 'count' },
+  watches_failing: { label: '检查失败的监视', kind: 'count' },
+  changes_new: { label: '新变化', kind: 'count' },
+  fetches_today: { label: '今日抓取', kind: 'count' },
+  notifications_pending: { label: '待发提醒', kind: 'count' },
+  intents_open: { label: '未完成的任务提议', kind: 'count' },
+  intents_sent_today: { label: '今日交给 Todofy', kind: 'count' },
 }
 
 export function counterInfo(name: string): { label: string; kind: CounterKind } {
@@ -388,6 +404,8 @@ export function deferredJobLabel(job: string): string {
       rank: '排序',
       brief: '中文简介',
       seed_resolve: '种子论文解析',
+      scheduled_checks: '定时检查',
+      daily_sweep: '每日整理',
     },
     job,
   )
