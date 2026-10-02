@@ -4,13 +4,20 @@
   "version": "0.1.0",
   "type": "module",
   "scripts": {
+    "postinstall": "node ../../proto/tools/ensure.mjs",
+    "predev": "node ../../proto/tools/ensure.mjs",
     "dev": "vite",
-    "build": "tsc --noEmit && vite build",
+    "prebuild": "node ../../proto/tools/ensure.mjs",
+    "build": "tsc --noEmit && vite build && node scripts/js-budget.mjs",
+    "pretypecheck": "node ../../proto/tools/ensure.mjs",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run"
+    "pretest": "node ../../proto/tools/ensure.mjs",
+    "test": "vitest run",
+    "check:budget": "node scripts/js-budget.mjs"
   },
   "dependencies": {
     "@tanstack/react-query": "^5.0.0",
+    "@ziyixi/proto": "file:../../proto/ts",
     "lucide-react": "^0.400.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",

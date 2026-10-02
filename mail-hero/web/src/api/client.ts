@@ -1,108 +1,182 @@
-import type { Attempt, Delivery, DeliveryStats, Endpoint, MessageDetail, MessageSummary, Overview, Page, RetentionPreview, Settings, SetupStatus } from './types'
+/**
+ * The owner API client (proto/mailhero/ui/v2): MailHeroUiService through the shared typed client
+ * (proto/ts/http-client.ts), built from the same descriptors the Worker's transcoder routes with. Same-origin only:
+ * every request goes to /api/v2/* with the Access cookie; nothing else leaves the page. This file adds only the
+ * transport (mutations carry the signed double-submit CSRF token: header X-CSRF-Token, cookie mail_hero_csrf, from GET
+ * /api/csrf; a refused token is renewed once), the ApiError every failure becomes, and the small helpers the pages
+ * share (resource names, timestamps, the reads that combine several calls).
+ */
+import { createHttpClient, HttpEncodeError, HttpResponseError, RpcStatusError, type HttpCall } from '@ziyixi/proto/http-client'
+import type { CommonReason } from '@ziyixi/proto/common/errors/v1/errors_pb'
+import type { ErrorReason } from '@ziyixi/proto/mailhero/ui/v2/errors_pb'
+import { MailHeroUiService } from '@ziyixi/proto/mailhero/ui/v2/mail_hero_ui_service_pb'
+import type { Delivery, DeliveryAttempt, DeliveryPayload } from '@ziyixi/proto/mailhero/ui/v2/delivery_pb'
+import type { Message, MessageContent } from '@ziyixi/proto/mailhero/ui/v2/message_pb'
+import { quoteLiteral } from '@ziyixi/proto/filter'
+import { parseStatus } from '@ziyixi/proto/rpc-status'
+import { timestampDate, timestampFromDate, type Timestamp } from '@ziyixi/proto/protobuf/wkt'
 
-const prefix = '/api/v1'
-let csrfToken: string | null = null
+export const CSRF_HEADER = 'X-CSRF-Token'
+
+/** An ErrorInfo reason Mail Hero answers: its own (errors.proto) or one every API shares (CommonReason). */
+export type Reason = Exclude<keyof typeof ErrorReason | keyof typeof CommonReason, 'UNSPECIFIED'>
+/** Codes the browser produces itself when no Status is available. */
+export type ClientCode = 'NETWORK_ERROR' | 'BAD_RESPONSE'
 
 export class ApiError extends Error {
-  constructor(public status: number, public code: string, message: string, public requestId?: string) {
+  readonly status: number
+  /** The ErrorInfo reason (a Reason), or a ClientCode; a reason this build does not know stays as sent. */
+  readonly reason: string
+  readonly requestId: string | undefined
+  /** ErrorInfo.metadata: codes only (INVALID_RETENTION_POLICY's `rule`). */
+  readonly metadata: Readonly<Record<string, string>>
+
+  constructor(status: number, reason: string, message: string, requestId?: string, metadata: Readonly<Record<string, string>> = {}) {
     super(message)
     this.name = 'ApiError'
+    this.status = status
+    this.reason = reason
+    this.requestId = requestId
+    this.metadata = metadata
   }
 }
 
-function query(params: Record<string, string | number | boolean | null | undefined>): string {
-  const search = new URLSearchParams()
-  for (const [key, value] of Object.entries(params)) {
-    if (value !== null && value !== undefined && value !== '') search.set(key, String(value))
-  }
-  const encoded = search.toString()
-  return encoded ? `?${encoded}` : ''
+/** Shown when fetch itself fails: no network, or Access redirected an expired session (redirect: 'error'). */
+export const NETWORK_MESSAGE = '无法连接 Mail Hero，请检查网络后重试'
+
+/** The UI's own copy where the reason alone says less than the owner needs; the rest show the server's copy. */
+const RETENTION_RULES: Readonly<Record<string, string>> = {
+  days_range: '保留天数应为 1–3650 的整数。',
+  ledger_minimum: '去重记录至少保留 90 天。',
+  raw_after_content: '原件保留期不能长于正文保留期。',
+  resolved_before_content: '已处理异常邮件的保留期不能短于正文保留期；正文不自动清理时也须留空。',
 }
 
-async function readError(response: Response): Promise<ApiError> {
-  let code = 'request_failed'
-  let message = `请求失败（HTTP ${response.status}）`
-  let requestId: string | undefined
+/** Any failure of a call as an ApiError. */
+export function toApiError(error: unknown): ApiError {
+  if (error instanceof ApiError) return error
+  if (error instanceof RpcStatusError) {
+    const { status } = error
+    const reason = status.reason ?? 'BAD_RESPONSE'
+    const rule = reason === 'INVALID_RETENTION_POLICY' ? RETENTION_RULES[status.metadata['rule'] ?? ''] : undefined
+    const message = rule ?? status.localizedMessage?.message ?? `请求失败（HTTP ${status.httpStatus}）`
+    return new ApiError(status.httpStatus, reason, message, status.requestId, status.metadata)
+  }
+  // Nothing was sent: the same input fails the same way.
+  if (error instanceof HttpEncodeError) return new ApiError(400, 'BAD_REQUEST', '输入有误')
+  if (error instanceof HttpResponseError) return new ApiError(error.httpStatus, 'BAD_RESPONSE', `请求失败（HTTP ${error.httpStatus}）`)
+  return new ApiError(0, 'BAD_RESPONSE', '服务返回了无法识别的响应')
+}
+
+let csrfToken: string | null = null
+
+async function fetchSameOrigin(url: string, init: RequestInit): Promise<Response> {
   try {
-    const body = await response.json() as { error?: { code?: string; message?: string; request_id?: string } }
-    code = body.error?.code || code
-    message = body.error?.message || message
-    requestId = body.error?.request_id
-  } catch { /* A proxy may return non-JSON. */ }
-  return new ApiError(response.status, code, message, requestId)
+    // redirect: 'error' so an expired Access session surfaces as an error, not as the login page's HTML.
+    return await fetch(url, { ...init, credentials: 'same-origin', cache: 'no-store', redirect: 'error' })
+  } catch {
+    throw new ApiError(0, 'NETWORK_ERROR', NETWORK_MESSAGE)
+  }
 }
 
-async function getCSRF(): Promise<string> {
+async function csrf(): Promise<string> {
   if (csrfToken) return csrfToken
-  const response = await fetch(`${prefix}/csrf`, { credentials: 'same-origin', cache: 'no-store' })
-  if (!response.ok) throw await readError(response)
-  const body = await response.json() as { token: string }
-  if (!body.token) throw new ApiError(500, 'csrf_unavailable', '无法取得表单安全令牌')
-  csrfToken = body.token
+  const response = await fetchSameOrigin('/api/csrf', { headers: { Accept: 'application/json' } })
+  let body: unknown
+  try { body = await response.json() } catch { /* Not JSON: a proxy's or Access's page. */ }
+  if (!response.ok) {
+    const status = parseStatus(response.status, body)
+    throw status === null ? new ApiError(response.status, 'BAD_RESPONSE', '无法取得表单安全令牌') : toApiError(new RpcStatusError(status))
+  }
+  const token = (body as { token?: unknown } | undefined)?.token
+  if (typeof token !== 'string' || token === '') throw new ApiError(response.status, 'BAD_RESPONSE', '无法取得表单安全令牌')
+  csrfToken = token
   return csrfToken
 }
 
-export async function request<T>(path: string, options: { method?: 'GET' | 'POST' | 'PATCH' | 'DELETE'; body?: unknown } = {}): Promise<T> {
-  const method = options.method || 'GET'
-  const headers: Record<string, string> = { Accept: 'application/json' }
-  if (method !== 'GET') {
-    headers['Content-Type'] = 'application/json'
-    headers['X-CSRF-Token'] = await getCSRF()
+/**
+ * The transport of every call. A mutation carries the CSRF token; a 403 CSRF_FAILED (an expired token, a lost cookie)
+ * drops the token and sends once more with a fresh one (the same body, so the same request_id).
+ */
+async function send(call: HttpCall): Promise<Response> {
+  for (let attempt = 0; ; attempt += 1) {
+    const headers: Record<string, string> = { Accept: 'application/json' }
+    if (call.body !== undefined) headers['Content-Type'] = 'application/json'
+    if (call.httpMethod !== 'GET') headers[CSRF_HEADER] = await csrf()
+    const response = await fetchSameOrigin(call.url, { method: call.httpMethod, headers, ...(call.body === undefined ? {} : { body: call.body }) })
+    if (response.status !== 403 || call.httpMethod === 'GET') return response
+    csrfToken = null
+    if (attempt > 0) return response
+    let reason: string | undefined
+    try { reason = parseStatus(403, await response.clone().json())?.reason } catch { reason = undefined }
+    if (reason !== 'CSRF_FAILED') return response
   }
-  let response: Response
-  try {
-    response = await fetch(`${prefix}${path}`, {
-      method,
-      headers,
-      body: options.body === undefined ? undefined : JSON.stringify(options.body),
-      credentials: 'same-origin',
-      cache: 'no-store',
-      redirect: 'error',
-    })
-  } catch {
-    throw new ApiError(0, 'network_error', '无法连接 Mail Hero，请检查网络后重试')
-  }
-  if (!response.ok) {
-    if (response.status === 403) csrfToken = null
-    throw await readError(response)
-  }
-  if (response.status === 204) return undefined as T
-  return await response.json() as T
 }
 
-export function actionId(): string { return crypto.randomUUID() }
-export function apiDownload(path: string): string { return `${prefix}${path}` }
+/** Every rpc of `client`, its failures turned into ApiErrors. */
+function withApiErrors<C extends object>(client: C): C {
+  const wrapped: Record<string, (request: unknown) => Promise<unknown>> = {}
+  for (const [name, method] of Object.entries(client) as [string, (request: unknown) => Promise<unknown>][]) {
+    wrapped[name] = request => method(request).catch((error: unknown) => { throw toApiError(error) })
+  }
+  return wrapped as C
+}
 
-export const api = {
-  overview: async (): Promise<Overview> => {
-    const raw = await request<{ receive_address?: string; counts?: { messages?: number; pending?: number; failed?: number; delivered?: number }; storage?: { logical_bytes?: number; limit_bytes?: number; pending_physical_delete_bytes?: number; capacity_used_bytes?: number | null; capacity_reserved_bytes?: number | null; bucket_actual_bytes?: number | null; account_r2_bytes?: number | null }; backup?: { last_at?: string | null }; alerts?: Overview['alerts']; warnings?: string[] }>('/overview')
-    return { receive_address: raw.receive_address, message_count: raw.counts?.messages, pending_count: raw.counts?.pending, failed_count: raw.counts?.failed, delivered_count: raw.counts?.delivered, storage_bytes: raw.storage?.logical_bytes, capacity_bytes: raw.storage?.limit_bytes, last_backup_at: raw.backup?.last_at, warnings: raw.warnings,
-      pending_physical_delete_bytes: raw.storage?.pending_physical_delete_bytes, capacity_used_bytes: raw.storage?.capacity_used_bytes, capacity_reserved_bytes: raw.storage?.capacity_reserved_bytes, bucket_actual_bytes: raw.storage?.bucket_actual_bytes, account_r2_bytes: raw.storage?.account_r2_bytes, alerts: raw.alerts }
-  },
-  setup: () => request<SetupStatus>('/setup/status'),
-  settings: () => request<Settings>('/settings'),
-  updateSettings: (body: Partial<Settings> & { version: number; retention_confirmation?: string; apply_existing?: boolean }) => request<Settings>('/settings', { method: 'PATCH', body }),
-  retentionPreview: (policy: number | { raw_retention_days: number | null; content_retention_days: number | null; ledger_retention_days: number; resolved_retention_days: number | null; apply_existing: boolean }) => request<RetentionPreview>(`/settings/retention-preview${query(typeof policy === 'number' ? { days: policy } : { ...policy, raw_retention_days: policy.raw_retention_days ?? 'none', content_retention_days: policy.content_retention_days ?? 'none', resolved_retention_days: policy.resolved_retention_days ?? 'none' })}`),
-  messages: (params: Record<string, string | number | boolean | null | undefined>) => request<Page<MessageSummary>>(`/messages${query(params)}`),
-  message: (id: string) => request<{ message: MessageDetail; deliveries: Delivery[] }>(`/messages/${encodeURIComponent(id)}`),
-  markRead: (id: string, version: number, read: boolean) => request<{ read_at: string | null; version: number }>(`/messages/${encodeURIComponent(id)}`, { method: 'PATCH', body: { read, version } }),
-  sendMessage: (id: string, endpointId: string, requestId = actionId()) => request<Delivery>(`/messages/${encodeURIComponent(id)}/send`, { method: 'POST', body: { endpoint_id: endpointId, action_request_id: requestId } }),
-  reparse: (id: string, requestId = actionId()) => request<void>(`/messages/${encodeURIComponent(id)}/reparse`, { method: 'POST', body: { action_request_id: requestId } }),
-  deleteContent: (id: string, version: number, requestId = actionId()) => request<void>(`/messages/${encodeURIComponent(id)}/content`, { method: 'DELETE', body: { version, action_request_id: requestId } }),
-  deliveries: (params: Record<string, string | number | boolean | null | undefined>) => request<Page<Delivery>>(`/deliveries${query(params)}`),
-  deliveryStats: (params: { from: string; to: string; bucket: 'hour' | 'day'; tz?: string }) => request<DeliveryStats>(`/delivery-stats${query(params)}`),
-  delivery: async (id: string): Promise<{ delivery: Delivery; attempts: Attempt[] }> => {
-    const raw = await request<{ delivery: Delivery; attempts: Attempt[]; payload?: unknown }>(`/deliveries/${encodeURIComponent(id)}`)
-    return { delivery: { ...raw.delivery, payload: raw.payload, paused: raw.delivery.effective_state === 'paused' }, attempts: raw.attempts }
-  },
-  retryDelivery: (id: string, requestId = actionId()) => request<Delivery>(`/deliveries/${encodeURIComponent(id)}/retry`, { method: 'POST', body: { action_request_id: requestId } }),
-  cancelDelivery: (id: string, requestId = actionId()) => request<Delivery>(`/deliveries/${encodeURIComponent(id)}/cancel`, { method: 'POST', body: { action_request_id: requestId } }),
-  replayDelivery: (id: string, endpointId: string, messageVersion: number, requestId = actionId()) => request<Delivery>(`/deliveries/${encodeURIComponent(id)}/replay`, { method: 'POST', body: { endpoint_id: endpointId, message_version: messageVersion, action_request_id: requestId } }),
-  endpoints: () => request<{ items: Endpoint[] }>('/endpoints'),
-  createEndpoint: (body: Record<string, unknown>) => request<Endpoint>('/endpoints', { method: 'POST', body: { action_request_id: actionId(), ...body } }),
-  updateEndpoint: (id: string, body: Record<string, unknown>) => request<Endpoint>(`/endpoints/${encodeURIComponent(id)}`, { method: 'PATCH', body }),
-  rotateCredential: (id: string, body: { credential: string; version: number }) => request<{ affected_revisions: number; version: number }>(`/endpoints/${encodeURIComponent(id)}/rotate-credential`, { method: 'POST', body }),
-  unblockEndpoint: (id: string, body: { version: number }) => request<{ affected_revisions: number; version: number }>(`/endpoints/${encodeURIComponent(id)}/unblock`, { method: 'POST', body }),
-  checkEndpoint: (id: string) => request<{ url_valid: boolean; dns_status: string; tls_status: string; business_contract?: string }>(`/endpoints/${encodeURIComponent(id)}/check`, { method: 'POST', body: {} }),
-  testEndpoint: (id: string, requestId = actionId()) => request<{ event_id: string; synthetic_test: true; warning?: string }>(`/endpoints/${encodeURIComponent(id)}/test`, { method: 'POST', body: { action_request_id: requestId } }),
+/** MailHeroUiService: `api.getMessage({ name: messageName(id) })` resolves to a Message. */
+export const api = withApiErrors(createHttpClient(MailHeroUiService, send))
+
+/** Test hook: forget the cached CSRF token. */
+export function resetClientForTests(): void {
+  csrfToken = null
+}
+
+// ---- names, times, filters ---------------------------------------------------------------------------------------
+
+/** AIP-155: a request_id, made once per user action, so a repeated request is answered with the first result. */
+export function newRequestId(): string { return crypto.randomUUID() }
+/** The last segment of a resource name (`messages/<id>` -> `<id>`). */
+export function idOf(name: string): string { return name.slice(name.lastIndexOf('/') + 1) }
+export const messageName = (id: string): string => `messages/${id}`
+export const deliveryName = (id: string): string => `deliveries/${id}`
+export const endpointName = (id: string): string => `endpoints/${id}`
+
+/** A Timestamp as an ISO string (null for none), for the formatting helpers. */
+export function timeOf(value: Timestamp | undefined): string | null {
+  return value === undefined ? null : timestampDate(value).toISOString()
+}
+/** An ISO instant as a Timestamp. */
+export function timestamp(iso: string): Timestamp {
+  return timestampFromDate(new Date(iso))
+}
+/** The lower-case wire name of an enum value ('' for UNSPECIFIED or a value this build does not know). */
+export function enumName<E extends Readonly<Record<string, number | string>>>(values: E, value: number): string {
+  const entry = Object.entries(values).find(([, number]) => number === value)
+  return entry === undefined || entry[0] === 'UNSPECIFIED' ? '' : entry[0].toLowerCase()
+}
+/** An AIP-160 filter: the search box's text as one quoted literal, and the restrictions, joined by AND. */
+export function filterOf(search: string, restrictions: readonly (string | false | null | undefined)[]): string {
+  return [quoteLiteral(search), ...restrictions].filter((term): term is string => !!term).join(' AND ')
+}
+
+// ---- reads that combine calls -------------------------------------------------------------------------------------
+
+/** A message, its parsed content and its deliveries (newest first, at most `deliveries`). */
+export interface MessageView { readonly message: Message; readonly content: MessageContent; readonly deliveries: readonly Delivery[] }
+export async function loadMessage(id: string, deliveries = 100): Promise<MessageView> {
+  const name = messageName(id)
+  const [message, content, list] = await Promise.all([
+    api.getMessage({ name }), api.getMessageContent({ name: `${name}/content` }),
+    api.listDeliveries({ filter: `message = ${quoteLiteral(name)}`, pageSize: deliveries }),
+  ])
+  return { message, content, deliveries: list.deliveries }
+}
+
+/** A delivery, its attempts (newest first, at most 100) and its frozen request. */
+export interface DeliveryView { readonly delivery: Delivery; readonly attempts: readonly DeliveryAttempt[]; readonly payload: DeliveryPayload }
+export async function loadDelivery(id: string): Promise<DeliveryView> {
+  const name = deliveryName(id)
+  const [delivery, attempts, payload] = await Promise.all([
+    api.getDelivery({ name }), api.listDeliveryAttempts({ parent: name, pageSize: 100 }), api.getDeliveryPayload({ name: `${name}/payload` }),
+  ])
+  return { delivery, attempts: attempts.deliveryAttempts, payload }
 }

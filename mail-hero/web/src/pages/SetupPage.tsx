@@ -1,13 +1,19 @@
 import { useQuery } from '@tanstack/react-query'
 import { Link } from 'react-router'
 import { ArrowRight, CheckCircle2, CircleAlert, Cloud, Inbox, Mail, RefreshCw, Server, ShieldCheck } from 'lucide-react'
-import { api } from '../api/client'
+import { SetupCheck_Result } from '@ziyixi/proto/mailhero/ui/v2/settings_pb'
+import { api, timeOf } from '../api/client'
+import { settingsQuery } from '../api/queries'
 import { Button, Card, CopyButton, ErrorState, formatDate, Loading, PageHead, SectionTitle } from '../components/UI'
 
+const RESULTS: Partial<Record<SetupCheck_Result, string>> = {
+  [SetupCheck_Result.OK]: 'ok', [SetupCheck_Result.WARNING]: 'warning', [SetupCheck_Result.ERROR]: 'error', [SetupCheck_Result.PENDING]: 'pending',
+}
+
 export default function SetupPage() {
-  const setup = useQuery({ queryKey: ['setup'], queryFn: api.setup })
-  const settings = useQuery({ queryKey: ['settings'], queryFn: api.settings })
-  const receiveAddress = settings.data?.receive_address || setup.data?.receive_address
+  const setup = useQuery({ queryKey: ['setup'], queryFn: () => api.getSetupStatus({ name: 'setupStatus' }) })
+  const settings = useQuery(settingsQuery)
+  const receiveAddress = settings.data?.receiveAddress || setup.data?.receiveAddress
 
   return <>
     <PageHead
@@ -32,7 +38,7 @@ export default function SetupPage() {
         </div>}
       </div>
       <aside className="setup-side">
-        <Card><SectionTitle title="接入检测" detail="配置通过不等于已收到真实邮件。"/>{setup.isPending ? <Loading label="正在检查…"/> : setup.isError ? <ErrorState error={setup.error} retry={() => setup.refetch()}/> : setup.data?.checks?.length ? <div className="check-list">{setup.data.checks.map(check => <div className="check-row" key={check.id}><span className={`check-icon check-${check.status}`}>{check.status === 'ok' ? <CheckCircle2 size={18}/> : <CircleAlert size={18}/>}</span><div><strong>{check.label}</strong>{check.detail && <p>{check.detail}</p>}{check.action && <small>{check.action}</small>}</div></div>)}</div> : <p className="muted">尚无检测结果。可以在收件箱确认真实邮件是否到达。</p>}{setup.data?.last_received_at && <p className="last-received"><Mail size={15}/> 最近收件：{formatDate(setup.data.last_received_at)}</p>}</Card>
+        <Card><SectionTitle title="接入检测" detail="配置通过不等于已收到真实邮件。"/>{setup.isPending ? <Loading label="正在检查…"/> : setup.isError ? <ErrorState error={setup.error} retry={() => setup.refetch()}/> : setup.data?.checks.length ? <div className="check-list">{setup.data.checks.map(check => <div className="check-row" key={check.id}><span className={`check-icon check-${RESULTS[check.result] ?? 'pending'}`}>{check.result === SetupCheck_Result.OK ? <CheckCircle2 size={18}/> : <CircleAlert size={18}/>}</span><div><strong>{check.label}</strong>{check.detail && <p>{check.detail}</p>}</div></div>)}</div> : <p className="muted">尚无检测结果。可以在收件箱确认真实邮件是否到达。</p>}{setup.data?.lastReceiveTime && <p className="last-received"><Mail size={15}/> 最近收件：{formatDate(timeOf(setup.data.lastReceiveTime))}</p>}</Card>
         <Card><SectionTitle title="明确的边界"/><div className="privacy-list"><p><Cloud size={17}/> 邮件内容保存在私有 R2，索引和处理状态保存在 D1；Cloudflare 会处理邮件原件。</p><p><Server size={17}/> 收件与后台处理由 Cloudflare 托管。这里只显示应用已登记的状态，不能代替 Gmail 或 Exchange 的转发设置。</p><p><ShieldCheck size={17}/> 同一入口的邮件不能仅凭 From 保证来自哪个原邮箱。</p></div></Card>
       </aside>
     </div>

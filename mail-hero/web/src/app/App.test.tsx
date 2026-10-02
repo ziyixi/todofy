@@ -1,28 +1,25 @@
 // @vitest-environment jsdom
 import { afterEach, expect, it, vi } from 'vitest'
-import { cleanup, render, screen } from '@testing-library/react'
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { MemoryRouter } from 'react-router'
-import { api } from '../api/client'
-import type { ActiveAlert } from '../api/types'
+import { cleanup, screen } from '@testing-library/react'
+import { create, type MessageInitShape } from '@ziyixi/proto/protobuf'
+import { ActiveAlert_Severity, ActiveAlertSchema } from '@ziyixi/proto/mailhero/ui/v2/settings_pb'
+import { installFakeServer } from '../test/fakeServer'
+import { overview, renderAt, settings } from '../test/fixtures'
 import App from './App'
 
-vi.mock('../api/client', () => ({ api: { settings: vi.fn(), overview: vi.fn() }, actionId: () => 'action-test', apiDownload: (path: string) => `/api/v1${path}` }))
-afterEach(() => { cleanup(); vi.clearAllMocks() })
+afterEach(() => { cleanup(); vi.unstubAllGlobals() })
 
-function open(active: ActiveAlert[]) {
-  vi.mocked(api.settings).mockResolvedValue({ version: 1, mode: 'forward', receive_address: 'hero@example.test', send_paused: false })
-  vi.mocked(api.overview).mockResolvedValue({ storage_bytes: 100, alerts: { configured: false, configuration_error: false, active, pending_notifications: 0, failed_notifications: 0 } })
-  const client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } })
+function open(active: MessageInitShape<typeof ActiveAlertSchema>[]) {
+  installFakeServer({ settings: settings(), overview: overview({ logicalBytes: 100, activeAlerts: active.map(alert => create(ActiveAlertSchema, alert)) }) })
   // An unknown route keeps the test on the shell without page-specific API calls.
-  render(<QueryClientProvider client={client}><MemoryRouter initialEntries={['/synthetic-missing-page']}><App /></MemoryRouter></QueryClientProvider>)
+  renderAt(<App />, '/synthetic-missing-page')
 }
 
 it('shows active warning and critical alerts in a status banner with the matching links', async () => {
   open([
-    { code: 'endpoint_blocked', severity: 'critical', metrics: { waiting_deliveries: 2, current_blocked: 1, auto_recheck: 0 } },
-    { code: 'policy_error', severity: 'warning', metrics: { count: 1 } },
-    { code: 'synthetic_info', severity: 'info', metrics: {} },
+    { code: 'endpoint_blocked', severity: ActiveAlert_Severity.CRITICAL, metrics: { waiting_deliveries: 2, current_blocked: 1, auto_recheck: 0 } },
+    { code: 'policy_error', severity: ActiveAlert_Severity.WARNING, metrics: { count: 1 } },
+    { code: 'synthetic_info', severity: ActiveAlert_Severity.INFO, metrics: {} },
   ])
   const banner = await screen.findByRole('status')
   expect(banner.textContent).toContain('投递目标被阻断，自动投递已停止')
@@ -34,7 +31,7 @@ it('shows active warning and critical alerts in a status banner with the matchin
 })
 
 it('links a warning-only banner to settings without an endpoint link', async () => {
-  open([{ code: 'delivery_failed', severity: 'warning', metrics: { count: 1 } }])
+  open([{ code: 'delivery_failed', severity: ActiveAlert_Severity.WARNING, metrics: { count: 1 } }])
   const banner = await screen.findByRole('status')
   expect(banner.textContent).toContain('有投递已停止，需要处理')
   expect(banner.className).not.toContain('critical')
@@ -42,7 +39,14 @@ it('links a warning-only banner to settings without an endpoint link', async () 
 })
 
 it('shows no banner when no alert needs attention', async () => {
-  open([{ code: 'synthetic_info', severity: 'info', metrics: {} }])
+  open([{ code: 'synthetic_info', severity: ActiveAlert_Severity.INFO, metrics: {} }])
   await screen.findByText('已用 100 B')
   expect(screen.queryByRole('status')).toBeNull()
+})
+
+it('shows the receive address and the effective pause from the settings', async () => {
+  installFakeServer({ settings: settings({ effectiveSendPaused: true }), overview: overview() })
+  renderAt(<App />, '/synthetic-missing-page')
+  expect(await screen.findByText('hero@example.test')).toBeTruthy()
+  expect(screen.getByText('投递已暂停')).toBeTruthy()
 })

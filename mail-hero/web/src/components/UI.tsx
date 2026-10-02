@@ -1,7 +1,6 @@
 import { useEffect, useRef, type ButtonHTMLAttributes, type ReactNode } from 'react'
 import { AlertCircle, ArrowRight, Check, ChevronRight, Copy, Inbox, LoaderCircle, RefreshCw, X } from 'lucide-react'
 import { ApiError } from '../api/client'
-import type { DeliveryState, ParseState } from '../api/types'
 
 export function Button({ children, variant = 'primary', loading, ...props }: ButtonHTMLAttributes<HTMLButtonElement> & { variant?: 'primary' | 'secondary' | 'quiet' | 'danger'; loading?: boolean }) {
   return <button className={`button button-${variant}`} {...props} disabled={props.disabled || loading}>
@@ -18,7 +17,8 @@ const deliveryLabels: Record<string, string> = {
 }
 const parseLabels: Record<string, string> = { pending: '待解析', parsing: '解析中', ready: '可阅读', failed: '需处理' }
 
-export function Status({ state, kind = 'delivery' }: { state?: DeliveryState | ParseState | string | null; kind?: 'delivery' | 'parse' }) {
+/** A delivery or parse state by its wire name (`retry_wait`, `ready`; api/client.ts enumName). */
+export function Status({ state, kind = 'delivery' }: { state?: string | null; kind?: 'delivery' | 'parse' }) {
   const value = state || (kind === 'parse' ? 'pending' : 'none')
   const label = kind === 'parse' ? parseLabels[value] : deliveryLabels[value]
   const tone = ['delivered', 'ready'].includes(value) ? 'ok' : ['failed', 'cancelled'].includes(value) ? 'bad' : ['retry_wait', 'paused'].includes(value) ? 'warn' : 'neutral'

@@ -1,22 +1,27 @@
 // @vitest-environment jsdom
 import { afterAll, afterEach, beforeAll, expect, it, vi } from 'vitest'
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { MemoryRouter } from 'react-router'
-import { api } from '../api/client'
-import type { DeliveryStats } from '../api/types'
+import { cleanup, fireEvent, screen, waitFor } from '@testing-library/react'
+import { create } from '@ziyixi/proto/protobuf'
+import { Code } from '@ziyixi/proto/rpc-status'
+import { SummarizeDeliveryAttemptsRequest_Granularity, SummarizeDeliveryAttemptsResponseSchema, type SummarizeDeliveryAttemptsResponse } from '@ziyixi/proto/mailhero/ui/v2/mail_hero_ui_service_pb'
+import { timeOf, timestamp } from '../api/client'
+import { installFakeServer, rpcError, type FakeServer } from '../test/fakeServer'
+import { overview, renderAt } from '../test/fixtures'
 import DashboardPage from './DashboardPage'
 
-vi.mock('../api/client', () => ({ api: { deliveryStats: vi.fn(), overview: vi.fn() } }))
 // The browser zone drives the windows and labels: pin it and the clock.
 beforeAll(() => { vi.stubEnv('TZ', 'America/Los_Angeles') })
 afterAll(() => { vi.unstubAllEnvs() })
-afterEach(() => { cleanup(); vi.clearAllMocks(); vi.restoreAllMocks(); vi.useRealTimers(); vi.stubEnv('TZ', 'America/Los_Angeles') })
+afterEach(() => { cleanup(); vi.unstubAllGlobals(); vi.restoreAllMocks(); vi.useRealTimers(); vi.stubEnv('TZ', 'America/Los_Angeles') })
 
 const zone = 'America/Los_Angeles'
 // 2026-11-03 12:00 PST: the last seven local days include the 25-hour 1 November.
 const now = new Date('2026-11-03T20:00:00.000Z')
-const sample: DeliveryStats = {
+
+/** A summary as the test writes it: ISO instants and the four counts. */
+interface Counts { succeeded: number; retried: number; failed: number; unknown: number }
+interface Stats { from: string; to: string; bucket: 'hour' | 'day'; time_zone: string; totals: Counts; buckets: Array<Counts & { start: string; end: string }> }
+const sample: Stats = {
   from: '2026-10-31T07:00:00.000Z', to: '2026-11-03T08:00:00.000Z', bucket: 'day', time_zone: zone,
   totals: { succeeded: 3, retried: 1, failed: 1, unknown: 1 },
   buckets: [
@@ -25,24 +30,34 @@ const sample: DeliveryStats = {
     { start: '2026-11-02T08:00:00.000Z', end: '2026-11-03T08:00:00.000Z', succeeded: 0, retried: 0, failed: 0, unknown: 0 },
   ],
 }
+const countsOf = (value: Counts) => ({ succeededCount: value.succeeded, retriedCount: value.retried, failedCount: value.failed, unknownCount: value.unknown })
+/** `stats` as the Worker answers it. */
+function answerOf(stats: Stats): SummarizeDeliveryAttemptsResponse {
+  return create(SummarizeDeliveryAttemptsResponseSchema, { startTime: timestamp(stats.from), endTime: timestamp(stats.to), timeZone: stats.time_zone,
+    granularity: stats.bucket === 'hour' ? SummarizeDeliveryAttemptsRequest_Granularity.HOUR : SummarizeDeliveryAttemptsRequest_Granularity.DAY,
+    totals: countsOf(stats.totals), buckets: stats.buckets.map(item => ({ startTime: timestamp(item.start), endTime: timestamp(item.end), counts: countsOf(item) })) })
+}
+/** A SummarizeDeliveryAttempts request as the window it asks for. */
+interface Window { from: string; to: string; bucket: string; tz: string }
+function windowOf(request: Record<string, unknown>): Window {
+  return { from: timeOf(request['startTime'] as never) ?? '', to: timeOf(request['endTime'] as never) ?? '',
+    bucket: request['granularity'] === SummarizeDeliveryAttemptsRequest_Granularity.HOUR ? 'hour' : 'day', tz: request['timeZone'] as string }
+}
 
-type StatsParams = Parameters<typeof api.deliveryStats>[0]
-function open(stats: DeliveryStats | ((params: StatsParams) => Promise<DeliveryStats>) = sample) {
+let fake: FakeServer
+function open(stats: Stats | ((window: Window) => Promise<Stats>) = sample) {
   vi.useFakeTimers({ toFake: ['Date'] })
   vi.setSystemTime(now)
-  if (typeof stats === 'function') vi.mocked(api.deliveryStats).mockImplementation(stats)
-  else vi.mocked(api.deliveryStats).mockResolvedValue(stats)
-  vi.mocked(api.overview).mockResolvedValue({ failed_count: 2 })
-  const client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } })
-  const tree = () => <QueryClientProvider client={client}><MemoryRouter><DashboardPage /></MemoryRouter></QueryClientProvider>
-  const result = render(tree())
-  return { ...result, rerender: () => result.rerender(tree()) }
+  fake = installFakeServer({ overview: overview({ failedDeliveryCount: 2 }) })
+  fake.answer.summarizeDeliveryAttempts = async request => answerOf(typeof stats === 'function' ? await stats(windowOf(request as never)) : stats)
+  return renderAt(<DashboardPage/>, '/dashboard')
 }
 const linkRange = (name: RegExp) => {
   const search = new URLSearchParams(screen.getByRole('link', { name }).getAttribute('href')!.split('?')[1])
   return [search.get('from'), search.get('to')]
 }
-const lastWindow = () => vi.mocked(api.deliveryStats).mock.lastCall?.[0]
+const windows = () => fake.callsOf('summarizeDeliveryAttempts').map(windowOf)
+const lastWindow = () => windows().at(-1)
 
 it('labels everything in the browser zone and drills down to each bucket end from the API', async () => {
   const { container } = open()
@@ -63,15 +78,6 @@ it('labels everything in the browser zone and drills down to each bucket end fro
   expect(linkRange(/^2026\/11\/1 成功 2 次/)).toEqual(['2026-11-01T07:00:00.000Z', '2026-11-02T08:00:00.000Z'])
   expect(linkRange(/^2026\/10\/31 成功 1 次/)).toEqual(['2026-10-31T07:00:00.000Z', '2026-11-01T07:00:00.000Z'])
   expect(container.innerHTML).not.toContain('UTC')
-})
-
-it('falls back to the next bucket start, then to the range end, when a bucket has no end', async () => {
-  const buckets = sample.buckets.map(({ end: _end, ...item }, index) => index === 2 ? { ...item, failed: 1 } : item)
-  open({ ...sample, time_zone: undefined, buckets })
-  await screen.findByText('投递趋势')
-  fireEvent.click(screen.getByText('查看每个时段的准确数量'))
-  expect(linkRange(/^2026\/11\/1 成功 2 次/)).toEqual(['2026-11-01T07:00:00.000Z', '2026-11-02T08:00:00.000Z'])
-  expect(linkRange(/^2026\/11\/2 失败 1 次/)).toEqual(['2026-11-02T08:00:00.000Z', '2026-11-03T08:00:00.000Z'])
 })
 
 it('builds the preset windows from local midnights and sends the browser zone', async () => {
@@ -128,7 +134,7 @@ it('labels the repeated fall-back 01:00 hour rows PDT and PST, each with its own
 })
 
 it('reads the browser zone again for each window and labels rows in the zone the API bucketed in', async () => {
-  const newYork: DeliveryStats = {
+  const newYork: Stats = {
     ...sample, from: '2026-10-05T04:00:00.000Z', to: now.toISOString(), time_zone: 'America/New_York',
     buckets: [{ start: '2026-11-01T04:00:00.000Z', end: '2026-11-02T05:00:00.000Z', succeeded: 3, retried: 1, failed: 1, unknown: 1 }],
   }
@@ -143,7 +149,7 @@ it('reads the browser zone again for each window and labels rows in the zone the
   expect(screen.getByText(/^当前区间：/).textContent).toBe('当前区间：2026/10/05 00:00 EDT 至 2026/11/03 15:00 EST（不含结束时刻）')
   // Back in Los Angeles without a new window: labels still follow the response's zone.
   vi.stubEnv('TZ', 'America/Los_Angeles')
-  view.rerender()
+  view.renderAgain()
   expect(screen.getByRole('rowheader', { name: '2026/11/1' })).toBeTruthy()
   expect(screen.getByText(/^当前区间：/).textContent).toBe('当前区间：2026/10/05 00:00 EDT 至 2026/11/03 15:00 EST（不含结束时刻）')
 })
@@ -166,12 +172,12 @@ it('uses UTC windows and says so when the browser reports a zone the Worker woul
 it('switches to UTC windows, without an error screen, when the Worker refuses the browser zone', async () => {
   let refusals = 0
   open(async params => {
-    if (params.tz !== 'UTC') { refusals++; throw Object.assign(new Error('时区无效'), { status: 400, code: 'invalid_time_zone' }) }
+    if (params.tz !== 'UTC') { refusals++; throw rpcError(Code.INVALID_ARGUMENT, 'INVALID_TIME_ZONE') }
     return { ...sample, from: params.from, to: params.to, time_zone: 'UTC' }
   })
   await screen.findByText('投递趋势')
   expect(refusals).toBe(1)
-  expect(vi.mocked(api.deliveryStats).mock.calls.map(([params]) => params)).toEqual([
+  expect(windows()).toEqual([
     { from: '2026-10-28T07:00:00.000Z', to: now.toISOString(), bucket: 'day', tz: zone },
     { from: '2026-10-28T00:00:00.000Z', to: now.toISOString(), bucket: 'day', tz: 'UTC' },
   ])

@@ -1,4 +1,4 @@
-import type { ActiveAlert } from '../api/types'
+import { ActiveAlert_Severity, type ActiveAlert } from '@ziyixi/proto/mailhero/ui/v2/settings_pb'
 
 const labels: Record<string, string> = {
   capacity_70: '应用容量已达 70%', capacity_85: '应用容量已达 85%', capacity_95: '应用容量已达 95%',
@@ -10,6 +10,7 @@ const labels: Record<string, string> = {
 // Unknown codes from a newer Worker stay visible as their raw code.
 export function alertLabel(code: string): string { return labels[code] || code }
 export function isEndpointAlert(code: string): boolean { return code.startsWith('endpoint_') }
-export function attentionAlerts(active?: ActiveAlert[]): ActiveAlert[] {
-  return (active || []).filter(alert => alert.severity === 'critical' || alert.severity === 'warning')
+export function attentionAlerts(active?: readonly ActiveAlert[]): ActiveAlert[] {
+  return (active || []).filter(alert => alert.severity === ActiveAlert_Severity.CRITICAL || alert.severity === ActiveAlert_Severity.WARNING)
 }
+export function isCritical(alert: ActiveAlert): boolean { return alert.severity === ActiveAlert_Severity.CRITICAL }

@@ -465,8 +465,9 @@ jobs:
           npm run typecheck
           npm test
       # Alone and serially: the other workerd suites of `npm test` would share the CPU the meter calibrates. The Ops
-      # calls and building a mail.received.v1 event (the generated message and the wire codec).
-      - name: Hold the Ops entrypoint's and the event builder's CPU to their bounds (workerd)
+      # calls, building a mail.received.v1 event (the generated message and the wire codec) and the owner API's
+      # heaviest mailhero.ui.v2 requests (the transcoder, and the reads the coordinator answers).
+      - name: Hold the Ops entrypoint's, the event builder's and the owner API's CPU to their bounds (workerd)
         working-directory: mail-hero/cloudflare
         run: npm run test:cpu
       - name: Check, test and build the UI

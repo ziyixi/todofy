@@ -2,8 +2,9 @@ import { useEffect, useMemo, useState, type FormEvent } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Link } from 'react-router'
 import { ArrowRight, CheckCircle2, Clock3, RefreshCw, RotateCcw, TriangleAlert } from 'lucide-react'
-import { api } from '../api/client'
-import type { DeliveryStats, DeliveryStatsCounts } from '../api/types'
+import { SummarizeDeliveryAttemptsRequest_Granularity } from '@ziyixi/proto/mailhero/ui/v2/mail_hero_ui_service_pb'
+import { api, ApiError, timeOf, timestamp } from '../api/client'
+import { overviewQuery } from '../api/queries'
 import { Button, Card, Empty, ErrorState, formatInstant, Loading, PageHead, zoneAbbreviation } from '../components/UI'
 
 type Period = '24h' | '7d' | '30d' | 'custom'
@@ -36,7 +37,7 @@ function browserZone(): string | null {
     return zone
   } catch { return null }
 }
-const zoneRefusal = (error: unknown) => (error as { code?: unknown } | null)?.code === 'invalid_time_zone'
+const zoneRefusal = (error: unknown) => error instanceof ApiError && error.reason === 'INVALID_TIME_ZONE'
 function dateOf(ms: number, tz: string): [number, number, number] {
   const date = new Date(ms)
   return tz === 'UTC' ? [date.getUTCFullYear(), date.getUTCMonth() + 1, date.getUTCDate()] : [date.getFullYear(), date.getMonth() + 1, date.getDate()]
@@ -81,14 +82,34 @@ function bucketLabel(value: string, bucket: Window['bucket'], timeZone: string, 
   // The abbreviation tells the two buckets of a repeated fall-back hour apart.
   return full && bucket === 'hour' ? `${label} ${zoneAbbreviation(date, timeZone)}` : label
 }
+type Counts = Record<Outcome, number>
+/** SummarizeDeliveryAttempts' answer as the page reads it: ISO instants and the four counts by outcome. */
+interface DeliveryStats { from: string; to: string; bucket: Window['bucket']; time_zone: string; totals: Counts; buckets: Array<Counts & { start: string; end: string }> }
+
+/** The attempts of `window`, by outcome and by hour or day of its zone. */
+async function deliveryStats(window: Window): Promise<DeliveryStats> {
+  const hour = window.bucket === 'hour'
+  const answer = await api.summarizeDeliveryAttempts({ parent: 'deliveries/-', startTime: timestamp(window.from), endTime: timestamp(window.to),
+    granularity: hour ? SummarizeDeliveryAttemptsRequest_Granularity.HOUR : SummarizeDeliveryAttemptsRequest_Granularity.DAY, timeZone: window.tz })
+  const counts = (value?: { succeededCount: number; retriedCount: number; failedCount: number; unknownCount: number }): Counts =>
+    ({ succeeded: value?.succeededCount ?? 0, retried: value?.retriedCount ?? 0, failed: value?.failedCount ?? 0, unknown: value?.unknownCount ?? 0 })
+  return {
+    from: timeOf(answer.startTime) ?? window.from, to: timeOf(answer.endTime) ?? window.to,
+    // Labels follow what the Worker bucketed by (as they follow its zone).
+    bucket: answer.granularity === SummarizeDeliveryAttemptsRequest_Granularity.UNSPECIFIED ? window.bucket : answer.granularity === SummarizeDeliveryAttemptsRequest_Granularity.HOUR ? 'hour' : 'day',
+    time_zone: answer.timeZone || 'UTC',
+    totals: counts(answer.totals), buckets: answer.buckets.map(item => ({ start: timeOf(item.startTime) ?? '', end: timeOf(item.endTime) ?? '', ...counts(item.counts) })),
+  }
+}
+
 // A DST day lasts 23 or 25 hours, so the API's end is used rather than start + 24 h.
 function bucketEnd(stats: DeliveryStats, index: number): string {
-  return stats.buckets[index].end ?? stats.buckets[index + 1]?.start ?? stats.to
+  return stats.buckets[index].end
 }
 function drilldown(outcome: Outcome, from: string, to: string): string {
   return `/deliveries?${new URLSearchParams({ attempt_outcome: outcome, from, to }).toString()}`
 }
-function countAll(counts: DeliveryStatsCounts): number {
+function countAll(counts: Counts): number {
   return counts.succeeded + counts.retried + counts.failed + counts.unknown
 }
 
@@ -116,17 +137,16 @@ export default function DashboardPage() {
     document.addEventListener('visibilitychange', advance)
     return () => { globalThis.clearInterval(timer); document.removeEventListener('visibilitychange', advance) }
   }, [period])
-  const overview = useQuery({ queryKey: ['overview'], queryFn: api.overview, staleTime: 300_000, refetchInterval: 300_000, refetchIntervalInBackground: false })
+  const overview = useQuery({ ...overviewQuery, refetchInterval: 300_000, refetchIntervalInBackground: false })
   const stats = useQuery({
     queryKey: ['delivery-stats', activeWindow.from, activeWindow.to, activeWindow.bucket, activeWindow.tz],
-    queryFn: () => api.deliveryStats({ from: activeWindow.from, to: activeWindow.to, bucket: activeWindow.bucket, tz: activeWindow.tz }),
+    queryFn: () => deliveryStats(activeWindow),
     staleTime: 300_000,
   })
   // A zone the Worker's Intl lacks: recompute the window in UTC instead of failing.
   const zoneError = stats.isError && zoneRefusal(stats.error) && activeWindow.tz !== 'UTC'
   useEffect(() => { if (zoneError) setZoneRefused(true) }, [zoneError])
-  // A response without time_zone came from the UTC-only API.
-  const shownZone = stats.data ? stats.data.time_zone ?? 'UTC' : activeWindow.tz, local = shownZone === browser
+  const shownZone = stats.data ? stats.data.time_zone : activeWindow.tz, local = shownZone === browser
   const zoneWords = local ? '浏览器时区' : ' UTC '
   const total = stats.data ? countAll(stats.data.totals) : 0
   const maxBucket = Math.max(1, ...(stats.data?.buckets.map(countAll) || []))
@@ -160,7 +180,7 @@ export default function DashboardPage() {
     {stats.isPending || zoneError ? <Card><Loading label="正在读取投递统计…"/></Card> : stats.isError ? <Card><ErrorState error={stats.error} retry={() => void stats.refetch()}/></Card> : <>
       <div className="dashboard-metrics">{outcomes.map(({ key, label, detail, icon: Icon }) => <Link to={drilldown(key, stats.data.from, stats.data.to)} className={`dashboard-metric dashboard-metric-${key}`} key={key} aria-label={`查看此区间${label}的投递事件`}><span className="dashboard-metric-top"><span>{label}的尝试</span><Icon size={19}/></span><strong>{stats.data.totals[key].toLocaleString('zh-CN')}</strong><small>{detail}</small><span className="dashboard-metric-action">查看相关事件 <ArrowRight size={14}/></span></Link>)}</div>
       {stats.data.totals.unknown > 0 && <div className="dashboard-unknown" role="status"><TriangleAlert size={17}/><span>另有 <strong>{stats.data.totals.unknown}</strong> 次尝试结果不明（可能在请求中断时发生），需要逐条核对。</span><Link to={drilldown('unknown', stats.data.from, stats.data.to)}>查看事件 <ArrowRight size={14}/></Link></div>}
-      {overview.data?.failed_count != null && <div className="dashboard-current-status"><span>当前已停止的事件：<strong>{overview.data.failed_count}</strong> 条。这里按事件当前状态计数，也包括未发出 HTTP 请求就停止的事件。</span><Link to="/deliveries?status=failed">查看当前失败事件 <ArrowRight size={14}/></Link></div>}
+      {overview.data && <div className="dashboard-current-status"><span>当前已停止的事件：<strong>{overview.data.failedDeliveryCount}</strong> 条。这里按事件当前状态计数，也包括未发出 HTTP 请求就停止的事件。</span><Link to="/deliveries?status=failed">查看当前失败事件 <ArrowRight size={14}/></Link></div>}
       {total === 0 ? <Card><Empty title="这段时间没有投递尝试" detail="新邮件进入转发流程后，这里会显示 webhook 尝试。仅归档的邮件不会计入。" action={<Link className="button button-secondary" to="/deliveries">查看投递记录</Link>}/></Card> : <Card className="dashboard-chart-card">
         <div className="dashboard-chart-heading"><div><h2>投递趋势</h2><p>每一段显示按{zoneWords}划分的小时或日期内完成的尝试；一次事件可能发生多次尝试。</p></div><Link className="text-link" to="/deliveries">全部记录 <ArrowRight size={15}/></Link></div>
         <div className="dashboard-legend" aria-hidden="true"><span className="succeeded">成功</span><span className="retried">进入重试</span><span className="failed">失败</span>{stats.data.totals.unknown > 0 && <span className="unknown">结果不明</span>}</div>
