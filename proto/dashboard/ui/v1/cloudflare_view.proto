@@ -202,9 +202,9 @@ message DriftFinding {
     (common.wire.v1.field).non_null = true
   ];
   // The committed binding type or flag (secret_text, plain_text, true, false), never a value.
-  optional string expected = 5;
+  optional string expected = 5 [(google.api.field_behavior) = OUTPUT_ONLY];
   // The live binding type or flag, never a value.
-  optional string actual = 6;
+  optional string actual = 6 [(google.api.field_behavior) = OUTPUT_ONLY];
 
   // How a finding differs.
   enum Kind {
@@ -311,43 +311,55 @@ message ResourceRow {
     }
   ];
   // D1 and Durable Objects: rows read today.
-  optional double rows_read = 7 [(common.wire.v1.field) = {
-    cases: {
-      when: [
-        "d1",
-        "do"
-      ]
-      presence: PRESENCE_REQUIRED
+  optional double rows_read = 7 [
+    (google.api.field_behavior) = OUTPUT_ONLY,
+    (common.wire.v1.field) = {
+      cases: {
+        when: [
+          "d1",
+          "do"
+        ]
+        presence: PRESENCE_REQUIRED
+      }
+      otherwise: PRESENCE_ABSENT
     }
-    otherwise: PRESENCE_ABSENT
-  }];
+  ];
   // D1 and Durable Objects: rows written today.
-  optional double rows_written = 8 [(common.wire.v1.field) = {
-    cases: {
-      when: [
-        "d1",
-        "do"
-      ]
-      presence: PRESENCE_REQUIRED
+  optional double rows_written = 8 [
+    (google.api.field_behavior) = OUTPUT_ONLY,
+    (common.wire.v1.field) = {
+      cases: {
+        when: [
+          "d1",
+          "do"
+        ]
+        presence: PRESENCE_REQUIRED
+      }
+      otherwise: PRESENCE_ABSENT
     }
-    otherwise: PRESENCE_ABSENT
-  }];
+  ];
   // R2: Class A operations this month.
-  optional double class_a = 9 [(common.wire.v1.field) = {
-    cases: {
-      when: "r2"
-      presence: PRESENCE_REQUIRED
+  optional double class_a = 9 [
+    (google.api.field_behavior) = OUTPUT_ONLY,
+    (common.wire.v1.field) = {
+      cases: {
+        when: "r2"
+        presence: PRESENCE_REQUIRED
+      }
+      otherwise: PRESENCE_ABSENT
     }
-    otherwise: PRESENCE_ABSENT
-  }];
+  ];
   // R2: Class B operations this month.
-  optional double class_b = 10 [(common.wire.v1.field) = {
-    cases: {
-      when: "r2"
-      presence: PRESENCE_REQUIRED
+  optional double class_b = 10 [
+    (google.api.field_behavior) = OUTPUT_ONLY,
+    (common.wire.v1.field) = {
+      cases: {
+        when: "r2"
+        presence: PRESENCE_REQUIRED
+      }
+      otherwise: PRESENCE_ABSENT
     }
-    otherwise: PRESENCE_ABSENT
-  }];
+  ];
 }
 
 // What the drift check compares, per Worker.

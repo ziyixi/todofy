@@ -83,13 +83,16 @@ message AttentionItem {
     (common.wire.v1.field).non_null = true
   ];
   // Set on an observed item only: its level (`code` is then a tile's or a stage's reason).
-  Level observed = 7 [(common.wire.v1.field) = {
-    allowed: [
-      "warning",
-      "critical",
-      "unknown"
-    ]
-  }];
+  Level observed = 7 [
+    (google.api.field_behavior) = OUTPUT_ONLY,
+    (common.wire.v1.field) = {
+      allowed: [
+        "warning",
+        "critical",
+        "unknown"
+      ]
+    }
+  ];
 }
 
 // Where an item links to; the UI builds the hash route from it.
@@ -100,13 +103,13 @@ message Target {
     (common.wire.v1.field).non_null = true
   ];
   // A flow of the registry (flows view).
-  optional string flow = 2;
+  optional string flow = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
   // A stage of that flow.
-  optional string stage = 3;
+  optional string stage = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
   // An entry of the registry.
-  optional string entry = 4;
+  optional string entry = 4 [(google.api.field_behavior) = OUTPUT_ONLY];
   // A Worker script (cloudflare view).
-  optional string script = 5;
+  optional string script = 5 [(google.api.field_behavior) = OUTPUT_ONLY];
 }
 
 // A switch that holds an entry's work.

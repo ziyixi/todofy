@@ -134,10 +134,10 @@ message QuotaBreakdownItem {
   // The contribution, in the row's unit.
   double value = 2 [(google.api.field_behavior) = REQUIRED];
   // Set on items keyed by a storage identifier: the kind `name` identifies.
-  StorageKind kind = 3;
+  StorageKind kind = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
   // The registry resource `name` maps to (GetRegistry names it); unset for an unregistered or unclassified
   // storage item (the UI shows 未登记 or 未归类) and for script and model items.
-  optional string resource = 4;
+  optional string resource = 4 [(google.api.field_behavior) = OUTPUT_ONLY];
 }
 
 // The Workers Free quotas the dashboard tracks.

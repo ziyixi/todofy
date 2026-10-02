@@ -489,7 +489,12 @@ follow the same pattern (ops-v1 is a service-binding contract, not an HTTP API: 
   `resource_reference` on every field that names one, singletons for per-owner state (`settings`); standard
   methods where they fit (AIP-131/132/133/134/135) and custom methods (AIP-136, `:verb`) for actions.
   `(google.api.field_behavior)` on every field: `REQUIRED`/`OPTIONAL` on inputs, `OUTPUT_ONLY` on what the
-  server computes, `IDENTIFIER` on `name`. A mutation takes an AIP-155 `request_id` with
+  server computes, `IDENTIFIER` on `name`. One exception: an API whose answers are pre-encoded wire JSON
+  (`PreEncoded`, as `dashboard.ui.v1`'s views) marks an output field its producer always writes, null
+  included, `REQUIRED`, because under the profile only `REQUIRED` writes a null (and makes the client refuse
+  its absence), so only then does the profile write the producer's bytes back unchanged; those files carry a
+  file-wide `core::0216::state-field-output-only` exception for their fields of a `State` enum, and the fields written
+  only when set stay `OUTPUT_ONLY`. A mutation takes an AIP-155 `request_id` with
   `(google.api.field_info).format = UUID4`.
 - Resource IDs have no `/` (AIP-122). An ID whose natural key has one (an old-style arXiv ID,
   `hep-th/9901001`) writes it as `~` (`likedPapers/hep-th~9901001`), and a Create's `<resource>_id` takes

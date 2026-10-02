@@ -182,13 +182,16 @@ message TileMetricDef {
     (common.wire.v1.field).non_null = true
   ];
   // The ops-v1 counter.
-  optional string name = 2 [(common.wire.v1.field) = {
-    cases: {
-      when: "counter"
-      presence: PRESENCE_REQUIRED
+  optional string name = 2 [
+    (google.api.field_behavior) = OUTPUT_ONLY,
+    (common.wire.v1.field) = {
+      cases: {
+        when: "counter"
+        presence: PRESENCE_REQUIRED
+      }
+      otherwise: PRESENCE_ABSENT
     }
-    otherwise: PRESENCE_ABSENT
-  }];
+  ];
 }
 
 // A Worker script that belongs to an entry (GraphQL `scriptName`).
@@ -217,7 +220,7 @@ message RegistryResource {
   // The entry it belongs to.
   string entry = 4 [(google.api.field_behavior) = REQUIRED];
   // Durable Objects: the script that defines the class.
-  optional string script = 5;
+  optional string script = 5 [(google.api.field_behavior) = OUTPUT_ONLY];
 }
 
 // A business flow.
@@ -260,17 +263,17 @@ message Stage {
   // The entry that runs it; null outside what the dashboard sees (source mailbox forwarding, Notion): 未接入.
   optional string entry = 3 [(google.api.field_behavior) = REQUIRED];
   // The entry's Workers this stage runs on; unset: all of them.
-  repeated string workers = 4;
+  repeated string workers = 4 [(google.api.field_behavior) = OUTPUT_ONLY];
   // Signals of the entry that describe this stage; each code at most once per flow.
   repeated string signals = 5 [(google.api.field_behavior) = REQUIRED];
   // Of those, the ones meaning "held by a switch": shown 已暂停, not as a fault.
-  repeated string hold_signals = 6;
+  repeated string hold_signals = 6 [(google.api.field_behavior) = OUTPUT_ONLY];
   // Counters of the entry shown on the stage (display only, never thresholds).
-  repeated string counters = 7;
+  repeated string counters = 7 [(google.api.field_behavior) = OUTPUT_ONLY];
   // The Workers' error rate counts for the stage's level.
-  optional bool analytics = 8;
+  optional bool analytics = 8 [(google.api.field_behavior) = OUTPUT_ONLY];
   // 中文, one line, shown while the stage is 未接入 (why the dashboard cannot see it).
-  optional string note = 9;
+  optional string note = 9 [(google.api.field_behavior) = OUTPUT_ONLY];
 }
 
 // An implemented canary runner bound to a flow.

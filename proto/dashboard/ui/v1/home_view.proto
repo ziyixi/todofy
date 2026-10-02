@@ -138,38 +138,50 @@ message TileMetric {
     (common.wire.v1.field).non_null = true
   ];
   // The counter's name.
-  optional string name = 2 [(common.wire.v1.field) = {
-    cases: {
-      when: "counter"
-      presence: PRESENCE_REQUIRED
+  optional string name = 2 [
+    (google.api.field_behavior) = OUTPUT_ONLY,
+    (common.wire.v1.field) = {
+      cases: {
+        when: "counter"
+        presence: PRESENCE_REQUIRED
+      }
+      otherwise: PRESENCE_ABSENT
     }
-    otherwise: PRESENCE_ABSENT
-  }];
+  ];
   // The counter's value.
-  optional double value = 3 [(common.wire.v1.field) = {
-    cases: {
-      when: "counter"
-      presence: PRESENCE_REQUIRED
+  optional double value = 3 [
+    (google.api.field_behavior) = OUTPUT_ONLY,
+    (common.wire.v1.field) = {
+      cases: {
+        when: "counter"
+        presence: PRESENCE_REQUIRED
+      }
+      otherwise: PRESENCE_ABSENT
     }
-    otherwise: PRESENCE_ABSENT
-  }];
+  ];
   // The probe's latency in milliseconds.
-  optional int32 ms = 4 [(common.wire.v1.field) = {
-    cases: {
-      when: "latency"
-      presence: PRESENCE_REQUIRED
+  optional int32 ms = 4 [
+    (google.api.field_behavior) = OUTPUT_ONLY,
+    (common.wire.v1.field) = {
+      cases: {
+        when: "latency"
+        presence: PRESENCE_REQUIRED
+      }
+      otherwise: PRESENCE_ABSENT
     }
-    otherwise: PRESENCE_ABSENT
-  }];
+  ];
   // The hour of the last request (the tick runs every 30 minutes), e.g. `2026-09-29T06:00:00.000Z`.
-  optional string hour = 5 [(common.wire.v1.field) = {
-    format: "Timestamp"
-    cases: {
-      when: "last_active"
-      presence: PRESENCE_REQUIRED
+  optional string hour = 5 [
+    (google.api.field_behavior) = OUTPUT_ONLY,
+    (common.wire.v1.field) = {
+      format: "Timestamp"
+      cases: {
+        when: "last_active"
+        presence: PRESENCE_REQUIRED
+      }
+      otherwise: PRESENCE_ABSENT
     }
-    otherwise: PRESENCE_ABSENT
-  }];
+  ];
 }
 
 // A flow's line.
@@ -248,29 +260,38 @@ message Freshness {
     }
   ];
   // Finished ok runs among the recent ones (canary).
-  optional int32 ok_runs = 3 [(common.wire.v1.field) = {
-    cases: {
-      when: "canary"
-      presence: PRESENCE_REQUIRED
+  optional int32 ok_runs = 3 [
+    (google.api.field_behavior) = OUTPUT_ONLY,
+    (common.wire.v1.field) = {
+      cases: {
+        when: "canary"
+        presence: PRESENCE_REQUIRED
+      }
+      otherwise: PRESENCE_ABSENT
     }
-    otherwise: PRESENCE_ABSENT
-  }];
+  ];
   // Finished recent runs (canary).
-  optional int32 runs = 4 [(common.wire.v1.field) = {
-    cases: {
-      when: "canary"
-      presence: PRESENCE_REQUIRED
+  optional int32 runs = 4 [
+    (google.api.field_behavior) = OUTPUT_ONLY,
+    (common.wire.v1.field) = {
+      cases: {
+        when: "canary"
+        presence: PRESENCE_REQUIRED
+      }
+      otherwise: PRESENCE_ABSENT
     }
-    otherwise: PRESENCE_ABSENT
-  }];
+  ];
   // Whether Todofy stored the last report (digest); unset before the first receipt.
-  optional bool accepted = 5 [(common.wire.v1.field) = {
-    cases: {
-      when: "digest"
-      presence: PRESENCE_OPTIONAL
+  optional bool accepted = 5 [
+    (google.api.field_behavior) = OUTPUT_ONLY,
+    (common.wire.v1.field) = {
+      cases: {
+        when: "digest"
+        presence: PRESENCE_OPTIONAL
+      }
+      otherwise: PRESENCE_ABSENT
     }
-    otherwise: PRESENCE_ABSENT
-  }];
+  ];
 }
 
 // The Cloudflare summary of the home view.
