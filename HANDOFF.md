@@ -162,7 +162,8 @@ with synthetic data.
 
 ### `proto-todofy-ui` — Todofy owner API as `todofy.ui.v1`
 
-- State: built on `9e38624`; all 11 review findings fixed, with tests. Verified from a clean clone of its head:
+- State: rebased on `ca63675` (after the dashboard's landing); all 11 review findings fixed, with tests. Verified
+  from a clean clone of its head:
   every check in the list above, the runtime suite, the gateway's workerd CPU test, the dry runs and the smoke
   (every rpc through the UI's own client; the machine routes byte-identical to `main` apart from timestamps
   and request IDs). Commits: `todofy.ui.v1` IDL, core RPC, gateway, tests, UI, docs, then one per review fix.
