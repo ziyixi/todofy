@@ -18,7 +18,7 @@ Rules for this file:
 
 Last updated: 2026-10-02 ~20:40 UTC. The code on `main` is `b70856f` (later commits are docs only). Every app's owner API is on proto now (the dashboard
 `ca63675`, FlowDay `8d9100e`, Mail Hero `d1bde0e`, Todofy `b70856f`, all landed and verified on 2026-10-02). Nothing
-is in flight; the next work is in "Next, in order".
+was in flight at that landing. The owner has since authorised the foundation work below.
 
 ## What is live
 
@@ -66,7 +66,9 @@ Practical notes learned the hard way:
 
 ## In flight
 
-Nothing. Start new work on a branch, add its row here in the same change, and push it early.
+| Branch | Scope | Remaining and verification |
+| --- | --- | --- |
+| `codex/personal-cloud-foundation` | Owner-authorised: concise bilingual README and documentation navigation; P5 per-app catalog using committed Wrangler configs; extract repeated CI deployment probes; import Newsletter while retaining its independent image and add a durable publishing drain. | Preserve current HTTP bytes, identities and Cloudflare resources. Run Changes/catalog/probe tests and affected app checks; run Newsletter unit/runtime and credential-free image checks. Branch CI first, then the same green source SHA to main. No K3s installation or real newsletter send in this phase. Inspect obsolete Todofy image references before narrowly removing only confirmed retired images; retain active images and documented rollback resources. |
 
 The pattern every owner API followed (owner-approved, Google style, from Lab), for any new app or API: describe every route the app's UI
 calls in `proto/<app>/ui/vN` as AIP resources with `google.api.http`, serve them through
