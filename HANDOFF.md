@@ -16,7 +16,7 @@ Rules for this file:
   what is done, what is left, how to verify it and what to check after its deploy. Link to the app docs for
   design detail instead of copying it.
 
-Last updated: 2026-10-02 ~20:20 UTC. `main` is `b70856f`. Every app's owner API is on proto now (the dashboard
+Last updated: 2026-10-02 ~20:40 UTC. The code on `main` is `b70856f` (later commits are docs only). Every app's owner API is on proto now (the dashboard
 `ca63675`, FlowDay `8d9100e`, Mail Hero `d1bde0e`, Todofy `b70856f`, all landed and verified on 2026-10-02). Nothing
 is in flight; the next work is in "Next, in order".
 
