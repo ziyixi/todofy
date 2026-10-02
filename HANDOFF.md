@@ -16,20 +16,20 @@ Rules for this file:
   what is done, what is left, how to verify it and what to check after its deploy. Link to the app docs for
   design detail instead of copying it.
 
-Last updated: 2026-10-02 ~20:30 UTC. Every app's owner API is on proto once this change lands: the dashboard
-(`ca63675`) and FlowDay (`8d9100e`) are live and verified, Mail Hero (`d1bde0e`) lands just before this change, and
-Todofy lands with it (both below; their post-deploy checks are pending until "Waiting to be verified" says otherwise).
+Last updated: 2026-10-02 ~20:20 UTC. `main` is `b70856f`. Every app's owner API is on proto now (the dashboard
+`ca63675`, FlowDay `8d9100e`, Mail Hero `d1bde0e`, Todofy `b70856f`, all landed and verified on 2026-10-02). Nothing
+is in flight; the next work is in "Next, in order".
 
 ## What is live
 
 | App | Worker | Host(s) | Deploy job | Owner API on proto? |
 | --- | --- | --- | --- | --- |
-| Mail Hero | `mail-hero` (+ `MailCoordinator` DO) | `mail-hero.ziyixi.science` | `Mail Hero deploy` | Webhook `mail.received.v1` yes; owner API: branch `proto-mail-hero-ui` |
-| Todofy | `todofy` (TS gateway) + `todofy-core` (Python) | `todofy.ziyixi.science`, hooks and daily hosts | `Todofy deploy` | Reports `todofy.report.v1`, `task-intent-v1`, `ops-v1` yes; owner API: branch `proto-todofy-ui` |
+| Mail Hero | `mail-hero` (+ `MailCoordinator` DO) | `mail-hero.ziyixi.science` | `Mail Hero deploy` | Yes (`mailhero.ui.v2`; webhook `mail.received.v1`) |
+| Todofy | `todofy` (TS gateway) + `todofy-core` (Python) | `todofy.ziyixi.science`, hooks and daily hosts | `Todofy deploy` | Yes (`todofy.ui.v1`; reports `todofy.report.v1`, `task-intent-v1`, `ops-v1`) |
 | Lab | `lab` | `lab.ziyixi.science` | `Lab deploy` | Yes (`lab.ui.v1`, the pilot) |
 | Links | `links` | `s.ziyixi.science` | `Links deploy` | Yes (`links.ui.v1`) |
 | Watch | `watch` (+ `WatchState` DO) | `watch.ziyixi.science` | `Watch deploy` | Yes (`watch.ui.v1`) |
-| FlowDay | `flowday` | `flowday.ziyixi.science` | `FlowDay deploy` | Branch `proto-flowday-ui` |
+| FlowDay | `flowday` | `flowday.ziyixi.science` | `FlowDay deploy` | Yes (`flowday.ui.v1`) |
 | Dashboard | `home` (+ `HomeState` DO) | `home.ziyixi.science` | `Dashboard deploy` | Yes (`dashboard.ui.v1`, since `ca63675`) |
 | Website | `ziyixi-website` (+ `ziyixi-notion-publish` relay) | `ziyixi.science`, `www.ziyixi.science` | `Website release` | n/a (static) |
 
@@ -66,12 +66,9 @@ Practical notes learned the hard way:
 
 ## In flight
 
-The three branches below are pushed (CI only, nothing deploys from a branch). They were built in local
-scratch clones by agents that are still finishing them; their latest commits are pushed again when they
-finish. If the session that runs them is gone, continue from the pushed branch: re-run the verification
-list, do the reviews, fix, rebase, land.
+Nothing. Start new work on a branch, add its row here in the same change, and push it early.
 
-The shared plan for each (owner-approved, Google style, copied from Lab): describe every route the app's UI
+The pattern every owner API followed (owner-approved, Google style, from Lab), for any new app or API: describe every route the app's UI
 calls in `proto/<app>/ui/vN` as AIP resources with `google.api.http`, serve them through
 `proto/ts/http-transcoder.ts` behind the app's unchanged edge auth (Access JWT, Origin, CSRF before any body
 is read), call them from the UI through `proto/ts/http-client.ts`, delete the hand-written duplicate types,
@@ -89,91 +86,21 @@ Proto checks (lint, api-lint, breaking vs `origin/main`, rules self-test, determ
 UI tests and build, bundle budgets, dry run), and a scripted smoke of every UI call against `wrangler dev`
 with synthetic data.
 
-### `proto-mail-hero-ui` — Mail Hero owner API as `mailhero.ui.v2`
-
-- State: LANDED on `main` as `d1bde0e` (2026-10-02, third, right after FlowDay; rebased on `8d9100e`). Its first
-  CI run failed one CPU bound: SendMessage's first run read 6.01 reference ms against 6 (the codec's first use inside
-  the request). The fix runs the owner API's codec path at startup (`mail-hero/cloudflare/src/native/warmup.ts`,
-  about 10 ms of a 1 s startup budget), as FlowDay and Todofy do: SendMessage's first run 4.15-4.60 → 3.38-3.98
-  reference ms locally. CI margin is still thin (projected 3.7-6.0 on runners); if it flakes, take a cheaper send
-  path rather than a looser bound. Post-deploy checks below are pending. Build and review history: four build
-  commits (IDL, Worker, UI, docs), one commit per review finding (MH-CS-1, D4, D7, D6, D1+D3, D5, D2, D8).
-- Review fixes: the dashboard's buckets are the IDL's `AttemptResult` (SUCCEEDED, RETRIED, FAILED, UNKNOWN, each mapped
-  to its attempt outcomes) and the drill-down filter is `attempt_result = <AttemptResult>` (was `attempt_outcome`; the
-  UI's drill-down URL parameter too); the dashboard page reads the generated response types; an unmapped module error
-  code is `INTERNAL`, never guessed from its status; a malformed filter time is `BAD_REQUEST`;
-  `Settings.ledger_retention_days` is always set; SendMessage, ResendDelivery and TestEndpoint all answer
-  `{delivery: Delivery}`; `ETAG_MISMATCH` carries the current Message, Endpoint or Settings; Mail Hero's filter parser
-  runs the shared corpus; the dashboard stats test no longer asserts host wall time.
-- Why v2: the hand-written owner API was `/api/v1`; the new one is `/api/v2/*`, and `/api/v1/*` answers 410
-  until 2026-11-01.
-- What it does: every owner route through the transcoder in `src/native/api-v2.ts`; MAINTENANCE_MODE,
-  Origin and CSRF checked before the body; mutations under the coordinator's write lease as before. The two
-  reads that exceeded 10 ms (parsed message content, the delivery dashboard's first time-zone load) are
-  answered inside the coordinator DO. Raw and attachment downloads stay outside the service with the same
-  headers (no-store, nosniff, attachment). The `mail.received.v1` webhook and `/api/internal/backup/*` are
-  untouched.
-- Measured (production dry run, `vite build`, the calibrated workerd meter, medians of three fresh isolates):
-  Worker 193.3 → 229.0 KiB gzip (budget 274), UI JS 121.4 → 162.4 KiB gzip (budget 195); the isolate's first API
-  request 7.2-7.8 reference ms (bound 9 of Free's 10), every other Worker request at most 5.5 first and 2.7 warm;
-  the two heavy reads run in the coordinator (slowest 19 ms of its 30 s).
-- Startup warm-up (CI fix): the branch's CI failed one check, `delivery-request-cpu.test.mjs` "SendMessage (largest
-  record): first run ... 6.01 reference ms" against `WORKER_COLD_BOUND_MS` 6 (the hand-written send reads 4.1-4.9 on
-  runners): an isolate's first request ran protobuf-es and the codec before V8 compiled them.
-  `cloudflare/src/native/warmup.ts`, called at module scope from `api.ts` as FlowDay's `warmup.ts` is, routes, reads
-  and answers synthetic requests of the heaviest methods through the transcoder's routes and the codec (no bindings,
-  no I/O, constants only; five rounds, about 10 ms of startup, +2.4 KiB gzip). Reference machine, four serial runs:
-  SendMessage first 4.15-4.60 → 3.38-3.98 (the hand-written send 2.84-3.06), the first API request 7.1-8.2 → 5.7-6.5,
-  50 messages with a search 4.7-5.1 → 2.8-3.3; bounds unchanged. Watch the next CI run's send (expected about
-  4.4-5.8 against 6).
-- Deploys: Mail Hero only.
-- After deploy: inbox list, a message detail (text, HTML in the sandbox, warnings), raw and attachment
-  downloads, deliveries and attempts, retry, targets, settings and retention preview, the delivery dashboard;
-  an old tab shows the reload message; the dashboard's Mail Hero tile stays ok; the next real mail is
-  delivered (Todofy's mail flow tile).
-
-### `proto-todofy-ui` — Todofy owner API as `todofy.ui.v1`
-
-- State: LANDING on `main` (2026-10-02, fourth and last, right after Mail Hero; rebased on `d1bde0e` without
-  conflicts, the four doc findings of the rebase audit fixed). All 11 review findings fixed, with tests. Verified
-  from a clean clone on the previous base `18e8e92` (every check in the list above, the runtime suite, the
-  gateway's workerd CPU test, both dry runs, and lint and typecheck of every other TypeScript proto user); the move
-  to `d1bde0e` changed no Todofy file. Post-deploy checks below are pending.
-- Review fixes: RecomputeReport stores only a computed report, so the same `request_id` computes again after
-  RATE_LIMITED or UNAVAILABLE (a stale unfinished claim is taken over after 120 s); a bug in TodofyCore is
-  INTERNAL, not UNAVAILABLE, and the UI retries only UNAVAILABLE and missing answers; ListMailEvents takes one
-  AIP-160 `filter` (`state = TODO_UNKNOWN` or `attention = true`) and an AIP-157 `view` (BASIC; GetMailEvent
-  FULL); a reused `request_id` is the common BAD_REQUEST (ErrorReason 3 reserved); IDs stay inside AIP-122
-  (`gtdReviews/2026-w40`; `legacyTexts/{event UUID}` only); a page token naming no real day is BAD_REQUEST;
-  `tools/workerd-cpu` replaces an isolate whose inspector timed out (tools only, deploys nothing).
-- What it does: `TodofyUiService` under `/api/v1` (mailEvents, dailyReminders, metricDays, gtdDays, gtdReviews,
-  legacyTexts; singletons serviceStatus, latestReports, integration). The TS gateway transcodes and makes one
-  `owner_ui` RPC to `TodofyCore`, which reads requests and writes answers with the generated Python code.
-  CSRF moves to `GET /api/csrf`. The OpenAPI document becomes `api/machine-api-v1.openapi.yaml` and keeps only
-  the hooks hosts' routes (`/hooks/mail`, `/api/summary`, `/api/recommendation`, `/health`), whose wire is
-  unchanged; `openapi-typescript` is retired. The old owner paths answer 410 `reload_required` (old envelope)
-  for one release; `owner_api` in core keeps serving the old gateway during the deploy. The next Todofy
-  release removes both (`todofy/docs/gateway-contract.md` §6.4).
-- Measured: gateway 11.8 → 72.0 KiB gzip (budget 86); UI JS 131.9 → 172.4 KiB gzip (budget 208); todofy-core
-  153.6 → 168.4 KiB gzip; gateway CPU per owner request at most 6.4
-  reference ms (a 1.9 MB ASCII legacy text heavy in escapes; the reports at their limits 5.2), the isolate's
-  first API request 4.2-5.2 (bound 8; details in `todofy/docs/gateway-contract.md` §8).
-- Deploys: Todofy (core first, then the gateway; no D1 or Durable Object migration) only. Core must answer
-  `owner_ui` before the new gateway serves.
-- After deploy: walk every Todofy page (首页, 需关注, 事件 and one event's detail, 提醒, 日报 with one recompute,
-  统计, GTD, 健康, 接入); act only on a synthetic or already handled event. A tab left open from before shows
-  "Todofy 已更新，请刷新页面". The newsletter's next run at 13:30 UTC still gets `/api/summary` and
-  `/api/recommendation` (same bytes); Mail Hero's next delivery succeeds and the canary (mail → Todofy) passes
-  on the dashboard; the gateway's CPU on the Workers dashboard stays well under 10 ms.
-
-### Landing order
-
-Done in this order on 2026-10-02: the dashboard (alone: its `proto/ts` change redeployed every TypeScript user),
-FlowDay, Mail Hero, Todofy, each rebased on the previous landing and re-verified. When an entry's post-deploy
-checks pass, move it to "Waiting to be verified" as verified, then delete it once nothing is left for it.
-
 ## Waiting to be verified
 
+- `todofy.ui.v1` (landed `b70856f`, 2026-10-02 20:02 UTC): verified. Todofy's deploy succeeded (core, then the
+  gateway); every owner route the UI calls answers 200 (serviceStatus, mailEvents with paging and `filter`, one
+  event, dailyReminders, latestReports, metricDays, gtdDays, gtdReviews, integration); old owner paths answer 410
+  with "Todofy 已更新，请刷新页面"; the machine routes are unchanged (`/api/summary` and `/api/recommendation` 401
+  with Basic realm "todofy" without credentials, `/health` 200). A manual canary at 20:06 UTC was delivered to
+  Todofy. Left: the newsletter's 2026-10-03 13:30 UTC run (reads `/api/summary` and `/api/recommendation`); remove
+  the old owner paths (`todofy/gateway/src/owner.ts`) and core's `owner_api` after 2026-11-02.
+- `mailhero.ui.v2` (landed `d1bde0e`, 2026-10-02 20:00 UTC): verified. Mail Hero's deploy succeeded; overview,
+  setup status, settings, messages (list, one detail, its content), deliveries and endpoints answer 200; the raw
+  download answers 200 with no-store, nosniff and attachment; old `/api/v1/*` answers 410 with "Mail Hero 已更新，
+  请刷新页面"; real mail and the canary were delivered after the deploy. On CI the send's first run read about
+  3.6-4.0 reference ms with the startup warm-up (bound 6). Left: remove the `/api/v1` 410 answer after 2026-11-01
+  (`mail-hero/cloudflare/src/native/api.ts`).
 - `flowday.ui.v1` (landed `8d9100e`, 2026-10-02 18:50 UTC): verified. FlowDay's deploy succeeded; the UI's calls
   (tasks, flows, notes, time entries by day and task, settings, timer, analytics) answer 200 and page; old `/api/*`
   answers 410 with the reload message; the dashboard's tiles are all ok. Left: remove the 410 routes after
@@ -192,8 +119,8 @@ checks pass, move it to "Waiting to be verified" as verified, then delete it onc
   answered 42 requests after 13:25 UTC, all successful, CPU p50 0.7 ms / p99 4.1 ms. The VPS side (the
   newsletter run itself) is not checked: an agent needs the owner's permission for the read-only ssh check,
   or the owner confirms the 2026-10-02 newsletter arrived.
-- Infra drift must stay `no-op 19` on its daily scheduled run. The 2026-10-02 scheduled run had not started
-  by 17:00 UTC (GitHub delay); check it ran and stayed no-op.
+- Infra drift must stay `no-op 19` on its daily scheduled run (13:23 UTC; GitHub often starts it hours late). On
+  2026-10-02 the scheduled run had not started by 18:25 UTC; a dispatched run (read-only plan) then read `no-op 19`.
 - FlowDay rollback window (F5) ends 2026-10-08: the old container stays untouched until then. F6 (retire the
   container, its tunnel ingress and the `flowday-bypass` Access app) needs the owner's OK and goes through
   `infra/` for the Access app (`flowday/docs/design.md` section 11).
@@ -218,19 +145,18 @@ checks pass, move it to "Waiting to be verified" as verified, then delete it onc
 
 ## Next, in order
 
-1. Finish and land the three remaining proto branches above (FlowDay, Mail Hero, Todofy), then verify each deploy.
-2. After them, proto is the single IDL for every interface the monorepo defines. Follow-ups: remove the 410
+1. proto is the single IDL for every interface the monorepo defines (done 2026-10-02). Follow-ups: remove the 410
    routes on their dates; remove `owner_api` from `todofy-core` in the release after `proto-todofy-ui`.
    With the next Mail Hero change (a `mail-hero/docs` edit deploys Mail Hero, so `proto-todofy-ui` leaves it):
    in `mail-hero/docs/todofy-integration.md` point line 13 at `todofy/api/machine-api-v1.openapi.yaml` (the
    `/hooks/mail` route Mail Hero calls) and `proto/todofy/ui/v1` instead of the removed
    `owner-api-v1.openapi.yaml`, and drop line 55's `npm run gen:api` (Todofy's UI no longer generates types
    from the schema).
-3. Watch W4: a shadow-mode week (watches report, no Todoist tasks), then the owner's watches.
-4. FlowDay F6 after 2026-10-08 with the owner's OK.
-5. Service catalog (IaC P5): one `app.toml` per app generating hostnames, Access apps, dashboard links and
+2. Watch W4: a shadow-mode week (watches report, no Todoist tasks), then the owner's watches.
+3. FlowDay F6 after 2026-10-08 with the owner's OK.
+4. Service catalog (IaC P5): one `app.toml` per app generating hostnames, Access apps, dashboard links and
    probes, validated against each `wrangler.toml`; then P6 (rollback drill for `infra/`).
-6. Code quality phases Q0–Q7: English comments everywhere, coverage and lint ratchets, clock injection in every
+5. Code quality phases Q0–Q7: English comments everywhere, coverage and lint ratchets, clock injection in every
    app's tests.
 
 ## Known problems and how they were solved
@@ -245,6 +171,13 @@ checks pass, move it to "Waiting to be verified" as verified, then delete it onc
   100117, even with override): the record must be removed first, which the deploy token cannot do.
 - The dashboard's registry must name every Durable Object namespace by id (`dashboard/worker/src/registry.ts`);
   a new DO needs a follow-up commit with its id after its first deploy.
+- A first request that pays for the codec: an isolate's first owner-API request runs protobuf-es and the wire codec
+  before V8 compiled them (about 1-2 reference ms more). Run the answer path once at startup (`warmup.ts` in FlowDay
+  and Mail Hero, `warm.ts` in Todofy's gateway), which costs about 10 ms of the 1 s startup budget.
+- Since `PreEncoded` (the dashboard), the transcoder's handler type answers `Message | PreEncoded`; a test that calls
+  a handler directly narrows the answer first (FlowDay's `reads.test.ts` `message()`).
+- Rebasing shared docs: a union merge of long one-line paragraphs duplicates clauses. Merge by meaning, then compare
+  every long changed line with both parents (each list of apps must name every app once).
 
 ## Owner decisions already taken (do not re-ask)
 
