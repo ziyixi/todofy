@@ -1,50 +1,49 @@
 import { screen, within } from '@testing-library/react'
+import type { GtdDay, GtdScope } from '@ziyixi/proto/todofy/ui/v1/history_wire'
 import { describe, expect, it } from 'vitest'
-import type { GtdDaily, GtdScope } from '../api/types'
+import { gtdReview, gtdScope } from '../test/fixtures'
 import { apiError, mockApi, renderApp } from '../test/harness'
 
 function scope(patch: Partial<GtdScope> = {}): GtdScope {
-  return {
-    open: 23,
-    age_0_7: 12,
-    age_8_14: 5,
-    age_15_30: 4,
-    age_31_plus: 2,
-    oldest_days: 41,
-    overdue: 3,
-    undated: 40,
-    created_7d: 35,
-    completed_7d: 42,
-    completed_source: 'api',
-    closed_1d: null,
-    mail_open: null,
-    complete: true,
+  return gtdScope({
+    open_count: 23,
+    fresh_count: 12,
+    recent_count: 5,
+    stale_count: 4,
+    old_count: 2,
+    oldest_age_days: 41,
+    overdue_count: 3,
+    undated_count: 40,
+    created_last_week_count: 35,
+    completed_last_week_count: 42,
+    closed_last_day_count: undefined,
+    open_mail_count: undefined,
     ...patch,
-  }
+  })
 }
 
-function gtdDaily(recordedDays = 2): GtdDaily {
+/** ListGtdDays: 30 days ending 2026-10-04, newest first, the newest `recordedDays` recorded. */
+function gtdDays(recordedDays = 2, last?: Partial<GtdDay>): { gtd_days: GtdDay[] } {
   const days = Array.from({ length: 30 }, (_, index) => new Date(Date.UTC(2026, 8, 5 + index)).toISOString().slice(0, 10))
-  return {
-    days: days.map((day, index) => {
-      const recorded = index >= 30 - recordedDays
-      return {
-        day,
-        recorded,
-        all: recorded ? scope({ open: 57, mail_open: 9, closed_1d: 4 }) : null,
-        inbox: recorded ? scope() : null,
-      }
-    }),
-    latest_review: { week: '2026-W40', state: 'created', created_at: '2026-10-04T17:00:02Z', completed_at: null },
-  }
+  const oldestFirst = days.map((day, index): GtdDay => {
+    const recorded = index >= 30 - recordedDays
+    return recorded
+      ? { name: `gtdDays/${day}`, recorded, all_projects: scope({ open_count: 57, open_mail_count: 9, closed_last_day_count: 4 }), inbox: scope() }
+      : { name: `gtdDays/${day}` }
+  })
+  if (last) oldestFirst[29] = { ...oldestFirst[29]!, ...last }
+  return { gtd_days: oldestFirst.toReversed() }
 }
+
+const REVIEWS = { gtd_reviews: [gtdReview({ name: 'gtdReviews/2026-W40', create_time: '2026-10-04T17:00:02Z' })] }
 
 describe('GTD page', () => {
   it('shows the latest snapshot as counts, the review and three trends', async () => {
-    const { calls } = mockApi({ 'GET /api/v1/gtd/daily': gtdDaily() })
+    const { calls } = mockApi({ 'GET /api/v1/gtdDays': gtdDays(), 'GET /api/v1/gtdReviews': REVIEWS })
     renderApp('/gtd')
     const snapshot = await screen.findByRole('region', { name: '快照 2026-10-04' })
-    expect(calls.find((call) => call.path === '/api/v1/gtd/daily')?.search).toBe('?days=30')
+    expect(calls.find((call) => call.path === '/api/v1/gtdDays')?.search).toBe('?page_size=30')
+    expect(calls.find((call) => call.path === '/api/v1/gtdReviews')?.search).toBe('?page_size=1')
     const facts = Object.fromEntries(
       within(snapshot)
         .getAllByRole('term')
@@ -64,15 +63,16 @@ describe('GTD page', () => {
   })
 
   it('explains an empty ledger and says when completions are unknown', async () => {
-    mockApi({ 'GET /api/v1/gtd/daily': { ...gtdDaily(0), latest_review: null } })
+    mockApi({ 'GET /api/v1/gtdDays': gtdDays(0), 'GET /api/v1/gtdReviews': {} })
     renderApp('/gtd')
     expect(await screen.findByText('还没有 Todoist 快照')).toBeInTheDocument()
-    expect(screen.getByText('还没有回顾任务')).toBeInTheDocument()
+    expect(await screen.findByText('还没有回顾任务')).toBeInTheDocument()
 
-    const partial = gtdDaily(1)
-    const last = partial.days[29]!
-    partial.days[29] = { ...last, all: scope({ complete: false, completed_7d: null, created_7d: null }), inbox: null }
-    mockApi({ 'GET /api/v1/gtd/daily': partial })
+    const partial = gtdDays(1, {
+      all_projects: scope({ complete: false, completed_last_week_count: undefined, created_last_week_count: undefined }),
+      inbox: undefined,
+    })
+    mockApi({ 'GET /api/v1/gtdDays': partial, 'GET /api/v1/gtdReviews': REVIEWS })
     renderApp('/gtd')
     expect(await screen.findByText('任务过多，快照不完整')).toBeInTheDocument()
     expect(screen.getAllByText('不可用 / 不可用').length).toBeGreaterThan(0)
@@ -80,7 +80,7 @@ describe('GTD page', () => {
   })
 
   it('shows an API failure with a retry', async () => {
-    mockApi({ 'GET /api/v1/gtd/daily': apiError(503, 'unavailable') })
+    mockApi({ 'GET /api/v1/gtdDays': apiError(503, 'UNAVAILABLE'), 'GET /api/v1/gtdReviews': REVIEWS })
     renderApp('/gtd')
     expect(await screen.findByRole('button', { name: /重试/ })).toBeInTheDocument()
   })

@@ -1,9 +1,9 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { useId, useState, type FormEvent } from 'react'
-import { api, ApiError } from '../api/client'
+import { ApiError, todofy } from '../api/client'
 import { keys } from '../api/queries'
-import type { EventDetail, ReconcileAction } from '../api/types'
-import { useActionId } from '../api/useAction'
+import { idOf, mailEventName, reconcileActions, ReconcileAction, type MailEvent, type ReconcileActionName } from '../api/types'
+import { useRequestId } from '../api/useAction'
 import { Modal } from '../components/Modal'
 import { Button, ErrorPanel } from '../components/ui'
 import { shortId } from '../lib/format'
@@ -12,10 +12,10 @@ import { RECONCILE_ACTIONS } from '../lib/labels'
 const TASK_ID = /^[0-9A-Za-z_-]{1,64}$/
 
 interface Props {
-  event: EventDetail
-  action: ReconcileAction
+  event: MailEvent
+  action: ReconcileActionName
   onClose: () => void
-  onDone: (event: EventDetail) => void
+  onDone: (event: MailEvent) => void
 }
 
 export function ReconcileDialog({ event, action, onClose, onDone }: Props) {
@@ -23,17 +23,27 @@ export function ReconcileDialog({ event, action, onClose, onDone }: Props) {
   const inputId = useId()
   const [taskId, setTaskId] = useState('')
   const [typed, setTyped] = useState('')
-  const { idFor } = useActionId()
+  const { idFor } = useRequestId()
   const client = useQueryClient()
-  const short = shortId(event.event_id)
+  const eventId = idOf(event.name)
+  const short = shortId(eventId)
 
   const mutation = useMutation({
-    mutationFn: (body: Parameters<typeof api.reconcile>[1]) => api.reconcile(event.event_id, body),
+    mutationFn: (request: { etag: string; taskId: string; requestId: string }) =>
+      todofy.reconcileMailEvent({
+        name: mailEventName(eventId),
+        action: reconcileActions.value(action) ?? ReconcileAction.UNSPECIFIED,
+        ...request,
+      }),
     onSuccess: (detail) => {
-      client.setQueryData(keys.event(event.event_id), detail)
+      client.setQueryData(keys.event(eventId), detail)
       void client.invalidateQueries({ queryKey: keys.events })
       void client.invalidateQueries({ queryKey: keys.overview })
       onDone(detail)
+    },
+    onError: (error) => {
+      // A stale etag or an action no longer allowed carries the event as it is now: the page shows it at once.
+      if (error instanceof ApiError && error.event) client.setQueryData(keys.event(eventId), error.event)
     },
   })
 
@@ -47,16 +57,16 @@ export function ReconcileDialog({ event, action, onClose, onDone }: Props) {
   function submit(form: FormEvent) {
     form.preventDefault()
     if (!ready || mutation.isPending) return
-    const request = { action, version: event.version, ...(action === 'task_created' ? { task_id: taskId.trim() } : {}) }
-    mutation.mutate({ ...request, action_request_id: idFor(request) })
+    const request = { etag: event.etag, taskId: action === 'task_created' ? taskId.trim() : '' }
+    mutation.mutate({ ...request, requestId: idFor({ action, ...request }) })
   }
 
   function reloadEvent() {
-    void client.invalidateQueries({ queryKey: keys.event(event.event_id) })
+    void client.invalidateQueries({ queryKey: keys.event(eventId) })
     onClose()
   }
 
-  const stale = mutation.error instanceof ApiError && ['version_conflict', 'action_not_allowed'].includes(mutation.error.code)
+  const stale = mutation.error instanceof ApiError && ['ETAG_MISMATCH', 'ACTION_NOT_ALLOWED'].includes(mutation.error.reason)
   const formId = `${inputId}-form`
 
   return (

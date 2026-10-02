@@ -7,7 +7,7 @@ import { apiError, mockApi, renderApp } from '../test/harness'
 
 describe('digest page', () => {
   it('shows the stored reports and their raw JSON', async () => {
-    mockApi({ 'GET /api/v1/reports/latest': { summary: summaryReport(), recommendations: [recommendationReport()] } })
+    mockApi({ 'GET /api/v1/latestReports': { name: 'latestReports', summary: summaryReport(), recommendations: [recommendationReport()] } })
     renderApp('/digest')
     const summary = await screen.findByRole('region', { name: '每日摘要' })
     expect(summary).toHaveTextContent('今天有 3 封账单提醒。')
@@ -15,13 +15,15 @@ describe('digest page', () => {
     const recommendation = screen.getByRole('region', { name: '推荐任务 · 前 10 项' })
     expect(within(recommendation).getAllByRole('listitem')).toHaveLength(2)
     expect(within(recommendation).getByText('newsletter 收到的原始 JSON')).toBeInTheDocument()
+    // The raw JSON is the wire JSON the newsletter gets, not the client's message.
+    expect(JSON.parse(within(summary).getByText(/"computed_at"/).textContent ?? '')).toEqual(summaryReport())
   })
 
   it('recomputes a recommendation with the chosen top and shows a rate limit', async () => {
     const user = userEvent.setup()
     const { calls } = mockApi({
-      'GET /api/v1/reports/latest': { summary: null, recommendations: [] },
-      'POST /api/v1/reports/recompute': apiError(429, 'rate_limited', 'req-429'),
+      'GET /api/v1/latestReports': { name: 'latestReports' },
+      'POST /api/v1/latestReports:recompute': apiError(429, 'RATE_LIMITED', 'req-429'),
     })
     renderApp('/digest')
     expect(await screen.findByText('还没有日报')).toBeInTheDocument()
@@ -29,29 +31,29 @@ describe('digest page', () => {
     const dialog = screen.getByRole('dialog', { name: '重新生成推荐任务' })
     await user.selectOptions(within(dialog).getByLabelText('推荐数量'), '3')
     await user.click(within(dialog).getByRole('button', { name: '重新生成' }))
-    expect(await within(dialog).findByRole('alert')).toHaveTextContent('rate_limited')
+    expect(await within(dialog).findByRole('alert')).toHaveTextContent('RATE_LIMITED')
     const post = calls.find((call) => call.method === 'POST')
-    expect(post?.body).toMatchObject({ kind: 'recommendation', top: 3 })
+    expect(post?.body).toMatchObject({ kind: 'recommendation', top_n: 3 })
   })
 
   it('retries a stored failure with a new action id, but an unknown outcome with the same one', async () => {
     const user = userEvent.setup()
-    const replies: object[] = [new Error('offline'), apiError(503, 'unavailable'), summaryReport()]
+    const replies: object[] = [new Error('offline'), apiError(503, 'UNAVAILABLE'), { summary: summaryReport() }]
     const { calls } = mockApi({
-      'GET /api/v1/reports/latest': { summary: null, recommendations: [] },
-      'POST /api/v1/reports/recompute': () => replies.shift()!,
+      'GET /api/v1/latestReports': { name: 'latestReports' },
+      'POST /api/v1/latestReports:recompute': () => replies.shift()!,
     })
     renderApp('/digest')
     await user.click(await screen.findByRole('button', { name: '重新生成摘要' }))
     const dialog = screen.getByRole('dialog')
     expect(dialog).toHaveTextContent('newsletter 下次读取的就是新结果')
-    for (const code of ['network_error', 'unavailable']) {
+    for (const code of ['NETWORK_ERROR', 'UNAVAILABLE']) {
       await user.click(within(dialog).getByRole('button', { name: '重新生成' }))
       expect(await within(dialog).findByRole('alert')).toHaveTextContent(code)
     }
     await user.click(within(dialog).getByRole('button', { name: '重新生成' }))
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
-    const ids = calls.filter((call) => call.method === 'POST').map((call) => (call.body as { action_request_id: string }).action_request_id)
+    const ids = calls.filter((call) => call.method === 'POST').map((call) => (call.body as { request_id: string }).request_id)
     expect(ids).toHaveLength(3)
     expect(ids[1]).toBe(ids[0])
     expect(ids[2]).not.toBe(ids[1])
@@ -59,7 +61,7 @@ describe('digest page', () => {
 
   it('says when a recompute does not change what the newsletter reads', async () => {
     const user = userEvent.setup()
-    mockApi({ 'GET /api/v1/reports/latest': { summary: null, recommendations: [] } })
+    mockApi({ 'GET /api/v1/latestReports': { name: 'latestReports' } })
     renderApp('/digest')
     await user.click(await screen.findByRole('button', { name: '重新生成推荐' }))
     const dialog = screen.getByRole('dialog', { name: '重新生成推荐任务' })
@@ -72,23 +74,28 @@ describe('digest page', () => {
   it('recomputes the summary without a top', async () => {
     const user = userEvent.setup()
     const { calls } = mockApi({
-      'GET /api/v1/reports/latest': { summary: null, recommendations: [] },
-      'POST /api/v1/reports/recompute': summaryReport(),
+      'GET /api/v1/latestReports': { name: 'latestReports' },
+      'POST /api/v1/latestReports:recompute': { summary: summaryReport() },
     })
     renderApp('/digest')
     await user.click(await screen.findByRole('button', { name: '重新生成摘要' }))
     await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: '重新生成' }))
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
-    expect(calls.find((call) => call.method === 'POST')?.body).toEqual({ kind: 'summary', action_request_id: expect.any(String) })
+    const post = calls.find((call) => call.method === 'POST')
+    expect(post?.path).toBe('/api/v1/latestReports:recompute')
+    expect(Object.keys(post?.body as object)).toEqual(['kind', 'request_id'])
+    expect(post?.body).toMatchObject({ kind: 'summary' })
   })
 })
 
 describe('reminders page', () => {
   it("highlights today's UTC reminder and lists older ones", async () => {
     mockApi({
-      'GET /api/v1/reminders': {
-        items: [reminder({ day: utcDay(), state: 'unknown', error_code: 'reminder_result_unknown', task_id: null }), reminder()],
-        next_cursor: null,
+      'GET /api/v1/dailyReminders': {
+        daily_reminders: [
+          reminder({ name: `dailyReminders/${utcDay()}`, state: 'unknown', error_code: 'reminder_result_unknown', task_id: undefined }),
+          reminder(),
+        ],
       },
     })
     renderApp('/reminders')
@@ -112,7 +119,7 @@ describe('budget and health pages', () => {
   })
 
   it('shows the build, flags and active counts', async () => {
-    mockApi({ 'GET /api/v1/overview': overview({ flags: { ...overview().flags, processing_paused: true } }) })
+    mockApi({ 'GET /api/v1/serviceStatus': overview({ switches: { ...overview().switches, processing_paused: true } }) })
     renderApp('/health')
     const worker = await screen.findByRole('region', { name: 'Worker' })
     expect(within(worker).getByRole('link')).toHaveAttribute('href', 'https://github.com/ziyixi/todofy/commit/0123456789abcdef0123456789abcdef01234567')
@@ -120,8 +127,8 @@ describe('budget and health pages', () => {
     expect(screen.getByRole('status', { name: '运行异常' })).toHaveTextContent('处理已暂停')
   })
 
-  it('shows the code when the overview cannot be read', async () => {
-    mockApi({ 'GET /api/v1/overview': apiError(503, 'unavailable', 'req-ov') })
+  it('shows the reason when the status cannot be read', async () => {
+    mockApi({ 'GET /api/v1/serviceStatus': apiError(503, 'UNAVAILABLE', 'req-ov') })
     renderApp('/health')
     expect(await screen.findByRole('alert')).toHaveTextContent('req-ov')
   })
@@ -129,7 +136,7 @@ describe('budget and health pages', () => {
 
 describe('setup page', () => {
   it('shows webhook addresses and which secrets are configured, never their values', async () => {
-    mockApi({ 'GET /api/v1/setup': setup() })
+    mockApi({ 'GET /api/v1/integration': setup() })
     renderApp('/setup')
     expect(await screen.findByText('https://todofy-hooks.example.test/hooks/mail')).toBeInTheDocument()
     const secrets = screen.getByRole('region', { name: '密钥与配置' })

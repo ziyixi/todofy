@@ -1,14 +1,13 @@
-import type { ClientErrorCode } from '../api/client'
+import type { ClientCode, Reason } from '../api/client'
 import type {
-  ApiErrorCode,
-  BackupStatus,
-  EventErrorCode,
+  BackupErrorName,
+  BackupStateName,
+  EventErrorName,
   EventState,
-  RecommendationReport,
-  ReconcileAction,
-  ReminderErrorCode,
-  ReminderState,
-  SummaryReport,
+  ReconcileActionName,
+  ReminderErrorName,
+  ReminderStateName,
+  ReportStatusName,
 } from '../api/types'
 
 export type Tone = 'neutral' | 'progress' | 'ok' | 'warn' | 'danger'
@@ -40,7 +39,7 @@ export const EVENT_STATES: Record<EventState, Label> = {
 
 export const EVENT_STATE_ORDER = Object.keys(EVENT_STATES) as EventState[]
 
-export const EVENT_ERRORS: Record<EventErrorCode, CodeLabel> = {
+export const EVENT_ERRORS: Record<EventErrorName, CodeLabel> = {
   mail_needs_review: {
     title: '邮件需人工检查',
     detail: 'Mail Hero 标记该邮件需要人工检查（或 HTML 被省略且没有正文）；不会调用 Gemini，也不会建任务',
@@ -103,14 +102,14 @@ export const EVENT_ERRORS: Record<EventErrorCode, CodeLabel> = {
   },
 }
 
-export const REMINDER_STATES: Record<ReminderState, Label> = {
+export const REMINDER_STATES: Record<ReminderStateName, Label> = {
   sending: { label: '创建中', tone: 'progress' },
   created: { label: '已创建', tone: 'ok' },
   unknown: { label: '结果不明', tone: 'warn' },
   failed: { label: '失败', tone: 'danger' },
 }
 
-export const REMINDER_ERRORS: Record<ReminderErrorCode, CodeLabel> = {
+export const REMINDER_ERRORS: Record<ReminderErrorName, CodeLabel> = {
   reminder_create_failed: {
     title: '提醒未能创建',
     detail: '提醒任务未能创建（请求没有发出或被 Todoist 拒绝），每小时重试，最多 5 次',
@@ -124,27 +123,32 @@ export const REMINDER_ERRORS: Record<ReminderErrorCode, CodeLabel> = {
   todo_client_unavailable: { title: '（旧版）todo 服务不可用', detail: '（旧版）无法连接旧 todo 服务，提醒未创建' },
 }
 
-/** What the owner can do about an API error; the server's own message is shown next to it. */
-export const API_ERROR_HINTS: Record<ApiErrorCode | ClientErrorCode, string> = {
-  invalid_request: '请求参数无效；刷新页面后重试',
-  invalid_payload: '事件内容不符合 mail.received.v1 合同',
-  unauthorized: 'Cloudflare Access 登录已失效；刷新页面重新登录',
-  csrf_failed: '页面安全令牌已失效；再试一次会自动取得新令牌',
-  not_found: '找不到该资源；它可能已被清理，或链接有误',
-  event_conflict: '同一事件 ID 已收到不同内容',
-  version_conflict: '事件在你查看后已被更新；刷新后确认新状态再操作',
-  action_not_allowed: '事件当前状态不允许此操作；刷新后查看可用操作',
-  action_request_conflict: '同一操作 ID 已用于不同的请求；关闭对话框后重新操作',
-  payload_too_large: '请求体超过 1 MiB',
-  unsupported_media_type: '只接受 application/json',
-  rate_limited: '已达到频率上限；稍后再试',
-  internal_error: 'Worker 内部错误；稍后重试，仍失败请按请求 ID 查日志',
-  maintenance: '服务处于维护模式，写操作暂不可用',
-  not_configured: 'Worker 缺少必需的密钥或配置；按设置页检查',
-  access_not_configured: 'Cloudflare Access 变量不完整；按设置页检查',
-  unavailable: 'D1 或后台协调器暂时不可用；稍后重试',
-  network_error: '网络中断，或 Access 登录已过期；刷新页面后重试',
-  bad_response: '收到的不是 Todofy 的响应，可能是登录页或代理错误；刷新页面后重试',
+/**
+ * What the owner can do about an API error, by its ErrorInfo reason (todofy.ui.v1's errors.proto and the common
+ * ones) or the client's own code; the server's LocalizedMessage is shown next to it.
+ */
+export const API_ERROR_HINTS: Record<Reason | ClientCode, string> = {
+  BAD_REQUEST: '请求参数无效；刷新页面后重试',
+  UNAUTHORIZED: 'Cloudflare Access 登录已失效；刷新页面重新登录',
+  CSRF_FAILED: '页面安全令牌已失效；再试一次会自动取得新令牌',
+  NOT_FOUND: '找不到该资源；它可能已被清理，或链接有误',
+  METHOD_NOT_ALLOWED: '页面版本与服务不一致；刷新页面后重试',
+  ETAG_MISMATCH: '事件在你查看后已被更新；刷新后确认新状态再操作',
+  ACTION_NOT_ALLOWED: '事件当前状态不允许此操作；刷新后查看可用操作',
+  REQUEST_ID_REUSED: '同一操作 ID 已用于不同的请求；关闭对话框后重新操作',
+  RATE_LIMITED: '已达到频率上限；稍后再试',
+  INTERNAL: 'Worker 内部错误；稍后重试，仍失败请按请求 ID 查日志',
+  MAINTENANCE: '服务处于维护模式，写操作暂不可用',
+  NOT_CONFIGURED: 'Worker 缺少必需的密钥或配置；按设置页检查',
+  ACCESS_NOT_CONFIGURED: 'Cloudflare Access 变量不完整；按设置页检查',
+  UNAVAILABLE: 'D1 或后台协调器暂时不可用；稍后重试',
+  NETWORK_ERROR: '网络中断，或 Access 登录已过期；刷新页面后重试',
+  BAD_RESPONSE: '收到的不是 Todofy 的响应，可能是登录页或代理错误；刷新页面后重试',
+}
+
+/** The hint of a reason, also of one this build does not know. */
+export function errorHint(reason: string): string {
+  return (API_ERROR_HINTS as Record<string, string | undefined>)[reason] ?? '请求失败；刷新页面后重试，仍失败请按请求 ID 查日志'
 }
 
 export interface ActionCopy {
@@ -158,7 +162,7 @@ export interface ActionCopy {
   destructive: boolean
 }
 
-export const RECONCILE_ACTIONS: Record<ReconcileAction, ActionCopy> = {
+export const RECONCILE_ACTIONS: Record<ReconcileActionName, ActionCopy> = {
   task_created: {
     title: '标记为已建任务',
     trigger: '我找到了任务',
@@ -192,13 +196,13 @@ export const RECONCILE_ACTIONS: Record<ReconcileAction, ActionCopy> = {
   },
 }
 
-export const SUMMARY_STATUS: Record<SummaryReport['status'], Label> = {
+export const SUMMARY_STATUS: Record<Exclude<ReportStatusName, 'model_output_invalid'>, Label> = {
   ok: { label: '正常', tone: 'ok' },
   empty_window: { label: '窗口内没有邮件', tone: 'warn' },
   stale: { label: '过期结果', tone: 'warn' },
 }
 
-export const BACKUP_STATUS: Record<BackupStatus['status'], Label> = {
+export const BACKUP_STATUS: Record<BackupStateName, Label> = {
   disabled: { label: '未启用', tone: 'neutral' },
   never: { label: '尚未备份', tone: 'warn' },
   running: { label: '备份中', tone: 'progress' },
@@ -207,12 +211,12 @@ export const BACKUP_STATUS: Record<BackupStatus['status'], Label> = {
 }
 
 const BACKUP_RETRY = '6 小时后自动重试；连续三次失败后等到下个周日 10:00（UTC）。'
-export const BACKUP_ERRORS: Record<NonNullable<BackupStatus['last_error_code']>, string> = {
+export const BACKUP_ERRORS: Record<BackupErrorName, string> = {
   storage_error: `D1 或 R2 连续三次读写失败，这次备份已放弃。${BACKUP_RETRY}`,
   lease_expired: `30 分钟内没有完成，这次备份已放弃。${BACKUP_RETRY}`,
 }
 
-export const RECOMMENDATION_STATUS: Record<RecommendationReport['status'], Label> = {
+export const RECOMMENDATION_STATUS: Record<ReportStatusName, Label> = {
   ok: { label: '正常', tone: 'ok' },
   empty_window: { label: '窗口内没有邮件', tone: 'warn' },
   model_output_invalid: { label: '模型输出无效', tone: 'danger' },

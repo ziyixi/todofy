@@ -14,7 +14,7 @@ export function EventsPage() {
   const [params, setParams] = useSearchParams()
   const state = parseState(params.get('state'))
   const list = useEventList('recent', state)
-  const events = list.data?.pages.flatMap((page) => page.items) ?? []
+  const events = list.data?.pages.flatMap((page) => page.mailEvents) ?? []
 
   function choose(next: EventState | null) {
     setParams(next ? { state: next } : {}, { replace: true })

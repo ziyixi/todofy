@@ -1,9 +1,22 @@
 import { readFileSync, readdirSync, statSync } from 'node:fs'
 import { join } from 'node:path'
-import { parse } from 'yaml'
+import { CommonReason } from '@ziyixi/proto/common/errors/v1/errors_pb'
+import { ErrorReason } from '@ziyixi/proto/todofy/ui/v1/errors_pb'
 import { describe, expect, it } from 'vitest'
 import {
+  backupErrors,
+  backupStates,
+  eventErrors,
+  eventStates,
+  reconcileActions,
+  reminderErrors,
+  reminderStates,
+  reportStatuses,
+} from '../api/types'
+import {
   API_ERROR_HINTS,
+  BACKUP_ERRORS,
+  BACKUP_STATUS,
   EVENT_ERRORS,
   EVENT_STATES,
   RECOMMENDATION_STATUS,
@@ -14,32 +27,25 @@ import {
 } from './labels'
 
 const API = join(__dirname, '../../../api')
-const spec = parse(readFileSync(join(API, 'owner-api-v1.openapi.yaml'), 'utf8')) as {
-  components: { schemas: Record<string, { enum?: string[] }> }
-}
 // A report schema (generated from proto/todofy/report/v1) is a union by status: one oneOf branch per status.
 const statuses = (name: string) =>
   (JSON.parse(readFileSync(join(API, name), 'utf8')) as { oneOf: { properties: { status: { const: string } } }[] }).oneOf.map(
     (branch) => branch.properties.status.const,
   )
-
-function enumOf(...names: string[]): string[] {
-  return names.flatMap((name) => {
-    const values = spec.components.schemas[name]?.enum
-    if (!values) throw new Error(`OpenAPI schema ${name} has no enum`)
-    return values
-  })
-}
+// Every reason Todofy answers: its own (proto/todofy/ui/v1/errors.proto) and the common ones (common/errors/v1).
+const reasons = (values: Readonly<Record<string, number>>) => Object.keys(values).filter((name) => name !== 'UNSPECIFIED')
 
 const sorted = (values: Iterable<string>) => [...values].sort()
 
-describe('every contract enum value has exactly one Chinese label', () => {
+describe('every value of the IDL has exactly one Chinese label', () => {
   it.each([
-    ['EventState', EVENT_STATES, enumOf('EventState')],
-    ['EventErrorCode', EVENT_ERRORS, enumOf('CurrentEventErrorCode', 'LegacyEventErrorCode')],
-    ['ReminderState', REMINDER_STATES, enumOf('ReminderState')],
-    ['ReminderErrorCode', REMINDER_ERRORS, enumOf('CurrentReminderErrorCode', 'LegacyReminderErrorCode')],
-    ['ReconcileAction', RECONCILE_ACTIONS, enumOf('ReconcileAction')],
+    ['MailEvent.State', EVENT_STATES, eventStates.names],
+    ['EventErrorCode', EVENT_ERRORS, eventErrors.names],
+    ['DailyReminder.State', REMINDER_STATES, reminderStates.names],
+    ['ReminderErrorCode', REMINDER_ERRORS, reminderErrors.names],
+    ['ReconcileAction', RECONCILE_ACTIONS, reconcileActions.names],
+    ['BackupStatus.State', BACKUP_STATUS, backupStates.names],
+    ['BackupStatus.ErrorCode', BACKUP_ERRORS, backupErrors.names],
     ['summary-v1 status', SUMMARY_STATUS, statuses('summary-v1.schema.json')],
     ['recommendation-v1 status', RECOMMENDATION_STATUS, statuses('recommendation-v1.schema.json')],
   ])('%s', (_name, table, values) => {
@@ -47,9 +53,13 @@ describe('every contract enum value has exactly one Chinese label', () => {
     for (const label of Object.values(table)) expect(JSON.stringify(label)).toMatch(/[一-鿿]/)
   })
 
+  it('the report statuses are the IDL\'s', () => {
+    expect(sorted(reportStatuses.names)).toEqual(sorted(statuses('recommendation-v1.schema.json')))
+  })
+
   it.each([
-    ['event', EVENT_ERRORS, enumOf('LegacyEventErrorCode')],
-    ['reminder', REMINDER_ERRORS, enumOf('LegacyReminderErrorCode')],
+    ['event', EVENT_ERRORS, ['invalid_saved_event', 'llm_client_unavailable', 'summary_render_failed', 'todo_client_unavailable', 'database_client_unavailable', 'cache_write_failed', 'checkpoint_failed']],
+    ['reminder', REMINDER_ERRORS, ['empty_task_id', 'todo_client_unavailable']],
   ])('%s codes only the Go service wrote are marked legacy, and only those', (_name, table, legacy) => {
     for (const [code, { title, detail }] of Object.entries(table)) {
       const isLegacy = legacy.includes(code)
@@ -57,8 +67,8 @@ describe('every contract enum value has exactly one Chinese label', () => {
     }
   })
 
-  it('ApiErrorCode plus the two client-side codes', () => {
-    expect(sorted(Object.keys(API_ERROR_HINTS))).toEqual(sorted([...enumOf('ApiErrorCode'), 'network_error', 'bad_response']))
+  it('every reason Todofy answers plus the two client-side codes has a hint', () => {
+    expect(sorted(Object.keys(API_ERROR_HINTS))).toEqual(sorted([...reasons(ErrorReason), ...reasons(CommonReason), 'NETWORK_ERROR', 'BAD_RESPONSE']))
   })
 })
 

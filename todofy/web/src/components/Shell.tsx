@@ -60,7 +60,7 @@ function OverviewFailure({ error }: { error: unknown }) {
           <strong>无法取得运行状态</strong>
           {failure ? (
             <>
-              错误码 <code>{failure.code}</code>
+              错误码 <code>{failure.reason}</code>
               {failure.requestId ? (
                 <>
                   ，请求 ID <code>{failure.requestId}</code>
@@ -77,7 +77,7 @@ function OverviewFailure({ error }: { error: unknown }) {
 export function Shell() {
   const overview = useOverview()
   const { pathname } = useLocation()
-  const attention = overview.data?.attention_count
+  const attention = overview.data?.attentionCount
   const inMore = pathname === MORE.to || MORE_ITEMS.some((item) => pathname.startsWith(item.to))
 
   return (

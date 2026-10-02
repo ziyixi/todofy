@@ -2,7 +2,7 @@ import { Check, Copy, RefreshCw } from 'lucide-react'
 import { useState, type ButtonHTMLAttributes, type ReactNode } from 'react'
 import { ApiError } from '../api/client'
 import { formatFullTime, formatRelative, formatTime } from '../lib/format'
-import { API_ERROR_HINTS, type Tone } from '../lib/labels'
+import { errorHint, type Tone } from '../lib/labels'
 
 type ButtonVariant = 'primary' | 'secondary' | 'danger' | 'ghost'
 
@@ -63,19 +63,19 @@ export function EmptyState({ icon, title, children }: { icon: ReactNode; title: 
   )
 }
 
-/** Every failure shows the API code and request ID so the owner can find it in the Worker logs. */
+/** Every failure shows the error's reason and request ID so the owner can find it in the Worker logs. */
 export function ErrorPanel({ error, onRetry }: { error: unknown; onRetry?: () => void }) {
   const failure =
-    error instanceof ApiError ? error : new ApiError(0, 'bad_response', error instanceof Error ? error.message : String(error))
+    error instanceof ApiError ? error : new ApiError(0, 'BAD_RESPONSE', error instanceof Error ? error.message : String(error))
   return (
     <div className="error-panel" role="alert">
       <p className="error-message">{failure.message}</p>
-      <p className="muted">{API_ERROR_HINTS[failure.code]}</p>
+      <p className="muted">{errorHint(failure.reason)}</p>
       <dl className="error-meta">
         <div>
           <dt>错误码</dt>
           <dd>
-            <code>{failure.code}</code>
+            <code>{failure.reason}</code>
             {failure.status ? <span className="muted"> · HTTP {failure.status}</span> : null}
           </dd>
         </div>

@@ -1,37 +1,36 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { Newspaper, RefreshCw, Sparkles } from 'lucide-react'
 import { useId, useState } from 'react'
-import { api, ApiError } from '../api/client'
+import { RecommendationReportSchema, SummaryReportSchema } from '@ziyixi/proto/todofy/report/v1/report_pb'
+import { toWire } from '@ziyixi/proto/wire-json'
+import { ApiError, todofy } from '../api/client'
 import { keys, useReports } from '../api/queries'
-import type { RecommendationReport, RecomputeRequest, SummaryReport } from '../api/types'
-import { useActionId } from '../api/useAction'
+import { ReportKind, reportStatuses, type RecommendationReport, type SummaryReport } from '../api/types'
+import { useRequestId } from '../api/useAction'
 import { Modal } from '../components/Modal'
 import { Badge, Button, EmptyState, ErrorPanel, Facts, Loading, PageHeader, Section, Time } from '../components/ui'
 import { RECOMMENDATION_STATUS, SUMMARY_STATUS } from '../lib/labels'
 
 function Window({ report }: { report: SummaryReport | RecommendationReport }) {
+  const carried = report.$typeName === 'todofy.report.v1.RecommendationReport' ? report.carryoverCount : undefined
   return (
     <Facts
       items={[
-        ['生成于', <Time key="c" value={report.computed_at} />],
+        ['生成于', <Time key="c" value={report.computedAt} />],
         [
           '窗口',
           <span key="w">
-            <Time value={report.window_start} /> – <Time value={report.window_end} />
+            <Time value={report.windowStart} /> – <Time value={report.windowEnd} />
           </span>,
         ],
-        [
-          '邮件摘要数',
-          'carryover_count' in report && report.carryover_count
-            ? `${report.task_count}（其中 ${report.carryover_count} 条是前几天仍未完成的任务）`
-            : report.task_count,
-        ],
+        ['邮件摘要数', carried ? `${report.taskCount}（其中 ${carried} 条是前几天仍未完成的任务）` : report.taskCount],
         ['模型', report.model ? <code key="m">{report.model}</code> : <span key="m" className="muted">未调用</span>],
       ]}
     />
   )
 }
 
+/** What the newsletter receives: the report in the wire JSON profile, the bytes /api/summary and /api/recommendation send. */
 function RawJson({ value }: { value: unknown }) {
   return (
     <details className="raw-json">
@@ -41,21 +40,25 @@ function RawJson({ value }: { value: unknown }) {
   )
 }
 
+const UNKNOWN_STATUS = { label: '未知状态', tone: 'neutral' } as const
+
 function SummaryCard({ report }: { report: SummaryReport }) {
-  const status = SUMMARY_STATUS[report.status]
+  const name = reportStatuses.name(report.status)
+  const status = name === null || name === 'model_output_invalid' ? UNKNOWN_STATUS : SUMMARY_STATUS[name]
   return (
     <Section title="每日摘要" aside={<Badge tone={status.tone}>{status.label}</Badge>}>
       <Window report={report} />
       <p className="pre report-text">{report.summary}</p>
-      <RawJson value={report} />
+      <RawJson value={toWire(SummaryReportSchema, report)} />
     </Section>
   )
 }
 
 function RecommendationCard({ report }: { report: RecommendationReport }) {
-  const status = RECOMMENDATION_STATUS[report.status]
+  const name = reportStatuses.name(report.status)
+  const status = name === null ? UNKNOWN_STATUS : RECOMMENDATION_STATUS[name]
   return (
-    <Section title={`推荐任务 · 前 ${report.top_n} 项`} aside={<Badge tone={status.tone}>{status.label}</Badge>}>
+    <Section title={`推荐任务 · 前 ${report.topN} 项`} aside={<Badge tone={status.tone}>{status.label}</Badge>}>
       <Window report={report} />
       {report.tasks.length === 0 ? (
         <p className="muted">没有推荐任务。</p>
@@ -74,12 +77,12 @@ function RecommendationCard({ report }: { report: RecommendationReport }) {
           ))}
         </ol>
       )}
-      <RawJson value={report} />
+      <RawJson value={toWire(RecommendationReportSchema, report)} />
     </Section>
   )
 }
 
-type Kind = RecomputeRequest['kind']
+type Kind = 'summary' | 'recommendation'
 
 /** The newsletter always asks for ?top=10 (api/recommendation-v1.schema.json). */
 const NEWSLETTER_TOP = 10
@@ -94,11 +97,16 @@ function newsletterEffect(kind: Kind, top: string): string {
 
 function RecomputeDialog({ kind, onClose }: { kind: Kind; onClose: () => void }) {
   const client = useQueryClient()
-  const { idFor, forget } = useActionId()
+  const { idFor, forget } = useRequestId()
   const selectId = useId()
   const [top, setTop] = useState('')
   const mutation = useMutation({
-    mutationFn: api.recompute,
+    mutationFn: (request: { topN: number; requestId: string }) =>
+      todofy.recomputeReport({
+        name: 'latestReports',
+        kind: kind === 'summary' ? ReportKind.SUMMARY : ReportKind.RECOMMENDATION,
+        ...request,
+      }),
     onSuccess: () => {
       void client.invalidateQueries({ queryKey: keys.reports })
       onClose()
@@ -106,13 +114,14 @@ function RecomputeDialog({ kind, onClose }: { kind: Kind; onClose: () => void })
     onError: (error) => {
       // The Worker answered and stored this failure: a retry needs a new id, or it is replayed.
       // Keep the id when the outcome is unknown, so a resend replays a stored success instead.
-      if (error instanceof ApiError && error.code !== 'network_error' && error.code !== 'bad_response') forget()
+      if (error instanceof ApiError && error.reason !== 'NETWORK_ERROR' && error.reason !== 'BAD_RESPONSE') forget()
     },
   })
 
   function submit() {
-    const request = kind === 'recommendation' && top ? { kind, top: Number(top) } : { kind }
-    mutation.mutate({ ...request, action_request_id: idFor(request) })
+    // 0 is REPORT_DEFAULT_TOP (RecomputeReportRequest.top_n).
+    const request = { topN: kind === 'recommendation' && top ? Number(top) : 0 }
+    mutation.mutate({ ...request, requestId: idFor({ kind, ...request }) })
   }
 
   return (
@@ -193,7 +202,7 @@ export function DigestPage() {
         <div className="stack">
           {reports.data.summary ? <SummaryCard report={reports.data.summary} /> : null}
           {reports.data.recommendations.map((report) => (
-            <RecommendationCard key={report.top_n} report={report} />
+            <RecommendationCard key={report.topN} report={report} />
           ))}
         </div>
       )}

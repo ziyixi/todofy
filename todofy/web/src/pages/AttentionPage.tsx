@@ -5,7 +5,7 @@ import { Button, EmptyState, ErrorPanel, Loading, PageHeader } from '../componen
 
 export function AttentionPage() {
   const list = useEventList('attention')
-  const events = list.data?.pages.flatMap((page) => page.items) ?? []
+  const events = list.data?.pages.flatMap((page) => page.mailEvents) ?? []
 
   return (
     <>

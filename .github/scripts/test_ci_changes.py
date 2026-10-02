@@ -289,17 +289,31 @@ class Classify(unittest.TestCase):
         codecs and the generated schemas); it deploys an app only when the changed path reaches that app's bundle."""
         self.assertEqual(
             ci_changes.PROTO_USERS,
-            {"lab": ("ts",), "todofy": ("python",), "flowday": ("ts",), "links": ("ts",), "mail-hero": ("ts",), "dashboard": ("ts",), "watch": ("ts",)},
+            {
+                "lab": ("ts",),
+                "todofy": ("python", "ts"),
+                "flowday": ("ts",),
+                "links": ("ts",),
+                "mail-hero": ("ts",),
+                "dashboard": ("ts",),
+                "watch": ("ts",),
+            },
         )
-        ts, python = {"lab", "mail-hero", "dashboard", "flowday", "links", "watch"}, {"todofy"}
+        # Todofy is both: todofy-core vendors the Python package, its gateway and UI bundle the TypeScript
+        # (todofy.ui.v1).
+        ts, python = {"lab", "mail-hero", "dashboard", "flowday", "links", "watch", "todofy"}, {"todofy"}
         every, none = ts | python, set()
         cases = {
             # task-intent-v1, bundled by Lab's and the watch app's TypeScript and todofy-core's Python.
             "proto/todofy/taskintent/v1/task_intent.proto": {"lab", "todofy", "watch"},
-            # recommendation-v1 and summary-v1: todofy-core builds the reports (its UI and gateway take types only).
+            # recommendation-v1 and summary-v1: todofy-core builds the reports, Todofy's gateway and UI read them in
+            # todofy.ui.v1's answers.
             "proto/todofy/report/v1/report.proto": {"todofy"},
-            # ops-v1: the Ops entrypoints that bundle its generated code (Todofy's gateway takes types only, its core
-            # reads ops.v1 in Python).
+            # Todofy's owner API: its core answers it, its gateway serves it and its UI calls it.
+            "proto/todofy/ui/v1/todofy_ui_service.proto": {"todofy"},
+            "proto/todofy/ui/v1/mail_event.proto": {"todofy"},
+            # ops-v1: the Ops entrypoints that bundle its generated code (Todofy's gateway takes its types only, its
+            # core reads ops.v1 in Python).
             "proto/ops/v1/ops.proto": {"mail-hero", "lab", "todofy", "dashboard", "watch"},
             # mail.received.v1: Mail Hero builds every event, todofy-core reads every body.
             "proto/mailhero/webhook/v1/mail_received.proto": {"mail-hero", "todofy"},
@@ -1505,14 +1519,15 @@ class TodofyJobs(unittest.TestCase):
             "uv run ruff check worker tests tools deploy",
             "uv run ruff format --check worker tests tools deploy",
             "uv run pytest tests/unit tests/fakes tools deploy",
-            "npm run lint\n          npm run typecheck\n          npm test",
-            "npm run check:api\n          npm run typecheck\n          npm test\n          npm run build",
+            "npm run lint\n          npm run typecheck\n          npm test\n          npm run test:runtime",
+            "npm ci --no-audit --no-fund\n          npm run typecheck\n          npm test\n          npm run build",
             "if grep -rnE 'mail_hero|mail-hero' src; then exit 1; fi",
             'uv run python deploy/deploy_vars.py secrets core "$RUNNER_TEMP/todofy-core-secrets.json"',
             'uv run python deploy/deploy_vars.py secrets gateway "$RUNNER_TEMP/todofy-gateway-secrets.json"',
             "uv run python deploy/deploy_vars.py exec core -- uv run pywrangler deploy --dry-run --config wrangler.toml",
             '--secrets-file "$RUNNER_TEMP/todofy-core-secrets.json" --outdir "$RUNNER_TEMP/todofy-core-bundle"',
             "uv run python deploy/deploy_vars.py exec gateway -- npx --no-install wrangler deploy --dry-run",
+            'node deploy/bundle-size.mjs "$RUNNER_TEMP/todofy-gateway-bundle"',
             'test -d "$RUNNER_TEMP/todofy-core-bundle/python_modules/workers"',
         ):
             with self.subTest(command=command):

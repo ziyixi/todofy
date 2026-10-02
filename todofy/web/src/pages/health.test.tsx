@@ -1,27 +1,12 @@
 import { screen, within } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
-import type { BackupStatus } from '../api/types'
 import { formatBytes } from '../lib/format'
-import { overview } from '../test/fixtures'
+import { backup, overview } from '../test/fixtures'
 import { mockApi, renderApp } from '../test/harness'
-
-function backup(patch: Partial<BackupStatus> = {}): BackupStatus {
-  return {
-    status: 'ok',
-    last_backup_at: '2026-09-27T10:00:41Z',
-    last_backup_key: 'backups/2026-09-27T100002Z/',
-    last_backup_bytes: 1_843_200,
-    last_backup_rows: 52_311,
-    last_failure_at: null,
-    last_error_code: null,
-    next_backup_at: '2026-10-04T10:00:00Z',
-    ...patch,
-  }
-}
 
 describe('health page backup section', () => {
   it('shows the last backup, its size and status', async () => {
-    mockApi({ 'GET /api/v1/overview': overview({ backup: backup() }) })
+    mockApi({ 'GET /api/v1/serviceStatus': overview({ backup: backup() }) })
     renderApp('/health')
     const section = await screen.findByRole('region', { name: '备份' })
     expect(within(section).getByText('正常')).toBeInTheDocument()
@@ -31,8 +16,8 @@ describe('health page backup section', () => {
   })
 
   it('explains a failure newer than the last backup', async () => {
-    const failed = backup({ status: 'failed', last_failure_at: '2026-10-04T10:31:00Z', last_error_code: 'lease_expired' })
-    mockApi({ 'GET /api/v1/overview': overview({ backup: failed }) })
+    const failed = backup({ state: 'failed', last_failure_time: '2026-10-04T10:31:00Z', last_error_code: 'lease_expired' })
+    mockApi({ 'GET /api/v1/serviceStatus': overview({ backup: failed }) })
     renderApp('/health')
     const section = await screen.findByRole('region', { name: '备份' })
     expect(within(section).getByText('失败')).toBeInTheDocument()
@@ -40,16 +25,16 @@ describe('health page backup section', () => {
   })
 
   it('says when nothing was backed up yet', async () => {
-    const never = backup({ status: 'never', last_backup_at: null, last_backup_key: null })
-    mockApi({ 'GET /api/v1/overview': overview({ backup: never }) })
+    const never = backup({ state: 'never', last_backup_time: undefined, last_backup_key: undefined })
+    mockApi({ 'GET /api/v1/serviceStatus': overview({ backup: never }) })
     renderApp('/health')
     const section = await screen.findByRole('region', { name: '备份' })
     expect(section).toHaveTextContent('还没有完成的备份')
     expect(within(section).getByText('尚未备份')).toBeInTheDocument()
   })
 
-  it('omits the section when the overview has no backup field', async () => {
-    mockApi({ 'GET /api/v1/overview': overview() })
+  it('omits the section when the status has no backup', async () => {
+    mockApi({ 'GET /api/v1/serviceStatus': overview() })
     renderApp('/health')
     await screen.findByRole('region', { name: 'Worker' })
     expect(screen.queryByRole('region', { name: '备份' })).not.toBeInTheDocument()

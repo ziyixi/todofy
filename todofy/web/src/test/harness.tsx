@@ -19,8 +19,24 @@ export interface Call {
 type Reply = object
 type Handler = Reply | ((call: Call) => Reply)
 
-export function apiError(status: number, code: string, requestId = 'req-test-1') {
-  return { status, body: { error: { code, message: '测试错误', request_id: requestId } } }
+/** The google.rpc.Status the gateway answers an error with: ErrorInfo, LocalizedMessage, RequestInfo, typed details. */
+export function apiError(status: number, reason: string, requestId = 'req-test-1', details: object[] = []) {
+  return {
+    status,
+    body: {
+      error: {
+        code: status,
+        message: 'test error',
+        status: 'TEST',
+        details: [
+          { '@type': 'type.googleapis.com/google.rpc.ErrorInfo', reason, domain: 'todofy.ziyixi.science' },
+          { '@type': 'type.googleapis.com/google.rpc.LocalizedMessage', locale: 'zh-CN', message: '测试错误' },
+          { '@type': 'type.googleapis.com/google.rpc.RequestInfo', request_id: requestId },
+          ...details,
+        ],
+      },
+    },
+  }
 }
 
 function isReply(value: unknown): value is { status: number; body?: unknown } {
@@ -28,25 +44,27 @@ function isReply(value: unknown): value is { status: number; body?: unknown } {
 }
 
 /**
- * Stubs fetch with handlers keyed by "METHOD /api/v1/path". Unmatched requests fail the test
- * loudly. GET /api/v1/csrf, /overview and /metrics/daily have defaults so every page can render.
+ * Stubs fetch with handlers keyed by "METHOD /api/v1/path" (the decoded path: `mailEvents/<id>:reconcile`). Unmatched
+ * requests fail the test loudly. GET /api/csrf, /api/v1/serviceStatus and /api/v1/metricDays have defaults so every
+ * page can render.
  */
 export function mockApi(handlers: Record<string, Handler>) {
   const calls: Call[] = []
   const table: Record<string, Handler> = {
-    'GET /api/v1/csrf': { token: 'csrf-token-1' },
-    'GET /api/v1/overview': overview(),
-    'GET /api/v1/metrics/daily': dailyMetrics(),
+    'GET /api/csrf': { token: 'csrf-token-1' },
+    'GET /api/v1/serviceStatus': overview(),
+    'GET /api/v1/metricDays': dailyMetrics(),
     ...handlers,
   }
   const fetchMock = vi.fn(async (input: RequestInfo | URL, init: RequestInit = {}) => {
     const url = new URL(String(input), 'https://todofy.example.test')
     const method = init.method ?? 'GET'
     const headers = Object.fromEntries(new Headers(init.headers).entries())
-    const call: Call = { method, path: url.pathname, search: url.search, headers, body: init.body ? JSON.parse(String(init.body)) : undefined }
+    const path = decodeURIComponent(url.pathname)
+    const call: Call = { method, path, search: url.search, headers, body: init.body ? JSON.parse(String(init.body)) : undefined }
     calls.push(call)
-    const handler = table[`${method} ${url.pathname}`]
-    if (handler === undefined) throw new Error(`Unexpected request ${method} ${url.pathname}`)
+    const handler = table[`${method} ${path}`]
+    if (handler === undefined) throw new Error(`Unexpected request ${method} ${path}`)
     const reply = typeof handler === 'function' ? handler(call) : handler
     if (reply instanceof Error) throw reply
     const { status, body } = isReply(reply) ? reply : { status: 200, body: reply }

@@ -11,7 +11,7 @@ describe('budget page trends', () => {
     renderApp('/budget')
     const trends = await screen.findByRole('region', { name: '近 30 天趋势' })
     const charts = await within(trends).findAllByRole('figure')
-    expect(calls.find((call) => call.path === '/api/v1/metrics/daily')?.search).toBe('?days=30')
+    expect(calls.find((call) => call.path === '/api/v1/metricDays')?.search).toBe('?page_size=30')
     expect(charts.map((chart) => within(chart).getByRole('img').getAttribute('aria-label')?.split('，')[0])).toEqual([
       '邮件（封）',
       '从收到到完成',
@@ -32,9 +32,9 @@ describe('budget page trends', () => {
   it('gives every series of a chart its own colour, and every line its own dash', async () => {
     // Six models (a changed model list) on the recorded days: more than the five chart colours.
     const tokens = Object.fromEntries([1, 2, 3, 4, 5, 6].map((n) => [`model-${n}`, n * 1000]))
-    const { days } = dailyMetrics()
+    const days = dailyMetrics().metric_days ?? []
     mockApi({
-      'GET /api/v1/metrics/daily': { days: days.map((day) => (day.recorded ? { ...day, gemini_tokens: tokens } : day)) },
+      'GET /api/v1/metricDays': { metric_days: days.map((day) => (day.recorded ? { ...day, gemini_tokens: tokens } : day)) },
     })
     renderApp('/budget')
     const trends = await screen.findByRole('region', { name: '近 30 天趋势' })
@@ -88,14 +88,14 @@ describe('budget page trends', () => {
   })
 
   it('explains an empty history instead of drawing flat lines', async () => {
-    mockApi({ 'GET /api/v1/metrics/daily': { days: dailyMetrics().days.map((day) => ({ ...day, recorded: false })) } })
+    mockApi({ 'GET /api/v1/metricDays': { metric_days: (dailyMetrics().metric_days ?? []).map((day) => ({ ...day, recorded: false })) } })
     renderApp('/budget')
     expect(await screen.findByText('还没有每日统计')).toBeInTheDocument()
     expect(screen.queryByRole('figure')).not.toBeInTheDocument()
   })
 
   it('shows a failure of the metrics read without hiding the budgets', async () => {
-    mockApi({ 'GET /api/v1/metrics/daily': apiError(503, 'unavailable', 'req-metrics') })
+    mockApi({ 'GET /api/v1/metricDays': apiError(503, 'UNAVAILABLE', 'req-metrics') })
     renderApp('/budget')
     expect(await screen.findByRole('alert')).toHaveTextContent('req-metrics')
     expect(screen.getByRole('region', { name: 'Gemini' })).toBeInTheDocument()
@@ -132,7 +132,7 @@ describe('trend chart', () => {
         recorded={[false, true]}
         variant="bar"
         format={String}
-        series={[{ label: 'm', color: 1, values: [null, metricsDay('2026-09-27').gemini_calls] }]}
+        series={[{ label: 'm', color: 1, values: [null, metricsDay('2026-09-27').gemini_call_count ?? 0] }]}
       />,
     )
     expect(container.querySelectorAll('rect')).toHaveLength(1)

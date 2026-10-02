@@ -1,56 +1,74 @@
-import type { RecommendationReport as RecommendationWire, SummaryReport as SummaryWire } from '@ziyixi/proto/todofy/report/v1/report_wire'
-import type { components } from './schema'
+/**
+ * The owner API's types are the generated messages of todofy.ui.v1 (proto/todofy/ui/v1): this file only re-exports
+ * the ones the pages name, with the small helpers they share: each enum's wire names (the codes the labels and the
+ * URLs use, lib/labels.ts), RFC 3339 text of a Timestamp, and the resources' names.
+ */
+import { timestampDate, type Timestamp } from '@ziyixi/proto/protobuf/wkt'
+import {
+  EventErrorCode,
+  EventErrorCodeSchema,
+  MailEvent_State,
+  MailEvent_StateSchema,
+  ReconcileAction,
+  ReconcileActionSchema,
+  Transition_Actor,
+  Transition_ActorSchema,
+} from '@ziyixi/proto/todofy/ui/v1/mail_event_pb'
+import { GtdReview_State, GtdReview_StateSchema } from '@ziyixi/proto/todofy/ui/v1/history_pb'
+import {
+  BackupStatus_ErrorCode,
+  BackupStatus_ErrorCodeSchema,
+  BackupStatus_State,
+  BackupStatus_StateSchema,
+  DailyReminder_State,
+  DailyReminder_StateSchema,
+  ReminderErrorCode,
+  ReminderErrorCodeSchema,
+} from '@ziyixi/proto/todofy/ui/v1/status_pb'
+import { ReportStatus, ReportStatusSchema } from '@ziyixi/proto/todofy/report/v1/report_pb'
+import { wireEnum, type WireName } from '@ziyixi/proto/wire-json'
 
-type Schemas = components['schemas']
+export type { LegacyText, MailEvent, Transition } from '@ziyixi/proto/todofy/ui/v1/mail_event_pb'
+export type { GtdDay, GtdReview, GtdScope, MetricDay } from '@ziyixi/proto/todofy/ui/v1/history_pb'
+export type { BackupStatus, DailyReminder, Integration, ServiceStatus, Switches } from '@ziyixi/proto/todofy/ui/v1/status_pb'
+export type { LatestReports } from '@ziyixi/proto/todofy/ui/v1/reports_pb'
+export type { RecommendationReport, SummaryReport } from '@ziyixi/proto/todofy/report/v1/report_pb'
+export { ReconcileAction, ReportStatus }
+export { ReportKind } from '@ziyixi/proto/todofy/ui/v1/reports_pb'
 
-export type ApiErrorCode = Schemas['ApiErrorCode']
-export type EventState = Schemas['EventState']
-export type EventErrorCode = Schemas['EventErrorCode']
-export type ReminderState = Schemas['ReminderState']
-export type ReminderErrorCode = Schemas['ReminderErrorCode']
-export type ReconcileAction = Schemas['ReconcileAction']
-export type EventSummary = Schemas['EventSummary']
-export type EventDetail = Schemas['EventDetail']
-export type Transition = Schemas['Transition']
-export type EventPage = Schemas['EventPage']
-export type ReconcileRequest = Schemas['ReconcileRequest']
-export type Reminder = Schemas['Reminder']
-export type ReminderPage = Schemas['ReminderPage']
-export type Overview = Schemas['Overview']
-export type BackupStatus = Schemas['BackupStatus']
-// The newsletter reports are proto/todofy/report/v1 (recommendation-v1, summary-v1): their wire JSON types come from
-// the IDL, a union by status (`report.status === 'empty_window'` narrows `report.summary` to the fixed sentence).
-export type SummaryReport = SummaryWire
-export type RecommendationReport = RecommendationWire
-// The owner API's ReportsLatest (its OpenAPI document stays the source of that envelope until the UI API moves to
-// proto/), with the reports typed from the IDL: a field the document adds reaches the UI without an edit here.
-export type ReportsLatest = Omit<Schemas['ReportsLatest'], 'summary' | 'recommendations'> & {
-  readonly summary: SummaryReport | null
-  readonly recommendations: readonly RecommendationReport[]
+// Each enum's wire names, e.g. eventStates.name(MailEvent_State.TODO_UNKNOWN) === 'todo_unknown'.
+export const eventStates = wireEnum(MailEvent_StateSchema, MailEvent_State)
+export const eventErrors = wireEnum(EventErrorCodeSchema, EventErrorCode)
+export const reconcileActions = wireEnum(ReconcileActionSchema, ReconcileAction)
+export const actors = wireEnum(Transition_ActorSchema, Transition_Actor)
+export const reminderStates = wireEnum(DailyReminder_StateSchema, DailyReminder_State)
+export const reminderErrors = wireEnum(ReminderErrorCodeSchema, ReminderErrorCode)
+export const backupStates = wireEnum(BackupStatus_StateSchema, BackupStatus_State)
+export const backupErrors = wireEnum(BackupStatus_ErrorCodeSchema, BackupStatus_ErrorCode)
+export const reviewStates = wireEnum(GtdReview_StateSchema, GtdReview_State)
+export const reportStatuses = wireEnum(ReportStatusSchema, ReportStatus)
+
+export type EventState = WireName<typeof MailEvent_State>
+export type EventErrorName = WireName<typeof EventErrorCode>
+export type ReconcileActionName = WireName<typeof ReconcileAction>
+export type ReminderStateName = WireName<typeof DailyReminder_State>
+export type ReminderErrorName = WireName<typeof ReminderErrorCode>
+export type BackupStateName = WireName<typeof BackupStatus_State>
+export type BackupErrorName = WireName<typeof BackupStatus_ErrorCode>
+export type ReportStatusName = WireName<typeof ReportStatus>
+
+/** A Timestamp as RFC 3339 UTC text (what lib/format.ts formats), or null when it is not set; whole seconds as the
+ * wire writes them (`2026-09-28T08:00:00Z`). */
+export function iso(timestamp: Timestamp | undefined): string | null {
+  return timestamp === undefined ? null : timestampDate(timestamp).toISOString().replace('.000Z', 'Z')
 }
-export type RecomputeRequest = Schemas['RecomputeRequest']
-export type LegacyText = Schemas['LegacyText']
-export type Setup = Schemas['Setup']
-export type DailyMetrics = Schemas['DailyMetrics']
-export type DailyMetricsDay = Schemas['DailyMetricsDay']
-export type GtdDaily = Schemas['GtdDaily']
-export type GtdDay = Schemas['GtdDay']
-export type GtdScope = Schemas['GtdScope']
-export type ErrorBody = Schemas['Error']
 
-export type EventView = 'recent' | 'attention'
+/** mailEvents/{id} of a Mail Hero event ID. */
+export function mailEventName(eventId: string): string {
+  return `mailEvents/${eventId}`
+}
 
-// The owner API's OpenAPI document refers to the reports' JSON Schemas, which are generated from the same IDL: what
-// it says the API answers must be what the UI's types accept (a compile error otherwise).
-type Accepts<Wire, Documented extends Wire> = Documented
-// The same property names, both ways (so neither side can gain a field the other lacks).
-type SameKeys<A, B> = [keyof A] extends [keyof B] ? ([keyof B] extends [keyof A] ? true : false) : false
-type Assert<Holds extends true> = Holds
-export type DocumentedReports = [
-  Assert<SameKeys<ReportsLatest, Schemas['ReportsLatest']>>,
-  Accepts<SummaryReport, Schemas['summary-v1.schema']>,
-  Accepts<RecommendationReport, Schemas['recommendation-v1.schema']>,
-  Accepts<ReportsLatest, Schemas['ReportsLatest']>,
-  Accepts<Schemas['summary-v1.schema']['status'], SummaryReport['status']>,
-  Accepts<Schemas['recommendation-v1.schema']['status'], RecommendationReport['status']>,
-]
+/** The last segment of a resource name (`mailEvents/<id>` → `<id>`, `dailyReminders/2026-09-30` → the day). */
+export function idOf(name: string): string {
+  return name.slice(name.lastIndexOf('/') + 1)
+}

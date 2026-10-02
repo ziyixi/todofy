@@ -198,7 +198,9 @@ jobs:
           uv run ruff format --check worker tests tools deploy
       - name: Host tests (core, fakes, migration tools, production configs and deploy values)
         run: uv run pytest tests/unit tests/fakes tools deploy
-      # The gateway Worker "todofy" (TypeScript); the root wrangler bundles it for the tests and the deploy.
+      # The gateway Worker "todofy" (TypeScript); the root wrangler bundles it for the tests and the deploy. Its workerd
+      # suite (test/runtime) runs it in Miniflare next to a stand-in TodofyCore: the CPU of the owner API's heaviest
+      # requests against Workers Free's 10 ms, in calibrated reference ms (tools/workerd-cpu).
       - name: Check and test the gateway
         working-directory: todofy/gateway
         run: |
@@ -206,12 +208,13 @@ jobs:
           npm run lint
           npm run typecheck
           npm test
-      # Builds uiassets/dist, which the dry-run serves.
+          npm run test:runtime
+      # Builds uiassets/dist, which the dry-run serves; the build fails over the UI's JavaScript budget
+      # (scripts/js-budget.mjs).
       - name: Check, test and build the UI
         working-directory: todofy/web
         run: |
           npm ci --no-audit --no-fund
-          npm run check:api
           npm run typecheck
           npm test
           npm run build
@@ -252,6 +255,9 @@ jobs:
           uv run python deploy/deploy_vars.py exec gateway -- npx --no-install wrangler deploy --dry-run \
             --config gateway/wrangler.toml --secrets-file "$RUNNER_TEMP/todofy-gateway-secrets.json" \
             --outdir "$RUNNER_TEMP/todofy-gateway-bundle"
+          # The gateway's bundle against its budget and the Workers Free limit (deploy/bundle-size.mjs).
+          node --test deploy/test/*.test.mjs
+          node deploy/bundle-size.mjs "$RUNNER_TEMP/todofy-gateway-bundle"
       - name: Remove the placeholder secrets files
         if: always()
         run: rm -f "$RUNNER_TEMP/todofy-core-secrets.json" "$RUNNER_TEMP/todofy-gateway-secrets.json"

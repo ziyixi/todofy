@@ -6,7 +6,7 @@ import { apiError, mockApi, renderApp } from '../test/harness'
 
 describe('shell', () => {
   it('lands on the attention page with four tabs and the attention badge', async () => {
-    mockApi({ 'GET /api/v1/events': { items: [], next_cursor: null } })
+    mockApi({ 'GET /api/v1/mailEvents': {} })
     const { router } = renderApp('/')
     expect(await screen.findByRole('heading', { name: '需要关注' })).toBeInTheDocument()
     expect(router.state.location.pathname).toBe('/attention')
@@ -20,7 +20,12 @@ describe('shell', () => {
 describe('attention page', () => {
   it('shows cards with the short ID, state and the Chinese error explanation', async () => {
     const { calls } = mockApi({
-      'GET /api/v1/events': { items: [eventSummary(), eventSummary({ event_id: OTHER_EVENT_ID, state: 'failed_summary', error_code: 'llm_request_rejected' })], next_cursor: null },
+      'GET /api/v1/mailEvents': {
+        mail_events: [
+          eventSummary(),
+          eventSummary({ name: `mailEvents/${OTHER_EVENT_ID}`, state: 'failed_summary', error_code: 'llm_request_rejected' }),
+        ],
+      },
     })
     renderApp('/attention')
     const cards = await screen.findAllByRole('link', { name: /f8c1e9a0/ })
@@ -29,33 +34,33 @@ describe('attention page', () => {
     expect(cards[0]).toHaveTextContent('结果不明')
     expect(cards[0]).toHaveTextContent('建任务结果不明')
     expect(cards[1]).toHaveTextContent('Gemini 拒绝请求')
-    expect(calls.find((call) => call.path === '/api/v1/events')?.search).toContain('view=attention')
+    expect(calls.find((call) => call.path === '/api/v1/mailEvents')?.search).toBe('?page_size=50&attention=true')
   })
 
-  it('shows the error code and request ID when the list fails', async () => {
-    mockApi({ 'GET /api/v1/events': apiError(503, 'unavailable', 'req-503') })
+  it('shows the reason and request ID when the list fails', async () => {
+    mockApi({ 'GET /api/v1/mailEvents': apiError(503, 'UNAVAILABLE', 'req-503') })
     renderApp('/attention')
     const alert = await screen.findByRole('alert')
-    expect(alert).toHaveTextContent('unavailable')
+    expect(alert).toHaveTextContent('UNAVAILABLE')
     expect(alert).toHaveTextContent('req-503')
     expect(within(alert).getByRole('button', { name: '重试' })).toBeInTheDocument()
   })
 
   it('says so when nothing needs attention', async () => {
-    mockApi({ 'GET /api/v1/events': { items: [], next_cursor: null } })
+    mockApi({ 'GET /api/v1/mailEvents': {} })
     renderApp('/attention')
     expect(await screen.findByText('一切正常')).toBeInTheDocument()
   })
 })
 
 describe('events page', () => {
-  it('filters by state and pages with the cursor', async () => {
+  it('filters by state and pages with the page token', async () => {
     const user = userEvent.setup()
     const { calls } = mockApi({
-      'GET /api/v1/events': (call) =>
-        call.search.includes('cursor=')
-          ? { items: [eventSummary({ event_id: OTHER_EVENT_ID, state: 'complete', error_code: null })], next_cursor: null }
-          : { items: [eventSummary({ state: 'complete', error_code: null })], next_cursor: 'next-1' },
+      'GET /api/v1/mailEvents': (call) =>
+        call.search.includes('page_token=')
+          ? { mail_events: [eventSummary({ name: `mailEvents/${OTHER_EVENT_ID}`, state: 'complete', error_code: undefined })] }
+          : { mail_events: [eventSummary({ state: 'complete', error_code: undefined })], next_page_token: 'next-1' },
     })
     const { router } = renderApp('/events')
     await screen.findByRole('link', { name: /f8c1e9a0/ })
@@ -67,9 +72,9 @@ describe('events page', () => {
 
     await user.click(screen.getByRole('button', { name: '加载更多' }))
     expect(await screen.findAllByRole('link', { name: /f8c1e9a0/ })).toHaveLength(2)
-    const searches = calls.filter((call) => call.path === '/api/v1/events').map((call) => call.search)
-    expect(searches).toContain('?view=recent&state=complete&limit=50')
-    expect(searches).toContain('?view=recent&state=complete&cursor=next-1&limit=50')
+    const searches = calls.filter((call) => call.path === '/api/v1/mailEvents').map((call) => call.search)
+    expect(searches).toContain('?page_size=50&state=complete')
+    expect(searches).toContain('?page_size=50&page_token=next-1&state=complete')
     expect(screen.queryByRole('button', { name: '加载更多' })).not.toBeInTheDocument()
   })
 })

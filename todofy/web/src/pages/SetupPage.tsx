@@ -1,16 +1,22 @@
 import { CircleCheck, CircleAlert } from 'lucide-react'
 import type { ReactNode } from 'react'
 import { useSetup } from '../api/queries'
-import type { Setup } from '../api/types'
+import type { Integration } from '../api/types'
 import { CopyButton, ErrorPanel, Facts, Loading, PageHeader, Section } from '../components/ui'
 
-const SECRETS: [keyof Setup['configured'], string, string][] = [
-  ['mail_webhook_token', 'MAIL_WEBHOOK_TOKEN_SHA256', 'Mail Hero webhook 的 Bearer token 摘要'],
-  ['report_basic_auth', 'REPORT_BASIC_AUTH_SHA256', 'newsletter Basic 认证的摘要'],
-  ['gemini_api_key', 'GEMINI_API_KEY', '生成摘要与日报'],
-  ['todoist_api_key', 'TODOIST_API_KEY', '建任务与只读页脚查找'],
-  ['todoist_project', 'TODOIST_DEFAULT_PROJECT_ID', '任务所在的 Todoist 项目'],
+type Secret = 'mailWebhookToken' | 'reportBasicAuth' | 'geminiApiKey' | 'todoistApiKey' | 'todoistProject'
+
+const SECRETS: [Secret, string, string][] = [
+  ['mailWebhookToken', 'MAIL_WEBHOOK_TOKEN_SHA256', 'Mail Hero webhook 的 Bearer token 摘要'],
+  ['reportBasicAuth', 'REPORT_BASIC_AUTH_SHA256', 'newsletter Basic 认证的摘要'],
+  ['geminiApiKey', 'GEMINI_API_KEY', '生成摘要与日报'],
+  ['todoistApiKey', 'TODOIST_API_KEY', '建任务与只读页脚查找'],
+  ['todoistProject', 'TODOIST_DEFAULT_PROJECT_ID', '任务所在的 Todoist 项目'],
 ]
+
+function configured(integration: Integration, secret: Secret): boolean {
+  return integration.configured?.[secret] ?? false
+}
 
 function Copyable({ value, label }: { value: string; label: string }) {
   return (
@@ -49,13 +55,13 @@ export function SetupPage() {
           <Section title="接入地址">
             <Facts
               items={[
-                ...setup.data.hooks_hosts.map((host, index): [ReactNode, ReactNode] => [
+                ...setup.data.hooksHosts.map((host, index): [ReactNode, ReactNode] => [
                   index === 0 ? 'Webhook 地址' : '备用地址',
-                  <Copyable key={host} value={`https://${host}${setup.data.webhook_path}`} label="Webhook 地址" />,
+                  <Copyable key={host} value={`https://${host}${setup.data.webhookPath}`} label="Webhook 地址" />,
                 ]),
-                ['管理界面', <Copyable key="p" value={`https://${setup.data.public_host}`} label="管理界面地址" />],
-                ['邮件来源 ID', <code key="s">{setup.data.mail_source_id}</code>],
-                ['Access 所有者', <code key="o">{setup.data.access_owner}</code>],
+                ['管理界面', <Copyable key="p" value={`https://${setup.data.publicHost}`} label="管理界面地址" />],
+                ['邮件来源 ID', <code key="s">{setup.data.mailSourceId}</code>],
+                ['Access 所有者', <code key="o">{setup.data.accessOwner}</code>],
                 ['部署版本', <code key="b">{setup.data.build.slice(0, 12) || '未设置'}</code>],
               ]}
             />
@@ -64,7 +70,7 @@ export function SetupPage() {
           <Section title="密钥与配置">
             <ul className="check-list">
               {SECRETS.map(([key, name, purpose]) => {
-                const ok = setup.data.configured[key]
+                const ok = configured(setup.data, key)
                 return (
                   <li key={key} className={ok ? 'tone-ok' : 'tone-danger'}>
                     {ok ? <CircleCheck size={18} aria-hidden="true" /> : <CircleAlert size={18} aria-hidden="true" />}

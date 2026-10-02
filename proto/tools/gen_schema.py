@@ -10,9 +10,9 @@ generated, never written by hand, in one of two shapes (``Target``):
 - a package's document (ops-v1): one ``$defs`` entry per format, enum and message of the package (``OpsStatus``,
   ``Code``), each message a ``$ref`` where it is used;
 - one message's schema (``Target.root``: Todofy's reports), self-contained: formats, enums and messages written in
-  place, no ``$defs`` or ``$ref`` (an OpenAPI document refers to it, and openapi-typescript would hoist ``$defs`` into
-  its components), with the message's and each field's leading comment as their ``description`` (the image needs its
-  source info; ``(-- ... --)`` blocks and ``buf:lint`` lines are left out).
+  place, no ``$defs`` or ``$ref`` (an OpenAPI document, Todofy's api/machine-api-v1.openapi.yaml, refers to it by
+  path), with the message's and each field's leading comment as their ``description`` (the image needs its source
+  info; ``(-- ... --)`` blocks and ``buf:lint`` lines are left out).
 
 Either way every message is closed (``additionalProperties: false``) unless the target is a consumer's (``Target.open``:
 every message takes properties it does not know, as a lenient read skips them), a REQUIRED field required (``null``
@@ -28,11 +28,11 @@ leniently (the codecs' lenient read). A format's ``json_schema_format`` is writt
 bound, a whole message's size) are in the contract's README, not here. Characters Python does not print (a pattern's
 control characters and Unicode spaces) are written as ``\\u`` escapes, so the committed file shows them.
 
-SCHEMAS lists the committed schemas, each with what must be regenerated after it changes (``Target.then``: Todofy's
-reports are copied into its UI's types by openapi-typescript), which a write that changes the file and a check that
-finds it stale print. Only keywords contracts/ops-v1/validate.mjs implements are written, so a
-TypeScript test may still check a document with it, except for the relations (``allOf``, ``if``, ``then``), which
-only mail.received.v1 states and only Python's jsonschema reads in the tests.
+SCHEMAS lists the committed schemas, each with what must be regenerated after it changes (``Target.then``, when a
+generator copies the schema; none does since Todofy's UI takes its types from todofy.ui.v1), which a write that
+changes the file and a check that finds it stale print. Only keywords contracts/ops-v1/validate.mjs implements are
+written, so a TypeScript test may still check a document with it, except for the relations (``allOf``, ``if``,
+``then``), which only mail.received.v1 states and only Python's jsonschema reads in the tests.
 """
 
 from __future__ import annotations
@@ -71,9 +71,6 @@ class Target:
     open: bool = False
 
 
-# Todofy's UI types (todofy/web/src/api/schema.d.ts, openapi-typescript) copy the reports' descriptions and formats
-# through the owner API's OpenAPI document.
-TODOFY_UI_TYPES = "cd todofy/web && npm run gen:api"
 SCHEMAS = (
     Target(
         "ops.v1",
@@ -85,14 +82,13 @@ SCHEMAS = (
         "are closed so that nothing but codes, numbers, booleans and timestamps can leave an app; consumers still "
         "ignore fields they do not know.",
     ),
-    # Todofy's newsletter reports (todofy/api/): the owner API's OpenAPI document refers to both.
+    # Todofy's newsletter reports (todofy/api/): the machine routes' OpenAPI document refers to both.
     Target(
         "todofy.report.v1",
         "../todofy/api/summary-v1.schema.json",
         "https://todofy.local/schema/summary-v1.schema.json",
         "Todofy GET /api/summary response",
         root="SummaryReport",
-        then=TODOFY_UI_TYPES,
     ),
     Target(
         "todofy.report.v1",
@@ -100,7 +96,6 @@ SCHEMAS = (
         "https://todofy.local/schema/recommendation-v1.schema.json",
         "Todofy GET /api/recommendation response",
         root="RecommendationReport",
-        then=TODOFY_UI_TYPES,
     ),
     # Mail Hero's webhook event: what its consumers accept (open: they skip fields they do not know), self-contained
     # because Todofy's OpenAPI document refers to it for the webhook's request body.
@@ -110,7 +105,6 @@ SCHEMAS = (
         "https://mail-hero.local/schema/mail-received-v1.schema.json",
         "Mail Hero mail.received.v1 event",
         root="MailReceivedEvent",
-        then=TODOFY_UI_TYPES,
         open=True,
     ),
 )

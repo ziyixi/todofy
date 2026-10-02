@@ -1,7 +1,7 @@
 import { ExternalLink } from 'lucide-react'
 import type { ReactNode } from 'react'
 import { useOverview } from '../api/queries'
-import type { BackupStatus, Overview } from '../api/types'
+import { backupErrors, backupStates, iso, type BackupStatus, type EventState, type ServiceStatus, type Switches } from '../api/types'
 import { Badge, ErrorPanel, Facts, Loading, PageHeader, Section, Time } from '../components/ui'
 import { formatBytes, formatNumber } from '../lib/format'
 import { BACKUP_ERRORS, BACKUP_STATUS, EVENT_STATES } from '../lib/labels'
@@ -24,30 +24,31 @@ function Flag({ on, label }: { on: boolean; label: string }) {
   return <Badge tone={on ? 'warn' : 'neutral'}>{on ? `${label}：开` : `${label}：关`}</Badge>
 }
 
-function Flags({ flags }: { flags: Overview['flags'] }) {
+function Flags({ switches }: { switches: Switches | undefined }) {
   return (
     <div className="badge-row">
-      <Flag on={flags.maintenance_mode} label="维护模式" />
-      <Flag on={flags.processing_paused} label="暂停处理" />
-      <Flag on={flags.force_pause_todoist} label="暂停 Todoist" />
-      <Badge tone={flags.reminder_enabled ? 'ok' : 'neutral'}>{flags.reminder_enabled ? '每日提醒：开' : '每日提醒：关'}</Badge>
+      <Flag on={switches?.maintenanceMode ?? false} label="维护模式" />
+      <Flag on={switches?.processingPaused ?? false} label="暂停处理" />
+      <Flag on={switches?.forcePauseTodoist ?? false} label="暂停 Todoist" />
+      <Badge tone={switches?.reminderEnabled ? 'ok' : 'neutral'}>{switches?.reminderEnabled ? '每日提醒：开' : '每日提醒：关'}</Badge>
     </div>
   )
 }
 
 function Backup({ backup }: { backup: BackupStatus }) {
-  const status = BACKUP_STATUS[backup.status]
-  const failure = backup.last_failure_at && (!backup.last_backup_at || backup.last_failure_at > backup.last_backup_at)
+  const state = backupStates.name(backup.state)
+  const status = state === null ? { label: '未知', tone: 'neutral' as const } : BACKUP_STATUS[state]
+  const last = iso(backup.lastBackupTime)
+  const failed = iso(backup.lastFailureTime)
+  const code = backupErrors.name(backup.lastErrorCode)
+  const failure = failed !== null && (last === null || failed > last)
   const items: [string, ReactNode][] = [
-    ['上次备份', <Time key="l" value={backup.last_backup_at} empty="还没有完成的备份" />],
-    [
-      '大小',
-      backup.last_backup_at ? `${formatBytes(backup.last_backup_bytes)}，${formatNumber(backup.last_backup_rows)} 行` : '—',
-    ],
-    ['下次备份', <Time key="n" value={backup.next_backup_at} empty={backup.status === 'running' ? '正在备份' : '未排期'} />],
+    ['上次备份', <Time key="l" value={last} empty="还没有完成的备份" />],
+    ['大小', last ? `${formatBytes(backup.lastBackupSizeBytes)}，${formatNumber(backup.lastBackupRowCount)} 行` : '—'],
+    ['下次备份', <Time key="n" value={iso(backup.nextBackupTime)} empty={state === 'running' ? '正在备份' : '未排期'} />],
   ]
-  if (failure && backup.last_error_code) {
-    items.push(['上次失败', <span key="f"><Time value={backup.last_failure_at} />：{BACKUP_ERRORS[backup.last_error_code]}</span>])
+  if (failure && code) {
+    items.push(['上次失败', <span key="f"><Time value={failed} />：{BACKUP_ERRORS[code]}</span>])
   }
   return (
     <Section title="备份" aside={<Badge tone={status.tone}>{status.label}</Badge>}>
@@ -55,6 +56,20 @@ function Backup({ backup }: { backup: BackupStatus }) {
       <p className="muted small">每周日 10:00（UTC）把 D1 备份到私有 R2 桶，保留最近 6 份；备份进行时（通常几分钟内）暂停处理和写操作。</p>
     </Section>
   )
+}
+
+/** Events per active state, in ActiveCounts' order (every state that is not finished). */
+function activeCounts(status: ServiceStatus): [EventState, number][] {
+  const counts = status.activeCounts
+  return [
+    ['pending', counts?.pendingCount ?? 0],
+    ['summarizing', counts?.summarizingCount ?? 0],
+    ['summarized', counts?.summarizedCount ?? 0],
+    ['todo_sending', counts?.todoSendingCount ?? 0],
+    ['todo_unknown', counts?.todoUnknownCount ?? 0],
+    ['todo_created', counts?.todoCreatedCount ?? 0],
+    ['failed_summary', counts?.failedSummaryCount ?? 0],
+  ]
 }
 
 export function HealthPage() {
@@ -76,23 +91,23 @@ export function HealthPage() {
             <Facts
               items={[
                 ['部署版本', <Build key="b" sha={overview.data.build} />],
-                ['服务器时间', <Time key="n" value={overview.data.now} />],
-                ['下次唤醒', <Time key="a" value={overview.data.next_alarm_at} empty="未排期" />],
-                ['最久等待的到期事件', <Time key="d" value={overview.data.oldest_due_at} relative empty="没有到期事件" />],
-                ['近 24 小时收到', `${overview.data.received_24h} 封`],
+                ['服务器时间', <Time key="n" value={iso(overview.data.readTime)} />],
+                ['下次唤醒', <Time key="a" value={iso(overview.data.nextAlarmTime)} empty="未排期" />],
+                ['最久等待的到期事件', <Time key="d" value={iso(overview.data.oldestDueTime)} relative empty="没有到期事件" />],
+                ['近 24 小时收到', `${overview.data.receivedLastDayCount} 封`],
               ]}
             />
           </Section>
           <Section title="运行开关">
-            <Flags flags={overview.data.flags} />
+            <Flags switches={overview.data.switches} />
           </Section>
           {overview.data.backup && <Backup backup={overview.data.backup} />}
-          <Section title="进行中的事件" aside={<span className="muted small">需关注 {overview.data.attention_count} 个</span>}>
+          <Section title="进行中的事件" aside={<span className="muted small">需关注 {overview.data.attentionCount} 个</span>}>
             <ul className="count-grid">
-              {Object.entries(overview.data.counts).map(([state, count]) => (
+              {activeCounts(overview.data).map(([state, count]) => (
                 <li key={state}>
                   <span className="count-value">{count}</span>
-                  <span className="muted small">{EVENT_STATES[state as keyof typeof EVENT_STATES].label}</span>
+                  <span className="muted small">{EVENT_STATES[state].label}</span>
                 </li>
               ))}
             </ul>
