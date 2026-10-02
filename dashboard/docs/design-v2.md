@@ -235,8 +235,12 @@ lost `version`.
 | `POST /api/v1/homeView:refresh`, `POST /api/v1/cloudflareView:refresh` (RefreshHomeView, RefreshCloudflareView; were `?refresh=1`) | DO `view(..., refresh)` | Origin + CSRF; each scope fetches at most once a minute |
 | `POST /api/v1/guard:override {level, request_id}` (OverrideGuard), `POST /api/v1/canaries/mail-todofy:run {request_id}` (RunCanary) | DO (`setGuardOverride`, `startCanary`) | Origin + CSRF; ≤ 1 KiB body |
 
-The old paths (`/api/v2/*`) answer 410 `reload_required` in the old error envelope until 2026-11-02 (one release), so a
-tab still running the old UI asks the owner to reload; then they answer NOT_FOUND like any unknown path.
+The old paths (`/api/v2/*`) answer 410 with the message 个人控制台已更新，请刷新页面 in the old error envelope until
+2026-11-02 (one release); then they answer NOT_FOUND like any unknown path. The code is `not_found`, not Lab's
+`reload_required`: the old UI shows the envelope's message only for the error codes it knows and turns any other code
+into its generic "unrecognized response (HTTP 410)" error, so only a known code lets a tab still running it ask the
+owner to reload (`worker/test/http.test.ts` runs that client's error handling on every legacy answer). An
+authentication failure on those paths keeps the old codes (`unauthorized`, ...; a bug is `unavailable`).
 
 **Pre-serialized views.** HomeState builds each view as the generated wire type of its message (`worker/src/api-types.ts`
 names them) and serializes it once; the Worker hands those bytes to the transcoder as a `PreEncoded` answer with the ETag

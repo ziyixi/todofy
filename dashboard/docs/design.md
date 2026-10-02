@@ -16,7 +16,7 @@ sources: [`limits.md`](limits.md).
 **Superseded parts (v2, then dashboard.ui.v1):** the one-page UI, `GET /api/v1/overview` and the other
 hand-written routes below were replaced by the four v2 views (`/api/v2/*`), and those on 2026-10-02 by the proto
 API `dashboard.ui.v1` ([`proto/dashboard/ui/v1`](../../proto/dashboard/ui/v1), [`design-v2.md`](design-v2.md) §5);
-the `/api/v2` paths answer 410 `reload_required` for one release. The guard, canary and digest logic, the owner
+the `/api/v2` paths answer 410 with a reload message (code `not_found`, which the old UI shows) for one release. The guard, canary and digest logic, the owner
 checks, CSRF and the limits in this document are unchanged and apply to its methods (OverrideGuard
 `POST /api/v1/guard:override`, RunCanary `POST /api/v1/canaries/mail-todofy:run`, and `GET /api/csrf`).
 

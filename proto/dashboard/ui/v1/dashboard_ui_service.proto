@@ -38,8 +38,9 @@
 // re-encode every view. For the same reason the field names keep the JSON the UI renders (`generated_at`).
 //
 // Before dashboard.ui.v1 (until 2026-10-02) the same operations were hand-written routes under /api/v2 (named
-// below). Those paths answer 410 with the old error envelope and the code `reload_required` for one release
-// (dashboard/worker/src/http.ts), so a tab still running the old UI tells the owner to reload.
+// below). Those paths answer 410 with the old error envelope and a reload message for one release
+// (dashboard/worker/src/http.ts), under the code `not_found` because the old UI shows the message only for the codes
+// it knows (unlike Lab's, which sends `reload_required`), so a tab still running the old UI tells the owner to reload.
 //
 // buf lint. The methods that answer a view carry two `buf:lint:ignore` lines: RPC_RESPONSE_STANDARD_NAME and
 // RPC_REQUEST_RESPONSE_UNIQUE, which the AIPs contradict (a Get and a custom method answer the resource itself,

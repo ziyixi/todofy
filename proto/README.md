@@ -595,7 +595,9 @@ to budgets (`tools/bundle-size`: `lab/deploy/bundle-size.mjs`, 128 KiB gzip for 
 4. Move the old routes off: an old UI tab calls the old paths until it reloads, so either keep them for one
    release as `additional_bindings` (when the old request and answer shapes still decode) or answer them
    with a "reload" error in the old envelope (what Lab did, `lab/worker/src/http.ts`); remove that after
-   one release.
+   one release. Check what the deployed old client does with that answer: Lab's shows any code's message, so it
+   sends `reload_required`; the dashboard's shows the message only for its known codes, so it sends `not_found`
+   (`dashboard/worker/test/http.test.ts` runs that client's error handling on the answer).
 5. Budget what the runtime costs ([Cost](#http-apis)), as Lab does: the Worker's and the UI's bundles against
    budgets with `tools/bundle-size` (a ratchet of about 1.2 times the measured size, raised only on purpose), and
    the heaviest requests' CPU, the isolate's first API request included, with `tools/workerd-cpu` (bounds in

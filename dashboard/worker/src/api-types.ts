@@ -10,7 +10,7 @@
  * parts of a message a builder fills in), and adds what the IDL does not describe:
  *
  * - the transport outside the service: GET /api/csrf (CsrfResponse), GET /health (HealthResponse), and the error
- *   envelope of the retired /api/v2 routes, which answer 410 `reload_required` for one release (LegacyApiError);
+ *   envelope of the retired /api/v2 routes, which answer 410 with a reload message for one release (LegacyApiError);
  * - OpsApp, the apps this build binds (the IDL's list is open: an app may join within ops-v1);
  * - the constants of the dashboard's rules (thresholds, budgets, bounds), which are behaviour, not wire.
  *
@@ -247,9 +247,11 @@ export interface HealthResponse {
 }
 
 /**
- * The error envelope of the retired /api/v2 routes, which answer 410 `reload_required` until 2026-11-02 (one
- * release), so a tab still running the old UI tells the owner to reload; an authentication failure there keeps the
- * old code (`unauthorized`, ...). Every other error is a google.rpc.Status (proto/dashboard/ui/v1/errors.proto).
+ * The error envelope of the retired /api/v2 routes, which answer 410 with the reload message until 2026-11-02 (one
+ * release), under the code `not_found`: the old UI shows the message only for a code it knows (http.ts LEGACY_CODES),
+ * so a tab still running it tells the owner to reload. An authentication failure there keeps the old code
+ * (`unauthorized`, ...; a bug is `unavailable`). Every other error is a google.rpc.Status
+ * (proto/dashboard/ui/v1/errors.proto).
  */
 export interface LegacyApiError {
   readonly error: {

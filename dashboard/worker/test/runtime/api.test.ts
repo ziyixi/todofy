@@ -149,12 +149,12 @@ describe('the ops and cloudflare views', () => {
     expect(h.analytics.requests).toEqual([]);
   });
 
-  it('answers 410 reload_required on the retired /api/v2 paths and NOT_FOUND on the retired v1 ones', async () => {
+  it('answers 410 with the reload message (code not_found, which the old UI shows) on the retired /api/v2 paths and NOT_FOUND on the retired v1 ones', async () => {
     h = await startFlows();
     for (const path of ['/api/v2/home', '/api/v2/ops', '/api/v2/registry', '/api/v2/csrf']) {
       const response = await h.fetch(path);
       expect(response.status).toBe(410);
-      expect(await response.json()).toMatchObject({ error: { code: 'reload_required', message: '个人控制台已更新，请刷新页面' } });
+      expect(await response.json()).toMatchObject({ error: { code: 'not_found', message: '个人控制台已更新，请刷新页面' } });
     }
     for (const path of ['/api/v2/guard', '/api/v2/canary']) {
       const response = await h.post(path, {});

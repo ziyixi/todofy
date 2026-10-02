@@ -5,9 +5,10 @@
  *   handlers of api.ts; every method but GET also needs the same-origin Origin and the signed double-submit CSRF
  *   token (the transcoder's `authorize` hook runs before the body is read);
  * - GET /api/csrf: the CSRF token and its cookie (transport, not part of the service);
- * - the routes of the UI before dashboard.ui.v1 (/api/v2/home, ...): 410 `reload_required` in their old error
- *   envelope, so a tab still running the old UI tells the owner to reload (until 2026-11-02, then NOT_FOUND like any
- *   other path);
+ * - the routes of the UI before dashboard.ui.v1 (/api/v2/home, ...): 410 with RELOAD_MESSAGE in their old error
+ *   envelope, under the code `not_found` (LEGACY_RELOAD_CODE: the old UI shows a message only for the codes it knows,
+ *   LEGACY_CODES), so a tab still running the old UI tells the owner to reload (until 2026-11-02, then NOT_FOUND like
+ *   any other path);
  * - everything else: the UI's static assets (GET and HEAD).
  *
  * Errors are google.rpc.Status bodies (proto/dashboard/ui/v1/errors.proto, common/errors/v1/errors.proto), logged as
@@ -45,6 +46,30 @@ export const API_DOMAIN = 'home.ziyixi.science';
 export const API_PREFIX = '/api/v1/';
 /** The old UI's reload answer on its retired paths (one release, until 2026-11-02). */
 export const RELOAD_MESSAGE = '个人控制台已更新，请刷新页面';
+/**
+ * The error codes the UI before dashboard.ui.v1 knows (its ApiErrorCode, frozen: that client no longer changes). Its
+ * readError shows the envelope's message only for these; any other code becomes its generic "unrecognized response
+ * (HTTP n)" error, so every legacy answer must carry one of them (test/http.test.ts runs that client's logic).
+ */
+export const LEGACY_CODES: readonly string[] = [
+  'unauthorized',
+  'access_not_configured',
+  'not_configured',
+  'csrf_failed',
+  'bad_request',
+  'not_found',
+  'method_not_allowed',
+  'canary_active',
+  'canary_disabled',
+  'canary_limit',
+  'unavailable',
+];
+/**
+ * The code of the 410 reload answer. Lab's old client showed any code's message, so Lab sends `reload_required`;
+ * the dashboard's old client would hide RELOAD_MESSAGE behind it, so the answer uses the nearest code it knows (the
+ * path is gone) and keeps HTTP 410. The Worker's log line still names the reason RELOAD_REQUIRED.
+ */
+export const LEGACY_RELOAD_CODE = 'not_found';
 const IMMUTABLE = 'private, max-age=31536000, immutable';
 const NO_STORE = { 'cache-control': 'no-store' } as const;
 
@@ -164,6 +189,12 @@ export function legacyApi(pathname: string): boolean {
   return pathname === '/api' || (pathname.startsWith('/api/') && !pathname.startsWith(API_PREFIX) && pathname !== '/api/v1' && pathname !== '/api/csrf');
 }
 
+/** A reason as an old-UI code: its lower-case name when the old UI knows it, else `unavailable` (INTERNAL). */
+export function legacyCode(reason: string): string {
+  const code = reason.toLowerCase();
+  return LEGACY_CODES.includes(code) ? code : 'unavailable';
+}
+
 /** The old UI's error envelope, {error: {code, message, request_id}}, for the paths it still calls. */
 function legacyError(ctx: Context, status: number, code: string, message: string): Response {
   const body: LegacyApiError = { error: { code, message, request_id: ctx.requestId } };
@@ -193,12 +224,12 @@ async function route(base: Context): Promise<Routed> {
     const rpc = error instanceof RpcError ? error : dashboardError('INTERNAL');
     if (legacyApi(url.pathname)) {
       const message = isReason(rpc.reason) ? REASONS[rpc.reason].zh : REASONS.UNAVAILABLE.zh;
-      return { response: legacyError(base, rpc.httpStatus, rpc.reason.toLowerCase(), message), asset: false, reason: rpc.reason };
+      return { response: legacyError(base, rpc.httpStatus, legacyCode(rpc.reason), message), asset: false, reason: rpc.reason };
     }
     return fail(rpc);
   }
   if (legacyApi(url.pathname)) {
-    return { response: legacyError(ctx, 410, 'reload_required', RELOAD_MESSAGE), asset: false, reason: 'RELOAD_REQUIRED' };
+    return { response: legacyError(ctx, 410, LEGACY_RELOAD_CODE, RELOAD_MESSAGE), asset: false, reason: 'RELOAD_REQUIRED' };
   }
   if (url.pathname === '/api/csrf') {
     // GET only, as before: a token and its cookie are issued to a page that asks for one.

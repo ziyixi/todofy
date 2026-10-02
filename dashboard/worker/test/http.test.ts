@@ -12,7 +12,7 @@ import { runView, newRun } from '../src/canary.ts';
 import type { Env } from '../src/env.ts';
 import worker from '../src/index.ts';
 import { REASONS } from '../src/api.ts';
-import { API_DOMAIN, CSRF_COOKIE, RELOAD_MESSAGE } from '../src/http.ts';
+import { API_DOMAIN, CSRF_COOKIE, LEGACY_CODES, LEGACY_RELOAD_CODE, legacyCode, RELOAD_MESSAGE } from '../src/http.ts';
 import { accessClaims, testIssuer, type TestIssuer } from './jwt.ts';
 import { expectWire, VIEW_SCHEMAS } from './wire-conformance.ts';
 
@@ -547,8 +547,51 @@ describe('routing', () => {
   });
 });
 
+/** The error codes of the UI before dashboard.ui.v1 (its ApiErrorCode at 327ad52), frozen: that client no longer changes. */
+const OLD_UI_CODES = [
+  'unauthorized',
+  'access_not_configured',
+  'not_configured',
+  'csrf_failed',
+  'bad_request',
+  'not_found',
+  'method_not_allowed',
+  'canary_active',
+  'canary_disabled',
+  'canary_limit',
+  'unavailable',
+] as const;
+
+/**
+ * What a tab still running the old UI makes of an error answer: its readError (dashboard/web/src/api/client.ts at
+ * 327ad52), step for step. The envelope's message is shown only for a code it knows; anything else is its generic
+ * "unrecognized response" error.
+ */
+async function oldUiError(response: Response): Promise<{ status: number; code: string; message: string }> {
+  try {
+    const body = await response.json<{ error?: { code?: unknown; message?: unknown } }>();
+    const error = body.error;
+    if (error && typeof error.code === 'string' && (OLD_UI_CODES as readonly string[]).includes(error.code)) {
+      const message = typeof error.message === 'string' && error.message ? error.message : `<copy of ${error.code}>`;
+      return { status: response.status, code: error.code, message };
+    }
+  } catch {
+    // An HTML answer, as from the Access edge.
+  }
+  return { status: response.status, code: 'bad_response', message: `服务返回了无法识别的响应（HTTP ${String(response.status)}）` };
+}
+
 describe('the retired /api/v2 routes', () => {
-  it('answer 410 reload_required in the old envelope, behind Access, without calling the object', async () => {
+  it('only use codes the old UI knows', () => {
+    expect(LEGACY_CODES).toEqual(OLD_UI_CODES);
+    expect(OLD_UI_CODES).toContain(LEGACY_RELOAD_CODE);
+    // Every reason an authentication failure may carry, INTERNAL (a bug) as `unavailable`.
+    for (const reason of Object.keys(REASONS)) expect(OLD_UI_CODES, reason).toContain(legacyCode(reason));
+    expect(legacyCode('INTERNAL')).toBe('unavailable');
+    expect(legacyCode('UNAUTHORIZED')).toBe('unauthorized');
+  });
+
+  it('answer 410 with the reload message, which the old UI shows, behind Access, without calling the object', async () => {
     const { env, calls } = makeEnv();
     for (const [path, method] of [
       ['/api/v2/home', 'GET'],
@@ -563,15 +606,35 @@ describe('the retired /api/v2 routes', () => {
       const response = await call(env, path, { method });
       expect(response.status, path).toBe(410);
       expectPrivate(response);
-      const body = await response.json<LegacyApiError>();
-      expect({ code: body.error.code, message: body.error.message }).toEqual({ code: 'reload_required', message: RELOAD_MESSAGE });
+      const body = await response.clone().json<LegacyApiError>();
+      expect({ code: body.error.code, message: body.error.message }).toEqual({ code: LEGACY_RELOAD_CODE, message: RELOAD_MESSAGE });
       expect(body.error.request_id).toMatch(/^[0-9a-f]{16}$/);
+      expect(await oldUiError(response), path).toEqual({ status: 410, code: 'not_found', message: RELOAD_MESSAGE });
     }
     expect(calls).toMatchObject({ views: [], startCanary: [], guard: [] });
-    // Without a login, the old envelope with the old code.
-    const anonymous = await call(env, '/api/v2/home', { jwt: null });
-    expect(anonymous.status).toBe(401);
-    expect((await anonymous.json<LegacyApiError>()).error.code).toBe('unauthorized');
+  });
+
+  it('answer an authentication failure in the old envelope with a code the old UI shows', async () => {
+    const { env } = makeEnv();
+    expect(await oldUiError(await call(env, '/api/v2/home', { jwt: null }))).toEqual({
+      status: 401,
+      code: 'unauthorized',
+      message: REASONS.UNAUTHORIZED.zh,
+    });
+    const bad = makeEnv({ ACCESS_AUDIENCE: '' });
+    expect(await oldUiError(await call(bad.env, '/api/v2/home'))).toEqual({
+      status: 503,
+      code: 'access_not_configured',
+      message: REASONS.ACCESS_NOT_CONFIGURED.zh,
+    });
+    const unreachable = 'https://unreachable.cloudflareaccess.com';
+    const other = makeEnv({ ACCESS_ISSUER: unreachable });
+    const jwt = await issuer.sign(accessClaims(unreachable, AUDIENCE, 'owner@example.com'));
+    expect(await oldUiError(await call(other.env, '/api/v2/home', { jwt }))).toEqual({
+      status: 503,
+      code: 'unavailable',
+      message: REASONS.UNAVAILABLE.zh,
+    });
   });
 });
 
