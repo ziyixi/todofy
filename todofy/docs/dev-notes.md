@@ -21,7 +21,8 @@ uv sync --locked                     # dev tools; the Worker itself has no third
 uv run ruff check worker tests tools deploy && uv run ruff format --check worker tests tools deploy
 uv run pytest tests/unit tests/fakes tools deploy   # host CPython (tools includes a local-D1 round trip)
 (cd gateway && npm ci --no-audit --no-fund && npm run lint && npm run typecheck && npm test)
-(cd web && npm ci --no-audit --no-fund && npm run check:api && npm run typecheck && npm test && npm run build)
+(cd gateway && npm run test:runtime) # the gateway alone in workerd: the owner API's CPU per request (gateway-contract.md §8)
+(cd web && npm ci --no-audit --no-fund && npm run typecheck && npm test && npm run build)  # build checks the JS budget
 uv run pytest tests/runtime          # real workerd via `wrangler dev`, serially: ~10 min (about 80
                                      # dev servers, each running the gateway and todofy-core in one process)
 uv run pytest tests/runtime -n 4     # the same tests in 4 processes (pytest-xdist): ~3 min
@@ -125,7 +126,8 @@ migrations/0001_init.sql       the D1 schema; 0002_daily_metrics.sql adds the ow
                                0004_gtd.sql adds the GTD ledger (gtd_snapshots, gtd_snapshot_tasks, gtd_daily,
                                gtd_reviews) and mail_reminders.project_id (gtd-features.md);
                                0005_task_intents.sql adds task_intents and task_intent_tasks (§5, task-intent-v1)
-api/                           owner-api-v1.openapi.yaml (source of truth for the UI), newsletter report
+api/                           machine-api-v1.openapi.yaml (the hooks hosts' routes: webhook, newsletter,
+                               health; the owner API is ../proto/todofy/ui/v1), newsletter report
                                schemas; the webhook body references ../contracts/mail-received-v1 (shared,
                                generated from proto/mailhero/webhook/v1; core/contract.py reads every body
                                with its generated Python codec)
@@ -142,7 +144,8 @@ tests/mail_contract.py         paths of the shared contract: ../contracts/mail-r
                                the exact webhook bytes Mail Hero's builder emits (compat fixtures, synthetic mail);
                                tests/unit/mail_cases.py mutates them for the differential tests against the frozen
                                hand-written schema and parser (tests/unit/legacy/)
-web/                           owner UI (React + Vite); builds into uiassets/dist; types generated from the OpenAPI
+web/                           owner UI (React + Vite); builds into uiassets/dist; calls todofy.ui.v1 through the
+                               generated client (@ziyixi/proto/http-client, src/api/client.ts)
 tools/                         legacy SQLite snapshot → D1 export/verify scripts and the webhook smoke test
                                (stdlib, Python 3.9+)
 deploy/                        deploy_vars.py (adds what is never committed: --var values, each Worker's
@@ -194,13 +197,16 @@ Answers (`runtime/http.py`)
   exception reaches the gateway only as an opaque `PythonError` with a traceback (503 there).
 - Return `bytes`, `str`, dicts and lists over RPC, never a tuple (refused) or a memoryview/typed array
   (converted element by element, about 1.5 s per MiB in workers-runtime-sdk 1.9.0).
-- Every error body is the OpenAPI envelope `{"error": {"code", "message", "request_id"}}`. Codes are the
-  closed `core.api_errors.ApiError` (== OpenAPI `ApiErrorCode`, unit-tested), messages come from
+- Every error body of the hooks hosts (and of `owner_api`, the previous gateway's) is the envelope
+  `{"error": {"code", "message", "request_id"}}` (`api/machine-api-v1.openapi.yaml`). Codes are the
+  closed `core.api_errors.ApiError` (== the document's `ApiErrorCode`, unit-tested), messages come from
   `api_errors.MESSAGES`. The gateway's `errorEnvelope()` (`gateway/src/http.ts`) builds the envelope and
   logs `{request_id, status, code}` once for every error, `failed()` results included; the core builds no
   envelopes and never sees the request ID, except `http.error_response()` (the fetch handlers' 404 and
   the transition 503), which makes and logs its own (gateway-contract.md §4). A new code means editing
-  `ApiError`, `MESSAGES` and the OpenAPI enum together.
+  `ApiError`, `MESSAGES` and the document's enum together. The owner API (todofy.ui.v1) answers
+  google.rpc.Status instead: `owner_ui` returns a reason (`core/owner_ui.py` `Reason`, the reasons of
+  `proto/todofy/ui/v1/errors.proto` and `common.errors.v1`) and the gateway builds the Status.
 
 D1 (`env.DB`, wrapped by the SDK)
 - `stmt = env.DB.prepare(sql).bind(*args)` (Python `None` → NULL); `await stmt.first()` → JsDict or None
@@ -259,7 +265,8 @@ Local runtime quirks (not production behaviour)
 ## 4. Contracts every module must keep
 
 ### 4.1 Vocabulary, units, identities
-- States, error codes and owner actions: `core.vocab` only (== migration CHECKs == OpenAPI enums, tested).
+- States, error codes and owner actions: `core.vocab` only (== migration CHECKs == the todofy.ui.v1 enums'
+  wire names == the machine document's `ApiErrorCode`, tested).
   The owner-facing Chinese text for each code lives only in `web/src/lib/labels.ts`; change it together
   with the behaviour it describes.
   Transition actors are the literals `worker` / `owner`.
@@ -269,7 +276,7 @@ Local runtime quirks (not production behaviour)
 - Payload hash: lowercase hex SHA-256 of the exact webhook bytes (`interop.sha256_hex`).
 - Owner identity: the gateway's `access.ts` (Todofy's policy for the shared `packages/edge-auth`
   verifier) returns `ACCESS_OWNER` ASCII-lowercased (aliases in `ACCESS_OWNER_ALIASES` map to it) and passes
-  it to `owner_api`; `owner_actions.owner` is always that value.
+  it to `owner_ui` (and `owner_api`, the previous gateway's); `owner_actions.owner` is always that value.
 
 ### 4.2 SQL
 - Every D1 statement is a module-level `Query(sql, index, sort_allowed=False)` in `worker/todofy/core/sql/`,
@@ -309,16 +316,20 @@ Local runtime quirks (not production behaviour)
   `ok`/`empty_window`; otherwise the coordinator computes one within 40 s, and anything but a usable
   report is 503 (the newsletter reads only the HTTP status, so an old or empty-by-failure report is never
   a 200). Responses must validate against `api/summary-v1` / `recommendation-v1`, which are generated from
-  `proto/todofy/report/v1/report.proto` (`cd proto && npm run schema`, then `cd todofy/web && npm run gen:api`,
-  because the UI's `src/api/schema.d.ts` copies the schemas' descriptions; never edited by hand):
+  `proto/todofy/report/v1/report.proto` (`cd proto && npm run schema`; never edited by hand; the UI reads the
+  reports as the generated messages of `@ziyixi/proto`):
   `core/report_schema.py` builds every report as a generated message written by the wire codec, which refuses one
   that breaks a rule, and `tests/unit/test_report_wire.py` pins the bytes of synthetic reports
   (`golden/reports-v1.json`, written before the move onto the IDL).
-- Owner API: the gateway checks Access on every request, CSRF on writes (it also issues
-  `/api/v1/csrf`) and `MAINTENANCE_MODE`; every `/api/v1/*` read and write then runs inside the object
-  (30 s CPU, single writer), writes with `action_request_id` idempotency via `owner_actions`. The
-  gateway forwards write bodies unread; the object reads them with `interop.read_capped` and stops past
-  16 KiB (400 `invalid_request`), so a chunked body is never buffered whole in the object.
+- Owner API (todofy.ui.v1, `proto/todofy/ui/v1`): the gateway checks Access on every request, then serves
+  `/api/v1/*` with the shared transcoder: Origin and CSRF on writes (it also issues `GET /api/csrf`),
+  `MAINTENANCE_MODE`, a 16 KiB body limit and a strict read of every request; page tokens are the gateway's
+  (bound to the list's other fields). Every rpc but `GetIntegration` is one `owner_ui` call: the object reads
+  the request strictly again with the generated Python code, does the work (30 s CPU, single writer; writes
+  with `request_id` idempotency via `owner_actions`, its `action_request_id` column) and answers the generated
+  response message (`runtime/owner_ui.py`, mapped from the ledger's dicts by `core/owner_ui.py`), which the
+  gateway reads leniently and writes. The paths before todofy.ui.v1 answer 410 `reload_required` for one release
+  (gateway-contract.md §2.2); the object keeps `owner_api` for the previous gateway until then.
 - One coordinator per D1 database: `ledger.recover_interrupted` treats every `summarizing` /
   `todo_sending` row as abandoned, so two objects on the same database would undo each other's work.
   A rollback or cutover stops one before the other runs (gateway-contract.md §6.5).
@@ -374,8 +385,10 @@ ingest(idempotency_key, body)             webhook stream → 204|400|409|413|503
 wake()                                    → None (the gateway's cron)
 newsletter(kind, query)                   stored or on-demand report, after the gateway accepted Basic
 newsletter_auth_failure()                 count a failed Basic credential → 401 | 429
-owner_api(owner, method, path, query,     the owner API (api.handle); owner not an address → 401
-          content_length, body)
+owner_ui(owner, method, request, cursor)  the owner API todofy.ui.v1 (owner_ui.handle): {"ok", "next_cursor"}
+                                          or {"error", "detail", "retry_after"}, never raised
+owner_api(owner, method, path, query,     the owner API before todofy.ui.v1 (api.handle), only for the previous
+          content_length, body)           gateway during this release's deploy; removed next release
 setup()                                   {"mail_source_id", "configured": {...}} for the setup page
 ops_status() | ops_set_guard(input_json)  the gateway's Ops entrypoint (contracts/ops-v1, below):
 ops_canary_result(event_id)               {"ok": value} or {"error": "invalid_input" | "busy" | "unavailable"},
@@ -385,8 +398,9 @@ task_intent_status(ref_json)
 ```
 Every other method is callable over RPC too (Python exposes them all, `_`-prefixed ones included); only
 the gateway binds the class, and it calls only these.
-The owner API calls the object's methods directly: `reconcile(owner, event_id, action, version,
-action_request_id, task_id)`, `recompute(owner, action_request_id, kind, top_n)`,
+The owner API calls the object's methods directly: `apply_reconcile(owner, event_id, action, version,
+action_request_id, task_id)` (`reconcile` wraps it for `owner_api`), `recompute_outcome(owner, action_request_id,
+kind, top_n)` (`recompute` wraps it), `event_detail(event_id)`,
 `compute_report(kind, top_n, now)`, `event(id)` and `budgets()` (Overview).
 Alarm loop (v2 §5.3): running guard → maintenance check → watchdog alarm → settle the token
 reservation of a summary call an eviction cut short → `ledger.recover_interrupted` → at most one step
@@ -489,7 +503,9 @@ async def tick(env, coordinator, now: int) -> None    # the snapshot and/or the 
 def next_at(store) -> int                              # for _next_alarm_ms
 def facts(env, store) -> core.gtd.GtdFacts             # ops status(): object storage only
 def release(store, now) / retry_later(store, now, at)  # a shed guard ended / a tick raised
-async def daily(db, days: int, now: int) -> dict       # GET /api/v1/gtd/daily (OpenAPI GtdDaily)
+async def daily(db, days: int, now: int) -> dict       # the previous gateway's GET /api/v1/gtd/daily
+async def day_page(db, size, before, now) -> (days, before)    # ListGtdDays (todofy.ui.v1 GtdDay), newest first
+async def review_page(db, size, before, now) -> (reviews, last)  # ListGtdReviews, the last 12 weeks
 ```
 The coordinator stands in for the Todoist budget (`count_todoist_calls`, `todoist_wait`, `block_todoist`)
 and step metrics (`record_step`). **Snapshot**: once a UTC day at `GTD_COLLECT_UTC`, `GET /api/v1/tasks`
@@ -558,25 +574,40 @@ matched case-insensitively over ASCII only, non-ASCII addresses refused; `ACCESS
 `csrf.ts` (`Origin` must equal `https://<TODOFY_PUBLIC_HOST>`, `http://` only under the `.localhost`
 dev rule; `X-CSRF-Token` must equal the first `todofy_csrf` cookie; an HMAC-signed
 `{kind, owner, nonce, exp}` (12 h) keyed by `CSRF_SIGNING_KEY`, 64 hex; missing or malformed → 503
-`not_configured` on `GET /api/v1/csrf` and every write, reads keep working), `http.ts` (error
+`NOT_CONFIGURED` on `GET /api/csrf` and every write, reads keep working), `http.ts` (error
 envelopes; the package's private headers plus the `/assets/` cache exception), `crypto.ts` (the hooks
-hosts' Bearer and Basic digest checks only), `owner.ts` (the gate: Access → CSRF and
-`MAINTENANCE_MODE` on writes → route, private headers on every response; `/api/v1/setup` merges the
-gateway's facts with the object's `setup()`), `hooks.ts` (webhook, newsletter, health), `metrics.ts`
+hosts' Bearer and Basic digest checks only), `owner.ts` (the gate: Access → the old paths' 410 →
+`/api/csrf` → the owner API, private headers on every response), `ui.ts` (TodofyUiService on the shared
+transcoder: CSRF and `MAINTENANCE_MODE` on writes in its `authorize` hook, one `owner_ui` call per rpc with
+the page tokens and `request_id` handled here, `GetIntegration` from the gateway's facts and the object's
+`setup()`), `warm.ts` (runs the codec once at global scope, outside every request's CPU), `hooks.ts` (webhook, newsletter, health), `metrics.ts`
 (one Analytics Engine point per request and cron, §6), `retired.ts` (the empty `TodofyCoordinator`
 class this script still exports; a gateway-only release of its own deletes it, gateway-contract.md
 §6.6). The rules are in gateway-contract.md §2; the gateway's unit tests check its error messages
 against `core.api_errors`.
 
+### owner_ui.py (`core/owner_ui.py` maps to the generated messages of `proto/todofy/ui/v1`)
+```python
+async def handle(env, coordinator, owner: str, method: str, request_json: str, cursor_json: str | None) -> dict
+METHODS: dict[str, tuple[type, Handler, bool]]         # rpc name → (request message, handler, writes)
+```
+Reads the request strictly with the generated code, refuses writes in maintenance or while a backup holds the
+ledger, and answers the response message or a reason; the reads are api.py's (`overview_data`, `event_page`,
+`legacy_text_data`), `reminder.page`, `metrics.day_page`, `gtd.day_page` / `review_page`. Page sizes follow
+AIP-158 (0 → the default, above the maximum → the maximum, negative → `BAD_REQUEST`).
+
 ### api.py (O)
 ```python
-async def handle(request: OwnerRequest, env, coordinator, owner: str) -> Result  # /api/v1/* (RPC owner_api)
+async def handle(request: OwnerRequest, env, coordinator, owner: str) -> Result  # old /api/v1/* (RPC owner_api)
 def setup(env) -> dict                                 # the object's facts for the setup page (RPC setup())
 ```
+The routes are the previous gateway's (removed next release); the readers below them are shared with
+owner_ui.py.
 Everything runs in the object: overview (D1 counts + `coordinator.budgets()`), events pages, event detail,
 reminders (`reminder.page`), `reports/latest` (`reports.latest`), legacy text, reconcile and recompute.
 Cursors are opaque base64url of `created_at:event_id` (events) or the day (reminders).
-Responses must validate against the OpenAPI schemas; T adds runtime tests that validate them.
+The owner API's answers are the generated messages of `proto/todofy/ui/v1`; the runtime tests read each with
+the generated code (`tests/runtime/harness.py` `filled`).
 Imported `legacy:<hash>` / `legacy:row-<id>` rows (CloudMailin era, or Mail Hero rows with no ledger event)
 are an archive: the reports read their summaries by date, `/legacy_text/{id}` serves their text by exact
 ID, and nothing lists them (browse with `wrangler d1 execute`).
@@ -585,9 +616,9 @@ ID, and nothing lists them (browse with `wrangler d1 execute`).
 ```python
 async def run(env, store, now: int) -> int | None   # called by the alarm loop after recover_interrupted:
                                                      # epoch ms to continue at while a job holds the ledger
-def holds_ledger(env, store, now: int) -> bool       # owner_api answers POSTs 503 unavailable while True
+def holds_ledger(env, store, now: int) -> bool       # owner writes answer UNAVAILABLE while True
 def next_run(env, store) -> int | None               # for _next_alarm_ms; None without the BACKUPS binding
-def overview(env, store, now: int) -> dict           # Overview.backup (OpenAPI BackupStatus)
+def overview(env, store, now: int) -> dict           # ServiceStatus.backup (todofy.ui.v1 BackupStatus)
 ```
 Sunday 10:00 UTC, or due now on an object with no `backup_state` row (a new or wiped object); after a
 backup the next run is the first Sunday 10:00 on a later UTC day. A job pages every table by rowid
@@ -757,7 +788,7 @@ Point layouts (one dataset; `blob1` tells them apart):
 
 | Writer | `index1` | `blob1` | `blob2` | `blob3` | `blob4` | `double1` | `double2` | `double3` | `double4` |
 |---|---|---|---|---|---|---|---|---|---|
-| gateway, per request and cron | route | host kind: `owner`, `hooks`, `unknown`, `cron` | method (`OTHER` if unusual) | route template (`/api/v1/events/{id}`, `asset`, `page`, `other`, `wake`) | status class `2xx`…`5xx` | wall ms to response headers | request Content-Length (0 if none) | response Content-Length (0 if none) | — |
+| gateway, per request and cron | route | host kind: `owner`, `hooks`, `unknown`, `cron` | method (`OTHER` if unusual) | route template (`/api/v1/mailEvents/{id}`, `asset`, `page`, `other`, `wake`) | status class `2xx`…`5xx` | wall ms to response headers | request Content-Length (0 if none) | response Content-Length (0 if none) | — |
 | core, per upstream step | step | step: `summary`, `canary` (a canary's summary call), `task`, `lookup`, `reminder`, `report`, `backup`, `gtd` (one read-only snapshot page), `review` (the Sunday review's create) | outcome: `ok`/`failed` (Gemini), `TaskResult` (task, reminder), ledger state (lookup) | error code or empty | Gemini model or empty | upstream wall ms | tokens in (prompt) | tokens out (total − prompt) | requests sent (models tried, POSTs; 0 for lookups) |
 
 Never written: paths, query strings, event IDs, subjects, addresses, the owner's identity, upstream bodies.
@@ -803,7 +834,7 @@ content; keep it that way (the repository and its logs are public).
 
 | Question | Where |
 |---|---|
-| Last backup, its key, rows, size, next run, last failure | owner UI → 健康 → 备份 (Overview `backup`, OpenAPI `BackupStatus`) |
+| Last backup, its key, rows, size, next run, last failure | owner UI → 健康 → 备份 (ServiceStatus `backup`, todofy.ui.v1 `BackupStatus`) |
 | What the bucket holds | `npx wrangler r2 bucket info todofy-backups` (object count and size; wrangler 4.142.0 has no `r2 object list`, the dashboard's R2 browser lists keys) |
 | One backup's tables, row counts and part hashes | `npx wrangler r2 object get todofy-backups/<key>manifest.json --file manifest.json --remote` (names, counts and SHA-256 only) |
 | Backup job progress or errors | Workers Logs of `todofy-core`, filter on the `backup` field: `planned`, `done` (rows, bytes), `deleted`, `error` (exception type, step), `failed` (`storage_error`, `lease_expired`), `retention_error` |

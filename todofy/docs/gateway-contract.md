@@ -1,8 +1,9 @@
 # Gateway contract: `todofy` (TypeScript) ↔ `todofy-core` (Python Durable Object)
 
 Status: as built. First derived from the single Python Worker at `c0d80c6` (its `hooks.py`,
-`owner.py`, `csrf.py` and `access_jwt.py` are now `gateway/src`) and `api/owner-api-v1.openapi.yaml`,
-then updated to match the code after review. Where this file and the code disagree, fix one of them
+`owner.py`, `csrf.py` and `access_jwt.py` are now `gateway/src`) and the OpenAPI document of that time,
+then updated to match the code after review. Since 2026-10-02 the owner API is todofy.ui.v1
+(`proto/todofy/ui/v1`, §2.2 and §3.5) and `api/machine-api-v1.openapi.yaml` describes the machine routes only. Where this file and the code disagree, fix one of them
 in the same change.
 
 Why the split: on Workers Free a plain Worker invocation has 10 ms of CPU and Pyodide alone costs 5–9 ms
@@ -73,26 +74,39 @@ every digest.
 
 ### 2.2 Owner host (`TODOFY_PUBLIC_HOST`, behind Access)
 
-Gate order for every request, assets included (owner.py):
+Gate order for every request, assets included (`gateway/src/owner.ts`):
 
-1. Access JWT (§2.4). Failure → its status/code.
-2. Path starts with `/api/`:
-   - method not `GET`/`HEAD` → CSRF verify (§2.5), then `MAINTENANCE_MODE` → 503 `maintenance` +
-     `retry-after: 300`;
-   - route: `GET /api/v1/csrf` → gateway issues (§2.5); `GET /api/v1/setup` → gateway composes (§3.6);
-     any other path under `/api/v1/` → DO `owner_api` with the method, path, query and body unchanged;
-     other `/api/*` → 404 `not_found` without a DO call. Call throws → 503 `unavailable`.
-3. Otherwise `env.ASSETS.fetch(request)` (SPA fallback via `not_found_handling`; a POST gets the asset
+1. Access JWT (§2.4). Failure → a google.rpc.Status (`UNAUTHORIZED`, `UNAVAILABLE` or
+   `ACCESS_NOT_CONFIGURED`), or the old envelope on a path of the old owner API (below).
+2. A path of the owner API before todofy.ui.v1 (`/api/v1/overview`, `/api/v1/events[/{id}[/reconcile]]`,
+   `/api/v1/csrf`, `/api/v1/setup`, `/api/v1/reminders`, `/api/v1/reports/{latest,recompute}`,
+   `/api/v1/metrics/daily`, `/api/v1/gtd/daily`, `/api/v1/legacy_text/{id}`) → 410 `reload_required` in the old
+   envelope (`{"error":{"code","message","request_id"}}`, "Todofy 已更新，请刷新页面"), any method, so a tab still
+   running the previous UI tells the owner to reload. For this release only; the next one answers them 404 like
+   any other path.
+3. `/api/csrf`: `GET` → the gateway issues (§2.5); any other method → 405 `METHOD_NOT_ALLOWED` with `allow: GET`.
+   It is the API's transport, not a method of the service.
+4. `/api/v1/*`: the owner API, TodofyUiService (`proto/todofy/ui/v1`, `gateway/src/ui.ts`), served by the shared
+   transcoder (`proto/ts/http-transcoder.ts`) from the generated descriptors' `google.api.http` bindings.
+   For every method but `GET` its `authorize` hook runs before the body is read: CSRF verify (§2.5), then
+   `MAINTENANCE_MODE` → 503 `MAINTENANCE` with `retry-after: 300`. The transcoder refuses a body over 16 KiB
+   (`MAX_BODY_BYTES`) and reads every request strictly; each rpc is one DO `owner_ui` call (§3.5), but
+   `GetIntegration`, which the gateway composes from its vars and the DO's `setup()` (§3.6). A path or method
+   no binding matches → 404 `NOT_FOUND` (405 for a known path with another method). A throwing call → 503
+   `UNAVAILABLE`.
+5. Other `/api/*` → 404 `NOT_FOUND` without a DO call.
+6. Otherwise `env.ASSETS.fetch(request)` (SPA fallback via `not_found_handling`; a POST gets the asset
    server's 405).
-4. Every response (errors, assets, DO answers) leaves with the private headers (§2.3).
+7. Every response (errors, assets, DO answers) leaves with the private headers (§2.3).
 
-The gateway does not read or size-check owner request bodies: the DO keeps today's `api._json_body`
-rule (declared `Content-Length`, passed as an argument, non-numeric or > 16 KiB, or a body > 16 KiB →
-400 `invalid_request`).
-The brief's "JSON ≤ 64 KiB" would change behaviour and the 404-before-400 order, so the 16 KiB rule
-stays where it is. The DO reads the body with `interop.read_capped` and stops after 16 KiB, so a
-chunked body (no `Content-Length`) is never buffered whole in the object that also runs ingest and the
-alarm loop (`tests/runtime/test_owner_body_limit.py`).
+Errors of the API are google.rpc.Status bodies (`ErrorInfo` with the reason and the domain
+`todofy.ziyixi.science`, `RequestInfo` with the gateway's request ID, `LocalizedMessage` zh-CN), logged as one
+line of request ID, status and reason. Its own reasons are `proto/todofy/ui/v1/errors.proto`'s (`ETAG_MISMATCH`,
+`ACTION_NOT_ALLOWED`, `REQUEST_ID_REUSED`, `RATE_LIMITED`, `MAINTENANCE`); the rest are `common.errors.v1`'s.
+
+The previous gateway's `owner_api` path (§3.5) still reads its bodies with the old rule (declared
+`Content-Length` non-numeric or > 16 KiB, or a body > 16 KiB → 400 `invalid_request`, read with
+`interop.read_capped`, `tests/runtime/test_owner_body_limit.py`) until it is removed next release.
 
 ### 2.3 Private headers (owner host)
 
@@ -176,21 +190,21 @@ format, key and cookie are unchanged, so tokens already in browsers stay valid
 (`gateway/test/owner.test.ts` accepts the golden tokens from SPEC §3.1).
 
 - Key: `CSRF_SIGNING_KEY` trimmed must match `^[0-9a-fA-F]{64}$`, used as 32 raw bytes for HMAC-SHA256
-  (`importHmacKeyHex`). Missing or malformed → 503 `not_configured` on `GET /api/v1/csrf` and on every
+  (`importHmacKeyHex`). Missing or malformed → 503 `NOT_CONFIGURED` on `GET /api/csrf` and on every
   write, checked before anything else (reads keep working).
-- Issue (`GET /api/v1/csrf`): claims `{"kind":"csrf","owner":<owner>,"nonce":<16 random bytes
+- Issue (`GET /api/csrf`; `GET /api/v1/csrf` until todofy.ui.v1): claims `{"kind":"csrf","owner":<owner>,"nonce":<16 random bytes
   base64url>,"exp":<now s + 43200>}` as compact JSON in that key order; token =
   `b64url(claims) "." b64url(HMAC(key, b64url(claims)))`, no padding. Body `{"token": token}`; header
   `set-cookie: todofy_csrf=<token>; Path=/; HttpOnly; SameSite=Strict; Max-Age=43200` plus `; Secure`
   when the request URL is `https:`.
-- Verify (every non-GET/HEAD under `/api/`): `origin` lowercased must be `https://<TODOFY_PUBLIC_HOST
+- Verify (every method of the owner API but `GET`, in the transcoder's `authorize` hook): `origin` lowercased must be `https://<TODOFY_PUBLIC_HOST
   lowercased>`, or under the `.localhost` rule also `http://<request URL host:port lowercased>`;
   `x-csrf-token` non-empty, ≤ 1024 characters, equal to the first `todofy_csrf` cookie value;
   signature text equal to the recomputed canonical one; payload a fatal-UTF-8 JSON object with
   `kind == "csrf"`, `owner` equal to the canonical owner and an integer `exp` > now. Any failure →
   403 `csrf_failed`. Compares are constant-time over the UTF-8 bytes (the package's own XOR loop;
   only the length can leak). Tokens minted by the Python code (and by the tests' `mint_csrf`) verify
-  unchanged.
+  unchanged. A failure is 403 `CSRF_FAILED` on the owner API (the UI renews its token once on it).
 
 ## 3. The DO's RPC methods
 
@@ -222,12 +236,13 @@ bug) is the gateway's 503 `unavailable`. A D1/storage `JsException` inside a met
 `CoreResult` is a 503 `unavailable` result (today's `except JsException`).
 
 Python exposes every method of the class over RPC, including `_`-prefixed helpers and the budget
-helpers; only the gateway binds the class and it calls only the six below and the four `ops_*` methods
-of §3.7. `alarm` is reserved and
+helpers; only the gateway binds the class and it calls only the methods below (`owner_api` only the gateway
+before todofy.ui.v1) and the four `ops_*` methods of §3.7. `alarm` is reserved and
 cannot be called.
 
 `MAINTENANCE_MODE` in the DO (defence in depth; the gateway refuses first with a `retry-after`):
-`ingest` and every `owner_api` call with method `POST` → 503 `maintenance` without `retry_after`; a
+`ingest`, every `owner_api` call with method `POST` → 503 `maintenance` without `retry_after`, and every
+`owner_ui` write (`ReconcileMailEvent`, `RecomputeReport`) → `MAINTENANCE`; a
 newsletter request that needs an on-demand computation → 503 `maintenance` (today's DO `/report`
 guard). The alarm loop's maintenance check is unchanged.
 
@@ -257,7 +272,45 @@ UTC hour: count ≥ 20 → 429 `rate_limited` with `retry_after` = seconds to th
 else increment and → 401 `unauthorized`, to which the gateway adds `www-authenticate: Basic
 realm="todofy"`.
 
-### 3.5 `owner_api(owner, method, path, query, content_length, body) -> CoreResult`
+### 3.5 `owner_ui(owner, method, request, cursor) -> {"ok", "next_cursor"} | {"error", "detail", "retry_after"}`
+The owner API todofy.ui.v1 (`worker/todofy/runtime/owner_ui.py`, the mapping to the generated messages in
+`core/owner_ui.py`). `owner` is the canonical owner after Access (not an address → `UNAUTHORIZED`); `method`
+the rpc's name (`ListMailEvents`); `request` the decoded request as wire JSON text, which the DO reads strictly
+again with the generated Python code (it trusts no field the gateway passes); `cursor` the JSON text of the
+cursor the gateway took from the request's page token, or null. The gateway owns the page tokens (AIP-158:
+`proto/ts/page-token.ts`, bound to the request's other fields, so a token reused with another filter is
+`BAD_REQUEST`), and makes up a `request_id` for a write that lacks one (AIP-155; the UI always sends one).
+The answer is a plain object, never an exception for an expected outcome:
+
+```
+{"ok": <the response message as wire JSON text>, "next_cursor": <JSON text> | null}
+{"error": <ErrorInfo reason>, "detail": <a MailEvent as wire JSON text> | null, "retry_after": int | null}
+```
+
+The gateway reads `ok` leniently with the generated TypeScript code and writes the response; a refusal becomes
+the Status of its reason (`INTERNAL` for one the gateway does not know), with the event as a detail
+(`ETAG_MISMATCH` and `ACTION_NOT_ALLOWED` answer the event as it is now) and `retry-after`. D1 or storage
+failures are `UNAVAILABLE`, which the UI may repeat with the same `request_id`; so is a write while a backup
+holds the ledger (`backup.holds_ledger`). A Python exception reaches the gateway as a failed call, like a stub
+failure: 503 `UNAVAILABLE`.
+
+| rpc (`google.api.http`) | The DO's work |
+|---|---|
+| `GetServiceStatus` `GET /api/v1/serviceStatus` | D1 counts + DO budgets, in-process (the old overview) |
+| `ListMailEvents` `GET /api/v1/mailEvents?page_size&page_token&state&attention` | 50 by default, at most 100; `state` and `attention` exclusive |
+| `GetMailEvent` `GET /api/v1/mailEvents/{id}` | the event, its transitions and allowed actions; a name that is not a UUID → `NOT_FOUND` |
+| `ReconcileMailEvent` `POST /api/v1/mailEvents/{id}:reconcile` | `etag` is the event's version; replays and conflicts via `owner_actions` keyed by `request_id` (`REQUEST_ID_REUSED`) |
+| `ListDailyReminders` `GET /api/v1/dailyReminders` | 50 by default, at most 100 |
+| `GetLatestReports` `GET /api/v1/latestReports` | the stored reports, read leniently (one the codec cannot read is left out and logged) |
+| `RecomputeReport` `POST /api/v1/latestReports:recompute` | as the old recompute: `RATE_LIMITED` with `retry_after`, replays via `owner_actions` |
+| `ListMetricDays` `GET /api/v1/metricDays` | newest first, 30 by default, at most 90 |
+| `ListGtdDays` `GET /api/v1/gtdDays` | newest first, 30 by default, at most 120 |
+| `ListGtdReviews` `GET /api/v1/gtdReviews` | the last 12 weeks, newest first |
+| `GetLegacyText` `GET /api/v1/legacyTexts/{id}` | an event's or an imported cache row's text (up to about 1.9 MB) |
+
+### 3.5.1 `owner_api(owner, method, path, query, content_length, body) -> CoreResult` (previous gateway only)
+The owner API before todofy.ui.v1, kept for one release so that the previous gateway keeps working while CI
+deploys this core before the new gateway (§6.4); the next release removes it with `runtime/api.py`'s routes.
 `owner` is the canonical owner after Access (not an address: `@` missing or over 254 characters → 401
 `unauthorized`); `method` and `path` as received (`HEAD` included); `query` without `?`;
 `content_length` the declared header or null (`api._json_body` checks it before reading); `body` the
@@ -277,11 +330,11 @@ unread stream of a write, null for `GET`/`HEAD`. The DO serves exactly today's `
 
 ### 3.6 `setup() -> {"mail_source_id": str, "configured": {"gemini_api_key": bool, "todoist_api_key": bool, "todoist_project": bool}}`
 Core-side facts, never values; a plain object, not a `CoreResult`. Not blocked by maintenance. The
-gateway answers `GET /api/v1/setup` with the OpenAPI `Setup` body: `build` (gateway `BUILD_SHA` or
+gateway answers `GetIntegration` (`GET /api/v1/integration`) with the `Integration` message (fields named the same): `build` (gateway `BUILD_SHA` or
 `unknown`), `public_host` (lowercased), `hooks_hosts` (csv lowercased), `webhook_path: "/hooks/mail"`,
 `mail_source_id` (DO), `access_owner` (canonical owner), `configured` = `{mail_webhook_token:
 MAIL_WEBHOOK_TOKEN_SHA256 non-empty, report_basic_auth: REPORT_BASIC_AUTH_SHA256 non-empty}` merged with
-the DO's `configured`. Call throws → 503 `unavailable`.
+the DO's `configured`. Call throws → 503 `UNAVAILABLE`.
 
 ### 3.7 The `Ops` entrypoint and the `ops_*` methods (contracts/ops-v1)
 `gateway/src/index.ts` also exports the named `WorkerEntrypoint` class `Ops` (`gateway/src/ops.ts`),
@@ -423,6 +476,16 @@ uv run python deploy/deploy_vars.py exec gateway -- npx --no-install wrangler de
 Core always deploys first, so the methods a new gateway calls exist before it calls them; a core change
 must keep serving the previous gateway's calls until the gateway deploy finishes. Adding a method or a
 trailing argument with a Python default is safe; renaming or removing one needs two releases.
+
+The todofy.ui.v1 release (2026-10-02) is such a pair. Its core adds `owner_ui` and keeps `owner_api` (§3.5.1),
+so the previous gateway serves the previous UI until the new gateway is live; its gateway calls `owner_ui`
+only and answers the old owner paths 410 `reload_required`, which an open tab of the previous UI shows as
+"Todofy 已更新，请刷新页面" (a reload loads the new UI from the same deploy's assets). No D1 migration, no Durable
+Object migration and no change on the hooks hosts. A failed gateway step leaves the previous pair's behaviour
+in place (the old gateway on the new core, `owner_api`). Rollback: revert on `main` and let CI redeploy both;
+the core of the revert lacks `owner_ui`, so between its deploy and the gateway's the new gateway's owner API
+answers 503 `UNAVAILABLE` (the hooks hosts are unaffected). The next release removes `owner_api`,
+`runtime/api.py`'s routes and the 410 paths.
 
 The one release that switches from the old internal fetch routes (`x-todofy-internal`, `/ingest`,
 `/newsletter/*`, `/api/v1/*` on `https://coordinator`) to RPC breaks that rule once, on purpose, and
@@ -637,6 +700,40 @@ with `bind(): Address already in use` otherwise), a private `WRANGLER_REGISTRY_P
 crash test would have to kill two processes.
 
 ## 8. Experiments behind this contract (wrangler 4.142.0, workers-py 1.17.4, cached workerd)
+
+### CPU
+
+The owner API's CPU in the gateway (a plain Worker request: 10 ms on Workers Free) is measured by
+`gateway/test/runtime/cpu.test.ts` (`npm run test:runtime`) with the shared meter `tools/workerd-cpu`: a sampled
+DevTools CPU profile of the gateway's isolate around each request in workerd, Access verified as in production,
+one RPC to a stand-in TodofyCore answering the largest answers the DO gives, in milliseconds of the reference
+machine (Apple M1 Max), each number the median of three fresh isolates. Measured 2026-10-02, before (the OpenAPI
+routes through `owner_api`, which passed the DO's JSON through) → after (todofy.ui.v1: the transcoder's decode, the
+lenient read of the DO's answer with the generated code and the transcoder's write):
+
+| Request | First run | Warm median | Bound |
+|---|---|---|---|
+| The isolate's first API request (the service status; first RS256 verification and key import) | 3.2 → 4.2-4.8 | | 8 |
+| Service status | 0.4 → 0.8 | 0.4 → 0.7 | 6 / 4 |
+| 100 mail events | 0.4-0.5 → 3.2 | 0.4 → 2.2 | 6 / 4 |
+| The next page (its token) | → 2.0 | → 2.0 | 6 / 4 |
+| An event's detail | 0.7 → 2.0 | 0.7 → 1.7 | 6 / 4 |
+| 90 metric days | 0.4-0.5 → 2.8 | 0.4-0.6 → 1.6 | 6 / 4 |
+| 120 GTD days | 0.3-0.4 → 3.2 | 0.4-0.5 → 2.9 | 6 / 4 |
+| 100 reminders | 0.4 → 2.0 | 0.4 → 1.4 | 6 / 4 |
+| A reconcile (CSRF verify included) | 1.0 → 2.1 | 0.7 → 1.6 | 6 / 4 |
+| A 1.9 MB legacy text | 2.0-2.1 → 4.4 | 2.4 → 3.8 | 8 |
+| Every stored report at the newsletter's limits | 1.1-1.3 → 5.2 | 1.2-1.3 → 5.0 | 8 |
+
+The cost is the generated code reading and writing every answer again: a few tenths of a millisecond per
+small message, about 2 ms for a page of 100 events, and the codec's text rules over a report's 230,000
+characters. `src/warm.ts` runs the codec once over synthetic messages at global scope (startup, outside every
+request's limit), which took the isolate's first API request from 7.4-8.2 to 4.2-4.8 ms. The DO's own CPU (30 s
+per invocation) is not measured here: it builds the same dicts as before and maps them to the generated
+dataclasses; todofy-core's upload grew 554.0 → 627.2 KiB (gzip 153.5 → 166.6 KiB). The gateway's bundle, `deploy/bundle-size.mjs` (budget 86 KiB gzip): 38.7 → 289.5 KiB raw, 11.5 →
+71.4 KiB gzip (the protobuf-es runtime, the codec, the transcoder and the descriptors of `todofy.ui.v1`,
+`todofy.report.v1`, `google/api` and `common/errors`); the UI's JavaScript, `web/scripts/js-budget.mjs` (budget
+208 KiB gzip): 131.9 → 172.3 KiB gzip.
 
 Run in `scratchpad/tmp/contract/repo` with a minimal TS gateway and a minimal Python DO:
 

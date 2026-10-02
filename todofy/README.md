@@ -29,7 +29,7 @@ cron */10 ----------> scheduled() -------------------------> wake() (RPC)
 
 | Host | Serves | Auth |
 |---|---|---|
-| `TODOFY_PUBLIC_HOST` (`todofy.ziyixi.science`) | owner UI and `/api/v1/*` | Cloudflare Access app on the whole host, and the gateway verifies the Access JWT itself (RS256 signature, issuer, audience, expiry, not-before, subject, owner or alias); writes also need CSRF and an `action_request_id` |
+| `TODOFY_PUBLIC_HOST` (`todofy.ziyixi.science`) | owner UI and its API todofy.ui.v1 under `/api/v1/*` ([`proto/todofy/ui/v1`](../proto/todofy/ui/v1), served by the shared transcoder) | Cloudflare Access app on the whole host, and the gateway verifies the Access JWT itself (RS256 signature, issuer, audience, expiry, not-before, subject, owner or alias); writes also need Origin, the CSRF token and a `request_id` |
 | each of `TODOFY_HOOKS_HOSTS` (`todofy-hooks.ziyixi.science`; `daily.ziyixi.science` is added at cutover so Mail Hero's and the newsletter's existing URLs keep working) | exactly `POST /hooks/mail`, `GET /api/summary`, `GET /api/recommendation`, `GET /health` | webhook: Bearer (SHA-256 digest compared in constant time); newsletter: Basic; `/health` returns the build SHA with `service`/`status` (the gateway answers it without the Durable Object) |
 
 Any other host or path is a 404. `workers.dev` and preview URLs are off.
@@ -143,7 +143,8 @@ uv sync --locked
 uv run ruff check worker tests tools deploy && uv run ruff format --check worker tests tools deploy
 uv run pytest tests/unit tests/fakes tools deploy        # host tests
 (cd gateway && npm ci --no-audit --no-fund && npm run lint && npm run typecheck && npm test)
-(cd web && npm ci --no-audit --no-fund && npm run check:api && npm run typecheck && npm test && npm run build)
+(cd gateway && npm run test:runtime)                     # the gateway in workerd: owner API CPU per request
+(cd web && npm ci --no-audit --no-fund && npm run typecheck && npm test && npm run build)
 uv run pytest tests/runtime                               # real workerd, gateway + core, D1, DO, alarms, cron (~9 min)
 ```
 
@@ -174,12 +175,14 @@ retired class `TodofyCoordinator` is recorded in [docs/gateway-contract.md](docs
 ```
 worker/todofy/core/     pure Python rules (vocabulary, contract, prompts, classification, SQL)
 worker/todofy/runtime/  todofy-core: Durable Object, D1 ledger, Gemini/Todoist clients, owner API
-gateway/                the gateway Worker todofy (TypeScript): routing, Access, CSRF, webhook, assets
+gateway/                the gateway Worker todofy (TypeScript): routing, Access, CSRF, webhook, assets,
+                        the owner API's transcoder (todofy.ui.v1 from ../proto/todofy/ui/v1)
                         (Access, CSRF and private headers from ../packages/edge-auth, compiled in)
 migrations/             D1 schema
-api/                    owner OpenAPI contract, newsletter report schemas (generated from
-                        ../proto/todofy/report/v1; the Mail Hero event schema is
-                        ../contracts/mail-received-v1, shared with Mail Hero)
+api/                    the machine routes' OpenAPI document (webhook, newsletter, health), newsletter
+                        report schemas (generated from ../proto/todofy/report/v1; the Mail Hero event
+                        schema is ../contracts/mail-received-v1, shared with Mail Hero); the owner API
+                        is ../proto/todofy/ui/v1
 web/                    owner UI (React + Vite), built into uiassets/dist
 tests/                  unit, fakes and runtime (workerd) tests
 tools/                  legacy SQLite snapshot/export/verify, the webhook smoke test, backup restore

@@ -39,6 +39,13 @@ transcoder (bytes, which the wire profile has no HttpBody for, with their own `C
 authentication, and the two heaviest reads (the largest parsed message, a zone's delivery dashboard) are answered by
 Mail Hero's coordinator Durable Object running the same transcoder (30 s of CPU instead of a Worker request's 10 ms).
 The webhook event and the backup machine API are not part of it.
+`todofy/ui/v1` is Todofy's owner API (2026-10-02, branch `proto-todofy-ui`): the first with a Python backend.
+Todofy's TypeScript gateway serves it through the same transcoder behind Access, Origin and CSRF, and hands each
+decoded request to its Python Durable Object as wire JSON over the existing RPC binding; the object reads it
+again strictly with the generated Python code and answers the generated response message, which the gateway
+reads leniently and writes. Todofy's UI calls it through `ts/http-client.ts`; the hand-written OpenAPI types
+(openapi-typescript) are gone, and `todofy/api/machine-api-v1.openapi.yaml` keeps only the machine routes
+(webhook, newsletter, health), whose callers keep their exact bytes ([Cost](#http-apis) has the numbers).
 
 `ops/v1/ops.proto` is the IDL of `contracts/ops-v1` (2026-10-01) and its single source of validation: the
 value rules are options in the IDL ([Value rules](#value-rules)), the contract's JSON Schema is generated from
@@ -55,7 +62,7 @@ of the hand-written schemas is a value rule there (a union by `status`, whose ca
 list empty when the window was empty or the model's answer unusable; timestamps keep `format: date-time`),
 `todofy/api/recommendation-v1.schema.json` and `summary-v1.schema.json` are generated from it as self-contained
 schemas of one message each, todofy-core builds every report as a generated message written by the codec, and
-Todofy's UI takes the reports' types from the generated wire types. The bytes did not change (golden tests in
+Todofy's UI reads them as generated messages (through todofy.ui.v1 since 2026-10-02). The bytes did not change (golden tests in
 Todofy pin them, and a differential test gives the generated and the frozen hand-written schemas the same verdict
 but on `stale`, which no production Todofy ever sent; in ECMAScript's regex dialect, which JSON Schema specifies,
 the text rules also differ on purpose on U+0085 and U+FEFF, where the hand-written `\S` disagreed with the
@@ -164,16 +171,16 @@ bundle is unchanged (its types come from the OpenAPI document).
 | --- | --- |
 | `buf.yaml`, `buf.lock` | The module (`path: .`, tooling directories excluded), lint and breaking rules, the `buf.build/googleapis/googleapis` dependency pinned by commit and digest |
 | `buf.gen.yaml` | protobuf-es v2 (`target=ts`, `import_extension=ts`, `erasable_syntax=true`) into `ts/` |
-| `<package path>/*.proto` | One directory per proto package: `todofy/taskintent/v1/task_intent.proto` is `todofy.taskintent.v1`; `lab/ui/v1/*.proto` is `lab.ui.v1`, Lab's owner UI API; `links/ui/v1/*.proto` is `links.ui.v1`, the links app's owner API; `watch/ui/v1/*.proto` is `watch.ui.v1`, the watch app's owner API; `flowday/ui/v1/*.proto` is `flowday.ui.v1`, FlowDay's owner API; `dashboard/ui/v1/*.proto` is `dashboard.ui.v1`, the dashboard's owner API; `mailhero/ui/v2/*.proto` is `mailhero.ui.v2`, Mail Hero's owner API; `common/errors/v1/errors.proto` is `common.errors.v1`, the error reasons every HTTP API shares; `common/wire/v1/wire.proto` is `common.wire.v1`, the wire profile's own options ([Value rules](#value-rules), `non_null`, `closed`, `keep_order`, `positional`); `ops/v1/ops.proto` is `ops.v1`, the IDL of `contracts/ops-v1` (every app's `Ops` entrypoint), a contract several apps implement, so named by the contract, not an app ([Adding a contract](#common-tasks), step 1); `todofy/report/v1/report.proto` is `todofy.report.v1`, Todofy's newsletter reports (recommendation-v1, summary-v1); `mailhero/webhook/v1/mail_received.proto` is `mailhero.webhook.v1`, Mail Hero's webhook event (mail.received.v1) |
+| `<package path>/*.proto` | One directory per proto package: `todofy/taskintent/v1/task_intent.proto` is `todofy.taskintent.v1`; `lab/ui/v1/*.proto` is `lab.ui.v1`, Lab's owner UI API; `links/ui/v1/*.proto` is `links.ui.v1`, the links app's owner API; `watch/ui/v1/*.proto` is `watch.ui.v1`, the watch app's owner API; `flowday/ui/v1/*.proto` is `flowday.ui.v1`, FlowDay's owner API; `dashboard/ui/v1/*.proto` is `dashboard.ui.v1`, the dashboard's owner API; `mailhero/ui/v2/*.proto` is `mailhero.ui.v2`, Mail Hero's owner API; `common/errors/v1/errors.proto` is `common.errors.v1`, the error reasons every HTTP API shares; `common/wire/v1/wire.proto` is `common.wire.v1`, the wire profile's own options ([Value rules](#value-rules), `non_null`, `closed`, `keep_order`, `positional`); `ops/v1/ops.proto` is `ops.v1`, the IDL of `contracts/ops-v1` (every app's `Ops` entrypoint), a contract several apps implement, so named by the contract, not an app ([Adding a contract](#common-tasks), step 1); `todofy/report/v1/report.proto` is `todofy.report.v1`, Todofy's newsletter reports (recommendation-v1, summary-v1); `mailhero/webhook/v1/mail_received.proto` is `mailhero.webhook.v1`, Mail Hero's webhook event (mail.received.v1); `todofy/ui/v1/*.proto` is `todofy.ui.v1`, Todofy's owner API |
 | `package.json`, `package-lock.json` | The toolchain pins (`dependencies`: buf, protoc-gen-es, the runtime) and this folder's test tools (`devDependencies`) |
 | `ts/` | The TypeScript package `@ziyixi/proto`. Committed: `package.json` (its exports), `wire-json.ts`, `wire-rules.ts` and `field-mask.ts` (the codec and its value rules), `http-path.ts`, `http-rule.ts`, `http-transcoder.ts`, `http-client.ts` and `rpc-status.ts` (the HTTP runtime, [HTTP APIs](#http-apis)), `page-token.ts` and `filter.ts` (AIP-158 page tokens and the AIP-160 subset for list methods), `protobuf.ts` / `protobuf-wkt.ts` (the runtime re-exports). Generated: every directory (`ts/todofy/...`, `ts/lab/...`, `ts/ops/...`, `ts/common/...`, `ts/google/...`): protobuf-es's `*_pb.ts`, and for the packages of `WIRE_PACKAGES` the wire JSON types `*_wire.ts` |
 | `python/` | The Python package `ziyixi-proto`. Committed: `pyproject.toml` (static metadata, uv cache keys), `build_backend.py`, `src/ziyixi_proto/__init__.py` and `wire_json.py` (the codec and its value rules). Generated: every directory under `src/ziyixi_proto/`, for the packages `tools/gen_py.py` lists in `PYTHON_PACKAGES` only; the wheel leaves the test-only ones out (`TEST_ONLY_PACKAGES`) |
 | `tools/ensure.mjs` | Installs the pinned toolchain when `node_modules/` does not match the lockfile, and generates both languages when its stamp (`.generated.json`, ignored) does not match |
-| `tools/gen_py.py` | The stdlib-only Python generator (frozen dataclasses, `IntEnum`s, field tables; a field named like a Python keyword is the attribute `<name>_`, `from_`), for `PYTHON_PACKAGES` only: `todofy.taskintent.v1`, `todofy.report.v1`, `ops.v1` and `mailhero.webhook.v1` (todofy-core imports all four) and `prototest.v1` (this folder's Python tests). A package only TypeScript apps use (an app's UI API) is not generated, so it may use what the Python profile lacks |
-| `tools/gen_wire_ts.py` | The TypeScript wire JSON types (`ts/<package>/<file>_wire.ts`, types only) of the packages in `WIRE_PACKAGES` (`ops.v1`, `todofy.report.v1` for Todofy's UI, and `dashboard.ui.v1`, whose views the dashboard's Worker builds and its UI renders as wire JSON): each message's JSON as a producer writes it, a union narrowed by its discriminator, a type of another file of these packages as a type-only import of that file's module, each service as a binding's methods (none for a service with `google.api.http` bindings: an HTTP API is called through the client), and the `WireTypes` entries that type `toWire`'s answer |
+| `tools/gen_py.py` | The stdlib-only Python generator (frozen dataclasses, `IntEnum`s, field tables; a field named like a Python keyword is the attribute `<name>_`, `from_`), for `PYTHON_PACKAGES` only: `todofy.taskintent.v1`, `todofy.report.v1`, `ops.v1`, `mailhero.webhook.v1` and `todofy.ui.v1` (todofy-core imports all five) and `prototest.v1` (this folder's Python tests). A package only TypeScript apps use (another app's UI API) is not generated, so it may use what the Python profile lacks |
+| `tools/gen_wire_ts.py` | The TypeScript wire JSON types (`ts/<package>/<file>_wire.ts`, types only) of the packages in `WIRE_PACKAGES` (`ops.v1`, `todofy.report.v1` and `todofy.ui.v1` for Todofy's UI and the fixtures of its tests, and `dashboard.ui.v1`, whose views the dashboard's Worker builds and its UI renders as wire JSON): each message's JSON as a producer writes it, a union narrowed by its discriminator, a type of another file of these packages as a type-only import of that file's module, each service as a binding's methods (none for a service with `google.api.http` bindings: an HTTP API is called through the client), and the `WireTypes` entries that type `toWire`'s answer |
 | `tools/gen_schema.py`, `tools/schema.mjs` | A contract's JSON Schema from its IDL (`SCHEMAS`: `ops.v1` writes the `$defs` document `contracts/ops-v1/ops-v1.schema.json`, with `ALIASES` keeping the `$defs` names it had before; `todofy.report.v1` writes `todofy/api/summary-v1.schema.json` and `recommendation-v1.schema.json`, each the self-contained schema of one message, `Target.root`, described by the IDL's comments; a target marked
 `Target.open` is a consumer's schema, every object open to unknown properties as a lenient read is, and the relations
-`any_match` and `present_when` are written as `anyOf` and `allOf`/`if`/`then`), run by `tools/schema.mjs` (no shell, the tools of `ensure.mjs`; the image keeps its source info for those comments); `npm run schema` rewrites them, `npm run check:schema` (Proto checks, Contracts and this folder's `npm test`) fails when one differs; both name what must be regenerated after a changed schema (`Target.then`: Todofy's reports are copied, comments included, into its UI's `src/api/schema.d.ts`, so a `report.proto` change is followed by `cd todofy/web && npm run gen:api`, which Todofy static checks hold with `npm run check:api`) |
+`any_match` and `present_when` are written as `anyOf` and `allOf`/`if`/`then`), run by `tools/schema.mjs` (no shell, the tools of `ensure.mjs`; the image keeps its source info for those comments); `npm run schema` rewrites them, `npm run check:schema` (Proto checks, Contracts and this folder's `npm test`) fails when one differs; both name what must be regenerated after a changed schema (`Target.then`, for a generator that copies one; none does since Todofy's UI reads its types from todofy.ui.v1) |
 | `tools/wire_rules.py` | The value rules of `common/wire/v1` as the generators read them from a buf image, and the check that refuses a rule that cannot apply where it is written (every package) |
 | `tools/profile_breaking.py` | The profile's breaking rules (rule 4) |
 | `scripts/breaking.sh`, `scripts/rules-selftest.sh` | The breaking gate against a base commit; the rules self-test |
@@ -325,8 +332,7 @@ typecheck|test|dev` regenerates first (its pre-scripts); Todofy's next `uv run` 
    `WIRE_PACKAGES` in `tools/gen_wire_ts.py` (and `positional` on a method that takes plain arguments). A contract
    with a published JSON Schema generates it: add a `Target` to `SCHEMAS` in `tools/gen_schema.py` (with `root` for
    the self-contained schema of one message, and `then` for a generator that copies it) and run `npm run schema`,
-   then what it names (for Todofy's reports, `cd todofy/web && npm run gen:api`: the UI's types copy the
-   schemas' descriptions, so even a comment edit in `report.proto` changes them).
+   then what its `then` names, if anything.
 3. `npm run lint && npm run api-lint` until clean, then `npm run generate`.
 4. Add the contract's fixtures to `test/` and `test/python/` (round trip byte for byte, a strict read refusing every
    invalid fixture, a lenient read tolerating what its consumers do), and a new kind of field or rule to
@@ -666,6 +672,21 @@ square of the data, so every FlowDay page seeks to its cursor through an index a
 protobuf-es runtime before; budget 140 KiB), its UI's JavaScript 362.8 → 398.9 KiB gzip (budget 480 KiB). An app
 with lists that long should expect the same: page sizes from its CPU test, keyset pages, and the warm-up.
 
+**What todofy.ui.v1 costs** (measured 2026-10-02 the same way, before and after on the same machine; the gateway's
+CPU test is `todofy/gateway/test/runtime/cpu.test.ts`, the table in `todofy/docs/gateway-contract.md` §8). Todofy's
+gateway passed the Durable Object's JSON through before; now it decodes every request and reads and writes every
+answer again with the generated code, so it pays more than Lab did, and most for its largest answers. Bundles: the
+gateway 38.7 → 289.5 KiB (gzip 11.5 → 71.4 KiB: its first protobuf-es runtime, the codec, the transcoder and the
+descriptors; budget 86 KiB, `todofy/deploy/bundle-size.mjs`), the UI's JavaScript gzip 131.9 → 172.3 KiB (budget
+208 KiB, `todofy/web/scripts/js-budget.mjs`). CPU in the gateway, reference ms, medians of three fresh isolates:
+the isolate's first API request (the service status, with the first RS256 verification) 3.2 → 4.2-4.8 (7.4-8.2
+until `todofy/gateway/src/warm.ts` ran the codec once at global scope over synthetic messages, outside every
+request's limit; bound 8), a page of 100 events 0.4 → 3.2 first and 2.2 warm, 120 GTD days 0.4 → 3.2 and 2.9, a
+reconcile 1.0 → 2.1 and 1.6, the two largest answers (a 1.9 MB legacy text, every stored report at the newsletter's
+limits) 2.1 → 4.4 and 1.3 → 5.2 (bound 8); every other first run at most 3.2 (bound 6) and warm median at most 2.9
+(bound 4). todofy-core (a Durable Object, 30 s) builds the same dicts as before and maps them to generated
+dataclasses; its upload 554.0 → 627.2 KiB (gzip 153.5 → 166.6: the `todofy.ui.v1` modules and the mapping).
+
 **Adding a UI API.**
 
 1. Write `<app>/ui/v1/*.proto` by the conventions above; `npm run lint && npm run api-lint` until clean.
@@ -688,8 +709,10 @@ with lists that long should expect the same: page sizes from its CPU test, keyse
    milliseconds of its reference machine, scaled by the calibration). Lists of hundreds of items need page sizes
    from that test and the startup warm-up (Large lists, above).
 
-Python: a Python Worker's transcoder will implement the same behaviour and run `testdata/http-cases.json`;
-the profile's Python twin already supports every kind these APIs use.
+Python: Todofy's backend is a Python Durable Object behind a TypeScript gateway, so the gateway transcodes and
+the object reads and writes the generated Python messages ("What todofy.ui.v1 costs" above). A Python Worker
+that serves HTTP itself would need a transcoder of its own that runs `testdata/http-cases.json`; the profile's
+Python twin already supports every kind these APIs use.
 
 ## CI
 
@@ -709,11 +732,11 @@ A `proto/` change also re-checks every app in `PROTO_USERS` (Lab, Todofy, Mail H
 `Contracts` (the contracts' tests check the codecs against the schemas and pin the wire bytes). It deploys only
 the apps whose production bundle the changed path reaches (`proto_deploys` in `.github/scripts/ci_changes.py`).
 `PROTO_USERS` names each user's bundled languages: Lab, Mail Hero and the dashboard `"ts"` (their Workers, and
-Lab's, Mail Hero's and the dashboard's UIs), FlowDay, the links and watch apps `"ts"` (their Workers and UIs), Todofy `"python"` (todofy-core vendors the wheel; its gateway and UI import types only, which compile to
-nothing). A language's runtime and generator reach that language's users (`proto/ts/` and `buf.gen.yaml`: the
+Lab's, Mail Hero's and the dashboard's UIs), FlowDay, the links and watch apps `"ts"` (their Workers and UIs), Todofy `"ts"` and `"python"` (its gateway and UI bundle the runtime and the descriptors of todofy.ui.v1;
+todofy-core vendors the wheel). A language's runtime and generator reach that language's users (`proto/ts/` and `buf.gen.yaml`: the
 TypeScript users; `proto/python/`, `tools/gen_py.py` and `tools/wire_rules.py`: Todofy); the wire profile's own
 options (`common/wire/`) reach both; a package reaches the apps that import it (`PROTO_PACKAGES`:
-`todofy/taskintent/` Lab, Todofy and the watch app, `todofy/report/` Todofy, `mailhero/webhook/` Mail Hero and Todofy, `lab/ui/` Lab, `flowday/ui/` FlowDay, `links/ui/` the links app, `mailhero/ui/` Mail Hero, `watch/ui/` the watch app, `dashboard/ui/` the dashboard, `ops/` the five apps with an `Ops` entrypoint or caller (Lab, Mail Hero, the dashboard, Todofy and the watch app), `common/errors/` and `prototest/` none);
+`todofy/taskintent/` Lab, Todofy and the watch app, `todofy/report/` Todofy, `todofy/ui/` Todofy, `mailhero/webhook/` Mail Hero and Todofy, `lab/ui/` Lab, `flowday/ui/` FlowDay, `links/ui/` the links app, `mailhero/ui/` Mail Hero, `watch/ui/` the watch app, `dashboard/ui/` the dashboard, `ops/` the five apps with an `Ops` entrypoint or caller (Lab, Mail Hero, the dashboard, Todofy and the watch app), `common/errors/` and `prototest/` none);
 the module and toolchain files (`buf.yaml`, `buf.lock`, `package-lock.json`, `tools/ensure.mjs`) and any path
 not mapped reach every user; tests, test data, the check scripts, the wire JSON types' and JSON Schema
 generators (`tools/gen_wire_ts.py`: types only; `tools/gen_schema.py`: files under `contracts/` and `todofy/api/`,
@@ -724,7 +747,7 @@ the users' languages and each package's importers from the sources, so the maps 
 
 Planned: every other app's UI API on the [HTTP APIs](#http-apis) pattern (Todofy's and Mail Hero's; the dashboard's and FlowDay's moved on 2026-10-02). ops-v1 moved on 2026-10-01 as one package,
 `ops/v1`, because its four services share every message, recommendation-v1 and summary-v1 as `todofy/report/v1`
-(messages only; Todofy's owner API, which lists them, moves with the Todofy UI API), and mail-received-v1 as
+(messages only; Todofy's owner API, which lists them, moved on 2026-10-02 as `todofy/ui/v1`), and mail-received-v1 as
 `mailhero/webhook/v1` (messages only: the webhook's path, authentication and Idempotency-Key header stay the HTTP
 transport's). task-intent-v1's value
 rules can move into its IDL the same way, generating its schema too. Shared types come from the same googleapis dependency (`google.rpc.Status`) or a

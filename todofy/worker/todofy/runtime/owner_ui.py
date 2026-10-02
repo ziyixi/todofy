@@ -9,7 +9,8 @@ request again with the generated code, does the work and answers
 
 or ``{"error": <ErrorInfo reason>, "detail": <a MailEvent as wire JSON text> | None, "retry_after": int | None}``,
 never an exception (a Python exception reaches the gateway only as an opaque error). D1 and storage failures are
-UNAVAILABLE, which the UI may repeat with the same request_id; a bug raises, which the gateway answers INTERNAL.
+UNAVAILABLE, which the UI may repeat with the same request_id; a bug raises, which reaches the gateway as a failed
+call, answered UNAVAILABLE like a stub failure (docs/gateway-contract.md §3.5).
 
 The ledger's readers (runtime/api.py, the coordinator, reminder.py, metrics.py, gtd.py, backup.py) build the
 same dicts as the owner API before todofy.ui.v1; core/owner_ui.py maps them to the generated messages. Reads are

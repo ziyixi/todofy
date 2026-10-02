@@ -62,11 +62,15 @@ The same sequence as local development:
 2. `ruff check` and `ruff format --check` over `worker tests tools deploy`
 3. host tests: `pytest tests/unit tests/fakes tools deploy` (includes a local D1 round trip of the legacy
    migration)
-4. gateway (`gateway/`): `npm ci`, `lint`, `typecheck`, `test`
-5. UI: `npm ci`, `check:api` (generated types match the OpenAPI), `typecheck`, `test`, `build`, and a grep
-   that no UI source names the other repository
+4. gateway (`gateway/`): `npm ci`, `lint`, `typecheck`, `test`, and `test:runtime` (the gateway in workerd next
+   to a stand-in TodofyCore: the owner API's CPU per request against Workers Free's 10 ms, in calibrated
+   reference ms, gateway-contract.md §8)
+5. UI: `npm ci`, `typecheck`, `test`, `build` (which fails over the UI's JavaScript budget,
+   `web/scripts/js-budget.mjs`), and a grep that no UI source names the other repository; the UI's types are
+   the generated messages of `proto/todofy/ui/v1`, so nothing is generated here
 6. placeholder production configs for both Workers are generated and dry-run, the gateway's with
-   `--secrets-file` (no token needed)
+   `--secrets-file` (no token needed), and the gateway's bundle is held to its budget
+   (`deploy/bundle-size.mjs`, 86 KiB gzip; `node --test deploy/test/*.test.mjs` tests the check)
 
 ### `Todofy runtime (1/3)`, `(2/3)`, `(3/3)`
 
@@ -234,7 +238,8 @@ that passed is what ships:
    answers 401 (or 429 once this hour's 20 failures are spent). Anything else, such as the 503 of a broken
    core, binding or D1, fails the job. The probe spends one of the hour's 20 failure slots and never blocks
    the real credential, which the gateway sends straight to the report. The Access → owner API path is
-   not probed (CI has no Access login); open the owner UI once after a deploy that touches it.
+   not probed (CI has no Access login); open the owner UI once after a deploy that touches it (after the
+   todofy.ui.v1 release: a tab left open from before shows "Todofy 已更新，请刷新页面" until it is reloaded).
 
 Order matters, and it sets three rules:
 

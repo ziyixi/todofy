@@ -162,21 +162,31 @@ with synthetic data.
 
 ### `proto-todofy-ui` — Todofy owner API as `todofy.ui.v1`
 
-- State: seven-plus commits on `327ad52` (`ab09114` IDL, `75129c3` core RPC, `7fae973` gateway, `c423706`
-  tests, `5d36980` UI, `8a9240c` and later docs); the builder is finishing; then reviews and fixes.
+- State: built, rebased on `9e38624` and verified from a clean clone of its head (every check in the list
+  above, the runtime suite's 508 tests, the gateway's workerd CPU test, the dry runs and the smoke: all 12
+  rpcs through the UI's own client, the machine routes byte-identical to `main` apart from timestamps and
+  request IDs). Commits: `todofy.ui.v1` IDL, core RPC, gateway, tests, UI, docs. Reviews and fixes next.
 - What it does: `TodofyUiService` under `/api/v1` (mailEvents, dailyReminders, metricDays, gtdDays, gtdReviews,
   legacyTexts; singletons serviceStatus, latestReports, integration). The TS gateway transcodes and makes one
   `owner_ui` RPC to `TodofyCore`, which reads requests and writes answers with the generated Python code.
   CSRF moves to `GET /api/csrf`. The OpenAPI document becomes `api/machine-api-v1.openapi.yaml` and keeps only
   the hooks hosts' routes (`/hooks/mail`, `/api/summary`, `/api/recommendation`, `/health`), whose wire is
-  unchanged; `openapi-typescript` is retired. `owner_api` in core keeps serving the old gateway during the
-  deploy and is removed in the next release.
-- Measured so far: gateway 71.4 KiB gzip (budget 86); UI JS 172.3 KiB gzip (budget 208).
-- Deploys: Todofy (gateway and core) only. Watch the deploy order: core must answer `owner_ui` before the new
-  gateway serves.
-- After deploy: the Todofy UI pages (events, reminders, metrics, GTD days and reviews, reports, integration
-  status) load; the newsletter's next run at 13:30 UTC still gets `/api/summary` and `/api/recommendation`
-  (same bytes); the canary (mail → Todofy) passes on the dashboard.
+  unchanged; `openapi-typescript` is retired. The old owner paths answer 410 `reload_required` (old envelope)
+  for one release; `owner_api` in core keeps serving the old gateway during the deploy. The next Todofy
+  release removes both (`todofy/docs/gateway-contract.md` §6.4).
+- Measured: gateway 11.8 → 71.7 KiB gzip (budget 86); UI JS 131.9 → 172.3 KiB gzip (budget 208); todofy-core
+  153.6 → 166.6 KiB gzip; gateway CPU per owner request at most 5.3 reference ms (the reports at their limits),
+  the isolate's first API request 4.2-5.2 (bound 8; details in `todofy/docs/gateway-contract.md` §8).
+- Deploys: Todofy (core first, then the gateway; no D1 or Durable Object migration) only. Core must answer
+  `owner_ui` before the new gateway serves.
+- After deploy: walk every Todofy page (首页, 需关注, 事件 and one event's detail, 提醒, 日报 with one recompute,
+  统计, GTD, 健康, 接入); act only on a synthetic or already handled event. A tab left open from before shows
+  "Todofy 已更新，请刷新页面". The newsletter's next run at 13:30 UTC still gets `/api/summary` and
+  `/api/recommendation` (same bytes); Mail Hero's next delivery succeeds and the canary (mail → Todofy) passes
+  on the dashboard; the gateway's CPU on the Workers dashboard stays well under 10 ms.
+- Known, not caused by it: the shared CPU meter's calibration step (`tools/workerd-cpu`, `Runtime.evaluate`)
+  sometimes gets no inspector answer within 30 s on a busy machine; seen in Todofy's (2 of 38 runs) and Lab's
+  (1 of 30, on `main`'s code) CPU tests. A rerun passes.
 
 ### Landing order
 
