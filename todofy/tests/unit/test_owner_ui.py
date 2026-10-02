@@ -199,17 +199,30 @@ def detail_row(**overrides):
     )
 
 
+BASIC_EVENT = {
+    "name": f"mailEvents/{EVENT}",
+    "state": "todo_unknown",
+    "error_code": "lookup_not_found",
+    "receive_time": AT,
+    "update_time": "2026-09-28T08:02:10Z",
+    "attention": True,
+}
+
+
 class TestMessages:
     def test_a_list_row_has_only_the_list_fields(self):
-        wire = json.loads(ui.answer(ui.mail_event(summary_row())))
-        assert wire == {
-            "name": f"mailEvents/{EVENT}",
-            "state": "todo_unknown",
-            "error_code": "lookup_not_found",
-            "receive_time": AT,
-            "update_time": "2026-09-28T08:02:10Z",
-            "attention": True,
-        }
+        assert json.loads(ui.answer(ui.mail_event(summary_row(), full=False))) == BASIC_EVENT
+
+    def test_the_basic_view_of_a_detail_is_the_list_row(self):
+        assert json.loads(ui.answer(ui.mail_event(detail_row(), full=False))) == BASIC_EVENT
+
+    def test_views_follow_aip_157(self):
+        view = mail_event_pb.MailEventView
+        assert ui.full_view(view.UNSPECIFIED) and ui.full_view(view.FULL) and not ui.full_view(view.BASIC)
+        ui.list_view(view.UNSPECIFIED)
+        ui.list_view(view.BASIC)
+        with refused(Reason.BAD_REQUEST):
+            ui.list_view(view.FULL)
 
     def test_a_detail(self):
         wire = json.loads(ui.answer(ui.mail_event(detail_row())))
@@ -226,7 +239,7 @@ class TestMessages:
         assert wire["canary"] is True and "allowed_actions" not in wire
 
     def test_an_unknown_code_reads_as_unset(self):
-        wire = json.loads(ui.answer(ui.mail_event(summary_row(error_code="something_new"))))
+        wire = json.loads(ui.answer(ui.mail_event(summary_row(error_code="something_new"), full=False)))
         assert "error_code" not in wire
 
     def test_service_status(self):

@@ -79,25 +79,29 @@ Handler = Callable[[Call], Awaitable[Answer]]
 async def _list_mail_events(call: Call) -> Answer:
     request: pb.ListMailEventsRequest = call.request
     size = ui.page_size(request.page_size, *EVENTS_PAGE)
+    ui.list_view(request.view)
     state, attention = ui.event_filter(request.filter)
     items, following = await api.event_page(
         call.env, attention=attention, state=state, after=ui.event_cursor(call.cursor), limit=size
     )
     cursor = None if following is None else {"at": following[0], "id": following[1]}
     return Answer(
-        pb.ListMailEventsResponse(mail_events=tuple(ui.mail_event(item) for item in items)), ui.cursor_text(cursor)
+        pb.ListMailEventsResponse(mail_events=tuple(ui.mail_event(item, full=False) for item in items)),
+        ui.cursor_text(cursor),
     )
 
 
-async def _detail(coordinator: Any, event_id: str) -> mail_event_pb.MailEvent:
+async def _detail(coordinator: Any, event_id: str, *, full: bool = True) -> mail_event_pb.MailEvent:
     detail = await coordinator.event_detail(event_id)
     if detail is None:
         raise UiError(Reason.NOT_FOUND)
-    return ui.mail_event(detail)
+    return ui.mail_event(detail, full=full)
 
 
 async def _get_mail_event(call: Call) -> Answer:
-    return Answer(await _detail(call.coordinator, ui.event_id(call.request.name)))
+    request: pb.GetMailEventRequest = call.request
+    full = ui.full_view(request.view)
+    return Answer(await _detail(call.coordinator, ui.event_id(request.name), full=full))
 
 
 async def _reconcile_mail_event(call: Call) -> Answer:

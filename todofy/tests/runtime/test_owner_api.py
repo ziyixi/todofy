@@ -144,6 +144,18 @@ def test_list_rows_never_carry_mail_content(api_worker: Worker) -> None:
     assert all(set(row) <= allowed for row in rows)
 
 
+def test_list_and_get_views_follow_aip_157(api_worker: Worker) -> None:
+    [listed] = [item for item in _pages(api_worker) if _id(item) == UNKNOWN]
+    assert _pages(api_worker, view="basic") == _pages(api_worker)
+    basic = api_worker.owner.get(f"/api/v1/mailEvents/{UNKNOWN}", params={"view": "basic"})
+    assert assert_message(basic, mail_event_pb.MailEvent) == listed
+    full = assert_message(api_worker.owner.get(f"/api/v1/mailEvents/{UNKNOWN}"), mail_event_pb.MailEvent)
+    assert full == assert_message(
+        api_worker.owner.get(f"/api/v1/mailEvents/{UNKNOWN}", params={"view": "full"}), mail_event_pb.MailEvent
+    )
+    assert {"etag", "version", "allowed_actions"} <= set(full) and full.items() >= listed.items()
+
+
 def test_page_size_follows_aip_158(api_worker: Worker) -> None:
     assert len(_pages(api_worker, page_size=1000)) == len(RECENT_ORDER)  # read as 100
     page = assert_message(
@@ -156,6 +168,7 @@ def test_page_size_follows_aip_158(api_worker: Worker) -> None:
     "query",
     [
         "view=attention",
+        "view=full",  # a page in full would read every event's detail (MailEventView)
         "attention=true",
         "state=pending",
         "filter=state%20%3D%20DONE",

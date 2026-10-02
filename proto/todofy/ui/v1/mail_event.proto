@@ -13,9 +13,10 @@ option java_multiple_files = true;
 option java_outer_classname = "MailEventProto";
 option java_package = "science.ziyixi.todofy.ui.v1";
 
-// One mail event. ListMailEvents answers the list fields only (name to imported); GetMailEvent and
-// ReconcileMailEvent answer every field. Never the mail's body: only the summary, the frozen Todoist
-// description and the first sender address while the event's body is still stored.
+// One mail event, in one of two views (MailEventView, AIP-157): ListMailEvents answers BASIC, GetMailEvent FULL
+// unless asked otherwise, and ReconcileMailEvent and the MailEvent detail of an error always FULL. Never the
+// mail's body: only the summary, the frozen Todoist description and the first sender address while the event's
+// body is still stored.
 message MailEvent {
   option (google.api.resource) = {
     type: "todofy.ziyixi.science/MailEvent"
@@ -145,6 +146,17 @@ message LegacyText {
   google.protobuf.Timestamp expire_time = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
   // The text (up to about 1.9 MB).
   string text = 4 [(google.api.field_behavior) = OUTPUT_ONLY];
+}
+
+// How much of a MailEvent an answer carries (AIP-157).
+enum MailEventView {
+  // The method's default: BASIC for ListMailEvents, FULL for GetMailEvent.
+  MAIL_EVENT_VIEW_UNSPECIFIED = 0;
+  // The list fields, `name` to `imported` (1-10), read from the ledger's row alone. Every later field is unset,
+  // and that says nothing about the event: `etag` and `allowed_actions` among them, so act only on a FULL event.
+  MAIL_EVENT_VIEW_BASIC = 1;
+  // Every field, with the event's summary and transitions (more D1 reads per event).
+  MAIL_EVENT_VIEW_FULL = 2;
 }
 
 // An owner action on a mail event that needs one (MailEvent.allowed_actions).

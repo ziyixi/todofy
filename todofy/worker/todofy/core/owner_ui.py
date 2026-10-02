@@ -203,9 +203,20 @@ def _int32(value: Any) -> int:
     return min(int(value), INT32_MAX)
 
 
-def mail_event(row: Mapping[str, Any]) -> mail_event_pb.MailEvent:
-    """A MailEvent from an EventSummary dict (runtime/api.py event_summary), or from a whole EventDetail dict
-    (TodofyCore.event_detail), whose detail fields it then sets too."""
+def list_view(view: mail_event_pb.MailEventView) -> None:
+    """ListMailEvents answers BASIC only (FULL would read every event's detail): FULL is BAD_REQUEST."""
+    if view == mail_event_pb.MailEventView.FULL:
+        raise UiError(Reason.BAD_REQUEST)
+
+
+def full_view(view: mail_event_pb.MailEventView) -> bool:
+    """GetMailEvent's view: FULL unless BASIC is asked for (AIP-157)."""
+    return view != mail_event_pb.MailEventView.BASIC
+
+
+def mail_event(row: Mapping[str, Any], *, full: bool = True) -> mail_event_pb.MailEvent:
+    """A MailEvent from a whole EventDetail dict (TodofyCore.event_detail) in the FULL view, or in the BASIC view
+    (``full=False``) from it or from an EventSummary dict (runtime/api.py event_summary): the list fields only."""
     fields: dict[str, Any] = {
         "name": f"mailEvents/{row['event_id']}",
         "state": _enum(mail_event_pb.MailEvent_State, row["state"]),
@@ -218,7 +229,7 @@ def mail_event(row: Mapping[str, Any]) -> mail_event_pb.MailEvent:
         "attention": row["attention"],
         "imported": row["imported"],
     }
-    if "version" in row:
+    if full:
         fields |= {
             "version": _int32(row["version"]),
             "etag": str(row["version"]),
