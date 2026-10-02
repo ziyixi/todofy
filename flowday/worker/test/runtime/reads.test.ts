@@ -6,6 +6,7 @@
  * is added up through a binding that also counts the selects drizzle runs with raw(), which carry no meta (the
  * Worker's own meter, ../../src/db.ts, sees only run(), all() and batch()).
  */
+import { PreEncoded } from '@ziyixi/proto/http-transcoder';
 import { create } from '@ziyixi/proto/protobuf';
 import { ListFlowsRequestSchema, QueryAnalyticsRequestSchema } from '@ziyixi/proto/flowday/ui/v1/flowday_ui_service_pb';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -23,6 +24,15 @@ beforeAll(async () => {
 afterAll(async () => {
   await h.dispose();
 });
+
+/**
+ * A handler's answer as its message. The transcoder's handler type also admits a PreEncoded answer (wire JSON a
+ * handler already holds, as the dashboard's views); no FlowDay handler returns one.
+ */
+function message<T>(answer: T | PreEncoded): T {
+  if (answer instanceof PreEncoded) throw new Error('a FlowDay handler answered PreEncoded');
+  return answer;
+}
 
 const DAY_MS = 86_400_000;
 const START = Date.UTC(2024, 9, 1);
@@ -105,7 +115,7 @@ async function readAll(page: (pageToken: string, ctx: ApiContext) => Promise<{ r
 
 function analytics(startDate: string, endDate: string) {
   return async (pageToken: string, ctx: ApiContext) => {
-    const answer = await handlers.queryAnalytics(create(QueryAnalyticsRequestSchema, { startDate, endDate, pageToken }), ctx);
+    const answer = message(await handlers.queryAnalytics(create(QueryAnalyticsRequestSchema, { startDate, endDate, pageToken }), ctx));
     // Each page also reads the tasks it names: count them as rows answered too.
     return { rows: answer.plannedTasks.length + answer.completedTasks.length + answer.timeEntries.length + answer.tasks.length, next: answer.nextPageToken };
   };
@@ -137,7 +147,7 @@ describe('rows read by the paged lists (D1 Free: 5,000,000 a day, shared by the 
 
   it('ListFlows reads about one page of rows per page', async () => {
     const reading = await readAll(async (pageToken, ctx) => {
-      const answer = await handlers.listFlows(create(ListFlowsRequestSchema, { pageToken }), ctx);
+      const answer = message(await handlers.listFlows(create(ListFlowsRequestSchema, { pageToken }), ctx));
       return { rows: answer.flows.reduce((sum, flow) => sum + 1 + flow.taskIds.length + flow.completedTaskIds.length, 0), next: answer.nextPageToken };
     });
     console.log(`reads: ListFlows: ${String(reading.pages)} pages, ${String(reading.rows)} rows answered, ${String(reading.rowsRead)} rows read`);
@@ -153,7 +163,7 @@ describe('rows read by the paged lists (D1 Free: 5,000,000 a day, shared by the 
     const entries: string[] = [];
     let pageToken = '';
     do {
-      const page = await handlers.queryAnalytics(create(QueryAnalyticsRequestSchema, { ...range, pageSize: 37, pageToken }), ctx);
+      const page = message(await handlers.queryAnalytics(create(QueryAnalyticsRequestSchema, { ...range, pageSize: 37, pageToken }), ctx));
       const rows = page.plannedTasks.length + page.completedTasks.length + page.timeEntries.length;
       expect(rows).toBeLessThanOrEqual(37);
       expect(page.tasks.length).toBeLessThanOrEqual(rows);
