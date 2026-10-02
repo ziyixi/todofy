@@ -1,6 +1,6 @@
 import type { Env, ParsedMail } from './types'
 import { HttpError, json } from './security.ts'
-import { createDelivery, deleteMessageContent, enqueue } from './pipeline.ts'
+import { deleteMessageContent, enqueue, requestDelivery } from './pipeline.ts'
 import { action, bad, body, conflict, delivery, deliveryJSON, deliverySelect, finishAction, first, gone, missing, now, page, paged, required, rows, uuid, version, type Row } from './api-common.ts'
 import { deliveryRange } from './api-delivery-stats.ts'
 
@@ -123,7 +123,7 @@ export async function messageRoute(request: Request, env: Env, owner: string, id
     }
     const endpoint = await required(env, 'SELECT current_revision_id FROM webhook_endpoints WHERE id=? AND archived_at IS NULL', endpointID)
     await required(env, `SELECT id FROM messages WHERE id=? AND origin='cloudflare'`, id)
-    const eventID = await createDelivery(env, { messageID: id, revisionID: endpoint.current_revision_id, actionID: input.action_request_id, retryMode: 'auto' })
+    const eventID = await requestDelivery(env, { kind: 'message', options: { messageID: id, revisionID: endpoint.current_revision_id, actionID: input.action_request_id, retryMode: 'auto' } })
     await finishAction(env, entry, eventID, 201)
     return json(await delivery(env, eventID), 201)
   }
@@ -217,7 +217,7 @@ export async function deliveryRoute(request: Request, env: Env, owner: string, i
     }
     const previous = await required(env, 'SELECT message_id FROM deliveries WHERE event_id=?', id)
     const endpoint = await required(env, 'SELECT current_revision_id FROM webhook_endpoints WHERE id=? AND archived_at IS NULL', endpointID)
-    const eventID = await createDelivery(env, { messageID: previous.message_id, revisionID: endpoint.current_revision_id, actionID: input.action_request_id, replayOf: id, expectedMessageVersion: expected, retryMode: 'auto' })
+    const eventID = await requestDelivery(env, { kind: 'message', options: { messageID: previous.message_id, revisionID: endpoint.current_revision_id, actionID: input.action_request_id, replayOf: id, expectedMessageVersion: expected, retryMode: 'auto' } })
     await finishAction(env, entry, eventID, 201)
     return json(await delivery(env, eventID), 201)
   }

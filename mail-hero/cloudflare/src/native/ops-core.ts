@@ -16,7 +16,7 @@ import type { Env } from './types.ts';
 import { alertSignals, alertSnapshot } from './alerts.ts';
 import { backupStatus, withBackupWrite } from './backup.ts';
 import { coordinatorRequest } from './capacity.ts';
-import { canaryActionID, createSyntheticCanaryDelivery } from './pipeline.ts';
+import { canaryActionID, requestDelivery } from './pipeline.ts';
 import { HttpError } from './security.ts';
 import { isCode, opsError, parseGuardInput, timestamp } from './ops-guard.ts';
 
@@ -204,7 +204,7 @@ export async function startCanary(env: Env, input: unknown, time = Date.now()): 
   if (target!.paused || target!.archived_at) return paused('endpoint_paused');
   if (target!.blocked_reason && (!target!.blocked_until || Date.parse(target!.blocked_until) > time)) return paused('endpoint_blocked');
   let eventID: string;
-  try { eventID = await withBackupWrite(env, () => createSyntheticCanaryDelivery(env, target!.revision_id, runID)); }
+  try { eventID = await withBackupWrite(env, () => requestDelivery(env, { kind: 'canary', revisionID: target!.revision_id, runID })); }
   catch (error) {
     const code = error instanceof HttpError ? error.code : error instanceof Error ? error.message : '';
     // The capacity reservation, or the capacity-guarded message or delivery insert, refused it.

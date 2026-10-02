@@ -1,5 +1,5 @@
 import type { Env, Job } from './types.ts';
-import { runJob, runMaintenance, markInterruptedJob } from './pipeline.ts';
+import { handleDeliveryRequest, runJob, runMaintenance, markInterruptedJob } from './pipeline.ts';
 import { CapacityLedger, MAX_PARSE_EXTRA_BYTES } from './capacity.ts';
 import { BackupState, readIntakePolicy } from './backup-state.ts';
 import { OpsGuardStore } from './ops-guard.ts';
@@ -15,7 +15,8 @@ function validJob(value:unknown):value is Job {
     (job.type==='deliver' && typeof job.eventID==='string' && /^[0-9a-f-]{36}$/i.test(job.eventID));
 }
 /** A SQLite-backed Durable Object is the durable scheduler, not the content DB.
- * Only alarms perform background work. fetch only records intents or wakes it. */
+ * Only alarms perform background work. fetch records intents or wakes it, and creates the delivery a Worker request
+ * asks for (/deliveries/create: building an event takes more CPU than a Worker request has on Workers Free). */
 export class MailCoordinator {
   private readonly state:DurableObjectState;
   private readonly env:Env;
@@ -154,6 +155,8 @@ export class MailCoordinator {
       await this.schedule();
       return new Response(null,{status:204});
     }
+    // An owner's send, resend or connection test, or a canary: the Worker's request waits for the event ID.
+    if(path==='/deliveries/create') return handleDeliveryRequest(this.env,request);
     // contracts/ops-v1: reached only through the Ops entrypoint (ops-core.ts), never from a public route.
     if(path==='/ops/guard' && request.method==='POST') {
       if(Number(request.headers.get('Content-Length') || 0)>1024) return new Response(null,{status:413});

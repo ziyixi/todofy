@@ -1,6 +1,6 @@
 import type { Env } from './types.ts'
 import { HttpError, decryptCredential, encryptCredential, json, validateTarget } from './security.ts'
-import { createSyntheticTestDelivery, wake } from './pipeline.ts'
+import { requestDelivery, wake } from './pipeline.ts'
 import { action, bad, body, boolean, conflict, endpointJSON, endpointSelect, finishAction, missing, now, required, rows, uuid, version, type Row } from './api-common.ts'
 
 function text(value: unknown, field: string, maximum: number): string {
@@ -175,7 +175,7 @@ export async function endpointRoute(request: Request, env: Env, owner: string, i
     let eventID = entry.result_ref
     if (!eventID) {
       const endpoint = await required(env, endpointSelect + ' WHERE e.id=? AND e.archived_at IS NULL', id)
-      eventID = await createSyntheticTestDelivery(env, endpoint.current_revision_id, input.action_request_id)
+      eventID = await requestDelivery(env, { kind: 'connection_test', revisionID: endpoint.current_revision_id, actionID: input.action_request_id })
       await finishAction(env, entry, eventID, 202)
     }
     return json({ event_id: eventID, synthetic_test: true, warning: '消费者可能把测试事件当真实邮件处理' }, 202)

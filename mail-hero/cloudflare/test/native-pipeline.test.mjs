@@ -2,7 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { emailHandler, MAX_RAW_BYTES } from '../src/native/ingest.ts';
 import { parseMail, safeHTML, ParseError } from '../src/native/parser.ts';
-import { buildPayload, cleanupPreviousParses, retryAfter } from '../src/native/pipeline.ts';
+import { buildPayload, cleanupPreviousParses, handleDeliveryRequest, requestDelivery, retryAfter } from '../src/native/pipeline.ts';
+import { HttpError } from '../src/native/security.ts';
 
 // A strict test stand-in for workerd's native FixedLengthStream. The integration
 // suite independently runs the actual runtime implementation.
@@ -164,4 +165,27 @@ test('byte quota also rejects before R2 upload and accepts no partial reservatio
 });
 test('very large Retry-After values become a finite manual pause instead of overflowing Date',()=>{
   const future=retryAfter('99999999999999999999999999');assert.ok(future>Date.now()+86400000);assert.ok(Number.isFinite(Date.parse(new Date(future).toISOString())));
+});
+
+test('requestDelivery: the coordinator creates the delivery; its errors keep their status and code, never a provider text',async()=>{
+  const coordinator=answer=>({COORDINATOR:{idFromName:name=>name,get:()=>({fetch:async(url,init)=>{
+    assert.equal(url,'https://coordinator/deliveries/create');return answer(JSON.parse(init.body));}})}});
+  const request={kind:'message',options:{messageID:'m',revisionID:'r',actionID:'a',retryMode:'auto'}};
+  assert.equal(await requestDelivery(coordinator(body=>{assert.deepEqual(body,request);return Response.json({event_id:'e'});}),request),'e');
+  await assert.rejects(requestDelivery(coordinator(()=>Response.json({error:{status:409,code:'version_conflict',message:'changed'}},{status:409})),request),
+    error=>error instanceof HttpError && error.status===409 && error.code==='version_conflict' && error.message==='changed');
+  await assert.rejects(requestDelivery(coordinator(()=>Response.json({error:{code:'logical_capacity'}},{status:503})),request),
+    error=>!(error instanceof HttpError) && error.message==='logical_capacity');
+  for(const response of [()=>Response.json({error:{code:'SELECT * FROM x'}},{status:503}),()=>new Response('overloaded',{status:503}),()=>new Response(null,{status:400})])
+    await assert.rejects(requestDelivery(coordinator(response),request),error=>!(error instanceof HttpError) && error.message==='scheduler_unavailable');
+});
+test('handleDeliveryRequest refuses other methods, large bodies and malformed requests before creating anything',async()=>{
+  const env={DB:{prepare(){assert.fail('no D1 access for a refused request');}}};
+  const post=(body,headers={})=>new Request('https://coordinator/deliveries/create',{method:'POST',headers,body:typeof body==='string'?body:JSON.stringify(body)});
+  assert.equal((await handleDeliveryRequest(env,new Request('https://coordinator/deliveries/create'))).status,405);
+  assert.equal((await handleDeliveryRequest(env,post({kind:'canary',revisionID:'r',runID:'x'},{'Content-Length':'5000'}))).status,413);
+  for(const body of ['not json',null,{kind:'other'},{kind:'canary',revisionID:'r'},{kind:'connection_test',revisionID:1,actionID:'a'},
+    {kind:'message',options:{messageID:'m'}},{kind:'message',options:{messageID:'m',revisionID:'r',retryMode:'never'}},
+    {kind:'message',options:{messageID:'m',revisionID:'r',expectedMessageVersion:1.5}},{kind:'message',options:{messageID:'m',revisionID:'r',actionID:'x'.repeat(201)}}])
+    assert.equal((await handleDeliveryRequest(env,post(body))).status,400,JSON.stringify(body));
 });

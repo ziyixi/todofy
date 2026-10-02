@@ -155,6 +155,12 @@ test('native workerd: durable archive, protected API, stable retry identity and 
     // receives 503 is terminal and must be counted as failed, not retried.
     await db.prepare('UPDATE webhook_endpoints SET paused=1 WHERE id=?').bind(endpoint.id).run();
     const beforeReplay = (await api(`/messages/${message.id}`)).message;
+    // The coordinator creates the delivery (/deliveries/create); its refusal reaches the owner as before.
+    const stale = await mf.dispatchFetch(`http://localhost/api/v1/deliveries/${event.event_id}/replay`, { method: 'POST',
+      headers: { Origin: 'http://localhost', Cookie: cookie, 'X-CSRF-Token': csrfValue, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ endpoint_id: endpoint.id, message_version: beforeReplay.version + 1, action_request_id: crypto.randomUUID() }) });
+    assert.equal(stale.status, 409);
+    assert.deepEqual(((await stale.json()).error.code), 'version_conflict');
     const terminal = await api(`/deliveries/${event.event_id}/replay`, 'POST', { endpoint_id: endpoint.id,
       message_version: beforeReplay.version, action_request_id: crypto.randomUUID() });
     await db.batch([

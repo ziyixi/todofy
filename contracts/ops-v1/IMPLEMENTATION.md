@@ -217,7 +217,9 @@ busy loop and nothing is rescheduled when the guard ends.
    `FORCE_SEND_PAUSED` → `paused/send_paused`; `send_paused` → `paused/settings_paused`; mode not
    `forward` or no endpoint → `unavailable/no_endpoint`; endpoint paused or archived →
    `paused/endpoint_paused`; revision blocked and not yet due for recheck → `paused/endpoint_blocked`.
-5. `withBackupWrite(env, () => createSyntheticCanaryDelivery(env, revisionID, runID))`; a refused lease
+5. `withBackupWrite(env, () => requestDelivery(env, {kind: 'canary', revisionID, runID}))`: the coordinator
+   runs `createSyntheticCanaryDelivery(env, revisionID, runID)` (`/deliveries/create`; building the event
+   is beyond a Worker request's 10 ms) and passes its error code back; a refused lease
    (`backup_in_progress`) → `unavailable/backup_active`; `logical_capacity` or the capacity-guarded
    message insert not happening → `unavailable/capacity`; any other error → throw `unavailable`.
 6. → `{event_id, state: "queued"}`.

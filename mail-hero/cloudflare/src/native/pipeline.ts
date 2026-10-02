@@ -1,6 +1,6 @@
 import { create } from '@ziyixi/proto/protobuf';
-import { MailReceivedEventSchema, OmittedReason, OmittedReasonSchema, StorageStatus, StorageStatusSchema } from '@ziyixi/proto/mailhero/webhook/v1/mail_received_pb';
-import { toWire, wireEnum, WireJsonError, type WireEnum } from '@ziyixi/proto/wire-json';
+import { file_mailhero_webhook_v1_mail_received, MailReceivedEventSchema, OmittedReason, OmittedReasonSchema, StorageStatus, StorageStatusSchema } from '@ziyixi/proto/mailhero/webhook/v1/mail_received_pb';
+import { formatMatches, toWire, wireEnum, WireJsonError, type WireEnum } from '@ziyixi/proto/wire-json';
 import type { Env, Job } from './types.ts';
 import { HttpError, sha256, decryptCredential, validateTarget } from './security.ts';
 import { parseMail, ParseError, type ParsedMail } from './parser.ts';
@@ -10,7 +10,7 @@ import { resolvedDueSQL, resolvedTerminalSQL, runLifecycle, safeTerminalSQL } fr
 import { runAlerts } from './alerts.ts';
 import { recordDeletion } from './backup-artifacts.ts';
 import type { OpsDeferral } from './ops-guard.ts';
-import { reserveObjectCapacity, settleObjectCapacity, releaseObjectCapacity, capacitySnapshot, reconcileCapacity, MAX_PARSED_JSON_BYTES, MAX_PARSE_EXTRA_BYTES } from './capacity.ts';
+import { coordinatorRequest, reserveObjectCapacity, settleObjectCapacity, releaseObjectCapacity, capacitySnapshot, reconcileCapacity, MAX_PARSED_JSON_BYTES, MAX_PARSE_EXTRA_BYTES } from './capacity.ts';
 
 type Row = Record<string, any>;
 const now = () => new Date().toISOString();
@@ -51,8 +51,8 @@ export interface CreateOptions {
   messageID: string; revisionID: string; eventID?: string; actionID?: string;
   replayOf?: string; retryMode?: 'auto'|'once'; expectedMessageVersion?: number;
 }
-/** contracts/ops-v1 RunId; also mail.received.v1 `canary.run_id`. */
-export const CANARY_RUN_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
+/** Whether `runID` is a canary run ID: mail.received.v1's RunId format (`canary.run_id`), read from the IDL. */
+export const isCanaryRunID = (runID: string): boolean => formatMatches(file_mailhero_webhook_v1_mail_received, 'RunId', runID);
 const STORAGE_STATUS = wireEnum(StorageStatusSchema, StorageStatus);
 const OMITTED_REASON = wireEnum(OmittedReasonSchema, OmittedReason);
 /** An attachment enum's value by its wire name: undefined for none, a refusal for a name the contract lacks. */
@@ -63,15 +63,18 @@ function enumValue<E extends Readonly<Record<string, number>>>(table: WireEnum<E
   return value;
 }
 /** The frozen bytes of a NEW mail.received.v1 event (proto/mailhero/webhook/v1/mail_received.proto), built as a
- * generated message and written by the wire codec, which checks every rule of the contract first. Called once per
- * event: its bytes go to R2 (payload/<eventID>.json) and every retry resends them; nothing builds an event twice.
- * `canary` marks a synthetic end-to-end canary event (contracts/ops-v1): consumers must not act on it. Without it the
- * bytes are exactly those of earlier releases. What the IDL cannot say is checked here: the subject's 4 KiB and the
- * event's 1 MiB of UTF-8, and a blank subject and text by ECMAScript's trim() as well as the contract's Visible. */
+ * generated message and written by the wire codec, which checks every rule of the contract first (UUIDs, times, the
+ * canary's run ID, list sizes, a subject or a text that is Visible...) and whose refusal is 422 invalid_payload.
+ * Called once per event: its bytes go to R2 (payload/<eventID>.json) and every retry resends them; nothing builds an
+ * event twice. `canary` marks a synthetic end-to-end canary event (contracts/ops-v1): consumers must not act on it.
+ * Without it the bytes are exactly those of earlier releases. What the IDL cannot say is checked here: the subject's
+ * 4 KiB and the event's 1 MiB of UTF-8, a blank subject and text by ECMAScript's trim() too (it also strips U+FEFF,
+ * which Visible keeps), and the To header's 50 addresses before Mail Hero's own address is taken out (the event's
+ * maxItems counts after; a message listed to 51 has always been refused). Runs in the coordinator only (createDelivery):
+ * a message's parsed record reaches megabytes, beyond a Worker request's CPU. */
 export function buildPayload(eventID: string, messageID: string, receivedAt: string, parsed: ParsedMail, address: string, currentAddress=address, canary?: {run_id: string}): string {
   const content = webhookContent(parsed);
-  if (utf8.encode(parsed.subject).length > 4096 || parsed.from.length > 50 || parsed.to.length > 50 ||
-      (!parsed.subject.trim() && !content.text.trim()) || (canary && !CANARY_RUN_ID.test(canary.run_id))) error(422,'invalid_payload');
+  if (utf8.encode(parsed.subject).length > 4096 || parsed.to.length > 50 || (!parsed.subject.trim() && !content.text.trim())) error(422,'invalid_payload');
   const event = create(MailReceivedEventSchema, {
     type:'mail.received.v1', eventId:eventID, receivedAt, canary:canary ? {runId:canary.run_id} : undefined, message:{
       id:messageID, from:parsed.from.map(a=>({address:a.address,name:a.name ?? ''})),
@@ -384,7 +387,8 @@ export const canaryActionID=(runID:string)=>`canary:${runID}`;
 /** contracts/ops-v1 startCanary: the connection-test path with the canary text and marker, and the
  * normal automatic retries (the owner's connection test stays a single attempt). */
 export async function createSyntheticCanaryDelivery(env:Env,revisionID:string,runID:string):Promise<string> {
-  if(!CANARY_RUN_ID.test(runID)) error(422,'invalid_payload');
+  // Before the synthetic message is stored: its run ID is also its action ID and its messages.canary_run_id.
+  if(!isCanaryRunID(runID)) error(422,'invalid_payload');
   return createSyntheticDelivery(env,revisionID,canaryActionID(runID),syntheticCanaryMail(),'auto',runID);
 }
 async function createSyntheticDelivery(env:Env,revisionID:string,actionID:string,parsed:ParsedMail,retryMode:'auto'|'once',canaryRunID?:string):Promise<string> {
@@ -410,6 +414,66 @@ async function createSyntheticDelivery(env:Env,revisionID:string,actionID:string
   // reservation stays under this deterministic key, so a retry of the same action reuses it.
   if(!inserted[0].meta.changes && !await first(env,'SELECT id FROM messages WHERE id=?',id)) await env.MAIL_STORE.delete(key);
   return createDelivery(env,{messageID:id,revisionID,actionID,retryMode});
+}
+/** A delivery a Worker request asks the coordinator to create: an owner's send or resend (`message`), an endpoint's
+ * connection test, or a dashboard canary (contracts/ops-v1 startCanary). */
+export type DeliveryRequest =
+  | {kind:'message'; options:CreateOptions}
+  | {kind:'connection_test'; revisionID:string; actionID:string}
+  | {kind:'canary'; revisionID:string; runID:string};
+/** An error code the coordinator may pass back as is: ours (logical_capacity, scheduler_unavailable...), never a
+ * provider's text (which can hold SQL, keys or URLs). */
+const SAFE_CODE=/^[a-z][a-z0-9_]{0,63}$/;
+/** Worker side of DeliveryRequest. Creating a delivery builds its event (createDelivery): it reads the message's
+ * parsed record from R2 (up to MAX_PARSED_JSON_BYTES of JSON), truncates its text and writes the event with the wire
+ * codec, which a Worker request cannot afford within Workers Free's 10 ms of CPU. The coordinator, a Durable Object
+ * (30 s per invocation), creates it as its alarm does for automatic forwards; the request waits for the event ID.
+ * Same result and errors as calling createDelivery here: an HttpError keeps its status, code and message, another
+ * error its code when it is one of ours (SAFE_CODE). */
+export async function requestDelivery(env:Env,request:DeliveryRequest):Promise<string> {
+  const response=await coordinatorRequest(env,'/deliveries/create',request);
+  let body:{event_id?:unknown; error?:{status?:unknown; code?:unknown; message?:unknown}}|null=null;
+  try { body=await response.json(); } catch { /* not ours: unavailable */ }
+  if(response.ok && typeof body?.event_id==='string') return body.event_id;
+  const failure=body?.error, code=typeof failure?.code==='string' && SAFE_CODE.test(failure.code) ? failure.code : 'scheduler_unavailable';
+  if(typeof failure?.status==='number' && failure.status>=400 && failure.status<600) throw new HttpError(failure.status,code,typeof failure.message==='string' ? failure.message : code);
+  throw new Error(code);
+}
+const text=(value:unknown,max=200):value is string => typeof value==='string' && value.length>0 && value.length<=max;
+const optionalText=(value:unknown):boolean => value===undefined || text(value);
+/** A DeliveryRequest read from the coordinator's request body, or null. Only the Worker sends it (the coordinator has
+ * no public route); the shape is still checked, so a bad call cannot reach createDelivery with other types. */
+function deliveryRequest(value:unknown):DeliveryRequest|null {
+  if(!value || typeof value!=='object') return null;
+  const input=value as Record<string,unknown>;
+  if(input.kind==='connection_test') return text(input.revisionID) && text(input.actionID) ? {kind:'connection_test',revisionID:input.revisionID,actionID:input.actionID} : null;
+  if(input.kind==='canary') return text(input.revisionID) && text(input.runID) ? {kind:'canary',revisionID:input.revisionID,runID:input.runID} : null;
+  if(input.kind!=='message' || !input.options || typeof input.options!=='object') return null;
+  const o=input.options as Record<string,unknown>;
+  if(!text(o.messageID) || !text(o.revisionID) || !optionalText(o.eventID) || !optionalText(o.actionID) || !optionalText(o.replayOf) ||
+    (o.retryMode!==undefined && o.retryMode!=='auto' && o.retryMode!=='once') ||
+    (o.expectedMessageVersion!==undefined && !Number.isSafeInteger(o.expectedMessageVersion))) return null;
+  return {kind:'message',options:{messageID:o.messageID,revisionID:o.revisionID,eventID:o.eventID as string|undefined,actionID:o.actionID as string|undefined,
+    replayOf:o.replayOf as string|undefined,retryMode:o.retryMode as 'auto'|'once'|undefined,expectedMessageVersion:o.expectedMessageVersion as number|undefined}};
+}
+/** Coordinator side of requestDelivery (POST /deliveries/create): 200 {event_id}, or {error} with the HttpError's
+ * status, else 503. */
+export async function handleDeliveryRequest(env:Env,request:Request):Promise<Response> {
+  if(request.method!=='POST') return new Response(null,{status:405});
+  if(Number(request.headers.get('Content-Length') || 0)>4096) return new Response(null,{status:413});
+  let input:unknown;
+  try { input=await request.json(); } catch { return new Response(null,{status:400}); }
+  const job=deliveryRequest(input);
+  if(!job) return new Response(null,{status:400});
+  try {
+    const eventID=job.kind==='message' ? await createDelivery(env,job.options)
+      : job.kind==='connection_test' ? await createSyntheticTestDelivery(env,job.revisionID,job.actionID)
+      : await createSyntheticCanaryDelivery(env,job.revisionID,job.runID);
+    return Response.json({event_id:eventID});
+  } catch(err) {
+    if(err instanceof HttpError) return Response.json({error:{status:err.status,code:err.code,message:err.message}},{status:err.status});
+    return Response.json({error:{code:err instanceof Error && SAFE_CODE.test(err.message) ? err.message : 'delivery_unavailable'}},{status:503});
+  }
 }
 /** Deferrable (ops-v1 `canary_cleanup`): one live canary message older than 7 days per pass, with no
  * delivery still in flight, loses its content through the owner-delete path (capacity, deletion

@@ -6,7 +6,7 @@ import { exportJWK, generateKeyPair, SignJWT } from 'jose'
 import { createAccessVerifier } from '@ziyixi/edge-auth'
 import { handleAPI } from '../src/native/api.ts'
 import { MAX_ZONE_SEGMENTS, zoneSegments } from '../src/native/api-delivery-stats.ts'
-import { ROUTE_BLOCK_COOLDOWN_MS, ROUTE_BLOCK_GRACE_MS, ROUTE_BLOCK_MAX_RECHECKS, buildPayload, runJob, runMaintenance, syntheticTestMail } from '../src/native/pipeline.ts'
+import { ROUTE_BLOCK_COOLDOWN_MS, ROUTE_BLOCK_GRACE_MS, ROUTE_BLOCK_MAX_RECHECKS, buildPayload, handleDeliveryRequest, runJob, runMaintenance, syntheticTestMail } from '../src/native/pipeline.ts'
 import { alertSignals, alertSnapshot } from '../src/native/alerts.ts'
 import { authenticate, csrfResponse, decryptCredential, encryptCredential, HttpError, privateResponse, requireCSRF } from '../src/native/security.ts'
 
@@ -57,17 +57,20 @@ class TestR2 {
 }
 function environment() {
   const jobs = [], wakes = []
-  return {
+  const env = {
     DB: new TestD1(), MAIL_STORE: new TestR2(), RECEIVE_ADDRESS: 'hero@in.example.org',
     CREDENTIAL_KEY: '12'.repeat(32), DEV_AUTH_BYPASS: 'true', WEBHOOK_ALLOWED_HOSTS: 'consumer.example.org,second.example.org',
     ACCESS_ISSUER: 'https://test.cloudflareaccess.com', ACCESS_AUDIENCE: 'test-audience', ACCESS_OWNER: 'owner@example.org',
     jobs, wakes, COORDINATOR: { idFromName(name) { assert.equal(name, 'inbox-v1'); return name }, get() { return { async fetch(url, init) {
       if (new URL(url).pathname === '/mutation/begin') return Response.json({id: crypto.randomUUID()})
+      // The coordinator creates the deliveries a request asks for (requestDelivery), with the same env here.
+      if (new URL(url).pathname === '/deliveries/create') return handleDeliveryRequest(env, new Request(url, init))
       if (new URL(url).pathname === '/wake') wakes.push(Date.now())
       if (new URL(url).pathname === '/enqueue') jobs.push({ url: String(url), body: init?.body ? JSON.parse(init.body) : null })
       return new Response(null, { status: 204 })
     } } } },
   }
+  return env
 }
 async function session(env) {
   const response = await handleAPI(new Request('http://127.0.0.1:8787/api/v1/csrf'), env)

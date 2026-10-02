@@ -1,39 +1,42 @@
 // mail.received.v1: CPU of building one event's frozen bytes (buildPayload: the content policy, the generated message
 // of proto/mailhero/webhook/v1/mail_received.proto and the wire codec, which checks every rule) inside workerd, measured
 // and calibrated like the Ops calls (tools/workerd-cpu/workerd-cpu.mts). An event is built once, when its delivery is
-// created: in the coordinator's alarm for automatic forwards (a Durable Object invocation, 30 s on Free), and in the
-// Worker's own request for an owner's send or resend and for the dashboard's canary (10 ms on Free). The email()
-// handler builds nothing: it streams the raw message to R2 and leaves MIME parsing and events to the alarm.
+// created, and always in the coordinator, a Durable Object (30 s of CPU per invocation on Free): in its alarm for
+// automatic forwards, and in its /deliveries/create for an owner's send, resend or connection test and for the
+// dashboard's canary (the Worker's request only waits for the event ID: test/cpu/delivery-request-cpu.test.mjs). The
+// email() handler builds nothing: it streams the raw message to R2 and leaves MIME parsing and events to the alarm.
 //
 // Three events: the owner's connection test (the smallest), 105 attachments (the 100-record metadata cap), and the
-// largest body (256 KiB of text, most of it control characters JSON escapes, so the bytes approach the 1 MiB limit).
-// Each is the isolate's first build of an event (a fresh isolate per case), then warm runs.
+// largest parsed input (a 1 MiB UI text, 155,000 of its characters control characters JSON escapes, truncated to the
+// webhook's 256 KiB, so the bytes approach the 1 MiB limit; and 105 attachments). Each case is a test of its own,
+// measured in COLD_ISOLATES fresh isolates (measureInIsolates): the isolate's first build of an event, then warm runs;
+// each isolate calibrates after its builds and its numbers are divided by its own speed (never below 1), and the bounds
+// hold each number's median across the isolates, in milliseconds of the reference machine (an Apple M1 Max). A median
+// speed above MAX_SPEED fails the test.
 //
-// Measured on the reference machine (an Apple M1 Max) on 2026-10-01, three serial runs of this test alone each, in
-// reference ms, before the move onto proto/ (the same test on the hand-written builder) -> after: the connection test
-// first 0.4-1.0 -> 2.2-2.5, warm 0.0-0.4 -> 0.4; 105 attachments first 0.7-0.8 -> 3.7-3.9, warm 0.4 -> 0.8-1.0;
-// the largest body first 2.5-2.7 -> 4.1-4.7, warm 2.3 -> 2.3-2.4 (JSON.stringify of 256 KiB dominates both). The first
-// build runs the codec's code paths and reads the contract's rules from the descriptors for the first time, as an
-// isolate's first status() does for ops-v1 (test/cpu/native-ops-cpu.test.mjs); an isolate that answered status() has
-// run part of them already. COLD_BOUND_MS is 7 ms, about 1.5 times the largest first build, and WARM_BOUND_MS 3.5 ms:
-// milliseconds of the reference machine, scaled by the measured speed (never below 1).
-import test from 'node:test'
+// Measured on the reference machine on 2026-10-01, in reference ms. Before the move onto proto/ (the hand-written
+// builder, one isolate per case): the connection test first 0.4-1.0, warm 0.0-0.4; 105 attachments first 0.6-0.8, warm
+// 0.4; the largest parsed input first 3.2-3.3, warm 2.4-2.6. After it, medians of three isolates over eight serial runs
+// of `npm run test:cpu` (other work loading the machine to a load average of about 3; single isolates in brackets): the
+// connection test first 2.2-2.6 (2.1-2.9), warm 0.4; 105 attachments first 3.6-3.7 (3.5-3.9), warm 0.9; the largest
+// parsed input first 6.3-6.6 (6.1-6.6), warm 2.9 (truncating and serialising the text dominates both). The first build
+// runs the codec's code paths and reads the contract's rules from the descriptors for the first time. With nine of the
+// ten cores busy (`yes`), 3 of 3 runs passed: most calibrations were disturbed and the profiles lost samples, so the
+// numbers read low (tools/workerd-cpu/README.md). These bounds are not the Free 10 ms (no Worker request builds an
+// event) but a regression gate on the codec, one for the three cases, which run the same codec paths: COLD_BOUND_MS is
+// 9.5 ms, about 1.5 times the largest first build, and WARM_BOUND_MS 4.5 ms. An injected 5 ms more in an isolate's
+// first build failed the largest case in 3 of 3 runs (11.6-11.7); the smaller cases then read 7.7-9.0 and passed.
+import test, { before } from 'node:test'
 import assert from 'node:assert/strict'
-import { join, resolve } from 'node:path'
-import { fileURLToPath } from 'node:url'
-import { build } from 'esbuild'
-import { Miniflare, convertV4MiniflareOptions } from 'miniflare'
-import { connectCpuMeter, FREE_CPU_MS, MAX_SPEED, scaleFor, tooSlow } from '../../../../tools/workerd-cpu/workerd-cpu.mts'
+import { COLD_ISOLATES, CPU_TEST_TIMEOUT_MS, measureInIsolates } from '../../../../tools/workerd-cpu/workerd-cpu.mts'
+import { bundle, startIsolate } from './isolate.mjs'
 
-const root = resolve(fileURLToPath(new URL('../..', import.meta.url)))
-// A port range of its own (the Ops CPU test uses 10000-10399).
-const PORT = 10_400 + Math.floor(Math.random() * 300)
-/** The bound of an isolate's first build of an event, in reference milliseconds. */
-const COLD_BOUND_MS = 0.7 * FREE_CPU_MS
-/** The bound of a warm build, in reference milliseconds. */
-const WARM_BOUND_MS = 0.35 * FREE_CPU_MS
+/** The bound of an isolate's first build of an event (median of COLD_ISOLATES isolates), in reference milliseconds. */
+const COLD_BOUND_MS = 9.5
+/** The bound of a warm build (the median of COLD_ISOLATES isolates' warm medians), in reference milliseconds. */
+const WARM_BOUND_MS = 4.5
 const RUNS = 11
-const CASES = ['connection_test', 'attachments_105', 'max_size']
+const CASES = ['connection_test', 'attachments_105', 'largest_parsed']
 
 const ENTRY = `
   import { buildPayload, syntheticTestMail } from './src/native/pipeline';
@@ -42,7 +45,8 @@ const ENTRY = `
   const mails = {
     connection_test: base,
     attachments_105: { ...base, subject: 'Many small files', attachments: Array.from({ length: 105 }, (_, n) => attachment(n + 1)) },
-    max_size: { ...base, subject: 'Quarterly report', text: '\\u0001'.repeat(155000) + 'y'.repeat(107144) },
+    largest_parsed: { ...base, subject: 'Quarterly report', text: '\\u0001'.repeat(155000) + 'y'.repeat(1048576 - 155000),
+      attachments: Array.from({ length: 105 }, (_, n) => attachment(n + 1)) },
   };
   export default { async fetch(request) {
     const mail = mails[new URL(request.url).pathname.slice(1)];
@@ -51,33 +55,34 @@ const ENTRY = `
     return new Response(String(payload.length));
   } };`
 
-async function start(script, port) {
-  const mf = new Miniflare(convertV4MiniflareOptions({
-    name: 'mail-hero-payload', modules: true, script, compatibilityDate: '2026-09-07', host: '127.0.0.1', port: 0, inspectorPort: port,
-  }))
-  await mf.ready
-  // The isolate is up (its global scope ran, as before any request); no event has been built yet.
-  const meter = await connectCpuMeter(port, 'mail-hero-payload')
-  const call = async name => {
-    const response = await mf.dispatchFetch(`http://payload/${name}`)
-    assert.equal(response.status, 200)
-    return Number(await response.text())
-  }
-  return { mf, meter, call }
+/** The bundle of ENTRY, built once for every case. */
+let script
+
+/** A fresh isolate of ENTRY: its global scope ran (as before any request), and no event has been built in it yet. */
+function start() {
+  return startIsolate({ workers: [{ name: 'mail-hero-payload', modules: true, script, compatibilityDate: '2026-09-07' }], prefix: 'mail-hero-payload-cpu-' },
+    ['mail-hero-payload'], async mf => ({
+      /** Builds the event of the case `name` and answers its length in bytes. */
+      async build(name) {
+        const response = await mf.dispatchFetch(`http://payload/${name}`)
+        assert.equal(response.status, 200)
+        return Number(await response.text())
+      },
+    }))
 }
 
-test('workerd buildPayload: an event is built well below the Free CPU limit, an isolate\'s first one too', { timeout: 300000 }, async t => {
-  const script = (await build({ stdin: { contents: ENTRY, resolveDir: root, sourcefile: 'payload-cpu-entry.ts', loader: 'ts' },
-    bundle: true, format: 'esm', platform: 'neutral', external: ['cloudflare:workers'], write: false })).outputFiles[0].text
-  for (const [i, name] of CASES.entries()) {
-    const { mf, meter, call } = await start(script, PORT + i)
-    t.after(() => { meter.close(); return mf.dispose() })
-    const measured = await meter.measure(`buildPayload(${name})`, async () => assert.ok(await call(name) <= 1024 * 1024), RUNS)
-    const calibration = await meter.calibrate()
-    assert.ok(calibration.speed <= MAX_SPEED, tooSlow(calibration))
-    const scale = scaleFor(calibration.speed)
-    console.log(`cpu buildPayload(${name}) in reference ms: first ${(measured.first / scale).toFixed(2)}, warm median ${(measured.median / scale).toFixed(2)} (speed ${calibration.speed.toFixed(2)})`)
-    assert.ok(measured.first < COLD_BOUND_MS * scale, `${name}: first build ${measured.first.toFixed(2)} ms`)
-    assert.ok(measured.median < WARM_BOUND_MS * scale, `${name}: warm median ${measured.median.toFixed(2)} ms`)
-  }
+before(async () => {
+  script = await bundle({ contents: ENTRY, sourcefile: 'payload-cpu-entry.ts' })
 })
+
+for (const name of CASES) {
+  test(`workerd buildPayload(${name}): an event's build stays within its CPU bounds, an isolate's first one too`, { timeout: CPU_TEST_TIMEOUT_MS }, async () => {
+    const label = `buildPayload(${name})`
+    const { reference } = await measureInIsolates(COLD_ISOLATES, start,
+      async ({ meter, build }) => [await meter.measure(label, async () => assert.ok(await build(name) <= 1024 * 1024), RUNS)])
+    console.log(`cpu bounds (reference ms, medians of ${COLD_ISOLATES} isolates): first build < ${COLD_BOUND_MS}, warm median < ${WARM_BOUND_MS}`)
+    const { first, median } = reference.get(label)
+    assert.ok(first < COLD_BOUND_MS, `${label}, the isolate's first build, the median of ${COLD_ISOLATES} isolates: ${first.toFixed(2)} reference ms`)
+    assert.ok(median < WARM_BOUND_MS, `${label}, warm median, the median of ${COLD_ISOLATES} isolates: ${median.toFixed(2)} reference ms`)
+  })
+}

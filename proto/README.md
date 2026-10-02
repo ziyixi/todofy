@@ -66,12 +66,17 @@ generated schema the frozen hand-written one's verdict (formats asserted; in ECM
 U+001C-U+001F, U+0085 and U+FEFF on purpose: `mail_received.proto`'s header). It ships after the vocabulary and deploys
 Mail Hero and Todofy only. Measured on 2026-10-01: Mail Hero's bundle 189.8 → 192.4 KiB gzip (the descriptors and the
 generated message; budget 228 KiB); building an event in workerd, in reference ms, the connection test first 0.4-1.0 →
-2.2-2.5 and warm about 0.4 either way, 105 attachments first 0.7-0.8 → 3.7-3.9 and warm 0.4 → 0.8-1.0, the largest body
-first 2.5-2.7 → 4.1-4.7 and warm 2.3 either way (`mail-hero/cloudflare/test/cpu/payload-cpu.test.mjs` holds them below
-7 and 3.5 ms); the email() handler builds nothing and still only streams the raw message to R2; Mail Hero's first
-`status()` stays within its noise; todofy-core's upload 542.7 → 554.0 KiB (gzip 151.2 → 153.5); parsing an event on the
-host (CPython) 0.01 → 0.04 ms for a small one, 0.2 → 0.7 ms with 100 attachments, 0.9 ms either way for the largest;
-Todofy's UI bundle is unchanged (its types come from the OpenAPI document).
+2.2-2.6 and warm about 0.4 either way, 105 attachments first 0.6-0.8 → 3.6-3.9 and warm 0.4 → 0.8-1.0, the largest
+parsed input (a 1 MiB text truncated to 256 KiB, 105 attachments) first 3.2-3.3 → 5.9-6.6 and warm 2.4-2.6 → 2.8-2.9
+(`mail-hero/cloudflare/test/cpu/payload-cpu.test.mjs` holds the medians of three fresh isolates below 9.5 and 4.5
+ms). Only the coordinator (a Durable Object, 30 s per invocation) builds an event: its alarm for forwards, and its
+`/deliveries/create` for an owner's send, resend or connection test and the dashboard's canary, whose Worker request
+only waits for the event ID (1.4-3.7 ms first as medians of three fresh isolates, at most 2.4 warm, with the largest
+parsed record and a real Access JWT; 12-15 ms when the Worker built it: `test/cpu/delivery-request-cpu.test.mjs`);
+the email() handler builds nothing and still only streams the raw message to R2; Mail Hero's first `status()` stays
+within its noise; todofy-core's upload 542.7 → 554.0 KiB (gzip 151.2 → 153.5); parsing an event on the host (CPython)
+0.01 → 0.04 ms for a small one, 0.2 → 0.7 ms with 100 attachments, 0.9 ms either way for the largest; Todofy's UI
+bundle is unchanged (its types come from the OpenAPI document).
 
 ## Rules
 
