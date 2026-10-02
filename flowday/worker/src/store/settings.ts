@@ -3,7 +3,7 @@
  * todoist_api_key, day_capacity_mins, planning_completed:<date>, last_sync_at (container era), and the sync's own
  * todoist_sync_token, todoist_projects and sync_claimed_at (../sync.ts).
  */
-import { and, eq, gte, inArray, lt, sql, type SQL } from 'drizzle-orm';
+import { and, eq, gte, inArray, lt, lte, sql, type SQL } from 'drizzle-orm';
 import type { Db } from '../db.ts';
 import { settings } from '../schema.ts';
 
@@ -42,6 +42,9 @@ export async function deleteSetting(db: Db, key: string): Promise<void> {
 /** The settings key that marks a day's planning as completed (value 'true'); kept since the container era. */
 export const PLANNING_PREFIX = 'planning_completed:';
 
+/** The first key after every planning key (`;` follows `:`). */
+export const PLANNING_END = 'planning_completed;';
+
 export function planningKey(flowDate: string): string {
   return `${PLANNING_PREFIX}${flowDate}`;
 }
@@ -54,6 +57,19 @@ export async function getPlanningDays(db: Db): Promise<Set<string>> {
   const rows = await db
     .select({ key: settings.key })
     .from(settings)
-    .where(and(gte(settings.key, PLANNING_PREFIX), lt(settings.key, 'planning_completed;'), eq(settings.value, 'true')));
+    .where(and(gte(settings.key, PLANNING_PREFIX), lt(settings.key, PLANNING_END), eq(settings.value, 'true')));
+  return new Set(rows.map((row) => row.key.slice(PLANNING_PREFIX.length)));
+}
+
+/** The days of [startDate, endDate] whose planning is completed (a range of the primary key, as getPlanningDays). */
+export function planningDaysBetweenQuery(db: Db, startDate: string, endDate: string) {
+  return db
+    .select({ key: settings.key })
+    .from(settings)
+    .where(and(gte(settings.key, planningKey(startDate)), lte(settings.key, planningKey(endDate)), eq(settings.value, 'true')));
+}
+
+export async function getPlanningDaysBetween(db: Db, startDate: string, endDate: string): Promise<Set<string>> {
+  const rows = await planningDaysBetweenQuery(db, startDate, endDate);
   return new Set(rows.map((row) => row.key.slice(PLANNING_PREFIX.length)));
 }

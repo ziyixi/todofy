@@ -96,13 +96,17 @@ describe('write budget of a day of use', () => {
       add('corrections', await h.call((api) => api.createTimeEntry({ timeEntry: { taskId, flowDate: DAY, startTime: at(`${DAY}T${start}:00Z`), endTime: at(`${DAY}T${end}:00Z`), durationSeconds: seconds, source: TimeEntry_Source.MANUAL }, requestId: crypto.randomUUID() })));
     }
     for (const id of plan.slice(0, 6)) add('done', await h.call((api) => api.completeFlowTask({ name: `flows/${DAY}`, taskId: id })));
-    add('rollover', await h.call((api) => api.rolloverFlow({ name: `flows/${DAY}`, destination: 'flows/2026-04-14' })));
+    add('rollover', await h.call((api) => api.rolloverFlow({ name: `flows/${DAY}`, destination: 'flows/2026-04-14', allUnfinished: true })));
     add('quick task', await h.call((api) => api.createTask({ task: { title: 'Call the plumber', dueDate: DAY }, requestId: crypto.randomUUID() })));
 
     const total = Object.values(rows).reduce((sum, value) => sum + value, 0);
     console.log(`write budget of a day of use: ${String(total)} rows ${JSON.stringify(rows)}`);
     expect(total).toBeLessThan(250);
-    // A ratchet: no step writes more than it did through the hand-written routes before flowday.ui.v1 (2026-10-02).
-    for (const [label, before] of Object.entries(ROWS_BEFORE_UI_V1)) expect(rows[label], label).toBeLessThanOrEqual(before);
+    // A ratchet: no step writes more than it did through the hand-written routes before flowday.ui.v1 (2026-10-02),
+    // and every step still writes (a step that wrote nothing would no longer measure what it is named after).
+    for (const [label, before] of Object.entries(ROWS_BEFORE_UI_V1)) {
+      expect(rows[label], label).toBeLessThanOrEqual(before);
+      expect(rows[label], label).toBeGreaterThan(0);
+    }
   });
 });

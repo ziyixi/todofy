@@ -87,6 +87,21 @@ describe('tasks', () => {
     expect((await h.call((api) => api.listTasks({ pageToken: 'not-a-token' }))).status?.reason).toBe('BAD_REQUEST');
   });
 
+  it('every list refuses a negative page_size (AIP-158) and reads 0 as the default', async () => {
+    await seedTasks({ id: 'a' });
+    const lists = [
+      (pageSize: number) => h.call((api) => api.listTasks({ pageSize })),
+      (pageSize: number) => h.call((api) => api.listFlows({ pageSize })),
+      (pageSize: number) => h.call((api) => api.listNotes({ parent: 'flows/2026-04-13', pageSize })),
+      (pageSize: number) => h.call((api) => api.listTimeEntries({ taskId: 'a', pageSize })),
+      (pageSize: number) => h.call((api) => api.queryAnalytics({ pageSize })),
+    ];
+    for (const [index, list] of lists.entries()) {
+      expect((await list(-1)).status?.reason, `list ${String(index)}`).toBe('BAD_REQUEST');
+      expect((await list(0)).status, `list ${String(index)}`).toBeUndefined();
+    }
+  });
+
   it('GetTask answers a task, deleted or not; NOT_FOUND for none; BAD_REQUEST for a malformed name', async () => {
     await seedTasks({ id: 't1' });
     await h.api.deleteTask({ name: 'tasks/t1' });
@@ -109,7 +124,8 @@ describe('tasks', () => {
     expect(repeated.rowsWritten).toBe(0);
     expect((await h.api.createTask({ task: { title: 'No request ID' } })).name).toMatch(/^tasks\/local-[0-9a-f-]{36}$/);
     expect(await taskIds()).toHaveLength(2);
-    for (const bad of [{ title: '' }, { title: '   ' }, { title: 'x'.repeat(2001) }, { title: 'Bad day', dueDate: '2026-02-30' }, { title: 'Negative', estimatedMinutes: -1 }]) {
+    // An over-long description is refused like an over-long title, never cut short.
+    for (const bad of [{ title: '' }, { title: '   ' }, { title: 'x'.repeat(2001) }, { title: 'Bad day', dueDate: '2026-02-30' }, { title: 'Negative', estimatedMinutes: -1 }, { title: 'Long', description: 'x'.repeat(2001) }]) {
       expect((await h.call((api) => api.createTask({ task: bad }))).status?.reason, JSON.stringify(bad).slice(0, 40)).toBe('BAD_REQUEST');
     }
     // A request_id is a UUID4 (the transcoder checks it).
@@ -137,6 +153,31 @@ describe('tasks', () => {
       expect((await h.call((api) => api.updateTask({ task, updateMask: { paths: [...paths] } }))).status?.reason, paths.join()).toBe('BAD_REQUEST');
     }
     expect((await h.call((api) => api.updateTask({ task: { name: 'tasks/none', title: 'x' }, updateMask: { paths: ['title'] } }))).status?.reason).toBe('NOT_FOUND');
+  });
+
+  it('UpdateTask keeps the IMMUTABLE fields (AIP-203): the same value passes, a different one is INVALID_ARGUMENT', async () => {
+    await seedTasks({ id: 't1', priority: 2, labels: ['a'], dueDate: '2026-04-20', description: 'About it' });
+    // The whole task (no mask), as GetTask answered it: the immutable values are the stored ones.
+    const stored = await h.api.getTask({ name: 'tasks/t1' });
+    const whole = await h.call((api) => api.updateTask({ task: { ...stored, title: 'Renamed' } }));
+    expect(whole.value).toMatchObject({ title: 'Renamed', priority: 2, labels: ['a'], dueDate: '2026-04-20', description: 'About it' });
+    // Without a mask an immutable field left empty was not given.
+    expect((await h.call((api) => api.updateTask({ task: { name: 'tasks/t1', title: 'Again' } }))).value?.title).toBe('Again');
+    // A mask that names an immutable field with its stored value changes nothing.
+    expect((await h.call((api) => api.updateTask({ task: { name: 'tasks/t1', priority: 2 }, updateMask: { paths: ['priority'] } }))).rowsWritten).toBe(0);
+    for (const [task, paths] of [
+      [{ name: 'tasks/t1', title: 'x', priority: 4 }, undefined],
+      [{ name: 'tasks/t1', title: 'x', labels: ['b'] }, undefined],
+      [{ name: 'tasks/t1', title: 'x', dueDate: '2026-04-21' }, undefined],
+      [{ name: 'tasks/t1', title: 'x', description: 'Other' }, undefined],
+      [{ name: 'tasks/t1' }, ['due_date']],
+      [{ name: 'tasks/t1', labels: [] }, ['labels']],
+    ] as const) {
+      const call = await h.call((api) => api.updateTask({ task: { ...task, labels: [...(task.labels ?? [])] }, ...(paths === undefined ? {} : { updateMask: { paths: [...paths] } }) }));
+      expect(call.status?.reason, JSON.stringify(task)).toBe('BAD_REQUEST');
+      expect(call.rowsWritten).toBe(0);
+    }
+    expect(await h.api.getTask({ name: 'tasks/t1' })).toMatchObject({ title: 'Again', priority: 2, labels: ['a'], dueDate: '2026-04-20' });
   });
 
   it('DeleteTask soft-deletes a task and removes it from every flow; a second delete is NOT_FOUND with the deleted task', async () => {
@@ -220,7 +261,7 @@ describe('flows', () => {
     await setFlowTaskIds(h.db(), '2026-04-13', ['t1', 't2', 't3']);
     await setFlowTaskIds(h.db(), '2026-04-14', ['t3', 't9']);
     await addCompletedFlowTask(h.db(), '2026-04-13', 't1');
-    const moved = await h.api.rolloverFlow({ name: 'flows/2026-04-13', destination: 'flows/2026-04-14' });
+    const moved = await h.api.rolloverFlow({ name: 'flows/2026-04-13', destination: 'flows/2026-04-14', allUnfinished: true });
     expect([moved.flow?.taskIds, moved.destinationFlow?.taskIds]).toEqual([['t1'], ['t2', 't3', 't9']]);
     expect(await getAllFlows(h.db())).toEqual({ '2026-04-13': ['t1'], '2026-04-14': ['t2', 't3', 't9'] });
   });
@@ -228,9 +269,18 @@ describe('flows', () => {
   it('RolloverFlow writes nothing when nothing is unfinished', async () => {
     await setFlowTaskIds(h.db(), '2026-04-13', ['t1']);
     await addCompletedFlowTask(h.db(), '2026-04-13', 't1');
-    const result = await h.call((api) => api.rolloverFlow({ name: 'flows/2026-04-13', destination: 'flows/2026-04-14' }));
+    const result = await h.call((api) => api.rolloverFlow({ name: 'flows/2026-04-13', destination: 'flows/2026-04-14', allUnfinished: true }));
     expect(result.rowsWritten).toBe(0);
     expect(await getAllFlows(h.db())).toEqual({ '2026-04-13': ['t1'] });
+  });
+
+  it('RolloverFlow with an empty task_ids and no all_unfinished moves nothing; both together are INVALID_ARGUMENT', async () => {
+    await setFlowTaskIds(h.db(), '2026-04-13', ['t1', 't2']);
+    const empty = await h.call((api) => api.rolloverFlow({ name: 'flows/2026-04-13', destination: 'flows/2026-04-14', taskIds: [] }));
+    expect([empty.value?.flow?.taskIds, empty.value?.destinationFlow?.taskIds, empty.rowsWritten]).toEqual([['t1', 't2'], [], 0]);
+    const both = await h.call((api) => api.rolloverFlow({ name: 'flows/2026-04-13', destination: 'flows/2026-04-14', taskIds: ['t1'], allUnfinished: true }));
+    expect([both.status?.reason, both.rowsWritten]).toEqual(['BAD_REQUEST', 0]);
+    expect(await getAllFlows(h.db())).toEqual({ '2026-04-13': ['t1', 't2'] });
   });
 
   it('RolloverFlow with task_ids moves only those; unknown IDs move nothing', async () => {
@@ -304,13 +354,34 @@ describe('time entries', () => {
 
   it('UpdateTimeEntry recomputes the duration; NOT_FOUND for a missing entry; BAD_REQUEST for an end before the start', async () => {
     await seedEntries();
-    const updated = await h.api.updateTimeEntry({ timeEntry: { name: 'timeEntries/e1', startTime: at('2026-04-13T10:07:00Z'), endTime: at('2026-04-13T11:22:00Z') } });
+    const updated = await h.api.updateTimeEntry({ timeEntry: { name: 'timeEntries/e1', startTime: at('2026-04-13T10:07:00Z'), endTime: at('2026-04-13T11:22:00Z') }, updateMask: { paths: ['start_time', 'end_time'] } });
     expect(updated.durationSeconds).toBe(4500);
     const endOnly = await h.api.updateTimeEntry({ timeEntry: { name: 'timeEntries/e1', endTime: at('2026-04-13T10:37:00Z') }, updateMask: { paths: ['end_time'] } });
     expect([iso(endOnly.startTime), endOnly.durationSeconds]).toEqual(['2026-04-13T10:07:00.000Z', 1800]);
-    expect((await h.call((api) => api.updateTimeEntry({ timeEntry: { name: 'timeEntries/none', startTime: at('2026-04-13T10:00:00Z'), endTime: at('2026-04-13T11:00:00Z') } }))).status?.reason).toBe('NOT_FOUND');
-    expect((await h.call((api) => api.updateTimeEntry({ timeEntry: { name: 'timeEntries/e1', startTime: at('2026-04-13T12:00:00Z'), endTime: at('2026-04-13T11:00:00Z') } }))).status?.reason).toBe('BAD_REQUEST');
+    const times = { paths: ['start_time', 'end_time'] };
+    expect((await h.call((api) => api.updateTimeEntry({ timeEntry: { name: 'timeEntries/none', startTime: at('2026-04-13T10:00:00Z'), endTime: at('2026-04-13T11:00:00Z') }, updateMask: times }))).status?.reason).toBe('NOT_FOUND');
+    expect((await h.call((api) => api.updateTimeEntry({ timeEntry: { name: 'timeEntries/e1', startTime: at('2026-04-13T12:00:00Z'), endTime: at('2026-04-13T11:00:00Z') }, updateMask: times }))).status?.reason).toBe('BAD_REQUEST');
     expect((await h.call((api) => api.updateTimeEntry({ timeEntry: { name: 'timeEntries/e1', taskId: 't9' }, updateMask: { paths: ['task_id'] } }))).status?.reason).toBe('BAD_REQUEST');
+  });
+
+  it('UpdateTimeEntry without a mask takes the whole entry (REQUIRED fields bind) and keeps its IMMUTABLE fields (AIP-203)', async () => {
+    await seedEntries();
+    const times = { startTime: at('2026-04-13T09:10:00Z'), endTime: at('2026-04-13T09:40:00Z') };
+    // Without a mask the body is the whole entry: without its REQUIRED task_id and flow_date the transcoder refuses it.
+    const partial = await h.mutate('PATCH', '/api/v1/timeEntries/e1', { start_time: '2026-04-13T09:10:00Z', end_time: '2026-04-13T09:40:00Z' });
+    expect(partial.status).toBe(400);
+    const whole = await h.call((api) => api.updateTimeEntry({ timeEntry: { name: 'timeEntries/e1', taskId: 't1', flowDate: '2026-04-13', source: TimeEntry_Source.TIMER, durationSeconds: 5, ...times } }));
+    expect(whole.value).toMatchObject({ taskId: 't1', flowDate: '2026-04-13', durationSeconds: 1800, source: TimeEntry_Source.TIMER });
+    for (const change of [{ taskId: 't9' }, { flowDate: '2026-04-14' }, { source: TimeEntry_Source.MANUAL }]) {
+      const call = await h.call((api) => api.updateTimeEntry({ timeEntry: { name: 'timeEntries/e1', taskId: 't1', flowDate: '2026-04-13', ...times, ...change } }));
+      expect([call.status?.reason, call.rowsWritten], JSON.stringify(change)).toEqual(['BAD_REQUEST', 0]);
+    }
+    // A mask that names an immutable field: its stored value passes, another is INVALID_ARGUMENT.
+    const same = await h.call((api) => api.updateTimeEntry({ timeEntry: { name: 'timeEntries/e1', flowDate: '2026-04-13', ...times }, updateMask: { paths: ['flow_date', 'end_time'] } }));
+    expect(same.status).toBeUndefined();
+    const moved = await h.call((api) => api.updateTimeEntry({ timeEntry: { name: 'timeEntries/e1', flowDate: '2026-04-14', ...times }, updateMask: { paths: ['flow_date'] } }));
+    expect(moved.status?.reason).toBe('BAD_REQUEST');
+    expect(await getEntriesByTask(h.db(), 't1')).toMatchObject([{ id: 'e1', taskId: 't1', flowDate: '2026-04-13', startTime: '2026-04-13T09:10:00.000Z', durationS: 1800 }]);
   });
 
   it('DeleteTimeEntry removes an entry; NOT_FOUND for a missing one', async () => {
@@ -443,7 +514,8 @@ describe('QueryAnalytics', () => {
     await setFlowTaskIds(h.db(), '2026-04-13', ['t1', 't2']);
     await setSetting(h.db(), 'day_capacity_mins', '420');
     const data = await h.api.queryAnalytics({ startDate: '2026-04-13', endDate: '2026-04-19' });
-    expect(data.flows.map((flow) => [flow.name, flow.taskIds, flow.completedTaskIds])).toEqual([['flows/2026-04-13', ['t1', 't2'], ['t1']]]);
+    expect(data.plannedTasks.map((row) => [row.flowDate, row.taskId])).toEqual([['2026-04-13', 't1'], ['2026-04-13', 't2']]);
+    expect(data.completedTasks.map((row) => [row.flowDate, row.taskId])).toEqual([['2026-04-13', 't1']]);
     expect(data.timeEntries.map((entry) => entry.name)).toEqual(['timeEntries/e1']);
     expect(data.tasks.map((task) => task.name).sort()).toEqual(['tasks/t1', 'tasks/t2']);
     expect(data.dayCapacityMinutes).toBe(420);
@@ -458,7 +530,7 @@ describe('QueryAnalytics', () => {
     let pageToken = '';
     do {
       const page = await h.api.queryAnalytics({ pageSize: 2, pageToken });
-      expect(page.flows).toEqual([]);
+      expect([page.plannedTasks, page.completedTasks]).toEqual([[], []]);
       pages.push(page.timeEntries.map((entry) => entry.name.slice('timeEntries/'.length)));
       pageToken = page.nextPageToken;
     } while (pageToken !== '');
@@ -466,6 +538,36 @@ describe('QueryAnalytics', () => {
     for (const request of [{ startDate: '2026-04-20', endDate: '2026-04-13' }, { startDate: '2026-04-13' }, { startDate: '2026-04-31', endDate: '2026-05-01' }]) {
       expect((await h.call((api) => api.queryAnalytics(request))).status?.reason, JSON.stringify(request)).toBe('BAD_REQUEST');
     }
+  });
+
+  it('a range pages planned rows, then done rows, then entries, at most page_size rows a page, with the tasks each names', async () => {
+    await seedTasks({ id: 't1' }, { id: 't2' }, { id: 't3' });
+    await setFlowTaskIds(h.db(), '2026-04-13', ['t1', 't2']);
+    await setFlowTaskIds(h.db(), '2026-04-14', ['t3']);
+    await addCompletedFlowTask(h.db(), '2026-04-13', 't2');
+    await createTimeEntry(h.db(), { id: 'e1', taskId: 't3', flowDate: '2026-04-14', startTime: '2026-04-14T09:00:00Z', endTime: null, durationS: 60, source: 'timer' });
+    const pages: string[][] = [];
+    let pageToken = '';
+    do {
+      const page = await h.api.queryAnalytics({ startDate: '2026-04-13', endDate: '2026-04-14', pageSize: 2, pageToken });
+      pages.push([
+        ...page.plannedTasks.map((row) => `p ${row.flowDate} ${row.taskId}`),
+        ...page.completedTasks.map((row) => `c ${row.flowDate} ${row.taskId}`),
+        ...page.timeEntries.map((entry) => `e ${entry.name}`),
+        ...page.tasks.map((task) => task.name).sort(),
+      ]);
+      pageToken = page.nextPageToken;
+    } while (pageToken !== '');
+    expect(pages).toEqual([
+      ['p 2026-04-13 t1', 'p 2026-04-13 t2', 'tasks/t1', 'tasks/t2'],
+      ['p 2026-04-14 t3', 'c 2026-04-13 t2', 'tasks/t2', 'tasks/t3'],
+      ['e timeEntries/e1', 'tasks/t3'],
+    ]);
+    // A token is bound to its range, and only a token this API made is read.
+    const first = await h.api.queryAnalytics({ startDate: '2026-04-13', endDate: '2026-04-14', pageSize: 1 });
+    expect((await h.call((api) => api.queryAnalytics({ startDate: '2026-04-13', endDate: '2026-04-15', pageToken: first.nextPageToken }))).status?.reason).toBe('BAD_REQUEST');
+    const stats = await h.api.queryAnalytics({ pageSize: 1 });
+    expect(stats.nextPageToken).toBe('');
   });
 });
 

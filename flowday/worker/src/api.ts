@@ -7,6 +7,9 @@
  * INTERNAL.
  *
  * The routes this replaces (/api/tasks, /api/flows, ... until 2026-10-02) answer 410 `reload_required` (./router.ts).
+ *
+ * Every list reads about one page of D1 rows per page (a keyset cursor and an index that seeks to it, never a whole
+ * table re-read and sliced), because the UI reads every page and D1's daily read allowance is shared by the account.
  */
 import { sql } from 'drizzle-orm';
 import { updatePaths } from '@ziyixi/proto/field-mask';
@@ -52,21 +55,22 @@ import {
 } from './limits.ts';
 import type { NoteRecord, TaskRecord, TimeEntryRecord, TimerSessionRecord } from './model.ts';
 import { settings as settingsTable } from './schema.ts';
-import { analyticsPage, dayCapacity } from './store/analytics.ts';
+import { analyticsPage, cursorFromValue, cursorValue, dayCapacity } from './store/analytics.ts';
 import { createTimeEntry, deleteTimeEntry, getTimeEntry, listTimeEntries, updateTimeEntry, type EntryCursor } from './store/entries.ts';
 import {
   addCompletedFlowTask,
-  getAllCompletedFlowTasks,
-  getAllFlows,
+  flowDaysAfter,
   getCompletedTaskIds,
+  getCompletedTaskIdsInDateRange,
   getFlowTaskIds,
+  getFlowTaskIdsInDateRange,
   removeCompletedFlowTask,
   rolloverAllTasks,
   rolloverSelectedTasks,
   setFlowStatements,
 } from './store/flows.ts';
 import { getNote, listNotes, upsertNote } from './store/notes.ts';
-import { getPlanningDays, getSetting, getSettings, planningKey, setSettingQuery, setSettingSql } from './store/settings.ts';
+import { getPlanningDaysBetween, getSetting, getSettings, planningKey, setSettingQuery, setSettingSql } from './store/settings.ts';
 import { createLocalTask, getTask, listTasks, restoreTask, runStatements, softDeleteTask, updateTaskEstimate, updateTaskTitle } from './store/tasks.ts';
 import { clearActiveTimerSession, getActiveTimerSession, saveActiveTimerSession } from './store/timer-session.ts';
 import { KEY_API_KEY, KEY_CLAIMED_AT, KEY_LAST_SYNC_AT, KEY_PENDING, KEY_PROJECTS, KEY_SYNC_TOKEN, runSync } from './sync.ts';
@@ -142,21 +146,50 @@ function noteName(name: string): { flowDate: string; taskId: string } {
   return { flowDate: day(parts[1] ?? ''), taskId };
 }
 
-/** The masked fields an update replaces: `*` becomes `all`; output-only `ignored` paths are dropped; others refused. */
-function maskOf(mask: { readonly paths: readonly string[] } | undefined, all: readonly string[], ignored: readonly string[] = []): Set<string> {
+/** What an update addresses (AIP-134, AIP-203). */
+interface UpdateMask {
+  /** The fields it replaces. */
+  readonly fields: Set<string>;
+  /** The IMMUTABLE fields it names: each must equal the stored value. */
+  readonly immutable: Set<string>;
+  /** Whether it is the whole resource (no mask, an empty one or `*`): an IMMUTABLE field left at its default is then not given. */
+  readonly whole: boolean;
+}
+
+/**
+ * The fields an update addresses: an absent, empty or `*` mask is the whole resource (`all` and every `immutable`
+ * field); otherwise the named ones of `all` and `immutable`, with the output-only `ignored` paths dropped and any other
+ * path refused.
+ */
+function maskOf(
+  mask: { readonly paths: readonly string[] } | undefined,
+  all: readonly string[],
+  ignored: readonly string[] = [],
+  immutable: readonly string[] = [],
+): UpdateMask {
   let paths: '*' | readonly string[];
   try {
     paths = updatePaths(mask);
   } catch {
     bad();
   }
-  if (paths === '*') return new Set(all);
-  const out = new Set<string>();
+  if (paths === '*') return { fields: new Set(all), immutable: new Set(immutable), whole: true };
+  const out: UpdateMask = { fields: new Set(), immutable: new Set(), whole: false };
   for (const path of paths) {
-    if (all.includes(path)) out.add(path);
+    if (all.includes(path)) out.fields.add(path);
+    else if (immutable.includes(path)) out.immutable.add(path);
     else if (!ignored.includes(path)) bad();
   }
   return out;
+}
+
+/**
+ * AIP-203: an IMMUTABLE field the update addresses must keep its stored value. A field the mask names compares as
+ * given (its default too); in a whole-resource update a field left at its default (`given` false) was not given.
+ */
+function keepImmutable(mask: UpdateMask, field: string, given: boolean, same: boolean): void {
+  if (!mask.immutable.has(field) || (mask.whole && !given)) return;
+  if (!same) bad();
 }
 
 // ---- times -------------------------------------------------------------------------------------------------------
@@ -184,8 +217,10 @@ function timeText(timestamp: Timestamp): string {
 
 // ---- page tokens -------------------------------------------------------------------------------------------------
 
+/** AIP-158: 0 is the default (`max`), a larger value is read as `max`, and a negative one is INVALID_ARGUMENT. */
 function pageSize(requested: number, max: number): number {
-  return requested <= 0 || requested > max ? max : requested;
+  if (requested < 0) bad();
+  return requested === 0 || requested > max ? max : requested;
 }
 
 /** The cursor of a page token (undefined for the first page); BAD_REQUEST for a token of other parameters. */
@@ -199,16 +234,11 @@ function cursorOf(token: string, parameters: PageParameters): unknown {
   }
 }
 
-function entryCursorOf(value: unknown, byDay: boolean): EntryCursor | null {
+function entryCursorOf(value: unknown): EntryCursor | null {
   if (value === undefined) return null;
-  const { d, s, i } = (typeof value === 'object' && value !== null ? value : {}) as { d?: unknown; s?: unknown; i?: unknown };
-  if (typeof s !== 'string' || typeof i !== 'string' || (byDay ? typeof d !== 'string' : d !== undefined)) bad();
-  return byDay ? { flowDate: d as string, startTime: s, id: i } : { startTime: s, id: i };
-}
-
-function entryToken(cursor: EntryCursor | null, parameters: PageParameters): string {
-  if (cursor === null) return '';
-  return encodePageToken(cursor.flowDate === undefined ? { s: cursor.startTime, i: cursor.id } : { d: cursor.flowDate, s: cursor.startTime, i: cursor.id }, parameters);
+  const { s, i, ...rest } = (typeof value === 'object' && value !== null ? value : {}) as { s?: unknown; i?: unknown };
+  if (typeof s !== 'string' || typeof i !== 'string' || Object.keys(rest).length > 0) bad();
+  return { startTime: s, id: i };
 }
 
 // ---- records to messages -----------------------------------------------------------------------------------------
@@ -236,7 +266,7 @@ export function flowMessage(flowDate: string, taskIds: string[], completedTaskId
   return create(FlowSchema, { name: `flows/${flowDate}`, taskIds, completedTaskIds, planningCompleted });
 }
 
-function noteMessage(note: NoteRecord): Note {
+export function noteMessage(note: NoteRecord): Note {
   return create(NoteSchema, { name: `flows/${note.flowDate}/notes/${note.taskId}`, content: note.content, updateTime: storedTime(note.updatedAt) });
 }
 
@@ -311,8 +341,9 @@ async function existingTask(db: Db, name: string) {
 
 // ---- handlers ----------------------------------------------------------------------------------------------------
 
-/** The task fields an update may replace. */
+/** The task fields an update may replace; the IMMUTABLE ones it may only repeat (AIP-203); the output-only ones. */
 const TASK_MASK = ['title', 'estimated_minutes'] as const;
+const TASK_IMMUTABLE = ['description', 'priority', 'labels', 'due_date'] as const;
 const TASK_IGNORED = ['name', 'todoist_id', 'project_display_name', 'project_color', 'completed', 'complete_time', 'create_time', 'delete_time'];
 
 function title(value: string): string {
@@ -394,7 +425,7 @@ export const handlers: ServiceHandlers<ShapeOf<typeof FlowDayUiService>, ApiCont
         ...(input.dueDate === '' ? {} : { dueDate: day(input.dueDate) }),
         ...(input.estimatedMinutes === undefined ? {} : { estimatedMins: minutes(input.estimatedMinutes) }),
         labels,
-        ...(input.description === '' ? {} : { description: input.description.slice(0, MAX_TITLE) }),
+        ...(input.description === '' ? {} : { description: input.description.length > MAX_TITLE ? bad() : input.description }),
       },
       now(),
     );
@@ -403,12 +434,17 @@ export const handlers: ServiceHandlers<ShapeOf<typeof FlowDayUiService>, ApiCont
 
   async updateTask(request, { db }) {
     const input = request.task ?? bad();
-    const mask = maskOf(request.updateMask, TASK_MASK, TASK_IGNORED);
+    const mask = maskOf(request.updateMask, TASK_MASK, TASK_IGNORED, TASK_IMMUTABLE);
     const taskId = resourceId(input.name, 'tasks');
-    const newTitle = mask.has('title') ? title(input.title) : null;
+    const newTitle = mask.fields.has('title') ? title(input.title) : null;
     // An unset estimate clears it.
-    const newEstimate = mask.has('estimated_minutes') ? (input.estimatedMinutes === undefined ? null : minutes(input.estimatedMinutes)) : undefined;
+    const newEstimate = mask.fields.has('estimated_minutes') ? (input.estimatedMinutes === undefined ? null : minutes(input.estimatedMinutes)) : undefined;
     const stored = (await getTask(db, taskId)) ?? notFound();
+    const { task } = stored;
+    keepImmutable(mask, 'description', input.description !== '', input.description === (task.description ?? ''));
+    keepImmutable(mask, 'priority', input.priority !== 0, input.priority === task.priority);
+    keepImmutable(mask, 'labels', input.labels.length > 0, input.labels.length === task.labels.length && input.labels.every((label, index) => label === task.labels[index]));
+    keepImmutable(mask, 'due_date', input.dueDate !== '', input.dueDate === (task.dueDate ?? ''));
     // Each write changes only a value that differs (none for a repeat).
     if (newTitle !== null) await updateTaskTitle(db, taskId, newTitle);
     if (newEstimate !== undefined) await updateTaskEstimate(db, taskId, newEstimate);
@@ -466,21 +502,31 @@ export const handlers: ServiceHandlers<ShapeOf<typeof FlowDayUiService>, ApiCont
   async listFlows(request, { db }) {
     const cursor = cursorOf(request.pageToken, {});
     if (cursor !== undefined && !(typeof cursor === 'string' && isDay(cursor))) bad();
-    const [flows, completed, planning] = await Promise.all([getAllFlows(db), getAllCompletedFlowTasks(db), getPlanningDays(db)]);
-    const days = [...new Set([...Object.keys(flows), ...Object.keys(completed), ...planning])].filter((flowDate) => cursor === undefined || flowDate > cursor).sort();
     const limit = pageSize(request.pageSize, FLOW_PAGE);
+    // The page's days first (limit + 1, the last only to tell whether more follow), then only those days' rows.
+    const days = await flowDaysAfter(db, cursor ?? '', limit + 1);
     const page = days.slice(0, limit);
+    const first = page[0];
     const last = page.at(-1);
+    if (first === undefined || last === undefined) return create(ListFlowsResponseSchema, {});
+    const [planned, completed, planning] = await Promise.all([
+      getFlowTaskIdsInDateRange(db, first, last),
+      getCompletedTaskIdsInDateRange(db, first, last),
+      getPlanningDaysBetween(db, first, last),
+    ]);
+    const flows = new Map(page.map((flowDate) => [flowDate, flowMessage(flowDate, [], [], planning.has(flowDate))]));
+    for (const row of planned) flows.get(row.flowDate)?.taskIds.push(row.taskId);
+    for (const row of completed) flows.get(row.flowDate)?.completedTaskIds.push(row.taskId);
     return create(ListFlowsResponseSchema, {
-      flows: page.map((flowDate) => flowMessage(flowDate, flows[flowDate] ?? [], completed[flowDate] ?? [], planning.has(flowDate))),
-      nextPageToken: days.length > limit && last !== undefined ? encodePageToken(last, {}) : '',
+      flows: [...flows.values()],
+      nextPageToken: days.length > limit ? encodePageToken(last, {}) : '',
     });
   },
 
   async updateFlow(request, { db }) {
     const input = request.flow ?? bad();
     const flowDate = day(resourceId(input.name, 'flows'));
-    const mask = maskOf(request.updateMask, ['task_ids', 'planning_completed'], ['name', 'completed_task_ids']);
+    const mask = maskOf(request.updateMask, ['task_ids', 'planning_completed'], ['name', 'completed_task_ids']).fields;
     // One atomic batch; each statement writes only what differs (UpdateFlow of the same list writes nothing).
     const statements = mask.has('task_ids') ? setFlowStatements(flowDate, idList(input.taskIds)) : [];
     if (mask.has('planning_completed')) {
@@ -505,8 +551,13 @@ export const handlers: ServiceHandlers<ShapeOf<typeof FlowDayUiService>, ApiCont
   async rolloverFlow(request, { db }) {
     const fromDate = day(resourceId(request.name, 'flows'));
     const toDate = day(resourceId(request.destination, 'flows'));
-    if (request.taskIds.length === 0) await rolloverAllTasks(db, fromDate, toDate);
-    else await rolloverSelectedTasks(db, fromDate, toDate, idList(request.taskIds));
+    // The broad action only when asked for by name: an empty list moves nothing (the zero value of a repeated field).
+    if (request.allUnfinished) {
+      if (request.taskIds.length > 0) bad();
+      await rolloverAllTasks(db, fromDate, toDate);
+    } else if (request.taskIds.length > 0) {
+      await rolloverSelectedTasks(db, fromDate, toDate, idList(request.taskIds));
+    }
     const [flow, destinationFlow] = await Promise.all([readFlow(db, fromDate), readFlow(db, toDate)]);
     return create(RolloverFlowResponseSchema, { flow, destinationFlow });
   },
@@ -550,12 +601,12 @@ export const handlers: ServiceHandlers<ShapeOf<typeof FlowDayUiService>, ApiCont
     const flowDate = request.flowDate === '' ? null : day(request.flowDate);
     if (taskId === null && flowDate === null) bad();
     const parameters = { task_id: request.taskId, flow_date: request.flowDate };
-    const after = entryCursorOf(cursorOf(request.pageToken, parameters), false);
+    const after = entryCursorOf(cursorOf(request.pageToken, parameters));
     const page = await listTimeEntries(db, { taskId, flowDate, after, limit: pageSize(request.pageSize, ENTRY_PAGE) });
     const last = page.entries.at(-1);
     return create(ListTimeEntriesResponseSchema, {
       timeEntries: page.entries.map(timeEntryMessage),
-      nextPageToken: page.more && last !== undefined ? entryToken({ startTime: last.startTime, id: last.id }, parameters) : '',
+      nextPageToken: page.more && last !== undefined ? encodePageToken({ s: last.startTime, i: last.id }, parameters) : '',
     });
   },
 
@@ -583,10 +634,14 @@ export const handlers: ServiceHandlers<ShapeOf<typeof FlowDayUiService>, ApiCont
   async updateTimeEntry(request, { db }) {
     const input = request.timeEntry ?? bad();
     const entryId = resourceId(input.name, 'timeEntries');
-    const mask = maskOf(request.updateMask, ['start_time', 'end_time'], ['name', 'create_time']);
+    const mask = maskOf(request.updateMask, ['start_time', 'end_time'], ['name', 'create_time'], ['task_id', 'flow_date', 'source']);
     const stored = (await getTimeEntry(db, entryId)) ?? notFound();
-    const startTime = mask.has('start_time') ? timeText(input.startTime ?? bad()) : stored.startTime;
-    const endTime = mask.has('end_time') ? timeText(input.endTime ?? bad()) : (stored.endTime ?? bad());
+    keepImmutable(mask, 'task_id', input.taskId !== '', input.taskId === stored.taskId);
+    keepImmutable(mask, 'flow_date', input.flowDate !== '', input.flowDate === stored.flowDate);
+    const storedSource = stored.source === 'manual' ? TimeEntry_Source.MANUAL : TimeEntry_Source.TIMER;
+    keepImmutable(mask, 'source', input.source !== TimeEntry_Source.UNSPECIFIED, input.source === storedSource);
+    const startTime = mask.fields.has('start_time') ? timeText(input.startTime ?? bad()) : stored.startTime;
+    const endTime = mask.fields.has('end_time') ? timeText(input.endTime ?? bad()) : (stored.endTime ?? bad());
     const durationMs = Date.parse(endTime) - Date.parse(startTime);
     if (!(durationMs >= 0)) bad();
     const durationS = Math.floor(durationMs / 1000);
@@ -608,7 +663,7 @@ export const handlers: ServiceHandlers<ShapeOf<typeof FlowDayUiService>, ApiCont
 
   async updateTimerSession(request, { db, now }) {
     const input = request.timerSession ?? bad();
-    const mask = maskOf(request.updateMask, SESSION_MASK, ['name', 'update_time']);
+    const mask = maskOf(request.updateMask, SESSION_MASK, ['name', 'update_time']).fields;
     // A partial mask keeps the other stored fields (one read); the UI always replaces the whole session.
     const base = mask.size === SESSION_MASK.length ? EMPTY_SESSION : ((await getActiveTimerSession(db)) ?? EMPTY_SESSION);
     const session = sessionRecord(input, base, mask);
@@ -633,7 +688,7 @@ export const handlers: ServiceHandlers<ShapeOf<typeof FlowDayUiService>, ApiCont
   async updateSettings(request, { db, env }) {
     const input = request.settings ?? bad();
     if (input.name !== 'settings') notFound();
-    const mask = maskOf(request.updateMask, ['todoist_api_key', 'day_capacity_minutes'], ['name', 'todoist_api_key_set', 'last_sync_time']);
+    const mask = maskOf(request.updateMask, ['todoist_api_key', 'day_capacity_minutes'], ['name', 'todoist_api_key_set', 'last_sync_time']).fields;
     const writes = [];
     if (mask.has('day_capacity_minutes') && (input.dayCapacityMinutes < 0 || input.dayCapacityMinutes > MAX_DAY_CAPACITY_MINUTES)) bad();
     if (mask.has('todoist_api_key')) {
@@ -663,24 +718,14 @@ export const handlers: ServiceHandlers<ShapeOf<typeof FlowDayUiService>, ApiCont
     const range = request.startDate === '' ? null : { start: day(request.startDate), end: day(request.endDate) };
     if (range !== null && range.start > range.end) bad();
     const parameters = { start_date: request.startDate, end_date: request.endDate };
-    const cursor = entryCursorOf(cursorOf(request.pageToken, parameters), range !== null);
+    const token = cursorOf(request.pageToken, parameters);
+    const cursor = token === undefined ? null : (cursorFromValue(token, range) ?? bad());
     const page = await analyticsPage(db, range, cursor, pageSize(request.pageSize, ANALYTICS_PAGE));
-    // The (day, task) rows as one Flow per day, both lists in their stored order.
-    const flows = new Map<string, Flow>();
-    const flowOf = (flowDate: string): Flow => {
-      let flow = flows.get(flowDate);
-      if (flow === undefined) {
-        flow = flowMessage(flowDate, [], [], false);
-        flows.set(flowDate, flow);
-      }
-      return flow;
-    };
-    for (const row of page.flows) flowOf(row.flowDate).taskIds.push(row.taskId);
-    for (const row of page.completed) flowOf(row.flowDate).completedTaskIds.push(row.taskId);
     return create(QueryAnalyticsResponseSchema, {
+      plannedTasks: page.planned,
+      completedTasks: page.completed,
       timeEntries: page.entries.map(timeEntryMessage),
-      nextPageToken: entryToken(page.next, parameters),
-      flows: [...flows.keys()].sort().map((flowDate) => flowOf(flowDate)),
+      nextPageToken: page.next === null ? '' : encodePageToken(cursorValue(page.next), parameters),
       tasks: page.tasks.map(taskMessage),
       dayCapacityMinutes: page.dayCapacityMins,
     });

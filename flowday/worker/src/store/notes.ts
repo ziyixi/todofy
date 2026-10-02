@@ -35,13 +35,18 @@ export async function upsertNote(db: Db, taskId: string, flowDate: string, conte
   return (await getNote(db, taskId, flowDate)) ?? { taskId, flowDate, content, updatedAt };
 }
 
-/** A page of the notes written on a day, in task ID order, after the task ID `afterTaskId` ('' for the first page). */
-export async function listNotes(db: Db, flowDate: string, afterTaskId: string, limit: number): Promise<{ notes: NoteRecord[]; more: boolean }> {
-  const rows = await db
+/** The query of a page of the notes written on a day, in task ID order, after the task ID `afterTaskId`. */
+export function listNotesQuery(db: Db, flowDate: string, afterTaskId: string, limit: number) {
+  return db
     .select({ taskId: flowTaskNotes.taskId, flowDate: flowTaskNotes.flowDate, content: flowTaskNotes.content, updatedAt: flowTaskNotes.updatedAt })
     .from(flowTaskNotes)
     .where(and(eq(flowTaskNotes.flowDate, flowDate), gt(flowTaskNotes.taskId, afterTaskId)))
     .orderBy(asc(flowTaskNotes.taskId))
     .limit(limit + 1);
+}
+
+/** A page of the notes written on a day, in task ID order, after the task ID `afterTaskId` ('' for the first page). */
+export async function listNotes(db: Db, flowDate: string, afterTaskId: string, limit: number): Promise<{ notes: NoteRecord[]; more: boolean }> {
+  const rows = await listNotesQuery(db, flowDate, afterTaskId, limit);
   return { notes: rows.slice(0, limit), more: rows.length > limit };
 }

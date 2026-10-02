@@ -3,7 +3,7 @@
  * entries of the primary-key index (TEXT key) and of the task_id and flow_date indexes: four D1 row writes. An
  * update of the times (unindexed) costs one.
  */
-import { and, asc, eq, gte, lte, sql, type SQL } from 'drizzle-orm';
+import { and, asc, eq, gte, lte, sql } from 'drizzle-orm';
 import type { TimeEntryRecord } from '../model.ts';
 import { sqliteNow, type Db } from '../db.ts';
 import { timeEntries } from '../schema.ts';
@@ -29,24 +29,15 @@ export async function getTimeEntry(db: Db, id: string): Promise<TimeEntryRecord 
   return row ?? null;
 }
 
-/** Where a page of entries ordered by (start_time, id), or by (flow_date, start_time, id), ends. */
+/** Where a page of entries ordered by (start_time, id) ends (ListTimeEntries). */
 export interface EntryCursor {
-  /** Set exactly for the (flow_date, start_time, id) order. */
-  readonly flowDate?: string;
   readonly startTime: string;
   readonly id: string;
 }
 
-/** The cursor after `entry` in the order `byDay` names. */
-export function entryCursor(entry: TimeEntryRecord, byDay: boolean): EntryCursor {
-  return byDay ? { flowDate: entry.flowDate, startTime: entry.startTime, id: entry.id } : { startTime: entry.startTime, id: entry.id };
-}
-
-function after(cursor: EntryCursor | null): SQL | undefined {
-  if (cursor === null) return undefined;
-  return cursor.flowDate === undefined
-    ? sql`(${timeEntries.startTime}, ${timeEntries.id}) > (${cursor.startTime}, ${cursor.id})`
-    : sql`(${timeEntries.flowDate}, ${timeEntries.startTime}, ${timeEntries.id}) > (${cursor.flowDate}, ${cursor.startTime}, ${cursor.id})`;
+/** Where a page of entries ordered by (flow_date, start_time, id) ends (QueryAnalytics). */
+export interface DayEntryCursor extends EntryCursor {
+  readonly flowDate: string;
 }
 
 /** A page plus whether more follow: `limit + 1` rows are read, the last one only to tell. */
@@ -55,8 +46,25 @@ export interface EntryPage {
   readonly more: boolean;
 }
 
-function page(rows: TimeEntryRecord[], limit: number): EntryPage {
+export function entryPage(rows: TimeEntryRecord[], limit: number): EntryPage {
   return { entries: rows.slice(0, limit), more: rows.length > limit };
+}
+
+/** The query of a ListTimeEntries page (built apart so ../warmup.ts can run its row mapping at startup). */
+export function listTimeEntriesQuery(db: Db, options: { taskId: string | null; flowDate: string | null; after: EntryCursor | null; limit: number }) {
+  const after = options.after;
+  return db
+    .select()
+    .from(timeEntries)
+    .where(
+      and(
+        options.taskId === null ? undefined : eq(timeEntries.taskId, options.taskId),
+        options.flowDate === null ? undefined : eq(timeEntries.flowDate, options.flowDate),
+        after === null ? undefined : sql`(${timeEntries.startTime}, ${timeEntries.id}) > (${after.startTime}, ${after.id})`,
+      ),
+    )
+    .orderBy(asc(timeEntries.startTime), asc(timeEntries.id))
+    .limit(options.limit + 1);
 }
 
 /**
@@ -67,41 +75,34 @@ export async function listTimeEntries(
   db: Db,
   options: { taskId: string | null; flowDate: string | null; after: EntryCursor | null; limit: number },
 ): Promise<EntryPage> {
-  const rows = await db
+  return entryPage(await listTimeEntriesQuery(db, options), options.limit);
+}
+
+/**
+ * The query of a page of the reviews' entries, by (flow_date, start_time, id): those of the days [start, end] (each
+ * bound optional), after `after`. The flow_date index seeks to the page's first day (`flow_date >=` the cursor's
+ * day), and SQLite sorts each day's rows on the way, so a page reads about its own rows and the rest of its last day,
+ * never the whole table (time_entries has no start_time index, and one would cost a row write per entry).
+ */
+export function analyticsEntriesQuery(db: Db, days: { start: string | null; end: string | null }, after: DayEntryCursor | null, limit: number) {
+  const from = after === null || (days.start !== null && days.start > after.flowDate) ? days.start : after.flowDate;
+  return db
     .select()
     .from(timeEntries)
     .where(
       and(
-        options.taskId === null ? undefined : eq(timeEntries.taskId, options.taskId),
-        options.flowDate === null ? undefined : eq(timeEntries.flowDate, options.flowDate),
-        after(options.after),
+        // One lower bound, the later of the two, so the index seeks to it (SQLite seeks to one of several).
+        from === null ? undefined : gte(timeEntries.flowDate, from),
+        days.end === null ? undefined : lte(timeEntries.flowDate, days.end),
+        after === null ? undefined : sql`(${timeEntries.flowDate}, ${timeEntries.startTime}, ${timeEntries.id}) > (${after.flowDate}, ${after.startTime}, ${after.id})`,
       ),
     )
-    .orderBy(asc(timeEntries.startTime), asc(timeEntries.id))
-    .limit(options.limit + 1);
-  return page(rows, options.limit);
+    .orderBy(asc(timeEntries.flowDate), asc(timeEntries.startTime), asc(timeEntries.id))
+    .limit(limit + 1);
 }
 
-/**
- * A page of the reviews' entries: those of the days [start, end] by day, start time and ID, or with `range` null
- * every entry by start time and ID (the work-pattern statistics).
- */
-export async function analyticsEntries(
-  db: Db,
-  range: { start: string; end: string } | null,
-  cursor: EntryCursor | null,
-  limit: number,
-): Promise<EntryPage> {
-  const rows =
-    range === null
-      ? await db.select().from(timeEntries).where(after(cursor)).orderBy(asc(timeEntries.startTime), asc(timeEntries.id)).limit(limit + 1)
-      : await db
-          .select()
-          .from(timeEntries)
-          .where(and(gte(timeEntries.flowDate, range.start), lte(timeEntries.flowDate, range.end), after(cursor)))
-          .orderBy(asc(timeEntries.flowDate), asc(timeEntries.startTime), asc(timeEntries.id))
-          .limit(limit + 1);
-  return page(rows, limit);
+export async function analyticsEntries(db: Db, days: { start: string | null; end: string | null }, after: DayEntryCursor | null, limit: number): Promise<EntryPage> {
+  return entryPage(await analyticsEntriesQuery(db, days, after, limit), limit);
 }
 
 export async function updateTimeEntry(

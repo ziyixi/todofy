@@ -251,6 +251,8 @@ export interface Harness {
   call<T>(run: (api: Api) => Promise<T>): Promise<Call<T>>;
   /** The drizzle Db over the same D1 database, metered by `meter`. */
   db(meter?: Meter): Db;
+  /** The D1 binding itself (Miniflare's proxy from Node). */
+  readonly binding: D1Database;
   sql<T>(query: string, ...params: unknown[]): Promise<T[]>;
   /** Deletes every row of every table and resets the fake Todoist. */
   reset(): Promise<void>;
@@ -346,6 +348,7 @@ export async function startHarness(options: HarnessOptions = {}): Promise<Harnes
     },
     mf,
     logs,
+    binding,
     get todoist() {
       return todoist;
     },

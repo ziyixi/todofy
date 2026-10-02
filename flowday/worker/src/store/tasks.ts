@@ -10,7 +10,7 @@ import type { TaskPriority, TaskRecord } from '../model.ts';
 import { batchSql, type Db } from '../db.ts';
 import { completedFlowTasks, flowTasks, tasks } from '../schema.ts';
 
-type TaskRow = typeof tasks.$inferSelect;
+export type TaskRow = typeof tasks.$inferSelect;
 
 /**
  * Rows per upsert statement: keeps each JSON parameter well below D1's limits. The sync applies at most this many
@@ -81,20 +81,28 @@ export async function getTask(db: Db, taskId: string): Promise<StoredTask | null
  * is the last rowid of the previous page (0 for the first). Returns the page and the last rowid it read, or null
  * when nothing follows.
  */
-export async function listTasks(
-  db: Db,
-  options: { afterRowid: number; limit: number; showDeleted: boolean },
-): Promise<{ tasks: TaskRecord[]; nextRowid: number | null }> {
+export function listTasksQuery(db: Db, options: { afterRowid: number; limit: number; showDeleted: boolean }) {
   const rowid = sql<number>`rowid`;
   const listed = options.showDeleted ? or(isNull(tasks.deletedAt), isNull(tasks.deletedSource), ne(tasks.deletedSource, 'sync')) : isNull(tasks.deletedAt);
-  const rows = await db
+  return db
     .select({ rowid, row: tasks })
     .from(tasks)
     .where(and(sql`rowid > ${options.afterRowid}`, listed))
     .orderBy(rowid)
     .limit(options.limit + 1);
-  const page = rows.slice(0, options.limit);
-  return { tasks: page.map(({ row }) => mapTaskRow(row)), nextRowid: rows.length > options.limit ? (page.at(-1)?.rowid ?? null) : null };
+}
+
+/** The page of listTasksQuery's rows (`limit + 1` read, the last one only to tell whether more follow). */
+export function taskPage(rows: readonly { rowid: number; row: TaskRow }[], limit: number): { tasks: TaskRecord[]; nextRowid: number | null } {
+  const page = rows.slice(0, limit);
+  return { tasks: page.map(({ row }) => mapTaskRow(row)), nextRowid: rows.length > limit ? (page.at(-1)?.rowid ?? null) : null };
+}
+
+export async function listTasks(
+  db: Db,
+  options: { afterRowid: number; limit: number; showDeleted: boolean },
+): Promise<{ tasks: TaskRecord[]; nextRowid: number | null }> {
+  return taskPage(await listTasksQuery(db, options), options.limit);
 }
 
 /** Hides a task and takes it out of every flow, in one atomic batch. */
@@ -193,14 +201,18 @@ export async function createLocalTask(db: Db, id: string, input: LocalTaskInput,
   };
 }
 
-/** Persisted tasks with these ids, deleted ones included (any number of ids: one JSON parameter). */
-export async function getTasksByIds(db: Db, ids: readonly string[]): Promise<TaskRecord[]> {
-  if (ids.length === 0) return [];
-  const rows = await db
+/** The query of getTasksByIds (any number of IDs: one JSON parameter). */
+export function tasksByIdsQuery(db: Db, ids: readonly string[]) {
+  return db
     .select()
     .from(tasks)
     .where(sql`${tasks.id} IN (SELECT value FROM json_each(${JSON.stringify([...new Set(ids)])}))`);
-  return rows.map(mapTaskRow);
+}
+
+/** Persisted tasks with these ids, deleted ones included (any number of ids: one JSON parameter). */
+export async function getTasksByIds(db: Db, ids: readonly string[]): Promise<TaskRecord[]> {
+  if (ids.length === 0) return [];
+  return (await tasksByIdsQuery(db, ids)).map(mapTaskRow);
 }
 
 // ---- the diff upsert shared by the Todoist sync, the E2E seed and the tests ----------------------------------

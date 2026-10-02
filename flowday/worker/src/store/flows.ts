@@ -8,7 +8,9 @@
  */
 import { and, asc, eq, gte, lte, sql, type SQL } from 'drizzle-orm';
 import type { Db } from '../db.ts';
+import type { FlowTaskRow } from '../model.ts';
 import { completedFlowTasks, flowTasks } from '../schema.ts';
+import { PLANNING_END, PLANNING_PREFIX } from './settings.ts';
 import { runStatements } from './tasks.ts';
 
 function group(rows: readonly { flowDate: string; taskId: string }[]): Record<string, string[]> {
@@ -80,7 +82,8 @@ export async function removeCompletedFlowTask(db: Db, flowDate: string, taskId: 
     .where(and(eq(completedFlowTasks.flowDate, flowDate), eq(completedFlowTasks.taskId, taskId)));
 }
 
-export async function getFlowTaskIdsInDateRange(db: Db, startDate: string, endDate: string): Promise<{ flowDate: string; taskId: string }[]> {
+/** The (day, task) rows of the days [startDate, endDate], by day and position. */
+export function flowRowsBetweenQuery(db: Db, startDate: string, endDate: string) {
   return db
     .select({ flowDate: flowTasks.flowDate, taskId: flowTasks.taskId })
     .from(flowTasks)
@@ -88,12 +91,86 @@ export async function getFlowTaskIdsInDateRange(db: Db, startDate: string, endDa
     .orderBy(asc(flowTasks.flowDate), asc(flowTasks.sortOrder));
 }
 
-export async function getCompletedTaskIdsInDateRange(db: Db, startDate: string, endDate: string): Promise<{ flowDate: string; taskId: string }[]> {
+export async function getFlowTaskIdsInDateRange(db: Db, startDate: string, endDate: string): Promise<FlowTaskRow[]> {
+  return flowRowsBetweenQuery(db, startDate, endDate);
+}
+
+/** The done (day, task) rows of the days [startDate, endDate], by day and the order they were marked. */
+export function completedRowsBetweenQuery(db: Db, startDate: string, endDate: string) {
   return db
     .select({ flowDate: completedFlowTasks.flowDate, taskId: completedFlowTasks.taskId })
     .from(completedFlowTasks)
     .where(and(gte(completedFlowTasks.flowDate, startDate), lte(completedFlowTasks.flowDate, endDate)))
     .orderBy(asc(completedFlowTasks.flowDate), sql`rowid`);
+}
+
+export async function getCompletedTaskIdsInDateRange(db: Db, startDate: string, endDate: string): Promise<FlowTaskRow[]> {
+  return completedRowsBetweenQuery(db, startDate, endDate);
+}
+
+/**
+ * The first `limit` days after `after` ('' for the first page) that have a planned or done task or a completed
+ * planning, oldest first: ListFlows's page. Each of the three sources gives at most `limit` days in order, through the
+ * unique (flow_date, task_id) indexes and the settings key, so a page reads about the rows of its own days.
+ */
+export async function flowDaysAfter(db: Db, after: string, limit: number): Promise<string[]> {
+  const rows = await db.all<{ flow_date: string }>(sql`SELECT flow_date FROM (
+      SELECT flow_date FROM (SELECT DISTINCT flow_date FROM flow_tasks WHERE flow_date > ${after} ORDER BY flow_date LIMIT ${limit})
+      UNION SELECT flow_date FROM (SELECT DISTINCT flow_date FROM completed_flow_tasks WHERE flow_date > ${after} ORDER BY flow_date LIMIT ${limit})
+      UNION SELECT substr(key, ${PLANNING_PREFIX.length + 1}) FROM (SELECT key FROM settings
+        WHERE key > ${PLANNING_PREFIX + after} AND key < ${PLANNING_END} AND value = 'true' ORDER BY key LIMIT ${limit})
+    ) ORDER BY flow_date LIMIT ${limit}`);
+  return rows.map((row) => row.flow_date);
+}
+
+/** A task's place in a day's flow: where a page of the planned rows ends (QueryAnalytics). */
+export interface PlannedCursor {
+  readonly flowDate: string;
+  readonly sortOrder: number;
+  readonly taskId: string;
+}
+
+/**
+ * A page of the planned rows of [start, end] by (flow_date, sort_order, task_id) after `after`: the unique
+ * (flow_date, task_id) index seeks to the first day, and the rows of each day are sorted on the way.
+ */
+export function plannedRowsQuery(db: Db, range: { start: string; end: string }, after: PlannedCursor | null, limit: number) {
+  return db
+    .select({ flowDate: flowTasks.flowDate, taskId: flowTasks.taskId, sortOrder: flowTasks.sortOrder })
+    .from(flowTasks)
+    .where(
+      and(
+        // One lower bound, the later of the two, so the index seeks to it (SQLite seeks to one of several).
+        gte(flowTasks.flowDate, after !== null && after.flowDate > range.start ? after.flowDate : range.start),
+        lte(flowTasks.flowDate, range.end),
+        after === null ? undefined : sql`(${flowTasks.flowDate}, ${flowTasks.sortOrder}, ${flowTasks.taskId}) > (${after.flowDate}, ${after.sortOrder}, ${after.taskId})`,
+      ),
+    )
+    .orderBy(asc(flowTasks.flowDate), asc(flowTasks.sortOrder), asc(flowTasks.taskId))
+    .limit(limit + 1);
+}
+
+/** A done row's place: its day and rowid (the order it was marked). */
+export interface CompletedCursor {
+  readonly flowDate: string;
+  readonly rowid: number;
+}
+
+/** A page of the done rows of [start, end] by (flow_date, rowid) after `after`, as plannedRowsQuery. */
+export function completedRowsQuery(db: Db, range: { start: string; end: string }, after: CompletedCursor | null, limit: number) {
+  const rowid = sql<number>`rowid`;
+  return db
+    .select({ flowDate: completedFlowTasks.flowDate, taskId: completedFlowTasks.taskId, rowid })
+    .from(completedFlowTasks)
+    .where(
+      and(
+        gte(completedFlowTasks.flowDate, after !== null && after.flowDate > range.start ? after.flowDate : range.start),
+        lte(completedFlowTasks.flowDate, range.end),
+        after === null ? undefined : sql`(${completedFlowTasks.flowDate}, rowid) > (${after.flowDate}, ${after.rowid})`,
+      ),
+    )
+    .orderBy(asc(completedFlowTasks.flowDate), rowid)
+    .limit(limit + 1);
 }
 
 /** Moves the unfinished tasks of `fromDate` to the top of `toDate`, in one atomic batch. */
