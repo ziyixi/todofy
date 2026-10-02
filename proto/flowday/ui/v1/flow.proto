@@ -31,8 +31,7 @@ message Flow {
   repeated string task_ids = 2 [(google.api.field_behavior) = OPTIONAL];
   // The tasks marked done on the day, in the order they were (CompleteFlowTask, ReopenFlowTask).
   repeated string completed_task_ids = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // Whether the owner finished the planning steps for the day (the planning wizard is not offered again). Only
-  // ListFlows, GetFlow and UpdateFlow answer it; QueryAnalytics leaves it unset.
+  // Whether the owner finished the planning steps for the day (the planning wizard is not offered again).
   bool planning_completed = 4 [(google.api.field_behavior) = OPTIONAL];
 }
 

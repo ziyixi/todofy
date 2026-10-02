@@ -39,7 +39,8 @@ message Task {
   string todoist_id = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
   // The title: not blank, at most 2,000 characters (CreateTask and UpdateTask trim it).
   string title = 3 [(google.api.field_behavior) = REQUIRED];
-  // The description (Todoist's, or a local task's, at most 2,000 characters).
+  // The description: Todoist's, or a local task's, at most 2,000 characters (CreateTask refuses a longer one with
+  // INVALID_ARGUMENT).
   string description = 4 [(google.api.field_behavior) = IMMUTABLE];
   // The Todoist project's name; empty for a local task.
   string project_display_name = 5 [(google.api.field_behavior) = OUTPUT_ONLY];
@@ -61,7 +62,7 @@ message Task {
   string due_date = 12 [(google.api.field_behavior) = IMMUTABLE];
   // When the task was created (in Todoist, or in FlowDay for a local task).
   google.protobuf.Timestamp create_time = 13 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // When the task was deleted in FlowDay (AIP-164), or hidden by the sync (only QueryAnalytics answers a hidden
-  // task); unset while it is in the task list.
+  // When the task was deleted in FlowDay (AIP-164), or hidden by the sync (GetTask and QueryAnalytics answer a
+  // hidden task; no list does); unset while it is in the task list.
   google.protobuf.Timestamp delete_time = 14 [(google.api.field_behavior) = OUTPUT_ONLY];
 }

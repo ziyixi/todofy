@@ -101,7 +101,8 @@ service FlowDayUiService {
 
   // Replaces the title or the estimate (AIP-134): the fields `update_mask` names, or both without one. Any task,
   // a Todoist task too (FlowDay keeps the change; Todoist never sees it, and the sync replaces the title when the
-  // task changes there). Replaces PATCH /api/tasks.
+  // task changes there). The IMMUTABLE fields cannot change (AIP-203, see UpdateTaskRequest). Replaces PATCH
+  // /api/tasks.
   // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
   // buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE
   rpc UpdateTask(UpdateTaskRequest) returns (Task) {
@@ -194,9 +195,9 @@ service FlowDayUiService {
     option (google.api.method_signature) = "name,task_id";
   }
 
-  // Moves tasks of the day to the top of another day, in one atomic write: the listed ones, or every task not done
-  // without a list. Tasks the other day has already keep their place there. Replaces PUT /api/flows `rollover` and
-  // `rolloverSelected`.
+  // Moves tasks of the day to the top of another day, in one atomic write: the listed ones, or with
+  // `all_unfinished` every task not done on the day. Tasks the other day has already keep their place there.
+  // Replaces PUT /api/flows `rolloverSelected` and `rollover`.
   rpc RolloverFlow(RolloverFlowRequest) returns (RolloverFlowResponse) {
     option (google.api.http) = {
       post: "/api/v1/{name=flows/*}:rollover"
@@ -258,7 +259,8 @@ service FlowDayUiService {
   }
 
   // Replaces an entry's start and end (AIP-134): the fields `update_mask` names (`start_time`, `end_time`), or both
-  // without one; the duration becomes the time between them. Replaces PUT /api/entries/{id}.
+  // without one; the duration becomes the time between them. The IMMUTABLE fields cannot change (AIP-203, see
+  // UpdateTimeEntryRequest). Replaces PUT /api/entries/{id}.
   // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
   // buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE
   rpc UpdateTimeEntry(UpdateTimeEntryRequest) returns (TimeEntry) {
@@ -330,8 +332,8 @@ service FlowDayUiService {
   }
 
   // The raw rows the browser computes the daily, weekly and work-pattern reviews and the exports from (Workers Free
-  // gives a request 10 ms of CPU; the container era's server-side reviews took 40-63 ms). Replaces GET
-  // /api/analytics?start&end.
+  // gives a request 10 ms of CPU; the container era's server-side reviews took 40-63 ms), a bounded page at a time
+  // however long the range. Replaces GET /api/analytics?start&end.
   rpc QueryAnalytics(QueryAnalyticsRequest) returns (QueryAnalyticsResponse) {
     option (google.api.http) = {get: "/api/v1/analytics:query"};
   }
@@ -348,8 +350,9 @@ message GetTaskRequest {
 
 // Input of ListTasks.
 message ListTasksRequest {
-  // At most this many tasks (AIP-158): 0 means 200, and a larger value is read as 200 (each answer is written well
-  // within Workers Free's 10 ms of CPU, even an isolate's first; the sync keeps at most 1,000 Todoist tasks).
+  // At most this many tasks (AIP-158): 0 means 200, a larger value is read as 200, and a negative one is
+  // INVALID_ARGUMENT (each answer is written within Workers Free's 10 ms of CPU, even an isolate's first; the sync
+  // keeps at most 1,000 Todoist tasks).
   int32 page_size = 1 [(google.api.field_behavior) = OPTIONAL];
   // The previous page's `next_page_token`, with the same `show_deleted` (another is INVALID_ARGUMENT).
   string page_token = 2 [(google.api.field_behavior) = OPTIONAL];
@@ -383,11 +386,15 @@ message CreateTaskRequest {
 
 // Input of UpdateTask.
 message UpdateTaskRequest {
-  // The new values: the fields `update_mask` names, or `title` and `estimated_minutes` without one (an unset
-  // estimate clears it). The other fields are ignored.
+  // The new values: the fields `update_mask` names, or without one the whole task, of which `title` and
+  // `estimated_minutes` are replaced (an unset estimate clears it). The IMMUTABLE fields (`description`, `priority`,
+  // `labels`, `due_date`) never change (AIP-203): one the mask names must equal the stored value, and without a mask
+  // each one that is set (not empty, not 0) must; a different value is INVALID_ARGUMENT. Output-only fields are
+  // ignored.
   Task task = 1 [(google.api.field_behavior) = REQUIRED];
-  // AIP-134: `title`, `estimated_minutes` or both (a query parameter). Absent, empty or `*` replaces both; any other
-  // field is INVALID_ARGUMENT, and output-only fields are ignored.
+  // AIP-134 (a query parameter): `title`, `estimated_minutes`, the IMMUTABLE fields (checked as above) and
+  // output-only fields (ignored). Absent, empty or `*` is the whole task, as above; any other field is
+  // INVALID_ARGUMENT.
   google.protobuf.FieldMask update_mask = 2 [(google.api.field_behavior) = OPTIONAL];
 }
 
@@ -462,7 +469,8 @@ message GetFlowRequest {
 
 // Input of ListFlows.
 message ListFlowsRequest {
-  // At most this many days (AIP-158): 0 means 200, and a larger value is read as 200.
+  // At most this many days (AIP-158): 0 means 200, a larger value is read as 200, and a negative one is
+  // INVALID_ARGUMENT.
   int32 page_size = 1 [(google.api.field_behavior) = OPTIONAL];
   // The previous page's `next_page_token`.
   string page_token = 2 [(google.api.field_behavior) = OPTIONAL];
@@ -519,9 +527,12 @@ message RolloverFlowRequest {
     (google.api.field_behavior) = REQUIRED,
     (google.api.resource_reference).type = "flowday.ziyixi.science/Flow"
   ];
-  // The tasks to move, at most 2,000 (those not in the day's flow are skipped); empty moves every task of the
-  // flow that is not done on the day.
+  // The tasks to move, at most 2,000 (those not in the day's flow are skipped). Empty without `all_unfinished` moves
+  // nothing and writes nothing (the zero value never selects the broadest action).
   repeated string task_ids = 3 [(google.api.field_behavior) = OPTIONAL];
+  // Move every task of the flow that is not done on the day instead of a list: `task_ids` must then be empty
+  // (INVALID_ARGUMENT otherwise).
+  bool all_unfinished = 4 [(google.api.field_behavior) = OPTIONAL];
 }
 
 // Output of RolloverFlow.
@@ -548,7 +559,8 @@ message ListNotesRequest {
     (google.api.field_behavior) = REQUIRED,
     (google.api.resource_reference).child_type = "flowday.ziyixi.science/Note"
   ];
-  // At most this many notes (AIP-158): 0 means 100, and a larger value is read as 100.
+  // At most this many notes (AIP-158): 0 means 100, a larger value is read as 100, and a negative one is
+  // INVALID_ARGUMENT.
   int32 page_size = 2 [(google.api.field_behavior) = OPTIONAL];
   // The previous page's `next_page_token`, with the same `parent`.
   string page_token = 3 [(google.api.field_behavior) = OPTIONAL];
@@ -584,7 +596,8 @@ message GetTimeEntryRequest {
 //     aip.dev/not-precedent: the two selectors are exact matches on indexed columns; the shared AIP-160 subset
 //     (proto/ts/filter.ts) parses literals only, with no field comparison to say `task_id = "..."` in a `filter`. --)
 message ListTimeEntriesRequest {
-  // At most this many entries (AIP-158): 0 means 200, and a larger value is read as 200.
+  // At most this many entries (AIP-158): 0 means 200, a larger value is read as 200, and a negative one is
+  // INVALID_ARGUMENT.
   int32 page_size = 1 [(google.api.field_behavior) = OPTIONAL];
   // The previous page's `next_page_token`, with the same `task_id` and `flow_date`.
   string page_token = 2 [(google.api.field_behavior) = OPTIONAL];
@@ -620,11 +633,15 @@ message CreateTimeEntryRequest {
 
 // Input of UpdateTimeEntry.
 message UpdateTimeEntryRequest {
-  // The new values: the fields `update_mask` names, or `start_time` and `end_time` without one; the end must not
-  // be before the start. The other fields are ignored.
+  // The new values: the fields `update_mask` names, or without one the whole entry: its REQUIRED fields
+  // (`task_id`, `flow_date`, `start_time`) must be there, and `start_time` and `end_time` are replaced. The end must
+  // not be before the start; `duration_seconds` becomes the time between them (a value given is ignored). The
+  // IMMUTABLE fields (`task_id`, `flow_date`, `source`) never change (AIP-203): one the mask names must equal the
+  // stored value, and without a mask each one that is set (not empty, not SOURCE_UNSPECIFIED) must; a different
+  // value is INVALID_ARGUMENT. Output-only fields are ignored.
   TimeEntry time_entry = 1 [(google.api.field_behavior) = REQUIRED];
-  // AIP-134: `start_time`, `end_time` or both (a query parameter). Absent, empty or `*` replaces both; any other
-  // field is INVALID_ARGUMENT, and output-only fields are ignored.
+  // AIP-134 (a query parameter): `start_time`, `end_time`, the IMMUTABLE fields (checked as above) and output-only
+  // fields (ignored). Absent, empty or `*` is the whole entry, as above; any other field is INVALID_ARGUMENT.
   google.protobuf.FieldMask update_mask = 2 [(google.api.field_behavior) = OPTIONAL];
 }
 
@@ -687,27 +704,38 @@ message QueryAnalyticsRequest {
   string start_date = 1 [(google.api.field_behavior) = OPTIONAL];
   // The last day, `YYYY-MM-DD`, not before `start_date`.
   string end_date = 2 [(google.api.field_behavior) = OPTIONAL];
-  // At most this many time entries (AIP-158): 0 means 200, and a larger value is read as 200 (a page also carries
-  // the tasks its entries name, and is written within Workers Free's 10 ms of CPU).
+  // At most this many rows (AIP-158): planned tasks, done tasks and time entries together. 0 means 200, a larger
+  // value is read as 200, and a negative one is INVALID_ARGUMENT. A page also carries the tasks its rows name (at
+  // most one per row), and is written within Workers Free's 10 ms of CPU, even an isolate's first, however long the
+  // range (flowday/worker/test/runtime/cpu.test.ts).
   int32 page_size = 3 [(google.api.field_behavior) = OPTIONAL];
   // The previous page's `next_page_token`, with the same `start_date` and `end_date`.
   string page_token = 4 [(google.api.field_behavior) = OPTIONAL];
 }
 
-// Output of QueryAnalytics: a page of the time entries, with what the browser needs to read them. The pages
-// together hold every row of the range: concatenate `time_entries`, `flows` and `tasks` (a task may come on several
-// pages).
+// Output of QueryAnalytics: a page of the range's rows, with what the browser needs to read them. The rows come in
+// one order across the pages: the planned tasks, then the done tasks, then the time entries; a page may hold rows of
+// several kinds. Concatenating every page's `planned_tasks`, `completed_tasks` and `time_entries` gives every row of
+// the range exactly once; `tasks` may repeat a task on several pages.
 message QueryAnalyticsResponse {
-  // The page's time entries: the range's by day and start time, or every entry by start time without a range.
-  repeated TimeEntry time_entries = 1 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // A task on a day's flow: one row of the range's planned or done tasks.
+  message FlowTask {
+    // The day, `YYYY-MM-DD`.
+    string flow_date = 1 [(google.api.field_behavior) = OUTPUT_ONLY];
+    // The task (any task ID, the UI's pseudo-tasks included).
+    string task_id = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
+  }
+
+  // The page's planned tasks: the range's flows as rows, by day and position in the day; none without a range.
+  repeated FlowTask planned_tasks = 1 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The page's done tasks, by day and the order they were marked; none without a range.
+  repeated FlowTask completed_tasks = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The page's time entries, by day, start time and ID: the range's, or every entry without a range.
+  repeated TimeEntry time_entries = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
   // The next page's token; empty on the last page.
-  string next_page_token = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // On the first page only: the flows of the range's days (planned and done tasks, without `planning_completed`),
-  // oldest first; none without a range.
-  repeated Flow flows = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // Every stored task the page's flows and time entries name, deleted ones included (the UI's pseudo-tasks are not
-  // tasks).
-  repeated Task tasks = 4 [(google.api.field_behavior) = OUTPUT_ONLY];
+  string next_page_token = 4 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Every stored task the page's rows name, deleted and hidden ones included (the UI's pseudo-tasks are not tasks).
+  repeated Task tasks = 5 [(google.api.field_behavior) = OUTPUT_ONLY];
   // The day's capacity setting (Settings.day_capacity_minutes).
-  int32 day_capacity_minutes = 5 [(google.api.field_behavior) = OUTPUT_ONLY];
+  int32 day_capacity_minutes = 6 [(google.api.field_behavior) = OUTPUT_ONLY];
 }
