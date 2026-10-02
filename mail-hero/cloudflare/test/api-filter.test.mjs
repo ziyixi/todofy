@@ -2,6 +2,7 @@
 // refused rather than read with another meaning. Which fields a list takes is tested with the lists (native-api*.test.mjs).
 import test from 'node:test'
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
 import { FilterError, parseFilter } from '../src/native/api-filter.ts'
 
 const parse = text => parseFilter(text, 400)
@@ -32,4 +33,34 @@ test('everything outside the subset is refused', () => {
   ]) assert.throws(() => parse(text), FilterError, text)
   assert.throws(() => parseFilter('x'.repeat(11), 10), FilterError, 'too long')
   assert.doesNotThrow(() => parseFilter('x'.repeat(10), 10))
+})
+
+// The shared corpus (proto/testdata/filter-cases.json) every implementation of the AIP-160 subset runs. This parser
+// reads the same literals as proto/ts/filter.ts and refuses what it refuses, but for comparisons, which it reads as
+// restrictions on purpose (each list then takes only its own fields): there a refusal must be a restriction and no
+// literal. The literal cap is each list's (ListMessages takes one), so the corpus's max_literals is applied here.
+test('the shared filter corpus: the same literals, the same refusals but for restrictions, and quoted searches round-trip', async () => {
+  const { quoteLiteral } = await import('@ziyixi/proto/filter')
+  const corpus = JSON.parse(readFileSync(new URL('../../../proto/testdata/filter-cases.json', import.meta.url), 'utf8'))
+  assert.ok(corpus.parse.length >= 29 && corpus.quote.length >= 4)
+  let restrictionsOnly = 0
+  for (const item of corpus.parse) {
+    let parsed = null
+    try { parsed = parse(item.filter) } catch (error) { assert.ok(error instanceof FilterError, item.name) }
+    if (item.error) {
+      if (parsed === null || parsed.literals.length > corpus.max_literals) continue
+      assert.deepEqual(parsed.literals, [], `${item.name}: a refusal this parser accepts can only be a restriction`)
+      assert.ok(parsed.restrictions.length > 0, item.name)
+      restrictionsOnly++
+    } else {
+      assert.notEqual(parsed, null, item.name)
+      assert.deepEqual([parsed.literals, parsed.restrictions], [item.literals, []], item.name)
+    }
+  }
+  assert.equal(restrictionsOnly, 1, 'only `year>2020` differs (a comparison); a new difference is a decision, not drift')
+  for (const item of corpus.quote) {
+    assert.equal(quoteLiteral(item.text), item.filter, item.name)
+    const text = item.text.trim()
+    assert.deepEqual(parse(item.filter), { literals: text === '' ? [] : [text], restrictions: [] }, item.name)
+  }
 })

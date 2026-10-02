@@ -14,7 +14,9 @@
 // The shared subset (proto/ts/filter.ts) has literals only; each list here also restricts fields, which that parser
 // refuses on purpose. Everything else AIP-160 defines is refused rather than read with another meaning: OR, NOT and
 // `-` (negation), `!=` and `:` (has), member traversal (`a.b`), functions, parentheses and wildcards. Which fields,
-// comparators and values a list takes is the list's own check (api-v2.ts); this module only parses.
+// comparators and values a list takes is the list's own check (api-v2.ts); this module only parses. The quoting, escapes
+// and bare words are the shared parser's: test/api-filter.test.mjs runs its corpus (proto/testdata/filter-cases.json)
+// here, so the two read every literal alike and differ only where this one reads a comparison as a restriction.
 
 export class FilterError extends Error {}
 

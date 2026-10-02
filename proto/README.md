@@ -181,7 +181,7 @@ bundle is unchanged (its types come from the OpenAPI document).
 | `prototest/v1/prototest.proto` | Test fixtures of the runtimes, never used by an app (not in the Python wheel; a change deploys nothing): a message with every field kind of the profile and a service with every kind of HTTP binding, an AIP-134 update with a field mask among them; `prototest/v1/rules.proto`, a union with every value rule and a binding service with positional and object requests |
 | `testdata/http-cases.json` | The HTTP runtime's cases on `prototest.v1.BookService`: 64 requests and what the transcoder answers, 19 request messages and what the client sends; every implementation (a Python transcoder later) runs them |
 | `testdata/wire-profile-cases.json` | 138 edge cases (timestamps, integer and double spellings, enum look-alikes, maps, field masks, missing fields, null, every value rule, `non_null`, closed enums, `keep_order`, `write_empty`, the relations `present_when` and `any_match`, a field named like a Python keyword) that both codecs must answer identically |
-| `testdata/filter-cases.json` | The AIP-160 subset of `ts/filter.ts`: 29 filters and their literals or refusal, 4 search-box texts and their quoted filter |
+| `testdata/filter-cases.json` | The AIP-160 subset of `ts/filter.ts`: 29 filters and their literals or refusal, 4 search-box texts and their quoted filter. Mail Hero's restriction parser (`mail-hero/cloudflare/src/native/api-filter.ts`) runs it too (`test/api-filter.test.mjs`) |
 | `test/*.test.ts`, `test/python/` | The codec and IDL tests, the same cases in both languages; `test/cross-language.test.ts` pipes bytes through both codecs (`test/python/roundtrip.py` in a child process); `test/ensure.test.ts` runs `tools/ensure.mjs` on a copy of this folder (a deleted toolchain, an abandoned lock, the commands Windows needs) |
 
 Every directory directly inside `ts/` and `python/src/ziyixi_proto/` is generated (`.gitignore`); every
@@ -497,7 +497,10 @@ follow the same pattern (ops-v1 is a service-binding contract, not an HTTP API: 
 **Conventions** (what api-linter does not already enforce):
 
 - Package `<app>.ui.v1` in `<app>/ui/v1/`, one service `<App>UiService`, resources in their own files and the
-  service with its request and response messages in `<app>_ui_service.proto`. Java options as AIP-191 asks.
+  service with its request and response messages in `<app>_ui_service.proto`. Java options as AIP-191 asks. An app
+  whose hand-written owner API already was `/api/v1` starts at major version 2 (AIP-185: its paths and shapes break
+  the old ones): `mailhero.ui.v2` in `mailhero/ui/v2/`, served under `/api/v2/`, with the old `/api/v1` paths
+  answering 410 `reload_required` for one release.
 - Errors (AIP-193): an `ErrorInfo.reason` is a value name without its prefix, of
   `common.errors.v1.CommonReason` (`common/errors/v1/errors.proto`: what the shared transcoder, `edge-auth` and
   any handler answer, `BAD_REQUEST`, `NOT_FOUND`, `METHOD_NOT_ALLOWED`, `INTERNAL`, `UNAVAILABLE`,
@@ -506,8 +509,8 @@ follow the same pattern (ops-v1 is a service-binding contract, not an HTTP API: 
   dependency (D1, a Durable Object, the identity provider's keys) is `UNAVAILABLE`, which a client may repeat
   with the same `request_id`: the app wraps exactly those calls. Anything else unexpected is a bug,
   `INTERNAL` (the transcoder's default), which a client never repeats by itself.
-- Paths under `/api/v1/` (`/api/v1/{name=decks/*}:decide`): `/api` stays the prefix that separates an app's
-  API from its static UI on the one host, and the version is in the path. An app's other HTTP surface (the
+- Paths under `/api/v1/` (`/api/v1/{name=decks/*}:decide`; `/api/v2/` for a v2 package): `/api` stays the prefix
+  that separates an app's API from its static UI on the one host, and the version is in the path. An app's other HTTP surface (the
   CSRF token at `GET /api/csrf`, `/health`) is transport and stays outside the service. An app whose host
   root belongs to something else keeps everything of its own under one reserved segment instead: the links app's
   host answers every `/<key>`, so its UI and API live under `/_/` (`/_/api/v1/...`, `/_/api/csrf`), with a
@@ -539,7 +542,10 @@ follow the same pattern (ops-v1 is a service-binding contract, not an HTTP API: 
   else exists under the same key, except the replay of a `request_id` whose first request deleted it.
 - Update (AIP-134) is `PATCH` with the resource as the body and an optional `google.protobuf.FieldMask
   update_mask` (a query parameter): the fields it names are replaced, and an absent, empty or `*` mask
-  replaces every field the client may set. The transcoder enforces the resource's `REQUIRED` fields only
+  replaces every field the client may set. An API may require an explicit mask instead (absent, empty or `*` is
+  `INVALID_ARGUMENT`) where replacing every field could change behaviour by accident; the field's comment says so and
+  why (Mail Hero's `UpdateSettings` and `UpdateEndpoint`: a client that leaves a field out would resume sending or
+  switch a retention period off). The transcoder enforces the resource's `REQUIRED` fields only
   where the mask names them, refuses unknown paths and ignores `OUTPUT_ONLY` ones; the client sends only the
   masked fields. `method_signature = "<resource>,update_mask"`. Store each field so that an update writes
   only its masked fields (two tabs changing different fields both keep their change).
@@ -551,7 +557,11 @@ follow the same pattern (ops-v1 is a service-binding contract, not an HTTP API: 
   `next_page_token` from `ts/page-token.ts` (opaque, bound to every list parameter but `page_size`: a token of
   another filter is `INVALID_ARGUMENT`). A `filter` is AIP-160 in the subset `ts/filter.ts` parses
   (literals, quoted strings, `AND`; anything else is `INVALID_ARGUMENT`, never read with another meaning);
-  a search box sends its text as one quoted literal (`quoteLiteral`).
+  a search box sends its text as one quoted literal (`quoteLiteral`). An API whose lists also restrict fields
+  (`state = FAILED`, `receive_time >= "..."`) keeps a parser of that larger subset, held to the same corpus
+  (`testdata/filter-cases.json`: the same literals and refusals, a comparison aside, and every quoted search read
+  back): Mail Hero's `mail-hero/cloudflare/src/native/api-filter.ts`. Its IDL lists each filter's fields, comparators
+  and values; any other is `INVALID_ARGUMENT`.
 - Counts end in `_count` (AIP-141: `card_count`, `created_task_count`, `liked_last_week_count`).
 - An api-linter exception is written next to the element with its reason, `(-- api-linter: <rule>=disabled
   aip.dev/not-precedent: <why> --)`; file-wide ones go in the file's header comment. Never in a config file.
