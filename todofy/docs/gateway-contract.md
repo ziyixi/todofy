@@ -725,12 +725,14 @@ lenient read of the DO's answer with the generated code and the transcoder's wri
 | 120 GTD days | 0.3-0.4 → 3.2 | 0.4-0.5 → 2.9 | 6 / 4 |
 | 100 reminders | 0.4 → 2.0 | 0.4 → 1.4 | 6 / 4 |
 | A reconcile (CSRF verify included) | 1.0 → 2.1 | 0.7 → 1.6 | 6 / 4 |
-| A 1.9 MB legacy text | 2.0-2.1 → 4.4 | 2.4 → 3.8 | 8 |
-| Every stored report at the newsletter's limits | 1.1-1.3 → 5.2 | 1.2-1.3 → 5.0 | 8 |
+| A 1.9 MB legacy text: 1.9 million ASCII characters heavy in escapes (the fixture: D1's largest row, costliest form) | → 6.0-6.2 | → 5.3-5.7 | 8 |
+| The same 1.9 MB as 633,333 Chinese characters (the fixture until review CS3) | 2.0-2.1 → 4.4 | 2.4 → 3.8 | 8 |
+| Every stored report at the newsletter's limits | 1.1-1.3 → 4.6-5.2 | 1.2-1.3 → 4.7-5.0 | 8 |
 
 The cost is the generated code reading and writing every answer again: a few tenths of a millisecond per
-small message, about 2 ms for a page of 100 events, and the codec's text rules over a report's 230,000
-characters. `src/warm.ts` runs the codec once over synthetic messages at global scope (startup, outside every
+small message, about 2 ms for a page of 100 events, the codec's text rules over a report's 230,000
+characters, and JSON.parse and stringify of a legacy text's 1.9 million characters, the largest at about 6 ms of
+the 10 (the ASCII rows were measured on 2026-10-02 in six runs of the test, three isolates each). `src/warm.ts` runs the codec once over synthetic messages at global scope (startup, outside every
 request's limit), which took the isolate's first API request from 7.4-8.2 to 4.2-5.2 ms. The DO's own CPU (30 s
 per invocation) is not measured here: it builds the same dicts as before and maps them to the generated
 dataclasses; todofy-core's upload grew 554.1 → 627.3 KiB (gzip 153.6 → 166.6 KiB). The gateway's bundle, `deploy/bundle-size.mjs` (budget 86 KiB gzip): 39.7 → 290.6 KiB raw, 11.8 →

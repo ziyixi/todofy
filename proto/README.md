@@ -683,7 +683,8 @@ the isolate's first API request (the service status, with the first RS256 verifi
 until `todofy/gateway/src/warm.ts` ran the codec once at global scope over synthetic messages, outside every
 request's limit; bound 8), a page of 100 events 0.4 → 3.2 first and 2.2 warm, 120 GTD days 0.4 → 3.2 and 2.9, a
 reconcile 1.0 → 2.1 and 1.6, the two largest answers (a 1.9 MB legacy text, every stored report at the newsletter's
-limits) 2.1 → 4.4 and 1.3 → 5.2 (bound 8); every other first run at most 3.2 (bound 6) and warm median at most 2.9
+limits) 2.1 → 6.2 (1.9 million ASCII characters heavy in escapes, D1's largest row; 4.4 as Chinese text) and
+1.3 → 5.2 (bound 8); every other first run at most 3.2 (bound 6) and warm median at most 2.9
 (bound 4). todofy-core (a Durable Object, 30 s) builds the same dicts as before and maps them to generated
 dataclasses; its upload 554.1 → 627.3 KiB (gzip 153.6 → 166.6: the `todofy.ui.v1` modules and the mapping).
 

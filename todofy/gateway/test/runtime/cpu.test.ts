@@ -31,8 +31,10 @@ const API_COLD_BOUND_MS = 0.6 * FREE_CPU_MS;
 const API_BOUND_MS = 0.4 * FREE_CPU_MS;
 /**
  * The two answers far larger than the others, read and written again whole: the 1.9 MB legacy text (JSON.parse and
- * stringify of about 640,000 characters, 4.4 / 3.8 ms measured) and every stored report at the newsletter's limits
- * (about 230,000 characters whose text rules the codec checks on the read and on the write, 5.2 / 5.0 ms).
+ * stringify of 1.9 million ASCII characters heavy in escapes, the worst case of D1's largest row: first runs
+ * 5.96-6.22 and warm medians 5.26-5.67 ms in six runs; the same bytes of Chinese text, 633,333 characters, read
+ * 4.4 / 3.8) and every stored report at the newsletter's limits (about 230,000 characters whose text rules the codec
+ * checks on the read and on the write, 4.6-5.0 / 4.7-4.9 ms).
  */
 const LARGE_BOUND_MS = 0.8 * FREE_CPU_MS;
 const RUNS = 11;
@@ -40,7 +42,7 @@ const ISSUER = SYNTHETIC_BINDINGS['ACCESS_ISSUER'] ?? '';
 const AUDIENCE = SYNTHETIC_BINDINGS['ACCESS_AUDIENCE'] ?? '';
 
 const API_INIT = "GET /api/v1/serviceStatus as the isolate's first API request";
-const LEGACY = 'GET /api/v1/legacyTexts/{id} (1.9 MB)';
+const LEGACY = 'GET /api/v1/legacyTexts/{id} (1.9 MB of ASCII with escapes)';
 const REPORTS = 'GET /api/v1/latestReports (every report at its limits)';
 const LARGE = new Set([LEGACY, REPORTS]);
 

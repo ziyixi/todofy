@@ -1,7 +1,9 @@
 /**
  * The largest answers TodofyCore can give the owner API, as wire JSON (todofy.ui.v1), for the CPU test. Every size is
  * the bound of the code that writes it: a full page of events (100), an event's 100 transitions with a summary of
- * MAX_SUMMARY_BYTES (64 KiB) and a 16,000-character Todoist description, an imported legacy text of 1.9 MB, 90
+ * MAX_SUMMARY_BYTES (64 KiB) and a 16,000-character Todoist description, an imported legacy text of 1.9 MB (ASCII
+ * mail with quotes, backslashes and line breaks: three times the JS characters of Chinese text in the same bytes,
+ * and the most escapes to read and write, so the gateway's costliest answer), 90
  * metric days with three models, 120 GTD days, and the reports at their schemas' limits (a 12,000-character summary,
  * the recommendation of every top_n from 1 to 10 with 200-character titles and 4,000-character reasons). Text is
  * Chinese (three UTF-8 bytes a character) where the real text usually is. All of it is synthetic.
@@ -57,8 +59,12 @@ export function eventDetail(): Record<string, unknown> {
   };
 }
 
+/** About 1.9 MB of ASCII mail text in HTML, heavy in what JSON escapes: quotes, backslashes, \r\n and tabs. */
+const ASCII_MAIL = 'Dear customer, your "invoice" C:\\path is due.\r\n\t> quoted line <a href=\'x\'>link</a>\n';
+
+/** The largest legacy text D1 holds (a row is at most 2,000,000 bytes), in the form costliest for the gateway. */
 export function legacyText(): Record<string, unknown> {
-  return { name: `legacyTexts/${UUID(0)}`, create_time: AT, text: text(Math.floor(1_900_000 / 3), 1) };
+  return { name: `legacyTexts/${UUID(0)}`, create_time: AT, text: ASCII_MAIL.repeat(Math.ceil(1_900_000 / ASCII_MAIL.length)).slice(0, 1_900_000) };
 }
 
 export function metricDays(count: number): Record<string, unknown> {
