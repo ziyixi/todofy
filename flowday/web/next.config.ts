@@ -12,7 +12,8 @@ const nextConfig: NextConfig = {
   },
   output: "export",
   productionBrowserSourceMaps: false,
-  // web/ is the project root (the Worker's own package-lock.json sits next to it in ../worker).
+  // The monorepo's root, not web/: Turbopack resolves no file outside its root, and the linked @ziyixi/proto (the
+  // generated flowday.ui.v1 client, ../../proto/ts) and its runtime (../../proto/node_modules) live outside web/.
   turbopack: { root: join(import.meta.dirname, "../..") },
 };
 
