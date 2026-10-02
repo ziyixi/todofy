@@ -1,0 +1,713 @@
+// FlowDay's owner API: the HTTP/JSON interface between FlowDay's UI (flowday/web, a Next.js static export) and the
+// Worker "flowday" (flowday/worker), which keeps everything in D1 and reads Todoist (never writes it).
+//
+// Callers. Only FlowDay's own UI calls it (same origin, flowday.ziyixi.science). No other app calls these routes.
+//
+// Transport. google.api.http bindings under the prefix /api/v1, served by the shared transcoder
+// (proto/ts/http-transcoder.ts) and called through the shared client (proto/ts/http-client.ts). Bodies, query
+// parameters and responses are JSON in the wire JSON profile (proto/README.md): proto field names (snake_case), enum
+// values in lower case without their prefix (`TimerSession.State.STATE_RUNNING` is "running"), timestamps in RFC
+// 3339 UTC. Inputs are read strictly (an unknown field or enum name is INVALID_ARGUMENT), outputs leniently. Request
+// bodies are at most 256 KiB. Errors: errors.proto (FlowDay's reasons) and common/errors/v1/errors.proto (the
+// reasons every API shares).
+//
+// Authentication, in front of the transcoder (packages/edge-auth, FlowDay's parameters in its SPEC §5.4): every
+// route needs the Cloudflare Access JWT of the owner (header Cf-Access-Jwt-Assertion or cookie CF_Authorization);
+// every method other than GET also needs the same-origin Origin header and the signed double-submit CSRF token
+// (header X-CSRF-Token, cookie flowday_csrf), issued by GET /api/csrf, which is transport, not part of this
+// service, as are /health and the exact PWA files.
+//
+// Repeated requests (AIP-155). The Worker keeps no request log: D1's daily write allowance is shared by every app of
+// the account, and a log would cost a row write (and its index entry) on every mutation, about doubling FlowDay's
+// writes. So the two creates take a `request_id` that becomes the new resource's ID (`local-<request_id>`,
+// `timeEntries/<request_id>`): a repeated request finds it and answers it, writing nothing. Every other mutation
+// sets a state (a flow's tasks, a note's text, the timer session, a setting), so repeating it changes nothing more;
+// a repeated Delete or Undelete answers NOT_FOUND or TASK_NOT_DELETED like any second one. There are no etags
+// (AIP-154): the owner's tabs and devices write last-writer-wins, as before; every change is small and the UI
+// reloads what it shows after a failure.
+//
+// Write budget. Every mutation writes only rows whose values change (flowday/AGENTS.md, flowday/docs/design.md
+// "Write budget"), and every response carries the header x-flowday-rows-written (transport, not part of a message).
+//
+// Value rules the IDL cannot express (lengths, ranges, counts, the `YYYY-MM-DD` days) are in each field's comment
+// and enforced by the Worker (flowday/worker/src/limits.ts).
+//
+// Before flowday.ui.v1 (until 2026-10-02) the same operations were hand-written routes under /api; each rpc below
+// names the route it replaces. Those paths now answer 410 with FlowDay's old error envelope and the code
+// `reload_required` (flowday/worker/src/router.ts), so a tab still running the old UI tells the owner to reload.
+//
+// buf lint. The methods that answer a resource (or google.protobuf.Empty) carry two `buf:lint:ignore` lines:
+// RPC_RESPONSE_STANDARD_NAME and RPC_REQUEST_RESPONSE_UNIQUE, which the AIPs contradict (a standard method answers
+// the resource itself, so one message answers several methods; api-linter checks those names instead). They are
+// excused here, next to each method, not in buf.yaml: buf.yaml is a path every proto user's deploy depends on
+// (.github/scripts/ci_changes.py), and this package must not redeploy the other apps.
+//
+// (-- api-linter: core::0142::time-field-type=disabled
+//     aip.dev/not-precedent: a field ending in `_date` is a calendar day, `YYYY-MM-DD`, and one ending in `_seconds` a
+//     count of seconds; the wire profile (proto/README.md) has neither google.type.Date nor google.protobuf.Duration,
+//     and a Timestamp would name an instant, which neither is. --)
+
+syntax = "proto3";
+
+package flowday.ui.v1;
+
+import "flowday/ui/v1/flow.proto";
+import "flowday/ui/v1/settings.proto";
+import "flowday/ui/v1/task.proto";
+import "flowday/ui/v1/time_entry.proto";
+import "google/api/annotations.proto";
+import "google/api/client.proto";
+import "google/api/field_behavior.proto";
+import "google/api/field_info.proto";
+import "google/api/resource.proto";
+import "google/protobuf/empty.proto";
+import "google/protobuf/field_mask.proto";
+import "google/protobuf/timestamp.proto";
+
+option java_multiple_files = true;
+option java_outer_classname = "FlowDayUiServiceProto";
+option java_package = "science.ziyixi.flowday.ui.v1";
+
+// The owner's day planner: the tasks (from Todoist, and local ones), each day's flow and notes, the time logged, the
+// shared timer, the settings, and the raw rows of the reviews and exports (which the browser computes).
+service FlowDayUiService {
+  option (google.api.default_host) = "flowday.ziyixi.science";
+
+  // A task, deleted or not (AIP-131).
+  // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
+  // buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE
+  rpc GetTask(GetTaskRequest) returns (Task) {
+    option (google.api.http) = {get: "/api/v1/{name=tasks/*}"};
+    option (google.api.method_signature) = "name";
+  }
+
+  // The tasks of the task list (AIP-132, AIP-158), in the order they were first stored; with `show_deleted` also the
+  // tasks deleted in FlowDay (the trash). Replaces GET /api/tasks and GET /api/tasks/deleted.
+  rpc ListTasks(ListTasksRequest) returns (ListTasksResponse) {
+    option (google.api.http) = {get: "/api/v1/tasks"};
+    option (google.api.method_signature) = "";
+  }
+
+  // Creates a local task (AIP-133). Replaces POST /api/tasks.
+  // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
+  // buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE
+  rpc CreateTask(CreateTaskRequest) returns (Task) {
+    option (google.api.http) = {
+      post: "/api/v1/tasks"
+      body: "task"
+    };
+    option (google.api.method_signature) = "task";
+  }
+
+  // Replaces the title or the estimate (AIP-134): the fields `update_mask` names, or both without one. Any task,
+  // a Todoist task too (FlowDay keeps the change; Todoist never sees it, and the sync replaces the title when the
+  // task changes there). Replaces PATCH /api/tasks.
+  // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
+  // buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE
+  rpc UpdateTask(UpdateTaskRequest) returns (Task) {
+    option (google.api.http) = {
+      patch: "/api/v1/{task.name=tasks/*}"
+      body: "task"
+    };
+    option (google.api.method_signature) = "task,update_mask";
+  }
+
+  // Soft-deletes a task (AIP-135, AIP-164) and takes it out of every flow and every day's done tasks, in one atomic
+  // write; answers the deleted task. NOT_FOUND when there is no task, and when it is deleted already (then with the
+  // deleted Task as a detail). Replaces DELETE /api/tasks.
+  // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
+  // buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE
+  rpc DeleteTask(DeleteTaskRequest) returns (Task) {
+    option (google.api.http) = {delete: "/api/v1/{name=tasks/*}"};
+    option (google.api.method_signature) = "name";
+  }
+
+  // Brings a deleted task back to the task list (AIP-164); TASK_NOT_DELETED when it is not deleted. Its flows are
+  // not restored. Replaces POST /api/tasks/deleted.
+  // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
+  // buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE
+  rpc UndeleteTask(UndeleteTaskRequest) returns (Task) {
+    option (google.api.http) = {
+      post: "/api/v1/{name=tasks/*}:undelete"
+      body: "*"
+    };
+    option (google.api.method_signature) = "name";
+  }
+
+  // Brings Todoist's changes in (flowday/docs/design.md §4): at most one Todoist read, throttled atomically across
+  // tabs and devices, a large answer applied over several requests (PARTIAL: ask again at once). Replaces POST
+  // /api/sync.
+  rpc SyncTasks(SyncTasksRequest) returns (SyncTasksResponse) {
+    option (google.api.http) = {
+      post: "/api/v1/tasks:sync"
+      body: "*"
+    };
+  }
+
+  // A day's flow (AIP-131); an empty one for a day without any.
+  // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
+  // buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE
+  rpc GetFlow(GetFlowRequest) returns (Flow) {
+    option (google.api.http) = {get: "/api/v1/{name=flows/*}"};
+    option (google.api.method_signature) = "name";
+  }
+
+  // The days with a flow, oldest first (AIP-132, AIP-158). Replaces GET /api/flows and the planning flag of GET
+  // /api/settings?today=.
+  rpc ListFlows(ListFlowsRequest) returns (ListFlowsResponse) {
+    option (google.api.http) = {get: "/api/v1/flows"};
+    option (google.api.method_signature) = "";
+  }
+
+  // Replaces the planned tasks or the planning flag (AIP-134): the fields `update_mask` names, or both without one.
+  // Replaces PUT /api/flows `setFlow` and PUT /api/settings `planning_completed_date`.
+  // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
+  // buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE
+  rpc UpdateFlow(UpdateFlowRequest) returns (Flow) {
+    option (google.api.http) = {
+      patch: "/api/v1/{flow.name=flows/*}"
+      body: "flow"
+    };
+    option (google.api.method_signature) = "flow,update_mask";
+  }
+
+  // Marks a task done on the day (a task done already changes nothing). Replaces PUT /api/flows `addCompleted`.
+  // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
+  // buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE
+  rpc CompleteFlowTask(CompleteFlowTaskRequest) returns (Flow) {
+    option (google.api.http) = {
+      post: "/api/v1/{name=flows/*}:completeTask"
+      body: "*"
+    };
+    option (google.api.method_signature) = "name,task_id";
+  }
+
+  // Takes a task's done mark of the day back (a task not done changes nothing). Replaces PUT /api/flows
+  // `removeCompleted`.
+  // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
+  // buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE
+  rpc ReopenFlowTask(ReopenFlowTaskRequest) returns (Flow) {
+    option (google.api.http) = {
+      post: "/api/v1/{name=flows/*}:reopenTask"
+      body: "*"
+    };
+    option (google.api.method_signature) = "name,task_id";
+  }
+
+  // Moves tasks of the day to the top of another day, in one atomic write: the listed ones, or every task not done
+  // without a list. Tasks the other day has already keep their place there. Replaces PUT /api/flows `rollover` and
+  // `rolloverSelected`.
+  rpc RolloverFlow(RolloverFlowRequest) returns (RolloverFlowResponse) {
+    option (google.api.http) = {
+      post: "/api/v1/{name=flows/*}:rollover"
+      body: "*"
+    };
+    option (google.api.method_signature) = "name,destination";
+  }
+
+  // A task's note of a day (AIP-131); an empty one when it was never written. Replaces GET /api/notes?taskId&date.
+  // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
+  // buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE
+  rpc GetNote(GetNoteRequest) returns (Note) {
+    option (google.api.http) = {get: "/api/v1/{name=flows/*/notes/*}"};
+    option (google.api.method_signature) = "name";
+  }
+
+  // The notes written on a day (AIP-132, AIP-158), in task ID order. Replaces GET /api/notes?date.
+  rpc ListNotes(ListNotesRequest) returns (ListNotesResponse) {
+    option (google.api.http) = {get: "/api/v1/{parent=flows/*}/notes"};
+    option (google.api.method_signature) = "parent";
+  }
+
+  // Replaces a note's text (AIP-134; every note exists, so this also writes the first text). Replaces PUT
+  // /api/notes.
+  // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
+  // buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE
+  rpc UpdateNote(UpdateNoteRequest) returns (Note) {
+    option (google.api.http) = {
+      patch: "/api/v1/{note.name=flows/*/notes/*}"
+      body: "note"
+    };
+    option (google.api.method_signature) = "note,update_mask";
+  }
+
+  // A time entry (AIP-131).
+  // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
+  // buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE
+  rpc GetTimeEntry(GetTimeEntryRequest) returns (TimeEntry) {
+    option (google.api.http) = {get: "/api/v1/{name=timeEntries/*}"};
+    option (google.api.method_signature) = "name";
+  }
+
+  // The time entries of a task, of a day, or of a task on a day, by start time (AIP-132, AIP-158). Replaces GET
+  // /api/entries?taskId&date.
+  rpc ListTimeEntries(ListTimeEntriesRequest) returns (ListTimeEntriesResponse) {
+    option (google.api.http) = {get: "/api/v1/timeEntries"};
+    option (google.api.method_signature) = "";
+  }
+
+  // Logs time on a task (AIP-133). Replaces POST /api/entries.
+  // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
+  // buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE
+  rpc CreateTimeEntry(CreateTimeEntryRequest) returns (TimeEntry) {
+    option (google.api.http) = {
+      post: "/api/v1/timeEntries"
+      body: "time_entry"
+    };
+    option (google.api.method_signature) = "time_entry";
+  }
+
+  // Replaces an entry's start and end (AIP-134): the fields `update_mask` names (`start_time`, `end_time`), or both
+  // without one; the duration becomes the time between them. Replaces PUT /api/entries/{id}.
+  // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
+  // buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE
+  rpc UpdateTimeEntry(UpdateTimeEntryRequest) returns (TimeEntry) {
+    option (google.api.http) = {
+      patch: "/api/v1/{time_entry.name=timeEntries/*}"
+      body: "time_entry"
+    };
+    option (google.api.method_signature) = "time_entry,update_mask";
+  }
+
+  // Deletes a time entry for good (AIP-135); NOT_FOUND when there is none. Replaces DELETE /api/entries/{id}.
+  // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
+  // buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE
+  rpc DeleteTimeEntry(DeleteTimeEntryRequest) returns (google.protobuf.Empty) {
+    option (google.api.http) = {delete: "/api/v1/{name=timeEntries/*}"};
+    option (google.api.method_signature) = "name";
+  }
+
+  // The shared timer (AIP-131, AIP-156): an empty session (IDLE, no task) when none is stored. Replaces GET
+  // /api/timer/session.
+  // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
+  // buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE
+  rpc GetTimerSession(GetTimerSessionRequest) returns (TimerSession) {
+    option (google.api.http) = {get: "/api/v1/{name=timerSession}"};
+    option (google.api.method_signature) = "name";
+  }
+
+  // Stores the timer's state (AIP-134): the fields `update_mask` names, or all of them without one. One row write.
+  // Replaces PUT /api/timer/session.
+  // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
+  // buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE
+  rpc UpdateTimerSession(UpdateTimerSessionRequest) returns (TimerSession) {
+    option (google.api.http) = {
+      patch: "/api/v1/{timer_session.name=timerSession}"
+      body: "timer_session"
+    };
+    option (google.api.method_signature) = "timer_session,update_mask";
+  }
+
+  // Empties the shared timer (no task, IDLE) and answers the empty session. Replaces DELETE /api/timer/session.
+  // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
+  // buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE
+  rpc ClearTimerSession(ClearTimerSessionRequest) returns (TimerSession) {
+    option (google.api.http) = {
+      post: "/api/v1/{name=timerSession}:clear"
+      body: "*"
+    };
+    option (google.api.method_signature) = "name";
+  }
+
+  // The settings (AIP-131, AIP-156). Replaces GET /api/settings.
+  // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
+  // buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE
+  rpc GetSettings(GetSettingsRequest) returns (Settings) {
+    option (google.api.http) = {get: "/api/v1/{name=settings}"};
+    option (google.api.method_signature) = "name";
+  }
+
+  // Replaces the settings `update_mask` names (`todoist_api_key`, `day_capacity_minutes`), or both without one
+  // (AIP-134), in one atomic write; answers the stored settings. Replaces PUT /api/settings.
+  // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
+  // buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE
+  rpc UpdateSettings(UpdateSettingsRequest) returns (Settings) {
+    option (google.api.http) = {
+      patch: "/api/v1/{settings.name=settings}"
+      body: "settings"
+    };
+    option (google.api.method_signature) = "settings,update_mask";
+  }
+
+  // The raw rows the browser computes the daily, weekly and work-pattern reviews and the exports from (Workers Free
+  // gives a request 10 ms of CPU; the container era's server-side reviews took 40-63 ms). Replaces GET
+  // /api/analytics?start&end.
+  rpc QueryAnalytics(QueryAnalyticsRequest) returns (QueryAnalyticsResponse) {
+    option (google.api.http) = {get: "/api/v1/analytics:query"};
+  }
+}
+
+// Input of GetTask.
+message GetTaskRequest {
+  // tasks/{task}.
+  string name = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (google.api.resource_reference).type = "flowday.ziyixi.science/Task"
+  ];
+}
+
+// Input of ListTasks.
+message ListTasksRequest {
+  // At most this many tasks (AIP-158): 0 means 200, and a larger value is read as 200 (each answer is written well
+  // within Workers Free's 10 ms of CPU, even an isolate's first; the sync keeps at most 1,000 Todoist tasks).
+  int32 page_size = 1 [(google.api.field_behavior) = OPTIONAL];
+  // The previous page's `next_page_token`, with the same `show_deleted` (another is INVALID_ARGUMENT).
+  string page_token = 2 [(google.api.field_behavior) = OPTIONAL];
+  // Also list the tasks deleted in FlowDay (AIP-164: the trash). The tasks the sync hid are never listed.
+  bool show_deleted = 3 [(google.api.field_behavior) = OPTIONAL];
+}
+
+// Output of ListTasks.
+message ListTasksResponse {
+  // The page, in the order the tasks were first stored.
+  repeated Task tasks = 1 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The next page's token; empty on the last page.
+  string next_page_token = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
+}
+
+// Input of CreateTask.
+// (-- api-linter: core::0133::request-id-field=disabled
+//     aip.dev/not-precedent: the Worker names a local task (`local-<UUID>`) from the request_id, so a repeated request
+//     finds what the first one made without a request log; a second way to choose the ID would have no caller. --)
+message CreateTaskRequest {
+  // The local task: its `title` (REQUIRED) and optionally `description`, `priority`, `labels`, `estimated_minutes`
+  // and `due_date`; `name` and the output-only fields are ignored.
+  Task task = 1 [(google.api.field_behavior) = REQUIRED];
+  // The idempotency key (AIP-155), a query parameter: the new task is `tasks/local-<request_id>`, so a repeated
+  // request answers the task the first one created (see FlowDayUiService). Without one the Worker makes an ID.
+  string request_id = 2 [
+    (google.api.field_info).format = UUID4,
+    (google.api.field_behavior) = OPTIONAL
+  ];
+}
+
+// Input of UpdateTask.
+message UpdateTaskRequest {
+  // The new values: the fields `update_mask` names, or `title` and `estimated_minutes` without one (an unset
+  // estimate clears it). The other fields are ignored.
+  Task task = 1 [(google.api.field_behavior) = REQUIRED];
+  // AIP-134: `title`, `estimated_minutes` or both (a query parameter). Absent, empty or `*` replaces both; any other
+  // field is INVALID_ARGUMENT, and output-only fields are ignored.
+  google.protobuf.FieldMask update_mask = 2 [(google.api.field_behavior) = OPTIONAL];
+}
+
+// Input of DeleteTask.
+message DeleteTaskRequest {
+  // tasks/{task}.
+  string name = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (google.api.resource_reference).type = "flowday.ziyixi.science/Task"
+  ];
+}
+
+// Input of UndeleteTask.
+message UndeleteTaskRequest {
+  // tasks/{task}.
+  string name = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (google.api.resource_reference).type = "flowday.ziyixi.science/Task"
+  ];
+}
+
+// Input of SyncTasks.
+message SyncTasksRequest {
+  // Who asked.
+  enum Mode {
+    // Not set: read as AUTO.
+    MODE_UNSPECIFIED = 0;
+    // The page's own polling: at most every 5 minutes, longer after failed syncs (up to 32 times).
+    MODE_AUTO = 1;
+    // "Sync now": at most every 30 seconds.
+    MODE_MANUAL = 2;
+  }
+
+  // Who asked (AUTO when unspecified).
+  Mode mode = 1 [(google.api.field_behavior) = OPTIONAL];
+}
+
+// Output of SyncTasks.
+message SyncTasksResponse {
+  // What the request did.
+  enum State {
+    // Never written.
+    STATE_UNSPECIFIED = 0;
+    // Todoist was read and its answer applied.
+    STATE_SYNCED = 1;
+    // Part of a large answer was applied (or a full pass must follow): ask again at once.
+    STATE_PARTIAL = 2;
+    // Another tab or device synced within the minimum interval: nothing was read or written.
+    STATE_THROTTLED = 3;
+  }
+
+  // What the request did.
+  State state = 1 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The task rows this request inserted, updated, hid or restored (0 when nothing changed).
+  int32 changed_task_count = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Whether Todoist answered with a full sync (the first sync, a new key, or Todoist reset the sync token).
+  bool full_sync = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // When the last sync applied an answer (this one, unless THROTTLED); unset before the first one.
+  google.protobuf.Timestamp last_sync_time = 4 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The earliest time an automatic sync may run again (later after failed syncs; now after PARTIAL).
+  google.protobuf.Timestamp next_auto_sync_time = 5 [(google.api.field_behavior) = OUTPUT_ONLY];
+}
+
+// Input of GetFlow.
+message GetFlowRequest {
+  // flows/{flow}.
+  string name = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (google.api.resource_reference).type = "flowday.ziyixi.science/Flow"
+  ];
+}
+
+// Input of ListFlows.
+message ListFlowsRequest {
+  // At most this many days (AIP-158): 0 means 200, and a larger value is read as 200.
+  int32 page_size = 1 [(google.api.field_behavior) = OPTIONAL];
+  // The previous page's `next_page_token`.
+  string page_token = 2 [(google.api.field_behavior) = OPTIONAL];
+}
+
+// Output of ListFlows.
+message ListFlowsResponse {
+  // The page, oldest day first: every day with a planned or done task, or a completed planning.
+  repeated Flow flows = 1 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The next page's token; empty on the last page.
+  string next_page_token = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
+}
+
+// Input of UpdateFlow.
+message UpdateFlowRequest {
+  // The new values: the fields `update_mask` names, or `task_ids` and `planning_completed` without one.
+  // `completed_task_ids` is output only (CompleteFlowTask, ReopenFlowTask).
+  Flow flow = 1 [(google.api.field_behavior) = REQUIRED];
+  // AIP-134: `task_ids`, `planning_completed` or both (a query parameter). Absent, empty or `*` replaces both.
+  google.protobuf.FieldMask update_mask = 2 [(google.api.field_behavior) = OPTIONAL];
+}
+
+// Input of CompleteFlowTask.
+message CompleteFlowTaskRequest {
+  // flows/{flow}.
+  string name = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (google.api.resource_reference).type = "flowday.ziyixi.science/Flow"
+  ];
+  // The task done on the day (any task ID).
+  string task_id = 2 [(google.api.field_behavior) = REQUIRED];
+}
+
+// Input of ReopenFlowTask.
+message ReopenFlowTaskRequest {
+  // flows/{flow}.
+  string name = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (google.api.resource_reference).type = "flowday.ziyixi.science/Flow"
+  ];
+  // The task whose done mark of the day is taken back.
+  string task_id = 2 [(google.api.field_behavior) = REQUIRED];
+}
+
+// Input of RolloverFlow.
+message RolloverFlowRequest {
+  // flows/{flow}: the day the tasks leave.
+  string name = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (google.api.resource_reference).type = "flowday.ziyixi.science/Flow"
+  ];
+  // flows/{flow}: the day the tasks go to, at the top in their order.
+  string destination = 2 [
+    (google.api.field_behavior) = REQUIRED,
+    (google.api.resource_reference).type = "flowday.ziyixi.science/Flow"
+  ];
+  // The tasks to move, at most 2,000 (those not in the day's flow are skipped); empty moves every task of the
+  // flow that is not done on the day.
+  repeated string task_ids = 3 [(google.api.field_behavior) = OPTIONAL];
+}
+
+// Output of RolloverFlow.
+message RolloverFlowResponse {
+  // The day the tasks left, afterwards.
+  Flow flow = 1 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The day they went to, afterwards.
+  Flow destination_flow = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
+}
+
+// Input of GetNote.
+message GetNoteRequest {
+  // flows/{flow}/notes/{note}.
+  string name = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (google.api.resource_reference).type = "flowday.ziyixi.science/Note"
+  ];
+}
+
+// Input of ListNotes.
+message ListNotesRequest {
+  // flows/{flow}: the day.
+  string parent = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (google.api.resource_reference).child_type = "flowday.ziyixi.science/Note"
+  ];
+  // At most this many notes (AIP-158): 0 means 100, and a larger value is read as 100.
+  int32 page_size = 2 [(google.api.field_behavior) = OPTIONAL];
+  // The previous page's `next_page_token`, with the same `parent`.
+  string page_token = 3 [(google.api.field_behavior) = OPTIONAL];
+}
+
+// Output of ListNotes.
+message ListNotesResponse {
+  // The page: the day's written notes, in task ID order.
+  repeated Note notes = 1 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The next page's token; empty on the last page.
+  string next_page_token = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
+}
+
+// Input of UpdateNote.
+message UpdateNoteRequest {
+  // The note and its new text.
+  Note note = 1 [(google.api.field_behavior) = REQUIRED];
+  // AIP-134: `content` (a query parameter); absent, empty or `*` is the same.
+  google.protobuf.FieldMask update_mask = 2 [(google.api.field_behavior) = OPTIONAL];
+}
+
+// Input of GetTimeEntry.
+message GetTimeEntryRequest {
+  // timeEntries/{time_entry}.
+  string name = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (google.api.resource_reference).type = "flowday.ziyixi.science/TimeEntry"
+  ];
+}
+
+// Input of ListTimeEntries. `task_id`, `flow_date` or both select the entries; neither is INVALID_ARGUMENT.
+// (-- api-linter: core::0132::request-unknown-fields=disabled
+//     aip.dev/not-precedent: the two selectors are exact matches on indexed columns; the shared AIP-160 subset
+//     (proto/ts/filter.ts) parses literals only, with no field comparison to say `task_id = "..."` in a `filter`. --)
+message ListTimeEntriesRequest {
+  // At most this many entries (AIP-158): 0 means 200, and a larger value is read as 200.
+  int32 page_size = 1 [(google.api.field_behavior) = OPTIONAL];
+  // The previous page's `next_page_token`, with the same `task_id` and `flow_date`.
+  string page_token = 2 [(google.api.field_behavior) = OPTIONAL];
+  // Only the entries of this task.
+  string task_id = 3 [(google.api.field_behavior) = OPTIONAL];
+  // Only the entries of this flow day, `YYYY-MM-DD`.
+  string flow_date = 4 [(google.api.field_behavior) = OPTIONAL];
+}
+
+// Output of ListTimeEntries.
+message ListTimeEntriesResponse {
+  // The page, by start time.
+  repeated TimeEntry time_entries = 1 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The next page's token; empty on the last page.
+  string next_page_token = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
+}
+
+// Input of CreateTimeEntry.
+// (-- api-linter: core::0133::request-id-field=disabled
+//     aip.dev/not-precedent: the entry's ID is its request_id (see CreateTaskRequest); a second way to choose the ID
+//     would have no caller. --)
+message CreateTimeEntryRequest {
+  // The entry: `task_id`, `flow_date` and `start_time` (REQUIRED), and optionally `end_time`, `duration_seconds`
+  // and `source`; `name` and the output-only fields are ignored.
+  TimeEntry time_entry = 1 [(google.api.field_behavior) = REQUIRED];
+  // The idempotency key (AIP-155), a query parameter: the new entry is `timeEntries/<request_id>`, so a repeated
+  // request answers the entry the first one created (see FlowDayUiService). Without one the Worker makes an ID.
+  string request_id = 2 [
+    (google.api.field_info).format = UUID4,
+    (google.api.field_behavior) = OPTIONAL
+  ];
+}
+
+// Input of UpdateTimeEntry.
+message UpdateTimeEntryRequest {
+  // The new values: the fields `update_mask` names, or `start_time` and `end_time` without one; the end must not
+  // be before the start. The other fields are ignored.
+  TimeEntry time_entry = 1 [(google.api.field_behavior) = REQUIRED];
+  // AIP-134: `start_time`, `end_time` or both (a query parameter). Absent, empty or `*` replaces both; any other
+  // field is INVALID_ARGUMENT, and output-only fields are ignored.
+  google.protobuf.FieldMask update_mask = 2 [(google.api.field_behavior) = OPTIONAL];
+}
+
+// Input of DeleteTimeEntry.
+message DeleteTimeEntryRequest {
+  // timeEntries/{time_entry}.
+  string name = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (google.api.resource_reference).type = "flowday.ziyixi.science/TimeEntry"
+  ];
+}
+
+// Input of GetTimerSession.
+message GetTimerSessionRequest {
+  // Always `timerSession`.
+  string name = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (google.api.resource_reference).type = "flowday.ziyixi.science/TimerSession"
+  ];
+}
+
+// Input of UpdateTimerSession.
+message UpdateTimerSessionRequest {
+  // The new state: the fields `update_mask` names, or every field but `name` and `update_time` without one.
+  TimerSession timer_session = 1 [(google.api.field_behavior) = REQUIRED];
+  // AIP-134: the fields to replace (a query parameter). Absent, empty or `*` replaces every field the UI sets.
+  google.protobuf.FieldMask update_mask = 2 [(google.api.field_behavior) = OPTIONAL];
+}
+
+// Input of ClearTimerSession.
+message ClearTimerSessionRequest {
+  // Always `timerSession`.
+  string name = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (google.api.resource_reference).type = "flowday.ziyixi.science/TimerSession"
+  ];
+}
+
+// Input of GetSettings.
+message GetSettingsRequest {
+  // Always `settings`.
+  string name = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (google.api.resource_reference).type = "flowday.ziyixi.science/Settings"
+  ];
+}
+
+// Input of UpdateSettings.
+message UpdateSettingsRequest {
+  // The new values: the fields `update_mask` names, or `todoist_api_key` and `day_capacity_minutes` without one.
+  Settings settings = 1 [(google.api.field_behavior) = REQUIRED];
+  // AIP-134: `todoist_api_key`, `day_capacity_minutes` or both (a query parameter). Absent, empty or `*` replaces
+  // both (so the key must be given); any other field is INVALID_ARGUMENT, and output-only fields are ignored.
+  google.protobuf.FieldMask update_mask = 2 [(google.api.field_behavior) = OPTIONAL];
+}
+
+// Input of QueryAnalytics: a range of days, or neither day (every time entry, for the work-pattern statistics).
+message QueryAnalyticsRequest {
+  // The first day, `YYYY-MM-DD`; given exactly when `end_date` is.
+  string start_date = 1 [(google.api.field_behavior) = OPTIONAL];
+  // The last day, `YYYY-MM-DD`, not before `start_date`.
+  string end_date = 2 [(google.api.field_behavior) = OPTIONAL];
+  // At most this many time entries (AIP-158): 0 means 200, and a larger value is read as 200 (a page also carries
+  // the tasks its entries name, and is written within Workers Free's 10 ms of CPU).
+  int32 page_size = 3 [(google.api.field_behavior) = OPTIONAL];
+  // The previous page's `next_page_token`, with the same `start_date` and `end_date`.
+  string page_token = 4 [(google.api.field_behavior) = OPTIONAL];
+}
+
+// Output of QueryAnalytics: a page of the time entries, with what the browser needs to read them. The pages
+// together hold every row of the range: concatenate `time_entries`, `flows` and `tasks` (a task may come on several
+// pages).
+message QueryAnalyticsResponse {
+  // The page's time entries: the range's by day and start time, or every entry by start time without a range.
+  repeated TimeEntry time_entries = 1 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The next page's token; empty on the last page.
+  string next_page_token = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // On the first page only: the flows of the range's days (planned and done tasks, without `planning_completed`),
+  // oldest first; none without a range.
+  repeated Flow flows = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Every stored task the page's flows and time entries name, deleted ones included (the UI's pseudo-tasks are not
+  // tasks).
+  repeated Task tasks = 4 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The day's capacity setting (Settings.day_capacity_minutes).
+  int32 day_capacity_minutes = 5 [(google.api.field_behavior) = OUTPUT_ONLY];
+}

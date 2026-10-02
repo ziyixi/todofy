@@ -1,0 +1,55 @@
+// A day's flow (the tasks planned for the day, in order, and the ones done) and the notes the owner keeps on a
+// task for that day (flowday/docs/design.md §2-§3).
+
+syntax = "proto3";
+
+package flowday.ui.v1;
+
+import "google/api/field_behavior.proto";
+import "google/api/resource.proto";
+import "google/protobuf/timestamp.proto";
+
+option java_multiple_files = true;
+option java_outer_classname = "FlowProto";
+option java_package = "science.ziyixi.flowday.ui.v1";
+
+// The plan of one day. Every day has a flow (an empty one until something is planned); ListFlows lists the days
+// with a planned or done task, or a completed planning. A task ID here is any task ID (Task.name's rule), the UI's
+// pseudo-tasks included.
+message Flow {
+  option (google.api.resource) = {
+    type: "flowday.ziyixi.science/Flow"
+    pattern: "flows/{flow}"
+    singular: "flow"
+    plural: "flows"
+  };
+
+  // flows/{flow}, where {flow} is the day, `YYYY-MM-DD` (the owner's local calendar day).
+  string name = 1 [(google.api.field_behavior) = IDENTIFIER];
+  // The tasks planned for the day, in order, at most 2,000 (a repeated ID keeps its first position). UpdateFlow
+  // writes only what differs.
+  repeated string task_ids = 2 [(google.api.field_behavior) = OPTIONAL];
+  // The tasks marked done on the day, in the order they were (CompleteFlowTask, ReopenFlowTask).
+  repeated string completed_task_ids = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Whether the owner finished the planning steps for the day (the planning wizard is not offered again). Only
+  // ListFlows, GetFlow and UpdateFlow answer it; QueryAnalytics leaves it unset.
+  bool planning_completed = 4 [(google.api.field_behavior) = OPTIONAL];
+}
+
+// The owner's markdown note on one task for one day. Every task has a note on every day: one that was never
+// written reads as empty, and writing the same text again changes nothing.
+message Note {
+  option (google.api.resource) = {
+    type: "flowday.ziyixi.science/Note"
+    pattern: "flows/{flow}/notes/{note}"
+    singular: "note"
+    plural: "notes"
+  };
+
+  // flows/{flow}/notes/{note}, where {note} is the task's ID (Task.name's rule).
+  string name = 1 [(google.api.field_behavior) = IDENTIFIER];
+  // The note's markdown text, at most 100,000 characters; empty when there is none.
+  string content = 2 [(google.api.field_behavior) = REQUIRED];
+  // When the note was last written; unset for a note never written.
+  google.protobuf.Timestamp update_time = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
+}

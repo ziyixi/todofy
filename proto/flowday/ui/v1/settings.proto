@@ -1,0 +1,40 @@
+// The owner's settings (flowday/docs/design.md §3): the Todoist API key FlowDay reads with, and the day's capacity.
+
+syntax = "proto3";
+
+package flowday.ui.v1;
+
+import "google/api/field_behavior.proto";
+import "google/api/resource.proto";
+import "google/protobuf/timestamp.proto";
+
+option java_multiple_files = true;
+option java_outer_classname = "SettingsProto";
+option java_package = "science.ziyixi.flowday.ui.v1";
+
+// The settings, one per owner (AIP-156).
+message Settings {
+  option (google.api.resource) = {
+    type: "flowday.ziyixi.science/Settings"
+    pattern: "settings"
+    singular: "settings"
+    plural: "settings"
+  };
+
+  // Always `settings`.
+  string name = 1 [(google.api.field_behavior) = IDENTIFIER];
+  // The Todoist API key FlowDay syncs with: 1 to 200 characters (trimmed). Written only: the Worker stores it sealed
+  // (AES-GCM under its CREDENTIAL_KEY secret) and never answers it. Saving the key that is stored already changes
+  // nothing; another key restarts the sync with a full sync.
+  string todoist_api_key = 2 [
+    (google.api.field_behavior) = INPUT_ONLY,
+    (google.api.field_behavior) = OPTIONAL
+  ];
+  // Whether a sealed Todoist API key is stored (a plaintext key of an older copy does not count: the sync never
+  // uses one).
+  bool todoist_api_key_set = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The minutes of planned work a day holds, 0 to 1,440 (360 until set).
+  int32 day_capacity_minutes = 4 [(google.api.field_behavior) = OPTIONAL];
+  // When the last sync with Todoist read and applied an answer; unset before the first one.
+  google.protobuf.Timestamp last_sync_time = 5 [(google.api.field_behavior) = OUTPUT_ONLY];
+}

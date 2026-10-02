@@ -1,0 +1,67 @@
+// A task FlowDay plans with: a Todoist task the sync brought in (read only: FlowDay never writes Todoist), or one of
+// FlowDay's own local tasks (flowday/docs/design.md §2-§4).
+//
+// (-- api-linter: core::0142::time-field-type=disabled
+//     aip.dev/not-precedent: a field ending in `_date` is a calendar day, `YYYY-MM-DD`, and one ending in `_seconds` a
+//     count of seconds; the wire profile (proto/README.md) has neither google.type.Date nor google.protobuf.Duration,
+//     and a Timestamp would name an instant, which neither is. --)
+
+syntax = "proto3";
+
+package flowday.ui.v1;
+
+import "google/api/field_behavior.proto";
+import "google/api/resource.proto";
+import "google/protobuf/timestamp.proto";
+
+option java_multiple_files = true;
+option java_outer_classname = "TaskProto";
+option java_package = "science.ziyixi.flowday.ui.v1";
+
+// A task. Deleting it in FlowDay is a soft delete (AIP-164): it leaves every flow and the task list, and
+// UndeleteTask brings it back from the trash. A Todoist task the sync no longer lists (completed or deleted in
+// Todoist, or in an archived project) is hidden instead: it is in no list, and comes back by itself when Todoist
+// lists it again.
+message Task {
+  option (google.api.resource) = {
+    type: "flowday.ziyixi.science/Task"
+    pattern: "tasks/{task}"
+    singular: "task"
+    plural: "tasks"
+  };
+
+  // tasks/{task}, where {task} is the task's ID: a Todoist task's Todoist ID, `local-<UUID>` for a local task. An
+  // ID is 1 to 200 printable ASCII characters other than `/` and `%` (an ID sent with `%2F` is INVALID_ARGUMENT). The
+  // flows and time entries also name the pseudo-tasks of the UI, such as `__flowday_misc__:<day>`, which are never
+  // Task resources.
+  string name = 1 [(google.api.field_behavior) = IDENTIFIER];
+  // The Todoist ID; empty for a local task.
+  string todoist_id = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The title: not blank, at most 2,000 characters (CreateTask and UpdateTask trim it).
+  string title = 3 [(google.api.field_behavior) = REQUIRED];
+  // The description (Todoist's, or a local task's, at most 2,000 characters).
+  string description = 4 [(google.api.field_behavior) = IMMUTABLE];
+  // The Todoist project's name; empty for a local task.
+  string project_display_name = 5 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The Todoist project's colour as `#rrggbb`; empty for a local task.
+  string project_color = 6 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Todoist's priority, 1 (normal) to 4 (urgent); CreateTask reads anything else as 1.
+  int32 priority = 7 [(google.api.field_behavior) = IMMUTABLE];
+  // The labels, at most 50 (CreateTask keeps the first 50).
+  repeated string labels = 8 [(google.api.field_behavior) = IMMUTABLE];
+  // FlowDay's estimate in minutes, 0 to 100,000; unset when there is none. The sync sets it from a Todoist duration
+  // (a day counts 480 minutes) and keeps the owner's estimate when the Todoist task has none.
+  optional int32 estimated_minutes = 9 [(google.api.field_behavior) = OPTIONAL];
+  // Whether the task is marked completed (rows of the container era; the sync hides a task Todoist completed
+  // instead, so it leaves the lists).
+  bool completed = 10 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // When Todoist completed the task, if it says.
+  google.protobuf.Timestamp complete_time = 11 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The day the task is due, `YYYY-MM-DD`; empty without one. (The wire profile has no google.type.Date.)
+  string due_date = 12 [(google.api.field_behavior) = IMMUTABLE];
+  // When the task was created (in Todoist, or in FlowDay for a local task).
+  google.protobuf.Timestamp create_time = 13 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // When the task was deleted in FlowDay (AIP-164), or hidden by the sync (only QueryAnalytics answers a hidden
+  // task); unset while it is in the task list.
+  google.protobuf.Timestamp delete_time = 14 [(google.api.field_behavior) = OUTPUT_ONLY];
+}

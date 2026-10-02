@@ -1,0 +1,48 @@
+// The errors of FlowDayUiService (AIP-193).
+//
+// Every error is a google.rpc.Status in Google's HTTP JSON form, written by the shared transcoder
+// (proto/ts/http-transcoder.ts):
+//
+//   {"error": {"code": <HTTP status>, "message": <English, for developers>, "status": <google.rpc.Code name>,
+//              "details": [
+//                {"@type": "type.googleapis.com/google.rpc.ErrorInfo", "reason": "TODOIST_KEY_MISSING",
+//                 "domain": "flowday.ziyixi.science"},
+//                {"@type": "type.googleapis.com/google.rpc.LocalizedMessage", "locale": "en", "message": ...},
+//                {"@type": "type.googleapis.com/google.rpc.RequestInfo", "request_id": <16 hex>},
+//                {"@type": "type.googleapis.com/flowday.ui.v1.Task", ...}]}}
+//
+// The UI branches on ErrorInfo.reason only: a value name without its prefix, of ErrorReason below (FlowDay's own
+// reasons) or of common.errors.v1.CommonReason (the reasons every API shares: BAD_REQUEST, NOT_FOUND,
+// METHOD_NOT_ALLOWED, INTERNAL, UNAVAILABLE, UNAUTHORIZED, CSRF_FAILED, ACCESS_NOT_CONFIGURED, NOT_CONFIGURED). The
+// LocalizedMessage is the text the owner reads. Before flowday.ui.v1 the same reasons were the lower-case
+// `error.code` strings of FlowDay's own envelope; `no_todoist_key` is TODOIST_KEY_MISSING now, and the others kept
+// their names (`todoist_key_unreadable` is TODOIST_KEY_UNREADABLE). A reason the UI does not know is shown with the
+// LocalizedMessage, never read as success.
+
+syntax = "proto3";
+
+package flowday.ui.v1;
+
+option java_multiple_files = true;
+option java_outer_classname = "ErrorsProto";
+option java_package = "science.ziyixi.flowday.ui.v1";
+
+// FlowDay's own reasons: ErrorInfo.reason is the value's name without `ERROR_REASON_`. The HTTP status follows the
+// google.rpc.Code listed for each value (the AIP-193 mapping).
+enum ErrorReason {
+  // Never sent.
+  ERROR_REASON_UNSPECIFIED = 0;
+  // FAILED_PRECONDITION (400): SyncTasks without a stored Todoist API key. Settings takes one.
+  ERROR_REASON_TODOIST_KEY_MISSING = 1;
+  // FAILED_PRECONDITION (400): the stored Todoist API key cannot be opened (it was sealed under another
+  // CREDENTIAL_KEY, or is a plaintext key of an older copy). Settings takes it again.
+  ERROR_REASON_TODOIST_KEY_UNREADABLE = 2;
+  // FAILED_PRECONDITION (400): Todoist refused the stored API key (HTTP 401 or 403). Settings takes another.
+  ERROR_REASON_TODOIST_UNAUTHORIZED = 3;
+  // UNAVAILABLE (503): Todoist could not be reached, failed, or answered something FlowDay does not read (too
+  // large, not a sync answer). The automatic sync backs off and tries again later; repeating is safe.
+  ERROR_REASON_TODOIST_UNAVAILABLE = 4;
+  // ALREADY_EXISTS (409): UndeleteTask of a task that is not deleted (AIP-164). The error carries the
+  // flowday.ui.v1.Task.
+  ERROR_REASON_TASK_NOT_DELETED = 5;
+}

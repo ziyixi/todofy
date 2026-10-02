@@ -188,6 +188,8 @@ PROTO_PACKAGES: dict[str, tuple[str, ...]] = {
     # recommendation-v1 and summary-v1 (todofy/api/*.schema.json are generated from it): todofy-core builds them.
     "proto/todofy/report/": ("todofy",),
     "proto/lab/ui/": ("lab",),
+    # FlowDay's owner API (flowday.ui.v1): no importer until FlowDay's Worker and UI move onto it.
+    "proto/flowday/ui/": (),
     "proto/links/ui/": ("links",),
     "proto/watch/ui/": ("watch",),
     # dashboard.ui.v1, the dashboard's owner API: its Worker serves it, its UI calls it.

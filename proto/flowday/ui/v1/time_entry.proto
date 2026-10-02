@@ -1,0 +1,128 @@
+// Time the owner logged on a task: the timer's segments and manual entries (flowday/docs/design.md §2-§3).
+//
+// (-- api-linter: core::0142::time-field-type=disabled
+//     aip.dev/not-precedent: a field ending in `_date` is a calendar day, `YYYY-MM-DD`, and one ending in `_seconds` a
+//     count of seconds; the wire profile (proto/README.md) has neither google.type.Date nor google.protobuf.Duration,
+//     and a Timestamp would name an instant, which neither is. --)
+
+syntax = "proto3";
+
+package flowday.ui.v1;
+
+import "google/api/field_behavior.proto";
+import "google/api/resource.proto";
+import "google/protobuf/timestamp.proto";
+
+option java_multiple_files = true;
+option java_outer_classname = "TimeEntryProto";
+option java_package = "science.ziyixi.flowday.ui.v1";
+
+// One stretch of time on a task: a segment of the timer (from a start until a pause or a stop) or an entry the owner
+// made by hand.
+message TimeEntry {
+  option (google.api.resource) = {
+    type: "flowday.ziyixi.science/TimeEntry"
+    pattern: "timeEntries/{time_entry}"
+    singular: "timeEntry"
+    plural: "timeEntries"
+  };
+
+  // How the entry was made.
+  enum Source {
+    // Not set: read as TIMER on input, never written.
+    SOURCE_UNSPECIFIED = 0;
+    // A segment of the timer.
+    SOURCE_TIMER = 1;
+    // Entered by hand.
+    SOURCE_MANUAL = 2;
+  }
+
+  // timeEntries/{time_entry}, where {time_entry} is a UUID (the CreateTimeEntry request's `request_id`, or one the
+  // Worker made), or an ID of the container era (Task.name's rule).
+  string name = 1 [(google.api.field_behavior) = IDENTIFIER];
+  // The task the time was spent on (any task ID, the UI's pseudo-tasks included).
+  string task_id = 2 [
+    (google.api.field_behavior) = REQUIRED,
+    (google.api.field_behavior) = IMMUTABLE
+  ];
+  // The day of the flow the time counts for, `YYYY-MM-DD` (it may differ from the start's UTC day).
+  string flow_date = 3 [
+    (google.api.field_behavior) = REQUIRED,
+    (google.api.field_behavior) = IMMUTABLE
+  ];
+  // When the time started.
+  google.protobuf.Timestamp start_time = 4 [(google.api.field_behavior) = REQUIRED];
+  // When the time ended; unset for a segment that did not record its end.
+  google.protobuf.Timestamp end_time = 5 [(google.api.field_behavior) = OPTIONAL];
+  // The time counted, in whole seconds (at least 0); unset when it was not recorded. CreateTimeEntry stores the
+  // value it is given (a timer segment's running time); UpdateTimeEntry sets it to the time between start and end.
+  optional int32 duration_seconds = 6 [(google.api.field_behavior) = OPTIONAL];
+  // How the entry was made (TIMER when unspecified).
+  Source source = 7 [(google.api.field_behavior) = IMMUTABLE];
+  // When the entry was created.
+  google.protobuf.Timestamp create_time = 8 [(google.api.field_behavior) = OUTPUT_ONLY];
+}
+
+// The timer that is running, paused or finished right now, shared by every device: a timer started on one device
+// continues on another. The UI owns its state and writes it on every change (start, pause, resume, stop); the Worker
+// stores it as given.
+message TimerSession {
+  option (google.api.resource) = {
+    type: "flowday.ziyixi.science/TimerSession"
+    pattern: "timerSession"
+    singular: "timerSession"
+    plural: "timerSessions"
+  };
+
+  // What the timer is doing.
+  // (-- api-linter: core::0216::state-field-output-only=disabled
+  //     aip.dev/not-precedent: the UI runs the timer and writes its state; the Worker only keeps it for the other
+  //     devices, so the state is the client's input. --)
+  enum State {
+    // Not set: read as IDLE on input, never written.
+    STATE_UNSPECIFIED = 0;
+    // No timer runs (a finished pomodoro may still wait for the owner).
+    STATE_IDLE = 1;
+    // The timer runs since `segment_start_time`.
+    STATE_RUNNING = 2;
+    // The timer is paused.
+    STATE_PAUSED = 3;
+  }
+
+  // How the timer counts.
+  enum Mode {
+    // Not set: read as COUNT_UP on input, never written.
+    MODE_UNSPECIFIED = 0;
+    // Up from zero.
+    MODE_COUNT_UP = 1;
+    // Down from `pomodoro_target_seconds`.
+    MODE_POMODORO = 2;
+  }
+
+  // Always `timerSession` (one per owner, AIP-156).
+  string name = 1 [(google.api.field_behavior) = IDENTIFIER];
+  // The task being timed (any task ID, at most 200 characters); empty when none is.
+  string task_id = 2 [(google.api.field_behavior) = OPTIONAL];
+  // The day of the flow the time counts for, `YYYY-MM-DD`; empty when no task is timed.
+  string flow_date = 3 [(google.api.field_behavior) = OPTIONAL];
+  // What the timer is doing (IDLE when unspecified).
+  // (-- api-linter: core::0216::state-field-output-only=disabled
+  //     aip.dev/not-precedent: the UI runs the timer and writes its state (see State). --)
+  State state = 4 [(google.api.field_behavior) = OPTIONAL];
+  // How the timer counts (COUNT_UP when unspecified).
+  Mode mode = 5 [(google.api.field_behavior) = OPTIONAL];
+  // A pomodoro's length in seconds; unset in COUNT_UP.
+  optional int32 pomodoro_target_seconds = 6 [(google.api.field_behavior) = OPTIONAL];
+  // When the running segment started; unset unless RUNNING.
+  google.protobuf.Timestamp segment_start_time = 7 [(google.api.field_behavior) = OPTIONAL];
+  // The seconds counted before the running segment (at least 0).
+  int32 saved_seconds = 8 [(google.api.field_behavior) = OPTIONAL];
+  // The task of a pomodoro that finished and waits for the owner; empty when none does.
+  string finished_pomodoro_task_id = 9 [(google.api.field_behavior) = OPTIONAL];
+  // The flow day of that finished pomodoro, `YYYY-MM-DD`.
+  string finished_pomodoro_flow_date = 10 [(google.api.field_behavior) = OPTIONAL];
+  // The length of that finished pomodoro in seconds.
+  optional int32 finished_pomodoro_target_seconds = 11 [(google.api.field_behavior) = OPTIONAL];
+  // When the session was last written; unset for an empty session (IDLE, no task and no finished pomodoro).
+  google.protobuf.Timestamp update_time = 12 [(google.api.field_behavior) = OUTPUT_ONLY];
+}
