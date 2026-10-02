@@ -121,7 +121,9 @@ with synthetic data.
 
 ### `proto-mail-hero-ui` — Mail Hero owner API as `mailhero.ui.v2`
 
-- State: built, reviewed and fixed; local only (not pushed). Rebased on `9e38624`: four build commits (IDL,
+- State: LANDING on `main` (2026-10-02, third, right after FlowDay; rebased on FlowDay's landing `8d9100e`, the
+  shared CI comments and docs merged to name all three apps). Post-deploy checks below are pending until this line
+  says otherwise. Before that rebase it sat on `9e38624`: four build commits (IDL,
   Worker, UI, docs), then one commit per review finding (MH-CS-1, D4, D7, D6, D1+D3, D5, D2, D8) and this row. Every
   check of the verification list passed from a clean clone of the head (below); next: push, CI, land.
 - Review fixes: the dashboard's buckets are the IDL's `AttemptResult` (SUCCEEDED, RETRIED, FAILED, UNKNOWN, each mapped
