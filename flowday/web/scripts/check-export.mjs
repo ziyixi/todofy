@@ -3,10 +3,12 @@
 // - no E2E bridge, test route or test helper text, no source maps, docs or tests;
 // - the manifest link asks for credentials (crossorigin="use-credentials", so it carries the Access cookie);
 // - the PWA files the Worker serves without a JWT exist (worker/src/assets.ts PWA_PUBLIC_PATHS);
-// - the file count stays far below Workers Static Assets' 20,000 files per version, each file below 25 MiB.
+// - the file count stays far below Workers Static Assets' 20,000 files per version, each file below 25 MiB;
+// - the JavaScript fits its budget (js-budget.mjs).
 import { readFile, readdir, stat } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { jsBudgetProblem, jsSize } from "./js-budget.mjs";
 
 const rootDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const outDir = path.join(rootDir, "out");
@@ -72,11 +74,16 @@ async function main() {
     problems.push('index.html: the manifest link lacks crossorigin="use-credentials"');
   }
 
+  const js = jsSize(path.join(outDir, "_next", "static", "chunks"));
+  const budget = jsBudgetProblem(js);
+  if (budget !== null) problems.push(budget);
+
   if (problems.length > 0) {
     throw new Error(`The static export is not ready:\n${problems.slice(0, 30).join("\n")}`);
   }
   console.log(
-    `Static export OK: ${files.length} files, ${(totalBytes / 1024 / 1024).toFixed(2)} MiB, no test code, manifest with credentials.`
+    `Static export OK: ${files.length} files, ${(totalBytes / 1024 / 1024).toFixed(2)} MiB, no test code, manifest with credentials; ` +
+      `its JavaScript is ${(js.gzip / 1024).toFixed(1)} KiB gzip (budget in js-budget.mjs).`
   );
 }
 

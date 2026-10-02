@@ -8,8 +8,8 @@
 //   when the page loads every chunk), against the app's own budget.
 //
 // Each app keeps its budgets as documented constants next to its CI command (Lab: lab/deploy/bundle-size.mjs and
-// lab/web/scripts/js-budget.mjs; FlowDay: flowday/worker/scripts/bundle-size.mjs; links: links/deploy/bundle-size.mjs
-// and links/web/scripts/js-budget.mjs). A budget is a ratchet: set at about 1.2 times the measured size, so that
+// lab/web/scripts/js-budget.mjs; FlowDay: flowday/worker/scripts/bundle-size.mjs and flowday/web/scripts/js-budget.mjs;
+// links: links/deploy/bundle-size.mjs and links/web/scripts/js-budget.mjs). A budget is a ratchet: set at about 1.2 times the measured size, so that
 // growth is a decision, and raised only in the commit that needs it, saying why there. An app adopting proto/'s HTTP runtime adds about 27 KiB gzip to its Worker and 36 KiB gzip to its
 // UI (proto/README.md "Cost"), which its budgets must make room for in that commit.
 import { readFileSync, readdirSync, realpathSync, statSync } from 'node:fs'

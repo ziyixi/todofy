@@ -881,6 +881,7 @@ class ToolsImports(unittest.TestCase):
             "lab/deploy/bundle-size.mjs",
             "lab/web/scripts/js-budget.mjs",
             "flowday/worker/scripts/bundle-size.mjs",
+            "flowday/web/scripts/js-budget.mjs",
             "mail-hero/deploy/bundle-size.mjs",
             "dashboard/deploy/bundle-size.mjs",
         ):

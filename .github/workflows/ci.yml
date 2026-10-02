@@ -686,7 +686,8 @@ jobs:
       - name: Runtime tests (workerd with real D1)
         working-directory: flowday/worker
         run: npm run test:runtime
-      # Builds web/out, which the dry-run below serves as static assets, and checks it holds no test code.
+      # Builds web/out, which the dry-run below serves as static assets, and checks it holds no test code and that its
+      # JavaScript fits its budget (web/scripts/js-budget.mjs).
       - name: Lint, typecheck, test and build the UI
         working-directory: flowday/web
         run: |
