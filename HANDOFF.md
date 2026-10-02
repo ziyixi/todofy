@@ -121,8 +121,16 @@ with synthetic data.
 
 ### `proto-mail-hero-ui` — Mail Hero owner API as `mailhero.ui.v2`
 
-- State: four commits (`52ed4f9` IDL, `58b495f` Worker, `05c9d8a` UI, `fa1ea05` docs), rebased on `327ad52`;
-  the builder is finishing its clean-clone verification; then two reviews and fixes.
+- State: built, reviewed and fixed; local only (not pushed). Rebased on `9e38624`: four build commits (IDL,
+  Worker, UI, docs), then one commit per review finding (MH-CS-1, D4, D7, D6, D1+D3, D5, D2, D8) and this row. Every
+  check of the verification list passed from a clean clone of the head (below); next: push, CI, land.
+- Review fixes: the dashboard's buckets are the IDL's `AttemptResult` (SUCCEEDED, RETRIED, FAILED, UNKNOWN, each mapped
+  to its attempt outcomes) and the drill-down filter is `attempt_result = <AttemptResult>` (was `attempt_outcome`; the
+  UI's drill-down URL parameter too); the dashboard page reads the generated response types; an unmapped module error
+  code is `INTERNAL`, never guessed from its status; a malformed filter time is `BAD_REQUEST`;
+  `Settings.ledger_retention_days` is always set; SendMessage, ResendDelivery and TestEndpoint all answer
+  `{delivery: Delivery}`; `ETAG_MISMATCH` carries the current Message, Endpoint or Settings; Mail Hero's filter parser
+  runs the shared corpus; the dashboard stats test no longer asserts host wall time.
 - Why v2: the hand-written owner API was `/api/v1`; the new one is `/api/v2/*`, and `/api/v1/*` answers 410
   until 2026-11-01.
 - What it does: every owner route through the transcoder in `src/native/api-v2.ts`; MAINTENANCE_MODE,
@@ -131,7 +139,10 @@ with synthetic data.
   answered inside the coordinator DO. Raw and attachment downloads stay outside the service with the same
   headers (no-store, nosniff, attachment). The `mail.received.v1` webhook and `/api/internal/backup/*` are
   untouched.
-- Measured so far: UI JS 121 → 162 KiB gzip (ratchet 195).
+- Measured (production dry run, `vite build`, the calibrated workerd meter, medians of three fresh isolates):
+  Worker 193.3 → 229.0 KiB gzip (budget 274), UI JS 121.4 → 162.4 KiB gzip (budget 195); the isolate's first API
+  request 7.2-7.8 reference ms (bound 9 of Free's 10), every other Worker request at most 5.5 first and 2.7 warm;
+  the two heavy reads run in the coordinator (slowest 19 ms of its 30 s).
 - Deploys: Mail Hero only.
 - After deploy: inbox list, a message detail (text, HTML in the sandbox, warnings), raw and attachment
   downloads, deliveries and attempts, retry, targets, settings and retention preview, the delivery dashboard;

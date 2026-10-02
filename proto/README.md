@@ -476,9 +476,10 @@ each before compression). CPU, within the runs' noise: Mail Hero's first `status
 **What mailhero.ui.v2 costs** (measured 2026-10-02 with the production dry run, `vite build` and the workerd CPU test
 `mail-hero/cloudflare/test/cpu/owner-api-cpu.test.mjs`; the before numbers are the same requests and data on the
 hand-written `/api/v1`, with the same meter on the same machine). It deploys Mail Hero only. Bundles, gzip: Mail Hero's
-Worker 193.3 → 228.3 KiB (the transcoder with its page-token, filter and field-mask helpers, and the service's
-descriptors; budget 228 → 274 KiB), its UI's JavaScript 121.4 → 162.1 KiB (the protobuf-es runtime and the same
-descriptors; new budget 195 KiB). CPU, reference milliseconds, median of three fresh isolates, first run / warm: the
+Worker 193.3 → 229.0 KiB (the transcoder with its page-token, filter and field-mask helpers, and the service's
+descriptors; budget 228 → 274 KiB), its UI's JavaScript 121.4 → 162.4 KiB (the protobuf-es runtime and the same
+descriptors; new budget 195 KiB); the review fixes (AttemptResult, one response shape for the three methods that make
+a delivery, ETAG_MISMATCH's current resource) added 0.7 and 0.3 KiB of that. CPU, reference milliseconds, median of three fresh isolates, first run / warm: the
 isolate's first API request 5.7 → 7.6 (the transcoder's paths run once; bound 9 of Free's 10), 50 messages with a
 search 1.7 / 0.8 → 5.1 / 1.8, a settings update 3.4 / 1.4 → 4.9 / 1.7, every other Worker request at most 2.8 first
 and 1.9 warm. The two reads near or over Free's 10 ms (a message with the largest parsed record: 9.8 / 8.4 before,
