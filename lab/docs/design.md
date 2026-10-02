@@ -401,10 +401,11 @@ entrypoint typed locally against `OpsCommon`, register the dashboard entry as `p
   `tests/unit/test_task_intent_contract.py` (same fixtures, same verdicts).
 - `Lab checks`: `npm ci` worker + web; `node --test deploy/test/*.test.mjs`; worker lint, typecheck,
   unit tests, runtime tests (workerd, real D1/DO; AI replaced through a wrapped binding / stub
-  service exposing `run`, arXiv answered by `outboundService`; no network; `cpu.test.ts` bounds the
-  isolate's first owner API request and every request's first run below 7 ms and every warm median
-  below 3 ms, in milliseconds of the reference machine scaled by the measured speed of the machine
-  running it, `tools/workerd-cpu`); web lint, typecheck, tests, build (+ `check-dist` and the UI's
+  service exposing `run`, arXiv answered by `outboundService`; no network; `cpu.test.ts` measures its
+  session in three fresh isolates and bounds the medians, in milliseconds of the reference machine (each
+  isolate's numbers divided by its own measured speed, `tools/workerd-cpu` and its README): the isolate's
+  first owner API request below 8.5 ms (4.0-5.2 on the reference machine, 5.7-7.2 on GitHub runners, an
+  injected 5 ms fails), every other request's first run below 7 ms, every warm median below 3 ms); web lint, typecheck, tests, build (+ `check-dist` and the UI's
   JavaScript budget, 160 KiB gzip); no imports from other apps; dry-run of the committed config through
   the wrapper with placeholder secrets, its bundle held to 128 KiB gzip (`deploy/bundle-size.mjs`;
   both budgets measured by `tools/bundle-size`). The runtime suite binds `TODOFY` to a stub Worker exporting an

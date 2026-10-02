@@ -25,7 +25,7 @@ this document are unchanged and still apply to the v2 routes (`POST /api/v2/guar
 | --- | --- | --- |
 | `worker/` | worker | TypeScript Worker + SQLite Durable Object; `package.json`/lockfile, `tsconfig.json` (Todofy gateway flags + `erasableSyntaxOnly`), `eslint.config.js` (strictTypeChecked), `vitest.config.ts` (Node unit tests), `vitest.runtime.config.ts` (workerd suite) |
 | `worker/src/api-types.ts` | worker (shared) | Owner API types and constants; the UI imports it by relative path. Change it only together with the UI |
-| `worker/test/runtime/` | worker | Miniflare harness (`harness.ts`, own `tsconfig.json` with Node types), stub apps from `test/stubs/ops-stub.js` |
+| `worker/test/runtime/` | worker | Miniflare harness (`harness.ts`, own `tsconfig.json` with Node types), stub apps from `test/stubs/ops-stub.js`; `cpu.test.ts` holds the cron tick's CPU in milliseconds of `tools/workerd-cpu`'s reference machine, the medians of three fresh isolates (the isolate's first tick below 16, 8.4-10.3 on the reference machine and 11.1-12.4 on GitHub runners; a warm tick below 4) |
 | `wrangler.toml` | worker | the production config (top level = production; run wrangler from `worker/` with `--config ../wrangler.toml`) |
 | `deploy/` | worker | `deploy-vars.mjs` (what the deploy adds) and `test/*.test.mjs` (`node --test`) |
 | `web/` | web | React 19 + Vite 7 + TypeScript UI (Chinese), vitest + testing-library, builds `web/dist` (served by `ASSETS`) |

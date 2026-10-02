@@ -510,8 +510,9 @@ literals (three LIKE patterns) 1.41 ms, the next page through its token 0.8-0.95
 2.6-3.2 → 3.0-3.3 ms, the isolate's first API request 3.9-4.1 → 3.8-4.0 ms. So an app that adopts the runtime
 should expect about 27 KiB more gzip in its Worker, 36 KiB more in its UI and about 2 ms more CPU on an
 isolate's first API request. Lab's CI holds these numbers: its CPU test bounds the isolate's first API request
-(and every request's first run) below 7 ms and every warm median below 3 ms, in milliseconds of the reference
-machine scaled by the measured speed of the machine running it (`tools/workerd-cpu`), and its bundles are held
+below 8.5 ms (7 until the cold bounds became medians of three isolates; ops-v1's move had raised it to about 5 ms),
+every other request's first run below 7 ms and every warm median below 3 ms, in milliseconds of the reference
+machine (`tools/workerd-cpu` and its README), and its bundles are held
 to budgets (`tools/bundle-size`: `lab/deploy/bundle-size.mjs`, 128 KiB gzip for the Worker;
 `lab/web/scripts/js-budget.mjs`, 160 KiB gzip for the UI's JavaScript).
 

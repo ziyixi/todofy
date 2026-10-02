@@ -279,7 +279,9 @@ about 340 ms and of a 2 MiB page of hostile runs (2,000 characters of each class
 (the quadratic Chinese mask it replaced took ~5 s), an alarm pass over 200 KiB pages 0.6 to 1.2 s and the worst
 pass (pages of 2 MiB, bounded by the 24 MiB budget) about 4 s of the 30 s an invocation may use. The test fails
 beyond 6 ms (2 ms warm) for the fetch handler, 300 ms for an API call and 7.5 s for an alarm pass or the largest
-preview, and the hostile preview beyond twice the plain one, in reference milliseconds scaled by the machine's speed.
+preview, and the hostile preview beyond twice the plain one, in reference milliseconds (each isolate's numbers divided
+by its measured speed); the fetch handler's very first request is the median of three fresh isolates, the rest is
+measured once, in the third (`tools/workerd-cpu` and its README).
 Bundles: the Worker 110.1 KiB gzip (budget 122 KiB, `deploy/bundle-size.mjs`), the UI's JavaScript 50.2 KiB gzip
 (budget 56 KiB, `web/scripts/js-budget.mjs`), both with the wire profile's rule checker of proto/ts.
 
