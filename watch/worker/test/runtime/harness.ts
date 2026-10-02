@@ -112,10 +112,18 @@ export interface Harness {
   readonly browser: FakeBrowser;
   /** The Worker's log lines (console output). */
   readonly logs: string[];
-  /** What the Todofy stub answers next (`todofy: true`). */
-  todofy(scenario: { propose?: 'accept' | 'throw' | 'paused' | 'daily_limit' | 'garbled' }): Promise<void>;
-  /** The intent IDs proposed since the last call, the intents recorded and the inputs refused (`todofy: true`). */
-  todofyState(): Promise<{ invalid: number; calls: string[]; intents: { intent_id: string; mode: string; parent: { title: string; description?: string }; items: { title: string; url?: string }[] }[] }>;
+  /** What the Todofy stub answers next (`todofy: true`; ../stubs/todofy-stub.ts Scenario). */
+  todofy(scenario: { propose?: 'accept' | 'throw' | 'paused' | 'daily_limit' | 'garbled'; status?: 'pending' | 'failed' | 'throw'; day?: string }): Promise<void>;
+  /**
+   * The intent IDs proposed and polled since the last call, the intents recorded and the inputs refused
+   * (`todofy: true`).
+   */
+  todofyState(): Promise<{
+    invalid: number;
+    calls: string[];
+    statusCalls: string[];
+    intents: { intent_id: string; mode: string; parent: { title: string; description?: string }; items: { title: string; url?: string }[] }[];
+  }>;
   /** ops-v1 over the Ops entrypoint, as the dashboard calls it (a rejection's message is its error code). */
   opsStatus(): Promise<unknown>;
   opsSetGuard(input: unknown): Promise<unknown>;

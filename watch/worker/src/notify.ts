@@ -79,6 +79,16 @@ export function pendingEvents(store: Store, policies: readonly NotifyPolicy[], l
     .map((row) => ({ id: row.id, kind: row.kind, watchId: row.watch_id, changeId: row.change_id, policy: row.policy, createdAt: row.created_at }));
 }
 
+/** The outbox rows of `ids` (delivered or not; a pruned one is missing), oldest first: a sink folding an intent. */
+export function eventsByIds(store: Store, ids: readonly number[]): WatchEvent[] {
+  const out: WatchEvent[] = [];
+  for (const id of [...new Set(ids)].sort((a, b) => a - b)) {
+    const row = store.one<EventRow>(`SELECT id, kind, watch_id, change_id, policy, created_at FROM notifications WHERE id = ?`, id);
+    if (row !== undefined) out.push({ id: row.id, kind: row.kind, watchId: row.watch_id, changeId: row.change_id, policy: row.policy, createdAt: row.created_at });
+  }
+  return out;
+}
+
 /** Whether an urgent event waits (at most one row read, through the partial index). */
 export function urgentWaiting(store: Store): boolean {
   return store.one<{ id: number }>(`SELECT id FROM notifications WHERE delivered_at IS NULL AND policy = 'urgent' LIMIT 1`) !== undefined;

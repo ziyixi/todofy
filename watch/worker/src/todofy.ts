@@ -6,9 +6,10 @@
  * - The digest: once a UTC day, at the first alarm from DIGEST_UTC_HOUR, every pending event (both policies) becomes
  *   one intent `digest-<day>` (subtasks mode): one item per watch.
  * - Urgent changes: a change confirmed on an URGENT watch becomes an intent `urgent-<change id>` (separate mode) in the
- *   same alarm, at most URGENT_INTENTS_PER_DAY a UTC day, so with the digest the app stays within the 10 intents a day
- *   Todofy records per source; one past them waits for the digest. BROKEN and auto-paused watches are only in the
- *   digest.
+ *   same alarm, while Todofy's 10 intents a day per source leave room for it and for the day's digest: the intents still
+ *   open (of any day) plus those Todofy recorded this UTC day plus one for a digest not yet frozen stay below
+ *   INTENTS_PER_DAY (Todofy counts by the day it records, so a carried-over intent takes a slot of the day it lands in).
+ *   One past them waits for the digest. BROKEN and auto-paused watches are only in the digest.
  *
  * What a task says (the owner decision of 2026-10-01): an item is only the owner's name for the watch, the trigger type
  * and a count, and links to the watch in this app (`https://<host>/watches/<id>`, the only host Todofy allows for this
@@ -16,11 +17,17 @@
  * assistant that reads the owner's tasks), and the watched URL stays in the object.
  *
  * Delivery: `take` freezes the intent's wire JSON in the `intents` table in the transaction that marks its events
- * delivered (notify.ts), and `flush` proposes open intents with exactly those bytes until Todofy records them (an
- * intent_id with other content would be refused as a conflict): a lost answer, `unavailable` or a pause is retried
- * with the same bytes; a refusal for a reason that cannot pass (a URL off the list, a conflict) is final; after
- * INTENT_GIVE_UP_MS an intent is given up. Every outcome is a row's state and code, counted in ops-v1; logs carry
- * intent IDs, kinds, counts and codes only.
+ * delivered (notify.ts), and `flush` works on what is due, the digest first, at most INTENT_SENDS_PER_ALARM calls:
+ * - open (not recorded): proposed with exactly those bytes (an intent_id with other content would be refused as a
+ *   conflict); a lost answer, `unavailable`, a pause or the day's limit is retried with the same bytes; a refusal that
+ *   cannot pass (a URL off the list, a conflict) is final;
+ * - held (Todofy recorded it, `pending` or `paused`): the bytes are kept and taskIntentStatus is polled every
+ *   INTENT_POLL_MS (contracts/task-intent-v1 "States"); `created` or `duplicate` ends it; `failed` (Todoist refused a
+ *   task, or Todofy's own attempts ran out) is proposed again with the same bytes, which re-queues only the unfinished
+ *   tasks, backing off; `not_found` makes it open again.
+ * After INTENT_GIVE_UP_MS an intent whose tasks do not all exist is given up. Every outcome is a row's state and code,
+ * counted in ops-v1 (a failed or long-held intent raises `notify_unsettled`); logs carry intent IDs, kinds, counts and
+ * codes only.
  */
 import { TASK_INTENT_LIMITS, TASK_INTENT_VERSION } from '../../../contracts/task-intent-v1/task-intent-v1.ts';
 import { create } from '@ziyixi/proto/protobuf';
@@ -32,6 +39,7 @@ import {
   State,
   StateSchema,
   TaskIntentItemSchema,
+  TaskIntentRefSchema,
   TaskIntentResultSchema,
   TaskIntentSchema,
   type TaskIntent,
@@ -48,20 +56,21 @@ import {
   DIGEST_UTC_HOUR,
   HOUR,
   INTENT_GIVE_UP_MS,
+  INTENT_POLL_MS,
   INTENT_RETRY_BASE_MS,
   INTENT_RETRY_MAX_MS,
   INTENT_SENDS_PER_ALARM,
+  INTENTS_PER_DAY,
   SECOND,
-  URGENT_INTENTS_PER_DAY,
 } from './limits.ts';
-import { urgentWaiting, type NotificationSink, type SinkWants, type WatchEvent } from './notify.ts';
+import { eventsByIds, urgentWaiting, type NotificationSink, type SinkWants, type WatchEvent } from './notify.ts';
 import type { Store } from './store.ts';
 
 /** Todofy's named entrypoint "Intents" as this app sees it: the generated TaskIntentService (wire JSON in and out). */
 export interface TodofyIntentEntrypoint extends Rpc.WorkerEntrypointBranded, WireService<typeof TaskIntentService> {}
 
-/** What the sink calls: proposeTasks only (it never polls; a recorded intent is Todofy's). */
-export type TodofyIntents = Pick<WireService<typeof TaskIntentService>, 'proposeTasks'>;
+/** What the sink calls: proposeTasks, and taskIntentStatus for an intent Todofy holds. */
+export type TodofyIntents = Pick<WireService<typeof TaskIntentService>, 'proposeTasks' | 'taskIntentStatus'>;
 
 const STATES = wireEnum(StateSchema, State);
 const ERROR_CODES = wireEnum(ErrorCodeSchema, ErrorCode);
@@ -224,9 +233,13 @@ export function asResult(value: unknown, intentId: string): TaskIntentResult | n
   return valid ? result : null;
 }
 
-/** What one answer means for the intent: Todofy holds it, it is final otherwise, or it is tried again. */
+/**
+ * What one answer means for the intent: its tasks exist (`done`), Todofy holds it (`held`: poll it after `afterMs`, or
+ * propose it again then when `failed`), it is refused for good, or it is proposed again (`retry`: not recorded).
+ */
 export type Outcome =
-  | { readonly kind: 'recorded'; readonly code: string }
+  | { readonly kind: 'done'; readonly code: string }
+  | { readonly kind: 'held'; readonly code: string; readonly afterMs: number }
   | { readonly kind: 'refused'; readonly code: string }
   | { readonly kind: 'retry'; readonly code: string; readonly afterMs: number };
 
@@ -235,14 +248,29 @@ export function backoffMs(attempts: number): number {
   return Math.min(INTENT_RETRY_MAX_MS, INTENT_RETRY_BASE_MS * 2 ** Math.min(Math.max(attempts - 1, 0), 10));
 }
 
+/** The answer's hint in milliseconds, or null. */
+function hintMs(result: TaskIntentResult): number | null {
+  return result.retryAfterSeconds === undefined ? null : result.retryAfterSeconds * SECOND;
+}
+
+/**
+ * What a recorded intent's state means, from either method: created or duplicate end it; failed is proposed again
+ * (re-queuing the unfinished tasks) after a backoff; pending or paused is polled at most every INTENT_POLL_MS.
+ */
+function heldOutcome(result: TaskIntentResult, attempts: number): Outcome {
+  const state = STATES.name(result.state) ?? 'unknown';
+  if (result.state === State.CREATED || result.state === State.DUPLICATE) return { kind: 'done', code: state };
+  if (result.state === State.FAILED) return { kind: 'held', code: 'failed', afterMs: backoffMs(attempts) };
+  return { kind: 'held', code: state, afterMs: Math.max(hintMs(result) ?? 0, INTENT_POLL_MS) };
+}
+
 /** The outcome of a readable answer to the `attempts`-th proposal. */
 export function outcomeOf(result: TaskIntentResult, attempts: number, now: number): Outcome {
   const code = ERROR_CODES.name(result.errorCode) ?? STATES.name(result.state) ?? 'unknown';
-  const hinted = result.retryAfterSeconds === undefined ? null : result.retryAfterSeconds * SECOND;
+  const hinted = hintMs(result);
   if (result.recorded) {
-    // pending, created, duplicate, failed or paused: Todofy holds the intent and will (or did) create the tasks. A
-    // recorded rejection is a conflict: another content holds this ID, which this sink never sends.
-    return result.state === State.REJECTED ? { kind: 'refused', code } : { kind: 'recorded', code: STATES.name(result.state) ?? 'recorded' };
+    // A recorded rejection is a conflict: another content holds this ID, which this sink never sends.
+    return result.state === State.REJECTED ? { kind: 'refused', code } : heldOutcome(result, attempts);
   }
   switch (result.errorCode) {
     case ErrorCode.URL_NOT_ALLOWED:
@@ -262,6 +290,18 @@ export function outcomeOf(result: TaskIntentResult, attempts: number, now: numbe
   }
 }
 
+/**
+ * The outcome of a readable taskIntentStatus answer for a held intent (`attempts` proposals so far): `not_found`
+ * (Todofy has no record, e.g. after a restore) makes it open again, to be proposed with the same bytes.
+ */
+export function statusOutcome(result: TaskIntentResult, attempts: number): Outcome {
+  if (result.state === State.NOT_FOUND) return { kind: 'retry', code: 'not_found', afterMs: INTENT_RETRY_BASE_MS };
+  if (!result.recorded) return { kind: 'held', code: STATES.name(result.state) ?? 'unknown', afterMs: INTENT_POLL_MS };
+  // A recorded rejection cannot come from a status read of this sink's own intent: poll again later.
+  if (result.state === State.REJECTED) return { kind: 'held', code: 'rejected', afterMs: INTENT_POLL_MS };
+  return heldOutcome(result, attempts);
+}
+
 // ---- the sink -------------------------------------------------------------------------------------------------------
 
 interface ChangeKindRow {
@@ -270,17 +310,24 @@ interface ChangeKindRow {
   [column: string]: SqlStorageValue;
 }
 
-interface OpenIntentRow {
+interface DueIntentRow {
   intent_id: string;
   kind: 'digest' | 'urgent';
+  state: 'open' | 'held';
   payload: string;
   events: number;
   attempts: number;
+  last_code: string | null;
   [column: string]: SqlStorageValue;
 }
 
 function isTriggerKind(value: string): value is TriggerKind {
   return Object.hasOwn(TRIGGER_LABELS, value);
+}
+
+/** The start of the UTC day of `now`. */
+function dayStart(now: number): number {
+  return Math.floor(now / DAY) * DAY;
 }
 
 /** The start of `day`'s digest hour (UTC). */
@@ -299,9 +346,15 @@ export class TodofySink implements NotificationSink {
     this.host = host;
   }
 
-  /** Urgent intents frozen on `day` (UTC). */
-  private urgentOn(day: string): number {
-    return this.store.one<{ n: number }>(`SELECT count(*) AS n FROM intents WHERE day = ? AND kind = 'urgent'`, day)?.n ?? 0;
+  /**
+   * The slots of Todofy's daily limit that are taken or may be taken today: the intents still open (of any day: each
+   * takes a slot of the day Todofy records it, which a pause can push to today) and those Todofy recorded this UTC day
+   * (`recorded_at`). Two indexed counts.
+   */
+  private slotsTaken(now: number): number {
+    const open = this.store.one<{ n: number }>(`SELECT count(*) AS n FROM intents WHERE state = 'open'`)?.n ?? 0;
+    const recorded = this.store.one<{ n: number }>(`SELECT count(*) AS n FROM intents WHERE recorded_at >= ?`, dayStart(now))?.n ?? 0;
+    return open + recorded;
   }
 
   private digestDone(day: string): boolean {
@@ -311,7 +364,8 @@ export class TodofySink implements NotificationSink {
   wants(now: number): SinkWants {
     const day = utcDay(now);
     if (now >= digestTime(now) && !this.digestDone(day)) return { urgent: false, digest: true };
-    return { urgent: urgentWaiting(this.store) && this.urgentOn(day) < URGENT_INTENTS_PER_DAY, digest: false };
+    // Room for an urgent intent: below Todofy's limit with one slot kept for a digest not yet frozen today.
+    return { urgent: urgentWaiting(this.store) && this.slotsTaken(now) + (this.digestDone(day) ? 0 : 1) < INTENTS_PER_DAY, digest: false };
   }
 
   /** The watches of `events` as lines (a deleted watch's events are taken and dropped: they were deleted with it). */
@@ -342,33 +396,58 @@ export class TodofySink implements NotificationSink {
     return { lines, taken };
   }
 
-  private freeze(intent: TaskIntent, kind: 'digest' | 'urgent', day: string, events: number, now: number): void {
+  /** Freezes `intent` with the outbox rows it took; false when it is over the contract's size bound. */
+  private freeze(intent: TaskIntent, kind: 'digest' | 'urgent', day: string, eventIds: readonly number[], now: number): boolean {
     const payload = freezeIntent(intent);
     if (payload === null) {
-      console.log(JSON.stringify({ event: 'intent_too_large', kind, intent: intent.intentId, events }));
-      return;
+      console.log(JSON.stringify({ event: 'intent_too_large', kind, intent: intent.intentId, events: eventIds.length }));
+      return false;
     }
     this.store.run(
-      `INSERT OR IGNORE INTO intents (intent_id, kind, day, payload, events, state, attempts, next_at, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, 'open', 0, ?, ?, ?)`,
+      `INSERT OR IGNORE INTO intents (intent_id, kind, day, payload, event_ids, events, state, attempts, next_at, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, 'open', 0, ?, ?, ?)`,
       intent.intentId,
       kind,
       day,
       payload,
-      events,
+      JSON.stringify(eventIds),
+      eventIds.length,
       now,
       now,
       now,
     );
+    return true;
   }
 
   take(events: readonly WatchEvent[], wants: SinkWants, now: number): readonly number[] {
     const day = utcDay(now);
     if (wants.digest) {
-      const { lines, taken } = this.lines(events);
-      if (lines.length > 0) this.freeze(digestIntent(day, lines, this.host), 'digest', day, taken.length, now);
+      // Open intents Todofy surely never recorded (never sent, or every answer said so: a pause, the day's limit) are
+      // folded into this digest: their events join it and they end as superseded. So a pause across the digest hour
+      // leaves one intent to send, not ten, and the day it ends Todofy's limit still has room for each day's digest.
+      // An intent whose answer was lost may be recorded already: it is left alone (folding it could repeat a task).
+      const folded = this.store.all<{ intent_id: string; event_ids: string }>(
+        `SELECT intent_id, event_ids FROM intents WHERE state = 'open' AND known_unrecorded = 1 ORDER BY intent_id`,
+      );
+      const own = new Set(events.map((event) => event.id));
+      const carried = eventsByIds(
+        this.store,
+        folded.flatMap((row) => (JSON.parse(row.event_ids) as number[]).filter((id) => !own.has(id))),
+      );
+      const { lines, taken } = this.lines([...events, ...carried]);
+      const frozen = lines.length === 0 || this.freeze(digestIntent(day, lines, this.host), 'digest', day, taken, now);
+      if (frozen) {
+        for (const row of folded) {
+          this.store.run(
+            `UPDATE intents SET state = 'superseded', payload = '', event_ids = '[]', last_code = ?, updated_at = ? WHERE intent_id = ? AND state = 'open'`,
+            `digest-${day}`,
+            now,
+            row.intent_id,
+          );
+        }
+      }
       this.store.setMeta('digest_day', day);
-      return taken;
+      return taken.filter((id) => own.has(id));
     }
     // Urgent: confirmed changes only (a broken or paused watch is never urgent), as many watches as one intent holds.
     const urgent: WatchEvent[] = [];
@@ -381,63 +460,105 @@ export class TodofySink implements NotificationSink {
     }
     const { lines, taken } = this.lines(urgent);
     const first = urgent.map((event) => event.changeId ?? '').sort()[0];
-    if (lines.length > 0 && first !== undefined) this.freeze(urgentIntent(first, lines, this.host), 'urgent', day, taken.length, now);
+    if (lines.length > 0 && first !== undefined) this.freeze(urgentIntent(first, lines, this.host), 'urgent', day, taken, now);
     return taken;
   }
 
   async flush(now: number): Promise<void> {
     this.store.run(
-      `UPDATE intents SET state = 'expired', payload = '', last_code = 'gave_up', updated_at = ? WHERE state = 'open' AND created_at <= ?`,
+      `UPDATE intents SET state = 'expired', payload = '', last_code = 'gave_up', updated_at = ? WHERE state IN ('open', 'held') AND created_at <= ?`,
       now,
       now - INTENT_GIVE_UP_MS,
     );
-    const due = this.store.all<OpenIntentRow>(
-      `SELECT intent_id, kind, payload, events, attempts FROM intents WHERE state = 'open' AND next_at <= ? ORDER BY next_at, intent_id LIMIT ?`,
+    // The digest first: it is the one intent a day that must fit in Todofy's limit (urgent ones wait for a slot).
+    const due = this.store.all<DueIntentRow>(
+      `SELECT intent_id, kind, state, payload, events, attempts, last_code FROM intents
+       WHERE state IN ('open', 'held') AND next_at <= ? ORDER BY kind = 'digest' DESC, next_at, intent_id LIMIT ?`,
       now,
       INTENT_SENDS_PER_ALARM,
     );
     for (const row of due) await this.send(row, now);
   }
 
-  private async send(row: OpenIntentRow, now: number): Promise<void> {
-    const attempts = row.attempts + 1;
+  /** One call for a due intent: a proposal (open, or held and failed) or a status poll (held). */
+  private async send(row: DueIntentRow, now: number): Promise<void> {
+    const propose = row.state === 'open' || row.last_code === 'failed';
+    const attempts = propose ? row.attempts + 1 : row.attempts;
     let outcome: Outcome;
+    // Whether this call's answer said for sure that nothing was recorded (a lost or unreadable answer does not).
+    let known = false;
     try {
-      const answer = await this.todofy.proposeTasks(JSON.parse(row.payload) as WireObject);
-      const result = asResult(answer, row.intent_id);
-      outcome = result === null ? { kind: 'retry', code: 'unreadable', afterMs: backoffMs(attempts) } : outcomeOf(result, attempts, now);
+      if (propose) {
+        const result = asResult(await this.todofy.proposeTasks(JSON.parse(row.payload) as WireObject), row.intent_id);
+        outcome = result === null ? { kind: 'retry', code: 'unreadable', afterMs: backoffMs(attempts) } : outcomeOf(result, attempts, now);
+        known = result !== null;
+      } else {
+        const ref = toWire(TaskIntentRefSchema, create(TaskIntentRefSchema, { version: TASK_INTENT_VERSION, source: Source.WATCH, intentId: row.intent_id }));
+        const result = asResult(await this.todofy.taskIntentStatus(ref), row.intent_id);
+        outcome = result === null ? { kind: 'held', code: 'unreadable', afterMs: INTENT_POLL_MS } : statusOutcome(result, attempts);
+        known = result !== null;
+      }
     } catch (error) {
       // `new Error(code)` crosses RPC intact. invalid_input from a Todofy that does not know this source yet (or a bug
       // here): ask again a few times a day until given up. Anything else (unavailable, busy, a deploy) is retried.
       const code = error instanceof Error && error.message === 'invalid_input' ? 'invalid_input' : 'unavailable';
-      outcome = { kind: 'retry', code, afterMs: code === 'invalid_input' ? INTENT_RETRY_MAX_MS : backoffMs(attempts) };
+      const afterMs = code === 'invalid_input' ? INTENT_RETRY_MAX_MS : backoffMs(Math.max(attempts, 1));
+      // A failed call changes nothing about who holds the intent: an open one stays open, a held one held.
+      outcome = row.state === 'open' ? { kind: 'retry', code, afterMs } : { kind: 'held', code: row.last_code === 'failed' ? 'failed' : code, afterMs };
     }
-    if (outcome.kind === 'retry') {
-      this.store.run(
-        `UPDATE intents SET attempts = ?, next_at = ?, last_code = ?, updated_at = ? WHERE intent_id = ? AND state = 'open'`,
-        attempts,
-        now + outcome.afterMs,
-        outcome.code,
-        now,
-        row.intent_id,
-      );
-    } else {
-      // Todofy holds the text now (or will never take it): the owner's names leave this table.
-      this.store.run(
-        `UPDATE intents SET state = ?, payload = '', attempts = ?, last_code = ?, updated_at = ? WHERE intent_id = ? AND state = 'open'`,
-        outcome.kind,
-        attempts,
-        outcome.code,
-        now,
-        row.intent_id,
-      );
+    switch (outcome.kind) {
+      case 'retry':
+        // Still open; once an answer was lost it may be recorded already, so it is never folded into a digest.
+        this.store.run(
+          `UPDATE intents SET state = 'open', attempts = ?, next_at = ?, last_code = ?, known_unrecorded = known_unrecorded * ?, updated_at = ?
+           WHERE intent_id = ? AND state = ?`,
+          attempts,
+          now + outcome.afterMs,
+          outcome.code,
+          row.state === 'open' && known ? 1 : 0,
+          now,
+          row.intent_id,
+          row.state,
+        );
+        break;
+      case 'held':
+        // Todofy holds it: the bytes stay (a failed intent is proposed again with exactly them). `recorded_at` is the
+        // first such answer (Todofy's daily limit counted it that day).
+        this.store.run(
+          `UPDATE intents SET state = 'held', attempts = ?, next_at = ?, last_code = ?, recorded_at = coalesce(recorded_at, ?), updated_at = ?
+           WHERE intent_id = ? AND state = ?`,
+          attempts,
+          now + outcome.afterMs,
+          outcome.code,
+          now,
+          now,
+          row.intent_id,
+          row.state,
+        );
+        break;
+      default:
+        // Its tasks exist (or it will never be taken): the owner's names leave this table.
+        this.store.run(
+          `UPDATE intents SET state = ?, payload = '', event_ids = '[]', attempts = ?, last_code = ?,
+             recorded_at = CASE WHEN ? THEN coalesce(recorded_at, ?) ELSE recorded_at END, updated_at = ? WHERE intent_id = ? AND state = ?`,
+          outcome.kind === 'done' ? 'recorded' : 'refused',
+          attempts,
+          outcome.code,
+          outcome.kind === 'done' ? 1 : 0,
+          now,
+          now,
+          row.intent_id,
+          row.state,
+        );
     }
     // IDs, kinds, counts and codes only.
-    console.log(JSON.stringify({ event: 'intent', intent: row.intent_id, kind: row.kind, events: row.events, attempts, outcome: outcome.kind, code: outcome.code }));
+    console.log(
+      JSON.stringify({ event: 'intent', intent: row.intent_id, kind: row.kind, call: propose ? 'propose' : 'status', events: row.events, attempts, outcome: outcome.kind, code: outcome.code }),
+    );
   }
 
   nextAt(now: number): number | null {
-    const retry = this.store.one<{ at: number | null }>(`SELECT min(next_at) AS at FROM intents WHERE state = 'open'`)?.at ?? null;
+    const retry = this.store.one<{ at: number | null }>(`SELECT min(next_at) AS at FROM intents WHERE state IN ('open', 'held')`)?.at ?? null;
     const digest = this.digestDone(utcDay(now)) ? digestTime(now) + DAY : Math.max(digestTime(now), now);
     return retry === null ? digest : Math.min(retry, digest);
   }

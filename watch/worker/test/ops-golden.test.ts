@@ -77,13 +77,16 @@ function change(target: Store, id: string, watchId: string, state: 'confirmed' |
   );
 }
 
-function intent(target: Store, id: string, state: 'open' | 'recorded' | 'refused' | 'expired', createdAt: number, day = '2026-10-01'): void {
+function intent(target: Store, id: string, state: 'open' | 'held' | 'recorded' | 'refused' | 'expired', createdAt: number, day = '2026-10-01'): void {
   target.run(
-    `INSERT INTO intents (intent_id, kind, day, payload, events, state, attempts, next_at, created_at, updated_at) VALUES (?, 'urgent', ?, '', 1, ?, 1, ?, ?, ?)`,
+    `INSERT INTO intents (intent_id, kind, day, payload, events, state, attempts, next_at, recorded_at, created_at, updated_at)
+     VALUES (?, 'urgent', ?, '', 1, ?, 1, ?, ?, ?, ?)`,
     id,
     day,
     state,
     NOW + 5 * MINUTE,
+    // Todofy recorded it at once (held or settled).
+    state === 'held' || state === 'recorded' ? createdAt : null,
     createdAt,
     createdAt,
   );

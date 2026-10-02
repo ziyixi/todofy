@@ -266,9 +266,15 @@ The sink (W3, `worker/src/todofy.ts`; the owner's decisions of 2026-10-01) is To
   task per watch (past 30 watches, the last one names how many more). A BROKEN or auto-paused watch is only ever in
   the digest. A day with nothing pending sends nothing.
 - **Urgent changes**: a change confirmed on an URGENT watch leaves in the alarm that confirmed it, as
-  `urgent-<change id>` (`separate` mode, the first change's ID when one alarm confirms several), at most 9 a UTC day
-  (`URGENT_INTENTS_PER_DAY`): Todofy records at most 10 intents per source and day, and one is the digest's. An urgent
-  change past them waits for the digest.
+  `urgent-<change id>` (`separate` mode, the first change's ID when one alarm confirms several). Todofy records at
+  most 10 intents per source and UTC day, counted by the day it records them (`INTENTS_PER_DAY`), so an urgent intent
+  is frozen only while the intents still open (of any day: a pause carries them over to the day it ends) plus those
+  Todofy recorded today, plus one slot for a digest not yet frozen today, stay below 10: nine on a normal day. An
+  urgent change past that waits for the digest. When the digest is frozen, every open intent Todofy surely never
+  recorded (never sent, or every answer said nothing was recorded: a pause, the day's limit) is folded into it (its
+  events join the digest, it ends `superseded`), and the digest is proposed before any urgent intent. So a pause across
+  the digest hour leaves one intent, not ten, and the day the pause ends still has room for each day's digest. An
+  intent whose answer was lost may already be recorded and is never folded (it could repeat a task).
 - **What a task says**: only the owner's display name of the watch, the trigger type with a count (`数值 2 次变化`)
   or its trouble (`检查失效`, `已自动暂停`), and a link to the watch in this app,
   `https://watch.ziyixi.science/watches/<id>`, the only host Todofy allows for this source. Never the page's text, a
@@ -278,12 +284,16 @@ The sink (W3, `worker/src/todofy.ts`; the owner's decisions of 2026-10-01) is To
   origin, its host or a parent domain of it is replaced by `监视 <id>` (`todofy.ts` `taskName`), and the UI never
   derives a name from the URL: the owner types it before saving (a shared `/new#u=` link's host is not the owner's
   text).
-- **Delivery**: the intent's wire JSON is frozen in `intents` with the events it took; it is proposed with exactly
-  those bytes until Todofy records it (`pending`, `created`, `duplicate`, `failed`, `paused`: Todofy holds it and
-  deduplicates by intent ID). A lost answer, `unavailable`, a pause or the day's limit is retried (5 minutes doubling
-  to 6 hours, or Todofy's `retry_after_seconds`); a URL off the list or a conflict is final; an intent not taken over
-  within 7 days is given up. At most 3 proposals an alarm. Once Todofy holds it the frozen text is cleared; the row
-  (ID, kind, state, code) is kept 30 days. Logs carry intent IDs, kinds, counts and codes only.
+- **Delivery**: the intent's wire JSON is frozen in `intents` with the events it took, and kept until its tasks
+  exist. An open intent (not recorded) is proposed with exactly those bytes: a lost answer, `unavailable`, a pause or
+  the day's limit is retried (5 minutes doubling to 6 hours, or Todofy's `retry_after_seconds`); a URL off the list or
+  a conflict is final. Once Todofy records it (`pending` or `paused`) it is held: `taskIntentStatus` is polled hourly
+  (`INTENT_POLL_MS`, or after a longer hint), as the contract's state table asks; `created` or `duplicate` ends it
+  (the frozen text is cleared); `failed` (Todoist refused a task, or Todofy's own 48 attempts or 7 days ran out) is
+  proposed again with the same bytes, which re-queues only the unfinished tasks, backing off; `not_found` makes it
+  open again. An intent whose tasks do not all exist 7 days after it was frozen is given up. At most 3 calls an
+  alarm, the digest first. A failed, long-held, refused or given-up intent raises `notify_unsettled`. The row (ID,
+  kind, state, code) is kept 30 days. Logs carry intent IDs, kinds, counts and codes only.
 
 Without the binding (local development, most workerd tests) there is no sink and the outbox only fills; the change
 inbox is always how the owner sees what changed.
@@ -291,9 +301,10 @@ inbox is always how the owner sees what changed.
 **ops-v1** (`worker/src/ops.ts`, `worker/src/ops-status.ts`; `contracts/ops-v1` IMPLEMENTATION.md §3c): the named
 entrypoint `Ops` answers the dashboard's service binding `WATCH` (no public route). `status()` holds counts and codes
 only, from WatchState's SQLite: `watches_active`, `watches_paused`, `watches_broken`, `watches_failing`,
-`changes_new` (counted up to 1,000 through `changes_state`), `fetches_today`, `notifications_pending`, `intents_open`,
-`intents_sent_today`; signals `watches_broken`, `scheduler_stale` (no pass for 12 hours while a watch is to be
-checked), `notify_unsettled` (an intent Todofy has not taken over for a day, or one given up or refused this week) and
+`changes_new` (counted up to 1,000 through `changes_state`), `fetches_today`, `notifications_pending`, `intents_open`
+(open or held: not settled), `intents_sent_today` (recorded by Todofy this UTC day); signals `watches_broken`, `scheduler_stale` (no pass for 12 hours while a watch is to be
+checked), `notify_unsettled` (an intent whose tasks do not all exist a day after it was frozen, one Todofy reports
+failed, or one given up or refused this week) and
 `guard_shed`; modes `maintenance` (always false) and `notifications` (the TODOFY binding is configured). Never a
 watch's name, URL, page text or a diff. Its one write: it arms the alarm when none is set, so the dashboard's tick
 (every 30 minutes) restarts a lost scheduler. `setGuard()` (the dashboard's 80 % rule, capability `guard`) defers
@@ -331,8 +342,8 @@ allows, each a change, with none of its own or the earlier passes' checks failed
 Wall time is the machine's, not what the test bounds (a request's timer includes waiting for the isolate while the other
 lanes parse; one request of that pass outlived production's 15 s on GitHub runners), so its page requests may take 60 s
 and its measured runs 120 s; the fetch timeout itself is `etiquette.test.ts`'s.
-Bundles: the Worker 125.2 KiB gzip with the Todofy sink and the Ops entrypoint (budget 140 KiB,
-`deploy/bundle-size.mjs`), the UI's JavaScript 50.2 KiB gzip (budget 56 KiB, `web/scripts/js-budget.mjs`), both with
+Bundles: the Worker 126.9 KiB gzip with the Todofy sink and the Ops entrypoint (budget 140 KiB,
+`deploy/bundle-size.mjs`), the UI's JavaScript 50.3 KiB gzip (budget 56 KiB, `web/scripts/js-budget.mjs`), both with
 the wire profile's rule checker of proto/ts.
 
 SQLite rows are a budget of their own: Workers Free gives the account's SQLite Durable Objects 5,000,000 rows read

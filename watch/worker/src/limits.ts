@@ -179,16 +179,27 @@ export const NOTIFICATIONS_MAX = 500;
  */
 export const DIGEST_UTC_HOUR = 14;
 /**
- * Todofy records at most 10 new intents per source and UTC day (TASK_INTENT_LIMITS.intentsPerSourcePerDay): urgent
- * changes may use 9 of them, so the digest always fits. An urgent change past them waits for the digest.
+ * Todofy records at most 10 new intents per source and UTC day, counted by the day it records them
+ * (TASK_INTENT_LIMITS.intentsPerSourcePerDay; todofy.test.ts checks the two agree). The sink freezes an urgent intent
+ * only while the intents still open (of any day: a pause carries them over) plus those Todofy recorded this UTC day,
+ * plus one slot for a digest not yet frozen today, stay below it: 9 urgent intents on a normal day. An urgent change
+ * past that waits for the digest, and the digest is proposed before any urgent intent (todofy.ts).
  */
-export const URGENT_INTENTS_PER_DAY = 9;
-/** Intents one alarm proposes to Todofy (each a service binding call). */
+export const INTENTS_PER_DAY = 10;
+/** Calls one alarm makes to Todofy (a proposal or a status poll, each a service binding call). */
 export const INTENT_SENDS_PER_ALARM = 3;
+/**
+ * An intent Todofy holds (recorded, its tasks not all created yet) is polled with taskIntentStatus this often (or
+ * after Todofy's hint, if longer; contracts/task-intent-v1 "States": poll a pending intent, re-propose a failed one).
+ */
+export const INTENT_POLL_MS = HOUR;
 /** A proposal that failed is tried again after this, doubling up to the maximum. */
 export const INTENT_RETRY_BASE_MS = 5 * MINUTE;
 export const INTENT_RETRY_MAX_MS = 6 * HOUR;
-/** An intent Todofy has not taken over this long after it was frozen is given up (counted in ops-v1). */
+/**
+ * An intent whose tasks do not all exist this long after it was frozen (never recorded, or held by Todofy without
+ * being created) is given up (counted in ops-v1): Todofy itself stops its attempts after 7 days.
+ */
 export const INTENT_GIVE_UP_MS = 7 * DAY;
 /** Intent rows (their IDs, states and codes; the text is cleared once Todofy holds it) are kept this long. */
 export const INTENTS_KEPT_MS = 30 * DAY;

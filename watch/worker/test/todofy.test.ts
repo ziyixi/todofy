@@ -20,12 +20,13 @@ import {
   lineTitle,
   oneLine,
   outcomeOf,
+  statusOutcome,
   taskName,
   TRIGGER_LABELS,
   urgentIntent,
   type WatchLine,
 } from '../src/todofy.ts';
-import { DAY, HOUR, INTENT_RETRY_BASE_MS, INTENT_RETRY_MAX_MS, MINUTE } from '../src/limits.ts';
+import { DAY, HOUR, INTENT_POLL_MS, INTENT_RETRY_BASE_MS, INTENT_RETRY_MAX_MS, INTENTS_PER_DAY, MINUTE } from '../src/limits.ts';
 
 /** A file next to this test (the Workers URL type is not Node's, so paths are strings). */
 const path = (relative: string): string => decodeURIComponent(new URL(relative, import.meta.url).pathname);
@@ -147,8 +148,12 @@ describe("Todofy's answers", () => {
   });
 
   it('maps every outcome', () => {
-    for (const state of ['pending', 'created', 'duplicate', 'failed']) expect(outcomeOf(read({ state }), 1, NOW)).toEqual({ kind: 'recorded', code: state });
-    expect(outcomeOf(read({ state: 'paused', error_code: 'todoist_paused', retry_after_seconds: 3600 }), 1, NOW)).toEqual({ kind: 'recorded', code: 'paused' });
+    // Recorded: created or duplicate end it; pending or paused is polled hourly (or after a longer hint); failed is
+    // proposed again with the same bytes after the backoff of the attempts so far.
+    for (const state of ['created', 'duplicate']) expect(outcomeOf(read({ state }), 1, NOW)).toEqual({ kind: 'done', code: state });
+    expect(outcomeOf(read({ state: 'pending', retry_after_seconds: 3 }), 1, NOW)).toEqual({ kind: 'held', code: 'pending', afterMs: INTENT_POLL_MS });
+    expect(outcomeOf(read({ state: 'paused', error_code: 'todoist_paused', retry_after_seconds: 3 * 3600 }), 1, NOW)).toEqual({ kind: 'held', code: 'paused', afterMs: 3 * HOUR });
+    expect(outcomeOf(read({ state: 'failed', error_code: 'todoist_rejected' }), 3, NOW)).toEqual({ kind: 'held', code: 'failed', afterMs: 20 * MINUTE });
     expect(outcomeOf(read({ state: 'rejected', error_code: 'intent_conflict' }), 1, NOW)).toEqual({ kind: 'refused', code: 'intent_conflict' });
     const notRecorded = { recorded: false, tasks_total: 0, retry_after_seconds: null };
     expect(outcomeOf(read({ ...notRecorded, state: 'rejected', error_code: 'url_not_allowed' }), 1, NOW)).toEqual({ kind: 'refused', code: 'url_not_allowed' });
@@ -158,6 +163,22 @@ describe("Todofy's answers", () => {
     expect(outcomeOf(read({ ...notRecorded, state: 'rejected', error_code: 'daily_limit' }), 1, NOW)).toEqual({ kind: 'retry', code: 'daily_limit', afterMs: Date.parse('2026-10-02T00:00:00Z') - NOW });
     expect(outcomeOf(read({ ...notRecorded, state: 'paused', error_code: 'maintenance', retry_after_seconds: 3600 }), 1, NOW)).toEqual({ kind: 'retry', code: 'maintenance', afterMs: HOUR });
     expect(outcomeOf(read({ ...notRecorded, state: 'paused', error_code: 'backup_active', retry_after_seconds: 5 }), 3, NOW)).toEqual({ kind: 'retry', code: 'backup_active', afterMs: INTENT_RETRY_BASE_MS });
+  });
+
+  it('maps every status answer for an intent Todofy holds', () => {
+    expect(statusOutcome(read({ state: 'created' }), 2)).toEqual({ kind: 'done', code: 'created' });
+    expect(statusOutcome(read({ state: 'pending', retry_after_seconds: 3 }), 2)).toEqual({ kind: 'held', code: 'pending', afterMs: INTENT_POLL_MS });
+    expect(statusOutcome(read({ state: 'failed', error_code: 'todoist_result_unknown' }), 2)).toEqual({ kind: 'held', code: 'failed', afterMs: 10 * MINUTE });
+    // Todofy has no record of it (a restore): open again, proposed with the same bytes.
+    expect(statusOutcome(read({ state: 'not_found', recorded: false, tasks_total: 0, retry_after_seconds: null }), 2)).toEqual({
+      kind: 'retry',
+      code: 'not_found',
+      afterMs: INTENT_RETRY_BASE_MS,
+    });
+  });
+
+  it("budgets Todofy's own daily limit", () => {
+    expect(INTENTS_PER_DAY).toBe(TASK_INTENT_LIMITS.intentsPerSourcePerDay);
   });
 
   it('backs off from 5 minutes to 6 hours', () => {

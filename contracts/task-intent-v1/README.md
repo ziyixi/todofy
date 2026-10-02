@@ -92,8 +92,11 @@ same `intent_id` and the same content. Every expected outcome is a value.
 - The watch app (`watch/worker/src/todofy.ts`) sends at most one digest a UTC day (`digest-<day>`, subtasks: one
   item per watch with only the owner's name for it, the trigger type and a count, linking to
   `https://watch.ziyixi.science/watches/<id>`; never page text, a watched URL or a summary) and urgent changes at
-  once (`urgent-<change id>`, separate mode), at most 9 urgent intents a UTC day so the digest always fits in the
-  10 per source.
+  once (`urgent-<change id>`, separate mode). Because Todofy counts the 10 per source by the day it records an
+  intent, the app freezes an urgent intent only while its open intents (of any day) plus those recorded today plus
+  one slot for a digest not yet frozen stay below 10, folds open intents Todofy surely never recorded into the next
+  digest, and proposes the digest first, so a pause across midnight cannot crowd out a day's digest. It polls an
+  intent Todofy holds and proposes a `failed` one again with the same bytes (the state table below).
 - `intent_id` is the idempotency key, unique per source **for ever** (the ledger row is kept, content
   removed, see Retention). Lab uses `deck-<day>-g<generation>`; the watch app `digest-<day>` and
   `urgent-<change id>`.

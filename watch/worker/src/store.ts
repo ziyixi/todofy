@@ -142,24 +142,34 @@ const SCHEMA_V3 = [
   // The undelivered events, by policy (notify.ts pendingEvents and the urgent check of every alarm): a partial index
   // holds only what waits, so an idle alarm reads nothing of the delivered history.
   `CREATE INDEX IF NOT EXISTS notifications_pending ON notifications (policy, id) WHERE delivered_at IS NULL`,
-  // The Todofy sink's own inbox (todofy.ts): each task intent frozen with the events it took over, until Todofy holds it.
-  // `payload` is the intent's wire JSON (the owner's watch names, never page text or a watched URL), cleared once
-  // Todofy recorded or refused it; the row (ID, kind, day, state, code) is kept INTENTS_KEPT_MS.
+  // The Todofy sink's own inbox (todofy.ts): each task intent frozen with the events it took over, until its tasks
+  // exist. `state`: open (not recorded by Todofy yet: proposed again), held (Todofy recorded it, its tasks not all
+  // created: polled, a failed one proposed again), then recorded (created or duplicate), refused, expired or
+  // superseded (an open intent Todofy surely never recorded, folded into a later digest). `payload` is the intent's
+  // wire JSON (the owner's watch names, never page text or a watched URL) and `event_ids` the outbox rows it took
+  // (IDs only), both kept while open or held and cleared at the end; `known_unrecorded` is 1 while every answer said
+  // nothing was recorded (0 after a lost answer); `recorded_at` is when Todofy first answered `recorded` (its daily
+  // limit counts by that day). The row (ID, kind, day, state, code) is kept INTENTS_KEPT_MS.
   `CREATE TABLE IF NOT EXISTS intents (
     intent_id TEXT PRIMARY KEY,
     kind TEXT NOT NULL CHECK (kind IN ('digest', 'urgent')),
     day TEXT NOT NULL,
     payload TEXT NOT NULL,
     events INTEGER NOT NULL,
-    state TEXT NOT NULL CHECK (state IN ('open', 'recorded', 'refused', 'expired')),
+    state TEXT NOT NULL CHECK (state IN ('open', 'held', 'recorded', 'refused', 'expired', 'superseded')),
+    event_ids TEXT NOT NULL DEFAULT '[]',
+    known_unrecorded INTEGER NOT NULL DEFAULT 1,
     attempts INTEGER NOT NULL DEFAULT 0,
     next_at INTEGER NOT NULL,
     last_code TEXT,
+    recorded_at INTEGER,
     created_at INTEGER NOT NULL,
     updated_at INTEGER NOT NULL
   )`,
+  // The due work (state, next_at), what ended in a window (state, updated_at: ops-v1), what Todofy recorded today.
   `CREATE INDEX IF NOT EXISTS intents_state ON intents (state, next_at)`,
-  `CREATE INDEX IF NOT EXISTS intents_day ON intents (day, kind)`,
+  `CREATE INDEX IF NOT EXISTS intents_settled ON intents (state, updated_at)`,
+  `CREATE INDEX IF NOT EXISTS intents_recorded ON intents (recorded_at) WHERE recorded_at IS NOT NULL`,
 ];
 
 /** The global tables are pruned at most this often (meta `pruned_at`). */
@@ -552,7 +562,7 @@ export class Store {
     deleted += this.run(`DELETE FROM notifications WHERE created_at <= ?`, now - NOTIFICATIONS_KEPT_MS);
     const cut = this.one<{ id: number }>(`SELECT id FROM notifications ORDER BY id DESC LIMIT 1 OFFSET ?`, NOTIFICATIONS_MAX);
     if (cut !== undefined) deleted += this.run(`DELETE FROM notifications WHERE id <= ?`, cut.id);
-    deleted += this.run(`DELETE FROM intents WHERE created_at <= ? AND state != 'open'`, now - INTENTS_KEPT_MS);
+    deleted += this.run(`DELETE FROM intents WHERE created_at <= ? AND state NOT IN ('open', 'held')`, now - INTENTS_KEPT_MS);
     deleted += this.run(`DELETE FROM hosts WHERE host NOT IN (SELECT host FROM watches) AND next_at <= ? AND coalesce(backoff_until, 0) <= ?`, now, now);
     const day = new Date(now).toISOString().slice(0, 10);
     if (!deferSweep && this.getMeta('swept_day') !== day) {

@@ -32,7 +32,7 @@ change inbox. Chinese, mobile first. Design: [`docs/design.md`](docs/design.md).
   reported as "no change".
 - **Todoist**: one task a day (from 14:00 UTC) lists every watch with something new: its name, the trigger type and a
   count, or 检查失效 / 已自动暂停, each linking to the watch here. A watch set to 紧急 (URGENT) sends its confirmed
-  changes at once, up to 9 a day. Tasks never carry page text or a watched URL: open the link to see the change.
+  changes at once, as long as Todofy's 10 task intents a day leave room for that day's digest (nine on a normal day). Tasks never carry page text or a watched URL: open the link to see the change.
   Todofy creates them (task-intent-v1, `docs/design.md` §7).
 
 ## Develop

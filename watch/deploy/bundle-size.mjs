@@ -8,6 +8,7 @@
 // and the review fixes (the per-hop etiquette gate, the rows meter and bounds, the confirmation window) 110.1 KiB.
 // W3 added the Todofy sink (task-intent-v1's generated code: 117.7 KiB) and the Ops entrypoint (ops.v1's generated
 // descriptors and codec: 125.2 KiB), so the budget went from 122 to 140 KiB, about 1.1 times that, on 2026-10-01.
+// The review fixes of the sink (status polls, the daily-limit budget, folding into the digest) made it 126.9 KiB.
 // Raise it only in the commit that needs it, saying why there. The UI's
 // own budget is in ../web/scripts/js-budget.mjs.
 //

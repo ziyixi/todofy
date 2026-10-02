@@ -14,7 +14,8 @@
  *
  * Rows read by status() (SQLite rows are a budget: docs/design.md §8): the watches (at most 50), the new changes
  * through `changes_state` up to NEW_CHANGES_COUNTED, the undelivered events through `notifications_pending` (at most
- * NOTIFICATIONS_MAX), the sink's intents of the last INTENTS_KEPT_MS (at most ~300), a few meta rows.
+ * NOTIFICATIONS_MAX), the sink's unsettled intents, those ended badly in a week and those recorded today (each through an
+ * index), a few meta rows.
  */
 import { create } from '@ziyixi/proto/protobuf';
 import {
@@ -45,7 +46,10 @@ export const SHED_CHECK_SPACING_MS = DAY;
 export const NEW_CHANGES_COUNTED = 1000;
 /** No alarm pass for this long (twice the idle interval) raises `scheduler_stale`. */
 export const SCHEDULER_STALE_MS = 2 * ALARM_IDLE_MS;
-/** An intent still open this long after it was frozen, or given up or refused this recently, is `notify_unsettled`. */
+/**
+ * `notify_unsettled`: an intent still open or held this long after it was frozen, one Todofy reports failed (held,
+ * waiting to be proposed again), or one given up or refused this recently.
+ */
 export const INTENT_UNSETTLED_MS = DAY;
 export const INTENT_FAILED_WINDOW_MS = 7 * DAY;
 
@@ -166,19 +170,21 @@ export function watchStatus(store: Store, env: Pick<Env, 'PUBLIC_HOST'> & { read
     const newChanges =
       store.one<{ n: number }>(`SELECT count(*) AS n FROM (SELECT 1 FROM changes WHERE state = 'confirmed' LIMIT ?)`, NEW_CHANGES_COUNTED)?.n ?? 0;
     const pending = store.one<{ n: number }>(`SELECT count(*) AS n FROM notifications WHERE delivered_at IS NULL`)?.n ?? 0;
-    const intents = store.one<{ open: number | null; stuck: number | null; stuck_since: number | null; failed: number | null; sent: number | null }>(
+    // Three indexed reads: the unsettled intents (open or held, through intents_state), those that ended badly in the
+    // window (intents_settled) and those Todofy recorded today (intents_recorded).
+    const intents = store.one<{ unsettled: number; stuck: number | null; stuck_since: number | null; failing: number | null }>(
       `SELECT
-         sum(state = 'open') AS open,
-         sum(state = 'open' AND created_at <= ?) AS stuck,
-         min(CASE WHEN state = 'open' AND created_at <= ? THEN created_at END) AS stuck_since,
-         sum(state IN ('refused', 'expired') AND updated_at >= ?) AS failed,
-         sum(state = 'recorded' AND day = ?) AS sent
-       FROM intents`,
+         count(*) AS unsettled,
+         sum(created_at <= ?) AS stuck,
+         min(CASE WHEN created_at <= ? THEN created_at END) AS stuck_since,
+         sum(state = 'held' AND last_code = 'failed') AS failing
+       FROM intents WHERE state IN ('open', 'held')`,
       now - INTENT_UNSETTLED_MS,
       now - INTENT_UNSETTLED_MS,
-      now - INTENT_FAILED_WINDOW_MS,
-      utcDay(now),
     );
+    const ended =
+      store.one<{ n: number }>(`SELECT count(*) AS n FROM intents WHERE state IN ('refused', 'expired') AND updated_at >= ?`, now - INTENT_FAILED_WINDOW_MS)?.n ?? 0;
+    const sent = store.one<{ n: number }>(`SELECT count(*) AS n FROM intents WHERE recorded_at >= ?`, Math.floor(now / DAY) * DAY)?.n ?? 0;
     const ledger = store.ledger(utcDay(now));
     const lastAlarm = Number(store.getMeta('last_alarm_at') ?? '');
 
@@ -192,7 +198,7 @@ export function watchStatus(store: Store, env: Pick<Env, 'PUBLIC_HOST'> & { read
       signals.push(signal('scheduler_stale', Severity.WARNING, ranAt === null ? {} : { hours: Math.floor((now - ranAt) / HOUR) }, ranAt ?? undefined));
     }
     const stuck = intents?.stuck ?? 0;
-    const failed = intents?.failed ?? 0;
+    const failed = (intents?.failing ?? 0) + ended;
     if (stuck + failed > 0) signals.push(signal('notify_unsettled', Severity.WARNING, { open: stuck, failed }, intents?.stuck_since ?? undefined));
     if (guard.level === GuardLevel.SHED && guard.until !== undefined) {
       signals.push(signal('guard_shed', Severity.INFO, { seconds_left: Math.max(0, Math.round((Date.parse(guard.until) - now) / 1000)) }));
@@ -207,8 +213,10 @@ export function watchStatus(store: Store, env: Pick<Env, 'PUBLIC_HOST'> & { read
       changes_new: newChanges,
       fetches_today: ledger.fetches,
       notifications_pending: pending,
-      intents_open: intents?.open ?? 0,
-      intents_sent_today: intents?.sent ?? 0,
+      // Not settled yet: open (not recorded) or held (recorded, its tasks not all created).
+      intents_open: intents?.unsettled ?? 0,
+      // Recorded by Todofy this UTC day (its daily limit's count).
+      intents_sent_today: sent,
     };
     return toWire(
       OpsStatusSchema,
