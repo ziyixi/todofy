@@ -137,8 +137,8 @@ message LegacyText {
     plural: "legacyTexts"
   };
 
-  // legacyTexts/{legacy_text}: a mail event's ID, or `legacy:<hash>` / `legacy:row-<id>` for an imported cache row
-  // with no ledger event (an archive no method lists; its IDs come from D1). In a URL the `:` is `%3A`.
+  // legacyTexts/{legacy_text}: the mail event's ID (MailEvent.legacy_text). Imported cache rows with no ledger
+  // event stay in D1 only: no page shows them, and this API does not serve them.
   string name = 1 [(google.api.field_behavior) = IDENTIFIER];
   // When it was imported.
   google.protobuf.Timestamp create_time = 2 [(google.api.field_behavior) = OUTPUT_ONLY];

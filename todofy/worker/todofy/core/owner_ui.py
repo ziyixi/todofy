@@ -11,6 +11,7 @@ byte leaves; the gateway reads the text leniently and writes it again for the br
 import json
 import re
 from collections.abc import Mapping
+from datetime import date
 from enum import IntEnum, StrEnum
 from typing import Any
 
@@ -21,11 +22,11 @@ from ziyixi_proto.wire_json import WireJsonError, from_wire, to_wire, wire_membe
 from .contract import UUID
 from .sql import ACTIVE_STATES
 
-# The ledger's IDs: a Mail Hero event (a UUID) or an imported Go cache row without one.
-LEGACY_ID = re.compile(r"legacy:[0-9A-Za-z-]{1,128}")
 TASK_ID = re.compile(r"[0-9A-Za-z_-]{1,64}")
 DAY = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}")
 WEEK = re.compile(r"[0-9]{4}-W[0-9]{2}")
+# Before any day the ledger keeps; a cursor older is BAD_REQUEST.
+MIN_CURSOR_YEAR = 1970
 # ListMailEvents' AIP-160 filter: one restriction, `state = <MailEvent.State name>` or `attention = true`.
 EVENT_FILTER = re.compile(r"\s*(state|attention)\s*=\s*([A-Za-z_]{1,32})\s*")
 MAX_FILTER_CHARS = 64
@@ -100,9 +101,10 @@ def event_id(name: str) -> str:
 
 
 def legacy_key(name: str) -> str:
-    """legacyTexts/{id}: an event's ID or an imported cache row's key; anything else is NOT_FOUND."""
+    """legacyTexts/{id}: an event's ID (MailEvent.legacy_text); anything else is NOT_FOUND. An imported cache row
+    with no event (key ``legacy:...``) stays in D1 only: its colon is outside AIP-122's IDs and no page links it."""
     value = resource_id(name, "legacyTexts")
-    if not (UUID.fullmatch(value) or LEGACY_ID.fullmatch(value)):
+    if not UUID.fullmatch(value):
         raise UiError(Reason.NOT_FOUND)
     return value
 
@@ -174,13 +176,29 @@ def event_cursor(text: str | None) -> tuple[int, str] | None:
     return at, last
 
 
+def _real(item: str, pattern: re.Pattern[str]) -> bool:
+    """Whether a day or a week of the right shape exists on the calendar (2026-02-30 and 2026-W99 do not), from
+    1970 on (a page goes back a day from its cursor, which 0001-01-01 could not)."""
+    if int(item[:4]) < MIN_CURSOR_YEAR:
+        return False
+    try:
+        if pattern is WEEK:
+            date.fromisocalendar(int(item[:4]), int(item[6:]), 1)
+        else:
+            date.fromisoformat(item)
+    except ValueError:
+        return False
+    return True
+
+
 def text_cursor(text: str | None, key: str, pattern: re.Pattern[str]) -> str | None:
-    """A cursor of one string matching ``pattern`` (a day or a week)."""
+    """A cursor of one string matching ``pattern`` (DAY or WEEK) that names a real day or ISO week. A page token
+    is untrusted input (proto/ts/page-token.ts): anything else is BAD_REQUEST, never a later exception."""
     value = _cursor_object(text)
     if value is None:
         return None
     item = value.get(key)
-    if not isinstance(item, str) or not pattern.fullmatch(item):
+    if not isinstance(item, str) or not pattern.fullmatch(item) or not _real(item, pattern):
         raise UiError(Reason.BAD_REQUEST)
     return item
 
@@ -376,7 +394,7 @@ def gtd_day(day: Mapping[str, Any]) -> history_pb.GtdDay:
 def gtd_review(review: Mapping[str, Any]) -> history_pb.GtdReview:
     """A GtdReview from a review dict (runtime/gtd.py review_page)."""
     return history_pb.GtdReview(
-        name=f"gtdReviews/{review['week']}",
+        name=f"gtdReviews/{review['week'].lower()}",
         state=_enum(history_pb.GtdReview_State, review["state"]),
         create_time=review["created_at"],
         complete_time=review["completed_at"],

@@ -140,7 +140,8 @@ message GtdReview {
     STATE_FAILED = 4;
   }
 
-  // gtdReviews/{gtd_review}: the ISO week, YYYY-Www.
+  // gtdReviews/{gtd_review}: the ISO week in lower case (AIP-122), `2026-w40` for the ISO week 2026-W40; show it
+  // in upper case.
   string name = 1 [(google.api.field_behavior) = IDENTIFIER];
   // The state.
   State state = 2 [(google.api.field_behavior) = OUTPUT_ONLY];

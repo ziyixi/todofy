@@ -613,8 +613,10 @@ Cursors are opaque base64url of `created_at:event_id` (events) or the day (remin
 The owner API's answers are the generated messages of `proto/todofy/ui/v1`; the runtime tests read each with
 the generated code (`tests/runtime/harness.py` `filled`).
 Imported `legacy:<hash>` / `legacy:row-<id>` rows (CloudMailin era, or Mail Hero rows with no ledger event)
-are an archive: the reports read their summaries by date, `/legacy_text/{id}` serves their text by exact
-ID, and nothing lists them (browse with `wrangler d1 execute`).
+are an archive: the reports read their summaries by date, and only `wrangler d1 execute` reaches their text.
+`GetLegacyText` (`legacyTexts/{id}`) serves an event's text only: a `legacy:` key's colon is outside AIP-122's
+IDs, and no page links one. Review IDs are the ISO week in lower case (`gtdReviews/2026-w40`); page cursors
+of a day or a week must name a real one (`core/owner_ui.text_cursor`), else `BAD_REQUEST`.
 
 ### backup.py (weekly D1 backup; `core/backup.py`, `core/sql/backup.py`)
 ```python

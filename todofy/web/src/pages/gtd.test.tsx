@@ -35,7 +35,7 @@ function gtdDays(recordedDays = 2, last?: Partial<GtdDay>): { gtd_days: GtdDay[]
   return { gtd_days: oldestFirst.toReversed() }
 }
 
-const REVIEWS = { gtd_reviews: [gtdReview({ name: 'gtdReviews/2026-W40', create_time: '2026-10-04T17:00:02Z' })] }
+const REVIEWS = { gtd_reviews: [gtdReview({ name: 'gtdReviews/2026-w40', create_time: '2026-10-04T17:00:02Z' })] }
 
 describe('GTD page', () => {
   it('shows the latest snapshot as counts, the review and three trends', async () => {
@@ -57,6 +57,7 @@ describe('GTD page', () => {
       '近 7 天新建 / 完成': '35 / 42',
       '1–14 天前收到、仍开着的邮件任务': '9',
     })
+    // The ID is lower case (AIP-122); the page shows the ISO week.
     expect(within(screen.getByRole('region', { name: '每周回顾' })).getByText('2026-W40 · 已创建')).toBeInTheDocument()
     const charts = within(screen.getByRole('region', { name: '近 30 天趋势' })).getAllByRole('figure')
     expect(charts).toHaveLength(3)

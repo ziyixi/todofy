@@ -3,6 +3,8 @@ generated Python code. Rows are seeded straight into D1 with processing paused, 
 them.
 """
 
+import base64
+import json
 import time
 from collections.abc import Iterator
 from typing import Any
@@ -211,8 +213,9 @@ def test_legacy_text_is_served_until_it_expires(api_worker: Worker) -> None:
     assert (body["text"], "expire_time" in body, body["name"]) == ("旧邮件全文\nline 2", False, f"legacyTexts/{DONE}")
     assert_private(response)
 
+    # An imported cache row without an event stays in D1 only (its `legacy:` key is outside AIP-122's IDs).
     imported = api_worker.owner.get(f"/api/v1/legacyTexts/{quote(LEGACY_KEY, safe='')}")
-    assert assert_message(imported, mail_event_pb.LegacyText)["name"] == f"legacyTexts/{LEGACY_KEY}"
+    assert_status(imported, 404, "NOT_FOUND")
 
     for key in (TIED[0], PENDING, "legacy%3A", "not-an-id", "legacy%3Aa%252Fb"):
         missing = api_worker.owner.get(f"/api/v1/legacyTexts/{key}")
@@ -228,12 +231,12 @@ def test_legacy_text_is_served_until_it_expires(api_worker: Worker) -> None:
 
 def test_a_legacy_text_near_the_d1_row_limit_is_served(api_worker: Worker) -> None:
     # 632,000 three-byte characters (~1.9 MB), built in SQL so the command stays short.
-    key = "legacy:large-text"
+    key = "f8c1e9a0-1a98-4fb8-8ca1-4c0a3e72aaaa"  # an event's ID: the only legacy texts the API serves
     api_worker.d1(
         "INSERT INTO legacy_mail_text (event_id, created_at, text, expires_at)"
         f" VALUES ('{key}', {NOW - DAY}, replace(hex(zeroblob(316000)), '0', '邮'), NULL)"
     )
-    response = api_worker.owner.get(f"/api/v1/legacyTexts/{quote(key, safe='')}")
+    response = api_worker.owner.get(f"/api/v1/legacyTexts/{key}")
     body = assert_message(response, mail_event_pb.LegacyText)
     assert len(body["text"]) == 632_000 and set(body["text"]) == {"邮"}
     assert_private(response)
@@ -366,3 +369,32 @@ def test_oversized_owner_bodies_are_rejected(api_worker: Worker) -> None:
     body = b'{"name": "latestReports", "kind": "summary", "request_id": "' + b"x" * (17 << 10) + b'"}'
     response = api_worker.owner.post("/api/v1/latestReports:recompute", headers=headers, content=body)
     assert_status(response, 400, "BAD_REQUEST")
+
+
+def _with_cursor(token: str, cursor: dict[str, str]) -> str:
+    """A page token of the same list with another cursor: page tokens are unsigned (proto/ts/page-token.ts), so a
+    client can send any cursor, which TodofyCore must read as untrusted input."""
+    payload = json.loads(base64.urlsafe_b64decode(token + "=" * (-len(token) % 4)))
+    raw = json.dumps(payload | {"c": cursor}, separators=(",", ":")).encode()
+    return base64.urlsafe_b64encode(raw).rstrip(b"=").decode()
+
+
+@pytest.mark.parametrize(
+    ("path", "cursor"),
+    [
+        ("/api/v1/metricDays", {"day": "2026-02-30"}),
+        ("/api/v1/metricDays", {"day": "0001-01-01"}),
+        ("/api/v1/gtdDays", {"day": "2026-13-01"}),
+        ("/api/v1/dailyReminders", {"day": "2026-02-30"}),
+        ("/api/v1/gtdReviews", {"week": "2026-W99"}),
+        ("/api/v1/gtdReviews", {"week": "2025-W53"}),
+    ],
+)
+def test_a_page_token_naming_no_real_day_is_bad_request(api_worker: Worker, path: str, cursor: dict[str, str]) -> None:
+    # Every one of these lists binds its token to no parameter, so a metricDays token's fingerprint fits them all.
+    real = assert_message(
+        api_worker.owner.get("/api/v1/metricDays", params={"page_size": 1}), pb.ListMetricDaysResponse
+    )
+    response = api_worker.owner.get(path, params={"page_token": _with_cursor(real["next_page_token"], cursor)})
+    assert_status(response, 400, "BAD_REQUEST")
+    assert_private(response)

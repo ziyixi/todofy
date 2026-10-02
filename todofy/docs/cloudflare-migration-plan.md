@@ -21,7 +21,8 @@
 > - `REPORT_DEFAULT_TOP=10`; `LEGACY_TEXT_RETENTION_DAYS=0` (keep) by default.
 > - §4.2/§4.8: full mail text and CloudMailin-era rows are imported by default (`--skip-cloudmailin` opts
 >   out); reminders keep their frozen subject, body and next attempt time. Imported `legacy:` rows are an
->   archive: reports read them, but only `wrangler d1 execute` or an exact-ID text read reaches them.
+>   archive: reports read them, but only `wrangler d1 execute` reaches their text (todofy.ui.v1's
+>   `GetLegacyText` serves an event's text only).
 > - §5.3 reports: a stored report is fresh only if computed since the latest precompute time and `ok` or
 >   `empty_window`; otherwise it is computed on demand, and failure is 503 (no `stale` 200). An overlong
 >   summary is cut to 12,000 characters with a notice; precompute retries a failed report at most 3 times a

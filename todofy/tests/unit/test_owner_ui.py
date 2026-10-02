@@ -78,9 +78,10 @@ class TestRequests:
 
     def test_legacy_text_names(self):
         assert ui.legacy_key(f"legacyTexts/{EVENT}") == EVENT
-        assert ui.legacy_key("legacyTexts/legacy:row-12") == "legacy:row-12"
-        with refused(Reason.NOT_FOUND):
-            ui.legacy_key("legacyTexts/legacy:")
+        # An imported cache row without an event stays in D1 only (AIP-122: no `:` in an ID).
+        for name in ("legacyTexts/legacy:row-12", "legacyTexts/legacy:", "legacyTexts/legacy-abc"):
+            with refused(Reason.NOT_FOUND):
+                ui.legacy_key(name)
 
     def test_etag_is_a_version(self):
         assert ui.etag_version("5") == 5
@@ -150,9 +151,29 @@ class TestCursors:
     def test_text_cursors(self):
         assert ui.text_cursor('{"day": "2026-09-28"}', "day", ui.DAY) == "2026-09-28"
         assert ui.text_cursor('{"week": "2026-W39"}', "week", ui.WEEK) == "2026-W39"
+        assert ui.text_cursor('{"week": "2026-W53"}', "week", ui.WEEK) == "2026-W53"  # 2026 has 53 ISO weeks
         with refused(Reason.BAD_REQUEST):
             ui.text_cursor('{"day": "2026-9-28"}', "day", ui.DAY)
         assert ui.cursor_text(None) is None
+
+    @pytest.mark.parametrize(
+        ("key", "value"),
+        [
+            ("day", "2026-02-30"),
+            ("day", "2026-13-01"),
+            ("day", "2026-00-10"),
+            ("day", "0001-01-01"),
+            ("day", "1969-12-31"),
+            ("week", "2026-W99"),
+            ("week", "2026-W00"),
+            ("week", "2025-W53"),  # 2025 has 52
+            ("week", "0001-W01"),
+        ],
+    )
+    def test_a_cursor_must_name_a_real_day_or_week(self, key, value):
+        pattern = ui.DAY if key == "day" else ui.WEEK
+        with refused(Reason.BAD_REQUEST):
+            ui.text_cursor(json.dumps({key: value}), key, pattern)
 
 
 def summary_row(**overrides):
@@ -237,6 +258,10 @@ class TestMessages:
         wire = json.loads(ui.answer(ui.mail_event(detail_row(has_legacy_text=True, canary=True, allowed_actions=[]))))
         assert wire["legacy_text"] == f"legacyTexts/{EVENT}"
         assert wire["canary"] is True and "allowed_actions" not in wire
+
+    def test_a_review_id_is_its_iso_week_in_lower_case(self):
+        review = {"week": "2026-W40", "state": "created", "created_at": AT, "completed_at": None}
+        assert json.loads(ui.answer(ui.gtd_review(review)))["name"] == "gtdReviews/2026-w40"
 
     def test_an_unknown_code_reads_as_unset(self):
         wire = json.loads(ui.answer(ui.mail_event(summary_row(error_code="something_new"), full=False)))

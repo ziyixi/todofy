@@ -202,5 +202,5 @@ export function gtdDay(day: string, patch: Partial<GtdDay> = {}): GtdDay {
 }
 
 export function gtdReview(patch: Partial<GtdReview> = {}): GtdReview {
-  return { name: 'gtdReviews/2026-W39', state: 'created', create_time: '2026-09-27T17:00:00Z', ...patch }
+  return { name: 'gtdReviews/2026-w39', state: 'created', create_time: '2026-09-27T17:00:00Z', ...patch }
 }

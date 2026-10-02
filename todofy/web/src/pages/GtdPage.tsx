@@ -63,7 +63,7 @@ export function GtdPage() {
   const completed = review === null ? null : iso(review.completeTime)
   const reviewFacts: [string, string][] = review
     ? [
-        ['最近一次回顾', `${idOf(review.name)} · ${state === null ? '未知' : REVIEW_STATE[state]}`],
+        ['最近一次回顾', `${idOf(review.name).toUpperCase()} · ${state === null ? '未知' : REVIEW_STATE[state]}`],
         ['完成', completed ? completed.slice(0, 10) : '尚未完成'],
       ]
     : [['最近一次回顾', latestReview.isPending ? '正在加载…' : '还没有回顾任务']]

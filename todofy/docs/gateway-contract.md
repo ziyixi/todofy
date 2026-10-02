@@ -308,8 +308,8 @@ reaches the gateway as an exception, answered 503 `UNAVAILABLE`.
 | `RecomputeReport` `POST /api/v1/latestReports:recompute` | `RATE_LIMITED` with `retry_after`; a computed report replays via `owner_actions`, a failure releases the claim so the same `request_id` computes again |
 | `ListMetricDays` `GET /api/v1/metricDays` | newest first, 30 by default, at most 90 |
 | `ListGtdDays` `GET /api/v1/gtdDays` | newest first, 30 by default, at most 120 |
-| `ListGtdReviews` `GET /api/v1/gtdReviews` | the last 12 weeks, newest first |
-| `GetLegacyText` `GET /api/v1/legacyTexts/{id}` | an event's or an imported cache row's text (up to about 1.9 MB) |
+| `ListGtdReviews` `GET /api/v1/gtdReviews` | the last 12 weeks, newest first; IDs are the ISO week in lower case (`2026-w40`) |
+| `GetLegacyText` `GET /api/v1/legacyTexts/{id}` | an event's imported text (up to about 1.9 MB); `{id}` is the event's UUID, an imported `legacy:` row without an event is not served |
 
 ### 3.5.1 `owner_api(owner, method, path, query, content_length, body) -> CoreResult` (previous gateway only)
 The owner API before todofy.ui.v1, kept for one release so that the previous gateway keeps working while CI

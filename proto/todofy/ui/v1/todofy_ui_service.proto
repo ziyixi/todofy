@@ -70,8 +70,8 @@ option java_package = "science.ziyixi.todofy.ui.v1";
 // The owner's Todofy: the ledger of mail events and its reconcile actions, the daily reminders, the newsletter's
 // reports, the daily history and the setup facts.
 // (-- api-linter: core::0121::resource-must-support-list=disabled
-//     aip.dev/not-precedent: a legacy text is reached from its event (MailEvent.legacy_text), or by an ID read from
-//     D1 for the archive no page shows; a list of the archive would have no caller. --)
+//     aip.dev/not-precedent: a legacy text is reached only from its event (MailEvent.legacy_text); a list of
+//     them would have no caller. --)
 // (-- api-linter: core::0121::resource-must-support-get=disabled
 //     aip.dev/not-precedent: daily reminders, metric days, GTD days and reviews are only ever shown as their
 //     lists (a day's row is one line of a table or a chart); a Get of one would have no caller. --)
