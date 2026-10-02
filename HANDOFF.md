@@ -13,7 +13,7 @@ Rules for this file:
   security-posture details. Those stay with the owner.
 - Keep it short. The details live in each app's docs; link to them.
 
-Last updated: 2026-10-02 (the FlowDay and links dashboard tiles land with this change).
+Last updated: 2026-10-02 (watch-infra lands with this change; the rule vocabulary and the watch transport fix have landed).
 
 ## How work lands
 
@@ -33,10 +33,8 @@ Last updated: 2026-10-02 (the FlowDay and links dashboard tiles land with this c
 
 | Work | Branch (pushed unless noted) | State | Lands as |
 | --- | --- | --- | --- |
-| Watch CPU test: page bodies reach WatchState through a pull proxy (`watch/worker/test/runtime/fake-net.ts`); the worst pass's TIMEOUT on runners was Linux 6.17's loopback TCP drops, not the pass | `watch-hang-fix` (local) | Done | First; test-only, deploys nothing |
-| `mail.received.v1` onto proto, rule vocabulary (`Field.write_empty`, `present_when`, `Message.any_match`) | `proto-mail-rules` @ `1e60681` | Done; rebase onto `main` once `watch-hang-fix` has landed (its Watch checks hit that TIMEOUT) | Second; redeploys every proto user, no behaviour change |
-| `mail.received.v1` onto proto, the contract (`proto/mailhero/webhook/v1`) | `proto-mail` @ `a45b9be` (on `proto-mail-rules`) | Done | Third; deploys Mail Hero and Todofy. Mail Hero's owner sends, resends, connection tests and canaries now build their event in the coordinator DO |
-| Watch go-live: Access app through `infra/`, deploy job, `watch.ziyixi.science` | `watch-infra` (local) | In progress | `watch-infra` first, then "Infra apply" (create 1), then the AUD goes into `watch/wrangler.toml` |
+| `mail.received.v1` onto proto, the contract (`proto/mailhero/webhook/v1`) | `proto-mail` @ `a45b9be` (on `proto-mail-rules`) | Done; its two new Mail Hero CPU tests are being ported to the rewritten `tools/workerd-cpu` (a rebase left them on the old API) | Next; deploys Mail Hero and Todofy. Mail Hero's owner sends, resends, connection tests and canaries now build their event in the coordinator DO |
+| Watch go-live: Access app "watch" created through `infra/` | `watch-infra` | Lands with this change | Then: check the "Infra drift" fingerprint (create 1, outputs 1), dispatch "Infra apply", read the AUD read-only, create `WATCH_CSRF_SIGNING_KEY`, fill both into `watch-l2` |
 | Watch W3: daily Todoist digest via task-intent `SOURCE_WATCH`, Ops status for the dashboard | `watch-l2` (local) | In progress | After `watch-infra`; deploys watch, Todofy, Lab, dashboard |
 
 ## Waiting to be verified
