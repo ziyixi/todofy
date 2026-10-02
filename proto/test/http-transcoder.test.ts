@@ -13,7 +13,8 @@ import { HttpRuleSchema } from '../ts/google/api/http_pb.ts';
 type Rule = MessageInitShape<typeof HttpRuleSchema>;
 import { BookSchema, BookService, type ArchiveBookRequest } from '../ts/prototest/v1/prototest_pb.ts';
 import { HttpRuleError } from '../ts/http-rule.ts';
-import { HttpTranscoder, TRANSCODER_REASONS, type ServiceHandlers, type ShapeOf } from '../ts/http-transcoder.ts';
+import { HttpTranscoder, PreEncoded, TRANSCODER_REASONS, type ServiceHandlers, type ShapeOf } from '../ts/http-transcoder.ts';
+import { toWire } from '../ts/wire-json.ts';
 import { Code, errorDetail, parseStatus, readDetail, RpcError } from '../ts/rpc-status.ts';
 
 type Handlers = ServiceHandlers<ShapeOf<typeof BookService>, { readonly user: string }>;
@@ -93,6 +94,52 @@ describe('reasons', () => {
     const getBook = () => Promise.resolve(create(BookSchema, { pages: 2 ** 31 }));
     const api = new HttpTranscoder(BookService, handlers({ getBook }), { domain: 'a.example.com', maxBodyBytes: 1024, authorize: () => undefined });
     const result = await api.handle(new Request('https://api.example.com/v1/shelves/s1/books/b1'), { user: 'u' });
+    expect(result?.response.status).toBe(500);
+    expect(result?.error?.reason).toBe('INTERNAL');
+  });
+});
+
+describe('pre-encoded answers', () => {
+  const BOOK = 'https://api.example.com/v1/shelves/s1/books/b1';
+  // Wire JSON the handler already holds, as a store serialized it once (the transcoder never decodes it).
+  const text = JSON.stringify(toWire(BookSchema, create(BookSchema, { title: 'kept', pages: 3 })));
+  const conditional = (request: Request) => (request.headers.get('if-none-match') === '"v1"' ? new PreEncoded(null, { etag: '"v1"' }) : new PreEncoded(text, { etag: '"v1"' }));
+  let current: Request = new Request(BOOK);
+  const api = new HttpTranscoder(BookService, handlers({ getBook: () => Promise.resolve(conditional(current)) }), {
+    domain: 'a.example.com',
+    maxBodyBytes: 1024,
+    authorize: (request) => {
+      current = request;
+    },
+  });
+
+  test('a GET answers the text as it is, with the JSON headers and its own', async () => {
+    const result = await api.handle(new Request(BOOK), { user: 'u' });
+    expect(result?.response.status).toBe(200);
+    expect(await result?.response.text()).toBe(text);
+    expect(result?.response.headers.get('etag')).toBe('"v1"');
+    expect(result?.response.headers.get('content-type')).toBe('application/json; charset=utf-8');
+    expect(result?.response.headers.get('cache-control')).toBe('no-store');
+    expect(result?.response.headers.get('x-content-type-options')).toBe('nosniff');
+    const head = await api.handle(new Request(BOOK, { method: 'HEAD' }), { user: 'u' });
+    expect(head?.response.status).toBe(200);
+    expect(await head?.response.text()).toBe('');
+  });
+
+  test('a null body is 304 without a body or a content type', async () => {
+    const result = await api.handle(new Request(BOOK, { headers: { 'if-none-match': '"v1"' } }), { user: 'u' });
+    expect(result?.response.status).toBe(304);
+    expect(result?.error).toBeUndefined();
+    expect(await result?.response.text()).toBe('');
+    expect(result?.response.headers.get('etag')).toBe('"v1"');
+    expect(result?.response.headers.get('cache-control')).toBe('no-store');
+    expect(result?.response.headers.get('content-type')).toBeNull();
+  });
+
+  test('only a GET answers 304: anything else answering null is a bug', async () => {
+    const archiveBook = () => Promise.resolve(new PreEncoded(null));
+    const posting = new HttpTranscoder(BookService, handlers({ archiveBook }), { domain: 'a.example.com', maxBodyBytes: 1024, authorize: () => undefined });
+    const result = await posting.handle(post(JSON.stringify({ request_id: UUID })), { user: 'u' });
     expect(result?.response.status).toBe(500);
     expect(result?.error?.reason).toBe('INTERNAL');
   });

@@ -528,7 +528,11 @@ message from the path variables, the body (`*` or one field, `application/json`,
 the query (`a.b=1`, repeated keys; form encoding, so `+` is a space; a malformed or non-UTF-8 escape is
 `INVALID_ARGUMENT`, as in a path or a body, never read as U+FFFD), applies an AIP-134 `update_mask` (above),
 checks UUID4 fields and clears `OUTPUT_ONLY` input fields (AIP-203), calls the typed handler and writes the
-answer (`no-store`, `nosniff`). Anything a handler throws that is not an `RpcError`, and an answer the
+answer (`no-store`, `nosniff`). A handler may answer `new PreEncoded(text, headers)` instead of a message: wire JSON
+it already holds, written as it is with extra headers (an ETag), or `PreEncoded(null)` for 304 Not Modified to a GET
+whose validator still matches. The dashboard's views use it (a Durable Object serializes each view once and the
+Worker passes the bytes through within Free's 10 ms of CPU); the transcoder never decodes the text, so the app's
+tests prove it is exactly what `toWire` writes (`dashboard/worker/test/wire-conformance.test.ts`). Anything a handler throws that is not an `RpcError`, and an answer the
 profile refuses to write, is `INTERNAL` unless the app's `onUnexpected` says otherwise. A
 path no binding has returns null, for the app's other routes; another method on a known path is 405 with
 `Allow`; `OPTIONS` is 204 with `Allow` and no CORS headers (same-origin only); `HEAD` is `GET` without the

@@ -30,7 +30,9 @@
  * 4. applies the field annotations every handler would otherwise repeat: a `(google.api.field_info).format =
  *    UUID4` string must be a UUID v4 (it is lower-cased), and OUTPUT_ONLY fields of the input are cleared
  *    (AIP-203: ignored on input);
- * 5. calls the handler and writes its message with the wire profile (200, `application/json`, `no-store`).
+ * 5. calls the handler and writes its message with the wire profile (200, `application/json`, `no-store`), or the
+ *    PreEncoded answer it returned as it is: wire JSON the handler already holds (a view a Durable Object serialized
+ *    once), with extra headers such as an ETag, or 304 Not Modified for a GET whose validator still matches.
  *
  * Errors: a handler throws an RpcError; the transcoder's own reasons (TRANSCODER_REASONS, values of
  * common.errors.v1.CommonReason) are BAD_REQUEST (INVALID_ARGUMENT), METHOD_NOT_ALLOWED (UNIMPLEMENTED, sent
@@ -89,9 +91,30 @@ type MessageOf<D> = D extends DescMessage ? MessageShape<D> : never;
 /** The method shapes of a generated service (`ShapeOf<typeof LabUiService>`), for naming its handler types. */
 export type ShapeOf<T> = T extends GenService<infer S> ? S : never;
 
-/** One typed handler per rpc, keyed as protobuf-es names the methods (`rpc GetDeck` is `getDeck`). */
+/**
+ * An answer a handler already holds as wire JSON text, written as it is instead of encoding a message: a body a Durable
+ * Object serialized once, which the Worker passes through without decoding it (Workers Free gives a request 10 ms of
+ * CPU), with extra response headers (an ETag). `body: null` answers 304 Not Modified without a body, for a GET whose
+ * If-None-Match names the current validator; any other method answering null is a bug (INTERNAL). The transcoder does
+ * not check the text: the app's tests prove that it is exactly what toWire writes for the method's output (a strict
+ * read of it, written back byte for byte).
+ */
+export class PreEncoded {
+  readonly body: string | null;
+  readonly headers: Readonly<Record<string, string>>;
+
+  constructor(body: string | null, headers: Readonly<Record<string, string>> = {}) {
+    this.body = body;
+    this.headers = headers;
+  }
+}
+
+/**
+ * One typed handler per rpc, keyed as protobuf-es names the methods (`rpc GetDeck` is `getDeck`); it answers the
+ * output message, or a PreEncoded answer.
+ */
 export type ServiceHandlers<S extends GenServiceMethods, C> = {
-  readonly [K in keyof S]: (request: MessageOf<S[K]['input']>, context: C) => Promise<MessageOf<S[K]['output']>>;
+  readonly [K in keyof S]: (request: MessageOf<S[K]['input']>, context: C) => Promise<MessageOf<S[K]['output']> | PreEncoded>;
 };
 
 export interface Transcoded {
@@ -345,6 +368,15 @@ async function readLimited(request: Request, limit: number): Promise<Uint8Array 
   return out;
 }
 
+/** The response of a PreEncoded answer: its text with the JSON headers and its own, or 304 without a body. */
+function preEncodedResponse(answer: PreEncoded, route: RouteInfo, head: boolean): Response {
+  if (answer.body === null) {
+    if (!route.safe) throw new TypeError('only a GET answers 304');
+    return new Response(null, { status: 304, headers: { 'cache-control': JSON_HEADERS['cache-control'], 'x-content-type-options': 'nosniff', ...answer.headers } });
+  }
+  return new Response(head ? null : answer.body, { status: 200, headers: { ...JSON_HEADERS, ...answer.headers } });
+}
+
 export class HttpTranscoder<S extends GenServiceMethods, C> {
   readonly #service: GenService<S>;
   readonly #handlers: ServiceHandlers<S, C>;
@@ -437,6 +469,7 @@ export class HttpTranscoder<S extends GenServiceMethods, C> {
       const handler = (this.#handlers as unknown as Record<string, ((request: Message, context: C) => Promise<Message>) | undefined>)[route.method.localName];
       if (handler === undefined) throw new TypeError(`no handler for ${route.method.name}`);
       const output = await handler(input, context);
+      if (output instanceof PreEncoded) return { response: preEncodedResponse(output, route, head), route, error: undefined };
       const body = JSON.stringify(toWire(route.method.output, output as never));
       return { response: new Response(head ? null : body, { status: 200, headers: JSON_HEADERS }), route, error: undefined };
     } catch (thrown) {
