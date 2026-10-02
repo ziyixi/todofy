@@ -25,6 +25,7 @@ import pytest
 
 from tests import mail_contract
 from tests.unit import mail_cases
+from todofy.core import contract
 
 jsonschema = pytest.importorskip("jsonschema", reason="dev dependency jsonschema is not installed")
 
@@ -118,3 +119,32 @@ def test_not_blank_agrees_on_every_character():
             if bool(pattern.search(text)) != bool(re.search(legacy, text)):
                 disagree.append(hex(code))
     assert disagree == []
+
+
+INT32_MAX = 2**31 - 1
+
+
+@pytest.mark.parametrize(
+    ("fixture", "field"),
+    [
+        ("attachments_stored_and_omitted", "size"),
+        ("truncated_webhook", "original_text_bytes"),
+        ("attachments_metadata_limit", "attachments_omitted_count"),
+    ],
+)
+def test_both_schemas_accept_integers_above_int32_which_todofy_refuses(fixture, field):
+    """The one known gap between the published schema and Todofy, stated in mail-received-v1.md: the IDL's integers
+    are int32 and Todofy's codec refuses a larger one ("shape"), while the schema, like the hand-written one, sets no
+    maximum (its meaning stays the hand-written one's). No message Mail Hero can receive (25 MiB) has such a size."""
+    for value, todofy_accepts in ((INT32_MAX, True), (INT32_MAX + 1, False)):
+        document = json.loads(json.dumps(mail_cases.fixtures()[fixture]))
+        target = document["message"]["attachments"][0] if field == "size" else document["message"]
+        assert field in target
+        target[field] = value
+        assert GENERATED.is_valid(document) and HAND_WRITTEN.is_valid(document), value
+        try:
+            contract.parse_mail_event(json.dumps(document).encode())
+        except contract.ContractError as error:
+            assert not todofy_accepts and error.reason == "shape", (value, error.reason)
+        else:
+            assert todofy_accepts, value

@@ -2,7 +2,12 @@
 
 Mail Hero 向一个配置好的消费者 URL 发送通用邮件事件。它不依赖 Todofy 的包、数据库或任务状态。接口是 Mail Hero 自己定义的，不兼容 CloudMailin 的请求格式。
 
-机器可读结构的唯一描述是 IDL [`proto/mailhero/webhook/v1/mail_received.proto`](../../proto/mailhero/webhook/v1/mail_received.proto)：字段、字段顺序和每条取值规则（UUID、UTC 时间、列表上限、附件枚举、`subject` 与 `text` 至少一个非空白、截断时必有 `original_text_bytes` 等）。发布的 [JSON Schema](mail-received-v1.schema.json) 由它生成（`proto/tools/gen_schema.py`，不得手改）；含义与迁移前的手写 Schema（冻结于 [`legacy/`](legacy/mail-received-v1.schema.json)）相同，两侧测试逐一比较判定。本文描述的语义不变：Mail Hero 用生成的消息和 wire 编解码器构建事件，字节与以前完全相同；Todofy 用生成的 Python 编解码器宽松读取（忽略未知字段，检查每条规则）。下文的字节、长度和一致性规则中 IDL 无法表达的部分（UTF-8 字节上限、截断前大小与正文一致等）仍由双方代码检查。
+机器可读结构的唯一描述是 IDL [`proto/mailhero/webhook/v1/mail_received.proto`](../../proto/mailhero/webhook/v1/mail_received.proto)：字段、字段顺序和每条取值规则（UUID、UTC 时间、列表上限、附件枚举、`subject` 与 `text` 至少一个非空白、截断时必有 `original_text_bytes` 等）。发布的 [JSON Schema](mail-received-v1.schema.json) 由它生成（`proto/tools/gen_schema.py`，不得手改）；含义与迁移前的手写 Schema（冻结于 [`legacy/`](legacy/mail-received-v1.schema.json)）相同，两侧测试逐一比较判定，只有两处已知差别（均有测试固定）：
+
+- **“非空白”按 Python 的空白字符集判断**（Todofy 的 `str.strip()`）。用 Python `re` 读取的判定与手写 Schema 完全相同；用 ECMAScript 正则读取时（有无 `u` 标志均同），U+001C–U+001F、U+0085 与 U+FEFF 这六个字符的判定与手写 Schema 的 `\S` 不同（见 IDL 文件头）。Mail Hero 构建事件时同时按这条规则和 JavaScript 的 `trim()` 检查，所以不会冻结只含这些字符的主题与正文。
+- **整数是 32 位的**：附件 `size`、`original_text_bytes`、`attachments_omitted_count` 最大为 2147483647（2^31 − 1）。Schema 与手写版一样不写上限，但 Todofy 拒绝更大的值（400）。Mail Hero 能接收的邮件（最大 25 MiB）不会产生这样的值。
+
+其余语义不变：Mail Hero 用生成的消息和 wire 编解码器构建事件，字节与以前完全相同；Todofy 用生成的 Python 编解码器宽松读取（忽略未知字段，检查每条规则）。下文的字节、长度和一致性规则中 IDL 无法表达的部分（UTF-8 字节上限、截断前大小与正文一致等）仍由双方代码检查。
 
 ## 请求
 

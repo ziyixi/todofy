@@ -49,10 +49,13 @@ Mail Hero 的 Todofy 目标为 `https://daily.ziyixi.science/hooks/mail`，Beare
 
 ## 共享合同
 
-`contracts/mail-received-v1/` 是两个应用唯一共享的文件：语义说明、唯一的 JSON Schema（Todofy 的 OpenAPI 按相对路径引用）、`fixtures/*.json` golden 请求体（由 Mail Hero 真实的 `parseMail` + `buildPayload` 从合成邮件生成，逐字节固定、无结尾换行）和 `fixtures/legacy/` 冻结旧字节（两侧测试固定其 SHA-256）。
+两个应用共享的合同有两部分。IDL 的改动检查并发布 Mail Hero 与 Todofy（两者都打包由它生成的代码）；`contracts/` 的改动检查所有应用、不发布任何应用：
 
-- Mail Hero 拥有该合同。修改构建器后在 `mail-hero/cloudflare` 运行 `npm run contract:update`，检查 fixture diff，并与 `contracts/` 的变更放在同一提交。
-- 根 CI 的 `Contracts` job：Mail Hero 逐字节重建每个 fixture；Todofy 用 Schema 校验并用自己的解析器解析每个 fixture（含 legacy）；两侧都检查所有 fixture 的 `event_id`、`message.id` 互不重复。另外 `Todofy runtime` 分片 job 的 runtime 测试（`contracts/` 改动时也会运行）把它们 POST 到真实 workerd 网关，`Todofy checks` 再核对每个收集到的 runtime 测试都恰好运行一次并通过。不兼容的改动在合并前失败。详见 [`contracts/README.md`](../../contracts/README.md)。
+- **IDL [`proto/mailhero/webhook/v1/mail_received.proto`](../../proto/mailhero/webhook/v1/mail_received.proto)** 是事件结构与取值规则的唯一描述。Mail Hero 的 `buildPayload` 用由它生成的消息和 wire 编解码器写出事件字节（先检查每条规则）；Todofy 的 `todofy.core.contract.parse_mail_event` 用生成的 Python 编解码器宽松读取（忽略未知字段，检查每条规则），IDL 无法表达的规则（UTF-8 字节上限、大小一致性等）仍由各自代码检查。
+- **[`contracts/mail-received-v1/`](../../contracts/mail-received-v1/)**：语义说明 `mail-received-v1.md`、由 IDL 生成的 JSON Schema（在 `proto/` 运行 `npm run schema`，不得手改；Todofy 的 OpenAPI 按相对路径引用，改动后在 `todofy/web` 运行 `npm run gen:api` 更新 UI 类型）、冻结的手写 Schema `legacy/`、`fixtures/*.json` golden 请求体（由 Mail Hero 真实的 `parseMail` + `buildPayload` 从合成邮件生成，逐字节固定、无结尾换行）和 `fixtures/legacy/` 冻结旧字节（两侧测试固定其 SHA-256）。
+
+- Mail Hero 拥有该合同。修改 IDL 或构建器后在 `mail-hero/cloudflare` 运行 `npm run contract:update`，检查 fixture diff，并与 `proto/`、`contracts/` 的变更放在同一提交。已冻结在 R2 的事件字节永不重新序列化：重试原样重发。
+- 根 CI 的 `Contracts` job：Mail Hero 逐字节重建每个 fixture，`contract-schema-dialect.test.mjs` 核对生成的 Schema 在 ECMAScript 方言（有无 `u` 标志）下只在 IDL 写明的字符上与手写 Schema 不同；Todofy 用 Schema 校验并用生成的编解码器解析每个 fixture（含 legacy），`test_mail_received_schema_legacy.py` 与 `test_mail_received_parser_legacy.py` 在每个 fixture 与约 9,000 个变体上核对生成的 Schema 与手写 Schema、新解析器与迁移前解析器的判定相同（唯一已知差别是大于 2^31 − 1 的整数，Todofy 现在拒绝）；两侧都检查所有 fixture 的 `event_id`、`message.id` 互不重复。`Proto checks` 运行 IDL 的 lint、breaking 检查与两种语言的编解码测试。另外 `Todofy runtime` 分片 job 的 runtime 测试（`contracts/` 改动时也会运行）把它们 POST 到真实 workerd 网关，`Todofy checks` 再核对每个收集到的 runtime 测试都恰好运行一次并通过。不兼容的改动在合并前失败。详见 [`contracts/README.md`](../../contracts/README.md)。
 
 ## 金丝雀事件（ops-v1）
 
