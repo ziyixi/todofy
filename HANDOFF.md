@@ -90,26 +90,30 @@ with synthetic data.
 
 ### `proto-flowday-ui` — FlowDay owner API as `flowday.ui.v1`
 
-- State: built and verified (head `71ef58e` at build time; the fix stage is adding commits). Design review
-  done; the compatibility/security review and the fixes are in progress.
+- State: built, reviewed and fixed, local only (not pushed): the build commits rebased on `9e38624`, then the
+  review fixes `584486c` (IDL), `6ce005f` (Worker), `455eae7` (UI), `dbac97a` (CI) and a docs commit; every
+  check passed again from a clean clone of the head. Every finding of the design and the compatibility/security
+  reviews was fixed, none refuted.
 - What it does: `FlowDayUiService` under `/api/v1` (Task, Flow per day, Note, TimeEntry, singletons
-  TimerSession and Settings, `QueryAnalytics`, `SyncTasks`). Lists page at 200. The Worker warms its codec at
-  startup (`worker/src/warmup.ts`) so an isolate's first request stays under 10 ms. Creates use the
-  `request_id` as the new resource id (no request log, so no extra D1 writes). Old `/api/*` routes answer 410
-  until 2026-11-02.
-- Measured: Worker 56.1 → 114.3 KiB gzip (budget 140); UI JS 362.8 → 398.9 KiB gzip (budget 480); first API
-  request 7.8 ms (was 8.2 for the old full list); D1 writes unchanged (221 rows per simulated day, sync 608
-  first / 280 per day), now ratcheted per step.
-- Design review findings to fix or refute: D1 (high) the analytics first page is not bounded by `page_size`;
-  D2 `ListFlows` reads all history per page; D3 `RolloverFlow` with empty `task_ids` means "all unfinished"
-  (destructive default proto3 cannot tell from empty); D4 docs still describe the removed `/api` routes;
-  D5 a negative `page_size` is read as the maximum instead of `INVALID_ARGUMENT`; D6 analytics flows show
-  `planning_completed` false; D7 a wrong `Task.delete_time` comment.
+  TimerSession and Settings, `QueryAnalytics`, `SyncTasks`). Lists page at 200 (notes 100); a negative
+  `page_size` is `INVALID_ARGUMENT`. Every page seeks to its cursor through an index and reads about its own D1
+  rows (`worker/test/runtime/reads.test.ts`). `QueryAnalytics` pages rows (planned tasks, done tasks, time
+  entries, in that order) with at most one task per row. `RolloverFlow` moves every unfinished task only with
+  `all_unfinished`. Updates refuse a changed `IMMUTABLE` field (AIP-203). The Worker warms each list's drizzle
+  query and answer at startup (`worker/src/warmup.ts`). Creates use the `request_id` as the new resource id
+  (no request log, so no extra D1 writes). Old `/api/*` routes answer 410 until 2026-11-02.
+- Measured: Worker 56.1 → 116.6 KiB gzip (budget 140); UI JS 362.8 → 398.9 KiB gzip (budget 480); every list
+  as an isolate's first API request 3.7–6.7 ms reference (bound 10; before the fixes 6.0–25.6, a year's
+  analytics page the 25.6); the warm-up adds about 80 ms to an isolate's startup (limit 1 s); rows read per
+  row answered 1.03–1.31 (the review's probe read 4–15 times a single read before); D1 writes unchanged (221
+  rows per simulated day, sync 608 first / 280 per day).
 - Deploys: FlowDay only (FlowDay becomes a "ts" proto user, so later shared-runtime changes redeploy it too).
   The deploy probe asks `/api/v1/tasks`.
 - After deploy: reload flowday.ziyixi.science; tasks, today's flow, notes, time entries, timer, settings,
-  analytics and export load; one small edit persists; an old tab shows the reload banner; Observability shows
-  no `INTERNAL`; sync still answers synced/partial/throttled. Remove the 410 routes after 2026-11-02.
+  the daily, weekly and work-pattern reviews and an export of the whole history load; one small edit persists;
+  rolling over a day still moves its unfinished tasks; an old tab shows the reload banner; Observability shows
+  no `INTERNAL` and no exceeded-CPU error; the dashboard's D1 reads stay as before; sync still answers
+  synced/partial/throttled. Remove the 410 routes after 2026-11-02.
 - Known, not caused by it: Playwright UI-005 is flaky on `main` too (CI does not run Playwright);
   `DEV_TODOIST_ORIGIN` is declared but unused, so the smoke cannot cover sync with a key.
 

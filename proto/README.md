@@ -21,9 +21,11 @@ links app's owner API (2026-10-01, deployed since the app's step L2): the second
 prefix `/_/api/v1/` (its host's other paths are short links). `watch/ui/v1` is the watch app's owner API (2026-10-01,
 deployed since the app's step W2): the third app on the runtime, under `/api/v1/`.
 `flowday/ui/v1` is FlowDay's owner API (2026-10-02, branch `proto-flowday-ui`): the fifth, on a Worker and a Next.js UI
-that had no proto code before, and the first with large lists: its lists are pages sized to Workers Free's CPU limit,
-and the Worker runs its answer path once at startup ([Cost](#http-apis)). Its old routes answer 410 `reload_required` for
-one release, as Lab's did.
+that had no proto code before, and the first with large lists: its lists are pages sized to Workers Free's CPU limit
+that each read about their own D1 rows, and the Worker runs every list's query and answer once at startup
+([Cost](#http-apis)). It keeps no request log (each entry would cost a D1 row write per mutation): only its two
+creates take a `request_id`, which names the new resource, as its service header states. Its old routes answer 410
+`reload_required` for one release, as Lab's did.
 `dashboard/ui/v1` is the dashboard's
 owner API (2026-10-02, branch `proto-dashboard-ui`): the registry and the four views are AIP-156 singletons read with
 standard Gets, the refreshes and the guard and canary actions are custom methods; HomeState still serializes each view
@@ -500,7 +502,15 @@ follow the same pattern (ops-v1 is a service-binding contract, not an HTTP API: 
   its absence), so only then does the profile write the producer's bytes back unchanged; those files carry a
   file-wide `core::0216::state-field-output-only` exception for their fields of a `State` enum, and the
   fields written only when set stay `OUTPUT_ONLY`. A mutation takes an AIP-155 `request_id` with
-  `(google.api.field_info).format = UUID4`.
+  `(google.api.field_info).format = UUID4`. An app without a request log (FlowDay: a log row would cost a D1 write on
+  every mutation) takes it on its creates only, where it becomes the new resource's ID so a repeat finds it, and makes
+  every other mutation set a state; its service header says so, with the api-linter exceptions next to each element.
+- `IMMUTABLE` fields (AIP-203) may appear in an update's body or mask only with their stored value; another value is
+  `INVALID_ARGUMENT`, never silently dropped. Without a mask, a field left at its default was not given. A repeated
+  field's empty value never selects a method's broadest action: such an action takes its own `bool` (FlowDay's
+  `RolloverFlowRequest.all_unfinished`).
+- `page_size` (AIP-158): 0 is the default, a value above the maximum is read as the maximum, a negative one is
+  `INVALID_ARGUMENT`; every repeated field of a page counts against its bound, not only the main one.
 - Resource IDs have no `/` (AIP-122). An ID whose natural key has one (an old-style arXiv ID,
   `hep-th/9901001`) writes it as `~` (`likedPapers/hep-th~9901001`), and a Create's `<resource>_id` takes
   exactly that form (AIP-133: the answer's name is `<collection>/<the given id>`); an ID with `/` (also sent
@@ -602,10 +612,17 @@ tasks, days or entries; the UI reads every page), and the Worker's global scope 
 once at startup (`flowday/worker/src/warmup.ts`), outside any request's CPU time like the transcoder's route table,
 so V8 has optimized the writer before a request needs it. An isolate's first API request, a page of 200 of 1,000
 tasks, is then 7.6 ms (median of three isolates; 11-13 ms without the warm-up; the hand-written answer of all 1,000
-tasks took 8.2 ms), and every warm request 3 ms or less (the sync's first chunk 7.3 ms cold, unchanged). Bundles:
-FlowDay's Worker 56.1 → 114.3 KiB gzip (it had no protobuf-es runtime before; budget 140 KiB), its UI's JavaScript
-362.8 → 398.9 KiB gzip (budget 480 KiB). An app with lists that long should expect the same: page sizes from its CPU
-test, and the warm-up.
+tasks took 8.2 ms), and every warm request 3 ms or less (the sync's first chunk 7.3 ms cold, unchanged). The review
+of that build found two more costs, now measured for every list as an isolate's first request: an isolate's first
+run of drizzle's query building and row mapping (about 3 ms for 200 tasks), and an analytics page whose first page
+carried a whole range's flows and tasks (25.6 ms for a year). The warm-up now also builds each list's query and maps
+synthetic raw rows through it (a stub binding that is never called), and every repeated field of a page counts
+against its bound: every list's largest first page is 3.7-6.7 ms on an isolate's first request, below the bound of
+10 ms. Paging also has a D1 cost: a page that re-reads a table and slices it makes reading every page grow with the
+square of the data, so every FlowDay page seeks to its cursor through an index and reads about its own rows
+(`flowday/worker/test/runtime/reads.test.ts`). Bundles: FlowDay's Worker 56.1 → 114.3 KiB gzip (it had no
+protobuf-es runtime before; budget 140 KiB), its UI's JavaScript 362.8 → 398.9 KiB gzip (budget 480 KiB). An app
+with lists that long should expect the same: page sizes from its CPU test, keyset pages, and the warm-up.
 
 **Adding a UI API.**
 

@@ -30,9 +30,13 @@ The root [`AGENTS.md`](../AGENTS.md) applies here too. FlowDay-specific rules:
 - **Owner API.** `proto/flowday/ui/v1` (`flowday.ui.v1`) is the one description of every route the UI calls: change
   the IDL first (`proto/README.md`, HTTP APIs), then the Worker's handler (`worker/src/api.ts`) and the UI's client
   (`web/lib/client/flowday-api.ts`, the only module of API calls; the UI's view models are built there, never a
-  hand-written wire type). Keep lists paged at sizes `worker/test/runtime/cpu.test.ts` holds within the CPU limit, and
-  keep `worker/src/warmup.ts` in step with the list answers. The routes before it answer 410 `reload_required` until
-  2026-11-02: remove them in the first FlowDay change after that day.
+  hand-written wire type). Keep lists paged at sizes `worker/test/runtime/cpu.test.ts` holds within the CPU limit as an
+  isolate's first request, count every repeated field of a page against its bound, and keep `worker/src/warmup.ts`
+  in step with each list's query and answer. A page seeks to its cursor through an index and reads about its own D1
+  rows, never a whole table sliced (`worker/test/runtime/reads.test.ts`: the account's 5 million reads a day are
+  shared). An empty repeated field never selects a broad action, and an `IMMUTABLE` field is never silently ignored
+  (AIP-203). The routes before it answer 410 `reload_required` until 2026-11-02: remove them in the first FlowDay
+  change after that day.
 - **Requests.** Every UI request goes through `web/lib/client/http.ts`, the client's transport (ESLint rejects `fetch`
   elsewhere): CSRF, one retry on an expired token, visible failures. Never swallow a failed write.
 - **D1 writes stay minimal.** The 100,000 rows/day write allowance is shared by every app in the
