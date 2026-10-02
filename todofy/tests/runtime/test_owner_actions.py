@@ -120,7 +120,7 @@ def test_reconcile_replays_the_stored_outcome_and_rejects_reuse(actions_worker: 
     assert (replay.status_code, replay.json()) == (200, detail)
 
     reused = _post(actions_worker, path, request | {"action": "task_created", "task_id": "123"})
-    assert_status(reused, 400, "REQUEST_ID_REUSED")
+    assert_status(reused, 400, "BAD_REQUEST")  # the request_id was used for another request
 
     stale = _post(actions_worker, path, request | {"request_id": str(uuid.uuid4())})
     current = _detail(assert_status(stale, 409, "ETAG_MISMATCH"))

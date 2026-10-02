@@ -169,7 +169,7 @@ describe('todofy.ui.v1 through the transcoder', () => {
     const cases: [ReturnType<typeof uiRefusal>, number, string][] = [
       [uiRefusal('ETAG_MISMATCH', EVENT_DETAIL), 409, 'ABORTED'],
       [uiRefusal('ACTION_NOT_ALLOWED', EVENT_DETAIL), 400, 'FAILED_PRECONDITION'],
-      [uiRefusal('REQUEST_ID_REUSED'), 400, 'INVALID_ARGUMENT'],
+      [uiRefusal('BAD_REQUEST'), 400, 'INVALID_ARGUMENT'],
       [uiRefusal('NOT_FOUND'), 404, 'NOT_FOUND'],
       [uiRefusal('RATE_LIMITED', null, 42), 429, 'RESOURCE_EXHAUSTED'],
       [uiRefusal('UNAVAILABLE'), 503, 'UNAVAILABLE'],

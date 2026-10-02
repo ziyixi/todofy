@@ -46,7 +46,6 @@ class Reason(StrEnum):
     UNAUTHORIZED = "UNAUTHORIZED"
     ETAG_MISMATCH = "ETAG_MISMATCH"
     ACTION_NOT_ALLOWED = "ACTION_NOT_ALLOWED"
-    REQUEST_ID_REUSED = "REQUEST_ID_REUSED"
     RATE_LIMITED = "RATE_LIMITED"
     MAINTENANCE = "MAINTENANCE"
     # A bug in TodofyCore (an exception, or an answer the codec refuses to write): never repeated by a client.

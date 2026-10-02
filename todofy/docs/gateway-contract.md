@@ -102,7 +102,8 @@ Gate order for every request, assets included (`gateway/src/owner.ts`):
 Errors of the API are google.rpc.Status bodies (`ErrorInfo` with the reason and the domain
 `todofy.ziyixi.science`, `RequestInfo` with the gateway's request ID, `LocalizedMessage` zh-CN), logged as one
 line of request ID, status and reason. Its own reasons are `proto/todofy/ui/v1/errors.proto`'s (`ETAG_MISMATCH`,
-`ACTION_NOT_ALLOWED`, `REQUEST_ID_REUSED`, `RATE_LIMITED`, `MAINTENANCE`); the rest are `common.errors.v1`'s.
+`ACTION_NOT_ALLOWED`, `RATE_LIMITED`, `MAINTENANCE`); the rest are `common.errors.v1`'s (a `request_id` reused
+for another request is `BAD_REQUEST`, as in links.ui.v1 and watch.ui.v1).
 
 The previous gateway's `owner_api` path (§3.5) still reads its bodies with the old rule (declared
 `Content-Length` non-numeric or > 16 KiB, or a body > 16 KiB → 400 `invalid_request`, read with
@@ -301,7 +302,7 @@ reaches the gateway as an exception, answered 503 `UNAVAILABLE`.
 | `GetServiceStatus` `GET /api/v1/serviceStatus` | D1 counts + DO budgets, in-process (the old overview) |
 | `ListMailEvents` `GET /api/v1/mailEvents?page_size&page_token&filter` | 50 by default, at most 100; `filter` is one AIP-160 restriction, `state = TODO_UNKNOWN` (newest first) or `attention = true` (oldest first), parsed by `core/owner_ui.event_filter`; the `BASIC` view only (AIP-157: `view=FULL` → `BAD_REQUEST`, a page in full would read every event's detail) |
 | `GetMailEvent` `GET /api/v1/mailEvents/{id}?view` | the event, its transitions and allowed actions (`FULL`, the default; `BASIC` answers the list fields); a name that is not a UUID → `NOT_FOUND` |
-| `ReconcileMailEvent` `POST /api/v1/mailEvents/{id}:reconcile` | `etag` is the event's version; replays and conflicts via `owner_actions` keyed by `request_id` (`REQUEST_ID_REUSED`) |
+| `ReconcileMailEvent` `POST /api/v1/mailEvents/{id}:reconcile` | `etag` is the event's version; replays and conflicts via `owner_actions` keyed by `request_id` (a reuse for another request is `BAD_REQUEST`) |
 | `ListDailyReminders` `GET /api/v1/dailyReminders` | 50 by default, at most 100 |
 | `GetLatestReports` `GET /api/v1/latestReports` | the stored reports, read leniently (one the codec cannot read is left out and logged) |
 | `RecomputeReport` `POST /api/v1/latestReports:recompute` | `RATE_LIMITED` with `retry_after`; a computed report replays via `owner_actions`, a failure releases the claim so the same `request_id` computes again |

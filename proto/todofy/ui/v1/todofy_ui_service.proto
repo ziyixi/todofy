@@ -25,8 +25,9 @@
 // Every mutation takes a `request_id` (AIP-155, a UUID4 the browser makes once per distinct request): repeating a
 // request with the same ID applies it once (ReconcileMailEvent answers the event as it is now, RecomputeReport the
 // report the first successful request stored). A request that failed with a retryable reason (UNAVAILABLE,
-// RATE_LIMITED) changed nothing and is repeated with the same ID. Reused for another request it is REQUEST_ID_REUSED
-// and changes nothing. Without one the gateway makes one up, so nothing is deduplicated.
+// RATE_LIMITED) changed nothing and is repeated with the same ID. Reused for another request (another action,
+// event, etag or task ID, or another report) it is INVALID_ARGUMENT (BAD_REQUEST) and changes nothing. Without one
+// the gateway makes one up, so nothing is deduplicated.
 //
 // Not in this service: the machine routes on the hooks hosts (TODOFY_HOOKS_HOSTS, outside Access), whose callers
 // are other systems that keep their exact paths, methods, authentication and bytes: POST /hooks/mail (Mail Hero's

@@ -47,7 +47,8 @@ REASONS = {
     ApiError.NOT_FOUND: Reason.NOT_FOUND,
     ApiError.VERSION_CONFLICT: Reason.ETAG_MISMATCH,
     ApiError.ACTION_NOT_ALLOWED: Reason.ACTION_NOT_ALLOWED,
-    ApiError.ACTION_REQUEST_CONFLICT: Reason.REQUEST_ID_REUSED,
+    # A request_id reused for another request: the common BAD_REQUEST, as links.ui.v1 and watch.ui.v1 answer it.
+    ApiError.ACTION_REQUEST_CONFLICT: Reason.BAD_REQUEST,
     ApiError.RATE_LIMITED: Reason.RATE_LIMITED,
     ApiError.MAINTENANCE: Reason.MAINTENANCE,
     ApiError.INVALID_REQUEST: Reason.BAD_REQUEST,

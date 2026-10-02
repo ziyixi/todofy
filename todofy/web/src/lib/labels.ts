@@ -135,7 +135,6 @@ export const API_ERROR_HINTS: Record<Reason | ClientCode, string> = {
   METHOD_NOT_ALLOWED: '页面版本与服务不一致；刷新页面后重试',
   ETAG_MISMATCH: '事件在你查看后已被更新；刷新后确认新状态再操作',
   ACTION_NOT_ALLOWED: '事件当前状态不允许此操作；刷新后查看可用操作',
-  REQUEST_ID_REUSED: '同一操作 ID 已用于不同的请求；关闭对话框后重新操作',
   RATE_LIMITED: '已达到频率上限；稍后再试',
   INTERNAL: 'Worker 内部错误；稍后重试，仍失败请按请求 ID 查日志',
   MAINTENANCE: '服务处于维护模式，写操作暂不可用',

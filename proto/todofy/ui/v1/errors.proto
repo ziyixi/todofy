@@ -35,9 +35,9 @@ enum ErrorReason {
   // FAILED_PRECONDITION (400): the action is not among the event's `allowed_actions` now. The error carries the
   // current todofy.ui.v1.MailEvent as a detail.
   ERROR_REASON_ACTION_NOT_ALLOWED = 2;
-  // INVALID_ARGUMENT (400): the request_id was used for another request (another action, event, etag or task
-  // ID, or another report). Nothing changed.
-  ERROR_REASON_REQUEST_ID_REUSED = 3;
+  // A request_id reused for another request is common.errors.v1's BAD_REQUEST, as in links.ui.v1 and watch.ui.v1.
+  reserved 3;
+  reserved "ERROR_REASON_REQUEST_ID_REUSED";
   // RESOURCE_EXHAUSTED (429): the hour's report computations (30, shared with the newsletter's on-demand
   // reports) are used up; Retry-After gives the seconds to the next UTC hour.
   ERROR_REASON_RATE_LIMITED = 4;

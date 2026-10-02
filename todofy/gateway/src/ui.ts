@@ -53,7 +53,6 @@ export const REASONS: Readonly<Record<Reason, { readonly code: Code; readonly me
   INTERNAL: { code: Code.INTERNAL, message: 'internal error', zh: '服务内部错误' },
   ETAG_MISMATCH: { code: Code.ABORTED, message: 'the event changed since its etag', zh: '事件已被更新，请刷新后重试' },
   ACTION_NOT_ALLOWED: { code: Code.FAILED_PRECONDITION, message: 'the event does not allow this action now', zh: '该事件当前状态不允许此操作' },
-  REQUEST_ID_REUSED: { code: Code.INVALID_ARGUMENT, message: 'the request_id was used for another request', zh: '同一操作 ID 已用于不同的请求' },
   RATE_LIMITED: { code: Code.RESOURCE_EXHAUSTED, message: "the hour's report computations are used up", zh: '请求过于频繁，请稍后再试' },
   MAINTENANCE: { code: Code.UNAVAILABLE, message: 'maintenance mode: writes wait', zh: '服务维护中，请稍后再试' },
 };

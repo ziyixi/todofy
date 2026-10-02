@@ -120,7 +120,7 @@ def test_retry_summary_after_the_worker_gave_up(worker: Worker, fresh_gemini: Ge
     assert len(fresh_gemini.calls_mentioning(event_id)) == 1
 
 
-@pytest.mark.reaches("REQUEST_ID_REUSED", "ETAG_MISMATCH", "ACTION_NOT_ALLOWED", "NOT_FOUND")
+@pytest.mark.reaches("ETAG_MISMATCH", "ACTION_NOT_ALLOWED", "NOT_FOUND")
 def test_replays_and_conflicts(worker: Worker, fresh_todoist: TodoistFake) -> None:
     event_id = _unknown(worker, fresh_todoist)
     etag = worker.event(event_id)["etag"]
@@ -132,7 +132,7 @@ def test_replays_and_conflicts(worker: Worker, fresh_todoist: TodoistFake) -> No
     assert (replay.json()["state"], replay.json()["etag"]) == (first.json()["state"], first.json()["etag"])
 
     reused = worker.reconcile(event_id, "task_created", etag=etag, task_id="1", request_id=request_id)
-    assert (reused.status_code, reason(reused)) == (400, "REQUEST_ID_REUSED")
+    assert (reused.status_code, reason(reused)) == (400, "BAD_REQUEST")  # the request_id was used for another
     stale = worker.reconcile(event_id, "dismiss", etag=etag)
     assert (stale.status_code, reason(stale)) == (409, "ETAG_MISMATCH")
     not_allowed = worker.reconcile(event_id, "retry_summary")
