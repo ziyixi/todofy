@@ -23,32 +23,31 @@ Outputs (GITHUB_OUTPUT, "true"/"false"):
                     website/relay/ (the Notion relay Worker, its own wrangler.toml) changed: deploy
                     the relay. A change only there checks the website but does not release the site;
                     a website change elsewhere releases the site but does not redeploy the relay.
-  FlowDay (flowday/) is checked and deployed like the other apps since F2 (flowday/docs/design.md section 11).
-  It uses no contract (NO_CONTRACTS) and compiles in packages/edge-auth and the TypeScript proto runtime with
-  proto/flowday/ui/ (its owner API, flowday.ui.v1), so a change to those checks and deploys it too. The links app (links/, the short links on s.ziyixi.science) is checked and deployed since L2
-  (links/docs/design.md section 11). It uses no contract and compiles in packages/edge-auth and the TypeScript proto
-  runtime with proto/links/ui/, so a change to those checks and deploys it too. The watch app (watch/, the web watches
-  on watch.ziyixi.science) is checked and deployed since W2 (watch/docs/design.md section 11). It proposes
-  task-intent-v1 (its notification sink) and answers ops-v1 (its Ops entrypoint; Contracts runs both tests) and
-  compiles in packages/edge-auth and the TypeScript proto runtime with proto/watch/ui/, proto/todofy/taskintent/ and
-  proto/ops/, so a change to those checks and deploys it too. CHECK_ONLY (apps checked but never deployed, with no
-  "<prefix>_deploy" output) is where a new app starts, until its first deploy job; it is empty since W2.
+  FlowDay (flowday/) is checked and deployed like the other apps since F2 (flowday/docs/design.md section 11). It uses
+  no contract (NO_CONTRACTS) and compiles in packages/edge-auth and the TypeScript proto runtime with
+  proto/flowday/ui/ (its owner API, flowday.ui.v1), so a change to those checks and deploys it too. The links app
+  (links/, the short links on s.ziyixi.science) is checked and deployed since L2 (links/docs/design.md section 11). It
+  uses no contract and compiles in packages/edge-auth and the TypeScript proto runtime with proto/links/ui/, so a
+  change to those checks and deploys it too. The watch app (watch/, the web watches on watch.ziyixi.science) is
+  checked and deployed since W2 (watch/docs/design.md section 11). It proposes task-intent-v1 (its notification sink)
+  and answers ops-v1 (its Ops entrypoint; Contracts runs both tests) and compiles in packages/edge-auth and the
+  TypeScript proto runtime with proto/watch/ui/, proto/todofy/taskintent/ and proto/ops/, so a change to those checks
+  and deploys it too. CHECK_ONLY (apps checked but never deployed, with no "<prefix>_deploy" output) is where a new
+  app starts, until its first deploy job; it is empty since W2.
 
-proto/ (the protobuf IDL, proto/README.md) checks every app in PROTO_USERS (an app that depends on
-@ziyixi/proto or ziyixi-proto) and deploys only the apps whose bundle the changed path reaches
-(proto_deploys): PROTO_USERS[app] names the languages whose generated code and runtime the app's
-production bundles compile in ("ts": Lab's, FlowDay's, the links app's, the watch app's and the dashboard's Workers and
-UIs, and Mail Hero's Worker; "python": todofy-core, through the wheel pywrangler vendors;
-Todofy's gateway and UI import types only, so neither makes Todofy a "ts" user), PROTO_RUNTIMES maps a language's
-runtime and generator to that language's users, and PROTO_PACKAGES maps each proto package to the apps that import its
-generated code (lab/ui reaches Lab only, flowday/ui FlowDay only, links/ui the links app only, watch/ui the watch app
-only, dashboard/ui the dashboard only; prototest, the runtimes' fixtures, reaches no app). Tests, test data, the check
-scripts, the api-linter tool module, check configs and Markdown (PROTO_NOT_BUNDLED) deploy nothing; any other proto/
-path (buf.yaml, buf.lock, the toolchain
-lockfile, ensure.mjs, a package not listed yet) deploys every user (fail safe). test_proto.py derives
-PROTO_USERS and the packages' importers from the sources. It also runs Contracts. A change to a contract proto/'s
-tests read (PROTO_READS: ops-v1's, task-intent-v1's and mail-received-v1's fixtures and schemas) runs Proto checks as
-well.
+proto/ (the protobuf IDL, proto/README.md) checks every app in PROTO_USERS (an app that depends on @ziyixi/proto or
+ziyixi-proto) and deploys only the apps whose bundle the changed path reaches (proto_deploys): PROTO_USERS[app] names
+the languages whose generated code and runtime the app's production bundles compile in ("ts": Lab's, FlowDay's, the
+links app's, the watch app's and the dashboard's Workers and UIs, and Mail Hero's Worker; "python": todofy-core,
+through the wheel pywrangler vendors; Todofy's gateway and UI import types only, so neither makes Todofy a "ts" user),
+PROTO_RUNTIMES maps a language's runtime and generator to that language's users, and PROTO_PACKAGES maps each proto
+package to the apps that import its generated code (lab/ui reaches Lab only, flowday/ui FlowDay only, links/ui the
+links app only, watch/ui the watch app only, dashboard/ui the dashboard only; prototest, the runtimes' fixtures,
+reaches no app). Tests, test data, the check scripts, the api-linter tool module, check configs and Markdown
+(PROTO_NOT_BUNDLED) deploy nothing; any other proto/ path (buf.yaml, buf.lock, the toolchain lockfile, ensure.mjs, a
+package not listed yet) deploys every user (fail safe). test_proto.py derives PROTO_USERS and the packages' importers
+from the sources. It also runs Contracts. A change to a contract proto/'s tests read (PROTO_READS: ops-v1's,
+task-intent-v1's and mail-received-v1's fixtures and schemas) runs Proto checks as well.
 
 push: the files changed between a cumulative base and github.sha, never only this push's own diff,
 so a change whose run was cancelled or failed is checked (and deployed) again by the next run.
