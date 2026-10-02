@@ -34,7 +34,11 @@ keep their JSON (string timestamps: they embed ops-v1's answers) and the dashboa
 `mailhero/ui/v2` is Mail Hero's owner API (2026-10-02): the sixth app on the runtime, under `/api/v2/`. It is v2
 because Mail Hero's hand-written owner API before it already was `/api/v1` (AIP-185: a breaking change is a new major
 version); for one release every `/api/v1` path answers 410 `reload_required` in that API's envelope, as Lab's old routes
-did.
+did. Mail Hero's UI calls it through `ts/http-client.ts`. The raw-message and attachment downloads stay outside the
+transcoder (bytes, which the wire profile has no HttpBody for, with their own `Content-Disposition`), behind the same
+authentication, and the two heaviest reads (the largest parsed message, a zone's delivery dashboard) are answered by
+Mail Hero's coordinator Durable Object running the same transcoder (30 s of CPU instead of a Worker request's 10 ms).
+The webhook event and the backup machine API are not part of it.
 
 `ops/v1/ops.proto` is the IDL of `contracts/ops-v1` (2026-10-01) and its single source of validation: the
 value rules are options in the IDL ([Value rules](#value-rules)), the contract's JSON Schema is generated from
@@ -469,6 +473,18 @@ each before compression). CPU, within the runs' noise: Mail Hero's first `status
 → 5.73-6.36 reference ms (bound 8); the dashboard's first tick 9.82-10.32 → 9.74-10.33 ms; Lab's first API request
 4.98-5.25 → 4.85-5.13 ms; links' first API request 3.87-4.45 → 4.32-4.47 ms.
 
+**What mailhero.ui.v2 costs** (measured 2026-10-02 with the production dry run, `vite build` and the workerd CPU test
+`mail-hero/cloudflare/test/cpu/owner-api-cpu.test.mjs`; the before numbers are the same requests and data on the
+hand-written `/api/v1`, with the same meter on the same machine). It deploys Mail Hero only. Bundles, gzip: Mail Hero's
+Worker 193.3 → 228.3 KiB (the transcoder with its page-token, filter and field-mask helpers, and the service's
+descriptors; budget 228 → 274 KiB), its UI's JavaScript 121.4 → 162.1 KiB (the protobuf-es runtime and the same
+descriptors; new budget 195 KiB). CPU, reference milliseconds, median of three fresh isolates, first run / warm: the
+isolate's first API request 5.7 → 7.6 (the transcoder's paths run once; bound 9 of Free's 10), 50 messages with a
+search 1.7 / 0.8 → 5.1 / 1.8, a settings update 3.4 / 1.4 → 4.9 / 1.7, every other Worker request at most 2.8 first
+and 1.9 warm. The two reads near or over Free's 10 ms (a message with the largest parsed record: 9.8 / 8.4 before,
+12.8 first through the transcoder; a zone's first dashboard: 13.2 before, 14.6) are answered by the coordinator: the
+Worker forwards them in under 1 ms, and the coordinator's slowest answer took 18 ms of its 30 s.
+
 ## HTTP APIs
 
 Each app's UI API (the HTTP/JSON interface between its UI and its Worker) is a proto service here too, in
@@ -671,11 +687,11 @@ A `proto/` change also re-checks every app in `PROTO_USERS` (Lab, Todofy, Mail H
 `Contracts` (the contracts' tests check the codecs against the schemas and pin the wire bytes). It deploys only
 the apps whose production bundle the changed path reaches (`proto_deploys` in `.github/scripts/ci_changes.py`).
 `PROTO_USERS` names each user's bundled languages: Lab, Mail Hero and the dashboard `"ts"` (their Workers, and
-Lab's and the dashboard's UIs), FlowDay, the links and watch apps `"ts"` (their Workers and UIs), Todofy `"python"` (todofy-core vendors the wheel; its gateway and UI import types only, which compile to
+Lab's, Mail Hero's and the dashboard's UIs), FlowDay, the links and watch apps `"ts"` (their Workers and UIs), Todofy `"python"` (todofy-core vendors the wheel; its gateway and UI import types only, which compile to
 nothing). A language's runtime and generator reach that language's users (`proto/ts/` and `buf.gen.yaml`: the
 TypeScript users; `proto/python/`, `tools/gen_py.py` and `tools/wire_rules.py`: Todofy); the wire profile's own
 options (`common/wire/`) reach both; a package reaches the apps that import it (`PROTO_PACKAGES`:
-`todofy/taskintent/` Lab, Todofy and the watch app, `todofy/report/` Todofy, `mailhero/webhook/` Mail Hero and Todofy, `lab/ui/` Lab, `flowday/ui/` FlowDay, `links/ui/` the links app, `watch/ui/` the watch app, `dashboard/ui/` the dashboard, `ops/` the five apps with an `Ops` entrypoint or caller (Lab, Mail Hero, the dashboard, Todofy and the watch app), `common/errors/` and `prototest/` none);
+`todofy/taskintent/` Lab, Todofy and the watch app, `todofy/report/` Todofy, `mailhero/webhook/` Mail Hero and Todofy, `lab/ui/` Lab, `flowday/ui/` FlowDay, `links/ui/` the links app, `mailhero/ui/` Mail Hero, `watch/ui/` the watch app, `dashboard/ui/` the dashboard, `ops/` the five apps with an `Ops` entrypoint or caller (Lab, Mail Hero, the dashboard, Todofy and the watch app), `common/errors/` and `prototest/` none);
 the module and toolchain files (`buf.yaml`, `buf.lock`, `package-lock.json`, `tools/ensure.mjs`) and any path
 not mapped reach every user; tests, test data, the check scripts, the wire JSON types' and JSON Schema
 generators (`tools/gen_wire_ts.py`: types only; `tools/gen_schema.py`: files under `contracts/` and `todofy/api/`,

@@ -54,7 +54,7 @@ UI 的投递 Dashboard 可按浏览器时区的本地小时或日期查看成功
 - 原件期限不能长于正文期限；留空表示不单独自动清理该阶段。正文到期仍会删除所有内容，包含尚未单独过期的原件。
 - 设置页分别显示逻辑内容和待物理删除字节；桶实际空间、账户 R2 用量没有可靠测量时明确显示“未测量”，不能从逻辑计数推算账单。
 
-API 为 `GET /api/v1/settings/retention-preview?raw_retention_days=7&content_retention_days=30&ledger_retention_days=180&resolved_retention_days=60&apply_existing=false`；无限期使用 `none`。`PATCH /api/v1/settings` 提交相同字段、`version`，需要确认时附 `retention_confirmation`。旧 `retention_days` / `days` 接口仅保留兼容用途，不会隐式给历史邮件设策略。
+API 为 `mailhero.ui.v2` 的 `PreviewRetentionPolicy`（`GET /api/v2/settings:previewRetentionPolicy?raw_retention_days=7&content_retention_days=30&ledger_retention_days=180&resolved_retention_days=60&apply_existing=false`）；无限期即不传该字段。`UpdateSettings`（`PATCH /api/v2/settings?update_mask=...`）在 `update_mask` 中列出四个保留期与 `etag`，提交相同的值，需要确认时附预览返回的 `retention_confirmation`（绑定 owner、`etag` 与完整策略，10 分钟有效）。旧的单一 `retention_days` 不能再设置，不会隐式给历史邮件设策略。
 
 ## 2.2 持久提醒
 
