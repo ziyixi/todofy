@@ -374,6 +374,21 @@ function enumValue(restriction: Restriction | undefined, names: readonly string[
   return name
 }
 
+/**
+ * The instant of a filter's time restriction (a quoted RFC 3339 string with its zone), as ISO UTC. A value that is not
+ * one is outside the filter's grammar: BAD_REQUEST, as the filters' docs say (INVALID_TIME_RANGE is for a valid range
+ * a method does not take).
+ */
+function filterInstant(restriction: Restriction): string {
+  if (!restriction.quoted) bad()
+  try {
+    return parseInstant(restriction.value)
+  } catch (error) {
+    if (error instanceof HttpError) bad()
+    throw error
+  }
+}
+
 /** ListMessages' filter (mail_hero_ui_service.proto) as the query of listMessages, without its page. */
 function messageFilter(filter: string): Omit<MessageQuery, 'limit' | 'cursor'> {
   const { literals, restrictions } = filterOf(filter)
@@ -385,9 +400,7 @@ function messageFilter(filter: string): Omit<MessageQuery, 'limit' | 'cursor'> {
   if (attachment !== undefined && (attachment.quoted || (attachment.value !== 'true' && attachment.value !== 'false'))) bad()
   const time = (key: string) => {
     const restriction = by.get(key)
-    if (restriction === undefined) return null
-    if (!restriction.quoted) bad()
-    return parseInstant(restriction.value)
+    return restriction === undefined ? null : filterInstant(restriction)
   }
   const literal = literals[0]?.trim().toLocaleLowerCase() ?? ''
   return {
@@ -547,10 +560,9 @@ export const handlers: ServiceHandlers<ShapeOf<typeof MailHeroUiService>, ApiCon
     const from = by.get('attempt_finish_time >='), to = by.get('attempt_finish_time <')
     // The drill-down needs all three; a range without an outcome, or an outcome without its range, is refused.
     if ((outcome === null) !== (from === undefined) || (from === undefined) !== (to === undefined)) bad()
-    if ((from !== undefined && !from.quoted) || (to !== undefined && !to.quoted)) bad()
     const page = await listDeliveries(env, {
       state: enumValue(by.get('state ='), DELIVERY_STATES), messageID: message === undefined ? null : idOf(message.value, 'messages'),
-      outcome, range: from === undefined ? null : deliveryRange(from.value, to!.value),
+      outcome, range: from === undefined ? null : deliveryRange(filterInstant(from), filterInstant(to!)),
       limit: pageSize(request.pageSize), cursor: cursorOf(request.pageToken, parameters),
     })
     return create(ListDeliveriesResponseSchema, { deliveries: page.items.map(toDelivery), nextPageToken: tokenOf(page.next, parameters) })

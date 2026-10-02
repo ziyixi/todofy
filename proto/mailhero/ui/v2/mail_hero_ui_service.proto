@@ -472,7 +472,8 @@ message ListMessagesRequest {
   //   (`delivery_state = RETRY_WAIT`; UNARRANGED: no delivery);
   // - `parse_state = <Message.ParseState>` (`parse_state = FAILED`);
   // - `has_attachments = true` or `false`;
-  // - `receive_time >= "<RFC 3339>"` and `receive_time <= "<RFC 3339>"`.
+  // - `receive_time >= "<RFC 3339>"` and `receive_time <= "<RFC 3339>"`, a quoted time with its zone (`Z` or an
+  //   offset); a time that is not one, or not a calendar time, is BAD_REQUEST too.
   string filter = 3 [(google.api.field_behavior) = OPTIONAL];
 }
 
@@ -579,8 +580,9 @@ message ListDeliveriesRequest {
   //   not a stored state);
   // - `message = "messages/<uuid>"`: the message's deliveries;
   // - `attempt_outcome = SUCCEEDED | RETRIED | FAILED | UNKNOWN` with both `attempt_finish_time >= "<RFC 3339>"` and
-  //   `attempt_finish_time < "<RFC 3339>"` (at most 90 days and two hours apart; one without the others is
-  //   BAD_REQUEST): the deliveries of real mail with at least one attempt of that outcome (AttemptCounts) that ended
+  //   `attempt_finish_time < "<RFC 3339>"` (quoted times with their zone; one without the others, or a time that is
+  //   not one, is BAD_REQUEST; a range that is empty, reversed or more than 90 days and two hours long is
+  //   INVALID_TIME_RANGE): the deliveries of real mail with at least one attempt of that outcome (AttemptCounts) that ended
   //   within the range, each listed once however many matched (the dashboard's drill-down; it counts attempts, this
   //   lists events).
   string filter = 3 [(google.api.field_behavior) = OPTIONAL];

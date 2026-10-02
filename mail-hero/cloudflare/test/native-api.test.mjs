@@ -282,7 +282,12 @@ test('90 local days across the 2-hour Antarctica/Troll change are accepted, and 
   assert.deepEqual([drill.status, drill.data.deliveries.length], [200, 3])
   const over = new Date(Date.parse(to) + 1).toISOString()
   assert.equal((await statsText(env, statsQuery(from, over, { tz: 'Antarctica/Troll' }))).status, 400)
-  assert.equal((await api('GET', drilldown('SUCCEEDED', from, over))).status, 400)
+  const long = await api('GET', drilldown('SUCCEEDED', from, over))
+  assert.deepEqual([long.status, reasonOf(long.data)], [400, 'INVALID_TIME_RANGE'])
+  for (const [start, end] of [['yesterday', to], [from, '2026-09-26T00:00:00'], [from, '2026-02-30T00:00:00Z']]) {
+    const malformed = await api('GET', drilldown('SUCCEEDED', start, end))
+    assert.deepEqual([malformed.status, reasonOf(malformed.data)], [400, 'BAD_REQUEST'], `${start} ${end}`)
+  }
 })
 
 test('local-time stats keep bound params, Intl calls and the range index bounded', async () => {
@@ -681,8 +686,14 @@ test('message API searches Chinese body, exposes safe details and optimistic rea
   assert.equal(list.data.messages[0].delivery_state, 'unarranged')
   const filtered = await api('GET', `/messages${query({ filter: `parse_state = READY AND delivery_state = UNARRANGED AND has_attachments = false` })}`)
   assert.deepEqual(filtered.data.messages.map(item => idOf(item.name)).sort(), [id, other].sort())
-  for (const filter of ['"a" "b"', 'parse_state = ready', 'parse_state = READY parse_state = FAILED', 'has_attachments = yes', 'receive_time >= 2026', 'subject = x', 'a OR b', '-x'])
-    assert.equal((await api('GET', `/messages${query({ filter })}`)).status, 400, filter)
+  for (const filter of ['"a" "b"', 'parse_state = ready', 'parse_state = READY parse_state = FAILED', 'has_attachments = yes', 'receive_time >= 2026', 'subject = x', 'a OR b', '-x',
+    'receive_time >= "yesterday"', 'receive_time <= "2026-09-25T00:00:00"', 'receive_time >= "2026-02-30T00:00:00Z"']) {
+    const refused = await api('GET', `/messages${query({ filter })}`)
+    // Outside the filter's grammar, a malformed time included (the IDL): BAD_REQUEST, not INVALID_TIME_RANGE.
+    assert.deepEqual([refused.status, reasonOf(refused.data)], [400, 'BAD_REQUEST'], filter)
+  }
+  const window = await api('GET', `/messages${query({ filter: 'receive_time >= "2000-01-01T00:00:00+08:00" receive_time <= "2999-01-01T00:00:00Z"' })}`)
+  assert.equal(window.status, 200, JSON.stringify(window.data))
   assert.equal((await api('GET', `/messages${query({ filter: quote('x'.repeat(201)) })}`)).status, 400, 'a search over 200 characters')
   const detail = await api('GET', `/messages/${id}`)
   assert.equal(detail.data.subject, '中文合成邮件')

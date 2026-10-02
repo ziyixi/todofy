@@ -118,6 +118,7 @@ enum ErrorReason {
   // "自动投递需要先选择 webhook 目标").
   ERROR_REASON_ENDPOINT_REQUIRED = 29;
   // INVALID_ARGUMENT (400): a time range is empty, reversed or longer than its method allows (was `invalid_request`).
+  // A time that is not RFC 3339 is BAD_REQUEST instead: outside the request's grammar, not a range.
   ERROR_REASON_INVALID_TIME_RANGE = 30;
   // INVALID_ARGUMENT (400): the time zone is not an IANA name this Worker's Intl knows, or changes its offset too
   // often within the range (was `invalid_time_zone`). The UI then asks again in UTC.
