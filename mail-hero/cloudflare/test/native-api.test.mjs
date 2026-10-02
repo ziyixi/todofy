@@ -303,7 +303,6 @@ test('local-time stats keep bound params, Intl calls and the range index bounded
   let intlCalls = 0
   Intl.DateTimeFormat.prototype.formatToParts = function (...args) { intlCalls++; return original.apply(this, args) }
   let result, fewerRowsCalls
-  const elapsed = []
   try {
     result = await statsText(env, ninety)
     fewerRowsCalls = intlCalls
@@ -311,12 +310,8 @@ test('local-time stats keep bound params, Intl calls and the range index bounded
     intlCalls = 0
     await statsText(env, ninety)
     assert.equal(intlCalls, fewerRowsCalls, 'Intl work does not grow with rows')
-    // Wall time per warm request, including node:sqlite, against the 10 ms Free CPU budget.
-    for (let run = 0; run < 30; run++) {
-      const started = performance.now()
-      assert.equal((await statsText(env, ninety)).status, 200)
-      elapsed.push(performance.now() - started)
-    }
+    // No wall-clock bound here: host time depends on the machine's load. The coordinator answers this read (30 s of
+    // CPU); its CPU is measured in workerd by test/cpu/owner-api-cpu.test.mjs. This test holds the work to counts.
   } finally { Intl.DateTimeFormat.prototype.formatToParts = original }
   assert.equal(result.status, 200, result.text)
   const stats = JSON.parse(result.text)
@@ -325,9 +320,8 @@ test('local-time stats keep bound params, Intl calls and the range index bounded
   assert.equal(Date.parse(fallBack.end) - Date.parse(fallBack.start), 25 * 3_600_000)
   assert.deepEqual(stats.totals, { succeeded: 15, retried: 15, failed: 0, unknown: 0 })
   assert.ok(fewerRowsCalls < 500, `Intl calls ${fewerRowsCalls}`)
-  const median = elapsed.toSorted((a, b) => a - b)[15], sum = elapsed.reduce((a, b) => a + b, 0)
-  assert.ok(median < 10 && sum < 300, `ninety-day requests: median ${median.toFixed(2)} ms, 30 runs ${sum.toFixed(1)} ms`)
-  assert.ok(captured.length >= 32 && captured.every(item => item.args.length < 100), JSON.stringify(captured.map(item => item.args.length)))
+  // One statement per request, its bound parameters fixed by the zone's segments, not by the rows or the days.
+  assert.deepEqual(captured.map(item => item.args.length), [5, 5])
   assert.deepEqual(captured[0].args, ['2026-09-01T07:00:00.000Z', '2026-11-30T08:00:00.000Z', '2026-11-01T09:00:00.000Z', '-420 minutes', '-480 minutes'])
   const plan = env.DB.sqlite.prepare(`EXPLAIN QUERY PLAN ${captured[0].sql}`).all(...captured[0].args)
   assert.ok(plan.some(row => row.detail.includes('delivery_attempts_finished_idx')), JSON.stringify(plan))
