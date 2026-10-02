@@ -66,6 +66,9 @@ enum Source {
   SOURCE_UNSPECIFIED = 0;
   // Lab, the paper radar. URL host allow-list: arxiv.org.
   SOURCE_LAB = 1;
+  // The watch app's notifications: its daily digest and urgent changes. URL host allow-list:
+  // watch.ziyixi.science (a task links to the change in the app, never to a watched page).
+  SOURCE_WATCH = 2;
 }
 
 // How the items become Todoist tasks.

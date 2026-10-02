@@ -53,7 +53,7 @@ MODES = _names(pb.Mode)
 # The sources the contract knows (its Source enum); Todofy accepts those listed in TASK_INTENT_SOURCES.
 SOURCES = _names(pb.Source)
 # TASK_INTENT_URL_HOSTS of task-intent-v1.ts: the hosts each source may link to (exact match).
-URL_HOSTS: Mapping[str, tuple[str, ...]] = {"lab": ("arxiv.org",)}
+URL_HOSTS: Mapping[str, tuple[str, ...]] = {"lab": ("arxiv.org",), "watch": ("watch.ziyixi.science",)}
 
 # TASK_INTENT_LIMITS of task-intent-v1.ts.
 ITEMS_MAX = 30

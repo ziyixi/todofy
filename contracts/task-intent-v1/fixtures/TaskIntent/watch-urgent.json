@@ -1,0 +1,15 @@
+{
+  "version": "task-intent-v1",
+  "source": "watch",
+  "intent_id": "urgent-mg7q3k2a0b1c2d3e",
+  "mode": "separate",
+  "parent": {
+    "title": "网页监视 · 紧急变化"
+  },
+  "items": [
+    {
+      "title": "合成示例：演唱会余票 · 供货状态 1 次变化",
+      "url": "https://watch.ziyixi.science/watches/tickets"
+    }
+  ]
+}

@@ -1,7 +1,7 @@
 # `task-intent-v1`: another app proposes Todoist tasks to Todofy
 
 Todofy is the only app that writes to Todoist. When another app in the account wants tasks created
-(today only Lab: "send today's liked papers to Todoist"), it sends Todofy a **task intent**: a parent
+(Lab: "send today's liked papers to Todoist"; the watch app: its daily digest and urgent changes), it sends Todofy a **task intent**: a parent
 title and up to 30 items, under an idempotency key the proposer chooses. Todofy records it in its own
 D1 ledger, creates the tasks with its existing Todoist client and answers with counts. The proposer
 never sees a Todoist token, and a repeated or retried proposal never creates a task twice.
@@ -67,10 +67,19 @@ same `intent_id` and the same content. Every expected outcome is a value.
  "items": [{"title": "…", "url": "https://arxiv.org/abs/2609.00001", "description": "…"}]}
 ```
 
-- `source` is a closed list (`lab`). Each source has a URL host allow-list (`TASK_INTENT_URL_HOSTS`,
-  lab: `arxiv.org`); any other host is `rejected`/`url_not_allowed`. Todofy never fetches a URL.
+- `source` is a closed list (`lab`, `watch`). Each source has a URL host allow-list (`TASK_INTENT_URL_HOSTS`,
+  lab: `arxiv.org`; watch: `watch.ziyixi.science`, so a watch task links to the change in the app and never to a
+  watched page); any other host is `rejected`/`url_not_allowed`. Todofy never fetches a URL.
+  `SOURCE_WATCH` was added on 2026-10-01 (an additive value: `buf breaking` and the profile rules pass, Lab keeps
+  writing `lab` only, Todofy accepts both).
+- The watch app (`watch/worker/src/todofy.ts`) sends at most one digest a UTC day (`digest-<day>`, subtasks: one
+  item per watch with only the owner's name for it, the trigger type and a count, linking to
+  `https://watch.ziyixi.science/watches/<id>`; never page text, a watched URL or a summary) and urgent changes at
+  once (`urgent-<change id>`, separate mode), at most 9 urgent intents a UTC day so the digest always fits in the
+  10 per source.
 - `intent_id` is the idempotency key, unique per source **for ever** (the ledger row is kept, content
-  removed, see Retention). Lab uses `deck-<day>-g<generation>`.
+  removed, see Retention). Lab uses `deck-<day>-g<generation>`; the watch app `digest-<day>` and
+  `urgent-<change id>`.
 - `mode`: `subtasks` = one parent task plus one subtask per item (default in Lab); `separate` = one
   top-level task per item, no parent task.
 - `items`: 1–30, distinct, created in the given order. Titles are single-line plain text; descriptions

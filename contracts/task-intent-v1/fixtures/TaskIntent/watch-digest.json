@@ -1,0 +1,28 @@
+{
+  "version": "task-intent-v1",
+  "source": "watch",
+  "intent_id": "digest-2026-10-01",
+  "mode": "subtasks",
+  "parent": {
+    "title": "网页监视 2026-10-01 · 4 个监视",
+    "description": "只有名称、类型和次数；变化的内容请在网页监视中查看。\nhttps://watch.ziyixi.science/"
+  },
+  "items": [
+    {
+      "title": "合成示例：招聘公告 · 任何变化 1 次变化 · 新条目 1 次变化",
+      "url": "https://watch.ziyixi.science/watches/jobs"
+    },
+    {
+      "title": "合成示例：水壶价格 · 数值 2 次变化",
+      "url": "https://watch.ziyixi.science/watches/kettle"
+    },
+    {
+      "title": "合成示例：旧博客 · 检查失效",
+      "url": "https://watch.ziyixi.science/watches/old-blog"
+    },
+    {
+      "title": "合成示例：停更的页面 · 已自动暂停（失效 14 天）",
+      "url": "https://watch.ziyixi.science/watches/quiet-page"
+    }
+  ]
+}

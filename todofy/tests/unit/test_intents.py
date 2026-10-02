@@ -64,6 +64,10 @@ PINNED = {
     "minimal.json": "4509943790f6a041b6664cf1d98894cc867bc99f0584ab4bc8521dc9ee8ba51a",
     "separate-2.json": "2a8910797cd8f9fb07ad4bfff08a15225c660a6eaeb36c336f7824523c3ee21d",
     "subtasks-3.json": "316d4581f9bd95acb34ddf6ac87efd44c7fff5cc9b0108b031de94eddcf92cdb",
+    # The watch app's digest and urgent intents (SOURCE_WATCH, 2026-10-01): the bytes watch/worker builds for its
+    # synthetic state (its intent golden test compares them with these fixtures).
+    "watch-digest.json": "8c770cf825eb116a9867ba4fb96f11a8cc10b88eb94c1c2b28555230c19d6b9a",
+    "watch-urgent.json": "bcea5917d607cb5b31de2cee3b8f11284582b48417ef8795ff74bbb7f2b82442",
 }
 
 
@@ -135,6 +139,35 @@ def test_task_text_in_separate_mode_names_the_parent():
     assert description.endswith("\n\n— 论文雷达 2026-09-30 · 3 篇\n\nTodofy intent: lab/deck-2026-09-30-g1#2")
     with pytest.raises(ValueError):
         intents.task_text(value, 0)
+
+
+def test_task_text_of_a_watch_digest_links_to_the_app_only():
+    """SOURCE_WATCH: the owner's names, trigger types and counts, each linking to its watch in the app; the footer
+    names the source, so a lookup never confuses a watch task with a Lab one."""
+    value = parsed("watch-digest.json")
+    assert (value.source, value.tasks_total) == ("watch", 5)
+    assert intents.urls_allowed(value)
+    assert intents.task_text(value, 2) == (
+        "合成示例：水壶价格 · 数值 2 次变化",
+        "https://watch.ziyixi.science/watches/kettle\n\nTodofy intent: watch/digest-2026-10-01#2",
+    )
+    urgent = parsed("watch-urgent.json")
+    assert intents.task_text(urgent, 1)[1] == (
+        "https://watch.ziyixi.science/watches/tickets\n\n— 网页监视 · 紧急变化\n\n"
+        "Todofy intent: watch/urgent-mg7q3k2a0b1c2d3e#1"
+    )
+
+
+def test_each_source_links_only_to_its_own_hosts():
+    """A watch intent may link only to the watch app, a Lab intent only to arXiv: never one to the other's host."""
+    watch, lab = fixture("watch-digest.json"), fixture("subtasks-3.json")
+    assert not intents.urls_allowed(
+        intents.intent(watch | {"items": [{"title": "t", "url": "https://arxiv.org/abs/1"}]})
+    )
+    assert not intents.urls_allowed(intents.intent(lab | {"items": [{"title": "t", "url": watch["items"][0]["url"]}]}))
+    assert not intents.urls_allowed(
+        intents.intent(watch | {"items": [{"title": "t", "url": "https://shop.example.com/kettle"}]})
+    )  # a watched page's host is never on the list
 
 
 def test_a_parent_without_description_is_only_its_footer():

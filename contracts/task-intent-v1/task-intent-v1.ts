@@ -20,6 +20,8 @@ export const TASK_INTENT_VERSION = 'task-intent-v1';
  */
 export const TASK_INTENT_URL_HOSTS: Readonly<Record<string, readonly string[]>> = {
   lab: ['arxiv.org'],
+  // A task links to the change in the watch app (/watches/<id>), never to a watched page.
+  watch: ['watch.ziyixi.science'],
 };
 
 export const TASK_INTENT_LIMITS = {

@@ -2,9 +2,10 @@
 ``Ops`` entrypoint over a service binding (``proposeTasks`` / ``taskIntentStatus``), in front of
 the real gateway, core, D1, Durable Object alarm and the fake Todoist.
 
-Covered: a parent with subtasks and separate tasks created once, parent first; a replay answered
+Covered: a parent with subtasks and separate tasks created once, parent first (the watch app's digest, SOURCE_WATCH,
+too); a replay answered
 ``duplicate`` without a Todoist call; a conflict; every refusal (schema, size, URL host, source,
-pause, daily limit); frozen X-Request-Id and bytes across retries; a partial failure retried by the
+pause, daily limit per source); frozen X-Request-Id and bytes across retries; a partial failure retried by the
 proposer (only the unfinished tasks are sent again); an unknown result settled by the read-only
 footer lookup instead of a resend; an interrupted call; the 48-attempt cap; the Todoist auth block;
 and mail processing going on while intents are created. Every value validates against the schema.
@@ -243,6 +244,30 @@ def test_separate_mode_creates_top_level_tasks_that_name_the_parent(
     assert all(f"— {doc['parent']['title']}" in post.json()["description"] for post in fresh_todoist.creates())
 
 
+def test_a_watch_digest_is_created_like_any_intent_and_links_only_to_the_app(
+    stack: OpsStack, fresh_todoist: TodoistFake
+) -> None:
+    """SOURCE_WATCH (the watch app's daily digest): recorded under its own source, the parent first, every item a
+    subtask whose description is its link to the watch app and the footer; the default project, as for Lab."""
+    doc = new_intent("watch-digest.json")
+    first = propose(stack, doc)
+    assert (first["source"], first["state"], first["recorded"], first["tasks_total"]) == ("watch", "pending", True, 5)
+    assert wait_state(stack, doc, {"created", "failed"})["state"] == "created"
+    value = intents.intent(doc)
+    parent, *children = (post.json() for post in fresh_todoist.creates())
+    assert parent == {
+        "content": doc["parent"]["title"],
+        "description": intents.task_text(value, 0)[1],
+        "project_id": PROJECT_ID,
+    }
+    assert [child["content"] for child in children] == [item["title"] for item in doc["items"]]
+    for n, child in enumerate(children, start=1):
+        assert child["description"].startswith("https://watch.ziyixi.science/watches/")
+        assert intents.has_footer(child["description"], footer(doc, n))
+    assert rows(stack, doc)[0]["source"] == "watch"
+    assert propose(stack, doc)["state"] == "duplicate"
+
+
 def test_the_same_intent_id_with_other_content_is_a_conflict(stack: OpsStack, fresh_todoist: TodoistFake) -> None:
     doc = new_intent("minimal.json")
     propose(stack, doc)
@@ -290,6 +315,11 @@ def test_a_url_off_the_sources_allow_list_is_rejected_and_nothing_recorded(
             0,
         )
         assert status(stack, doc)["state"] == "not_found"
+    # Each source has its own list: a watch task never links to arXiv, or to a watched page.
+    for url in ("https://arxiv.org/abs/2609.00001", "https://shop.example.com/kettle"):
+        doc = new_intent("watch-urgent.json", items=[{"title": "Synthetic", "url": url}])
+        refused = propose(stack, doc)
+        assert (refused["state"], refused["error_code"], refused["recorded"]) == ("rejected", "url_not_allowed", False)
     assert fresh_todoist.creates() == []
 
 
@@ -444,6 +474,10 @@ def test_the_daily_limit_counts_new_intents_per_source(stack: OpsStack, fresh_to
     assert (refused["state"], refused["error_code"], refused["recorded"]) == ("rejected", "daily_limit", False)
     assert 0 < refused["retry_after_seconds"] <= 86400
     assert status(stack, over)["state"] == "not_found"
+    # The limit is per source: Lab's full day does not hold the watch app's urgent change.
+    urgent = new_intent("watch-urgent.json")
+    assert propose(stack, urgent)["state"] == "pending"
+    assert wait_state(stack, urgent, {"created"})["tasks_created"] == 1
 
 
 def test_an_auth_block_holds_recorded_intents_and_refuses_new_ones(stack: OpsStack, fresh_todoist: TodoistFake) -> None:

@@ -13,7 +13,7 @@ hand-written, checked against the codec on every fixture.
 | --- | --- | --- |
 | `mail-received-v1/` | Mail Hero → its webhook consumer (Todofy) | Mail Hero |
 | `ops-v1/` | each app ↔ the ops dashboard `home` in [`dashboard/`](../dashboard/) (`Ops` entrypoints, canary, guard, digest) | Mail Hero, Todofy and Lab (`status()`/`setGuard()` only); see [`ops-v1/README.md`](ops-v1/README.md) |
-| `task-intent-v1/` | a proposing app (Lab) → Todofy's `Ops` entrypoint: "create these Todoist tasks", idempotent per intent | Todofy; see [`task-intent-v1/README.md`](task-intent-v1/README.md) |
+| `task-intent-v1/` | a proposing app (Lab, the watch app) → Todofy's `Ops` entrypoint: "create these Todoist tasks", idempotent per intent | Todofy; see [`task-intent-v1/README.md`](task-intent-v1/README.md) |
 
 ## `mail-received-v1/`
 
