@@ -13,7 +13,7 @@ Rules for this file:
   security-posture details. Those stay with the owner.
 - Keep it short. The details live in each app's docs; link to them.
 
-Last updated: 2026-10-02 (watch-infra lands with this change; the rule vocabulary and the watch transport fix have landed).
+Last updated: 2026-10-02 (`mail.received.v1` on proto lands with this change; the watch Access app exists, created through "Infra apply").
 
 ## How work lands
 
@@ -33,8 +33,6 @@ Last updated: 2026-10-02 (watch-infra lands with this change; the rule vocabular
 
 | Work | Branch (pushed unless noted) | State | Lands as |
 | --- | --- | --- | --- |
-| `mail.received.v1` onto proto, the contract (`proto/mailhero/webhook/v1`) | `proto-mail` @ `a45b9be` (on `proto-mail-rules`) | Done; its two new Mail Hero CPU tests are being ported to the rewritten `tools/workerd-cpu` (a rebase left them on the old API) | Next; deploys Mail Hero and Todofy. Mail Hero's owner sends, resends, connection tests and canaries now build their event in the coordinator DO |
-| Watch go-live: Access app "watch" created through `infra/` | `watch-infra` | Lands with this change | Then: check the "Infra drift" fingerprint (create 1, outputs 1), dispatch "Infra apply", read the AUD read-only, create `WATCH_CSRF_SIGNING_KEY`, fill both into `watch-l2` |
 | Watch W3: daily Todoist digest via task-intent `SOURCE_WATCH`, Ops status for the dashboard | `watch-l2` (local) | In progress | After `watch-infra`; deploys watch, Todofy, Lab, dashboard |
 
 ## Waiting to be verified
