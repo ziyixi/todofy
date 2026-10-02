@@ -1,0 +1,238 @@
+// A message Mail Hero received, and its parsed content (mail-hero/AGENTS.md §1, §3).
+//
+// Mail is untrusted: every text here (subject, sender, recipients, headers, bodies, file names) is shown as plain text
+// or, for the HTML body, in a sandboxed frame without scripts or network; nothing in it is followed or run. A Message is
+// the D1 index row (cheap to list); its MessageContent is the parsed record in the private R2 bucket (up to about 4 MiB
+// of JSON), read only when the owner opens the message.
+
+syntax = "proto3";
+
+package mailhero.ui.v2;
+
+import "google/api/field_behavior.proto";
+import "google/api/resource.proto";
+import "google/protobuf/timestamp.proto";
+
+option java_multiple_files = true;
+option java_outer_classname = "MessageProto";
+option java_package = "science.ziyixi.mailhero.ui.v2";
+
+// A received message: one envelope recipient (the deployment's receive address), stored raw in R2 before anything
+// else (its owner takes over only then), parsed by the coordinator's alarm. Only mail from Email Routing is listed:
+// the synthetic messages of connection tests and dashboard canaries are not messages here (GetMessage answers
+// NOT_FOUND for them), although their deliveries are listed.
+message Message {
+  option (google.api.resource) = {
+    type: "mail-hero.ziyixi.science/Message"
+    pattern: "messages/{message}"
+    singular: "message"
+    plural: "messages"
+  };
+
+  // How far parsing got (AIP-216).
+  enum ParseState {
+    // Never written.
+    PARSE_STATE_UNSPECIFIED = 0;
+    // Stored raw, waiting for the coordinator's alarm.
+    PARSE_STATE_PENDING = 1;
+    // Being parsed (a lease is held).
+    PARSE_STATE_PARSING = 2;
+    // Parsed: MessageContent is readable.
+    PARSE_STATE_READY = 3;
+    // Parsing failed or stopped after three interrupted runs; the raw message is kept (`parse_error` says why) and
+    // ReparseMessage starts again.
+    PARSE_STATE_FAILED = 4;
+  }
+
+  // The stored state of the message's latest delivery (its highest generation), or UNARRANGED without one.
+  // Delivery.effective_state says whether a waiting delivery is paused.
+  enum DeliveryState {
+    // Never written.
+    DELIVERY_STATE_UNSPECIFIED = 0;
+    // No delivery: archived only, or not parsed yet.
+    DELIVERY_STATE_UNARRANGED = 1;
+    // Delivery.State.PENDING.
+    DELIVERY_STATE_PENDING = 2;
+    // Delivery.State.SENDING.
+    DELIVERY_STATE_SENDING = 3;
+    // Delivery.State.RETRY_WAIT.
+    DELIVERY_STATE_RETRY_WAIT = 4;
+    // Delivery.State.DELIVERED.
+    DELIVERY_STATE_DELIVERED = 5;
+    // Delivery.State.FAILED.
+    DELIVERY_STATE_FAILED = 6;
+    // Delivery.State.CANCELLED.
+    DELIVERY_STATE_CANCELLED = 7;
+  }
+
+  // messages/{message}, where {message} is the message's UUID (lower case).
+  string name = 1 [(google.api.field_behavior) = IDENTIFIER];
+  // The parsed Subject header; empty until parsed, and after the content was deleted.
+  string subject = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The parsed From header as one display text; empty until parsed, and after the content was deleted.
+  string sender = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // When the message first arrived.
+  google.protobuf.Timestamp receive_time = 4 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // When the same message (same bytes and envelope) last arrived again; equal to `receive_time` for one arrival.
+  google.protobuf.Timestamp last_receive_time = 5 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // How many times the same message arrived (identical repeats are merged).
+  int32 arrival_count = 6 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The raw message's size in bytes (at most 25 MiB, Email Routing's limit).
+  int32 size_bytes = 7 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // How far parsing got.
+  ParseState parse_state = 8 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Why parsing failed, or why the receive policy could not be read (then the message was only archived): a code,
+  // shown as plain text. Empty otherwise, and after the content was deleted.
+  string parse_error = 9 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The state of the latest delivery.
+  DeliveryState delivery_state = 10 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // How many deliveries (events) the message has.
+  int32 delivery_count = 11 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The parsed message has at least one attachment.
+  bool has_attachments = 12 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The first 160 characters of the search text (subject, sender and the start of the body), for the inbox list.
+  string snippet = 13 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The search index holds only the first 16 KiB (UTF-8) of the body: a search does not find text after that,
+  // although MessageContent holds all of it (AGENTS.md §2).
+  bool search_index_truncated = 14 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The owner marked the message read. Settable (UpdateMessage).
+  bool read = 15 [(google.api.field_behavior) = OPTIONAL];
+  // When the owner marked it read; unset while it is unread.
+  google.protobuf.Timestamp read_time = 16 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // When the raw message expired under its retention policy (it can no longer be downloaded or parsed again); unset
+  // while it is kept.
+  google.protobuf.Timestamp raw_expire_time = 17 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // When the content (raw message, parsed content, attachments, frozen requests) was deleted; unset while it is kept.
+  // The ledger (IDs, states, counts) stays.
+  google.protobuf.Timestamp content_delete_time = 18 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The SMTP envelope's MAIL FROM (empty for a bounce).
+  string envelope_sender = 19 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The SMTP envelope's recipient: the deployment's receive address.
+  string envelope_recipient = 20 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The SHA-256 of the raw message, 64 hex digits; empty for a message stored before it was recorded.
+  string raw_sha256 = 21 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The receive mode frozen when the message arrived.
+  ReceiveMode receive_mode = 22 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Where the raw message downloads (an `.eml`, `Cache-Control: no-store`, `X-Content-Type-Options: nosniff`, as an
+  // attachment): `/api/v2/messages/{message}/raw`, a path outside this service (MailHeroUiService). Empty when it
+  // cannot: the content was deleted or the raw message expired.
+  string raw_download_uri = 23 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // AIP-154: changes with every change of the message. UpdateMessage and ClearMessageContent need the current one.
+  string etag = 24 [(google.api.field_behavior) = OPTIONAL];
+}
+
+// A mailbox of a parsed address header.
+message Address {
+  // The address, as the header gave it.
+  string address = 1 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The display name; empty without one.
+  string display_name = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
+}
+
+// A header of the parsed message, in message order.
+message Header {
+  // The header's name, in lower case.
+  string key = 1 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Its decoded value.
+  string value = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
+}
+
+// An attachment of the parsed message (at most 100 are listed). Downloads are not virus-scanned and are never opened
+// by Mail Hero.
+message Attachment {
+  // Whether Mail Hero kept a copy of the attachment (storage-v1, AGENTS.md §7).
+  enum StorageState {
+    // Never written: an attachment of a message parsed before storage-v1 has no status (its copy is stored).
+    STORAGE_STATE_UNSPECIFIED = 0;
+    // A decoded copy is stored and downloads from `download_uri`.
+    STORAGE_STATE_STORED = 1;
+    // No copy: `omitted_reason` says why; the raw message still holds it while it is kept.
+    STORAGE_STATE_OMITTED = 2;
+  }
+
+  // Why an attachment has no stored copy.
+  enum OmittedReason {
+    // Never written.
+    OMITTED_REASON_UNSPECIFIED = 0;
+    // Larger than 2 MiB.
+    OMITTED_REASON_SIZE_LIMIT = 1;
+    // The message's stored attachments would pass 5 MiB.
+    OMITTED_REASON_MESSAGE_SIZE_LIMIT = 2;
+    // An inline image (its metadata is kept).
+    OMITTED_REASON_INLINE_IMAGE = 3;
+    // The capacity guard refused the copy.
+    OMITTED_REASON_CAPACITY = 4;
+  }
+
+  // The MIME part's ID (`1.2`): the attachment's key within the message.
+  string part_id = 1 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The file name the message gave; empty without one. Untrusted: shown as text, never used as a path.
+  string filename = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The declared media type. Untrusted: a download is always sent as an attachment with `nosniff`.
+  string mime_type = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The decoded size in bytes.
+  int32 size_bytes = 4 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Whether a copy is stored.
+  StorageState storage_state = 5 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Why no copy is stored; unset when one is.
+  OmittedReason omitted_reason = 6 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Where the stored copy downloads: `/api/v2/messages/{message}/attachments/{part_id}` (part_id percent-encoded), a
+  // path outside this service, with the raw download's headers. Empty when no copy is stored.
+  string download_uri = 7 [(google.api.field_behavior) = OUTPUT_ONLY];
+}
+
+// A message's parsed content: the record the coordinator wrote to R2 when it parsed the message. A singleton of its
+// message. Empty (only `name`) until the message is parsed, and after its content was deleted.
+message MessageContent {
+  option (google.api.resource) = {
+    type: "mail-hero.ziyixi.science/MessageContent"
+    pattern: "messages/{message}/content"
+    singular: "messageContent"
+    plural: "messageContents"
+  };
+
+  // messages/{message}/content.
+  string name = 1 [(google.api.field_behavior) = IDENTIFIER];
+  // The To header's mailboxes (at most 50).
+  repeated Address recipients = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The Date header; unset without one, or when it is not a time between the years 1 and 9999.
+  google.protobuf.Timestamp send_time = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The Message-ID header; empty without one.
+  string rfc_message_id = 4 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The plain text body, at most 1 MiB (`text_truncated`).
+  string text = 5 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The HTML body after sanitizing, at most 2 MiB; empty when there is none or it was omitted (`html_omitted`). Shown
+  // only in a sandboxed frame without scripts, forms or network.
+  string html = 6 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The headers, in message order.
+  repeated Header headers = 7 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The attachments, in message order (at most 100: `omitted_attachment_count` counts the rest).
+  repeated Attachment attachments = 8 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The parser found what it cannot judge (a nested or opaque attachment, no readable body): automatic delivery
+  // waits for the owner. `warnings` says what.
+  bool needs_review = 9 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // What the parser and the content policy left out or could not read, as codes (`attached_or_opaque_message`,
+  // `no_readable_body`, `text_truncated`, `html_omitted`, `attachment_copies_omitted`, `attachment_metadata_limit`;
+  // more may come). Shown as plain text, an unknown code as itself.
+  repeated string warnings = 10 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The text was cut at 1 MiB; `original_text_bytes` is its size before.
+  bool text_truncated = 11 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The text's size in UTF-8 bytes before truncation; 0 when it was not cut.
+  int32 original_text_bytes = 12 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The HTML body was over its budget and not kept.
+  bool html_omitted = 13 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Attachments beyond the first 100, not listed.
+  int32 omitted_attachment_count = 14 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The content policy the record was written under (`storage-v1`); empty for older records.
+  string content_policy_version = 15 [(google.api.field_behavior) = OUTPUT_ONLY];
+}
+
+// What Mail Hero did with new mail when a message arrived: frozen on the message (AGENTS.md §3).
+enum ReceiveMode {
+  // Never written.
+  RECEIVE_MODE_UNSPECIFIED = 0;
+  // Archive only: no automatic delivery.
+  RECEIVE_MODE_ARCHIVE = 1;
+  // Forward to the current target (Settings.current_endpoint) once parsed.
+  RECEIVE_MODE_FORWARD = 2;
+}

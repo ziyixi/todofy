@@ -1,0 +1,198 @@
+// A delivery: one mail.received.v1 event POSTed to one webhook target revision (mail-hero/AGENTS.md §3).
+//
+// A delivery freezes its event ID, the exact JSON bytes and the target revision when it is made; every retry sends the
+// same bytes with the same ID (proto/mailhero/webhook/v1/mail_received.proto, contracts/mail-received-v1). DELIVERED
+// means the consumer answered 2xx (it took the event over durably), not that its own work is done.
+
+syntax = "proto3";
+
+package mailhero.ui.v2;
+
+import "google/api/field_behavior.proto";
+import "google/api/resource.proto";
+import "google/protobuf/timestamp.proto";
+
+option java_multiple_files = true;
+option java_outer_classname = "DeliveryProto";
+option java_package = "science.ziyixi.mailhero.ui.v2";
+
+// A delivery (an event). Deliveries of the synthetic messages of connection tests and dashboard canaries are listed too
+// (`canary`, and `message` naming a message GetMessage does not answer).
+message Delivery {
+  option (google.api.resource) = {
+    type: "mail-hero.ziyixi.science/Delivery"
+    pattern: "deliveries/{delivery}"
+    singular: "delivery"
+    plural: "deliveries"
+  };
+
+  // The delivery's state (AIP-216).
+  enum State {
+    // Never written.
+    STATE_UNSPECIFIED = 0;
+    // Waiting for its first attempt (or a retry the owner asked for).
+    STATE_PENDING = 1;
+    // An attempt is in flight.
+    STATE_SENDING = 2;
+    // Waiting for a retry after a transient failure (network, 408, 429, 5xx), or while its target is blocked.
+    STATE_RETRY_WAIT = 3;
+    // The consumer answered 2xx.
+    STATE_DELIVERED = 4;
+    // Stopped: rejected, out of attempts or out of its retry window. RetryDelivery tries once more.
+    STATE_FAILED = 5;
+    // Cancelled by the owner, or by deleting the message's content.
+    STATE_CANCELLED = 6;
+    // Only in `effective_state`: PENDING or RETRY_WAIT while its target or all sending is paused (by the owner or
+    // FORCE_SEND_PAUSED) or its target revision is blocked; it is sent when that ends.
+    STATE_PAUSED = 7;
+  }
+
+  // How a delivery retries.
+  enum RetryMode {
+    // Never written.
+    RETRY_MODE_UNSPECIFIED = 0;
+    // Persistent backoff: at most 48 attempts or 7 days.
+    RETRY_MODE_AUTO = 1;
+    // One attempt the owner asked for (RetryDelivery).
+    RETRY_MODE_ONCE = 2;
+  }
+
+  // deliveries/{delivery}, where {delivery} is the event's UUID (the event_id the consumer deduplicates by).
+  string name = 1 [(google.api.field_behavior) = IDENTIFIER];
+  // The message the event is about.
+  string message = 2 [
+    (google.api.field_behavior) = OUTPUT_ONLY,
+    (google.api.resource_reference).type = "mail-hero.ziyixi.science/Message"
+  ];
+  // The target the event goes to (its revision frozen when the event was made).
+  string endpoint = 3 [
+    (google.api.field_behavior) = OUTPUT_ONLY,
+    (google.api.resource_reference).type = "mail-hero.ziyixi.science/Endpoint"
+  ];
+  // The target's display name now.
+  string endpoint_display_name = 4 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The URI of the target revision the event goes to.
+  string endpoint_uri = 5 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The message's subject; empty once its content was deleted.
+  string subject = 6 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The message's sender; empty once its content was deleted.
+  string sender = 7 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The stored state (never PAUSED).
+  State state = 8 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The state the owner sees: `state`, or PAUSED (above).
+  State effective_state = 9 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Attempts so far.
+  int32 attempt_count = 10 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // When the event was made.
+  google.protobuf.Timestamp create_time = 11 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // When the next attempt is due (while PENDING or RETRY_WAIT).
+  google.protobuf.Timestamp next_attempt_time = 12 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // When the consumer took it over; unset until DELIVERED.
+  google.protobuf.Timestamp deliver_time = 13 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The last error as a code (`http_503`, `retry_window_expired`, `cancelled_by_owner`, ...); empty without one. Shown as
+  // plain text.
+  string last_error = 14 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The message's generation of this event: 1 for its first delivery, one more for each ResendDelivery.
+  int32 generation = 15 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The event this one was resent from (ResendDelivery); empty for an original.
+  string source_delivery = 16 [
+    (google.api.field_behavior) = OUTPUT_ONLY,
+    (google.api.resource_reference).type = "mail-hero.ziyixi.science/Delivery"
+  ];
+  // How it retries.
+  RetryMode retry_mode = 17 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The message's content was deleted: its frozen request is gone too.
+  bool content_deleted = 18 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // A dashboard canary (contracts/ops-v1): a synthetic event with the `canary` marker, not mail.
+  bool canary = 19 [(google.api.field_behavior) = OUTPUT_ONLY];
+}
+
+// One attempt of a delivery: one HTTP request, or a run that ended before one.
+message DeliveryAttempt {
+  option (google.api.resource) = {
+    type: "mail-hero.ziyixi.science/DeliveryAttempt"
+    pattern: "deliveries/{delivery}/attempts/{attempt}"
+    singular: "deliveryAttempt"
+    plural: "deliveryAttempts"
+  };
+
+  // What an attempt ended with.
+  enum Outcome {
+    // Not written: the attempt is still running.
+    OUTCOME_UNSPECIFIED = 0;
+    // 2xx: the consumer took the event over.
+    OUTCOME_DELIVERED = 1;
+    // A transient failure: a retry is scheduled.
+    OUTCOME_RETRYABLE = 2;
+    // The consumer refused it (4xx other than 408 and 429, a redirect after its grace, a blocked target).
+    OUTCOME_REJECTED = 3;
+    // A failure that ended the delivery (out of attempts or out of its window).
+    OUTCOME_FAILED = 4;
+    // The run was interrupted before its result was recorded: whether the consumer got it is unknown.
+    OUTCOME_INTERRUPTED = 5;
+    // Nothing was sent: the delivery changed before the request.
+    OUTCOME_NOT_SENT = 6;
+  }
+
+  // deliveries/{delivery}/attempts/{attempt}, where {attempt} is the attempt's number (1, 2, ...).
+  string name = 1 [(google.api.field_behavior) = IDENTIFIER];
+  // When the attempt started.
+  google.protobuf.Timestamp start_time = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // When it ended; unset while it runs.
+  google.protobuf.Timestamp finish_time = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The consumer's HTTP status; 0 without an answer.
+  int32 http_status = 4 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // How long the request took, in milliseconds; 0 when nothing was sent.
+  // (-- api-linter: core::0142::time-field-type=disabled
+  //     aip.dev/not-precedent: the wire profile has no google.protobuf.Duration; an integer of milliseconds, named by
+  //     its unit, is the one way to write a duration. --)
+  int32 duration_ms = 5 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // What it ended with.
+  Outcome outcome = 6 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Why it failed, as a code (`http_503`, `timeout`, `result_unknown`, ...); empty on success.
+  string error_code = 7 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The start of the consumer's answer as text (at most 1 KiB), shown as plain text; empty once the message's content
+  // was deleted.
+  string response_preview = 8 [(google.api.field_behavior) = OUTPUT_ONLY];
+}
+
+// A delivery's frozen request: the exact bytes every attempt of the event POSTs. A singleton of its delivery.
+message DeliveryPayload {
+  option (google.api.resource) = {
+    type: "mail-hero.ziyixi.science/DeliveryPayload"
+    pattern: "deliveries/{delivery}/payload"
+    singular: "deliveryPayload"
+    plural: "deliveryPayloads"
+  };
+
+  // deliveries/{delivery}/payload.
+  string name = 1 [(google.api.field_behavior) = IDENTIFIER];
+  // The request body as UTF-8 text: a mail.received.v1 event, at most 1 MiB of JSON. Empty once the message's content
+  // was deleted (and for a delivery cancelled by that deletion).
+  string body = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The SHA-256 of the body, 64 hex digits (kept after the body is deleted).
+  string body_sha256 = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
+}
+
+// Attempts that ended, by outcome (outcomes still running and NOT_SENT are not counted).
+message AttemptCounts {
+  // DELIVERED.
+  int32 succeeded_count = 1 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // RETRYABLE.
+  int32 retried_count = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // REJECTED or FAILED.
+  int32 failed_count = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // INTERRUPTED: whether the consumer got it is unknown.
+  int32 unknown_count = 4 [(google.api.field_behavior) = OUTPUT_ONLY];
+}
+
+// The attempts of one hour or one day of the time zone asked for.
+message AttemptBucket {
+  // The bucket's first instant: a local hour, or a local midnight (the first valid instant when DST skips it). The
+  // first bucket's may precede the range's start; only attempts within the range are counted.
+  google.protobuf.Timestamp start_time = 1 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The next bucket's start, or the range's end for the last one: a local day lasts 23 or 25 hours across a DST change.
+  google.protobuf.Timestamp end_time = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The attempts within the range that ended within [start_time, end_time).
+  AttemptCounts counts = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
+}

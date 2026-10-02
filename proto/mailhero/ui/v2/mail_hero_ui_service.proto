@@ -1,0 +1,888 @@
+// Mail Hero's owner API: the HTTP/JSON interface between its UI (mail-hero/web) and the Worker "mail-hero"
+// (mail-hero/cloudflare/src/native), for the inbox, deliveries, webhook targets, settings and setup guide.
+//
+// Callers. Only Mail Hero's UI calls it (same origin, mail-hero.ziyixi.science). The other HTTP surfaces of the Worker
+// are not this service and keep their own authentication: the backup machine API `/api/internal/backup/*` (a dedicated
+// Bearer token and an Access service identity, mail-hero/AGENTS.md §7), the dashboard's ops-v1 `Ops` entrypoint (a
+// service binding, proto/ops/v1), and the webhook Mail Hero POSTs (mail.received.v1, proto/mailhero/webhook/v1).
+//
+// Version. The API is v2: Mail Hero's hand-written owner API of before was served under /api/v1 (its own major version
+// 1, with other paths and shapes), and this IDL replaces it (AIP-185). For one release (until 2026-11-01) every
+// /api/v1 path answers 410 `reload_required` in that API's error envelope, so a tab still running the old UI asks the
+// owner to reload; then they are NOT_FOUND.
+//
+// Transport. google.api.http bindings under /api/v2, served by the shared transcoder (proto/ts/http-transcoder.ts) and
+// called through the shared client (proto/ts/http-client.ts). Bodies, query parameters and responses are JSON in the wire
+// JSON profile (proto/README.md): proto field names (snake_case), enum values in lower case without their prefix
+// (`Delivery.State.STATE_RETRY_WAIT` is "retry_wait"), timestamps in RFC 3339 UTC. Inputs are read strictly (an
+// unknown field or enum name is INVALID_ARGUMENT), outputs leniently. Request bodies are at most 64 KiB. Responses are
+// `Cache-Control: no-store` and `X-Content-Type-Options: nosniff`. Errors: errors.proto (Mail Hero's reasons) and
+// common/errors/v1/errors.proto (the reasons every API shares).
+//
+// Downloads are not in this service: the raw message (`GET /api/v2/messages/{message}/raw`) and an attachment's stored
+// copy (`GET /api/v2/messages/{message}/attachments/{part_id}`) stream bytes from the private R2 bucket, up to 25 MiB,
+// which neither the wire profile (no `bytes`, so no google.api.HttpBody) nor a Worker's 10 ms of CPU could carry as a
+// message. The Worker serves them next to the transcoder, behind the same authentication, as `Content-Disposition:
+// attachment`, `Cache-Control: no-store`, `X-Content-Type-Options: nosniff` and a sandboxing CSP; their errors are the
+// same google.rpc.Status, with HTTP 410 for content that is gone (CONTENT_DELETED, RAW_EXPIRED, ATTACHMENT_OMITTED).
+// Message.raw_download_uri and Attachment.download_uri give the paths.
+//
+// Authentication, in front of the transcoder (packages/edge-auth, Mail Hero's parameters in its SPEC §5.4): every route
+// needs the owner's Cloudflare Access JWT (header Cf-Access-Jwt-Assertion, or the first cookie CF_Authorization),
+// verified by signature, issuer, audience, expiry and the one owner (with its configured aliases). Every method other
+// than GET also needs the same-origin Origin header and the signed double-submit CSRF token (header X-CSRF-Token,
+// cookie mail_hero_csrf), issued by GET /api/csrf, which is transport, not part of this service; and while the
+// deployment's MAINTENANCE_MODE is on, it is MAINTENANCE before the token is checked. A mutation runs under the
+// coordinator's write lease, so it waits for no backup snapshot (BACKUP_IN_PROGRESS while one holds it).
+//
+// Idempotency (AIP-155). The mutations with side effects beyond D1 (a delivery, a parse, a deletion, a new target)
+// require a `request_id`, a UUID4 the browser makes once per user action; repeating the request with the same ID
+// answers its result without doing it again, also after a lost response. The ID is bound to the owner, the method, the
+// resource and the input: reused for anything else it is REQUEST_ID_REUSED and changes nothing. The other mutations are
+// guarded by the resource's etag (AIP-154) instead.
+//
+// Every value rule the IDL cannot express (lengths, ranges, the filters' grammar) is in the field's comment and enforced
+// by the Worker (mail-hero/cloudflare/src/native/api-v2.ts and the modules it calls). A Worker request has 10 ms of CPU
+// on Workers Free: every list is bounded by its page size and its filter, and the work that is heavy (building an event,
+// parsing mail) runs in the coordinator, a Durable Object.
+//
+// buf lint. The methods that answer a resource carry two `buf:lint:ignore` lines: RPC_RESPONSE_STANDARD_NAME and
+// RPC_REQUEST_RESPONSE_UNIQUE, which the AIPs contradict (a standard or custom method answers the resource itself, so
+// one message answers several methods; api-linter checks those names instead). They are excused here, next to each
+// method, not in buf.yaml: buf.yaml is a path every proto user's deploy depends on (.github/scripts/ci_changes.py), and
+// this package must not redeploy the other apps.
+
+syntax = "proto3";
+
+package mailhero.ui.v2;
+
+import "google/api/annotations.proto";
+import "google/api/client.proto";
+import "google/api/field_behavior.proto";
+import "google/api/field_info.proto";
+import "google/api/resource.proto";
+import "google/protobuf/field_mask.proto";
+import "google/protobuf/timestamp.proto";
+import "mailhero/ui/v2/delivery.proto";
+import "mailhero/ui/v2/endpoint.proto";
+import "mailhero/ui/v2/message.proto";
+import "mailhero/ui/v2/settings.proto";
+
+option java_multiple_files = true;
+option java_outer_classname = "MailHeroUiServiceProto";
+option java_package = "science.ziyixi.mailhero.ui.v2";
+
+// The owner's inbox and its deliveries: read mail, send it to a webhook target, follow each delivery's attempts, manage
+// the targets, and set how new mail is handled and kept.
+service MailHeroUiService {
+  option (google.api.default_host) = "mail-hero.ziyixi.science";
+
+  // The service at a glance (counts, storage, the coordinator, alerts, warnings). Was GET /api/v1/overview.
+  // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
+  // buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE
+  rpc GetOverview(GetOverviewRequest) returns (Overview) {
+    option (google.api.http) = {get: "/api/v2/{name=overview}"};
+    option (google.api.method_signature) = "name";
+  }
+
+  // The setup guide's checks. Was GET /api/v1/setup/status.
+  // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
+  // buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE
+  rpc GetSetupStatus(GetSetupStatusRequest) returns (SetupStatus) {
+    option (google.api.http) = {get: "/api/v2/{name=setupStatus}"};
+    option (google.api.method_signature) = "name";
+  }
+
+  // The settings. Was GET /api/v1/settings.
+  // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
+  // buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE
+  rpc GetSettings(GetSettingsRequest) returns (Settings) {
+    option (google.api.http) = {get: "/api/v2/{name=settings}"};
+    option (google.api.method_signature) = "name";
+  }
+
+  // Replaces the settings `update_mask` names (AIP-134), if the settings' etag is current; answers the stored settings.
+  // Enabling or shortening a retention period, or applying the policy to history, needs `retention_confirmation`.
+  // Wakes the coordinator. Was PATCH /api/v1/settings.
+  // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
+  // buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE
+  rpc UpdateSettings(UpdateSettingsRequest) returns (Settings) {
+    option (google.api.http) = {
+      patch: "/api/v2/{settings.name=settings}"
+      body: "settings"
+    };
+    option (google.api.method_signature) = "settings,update_mask";
+  }
+
+  // What a retention policy would do, and the token that confirms it; changes nothing. Was GET
+  // /api/v1/settings/retention-preview.
+  rpc PreviewRetentionPolicy(PreviewRetentionPolicyRequest) returns (PreviewRetentionPolicyResponse) {
+    option (google.api.http) = {get: "/api/v2/{name=settings}:previewRetentionPolicy"};
+  }
+
+  // The received messages, newest first (AIP-132, AIP-158, AIP-160). Was GET /api/v1/messages.
+  rpc ListMessages(ListMessagesRequest) returns (ListMessagesResponse) {
+    option (google.api.http) = {get: "/api/v2/messages"};
+    option (google.api.method_signature) = "";
+  }
+
+  // A message (AIP-131). Was the `message` of GET /api/v1/messages/{id}.
+  // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
+  // buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE
+  rpc GetMessage(GetMessageRequest) returns (Message) {
+    option (google.api.http) = {get: "/api/v2/{name=messages/*}"};
+    option (google.api.method_signature) = "name";
+  }
+
+  // Marks a message read or unread (AIP-134: `read` is the one field the owner sets), if its etag is current. Was PATCH
+  // /api/v1/messages/{id}.
+  // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
+  // buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE
+  rpc UpdateMessage(UpdateMessageRequest) returns (Message) {
+    option (google.api.http) = {
+      patch: "/api/v2/{message.name=messages/*}"
+      body: "message"
+    };
+    option (google.api.method_signature) = "message,update_mask";
+  }
+
+  // A message's parsed content (AIP-156 singleton): read from R2 (CONTENT_UNAVAILABLE when it does not load). Was the
+  // body, headers and attachments of GET /api/v1/messages/{id}.
+  // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
+  // buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE
+  rpc GetMessageContent(GetMessageContentRequest) returns (MessageContent) {
+    option (google.api.http) = {get: "/api/v2/{name=messages/*/content}"};
+    option (google.api.method_signature) = "name";
+  }
+
+  // Sends a parsed message that has no delivery yet to a target: the coordinator makes and freezes its event, and the
+  // delivery is scheduled (AIP-136). Was POST /api/v1/messages/{id}/send.
+  rpc SendMessage(SendMessageRequest) returns (SendMessageResponse) {
+    option (google.api.http) = {
+      post: "/api/v2/{name=messages/*}:send"
+      body: "*"
+    };
+    option (google.api.method_signature) = "name,endpoint,request_id";
+  }
+
+  // Parses a message again from its raw message: one whose parse is READY or FAILED, whose raw message is kept and
+  // which has no delivery (else NOT_REPARSABLE). Answers the message (PENDING). Was POST /api/v1/messages/{id}/reparse.
+  // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
+  // buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE
+  rpc ReparseMessage(ReparseMessageRequest) returns (Message) {
+    option (google.api.http) = {
+      post: "/api/v2/{name=messages/*}:reparse"
+      body: "*"
+    };
+    option (google.api.method_signature) = "name,request_id";
+  }
+
+  // Deletes a message's content for good: the raw message, parsed content, headers, attachments, frozen requests and
+  // response previews; the content-free ledger stays, and its waiting deliveries are cancelled. A request already in
+  // flight cannot be recalled. Answers the message. Was DELETE /api/v1/messages/{id}/content.
+  // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
+  // buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE
+  rpc ClearMessageContent(ClearMessageContentRequest) returns (Message) {
+    option (google.api.http) = {
+      post: "/api/v2/{name=messages/*}:clearContent"
+      body: "*"
+    };
+    option (google.api.method_signature) = "name,etag,request_id";
+  }
+
+  // The deliveries, newest first (AIP-132, AIP-158, AIP-160). Was GET /api/v1/deliveries.
+  rpc ListDeliveries(ListDeliveriesRequest) returns (ListDeliveriesResponse) {
+    option (google.api.http) = {get: "/api/v2/deliveries"};
+    option (google.api.method_signature) = "";
+  }
+
+  // A delivery (AIP-131). Was the `delivery` of GET /api/v1/deliveries/{id}.
+  // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
+  // buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE
+  rpc GetDelivery(GetDeliveryRequest) returns (Delivery) {
+    option (google.api.http) = {get: "/api/v2/{name=deliveries/*}"};
+    option (google.api.method_signature) = "name";
+  }
+
+  // Tries the same event once more, with its event ID, frozen bytes and target revision: a FAILED, RETRY_WAIT or
+  // CANCELLED delivery made within 30 days whose request is kept (NOT_RETRYABLE, RETRY_WINDOW_CLOSED otherwise). The
+  // owner's handling restarts the resolved-exception clock. Was POST /api/v1/deliveries/{id}/retry.
+  // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
+  // buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE
+  rpc RetryDelivery(RetryDeliveryRequest) returns (Delivery) {
+    option (google.api.http) = {
+      post: "/api/v2/{name=deliveries/*}:retry"
+      body: "*"
+    };
+    option (google.api.method_signature) = "name,request_id";
+  }
+
+  // Stops a PENDING, RETRY_WAIT or FAILED delivery (NOT_CANCELLABLE otherwise); an attempt already sent may still
+  // arrive. The owner's handling restarts the resolved-exception clock. Was POST /api/v1/deliveries/{id}/cancel.
+  // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
+  // buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE
+  rpc CancelDelivery(CancelDeliveryRequest) returns (Delivery) {
+    option (google.api.http) = {
+      post: "/api/v2/{name=deliveries/*}:cancel"
+      body: "*"
+    };
+    option (google.api.method_signature) = "name,request_id";
+  }
+
+  // Sends the delivery's message again as a new event (a new event ID, built from the message's current parsed
+  // content) to a target: the consumer may act on it again. Answers the new delivery. Was POST
+  // /api/v1/deliveries/{id}/replay.
+  // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
+  // buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE
+  rpc ResendDelivery(ResendDeliveryRequest) returns (Delivery) {
+    option (google.api.http) = {
+      post: "/api/v2/{name=deliveries/*}:resend"
+      body: "*"
+    };
+    option (google.api.method_signature) = "name,endpoint,message_etag,request_id";
+  }
+
+  // A delivery's attempts, newest first (AIP-132, AIP-158). Was the `attempts` of GET /api/v1/deliveries/{id}.
+  rpc ListDeliveryAttempts(ListDeliveryAttemptsRequest) returns (ListDeliveryAttemptsResponse) {
+    option (google.api.http) = {get: "/api/v2/{parent=deliveries/*}/attempts"};
+    option (google.api.method_signature) = "parent";
+  }
+
+  // A delivery's attempt (AIP-131).
+  // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
+  // buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE
+  rpc GetDeliveryAttempt(GetDeliveryAttemptRequest) returns (DeliveryAttempt) {
+    option (google.api.http) = {get: "/api/v2/{name=deliveries/*/attempts/*}"};
+    option (google.api.method_signature) = "name";
+  }
+
+  // A delivery's frozen request (AIP-156 singleton). Was the `payload` and `payload_sha256` of GET
+  // /api/v1/deliveries/{id}.
+  // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
+  // buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE
+  rpc GetDeliveryPayload(GetDeliveryPayloadRequest) returns (DeliveryPayload) {
+    option (google.api.http) = {get: "/api/v2/{name=deliveries/*/payload}"};
+    option (google.api.method_signature) = "name";
+  }
+
+  // The attempts of every delivery of real mail (not connection tests or canaries) that ended within a time range, by
+  // outcome and by hour or day of a time zone, for the delivery dashboard (AIP-136 on the AIP-159 collection
+  // `deliveries/-/attempts`). Was GET /api/v1/delivery-stats.
+  rpc SummarizeDeliveryAttempts(SummarizeDeliveryAttemptsRequest) returns (SummarizeDeliveryAttemptsResponse) {
+    option (google.api.http) = {get: "/api/v2/{parent=deliveries/*}/attempts:summarize"};
+  }
+
+  // The webhook targets, newest first (AIP-132, AIP-158). Was GET /api/v1/endpoints.
+  rpc ListEndpoints(ListEndpointsRequest) returns (ListEndpointsResponse) {
+    option (google.api.http) = {get: "/api/v2/endpoints"};
+    option (google.api.method_signature) = "";
+  }
+
+  // A webhook target (AIP-131). Was GET /api/v1/endpoints/{id}.
+  // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
+  // buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE
+  rpc GetEndpoint(GetEndpointRequest) returns (Endpoint) {
+    option (google.api.http) = {get: "/api/v2/{name=endpoints/*}"};
+    option (google.api.method_signature) = "name";
+  }
+
+  // Creates a webhook target with its first revision (AIP-133). Was POST /api/v1/endpoints.
+  // (-- api-linter: core::0133::method-signature=disabled
+  //     aip.dev/not-precedent: the signature names the required request_id too (AIP-4232); see CreateEndpointRequest. --)
+  // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
+  // buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE
+  rpc CreateEndpoint(CreateEndpointRequest) returns (Endpoint) {
+    option (google.api.http) = {
+      post: "/api/v2/endpoints"
+      body: "endpoint"
+    };
+    option (google.api.method_signature) = "endpoint,request_id";
+  }
+
+  // Replaces the target's fields `update_mask` names (AIP-134), if its etag is current. A change of the URI,
+  // authentication type, timeout or credential makes a new revision for later events; the deliveries already made keep
+  // theirs. Unpausing clears `paused_reason`. Wakes the coordinator. Was PATCH /api/v1/endpoints/{id}.
+  // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
+  // buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE
+  rpc UpdateEndpoint(UpdateEndpointRequest) returns (Endpoint) {
+    option (google.api.http) = {
+      patch: "/api/v2/{endpoint.name=endpoints/*}"
+      body: "endpoint"
+    };
+    option (google.api.method_signature) = "endpoint,update_mask";
+  }
+
+  // Replaces the credential of every revision of the target on its current origin and authentication type (so events
+  // already made use the new one too; their IDs and bytes do not change), and lifts the blocks an authentication failure
+  // or a policy error set. Wakes the coordinator. Was POST /api/v1/endpoints/{id}/rotate-credential.
+  rpc RotateEndpointCredential(RotateEndpointCredentialRequest) returns (RotateEndpointCredentialResponse) {
+    option (google.api.http) = {
+      post: "/api/v2/{name=endpoints/*}:rotateCredential"
+      body: "*"
+    };
+    option (google.api.method_signature) = "name,credential,etag";
+  }
+
+  // Lifts every block of every revision of the target, whatever its reason, and resets their automatic rechecks; the
+  // deliveries a block held are retried now, the others keep their backoff. A target that still fails is blocked again
+  // by its next attempt. Wakes the coordinator. Was POST /api/v1/endpoints/{id}/unblock.
+  rpc UnblockEndpoint(UnblockEndpointRequest) returns (UnblockEndpointResponse) {
+    option (google.api.http) = {
+      post: "/api/v2/{name=endpoints/*}:unblock"
+      body: "*"
+    };
+    option (google.api.method_signature) = "name,etag";
+  }
+
+  // Checks the target's URI against the static URL policy (HTTPS, port, the deployment's allowed hosts). It resolves
+  // no DNS, opens no TLS connection and calls nothing: those are reported as not checked. Was POST
+  // /api/v1/endpoints/{id}/check.
+  rpc CheckEndpoint(CheckEndpointRequest) returns (CheckEndpointResponse) {
+    option (google.api.http) = {get: "/api/v2/{name=endpoints/*}:check"};
+    option (google.api.method_signature) = "name";
+  }
+
+  // Sends a synthetic connection-test event (a synthetic message, not mail) to the target's current revision: it is a
+  // real POST, and the consumer may act on it like on mail. Answers the delivery made. Was POST
+  // /api/v1/endpoints/{id}/test.
+  rpc TestEndpoint(TestEndpointRequest) returns (TestEndpointResponse) {
+    option (google.api.http) = {
+      post: "/api/v2/{name=endpoints/*}:test"
+      body: "*"
+    };
+    option (google.api.method_signature) = "name,request_id";
+  }
+}
+
+// Input of GetOverview.
+message GetOverviewRequest {
+  // Always `overview`.
+  string name = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (google.api.resource_reference).type = "mail-hero.ziyixi.science/Overview"
+  ];
+}
+
+// Input of GetSetupStatus.
+message GetSetupStatusRequest {
+  // Always `setupStatus`.
+  string name = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (google.api.resource_reference).type = "mail-hero.ziyixi.science/SetupStatus"
+  ];
+}
+
+// Input of GetSettings.
+message GetSettingsRequest {
+  // Always `settings`.
+  string name = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (google.api.resource_reference).type = "mail-hero.ziyixi.science/Settings"
+  ];
+}
+
+// Input of UpdateSettings.
+message UpdateSettingsRequest {
+  // The new values of the fields `update_mask` names, and the settings' current etag (required: ETAG_MISMATCH when it
+  // is stale, BAD_REQUEST without one).
+  Settings settings = 1 [(google.api.field_behavior) = REQUIRED];
+  // AIP-134: the Settings fields to replace (a query parameter, `update_mask=mode,current_endpoint`). Required here: an
+  // update without a mask, an empty one or `*` is BAD_REQUEST, so a client that leaves a field out never resumes
+  // sending or switches a retention period off by accident. A named field without a value is cleared (a retention
+  // period kept forever, no current target, not paused).
+  google.protobuf.FieldMask update_mask = 2 [(google.api.field_behavior) = OPTIONAL];
+  // The `confirmation_token` of a PreviewRetentionPolicy of exactly the policy this update saves (all four periods and
+  // `apply_existing`), made for the settings' current etag, within 10 minutes. Needed when the update enables or shortens
+  // a period or sets `apply_existing`; ignored otherwise.
+  // (-- api-linter: core::0134::request-unknown-fields=disabled
+  //     aip.dev/not-precedent: deleting content early is confirmed by the owner from a preview of what it affects; the
+  //     confirmation belongs to this update, bound to its etag and policy. --)
+  string retention_confirmation = 3 [(google.api.field_behavior) = OPTIONAL];
+  // Also apply the saved policy to the live messages that have none (history): their clocks start after this
+  // confirmation and their safe terminal state. Needs `retention_confirmation`.
+  // (-- api-linter: core::0134::request-unknown-fields=disabled
+  //     aip.dev/not-precedent: adopting history is an action of this update, not a setting: it is not stored. --)
+  bool apply_existing = 4 [(google.api.field_behavior) = OPTIONAL];
+}
+
+// Input of PreviewRetentionPolicy: the whole policy the owner would save.
+message PreviewRetentionPolicyRequest {
+  // Always `settings`.
+  string name = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (google.api.resource_reference).type = "mail-hero.ziyixi.science/Settings"
+  ];
+  // Settings.raw_retention_days; unset: no separate raw cleanup.
+  optional int32 raw_retention_days = 2 [(google.api.field_behavior) = OPTIONAL];
+  // Settings.content_retention_days; unset: kept forever.
+  optional int32 content_retention_days = 3 [(google.api.field_behavior) = OPTIONAL];
+  // Settings.ledger_retention_days (90-3650).
+  int32 ledger_retention_days = 4 [(google.api.field_behavior) = REQUIRED];
+  // Settings.resolved_retention_days; unset: kept forever.
+  optional int32 resolved_retention_days = 5 [(google.api.field_behavior) = OPTIONAL];
+  // Preview applying the policy to history too (UpdateSettingsRequest.apply_existing).
+  bool apply_existing = 6 [(google.api.field_behavior) = OPTIONAL];
+}
+
+// Output of PreviewRetentionPolicy: what the policy would do, and the token that confirms it. Counts are of the moment;
+// the token binds the owner, the settings' etag and the exact policy, for 10 minutes.
+message PreviewRetentionPolicyResponse {
+  // The settings' etag the preview was made for: UpdateSettings must carry the same one.
+  string etag = 1;
+  // The previewed raw period; unset: no separate raw cleanup.
+  optional int32 raw_retention_days = 2;
+  // The previewed content period; unset: kept forever.
+  optional int32 content_retention_days = 3;
+  // The previewed ledger period.
+  int32 ledger_retention_days = 4;
+  // The previewed resolved period; unset: kept forever.
+  optional int32 resolved_retention_days = 5;
+  // The policy would also be applied to the messages that have none (history).
+  bool apply_existing = 6;
+  // Live messages without a retention policy (history).
+  int32 historical_message_count = 7;
+  // Of those, the ones in a safe terminal state now.
+  int32 safe_terminal_message_count = 8;
+  // The content bytes of the historical messages.
+  double historical_content_bytes = 9;
+  // Live owner-resolved exceptions the resolved period governs.
+  int32 resolved_message_count = 10;
+  // The historical messages the policy would be applied to: `historical_message_count` with `apply_existing`, else 0.
+  // Saving deletes nothing at once: every clock starts after the confirmation and the message's safe terminal state.
+  int32 candidate_count = 11;
+  // When the token expires.
+  google.protobuf.Timestamp expire_time = 12;
+  // The confirmation: UpdateSettingsRequest.retention_confirmation. Opaque, signed, not a credential.
+  string confirmation_token = 13;
+}
+
+// Input of ListMessages.
+message ListMessagesRequest {
+  // At most this many messages (AIP-158): 0 means 50, and a larger value than 100 is read as 100.
+  int32 page_size = 1 [(google.api.field_behavior) = OPTIONAL];
+  // The previous page's `next_page_token`, with the same `filter` (another filter is BAD_REQUEST).
+  string page_token = 2 [(google.api.field_behavior) = OPTIONAL];
+  // AIP-160, a conjunction (whitespace or AND) of at most one search literal and these restrictions, each at most once
+  // (anything else, OR, NOT, functions or parentheses is BAD_REQUEST; at most 400 characters):
+  //
+  // - a literal, a bare word or a quoted string of at most 200 characters (the search box quotes what the owner
+  //   typed): it occurs, ignoring case, in the subject, the sender or the indexed start of the body (16 KiB:
+  //   Message.search_index_truncated);
+  // - `delivery_state = <Message.DeliveryState>`, the value name without its prefix in upper case
+  //   (`delivery_state = RETRY_WAIT`; UNARRANGED: no delivery);
+  // - `parse_state = <Message.ParseState>` (`parse_state = FAILED`);
+  // - `has_attachments = true` or `false`;
+  // - `receive_time >= "<RFC 3339>"` and `receive_time <= "<RFC 3339>"`.
+  string filter = 3 [(google.api.field_behavior) = OPTIONAL];
+}
+
+// Output of ListMessages.
+message ListMessagesResponse {
+  // The page, newest first.
+  repeated Message messages = 1;
+  // The next page's token; empty on the last page.
+  string next_page_token = 2;
+}
+
+// Input of GetMessage.
+message GetMessageRequest {
+  // messages/{message}.
+  string name = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (google.api.resource_reference).type = "mail-hero.ziyixi.science/Message"
+  ];
+}
+
+// Input of UpdateMessage.
+message UpdateMessageRequest {
+  // The message: its name, `read`, and its current etag (required: ETAG_MISMATCH when it is stale, BAD_REQUEST without
+  // one).
+  Message message = 1 [(google.api.field_behavior) = REQUIRED];
+  // AIP-134: `read` (the one field the owner sets), or absent.
+  google.protobuf.FieldMask update_mask = 2 [(google.api.field_behavior) = OPTIONAL];
+}
+
+// Input of GetMessageContent.
+message GetMessageContentRequest {
+  // messages/{message}/content.
+  string name = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (google.api.resource_reference).type = "mail-hero.ziyixi.science/MessageContent"
+  ];
+}
+
+// Input of SendMessage.
+message SendMessageRequest {
+  // messages/{message}: a parsed message without a delivery.
+  string name = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (google.api.resource_reference).type = "mail-hero.ziyixi.science/Message"
+  ];
+  // endpoints/{endpoint}: the target, at its current revision.
+  string endpoint = 2 [
+    (google.api.field_behavior) = REQUIRED,
+    (google.api.resource_reference).type = "mail-hero.ziyixi.science/Endpoint"
+  ];
+  // The idempotency key (AIP-155); see MailHeroUiService.
+  string request_id = 3 [
+    (google.api.field_info).format = UUID4,
+    (google.api.field_behavior) = REQUIRED
+  ];
+}
+
+// Output of SendMessage.
+message SendMessageResponse {
+  // The delivery made (PENDING, or PAUSED in its effective state).
+  Delivery delivery = 1;
+}
+
+// Input of ReparseMessage.
+message ReparseMessageRequest {
+  // messages/{message}.
+  string name = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (google.api.resource_reference).type = "mail-hero.ziyixi.science/Message"
+  ];
+  // The idempotency key (AIP-155); see MailHeroUiService.
+  string request_id = 2 [
+    (google.api.field_info).format = UUID4,
+    (google.api.field_behavior) = REQUIRED
+  ];
+}
+
+// Input of ClearMessageContent.
+message ClearMessageContentRequest {
+  // messages/{message}.
+  string name = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (google.api.resource_reference).type = "mail-hero.ziyixi.science/Message"
+  ];
+  // The message's current etag (AIP-154): ETAG_MISMATCH when it is stale.
+  string etag = 2 [(google.api.field_behavior) = REQUIRED];
+  // The idempotency key (AIP-155); see MailHeroUiService.
+  string request_id = 3 [
+    (google.api.field_info).format = UUID4,
+    (google.api.field_behavior) = REQUIRED
+  ];
+}
+
+// Input of ListDeliveries.
+message ListDeliveriesRequest {
+  // At most this many deliveries (AIP-158): 0 means 50, and a larger value than 100 is read as 100.
+  int32 page_size = 1 [(google.api.field_behavior) = OPTIONAL];
+  // The previous page's `next_page_token`, with the same `filter` (another filter is BAD_REQUEST).
+  string page_token = 2 [(google.api.field_behavior) = OPTIONAL];
+  // AIP-160, a conjunction (whitespace or AND) of these restrictions, each at most once (anything else, a literal, OR,
+  // NOT, functions or parentheses is BAD_REQUEST; at most 400 characters):
+  //
+  // - `state = <Delivery.State>`, the stored state's name without its prefix in upper case (`state = FAILED`; PAUSED is
+  //   not a stored state);
+  // - `message = "messages/<uuid>"`: the message's deliveries;
+  // - `attempt_outcome = SUCCEEDED | RETRIED | FAILED | UNKNOWN` with both `attempt_finish_time >= "<RFC 3339>"` and
+  //   `attempt_finish_time < "<RFC 3339>"` (at most 90 days and two hours apart; one without the others is
+  //   BAD_REQUEST): the deliveries of real mail with at least one attempt of that outcome (AttemptCounts) that ended
+  //   within the range, each listed once however many matched (the dashboard's drill-down; it counts attempts, this
+  //   lists events).
+  string filter = 3 [(google.api.field_behavior) = OPTIONAL];
+}
+
+// Output of ListDeliveries.
+message ListDeliveriesResponse {
+  // The page, newest first.
+  repeated Delivery deliveries = 1;
+  // The next page's token; empty on the last page.
+  string next_page_token = 2;
+}
+
+// Input of GetDelivery.
+message GetDeliveryRequest {
+  // deliveries/{delivery}.
+  string name = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (google.api.resource_reference).type = "mail-hero.ziyixi.science/Delivery"
+  ];
+}
+
+// Input of RetryDelivery.
+message RetryDeliveryRequest {
+  // deliveries/{delivery}.
+  string name = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (google.api.resource_reference).type = "mail-hero.ziyixi.science/Delivery"
+  ];
+  // The idempotency key (AIP-155); see MailHeroUiService.
+  string request_id = 2 [
+    (google.api.field_info).format = UUID4,
+    (google.api.field_behavior) = REQUIRED
+  ];
+}
+
+// Input of CancelDelivery.
+message CancelDeliveryRequest {
+  // deliveries/{delivery}.
+  string name = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (google.api.resource_reference).type = "mail-hero.ziyixi.science/Delivery"
+  ];
+  // The idempotency key (AIP-155); see MailHeroUiService.
+  string request_id = 2 [
+    (google.api.field_info).format = UUID4,
+    (google.api.field_behavior) = REQUIRED
+  ];
+}
+
+// Input of ResendDelivery.
+message ResendDeliveryRequest {
+  // deliveries/{delivery}: the event to resend.
+  string name = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (google.api.resource_reference).type = "mail-hero.ziyixi.science/Delivery"
+  ];
+  // endpoints/{endpoint}: the target of the new event, at its current revision.
+  string endpoint = 2 [
+    (google.api.field_behavior) = REQUIRED,
+    (google.api.resource_reference).type = "mail-hero.ziyixi.science/Endpoint"
+  ];
+  // The message's etag the owner saw (Message.etag): ETAG_MISMATCH when the message changed since.
+  string message_etag = 3 [(google.api.field_behavior) = REQUIRED];
+  // The idempotency key (AIP-155); see MailHeroUiService.
+  string request_id = 4 [
+    (google.api.field_info).format = UUID4,
+    (google.api.field_behavior) = REQUIRED
+  ];
+}
+
+// Input of ListDeliveryAttempts.
+message ListDeliveryAttemptsRequest {
+  // deliveries/{delivery}.
+  string parent = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (google.api.resource_reference).child_type = "mail-hero.ziyixi.science/DeliveryAttempt"
+  ];
+  // At most this many attempts (AIP-158): 0 means 50, and a larger value than 100 is read as 100.
+  int32 page_size = 2 [(google.api.field_behavior) = OPTIONAL];
+  // The previous page's `next_page_token`, with the same parent (another is BAD_REQUEST).
+  string page_token = 3 [(google.api.field_behavior) = OPTIONAL];
+}
+
+// Output of ListDeliveryAttempts.
+message ListDeliveryAttemptsResponse {
+  // The page, newest first.
+  repeated DeliveryAttempt delivery_attempts = 1;
+  // The next page's token; empty on the last page.
+  string next_page_token = 2;
+}
+
+// Input of GetDeliveryAttempt.
+message GetDeliveryAttemptRequest {
+  // deliveries/{delivery}/attempts/{attempt}.
+  string name = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (google.api.resource_reference).type = "mail-hero.ziyixi.science/DeliveryAttempt"
+  ];
+}
+
+// Input of GetDeliveryPayload.
+message GetDeliveryPayloadRequest {
+  // deliveries/{delivery}/payload.
+  string name = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (google.api.resource_reference).type = "mail-hero.ziyixi.science/DeliveryPayload"
+  ];
+}
+
+// Input of SummarizeDeliveryAttempts.
+message SummarizeDeliveryAttemptsRequest {
+  // How long a bucket is.
+  enum Granularity {
+    // Read as DAY.
+    GRANULARITY_UNSPECIFIED = 0;
+    // A local hour: the range is at most 7 days (and two hours across a DST change).
+    GRANULARITY_HOUR = 1;
+    // A local day: the range is at most 90 days (and two hours across a DST change).
+    GRANULARITY_DAY = 2;
+  }
+
+  // `deliveries/-`: every delivery (AIP-159).
+  string parent = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (google.api.resource_reference).child_type = "mail-hero.ziyixi.science/DeliveryAttempt"
+  ];
+  // The range's start (inclusive).
+  google.protobuf.Timestamp start_time = 2 [(google.api.field_behavior) = REQUIRED];
+  // The range's end (exclusive), after `start_time` (INVALID_TIME_RANGE otherwise).
+  google.protobuf.Timestamp end_time = 3 [(google.api.field_behavior) = REQUIRED];
+  // The buckets' length.
+  Granularity granularity = 4 [(google.api.field_behavior) = OPTIONAL];
+  // The IANA time zone the buckets follow (`America/Los_Angeles`); empty means `UTC`. At most 64 characters of
+  // letters, digits and `_+-/`, a zone this Worker's Intl knows, with at most 8 offset changes within the range
+  // (INVALID_TIME_ZONE otherwise).
+  string time_zone = 5 [(google.api.field_behavior) = OPTIONAL];
+}
+
+// Output of SummarizeDeliveryAttempts.
+message SummarizeDeliveryAttemptsResponse {
+  // The range's start.
+  google.protobuf.Timestamp start_time = 1;
+  // The range's end.
+  google.protobuf.Timestamp end_time = 2;
+  // The buckets' length (never unspecified).
+  SummarizeDeliveryAttemptsRequest.Granularity granularity = 3;
+  // The time zone the buckets follow.
+  string time_zone = 4;
+  // Every attempt within the range.
+  AttemptCounts totals = 5;
+  // Every hour or day of the range in order, empty ones included.
+  repeated AttemptBucket buckets = 6;
+}
+
+// Input of ListEndpoints.
+message ListEndpointsRequest {
+  // At most this many targets (AIP-158): 0 means 50, and a larger value than 100 is read as 100.
+  int32 page_size = 1 [(google.api.field_behavior) = OPTIONAL];
+  // The previous page's `next_page_token`.
+  string page_token = 2 [(google.api.field_behavior) = OPTIONAL];
+}
+
+// Output of ListEndpoints.
+message ListEndpointsResponse {
+  // The page, newest first.
+  repeated Endpoint endpoints = 1;
+  // The next page's token; empty on the last page.
+  string next_page_token = 2;
+}
+
+// Input of GetEndpoint.
+message GetEndpointRequest {
+  // endpoints/{endpoint}.
+  string name = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (google.api.resource_reference).type = "mail-hero.ziyixi.science/Endpoint"
+  ];
+}
+
+// Input of CreateEndpoint.
+// (-- api-linter: core::0133::request-id-field=disabled
+//     aip.dev/not-precedent: a target's ID is a UUID the Worker makes; the owner names it with display_name. --)
+message CreateEndpointRequest {
+  // The target to create, with its credential: its `name` is ignored (the Worker makes the ID).
+  Endpoint endpoint = 1 [(google.api.field_behavior) = REQUIRED];
+  // The idempotency key (AIP-155), a query parameter; see MailHeroUiService. Required: a repeated request after a lost
+  // response must answer the first target, never create a second one with the same credential.
+  // (-- api-linter: core::0133::request-required-fields=disabled
+  //     aip.dev/not-precedent: required for the reason above, as the hand-written API required it. --)
+  string request_id = 2 [
+    (google.api.field_info).format = UUID4,
+    (google.api.field_behavior) = REQUIRED
+  ];
+}
+
+// Input of UpdateEndpoint.
+message UpdateEndpointRequest {
+  // The new values of the fields `update_mask` names, and the target's current etag (required: ETAG_MISMATCH when it is
+  // stale, BAD_REQUEST without one).
+  Endpoint endpoint = 1 [(google.api.field_behavior) = REQUIRED];
+  // AIP-134: the Endpoint fields to replace (a query parameter, `update_mask=paused`). Required here: an update without
+  // a mask, an empty one or `*` is BAD_REQUEST, so a client that leaves `paused` out never resumes a target by accident.
+  // `credential` may be named (a new revision); a named field without a value is cleared (`rate_per_minute` and
+  // `timeout_seconds` then take their defaults).
+  google.protobuf.FieldMask update_mask = 2 [(google.api.field_behavior) = OPTIONAL];
+}
+
+// Input of RotateEndpointCredential.
+message RotateEndpointCredentialRequest {
+  // endpoints/{endpoint}.
+  string name = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (google.api.resource_reference).type = "mail-hero.ziyixi.science/Endpoint"
+  ];
+  // The new credential, by Endpoint.credential's rules for the target's authentication type.
+  string credential = 2 [(google.api.field_behavior) = REQUIRED];
+  // The target's current etag (AIP-154): ETAG_MISMATCH when it is stale.
+  string etag = 3 [(google.api.field_behavior) = REQUIRED];
+}
+
+// Output of RotateEndpointCredential.
+message RotateEndpointCredentialResponse {
+  // The target after the rotation.
+  Endpoint endpoint = 1;
+  // The revisions whose credential was replaced.
+  int32 affected_revision_count = 2;
+}
+
+// Input of UnblockEndpoint.
+message UnblockEndpointRequest {
+  // endpoints/{endpoint}.
+  string name = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (google.api.resource_reference).type = "mail-hero.ziyixi.science/Endpoint"
+  ];
+  // The target's current etag (AIP-154): ETAG_MISMATCH when it is stale.
+  string etag = 2 [(google.api.field_behavior) = REQUIRED];
+  // The idempotency key (AIP-155); see MailHeroUiService. Optional here: without one, a repeated request after a lost
+  // response is ETAG_MISMATCH (the first one changed the etag) and changes nothing more.
+  string request_id = 3 [
+    (google.api.field_info).format = UUID4,
+    (google.api.field_behavior) = OPTIONAL
+  ];
+}
+
+// Output of UnblockEndpoint.
+message UnblockEndpointResponse {
+  // The target after the unblock.
+  Endpoint endpoint = 1;
+  // The revisions whose block was lifted (0: none was blocked; an alert about a block may concern another or an
+  // archived target).
+  int32 affected_revision_count = 2;
+}
+
+// Input of CheckEndpoint.
+message CheckEndpointRequest {
+  // endpoints/{endpoint}.
+  string name = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (google.api.resource_reference).type = "mail-hero.ziyixi.science/Endpoint"
+  ];
+}
+
+// Output of CheckEndpoint: only the static URL policy is checked.
+message CheckEndpointResponse {
+  // What a check found about one aspect of the target.
+  enum CheckResult {
+    // Never written.
+    CHECK_RESULT_UNSPECIFIED = 0;
+    // Not checked: a Worker cannot pin DNS, open a bare TLS connection or verify a consumer without a real POST.
+    CHECK_RESULT_NOT_CHECKED = 1;
+    // Refused by the URL policy: nothing would be sent.
+    CHECK_RESULT_BLOCKED = 2;
+  }
+
+  // The URI passes the URL policy (HTTPS, port 443, an allowed public host).
+  bool uri_allowed = 1;
+  // DNS: NOT_CHECKED, or BLOCKED when the URI does not pass the policy.
+  CheckResult dns = 2;
+  // TLS: NOT_CHECKED.
+  CheckResult tls = 3;
+  // Whether the consumer accepts mail.received.v1: NOT_CHECKED (only a real delivery, or TestEndpoint, shows it).
+  CheckResult consumer = 4;
+}
+
+// Input of TestEndpoint.
+message TestEndpointRequest {
+  // endpoints/{endpoint}.
+  string name = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (google.api.resource_reference).type = "mail-hero.ziyixi.science/Endpoint"
+  ];
+  // The idempotency key (AIP-155); see MailHeroUiService.
+  string request_id = 2 [
+    (google.api.field_info).format = UUID4,
+    (google.api.field_behavior) = REQUIRED
+  ];
+}
+
+// Output of TestEndpoint.
+message TestEndpointResponse {
+  // deliveries/{delivery}: the test event's delivery (ListDeliveries shows its attempts).
+  string delivery = 1 [(google.api.resource_reference).type = "mail-hero.ziyixi.science/Delivery"];
+}

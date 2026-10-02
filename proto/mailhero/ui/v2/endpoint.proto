@@ -1,0 +1,83 @@
+// A webhook target: where deliveries go (mail-hero/AGENTS.md §3).
+//
+// A target is a chain of immutable revisions: changing its URI, authentication type, timeout or credential makes a new
+// revision, and every delivery keeps the revision frozen when it was made (so an edit never re-routes an old event).
+// The Worker POSTs only to exact public HTTPS hosts the deployment allows (WEBHOOK_ALLOWED_HOSTS), always with Bearer or
+// Basic authentication; the credential is encrypted at rest (AES-GCM under CREDENTIAL_KEY) and never answered.
+
+syntax = "proto3";
+
+package mailhero.ui.v2;
+
+import "google/api/field_behavior.proto";
+import "google/api/resource.proto";
+import "google/protobuf/timestamp.proto";
+
+option java_multiple_files = true;
+option java_outer_classname = "EndpointProto";
+option java_package = "science.ziyixi.mailhero.ui.v2";
+
+// A webhook target. Archived targets are not answered.
+message Endpoint {
+  option (google.api.resource) = {
+    type: "mail-hero.ziyixi.science/Endpoint"
+    pattern: "endpoints/{endpoint}"
+    singular: "endpoint"
+    plural: "endpoints"
+  };
+
+  // How the Worker authenticates to the target.
+  enum AuthType {
+    // Not set: read as BEARER on create, never written.
+    AUTH_TYPE_UNSPECIFIED = 0;
+    // `Authorization: Bearer <credential>`; the credential is printable ASCII without spaces.
+    AUTH_TYPE_BEARER = 1;
+    // `Authorization: Basic <base64 of credential>`; the credential is `username:password`.
+    AUTH_TYPE_BASIC = 2;
+    // No authentication: only targets made before authentication was required; never accepted on input.
+    AUTH_TYPE_NONE = 3;
+  }
+
+  // endpoints/{endpoint}, where {endpoint} is the target's UUID (lower case).
+  string name = 1 [(google.api.field_behavior) = IDENTIFIER];
+  // The owner's name for it: 1-120 bytes (UTF-8) after trimming.
+  string display_name = 2 [(google.api.field_behavior) = REQUIRED];
+  // The URL the Worker POSTs to: `https:`, port 443, no user, password or fragment, at most 4096 bytes, on a host the
+  // deployment allows (TARGET_NOT_ALLOWED otherwise). Answered as the URL parser writes it.
+  string uri = 3 [(google.api.field_behavior) = REQUIRED];
+  // How the Worker authenticates: BEARER (unspecified on create) or BASIC.
+  AuthType auth_type = 4 [(google.api.field_behavior) = OPTIONAL];
+  // The secret of `auth_type`: at most 4096 bytes, no line break (INVALID_CREDENTIAL otherwise). Required on create
+  // and by an update that changes the origin or `auth_type`; never answered.
+  string credential = 5 [
+    (google.api.field_behavior) = INPUT_ONLY,
+    (google.api.field_behavior) = OPTIONAL
+  ];
+  // A credential is stored (always, for an authenticated target).
+  bool credential_configured = 6 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // At most this many attempts per minute to this target, 1-60 (2 when 0).
+  int32 rate_per_minute = 7 [(google.api.field_behavior) = OPTIONAL];
+  // The HTTP timeout in seconds, 1-120 (20 when 0).
+  // (-- api-linter: core::0142::time-field-type=disabled
+  //     aip.dev/not-precedent: the wire profile has no google.protobuf.Duration; an integer of seconds, named by its
+  //     unit, is the one way to write a duration. --)
+  int32 timeout_seconds = 8 [(google.api.field_behavior) = OPTIONAL];
+  // No delivery to this target starts while set; mail is still received and queued.
+  bool paused = 9 [(google.api.field_behavior) = OPTIONAL];
+  // Why the Worker paused it itself, as a code (`retry_after_over_24h`: the target asked to wait over a day); empty
+  // otherwise. Unpausing clears it.
+  string paused_reason = 10 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Why the current revision is blocked, as a code: `http_401`, `http_403`, `credential_or_target_invalid` (until the
+  // credential is rotated or the owner unblocks it) or `http_404`, `http_405`, `http_3xx` (a route block, rechecked
+  // automatically); empty when it is not blocked.
+  string blocked_reason = 11 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // When a route block's cooldown ends and the next delivery rechecks the target; unset for a block that waits for
+  // the owner. A past time: the cooldown ended, and the block is lifted by the next attempt that succeeds.
+  google.protobuf.Timestamp block_expire_time = 12 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The automatic rechecks of the current route block, the scheduled one included (at most 8, about two days; then
+  // the block waits for the owner). 0 when the revision is not blocked.
+  int32 blocked_recheck_count = 13 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // AIP-154: changes with every change of the target. UpdateEndpoint, RotateEndpointCredential and UnblockEndpoint
+  // need the current one.
+  string etag = 14 [(google.api.field_behavior) = OPTIONAL];
+}

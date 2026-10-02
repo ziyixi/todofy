@@ -1,0 +1,228 @@
+// The owner's settings, and the views of the whole service: the overview the UI polls and the setup checks
+// (mail-hero/AGENTS.md §2-§4, §7).
+//
+// Byte totals that can pass 2^31 are doubles: the wire profile has no 64-bit integer (a JSON number must stay exact in
+// JavaScript, and a double is exact below 2^53).
+
+syntax = "proto3";
+
+package mailhero.ui.v2;
+
+import "google/api/field_behavior.proto";
+import "google/api/resource.proto";
+import "google/protobuf/timestamp.proto";
+import "mailhero/ui/v2/message.proto";
+
+option java_multiple_files = true;
+option java_outer_classname = "SettingsProto";
+option java_package = "science.ziyixi.mailhero.ui.v2";
+
+// The owner's settings. A singleton.
+//
+// Retention (storage-v1): a new message freezes the raw, content and ledger periods when it arrives; its clocks start
+// once it reaches a safe terminal state. A period without a value keeps that part forever. The resolved period is
+// global, not frozen per message: an owner-resolved delivery exception (resent and delivered, or cancelled by the owner)
+// loses all its content that long after its last handling. Enabling or shortening a period, or applying the policy to
+// history, needs a PreviewRetentionPolicy confirmation first (UpdateSettingsRequest.retention_confirmation).
+message Settings {
+  option (google.api.resource) = {
+    type: "mail-hero.ziyixi.science/Settings"
+    pattern: "settings"
+    singular: "settings"
+    plural: "settings"
+  };
+
+  // Always `settings`.
+  string name = 1 [(google.api.field_behavior) = IDENTIFIER];
+  // The one address mail is forwarded to (the deployment's RECEIVE_ADDRESS).
+  string receive_address = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // What happens to new mail: ARCHIVE or FORWARD. A change applies to mail that arrives later; queued deliveries are
+  // unchanged.
+  ReceiveMode mode = 3 [(google.api.field_behavior) = OPTIONAL];
+  // The target FORWARD sends new mail to; empty for none (then `mode` must be ARCHIVE: ENDPOINT_REQUIRED). A change
+  // applies to mail that arrives later.
+  string current_endpoint = 4 [
+    (google.api.field_behavior) = OPTIONAL,
+    (google.api.resource_reference).type = "mail-hero.ziyixi.science/Endpoint"
+  ];
+  // No delivery starts while set (the owner's pause); mail is still received and queued.
+  bool send_paused = 5 [(google.api.field_behavior) = OPTIONAL];
+  // No delivery starts: `send_paused`, the deployment's FORCE_SEND_PAUSED (which the owner cannot lift here) or
+  // `maintenance_mode`.
+  bool effective_send_paused = 6 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The deployment's MAINTENANCE_MODE: no new mail, no mutation and no background work.
+  bool maintenance_mode = 7 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Days the raw message of new mail is kept after it reaches a safe terminal state, 1-3650, not longer than
+  // `content_retention_days`; unset: no separate raw cleanup.
+  optional int32 raw_retention_days = 8 [(google.api.field_behavior) = OPTIONAL];
+  // Days the content (parsed content, attachments, frozen requests) of new mail is kept after its safe terminal state,
+  // 1-3650; unset: kept forever.
+  optional int32 content_retention_days = 9 [(google.api.field_behavior) = OPTIONAL];
+  // Days the content-free ledger (IDs, states, hashes) of new mail is kept, 90-3650 (no ledger is deleted yet).
+  optional int32 ledger_retention_days = 10 [(google.api.field_behavior) = OPTIONAL];
+  // Days an owner-resolved exception is kept after its last handling, 1-3650, at least `content_retention_days`;
+  // unset: kept forever (and it must be unset while the content is kept forever).
+  optional int32 resolved_retention_days = 11 [(google.api.field_behavior) = OPTIONAL];
+  // The version of the retention policy new mail freezes; it grows when the raw, content or ledger period changes or
+  // the policy is applied to history.
+  int32 lifecycle_policy_version = 12 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The bytes of content the Worker accounts for (D1's counter).
+  double logical_bytes = 13 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The configured capacity (5 GiB at first): the coordinator refuses new mail beyond it. Not the account's R2 limit.
+  double logical_limit_bytes = 14 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The D1 database's size as D1 reported it with this answer; unset when it did not.
+  optional double database_bytes = 15 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // When the last independent backup was recorded; unset before the first one.
+  google.protobuf.Timestamp last_backup_time = 16 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // AIP-154: changes with every change of the settings. UpdateSettings needs the current one.
+  string etag = 17 [(google.api.field_behavior) = OPTIONAL];
+}
+
+// What the coordinator (the Durable Object that schedules every background job) reported.
+message SchedulerStatus {
+  // The coordinator answered within 3 seconds; when not, every other field is unset.
+  bool available = 1 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Jobs waiting.
+  int32 pending_job_count = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Jobs that failed and wait for a retry or the owner.
+  int32 failed_job_count = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // When the oldest waiting job was registered.
+  google.protobuf.Timestamp oldest_job_time = 4 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // When the coordinator's alarm next runs; unset when none is set.
+  google.protobuf.Timestamp next_alarm_time = 5 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The capacity guard's accounting is initialized (the first inventory of R2 is done).
+  bool capacity_initialized = 6 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The bytes the capacity guard accounts for, once initialized.
+  optional double capacity_used_bytes = 7 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The bytes reserved for mail not indexed yet and its parsed copies, once initialized.
+  optional double capacity_reserved_bytes = 8 [(google.api.field_behavior) = OUTPUT_ONLY];
+}
+
+// An active alert: a condition the owner should look at (codes and counts only, never mail content).
+message ActiveAlert {
+  // How urgent an alert is.
+  enum Severity {
+    // Never written.
+    SEVERITY_UNSPECIFIED = 0;
+    // For information.
+    SEVERITY_INFO = 1;
+    // Look at it soon.
+    SEVERITY_WARNING = 2;
+    // Mail or deliveries are at risk.
+    SEVERITY_CRITICAL = 3;
+  }
+
+  // The alert's code: `capacity_70`, `capacity_85`, `capacity_95`, `backup_stale`, `pending_stale`, `parse_failed`,
+  // `endpoint_blocked`, `endpoint_paused`, `delivery_failed`, `policy_error`; more may come (shown as the code).
+  string code = 1 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // How urgent it is.
+  Severity severity = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Its numbers by name (`count`, `waiting_deliveries`, `current_blocked`, `percent`, ...).
+  map<string, double> metrics = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // When the condition was first seen.
+  google.protobuf.Timestamp first_seen_time = 4 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // When the background check last saw it (about every 10 minutes).
+  google.protobuf.Timestamp last_seen_time = 5 [(google.api.field_behavior) = OUTPUT_ONLY];
+}
+
+// The service at a glance, for the UI's header and pages. A singleton. The UI reads it at most every five minutes (and
+// on demand): it is a handful of indexed D1 reads and one coordinator call, never a scan of all mail.
+message Overview {
+  option (google.api.resource) = {
+    type: "mail-hero.ziyixi.science/Overview"
+    pattern: "overview"
+    singular: "overview"
+    plural: "overviews"
+  };
+
+  // Always `overview`.
+  string name = 1 [(google.api.field_behavior) = IDENTIFIER];
+  // The receive address.
+  string receive_address = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Messages stored (the trigger-maintained counter).
+  int32 message_count = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Deliveries waiting: pending, sending or waiting for a retry.
+  int32 pending_delivery_count = 4 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Deliveries that stopped (FAILED).
+  int32 failed_delivery_count = 5 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Deliveries the consumer took over.
+  int32 delivered_count = 6 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Live messages whose parsing failed.
+  int32 parse_failed_count = 7 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The bytes of content the Worker accounts for.
+  double logical_bytes = 8 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The configured capacity.
+  double logical_limit_bytes = 9 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The D1 database's size; unset when D1 did not report it.
+  optional double database_bytes = 10 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Deleted content whose objects still wait to be removed from R2.
+  double pending_physical_delete_bytes = 11 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // When the last independent backup was recorded; unset before the first one.
+  google.protobuf.Timestamp last_backup_time = 12 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // No delivery starts (Settings.effective_send_paused).
+  bool send_paused = 13 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The coordinator's state.
+  SchedulerStatus scheduler = 14 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The active alerts, most severe first (at most 8).
+  repeated ActiveAlert active_alerts = 15 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // An external alert webhook is configured (ALERT_WEBHOOK_URL; normally not).
+  bool alert_webhook_configured = 16 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The alert webhook's configuration is invalid.
+  bool alert_webhook_misconfigured = 17 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Alert notifications waiting to be sent.
+  int32 pending_notification_count = 18 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Alert notifications that failed.
+  int32 failed_notification_count = 19 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Warnings for the owner, in Chinese, one sentence each (capacity, D1 size, parse failures, pauses, maintenance,
+  // the coordinator, backups).
+  repeated string warnings = 20 [(google.api.field_behavior) = OUTPUT_ONLY];
+}
+
+// One check of the setup guide.
+message SetupCheck {
+  // A check's result.
+  enum Result {
+    // Never written.
+    RESULT_UNSPECIFIED = 0;
+    // Fine.
+    RESULT_OK = 1;
+    // Works, with a caveat.
+    RESULT_WARNING = 2;
+    // Broken.
+    RESULT_ERROR = 3;
+    // Not verifiable here (Email Routing, the first mail): the owner checks it.
+    RESULT_PENDING = 4;
+  }
+
+  // The check's key: `address`, `database`, `scheduler`, `edge`, `received`, `runtime`.
+  string id = 1 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Its title, in Chinese.
+  string label = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Its result.
+  Result result = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // What it means, in Chinese. A passing check never claims that forwarding from the owner's mailbox works.
+  string detail = 4 [(google.api.field_behavior) = OUTPUT_ONLY];
+}
+
+// The setup guide's checks. A singleton.
+message SetupStatus {
+  option (google.api.resource) = {
+    type: "mail-hero.ziyixi.science/SetupStatus"
+    pattern: "setupStatus"
+    singular: "setupStatus"
+    plural: "setupStatuses"
+  };
+
+  // Always `setupStatus`.
+  string name = 1 [(google.api.field_behavior) = IDENTIFIER];
+  // The receive address.
+  string receive_address = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The receive address looks like an email address.
+  bool address_valid = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The coordinator's state.
+  SchedulerStatus scheduler = 4 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // When the newest message arrived; unset before the first.
+  google.protobuf.Timestamp last_receive_time = 5 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The checks, in order.
+  repeated SetupCheck checks = 6 [(google.api.field_behavior) = OUTPUT_ONLY];
+}

@@ -1,0 +1,125 @@
+// The errors of MailHeroUiService (AIP-193).
+//
+// Every error is a google.rpc.Status in Google's HTTP JSON form, written by the shared transcoder
+// (proto/ts/http-transcoder.ts):
+//
+//   {"error": {"code": <HTTP status>, "message": <English, for developers>, "status": <google.rpc.Code name>,
+//              "details": [
+//                {"@type": "type.googleapis.com/google.rpc.ErrorInfo", "reason": "ETAG_MISMATCH",
+//                 "domain": "mail-hero.ziyixi.science"},
+//                {"@type": "type.googleapis.com/google.rpc.LocalizedMessage", "locale": "zh-CN", "message": ...},
+//                {"@type": "type.googleapis.com/google.rpc.RequestInfo", "request_id": <16 hex>}]}}
+//
+// The UI branches on ErrorInfo.reason only: a value name without its prefix, of ErrorReason below (Mail Hero's own
+// reasons) or of common.errors.v1.CommonReason (the reasons every API shares). A reason the UI does not know is shown
+// with the LocalizedMessage, never read as success. ErrorInfo.metadata carries codes only (`rule` below), never a
+// value from the request or from mail.
+//
+// Before mailhero.ui.v2, the owner API (/api/v1, hand-written) answered `{"error": {"code": <lower-case code>,
+// "message": <Chinese>, "request_id"}}`. Every code keeps its meaning under the reason named in its value's comment
+// (`was ...`); the codes that were one string for several causes (`conflict`, `invalid_request`) are split into the
+// reasons below, so the UI no longer reads the cause from the message text.
+
+syntax = "proto3";
+
+package mailhero.ui.v2;
+
+option java_multiple_files = true;
+option java_outer_classname = "ErrorsProto";
+option java_package = "science.ziyixi.mailhero.ui.v2";
+
+// Mail Hero's own reasons: ErrorInfo.reason is the value's name without `ERROR_REASON_`. The HTTP status follows the
+// google.rpc.Code listed for each value (the AIP-193 mapping), except where noted.
+enum ErrorReason {
+  // Never sent.
+  ERROR_REASON_UNSPECIFIED = 0;
+  // ABORTED (409): the request's etag is stale (AIP-154): the resource changed since it was read (was `conflict`
+  // "状态已改变", and the pipeline's `version_conflict`). Read it again and repeat the change.
+  ERROR_REASON_ETAG_MISMATCH = 1;
+  // INVALID_ARGUMENT (400): the request_id was used before for another request: another method, resource or input
+  // (AIP-155; was `conflict` "操作 ID 已用于不同请求" and the pipeline's `action_conflict`). Nothing changed.
+  ERROR_REASON_REQUEST_ID_REUSED = 2;
+  // UNAVAILABLE (503): MAINTENANCE_MODE is on: no mutation is accepted (was `maintenance`). Reads still work.
+  ERROR_REASON_MAINTENANCE = 3;
+  // UNAVAILABLE (503): a backup snapshot holds the write lease (was `backup_in_progress`); new mail is still archived.
+  // Repeat the request later with the same request_id.
+  ERROR_REASON_BACKUP_IN_PROGRESS = 4;
+  // FAILED_PRECONDITION (400; 410 on a download): the message's content was deleted (was `content_deleted`).
+  ERROR_REASON_CONTENT_DELETED = 5;
+  // FAILED_PRECONDITION (400; 410 on a download): the raw message expired under its retention policy; the parsed
+  // content is still readable (was `raw_expired`).
+  ERROR_REASON_RAW_EXPIRED = 6;
+  // FAILED_PRECONDITION (400; 410 on a download): the attachment has no stored copy (Attachment.storage_state
+  // OMITTED; was `attachment_omitted`).
+  ERROR_REASON_ATTACHMENT_OMITTED = 7;
+  // UNAVAILABLE (503): a stored object of the message (its parsed content, the raw message or an attachment) did not
+  // load; the raw message is kept (was `content_unavailable`, the pipeline's `parsed_content_unavailable`).
+  ERROR_REASON_CONTENT_UNAVAILABLE = 8;
+  // UNAVAILABLE (503): a delivery's frozen request did not load (was `payload_unavailable`).
+  ERROR_REASON_PAYLOAD_UNAVAILABLE = 9;
+  // FAILED_PRECONDITION (400): ReparseMessage of a message that cannot be parsed again: its raw message is gone, it
+  // is being parsed, or it has a delivery (was `conflict` "该邮件暂不能重新解析").
+  ERROR_REASON_NOT_REPARSABLE = 10;
+  // FAILED_PRECONDITION (400): RetryDelivery of a delivery that is not failed, waiting or cancelled, or whose
+  // message's content was deleted (was `conflict` "该事件暂不能重试").
+  ERROR_REASON_NOT_RETRYABLE = 11;
+  // FAILED_PRECONDITION (400): RetryDelivery of a delivery without its frozen request or created more than 30 days
+  // ago (was `conflict` "内容不可用或事件重试期限已过"). ResendDelivery makes a new event instead.
+  ERROR_REASON_RETRY_WINDOW_CLOSED = 12;
+  // FAILED_PRECONDITION (400): CancelDelivery of a delivery that is being sent or has ended (was `conflict`
+  // "发送中或已完成的事件无法取消").
+  ERROR_REASON_NOT_CANCELLABLE = 13;
+  // FAILED_PRECONDITION (400): the message is not parsed (or its parse failed), so it has no event to send (was
+  // `message_not_ready`).
+  ERROR_REASON_MESSAGE_NOT_READY = 14;
+  // ALREADY_EXISTS (409): SendMessage of a message that has a delivery already; ResendDelivery makes another one
+  // (was `delivery_exists`).
+  ERROR_REASON_DELIVERY_EXISTS = 15;
+  // FAILED_PRECONDITION (400): the target was archived while the delivery was being made (was
+  // `endpoint_unavailable`).
+  ERROR_REASON_ENDPOINT_UNAVAILABLE = 16;
+  // ABORTED (409): the message changed while its event was being made (was `message_changed`). Repeat the request
+  // with the same request_id.
+  ERROR_REASON_MESSAGE_CHANGED = 17;
+  // FAILED_PRECONDITION (400): ResendDelivery of an event that does not belong to the message (was `invalid_replay`).
+  ERROR_REASON_INVALID_RESEND = 18;
+  // FAILED_PRECONDITION (400): the message cannot make a valid mail.received.v1 event (a blank subject and text, a
+  // subject over 4 KiB, more than 50 recipients, an event over 1 MiB; was `invalid_payload`, HTTP 422).
+  ERROR_REASON_INVALID_PAYLOAD = 19;
+  // INVALID_ARGUMENT (400): the target URI is not a URL, or the display name or URI is blank or too long (was
+  // `invalid_target`, and `invalid_request` for the lengths).
+  ERROR_REASON_INVALID_TARGET = 20;
+  // INVALID_ARGUMENT (400): the target is not a public HTTPS host on the deployment's allow-list
+  // (WEBHOOK_ALLOWED_HOSTS; was `target_not_allowed`).
+  ERROR_REASON_TARGET_NOT_ALLOWED = 21;
+  // INVALID_ARGUMENT (400): a target needs Bearer or Basic authentication (was `invalid_request`).
+  ERROR_REASON_AUTH_REQUIRED = 22;
+  // INVALID_ARGUMENT (400): the credential is empty, over 4096 bytes or holds a line break; a Bearer token is not
+  // printable ASCII without spaces, or a Basic credential has no `:` (was `invalid_request`).
+  ERROR_REASON_INVALID_CREDENTIAL = 23;
+  // INVALID_ARGUMENT (400): an update that moves the target to another origin or authentication type needs the
+  // credential again (was `invalid_request` "新 origin 或认证方式需要重新输入认证值").
+  ERROR_REASON_CREDENTIAL_REQUIRED = 24;
+  // FAILED_PRECONDITION (400): RotateEndpointCredential of a target without authentication (was `invalid_request`).
+  ERROR_REASON_NO_CREDENTIAL = 25;
+  // FAILED_PRECONDITION (400): RotateEndpointCredential of a target with more than 40 revisions on its origin (was
+  // `invalid_request`).
+  ERROR_REASON_TOO_MANY_REVISIONS = 26;
+  // INVALID_ARGUMENT (400): a retention period breaks a rule; ErrorInfo.metadata `rule` says which: `days_range`
+  // (1-3650 days), `ledger_minimum` (the ledger at least 90 days), `raw_after_content` (the raw message kept longer
+  // than the content) or `resolved_before_content` (resolved exceptions kept shorter than the content, or kept while
+  // the content is kept forever). Was `invalid_request`.
+  ERROR_REASON_INVALID_RETENTION_POLICY = 27;
+  // FAILED_PRECONDITION (400): enabling, shortening or applying to history a retention policy needs the confirmation
+  // token of a PreviewRetentionPolicy for exactly that policy and the settings' etag, unexpired (was
+  // `invalid_request` "...前需要预览并确认").
+  ERROR_REASON_RETENTION_CONFIRMATION_REQUIRED = 28;
+  // FAILED_PRECONDITION (400): FORWARD mode needs a current target (was `invalid_request`
+  // "自动投递需要先选择 webhook 目标").
+  ERROR_REASON_ENDPOINT_REQUIRED = 29;
+  // INVALID_ARGUMENT (400): a time range is empty, reversed or longer than its method allows (was `invalid_request`).
+  ERROR_REASON_INVALID_TIME_RANGE = 30;
+  // INVALID_ARGUMENT (400): the time zone is not an IANA name this Worker's Intl knows, or changes its offset too
+  // often within the range (was `invalid_time_zone`). The UI then asks again in UTC.
+  ERROR_REASON_INVALID_TIME_ZONE = 31;
+}
