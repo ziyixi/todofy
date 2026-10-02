@@ -2,7 +2,7 @@ import { useInfiniteQuery, useQuery } from '@tanstack/react-query'
 import { MailEvent_State } from '@ziyixi/proto/todofy/ui/v1/mail_event_pb'
 import { useRef } from 'react'
 import { todofy } from './client'
-import { eventStates, iso, mailEventName, type EventState, type MailEvent } from './types'
+import { iso, mailEventName, type EventState, type MailEvent } from './types'
 
 /** The service status is an aggregate: every screen shares one cached copy refreshed every five minutes. */
 export const OVERVIEW_INTERVAL_MS = 5 * 60 * 1000
@@ -34,6 +34,15 @@ export function useOverview() {
   })
 }
 
+/**
+ * ListMailEventsRequest.filter (AIP-160, one restriction): the attention list, one state (its IDL name, upper case),
+ * or every event.
+ */
+export function eventFilter(view: EventView, state: EventState | null): string {
+  if (view === 'attention') return 'attention = true'
+  return state === null ? '' : `state = ${state.toUpperCase()}`
+}
+
 /** Recent events (newest first, optionally of one state) or the attention list (oldest first), a page at a time. */
 export function useEventList(view: EventView, state: EventState | null = null) {
   return useInfiniteQuery({
@@ -42,8 +51,7 @@ export function useEventList(view: EventView, state: EventState | null = null) {
       todofy.listMailEvents({
         pageSize: PAGE_SIZE,
         pageToken: pageParam,
-        attention: view === 'attention',
-        state: view === 'recent' && state !== null ? (eventStates.value(state) ?? MailEvent_State.UNSPECIFIED) : MailEvent_State.UNSPECIFIED,
+        filter: eventFilter(view, state),
       }),
     initialPageParam: '',
     getNextPageParam: (page) => page.nextPageToken || undefined,

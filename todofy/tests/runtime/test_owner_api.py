@@ -120,9 +120,10 @@ def test_recent_pages_walk_every_event_newest_first(api_worker: Worker) -> None:
 
 
 def test_state_filter_and_attention_list(api_worker: Worker) -> None:
-    complete = _pages(api_worker, state="complete", page_size=4)
+    complete = _pages(api_worker, filter="state = COMPLETE", page_size=4)
     assert [_id(item) for item in complete] == [DONE, *sorted(TIED, reverse=True)]
-    attention = _pages(api_worker, attention="true", page_size=1)
+    assert _pages(api_worker, filter="state=COMPLETE") == complete
+    attention = _pages(api_worker, filter="attention = true", page_size=1)
     assert [_id(item) for item in attention] == [AGED, UNKNOWN, FAILED]  # oldest first
 
 
@@ -155,15 +156,19 @@ def test_page_size_follows_aip_158(api_worker: Worker) -> None:
     "query",
     [
         "view=attention",
-        "attention=true&state=pending",
-        "state=done",
+        "attention=true",
+        "state=pending",
+        "filter=state%20%3D%20DONE",
+        "filter=state%20%3D%20pending",
+        "filter=attention%20%3D%20true%20AND%20state%20%3D%20PENDING",
+        "filter=attention%20%3D%20false",
         "page_size=-1",
         "page_size=ten",
         "page_size=%EF%BC%95",  # a full-width digit
         "page_token=%21%21%21",
         "page_token=" + "A" * 1025,
         "page_token=bm90LWEtdG9rZW4",  # base64url of "not-a-token"
-        "state=pending&state=complete",
+        "filter=a&filter=b",
         "limit=5",
     ],
 )
@@ -175,13 +180,15 @@ def test_invalid_listing_queries_get_bad_request(api_worker: Worker, query: str)
 
 def test_a_page_token_is_bound_to_its_list(api_worker: Worker) -> None:
     first = assert_message(
-        api_worker.owner.get("/api/v1/mailEvents", params={"state": "complete", "page_size": 1}),
+        api_worker.owner.get("/api/v1/mailEvents", params={"filter": "state = COMPLETE", "page_size": 1}),
         pb.ListMailEventsResponse,
     )
     token = first["next_page_token"]
     other = api_worker.owner.get("/api/v1/mailEvents", params={"page_token": token, "page_size": 1})
     assert_status(other, 400, "BAD_REQUEST")
-    same = api_worker.owner.get("/api/v1/mailEvents", params={"state": "complete", "page_token": token, "page_size": 9})
+    same = api_worker.owner.get(
+        "/api/v1/mailEvents", params={"filter": "state = COMPLETE", "page_token": token, "page_size": 9}
+    )
     assert len(assert_message(same, pb.ListMailEventsResponse)["mail_events"]) == len(TIED)
 
 
@@ -242,7 +249,7 @@ def test_service_status_counts_active_rows_of_this_source(api_worker: Worker) ->
     assert body["received_last_day_count"] == 5
     assert body["switches"] == {"processing_paused": True, "reminder_enabled": True}
     # The pending row is due since arrival; the summarized one is not due yet.
-    assert body["oldest_due_time"] == _pages(api_worker, state="pending")[0]["receive_time"]
+    assert body["oldest_due_time"] == _pages(api_worker, filter="state = PENDING")[0]["receive_time"]
     assert body["latest_reminder"]["name"] == f"dailyReminders/{REMINDERS[0]['day']}"
     assert_private(response)
 

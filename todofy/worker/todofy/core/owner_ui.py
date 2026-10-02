@@ -26,6 +26,9 @@ LEGACY_ID = re.compile(r"legacy:[0-9A-Za-z-]{1,128}")
 TASK_ID = re.compile(r"[0-9A-Za-z_-]{1,64}")
 DAY = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}")
 WEEK = re.compile(r"[0-9]{4}-W[0-9]{2}")
+# ListMailEvents' AIP-160 filter: one restriction, `state = <MailEvent.State name>` or `attention = true`.
+EVENT_FILTER = re.compile(r"\s*(state|attention)\s*=\s*([A-Za-z_]{1,32})\s*")
+MAX_FILTER_CHARS = 64
 # An etag is the event's version (MailEvent.etag says opaque; only TodofyCore reads it back).
 ETAG = re.compile(r"[1-9][0-9]{0,15}")
 # Beyond any timestamp, yet still passed to D1 as a JS Number (larger ints become BigInt, which D1 rejects).
@@ -111,6 +114,26 @@ def etag_version(etag: str) -> int:
     if not ETAG.fullmatch(etag) or int(etag) > MAX_INTEGER:
         raise UiError(Reason.ETAG_MISMATCH)
     return int(etag)
+
+
+def event_filter(text: str) -> tuple[str | None, bool]:
+    """ListMailEvents' filter as (the state's wire name or None, attention); anything but one restriction is
+    BAD_REQUEST. Names are upper case as in the IDL (`state = TODO_UNKNOWN`); UNSPECIFIED names no state."""
+    if not text.strip():
+        return None, False
+    match = EVENT_FILTER.fullmatch(text) if len(text) <= MAX_FILTER_CHARS else None
+    if match is None:
+        raise UiError(Reason.BAD_REQUEST)
+    field, value = match.groups()
+    if field == "attention":
+        if value != "true":
+            raise UiError(Reason.BAD_REQUEST)
+        return None, True
+    member = mail_event_pb.MailEvent_State.__members__.get(value) if value.isupper() else None
+    name = None if member is None else wire_name(member)
+    if name is None:
+        raise UiError(Reason.BAD_REQUEST)
+    return name, False
 
 
 def reconcile_task_id(action: mail_event_pb.ReconcileAction, task_id: str) -> str | None:

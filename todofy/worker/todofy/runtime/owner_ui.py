@@ -79,11 +79,9 @@ Handler = Callable[[Call], Awaitable[Answer]]
 async def _list_mail_events(call: Call) -> Answer:
     request: pb.ListMailEventsRequest = call.request
     size = ui.page_size(request.page_size, *EVENTS_PAGE)
-    state = wire_name(request.state) if request.state else None
-    if request.attention and state is not None:
-        raise UiError(Reason.BAD_REQUEST)
+    state, attention = ui.event_filter(request.filter)
     items, following = await api.event_page(
-        call.env, attention=request.attention, state=state, after=ui.event_cursor(call.cursor), limit=size
+        call.env, attention=attention, state=state, after=ui.event_cursor(call.cursor), limit=size
     )
     cursor = None if following is None else {"at": following[0], "id": following[1]}
     return Answer(

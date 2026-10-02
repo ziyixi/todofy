@@ -127,9 +127,10 @@ describe('todofy.ui.v1 through the transcoder', () => {
 
   it('reads a GET from the path and query, strictly', async () => {
     const { env, core: calls } = fakes({}, core);
-    expect((await owner(env, '/api/v1/mailEvents?page_size=5&state=todo_unknown')).status).toBe(200);
-    expect(request(calls[0])).toEqual({ page_size: 5, state: 'todo_unknown' });
-    for (const path of ['/api/v1/mailEvents?view=recent', '/api/v1/mailEvents?state=sleeping', '/api/v1/mailEvents?page_size=x']) {
+    expect((await owner(env, '/api/v1/mailEvents?page_size=5&filter=state%20%3D%20TODO_UNKNOWN')).status).toBe(200);
+    // The filter's grammar is TodofyCore's (core/owner_ui.event_filter); the gateway passes the string on.
+    expect(request(calls[0])).toEqual({ page_size: 5, filter: 'state = TODO_UNKNOWN' });
+    for (const path of ['/api/v1/mailEvents?view=recent', '/api/v1/mailEvents?state=pending', '/api/v1/mailEvents?page_size=x']) {
       const refused = await owner(env, path);
       expect(refused.status, path).toBe(400);
       expect(await statusReason(refused)).toBe('BAD_REQUEST');
@@ -145,18 +146,18 @@ describe('todofy.ui.v1 through the transcoder', () => {
 
   it('wraps the cursor TodofyCore answers in a page token bound to the list parameters', async () => {
     const { env, core: calls } = fakes({}, (call) => uiOk({ mail_events: [] }, call.args[3] === null ? { at: 1, id: EVENT } : null));
-    const first = await owner(env, '/api/v1/mailEvents?state=pending');
+    const first = await owner(env, '/api/v1/mailEvents?filter=state%3DPENDING');
     const { next_page_token: token } = await first.json<{ next_page_token: string }>();
     expect(token).toMatch(/^[A-Za-z0-9_-]+$/);
     expect(JSON.stringify(calls[0]?.args)).not.toContain(token);
 
-    const second = await owner(env, `/api/v1/mailEvents?state=pending&page_size=3&page_token=${token}`);
+    const second = await owner(env, `/api/v1/mailEvents?filter=state%3DPENDING&page_size=3&page_token=${token}`);
     expect(await second.json()).toEqual({});
     expect(calls[1]?.args[3]).toBe(JSON.stringify({ at: 1, id: EVENT }));
-    expect(request(calls[1])).toEqual({ page_size: 3, state: 'pending' });
+    expect(request(calls[1])).toEqual({ page_size: 3, filter: 'state=PENDING' });
 
     // A token of other parameters, or no token at all, never reaches the core.
-    for (const path of [`/api/v1/mailEvents?attention=true&page_token=${token}`, '/api/v1/mailEvents?page_token=x']) {
+    for (const path of [`/api/v1/mailEvents?filter=attention%3Dtrue&page_token=${token}`, '/api/v1/mailEvents?page_token=x']) {
       const refused = await owner(env, path);
       expect(refused.status, path).toBe(400);
       expect(await statusReason(refused)).toBe('BAD_REQUEST');

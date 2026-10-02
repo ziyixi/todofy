@@ -88,6 +88,33 @@ class TestRequests:
             with refused(Reason.ETAG_MISMATCH):
                 ui.etag_version(stale)
 
+    def test_event_filter_is_one_restriction(self):
+        assert ui.event_filter("") == (None, False)
+        assert ui.event_filter("  ") == (None, False)
+        assert ui.event_filter("state = TODO_UNKNOWN") == ("todo_unknown", False)
+        assert ui.event_filter("state=COMPLETE") == ("complete", False)
+        assert ui.event_filter(" attention = true ") == (None, True)
+        for bad in (
+            "state = todo_unknown",
+            "state = UNSPECIFIED",
+            "state = SLEEPING",
+            "attention = false",
+            "attention = TRUE",
+            "state = PENDING AND attention = true",
+            "state = PENDING OR state = COMPLETE",
+            "state != PENDING",
+            "subject = x",
+            "PENDING",
+            "state = " + "A" * 64,
+        ):
+            with refused(Reason.BAD_REQUEST):
+                ui.event_filter(bad)
+
+    def test_every_listed_state_reads_as_a_filter(self):
+        for member in mail_event_pb.MailEvent_State:
+            if member:
+                assert ui.event_filter(f"state = {member.name}") == (wire_name(member), False)
+
     def test_task_id_only_with_task_created(self):
         created, dismiss = mail_event_pb.ReconcileAction.TASK_CREATED, mail_event_pb.ReconcileAction.DISMISS
         assert ui.reconcile_task_id(created, "6X7rM8997g3RQmvh") == "6X7rM8997g3RQmvh"
@@ -101,9 +128,9 @@ class TestRequests:
     def test_read_request_is_strict(self):
         from ziyixi_proto.todofy.ui.v1 import todofy_ui_service_pb as pb
 
-        read = ui.read_request(pb.ListMailEventsRequest, '{"page_size": 3, "state": "pending"}')
-        assert read.page_size == 3 and read.state == mail_event_pb.MailEvent_State.PENDING
-        for text in ('{"limit": 3}', '{"state": "sleeping"}', "not json", "[]"):
+        read = ui.read_request(pb.ListMailEventsRequest, '{"page_size": 3, "filter": "state = PENDING"}')
+        assert read.page_size == 3 and read.filter == "state = PENDING"
+        for text in ('{"limit": 3}', '{"state": "pending"}', '{"filter": 7}', "not json", "[]"):
             with refused(Reason.BAD_REQUEST):
                 ui.read_request(pb.ListMailEventsRequest, text)
 

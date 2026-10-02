@@ -34,7 +34,7 @@ describe('attention page', () => {
     expect(cards[0]).toHaveTextContent('结果不明')
     expect(cards[0]).toHaveTextContent('建任务结果不明')
     expect(cards[1]).toHaveTextContent('Gemini 拒绝请求')
-    expect(calls.find((call) => call.path === '/api/v1/mailEvents')?.search).toBe('?page_size=50&attention=true')
+    expect(calls.find((call) => call.path === '/api/v1/mailEvents')?.search).toBe('?page_size=50&filter=attention%20%3D%20true')
   })
 
   it('shows the reason and request ID when the list fails', async () => {
@@ -73,8 +73,8 @@ describe('events page', () => {
     await user.click(screen.getByRole('button', { name: '加载更多' }))
     expect(await screen.findAllByRole('link', { name: /f8c1e9a0/ })).toHaveLength(2)
     const searches = calls.filter((call) => call.path === '/api/v1/mailEvents').map((call) => call.search)
-    expect(searches).toContain('?page_size=50&state=complete')
-    expect(searches).toContain('?page_size=50&page_token=next-1&state=complete')
+    expect(searches).toContain('?page_size=50&filter=state%20%3D%20COMPLETE')
+    expect(searches).toContain('?page_size=50&page_token=next-1&filter=state%20%3D%20COMPLETE')
     expect(screen.queryByRole('button', { name: '加载更多' })).not.toBeInTheDocument()
   })
 })

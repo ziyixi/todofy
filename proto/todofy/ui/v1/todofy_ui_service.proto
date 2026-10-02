@@ -181,22 +181,17 @@ message GetServiceStatusRequest {
 }
 
 // Input of ListMailEvents.
-// (-- api-linter: core::0132::request-unknown-fields=disabled
-//     aip.dev/not-precedent: `state` and `attention` pick one of the ledger's two indexed lists (by state, newest
-//     first; the attention list, oldest first, as the owner works through it); the literal filter subset of
-//     proto/ts/filter.ts has no field comparisons to say that with. --)
 message ListMailEventsRequest {
   // At most this many events (AIP-158): 0 means 50, and a larger value is read as 100.
   int32 page_size = 1 [(google.api.field_behavior) = OPTIONAL];
-  // The previous page's `next_page_token`, with the same `state` and `attention` (others are INVALID_ARGUMENT).
+  // The previous page's `next_page_token`, with the same filter (others are INVALID_ARGUMENT).
   string page_token = 2 [(google.api.field_behavior) = OPTIONAL];
-  // Only events in this state, newest first. Canary events are never listed.
-  // (-- api-linter: core::0216::state-field-output-only=disabled
-  //     aip.dev/not-precedent: an input that picks which events to list, not a resource's state. --)
-  MailEvent.State state = 3 [(google.api.field_behavior) = OPTIONAL];
-  // Only the events that need the owner (MailEvent.attention), oldest first; with `state` it is
-  // INVALID_ARGUMENT.
-  bool attention = 4 [(google.api.field_behavior) = OPTIONAL];
+  // AIP-160, one restriction, which also picks the order (each is one of the ledger's indexed lists):
+  // `state = TODO_UNKNOWN` (a MailEvent.State name without its prefix, upper case) lists the events in that state,
+  // newest first; `attention = true` lists the events that need the owner (MailEvent.attention), oldest first, as
+  // the owner works through them. Spaces around `=` are optional. Empty lists every event, newest first. Anything
+  // else is INVALID_ARGUMENT. Canary events are never listed.
+  string filter = 3 [(google.api.field_behavior) = OPTIONAL];
 }
 
 // Output of ListMailEvents.

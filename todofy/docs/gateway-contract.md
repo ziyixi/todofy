@@ -299,7 +299,7 @@ reaches the gateway as an exception, answered 503 `UNAVAILABLE`.
 | rpc (`google.api.http`) | The DO's work |
 |---|---|
 | `GetServiceStatus` `GET /api/v1/serviceStatus` | D1 counts + DO budgets, in-process (the old overview) |
-| `ListMailEvents` `GET /api/v1/mailEvents?page_size&page_token&state&attention` | 50 by default, at most 100; `state` and `attention` exclusive |
+| `ListMailEvents` `GET /api/v1/mailEvents?page_size&page_token&filter` | 50 by default, at most 100; `filter` is one AIP-160 restriction, `state = TODO_UNKNOWN` (newest first) or `attention = true` (oldest first), parsed by `core/owner_ui.event_filter` |
 | `GetMailEvent` `GET /api/v1/mailEvents/{id}` | the event, its transitions and allowed actions; a name that is not a UUID → `NOT_FOUND` |
 | `ReconcileMailEvent` `POST /api/v1/mailEvents/{id}:reconcile` | `etag` is the event's version; replays and conflicts via `owner_actions` keyed by `request_id` (`REQUEST_ID_REUSED`) |
 | `ListDailyReminders` `GET /api/v1/dailyReminders` | 50 by default, at most 100 |
