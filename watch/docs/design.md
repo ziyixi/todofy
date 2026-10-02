@@ -437,7 +437,8 @@ All hermetic: synthetic content only, the only network is loopback, clocks are i
   alarm is checked by hand after the deploy (README "Deploy"). The lead fills in two values read after the apply
   (`infra/README.md` "Adding an app" step 4) and commits them together: the AUD in `wrangler.toml`
   (`deploy/test/wrangler-config.test.mjs` fails while it is the placeholder) and the application id in
-  `infra/ids.tf` `access_app_ids["watch"]` (`test_infra_config.py` fails while it is the all-zeros UUID). The push
+  `infra/ids.tf` `access_app_ids["watch"]` (`test_infra_config.py` fails while it is the all-zeros UUID); both were
+  filled in on 2026-10-02, after "Infra apply" created the application. The push
   changes `infra/`, so it runs "Infra drift": it must be green (`no-op: 19`, `output changes: 0`, no outputs problem)
   before the deploy is trusted, since the Access probes pass whatever the AUD (Access answers before the Worker runs);
   red with `vars.ACCESS_AUDIENCE differs` means a wrong AUD: fix it and push again:

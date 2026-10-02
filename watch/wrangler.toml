@@ -74,9 +74,7 @@ props = { source = "watch" }
 # The watch host: the only origin a mutation may come from (CSRF).
 PUBLIC_HOST = "watch.ziyixi.science"
 ACCESS_ISSUER = "https://ziyixi.cloudflareaccess.com"
-# AUD tag of the Access application "watch" (the whole host; infra/access.tf owner_apps["watch"]).
-# W2 FILL-IN: replace the 64 zeros with the AUD read in infra/README.md "Adding an app" step 4 (the admin helper's
-# GET of the Access applications). deploy/test/wrangler-config.test.mjs fails, and the wrapper refuses a real deploy,
-# while it is the placeholder. The same step's application id is the second fill-in, in infra/ids.tf
-# access_app_ids["watch"] (test_infra_config.py fails while it is the all-zeros UUID). Commit both together.
-ACCESS_AUDIENCE = "0000000000000000000000000000000000000000000000000000000000000000"
+# AUD tag of the Access application "watch" (the whole host; infra/access.tf owner_apps["watch"]), created by "Infra
+# apply" and read as in infra/README.md "Adding an app" step 4; its application id is in infra/ids.tf. "Infra drift"
+# compares this value with the application's every day.
+ACCESS_AUDIENCE = "faa4baa704bba09670265053427cb88ba1047384cbc849b15dc7d3a732e3b576"

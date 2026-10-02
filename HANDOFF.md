@@ -13,7 +13,7 @@ Rules for this file:
   security-posture details. Those stay with the owner.
 - Keep it short. The details live in each app's docs; link to them.
 
-Last updated: 2026-10-02 (`mail.received.v1` on proto has landed; watch-infra has landed and "Infra apply" created the Access application "watch"; watch-l2 waits for its two fill-ins).
+Last updated: 2026-10-02 (watch-l2 lands with this change; `mail.received.v1` on proto and watch-infra have landed, and "Infra apply" created the Access application "watch").
 
 ## How work lands
 
@@ -33,7 +33,7 @@ Last updated: 2026-10-02 (`mail.received.v1` on proto has landed; watch-infra ha
 
 | Work | Branch (pushed unless noted) | State | Lands as |
 | --- | --- | --- | --- |
-| Watch W2 + W3: `watch.ziyixi.science`, daily Todoist digest via task-intent `SOURCE_WATCH` (Todofy's least-privilege `Intents` entrypoint), Ops status and the 网页监视 tile for the dashboard | `watch-l2` (local, on `main` since `watch-infra` landed) | Done, verified from a clean clone, except two fill-ins | Next. Fill in the AUD (`watch/wrangler.toml`) and the application id (`infra/ids.tf`) of the Access application "watch" that "Infra apply" created, commit both, then push; deploys Todofy before watch, then dashboard, Lab, Mail Hero |
+| Watch W2 + W3: `watch.ziyixi.science`, daily Todoist digest via task-intent `SOURCE_WATCH` (Todofy's least-privilege `Intents` entrypoint), Ops status and the 网页监视 tile for the dashboard | `watch-l2` | Lands with this change (the AUD and the application id of the Access application "watch" filled in) | Needs the `production` secret `WATCH_CSRF_SIGNING_KEY` before the push; deploys Todofy before watch, then the dashboard, Lab and Mail Hero, and runs "Infra drift" (`infra/` changed) |
 
 ## Waiting to be verified
 
@@ -48,10 +48,15 @@ Last updated: 2026-10-02 (`mail.received.v1` on proto has landed; watch-infra ha
 - Infra drift must stay `no-op` on its daily run (13:23 UTC).
 - After `dashboard-new-tiles` deploys: 首页 shows FlowDay and 短链接 as ● 正常 with a latency
   (`dashboard/docs/verification.md` §2).
-- After `watch-l2` deploys: its push's "Infra drift" green with `no-op: 19`, `output changes: 0` (the only check of
-  the committed AUD); signed in, `https://watch.ziyixi.science/status` shows a next scheduler time (README "Deploy");
-  the dashboard's 网页监视 tile is ok on its next tick; the first digest task after 14:00 UTC once a watch has
-  changed; a follow-up commit adds the `WatchState` namespace id to the dashboard registry.
+- After `watch-l2` deploys (`watch/README.md` "Deploy"):
+  - its push's "Infra drift" is green with `no-op: 19`, `output changes: 0` and no outputs problem: the only check of
+    the committed AUD (Access answers the deploy's probes before the Worker runs);
+  - signed in, `https://watch.ziyixi.science/status` shows a next scheduler time (the alarm is armed);
+  - the dashboard's 网页监视 tile (首页, 应用) is ● 正常 with its 新变化 count on its next tick, and the 网页监视 flow shows;
+  - the first daily digest task in Todoist after 14:00 UTC on a day a watch has changed (Todofy's `Intents`, source
+    watch);
+  - a follow-up commit records the `WatchState` Durable Object namespace id in the dashboard registry
+    (`dashboard/worker/src/registry.ts` RESOURCES `watch-state`, read-only from the account's namespace list).
 
 ## Waiting for the owner
 
