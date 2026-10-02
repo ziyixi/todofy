@@ -8,15 +8,17 @@ request again with the generated code, does the work and answers
     {"ok": <the response message as wire JSON text>, "next_cursor": <JSON text of the next page's cursor> | None}
 
 or ``{"error": <ErrorInfo reason>, "detail": <a MailEvent as wire JSON text> | None, "retry_after": int | None}``,
-never an exception (a Python exception reaches the gateway only as an opaque error). D1 and storage failures are
-UNAVAILABLE, which the UI may repeat with the same request_id; a bug raises, which reaches the gateway as a failed
-call, answered UNAVAILABLE like a stub failure (docs/gateway-contract.md §3.5).
+never an exception (a Python exception reaches the gateway only as an opaque error, which it must read as the
+object being unavailable). D1 and storage failures (JsException) are UNAVAILABLE, which the UI may repeat with the
+same request_id; any other exception, including an answer the codec refuses to write, is a bug: INTERNAL, which no
+client repeats by itself, with only the exception's type logged (docs/gateway-contract.md §3.5).
 
 The ledger's readers (runtime/api.py, the coordinator, reminder.py, metrics.py, gtd.py, backup.py) build the
 same dicts as the owner API before todofy.ui.v1; core/owner_ui.py maps them to the generated messages. Reads are
 the same bounded, indexed D1 queries as before.
 """
 
+import json
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Any
@@ -236,7 +238,19 @@ def _refusal(error: UiError) -> dict[str, Any]:
 async def handle(
     env: Any, coordinator: Any, owner: str, method: str, request_json: str, cursor_json: str | None
 ) -> dict[str, Any]:
-    """One todofy.ui.v1 rpc for the canonical owner the gateway verified with Access."""
+    """One todofy.ui.v1 rpc for the canonical owner the gateway verified with Access; never raises."""
+    try:
+        return await _answer(env, coordinator, owner, method, request_json, cursor_json)
+    except Exception as exc:
+        # A bug, never the owner's data: the rpc's name (only a known one) and the exception's type.
+        rpc = method if method in METHODS else None
+        print(json.dumps({"owner_ui": "internal", "rpc": rpc, "error": type(exc).__name__}))
+        return {"error": str(Reason.INTERNAL), "detail": None, "retry_after": None}
+
+
+async def _answer(
+    env: Any, coordinator: Any, owner: str, method: str, request_json: str, cursor_json: str | None
+) -> dict[str, Any]:
     try:
         if "@" not in owner or len(owner) > MAX_OWNER_CHARS:
             raise UiError(Reason.UNAUTHORIZED)
@@ -252,9 +266,10 @@ async def handle(
             # A backup job keeps the ledger still for a minute or so (at most its lease).
             raise UiError(Reason.UNAVAILABLE)
         result = await handler(Call(env, coordinator, owner, request, cursor_json))
+        # Inside the try: an answer the codec refuses to write is a bug (INTERNAL), not a transport failure.
+        return {"ok": ui.answer(result.message), "next_cursor": result.next_cursor}
     except UiError as error:
         return _refusal(error)
     except JsException:
         # D1 or object storage failed; the platform logs carry the details.
         return _refusal(UiError(Reason.UNAVAILABLE))
-    return {"ok": ui.answer(result.message), "next_cursor": result.next_cursor}

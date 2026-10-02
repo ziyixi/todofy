@@ -46,6 +46,8 @@ class Reason(StrEnum):
     REQUEST_ID_REUSED = "REQUEST_ID_REUSED"
     RATE_LIMITED = "RATE_LIMITED"
     MAINTENANCE = "MAINTENANCE"
+    # A bug in TodofyCore (an exception, or an answer the codec refuses to write): never repeated by a client.
+    INTERNAL = "INTERNAL"
 
 
 class UiError(Exception):

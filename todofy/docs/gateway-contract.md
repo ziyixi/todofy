@@ -290,9 +290,11 @@ The answer is a plain object, never an exception for an expected outcome:
 The gateway reads `ok` leniently with the generated TypeScript code and writes the response; a refusal becomes
 the Status of its reason (`INTERNAL` for one the gateway does not know), with the event as a detail
 (`ETAG_MISMATCH` and `ACTION_NOT_ALLOWED` answer the event as it is now) and `retry-after`. D1 or storage
-failures are `UNAVAILABLE`, which the UI may repeat with the same `request_id`; so is a write while a backup
-holds the ledger (`backup.holds_ledger`). A Python exception reaches the gateway as a failed call, like a stub
-failure: 503 `UNAVAILABLE`.
+failures (a `JsException`) are `UNAVAILABLE`, which the UI may repeat with the same `request_id`; so is a write
+while a backup holds the ledger (`backup.holds_ledger`). Any other Python exception, including an answer the
+codec refuses to write, is a bug: `owner_ui` answers `INTERNAL` (500, never repeated by a client) and logs only
+the rpc's name and the exception's type. Only a failed RPC call itself (the object down, a deploy in progress)
+reaches the gateway as an exception, answered 503 `UNAVAILABLE`.
 
 | rpc (`google.api.http`) | The DO's work |
 |---|---|

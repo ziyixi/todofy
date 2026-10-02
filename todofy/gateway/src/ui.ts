@@ -9,8 +9,9 @@
  * tokens (proto/ts/page-token.ts, bound to the list's other parameters; TodofyCore sees and returns the cursor
  * inside), a made-up request_id for a mutation sent without one (so it is not deduplicated), Retry-After, and the
  * mapping of each reason to its google.rpc.Code and the owner's copy. A failed core call (the object down, a
- * deploy in progress, a Python exception) is UNAVAILABLE; an answer the generated code cannot read is a bug,
- * INTERNAL. GetIntegration is composed here from the gateway's own facts and TodofyCore's setup().
+ * deploy in progress) is UNAVAILABLE; TodofyCore answers its own bugs (a Python exception, an answer its codec
+ * refuses) as the reason INTERNAL, and an answer the generated code here cannot read is INTERNAL too.
+ * GetIntegration is composed here from the gateway's own facts and TodofyCore's setup().
  */
 import type { CommonReason } from '@ziyixi/proto/common/errors/v1/errors_pb';
 import { HttpTranscoder, type RouteInfo, type ServiceHandlers, type ShapeOf } from '@ziyixi/proto/http-transcoder';

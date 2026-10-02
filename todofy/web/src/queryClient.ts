@@ -1,10 +1,18 @@
 import { QueryClient } from '@tanstack/react-query'
 import { ApiError } from './api/client'
 
-/** Retry only failures that can heal by themselves; a 4xx will not change on a second try. */
-function shouldRetry(failures: number, error: unknown): boolean {
+/** A gateway or edge answer without a Status body that a moment can heal (Cloudflare's 502/503/504 pages). */
+const TRANSIENT_HTTP = new Set([502, 503, 504])
+
+/**
+ * Retry only failures that can heal by themselves (proto/README.md): no answer at all, UNAVAILABLE, or an edge
+ * error page. INTERNAL (a bug) and every 4xx answer the same on a second try.
+ */
+export function shouldRetry(failures: number, error: unknown): boolean {
   if (failures >= 2) return false
-  return !(error instanceof ApiError) || error.status === 0 || error.status >= 500
+  if (!(error instanceof ApiError)) return false
+  if (error.status === 0 || error.reason === 'UNAVAILABLE') return true
+  return error.reason === 'BAD_RESPONSE' && TRANSIENT_HTTP.has(error.status)
 }
 
 export function createQueryClient(): QueryClient {

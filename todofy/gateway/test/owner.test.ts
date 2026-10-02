@@ -172,6 +172,8 @@ describe('todofy.ui.v1 through the transcoder', () => {
       [uiRefusal('NOT_FOUND'), 404, 'NOT_FOUND'],
       [uiRefusal('RATE_LIMITED', null, 42), 429, 'RESOURCE_EXHAUSTED'],
       [uiRefusal('UNAVAILABLE'), 503, 'UNAVAILABLE'],
+      // A bug in TodofyCore (runtime/owner_ui.handle): never retryable.
+      [uiRefusal('INTERNAL'), 500, 'INTERNAL'],
       [uiRefusal('SOMETHING_NEW'), 500, 'INTERNAL'],
     ];
     for (const [answer, status, code] of cases) {
