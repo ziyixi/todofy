@@ -47,8 +47,8 @@ import type { ParsedRecord } from './api-messages.ts'
  * Rounds of every call. The first round compiles the code (V8 compiles a function when it first runs); 1, 5, 20 and 100
  * rounds measured the same first requests, so a few rounds suffice. Five rounds of the calls add about 10 ms to an
  * isolate's startup (wall time from Miniflare's start to the first answer: 117 ms without the warm-up, 127 ms with it,
- * 190 ms with 200 rounds; Node runs the five rounds in about 3 ms, test/warmup.test.mjs), far below Workers' 1 s limit
- * on a Worker's startup.
+ * 190 ms with 200 rounds; a fresh Node process runs the five rounds cold in about 10 ms, test/warmup.test.mjs), far
+ * below Workers' 1 s limit on a Worker's startup.
  */
 export const WARMUP_ROUNDS = 5
 /** Rows of each list's answer per round. */

@@ -4,10 +4,12 @@
 // a whole warm-up stays a small part of Workers' startup budget (the global scope may use up to 1 s of CPU; this
 // machine is not Cloudflare's, so the bound is loose). Synthetic data only.
 import test from 'node:test'
+import { spawnSync } from 'node:child_process'
+import { fileURLToPath } from 'node:url'
 import assert from 'node:assert/strict'
 import { MailHeroUiService } from '@ziyixi/proto/mailhero/ui/v2/mail_hero_ui_service_pb'
 import { ownerApiRoutes } from '../src/native/api.ts'
-import { warmCall, warmUp, WARM_CALLS, WARMUP_ROUNDS } from '../src/native/warmup.ts'
+import { warmCall, WARM_CALLS } from '../src/native/warmup.ts'
 
 test('the warm-up runs without bindings, every call routed to its own method', () => {
   const routes = ownerApiRoutes()
@@ -42,11 +44,28 @@ test('the warm-up runs without bindings, every call routed to its own method', (
   assert.deepEqual([update.settings.name, update.settings.sendPaused, update.updateMask.paths], ['settings', true, ['send_paused']])
 })
 
-test('a whole warm-up takes a small part of the startup budget', () => {
-  const routes = ownerApiRoutes()
-  const start = performance.now()
-  warmUp(routes, WARMUP_ROUNDS)
-  const ms = performance.now() - start
-  console.log(`warm-up: ${WARMUP_ROUNDS} rounds of ${Object.keys(WARM_CALLS).length} calls in ${ms.toFixed(1)} ms`)
+// A cold warm-up, as an isolate's startup runs it: in a fresh Node process that never imports api.ts (whose module
+// scope runs the warm-up itself), so no code it times was compiled before. The routes are built as the transcoder
+// builds them (http-rule.ts httpBindings, most specific first).
+const COLD_WARMUP = `
+import { httpBindings } from '@ziyixi/proto/http-rule'
+import { compareSpecificity } from '@ziyixi/proto/http-path'
+import { MailHeroUiService } from '@ziyixi/proto/mailhero/ui/v2/mail_hero_ui_service_pb'
+import { warmUp, WARMUP_ROUNDS } from ${JSON.stringify(new URL('../src/native/warmup.ts', import.meta.url).href)}
+const routes = httpBindings(MailHeroUiService).sort((a, b) => compareSpecificity(a.template, b.template))
+const start = performance.now()
+warmUp(routes, WARMUP_ROUNDS)
+console.log(JSON.stringify({ ms: performance.now() - start, rounds: WARMUP_ROUNDS }))
+`
+
+test('a whole cold warm-up takes a small part of the startup budget', () => {
+  const run = spawnSync(process.execPath, ['--input-type=module', '-e', COLD_WARMUP], {
+    cwd: fileURLToPath(new URL('..', import.meta.url)),
+    encoding: 'utf8',
+    timeout: 60_000,
+  })
+  assert.equal(run.status, 0, run.stderr)
+  const { ms, rounds } = JSON.parse(run.stdout.trim().split('\n').at(-1))
+  console.log(`warm-up, cold: ${rounds} rounds of ${Object.keys(WARM_CALLS).length} calls in ${ms.toFixed(1)} ms`)
   assert.ok(ms < 250, `${ms.toFixed(1)} ms`)
 })
