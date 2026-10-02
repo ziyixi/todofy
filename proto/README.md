@@ -676,16 +676,16 @@ with lists that long should expect the same: page sizes from its CPU test, keyse
 CPU test is `todofy/gateway/test/runtime/cpu.test.ts`, the table in `todofy/docs/gateway-contract.md` §8). Todofy's
 gateway passed the Durable Object's JSON through before; now it decodes every request and reads and writes every
 answer again with the generated code, so it pays more than Lab did, and most for its largest answers. Bundles: the
-gateway 38.7 → 289.5 KiB (gzip 11.5 → 71.4 KiB: its first protobuf-es runtime, the codec, the transcoder and the
+gateway 39.7 → 290.6 KiB (gzip 11.8 → 71.7 KiB: its first protobuf-es runtime, the codec, the transcoder and the
 descriptors; budget 86 KiB, `todofy/deploy/bundle-size.mjs`), the UI's JavaScript gzip 131.9 → 172.3 KiB (budget
 208 KiB, `todofy/web/scripts/js-budget.mjs`). CPU in the gateway, reference ms, medians of three fresh isolates:
-the isolate's first API request (the service status, with the first RS256 verification) 3.2 → 4.2-4.8 (7.4-8.2
+the isolate's first API request (the service status, with the first RS256 verification) 3.2 → 4.2-5.2 (7.4-8.2
 until `todofy/gateway/src/warm.ts` ran the codec once at global scope over synthetic messages, outside every
 request's limit; bound 8), a page of 100 events 0.4 → 3.2 first and 2.2 warm, 120 GTD days 0.4 → 3.2 and 2.9, a
 reconcile 1.0 → 2.1 and 1.6, the two largest answers (a 1.9 MB legacy text, every stored report at the newsletter's
 limits) 2.1 → 4.4 and 1.3 → 5.2 (bound 8); every other first run at most 3.2 (bound 6) and warm median at most 2.9
 (bound 4). todofy-core (a Durable Object, 30 s) builds the same dicts as before and maps them to generated
-dataclasses; its upload 554.0 → 627.2 KiB (gzip 153.5 → 166.6: the `todofy.ui.v1` modules and the mapping).
+dataclasses; its upload 554.1 → 627.3 KiB (gzip 153.6 → 166.6: the `todofy.ui.v1` modules and the mapping).
 
 **Adding a UI API.**
 

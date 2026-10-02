@@ -22,8 +22,8 @@ import { accessClaims, testIssuer } from './jwt.ts';
 /**
  * The isolate's first API request (the service status, what every page asks first), in reference milliseconds: the
  * first RS256 verification and key import, the transcoder's first run and what the codec still does the first time
- * after src/warm.ts. Measured 4.2-4.8 ms per isolate (3.2-3.3 before todofy.ui.v1): ../../docs/gateway-contract.md
- * §8, "CPU".
+ * after src/warm.ts. Medians of 4.2-5.2 ms measured, single isolates 3.9-8.6 on a busy machine (3.2-3.3 before
+ * todofy.ui.v1): ../../docs/gateway-contract.md §8, "CPU".
  */
 const API_INIT_BOUND_MS = 0.8 * FREE_CPU_MS;
 /** Every other request's first run and warm median, in reference milliseconds (at most 3.2 and 2.9 measured). */

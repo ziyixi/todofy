@@ -4,8 +4,8 @@
 // gateway/wrangler.toml. todofy-core (Python, vendored by pywrangler) is not measured here.
 //
 // BUDGET_GZIP_BYTES is the gateway's ratchet, well below the limit, so that growth is a decision. It was set on
-// 2026-10-02 at about 1.2 times the measured bundle (71.4 KiB gzip: the transcoder of todofy.ui.v1 with the protobuf-es
-// runtime, the generated descriptors and the HTTP runtime of proto/ts, and packages/edge-auth; 11.5 KiB before
+// 2026-10-02 at about 1.2 times the measured bundle (71.7 KiB gzip: the transcoder of todofy.ui.v1 with the protobuf-es
+// runtime, the generated descriptors and the HTTP runtime of proto/ts, and packages/edge-auth; 11.8 KiB before
 // todofy.ui.v1, docs/gateway-contract.md §8). Raise it only in the commit that needs it, saying why there. The UI's
 // own budget is in ../web/scripts/js-budget.mjs.
 //

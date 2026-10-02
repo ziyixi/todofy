@@ -713,7 +713,7 @@ lenient read of the DO's answer with the generated code and the transcoder's wri
 
 | Request | First run | Warm median | Bound |
 |---|---|---|---|
-| The isolate's first API request (the service status; first RS256 verification and key import) | 3.2 → 4.2-4.8 | | 8 |
+| The isolate's first API request (the service status; first RS256 verification and key import) | 3.2 → 4.2-5.2 (single isolates 3.9-8.6 on a busy machine) | | 8 |
 | Service status | 0.4 → 0.8 | 0.4 → 0.7 | 6 / 4 |
 | 100 mail events | 0.4-0.5 → 3.2 | 0.4 → 2.2 | 6 / 4 |
 | The next page (its token) | → 2.0 | → 2.0 | 6 / 4 |
@@ -728,10 +728,10 @@ lenient read of the DO's answer with the generated code and the transcoder's wri
 The cost is the generated code reading and writing every answer again: a few tenths of a millisecond per
 small message, about 2 ms for a page of 100 events, and the codec's text rules over a report's 230,000
 characters. `src/warm.ts` runs the codec once over synthetic messages at global scope (startup, outside every
-request's limit), which took the isolate's first API request from 7.4-8.2 to 4.2-4.8 ms. The DO's own CPU (30 s
+request's limit), which took the isolate's first API request from 7.4-8.2 to 4.2-5.2 ms. The DO's own CPU (30 s
 per invocation) is not measured here: it builds the same dicts as before and maps them to the generated
-dataclasses; todofy-core's upload grew 554.0 → 627.2 KiB (gzip 153.5 → 166.6 KiB). The gateway's bundle, `deploy/bundle-size.mjs` (budget 86 KiB gzip): 38.7 → 289.5 KiB raw, 11.5 →
-71.4 KiB gzip (the protobuf-es runtime, the codec, the transcoder and the descriptors of `todofy.ui.v1`,
+dataclasses; todofy-core's upload grew 554.1 → 627.3 KiB (gzip 153.6 → 166.6 KiB). The gateway's bundle, `deploy/bundle-size.mjs` (budget 86 KiB gzip): 39.7 → 290.6 KiB raw, 11.8 →
+71.7 KiB gzip (the protobuf-es runtime, the codec, the transcoder and the descriptors of `todofy.ui.v1`,
 `todofy.report.v1`, `google/api` and `common/errors`); the UI's JavaScript, `web/scripts/js-budget.mjs` (budget
 208 KiB gzip): 131.9 → 172.3 KiB gzip.
 
