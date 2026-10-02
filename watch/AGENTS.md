@@ -10,5 +10,6 @@
 - **隐私**：被监视的 URL、页面文字、选择器和 diff 都是 owner 的个人数据，只在对象中、经 Access 访问。日志只记 ID、状态、计数和错误码；`observability` 的调用日志与 traces 保持关闭。
 - **测试只用合成数据**：页面来自 `worker/test/fake-sites.ts`（Miniflare 的 outbound service）或本机回环的 `test/runtime/serve-fake-sites.ts`；测试从不访问真实第三方网站，时钟一律注入（`DEV_MANUAL_ALARMS`、`step(now)`、`setClock`）。
 - **失败从不等于“无变化”**：健康检查失败都有原因码；检查在抓取后抛出的错误记为 `INTERNAL_ERROR`，同样计入失败并逐步拉长重试间隔；连续 3 次为 BROKEN（每轮失败只进一次每日摘要），14 天自动暂停。每个被抑制的变化都要保存原因；待确认的变化从不被无声丢弃（忽略行、改设置、确认抓取失败都有去处）。
-- **接口**：owner API 是 `proto/watch/ui/v1`（AIP 风格，经共享转码器与客户端）；改 proto 时运行 `proto/` 的 lint、api-lint 与 breaking。通知（W3）与 AI 判断只保留接口，v1 不投递、不调用模型。
+- **接口**：owner API 是 `proto/watch/ui/v1`（AIP 风格，经共享转码器与客户端）；改 proto 时运行 `proto/` 的 lint、api-lint 与 breaking。AI 判断只保留接口，不调用模型。
 - **部署**：W2 之前不部署（`CHECK_ONLY`、`UNDEPLOYED`、全零 AUD 占位符）；不要手动 `wrangler deploy`，本地开发只用本地绑定。
+- **通知**（W3，`docs/design.md` §7）：只经 `TODOFY` binding 以 task-intent-v1 `SOURCE_WATCH` 发给 Todofy；任务只含 owner 起的名称、触发类型、次数与本应用 `/watches/<id>` 链接，从不含页面文字、被监视的 URL 或变化摘要（页面内容不可信，可能针对读任务的助手）。每个来源每日至多 10 条 intent（紧急至多 9 条，留一条给摘要）；intent 先在事务中冻结再发送，以同样字节重试，按 intent ID 幂等；日志只记 intent ID、类型、计数与错误码。

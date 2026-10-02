@@ -7,7 +7,7 @@
  * the previous check's), SUPPRESSED_KEPT suppressed and CHANGES_KEPT changes in all (the oldest acknowledged, then
  * suppressed, then confirmed ones go first; never a pending one or the CONFIRMED_KEPT newest confirmed ones); one row
  * per host and per day; request IDs for a day; URL fetch times for URL_MIN_SPACING_MS; notifications for
- * NOTIFICATIONS_KEPT_MS and at most NOTIFICATIONS_MAX.
+ * NOTIFICATIONS_KEPT_MS and at most NOTIFICATIONS_MAX; the Todofy sink's intents (at most 10 a day) for INTENTS_KEPT_MS.
  *
  * Rows read are a budget too (Workers Free: 5,000,000 rows read and 100,000 written a day for the whole account's
  * SQLite Durable Objects, Mail Hero's included; docs/design.md §8). So the bounds are kept where they grow: after an
@@ -23,6 +23,7 @@ import {
   CONFIRMED_KEPT,
   DAY,
   HOUR,
+  INTENTS_KEPT_MS,
   NOTIFICATIONS_KEPT_MS,
   NOTIFICATIONS_MAX,
   PREVIEW_CACHE_MS,
@@ -33,7 +34,7 @@ import {
 } from './limits.ts';
 
 /** Bump with every schema change; `migrate` runs the steps above the stored version. */
-export const SCHEMA_VERSION = 2;
+export const SCHEMA_VERSION = 3;
 
 const SCHEMA_V1 = [
   `CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)`,
@@ -135,6 +136,30 @@ const SCHEMA_V2 = [
   // When each URL was last requested (a check or a preview): the same URL is never fetched again within
   // URL_MIN_SPACING_MS, whoever asks.
   `CREATE TABLE IF NOT EXISTS url_fetches (url TEXT PRIMARY KEY, at INTEGER NOT NULL)`,
+];
+
+const SCHEMA_V3 = [
+  // The undelivered events, by policy (notify.ts pendingEvents and the urgent check of every alarm): a partial index
+  // holds only what waits, so an idle alarm reads nothing of the delivered history.
+  `CREATE INDEX IF NOT EXISTS notifications_pending ON notifications (policy, id) WHERE delivered_at IS NULL`,
+  // The Todofy sink's own inbox (todofy.ts): each task intent frozen with the events it took over, until Todofy holds it.
+  // `payload` is the intent's wire JSON (the owner's watch names, never page text or a watched URL), cleared once
+  // Todofy recorded or refused it; the row (ID, kind, day, state, code) is kept INTENTS_KEPT_MS.
+  `CREATE TABLE IF NOT EXISTS intents (
+    intent_id TEXT PRIMARY KEY,
+    kind TEXT NOT NULL CHECK (kind IN ('digest', 'urgent')),
+    day TEXT NOT NULL,
+    payload TEXT NOT NULL,
+    events INTEGER NOT NULL,
+    state TEXT NOT NULL CHECK (state IN ('open', 'recorded', 'refused', 'expired')),
+    attempts INTEGER NOT NULL DEFAULT 0,
+    next_at INTEGER NOT NULL,
+    last_code TEXT,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+  )`,
+  `CREATE INDEX IF NOT EXISTS intents_state ON intents (state, next_at)`,
+  `CREATE INDEX IF NOT EXISTS intents_day ON intents (day, kind)`,
 ];
 
 /** The global tables are pruned at most this often (meta `pruned_at`). */
@@ -248,6 +273,7 @@ export class Store {
     const version = this.version();
     if (version < 1) for (const statement of SCHEMA_V1) this.sql.exec(statement);
     if (version < 2) for (const statement of SCHEMA_V2) this.sql.exec(statement);
+    if (version < 3) for (const statement of SCHEMA_V3) this.sql.exec(statement);
     if (version !== SCHEMA_VERSION) this.sql.exec(`INSERT OR REPLACE INTO meta (key, value) VALUES ('schema_version', ?)`, String(SCHEMA_VERSION));
   }
 
@@ -505,6 +531,7 @@ export class Store {
     deleted += this.run(`DELETE FROM notifications WHERE created_at <= ?`, now - NOTIFICATIONS_KEPT_MS);
     const cut = this.one<{ id: number }>(`SELECT id FROM notifications ORDER BY id DESC LIMIT 1 OFFSET ?`, NOTIFICATIONS_MAX);
     if (cut !== undefined) deleted += this.run(`DELETE FROM notifications WHERE id <= ?`, cut.id);
+    deleted += this.run(`DELETE FROM intents WHERE created_at <= ? AND state != 'open'`, now - INTENTS_KEPT_MS);
     deleted += this.run(`DELETE FROM hosts WHERE host NOT IN (SELECT host FROM watches) AND next_at <= ? AND coalesce(backoff_until, 0) <= ?`, now, now);
     const day = new Date(now).toISOString().slice(0, 10);
     if (this.getMeta('swept_day') !== day) {

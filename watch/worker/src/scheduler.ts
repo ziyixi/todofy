@@ -25,7 +25,7 @@ import type { WatchRow } from './store.ts';
 export interface AlarmDeps extends CheckDeps {
   /** Monotonic milliseconds for the wall budget (performance.now in the Worker). */
   readonly elapsed: () => number;
-  /** Where the outbox goes (null in v1: it only fills). */
+  /** Where the outbox goes (todofy.ts; null without the TODOFY binding: it only fills). */
   readonly sink: NotificationSink | null;
 }
 
@@ -114,13 +114,15 @@ export async function runAlarm(deps: AlarmDeps, now: number): Promise<AlarmResul
   await Promise.all(Array.from({ length: Math.min(ALARM_CONCURRENCY, queue.length) }, worker));
 
   deps.store.addLedger(utcDay(now), budget.used);
-  await deliver(deps.store, deps.sink, now);
+  // Urgent changes this pass confirmed leave now; the digest when its hour has come (notify.ts, todofy.ts).
+  await deliver(deps.store, deps.sink, now, deps.transact);
   deps.store.pruneWatches(grown);
   deps.store.pruneGlobal(now);
   deps.store.setMeta('last_alarm_at', String(now));
 
   const nextDue = deps.store.nextDue();
-  let next = nextDue ?? now + ALARM_IDLE_MS;
+  const sinkAt = deps.sink?.nextAt(now) ?? null;
+  let next = Math.min(nextDue ?? now + ALARM_IDLE_MS, sinkAt ?? now + ALARM_IDLE_MS);
   next = Math.min(Math.max(next, now + WAKE_MS), now + ALARM_IDLE_MS);
   return { next, outcomes, requests: budget.used, left };
 }

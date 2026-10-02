@@ -30,6 +30,10 @@ change inbox. Chinese, mobile first. Design: [`docs/design.md`](docs/design.md).
 - **Health**: 健康 groups the watches that are not well: 失效 (3 failed checks in a row; 14 days of it pauses the
   watch), 被拦截 (a bot challenge, never worked around), robots.txt, 网站要求放慢, 今日 JS 配额已用完. A failure is never
   reported as "no change".
+- **Todoist**: one task a day (from 14:00 UTC) lists every watch with something new: its name, the trigger type and a
+  count, or 检查失效 / 已自动暂停, each linking to the watch here. A watch set to 紧急 (URGENT) sends its confirmed
+  changes at once, up to 9 a day. Tasks never carry page text or a watched URL: open the link to see the change.
+  Todofy creates them (task-intent-v1, `docs/design.md` §7).
 
 ## Develop
 

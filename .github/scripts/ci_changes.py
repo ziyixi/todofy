@@ -30,8 +30,9 @@ Outputs (GITHUB_OUTPUT, "true"/"false"):
   runtime with proto/links/ui/, so a change to those checks and deploys it too. CHECK_ONLY (apps checked but never
   deployed, with no "<prefix>_deploy" output) is where a new app starts, until its first deploy job: it holds the
   watch app (watch/, the web watches on watch.ziyixi.science: watch/docs/design.md section 11) until its first deploy
-  job (W2): it has no watch_deploy output. It uses no contract and compiles in packages/edge-auth and the TypeScript
-  proto runtime with proto/watch/ui/, so a change to those checks it too.
+  job (W2): it has no watch_deploy output. It proposes task-intent-v1 (its notification sink, W3: Contracts runs its
+  intent tests) and compiles in packages/edge-auth and the TypeScript proto runtime with proto/watch/ui/ and
+  proto/todofy/taskintent/, so a change to those checks it too.
 
 proto/ (the protobuf IDL, proto/README.md) checks every app in PROTO_USERS (an app that depends on
 @ziyixi/proto or ziyixi-proto) and deploys only the apps whose bundle the changed path reaches
@@ -147,7 +148,7 @@ DISPATCH = {
 # The website's Notion relay Worker deploys on its own (website_relay_deploy).
 RELAY = "website/relay/"
 # Apps that neither provide nor consume a contract: their own changes do not run Contracts.
-NO_CONTRACTS = {"website", "flowday", "links", "watch"}
+NO_CONTRACTS = {"website", "flowday", "links"}
 # The OpenTofu configuration (infra/README.md) and its plan-summary tool: checked here without a token; only
 # .github/workflows/infra.yml plans it against Cloudflare, and only the manually dispatched infra-apply.yml applies it.
 INFRA = ("infra/", "tools/infra-plan-summary/")
@@ -181,7 +182,7 @@ PROTO_RUNTIMES: dict[str, tuple[str, ...]] = {
 # value imports, Python imports; test_proto.py checks this against the sources). A package missing here
 # reaches every user (fail safe; test_proto.py fails until it is listed).
 PROTO_PACKAGES: dict[str, tuple[str, ...]] = {
-    "proto/todofy/taskintent/": ("lab", "todofy"),
+    "proto/todofy/taskintent/": ("lab", "todofy", "watch"),
     # recommendation-v1 and summary-v1 (todofy/api/*.schema.json are generated from it): todofy-core builds them.
     "proto/todofy/report/": ("todofy",),
     "proto/lab/ui/": ("lab",),
@@ -231,9 +232,9 @@ BUNDLED_BY = {
     # Lab validates its task intents and Todofy's answers with validate.mjs (ops-v1 answers are read with the
     # generated code: proto/ops/).
     "contracts/ops-v1/validate.mjs": ("lab",),
-    # task-intent-v1: Lab proposes (bounds, schema), Todofy's gateway forwards (the input bound). The types
-    # are generated from proto/ (PROTO_USERS).
-    "contracts/task-intent-v1/task-intent-v1.ts": ("lab", "todofy"),
+    # task-intent-v1: Lab and the watch app propose (bounds; Lab also the schema), Todofy's gateway forwards (the input
+    # bound). The types are generated from proto/ (PROTO_USERS).
+    "contracts/task-intent-v1/task-intent-v1.ts": ("lab", "todofy", "watch"),
     "contracts/task-intent-v1/task-intent-v1.schema.json": ("lab",),
 }
 

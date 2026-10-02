@@ -15,7 +15,7 @@ const config = JSON.parse(JSON.stringify(wrangler.experimental_readRawConfig({ c
 const values = readFileSync(CONFIG, 'utf8').split('\n').filter((line) => !line.trimStart().startsWith('#')).join('\n')
 
 // Every key the Worker "watch" uses; a new one must be added here on purpose (and checked below).
-const KEYS = ['name', 'account_id', 'main', 'compatibility_date', 'workers_dev', 'preview_urls', 'observability', 'assets', 'durable_objects', 'migrations', 'vars']
+const KEYS = ['name', 'account_id', 'main', 'compatibility_date', 'workers_dev', 'preview_urls', 'observability', 'assets', 'durable_objects', 'migrations', 'services', 'vars']
 
 test('the top level is the production Worker: known keys only, no cron, no workers.dev or preview URL, no route yet', () => {
   assert.deepEqual(Object.keys(config).sort(), [...KEYS].sort())
@@ -41,7 +41,11 @@ test('every request reaches the Worker first (Access, private headers), and /new
 test('one SQLite Durable Object, WatchState, and no D1, R2, KV, queue, browser or AI binding', () => {
   assert.deepEqual(config.durable_objects, { bindings: [{ name: 'WATCH', class_name: 'WatchState' }] })
   assert.deepEqual(config.migrations, [{ tag: 'v1', new_sqlite_classes: ['WatchState'] }])
-  for (const key of ['d1_databases', 'r2_buckets', 'kv_namespaces', 'queues', 'browser', 'ai', 'services']) assert.equal(config[key], undefined, key)
+  for (const key of ['d1_databases', 'r2_buckets', 'kv_namespaces', 'queues', 'browser', 'ai']) assert.equal(config[key], undefined, key)
+})
+
+test("one service binding: Todofy's Ops entrypoint, the notification sink (task-intent-v1)", () => {
+  assert.deepEqual(config.services, [{ binding: 'TODOFY', service: 'todofy', entrypoint: 'Ops' }])
 })
 
 test('vars: the public host, the Access issuer and the AUD placeholder; nothing injected, secret or for development', () => {

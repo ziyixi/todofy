@@ -168,8 +168,27 @@ export const PREVIEW_LINES_MAX = 300;
 export const PREVIEW_ITEMS_MAX = 100;
 export const PREVIEW_TEXT_MAX = 300;
 
-// ---- notifications (the interface step W3 plugs into) ---------------------------------------------------------------
+// ---- notifications (docs/design.md §7: the outbox and the Todofy sink, W3) ------------------------------------------
 
 /** Notification outbox rows are kept this long (delivered or not) and at most this many. */
 export const NOTIFICATIONS_KEPT_MS = 30 * DAY;
 export const NOTIFICATIONS_MAX = 500;
+/**
+ * The daily digest is frozen at the first alarm at or after this UTC hour (07:00 in California, 22:00 in Beijing; after
+ * Todofy's own 13:00 and 13:30 UTC work). The alarm wakes for it.
+ */
+export const DIGEST_UTC_HOUR = 14;
+/**
+ * Todofy records at most 10 new intents per source and UTC day (TASK_INTENT_LIMITS.intentsPerSourcePerDay): urgent
+ * changes may use 9 of them, so the digest always fits. An urgent change past them waits for the digest.
+ */
+export const URGENT_INTENTS_PER_DAY = 9;
+/** Intents one alarm proposes to Todofy (each a service binding call). */
+export const INTENT_SENDS_PER_ALARM = 3;
+/** A proposal that failed is tried again after this, doubling up to the maximum. */
+export const INTENT_RETRY_BASE_MS = 5 * MINUTE;
+export const INTENT_RETRY_MAX_MS = 6 * HOUR;
+/** An intent Todofy has not taken over this long after it was frozen is given up (counted in ops-v1). */
+export const INTENT_GIVE_UP_MS = 7 * DAY;
+/** Intent rows (their IDs, states and codes; the text is cleared once Todofy holds it) are kept this long. */
+export const INTENTS_KEPT_MS = 30 * DAY;

@@ -886,6 +886,7 @@ jobs:
             todofy/gateway/package-lock.json
             dashboard/worker/package-lock.json
             lab/worker/package-lock.json
+            watch/worker/package-lock.json
             proto/package-lock.json
       - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
         with:
@@ -955,6 +956,16 @@ jobs:
         run: |
           npm ci --no-audit --no-fund
           npx --no-install vitest run test/task-intent-contract.test.ts test/intent.test.ts test/ops-golden.test.ts
+      # task-intent-v1, the watch app's notification sink (W3): its daily digest and an urgent change keep the bytes of
+      # the contract's watch fixtures (which Todofy's step above accepts and pins), every intent it can build passes
+      # validate.mjs with only the owner's names, trigger types, counts and links to the app, and every result Todofy
+      # may give maps to recorded, refused or a retry. Host only; Watch checks runs the sink in workerd with a stub
+      # Todofy.
+      - name: The watch app proposes task-intent-v1 as declared
+        working-directory: watch/worker
+        run: |
+          npm ci --no-audit --no-fund
+          npx --no-install vitest run test/todofy.test.ts
 
   # The personal website (website/, docs in website/docs): a Next.js static export on the assets-only Worker
   # ziyixi-website (Custom Domains www and the apex), plus the Notion relay Worker ziyixi-notion-publish

@@ -3,6 +3,7 @@
  */
 import type { FetchFn } from './fetcher.ts';
 import type { WatchState } from './state.ts';
+import type { TodofyIntentEntrypoint } from './todofy.ts';
 
 /** The name of the single WatchState instance. */
 export const WATCH_OBJECT = 'watch-v1';
@@ -19,6 +20,11 @@ export interface Env {
    * browser binding, so such watches are refused (BROWSER_NOT_AVAILABLE). The workerd tests bind a fake one.
    */
   readonly BROWSER?: Fetcher;
+  /**
+   * Service binding to the Worker "todofy", entrypoint "Ops" (contracts/task-intent-v1): the notification sink
+   * (todofy.ts). Absent in local development and in most workerd tests: the outbox then only fills.
+   */
+  readonly TODOFY?: Service<TodofyIntentEntrypoint>;
 
   // vars (committed in ../../wrangler.toml; BUILD_SHA added at deploy by deploy/deploy-vars.mjs)
   /** The watch host, e.g. watch.ziyixi.science: the CSRF Origin. */

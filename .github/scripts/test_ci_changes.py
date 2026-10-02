@@ -160,8 +160,8 @@ class Classify(unittest.TestCase):
                 self.assertEqual(push([path], ref=BRANCH), expect(F, F, F, F, F, **LINKS))
 
     def test_watch_is_checked_alone_and_never_deployed(self):
-        """The watch app uses no contract (NO_CONTRACTS) and has no deploy job yet (until W2): its changes run only its
-        checks, on main too."""
+        """The watch app proposes task-intent-v1 (W3: Contracts runs its intent tests) and has no deploy job yet (until
+        W2): its changes run its checks and Contracts, on main too."""
         for path in (
             "watch/worker/src/pipeline.ts",
             "watch/web/src/views/add.ts",
@@ -172,12 +172,13 @@ class Classify(unittest.TestCase):
             "watch/README.md",
         ):
             with self.subTest(path=path):
-                self.assertEqual(push([path]), expect(F, F, F, F, F, watch_check=T))
-                self.assertEqual(push([path], ref=BRANCH), expect(F, F, F, F, F, watch_check=T))
+                self.assertEqual(push([path]), expect(F, F, T, F, F, watch_check=T))
+                self.assertEqual(push([path], ref=BRANCH), expect(F, F, T, F, F, watch_check=T))
         self.assertNotIn("watch_deploy", ci_changes.KEYS)
 
     def test_task_intent_code_deploys_lab_and_todofy(self):
-        """TASK_INTENT_LIMITS ship in Lab and in Todofy's gateway; the schema only in Lab (its types are generated).
+        """TASK_INTENT_LIMITS ship in Lab, the watch app (checked only until W2) and Todofy's gateway; the schema only in
+        Lab (its types are generated).
         proto/'s tests read the contract, so Proto checks runs too (PROTO_READS)."""
         self.assertEqual(
             push(["contracts/task-intent-v1/task-intent-v1.ts"]), expect(T, T, T, T, F, **ALL_CHECKED, lab_deploy=T, proto=T)
@@ -292,8 +293,8 @@ class Classify(unittest.TestCase):
         ts, python = {"lab", "mail-hero", "dashboard", "links", "watch"}, {"todofy"}
         every, none = ts | python, set()
         cases = {
-            # task-intent-v1, bundled by Lab's TypeScript and todofy-core's Python.
-            "proto/todofy/taskintent/v1/task_intent.proto": {"lab", "todofy"},
+            # task-intent-v1, bundled by Lab's and the watch app's TypeScript and todofy-core's Python.
+            "proto/todofy/taskintent/v1/task_intent.proto": {"lab", "todofy", "watch"},
             # recommendation-v1 and summary-v1: todofy-core builds the reports (its UI and gateway take types only).
             "proto/todofy/report/v1/report.proto": {"todofy"},
             # ops-v1: the Ops entrypoints that bundle its generated code (Todofy's gateway takes types only, its core
@@ -968,6 +969,8 @@ class ContractsJob(unittest.TestCase):
                 "lab/worker/test/task-intent-contract.test.ts",
                 "lab/worker/test/intent.test.ts",
                 "todofy/tests/unit/test_task_intent_contract.py",
+                # The watch app's digest and urgent intents (the contract's watch fixtures, byte for byte).
+                "watch/worker/test/todofy.test.ts",
             },
             self.named_tests(),
         )

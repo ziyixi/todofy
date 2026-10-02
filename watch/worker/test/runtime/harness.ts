@@ -6,7 +6,8 @@
  *     synthetic websites, through ./fake-net.ts, which streams each body to the reader as it reads (never ahead of it);
  *     nothing leaves the process tree;
  *   - a fake ASSETS binding (the UI's page) and, when asked, a fake BROWSER binding (Browser Run's `content` action),
- *     through fake-net too.
+ *     through fake-net too, and the TODOFY binding to "todofy", a stub of Todofy's `Ops` entrypoint
+ *     (../stubs/todofy-stub.ts).
  * DEV_MANUAL_ALARMS=true: no alarm is ever armed and the tests drive the scheduler with explicit clocks; the owner is
  * signed in over loopback http by the dev bypass. All data is synthetic.
  */
@@ -53,10 +54,12 @@ export const SYNTHETIC_BINDINGS: Readonly<Record<string, string>> = {
 /** The page the fake ASSETS serves for every path (the real one is web/dist/index.html). */
 export const TEST_PAGE = '<!doctype html><html><head><script type="module" src="/assets/app.js"></script></head><body><div id="app"></div></body></html>';
 
-let bundle: Promise<string> | undefined;
-function workerBundle(): Promise<string> {
-  bundle ??= build({
-    entryPoints: [join(ROOT, 'src/index.ts')],
+const bundles = new Map<string, Promise<string>>();
+function workerBundle(entry = 'src/index.ts'): Promise<string> {
+  const cached = bundles.get(entry);
+  if (cached !== undefined) return cached;
+  const bundle = build({
+    entryPoints: [join(ROOT, entry)],
     bundle: true,
     format: 'esm',
     platform: 'neutral',
@@ -71,6 +74,7 @@ function workerBundle(): Promise<string> {
     if (!output) throw new Error('esbuild produced no output');
     return output.text;
   });
+  bundles.set(entry, bundle);
   return bundle;
 }
 
@@ -88,6 +92,8 @@ export interface HarnessOptions {
   readonly bindings?: Record<string, string>;
   /** Bind a fake BROWSER (Browser Run's content action). */
   readonly browser?: boolean;
+  /** Bind TODOFY to the stub of Todofy's Ops entrypoint (the notification sink is then on). */
+  readonly todofy?: boolean;
   /** Extra outbound routes by URL (the Access certs endpoint), before FakeSites. */
   readonly routes?: Map<string, () => Response>;
   /** Opens workerd's DevTools inspector on this port (./cpu.test.ts). */
@@ -105,6 +111,10 @@ export interface Harness {
   readonly browser: FakeBrowser;
   /** The Worker's log lines (console output). */
   readonly logs: string[];
+  /** What the Todofy stub answers next (`todofy: true`). */
+  todofy(scenario: { propose?: 'accept' | 'throw' | 'paused' | 'daily_limit' | 'garbled' }): Promise<void>;
+  /** The intent IDs proposed since the last call, the intents recorded and the inputs refused (`todofy: true`). */
+  todofyState(): Promise<{ invalid: number; calls: string[]; intents: { intent_id: string; mode: string; parent: { title: string; description?: string }; items: { title: string; url?: string }[] }[] }>;
   /** A request to "watch" over loopback http. */
   fetch(path: string, init?: RequestInit): Promise<Response>;
   /** WatchUiService through the shared typed client, exactly as the UI calls it (CSRF and Origin on mutations). */
@@ -127,6 +137,7 @@ export interface Harness {
 export async function startHarness(options: HarnessOptions = {}): Promise<Harness> {
   const temp = await mkdtemp(join(tmpdir(), 'watch-runtime-'));
   const script = await workerBundle();
+  const todofyScript = options.todofy === true ? await workerBundle('test/stubs/todofy-stub.ts') : '';
   const sites = new FakeSites();
   const browser: FakeBrowser = { pages: new Map(), finalUrls: new Map(), msUsed: 20_000, quota: false, calls: [] };
   const logs: string[] = [];
@@ -163,10 +174,12 @@ export async function startHarness(options: HarnessOptions = {}): Promise<Harnes
           serviceBindings: {
             ASSETS: () => new Response(TEST_PAGE, { headers: { 'content-type': 'text/html; charset=utf-8' } }),
             ...(options.browser === true ? { BROWSER: FAKE_BROWSER_WORKER } : {}),
+            ...(options.todofy === true ? { TODOFY: { name: 'todofy', entrypoint: 'Ops' } } : {}),
           },
           bindings,
           outboundService: FAKE_NET_WORKER,
         },
+        ...(options.todofy === true ? [{ name: 'todofy', modules: true, script: todofyScript, compatibilityDate: '2026-09-08' }] : []),
         ...(options.splitObject === true
           ? [
               {
@@ -237,6 +250,14 @@ export async function startHarness(options: HarnessOptions = {}): Promise<Harnes
     browser,
     logs,
     fetch: fetchWatch,
+    async todofy(scenario) {
+      const response = await (await mf.getWorker('todofy')).fetch('http://stub/__scenario', { method: 'POST', body: JSON.stringify(scenario) });
+      if (response.status !== 204) throw new Error('todofy scenario');
+    },
+    async todofyState() {
+      const response = await (await mf.getWorker('todofy')).fetch('http://stub/__state');
+      return (await response.json()) as Awaited<ReturnType<Harness['todofyState']>>;
+    },
     api: createHttpClient(WatchUiService, send),
     async mutate(method, path, body) {
       const { token, cookie } = await csrfToken();

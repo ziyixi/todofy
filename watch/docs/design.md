@@ -12,8 +12,8 @@ Step W1 (this one) builds and checks it; nothing is deployed (§11).
 - One owner, at most 50 watches (`WATCHES_MAX`), checked every 6 hours by default (1 hour to 7 days).
 - Pages that render on the server, RSS/Atom/JSON feeds, JSON APIs and data embedded in pages (JSON-LD, Next.js).
   Pages that need JavaScript use a browser renderer that v1 keeps behind a flag (§4).
-- Not in v1: deployment and Access (W2), notifications (W3: a task intent of kind `SOURCE_WATCH` to Todofy and
-  ops-v1 counts for the dashboard), the AI judge. Their interfaces exist (§7).
+- Not in v1: deployment and Access (W2), the AI judge. Notifications (W3, §7) are one daily Todoist digest task and
+  urgent changes, as task intents of source `SOURCE_WATCH` to Todofy, and ops-v1 counts for the dashboard.
 - Never: logging a watched URL, page text or a diff; fetching a site faster than the etiquette allows (a redirect's
   target included); working around a bot challenge; fetching the owner's own hosts or Workers.
 
@@ -214,7 +214,8 @@ not memory.
 
 ## 6. WatchState's storage
 
-`worker/src/store.ts`; every table is bounded. After an alarm the watches whose checks may have added rows are pruned
+`worker/src/store.ts`; every table is bounded (schema v3 adds the sink's `intents` and a partial index of the
+undelivered events). After an alarm the watches whose checks may have added rows are pruned
 (`pruneWatches`, through the `(watch_id, state, id)` index: only that watch's rows are read); the global tables at
 most once an hour and every watch once per UTC day (`pruneGlobal`).
 
@@ -229,14 +230,16 @@ most once an hour and every watch once per UTC day (`pruneGlobal`).
 | `previews` | PreviewWatch's stored fetches | 4 rows, 15 minutes |
 | `url_fetches` | when each URL was last requested (a check or a preview) | 15 minutes |
 | `notifications` | the outbox (§7) | 30 days, 500 rows |
+| `intents` | the Todofy sink's inbox (§7): each intent's ID, kind, day, state, attempts, code; its frozen text until Todofy holds it | 30 days (at most 10 a day) |
 
 A check that finds nothing new writes a few rows (the watch, its host, the URL's fetch time); the day's request count
 is written once per alarm. The schema has a version in `meta`; a change adds a migration step (v2: the
-`changes_watch_state` index and `url_fetches`).
+`changes_watch_state` index and `url_fetches`; v3: `intents` and `notifications_pending`).
 
-## 7. Bindings, the notification interface
+## 7. Bindings, notifications
 
-Bindings (`wrangler.toml`, `worker/src/env.ts`): `WATCH` (the object), `ASSETS`; vars `PUBLIC_HOST`
+Bindings (`wrangler.toml`, `worker/src/env.ts`): `WATCH` (the object), `ASSETS`, `TODOFY` (Todofy's `Ops`
+entrypoint, the notification sink); vars `PUBLIC_HOST`
 (`watch.ziyixi.science`, the CSRF origin), `ACCESS_ISSUER`, `ACCESS_AUDIENCE`, and `BUILD_SHA` at deploy; secrets
 `ACCESS_OWNER`, `ACCESS_OWNER_ALIASES` (the dashboard's owner, as for Lab, FlowDay and the links app) and the app's
 own `CSRF_SIGNING_KEY`. A `BROWSER` binding turns on tier 3 (§4). Local development and tests only:
@@ -244,17 +247,42 @@ own `CSRF_SIGNING_KEY`. A `BROWSER` binding turns on tier 3 (§4). Local develop
 over loopback), `DEV_FAKE_UPSTREAM` (every page request goes to a loopback server of synthetic sites),
 `DEV_FETCH_TIMEOUT_MS`. The committed config never sets a `DEV_` var (`test_wrangler_configs.py`).
 
-Notifications (`worker/src/notify.ts`) are the seam W3 plugs into. v1 fills an outbox in the same transaction as the
-state it reports and delivers nothing:
+Notifications (`worker/src/notify.ts`): an outbox filled in the same transaction as the state it reports:
 
 - `change_confirmed` with the watch's policy (`digest` or `urgent`);
 - `watch_broken` (always `digest`), once per run of failures;
 - `watch_paused` (always `digest`), when the Worker pauses a watch.
 
-An event carries IDs, a kind and a policy only. A `NotificationSink` takes a batch and answers the IDs it took over
-(it keeps its own inbox and deduplicates by ID); `deliver` marks those. `pendingCounts` is what ops-v1 will report.
-W3's sinks: a task intent of kind `SOURCE_WATCH` to Todofy for `urgent` events and the daily digest, and ops-v1
-counts for the dashboard.
+An event carries IDs, a kind and a policy only. A `NotificationSink` takes events over synchronously, in the
+transaction that marks them delivered, into its own durable inbox (so an event is never lost and never sent twice
+whatever fails afterwards), then sends from that inbox after the transaction. `pendingCounts` is what ops-v1 reports.
+
+The sink (W3, `worker/src/todofy.ts`; the owner's decisions of 2026-10-01) is Todofy's `Ops` entrypoint over the
+`TODOFY` service binding, through task-intent-v1 (`contracts/task-intent-v1`, source `SOURCE_WATCH`):
+
+- **The digest**: once a UTC day, at the first alarm from 14:00 UTC (`DIGEST_UTC_HOUR`; the alarm wakes for it),
+  every pending event of both policies becomes one intent `digest-<day>` in `subtasks` mode: a parent task and one
+  task per watch (past 30 watches, the last one names how many more). A BROKEN or auto-paused watch is only ever in
+  the digest. A day with nothing pending sends nothing.
+- **Urgent changes**: a change confirmed on an URGENT watch leaves in the alarm that confirmed it, as
+  `urgent-<change id>` (`separate` mode, the first change's ID when one alarm confirms several), at most 9 a UTC day
+  (`URGENT_INTENTS_PER_DAY`): Todofy records at most 10 intents per source and day, and one is the digest's. An urgent
+  change past them waits for the digest.
+- **What a task says**: only the owner's display name of the watch, the trigger type with a count (`数值 2 次变化`)
+  or its trouble (`检查失效`, `已自动暂停`), and a link to the watch in this app,
+  `https://watch.ziyixi.science/watches/<id>`, the only host Todofy allows for this source. Never the page's text, a
+  watched URL or a change summary: page content is untrusted (a page could address an assistant that reads the
+  owner's tasks), and a watched URL leaves the object only through the owner API. A name is made one line (control
+  characters and separators become spaces) and cut to the contract's bounds.
+- **Delivery**: the intent's wire JSON is frozen in `intents` with the events it took; it is proposed with exactly
+  those bytes until Todofy records it (`pending`, `created`, `duplicate`, `failed`, `paused`: Todofy holds it and
+  deduplicates by intent ID). A lost answer, `unavailable`, a pause or the day's limit is retried (5 minutes doubling
+  to 6 hours, or Todofy's `retry_after_seconds`); a URL off the list or a conflict is final; an intent not taken over
+  within 7 days is given up. At most 3 proposals an alarm. Once Todofy holds it the frozen text is cleared; the row
+  (ID, kind, state, code) is kept 30 days. Logs carry intent IDs, kinds, counts and codes only.
+
+Without the binding (local development, most workerd tests) there is no sink and the outbox only fills; the change
+inbox is always how the owner sees what changed.
 
 ## 8. HTTP surface, limits and cost
 
@@ -297,6 +325,7 @@ its bound (50 watches, 200 changes and 22 snapshots each) and holds each path to
 | Path | Rows read | Rows written |
 | --- | --- | --- |
 | an idle alarm pass | 5 | 1 |
+| an idle alarm pass with the Todofy sink (`notify.test.ts`) | 11 | 1 |
 | a check that finds nothing new | ~30 | ~7 |
 | a check that records a change (its own watch's prune included) | ~330 | ~22 |
 | the daily sweep of every watch's bounds (once per UTC day) | ~14,500 | ~200 |
@@ -395,7 +424,8 @@ All hermetic: synthetic content only, the only network is loopback, clocks are i
      row of kind `do` for the namespace `WatchState`, whose id is known only after the first deploy (a follow-up
      commit adds it, as `registry.test.ts` records for an id not yet known).
   8. After the deploy: the first API call arms the alarm; verify with a synthetic page on a host the lead controls.
-- **W3** (notifications; ops-v1 is merged: `proto/ops/v1/ops.proto`, generated code and the Contracts job):
+- **W3** (notifications; ops-v1 is merged: `proto/ops/v1/ops.proto`, generated code and the Contracts job). Steps 1
+  and 2 are done (commit "task-intent-v1: SOURCE_WATCH, ..." and the Todofy sink, §7):
   1. `proto/todofy/taskintent/v1`: a new `Source` value `SOURCE_WATCH` whose URL host allow-list is
      `watch.ziyixi.science` only, so a task links to the change in the app (`/watches/<id>`), never to the watched URL
      (which keeps the rule that a watched URL leaves the object only through the owner API); Todofy's source handling
@@ -406,5 +436,5 @@ All hermetic: synthetic content only, the only network is loopback, clocks are i
   3. An `export { Ops }` entrypoint (as `lab/worker/src/index.ts`) answering ops-v1 from `pendingCounts` and the
      scheduler's state; `watch` out of `ci_changes.py`'s `NO_CONTRACTS`, with its ops-v1 golden test run by the
      Contracts job like the other apps'; the dashboard registry's ops binding for it.
-  4. Logs stay IDs and counts: a task intent carries the watch's display name and the change's summary, never the
-     page's text or URL.
+  4. Logs stay IDs and counts: a task intent carries the watch's display name, the trigger type and a count (the
+     owner decided against the change's summary: it is page text), never the page's text or URL.

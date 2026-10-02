@@ -18,7 +18,7 @@ import { HttpTranscoder } from '@ziyixi/proto/http-transcoder';
 import { WatchUiService } from '@ziyixi/proto/watch/ui/v1/watch_ui_service_pb';
 import { handlers, type ApiContext } from './api.ts';
 import { quickActionRenderer, type BrowserRenderer } from './browser.ts';
-import { buildSha, devFetch, REQUEST_ID_HEADER, type Env } from './env.ts';
+import { buildSha, devFetch, publicHost, REQUEST_ID_HEADER, type Env } from './env.ts';
 import { supportedSelector } from './extract/html.ts';
 import type { FetchFn } from './fetcher.ts';
 import { NO_JUDGE } from './judge.ts';
@@ -28,6 +28,8 @@ import { API_DOMAIN, localize, REASONS } from './reasons.ts';
 import { errorCode, runAlarm, type AlarmResult } from './scheduler.ts';
 import { HostLocks } from './host-locks.ts';
 import { Store, type RowMeter } from './store.ts';
+import { TodofySink } from './todofy.ts';
+import type { NotificationSink } from './notify.ts';
 import { RpcError } from '@ziyixi/proto/rpc-status';
 
 
@@ -90,6 +92,15 @@ export class WatchState extends DurableObject<Env> {
 
   private transact = <T>(fn: () => T): T => this.ctx.storage.transactionSync(fn);
 
+  /**
+   * The notification sink: Todofy over the TODOFY binding, with links to this app's host (the only host Todofy allows
+   * for this source). Without either (local development, most tests) the outbox only fills.
+   */
+  private sink(): NotificationSink | null {
+    const host = publicHost(this.env);
+    return this.env.TODOFY === undefined || host === null ? null : new TodofySink(this.store, this.env.TODOFY, host);
+  }
+
   // ---- scheduling -------------------------------------------------------------------------------------------------
 
   /** Arms the alarm when none is set (every API call: the fallback for a lost alarm). */
@@ -126,7 +137,7 @@ export class WatchState extends DurableObject<Env> {
             hosts: this.hosts,
             transact: this.transact,
             judge: NO_JUDGE,
-            sink: null,
+            sink: this.sink(),
             elapsed: () => performance.now(),
           },
           now,
