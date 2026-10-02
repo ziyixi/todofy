@@ -3,7 +3,7 @@ import json
 
 import pytest
 from ziyixi_proto.mailhero.webhook.v1 import mail_received_pb as pb
-from ziyixi_proto.wire_json import wire_name
+from ziyixi_proto.wire_json import format_matches, wire_name
 
 from tests import mail_contract
 from todofy.core import contract
@@ -192,8 +192,24 @@ def test_subject_and_text_limits_count_utf8_bytes(payload):
 
 
 def test_blank_subject_and_text_are_rejected(payload):
-    with pytest.raises(ContractError):
+    with pytest.raises(ContractError) as caught:
         parse_mail_event(with_message(payload, subject=" \t", text="\n"))
+    assert caught.value.reason == "empty"
+
+
+def test_visible_is_what_str_strip_keeps():
+    """The codec's Visible (Mail.any_match) is the one blank check: a character is Visible exactly when str.strip()
+    keeps it, over all of Unicode, so a subject and a text are both blank exactly when both strip to nothing."""
+    visible = pb.FORMATS["Visible"]
+    disagree = [hex(code) for code in range(0x110000) if format_matches(visible, chr(code)) != bool(chr(code).strip())]
+    assert disagree == []
+
+
+@pytest.mark.parametrize("space", sorted({chr(code) for code in range(0x110000) if chr(code).isspace()}), ids=ascii)
+def test_every_python_whitespace_is_blank_with_reason_empty(payload, space):
+    with pytest.raises(ContractError) as caught:
+        parse_mail_event(with_message(payload, subject=space, text=space * 2))
+    assert caught.value.reason == "empty"
 
 
 @pytest.mark.parametrize(

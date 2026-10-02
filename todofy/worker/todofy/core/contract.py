@@ -136,9 +136,8 @@ def parse_mail_event(raw: bytes) -> MailEvent:
     received_at = _timestamp(read.received_at)
     if received_at == _ZERO_TIME:
         raise ContractError("received_at")
-    # The contract's Visible is Python's whitespace, as str.strip() reads it.
-    if not message.subject.strip() and not message.text.strip():
-        raise ContractError("empty")
+    # A blank subject and text ("empty") never get here: the codec checked Mail.any_match, whose Visible is exactly
+    # the whitespace str.strip() removes (tests/unit/test_contract.py pins both).
     if utf8_len(message.subject) > MAX_SUBJECT_BYTES or utf8_len(message.text) > MAX_TEXT_BYTES:
         raise ContractError("too_long")
     event = MailEvent(

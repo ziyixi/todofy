@@ -10,6 +10,7 @@ import unittest
 
 from proto_test_support import REPO, compact
 from ziyixi_proto.mailhero.webhook.v1 import mail_received_pb as pb
+from ziyixi_proto.ops.v1 import ops_pb
 from ziyixi_proto.wire_json import WireJsonError, field_rules, from_wire, to_wire
 
 FIXTURES = REPO / "contracts" / "mail-received-v1" / "fixtures"
@@ -99,6 +100,12 @@ class GeneratedModuleTest(unittest.TestCase):
         self.assertEqual(field_rules(pb.Mail, "attachments").max_items, 100)
         self.assertTrue(field_rules(pb.Mail, "warnings").write_empty)
         self.assertEqual(field_rules(pb.Mail, "original_text_bytes").present_when, "text_truncated")
+
+    def test_the_canary_run_id_is_ops_v1s_run_id(self) -> None:
+        # The dashboard names a run in ops-v1 (startCanary) and Mail Hero writes it into the event's canary.run_id:
+        # the two IDLs' RunId must stay one format (Mail Hero checks a run ID with this one, isCanaryRunID).
+        mail, ops = pb.FORMATS["RunId"], ops_pb.FORMATS["RunId"]
+        self.assertEqual((mail.pattern, mail.max_length), (ops.pattern, ops.max_length))
 
 
 if __name__ == "__main__":
