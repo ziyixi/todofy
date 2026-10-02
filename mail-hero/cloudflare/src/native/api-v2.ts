@@ -34,7 +34,7 @@ import {
   type MailHeroUiService,
 } from '@ziyixi/proto/mailhero/ui/v2/mail_hero_ui_service_pb'
 import { Attachment_OmittedReason, Attachment_StorageState, Message_DeliveryState, Message_ParseState, MessageContentSchema, MessageSchema, ReceiveMode, type Message } from '@ziyixi/proto/mailhero/ui/v2/message_pb'
-import { ActiveAlert_Severity, OverviewSchema, SettingsSchema, SetupCheck_Result, SetupStatusSchema, type SchedulerStatus, type Settings } from '@ziyixi/proto/mailhero/ui/v2/settings_pb'
+import { ActiveAlert_Severity, OverviewSchema, SettingsSchema, SetupCheck_Result, SetupStatusSchema, type Overview, type SchedulerStatus, type Settings, type SetupStatus } from '@ziyixi/proto/mailhero/ui/v2/settings_pb'
 import { FieldMaskError, updatePaths } from '@ziyixi/proto/field-mask'
 import type { ServiceHandlers, ShapeOf } from '@ziyixi/proto/http-transcoder'
 import { decodePageToken, encodePageToken, PageTokenError, type PageParameters } from '@ziyixi/proto/page-token'
@@ -269,7 +269,7 @@ export function toMessage(row: Row): Message {
 }
 
 /** The parsed record of message `id` as its MessageContent. The record is the parser's: shapes are checked loosely. */
-function toContent(id: string, parsed: ParsedRecord): ReturnType<typeof create<typeof MessageContentSchema>> {
+export function toContent(id: string, parsed: ParsedRecord): ReturnType<typeof create<typeof MessageContentSchema>> {
   const list = (value: unknown): unknown[] => (Array.isArray(value) ? value : [])
   const object = (value: unknown): Row => (value !== null && typeof value === 'object' ? (value as Row) : {})
   return create(MessageContentSchema, {
@@ -303,7 +303,7 @@ export function toDelivery(row: Row): Delivery {
   })
 }
 
-function toAttempt(eventID: string, row: Row): DeliveryAttempt {
+export function toAttempt(eventID: string, row: Row): DeliveryAttempt {
   return create(DeliveryAttemptSchema, {
     name: `deliveries/${eventID}/attempts/${int(row.attempt_no)}`, startTime: ts(row.started_at), finishTime: ts(row.finished_at),
     httpStatus: int(row.http_status), durationMs: int(row.duration_ms), outcome: enumOf(DeliveryAttempt_Outcome, row.outcome),
@@ -345,6 +345,34 @@ function toScheduler(row: Row): SchedulerStatus {
     oldestJobTime: ts(row.oldest_at), nextAlarmTime: ts(row.next_alarm_at), capacityInitialized: initialized,
     ...(initialized ? { capacityUsedBytes: bytes(capacity!.used_bytes), capacityReservedBytes: bytes(capacity!.reserved_bytes) } : {}),
   }
+}
+
+export function toOverview(value: Row): Overview {
+  const counts = value.counts as Row, storage = value.storage as Row, alerts = value.alerts as Row
+  return create(OverviewSchema, {
+    name: 'overview', receiveAddress: text(value.receive_address), messageCount: int(counts.messages), pendingDeliveryCount: int(counts.pending),
+    failedDeliveryCount: int(counts.failed), deliveredCount: int(counts.delivered), parseFailedCount: int(counts.parse_failed),
+    logicalBytes: bytes(storage.logical_bytes), logicalLimitBytes: bytes(storage.limit_bytes),
+    databaseBytes: storage.database_bytes === null || storage.database_bytes === undefined ? undefined : bytes(storage.database_bytes),
+    pendingPhysicalDeleteBytes: bytes(storage.pending_physical_delete_bytes), lastBackupTime: ts((value.backup as Row).last_at),
+    sendPaused: !!value.send_paused, scheduler: toScheduler(value.scheduler as Row),
+    activeAlerts: (alerts.active as Row[]).map(alert => ({
+      code: text(alert.code), severity: enumOf(ActiveAlert_Severity, alert.severity),
+      metrics: Object.fromEntries(Object.entries((alert.metrics ?? {}) as Row).filter(([, number]) => typeof number === 'number' && Number.isFinite(number))),
+      firstSeenTime: ts(alert.first_seen_at), lastSeenTime: ts(alert.last_seen_at),
+    })),
+    alertWebhookConfigured: !!alerts.configured, alertWebhookMisconfigured: !!alerts.configuration_error,
+    pendingNotificationCount: int(alerts.pending_notifications), failedNotificationCount: int(alerts.failed_notifications),
+    warnings: (value.warnings as string[]).map(text),
+  })
+}
+
+export function toSetupStatus(value: Row): SetupStatus {
+  return create(SetupStatusSchema, {
+    name: 'setupStatus', receiveAddress: text(value.receive_address), addressValid: !!value.address_valid,
+    scheduler: toScheduler(value.scheduler as Row), lastReceiveTime: ts(value.last_received_at),
+    checks: (value.checks as Row[]).map(check => ({ id: text(check.id), label: text(check.label), result: enumOf(SetupCheck_Result, check.status), detail: text(check.detail) })),
+  })
 }
 
 // ---- filters -------------------------------------------------------------------------------------------------------
@@ -464,34 +492,12 @@ function maskPaths(mask: { readonly paths: readonly string[] } | undefined, requ
 export const handlers: ServiceHandlers<ShapeOf<typeof MailHeroUiService>, ApiContext> = {
   async getOverview(request, { env }) {
     if (request.name !== 'overview') throw mhError('NOT_FOUND')
-    const value = await overview(env)
-    const counts = value.counts as Row, storage = value.storage as Row, alerts = value.alerts as Row
-    return create(OverviewSchema, {
-      name: 'overview', receiveAddress: text(value.receive_address), messageCount: int(counts.messages), pendingDeliveryCount: int(counts.pending),
-      failedDeliveryCount: int(counts.failed), deliveredCount: int(counts.delivered), parseFailedCount: int(counts.parse_failed),
-      logicalBytes: bytes(storage.logical_bytes), logicalLimitBytes: bytes(storage.limit_bytes),
-      databaseBytes: storage.database_bytes === null || storage.database_bytes === undefined ? undefined : bytes(storage.database_bytes),
-      pendingPhysicalDeleteBytes: bytes(storage.pending_physical_delete_bytes), lastBackupTime: ts((value.backup as Row).last_at),
-      sendPaused: !!value.send_paused, scheduler: toScheduler(value.scheduler as Row),
-      activeAlerts: (alerts.active as Row[]).map(alert => ({
-        code: text(alert.code), severity: enumOf(ActiveAlert_Severity, alert.severity),
-        metrics: Object.fromEntries(Object.entries((alert.metrics ?? {}) as Row).filter(([, number]) => typeof number === 'number' && Number.isFinite(number))),
-        firstSeenTime: ts(alert.first_seen_at), lastSeenTime: ts(alert.last_seen_at),
-      })),
-      alertWebhookConfigured: !!alerts.configured, alertWebhookMisconfigured: !!alerts.configuration_error,
-      pendingNotificationCount: int(alerts.pending_notifications), failedNotificationCount: int(alerts.failed_notifications),
-      warnings: (value.warnings as string[]).map(text),
-    })
+    return toOverview(await overview(env))
   },
 
   async getSetupStatus(request, { env }) {
     if (request.name !== 'setupStatus') throw mhError('NOT_FOUND')
-    const value = await setupStatus(env)
-    return create(SetupStatusSchema, {
-      name: 'setupStatus', receiveAddress: text(value.receive_address), addressValid: !!value.address_valid,
-      scheduler: toScheduler(value.scheduler as Row), lastReceiveTime: ts(value.last_received_at),
-      checks: (value.checks as Row[]).map(check => ({ id: text(check.id), label: text(check.label), result: enumOf(SetupCheck_Result, check.status), detail: text(check.detail) })),
-    })
+    return toSetupStatus(await setupStatus(env))
   },
 
   async getSettings(request, { env }) {
