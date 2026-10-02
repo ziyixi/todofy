@@ -3,7 +3,9 @@
  * registry.ts, which the UI's tests import as data, because it checks the ops-v1 codes the registry names with the
  * contract's own `Code` format (the IDL through ops-client.ts), and the UI has no business importing that.
  */
-import { ACCENTS, ICON_KEYS, MAX_OUTBOUND_PER_REFRESH, MAX_OUTBOUND_PER_TICK, type Registry } from './api-v2-types.ts';
+import { MAX_OUTBOUND_PER_REFRESH, MAX_OUTBOUND_PER_TICK } from './api-types.ts';
+import type { RegistryDef } from './registry-types.ts';
+import { ACCENTS, ICON_KEYS } from './idl.ts';
 import { isOpsCode } from './ops-client.ts';
 import { OWNER_ZONE, PLATFORM_SIGNALS, outboundPerRefresh, outboundPerTick, stageScripts } from './registry.ts';
 
@@ -76,7 +78,7 @@ export interface ValidationOptions {
 }
 
 /** Every problem of `registry` as one line each; empty when it is valid. */
-export function validateRegistry(registry: Registry, options: ValidationOptions = {}): string[] {
+export function validateRegistry(registry: RegistryDef, options: ValidationOptions = {}): string[] {
   const problems: string[] = [];
   const add = (condition: boolean, problem: string): void => {
     if (!condition) problems.push(problem);

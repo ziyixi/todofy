@@ -9,17 +9,8 @@
  * keeps only its name and type, so a plain_text value (or any other field) never leaves the parser, and
  * remote text never leaves this module (failures become codes). Findings are names only.
  */
-import {
-  DRIFT_CALLS_PER_TICK,
-  DRIFT_CATEGORIES,
-  DRIFT_FINDINGS_MAX,
-  DRIFT_MAX_ATTEMPTS,
-  DRIFT_UTC_HOUR,
-  DRIFT_VIEW_FINDINGS_MAX,
-  type DriftCategory,
-  type DriftFinding,
-  type DriftView,
-} from './api-v2-types.ts';
+import { DRIFT_CALLS_PER_TICK, DRIFT_FINDINGS_MAX, DRIFT_MAX_ATTEMPTS, DRIFT_UTC_HOUR, DRIFT_VIEW_FINDINGS_MAX, type DriftCategory, type DriftFinding, type Drift } from './api-types.ts';
+import { DRIFT_CATEGORIES } from './idl.ts';
 import desiredJson from './drift-desired.json';
 import { isoOrNull, utcDay } from './time.ts';
 
@@ -529,9 +520,9 @@ export function failedDoc(previous: DriftDoc, run: DriftRunDoc, error: { code: D
   };
 }
 
-export function driftView(doc: DriftDoc, configured: boolean, now: number): DriftView {
+export function driftView(doc: DriftDoc, configured: boolean, now: number): Drift {
   const total = totalFindings(doc.counts);
-  const status: DriftView['status'] = !configured
+  const status: Drift['status'] = !configured
     ? 'not_configured'
     : doc.checked_at === null
       ? doc.consecutive_failed_days > 0

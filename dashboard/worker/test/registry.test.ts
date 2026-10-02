@@ -1,6 +1,8 @@
 import opsReadme from '../../../contracts/ops-v1/README.md?raw';
 import { describe, expect, it } from 'vitest';
-import { ICON_KEYS, MAX_OUTBOUND_PER_TICK, V2_BODY_BUDGET, type EntryDef, type FlowDef, type Registry, type ResourceDef } from '../src/api-v2-types.ts';
+import { MAX_OUTBOUND_PER_TICK, VIEW_BODY_BUDGET } from '../src/api-types.ts';
+import type { EntryDef, FlowDef, RegistryDef, ResourceDef } from '../src/registry-types.ts';
+import { ICON_KEYS } from '../src/idl.ts';
 import {
   REGISTRY,
   entryOfScript,
@@ -13,6 +15,7 @@ import {
 } from '../src/registry.ts';
 import { validateRegistry } from '../src/registry-check.ts';
 import { LINK_ONLY_ENTRY, withLinkOnly } from './v2-fixtures.ts';
+import { expectWire, VIEW_SCHEMAS } from './wire-conformance.ts';
 
 /**
  * The signal codes each app documents in contracts/ops-v1/README.md ("Signal codes"), read from the
@@ -38,22 +41,22 @@ function contractSignals(): Record<string, string[]> {
 type Mutable<T> = { -readonly [K in keyof T]: T[K] extends readonly (infer U)[] ? Mutable<U>[] : T[K] extends object ? Mutable<T[K]> : T[K] };
 
 /** A mutable copy of the registry plus the synthetic link-only entry `link-demo`. */
-function copy(): Mutable<Registry> {
-  return structuredClone(withLinkOnly()) as Mutable<Registry>;
+function copy(): Mutable<RegistryDef> {
+  return structuredClone(withLinkOnly()) as Mutable<RegistryDef>;
 }
 
-function entry(registry: Mutable<Registry>, id: string): Mutable<EntryDef> {
+function entry(registry: Mutable<RegistryDef>, id: string): Mutable<EntryDef> {
   const found = registry.entries.find((e) => e.id === id);
   if (found === undefined) throw new Error(id);
   return found;
 }
 
 /** Drops the workers of an entry (to test the rules that need one). */
-function withoutWorkers(registry: Mutable<Registry>, id: string): void {
+function withoutWorkers(registry: Mutable<RegistryDef>, id: string): void {
   registry.workers = registry.workers.filter((worker) => worker.entry !== id);
 }
 
-function flow(registry: Mutable<Registry>, id: string): Mutable<FlowDef> {
+function flow(registry: Mutable<RegistryDef>, id: string): Mutable<FlowDef> {
   const found = registry.flows.find((f) => f.id === id);
   if (found === undefined) throw new Error(id);
   return found;
@@ -151,7 +154,9 @@ describe('the registry', () => {
   it('serves a public view without bindings or probe URLs, within its budget', () => {
     const body = registryBody('abc123');
     expect(body).toBe(JSON.stringify(registryView('abc123')));
-    expect(new TextEncoder().encode(body).byteLength).toBeLessThanOrEqual(V2_BODY_BUDGET.registry);
+    expectWire(VIEW_SCHEMAS.registry, body);
+    expectWire(VIEW_SCHEMAS.registry, registryView('abc123', withLinkOnly()));
+    expect(new TextEncoder().encode(body).byteLength).toBeLessThanOrEqual(VIEW_BODY_BUDGET.registry);
     expect(body).not.toContain('MAIL_HERO');
     for (const probe of ['build-info', 'manifest.webmanifest', 'robots.txt', 'content_type', 'outside_access']) expect(body).not.toContain(probe);
     expect(body).not.toContain('GitHub');
@@ -168,7 +173,7 @@ describe('the registry', () => {
 });
 
 describe('validateRegistry', () => {
-  const problems = (registry: Mutable<Registry>, knownSignals?: Record<string, string[]>) =>
+  const problems = (registry: Mutable<RegistryDef>, knownSignals?: Record<string, string[]>) =>
     validateRegistry(registry, knownSignals === undefined ? {} : { knownSignals });
 
   it('accepts a link-only entry (the synthetic link-demo of these tests)', () => {

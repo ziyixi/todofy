@@ -4,17 +4,9 @@
  */
 import type { OpsReport, OpsReportItem } from '@ziyixi/proto/ops/v1/ops_wire';
 import { OPS_LIMITS } from '../../../contracts/ops-v1/ops-v1.ts';
-import {
-  GUARD_SHED_PERCENT,
-  QUOTA_CRITICAL_PERCENT,
-  type CanaryStage,
-  type OpsApp,
-  type OpsSeverity,
-  type OpsStatus,
-  type OverallLevel,
-  type QuotaRow,
-} from './api-types.ts';
-import { DRIFT_CATEGORIES, DRIFT_UNAVAILABLE_AFTER_DAYS } from './api-v2-types.ts';
+import { GUARD_SHED_PERCENT, QUOTA_CRITICAL_PERCENT, type CanaryStage, type OpsApp, type OpsSeverity, type OpsStatus, type OverallLevel, type QuotaRow } from './api-types.ts';
+import { DRIFT_UNAVAILABLE_AFTER_DAYS } from './api-types.ts';
+import { DRIFT_CATEGORIES } from './idl.ts';
 import { CANARY_DISABLED_CODE, type CanaryRecord } from './canary.ts';
 import { totalFindings, type DriftDoc } from './drift.ts';
 import { hoursLeft, reachesPercent, type DesiredGuard } from './guard.ts';

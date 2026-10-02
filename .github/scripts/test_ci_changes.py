@@ -1668,7 +1668,7 @@ class AccessProbe(unittest.TestCase):
         name = "- name: Check that Access answers unauthenticated requests\n"
         step = lambda job: workflow_jobs()[job].split(name, 1)[1].split("\n      - ", 1)[0]  # noqa: E731
         body = lambda job: step(job).split("        run: |\n", 1)[1]  # noqa: E731
-        self.assertEqual(body("lab-deploy").replace("/api/v1/today", "/api/v2/home"), body("dashboard-deploy"))
+        self.assertEqual(body("lab-deploy").replace("/api/v1/today", "/api/v1/homeView"), body("dashboard-deploy"))
         self.assertIn("ACCESS_ISSUER: ${{ steps.config.outputs.access_issuer }}", step("lab-deploy"))
         config = workflow_jobs()["lab-deploy"].split("- name: Read the host and the Access issuer from the committed config\n", 1)[1]
         self.assertIn('open("wrangler.toml", "rb")', config.split("\n      - ", 1)[0])
@@ -1684,7 +1684,7 @@ class AccessProbe(unittest.TestCase):
             lines = step(job).split("        run: |\n", 1)[1].splitlines()
             return "\n".join(line for line in lines if not line.strip() or line.startswith("          ")).rstrip()
 
-        self.assertEqual(body("flowday-deploy").replace("/api/tasks", "/api/v2/home"), body("dashboard-deploy"))
+        self.assertEqual(body("flowday-deploy").replace("/api/tasks", "/api/v1/homeView"), body("dashboard-deploy"))
         self.assertIn("ACCESS_ISSUER: ${{ steps.config.outputs.access_issuer }}", step("flowday-deploy"))
         self.assertIn("PUBLIC_HOST: ${{ steps.config.outputs.host }}", step("flowday-deploy"))
         block = workflow_jobs()["flowday-deploy"]
@@ -1706,7 +1706,7 @@ class AccessProbe(unittest.TestCase):
 
         links = body("links-deploy")
         self.assertIn("for path in /_ /_/ /_/api/v1/links; do", links)
-        self.assertEqual(links.replace("for path in /_ /_/ /_/api/v1/links;", "for path in / /api/v2/home;"), body("dashboard-deploy"))
+        self.assertEqual(links.replace("for path in /_ /_/ /_/api/v1/links;", "for path in / /api/v1/homeView;"), body("dashboard-deploy"))
         self.assertIn("ACCESS_ISSUER: ${{ steps.config.outputs.access_issuer }}", step("links-deploy"))
         self.assertIn("PUBLIC_HOST: ${{ steps.config.outputs.host }}", step("links-deploy"))
         block = workflow_jobs()["links-deploy"]
@@ -1727,7 +1727,7 @@ class AccessProbe(unittest.TestCase):
 
         watch = body("watch-deploy")
         self.assertIn("for path in / /api/v1/watches /new; do", watch)
-        self.assertEqual(watch.replace("for path in / /api/v1/watches /new;", "for path in / /api/v2/home;"), body("dashboard-deploy"))
+        self.assertEqual(watch.replace("for path in / /api/v1/watches /new;", "for path in / /api/v1/homeView;"), body("dashboard-deploy"))
         self.assertIn("ACCESS_ISSUER: ${{ steps.config.outputs.access_issuer }}", step("watch-deploy"))
         self.assertIn("PUBLIC_HOST: ${{ steps.config.outputs.host }}", step("watch-deploy"))
         block = workflow_jobs()["watch-deploy"]

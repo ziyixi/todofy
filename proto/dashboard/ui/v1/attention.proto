@@ -1,0 +1,195 @@
+// The parts every view of the dashboard shares (dashboard/docs/design-v2.md §4-§5): the attention strip, the
+// tab badges, the levels and the refresh times. Output messages only: the Worker never reads them from a client.
+//
+// Wire. As in every file of this package, a REQUIRED field is always written (as null when it has no value: a
+// field declared `optional`, an enum without non_null, a message without non_null), any other field is left out
+// when it has no value, and fields are numbered in the order HomeState writes them, so the JSON it serializes
+// once per view is exactly what the wire profile writes (dashboard/worker/test/wire-conformance.test.ts).
+// Timestamps are strings in the format `Timestamp` (dashboard_ui_service.proto says why).
+//
+// (-- api-linter: core::0142::time-field-type=disabled
+//     aip.dev/not-precedent: timestamps are strings, as in the ops-v1 answers these views embed. --)
+// (-- api-linter: core::0142::time-field-names=disabled
+//     aip.dev/not-precedent: the view JSON's names (generated_at, since); AIP-142 would say generate_time. --)
+// (-- api-linter: core::0140::prepositions=disabled
+//     aip.dev/not-precedent: the view JSON's names (last_tick_at). --)
+
+syntax = "proto3";
+
+package dashboard.ui.v1;
+
+import "common/wire/v1/wire.proto";
+import "google/api/field_behavior.proto";
+import "ops/v1/ops.proto";
+
+option java_multiple_files = true;
+option java_outer_classname = "AttentionProto";
+option java_package = "science.ziyixi.dashboard.ui.v1";
+option (common.wire.v1.formats) = {
+  name: "Timestamp"
+  pattern: "[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]{1,3})?Z"
+  description: "RFC 3339 UTC with Z, optional milliseconds."
+};
+
+// The attention strip of every view: what needs the owner, worst first.
+message Attention {
+  // Worst of `items` (critical, then unknown, then warning); unknown before anything ran.
+  Level level = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field) = {
+      allowed: [
+        "ok",
+        "warning",
+        "critical",
+        "unknown"
+      ]
+      non_null: true
+    }
+  ];
+  // The digest's warning and critical items, then the observed ones, worst first; the strip shows three.
+  repeated AttentionItem items = 2 [(google.api.field_behavior) = REQUIRED];
+  // Info items shown on the page only (canary_disabled).
+  repeated AttentionItem info = 3 [(google.api.field_behavior) = REQUIRED];
+  // Switches that hold work (maintenance, a paused delivery, the owner's shed): shown, never alarmed.
+  repeated HeldItem held = 4 [(google.api.field_behavior) = REQUIRED];
+}
+
+// A digest item (an ops-v1 report item) with where it is shown, or a page-only observed item: a level a view
+// shows (a tile, a flow stage, a Worker's error rate) that no digest item explains. Observed items never reach
+// Todofy.
+message AttentionItem {
+  // Where it comes from: an app (`mail-hero`), `dashboard` or `cloudflare`.
+  string source = 1 [(google.api.field_behavior) = REQUIRED];
+  // What the condition is (a code; the UI shows an unknown one as it is).
+  string code = 2 [(google.api.field_behavior) = REQUIRED];
+  // The digest severity; an observed item is `critical` when critical, else `warning`.
+  ops.v1.Severity severity = 3 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).non_null = true
+  ];
+  // When the episode started; null for page-only items.
+  optional string since = 4 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).format = "Timestamp"
+  ];
+  // Numbers only, named by codes, in the order the source wrote them.
+  map<string, double> metrics = 5 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).keep_order = true
+  ];
+  // Where the item links to.
+  Target target = 6 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).non_null = true
+  ];
+  // Set on an observed item only: its level (`code` is then a tile's or a stage's reason).
+  Level observed = 7 [(common.wire.v1.field) = {
+    allowed: [
+      "warning",
+      "critical",
+      "unknown"
+    ]
+  }];
+}
+
+// Where an item links to; the UI builds the hash route from it.
+message Target {
+  // The view.
+  View view = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).non_null = true
+  ];
+  // A flow of the registry (flows view).
+  optional string flow = 2;
+  // A stage of that flow.
+  optional string stage = 3;
+  // An entry of the registry.
+  optional string entry = 4;
+  // A Worker script (cloudflare view).
+  optional string script = 5;
+}
+
+// A switch that holds an entry's work.
+message HeldItem {
+  // The registry entry.
+  string entry = 1 [(google.api.field_behavior) = REQUIRED];
+  // The hold signal's code (maintenance, send_paused, owner_shed).
+  string code = 2 [(google.api.field_behavior) = REQUIRED];
+  // Where it links to.
+  Target target = 3 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).non_null = true
+  ];
+}
+
+// Warning, critical and unknown items per view, for the tab badges (held and info items never count).
+message Badges {
+  // Items whose target is the home view.
+  int32 home = 1 [(google.api.field_behavior) = REQUIRED];
+  // Items whose target is the flows view.
+  int32 flows = 2 [(google.api.field_behavior) = REQUIRED];
+  // Items whose target is the cloudflare view.
+  int32 cloudflare = 3 [(google.api.field_behavior) = REQUIRED];
+  // Items whose target is the ops view.
+  int32 ops = 4 [(google.api.field_behavior) = REQUIRED];
+}
+
+// The freshness of a view.
+message Refresh {
+  // The last cron tick.
+  optional string last_tick_at = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).format = "Timestamp"
+  ];
+  // The next cron tick (every :00 and :30 UTC).
+  string next_tick_at = 2 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).format = "Timestamp"
+  ];
+  // The last owner refresh of this view's scope that fetched.
+  optional string last_refresh_at = 3 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).format = "Timestamp"
+  ];
+  // The earliest time a refresh of this scope fetches again.
+  string next_refresh_at = 4 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).format = "Timestamp"
+  ];
+  // This answer performed a refresh.
+  bool refreshed = 5 [(google.api.field_behavior) = REQUIRED];
+}
+
+// A level of the dashboard (design-v2.md §2). Status is always shape and word, never colour alone.
+enum Level {
+  // Never sent.
+  LEVEL_UNSPECIFIED = 0;
+  // 正常.
+  LEVEL_OK = 1;
+  // 已暂停: held by a switch.
+  LEVEL_HELD = 2;
+  // 需关注.
+  LEVEL_WARNING = 3;
+  // 故障.
+  LEVEL_CRITICAL = 4;
+  // 未知: a check that went silent is never shown healthy.
+  LEVEL_UNKNOWN = 5;
+  // 仅链接: Access-protected, never probed.
+  LEVEL_LINK = 6;
+  // 未接入: not monitored.
+  LEVEL_UNMONITORED = 7;
+}
+
+// The dashboard's views (the UI's tabs).
+enum View {
+  // Never sent.
+  VIEW_UNSPECIFIED = 0;
+  // 首页.
+  VIEW_HOME = 1;
+  // 业务流程.
+  VIEW_FLOWS = 2;
+  // Cloudflare.
+  VIEW_CLOUDFLARE = 3;
+  // 操作与记录.
+  VIEW_OPS = 4;
+}

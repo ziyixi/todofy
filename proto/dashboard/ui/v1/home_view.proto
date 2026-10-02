@@ -1,0 +1,313 @@
+// 首页, the home view (dashboard/docs/design-v2.md §5): a tile per registry entry, a line per flow, the
+// Cloudflare summary and the digest. The wire rules of attention.proto apply.
+//
+// (-- api-linter: core::0142::time-field-type=disabled
+//     aip.dev/not-precedent: timestamps are strings, as in the ops-v1 answers these views embed. --)
+// (-- api-linter: core::0142::time-field-names=disabled
+//     aip.dev/not-precedent: the view JSON's names (generated_at, checked_at). --)
+// (-- api-linter: core::0140::prepositions=disabled
+//     aip.dev/not-precedent: the view JSON's names (last_sent_at). --)
+// (-- api-linter: core::0216::state-field-output-only=disabled
+//     aip.dev/not-precedent: output messages, where REQUIRED means "always written"; OUTPUT_ONLY would let the
+//     wire profile omit a null. --)
+
+syntax = "proto3";
+
+package dashboard.ui.v1;
+
+import "common/wire/v1/wire.proto";
+import "dashboard/ui/v1/attention.proto";
+import "dashboard/ui/v1/registry.proto";
+import "dashboard/ui/v1/usage.proto";
+import "google/api/field_behavior.proto";
+import "google/api/resource.proto";
+import "ops/v1/ops.proto";
+
+option java_multiple_files = true;
+option java_outer_classname = "HomeViewProto";
+option java_package = "science.ziyixi.dashboard.ui.v1";
+option (common.wire.v1.formats) = {
+  name: "Timestamp"
+  pattern: "[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]{1,3})?Z"
+  description: "RFC 3339 UTC with Z, optional milliseconds."
+};
+
+// The home view. A singleton (AIP-156), built and serialized by HomeState on each read.
+message HomeView {
+  option (google.api.resource) = {
+    type: "home.ziyixi.science/HomeView"
+    pattern: "homeView"
+    singular: "homeView"
+    plural: "homeViews"
+  };
+
+  // Always `homeView`.
+  string name = 1 [(google.api.field_behavior) = IDENTIFIER];
+  // When HomeState built this answer.
+  string generated_at = 2 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).format = "Timestamp"
+  ];
+  // Bumped by every tick, every refresh that fetched, every guard override and manual canary start.
+  int32 rev = 3 [(google.api.field_behavior) = REQUIRED];
+  // The Worker's build (BUILD_SHA).
+  string build = 4 [(google.api.field_behavior) = REQUIRED];
+  // The attention strip.
+  Attention attention = 5 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).non_null = true
+  ];
+  // The tab badges.
+  Badges badges = 6 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).non_null = true
+  ];
+  // The view's freshness; RefreshHomeView's scope.
+  Refresh refresh = 7 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).non_null = true
+  ];
+  // One per registry entry except the hidden group, in registry order.
+  repeated EntryState entries = 8 [(google.api.field_behavior) = REQUIRED];
+  // One per flow, in registry order.
+  repeated FlowSummary flows = 9 [(google.api.field_behavior) = REQUIRED];
+  // The Cloudflare summary.
+  CloudflareSummary cloudflare = 10 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).non_null = true
+  ];
+  // The digest's last send.
+  HomeDigest digest = 11 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).non_null = true
+  ];
+}
+
+// An entry's tile.
+message EntryState {
+  // The registry entry.
+  string id = 1 [(google.api.field_behavior) = REQUIRED];
+  // link_only entries are `link`; unmonitored ones (or a disabled probe) `unmonitored`; never a made-up ok.
+  Level level = 2 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).non_null = true
+  ];
+  // The code explaining a non-ok level: a signal code, unreachable, http_status, idle, never_checked, tick_stale.
+  optional string reason = 3 [(google.api.field_behavior) = REQUIRED];
+  // When the entry was last checked.
+  optional string checked_at = 4 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).format = "Timestamp"
+  ];
+  // Failed checks since the last success.
+  int32 consecutive_failures = 5 [(google.api.field_behavior) = REQUIRED];
+  // At most 3 signals, worst first (ops-v1 entries only).
+  repeated TopSignal top_signals = 6 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).max_items = 3
+  ];
+  // The one number the tile shows next to its level.
+  TileMetric metric = 7 [(google.api.field_behavior) = REQUIRED];
+}
+
+// A signal on a tile.
+message TopSignal {
+  // The signal's code.
+  string code = 1 [(google.api.field_behavior) = REQUIRED];
+  // How bad it is.
+  ops.v1.Severity severity = 2 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).non_null = true
+  ];
+  // When the app first saw it, if it tracks that.
+  optional string since = 3 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).format = "Timestamp"
+  ];
+}
+
+// The number a tile shows (TileMetricDef says which).
+// (-- api-linter: core::0123::resource-annotation=disabled
+//     aip.dev/not-precedent: `name` is an ops-v1 counter's name, not a resource name. --)
+message TileMetric {
+  option (common.wire.v1.message).discriminator = "kind";
+
+  // Which number.
+  TileMetricKind kind = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).non_null = true
+  ];
+  // The counter's name.
+  optional string name = 2 [(common.wire.v1.field) = {
+    cases: {
+      when: "counter"
+      presence: PRESENCE_REQUIRED
+    }
+    otherwise: PRESENCE_ABSENT
+  }];
+  // The counter's value.
+  optional double value = 3 [(common.wire.v1.field) = {
+    cases: {
+      when: "counter"
+      presence: PRESENCE_REQUIRED
+    }
+    otherwise: PRESENCE_ABSENT
+  }];
+  // The probe's latency in milliseconds.
+  optional int32 ms = 4 [(common.wire.v1.field) = {
+    cases: {
+      when: "latency"
+      presence: PRESENCE_REQUIRED
+    }
+    otherwise: PRESENCE_ABSENT
+  }];
+  // The hour of the last request (the tick runs every 30 minutes), e.g. `2026-09-29T06:00:00.000Z`.
+  optional string hour = 5 [(common.wire.v1.field) = {
+    format: "Timestamp"
+    cases: {
+      when: "last_active"
+      presence: PRESENCE_REQUIRED
+    }
+    otherwise: PRESENCE_ABSENT
+  }];
+}
+
+// A flow's line.
+message FlowSummary {
+  // The flow.
+  string id = 1 [(google.api.field_behavior) = REQUIRED];
+  // The worst monitored stage; `unmonitored` when no stage is monitored.
+  Level level = 2 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).non_null = true
+  ];
+  // Fewer than half of the stages are monitored: the title shows 部分接入, never a green dot.
+  bool partial = 3 [(google.api.field_behavior) = REQUIRED];
+  // The stages the dashboard sees.
+  Coverage coverage = 4 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).non_null = true
+  ];
+  // The first stage that is not ok, with its main code.
+  FirstIssue first_issue = 5 [(google.api.field_behavior) = REQUIRED];
+  // How recently the flow was seen working.
+  Freshness freshness = 6 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).non_null = true
+  ];
+}
+
+// Monitored stages of a flow.
+message Coverage {
+  // Stages with a source the dashboard reads.
+  int32 monitored = 1 [(google.api.field_behavior) = REQUIRED];
+  // All stages.
+  int32 total = 2 [(google.api.field_behavior) = REQUIRED];
+}
+
+// A flow's first problem.
+message FirstIssue {
+  // The stage.
+  string stage = 1 [(google.api.field_behavior) = REQUIRED];
+  // Its reason code.
+  optional string code = 2 [(google.api.field_behavior) = REQUIRED];
+}
+
+// How recently a flow was seen working.
+message Freshness {
+  option (common.wire.v1.message).discriminator = "kind";
+
+  // What proves it.
+  enum Kind {
+    // Never sent.
+    KIND_UNSPECIFIED = 0;
+    // The last ok canary run.
+    KIND_CANARY = 1;
+    // The last request of the flow's Workers.
+    KIND_ACTIVITY = 2;
+    // The digest's last send.
+    KIND_DIGEST = 3;
+    // Nothing the dashboard sees.
+    KIND_NONE = 4;
+  }
+
+  // What proves it.
+  Kind kind = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).non_null = true
+  ];
+  // When; null when it never happened (always null for `none`).
+  optional string at = 2 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field) = {
+      format: "Timestamp"
+      cases: {
+        when: "none"
+        presence: PRESENCE_ABSENT
+      }
+    }
+  ];
+  // Finished ok runs among the recent ones (canary).
+  optional int32 ok_runs = 3 [(common.wire.v1.field) = {
+    cases: {
+      when: "canary"
+      presence: PRESENCE_REQUIRED
+    }
+    otherwise: PRESENCE_ABSENT
+  }];
+  // Finished recent runs (canary).
+  optional int32 runs = 4 [(common.wire.v1.field) = {
+    cases: {
+      when: "canary"
+      presence: PRESENCE_REQUIRED
+    }
+    otherwise: PRESENCE_ABSENT
+  }];
+  // Whether Todofy stored the last report (digest); unset before the first receipt.
+  optional bool accepted = 5 [(common.wire.v1.field) = {
+    cases: {
+      when: "digest"
+      presence: PRESENCE_OPTIONAL
+    }
+    otherwise: PRESENCE_ABSENT
+  }];
+}
+
+// The Cloudflare summary of the home view.
+message CloudflareSummary {
+  // The usage read's status.
+  Usage.State usage_status = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).non_null = true
+  ];
+  // When the usage was fetched.
+  optional string fetched_at = 2 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).format = "Timestamp"
+  ];
+  // The four mini bars (workers_requests, d1_rows_read, ai_neurons, r2_storage), without contributors.
+  repeated QuotaRow quota = 3 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).max_items = 4
+  ];
+  // Workers seen today or remembered.
+  int32 workers = 4 [(google.api.field_behavior) = REQUIRED];
+  // Their errors today (UTC).
+  double errors_today = 5 [(google.api.field_behavior) = REQUIRED];
+  // The desired guard level.
+  ops.v1.GuardLevel guard_level = 6 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).non_null = true
+  ];
+}
+
+// The digest's last send, on the home view.
+message HomeDigest {
+  // When the last report went out.
+  optional string last_sent_at = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).format = "Timestamp"
+  ];
+  // Whether Todofy stored it; null before the first receipt.
+  optional bool accepted = 2 [(google.api.field_behavior) = REQUIRED];
+}

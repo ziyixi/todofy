@@ -9,10 +9,10 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { afterEach, beforeAll, describe, expect, it } from 'vitest';
-import { QUOTA_RESOURCES } from '../../src/api-types.ts';
-import { API_V2_VERSION, type HomeResponse, type OpsResponse } from '../../src/api-v2-types.ts';
+import { QUOTA_RESOURCES } from '../../src/idl.ts';
+import { type HomeView, type OpsView } from '../../src/api-types.ts';
 import { accessClaims, testIssuer, type TestIssuer } from '../jwt.ts';
-import { d1Reads, expectValid, latest, NOW, startFlows, SYNTHETIC_BINDINGS, type FlowHarness } from './flows.ts';
+import { d1Reads, expectValid, latest, NOW, PATHS, startFlows, SYNTHETIC_BINDINGS, type FlowHarness } from './flows.ts';
 
 const ISSUER = SYNTHETIC_BINDINGS.ACCESS_ISSUER ?? '';
 const AUDIENCE = SYNTHETIC_BINDINGS.ACCESS_AUDIENCE ?? '';
@@ -35,7 +35,7 @@ describe('Access end to end', () => {
       certs++;
       return Response.json(issuer.jwks);
     });
-    const as = async (email: string | null, path = '/api/v2/ops') =>
+    const as = async (email: string | null, path: string = PATHS.ops) =>
       h?.fetch(path, email === null ? {} : { headers: { 'cf-access-jwt-assertion': await issuer.sign(accessClaims(ISSUER, AUDIENCE, email)) } });
 
     expect((await as(null))?.status).toBe(401);
@@ -46,7 +46,7 @@ describe('Access end to end', () => {
       await response?.arrayBuffer();
     }
     // The harness's DEV_NOW pins only requests the loopback bypass signed in: one Access verified reads the clock.
-    const verified = (await (await as('owner@example.com'))?.json()) as OpsResponse;
+    const verified = (await (await as('owner@example.com'))?.json()) as OpsView;
     expect(verified.generated_at).not.toBe(new Date(NOW).toISOString());
     const page = await as('owner@example.com', '/');
     expect(page?.status).toBe(200);
@@ -59,13 +59,13 @@ describe('Access end to end', () => {
 
     // The CSRF token is bound to the owner and the https origin of PUBLIC_HOST.
     const jwt = await issuer.sign(accessClaims(ISSUER, AUDIENCE, 'owner@example.com'));
-    const csrf = await h.fetch('/api/v2/csrf', { headers: { 'cf-access-jwt-assertion': jwt } });
+    const csrf = await h.fetch(PATHS.csrf, { headers: { 'cf-access-jwt-assertion': jwt } });
     const { token } = (await csrf.json()) as { token: string };
     const cookie = (csrf.headers.get('set-cookie') ?? '').split(';')[0] ?? '';
     const post = (origin: string) =>
-      h?.fetch('/api/v2/guard', {
+      h?.fetch(PATHS.guard, {
         method: 'POST',
-        headers: { 'cf-access-jwt-assertion': jwt, origin, 'x-csrf-token': token, cookie },
+        headers: { 'cf-access-jwt-assertion': jwt, origin, 'x-csrf-token': token, cookie, 'content-type': 'application/json' },
         body: '{"level":"shed"}',
       });
     expect((await post('http://127.0.0.1'))?.status).toBe(403);
@@ -87,7 +87,7 @@ describe('the ops and cloudflare views', () => {
 
     await h.tick(NOW - 60_000);
     const after = await h.snapshot();
-    expect(after.ops.version).toBe(API_V2_VERSION);
+    expect(after.ops.name).toBe('opsView');
     expect(after.ops.generated_at).toBe(new Date(NOW).toISOString());
     expect(after.ops.build).toBe('test');
     expect(after.overall.level).toBe('ok');
@@ -121,7 +121,7 @@ describe('the ops and cloudflare views', () => {
 
   it('keeps 10 minutes between status() polls across home refreshes and ticks', async () => {
     h = await startFlows({ bindings: { CANARY_UTC_HOUR: '23' } });
-    const refreshed = await h.v2<HomeResponse>('home?refresh=1');
+    const refreshed = await h.refresh<HomeView>('home');
     expect(refreshed.body?.refresh.refreshed).toBe(true);
     expect((await h.called()).sort()).toEqual(['mail-hero.status', 'todofy.status']);
     const polledAt = Date.parse((await h.snapshot()).apps.todofy.checked_at ?? '');
@@ -138,10 +138,10 @@ describe('the ops and cloudflare views', () => {
 
   it('polls stale statuses on a home refresh and says when analytics is not configured', async () => {
     h = await startFlows({ bindings: { CF_ANALYTICS_TOKEN: '' } });
-    const refreshed = await h.v2<HomeResponse>('home?refresh=1');
+    const refreshed = await h.refresh<HomeView>('home');
     expect(refreshed.body?.refresh.refreshed).toBe(true);
     expect((await h.called()).sort()).toEqual(['mail-hero.status', 'todofy.status']);
-    const cloudflare = await h.v2('cloudflare?refresh=1');
+    const cloudflare = await h.refresh('cloudflare');
     expect(cloudflare.status).toBe(200);
     const snap = await h.snapshot();
     expect(snap.usage.status).toBe('not_configured');
@@ -149,17 +149,22 @@ describe('the ops and cloudflare views', () => {
     expect(h.analytics.requests).toEqual([]);
   });
 
-  it('answers 404 on the retired v1 paths', async () => {
+  it('answers 410 reload_required on the retired /api/v2 paths and NOT_FOUND on the retired v1 ones', async () => {
     h = await startFlows();
-    for (const path of ['/api/v1/overview', '/api/v1/csrf']) {
+    for (const path of ['/api/v2/home', '/api/v2/ops', '/api/v2/registry', '/api/v2/csrf']) {
+      const response = await h.fetch(path);
+      expect(response.status).toBe(410);
+      expect(await response.json()).toMatchObject({ error: { code: 'reload_required', message: '个人控制台已更新，请刷新页面' } });
+    }
+    for (const path of ['/api/v2/guard', '/api/v2/canary']) {
+      const response = await h.post(path, {});
+      expect(response.status).toBe(410);
+      await response.arrayBuffer();
+    }
+    for (const path of ['/api/v1/overview', '/api/v1/guard', '/api/v1/canary']) {
       const response = await h.fetch(path);
       expect(response.status).toBe(404);
-      expect(await response.json()).toMatchObject({ error: { code: 'not_found' } });
-    }
-    for (const path of ['/api/v1/guard', '/api/v1/canary']) {
-      const response = await h.post(path, {});
-      expect(response.status).toBe(404);
-      await response.arrayBuffer();
+      expect(await response.json()).toMatchObject({ error: { code: 404, status: 'NOT_FOUND' } });
     }
     expect(await h.called()).toEqual([]);
   });
@@ -222,7 +227,7 @@ describe('ticks and storage bounds', () => {
 
       h = await startFlows({ persist: dir });
       expect(latest(await h.snapshot())).toMatchObject({ run_id: 'canary-2026-09-29', outcome: 'ok' });
-      expect((await h.post('/api/v2/canary', { canary_id: 'mail-todofy' })).status).toBe(202);
+      expect((await h.post(PATHS.canary, {})).status).toBe(200);
       await h.dispose();
       h = undefined;
       let migrated = 0;

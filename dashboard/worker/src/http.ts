@@ -1,8 +1,20 @@
 /**
- * The owner surface (docs/design.md §6): Access (edge-auth) on every path except /health, signed
- * double-submit CSRF plus Origin on mutations, private headers on every response, error envelopes.
- * No business logic: every API call is one RPC to HomeState. Workers Free gives this handler 10 ms of
- * CPU, so it never reads or parses more than a 1 KiB body (a chunked upload is cut off after 1 KiB).
+ * The owner surface (docs/design.md §6, docs/design-v2.md §5): Access (edge-auth) on every path except /health, then
+ *
+ * - /api/v1/*: the owner API, DashboardUiService (proto/dashboard/ui/v1), served by the shared transcoder with the
+ *   handlers of api.ts; every method but GET also needs the same-origin Origin and the signed double-submit CSRF
+ *   token (the transcoder's `authorize` hook runs before the body is read);
+ * - GET /api/csrf: the CSRF token and its cookie (transport, not part of the service);
+ * - the routes of the UI before dashboard.ui.v1 (/api/v2/home, ...): 410 `reload_required` in their old error
+ *   envelope, so a tab still running the old UI tells the owner to reload (until 2026-11-02, then NOT_FOUND like any
+ *   other path);
+ * - everything else: the UI's static assets (GET and HEAD).
+ *
+ * Errors are google.rpc.Status bodies (proto/dashboard/ui/v1/errors.proto, common/errors/v1/errors.proto), logged as
+ * one line with the request ID, status and reason only. A failed dependency (HomeState, Access's keys) is
+ * UNAVAILABLE, which the UI may repeat; anything else unexpected is a bug, INTERNAL. Private headers on every
+ * response. Workers Free gives this handler 10 ms of CPU, so it never reads more than a 1 KiB body (a chunked upload
+ * is cut off after 1 KiB) and never decodes a view: HomeState serializes each one once (api.ts).
  */
 import {
   STRICT_CSP,
@@ -14,15 +26,13 @@ import {
   withPrivateHeaders,
   type AccessPolicy,
 } from '@ziyixi/edge-auth';
-import type { GuardLevel } from './api-types.ts';
-import { GUARD_LEVELS } from './ops-client.ts';
-import type { ApiError, ApiErrorCode, CsrfResponse, GuardRequest, HealthResponse } from './api-types.ts';
-import type { CanaryStartRequestV2, GuardResponseV2 } from './api-v2-types.ts';
+import { DashboardUiService } from '@ziyixi/proto/dashboard/ui/v1/dashboard_ui_service_pb';
+import { HttpTranscoder, type RouteInfo } from '@ziyixi/proto/http-transcoder';
+import { RpcError } from '@ziyixi/proto/rpc-status';
+import { dashboardError, handlers, isReason, REASONS, type ApiContext } from './api.ts';
+import type { CsrfResponse, HealthResponse, LegacyApiError } from './api-types.ts';
 import { buildSha, devNow, publicHost } from './config.ts';
 import type { Env } from './env.ts';
-import { registryBody } from './registry.ts';
-import { HOME_OBJECT, type GuardOverrideOutcome, type HomeState, type StartCanaryOutcome } from './state.ts';
-import { V2_REFRESHABLE, etagMatches, type V2Body, type V2View } from './v2-views.ts';
 
 export const CSRF_COOKIE = 'home_csrf';
 export const MAX_BODY_BYTES = 1024;
@@ -30,34 +40,13 @@ export const MAX_BODY_BYTES = 1024;
 export const JWKS_TTL_MS = 600_000;
 export const JWKS_REFRESH_COOLDOWN_MS = 60_000;
 export const NBF_LEEWAY_SECONDS = 60;
+/** ErrorInfo.domain: the API's name (DashboardUiService's default_host), whatever host serves it. */
+export const API_DOMAIN = 'home.ziyixi.science';
+export const API_PREFIX = '/api/v1/';
+/** The old UI's reload answer on its retired paths (one release, until 2026-11-02). */
+export const RELOAD_MESSAGE = '个人控制台已更新，请刷新页面';
 const IMMUTABLE = 'private, max-age=31536000, immutable';
-
-export const MESSAGES: Readonly<Record<ApiErrorCode, string>> = {
-  unauthorized: '未登录或凭据无效',
-  access_not_configured: 'Cloudflare Access 配置不完整',
-  not_configured: '服务缺少必需的密钥配置',
-  csrf_failed: '页面安全令牌已失效，请刷新后重试',
-  bad_request: '请求格式不正确',
-  not_found: '找不到该资源',
-  method_not_allowed: '不支持该请求方法',
-  canary_active: '已有金丝雀运行正在进行',
-  canary_disabled: '金丝雀已关闭（DASHBOARD_CANARY_ENABLED=false）',
-  canary_limit: '今天的手动金丝雀次数已用完',
-  unavailable: '依赖服务暂时不可用，请稍后再试',
-};
-
-export class HttpError extends Error {
-  readonly status: number;
-  readonly code: ApiErrorCode;
-  readonly headers: Readonly<Record<string, string>>;
-
-  constructor(status: number, code: ApiErrorCode, headers: Readonly<Record<string, string>> = {}) {
-    super(code);
-    this.status = status;
-    this.code = code;
-    this.headers = headers;
-  }
-}
+const NO_STORE = { 'cache-control': 'no-store' } as const;
 
 interface Context {
   readonly request: Request;
@@ -66,44 +55,20 @@ interface Context {
   readonly requestId: string;
 }
 
+/** The context of an authenticated request: the transcoder's and every handler's. */
+interface OwnerContext extends Context, ApiContext {
+  readonly owner: string;
+  readonly bypassed: boolean;
+}
+
 export function newRequestId(): string {
   return Array.from(crypto.getRandomValues(new Uint8Array(8)), (byte) => byte.toString(16).padStart(2, '0')).join('');
-}
-
-export function jsonResponse(data: unknown, status = 200): Response {
-  return new Response(JSON.stringify(data), {
-    status,
-    headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' },
-  });
-}
-
-/** The error envelope; one log line with the request ID, status and code only. */
-export function errorResponse(requestId: string, error: HttpError): Response {
-  console.log(JSON.stringify({ request_id: requestId, status: error.status, code: error.code }));
-  const body: ApiError = { error: { code: error.code, message: MESSAGES[error.code], request_id: requestId } };
-  const response = jsonResponse(body, error.status);
-  for (const [name, value] of Object.entries(error.headers)) response.headers.set(name, value);
-  return response;
 }
 
 // ---- Access ---------------------------------------------------------------------------------------
 
 /** One verifier per isolate: it owns the per-issuer key cache. */
 const verifier = createAccessVerifier();
-
-function localBypass(env: Env): boolean {
-  return env.DEV_AUTH_BYPASS === 'true';
-}
-
-/**
- * The instant HomeState takes as now for this request: DEV_NOW when the loopback dev bypass signed the
- * request in (local development and the workerd tests pin the clock with it), else null, the object's
- * own Date.now(). A request Access verified never reads DEV_NOW, and an enabled bypass refuses every
- * non-loopback request, so a stray DEV_NOW cannot move a production request's clock.
- */
-function requestTime(env: Env, bypassed: boolean): number | null {
-  return bypassed ? devNow(env) : null;
-}
 
 export function accessPolicy(env: Env): AccessPolicy {
   return {
@@ -118,7 +83,7 @@ export function accessPolicy(env: Env): AccessPolicy {
     // Local development only: http://localhost|127.0.0.1|[::1] without cf-ray. Anywhere else an enabled
     // bypass refuses every request (503) instead of silently verifying.
     devBypass: {
-      enabled: localBypass(env),
+      enabled: env.DEV_AUTH_BYPASS === 'true',
       hosts: 'loopback-http',
       principal: asciiLowerCase((env.ACCESS_OWNER ?? '').trim()),
       whenNotLocal: 'refuse',
@@ -126,18 +91,22 @@ export function accessPolicy(env: Env): AccessPolicy {
   };
 }
 
-async function authenticate(ctx: Context): Promise<{ owner: string; bypassed: boolean }> {
+async function authenticate(ctx: Context): Promise<OwnerContext> {
   const result = await verifier.verify(ctx.request, accessPolicy(ctx.env));
-  if (result.ok) return { owner: result.owner, bypassed: result.bypassed };
+  if (result.ok) {
+    // A request Access verified never reads DEV_NOW, and an enabled bypass refuses every non-loopback request, so a
+    // stray DEV_NOW cannot move a production request's clock.
+    return { ...ctx, owner: result.owner, bypassed: result.bypassed, at: result.bypassed ? devNow(ctx.env) : null };
+  }
   switch (result.failure) {
     case 'not_configured':
     case 'dev_bypass_refused':
-      throw new HttpError(503, 'access_not_configured');
+      throw dashboardError('ACCESS_NOT_CONFIGURED');
     case 'keys_unavailable':
-      throw new HttpError(503, 'unavailable');
+      throw dashboardError('UNAVAILABLE');
     case 'missing_token':
     case 'invalid_token':
-      throw new HttpError(401, 'unauthorized');
+      throw dashboardError('UNAUTHORIZED');
   }
 }
 
@@ -145,206 +114,106 @@ async function authenticate(ctx: Context): Promise<{ owner: string; bypassed: bo
 
 async function csrfKey(env: Env): Promise<CryptoKey> {
   const key = await importHmacKeyHex((env.CSRF_SIGNING_KEY ?? '').trim());
-  if (key === null) throw new HttpError(503, 'not_configured');
+  if (key === null) throw dashboardError('NOT_CONFIGURED');
   return key;
 }
 
-function allowedOrigins(ctx: Context, bypassed: boolean): string[] {
+function allowedOrigins(ctx: OwnerContext): string[] {
   const host = publicHost(ctx.env);
   const origins = host === null ? [] : [`https://${host}`];
   // The loopback dev server is plain HTTP on its own port.
-  if (bypassed) origins.push(ctx.url.origin.toLowerCase());
+  if (ctx.bypassed) origins.push(ctx.url.origin.toLowerCase());
   return origins;
 }
 
-async function checkCsrf(ctx: Context, owner: string, bypassed: boolean): Promise<void> {
-  // The key comes first, so a missing key answers 503 whatever the request carries.
+/** The transcoder's authorize hook: a mutation needs Origin and the CSRF token of this owner (the key first). */
+async function authorize(request: Request, route: RouteInfo, ctx: OwnerContext): Promise<void> {
+  if (route.safe) return;
   const key = await csrfKey(ctx.env);
-  const result = await verifyCsrf(ctx.request, owner, { cookieName: CSRF_COOKIE, key, allowedOrigins: allowedOrigins(ctx, bypassed) });
-  if (!result.ok) throw new HttpError(403, 'csrf_failed');
+  const result = await verifyCsrf(request, ctx.owner, { cookieName: CSRF_COOKIE, key, allowedOrigins: allowedOrigins(ctx) });
+  if (!result.ok) throw dashboardError('CSRF_FAILED');
 }
 
-/**
- * The body's bytes, at most `limit`: a declared Content-Length above it is refused before reading, and
- * a body without one (chunked) is read only until it passes the limit, then cancelled.
- */
-export async function readLimited(request: Request, limit: number): Promise<Uint8Array | null> {
-  const header = request.headers.get('content-length');
-  if (header !== null && !(/^[0-9]{1,10}$/.test(header.trim()) && Number(header.trim()) <= limit)) return null;
-  if (request.body === null) return new Uint8Array(0);
-  const reader = (request.body as ReadableStream<Uint8Array>).getReader();
-  const chunks: Uint8Array[] = [];
-  let size = 0;
-  for (;;) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    size += value.byteLength;
-    if (size > limit) {
-      await reader.cancel();
-      return null;
-    }
-    chunks.push(value);
-  }
-  const out = new Uint8Array(size);
-  let offset = 0;
-  for (const chunk of chunks) {
-    out.set(chunk, offset);
-    offset += chunk.byteLength;
-  }
-  return out;
-}
-
-/** A JSON object body of at most 1 KiB; an empty body reads as `{}`. */
-async function readBody(request: Request): Promise<Record<string, unknown>> {
-  const bytes = await readLimited(request, MAX_BODY_BYTES);
-  if (bytes === null) throw new HttpError(400, 'bad_request');
-  let text: string;
-  try {
-    text = new TextDecoder('utf-8', { fatal: true, ignoreBOM: false }).decode(bytes);
-  } catch {
-    throw new HttpError(400, 'bad_request');
-  }
-  if (text.trim() === '') return {};
-  let value: unknown;
-  try {
-    value = JSON.parse(text);
-  } catch {
-    throw new HttpError(400, 'bad_request');
-  }
-  if (typeof value !== 'object' || value === null || Array.isArray(value)) throw new HttpError(400, 'bad_request');
-  return value as Record<string, unknown>;
-}
-
-// ---- routes ---------------------------------------------------------------------------------------
-
-function home(env: Env): DurableObjectStub<HomeState> {
-  return env.HOME.get(env.HOME.idFromName(HOME_OBJECT));
-}
-
-function methodNotAllowed(allow: string): HttpError {
-  return new HttpError(405, 'method_not_allowed', { allow });
-}
-
-/** Any failure of the Durable Object call is 503 `unavailable`. */
-async function callHome<T>(fn: () => Promise<T>): Promise<T> {
-  try {
-    return await fn();
-  } catch (error) {
-    if (error instanceof HttpError) throw error;
-    throw new HttpError(503, 'unavailable');
-  }
-}
-
-/** API v2 (docs/design-v2.md §5; types in api-v2-types.ts). v1 is gone: its paths answer 404. */
-const API_ROUTES: Readonly<Record<string, string>> = {
-  '/api/v2/csrf': 'GET',
-  '/api/v2/registry': 'GET',
-  '/api/v2/home': 'GET',
-  '/api/v2/flows': 'GET',
-  '/api/v2/cloudflare': 'GET',
-  '/api/v2/ops': 'GET',
-  '/api/v2/canary': 'POST',
-  '/api/v2/guard': 'POST',
-};
-
-async function csrfResponse(ctx: Context, owner: string): Promise<Response> {
+async function csrfResponse(ctx: OwnerContext): Promise<Response> {
   const key = await csrfKey(ctx.env);
-  const issued = await issueCsrf(ctx.request, owner, { cookieName: CSRF_COOKIE, key });
+  const issued = await issueCsrf(ctx.request, ctx.owner, { cookieName: CSRF_COOKIE, key });
   const body: CsrfResponse = { token: issued.token };
-  const response = jsonResponse(body);
+  const response = Response.json(body, { headers: NO_STORE });
   response.headers.set('set-cookie', issued.setCookie);
   return response;
 }
 
-/** A pre-serialized JSON body with its ETag, or 304 when If-None-Match already names it. */
-function etagResponse(etag: string, body: string | null): Response {
-  const headers = { etag, 'cache-control': 'no-store' };
-  if (body === null) return new Response(null, { status: 304, headers });
-  return new Response(body, { status: 200, headers: { ...headers, 'content-type': 'application/json; charset=utf-8' } });
+// ---- routes ---------------------------------------------------------------------------------------
+
+/** Built at global scope: the route table is read from the descriptors during startup, outside any request. */
+const api = new HttpTranscoder(DashboardUiService, handlers, {
+  domain: API_DOMAIN,
+  maxBodyBytes: MAX_BODY_BYTES,
+  authorize,
+  localize: (reason) => (isReason(reason) ? { locale: 'zh-CN', message: REASONS[reason].zh } : undefined),
+  // A bug (api.ts wraps its HomeState calls as UNAVAILABLE itself): never answered as retryable.
+  onUnexpected: () => dashboardError('INTERNAL'),
+});
+
+function methodNotAllowed(allow: string): RpcError {
+  return dashboardError('METHOD_NOT_ALLOWED', { allow });
 }
 
-/** GET /api/v2/registry: static per build, never reaches the Durable Object. */
-function registryResponse(ctx: Context): Response {
-  const build = buildSha(ctx.env);
-  const etag = `"${build}"`;
-  const body = etagMatches(ctx.request.headers.get('if-none-match'), etag) ? null : registryBody(build);
-  return etagResponse(etag, body);
+/** A path of the UI's API before dashboard.ui.v1 (/api/v2/..., anything under /api but /api/v1 and /api/csrf). */
+export function legacyApi(pathname: string): boolean {
+  return pathname === '/api' || (pathname.startsWith('/api/') && !pathname.startsWith(API_PREFIX) && pathname !== '/api/v1' && pathname !== '/api/csrf');
 }
 
-/** GET /api/v2/{home,flows,cloudflare,ops}: one RPC; the Worker passes the DO's string through. */
-async function viewResponse(ctx: Context, view: V2View, at: number | null): Promise<Response> {
-  const refresh = V2_REFRESHABLE.has(view) && ctx.url.searchParams.get('refresh') === '1';
-  const ifNoneMatch = ctx.request.headers.get('if-none-match');
-  const result = await callHome(() => home(ctx.env).v2View(view, refresh, ifNoneMatch, at) as unknown as Promise<V2Body>);
-  return etagResponse(result.etag, result.body);
+/** The old UI's error envelope, {error: {code, message, request_id}}, for the paths it still calls. */
+function legacyError(ctx: Context, status: number, code: string, message: string): Response {
+  const body: LegacyApiError = { error: { code, message, request_id: ctx.requestId } };
+  return Response.json(body, { status, headers: NO_STORE });
 }
 
-async function startCanaryResponse(ctx: Context, at: number | null): Promise<Response> {
-  const result = await callHome(() => home(ctx.env).startCanary(at) as unknown as Promise<StartCanaryOutcome>);
-  if (result.ok) return jsonResponse({ run: result.run }, 202);
-  if (result.code === 'canary_disabled') throw new HttpError(409, 'canary_disabled');
-  if (result.code === 'canary_active') throw new HttpError(409, 'canary_active');
-  throw new HttpError(429, 'canary_limit');
+interface Routed {
+  readonly response: Response;
+  readonly asset: boolean;
+  readonly reason?: string | undefined;
 }
 
-async function guardResponse(ctx: Context, at: number | null): Promise<GuardOverrideOutcome> {
-  const body = await readBody(ctx.request);
-  const level = body.level;
-  if (Object.keys(body).length !== 1 || !(GUARD_LEVELS as readonly unknown[]).includes(level)) {
-    throw new HttpError(400, 'bad_request');
-  }
-  const input: GuardRequest = { level: level as GuardLevel };
-  return callHome(() => home(ctx.env).setGuardOverride(input.level, at) as unknown as Promise<GuardOverrideOutcome>);
-}
-
-async function api(ctx: Context, owner: string, bypassed: boolean): Promise<Response> {
-  const { request, url } = ctx;
-  const method = API_ROUTES[url.pathname];
-  if (method === undefined) throw new HttpError(404, 'not_found');
-  if (request.method !== method) throw methodNotAllowed(method);
-  const at = requestTime(ctx.env, bypassed);
-
-  switch (url.pathname) {
-    case '/api/v2/csrf':
-      return csrfResponse(ctx, owner);
-    case '/api/v2/registry':
-      return registryResponse(ctx);
-    case '/api/v2/home':
-      return viewResponse(ctx, 'home', at);
-    case '/api/v2/flows':
-      return viewResponse(ctx, 'flows', at);
-    case '/api/v2/cloudflare':
-      return viewResponse(ctx, 'cloudflare', at);
-    case '/api/v2/ops':
-      return viewResponse(ctx, 'ops', at);
-    case '/api/v2/canary': {
-      await checkCsrf(ctx, owner, bypassed);
-      const body = await readBody(request);
-      const input = body as Partial<CanaryStartRequestV2>;
-      if (Object.keys(body).length !== 1 || input.canary_id !== 'mail-todofy') throw new HttpError(400, 'bad_request');
-      return startCanaryResponse(ctx, at);
-    }
-    case '/api/v2/guard': {
-      await checkCsrf(ctx, owner, bypassed);
-      // GuardView.apps (keyed by the two ops_v1 entry ids) is already a GuardViewV2.
-      const result: GuardResponseV2 = { guard: (await guardResponse(ctx, at)).guard };
-      return jsonResponse(result);
-    }
-    default:
-      throw new HttpError(404, 'not_found');
-  }
-}
-
-async function route(ctx: Context): Promise<{ response: Response; asset: boolean }> {
-  const { request, url, env } = ctx;
+async function route(base: Context): Promise<Routed> {
+  const { request, url, env } = base;
+  const head = request.method === 'HEAD';
+  const fail = (error: RpcError): Routed => ({ response: api.errorResponse(error, base.requestId, head), asset: false, reason: error.reason });
   if (url.pathname === '/health') {
-    if (request.method !== 'GET' && request.method !== 'HEAD') throw methodNotAllowed('GET, HEAD');
+    if (request.method !== 'GET' && !head) return fail(methodNotAllowed('GET, HEAD'));
     const body: HealthResponse = { service: 'home', status: 'ok', build: buildSha(env) };
-    return { response: jsonResponse(body), asset: false };
+    return { response: Response.json(body, { headers: NO_STORE }), asset: false };
   }
-  const { owner, bypassed } = await authenticate(ctx);
-  if (url.pathname === '/api' || url.pathname.startsWith('/api/')) return { response: await api(ctx, owner, bypassed), asset: false };
-  if (request.method !== 'GET' && request.method !== 'HEAD') throw methodNotAllowed('GET, HEAD');
+  let ctx: OwnerContext;
+  try {
+    ctx = await authenticate(base);
+  } catch (error) {
+    // edge-auth reports a failed key fetch as `keys_unavailable` (UNAVAILABLE): anything it throws is a bug.
+    const rpc = error instanceof RpcError ? error : dashboardError('INTERNAL');
+    if (legacyApi(url.pathname)) {
+      const message = isReason(rpc.reason) ? REASONS[rpc.reason].zh : REASONS.UNAVAILABLE.zh;
+      return { response: legacyError(base, rpc.httpStatus, rpc.reason.toLowerCase(), message), asset: false, reason: rpc.reason };
+    }
+    return fail(rpc);
+  }
+  if (legacyApi(url.pathname)) {
+    return { response: legacyError(ctx, 410, 'reload_required', RELOAD_MESSAGE), asset: false, reason: 'RELOAD_REQUIRED' };
+  }
+  if (url.pathname === '/api/csrf') {
+    if (request.method !== 'GET' && !head) return fail(methodNotAllowed('GET, HEAD'));
+    try {
+      return { response: await csrfResponse(ctx), asset: false };
+    } catch (error) {
+      return fail(error instanceof RpcError ? error : dashboardError('INTERNAL'));
+    }
+  }
+  if (url.pathname === '/api/v1' || url.pathname.startsWith(API_PREFIX)) {
+    const result = await api.handle(request, ctx, ctx.requestId);
+    if (result === null) return fail(dashboardError('NOT_FOUND'));
+    return { response: result.response, asset: false, reason: result.error?.reason };
+  }
+  if (request.method !== 'GET' && !head) return fail(methodNotAllowed('GET, HEAD'));
   return { response: await env.ASSETS.fetch(request), asset: url.pathname.startsWith('/assets/') };
 }
 
@@ -356,12 +225,17 @@ function finalize(response: Response, asset: boolean): Response {
 
 export async function handleRequest(request: Request, env: Env): Promise<Response> {
   const ctx: Context = { request, env, url: new URL(request.url), requestId: newRequestId() };
-  let result: { response: Response; asset: boolean };
+  let result: Routed;
   try {
     result = await route(ctx);
-  } catch (error) {
-    const httpError = error instanceof HttpError ? error : new HttpError(503, 'unavailable');
-    result = { response: errorResponse(ctx.requestId, httpError), asset: false };
+  } catch {
+    // Anything that escaped the routes (an asset fetch that threw): unavailable, as before.
+    const error = dashboardError('UNAVAILABLE');
+    result = { response: api.errorResponse(error, ctx.requestId, request.method === 'HEAD'), asset: false, reason: error.reason };
+  }
+  if (result.reason !== undefined) {
+    // One line per refused request: the request ID, status and reason only (never a path, query or body).
+    console.log(JSON.stringify({ request_id: ctx.requestId, status: result.response.status, reason: result.reason }));
   }
   // An answer given on the headers alone leaves the upload unread: discard it.
   if (request.body !== null && !request.body.locked) await request.body.cancel();

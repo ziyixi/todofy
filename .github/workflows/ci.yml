@@ -1610,7 +1610,7 @@ jobs:
           issuer=$ACCESS_ISSUER
           host=$PUBLIC_HOST
           test -n "$issuer" && test -n "$host"
-          for path in / /api/v2/home; do
+          for path in / /api/v1/homeView; do
             for attempt in $(seq 1 10); do
               answer=$(curl -sS -o /dev/null --max-time 15 --proto '=https' -w '%{http_code} %{redirect_url}' \
                 "https://$host$path" 2>/dev/null) || true

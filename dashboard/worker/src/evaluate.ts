@@ -5,29 +5,8 @@
  * so the digest sent to Todofy is unchanged.
  */
 import { CANARY_DISABLED_ITEM, type OpsSignal, type OpsStatus, type OverallLevel } from './api-types.ts';
-import {
-  LEVEL_RANK,
-  attentionLevel,
-  type AttentionItem,
-  type AttentionView,
-  type Badges,
-  type CanaryBadge,
-  type EntryDef,
-  type EntryState,
-  type FlowDef,
-  type FlowState,
-  type FlowSummary,
-  type Freshness,
-  type HeldItem,
-  type Level,
-  type Registry,
-  type RollupLevel,
-  type StageDef,
-  type StageState,
-  type Target,
-  type TileMetric,
-  type ViewId,
-} from './api-v2-types.ts';
+import { LEVEL_RANK, attentionLevel, type AttentionItem, type Attention, type Badges, type CanaryBadge, type EntryState, type FlowState, type FlowSummary, type Freshness, type HeldItem, type Level, type RollupLevel, type StageState, type Target, type TileMetric, type ViewId } from './api-types.ts';
+import type { EntryDef, FlowDef, RegistryDef, StageDef } from './registry-types.ts';
 import type { CanaryRecord } from './canary.ts';
 import { TICK_STALE_MS, overallLevel } from './digest.ts';
 import { errorLevel, errorPercent, todayOf, workerRows, type CfScriptsDoc } from './discovery.ts';
@@ -87,13 +66,13 @@ const severityLevel = (severity: OpsSignal['severity']): RollupLevel => (severit
 // ---- registry helpers ------------------------------------------------------------------------------
 
 /** Flows in display order: group order, then flow order. */
-export function orderedFlows(registry: Registry = REGISTRY): FlowDef[] {
+export function orderedFlows(registry: RegistryDef = REGISTRY): FlowDef[] {
   const groupOrder = (flow: FlowDef): number => registry.flow_groups.find((group) => group.id === flow.group)?.order ?? 99;
   return [...registry.flows].sort((a, b) => groupOrder(a) - groupOrder(b) || a.order - b.order);
 }
 
 /** The signals of `entry` that mean "held by a switch" in some stage (shown 已暂停, never as a fault). */
-export function holdCodes(entry: string, registry: Registry = REGISTRY): Set<string> {
+export function holdCodes(entry: string, registry: RegistryDef = REGISTRY): Set<string> {
   const codes = new Set<string>();
   for (const flow of registry.flows) {
     for (const stage of flow.stages) if (stage.entry === entry) for (const code of stage.hold_signals ?? []) codes.add(code);
@@ -102,7 +81,7 @@ export function holdCodes(entry: string, registry: Registry = REGISTRY): Set<str
 }
 
 /** Every code of `entry` some stage, the entry's detail or the platform places. */
-function placedCodes(entry: EntryDef, registry: Registry): Set<string> {
+function placedCodes(entry: EntryDef, registry: RegistryDef): Set<string> {
   const codes = new Set<string>([...entry.app_only_signals, ...PLATFORM_SIGNALS]);
   for (const flow of registry.flows) for (const stage of flow.stages) if (stage.entry === entry.id) for (const code of stage.signals) codes.add(code);
   return codes;
@@ -170,7 +149,7 @@ function activityOf(scripts: readonly string[], doc: CfScriptsDoc | null, now: n
   return { requests, errors, last_active_hour: last };
 }
 
-function entryScripts(entry: string, registry: Registry): string[] {
+function entryScripts(entry: string, registry: RegistryDef): string[] {
   return registry.workers.filter((worker) => worker.entry === entry).map((worker) => worker.script);
 }
 
@@ -180,7 +159,7 @@ function entryScripts(entry: string, registry: Registry): string[] {
  * The entry's own level and reason (the tile; design-v2 §4, Q2: never the worst of its flows). For
  * link_only `link`, for none and a disabled probe `unmonitored`: never a made-up ok.
  */
-function entryVerdict(entry: EntryDef, input: EvalInput, registry: Registry): { level: Level; reason: string | null } {
+function entryVerdict(entry: EntryDef, input: EvalInput, registry: RegistryDef): { level: Level; reason: string | null } {
   const { now } = input;
   const status = entry.status;
   switch (status.type) {
@@ -246,7 +225,7 @@ function entryVerdict(entry: EntryDef, input: EvalInput, registry: Registry): { 
   }
 }
 
-function tileMetric(entry: EntryDef, level: Level, input: EvalInput, registry: Registry): TileMetric | null {
+function tileMetric(entry: EntryDef, level: Level, input: EvalInput, registry: RegistryDef): TileMetric | null {
   const metric = entry.tile_metric;
   if (metric === null) return null;
   switch (metric.kind) {
@@ -268,7 +247,7 @@ function tileMetric(entry: EntryDef, level: Level, input: EvalInput, registry: R
 
 const SEVERITY_RANK = { critical: 0, warning: 1, info: 2 } as const;
 
-export function entryState(entry: EntryDef, input: EvalInput, registry: Registry = REGISTRY): EntryState {
+export function entryState(entry: EntryDef, input: EvalInput, registry: RegistryDef = REGISTRY): EntryState {
   const verdict = entryVerdict(entry, input, registry);
   let checkedAt: number | null = null;
   let failures = 0;
@@ -366,7 +345,7 @@ function unmonitoredStage(stage: StageDef): StageState {
   return { id: stage.id, level: 'unmonitored', reason: null, held: false, signals: [], counters: [], canary: null, analytics: null, probe: null, checked_at: null };
 }
 
-function stageState(stage: StageDef, input: EvalInput, marks: Map<string, CanaryMark>, registry: Registry): StageState {
+function stageState(stage: StageDef, input: EvalInput, marks: Map<string, CanaryMark>, registry: RegistryDef): StageState {
   const { now } = input;
   const entry = stage.entry === null ? undefined : registry.entries.find((e) => e.id === stage.entry);
   if (entry === undefined) return unmonitoredStage(stage);
@@ -437,7 +416,7 @@ function stageState(stage: StageDef, input: EvalInput, marks: Map<string, Canary
   };
 }
 
-function freshness(flow: FlowDef, stages: readonly StageState[], input: EvalInput, registry: Registry): Freshness {
+function freshness(flow: FlowDef, stages: readonly StageState[], input: EvalInput, registry: RegistryDef): Freshness {
   if (flow.canary !== null) {
     const done = input.canaryRecent.filter((run) => run.phase === 'done');
     const okRuns = done.filter((run) => run.outcome === 'ok');
@@ -447,7 +426,9 @@ function freshness(flow: FlowDef, stages: readonly StageState[], input: EvalInpu
   const selfStage = flow.stages.some((stage) => registry.entries.find((e) => e.id === stage.entry)?.status.type === 'self');
   if (selfStage) {
     const receipt = input.digest.last_receipt;
-    return { kind: 'digest', at: isoOrNull(input.digest.last_sent_at), accepted: receipt === null ? null : receipt.stored };
+    const at = isoOrNull(input.digest.last_sent_at);
+    // `accepted` is left out before the first receipt (Freshness.accepted).
+    return receipt === null ? { kind: 'digest', at } : { kind: 'digest', at, accepted: receipt.stored };
   }
   let last: string | null = null;
   let any = false;
@@ -457,11 +438,11 @@ function freshness(flow: FlowDef, stages: readonly StageState[], input: EvalInpu
     const hour = stage.analytics.last_active_hour;
     if (hour !== null && (last === null || hour > last)) last = hour;
   }
-  return any ? { kind: 'activity', at: last } : { kind: 'none' };
+  return any ? { kind: 'activity', at: last } : { kind: 'none', at: null };
 }
 
-/** Every flow's state in display order (FlowsResponse.flows); `summary` drops the per-stage detail. */
-export function flowStates(input: EvalInput, registry: Registry = REGISTRY): Omit<FlowState, 'canary'>[] {
+/** Every flow's state in display order (FlowsView.flows); `summary` drops the per-stage detail. */
+export function flowStates(input: EvalInput, registry: RegistryDef = REGISTRY): Omit<FlowState, 'canary'>[] {
   const flows = orderedFlows(registry);
   // An unplaced code of an entry is listed once, on the first flow (display order) that has the entry.
   const firstFlowOf = new Map<string, string>();
@@ -497,7 +478,7 @@ export function flowStates(input: EvalInput, registry: Registry = REGISTRY): Omi
   });
 }
 
-export function flowSummaries(input: EvalInput, registry: Registry = REGISTRY): FlowSummary[] {
+export function flowSummaries(input: EvalInput, registry: RegistryDef = REGISTRY): FlowSummary[] {
   return flowStates(input, registry).map(({ id, level, partial, coverage, first_issue, freshness: fresh }) => ({
     id,
     level,
@@ -519,7 +500,7 @@ const CANARY_ITEM_STAGE: Readonly<Record<string, 'delivery' | 'consumer' | null>
 };
 
 /** Where an item (source, code) is shown: the flow stage that claims it, else the entry or the view. */
-export function targetOf(source: string, code: string, registry: Registry = REGISTRY): Target {
+export function targetOf(source: string, code: string, registry: RegistryDef = REGISTRY): Target {
   const flows = orderedFlows(registry);
   const entry = registry.entries.find((e) => e.id === source);
   if (entry !== undefined) {
@@ -592,7 +573,7 @@ function observedItem(source: string, code: string, level: ObservedLevel, target
  *    the error rate decides it; a probe failure at least as severe keeps the tile, and the row lists the rate.
  * This dashboard's own entry is left out: `tick_stale` (digest) already says the ticks stopped.
  */
-function observedItems(existing: readonly AttentionItem[], evaluation: EvalInput, registry: Registry): AttentionItem[] {
+function observedItems(existing: readonly AttentionItem[], evaluation: EvalInput, registry: RegistryDef): AttentionItem[] {
   const out: AttentionItem[] = [];
   const all = (): AttentionItem[] => [...existing, ...out];
   const explained = (source: string, code: string): boolean => all().some((item) => item.source === source && sameCode(item.code, code));
@@ -637,7 +618,7 @@ const STRIP_RANK = { critical: 0, unknown: 1, warning: 2, info: 3 } as const;
  * in the level or the badges); maintenance stays critical. Badges count the warning, critical and
  * unknown items per target view.
  */
-export function attentionView(input: AttentionInput, registry: Registry = REGISTRY): { attention: AttentionView; badges: Badges } {
+export function attentionView(input: AttentionInput, registry: RegistryDef = REGISTRY): { attention: Attention; badges: Badges } {
   const held: HeldItem[] = [];
   const heldKeys = new Set<string>();
   const addHeld = (entry: string, code: string, target: Target): void => {

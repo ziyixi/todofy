@@ -1,13 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import unavailable from '../../../contracts/ops-v1/fixtures/OpsStatus/status-unavailable.json';
 import type { OpsReportItem, OpsStatus } from '@ziyixi/proto/ops/v1/ops_wire';
-import type { EntryDef, FlowState, Registry } from '../src/api-v2-types.ts';
+import type { FlowState } from '../src/api-types.ts';
+import type { EntryDef, RegistryDef } from '../src/registry-types.ts';
 import { mergeScripts } from '../src/discovery.ts';
 import { attentionView, entryState, flowStates, flowSummaries, holdCodes, rollup, targetOf, type AttentionInput, type EvalInput } from '../src/evaluate.ts';
 import { REGISTRY, entryById } from '../src/registry.ts';
 import { DAY, HOUR, LINK_ONLY_ENTRY, MIN, NOW, failedStatus, fortnight, input, probe, run, scripts, signal, status, withLinkOnly } from './v2-fixtures.ts';
 
-function entry(id: string, registry: Registry = REGISTRY): EntryDef {
+function entry(id: string, registry: RegistryDef = REGISTRY): EntryDef {
   const found = entryById(id, registry);
   if (found === undefined) throw new Error(id);
   return found;
@@ -105,7 +106,7 @@ describe('entry health (the tile: the entry\'s own health, Q2)', () => {
       reason: 'timeout',
     });
     expect(state('website', { probes: { website: probe({ checked_at: NOW - 2 * HOUR }) } })).toMatchObject({ level: 'unknown', reason: 'stale' });
-    const off: Registry = {
+    const off: RegistryDef = {
       ...REGISTRY,
       entries: REGISTRY.entries.map((e) => (e.id === 'website' ? { ...e, status: { type: 'public_http', url: 'https://www.ziyixi.science/build-info.json', expect: [200], enabled: false } } : e)),
     };

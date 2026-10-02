@@ -1,0 +1,317 @@
+// The registry (dashboard/docs/design-v2.md §3): every entry the dashboard shows, the Workers and storage
+// resources that belong to it, and the business flows with their stages. The data is compiled into the Worker
+// (dashboard/worker/src/registry.ts); this is its public view, which leaves out how a status is obtained
+// (binding names, probe URLs). The wire rules of attention.proto apply.
+//
+// (-- api-linter: core::0123::resource-annotation=disabled
+//     aip.dev/not-precedent: `name` is the display name of a group, an entry, a resource, a flow or a stage, not a resource name. --)
+
+syntax = "proto3";
+
+package dashboard.ui.v1;
+
+import "common/wire/v1/wire.proto";
+import "dashboard/ui/v1/usage.proto";
+import "google/api/field_behavior.proto";
+import "google/api/resource.proto";
+
+option java_multiple_files = true;
+option java_outer_classname = "RegistryProto";
+option java_package = "science.ziyixi.dashboard.ui.v1";
+
+// The registry. A singleton (AIP-156), static per build: the Worker serializes it once per isolate.
+message Registry {
+  option (google.api.resource) = {
+    type: "home.ziyixi.science/Registry"
+    pattern: "registry"
+    singular: "registry"
+    plural: "registries"
+  };
+
+  // Always `registry`.
+  string name = 1 [(google.api.field_behavior) = IDENTIFIER];
+  // The Worker's build (BUILD_SHA); the answer's ETag is `"<build>"`.
+  string build = 2 [(google.api.field_behavior) = REQUIRED];
+  // The launcher's groups on 首页, by kind.
+  repeated EntryGroup entry_groups = 3 [(google.api.field_behavior) = REQUIRED];
+  // The business groups on 业务流程.
+  repeated FlowGroup flow_groups = 4 [(google.api.field_behavior) = REQUIRED];
+  // Every entry, in registry order.
+  repeated RegistryEntry entries = 5 [(google.api.field_behavior) = REQUIRED];
+  // Every Worker script that belongs to an entry.
+  repeated RegistryWorker workers = 6 [(google.api.field_behavior) = REQUIRED];
+  // Every storage resource that belongs to an entry.
+  repeated RegistryResource resources = 7 [(google.api.field_behavior) = REQUIRED];
+  // Every flow.
+  repeated Flow flows = 8 [(google.api.field_behavior) = REQUIRED];
+}
+
+// A launcher group.
+message EntryGroup {
+  // apps, sites, services, or hidden (no tile: the dashboard itself).
+  string id = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field) = {
+      allowed: [
+        "apps",
+        "sites",
+        "services",
+        "hidden"
+      ]
+    }
+  ];
+  // 中文, at most 12 characters.
+  string name = 2 [(google.api.field_behavior) = REQUIRED];
+  // The group's place.
+  int32 order = 3 [(google.api.field_behavior) = REQUIRED];
+}
+
+// A business group.
+message FlowGroup {
+  // mail, content, research or platform.
+  string id = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field) = {
+      allowed: [
+        "mail",
+        "content",
+        "research",
+        "platform"
+      ]
+    }
+  ];
+  // 中文, at most 12 characters.
+  string name = 2 [(google.api.field_behavior) = REQUIRED];
+  // The group's place.
+  int32 order = 3 [(google.api.field_behavior) = REQUIRED];
+}
+
+// Something the owner can open, or a background service with a status line (a tile on 首页).
+message RegistryEntry {
+  // `^[a-z][a-z0-9-]{0,31}$`; an ops-v1 entry uses its app's ops-v1 name.
+  string id = 1 [(google.api.field_behavior) = REQUIRED];
+  // The display name.
+  string name = 2 [(google.api.field_behavior) = REQUIRED];
+  // 中文, one line, at most 40 characters.
+  string description = 3 [(google.api.field_behavior) = REQUIRED];
+  // The launcher group (EntryGroup.id).
+  string group = 4 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field) = {
+      allowed: [
+        "apps",
+        "sites",
+        "services",
+        "hidden"
+      ]
+    }
+  ];
+  // The tile's icon (a lucide icon the UI bundles).
+  string icon = 5 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field) = {
+      allowed: [
+        "mail",
+        "list-checks",
+        "calendar-clock",
+        "notebook-pen",
+        "globe",
+        "upload-cloud",
+        "newspaper",
+        "gauge",
+        "server",
+        "database",
+        "link",
+        "flask-conical",
+        "eye"
+      ]
+    }
+  ];
+  // The tile's accent; each has light and dark tokens in web/src/styles.
+  string accent = 6 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field) = {
+      allowed: [
+        "blue",
+        "green",
+        "teal",
+        "rose",
+        "violet",
+        "amber",
+        "slate"
+      ]
+    }
+  ];
+  // `https://<host>/` or a directory of it; null for a background service without a page.
+  optional string url = 7 [(google.api.field_behavior) = REQUIRED];
+  // Access protects `url` (the tile's lock, informational).
+  bool access = 8 [(google.api.field_behavior) = REQUIRED];
+  // The one number the tile shows next to its level.
+  TileMetricDef tile_metric = 9 [(google.api.field_behavior) = REQUIRED];
+  // Signals of this entry shown only on its detail, claimed by no flow stage.
+  repeated string app_only_signals = 10 [(google.api.field_behavior) = REQUIRED];
+  // The place within the group; tiles never reorder by status.
+  int32 order = 11 [(google.api.field_behavior) = REQUIRED];
+  // Where the entry's own health comes from (design-v2.md §3).
+  string status_type = 12 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field) = {
+      allowed: [
+        "ops_v1",
+        "public_http",
+        "analytics",
+        "self",
+        "link_only",
+        "none"
+      ]
+    }
+  ];
+  // The lowercase host of `url`; null without one.
+  optional string host = 13 [(google.api.field_behavior) = REQUIRED];
+  // The entry's Worker scripts.
+  repeated string scripts = 14 [(google.api.field_behavior) = REQUIRED];
+}
+
+// Which number a tile shows.
+message TileMetricDef {
+  option (common.wire.v1.message).discriminator = "kind";
+
+  // Which number.
+  TileMetricKind kind = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).non_null = true
+  ];
+  // The ops-v1 counter.
+  optional string name = 2 [(common.wire.v1.field) = {
+    cases: {
+      when: "counter"
+      presence: PRESENCE_REQUIRED
+    }
+    otherwise: PRESENCE_ABSENT
+  }];
+}
+
+// A Worker script that belongs to an entry (GraphQL `scriptName`).
+message RegistryWorker {
+  // The wrangler `name`.
+  string script = 1 [(google.api.field_behavior) = REQUIRED];
+  // The entry it belongs to.
+  string entry = 2 [(google.api.field_behavior) = REQUIRED];
+  // 中文, at most 24 characters (网关与 UI).
+  string role = 3 [(google.api.field_behavior) = REQUIRED];
+  // The flows whose stages run on it.
+  repeated string flows = 4 [(google.api.field_behavior) = REQUIRED];
+}
+
+// A storage resource and its owner.
+message RegistryResource {
+  // The registry ID, `^[a-z][a-z0-9-]{0,47}$`.
+  string id = 1 [(google.api.field_behavior) = REQUIRED];
+  // The kind of storage.
+  StorageKind kind = 2 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).non_null = true
+  ];
+  // The display name (mail-hero 主库, MailCoordinator).
+  string name = 3 [(google.api.field_behavior) = REQUIRED];
+  // The entry it belongs to.
+  string entry = 4 [(google.api.field_behavior) = REQUIRED];
+  // Durable Objects: the script that defines the class.
+  optional string script = 5;
+}
+
+// A business flow.
+message Flow {
+  // `^[a-z][a-z0-9-]{0,31}$`; also the hash route `#/flows/<id>`.
+  string id = 1 [(google.api.field_behavior) = REQUIRED];
+  // The display name.
+  string name = 2 [(google.api.field_behavior) = REQUIRED];
+  // The business group (FlowGroup.id).
+  string group = 3 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field) = {
+      allowed: [
+        "mail",
+        "content",
+        "research",
+        "platform"
+      ]
+    }
+  ];
+  // 中文, one line.
+  string description = 4 [(google.api.field_behavior) = REQUIRED];
+  // The place within the group.
+  int32 order = 5 [(google.api.field_behavior) = REQUIRED];
+  // The stages, in order (2 to 8).
+  repeated Stage stages = 6 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).max_items = 8
+  ];
+  // The canary bound to the flow, if any.
+  CanaryDef canary = 7 [(google.api.field_behavior) = REQUIRED];
+}
+
+// A stage of a flow.
+message Stage {
+  // `^[a-z][a-z0-9_]{0,31}$`, unique within the flow.
+  string id = 1 [(google.api.field_behavior) = REQUIRED];
+  // 中文, at most 12 characters.
+  string name = 2 [(google.api.field_behavior) = REQUIRED];
+  // The entry that runs it; null outside what the dashboard sees (source mailbox forwarding, Notion): 未接入.
+  optional string entry = 3 [(google.api.field_behavior) = REQUIRED];
+  // The entry's Workers this stage runs on; unset: all of them.
+  repeated string workers = 4;
+  // Signals of the entry that describe this stage; each code at most once per flow.
+  repeated string signals = 5 [(google.api.field_behavior) = REQUIRED];
+  // Of those, the ones meaning "held by a switch": shown 已暂停, not as a fault.
+  repeated string hold_signals = 6;
+  // Counters of the entry shown on the stage (display only, never thresholds).
+  repeated string counters = 7;
+  // The Workers' error rate counts for the stage's level.
+  optional bool analytics = 8;
+  // 中文, one line, shown while the stage is 未接入 (why the dashboard cannot see it).
+  optional string note = 9;
+}
+
+// An implemented canary runner bound to a flow.
+message CanaryDef {
+  // The canary (`mail-todofy`).
+  string id = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).allowed = "mail-todofy"
+  ];
+  // The runner (`mail_todofy_v1`).
+  string runner = 2 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).allowed = "mail_todofy_v1"
+  ];
+  // The runner's stages mapped to the flow's.
+  CanaryStageMap stage_map = 3 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).non_null = true
+  ];
+  // A finished ok run verifies the mapped stages for this long, then 未验证.
+  int32 fresh_hours = 4 [(google.api.field_behavior) = REQUIRED];
+  // What the canary does not prove, shown verbatim.
+  string scope_note = 5 [(google.api.field_behavior) = REQUIRED];
+}
+
+// The runner's stages mapped to a flow's stage IDs.
+message CanaryStageMap {
+  // The stage Mail Hero's delivery verifies.
+  string delivery = 1 [(google.api.field_behavior) = REQUIRED];
+  // The stage Todofy's handling verifies.
+  string consumer = 2 [(google.api.field_behavior) = REQUIRED];
+}
+
+// Which number a tile shows.
+enum TileMetricKind {
+  // Never sent.
+  TILE_METRIC_KIND_UNSPECIFIED = 0;
+  // An ops-v1 counter.
+  TILE_METRIC_KIND_COUNTER = 1;
+  // The probe's latency.
+  TILE_METRIC_KIND_LATENCY = 2;
+  // The hour of the last request.
+  TILE_METRIC_KIND_LAST_ACTIVE = 3;
+}

@@ -7,8 +7,8 @@ import todofyOk from '../../../contracts/ops-v1/fixtures/OpsStatus/todofy-ok.jso
 import labOk from '../../../contracts/ops-v1/fixtures/OpsStatus/lab-ok.json';
 import watchOk from '../../../contracts/ops-v1/fixtures/OpsStatus/watch-ok.json';
 import type { OpsApp, OpsSignal, OpsStatus } from '../src/api-types.ts';
-import type { UsageView } from '../src/api-types.ts';
-import type { EntryDef, Registry } from '../src/api-v2-types.ts';
+import type { Usage } from '../src/api-types.ts';
+import type { EntryDef, RegistryDef } from '../src/registry-types.ts';
 import { finish, newRun, type CanaryRecord } from '../src/canary.ts';
 import { mergeScripts, type CfScriptsDoc } from '../src/discovery.ts';
 import { NO_DIGEST, NO_USAGE, type ProbeDoc, type StatusDoc, type UsageDoc } from '../src/docs.ts';
@@ -43,7 +43,7 @@ export const LINK_ONLY_ENTRY: EntryDef = {
 };
 
 /** The registry plus LINK_ONLY_ENTRY. */
-export function withLinkOnly(registry: Registry = REGISTRY): Registry {
+export function withLinkOnly(registry: RegistryDef = REGISTRY): RegistryDef {
   return { ...registry, entries: [...registry.entries, LINK_ONLY_ENTRY] };
 }
 
@@ -117,7 +117,7 @@ export function input(patch: Partial<EvalInput> = {}): EvalInput {
 }
 
 /** The usage view of a GraphQL answer fetched at `now`. */
-export function usageView(usage: SyntheticUsage = usageWithScripts(5), now = NOW): UsageView {
+export function usageView(usage: SyntheticUsage = usageWithScripts(5), now = NOW): Usage {
   const data = parseUsage(graphqlBody(usage), now);
   return {
     status: 'ok',

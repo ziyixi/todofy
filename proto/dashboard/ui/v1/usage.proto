@@ -1,0 +1,217 @@
+// The account's Workers Free usage as the dashboard reads it from Cloudflare's GraphQL Analytics API
+// (dashboard/docs/design.md §7, limits.md): one row per quota, its largest contributors, and the read's own
+// state. Output messages only; the wire rules of attention.proto apply.
+//
+// (-- api-linter: core::0142::time-field-type=disabled
+//     aip.dev/not-precedent: timestamps are strings, as in the ops-v1 answers these views embed. --)
+// (-- api-linter: core::0142::time-field-names=disabled
+//     aip.dev/not-precedent: the view JSON's names (fetched_at). --)
+// (-- api-linter: core::0140::prepositions=disabled
+//     aip.dev/not-precedent: the view JSON's names (last_error_at). --)
+// (-- api-linter: core::0216::state-field-output-only=disabled
+//     aip.dev/not-precedent: output messages, where REQUIRED means "always written"; OUTPUT_ONLY would let the
+//     wire profile omit a null. --)
+
+syntax = "proto3";
+
+package dashboard.ui.v1;
+
+import "common/wire/v1/wire.proto";
+import "google/api/field_behavior.proto";
+
+option java_multiple_files = true;
+option java_outer_classname = "UsageProto";
+option java_package = "science.ziyixi.dashboard.ui.v1";
+option (common.wire.v1.formats) = {
+  name: "Timestamp"
+  pattern: "[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]{1,3})?Z"
+  description: "RFC 3339 UTC with Z, optional milliseconds."
+};
+option (common.wire.v1.formats) = {
+  name: "Day"
+  pattern: "[0-9]{4}-[0-9]{2}-[0-9]{2}"
+  description: "A UTC calendar day, YYYY-MM-DD."
+};
+
+// The usage read of the current UTC day and month.
+message Usage {
+  // ok: fetched for the current UTC day within 90 minutes; stale: older; unavailable: never fetched.
+  State status = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).non_null = true
+  ];
+  // When the rows were fetched.
+  optional string fetched_at = 2 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).format = "Timestamp"
+  ];
+  // The UTC day the daily rows describe.
+  optional string day = 3 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).format = "Day"
+  ];
+  // The first day of the UTC month the monthly rows describe (YYYY-MM-01).
+  optional string month = 4 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).format = "Day"
+  ];
+  // The last failed read: http_<status>, graphql_error, network_error, timeout, invalid_response, not_configured.
+  optional string last_error = 5 [(google.api.field_behavior) = REQUIRED];
+  // When the last read failed.
+  optional string last_error_at = 6 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).format = "Timestamp"
+  ];
+  // Failed reads since the last success.
+  int32 consecutive_failures = 7 [(google.api.field_behavior) = REQUIRED];
+  // One row per quota, in the order of QuotaResource.
+  repeated QuotaRow rows = 8 [(google.api.field_behavior) = REQUIRED];
+  // R2 operations whose actionType is in neither documented class; counted as Class A.
+  double unclassified_r2_operations = 9 [(google.api.field_behavior) = REQUIRED];
+
+  // What the read of the usage achieved.
+  enum State {
+    // Never sent.
+    STATE_UNSPECIFIED = 0;
+    // Fetched for the current UTC day within 90 minutes.
+    STATE_OK = 1;
+    // Older.
+    STATE_STALE = 2;
+    // Never fetched.
+    STATE_UNAVAILABLE = 3;
+    // No analytics token.
+    STATE_NOT_CONFIGURED = 4;
+  }
+}
+
+// One Workers Free allowance and the account's use of it.
+message QuotaRow {
+  // The quota.
+  QuotaResource id = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).non_null = true
+  ];
+  // daily: resets 00:00 UTC; monthly: the UTC month to date; storage: the current size.
+  QuotaPeriod period = 2 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).non_null = true
+  ];
+  // The unit of `used`, `limit` and `projected`.
+  QuotaUnit unit = 3 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).non_null = true
+  ];
+  // Account-wide usage; null when the dataset returned no data.
+  optional double used = 4 [(google.api.field_behavior) = REQUIRED];
+  // The Workers Free allowance (dashboard/docs/limits.md).
+  double limit = 5 [(google.api.field_behavior) = REQUIRED];
+  // used / limit x 100, one decimal; null when used is null.
+  optional double percent = 6 [(google.api.field_behavior) = REQUIRED];
+  // The linear end-of-period projection; null for storage and early in the period.
+  optional double projected = 7 [(google.api.field_behavior) = REQUIRED];
+  // The projection in percent of the limit.
+  optional double projected_percent = 8 [(google.api.field_behavior) = REQUIRED];
+  // The quota counts for the guard rule (daily quotas but Workers AI, and R2 operations; never storage).
+  bool guard_trigger = 9 [(google.api.field_behavior) = REQUIRED];
+  // The dataset returned as many rows as the query's limit: `used` is a lower bound.
+  bool truncated = 10 [(google.api.field_behavior) = REQUIRED];
+  // The largest contributors, at most 5 (empty on the home view's mini bars).
+  repeated QuotaBreakdownItem breakdown = 11 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).max_items = 5
+  ];
+  // Cloudflare's documentation URL of the limit.
+  string source = 12 [(google.api.field_behavior) = REQUIRED];
+}
+
+// One contributor of a quota row, keyed as measured: a script name, a D1 database ID, a DO namespace ID, a
+// bucket name or a Workers AI model ID.
+// (-- api-linter: core::0123::resource-annotation=disabled
+//     aip.dev/not-precedent: `name` is the contributor's GraphQL key, not a resource name. --)
+message QuotaBreakdownItem {
+  // The GraphQL key; `unknown` for a measured row without its dimension.
+  string name = 1 [(google.api.field_behavior) = REQUIRED];
+  // The contribution, in the row's unit.
+  double value = 2 [(google.api.field_behavior) = REQUIRED];
+  // Set on items keyed by a storage identifier: the kind `name` identifies.
+  StorageKind kind = 3;
+  // The registry resource `name` maps to (GetRegistry names it); unset for an unregistered or unclassified
+  // storage item (the UI shows 未登记 or 未归类) and for script and model items.
+  optional string resource = 4;
+}
+
+// The Workers Free quotas the dashboard tracks.
+enum QuotaResource {
+  // Never sent.
+  QUOTA_RESOURCE_UNSPECIFIED = 0;
+  // Worker requests a day.
+  QUOTA_RESOURCE_WORKERS_REQUESTS = 1;
+  // D1 rows read a day.
+  QUOTA_RESOURCE_D1_ROWS_READ = 2;
+  // D1 rows written a day.
+  QUOTA_RESOURCE_D1_ROWS_WRITTEN = 3;
+  // Durable Object requests a day.
+  QUOTA_RESOURCE_DO_REQUESTS = 4;
+  // Durable Object duration a day (GB-s).
+  QUOTA_RESOURCE_DO_DURATION = 5;
+  // Durable Object rows read a day.
+  QUOTA_RESOURCE_DO_ROWS_READ = 6;
+  // Durable Object rows written a day.
+  QUOTA_RESOURCE_DO_ROWS_WRITTEN = 7;
+  // Workers AI neurons a day.
+  QUOTA_RESOURCE_AI_NEURONS = 8;
+  // R2 Class A operations a month.
+  QUOTA_RESOURCE_R2_CLASS_A = 9;
+  // R2 Class B operations a month.
+  QUOTA_RESOURCE_R2_CLASS_B = 10;
+  // D1 storage of the account.
+  QUOTA_RESOURCE_D1_STORAGE = 11;
+  // The largest D1 database.
+  QUOTA_RESOURCE_D1_DATABASE_MAX = 12;
+  // Durable Object storage of the account.
+  QUOTA_RESOURCE_DO_STORAGE = 13;
+  // R2 storage of the account.
+  QUOTA_RESOURCE_R2_STORAGE = 14;
+}
+
+// When a quota resets.
+enum QuotaPeriod {
+  // Never sent.
+  QUOTA_PERIOD_UNSPECIFIED = 0;
+  // At 00:00 UTC.
+  QUOTA_PERIOD_DAILY = 1;
+  // On the first of the UTC month.
+  QUOTA_PERIOD_MONTHLY = 2;
+  // Never: the current size.
+  QUOTA_PERIOD_STORAGE = 3;
+}
+
+// The unit of a quota.
+enum QuotaUnit {
+  // Never sent.
+  QUOTA_UNIT_UNSPECIFIED = 0;
+  // Requests.
+  QUOTA_UNIT_REQUESTS = 1;
+  // Rows.
+  QUOTA_UNIT_ROWS = 2;
+  // Gigabyte-seconds.
+  QUOTA_UNIT_GB_SECONDS = 3;
+  // Operations.
+  QUOTA_UNIT_OPERATIONS = 4;
+  // Bytes.
+  QUOTA_UNIT_BYTES = 5;
+  // Workers AI neurons.
+  QUOTA_UNIT_NEURONS = 6;
+}
+
+// A kind of storage resource.
+enum StorageKind {
+  // Never sent.
+  STORAGE_KIND_UNSPECIFIED = 0;
+  // A D1 database (GraphQL `databaseId`).
+  STORAGE_KIND_D1 = 1;
+  // A Durable Object namespace (`namespaceId`).
+  STORAGE_KIND_DO = 2;
+  // An R2 bucket (`bucketName`).
+  STORAGE_KIND_R2 = 3;
+}

@@ -1,14 +1,21 @@
 import { describe, expect, it } from 'vitest';
 import designV2 from '../../docs/design-v2.md?raw';
-import apiV2Source from '../src/api-v2-types.ts?raw';
+import apiTypesSource from '../src/api-types.ts?raw';
 import type { OpsReportItem, OpsSignal } from '../src/api-types.ts';
-import { CANARY_MANUAL_PER_DAY, type CanaryView, type DigestView, type GuardView } from '../src/api-types.ts';
-import { CF_SCRIPTS_MAX, CF_VIEW_WORKERS_MAX, DRIFT_VIEW_FINDINGS_MAX, HOME_QUOTA_IDS, V2_BODY_BUDGET, V2_BODY_MAX, V2_ROWS_READ, type ShellFields } from '../src/api-v2-types.ts';
+import { CANARY_MANUAL_PER_DAY, type CanaryState, type Digest, type GuardView } from '../src/api-types.ts';
+import { CF_SCRIPTS_MAX, CF_VIEW_WORKERS_MAX, DRIFT_VIEW_FINDINGS_MAX, HOME_QUOTA_IDS, VIEW_BODY_BUDGET, VIEW_BODY_MAX, VIEW_ROWS_READ, type ShellFields } from '../src/api-types.ts';
 import { runView } from '../src/canary.ts';
 import { NO_DRIFT, countFindings, driftView } from '../src/drift.ts';
 import { attentionView, type EvalInput } from '../src/evaluate.ts';
-import { etagMatches } from '../src/v2-views.ts';
-import { capWorkers, cloudflareResponse, flowsResponse, fnv1a, homeResponse, nextTickAt, opsResponse, serializeView, shell } from '../src/views-v2.ts';
+import { etagMatches } from '../src/view-body.ts';
+import { capWorkers, cloudflareResponse, flowsResponse, fnv1a, homeResponse, nextTickAt, opsResponse, serializeView, shell } from '../src/views.ts';
+import { expectWire, VIEW_SCHEMAS } from './wire-conformance.ts';
+
+// Every view these tests build is also checked against dashboard.ui.v1, byte for byte (wire-conformance.ts).
+const homeView = (...args: Parameters<typeof homeResponse>) => expectWire(VIEW_SCHEMAS.home, homeResponse(...args));
+const flowsView = (...args: Parameters<typeof flowsResponse>) => expectWire(VIEW_SCHEMAS.flows, flowsResponse(...args));
+const cloudflareView = (...args: Parameters<typeof cloudflareResponse>) => expectWire(VIEW_SCHEMAS.cloudflare, cloudflareResponse(...args));
+const opsView = (...args: Parameters<typeof opsResponse>) => expectWire(VIEW_SCHEMAS.ops, opsResponse(...args));
 import type { CfScriptsDoc, ScriptRecord } from '../src/discovery.ts';
 import { REALISTIC_USAGE, usageWithScripts } from './graphql-fixture.ts';
 import { DAY, LINK_ONLY_ENTRY, MIN, NOW, fortnight, input, run, scripts, signal, status, usageDoc, usageView, withLinkOnly } from './v2-fixtures.ts';
@@ -20,7 +27,7 @@ function base(patch: Partial<Parameters<typeof shell>[0]> = {}, attentionItems: 
   return shell({ now: NOW, rev: 42, build: 'abc123', attention, badges, lastTickAt: NOW, lastRefreshAt: null, nextRefreshAt: NOW, refreshed: false, ...patch });
 }
 
-function canaryView(ev: EvalInput): CanaryView {
+function canaryView(ev: EvalInput): CanaryState {
   return {
     enabled: true,
     hour_utc: 16,
@@ -45,7 +52,7 @@ const GUARD: GuardView = {
   },
 };
 
-function digestView(items: readonly OpsReportItem[]): DigestView {
+function digestView(items: readonly OpsReportItem[]): Digest {
   return { items, enabled: true, last_sent_at: '2026-09-29T07:00:00.000Z', last_generated_at: '2026-09-29T07:00:00.000Z', last_receipt: { stored: true, generated_at: '2026-09-29T07:00:00.000Z', item_count: items.length }, last_error: null, next_due_at: '2026-09-29T13:00:00.000Z' };
 }
 
@@ -141,10 +148,10 @@ describe('serialization and the ETag', () => {
 describe('the views', () => {
   it('home: every tile but the hidden one, one line per flow, four mini bars without contributors', () => {
     const ev = input();
-    const home = homeResponse(base(), ev, usageView(), DESIRED);
+    const home = homeView(base(), ev, usageView(), DESIRED);
     expect(home.entries.map((e) => e.id)).toEqual(['mail-hero', 'todofy', 'lab', 'flowday', 'links', 'watch', 'website', 'notion-publish', 'newsletter']);
     // A link-only entry (synthetic: the registry has none) is a tile at level link, never probed.
-    const linked = homeResponse(base(), ev, usageView(), DESIRED, withLinkOnly()).entries.find((e) => e.id === LINK_ONLY_ENTRY.id);
+    const linked = homeView(base(), ev, usageView(), DESIRED, withLinkOnly()).entries.find((e) => e.id === LINK_ONLY_ENTRY.id);
     expect(linked).toMatchObject({ level: 'link', reason: null, metric: null, checked_at: null });
     expect(home.flows.map((f) => f.id)).toEqual(['mail-to-task', 'gtd', 'site-publish', 'daily-newsletter', 'web-watch', 'paper-radar', 'ops-digest']);
     expect(home.flows[0]).not.toHaveProperty('stages');
@@ -158,7 +165,7 @@ describe('the views', () => {
 
   it('flows: the canary only on the mail flow, with its last ok run', () => {
     const ev = input({ canaryRecent: fortnight(run('2026-09-29', 'ok', null, null, 9)) });
-    const flows = flowsResponse(base(), ev, canaryView(ev));
+    const flows = flowsView(base(), ev, canaryView(ev));
     expect(flows.flows.map((f) => [f.id, f.canary?.id ?? null])).toEqual([
       ['mail-to-task', 'mail-todofy'],
       ['gtd', null],
@@ -175,7 +182,7 @@ describe('the views', () => {
   it.each([0, 5, 20])('cloudflare: %i scripts in the Worker table, resources and the quota rows', (count) => {
     const usage = usageWithScripts(count);
     const doc = usageDoc(usage);
-    const view = cloudflareResponse(base(), NOW, usageView(usage), doc, count === 0 ? null : scripts(usage), GUARD, DRIFT_OK);
+    const view = cloudflareView(base(), NOW, usageView(usage), doc, count === 0 ? null : scripts(usage), GUARD, DRIFT_OK);
     expect(view.workers).toHaveLength(count);
     expect(view.usage.rows).toHaveLength(14);
     expect(view.resources.map((r) => r.kind)).toEqual(['d1', 'd1', 'do', 'do', 'do', 'r2', 'r2']);
@@ -183,18 +190,18 @@ describe('the views', () => {
     expect(doc.rows.flatMap((r) => r.breakdown).some((item) => 'kind' in item)).toBe(false);
     expect(view.usage.rows.find((r) => r.id === 'r2_storage')?.breakdown).toEqual([
       { name: 'mail-hero-store', value: 781_000_000, kind: 'r2', resource: 'mail-hero-store' },
-      { name: 'backup-synthetic', value: 56_000_000, kind: 'r2', resource: null },
+      { name: 'backup-synthetic', value: 56_000_000, kind: 'r2' },
     ]);
-    expect(view.usage.rows.find((r) => r.id === 'do_rows_written')?.breakdown.every((item) => item.kind === 'do' && item.resource === null)).toBe(true);
+    expect(view.usage.rows.find((r) => r.id === 'do_rows_written')?.breakdown.every((item) => item.kind === 'do' && item.resource === undefined)).toBe(true);
     expect(view.usage.rows.find((r) => r.id === 'workers_requests')?.breakdown.every((item) => !('kind' in item))).toBe(true);
     expect(view.do_storage_bytes).toBeNull();
     expect(view.workers_truncated).toBe(false);
-    expect(bytes(view)).toBeLessThanOrEqual(V2_BODY_BUDGET.cloudflare);
+    expect(bytes(view)).toBeLessThanOrEqual(VIEW_BODY_BUDGET.cloudflare);
   });
 
   it('ops: guard, the canary with its id, the digest and every ops-v1 app in registry order', () => {
     const ev = input();
-    const ops = opsResponse(base(), GUARD, canaryView(ev), digestView([]), ev.statuses);
+    const ops = opsView(base(), GUARD, canaryView(ev), digestView([]), ev.statuses);
     expect(ops.apps.map((a) => a.entry)).toEqual(['mail-hero', 'todofy', 'lab', 'watch']);
     expect(ops.apps[0]).toMatchObject({ reachable: true, error: null, consecutive_failures: 0, status: { app: 'mail-hero' } });
     expect(ops.canary.id).toBe('mail-todofy');
@@ -207,26 +214,26 @@ describe('the views', () => {
     const item: OpsReportItem = { source: 'todofy', code: 'gemini_budget_80', severity: 'warning', since: '2026-09-29T11:20:00.000Z', metrics: { percent: 82 } };
     const day = base({}, [item]);
     const sizes = {
-      home: bytes(homeResponse(day, ev, usageView(REALISTIC_USAGE), DESIRED)),
-      flows: bytes(flowsResponse(day, ev, canaryView(ev))),
-      cloudflare: bytes(cloudflareResponse(day, NOW, usageView(REALISTIC_USAGE), usageDoc(REALISTIC_USAGE), ev.scripts, GUARD, DRIFT_OK)),
-      ops: bytes(opsResponse(day, GUARD, canaryView(ev), digestView([item]), ev.statuses)),
+      home: bytes(homeView(day, ev, usageView(REALISTIC_USAGE), DESIRED)),
+      flows: bytes(flowsView(day, ev, canaryView(ev))),
+      cloudflare: bytes(cloudflareView(day, NOW, usageView(REALISTIC_USAGE), usageDoc(REALISTIC_USAGE), ev.scripts, GUARD, DRIFT_OK)),
+      ops: bytes(opsView(day, GUARD, canaryView(ev), digestView([item]), ev.statuses)),
     };
-    for (const view of ['home', 'flows', 'cloudflare', 'ops'] as const) expect({ view, bytes: sizes[view] }).toEqual({ view, bytes: Math.min(sizes[view], V2_BODY_BUDGET[view]) });
+    for (const view of ['home', 'flows', 'cloudflare', 'ops'] as const) expect({ view, bytes: sizes[view] }).toEqual({ view, bytes: Math.min(sizes[view], VIEW_BODY_BUDGET[view]) });
   });
 
-  it('stays within V2_BODY_MAX on a heavy day (20 items, 16 signals per app, 14 failed runs, 20 scripts)', () => {
+  it('stays within VIEW_BODY_MAX on a heavy day (20 items, 16 signals per app, 14 failed runs, 20 scripts)', () => {
     const ev = heavyInput();
     const shellHeavy = base({}, HEAVY_ITEMS);
     const sizes = {
-      home: bytes(homeResponse(shellHeavy, ev, usageView(usageWithScripts(20)), DESIRED)),
-      flows: bytes(flowsResponse(shellHeavy, ev, canaryView(ev))),
+      home: bytes(homeView(shellHeavy, ev, usageView(usageWithScripts(20)), DESIRED)),
+      flows: bytes(flowsView(shellHeavy, ev, canaryView(ev))),
       cloudflare: bytes(
-        cloudflareResponse(shellHeavy, NOW, usageView(usageWithScripts(20)), usageDoc(usageWithScripts(20)), ev.scripts, GUARD, DRIFT_HEAVY),
+        cloudflareView(shellHeavy, NOW, usageView(usageWithScripts(20)), usageDoc(usageWithScripts(20)), ev.scripts, GUARD, DRIFT_HEAVY),
       ),
-      ops: bytes(opsResponse(shellHeavy, GUARD, canaryView(ev), digestView(HEAVY_ITEMS), ev.statuses)),
+      ops: bytes(opsView(shellHeavy, GUARD, canaryView(ev), digestView(HEAVY_ITEMS), ev.statuses)),
     };
-    for (const view of ['home', 'flows', 'cloudflare', 'ops'] as const) expect({ view, bytes: sizes[view] }).toEqual({ view, bytes: Math.min(sizes[view], V2_BODY_MAX) });
+    for (const view of ['home', 'flows', 'cloudflare', 'ops'] as const) expect({ view, bytes: sizes[view] }).toEqual({ view, bytes: Math.min(sizes[view], VIEW_BODY_MAX) });
   });
 
   it('bounds the Cloudflare view at CF_SCRIPTS_MAX remembered scripts on a heavy day, active ones first (C2)', () => {
@@ -245,7 +252,7 @@ describe('the views', () => {
       };
     };
     const doc: CfScriptsDoc = { since: NOW - 30 * DAY, observed_at: NOW, day: '2026-09-29', truncated: true, scripts: Array.from({ length: CF_SCRIPTS_MAX }, (_, i) => record(i)) };
-    const view = cloudflareResponse(base({}, HEAVY_ITEMS), NOW, usageView(usageWithScripts(20)), usageDoc(usageWithScripts(20)), doc, GUARD, DRIFT_HEAVY);
+    const view = cloudflareView(base({}, HEAVY_ITEMS), NOW, usageView(usageWithScripts(20)), usageDoc(usageWithScripts(20)), doc, GUARD, DRIFT_HEAVY);
     expect(view.drift.findings).toHaveLength(DRIFT_VIEW_FINDINGS_MAX);
     expect(view.drift.findings_omitted).toBe(50 + 12 - DRIFT_VIEW_FINDINGS_MAX);
     expect(view.workers).toHaveLength(CF_VIEW_WORKERS_MAX);
@@ -254,7 +261,7 @@ describe('the views', () => {
     expect(view.workers.filter((row) => row.requests > 0)).toHaveLength(30);
     const listedIdle = view.workers.filter((row) => row.requests === 0).map((row) => row.last_seen_day);
     expect(Math.min(...listedIdle.map((day) => Date.parse(day)))).toBeGreaterThanOrEqual(Date.parse('2026-09-08'));
-    expect(bytes(view)).toBeLessThanOrEqual(V2_BODY_MAX);
+    expect(bytes(view)).toBeLessThanOrEqual(VIEW_BODY_MAX);
     // Under the cap nothing is left out.
     expect(capWorkers(view.workers.slice(0, 10))).toEqual({ rows: view.workers.slice(0, 10), omitted: 0 });
   });
@@ -265,7 +272,7 @@ describe('documented budgets', () => {
   function documented(text: string): Map<string, { kib: number; rows: number | null }> {
     const found = new Map<string, { kib: number; rows: number | null }>();
     for (const line of text.split('\n')) {
-      const route = /\|\s*`?GET\s+([a-z]+)/.exec(line)?.[1];
+      const route = /GET\s+\/api\/v1\/([a-z]+?)(?:View)?\b/.exec(line)?.[1];
       const kib = /≤ (\d+) KiB/.exec(line)?.[1];
       if (route === undefined || kib === undefined) continue;
       const rows = /≤ (\d+) rows read/.exec(line)?.[1];
@@ -274,19 +281,19 @@ describe('documented budgets', () => {
     return found;
   }
 
-  it('the route table of api-v2-types.ts states V2_BODY_BUDGET and V2_ROWS_READ', () => {
-    const header = apiV2Source.split('*/', 1)[0] ?? '';
+  it('the route table of api-types.ts states VIEW_BODY_BUDGET and VIEW_ROWS_READ', () => {
+    const header = apiTypesSource.split('*/', 1)[0] ?? '';
     const rows = documented(header);
-    expect([...rows.keys()].sort()).toEqual(Object.keys(V2_BODY_BUDGET).sort());
-    for (const [view, budget] of Object.entries(V2_BODY_BUDGET)) {
+    expect([...rows.keys()].sort()).toEqual(Object.keys(VIEW_BODY_BUDGET).sort());
+    for (const [view, budget] of Object.entries(VIEW_BODY_BUDGET)) {
       expect({ view, kib: rows.get(view)?.kib }).toEqual({ view, kib: budget / 1024 });
-      if (view in V2_ROWS_READ) expect({ view, rows: rows.get(view)?.rows }).toEqual({ view, rows: V2_ROWS_READ[view as keyof typeof V2_ROWS_READ] });
+      if (view in VIEW_ROWS_READ) expect({ view, rows: rows.get(view)?.rows }).toEqual({ view, rows: VIEW_ROWS_READ[view as keyof typeof VIEW_ROWS_READ] });
     }
   });
 
-  it('the route table of docs/design-v2.md states V2_BODY_BUDGET', () => {
+  it('the route table of docs/design-v2.md states VIEW_BODY_BUDGET', () => {
     const rows = documented(designV2.split('\n| Route | Served by | Budget |', 2)[1]?.split('\n\n', 1)[0] ?? '');
-    expect([...rows.keys()].sort()).toEqual(Object.keys(V2_BODY_BUDGET).sort());
-    for (const [view, budget] of Object.entries(V2_BODY_BUDGET)) expect({ view, kib: rows.get(view)?.kib }).toEqual({ view, kib: budget / 1024 });
+    expect([...rows.keys()].sort()).toEqual(Object.keys(VIEW_BODY_BUDGET).sort());
+    for (const [view, budget] of Object.entries(VIEW_BODY_BUDGET)) expect({ view, kib: rows.get(view)?.kib }).toEqual({ view, kib: budget / 1024 });
   });
 });

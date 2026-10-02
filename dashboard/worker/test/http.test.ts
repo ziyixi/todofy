@@ -1,20 +1,57 @@
+/**
+ * The Worker's HTTP surface with a stub HomeState (src/http.ts, src/api.ts): Access on every path but /health, CSRF
+ * and Origin on every mutation, the owner API's routes, its google.rpc.Status errors, the views passed through with
+ * their ETags, and the retired /api/v2 routes' reload answer. The workerd suite (test/runtime) runs the same routes
+ * against the real HomeState.
+ */
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { ApiError, CsrfResponse, HealthResponse } from '../src/api-types.ts';
-import type { RegistryResponse } from '../src/api-v2-types.ts';
+import { OverrideGuardResponseSchema, RunCanaryResponseSchema } from '@ziyixi/proto/dashboard/ui/v1/dashboard_ui_service_pb';
+import { parseStatus } from '@ziyixi/proto/rpc-status';
+import type { CanaryRun, CsrfResponse, GuardView, HealthResponse, LegacyApiError, Registry } from '../src/api-types.ts';
+import { runView, newRun } from '../src/canary.ts';
 import type { Env } from '../src/env.ts';
 import worker from '../src/index.ts';
-import { CSRF_COOKIE, MESSAGES } from '../src/http.ts';
+import { REASONS } from '../src/api.ts';
+import { API_DOMAIN, CSRF_COOKIE, RELOAD_MESSAGE } from '../src/http.ts';
 import { accessClaims, testIssuer, type TestIssuer } from './jwt.ts';
+import { expectWire, VIEW_SCHEMAS } from './wire-conformance.ts';
 
 const ISSUER = 'https://synthetic.cloudflareaccess.com';
 const AUDIENCE = 'a'.repeat(64);
 const OWNER = 'Owner@Example.com';
 const HOST = 'home.example.com';
 const ORIGIN = `https://${HOST}`;
+const REQUEST_ID = '0d8f7a9e-1c2b-4d3e-8f4a-5b6c7d8e9f0a';
+
+/** The owner API's paths (one place, so a route change touches only this table). */
+const PATHS = {
+  registry: '/api/v1/registry',
+  home: '/api/v1/homeView',
+  refreshHome: '/api/v1/homeView:refresh',
+  flows: '/api/v1/flowsView',
+  cloudflare: '/api/v1/cloudflareView',
+  refreshCloudflare: '/api/v1/cloudflareView:refresh',
+  ops: '/api/v1/opsView',
+  guard: '/api/v1/guard:override',
+  canary: '/api/v1/canaries/mail-todofy:run',
+  csrf: '/api/csrf',
+} as const;
 
 /** Worker handlers receive requests with incoming cf properties; tests have none. */
 const incoming = (...args: ConstructorParameters<typeof Request>): Request<unknown, IncomingRequestCfProperties> =>
   new Request(...args) as unknown as Request<unknown, IncomingRequestCfProperties>;
+
+/** A run as HomeState answers RunCanary (a valid dashboard.ui.v1 CanaryRun). */
+const RUN: CanaryRun = runView(newRun('canary-manual-20260929T160000Z', 'manual', Date.parse('2026-09-29T16:00:00Z')));
+/** A guard as HomeState answers OverrideGuard. */
+function guardOf(level: 'normal' | 'shed'): GuardView {
+  return {
+    desired: { level, reason: level === 'shed' ? 'owner_shed' : 'owner_clear', until: null, source: 'owner' },
+    override: null,
+    thresholds: { shed_percent: 80, clear_percent: 70 },
+    apps: { 'mail-hero': { state: { level, reason: null, until: null, set_at: null, deferred: [] }, last_call_at: null, last_error: null } },
+  };
+}
 
 let issuer: TestIssuer;
 let certRequests: string[];
@@ -33,29 +70,31 @@ beforeEach(() => {
 });
 
 interface HomeCalls {
-  /** v2View calls as `<view>:<refresh>`. */
+  /** view calls as `<view>:<refresh>`. */
   views: string[];
-  startCanary: number;
+  /** The request_id of every startCanary call. */
+  startCanary: (string | null)[];
+  /** `<level>:<request_id>` of every setGuardOverride call. */
   guard: string[];
-  /** The request time (`at`) of every v2View, startCanary and setGuardOverride call, in order. */
+  /** The request time (`at`) of every view, startCanary and setGuardOverride call, in order. */
   at: (number | null)[];
 }
 
 function makeEnv(overrides: Partial<Env> = {}, answers: { startCanary?: unknown; guard?: unknown; view?: () => unknown } = {}) {
-  const calls: HomeCalls = { views: [], startCanary: 0, guard: [], at: [] };
+  const calls: HomeCalls = { views: [], startCanary: [], guard: [], at: [] };
   const stub = {
-    startCanary(at: number | null) {
-      calls.startCanary++;
+    startCanary(at: number | null, requestId: string | null) {
+      calls.startCanary.push(requestId);
       calls.at.push(at);
-      return Promise.resolve(answers.startCanary ?? { ok: true, run: { run_id: 'canary-manual-20260929T160000Z' } });
+      return Promise.resolve(answers.startCanary ?? { ok: true, run: RUN });
     },
-    setGuardOverride(level: string, at: number | null) {
-      calls.guard.push(level);
+    setGuardOverride(level: 'normal' | 'shed', at: number | null, requestId: string | null) {
+      calls.guard.push(`${level}:${String(requestId)}`);
       calls.at.push(at);
-      return Promise.resolve(answers.guard ?? { guard: { desired: { level } } });
+      return Promise.resolve(answers.guard ?? { ok: true, guard: guardOf(level) });
     },
     tick: vi.fn(() => Promise.resolve({ ran: true })),
-    v2View: vi.fn((view: string, refresh: boolean, ifNoneMatch: string | null, at: number | null) => {
+    view: vi.fn((view: string, refresh: boolean, ifNoneMatch: string | null, at: number | null) => {
       calls.views.push(`${view}:${String(refresh)}`);
       calls.at.push(at);
       if (answers.view) return Promise.resolve(answers.view());
@@ -102,11 +141,15 @@ async function call(env: Env, path: string, init: RequestInit & { jwt?: string |
   return worker.fetch(incoming(`https://${HOST}${path}`, { ...init, headers }), env);
 }
 
-async function errorCode(response: Response): Promise<string> {
-  const body = await response.json<ApiError>();
-  expect(body.error.message).toBe(MESSAGES[body.error.code]);
-  expect(body.error.request_id).toMatch(/^[0-9a-f]{16}$/);
-  return body.error.code;
+/** The ErrorInfo reason of a google.rpc.Status answer, after checking its domain, request ID and copy. */
+async function reasonOf(response: Response): Promise<string> {
+  const status = parseStatus(response.status, await response.json());
+  expect(status).not.toBeNull();
+  expect(status?.domain).toBe(API_DOMAIN);
+  expect(status?.requestId).toMatch(/^[0-9a-f]{16}$/);
+  const reason = status?.reason ?? '';
+  expect(status?.localizedMessage).toEqual({ locale: 'zh-CN', message: REASONS[reason as keyof typeof REASONS].zh });
+  return reason;
 }
 
 function expectPrivate(response: Response, cache = 'no-store'): void {
@@ -119,8 +162,9 @@ function expectPrivate(response: Response, cache = 'no-store'): void {
 }
 
 async function csrf(env: Env): Promise<{ token: string; cookie: string }> {
-  const response = await call(env, '/api/v2/csrf');
+  const response = await call(env, PATHS.csrf);
   expect(response.status).toBe(200);
+  expectPrivate(response);
   const body = await response.json<CsrfResponse>();
   const setCookie = response.headers.get('set-cookie') ?? '';
   expect(setCookie).toMatch(new RegExp(`^${CSRF_COOKIE}=[^;]+; Path=/; HttpOnly; SameSite=Strict; Max-Age=43200; Secure$`));
@@ -158,14 +202,14 @@ describe('Access', () => {
   it('lets the owner, an alias and any ASCII case of them in', async () => {
     const { env } = makeEnv();
     for (const email of ['owner@example.com', 'OWNER@EXAMPLE.COM', 'Second@Example.org']) {
-      const response = await call(env, '/api/v2/home', { jwt: await token(email) });
+      const response = await call(env, PATHS.home, { jwt: await token(email) });
       expect(response.status).toBe(200);
     }
     // The key set was fetched once for all of them.
     expect(certRequests).toEqual([`${ISSUER}/cdn-cgi/access/certs`]);
   });
 
-  it('refuses missing, invalid, expired, foreign and wrong-audience tokens', async () => {
+  it('refuses missing, invalid, expired, foreign and wrong-audience tokens on every path', async () => {
     const { env, calls } = makeEnv();
     const now = Math.floor(Date.now() / 1000);
     const cases = [
@@ -175,14 +219,16 @@ describe('Access', () => {
       await token('owner@example.com', { exp: now - 1 }),
       await token('owner@example.com', { aud: ['b'.repeat(64)] }),
       await token('owner@example.com', { iss: 'https://other.cloudflareaccess.com' }),
-      await token('Kowner@example.com'),
+      await token('Kowner@example.com'),
       (await token()).slice(0, -4) + 'AAAA',
     ];
     for (const jwt of cases) {
-      const response = await call(env, '/api/v2/home', { jwt });
-      expect(response.status).toBe(401);
-      expect(await errorCode(response)).toBe('unauthorized');
-      expectPrivate(response);
+      for (const path of [PATHS.home, PATHS.registry, PATHS.csrf, '/api/v1/nothing']) {
+        const response = await call(env, path, { jwt });
+        expect(response.status, path).toBe(401);
+        expect(await reasonOf(response)).toBe('UNAUTHORIZED');
+        expectPrivate(response);
+      }
     }
     expect(calls.views).toEqual([]);
   });
@@ -201,26 +247,26 @@ describe('Access', () => {
 
   it('fails closed on bad configuration and unreachable keys', async () => {
     const bad = makeEnv({ ACCESS_AUDIENCE: '' });
-    const response = await call(bad.env, '/api/v2/home');
+    const response = await call(bad.env, PATHS.home);
     expect(response.status).toBe(503);
-    expect(await errorCode(response)).toBe('access_not_configured');
+    expect(await reasonOf(response)).toBe('ACCESS_NOT_CONFIGURED');
     const noOwner = makeEnv({ ACCESS_OWNER: undefined } as unknown as Partial<Env>);
-    expect(await errorCode(await call(noOwner.env, '/'))).toBe('access_not_configured');
+    expect(await reasonOf(await call(noOwner.env, '/'))).toBe('ACCESS_NOT_CONFIGURED');
     const other = makeEnv({ ACCESS_ISSUER: 'https://unreachable.cloudflareaccess.com' });
-    const keys = await call(other.env, '/api/v2/home', { jwt: await issuer.sign(accessClaims('https://unreachable.cloudflareaccess.com', AUDIENCE, 'owner@example.com')) });
+    const keys = await call(other.env, PATHS.home, { jwt: await issuer.sign(accessClaims('https://unreachable.cloudflareaccess.com', AUDIENCE, 'owner@example.com')) });
     expect(keys.status).toBe(503);
-    expect(await errorCode(keys)).toBe('unavailable');
+    expect(await reasonOf(keys)).toBe('UNAVAILABLE');
   });
 
   it('allows the dev bypass only on loopback http without cf-ray, and refuses it elsewhere', async () => {
     const { env } = makeEnv({ DEV_AUTH_BYPASS: 'true' });
-    const local = await worker.fetch(incoming('http://127.0.0.1:8787/api/v2/home'), env);
+    const local = await worker.fetch(incoming(`http://127.0.0.1:8787${PATHS.home}`), env);
     expect(local.status).toBe(200);
-    const viaEdge = await worker.fetch(incoming('http://127.0.0.1:8787/api/v2/home', { headers: { 'cf-ray': 'x' } }), env);
+    const viaEdge = await worker.fetch(incoming(`http://127.0.0.1:8787${PATHS.home}`, { headers: { 'cf-ray': 'x' } }), env);
     expect(viaEdge.status).toBe(503);
-    const production = await call(env, '/api/v2/home');
+    const production = await call(env, PATHS.home);
     expect(production.status).toBe(503);
-    expect(await errorCode(production)).toBe('access_not_configured');
+    expect(await reasonOf(production)).toBe('ACCESS_NOT_CONFIGURED');
   });
 
   it('pins the request time to DEV_NOW only for requests the loopback dev bypass signed in', async () => {
@@ -228,7 +274,7 @@ describe('Access', () => {
     const local = async (env: Env, path: string, body?: unknown): Promise<Response> => {
       const url = `http://127.0.0.1:8787${path}`;
       if (body === undefined) return worker.fetch(incoming(url), env);
-      const issued = await worker.fetch(incoming('http://127.0.0.1:8787/api/v2/csrf'), env);
+      const issued = await worker.fetch(incoming(`http://127.0.0.1:8787${PATHS.csrf}`), env);
       const { token: csrfToken } = await issued.json<CsrfResponse>();
       const cookie = (issued.headers.get('set-cookie') ?? '').split(';')[0] ?? '';
       const headers = { origin: 'http://127.0.0.1:8787', 'x-csrf-token': csrfToken, cookie, 'content-type': 'application/json' };
@@ -237,123 +283,163 @@ describe('Access', () => {
 
     // Bypassed: every request-driven call of the object takes DEV_NOW as now.
     const pinned = makeEnv({ DEV_AUTH_BYPASS: 'true', DEV_NOW: NOW });
-    expect((await local(pinned.env, '/api/v2/home?refresh=1')).status).toBe(200);
-    expect((await local(pinned.env, '/api/v2/canary', { canary_id: 'mail-todofy' })).status).toBe(202);
-    expect((await local(pinned.env, '/api/v2/guard', { level: 'shed' })).status).toBe(200);
+    expect((await local(pinned.env, PATHS.refreshHome, {})).status).toBe(200);
+    expect((await local(pinned.env, PATHS.canary, {})).status).toBe(200);
+    expect((await local(pinned.env, PATHS.guard, { level: 'shed' })).status).toBe(200);
     expect(pinned.calls.at).toEqual([Date.parse(NOW), Date.parse(NOW), Date.parse(NOW)]);
 
     // Unset or not an RFC 3339 UTC instant: the object's own clock.
     for (const value of ['', ' ', '2026-10-01 12:00:00', '2026-10-01T12:00:00+02:00', '1759320000000', 'now']) {
       const { env, calls } = makeEnv({ DEV_AUTH_BYPASS: 'true', DEV_NOW: value });
-      expect((await local(env, '/api/v2/ops')).status).toBe(200);
+      expect((await local(env, PATHS.ops)).status).toBe(200);
       expect(calls.at, value).toEqual([null]);
     }
 
     // A request Access verified never reads it, even where the Worker holds a DEV_NOW.
     const verified = makeEnv({ DEV_NOW: NOW });
-    expect((await call(verified.env, '/api/v2/home')).status).toBe(200);
-    expect((await mutate(verified.env, '/api/v2/canary', { canary_id: 'mail-todofy' })).status).toBe(202);
-    expect((await mutate(verified.env, '/api/v2/guard', { level: 'normal' })).status).toBe(200);
+    expect((await call(verified.env, PATHS.home)).status).toBe(200);
+    expect((await mutate(verified.env, PATHS.canary, {})).status).toBe(200);
+    expect((await mutate(verified.env, PATHS.guard, { level: 'normal' })).status).toBe(200);
     expect(verified.calls.at).toEqual([null, null, null]);
     // And with the bypass switched on as well, the edge's requests are refused before the object is called.
     const both = makeEnv({ DEV_AUTH_BYPASS: 'true', DEV_NOW: NOW });
-    expect((await call(both.env, '/api/v2/home')).status).toBe(503);
+    expect((await call(both.env, PATHS.home)).status).toBe(503);
     expect(both.calls.at).toEqual([]);
   });
 });
 
 describe('CSRF and mutations', () => {
-  it('issues a signed token and cookie', async () => {
+  it('issues a signed token and cookie at /api/csrf (GET and HEAD only)', async () => {
     const { env } = makeEnv();
     const pair = await csrf(env);
     expect(pair.token.split('.')).toHaveLength(2);
     expect(pair.cookie).toBe(`${CSRF_COOKIE}=${pair.token}`);
+    const post = await call(env, PATHS.csrf, { method: 'POST' });
+    expect(post.status).toBe(405);
+    expect(post.headers.get('allow')).toBe('GET, HEAD');
   });
 
-  it('starts a canary with Origin + CSRF', async () => {
+  it('starts a canary with Origin + CSRF and answers its first run', async () => {
     const { env, calls } = makeEnv();
-    const response = await mutate(env, '/api/v2/canary', { canary_id: 'mail-todofy' });
-    expect(response.status).toBe(202);
-    expect(await response.json()).toEqual({ run: { run_id: 'canary-manual-20260929T160000Z' } });
-    expect(calls.startCanary).toBe(1);
+    const response = await mutate(env, PATHS.canary, { request_id: REQUEST_ID.toUpperCase() });
+    expect(response.status).toBe(200);
+    expectPrivate(response);
+    expect(expectWire(RunCanaryResponseSchema, await response.json())).toEqual({ run: RUN });
+    // The transcoder lower-cased the UUID4 request_id.
+    expect(calls.startCanary).toEqual([REQUEST_ID]);
+    expect((await mutate(env, PATHS.canary, {})).status).toBe(200);
+    expect(calls.startCanary).toEqual([REQUEST_ID, null]);
   });
 
   it('refuses a wrong Origin, a missing or foreign token, before reading the body or calling the object', async () => {
     const { env, calls } = makeEnv();
     const pair = await csrf(env);
     const cases = [
-      await mutate(env, '/api/v2/canary', { canary_id: 'mail-todofy' }, { origin: 'https://evil.example.com', csrf: pair }),
-      await mutate(env, '/api/v2/canary', { canary_id: 'mail-todofy' }, { origin: 'http://home.example.com', csrf: pair }),
-      await mutate(env, '/api/v2/canary', { canary_id: 'mail-todofy' }, { csrf: null }),
-      await mutate(env, '/api/v2/canary', { canary_id: 'mail-todofy' }, { csrf: { token: pair.token, cookie: `${CSRF_COOKIE}=other` } }),
-      await mutate(env, '/api/v2/guard', 'not json', { csrf: { token: `${pair.token}x`, cookie: `${CSRF_COOKIE}=${pair.token}x` } }),
+      await mutate(env, PATHS.canary, {}, { origin: 'https://evil.example.com', csrf: pair }),
+      await mutate(env, PATHS.canary, {}, { origin: 'http://home.example.com', csrf: pair }),
+      await mutate(env, PATHS.canary, {}, { csrf: null }),
+      await mutate(env, PATHS.canary, {}, { csrf: { token: pair.token, cookie: `${CSRF_COOKIE}=other` } }),
+      await mutate(env, PATHS.guard, 'not json', { csrf: { token: `${pair.token}x`, cookie: `${CSRF_COOKIE}=${pair.token}x` } }),
+      await mutate(env, PATHS.refreshHome, {}, { csrf: null }),
+      await mutate(env, PATHS.refreshCloudflare, {}, { origin: 'https://evil.example.com', csrf: pair }),
     ];
     for (const response of cases) {
       expect(response.status).toBe(403);
-      expect(await errorCode(response)).toBe('csrf_failed');
+      expect(await reasonOf(response)).toBe('CSRF_FAILED');
     }
     // A token minted with another key does not verify.
     const other = makeEnv({ CSRF_SIGNING_KEY: 'cd'.repeat(32) });
-    expect((await mutate(env, '/api/v2/guard', { level: 'shed' }, { csrf: await csrf(other.env) })).status).toBe(403);
-    expect(calls.startCanary).toBe(0);
+    expect((await mutate(env, PATHS.guard, { level: 'shed' }, { csrf: await csrf(other.env) })).status).toBe(403);
+    expect(calls.startCanary).toEqual([]);
     expect(calls.guard).toEqual([]);
+    expect(calls.views).toEqual([]);
   });
 
   it('needs a signing key for the CSRF token and every mutation', async () => {
     const { env, calls } = makeEnv({ CSRF_SIGNING_KEY: 'short' });
-    expect(await errorCode(await call(env, '/api/v2/csrf'))).toBe('not_configured');
-    const response = await mutate(env, '/api/v2/guard', { level: 'shed' }, { csrf: { token: 'a.b', cookie: `${CSRF_COOKIE}=a.b` } });
+    expect(await reasonOf(await call(env, PATHS.csrf))).toBe('NOT_CONFIGURED');
+    const response = await mutate(env, PATHS.guard, { level: 'shed' }, { csrf: { token: 'a.b', cookie: `${CSRF_COOKIE}=a.b` } });
     expect(response.status).toBe(503);
-    expect(await errorCode(response)).toBe('not_configured');
+    expect(await reasonOf(response)).toBe('NOT_CONFIGURED');
     expect(calls.guard).toEqual([]);
     // Reads keep working.
-    expect((await call(env, '/api/v2/home')).status).toBe(200);
+    expect((await call(env, PATHS.home)).status).toBe(200);
   });
 
-  it('sets the guard override from {level}', async () => {
+  it('sets the guard override from {level, request_id}', async () => {
     const { env, calls } = makeEnv();
-    const response = await mutate(env, '/api/v2/guard', { level: 'normal' });
+    const response = await mutate(env, PATHS.guard, { level: 'normal', request_id: REQUEST_ID });
     expect(response.status).toBe(200);
-    expect(await response.json()).toEqual({ guard: { desired: { level: 'normal' } } });
-    expect(calls.guard).toEqual(['normal']);
+    const body = await response.json();
+    expect(body).toEqual({ guard: guardOf('normal') });
+    expectWire(OverrideGuardResponseSchema, body);
+    expect(calls.guard).toEqual([`normal:${REQUEST_ID}`]);
   });
 
-  it('refuses malformed bodies with 400', async () => {
+  it('refuses malformed bodies with BAD_REQUEST before calling the object', async () => {
     const { env, calls } = makeEnv();
-    for (const body of ['not json', '[]', JSON.stringify({ level: 'panic' }), JSON.stringify({ level: 'shed', extra: 1 }), JSON.stringify({ level: 'shed', pad: 'x'.repeat(2000) })]) {
-      const response = await mutate(env, '/api/v2/guard', body);
-      expect(response.status).toBe(400);
-      expect(await errorCode(response)).toBe('bad_request');
+    for (const body of [
+      'not json',
+      '[]',
+      '{}',
+      JSON.stringify({ level: 'panic' }),
+      JSON.stringify({ level: null }),
+      JSON.stringify({ level: 'shed', extra: 1 }),
+      JSON.stringify({ level: 'shed', request_id: 'not-a-uuid' }),
+      JSON.stringify({ level: 'shed', pad: 'x'.repeat(2000) }),
+    ]) {
+      const response = await mutate(env, PATHS.guard, body);
+      expect(response.status, body).toBe(400);
+      expect(await reasonOf(response)).toBe('BAD_REQUEST');
     }
-    for (const body of ['', {}, { run_id: 'mine' }, { canary_id: 'other' }, { canary_id: 'mail-todofy', extra: 1 }]) {
-      expect(await errorCode(await mutate(env, '/api/v2/canary', body))).toBe('bad_request');
+    for (const body of ['', '[]', { run_id: 'mine' }, { canary_id: 'mail-todofy' }, { request_id: 7 }]) {
+      expect(await reasonOf(await mutate(env, PATHS.canary, body))).toBe('BAD_REQUEST');
     }
+    // A refresh takes nothing but its name.
+    expect(await reasonOf(await mutate(env, PATHS.refreshHome, { refresh: true }))).toBe('BAD_REQUEST');
     expect(calls.guard).toEqual([]);
-    expect(calls.startCanary).toBe(0);
+    expect(calls.startCanary).toEqual([]);
+    expect(calls.views).toEqual([]);
   });
 
-  it('maps the object\'s refusals to 409 and 429, and its failure to 503', async () => {
-    for (const [answer, status, code] of [
-      [{ ok: false, code: 'canary_disabled' }, 409, 'canary_disabled'],
-      [{ ok: false, code: 'canary_active' }, 409, 'canary_active'],
-      [{ ok: false, code: 'canary_limit' }, 429, 'canary_limit'],
+  it("maps the object's refusals to their reasons, another canary to NOT_FOUND and the object's failure to UNAVAILABLE", async () => {
+    for (const [answer, status, reason] of [
+      [{ ok: false, code: 'canary_disabled' }, 400, 'CANARY_DISABLED'],
+      [{ ok: false, code: 'canary_active' }, 409, 'CANARY_ACTIVE'],
+      [{ ok: false, code: 'canary_limit' }, 429, 'CANARY_LIMIT'],
+      [{ ok: false, code: 'request_id_reused' }, 400, 'BAD_REQUEST'],
     ] as const) {
       const { env } = makeEnv({}, { startCanary: answer });
-      const response = await mutate(env, '/api/v2/canary', { canary_id: 'mail-todofy' });
+      const response = await mutate(env, PATHS.canary, {});
       expect(response.status).toBe(status);
-      expect(await errorCode(response)).toBe(code);
+      expect(await reasonOf(response)).toBe(reason);
     }
+    const reused = await mutate(makeEnv({}, { guard: { ok: false, code: 'request_id_reused' } }).env, PATHS.guard, { level: 'shed', request_id: REQUEST_ID });
+    expect(await reasonOf(reused)).toBe('BAD_REQUEST');
     // The switch names the variable that turns it back on.
-    const disabled = await mutate(makeEnv({}, { startCanary: { ok: false, code: 'canary_disabled' } }).env, '/api/v2/canary', { canary_id: 'mail-todofy' });
-    expect((await disabled.json<ApiError>()).error.message).toBe('金丝雀已关闭（DASHBOARD_CANARY_ENABLED=false）');
-    const { env, stub } = makeEnv();
+    const disabled = await mutate(makeEnv({}, { startCanary: { ok: false, code: 'canary_disabled' } }).env, PATHS.canary, {});
+    expect(parseStatus(400, await disabled.json())?.localizedMessage?.message).toBe('金丝雀已关闭（DASHBOARD_CANARY_ENABLED=false）');
+    const { env, stub, calls } = makeEnv();
+    const unknown = await mutate(env, '/api/v1/canaries/other:run', {});
+    expect(unknown.status).toBe(404);
+    expect(await reasonOf(unknown)).toBe('NOT_FOUND');
+    expect(calls.startCanary).toEqual([]);
     stub.startCanary = () => Promise.reject(new Error('object reset'));
     stub.setGuardOverride = () => Promise.reject(new Error('object reset'));
-    for (const [path, body] of [['/api/v2/canary', { canary_id: 'mail-todofy' }], ['/api/v2/guard', { level: 'shed' }]] as const) {
+    for (const [path, body] of [[PATHS.canary, {}], [PATHS.guard, { level: 'shed' }]] as const) {
       const response = await mutate(env, path, body);
       expect(response.status).toBe(503);
-      expect(await errorCode(response)).toBe('unavailable');
+      expect(await reasonOf(response)).toBe('UNAVAILABLE');
     }
+  });
+
+  it('answers INTERNAL, never the object’s answer, when HomeState answers what the IDL refuses', async () => {
+    const { env } = makeEnv({}, { startCanary: { ok: true, run: { ...RUN, phase: 'exploded' } } });
+    const response = await mutate(env, PATHS.canary, {});
+    expect(response.status).toBe(500);
+    const text = await response.text();
+    expect(text).not.toContain('exploded');
+    expect(parseStatus(500, JSON.parse(text))?.reason).toBe('INTERNAL');
   });
 
   it('reads at most 1 KiB of a chunked body (no Content-Length) and never buffers the rest', async () => {
@@ -371,16 +457,12 @@ describe('CSRF and mutations', () => {
         cancelled = true;
       },
     });
-    const request = incoming(`https://${HOST}/api/v2/guard`, {
-      method: 'POST',
-      headers: { 'cf-access-jwt-assertion': await token(), origin: ORIGIN, 'x-csrf-token': pair.token, cookie: pair.cookie },
-      body: endless,
-      duplex: 'half',
-    } as RequestInit);
+    const headers = { 'cf-access-jwt-assertion': await token(), origin: ORIGIN, 'x-csrf-token': pair.token, cookie: pair.cookie, 'content-type': 'application/json' };
+    const request = incoming(`https://${HOST}${PATHS.guard}`, { method: 'POST', headers, body: endless, duplex: 'half' } as RequestInit);
     expect(request.headers.get('content-length')).toBeNull();
     const response = await worker.fetch(request, env);
     expect(response.status).toBe(400);
-    expect(await errorCode(response)).toBe('bad_request');
+    expect(await reasonOf(response)).toBe('BAD_REQUEST');
     expect(cancelled).toBe(true);
     expect(pulled).toBeLessThanOrEqual(3);
     expect(calls.guard).toEqual([]);
@@ -393,128 +475,152 @@ describe('CSRF and mutations', () => {
         controller.close();
       },
     });
-    const ok = await worker.fetch(
-      incoming(`https://${HOST}/api/v2/guard`, {
-        method: 'POST',
-        headers: { 'cf-access-jwt-assertion': await token(), origin: ORIGIN, 'x-csrf-token': pair.token, cookie: pair.cookie },
-        body: small,
-        duplex: 'half',
-      } as RequestInit),
-      env,
-    );
+    const ok = await worker.fetch(incoming(`https://${HOST}${PATHS.guard}`, { method: 'POST', headers, body: small, duplex: 'half' } as RequestInit), env);
     expect(ok.status).toBe(200);
-    expect(calls.guard).toEqual(['shed']);
+    expect(calls.guard).toEqual(['shed:null']);
     // A declared length above the limit or a malformed one is refused before reading.
     for (const length of ['1025', 'abc', '-1']) {
-      const refused = await mutate(env, '/api/v2/guard', { level: 'shed' }, { csrf: pair, headers: { 'content-length': length } });
+      const refused = await mutate(env, PATHS.guard, { level: 'shed' }, { csrf: pair, headers: { 'content-length': length } });
       expect(refused.status, length).toBe(400);
     }
-    expect(calls.guard).toEqual(['shed']);
+    expect(calls.guard).toEqual(['shed:null']);
   });
 });
 
 describe('routing', () => {
-  it('passes only ?refresh=1 on as a refresh', async () => {
+  it('refreshes only through the refresh methods, never through a GET', async () => {
     const { env, calls } = makeEnv();
-    await call(env, '/api/v2/home');
-    await call(env, '/api/v2/home?refresh=1');
-    await call(env, '/api/v2/home?refresh=yes');
-    expect(calls.views).toEqual(['home:false', 'home:true', 'home:false']);
+    await call(env, PATHS.home);
+    expect((await mutate(env, PATHS.refreshHome, {})).status).toBe(200);
+    // The old query parameter is an unknown query parameter of GetHomeView now.
+    const query = await call(env, `${PATHS.home}?refresh=1`);
+    expect(query.status).toBe(400);
+    expect(await reasonOf(query)).toBe('BAD_REQUEST');
+    expect((await mutate(env, PATHS.refreshCloudflare, {})).status).toBe(200);
+    expect(calls.views).toEqual(['home:false', 'home:true', 'cloudflare:true']);
   });
 
-  it('answers unknown API paths 404 and wrong methods 405 with Allow', async () => {
+  it('answers unknown API paths NOT_FOUND and wrong methods METHOD_NOT_ALLOWED with Allow', async () => {
     const { env } = makeEnv();
-    for (const path of ['/api/v2/nothing', '/api/v1/overview', '/api/v1/csrf']) {
+    for (const path of ['/api/v1/nothing', '/api/v1/overview', '/api/v1', '/api/v1/canaries', '/api/v1/flowsView:refresh']) {
       const missing = await call(env, path);
       expect(missing.status, path).toBe(404);
-      expect(await errorCode(missing)).toBe('not_found');
+      expect(await reasonOf(missing)).toBe('NOT_FOUND');
     }
-    // v1 is retired: its mutations are unknown paths too (404 before any CSRF check).
-    expect((await call(env, '/api/v1/guard', { method: 'POST', body: '{"level":"shed"}' })).status).toBe(404);
-    expect(await errorCode(await call(env, '/api'))).toBe('not_found');
-    const wrong = await call(env, '/api/v2/canary');
+    const wrong = await call(env, PATHS.canary);
     expect(wrong.status).toBe(405);
-    expect(wrong.headers.get('allow')).toBe('POST');
-    expect(await errorCode(wrong)).toBe('method_not_allowed');
-    expect((await call(env, '/api/v2/home', { method: 'POST' })).headers.get('allow')).toBe('GET');
+    expect(wrong.headers.get('allow')).toBe('POST, OPTIONS');
+    expect(await reasonOf(wrong)).toBe('METHOD_NOT_ALLOWED');
+    expect((await call(env, PATHS.home, { method: 'DELETE' })).headers.get('allow')).toBe('GET, HEAD, OPTIONS');
+    const head = await call(env, PATHS.home, { method: 'HEAD' });
+    expect(head.status).toBe(200);
+    expect(await head.text()).toBe('');
   });
 
-  it('turns a failing Durable Object into 503 unavailable', async () => {
-    const { env } = makeEnv({}, { view: () => { throw new Error('storage exploded with detail'); } });
-    const response = await call(env, '/api/v2/home');
+  it('turns a failing Durable Object into UNAVAILABLE without its message', async () => {
+    const { env } = makeEnv({}, {
+      view: () => {
+        throw new Error('storage exploded with detail');
+      },
+    });
+    const response = await call(env, PATHS.home);
     expect(response.status).toBe(503);
     const text = await response.text();
     expect(text).not.toContain('exploded');
-    expect(JSON.parse(text)).toMatchObject({ error: { code: 'unavailable' } });
+    expect(parseStatus(503, JSON.parse(text))?.reason).toBe('UNAVAILABLE');
   });
 
-  it('logs only the request ID, status and code of an error', async () => {
+  it('logs only the request ID, status and reason of an error', async () => {
     const log = vi.spyOn(console, 'log');
     const { env } = makeEnv();
     const jwt = await token('someone@example.com');
-    await call(env, '/api/v2/home', { jwt });
+    await call(env, PATHS.home, { jwt });
     const lines = log.mock.calls.map((args) => String(args[0]));
     expect(lines).toHaveLength(1);
-    expect(Object.keys(JSON.parse(lines[0] ?? '{}') as object).sort()).toEqual(['code', 'request_id', 'status']);
+    expect(Object.keys(JSON.parse(lines[0] ?? '{}') as object).sort()).toEqual(['reason', 'request_id', 'status']);
     expect(lines[0]).not.toContain('someone');
     expect(lines[0]).not.toContain(jwt.slice(0, 20));
+    expect(lines[0]).not.toContain('homeView');
   });
 });
 
-describe('API v2', () => {
+describe('the retired /api/v2 routes', () => {
+  it('answer 410 reload_required in the old envelope, behind Access, without calling the object', async () => {
+    const { env, calls } = makeEnv();
+    for (const [path, method] of [
+      ['/api/v2/home', 'GET'],
+      ['/api/v2/home?refresh=1', 'GET'],
+      ['/api/v2/registry', 'GET'],
+      ['/api/v2/csrf', 'GET'],
+      ['/api/v2/guard', 'POST'],
+      ['/api/v2/canary', 'POST'],
+      ['/api/v2/nothing', 'GET'],
+      ['/api', 'GET'],
+    ] as const) {
+      const response = await call(env, path, { method });
+      expect(response.status, path).toBe(410);
+      expectPrivate(response);
+      const body = await response.json<LegacyApiError>();
+      expect({ code: body.error.code, message: body.error.message }).toEqual({ code: 'reload_required', message: RELOAD_MESSAGE });
+      expect(body.error.request_id).toMatch(/^[0-9a-f]{16}$/);
+    }
+    expect(calls).toMatchObject({ views: [], startCanary: [], guard: [] });
+    // Without a login, the old envelope with the old code.
+    const anonymous = await call(env, '/api/v2/home', { jwt: null });
+    expect(anonymous.status).toBe(401);
+    expect((await anonymous.json<LegacyApiError>()).error.code).toBe('unauthorized');
+  });
+});
+
+describe('DashboardUiService', () => {
   it('serves the registry from the Worker with the build as ETag, and 304 for it', async () => {
     const { env, stub } = makeEnv();
-    const response = await call(env, '/api/v2/registry');
+    const response = await call(env, PATHS.registry);
     expect(response.status).toBe(200);
     expect(response.headers.get('etag')).toBe('"abc123"');
     expectPrivate(response);
-    const body = await response.json<RegistryResponse>();
-    expect(body).toMatchObject({ version: 'home-v2', build: 'abc123' });
+    const text = await response.text();
+    expectWire(VIEW_SCHEMAS.registry, text);
+    const body = JSON.parse(text) as Registry;
+    expect(body).toMatchObject({ name: 'registry', build: 'abc123' });
     expect(body.entries.map((entry) => entry.id)).toContain('mail-hero');
-    const again = await call(env, '/api/v2/registry', { headers: { 'if-none-match': '"abc123"' } });
+    const again = await call(env, PATHS.registry, { headers: { 'if-none-match': '"abc123"' } });
     expect(again.status).toBe(304);
     expect(again.headers.get('etag')).toBe('"abc123"');
+    expect(again.headers.get('content-type')).toBeNull();
     expect(await again.text()).toBe('');
-    expect(stub.v2View).not.toHaveBeenCalled();
-    expect((await call(env, '/api/v2/registry', { jwt: null })).status).toBe(401);
+    expect(stub.view).not.toHaveBeenCalled();
+    expect((await call(env, PATHS.registry, { jwt: null })).status).toBe(401);
   });
 
-  it('passes a view through with its ETag, refresh only where a view has one', async () => {
+  it('passes a view through with its ETag, and 304 for a matching If-None-Match', async () => {
     const { env, stub } = makeEnv();
-    const home = await call(env, '/api/v2/home?refresh=1');
+    const home = await call(env, PATHS.home);
     expect(home.status).toBe(200);
     expect(home.headers.get('etag')).toBe('"7"');
     expect(home.headers.get('content-type')).toBe('application/json; charset=utf-8');
     expectPrivate(home);
-    expect(await home.json()).toEqual({ view: 'home', refresh: true });
-    await call(env, '/api/v2/flows?refresh=1');
-    await call(env, '/api/v2/cloudflare?refresh=1');
-    await call(env, '/api/v2/ops');
-    expect(stub.v2View.mock.calls.map((args) => [args[0], args[1]])).toEqual([
-      ['home', true],
-      ['flows', false],
-      ['cloudflare', true],
-      ['ops', false],
+    // The bytes HomeState serialized, untouched.
+    expect(await home.text()).toBe('{"view":"home","refresh":false}');
+    await call(env, PATHS.flows);
+    await call(env, PATHS.cloudflare);
+    await call(env, PATHS.ops);
+    await mutate(env, PATHS.refreshCloudflare, {});
+    expect(stub.view.mock.calls.map((args) => [args[0], args[1], args[2]])).toEqual([
+      ['home', false, null],
+      ['flows', false, null],
+      ['cloudflare', false, null],
+      ['ops', false, null],
+      // A refresh always wants the fresh body: no If-None-Match is passed on.
+      ['cloudflare', true, null],
     ]);
-    const cached = await call(env, '/api/v2/home', { headers: { 'if-none-match': '"7"' } });
+    const cached = await call(env, PATHS.ops, { headers: { 'if-none-match': '"7"' } });
     expect(cached.status).toBe(304);
+    expect(cached.headers.get('etag')).toBe('"7"');
+    expectPrivate(cached);
     expect(await cached.text()).toBe('');
-  });
-
-  it('requires canary_id on the canary mutation and serves the CSRF token', async () => {
-    const { env, calls } = makeEnv();
-    const pair = await csrf(env);
-    expect(await errorCode(await mutate(env, '/api/v2/canary', {}, { csrf: pair }))).toBe('bad_request');
-    expect(await errorCode(await mutate(env, '/api/v2/canary', { canary_id: 'other' }, { csrf: pair }))).toBe('bad_request');
-    expect(calls.startCanary).toBe(0);
-    expect((await mutate(env, '/api/v2/canary', { canary_id: 'mail-todofy' }, { csrf: pair })).status).toBe(202);
-    expect((await mutate(env, '/api/v2/canary', { canary_id: 'mail-todofy' }, { csrf: null })).status).toBe(403);
-    expect((await mutate(env, '/api/v2/guard', { level: 'shed' }, { csrf: pair })).status).toBe(200);
-    expect((await mutate(env, '/api/v2/guard', { level: 'shed' }, { origin: 'https://evil.example.com', csrf: pair })).status).toBe(403);
-    expect(calls).toMatchObject({ startCanary: 1, guard: ['shed'] });
-    const v2csrf = await call(env, '/api/v2/csrf');
-    expect(v2csrf.status).toBe(200);
-    expect(v2csrf.headers.get('set-cookie')).toMatch(new RegExp(`^${CSRF_COOKIE}=`));
+    const refreshed = await mutate(env, PATHS.refreshHome, {}, { headers: { 'if-none-match': '"7"' } });
+    expect(refreshed.status).toBe(200);
   });
 });
 

@@ -4,7 +4,7 @@
  * values equal). They are account-wide: other Workers, databases, buckets and AI models count too.
  * "GB" is taken as 10^9 bytes (the docs do not say; decimal is the smaller, more cautious limit).
  */
-import type { QuotaPeriod, QuotaResourceId, QuotaUnit } from './api-types.ts';
+import type { QuotaPeriod, QuotaResource, QuotaUnit } from './api-types.ts';
 
 export interface Allowance {
   readonly period: QuotaPeriod;
@@ -29,7 +29,7 @@ const AI_PRICING = 'https://developers.cloudflare.com/workers-ai/platform/pricin
 
 export const GB = 1_000_000_000;
 
-export const ALLOWANCES: Readonly<Record<QuotaResourceId, Allowance>> = {
+export const ALLOWANCES: Readonly<Record<QuotaResource, Allowance>> = {
   workers_requests: { period: 'daily', unit: 'requests', limit: 100_000, guardTrigger: true, source: WORKERS_LIMITS },
   d1_rows_read: { period: 'daily', unit: 'rows', limit: 5_000_000, guardTrigger: true, source: D1_PRICING },
   d1_rows_written: { period: 'daily', unit: 'rows', limit: 100_000, guardTrigger: true, source: D1_PRICING },

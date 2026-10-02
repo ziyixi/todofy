@@ -1,6 +1,6 @@
 /**
  * The JSON documents HomeState keeps in its `state` table (docs/design.md §3, docs/design-v2.md §6),
- * with their empty values. One writer per key (HomeState); the pure view builders (views-v2.ts,
+ * with their empty values. One writer per key (HomeState); the pure view builders (views.ts,
  * evaluate.ts) read them through a Snapshot. Times are epoch milliseconds.
  */
 import type { OpsReportItem, OpsReportReceipt, OpsStatus } from '@ziyixi/proto/ops/v1/ops_wire';

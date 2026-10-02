@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { BREAKDOWN_UNCLASSIFIED } from '../src/api-types.ts';
-import { CF_SCRIPTS_MAX, type Registry } from '../src/api-v2-types.ts';
+import { CF_SCRIPTS_MAX } from '../src/api-types.ts';
+import type { RegistryDef } from '../src/registry-types.ts';
 import { errorLevel, errorPercent, mergeScripts, resourceRows, withBreakdownResources, workerRows, type CfScriptsDoc } from '../src/discovery.ts';
 import { REGISTRY } from '../src/registry.ts';
 import { parseUsage, type ScriptUsage } from '../src/usage.ts';
@@ -147,12 +148,12 @@ describe('the resource table', () => {
   it('names the backup bucket of the self-hosted servers, which belongs to no monorepo app', () => {
     const usage = { d1: [], do: [], r2: [{ id: 'vultr-backup', size_bytes: 790_000_000, class_a: 12, class_b: 3 }] };
     expect(resourceRows(usage, null, T0)).toEqual([
-      { kind: 'r2', id: 'vultr-backup', resource: 'vps-backup', entry: 'self-hosted', size_bytes: 790_000_000, class_a: 12, class_b: 3 },
+      { kind: 'r2', id: 'vultr-backup', resource: 'vps-backup', entry: 'self-hosted', size_bytes: 790_000_000, requests: null, class_a: 12, class_b: 3 },
     ]);
   });
 
   it('gives a mapped namespace the DO requests of the script defining its class', () => {
-    const registry: Registry = {
+    const registry: RegistryDef = {
       ...REGISTRY,
       resources: REGISTRY.resources.map((r) => (r.id === 'todofy-core-do' ? { ...r, match: SYNTHETIC_NS[1] } : r)),
     };
@@ -163,6 +164,7 @@ describe('the resource table', () => {
       id: SYNTHETIC_NS[1],
       resource: 'todofy-core-do',
       entry: 'todofy',
+      size_bytes: null,
       requests: 632,
       rows_read: 7300,
       rows_written: 610,
@@ -172,7 +174,7 @@ describe('the resource table', () => {
 
 describe('the quota breakdowns', () => {
   /** The registry with two of its resources matched to the synthetic IDs of REALISTIC_USAGE. */
-  const registry: Registry = {
+  const registry: RegistryDef = {
     ...REGISTRY,
     resources: REGISTRY.resources.map((r) =>
       r.id === 'mail-hero-db' ? { ...r, match: SYNTHETIC_D1[0] } : r.id === 'mail-coordinator' ? { ...r, match: SYNTHETIC_NS[0] } : r,
@@ -185,33 +187,33 @@ describe('the quota breakdowns', () => {
   };
   const breakdown = (rows: ReturnType<typeof parsed>, id: string) => rows.find((r) => r.id === id)?.breakdown;
 
-  it('joins every D1, DO and R2 item to the registry like the resource table (unknown → null)', () => {
+  it('joins every D1, DO and R2 item to the registry like the resource table (unknown: no resource)', () => {
     const stored = parsed();
     const rows = withBreakdownResources(stored, registry);
     for (const id of ['d1_rows_read', 'd1_rows_written', 'd1_storage', 'd1_database_max']) {
       expect(breakdown(rows, id)?.map((item) => [item.name, item.kind, item.resource]), id).toEqual([
         [SYNTHETIC_D1[0], 'd1', 'mail-hero-db'],
-        [SYNTHETIC_D1[1], 'd1', null],
+        [SYNTHETIC_D1[1], 'd1', undefined],
       ]);
     }
     for (const id of ['do_duration', 'do_rows_read', 'do_rows_written']) {
       expect(breakdown(rows, id)?.map((item) => [item.name, item.kind, item.resource]), id).toEqual([
         [SYNTHETIC_NS[0], 'do', 'mail-coordinator'],
-        [SYNTHETIC_NS[1], 'do', null],
-        [SYNTHETIC_NS[2], 'do', null],
+        [SYNTHETIC_NS[1], 'do', undefined],
+        [SYNTHETIC_NS[2], 'do', undefined],
       ]);
     }
     for (const id of ['r2_class_a', 'r2_class_b', 'r2_storage']) {
       expect(breakdown(rows, id)?.map((item) => [item.name, item.kind, item.resource]), id).toEqual([
         ['mail-hero-store', 'r2', 'mail-hero-store'],
-        ['backup-synthetic', 'r2', null],
+        ['backup-synthetic', 'r2', undefined],
       ]);
     }
     expect(breakdown(rows, 'd1_rows_read')?.[0]).toEqual({ name: SYNTHETIC_D1[0], value: 5210, kind: 'd1', resource: 'mail-hero-db' });
     // The same answer for the same identifier as the resource table.
     const table = resourceRows(parseUsage(graphqlBody(REALISTIC_USAGE), T0)?.resources, scriptsAt(5, T0), T0, registry);
     for (const item of rows.flatMap((row) => row.breakdown)) {
-      if (item.kind !== undefined) expect(table.find((r) => r.kind === item.kind && r.id === item.name)?.resource, item.name).toBe(item.resource);
+      if (item.kind !== undefined) expect(table.find((r) => r.kind === item.kind && r.id === item.name)?.resource, item.name).toBe(item.resource ?? null);
     }
   });
 
@@ -237,7 +239,7 @@ describe('the quota breakdowns', () => {
     });
     expect(breakdown(withBreakdownResources(stored, registry), 'r2_class_a')).toEqual([
       { name: 'mail-hero-store', value: 10, kind: 'r2', resource: 'mail-hero-store' },
-      { name: BREAKDOWN_UNCLASSIFIED, value: 4, kind: 'r2', resource: null },
+      { name: BREAKDOWN_UNCLASSIFIED, value: 4, kind: 'r2' },
     ]);
     // Even a registry entry whose match reads "unknown" is never joined to the dimension-less key.
     const trap = { ...registry, resources: registry.resources.map((r) => (r.id === 'mail-hero-db' ? { ...r, match: BREAKDOWN_UNCLASSIFIED } : r)) };
@@ -246,7 +248,6 @@ describe('the quota breakdowns', () => {
       name: BREAKDOWN_UNCLASSIFIED,
       value: 7,
       kind: 'd1',
-      resource: null,
     });
   });
 });

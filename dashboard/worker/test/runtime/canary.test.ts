@@ -4,9 +4,10 @@
  * are limited. Every stub answer is a contracts/ops-v1 fixture.
  */
 import { afterEach, describe, expect, it } from 'vitest';
+import { parseStatus } from '@ziyixi/proto/rpc-status';
 import type { OpsReport } from '@ziyixi/proto/ops/v1/ops_wire';
-import type { CanaryStartResponse } from '../../src/api-types.ts';
-import { expectValid, latest, NOW, startFlows, status, type FlowHarness } from './flows.ts';
+import type { RunCanaryResponse } from '../../src/api-types.ts';
+import { expectValid, latest, NOW, PATHS, startFlows, status, type FlowHarness } from './flows.ts';
 import { fixture } from './harness.ts';
 
 const EVENT_ID = '6d3b2f0e-4c1a-4b7e-8a52-0c9e7f1d2a31';
@@ -160,16 +161,16 @@ describe('the scheduled canary', () => {
 describe('manual canary runs', () => {
   it('starts at once, refuses a second while active, and lets ticks finish it', async () => {
     h = await startFlows({ bindings: { CANARY_UTC_HOUR: '0' } });
-    const response = await h.post('/api/v2/canary', { canary_id: 'mail-todofy' });
-    expect(response.status).toBe(202);
-    const { run } = (await response.json()) as CanaryStartResponse;
+    const response = await h.post(PATHS.canary, {});
+    expect(response.status).toBe(200);
+    const { run } = (await response.json()) as RunCanaryResponse;
     expect(run).toMatchObject({ kind: 'manual', phase: 'delivering', event_id: EVENT_ID, polls: 1 });
     expect(run.run_id).toMatch(/^canary-manual-\d{8}T\d{6}Z$/);
     expect(await h.callsOf('mail-hero', 'startCanary')).toEqual([[{ run_id: run.run_id }]]);
 
-    const second = await h.post('/api/v2/canary', { canary_id: 'mail-todofy' });
+    const second = await h.post(PATHS.canary, {});
     expect(second.status).toBe(409);
-    expect(await second.json()).toMatchObject({ error: { code: 'canary_active' } });
+    expect(parseStatus(409, await second.json())?.reason).toBe('CANARY_ACTIVE');
 
     // The next tick, past the canary hour, advances the manual run and does not start the scheduled one alongside it.
     await h.tick(NOW + 60_000);
@@ -185,15 +186,15 @@ describe('manual canary runs', () => {
     // Mail Hero without canary_producer: each run ends (skipped) at once, freeing the next.
     await h.answer('mail-hero', 'status', { value: await status('mail-hero', { capabilities: ['guard'] }) });
     for (let i = 0; i < 3; i++) {
-      const response = await h.post('/api/v2/canary', { canary_id: 'mail-todofy' });
-      expect(response.status).toBe(202);
-      expect(((await response.json()) as CanaryStartResponse).run).toMatchObject({ outcome: 'skipped', code: 'canary_producer_missing' });
+      const response = await h.post(PATHS.canary, {});
+      expect(response.status).toBe(200);
+      expect(((await response.json()) as RunCanaryResponse).run).toMatchObject({ outcome: 'skipped', code: 'canary_producer_missing' });
     }
     // Started within the same second, yet three distinct run IDs.
     expect(new Set((await h.snapshot()).canary.recent.map((r) => r.run_id)).size).toBe(3);
-    const fourth = await h.post('/api/v2/canary', { canary_id: 'mail-todofy' });
+    const fourth = await h.post(PATHS.canary, {});
     expect(fourth.status).toBe(429);
-    expect(await fourth.json()).toMatchObject({ error: { code: 'canary_limit' } });
+    expect(parseStatus(429, await fourth.json())?.reason).toBe('CANARY_LIMIT');
     // status() was polled once for all of them (at most every 10 minutes).
     expect(await h.callsOf('mail-hero', 'status')).toHaveLength(1);
   });
@@ -213,11 +214,10 @@ describe('the canary switch (CANARY_ENABLED)', () => {
     }
     expect(await canaryCalls(h)).toEqual([]);
 
-    const response = await h.post('/api/v2/canary', { canary_id: 'mail-todofy' });
-    expect(response.status).toBe(409);
-    expect(await response.json()).toMatchObject({
-      error: { code: 'canary_disabled', message: '金丝雀已关闭（DASHBOARD_CANARY_ENABLED=false）' },
-    });
+    const response = await h.post(PATHS.canary, {});
+    expect(response.status).toBe(400);
+    const disabled = parseStatus(400, await response.json());
+    expect(disabled).toMatchObject({ reason: 'CANARY_DISABLED', localizedMessage: { locale: 'zh-CN', message: '金丝雀已关闭（DASHBOARD_CANARY_ENABLED=false）' } });
     // Refused before anything is called (no status poll, no startCanary).
     expect(await h.called()).toEqual([]);
 
@@ -238,9 +238,9 @@ describe('the canary switch (CANARY_ENABLED)', () => {
 
     // Switched off with the run in flight (the step before a Todofy rollback).
     await h.redeploy({ CANARY_ENABLED: 'false' });
-    const manual = await h.post('/api/v2/canary', { canary_id: 'mail-todofy' });
-    expect(manual.status).toBe(409);
-    expect(await manual.json()).toMatchObject({ error: { code: 'canary_disabled' } });
+    const manual = await h.post(PATHS.canary, {});
+    expect(manual.status).toBe(400);
+    expect(parseStatus(400, await manual.json())?.reason).toBe('CANARY_DISABLED');
     const during = await h.snapshot();
     expect(during.canary).toMatchObject({ enabled: false, next_scheduled_at: null, active: { run_id: 'canary-2026-09-29' } });
 

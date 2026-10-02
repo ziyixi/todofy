@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import limitsDoc from '../../docs/limits.md?raw';
-import { QUOTA_RESOURCES } from '../src/api-types.ts';
+import { QUOTA_RESOURCES } from '../src/idl.ts';
 import { ALLOWANCES } from '../src/limits.ts';
 
 /** The §1 table of docs/limits.md: resource id → its cells. */

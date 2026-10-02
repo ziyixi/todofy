@@ -1,0 +1,296 @@
+// The dashboard's owner API: the HTTP/JSON interface between its UI (dashboard/web) and the Worker "home"
+// (dashboard/worker), whose Durable Object HomeState holds every status, probe, usage read, canary run and the
+// guard (dashboard/docs/design-v2.md §5).
+//
+// Callers. Only the dashboard's own UI calls it (same origin, home.ziyixi.science). The dashboard reads the other
+// apps through ops-v1 service bindings (proto/ops/v1), never through this API.
+//
+// Transport. google.api.http bindings under /api/v1, served by the shared transcoder
+// (proto/ts/http-transcoder.ts) and called through the shared client (proto/ts/http-client.ts). Bodies, query
+// parameters and responses are JSON in the wire JSON profile (proto/README.md): proto field names (snake_case),
+// enum values in lower case without their prefix (`LEVEL_CRITICAL` is "critical"). Inputs are read strictly (an
+// unknown field or enum name is INVALID_ARGUMENT), outputs leniently. Request bodies are at most 1 KiB. Errors:
+// errors.proto (the dashboard's reasons) and common/errors/v1/errors.proto (the reasons every API shares).
+//
+// Authentication, in front of the transcoder (packages/edge-auth, the dashboard's parameters in its SPEC §5.4):
+// the whole host is behind Cloudflare Access, and every route needs the owner's Access JWT (header
+// Cf-Access-Jwt-Assertion or cookie CF_Authorization); every method other than GET also needs the same-origin
+// Origin header and the signed double-submit CSRF token (header X-CSRF-Token, cookie home_csrf), issued by
+// GET /api/csrf, which is transport, not part of this service. OverrideGuard and RunCanary take a `request_id`
+// (AIP-155, a UUID4 the browser makes once per user action): repeating it within 24 hours answers the first
+// response and changes nothing; reused for another rpc it is INVALID_ARGUMENT (BAD_REQUEST). Without one the
+// request is applied as it comes.
+//
+// The views. Each Get of a view is one RPC to HomeState, which builds the view from its tables and serializes it
+// once; the Worker passes those bytes through without decoding them (Workers Free gives a request 10 ms of CPU).
+// The answer carries `ETag: "<rev>-<hash>"` (the hash covers the body without generated_at, so a level that went
+// stale changes it) and `Cache-Control: no-store`; a GET whose If-None-Match names the current ETag is answered
+// 304 Not Modified without a body. The registry is static per build (`ETag: "<build>"`). A refresh is a custom
+// method (AIP-136), since it calls the apps: RefreshHomeView polls the due ops-v1 statuses (each at most every
+// 10 minutes) and the due probes, RefreshCloudflareView reads the GraphQL usage again; each scope fetches at most
+// once a minute, and a refresh within that minute answers the view as it is (`refresh.refreshed` false). The
+// bytes HomeState writes are exactly what the wire profile writes for these messages
+// (dashboard/worker/test/wire-conformance.test.ts reads every view strictly and writes it back byte for byte).
+//
+// Timestamps are strings in the format `Timestamp`, not google.protobuf.Timestamp: the views embed ops-v1's
+// answers as the apps wrote them (whole seconds and milliseconds, proto/ops/v1/ops.proto), and HomeState writes
+// its own with milliseconds; the profile's Timestamp would rewrite one of them, and the Worker would have to
+// re-encode every view. For the same reason the field names keep the JSON the UI renders (`generated_at`).
+//
+// Before dashboard.ui.v1 (until 2026-10-02) the same operations were hand-written routes under /api/v2 (named
+// below). Those paths answer 410 with the old error envelope and the code `reload_required` for one release
+// (dashboard/worker/src/http.ts), so a tab still running the old UI tells the owner to reload.
+//
+// buf lint. The methods that answer a view carry two `buf:lint:ignore` lines: RPC_RESPONSE_STANDARD_NAME and
+// RPC_REQUEST_RESPONSE_UNIQUE, which the AIPs contradict (a Get and a custom method answer the resource itself,
+// so one message answers several methods; api-linter checks those names instead). They are excused here, next
+// to each method, not in buf.yaml: buf.yaml is a path every proto user's deploy depends on, and this package must
+// not redeploy the other apps.
+
+syntax = "proto3";
+
+package dashboard.ui.v1;
+
+import "common/wire/v1/wire.proto";
+import "dashboard/ui/v1/canary.proto";
+import "dashboard/ui/v1/cloudflare_view.proto";
+import "dashboard/ui/v1/flows_view.proto";
+import "dashboard/ui/v1/guard.proto";
+import "dashboard/ui/v1/home_view.proto";
+import "dashboard/ui/v1/ops_view.proto";
+import "dashboard/ui/v1/registry.proto";
+import "google/api/annotations.proto";
+import "google/api/client.proto";
+import "google/api/field_behavior.proto";
+import "google/api/field_info.proto";
+import "google/api/resource.proto";
+import "ops/v1/ops.proto";
+
+option java_multiple_files = true;
+option java_outer_classname = "DashboardUiServiceProto";
+option java_package = "science.ziyixi.dashboard.ui.v1";
+// The guard (a singleton): what the dashboard wants every guarded app to do. Shown inside the cloudflare and ops
+// views (GuardView); OverrideGuard changes it.
+option (google.api.resource_definition) = {
+  type: "home.ziyixi.science/Guard"
+  pattern: "guard"
+  singular: "guard"
+  plural: "guards"
+};
+// A canary (`canaries/mail-todofy`): an end-to-end check bound to a flow. Shown inside the flows and ops views
+// (FlowCanaryView, CanaryView); RunCanary starts a manual run.
+option (google.api.resource_definition) = {
+  type: "home.ziyixi.science/Canary"
+  pattern: "canaries/{canary}"
+  singular: "canary"
+  plural: "canaries"
+};
+
+// The owner's operations dashboard: the four views, the registry they are drawn from, the guard override and the
+// manual canary.
+// (-- api-linter: core::0121::resource-must-support-get=disabled
+//     aip.dev/not-precedent: the guard and the canary are shown inside the views that need them (GuardView,
+//     CanaryView); a Get of either alone would have no caller. --)
+service DashboardUiService {
+  option (google.api.default_host) = "home.ziyixi.science";
+
+  // The registry (AIP-131, a singleton). Replaces GET /api/v2/registry.
+  // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
+  // buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE
+  rpc GetRegistry(GetRegistryRequest) returns (Registry) {
+    option (google.api.http) = {get: "/api/v1/{name=registry}"};
+    option (google.api.method_signature) = "name";
+  }
+
+  // The home view (AIP-131, a singleton). Replaces GET /api/v2/home.
+  // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
+  // buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE
+  rpc GetHomeView(GetHomeViewRequest) returns (HomeView) {
+    option (google.api.http) = {get: "/api/v1/{name=homeView}"};
+    option (google.api.method_signature) = "name";
+  }
+
+  // Polls the due ops-v1 statuses and probes, then answers the home view (AIP-136). Replaces
+  // GET /api/v2/home?refresh=1.
+  // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
+  // buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE
+  rpc RefreshHomeView(RefreshHomeViewRequest) returns (HomeView) {
+    option (google.api.http) = {
+      post: "/api/v1/{name=homeView}:refresh"
+      body: "*"
+    };
+    option (google.api.method_signature) = "name";
+  }
+
+  // The flows view (AIP-131, a singleton). Replaces GET /api/v2/flows.
+  // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
+  // buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE
+  rpc GetFlowsView(GetFlowsViewRequest) returns (FlowsView) {
+    option (google.api.http) = {get: "/api/v1/{name=flowsView}"};
+    option (google.api.method_signature) = "name";
+  }
+
+  // The Cloudflare view (AIP-131, a singleton). Replaces GET /api/v2/cloudflare.
+  // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
+  // buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE
+  rpc GetCloudflareView(GetCloudflareViewRequest) returns (CloudflareView) {
+    option (google.api.http) = {get: "/api/v1/{name=cloudflareView}"};
+    option (google.api.method_signature) = "name";
+  }
+
+  // Reads the GraphQL usage again, then answers the Cloudflare view (AIP-136). Replaces
+  // GET /api/v2/cloudflare?refresh=1.
+  // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
+  // buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE
+  rpc RefreshCloudflareView(RefreshCloudflareViewRequest) returns (CloudflareView) {
+    option (google.api.http) = {
+      post: "/api/v1/{name=cloudflareView}:refresh"
+      body: "*"
+    };
+    option (google.api.method_signature) = "name";
+  }
+
+  // The ops view (AIP-131, a singleton). Replaces GET /api/v2/ops.
+  // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
+  // buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE
+  rpc GetOpsView(GetOpsViewRequest) returns (OpsView) {
+    option (google.api.http) = {get: "/api/v1/{name=opsView}"};
+    option (google.api.method_signature) = "name";
+  }
+
+  // The owner's guard override (AIP-136): `shed` forces a shed on every guarded app for 24 hours (until cleared),
+  // `normal` ends a forced shed and suppresses the automatic one until the next 00:00 UTC. Replaces
+  // POST /api/v2/guard.
+  rpc OverrideGuard(OverrideGuardRequest) returns (OverrideGuardResponse) {
+    option (google.api.http) = {
+      post: "/api/v1/{name=guard}:override"
+      body: "*"
+    };
+    option (google.api.method_signature) = "name,level";
+  }
+
+  // Starts a manual run of the canary with its first step (AIP-136); the ticks follow it to its end. At most one
+  // run at a time (CANARY_ACTIVE) and 3 manual runs a UTC day (CANARY_LIMIT); none while the canary is switched
+  // off (CANARY_DISABLED). Replaces POST /api/v2/canary.
+  rpc RunCanary(RunCanaryRequest) returns (RunCanaryResponse) {
+    option (google.api.http) = {
+      post: "/api/v1/{name=canaries/*}:run"
+      body: "*"
+    };
+    option (google.api.method_signature) = "name";
+  }
+}
+
+// Input of GetRegistry.
+message GetRegistryRequest {
+  // `registry`.
+  string name = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (google.api.resource_reference).type = "home.ziyixi.science/Registry"
+  ];
+}
+
+// Input of GetHomeView.
+message GetHomeViewRequest {
+  // `homeView`.
+  string name = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (google.api.resource_reference).type = "home.ziyixi.science/HomeView"
+  ];
+}
+
+// Input of RefreshHomeView.
+message RefreshHomeViewRequest {
+  // `homeView`.
+  string name = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (google.api.resource_reference).type = "home.ziyixi.science/HomeView"
+  ];
+}
+
+// Input of GetFlowsView.
+message GetFlowsViewRequest {
+  // `flowsView`.
+  string name = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (google.api.resource_reference).type = "home.ziyixi.science/FlowsView"
+  ];
+}
+
+// Input of GetCloudflareView.
+message GetCloudflareViewRequest {
+  // `cloudflareView`.
+  string name = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (google.api.resource_reference).type = "home.ziyixi.science/CloudflareView"
+  ];
+}
+
+// Input of RefreshCloudflareView.
+message RefreshCloudflareViewRequest {
+  // `cloudflareView`.
+  string name = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (google.api.resource_reference).type = "home.ziyixi.science/CloudflareView"
+  ];
+}
+
+// Input of GetOpsView.
+message GetOpsViewRequest {
+  // `opsView`.
+  string name = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (google.api.resource_reference).type = "home.ziyixi.science/OpsView"
+  ];
+}
+
+// Input of OverrideGuard.
+message OverrideGuardRequest {
+  // `guard`.
+  string name = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (google.api.resource_reference).type = "home.ziyixi.science/Guard"
+  ];
+  // shed: force a shed for 24 hours; normal: clear it and suppress the automatic shed until 00:00 UTC.
+  ops.v1.GuardLevel level = 2 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).non_null = true
+  ];
+  // The idempotency key (AIP-155); see DashboardUiService.
+  string request_id = 3 [
+    (google.api.field_info).format = UUID4,
+    (google.api.field_behavior) = OPTIONAL
+  ];
+}
+
+// Output of OverrideGuard.
+message OverrideGuardResponse {
+  // The guard after the override, with each app's answer to the new setGuard.
+  GuardView guard = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).non_null = true
+  ];
+}
+
+// Input of RunCanary.
+message RunCanaryRequest {
+  // `canaries/mail-todofy` (another canary is NOT_FOUND).
+  string name = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (google.api.resource_reference).type = "home.ziyixi.science/Canary"
+  ];
+  // The idempotency key (AIP-155); see DashboardUiService.
+  string request_id = 2 [
+    (google.api.field_info).format = UUID4,
+    (google.api.field_behavior) = OPTIONAL
+  ];
+}
+
+// Output of RunCanary.
+message RunCanaryResponse {
+  // The new run after its first step.
+  CanaryRun run = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).non_null = true
+  ];
+}

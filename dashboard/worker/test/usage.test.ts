@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import design from '../../docs/design.md?raw';
-import { QUOTA_RESOURCES, type QuotaRow } from '../src/api-types.ts';
+import { type QuotaRow } from '../src/api-types.ts';
+import { QUOTA_RESOURCES } from '../src/idl.ts';
 import { ALLOWANCES } from '../src/limits.ts';
 import limitsDoc from '../../docs/limits.md?raw';
 import {

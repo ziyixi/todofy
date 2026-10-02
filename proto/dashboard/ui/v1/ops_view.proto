@@ -1,0 +1,165 @@
+// 操作与记录, the ops view (dashboard/docs/design-v2.md §5): the guard and canary actions, the digest and every
+// ops-v1 app's last status. The wire rules of attention.proto apply.
+//
+// (-- api-linter: core::0142::time-field-type=disabled
+//     aip.dev/not-precedent: timestamps are strings, as in the ops-v1 answers this view embeds. --)
+// (-- api-linter: core::0142::time-field-names=disabled
+//     aip.dev/not-precedent: the view JSON's names (generated_at, checked_at, status_at). --)
+// (-- api-linter: core::0140::prepositions=disabled
+//     aip.dev/not-precedent: the view JSON's names (last_sent_at). --)
+// (-- api-linter: core::0215::foreign-type-reference=disabled
+//     aip.dev/not-precedent: the view embeds ops-v1's answers (GuardState, OpsStatus, OpsReportItem) as the
+//     dashboard read them from the apps; proto/ops/v1 is their one description. --)
+
+syntax = "proto3";
+
+package dashboard.ui.v1;
+
+import "common/wire/v1/wire.proto";
+import "dashboard/ui/v1/attention.proto";
+import "dashboard/ui/v1/canary.proto";
+import "dashboard/ui/v1/guard.proto";
+import "google/api/field_behavior.proto";
+import "google/api/resource.proto";
+import "ops/v1/ops.proto";
+
+option java_multiple_files = true;
+option java_outer_classname = "OpsViewProto";
+option java_package = "science.ziyixi.dashboard.ui.v1";
+option (common.wire.v1.formats) = {
+  name: "Timestamp"
+  pattern: "[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]{1,3})?Z"
+  description: "RFC 3339 UTC with Z, optional milliseconds."
+};
+
+// The ops view. A singleton (AIP-156), built and serialized by HomeState on each read.
+message OpsView {
+  option (google.api.resource) = {
+    type: "home.ziyixi.science/OpsView"
+    pattern: "opsView"
+    singular: "opsView"
+    plural: "opsViews"
+  };
+
+  // Always `opsView`.
+  string name = 1 [(google.api.field_behavior) = IDENTIFIER];
+  // As HomeView.generated_at.
+  string generated_at = 2 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).format = "Timestamp"
+  ];
+  // As HomeView.rev.
+  int32 rev = 3 [(google.api.field_behavior) = REQUIRED];
+  // As HomeView.build.
+  string build = 4 [(google.api.field_behavior) = REQUIRED];
+  // As HomeView.attention.
+  Attention attention = 5 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).non_null = true
+  ];
+  // As HomeView.badges.
+  Badges badges = 6 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).non_null = true
+  ];
+  // As HomeView.refresh (the home scope).
+  Refresh refresh = 7 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).non_null = true
+  ];
+  // The guard (OverrideGuard changes it).
+  GuardView guard = 8 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).non_null = true
+  ];
+  // The canary (RunCanary starts a manual run).
+  CanaryView canary = 9 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).non_null = true
+  ];
+  // The digest Todofy receives.
+  Digest digest = 10 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).non_null = true
+  ];
+  // Every ops-v1 entry, in registry order.
+  repeated AppDetail apps = 11 [(google.api.field_behavior) = REQUIRED];
+}
+
+// The digest: the dashboard's report to Todofy (ops-v1 reportOps) and its receipts.
+message Digest {
+  // The last tick's report: warning and critical items only, at most 20, critical first.
+  repeated ops.v1.OpsReportItem items = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).max_items = 20
+  ];
+  // Todofy advertises `ops_digest` (its last status); reports are sent only then.
+  bool enabled = 2 [(google.api.field_behavior) = REQUIRED];
+  // When the last report went out.
+  optional string last_sent_at = 3 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).format = "Timestamp"
+  ];
+  // The generated_at of the last report Todofy accepted.
+  optional string last_generated_at = 4 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).format = "Timestamp"
+  ];
+  // Todofy's last receipt.
+  ops.v1.OpsReportReceipt last_receipt = 5 [(google.api.field_behavior) = REQUIRED];
+  // The error of the last failed send; null after a success.
+  optional string last_error = 6 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field) = {
+      allowed: [
+        "invalid_input",
+        "busy",
+        "unavailable",
+        "timeout",
+        "invalid_output",
+        "not_configured"
+      ]
+    }
+  ];
+  // The latest time the next report goes out even without a change (last_sent_at + 6 h).
+  optional string next_due_at = 7 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).format = "Timestamp"
+  ];
+}
+
+// An ops-v1 app's last status() attempt and its last successful answer.
+message AppDetail {
+  // The registry entry (the app's ops-v1 name).
+  string entry = 1 [(google.api.field_behavior) = REQUIRED];
+  // The result of the last attempt; null before the first.
+  optional bool reachable = 2 [(google.api.field_behavior) = REQUIRED];
+  // When the last attempt ran.
+  optional string checked_at = 3 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).format = "Timestamp"
+  ];
+  // The error of the last attempt; null when it succeeded.
+  optional string error = 4 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field) = {
+      allowed: [
+        "invalid_input",
+        "busy",
+        "unavailable",
+        "timeout",
+        "invalid_output",
+        "not_configured"
+      ]
+    }
+  ];
+  // Failed attempts since the last success.
+  int32 consecutive_failures = 5 [(google.api.field_behavior) = REQUIRED];
+  // The last successful answer (may be older than checked_at), as the dashboard read it.
+  ops.v1.OpsStatus status = 6 [(google.api.field_behavior) = REQUIRED];
+  // When it was read.
+  optional string status_at = 7 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).format = "Timestamp"
+  ];
+}

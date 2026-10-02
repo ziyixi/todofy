@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { PROBE_TIMEOUT_MS } from '../src/api-v2-types.ts';
+import { PROBE_TIMEOUT_MS } from '../src/api-types.ts';
 import { mediaType, nextProbeDoc, probeDue, probeUrl, type ProbeTarget } from '../src/probe.ts';
 import type { FetchLike } from '../src/usage.ts';
 

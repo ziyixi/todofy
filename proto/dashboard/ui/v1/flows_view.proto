@@ -1,0 +1,222 @@
+// 业务流程, the flows view (dashboard/docs/design-v2.md §5): every flow with its stages, their signals,
+// counters, analytics and probes, and the canary bound to the mail flow. It reads what ticks and home refreshes
+// stored; it has no refresh of its own. The wire rules of attention.proto apply.
+//
+// (-- api-linter: core::0142::time-field-type=disabled
+//     aip.dev/not-precedent: timestamps are strings, as in the ops-v1 answers these views embed. --)
+// (-- api-linter: core::0142::time-field-names=disabled
+//     aip.dev/not-precedent: the view JSON's names (generated_at, checked_at, last_active_hour). --)
+// (-- api-linter: core::0140::prepositions=disabled
+//     aip.dev/not-precedent: the view JSON's names (generated_at, since), as ops-v1's Signal. --)
+
+syntax = "proto3";
+
+package dashboard.ui.v1;
+
+import "common/wire/v1/wire.proto";
+import "dashboard/ui/v1/attention.proto";
+import "dashboard/ui/v1/canary.proto";
+import "dashboard/ui/v1/home_view.proto";
+import "google/api/field_behavior.proto";
+import "google/api/resource.proto";
+import "ops/v1/ops.proto";
+
+option java_multiple_files = true;
+option java_outer_classname = "FlowsViewProto";
+option java_package = "science.ziyixi.dashboard.ui.v1";
+option (common.wire.v1.formats) = {
+  name: "Timestamp"
+  pattern: "[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]{1,3})?Z"
+  description: "RFC 3339 UTC with Z, optional milliseconds."
+};
+
+// The flows view. A singleton (AIP-156), built and serialized by HomeState on each read.
+message FlowsView {
+  option (google.api.resource) = {
+    type: "home.ziyixi.science/FlowsView"
+    pattern: "flowsView"
+    singular: "flowsView"
+    plural: "flowsViews"
+  };
+
+  // Always `flowsView`.
+  string name = 1 [(google.api.field_behavior) = IDENTIFIER];
+  // As HomeView.generated_at.
+  string generated_at = 2 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).format = "Timestamp"
+  ];
+  // As HomeView.rev.
+  int32 rev = 3 [(google.api.field_behavior) = REQUIRED];
+  // As HomeView.build.
+  string build = 4 [(google.api.field_behavior) = REQUIRED];
+  // As HomeView.attention.
+  Attention attention = 5 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).non_null = true
+  ];
+  // As HomeView.badges.
+  Badges badges = 6 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).non_null = true
+  ];
+  // As HomeView.refresh (the home scope).
+  Refresh refresh = 7 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).non_null = true
+  ];
+  // Every flow, in registry order.
+  repeated FlowState flows = 8 [(google.api.field_behavior) = REQUIRED];
+}
+
+// A flow: its summary (as FlowSummary), its stages and its canary.
+message FlowState {
+  // As FlowSummary.id.
+  string id = 1 [(google.api.field_behavior) = REQUIRED];
+  // As FlowSummary.level.
+  Level level = 2 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).non_null = true
+  ];
+  // As FlowSummary.partial.
+  bool partial = 3 [(google.api.field_behavior) = REQUIRED];
+  // As FlowSummary.coverage.
+  Coverage coverage = 4 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).non_null = true
+  ];
+  // As FlowSummary.first_issue.
+  FirstIssue first_issue = 5 [(google.api.field_behavior) = REQUIRED];
+  // As FlowSummary.freshness.
+  Freshness freshness = 6 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).non_null = true
+  ];
+  // The stages, in the flow's order.
+  repeated StageState stages = 7 [(google.api.field_behavior) = REQUIRED];
+  // Codes of the flow's entries that no stage claims (a newer app release): never dropped.
+  repeated UnclassifiedSignal unclassified = 8 [(google.api.field_behavior) = REQUIRED];
+  // The bound canary (the mail flow only).
+  FlowCanaryView canary = 9 [(google.api.field_behavior) = REQUIRED];
+}
+
+// A stage of a flow.
+message StageState {
+  // The stage (unique within the flow).
+  string id = 1 [(google.api.field_behavior) = REQUIRED];
+  // Its level.
+  Level level = 2 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).non_null = true
+  ];
+  // The code explaining a non-ok level (a claimed signal code, unreachable, stale, never_checked, app_down,
+  // app_degraded, error_rate, idle, never_seen, http_status, timeout, network_error, tick_stale, canary_failed);
+  // null when ok or unmonitored.
+  optional string reason = 3 [(google.api.field_behavior) = REQUIRED];
+  // A hold signal matched (the level is `held` unless something worse applies).
+  bool held = 4 [(google.api.field_behavior) = REQUIRED];
+  // The entry's signals this stage claims.
+  repeated StageSignal signals = 5 [(google.api.field_behavior) = REQUIRED];
+  // The entry's counters shown on the stage (display only, never thresholds).
+  repeated StageCounter counters = 6 [(google.api.field_behavior) = REQUIRED];
+  // On the stages the canary's stage map covers.
+  CanaryBadge canary = 7 [(google.api.field_behavior) = REQUIRED];
+  // On a stage with analytics: its Workers today (UTC).
+  StageAnalytics analytics = 8 [(google.api.field_behavior) = REQUIRED];
+  // On a stage whose entry is probed.
+  StageProbe probe = 9 [(google.api.field_behavior) = REQUIRED];
+  // When the stage's entry was last read: its ops-v1 status poll, or the dashboard's last tick for its own
+  // entry; null for other sources (their facts are above).
+  optional string checked_at = 10 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).format = "Timestamp"
+  ];
+}
+
+// A signal a stage claims.
+message StageSignal {
+  // The signal's code.
+  string code = 1 [(google.api.field_behavior) = REQUIRED];
+  // How bad it is.
+  ops.v1.Severity severity = 2 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).non_null = true
+  ];
+  // When the app first saw it, if it tracks that.
+  optional string since = 3 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).format = "Timestamp"
+  ];
+  // Its numbers, in the app's order.
+  map<string, double> metrics = 4 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).keep_order = true
+  ];
+}
+
+// A counter shown on a stage.
+// (-- api-linter: core::0123::resource-annotation=disabled
+//     aip.dev/not-precedent: `name` is an ops-v1 counter's name, not a resource name. --)
+message StageCounter {
+  // The counter's name.
+  string name = 1 [(google.api.field_behavior) = REQUIRED];
+  // Its value.
+  double value = 2 [(google.api.field_behavior) = REQUIRED];
+}
+
+// A stage's Workers today (UTC).
+message StageAnalytics {
+  // Requests.
+  double requests = 1 [(google.api.field_behavior) = REQUIRED];
+  // Errors.
+  double errors = 2 [(google.api.field_behavior) = REQUIRED];
+  // errors / requests x 100; null below 20 requests (样本太少，不判定).
+  optional double error_percent = 3 [(google.api.field_behavior) = REQUIRED];
+  // The hour of the last tick that saw requests grow.
+  optional string last_active_hour = 4 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).format = "Timestamp"
+  ];
+}
+
+// A stage's probe.
+message StageProbe {
+  // When it ran.
+  optional string checked_at = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).format = "Timestamp"
+  ];
+  // Whether the answer was what the registry expects.
+  optional bool ok = 2 [(google.api.field_behavior) = REQUIRED];
+  // The answer's HTTP status.
+  optional int32 http_status = 3 [(google.api.field_behavior) = REQUIRED];
+  // The answer's latency.
+  optional int32 latency_ms = 4 [(google.api.field_behavior) = REQUIRED];
+}
+
+// A code of a flow's entry that no stage claims.
+message UnclassifiedSignal {
+  // The entry.
+  string entry = 1 [(google.api.field_behavior) = REQUIRED];
+  // The signal's code.
+  string code = 2 [(google.api.field_behavior) = REQUIRED];
+  // How bad it is.
+  ops.v1.Severity severity = 3 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).non_null = true
+  ];
+}
+
+// What the canary says of a stage it covers.
+enum CanaryBadge {
+  // Never sent (null on the stages it does not cover).
+  CANARY_BADGE_UNSPECIFIED = 0;
+  // An ok run within the canary's fresh hours.
+  CANARY_BADGE_VERIFIED = 1;
+  // The last run failed here.
+  CANARY_BADGE_FAILED = 2;
+  // The last run was held by a switch.
+  CANARY_BADGE_HELD = 3;
+  // No recent ok run.
+  CANARY_BADGE_UNVERIFIED = 4;
+}

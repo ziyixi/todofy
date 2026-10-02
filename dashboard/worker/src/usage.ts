@@ -6,8 +6,8 @@
  * logged, stored, echoed or sent anywhere else, and remote response text never leaves this module:
  * failures become codes.
  */
-import { BREAKDOWN_UNCLASSIFIED, type QuotaResourceId, type QuotaRow } from './api-types.ts';
-import { WORKERS_QUERY_LIMIT, type ResourceKind } from './api-v2-types.ts';
+import { BREAKDOWN_UNCLASSIFIED, type QuotaResource, type QuotaRow } from './api-types.ts';
+import { WORKERS_QUERY_LIMIT, type StorageKind } from './api-types.ts';
 import { ALLOWANCES, DO_DURATION_GB } from './limits.ts';
 import { DAY_MS, HOUR_MS, daysInUtcMonth, isoSeconds, round1, startOfUtcDay, startOfUtcMonth, utcDay, utcMonthStart } from './time.ts';
 
@@ -219,7 +219,7 @@ function dimension(row: unknown, name: string): string {
  * bucketName); the others are keyed by scriptName (workers_requests, do_requests) or modelId, and
  * do_storage has none.
  */
-export const BREAKDOWN_RESOURCE_KIND: Readonly<Partial<Record<QuotaResourceId, ResourceKind>>> = {
+export const BREAKDOWN_RESOURCE_KIND: Readonly<Partial<Record<QuotaResource, StorageKind>>> = {
   d1_rows_read: 'd1',
   d1_rows_written: 'd1',
   d1_storage: 'd1',
@@ -270,7 +270,7 @@ export function projection(period: QuotaRow['period'], used: number | null, now:
   return null;
 }
 
-function quotaRow(id: QuotaResourceId, measured: Measured, now: number): QuotaRow {
+function quotaRow(id: QuotaResource, measured: Measured, now: number): QuotaRow {
   const allowance = ALLOWANCES[id];
   const used = measured.used === null ? null : round1(measured.used);
   const projected = projection(allowance.period, used, now);
@@ -313,7 +313,7 @@ export function parseUsage(body: unknown, now: number): UsageData | null {
     sets[name] = value as unknown[];
   }
 
-  const measured = new Map<QuotaResourceId, Measured>();
+  const measured = new Map<QuotaResource, Measured>();
   const script = (row: unknown): string => dimension(row, 'scriptName');
   const database = (row: unknown): string => dimension(row, 'databaseId');
   const namespace = (row: unknown): string => dimension(row, 'namespaceId');
@@ -371,7 +371,7 @@ export function parseUsage(body: unknown, now: number): UsageData | null {
   const r2Storage = sumBy(sets.r2sto, 'r2sto', (r) => field(r, 'max', 'payloadSize') + field(r, 'max', 'metadataSize'), bucket);
   measured.set('r2_storage', storageEmpty(r2Storage, sets.r2sto));
 
-  const order: readonly QuotaResourceId[] = [
+  const order: readonly QuotaResource[] = [
     'workers_requests', 'd1_rows_read', 'd1_rows_written', 'do_requests', 'do_duration', 'do_rows_read',
     'do_rows_written', 'ai_neurons', 'r2_class_a', 'r2_class_b', 'd1_storage', 'd1_database_max', 'do_storage', 'r2_storage',
   ];

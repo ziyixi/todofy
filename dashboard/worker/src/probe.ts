@@ -5,7 +5,7 @@
  * looked at: `redirect: 'manual'` (a redirect is an answer, never followed), no credentials or cookies,
  * and the body is cancelled unread.
  */
-import { PROBE_MIN_INTERVAL_SECONDS, PROBE_TIMEOUT_MS } from './api-v2-types.ts';
+import { PROBE_MIN_INTERVAL_SECONDS, PROBE_TIMEOUT_MS } from './api-types.ts';
 import type { ProbeDoc } from './docs.ts';
 import type { FetchLike } from './usage.ts';
 

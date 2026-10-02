@@ -22,31 +22,20 @@
  * is registered here, and until every production Worker with a Custom Domain maps to an `apps` or `sites` entry
  * whose url is on one of its hosts (only `home` is exempt), so a newly deployed app cannot stay off the dashboard.
  */
-import {
-  API_V2_VERSION,
-  DRIFT_CALLS_PER_TICK,
-  type EntryDef,
-  type EntryGroupId,
-  type FlowDef,
-  type FlowGroupId,
-  type GroupDef,
-  type Registry,
-  type RegistryResponse,
-  type ResourceDef,
-  type WorkerDef,
-} from './api-v2-types.ts';
+import { DRIFT_CALLS_PER_TICK, type EntryGroup, type FlowGroup, type Registry, type RegistryEntry, type Stage, type TileMetricDef } from './api-types.ts';
+import type { EntryDef, FlowDef, RegistryDef, ResourceDef, WorkerDef } from './registry-types.ts';
 
 /** Every registry host is this zone or one of its subdomains. */
 export const OWNER_ZONE = 'ziyixi.science';
 
-const ENTRY_GROUPS: readonly GroupDef<EntryGroupId>[] = [
+const ENTRY_GROUPS: readonly EntryGroup[] = [
   { id: 'apps', name: '应用', order: 1 },
   { id: 'sites', name: '站点', order: 2 },
   { id: 'services', name: '后台服务', order: 3 },
   { id: 'hidden', name: '平台', order: 9 },
 ];
 
-const FLOW_GROUPS: readonly GroupDef<FlowGroupId>[] = [
+const FLOW_GROUPS: readonly FlowGroup[] = [
   { id: 'mail', name: '邮件与任务', order: 1 },
   { id: 'content', name: '内容与发布', order: 2 },
   { id: 'research', name: '研究', order: 3 },
@@ -473,7 +462,7 @@ const FLOWS: readonly FlowDef[] = [
   },
 ];
 
-export const REGISTRY: Registry = {
+export const REGISTRY: RegistryDef = {
   entry_groups: ENTRY_GROUPS,
   flow_groups: FLOW_GROUPS,
   entries: ENTRIES,
@@ -490,23 +479,23 @@ export const PLATFORM_SIGNALS: readonly string[] = ['status_unavailable', 'guard
 
 // ---- lookups ----------------------------------------------------------------------------------------
 
-export function entryById(id: string, registry: Registry = REGISTRY): EntryDef | undefined {
+export function entryById(id: string, registry: RegistryDef = REGISTRY): EntryDef | undefined {
   return registry.entries.find((entry) => entry.id === id);
 }
 
 /** Script name → entry id, for the Worker table and the quota breakdowns; unknown → undefined (未登记). */
-export function entryOfScript(script: string, registry: Registry = REGISTRY): string | undefined {
+export function entryOfScript(script: string, registry: RegistryDef = REGISTRY): string | undefined {
   return registry.workers.find((worker) => worker.script === script)?.entry;
 }
 
 /** The scripts a stage runs on: its `workers`, or all of its entry's workers. */
-export function stageScripts(stage: FlowDef['stages'][number], registry: Registry = REGISTRY): readonly string[] {
+export function stageScripts(stage: FlowDef['stages'][number], registry: RegistryDef = REGISTRY): readonly string[] {
   if (stage.entry === null) return [];
   return stage.workers ?? registry.workers.filter((worker) => worker.entry === stage.entry).map((worker) => worker.script);
 }
 
 /** Flow ids a script takes part in (the Worker table's flow tags), by group order then flow order. */
-export function flowsOfScript(script: string, registry: Registry = REGISTRY): string[] {
+export function flowsOfScript(script: string, registry: RegistryDef = REGISTRY): string[] {
   const groupOrder = (flow: FlowDef): number => registry.flow_groups.find((group) => group.id === flow.group)?.order ?? 99;
   return [...registry.flows]
     .sort((a, b) => groupOrder(a) - groupOrder(b) || a.order - b.order)
@@ -515,7 +504,7 @@ export function flowsOfScript(script: string, registry: Registry = REGISTRY): st
 }
 
 /** A GraphQL identifier (databaseId, namespaceId, bucketName) → its registry resource, if mapped. */
-export function resourceByMatch(kind: ResourceDef['kind'], id: string, registry: Registry = REGISTRY): ResourceDef | undefined {
+export function resourceByMatch(kind: ResourceDef['kind'], id: string, registry: RegistryDef = REGISTRY): ResourceDef | undefined {
   return registry.resources.find((resource) => resource.kind === kind && resource.match !== null && resource.match === id);
 }
 
@@ -524,7 +513,7 @@ export function resourceByMatch(kind: ResourceDef['kind'], id: string, registry:
  * one GET per enabled public_http probe, the GraphQL query, setGuard per guarded entry, two canary
  * calls per canary, one reportOps and the drift check's read-only calls (at most DRIFT_CALLS_PER_TICK).
  */
-export function outboundPerTick(registry: Registry = REGISTRY): number {
+export function outboundPerTick(registry: RegistryDef = REGISTRY): number {
   const ops = registry.entries.filter((entry) => entry.status.type === 'ops_v1');
   const guarded = ops.filter((entry) => entry.status.type === 'ops_v1' && entry.status.guard);
   const canaries = registry.flows.filter((flow) => flow.canary !== null).length;
@@ -532,12 +521,12 @@ export function outboundPerTick(registry: Registry = REGISTRY): number {
 }
 
 /** Outbound calls of one owner refresh: status() and probes of /home, or the GraphQL of /cloudflare. */
-export function outboundPerRefresh(registry: Registry = REGISTRY): number {
+export function outboundPerRefresh(registry: RegistryDef = REGISTRY): number {
   const ops = registry.entries.filter((entry) => entry.status.type === 'ops_v1').length;
   return Math.max(ops + probeCount(registry), 1);
 }
 
-function probeCount(registry: Registry): number {
+function probeCount(registry: RegistryDef): number {
   return registry.entries.filter((entry) => entry.status.type === 'public_http' && entry.status.enabled).length;
 }
 
@@ -547,22 +536,78 @@ function hostOf(url: string | null): string | null {
   return url === null ? null : new URL(url).hostname;
 }
 
-/** The body of GET /api/v2/registry; no binding names or probe URLs. */
-export function registryView(build: string, registry: Registry = REGISTRY): RegistryResponse {
+/** The resource name of the registry singleton (dashboard.ui.v1.Registry). */
+export const REGISTRY_NAME = 'registry';
+
+/**
+ * Every object below is written field by field in the IDL's field order (proto/dashboard/ui/v1/registry.proto), not
+ * spread from the definitions, so the serialized body is what the wire profile writes whatever order a definition's
+ * keys were typed in (test/wire-conformance.test.ts); a key a stage leaves out stays out.
+ */
+function tileMetricView(metric: TileMetricDef | null): TileMetricDef | null {
+  if (metric === null) return null;
+  return metric.kind === 'counter' ? { kind: metric.kind, name: metric.name } : { kind: metric.kind };
+}
+
+function stageView(stage: Stage): Stage {
   return {
-    version: API_V2_VERSION,
+    id: stage.id,
+    name: stage.name,
+    entry: stage.entry,
+    ...(stage.workers === undefined ? {} : { workers: stage.workers }),
+    signals: stage.signals,
+    ...(stage.hold_signals === undefined ? {} : { hold_signals: stage.hold_signals }),
+    ...(stage.counters === undefined ? {} : { counters: stage.counters }),
+    ...(stage.analytics === undefined ? {} : { analytics: stage.analytics }),
+    ...(stage.note === undefined ? {} : { note: stage.note }),
+  };
+}
+
+/** The body of GetRegistry; no binding names or probe URLs. */
+export function registryView(build: string, registry: RegistryDef = REGISTRY): Registry {
+  return {
+    name: REGISTRY_NAME,
     build,
-    entry_groups: registry.entry_groups,
-    flow_groups: registry.flow_groups,
-    entries: registry.entries.map(({ status, ...entry }) => ({
-      ...entry,
-      status_type: status.type,
-      host: hostOf(entry.url),
-      scripts: registry.workers.filter((worker) => worker.entry === entry.id).map((worker) => worker.script),
-    })),
-    workers: registry.workers.map((worker) => ({ ...worker, flows: flowsOfScript(worker.script, registry) })),
+    entry_groups: registry.entry_groups.map(({ id, name, order }): EntryGroup => ({ id, name, order })),
+    flow_groups: registry.flow_groups.map(({ id, name, order }): FlowGroup => ({ id, name, order })),
+    entries: registry.entries.map(
+      (entry): RegistryEntry => ({
+        id: entry.id,
+        name: entry.name,
+        description: entry.description,
+        group: entry.group,
+        icon: entry.icon,
+        accent: entry.accent,
+        url: entry.url,
+        access: entry.access,
+        tile_metric: tileMetricView(entry.tile_metric),
+        app_only_signals: entry.app_only_signals,
+        order: entry.order,
+        status_type: entry.status.type,
+        host: hostOf(entry.url),
+        scripts: registry.workers.filter((worker) => worker.entry === entry.id).map((worker) => worker.script),
+      }),
+    ),
+    workers: registry.workers.map(({ script, entry, role }) => ({ script, entry, role, flows: flowsOfScript(script, registry) })),
     resources: registry.resources.map(({ id, kind, name, entry, script }) => (script === undefined ? { id, kind, name, entry } : { id, kind, name, entry, script })),
-    flows: registry.flows,
+    flows: registry.flows.map((flow) => ({
+      id: flow.id,
+      name: flow.name,
+      group: flow.group,
+      description: flow.description,
+      order: flow.order,
+      stages: flow.stages.map(stageView),
+      canary:
+        flow.canary === null
+          ? null
+          : {
+              id: flow.canary.id,
+              runner: flow.canary.runner,
+              stage_map: { delivery: flow.canary.stage_map.delivery, consumer: flow.canary.stage_map.consumer },
+              fresh_hours: flow.canary.fresh_hours,
+              scope_note: flow.canary.scope_note,
+            },
+    })),
   };
 }
 

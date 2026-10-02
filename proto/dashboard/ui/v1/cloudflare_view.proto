@@ -1,0 +1,371 @@
+// The Cloudflare view (dashboard/docs/design-v2.md §5, §10): the account's usage against Workers Free, every
+// Worker and storage resource seen, the configuration drift check and the guard. The wire rules of
+// attention.proto apply.
+//
+// (-- api-linter: core::0142::time-field-type=disabled
+//     aip.dev/not-precedent: timestamps are strings, as in the ops-v1 answers these views embed. --)
+// (-- api-linter: core::0142::time-field-names=disabled
+//     aip.dev/not-precedent: the view JSON's names (generated_at, checked_at, last_active_hour). --)
+// (-- api-linter: core::0140::prepositions=disabled
+//     aip.dev/not-precedent: the view JSON's names (last_error_at). --)
+// (-- api-linter: core::0216::state-field-output-only=disabled
+//     aip.dev/not-precedent: output messages, where REQUIRED means "always written"; OUTPUT_ONLY would let the
+//     wire profile omit a null. --)
+
+syntax = "proto3";
+
+package dashboard.ui.v1;
+
+import "common/wire/v1/wire.proto";
+import "dashboard/ui/v1/attention.proto";
+import "dashboard/ui/v1/guard.proto";
+import "dashboard/ui/v1/usage.proto";
+import "google/api/field_behavior.proto";
+import "google/api/resource.proto";
+
+option java_multiple_files = true;
+option java_outer_classname = "CloudflareViewProto";
+option java_package = "science.ziyixi.dashboard.ui.v1";
+option (common.wire.v1.formats) = {
+  name: "Timestamp"
+  pattern: "[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]{1,3})?Z"
+  description: "RFC 3339 UTC with Z, optional milliseconds."
+};
+option (common.wire.v1.formats) = {
+  name: "Day"
+  pattern: "[0-9]{4}-[0-9]{2}-[0-9]{2}"
+  description: "A UTC calendar day, YYYY-MM-DD."
+};
+
+// The Cloudflare view. A singleton (AIP-156), built and serialized by HomeState on each read.
+message CloudflareView {
+  option (google.api.resource) = {
+    type: "home.ziyixi.science/CloudflareView"
+    pattern: "cloudflareView"
+    singular: "cloudflareView"
+    plural: "cloudflareViews"
+  };
+
+  // Always `cloudflareView`.
+  string name = 1 [(google.api.field_behavior) = IDENTIFIER];
+  // As HomeView.generated_at.
+  string generated_at = 2 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).format = "Timestamp"
+  ];
+  // As HomeView.rev.
+  int32 rev = 3 [(google.api.field_behavior) = REQUIRED];
+  // As HomeView.build.
+  string build = 4 [(google.api.field_behavior) = REQUIRED];
+  // As HomeView.attention.
+  Attention attention = 5 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).non_null = true
+  ];
+  // As HomeView.badges.
+  Badges badges = 6 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).non_null = true
+  ];
+  // The view's freshness; RefreshCloudflareView's scope.
+  Refresh refresh = 7 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).non_null = true
+  ];
+  // The configuration drift check (design-v2.md §10).
+  Drift drift = 8 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).non_null = true
+  ];
+  // The usage, every quota with its contributors.
+  Usage usage = 9 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).non_null = true
+  ];
+  // At most 50 remembered Workers, in table order (errors first, then requests).
+  repeated WorkerRow workers = 10 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).max_items = 50
+  ];
+  // Remembered Workers left out of `workers`.
+  int32 workers_omitted = 11 [(google.api.field_behavior) = REQUIRED];
+  // The workers dataset returned as many rows as the query's limit: the list is a lower bound.
+  bool workers_truncated = 12 [(google.api.field_behavior) = REQUIRED];
+  // Every storage resource measured today.
+  repeated ResourceRow resources = 13 [(google.api.field_behavior) = REQUIRED];
+  // Durable Object storage, account-wide only (the query has no per-namespace dimension).
+  optional double do_storage_bytes = 14 [(google.api.field_behavior) = REQUIRED];
+  // The guard.
+  GuardView guard = 15 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).non_null = true
+  ];
+}
+
+// The configuration drift check: the live account against the desired state generated from the committed
+// configs. Names only, never a value.
+message Drift {
+  // ok or drift from the last completed check; never_checked before the first; failing when none completed and
+  // the last day's attempts failed; not_configured without the token.
+  State status = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).non_null = true
+  ];
+  // The last completed check.
+  optional string checked_at = 2 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).format = "Timestamp"
+  ];
+  // A check of today is running across ticks.
+  bool in_progress = 3 [(google.api.field_behavior) = REQUIRED];
+  // Workers in the desired state.
+  int32 desired_workers = 4 [(google.api.field_behavior) = REQUIRED];
+  // Findings per category of the last completed check (complete, even when `findings` is cut).
+  DriftCounts counts = 5 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).non_null = true
+  ];
+  // At most 20 findings, in category order.
+  repeated DriftFinding findings = 6 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).max_items = 20
+  ];
+  // Findings left out of `findings`.
+  int32 findings_omitted = 7 [(google.api.field_behavior) = REQUIRED];
+  // Zones whose routes could not be read this check.
+  int32 zones_unchecked = 8 [(google.api.field_behavior) = REQUIRED];
+  // A live list passed its bound: the comparison saw only part of it.
+  bool truncated = 9 [(google.api.field_behavior) = REQUIRED];
+  // The last failed attempt's code (http_403, timeout, ...).
+  optional string last_error = 10 [(google.api.field_behavior) = REQUIRED];
+  // The step it failed in (account, script, ...).
+  optional string last_error_step = 11 [(google.api.field_behavior) = REQUIRED];
+  // When it failed.
+  optional string last_error_at = 12 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).format = "Timestamp"
+  ];
+  // UTC days in a row without a completed check.
+  int32 consecutive_failed_days = 13 [(google.api.field_behavior) = REQUIRED];
+
+  // The state of the drift check.
+  enum State {
+    // Never sent.
+    STATE_UNSPECIFIED = 0;
+    // The last completed check found nothing.
+    STATE_OK = 1;
+    // The last completed check found differences.
+    STATE_DRIFT = 2;
+    // No check has run yet.
+    STATE_NEVER_CHECKED = 3;
+    // No token.
+    STATE_NOT_CONFIGURED = 4;
+    // No check completed and the last day's attempts failed.
+    STATE_FAILING = 5;
+  }
+}
+
+// Findings per category.
+message DriftCounts {
+  // The Worker set.
+  int32 scripts = 1 [(google.api.field_behavior) = REQUIRED];
+  // Custom Domains.
+  int32 custom_domains = 2 [(google.api.field_behavior) = REQUIRED];
+  // Zone routes.
+  int32 routes = 3 [(google.api.field_behavior) = REQUIRED];
+  // Cron schedules.
+  int32 crons = 4 [(google.api.field_behavior) = REQUIRED];
+  // Binding names and types.
+  int32 bindings = 5 [(google.api.field_behavior) = REQUIRED];
+  // The workers.dev and preview URL flags.
+  int32 workers_dev = 6 [(google.api.field_behavior) = REQUIRED];
+  // Personal values that must be secrets.
+  int32 personal = 7 [(google.api.field_behavior) = REQUIRED];
+}
+
+// One difference between the committed and the live configuration, names only.
+// (-- api-linter: core::0123::resource-annotation=disabled
+//     aip.dev/not-precedent: `name` is the Worker's, hostname's or binding's name that differs, not a resource name. --)
+message DriftFinding {
+  // What was compared.
+  DriftCategory category = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).non_null = true
+  ];
+  // The Worker (script name); for a route without a Worker, `(none)`.
+  string script = 2 [(google.api.field_behavior) = REQUIRED];
+  // The Worker, hostname, route pattern, cron, binding name, or `workers_dev` / `preview_urls`.
+  string name = 3 [(google.api.field_behavior) = REQUIRED];
+  // How it differs.
+  Kind kind = 4 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).non_null = true
+  ];
+  // The committed binding type or flag (secret_text, plain_text, true, false), never a value.
+  optional string expected = 5;
+  // The live binding type or flag, never a value.
+  optional string actual = 6;
+
+  // How a finding differs.
+  enum Kind {
+    // Never sent.
+    KIND_UNSPECIFIED = 0;
+    // Committed, not live.
+    KIND_MISSING = 1;
+    // Live, not committed.
+    KIND_EXTRA = 2;
+    // Both, with another type or flag.
+    KIND_CHANGED = 3;
+  }
+}
+
+// A Worker script seen by the usage read or remembered (30 days, at most 100).
+message WorkerRow {
+  // The script (wrangler `name`).
+  string script = 1 [(google.api.field_behavior) = REQUIRED];
+  // Its registry entry; null: 未登记 (a new Worker shows up on its first request).
+  optional string entry = 2 [(google.api.field_behavior) = REQUIRED];
+  // Requests today (UTC); 0 for a remembered script without a request today.
+  double requests = 3 [(google.api.field_behavior) = REQUIRED];
+  // Errors today.
+  double errors = 4 [(google.api.field_behavior) = REQUIRED];
+  // errors / requests x 100; null below 20 requests.
+  optional double error_percent = 5 [(google.api.field_behavior) = REQUIRED];
+  // From the error rate only (warning at 5 %, critical at 20 %); ok otherwise.
+  Level level = 6 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field) = {
+      allowed: [
+        "ok",
+        "warning",
+        "critical"
+      ]
+      non_null: true
+    }
+  ];
+  // Subrequests today.
+  double subrequests = 7 [(google.api.field_behavior) = REQUIRED];
+  // The median CPU time in microseconds; null when not reported today.
+  optional double cpu_p50_us = 8 [(google.api.field_behavior) = REQUIRED];
+  // The 99th percentile CPU time in microseconds.
+  optional double cpu_p99_us = 9 [(google.api.field_behavior) = REQUIRED];
+  // Durable Object requests, counted on the script that defines the class; null for a script without one.
+  optional double do_requests = 10 [(google.api.field_behavior) = REQUIRED];
+  // Durable Object errors, likewise.
+  optional double do_errors = 11 [(google.api.field_behavior) = REQUIRED];
+  // The first UTC day the script was seen.
+  string first_seen_day = 12 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).format = "Day"
+  ];
+  // The last UTC day the script was seen.
+  string last_seen_day = 13 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).format = "Day"
+  ];
+  // The hour of the last tick that saw its requests grow.
+  optional string last_active_hour = 14 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).format = "Timestamp"
+  ];
+}
+
+// A storage resource measured today: a D1 database, a Durable Object namespace or an R2 bucket.
+message ResourceRow {
+  option (common.wire.v1.message).discriminator = "kind";
+
+  // The kind of storage.
+  StorageKind kind = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).non_null = true
+  ];
+  // The account's identifier: a databaseId, a namespaceId, or a bucketName (`unclassified` for R2 operations
+  // without a bucket).
+  string id = 2 [(google.api.field_behavior) = REQUIRED];
+  // The registry resource; null: 未登记.
+  optional string resource = 3 [(google.api.field_behavior) = REQUIRED];
+  // Its registry entry.
+  optional string entry = 4 [(google.api.field_behavior) = REQUIRED];
+  // D1 and R2: the size; null when not measured. Always null for a namespace.
+  optional double size_bytes = 5 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field) = {
+      cases: {
+        when: "do"
+        presence: PRESENCE_ABSENT
+      }
+    }
+  ];
+  // Durable Objects: requests through the defining script's row; null when the namespace is not mapped. Always
+  // null for D1 and R2.
+  optional double requests = 6 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field) = {
+      cases: {
+        when: [
+          "d1",
+          "r2"
+        ]
+        presence: PRESENCE_ABSENT
+      }
+    }
+  ];
+  // D1 and Durable Objects: rows read today.
+  optional double rows_read = 7 [(common.wire.v1.field) = {
+    cases: {
+      when: [
+        "d1",
+        "do"
+      ]
+      presence: PRESENCE_REQUIRED
+    }
+    otherwise: PRESENCE_ABSENT
+  }];
+  // D1 and Durable Objects: rows written today.
+  optional double rows_written = 8 [(common.wire.v1.field) = {
+    cases: {
+      when: [
+        "d1",
+        "do"
+      ]
+      presence: PRESENCE_REQUIRED
+    }
+    otherwise: PRESENCE_ABSENT
+  }];
+  // R2: Class A operations this month.
+  optional double class_a = 9 [(common.wire.v1.field) = {
+    cases: {
+      when: "r2"
+      presence: PRESENCE_REQUIRED
+    }
+    otherwise: PRESENCE_ABSENT
+  }];
+  // R2: Class B operations this month.
+  optional double class_b = 10 [(common.wire.v1.field) = {
+    cases: {
+      when: "r2"
+      presence: PRESENCE_REQUIRED
+    }
+    otherwise: PRESENCE_ABSENT
+  }];
+}
+
+// What the drift check compares, per Worker.
+enum DriftCategory {
+  // Never sent.
+  DRIFT_CATEGORY_UNSPECIFIED = 0;
+  // The Worker set.
+  DRIFT_CATEGORY_SCRIPTS = 1;
+  // Custom Domains.
+  DRIFT_CATEGORY_CUSTOM_DOMAINS = 2;
+  // Zone routes.
+  DRIFT_CATEGORY_ROUTES = 3;
+  // Cron schedules.
+  DRIFT_CATEGORY_CRONS = 4;
+  // Binding names and types (secrets by name).
+  DRIFT_CATEGORY_BINDINGS = 5;
+  // The workers.dev and preview URL flags.
+  DRIFT_CATEGORY_WORKERS_DEV = 6;
+  // Whether each personal value is a secret.
+  DRIFT_CATEGORY_PERSONAL = 7;
+}

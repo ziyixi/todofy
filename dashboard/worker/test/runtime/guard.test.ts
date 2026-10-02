@@ -5,9 +5,9 @@
  */
 import { afterEach, describe, expect, it } from 'vitest';
 import type { SetGuardInput } from '@ziyixi/proto/ops/v1/ops_wire';
-import type { GuardResponseV2 } from '../../src/api-v2-types.ts';
+import type { OverrideGuardResponse } from '../../src/api-types.ts';
 import { aiNeurons, graphqlBodyWithAiError } from '../graphql-fixture.ts';
-import { d1Reads, expectValid, NOW, shedState, startFlows, status, type FlowHarness } from './flows.ts';
+import { d1Reads, expectValid, NOW, shedState, PATHS, startFlows, status, type FlowHarness } from './flows.ts';
 
 let h: FlowHarness | undefined;
 afterEach(async () => {
@@ -219,9 +219,9 @@ describe('owner override', () => {
     await h.tick(NOW - 20 * 60_000);
     await guardCalls(h);
 
-    const forced = await h.post('/api/v2/guard', { level: 'shed' });
+    const forced = await h.post(PATHS.guard, { level: 'shed' });
     expect(forced.status).toBe(200);
-    const body = (await forced.json()) as GuardResponseV2;
+    const body = (await forced.json()) as OverrideGuardResponse;
     expect(body.guard.desired).toMatchObject({ level: 'shed', reason: 'owner_shed', source: 'owner' });
     expect(body.guard.override?.level).toBe('shed');
     const shedCalls = await guardCalls(h);
@@ -232,9 +232,9 @@ describe('owner override', () => {
     expect(shedCalls['mail-hero']?.[0]?.until).toBe('2026-10-02T12:00:00.000Z');
     expect(body.guard.override?.until).toBe('2026-10-02T12:00:00.000Z');
 
-    const cleared = await h.post('/api/v2/guard', { level: 'normal' });
+    const cleared = await h.post(PATHS.guard, { level: 'normal' });
     expect(cleared.status).toBe(200);
-    const clearedBody = (await cleared.json()) as GuardResponseV2;
+    const clearedBody = (await cleared.json()) as OverrideGuardResponse;
     expect(clearedBody.guard.desired).toMatchObject({ level: 'normal', reason: 'owner_clear', source: 'owner' });
     expect(await guardCalls(h)).toEqual({
       'mail-hero': [{ level: 'normal', reason: 'owner_clear', until: null }],
@@ -253,7 +253,7 @@ describe('owner override', () => {
 
   it('refuses the override without CSRF', async () => {
     h = await startFlows();
-    const response = await h.fetch('/api/v2/guard', { method: 'POST', headers: { origin: 'http://127.0.0.1' }, body: '{"level":"shed"}' });
+    const response = await h.fetch(PATHS.guard, { method: 'POST', headers: { origin: 'http://127.0.0.1' }, body: '{"level":"shed"}' });
     expect(response.status).toBe(403);
     expect(await h.called()).toEqual([]);
   });

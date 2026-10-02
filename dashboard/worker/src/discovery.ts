@@ -4,17 +4,8 @@
  * ran in the window (an idle cron Worker would vanish at 00:00 UTC) and the Analytics token cannot list
  * scripts. Pure functions, `now` passed in; the registry only names what was found.
  */
-import {
-  CF_SCRIPTS_MAX,
-  CF_SCRIPTS_RETENTION_DAYS,
-  ERROR_RATE_CRITICAL_PERCENT,
-  ERROR_RATE_MIN_REQUESTS,
-  ERROR_RATE_WARN_PERCENT,
-  type Level,
-  type Registry,
-  type ResourceRow,
-  type WorkerRow,
-} from './api-v2-types.ts';
+import { CF_SCRIPTS_MAX, CF_SCRIPTS_RETENTION_DAYS, ERROR_RATE_CRITICAL_PERCENT, ERROR_RATE_MIN_REQUESTS, ERROR_RATE_WARN_PERCENT, type Level, type ResourceRow, type WorkerRow } from './api-types.ts';
+import type { RegistryDef } from './registry-types.ts';
 import type { QuotaRow } from './api-types.ts';
 import { REGISTRY, entryOfScript, resourceByMatch } from './registry.ts';
 import { DAY_MS, HOUR_MS, isoOrNull, round1, utcDay } from './time.ts';
@@ -120,7 +111,7 @@ export function errorLevel(requests: number, errors: number): 'ok' | 'warning' |
 }
 
 /** The Worker table (design-v2 §4): errors first, then requests, then name. */
-export function workerRows(doc: CfScriptsDoc | null, now: number, registry: Registry = REGISTRY): WorkerRow[] {
+export function workerRows(doc: CfScriptsDoc | null, now: number, registry: RegistryDef = REGISTRY): WorkerRow[] {
   if (doc === null) return [];
   return doc.scripts
     .map((record): WorkerRow => {
@@ -152,7 +143,7 @@ export function workerRows(doc: CfScriptsDoc | null, now: number, registry: Regi
  * namespace's requests come from its defining script's doInv row (registry `script`), so only mapped
  * namespaces have them.
  */
-export function resourceRows(usage: ResourceUsage | undefined, scripts: CfScriptsDoc | null, now: number, registry: Registry = REGISTRY): ResourceRow[] {
+export function resourceRows(usage: ResourceUsage | undefined, scripts: CfScriptsDoc | null, now: number, registry: RegistryDef = REGISTRY): ResourceRow[] {
   if (usage === undefined) return [];
   const doRequests = (script: string | undefined): number | null => {
     if (script === undefined || scripts === null) return null;
@@ -162,7 +153,9 @@ export function resourceRows(usage: ResourceUsage | undefined, scripts: CfScript
   const rows: ResourceRow[] = [];
   for (const d1 of usage.d1) {
     const def = resourceByMatch('d1', d1.id, registry);
-    rows.push({ kind: 'd1', id: d1.id, resource: def?.id ?? null, entry: def?.entry ?? null, size_bytes: d1.size_bytes, rows_read: d1.rows_read, rows_written: d1.rows_written });
+    // Field order and nulls as dashboard.ui.v1.ResourceRow writes them: each kind writes size_bytes and requests,
+    // null where the kind has none (test/wire-conformance.test.ts).
+    rows.push({ kind: 'd1', id: d1.id, resource: def?.id ?? null, entry: def?.entry ?? null, size_bytes: d1.size_bytes, requests: null, rows_read: d1.rows_read, rows_written: d1.rows_written });
   }
   for (const ns of usage.do) {
     const def = resourceByMatch('do', ns.id, registry);
@@ -171,6 +164,7 @@ export function resourceRows(usage: ResourceUsage | undefined, scripts: CfScript
       id: ns.id,
       resource: def?.id ?? null,
       entry: def?.entry ?? null,
+      size_bytes: null,
       requests: def === undefined ? null : doRequests(def.script),
       rows_read: ns.rows_read,
       rows_written: ns.rows_written,
@@ -178,7 +172,7 @@ export function resourceRows(usage: ResourceUsage | undefined, scripts: CfScript
   }
   for (const bucket of usage.r2) {
     const def = bucket.id === 'unclassified' ? undefined : resourceByMatch('r2', bucket.id, registry);
-    rows.push({ kind: 'r2', id: bucket.id, resource: def?.id ?? null, entry: def?.entry ?? null, size_bytes: bucket.size_bytes, class_a: bucket.class_a, class_b: bucket.class_b });
+    rows.push({ kind: 'r2', id: bucket.id, resource: def?.id ?? null, entry: def?.entry ?? null, size_bytes: bucket.size_bytes, requests: null, class_a: bucket.class_a, class_b: bucket.class_b });
   }
   return rows;
 }
@@ -187,20 +181,21 @@ export function resourceRows(usage: ResourceUsage | undefined, scripts: CfScript
  * The quota rows with each D1/DO/R2 breakdown item joined to the registry like the resource table
  * (resourceByMatch): `kind` and `resource` (null → 未登记), so the page names "MailCoordinator ·
  * Mail Hero" instead of a namespace ID. Done when the view is built, never stored: snapshots from
- * before this field get it too, and a registry change applies at once. An item without the dimension
- * gets `kind` and `resource: null` (the page reads 未归类, not 未登记); script and model items are
- * left as they are.
+ * before this field get it too, and a registry change applies at once. An unregistered item gets `kind`
+ * without `resource` (the page reads 未登记), and so does an item without the dimension (未归类); script and
+ * model items are left as they are.
  */
-export function withBreakdownResources(rows: readonly QuotaRow[], registry: Registry = REGISTRY): QuotaRow[] {
+export function withBreakdownResources(rows: readonly QuotaRow[], registry: RegistryDef = REGISTRY): QuotaRow[] {
   return rows.map((row) => {
     const kind = BREAKDOWN_RESOURCE_KIND[row.id];
     if (kind === undefined || row.breakdown.length === 0) return row;
     return {
       ...row,
-      breakdown: row.breakdown.map(({ name, value }) =>
+      breakdown: row.breakdown.map(({ name, value }) => {
         // Without the dimension: still marked with its kind (the page reads 未归类), never matched.
-        ({ name, value, kind, resource: name === UNKNOWN_DIMENSION ? null : (resourceByMatch(kind, name, registry)?.id ?? null) }),
-      ),
+        const resource = name === UNKNOWN_DIMENSION ? undefined : resourceByMatch(kind, name, registry)?.id;
+        return resource === undefined ? { name, value, kind } : { name, value, kind, resource };
+      }),
     };
   });
 }

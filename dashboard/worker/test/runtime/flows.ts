@@ -10,12 +10,13 @@
  */
 import { expect } from 'vitest';
 import type { GuardState, OpsStatus } from '@ziyixi/proto/ops/v1/ops_wire';
-import type { CanaryRun, CsrfResponse, OverallLevel, UsageView } from '../../src/api-types.ts';
-import type { AppDetail, CloudflareResponse, OpsResponse } from '../../src/api-v2-types.ts';
+import type { CanaryRun, CsrfResponse, OverallLevel, Usage, ViewId } from '../../src/api-types.ts';
+import type { AppDetail, CloudflareView, OpsView } from '../../src/api-types.ts';
 import { DESIRED } from '../../src/drift.ts';
 import { fakeCloudflare, type LiveTweaks } from '../drift-fixture.ts';
 import { graphqlBody, type SyntheticUsage } from '../graphql-fixture.ts';
 import { contractErrors, type ContractName } from '../contract.ts';
+import { expectWire, VIEW_SCHEMAS } from '../wire-conformance.ts';
 import { fixture, startHarness, SYNTHETIC_BINDINGS, type Harness, type StubApp } from './harness.ts';
 
 export const GRAPHQL = 'https://api.cloudflare.com/client/v4/graphql';
@@ -50,8 +51,22 @@ export function answerProbes(harness: FlowHarness): void {
   for (const entry of Object.keys(PROBES) as (keyof typeof PROBES)[]) harness.routes.set(PROBES[entry], () => healthyProbe(entry));
 }
 
-/** A v2 GET: status, ETag and the parsed body (null for 304). */
-export interface V2Answer<T> {
+/** The owner API's paths (DashboardUiService and the transport's CSRF route). */
+export const PATHS = {
+  registry: '/api/v1/registry',
+  home: '/api/v1/homeView',
+  flows: '/api/v1/flowsView',
+  cloudflare: '/api/v1/cloudflareView',
+  ops: '/api/v1/opsView',
+  refreshHome: '/api/v1/homeView:refresh',
+  refreshCloudflare: '/api/v1/cloudflareView:refresh',
+  guard: '/api/v1/guard:override',
+  canary: '/api/v1/canaries/mail-todofy:run',
+  csrf: '/api/csrf',
+} as const;
+
+/** A view's answer: status, ETag and the parsed body (null for 304). */
+export interface ViewAnswer<T> {
   readonly status: number;
   readonly etag: string | null;
   readonly body: T | null;
@@ -59,22 +74,22 @@ export interface V2Answer<T> {
 }
 
 /**
- * What the flow tests read, assembled from GET /api/v2/ops (guard, canary, digest, app details, the
- * shared shell) and GET /api/v2/cloudflare (usage). `overall` is the attention strip as v1's banner
+ * What the flow tests read, assembled from GetOpsView (guard, canary, digest, app details, the shared
+ * shell) and GetCloudflareView (usage). `overall` is the attention strip as v1's banner
  * was: the digest's warning/critical items worst first, then the page-only info items, as {source,
  * code, severity}, with their level; `observed` lists the strip's observed items (tiles, stages,
  * Workers no digest item explains) apart, so the flow tests keep checking the unchanged item set.
  */
 export interface Snapshot {
-  readonly ops: OpsResponse;
+  readonly ops: OpsView;
   readonly overall: { readonly level: OverallLevel; readonly items: readonly { source: string; code: string; severity: string }[] };
   readonly observed: readonly { source: string; code: string; level: string }[];
   readonly apps: Readonly<Record<StubApp, AppDetail>>;
-  readonly usage: UsageView;
-  readonly guard: OpsResponse['guard'];
-  readonly canary: OpsResponse['canary'];
-  readonly digest: OpsResponse['digest'];
-  readonly refresh: OpsResponse['refresh'];
+  readonly usage: Usage;
+  readonly guard: OpsView['guard'];
+  readonly canary: OpsView['canary'];
+  readonly digest: OpsView['digest'];
+  readonly refresh: OpsView['refresh'];
 }
 
 export interface Analytics {
@@ -98,8 +113,13 @@ export interface FlowHarness extends Harness {
   readonly routes: Map<string, () => Response>;
   /** The ops and cloudflare views through the loopback dev bypass (DEV_AUTH_BYPASS=true in these harnesses). */
   snapshot(): Promise<Snapshot>;
-  /** GET /api/v2/<path> through the dev bypass, optionally conditional. */
-  v2<T>(path: string, etag?: string | null): Promise<V2Answer<T>>;
+  /**
+   * GET a view (or the registry) through the dev bypass, optionally conditional; every 200 body is checked against
+   * dashboard.ui.v1 byte for byte (test/wire-conformance.ts).
+   */
+  view<T>(name: ViewId | 'registry', etag?: string | null): Promise<ViewAnswer<T>>;
+  /** POST a view's refresh (RefreshHomeView, RefreshCloudflareView) with CSRF; the body checked like view()'s. */
+  refresh<T>(name: 'home' | 'cloudflare'): Promise<ViewAnswer<T>>;
   /** Rows the Durable Object read for its last v2 view (HomeState.lastRowsRead over RPC). */
   lastRowsRead(): Promise<number>;
   /** Every outbound request "home" made (URL only), GraphQL and probes included. */
@@ -119,7 +139,22 @@ export interface FlowHarness extends Harness {
 /** A stub answer: a value, an error code thrown, or a sequence of them (the last one repeats). */
 export type StubAnswer = { value: unknown } | { throw: string } | { sequence: ({ value: unknown } | { throw: string })[] };
 
-export async function startFlows(options: { bindings?: Record<string, string>; usage?: SyntheticUsage; persist?: string } = {}): Promise<FlowHarness> {
+/** A view's answer, its body checked against its message when it has one. */
+async function answerOf<T>(name: ViewId | 'registry', response: Response): Promise<ViewAnswer<T>> {
+  expect(response.headers.get('cache-control')).toBe('no-store');
+  const text = await response.text();
+  if (response.status === 200) expectWire(VIEW_SCHEMAS[name], text);
+  return {
+    status: response.status,
+    etag: response.headers.get('etag'),
+    body: response.status === 200 ? (JSON.parse(text) as T) : null,
+    bytes: new TextEncoder().encode(text).byteLength,
+  };
+}
+
+export async function startFlows(
+  options: { bindings?: Record<string, string>; usage?: SyntheticUsage; persist?: string; inspectorPort?: number } = {},
+): Promise<FlowHarness> {
   const analytics: Analytics = { answer: options.usage ?? {}, requests: [] };
   const cloudflare: CloudflareApi = { tweaks: {}, requests: [] };
   const routes = new Map<string, () => Response>();
@@ -127,6 +162,7 @@ export async function startFlows(options: { bindings?: Record<string, string>; u
   const harness = await startHarness({
     bindings: { DEV_AUTH_BYPASS: 'true', DEV_NOW: new Date(NOW).toISOString(), ...options.bindings },
     ...(options.persist === undefined ? {} : { persist: options.persist }),
+    ...(options.inspectorPort === undefined ? {} : { inspectorPort: options.inspectorPort }),
     async outbound(request) {
       outboundLog.push(request.url);
       if (request.url === GRAPHQL) {
@@ -155,16 +191,13 @@ export async function startFlows(options: { bindings?: Record<string, string>; u
     cloudflare,
     routes,
     outboundLog,
-    async v2<T>(path: string, etag: string | null = null): Promise<V2Answer<T>> {
-      const response = await harness.fetch(`/api/v2/${path}`, etag === null ? {} : { headers: { 'if-none-match': etag } });
-      expect(response.headers.get('cache-control')).toBe('no-store');
-      const text = await response.text();
-      return {
-        status: response.status,
-        etag: response.headers.get('etag'),
-        body: response.status === 200 ? (JSON.parse(text) as T) : null,
-        bytes: new TextEncoder().encode(text).byteLength,
-      };
+    async view<T>(name: ViewId | 'registry', etag: string | null = null): Promise<ViewAnswer<T>> {
+      const response = await harness.fetch(PATHS[name], etag === null ? {} : { headers: { 'if-none-match': etag } });
+      return answerOf<T>(name, response);
+    },
+    async refresh<T>(name: 'home' | 'cloudflare'): Promise<ViewAnswer<T>> {
+      const response = await flows.post(name === 'home' ? PATHS.refreshHome : PATHS.refreshCloudflare, {});
+      return answerOf<T>(name, response);
     },
     async lastRowsRead() {
       const ns = await harness.mf.getDurableObjectNamespace('HOME', 'home');
@@ -172,14 +205,14 @@ export async function startFlows(options: { bindings?: Record<string, string>; u
       return stub.lastRowsRead();
     },
     async snapshot() {
-      const read = async <T>(path: string): Promise<T> => {
-        const response = await harness.fetch(`/api/v2/${path}`);
-        expect(response.status).toBe(200);
-        expect(response.headers.get('cache-control')).toBe('no-store');
-        return (await response.json()) as T;
+      const read = async <T>(name: 'ops' | 'cloudflare'): Promise<T> => {
+        const answer = await flows.view<T>(name);
+        expect(answer.status).toBe(200);
+        if (answer.body === null) throw new Error(`no ${name} view`);
+        return answer.body;
       };
-      const ops = await read<OpsResponse>('ops');
-      const cloudflare = await read<CloudflareResponse>('cloudflare');
+      const ops = await read<OpsView>('ops');
+      const cloudflare = await read<CloudflareView>('cloudflare');
       const app = (id: StubApp): AppDetail => {
         const detail = ops.apps.find((entry) => entry.entry === id);
         if (detail === undefined) throw new Error(`no app detail for ${id}`);
@@ -210,7 +243,7 @@ export async function startFlows(options: { bindings?: Record<string, string>; u
     },
     async post(path, body) {
       if (csrf === null) {
-        const response = await harness.fetch('/api/v2/csrf');
+        const response = await harness.fetch(PATHS.csrf);
         expect(response.status).toBe(200);
         const token = ((await response.json()) as CsrfResponse).token;
         csrf = { token, cookie: (response.headers.get('set-cookie') ?? '').split(';')[0] ?? '' };

@@ -6,28 +6,14 @@
  *
  * Bounds: every tick makes at most outboundPerTick() = 27 outbound calls (4 status, 3 probes, 1 GraphQL,
  * ≤ 4 setGuard, ≤ 2 canary calls, ≤ 1 reportOps, ≤ DRIFT_CALLS_PER_TICK = 12 read-only drift calls) and
- * writes a few dozen rows; a v2 view reads at most V2_ROWS_READ[view] rows (api-v2-types.ts; tested in
+ * writes a few dozen rows; a v2 view reads at most VIEW_ROWS_READ[view] rows (api-types.ts; tested in
  * workerd).
  */
 import { DurableObject } from 'cloudflare:workers';
 import type { GuardLevel, GuardState, OpsStatus, SetGuardInput } from '@ziyixi/proto/ops/v1/ops_wire';
 import { OPS_LIMITS } from '../../../contracts/ops-v1/ops-v1.ts';
-import {
-  CANARY_MANUAL_PER_DAY,
-  CANARY_RECENT_RUNS,
-  GUARD_CLEAR_PERCENT,
-  GUARD_SHED_PERCENT,
-  REFRESH_MIN_INTERVAL_SECONDS,
-  type AppErrorCode,
-  type CanaryRun,
-  type OpsApp,
-  type CanaryView,
-  type DigestView,
-  type GuardAppView,
-  type GuardView,
-  type UsageView,
-} from './api-types.ts';
-import { CLOUDFLARE_REFRESH_MIN_SECONDS, PROBE_MIN_INTERVAL_SECONDS, V2_BODY_BUDGET, type ShellFields } from './api-v2-types.ts';
+import { CANARY_MANUAL_PER_DAY, CANARY_RECENT_RUNS, GUARD_CLEAR_PERCENT, GUARD_SHED_PERCENT, REFRESH_MIN_INTERVAL_SECONDS, type AppErrorCode, type CanaryRun, type OpsApp, type CanaryState, type Digest, type GuardAppView, type GuardView, type Usage } from './api-types.ts';
+import { CLOUDFLARE_REFRESH_MIN_SECONDS, PROBE_MIN_INTERVAL_SECONDS, VIEW_BODY_BUDGET, type ShellFields, type ViewId } from './api-types.ts';
 import {
   CANARY_RETENTION_MS,
   applyDeadline,
@@ -87,8 +73,8 @@ import { nextProbeDoc, probeDue, probeUrl, type ProbeTarget } from './probe.ts';
 import { REGISTRY } from './registry.ts';
 import { MINUTE_MS, iso, isoOrNull, utcDay, utcMonthStart } from './time.ts';
 import { fetchUsage, type UsageErrorCode } from './usage.ts';
-import type { V2Body, V2View } from './v2-views.ts';
-import { cloudflareResponse, flowsResponse, homeResponse, opsResponse, serializeView, shell } from './views-v2.ts';
+import type { ViewBody } from './view-body.ts';
+import { cloudflareResponse, flowsResponse, homeResponse, opsResponse, serializeView, shell } from './views.ts';
 
 /** Name of the single object instance. */
 export const HOME_OBJECT = 'home-v1';
@@ -185,12 +171,30 @@ const SCHEMA = [
   'CREATE TABLE IF NOT EXISTS item_since (key TEXT PRIMARY KEY, since INTEGER NOT NULL)',
 ];
 
-/** A failure of the call itself (the Durable Object) is an exception, which the Worker maps to 503. */
+/**
+ * A failure of the call itself (the Durable Object) is an exception, which the Worker maps to 503 UNAVAILABLE.
+ * `request_id_reused`: the request's AIP-155 request_id answered another method (BAD_REQUEST).
+ */
 export type StartCanaryOutcome =
   | { readonly ok: true; readonly run: CanaryRun }
-  | { readonly ok: false; readonly code: 'canary_disabled' | 'canary_active' | 'canary_limit' };
-export interface GuardOverrideOutcome {
-  readonly guard: GuardView;
+  | { readonly ok: false; readonly code: 'canary_disabled' | 'canary_active' | 'canary_limit' | 'request_id_reused' };
+export type GuardOverrideOutcome = { readonly ok: true; readonly guard: GuardView } | { readonly ok: false; readonly code: 'request_id_reused' };
+
+/**
+ * AIP-155: the answers of the owner's mutations by request_id (RunCanary, OverrideGuard), so a repeated request
+ * (the UI retries a lost response with the same ID) answers the first response and changes nothing. Kept 24 hours,
+ * at most REQUEST_LOG_MAX entries (a few hundred bytes each), in one `state` document. Only a success is kept: a
+ * refused request changed nothing, so its repeat is decided again.
+ */
+export const REQUEST_LOG_KEY = 'request_log';
+export const REQUEST_LOG_MAX = 16;
+export const REQUEST_LOG_TTL_MS = 24 * 60 * MINUTE_MS;
+type RequestMethod = 'run_canary' | 'override_guard';
+interface RequestLogEntry {
+  readonly id: string;
+  readonly method: RequestMethod;
+  readonly at: number;
+  readonly answer: unknown;
 }
 
 interface CanaryRow extends Record<string, SqlStorageValue> {
@@ -296,15 +300,15 @@ export class HomeState extends DurableObject<Env> {
   }
 
   /**
-   * GET /api/v2/<view> (docs/design-v2.md §5): the view built from the tables and serialized here, with
-   * ETag `"<rev>-<hash>"` (views-v2.ts); `body: null` when `ifNoneMatch` names it (the Worker answers
+   * A view of the owner API (GetHomeView, ...; docs/design-v2.md §5): built from the tables and serialized here, with
+   * ETag `"<rev>-<hash>"` (views.ts); `body: null` when `ifNoneMatch` names it (the Worker answers
    * 304). `refresh` only for home (due statuses and probes) and cloudflare (GraphQL), each scope at most
    * once per minute; statuses keep their 10 minutes, probes PROBE_MIN_INTERVAL_SECONDS.
    *
    * `at`, here and on the other API methods: the request's instant when the Worker pins one (DEV_NOW
-   * under the loopback dev bypass, http.ts requestTime); null, always in production, reads Date.now().
+   * under the loopback dev bypass, http.ts authenticate); null, always in production, reads Date.now().
    */
-  async v2View(view: V2View, refresh: boolean, ifNoneMatch: string | null, at: number | null = null): Promise<V2Body> {
+  async view(view: ViewId, refresh: boolean, ifNoneMatch: string | null, at: number | null = null): Promise<ViewBody> {
     const refreshed = refresh && (view === 'home' || view === 'cloudflare') ? await this.serialize(() => this.refreshScope(view, at ?? Date.now())) : false;
     const now = at ?? Date.now();
     this.rowsRead = 0;
@@ -316,7 +320,7 @@ export class HomeState extends DurableObject<Env> {
         refreshed,
         status: result.body === null ? 304 : 200,
         bytes: result.bytes,
-        over_budget: result.bytes > V2_BODY_BUDGET[view],
+        over_budget: result.bytes > VIEW_BODY_BUDGET[view],
         rows_read: this.rowsRead,
       }),
     );
@@ -324,17 +328,23 @@ export class HomeState extends DurableObject<Env> {
   }
 
   /**
-   * Rows the last v2 view build read (workerd tests: stays within V2_ROWS_READ). Diagnostic only; the
+   * Rows the last v2 view build read (workerd tests: stays within VIEW_ROWS_READ). Diagnostic only; the
    * Worker never calls it.
    */
   lastRowsRead(): number {
     return this.rowsRead;
   }
 
-  /** POST /api/v2/canary: a manual run with its first start attempt; later steps happen on ticks. */
-  startCanary(at: number | null = null): Promise<StartCanaryOutcome> {
+  /**
+   * RunCanary: a manual run with its first start attempt; later steps happen on ticks. With a `requestId` already
+   * answered (AIP-155), the first answer again.
+   */
+  startCanary(at: number | null = null, requestId: string | null = null): Promise<StartCanaryOutcome> {
     return this.serialize(async (): Promise<StartCanaryOutcome> => {
       const now = at ?? Date.now();
+      const replay = this.replay(requestId, 'run_canary', now);
+      if (replay === 'reused') return { ok: false, code: 'request_id_reused' };
+      if (replay !== null) return { ok: true, run: replay as CanaryRun };
       // Switched off: refused before anything is read or called.
       if (!canaryEnabled(this.env)) return { ok: false, code: 'canary_disabled' };
       if (this.activeRun() !== null) return { ok: false, code: 'canary_active' };
@@ -348,14 +358,22 @@ export class HomeState extends DurableObject<Env> {
       this.saveRun(run);
       this.bumpRev(now);
       console.log(JSON.stringify({ event: 'canary_manual', phase: run.phase, outcome: run.outcome, code: run.code }));
-      return { ok: true, run: runView(run) };
+      const view = runView(run);
+      this.remember(requestId, 'run_canary', view, now);
+      return { ok: true, run: view };
     });
   }
 
-  /** POST /api/v2/guard: force shed for 24 h, or clear and suppress the automatic shed until 00:00 UTC. */
-  setGuardOverride(level: GuardLevel, at: number | null = null): Promise<GuardOverrideOutcome> {
+  /**
+   * OverrideGuard: force shed for 24 h, or clear and suppress the automatic shed until 00:00 UTC. With a `requestId`
+   * already answered (AIP-155), the first answer again.
+   */
+  setGuardOverride(level: GuardLevel, at: number | null = null, requestId: string | null = null): Promise<GuardOverrideOutcome> {
     return this.serialize(async (): Promise<GuardOverrideOutcome> => {
       const now = at ?? Date.now();
+      const replay = this.replay(requestId, 'override_guard', now);
+      if (replay === 'reused') return { ok: false, code: 'request_id_reused' };
+      if (replay !== null) return { ok: true, guard: replay as GuardView };
       this.putDoc('guard_override', ownerOverride(level, now), now);
       // A cleared episode must not come back when the override ends (the auto shed's own until).
       if (level === 'normal') this.putDoc('guard', AUTO_NORMAL, now);
@@ -363,8 +381,25 @@ export class HomeState extends DurableObject<Env> {
       const calls = await this.applyGuard(now, desired, perApp(() => null));
       this.bumpRev(now);
       console.log(JSON.stringify({ event: 'guard_override', level, guard_calls: calls }));
-      return { guard: this.guardView(now) };
+      const guard = this.guardView(now);
+      this.remember(requestId, 'override_guard', guard, now);
+      return { ok: true, guard };
     });
+  }
+
+  /** The first answer to `requestId` within 24 h, `reused` when another method answered it, else null. */
+  private replay(requestId: string | null, method: RequestMethod, now: number): unknown {
+    if (requestId === null) return null;
+    const entry = (this.doc<{ entries: RequestLogEntry[] }>(REQUEST_LOG_KEY)?.entries ?? []).find((e) => e.id === requestId && now - e.at < REQUEST_LOG_TTL_MS);
+    if (entry === undefined) return null;
+    return entry.method === method ? entry.answer : 'reused';
+  }
+
+  /** Keeps a success's answer under its request_id: the newest REQUEST_LOG_MAX of the last 24 hours. */
+  private remember(requestId: string | null, method: RequestMethod, answer: unknown, now: number): void {
+    if (requestId === null) return;
+    const kept = (this.doc<{ entries: RequestLogEntry[] }>(REQUEST_LOG_KEY)?.entries ?? []).filter((e) => e.id !== requestId && now - e.at < REQUEST_LOG_TTL_MS);
+    this.putDoc(REQUEST_LOG_KEY, { entries: [{ id: requestId, method, at: now, answer }, ...kept].slice(0, REQUEST_LOG_MAX) }, now);
   }
 
   // ---- the tick's steps -------------------------------------------------------------------------
@@ -627,7 +662,7 @@ export class HomeState extends DurableObject<Env> {
   }
 
   /**
-   * `?refresh=1` of a v2 scope; true when something was fetched. home: due statuses (10 min each) and
+   * A refresh of a scope (RefreshHomeView, RefreshCloudflareView); true when something was fetched. home: due statuses (10 min each) and
    * probes; cloudflare: GraphQL (60 s). Each scope at most once per minute; the digest items are
    * rebuilt from the new data (a report is sent only by a tick).
    */
@@ -680,7 +715,7 @@ export class HomeState extends DurableObject<Env> {
   }
 
   /** The shared part of every view: attention strip, badges, freshness and this scope's refresh times. */
-  private shellFor(view: V2View, now: number, refreshed: boolean): ShellFields {
+  private shellFor(view: ViewId, now: number, refreshed: boolean): ShellFields {
     const meta = this.doc<MetaDoc>('meta') ?? NO_META;
     const digest = this.doc<DigestDoc>('digest') ?? NO_DIGEST;
     const homeAt = meta.last_refresh_home_at ?? null;
@@ -732,7 +767,7 @@ export class HomeState extends DurableObject<Env> {
   }
 
   /** One v2 view from the tables (synchronous: no call interleaves while it reads). */
-  private buildView(view: V2View, now: number, refreshed: boolean): ShellFields {
+  private buildView(view: ViewId, now: number, refreshed: boolean): ShellFields {
     this.readCache = new Map();
     try {
       const base = this.shellFor(view, now, refreshed);
@@ -764,9 +799,9 @@ export class HomeState extends DurableObject<Env> {
 
   // ---- parts of the v2 views ----------------------------------------------------------------------
 
-  private usageView(now: number): UsageView {
+  private usageView(now: number): Usage {
     const usage = this.doc<UsageDoc>('usage') ?? NO_USAGE;
-    const status: UsageView['status'] = !analyticsConfigured(this.env)
+    const status: Usage['status'] = !analyticsConfigured(this.env)
       ? 'not_configured'
       : usage.fetched_at === null
         ? 'unavailable'
@@ -808,7 +843,7 @@ export class HomeState extends DurableObject<Env> {
     };
   }
 
-  private canaryView(now: number): CanaryView {
+  private canaryView(now: number): CanaryState {
     const day = utcDay(now);
     const recent = this.recentRuns();
     const active = this.activeRun();
@@ -827,7 +862,7 @@ export class HomeState extends DurableObject<Env> {
     };
   }
 
-  private digestView(digest: DigestDoc, enabled: boolean): DigestView {
+  private digestView(digest: DigestDoc, enabled: boolean): Digest {
     return {
       items: digest.items,
       enabled,

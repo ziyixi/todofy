@@ -37,11 +37,12 @@ Outputs (GITHUB_OUTPUT, "true"/"false"):
 proto/ (the protobuf IDL, proto/README.md) checks every app in PROTO_USERS (an app that depends on
 @ziyixi/proto or ziyixi-proto) and deploys only the apps whose bundle the changed path reaches
 (proto_deploys): PROTO_USERS[app] names the languages whose generated code and runtime the app's
-production bundles compile in ("ts": Lab's, the links app's and the watch app's Workers and UIs, Mail Hero's Worker and
-the dashboard's Worker (ops.v1 and the wire codec); "python": todofy-core, through the wheel pywrangler vendors;
+production bundles compile in ("ts": Lab's, the links app's, the watch app's and the dashboard's Workers and UIs, and
+Mail Hero's Worker; "python": todofy-core, through the wheel pywrangler vendors;
 Todofy's gateway and UI import types only, so neither makes Todofy a "ts" user), PROTO_RUNTIMES maps a language's
 runtime and generator to that language's users, and PROTO_PACKAGES maps each proto package to the apps that import its
-generated code (lab/ui reaches Lab only, links/ui the links app only, watch/ui the watch app only; prototest, the
+generated code (lab/ui reaches Lab only, links/ui the links app only, watch/ui the watch app only, dashboard/ui the
+dashboard only; prototest, the
 runtimes' fixtures, reaches no app). Tests, test data, the check scripts, the api-linter tool module, check configs and
 Markdown (PROTO_NOT_BUNDLED) deploy nothing; any other proto/ path (buf.yaml, buf.lock, the toolchain
 lockfile, ensure.mjs, a package not listed yet) deploys every user (fail safe). test_proto.py derives
@@ -189,6 +190,8 @@ PROTO_PACKAGES: dict[str, tuple[str, ...]] = {
     "proto/lab/ui/": ("lab",),
     "proto/links/ui/": ("links",),
     "proto/watch/ui/": ("watch",),
+    # dashboard.ui.v1, the dashboard's owner API: its Worker serves it, its UI calls it.
+    "proto/dashboard/ui/": ("dashboard",),
     # CommonReason: Lab reads its names as types only.
     "proto/common/errors/": (),
     # ops-v1 (contracts/ops-v1): every app's Ops entrypoint and the dashboard that calls them.

@@ -1,0 +1,36 @@
+// The errors of DashboardUiService (AIP-193).
+//
+// Every error is a google.rpc.Status in Google's HTTP JSON form, written by the shared transcoder
+// (proto/ts/http-transcoder.ts):
+//
+//   {"error": {"code": <HTTP status>, "message": <English, for developers>, "status": <google.rpc.Code name>,
+//              "details": [
+//                {"@type": "type.googleapis.com/google.rpc.ErrorInfo", "reason": "CANARY_ACTIVE",
+//                 "domain": "home.ziyixi.science"},
+//                {"@type": "type.googleapis.com/google.rpc.LocalizedMessage", "locale": "zh-CN", "message": ...},
+//                {"@type": "type.googleapis.com/google.rpc.RequestInfo", "request_id": <16 hex>}]}}
+//
+// The UI branches on ErrorInfo.reason only: a value name without its prefix, of ErrorReason below (the
+// dashboard's own reasons) or of common.errors.v1.CommonReason (the reasons every API shares). A reason the UI does
+// not know is shown with the LocalizedMessage, never read as success.
+
+syntax = "proto3";
+
+package dashboard.ui.v1;
+
+option java_multiple_files = true;
+option java_outer_classname = "ErrorsProto";
+option java_package = "science.ziyixi.dashboard.ui.v1";
+
+// The dashboard's own reasons: ErrorInfo.reason is the value's name without `ERROR_REASON_`. The HTTP status
+// follows the google.rpc.Code listed for each value (the AIP-193 mapping).
+enum ErrorReason {
+  // Never sent.
+  ERROR_REASON_UNSPECIFIED = 0;
+  // ABORTED (409): RunCanary while a run is in progress (at most one at a time).
+  ERROR_REASON_CANARY_ACTIVE = 1;
+  // FAILED_PRECONDITION (400): RunCanary while the canary is switched off (DASHBOARD_CANARY_ENABLED=false).
+  ERROR_REASON_CANARY_DISABLED = 2;
+  // RESOURCE_EXHAUSTED (429): RunCanary after today's manual runs (3 per UTC day) were used.
+  ERROR_REASON_CANARY_LIMIT = 3;
+}

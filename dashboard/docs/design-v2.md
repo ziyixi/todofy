@@ -3,10 +3,12 @@
 What v2 changes relative to [`design.md`](design.md) (which stays authoritative for storage, the tick,
 guard, canary, digest, Access/CSRF and the usage query). It condenses the owner-approved redesign
 proposal of 2026-09-29 (steps 1 and 2; every open question takes its recommended default, §8). Status:
-the registry, the v2 types and every `/api/v2` route are implemented in the Worker (evaluation in
+the registry, the views and every route of the owner API are implemented in the Worker (evaluation in
 `worker/src/evaluate.ts`, discovery in `discovery.ts`, the probe in `probe.ts`, view assembly and ETags
-in `views-v2.ts`, storage in `state.ts`), with unit tests and workerd tests for each endpoint. The UI
-(`web/`) renders the four views from `/api/v2` only, and the v1 API is removed (§5). The built UI was
+in `views.ts`, storage in `state.ts`), with unit tests and workerd tests for each endpoint. Since
+2026-10-02 the API is `dashboard.ui.v1` ([`proto/dashboard/ui/v1`](../../proto/dashboard/ui/v1), §5): the
+UI (`web/`) renders the four views through its generated client, and the `/api/v2` routes answer 410 for
+one release. The built UI was
 driven end to end against the real Worker in workerd (stub apps, fake GraphQL; desktop and a 390 px
 phone, light and dark): [`verification.md`](verification.md) §1d.
 
@@ -17,10 +19,10 @@ Four hash-routed views; hash routing needs no Worker change behind Access. Page 
 
 | View | Route | Content | Endpoint |
 | --- | --- | --- | --- |
-| 首页 | `#/` | attention strip; launcher tiles grouped 应用 / 站点 / 后台服务 (registry order, never reordered by status); one line per flow; four mini quota bars (Workers 请求, D1 读取行数, Workers AI neurons with 剩余, R2 存储; `HOME_QUOTA_IDS`) + "N 个 Worker · 今日错误 N · 降载状态" | `/api/v2/home` |
-| 业务流程 | `#/flows`, `#/flows/<flow>` | flow cards by business group (邮件与任务 / 内容与发布 / 平台), stage chains; the mail flow owns the canary (14-day strip, today's timeline, scope note verbatim) | `/api/v2/flows` |
-| Cloudflare 监控 | `#/cloudflare`, `#/cloudflare/worker/<script>` | the 14 quota rows (daily / monthly / storage; Workers AI neurons among the daily ones, with the neurons left), the auto-discovered Worker table, D1 / DO / R2 resources, read-only guard | `/api/v2/cloudflare` |
-| 操作与记录 | `#/ops` | guard and canary actions (confirmation texts and CSRF flow unchanged), digest, full ops-v1 details per app (the old `AppCard` body), build, time zone, registry list | `/api/v2/ops` |
+| 首页 | `#/` | attention strip; launcher tiles grouped 应用 / 站点 / 后台服务 (registry order, never reordered by status); one line per flow; four mini quota bars (Workers 请求, D1 读取行数, Workers AI neurons with 剩余, R2 存储; `HOME_QUOTA_IDS`) + "N 个 Worker · 今日错误 N · 降载状态" | `GetHomeView` |
+| 业务流程 | `#/flows`, `#/flows/<flow>` | flow cards by business group (邮件与任务 / 内容与发布 / 平台), stage chains; the mail flow owns the canary (14-day strip, today's timeline, scope note verbatim) | `GetFlowsView` |
+| Cloudflare 监控 | `#/cloudflare`, `#/cloudflare/worker/<script>` | the 14 quota rows (daily / monthly / storage; Workers AI neurons among the daily ones, with the neurons left), the auto-discovered Worker table, D1 / DO / R2 resources, read-only guard | `GetCloudflareView` |
+| 操作与记录 | `#/ops` | guard and canary actions (confirmation texts and CSRF flow unchanged), digest, full ops-v1 details per app (the old `AppCard` body), build, time zone, registry list | `GetOpsView` |
 
 v1 anchors map to routes (`web/src/router.ts`): `#apps` → `#/`, `#quota` → `#/cloudflare`, `#canary` →
 `#/flows/mail-to-task`, `#actions`/`#digest`/`#app-*` → `#/ops`. Phones get a fixed bottom tab bar
@@ -67,10 +69,10 @@ healthy. Status is always shape + word. A link-only entry never shows a dot: its
 and its accessible name says 未接入监控（仅链接）. `maintenance_mode` stays a critical signal (as in
 ops-v1 and the digest), not a hold.
 
-## 3. Registry (`worker/src/registry.ts`, types in `worker/src/api-v2-types.ts`)
+## 3. Registry (`worker/src/registry.ts`, definitions in `worker/src/registry-types.ts`)
 
 Three lists joined by id, compiled into the Worker; the UI gets the public view from
-`GET /api/v2/registry` (no binding names or probe URLs), so no hostname enters the bundle and
+GetRegistry (`GET /api/v1/registry`; no binding names or probe URLs), so no hostname enters the bundle and
 `no-external.test.ts` / `check-dist.mjs` stay as they are.
 
 - **Entries** (tiles): id, name, description, group, icon (closed `ICON_KEYS`, bundled lucide), accent,
@@ -136,7 +138,7 @@ entrypoint (a service binding in `env.ts` and `wrangler.toml`, the binding type 
 codes placed by stages or `app_only_signals`; the watch app's W3 is that case), else a `public_http` probe of a
 path its own Worker answers anonymously (`outside_access` + `content_type` when the host is behind Access, and
 `error_rate` to add the Worker's error rate). Each such entry adds one outbound call per tick and one row to
-every view (`V2_ROWS_READ`).
+every view (`VIEW_ROWS_READ`).
 
 ## 4. Evaluation (`worker/src/evaluate.ts`; page requests only read)
 
@@ -196,30 +198,52 @@ time (a stale status, stopped ticks) is right at every read.
   joined with the registry by `match`; unmatched rows keep `resource: null` (shown "未登记 · <first 8
   characters>", a bucket in full, the ID as the tooltip; `unclassified` reads 未归类操作). A mapped
   namespace's `requests` are its defining script's `doInv` count.
-- **Quota 主要来源**: the stored rows keep the raw GraphQL keys. When `/api/v2/cloudflare` is built, each
-  breakdown item keyed by a D1 `databaseId`, DO `namespaceId` or R2 `bucketName` gets `kind` and
-  `resource` from the same `match` join (additive fields, so snapshots stored earlier get them too;
+- **Quota 主要来源**: the stored rows keep the raw GraphQL keys. When the Cloudflare view is built, each
+  breakdown item keyed by a D1 `databaseId`, DO `namespaceId` or R2 `bucketName` gets `kind`, and
+  `resource` when the same `match` join finds one (left out for an unregistered item) (additive fields, so snapshots stored earlier get them too;
   no extra request). The page names it from the registry, "MailCoordinator · Mail Hero", or
   "未登记 · <first 8 characters>" (a bucket: its full name) worded exactly as in the resource table
   (one helper), the key as the tooltip. An item measured without the dimension (key `unknown`,
-  `BREAKDOWN_UNCLASSIFIED`) also gets `kind` with `resource: null` and reads 未归类 (R2: 未归类操作,
+  `BREAKDOWN_UNCLASSIFIED`) also gets `kind` without `resource` and reads 未归类 (R2: 未归类操作,
   like the table), never "unknown". Script items (Workers and DO requests) stay "script（entry）";
   model items stay raw. Only the name wraps; the value never does.
 
-## 5. API v2 and budgets
+## 5. The owner API (`dashboard.ui.v1`) and budgets
 
-All under `/api/v2/`, same Access + owner check, error envelope, CSRF + Origin on mutations,
-`Cache-Control: no-store`. Responses carry only ids, codes, numbers, timestamps and registry strings.
+Since 2026-10-02 the API is the proto service `DashboardUiService`
+([`proto/dashboard/ui/v1/dashboard_ui_service.proto`](../../proto/dashboard/ui/v1/dashboard_ui_service.proto), the one
+description of its routes, messages and errors), served by the shared transcoder (`proto/ts/http-transcoder.ts`) and
+called by the UI through the shared client (`web/src/api/client.ts`), as Lab's owner API is (`proto/README.md`, HTTP
+APIs). Resources follow the AIPs: the registry and the four views are singletons (AIP-156) read with standard Gets
+(AIP-131), the refreshes and the two actions are custom methods (AIP-136) on them, on the guard singleton and on the
+canary resource `canaries/mail-todofy`; OverrideGuard and RunCanary take an AIP-155 `request_id` (HomeState answers a
+repeat with the first answer for 24 hours). Same Access + owner check in front of the transcoder, CSRF + Origin on every
+POST (the refreshes too: they call the apps), `Cache-Control: no-store`, errors as google.rpc.Status with the reasons of
+`errors.proto` and `common/errors/v1`; `GET /api/csrf` and `/health` are transport outside the service. Responses carry
+only ids, codes, numbers, timestamps and registry strings. The view JSON kept its field names and its
+string timestamps (it embeds ops-v1's answers as the apps wrote them); each view gained `name` (its resource name) and
+lost `version`.
 
 | Route | Served by | Budget |
 | --- | --- | --- |
-| `GET registry` | Worker, serialized once per isolate; `ETag: "<build>"` → 304 | 0 DO; ≤ 12 KiB |
-| `GET csrf` | Worker (signed token + `home_csrf` cookie, design.md §6) | — |
-| `GET home[?refresh=1]` | DO `v2View('home')` | 1 DO call; ≤ 1 + N rows; ≤ 10 KiB |
-| `GET flows` | DO | ≤ 20 rows; ≤ 20 KiB (16 KiB until the GTD loop and Paper Radar made six flows) |
-| `GET cloudflare[?refresh=1]` | DO | 3–4 rows; ≤ 16 KiB |
-| `GET ops` | DO | ≤ 10 rows; ≤ 24 KiB |
-| `POST guard {level}`, `POST canary {canary_id}` | DO (`setGuardOverride`, `startCanary`) | Origin + CSRF; ≤ 1 KiB body |
+| `GET /api/v1/registry` (GetRegistry) | Worker, serialized once per isolate; `ETag: "<build>"` → 304 | 0 DO; ≤ 12 KiB |
+| `GET /api/csrf` | Worker (signed token + `home_csrf` cookie, design.md §6) | — |
+| `GET /api/v1/homeView` (GetHomeView) | DO `view('home')` | 1 DO call; ≤ 1 + N rows; ≤ 10 KiB |
+| `GET /api/v1/flowsView` (GetFlowsView) | DO | ≤ 20 rows; ≤ 20 KiB (16 KiB until the GTD loop and Paper Radar made six flows) |
+| `GET /api/v1/cloudflareView` (GetCloudflareView) | DO | 3–4 rows; ≤ 16 KiB |
+| `GET /api/v1/opsView` (GetOpsView) | DO | ≤ 10 rows; ≤ 24 KiB |
+| `POST /api/v1/homeView:refresh`, `POST /api/v1/cloudflareView:refresh` (RefreshHomeView, RefreshCloudflareView; were `?refresh=1`) | DO `view(..., refresh)` | Origin + CSRF; each scope fetches at most once a minute |
+| `POST /api/v1/guard:override {level, request_id}` (OverrideGuard), `POST /api/v1/canaries/mail-todofy:run {request_id}` (RunCanary) | DO (`setGuardOverride`, `startCanary`) | Origin + CSRF; ≤ 1 KiB body |
+
+The old paths (`/api/v2/*`) answer 410 `reload_required` in the old error envelope until 2026-11-02 (one release), so a
+tab still running the old UI asks the owner to reload; then they answer NOT_FOUND like any unknown path.
+
+**Pre-serialized views.** HomeState builds each view as the generated wire type of its message (`worker/src/api-types.ts`
+names them) and serializes it once; the Worker hands those bytes to the transcoder as a `PreEncoded` answer with the ETag
+(or 304), never decoding them, so a view costs the handler no codec CPU. The proof that the bytes are what the wire
+profile writes is in the tests: `worker/test/wire-conformance.ts` reads every view the unit suite builds and every answer
+of the real Worker in workerd as the client does, refusing anything unrecognized, and requires the message read back to
+serialize to the same bytes (fields in numbered order, nulls and omissions where the profile puts them).
 
 Every dynamic response shares the shell (attention, badges, refresh/tick times, `rev`) and carries
 `ETag: "<rev>-<hash>"`: `rev` is bumped by each tick, refresh that fetched, guard override and manual
@@ -227,7 +251,7 @@ canary start, and the hash (FNV-1a) covers the body without `generated_at` — l
 time alone, so `rev` by itself could serve a stale 304. Time-derived fields are minute-rounded, so an
 unchanged state keeps its ETag. The DO returns the serialized string (or null for a matching
 If-None-Match → 304) so the plain handler stays ~1–3 ms CPU. Responses
-are `no-store`, so the client keeps the last body + ETag itself (`apiV2` in `web/src/api/client.ts`).
+are `no-store`, so the client keeps the last body + ETag itself (its transport in `web/src/api/client.ts`).
 Only the visible view polls, every 5 minutes; the registry is fetched once per load. Refresh scopes
 (each at most once a minute, `meta.last_refresh_{home,cloudflare}_at`): `home` re-polls due statuses
 (≥ 10 min each, the contract) and the due probe (≥ 10 min); `cloudflare` re-queries GraphQL (≥ 60 s
@@ -240,13 +264,13 @@ Measured (unit suite for bytes, workerd suite for rows; a full 14-run canary his
 | --- | --- | --- | --- |
 | home | 4.7 KB (nine tiles; budget 10 KiB) | 9.1 KB | 26 (≤ 28) |
 | flows | 17.0 KB (seven flows; 17.8 KB in the workerd suite) | 23.8 KB | 26 (≤ 28) |
-| cloudflare | ≤ 16 KiB, also with 20 Workers | under `V2_BODY_MAX` with 20 listed drift findings (tested) | 27 (≤ 28; one more document since §10: `drift`) |
+| cloudflare | ≤ 16 KiB, also with 20 Workers | under `VIEW_BODY_MAX` with 20 listed drift findings (tested) | 27 (≤ 28; one more document since §10: `drift`) |
 | ops | ≤ 24 KiB | 24.8 KB | 26 (≤ 28) |
 
-`V2_BODY_BUDGET` holds for a normal day; `V2_BODY_MAX` (32 KiB) bounds the bad day. The Cloudflare view
+`VIEW_BODY_BUDGET` holds for a normal day; `VIEW_BODY_MAX` (32 KiB) bounds the bad day. The Cloudflare view
 lists at most `CF_VIEW_WORKERS_MAX` (50) of the up to `CF_SCRIPTS_MAX` (100) remembered scripts —
 every script active today first, then the most recently seen — and counts the rest in
-`workers_omitted` (shown as a note), so 100 remembered scripts stay under `V2_BODY_MAX` (tested); HomeState logs
+`workers_omitted` (shown as a note), so 100 remembered scripts stay under `VIEW_BODY_MAX` (tested); HomeState logs
 `over_budget` per response. The design's row estimates (1 + N, ≤ 20, 3–4, ≤ 10) did not count the shell
 every view shares (six documents for the attention strip and badges, plus what the evaluation reads for
 the strip's observed items, §4) or the 14 canary rows, so the measured counts replace them (each probed or ops_v1 entry adds one row to every view: 23 / 23 / 24 / 23 before the FlowDay and links probes, 25 / 25 / 26 / 25 before the watch app's status); they are ~0.01 % of the DO's 5 M free rows a day at a few hundred views.
@@ -259,11 +283,11 @@ status polls. GraphQL stays one query per tick (48/day) plus refreshes ≤ 1/min
 (`cf_scripts` and one `probe:<entry>` per probe). The FlowDay and links probes are each one request of that app's Worker per tick (≤ 144 a day with refreshes, no D1 query); the website's is a static asset. Everything else as in
 [`limits.md`](limits.md).
 
-**v1 removal (done):** the UI calls only v2, so `/api/v1/*` is gone (routes, `overview()`/`buildOverview`,
-`OverviewResponse`, `AppCard`, v1 tests; the paths answer 404, tested). The workerd flow tests read the
-ops and cloudflare views instead (`snapshot()` in `test/runtime/flows.ts`). `Dashboard deploy` probes
-`/api/v2/home` for the Access redirect. The vars `MAIL_HERO_URL`/`TODOFY_URL` are dropped: the registry
-is the only URL source; the generator and `wrangler.toml` are otherwise unchanged.
+**v1 removal (done 2026-09-29):** the hand-written v1 API (`/api/v1/overview`, `OverviewResponse`, `AppCard`) was
+removed when the UI moved to v2; the prefix `/api/v1/` now belongs to `dashboard.ui.v1`. The workerd flow tests read
+the ops and cloudflare views (`snapshot()` in `test/runtime/flows.ts`). `Dashboard deploy` probes `/` and
+`/api/v1/homeView` for the Access redirect. The vars `MAIL_HERO_URL`/`TODOFY_URL` are dropped: the registry is the only
+URL source.
 
 ## 6. DO storage changes (step 2)
 
@@ -363,7 +387,7 @@ value.
 **Storage and views.** `state` documents `drift_run` (today's run across ticks: the live names and
 types read so far; deleted when the run ends) and `drift` (the last completed check: counts per
 category, at most `DRIFT_FINDINGS_MAX` (50) findings, and the latest error code, step and failed-day
-count). `GET /api/v2/cloudflare` carries `drift` (`DriftView`: status `ok` / `drift` / `never_checked` /
+count). The Cloudflare view (GetCloudflareView) carries `drift` (`Drift`: status `ok` / `drift` / `never_checked` /
 `not_configured` / `failing`, counts, at most `DRIFT_VIEW_FINDINGS_MAX` (20) findings) and the page shows
 it as the 配置漂移 panel. The digest adds `config_drift` (warning; metrics `total` and the non-zero
 category counts) while the last completed check has findings, and `drift_unavailable` (warning) after
