@@ -52,7 +52,9 @@ def test_every_read_matches_the_idl_after_traffic(worker: Worker) -> None:
     assert status["received_last_day_count"] >= 1 and status["build"] == "test"
     recent = assert_message(worker.owner.get("/api/v1/mailEvents", params={"page_size": 1}), pb.ListMailEventsResponse)
     assert recent["mail_events"][0]["name"] == f"mailEvents/{event_id}"
-    assert_message(worker.owner.get("/api/v1/mailEvents", params={"attention": "true"}), pb.ListMailEventsResponse)
+    assert_message(
+        worker.owner.get("/api/v1/mailEvents", params={"filter": "attention = true"}), pb.ListMailEventsResponse
+    )
     integration = assert_message(worker.owner.get("/api/v1/integration"), status_pb.Integration)
     assert len(integration["configured"]) == 5 and integration["access_owner"] == OWNER
     assert worker.owner.get("/api/csrf").status_code == 200
