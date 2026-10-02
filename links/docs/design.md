@@ -167,7 +167,9 @@ on its own: 3.3-4.5 ms (five runs, 2026-10-01). After it, first runs and warm me
 2.5-3.0 / 1.4-1.9 ms, a filter over 1,000 links 1.6-2.5 / 1.4-1.6 ms, an export page of 250 links 2.2-2.8 / 2.0-2.2 ms,
 an import of 100 lines 3.7-4.4 / 1.7-2.0 ms (its first run is also the isolate's first mutation: the CSRF check and the
 first request body). The test holds redirects to 3 ms first and 1.5 ms warm, the isolate's first API request to 9 ms,
-every other API path to 7 ms first and 5 ms warm (reference milliseconds, scaled by the machine's speed). Before the
+every other API path to 7 ms first and 5 ms warm: reference milliseconds, the medians of three fresh isolates measured
+one after another, each isolate's numbers divided by its own measured speed (`tools/workerd-cpu` and its README;
+GitHub runners read the first request 1.0-1.7 ms and the first API request 3.2-4.3 ms, single isolates). Before the
 first API request was measured apart, the full list page carried it (4.9-5.3 ms against 7 ms) and failed once of ten
 runs on a machine loaded with nine busy processes; measured apart, eight such loaded runs passed (speed 2.4-2.8). An
 export of all 1,000 links in one answer measured about 5 ms, which is why it is paged.
