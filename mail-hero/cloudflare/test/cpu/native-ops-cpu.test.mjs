@@ -23,16 +23,9 @@
 // about 4 ms of Free's 10 ms on the reference machine, less than before the move (about half).
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { readFile, readdir, mkdtemp, rm } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
-import { join, resolve } from 'node:path'
-import { fileURLToPath } from 'node:url'
-import { build } from 'esbuild'
-import { Miniflare, convertV4MiniflareOptions } from 'miniflare'
-import { COLD_ISOLATES, connectCpuMeter, CPU_TEST_TIMEOUT_MS, FREE_CPU_MS, measureInIsolates } from '../../../../tools/workerd-cpu/workerd-cpu.mts'
-import { migrationStatements } from '../migrations.mjs'
+import { COLD_ISOLATES, CPU_TEST_TIMEOUT_MS, FREE_CPU_MS, measureInIsolates } from '../../../../tools/workerd-cpu/workerd-cpu.mts'
+import { bundle, DASHBOARD_WORKER, ENV, migrate, opsCaller, startIsolate } from './isolate.mjs'
 
-const root = resolve(fileURLToPath(new URL('../..', import.meta.url)))
 const COLD_LABEL = "status() as the isolate's first Ops call"
 /** The bound of the isolate's first status() (the median of COLD_ISOLATES isolates), in reference milliseconds. */
 const COLD_BOUND_MS = 0.9 * FREE_CPU_MS
@@ -44,55 +37,24 @@ const RUNS = 11
 const UNKNOWN_EVENT = '6d3b2f0e-4c1a-4b7e-8a52-0c9e7f1d2a31'
 
 /** A fresh Mail Hero isolate (its D1 migrated, its coordinator constructed) and a dashboard Worker calling its Ops. */
-async function start(script) {
-  const temp = await mkdtemp(join(tmpdir(), 'mail-hero-ops-cpu-'))
-  // inspectorPort 0: the OS picks a free port, which the meter reads back from Miniflare.
-  const mf = new Miniflare(convertV4MiniflareOptions({
-    host: '127.0.0.1', port: 0, inspectorPort: 0,
-    d1Persist: join(temp, 'd1'), r2Persist: join(temp, 'r2'), durableObjectsPersist: join(temp, 'do'),
-    workers: [
-      { name: 'mail-hero', modules: true, script, compatibilityDate: '2026-09-07',
-        d1Databases: { DB: 'ops-cpu' }, r2Buckets: ['MAIL_STORE'],
-        durableObjects: { COORDINATOR: { className: 'MailCoordinator', useSQLite: true } },
-        bindings: { RECEIVE_ADDRESS: 'inbox@mail.example.org', ACCESS_ISSUER: 'https://synthetic.cloudflareaccess.com', ACCESS_AUDIENCE: 'synthetic',
-          ACCESS_OWNER: 'owner@example.org', CREDENTIAL_KEY: 'a'.repeat(64), WEBHOOK_ALLOWED_HOSTS: 'consumer.example.org',
-          FORCE_SEND_PAUSED: 'false', MAINTENANCE_MODE: 'false', PUBLIC_HOST: 'mail-hero.example.net' },
-        serviceBindings: { ASSETS: () => new Response('synthetic') } },
-      { name: 'dashboard', modules: true, compatibilityDate: '2026-09-07',
-        script: `export default { async fetch(request, env) {
-          const { method, args } = await request.json()
-          try { return Response.json({ ok: await env.MAIL_HERO[method](...args) }) }
-          catch (error) { return Response.json({ error: error instanceof Error ? error.message : 'not_an_error' }) }
-        } }`,
-        serviceBindings: { MAIL_HERO: { name: 'mail-hero', entrypoint: 'Ops' } } },
-    ],
-  }))
-  let meter
-  const dispose = async () => { meter?.close(); await mf.dispose(); await rm(temp, { recursive: true, force: true }) }
-  try {
-    await mf.ready
-    const db = await mf.getD1Database('DB', 'mail-hero')
-    for (const name of (await readdir(join(root, 'migrations'))).filter(name => name.endsWith('.sql')).sort()) {
-      await db.batch(migrationStatements(await readFile(join(root, 'migrations', name), 'utf8')).map(sql => db.prepare(sql)))
-    }
-    const dashboard = await mf.getWorker('dashboard')
-    const ops = async (method, ...args) => {
-      const result = await (await dashboard.fetch('http://dashboard/', { method: 'POST', body: JSON.stringify({ method, args }) })).json()
-      if (result.error !== undefined) throw new Error(`${method}: ${result.error}`)
-      return result.ok
-    }
+function start(script) {
+  const workers = [
+    { name: 'mail-hero', modules: true, script, compatibilityDate: '2026-09-07',
+      d1Databases: { DB: 'ops-cpu' }, r2Buckets: ['MAIL_STORE'],
+      durableObjects: { COORDINATOR: { className: 'MailCoordinator', useSQLite: true } },
+      bindings: ENV, serviceBindings: { ASSETS: () => new Response('synthetic') } },
+    DASHBOARD_WORKER,
+  ]
+  return startIsolate({ workers, prefix: 'mail-hero-ops-cpu-' }, ['mail-hero'], async mf => {
+    await migrate(mf)
     // Cloudflare meters the coordinator's invocations apart from the entrypoint's; here they share the isolate. So the
     // coordinator is constructed first, through a route that runs none of the ops code (its own /status), and the
     // first status() is the isolate's first run of the Ops code paths (the entrypoint's and /ops/status).
     const coordinators = await mf.getDurableObjectNamespace('COORDINATOR', 'mail-hero')
     const warmed = await coordinators.get(coordinators.idFromName('inbox-v1')).fetch('https://coordinator/status')
     assert.equal(warmed.status, 200)
-    meter = await connectCpuMeter(mf, 'mail-hero')
-    return { ops, meter, dispose }
-  } catch (error) {
-    await dispose()
-    throw error
-  }
+    return { ops: await opsCaller(mf) }
+  })
 }
 
 /** One isolate's session: its first status(), then every call's first run and warm runs. */
@@ -109,8 +71,7 @@ async function session({ ops, meter }) {
 }
 
 test('workerd Ops: every call stays well below the Free CPU limit, the isolate\'s first one too', { timeout: CPU_TEST_TIMEOUT_MS }, async () => {
-  const script = (await build({ entryPoints: [join(root, 'src/native/index.ts')], bundle: true, format: 'esm', platform: 'neutral',
-    external: ['cloudflare:workers'], write: false })).outputFiles[0].text
+  const script = await bundle()
   const { reference } = await measureInIsolates(COLD_ISOLATES, () => start(script), session)
   console.log(`cpu bounds (reference ms, medians of ${COLD_ISOLATES} isolates): the isolate's first status() < ${COLD_BOUND_MS}, ` +
     `other first runs < ${FIRST_BOUND_MS}, warm medians < ${WARM_BOUND_MS}`)
