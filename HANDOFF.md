@@ -145,6 +145,15 @@ with synthetic data.
   Worker 193.3 → 229.0 KiB gzip (budget 274), UI JS 121.4 → 162.4 KiB gzip (budget 195); the isolate's first API
   request 7.2-7.8 reference ms (bound 9 of Free's 10), every other Worker request at most 5.5 first and 2.7 warm;
   the two heavy reads run in the coordinator (slowest 19 ms of its 30 s).
+- Startup warm-up (CI fix): the branch's CI failed one check, `delivery-request-cpu.test.mjs` "SendMessage (largest
+  record): first run ... 6.01 reference ms" against `WORKER_COLD_BOUND_MS` 6 (the hand-written send reads 4.1-4.9 on
+  runners): an isolate's first request ran protobuf-es and the codec before V8 compiled them.
+  `cloudflare/src/native/warmup.ts`, called at module scope from `api.ts` as FlowDay's `warmup.ts` is, routes, reads
+  and answers synthetic requests of the heaviest methods through the transcoder's routes and the codec (no bindings,
+  no I/O, constants only; five rounds, about 10 ms of startup, +2.4 KiB gzip). Reference machine, four serial runs:
+  SendMessage first 4.15-4.60 → 3.38-3.98 (the hand-written send 2.84-3.06), the first API request 7.1-8.2 → 5.7-6.5,
+  50 messages with a search 4.7-5.1 → 2.8-3.3; bounds unchanged. Watch the next CI run's send (expected about
+  4.4-5.8 against 6).
 - Deploys: Mail Hero only.
 - After deploy: inbox list, a message detail (text, HTML in the sandbox, warnings), raw and attachment
   downloads, deliveries and attempts, retry, targets, settings and retention preview, the delivery dashboard;

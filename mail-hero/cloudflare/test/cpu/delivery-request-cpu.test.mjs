@@ -23,13 +23,20 @@
 // coordinator's holds its slowest invocation in any isolate. Milliseconds of the reference machine (an Apple M1 Max); a
 // median speed above MAX_SPEED fails the test.
 //
-// Measured on the reference machine on 2026-10-01, medians of three isolates over eight serial runs of `npm run
-// test:cpu` (other work loading the machine to a load average of about 3; single isolates in brackets), in reference
-// ms: the Worker's send first 2.6-3.7 (2.1-4.2), warm 1.8-2.2; resend first 1.8-2.7 (1.1-3.3), warm 1.6-2.4; connection
-// test first 1.4-2.1 (1.0-2.6), warm 1.2-1.8; startCanary first 1.8-2.7 (1.6-2.8), warm 0.6-1.2. The same test on the
-// earlier request path (the Worker built the event, one isolate): send first 14.5, warm 11.6. The coordinator's
-// /deliveries/create for the largest record took a median of 9.2-9.9 ms and at most 16 ms (of 30 s). With nine of the
-// ten cores busy (`yes`), 3 of 3 runs passed, the numbers reading low (tools/workerd-cpu/README.md).
+// Measured on the reference machine on 2026-10-01 (the hand-written owner API), medians of three isolates over eight
+// serial runs of `npm run test:cpu` (other work loading the machine to a load average of about 3; single isolates in
+// brackets), in reference ms: the Worker's send first 2.6-3.7 (2.1-4.2), warm 1.8-2.2; resend first 1.8-2.7 (1.1-3.3),
+// warm 1.6-2.4; connection test first 1.4-2.1 (1.0-2.6), warm 1.2-1.8; startCanary first 1.8-2.7 (1.6-2.8), warm
+// 0.6-1.2. The same test on the earlier request path (the Worker built the event, one isolate): send first 14.5, warm
+// 11.6. The coordinator's /deliveries/create for the largest record took a median of 9.2-9.9 ms and at most 16 ms (of
+// 30 s). With nine of the ten cores busy (`yes`), 3 of 3 runs passed, the numbers reading low
+// (tools/workerd-cpu/README.md).
+// Through mailhero.ui.v2 (2026-10-02, four serial runs each, load average 2.5-6.9): send first 4.15-4.60, warm
+// 2.50-3.15, until src/native/warmup.ts ran the transcoder's codec path at startup: first 3.38-3.98, warm 1.90-2.30;
+// resend first 2.22-3.06 -> 1.91-2.81, connection test 1.79-3.28 -> 1.11-2.31, startCanary unchanged (1.5-2.1). The
+// hand-written send on the same machine then: first 2.84-3.06, warm 1.66-2.35. Without the warm-up a GitHub runner read
+// the send's first run 6.01, not below WORKER_COLD_BOUND_MS, and the hand-written send's 4.1-4.9: runners read these
+// first runs about 1.3-1.6 times this machine's, so the warm-up's send should read about 4.4-5.8 there.
 // WORKER_COLD_BOUND_MS is 6 ms and WORKER_WARM_BOUND_MS 3.5 ms; an injected 5 ms more in the Worker's first request
 // (requestDelivery) failed 3 of 3 runs (send first 8.4-9.4). COORDINATOR_BOUND_MS is 1 s, a thirtieth of the Durable
 // Object's limit.

@@ -30,11 +30,16 @@
 //   settings, setup checks, targets, the raw download    at most 0.8  ->  at most 1.4
 //   a settings update (under the write lease)              3.4 / 1.4  ->  4.9 / 1.7
 //
-// The two reads that were over Free's 10 ms before (the largest parsed record: JSON.parse of 4 MiB and writing it again;
-// an isolate's first time zone: ICU's zone data) are answered by the coordinator now (src/native/api.ts DELEGATED): its
-// slowest answer took 18 ms of its 30 s (median 10). COLD_BOUND_MS is 9 ms: the first API request leaves about 2.4 ms
-// of Free's 10 ms on the reference machine (about 4.3 before); FIRST_BOUND_MS and WARM_BOUND_MS hold every other
-// request at about twice its measure.
+// Since src/native/warmup.ts runs the codec path of the heaviest methods at startup (2026-10-02, four serial runs of
+// `npm run test:cpu` before and after, plus eight runs of this file after): the isolate's first API request 7.1-8.2 ->
+// 5.7-6.5, 50 messages with a search 4.7-5.1 -> 2.8-3.3 first, 50 deliveries 2.6-2.9 -> 2.0-2.2, a settings update
+// 4.1-4.8 -> 3.1-4.0, the coordinator's slowest delegated read 17.8-19.4 -> 15.1-15.4; warm medians unchanged.
+//
+// The two reads that were over Free's 10 ms before (the largest parsed record: JSON.parse of 4 MiB and writing it
+// again; an isolate's first time zone: ICU's zone data) are answered by the coordinator now (src/native/api.ts
+// DELEGATED): its slowest answer took 15 ms of its 30 s (median 10; 18 without the warm-up). COLD_BOUND_MS is 9 ms: the
+// first API request leaves about 3.5 ms of Free's 10 ms on the reference machine (about 2.4 without the warm-up, 4.3 on
+// the hand-written API); FIRST_BOUND_MS and WARM_BOUND_MS hold every other request at about twice its measure.
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { exportJWK, generateKeyPair, SignJWT } from 'jose'

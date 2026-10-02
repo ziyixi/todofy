@@ -484,7 +484,18 @@ isolate's first API request 5.7 → 7.6 (the transcoder's paths run once; bound 
 search 1.7 / 0.8 → 5.1 / 1.8, a settings update 3.4 / 1.4 → 4.9 / 1.7, every other Worker request at most 2.8 first
 and 1.9 warm. The two reads near or over Free's 10 ms (a message with the largest parsed record: 9.8 / 8.4 before,
 12.8 first through the transcoder; a zone's first dashboard: 13.2 before, 14.6) are answered by the coordinator: the
-Worker forwards them in under 1 ms, and the coordinator's slowest answer took 18 ms of its 30 s.
+Worker forwards them in under 1 ms, and the coordinator's slowest answer took 18 ms of its 30 s. **The startup
+warm-up** (`mail-hero/cloudflare/src/native/warmup.ts`, like FlowDay's): an isolate's first request of a method ran
+its share of protobuf-es and the codec before V8 compiled it, and a GitHub runner read the first SendMessage at 6.01
+reference ms against its bound of 6 (`test/cpu/delivery-request-cpu.test.mjs`; the hand-written send read 4.1-4.9
+there). The Worker's global scope now routes, reads and answers synthetic requests of the heaviest methods (the
+overview, SendMessage, ResendDelivery, TestEndpoint, the lists and reads, an update, the coordinator's two reads)
+through the transcoder's routes and the codec, five rounds: about 10 ms more startup in Miniflare (Workers allow 1 s),
+2.4 KiB more gzip (229.2 → 231.6 KiB). Four serial runs before and after, reference ms, first run / warm: SendMessage
+4.15-4.60 / 2.50-3.15 → 3.38-3.98 / 1.90-2.30 (the hand-written send 2.84-3.06 / 1.66-2.35 the same day), the
+isolate's first API request 7.1-8.2 → 5.7-6.5, 50 messages with a search 4.7-5.1 → 2.8-3.3 first, a settings update
+4.1-4.8 → 3.1-4.0 first, the coordinator's slowest delegated read 17.8-19.4 → 15.1-15.4; the event builds
+(`payload-cpu`) unchanged, and the `Ops` entrypoint's first `status()` 4.4-4.8 → 3.0-3.4 (it shares the codec).
 
 ## HTTP APIs
 
