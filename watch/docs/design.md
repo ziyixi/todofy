@@ -347,14 +347,16 @@ All hermetic: synthetic content only, the only network is loopback, clocks are i
   settings and hashes, the fetch with a stub (redirects, the hop gate, caps, per-request timers), the browser
   renderer's cap and cost, the dev rewrite.
 - workerd (`npm run test:runtime`): Miniflare runs the bundled Worker with a real SQLite WatchState; every request it
-  makes goes to `test/fake-sites.ts` through the outbound service, so no socket is opened. A probe Worker calls
-  `step(now)`, `setClock(now)` and test-only reads (rows, the row meter) over the object binding; a fake site may move
-  the clock while its request is out. Files cover every tier, the etiquette as the sites see it (redirect targets'
-  robots.txt and backoff, one request at a time per host across previews and the alarm, the URL's 15 minutes for
-  previews and edits, the time each check is stamped with), every stage, every trigger, confirmation, flicker, third
-  versions and the window, ignored lines with a change pending, a check that throws, BROKEN and the auto-pause, GBK,
-  UTF-16, an omitted `</head>`, masks, shadow mode, the API surface (AIP-155 replays), the browser tier with a fake
-  binding (the ledger charges failed renders), real alarms, storage bounds, the rows budget and the CPU (§8).
+  makes goes to `test/fake-sites.ts` through the outbound service, a proxy Worker that streams each body as it is read
+  (`test/runtime/fake-net.ts`: a body written ahead of a busy WatchState into Miniflare's loopback connection crawled
+  on Linux 6.17 runners), so nothing leaves the machine. A probe Worker calls `step(now)`, `setClock(now)` and
+  test-only reads (rows, the row meter) over the object binding; a fake site may move the clock while its request is
+  out. Files cover every tier, the etiquette as the sites see it (redirect targets' robots.txt and backoff, one
+  request at a time per host across previews and the alarm, the URL's 15 minutes for previews and edits, the time each
+  check is stamped with), every stage, every trigger, confirmation, flicker, third versions and the window, ignored
+  lines with a change pending, a check that throws, BROKEN and the auto-pause, GBK, UTF-16, an omitted `</head>`,
+  masks, shadow mode, the API surface (AIP-155 replays), the browser tier with a fake binding (the ledger charges
+  failed renders), real alarms, storage bounds, the rows budget and the CPU (§8).
 - UI (`npm test` in `web/`, jsdom): the transport, the formats, the inbox and drawer with ignore and undo, the add
   flow from a fragment (nothing fetched before 预览, the fragment cleared) with the block picker, a create whose
   response was lost, the settings form's round trip and mask, taking an ignored line back, accessibility, the health

@@ -13,7 +13,7 @@ Rules for this file:
   security-posture details. Those stay with the owner.
 - Keep it short. The details live in each app's docs; link to them.
 
-Last updated: 2026-10-02 (the cold-start CPU and watch CPU test fixes land with this change).
+Last updated: 2026-10-02 (the watch runtime suite's transport fix is ready on `watch-hang-fix`).
 
 ## How work lands
 
@@ -33,8 +33,9 @@ Last updated: 2026-10-02 (the cold-start CPU and watch CPU test fixes land with 
 
 | Work | Branch (pushed unless noted) | State | Lands as |
 | --- | --- | --- | --- |
-| `mail.received.v1` onto proto, rule vocabulary (`Field.write_empty`, `present_when`, `Message.any_match`) | `proto-mail-rules` @ `1e60681` | Done; rebase onto `main` (the CPU-test fixes have landed) | First; redeploys every proto user, no behaviour change |
-| `mail.received.v1` onto proto, the contract (`proto/mailhero/webhook/v1`) | `proto-mail` @ `a45b9be` (on `proto-mail-rules`) | Done | Second; deploys Mail Hero and Todofy. Mail Hero's owner sends, resends, connection tests and canaries now build their event in the coordinator DO |
+| Watch CPU test: page bodies reach WatchState through a pull proxy (`watch/worker/test/runtime/fake-net.ts`); the worst pass's TIMEOUT on runners was Linux 6.17's loopback TCP drops, not the pass | `watch-hang-fix` (local) | Done | First; test-only, deploys nothing |
+| `mail.received.v1` onto proto, rule vocabulary (`Field.write_empty`, `present_when`, `Message.any_match`) | `proto-mail-rules` @ `1e60681` | Done; rebase onto `main` once `watch-hang-fix` has landed (its Watch checks hit that TIMEOUT) | Second; redeploys every proto user, no behaviour change |
+| `mail.received.v1` onto proto, the contract (`proto/mailhero/webhook/v1`) | `proto-mail` @ `a45b9be` (on `proto-mail-rules`) | Done | Third; deploys Mail Hero and Todofy. Mail Hero's owner sends, resends, connection tests and canaries now build their event in the coordinator DO |
 | Watch go-live: Access app through `infra/`, deploy job, `watch.ziyixi.science` | `watch-infra` (local) | In progress | `watch-infra` first, then "Infra apply" (create 1), then the AUD goes into `watch/wrangler.toml` |
 | Watch W3: daily Todoist digest via task-intent `SOURCE_WATCH`, Ops status for the dashboard | `watch-l2` (local) | In progress | After `watch-infra`; deploys watch, Todofy, Lab, dashboard |
 | Home dashboard tiles for FlowDay and links | `dashboard-new-tiles` (local) | In progress | Dashboard only; watch's tile comes with `watch-l2` |

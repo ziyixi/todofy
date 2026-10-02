@@ -35,7 +35,7 @@ import {
   type Isolate,
   type Measurement,
 } from '../../../../tools/workerd-cpu/workerd-cpu.mts';
-import { ALARM_BYTES_BUDGET, CHANGE_PAGE, DIFF_LINE_MAX, DIFF_LINES_KEPT, FETCH_MAX_BYTES, WATCH_PAGE, WATCHES_MAX } from '../../src/limits.ts';
+import { ALARM_BYTES_BUDGET, CHANGE_PAGE, DIFF_LINE_MAX, DIFF_LINES_KEPT, FETCH_MAX_BYTES, FETCH_TIMEOUT_MS, WATCH_PAGE, WATCHES_MAX } from '../../src/limits.ts';
 import { accessClaims, testIssuer } from '../jwt.ts';
 import { HOUR, OBJECT_WORKER, op, PUBLIC_HOST, startHarness, SYNTHETIC_BINDINGS, T0, type Harness } from './harness.ts';
 
@@ -58,19 +58,18 @@ const OBJECT_API_BOUND_MS = 0.01 * FREE_OBJECT_CPU_MS;
 const OBJECT_ALARM_BOUND_MS = 0.25 * FREE_OBJECT_CPU_MS;
 /**
  * The wall-clock limits here. This test bounds CPU; wall time is the test machine's, and a timeout that trips on a slow
- * machine changes what a pass does: the page goes unread and its parse uncounted. A page request's timer runs until
- * its body is read, which includes waiting for the isolate while other lanes (ALARM_CONCURRENCY) parse and diff their
- * pages: measured 1.4 s for the requests queued behind two lanes in the worst pass on the reference machine, 2.4 s
- * with nine of its ten cores busy. On GitHub runners one request of that pass, always cpu-42's, outlived production's
- * 15 s in 3 of 5 runs (2026-10-02: its check failed without a byte read, and the pass ran about 15 s longer). The
- * fetch timeout itself is etiquette.test.ts's. So a page request may take PASS_FETCH_TIMEOUT_MS here
- * (DEV_FETCH_TIMEOUT_MS), and each measured run in WatchState PASS_RUN_LIMIT_MS (the meter's limit, which names the
- * run), far above a pass on a slow runner (about 20 s): a request that never answers still fails, as TIMEOUT with its
- * watch named. The alarm's own wall budget (ALARM_WALL_BUDGET_MS less ALARM_START_MARGIN_MS: 7.5 minutes) cannot bind
- * within these limits.
+ * machine changes what a pass does: the page goes unread and its parse uncounted. A page request has production's
+ * FETCH_TIMEOUT_MS (DEV_FETCH_TIMEOUT_MS: the harness's default is the 500 ms of the timeout tests). Its timer runs
+ * until its body is read, which includes waiting for the isolate while other lanes (ALARM_CONCURRENCY) parse and diff
+ * their pages: up to about 3 s in the worst pass on a GitHub runner (2026-10-02). Pages of that pass used to time out
+ * on those runners even with a 60 s timer: Miniflare's loopback transport, not the pass, slowed them to a crawl
+ * (./fake-net.ts). Each measured run in WatchState may take PASS_RUN_LIMIT_MS (the meter's limit, which names the run),
+ * above a pass in which one request runs out its timer (about 20 s and 15 s on a runner): a request that never answers
+ * fails as TIMEOUT with its watch named. The alarm's own wall budget (ALARM_WALL_BUDGET_MS less ALARM_START_MARGIN_MS:
+ * 7.5 minutes) cannot bind within these limits.
  */
-const PASS_FETCH_TIMEOUT_MS = 2 * INSPECTOR_TIMEOUT_MS;
-const PASS_RUN_LIMIT_MS = 2 * PASS_FETCH_TIMEOUT_MS;
+const PASS_FETCH_TIMEOUT_MS = FETCH_TIMEOUT_MS;
+const PASS_RUN_LIMIT_MS = 2 * INSPECTOR_TIMEOUT_MS;
 /**
  * The pages of FETCH_MAX_BYTES (just under) one alarm reads: a check starts only while FETCH_MAX_BYTES are left of
  * ALARM_BYTES_BUDGET for it and for each check in flight. The other due watches wait for the next alarm (never a

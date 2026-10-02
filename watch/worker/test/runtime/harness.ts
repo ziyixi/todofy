@@ -2,9 +2,11 @@
  * workerd harness (../../../docs/design.md §10): bundles src/index.ts with esbuild and runs it in Miniflare as the Worker
  * "watch" with a real SQLite WatchState, next to
  *   - "probe": calls WatchState.step(now), setClock(now), alarmAt() and sqlForTests() over the object binding;
- *   - the outbound service: every request the Worker makes goes to FakeSites (../fake-sites.ts), the synthetic websites;
- *     nothing leaves the process;
- *   - a fake ASSETS binding (the UI's page) and, when asked, a fake BROWSER binding (Browser Run's `content` action).
+ *   - the outbound service "fake-net": every request the Worker makes goes to FakeSites (../fake-sites.ts), the
+ *     synthetic websites, through ./fake-net.ts, which streams each body to the reader as it reads (never ahead of it);
+ *     nothing leaves the process tree;
+ *   - a fake ASSETS binding (the UI's page) and, when asked, a fake BROWSER binding (Browser Run's `content` action),
+ *     through fake-net too.
  * DEV_MANUAL_ALARMS=true: no alarm is ever armed and the tests drive the scheduler with explicit clocks; the owner is
  * signed in over loopback http by the dev bypass. All data is synthetic.
  */
@@ -18,12 +20,16 @@ import { createHttpClient, type HttpCall, type HttpClient } from '@ziyixi/proto/
 import type { ShapeOf } from '@ziyixi/proto/http-transcoder';
 import { WatchUiService } from '@ziyixi/proto/watch/ui/v1/watch_ui_service_pb';
 import { FakeSites } from '../fake-sites.ts';
+import { FakeNet } from './fake-net.ts';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 
 export const ORIGIN = 'http://127.0.0.1';
 /** The Worker that runs WatchState when HarnessOptions.splitObject. */
 export const OBJECT_WORKER = 'watch-object';
+/** The proxy Workers of ./fake-net.ts: the outbound service, and the fake BROWSER binding. */
+const FAKE_NET_WORKER = 'fake-net';
+const FAKE_BROWSER_WORKER = 'fake-browser';
 export const PUBLIC_HOST = 'watch.example.com';
 /** 2026-10-01T00:00:00Z: the tests' first clock. */
 export const T0 = Date.parse('2026-10-01T00:00:00Z');
@@ -124,8 +130,8 @@ export async function startHarness(options: HarnessOptions = {}): Promise<Harnes
   const sites = new FakeSites();
   const browser: FakeBrowser = { pages: new Map(), finalUrls: new Map(), msUsed: 20_000, quota: false, calls: [] };
   const logs: string[] = [];
-  const outbound = async (request: Request): Promise<Response> => options.routes?.get(request.url)?.() ?? sites.handle(request);
-  const fakeBrowser = async (request: Request): Promise<Response> => {
+  const outbound = new FakeNet(async (request) => options.routes?.get(request.url)?.() ?? sites.handle(request));
+  const fakeBrowser = new FakeNet(async (request) => {
     const { url } = await request.json<{ url: string }>();
     browser.calls.push(url);
     if (browser.quota) return new Response('rate limited', { status: 429 });
@@ -135,7 +141,7 @@ export async function startHarness(options: HarnessOptions = {}): Promise<Harnes
     return new Response(html, {
       headers: { 'content-type': 'text/html; charset=utf-8', 'x-page-status': '200', 'x-browser-ms-used': String(browser.msUsed), ...(finalUrl === undefined ? {} : { 'x-final-url': finalUrl }) },
     });
-  };
+  });
   const bindings = { ...SYNTHETIC_BINDINGS, ...options.bindings };
   const mf = new Miniflare(
     convertV4MiniflareOptions({
@@ -156,10 +162,10 @@ export async function startHarness(options: HarnessOptions = {}): Promise<Harnes
           durableObjects: { WATCH: { className: 'WatchState', useSQLite: true, ...(options.splitObject === true ? { scriptName: OBJECT_WORKER } : {}) } },
           serviceBindings: {
             ASSETS: () => new Response(TEST_PAGE, { headers: { 'content-type': 'text/html; charset=utf-8' } }),
-            ...(options.browser === true ? { BROWSER: (request: Request) => fakeBrowser(request) } : {}),
+            ...(options.browser === true ? { BROWSER: FAKE_BROWSER_WORKER } : {}),
           },
           bindings,
-          outboundService: (request: Request) => outbound(request),
+          outboundService: FAKE_NET_WORKER,
         },
         ...(options.splitObject === true
           ? [
@@ -171,10 +177,12 @@ export async function startHarness(options: HarnessOptions = {}): Promise<Harnes
                 durableObjects: { WATCH: { className: 'WatchState', useSQLite: true } },
                 serviceBindings: { ASSETS: () => new Response('', { status: 404 }) },
                 bindings,
-                outboundService: (request: Request) => outbound(request),
+                outboundService: FAKE_NET_WORKER,
               },
             ]
           : []),
+        outbound.worker(FAKE_NET_WORKER),
+        ...(options.browser === true ? [fakeBrowser.worker(FAKE_BROWSER_WORKER)] : []),
         {
           name: 'probe',
           modules: true,
