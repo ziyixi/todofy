@@ -9,7 +9,7 @@ import { createHash } from 'node:crypto';
 import { build } from 'esbuild';
 import { Miniflare, convertV4MiniflareOptions } from 'miniflare';
 import { migrationStatements } from './migrations.mjs';
-import { idOf, query, reasonOf } from './owner-api.mjs';
+import { detailOf, idOf, query, reasonOf } from './owner-api.mjs';
 
 const root = resolve(fileURLToPath(new URL('..', import.meta.url)));
 const fixture = [
@@ -169,7 +169,10 @@ test('native workerd: durable archive, protected API, stable retry identity and 
       headers: { Origin: 'http://localhost', Cookie: cookie, 'X-CSRF-Token': csrfValue, 'Content-Type': 'application/json' },
       body: JSON.stringify({ endpoint: endpoint.name, message_etag: String(Number(beforeReplay.etag) + 1), request_id: crypto.randomUUID() }) });
     assert.equal(stale.status, 409);
-    assert.deepEqual(reasonOf(await stale.json()), 'ETAG_MISMATCH');
+    const staleBody = await stale.json();
+    assert.deepEqual(reasonOf(staleBody), 'ETAG_MISMATCH');
+    // In workerd too, the mismatch carries the delivery's message as it is now (AIP-154).
+    assert.deepEqual(detailOf(staleBody, 'mailhero.ui.v2.Message'), beforeReplay);
     const terminal = { event_id: idOf((await api(`/deliveries/${event.event_id}:resend`, 'POST', { endpoint: endpoint.name,
       message_etag: beforeReplay.etag, request_id: crypto.randomUUID() })).delivery.name) };
     await db.batch([

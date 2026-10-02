@@ -11,6 +11,14 @@ export const idOf = name => name.slice(name.lastIndexOf('/') + 1)
 /** The ErrorInfo reason of an error body (undefined for none). */
 export const reasonOf = data => data?.error?.details?.find(detail => detail['@type'] === 'type.googleapis.com/google.rpc.ErrorInfo')?.reason
 
+/** The typed detail of `type` (`mailhero.ui.v2.Message`) in an error body, without its `@type` (undefined for none). */
+export function detailOf(data, type) {
+  const found = data?.error?.details?.find(detail => detail['@type'] === `type.googleapis.com/${type}`)
+  if (found === undefined) return undefined
+  const { '@type': _, ...value } = found
+  return value
+}
+
 /** An AIP-160 quoted literal or value. */
 export const quote = text => `"${String(text).replaceAll('\\', '\\\\').replaceAll('"', '\\"')}"`
 

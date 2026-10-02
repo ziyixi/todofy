@@ -38,7 +38,7 @@ import { ActiveAlert_Severity, OverviewSchema, SettingsSchema, SetupCheck_Result
 import { FieldMaskError, updatePaths } from '@ziyixi/proto/field-mask'
 import type { ServiceHandlers, ShapeOf } from '@ziyixi/proto/http-transcoder'
 import { decodePageToken, encodePageToken, PageTokenError, type PageParameters } from '@ziyixi/proto/page-token'
-import { Code, RpcError } from '@ziyixi/proto/rpc-status'
+import { Code, errorDetail, RpcError, type ErrorDetail } from '@ziyixi/proto/rpc-status'
 import type { JsonValue } from '@ziyixi/proto/protobuf'
 import type { Env } from './types.ts'
 import { withBackupWrite } from './backup.ts'
@@ -117,8 +117,11 @@ export function isReason(value: string): value is Reason {
   return Object.hasOwn(REASONS, value)
 }
 
-/** The RpcError of `reason`; `httpStatus` overrides its code's status (410 on a download of content that is gone). */
-export function mhError(reason: Reason, init: { metadata?: Record<string, string>; httpStatus?: number; headers?: Record<string, string> } = {}): RpcError {
+/**
+ * The RpcError of `reason`; `httpStatus` overrides its code's status (410 on a download of content that is gone), and
+ * `details` are typed details after the google.rpc ones (ETAG_MISMATCH's current resource).
+ */
+export function mhError(reason: Reason, init: { metadata?: Record<string, string>; httpStatus?: number; headers?: Record<string, string>; details?: readonly ErrorDetail[] } = {}): RpcError {
   const { code, message } = REASONS[reason]
   return new RpcError(code, reason, message, init)
 }
@@ -421,6 +424,30 @@ function messageFilter(filter: string): Omit<MessageQuery, 'limit' | 'cursor'> {
 function mutate<T>(ctx: ApiContext, run: () => Promise<T>): Promise<T> {
   return withBackupWrite(ctx.env, run)
 }
+
+/**
+ * Runs `run`, a mutation guarded by an etag; a stale etag is ETAG_MISMATCH with the resource as it is now as a detail
+ * (AIP-154, errors.proto), which `current` reads: one indexed D1 read (two for ResendDelivery), only on a mismatch. A
+ * resource that is gone by then is ETAG_MISMATCH without it; another failure of that read is that failure's reason.
+ */
+async function withCurrent<T>(run: () => Promise<T>, current: () => Promise<ErrorDetail>): Promise<T> {
+  try {
+    return await run()
+  } catch (error) {
+    if (!(error instanceof HttpError) || codeReason(error.code) !== 'ETAG_MISMATCH') throw error
+    let detail: ErrorDetail
+    try {
+      detail = await current()
+    } catch (failure) {
+      if (failure instanceof HttpError && codeReason(failure.code) === 'NOT_FOUND') throw mhError('ETAG_MISMATCH')
+      throw failure
+    }
+    throw mhError('ETAG_MISMATCH', { details: [detail] })
+  }
+}
+const messageNow = (env: Env, id: string) => async () => errorDetail(MessageSchema, toMessage(await getMessage(env, id)))
+const endpointNow = (env: Env, id: string) => async () => errorDetail(EndpointSchema, toEndpoint(await getEndpoint(env, id)))
+const settingsNow = (env: Env) => async () => errorDetail(SettingsSchema, toSettings(await currentSettings(env)))
 /** An AIP-134 update's paths: an explicit list (no mask, an empty one or `*` is BAD_REQUEST here, see the IDL). */
 function maskPaths(mask: { readonly paths: readonly string[] } | undefined, required: boolean): readonly string[] | '*' {
   let paths: '*' | readonly string[]
@@ -490,7 +517,8 @@ export const handlers: ServiceHandlers<ShapeOf<typeof MailHeroUiService>, ApiCon
         default: break // output-only fields (the transcoder refused unknown ones): ignored, AIP-203
       }
     }
-    return mutate(ctx, async () => toSettings(await patchSettings(ctx.env, ctx.owner, input, expected, request.retentionConfirmation || null, request.applyExisting)))
+    return withCurrent(() => mutate(ctx, async () => toSettings(await patchSettings(ctx.env, ctx.owner, input, expected, request.retentionConfirmation || null, request.applyExisting))),
+      settingsNow(ctx.env))
   },
 
   async previewRetentionPolicy(request, { env, owner }) {
@@ -527,7 +555,7 @@ export const handlers: ServiceHandlers<ShapeOf<typeof MailHeroUiService>, ApiCon
     const paths = maskPaths(request.updateMask, false)
     const expected = versionOf(message.etag)
     if (paths !== '*' && !paths.includes('read')) return toMessage(await getMessage(ctx.env, id)) // nothing the owner sets
-    return mutate(ctx, async () => toMessage(await markRead(ctx.env, id, expected, message.read)))
+    return withCurrent(() => mutate(ctx, async () => toMessage(await markRead(ctx.env, id, expected, message.read))), messageNow(ctx.env, id))
   },
 
   async getMessageContent(request, { env }) {
@@ -549,7 +577,8 @@ export const handlers: ServiceHandlers<ShapeOf<typeof MailHeroUiService>, ApiCon
 
   async clearMessageContent(request, ctx) {
     const id = idOf(request.name, 'messages'), expected = versionOf(request.etag)
-    return mutate(ctx, async () => toMessage(await clearMessageContent(ctx.env, ctx.owner, id, expected, request.requestId)))
+    return withCurrent(() => mutate(ctx, async () => toMessage(await clearMessageContent(ctx.env, ctx.owner, id, expected, request.requestId))),
+      messageNow(ctx.env, id))
   },
 
   async listDeliveries(request, { env }) {
@@ -588,9 +617,10 @@ export const handlers: ServiceHandlers<ShapeOf<typeof MailHeroUiService>, ApiCon
 
   async resendDelivery(request, ctx) {
     const id = idOf(request.name, 'deliveries'), endpointID = idOf(request.endpoint, 'endpoints'), expected = versionOf(request.messageEtag)
-    return mutate(ctx, async () => create(ResendDeliveryResponseSchema, {
+    // message_etag is the delivery's message's: a mismatch carries that Message.
+    return withCurrent(() => mutate(ctx, async () => create(ResendDeliveryResponseSchema, {
       delivery: toDelivery(await resendDelivery(ctx.env, ctx.owner, id, endpointID, expected, request.requestId)),
-    }))
+    })), async () => messageNow(ctx.env, text((await getDelivery(ctx.env, id)).message_id))())
   },
 
   async listDeliveryAttempts(request, { env }) {
@@ -669,23 +699,23 @@ export const handlers: ServiceHandlers<ShapeOf<typeof MailHeroUiService>, ApiCon
         default: break // output-only fields: ignored (AIP-203)
       }
     }
-    return mutate(ctx, async () => toEndpoint(await updateEndpoint(ctx.env, id, input, expected)))
+    return withCurrent(() => mutate(ctx, async () => toEndpoint(await updateEndpoint(ctx.env, id, input, expected))), endpointNow(ctx.env, id))
   },
 
   async rotateEndpointCredential(request, ctx) {
     const id = idOf(request.name, 'endpoints'), expected = versionOf(request.etag)
-    return mutate(ctx, async () => {
+    return withCurrent(() => mutate(ctx, async () => {
       const result = await rotateCredential(ctx.env, id, request.credential, expected)
       return create(RotateEndpointCredentialResponseSchema, { endpoint: toEndpoint(result.endpoint), affectedRevisionCount: result.affected })
-    })
+    }), endpointNow(ctx.env, id))
   },
 
   async unblockEndpoint(request, ctx) {
     const id = idOf(request.name, 'endpoints'), expected = versionOf(request.etag)
-    return mutate(ctx, async () => {
+    return withCurrent(() => mutate(ctx, async () => {
       const result = await unblockEndpoint(ctx.env, ctx.owner, id, expected, request.requestId || null)
       return create(UnblockEndpointResponseSchema, { endpoint: toEndpoint(result.endpoint), affectedRevisionCount: result.affected })
-    })
+    }), endpointNow(ctx.env, id))
   },
 
   async checkEndpoint(request, { env }) {

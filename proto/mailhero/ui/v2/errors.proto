@@ -8,9 +8,10 @@
 //                {"@type": "type.googleapis.com/google.rpc.ErrorInfo", "reason": "ETAG_MISMATCH",
 //                 "domain": "mail-hero.ziyixi.science"},
 //                {"@type": "type.googleapis.com/google.rpc.LocalizedMessage", "locale": "zh-CN", "message": ...},
-//                {"@type": "type.googleapis.com/google.rpc.RequestInfo", "request_id": <16 hex>}]}}
+//                {"@type": "type.googleapis.com/google.rpc.RequestInfo", "request_id": <16 hex>},
+//                {"@type": "type.googleapis.com/mailhero.ui.v2.Message", ...}]}}
 //
-// The UI branches on ErrorInfo.reason only: a value name without its prefix, of ErrorReason below (Mail Hero's own
+// The last detail is ETAG_MISMATCH's only: the resource as it is now (below). The UI branches on ErrorInfo.reason only: a value name without its prefix, of ErrorReason below (Mail Hero's own
 // reasons) or of common.errors.v1.CommonReason (the reasons every API shares). A reason the UI does not know is shown
 // with the LocalizedMessage, never read as success. ErrorInfo.metadata carries codes only (`rule` below), never a
 // value from the request or from mail.
@@ -34,7 +35,10 @@ enum ErrorReason {
   // Never sent.
   ERROR_REASON_UNSPECIFIED = 0;
   // ABORTED (409): the request's etag is stale (AIP-154): the resource changed since it was read (was `conflict`
-  // "状态已改变", and the pipeline's `version_conflict`). Read it again and repeat the change.
+  // "状态已改变", and the pipeline's `version_conflict`). The error carries the resource as it is now, a
+  // mailhero.ui.v2.Message (UpdateMessage, ClearMessageContent, and ResendDelivery's `message_etag`: the delivery's
+  // message), Endpoint (UpdateEndpoint, RotateEndpointCredential, UnblockEndpoint) or Settings (UpdateSettings), with
+  // its current etag; none when the resource is gone by then. Repeat the change on it if it still applies.
   ERROR_REASON_ETAG_MISMATCH = 1;
   // INVALID_ARGUMENT (400): the request_id was used before for another request: another method, resource or input
   // (AIP-155; was `conflict` "操作 ID 已用于不同请求" and the pipeline's `action_conflict`). Nothing changed.

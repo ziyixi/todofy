@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { exportJWK, generateKeyPair, SignJWT } from 'jose'
 import { createAccessVerifier } from '@ziyixi/edge-auth'
 import { handleAPI } from '../src/native/api.ts'
-import { idOf, query, quote, reasonOf, sendMessage } from './owner-api.mjs'
+import { detailOf, idOf, query, quote, reasonOf, sendMessage } from './owner-api.mjs'
 import { endpoint, environment, message, session, withRevision } from './native-env.mjs'
 import { MAX_ZONE_SEGMENTS, zoneSegments } from '../src/native/api-delivery-stats.ts'
 import { ROUTE_BLOCK_COOLDOWN_MS, ROUTE_BLOCK_GRACE_MS, ROUTE_BLOCK_MAX_RECHECKS, buildPayload, runJob, runMaintenance, syntheticTestMail } from '../src/native/pipeline.ts'
@@ -622,6 +622,10 @@ test('endpoint policy rejects private/unauthenticated targets and requires new c
   assert.notEqual((await withRevision(api, changed.data)).current_revision_id, value.current_revision_id)
   const stale = await update('paused', { etag: value.etag, paused: true })
   assert.deepEqual([stale.status, reasonOf(stale.data)], [409, 'ETAG_MISMATCH'])
+  // AIP-154: the mismatch carries the endpoint as it is now, the last detail, so no other GET is needed.
+  assert.equal(stale.data.error.details.at(-1)['@type'], 'type.googleapis.com/mailhero.ui.v2.Endpoint')
+  assert.deepEqual(detailOf(stale.data, 'mailhero.ui.v2.Endpoint'), (await api('GET', `/endpoints/${value.id}`)).data)
+  assert.equal(detailOf(stale.data, 'mailhero.ui.v2.Endpoint').etag, changed.data.etag)
   // A full replacement could resume a paused target by accident: the mask is required.
   for (const mask of ['', '*']) assert.equal((await update(mask, { etag: changed.data.etag, display_name: 'Consumer', uri: changed.data.uri })).status, 400, mask)
   assert.equal((await api('PATCH', `/endpoints/${value.id}`, { etag: changed.data.etag, paused: true })).status, 400)
@@ -670,7 +674,9 @@ test('retention shortening requires an owner/etag/policy-bound preview and never
   assert.equal(saved.status, 200, JSON.stringify(saved.data))
   assert.deepEqual([saved.data.raw_retention_days, saved.data.content_retention_days, saved.data.etag, saved.data.lifecycle_policy_version], [3, 20, '2', 2])
   assert.equal((await env.DB.prepare('SELECT content_deleted_at FROM messages WHERE id=?').bind(id).first()).content_deleted_at, null)
-  assert.equal((await api('PATCH', '/settings?update_mask=send_paused', { etag: '1', send_paused: true })).status, 409)
+  const staleSettings = await api('PATCH', '/settings?update_mask=send_paused', { etag: '1', send_paused: true })
+  assert.deepEqual([staleSettings.status, reasonOf(staleSettings.data)], [409, 'ETAG_MISMATCH'])
+  assert.deepEqual(detailOf(staleSettings.data, 'mailhero.ui.v2.Settings'), saved.data)
   // Lengthening and switching a period off need no preview; a mask naming a field without a value clears it.
   const forever = await api('PATCH', '/settings?update_mask=raw_retention_days,content_retention_days,resolved_retention_days', { etag: '2' })
   assert.equal(forever.status, 200, JSON.stringify(forever.data))
@@ -718,6 +724,9 @@ test('message API searches Chinese body, exposes safe details and optimistic rea
   assert.ok(read.data.read_time)
   const stale = await api('PATCH', `/messages/${id}?update_mask=read`, { read: false, etag: detail.data.etag })
   assert.deepEqual([stale.status, reasonOf(stale.data)], [409, 'ETAG_MISMATCH'])
+  assert.deepEqual(detailOf(stale.data, 'mailhero.ui.v2.Message'), read.data)
+  // The detail is the owner's resource as GET answers it: no storage key, no mail beyond what GET shows.
+  assert.equal(JSON.stringify(stale.data).includes('raw/'), false)
   assert.equal((await api('PATCH', `/messages/${crypto.randomUUID()}?update_mask=read`, { read: false, etag: '1' })).status, 404)
   const raw = await api('GET', `/messages/${id}/raw`)
   assert.equal(raw.status, 200)
@@ -767,6 +776,7 @@ test('send/retry/cancel/resend use durable IDs and deleted content cannot be sen
   const currentMessage = (await api('GET', `/messages/${id}`)).data
   const stale = await api('POST', `/deliveries/${eventID}:resend`, { request_id: crypto.randomUUID(), endpoint: `endpoints/${target.id}`, message_etag: String(Number(currentMessage.etag) + 1) })
   assert.deepEqual([stale.status, reasonOf(stale.data)], [409, 'ETAG_MISMATCH'])
+  assert.deepEqual(detailOf(stale.data, 'mailhero.ui.v2.Message'), currentMessage)
   const resend = await api('POST', `/deliveries/${eventID}:resend`, { request_id: crypto.randomUUID(), endpoint: `endpoints/${target.id}`, message_etag: currentMessage.etag })
   assert.equal(resend.status, 200, JSON.stringify(resend.data))
   // The three methods that make a delivery answer it alike: the response's `delivery`.
@@ -1011,7 +1021,8 @@ test('owner unblock clears every revision of the endpoint, retries waiting event
   }
   const listed = (await api('GET', '/endpoints')).data.endpoints[0]
   assert.equal(listed.blocked_reason, 'http_401'); assert.equal(listed.block_expire_time, undefined)
-  assert.equal((await api('POST', `/endpoints/${target.id}:unblock`, { etag: target.etag })).status, 409)
+  const staleUnblock = await api('POST', `/endpoints/${target.id}:unblock`, { etag: target.etag })
+  assert.deepEqual([staleUnblock.status, detailOf(staleUnblock.data, 'mailhero.ui.v2.Endpoint')?.etag], [409, changed.etag])
   assert.equal((await api('POST', `/endpoints/${crypto.randomUUID()}:unblock`, { etag: '1' })).status, 404)
   const before = env.wakes.length, actionID = crypto.randomUUID()
   const result = await api('POST', `/endpoints/${target.id}:unblock`, { etag: changed.etag, request_id: actionID })
