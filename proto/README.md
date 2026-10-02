@@ -64,8 +64,9 @@ keeps the checks the IDL cannot say (UTF-8 byte sizes, a real calendar time, con
 about 9,000 mutations it gives the frozen parser's verdict, event and log reason but for integers above 2^31 - 1, and the
 generated schema the frozen hand-written one's verdict (formats asserted; in ECMAScript's dialect "not blank" differs on
 U+001C-U+001F, U+0085 and U+FEFF on purpose: `mail_received.proto`'s header). It ships after the vocabulary and deploys
-Mail Hero and Todofy only. Measured on 2026-10-01: Mail Hero's bundle 189.8 → 192.4 KiB gzip (the descriptors and the
-generated message; budget 228 KiB); building an event in workerd, in reference ms, the connection test first 0.4-1.0 →
+Mail Hero and Todofy only. Measured on 2026-10-01: Mail Hero's bundle 189.8 → 193.3 KiB gzip (the descriptors, the
+generated message and the coordinator's delivery route; budget 228 KiB);
+building an event in workerd, in reference ms, the connection test first 0.4-1.0 →
 2.2-2.6 and warm about 0.4 either way, 105 attachments first 0.6-0.8 → 3.6-3.9 and warm 0.4 → 0.8-1.0, the largest
 parsed input (a 1 MiB text truncated to 256 KiB, 105 attachments) first 3.2-3.3 → 5.9-6.6 and warm 2.4-2.6 → 2.8-2.9
 (`mail-hero/cloudflare/test/cpu/payload-cpu.test.mjs` holds the medians of three fresh isolates below 9.5 and 4.5
