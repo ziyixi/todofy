@@ -87,17 +87,30 @@ describe('adding a watch', () => {
     await until(() => text(root).includes('gbk（来自 meta）'))
     // The fragment never reached the server: the preview carries the URL in its body.
     expect(server.calls.every((call) => !call.path.includes('shop.example.com'))).toBe(true)
-    expect(server.mutations(':preview')[0]?.body).toMatchObject({ watch: { uri: 'https://shop.example.com/item?x=1', display_name: 'shop.example.com' } })
+    // The name is never taken from the URL (it goes into Todoist): the preview sends a neutral one and the box stays empty.
+    expect(server.mutations(':preview')[0]?.body).toMatchObject({ watch: { uri: 'https://shop.example.com/item?x=1', display_name: '新监视' } })
+    const nameBox = () => root.querySelector<HTMLInputElement>('input[name="displayName"]')
+    expect(nameBox()?.value).toBe('')
     button(root, '排除这些').click()
     const ads = [...root.querySelectorAll<HTMLButtonElement>('button.block')].find((node) => (node.textContent ?? '').includes('Advertisement'))
     ads?.click()
     await until(() => text(root).includes('将比较的内容（1 行'))
     expect(server.mutations(':preview').at(-1)?.body).toMatchObject({ watch: { source: { html: { exclude_selectors: ['aside#ads'] } } } })
     expect(text(root)).toContain('排除 aside#ads')
+    // Saving asks for the owner's name first, and nothing is created without one.
+    button(root, '保存').click()
+    await until(() => (document.getElementById('toast')?.textContent ?? '').includes('先填写名称'))
+    const name = nameBox()
+    if (name === null) throw new Error('no name box')
+    expect(name.value).toBe('')
+    expect(document.activeElement).toBe(name)
+    expect(server.mutations().some((call) => call.method === 'POST' && call.path.startsWith('/api/v1/watches?'))).toBe(false)
+    name.value = '合成：水壶价格'
+    name.dispatchEvent(new Event('input'))
     button(root, '保存').click()
     await until(() => window.location.pathname.startsWith('/watches/'))
     const created = server.mutations().find((call) => call.method === 'POST' && call.path.startsWith('/api/v1/watches?'))
-    expect(created?.body).toMatchObject({ uri: 'https://shop.example.com/item?x=1', source: { html: { exclude_selectors: ['aside#ads'] } }, check_interval_minutes: 360 })
+    expect(created?.body).toMatchObject({ display_name: '合成：水壶价格', uri: 'https://shop.example.com/item?x=1', source: { html: { exclude_selectors: ['aside#ads'] } }, check_interval_minutes: 360 })
   })
 
   it('shows a failed health gate as its reason, never as "no change"', async () => {

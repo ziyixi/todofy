@@ -119,6 +119,35 @@ export function lineTitle(line: WatchLine): string {
   return oneLine([name, ...parts].join(' · '), TASK_INTENT_LIMITS.itemTitleMax);
 }
 
+/**
+ * The owner's name for a watch as a task may carry it: '' (so the title says `监视 <id>`) when the name holds the watched
+ * URL, its origin, its host or a parent domain of it (`shop.example.com`, `example.com`; a public suffix like `co.uk`
+ * too, which only costs the name), compared case-insensitively on the one-line form. A name copied
+ * from the URL (an older UI defaulted to the host; an owner may paste the address) would otherwise put the watched
+ * site, or the whole URL with its query, into Todoist, and a host from a shared link is text the owner never wrote.
+ * `host` is the stored host column (the URL's, kept by url-policy.ts). An internationalized host is compared in its
+ * ASCII form only, as the URL keeps it.
+ */
+export function taskName(name: string, uri: string, host: string): string {
+  const flat = oneLine(name, 4 * TASK_INTENT_LIMITS.itemTitleMax).toLowerCase();
+  if (flat === '') return '';
+  const candidates = new Set<string>([oneLine(uri, 4096).toLowerCase(), host.toLowerCase()]);
+  try {
+    const url = new URL(uri);
+    for (const value of [url.href, url.origin, url.host]) candidates.add(value.toLowerCase());
+    // The host and each parent domain of two labels or more.
+    const labels = url.hostname.toLowerCase().split('.');
+    for (let start = 0; start <= labels.length - 2; start++) candidates.add(labels.slice(start).join('.'));
+  } catch {
+    // Not a URL (never stored, url-policy.ts normalizes it): the raw text and the host column still count.
+  }
+  for (const candidate of candidates) {
+    // A host has a dot (url-policy.ts refuses single-label hosts and IP literals); a shorter text is no address.
+    if (candidate.includes('.') && flat.includes(candidate)) return '';
+  }
+  return name;
+}
+
 /** Most changes first, then by watch ID: the same lines always give the same intent. */
 export function orderLines(lines: readonly WatchLine[]): WatchLine[] {
   return [...lines].sort((a, b) => changeCount(b) - changeCount(a) || (a.watchId < b.watchId ? -1 : a.watchId > b.watchId ? 1 : 0));
@@ -302,10 +331,12 @@ export class TodofySink implements NotificationSink {
     }
     const lines: WatchLine[] = [];
     for (const [watchId, line] of byWatch) {
-      const row = this.store.one<{ settings: string }>(`SELECT settings FROM watches WHERE id = ?`, watchId);
+      const row = this.store.one<{ settings: string; host: string }>(`SELECT settings, host FROM watches WHERE id = ?`, watchId);
       if (row === undefined) continue;
-      const name = (JSON.parse(row.settings) as { display_name?: unknown }).display_name;
-      lines.push({ watchId, name: typeof name === 'string' ? name : '', ...line });
+      const settings = JSON.parse(row.settings) as { display_name?: unknown; uri?: unknown };
+      const name = typeof settings.display_name === 'string' ? settings.display_name : '';
+      // Never the watched site: a name that holds its URL or host becomes `监视 <id>` (taskName).
+      lines.push({ watchId, name: taskName(name, typeof settings.uri === 'string' ? settings.uri : '', row.host), ...line });
     }
     return { lines, taken };
   }

@@ -66,6 +66,10 @@ describe('saving a new watch', () => {
     uri.dispatchEvent(new Event('input'))
     button(root, '预览').click()
     await until(() => text(root).includes('将比较的内容'))
+    const name = root.querySelector<HTMLInputElement>('input[name="displayName"]')
+    if (name === null) throw new Error('no name box')
+    name.value = '合成：水壶'
+    name.dispatchEvent(new Event('input'))
     server.loseNextResponse = '/api/v1/watches'
     button(root, '保存').click()
     await until(() => window.location.pathname.startsWith('/watches/w'))

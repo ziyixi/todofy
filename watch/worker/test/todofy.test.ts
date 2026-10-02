@@ -20,6 +20,7 @@ import {
   lineTitle,
   oneLine,
   outcomeOf,
+  taskName,
   TRIGGER_LABELS,
   urgentIntent,
   type WatchLine,
@@ -101,6 +102,21 @@ describe('every intent passes the schema and keeps the owner decision', () => {
     const items = digestIntent('2026-10-01', DIGEST_LINES, HOST).items;
     expect(items.map((item) => item.url)).toEqual(['jobs', 'kettle', 'old-blog', 'quiet-page'].map((id) => `https://${HOST}/watches/${id}`));
     expect(items.every((item) => item.description === undefined)).toBe(true);
+  });
+
+  it('a name that holds the watched URL, origin or host is never sent (taskName)', () => {
+    const uri = 'https://Shop.Example.com/item?key=s3cr3t';
+    const host = 'shop.example.com';
+    for (const name of ['shop.example.com', 'SHOP.EXAMPLE.COM', 'example.com', 'https://shop.example.com', 'shop.example.com/item?key=s3cr3t', '  价格 shop.example.com  ', uri]) {
+      expect(taskName(name, uri, host), name).toBe('');
+      expect(lineTitle(line('w1', taskName(name, uri, host), [['number', 1]]))).toBe('监视 w1 · 数值 1 次变化');
+    }
+    const www = 'https://www.example.org/feed';
+    expect(taskName('example.org', www, 'www.example.org')).toBe('');
+    expect(taskName('Example.org 新闻', www, 'www.example.org')).toBe('');
+    // The owner's own words pass, a word that only looks like part of a host too.
+    for (const name of ['水壶价格', 'shop item', 'example', 'Example 新闻']) expect(taskName(name, uri, host)).toBe(name);
+    expect(taskName('', uri, host)).toBe('');
   });
 
   it('oneLine keeps one line of at most max code points', () => {

@@ -273,7 +273,10 @@ The sink (W3, `worker/src/todofy.ts`; the owner's decisions of 2026-10-01) is To
   `https://watch.ziyixi.science/watches/<id>`, the only host Todofy allows for this source. Never the page's text, a
   watched URL or a change summary: page content is untrusted (a page could address an assistant that reads the
   owner's tasks), and a watched URL leaves the object only through the owner API. A name is made one line (control
-  characters and separators become spaces) and cut to the contract's bounds.
+  characters and separators become spaces) and cut to the contract's bounds. A name that holds the watched URL, its
+  origin, its host or a parent domain of it is replaced by `监视 <id>` (`todofy.ts` `taskName`), and the UI never
+  derives a name from the URL: the owner types it before saving (a shared `/new#u=` link's host is not the owner's
+  text).
 - **Delivery**: the intent's wire JSON is frozen in `intents` with the events it took; it is proposed with exactly
   those bytes until Todofy records it (`pending`, `created`, `duplicate`, `failed`, `paused`: Todofy holds it and
   deduplicates by intent ID). A lost answer, `unavailable`, a pause or the day's limit is retried (5 minutes doubling

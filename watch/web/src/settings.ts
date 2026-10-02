@@ -324,7 +324,7 @@ export function settingsForm(draft: Draft, onInput: () => void, options: FormOpt
     )
     fill(
       form,
-      labelled('名称', input('displayName', { maxlength: '80', placeholder: '例如 水壶价格' })),
+      labelled('名称', input('displayName', { name: 'displayName', maxlength: '80', placeholder: '例如 水壶价格' }), '会出现在 Todoist 任务里；不要填网址'),
       labelled('数据来源', sourceSelect),
       ...sourceFields,
       labelled('提醒条件', triggerSelect),

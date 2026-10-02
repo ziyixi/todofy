@@ -6,7 +6,9 @@
  * for every stage of the pipeline: the fetch, the health gate, and the page's blocks. Tapping a block adds its
  * selector to the include list ("只看这些") or the exclude list ("排除这些"), and the preview runs again from the Worker's
  * stored fetch, so the owner sees the normalized lines that will be compared before saving. A landmark block (a nav,
- * the page's header or footer) says that it does not count unless picked. "保存" creates the watch.
+ * the page's header or footer) says that it does not count unless picked. "保存" creates the watch once the owner has
+ * typed its name: the name goes into the owner's Todoist tasks, so it is never derived from the URL (a shared link's
+ * host is text the owner did not write, and a name copied from the URL would put the watched site into Todoist).
  *
  * The preview area is not a live region (it is rebuilt on every tap); a short status line says what changed.
  */
@@ -20,6 +22,8 @@ import type { ViewContext } from '../app.ts'
 
 /** Lines the preview shows. */
 const PREVIEW_LINES = 60
+/** The name a preview sends while the owner has typed none (Watch requires one; a preview saves nothing). */
+const PREVIEW_NAME = '新监视'
 
 type PreviewResult = Awaited<ReturnType<typeof api.previewWatch>>
 
@@ -127,12 +131,12 @@ export function renderAdd(ctx: ViewContext): Promise<void> {
       toast('先输入网址')
       return
     }
-    if (draft.displayName.trim() === '') draft.displayName = hostOf(draft.uri)
     previewButton.disabled = true
     result.replaceChildren(el('p', { class: 'status' }, refresh ? '重新抓取中…（同一网址 15 分钟内只抓一次，同一网站两次抓取至少间隔 30 秒）' : '抓取中…'))
     try {
-      // The preview needs a display name (a required field of Watch); the form keeps the one the owner types.
-      last = await api.previewWatch({ watch: watchOf(draft), refresh })
+      // The preview needs a display name (a required field of Watch): a neutral one until the owner types theirs; the
+      // form keeps it empty, so saving still asks for it.
+      last = await api.previewWatch({ watch: watchOf({ ...draft, displayName: draft.displayName.trim() === '' ? PREVIEW_NAME : draft.displayName }), refresh })
       renderResult(last)
       refreshButton.hidden = false
       save.disabled = false
@@ -146,6 +150,11 @@ export function renderAdd(ctx: ViewContext): Promise<void> {
 
   const requestId = newRequestId()
   const doSave = async () => {
+    if (draft.displayName.trim() === '') {
+      toast('先填写名称（会出现在 Todoist 任务里，不要填网址）')
+      form.element.querySelector<HTMLInputElement>('input[name="displayName"]')?.focus()
+      return
+    }
     save.disabled = true
     try {
       const created = await withRetry(() => api.createWatch({ watch: watchOf(draft), requestId }))
