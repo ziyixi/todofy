@@ -307,6 +307,16 @@ GitHub call:
 | `Changes` | `uv run --no-project --python 3.12 python -m unittest discover -s .github/scripts`; `drift_desired.py --check` | 316 tests OK (every production Worker and D1 registered, tile links = PUBLIC_HOST, every probe path outside Access per `infra/access.tf`); the desired state is current |
 | browser | the real Worker in Miniflare with `web/dist`, stub Ops apps, synthetic GraphQL and probe answers, the loopback bypass; 1280 px and 390 px, light and dark | healthy: 应用 holds Mail Hero, Todofy, 论文雷达, FlowDay, 短链接 in one desktop row next to 站点; on a phone 应用与站点 fills two rows of three; FlowDay and 短链接 read "● 正常 · 响应 N ms" with the Access lock; no horizontal scroll at 390 px. Failing (FlowDay's manifest redirected, links at 8 % errors): strip "1 项故障 · 1 项需关注" (FlowDay：HTTP 状态异常, 短链接：错误率偏高), tiles ■ 故障 / ▲ 需关注, badge 2; FlowDay's sheet shows 连续失败 2 次 and links to its Worker and the app |
 
+After the review (rebased onto `eb5f40e`, fixes in `ef3e395`), again from a clean clone: deploy tests 17 passed;
+worker lint, typecheck, 15 files / 236 tests (the error-rate tie: the probe keeps the tile, the Worker row lists the
+rate; no tile with a health level is rose); runtime 8 files / 72 tests incl. the CPU test; web 13 files / 117 tests,
+build, no cross-origin references; import guard; dry-run 389.6 KiB raw, 91.1 KiB gzip (budget 108 KiB); `Changes`
+318 tests OK (new: every production Worker with a Custom Domain has a visible tile on one of its hosts, `home`
+exempt; it fails on `main`'s registry for links, hidden, and FlowDay, unregistered); `drift_desired.py --check`
+current. Browser, the same synthetic set-up at 1280 px light and 375/390 px light and dark: 短链接 now has the slate
+chip of the neutral entries, FlowDay teal; both "● 正常 · 响应 N ms" with the lock, links to `https://flowday.ziyixi.science/`
+and `https://s.ziyixi.science/_/` in a new tab; no horizontal scroll at 375 px.
+
 ## 2. Production (pending)
 
 None of these has been done; each needs the first `Dashboard deploy` on `main` (after Todofy and Mail
