@@ -1,11 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { apiGetOrNull, apiSendOk } from "@/lib/client/http";
-
-interface TaskNoteResponse {
-  content?: string | null;
-}
+import { loadNote, saveNote } from "@/lib/client/flowday-api";
 
 /**
  * A note is saved after a pause in typing. Each save is one D1 row write, so the pause is 1.5 s (not every few
@@ -26,17 +22,15 @@ export function useTaskNote(taskId: string, flowDate: string) {
     debounceRef.current = null;
     const content = pendingRef.current;
     pendingRef.current = null;
-    if (content !== null) void apiSendOk("PUT", "/api/notes", { taskId, flowDate, content });
+    if (content !== null) void saveNote(taskId, flowDate, content);
   }, [flowDate, taskId]);
 
   useEffect(() => {
     let cancelled = false;
-    void apiGetOrNull<TaskNoteResponse>(
-      `/api/notes?taskId=${encodeURIComponent(taskId)}&date=${encodeURIComponent(flowDate)}`
-    ).then((data) => {
+    void loadNote(taskId, flowDate).then((content) => {
       if (cancelled) return;
-      if (data?.content) {
-        setNote(data.content);
+      if (content) {
+        setNote(content);
         setShowNote(true);
       }
       setLoaded(true);

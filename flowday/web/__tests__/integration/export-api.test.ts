@@ -1,7 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { exportData, exportRequestError } from "@/features/settings/services/export-service";
-import { apiGet } from "@/lib/client/http";
-import type { AnalyticsDataset } from "@/lib/types/worker-contract";
+import { queryAnalytics } from "@/lib/client/flowday-api";
 import type { Task } from "@/lib/types/task";
 import { addCompletedFlowTask, createTimeEntry, fakeFetch, setFlowTaskIds, upsertTasks } from "../helpers/fake-worker";
 import { buildMiscTaskId } from "@/lib/utils/misc-task";
@@ -34,9 +33,7 @@ async function callExport(params: string) {
   const query = new URLSearchParams(params);
   const args = { type: query.get("type"), format: query.get("format"), startDate: query.get("start"), endDate: query.get("end") };
   if (exportRequestError(args) !== null) return new Response(null, { status: 400 });
-  const dataset = await apiGet<AnalyticsDataset>(
-    `/api/analytics?${new URLSearchParams({ start: args.startDate ?? "", end: args.endDate ?? "" }).toString()}`
-  );
+  const dataset = await queryAnalytics({ start: args.startDate ?? "", end: args.endDate ?? "" });
   const result = exportData(args, dataset);
   if (!result.ok) return new Response(null, { status: 400 });
   return new Response(result.file.body, {

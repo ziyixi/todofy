@@ -1,45 +1,49 @@
-import { apiGetOrNull, apiSend, apiSendOk } from "@/lib/client/http";
+import {
+  loadFlows,
+  loadSettings,
+  persistFlowCompletion,
+  persistFlowTasks,
+  persistPlanningCompleted as persistPlanning,
+  rolloverFlow,
+  type FlowSnapshot,
+  type SettingsView,
+} from "@/lib/client/flowday-api";
 import { formatLocalDate } from "@/lib/utils/time";
-import type { FlowMutationAction, FlowStateResponse } from "../contracts";
-import type { SettingsResponse } from "@/features/settings/contracts";
 
 export function todayStr() {
   return formatLocalDate();
 }
 
-/** Saves a flow change in the background; on failure the banner shows it and `onFailure` reloads the flows. */
-export function persistFlowMutation(body: FlowMutationAction, onFailure: () => void) {
-  void apiSendOk("PUT", "/api/flows", body).then((saved) => {
-    if (!saved) onFailure();
-  });
+/** Saves a day's planned tasks in the background; on failure the banner shows it and `onFailure` reloads the flows. */
+export function persistFlow(date: string, taskIds: string[], onFailure: () => void) {
+  persistFlowTasks(date, taskIds, onFailure);
 }
 
-/** Throws (after the banner shows it) when the change was not saved. */
-export async function sendFlowMutation(body: FlowMutationAction): Promise<void> {
-  await apiSend("PUT", "/api/flows", body);
+/** Saves a task's done mark of a day in the background; on failure the banner shows it and `onFailure` reloads. */
+export function persistCompleted(date: string, taskId: string, done: boolean, onFailure: () => void) {
+  persistFlowCompletion(date, taskId, done, onFailure);
+}
+
+/**
+ * Moves the unfinished tasks of `fromDate` (or only `taskIds`) to the top of `toDate`. Throws (after the banner shows
+ * it) when it was not saved.
+ */
+export async function sendRollover(fromDate: string, toDate: string, taskIds?: string[]): Promise<void> {
+  await rolloverFlow(fromDate, toDate, taskIds);
 }
 
 export function persistPlanningCompleted(date: string) {
-  void apiSendOk("PUT", "/api/settings", { planning_completed_date: date });
+  persistPlanning(date);
 }
 
-export async function loadFlowState(): Promise<FlowStateResponse | null> {
-  const data = await apiGetOrNull<FlowStateResponse>("/api/flows");
-  if (!data) return null;
-  return {
-    flows: data.flows ?? {},
-    completedTasks: data.completedTasks ?? {},
-  };
+export async function loadFlowState(): Promise<FlowSnapshot | null> {
+  return loadFlows();
 }
 
-export async function loadHydrationData(today: string): Promise<{
-  flowState: FlowStateResponse | null;
-  settings: SettingsResponse | null;
+export async function loadHydrationData(): Promise<{
+  flowState: FlowSnapshot | null;
+  settings: SettingsView | null;
 }> {
-  const [flowState, settings] = await Promise.all([
-    apiGetOrNull<FlowStateResponse>("/api/flows"),
-    apiGetOrNull<SettingsResponse>(`/api/settings?today=${encodeURIComponent(today)}`),
-  ]);
-
+  const [flowState, settings] = await Promise.all([loadFlows(), loadSettings()]);
   return { flowState, settings };
 }

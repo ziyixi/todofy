@@ -8,7 +8,7 @@ import {
   PopoverTrigger,
 } from "@/components/ui/popover";
 import type { TimeEntry } from "@/features/timer/contracts";
-import { apiGetOrNull } from "@/lib/client/http";
+import { loadEntriesByTask } from "@/lib/client/flowday-api";
 import { sumEntryDurationSeconds } from "@/lib/utils/time-entries";
 import { formatDurationShort } from "./manual-entry-utils";
 import { AddEntryDialog, EditEntryDialog } from "./manual-entry-dialogs";
@@ -34,9 +34,7 @@ export function ManualEntry({
 
   const fetchEntries = useCallback(async () => {
     try {
-      const nextEntries = await apiGetOrNull<TimeEntry[]>(
-        `/api/entries?taskId=${encodeURIComponent(taskId)}`
-      );
+      const nextEntries = await loadEntriesByTask(taskId);
       if (nextEntries) {
         setEntries(nextEntries);
       }

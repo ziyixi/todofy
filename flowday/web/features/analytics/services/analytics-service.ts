@@ -5,7 +5,7 @@ import {
   parseISO,
   startOfWeek,
 } from "date-fns";
-import type { AnalyticsDataset } from "@/lib/types/worker-contract";
+import type { AnalyticsDataset } from "@/lib/client/flowday-api";
 import type { Task } from "@/lib/types/task";
 import { buildMiscTask, isMiscTaskId } from "@/lib/utils/misc-task";
 import {
@@ -21,8 +21,8 @@ import type {
 } from "../contracts";
 
 /**
- * The daily, weekly and work-pattern reviews, computed in the browser from the raw rows of GET /api/analytics
- * (worker/src/store/analytics.ts). Workers Free gives a request 10 ms of CPU, and the minute-by-minute heatmaps took
+ * The daily, weekly and work-pattern reviews, computed in the browser from the raw rows of QueryAnalytics
+ * (flowday.ui.v1; worker/src/store/analytics.ts). Workers Free gives a request 10 ms of CPU, and the minute-by-minute heatmaps took
  * 40-63 ms per 100 hours of entries on the server; here they run in the owner's browser instead.
  */
 

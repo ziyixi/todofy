@@ -24,7 +24,7 @@ import { PRIORITY_CONFIG } from "@/lib/types/task";
 import { useTodoistStore } from "@/features/todoist/store";
 import type { Task } from "@/lib/types/task";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip";
-import { apiGetOrNull, apiSendOk } from "@/lib/client/http";
+import { loadDeletedTasks, restoreTask } from "@/lib/client/flowday-api";
 import { cn } from "@/lib/utils";
 
 interface DeletedTasksDialogProps {
@@ -59,7 +59,7 @@ export function DeletedTasksDialog({
     if (!open) return;
 
     let cancelled = false;
-    apiGetOrNull<Task[]>("/api/tasks/deleted")
+    loadDeletedTasks()
       .then((tasks) => {
         if (cancelled) return;
         const nextTasks = tasks ?? [];
@@ -129,7 +129,7 @@ export function DeletedTasksDialog({
 
   const handleRestore = async (taskId: string) => {
     // A failure shows on the banner and the task stays in the list.
-    if (!(await apiSendOk("POST", "/api/tasks/deleted", { taskId }))) return;
+    if (!(await restoreTask(taskId))) return;
     setAllDeleted((prev) => prev.filter((t) => t.id !== taskId));
     await hydrate();
   };

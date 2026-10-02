@@ -1,9 +1,9 @@
 /**
- * CSV and JSON exports, built in the browser from the raw rows of GET /api/analytics?start&end (the container era
+ * CSV and JSON exports, built in the browser from the raw rows of QueryAnalytics (flowday.ui.v1; the container era
  * built them in an /api/export route). Fields with a comma, quote or newline are quoted, quotes doubled.
  */
 import { taskLookup } from "@/features/analytics/services/analytics-service";
-import type { AnalyticsDataset } from "@/lib/types/worker-contract";
+import type { AnalyticsDataset } from "@/lib/client/flowday-api";
 import { entryDurationSeconds } from "@/lib/utils/time-entries";
 import type { ExportDataType, ExportFormat } from "../contracts";
 

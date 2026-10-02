@@ -1,3 +1,4 @@
+import { join } from "node:path";
 import type { NextConfig } from "next";
 
 // A static export (out/): the Worker "flowday" serves it as static assets in front of its API (../wrangler.toml,
@@ -12,7 +13,7 @@ const nextConfig: NextConfig = {
   output: "export",
   productionBrowserSourceMaps: false,
   // web/ is the project root (the Worker's own package-lock.json sits next to it in ../worker).
-  turbopack: { root: import.meta.dirname },
+  turbopack: { root: join(import.meta.dirname, "../..") },
 };
 
 export default nextConfig;

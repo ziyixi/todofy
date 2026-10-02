@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useTimerStore } from "@/features/timer/store";
 import { _getChimeCount, _resetChime } from "@/lib/utils/chime";
 import { buildMiscTaskId } from "@/lib/utils/misc-task";
+import { fakeFetch, fakeWorker } from "../helpers/fake-worker";
 
 interface EntryPostBody {
   taskId: string;
@@ -10,41 +11,19 @@ interface EntryPostBody {
   source: string;
 }
 
-function jsonResponse(data: unknown, status = 200) {
-  return new Response(JSON.stringify(data), {
-    status,
-    headers: { "Content-Type": "application/json" },
-  });
-}
-
-function createTimerFetchMock(options: {
-  onEntryPost?: (body: EntryPostBody) => void;
-  timerSession?: unknown;
-} = {}) {
+/**
+ * The fake Worker's fetch (the owner API on the real wire), reporting each CreateTimeEntry's body in the old names
+ * the assertions use. `timerSession: null` starts without a stored session (the fake's default).
+ */
+function createTimerFetchMock(options: { onEntryPost?: (body: EntryPostBody) => void; timerSession?: null } = {}) {
+  if (options.timerSession === null) fakeWorker.session = null;
   return vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
-    const url = typeof input === "string" ? input : input.toString();
-    const method = init?.method ?? "GET";
-
-    if (url === "/api/timer/session") {
-      if (method === "GET") {
-        return jsonResponse({ session: options.timerSession ?? null });
-      }
-      if (method === "PUT" || method === "DELETE") {
-        return jsonResponse({ success: true });
-      }
+    const response = await fakeFetch(input, init);
+    if ((init?.method ?? "GET") === "POST" && String(input).startsWith("/api/v1/timeEntries?")) {
+      const body = JSON.parse(String(init?.body ?? "{}")) as { task_id: string; flow_date: string; duration_seconds: number; source: string };
+      options.onEntryPost?.({ taskId: body.task_id, flowDate: body.flow_date, durationS: body.duration_seconds, source: body.source });
     }
-
-    if (url.startsWith("/api/entries?taskId=") && method === "GET") {
-      return jsonResponse([]);
-    }
-
-    if (url === "/api/entries" && method === "POST") {
-      const body = JSON.parse(String(init?.body ?? "{}")) as EntryPostBody;
-      options.onEntryPost?.(body);
-      return jsonResponse({ id: "x" }, 201);
-    }
-
-    throw new Error(`Unexpected fetch: ${method} ${url}`);
+    return response;
   });
 }
 

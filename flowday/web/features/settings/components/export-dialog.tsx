@@ -13,8 +13,7 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { formatLocalDate } from "@/lib/utils/time";
-import { apiGet } from "@/lib/client/http";
-import type { AnalyticsDataset } from "@/lib/types/worker-contract";
+import { queryAnalytics, type AnalyticsDataset } from "@/lib/client/flowday-api";
 import { exportData, exportRequestError } from "../services/export-service";
 
 interface ExportDialogProps {
@@ -49,10 +48,9 @@ export function ExportDialog({ open, onOpenChange }: ExportDialogProps) {
   async function handleDownload() {
     const args = { type: exportType, format: exportFormat, startDate, endDate };
     if (exportRequestError(args) !== null) return;
-    const params = new URLSearchParams({ start: startDate, end: endDate });
     let dataset: AnalyticsDataset;
     try {
-      dataset = await apiGet<AnalyticsDataset>(`/api/analytics?${params.toString()}`, { report: true });
+      dataset = await queryAnalytics({ start: startDate, end: endDate }, { report: true });
     } catch {
       return;
     }

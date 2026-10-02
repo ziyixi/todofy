@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react";
 import { AlertTriangle } from "lucide-react";
 import { useFlowTasksForDate, useCompletedTasksForDate, useFlowStore } from "@/features/flow/store";
-import { apiGetOrNull } from "@/lib/client/http";
+import { loadEntriesByDate } from "@/lib/client/flowday-api";
 import { formatDuration, formatElapsed } from "@/lib/utils/time";
 import {
   sumEntryDurationSeconds,
@@ -33,10 +33,8 @@ export function ProgressBar({ date }: { date: string }) {
   const entryRevision = useTimerStore((s) => s.entryRevision);
   useEffect(() => {
     let cancelled = false;
-    apiGetOrNull<DurationEntryLike[]>(
-      `/api/entries?date=${encodeURIComponent(date)}`
-    )
-      .then((entries) => {
+    loadEntriesByDate(date)
+      .then((entries: DurationEntryLike[] | null) => {
         if (!cancelled) {
           setActualSeconds(sumEntryDurationSeconds(entries));
         }

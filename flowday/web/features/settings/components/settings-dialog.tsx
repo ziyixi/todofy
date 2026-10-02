@@ -14,9 +14,8 @@ import { ExportDialog } from "./export-dialog";
 import { useIdlePermissionStatus } from "../hooks/use-idle-permission-status";
 import { useTodoistStore } from "@/features/todoist/store";
 import { useFlowStore } from "@/features/flow/store";
-import { apiGetOrNull, apiSendOk } from "@/lib/client/http";
+import { loadSettings, saveDayCapacity, saveTodoistKey } from "@/lib/client/flowday-api";
 import { cn } from "@/lib/utils";
-import type { SettingsResponse } from "../contracts";
 
 interface SettingsDialogProps {
   open: boolean;
@@ -48,12 +47,10 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
     setApiKey("");
     setMessage(null);
 
-    void apiGetOrNull<SettingsResponse>("/api/settings").then((data) => {
+    void loadSettings().then((data) => {
       if (!data) return;
-      setHasExistingKey(data.has_api_key);
-      if (data.day_capacity_mins != null) {
-        setCapacityHours(String(data.day_capacity_mins / 60));
-      }
+      setHasExistingKey(data.hasApiKey);
+      setCapacityHours(String(data.dayCapacityMins / 60));
     });
   }, [open]);
 
@@ -66,7 +63,7 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
     setSaving(true);
     setMessage(null);
     try {
-      if (await apiSendOk("PUT", "/api/settings", { todoist_api_key: apiKey.trim() })) {
+      if (await saveTodoistKey(apiKey.trim())) {
         setHasExistingKey(true);
         setApiKey("");
         // The automatic sync starts now that a key is stored.
@@ -105,7 +102,7 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
     setMessage(null);
     try {
       const capacityMins = Math.round(hours * 60);
-      if (await apiSendOk("PUT", "/api/settings", { day_capacity_mins: capacityMins })) {
+      if (await saveDayCapacity(capacityMins)) {
         setDayCapacityMins(capacityMins);
         setMessage({ type: "success", text: "Capacity saved" });
       } else {

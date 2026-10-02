@@ -1,5 +1,5 @@
 import type { Task } from "@/lib/types/task";
-import type { SyncMode } from "../contracts";
+import type { SyncMode } from "@/lib/client/flowday-api";
 
 export interface TodoistState {
   tasks: Task[];

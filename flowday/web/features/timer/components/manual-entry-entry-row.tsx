@@ -3,7 +3,7 @@
 import { format } from "date-fns";
 import { Pencil, Trash2 } from "lucide-react";
 import type { TimeEntry } from "@/features/timer/contracts";
-import { apiSendOk } from "@/lib/client/http";
+import { deleteTimeEntry } from "@/lib/client/flowday-api";
 import { formatDurationShort, formatTimeRange } from "./manual-entry-utils";
 
 export function ManualEntryRow({
@@ -17,7 +17,7 @@ export function ManualEntryRow({
 }) {
   async function handleDelete() {
     // A failure shows on the banner and the entry stays listed.
-    if (await apiSendOk("DELETE", `/api/entries/${encodeURIComponent(entry.id)}`)) onDelete();
+    if (await deleteTimeEntry(entry.id)) onDelete();
   }
 
   const entryDate = format(new Date(entry.startTime), "MMM d");

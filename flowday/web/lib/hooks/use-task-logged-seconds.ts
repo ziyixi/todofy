@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { apiGetOrNull } from "@/lib/client/http";
+import { loadEntriesByDate, loadEntriesByTask } from "@/lib/client/flowday-api";
 import {
   mapEntrySecondsByTask,
   sumEntryDurationSeconds,
@@ -15,10 +15,8 @@ export function useTaskLoggedSeconds(taskId: string, revision: number): number {
   useEffect(() => {
     if (!taskId) return;
     let cancelled = false;
-    apiGetOrNull<DurationEntryLike[]>(
-      `/api/entries?taskId=${encodeURIComponent(taskId)}`
-    )
-      .then((entries) => {
+    loadEntriesByTask(taskId)
+      .then((entries: DurationEntryLike[] | null) => {
         if (!cancelled) {
           setSeconds(sumEntryDurationSeconds(entries));
         }
@@ -40,10 +38,8 @@ export function useLoggedSecondsByTaskForDate(
 
   useEffect(() => {
     let cancelled = false;
-    apiGetOrNull<TaskDurationEntryLike[]>(
-      `/api/entries?date=${encodeURIComponent(date)}`
-    )
-      .then((entries) => {
+    loadEntriesByDate(date)
+      .then((entries: TaskDurationEntryLike[] | null) => {
         if (cancelled) return;
         setSecondsByTask(mapEntrySecondsByTask(entries));
       })

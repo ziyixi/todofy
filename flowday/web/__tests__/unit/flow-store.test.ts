@@ -1,13 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { format } from "date-fns";
 import { useFlowStore } from "@/features/flow/store";
-
-function jsonResponse(data: unknown, status = 200) {
-  return new Response(JSON.stringify(data), {
-    status,
-    headers: { "Content-Type": "application/json" },
-  });
-}
+import { addCompletedFlowTask, fakeFetch, fakeWorker, setFlowTaskIds, setSetting } from "../helpers/fake-worker";
 
 function resetFlowStore() {
   useFlowStore.setState({
@@ -34,27 +28,8 @@ describe("flow store", () => {
     resetFlowStore();
   });
 
-  it("adds tasks optimistically and persists the flow order", () => {
-    const requestBodies: Array<{
-      action: string;
-      date: string;
-      taskIds?: string[];
-      taskId?: string;
-    }> = [];
-    const fetchMock = vi.fn(
-      async (_input: string | URL | Request, init?: RequestInit) => {
-        requestBodies.push(
-          JSON.parse(String(init?.body)) as {
-            action: string;
-            date: string;
-            taskIds?: string[];
-            taskId?: string;
-          }
-        );
-        return jsonResponse({ success: true });
-      }
-    );
-    vi.stubGlobal("fetch", fetchMock);
+  it("adds tasks optimistically and persists the flow order", async () => {
+    vi.stubGlobal("fetch", fakeFetch);
 
     useFlowStore.getState().addTask("task-1", "2026-04-13");
 
@@ -63,39 +38,16 @@ describe("flow store", () => {
     expect(state.sortableGen).toBe(1);
     expect(state.sortableKeys["task-1"]).toBe(1);
 
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(fetchMock).toHaveBeenCalledWith(
-      "/api/flows",
-      expect.objectContaining({ method: "PUT" })
-    );
-    expect(requestBodies).toEqual([{
-      action: "setFlow",
-      date: "2026-04-13",
-      taskIds: ["task-1"],
-    }]);
+    // The write left synchronously (writes keep their order).
+    expect(fakeWorker.requests.map((request) => [request.method, request.path, request.body])).toEqual([
+      ["PATCH", "/api/v1/flows/2026-04-13?update_mask=task_ids", { task_ids: ["task-1"] }],
+    ]);
+    await vi.waitFor(() => expect(fakeWorker.flows.get("2026-04-13")).toEqual(["task-1"]));
   });
 
-  it("moves tasks between flow and completed lists optimistically", () => {
-    const requestBodies: Array<{
-      action: string;
-      date: string;
-      taskIds?: string[];
-      taskId?: string;
-    }> = [];
-    const fetchMock = vi.fn(
-      async (_input: string | URL | Request, init?: RequestInit) => {
-        requestBodies.push(
-          JSON.parse(String(init?.body)) as {
-            action: string;
-            date: string;
-            taskIds?: string[];
-            taskId?: string;
-          }
-        );
-        return jsonResponse({ success: true });
-      }
-    );
-    vi.stubGlobal("fetch", fetchMock);
+  it("moves tasks between flow and completed lists optimistically", async () => {
+    vi.stubGlobal("fetch", fakeFetch);
+    setFlowTaskIds("2026-04-13", ["task-1"]);
     useFlowStore.setState({
       flows: { "2026-04-13": ["task-1"] },
       completedTasks: { "2026-04-13": [] },
@@ -111,42 +63,37 @@ describe("flow store", () => {
     expect(state.flows["2026-04-13"]).toEqual(["task-1"]);
     expect(state.completedTasks["2026-04-13"]).toEqual([]);
 
-    const actions = requestBodies.map((body) => body.action);
-    expect(actions).toEqual([
-      "setFlow",
-      "addCompleted",
-      "setFlow",
-      "removeCompleted",
+    expect(fakeWorker.requests.map((request) => `${request.method} ${request.path}`)).toEqual([
+      "PATCH /api/v1/flows/2026-04-13?update_mask=task_ids",
+      "POST /api/v1/flows/2026-04-13:completeTask",
+      "PATCH /api/v1/flows/2026-04-13?update_mask=task_ids",
+      "POST /api/v1/flows/2026-04-13:reopenTask",
     ]);
+    await vi.waitFor(() => expect(fakeWorker.completed.get("2026-04-13")).toEqual([]));
+    expect(fakeWorker.flows.get("2026-04-13")).toEqual(["task-1"]);
+  });
+
+  it("rolls over selected tasks, and asks nothing for an empty selection", async () => {
+    vi.stubGlobal("fetch", fakeFetch);
+    setFlowTaskIds("2026-04-13", ["a", "b", "c"]);
+    await useFlowStore.getState().rolloverSelectedTasks("2026-04-13", "2026-04-14", ["a", "c"]);
+    expect(useFlowStore.getState().flows).toEqual({ "2026-04-13": ["b"], "2026-04-14": ["a", "c"] });
+    fakeWorker.requests = [];
+    await useFlowStore.getState().rolloverSelectedTasks("2026-04-13", "2026-04-15", []);
+    expect(fakeWorker.requests.map((request) => request.method)).toEqual(["GET"]);
+    expect(useFlowStore.getState().flows["2026-04-13"]).toEqual(["b"]);
   });
 
   it("rehydrates from the server when a flow persistence write fails", async () => {
     const today = format(new Date(), "yyyy-MM-dd");
-    const fetchMock = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
-      const url = typeof input === "string" ? input : input.toString();
-      const method = init?.method ?? "GET";
-
-      if (url === "/api/flows" && method === "PUT") {
-        return new Response(null, { status: 500 });
-      }
-
-      if (url === "/api/flows" && method === "GET") {
-        return jsonResponse({
-          flows: { "2026-04-13": ["server-task"] },
-          completedTasks: { "2026-04-13": ["done-task"] },
-        });
-      }
-
-      if (url.startsWith("/api/settings?today=") && method === "GET") {
-        return jsonResponse({
-          day_capacity_mins: 420,
-          planning_completed_today: true,
-        });
-      }
-
-      throw new Error(`Unexpected fetch: ${method} ${url}`);
+    setFlowTaskIds("2026-04-13", ["server-task"]);
+    addCompletedFlowTask("2026-04-13", "done-task");
+    fakeWorker.planned.add(today);
+    setSetting("day_capacity_mins", "420");
+    vi.stubGlobal("fetch", async (input: string | URL | Request, init?: RequestInit) => {
+      if ((init?.method ?? "GET") === "PATCH") return new Response(null, { status: 500 });
+      return fakeFetch(input, init);
     });
-    vi.stubGlobal("fetch", fetchMock);
 
     useFlowStore.getState().addTask("task-1", "2026-04-13");
     await vi.waitFor(() => {

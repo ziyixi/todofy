@@ -2,27 +2,18 @@
 
 import { useEffect, useState } from "react";
 import { useTimerStore } from "@/features/timer/store";
-import { apiGetOrNull } from "@/lib/client/http";
+import { loadNotesByDate } from "@/lib/client/flowday-api";
 import { useLoggedSecondsByTaskForDate } from "@/lib/hooks/use-task-logged-seconds";
-
-interface NoteRow {
-  taskId: string;
-  content: string;
-}
 
 export function useDayNotesMap(date: string): Record<string, string> {
   const [notesByTask, setNotesByTask] = useState<Record<string, string>>({});
 
   useEffect(() => {
     let cancelled = false;
-    apiGetOrNull<NoteRow[]>(`/api/notes?date=${encodeURIComponent(date)}`)
-      .then((rows) => {
+    loadNotesByDate(date)
+      .then((notes) => {
         if (cancelled) return;
-        const next: Record<string, string> = {};
-        for (const row of rows ?? []) {
-          next[row.taskId] = row.content ?? "";
-        }
-        setNotesByTask(next);
+        setNotesByTask(notes ?? {});
       })
       .catch(() => {
         if (!cancelled) setNotesByTask({});

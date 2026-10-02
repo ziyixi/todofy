@@ -16,7 +16,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
-import { apiSend } from "@/lib/client/http";
+import { createTimeEntry, updateTimeEntry } from "@/lib/client/flowday-api";
 import type { TimeEntry } from "@/features/timer/contracts";
 import { formatDurationShort } from "./manual-entry-utils";
 
@@ -174,7 +174,7 @@ export function EditEntryDialog({
 
     setSaving(true);
     try {
-      await apiSend("PUT", `/api/entries/${encodeURIComponent(entry.id)}`, { startTime: start, endTime: end });
+      await updateTimeEntry(entry.id, start, end);
       onOpenChange(false);
       onSaved();
     } catch {
@@ -284,7 +284,7 @@ export function AddEntryDialog({
     setError("");
 
     try {
-      await apiSend("POST", "/api/entries", {
+      await createTimeEntry({
         taskId,
         flowDate,
         startTime: start.toISOString(),

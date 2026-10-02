@@ -3,21 +3,31 @@ import { useFlowStore } from "@/features/flow/store";
 import { useTodoistStore } from "@/features/todoist/store";
 import { MAX_SYNC_REQUESTS } from "@/features/todoist/store/todoist-store";
 import { useTimerStore } from "@/features/timer/store";
+import { SyncTasksResponse_State } from "@ziyixi/proto/flowday/ui/v1/flowday_ui_service_pb";
 import type { Task } from "@/lib/types/task";
+import { fakeFetch, fakeWorker, setFlowTaskIds, setSetting, upsertTasks } from "../helpers/fake-worker";
 
-function jsonResponse(data: unknown, status = 200) {
-  return new Response(JSON.stringify(data), {
-    status,
-    headers: { "Content-Type": "application/json" },
+const SYNC = "POST /api/v1/tasks:sync";
+
+/** The fake Worker's fetch, with SyncTasks held until `release` (to observe the store while a sync runs). */
+function heldSync() {
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
   });
+  const calls: string[] = [];
+  const fetch = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+    const call = `${init?.method ?? "GET"} ${String(input)}`;
+    calls.push(call);
+    if (call === SYNC) await gate;
+    return fakeFetch(input, init);
+  });
+  return { fetch, calls, release };
 }
 
-function deferredResponse() {
-  let resolve!: (value: Response) => void;
-  const promise = new Promise<Response>((res) => {
-    resolve = res;
-  });
-  return { promise, resolve };
+/** The `METHOD path` of every request the fake Worker received. */
+function requests(): string[] {
+  return fakeWorker.requests.map((request) => `${request.method} ${request.path}`);
 }
 
 function makeTask(overrides: Partial<Task> = {}): Task {
@@ -104,148 +114,73 @@ describe("todoist store", () => {
   });
 
   it("sync toggles syncing state, refreshes tasks, and preserves lastSyncAt", async () => {
-    const syncRequest = deferredResponse();
-    const syncedAt = "2026-04-13T09:30:00.000Z";
-    const fetchMock = vi.fn((input: string | URL | Request, init?: RequestInit) => {
-      const url = typeof input === "string" ? input : input.toString();
-      const method = init?.method ?? "GET";
-
-      if (url === "/api/sync" && method === "POST") {
-        return syncRequest.promise;
-      }
-
-      if (url === "/api/tasks" && method === "GET") {
-        return Promise.resolve(jsonResponse([makeTask()]));
-      }
-
-      if (url === "/api/settings" && method === "GET") {
-        return Promise.resolve(jsonResponse({ last_sync_at: syncedAt }));
-      }
-
-      throw new Error(`Unexpected fetch: ${method} ${url}`);
-    });
-    vi.stubGlobal("fetch", fetchMock);
+    upsertTasks([makeTask()]);
+    fakeWorker.syncAnswers = [{ state: SyncTasksResponse_State.SYNCED, changed: 1, fullSync: false }];
+    const held = heldSync();
+    vi.stubGlobal("fetch", held.fetch);
 
     const syncPromise = useTodoistStore.getState().sync();
     expect(useTodoistStore.getState().isSyncing).toBe(true);
 
-    syncRequest.resolve(jsonResponse({ status: "synced", changed: 1, fullSync: false, lastSyncAt: syncedAt, nextAutoSyncAt: 0 }));
+    held.release();
     await syncPromise;
 
     const state = useTodoistStore.getState();
     expect(state.isSyncing).toBe(false);
-    expect(state.lastSyncAt).toBe(syncedAt);
+    expect(state.lastSyncAt).toBe("2026-04-13T09:00:00.000Z");
     expect(state.tasks.map((task) => task.id)).toEqual(["task-1"]);
   });
 
   it("short-circuits duplicate sync requests while one is already running", async () => {
-    const syncRequest = deferredResponse();
-    const fetchMock = vi.fn((input: string | URL | Request, init?: RequestInit) => {
-      const url = typeof input === "string" ? input : input.toString();
-      const method = init?.method ?? "GET";
-
-      if (url === "/api/sync" && method === "POST") {
-        return syncRequest.promise;
-      }
-
-      if (url === "/api/tasks" && method === "GET") {
-        return Promise.resolve(jsonResponse([]));
-      }
-
-      if (url === "/api/settings" && method === "GET") {
-        return Promise.resolve(jsonResponse({ last_sync_at: null }));
-      }
-
-      throw new Error(`Unexpected fetch: ${method} ${url}`);
-    });
-    vi.stubGlobal("fetch", fetchMock);
+    const held = heldSync();
+    vi.stubGlobal("fetch", held.fetch);
 
     const firstSync = useTodoistStore.getState().sync();
     const secondSync = useTodoistStore.getState().sync();
 
-    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(held.calls).toEqual([SYNC]);
 
-    syncRequest.resolve(jsonResponse({ status: "synced", changed: 0, fullSync: false, lastSyncAt: null, nextAutoSyncAt: 0 }));
+    held.release();
     await Promise.all([firstSync, secondSync]);
 
-    expect(
-      fetchMock.mock.calls.filter(
-        ([input, init]) =>
-          (typeof input === "string" ? input : input.toString()) === "/api/sync" &&
-          (init?.method ?? "GET") === "POST"
-      )
-    ).toHaveLength(1);
+    expect(held.calls.filter((call) => call === SYNC)).toHaveLength(1);
   });
 
   it("an automatic sync with nothing new does not reload the task list", async () => {
     useTodoistStore.setState({ lastSyncAt: "2026-04-13T09:00:00.000Z" });
-    const fetchMock = vi.fn((input: string | URL | Request, init?: RequestInit) => {
-      const url = typeof input === "string" ? input : input.toString();
-      if (url === "/api/sync" && init?.method === "POST") {
-        expect(JSON.parse(String(init.body))).toEqual({ mode: "auto" });
-        return Promise.resolve(
-          jsonResponse({ status: "throttled", changed: 0, fullSync: false, lastSyncAt: "2026-04-13T09:00:00.000Z", nextAutoSyncAt: 1 })
-        );
-      }
-      throw new Error(`Unexpected fetch: ${url}`);
-    });
-    vi.stubGlobal("fetch", fetchMock);
+    fakeWorker.syncAnswers = [{ state: SyncTasksResponse_State.THROTTLED, changed: 0, fullSync: false }];
+    vi.stubGlobal("fetch", fakeFetch);
     expect(await useTodoistStore.getState().sync("auto")).toBe(true);
-    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(requests()).toEqual([SYNC]);
+    expect(fakeWorker.requests[0]?.body).toEqual({ mode: "auto" });
   });
 
   it("asks again right away while the Worker answers partial, then reloads the task list once", async () => {
-    const statuses = ["partial", "partial", "synced"];
-    const calls: string[] = [];
-    const fetchMock = vi.fn((input: string | URL | Request, init?: RequestInit) => {
-      const url = typeof input === "string" ? input : input.toString();
-      calls.push(`${init?.method ?? "GET"} ${url}`);
-      if (url === "/api/sync" && init?.method === "POST") {
-        const status = statuses.shift() ?? "synced";
-        return Promise.resolve(
-          jsonResponse({ status, changed: 200, fullSync: true, lastSyncAt: "2026-04-13T09:00:00.000Z", nextAutoSyncAt: 1 })
-        );
-      }
-      if (url === "/api/tasks") return Promise.resolve(jsonResponse([makeTask()]));
-      if (url.startsWith("/api/settings")) return Promise.resolve(jsonResponse({ last_sync_at: "2026-04-13T09:00:00.000Z", has_api_key: true }));
-      throw new Error(`Unexpected fetch: ${url}`);
-    });
-    vi.stubGlobal("fetch", fetchMock);
+    upsertTasks([makeTask()]);
+    fakeWorker.syncAnswers = [
+      { state: SyncTasksResponse_State.PARTIAL, changed: 200, fullSync: true },
+      { state: SyncTasksResponse_State.PARTIAL, changed: 200, fullSync: true },
+      { state: SyncTasksResponse_State.SYNCED, changed: 200, fullSync: true },
+    ];
+    vi.stubGlobal("fetch", fakeFetch);
     expect(await useTodoistStore.getState().sync("auto")).toBe(true);
-    expect(calls.filter((call) => call === "POST /api/sync")).toHaveLength(3);
-    expect(calls.filter((call) => call === "GET /api/tasks")).toHaveLength(1);
+    expect(requests().filter((call) => call === SYNC)).toHaveLength(3);
+    expect(requests().filter((call) => call === "GET /api/v1/tasks")).toHaveLength(1);
+    expect(useTodoistStore.getState().tasks.map((task) => task.id)).toEqual(["task-1"]);
   });
 
   it("stops after MAX_SYNC_REQUESTS partial answers", async () => {
-    const fetchMock = vi.fn((input: string | URL | Request, init?: RequestInit) => {
-      const url = typeof input === "string" ? input : input.toString();
-      if (url === "/api/sync" && init?.method === "POST") {
-        return Promise.resolve(jsonResponse({ status: "partial", changed: 0, fullSync: false, lastSyncAt: null, nextAutoSyncAt: 1 }));
-      }
-      throw new Error(`Unexpected fetch: ${url}`);
-    });
-    vi.stubGlobal("fetch", fetchMock);
+    fakeWorker.syncAnswers = Array.from({ length: MAX_SYNC_REQUESTS + 5 }, () => ({ state: SyncTasksResponse_State.PARTIAL, changed: 0, fullSync: false }));
+    vi.stubGlobal("fetch", fakeFetch);
     expect(await useTodoistStore.getState().sync("auto")).toBe(true);
-    expect(fetchMock).toHaveBeenCalledTimes(MAX_SYNC_REQUESTS);
+    expect(requests().filter((call) => call === SYNC)).toHaveLength(MAX_SYNC_REQUESTS);
   });
 
   it("deletes tasks optimistically, removes them from flow state, and stops the active timer", async () => {
     const stopWithoutSaving = vi.fn();
-    const fetchMock = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
-      const url = typeof input === "string" ? input : input.toString();
-      const method = init?.method ?? "GET";
-
-      if (url === "/api/tasks" && method === "DELETE") {
-        return jsonResponse({ success: true });
-      }
-
-      if (url === "/api/flows" && method === "PUT") {
-        return jsonResponse({ success: true });
-      }
-
-      throw new Error(`Unexpected fetch: ${method} ${url}`);
-    });
-    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("fetch", fakeFetch);
+    upsertTasks([makeTask()]);
+    setFlowTaskIds("2026-04-13", ["task-1"]);
 
     useTodoistStore.setState({ tasks: [makeTask()] });
     useFlowStore.setState({
@@ -263,47 +198,21 @@ describe("todoist store", () => {
     expect(useFlowStore.getState().flows["2026-04-13"]).toEqual([]);
     expect(useFlowStore.getState().completedTasks["2026-04-13"]).toEqual([]);
     expect(stopWithoutSaving).toHaveBeenCalledTimes(1);
+    expect(requests()).toContain("DELETE /api/v1/tasks/task-1");
+    expect(fakeWorker.tasks.get("task-1")?.deletedAt).not.toBeNull();
   });
 
   it("rehydrates tasks and flows if optimistic delete persistence fails", async () => {
     const restoredTask = makeTask();
-    const fetchMock = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
-      const url = typeof input === "string" ? input : input.toString();
-      const method = init?.method ?? "GET";
-
-      if (url === "/api/tasks" && method === "DELETE") {
-        return new Response(null, { status: 500 });
-      }
-
-      if (url === "/api/tasks" && method === "GET") {
-        return jsonResponse([restoredTask]);
-      }
-
-      if (url === "/api/settings" && method === "GET") {
-        return jsonResponse({ last_sync_at: "2026-04-13T10:00:00.000Z" });
-      }
-
-      if (url === "/api/flows" && method === "PUT") {
-        return jsonResponse({ success: true });
-      }
-
-      if (url === "/api/flows" && method === "GET") {
-        return jsonResponse({
-          flows: { "2026-04-13": ["task-1"] },
-          completedTasks: {},
-        });
-      }
-
-      if (url.startsWith("/api/settings?today=") && method === "GET") {
-        return jsonResponse({
-          day_capacity_mins: 360,
-          planning_completed_today: false,
-        });
-      }
-
-      throw new Error(`Unexpected fetch: ${method} ${url}`);
+    upsertTasks([restoredTask]);
+    setFlowTaskIds("2026-04-13", ["task-1"]);
+    setSetting("last_sync_at", "2026-04-13T10:00:00.000Z");
+    vi.stubGlobal("fetch", async (input: string | URL | Request, init?: RequestInit) => {
+      if ((init?.method ?? "GET") === "DELETE") return new Response(null, { status: 500 });
+      // The flow writes of the optimistic removal fail too, as the delete would have.
+      if ((init?.method ?? "GET") === "PATCH") return new Response(null, { status: 500 });
+      return fakeFetch(input, init);
     });
-    vi.stubGlobal("fetch", fetchMock);
 
     useTodoistStore.setState({ tasks: [restoredTask] });
     useFlowStore.setState({
@@ -313,8 +222,10 @@ describe("todoist store", () => {
 
     await useTodoistStore.getState().deleteTask("task-1");
 
-    expect(useTodoistStore.getState().tasks.map((task) => task.id)).toEqual(["task-1"]);
-    expect(useTodoistStore.getState().lastSyncAt).toBe("2026-04-13T10:00:00.000Z");
-    expect(useFlowStore.getState().flows["2026-04-13"]).toEqual(["task-1"]);
+    await vi.waitFor(() => {
+      expect(useTodoistStore.getState().tasks.map((task) => task.id)).toEqual(["task-1"]);
+      expect(useTodoistStore.getState().lastSyncAt).toBe("2026-04-13T10:00:00.000Z");
+      expect(useFlowStore.getState().flows["2026-04-13"]).toEqual(["task-1"]);
+    });
   });
 });

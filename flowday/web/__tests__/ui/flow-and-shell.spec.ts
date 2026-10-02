@@ -143,19 +143,20 @@ test("[UI-010] Deleted-task dialog restores a soft-deleted local task", async ({
   await poolCard.getByTitle("Delete task").click();
 
   await expect.poll(async () => {
-    const response = await request.get("/api/tasks/deleted");
-    const deletedTasks = (await response.json()) as Array<{ title: string }>;
-    return deletedTasks.some((task) => task.title === "Restore me");
+    // flowday.ui.v1 ListTasks with the trash, in the wire JSON profile.
+    const response = await request.get("/api/v1/tasks?show_deleted=true");
+    const tasks = ((await response.json()) as { tasks?: Array<{ title: string; delete_time?: string }> }).tasks ?? [];
+    return tasks.some((task) => task.title === "Restore me" && task.delete_time !== undefined);
   }).toBe(true);
 
   const deletedResponsePromise = page.waitForResponse(
     (response) =>
-      response.url().endsWith("/api/tasks/deleted") &&
+      response.url().endsWith("/api/v1/tasks?show_deleted=true") &&
       response.request().method() === "GET"
   );
   await page.getByRole("button", { name: "Deleted tasks" }).click();
   const deletedResponse = await deletedResponsePromise;
-  const deletedTasks = (await deletedResponse.json()) as Array<{ title: string }>;
+  const deletedTasks = ((await deletedResponse.json()) as { tasks?: Array<{ title: string }> }).tasks ?? [];
   expect(deletedTasks.some((task) => task.title === "Restore me")).toBe(true);
   await expect(page.getByRole("heading", { name: "Deleted Tasks" })).toBeVisible();
   await page.getByPlaceholder("Search deleted...").fill("Restore me");
@@ -664,7 +665,7 @@ test.describe("analytics timezone", () => {
     // The stats read every time entry (no range) and are computed in the browser, in its time zone.
     const statsResponsePromise = page.waitForResponse(
       (response) =>
-        new URL(response.url()).pathname === "/api/analytics" &&
+        new URL(response.url()).pathname === "/api/v1/analytics:query" &&
         new URL(response.url()).search === "" &&
         response.request().method() === "GET"
     );

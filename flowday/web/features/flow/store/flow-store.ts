@@ -10,9 +10,10 @@ import type { FlowState } from "./types";
 import {
   loadFlowState,
   loadHydrationData,
-  persistFlowMutation,
+  persistCompleted,
+  persistFlow,
   persistPlanningCompleted,
-  sendFlowMutation,
+  sendRollover,
   todayStr,
 } from "./persistence";
 
@@ -93,7 +94,7 @@ export const useFlowStore = create<FlowState>()((set) => ({
         ids.push(taskId);
       }
       const nextGen = state.sortableGen + 1;
-      persistFlowMutation({ action: "setFlow", date, taskIds: ids }, recoverFlowState);
+      persistFlow(date, ids, recoverFlowState);
       return {
         flows: { ...state.flows, [date]: ids },
         sortableGen: nextGen,
@@ -104,7 +105,7 @@ export const useFlowStore = create<FlowState>()((set) => ({
   removeTask: (taskId, date) =>
     set((state) => {
       const ids = flowForDate(state, date).filter((id) => id !== taskId);
-      persistFlowMutation({ action: "setFlow", date, taskIds: ids }, recoverFlowState);
+      persistFlow(date, ids, recoverFlowState);
       return {
         flows: { ...state.flows, [date]: ids },
         quickFocusTaskIds:
@@ -120,15 +121,15 @@ export const useFlowStore = create<FlowState>()((set) => ({
       const ids = [...flowForDate(state, date)];
       const [removed] = ids.splice(fromIndex, 1);
       ids.splice(toIndex, 0, removed);
-      persistFlowMutation({ action: "setFlow", date, taskIds: ids }, recoverFlowState);
+      persistFlow(date, ids, recoverFlowState);
       return { flows: { ...state.flows, [date]: ids } };
     }),
 
   completeTask: (taskId, date) =>
     set((state) => {
       const flowIds = flowForDate(state, date).filter((id) => id !== taskId);
-      persistFlowMutation({ action: "setFlow", date, taskIds: flowIds }, recoverFlowState);
-      persistFlowMutation({ action: "addCompleted", date, taskId }, recoverFlowState);
+      persistFlow(date, flowIds, recoverFlowState);
+      persistCompleted(date, taskId, true, recoverFlowState);
       return {
         flows: { ...state.flows, [date]: flowIds },
         completedTasks: {
@@ -146,11 +147,8 @@ export const useFlowStore = create<FlowState>()((set) => ({
   uncompleteTask: (taskId, date) =>
     set((state) => {
       const flowIds = [...flowForDate(state, date), taskId];
-      persistFlowMutation({ action: "setFlow", date, taskIds: flowIds }, recoverFlowState);
-      persistFlowMutation(
-        { action: "removeCompleted", date, taskId },
-        recoverFlowState
-      );
+      persistFlow(date, flowIds, recoverFlowState);
+      persistCompleted(date, taskId, false, recoverFlowState);
       return {
         flows: { ...state.flows, [date]: flowIds },
         completedTasks: {
@@ -162,10 +160,7 @@ export const useFlowStore = create<FlowState>()((set) => ({
 
   removeCompletedTask: (taskId, date) =>
     set((state) => {
-      persistFlowMutation(
-        { action: "removeCompleted", date, taskId },
-        recoverFlowState
-      );
+      persistCompleted(date, taskId, false, recoverFlowState);
       return {
         completedTasks: {
           ...state.completedTasks,
@@ -178,59 +173,52 @@ export const useFlowStore = create<FlowState>()((set) => ({
     set((state) => {
       const ids = flowForDate(state, date).filter((id) => id !== taskId);
       ids.push(taskId);
-      persistFlowMutation({ action: "setFlow", date, taskIds: ids }, recoverFlowState);
+      persistFlow(date, ids, recoverFlowState);
       return { flows: { ...state.flows, [date]: ids } };
     }),
 
   rolloverTasks: async (fromDate, toDate) => {
     try {
-      await sendFlowMutation({ action: "rollover", date: fromDate, fromDate, toDate });
+      await sendRollover(fromDate, toDate);
     } catch {
       // Shown on the banner; the reload below shows what the server has.
     }
     const flowState = await loadFlowState();
     if (flowState) {
       set({
-        flows: flowState.flows ?? {},
-        completedTasks: flowState.completedTasks ?? {},
+        flows: flowState.flows,
+        completedTasks: flowState.completedTasks,
       });
     }
   },
 
   rolloverSelectedTasks: async (fromDate, toDate, taskIds) => {
     try {
-      await sendFlowMutation({ action: "rolloverSelected", date: fromDate, fromDate, toDate, taskIds });
+      await sendRollover(fromDate, toDate, taskIds);
     } catch {
       // Shown on the banner; the reload below shows what the server has.
     }
     const flowState = await loadFlowState();
     if (flowState) {
       set({
-        flows: flowState.flows ?? {},
-        completedTasks: flowState.completedTasks ?? {},
+        flows: flowState.flows,
+        completedTasks: flowState.completedTasks,
       });
     }
   },
 
   hydrate: async () => {
     try {
-      const today = todayStr();
-      const { flowState, settings } = await loadHydrationData(today);
+      const { flowState, settings } = await loadHydrationData();
       if (flowState) {
-        set({
-          flows: flowState.flows ?? {},
-          completedTasks: flowState.completedTasks ?? {},
-        });
+        set((state) => ({
+          flows: flowState.flows,
+          completedTasks: flowState.completedTasks,
+          planningCompletedDates: { ...state.planningCompletedDates, ...flowState.planningCompletedDates },
+        }));
       }
       if (settings) {
-        if (settings.day_capacity_mins != null) {
-          set({ dayCapacityMins: settings.day_capacity_mins });
-        }
-        if (settings.planning_completed_today) {
-          set((state) => ({
-            planningCompletedDates: { ...state.planningCompletedDates, [today]: true },
-          }));
-        }
+        set({ dayCapacityMins: settings.dayCapacityMins });
       }
     } catch {
       // Hydration failures should not block the app; the empty state is still usable.

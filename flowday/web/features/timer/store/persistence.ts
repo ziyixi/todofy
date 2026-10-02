@@ -1,4 +1,4 @@
-import { apiGetOrNull, apiSendOk } from "@/lib/client/http";
+import { clearTimerSession, createTimeEntry, loadEntriesByTask, loadTimerSession, saveTimerSession } from "@/lib/client/flowday-api";
 import {
   sumEntryDurationSeconds,
   type DurationEntryLike,
@@ -20,10 +20,7 @@ interface PersistedTimerSession {
 }
 
 export async function loadPersistedTimerSession(): Promise<ServerSessionPayload | null> {
-  const payload = await apiGetOrNull<{ session: ServerSessionPayload | null }>(
-    "/api/timer/session"
-  );
-  return payload?.session ?? null;
+  return loadTimerSession();
 }
 
 // Session writes go out one after another, so a quick start-pause-resume cannot land out of order.
@@ -36,10 +33,10 @@ function queueSessionWrite(write: () => Promise<boolean>) {
 /** Saves (or clears) the shared timer session in the background; a failure shows on the banner. */
 export function persistCurrentSession(session: PersistedTimerSession | null) {
   if (!session) {
-    queueSessionWrite(() => apiSendOk("DELETE", "/api/timer/session"));
+    queueSessionWrite(clearTimerSession);
     return;
   }
-  queueSessionWrite(() => apiSendOk("PUT", "/api/timer/session", session));
+  queueSessionWrite(() => saveTimerSession(session));
 }
 
 export function snapshotSessionState(state: TimerState): PersistedTimerSession | null {
@@ -79,23 +76,25 @@ export async function saveTimerSegment(
   const endTime = new Date(segmentStartMs + segmentSeconds * 1000).toISOString();
 
   // A failure shows on the banner; the user can add the time as a manual entry.
-  await apiSendOk("POST", "/api/entries", {
-    taskId: state.activeTaskId,
-    flowDate: state.activeFlowDate,
-    startTime: state.segmentWallStart,
-    endTime,
-    durationS: segmentSeconds,
-    source: "timer",
-  });
+  try {
+    await createTimeEntry({
+      taskId: state.activeTaskId,
+      flowDate: state.activeFlowDate,
+      startTime: state.segmentWallStart,
+      endTime,
+      durationS: segmentSeconds,
+      source: "timer",
+    });
+  } catch {
+    // Already on the banner.
+  }
 }
 
 export async function fetchPriorSeconds(taskId: string): Promise<number> {
-  const entries = await apiGetOrNull<DurationEntryLike[]>(
-    `/api/entries?taskId=${encodeURIComponent(taskId)}`
-  );
+  const entries: DurationEntryLike[] | null = await loadEntriesByTask(taskId);
   return sumEntryDurationSeconds(entries);
 }
 
 export function clearPersistedTimerSession() {
-  queueSessionWrite(() => apiSendOk("DELETE", "/api/timer/session"));
+  queueSessionWrite(clearTimerSession);
 }

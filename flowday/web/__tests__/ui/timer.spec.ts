@@ -483,16 +483,17 @@ test("[UI-028] Misc timer saves tracked time without becoming a flow task", asyn
   await expect
     .poll(async () => {
       const response = await request.get(
-        `/api/entries?taskId=${encodeURIComponent(miscTaskId)}`
+        `/api/v1/timeEntries?task_id=${encodeURIComponent(miscTaskId)}`
       );
-      const entries = (await response.json()) as Array<{
-        durationS: number | null;
-        flowDate: string;
-      }>;
+      // flowday.ui.v1 ListTimeEntries, in the wire JSON profile.
+      const entries =
+        ((await response.json()) as {
+          time_entries?: Array<{ duration_seconds?: number; flow_date: string }>;
+        }).time_entries ?? [];
       if (entries.length === 0) return null;
       return {
-        flowDate: entries[0]?.flowDate ?? null,
-        durationS: entries[0]?.durationS ?? null,
+        flowDate: entries[0]?.flow_date ?? null,
+        durationS: entries[0]?.duration_seconds ?? null,
       };
     })
     .toEqual({
@@ -537,10 +538,11 @@ test("[UI-029] Misc pomodoro finishes into a restart-or-done state", async ({
   await expect
     .poll(async () => {
       const response = await request.get(
-        `/api/entries?taskId=${encodeURIComponent(miscTaskId)}`
+        `/api/v1/timeEntries?task_id=${encodeURIComponent(miscTaskId)}`
       );
-      const entries = (await response.json()) as Array<{ durationS: number | null }>;
-      return entries.some((entry) => entry.durationS === 1800);
+      const entries =
+        ((await response.json()) as { time_entries?: Array<{ duration_seconds?: number }> }).time_entries ?? [];
+      return entries.some((entry) => entry.duration_seconds === 1800);
     })
     .toBe(true);
 });

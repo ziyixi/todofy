@@ -1,8 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { analyticsDatasetUrl } from "@/features/analytics/hooks/use-analytics-resource";
-import { getAnalytics, type AnalyticsType } from "@/features/analytics/services/analytics-service";
-import { apiGet } from "@/lib/client/http";
-import type { AnalyticsDataset } from "@/lib/types/worker-contract";
+import { analyticsRange, getAnalytics, type AnalyticsType } from "@/features/analytics/services/analytics-service";
+import { queryAnalytics } from "@/lib/client/flowday-api";
 import type { Task } from "@/lib/types/task";
 import {
   addCompletedFlowTask,
@@ -15,9 +13,9 @@ import {
 import { buildMiscTaskId, buildMiscTaskTitle } from "@/lib/utils/misc-task";
 
 /**
- * Integration tests for the analytics computation, now in the browser: the rows come from GET /api/analytics for
- * the review's range (here the in-memory fake of the Worker API), and getAnalytics computes the review, as the
- * Analytics views do (features/analytics/hooks/use-analytics-resource.ts).
+ * Integration tests for the analytics computation, now in the browser: the rows come from QueryAnalytics for the
+ * review's range (here the in-memory fake of the Worker's owner API, on the real wire), and getAnalytics computes the
+ * review, as the Analytics views do (features/analytics/hooks/use-analytics-resource.ts).
  */
 
 function makeTask(overrides: Partial<Task> = {}): Task {
@@ -76,7 +74,7 @@ async function callAnalytics(params: string) {
   const type = query.get("type");
   const date = query.get("date");
   const range: AnalyticsType = type === "daily" || type === "weekly" ? type : "stats";
-  const dataset = await apiGet<AnalyticsDataset>(analyticsDatasetUrl(range, date ?? ""));
+  const dataset = await queryAnalytics(analyticsRange(range, date ?? ""));
   const result = getAnalytics({ type, date, timeZone: query.get("tz") }, dataset);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any -- the tests read each review's fields directly
   return (result.ok ? result.data : { error: result.error }) as any;

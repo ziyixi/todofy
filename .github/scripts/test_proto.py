@@ -406,6 +406,16 @@ class Users(unittest.TestCase):
                 actual = {app for app, paths in imports.items() if any(path.startswith(package) for path in paths)}
                 self.assertEqual(actual, set(importers))
 
+    def test_a_next_js_ui_is_read_from_its_source_directories(self):
+        """FlowDay's UI (Next.js, no src/) imports flowday.ui.v1 from lib/: its production sources are found."""
+        manifest = REPO / "flowday" / "web" / "package.json"
+        self.assertIn(manifest, ts_users())
+        sources = production_sources(manifest)
+        self.assertIn(REPO / "flowday" / "web" / "lib" / "client" / "flowday-api.ts", sources)
+        self.assertFalse([path for path in sources if "__tests__" in path.parts])
+        values = {name for path in sources for name, type_only in ts_proto_imports(path.read_text()) if not type_only}
+        self.assertIn("@ziyixi/proto/flowday/ui/v1/flowday_ui_service_pb", values)
+
     def test_type_only_imports_are_told_apart(self):
         text = (
             "import type { A } from '@ziyixi/proto/a/v1/a_pb'\n"
