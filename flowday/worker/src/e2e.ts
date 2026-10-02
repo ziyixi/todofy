@@ -5,11 +5,12 @@
  * edge, can never reach them even if the variable were set. Anywhere else they answer 404 like any unknown path.
  */
 import { sql } from 'drizzle-orm';
-import type { Task, TaskPriority } from './api-types.ts';
+import type { TaskPriority, TaskRecord } from './model.ts';
 import { importCredentialKey, sealCredential } from './credentials.ts';
 import type { Db } from './db.ts';
 import type { Env } from './env.ts';
-import { HttpError, jsonResponse, readBody, type Principal } from './http.ts';
+import { flowdayError } from './errors.ts';
+import { jsonResponse, readBody, type Principal } from './http.ts';
 import { createTimeEntry } from './store/entries.ts';
 import { setFlowStatements } from './store/flows.ts';
 import { upsertNote } from './store/notes.ts';
@@ -61,7 +62,7 @@ export async function clearAll(db: Db): Promise<void> {
   await runStatements(db, TABLES.map((table) => sql.raw(`DELETE FROM ${table}`)));
 }
 
-function toTask(seed: TaskSeed): Task {
+function toTask(seed: TaskSeed): TaskRecord {
   return {
     id: seed.id,
     todoistId: seed.todoistId ?? null,
@@ -139,6 +140,6 @@ export async function e2eRoute(request: Request, env: Env, db: Db, pathname: str
       return jsonResponse({ ok: true, changed: await markOrphanedTodoistTasksDeleted(db, ids) });
     }
     default:
-      throw new HttpError(404, 'not_found');
+      throw flowdayError('NOT_FOUND');
   }
 }

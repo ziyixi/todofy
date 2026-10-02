@@ -145,12 +145,20 @@ def ts_proto_imports(text: str) -> list[tuple[str, bool]]:
     return found
 
 
+# A Next.js app (FlowDay's UI) keeps the code it ships in these top-level directories instead of src/.
+NEXT_SOURCE_DIRS = ("app", "components", "features", "lib")
+
+
 def production_sources(manifest: Path) -> list[Path]:
-    """The TypeScript a package ships: src/**, without tests (*.test.*) and test helpers (a test/ directory)."""
+    """The TypeScript a package ships: src/** (or a Next.js app's NEXT_SOURCE_DIRS), without tests (*.test.*) and test
+    helpers (a test/ or __tests__/ directory)."""
+    base = manifest.parent
+    roots = [base / "src"] if (base / "src").is_dir() else [base / name for name in NEXT_SOURCE_DIRS if (base / name).is_dir()]
     return [
         path
-        for path in sorted((manifest.parent / "src").rglob("*.ts*"))
-        if ".test." not in path.name and "test" not in path.relative_to(manifest.parent).parts
+        for root in roots
+        for path in sorted(root.rglob("*.ts*"))
+        if ".test." not in path.name and not {"test", "__tests__", "node_modules"} & set(path.relative_to(base).parts)
     ]
 
 
@@ -416,7 +424,7 @@ class Users(unittest.TestCase):
         for manifest, data in ts_users().items():
             if TS_PACKAGE in data.get("dependencies", {}):
                 continue
-            for source in sorted((manifest.parent / "src").rglob("*.ts*")):
+            for source in production_sources(manifest):
                 with self.subTest(file=str(source.relative_to(REPO))):
                     self.assertNotIn(f"'{TS_PACKAGE}", source.read_text())
                     self.assertNotIn(f'"{TS_PACKAGE}', source.read_text())

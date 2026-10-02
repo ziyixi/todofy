@@ -3,17 +3,17 @@
  * only on timer state changes (start, pause, resume, stop), one D1 row each.
  */
 import { eq } from 'drizzle-orm';
-import type { ActiveTimerSession, TimerSessionMode, TimerSessionStatus } from '../api-types.ts';
+import type { TimerSessionMode, TimerSessionRecord, TimerSessionStatus } from '../model.ts';
 import type { Db } from '../db.ts';
 import { activeTimerSession } from '../schema.ts';
 
 const SINGLETON_ID = 'main';
 
 /** The session, or null when it is effectively empty (idle, no task, no finished pomodoro). */
-export async function getActiveTimerSession(db: Db): Promise<ActiveTimerSession | null> {
+export async function getActiveTimerSession(db: Db): Promise<TimerSessionRecord | null> {
   const [row] = await db.select().from(activeTimerSession).where(eq(activeTimerSession.id, SINGLETON_ID)).limit(1);
   if (row === undefined) return null;
-  const session: ActiveTimerSession = {
+  const session: TimerSessionRecord = {
     taskId: row.taskId,
     flowDate: row.flowDate,
     status: row.status as TimerSessionStatus,
@@ -30,7 +30,7 @@ export async function getActiveTimerSession(db: Db): Promise<ActiveTimerSession 
   return session;
 }
 
-export async function saveActiveTimerSession(db: Db, session: Omit<ActiveTimerSession, 'updatedAt'>, now: Date = new Date()): Promise<void> {
+export async function saveActiveTimerSession(db: Db, session: Omit<TimerSessionRecord, 'updatedAt'>, now: Date = new Date()): Promise<void> {
   const values = { ...session, updatedAt: now.toISOString() };
   await db
     .insert(activeTimerSession)

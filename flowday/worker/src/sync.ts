@@ -20,7 +20,7 @@
  * mid-request) doubles the automatic interval, up to 32 times. A failing full sync therefore cannot repeat every
  * 5 minutes all day. "Sync now" keeps its 30 seconds.
  */
-import type { SyncResponse } from './api-types.ts';
+import type { SyncResult } from './model.ts';
 import { importCredentialKey, openCredential } from './credentials.ts';
 import { batchSql, type Db } from './db.ts';
 import { getSettings, setSettingSql } from './store/settings.ts';
@@ -45,7 +45,7 @@ export const KEY_PENDING = 'todoist_sync_pending';
 export type SyncMode = 'auto' | 'manual';
 
 export type SyncOutcome =
-  | { kind: 'ok'; response: SyncResponse }
+  | { kind: 'ok'; response: SyncResult }
   | { kind: 'no_key' }
   | { kind: 'key_unreadable' }
   | { kind: 'not_configured' }

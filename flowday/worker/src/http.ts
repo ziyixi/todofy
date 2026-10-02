@@ -1,70 +1,19 @@
 /**
- * Request plumbing shared by the routes: the error envelope, Access (edge-auth) and the signed double-submit CSRF
- * plus Origin check on every mutation, and bounded JSON bodies (../../docs/design.md "Security").
+ * Request plumbing shared by the routes (../../docs/design.md "Security"): Access (edge-auth), the signed
+ * double-submit CSRF plus Origin check on every mutation, the CSRF token route, and the plain JSON of the transport
+ * routes outside flowday.ui.v1 (/health, /api/csrf, the E2E routes). Failures are RpcErrors with the reasons of
+ * ./errors.ts.
  */
 import { asciiLowerCase, createAccessVerifier, importHmacKeyHex, issueCsrf, verifyCsrf, type AccessPolicy } from '@ziyixi/edge-auth';
-import type { ApiError, CsrfResponse } from './api-types.ts';
+import { RpcError } from '@ziyixi/proto/rpc-status';
 import type { Env } from './env.ts';
+import { flowdayError } from './errors.ts';
+import { MAX_BODY_BYTES } from './limits.ts';
 
 export const CSRF_COOKIE = 'flowday_csrf';
-/** Request bodies: a day's flow, a note (markdown) or a settings change; nothing larger. */
-export const MAX_BODY_BYTES = 256 * 1024;
 export const JWKS_TTL_MS = 600_000;
 export const JWKS_REFRESH_COOLDOWN_MS = 60_000;
 export const NBF_LEEWAY_SECONDS = 60;
-
-export type ApiErrorCode =
-  | 'unauthorized'
-  | 'access_not_configured'
-  | 'not_configured'
-  | 'csrf_failed'
-  | 'bad_request'
-  | 'not_found'
-  | 'method_not_allowed'
-  | 'unavailable'
-  | 'no_todoist_key'
-  | 'todoist_key_unreadable'
-  | 'todoist_unauthorized'
-  | 'todoist_unavailable';
-
-export const MESSAGES: Readonly<Record<ApiErrorCode, string>> = {
-  unauthorized: 'Not signed in, or the sign-in is no longer valid.',
-  access_not_configured: 'Cloudflare Access is not fully configured.',
-  not_configured: 'A required secret is not configured.',
-  csrf_failed: 'The page security token expired. Reload and try again.',
-  bad_request: 'The request is not valid.',
-  not_found: 'Not found.',
-  method_not_allowed: 'Method not allowed.',
-  unavailable: 'The service is temporarily unavailable. Try again shortly.',
-  no_todoist_key: 'No Todoist API key configured. Add one in Settings.',
-  todoist_key_unreadable: 'The stored Todoist API key cannot be read. Enter it again in Settings.',
-  todoist_unauthorized: 'Todoist rejected the API key. Check it in Settings.',
-  todoist_unavailable: 'Todoist could not be reached. FlowDay will try again later.',
-};
-
-export class HttpError extends Error {
-  readonly status: number;
-  readonly code: ApiErrorCode;
-  /** A more specific message than MESSAGES[code] (validation details; never request data). */
-  readonly detail: string | null;
-  readonly headers: Readonly<Record<string, string>>;
-
-  constructor(status: number, code: ApiErrorCode, detail: string | null = null, headers: Readonly<Record<string, string>> = {}) {
-    super(code);
-    this.status = status;
-    this.code = code;
-    this.detail = detail;
-    this.headers = headers;
-  }
-}
-
-export function bad(detail: string | null = null): never {
-  throw new HttpError(400, 'bad_request', detail);
-}
-
-export function methodNotAllowed(allow: string): HttpError {
-  return new HttpError(405, 'method_not_allowed', null, { allow });
-}
 
 export function newRequestId(): string {
   return Array.from(crypto.getRandomValues(new Uint8Array(8)), (byte) => byte.toString(16).padStart(2, '0')).join('');
@@ -75,13 +24,6 @@ export function jsonResponse(data: unknown, status = 200): Response {
     status,
     headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' },
   });
-}
-
-export function errorResponse(requestId: string, error: HttpError): Response {
-  const body: ApiError = { error: { code: error.code, message: error.detail ?? MESSAGES[error.code], request_id: requestId } };
-  const response = jsonResponse(body, error.status);
-  for (const [name, value] of Object.entries(error.headers)) response.headers.set(name, value);
-  return response;
 }
 
 // ---- Access ------------------------------------------------------------------------------------------------------
@@ -113,18 +55,19 @@ export interface Principal {
   readonly bypassed: boolean;
 }
 
+/** The owner, or an RpcError: UNAUTHORIZED, ACCESS_NOT_CONFIGURED, or UNAVAILABLE when Access's keys failed. */
 export async function authenticate(request: Request, env: Env): Promise<Principal> {
   const result = await verifier.verify(request, accessPolicy(env));
   if (result.ok) return { owner: result.owner, bypassed: result.bypassed };
   switch (result.failure) {
     case 'not_configured':
     case 'dev_bypass_refused':
-      throw new HttpError(503, 'access_not_configured');
+      throw flowdayError('ACCESS_NOT_CONFIGURED');
     case 'keys_unavailable':
-      throw new HttpError(503, 'unavailable');
+      throw flowdayError('UNAVAILABLE');
     case 'missing_token':
     case 'invalid_token':
-      throw new HttpError(401, 'unauthorized');
+      throw flowdayError('UNAUTHORIZED');
   }
 }
 
@@ -132,7 +75,7 @@ export async function authenticate(request: Request, env: Env): Promise<Principa
 
 async function csrfKey(env: Env): Promise<CryptoKey> {
   const key = await importHmacKeyHex((env.CSRF_SIGNING_KEY ?? '').trim());
-  if (key === null) throw new HttpError(503, 'not_configured');
+  if (key === null) throw flowdayError('NOT_CONFIGURED');
   return key;
 }
 
@@ -144,6 +87,7 @@ export function allowedOrigins(env: Env, url: URL, bypassed: boolean): string[] 
   return origins;
 }
 
+/** Refuses a mutation without this owner's CSRF token and an allowed Origin (CSRF_FAILED, or NOT_CONFIGURED). */
 export async function checkCsrf(request: Request, env: Env, principal: Principal): Promise<void> {
   const key = await csrfKey(env);
   const result = await verifyCsrf(request, principal.owner, {
@@ -151,19 +95,19 @@ export async function checkCsrf(request: Request, env: Env, principal: Principal
     key,
     allowedOrigins: allowedOrigins(env, new URL(request.url), principal.bypassed),
   });
-  if (!result.ok) throw new HttpError(403, 'csrf_failed');
+  if (!result.ok) throw flowdayError('CSRF_FAILED');
 }
 
+/** GET /api/csrf: `{"token": ...}` and the signed cookie (12-hour validity). */
 export async function csrfResponse(request: Request, env: Env, principal: Principal): Promise<Response> {
   const key = await csrfKey(env);
   const issued = await issueCsrf(request, principal.owner, { cookieName: CSRF_COOKIE, key });
-  const body: CsrfResponse = { token: issued.token };
-  const response = jsonResponse(body);
+  const response = jsonResponse({ token: issued.token });
   response.headers.set('set-cookie', issued.setCookie);
   return response;
 }
 
-// ---- bodies ------------------------------------------------------------------------------------------------------
+// ---- bodies of the E2E routes (the owner API's bodies are read by the transcoder) --------------------------------
 
 /** The body's bytes, at most `limit` (a larger declared or streamed body is refused). */
 export async function readLimited(request: Request, limit: number): Promise<Uint8Array | null> {
@@ -194,17 +138,22 @@ export async function readLimited(request: Request, limit: number): Promise<Uint
 
 export type Body = Record<string, unknown>;
 
-/** A JSON object body (an empty body reads as {}). */
+/** A JSON object body (an empty body reads as {}); BAD_REQUEST otherwise. */
 export async function readBody(request: Request): Promise<Body> {
   const bytes = await readLimited(request, MAX_BODY_BYTES);
-  if (bytes === null) bad('The request body is too large.');
+  if (bytes === null) throw flowdayError('BAD_REQUEST');
   if (bytes.byteLength === 0) return {};
   let value: unknown;
   try {
     value = JSON.parse(new TextDecoder('utf-8', { fatal: true, ignoreBOM: false }).decode(bytes));
   } catch {
-    bad('The request body is not valid JSON.');
+    throw flowdayError('BAD_REQUEST');
   }
-  if (typeof value !== 'object' || value === null || Array.isArray(value)) bad('The request body must be a JSON object.');
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) throw flowdayError('BAD_REQUEST');
   return value as Body;
+}
+
+/** The 405 of a transport route (/health, /api/csrf, the UI's files), with Allow. */
+export function methodNotAllowed(allow: string): RpcError {
+  return flowdayError('METHOD_NOT_ALLOWED', [], { allow }, 405);
 }

@@ -8,7 +8,7 @@
  * "*" (first sync, a new API key) returns everything with `full_sync: true`; Todoist may also answer a stored
  * token with a full sync, which the caller treats the same way.
  */
-import type { TaskPriority } from './api-types.ts';
+import type { TaskPriority } from './model.ts';
 import type { TaskUpsertRow } from './store/tasks.ts';
 
 export const TODOIST_SYNC_URL = 'https://api.todoist.com/api/v1/sync';

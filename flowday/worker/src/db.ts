@@ -5,6 +5,9 @@
  *
  * The meter wraps the binding: run(), all() and batch() report meta; first() and raw() do not, so writes always
  * go through run() or a batch (drizzle uses run() for insert, update and delete without returning()).
+ *
+ * The wrapper is also where a failed D1 call becomes a StorageError: the owner API answers it UNAVAILABLE (a
+ * dependency failed; repeating is safe), while anything else unexpected is a bug in FlowDay, INTERNAL (./api.ts).
  */
 import type { SQL } from 'drizzle-orm';
 import { drizzle, type DrizzleD1Database } from 'drizzle-orm/d1';
@@ -24,6 +27,30 @@ export class Meter {
   }
 }
 
+/** A D1 call failed (the database or the call to it, not FlowDay's own code). */
+export class StorageError extends Error {
+  constructor(cause: unknown) {
+    super('a D1 call failed', { cause });
+    this.name = 'StorageError';
+  }
+}
+
+/** Whether `error`, or an error it wraps (drizzle wraps a failed query), is a StorageError. */
+export function isStorageError(error: unknown): boolean {
+  for (let current = error, depth = 0; current instanceof Error && depth < 8; current = current.cause, depth += 1) {
+    if (current instanceof StorageError) return true;
+  }
+  return false;
+}
+
+async function d1<T>(call: () => Promise<T>): Promise<T> {
+  try {
+    return await call();
+  } catch (error) {
+    throw new StorageError(error);
+  }
+}
+
 class MeteredStatement {
   readonly inner: D1PreparedStatement;
   private readonly meter: Meter;
@@ -38,23 +65,23 @@ class MeteredStatement {
   }
 
   first(column?: string): Promise<unknown> {
-    return column === undefined ? this.inner.first() : this.inner.first(column);
+    return d1(() => (column === undefined ? this.inner.first() : this.inner.first(column)));
   }
 
   async run(): Promise<D1Result> {
-    const result = await this.inner.run();
+    const result = await d1(() => this.inner.run());
     this.meter.record(result);
     return result;
   }
 
   async all(): Promise<D1Result> {
-    const result = await this.inner.all();
+    const result = await d1(() => this.inner.all());
     this.meter.record(result);
     return result;
   }
 
   raw(options?: { columnNames?: boolean }): Promise<unknown[]> {
-    return options?.columnNames === true ? this.inner.raw({ columnNames: true }) : this.inner.raw();
+    return d1(() => (options?.columnNames === true ? this.inner.raw({ columnNames: true }) : this.inner.raw()));
   }
 }
 
@@ -72,13 +99,13 @@ class MeteredDatabase {
   }
 
   async batch(statements: MeteredStatement[]): Promise<D1Result[]> {
-    const results = await this.inner.batch(statements.map((statement) => statement.inner));
+    const results = await d1(() => this.inner.batch(statements.map((statement) => statement.inner)));
     for (const result of results) this.meter.record(result);
     return results;
   }
 
   exec(query: string): Promise<D1ExecResult> {
-    return this.inner.exec(query);
+    return d1(() => this.inner.exec(query));
   }
 }
 

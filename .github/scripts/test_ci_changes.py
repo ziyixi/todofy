@@ -289,9 +289,9 @@ class Classify(unittest.TestCase):
         codecs and the generated schemas); it deploys an app only when the changed path reaches that app's bundle."""
         self.assertEqual(
             ci_changes.PROTO_USERS,
-            {"lab": ("ts",), "todofy": ("python",), "links": ("ts",), "mail-hero": ("ts",), "dashboard": ("ts",), "watch": ("ts",)},
+            {"lab": ("ts",), "todofy": ("python",), "flowday": ("ts",), "links": ("ts",), "mail-hero": ("ts",), "dashboard": ("ts",), "watch": ("ts",)},
         )
-        ts, python = {"lab", "mail-hero", "dashboard", "links", "watch"}, {"todofy"}
+        ts, python = {"lab", "mail-hero", "dashboard", "flowday", "links", "watch"}, {"todofy"}
         every, none = ts | python, set()
         cases = {
             # task-intent-v1, bundled by Lab's and the watch app's TypeScript and todofy-core's Python.
@@ -306,6 +306,9 @@ class Classify(unittest.TestCase):
             # Lab's UI API: only Lab imports it (Python does not even generate it).
             "proto/lab/ui/v1/lab_ui_service.proto": {"lab"},
             "proto/lab/ui/v1/deck.proto": {"lab"},
+            # FlowDay's UI API reaches only FlowDay.
+            "proto/flowday/ui/v1/flowday_ui_service.proto": {"flowday"},
+            "proto/flowday/ui/v1/task.proto": {"flowday"},
             # The links app's UI API reaches only the links app.
             "proto/links/ui/v1/links_ui_service.proto": {"links"},
             # The watch app's UI API reaches only the watch app.
@@ -366,6 +369,8 @@ class Classify(unittest.TestCase):
                 lab_deploy="lab" in deployed,
                 dashboard_check=T,
                 dashboard_deploy="dashboard" in deployed,
+                flowday_check=T,
+                flowday_deploy="flowday" in deployed,
                 links_check=T,
                 links_deploy="links" in deployed,
                 watch_check=T,
@@ -382,6 +387,7 @@ class Classify(unittest.TestCase):
             checked_and({"todofy", "lab"}),
         )
         self.assertEqual(ci_changes.proto_deploys("proto/ts/http-transcoder.ts"), ts)
+        self.assertEqual(ci_changes.proto_deploys("proto/flowday/ui/v1/flow.proto"), {"flowday"})
         self.assertEqual(ci_changes.proto_deploys("proto/links/ui/v1/link.proto"), {"links"})
         self.assertEqual(ci_changes.proto_deploys("proto/watch/ui/v1/watch.proto"), {"watch"})
 
@@ -1684,7 +1690,7 @@ class AccessProbe(unittest.TestCase):
             lines = step(job).split("        run: |\n", 1)[1].splitlines()
             return "\n".join(line for line in lines if not line.strip() or line.startswith("          ")).rstrip()
 
-        self.assertEqual(body("flowday-deploy").replace("/api/tasks", "/api/v1/homeView"), body("dashboard-deploy"))
+        self.assertEqual(body("flowday-deploy").replace("/api/v1/tasks", "/api/v1/homeView"), body("dashboard-deploy"))
         self.assertIn("ACCESS_ISSUER: ${{ steps.config.outputs.access_issuer }}", step("flowday-deploy"))
         self.assertIn("PUBLIC_HOST: ${{ steps.config.outputs.host }}", step("flowday-deploy"))
         block = workflow_jobs()["flowday-deploy"]

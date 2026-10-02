@@ -6,7 +6,7 @@
  * as one JSON parameter read with json_each(), never as one bound parameter per id (D1 allows 100 per statement).
  */
 import { and, eq, isNotNull, isNull, ne, or, sql, type SQL } from 'drizzle-orm';
-import type { Task, TaskPriority } from '../api-types.ts';
+import type { TaskPriority, TaskRecord } from '../model.ts';
 import { batchSql, type Db } from '../db.ts';
 import { completedFlowTasks, flowTasks, tasks } from '../schema.ts';
 
@@ -18,7 +18,7 @@ type TaskRow = typeof tasks.$inferSelect;
  */
 export const UPSERT_CHUNK = 200;
 
-export function mapTaskRow(row: TaskRow): Task {
+export function mapTaskRow(row: TaskRow): TaskRecord {
   return {
     id: row.id,
     todoistId: row.todoistId,
@@ -46,7 +46,7 @@ function parseLabels(raw: string | null): string[] {
   }
 }
 
-export async function getAllTasks(db: Db): Promise<Task[]> {
+export async function getAllTasks(db: Db): Promise<TaskRecord[]> {
   const rows = await db.select().from(tasks).where(isNull(tasks.deletedAt));
   return rows.map(mapTaskRow);
 }
@@ -55,12 +55,46 @@ export async function getAllTasks(db: Db): Promise<Task[]> {
  * Tasks deleted in FlowDay itself (or with the legacy NULL source). Sync deletions are left out: they are
  * restored in Todoist, and listing every Todoist deletion would flood the trash dialog.
  */
-export async function getDeletedTasks(db: Db): Promise<Task[]> {
+export async function getDeletedTasks(db: Db): Promise<TaskRecord[]> {
   const rows = await db
     .select()
     .from(tasks)
     .where(and(isNotNull(tasks.deletedAt), or(isNull(tasks.deletedSource), ne(tasks.deletedSource, 'sync'))));
   return rows.map(mapTaskRow);
+}
+
+/** A task row with where its deletion came from (`deleted_source`: 'local', 'sync' or null). */
+export interface StoredTask {
+  readonly task: TaskRecord;
+  readonly deletedSource: string | null;
+}
+
+/** One task by ID, deleted or hidden ones included; null when there is none. */
+export async function getTask(db: Db, taskId: string): Promise<StoredTask | null> {
+  const [row] = await db.select().from(tasks).where(eq(tasks.id, taskId)).limit(1);
+  return row === undefined ? null : { task: mapTaskRow(row), deletedSource: row.deletedSource };
+}
+
+/**
+ * A page of the task list in rowid order (the order the tasks were first stored, which the list always had): the
+ * tasks that are not deleted, and with `showDeleted` also those of the trash (getDeletedTasks' rule). `afterRowid`
+ * is the last rowid of the previous page (0 for the first). Returns the page and the last rowid it read, or null
+ * when nothing follows.
+ */
+export async function listTasks(
+  db: Db,
+  options: { afterRowid: number; limit: number; showDeleted: boolean },
+): Promise<{ tasks: TaskRecord[]; nextRowid: number | null }> {
+  const rowid = sql<number>`rowid`;
+  const listed = options.showDeleted ? or(isNull(tasks.deletedAt), isNull(tasks.deletedSource), ne(tasks.deletedSource, 'sync')) : isNull(tasks.deletedAt);
+  const rows = await db
+    .select({ rowid, row: tasks })
+    .from(tasks)
+    .where(and(sql`rowid > ${options.afterRowid}`, listed))
+    .orderBy(rowid)
+    .limit(options.limit + 1);
+  const page = rows.slice(0, options.limit);
+  return { tasks: page.map(({ row }) => mapTaskRow(row)), nextRowid: rows.length > options.limit ? (page.at(-1)?.rowid ?? null) : null };
 }
 
 /** Hides a task and takes it out of every flow, in one atomic batch. */
@@ -104,49 +138,63 @@ export interface LocalTaskInput {
   description?: string | undefined;
 }
 
-export async function createLocalTask(db: Db, input: LocalTaskInput, now: Date = new Date()): Promise<Task> {
-  const id = `local-${crypto.randomUUID()}`;
+/**
+ * Creates a local task with the ID `id` (`local-<UUID>`); a task with that ID already there (a repeated request) is
+ * left as it is and answered instead (false). Three D1 row writes for a new task (the row, its primary key and the
+ * deleted_at index entry), none for a repeat.
+ */
+export async function createLocalTask(db: Db, id: string, input: LocalTaskInput, now: Date = new Date()): Promise<{ task: TaskRecord; created: boolean }> {
   const createdAt = now.toISOString();
   const priority = (input.priority !== undefined && input.priority >= 1 && input.priority <= 4 ? input.priority : 1) as TaskPriority;
-  await db.insert(tasks).values({
-    id,
-    todoistId: null,
-    title: input.title,
-    description: input.description ?? null,
-    projectName: null,
-    projectColor: null,
-    priority,
-    labels: JSON.stringify(input.labels ?? []),
-    estimatedMins: input.estimatedMins ?? null,
-    isCompleted: 0,
-    completedAt: null,
-    dueDate: input.dueDate ?? null,
-    createdAt,
-    syncedAt: null,
-    deletedAt: null,
-    deletedSource: null,
-    todoistProjectId: null,
-  });
+  const result = await db
+    .insert(tasks)
+    .values({
+      id,
+      todoistId: null,
+      title: input.title,
+      description: input.description ?? null,
+      projectName: null,
+      projectColor: null,
+      priority,
+      labels: JSON.stringify(input.labels ?? []),
+      estimatedMins: input.estimatedMins ?? null,
+      isCompleted: 0,
+      completedAt: null,
+      dueDate: input.dueDate ?? null,
+      createdAt,
+      syncedAt: null,
+      deletedAt: null,
+      deletedSource: null,
+      todoistProjectId: null,
+    })
+    .onConflictDoNothing();
+  if (result.meta.changes === 0) {
+    const stored = await getTask(db, id);
+    if (stored !== null) return { task: stored.task, created: false };
+  }
   return {
-    id,
-    todoistId: null,
-    title: input.title,
-    description: input.description ?? null,
-    projectName: null,
-    projectColor: null,
-    priority,
-    labels: input.labels ?? [],
-    estimatedMins: input.estimatedMins ?? null,
-    isCompleted: false,
-    completedAt: null,
-    dueDate: input.dueDate ?? null,
-    createdAt,
-    deletedAt: null,
+    task: {
+      id,
+      todoistId: null,
+      title: input.title,
+      description: input.description ?? null,
+      projectName: null,
+      projectColor: null,
+      priority,
+      labels: input.labels ?? [],
+      estimatedMins: input.estimatedMins ?? null,
+      isCompleted: false,
+      completedAt: null,
+      dueDate: input.dueDate ?? null,
+      createdAt,
+      deletedAt: null,
+    },
+    created: true,
   };
 }
 
 /** Persisted tasks with these ids, deleted ones included (any number of ids: one JSON parameter). */
-export async function getTasksByIds(db: Db, ids: readonly string[]): Promise<Task[]> {
+export async function getTasksByIds(db: Db, ids: readonly string[]): Promise<TaskRecord[]> {
   if (ids.length === 0) return [];
   const rows = await db
     .select()
@@ -177,7 +225,7 @@ export interface TaskUpsertRow {
   todoist_project_id: string | null;
 }
 
-export function taskToUpsertRow(task: Task, todoistProjectId: string | null = null): TaskUpsertRow {
+export function taskToUpsertRow(task: TaskRecord, todoistProjectId: string | null = null): TaskUpsertRow {
   return {
     id: task.id,
     todoist_id: task.todoistId,
@@ -288,7 +336,7 @@ export function projectStatement(projects: readonly { id: string; name: string; 
 }
 
 /** Upserts these tasks (the diff upsert above) in one batch; returns the number of rows inserted or changed. */
-export async function upsertTasks(db: Db, list: readonly Task[], now: Date = new Date()): Promise<number> {
+export async function upsertTasks(db: Db, list: readonly TaskRecord[], now: Date = new Date()): Promise<number> {
   const statements = upsertStatements(list.map((task) => taskToUpsertRow(task)), now.toISOString());
   return runStatements(db, statements);
 }

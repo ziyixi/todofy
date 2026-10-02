@@ -9,6 +9,12 @@ import { PWA_PUBLIC_PATHS } from '../../src/assets.ts';
 import { accessClaims, testIssuer, type TestIssuer } from '../jwt.ts';
 import { SYNTHETIC_BINDINGS, TEST_PAGE, startHarness, type Harness } from './harness.ts';
 
+/** The ErrorInfo reason of a google.rpc.Status body. */
+async function reasonOf(response: Response): Promise<string | undefined> {
+  const body = await response.json<{ error: { details?: { '@type': string; reason?: string }[] } }>();
+  return body.error.details?.find((detail) => detail['@type'] === 'type.googleapis.com/google.rpc.ErrorInfo')?.reason;
+}
+
 const ISSUER = SYNTHETIC_BINDINGS['ACCESS_ISSUER'] ?? '';
 const AUDIENCE = SYNTHETIC_BINDINGS['ACCESS_AUDIENCE'] ?? '';
 
@@ -41,12 +47,21 @@ describe('with Cloudflare Access (no dev bypass)', () => {
   });
 
   it('everything else needs the JWT: other /pwa/ files, the page, the API, the E2E routes', async () => {
-    for (const path of ['/', '/index.html', '/pwa/sw.js', '/pwa/other.png', '/pwa/', '/pwa/icon-192x192.png/', '/api/tasks', '/api/csrf', '/api/test/health', '/_next/static/chunks/app.js']) {
+    for (const path of ['/', '/index.html', '/pwa/sw.js', '/pwa/other.png', '/pwa/', '/pwa/icon-192x192.png/', '/api/v1/tasks', '/api/v1/settings', '/api/csrf', '/api/test/health', '/_next/static/chunks/app.js']) {
       const response = await h.fetch(path);
       expect(response.status, path).toBe(401);
-      expect((await response.json<{ error: { code: string } }>()).error.code).toBe('unauthorized');
+      expect(await reasonOf(response), path).toBe('UNAUTHORIZED');
     }
-    expect((await h.fetch('/api/tasks', { headers: { 'cf-access-jwt-assertion': await jwt('someone@example.com') } })).status).toBe(401);
+    expect((await h.fetch('/api/v1/tasks', { headers: { 'cf-access-jwt-assertion': await jwt('someone@example.com') } })).status).toBe(401);
+  });
+
+  it("the old UI's routes answer an expired sign-in in their old envelope, which the old UI reads as a session to renew", async () => {
+    const response = await h.fetch('/api/tasks');
+    expect(response.status).toBe(401);
+    expect((await response.json<{ error: { code: string } }>()).error.code).toBe('unauthorized');
+    const signedIn = await h.fetch('/api/flows', { headers: { 'cf-access-jwt-assertion': await jwt() } });
+    expect(signedIn.status).toBe(410);
+    expect((await signedIn.json<{ error: { code: string } }>()).error.code).toBe('reload_required');
   });
 
   it('/health is public and says nothing but the service, status and build', async () => {
@@ -55,7 +70,7 @@ describe('with Cloudflare Access (no dev bypass)', () => {
 
   it('the owner JWT reads the API and the page; the E2E routes stay 404 without the dev bypass', async () => {
     const headers = { 'cf-access-jwt-assertion': await jwt() };
-    expect((await h.fetch('/api/tasks', { headers })).status).toBe(200);
+    expect((await h.fetch('/api/v1/tasks', { headers })).status).toBe(200);
     expect((await h.fetch('/', { headers })).status).toBe(200);
     expect((await h.fetch('/api/test/health', { headers })).status).toBe(404);
     expect((await h.fetch('/api/test/reset', { method: 'POST', headers })).status).toBe(404);
@@ -67,7 +82,11 @@ describe('with Cloudflare Access (no dev bypass)', () => {
     const { token: csrfToken } = await csrf.json<{ token: string }>();
     const cookie = (csrf.headers.get('set-cookie') ?? '').split(';')[0] ?? '';
     const send = (headers: Record<string, string>) =>
-      h.fetch('/api/settings', { method: 'PUT', headers: { 'cf-access-jwt-assertion': token, 'content-type': 'application/json', ...headers }, body: JSON.stringify({ day_capacity_mins: 300 }) });
+      h.fetch('/api/v1/settings?update_mask=day_capacity_minutes', {
+        method: 'PATCH',
+        headers: { 'cf-access-jwt-assertion': token, 'content-type': 'application/json', ...headers },
+        body: JSON.stringify({ day_capacity_minutes: 300 }),
+      });
     expect((await send({ origin: 'https://flowday.example.com', 'x-csrf-token': csrfToken, cookie })).status).toBe(200);
     for (const headers of [
       { origin: 'https://flowday.example.com', cookie },
@@ -77,7 +96,7 @@ describe('with Cloudflare Access (no dev bypass)', () => {
     ]) {
       const response = await send(headers);
       expect(response.status).toBe(403);
-      expect((await response.json<{ error: { code: string } }>()).error.code).toBe('csrf_failed');
+      expect(await reasonOf(response)).toBe('CSRF_FAILED');
     }
   });
 });
@@ -105,7 +124,7 @@ describe('with the loopback dev bypass', () => {
 
   it('hashed build files are cached as immutable; API answers are private and no-store', async () => {
     expect((await h.fetch('/_next/static/chunks/app.js')).headers.get('cache-control')).toBe('private, max-age=31536000, immutable');
-    const api = await h.fetch('/api/tasks');
+    const api = await h.fetch('/api/v1/tasks');
     expect(api.headers.get('cache-control')).toBe('no-store');
     expect(api.headers.get('content-security-policy')).toContain("script-src 'self';");
     expect(api.headers.get('x-flowday-rows-written')).toBe('0');
@@ -115,43 +134,46 @@ describe('with the loopback dev bypass', () => {
     expect(await (await h.fetch('/api/test/health')).json()).toEqual({ ok: true });
     const seeded = await h.fetch('/api/test/seed', { method: 'POST', body: JSON.stringify({ tasks: [{ id: 'a', title: 'Seeded' }], flows: { '2026-04-13': ['a'] } }) });
     expect(seeded.status).toBe(200);
-    expect((await (await h.fetch('/api/tasks')).json<{ id: string }[]>()).map((task) => task.id)).toEqual(['a']);
+    expect((await (await h.fetch('/api/v1/tasks')).json<{ tasks: { name: string }[] }>()).tasks.map((task) => task.name)).toEqual(['tasks/a']);
     expect(await (await h.fetch('/api/test/sync-orphans', { method: 'POST', body: '{}' })).json()).toEqual({ ok: true, changed: 0 });
     expect((await h.fetch('/api/test/reset', { method: 'POST' })).status).toBe(200);
-    expect(await (await h.fetch('/api/tasks')).json()).toEqual([]);
+    expect(await (await h.fetch('/api/v1/tasks')).json()).toEqual({});
   });
 
   it('a seeded Todoist key is sealed like one saved in Settings', async () => {
     await h.fetch('/api/test/seed', { method: 'POST', body: JSON.stringify({ settings: { todoist_api_key: 'saved-secret-key' } }) });
     const [row] = await h.sql<{ value: string }>("SELECT value FROM settings WHERE key = 'todoist_api_key'");
     expect(row?.value).toMatch(/^v1\./);
-    expect((await (await h.fetch('/api/settings')).json<{ has_api_key: boolean }>()).has_api_key).toBe(true);
+    expect((await (await h.fetch('/api/v1/settings')).json<{ todoist_api_key_set: boolean }>()).todoist_api_key_set).toBe(true);
   });
 
   it('a request that came through Cloudflare (cf-ray) never gets the bypass or the E2E routes', async () => {
     const response = await h.fetch('/api/test/health', { headers: { 'cf-ray': 'synthetic' } });
     expect(response.status).toBe(503);
-    expect((await response.json<{ error: { code: string } }>()).error.code).toBe('access_not_configured');
+    expect(await reasonOf(response)).toBe('ACCESS_NOT_CONFIGURED');
   });
 
   it('logs one line per mutation with IDs, route, status and row counts only: no title, note, token or key', async () => {
     h.logs.length = 0;
-    await h.mutate('PUT', '/api/settings', { todoist_api_key: 'synthetic-secret-key' });
-    await h.mutate('POST', '/api/tasks', { title: 'Synthetic private title' });
-    await h.mutate('PUT', '/api/notes', { taskId: 't1', flowDate: '2026-04-13', content: 'Synthetic private note' });
+    await h.api.updateSettings({ settings: { name: 'settings', todoistApiKey: 'synthetic-secret-key' }, updateMask: { paths: ['todoist_api_key'] } });
+    await h.api.createTask({ task: { title: 'Synthetic private title' } });
+    await h.api.updateNote({ note: { name: 'flows/2026-04-13/notes/t1', content: 'Synthetic private note' } });
+    await h.call((api) => api.getTask({ name: 'tasks/synthetic-private-id' }));
     const lines = h.logs.filter((line) => line.startsWith('{'));
-    expect(lines).toHaveLength(3);
+    expect(lines).toHaveLength(4);
     for (const line of lines) {
       expect(Object.keys(JSON.parse(line) as object).sort()).toEqual(['code', 'method', 'request_id', 'route', 'rows_read', 'rows_written', 'status']);
     }
+    expect(lines.map((line) => (JSON.parse(line) as { route: string; code: string | null }).route)).toEqual(['UpdateSettings', 'CreateTask', 'UpdateNote', 'GetTask']);
+    expect((JSON.parse(lines[3] ?? '{}') as { code: string }).code).toBe('NOT_FOUND');
     const all = h.logs.join('\n');
-    for (const secret of ['synthetic-secret-key', 'Synthetic private title', 'Synthetic private note', 'owner@example.com']) expect(all).not.toContain(secret);
+    for (const secret of ['synthetic-secret-key', 'Synthetic private title', 'Synthetic private note', 'synthetic-private-id', 'owner@example.com']) expect(all).not.toContain(secret);
   });
 
   it('refuses bodies over 256 KiB, non-JSON bodies and unknown methods', async () => {
-    const big = await h.mutate('PUT', '/api/notes', { taskId: 't1', flowDate: '2026-04-13', content: 'x'.repeat(300 * 1024) });
+    const big = await h.mutate('PATCH', '/api/v1/flows/2026-04-13/notes/t1', { content: 'x'.repeat(300 * 1024) });
     expect(big.status).toBe(400);
-    expect((await h.fetch('/api/flows', { method: 'POST' })).status).toBe(405);
+    expect((await h.fetch('/api/v1/flows', { method: 'POST' })).status).toBe(405);
     expect((await h.fetch('/', { method: 'POST' })).status).toBe(405);
     expect((await h.fetch('/api/nothing-here')).status).toBe(404);
   });
@@ -172,8 +194,8 @@ describe('without E2E_TEST_ROUTES or CREDENTIAL_KEY', () => {
   });
 
   it('without the credential key a Todoist key is refused (503), never stored in plain text', async () => {
-    const result = await h.mutate('PUT', '/api/settings', { todoist_api_key: 'synthetic-secret-key' });
-    expect(result.status).toBe(503);
+    const result = await h.call((api) => api.updateSettings({ settings: { name: 'settings', todoistApiKey: 'synthetic-secret-key' }, updateMask: { paths: ['todoist_api_key'] } }));
+    expect(result.status).toMatchObject({ httpStatus: 503, reason: 'NOT_CONFIGURED' });
     expect(result.rowsWritten).toBe(0);
     expect(await h.sql("SELECT * FROM settings WHERE key = 'todoist_api_key'")).toEqual([]);
   });

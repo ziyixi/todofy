@@ -9,6 +9,10 @@ import { mkdtemp, readFile, readdir, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { FlowDayUiService } from '@ziyixi/proto/flowday/ui/v1/flowday_ui_service_pb';
+import { createHttpClient, RpcStatusError, type HttpCall, type HttpClient } from '@ziyixi/proto/http-client';
+import type { ShapeOf } from '@ziyixi/proto/http-transcoder';
+import type { Status } from '@ziyixi/proto/rpc-status';
 import { build } from 'esbuild';
 import { Miniflare, convertV4MiniflareOptions } from 'miniflare';
 import { importCredentialKey, sealCredential } from '../../src/credentials.ts';
@@ -219,6 +223,16 @@ export class FakeTodoist {
 
 // ---- the harness -------------------------------------------------------------------------------------------------------
 
+/** FlowDayUiService's typed client (proto/ts/http-client.ts), as the UI calls it. */
+export type Api = HttpClient<ShapeOf<typeof FlowDayUiService>>;
+
+/** What one owner API call did: its answer or its google.rpc.Status, and the D1 rows it wrote. */
+export interface Call<T> {
+  readonly value: T | undefined;
+  readonly status: Status | undefined;
+  readonly rowsWritten: number;
+}
+
 export interface Harness {
   readonly mf: Miniflare;
   /** The Worker's log lines (console output), kept instead of printed; warnings and errors are also printed. */
@@ -231,6 +245,10 @@ export interface Harness {
   /** A mutation with a fresh CSRF token and the loopback Origin: status, JSON and the D1 rows it wrote. */
   // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-parameters -- the caller names the answer's shape
   mutate<T = unknown>(method: 'POST' | 'PUT' | 'PATCH' | 'DELETE', path: string, body?: unknown): Promise<{ status: number; body: T; rowsWritten: number }>;
+  /** The owner API through the shared client: GETs as they are, mutations with the CSRF token and the loopback Origin. */
+  readonly api: Api;
+  /** Runs one owner API call: its answer, or its Status when it failed, and the D1 rows it wrote. */
+  call<T>(run: (api: Api) => Promise<T>): Promise<Call<T>>;
   /** The drizzle Db over the same D1 database, metered by `meter`. */
   db(meter?: Meter): Db;
   sql<T>(query: string, ...params: unknown[]): Promise<T[]>;
@@ -297,7 +315,35 @@ export async function startHarness(options: HarnessOptions = {}): Promise<Harnes
   const fetchFlowday = (path: string, init?: RequestInit) =>
     mf.dispatchFetch(`http://127.0.0.1${path}`, init as never) as unknown as Promise<Response>;
   let csrf: { token: string; cookie: string } | null = null;
+  const csrfHeaders = async (): Promise<Record<string, string>> => {
+    if (csrf === null) {
+      const response = await fetchFlowday('/api/csrf');
+      const { token } = await response.json<{ token: string }>();
+      csrf = { token, cookie: (response.headers.get('set-cookie') ?? '').split(';')[0] ?? '' };
+    }
+    return { origin: 'http://127.0.0.1', 'x-csrf-token': csrf.token, cookie: csrf.cookie };
+  };
+  let lastRowsWritten = Number.NaN;
+  const send = async (call: HttpCall): Promise<Response> => {
+    const headers: Record<string, string> = call.httpMethod === 'GET' ? {} : await csrfHeaders();
+    if (call.body !== undefined) headers['content-type'] = 'application/json';
+    const response = await fetchFlowday(call.url, { method: call.httpMethod, headers, ...(call.body === undefined ? {} : { body: call.body }) });
+    lastRowsWritten = Number(response.headers.get('x-flowday-rows-written') ?? 'NaN');
+    return response;
+  };
+  const api: Api = createHttpClient(FlowDayUiService, send);
   const harness: Harness = {
+    api,
+    async call<T>(run: (client: Api) => Promise<T>): Promise<Call<T>> {
+      lastRowsWritten = Number.NaN;
+      try {
+        const value = await run(api);
+        return { value, status: undefined, rowsWritten: lastRowsWritten };
+      } catch (error) {
+        if (error instanceof RpcStatusError) return { value: undefined, status: error.status, rowsWritten: lastRowsWritten };
+        throw error;
+      }
+    },
     mf,
     logs,
     get todoist() {
@@ -311,14 +357,9 @@ export async function startHarness(options: HarnessOptions = {}): Promise<Harnes
     },
     // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-parameters -- the caller names the answer's shape
     async mutate<T>(method: 'POST' | 'PUT' | 'PATCH' | 'DELETE', path: string, body?: unknown) {
-      if (csrf === null) {
-        const response = await fetchFlowday('/api/csrf');
-        const { token } = await response.json<{ token: string }>();
-        csrf = { token, cookie: (response.headers.get('set-cookie') ?? '').split(';')[0] ?? '' };
-      }
       const response = await fetchFlowday(path, {
         method,
-        headers: { 'content-type': 'application/json', origin: 'http://127.0.0.1', 'x-csrf-token': csrf.token, cookie: csrf.cookie },
+        headers: { 'content-type': 'application/json', ...(await csrfHeaders()) },
         ...(body === undefined ? {} : { body: JSON.stringify(body) }),
       });
       return {

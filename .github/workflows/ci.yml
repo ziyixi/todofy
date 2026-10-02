@@ -638,7 +638,8 @@ jobs:
         run: rm -f "$RUNNER_TEMP/lab-secrets.json"
 
   # FlowDay (flowday/: the Worker "flowday", its D1 schema and the Next.js static export it serves). "FlowDay deploy"
-  # needs this job. It compiles in packages/edge-auth; no contract.
+  # needs this job. It compiles in packages/edge-auth and the TypeScript proto runtime with proto/flowday/ui/ (its owner
+  # API, flowday.ui.v1); no contract.
   flowday-checks:
     name: FlowDay checks
     needs: changes
@@ -659,6 +660,7 @@ jobs:
           cache-dependency-path: |
             flowday/worker/package-lock.json
             flowday/web/package-lock.json
+            proto/package-lock.json
       - name: Install locked dependencies
         run: |
           npm ci --prefix worker --no-audit --no-fund
@@ -1971,7 +1973,7 @@ jobs:
           issuer=$ACCESS_ISSUER
           host=$PUBLIC_HOST
           test -n "$issuer" && test -n "$host"
-          for path in / /api/tasks; do
+          for path in / /api/v1/tasks; do
             for attempt in $(seq 1 10); do
               answer=$(curl -sS -o /dev/null --max-time 15 --proto '=https' -w '%{http_code} %{redirect_url}' \
                 "https://$host$path" 2>/dev/null) || true

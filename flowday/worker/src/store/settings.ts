@@ -3,7 +3,7 @@
  * todoist_api_key, day_capacity_mins, planning_completed:<date>, last_sync_at (container era), and the sync's own
  * todoist_sync_token, todoist_projects and sync_claimed_at (../sync.ts).
  */
-import { eq, inArray, sql, type SQL } from 'drizzle-orm';
+import { and, eq, gte, inArray, lt, sql, type SQL } from 'drizzle-orm';
 import type { Db } from '../db.ts';
 import { settings } from '../schema.ts';
 
@@ -37,4 +37,23 @@ export async function setSetting(db: Db, key: string, value: string): Promise<vo
 
 export async function deleteSetting(db: Db, key: string): Promise<void> {
   await db.delete(settings).where(eq(settings.key, key));
+}
+
+/** The settings key that marks a day's planning as completed (value 'true'); kept since the container era. */
+export const PLANNING_PREFIX = 'planning_completed:';
+
+export function planningKey(flowDate: string): string {
+  return `${PLANNING_PREFIX}${flowDate}`;
+}
+
+/**
+ * The days whose planning is completed, by a range of the primary key (`planning_completed:` up to the next
+ * character after the colon, `;`), so no LIKE pattern and no full scan.
+ */
+export async function getPlanningDays(db: Db): Promise<Set<string>> {
+  const rows = await db
+    .select({ key: settings.key })
+    .from(settings)
+    .where(and(gte(settings.key, PLANNING_PREFIX), lt(settings.key, 'planning_completed;'), eq(settings.value, 'true')));
+  return new Set(rows.map((row) => row.key.slice(PLANNING_PREFIX.length)));
 }

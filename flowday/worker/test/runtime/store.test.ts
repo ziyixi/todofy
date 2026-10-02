@@ -4,7 +4,7 @@
  * (more than 100 ids in one statement) and the row counts of each write.
  */
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import type { Task } from '../../src/api-types.ts';
+import type { TaskRecord } from '../../src/model.ts';
 import { Meter } from '../../src/db.ts';
 import { createTimeEntry, deleteTimeEntry, getAllTimeEntries, getEntriesByDate, getEntriesByTask, getEntriesByTaskAndDate, getEntriesInDateRange, updateTimeEntry } from '../../src/store/entries.ts';
 import { addCompletedFlowTask, getAllCompletedFlowTasks, getAllFlows, removeCompletedFlowTask, setFlowTaskIds } from '../../src/store/flows.ts';
@@ -34,7 +34,7 @@ beforeEach(async () => {
   await h.reset();
 });
 
-function makeTask(overrides: Partial<Task> = {}): Task {
+function makeTask(overrides: Partial<TaskRecord> = {}): TaskRecord {
   return {
     id: 't1',
     todoistId: null,
@@ -54,7 +54,7 @@ function makeTask(overrides: Partial<Task> = {}): Task {
   };
 }
 
-const ids = (tasks: Task[]) => tasks.map((task) => task.id).sort();
+const ids = (tasks: TaskRecord[]) => tasks.map((task) => task.id).sort();
 
 describe('settings', () => {
   it('returns null for a missing setting, sets, overwrites', async () => {
