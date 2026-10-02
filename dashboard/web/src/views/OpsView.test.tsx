@@ -44,21 +44,25 @@ describe('操作与记录', () => {
       'Mail Hero',
       'Todofy',
       '论文雷达',
+      'FlowDay',
+      '短链接',
       '个人网站',
       'Notion 发布',
       'Newsletter',
       '个人控制台',
       '自托管服务器',
-      '短链接',
     ])
     expect(rows[2]).toHaveTextContent('ops-v1 状态接口')
+    // FlowDay and the links app: a probe of a path their own Worker answers outside Access.
     expect(rows[3]).toHaveTextContent('公开地址探测')
-    expect(rows[5]).toHaveTextContent('未接入监控')
-    // Hidden, with no Worker: it only names the self-hosted servers' backup bucket.
+    expect(within(rows[3] as HTMLElement).getAllByRole('cell').at(-1)).toHaveTextContent('flowday')
+    expect(rows[4]).toHaveTextContent('公开地址探测')
+    expect(within(rows[4] as HTMLElement).getAllByRole('cell').at(-1)).toHaveTextContent('links')
+    expect(rows[5]).toHaveTextContent('公开地址探测')
     expect(rows[7]).toHaveTextContent('未接入监控')
-    expect(within(rows[7] as HTMLElement).getAllByRole('cell').at(-1)).toHaveTextContent('—')
-    // Hidden, with the Worker links and its D1 database (L2): no probe and no Ops entrypoint.
-    expect(rows[8]).toHaveTextContent('未接入监控')
+    // Hidden, with no Worker: it only names the self-hosted servers' backup bucket.
+    expect(rows[9]).toHaveTextContent('未接入监控')
+    expect(within(rows[9] as HTMLElement).getAllByRole('cell').at(-1)).toHaveTextContent('—')
   })
 
   it('names a link-only entry of the registry as such', async () => {

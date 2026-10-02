@@ -43,6 +43,11 @@ function entry(registry: Mutable<Registry>, id: string): Mutable<EntryDef> {
   return found;
 }
 
+/** Drops the workers of an entry (to test the rules that need one). */
+function withoutWorkers(registry: Mutable<Registry>, id: string): void {
+  registry.workers = registry.workers.filter((worker) => worker.entry !== id);
+}
+
 function flow(registry: Mutable<Registry>, id: string): Mutable<FlowDef> {
   const found = registry.flows.find((f) => f.id === id);
   if (found === undefined) throw new Error(id);
@@ -60,21 +65,22 @@ describe('the registry', () => {
 
   it('registers the entries of the design, in their groups and order', () => {
     const byGroup = (group: string) => REGISTRY.entries.filter((e) => e.group === group).sort((a, b) => a.order - b.order).map((e) => e.id);
-    expect(byGroup('apps')).toEqual(['mail-hero', 'todofy', 'lab']);
+    expect(byGroup('apps')).toEqual(['mail-hero', 'todofy', 'lab', 'flowday', 'links']);
     expect(byGroup('sites')).toEqual(['website']);
     expect(byGroup('services')).toEqual(['notion-publish', 'newsletter']);
-    expect(byGroup('hidden')).toEqual(['home', 'self-hosted', 'links']);
+    expect(byGroup('hidden')).toEqual(['home', 'self-hosted']);
     const status = Object.fromEntries(REGISTRY.entries.map((e) => [e.id, e.status.type]));
     expect(status).toEqual({
       'mail-hero': 'ops_v1',
       todofy: 'ops_v1',
       lab: 'ops_v1',
+      flowday: 'public_http',
+      links: 'public_http',
       website: 'public_http',
       'notion-publish': 'analytics',
       newsletter: 'none',
       home: 'self',
       'self-hosted': 'none',
-      links: 'none',
     });
   });
 
@@ -102,11 +108,13 @@ describe('the registry', () => {
     expect(resourceByMatch('do', 'a013ef9fa45048d4b4f7bfcc641b57ea')?.id).toBe('todofy-core-do');
     expect(resourceByMatch('do', 'acddddf88d624194a68af430fd1a90ff')?.id).toBe('home-state');
     expect(resourceByMatch('do', 'd8b315160669429781ba6229123cb33c')?.id).toBe('lab-state');
-    // The links app (L2): its Worker and D1 database, named under a hidden entry without a tile.
+    // FlowDay and the links app: their Worker and D1 database, under their tiles (no flow takes part).
     expect(resourceByMatch('d1', '2f8c5331-06ce-4347-8c0a-90fe51c82260')).toMatchObject({ id: 'links-db', entry: 'links' });
+    expect(resourceByMatch('d1', 'df104e83-7183-47e3-b2f9-638dc7502c13')).toMatchObject({ id: 'flowday-db', entry: 'flowday' });
     expect(entryOfScript('links')).toBe('links');
+    expect(entryOfScript('flowday')).toBe('flowday');
     expect(flowsOfScript('links')).toEqual([]);
-    expect(REGISTRY.entries.find((e) => e.id === 'links')).toMatchObject({ group: 'hidden', url: null, status: { type: 'none' } });
+    expect(flowsOfScript('flowday')).toEqual([]);
     expect(resourceByMatch('r2', 'someone-elses-bucket')).toBeUndefined();
     // Not an app of the monorepo: the self-hosted servers' backups, named under a hidden entry.
     expect(resourceByMatch('r2', 'vultr-backup')).toMatchObject({ id: 'vps-backup', name: 'VPS 备份', entry: 'self-hosted' });
@@ -116,10 +124,10 @@ describe('the registry', () => {
   });
 
   it('keeps the tick within the Workers Free subrequest budget', () => {
-    // 3 status() + 1 probe + 1 GraphQL + 3 setGuard + 2 canary calls + 1 reportOps + 12 drift calls.
-    expect(outboundPerTick()).toBe(23);
+    // 3 status() + 3 probes (website, FlowDay, links) + 1 GraphQL + 3 setGuard + 2 canary calls + 1 reportOps + 12 drift calls.
+    expect(outboundPerTick()).toBe(25);
     expect(outboundPerTick()).toBeLessThanOrEqual(MAX_OUTBOUND_PER_TICK);
-    expect(outboundPerRefresh()).toBe(4);
+    expect(outboundPerRefresh()).toBe(6);
   });
 
   it('serves a public view without bindings or probe URLs, within its budget', () => {
@@ -127,10 +135,11 @@ describe('the registry', () => {
     expect(body).toBe(JSON.stringify(registryView('abc123')));
     expect(new TextEncoder().encode(body).byteLength).toBeLessThanOrEqual(V2_BODY_BUDGET.registry);
     expect(body).not.toContain('MAIL_HERO');
-    expect(body).not.toContain('build-info');
+    for (const probe of ['build-info', 'manifest.webmanifest', 'robots.txt', 'content_type', 'outside_access']) expect(body).not.toContain(probe);
     expect(body).not.toContain('GitHub');
     const view = registryView('abc123');
-    expect(view.entries.map((e) => e.id)).not.toContain('flowday');
+    expect(view.entries.find((e) => e.id === 'flowday')).toMatchObject({ status_type: 'public_http', host: 'flowday.ziyixi.science', access: true, scripts: ['flowday'] });
+    expect(view.entries.find((e) => e.id === 'links')).toMatchObject({ url: 'https://s.ziyixi.science/_/', host: 's.ziyixi.science', access: true, scripts: ['links'] });
     const linkOnly = registryView('abc123', withLinkOnly()).entries.find((e) => e.id === LINK_ONLY_ENTRY.id);
     expect(linkOnly).toMatchObject({ status_type: 'link_only', host: 'link-demo.ziyixi.science', scripts: [] });
     expect(linkOnly).not.toHaveProperty('status');
@@ -162,7 +171,8 @@ describe('validateRegistry', () => {
   it('accepts only https URLs of the owner zone without query, port or userinfo', () => {
     for (const [url, problem] of [
       ['http://link-demo.ziyixi.science/', 'not https'],
-      ['https://link-demo.ziyixi.science/x', 'path must be /'],
+      ['https://link-demo.ziyixi.science/x', 'path must be / or a directory ending in /'],
+      ['https://link-demo.ziyixi.science/_//', 'path must be / or a directory ending in /'],
       ['https://link-demo.ziyixi.science/?a=1', 'query or fragment'],
       ['https://user@link-demo.ziyixi.science/', 'userinfo'],
       ['https://link-demo.ziyixi.science:8443/', 'explicit port'],
@@ -173,6 +183,12 @@ describe('validateRegistry', () => {
       entry(r, 'link-demo').url = url;
       expect(problems(r).some((p) => p.startsWith('entry link-demo url') && p.includes(problem)), url).toBe(true);
     }
+  });
+
+  it('accepts a directory of the host as a tile link (the links launcher /_/)', () => {
+    const r = copy();
+    entry(r, 'link-demo').url = 'https://link-demo.ziyixi.science/_/';
+    expect(problems(r)).toEqual([]);
   });
 
   it('refuses anything that looks private', () => {
@@ -212,9 +228,39 @@ describe('validateRegistry', () => {
     const found = problems(r);
     expect(found).toContain('entry link-demo: an Access-protected host cannot be probed publicly');
     expect(found).toContain('entry newsletter: analytics needs a worker');
+    // Declaring the path outside Access (and the rest of what that needs) is what allows it.
+    const exempt = copy();
+    entry(exempt, 'link-demo').status = { type: 'public_http', url: 'https://link-demo.ziyixi.science/robots.txt', expect: [200], content_type: 'text/plain', outside_access: true, enabled: true };
+    expect(problems(exempt)).toEqual([]);
     const linkOnly = copy();
     entry(linkOnly, 'link-demo').tile_metric = { kind: 'latency' };
     expect(problems(linkOnly)).toContain('entry link-demo: tile_metric latency does not fit status link_only');
+  });
+
+  it('allows a probe of an Access-protected host only where the login redirect can never pass as healthy', () => {
+    type Probe = Extract<Mutable<EntryDef>['status'], { type: 'public_http' }>;
+    const cases: [(probe: Probe) => void, string][] = [
+      [(p) => delete p.content_type, 'entry flowday: a probe outside Access needs content_type'],
+      [(p) => (p.expect = [200, 302]), 'entry flowday: a probe outside Access expects 2xx only'],
+      [(p) => (p.url = 'https://flowday.ziyixi.science/'), 'entry flowday: a probe outside Access cannot be the Access-protected url'],
+      [(p) => (p.url = 'https://elsewhere.ziyixi.science/pwa/manifest.webmanifest'), "entry flowday: a probe outside Access is on the entry's own host"],
+      [(p) => delete p.outside_access, 'entry flowday: an Access-protected host cannot be probed publicly'],
+      [(p) => (p.content_type = 'Application/JSON; charset=utf-8'), 'entry flowday: content_type is not a lowercase media type'],
+    ];
+    for (const [change, problem] of cases) {
+      const r = copy();
+      const probe = { ...(entry(r, 'flowday').status as Probe) };
+      change(probe);
+      entry(r, 'flowday').status = probe;
+      expect(problems(r), problem).toContain(problem);
+    }
+    // A public host never claims to be outside Access, and error_rate needs Workers to judge.
+    const site = copy();
+    entry(site, 'website').status = { type: 'public_http', url: 'https://www.ziyixi.science/build-info.json', expect: [200], outside_access: true, error_rate: true, enabled: true };
+    withoutWorkers(site, 'website');
+    const found = problems(site);
+    expect(found).toContain('entry website: outside_access is only for an Access-protected host');
+    expect(found).toContain('entry website: error_rate needs a worker');
   });
 
   it('checks stages: entries, workers, holds, notes and each code once per flow', () => {

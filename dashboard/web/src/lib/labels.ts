@@ -44,6 +44,8 @@ export const LEVEL: Readonly<Record<Level, { word: string; tone: Tone }>> = {
 const REASONS: Readonly<Record<string, string>> = {
   unreachable: '无法连接',
   http_status: 'HTTP 状态异常',
+  // The probe got the expected status with another media type: something else than the app's Worker answered.
+  content_type: '响应类型不符',
   idle: '长时间没有请求',
   never_checked: '尚未检查',
   tick_stale: '定时检查已停止',

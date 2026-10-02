@@ -549,12 +549,34 @@ class Hosts(unittest.TestCase):
         self.assertEqual(load(PRODUCTION["todofy-core"])["vars"]["TODOFY_PUBLIC_HOST"], self.todofy)
 
     def test_the_dashboard_links_to_the_app_hosts(self):
+        """Each app tile opens its Worker's PUBLIC_HOST; the links tile opens the launcher /_/ (links/docs/design.md)."""
         registry = (REPO / "dashboard" / "worker" / "src" / "registry.ts").read_text()
-        urls = dict(re.findall(r"id: '(mail-hero|todofy|lab)',[^}]*?url: '([^']+)'", registry, re.S))
-        lab = load(PRODUCTION["lab"])["vars"]["PUBLIC_HOST"]
+        urls = dict(re.findall(r"id: '(mail-hero|todofy|lab|flowday|links)',[^}]*?url: '([^']+)'", registry, re.S))
+        host = {app: load(PRODUCTION[app])["vars"]["PUBLIC_HOST"] for app in ("lab", "flowday", "links")}
         self.assertEqual(
-            urls, {"mail-hero": f"https://{self.mail_hero}/", "todofy": f"https://{self.todofy}/", "lab": f"https://{lab}/"}
+            urls,
+            {
+                "mail-hero": f"https://{self.mail_hero}/",
+                "todofy": f"https://{self.todofy}/",
+                "lab": f"https://{host['lab']}/",
+                "flowday": f"https://{host['flowday']}/",
+                "links": f"https://{host['links']}/_/",
+            },
         )
+
+    def test_the_dashboard_registers_every_production_worker_and_d1_database(self):
+        """Every deployed Worker has a WORKERS row in dashboard/worker/src/registry.ts and every D1 database a resource
+        whose match is its database_id, so a new app (FlowDay at F4, links at L2, watch at W2) cannot stay off the home
+        dashboard or show up there as 未登记. An app moves into PRODUCTION when it deploys, and this then fails until the
+        registry names it."""
+        registry = (REPO / "dashboard" / "worker" / "src" / "registry.ts").read_text()
+        scripts = set(re.findall(r"\{ script: '([a-z0-9_-]+)', entry: '", registry))
+        d1 = set(re.findall(r"kind: 'd1',[^}]*?match: '([0-9a-f-]{36})'", registry))
+        for worker, path in PRODUCTION.items():
+            with self.subTest(worker=worker):
+                self.assertIn(worker, scripts)
+                for database in load(path).get("d1_databases", []):
+                    self.assertIn(database["database_id"], d1, f"D1 {database['database_name']} is not a registry resource")
 
 
 class Workflow(unittest.TestCase):

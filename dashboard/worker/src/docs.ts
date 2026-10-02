@@ -55,15 +55,18 @@ export interface MetaDoc {
   readonly last_refresh_cloudflare_at?: number | null;
 }
 
-/** `probe:<entry>`: the last public_http probe of an entry (status code and latency only). */
+/** `probe:<entry>`: the last public_http probe of an entry (status code, outcome and latency only). */
 export interface ProbeDoc {
   readonly checked_at: number;
   readonly ok: boolean;
   /** Null when no response arrived (timeout, network error). */
   readonly http_status: number | null;
   readonly latency_ms: number | null;
-  /** `timeout`, `network_error`, `http_status` (an unexpected code), or null when ok. */
-  readonly error: 'timeout' | 'network_error' | 'http_status' | null;
+  /**
+   * `timeout`, `network_error`, `http_status` (an unexpected code), `content_type` (an expected code with
+   * another media type than the registry's `content_type`), or null when ok.
+   */
+  readonly error: 'timeout' | 'network_error' | 'http_status' | 'content_type' | null;
   readonly consecutive_failures: number;
 }
 

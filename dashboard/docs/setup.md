@@ -51,7 +51,7 @@ The Worker's production config is the committed `dashboard/wrangler.toml` (top l
 `[env.*]`, no `keep_vars`; the repository is public, so nothing personal or secret goes there): account ID
 (also the var `ACCOUNT_ID`, the GraphQL `accountTag`), the route and `PUBLIC_HOST` (CSRF origin, digest
 link; different from both app hosts, and the registry's app links, `worker/src/registry.ts`, must match
-the apps' hosts: `.github/scripts/test_wrangler_configs.py`), `ACCESS_ISSUER`, `ACCESS_AUDIENCE` and
+the apps' hosts, and it must name every production Worker and D1 database: `.github/scripts/test_wrangler_configs.py`), `ACCESS_ISSUER`, `ACCESS_AUDIENCE` and
 `CANARY_UTC_HOUR` (0–23, 16). Changing one is a commit to that file.
 
 The `Dashboard deploy` job uses the existing `production` environment (deployment branch `main`).
@@ -141,10 +141,11 @@ request's URL, so the Worker would see `https://home.ziyixi.science` and refuse 
 `access_not_configured`). Change `--port` and `--local-upstream` together, and never run a bare
 `wrangler dev` of this config; `web/`'s Vite proxy sends that origin as `Origin`. The production config never holds `DEV_AUTH_BYPASS` (tests check it). An optional `DEV_NOW` (an RFC 3339 UTC instant, e.g. `2026-10-01T16:30:00Z`) makes the bypassed requests show the views as of that instant, to match ticks run locally at chosen times; the deploy never sets it either. Without the two app Workers running locally, their tiles show ◆ 未知 · 无法连接
 after the first poll and ■ 故障 from the second, and without a `CF_ANALYTICS_TOKEN` the Cloudflare view
-has no usage and no Worker rows; both are the expected state. The registry's website probe is the only
-public request a tick makes (one `GET https://www.ziyixi.science/build-info.json`, status and latency
-only); set that entry's `enabled: false` in `worker/src/registry.ts` (uncommitted) to avoid it. Use
-synthetic data only; never point a local run at production resources.
+has no usage and no Worker rows; both are the expected state. The registry's three probes are the only
+public requests a tick makes (`GET https://www.ziyixi.science/build-info.json`,
+`https://flowday.ziyixi.science/pwa/manifest.webmanifest` and `https://s.ziyixi.science/robots.txt`; status,
+media type and latency only); set those entries' `enabled: false` in `worker/src/registry.ts` (uncommitted) to
+avoid them. Use synthetic data only; never point a local run at production resources.
 
 For an end-to-end check of the UI against the real Worker without any account, run the Worker in
 Miniflare the way `worker/test/runtime/harness.ts` does (bundle `src/index.ts`, stub `mail-hero` and

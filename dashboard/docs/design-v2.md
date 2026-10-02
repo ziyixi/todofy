@@ -90,31 +90,46 @@ Three lists joined by id, compiled into the Worker; the UI gets the public view 
 | --- | --- | --- | --- |
 | Mail Hero | 应用 | `ops_v1` (MAIL_HERO, guard) | 今日收件 |
 | Todofy (`todofy`, `todofy-core`) | 应用 | `ops_v1` (TODOFY, guard) | 24 小时收到 |
+| 论文雷达 (`lab`) | 应用 | `ops_v1` (LAB, guard) | 7 天喜欢 |
+| FlowDay (`flowday`, D1 `flowday`) | 应用 | `public_http` outside Access: one GET per tick to `flowday…/pwa/manifest.webmanifest`, expecting 200 and `application/manifest+json`. The host is behind the Access app "flowday", but "flowday-bypass" covers `/pwa/*` and the Worker serves the manifest itself (a static asset, no D1 read), so Access's login redirect can never pass; plus the Worker's error rate (`error_rate`). No Ops entrypoint. F6 may remove the bypass (`flowday/docs/design.md` §11): that change must move this probe first (`test_infra_config.py` fails otherwise) | latency |
+| 短链接 (`links`, D1 `links`) | 应用 | `public_http` outside Access: one GET per tick to `s…/robots.txt`, expecting 200 and `text/plain` (the Worker's constant, before any D1 read); plus the Worker's error rate. The tile opens the launcher `https://s.ziyixi.science/_/` behind the path-scoped Access app "links". No Ops entrypoint, and a short link may go unused for days, so no idle rule | latency |
 | 个人网站 (`ziyixi-website`, assets only) | 站点 | `public_http`: one GET per tick to `www…/build-info.json` (www is canonical; the apex serves the same site), status + latency only, `redirect: 'manual'`, body unread, `enabled` flag. The site's Worker (`website/`) serves static assets only, which are not Worker invocations, so analytics cannot judge it; the file is part of its static export, so the probe survives the cutover | latency |
 | Notion 发布 (`ziyixi-notion-publish`) | 后台服务 | `analytics`: error rate + 26 h idle rule | last request hour |
 | Newsletter | 后台服务 | `none` → 未接入 | — |
 | 个人控制台 (`home`) | hidden | `self` (`tick_stale`) | no tile; Cloudflare row only |
 | 自托管服务器 (`self-hosted`, no Worker) | hidden | `none` | no tile; exists only to name the R2 bucket `vultr-backup` (VPS 备份: the self-hosted VPS and home server's backups, not a monorepo app), since a resource must belong to an entry |
-| 短链接 (`links`) | hidden | `none` | no tile; names the Worker `links` and its D1 database `links` (L2 of `links/docs/design.md`) in the Cloudflare table. No Ops entrypoint, its owner half is behind Access and a short link may go unused for days, so neither a probe nor an idle rule would tell anything |
 
 Flows: 邮件 → 任务 (来源转发 ○ → 收件与保存 → 解析 → Webhook 投递 → Todofy 摘要 → Todoist 与提醒; canary
 `mail-todofy` verifies 投递 and 摘要 only), 网站发布 (Notion ○ → 发布 → 网站可用), 每日 Newsletter
 (Todofy 报告 → 读取报告 ○ → 写入 Notion ○; partial), 运维摘要 (巡检 → 提交摘要 → 每日提醒), and GTD 循环
 (收集 → 理清 → 组织 → 回顾 → 执行 ○: Todofy's `received_24h`, then the counters of its daily read-only
-Todoist snapshot, `review_overdue` (info) and `gtd_snapshot_stale` at 回顾; 执行 is done in Todoist, outside the dashboard (no entry since Flowday was removed);
+Todoist snapshot, `review_overdue` (info) and `gtd_snapshot_stale` at 回顾; 执行 is done in Todoist, outside the dashboard (FlowDay has its own tile but no stage: the work itself is not something the dashboard can see);
 todofy/docs/gtd-features.md §9).
 
 `validateRegistry` (`src/registry-check.ts`, run by test/registry.test.ts; apart from the registry's data, which the
 UI's tests import) checks ids and references, ops-v1 codes with the contract's own `Code` format (the IDL), https URLs inside
-`ziyixi.science` (path `/`, no query/port/userinfo), one entry per script, status/kind consistency
-(no public probe of an Access host), each `(entry, code)` once per flow, that every signal code of the
+`ziyixi.science` (path `/` or a directory ending in `/`, such as the links launcher `/_/`; no query/port/userinfo),
+one entry per script, status/kind consistency (no public probe of an Access host, unless the entry declares the
+probe path `outside_access`: then on the entry's own host, not its URL, with a `content_type` and 2xx only, so
+Access's login redirect can never pass; `.github/scripts/test_infra_config.py` checks every probe path against the
+Access applications in `infra/access.tf`, only a `*-bypass` application may cover one), each `(entry, code)` once per flow, that every signal code of the
 ops-v1 README table is placed (a stage, `app_only_signals`, or the platform codes `status_unavailable`
 and `guard_shed`), the outbound budget (§5), and a privacy scan (no email, IP, `localhost`, credential
 words or account-like IDs, except a D1/DO `match`).
 
 **Adding a Worker:** nothing — it appears in the Cloudflare table on its first request as 未登记. To name
 it: add a `WORKERS` row (and an `ENTRIES` row if it is a new tile), optionally a flow stage and its
-resources, run `npm test`, merge. No UI or API type change.
+resources, run `npm test`, merge. No UI or API type change. A deployed app cannot be forgotten:
+`.github/scripts/test_wrangler_configs.py` fails until every Worker of a production `wrangler.toml` has a
+`WORKERS` row and each of its D1 databases a resource whose `match` is the `database_id`.
+
+**Adding an app's tile** (as FlowDay and the links app were on 2026-10-02): an `ENTRIES` row in `apps` with its
+URL and Access lock, plus its Workers and resources. The status source is `ops_v1` when the app has an Ops
+entrypoint (a service binding in `env.ts` and `wrangler.toml`, the binding type in `StatusSource`, its signal
+codes placed by stages or `app_only_signals`; the watch app's W3 is that case), else a `public_http` probe of a
+path its own Worker answers anonymously (`outside_access` + `content_type` when the host is behind Access, and
+`error_rate` to add the Worker's error rate). Each such entry adds one outbound call per tick and one row to
+every view (`V2_ROWS_READ`).
 
 ## 4. Evaluation (`worker/src/evaluate.ts`; page requests only read)
 
@@ -129,8 +144,12 @@ time (a stale status, stopped ticks) is right at every read.
     `held` (any severity) and other info signals nothing; `degraded` without any shown signal →
     warning `app_degraded`. Tile metric: the counter named by `tile_metric`.
   - public_http: not yet probed → unknown; last probe older than 75 min → unknown `stale`; ok; one
-    failure → warning, ≥ 2 → critical, reason `http_status`/`timeout`/`network_error`; `enabled: false`
-    → unmonitored. Metric: latency of the last ok probe.
+    failure → warning, ≥ 2 → critical, reason `http_status`/`timeout`/`network_error`, or `content_type`
+    when the status was right but the media type was not the registry's `content_type` (another answerer
+    than the app's Worker); `enabled: false` → unmonitored. With `error_rate`, the entry's Workers' error
+    rate today (the rule of the Worker table, fresh GraphQL only; stale analytics never make the tile
+    unknown) adds `error_rate`, and the strip then lists it once, on the tile. Metric: latency of the last
+    ok probe while the tile is ok.
   - analytics: no GraphQL data → unknown `never_checked`; data older than 90 min or of another day →
     unknown `stale`; the error-rate rule over the entry's scripts → `error_rate`; the last active hour
     more than `max_idle_hours` ago → warning `idle`; never seen → unknown `never_seen` until discovery
@@ -210,10 +229,10 @@ Measured (unit suite for bytes, workerd suite for rows; a full 14-run canary his
 
 | View | Mockup day | Bad day (20 items, 16 signals/app, 14 failed runs) | Rows read |
 | --- | --- | --- | --- |
-| home | ≤ 10 KiB (budget) | 8.3 KB | 22 (≤ 24) |
-| flows | 16.1 KB (six flows; 17.4 KB in the workerd suite) | 22.9 KB | 22 (≤ 24) |
-| cloudflare | ≤ 16 KiB, also with 20 Workers | under `V2_BODY_MAX` with 20 listed drift findings (tested) | ≤ 24 (one more document since §10: `drift`) |
-| ops | ≤ 24 KiB | 24.1 KB | 22 (≤ 24) |
+| home | 4.4 KB (eight tiles; budget 10 KiB) | 8.8 KB | 25 (≤ 28) |
+| flows | 16.1 KB (six flows; 17.4 KB in the workerd suite) | 22.9 KB | 25 (≤ 28) |
+| cloudflare | ≤ 16 KiB, also with 20 Workers | under `V2_BODY_MAX` with 20 listed drift findings (tested) | 26 (≤ 28; one more document since §10: `drift`) |
+| ops | ≤ 24 KiB | 24.5 KB | 25 (≤ 28) |
 
 `V2_BODY_BUDGET` holds for a normal day; `V2_BODY_MAX` (32 KiB) bounds the bad day. The Cloudflare view
 lists at most `CF_VIEW_WORKERS_MAX` (50) of the up to `CF_SCRIPTS_MAX` (100) remembered scripts —
@@ -221,13 +240,13 @@ every script active today first, then the most recently seen — and counts the 
 `workers_omitted` (shown as a note), so 100 remembered scripts stay under `V2_BODY_MAX` (tested); HomeState logs
 `over_budget` per response. The design's row estimates (1 + N, ≤ 20, 3–4, ≤ 10) did not count the shell
 every view shares (six documents for the attention strip and badges, plus what the evaluation reads for
-the strip's observed items, §4) or the 14 canary rows, so the measured counts replace them; they are ~0.01 % of the DO's 5 M free rows a day at a few hundred views.
+the strip's observed items, §4) or the 14 canary rows, so the measured counts replace them (each probed or ops_v1 entry adds one row to every view: 23 / 23 / 24 / 23 before the FlowDay and links probes); they are ~0.01 % of the DO's 5 M free rows a day at a few hundred views.
 A partial index (`canary_runs_active`) keeps the "run in progress" lookup at one row for ticks and views.
 
-Per tick: 3 `status()` + 1 probe + 1 GraphQL + ≤ 3 `setGuard` + ≤ 2 canary calls + ≤ 1 `reportOps` + ≤ 12
-read-only drift calls (§10) = 23 outbound calls (`outboundPerTick`, tested ≤ 30 and asserted per tick in
-workerd; Free allows 50). The probe runs in parallel with the status polls. GraphQL stays one query per tick (48/day) plus refreshes
-≤ 1/min. DO rows written grow by ~2 per tick (`cf_scripts`, `probe:website`). Everything else as in
+Per tick: 3 `status()` + 3 probes (website, FlowDay, links) + 1 GraphQL + ≤ 3 `setGuard` + ≤ 2 canary calls +
+≤ 1 `reportOps` + ≤ 12 read-only drift calls (§10) = 25 outbound calls (`outboundPerTick`, tested ≤ 30 and asserted per tick in
+workerd; Free allows 50). The probes run in parallel with the status polls. GraphQL stays one query per tick (48/day) plus refreshes
+≤ 1/min. DO rows written grow by ~4 per tick (`cf_scripts` and one `probe:<entry>` per probe). The FlowDay and links probes are each one request of that app's Worker per tick (≤ 144 a day with refreshes, no D1 query); the website's is a static asset. Everything else as in
 [`limits.md`](limits.md).
 
 **v1 removal (done):** the UI calls only v2, so `/api/v1/*` is gone (routes, `overview()`/`buildOverview`,
@@ -263,7 +282,7 @@ while loading; one failing source greys only its own tile. Times in the browser 
 ## 8. Decisions taken (owner-approved defaults)
 
 Q1 title 个人控制台 · Q2 tile = entry's own health · Q3 home keeps one line per flow and 4 mini bars ·
-Q4 home grouped by kind, flows by business · Q5 Flowday link-only (思源笔记 was too until the owner retired it on 2026-09-30; the owner removed Flowday's entry from the dashboard the same day, so the registry has no link-only entry now and the kind stays supported) · Q6 probe the website every tick
+Q4 home grouped by kind, flows by business · Q5 Flowday link-only (思源笔记 was too until the owner retired it on 2026-09-30; the owner removed Flowday's entry from the dashboard the same day, so the registry has no link-only entry now and the kind stays supported; on 2026-10-02 the owner asked for the new services on 首页, and FlowDay, now a Workers app, came back as a probed tile next to the links app) · Q6 probe the website every tick
 · Q7 Newsletter 未接入 for now · Q8 24 h sparkline later (step 3, not in scope) · Q9 registry in repo TS
 · Q10 four tabs · Q11 no tile for this dashboard · Q12 unregistered Workers never alarm · Q13
 notion-publish idle limit 26 h.
@@ -271,7 +290,7 @@ notion-publish idle limit 26 h.
 ## 9. Still to verify in production (read-only)
 
 Whether `durableObjectsInvocationsAdaptiveGroups.scriptName` is the defining or the calling script;
-whether `cpuTimeP99` includes DO time; the website probe from a same-zone Worker; notion-publish's
+whether `cpuTimeP99` includes DO time; the website, FlowDay and links probes from a same-zone Worker; notion-publish's
 real schedule; the TODO resource identifiers of §3. The full list of pending production checks is in
 [`verification.md`](verification.md) §2.
 
@@ -304,7 +323,7 @@ also redeploys the dashboard with the new desired state.
 
 At most `DRIFT_CALLS_PER_TICK` (12) calls per tick: the account step and three Workers on the first tick,
 four Workers on the next, then the rest, so a check of the 9 Workers takes three ticks, 3 + 4 + 2 (a tick then
-makes at most 23 outbound calls in all, §5). A failed step is retried by the next tick; after `DRIFT_MAX_ATTEMPTS` (3)
+makes at most 25 outbound calls in all, §5). A failed step is retried by the next tick; after `DRIFT_MAX_ATTEMPTS` (3)
 failed attempts the day is given up (`consecutive_failed_days` + 1), and a run left unfinished at the end
 of its UTC day counts as a failed day too, as does a `drift_run` document that would pass
 `DRIFT_RUN_MAX_BYTES` (60,000 bytes, under the 64 KiB row limit; this account's is about 6 KB). Every answer is reduced at once to names, types and flags:

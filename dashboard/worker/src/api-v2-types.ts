@@ -16,10 +16,10 @@
  * | ------------------------------ | ---------------------- | --------------------- | ------------------------------- |
  * | GET  registry                  | Worker (no DO)         | RegistryResponse      | ≤ 12 KiB; ETag "<build>" → 304  |
  * | GET  csrf                      | Worker                 | CsrfResponse          | signed token + cookie           |
- * | GET  home[?refresh=1]          | DO, 1 call             | HomeResponse          | ≤ 10 KiB; ≤ 24 rows read        |
- * | GET  flows                     | DO, 1 call             | FlowsResponse         | ≤ 20 KiB; ≤ 24 rows read        |
- * | GET  cloudflare[?refresh=1]    | DO, 1 call             | CloudflareResponse    | ≤ 16 KiB; ≤ 24 rows read        |
- * | GET  ops                       | DO, 1 call             | OpsResponse           | ≤ 24 KiB; ≤ 24 rows read        |
+ * | GET  home[?refresh=1]          | DO, 1 call             | HomeResponse          | ≤ 10 KiB; ≤ 28 rows read        |
+ * | GET  flows                     | DO, 1 call             | FlowsResponse         | ≤ 20 KiB; ≤ 28 rows read        |
+ * | GET  cloudflare[?refresh=1]    | DO, 1 call             | CloudflareResponse    | ≤ 16 KiB; ≤ 28 rows read        |
+ * | GET  ops                       | DO, 1 call             | OpsResponse           | ≤ 24 KiB; ≤ 28 rows read        |
  * | POST guard {level}             | DO                     | GuardResponseV2       | CSRF + Origin                   |
  * | POST canary {canary_id}        | DO                     | CanaryStartResponse   | CSRF + Origin                   |
  *
@@ -70,12 +70,15 @@ export const V2_BODY_BUDGET = {
 
 /**
  * Durable Object rows one view may read (SqlStorageCursor.rowsRead per call; the workerd suite asserts
- * it with a full 14-run canary history and 20 Workers, measured 22 / 22 / 22 / 22). Every view reads the
- * shared shell (meta, digest, the two guard docs, both statuses) and, for the strip's observed items,
- * what the evaluation reads (probes, cf_scripts, the 14 recent canary runs); cloudflare adds the usage
- * document. Each document is read once per build (HomeState's read cache).
+ * it with a full 14-run canary history and 20 Workers). Every view reads the shared shell (meta, digest,
+ * the guard docs, one status per ops_v1 entry) and, for the strip's observed items, what the evaluation
+ * reads (one probe document per public_http entry, cf_scripts, the 14 recent canary runs); cloudflare adds
+ * the usage and drift documents. Each document is read once per build (HomeState's read cache). Measured
+ * 25 / 25 / 26 / 25 (home / flows / cloudflare / ops) with three ops_v1 apps and three probes (website,
+ * FlowDay, links; 23 / 23 / 24 / 23 with the website's alone); each new ops_v1 or public_http entry adds
+ * one row to every view, so the budget leaves room for one or two more (the watch app's status).
  */
-export const V2_ROWS_READ: Readonly<Record<ViewId, number>> = { home: 24, flows: 24, cloudflare: 24, ops: 24 };
+export const V2_ROWS_READ: Readonly<Record<ViewId, number>> = { home: 28, flows: 28, cloudflare: 28, ops: 28 };
 
 /** Outbound calls one tick may make, computed from the registry (tested). Free: 50 subrequests. */
 export const MAX_OUTBOUND_PER_TICK = 30;
@@ -181,10 +184,29 @@ export type StatusSource =
   /** contracts/ops-v1 `Ops.status()` over the named service binding (as in v1); guard: receives setGuard. */
   | { readonly type: 'ops_v1'; readonly binding: 'MAIL_HERO' | 'TODOFY' | 'LAB'; readonly guard: boolean }
   /**
-   * One GET per tick from the Durable Object to a public (not Access-protected) URL: status code and
-   * latency only, `redirect: 'manual'`, body cancelled unread. `enabled: false` shows 未接入 instead.
+   * One GET per tick from the Durable Object to a public (not Access-protected) URL: status code,
+   * Content-Type header and latency only, `redirect: 'manual'`, body cancelled unread. `enabled: false`
+   * shows 未接入 instead.
    */
-  | { readonly type: 'public_http'; readonly url: string; readonly expect: readonly number[]; readonly enabled: boolean }
+  | {
+      readonly type: 'public_http';
+      readonly url: string;
+      readonly expect: readonly number[];
+      /**
+       * The media type (lowercase, without parameters) the answer must carry, e.g. `text/plain`: proves that
+       * the app's own Worker answered and not an error or login page of the edge. A mismatch is `content_type`.
+       */
+      readonly content_type?: string;
+      /**
+       * The entry's `url` is behind Access but the probe path is not (a bypass application or a path-scoped
+       * one). Requires `content_type` and 2xx-only `expect`, so Access's login redirect can never pass as
+       * healthy; `.github/scripts/test_infra_config.py` checks the path against infra/access.tf.
+       */
+      readonly outside_access?: true;
+      /** Also judge the error rate of the entry's Workers today (fresh GraphQL only), as an `analytics` stage does. */
+      readonly error_rate?: true;
+      readonly enabled: boolean;
+    }
   /** From the tick's GraphQL data of the entry's workers: error rate and hours since the last request. */
   | { readonly type: 'analytics'; readonly max_idle_hours: number }
   /** The dashboard's own tick freshness (tick_stale). */
@@ -211,7 +233,10 @@ export interface EntryDef {
   readonly group: EntryGroupId;
   readonly icon: IconKey;
   readonly accent: Accent;
-  /** `https://<host>/`; null for a background service without a page (its row opens a view here). */
+  /**
+   * `https://<host>/` or a directory of it (`https://<host>/_/`, a path ending in `/`); null for a
+   * background service without a page (its row opens a view here).
+   */
   readonly url: string | null;
   /** Access protects `url` (tile lock, informational). */
   readonly access: boolean;

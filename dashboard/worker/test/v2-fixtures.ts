@@ -103,7 +103,7 @@ export function input(patch: Partial<EvalInput> = {}): EvalInput {
     lastTickAt: NOW,
     analyticsConfigured: true,
     statuses: { 'mail-hero': status('mail-hero'), todofy: status('todofy'), lab: status('lab') },
-    probes: { website: probe() },
+    probes: { website: probe(), flowday: probe({ latency_ms: 95 }), links: probe({ latency_ms: 40 }) },
     scripts: scripts(),
     digest: {
       ...NO_DIGEST,

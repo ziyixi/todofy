@@ -49,6 +49,8 @@ describe('entry health (the tile: the entry\'s own health, Q2)', () => {
     expect(tiles.todofy).toMatchObject({ level: 'ok', metric: { kind: 'counter', name: 'received_24h', value: 63 } });
     expect(tiles[LINK_ONLY_ENTRY.id]).toMatchObject({ level: 'link', reason: null, metric: null, checked_at: null });
     expect(tiles.website).toMatchObject({ level: 'ok', metric: { kind: 'latency', ms: 180 } });
+    expect(tiles.flowday).toMatchObject({ level: 'ok', reason: null, metric: { kind: 'latency', ms: 95 } });
+    expect(tiles.links).toMatchObject({ level: 'ok', reason: null, metric: { kind: 'latency', ms: 40 } });
     expect(tiles['notion-publish']).toMatchObject({ level: 'ok', metric: { kind: 'last_active', hour: '2026-09-29T06:00:00.000Z' } });
     expect(tiles.newsletter).toMatchObject({ level: 'unmonitored', reason: null, metric: null });
     expect(tiles.home).toMatchObject({ level: 'ok' });
@@ -108,6 +110,38 @@ describe('entry health (the tile: the entry\'s own health, Q2)', () => {
       entries: REGISTRY.entries.map((e) => (e.id === 'website' ? { ...e, status: { type: 'public_http', url: 'https://www.ziyixi.science/build-info.json', expect: [200], enabled: false } } : e)),
     };
     expect(entryState(entry('website', off), input(), off)).toMatchObject({ level: 'unmonitored', reason: null });
+  });
+
+  it('judges FlowDay and the links app by their probe like the website, plus a wrong media type', () => {
+    const wrongType = probe({ ok: false, http_status: 200, error: 'content_type', consecutive_failures: 1 });
+    for (const id of ['flowday', 'links'] as const) {
+      expect(state(id, { probes: {} })).toMatchObject({ level: 'unknown', reason: 'never_checked', metric: null });
+      expect(state(id, { probes: { [id]: wrongType } })).toMatchObject({ level: 'warning', reason: 'content_type', consecutive_failures: 1, metric: null });
+      // Access's login redirect on a path that should be public: an http_status failure, critical the second time.
+      const redirected = probe({ ok: false, http_status: 302, error: 'http_status', consecutive_failures: 2 });
+      expect(state(id, { probes: { [id]: redirected } })).toMatchObject({ level: 'critical', reason: 'http_status', metric: null });
+      expect(state(id, { probes: { [id]: probe({ checked_at: NOW - 2 * HOUR }) } })).toMatchObject({ level: 'unknown', reason: 'stale', metric: null });
+    }
+  });
+
+  it('adds the Workers\' error rate to a probe that asks for it (fresh data only), and never to the website\'s', () => {
+    const errors = (script: string, requests: number, failed: number) =>
+      mergeScripts(scripts(), [{ script, requests, errors: failed, subrequests: 0, cpu_p50_us: 1, cpu_p99_us: 2, do_requests: null, do_errors: null }], false, NOW);
+    // 30 % errors over 100 requests: critical, while the probe itself passed; the latency gives way to the reason.
+    expect(state('flowday', { scripts: errors('flowday', 100, 30) })).toMatchObject({ level: 'critical', reason: 'error_rate', metric: null });
+    expect(state('links', { scripts: errors('links', 100, 6) })).toMatchObject({ level: 'warning', reason: 'error_rate', metric: null });
+    // Too few requests to judge, or another Worker's errors: the probe decides.
+    expect(state('links', { scripts: errors('links', 10, 9) })).toMatchObject({ level: 'ok', metric: { kind: 'latency', ms: 40 } });
+    expect(state('flowday', { scripts: errors('links', 100, 30) })).toMatchObject({ level: 'ok' });
+    // A failing probe stays the reason when it is the worse of the two.
+    const down = probe({ ok: false, http_status: 503, error: 'http_status', consecutive_failures: 2 });
+    expect(state('flowday', { probes: { flowday: down }, scripts: errors('flowday', 100, 6) })).toMatchObject({ level: 'critical', reason: 'http_status' });
+    // Stale analytics never make the tile unknown: the fresh probe still says ok.
+    const staleNow = NOW + 2 * HOUR;
+    const fresh = { flowday: probe({ checked_at: staleNow - MIN, latency_ms: 95 }) };
+    expect(state('flowday', { now: staleNow, lastTickAt: staleNow, probes: fresh, scripts: errors('flowday', 100, 30) })).toMatchObject({ level: 'ok' });
+    // The website's assets-only Worker is not judged by its error rate.
+    expect(state('website', { scripts: errors('ziyixi-website', 100, 30) })).toMatchObject({ level: 'ok' });
   });
 
   it('judges Notion 发布 by its Worker analytics: idle after 26 h, unknown until discovery watched long enough', () => {
@@ -305,7 +339,7 @@ describe('the attention strip', () => {
 
   it('never says 全部正常 while a tile or a flow is worse: a failing site probe becomes one observed item (F1)', () => {
     const failing = probe({ ok: false, http_status: 503, error: 'http_status', consecutive_failures: 1 });
-    const evaluation = input({ probes: { website: failing } });
+    const evaluation = input({ probes: { ...input().probes, website: failing } });
     const { attention, badges } = attentionView(base({ evaluation }));
     expect(attention.level).toBe('warning');
     // One item for the cause: the 网站发布 stage on the same entry and code is not repeated.
@@ -318,6 +352,22 @@ describe('the attention strip', () => {
     expect(quiet.attention).toMatchObject({ level: 'ok', items: [] });
     // Before anything ran the strip says so, whatever the (never checked) tiles are.
     expect(attentionView(base({ neverRan: true, evaluation: input({ statuses: {}, probes: {}, scripts: null }) })).attention.items).toEqual([]);
+  });
+
+  it('raises a failing FlowDay or links probe as one observed item on its tile, like the website (no flow repeats it)', () => {
+    const redirected = probe({ ok: false, http_status: 302, error: 'http_status', consecutive_failures: 2 });
+    const evaluation = input({ probes: { ...input().probes, flowday: redirected, links: probe({ ok: false, http_status: 200, error: 'content_type', consecutive_failures: 1 }) } });
+    const { attention, badges } = attentionView(base({ evaluation }));
+    expect(attention.level).toBe('critical');
+    expect(attention.items).toEqual([
+      { source: 'flowday', code: 'http_status', severity: 'critical', since: null, metrics: {}, target: { view: 'home', entry: 'flowday' }, observed: 'critical' },
+      { source: 'links', code: 'content_type', severity: 'warning', since: null, metrics: {}, target: { view: 'home', entry: 'links' }, observed: 'warning' },
+    ]);
+    expect(badges).toEqual({ home: 2, flows: 0, cloudflare: 0, ops: 0 });
+    // A high error rate shows once, on the tile: the Worker row of the same entry and code is not repeated.
+    const failing = mergeScripts(scripts(), [{ script: 'flowday', requests: 100, errors: 30, subrequests: 0, cpu_p50_us: 1, cpu_p99_us: 2, do_requests: null, do_errors: null }], false, NOW);
+    const errors = attentionView(base({ evaluation: input({ scripts: failing }) })).attention;
+    expect(errors.items.map((i) => [i.source, i.code, i.observed, i.target])).toEqual([['flowday', 'error_rate', 'critical', { view: 'home', entry: 'flowday' }]]);
   });
 
   it('shows an app that failed once as ◆ 未知 above the warnings, and counts it in the badges (F1)', () => {

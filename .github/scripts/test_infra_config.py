@@ -228,6 +228,52 @@ class MatchesTheApps(unittest.TestCase):
         backup = re.search(r'resource "cloudflare_zero_trust_access_application" "mail_hero_backup" \{(.*?)^\}', code, re.DOTALL | re.MULTILINE)
         self.assertIn('domain                      = "mail-hero.ziyixi.science/api/internal/backup/*"', backup.group(1))
 
+    def access_destinations(self, code: str) -> dict[str, list[str]]:
+        """Every Access application's destinations (host or host/path, `*` as the last segment) by application key."""
+        owner = {
+            key: [re.search(r'domain\s*=\s*"([^"]+)"', value).group(1)]
+            + re.findall(r'"([^"]+)"', re.search(r"more\s*=\s*\[(.*?)\]", value).group(1))
+            for key, value in hcl_map(code, "owner_apps").items()
+        }
+        backup = re.search(r'resource "cloudflare_zero_trust_access_application" "mail_hero_backup" \{.*?^\s*domain\s*=\s*"([^"]+)"', code, re.DOTALL | re.MULTILINE)
+        return {**owner, **self.flowday_apps(code), "mail-hero-backup": [backup.group(1)]}
+
+    def test_the_dashboard_probes_only_paths_outside_access(self):
+        """Each public_http probe of dashboard/worker/src/registry.ts is anonymous, so Access must not govern its path: no
+        destination matches it, or the most specific one is a bypass application (FlowDay's /pwa/* "flowday-bypass").
+        A probe on a host with any Access application declares `outside_access: true`. When F6 removes "flowday-bypass"
+        (flowday/docs/design.md section 11), FlowDay's manifest probe fails here until the registry moves it."""
+        code = (INFRA / "access.tf").read_text()
+        destinations = self.access_destinations(code)
+        registry = (REPO / "dashboard" / "worker" / "src" / "registry.ts").read_text()
+        probes = re.findall(r"type: 'public_http',(.*?)\}", registry, re.DOTALL)
+        self.assertGreaterEqual(len(probes), 3)
+
+        def governs(destination: str, host: str, path: str) -> int | None:
+            """The length of the destination's path when it covers host+path (longer = more specific), else None."""
+            dest_host, _, rest = destination.partition("/")
+            if dest_host != host:
+                return None
+            dest_path = f"/{rest}" if rest else ""
+            if dest_path == "":
+                return 0
+            if dest_path.endswith("/*"):
+                return len(dest_path) if path.startswith(dest_path[:-1]) else None
+            return len(dest_path) if path == dest_path else None
+
+        for body in probes:
+            url = re.search(r"url: '([^']+)'", body).group(1)
+            host, path = re.match(r"https://([^/]+)(/.*)", url).groups()
+            with self.subTest(probe=url):
+                matches = sorted(
+                    ((length, key) for key, uris in destinations.items() for uri in uris if (length := governs(uri, host, path)) is not None),
+                    reverse=True,
+                )
+                if matches:
+                    self.assertTrue(matches[0][1].endswith("-bypass"), f"Access application {matches[0][1]} governs the probe")
+                on_access_host = any(uri.split("/")[0] == host for uris in destinations.values() for uri in uris)
+                self.assertEqual("outside_access: true" in body, on_access_host)
+
     def test_retiring_hosts_are_exact(self):
         """An allowance in RETIRING_HOSTS exists only while a FlowDay application still lists the host, and no other
         application may use it: dropping the host from local.flowday_apps without emptying the set fails here."""

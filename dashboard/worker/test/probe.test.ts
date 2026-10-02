@@ -1,9 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import { PROBE_TIMEOUT_MS } from '../src/api-v2-types.ts';
-import { nextProbeDoc, probeDue, probeUrl } from '../src/probe.ts';
+import { mediaType, nextProbeDoc, probeDue, probeUrl, type ProbeTarget } from '../src/probe.ts';
 import type { FetchLike } from '../src/usage.ts';
 
 const URL_ = 'https://www.example.com/build-info.json';
+const TARGET: ProbeTarget = { url: URL_, expect: [200] };
+/** A probe that also asks for the Worker's own media type (FlowDay's manifest, the links app's robots.txt). */
+const TYPED: ProbeTarget = { url: 'https://app.example.com/robots.txt', expect: [200], content_type: 'text/plain' };
 const NOW = Date.parse('2026-09-29T14:30:00Z');
 
 function clock(...times: number[]): () => number {
@@ -24,7 +27,7 @@ describe('probeUrl', () => {
       seen.push({ url, init });
       return Promise.resolve(new Response(body, { status: 200 }));
     };
-    const result = await probeUrl(URL_, [200], fetcher, clock(1000, 1180));
+    const result = await probeUrl(TARGET, fetcher, clock(1000, 1180));
     expect(result).toEqual({ ok: true, http_status: 200, latency_ms: 180, error: null });
     expect(seen).toHaveLength(1);
     expect(seen[0]?.url).toBe(URL_);
@@ -39,18 +42,46 @@ describe('probeUrl', () => {
 
   it('reports an unexpected status (a redirect included) as http_status', async () => {
     const redirect: FetchLike = () => Promise.resolve(new Response(null, { status: 308, headers: { location: 'https://elsewhere.example.com/' } }));
-    expect(await probeUrl(URL_, [200], redirect, clock(0, 40))).toEqual({ ok: false, http_status: 308, latency_ms: 40, error: 'http_status' });
+    expect(await probeUrl(TARGET, redirect, clock(0, 40))).toEqual({ ok: false, http_status: 308, latency_ms: 40, error: 'http_status' });
     const down: FetchLike = () => Promise.resolve(new Response('bad gateway', { status: 502 }));
-    expect(await probeUrl(URL_, [200], down, clock(0, 5))).toMatchObject({ ok: false, http_status: 502, error: 'http_status' });
+    expect(await probeUrl(TARGET, down, clock(0, 5))).toMatchObject({ ok: false, http_status: 502, error: 'http_status' });
   });
 
   it('turns a timeout and a network error into codes without a status', async () => {
     const timeout: FetchLike = () => Promise.reject(new DOMException('timed out', 'TimeoutError'));
-    expect(await probeUrl(URL_, [200], timeout)).toEqual({ ok: false, http_status: null, latency_ms: null, error: 'timeout' });
+    expect(await probeUrl(TARGET, timeout)).toEqual({ ok: false, http_status: null, latency_ms: null, error: 'timeout' });
     const network: FetchLike = () => Promise.reject(new TypeError('connection refused 192.0.2.1'));
-    const result = await probeUrl(URL_, [200], network);
+    const result = await probeUrl(TARGET, network);
     expect(result).toEqual({ ok: false, http_status: null, latency_ms: null, error: 'network_error' });
     expect(JSON.stringify(result)).not.toContain('refused');
+  });
+
+  it('asks for the expected media type and compares the header without parameters or case', async () => {
+    const seen: RequestInit[] = [];
+    const answer =
+      (type: string | null, status = 200): FetchLike =>
+      (_url, init) => {
+        seen.push(init);
+        // Bytes, not a string: a string body would get a text/plain Content-Type of its own.
+        const body = new TextEncoder().encode('User-agent: *\nDisallow: /\n');
+        return Promise.resolve(new Response(body, { status, headers: type === null ? {} : { 'content-type': type } }));
+      };
+    expect(await probeUrl(TYPED, answer('Text/Plain; charset=utf-8'), clock(0, 30))).toEqual({ ok: true, http_status: 200, latency_ms: 30, error: null });
+    expect(seen[0]?.headers).toEqual({ accept: 'text/plain' });
+    // Another app (or an edge error page) answered: right status, wrong type.
+    expect(await probeUrl(TYPED, answer('text/html; charset=utf-8'), clock(0, 30))).toEqual({ ok: false, http_status: 200, latency_ms: 30, error: 'content_type' });
+    expect(await probeUrl(TYPED, answer(null), clock(0, 30))).toMatchObject({ ok: false, error: 'content_type' });
+    // The status is judged first: Access's login redirect is an http_status failure whatever its type.
+    expect(await probeUrl(TYPED, answer('text/plain', 302), clock(0, 30))).toMatchObject({ ok: false, http_status: 302, error: 'http_status' });
+    // Without content_type any type passes, and the Accept header stays the JSON default.
+    expect(await probeUrl(TARGET, answer('text/html'), clock(0, 30))).toMatchObject({ ok: true, error: null });
+    expect(seen.at(-1)?.headers).toEqual({ accept: 'application/json' });
+  });
+
+  it('reduces a Content-Type header to its media type', () => {
+    expect(mediaType('application/manifest+json')).toBe('application/manifest+json');
+    expect(mediaType(' TEXT/plain ;charset=UTF-8')).toBe('text/plain');
+    expect(mediaType(null)).toBeNull();
   });
 });
 

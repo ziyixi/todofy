@@ -197,8 +197,14 @@ function entryVerdict(entry: EntryDef, input: EvalInput, registry: Registry): { 
       const probe = input.probes[entry.id];
       if (probe === undefined) return { level: 'unknown', reason: 'never_checked' };
       if (!recent(probe.checked_at, now)) return { level: 'unknown', reason: 'stale' };
-      if (probe.ok) return OK;
-      return { level: probe.consecutive_failures >= 2 ? 'critical' : 'warning', reason: probe.error ?? 'http_status' };
+      let verdict: Verdict = probe.ok ? OK : { level: probe.consecutive_failures >= 2 ? 'critical' : 'warning', reason: probe.error ?? 'http_status' };
+      // The Workers' error rate adds to the probe (fresh data only; stale analytics never make the tile unknown).
+      if (status.error_rate === true && scriptsFresh(input.scripts, now)) {
+        const activity = activityOf(entryScripts(entry.id, registry), input.scripts, now);
+        const errors = errorLevel(activity.requests, activity.errors);
+        if (errors !== 'ok') verdict = worse(verdict, { level: errors, reason: 'error_rate' });
+      }
+      return verdict;
     }
     case 'analytics': {
       const doc = input.scripts;
@@ -240,7 +246,7 @@ function entryVerdict(entry: EntryDef, input: EvalInput, registry: Registry): { 
   }
 }
 
-function tileMetric(entry: EntryDef, input: EvalInput, registry: Registry): TileMetric | null {
+function tileMetric(entry: EntryDef, level: Level, input: EvalInput, registry: Registry): TileMetric | null {
   const metric = entry.tile_metric;
   if (metric === null) return null;
   switch (metric.kind) {
@@ -249,8 +255,9 @@ function tileMetric(entry: EntryDef, input: EvalInput, registry: Registry): Tile
       return typeof value === 'number' ? { kind: 'counter', name: metric.name, value } : null;
     }
     case 'latency': {
+      // Only while the tile is ok: a probe that passed next to a high error rate shows that reason instead.
       const probe = input.probes[entry.id];
-      return probe?.ok === true && probe.latency_ms !== null ? { kind: 'latency', ms: probe.latency_ms } : null;
+      return level === 'ok' && probe?.ok === true && probe.latency_ms !== null ? { kind: 'latency', ms: probe.latency_ms } : null;
     }
     case 'last_active': {
       const hour = activityOf(entryScripts(entry.id, registry), input.scripts, input.now).last_active_hour;
@@ -302,7 +309,7 @@ export function entryState(entry: EntryDef, input: EvalInput, registry: Registry
     checked_at: isoOrNull(checkedAt),
     consecutive_failures: failures,
     top_signals: topSignals,
-    metric: tileMetric(entry, input, registry),
+    metric: tileMetric(entry, verdict.level, input, registry),
   };
 }
 

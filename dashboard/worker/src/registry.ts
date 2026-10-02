@@ -14,6 +14,12 @@
  * Adding a Worker (docs/design-v2.md §3.4): it appears in the Cloudflare table on its first request
  * without any change here; add a `workers` row (and an entry, if it is new) to name it, optionally a
  * flow stage and its resources, then run `npm test`.
+ *
+ * Adding an app's tile (docs/design-v2.md §3): one `entries` row in `apps`, its `workers` rows and its resources.
+ * Its status source is `ops_v1` when the app has an Ops entrypoint the dashboard binds (a binding in env.ts and
+ * wrangler.toml), else a `public_http` probe of a path its own Worker answers outside Access (`outside_access`,
+ * `content_type`). `.github/scripts/test_wrangler_configs.py` fails until every production Worker and D1 database
+ * is registered here, so a newly deployed app cannot stay off the dashboard.
  */
 import {
   API_V2_VERSION,
@@ -90,6 +96,60 @@ const ENTRIES: readonly EntryDef[] = [
     app_only_signals: ['maintenance_mode'],
     // After the synthetic link-only test entry's order 3 (test/v2-fixtures.ts).
     order: 4,
+  },
+  {
+    // FlowDay (flowday/, the Worker `flowday` and its D1 database since the F4 cutover). The whole host is behind the
+    // Access app "flowday" except its exact PWA files: the app "flowday-bypass" covers /pwa/* and the Worker serves the
+    // manifest itself, as application/manifest+json (flowday/worker/src/assets.ts). So one anonymous GET of the manifest
+    // per tick reaches the Worker and its static assets with no D1 read; Access's login redirect can never pass (2xx and
+    // the media type are required). F6 may remove "flowday-bypass" (flowday/docs/design.md §11): that change must move
+    // this probe first, which test_infra_config.py enforces.
+    id: 'flowday',
+    name: 'FlowDay',
+    description: 'Todoist 时间块、计时与回顾',
+    group: 'apps',
+    icon: 'calendar-clock',
+    accent: 'teal',
+    url: 'https://flowday.ziyixi.science/',
+    access: true,
+    status: {
+      type: 'public_http',
+      url: 'https://flowday.ziyixi.science/pwa/manifest.webmanifest',
+      expect: [200],
+      content_type: 'application/manifest+json',
+      outside_access: true,
+      error_rate: true,
+      enabled: true,
+    },
+    tile_metric: { kind: 'latency' },
+    app_only_signals: [],
+    order: 5,
+  },
+  {
+    // The short links (links/, s.ziyixi.science, deployed by "Links deploy" since L2). The tile opens the launcher
+    // /_/, behind the path-scoped Access app "links"; the rest of the host is public. /robots.txt is the Worker's own
+    // constant text/plain answer before any D1 read (links/worker/src/http.ts), so the probe says the Worker is up
+    // without touching the database or a key. A short link may go unused for days, so no idle rule.
+    id: 'links',
+    name: '短链接',
+    description: 's.ziyixi.science 短链接与启动器',
+    group: 'apps',
+    icon: 'link',
+    accent: 'rose',
+    url: 'https://s.ziyixi.science/_/',
+    access: true,
+    status: {
+      type: 'public_http',
+      url: 'https://s.ziyixi.science/robots.txt',
+      expect: [200],
+      content_type: 'text/plain',
+      outside_access: true,
+      error_rate: true,
+      enabled: true,
+    },
+    tile_metric: { kind: 'latency' },
+    app_only_signals: [],
+    order: 6,
   },
   {
     id: 'website',
@@ -175,23 +235,6 @@ const ENTRIES: readonly EntryDef[] = [
     app_only_signals: [],
     order: 2,
   },
-  {
-    // The short links (links/, s.ziyixi.science, deployed by "Links deploy" from L2). No tile: it names the Worker's
-    // row and its D1 database in the Cloudflare table. Its owner half is behind Access and it has no Ops entrypoint, and a
-    // short link may go unused for days, so neither a probe nor an idle rule would say anything: 未接入监控.
-    id: 'links',
-    name: '短链接',
-    description: 's.ziyixi.science 短链接与启动器；无磁贴',
-    group: 'hidden',
-    icon: 'link',
-    accent: 'slate',
-    url: null,
-    access: true,
-    status: { type: 'none' },
-    tile_metric: null,
-    app_only_signals: [],
-    order: 3,
-  },
 ];
 
 const WORKERS: readonly WorkerDef[] = [
@@ -200,6 +243,7 @@ const WORKERS: readonly WorkerDef[] = [
   { script: 'todofy-core', entry: 'todofy', role: '处理核心（TodofyCore）' },
   { script: 'home', entry: 'home', role: '本面板' },
   { script: 'lab', entry: 'lab', role: '论文雷达与 UI' },
+  { script: 'flowday', entry: 'flowday', role: '页面、API 与 PWA 文件' },
   { script: 'links', entry: 'links', role: '短链接跳转与启动器' },
   { script: 'ziyixi-notion-publish', entry: 'notion-publish', role: '发布 Worker' },
   // website/wrangler.toml: static assets only, so it shows up in the table only if it ever runs code.
@@ -218,6 +262,8 @@ const RESOURCES: readonly ResourceDef[] = [
   { id: 'lab-state', kind: 'do', name: 'LabState', entry: 'lab', script: 'lab', match: 'd8b315160669429781ba6229123cb33c' },
   // Created for the links app's first deploy (L2, 2026-10-01).
   { id: 'links-db', kind: 'd1', name: 'links 短链接库', entry: 'links', match: '2f8c5331-06ce-4347-8c0a-90fe51c82260' },
+  // FlowDay's database (flowday/wrangler.toml, managed by infra/ since IaC P4).
+  { id: 'flowday-db', kind: 'd1', name: 'flowday 主库', entry: 'flowday', match: 'df104e83-7183-47e3-b2f9-638dc7502c13' },
   // IDs read from the account's D1, Durable Object namespace and R2 bucket lists (2026-09-30).
   { id: 'mail-hero-store', kind: 'r2', name: 'mail-hero 邮件存储', entry: 'mail-hero', match: 'mail-hero-store' },
   { id: 'mail-hero-backup', kind: 'r2', name: 'mail-hero 备份', entry: 'mail-hero', match: 'mail-hero-backups' },

@@ -141,7 +141,7 @@ describe('the views', () => {
   it('home: every tile but the hidden one, one line per flow, four mini bars without contributors', () => {
     const ev = input();
     const home = homeResponse(base(), ev, usageView(), DESIRED);
-    expect(home.entries.map((e) => e.id)).toEqual(['mail-hero', 'todofy', 'lab', 'website', 'notion-publish', 'newsletter']);
+    expect(home.entries.map((e) => e.id)).toEqual(['mail-hero', 'todofy', 'lab', 'flowday', 'links', 'website', 'notion-publish', 'newsletter']);
     // A link-only entry (synthetic: the registry has none) is a tile at level link, never probed.
     const linked = homeResponse(base(), ev, usageView(), DESIRED, withLinkOnly()).entries.find((e) => e.id === LINK_ONLY_ENTRY.id);
     expect(linked).toMatchObject({ level: 'link', reason: null, metric: null, checked_at: null });

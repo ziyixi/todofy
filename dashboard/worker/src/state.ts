@@ -1,10 +1,10 @@
 /**
  * HomeState: the one SQLite-backed Durable Object ("home-v1") that does all real work
- * (docs/design.md §3–§5, docs/design-v2.md §4–§6): status polling, the website probe, the GraphQL usage
+ * (docs/design.md §3–§5, docs/design-v2.md §4–§6): status polling, the public_http probes, the GraphQL usage
  * query and Worker discovery, guard, canary, digest, and the v2 views assembled from its tables. The
  * fetch and scheduled handlers only call these RPC methods.
  *
- * Bounds: every tick makes at most outboundPerTick() = 23 outbound calls (3 status, 1 probe, 1 GraphQL,
+ * Bounds: every tick makes at most outboundPerTick() = 25 outbound calls (3 status, 3 probes, 1 GraphQL,
  * ≤ 3 setGuard, ≤ 2 canary calls, ≤ 1 reportOps, ≤ DRIFT_CALLS_PER_TICK = 12 read-only drift calls) and
  * writes a few dozen rows; a v2 view reads at most V2_ROWS_READ[view] rows (api-v2-types.ts; tested in
  * workerd).
@@ -83,7 +83,7 @@ import {
 } from './drift.ts';
 import { attentionView, type EvalInput } from './evaluate.ts';
 import { OPS_APPS, opsCanaryDelivery, opsCanaryResult, opsReportOps, opsSetGuard, opsStartCanary, opsStatus } from './ops-client.ts';
-import { nextProbeDoc, probeDue, probeUrl } from './probe.ts';
+import { nextProbeDoc, probeDue, probeUrl, type ProbeTarget } from './probe.ts';
 import { REGISTRY } from './registry.ts';
 import { MINUTE_MS, iso, isoOrNull, utcDay, utcMonthStart } from './time.ts';
 import { fetchUsage, type UsageErrorCode } from './usage.ts';
@@ -133,7 +133,12 @@ const PROBE_MIN_MS = PROBE_MIN_INTERVAL_SECONDS * 1000;
 const CLOUDFLARE_REFRESH_MIN_MS = CLOUDFLARE_REFRESH_MIN_SECONDS * 1000;
 
 /** The public_http entries the tick probes (at most one GET each per tick). */
-const PROBED = REGISTRY.entries.flatMap((entry) => (entry.status.type === 'public_http' && entry.status.enabled ? [{ id: entry.id, url: entry.status.url, expect: entry.status.expect }] : []));
+const PROBED: readonly (ProbeTarget & { readonly id: string })[] = REGISTRY.entries.flatMap((entry) => {
+  const status = entry.status;
+  if (status.type !== 'public_http' || !status.enabled) return [];
+  const { url, expect, content_type } = status;
+  return [content_type === undefined ? { id: entry.id, url, expect } : { id: entry.id, url, expect, content_type }];
+});
 
 /** Whether an app's status() may be polled at `now`: never polled, or the last attempt is at least 10 minutes old (or from a later clock). */
 function statusDue(doc: { readonly checked_at: number | null }, now: number): boolean {
@@ -596,7 +601,7 @@ export class HomeState extends DurableObject<Env> {
    */
   private async pollProbes(now: number): Promise<Record<string, string>> {
     const due = PROBED.filter((probe) => probeDue(this.doc<ProbeDoc>(`probe:${probe.id}`), now));
-    const results = await Promise.all(due.map(async (probe) => [probe, await probeUrl(probe.url, probe.expect)] as const));
+    const results = await Promise.all(due.map(async (probe) => [probe, await probeUrl(probe)] as const));
     const summary: Record<string, string> = {};
     for (const [probe, result] of results) {
       this.putDoc(`probe:${probe.id}`, nextProbeDoc(this.doc<ProbeDoc>(`probe:${probe.id}`), result, now), now);

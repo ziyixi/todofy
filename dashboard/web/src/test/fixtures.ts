@@ -279,6 +279,8 @@ function entries(patch: Record<string, Partial<EntryState>> = {}): EntryState[] 
   return [
     entry('mail-hero', { metric: { kind: 'counter', name: 'ingest_today_messages', value: 37 }, ...patch['mail-hero'] }),
     entry('todofy', { metric: { kind: 'counter', name: 'received_24h', value: 41 }, ...patch.todofy }),
+    entry('flowday', { metric: { kind: 'latency', ms: 95 }, ...patch.flowday }),
+    entry('links', { metric: { kind: 'latency', ms: 40 }, ...patch.links }),
     entry('website', { metric: { kind: 'latency', ms: 180 }, ...patch.website }),
     entry('notion-publish', { metric: { kind: 'last_active', hour: '2026-09-29T16:00:00.000Z' }, ...patch['notion-publish'] }),
     entry('newsletter', { level: 'unmonitored', checked_at: null, ...patch.newsletter }),

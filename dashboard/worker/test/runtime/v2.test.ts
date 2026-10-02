@@ -19,7 +19,7 @@ import {
 import { REGISTRY, outboundPerTick } from '../../src/registry.ts';
 import { REALISTIC_USAGE, SYNTHETIC_D1, SYNTHETIC_NS, usageWithScripts } from '../graphql-fixture.ts';
 import { accessClaims, testIssuer, type TestIssuer } from '../jwt.ts';
-import { GRAPHQL, NOW, SYNTHETIC_BINDINGS, WEBSITE_PROBE, startFlows, status, type FlowHarness } from './flows.ts';
+import { GRAPHQL, NOW, PROBES, SYNTHETIC_BINDINGS, WEBSITE_PROBE, answerProbes, startFlows, status, type FlowHarness } from './flows.ts';
 
 let h: FlowHarness | undefined;
 let issuer: TestIssuer;
@@ -34,13 +34,13 @@ afterEach(async () => {
 const MIN = 60_000;
 
 /**
- * A harness on the mockup's account (REALISTIC_USAGE) whose website answers 200. Its canary hour, 23, is
+ * A harness on the mockup's account (REALISTIC_USAGE) whose probed apps answer as healthy. Its canary hour, 23, is
  * later than every tick of these tests (around NOW, noon): no scheduled canary starts unless a test sets
  * the hour of its own ticks.
  */
 async function mockupDay(bindings: Record<string, string> = {}): Promise<FlowHarness> {
   const harness = await startFlows({ usage: REALISTIC_USAGE, bindings: { CANARY_UTC_HOUR: '23', ...bindings } });
-  harness.routes.set(WEBSITE_PROBE, () => Response.json({ build: 'synthetic' }, { headers: { 'cache-control': 'no-store' } }));
+  answerProbes(harness);
   return harness;
 }
 
@@ -87,9 +87,9 @@ describe('GET /api/v2/registry', () => {
     const first = await h.v2<RegistryResponse>('registry');
     expect(first).toMatchObject({ status: 200, etag: '"test"' });
     expect(first.bytes).toBeLessThanOrEqual(V2_BODY_BUDGET.registry);
-    expect(first.body?.entries.map((e) => e.id)).toEqual(['mail-hero', 'todofy', 'lab', 'website', 'notion-publish', 'newsletter', 'home', 'self-hosted', 'links']);
+    expect(first.body?.entries.map((e) => e.id)).toEqual(['mail-hero', 'todofy', 'lab', 'flowday', 'links', 'website', 'notion-publish', 'newsletter', 'home', 'self-hosted']);
     const text = JSON.stringify(first.body);
-    expect(text).not.toContain('build-info');
+    for (const url of Object.values(PROBES)) expect(text).not.toContain(new URL(url).pathname);
     expect(text).not.toContain('MAIL_HERO');
     expect((await h.v2('registry', '"test"')).status).toBe(304);
     // No tick, no DO view: nothing went out.
@@ -107,6 +107,8 @@ describe('GET /api/v2/home', () => {
       'mail-hero': ['unknown', 'never_checked'],
       todofy: ['unknown', 'never_checked'],
       lab: ['unknown', 'never_checked'],
+      flowday: ['unknown', 'never_checked'],
+      links: ['unknown', 'never_checked'],
       website: ['unknown', 'never_checked'],
       'notion-publish': ['unknown', 'never_checked'],
       newsletter: ['unmonitored', null],
@@ -131,6 +133,9 @@ describe('GET /api/v2/home', () => {
     expect(tiles.todofy).toMatchObject({ level: 'ok', metric: { kind: 'counter', name: 'received_24h', value: 63 } });
     expect(tiles.website?.level).toBe('ok');
     expect(tiles.website?.metric?.kind).toBe('latency');
+    // FlowDay's manifest and the links app's robots.txt, each answered by its own Worker.
+    expect(tiles.flowday).toMatchObject({ level: 'ok', reason: null, metric: { kind: 'latency' } });
+    expect(tiles.links).toMatchObject({ level: 'ok', reason: null, metric: { kind: 'latency' } });
     // Notion 发布 had requests this hour (first answer of discovery).
     expect(tiles['notion-publish']).toMatchObject({ level: 'ok', metric: { kind: 'last_active' } });
     expect(home.flows.map((f) => [f.id, f.level, f.partial])).toEqual([
@@ -153,19 +158,19 @@ describe('GET /api/v2/home', () => {
     expect(after.etag).toMatch(/^"2-/);
   });
 
-  it('refreshes due statuses and the probe at most once a minute, statuses every 10 minutes', async () => {
+  it('refreshes due statuses and the probes at most once a minute, statuses every 10 minutes', async () => {
     h = await mockupDay();
     const refreshed = await view<HomeResponse>(h, 'home?refresh=1');
     expect(refreshed.refresh.refreshed).toBe(true);
     expect((await h.called()).sort()).toEqual(['mail-hero.status', 'todofy.status']);
-    expect(h.outboundLog).toEqual([WEBSITE_PROBE]);
+    expect([...h.outboundLog].sort()).toEqual(Object.values(PROBES).sort());
     expect(h.analytics.requests).toEqual([]);
-    expect(refreshed.entries.find((e) => e.id === 'website')?.level).toBe('ok');
+    for (const id of ['website', 'flowday', 'links']) expect(refreshed.entries.find((e) => e.id === id)?.level).toBe('ok');
     // Within the minute: nothing is fetched again.
     const second = await view<HomeResponse>(h, 'home?refresh=1');
     expect(second.refresh.refreshed).toBe(false);
     expect(await h.called()).toEqual([]);
-    expect(h.outboundLog).toHaveLength(1);
+    expect(h.outboundLog).toHaveLength(3);
     // The next status poll is 10 minutes after the last one.
     expect(Date.parse(second.refresh.next_refresh_at) - Date.parse(refreshed.refresh.last_refresh_at ?? '')).toBeGreaterThanOrEqual(10 * MIN - MIN);
   });
@@ -188,6 +193,34 @@ describe('GET /api/v2/home', () => {
     const ops = await view<OpsResponse>(h, 'ops');
     expect(ops.digest.items).toEqual([]);
     expect(h.outboundLog.filter((url) => url === WEBSITE_PROBE)).toHaveLength(2);
+  });
+});
+
+describe('the FlowDay and links tiles', () => {
+  it('probes exactly the public_http URLs of the registry', () => {
+    const urls = REGISTRY.entries.flatMap((e) => (e.status.type === 'public_http' && e.status.enabled ? [[e.id, e.status.url]] : []));
+    expect(Object.fromEntries(urls)).toEqual(PROBES);
+  });
+
+  it('shows Access answering FlowDay\'s manifest, or a wrong type from links, on the tile and as one observed item each', async () => {
+    h = await mockupDay();
+    // The bypass is gone: Access redirects the manifest to its login page.
+    h.routes.set(PROBES.flowday, () => new Response(null, { status: 302, headers: { location: 'https://team.example.com/cdn-cgi/access/login' } }));
+    // Something other than the links Worker answers 200 with HTML.
+    h.routes.set(PROBES.links, () => new Response('<html></html>', { headers: { 'content-type': 'text/html; charset=utf-8' } }));
+    await h.tick(NOW - 31 * MIN);
+    await h.tick(NOW - MIN);
+    const home = await view<HomeResponse>(h, 'home');
+    expect(home.entries.find((e) => e.id === 'flowday')).toMatchObject({ level: 'critical', reason: 'http_status', consecutive_failures: 2, metric: null });
+    expect(home.entries.find((e) => e.id === 'links')).toMatchObject({ level: 'critical', reason: 'content_type', consecutive_failures: 2, metric: null });
+    expect(home.attention.items).toEqual([
+      { source: 'flowday', code: 'http_status', severity: 'critical', since: null, metrics: {}, target: { view: 'home', entry: 'flowday' }, observed: 'critical' },
+      { source: 'links', code: 'content_type', severity: 'critical', since: null, metrics: {}, target: { view: 'home', entry: 'links' }, observed: 'critical' },
+    ]);
+    expect(home.badges).toEqual({ home: 2, flows: 0, cloudflare: 0, ops: 0 });
+    // No flow names either app, and the digest to Todofy keeps v1's item set.
+    expect(home.flows.every((f) => f.level === 'ok')).toBe(true);
+    expect((await view<OpsResponse>(h, 'ops')).digest.items).toEqual([]);
   });
 });
 
@@ -388,13 +421,13 @@ describe('budgets of a tick', () => {
     h = await mockupDay({ CANARY_UTC_HOUR: String(new Date(start).getUTCHours()) });
     await h.tick(start);
     const first = [...(await h.called()), ...h.outboundLog.splice(0)];
-    // 2 status + 1 probe + 1 GraphQL + startCanary + canaryDelivery + reportOps (+ canaryResult when delivered at once).
+    // 3 status + 3 probes + 1 GraphQL + startCanary + canaryDelivery + reportOps (+ canaryResult when delivered at once).
     expect(first.length).toBeLessThanOrEqual(outboundPerTick());
-    expect(first).toContain(WEBSITE_PROBE);
+    for (const probe of Object.values(PROBES)) expect(first).toContain(probe);
     expect(first).toContain(GRAPHQL);
     await h.tick(NOW - 5 * MIN);
     const second = [...(await h.called()), ...h.outboundLog.splice(0)];
     expect(second.length).toBeLessThanOrEqual(outboundPerTick());
-    expect(second.filter((call) => call === WEBSITE_PROBE)).toHaveLength(1);
+    for (const probe of Object.values(PROBES)) expect(second.filter((call) => call === probe)).toHaveLength(1);
   });
 });

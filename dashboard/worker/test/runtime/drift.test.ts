@@ -9,7 +9,7 @@ import type { OpsReport } from '@ziyixi/proto/ops/v1/ops_wire';
 import { DRIFT_CALLS_PER_TICK, DRIFT_UTC_HOUR, type CloudflareResponse, type OpsResponse } from '../../src/api-v2-types.ts';
 import { outboundPerTick } from '../../src/registry.ts';
 import { CF_API, SENTINEL_VALUE } from '../drift-fixture.ts';
-import { GRAPHQL, NOW, SYNTHETIC_BINDINGS, startFlows, type FlowHarness } from './flows.ts';
+import { GRAPHQL, NOW, PROBES, SYNTHETIC_BINDINGS, startFlows, type FlowHarness } from './flows.ts';
 
 let h: FlowHarness | undefined;
 afterEach(async () => {
@@ -72,7 +72,8 @@ describe('the daily drift check', () => {
     expect(driftRequests(h)).toBe(0);
     // The GraphQL query still carries the same token; nothing else got it.
     expect(h.analytics.requests.every((r) => r.authorization === `Bearer ${TOKEN}`)).toBe(true);
-    expect(h.outboundLog.every((url) => url === GRAPHQL || url.startsWith(`${CF_API}/`) || url.startsWith('https://www.'))).toBe(true);
+    const probes: readonly string[] = Object.values(PROBES);
+    expect(h.outboundLog.every((url) => url === GRAPHQL || url.startsWith(`${CF_API}/`) || probes.includes(url))).toBe(true);
   });
 
   it('reports drift by name on the Cloudflare view and by counts in the digest, never a value', async () => {

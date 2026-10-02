@@ -23,7 +23,13 @@ const FORBIDDEN: readonly [string, RegExp][] = [
   ['account-like identifier', /\b[0-9a-f]{32}\b|\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/i],
 ];
 
-function httpsProblems(where: string, value: string, pathRule: 'root' | 'path'): string[] {
+/** A media type as the probe compares it: lowercase `type/subtype`, no parameters. */
+const MEDIA_TYPE = /^[a-z]+\/[a-z0-9][a-z0-9.+-]{0,62}$/;
+
+/**
+ * `dir`: an entry's link, `/` or a directory of the host (`/_/`, ending in `/`); `path`: a probe's file.
+ */
+function httpsProblems(where: string, value: string, pathRule: 'dir' | 'path'): string[] {
   let url: URL;
   try {
     url = new URL(value);
@@ -37,10 +43,24 @@ function httpsProblems(where: string, value: string, pathRule: 'root' | 'path'):
   if (url.search !== '' || url.hash !== '' || value.includes('?') || value.includes('#')) problems.push(`${where}: query or fragment`);
   if (!HOST.test(url.hostname)) problems.push(`${where}: host is not a lowercase domain`);
   if (url.hostname !== OWNER_ZONE && !url.hostname.endsWith(`.${OWNER_ZONE}`)) problems.push(`${where}: host outside ${OWNER_ZONE}`);
-  if (pathRule === 'root' && url.pathname !== '/') problems.push(`${where}: path must be /`);
+  if (pathRule === 'dir' && !/^\/(?:[a-z0-9._-]+\/)*$/.test(url.pathname)) problems.push(`${where}: path must be / or a directory ending in /`);
   if (pathRule === 'path' && !/^\/[a-z0-9._/-]*$/.test(url.pathname)) problems.push(`${where}: path`);
   if (url.href !== value) problems.push(`${where}: not in canonical form (${url.href})`);
   return problems;
+}
+
+/** The host and the path of a URL, or null when it does not parse (httpsProblems reports that). */
+function hostOf(value: string): string | null {
+  return URL.canParse(value) ? new URL(value).hostname : null;
+}
+
+function pathOf(value: string): string | null {
+  return URL.canParse(value) ? new URL(value).pathname : null;
+}
+
+function sameHost(a: string, b: string): boolean {
+  const host = hostOf(a);
+  return host !== null && host === hostOf(b);
 }
 
 function duplicates(values: readonly string[]): string[] {
@@ -87,7 +107,7 @@ export function validateRegistry(registry: Registry, options: ValidationOptions 
     add(entryGroups.has(entry.group), `${where}: unknown group ${entry.group}`);
     add((ICON_KEYS as readonly string[]).includes(entry.icon), `${where}: unknown icon ${entry.icon}`);
     add((ACCENTS as readonly string[]).includes(entry.accent), `${where}: unknown accent ${entry.accent}`);
-    if (entry.url !== null) problems.push(...httpsProblems(`${where} url`, entry.url, 'root'));
+    if (entry.url !== null) problems.push(...httpsProblems(`${where} url`, entry.url, 'dir'));
     // A launcher tile opens something; only background services and the hidden group may lack a URL.
     if (entry.group === 'apps' || entry.group === 'sites') add(entry.url !== null, `${where}: a tile needs a url`);
     for (const code of entry.app_only_signals) add(isOpsCode(code), `${where}: app_only_signals code ${code}`);
@@ -101,8 +121,22 @@ export function validateRegistry(registry: Registry, options: ValidationOptions 
         break;
       case 'public_http':
         problems.push(...httpsProblems(`${where} probe`, status.url, 'path'));
-        add(!entry.access, `${where}: an Access-protected host cannot be probed publicly`);
         add(status.expect.length > 0 && status.expect.every((code) => Number.isInteger(code) && code >= 200 && code <= 399), `${where}: expect`);
+        if (status.content_type !== undefined) add(MEDIA_TYPE.test(status.content_type), `${where}: content_type is not a lowercase media type`);
+        if (entry.access) {
+          // An anonymous probe of an Access path sees only Access. A path outside Access is allowed when declared,
+          // and only in a form where Access's login redirect (3xx, an HTML page) can never look healthy.
+          add(status.outside_access === true, `${where}: an Access-protected host cannot be probed publicly`);
+          if (status.outside_access === true) {
+            add(status.content_type !== undefined, `${where}: a probe outside Access needs content_type`);
+            add(status.expect.every((code) => code >= 200 && code <= 299), `${where}: a probe outside Access expects 2xx only`);
+            add(entry.url !== null && sameHost(status.url, entry.url), `${where}: a probe outside Access is on the entry's own host`);
+            add(entry.url === null || pathOf(status.url) !== pathOf(entry.url), `${where}: a probe outside Access cannot be the Access-protected url`);
+          }
+        } else {
+          add(status.outside_access === undefined, `${where}: outside_access is only for an Access-protected host`);
+        }
+        if (status.error_rate === true) add(scripts.length > 0, `${where}: error_rate needs a worker`);
         break;
       case 'analytics':
         add(scripts.length > 0, `${where}: analytics needs a worker`);
