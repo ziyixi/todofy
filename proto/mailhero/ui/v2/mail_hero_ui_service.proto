@@ -156,7 +156,8 @@ service MailHeroUiService {
   }
 
   // Sends a parsed message that has no delivery yet to a target: the coordinator makes and freezes its event, and the
-  // delivery is scheduled (AIP-136). Was POST /api/v1/messages/{id}/send.
+  // delivery is scheduled (AIP-136). Answers the delivery made in the response's `delivery`, the one shape of the three
+  // methods that make a delivery (SendMessage, ResendDelivery, TestEndpoint). Was POST /api/v1/messages/{id}/send.
   rpc SendMessage(SendMessageRequest) returns (SendMessageResponse) {
     option (google.api.http) = {
       post: "/api/v2/{name=messages/*}:send"
@@ -230,11 +231,9 @@ service MailHeroUiService {
   }
 
   // Sends the delivery's message again as a new event (a new event ID, built from the message's current parsed
-  // content) to a target: the consumer may act on it again. Answers the new delivery. Was POST
-  // /api/v1/deliveries/{id}/replay.
-  // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
-  // buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE
-  rpc ResendDelivery(ResendDeliveryRequest) returns (Delivery) {
+  // content) to a target: the consumer may act on it again. Answers the new delivery in the response's `delivery`, as
+  // SendMessage does. Was POST /api/v1/deliveries/{id}/replay.
+  rpc ResendDelivery(ResendDeliveryRequest) returns (ResendDeliveryResponse) {
     option (google.api.http) = {
       post: "/api/v2/{name=deliveries/*}:resend"
       body: "*"
@@ -343,8 +342,8 @@ service MailHeroUiService {
   }
 
   // Sends a synthetic connection-test event (a synthetic message, not mail) to the target's current revision: it is a
-  // real POST, and the consumer may act on it like on mail. Answers the delivery made. Was POST
-  // /api/v1/endpoints/{id}/test.
+  // real POST, and the consumer may act on it like on mail. Answers the delivery made in the response's `delivery`, as
+  // SendMessage does. Was POST /api/v1/endpoints/{id}/test.
   rpc TestEndpoint(TestEndpointRequest) returns (TestEndpointResponse) {
     option (google.api.http) = {
       post: "/api/v2/{name=endpoints/*}:test"
@@ -657,6 +656,12 @@ message ResendDeliveryRequest {
   ];
 }
 
+// Output of ResendDelivery.
+message ResendDeliveryResponse {
+  // The new delivery (PENDING, or PAUSED in its effective state): its own event ID, `source_delivery` the request's.
+  Delivery delivery = 1;
+}
+
 // Input of ListDeliveryAttempts.
 message ListDeliveryAttemptsRequest {
   // deliveries/{delivery}.
@@ -888,6 +893,7 @@ message TestEndpointRequest {
 
 // Output of TestEndpoint.
 message TestEndpointResponse {
-  // deliveries/{delivery}: the test event's delivery (ListDeliveries shows its attempts).
-  string delivery = 1 [(google.api.resource_reference).type = "mail-hero.ziyixi.science/Delivery"];
+  // The test event's delivery (PENDING, or PAUSED in its effective state). Its attempts are
+  // ListDeliveryAttempts(`<delivery.name>`); ListDeliveries does not list it under a message of mail.
+  Delivery delivery = 1;
 }

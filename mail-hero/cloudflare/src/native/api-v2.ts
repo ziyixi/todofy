@@ -24,6 +24,7 @@ import {
   ListEndpointsResponseSchema,
   ListMessagesResponseSchema,
   PreviewRetentionPolicyResponseSchema,
+  ResendDeliveryResponseSchema,
   RotateEndpointCredentialResponseSchema,
   SendMessageResponseSchema,
   SummarizeDeliveryAttemptsRequest_Granularity,
@@ -587,7 +588,9 @@ export const handlers: ServiceHandlers<ShapeOf<typeof MailHeroUiService>, ApiCon
 
   async resendDelivery(request, ctx) {
     const id = idOf(request.name, 'deliveries'), endpointID = idOf(request.endpoint, 'endpoints'), expected = versionOf(request.messageEtag)
-    return mutate(ctx, async () => toDelivery(await resendDelivery(ctx.env, ctx.owner, id, endpointID, expected, request.requestId)))
+    return mutate(ctx, async () => create(ResendDeliveryResponseSchema, {
+      delivery: toDelivery(await resendDelivery(ctx.env, ctx.owner, id, endpointID, expected, request.requestId)),
+    }))
   },
 
   async listDeliveryAttempts(request, { env }) {
@@ -693,6 +696,10 @@ export const handlers: ServiceHandlers<ShapeOf<typeof MailHeroUiService>, ApiCon
 
   async testEndpoint(request, ctx) {
     const id = idOf(request.name, 'endpoints')
-    return mutate(ctx, async () => create(TestEndpointResponseSchema, { delivery: `deliveries/${await testEndpoint(ctx.env, ctx.owner, id, request.requestId)}` }))
+    return mutate(ctx, async () => {
+      // The test event's ID, then its row: one indexed read more, so the three methods that make a delivery answer alike.
+      const eventID = await testEndpoint(ctx.env, ctx.owner, id, request.requestId)
+      return create(TestEndpointResponseSchema, { delivery: toDelivery(await getDelivery(ctx.env, eventID)) })
+    })
   },
 }

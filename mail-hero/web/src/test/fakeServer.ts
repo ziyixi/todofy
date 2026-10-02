@@ -15,7 +15,7 @@ import { EndpointSchema, type Endpoint } from '@ziyixi/proto/mailhero/ui/v2/endp
 import {
   CheckEndpointResponse_CheckResult, CheckEndpointResponseSchema, ListDeliveriesResponseSchema, ListDeliveryAttemptsResponseSchema, ListEndpointsResponseSchema,
   ListMessagesResponseSchema, MailHeroUiService, PreviewRetentionPolicyResponseSchema, RotateEndpointCredentialResponseSchema, SendMessageResponseSchema,
-  SummarizeDeliveryAttemptsResponseSchema, TestEndpointResponseSchema, UnblockEndpointResponseSchema,
+  ResendDeliveryResponseSchema, SummarizeDeliveryAttemptsResponseSchema, TestEndpointResponseSchema, UnblockEndpointResponseSchema,
 } from '@ziyixi/proto/mailhero/ui/v2/mail_hero_ui_service_pb'
 import { MessageContentSchema, type Message, type MessageContent } from '@ziyixi/proto/mailhero/ui/v2/message_pb'
 import { OverviewSchema, SettingsSchema, SetupStatusSchema, type Overview, type Settings, type SetupStatus } from '@ziyixi/proto/mailhero/ui/v2/settings_pb'
@@ -101,7 +101,7 @@ export function installFakeServer(initial: Partial<FakeState> = {}): FakeServer 
     getDelivery: async request => state.deliveries.find(item => item.name === request.name) ?? notFound(),
     retryDelivery: async request => state.deliveries.find(item => item.name === request.name) ?? notFound(),
     cancelDelivery: async request => state.deliveries.find(item => item.name === request.name) ?? notFound(),
-    resendDelivery: async request => create(DeliverySchema, { name: 'deliveries/resent', endpoint: request.endpoint, sourceDelivery: request.name }),
+    resendDelivery: async request => create(ResendDeliveryResponseSchema, { delivery: { name: 'deliveries/resent', endpoint: request.endpoint, sourceDelivery: request.name } }),
     listDeliveryAttempts: async request => create(ListDeliveryAttemptsResponseSchema, { deliveryAttempts: state.attempts.get(request.parent) ?? [] }),
     getDeliveryAttempt: async () => notFound(),
     getDeliveryPayload: async request => state.payloads.get(request.name) ?? create(DeliveryPayloadSchema, { name: request.name }),
@@ -115,7 +115,7 @@ export function installFakeServer(initial: Partial<FakeState> = {}): FakeServer 
     rotateEndpointCredential: async request => create(RotateEndpointCredentialResponseSchema, { endpoint: state.endpoints.find(item => item.name === request.name) ?? notFound(), affectedRevisionCount: 1 }),
     unblockEndpoint: async request => create(UnblockEndpointResponseSchema, { endpoint: state.endpoints.find(item => item.name === request.name) ?? notFound() }),
     checkEndpoint: async () => create(CheckEndpointResponseSchema, { uriAllowed: true, dns: CheckEndpointResponse_CheckResult.NOT_CHECKED, tls: CheckEndpointResponse_CheckResult.NOT_CHECKED, consumer: CheckEndpointResponse_CheckResult.NOT_CHECKED }),
-    testEndpoint: async () => create(TestEndpointResponseSchema, { delivery: 'deliveries/test-event' }),
+    testEndpoint: async request => create(TestEndpointResponseSchema, { delivery: { name: 'deliveries/test-event', endpoint: request.name } }),
   }
   const handlers = Object.fromEntries((Object.keys(defaults) as Method[]).map(method => [method, async (request: ProtoMessage) => {
     calls.push({ method, request: request as unknown as Record<string, unknown> })

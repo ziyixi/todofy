@@ -138,10 +138,10 @@ async function session({ meters, db, api, ops, endpoint, messages }, coordinator
     send,
     await worker.measure(RESEND, both(async () => {
       const n = resent++
-      assert.ok((await api(`/deliveries/${sent[n]}:resend`, 'POST', { endpoint: endpoint.name, request_id: crypto.randomUUID(), message_etag: String(versions[n]) })).name)
+      assert.ok((await api(`/deliveries/${sent[n]}:resend`, 'POST', { endpoint: endpoint.name, request_id: crypto.randomUUID(), message_etag: String(versions[n]) })).delivery.name)
     }), RUNS),
     await worker.measure(TEST, both(async () => {
-      assert.ok((await api(`/endpoints/${endpoint.id}:test`, 'POST', { request_id: crypto.randomUUID() })).delivery)
+      assert.ok((await api(`/endpoints/${endpoint.id}:test`, 'POST', { request_id: crypto.randomUUID() })).delivery.name)
     }), RUNS),
     await worker.measure(CANARY, both(async () => {
       assert.equal((await ops('startCanary', { run_id: `canary-cpu-${canaries++}` })).state, 'queued')

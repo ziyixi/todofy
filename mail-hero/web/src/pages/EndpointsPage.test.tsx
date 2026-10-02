@@ -29,6 +29,16 @@ function unblocks(fake: FakeServer, count: number, etag = '5') {
   fake.answer.unblockEndpoint = async () => create(UnblockEndpointResponseSchema, { endpoint: endpoint({ etag }), affectedRevisionCount: count })
 }
 
+it('sends a connection test after the warning and names the delivery it made', async () => {
+  const fake = open({})
+  fireEvent.click(await screen.findByRole('button', { name: /发送测试事件/ }))
+  fireEvent.click(await screen.findByRole('button', { name: '确认发送' }))
+  await waitFor(() => expect(fake.callsOf('testEndpoint')).toHaveLength(1))
+  expect(fake.callsOf('testEndpoint')[0]).toMatchObject({ name: NAME })
+  expect(fake.callsOf('testEndpoint')[0]['requestId']).toMatch(/^[0-9a-f-]{36}$/)
+  expect((await screen.findByText(/测试事件已创建/)).textContent).toContain('test-event')
+})
+
 it('explains a route block with its automatic recheck and unblocks every revision with the endpoint etag', async () => {
   const until = hours(6)
   const fake = open({ blockedReason: 'http_404', blockExpireTime: timestamp(until), blockedRecheckCount: 3 })

@@ -2,7 +2,8 @@
 import { afterEach, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, screen, waitFor } from '@testing-library/react'
 import { create } from '@ziyixi/proto/protobuf'
-import { Delivery_State, DeliveryPayloadSchema, DeliverySchema } from '@ziyixi/proto/mailhero/ui/v2/delivery_pb'
+import { Delivery_State, DeliveryPayloadSchema } from '@ziyixi/proto/mailhero/ui/v2/delivery_pb'
+import { ResendDeliveryResponseSchema } from '@ziyixi/proto/mailhero/ui/v2/mail_hero_ui_service_pb'
 import { installFakeServer } from '../test/fakeServer'
 import { delivery, endpoint, ENDPOINT_ID, EVENT_ID, message, renderAt } from '../test/fixtures'
 import DeliveryPage from './DeliveryPage'
@@ -32,7 +33,7 @@ it('warns before cancelling that an owner-resolved exception is later cleaned by
 it('shows the frozen request and its attempts, and resends as a new event with the message etag', async () => {
   const fake = installFakeServer({ deliveries: [delivery()], messages: [message({ etag: '3' })], endpoints: [endpoint()] })
   fake.state.payloads.set(`deliveries/${EVENT_ID}/payload`, create(DeliveryPayloadSchema, { name: `deliveries/${EVENT_ID}/payload`, body: '{"type":"mail.received.v1"}' }))
-  fake.answer.resendDelivery = async request => create(DeliverySchema, { name: 'deliveries/new-event', endpoint: request.endpoint, sourceDelivery: request.name })
+  fake.answer.resendDelivery = async request => create(ResendDeliveryResponseSchema, { delivery: { name: 'deliveries/new-event', endpoint: request.endpoint, sourceDelivery: request.name } })
   open()
   expect(await screen.findByText(/"type": "mail.received.v1"/)).toBeTruthy()
   await screen.findByText('Synthetic subject')
@@ -40,6 +41,8 @@ it('shows the frozen request and its attempts, and resends as a new event with t
   fireEvent.click(await screen.findByRole('button', { name: '创建新事件' }))
   await waitFor(() => expect(fake.callsOf('resendDelivery')).toHaveLength(1))
   expect(fake.callsOf('resendDelivery')[0]).toMatchObject({ name: `deliveries/${EVENT_ID}`, endpoint: `endpoints/${ENDPOINT_ID}`, messageEtag: '3' })
+  // The answer's delivery is the new event: the page opens it.
+  await waitFor(() => expect(fake.callsOf('getDelivery').map(call => call['name'])).toContain('deliveries/new-event'))
 })
 
 it('marks a canary delivery as a synthetic ops event', async () => {

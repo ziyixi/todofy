@@ -171,7 +171,7 @@ test('native workerd: durable archive, protected API, stable retry identity and 
     assert.equal(stale.status, 409);
     assert.deepEqual(reasonOf(await stale.json()), 'ETAG_MISMATCH');
     const terminal = { event_id: idOf((await api(`/deliveries/${event.event_id}:resend`, 'POST', { endpoint: endpoint.name,
-      message_etag: beforeReplay.etag, request_id: crypto.randomUUID() })).name) };
+      message_etag: beforeReplay.etag, request_id: crypto.randomUUID() })).delivery.name) };
     await db.batch([
       db.prepare("UPDATE deliveries SET retry_mode='once',next_attempt_at='2000-01-01T00:00:00.000Z' WHERE event_id=?").bind(terminal.event_id),
       db.prepare('UPDATE webhook_endpoints SET paused=0,next_send_at=NULL WHERE id=?').bind(endpoint.id),
@@ -244,7 +244,7 @@ test('native workerd: durable archive, protected API, stable retry identity and 
     await db.prepare('UPDATE webhook_endpoints SET paused=1 WHERE id=?').bind(endpoint.id).run();
     const latest = await api(`/messages/${forwardedRow.id}`);
     const frozen = { event_id: idOf((await api(`/deliveries/${automatic.event_id}:resend`, 'POST', { endpoint: endpoint.name,
-      message_etag: latest.etag, request_id: crypto.randomUUID() })).name) };
+      message_etag: latest.etag, request_id: crypto.randomUUID() })).delivery.name) };
     const { payload_key: frozenKey } = await db.prepare('SELECT payload_key FROM deliveries WHERE event_id=?').bind(frozen.event_id).first();
     await (await mf.getR2Bucket('MAIL_STORE')).put(frozenKey, legacyBytes);
     await db.batch([
