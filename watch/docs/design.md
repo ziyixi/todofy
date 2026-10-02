@@ -281,7 +281,11 @@ pass (pages of 2 MiB, bounded by the 24 MiB budget) about 4 s of the 30 s an inv
 beyond 6 ms (2 ms warm) for the fetch handler, 300 ms for an API call and 7.5 s for an alarm pass or the largest
 preview, and the hostile preview beyond twice the plain one, in reference milliseconds (each isolate's numbers divided
 by its measured speed); the fetch handler's very first request is the median of three fresh isolates, the rest is
-measured once, in the third (`tools/workerd-cpu` and its README).
+measured once, in the third (`tools/workerd-cpu` and its README). The worst pass must read all 12 pages its byte budget
+allows, each a change, with none of its own or the earlier passes' checks failed: a timeout would hide a page's parse.
+Wall time is the machine's, not what the test bounds (a request's timer includes waiting for the isolate while the other
+lanes parse; one request of that pass outlived production's 15 s on GitHub runners), so its page requests may take 60 s
+and its measured runs 120 s; the fetch timeout itself is `etiquette.test.ts`'s.
 Bundles: the Worker 110.1 KiB gzip (budget 122 KiB, `deploy/bundle-size.mjs`), the UI's JavaScript 50.2 KiB gzip
 (budget 56 KiB, `web/scripts/js-budget.mjs`), both with the wire profile's rule checker of proto/ts.
 

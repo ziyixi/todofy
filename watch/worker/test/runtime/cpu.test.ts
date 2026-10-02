@@ -23,8 +23,19 @@
  * median speed above MAX_SPEED fails the test.
  */
 import { beforeAll, describe, expect, it } from 'vitest';
-import { COLD_ISOLATES, connectCpuMeter, CPU_TEST_TIMEOUT_MS, FREE_CPU_MS, measureInIsolates, summarize, type CpuMeter, type Isolate, type Measurement } from '../../../../tools/workerd-cpu/workerd-cpu.mts';
-import { CHANGE_PAGE, DIFF_LINE_MAX, DIFF_LINES_KEPT, FETCH_MAX_BYTES, WATCH_PAGE, WATCHES_MAX } from '../../src/limits.ts';
+import {
+  COLD_ISOLATES,
+  connectCpuMeter,
+  CPU_TEST_TIMEOUT_MS,
+  FREE_CPU_MS,
+  INSPECTOR_TIMEOUT_MS,
+  measureInIsolates,
+  summarize,
+  type CpuMeter,
+  type Isolate,
+  type Measurement,
+} from '../../../../tools/workerd-cpu/workerd-cpu.mts';
+import { ALARM_BYTES_BUDGET, CHANGE_PAGE, DIFF_LINE_MAX, DIFF_LINES_KEPT, FETCH_MAX_BYTES, WATCH_PAGE, WATCHES_MAX } from '../../src/limits.ts';
 import { accessClaims, testIssuer } from '../jwt.ts';
 import { HOUR, OBJECT_WORKER, op, PUBLIC_HOST, startHarness, SYNTHETIC_BINDINGS, T0, type Harness } from './harness.ts';
 
@@ -45,6 +56,27 @@ const WORKER_BOUND_MS = 0.2 * FREE_CPU_MS;
  */
 const OBJECT_API_BOUND_MS = 0.01 * FREE_OBJECT_CPU_MS;
 const OBJECT_ALARM_BOUND_MS = 0.25 * FREE_OBJECT_CPU_MS;
+/**
+ * The wall-clock limits here. This test bounds CPU; wall time is the test machine's, and a timeout that trips on a slow
+ * machine changes what a pass does: the page goes unread and its parse uncounted. A page request's timer runs until
+ * its body is read, which includes waiting for the isolate while other lanes (ALARM_CONCURRENCY) parse and diff their
+ * pages: measured 1.4 s for the requests queued behind two lanes in the worst pass on the reference machine, 2.4 s
+ * with nine of its ten cores busy. On GitHub runners one request of that pass, always cpu-42's, outlived production's
+ * 15 s in 3 of 5 runs (2026-10-02: its check failed without a byte read, and the pass ran about 15 s longer). The
+ * fetch timeout itself is etiquette.test.ts's. So a page request may take PASS_FETCH_TIMEOUT_MS here
+ * (DEV_FETCH_TIMEOUT_MS), and each measured run in WatchState PASS_RUN_LIMIT_MS (the meter's limit, which names the
+ * run), far above a pass on a slow runner (about 20 s): a request that never answers still fails, as TIMEOUT with its
+ * watch named. The alarm's own wall budget (ALARM_WALL_BUDGET_MS less ALARM_START_MARGIN_MS: 7.5 minutes) cannot bind
+ * within these limits.
+ */
+const PASS_FETCH_TIMEOUT_MS = 2 * INSPECTOR_TIMEOUT_MS;
+const PASS_RUN_LIMIT_MS = 2 * PASS_FETCH_TIMEOUT_MS;
+/**
+ * The pages of FETCH_MAX_BYTES (just under) one alarm reads: a check starts only while FETCH_MAX_BYTES are left of
+ * ALARM_BYTES_BUDGET for it and for each check in flight. The other due watches wait for the next alarm (never a
+ * failure); the 40 requests do not bind (one per check, robots.txt cached).
+ */
+const PAGES_PER_PASS = Math.floor(ALARM_BYTES_BUDGET / FETCH_MAX_BYTES);
 const RUNS = 7;
 /** Label suffixes of a request measured in both isolates. */
 const HANDLER = 'fetch handler';
@@ -79,13 +111,12 @@ async function startIsolate(): Promise<WatchIsolate> {
   const h = await startHarness({
     inspectorPort: 0,
     splitObject: true,
-    // Production's fetch timeout: a 2 MiB page under the profiler takes longer than the suite's short one.
-    bindings: { DEV_AUTH_BYPASS: 'false', DEV_FETCH_TIMEOUT_MS: '15000' },
+    bindings: { DEV_AUTH_BYPASS: 'false', DEV_FETCH_TIMEOUT_MS: String(PASS_FETCH_TIMEOUT_MS) },
     routes: new Map([[`${ISSUER}/cdn-cgi/access/certs`, () => Response.json(issuerJwks)]]),
   });
   try {
     const meter = await connectCpuMeter(h.mf, 'watch');
-    const object = await connectCpuMeter(h.mf, OBJECT_WORKER);
+    const object = await connectCpuMeter(h.mf, OBJECT_WORKER, PASS_RUN_LIMIT_MS);
     return {
       h,
       meter,
@@ -138,9 +169,17 @@ function hostilePage(): string {
   return `<!doctype html><html><body><main>${paragraphs.join('')}</main></body></html>`;
 }
 
-function setPages(h: Harness, variant: number): void {
-  for (let n = 0; n < WATCHES_MAX; n++) h.sites.html(`https://cpu${String(n)}.example.com/p`, bigPage(n, 200, variant));
+/** The page watch `cpu-<n>` watches, each on a host of its own. */
+function pageUrl(n: number): string {
+  return `https://cpu${String(n)}.example.com/p`;
 }
+
+function setPages(h: Harness, variant: number): void {
+  for (let n = 0; n < WATCHES_MAX; n++) h.sites.html(pageUrl(n), bigPage(n, 200, variant));
+}
+
+/** What one scheduler pass answered (WatchState.step). */
+type Pass = Awaited<ReturnType<Harness['step']>>;
 
 /**
  * One isolate's session: the fetch handler's very first request; in the third isolate also the alarm passes, every
@@ -166,7 +205,7 @@ async function session({ h, meter: worker, object }: WatchIsolate, index: number
     const response = await h.fetch(`/api/v1/watches?watch_id=cpu-${String(n)}&request_id=${op()}`, {
       method: 'POST',
       headers: mutationHeaders,
-      body: JSON.stringify({ display_name: `Synthetic page ${String(n)}`, uri: `https://cpu${String(n)}.example.com/p`, stability: { skip_confirmation: n % 2 === 0 } }),
+      body: JSON.stringify({ display_name: `Synthetic page ${String(n)}`, uri: pageUrl(n), stability: { skip_confirmation: n % 2 === 0 } }),
     });
     if (response.status !== 200) throw new Error(`create ${String(n)}: ${String(response.status)} ${await response.text()}`);
   }
@@ -208,9 +247,9 @@ async function session({ h, meter: worker, object }: WatchIsolate, index: number
 
   // The alarm path: the first pass sets the notified states (50 pages of 200 KiB, as far as the budget goes).
   let clock = T0;
-  const outcomes: unknown[] = [];
+  const passes: Pass[] = [];
   const pass = async () => {
-    outcomes.push((await h.step(clock)).outcomes);
+    passes.push(await h.step(clock));
   };
   const firstPass = summarize(ALARM_FIRST, [await object.cpu(pass)]);
   clock += 1000;
@@ -246,14 +285,27 @@ async function session({ h, meter: worker, object }: WatchIsolate, index: number
     expectOk('/api/v1/watches:preview', { method: 'POST', headers: mutationHeaders, body: JSON.stringify({ watch: { display_name: 'p', uri: 'https://hostile.example.com/p' } }) }),
   );
 
-  // The worst pass: every page just under FETCH_MAX_BYTES, as many as the request budget allows.
-  for (let n = 0; n < WATCHES_MAX; n++) h.sites.html(`https://cpu${String(n)}.example.com/p`, hugePage(n));
+  // The worst pass: every page just under FETCH_MAX_BYTES, as many as the byte budget allows (PAGES_PER_PASS).
+  for (let n = 0; n < WATCHES_MAX; n++) h.sites.html(pageUrl(n), hugePage(n));
   clock = T0 + 16 * HOUR;
+  const asked = h.sites.requests.length;
+  const started = performance.now();
   const worst = summarize(ALARM_WORST, [await object.cpu(pass)]);
-  console.log(`cpu WatchState alarm passes: first ${firstPass.first.toFixed(1)} ms, with changes ${changed.first.toFixed(1)} ms, the largest pages ${worst.first.toFixed(1)} ms`);
-  console.log(`cpu alarm outcomes ${JSON.stringify(outcomes)}`);
-  // Every page was read: no check of the largest pages failed (a timeout would hide their cost).
-  expect(await h.sql('SELECT id FROM watches WHERE last_failure IS NOT NULL')).toEqual([]);
+  const wallMs = performance.now() - started;
+  console.log(`cpu WatchState alarm passes: first ${firstPass.first.toFixed(1)} ms, with changes ${changed.first.toFixed(1)} ms, the largest pages ${worst.first.toFixed(1)} ms (${(wallMs / 1000).toFixed(1)} s wall)`);
+  console.log(`cpu alarm passes ${JSON.stringify(passes.map(({ outcomes, requests, left }) => ({ outcomes, requests, left })))}`);
+
+  // Every check of the measured passes read its page (a failure, a timeout say, would hide that page's parse), and the
+  // worst pass read all PAGES_PER_PASS pages, each a change, leaving the other due watches to the next alarm. A
+  // failure names its code, and how often its page's request reached the fake site in the worst pass.
+  const failed = await h.sql<{ id: string; last_failure: string }>('SELECT id, last_failure FROM watches WHERE last_failure IS NOT NULL ORDER BY id');
+  const reached = (id: string) => h.sites.requests.slice(asked).filter(({ url }) => url === pageUrl(Number(id.slice('cpu-'.length)))).length;
+  const named = failed.map(({ id, last_failure }) => `${id} ${last_failure} (its page requested ${String(reached(id))}x in the worst pass)`);
+  const why = `failed checks: ${named.join(', ') || 'none'}; the worst pass took ${(wallMs / 1000).toFixed(1)} s`;
+  const failures = passes.map(({ outcomes }) => (outcomes?.['failed'] ?? 0) + (outcomes?.['error'] ?? 0));
+  expect({ failed, failures }, why).toEqual({ failed: [], failures: passes.map(() => 0) });
+  const last = passes.at(-1);
+  expect({ outcomes: last?.outcomes, left: last?.left }, why).toEqual({ outcomes: { changed: PAGES_PER_PASS }, left: WATCHES_MAX - PAGES_PER_PASS });
   return [cold, firstPass, changed, ...api, ...huge, ...hostile, worst];
 }
 
