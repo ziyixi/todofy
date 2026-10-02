@@ -317,6 +317,31 @@ current. Browser, the same synthetic set-up at 1280 px light and 375/390 px ligh
 chip of the neutral entries, FlowDay teal; both "● 正常 · 响应 N ms" with the lock, links to `https://flowday.ziyixi.science/`
 and `https://s.ziyixi.science/_/` in a new tab; no horizontal scroll at 375 px.
 
+## 1l. Local, the owner API on proto (`dashboard.ui.v1`, 2026-10-02)
+
+The owner API served from `proto/dashboard/ui/v1` by the shared transcoder, the UI on the generated client
+(design-v2.md §5). From a clean clone of the branch at `c286fd1` (base `327ad52`), macOS, Node 26.9.0, synthetic
+data only, no token, no Cloudflare or GitHub call:
+
+| Job | Step | Result |
+| --- | --- | --- |
+| `Changes` | `uv run --no-project --python 3.12 python -m unittest discover -s .github/scripts`; cf-guard and tools tests | 332 tests OK (1 skipped); both `node --test` suites passed |
+| `Proto checks` | lint, api-lint (api-linter 2.4.0), breaking against `327ad52`, the rules self-test, determinism, `check:schema`, `test_proto.py`, typecheck, vitest, `test:python` | all ok; api-linter: no problems in 30 files; no breaking change |
+| `Dashboard checks` | `node --test deploy/test/*.test.mjs` | 17 passed |
+| | worker lint, typecheck, `npm test` | ok; 16 files, 245 tests passed (every view and answer read as the client reads it and written back byte for byte) |
+| | worker `npm run test:runtime` (workerd, clock pinned with `DEV_NOW`) | 9 files, 73 tests passed, the API CPU test included: reference ms, medians of 3 isolates, the isolate's first API request 5.65 (bound 9), other first runs at most 3.19 (bound 7), warm medians at most 1.47 (bound 3); the cron tick unchanged (first 9.80, warm 2.70; bounds 16 and 4) |
+| | web lint, typecheck, tests, build; import guard | ok; 16 files, 136 tests passed; JavaScript 157.9 KiB gzip (budget 192 KiB); no cross-origin references |
+| | placeholder config dry-run (`GITHUB_SHA` set as in CI) | ok; 478.5 KiB raw, 116.7 KiB gzip (budget 140 KiB) |
+| `Contracts` | schema, Mail Hero, Todofy, gateway, dashboard, Lab, watch | all ok |
+| smoke | `wrangler dev` of the committed config (local bindings, the loopback bypass, `.dev.vars` from the example with a fresh key; no app Workers, no analytics token), one cron tick, then every call of `web/src/api/client.ts` from Node through a fetch that plays the browser (same-origin `Origin`, the CSRF cookie) | 28 of 28: the registry and the four views 200 with an ETag and `no-store`, then 304 from the kept body; both refreshes; a guard override and its replay by `request_id` (same answer), the same `request_id` on another method 400; the canary 409 `CANARY_ACTIVE` (the tick's run had started), an unknown canary 404; a lost CSRF cookie renewed once; a foreign Origin and a POST without the token 403 `CSRF_FAILED`; every retired `/api/v2` path 410 `reload_required` in the old envelope; `GET /api/v1/homeView?refresh=1` 400, `POST /api/csrf` 405; the private headers on the answers |
+
+The smoke found that the flows and ops views never answered 304 outside the pinned clock: their
+`next_refresh_at` was written to the millisecond, so their ETag changed on every request (also on `main`); fixed in
+`c286fd1` (a time at or before now is the current minute). It also showed a local-only effect: after a request whose
+body the Worker cancels unread (a refused POST), `wrangler dev`'s proxy answers the next POST 500 "Network
+connection lost" (the same `body.cancel()` is on `main` and in Lab, links and watch; the workerd suites do not go
+through that proxy). The smoke sends such a request once more and counts it (1 in the final run).
+
 ## 2. Production (pending)
 
 None of these has been done; each needs the first `Dashboard deploy` on `main` (after Todofy and Mail
