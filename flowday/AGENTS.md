@@ -27,7 +27,13 @@ The root [`AGENTS.md`](../AGENTS.md) applies here too. FlowDay-specific rules:
   mutation, and reviews and exports computed in the browser. Respect the Free limits: 10 ms CPU per
   request (`worker/test/runtime/cpu.test.ts`), 50 subrequests, 100 bound parameters per D1 statement
   (pass id lists as one JSON parameter to `json_each(?)`), no interactive transactions (one batch).
-- **Requests.** Every UI request goes through `web/lib/client/http.ts` (ESLint rejects `fetch`
+- **Owner API.** `proto/flowday/ui/v1` (`flowday.ui.v1`) is the one description of every route the UI calls: change
+  the IDL first (`proto/README.md`, HTTP APIs), then the Worker's handler (`worker/src/api.ts`) and the UI's client
+  (`web/lib/client/flowday-api.ts`, the only module of API calls; the UI's view models are built there, never a
+  hand-written wire type). Keep lists paged at sizes `worker/test/runtime/cpu.test.ts` holds within the CPU limit, and
+  keep `worker/src/warmup.ts` in step with the list answers. The routes before it answer 410 `reload_required` until
+  2026-11-02: remove them in the first FlowDay change after that day.
+- **Requests.** Every UI request goes through `web/lib/client/http.ts`, the client's transport (ESLint rejects `fetch`
   elsewhere): CSRF, one retry on an expired token, visible failures. Never swallow a failed write.
 - **D1 writes stay minimal.** The 100,000 rows/day write allowance is shared by every app in the
   account, and each index touched counts as another row written. Sync reads only what changed in

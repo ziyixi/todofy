@@ -19,7 +19,12 @@ through `ts/http-transcoder.ts` and Lab's UI calls it through `ts/http-client.ts
 HTTP APIs, which recommendation-v1, mail-received-v1 and every app's UI API follow. `links/ui/v1` is the
 links app's owner API (2026-10-01, deployed since the app's step L2): the second app on the same runtime, under the path
 prefix `/_/api/v1/` (its host's other paths are short links). `watch/ui/v1` is the watch app's owner API (2026-10-01,
-deployed since the app's step W2): the third app on the runtime, under `/api/v1/`. `dashboard/ui/v1` is the dashboard's
+deployed since the app's step W2): the third app on the runtime, under `/api/v1/`.
+`flowday/ui/v1` is FlowDay's owner API (2026-10-02, branch `proto-flowday-ui`): the fifth, on a Worker and a Next.js UI
+that had no proto code before, and the first with large lists: its lists are pages sized to Workers Free's CPU limit,
+and the Worker runs its answer path once at startup ([Cost](#http-apis)). Its old routes answer 410 `reload_required` for
+one release, as Lab's did.
+`dashboard/ui/v1` is the dashboard's
 owner API (2026-10-02, branch `proto-dashboard-ui`): the registry and the four views are AIP-156 singletons read with
 standard Gets, the refreshes and the guard and canary actions are custom methods; HomeState still serializes each view
 once and the Worker answers those bytes through the transcoder as `PreEncoded` (with the ETag, or 304), so its views
@@ -105,7 +110,7 @@ bundle is unchanged (its types come from the OpenAPI document).
    `lower_snake_case`, versioned packages) and `COMMENTS` (every element documented); exceptions are written
    next to the element with `buf:lint:ignore` and a reason, and the AIP-shaped HTTP packages are excused only
    from the two response-name rules the AIPs contradict: `lab/ui` in `buf.yaml`'s `ignore_only`, `links/ui`,
-   `watch/ui` and `dashboard/ui` by those two `buf:lint:ignore` lines on each method that answers a resource (with the
+   `watch/ui`, `flowday/ui` and `dashboard/ui` by those two `buf:lint:ignore` lines on each method that answers a resource (with the
    reason in the file's header),
    because `buf.yaml` reaches every proto user's deploy (`proto_deploys` below) and a new package must not
    redeploy the other apps. Google's api-linter
@@ -149,7 +154,7 @@ bundle is unchanged (its types come from the OpenAPI document).
 | --- | --- |
 | `buf.yaml`, `buf.lock` | The module (`path: .`, tooling directories excluded), lint and breaking rules, the `buf.build/googleapis/googleapis` dependency pinned by commit and digest |
 | `buf.gen.yaml` | protobuf-es v2 (`target=ts`, `import_extension=ts`, `erasable_syntax=true`) into `ts/` |
-| `<package path>/*.proto` | One directory per proto package: `todofy/taskintent/v1/task_intent.proto` is `todofy.taskintent.v1`; `lab/ui/v1/*.proto` is `lab.ui.v1`, Lab's owner UI API; `links/ui/v1/*.proto` is `links.ui.v1`, the links app's owner API; `watch/ui/v1/*.proto` is `watch.ui.v1`, the watch app's owner API; `dashboard/ui/v1/*.proto` is `dashboard.ui.v1`, the dashboard's owner API; `common/errors/v1/errors.proto` is `common.errors.v1`, the error reasons every HTTP API shares; `common/wire/v1/wire.proto` is `common.wire.v1`, the wire profile's own options ([Value rules](#value-rules), `non_null`, `closed`, `keep_order`, `positional`); `ops/v1/ops.proto` is `ops.v1`, the IDL of `contracts/ops-v1` (every app's `Ops` entrypoint), a contract several apps implement, so named by the contract, not an app ([Adding a contract](#common-tasks), step 1); `todofy/report/v1/report.proto` is `todofy.report.v1`, Todofy's newsletter reports (recommendation-v1, summary-v1); `mailhero/webhook/v1/mail_received.proto` is `mailhero.webhook.v1`, Mail Hero's webhook event (mail.received.v1) |
+| `<package path>/*.proto` | One directory per proto package: `todofy/taskintent/v1/task_intent.proto` is `todofy.taskintent.v1`; `lab/ui/v1/*.proto` is `lab.ui.v1`, Lab's owner UI API; `links/ui/v1/*.proto` is `links.ui.v1`, the links app's owner API; `watch/ui/v1/*.proto` is `watch.ui.v1`, the watch app's owner API; `flowday/ui/v1/*.proto` is `flowday.ui.v1`, FlowDay's owner API; `dashboard/ui/v1/*.proto` is `dashboard.ui.v1`, the dashboard's owner API; `common/errors/v1/errors.proto` is `common.errors.v1`, the error reasons every HTTP API shares; `common/wire/v1/wire.proto` is `common.wire.v1`, the wire profile's own options ([Value rules](#value-rules), `non_null`, `closed`, `keep_order`, `positional`); `ops/v1/ops.proto` is `ops.v1`, the IDL of `contracts/ops-v1` (every app's `Ops` entrypoint), a contract several apps implement, so named by the contract, not an app ([Adding a contract](#common-tasks), step 1); `todofy/report/v1/report.proto` is `todofy.report.v1`, Todofy's newsletter reports (recommendation-v1, summary-v1); `mailhero/webhook/v1/mail_received.proto` is `mailhero.webhook.v1`, Mail Hero's webhook event (mail.received.v1) |
 | `package.json`, `package-lock.json` | The toolchain pins (`dependencies`: buf, protoc-gen-es, the runtime) and this folder's test tools (`devDependencies`) |
 | `ts/` | The TypeScript package `@ziyixi/proto`. Committed: `package.json` (its exports), `wire-json.ts`, `wire-rules.ts` and `field-mask.ts` (the codec and its value rules), `http-path.ts`, `http-rule.ts`, `http-transcoder.ts`, `http-client.ts` and `rpc-status.ts` (the HTTP runtime, [HTTP APIs](#http-apis)), `page-token.ts` and `filter.ts` (AIP-158 page tokens and the AIP-160 subset for list methods), `protobuf.ts` / `protobuf-wkt.ts` (the runtime re-exports). Generated: every directory (`ts/todofy/...`, `ts/lab/...`, `ts/ops/...`, `ts/common/...`, `ts/google/...`): protobuf-es's `*_pb.ts`, and for the packages of `WIRE_PACKAGES` the wire JSON types `*_wire.ts` |
 | `python/` | The Python package `ziyixi-proto`. Committed: `pyproject.toml` (static metadata, uv cache keys), `build_backend.py`, `src/ziyixi_proto/__init__.py` and `wire_json.py` (the codec and its value rules). Generated: every directory under `src/ziyixi_proto/`, for the packages `tools/gen_py.py` lists in `PYTHON_PACKAGES` only; the wheel leaves the test-only ones out (`TEST_ONLY_PACKAGES`) |
@@ -587,6 +592,21 @@ machine (`tools/workerd-cpu` and its README), and its bundles are held
 to budgets (`tools/bundle-size`: `lab/deploy/bundle-size.mjs`, 128 KiB gzip for the Worker;
 `lab/web/scripts/js-budget.mjs`, 160 KiB gzip for the UI's JavaScript).
 
+**Large lists** (measured 2026-10-02 on FlowDay, the first API with lists of hundreds of items:
+`flowday/worker/test/runtime/cpu.test.ts`, same meter and machine). Writing a message with `toWire` costs a few
+microseconds per item warm and several times that the first time an isolate runs it (300 tasks: 0.9 ms warm, 5.5-7 ms
+on the first run, in Node), so an answer's size is a CPU decision. FlowDay's first cut answered whole lists: a page of
+500 time entries with their tasks took 7.0 ms warm (Free's 10 ms with no margin), and an isolate's first API request,
+a page of 300 tasks, 12.9 ms. Two changes keep both inside the limit. Lists are AIP-158 pages sized to the budget (200
+tasks, days or entries; the UI reads every page), and the Worker's global scope writes a few hundred synthetic messages
+once at startup (`flowday/worker/src/warmup.ts`), outside any request's CPU time like the transcoder's route table,
+so V8 has optimized the writer before a request needs it. An isolate's first API request, a page of 200 of 1,000
+tasks, is then 7.6 ms (median of three isolates; 11-13 ms without the warm-up; the hand-written answer of all 1,000
+tasks took 8.2 ms), and every warm request 3 ms or less (the sync's first chunk 7.3 ms cold, unchanged). Bundles:
+FlowDay's Worker 56.1 → 114.3 KiB gzip (it had no protobuf-es runtime before; budget 140 KiB), its UI's JavaScript
+362.8 → 398.9 KiB gzip (budget 480 KiB). An app with lists that long should expect the same: page sizes from its CPU
+test, and the warm-up.
+
 **Adding a UI API.**
 
 1. Write `<app>/ui/v1/*.proto` by the conventions above; `npm run lint && npm run api-lint` until clean.
@@ -606,7 +626,8 @@ to budgets (`tools/bundle-size`: `lab/deploy/bundle-size.mjs`, 128 KiB gzip for 
 5. Budget what the runtime costs ([Cost](#http-apis)), as Lab does: the Worker's and the UI's bundles against
    budgets with `tools/bundle-size` (a ratchet of about 1.2 times the measured size, raised only on purpose), and
    the heaviest requests' CPU, the isolate's first API request included, with `tools/workerd-cpu` (bounds in
-   milliseconds of its reference machine, scaled by the calibration).
+   milliseconds of its reference machine, scaled by the calibration). Lists of hundreds of items need page sizes
+   from that test and the startup warm-up (Large lists, above).
 
 Python: a Python Worker's transcoder will implement the same behaviour and run `testdata/http-cases.json`;
 the profile's Python twin already supports every kind these APIs use.
@@ -625,15 +646,15 @@ runs everything: first run, unusable base, dispatch), `breaking.sh` compares wit
 the log; a base that predates `proto/` has nothing to break. The job is in `CI gate`'s needs and in
 `CHECK_JOBS` (a push to `main` reuses a green branch run only if it passed Proto checks).
 
-A `proto/` change also re-checks every app in `PROTO_USERS` (Lab, Todofy, Mail Hero, the dashboard, the links app and the watch app) and runs
+A `proto/` change also re-checks every app in `PROTO_USERS` (Lab, Todofy, Mail Hero, the dashboard, FlowDay, the links app and the watch app) and runs
 `Contracts` (the contracts' tests check the codecs against the schemas and pin the wire bytes). It deploys only
 the apps whose production bundle the changed path reaches (`proto_deploys` in `.github/scripts/ci_changes.py`).
 `PROTO_USERS` names each user's bundled languages: Lab, Mail Hero and the dashboard `"ts"` (their Workers, and
-Lab's and the dashboard's UIs), the links and watch apps `"ts"` (their Workers and UIs), Todofy `"python"` (todofy-core vendors the wheel; its gateway and UI import types only, which compile to
+Lab's and the dashboard's UIs), FlowDay, the links and watch apps `"ts"` (their Workers and UIs), Todofy `"python"` (todofy-core vendors the wheel; its gateway and UI import types only, which compile to
 nothing). A language's runtime and generator reach that language's users (`proto/ts/` and `buf.gen.yaml`: the
 TypeScript users; `proto/python/`, `tools/gen_py.py` and `tools/wire_rules.py`: Todofy); the wire profile's own
 options (`common/wire/`) reach both; a package reaches the apps that import it (`PROTO_PACKAGES`:
-`todofy/taskintent/` Lab, Todofy and the watch app, `todofy/report/` Todofy, `mailhero/webhook/` Mail Hero and Todofy, `lab/ui/` Lab, `links/ui/` the links app, `watch/ui/` the watch app, `dashboard/ui/` the dashboard, `ops/` the five apps with an `Ops` entrypoint or caller (Lab, Mail Hero, the dashboard, Todofy and the watch app), `common/errors/` and `prototest/` none);
+`todofy/taskintent/` Lab, Todofy and the watch app, `todofy/report/` Todofy, `mailhero/webhook/` Mail Hero and Todofy, `lab/ui/` Lab, `flowday/ui/` FlowDay, `links/ui/` the links app, `watch/ui/` the watch app, `dashboard/ui/` the dashboard, `ops/` the five apps with an `Ops` entrypoint or caller (Lab, Mail Hero, the dashboard, Todofy and the watch app), `common/errors/` and `prototest/` none);
 the module and toolchain files (`buf.yaml`, `buf.lock`, `package-lock.json`, `tools/ensure.mjs`) and any path
 not mapped reach every user; tests, test data, the check scripts, the wire JSON types' and JSON Schema
 generators (`tools/gen_wire_ts.py`: types only; `tools/gen_schema.py`: files under `contracts/` and `todofy/api/`,
@@ -642,7 +663,7 @@ the users' languages and each package's importers from the sources, so the maps 
 
 ## Later
 
-Planned: every other app's UI API on the [HTTP APIs](#http-apis) pattern (the dashboard's moved on 2026-10-02). ops-v1 moved on 2026-10-01 as one package,
+Planned: every other app's UI API on the [HTTP APIs](#http-apis) pattern (Todofy's and Mail Hero's; the dashboard's and FlowDay's moved on 2026-10-02). ops-v1 moved on 2026-10-01 as one package,
 `ops/v1`, because its four services share every message, recommendation-v1 and summary-v1 as `todofy/report/v1`
 (messages only; Todofy's owner API, which lists them, moves with the Todofy UI API), and mail-received-v1 as
 `mailhero/webhook/v1` (messages only: the webhook's path, authentication and Idempotency-Key header stay the HTTP

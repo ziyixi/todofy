@@ -39,20 +39,36 @@ There is no cron, no Durable Object and no Queue. The sync runs when a page asks
 Every path needs the owner's Access JWT, verified by `packages/edge-auth`: signature, issuer, audience, expiry and
 the single owner (with aliases). The exceptions are `/health` and the exact PWA files (section 7). Every non-GET
 `/api` request also needs the signed double-submit CSRF token (`X-CSRF-Token` plus the `flowday_csrf` cookie) and
-an allowed `Origin`. Errors use the envelope `{error: {code, message, request_id}}`.
+an allowed `Origin`.
 
-| Route | Methods | Notes |
+The owner API is `flowday.ui.v1` (since 2026-10-02): `proto/flowday/ui/v1` is its one description (resources, routes,
+fields, errors), in the AIP style of the repository's other UI APIs (`proto/README.md`, HTTP APIs). The Worker serves
+it through the shared transcoder (`worker/src/router.ts`, handlers in `api.ts`) after Access, with the CSRF and
+Origin check in the transcoder's `authorize` hook, before any body is read; the UI calls it through the shared typed
+client (section 8). Bodies and answers are wire JSON (snake_case, enum names in lower case, RFC 3339 times); errors
+are `google.rpc.Status` bodies whose `ErrorInfo.reason` is FlowDay's (`errors.proto`: `TODOIST_KEY_MISSING`,
+`TODOIST_KEY_UNREADABLE`, `TODOIST_UNAUTHORIZED`, `TODOIST_UNAVAILABLE`, `TASK_NOT_DELETED`) or a shared one, with the
+owner's English copy as its `LocalizedMessage`. A failed D1 call is `UNAVAILABLE` (safe to repeat), any other surprise
+`INTERNAL`.
+
+| Resource | Routes (under `/api/v1`) | Notes |
 | --- | --- | --- |
-| `/api/csrf` | GET | Issues the token and its cookie (12-hour validity) |
-| `/api/tasks` | GET, POST, PATCH, DELETE | Visible tasks; create a local task; title or estimate; soft delete (also removes the task from every flow, in one batch) |
-| `/api/tasks/deleted` | GET, POST | Trash (FlowDay deletions only); restore |
-| `/api/flows` | GET, PUT | All flows and completions; `setFlow`, `addCompleted`, `removeCompleted`, `rollover`, `rolloverSelected` |
-| `/api/entries`, `/api/entries/:id` | GET, POST / PUT, DELETE | Time entries by task, day or both |
-| `/api/notes` | GET, PUT | One markdown note per task and day |
-| `/api/settings` | GET, PUT | Todoist key (masked on read), day capacity, planning-done flag |
-| `/api/sync` | POST | `{mode: "auto" \| "manual"}`. See section 4 |
-| `/api/timer/session` | GET, PUT, DELETE | The cross-device active timer (one row) |
-| `/api/analytics` | GET | Raw rows of `?start&end` (both dates), or every time entry when no range is given. See section 8 |
+| `tasks/{task}` | `GET tasks`, `GET`, `POST tasks`, `PATCH`, `DELETE`, `POST :undelete`, `POST tasks:sync` | The task list (pages; `show_deleted` adds the trash); a local task (its `request_id` names it, `local-<request_id>`); title or estimate (`update_mask`); soft delete (also out of every flow, in one batch) and restore; the sync (section 4) |
+| `flows/{day}` | `GET flows`, `GET`, `PATCH`, `POST :completeTask`, `POST :reopenTask`, `POST :rollover` | Every day with a flow (pages), its planned tasks in order, its done tasks and its planning flag; `task_ids` or `planning_completed` (`update_mask`); done marks; rollover of the listed or of every unfinished task |
+| `flows/{day}/notes/{task}` | `GET {parent}/notes`, `GET`, `PATCH` | One markdown note per task and day; one never written reads as empty |
+| `timeEntries/{entry}` | `GET timeEntries?task_id&flow_date`, `GET`, `POST timeEntries`, `PATCH`, `DELETE` | Time entries by task, day or both (pages); a new one (its `request_id` is its ID); start and end (the duration follows) |
+| `timerSession` | `GET`, `PATCH`, `POST :clear` | The cross-device active timer (one row) |
+| `settings` | `GET`, `PATCH` | Whether a sealed Todoist key is stored (never the key), the day's capacity, the last sync |
+| (analytics) | `GET analytics:query?start_date&end_date` | Raw rows of a range of days, or every time entry without one, a page of entries at a time. See section 8 |
+
+`GET /api/csrf` (the token and its cookie, 12-hour validity), `/health`, the PWA files and the E2E routes
+(`/api/test/*`) are transport, outside the service. Lists are AIP-158 pages of at most 200 tasks, days or entries
+(100 notes): an answer is written within Workers Free's CPU limit even in an isolate's first request (section 6).
+There is no request log and no etag, because each would cost a D1 row write on every mutation (section 5): the two
+creates take a `request_id` that becomes the new resource's ID, so a repeat finds it and writes nothing, and every
+other mutation sets a state. The routes before `flowday.ui.v1` (`/api/tasks`, `/api/flows`, ...) answer 410 with the
+old envelope `{error: {code: "reload_required", message, request_id}}` until 2026-11-02, so a tab still running the
+old UI shows "FlowDay has been updated. Reload the page" on its next write and changes nothing.
 
 `/api/export` and the server-side review maths of the container era are gone. The browser does that work now
 (section 8).
@@ -187,7 +203,7 @@ unread indexes, a new task cost 5 rows and a new flow task 5.
 | Scenario | Rows written |
 | --- | --- |
 | Simulated day of sync: 200 tasks, 20 Todoist changes (10 edits, 3 reschedules, 3 completions, 1 deletion, 2 new tasks, 1 project rename covering 40 tasks), two tabs polling every 10 minutes for 16 hours. Result: 96 syncs, 96 throttled, 96 Todoist reads | **280** (asserted < 320) |
-| Simulated day of use: plan 8 tasks, reorder twice, 8 estimates, 12 timer segments, 6 notes × 5 saves, 2 manual entries, 6 completions, a rollover, a quick task | **221** (asserted < 250) |
+| Simulated day of use: plan 8 tasks, reorder twice, 8 estimates, 12 timer segments, 6 notes × 5 saves, 2 manual entries, 6 completions, a rollover, a quick task | **221** (asserted < 250, and no step above its count through the routes before `flowday.ui.v1`: the same 221) |
 | One-off first sync of a new account with 200 tasks | 608 (3 per task; asserted < 620) |
 | A sync with no Todoist change | 2 (claim + `last_sync_at`), or 3 if Todoist rotates the token |
 | Each extra chunk of a large answer | its changed rows + 3 (claim, `last_sync_at`, cursor) |
@@ -199,7 +215,7 @@ Before the port, the container
 upserted every task every 60 seconds whether or not the tab was visible. That was about 4 rows per task per
 sync: roughly 0.58–1.15 million rows a day for 200 tasks.
 
-Every API mutation logs one line (`request_id`, method, route, status, error code, `rows_written`, `rows_read`)
+Every API mutation logs one line (`request_id`, method, the rpc's name as `route`, status, error reason, `rows_written`, `rows_read`)
 and returns its row count in `x-flowday-rows-written`. Workers Observability can then show the real figure
 after F2.
 
@@ -207,12 +223,12 @@ after F2.
 
 | Limit | FlowDay |
 | --- | --- |
-| 10 ms CPU per request | Measured in workerd from the isolate's CPU profile (`cpu.test.ts`), with answers that carry every field of a Todoist API v1 item (1,000 items: 595 KiB). The sync's first chunk of a full sync of 1,000 tasks: **8.6 ms on the isolate's first run** (about 6 ms of that is the first run of the sync's code with any answer size), 3.3 ms warm median; its last chunk 3.0 ms; incremental sync with 20 changes 1.4 ms; `GET /api/tasks` with 1,000 tasks 1.6 ms; analytics rows for 1,000 hours 4.9 ms, a week 1.5 ms; the page with CSP hashing 0.4 ms. The test asserts every warm best < 6 ms and the sync's first run < 15 ms, in milliseconds of that reference machine (an Apple M1 Max); the sync's first run is the median of three fresh isolates measured one after another (GitHub runners read single isolates 8.8–11.0 ms), the other handlers are measured in the last of them (`tools/workerd-cpu` and its README). Measured CPU scales with the machine (GitHub runners measure the sync 1.1–2.1× the reference, varying 2× within an hour), so the test calibrates in the same isolate with the meter it shares with Lab (`tools/workerd-cpu`): a fixed, deterministic workload shaped like the sync's (parse a synthetic 1,000-item answer, sort, map to rows, serialise) runs in the Worker through the inspector's `Runtime.evaluate`, and its warm median wall time over the reference's (4.8 ms) is the speed each isolate's numbers are divided by, never below 1×; a median above 5× fails the test as too slow to measure. 2,000 items measured 10–14 ms on the first run, hence `MAX_SYNC_ITEMS` = 1,000. These are estimates on the test machine, not Cloudflare's meter; a sync request stopped for CPU resumes from its cursor after the backoff. Watch `/api/sync` in Observability after F2 |
+| 10 ms CPU per request | Measured in workerd from the isolate's CPU profile (`cpu.test.ts`), with answers that carry every field of a Todoist API v1 item (1,000 items: 595 KiB). Since `flowday.ui.v1` (2026-10-02, warm medians unless noted): the sync's first chunk of a full sync of 1,000 tasks **7.3 ms on the isolate's first run** (8.2 before; about 6 ms of it is the first run of the sync's code with any answer size), 3.7 ms warm; its last chunk 3.1 ms; incremental sync with 20 changes 1.9 ms; **an isolate's first API request**, a page of 200 of 1,000 tasks, **7.6 ms** (the hand-written answer of all 1,000 tasks took 8.2 ms; without the startup warm-up of `worker/src/warmup.ts` it was 11–13 ms), 2.6–2.9 ms warm; a page of 200 of 395 days of flows 3.1 ms; a page of 200 time entries 2.2 ms; analytics rows for 1,000 hours a page of 200 entries at a time 2.7 ms (all 2,000 in one answer took 4.9 ms before, and 7.0 ms for 500 through the wire JSON writer, which is why they are pages), a week 1.8 ms; the page with CSP hashing 0.4–0.8 ms. Writing an answer costs a few microseconds per task or entry warm and several times that on an isolate's first run, hence the page sizes (`worker/src/limits.ts`) and the warm-up. The test asserts every warm best < 6 ms, the sync's first run < 15 ms and the isolate's first API request < 12 ms, in milliseconds of that reference machine (an Apple M1 Max); the sync's first run is the median of three fresh isolates measured one after another (GitHub runners read single isolates 8.8–11.0 ms), the other handlers are measured in the last of them (`tools/workerd-cpu` and its README). Measured CPU scales with the machine (GitHub runners measure the sync 1.1–2.1× the reference, varying 2× within an hour), so the test calibrates in the same isolate with the meter it shares with Lab (`tools/workerd-cpu`): a fixed, deterministic workload shaped like the sync's (parse a synthetic 1,000-item answer, sort, map to rows, serialise) runs in the Worker through the inspector's `Runtime.evaluate`, and its warm median wall time over the reference's (4.8 ms) is the speed each isolate's numbers are divided by, never below 1×; a median above 5× fails the test as too slow to measure. 2,000 items measured 10–14 ms on the first run, hence `MAX_SYNC_ITEMS` = 1,000. These are estimates on the test machine, not Cloudflare's meter; a sync request stopped for CPU resumes from its cursor after the backoff. Watch `/api/sync` in Observability after F2 |
 | 50 subrequests | `/api/sync`: 1 (Todoist). Everything else: 0 |
 | 50 D1 queries per invocation | A sync request: 1 settings read, 1 claim, and a batch of at most 1 upsert + restore + hide + orphan or project statements + hide by project + 4 settings = 12 |
 | 100 bound parameters per statement | Id lists always travel as one JSON parameter to `json_each(?)`. Tests cover 140–250 ids |
-| Script size | 254.9 KiB raw, **54.3 KiB gzip**. CI fails above a 3 MiB gzip budget (`worker/scripts/bundle-size.mjs`, measured by the shared `tools/bundle-size`) |
-| Static assets | 44 files, 1.66 MiB (`web/scripts/check-export.mjs` keeps it under 1,000 files) |
+| Script size | 516.1 KiB raw, **114.3 KiB gzip** since `flowday.ui.v1` (261.2 KiB raw, 56.1 KiB gzip before: the protobuf-es runtime, the HTTP runtime of `proto/ts` and the descriptors). CI fails above a 140 KiB gzip budget, a ratchet at about 1.2 times that (`worker/scripts/bundle-size.mjs`, measured by the shared `tools/bundle-size`) |
+| Static assets | 44 files, 1.77 MiB (`web/scripts/check-export.mjs` keeps it under 1,000 files); the UI's JavaScript 398.9 KiB gzip (362.8 KiB before), held to a 480 KiB budget (`web/scripts/js-budget.mjs`) |
 | Cron | None (the account has 5, 3 used) |
 
 The reviews moved to the browser because they ran per minute of logged time. On the server that took 40–63 ms per
@@ -249,32 +265,38 @@ The reviews moved to the browser because they ran per minute of logged time. On 
 
 ## 8. Client
 
-- **One request wrapper.** `web/lib/client/http.ts` is the only module that calls `fetch`; ESLint rejects `fetch`
-  anywhere else in app code. It fetches the CSRF token at start and attaches it to every write.
-- **Expired token.** A `403 csrf_failed` (the token is valid for 12 hours, and a PWA window stays open longer)
-  refreshes the token and retries the write once.
+- **One API client, one request wrapper.** `web/lib/client/flowday-api.ts` is the UI's one module of owner API calls:
+  the shared typed client (`proto/ts/http-client.ts`) over `FlowDayUiService`, built from the same descriptors the
+  Worker routes with. It reads every page of a list and turns the generated messages into the UI's view models
+  (`lib/types/task.ts`, the stores' state) in one place; no hand-written wire type is left. `web/lib/client/http.ts`
+  is its transport and the only module that calls `fetch`; ESLint rejects `fetch` anywhere else in app code. It
+  fetches the CSRF token at start and attaches it to every write.
+- **Expired token.** A `403 CSRF_FAILED` (the token is valid for 12 hours, and a PWA window stays open longer)
+  refreshes the token and sends the write once more (the same request, so the same `request_id`).
 - **Expired Access session.** A redirect, a login page in place of JSON, or the Worker's own 401 is never retried.
 - **Visible failures.** Every failed write, and every expired session, appears in a banner with Reload. A failed
   write is never swallowed. Optimistic local state is kept unless the store reloads from the server, which is the
   container era's behaviour for flows and tasks.
 - **Ordered, surviving writes.** Writes small enough are sent with `keepalive`, so a save made while the page
   unloads still arrives. Timer-session writes are queued so they cannot land out of order.
-- **Reviews and exports in the browser.** The UI asks `/api/analytics` for the rows of a range (a day, an ISO week,
-  or every time entry for the work-pattern stats). The container's pure functions
+- **Reviews and exports in the browser.** The UI asks `QueryAnalytics` for the rows of a range (a day, an ISO week,
+  or every time entry for the work-pattern stats), page by page. The container's pure functions
   (`features/analytics/services/analytics-service.ts`) compute the reviews in the browser's time zone. The Export
   dialog builds CSV or JSON from the same rows (`features/settings/services/export-service.ts`) and saves it from
   a `blob:` URL.
-- **Shared types.** The Worker's response types live in `worker/src/api-types.ts`.
-  `web/lib/types/worker-contract.ts` fails `tsc` when the UI's types drift from them.
+- **Shared types.** Both sides take every request and answer shape from the generated code of
+  `proto/flowday/ui/v1` (`@ziyixi/proto`), so `tsc` fails on either side when the IDL changes; the Worker's own
+  records (`worker/src/model.ts`) are not the wire. Next.js resolves the linked package from the monorepo root
+  (`turbopack.root` in `web/next.config.ts`).
 
 ## 9. Tests
 
 | Suite | Where | What |
 | --- | --- | --- |
 | Worker unit | `worker/test/*.test.ts` (Node) | Todoist parsing and failure mapping, the request body (never `commands`), the byte cap, the chunk plan, claims and backoff, sealing and opening the key, CSP hashing, the PWA list |
-| Worker runtime | `worker/test/runtime/*.test.ts` (Miniflare/workerd, real D1, a fake Todoist Sync API with full item shapes) | Schema and query plans; every store module (the container's query tests, async), including more than 100 ids and row counts; the API over HTTP with CSRF; Access with real RS256 JWTs; CSRF and Origin; PWA exceptions; CSP; E2E gating; the sync rules, throttle, concurrency, backoff, chunked passes, archived projects and the sealed key; the write budget; CPU |
-| UI unit and integration | `web/__tests__` (Vitest, an in-memory fake of the API) | Stores, the request wrapper (CSRF retry, session expiry, banner), the auto-sync scheduler, reviews and exports from rows |
-| Playwright | `web/__tests__/ui` against `wrangler dev` (`web/scripts/e2e-server.mjs`: E2E export, local D1, bypass) | The 52 UI scenarios. All passed locally (Chromium headless shell). CI does not run them yet, as before F1 |
+| Worker runtime | `worker/test/runtime/*.test.ts` (Miniflare/workerd, real D1, a fake Todoist Sync API with full item shapes) | Schema and query plans; every store module (the container's query tests, async), including more than 100 ids and row counts; every rpc of `flowday.ui.v1` through the shared typed client with CSRF (pages and their tokens, update masks, the `request_id` of a create, AIP-164 deletes, Status reasons), the wire JSON, and the old routes' 410; Access with real RS256 JWTs; CSRF and Origin; PWA exceptions; CSP; E2E gating; the sync rules, throttle, concurrency, backoff, chunked passes, archived projects and the sealed key; the write budget; CPU |
+| UI unit and integration | `web/__tests__` (Vitest, an in-memory fake of the Worker serving `FlowDayUiService` through the same shared transcoder, so on the real wire) | Stores, the client and its transport (CSRF retry, session expiry, banner, requests never laid out), the auto-sync scheduler, reviews and exports from rows |
+| Playwright | `web/__tests__/ui` against `wrangler dev` (`web/scripts/e2e-server.mjs`: E2E export, local D1, bypass) | The 52 UI scenarios. With `flowday.ui.v1` 51 passed locally (Chromium headless shell, 2026-10-02); UI-005 (a note typed 0.7 s before a reload) fails about 3 runs in 5 on `main` as well, the same rate. CI does not run them yet, as before F1 |
 | Import tool | `deploy/migrate/test_flowday_migrate.py` (Python, synthetic container-era files only) | One operand per value for every hard text (quotes, SQL syntax, emoji, all control characters, hundreds of CRLFs, transaction keywords), exact reals, the statement limit, a WAL that only the staged checkpoint applies, untouched source files, the host's hashes, the excluded key, refusals (a NULL primary key, a cloud-synced work directory); a full export, import into a local D1 (the pinned wrangler and the committed migrations) with edge reals and ±Inf, verify and reset, and no wrangler debug log left behind; the `--remote` paths and the daily write budget against a fake wrangler |
 | Config and wrapper | `deploy/test/*.test.mjs`, `.github/scripts/test_wrangler_configs.py`, `test_ci_changes.py`, `test_drift_desired.py` | No route and no hostname (F2), the real D1 id and AUD, no personal value, the placeholder guard; the deploy job's secrets (the dashboard's owner, FlowDay's own keys), migrations before the Worker, the hostname guard, and its production check against a stubbed wrangler; the dashboard's desired state for drift |
 
@@ -323,7 +345,7 @@ first (`cd ../web && npm run build`), and apply the migrations locally:
     answer every anonymous `/pwa/` request itself and the Worker's exceptions could not be checked at all; whether
     the bypass can go (the manifest with credentials) is F6's own device check, which can first drop only the
     staging destination.
-  - **CI checks the live host** after the deploy and the API check: an unauthenticated `GET /` and `/api/tasks` are
+  - **CI checks the live host** after the deploy and the API check: an unauthenticated `GET /` and `/api/v1/tasks` are
     answered by Access with a 302 to its login page for this host (the dashboard's probe); the manifest, two icons
     and `/pwa/sw` answer 200 with their media types from the Worker, and `/pwa/sw.js` (in the export, not on the
     list) the Worker's 401.

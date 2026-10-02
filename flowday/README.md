@@ -72,14 +72,15 @@ data or a Todoist token.
 ## Deploy
 
 Only from GitHub Actions: `FlowDay deploy` (`.github/workflows/ci.yml`) runs on `main` after `CI gate` when
-`flowday/` or `packages/edge-auth/` changed (or on a dispatch with `flowday` or `all`), in the `production`
+`flowday/`, `packages/edge-auth/` or a `proto/` path its bundles compile in (the TypeScript runtime, `proto/flowday/ui/`,
+the module's own files) changed (or on a dispatch with `flowday` or `all`), in the `production`
 environment and the group `flowday-production`. It builds and checks the export, writes the secrets file,
 dry-runs, runs the hostname guard (`tools/cf-guard`), applies the D1 migrations
 (`wrangler d1 migrations apply DB --remote`), deploys through `deploy/deploy-vars.mjs`, and then checks production:
 
 - through the API (`/health` needs an owner login): the Worker serves exactly one version at 100%, its
   `BUILD_SHA` is the commit, and no migration is pending;
-- on its host (`PUBLIC_HOST`), anonymously: `GET /` and `/api/tasks` are answered by Access with a 302 to its login page
+- on its host (`PUBLIC_HOST`), anonymously: `GET /` and `/api/v1/tasks` are answered by Access with a 302 to its login page
   for this host (the dashboard's probe), the manifest, two icons and `/pwa/sw` by the Worker with 200 and their
   media types (through "flowday-bypass"), and `/pwa/sw.js`, which is not a public file, by the Worker's 401.
 
