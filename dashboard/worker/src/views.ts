@@ -41,7 +41,10 @@ export interface ShellInput {
   readonly badges: Badges;
   readonly lastTickAt: number | null;
   readonly lastRefreshAt: number | null;
-  /** Earliest time `?refresh=1` of this scope fetches again (minute-rounded up to `now`). */
+  /**
+   * Earliest time a refresh of this scope fetches again; `now` or earlier (a view without a refresh, a refresh that
+   * is due) is written as the current minute, so the view's ETag holds within the minute.
+   */
   readonly nextRefreshAt: number;
   readonly refreshed: boolean;
 }
@@ -51,7 +54,7 @@ export function shell(input: ShellInput): ShellFields {
     last_tick_at: isoOrNull(input.lastTickAt),
     next_tick_at: iso(nextTickAt(input.now)),
     last_refresh_at: isoOrNull(input.lastRefreshAt),
-    next_refresh_at: iso(Math.max(floorMinute(input.now), input.nextRefreshAt)),
+    next_refresh_at: iso(input.nextRefreshAt > input.now ? input.nextRefreshAt : floorMinute(input.now)),
     refreshed: input.refreshed,
   };
   return {

@@ -140,6 +140,12 @@ describe('serialization and the ETag', () => {
       refreshed: false,
     });
     expect(serializeView(shellAt(NOW + 10_000), null).etag).toBe(serializeView(shellAt(NOW + 50_000), null).etag);
+    // HomeState passes `now` itself for a view without a refresh (flows, ops) and for a refresh that is due: the
+    // answer and its ETag still hold within the minute (a repeat GET is a 304), and a later one stays as it is.
+    const dueAt = (now: number) => base({ now, nextRefreshAt: now });
+    expect(dueAt(NOW + 10_000).refresh.next_refresh_at).toBe(new Date(NOW).toISOString());
+    expect(serializeView(dueAt(NOW + 10_000), null).etag).toBe(serializeView(dueAt(NOW + 50_000), null).etag);
+    expect(base({ now: NOW + 10_000, nextRefreshAt: NOW + 10_001 }).refresh.next_refresh_at).toBe(new Date(NOW + 10_001).toISOString());
     expect(nextTickAt(Date.parse('2026-09-29T14:59:59Z'))).toBe(Date.parse('2026-09-29T15:00:00Z'));
     expect(nextTickAt(Date.parse('2026-09-29T15:00:00Z'))).toBe(Date.parse('2026-09-29T15:30:00Z'));
   });
