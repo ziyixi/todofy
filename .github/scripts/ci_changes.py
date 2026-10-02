@@ -187,6 +187,9 @@ PROTO_PACKAGES: dict[str, tuple[str, ...]] = {
     "proto/todofy/taskintent/": ("lab", "todofy", "watch"),
     # recommendation-v1 and summary-v1 (todofy/api/*.schema.json are generated from it): todofy-core builds them.
     "proto/todofy/report/": ("todofy",),
+    # Todofy's owner API (todofy.ui.v1): todofy-core writes every answer with it, the gateway serves it through the
+    # shared transcoder and Todofy's UI calls it through the shared client.
+    "proto/todofy/ui/": ("todofy",),
     "proto/lab/ui/": ("lab",),
     "proto/flowday/ui/": ("flowday",),
     "proto/links/ui/": ("links",),

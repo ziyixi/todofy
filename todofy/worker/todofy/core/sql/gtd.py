@@ -113,6 +113,12 @@ REVIEW_HISTORY = Query(
     "SELECT week, state, completed_at, created_at FROM gtd_reviews WHERE week >= ? ORDER BY week DESC LIMIT ?",
     REVIEWS_INDEX,
 )
+# A page of reviews for the owner API (todofy.ui.v1 ListGtdReviews), newest first: weeks in [first, before).
+REVIEW_PAGE = Query(
+    "SELECT week, state, completed_at, created_at FROM gtd_reviews WHERE week >= ? AND week < ? ORDER BY week DESC"
+    " LIMIT ?",
+    REVIEWS_INDEX,
+)
 # Claims the week before Todoist is called, with the frozen title, body and project.
 CLAIM_REVIEW = Query(
     "INSERT INTO gtd_reviews (week, state, project_id, subject, body, created_at, updated_at)"

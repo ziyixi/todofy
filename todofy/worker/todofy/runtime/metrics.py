@@ -224,3 +224,20 @@ async def daily(db: Any, days: int, now: int) -> dict[str, Any]:
     first, last = core.day_of(now - days * DAY), core.shift(core.day_of(now), -1)
     rows = (await db.prepare(sql.DAYS.sql).bind(first, last, days * MAX_KEYS_PER_DAY).all()).results
     return {"days": core.daily_series(((row["day"], row["key"], row["value"]) for row in rows), first, days)}
+
+
+async def day_page(db: Any, size: int, before: str | None, now: int) -> tuple[list[dict[str, Any]], str | None]:
+    """todofy.ui.v1 ListMetricDays: up to ``size`` finished UTC days before ``before`` (yesterday and older when
+    None), newest first, as DailyMetricsDay dicts; and the day the next page ends before, or None on the last page.
+
+    Days older than KEEP_DAYS are never listed (retention deletes them)."""
+    yesterday = core.shift(core.day_of(now), -1)
+    oldest = core.day_of(now - KEEP_DAYS * DAY)
+    last = yesterday if before is None else min(core.shift(before, -1), yesterday)
+    if last < oldest:
+        return [], None
+    first = max(core.shift(last, -(size - 1)), oldest)
+    count = len(core.days_from(first, last))
+    rows = (await db.prepare(sql.DAYS.sql).bind(first, last, count * MAX_KEYS_PER_DAY).all()).results
+    series = core.daily_series(((row["day"], row["key"], row["value"]) for row in rows), first, count)
+    return series[::-1], (first if first > oldest else None)

@@ -186,7 +186,8 @@ def _path_id(match: re.Match[str], *, legacy: bool = False) -> str | None:
     return None
 
 
-async def overview(env: Any, coordinator: Any) -> Result:
+async def overview_data(env: Any, coordinator: Any) -> dict[str, Any]:
+    """The OpenAPI Overview as a dict (todofy.ui.v1 GetServiceStatus reads it too)."""
     now = now_ms() // 1000
     db, source = env.DB, source_id(env)
     counts, attention, received, due = await db.batch(
@@ -202,57 +203,77 @@ async def overview(env: Any, coordinator: Any) -> Result:
     latest_reminders, _ = await reminder.page(db, None, 1)
     per_state = {row["state"]: row["n"] for row in counts.results}
     oldest_due = due.results[0]["at"]
-    return ok(
-        {
-            "build": var(env, "BUILD_SHA", "unknown"),
-            "now": timestamp(now),
-            "flags": {
-                "maintenance_mode": flag(env, "MAINTENANCE_MODE"),
-                "processing_paused": flag(env, "PROCESSING_PAUSED"),
-                "force_pause_todoist": flag(env, "FORCE_PAUSE_TODOIST"),
-                "reminder_enabled": flag(env, "REMINDER_ENABLED"),
-            },
-            "counts": {state: per_state.get(state, 0) for state in ACTIVE_STATES},
-            "attention_count": attention.results[0]["n"],
-            "received_24h": received.results[0]["n"],
-            "latest_reminder": latest_reminders[0] if latest_reminders else None,
-            "next_alarm_at": budgets["next_alarm_at"],
-            "oldest_due_at": None if oldest_due is None else timestamp(oldest_due),
-            "gemini": budgets["gemini"],
-            "todoist": budgets["todoist"],
-            "backup": backup.overview(env, coordinator.sql, now),
-        }
-    )
+    return {
+        "build": var(env, "BUILD_SHA", "unknown"),
+        "now": timestamp(now),
+        "flags": {
+            "maintenance_mode": flag(env, "MAINTENANCE_MODE"),
+            "processing_paused": flag(env, "PROCESSING_PAUSED"),
+            "force_pause_todoist": flag(env, "FORCE_PAUSE_TODOIST"),
+            "reminder_enabled": flag(env, "REMINDER_ENABLED"),
+        },
+        "counts": {state: per_state.get(state, 0) for state in ACTIVE_STATES},
+        "attention_count": attention.results[0]["n"],
+        "received_24h": received.results[0]["n"],
+        "latest_reminder": latest_reminders[0] if latest_reminders else None,
+        "next_alarm_at": budgets["next_alarm_at"],
+        "oldest_due_at": None if oldest_due is None else timestamp(oldest_due),
+        "gemini": budgets["gemini"],
+        "todoist": budgets["todoist"],
+        "backup": backup.overview(env, coordinator.sql, now),
+    }
+
+
+async def overview(env: Any, coordinator: Any) -> Result:
+    return ok(await overview_data(env, coordinator))
+
+
+async def event_page(
+    env: Any, *, attention: bool, state: str | None, after: tuple[int, str] | None, limit: int
+) -> tuple[list[dict[str, Any]], tuple[int, str] | None]:
+    """One page of EventSummary dicts and the (created_at, event_id) the next page starts after, or None.
+
+    ``attention``: the attention list, oldest first (``state`` must be None); otherwise the events in
+    ``state`` (every state when None), newest first. ``after`` is the previous page's last row.
+    """
+    now = now_ms() // 1000
+    db, source = env.DB, source_id(env)
+    if attention:
+        created_at, event_id = after or OLDEST_FIRST_START
+        statement = db.prepare(views.ATTENTION_PAGE.sql).bind(
+            source, now - ATTENTION_AGE_SECONDS, created_at, event_id, limit + 1
+        )
+    else:
+        created_at, event_id = after or NEWEST_FIRST_START
+        if state is None:
+            statement = db.prepare(views.RECENT_PAGE.sql).bind(source, created_at, event_id, limit + 1)
+        else:
+            statement = db.prepare(views.RECENT_PAGE_BY_STATE.sql).bind(source, state, created_at, event_id, limit + 1)
+    rows = (await statement.all()).results
+    following = None
+    if len(rows) > limit:
+        last = rows[limit - 1]
+        following = (int(last["created_at"]), str(last["event_id"]))
+    return [event_summary(row, now) for row in rows[:limit]], following
 
 
 async def events(env: Any, query: dict[str, str]) -> Result:
-    now = now_ms() // 1000
-    db, source = env.DB, source_id(env)
     limit = _limit(query.get("limit"))
     view, state = query.get("view", "recent"), query.get("state")
     if view == "attention":
         if state is not None:
             raise InvalidRequest
-        created_at, event_id = _event_cursor(query.get("cursor"), OLDEST_FIRST_START)
-        statement = db.prepare(views.ATTENTION_PAGE.sql).bind(
-            source, now - ATTENTION_AGE_SECONDS, created_at, event_id, limit + 1
-        )
+        start = OLDEST_FIRST_START
     elif view == "recent":
-        created_at, event_id = _event_cursor(query.get("cursor"), NEWEST_FIRST_START)
-        if state is None:
-            statement = db.prepare(views.RECENT_PAGE.sql).bind(source, created_at, event_id, limit + 1)
-        elif state in set(EventState):
-            statement = db.prepare(views.RECENT_PAGE_BY_STATE.sql).bind(source, state, created_at, event_id, limit + 1)
-        else:
+        if state is not None and state not in set(EventState):
             raise InvalidRequest
+        start = NEWEST_FIRST_START
     else:
         raise InvalidRequest
-    rows = (await statement.all()).results
-    next_cursor = None
-    if len(rows) > limit:
-        last = rows[limit - 1]
-        next_cursor = _encode_cursor(f"{last['created_at']}:{last['event_id']}")
-    return ok({"items": [event_summary(row, now) for row in rows[:limit]], "next_cursor": next_cursor})
+    after = _event_cursor(query.get("cursor"), start)
+    items, following = await event_page(env, attention=view == "attention", state=state, after=after, limit=limit)
+    next_cursor = None if following is None else _encode_cursor(f"{following[0]}:{following[1]}")
+    return ok({"items": items, "next_cursor": next_cursor})
 
 
 async def reconcile(request: OwnerRequest, coordinator: Any, owner: str, event_id: str) -> Result:
@@ -320,20 +341,24 @@ async def gtd_daily(env: Any, query: dict[str, str]) -> Result:
     return ok(await gtd.daily(env.DB, days, now_ms() // 1000))
 
 
-async def legacy_text(env: Any, key: str) -> Result:
-    """GET /api/v1/legacy_text/{key}: imported texts reach 1.9 MB, fine for the object's 30 s of CPU."""
+async def legacy_text_data(env: Any, key: str) -> dict[str, Any] | None:
+    """The OpenAPI LegacyText of ``key``, or None when there is none or it expired."""
     row = await env.DB.prepare(views.LEGACY_TEXT.sql).bind(key).first()
     expires_at = None if row is None else row["expires_at"]
     if row is None or (expires_at is not None and expires_at <= now_ms() // 1000):
-        return failed(404, ApiError.NOT_FOUND)
-    return ok(
-        {
-            "event_id": row["event_id"],
-            "created_at": timestamp(row["created_at"]),
-            "expires_at": None if expires_at is None else timestamp(expires_at),
-            "text": row["text"],
-        }
-    )
+        return None
+    return {
+        "event_id": row["event_id"],
+        "created_at": timestamp(row["created_at"]),
+        "expires_at": None if expires_at is None else timestamp(expires_at),
+        "text": row["text"],
+    }
+
+
+async def legacy_text(env: Any, key: str) -> Result:
+    """GET /api/v1/legacy_text/{key}: imported texts reach 1.9 MB, fine for the object's 30 s of CPU."""
+    data = await legacy_text_data(env, key)
+    return failed(404, ApiError.NOT_FOUND) if data is None else ok(data)
 
 
 def setup(env: Any) -> dict[str, Any]:

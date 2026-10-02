@@ -8,7 +8,9 @@ COORDINATOR binding, which calls these methods over JS RPC after its own checks
     wake()                                 run the alarm loop now (the gateway's cron) -> None
     newsletter(kind, query)                stored or on-demand report (Basic auth passed)
     newsletter_auth_failure()              count a failed Basic credential -> 401 | 429
-    owner_api(owner, method, path, ...)    the owner API (api.py) for the Access owner
+    owner_ui(owner, method, request, cursor)   the owner API todofy.ui.v1 (owner_ui.py) for the Access owner
+    owner_api(owner, method, path, ...)    the owner API before todofy.ui.v1 (api.py), for the previous gateway
+                                           during this deploy only; removed in the next release
     setup()                                the core's facts for the setup page -> dict
     ops_status() / ops_set_guard(json) /   the gateway's ``Ops`` entrypoint (contracts/ops-v1):
     ops_canary_result(id) / ops_report(json)   {"ok": value} or {"error": OpsErrorCode}
@@ -89,6 +91,7 @@ from todofy.runtime.config import flag, gemini_models, integer, source_id, var
 from todofy.runtime.http import NO_CONTENT, Result, failed, not_found, ok
 from todofy.runtime.interop import now_ms, now_s, read_capped, sha256_hex
 from todofy.runtime.ledger import WORKER, CompletedSummary, EventRow, OwnerAction
+from todofy.runtime.owner_ui import handle as handle_owner_ui
 
 DEFAULT_TOKEN_BUDGET = 3_000_000
 DEFAULT_LOOKUP_DELAY_MS = 2 * MINUTE * 1000
@@ -205,7 +208,10 @@ class TodofyCore(DurableObject):
     async def owner_api(
         self, owner: str, method: str, path: str, query: str, content_length: str | None, body: Any
     ) -> dict[str, Any]:
-        """One /api/v1 request for the canonical owner the gateway verified with Access."""
+        """One request of the owner API before todofy.ui.v1, for the canonical owner the gateway verified with Access.
+
+        Only the gateway deployed before todofy.ui.v1 calls it, while CI deploys the new gateway after this core
+        (docs/gateway-contract.md §6.4). Remove it, and api.py's routes, in the next release."""
         if "@" not in owner or len(owner) > MAX_OWNER_CHARS:
             return failed(401, ApiError.UNAUTHORIZED).wire()
         if method == "POST" and flag(self.env, "MAINTENANCE_MODE"):
@@ -215,6 +221,13 @@ class TodofyCore(DurableObject):
             return failed(503, ApiError.UNAVAILABLE).wire()
         request = api.OwnerRequest(method, path, query, content_length, body)
         return await self._answer(api.handle(request, self.env, self, owner))
+
+    async def owner_ui(self, owner: str, method: str, request: str, cursor: str | None = None) -> dict[str, Any]:
+        """One todofy.ui.v1 rpc (proto/todofy/ui/v1) for the canonical owner the gateway verified with Access:
+        ``request`` is the decoded request as wire JSON, ``cursor`` the JSON of its page token's cursor. Answers
+        {"ok", "next_cursor"} or {"error", "detail", "retry_after"} (runtime/owner_ui.py), never raises for an
+        expected outcome."""
+        return await handle_owner_ui(self.env, self, owner, method, request, cursor)
 
     def setup(self) -> dict[str, Any]:
         """The core's facts for the setup page (never secret values)."""
@@ -380,20 +393,32 @@ class TodofyCore(DurableObject):
         self, owner: str, event_id: str, action: str, version: int, action_request_id: str, task_id: str | None
     ) -> Result:
         """An owner action on one event (api.reconcile validated the request)."""
+        refused = await self.apply_reconcile(owner, event_id, action, version, action_request_id, task_id)
+        if refused is not None:
+            return failed(409 if refused != ApiError.NOT_FOUND else 404, refused)
+        return await self.event(event_id)
+
+    async def apply_reconcile(
+        self, owner: str, event_id: str, action: str, version: int, action_request_id: str, task_id: str | None
+    ) -> ApiError | None:
+        """Apply (or replay) an owner action; the refusal's code, or None when the event now reflects it.
+
+        NOT_FOUND, ACTION_REQUEST_CONFLICT, VERSION_CONFLICT or ACTION_NOT_ALLOWED; a replay of the same
+        request is None (the caller answers the event as it is now)."""
         db, now = self.env.DB, now_s()
         request_hash = _request_hash({"event_id": event_id, "action": action, "version": version, "task_id": task_id})
         claim = await ledger.find_action(db, owner, action_request_id, request_hash)
         if claim.claim == ledger.Claim.CONFLICT:
-            return failed(409, ApiError.ACTION_REQUEST_CONFLICT)
+            return ApiError.ACTION_REQUEST_CONFLICT
         if claim.claim == ledger.Claim.REPLAY:
-            return await self.event(event_id)
+            return None
         row = await ledger.get(db, source_id(self.env), event_id)
         if row is None:
-            return failed(404, ApiError.NOT_FOUND)
+            return ApiError.NOT_FOUND
         if row.version != version:
-            return failed(409, ApiError.VERSION_CONFLICT)
+            return ApiError.VERSION_CONFLICT
         if action not in allowed_actions(row.state, row.last_error_code, canary=row.canary):
-            return failed(409, ApiError.ACTION_NOT_ALLOWED)
+            return ApiError.ACTION_NOT_ALLOWED
         recorded = OwnerAction(owner, action_request_id, action, request_hash)
         match action:
             case Reconcile.TASK_CREATED:
@@ -409,25 +434,42 @@ class TodofyCore(DurableObject):
                 to, code, columns = EventState.IGNORED, Code.DISMISSED_BY_OWNER, {"next_attempt_at": 0}
         moved = await ledger.transition(db, row, to, actor=ledger.OWNER, now=now, code=code, action=recorded, **columns)
         if moved is None:
-            return failed(409, ApiError.VERSION_CONFLICT)
+            return ApiError.VERSION_CONFLICT
         _log(reconcile=action, event_id=event_id, state=to)
         await self.wake()
-        return await self.event(event_id)
+        return None
 
     async def recompute(self, owner: str, action_request_id: str, kind: str, top_n: int) -> Result:
         """The owner's report recompute, replayed by action_request_id (api.recompute validated it)."""
+        status, result = await self.recompute_outcome(owner, action_request_id, kind, top_n)
+        if status == 200:
+            return ok(result)
+        if status == 409:
+            return failed(409, ApiError.ACTION_REQUEST_CONFLICT)
+        return reports.report_error(status, result, now_s())
+
+    async def recompute_outcome(self, owner: str, action_request_id: str, kind: str, top_n: int) -> tuple[int, Any]:
+        """(200, the report dict) or (status, ApiError): a new computation, or the replay of a stored one.
+
+        (409, ACTION_REQUEST_CONFLICT) when the ID was used for another request; a replay whose first run
+        has not finished (or was evicted) is (503, UNAVAILABLE)."""
         db, now = self.env.DB, now_s()
         claim = await ledger.claim_action(
             db, owner, action_request_id, "recompute", _request_hash({"kind": kind, "top_n": top_n}), now
         )
         if claim.claim == ledger.Claim.CONFLICT:
-            return failed(409, ApiError.ACTION_REQUEST_CONFLICT)
+            return 409, ApiError.ACTION_REQUEST_CONFLICT
         if claim.claim == ledger.Claim.REPLAY:
-            return self._replayed_report(claim)
+            if claim.http_status is None:
+                # Still running, or the run that claimed it was evicted: ask for a new action.
+                return 503, ApiError.UNAVAILABLE
+            if claim.http_status == 200:
+                return 200, json.loads(claim.result_ref or "null")
+            return claim.http_status, ApiError(claim.result_ref or ApiError.UNAVAILABLE)
         status, result = await self.compute_report(kind, top_n, now)
         stored = json.dumps(result, ensure_ascii=False) if status == 200 else result
         await ledger.finish_action(db, owner, action_request_id, stored, status)
-        return ok(result) if status == 200 else reports.report_error(status, result, now)
+        return status, result
 
     async def compute_report(self, kind: str, top_n: int, now: int) -> tuple[int, Any]:
         """(200, report) or (status, ApiError) for one on-demand report (newsletter or owner)."""
@@ -439,22 +481,18 @@ class TodofyCore(DurableObject):
             _log(report="failed", kind=kind, top_n=top_n, error=type(exc).__name__)
             return 503, ApiError.UNAVAILABLE
 
-    @staticmethod
-    def _replayed_report(claim: ledger.ActionClaim) -> Result:
-        if claim.http_status is None:
-            # Still running, or the run that claimed it was evicted: ask for a new action.
-            return failed(503, ApiError.UNAVAILABLE)
-        if claim.http_status == 200:
-            return ok(json.loads(claim.result_ref or "null"))
-        return reports.report_error(claim.http_status, ApiError(claim.result_ref or ApiError.UNAVAILABLE), now_s())
-
     async def event(self, event_id: str) -> Result:
+        detail = await self.event_detail(event_id)
+        return failed(404, ApiError.NOT_FOUND) if detail is None else ok(detail)
+
+    async def event_detail(self, event_id: str) -> dict[str, Any] | None:
+        """The OpenAPI EventDetail of one event as a dict, or None when there is no such event."""
         if not UUID.fullmatch(event_id):
-            return failed(404, ApiError.NOT_FOUND)
+            return None
         db = self.env.DB
         row = await ledger.get(db, source_id(self.env), event_id)
         if row is None:
-            return failed(404, ApiError.NOT_FOUND)
+            return None
         now = now_s()
         timeline, summary, legacy = await db.batch(
             [
@@ -490,7 +528,7 @@ class TodofyCore(DurableObject):
         if row.canary:
             # A synthetic end-to-end check (contracts/ops-v1); the lists never show it.
             detail["canary"] = True
-        return ok(detail)
+        return detail
 
     async def budgets(self) -> dict[str, Any]:
         """The next alarm and the Gemini/Todoist budgets, in the Overview's API shape."""

@@ -20,6 +20,7 @@ key is new (hashes change once) and the ops counters are absent until the next c
 import json
 import secrets
 from dataclasses import asdict, dataclass, field
+from datetime import date
 from typing import Any
 from urllib.parse import urlencode
 
@@ -584,3 +585,37 @@ async def daily(db: Any, days: int, now: int) -> dict[str, Any]:
             "completed_at": None if latest["completed_at"] is None else rules.rfc3339(int(latest["completed_at"])),
         },
     }
+
+
+async def day_page(db: Any, size: int, before: str | None, now: int) -> tuple[list[dict[str, Any]], str | None]:
+    """todofy.ui.v1 ListGtdDays: up to ``size`` UTC days before ``before`` (today and older when None), newest
+    first, as GtdDay dicts; and the day the next page ends before, or None on the last page. Days older than
+    the DAILY_DAYS kept are never listed."""
+    today = rules.day_of(now)
+    oldest = rules.shift(today, -(rules.DAILY_DAYS - 1))
+    last = today if before is None else min(rules.shift(before, -1), today)
+    if last < oldest:
+        return [], None
+    first = max(rules.shift(last, -(size - 1)), oldest)
+    count = (date.fromisoformat(last) - date.fromisoformat(first)).days + 1
+    rows = (await db.prepare(sql.DAILY_RANGE.sql).bind(first, last, count * 2).all()).results
+    series = rules.daily_api([dict(row) for row in rows], first, count)
+    return series[::-1], (first if first > oldest else None)
+
+
+async def review_page(db: Any, size: int, before: str | None, now: int) -> tuple[list[dict[str, Any]], str | None]:
+    """todofy.ui.v1 ListGtdReviews: up to ``size`` weekly reviews of the last HISTORY_WEEKS weeks before the ISO
+    week ``before`` (every week when None), newest first, as GtdReview dicts; and the last listed week when there
+    are more, else None."""
+    first = rules.week_shift(rules.iso_week(now), -HISTORY_WEEKS)
+    rows = (await db.prepare(sql.REVIEW_PAGE.sql).bind(first, before or "9999-W99", size + 1).all()).results
+    reviews = [
+        {
+            "week": row["week"],
+            "state": row["state"],
+            "created_at": rules.rfc3339(int(row["created_at"])),
+            "completed_at": None if row["completed_at"] is None else rules.rfc3339(int(row["completed_at"])),
+        }
+        for row in rows[:size]
+    ]
+    return reviews, (reviews[-1]["week"] if len(rows) > size else None)
