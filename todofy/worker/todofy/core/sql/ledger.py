@@ -116,3 +116,16 @@ ACTION_FINISH = Query(
     "UPDATE owner_actions SET result_ref = ?, http_status = ? WHERE owner = ? AND action_request_id = ?",
     "sqlite_autoindex_owner_actions_1",
 )
+# A claim whose run failed is released, so the same request_id runs again (AIP-155): only a success is replayed.
+ACTION_RELEASE = Query(
+    "DELETE FROM owner_actions WHERE owner = ? AND action_request_id = ? AND http_status IS NULL",
+    "sqlite_autoindex_owner_actions_1",
+)
+# Takes over a claim whose run never finished (evicted, or its release failed) once it is older than the bound, or
+# a failure an earlier version stored; changes() = 1 for exactly one of two concurrent takers.
+ACTION_TAKEOVER = Query(
+    "UPDATE owner_actions SET created_at = ?, result_ref = NULL, http_status = NULL"
+    " WHERE owner = ? AND action_request_id = ? AND request_hash = ?"
+    " AND (http_status IS NULL AND created_at < ? OR http_status <> 200)",
+    "sqlite_autoindex_owner_actions_1",
+)

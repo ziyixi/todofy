@@ -446,9 +446,13 @@ async def transition(db, row: EventRow, to: EventState, *, actor: str, now: int,
 async def find_action(db, owner, action_request_id, request_hash) -> ActionClaim      # read only (reconcile)
 async def claim_action(db, owner, action_request_id, kind, request_hash, now) -> ActionClaim  # insert, then read (recompute)
 async def finish_action(db, owner, action_request_id, result_ref: str, http_status: int) -> None
+async def release_action(db, owner, action_request_id) -> None   # a failed recompute: the same id runs again
+async def take_over_action(db, owner, action_request_id, request_hash, now, stale_before) -> bool  # an unfinished claim
 ```
 `ActionClaim.claim` is `new`, `replay` (with `result_ref`, `http_status`) or `conflict` (same id, different
-hash → 409).
+hash → 409). A recompute stores only a computed report (200); a failure (429, 503) releases its claim, and a
+claim whose run never finished is taken over after `RECOMPUTE_CLAIM_STALE_S` (120 s), so repeating the same
+`request_id` after a retryable error computes it then (AIP-155).
 
 ### gemini.py (P; used by R)
 ```python

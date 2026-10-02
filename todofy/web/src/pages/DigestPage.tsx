@@ -3,7 +3,7 @@ import { Newspaper, RefreshCw, Sparkles } from 'lucide-react'
 import { useId, useState } from 'react'
 import { RecommendationReportSchema, SummaryReportSchema } from '@ziyixi/proto/todofy/report/v1/report_pb'
 import { toWire } from '@ziyixi/proto/wire-json'
-import { ApiError, todofy } from '../api/client'
+import { todofy } from '../api/client'
 import { keys, useReports } from '../api/queries'
 import { ReportKind, reportStatuses, type RecommendationReport, type SummaryReport } from '../api/types'
 import { useRequestId } from '../api/useAction'
@@ -97,7 +97,7 @@ function newsletterEffect(kind: Kind, top: string): string {
 
 function RecomputeDialog({ kind, onClose }: { kind: Kind; onClose: () => void }) {
   const client = useQueryClient()
-  const { idFor, forget } = useRequestId()
+  const { idFor } = useRequestId()
   const selectId = useId()
   const [top, setTop] = useState('')
   const mutation = useMutation({
@@ -110,11 +110,6 @@ function RecomputeDialog({ kind, onClose }: { kind: Kind; onClose: () => void })
     onSuccess: () => {
       void client.invalidateQueries({ queryKey: keys.reports })
       onClose()
-    },
-    onError: (error) => {
-      // The Worker answered and stored this failure: a retry needs a new id, or it is replayed.
-      // Keep the id when the outcome is unknown, so a resend replays a stored success instead.
-      if (error instanceof ApiError && error.reason !== 'NETWORK_ERROR' && error.reason !== 'BAD_RESPONSE') forget()
     },
   })
 

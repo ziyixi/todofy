@@ -101,3 +101,19 @@ def test_report_computations_are_capped_per_hour(limited: Worker) -> None:
             assert 0 < int(response.headers["retry-after"]) <= 3600
             break
     assert statuses[-1] == 429 and set(statuses[:-1]) == {200} and len(statuses) <= HOURLY_REPORT_CAP + 1
+
+
+def test_a_rate_limited_recompute_is_not_stored_so_the_same_request_id_runs_again(limited: Worker) -> None:
+    """AIP-155: only a computed report is replayed; a refusal releases the request_id (RecomputeReportRequest)."""
+    _clear_of_the_hour_boundary(margin_s=60)
+    for _ in range(HOURLY_REPORT_CAP + 1):
+        body = {"kind": "summary", "request_id": str(uuid.uuid4())}
+        if limited.post_owner("/api/v1/latestReports:recompute", body).status_code == 429:
+            break
+    request_id = str(uuid.uuid4())
+    for _ in range(2):
+        response = limited.post_owner("/api/v1/latestReports:recompute", {"kind": "summary", "request_id": request_id})
+        assert (response.status_code, reason(response)) == (429, "RATE_LIMITED")
+        assert 0 < int(response.headers["retry-after"]) <= 3600
+        stored = limited.d1(f"SELECT count(*) AS n FROM owner_actions WHERE action_request_id = '{request_id}'")
+        assert stored == [{"n": 0}]

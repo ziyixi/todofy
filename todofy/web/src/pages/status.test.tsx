@@ -36,9 +36,9 @@ describe('digest page', () => {
     expect(post?.body).toMatchObject({ kind: 'recommendation', top_n: 3 })
   })
 
-  it('retries a stored failure with a new action id, but an unknown outcome with the same one', async () => {
+  it('repeats the same recompute with the same action id after a network failure, UNAVAILABLE or RATE_LIMITED', async () => {
     const user = userEvent.setup()
-    const replies: object[] = [new Error('offline'), apiError(503, 'UNAVAILABLE'), { summary: summaryReport() }]
+    const replies: object[] = [new Error('offline'), apiError(503, 'UNAVAILABLE'), apiError(429, 'RATE_LIMITED'), { summary: summaryReport() }]
     const { calls } = mockApi({
       'GET /api/v1/latestReports': { name: 'latestReports' },
       'POST /api/v1/latestReports:recompute': () => replies.shift()!,
@@ -47,16 +47,16 @@ describe('digest page', () => {
     await user.click(await screen.findByRole('button', { name: '重新生成摘要' }))
     const dialog = screen.getByRole('dialog')
     expect(dialog).toHaveTextContent('newsletter 下次读取的就是新结果')
-    for (const code of ['NETWORK_ERROR', 'UNAVAILABLE']) {
+    for (const code of ['NETWORK_ERROR', 'UNAVAILABLE', 'RATE_LIMITED']) {
       await user.click(within(dialog).getByRole('button', { name: '重新生成' }))
       expect(await within(dialog).findByRole('alert')).toHaveTextContent(code)
     }
     await user.click(within(dialog).getByRole('button', { name: '重新生成' }))
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+    // TodofyCore stores only a computed report (RecomputeReportRequest.request_id): every retry is the same request.
     const ids = calls.filter((call) => call.method === 'POST').map((call) => (call.body as { request_id: string }).request_id)
-    expect(ids).toHaveLength(3)
-    expect(ids[1]).toBe(ids[0])
-    expect(ids[2]).not.toBe(ids[1])
+    expect(ids).toHaveLength(4)
+    expect(new Set(ids).size).toBe(1)
   })
 
   it('says when a recompute does not change what the newsletter reads', async () => {

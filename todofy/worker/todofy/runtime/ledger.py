@@ -307,6 +307,22 @@ async def finish_action(db: Any, owner: str, action_request_id: str, result_ref:
     await db.prepare(sql.ACTION_FINISH.sql).bind(result_ref, http_status, owner, action_request_id).run()
 
 
+async def release_action(db: Any, owner: str, action_request_id: str) -> None:
+    """Forget a claimed action whose run failed, so that the same ID runs it again."""
+    await db.prepare(sql.ACTION_RELEASE.sql).bind(owner, action_request_id).run()
+
+
+async def take_over_action(
+    db: Any, owner: str, action_request_id: str, request_hash: str, now: int, stale_before: int
+) -> bool:
+    """Claim again an action whose run never finished before ``stale_before`` (or that stored a failure); False
+    while another run may still hold it."""
+    result = await (
+        db.prepare(sql.ACTION_TAKEOVER.sql).bind(now, owner, action_request_id, request_hash, stale_before).run()
+    )
+    return result.meta.changes == 1
+
+
 def _claim(row: Any, request_hash: str) -> ActionClaim:
     if not row:
         return ActionClaim(Claim.NEW)

@@ -302,7 +302,7 @@ failure: 503 `UNAVAILABLE`.
 | `ReconcileMailEvent` `POST /api/v1/mailEvents/{id}:reconcile` | `etag` is the event's version; replays and conflicts via `owner_actions` keyed by `request_id` (`REQUEST_ID_REUSED`) |
 | `ListDailyReminders` `GET /api/v1/dailyReminders` | 50 by default, at most 100 |
 | `GetLatestReports` `GET /api/v1/latestReports` | the stored reports, read leniently (one the codec cannot read is left out and logged) |
-| `RecomputeReport` `POST /api/v1/latestReports:recompute` | as the old recompute: `RATE_LIMITED` with `retry_after`, replays via `owner_actions` |
+| `RecomputeReport` `POST /api/v1/latestReports:recompute` | `RATE_LIMITED` with `retry_after`; a computed report replays via `owner_actions`, a failure releases the claim so the same `request_id` computes again |
 | `ListMetricDays` `GET /api/v1/metricDays` | newest first, 30 by default, at most 90 |
 | `ListGtdDays` `GET /api/v1/gtdDays` | newest first, 30 by default, at most 120 |
 | `ListGtdReviews` `GET /api/v1/gtdReviews` | the last 12 weeks, newest first |

@@ -24,8 +24,9 @@
 //
 // Every mutation takes a `request_id` (AIP-155, a UUID4 the browser makes once per distinct request): repeating a
 // request with the same ID applies it once (ReconcileMailEvent answers the event as it is now, RecomputeReport the
-// stored outcome of the first request). Reused for another request it is REQUEST_ID_REUSED and changes nothing.
-// Without one the gateway makes one up, so nothing is deduplicated.
+// report the first successful request stored). A request that failed with a retryable reason (UNAVAILABLE,
+// RATE_LIMITED) changed nothing and is repeated with the same ID. Reused for another request it is REQUEST_ID_REUSED
+// and changes nothing. Without one the gateway makes one up, so nothing is deduplicated.
 //
 // Not in this service: the machine routes on the hooks hosts (TODOFY_HOOKS_HOSTS, outside Access), whose callers
 // are other systems that keep their exact paths, methods, authentication and bytes: POST /hooks/mail (Mail Hero's
@@ -272,8 +273,9 @@ message RecomputeReportRequest {
   // A recommendation's number of tasks, 1-10; 0 (or absent) means REPORT_DEFAULT_TOP. Set with a summary, it is
   // INVALID_ARGUMENT.
   int32 top_n = 3 [(google.api.field_behavior) = OPTIONAL];
-  // The idempotency key (AIP-155); see TodofyUiService. A failure TodofyCore answered (RATE_LIMITED,
-  // UNAVAILABLE) is stored too and replayed for the same ID: a new attempt needs a new ID.
+  // The idempotency key (AIP-155); see TodofyUiService. Only a computed report is stored and replayed for the
+  // same ID; after RATE_LIMITED or UNAVAILABLE the same request with the same ID computes it again (after
+  // Retry-After). UNAVAILABLE also answers a repeat while the first request with the ID is still computing.
   string request_id = 4 [
     (google.api.field_info).format = UUID4,
     (google.api.field_behavior) = OPTIONAL

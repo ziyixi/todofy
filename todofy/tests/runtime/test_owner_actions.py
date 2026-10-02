@@ -15,7 +15,7 @@ import pytest
 from ziyixi_proto.todofy.ui.v1 import mail_event_pb
 from ziyixi_proto.todofy.ui.v1 import todofy_ui_service_pb as pb
 
-from tests.runtime.harness import Worker, start_gateway
+from tests.runtime.harness import OWNER, Worker, start_gateway
 from tests.runtime.owner_support import (
     CSRF_KEY,
     assert_message,
@@ -154,3 +154,45 @@ def test_recompute_with_an_empty_window_needs_no_model(actions_worker: Worker, k
     assert field == kind and report["status"] == "empty_window"
     if top_n is not None:
         assert report["top_n"] == top_n  # the REPORT_DEFAULT_TOP default
+
+
+def _claim(worker: Worker, request_id: str, created_at: int, http_status: int | None = None) -> None:
+    """An owner_actions row for a summary recompute, as a run that never finished (or an older version) left it."""
+    request_hash = hashlib.sha256(
+        json.dumps({"kind": "summary", "top_n": 0}, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
+    status = "NULL" if http_status is None else str(http_status)
+    result = "NULL" if http_status is None else "'unavailable'"
+    worker.d1(
+        "INSERT INTO owner_actions (owner, action_request_id, kind, request_hash, result_ref, http_status, created_at)"
+        f" VALUES ('{OWNER}', '{request_id}', 'recompute', '{request_hash}', {result}, {status}, {created_at})"
+    )
+
+
+def _stored(worker: Worker, request_id: str) -> list[dict[str, Any]]:
+    return worker.d1(f"SELECT http_status FROM owner_actions WHERE action_request_id = '{request_id}'")
+
+
+def test_recompute_takes_over_a_claim_whose_run_never_finished(actions_worker: Worker) -> None:
+    request_id = str(uuid.uuid4())
+    body = {"kind": "summary", "request_id": request_id}
+    _claim(actions_worker, request_id, int(time.time()))
+    # The first run may still be computing: UNAVAILABLE, and the claim stays.
+    assert_status(_post(actions_worker, "/api/v1/latestReports:recompute", body), 503, "UNAVAILABLE")
+    assert _stored(actions_worker, request_id) == [{"http_status": None}]
+    # Once older than any run (RECOMPUTE_CLAIM_STALE_S), the same request_id computes it and stores the report.
+    actions_worker.d1(
+        f"UPDATE owner_actions SET created_at = {int(time.time()) - 600} WHERE action_request_id = '{request_id}'"
+    )
+    response = _post(actions_worker, "/api/v1/latestReports:recompute", body)
+    assert assert_message(response, pb.RecomputeReportResponse)["summary"]["status"] == "empty_window"
+    assert _stored(actions_worker, request_id) == [{"http_status": 200}]
+    assert _post(actions_worker, "/api/v1/latestReports:recompute", body).json() == response.json()
+
+
+def test_recompute_runs_again_after_a_failure_an_earlier_version_stored(actions_worker: Worker) -> None:
+    request_id = str(uuid.uuid4())
+    _claim(actions_worker, request_id, int(time.time()), http_status=503)
+    response = _post(actions_worker, "/api/v1/latestReports:recompute", {"kind": "summary", "request_id": request_id})
+    assert assert_message(response, pb.RecomputeReportResponse)["summary"]["status"] == "empty_window"
+    assert _stored(actions_worker, request_id) == [{"http_status": 200}]

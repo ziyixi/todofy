@@ -107,6 +107,9 @@ TODOIST_WINDOW_LIMIT = 1000
 # The most calls one ledger step can make: a whole footer lookup.
 TODOIST_STEP_CALLS = max(TODOIST_MAX_ATTEMPTS, LOOKUP_MAX_PAGES)
 REPORT_HOURLY_LIMIT = 30
+# An owner recompute's claim older than this whose run never finished (the object was evicted, or releasing it
+# failed) is taken over by the same request_id: three times the Gemini budget of one on-demand report.
+RECOMPUTE_CLAIM_STALE_S = 3 * REPORT_ON_DEMAND_BUDGET
 TIMELINE_LIMIT = 100
 TICK_RETRY = 10 * MINUTE
 # A canary's summary step is tried at most this often before it ends ignored (failed).
@@ -449,26 +452,29 @@ class TodofyCore(DurableObject):
         return reports.report_error(status, result, now_s())
 
     async def recompute_outcome(self, owner: str, action_request_id: str, kind: str, top_n: int) -> tuple[int, Any]:
-        """(200, the report dict) or (status, ApiError): a new computation, or the replay of a stored one.
+        """(200, the report dict) or (status, ApiError): a new computation, or the replay of a stored report.
 
-        (409, ACTION_REQUEST_CONFLICT) when the ID was used for another request; a replay whose first run
-        has not finished (or was evicted) is (503, UNAVAILABLE)."""
+        Only a computed report is stored and replayed (AIP-155). A failure (429 RATE_LIMITED, 503 UNAVAILABLE)
+        releases the claim, so repeating the request with the same ID after its Retry-After computes it then.
+        (409, ACTION_REQUEST_CONFLICT) when the ID was used for another request; (503, UNAVAILABLE) while the
+        first run of the same ID may still be running (a run that never finished is taken over after
+        RECOMPUTE_CLAIM_STALE_S)."""
         db, now = self.env.DB, now_s()
-        claim = await ledger.claim_action(
-            db, owner, action_request_id, "recompute", _request_hash({"kind": kind, "top_n": top_n}), now
-        )
+        request_hash = _request_hash({"kind": kind, "top_n": top_n})
+        claim = await ledger.claim_action(db, owner, action_request_id, "recompute", request_hash, now)
         if claim.claim == ledger.Claim.CONFLICT:
             return 409, ApiError.ACTION_REQUEST_CONFLICT
         if claim.claim == ledger.Claim.REPLAY:
-            if claim.http_status is None:
-                # Still running, or the run that claimed it was evicted: ask for a new action.
-                return 503, ApiError.UNAVAILABLE
             if claim.http_status == 200:
                 return 200, json.loads(claim.result_ref or "null")
-            return claim.http_status, ApiError(claim.result_ref or ApiError.UNAVAILABLE)
+            stale_before = now - RECOMPUTE_CLAIM_STALE_S
+            if not await ledger.take_over_action(db, owner, action_request_id, request_hash, now, stale_before):
+                return 503, ApiError.UNAVAILABLE
         status, result = await self.compute_report(kind, top_n, now)
-        stored = json.dumps(result, ensure_ascii=False) if status == 200 else result
-        await ledger.finish_action(db, owner, action_request_id, stored, status)
+        if status == 200:
+            await ledger.finish_action(db, owner, action_request_id, json.dumps(result, ensure_ascii=False), status)
+        else:
+            await ledger.release_action(db, owner, action_request_id)
         return status, result
 
     async def compute_report(self, kind: str, top_n: int, now: int) -> tuple[int, Any]:
