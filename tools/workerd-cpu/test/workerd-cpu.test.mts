@@ -24,6 +24,7 @@ import {
   profileCpu,
   scaleFor,
   summarize,
+  TimedOut,
   within,
   type Calibration,
   type CpuMeter,
@@ -183,6 +184,46 @@ test('an isolate is disposed when its session fails, and the failure is the erro
     /the request failed/,
   );
   assert.deepEqual(log, ['calibrate 0', 'dispose 0', 'dispose 1']);
+});
+
+test('an isolate whose inspector timed out is measured again in a fresh one; one that hangs every time fails', async () => {
+  const run = async (timesOut: (index: number, step: 'session' | 'calibrate') => boolean) => {
+    const log: string[] = [];
+    const result = await measureInIsolates(
+      3,
+      (index) => {
+        const meter = fakeMeter(1, log, index);
+        const calibrate = meter.calibrate;
+        return Promise.resolve({
+          meter: {
+            ...meter,
+            calibrate: () =>
+              timesOut(index, 'calibrate') ? Promise.reject(new TimedOut('the inspector of the Worker w answering Runtime.evaluate: nothing within 30000 ms')) : calibrate(),
+          },
+          dispose: () => Promise.resolve(void log.push(`dispose ${String(index)}`)),
+        });
+      },
+      (_isolate, index) =>
+        timesOut(index, 'session')
+          ? Promise.reject(new TimedOut('a measured run in the Worker w: nothing within 30000 ms'))
+          : Promise.resolve([{ label: 'cold', first: 5, median: 5, best: 5 }]),
+    );
+    return { log, finished: result.runs.length, cold: result.reference.get('cold')?.first };
+  };
+  // The first calibration and the second session time out: two more isolates, each timed-out one disposed.
+  assert.deepEqual(await run((index, step) => (index === 0 && step === 'calibrate') || (index === 1 && step === 'session')), {
+    log: ['dispose 0', 'dispose 1', 'calibrate 2', 'dispose 2', 'calibrate 3', 'dispose 3', 'calibrate 4', 'dispose 4'],
+    finished: 3,
+    cold: 5,
+  });
+  // Every calibration times out: six tries, then the failure names the timeouts.
+  await assert.rejects(run((_index, step) => step === 'calibrate'), /only 0 of 3 isolates finished within 6 tries; isolate 0: the inspector of the Worker w answering Runtime\.evaluate: nothing within 30000 ms/);
+  // Four of six time out: two isolates finished, fewer than three.
+  await assert.rejects(run((index, step) => step === 'session' && index < 4), /only 2 of 3 isolates finished/);
+});
+
+test('within rejects with TimedOut, which measureInIsolates tells apart from any other failure', async () => {
+  await assert.rejects(within(10, 'a stuck call', new Promise(() => undefined)), (error: unknown) => error instanceof TimedOut);
 });
 
 test('one isolate too busy to measure is outvoted; most of them fail the test', async () => {

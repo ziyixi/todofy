@@ -248,12 +248,17 @@ interface InspectorMessage {
   params?: { context?: { uniqueId?: string } };
 }
 
-/** `promise`, or a rejection that names `what` once `ms` have passed without it settling. */
+/** The rejection of `within`: `what` did not happen in time (a stuck inspector call or a measured run that hung). */
+export class TimedOut extends Error {
+  override readonly name = 'TimedOut';
+}
+
+/** `promise`, or a TimedOut rejection that names `what` once `ms` have passed without it settling. */
 export function within<T>(ms: number, what: string, promise: Promise<T>): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | undefined;
   const timeout = new Promise<never>((_resolve, reject) => {
     timer = setTimeout(() => {
-      reject(new Error(`${what}: nothing within ${String(ms)} ms`));
+      reject(new TimedOut(`${what}: nothing within ${String(ms)} ms`));
     }, ms);
   });
   return Promise.race([promise, timeout]).finally(() => {
@@ -454,8 +459,11 @@ function countedRuns(runs: readonly IsolateRun[], count: number): readonly Isola
  * Measures `session` in `count` fresh isolates, one after another (see "Cold runs" above). For each one it starts an
  * isolate, runs the session (whose measurements, each label once, it returns), calibrates that isolate after the
  * session, so that every first run in it was the isolate's first run of its path, and disposes of it, also when a
- * step fails. An isolate whose calibration was disturbed (MAX_WALL_OVER_CPU) is replaced by another fresh one, up to
- * `count` more in all. Returns every isolate's run and, label by label, the median of each number across the
+ * step fails. An isolate whose calibration was disturbed (MAX_WALL_OVER_CPU), or whose session or calibration timed
+ * out (TimedOut: the inspector gave no answer within INSPECTOR_TIMEOUT_MS, which GitHub runners and a busy machine do
+ * now and then), is replaced by another fresh one, up to `count` more in all; any other failure is the error. Fails
+ * when fewer than `count` isolates finished, naming the timeouts, so an inspector or a request that hangs every time
+ * still fails the test. Returns every finished isolate's run and, label by label, the median of each number across the
  * isolates that count (countedRuns; a label measured only in a replaced isolate keeps that isolate's numbers), in
  * reference milliseconds, and prints those medians with each isolate's first run. Fails when the counted isolates'
  * median speed is above MAX_SPEED: one isolate too busy to measure cannot hide a regression from the median of the
@@ -468,6 +476,7 @@ export async function measureInIsolates<T extends Isolate>(
 ): Promise<IsolatesResult> {
   if (!Number.isInteger(count) || count < 1) throw new Error(`measureInIsolates needs at least one isolate, not ${String(count)}`);
   const runs: IsolateRun[] = [];
+  const timeouts: string[] = [];
   const undisturbed = () => runs.filter((run) => !disturbed(run.calibration)).length;
   for (let index = 0; undisturbed() < count && index < 2 * count; index += 1) {
     const isolate = await start(index);
@@ -476,9 +485,16 @@ export async function measureInIsolates<T extends Isolate>(
       const calibration = await isolate.meter.calibrate();
       if (disturbed(calibration)) console.log(`cpu isolate ${String(index)}: the calibration was disturbed (wall over CPU above ${String(MAX_WALL_OVER_CPU)}), measured again`);
       runs.push({ calibration, measured, reference: measured.map((measurement) => inReference(measurement, calibration)) });
+    } catch (error) {
+      if (!(error instanceof TimedOut)) throw error;
+      timeouts.push(`isolate ${String(index)}: ${error.message}`);
+      console.log(`cpu isolate ${String(index)}: ${error.message}; measured again in a fresh isolate`);
     } finally {
       await isolate.dispose();
     }
+  }
+  if (runs.length < count) {
+    throw new Error(`only ${String(runs.length)} of ${String(count)} isolates finished within ${String(2 * count)} tries; ${timeouts.join('; ')}`);
   }
   const counted = countedRuns(runs, count);
   const speeds = counted.map((run) => run.calibration.speed);

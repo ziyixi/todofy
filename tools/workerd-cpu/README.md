@@ -25,8 +25,14 @@ node --test tools/workerd-cpu/test/*.test.mts
 Two guards keep a busy machine from hiding a regression. An isolate whose calibration wall time is more than
 `MAX_WALL_OVER_CPU` (1.2) times its profile CPU measured a busy moment, not the machine, and is replaced by another
 fresh isolate (at most three more). A median speed above `MAX_SPEED` (5) fails the test. Every inspector call fails
-after 30 s with the step it was in, instead of hanging until the runner's timeout; `CPU_TEST_TIMEOUT_MS` (300 s), the
-tests' own timeout, leaves room for replaced isolates on a busy machine.
+after 30 s with the step it was in (`TimedOut`), instead of hanging until the runner's timeout; `CPU_TEST_TIMEOUT_MS`
+(300 s), the tests' own timeout, leaves room for replaced isolates on a busy machine.
+
+An isolate whose session or calibration timed out is replaced the same way, within the same three more: the inspector
+sometimes gives no answer within 30 s (2 of 38 Todofy and 1 of 30 Lab runs on a busy machine,
+2026-10-02), and one such isolate must not fail a required check. Fewer than three finished isolates fail the test
+with every timeout named, so an inspector or a request that hangs every time still fails it. Any other failure is the
+test's error at once.
 
 ## Why the median of three isolates (2026-10-01)
 
