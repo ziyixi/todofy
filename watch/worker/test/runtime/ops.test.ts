@@ -8,6 +8,7 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { fromWire } from '@ziyixi/proto/wire-json';
 import { OpsStatusSchema } from '@ziyixi/proto/ops/v1/ops_pb';
+import { STATUS_ROWS_MAX } from '../../src/ops-status.ts';
 import { page } from '../fake-sites.ts';
 import { DAY, HOUR, MINUTE, op, resetWatches, startHarness, T0, type Harness } from './harness.ts';
 
@@ -87,6 +88,61 @@ describe('the Ops entrypoint (manual alarms)', () => {
     const resumed = await h.step(at + DAY + 6 * MINUTE);
     expect(resumed.outcomes).toEqual({ unchanged: 1 });
     await resetWatches(h);
+  });
+
+  it('status() reads at most STATUS_ROWS_MAX rows at the bounds (SQLite rows are a budget, docs/design.md §8)', async () => {
+    // The bounds: 50 watches, 1,000 new changes and more, 500 undelivered events, 300 intents of 30 days (a week of
+    // them unsettled or ended badly, as many recorded today as Todofy allows).
+    const at = T0 + 20 * DAY + 12 * HOUR;
+    await h.clock(at);
+    await h.sql(
+      `WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < 50)
+       INSERT INTO watches (id, settings, host, read_hash, check_hash, state, etag, create_time, update_time, failures, failure_start)
+       SELECT 'bound' || i, '{}', 'b' || i || '.example.org', 'r', 'c', CASE WHEN i % 10 = 0 THEN 'broken' ELSE 'active' END, 'e', ?, ?, i % 3, ? FROM n`,
+      at - DAY,
+      at - DAY,
+      at - DAY,
+    );
+    await h.sql(
+      `WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < 1200)
+       INSERT INTO changes (id, watch_id, state, trigger_kind, summary, added, removed, diff, detect_time)
+       SELECT printf('bound%05d', i), 'bound' || (1 + i % 50), CASE WHEN i <= 1100 THEN 'confirmed' ELSE 'acknowledged' END, 'any_change', 's', 1, 0, '', ? FROM n`,
+      at - HOUR,
+    );
+    await h.sql(
+      `WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < 600)
+       INSERT INTO notifications (kind, watch_id, change_id, policy, created_at, delivered_at)
+       SELECT 'change_confirmed', 'bound' || (1 + i % 50), printf('bound%05d', i), 'digest', ?, CASE WHEN i <= 500 THEN NULL ELSE ? END FROM n`,
+      at - HOUR,
+      at - HOUR,
+    );
+    // 300 intents: 70 unsettled (a week of carried-over ones), 70 ended badly this week, 10 recorded today, the rest
+    // settled before.
+    await h.sql(
+      `WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < 300)
+       INSERT INTO intents (intent_id, kind, day, payload, events, state, attempts, next_at, last_code, recorded_at, created_at, updated_at)
+       SELECT 'urgent-bound' || i, 'urgent', '2026-10-21', '', 1,
+              CASE WHEN i <= 35 THEN 'open' WHEN i <= 70 THEN 'held' WHEN i <= 140 THEN 'expired' ELSE 'recorded' END,
+              1, ?, CASE WHEN i <= 70 AND i % 2 = 0 THEN 'failed' ELSE 'pending' END,
+              CASE WHEN i > 35 AND i <= 70 THEN ? - 2 * 86400000 WHEN i > 140 AND i <= 150 THEN ? - 3600000 WHEN i > 150 THEN ? - 10 * 86400000 END,
+              ? - (i % 30) * 86400000, CASE WHEN i > 70 AND i <= 140 THEN ? - 86400000 ELSE ? - 20 * 86400000 END FROM n`,
+      at + HOUR,
+      at,
+      at,
+      at,
+      at,
+      at,
+      at,
+    );
+    await h.rows();
+    const status = (await h.opsStatus()) as { counters: Record<string, number>; signals: { code: string }[] };
+    const { read, written } = await h.rows();
+    console.log(`rows: status() at the bounds read ${String(read)}, wrote ${String(written)}`);
+    expect(status.counters).toMatchObject({ watches_active: 45, watches_broken: 5, changes_new: 1000, notifications_pending: 500, intents_open: 70, intents_sent_today: 10 });
+    expect(status.signals.map((signal) => signal.code)).toContain('notify_unsettled');
+    expect(read).toBeLessThanOrEqual(STATUS_ROWS_MAX);
+    expect(written).toBe(0);
+    for (const table of ['watches', 'changes', 'notifications', 'intents']) await h.sql(`DELETE FROM ${table}`);
   });
 
   it('an input the contract refuses rejects with invalid_input', async () => {

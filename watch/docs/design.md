@@ -360,9 +360,11 @@ its bound (50 watches, 200 changes and 22 snapshots each) and holds each path to
 | the daily sweep of every watch's bounds (once per UTC day) | ~14,500 | ~200 |
 | ListWatches, GetServiceStatus (they count the open changes) | ~5,200 here, at most ~10,000 | 0 |
 | the inbox (a page of ListChanges) | ~150 | 0 |
+| ops-v1 `status()`, 48 a day (the dashboard's tick; `ops.test.ts` at the bounds: 50 watches, 1,000 new changes, 500 undelivered events, a week of unsettled and failed intents) | 1,709 at the bounds, at most `STATUS_ROWS_MAX` 1,750; ~65 on a normal day | 0 (1 when it re-arms a missing alarm) |
 
 A day, typically (50 watches at 6 hours, ~250 checks, a few dozen changes, a few dozen page loads): under 100,000
-rows read and 5,000 written. At every bound at once (50 watches at 1 hour, every check a change with its
+rows read and 5,000 written, plus ~3,000 read by the dashboard's 48 `status()` calls (84,000 at their bounds). At
+every bound at once (50 watches at 1 hour, every check a change with its
 confirmation, ~2,400 checks; every watch at 200 unread changes; 100 loads of the heaviest pages): ~0.8 M rows read by
 checks and ~2 M by the UI, ~55,000 written: within the day's 5 M and 100 k, with room for Mail Hero, but only
 because a prune reads one watch's rows (before the `(watch_id, state, id)` index every alarm read ~318,000 rows).

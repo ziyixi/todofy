@@ -44,6 +44,13 @@ export const DEFERRED_JOBS = ['scheduled_checks', 'daily_sweep'] as const;
 export const SHED_CHECK_SPACING_MS = DAY;
 /** status() counts new changes up to this many (the count reads one index row each). */
 export const NEW_CHANGES_COUNTED = 1000;
+/**
+ * The most SQLite rows one status() reads at the bounds (50 watches, NEW_CHANGES_COUNTED new changes, NOTIFICATIONS_MAX
+ * undelivered events, a week of unsettled and failed intents; test/runtime/ops.test.ts measured 1,709). Each counted
+ * row is one index row read. The dashboard calls it every 30 minutes: 48 a day, at most 84,000 rows (1.7 % of the
+ * account's 5,000,000), about 3,000 on a normal day (docs/design.md §8).
+ */
+export const STATUS_ROWS_MAX = 1750;
 /** No alarm pass for this long (twice the idle interval) raises `scheduler_stale`. */
 export const SCHEDULER_STALE_MS = 2 * ALARM_IDLE_MS;
 /**

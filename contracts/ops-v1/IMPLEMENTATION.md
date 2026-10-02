@@ -570,7 +570,9 @@ list), then gained `watch`; fixtures `OpsStatus/watch-ok.json`, `OpsStatus/watch
 - Files: `watch/worker/src/ops.ts` (the entrypoint, forwards to `WatchState`), `watch/worker/src/ops-status.ts` (status
   and guard over the object's SQLite). No D1. Rows read per `status()`: the watches (at most 50), the new changes
   through the `changes_state` index (counted up to 1,000), the undelivered events through the partial index
-  `notifications_pending` (at most 500), the Todofy sink's intents (at most ~300) and a few meta rows. Its one write:
+  `notifications_pending` (at most 500), the Todofy sink's unsettled intents, those ended badly in a week and those
+  recorded today (three indexed counts) and a few meta rows: 1,709 at those bounds, held to 1,750
+  (`STATUS_ROWS_MAX`, `watch/worker/test/runtime/ops.test.ts`), so 48 calls a day read at most 84,000. Its one write:
   when WatchState has no alarm set it arms one, so the dashboard's tick restarts a lost scheduler.
 - Counters: `watches_active`, `watches_paused`, `watches_broken`, `watches_failing`, `changes_new`, `fetches_today`,
   `notifications_pending`, `intents_open`, `intents_sent_today`. Signals: `watches_broken`, `scheduler_stale`,
