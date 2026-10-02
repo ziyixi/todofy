@@ -13,7 +13,7 @@ Rules for this file:
   security-posture details. Those stay with the owner.
 - Keep it short. The details live in each app's docs; link to them.
 
-Last updated: 2026-10-02 (`mail.received.v1` on proto lands with this change; the watch Access app exists, created through "Infra apply").
+Last updated: 2026-10-02 (`mail.received.v1` on proto has landed; watch-infra has landed and "Infra apply" created the Access application "watch"; watch-l2 waits for its two fill-ins).
 
 ## How work lands
 
@@ -33,7 +33,7 @@ Last updated: 2026-10-02 (`mail.received.v1` on proto lands with this change; th
 
 | Work | Branch (pushed unless noted) | State | Lands as |
 | --- | --- | --- | --- |
-| Watch W3: daily Todoist digest via task-intent `SOURCE_WATCH`, Ops status for the dashboard | `watch-l2` (local) | In progress | After `watch-infra`; deploys watch, Todofy, Lab, dashboard |
+| Watch W2 + W3: `watch.ziyixi.science`, daily Todoist digest via task-intent `SOURCE_WATCH` (Todofy's least-privilege `Intents` entrypoint), Ops status and the 网页监视 tile for the dashboard | `watch-l2` (local, on `main` since `watch-infra` landed) | Done, verified from a clean clone, except two fill-ins | Next. Fill in the AUD (`watch/wrangler.toml`) and the application id (`infra/ids.tf`) of the Access application "watch" that "Infra apply" created, commit both, then push; deploys Todofy before watch, then dashboard, Lab, Mail Hero |
 
 ## Waiting to be verified
 
@@ -48,6 +48,10 @@ Last updated: 2026-10-02 (`mail.received.v1` on proto lands with this change; th
 - Infra drift must stay `no-op` on its daily run (13:23 UTC).
 - After `dashboard-new-tiles` deploys: 首页 shows FlowDay and 短链接 as ● 正常 with a latency
   (`dashboard/docs/verification.md` §2).
+- After `watch-l2` deploys: its push's "Infra drift" green with `no-op: 19`, `output changes: 0` (the only check of
+  the committed AUD); signed in, `https://watch.ziyixi.science/status` shows a next scheduler time (README "Deploy");
+  the dashboard's 网页监视 tile is ok on its next tick; the first digest task after 14:00 UTC once a watch has
+  changed; a follow-up commit adds the `WatchState` namespace id to the dashboard registry.
 
 ## Waiting for the owner
 
