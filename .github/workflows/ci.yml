@@ -1731,7 +1731,7 @@ jobs:
           ACCESS_ISSUER: ${{ steps.config.outputs.access_issuer }}
           PUBLIC_HOST: ${{ steps.config.outputs.host }}
         run: |
-          bash tools/deploy-probes/access.sh / /api/v1/homeView
+          bash "$GITHUB_WORKSPACE/tools/deploy-probes/access.sh" / /api/v1/homeView
       - name: Remove the secrets file
         if: always()
         run: rm -f "$RUNNER_TEMP/home-secrets.json"
@@ -1842,7 +1842,7 @@ jobs:
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
         run: |
-          bash ../../tools/deploy-probes/production.sh lab ../wrangler.toml DB
+          bash "$GITHUB_WORKSPACE/tools/deploy-probes/production.sh" lab ../wrangler.toml DB
       # Cloudflare Access ("Lab") must answer every unauthenticated request with a 302 to its login page for this
       # host, exactly as the dashboard's probe checks (same script; test_ci_changes.py runs it).
       - name: Check that Access answers unauthenticated requests
@@ -1850,7 +1850,7 @@ jobs:
           ACCESS_ISSUER: ${{ steps.config.outputs.access_issuer }}
           PUBLIC_HOST: ${{ steps.config.outputs.host }}
         run: |
-          bash tools/deploy-probes/access.sh / /api/v1/today
+          bash "$GITHUB_WORKSPACE/tools/deploy-probes/access.sh" / /api/v1/today
       - name: Remove the secrets file
         if: always()
         run: rm -f "$RUNNER_TEMP/lab-secrets.json"
@@ -1966,7 +1966,7 @@ jobs:
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
         run: |
-          bash ../../tools/deploy-probes/production.sh flowday ../wrangler.toml DB
+          bash "$GITHUB_WORKSPACE/tools/deploy-probes/production.sh" flowday ../wrangler.toml DB
       # Cloudflare Access ("flowday", which covers the host) must answer every unauthenticated request
       # with a 302 to its login page for this host, exactly as the dashboard's probe checks (same script;
       # test_ci_changes.py runs it).
@@ -1975,7 +1975,7 @@ jobs:
           ACCESS_ISSUER: ${{ steps.config.outputs.access_issuer }}
           PUBLIC_HOST: ${{ steps.config.outputs.host }}
         run: |
-          bash tools/deploy-probes/access.sh / /api/v1/tasks
+          bash "$GITHUB_WORKSPACE/tools/deploy-probes/access.sh" / /api/v1/tasks
       # The PWA files the Worker serves without a JWT (worker/src/assets.ts PWA_PUBLIC_PATHS) reach it anonymously
       # only through the Access app "flowday-bypass" (its destination <host>/pwa/*, as on the container's host until
       # F6): each answers 200 with its own media type, and a file under /pwa/ that is not on the list (the service
@@ -2131,7 +2131,7 @@ jobs:
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
         run: |
-          bash ../../tools/deploy-probes/production.sh links ../wrangler.toml DB
+          bash "$GITHUB_WORKSPACE/tools/deploy-probes/production.sh" links ../wrangler.toml DB
       # Cloudflare Access ("links", path-scoped) must answer every unauthenticated request for the owner's half with a
       # 302 to its login page for this host: its exact destination /_, the launcher /_/ and the owner API, exactly as
       # the dashboard's probe checks (same script; test_ci_changes.py runs it).
@@ -2140,7 +2140,7 @@ jobs:
           ACCESS_ISSUER: ${{ steps.config.outputs.access_issuer }}
           PUBLIC_HOST: ${{ steps.config.outputs.host }}
         run: |
-          bash tools/deploy-probes/access.sh /_ /_/ /_/api/v1/links
+          bash "$GITHUB_WORKSPACE/tools/deploy-probes/access.sh" /_ /_/ /_/api/v1/links
       # The rest of the host is outside Access and the Worker answers it itself, anonymously (docs/design.md §2, §4):
       # /robots.txt with its own text (200, text/plain, "Disallow: /" for every agent), and a key no link uses with the
       # 302 to /_/k/<key> on this host that a private, deleted or expired key gets too (the enumeration rule), both with
@@ -2311,7 +2311,7 @@ jobs:
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
         run: |
-          bash ../../tools/deploy-probes/production.sh watch ../wrangler.toml
+          bash "$GITHUB_WORKSPACE/tools/deploy-probes/production.sh" watch ../wrangler.toml
       # Cloudflare Access ("watch", the whole host) must answer every unauthenticated request with a 302 to its login
       # page for this host: the inbox /, the owner API and the add-from-phone page /new, exactly as the dashboard's
       # probe checks (same script; test_ci_changes.py runs it). /health is behind Access too (no bypass application),
@@ -2322,7 +2322,7 @@ jobs:
           ACCESS_ISSUER: ${{ steps.config.outputs.access_issuer }}
           PUBLIC_HOST: ${{ steps.config.outputs.host }}
         run: |
-          bash tools/deploy-probes/access.sh / /api/v1/watches /new
+          bash "$GITHUB_WORKSPACE/tools/deploy-probes/access.sh" / /api/v1/watches /new
       - name: Remove the secrets file
         if: always()
         run: rm -f "$RUNNER_TEMP/watch-secrets.json"

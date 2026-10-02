@@ -958,6 +958,23 @@ def workflow_jobs():
     return blocks
 
 
+def workflow_run_step(job_name, step_name):
+    """Resolve a run step and its effective cwd, including the job's run defaults."""
+    block = workflow_jobs()[job_name]
+    header = block.split("    steps:\n", 1)[0]
+    default = re.search(r"^        working-directory: (\S+)$", header, re.MULTILINE)
+    step = block.split(f"- name: {step_name}\n", 1)[1].split("\n      - ", 1)[0]
+    override = re.search(r"^        working-directory: (\S+)$", step, re.MULTILINE)
+    directory = override.group(1) if override else default.group(1) if default else "."
+    body = step.split("        run: |\n", 1)[1]
+    lines = []
+    for line in body.splitlines():
+        if line.strip() and not line.startswith("          "):
+            break
+        lines.append(line[10:])
+    return "\n".join(lines) + "\n", Path(directory)
+
+
 class ContractsJob(unittest.TestCase):
     """The Contracts job runs both sides of both contracts, and every test file it names exists.
 
@@ -1668,21 +1685,16 @@ class AccessProbe(unittest.TestCase):
     ISSUER = "https://example.cloudflareaccess.com"
     HOST = "home.example.org"
 
-    def script(self):
-        block = workflow_jobs()["dashboard-deploy"]
-        step = block.split("- name: Check that Access answers unauthenticated requests\n", 1)[1]
-        body = step.split("        run: |\n", 1)[1]
-        lines = []
-        for line in body.splitlines():
-            if line.strip() and not line.startswith("          "):
-                break
-            lines.append(line[10:])
-        return "\n".join(lines) + "\n"
+    def script(self, job="dashboard-deploy"):
+        return workflow_run_step(job, "Check that Access answers unauthenticated requests")[0]
 
-    def probe(self, *answers):
+    def probe(self, *answers, job="dashboard-deploy"):
         """Runs the step with the issuer and host the config step reads from dashboard/wrangler.toml; curl
         answers each request with the next of `answers` ("<code> <location>"), the last one repeating."""
         with tempfile.TemporaryDirectory() as root:
+            # GitHub's workspace may contain spaces; the helper must be independent of app defaults.
+            workspace = Path(root, "workspace with spaces")
+            workspace.symlink_to(REPO, target_is_directory=True)
             bin_dir = Path(root, "bin")
             bin_dir.mkdir()
             Path(root, "answers").write_text("\n".join(answers) + "\n")
@@ -1703,11 +1715,24 @@ class AccessProbe(unittest.TestCase):
                 "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}",
                 "ACCESS_ISSUER": self.ISSUER,
                 "PUBLIC_HOST": self.HOST,
+                "GITHUB_WORKSPACE": str(workspace),
             }
+            script, directory = workflow_run_step(job, "Check that Access answers unauthenticated requests")
             result = subprocess.run(
-                ["bash", "-e", "-c", self.script()], cwd=REPO, env=env, capture_output=True, text=True, check=False
+                ["bash", "-e", "-c", script], cwd=workspace / directory, env=env, capture_output=True, text=True, check=False
             )
             return result.returncode, result.stdout + result.stderr
+
+    def test_every_app_probe_runs_from_its_effective_workflow_directory(self):
+        login = f"{self.ISSUER}/cdn-cgi/access/login/{self.HOST}"
+        jobs = ("dashboard-deploy", "lab-deploy", "flowday-deploy", "links-deploy", "watch-deploy")
+        for job in jobs:
+            with self.subTest(job=job):
+                code, output = self.probe(f"302 {login}", job=job)
+                self.assertEqual(code, 0, output)
+                code, output = self.probe("200 ", job=job)
+                self.assertEqual(code, 1, output)
+                self.assertIn("was answered with", output)
 
     def test_lab_deploy_runs_the_same_probe_from_its_own_config(self):
         """The Lab deploy's probe is this very script (so these tests cover it), fed from lab/wrangler.toml."""
@@ -1751,8 +1776,8 @@ class AccessProbe(unittest.TestCase):
             return "\n".join(line for line in lines if not line.strip() or line.startswith("          ")).rstrip()
 
         links = body("links-deploy")
-        self.assertIn("bash tools/deploy-probes/access.sh /_ /_/ /_/api/v1/links", links)
-        self.assertEqual(links.replace("access.sh /_ /_/ /_/api/v1/links", "access.sh / /api/v1/homeView"), body("dashboard-deploy"))
+        self.assertIn('bash "$GITHUB_WORKSPACE/tools/deploy-probes/access.sh" /_ /_/ /_/api/v1/links', links)
+        self.assertEqual(links.replace('access.sh" /_ /_/ /_/api/v1/links', 'access.sh" / /api/v1/homeView'), body("dashboard-deploy"))
         self.assertIn("ACCESS_ISSUER: ${{ steps.config.outputs.access_issuer }}", step("links-deploy"))
         self.assertIn("PUBLIC_HOST: ${{ steps.config.outputs.host }}", step("links-deploy"))
         block = workflow_jobs()["links-deploy"]
@@ -1772,8 +1797,8 @@ class AccessProbe(unittest.TestCase):
             return "\n".join(line for line in lines if not line.strip() or line.startswith("          ")).rstrip()
 
         watch = body("watch-deploy")
-        self.assertIn("bash tools/deploy-probes/access.sh / /api/v1/watches /new", watch)
-        self.assertEqual(watch.replace("access.sh / /api/v1/watches /new", "access.sh / /api/v1/homeView"), body("dashboard-deploy"))
+        self.assertIn('bash "$GITHUB_WORKSPACE/tools/deploy-probes/access.sh" / /api/v1/watches /new', watch)
+        self.assertEqual(watch.replace('access.sh" / /api/v1/watches /new', 'access.sh" / /api/v1/homeView'), body("dashboard-deploy"))
         self.assertIn("ACCESS_ISSUER: ${{ steps.config.outputs.access_issuer }}", step("watch-deploy"))
         self.assertIn("PUBLIC_HOST: ${{ steps.config.outputs.host }}", step("watch-deploy"))
         block = workflow_jobs()["watch-deploy"]
@@ -2118,14 +2143,7 @@ class FlowDayProductionCheck(unittest.TestCase):
     EMAIL = "deployer@example.org"
 
     def script(self):
-        block = workflow_jobs()[self.JOB]
-        body = block.split(self.STEP, 1)[1].split("        run: |\n", 1)[1]
-        lines = []
-        for line in body.splitlines():
-            if line.strip() and not line.startswith("          "):
-                break
-            lines.append(line[10:])
-        return "\n".join(lines) + "\n"
+        return workflow_run_step(self.JOB, "Check that production runs this commit")[0]
 
     def deployment(self, *versions):
         return {
@@ -2146,6 +2164,8 @@ class FlowDayProductionCheck(unittest.TestCase):
         if shutil.which("jq") is None and os.environ.get("GITHUB_ACTIONS") != "true":
             self.skipTest("needs jq (the runner has it)")
         with tempfile.TemporaryDirectory() as root:
+            workspace = Path(root, "workspace with spaces")
+            workspace.symlink_to(REPO, target_is_directory=True)
             bin_dir = Path(root, "bin")
             bin_dir.mkdir()
             Path(root, "deployment.json").write_text(json.dumps(deployment))
@@ -2154,6 +2174,8 @@ class FlowDayProductionCheck(unittest.TestCase):
             npx = bin_dir / "npx"
             npx.write_text(
                 "#!/usr/bin/env bash\n"
+                # Wrangler and its relative config resolve in the app's installed worker directory.
+                'test -f ../wrangler.toml || exit 4\n'
                 f'echo "$*" >> "{root}/calls"\n'
                 'args=" $* "\n'
                 + (f'case "$args" in *" {fail} "*) exit 1 ;; esac\n' if fail else "")
@@ -2170,9 +2192,12 @@ class FlowDayProductionCheck(unittest.TestCase):
                 "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}",
                 "CLOUDFLARE_API_TOKEN": token,
                 "GITHUB_SHA": SHA,
+                "GITHUB_WORKSPACE": str(workspace),
             }
+            script, directory = workflow_run_step(self.JOB, "Check that production runs this commit")
+            self.assertEqual(directory, Path(self.WORKER) / "worker")
             result = subprocess.run(
-                ["bash", "-e", "-c", self.script()], cwd=REPO / self.WORKER / "worker", env=env, capture_output=True, text=True, check=False
+                ["bash", "-e", "-c", script], cwd=workspace / directory, env=env, capture_output=True, text=True, check=False
             )
             calls = Path(root, "calls").read_text().splitlines() if Path(root, "calls").exists() else []
             output = result.stdout + result.stderr
@@ -2256,7 +2281,7 @@ class WatchProductionCheck(FlowDayProductionCheck):
 
     def test_the_same_step_as_the_links_app_without_d1(self):
         links = FlowDayProductionCheck.script(LinksProductionCheck())
-        self.assertEqual(self.script(), links.replace("production.sh links", "production.sh watch").replace("wrangler.toml DB", "wrangler.toml"))
+        self.assertEqual(self.script(), links.replace('production.sh" links', 'production.sh" watch').replace("wrangler.toml DB", "wrangler.toml"))
         self.assertNotIn(" DB", self.script())
 
     def test_this_commit_at_100_percent_with_no_pending_migration_passes(self):

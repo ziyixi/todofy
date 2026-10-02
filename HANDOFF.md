@@ -16,7 +16,7 @@ Rules for this file:
   what is done, what is left, how to verify it and what to check after its deploy. Link to the app docs for
   design detail instead of copying it.
 
-Last updated: 2026-10-02 ~23:24 UTC. The code on `main` is `b70856f` (later commits are docs only). Every app's owner API is on proto now (the dashboard
+Last updated: 2026-10-02 ~23:49 UTC. The source on `main` is `e8b3666`; the foundation code below has landed, with production verification still in progress. Every app's owner API is on proto now (the dashboard
 `ca63675`, FlowDay `8d9100e`, Mail Hero `d1bde0e`, Todofy `b70856f`, all landed and verified on 2026-10-02). Nothing
 was in flight at that landing. The owner has since authorised the foundation work below.
 
@@ -33,8 +33,8 @@ was in flight at that landing. The owner has since authorised the foundation wor
 | Dashboard | `home` (+ `HomeState` DO) | `home.ziyixi.science` | `Dashboard deploy` | Yes (`dashboard.ui.v1`, since `ca63675`) |
 | Website | `ziyixi-website` (+ `ziyixi-notion-publish` relay) | `ziyixi.science`, `www.ziyixi.science` | `Website release` | n/a (static) |
 
-Newsletter source is now imported on `codex/personal-cloud-foundation` from its deployed engine commit
-`c3d622d4771b1ca63ee4e3f785b79032cffc30e1`. Its new independent image is `ghcr.io/ziyixi/todofy-newsletter`. The existing VPS still runs
+Newsletter source is now imported on `main` from its deployed engine commit
+`c3d622d4771b1ca63ee4e3f785b79032cffc30e1`. Its new independent image is `ghcr.io/ziyixi/todofy-newsletter`. The main publisher at `e8b3666` published it; the package is public and anonymous manifest access was verified. The pullable digest is `sha256:5ee91bedec986608d2758213b66aa20d89881f188226d2d6fe3aa4d19701a886`. The existing VPS still runs
 `ghcr.io/ziyixi/newsletter`; image publication here does not update that server. It still reads Todofy's
 `/api/summary` and `/api/recommendation` using its existing machine contract. See
 `newsletter/docs/import-source.md` and `newsletter/docs/deployment-drain.md` for the import and release boundaries.
@@ -71,7 +71,17 @@ Practical notes learned the hard way:
 
 | Branch | Scope | Remaining and verification |
 | --- | --- | --- |
-| `codex/personal-cloud-foundation` | Owner-authorised: concise bilingual README and documentation navigation; P5 per-app catalog using committed Wrangler configs; extract repeated CI deployment probes; import Newsletter while retaining its independent image and add a durable publishing drain. | Preserve current HTTP bytes, identities and Cloudflare resources. Run Changes/catalog/probe tests and affected app checks; run Newsletter unit/runtime and credential-free image checks. Branch CI first, then the same green source SHA to main. No K3s installation or real newsletter send in this phase. Local evidence: Changes 359 tests (one intentional Watch/no-D1 skip), catalog 18, infra driver 75, Home unit 249 and workerd 73 passed; secretless OpenTofu fmt/validate and cross-config guards passed. Newsletter 2476 tests, locked lint/type/structure checks, mock HTTP smoke, no-login Codex startup, build and isolated wheel smoke passed. Codex cleanup failures retain an uncertain activity and prevent freeze; timeout/cancel/restart tests cover it. The first Linux Changes run found nested catalog discovery mutating the outer unittest loader; the bridge now uses a fresh loader and covers continuation with sibling tests. Linux Newsletter checks, actual Docker image smoke, candidate configuration validation and image artifact save passed on `98df790`; all other required jobs except Watch also passed. Watch had an existing Node 26 test-stub lifetime bug: GC could remove the Request and dependent abort signal. Its test now retains requests and uses a controlled clock to verify redirect deadlines and timer cleanup; production fetch behavior is unchanged. The final exact-SHA branch CI and main publication are still pending. Four retired GHCR packages (`todofy`, `todofy-llm`, `todofy-todo`, `todofy-database`; 302 versions) were deleted after exact owner confirmation and verified absent. The current public server deployment config has no references; the older local deployment checkout is stale. Migration snapshot and unrelated images retained. The owner requested the new independent package name `todofy-newsletter`; its creation and main publication remain to be verified. The owner approved public visibility for this code-only image; set and verify anonymous pull after creation, without changing the older Newsletter package permissions. |
+| `codex/personal-cloud-foundation` | Foundation landed on main as `e8b3666`: documentation, P5 catalog, shared CI probes, Newsletter import and durable drain. | Shared probe paths are corrected with workflow-directory and spaced-workspace regressions; full branch CI, then the exact green SHA to main. Complete Watch and Home release verification. No K3s, VPS upgrade or real newsletter send. |
+
+Foundation evidence and remaining checks:
+
+- Root README is concise and bilingual; docs, contracts and migration history have separate navigation. P5 uses nine `app.toml` files, generates Home/Access metadata, and validates ten Workers against their committed Wrangler configs. Existing Home public bytes and Access identities were preserved.
+- Changes: 360 tests (one intentional Watch/no-D1 skip); catalog: 18; infra driver: 75; Home unit: 249 and workerd: 73. Secretless OpenTofu fmt/validate and cross-config guards passed. Newsletter: 2476 tests, locked lint/type/structure, synthetic HTTP smoke, no-login Codex startup, build, isolated wheel and actual Linux Docker/configuration smoke passed.
+- The full branch run [37078220816](https://github.com/ziyixi/todofy/actions/runs/37078220816) passed at `e8b3666`. Earlier CI exposed shared unittest discovery state and a Node 26 Watch stub lifetime issue; isolated loaders and retained requests with a controlled clock cover both. Codex cleanup failure retains an uncertain activity and blocks freeze.
+- Main run [37078711967](https://github.com/ziyixi/todofy/actions/runs/37078711967) reused the exact tested image artifact and published the new package; Mail Hero deployment passed. Watch uploaded and verified its 100% version/BUILD_SHA, but its subsequent Access check could not find the shared script from `watch/worker`. Home was gated behind that failure. All nine shared helper calls now use the quoted workspace absolute path. Regression probes execute from the actual workflow directories and a workspace path containing spaces; the old Watch call fails the negative control with exit 127. The final corrected release is pending.
+- The owner approved a public code-only `todofy-newsletter` package; GitHub created it public, and anonymous registry access passed. The original Newsletter package permissions and existing VPS image/configuration are unchanged.
+- Four retired GHCR packages (`todofy`, `todofy-llm`, `todofy-todo`, `todofy-database`; 302 versions) were deleted after exact owner confirmation and verified absent. Current public server deployment configuration has no references; the older local deployment checkout is stale. Migration snapshots and unrelated images remain.
+
 
 The pattern every owner API followed (owner-approved, Google style, from Lab), for any new app or API: describe every route the app's UI
 calls in `proto/<app>/ui/vN` as AIP resources with `google.api.http`, serve them through
@@ -158,7 +168,7 @@ with synthetic data.
 2. Watch W4: a shadow-mode week (watches report, no Todoist tasks), then the owner's watches.
 3. FlowDay F6 after 2026-10-08 with the owner's OK.
 4. Service catalog (IaC P5): one `app.toml` per app generating hostnames, Access apps, dashboard links and
-   probes, validated against each `wrangler.toml`; P5 is implemented on the foundation branch above; P6 (rollback drill for `infra/`) remains later.
+   probes, validated against each `wrangler.toml`; P5 is implemented on main; P6 (rollback drill for `infra/`) remains later.
 5. Code quality phases Q0–Q7: English comments everywhere, coverage and lint ratchets, clock injection in every
    app's tests.
 

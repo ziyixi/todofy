@@ -890,7 +890,7 @@ class Workflow(unittest.TestCase):
         self.assertLess(script.index("wrangler d1 migrations apply DB --remote --config ../wrangler.toml"), script.index("deploy-vars.mjs exec"))
         check = flowday[deploy + 1]
         self.assertEqual(check["name"], "Check that production runs this commit")
-        self.assertEqual(check["run"], "bash ../../tools/deploy-probes/production.sh flowday ../wrangler.toml DB")
+        self.assertEqual(check["run"], 'bash "$GITHUB_WORKSPACE/tools/deploy-probes/production.sh" flowday ../wrangler.toml DB')
         probe = (REPO / "tools/deploy-probes/production.sh").read_text()
         for command in ("deployments status", "versions view", 'd1 migrations list "$d1" --remote'):
             self.assertIn(f"wrangler {command}", probe)
@@ -918,7 +918,7 @@ class Workflow(unittest.TestCase):
         self.assertEqual(check["name"], "Check that production runs this commit")
         self.assertEqual(lab[deploy + 2]["name"], "Check that Access answers unauthenticated requests")
         [same] = [s for s in flowday if s["name"] == check["name"]]
-        self.assertEqual(check["run"].replace("production.sh lab", "production.sh flowday"), same["run"])
+        self.assertEqual(check["run"].replace('production.sh" lab', 'production.sh" flowday'), same["run"])
         self.assertFalse({"deploy", "versions upload", "versions deploy", "rollback", "secret"} & set(wrangler_commands(check["run"])))
 
     def test_links_deploy_reads_the_dashboard_owner_and_its_own_csrf_key(self):
@@ -952,7 +952,7 @@ class Workflow(unittest.TestCase):
         check = links[deploy + 1]
         self.assertEqual(check["name"], "Check that production runs this commit")
         [same] = [s for s in steps(self.jobs["flowday-deploy"]) if s["name"] == check["name"]]
-        self.assertEqual(check["run"].replace("production.sh links", "production.sh flowday"), same["run"])
+        self.assertEqual(check["run"].replace('production.sh" links', 'production.sh" flowday'), same["run"])
         self.assertEqual(
             names[deploy + 2 :],
             [
@@ -1062,7 +1062,7 @@ class Workflow(unittest.TestCase):
         for step in lab_steps[index : index + 3]:
             with self.subTest(step=step["name"]):
                 self.assertIn(f'"{step["name"]}"', flat)
-        self.assertIn("production.sh lab ../wrangler.toml DB", lab_steps[index + 1]["run"])
+        self.assertIn('production.sh" lab ../wrangler.toml DB', lab_steps[index + 1]["run"])
         self.assertIn("wrangler versions view", (REPO / "tools/deploy-probes/production.sh").read_text())
         self.assertIn("tools/deploy-probes/access.sh", lab_steps[index + 2]["run"])
         self.assertIn("curl", (REPO / "tools/deploy-probes/access.sh").read_text())
