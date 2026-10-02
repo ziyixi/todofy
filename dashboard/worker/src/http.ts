@@ -201,7 +201,8 @@ async function route(base: Context): Promise<Routed> {
     return { response: legacyError(ctx, 410, 'reload_required', RELOAD_MESSAGE), asset: false, reason: 'RELOAD_REQUIRED' };
   }
   if (url.pathname === '/api/csrf') {
-    if (request.method !== 'GET' && !head) return fail(methodNotAllowed('GET, HEAD'));
+    // GET only, as before: a token and its cookie are issued to a page that asks for one.
+    if (request.method !== 'GET') return fail(methodNotAllowed('GET'));
     try {
       return { response: await csrfResponse(ctx), asset: false };
     } catch (error) {

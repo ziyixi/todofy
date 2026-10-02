@@ -309,14 +309,17 @@ describe('Access', () => {
 });
 
 describe('CSRF and mutations', () => {
-  it('issues a signed token and cookie at /api/csrf (GET and HEAD only)', async () => {
+  it('issues a signed token and cookie at /api/csrf (GET only)', async () => {
     const { env } = makeEnv();
     const pair = await csrf(env);
     expect(pair.token.split('.')).toHaveLength(2);
     expect(pair.cookie).toBe(`${CSRF_COOKIE}=${pair.token}`);
-    const post = await call(env, PATHS.csrf, { method: 'POST' });
-    expect(post.status).toBe(405);
-    expect(post.headers.get('allow')).toBe('GET, HEAD');
+    for (const method of ['POST', 'HEAD']) {
+      const refused = await call(env, PATHS.csrf, { method });
+      expect(refused.status, method).toBe(405);
+      expect(refused.headers.get('allow')).toBe('GET');
+      expect(refused.headers.get('set-cookie')).toBeNull();
+    }
   });
 
   it('starts a canary with Origin + CSRF and answers its first run', async () => {

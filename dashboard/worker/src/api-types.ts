@@ -67,7 +67,6 @@ import type {
   WorkerRow,
 } from '@ziyixi/proto/dashboard/ui/v1/cloudflare_view_wire';
 import type { OverrideGuardRequest, OverrideGuardResponse, RunCanaryRequest, RunCanaryResponse } from '@ziyixi/proto/dashboard/ui/v1/dashboard_ui_service_wire';
-import type { ErrorReason } from '@ziyixi/proto/dashboard/ui/v1/errors_wire';
 import type {
   CanaryBadge,
   FlowState,
@@ -190,8 +189,6 @@ export type {
 };
 export type { GuardLevel, GuardState, OpsReportItem, OpsReportReceipt, OpsStatus };
 
-/** A dashboard.ui.v1 ErrorReason as ErrorInfo.reason writes it (`CANARY_ACTIVE`). */
-export type DashboardReason = Uppercase<ErrorReason>;
 /** The state of the usage read (Usage.State). */
 export type UsageState = Usage_State;
 /** The state of the drift check (Drift.State). */
