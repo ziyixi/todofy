@@ -424,7 +424,8 @@ describe('budgets of a tick', () => {
     h = await mockupDay({ CANARY_UTC_HOUR: String(new Date(start).getUTCHours()) });
     await h.tick(start);
     const first = [...(await h.called()), ...h.outboundLog.splice(0)];
-    // 3 status + 3 probes + 1 GraphQL + startCanary + canaryDelivery + reportOps (+ canaryResult when delivered at once).
+    // 4 status (this log keeps Mail Hero's and Todofy's) + 3 probes + 1 GraphQL + startCanary + canaryDelivery + reportOps
+    // (+ canaryResult when delivered at once) + the drift check's calls.
     expect(first.length).toBeLessThanOrEqual(outboundPerTick());
     for (const probe of Object.values(PROBES)) expect(first).toContain(probe);
     expect(first).toContain(GRAPHQL);

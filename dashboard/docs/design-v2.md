@@ -93,6 +93,7 @@ Three lists joined by id, compiled into the Worker; the UI gets the public view 
 | 论文雷达 (`lab`) | 应用 | `ops_v1` (LAB, guard) | 7 天喜欢 |
 | FlowDay (`flowday`, D1 `flowday`) | 应用 | `public_http` outside Access: one GET per tick to `flowday…/pwa/manifest.webmanifest`, expecting 200 and `application/manifest+json`. The host is behind the Access app "flowday", but "flowday-bypass" covers `/pwa/*` and the Worker serves the manifest itself (a static asset, no D1 read), so Access's login redirect can never pass; plus the Worker's error rate (`error_rate`). No Ops entrypoint. F6 may remove the bypass (`flowday/docs/design.md` §11): that change must move this probe first (`test_infra_config.py` fails otherwise) | latency |
 | 短链接 (`links`, D1 `links`) | 应用 | `public_http` outside Access: one GET per tick to `s…/robots.txt`, expecting 200 and `text/plain` (the Worker's constant, before any D1 read); plus the Worker's error rate. The tile opens the launcher `https://s.ziyixi.science/_/` behind the path-scoped Access app "links". No Ops entrypoint, and a short link may go unused for days, so no idle rule | latency |
+| 网页监视 (`watch`, DO `WatchState`) | 应用 | `ops_v1` (WATCH, guard): counts and codes only, never a watch's name, URL or page text; its `status()` re-arms a missing alarm, so each tick restarts a lost scheduler | 新变化 |
 | 个人网站 (`ziyixi-website`, assets only) | 站点 | `public_http`: one GET per tick to `www…/build-info.json` (www is canonical; the apex serves the same site), status + latency only, `redirect: 'manual'`, body unread, `enabled` flag. The site's Worker (`website/`) serves static assets only, which are not Worker invocations, so analytics cannot judge it; the file is part of its static export, so the probe survives the cutover | latency |
 | Notion 发布 (`ziyixi-notion-publish`) | 后台服务 | `analytics`: error rate + 26 h idle rule | last request hour |
 | Newsletter | 后台服务 | `none` → 未接入 | — |
@@ -101,7 +102,9 @@ Three lists joined by id, compiled into the Worker; the UI gets the public view 
 
 Flows: 邮件 → 任务 (来源转发 ○ → 收件与保存 → 解析 → Webhook 投递 → Todofy 摘要 → Todoist 与提醒; canary
 `mail-todofy` verifies 投递 and 摘要 only), 网站发布 (Notion ○ → 发布 → 网站可用), 每日 Newsletter
-(Todofy 报告 → 读取报告 ○ → 写入 Notion ○; partial), 运维摘要 (巡检 → 提交摘要 → 每日提醒), and GTD 循环
+(Todofy 报告 → 读取报告 ○ → 写入 Notion ○; partial), 网页监视 (网站 ○ → 检查 → 变化收件箱 → 交给 Todofy: the watch app's
+`scheduler_stale` and `watches_broken` at 检查, `notify_unsettled` at 交给 Todofy; `maintenance_mode` is app-only, as for
+Lab), 运维摘要 (巡检 → 提交摘要 → 每日提醒), and GTD 循环
 (收集 → 理清 → 组织 → 回顾 → 执行 ○: Todofy's `received_24h`, then the counters of its daily read-only
 Todoist snapshot, `review_overdue` (info) and `gtd_snapshot_stale` at 回顾; 执行 is done in Todoist, outside the dashboard (FlowDay has its own tile but no stage: the work itself is not something the dashboard can see);
 todofy/docs/gtd-features.md §9).
@@ -235,10 +238,10 @@ Measured (unit suite for bytes, workerd suite for rows; a full 14-run canary his
 
 | View | Mockup day | Bad day (20 items, 16 signals/app, 14 failed runs) | Rows read |
 | --- | --- | --- | --- |
-| home | 4.4 KB (eight tiles; budget 10 KiB) | 8.8 KB | 26 (≤ 28) |
-| flows | 16.1 KB (six flows; 17.4 KB in the workerd suite) | 22.9 KB | 26 (≤ 28) |
+| home | 4.7 KB (nine tiles; budget 10 KiB) | 9.1 KB | 26 (≤ 28) |
+| flows | 17.0 KB (seven flows; 17.8 KB in the workerd suite) | 23.8 KB | 26 (≤ 28) |
 | cloudflare | ≤ 16 KiB, also with 20 Workers | under `V2_BODY_MAX` with 20 listed drift findings (tested) | 27 (≤ 28; one more document since §10: `drift`) |
-| ops | ≤ 24 KiB | 24.5 KB | 26 (≤ 28) |
+| ops | ≤ 24 KiB | 24.8 KB | 26 (≤ 28) |
 
 `V2_BODY_BUDGET` holds for a normal day; `V2_BODY_MAX` (32 KiB) bounds the bad day. The Cloudflare view
 lists at most `CF_VIEW_WORKERS_MAX` (50) of the up to `CF_SCRIPTS_MAX` (100) remembered scripts —
