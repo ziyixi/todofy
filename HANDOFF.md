@@ -90,7 +90,9 @@ with synthetic data.
 
 ### `proto-flowday-ui` — FlowDay owner API as `flowday.ui.v1`
 
-- State: built, reviewed and fixed, local only (not pushed): the build commits rebased on `9e38624`, then the
+- State: LANDING on `main` (2026-10-02, second after the dashboard; rebased on `a956440`, conflicts in the shared
+  CI comments and docs resolved by keeping both apps). Post-deploy checks below are pending until this line says
+  otherwise. Built, reviewed and fixed: the build commits, then the
   review fixes `584486c` (IDL), `6ce005f` (Worker), `455eae7` (UI), `dbac97a` (CI) and a docs commit; every
   check passed again from a clean clone of the head. Every finding of the design and the compatibility/security
   reviews was fixed, none refuted.
