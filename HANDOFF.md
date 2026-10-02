@@ -162,11 +162,15 @@ with synthetic data.
 
 ### `proto-todofy-ui` — Todofy owner API as `todofy.ui.v1`
 
-- State: rebased on `a956440` (after the dashboard's landing); all 11 review findings fixed, with tests.
-  Verified from a clean clone of its head: every check in the list above, the runtime suite, the gateway's workerd CPU test, the dry runs and the smoke
-  (every rpc through the UI's own client; the machine routes byte-identical to `main` apart from timestamps
-  and request IDs). Commits: `todofy.ui.v1` IDL, core RPC, gateway, tests, UI, docs, then one per review fix.
-  Ready to land.
+- State: READY to land fourth, right after Mail Hero: rebased on `18e8e92` (`proto-mail-hero-ui`'s head, which
+  contains FlowDay's `8d9100e`), the shared CI comments and docs merged to name every proto user (Lab, links,
+  watch, the dashboard, FlowDay, Mail Hero and Todofy) once. If Mail Hero lands with a different head, rebase
+  again onto it. All 11 review findings fixed, with tests. Verified again from a clean clone after that rebase:
+  every check in the list above (breaking vs `18e8e92`), the runtime suite, the gateway's workerd CPU test, both
+  dry runs, and lint and typecheck of every other TypeScript proto user (Lab, links, watch, the dashboard,
+  FlowDay, Mail Hero). The smoke (every rpc through the UI's own client; the machine routes byte-identical to
+  `main` apart from timestamps and request IDs) ran before the rebase, which changed no Todofy file. Commits:
+  `todofy.ui.v1` IDL, core RPC, gateway, tests, UI, docs, then one per review fix.
 - Review fixes: RecomputeReport stores only a computed report, so the same `request_id` computes again after
   RATE_LIMITED or UNAVAILABLE (a stale unfinished claim is taken over after 120 s); a bug in TodofyCore is
   INTERNAL, not UNAVAILABLE, and the UI retries only UNAVAILABLE and missing answers; ListMailEvents takes one
