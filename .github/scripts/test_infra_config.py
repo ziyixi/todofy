@@ -26,6 +26,10 @@ What they keep true (infra/README.md):
   FROZEN object's id is the id ids.tf records, and its OUTPUTS are the outputs outputs.tf declares.
 - RETIRING_HOSTS is exact: each retiring host is still a FlowDay destination and no other application uses one, so the
   commit that drops a host from FlowDay's applications must empty its allowance in the same change.
+- The count of managed objects is one number: README.md "Managed here (N objects)", bootstrap_state.py's
+  EXPECTED_OBJECTS (a rebuild by import must cover each) and the resources the configuration declares (each for_each
+  map's keys) agree; ids.tf records the id of every application except one still AHEAD_OF_DEPLOY (never the all-zeros
+  placeholder), so a rebuild by import can name it.
 - No account or zone id (32 hex digits) and no email address is committed under infra/.
 """
 
@@ -51,6 +55,7 @@ import test_wrangler_configs  # noqa: E402
 REPO = Path(__file__).resolve().parents[2]
 INFRA = REPO / "infra"
 sys.path.insert(0, str(INFRA / "scripts"))
+import bootstrap_state  # noqa: E402
 import infra_state  # noqa: E402
 
 # Production Workers whose D1 database and Access applications are not adopted into infra/ yet. Empty since IaC P4
@@ -195,6 +200,42 @@ class Coverage(unittest.TestCase):
                     re.search(r'^\s*mail_hero_backup_app_id\s*=\s*"([^"]+)"', ids, re.MULTILINE).group(1)}
         self.assertEqual(infra_state.FROZEN_OBJECTS, recorded)
 
+    def test_the_managed_object_count_is_one_number(self):
+        """README.md's heading, the bootstrap's EXPECTED_OBJECTS (a rebuild by import refuses any other count) and the
+        resources declared (a for_each resource counts the keys of its locals map) are the same number, so adding an
+        object without updating the rebuild path fails here, not during a disaster recovery."""
+        code = "".join(path.read_text() for path in sorted(INFRA.glob("*.tf")))
+        declared = 0
+        for body in re.findall(r'^resource "[^"]+" "[^"]+" \{\n(.*?)^\}', code, re.MULTILINE | re.DOTALL):
+            each = re.search(r"^\s*for_each\s*=\s*local\.(\w+)\s*$", body, re.MULTILINE)
+            if each is None:
+                declared += 1
+                continue
+            block = re.search(rf"^  {each.group(1)} = \{{\n(.*?)^  \}}\n", code, re.MULTILINE | re.DOTALL)
+            self.assertIsNotNone(block, each.group(1))
+            declared += len(re.findall(r'^    "[^"]+"\s*=', block.group(1), re.MULTILINE))
+        heading = re.search(r"^### Managed here \((\d+) objects\)$", (INFRA / "README.md").read_text(), re.MULTILINE)
+        self.assertIsNotNone(heading)
+        self.assertEqual(int(heading.group(1)), declared)
+        self.assertEqual(bootstrap_state.EXPECTED_OBJECTS, declared)
+
+    def test_ids_record_every_application_but_one_ahead_of_its_deploy(self):
+        """ids.tf names every owner and FlowDay application by its id (a rebuild by import writes its import block
+        from it), except an application created ahead of its Worker's first deploy: that deploy's commit records the
+        id (README.md "Adding an app" step 5), and the all-zeros placeholder never passes."""
+        ids = (INFRA / "ids.tf").read_text()
+        code = (INFRA / "access.tf").read_text()
+        uuid = re.compile(r'^"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"$')
+        placeholder = '"00000000-0000-0000-0000-000000000000"'
+        owner_ids = hcl_map(ids, "access_app_ids")
+        flowday_ids = hcl_map(ids, "flowday_app_ids")
+        self.assertEqual(set(owner_ids), set(hcl_map(code, "owner_apps")) - set(AHEAD_OF_DEPLOY))
+        self.assertEqual(set(flowday_ids), set(MatchesTheApps.flowday_apps(code)))
+        for key, value in {**owner_ids, **flowday_ids}.items():
+            with self.subTest(app=key):
+                self.assertRegex(value, uuid)
+                self.assertNotEqual(value, placeholder, "fill in the application id read after the apply")
+
     def test_every_production_worker_is_adopted_or_listed_as_not_adopted(self):
         """A Worker added to test_wrangler_configs.PRODUCTION must be either checked here or named in NOT_ADOPTED,
         so a new app's D1 database is never skipped silently by the checks below."""
@@ -203,7 +244,8 @@ class Coverage(unittest.TestCase):
 
 
 class MatchesTheApps(unittest.TestCase):
-    def flowday_apps(self, code: str) -> dict[str, list[str]]:
+    @staticmethod
+    def flowday_apps(code: str) -> dict[str, list[str]]:
         block = re.search(r"^  flowday_apps = \{\n(.*?)^  \}\n", code, re.MULTILINE | re.DOTALL).group(1)
         entries = re.findall(r'^    "([a-z-]+)" = \{\n(.*?)^    \}', block, re.MULTILINE | re.DOTALL)
         return {key: re.findall(r'"([^"]+)"', re.search(r"destinations = \[(.*?)\]", body).group(1))

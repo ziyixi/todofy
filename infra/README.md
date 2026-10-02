@@ -314,7 +314,8 @@ or an empty state). It prints one fixed line per step and the redacted summaries
    edited).
 3. Probes conditional writes on a throwaway key (report only).
 4. Notes whether the state object exists, then `tofu init` with the backend.
-5. Plans. The plan must hold **only imports**: every resource `import` (or already `no-op`), exactly 18,
+5. Plans. The plan must hold **only imports**: every resource `import` (or already `no-op`), exactly 19
+   (`EXPECTED_OBJECTS`),
    and outputs only created (a new state has none). Anything else (create, update, replace, delete,
    forget, import+update, an output update, another count) **refuses with exit 4 before any apply**. If the
    state object **already exists**, any import or output create refuses too (exit 4): a populated state changes
@@ -322,11 +323,13 @@ or an empty state). It prints one fixed line per step and the redacted summaries
 6. Applies exactly that saved plan, only into a missing state object. Import reads Cloudflare and writes only
    the state.
 7. Reads the state object back and checks that it is encrypted.
-8. Plans again: it must be "No changes" (exit 0, 18 no-op, no output change), or the script fails.
+8. Plans again: it must be "No changes" (exit 0, 19 no-op, no output change), or the script fails.
 
 A second run on an existing state only verifies it: "No changes" passes, anything else refuses. The bootstrap
 needs the `import {}` blocks, which were [removed](#removing-the-import-blocks): restore `imports.tf` from git
-history on a branch first. Rebuilding by import (a lost passphrase, or the first way of
+history on a branch first. That file predates the objects created here later ([Adding an app](#adding-an-app): the
+watch app's application), so add one block for each of them from its id in [`ids.tf`](ids.tf), in the form of the
+other applications' blocks; without it the plan holds a `create` and the bootstrap refuses (exit 4). Rebuilding by import (a lost passphrase, or the first way of
 [Rotating the passphrase](#rotating-the-passphrase)) therefore means: copy the state object to a backup key
 (as in [Apply](#apply-p4) "Restoring a state backup", in reverse), delete the state object, then run the bootstrap.
 
@@ -526,8 +529,15 @@ AUD exists only once the application does, and the Worker must be deployed with 
 5. **The app's first-deploy commit**: the AUD as the config's `ACCESS_AUDIENCE`, the Custom Domain in its `routes`,
    the Worker moved to `PRODUCTION` in `test_wrangler_configs.py` (and so into `infra_state.py`'s
    `WRANGLER_CONFIGS`), its `AHEAD_OF_DEPLOY` entry removed, and the application id recorded in
-   [`ids.tf`](ids.tf) `access_app_ids` (for a rebuild by import, which then needs an import block for it too). From
-   that commit on, "Infra drift" compares the committed AUD with `access_aud` every day.
+   [`ids.tf`](ids.tf) `access_app_ids` (for a rebuild by import, which then needs an import block for it too:
+   [Bootstrap](#bootstrap-once)). `test_infra_config.py` requires that id once `AHEAD_OF_DEPLOY` is empty, and refuses
+   the all-zeros placeholder, as the app's own config test refuses the all-zeros AUD: both values come from step 4.
+   From that commit on, "Infra drift" compares the committed AUD with `access_aud` every day.
+6. **After that commit reaches `main`**: it changes `infra/`, so its push runs "Infra drift". That run is the first
+   check that the committed AUD is the application's (the deploy's Access probes cannot tell: Access answers before
+   the Worker runs, so a wrong AUD only shows as a 403 for the owner). It must be green: `no-op: 19`,
+   `output changes: 0`, and no outputs problem. Red with `vars.ACCESS_AUDIENCE differs from access_aud` means the
+   committed AUD is wrong: read it again (step 4), fix it and push; the app's deploy job then ships the fix.
 
 Between steps 3 and 5 the application gates a host that no Worker serves yet, which is harmless.
 
@@ -572,7 +582,8 @@ rebuild by import.** The state holds nothing that cannot be read again.
 2. Delete the state object: `python3 mail-hero/deploy/cloudflare-admin.py wrangler r2 object delete
    infra-state/production/terraform.tfstate --remote`. (The bootstrap writes only a missing state object.)
 3. Run the bootstrap with `--passphrase-file ~/.config/todofy-infra/state-passphrase.new`. It imports the
-   18 objects again into a new encrypted state and ends with "No changes".
+   19 objects again (the watch application through the block added from `ids.tf`, [Bootstrap](#bootstrap-once)) into
+   a new encrypted state and ends with "No changes".
 4. `gh secret set INFRA_STATE_PASSPHRASE --env production -R ziyixi/todofy < ~/.config/todofy-infra/state-passphrase.new`,
    update the password manager, dispatch "Infra drift".
 5. After a suspected leak: delete the old backups (above).
