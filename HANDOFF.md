@@ -182,8 +182,8 @@ with synthetic data.
   unchanged; `openapi-typescript` is retired. The old owner paths answer 410 `reload_required` (old envelope)
   for one release; `owner_api` in core keeps serving the old gateway during the deploy. The next Todofy
   release removes both (`todofy/docs/gateway-contract.md` §6.4).
-- Measured: gateway 11.8 → 71.7 KiB gzip (budget 86); UI JS 131.9 → 172.3 KiB gzip (budget 208); todofy-core
-  153.6 → 166.6 KiB gzip; gateway CPU per owner request at most 6.2 reference ms (a 1.9 MB ASCII legacy text heavy in escapes; the
+- Measured: gateway 11.8 → 71.8 KiB gzip (budget 86); UI JS 131.9 → 172.4 KiB gzip (budget 208); todofy-core
+  153.6 → 168.4 KiB gzip; gateway CPU per owner request at most 6.2 reference ms (a 1.9 MB ASCII legacy text heavy in escapes; the
   reports at their limits 5.2),
   the isolate's first API request 4.2-5.2 (bound 8; details in `todofy/docs/gateway-contract.md` §8).
 - Deploys: Todofy (core first, then the gateway; no D1 or Durable Object migration) only. Core must answer
