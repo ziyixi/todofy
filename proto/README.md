@@ -746,11 +746,11 @@ the users' languages and each package's importers from the sources, so the maps 
 
 ## Later
 
-Planned: every other app's UI API on the [HTTP APIs](#http-apis) pattern (Todofy's and Mail Hero's; the dashboard's and FlowDay's moved on 2026-10-02). ops-v1 moved on 2026-10-01 as one package,
+Every app's UI API is on the [HTTP APIs](#http-apis) pattern (the dashboard's, FlowDay's, Mail Hero's and Todofy's moved on 2026-10-02). ops-v1 moved on 2026-10-01 as one package,
 `ops/v1`, because its four services share every message, recommendation-v1 and summary-v1 as `todofy/report/v1`
 (messages only; Todofy's owner API, which lists them, moved on 2026-10-02 as `todofy/ui/v1`), and mail-received-v1 as
 `mailhero/webhook/v1` (messages only: the webhook's path, authentication and Idempotency-Key header stay the HTTP
-transport's). task-intent-v1's value
+transport's). Planned: task-intent-v1's value
 rules can move into its IDL the same way, generating its schema too. Shared types come from the same googleapis dependency (`google.rpc.Status`) or a
 `common/<name>/v1` package. Each contract moves the way task-intent-v1 did: the IDL and tests first, then
 both sides on the generated code with every frozen v1 byte pinned by tests (Mail Hero's legacy fixtures are
