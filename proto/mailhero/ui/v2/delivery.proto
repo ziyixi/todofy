@@ -174,15 +174,15 @@ message DeliveryPayload {
   string body_sha256 = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
 }
 
-// Attempts that ended, by outcome (outcomes still running and NOT_SENT are not counted).
+// Attempts that ended, by AttemptResult (attempts still running and NOT_SENT have none and are not counted).
 message AttemptCounts {
-  // DELIVERED.
+  // SUCCEEDED.
   int32 succeeded_count = 1 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // RETRYABLE.
+  // RETRIED.
   int32 retried_count = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // REJECTED or FAILED.
+  // FAILED.
   int32 failed_count = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // INTERRUPTED: whether the consumer got it is unknown.
+  // UNKNOWN.
   int32 unknown_count = 4 [(google.api.field_behavior) = OUTPUT_ONLY];
 }
 
@@ -195,4 +195,20 @@ message AttemptBucket {
   google.protobuf.Timestamp end_time = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
   // The attempts within the range that ended within [start_time, end_time).
   AttemptCounts counts = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
+}
+
+// How the delivery dashboard groups the attempts that ended: each result is one or two DeliveryAttempt.Outcome values.
+// An attempt still running (OUTCOME_UNSPECIFIED) or NOT_SENT has no result. AttemptCounts counts attempts by result,
+// and ListDeliveries' filter `attempt_result = <AttemptResult>` lists the deliveries with an attempt of one.
+enum AttemptResult {
+  // No result: never sent, never accepted in a filter.
+  ATTEMPT_RESULT_UNSPECIFIED = 0;
+  // Outcome DELIVERED: the consumer answered 2xx and took the event over.
+  ATTEMPT_RESULT_SUCCEEDED = 1;
+  // Outcome RETRYABLE: a transient failure; a retry was scheduled.
+  ATTEMPT_RESULT_RETRIED = 2;
+  // Outcome REJECTED or FAILED: the attempt ended the delivery or was refused, without an automatic retry.
+  ATTEMPT_RESULT_FAILED = 3;
+  // Outcome INTERRUPTED: whether the consumer got it is unknown.
+  ATTEMPT_RESULT_UNKNOWN = 4;
 }

@@ -266,7 +266,7 @@ service MailHeroUiService {
   }
 
   // The attempts of every delivery of real mail (not connection tests or canaries) that ended within a time range, by
-  // outcome and by hour or day of a time zone, for the delivery dashboard (AIP-136 on the AIP-159 collection
+  // AttemptResult and by hour or day of a time zone, for the delivery dashboard (AIP-136 on the AIP-159 collection
   // `deliveries/-/attempts`). Was GET /api/v1/delivery-stats.
   rpc SummarizeDeliveryAttempts(SummarizeDeliveryAttemptsRequest) returns (SummarizeDeliveryAttemptsResponse) {
     option (google.api.http) = {get: "/api/v2/{parent=deliveries/*}/attempts:summarize"};
@@ -580,12 +580,14 @@ message ListDeliveriesRequest {
   // - `state = <Delivery.State>`, the stored state's name without its prefix in upper case (`state = FAILED`; PAUSED is
   //   not a stored state);
   // - `message = "messages/<uuid>"`: the message's deliveries;
-  // - `attempt_outcome = SUCCEEDED | RETRIED | FAILED | UNKNOWN` with both `attempt_finish_time >= "<RFC 3339>"` and
-  //   `attempt_finish_time < "<RFC 3339>"` (quoted times with their zone; one without the others, or a time that is
-  //   not one, is BAD_REQUEST; a range that is empty, reversed or more than 90 days and two hours long is
-  //   INVALID_TIME_RANGE): the deliveries of real mail with at least one attempt of that outcome (AttemptCounts) that ended
-  //   within the range, each listed once however many matched (the dashboard's drill-down; it counts attempts, this
-  //   lists events).
+  // - the dashboard's drill-down, all three together: `attempt_result = <AttemptResult>` (the value name without its
+  //   prefix in upper case: `attempt_result = RETRIED`), `attempt_finish_time >= "<RFC 3339>"` and
+  //   `attempt_finish_time < "<RFC 3339>"` (quoted times with their zone). It lists the deliveries of real mail with at
+  //   least one attempt of that result (DeliveryAttempt.outcome as AttemptResult maps it) whose finish_time is within
+  //   the range, each once however many matched: the dashboard counts attempts, this lists events. The two names are
+  //   not fields of Delivery but of its attempts, so they carry the `attempt_` prefix. One of the three without the
+  //   others, or a time that is not RFC 3339, is BAD_REQUEST; a range that is empty, reversed or more than 90 days and
+  //   two hours long is INVALID_TIME_RANGE.
   string filter = 3 [(google.api.field_behavior) = OPTIONAL];
 }
 

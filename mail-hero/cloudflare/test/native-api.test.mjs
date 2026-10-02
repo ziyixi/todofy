@@ -14,9 +14,9 @@ import { authenticate, csrfResponse, decryptCredential, encryptCredential, HttpE
 function summarize(from, to, granularity, timeZone) {
   return `/deliveries/-/attempts:summarize${query({ start_time: from, end_time: to, granularity, time_zone: timeZone })}`
 }
-/** ListDeliveries' query for the dashboard's drill-down: an outcome and an attempt range. */
-function drilldown(outcome, from, to, extra = '') {
-  return `/deliveries${query({ filter: `attempt_outcome = ${outcome} AND attempt_finish_time >= ${quote(from)} AND attempt_finish_time < ${quote(to)}${extra}` })}`
+/** ListDeliveries' query for the dashboard's drill-down: an AttemptResult and an attempt range. */
+function drilldown(result, from, to, extra = '') {
+  return `/deliveries${query({ filter: `attempt_result = ${result} AND attempt_finish_time >= ${quote(from)} AND attempt_finish_time < ${quote(to)}${extra}` })}`
 }
 
 test('delivery dashboard uses immutable attempt outcomes, default UTC windows and distinct-event drill-down', async () => {
@@ -84,7 +84,12 @@ test('delivery dashboard uses immutable attempt outcomes, default UTC windows an
     drilldown('INVALID', from, to),
     drilldown('CONSTRUCTOR', from, to),
     drilldown('failed', from, to),
-    `/deliveries${query({ filter: 'attempt_outcome = FAILED' })}`,
+    `/deliveries${query({ filter: 'attempt_result = FAILED' })}`,
+    // DeliveryAttempt.Outcome names, the old field name and UNSPECIFIED are not results.
+    drilldown('DELIVERED', from, to),
+    drilldown('REJECTED', from, to),
+    drilldown('UNSPECIFIED', from, to),
+    `/deliveries${query({ filter: `attempt_outcome = FAILED AND attempt_finish_time >= ${quote(from)} AND attempt_finish_time < ${quote(to)}` })}`,
     `/deliveries${query({ filter: `attempt_finish_time >= ${quote(from)} AND attempt_finish_time < ${quote(to)}` })}`,
     `/deliveries${query({ filter: 'state = PAUSED' })}`,
     `/deliveries${query({ filter: 'state = FAILED OR state = PENDING' })}`,

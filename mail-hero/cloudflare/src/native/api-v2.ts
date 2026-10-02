@@ -13,7 +13,7 @@
 import { create } from '@ziyixi/proto/protobuf'
 import { timestampDate, timestampFromDate, type Timestamp } from '@ziyixi/proto/protobuf/wkt'
 import type { CommonReason } from '@ziyixi/proto/common/errors/v1/errors_pb'
-import { AttemptBucketSchema, DeliveryAttempt_Outcome, DeliveryAttemptSchema, DeliveryPayloadSchema, DeliverySchema, Delivery_RetryMode, Delivery_State, type Delivery, type DeliveryAttempt } from '@ziyixi/proto/mailhero/ui/v2/delivery_pb'
+import { AttemptBucketSchema, AttemptResult, DeliveryAttempt_Outcome, DeliveryAttemptSchema, DeliveryPayloadSchema, DeliverySchema, Delivery_RetryMode, Delivery_State, type Delivery, type DeliveryAttempt } from '@ziyixi/proto/mailhero/ui/v2/delivery_pb'
 import { Endpoint_AuthType, EndpointSchema, type Endpoint } from '@ziyixi/proto/mailhero/ui/v2/endpoint_pb'
 import type { ErrorReason } from '@ziyixi/proto/mailhero/ui/v2/errors_pb'
 import {
@@ -46,7 +46,7 @@ import { FilterError, parseFilter, type Restriction } from './api-filter.ts'
 import { HttpError } from './security.ts'
 import { type Cursor, type Row } from './api-common.ts'
 import { clearMessageContent, DELIVERY_STATES, getMessage, listMessages, markRead, PARSE_STATES, readMessageContent, reparseMessage, sendMessage, type MessageQuery, type ParsedRecord } from './api-messages.ts'
-import { changeDelivery, getAttempt, getDelivery, listAttempts, listDeliveries, OUTCOME_SQL, readPayload, resendDelivery } from './api-deliveries.ts'
+import { changeDelivery, getAttempt, getDelivery, listAttempts, listDeliveries, readPayload, type AttemptResultName, resendDelivery } from './api-deliveries.ts'
 import { checkEndpoint, createEndpoint, getEndpoint, listEndpoints, rotateCredential, testEndpoint, unblockEndpoint, updateEndpoint } from './api-endpoints.ts'
 import { currentSettings, overview, patchSettings, previewRetention, setupStatus } from './api-settings.ts'
 import { deliveryRange, deliveryStats, parseInstant } from './api-delivery-stats.ts'
@@ -366,6 +366,8 @@ function restrictionsBy(restrictions: readonly Restriction[], allowed: Readonly<
   }
   return found
 }
+/** The names an AttemptResult takes in a filter, lower-cased as enumValue compares them. */
+const RESULT_NAMES = Object.keys(AttemptResult).filter(name => name !== 'UNSPECIFIED').map(name => name.toLowerCase())
 /** A bare upper-case enum name in `names` (lower-cased), else BAD_REQUEST. */
 function enumValue(restriction: Restriction | undefined, names: readonly string[]): string | null {
   if (restriction === undefined) return null
@@ -553,16 +555,17 @@ export const handlers: ServiceHandlers<ShapeOf<typeof MailHeroUiService>, ApiCon
     const parameters = { filter: request.filter }
     const { literals, restrictions } = filterOf(request.filter)
     if (literals.length > 0) bad()
-    const by = restrictionsBy(restrictions, { state: ['='], message: ['='], attempt_outcome: ['='], attempt_finish_time: ['>=', '<'] })
+    const by = restrictionsBy(restrictions, { state: ['='], message: ['='], attempt_result: ['='], attempt_finish_time: ['>=', '<'] })
     const message = by.get('message =')
     if (message !== undefined && !message.quoted) bad()
-    const outcome = enumValue(by.get('attempt_outcome ='), Object.keys(OUTCOME_SQL))
+    const resultName = enumValue(by.get('attempt_result ='), RESULT_NAMES)
+    const result = resultName === null ? null : resultName.toUpperCase() as AttemptResultName
     const from = by.get('attempt_finish_time >='), to = by.get('attempt_finish_time <')
-    // The drill-down needs all three; a range without an outcome, or an outcome without its range, is refused.
-    if ((outcome === null) !== (from === undefined) || (from === undefined) !== (to === undefined)) bad()
+    // The drill-down needs all three; a range without a result, or a result without its range, is refused.
+    if ((result === null) !== (from === undefined) || (from === undefined) !== (to === undefined)) bad()
     const page = await listDeliveries(env, {
       state: enumValue(by.get('state ='), DELIVERY_STATES), messageID: message === undefined ? null : idOf(message.value, 'messages'),
-      outcome, range: from === undefined ? null : deliveryRange(filterInstant(from), filterInstant(to!)),
+      result, range: from === undefined ? null : deliveryRange(filterInstant(from), filterInstant(to!)),
       limit: pageSize(request.pageSize), cursor: cursorOf(request.pageToken, parameters),
     })
     return create(ListDeliveriesResponseSchema, { deliveries: page.items.map(toDelivery), nextPageToken: tokenOf(page.next, parameters) })

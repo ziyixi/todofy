@@ -2,15 +2,21 @@
 // request in R2, and retry, cancel and resend. Inputs are plain values api-v2.ts read from the request; outputs are D1
 // rows (api-common.ts).
 import type { Env } from './types'
+import type { AttemptResult } from '@ziyixi/proto/mailhero/ui/v2/delivery_pb'
 import { HttpError } from './security.ts'
 import { enqueue, requestDelivery } from './pipeline.ts'
 import { action, delivery, deliveryJSON, deliverySelect, finishAction, first, now, paged, required, rows, type Cursor, type Page, type Row } from './api-common.ts'
 import type { DeliveryRange } from './api-delivery-stats.ts'
 
-/** Attempt outcomes as the dashboard groups them (mailhero.ui.v2 AttemptCounts), and their rows. */
-export const OUTCOME_SQL: Readonly<Record<string, string>> = {
-  succeeded: "a.outcome='delivered'", retried: "a.outcome='retryable'",
-  failed: "a.outcome IN('rejected','failed')", unknown: "a.outcome='interrupted'",
+/** A result of mailhero.ui.v2 AttemptResult, by its name. */
+export type AttemptResultName = Exclude<keyof typeof AttemptResult, 'UNSPECIFIED'>
+/**
+ * The attempts (`a`, delivery_attempts) of each AttemptResult: the outcomes delivery.proto maps it to. Exhaustive (a
+ * new result fails the typecheck until it is mapped). The dashboard's counts and its drill-down both read this.
+ */
+export const RESULT_SQL: Readonly<Record<AttemptResultName, string>> = {
+  SUCCEEDED: "a.outcome='delivered'", RETRIED: "a.outcome='retryable'",
+  FAILED: "a.outcome IN('rejected','failed')", UNKNOWN: "a.outcome='interrupted'",
 }
 
 /** The restrictions of ListDeliveries (api-v2.ts parses its filter into these). */
@@ -19,8 +25,8 @@ export interface DeliveryQuery {
   state: string | null
   /** The deliveries of one message. */
   messageID: string | null
-  /** With `range`: deliveries of real mail with an attempt of this outcome (OUTCOME_SQL) that ended in the range. */
-  outcome: string | null
+  /** With `range`: deliveries of real mail with an attempt of this result (RESULT_SQL) that ended in the range. */
+  result: AttemptResultName | null
   range: DeliveryRange | null
   limit: number
   cursor: Cursor | null
@@ -29,10 +35,10 @@ export interface DeliveryQuery {
 export async function listDeliveries(env: Env, query: DeliveryQuery): Promise<Page> {
   // One event may have several matching attempts. Materializing distinct IDs
   // keeps the drill-down list distinct, while the chart counts attempts.
-  const range = query.outcome && query.range ? query.range : null
+  const range = query.result && query.range ? query.range : null
   const matching = range ? ` JOIN (
     SELECT DISTINCT a.event_id FROM delivery_attempts a
-    WHERE a.finished_at>=? AND a.finished_at<? AND ${OUTCOME_SQL[query.outcome!]}
+    WHERE a.finished_at>=? AND a.finished_at<? AND ${RESULT_SQL[query.result!]}
   ) matched ON matched.event_id=d.event_id` : ''
   const binds: unknown[] = range ? [range.from, range.to] : []
   const conditions: string[] = []

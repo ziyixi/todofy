@@ -19,15 +19,15 @@ it('keeps the selected attempt result and exact interval while paging, labelled 
     create(ListDeliveriesResponseSchema, {}),
   ]
   fake.answer.listDeliveries = async () => pages.shift() ?? create(ListDeliveriesResponseSchema, {})
-  const { container } = renderAt(<DeliveriesPage/>, '/deliveries?attempt_outcome=retried&from=2026-11-01T07%3A00%3A00.000Z&to=2026-11-02T08%3A00%3A00.000Z')
+  const { container } = renderAt(<DeliveriesPage/>, '/deliveries?attempt_result=retried&from=2026-11-01T07%3A00%3A00.000Z&to=2026-11-02T08%3A00%3A00.000Z')
   await screen.findByText('event-1…')
   expect(screen.getByText(/^尝试完成时间：/).textContent).toBe('尝试完成时间：2026/11/01 00:00 PDT 至 2026/11/02 00:00 PST（不含结束时刻）')
   expect(container.querySelector('.delivery-history-filter')?.textContent).not.toContain('UTC')
-  expect(screen.getByRole('link', { name: 'event-1…' }).getAttribute('href')).toContain('attempt_outcome=retried')
+  expect(screen.getByRole('link', { name: 'event-1…' }).getAttribute('href')).toContain('attempt_result=retried')
   expect(screen.getByText(/按事件创建时间排序/)).toBeTruthy()
   expect(screen.getByRole('link', { name: '清除筛选' }).getAttribute('href')).toBe('/deliveries')
   expect(screen.queryByRole('combobox', { name: '筛选投递状态' })).toBeNull()
-  const filter = 'attempt_outcome = RETRIED AND attempt_finish_time >= "2026-11-01T07:00:00.000Z" AND attempt_finish_time < "2026-11-02T08:00:00.000Z"'
+  const filter = 'attempt_result = RETRIED AND attempt_finish_time >= "2026-11-01T07:00:00.000Z" AND attempt_finish_time < "2026-11-02T08:00:00.000Z"'
   expect(fake.callsOf('listDeliveries')[0]).toMatchObject({ filter, pageToken: '', pageSize: 50 })
   fireEvent.click(screen.getByRole('button', { name: /下一页/ }))
   await waitFor(() => expect(fake.callsOf('listDeliveries')).toHaveLength(2))

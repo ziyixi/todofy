@@ -3,6 +3,7 @@
 import type { Env } from './types.ts'
 import { bad, rows, type Row } from './api-common.ts'
 import { HttpError } from './security.ts'
+import { RESULT_SQL } from './api-deliveries.ts'
 
 const MINUTE = 60_000
 const HOUR = 3_600_000
@@ -131,10 +132,10 @@ export async function deliveryStats(env: Env, query: StatsQuery): Promise<Row> {
   // An hour key carries its offset, so a repeated fall-back hour stays two buckets.
   const key = bucket === 'hour' ? `strftime('%Y-%m-%dT%H',a.finished_at,${modifier})||'|'||${modifier}` : `strftime('%Y-%m-%d',a.finished_at,${modifier})`
   const grouped = await rows(env, `SELECT ${key} bucket,
-    sum(a.outcome='delivered') succeeded,
-    sum(a.outcome='retryable') retried,
-    sum(a.outcome IN('rejected','failed')) failed,
-    sum(a.outcome='interrupted') unknown
+    sum(${RESULT_SQL.SUCCEEDED}) succeeded,
+    sum(${RESULT_SQL.RETRIED}) retried,
+    sum(${RESULT_SQL.FAILED}) failed,
+    sum(${RESULT_SQL.UNKNOWN}) unknown
     FROM delivery_attempts a JOIN deliveries d ON d.event_id=a.event_id
     JOIN messages m ON m.id=d.message_id
     WHERE a.finished_at>=?1 AND a.finished_at<?2 AND m.origin='cloudflare'

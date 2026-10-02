@@ -2,13 +2,14 @@ import { useEffect, useMemo, useState, type FormEvent } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Link } from 'react-router'
 import { ArrowRight, CheckCircle2, Clock3, RefreshCw, RotateCcw, TriangleAlert } from 'lucide-react'
-import { SummarizeDeliveryAttemptsRequest_Granularity } from '@ziyixi/proto/mailhero/ui/v2/mail_hero_ui_service_pb'
+import { AttemptResult } from '@ziyixi/proto/mailhero/ui/v2/delivery_pb'
+import { SummarizeDeliveryAttemptsRequest_Granularity, type SummarizeDeliveryAttemptsResponse } from '@ziyixi/proto/mailhero/ui/v2/mail_hero_ui_service_pb'
 import { api, ApiError, timeOf, timestamp } from '../api/client'
 import { overviewQuery } from '../api/queries'
+import { ATTEMPT_RESULTS, countAll, countOf, resultLabel, resultName } from '../components/attemptResults'
 import { Button, Card, Empty, ErrorState, formatInstant, Loading, PageHead, zoneAbbreviation } from '../components/UI'
 
 type Period = '24h' | '7d' | '30d' | 'custom'
-type Outcome = 'succeeded' | 'retried' | 'failed' | 'unknown'
 type Window = { from: string; to: string; bucket: 'hour' | 'day'; tz: string }
 const DAY = 86_400_000
 const periodOptions: Array<{ value: Period; label: string }> = [
@@ -17,10 +18,11 @@ const periodOptions: Array<{ value: Period; label: string }> = [
   { value: '30d', label: '最近 30 天' },
   { value: 'custom', label: '自选日期' },
 ]
-const outcomes: Array<{ key: Outcome; label: string; detail: string; icon: typeof CheckCircle2 }> = [
-  { key: 'succeeded', label: '成功', detail: '目标返回 2xx，表示已持久接管', icon: CheckCircle2 },
-  { key: 'retried', label: '进入重试', detail: '本次请求暂时失败，已进入重试队列', icon: RotateCcw },
-  { key: 'failed', label: '失败', detail: '本次请求终止，不会自动重试', icon: TriangleAlert },
+// The three results shown as metrics; UNKNOWN has its own notice when there is any.
+const metrics: Array<{ result: AttemptResult; detail: string; icon: typeof CheckCircle2 }> = [
+  { result: AttemptResult.SUCCEEDED, detail: '目标返回 2xx，表示已持久接管', icon: CheckCircle2 },
+  { result: AttemptResult.RETRIED, detail: '本次请求暂时失败，已进入重试队列', icon: RotateCcw },
+  { result: AttemptResult.FAILED, detail: '本次请求终止，不会自动重试', icon: TriangleAlert },
 ]
 
 // Windows, labels and the API buckets all follow one zone: the browser's, read
@@ -82,35 +84,17 @@ function bucketLabel(value: string, bucket: Window['bucket'], timeZone: string, 
   // The abbreviation tells the two buckets of a repeated fall-back hour apart.
   return full && bucket === 'hour' ? `${label} ${zoneAbbreviation(date, timeZone)}` : label
 }
-type Counts = Record<Outcome, number>
-/** SummarizeDeliveryAttempts' answer as the page reads it: ISO instants and the four counts by outcome. */
-interface DeliveryStats { from: string; to: string; bucket: Window['bucket']; time_zone: string; totals: Counts; buckets: Array<Counts & { start: string; end: string }> }
-
-/** The attempts of `window`, by outcome and by hour or day of its zone. */
-async function deliveryStats(window: Window): Promise<DeliveryStats> {
-  const hour = window.bucket === 'hour'
-  const answer = await api.summarizeDeliveryAttempts({ parent: 'deliveries/-', startTime: timestamp(window.from), endTime: timestamp(window.to),
-    granularity: hour ? SummarizeDeliveryAttemptsRequest_Granularity.HOUR : SummarizeDeliveryAttemptsRequest_Granularity.DAY, timeZone: window.tz })
-  const counts = (value?: { succeededCount: number; retriedCount: number; failedCount: number; unknownCount: number }): Counts =>
-    ({ succeeded: value?.succeededCount ?? 0, retried: value?.retriedCount ?? 0, failed: value?.failedCount ?? 0, unknown: value?.unknownCount ?? 0 })
-  return {
-    from: timeOf(answer.startTime) ?? window.from, to: timeOf(answer.endTime) ?? window.to,
-    // Labels follow what the Worker bucketed by (as they follow its zone).
-    bucket: answer.granularity === SummarizeDeliveryAttemptsRequest_Granularity.UNSPECIFIED ? window.bucket : answer.granularity === SummarizeDeliveryAttemptsRequest_Granularity.HOUR ? 'hour' : 'day',
-    time_zone: answer.timeZone || 'UTC',
-    totals: counts(answer.totals), buckets: answer.buckets.map(item => ({ start: timeOf(item.startTime) ?? '', end: timeOf(item.endTime) ?? '', ...counts(item.counts) })),
-  }
+/** SummarizeDeliveryAttempts of `window`: the attempts by result, by hour or day of its zone. */
+function deliveryStats(window: Window): Promise<SummarizeDeliveryAttemptsResponse> {
+  return api.summarizeDeliveryAttempts({ parent: 'deliveries/-', startTime: timestamp(window.from), endTime: timestamp(window.to),
+    granularity: window.bucket === 'hour' ? SummarizeDeliveryAttemptsRequest_Granularity.HOUR : SummarizeDeliveryAttemptsRequest_Granularity.DAY, timeZone: window.tz })
 }
-
-// A DST day lasts 23 or 25 hours, so the API's end is used rather than start + 24 h.
-function bucketEnd(stats: DeliveryStats, index: number): string {
-  return stats.buckets[index].end
+/** Labels follow what the Worker bucketed by, as they follow its zone. */
+function granularityOf(stats: SummarizeDeliveryAttemptsResponse): Window['bucket'] {
+  return stats.granularity === SummarizeDeliveryAttemptsRequest_Granularity.HOUR ? 'hour' : 'day'
 }
-function drilldown(outcome: Outcome, from: string, to: string): string {
-  return `/deliveries?${new URLSearchParams({ attempt_outcome: outcome, from, to }).toString()}`
-}
-function countAll(counts: Counts): number {
-  return counts.succeeded + counts.retried + counts.failed + counts.unknown
+function drilldown(result: AttemptResult, from: string, to: string): string {
+  return `/deliveries?${new URLSearchParams({ attempt_result: resultName(result), from, to }).toString()}`
 }
 
 export default function DashboardPage() {
@@ -146,10 +130,14 @@ export default function DashboardPage() {
   // A zone the Worker's Intl lacks: recompute the window in UTC instead of failing.
   const zoneError = stats.isError && zoneRefusal(stats.error) && activeWindow.tz !== 'UTC'
   useEffect(() => { if (zoneError) setZoneRefused(true) }, [zoneError])
-  const shownZone = stats.data ? stats.data.time_zone : activeWindow.tz, local = shownZone === browser
+  const shownZone = stats.data ? stats.data.timeZone : activeWindow.tz, local = shownZone === browser
   const zoneWords = local ? '浏览器时区' : ' UTC '
   const total = stats.data ? countAll(stats.data.totals) : 0
-  const maxBucket = Math.max(1, ...(stats.data?.buckets.map(countAll) || []))
+  const maxBucket = Math.max(1, ...(stats.data?.buckets.map(item => countAll(item.counts)) || []))
+  // The range the Worker counted: the drill-downs ask for exactly it. A DST day lasts 23 or 25 hours, so a bucket's
+  // end is the API's, never its start + 24 h.
+  const from = timeOf(stats.data?.startTime) ?? activeWindow.from, to = timeOf(stats.data?.endTime) ?? activeWindow.to
+  const granularity = stats.data ? granularityOf(stats.data) : activeWindow.bucket
 
   function choosePeriod(next: Period) {
     setPeriod(next)
@@ -178,16 +166,16 @@ export default function DashboardPage() {
     </form>}
     <div className="dashboard-range"><Clock3 size={15}/><span>当前区间：{formatInstant(activeWindow.from, shownZone)} 至 {formatInstant(activeWindow.to, shownZone)}（不含结束时刻）</span></div>
     {stats.isPending || zoneError ? <Card><Loading label="正在读取投递统计…"/></Card> : stats.isError ? <Card><ErrorState error={stats.error} retry={() => void stats.refetch()}/></Card> : <>
-      <div className="dashboard-metrics">{outcomes.map(({ key, label, detail, icon: Icon }) => <Link to={drilldown(key, stats.data.from, stats.data.to)} className={`dashboard-metric dashboard-metric-${key}`} key={key} aria-label={`查看此区间${label}的投递事件`}><span className="dashboard-metric-top"><span>{label}的尝试</span><Icon size={19}/></span><strong>{stats.data.totals[key].toLocaleString('zh-CN')}</strong><small>{detail}</small><span className="dashboard-metric-action">查看相关事件 <ArrowRight size={14}/></span></Link>)}</div>
-      {stats.data.totals.unknown > 0 && <div className="dashboard-unknown" role="status"><TriangleAlert size={17}/><span>另有 <strong>{stats.data.totals.unknown}</strong> 次尝试结果不明（可能在请求中断时发生），需要逐条核对。</span><Link to={drilldown('unknown', stats.data.from, stats.data.to)}>查看事件 <ArrowRight size={14}/></Link></div>}
+      <div className="dashboard-metrics">{metrics.map(({ result, detail, icon: Icon }) => <Link to={drilldown(result, from, to)} className={`dashboard-metric dashboard-metric-${resultName(result)}`} key={result} aria-label={`查看此区间${resultLabel(result)}的投递事件`}><span className="dashboard-metric-top"><span>{resultLabel(result)}的尝试</span><Icon size={19}/></span><strong>{countOf(stats.data.totals, result).toLocaleString('zh-CN')}</strong><small>{detail}</small><span className="dashboard-metric-action">查看相关事件 <ArrowRight size={14}/></span></Link>)}</div>
+      {countOf(stats.data.totals, AttemptResult.UNKNOWN) > 0 && <div className="dashboard-unknown" role="status"><TriangleAlert size={17}/><span>另有 <strong>{countOf(stats.data.totals, AttemptResult.UNKNOWN)}</strong> 次尝试结果不明（可能在请求中断时发生），需要逐条核对。</span><Link to={drilldown(AttemptResult.UNKNOWN, from, to)}>查看事件 <ArrowRight size={14}/></Link></div>}
       {overview.data && <div className="dashboard-current-status"><span>当前已停止的事件：<strong>{overview.data.failedDeliveryCount}</strong> 条。这里按事件当前状态计数，也包括未发出 HTTP 请求就停止的事件。</span><Link to="/deliveries?status=failed">查看当前失败事件 <ArrowRight size={14}/></Link></div>}
       {total === 0 ? <Card><Empty title="这段时间没有投递尝试" detail="新邮件进入转发流程后，这里会显示 webhook 尝试。仅归档的邮件不会计入。" action={<Link className="button button-secondary" to="/deliveries">查看投递记录</Link>}/></Card> : <Card className="dashboard-chart-card">
         <div className="dashboard-chart-heading"><div><h2>投递趋势</h2><p>每一段显示按{zoneWords}划分的小时或日期内完成的尝试；一次事件可能发生多次尝试。</p></div><Link className="text-link" to="/deliveries">全部记录 <ArrowRight size={15}/></Link></div>
-        <div className="dashboard-legend" aria-hidden="true"><span className="succeeded">成功</span><span className="retried">进入重试</span><span className="failed">失败</span>{stats.data.totals.unknown > 0 && <span className="unknown">结果不明</span>}</div>
-        <div className="dashboard-chart-scroll"><div className="dashboard-chart" role="img" aria-label={`此区间共 ${total} 次投递尝试：成功 ${stats.data.totals.succeeded} 次，进入重试 ${stats.data.totals.retried} 次，失败 ${stats.data.totals.failed} 次，结果不明 ${stats.data.totals.unknown} 次。每个时段的精确值见下方明细表。`}>
-          {stats.data.buckets.map((item, index) => <div className="dashboard-chart-column" key={item.start}><div className="dashboard-bar-stack">{(['succeeded', 'retried', 'failed', 'unknown'] as Outcome[]).map(key => item[key] > 0 && <span key={key} className={`dashboard-bar-${key}`} style={{ height: `${item[key] / maxBucket * 100}%` }}/>)}</div><span className="dashboard-chart-label">{index % Math.max(1, Math.ceil(stats.data.buckets.length / 8)) === 0 || index === stats.data.buckets.length - 1 ? bucketLabel(item.start, stats.data.bucket, shownZone) : '\u00a0'}</span></div>)}
+        <div className="dashboard-legend" aria-hidden="true">{ATTEMPT_RESULTS.filter(result => result !== AttemptResult.UNKNOWN || countOf(stats.data.totals, result) > 0).map(result => <span key={result} className={resultName(result)}>{resultLabel(result)}</span>)}</div>
+        <div className="dashboard-chart-scroll"><div className="dashboard-chart" role="img" aria-label={`此区间共 ${total} 次投递尝试：${ATTEMPT_RESULTS.map(result => `${resultLabel(result)} ${countOf(stats.data.totals, result)} 次`).join('，')}。每个时段的精确值见下方明细表。`}>
+          {stats.data.buckets.map((item, index) => { const start = timeOf(item.startTime) ?? ''; return <div className="dashboard-chart-column" key={start}><div className="dashboard-bar-stack">{ATTEMPT_RESULTS.map(result => countOf(item.counts, result) > 0 && <span key={result} className={`dashboard-bar-${resultName(result)}`} style={{ height: `${countOf(item.counts, result) / maxBucket * 100}%` }}/>)}</div><span className="dashboard-chart-label">{index % Math.max(1, Math.ceil(stats.data.buckets.length / 8)) === 0 || index === stats.data.buckets.length - 1 ? bucketLabel(start, granularity, shownZone) : '\u00a0'}</span></div> })}
         </div></div>
-        <details className="dashboard-details"><summary>查看每个时段的准确数量</summary><div className="table-wrap"><table className="data-table dashboard-table"><caption>按{zoneWords}时段统计的投递尝试；数字可打开对应投递事件</caption><thead><tr><th scope="col">时段（{shownZone}）</th><th scope="col">成功</th><th scope="col">进入重试</th><th scope="col">失败</th><th scope="col">结果不明</th></tr></thead><tbody>{stats.data.buckets.map((item, index) => <tr key={item.start}><th scope="row">{bucketLabel(item.start, stats.data.bucket, shownZone, true)}</th>{(['succeeded', 'retried', 'failed', 'unknown'] as Outcome[]).map(key => <td key={key}>{item[key] ? <Link to={drilldown(key, new Date(Math.max(Date.parse(item.start), Date.parse(stats.data.from))).toISOString(), bucketEnd(stats.data, index))} aria-label={`${bucketLabel(item.start, stats.data.bucket, shownZone, true)} ${key === 'succeeded' ? '成功' : key === 'retried' ? '进入重试' : key === 'failed' ? '失败' : '结果不明'} ${item[key]} 次，查看相关事件`}>{item[key]}</Link> : '0'}</td>)}</tr>)}</tbody></table></div></details>
+        <details className="dashboard-details"><summary>查看每个时段的准确数量</summary><div className="table-wrap"><table className="data-table dashboard-table"><caption>按{zoneWords}时段统计的投递尝试；数字可打开对应投递事件</caption><thead><tr><th scope="col">时段（{shownZone}）</th>{ATTEMPT_RESULTS.map(result => <th scope="col" key={result}>{resultLabel(result)}</th>)}</tr></thead><tbody>{stats.data.buckets.map(item => { const start = timeOf(item.startTime) ?? '', end = timeOf(item.endTime) ?? to, label = bucketLabel(start, granularity, shownZone, true); return <tr key={start}><th scope="row">{label}</th>{ATTEMPT_RESULTS.map(result => { const count = countOf(item.counts, result); return <td key={result}>{count ? <Link to={drilldown(result, new Date(Math.max(Date.parse(start), Date.parse(from))).toISOString(), end)} aria-label={`${label} ${resultLabel(result)} ${count} 次，查看相关事件`}>{count}</Link> : '0'}</td> })}</tr> })}</tbody></table></div></details>
       </Card>}
       <p className="dashboard-scope">只统计真实邮件的 webhook 请求；连接测试和未发出的任务不计入。成功指目标服务返回 2xx 并接管请求，不表示下游业务已经完成。图表按尝试计数，点击数字打开相关事件；同一事件重试多次时，事件列表条数可能小于这里的次数。旧版记录中，部分显示为“进入重试”的尝试可能当时已耗尽重试额度；历史结果无法可靠补算。</p>
     </>}

@@ -63,7 +63,7 @@ it('labels everything in the browser zone and drills down to each bucket end fro
   const { container } = open()
   expect(Intl.DateTimeFormat().resolvedOptions().timeZone).toBe(zone)
   const successful = await screen.findByRole('link', { name: '查看此区间成功的投递事件' })
-  expect(successful.getAttribute('href')).toContain('attempt_outcome=succeeded')
+  expect(successful.getAttribute('href')).toContain('attempt_result=succeeded')
   expect(successful.getAttribute('href')).toContain('from=2026-10-31T07%3A00%3A00.000Z')
   expect(screen.getByText(`时间按浏览器时区 ${zone}（PST）`)).toBeTruthy()
   expect(screen.getByText(/^当前区间：/).textContent).toBe('当前区间：2026/10/28 00:00 PDT 至 2026/11/03 12:00 PST（不含结束时刻）')
