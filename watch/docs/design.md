@@ -449,6 +449,12 @@ All hermetic: synthetic content only, the only network is loopback, clocks are i
      row of kind `do` for the namespace `WatchState`, whose id is known only after the first deploy (a follow-up
      commit adds it, as `registry.test.ts` records for an id not yet known).
   8. After the deploy: the first API call arms the alarm; verify with a synthetic page on a host the lead controls.
+
+  Rollback (README "Rollback"): normally a code-only revert through `Watch deploy`. Leaving production is a separate
+  decision with ordered steps: stop the side effects first (Todofy's `TASK_INTENT_SOURCES = "lab"`, every watch
+  paused), then detach the Custom Domain, and keep the dashboard's `WATCH` binding, registry entry and drift entry
+  while the Worker exists. Reverting this commit alone would leave WatchState running and the dashboard reporting it
+  unreachable.
 - **W3** (notifications; ops-v1 is merged: `proto/ops/v1/ops.proto`, generated code and the Contracts job). Steps 1
   to 3 are done (commit "task-intent-v1: SOURCE_WATCH, ...", the Todofy sink and the Ops entrypoint, §7); the
   dashboard's `WATCH` binding is part of the first deploy (W2), since a binding needs the Worker deployed:

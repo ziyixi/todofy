@@ -110,12 +110,35 @@ The dashboard's daily drift check compares the live Worker with `dashboard/worke
 secrets, `BUILD_SHA`, the bindings and the Custom Domain); its registry shows the 网页监视 tile (ops-v1 through the
 `WATCH` binding) and the Worker. The Access application "watch" is managed by `infra/` (`infra/README.md` "Adding an
 app"): change it there, not by hand, and "Infra drift" checks every day that `ACCESS_AUDIENCE` here equals its AUD.
-Notifications go to Todoist through Todofy (`docs/design.md` §7); Todofy's own switches (`TODOFY_*`) pause them.
+Notifications go to Todoist through Todofy (`docs/design.md` §7). The switch that stops only this app's tasks is
+Todofy's `TASK_INTENT_SOURCES` (below); Todofy's pause switches (`MAINTENANCE_MODE`, `PROCESSING_PAUSED`,
+`FORCE_PAUSE_TODOIST`) would hold Mail Hero's mail tasks too.
 
 ### Rollback
 
-A deploy without `routes` leaves an attached Custom Domain in place, so: detach `watch.ziyixi.science` from the Worker
-`watch` by hand in the Cloudflare dashboard (Workers & Pages → watch → Settings → Domains & Routes), then revert the W2
-commit (and the dashboard's `WATCH` binding with it). The Access application can stay. To roll back the code only,
-revert the commit that broke it: the next `Watch deploy` ships the revert and keeps the host and the object's data.
-Never run a plain `wrangler deploy`.
+**The normal path is a code-only revert:** revert the commit that broke it and push; the next `Watch deploy` ships the
+revert and keeps the host, the dashboard's view and the object's data. Never run a plain `wrangler deploy`.
+
+**Taking the app out of production is a separate decision**, in this order. A Worker without a route keeps running:
+its Durable Object keeps its alarm, so WatchState keeps checking the watched sites and proposing tasks until step 1
+stops it, whatever happens to the host.
+
+1. Stop the side effects first.
+   - Tasks: set `TASK_INTENT_SOURCES = "lab"` in the `[vars]` of `todofy/wrangler.toml` (and add it to `CORE_VARS` in
+     `todofy/deploy/test_wrangler_configs.py`) and let `Todofy deploy` ship it (`todofy/docs/cloudflare-setup.md`
+     "Task intents"). Every watch proposal then answers `source_not_allowed` and nothing reaches Todoist; Lab is not
+     affected. Or, while the app is still in production, ship a watch commit without the `TODOFY` binding through
+     `Watch deploy`: the outbox then only fills.
+   - Fetches: pause every watch in the UI (暂停, or the owner API's `pauseWatch`). A paused watch is never checked; the
+     alarm then only wakes every six hours to find nothing due.
+2. Detach the Custom Domain by hand: Cloudflare dashboard → Workers & Pages → watch → Settings → Domains & Routes →
+   `watch.ziyixi.science`. A deploy without `routes` would leave it attached. The Access application can stay.
+3. Keep the dashboard's `WATCH` binding, its registry entry and `watch` in `drift-desired.json` while the Worker
+   exists: `Ops` keeps answering over the binding without any route, so the tile goes on showing the (paused) app.
+   Do not revert the W2 commit for this: it would drop the binding while the registry entry stays (from the Ops
+   commit), and the dashboard would mark the tile unreachable after two ticks and send `app_unreachable` (critical)
+   in every daily digest, while the drift check reported the live Worker as an extra script.
+4. Deleting the Worker deletes `WatchState` and all its data (the watches, snapshots and changes) for good. If the
+   owner decides that, one commit then reverts W2 and the dashboard part of the Ops commit together (the `WATCH`
+   binding, the registry entry and flow, the drift entry), and the Worker is deleted after that commit's
+   `Dashboard deploy`; until it is deleted the drift check reports it as an extra script.
