@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://todofy.local/schema/recommendation-v1.schema.json",
-  "$comment": "Generated from proto/todofy/report/v1/report.proto by proto/tools/gen_schema.py: do not edit. Self-contained on purpose (no $defs or $ref): the owner API's OpenAPI document refers to it, and openapi-typescript hoists those into its components.",
+  "$comment": "Generated from proto/todofy/report/v1/report.proto by proto/tools/gen_schema.py: do not edit. Self-contained on purpose (no $defs or $ref): Todofy's machine API document refers to it by path, and each consumer reads it without resolving references.",
   "title": "Todofy GET /api/recommendation response",
   "description": "Todofy GET /api/recommendation response: the ranked tasks the newsletter reads (it asks for ?top=10). tasks, model and task_count are the Go service's fields (handle_recommendation.go @ 6c46ed4); model is now a model name rather than a proto enum name, and unparsable model output is reported as status model_output_invalid with no tasks instead of being passed through as a fake task. Fields may be added, never removed or retyped, so consumers must ignore unknown fields. The limits are the newsletter's acceptance rules (newsletter src/newsletter/todofy.py _decode_recommendation), so any response that validates is one the newsletter accepts. Ranks are unique and at most top_n, which JSON Schema cannot express.",
   "oneOf": [

@@ -1,15 +1,15 @@
 // recommendation-v1 and summary-v1 as a protobuf IDL (proto/README.md): the daily reports Todofy serves the
 // newsletter at GET /api/recommendation and GET /api/summary (Basic auth; todofy/docs/gateway-contract.md), and
-// lists to its owner (the owner API's ReportsLatest).
+// lists to its owner (todofy.ui.v1's LatestReports and RecomputeReport, proto/todofy/ui/v1).
 //
 // This file is the one description of both reports: their fields, enums and value rules (common.wire.v1). The
 // wire stays the JSON Todofy has always sent, byte for byte: field names, field-number order (each message's
 // fields are numbered in the order todofy-core writes them, which is not the order the hand-written schemas
 // listed them in), enums as their lower-case names. todofy/api/recommendation-v1.schema.json and
-// summary-v1.schema.json are generated from it (proto/tools/gen_schema.py, self-contained: the owner API's
-// OpenAPI document refers to them and openapi-typescript would hoist $defs into its components), todofy-core
-// builds every report as a generated message written by the codec, which checks the rules before a byte is
-// stored or sent, and Todofy's UI takes the reports' types from the generated wire types.
+// summary-v1.schema.json are generated from it (proto/tools/gen_schema.py, self-contained: Todofy's machine API
+// document, todofy/api/machine-api-v1.openapi.yaml, refers to them by path), todofy-core builds every report as a
+// generated message written by the codec, which checks the rules before a byte is stored or sent, and Todofy's UI
+// reads them as generated messages through todofy.ui.v1.
 //
 // The rules are the newsletter's acceptance rules (newsletter src/newsletter/todofy.py _decode and
 // _decode_recommendation), so a report that keeps them is one the newsletter accepts: no control characters

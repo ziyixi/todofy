@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://todofy.local/schema/summary-v1.schema.json",
-  "$comment": "Generated from proto/todofy/report/v1/report.proto by proto/tools/gen_schema.py: do not edit. Self-contained on purpose (no $defs or $ref): the owner API's OpenAPI document refers to it, and openapi-typescript hoists those into its components.",
+  "$comment": "Generated from proto/todofy/report/v1/report.proto by proto/tools/gen_schema.py: do not edit. Self-contained on purpose (no $defs or $ref): Todofy's machine API document refers to it by path, and each consumer reads it without resolving references.",
   "title": "Todofy GET /api/summary response",
   "description": "Todofy GET /api/summary response: the daily summary the newsletter reads. summary, task_count and time_window_hours are the Go service's fields (handle_summary.go @ 6c46ed4) and keep their meaning; the rest were added by the Worker. Fields may be added, never removed or retyped, so consumers must ignore unknown fields. The limits are the newsletter's acceptance rules (newsletter src/newsletter/todofy.py _decode), so any response that validates is one the newsletter accepts.",
   "oneOf": [

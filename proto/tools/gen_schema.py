@@ -109,8 +109,8 @@ SCHEMAS = (
     ),
 )
 SELF_CONTAINED = (
-    "Self-contained on purpose (no $defs or $ref): the owner API's OpenAPI document refers to it, and "
-    "openapi-typescript hoists those into its components."
+    "Self-contained on purpose (no $defs or $ref): Todofy's machine API document refers to it by path, and "
+    "each consumer reads it without resolving references."
 )
 # package -> {$defs name a published schema had before it was generated: what it names now}. A message's field
 # ("OpsStatus.counters") is that field's schema; anything else is a $defs entry. An outside reader that resolves
