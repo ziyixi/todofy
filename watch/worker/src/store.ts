@@ -347,17 +347,37 @@ export class Store {
   }
 
   /** Watches due at `now`: active or broken ones, and paused ones the owner asked to check, earliest first. */
-  dueWatches(now: number, limit: number): WatchRow[] {
+  dueWatches(now: number, limit: number, stretch: number | null = null): WatchRow[] {
+    if (stretch === null) {
+      return this.all<WatchRow & Record<string, SqlStorageValue>>(
+        `SELECT * FROM watches WHERE next_check_at IS NOT NULL AND next_check_at <= ? AND (state != 'paused' OR check_requested = 1) ORDER BY next_check_at, id LIMIT ?`,
+        now,
+        limit,
+      );
+    }
+    // A shed (ops-status.ts): an owner's check and a pending change's confirmation as usual, a scheduled check only once
+    // the watch's last check is `stretch` old.
     return this.all<WatchRow & Record<string, SqlStorageValue>>(
-      `SELECT * FROM watches WHERE next_check_at IS NOT NULL AND next_check_at <= ? AND (state != 'paused' OR check_requested = 1) ORDER BY next_check_at, id LIMIT ?`,
+      `SELECT * FROM watches WHERE next_check_at IS NOT NULL AND next_check_at <= ? AND (state != 'paused' OR check_requested = 1)
+       AND (check_requested = 1 OR pending_change IS NOT NULL OR coalesce(last_check_at, 0) <= ?) ORDER BY next_check_at, id LIMIT ?`,
       now,
+      now - stretch,
       limit,
     );
   }
 
-  /** The earliest scheduled check of any watch that will be checked, or null. */
-  nextDue(): number | null {
-    return this.one<{ at: number | null }>(`SELECT min(next_check_at) AS at FROM watches WHERE next_check_at IS NOT NULL AND (state != 'paused' OR check_requested = 1)`)?.at ?? null;
+  /** The earliest scheduled check of any watch that will be checked (under a shed's `stretch`, as dueWatches), or null. */
+  nextDue(stretch: number | null = null): number | null {
+    if (stretch === null) {
+      return this.one<{ at: number | null }>(`SELECT min(next_check_at) AS at FROM watches WHERE next_check_at IS NOT NULL AND (state != 'paused' OR check_requested = 1)`)?.at ?? null;
+    }
+    return (
+      this.one<{ at: number | null }>(
+        `SELECT min(CASE WHEN check_requested = 1 OR pending_change IS NOT NULL THEN next_check_at ELSE max(next_check_at, coalesce(last_check_at, 0) + ?) END) AS at
+         FROM watches WHERE next_check_at IS NOT NULL AND (state != 'paused' OR check_requested = 1)`,
+        stretch,
+      )?.at ?? null
+    );
   }
 
   insertWatch(row: WatchRow): void {
@@ -517,9 +537,10 @@ export class Store {
 
   /**
    * The global tables within their bounds, at most once per PRUNE_GLOBAL_EVERY_MS, and every watch's bounds once per
-   * UTC day (a watch's rows grow only when it is checked, and `pruneWatches` follows every check). Returns rows deleted.
+   * UTC day (a watch's rows grow only when it is checked, and `pruneWatches` follows every check), unless `deferSweep`
+   * (a shed: the sweep waits for its end). Returns rows deleted.
    */
-  pruneGlobal(now: number): number {
+  pruneGlobal(now: number, deferSweep = false): number {
     const last = Number(this.getMeta('pruned_at') ?? '0');
     if (now - last < PRUNE_GLOBAL_EVERY_MS && now >= last) return 0;
     let deleted = 0;
@@ -534,7 +555,7 @@ export class Store {
     deleted += this.run(`DELETE FROM intents WHERE created_at <= ? AND state != 'open'`, now - INTENTS_KEPT_MS);
     deleted += this.run(`DELETE FROM hosts WHERE host NOT IN (SELECT host FROM watches) AND next_at <= ? AND coalesce(backoff_until, 0) <= ?`, now, now);
     const day = new Date(now).toISOString().slice(0, 10);
-    if (this.getMeta('swept_day') !== day) {
+    if (!deferSweep && this.getMeta('swept_day') !== day) {
       deleted += this.pruneWatches(this.all<{ id: string }>(`SELECT id FROM watches`).map((row) => row.id));
       this.setMeta('swept_day', day);
     }

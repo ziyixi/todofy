@@ -15,11 +15,14 @@ import todofyOk from '../../../contracts/ops-v1/fixtures/OpsStatus/todofy-ok.jso
 import todofyDegraded from '../../../contracts/ops-v1/fixtures/OpsStatus/todofy-degraded.json';
 import labOk from '../../../contracts/ops-v1/fixtures/OpsStatus/lab-ok.json';
 import labDegraded from '../../../contracts/ops-v1/fixtures/OpsStatus/lab-degraded.json';
+import watchOk from '../../../contracts/ops-v1/fixtures/OpsStatus/watch-ok.json';
+import watchDegraded from '../../../contracts/ops-v1/fixtures/OpsStatus/watch-degraded.json';
 import statusUnavailable from '../../../contracts/ops-v1/fixtures/OpsStatus/status-unavailable.json';
 import guardNormal from '../../../contracts/ops-v1/fixtures/GuardState/normal.json';
 import guardShedMail from '../../../contracts/ops-v1/fixtures/GuardState/shed-mail-hero.json';
 import guardShedTodofy from '../../../contracts/ops-v1/fixtures/GuardState/shed-todofy.json';
 import guardShedLab from '../../../contracts/ops-v1/fixtures/GuardState/shed-lab.json';
+import guardShedWatch from '../../../contracts/ops-v1/fixtures/GuardState/shed-watch.json';
 import startQueued from '../../../contracts/ops-v1/fixtures/StartCanaryResult/queued.json';
 import startPausedBlocked from '../../../contracts/ops-v1/fixtures/StartCanaryResult/paused-endpoint-blocked.json';
 import startPausedSend from '../../../contracts/ops-v1/fixtures/StartCanaryResult/paused-send-paused.json';
@@ -69,7 +72,7 @@ const EVENT_ID = '6d3b2f0e-4c1a-4b7e-8a52-0c9e7f1d2a31';
 type Calls = { app: OpsApp; method: string; args: unknown[] }[];
 
 /** A binding that records every property called on it and answers from `answers`. */
-function recordingEnv(answers: Record<string, () => unknown>): { env: Pick<Env, 'MAIL_HERO' | 'TODOFY' | 'LAB'>; calls: Calls } {
+function recordingEnv(answers: Record<string, () => unknown>): { env: Pick<Env, 'MAIL_HERO' | 'TODOFY' | 'LAB' | 'WATCH'>; calls: Calls } {
   const calls: Calls = [];
   const binding = (app: OpsApp): unknown =>
     new Proxy(
@@ -85,12 +88,12 @@ function recordingEnv(answers: Record<string, () => unknown>): { env: Pick<Env, 
         },
       },
     );
-  return { env: { MAIL_HERO: binding('mail-hero'), TODOFY: binding('todofy'), LAB: binding('lab') } as Pick<Env, 'MAIL_HERO' | 'TODOFY' | 'LAB'>, calls };
+  return { env: { MAIL_HERO: binding('mail-hero'), TODOFY: binding('todofy'), LAB: binding('lab'), WATCH: binding('watch') } as Pick<Env, 'MAIL_HERO' | 'TODOFY' | 'LAB' | 'WATCH'>, calls };
 }
 
 const guardInput = { level: 'shed', reason: 'quota_d1_rows_read', until: '2026-09-30T00:10:00.000Z' } as const;
 
-type Wrapper = (env: Pick<Env, 'MAIL_HERO' | 'TODOFY' | 'LAB'>) => Promise<OpsCall<unknown>>;
+type Wrapper = (env: Pick<Env, 'MAIL_HERO' | 'TODOFY' | 'LAB' | 'WATCH'>) => Promise<OpsCall<unknown>>;
 const WRAPPERS: readonly { app: OpsApp; method: string; call: Wrapper; valid: unknown }[] = [
   { app: 'mail-hero', method: 'status', call: (env) => opsStatus(env, 'mail-hero'), valid: mailHeroOk },
   { app: 'mail-hero', method: 'setGuard', call: (env) => opsSetGuard(env, 'mail-hero', guardInput), valid: guardShedMail },
@@ -102,11 +105,13 @@ const WRAPPERS: readonly { app: OpsApp; method: string; call: Wrapper; valid: un
   { app: 'todofy', method: 'reportOps', call: (env) => opsReportOps(env, reportDaily as never), valid: receiptStored },
   { app: 'lab', method: 'status', call: (env) => opsStatus(env, 'lab'), valid: labOk },
   { app: 'lab', method: 'setGuard', call: (env) => opsSetGuard(env, 'lab', guardInput), valid: guardShedLab },
+  { app: 'watch', method: 'status', call: (env) => opsStatus(env, 'watch'), valid: watchOk },
+  { app: 'watch', method: 'setGuard', call: (env) => opsSetGuard(env, 'watch', guardInput), valid: guardShedWatch },
 ];
 
 describe('only the methods of the services each app implements', () => {
   it('knows exactly the apps of the IDL (OpsStatus.app is open on the wire, OpsApp is this list)', () => {
-    expect(OPS_APPS).toEqual(['mail-hero', 'todofy', 'lab'] satisfies readonly OpsApp[]);
+    expect(OPS_APPS).toEqual(['mail-hero', 'todofy', 'lab', 'watch'] satisfies readonly OpsApp[]);
     expect(Object.keys(CALLED_METHODS)).toEqual([...OPS_APPS]);
   });
 
@@ -120,6 +125,7 @@ describe('only the methods of the services each app implements', () => {
     expect([...CALLED_METHODS['mail-hero']].sort()).toEqual(declaredMethods('mail-hero'));
     expect([...CALLED_METHODS.todofy].sort()).toEqual(declaredMethods('todofy'));
     expect([...CALLED_METHODS.lab].sort()).toEqual(declaredMethods('lab'));
+    expect([...CALLED_METHODS.watch].sort()).toEqual(declaredMethods('watch'));
   });
 
   it('calls each wrapper\'s declared method on the right app, with contract-valid input', async () => {
@@ -139,6 +145,7 @@ describe('only the methods of the services each app implements', () => {
     expect(WRAPPERS.filter((w) => w.app === 'mail-hero').map((w) => w.method).sort()).toEqual(declaredMethods('mail-hero'));
     expect(WRAPPERS.filter((w) => w.app === 'todofy').map((w) => w.method).sort()).toEqual(declaredMethods('todofy'));
     expect(WRAPPERS.filter((w) => w.app === 'lab').map((w) => w.method).sort()).toEqual(declaredMethods('lab'));
+    expect(WRAPPERS.filter((w) => w.app === 'watch').map((w) => w.method).sort()).toEqual(declaredMethods('watch'));
   });
 
   it('never sends an input the contract refuses: the call answers invalid_input, as the app would', async () => {
@@ -171,7 +178,7 @@ describe('error handling for every method', () => {
       expect(await wrapper.call(notAnError.env)).toEqual({ ok: false, code: 'unavailable' });
       // An older release without the method: the RPC receiver rejects.
       expect(await wrapper.call(recordingEnv({}).env)).toEqual({ ok: false, code: 'unavailable' });
-      expect(await wrapper.call({} as Pick<Env, 'MAIL_HERO' | 'TODOFY' | 'LAB'>)).toEqual({ ok: false, code: 'not_configured' });
+      expect(await wrapper.call({} as Pick<Env, 'MAIL_HERO' | 'TODOFY' | 'LAB' | 'WATCH'>)).toEqual({ ok: false, code: 'not_configured' });
       const bad = recordingEnv({ [wrapper.method]: () => ({ unexpected: true }) });
       expect(await wrapper.call(bad.env)).toEqual({ ok: false, code: 'invalid_output' });
       const huge = recordingEnv({ [wrapper.method]: () => ({ ...(wrapper.valid as object), padding: 'x'.repeat(40_000) }) });
@@ -188,7 +195,9 @@ describe('answers are read with the contract\'s rules', () => {
     expect(asStatus('todofy')(mailHeroOk)).toBeNull();
     for (const status of [labOk, labDegraded]) expect(asStatus('lab')(status)).toEqual(status);
     expect(asStatus('lab')(todofyOk)).toBeNull();
-    for (const guard of [guardNormal, guardShedMail, guardShedTodofy, guardShedLab]) expect(asGuardState(guard)).toEqual(guard);
+    for (const status of [watchOk, watchDegraded]) expect(asStatus('watch')(status)).toEqual(status);
+    expect(asStatus('watch')(labOk)).toBeNull();
+    for (const guard of [guardNormal, guardShedMail, guardShedTodofy, guardShedLab, guardShedWatch]) expect(asGuardState(guard)).toEqual(guard);
     for (const result of [startQueued, startPausedBlocked, startPausedSend, startMaintenance, startNoEndpoint]) {
       expect(asStartCanaryResult(result)).toEqual(result);
     }

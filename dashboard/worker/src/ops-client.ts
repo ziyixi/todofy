@@ -164,9 +164,10 @@ export const CALLED_METHODS = {
   'mail-hero': ['status', 'setGuard', 'startCanary', 'canaryDelivery'],
   todofy: ['status', 'setGuard', 'canaryResult', 'reportOps'],
   lab: ['status', 'setGuard'],
+  watch: ['status', 'setGuard'],
 } as const;
 
-type Bindings = Pick<Env, 'MAIL_HERO' | 'TODOFY' | 'LAB'>;
+type Bindings = Pick<Env, 'MAIL_HERO' | 'TODOFY' | 'LAB' | 'WATCH'>;
 
 function missing(): Promise<never> {
   return Promise.reject(new MissingBinding('not_configured'));
@@ -176,6 +177,7 @@ export function opsStatus(env: Bindings, app: OpsApp): Promise<OpsCall<ops.OpsSt
   return callOps(() => {
     if (app === 'mail-hero') return (env.MAIL_HERO as Bindings['MAIL_HERO'] | undefined)?.status() ?? missing();
     if (app === 'lab') return (env.LAB as Bindings['LAB'] | undefined)?.status() ?? missing();
+    if (app === 'watch') return (env.WATCH as Bindings['WATCH'] | undefined)?.status() ?? missing();
     return (env.TODOFY as Bindings['TODOFY'] | undefined)?.status() ?? missing();
   }, asStatus(app));
 }
@@ -187,6 +189,7 @@ export async function opsSetGuard(env: Bindings, app: OpsApp, input: ops.SetGuar
   return callOps(() => {
     if (app === 'mail-hero') return (env.MAIL_HERO as Bindings['MAIL_HERO'] | undefined)?.setGuard(sent) ?? missing();
     if (app === 'lab') return (env.LAB as Bindings['LAB'] | undefined)?.setGuard(sent) ?? missing();
+    if (app === 'watch') return (env.WATCH as Bindings['WATCH'] | undefined)?.setGuard(sent) ?? missing();
     return (env.TODOFY as Bindings['TODOFY'] | undefined)?.setGuard(sent) ?? missing();
   }, asGuardState);
 }

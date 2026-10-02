@@ -235,10 +235,10 @@ Measured (unit suite for bytes, workerd suite for rows; a full 14-run canary his
 
 | View | Mockup day | Bad day (20 items, 16 signals/app, 14 failed runs) | Rows read |
 | --- | --- | --- | --- |
-| home | 4.4 KB (eight tiles; budget 10 KiB) | 8.8 KB | 25 (≤ 28) |
-| flows | 16.1 KB (six flows; 17.4 KB in the workerd suite) | 22.9 KB | 25 (≤ 28) |
-| cloudflare | ≤ 16 KiB, also with 20 Workers | under `V2_BODY_MAX` with 20 listed drift findings (tested) | 26 (≤ 28; one more document since §10: `drift`) |
-| ops | ≤ 24 KiB | 24.5 KB | 25 (≤ 28) |
+| home | 4.4 KB (eight tiles; budget 10 KiB) | 8.8 KB | 26 (≤ 28) |
+| flows | 16.1 KB (six flows; 17.4 KB in the workerd suite) | 22.9 KB | 26 (≤ 28) |
+| cloudflare | ≤ 16 KiB, also with 20 Workers | under `V2_BODY_MAX` with 20 listed drift findings (tested) | 27 (≤ 28; one more document since §10: `drift`) |
+| ops | ≤ 24 KiB | 24.5 KB | 26 (≤ 28) |
 
 `V2_BODY_BUDGET` holds for a normal day; `V2_BODY_MAX` (32 KiB) bounds the bad day. The Cloudflare view
 lists at most `CF_VIEW_WORKERS_MAX` (50) of the up to `CF_SCRIPTS_MAX` (100) remembered scripts —
@@ -246,13 +246,14 @@ every script active today first, then the most recently seen — and counts the 
 `workers_omitted` (shown as a note), so 100 remembered scripts stay under `V2_BODY_MAX` (tested); HomeState logs
 `over_budget` per response. The design's row estimates (1 + N, ≤ 20, 3–4, ≤ 10) did not count the shell
 every view shares (six documents for the attention strip and badges, plus what the evaluation reads for
-the strip's observed items, §4) or the 14 canary rows, so the measured counts replace them (each probed or ops_v1 entry adds one row to every view: 23 / 23 / 24 / 23 before the FlowDay and links probes); they are ~0.01 % of the DO's 5 M free rows a day at a few hundred views.
+the strip's observed items, §4) or the 14 canary rows, so the measured counts replace them (each probed or ops_v1 entry adds one row to every view: 23 / 23 / 24 / 23 before the FlowDay and links probes, 25 / 25 / 26 / 25 before the watch app's status); they are ~0.01 % of the DO's 5 M free rows a day at a few hundred views.
 A partial index (`canary_runs_active`) keeps the "run in progress" lookup at one row for ticks and views.
 
-Per tick: 3 `status()` + 3 probes (website, FlowDay, links) + 1 GraphQL + ≤ 3 `setGuard` + ≤ 2 canary calls +
-≤ 1 `reportOps` + ≤ 12 read-only drift calls (§10) = 25 outbound calls (`outboundPerTick`, tested ≤ 30 and asserted per tick in
-workerd; Free allows 50). The probes run in parallel with the status polls. GraphQL stays one query per tick (48/day) plus refreshes
-≤ 1/min. DO rows written grow by ~4 per tick (`cf_scripts` and one `probe:<entry>` per probe). The FlowDay and links probes are each one request of that app's Worker per tick (≤ 144 a day with refreshes, no D1 query); the website's is a static asset. Everything else as in
+Per tick: 4 `status()` (Mail Hero, Todofy, Lab, the watch app) + 3 probes (website, FlowDay, links) + 1 GraphQL +
+≤ 4 `setGuard` + ≤ 2 canary calls + ≤ 1 `reportOps` + ≤ 12 read-only drift calls (§10) = 27 outbound calls
+(`outboundPerTick`, tested ≤ 30 and asserted per tick in workerd; Free allows 50). The probes run in parallel with the
+status polls. GraphQL stays one query per tick (48/day) plus refreshes ≤ 1/min. DO rows written grow by ~4 per tick
+(`cf_scripts` and one `probe:<entry>` per probe). The FlowDay and links probes are each one request of that app's Worker per tick (≤ 144 a day with refreshes, no D1 query); the website's is a static asset. Everything else as in
 [`limits.md`](limits.md).
 
 **v1 removal (done):** the UI calls only v2, so `/api/v1/*` is gone (routes, `overview()`/`buildOverview`,
@@ -329,7 +330,7 @@ also redeploys the dashboard with the new desired state.
 
 At most `DRIFT_CALLS_PER_TICK` (12) calls per tick: the account step and three Workers on the first tick,
 four Workers on the next, then the rest, so a check of the 9 Workers takes three ticks, 3 + 4 + 2 (a tick then
-makes at most 25 outbound calls in all, §5). A failed step is retried by the next tick; after `DRIFT_MAX_ATTEMPTS` (3)
+makes at most 27 outbound calls in all, §5). A failed step is retried by the next tick; after `DRIFT_MAX_ATTEMPTS` (3)
 failed attempts the day is given up (`consecutive_failed_days` + 1), and a run left unfinished at the end
 of its UTC day counts as a failed day too, as does a `drift_run` document that would pass
 `DRIFT_RUN_MAX_BYTES` (60,000 bytes, under the 64 KiB row limit; this account's is about 6 KB). Every answer is reduced at once to names, types and flags:

@@ -9,11 +9,13 @@ import type { HomeState } from './state.ts';
 export interface MailHeroOpsEntrypoint extends Rpc.WorkerEntrypointBranded, ops.OpsService, ops.CanaryProducerService {}
 export interface TodofyOpsEntrypoint extends Rpc.WorkerEntrypointBranded, ops.OpsService, ops.CanaryConsumerService, ops.OpsDigestService {}
 export interface LabOpsEntrypoint extends Rpc.WorkerEntrypointBranded, ops.OpsService {}
+export interface WatchOpsEntrypoint extends Rpc.WorkerEntrypointBranded, ops.OpsService {}
 
 export interface Env {
   readonly MAIL_HERO: Service<MailHeroOpsEntrypoint>;
   readonly TODOFY: Service<TodofyOpsEntrypoint>;
   readonly LAB: Service<LabOpsEntrypoint>;
+  readonly WATCH: Service<WatchOpsEntrypoint>;
   readonly HOME: DurableObjectNamespace<HomeState>;
   readonly ASSETS: Fetcher;
 

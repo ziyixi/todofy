@@ -74,9 +74,10 @@ export const V2_BODY_BUDGET = {
  * the guard docs, one status per ops_v1 entry) and, for the strip's observed items, what the evaluation
  * reads (one probe document per public_http entry, cf_scripts, the 14 recent canary runs); cloudflare adds
  * the usage and drift documents. Each document is read once per build (HomeState's read cache). Measured
- * 25 / 25 / 26 / 25 (home / flows / cloudflare / ops) with three ops_v1 apps and three probes (website,
- * FlowDay, links; 23 / 23 / 24 / 23 with the website's alone); each new ops_v1 or public_http entry adds
- * one row to every view, so the budget leaves room for one or two more (the watch app's status).
+ * 26 / 26 / 27 / 26 (home / flows / cloudflare / ops) with four ops_v1 apps (Mail Hero, Todofy, Lab and
+ * the watch app) and three probes (website, FlowDay, links; 25 / 25 / 26 / 25 before the watch app, 23 / 23 /
+ * 24 / 23 with the website's probe alone); each new ops_v1 or public_http entry adds one row to every view,
+ * so the budget leaves room for one more.
  */
 export const V2_ROWS_READ: Readonly<Record<ViewId, number>> = { home: 28, flows: 28, cloudflare: 28, ops: 28 };
 
@@ -160,6 +161,7 @@ export const ICON_KEYS = [
   'database',
   'link',
   'flask-conical',
+  'eye',
 ] as const;
 export type IconKey = (typeof ICON_KEYS)[number];
 
@@ -185,7 +187,7 @@ export interface GroupDef<Id extends string> {
 /** Where an entry's own health comes from (docs/design-v2.md §3). */
 export type StatusSource =
   /** contracts/ops-v1 `Ops.status()` over the named service binding (as in v1); guard: receives setGuard. */
-  | { readonly type: 'ops_v1'; readonly binding: 'MAIL_HERO' | 'TODOFY' | 'LAB'; readonly guard: boolean }
+  | { readonly type: 'ops_v1'; readonly binding: 'MAIL_HERO' | 'TODOFY' | 'LAB' | 'WATCH'; readonly guard: boolean }
   /**
    * One GET per tick from the Durable Object to a public (not Access-protected) URL: status code,
    * Content-Type header and latency only, `redirect: 'manual'`, body cancelled unread. `enabled: false`

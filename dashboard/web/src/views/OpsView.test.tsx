@@ -46,6 +46,7 @@ describe('操作与记录', () => {
       '论文雷达',
       'FlowDay',
       '短链接',
+      '网页监视',
       '个人网站',
       'Notion 发布',
       'Newsletter',
@@ -58,11 +59,14 @@ describe('操作与记录', () => {
     expect(within(rows[3] as HTMLElement).getAllByRole('cell').at(-1)).toHaveTextContent('flowday')
     expect(rows[4]).toHaveTextContent('公开地址探测')
     expect(within(rows[4] as HTMLElement).getAllByRole('cell').at(-1)).toHaveTextContent('links')
-    expect(rows[5]).toHaveTextContent('公开地址探测')
-    expect(rows[7]).toHaveTextContent('未接入监控')
+    // The watch app: its Ops entrypoint, as Mail Hero, Todofy and Lab.
+    expect(rows[5]).toHaveTextContent('ops-v1 状态接口')
+    expect(within(rows[5] as HTMLElement).getAllByRole('cell').at(-1)).toHaveTextContent('watch')
+    expect(rows[6]).toHaveTextContent('公开地址探测')
+    expect(rows[8]).toHaveTextContent('未接入监控')
     // Hidden, with no Worker: it only names the self-hosted servers' backup bucket.
-    expect(rows[9]).toHaveTextContent('未接入监控')
-    expect(within(rows[9] as HTMLElement).getAllByRole('cell').at(-1)).toHaveTextContent('—')
+    expect(rows[10]).toHaveTextContent('未接入监控')
+    expect(within(rows[10] as HTMLElement).getAllByRole('cell').at(-1)).toHaveTextContent('—')
   })
 
   it('names a link-only entry of the registry as such', async () => {

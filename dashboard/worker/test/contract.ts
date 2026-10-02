@@ -43,6 +43,7 @@ const SERVICES = {
   'mail-hero': [ops.OpsService, ops.CanaryProducerService],
   todofy: [ops.OpsService, ops.CanaryConsumerService, ops.OpsDigestService],
   lab: [ops.OpsService],
+  watch: [ops.OpsService],
 } as const;
 
 /** The methods of `app`'s Ops entrypoint, sorted: the dashboard calls only these, the stubs expose exactly these. */

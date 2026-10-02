@@ -114,7 +114,8 @@
           "enum": [
             "mail-hero",
             "todofy",
-            "lab"
+            "lab",
+            "watch"
           ]
         },
         "generated_at": {
@@ -700,7 +701,8 @@
       "enum": [
         "mail-hero",
         "todofy",
-        "lab"
+        "lab",
+        "watch"
       ]
     },
     "Counters": {

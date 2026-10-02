@@ -284,6 +284,19 @@ The sink (W3, `worker/src/todofy.ts`; the owner's decisions of 2026-10-01) is To
 Without the binding (local development, most workerd tests) there is no sink and the outbox only fills; the change
 inbox is always how the owner sees what changed.
 
+**ops-v1** (`worker/src/ops.ts`, `worker/src/ops-status.ts`; `contracts/ops-v1` IMPLEMENTATION.md §3c): the named
+entrypoint `Ops` answers the dashboard's service binding `WATCH` (no public route). `status()` holds counts and codes
+only, from WatchState's SQLite: `watches_active`, `watches_paused`, `watches_broken`, `watches_failing`,
+`changes_new` (counted up to 1,000 through `changes_state`), `fetches_today`, `notifications_pending`, `intents_open`,
+`intents_sent_today`; signals `watches_broken`, `scheduler_stale` (no pass for 12 hours while a watch is to be
+checked), `notify_unsettled` (an intent Todofy has not taken over for a day, or one given up or refused this week) and
+`guard_shed`; modes `maintenance` (always false) and `notifications` (the TODOFY binding is configured). Never a
+watch's name, URL, page text or a diff. Its one write: it arms the alarm when none is set, so the dashboard's tick
+(every 30 minutes) restarts a lost scheduler. `setGuard()` (the dashboard's 80 % rule, capability `guard`) defers
+`scheduled_checks` (a scheduled check waits until the watch's last check is a day old: every watch is still checked
+daily) and `daily_sweep` (the sweep of every watch's bounds waits for the shed's end); an owner's check, a pending
+change's confirmation, previews, the owner API and the notifications go on.
+
 ## 8. HTTP surface, limits and cost
 
 - The whole host is behind the Access application "watch" (W2). The Worker verifies the JWT on every path but
@@ -314,8 +327,9 @@ allows, each a change, with none of its own or the earlier passes' checks failed
 Wall time is the machine's, not what the test bounds (a request's timer includes waiting for the isolate while the other
 lanes parse; one request of that pass outlived production's 15 s on GitHub runners), so its page requests may take 60 s
 and its measured runs 120 s; the fetch timeout itself is `etiquette.test.ts`'s.
-Bundles: the Worker 110.1 KiB gzip (budget 122 KiB, `deploy/bundle-size.mjs`), the UI's JavaScript 50.2 KiB gzip
-(budget 56 KiB, `web/scripts/js-budget.mjs`), both with the wire profile's rule checker of proto/ts.
+Bundles: the Worker 125.2 KiB gzip with the Todofy sink and the Ops entrypoint (budget 140 KiB,
+`deploy/bundle-size.mjs`), the UI's JavaScript 50.2 KiB gzip (budget 56 KiB, `web/scripts/js-budget.mjs`), both with
+the wire profile's rule checker of proto/ts.
 
 SQLite rows are a budget of their own: Workers Free gives the account's SQLite Durable Objects 5,000,000 rows read
 and 100,000 rows written a day, Mail Hero's included, and every call fails past them until 00:00 UTC. The store
@@ -425,7 +439,8 @@ All hermetic: synthetic content only, the only network is loopback, clocks are i
      commit adds it, as `registry.test.ts` records for an id not yet known).
   8. After the deploy: the first API call arms the alarm; verify with a synthetic page on a host the lead controls.
 - **W3** (notifications; ops-v1 is merged: `proto/ops/v1/ops.proto`, generated code and the Contracts job). Steps 1
-  and 2 are done (commit "task-intent-v1: SOURCE_WATCH, ..." and the Todofy sink, §7):
+  to 3 are done (commit "task-intent-v1: SOURCE_WATCH, ...", the Todofy sink and the Ops entrypoint, §7); the
+  dashboard's `WATCH` binding is part of the first deploy (W2), since a binding needs the Worker deployed:
   1. `proto/todofy/taskintent/v1`: a new `Source` value `SOURCE_WATCH` whose URL host allow-list is
      `watch.ziyixi.science` only, so a task links to the change in the app (`/watches/<id>`), never to the watched URL
      (which keeps the rule that a watched URL leaves the object only through the owner API); Todofy's source handling

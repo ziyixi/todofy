@@ -81,7 +81,7 @@ class BoundsTest(unittest.TestCase):
         self.assertEqual(field_rules(pb.OpsStatus, "counters").max_items, 32)
         self.assertEqual(field_rules(pb.Signal, "metrics").max_items, 12)
         self.assertEqual(field_rules(pb.OpsReport, "items").max_items, 20)
-        self.assertEqual(field_rules(pb.OpsStatus, "app").allowed, frozenset({"mail-hero", "todofy", "lab"}))
+        self.assertEqual(field_rules(pb.OpsStatus, "app").allowed, frozenset({"mail-hero", "todofy", "lab", "watch"}))
         self.assertTrue(field_rules(pb.OpsStatus, "app").open)  # an app may join within ops-v1
         self.assertEqual([wire_name(code) for code in list(pb.ErrorCode)[1:]], ["invalid_input", "busy", "unavailable"])
 
@@ -94,7 +94,8 @@ class BoundsTest(unittest.TestCase):
 class SchemaTest(unittest.TestCase):
     def test_every_defs_name_of_the_hand_written_schema_still_resolves(self) -> None:
         """Readers outside the monorepo may resolve "#/$defs/<name>" by the names the schema had before it was
-        generated: each one is still there and says the same (descriptions aside)."""
+        generated: each one is still there and says the same (descriptions aside), except that App lists the apps
+        that joined since (the watch app, 2026-10-01) after the frozen ones: OpsStatus.app is an open list."""
         root = REPO / "contracts" / "ops-v1"
         legacy = json.loads((root / "legacy" / "ops-v1.schema.json").read_text(encoding="utf-8"))["$defs"]
         generated = json.loads((root / "ops-v1.schema.json").read_text(encoding="utf-8"))["$defs"]
@@ -107,9 +108,13 @@ class SchemaTest(unittest.TestCase):
         self.assertLessEqual(set(legacy), set(generated))
         for name in ("App", "Counters", "Metrics", "Modes", "OpsErrorCode"):
             with self.subTest(name):
-                self.assertEqual(
-                    resolved(generated[name]), {k: v for k, v in legacy[name].items() if k != "description"}
-                )
+                now = resolved(generated[name])
+                was = {k: v for k, v in legacy[name].items() if k != "description"}
+                if name == "App":
+                    self.assertEqual(now["enum"][: len(was["enum"])], was["enum"])
+                    self.assertEqual(now["enum"][len(was["enum"]) :], ["watch"])
+                    now, was = {**now, "enum": None}, {**was, "enum": None}
+                self.assertEqual(now, was)
 
 
 class NonNullTest(unittest.TestCase):

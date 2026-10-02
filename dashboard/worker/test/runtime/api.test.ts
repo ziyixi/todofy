@@ -241,7 +241,7 @@ describe('ticks and storage bounds', () => {
       await rm(dir, { recursive: true, force: true });
     }
   });
-  it('rebuilds a guard_applied table from before Lab joined ops-v1 and keeps its rows', async () => {
+  it('rebuilds a guard_applied table from before Lab and the watch app joined ops-v1 and keeps its rows', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'home-dashboard-guard-migration-'));
     const tableSql = (db: DatabaseSync) =>
       (db.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'guard_applied'").get() as { sql: string } | undefined)?.sql ?? '';
@@ -259,29 +259,32 @@ describe('ticks and storage bounds', () => {
           db.exec(`CREATE TABLE guard_applied_old (
             app TEXT PRIMARY KEY CHECK (app IN ('mail-hero', 'todofy')),
             input TEXT, state TEXT, last_call_at INTEGER, last_error TEXT, consecutive_failures INTEGER NOT NULL DEFAULT 0);
-            INSERT INTO guard_applied_old SELECT * FROM guard_applied WHERE app != 'lab';
+            INSERT INTO guard_applied_old SELECT * FROM guard_applied WHERE app IN ('mail-hero', 'todofy');
             DROP TABLE guard_applied;
             ALTER TABLE guard_applied_old RENAME TO guard_applied;`);
           expect(tableSql(db)).not.toContain("'lab'");
+          expect(tableSql(db)).not.toContain("'watch'");
           rewritten++;
         }
         db.close();
       }
       expect(rewritten).toBe(1);
 
-      // The new release opens it, rebuilds the CHECK, and can record Lab's guard call.
+      // The new release opens it, rebuilds the CHECK, and can record Lab's and the watch app's guard calls.
       h = await startFlows({ persist: dir, bindings: { CANARY_UTC_HOUR: '23' }, usage: d1Reads(90) });
       await h.tick('2026-09-29T10:30:00Z');
       const snap = await h.snapshot();
       expect(snap.guard.apps.lab?.last_error ?? null).toBeNull();
+      expect(snap.guard.apps.watch?.last_error ?? null).toBeNull();
       await h.dispose();
       h = undefined;
       for (const file of files) {
         const db = new DatabaseSync(join(dir, file));
         if (tableSql(db) !== '') {
           expect(tableSql(db)).toContain("'lab'");
+          expect(tableSql(db)).toContain("'watch'");
           const rows = db.prepare('SELECT app, input FROM guard_applied ORDER BY app').all() as { app: string; input: string | null }[];
-          expect(rows.map((row) => row.app)).toEqual(['lab', 'mail-hero', 'todofy']);
+          expect(rows.map((row) => row.app)).toEqual(['lab', 'mail-hero', 'todofy', 'watch']);
           expect(rows.every((row) => row.input?.includes('quota_d1_rows_read') === true)).toBe(true);
         }
         db.close();

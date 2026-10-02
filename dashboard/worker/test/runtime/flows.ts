@@ -143,12 +143,12 @@ export async function startFlows(options: { bindings?: Record<string, string>; u
     },
   });
   let csrf: { token: string; cookie: string } | null = null;
-  const pending: Record<StubApp, { app: StubApp; method: string; args: unknown[] }[]> = { 'mail-hero': [], todofy: [], lab: [] };
+  const pending: Record<StubApp, { app: StubApp; method: string; args: unknown[] }[]> = { 'mail-hero': [], todofy: [], lab: [], watch: [] };
   const drain = async (app: StubApp) => {
     pending[app].push(...(await harness.calls(app)));
     return pending[app].splice(0);
   };
-  const scenarios: Record<StubApp, Record<string, StubAnswer>> = { 'mail-hero': {}, todofy: {}, lab: {} };
+  const scenarios: Record<StubApp, Record<string, StubAnswer>> = { 'mail-hero': {}, todofy: {}, lab: {}, watch: {} };
   const flows: FlowHarness = {
     ...harness,
     analytics,
@@ -200,7 +200,7 @@ export async function startFlows(options: { bindings?: Record<string, string>; u
           items: [...digestItems, ...ops.attention.info].map(({ source, code, severity }) => ({ source, code, severity })),
         },
         observed: ops.attention.items.flatMap((item) => (item.observed === undefined ? [] : [{ source: item.source, code: item.code, level: item.observed }])),
-        apps: { 'mail-hero': app('mail-hero'), todofy: app('todofy'), lab: app('lab') },
+        apps: { 'mail-hero': app('mail-hero'), todofy: app('todofy'), lab: app('lab'), watch: app('watch') },
         usage: cloudflare.usage,
         guard: ops.guard,
         canary: ops.canary,

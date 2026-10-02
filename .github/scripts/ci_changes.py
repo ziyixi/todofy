@@ -30,9 +30,9 @@ Outputs (GITHUB_OUTPUT, "true"/"false"):
   runtime with proto/links/ui/, so a change to those checks and deploys it too. CHECK_ONLY (apps checked but never
   deployed, with no "<prefix>_deploy" output) is where a new app starts, until its first deploy job: it holds the
   watch app (watch/, the web watches on watch.ziyixi.science: watch/docs/design.md section 11) until its first deploy
-  job (W2): it has no watch_deploy output. It proposes task-intent-v1 (its notification sink, W3: Contracts runs its
-  intent tests) and compiles in packages/edge-auth and the TypeScript proto runtime with proto/watch/ui/ and
-  proto/todofy/taskintent/, so a change to those checks it too.
+  job (W2): it has no watch_deploy output. It proposes task-intent-v1 (its notification sink, W3) and answers ops-v1
+  (its Ops entrypoint; Contracts runs both tests) and compiles in packages/edge-auth and the TypeScript proto runtime
+  with proto/watch/ui/, proto/todofy/taskintent/ and proto/ops/, so a change to those checks it too.
 
 proto/ (the protobuf IDL, proto/README.md) checks every app in PROTO_USERS (an app that depends on
 @ziyixi/proto or ziyixi-proto) and deploys only the apps whose bundle the changed path reaches
@@ -191,7 +191,7 @@ PROTO_PACKAGES: dict[str, tuple[str, ...]] = {
     # CommonReason: Lab reads its names as types only.
     "proto/common/errors/": (),
     # ops-v1 (contracts/ops-v1): every app's Ops entrypoint and the dashboard that calls them.
-    "proto/ops/": ("mail-hero", "lab", "todofy", "dashboard"),
+    "proto/ops/": ("mail-hero", "lab", "todofy", "dashboard", "watch"),
     # mail.received.v1 (contracts/mail-received-v1's schema is generated from it): Mail Hero builds every event,
     # todofy-core reads every webhook body.
     "proto/mailhero/webhook/": ("mail-hero", "todofy"),
@@ -228,7 +228,7 @@ PROTO_NOT_BUNDLED = (
 # (PROTO_PACKAGES).
 # test_ci_changes.py checks this map against the Workers' imports.
 BUNDLED_BY = {
-    "contracts/ops-v1/ops-v1.ts": ("todofy", "mail-hero", "dashboard", "lab"),
+    "contracts/ops-v1/ops-v1.ts": ("todofy", "mail-hero", "dashboard", "lab", "watch"),
     # Lab validates its task intents and Todofy's answers with validate.mjs (ops-v1 answers are read with the
     # generated code: proto/ops/).
     "contracts/ops-v1/validate.mjs": ("lab",),

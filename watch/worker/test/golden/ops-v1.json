@@ -1,0 +1,281 @@
+{
+  "status/ok": {
+    "version": "ops-v1",
+    "app": "watch",
+    "generated_at": "2026-10-01T14:00:00Z",
+    "health": "ok",
+    "modes": {
+      "maintenance": false,
+      "notifications": true
+    },
+    "guard": {
+      "level": "normal",
+      "reason": null,
+      "until": null,
+      "set_at": null,
+      "deferred": []
+    },
+    "signals": [],
+    "counters": {
+      "watches_active": 2,
+      "watches_paused": 1,
+      "watches_broken": 0,
+      "watches_failing": 1,
+      "changes_new": 2,
+      "fetches_today": 37,
+      "notifications_pending": 1,
+      "intents_open": 0,
+      "intents_sent_today": 1
+    },
+    "last_backup_at": null,
+    "ui_url": "https://watch.example.com/",
+    "capabilities": [
+      "guard"
+    ]
+  },
+  "status/no-host": {
+    "version": "ops-v1",
+    "app": "watch",
+    "generated_at": "2026-10-01T14:00:00Z",
+    "health": "ok",
+    "modes": {
+      "maintenance": false,
+      "notifications": false
+    },
+    "guard": {
+      "level": "normal",
+      "reason": null,
+      "until": null,
+      "set_at": null,
+      "deferred": []
+    },
+    "signals": [],
+    "counters": {
+      "watches_active": 2,
+      "watches_paused": 1,
+      "watches_broken": 0,
+      "watches_failing": 1,
+      "changes_new": 2,
+      "fetches_today": 37,
+      "notifications_pending": 1,
+      "intents_open": 0,
+      "intents_sent_today": 1
+    },
+    "last_backup_at": null,
+    "ui_url": null,
+    "capabilities": [
+      "guard"
+    ]
+  },
+  "status/degraded": {
+    "version": "ops-v1",
+    "app": "watch",
+    "generated_at": "2026-10-01T14:00:00Z",
+    "health": "degraded",
+    "modes": {
+      "maintenance": false,
+      "notifications": true
+    },
+    "guard": {
+      "level": "shed",
+      "reason": "do_rows_read_high",
+      "until": "2026-10-02T01:00:00Z",
+      "set_at": "2026-10-01T13:30:00Z",
+      "deferred": [
+        "scheduled_checks",
+        "daily_sweep"
+      ]
+    },
+    "signals": [
+      {
+        "code": "notify_unsettled",
+        "severity": "warning",
+        "metrics": {
+          "open": 1,
+          "failed": 1
+        },
+        "since": "2026-09-29T14:00:00Z"
+      },
+      {
+        "code": "scheduler_stale",
+        "severity": "warning",
+        "metrics": {
+          "hours": 13
+        },
+        "since": "2026-10-01T01:00:00Z"
+      },
+      {
+        "code": "watches_broken",
+        "severity": "warning",
+        "metrics": {
+          "count": 2
+        },
+        "since": "2026-09-26T14:00:00Z"
+      },
+      {
+        "code": "guard_shed",
+        "severity": "info",
+        "metrics": {
+          "seconds_left": 39600
+        }
+      }
+    ],
+    "counters": {
+      "watches_active": 1,
+      "watches_paused": 0,
+      "watches_broken": 2,
+      "watches_failing": 2,
+      "changes_new": 0,
+      "fetches_today": 0,
+      "notifications_pending": 1,
+      "intents_open": 1,
+      "intents_sent_today": 0
+    },
+    "last_backup_at": null,
+    "ui_url": "https://watch.example.com/",
+    "capabilities": [
+      "guard"
+    ]
+  },
+  "status/never-ran": {
+    "version": "ops-v1",
+    "app": "watch",
+    "generated_at": "2026-10-01T14:00:00Z",
+    "health": "degraded",
+    "modes": {
+      "maintenance": false,
+      "notifications": true
+    },
+    "guard": {
+      "level": "normal",
+      "reason": null,
+      "until": null,
+      "set_at": null,
+      "deferred": []
+    },
+    "signals": [
+      {
+        "code": "scheduler_stale",
+        "severity": "warning",
+        "metrics": {}
+      }
+    ],
+    "counters": {
+      "watches_active": 1,
+      "watches_paused": 0,
+      "watches_broken": 0,
+      "watches_failing": 0,
+      "changes_new": 0,
+      "fetches_today": 0,
+      "notifications_pending": 0,
+      "intents_open": 0,
+      "intents_sent_today": 0
+    },
+    "last_backup_at": null,
+    "ui_url": "https://watch.example.com/",
+    "capabilities": [
+      "guard"
+    ]
+  },
+  "status/unavailable": {
+    "version": "ops-v1",
+    "app": "watch",
+    "generated_at": "2026-10-01T14:00:00Z",
+    "health": "down",
+    "modes": {
+      "maintenance": false,
+      "notifications": true
+    },
+    "guard": {
+      "level": "normal",
+      "reason": null,
+      "until": null,
+      "set_at": null,
+      "deferred": []
+    },
+    "signals": [
+      {
+        "code": "status_unavailable",
+        "severity": "critical",
+        "metrics": {}
+      }
+    ],
+    "counters": {},
+    "last_backup_at": null,
+    "ui_url": "https://watch.example.com/",
+    "capabilities": [
+      "guard"
+    ]
+  },
+  "guard/normal": {
+    "level": "normal",
+    "reason": null,
+    "until": null,
+    "set_at": null,
+    "deferred": []
+  },
+  "guard/set-shed": {
+    "ok": {
+      "level": "shed",
+      "reason": "do_rows_read_high",
+      "until": "2026-10-02T01:00:00Z",
+      "set_at": "2026-10-01T13:30:00Z",
+      "deferred": [
+        "scheduled_checks",
+        "daily_sweep"
+      ]
+    }
+  },
+  "guard/shed": {
+    "level": "shed",
+    "reason": "do_rows_read_high",
+    "until": "2026-10-02T01:00:00Z",
+    "set_at": "2026-10-01T13:30:00Z",
+    "deferred": [
+      "scheduled_checks",
+      "daily_sweep"
+    ]
+  },
+  "guard/shed-again": {
+    "ok": {
+      "level": "shed",
+      "reason": "do_rows_read_high",
+      "until": "2026-10-02T01:00:00Z",
+      "set_at": "2026-10-01T13:30:00Z",
+      "deferred": [
+        "scheduled_checks",
+        "daily_sweep"
+      ]
+    }
+  },
+  "guard/renewed": {
+    "ok": {
+      "level": "shed",
+      "reason": "do_rows_read_high",
+      "until": "2026-10-02T10:00:00Z",
+      "set_at": "2026-10-01T14:00:00Z",
+      "deferred": [
+        "scheduled_checks",
+        "daily_sweep"
+      ]
+    }
+  },
+  "guard/cleared": {
+    "ok": {
+      "level": "normal",
+      "reason": null,
+      "until": null,
+      "set_at": null,
+      "deferred": []
+    }
+  },
+  "guard/refused-too-far": {
+    "error": "invalid_input"
+  },
+  "guard/refused-past": {
+    "error": "invalid_input"
+  },
+  "guard/refused-shape": {
+    "error": "invalid_input"
+  }
+}

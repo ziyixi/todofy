@@ -87,7 +87,7 @@ describe('GET /api/v2/registry', () => {
     const first = await h.v2<RegistryResponse>('registry');
     expect(first).toMatchObject({ status: 200, etag: '"test"' });
     expect(first.bytes).toBeLessThanOrEqual(V2_BODY_BUDGET.registry);
-    expect(first.body?.entries.map((e) => e.id)).toEqual(['mail-hero', 'todofy', 'lab', 'flowday', 'links', 'website', 'notion-publish', 'newsletter', 'home', 'self-hosted']);
+    expect(first.body?.entries.map((e) => e.id)).toEqual(['mail-hero', 'todofy', 'lab', 'flowday', 'links', 'watch', 'website', 'notion-publish', 'newsletter', 'home', 'self-hosted']);
     const text = JSON.stringify(first.body);
     for (const url of Object.values(PROBES)) expect(text).not.toContain(new URL(url).pathname);
     expect(text).not.toContain('MAIL_HERO');
@@ -109,6 +109,7 @@ describe('GET /api/v2/home', () => {
       lab: ['unknown', 'never_checked'],
       flowday: ['unknown', 'never_checked'],
       links: ['unknown', 'never_checked'],
+      watch: ['unknown', 'never_checked'],
       website: ['unknown', 'never_checked'],
       'notion-publish': ['unknown', 'never_checked'],
       newsletter: ['unmonitored', null],
@@ -143,6 +144,7 @@ describe('GET /api/v2/home', () => {
       ['gtd', 'ok', false],
       ['site-publish', 'ok', false],
       ['daily-newsletter', 'ok', true],
+      ['web-watch', 'ok', false],
       ['paper-radar', 'ok', false],
       ['ops-digest', 'ok', false],
     ]);
@@ -239,7 +241,7 @@ describe('GET /api/v2/cloudflare', () => {
     expect(cf.workers_truncated).toBe(false);
     expect(cf.resources.map((r) => r.kind)).toEqual(['d1', 'd1', 'do', 'do', 'do', 'r2', 'r2']);
     expect(cf.resources.find((r) => r.id === 'mail-hero-store')).toMatchObject({ resource: 'mail-hero-store', entry: 'mail-hero' });
-    expect(Object.keys(cf.guard.apps).sort()).toEqual(['lab', 'mail-hero', 'todofy']);
+    expect(Object.keys(cf.guard.apps).sort()).toEqual(['lab', 'mail-hero', 'todofy', 'watch']);
     if (count >= 5) {
       expect(cf.workers.find((w) => w.script === 'todofy-core')).toMatchObject({ entry: 'todofy', requests: 96, do_requests: 632, cpu_p99_us: 6207 });
       // Errors first, then requests.
@@ -372,6 +374,7 @@ describe('GET /api/v2/flows and /api/v2/ops', () => {
       ['mail-hero', true, 'mail-hero'],
       ['todofy', true, 'todofy'],
       ['lab', true, 'lab'],
+      ['watch', true, 'watch'],
     ]);
     expect(ops.canary).toMatchObject({ id: 'mail-todofy', enabled: true, manual_limit: 3 });
     expect(ops.digest.enabled).toBe(true);

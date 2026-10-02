@@ -461,6 +461,7 @@ DEPLOYMENT_MODES = {
     "mail-hero": ["maintenance", "force_send_paused"],
     "todofy": ["maintenance", "processing_paused", "force_pause_todoist", "reminder_enabled"],
     "lab": ["maintenance"],
+    "watch": ["maintenance", "notifications"],
 }
 
 

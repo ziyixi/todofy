@@ -27,6 +27,14 @@ from tests import mail_contract
 ROOT = mail_contract.TODOFY.parent / "contracts" / "ops-v1"
 SCHEMA = json.loads((ROOT / "ops-v1.schema.json").read_text())
 LEGACY = json.loads((ROOT / "legacy" / "ops-v1.schema.json").read_text())
+# The apps that joined ops-v1 after the hand-written schema was frozen (OpsStatus.app is an open list): the watch app,
+# 2026-10-01. No dashboard that validates with the legacy schema binds one, so the legacy schema is compared with the
+# generated one as if its App list had grown the same way; that is the only difference allowed.
+JOINED_APPS = ["watch"]
+LEGACY_GROWN = {
+    **LEGACY,
+    "$defs": {**LEGACY["$defs"], "App": {"enum": [*LEGACY["$defs"]["App"]["enum"], *JOINED_APPS]}},
+}
 # validate.mjs: KEYWORDS plus the annotations it skips.
 SUPPORTED = {
     *("$ref", "type", "enum", "const", "required", "properties", "additionalProperties", "propertyNames"),
@@ -94,7 +102,11 @@ def test_fixtures_exist_for_every_method_input_and_output():
 @pytest.mark.parametrize(("name", "path"), VALID, ids=[f"{n}/{p.stem}" for n, p in VALID])
 def test_valid_fixture(name, path):
     assert _errors(name, path) == []
-    assert _validator(LEGACY, name).is_valid(json.loads(path.read_text()))
+    value = json.loads(path.read_text())
+    joined = isinstance(value, dict) and value.get("app") in JOINED_APPS
+    # A joined app's status is refused by the frozen list (no dashboard of that time binds it), and only by it.
+    assert _validator(LEGACY, name).is_valid(value) != joined
+    assert _validator(LEGACY_GROWN, name).is_valid(value)
 
 
 @pytest.mark.parametrize(("name", "path"), INVALID, ids=[f"{n}/{p.stem}" for n, p in INVALID])
@@ -162,6 +174,6 @@ _REMOVE = object()
 @pytest.mark.parametrize(("name", "path"), VALID, ids=[f"{n}/{p.stem}" for n, p in VALID])
 def test_the_generated_schema_keeps_every_guarantee_of_the_hand_written_one(name, path):
     """About 22,000 mutants of the valid fixtures (the invalid ones get the same verdict from both above)."""
-    generated, legacy = _validator(SCHEMA, name), _validator(LEGACY, name)
+    generated, legacy = _validator(SCHEMA, name), _validator(LEGACY_GROWN, name)
     differ = [m for m in _mutants(json.loads(path.read_text())) if generated.is_valid(m) != legacy.is_valid(m)]
     assert differ == []

@@ -1,7 +1,8 @@
 /**
  * workerd harness (../../../docs/design.md §10): bundles src/index.ts with esbuild and runs it in Miniflare as the Worker
  * "watch" with a real SQLite WatchState, next to
- *   - "probe": calls WatchState.step(now), setClock(now), alarmAt() and sqlForTests() over the object binding;
+ *   - "probe": calls WatchState.step(now), setClock(now), alarmAt() and sqlForTests() over the object binding, and the
+ *     named entrypoint Ops of "watch" over a service binding (ops-v1, as the dashboard does);
  *   - the outbound service "fake-net": every request the Worker makes goes to FakeSites (../fake-sites.ts), the
  *     synthetic websites, through ./fake-net.ts, which streams each body to the reader as it reads (never ahead of it);
  *     nothing leaves the process tree;
@@ -115,6 +116,9 @@ export interface Harness {
   todofy(scenario: { propose?: 'accept' | 'throw' | 'paused' | 'daily_limit' | 'garbled' }): Promise<void>;
   /** The intent IDs proposed since the last call, the intents recorded and the inputs refused (`todofy: true`). */
   todofyState(): Promise<{ invalid: number; calls: string[]; intents: { intent_id: string; mode: string; parent: { title: string; description?: string }; items: { title: string; url?: string }[] }[] }>;
+  /** ops-v1 over the Ops entrypoint, as the dashboard calls it (a rejection's message is its error code). */
+  opsStatus(): Promise<unknown>;
+  opsSetGuard(input: unknown): Promise<unknown>;
   /** A request to "watch" over loopback http. */
   fetch(path: string, init?: RequestInit): Promise<Response>;
   /** WatchUiService through the shared typed client, exactly as the UI calls it (CSRF and Origin on mutations). */
@@ -201,6 +205,8 @@ export async function startHarness(options: HarnessOptions = {}): Promise<Harnes
           modules: true,
           compatibilityDate: '2026-09-08',
           durableObjects: { WATCH: { className: 'WatchState', scriptName: options.splitObject === true ? OBJECT_WORKER : 'watch', useSQLite: true } },
+          // The dashboard's view: the named entrypoint Ops of "watch" (ops-v1), as dashboard/wrangler.toml binds it.
+          serviceBindings: { OPS: { name: 'watch', entrypoint: 'Ops' } },
           script: `export default { async fetch(request, env) {
             const { op, args } = await request.json()
             const stub = env.WATCH.get(env.WATCH.idFromName('watch-v1'))
@@ -210,6 +216,8 @@ export async function startHarness(options: HarnessOptions = {}): Promise<Harnes
               if (op === 'alarm') return Response.json({ ok: await stub.alarmAt() })
               if (op === 'sql') return Response.json({ ok: await stub.sqlForTests(...args) })
               if (op === 'meter') return Response.json({ ok: await stub.takeRowMeter() })
+              if (op === 'ops_status') return Response.json({ ok: await env.OPS.status() })
+              if (op === 'ops_guard') return Response.json({ ok: await env.OPS.setGuard(args[0]) })
               return Response.json({ error: 'unknown op' })
             } catch (error) { return Response.json({ error: error instanceof Error ? error.message : 'not_an_error' }) }
           } }`,
@@ -250,6 +258,8 @@ export async function startHarness(options: HarnessOptions = {}): Promise<Harnes
     browser,
     logs,
     fetch: fetchWatch,
+    opsStatus: () => probe('ops_status', []),
+    opsSetGuard: (input) => probe('ops_guard', [input]),
     async todofy(scenario) {
       const response = await (await mf.getWorker('todofy')).fetch('http://stub/__scenario', { method: 'POST', body: JSON.stringify(scenario) });
       if (response.status !== 204) throw new Error('todofy scenario');

@@ -41,6 +41,7 @@ const GUARD: GuardView = {
     'mail-hero': { state: { level: 'normal', reason: null, until: null, set_at: null, deferred: [] }, last_call_at: null, last_error: null },
     todofy: { state: { level: 'normal', reason: null, until: null, set_at: null, deferred: [] }, last_call_at: null, last_error: null },
     lab: { state: { level: 'normal', reason: null, until: null, set_at: null, deferred: [] }, last_call_at: null, last_error: null },
+    watch: { state: { level: 'normal', reason: null, until: null, set_at: null, deferred: [] }, last_call_at: null, last_error: null },
   },
 };
 
@@ -141,11 +142,11 @@ describe('the views', () => {
   it('home: every tile but the hidden one, one line per flow, four mini bars without contributors', () => {
     const ev = input();
     const home = homeResponse(base(), ev, usageView(), DESIRED);
-    expect(home.entries.map((e) => e.id)).toEqual(['mail-hero', 'todofy', 'lab', 'flowday', 'links', 'website', 'notion-publish', 'newsletter']);
+    expect(home.entries.map((e) => e.id)).toEqual(['mail-hero', 'todofy', 'lab', 'flowday', 'links', 'watch', 'website', 'notion-publish', 'newsletter']);
     // A link-only entry (synthetic: the registry has none) is a tile at level link, never probed.
     const linked = homeResponse(base(), ev, usageView(), DESIRED, withLinkOnly()).entries.find((e) => e.id === LINK_ONLY_ENTRY.id);
     expect(linked).toMatchObject({ level: 'link', reason: null, metric: null, checked_at: null });
-    expect(home.flows.map((f) => f.id)).toEqual(['mail-to-task', 'gtd', 'site-publish', 'daily-newsletter', 'paper-radar', 'ops-digest']);
+    expect(home.flows.map((f) => f.id)).toEqual(['mail-to-task', 'gtd', 'site-publish', 'daily-newsletter', 'web-watch', 'paper-radar', 'ops-digest']);
     expect(home.flows[0]).not.toHaveProperty('stages');
     expect(home.cloudflare.quota.map((q) => q.id)).toEqual(HOME_QUOTA_IDS);
     expect(home.cloudflare.quota.every((q) => q.breakdown.length === 0)).toBe(true);
@@ -163,6 +164,7 @@ describe('the views', () => {
       ['gtd', null],
       ['site-publish', null],
       ['daily-newsletter', null],
+      ['web-watch', null],
       ['paper-radar', null],
       ['ops-digest', null],
     ]);
@@ -193,7 +195,7 @@ describe('the views', () => {
   it('ops: guard, the canary with its id, the digest and every ops-v1 app in registry order', () => {
     const ev = input();
     const ops = opsResponse(base(), GUARD, canaryView(ev), digestView([]), ev.statuses);
-    expect(ops.apps.map((a) => a.entry)).toEqual(['mail-hero', 'todofy', 'lab']);
+    expect(ops.apps.map((a) => a.entry)).toEqual(['mail-hero', 'todofy', 'lab', 'watch']);
     expect(ops.apps[0]).toMatchObject({ reachable: true, error: null, consecutive_failures: 0, status: { app: 'mail-hero' } });
     expect(ops.canary.id).toBe('mail-todofy');
     expect(ops.guard.apps).toHaveProperty('todofy');
@@ -201,7 +203,7 @@ describe('the views', () => {
 
   it('stays within the body budgets on the mockup day (one warning, 14 runs, 5 Workers)', () => {
     const gemini = status('todofy', { health: 'degraded', signals: [signal('gemini_budget_80', 'warning', { percent: 82 }, '2026-09-29T11:20:00Z')] });
-    const ev = input({ statuses: { 'mail-hero': status('mail-hero'), todofy: gemini, lab: status('lab') }, canaryRecent: fortnight(run('2026-09-29', 'ok', null, null, 9)) });
+    const ev = input({ statuses: { 'mail-hero': status('mail-hero'), todofy: gemini, lab: status('lab'), watch: status('watch') }, canaryRecent: fortnight(run('2026-09-29', 'ok', null, null, 9)) });
     const item: OpsReportItem = { source: 'todofy', code: 'gemini_budget_80', severity: 'warning', since: '2026-09-29T11:20:00.000Z', metrics: { percent: 82 } };
     const day = base({}, [item]);
     const sizes = {

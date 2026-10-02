@@ -299,7 +299,7 @@ class Classify(unittest.TestCase):
             "proto/todofy/report/v1/report.proto": {"todofy"},
             # ops-v1: the Ops entrypoints that bundle its generated code (Todofy's gateway takes types only, its core
             # reads ops.v1 in Python).
-            "proto/ops/v1/ops.proto": {"mail-hero", "lab", "todofy", "dashboard"},
+            "proto/ops/v1/ops.proto": {"mail-hero", "lab", "todofy", "dashboard", "watch"},
             # mail.received.v1: Mail Hero builds every event, todofy-core reads every body.
             "proto/mailhero/webhook/v1/mail_received.proto": {"mail-hero", "todofy"},
             # Lab's UI API: only Lab imports it (Python does not even generate it).
@@ -969,8 +969,10 @@ class ContractsJob(unittest.TestCase):
                 "lab/worker/test/task-intent-contract.test.ts",
                 "lab/worker/test/intent.test.ts",
                 "todofy/tests/unit/test_task_intent_contract.py",
-                # The watch app's digest and urgent intents (the contract's watch fixtures, byte for byte).
+                # The watch app's digest and urgent intents (the contract's watch fixtures, byte for byte) and its
+                # ops-v1 answers.
                 "watch/worker/test/todofy.test.ts",
+                "watch/worker/test/ops-golden.test.ts",
             },
             self.named_tests(),
         )

@@ -14,6 +14,8 @@
  * due: the next alarm runs a second later with fresh budgets. A check that throws is recorded as INTERNAL_ERROR
  * (pipeline.ts recordInternalError). Afterwards the bounds of the watches whose checks added a change are kept
  * (store.ts pruneWatches, a few hundred rows read each), and the global ones at most hourly (every watch once a day).
+ * While the dashboard's guard sheds (ops-status.ts), a scheduled check waits until the watch's last check is a day old
+ * and the daily sweep waits for the shed's end.
  */
 import { deliver, type NotificationSink } from './notify.ts';
 import { utcDay } from './etiquette.ts';
@@ -21,6 +23,7 @@ import { ALARM_BYTES_BUDGET, ALARM_CONCURRENCY, FETCH_MAX_BYTES, ALARM_DUE_MAX, 
 import { REQUESTS_PER_CHECK, type Budget } from './obtain.ts';
 import { recordInternalError, runCheck, storedConfig, type CheckDeps, type CheckOutcome } from './pipeline.ts';
 import type { WatchRow } from './store.ts';
+import { activeShed, SHED_CHECK_SPACING_MS } from './ops-status.ts';
 
 export interface AlarmDeps extends CheckDeps {
   /** Monotonic milliseconds for the wall budget (performance.now in the Worker). */
@@ -57,7 +60,11 @@ function laneOf(row: WatchRow): string {
 export async function runAlarm(deps: AlarmDeps, now: number): Promise<AlarmResult> {
   const start = deps.elapsed();
   const budget: Budget = { requests: ALARM_FETCH_BUDGET, used: 0, bytes: 0 };
-  const due = deps.store.dueWatches(now, ALARM_DUE_MAX);
+  // The dashboard's guard (ops-v1 setGuard): while shed, scheduled checks wait for a day since the last one and the
+  // daily sweep waits; an owner's check, a confirmation and the notifications go on (ops-status.ts).
+  const shed = activeShed(deps.store, now);
+  const stretch = shed === null ? null : SHED_CHECK_SPACING_MS;
+  const due = deps.store.dueWatches(now, ALARM_DUE_MAX, stretch);
   const lanes = new Map<string, WatchRow[]>();
   for (const row of due) {
     const lane = laneOf(row);
@@ -117,12 +124,13 @@ export async function runAlarm(deps: AlarmDeps, now: number): Promise<AlarmResul
   // Urgent changes this pass confirmed leave now; the digest when its hour has come (notify.ts, todofy.ts).
   await deliver(deps.store, deps.sink, now, deps.transact);
   deps.store.pruneWatches(grown);
-  deps.store.pruneGlobal(now);
+  deps.store.pruneGlobal(now, shed !== null);
   deps.store.setMeta('last_alarm_at', String(now));
 
-  const nextDue = deps.store.nextDue();
+  const nextDue = deps.store.nextDue(stretch);
   const sinkAt = deps.sink?.nextAt(now) ?? null;
-  let next = Math.min(nextDue ?? now + ALARM_IDLE_MS, sinkAt ?? now + ALARM_IDLE_MS);
+  // A shed's end brings the deferred work back.
+  let next = Math.min(nextDue ?? now + ALARM_IDLE_MS, sinkAt ?? now + ALARM_IDLE_MS, shed?.until ?? now + ALARM_IDLE_MS);
   next = Math.min(Math.max(next, now + WAKE_MS), now + ALARM_IDLE_MS);
   return { next, outcomes, requests: budget.used, left };
 }

@@ -89,7 +89,7 @@ option (common.wire.v1.formats) = {
   description: "Where a report item comes from: an app (mail-hero, todofy, lab), dashboard, cloudflare."
 };
 
-// What every app's "Ops" entrypoint answers (Mail Hero, Todofy, Lab).
+// What every app's "Ops" entrypoint answers (Mail Hero, Todofy, Lab, the watch app).
 service OpsService {
   // `status()`: a snapshot built only from bounded, indexed reads; it never writes. Poll it at most every 10
   // minutes.
@@ -156,15 +156,17 @@ message OpsStatus {
     (google.api.field_behavior) = REQUIRED,
     (common.wire.v1.field).allowed = "ops-v1"
   ];
-  // The app that answers. The list is open: it may grow within ops-v1 when an app joins (the watch app next), and a
-  // consumer reads a name it does not know yet; the dashboard keeps only the answer of the app it called.
+  // The app that answers. The list is open: it may grow within ops-v1 when an app joins (the watch app joined on
+  // 2026-10-01), and a consumer reads a name it does not know yet; the dashboard keeps only the answer of the app it
+  // called.
   string app = 2 [
     (google.api.field_behavior) = REQUIRED,
     (common.wire.v1.field) = {
       allowed: [
         "mail-hero",
         "todofy",
-        "lab"
+        "lab",
+        "watch"
       ]
       open: true
     }

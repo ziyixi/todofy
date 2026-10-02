@@ -30,6 +30,8 @@ import { HostLocks } from './host-locks.ts';
 import { Store, type RowMeter } from './store.ts';
 import { TodofySink } from './todofy.ts';
 import type { NotificationSink } from './notify.ts';
+import { setGuard, watchStatus, type GuardOutcome } from './ops-status.ts';
+import type * as opsWire from '@ziyixi/proto/ops/v1/ops_wire';
 import { RpcError } from '@ziyixi/proto/rpc-status';
 
 
@@ -186,6 +188,22 @@ export class WatchState extends DurableObject<Env> {
   takeRowMeter(): RowMeter {
     if (!this.manual()) throw new Error('not_available');
     return this.store.takeMeter();
+  }
+
+  // ---- ops-v1 (ops.ts, the dashboard's service binding) -------------------------------------------------------------
+
+  /**
+   * status(): counts and codes from this object's SQLite (ops-status.ts). Its one write: an alarm when none is set, so
+   * the dashboard's tick (every 30 minutes) re-arms a lost alarm as every owner API call does.
+   */
+  async opsStatus(): Promise<opsWire.OpsStatus> {
+    await this.ensureAlarm();
+    return watchStatus(this.store, this.env, this.now());
+  }
+
+  /** setGuard(): shed or normal (ops-status.ts); the next alarm pass applies it. */
+  opsSetGuard(input: unknown): GuardOutcome {
+    return this.transact(() => setGuard(this.store, input, this.now()));
   }
 
   // ---- the owner API ------------------------------------------------------------------------------------------------

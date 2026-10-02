@@ -560,6 +560,26 @@ changed; the dashboard binds `LAB` next to the two others.
   sends to Todofy are never deferred. Bound: when the last successful fetch is more than 48 h old, the
   whole day's pipeline runs to its end despite the shed (then defers again).
 
+## 3c. The watch app (added 2026-10-01, additive)
+
+The watch app (`watch/`, Worker `watch`, `watch/docs/design.md` §7) is the fourth app. `OpsStatus.app` became an open
+list first (its own change, so this one is compatible: `proto/tools/profile_breaking.py` refuses a new name in a closed
+list), then gained `watch`; fixtures `OpsStatus/watch-ok.json`, `OpsStatus/watch-degraded.json` and
+`GuardState/shed-watch.json`. Nothing of the other apps' surface changed; the dashboard binds `WATCH`.
+
+- Files: `watch/worker/src/ops.ts` (the entrypoint, forwards to `WatchState`), `watch/worker/src/ops-status.ts` (status
+  and guard over the object's SQLite). No D1. Rows read per `status()`: the watches (at most 50), the new changes
+  through the `changes_state` index (counted up to 1,000), the undelivered events through the partial index
+  `notifications_pending` (at most 500), the Todofy sink's intents (at most ~300) and a few meta rows. Its one write:
+  when WatchState has no alarm set it arms one, so the dashboard's tick restarts a lost scheduler.
+- Counters: `watches_active`, `watches_paused`, `watches_broken`, `watches_failing`, `changes_new`, `fetches_today`,
+  `notifications_pending`, `intents_open`, `intents_sent_today`. Signals: `watches_broken`, `scheduler_stale`,
+  `notify_unsettled` (warning), `guard_shed` (info). Never a watch's name, URL, page text or a diff.
+- Guard: a shed defers `scheduled_checks` (a scheduled check waits until the watch's last check is a day old, so
+  every watch is still checked daily) and `daily_sweep` (the sweep of every watch's bounds waits for the shed's end).
+  An owner's check, a pending change's confirmation, previews, the owner API and the notifications to Todofy are never
+  deferred.
+
 ## 3b. The move onto proto/ (2026-10-01, no wire change)
 
 The contract's source of truth became the IDL [`proto/ops/v1/ops.proto`](../../proto/ops/v1/ops.proto)

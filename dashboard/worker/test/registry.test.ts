@@ -27,7 +27,12 @@ function contractSignals(): Record<string, string[]> {
     return [...line.replace(/\([^)]*\)/g, '').matchAll(/`([a-z][a-z0-9_]*)`/g)].map((match) => match[1] as string);
   };
   const every = row('every app');
-  return { 'mail-hero': [...every, ...row('Mail Hero')], todofy: [...every, ...row('Todofy')], lab: [...every, ...row('Lab')] };
+  return {
+    'mail-hero': [...every, ...row('Mail Hero')],
+    todofy: [...every, ...row('Todofy')],
+    lab: [...every, ...row('Lab')],
+    watch: [...every, ...row('watch')],
+  };
 }
 
 type Mutable<T> = { -readonly [K in keyof T]: T[K] extends readonly (infer U)[] ? Mutable<U>[] : T[K] extends object ? Mutable<T[K]> : T[K] };
@@ -60,12 +65,13 @@ describe('the registry', () => {
     expect(known['mail-hero']).toContain('endpoint_blocked');
     expect(known.todofy).toContain('gemini_budget_80');
     expect(known.lab).toContain('send_unsettled');
+    expect(known.watch).toContain('notify_unsettled');
     expect(validateRegistry(REGISTRY, { knownSignals: known })).toEqual([]);
   });
 
   it('registers the entries of the design, in their groups and order', () => {
     const byGroup = (group: string) => REGISTRY.entries.filter((e) => e.group === group).sort((a, b) => a.order - b.order).map((e) => e.id);
-    expect(byGroup('apps')).toEqual(['mail-hero', 'todofy', 'lab', 'flowday', 'links']);
+    expect(byGroup('apps')).toEqual(['mail-hero', 'todofy', 'lab', 'flowday', 'links', 'watch']);
     expect(byGroup('sites')).toEqual(['website']);
     expect(byGroup('services')).toEqual(['notion-publish', 'newsletter']);
     expect(byGroup('hidden')).toEqual(['home', 'self-hosted']);
@@ -76,6 +82,7 @@ describe('the registry', () => {
       lab: 'ops_v1',
       flowday: 'public_http',
       links: 'public_http',
+      watch: 'ops_v1',
       website: 'public_http',
       'notion-publish': 'analytics',
       newsletter: 'none',
@@ -87,7 +94,7 @@ describe('the registry', () => {
   it('gives no tile with a health level an accent that reads as a status colour', () => {
     // design-v2 §7: status colours only inside shape + word marks. Rose's chip next to ● 正常 reads as ■ 故障.
     const judged = REGISTRY.entries.filter((e) => e.group !== 'hidden' && e.status.type !== 'none' && e.status.type !== 'link_only');
-    expect(judged.map((e) => e.id)).toContain('links');
+    expect(judged.map((e) => e.id)).toEqual(expect.arrayContaining(['links', 'watch']));
     for (const e of judged) expect(e.accent, e.id).not.toBe('rose');
     expect(REGISTRY.entries.find((e) => e.id === 'links')?.accent).toBe('slate');
   });
@@ -101,6 +108,7 @@ describe('the registry', () => {
     expect(flowsOfScript('todofy')).toEqual(['mail-to-task', 'daily-newsletter', 'ops-digest']);
     expect(flowsOfScript('todofy-core')).toEqual(['mail-to-task', 'gtd']);
     expect(flowsOfScript('lab')).toEqual(['paper-radar']);
+    expect(flowsOfScript('watch')).toEqual(['web-watch']);
     expect(flowsOfScript('home')).toEqual(['ops-digest']);
     expect(flowsOfScript('ziyixi-notion-publish')).toEqual(['site-publish']);
   });
@@ -128,14 +136,15 @@ describe('the registry', () => {
     expect(resourceByMatch('r2', 'vultr-backup')).toMatchObject({ id: 'vps-backup', name: 'VPS 备份', entry: 'self-hosted' });
     expect(REGISTRY.entries.find((e) => e.id === 'self-hosted')).toMatchObject({ group: 'hidden', url: null, status: { type: 'none' } });
     expect(REGISTRY.workers.filter((w) => w.entry === 'self-hosted')).toEqual([]);
-    expect(REGISTRY.resources.filter((r) => r.match === null)).toEqual([]);
+    // WatchState's namespace exists only after the watch app's first deploy (W2): a follow-up commit records its id.
+    expect(REGISTRY.resources.filter((r) => r.match === null).map((r) => r.id)).toEqual(['watch-state']);
   });
 
   it('keeps the tick within the Workers Free subrequest budget', () => {
-    // 3 status() + 3 probes (website, FlowDay, links) + 1 GraphQL + 3 setGuard + 2 canary calls + 1 reportOps + 12 drift calls.
-    expect(outboundPerTick()).toBe(25);
+    // 4 status() + 3 probes (website, FlowDay, links) + 1 GraphQL + 4 setGuard + 2 canary calls + 1 reportOps + 12 drift calls.
+    expect(outboundPerTick()).toBe(27);
     expect(outboundPerTick()).toBeLessThanOrEqual(MAX_OUTBOUND_PER_TICK);
-    expect(outboundPerRefresh()).toBe(6);
+    expect(outboundPerRefresh()).toBe(7);
   });
 
   it('serves a public view without bindings or probe URLs, within its budget', () => {

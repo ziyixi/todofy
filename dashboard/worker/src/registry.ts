@@ -154,6 +154,24 @@ const ENTRIES: readonly EntryDef[] = [
     order: 6,
   },
   {
+    // The web watches (watch/, watch.ziyixi.science, W2/W3): its Ops entrypoint answers counts only, never a
+    // watch's name, URL or page text, so the tile and its flow read ops-v1 like Mail Hero's, Todofy's and Lab's.
+    id: 'watch',
+    name: '网页监视',
+    description: '网页、订阅与接口的变化收件箱',
+    group: 'apps',
+    icon: 'eye',
+    // Not rose (it reads as the danger colour), and not its neighbours' violet or slate in the 3-column grid.
+    accent: 'blue',
+    url: 'https://watch.ziyixi.science/',
+    access: true,
+    status: { type: 'ops_v1', binding: 'WATCH', guard: true },
+    tile_metric: { kind: 'counter', name: 'changes_new' },
+    // The watch app has no maintenance switch; the code is listed for every app in ops-v1 and never raised by it.
+    app_only_signals: ['maintenance_mode'],
+    order: 7,
+  },
+  {
     id: 'website',
     name: '个人网站',
     description: 'ziyixi.science，内容来自 Notion',
@@ -247,6 +265,7 @@ const WORKERS: readonly WorkerDef[] = [
   { script: 'lab', entry: 'lab', role: '论文雷达与 UI' },
   { script: 'flowday', entry: 'flowday', role: '页面、API 与 PWA 文件' },
   { script: 'links', entry: 'links', role: '短链接跳转与启动器' },
+  { script: 'watch', entry: 'watch', role: '网页监视与 UI' },
   { script: 'ziyixi-notion-publish', entry: 'notion-publish', role: '发布 Worker' },
   // website/wrangler.toml: static assets only, so it shows up in the table only if it ever runs code.
   { script: 'ziyixi-website', entry: 'website', role: '静态网站（仅静态资源）' },
@@ -266,6 +285,16 @@ const RESOURCES: readonly ResourceDef[] = [
   { id: 'links-db', kind: 'd1', name: 'links 短链接库', entry: 'links', match: '2f8c5331-06ce-4347-8c0a-90fe51c82260' },
   // FlowDay's database (flowday/wrangler.toml, managed by infra/ since IaC P4).
   { id: 'flowday-db', kind: 'd1', name: 'flowday 主库', entry: 'flowday', match: 'df104e83-7183-47e3-b2f9-638dc7502c13' },
+  // Created by the watch app's first deploy (W2); a follow-up commit records its namespace id.
+  {
+    id: 'watch-state',
+    kind: 'do',
+    name: 'WatchState',
+    entry: 'watch',
+    script: 'watch',
+    match: null,
+    todo: "the namespace id of WatchState from the account's Durable Object namespace list after the watch app's first deploy",
+  },
   // IDs read from the account's D1, Durable Object namespace and R2 bucket lists (2026-09-30).
   { id: 'mail-hero-store', kind: 'r2', name: 'mail-hero 邮件存储', entry: 'mail-hero', match: 'mail-hero-store' },
   { id: 'mail-hero-backup', kind: 'r2', name: 'mail-hero 备份', entry: 'mail-hero', match: 'mail-hero-backups' },
@@ -413,6 +442,20 @@ const FLOWS: readonly FlowDef[] = [
       { id: 'rank', name: '排序与简介', entry: 'lab', signals: ['neuron_cap_hit'], counters: ['ranked_24h', 'neurons_today'] },
       { id: 'deck', name: '卡片', entry: 'lab', signals: [], counters: ['liked_7d'] },
       { id: 'send', name: '交给 Todofy', entry: 'lab', signals: ['send_unsettled'] },
+    ],
+    canary: null,
+  },
+  {
+    id: 'web-watch',
+    name: '网页监视',
+    group: 'content',
+    description: '网页、订阅与接口按计划检查，确认的变化进收件箱，每日摘要与紧急变化交给 Todofy 创建任务。',
+    order: 3,
+    stages: [
+      { id: 'source', name: '网站', entry: null, signals: [], note: '被监视的网站在面板之外' },
+      { id: 'check', name: '检查', entry: 'watch', signals: ['scheduler_stale', 'watches_broken'], counters: ['fetches_today', 'watches_failing'] },
+      { id: 'inbox', name: '变化收件箱', entry: 'watch', signals: [], counters: ['changes_new'] },
+      { id: 'send', name: '交给 Todofy', entry: 'watch', signals: ['notify_unsettled'], counters: ['intents_sent_today'] },
     ],
     canary: null,
   },

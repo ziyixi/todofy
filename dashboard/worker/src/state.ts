@@ -4,8 +4,8 @@
  * query and Worker discovery, guard, canary, digest, and the v2 views assembled from its tables. The
  * fetch and scheduled handlers only call these RPC methods.
  *
- * Bounds: every tick makes at most outboundPerTick() = 25 outbound calls (3 status, 3 probes, 1 GraphQL,
- * ≤ 3 setGuard, ≤ 2 canary calls, ≤ 1 reportOps, ≤ DRIFT_CALLS_PER_TICK = 12 read-only drift calls) and
+ * Bounds: every tick makes at most outboundPerTick() = 27 outbound calls (4 status, 3 probes, 1 GraphQL,
+ * ≤ 4 setGuard, ≤ 2 canary calls, ≤ 1 reportOps, ≤ DRIFT_CALLS_PER_TICK = 12 read-only drift calls) and
  * writes a few dozen rows; a v2 view reads at most V2_ROWS_READ[view] rows (api-v2-types.ts; tested in
  * workerd).
  */
@@ -98,17 +98,21 @@ export function perApp<T>(value: (app: OpsApp) => T): Record<OpsApp, T> {
   return Object.fromEntries(OPS_APPS.map((app) => [app, value(app)])) as Record<OpsApp, T>;
 }
 
+/** guard_applied's CHECK: exactly the ops-v1 apps this dashboard calls (OPS_APPS). */
+const GUARD_APPS_CHECK = `CHECK (app IN (${OPS_APPS.map((app) => `'${app}'`).join(', ')}))`;
+
 /**
- * guard_applied's CHECK lists the apps; SQLite cannot alter a CHECK, so a store created before Lab joined
- * ops-v1 (2026-09-30) is rebuilt once, rows kept: new table, copy, drop, rename, in one transaction.
+ * guard_applied's CHECK lists the apps; SQLite cannot alter a CHECK, so a store created before an app joined ops-v1
+ * (Lab on 2026-09-30, the watch app on 2026-10-01) is rebuilt once, rows kept: new table, copy, drop, rename, in one
+ * transaction.
  */
 export function migrateGuardApplied(storage: DurableObjectStorage): void {
   const sql = storage.sql.exec<{ sql: string }>("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'guard_applied'").toArray()[0]?.sql ?? '';
-  if (sql === '' || sql.includes("'lab'")) return;
+  if (sql === '' || sql.includes(GUARD_APPS_CHECK)) return;
   storage.transactionSync(() => {
     storage.sql.exec(
       `CREATE TABLE guard_applied_v2 (
-        app TEXT PRIMARY KEY CHECK (app IN ('mail-hero', 'todofy', 'lab')),
+        app TEXT PRIMARY KEY ${GUARD_APPS_CHECK},
         input TEXT,
         state TEXT,
         last_call_at INTEGER,
@@ -152,7 +156,7 @@ const SCHEMA = [
     updated_at INTEGER NOT NULL
   )`,
   `CREATE TABLE IF NOT EXISTS guard_applied (
-    app TEXT PRIMARY KEY CHECK (app IN ('mail-hero', 'todofy', 'lab')),
+    app TEXT PRIMARY KEY ${GUARD_APPS_CHECK},
     input TEXT,
     state TEXT,
     last_call_at INTEGER,
