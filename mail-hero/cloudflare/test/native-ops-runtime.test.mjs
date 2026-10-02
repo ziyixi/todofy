@@ -162,9 +162,10 @@ async function runtime(t, bindings = {}) {
     for (const secret of SECRETS) assert.ok(!text.includes(secret), `${method} output leaks ${secret}: ${text}`)
     return { value: result.ok, statements }
   }
-  const csrf = await mf.dispatchFetch('http://localhost/api/v1/csrf')
+  const csrf = await mf.dispatchFetch('http://localhost/api/csrf')
   const token = (await csrf.json()).token, cookie = csrf.headers.get('set-cookie').split(';')[0]
-  const api = (path, method = 'GET', body) => request(`/api/v1${path}`, { method,
+  /** mailhero.ui.v2 through the Worker (the owner's view); a refusal fails the test. */
+  const api = (path, method = 'GET', body) => request(`/api/v2${path}`, { method,
     headers: { Origin: 'http://localhost', Cookie: cookie, 'X-CSRF-Token': token, 'Content-Type': 'application/json' },
     body: body === undefined ? undefined : JSON.stringify(body) })
   async function receive(raw = secretMail) {
@@ -173,8 +174,9 @@ async function runtime(t, bindings = {}) {
   }
   /** A forward-mode target through the real API (the credential is encrypted by the Worker). */
   async function forwardTarget() {
-    const endpoint = await api('/endpoints', 'POST', { action_request_id: crypto.randomUUID(), label: 'Synthetic consumer', url: 'https://consumer.example.org/hooks/mail',
+    const created = await api(`/endpoints?request_id=${crypto.randomUUID()}`, 'POST', { display_name: 'Synthetic consumer', uri: 'https://consumer.example.org/hooks/mail',
       auth_type: 'bearer', credential: 'synthetic-token-not-a-real-secret', rate_per_minute: 60, timeout_seconds: 2 })
+    const endpoint = { ...created, id: created.name.slice('endpoints/'.length) }
     await db.prepare("UPDATE app_settings SET mode='forward',current_endpoint_id=? WHERE id=1").bind(endpoint.id).run()
     return endpoint
   }
@@ -295,16 +297,16 @@ test('workerd Ops: canary queued once per run, delivered with the golden marker,
   assert.deepEqual((await ops('startCanary', 'StartCanaryResult', { run_id: 'canary-2026-09-29' })).value, started.value, 'still the same event after delivery')
 
   // The owner sees it only as a labelled delivery, never in the inbox.
-  const listed = (await api('/deliveries')).items.find(item => item.event_id === eventID)
+  const listed = (await api('/deliveries')).deliveries.find(item => item.name === `deliveries/${eventID}`)
   assert.equal(listed.canary, true)
-  assert.equal((await api('/messages')).items.length, 0)
+  assert.equal((await api('/messages')).messages, undefined)
   // A real mail's event reads unknown, as does an unknown ID; malformed IDs are invalid_input.
   await unthrottle()
   await receive()
   const real = await waitFor(() => db.prepare("SELECT d.event_id,d.state FROM deliveries d JOIN messages m ON m.id=d.message_id WHERE m.origin='cloudflare'").first(), row => row?.state === 'delivered', 'real mail delivered')
   assert.deepEqual((await ops('canaryDelivery', 'CanaryDelivery', real.event_id)).value, { state: 'unknown', attempts: 0 })
   assert.equal(JSON.parse(calls.at(-1).body).canary, undefined, 'real mail carries no canary marker')
-  assert.equal((await api('/deliveries')).items.find(item => item.event_id === real.event_id).canary, false)
+  assert.equal((await api('/deliveries')).deliveries.find(item => item.name === `deliveries/${real.event_id}`).canary, undefined)
   assert.deepEqual((await ops('canaryDelivery', 'CanaryDelivery', crypto.randomUUID())).value, { state: 'unknown', attempts: 0 })
   assert.equal((await ops('canaryDelivery', 'CanaryDelivery', 'not-an-event')).error, 'invalid_input')
   assert.equal((await ops('startCanary', 'StartCanaryResult', { run_id: 'bad run' })).error, 'invalid_input')

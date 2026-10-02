@@ -85,7 +85,7 @@ async function script() {
       const stats = { rows_read: 0, queries: 0 }, metered = { ...env, DB: meter(env.DB, stats) }
       if (url.pathname === '/__test/maintenance') { const result = await runMaintenance(metered); return Response.json({ ...stats, jobs: result.jobs.length }) }
       if (url.pathname === '/__test/overview') {
-        const response = await app.fetch(new Request('http://localhost/api/v1/overview'), metered, ctx)
+        const response = await app.fetch(new Request('http://localhost/api/v2/overview'), metered, ctx)
         return Response.json({ ...stats, status: response.status, body: await response.json() })
       }
       return app.fetch(request, env, ctx)
@@ -197,7 +197,9 @@ test('workerd rows read per maintenance cycle and overview stay bounded as store
     }
     const overview = await json('/__test/overview'), probe = await json('/__probe/stats')
     assert.equal(overview.status, 200)
-    return { cycle: cycles.at(-1), first: cycles[0], overview: overview.rows_read + probe.d1_rows_read, overviewDO: probe.do_rows_read, counts: overview.body.counts, alerts: overview.body.alerts.active.map(alert => alert.code).sort() }
+    return { cycle: cycles.at(-1), first: cycles[0], overview: overview.rows_read + probe.d1_rows_read, overviewDO: probe.do_rows_read, counts: { messages: overview.body.message_count ?? 0, delivered: overview.body.delivered_count ?? 0, failed: overview.body.failed_delivery_count ?? 0,
+      pending: overview.body.pending_delivery_count ?? 0, parse_failed: overview.body.parse_failed_count ?? 0 },
+      alerts: (overview.body.active_alerts ?? []).map(alert => alert.code).sort() }
   }
   await history(300)
   const small = await measure()

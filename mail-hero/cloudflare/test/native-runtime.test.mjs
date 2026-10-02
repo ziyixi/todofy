@@ -9,6 +9,7 @@ import { createHash } from 'node:crypto';
 import { build } from 'esbuild';
 import { Miniflare, convertV4MiniflareOptions } from 'miniflare';
 import { migrationStatements } from './migrations.mjs';
+import { idOf, query, reasonOf } from './owner-api.mjs';
 
 const root = resolve(fileURLToPath(new URL('..', import.meta.url)));
 const fixture = [
@@ -84,48 +85,56 @@ test('native workerd: durable archive, protected API, stable retry identity and 
       const sql = await readFile(join(root, 'migrations', name), 'utf8');
       await db.batch(migrationStatements(sql).map(s => db.prepare(s)));
     }
-    const publicRequest = await mf.dispatchFetch('https://public.example.org/api/v1/messages');
+    const publicRequest = await mf.dispatchFetch('https://public.example.org/api/v2/messages');
     assert.equal(publicRequest.status, 503, 'DEV bypass fails closed outside localhost');
-    const spoofed = await mf.dispatchFetch('http://localhost/api/v1/messages', { headers: { 'CF-Ray': 'spoof' } });
+    assert.equal(reasonOf(await publicRequest.json()), 'ACCESS_NOT_CONFIGURED');
+    const spoofed = await mf.dispatchFetch('http://localhost/api/v2/messages', { headers: { 'CF-Ray': 'spoof' } });
     assert.equal(spoofed.status, 503);
-    const csrf = await mf.dispatchFetch('http://localhost/api/v1/csrf');
+    const csrf = await mf.dispatchFetch('http://localhost/api/csrf');
     assert.equal(csrf.status, 200);
     const csrfValue = (await csrf.json()).token;
     const cookie = csrf.headers.get('set-cookie').split(';')[0];
+    /** mailhero.ui.v2 through the Worker, as the UI calls it; a refusal fails the test. */
     async function api(path, method = 'GET', body) {
-      const response = await mf.dispatchFetch(`http://localhost/api/v1${path}`, { method,
+      const response = await mf.dispatchFetch(`http://localhost/api/v2${path}`, { method,
         headers: { Origin: 'http://localhost', Cookie: cookie, 'X-CSRF-Token': csrfValue, 'Content-Type': 'application/json' },
         body: body === undefined ? undefined : JSON.stringify(body) });
-      const result = response.status === 204 ? null : await response.json();
+      const result = await response.json();
       assert.ok(response.ok, `${method} ${path}: ${response.status} ${JSON.stringify(result)}`);
       return result;
     }
-    const forbidden = await mf.dispatchFetch('http://localhost/api/v1/settings', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+    const stats = (from, to, extra = {}) => `/deliveries/-/attempts:summarize${query({ start_time: from, end_time: to, granularity: 'hour', ...extra })}`;
+    const forbidden = await mf.dispatchFetch('http://localhost/api/v2/settings?update_mask=send_paused', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: '{}' });
     assert.equal(forbidden.status, 403, 'mutations require origin and CSRF');
+    assert.equal(reasonOf(await forbidden.json()), 'CSRF_FAILED');
+    const legacy = await mf.dispatchFetch('http://localhost/api/v1/messages');
+    assert.deepEqual([legacy.status, (await legacy.json()).error.code], [410, 'reload_required'], 'an old tab is asked to reload');
     async function receive() {
       const response = await mf.dispatchFetch('http://localhost/__test/email', { method: 'POST', headers: { 'x-raw-size': String(Buffer.byteLength(fixture)) }, body: fixture });
       assert.equal(response.status, 204, await response.text());
     }
     await receive();
     const message = await waitFor(() => db.prepare('SELECT * FROM messages LIMIT 1').first(), row => row?.parse_state === 'ready', 'mail becomes readable');
-    const detail = await api(`/messages/${message.id}`);
-    assert.equal(detail.message.subject, '合成测试');
-    assert.match(detail.message.text, /合成邮件/);
-    assert.doesNotMatch(detail.message.html, /tracker|script|<img/i);
-    assert.equal(detail.message.attachments.length, 1);
-    assert.equal((await api('/deliveries')).items.length, 0, 'archive mode does not send');
-    const attachment = await mf.dispatchFetch(`http://localhost/api/v1/messages/${message.id}/attachments/1.1`);
+    assert.equal((await api(`/messages/${message.id}`)).subject, '合成测试');
+    const detail = await api(`/messages/${message.id}/content`);
+    assert.match(detail.text, /合成邮件/);
+    assert.doesNotMatch(detail.html, /tracker|script|<img/i);
+    assert.equal(detail.attachments.length, 1);
+    assert.equal((await api('/deliveries')).deliveries, undefined, 'archive mode does not send');
+    const attachment = await mf.dispatchFetch(`http://localhost${detail.attachments[0].download_uri}`);
     assert.equal(attachment.status, 200);
     assert.match(await attachment.text(), /safe attachment/);
     const actionID = crypto.randomUUID();
-    const endpointBody = { action_request_id: actionID, label: 'Synthetic consumer', url: 'https://consumer.example.org/hooks/mail',
+    const endpointBody = { display_name: 'Synthetic consumer', uri: 'https://consumer.example.org/hooks/mail',
       auth_type: 'bearer', credential: 'synthetic-token-not-a-real-secret', rate_per_minute: 60, timeout_seconds: 2 };
-    const endpoint = await api('/endpoints', 'POST', endpointBody);
-    assert.equal((await api('/endpoints', 'POST', endpointBody)).id, endpoint.id, 'double click creates one endpoint');
-    assert.ok(!JSON.stringify(endpoint).includes(endpointBody.credential));
-    const send = { endpoint_id: endpoint.id, action_request_id: crypto.randomUUID() };
-    const event = await api(`/messages/${message.id}/send`, 'POST', send);
-    assert.equal((await api(`/messages/${message.id}/send`, 'POST', send)).event_id, event.event_id);
+    const created = await api(`/endpoints?request_id=${actionID}`, 'POST', endpointBody);
+    assert.equal((await api(`/endpoints?request_id=${actionID}`, 'POST', endpointBody)).name, created.name, 'double click creates one endpoint');
+    assert.ok(!JSON.stringify(created).includes(endpointBody.credential));
+    const endpoint = { ...created, id: idOf(created.name), ...(await db.prepare('SELECT current_revision_id FROM webhook_endpoints WHERE id=?').bind(idOf(created.name)).first()) };
+    const send = { endpoint: created.name, request_id: crypto.randomUUID() };
+    const sent = await api(`/messages/${message.id}:send`, 'POST', send);
+    const event = { event_id: idOf(sent.delivery.name) };
+    assert.equal((await api(`/messages/${message.id}:send`, 'POST', send)).delivery.name, sent.delivery.name);
     await waitFor(() => db.prepare('SELECT * FROM deliveries WHERE event_id=?').bind(event.event_id).first(), row => row?.state === 'retry_wait', '503 is durable retry');
     assert.equal(calls.length, 1);
     // Advance only the test's persisted clocks; production backoff remains intact.
@@ -139,8 +148,8 @@ test('native workerd: durable archive, protected API, stable retry identity and 
     assert.equal(calls.length, 2);
     const statsFrom = new Date(Date.now() - 3600_000).toISOString();
     const statsTo = new Date(Date.now() + 3600_000).toISOString();
-    const stats = await api(`/delivery-stats?from=${encodeURIComponent(statsFrom)}&to=${encodeURIComponent(statsTo)}&bucket=hour`);
-    assert.deepEqual(stats.totals, { succeeded: 1, retried: 1, failed: 0, unknown: 0 }, 'workerd reads actual completed attempts');
+    const totals = await api(stats(statsFrom, statsTo));
+    assert.deepEqual(totals.totals, { succeeded_count: 1, retried_count: 1 }, 'workerd reads actual completed attempts');
     assert.deepEqual((await db.prepare('SELECT outcome FROM delivery_attempts WHERE event_id=? ORDER BY attempt_no').bind(event.event_id).all()).results.map(row => row.outcome), ['retryable', 'delivered']);
     assert.ok(await db.prepare("SELECT name FROM sqlite_master WHERE type='index' AND name='delivery_attempts_finished_idx'").first(), 'range index migrated in workerd D1');
     assert.equal(calls[0].body, calls[1].body);
@@ -154,15 +163,15 @@ test('native workerd: durable archive, protected API, stable retry identity and 
     // cannot race the test's retry-mode setup. A single manual attempt that
     // receives 503 is terminal and must be counted as failed, not retried.
     await db.prepare('UPDATE webhook_endpoints SET paused=1 WHERE id=?').bind(endpoint.id).run();
-    const beforeReplay = (await api(`/messages/${message.id}`)).message;
+    const beforeReplay = await api(`/messages/${message.id}`);
     // The coordinator creates the delivery (/deliveries/create); its refusal reaches the owner as before.
-    const stale = await mf.dispatchFetch(`http://localhost/api/v1/deliveries/${event.event_id}/replay`, { method: 'POST',
+    const stale = await mf.dispatchFetch(`http://localhost/api/v2/deliveries/${event.event_id}:resend`, { method: 'POST',
       headers: { Origin: 'http://localhost', Cookie: cookie, 'X-CSRF-Token': csrfValue, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ endpoint_id: endpoint.id, message_version: beforeReplay.version + 1, action_request_id: crypto.randomUUID() }) });
+      body: JSON.stringify({ endpoint: endpoint.name, message_etag: String(Number(beforeReplay.etag) + 1), request_id: crypto.randomUUID() }) });
     assert.equal(stale.status, 409);
-    assert.deepEqual(((await stale.json()).error.code), 'version_conflict');
-    const terminal = await api(`/deliveries/${event.event_id}/replay`, 'POST', { endpoint_id: endpoint.id,
-      message_version: beforeReplay.version, action_request_id: crypto.randomUUID() });
+    assert.deepEqual(reasonOf(await stale.json()), 'ETAG_MISMATCH');
+    const terminal = { event_id: idOf((await api(`/deliveries/${event.event_id}:resend`, 'POST', { endpoint: endpoint.name,
+      message_etag: beforeReplay.etag, request_id: crypto.randomUUID() })).name) };
     await db.batch([
       db.prepare("UPDATE deliveries SET retry_mode='once',next_attempt_at='2000-01-01T00:00:00.000Z' WHERE event_id=?").bind(terminal.event_id),
       db.prepare('UPDATE webhook_endpoints SET paused=0,next_send_at=NULL WHERE id=?').bind(endpoint.id),
@@ -171,11 +180,11 @@ test('native workerd: durable archive, protected API, stable retry identity and 
     assert.equal((await mf.dispatchFetch('http://localhost/__test/enqueue', { method: 'POST', body: JSON.stringify({ type: 'deliver', eventID: terminal.event_id }) })).status, 204);
     await waitFor(() => db.prepare('SELECT state FROM deliveries WHERE event_id=?').bind(terminal.event_id).first(), row => row?.state === 'failed', 'single transient attempt is terminal');
     assert.equal((await db.prepare('SELECT outcome FROM delivery_attempts WHERE event_id=?').bind(terminal.event_id).first()).outcome, 'failed');
-    const finalStats = await api(`/delivery-stats?from=${encodeURIComponent(statsFrom)}&to=${encodeURIComponent(statsTo)}&bucket=hour`);
-    assert.deepEqual(finalStats.totals, { succeeded: 1, retried: 1, failed: 1, unknown: 0 });
-    const fresh = (await api(`/messages/${message.id}`)).message;
-    await api(`/messages/${message.id}/content`, 'DELETE', { version: fresh.version, action_request_id: crypto.randomUUID() });
-    assert.equal((await mf.dispatchFetch(`http://localhost/api/v1/messages/${message.id}/raw`)).status, 410);
+    const finalStats = await api(stats(statsFrom, statsTo));
+    assert.deepEqual(finalStats.totals, { succeeded_count: 1, retried_count: 1, failed_count: 1 });
+    const fresh = await api(`/messages/${message.id}`);
+    await api(`/messages/${message.id}:clearContent`, 'POST', { etag: fresh.etag, request_id: crypto.randomUUID() });
+    assert.equal((await mf.dispatchFetch(`http://localhost/api/v2/messages/${message.id}/raw`)).status, 410);
     await receive();
     await waitFor(() => db.prepare('SELECT COUNT(*) n FROM ingest_receipts').first(), row => row?.n === 2, 'duplicate is indexed once');
     const tombstone = await db.prepare('SELECT * FROM messages WHERE id=?').bind(message.id).first();
@@ -208,7 +217,7 @@ test('native workerd: durable archive, protected API, stable retry identity and 
       row => row?.parse_state === 'ready', 'Gmail-style forward is parsed');
     assert.equal(forwardedRow.receive_mode, 'forward');
     assert.equal(forwardedRow.from_text, 'Synthetic Sender <sender@example.org>');
-    assert.equal((await api(`/messages/${forwardedRow.id}`)).message.text, '测试邮件');
+    assert.equal((await api(`/messages/${forwardedRow.id}/content`)).text, '测试邮件');
     const automatic = await waitFor(() => db.prepare('SELECT * FROM deliveries WHERE message_id=?').bind(forwardedRow.id).first(),
       row => row?.state === 'delivered', 'forwarded mail auto-delivers');
     assert.equal(automatic.endpoint_revision_id, endpoint.current_revision_id);
@@ -221,20 +230,21 @@ test('native workerd: durable archive, protected API, stable retry identity and 
     await db.prepare(`INSERT INTO delivery_attempts(id,event_id,attempt_no,started_at,finished_at,outcome)
       VALUES(?,?,90,'2026-11-01T08:30:00.000Z','2026-11-01T08:30:00.000Z','retryable'),(?,?,91,'2026-11-01T09:30:00.000Z','2026-11-01T09:30:00.000Z','delivered')`)
       .bind(crypto.randomUUID(), automatic.event_id, crypto.randomUUID(), automatic.event_id).run();
-    const local = await api('/delivery-stats?from=2026-11-01T06%3A00%3A00.000Z&to=2026-11-01T12%3A00%3A00.000Z&bucket=hour&tz=America%2FLos_Angeles');
+    const local = await api(stats('2026-11-01T06:00:00.000Z', '2026-11-01T12:00:00.000Z', { time_zone: 'America/Los_Angeles' }));
     assert.equal(local.time_zone, 'America/Los_Angeles');
-    assert.deepEqual(local.buckets.map(item => [item.start.slice(11, 13), item.retried, item.succeeded]),
+    assert.deepEqual(local.buckets.map(item => [item.start_time.slice(11, 13), item.counts.retried_count ?? 0, item.counts.succeeded_count ?? 0]),
       [['06', 0, 0], ['07', 0, 0], ['08', 1, 0], ['09', 0, 1], ['10', 0, 0], ['11', 0, 0]], 'the repeated 01:00 stays two buckets');
-    assert.equal((await mf.dispatchFetch('http://localhost/api/v1/delivery-stats?from=2026-11-01T06%3A00%3A00.000Z&to=2026-11-01T12%3A00%3A00.000Z&tz=Not%2FAZone')).status, 400);
+    const zone = await mf.dispatchFetch(`http://localhost/api/v2${stats('2026-11-01T06:00:00.000Z', '2026-11-01T12:00:00.000Z', { time_zone: 'Not/AZone' })}`);
+    assert.deepEqual([zone.status, reasonOf(await zone.json())], [400, 'INVALID_TIME_ZONE']);
 
     // Mixed versions: an event an older build froze (its R2 payload/<eventID>.json) is retried with exactly those bytes.
     // Nothing builds an event twice, so this build's codec never rewrites one (pre_storage_v1 lacks storage-v1's fields,
     // which the codec would add).
     const legacyBytes = await readFile(join(root, '../../contracts/mail-received-v1/fixtures/legacy/pre_storage_v1.json'));
     await db.prepare('UPDATE webhook_endpoints SET paused=1 WHERE id=?').bind(endpoint.id).run();
-    const latest = (await api(`/messages/${forwardedRow.id}`)).message;
-    const frozen = await api(`/deliveries/${automatic.event_id}/replay`, 'POST', { endpoint_id: endpoint.id,
-      message_version: latest.version, action_request_id: crypto.randomUUID() });
+    const latest = await api(`/messages/${forwardedRow.id}`);
+    const frozen = { event_id: idOf((await api(`/deliveries/${automatic.event_id}:resend`, 'POST', { endpoint: endpoint.name,
+      message_etag: latest.etag, request_id: crypto.randomUUID() })).name) };
     const { payload_key: frozenKey } = await db.prepare('SELECT payload_key FROM deliveries WHERE event_id=?').bind(frozen.event_id).first();
     await (await mf.getR2Bucket('MAIL_STORE')).put(frozenKey, legacyBytes);
     await db.batch([
@@ -251,5 +261,31 @@ test('native workerd: durable archive, protected API, stable retry identity and 
   } finally {
     await mf.dispose();
     await rm(temp, { recursive: true, force: true });
+  }
+});
+
+test('native workerd: MAINTENANCE_MODE refuses a mutation before Access, with a Status on the owner API', { timeout: 60000 }, async () => {
+  const bundle = await build({ entryPoints: [join(root, 'src/native/index.ts')], bundle: true, format: 'esm', platform: 'neutral', external: ['cloudflare:workers'], write: false });
+  const mf = new Miniflare(convertV4MiniflareOptions({
+    name: 'mail-hero-maintenance-test', modules: true, script: bundle.outputFiles[0].text, compatibilityDate: '2026-09-07', host: '127.0.0.1', port: 0,
+    d1Databases: { DB: 'maintenance-test' }, r2Buckets: ['MAIL_STORE'], durableObjects: { COORDINATOR: { className: 'MailCoordinator', useSQLite: true } },
+    bindings: { RECEIVE_ADDRESS: 'inbox@mail.example.org', ACCESS_ISSUER: 'https://synthetic.cloudflareaccess.com', ACCESS_AUDIENCE: 'synthetic',
+      ACCESS_OWNER: 'owner@example.org', CREDENTIAL_KEY: 'a'.repeat(64), WEBHOOK_ALLOWED_HOSTS: 'consumer.example.org', FORCE_SEND_PAUSED: 'false', MAINTENANCE_MODE: 'true' },
+    serviceBindings: { ASSETS: () => new Response('<html>Mail Hero</html>', { headers: { 'content-type': 'text/html' } }) },
+  }));
+  try {
+    // No login at all: maintenance answers first, as before; the owner API's answer is a Status, every other path's the envelope.
+    for (const path of ['/api/v2/settings?update_mask=send_paused', '/api/csrf']) {
+      const response = await mf.dispatchFetch(`https://mail.example.org${path}`, { method: 'PATCH', body: '{}' });
+      assert.equal(response.status, 503, path);
+      assert.equal(reasonOf(await response.json()), 'MAINTENANCE', path);
+      assert.equal(response.headers.get('Cache-Control'), 'no-store');
+    }
+    const other = await mf.dispatchFetch('https://mail.example.org/api/v1/settings', { method: 'PATCH', body: '{}' });
+    assert.deepEqual([other.status, (await other.json()).error.code], [503, 'maintenance']);
+    const read = await mf.dispatchFetch('https://mail.example.org/api/v2/settings');
+    assert.deepEqual([read.status, reasonOf(await read.json())], [401, 'UNAUTHORIZED'], 'a read still needs Access');
+  } finally {
+    await mf.dispose();
   }
 });

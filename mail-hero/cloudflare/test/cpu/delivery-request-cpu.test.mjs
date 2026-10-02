@@ -1,8 +1,8 @@
 // mail.received.v1: CPU of the Worker requests that ask for a new event, against Workers Free's 10 ms per request,
 // measured and calibrated by the shared meter (tools/workerd-cpu/workerd-cpu.mts). Four requests create a delivery
-// and so build its event: the owner's send (POST /api/v1/messages/:id/send), resend (POST /deliveries/:id/replay) and
-// connection test (POST /endpoints/:id/test), and the dashboard's canary (Ops startCanary, through a real service
-// binding). Each reaches the coordinator (requestDelivery, POST /deliveries/create), a Durable Object whose invocation
+// and so build its event: the owner's send (mailhero.ui.v2 SendMessage, POST /api/v2/messages/{id}:send), resend
+// (ResendDelivery, POST /api/v2/deliveries/{id}:resend) and connection test (TestEndpoint, POST
+// /api/v2/endpoints/{id}:test), and the dashboard's canary (Ops startCanary, through a real service binding). Each reaches the coordinator (requestDelivery, POST /deliveries/create), a Durable Object whose invocation
 // has 30 s of CPU on Free, which reads the message's parsed record from R2, truncates its text and writes the event
 // with the wire codec (createDelivery, buildPayload). Before, the Worker did that itself: with the largest parsed
 // record below, a send took 12-15 ms of reference CPU first and 10-12 ms warm (the JSON parse of a 4 MiB record
@@ -49,9 +49,9 @@ const RUNS = 6
 const MIB = 1024 * 1024
 const ORIGIN = `https://${ENV.PUBLIC_HOST}`
 const KID = 'synthetic-kid'
-const SEND = 'POST /messages/:id/send (largest record)'
-const RESEND = 'POST /deliveries/:id/replay (largest record)'
-const TEST = 'POST /endpoints/:id/test'
+const SEND = 'SendMessage (largest record)'
+const RESEND = 'ResendDelivery (largest record)'
+const TEST = 'TestEndpoint'
 const CANARY = 'Ops startCanary (default endpoint)'
 
 /** The largest parsed record (message.json) the content policy writes; synthetic. */
@@ -86,19 +86,20 @@ function start(script, outbound, keys) {
     const bucket = await mf.getR2Bucket('MAIL_STORE', 'mail-hero')
     const jwt = await new SignJWT({ email: ENV.ACCESS_OWNER }).setProtectedHeader({ alg: 'RS256', kid: KID }).setIssuer(ENV.ACCESS_ISSUER)
       .setAudience(ENV.ACCESS_AUDIENCE).setSubject('synthetic-user').setIssuedAt().setExpirationTime('30m').sign(keys.privateKey)
-    const csrf = await mf.dispatchFetch(`${ORIGIN}/api/v1/csrf`, { headers: { 'Cf-Access-Jwt-Assertion': jwt } })
+    const csrf = await mf.dispatchFetch(`${ORIGIN}/api/csrf`, { headers: { 'Cf-Access-Jwt-Assertion': jwt } })
     assert.equal(csrf.status, 200)
     const token = (await csrf.json()).token, cookie = csrf.headers.get('set-cookie').split(';')[0]
     const api = async (path, method, body) => {
-      const response = await mf.dispatchFetch(`${ORIGIN}/api/v1${path}`, { method,
+      const response = await mf.dispatchFetch(`${ORIGIN}/api/v2${path}`, { method,
         headers: { 'Cf-Access-Jwt-Assertion': jwt, Origin: ORIGIN, Cookie: cookie, 'X-CSRF-Token': token, 'Content-Type': 'application/json' },
         body: JSON.stringify(body) })
       const result = await response.json()
       assert.ok(response.ok, `${method} ${path}: ${response.status} ${JSON.stringify(result)}`)
       return result
     }
-    const endpoint = await api('/endpoints', 'POST', { action_request_id: crypto.randomUUID(), label: 'Synthetic consumer', url: 'https://consumer.example.org/hooks/mail',
+    const created = await api(`/endpoints?request_id=${crypto.randomUUID()}`, 'POST', { display_name: 'Synthetic consumer', uri: 'https://consumer.example.org/hooks/mail',
       auth_type: 'bearer', credential: 'synthetic-token-not-a-real-secret', rate_per_minute: 60, timeout_seconds: 2 })
+    const endpoint = { ...created, id: created.name.slice('endpoints/'.length) }
     await db.prepare("UPDATE app_settings SET mode='forward',current_endpoint_id=? WHERE id=1").bind(endpoint.id).run()
     // Archived messages, each with the largest parsed record: one sent per run, then resent.
     const messages = []
@@ -124,9 +125,9 @@ async function session({ meters, db, api, ops, endpoint, messages }, coordinator
   const both = run => async () => { coordinatorCpu.push(await coordinator.cpu(run)) }
   const sent = []
   const send = await worker.measure(SEND, both(async () => {
-    const result = await api(`/messages/${messages[sent.length]}/send`, 'POST', { endpoint_id: endpoint.id, action_request_id: crypto.randomUUID() })
-    assert.ok(result.event_id)
-    sent.push(result.event_id)
+    const result = await api(`/messages/${messages[sent.length]}:send`, 'POST', { endpoint: endpoint.name, request_id: crypto.randomUUID() })
+    assert.ok(result.delivery.name)
+    sent.push(result.delivery.name.slice('deliveries/'.length))
   }), RUNS)
   assert.equal(new Set(sent).size, RUNS)
   // Each message's version after its send, read here: no D1 read from the test runs while a resend is measured.
@@ -137,10 +138,10 @@ async function session({ meters, db, api, ops, endpoint, messages }, coordinator
     send,
     await worker.measure(RESEND, both(async () => {
       const n = resent++
-      assert.ok((await api(`/deliveries/${sent[n]}/replay`, 'POST', { endpoint_id: endpoint.id, action_request_id: crypto.randomUUID(), message_version: versions[n] })).event_id)
+      assert.ok((await api(`/deliveries/${sent[n]}:resend`, 'POST', { endpoint: endpoint.name, request_id: crypto.randomUUID(), message_etag: String(versions[n]) })).name)
     }), RUNS),
     await worker.measure(TEST, both(async () => {
-      assert.ok((await api(`/endpoints/${endpoint.id}/test`, 'POST', { action_request_id: crypto.randomUUID() })).event_id)
+      assert.ok((await api(`/endpoints/${endpoint.id}:test`, 'POST', { request_id: crypto.randomUUID() })).delivery)
     }), RUNS),
     await worker.measure(CANARY, both(async () => {
       assert.equal((await ops('startCanary', { run_id: `canary-cpu-${canaries++}` })).state, 'queued')

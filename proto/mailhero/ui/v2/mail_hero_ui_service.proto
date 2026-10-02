@@ -384,7 +384,7 @@ message GetSettingsRequest {
 // Input of UpdateSettings.
 message UpdateSettingsRequest {
   // The new values of the fields `update_mask` names, and the settings' current etag (required: ETAG_MISMATCH when it
-  // is stale, BAD_REQUEST without one).
+  // is stale, BAD_REQUEST without one; the shared client sends only the masked fields, so it names `etag` in the mask).
   Settings settings = 1 [(google.api.field_behavior) = REQUIRED];
   // AIP-134: the Settings fields to replace (a query parameter, `update_mask=mode,current_endpoint`). Required here: an
   // update without a mask, an empty one or `*` is BAD_REQUEST, so a client that leaves a field out never resumes
@@ -496,9 +496,9 @@ message GetMessageRequest {
 // Input of UpdateMessage.
 message UpdateMessageRequest {
   // The message: its name, `read`, and its current etag (required: ETAG_MISMATCH when it is stale, BAD_REQUEST without
-  // one).
+  // one; the shared client sends only the masked fields, so it names `etag` in the mask).
   Message message = 1 [(google.api.field_behavior) = REQUIRED];
-  // AIP-134: `read` (the one field the owner sets), or absent.
+  // AIP-134: `read` (the one field the owner sets) and `etag`, or absent.
   google.protobuf.FieldMask update_mask = 2 [(google.api.field_behavior) = OPTIONAL];
 }
 
@@ -780,7 +780,7 @@ message CreateEndpointRequest {
 // Input of UpdateEndpoint.
 message UpdateEndpointRequest {
   // The new values of the fields `update_mask` names, and the target's current etag (required: ETAG_MISMATCH when it is
-  // stale, BAD_REQUEST without one).
+  // stale, BAD_REQUEST without one; the shared client sends only the masked fields, so it names `etag` in the mask).
   Endpoint endpoint = 1 [(google.api.field_behavior) = REQUIRED];
   // AIP-134: the Endpoint fields to replace (a query parameter, `update_mask=paused`). Required here: an update without
   // a mask, an empty one or `*` is BAD_REQUEST, so a client that leaves `paused` out never resumes a target by accident.

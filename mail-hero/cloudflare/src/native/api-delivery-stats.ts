@@ -1,6 +1,8 @@
+// The delivery dashboard's numbers (mailhero.ui.v2 SummarizeDeliveryAttempts) and the time ranges of its drill-down
+// (ListDeliveries' attempt filter): attempts that ended within a range, by outcome, in hours or days of a time zone.
 import type { Env } from './types.ts'
-import { bad, rows } from './api-common.ts'
-import { HttpError, json } from './security.ts'
+import { bad, rows, type Row } from './api-common.ts'
+import { HttpError } from './security.ts'
 
 const MINUTE = 60_000
 const HOUR = 3_600_000
@@ -18,22 +20,27 @@ function instant(value: string | null): { iso: string; ms: number } {
   // Require an explicit timezone. Date.parse alone also accepts ambiguous local
   // timestamps, which would make owner-selected ranges vary by location.
   const parts = value?.match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d{1,3})?(?:Z|[+-]\d{2}:\d{2})$/)
-  if (!parts) return bad('时间范围必须为带时区的 ISO 时间')
+  if (!parts) return bad('时间范围必须为带时区的 ISO 时间', 'invalid_time_range')
   const [, yearText, monthText, dayText, hourText, minuteText, secondText] = parts
   const [year, month, day, hour, minute, second] = [yearText, monthText, dayText, hourText, minuteText, secondText].map(Number)
   const leap = year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0)
   const days = [31, leap ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
-  if (month < 1 || month > 12 || day < 1 || day > days[month - 1] || hour > 23 || minute > 59 || second > 59) bad('时间范围无效')
+  if (month < 1 || month > 12 || day < 1 || day > days[month - 1] || hour > 23 || minute > 59 || second > 59) bad('时间范围无效', 'invalid_time_range')
   const ms = Date.parse(value as string)
-  if (!Number.isFinite(ms)) bad('时间范围无效')
+  if (!Number.isFinite(ms)) bad('时间范围无效', 'invalid_time_range')
   return { iso: new Date(ms).toISOString(), ms }
 }
 
+/** An RFC 3339 instant with an explicit zone, as ISO UTC; INVALID_TIME_RANGE otherwise. */
+export function parseInstant(value: string): string {
+  return instant(value).iso
+}
+
 // maxDays counts local calendar days; the slack admits a range whose local
-// days include a DST fall-back. UTC-only stats callers pass 0, the former limit.
-export function deliveryRange(params: URLSearchParams, maxDays = 90, slack = DST_SLACK): DeliveryRange {
-  const from = instant(params.get('from')), to = instant(params.get('to'))
-  if (to.ms <= from.ms || to.ms - from.ms > maxDays * DAY + slack) bad(`时间范围必须大于 0 且不超过 ${maxDays} 天`)
+// days include a DST fall-back.
+export function deliveryRange(fromText: string | null, toText: string | null, maxDays = 90, slack = DST_SLACK): DeliveryRange {
+  const from = instant(fromText), to = instant(toText)
+  if (to.ms <= from.ms || to.ms - from.ms > maxDays * DAY + slack) bad(`时间范围必须大于 0 且不超过 ${maxDays} 天`, 'invalid_time_range')
   return { from: from.iso, to: to.iso, fromMS: from.ms, toMS: to.ms }
 }
 
@@ -104,14 +111,13 @@ function localStart(zone: ZoneSegments, wall: number): number {
 type Counts = { succeeded: number; retried: number; failed: number; unknown: number }
 const zero = (): Counts => ({ succeeded: 0, retried: 0, failed: 0, unknown: 0 })
 
-export async function deliveryStats(request: Request, env: Env): Promise<Response> {
-  const params = new URL(request.url).searchParams
-  const bucket = params.get('bucket') ?? 'day'
-  if (bucket !== 'hour' && bucket !== 'day') bad('bucket 只能为 hour 或 day')
-  // An old cached UI sends no tz and receives exactly the former UTC response.
-  const legacy = !params.has('tz'), tz = params.get('tz') ?? 'UTC'
+/** What SummarizeDeliveryAttempts asks for: an exact range (ISO instants), the buckets' length and an IANA zone. */
+export interface StatsQuery { from: string; to: string; bucket: DeliveryBucket; tz: string }
+
+export async function deliveryStats(env: Env, query: StatsQuery): Promise<Row> {
+  const { bucket, tz } = query
   const format = zoneFormat(tz)
-  const range = deliveryRange(params, bucket === 'hour' ? 7 : 90, legacy ? 0 : DST_SLACK)
+  const range = deliveryRange(query.from, query.to, bucket === 'hour' ? 7 : 90)
   const zone = zoneSegments(format, range.fromMS - 2 * DAY, range.toMS)
   const firstSegment = segmentAt(zone, range.fromMS), lastSegment = segmentAt(zone, range.toMS - 1)
   const binds: string[] = [range.from, range.to]
@@ -157,10 +163,9 @@ export async function deliveryStats(request: Request, env: Env): Promise<Respons
     }
   }
   const buckets = starts.map(({ at, key }, index) => {
-    const counts = byBucket.get(key) ?? zero(), start = new Date(at).toISOString()
+    const counts = byBucket.get(key) ?? zero()
     byBucket.delete(key)
-    return legacy ? { start, ...counts } : { start, end: new Date(starts[index + 1]?.at ?? range.toMS).toISOString(), ...counts }
+    return { start: new Date(at).toISOString(), end: new Date(starts[index + 1]?.at ?? range.toMS).toISOString(), ...counts }
   })
-  return json(legacy ? { from: range.from, to: range.to, bucket, totals, buckets }
-    : { from: range.from, to: range.to, bucket, time_zone: tz, totals, buckets })
+  return { from: range.from, to: range.to, bucket, time_zone: tz, totals, buckets }
 }

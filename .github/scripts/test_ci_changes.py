@@ -313,6 +313,9 @@ class Classify(unittest.TestCase):
             "proto/links/ui/v1/links_ui_service.proto": {"links"},
             # The watch app's UI API reaches only the watch app.
             "proto/watch/ui/v1/watch_ui_service.proto": {"watch"},
+            # Mail Hero's owner API reaches only Mail Hero (not Todofy, which shares the mailhero/webhook package).
+            "proto/mailhero/ui/v2/mail_hero_ui_service.proto": {"mail-hero"},
+            "proto/mailhero/ui/v2/errors.proto": {"mail-hero"},
             # The TypeScript runtime and generator: every TypeScript user.
             "proto/ts/wire-json.ts": ts,
             "proto/ts/wire-rules.ts": ts,
@@ -390,6 +393,7 @@ class Classify(unittest.TestCase):
         self.assertEqual(ci_changes.proto_deploys("proto/flowday/ui/v1/flow.proto"), {"flowday"})
         self.assertEqual(ci_changes.proto_deploys("proto/links/ui/v1/link.proto"), {"links"})
         self.assertEqual(ci_changes.proto_deploys("proto/watch/ui/v1/watch.proto"), {"watch"})
+        self.assertEqual(ci_changes.proto_deploys("proto/mailhero/ui/v2/message.proto"), {"mail-hero"})
 
     def test_every_proto_package_and_runtime_is_mapped(self):
         """Each package directory under proto/ (a directory holding .proto files) is in PROTO_PACKAGES, and every

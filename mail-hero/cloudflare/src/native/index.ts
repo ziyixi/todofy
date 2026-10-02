@@ -1,6 +1,7 @@
 import { BACKUP_PREFIX, handleBackupAPI } from './backup';
 import type { Env } from './types';
-import { handleAPI } from './api';
+import { handleAPI, refusedResponse } from './api';
+import { API_PREFIX } from './api-v2';
 import { emailHandler } from './ingest';
 import { authenticate, HttpError, json, privateResponse } from './security';
 
@@ -14,6 +15,8 @@ export async function fetchHandler(request: Request, env: Env): Promise<Response
       return new Response(null, { status: 204, headers: { 'Cache-Control': 'no-store' } });
     }
     if (env.MAINTENANCE_MODE === 'true' && !['GET', 'HEAD'].includes(request.method) && path !== BACKUP_PREFIX + '/reconcile-writer') {
+      // Before authentication, as always: the owner API answers its google.rpc.Status, every other path its envelope.
+      if (path.startsWith(API_PREFIX) || path === '/api/csrf') return refusedResponse('MAINTENANCE');
       return privateResponse(json({ error: { code: 'maintenance', message: '维护中，请稍后重试' } }, 503));
     }
     if (path.startsWith(BACKUP_PREFIX + '/')) return await handleBackupAPI(request, env);

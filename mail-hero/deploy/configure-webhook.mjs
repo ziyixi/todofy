@@ -99,13 +99,10 @@ export async function configureWebhook(env, options, credential) {
     if (old.length !== next.length || !timingSafeEqual(old, next)) fail('existing_credential_mismatch')
     return safeMetadata(existing, false)
   }
-  const response = await createEndpoint(new Request('https://admin.invalid/api/endpoints', {
-    method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ label: options.label, url, auth_type: 'bearer', credential,
-      paused: true, rate_per_minute: 2, timeout_seconds: 20, action_request_id: options['action-id'] }),
-  }), env, options.owner)
-  if (response.status !== 201) fail('endpoint_creation_failed')
-  return safeMetadata(await response.json(), true)
+  const endpoint = await createEndpoint(env, options.owner, { label: options.label, url, auth_type: 'bearer', credential,
+    paused: true, rate_per_minute: 2, timeout_seconds: 20 }, options['action-id'])
+  if (!endpoint?.id) fail('endpoint_creation_failed')
+  return safeMetadata(endpoint, true)
 }
 
 export function safeError(error) {

@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url'
 import { build } from 'esbuild'
 import { Miniflare, convertV4MiniflareOptions } from 'miniflare'
 import { migrationStatements } from './migrations.mjs'
+import { query, reasonOf } from './owner-api.mjs'
 
 // Owner-resolved exception retention in workerd with the real migrations, D1
 // and R2. The Worker keeps its real clock: tests move time by seeding past
@@ -86,12 +87,35 @@ async function runtime(t) {
     assert.equal(response.status, 200, await response.clone().text())
     return response.json()
   }
-  const csrf = await mf.dispatchFetch('http://localhost/api/v1/csrf'), token = (await csrf.json()).token, cookie = csrf.headers.get('set-cookie').split(';')[0]
+  const csrf = await mf.dispatchFetch('http://localhost/api/csrf'), token = (await csrf.json()).token, cookie = csrf.headers.get('set-cookie').split(';')[0]
+  /** mailhero.ui.v2 through the Worker: {status, data} in the wire JSON. */
   const api = async (path, method = 'GET', input) => {
-    const response = await mf.dispatchFetch('http://localhost/api/v1' + path, { method, body: input === undefined ? undefined : JSON.stringify(input),
+    const response = await mf.dispatchFetch('http://localhost/api/v2' + path, { method, body: input === undefined ? undefined : JSON.stringify(input),
       headers: { Origin: 'http://localhost', Cookie: cookie, 'X-CSRF-Token': token, 'Content-Type': 'application/json' } })
     return { status: response.status, data: await response.json() }
   }
+  const PERIODS = ['raw_retention_days', 'content_retention_days', 'ledger_retention_days', 'resolved_retention_days']
+  /** Settings as these tests read them: a period kept forever as null, the etag as the version it names. */
+  const settingsOf = data => ({ ...data, version: Number(data.etag), ...Object.fromEntries(PERIODS.map(key => [key, data[key] ?? null])) })
+  const getSettings = async () => settingsOf((await api('/settings')).data)
+  /** UpdateSettings of the fields `input` names besides version, retention_confirmation and apply_existing (null: cleared). */
+  const patchSettings = async ({ version, retention_confirmation, apply_existing, ...fields }) => {
+    const mask = [...Object.keys(fields), 'etag'].join(',')
+    const body = { etag: String(version), ...Object.fromEntries(Object.entries(fields).filter(([, value]) => value !== null)) }
+    const result = await api(`/settings${query({ update_mask: mask, retention_confirmation, apply_existing })}`, 'PATCH', body)
+    return result.status === 200 ? { status: 200, data: settingsOf(result.data) } : result
+  }
+  /** PreviewRetentionPolicy of the stored policy with the periods `changes` holds (null: kept forever). */
+  const previewRetention = async (changes = {}) => {
+    const policy = { ...Object.fromEntries(PERIODS.map(key => [key, null])), ...await getSettings(), ...changes }
+    const result = await api(`/settings:previewRetentionPolicy${query(Object.fromEntries([...PERIODS, 'apply_existing'].map(key => [key, policy[key]])))}`)
+    if (result.status !== 200) return result
+    const data = result.data
+    return { status: 200, data: { ...data, preview_token: data.confirmation_token, resolved_retention_days: data.resolved_retention_days ?? null,
+      resolved_messages: data.resolved_message_count ?? 0, historical_messages: data.historical_message_count ?? 0 } }
+  }
+  /** The rule an INVALID_RETENTION_POLICY names. */
+  const ruleOf = data => data.error.details[0].metadata?.rule
   const endpoint = crypto.randomUUID(), revision = crypto.randomUUID(), date = new Date().toISOString()
   await db.batch([
     db.prepare("INSERT INTO webhook_endpoints(id,label,current_revision_id,created_at,updated_at) VALUES(?,'Synthetic',?,?,?)").bind(endpoint, revision, date, date),
@@ -120,7 +144,7 @@ async function runtime(t) {
   const read = id => db.prepare('SELECT * FROM messages WHERE id=?').bind(id).first()
   const objects = async value => (await Promise.all([value.raw, value.parsed, ...value.events.map(id => `payload/${id}.json`)].map(key => store.head(key)))).filter(Boolean).length
   const lifecycle = () => post('/__test/lifecycle')
-  return { mf, db, store, api, post, seed, read, objects, lifecycle, revision }
+  return { mf, db, store, api, post, seed, read, objects, lifecycle, revision, getSettings, patchSettings, previewRetention, ruleOf }
 }
 // A failed original event that a later replay delivered.
 const replayed = (failedAt, deliveredAt) => [{ state: 'failed', last_error: 'retry_window_expired', finished: failedAt }, { state: 'delivered', finished: deliveredAt }]
@@ -158,7 +182,7 @@ test('workerd: an exception resolved by a replay is deleted exactly after the re
 test('workerd: an owner cancel resolves the exception, and a later cancel restarts its clock', { timeout: 60000 }, async t => {
   const { db, api, seed, read, objects, lifecycle } = await runtime(t)
   const cancelled = await seed({ events: [{ state: 'failed', last_error: 'retry_window_expired', finished: ago(65 * DAY) }] })
-  const result = await api(`/deliveries/${cancelled.events[0]}/cancel`, 'POST', { action_request_id: crypto.randomUUID() })
+  const result = await api(`/deliveries/${cancelled.events[0]}:cancel`, 'POST', { request_id: crypto.randomUUID() })
   assert.equal(result.status, 200, JSON.stringify(result.data))
   // Previously resolved, then replayed; the replay is still retrying.
   const restarted = await seed({ events: [{ state: 'cancelled', last_error: 'cancelled_by_owner', finished: ago(65 * DAY) }, { state: 'retry_wait', finished: ago(64 * DAY) }],
@@ -173,7 +197,7 @@ test('workerd: an owner cancel resolves the exception, and a later cancel restar
   // The owner cancels the replay: resolved again, and the cancel itself also drops
   // any stale resolution, so the clock restarts from this handling.
   await db.prepare('UPDATE messages SET resolved_at=? WHERE id=?').bind(ago(61 * DAY), restarted.id).run()
-  assert.equal((await api(`/deliveries/${restarted.events[1]}/cancel`, 'POST', { action_request_id: crypto.randomUUID() })).status, 200)
+  assert.equal((await api(`/deliveries/${restarted.events[1]}:cancel`, 'POST', { request_id: crypto.randomUUID() })).status, 200)
   assert.equal((await read(restarted.id)).resolved_at, null)
   await db.prepare('UPDATE messages SET lifecycle_due_at=? WHERE id IN(?,?)').bind(ago(1000), restarted.id, cancelled.id).run()
   await db.prepare('UPDATE messages SET resolved_at=? WHERE id=?').bind(ago(61 * DAY), cancelled.id).run()
@@ -219,16 +243,16 @@ test('workerd: unresolved failures, in-flight replays and NULL-policy history ar
 })
 
 test('workerd: the owner applying the policy to history starts its resolved clock at confirmation', { timeout: 60000 }, async t => {
-  const { api, seed, read, lifecycle } = await runtime(t)
+  const { api, seed, read, lifecycle, getSettings, patchSettings, previewRetention } = await runtime(t)
   const history = await seed({ received: ago(400 * DAY), events: [{ state: 'delivered', finished: ago(390 * DAY) }],
     message: { receive_mode: 'archive', endpoint_revision_id: null, policy_error: 'policy_unavailable', retention_policy_version: null, raw_retention_days: null, content_retention_days: null, ledger_retention_days: null } })
   await lifecycle()
   assert.equal((await read(history.id)).resolved_at, null)
-  const settings = (await api('/settings')).data
-  const preview = (await api('/settings/retention-preview?apply_existing=true')).data
+  const settings = (await getSettings())
+  const preview = (await previewRetention({ apply_existing: true })).data
   assert.equal(preview.historical_messages, 1)
   const confirmed = Date.now()
-  assert.equal((await api('/settings', 'PATCH', { version: settings.version, apply_existing: true, retention_confirmation: preview.preview_token })).status, 200)
+  assert.equal((await patchSettings({ version: settings.version, apply_existing: true, retention_confirmation: preview.preview_token })).status, 200)
   await lifecycle()
   const row = await read(history.id)
   assert.equal(row.content_deleted_at, null); assert.ok(Date.parse(row.resolved_at) >= confirmed, 'counted from the confirmation, not from its old delivery')
@@ -252,7 +276,7 @@ test('workerd: a later replay that fails without an attempt, or an owner retry, 
   // An owner retry of the older failed event is a handling: the clock restarts.
   const retried = await seed({ events: [{ state: 'failed', last_error: 'http_500', finished: ago(20 * DAY), created: ago(21 * DAY) }, { state: 'delivered', finished: ago(19 * DAY) }],
     message: { resolved_at: ago(61 * DAY), lifecycle_due_at: iso(Date.now() + DAY) } })
-  assert.equal((await api(`/deliveries/${retried.events[0]}/retry`, 'POST', { action_request_id: crypto.randomUUID() })).status, 202)
+  assert.equal((await api(`/deliveries/${retried.events[0]}:retry`, 'POST', { request_id: crypto.randomUUID() })).status, 200)
   assert.equal((await read(retried.id)).resolved_at, null)
 })
 
@@ -270,7 +294,7 @@ test('workerd: disabling or lengthening the period after candidate selection sto
 })
 
 test('workerd: the resolved period is never shorter than the content period, stored or snapshotted', { timeout: 60000 }, async t => {
-  const { db, api, seed, read, objects, lifecycle } = await runtime(t)
+  const { db, api, seed, read, objects, lifecycle, getSettings, patchSettings, previewRetention, ruleOf } = await runtime(t)
   // A snapshot that keeps content forever, and one with a longer content period.
   const forever = await seed({ events: replayed(ago(400 * DAY), ago(399 * DAY)), message: { content_retention_days: null, raw_retention_days: null, resolved_at: ago(398 * DAY), lifecycle_due_at: ago(1000) } })
   const longer = await seed({ events: replayed(ago(81 * DAY), ago(80 * DAY)), message: { content_retention_days: 90, resolved_at: ago(80 * DAY), lifecycle_due_at: ago(1000) } })
@@ -284,19 +308,19 @@ test('workerd: the resolved period is never shorter than the content period, sto
   row = await read(stored.id)
   assert.equal(row.content_deleted_at, null); assert.equal(row.lifecycle_due_at, iso(Date.parse(row.resolved_at) + 120 * DAY))
   // That stored combination blocks no unrelated change, only a retention change that keeps it.
-  let settings = (await api('/settings')).data
+  let settings = (await getSettings())
   assert.deepEqual([settings.content_retention_days, settings.resolved_retention_days], [120, 60])
-  let result = await api('/settings', 'PATCH', { version: settings.version, send_paused: true })
+  let result = await patchSettings({ version: settings.version, send_paused: true })
   assert.equal(result.status, 200, JSON.stringify(result.data)); settings = result.data
-  result = await api('/settings', 'PATCH', { version: settings.version, content_retention_days: 120 })
-  assert.equal(result.status, 400); assert.equal(result.data.error.message, '已处理异常邮件的保留期不能短于正文保留期')
+  result = await patchSettings({ version: settings.version, content_retention_days: 120 })
+  assert.equal(result.status, 400); assert.equal(ruleOf(result.data), 'resolved_before_content')
   // Content kept forever allows only a resolved period kept forever.
   await db.prepare('UPDATE app_settings SET content_retention_days=30 WHERE id=1').run()
-  settings = (await api('/settings')).data
-  result = await api('/settings', 'PATCH', { version: settings.version, content_retention_days: null })
-  assert.equal(result.status, 400); assert.equal(result.data.error.message, '已处理异常邮件的保留期不能短于正文保留期')
-  assert.equal((await api('/settings/retention-preview?content_retention_days=none')).status, 400)
-  result = await api('/settings', 'PATCH', { version: settings.version, content_retention_days: null, resolved_retention_days: null })
+  settings = (await getSettings())
+  result = await patchSettings({ version: settings.version, content_retention_days: null })
+  assert.equal(result.status, 400); assert.equal(ruleOf(result.data), 'resolved_before_content')
+  assert.equal((await previewRetention({ content_retention_days: null })).status, 400)
+  result = await patchSettings({ version: settings.version, content_retention_days: null, resolved_retention_days: null })
   assert.equal(result.status, 200, JSON.stringify(result.data)); assert.deepEqual([result.data.content_retention_days, result.data.resolved_retention_days], [null, null])
   assert.equal(await objects(forever) + await objects(longer) + await objects(stored), 12)
 })
@@ -328,13 +352,13 @@ test('workerd: a replay published between the resolved recheck and the tombstone
 })
 
 test('workerd: resolved retention settings validate, need a preview to enable or shorten, and re-arm on change', { timeout: 60000 }, async t => {
-  const { api, seed, read, lifecycle } = await runtime(t)
-  let settings = (await api('/settings')).data
+  const { api, seed, read, lifecycle, getSettings, patchSettings, previewRetention, ruleOf } = await runtime(t)
+  let settings = (await getSettings())
   assert.equal(settings.resolved_retention_days, 60, 'the migration default applies to the existing row')
   const due = await seed({ events: replayed(ago(65 * DAY), ago(64 * DAY)), message: { resolved_at: ago(61 * DAY), lifecycle_due_at: iso(Date.now() + 5 * DAY) } })
   const fresh = await seed({ events: replayed(ago(65 * DAY), ago(64 * DAY)) })
   // Disabling needs no preview and deletes nothing; it clears every armed due time.
-  let result = await api('/settings', 'PATCH', { version: settings.version, resolved_retention_days: null })
+  let result = await patchSettings({ version: settings.version, resolved_retention_days: null })
   assert.equal(result.status, 200, JSON.stringify(result.data)); assert.equal(result.data.resolved_retention_days, null)
   assert.equal(result.data.lifecycle_policy_version, settings.lifecycle_policy_version, 'the global period is not a per-message snapshot')
   settings = result.data
@@ -344,18 +368,18 @@ test('workerd: resolved retention settings validate, need a preview to enable or
   const recorded = await read(fresh.id)
   assert.ok(recorded.resolved_at, 'still recorded while disabled'); assert.equal(recorded.lifecycle_due_at, null)
   // Shorter than the content period is invalid, in the preview and the update.
-  result = await api('/settings', 'PATCH', { version: settings.version, resolved_retention_days: 20 })
-  assert.equal(result.status, 400); assert.equal(result.data.error.message, '已处理异常邮件的保留期不能短于正文保留期')
-  assert.equal((await api('/settings/retention-preview?resolved_retention_days=10')).status, 400)
-  assert.equal((await api('/settings', 'PATCH', { version: settings.version, content_retention_days: 90, resolved_retention_days: 60 })).status, 400)
+  result = await patchSettings({ version: settings.version, resolved_retention_days: 20 })
+  assert.equal(result.status, 400); assert.equal(ruleOf(result.data), 'resolved_before_content')
+  assert.equal((await previewRetention({ resolved_retention_days: 10 })).status, 400)
+  assert.equal((await patchSettings({ version: settings.version, content_retention_days: 90, resolved_retention_days: 60 })).status, 400)
   // Enabling from disabled requires a preview bound to the exact value.
-  result = await api('/settings', 'PATCH', { version: settings.version, resolved_retention_days: 60 })
-  assert.equal(result.status, 400); assert.match(result.data.error.message, /预览/)
-  const preview = (await api('/settings/retention-preview?resolved_retention_days=60')).data
+  result = await patchSettings({ version: settings.version, resolved_retention_days: 60 })
+  assert.equal(result.status, 400); assert.equal(reasonOf(result.data), 'RETENTION_CONFIRMATION_REQUIRED')
+  const preview = (await previewRetention({ resolved_retention_days: 60 })).data
   assert.equal(preview.resolved_retention_days, 60); assert.equal(preview.resolved_messages, 2)
-  assert.equal((await api('/settings', 'PATCH', { version: settings.version, resolved_retention_days: 61, retention_confirmation: preview.preview_token })).status, 400)
+  assert.equal((await patchSettings({ version: settings.version, resolved_retention_days: 61, retention_confirmation: preview.preview_token })).status, 400)
   const armed = Date.now()
-  result = await api('/settings', 'PATCH', { version: settings.version, resolved_retention_days: 60, retention_confirmation: preview.preview_token })
+  result = await patchSettings({ version: settings.version, resolved_retention_days: 60, retention_confirmation: preview.preview_token })
   assert.equal(result.status, 200, JSON.stringify(result.data)); settings = result.data
   // Each is re-armed at the lower bound of its due time: now for one that may be
   // due, resolved_at plus the period otherwise, so a change never floods the due index.
@@ -368,12 +392,12 @@ test('workerd: resolved retention settings validate, need a preview to enable or
   const kept = await read(fresh.id)
   assert.equal(kept.content_deleted_at, null); assert.equal(kept.lifecycle_due_at, iso(Date.parse(kept.resolved_at) + 60 * DAY))
   // Shortening needs a preview; lengthening does not. 'none' previews disabling.
-  assert.equal((await api('/settings', 'PATCH', { version: settings.version, resolved_retention_days: 45 })).status, 400)
-  const shorter = (await api('/settings/retention-preview?resolved_retention_days=45')).data
+  assert.equal((await patchSettings({ version: settings.version, resolved_retention_days: 45 })).status, 400)
+  const shorter = (await previewRetention({ resolved_retention_days: 45 })).data
   assert.equal(shorter.resolved_messages, 1)
-  result = await api('/settings', 'PATCH', { version: settings.version, resolved_retention_days: 45, retention_confirmation: shorter.preview_token })
+  result = await patchSettings({ version: settings.version, resolved_retention_days: 45, retention_confirmation: shorter.preview_token })
   assert.equal(result.status, 200); assert.equal(result.data.resolved_retention_days, 45)
-  result = await api('/settings', 'PATCH', { version: result.data.version, resolved_retention_days: 90 })
+  result = await patchSettings({ version: result.data.version, resolved_retention_days: 90 })
   assert.equal(result.status, 200); assert.equal(result.data.resolved_retention_days, 90)
-  assert.equal((await api('/settings/retention-preview?resolved_retention_days=none')).data.resolved_retention_days, null)
+  assert.equal((await previewRetention({ resolved_retention_days: null })).data.resolved_retention_days, null)
 })

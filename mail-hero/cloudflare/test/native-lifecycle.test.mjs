@@ -53,7 +53,9 @@ async function delivery(env, id, revision, state = 'delivered', extra = {}) {
   const row = { event_id: crypto.randomUUID(), message_id: id, endpoint_revision_id: revision, generation: 1, payload_sha256: '0'.repeat(64), state, next_attempt_at: '2026-01-01', created_at: '2026-01-01', delivered_at: state === 'delivered' ? '2026-01-02' : null, ...extra }
   await env.DB.prepare(`INSERT INTO deliveries(${Object.keys(row).join(',')}) VALUES(${Object.keys(row).map(() => '?').join(',')})`).bind(...Object.values(row)).run()
 }
-const request = input => new Request('https://mail.example.org/api/v1/settings', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input) })
+/** UpdateSettings' core (api-settings.ts) with the inputs as one object: version, the fields it changes, the confirmation. */
+const patch = ({ version, retention_confirmation, apply_existing, ...input }, env, owner) =>
+  patchSettings(env, owner, input, version, retention_confirmation ?? null, apply_existing === true)
 
 test('new lifecycle defaults never retroactively enroll historical mail', async () => {
   const env = environment(), id = await insert(env)
@@ -164,13 +166,12 @@ test('a new pending delivery between lifecycle selection and tombstone CAS preve
 test('preview binds policy, owner and version; history opt-in starts no immediate purge', async () => {
   const env = environment(), historical = await insert(env), fixed = await insert(env, { retention_policy_version: 1, raw_retention_days: 7, content_retention_days: 30 })
   const policy = { raw_retention_days: 3, content_retention_days: 20, ledger_retention_days: 180, apply_existing: true }
-  await assert.rejects(patchSettings(request({ version: 1, ...policy }), env, 'owner'), /预览/)
-  const query = new URLSearchParams(Object.entries(policy).map(([key, value]) => [key, String(value)]))
-  const preview = await (await previewRetention(new Request(`https://mail.example.org/?${query}`), env, 'owner')).json()
-  assert.equal(preview.historical_messages, 1); assert.equal(preview.bytes_to_clear, 0)
-  await assert.rejects(patchSettings(request({ version: 1, ...policy, retention_confirmation: preview.preview_token }), env, 'other'), /预览/)
-  await assert.rejects(patchSettings(request({ version: 1, ...policy, content_retention_days: 19, retention_confirmation: preview.preview_token }), env, 'owner'), /预览/)
-  await patchSettings(request({ version: 1, ...policy, retention_confirmation: preview.preview_token }), env, 'owner')
+  await assert.rejects(patch({ version: 1, ...policy }, env, 'owner'), /预览/)
+  const preview = await previewRetention(env, 'owner', policy)
+  assert.equal(preview.historical_messages, 1); assert.equal(preview.candidates, 1)
+  await assert.rejects(patch({ version: 1, ...policy, retention_confirmation: preview.preview_token }, env, 'other'), /预览/)
+  await assert.rejects(patch({ version: 1, ...policy, content_retention_days: 19, retention_confirmation: preview.preview_token }, env, 'owner'), /预览/)
+  await patch({ version: 1, ...policy, retention_confirmation: preview.preview_token }, env, 'owner')
   assert.equal((await read(env, historical)).raw_retention_days, 3); assert.equal((await read(env, historical)).retention_started_at, null)
   assert.equal((await read(env, historical)).content_deleted_at, null); assert.equal((await read(env, fixed)).raw_retention_days, 7)
   assert.equal((await captureLifecyclePolicy(env)).lifecycle_policy_version, 2)
@@ -178,7 +179,7 @@ test('preview binds policy, owner and version; history opt-in starts no immediat
 
 test('future settings changes never adopt history implicitly', async () => {
   const env = environment(), historical = await insert(env)
-  await patchSettings(request({ version: 1, raw_retention_days: 10, content_retention_days: 40 }), env, 'owner')
+  await patch({ version: 1, raw_retention_days: 10, content_retention_days: 40 }, env, 'owner')
   assert.equal((await read(env, historical)).retention_policy_version, null); assert.equal((await captureLifecyclePolicy(env)).content_retention_days, 40)
 })
 
@@ -315,8 +316,8 @@ test('confirming history clears any due time together with the clock', async () 
   const env = environment(), historical = await insert(env, { lifecycle_due_at: '2026-01-01T00:00:00.000Z' })
   // Even a stale resolution on history restarts: every clock starts after the confirmation.
   const resolved = await insert(env, { policy_error: 'policy_unavailable', resolved_at: '2026-01-01T00:00:00.000Z', lifecycle_due_at: '2026-03-01T00:00:00.000Z' })
-  const preview = await (await previewRetention(new Request('https://mail.example.org/?apply_existing=true'), env, 'owner')).json()
-  await patchSettings(request({ version: 1, apply_existing: true, retention_confirmation: preview.preview_token }), env, 'owner')
+  const preview = await previewRetention(env, 'owner', { apply_existing: true })
+  await patch({ version: 1, apply_existing: true, retention_confirmation: preview.preview_token }, env, 'owner')
   const row = await read(env, historical)
   assert.equal(row.retention_policy_version, 2); assert.equal(row.lifecycle_due_at, null)
   const adopted = await read(env, resolved)
@@ -409,8 +410,8 @@ test('a settings update that loses its version race re-arms nothing; the winner 
   await delivery(env, id, revision, 'failed', { last_error: 'retry_window_expired' }); await delivery(env, id, revision, 'delivered', { generation: 2 })
   // Both read version 1; the winner commits a longer period before the loser's batch runs.
   const batch = env.DB.batch.bind(env.DB)
-  env.DB.batch = async list => { env.DB.batch = batch; await patchSettings(request({ version: 1, resolved_retention_days: 90 }), env, 'owner'); return batch(list) }
-  await assert.rejects(patchSettings(request({ version: 1, resolved_retention_days: null }), env, 'owner'), error => error.status === 409)
+  env.DB.batch = async list => { env.DB.batch = batch; await patch({ version: 1, resolved_retention_days: 90 }, env, 'owner'); return batch(list) }
+  await assert.rejects(patch({ version: 1, resolved_retention_days: null }, env, 'owner'), error => error.status === 409)
   assert.equal((await currentSettings(env)).resolved_retention_days, 90)
   assert.equal((await read(env, id)).lifecycle_due_at, iso(Date.parse(resolvedAt) + 90 * DAY), 'the lower bound under the committed period, not cleared')
 })
